@@ -148,9 +148,9 @@
         "label": "教师控制器",
         "frame": {
           "mode": "absolute",
-          "x": 190,
+          "x": 80,
           "y": 638,
-          "width": 900,
+          "width": 1120,
           "height": 64
         },
         "order": 1,
@@ -173,13 +173,29 @@
               {
                 "id": "teacher_button_benchmark_03",
                 "action": {
+                  "type": "step.previous"
+                },
+                "label": "上一步",
+                "visible": true
+              },
+              {
+                "id": "teacher_button_benchmark_04",
+                "action": {
+                  "type": "step.next"
+                },
+                "label": "下一步",
+                "visible": true
+              },
+              {
+                "id": "teacher_button_benchmark_05",
+                "action": {
                   "type": "scene.previous"
                 },
                 "label": "上一场景",
                 "visible": true
               },
               {
-                "id": "teacher_button_benchmark_04",
+                "id": "teacher_button_benchmark_06",
                 "action": {
                   "type": "scene.next"
                 },
@@ -187,7 +203,7 @@
                 "visible": true
               },
               {
-                "id": "teacher_button_benchmark_05",
+                "id": "teacher_button_benchmark_07",
                 "action": {
                   "type": "scene.open-picker"
                 },
@@ -195,7 +211,7 @@
                 "visible": true
               },
               {
-                "id": "teacher_button_benchmark_06",
+                "id": "teacher_button_benchmark_08",
                 "action": {
                   "type": "scene.replay"
                 },
@@ -203,7 +219,7 @@
                 "visible": true
               },
               {
-                "id": "teacher_button_benchmark_07",
+                "id": "teacher_button_benchmark_09",
                 "action": {
                   "type": "course.restart"
                 },
@@ -211,7 +227,7 @@
                 "visible": false
               },
               {
-                "id": "teacher_button_benchmark_08",
+                "id": "teacher_button_benchmark_10",
                 "action": {
                   "type": "audio.toggle-mute"
                 },
@@ -219,7 +235,7 @@
                 "visible": true
               },
               {
-                "id": "teacher_button_benchmark_09",
+                "id": "teacher_button_benchmark_11",
                 "action": {
                   "type": "player.fullscreen.toggle"
                 },

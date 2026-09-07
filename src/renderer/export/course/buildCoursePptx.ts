@@ -4,7 +4,7 @@ import type PptxGenJS from 'pptxgenjs'
 import { resolveEffectiveBackground } from '../../../shared/effectiveBackground'
 import type { ImageNode } from '../../../shared/contracts/native-v1/types'
 import { renderImageNodeCanvas } from '../../../shared/imageEffects'
-import { nativeRenderInputFromPublishedItem, readonlyNativeRenderInputFromPublishedItem } from '../../../player/surfaces/slide/publishedNativeRendering'
+import { nativeRenderInputFromPublishedItem, readonlyNativeRenderInputFromPublishedItem } from '../../../player/surfaces/native/publishedNativeRendering'
 import type {
   PublishedCourseV2Payload,
   PublishedLayerItem,

@@ -882,7 +882,7 @@ describe('V9-native Course Project health', () => {
       {
         id: 'unsupported-trigger',
         enabled: true,
-        trigger: { type: 'presenter.command', command: 'next' },
+        trigger: { type: 'presentation.enter', stateId: scene.presentation!.initialStateId },
         conditions: [],
         actions: [{
           id: 'unsupported-trigger-next',
@@ -912,7 +912,7 @@ describe('V9-native Course Project health', () => {
       {
         id: 'disabled-unsupported-trigger',
         enabled: false,
-        trigger: { type: 'presenter.command', command: 'next' },
+        trigger: { type: 'presentation.enter', stateId: scene.presentation!.initialStateId },
         conditions: [],
         actions: [{
           id: 'disabled-next',

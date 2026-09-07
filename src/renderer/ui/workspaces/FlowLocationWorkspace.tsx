@@ -10,7 +10,6 @@ import {
 import type { FlowTextEditSession } from '../../authoring/flowTextEdit'
 import type { CourseAuthoringSessionToken } from '../../authoring/courseAuthoringSession'
 import {
-  attachPublishedCourseStageFit,
 } from '../coursePlayerTryRun'
 import {
   beginSerializedSessionMount,
@@ -59,14 +58,11 @@ export function FlowLocationWorkspace({
   const tryRunRef = useRef<HTMLDivElement>(null)
   const tryRunMountChainRef = useRef(Promise.resolve())
   const hostRef = useRef<FlowTryRunSession | null>(null)
-  const tryRunFitRef = useRef<(() => void) | null>(null)
 
   useEffect(() => {
     const container = tryRunRef.current
     if (!container) return
     if (canvasMode !== 'run') {
-      tryRunFitRef.current?.()
-      tryRunFitRef.current = null
       const leftover = hostRef.current
       hostRef.current = null
       if (leftover) enqueueSerial(tryRunMountChainRef, async () => {
@@ -77,12 +73,8 @@ export function FlowLocationWorkspace({
     return beginSerializedSessionMount(tryRunMountChainRef, () => onMountTryRun(container), {
       onReady: (mounted) => {
         hostRef.current = mounted
-        tryRunFitRef.current?.()
-        tryRunFitRef.current = attachPublishedCourseStageFit(container)
       },
       onCleanup: () => {
-        tryRunFitRef.current?.()
-        tryRunFitRef.current = null
         hostRef.current = null
       },
     })

@@ -7,8 +7,9 @@
 - Course Project V9 是唯一受支持的作者工程格式；不导入 V8 `.h5lesson`；不借重构创建 V10。
 - V9 已有字段、判别器和语义软冻结；additive 可选字段必须独立合同提交并保持 `.strict()`。Table、Chart 与 Slide Native input 是 Owner 明确批准的三个新 strict discriminator 窄例外，不构成任意联合类型扩展授权。
 - Published Course V2、Runtime API 2 / Surface Runtime API 3、Component API 4、Interaction Protocol V1 的版本边界保留。Table、Chart 与 Slide Native input 使用 Published V2 对等 strict 分支并与匹配 Player 成对交付，不为此升级 Published V3。
+- Owner 2026-09-07批准导航分层并授权实施后，085独立窄合同增加TeacherControllerAction/InteractionAction的`step.next`与`step.previous`两个strict无参分支，V9/Published共用；不增加文档字段或第二顺序，不扩Native节点discriminator。旧动作继续可读，新动作在旧reader明确失败；scene.next/previous按已批准场景层级纠正，精确location/deep link/index接口不重解释。Runtime/Component仅additive可选步进方法，旧宿主feature-detect；实施与兼容反例见085合同。
 - 项目 `id` 与单调 `revision` 语义保留；`globalLayerItems`、`surfaceLayerItems` 和三 Surface 保留；不新增 persisted `projectMode`。
-- AI 路线为 1.6–1.9 默认隐藏、2.0 在内部生产构建中正式开放；对应版本门完成前，当前编辑器仍不得宣称 AI、聊天、Provider 或 internal/reserved 接口为可用工作流。隐藏能力也必须走正式 CLI harness、受管暂存、自动准入与宿主 canonical command 边界；1.8 基础聊天直接接 CLI 请求与候选结果，不建设 MCP，不能从旧接口名称直接接线。
+- 按 Owner 2026-09-07 决定，1.8 起 AI 入口在普通内部生产构建默认显示，无需 dogfood 开关；对应版本门完成前，当前编辑器仍不得宣称 AI、聊天、Provider 或 internal/reserved 接口为可用工作流。AI 能力必须走正式 CLI harness、受管暂存、自动准入与宿主 canonical command 边界；1.8 基础聊天直接接 CLI 请求与候选结果，不建设 MCP，不能从旧接口名称直接接线。
 - 1.1 在保持 V9 wire、Published V2 wire 和全部受支持行为不变的前提下，清零可执行代码、测试、脚本、示例、fixture、artifacts 与正式生成制品中的 V8 模型、Schema、旧 Player/Export payload 和旧测试工具链；历史 Markdown 与 Git 历史可保留旧名称。该清理不恢复 V8 导入，也不触发 V10。
 
 ### 1.1 内部生产信任模型
@@ -29,6 +30,8 @@
 6. 全局层入口保持可发现；教师控制器保持全局单份、固定属于 Overlay，运行态会话拖拽不写回工程；页面作者态控制器 inert，全局层是唯一持久化编辑入口。控制器在作者、试运行、Player 与 HTML 中始终高于当前 surface/scene/world 的 Native、Runtime、Component 内容，并只承担恢复、手动跳转、重播和临时越过；它可为课堂强制跳转绕过导航守卫，但课程主推进不得依赖它，也不得为它预留正文安全区。控制器与其他全局 Overlay 元素的关系仍由全局平面内排序决定。
 
 ### 保存与运行
+
+**Owner 2026-09-07确认并经r18-085–087实施：场景与步骤分层。** Slide页、Flow讲义与Spatial画布是内容场景；当前场景的明确呈现/讲解/镜头编排是步骤。上/下一步按整课连续序列推进，末步之后到下一场景首步、首步之前到上一场景末步，只有整课首尾停止；上一/下一场景直接跳过场景内部剩余步骤，进入相邻场景起始位置。同画布镜头不得继续被场景按钮逐个推进。目录、计数、键盘/翻页笔、交互和动态导航接口应消费同一导航语义Owner；场景/步骤切换与r18-077观察zoom/pan分离。精确location深链、合法重复进入、导航守卫及当前生命周期按[导航分层工作包](roadmap/1.8/r18-085-navigation-levels.md)明确兼容，不静默重解释既有API或创建第二持久序列。实现与直接证据见[导航结束记录](reviews/1.8-navigation-level-exit.md)；新增动作保持V9/Published strict合同。
 
 7. Save 从已提交活动文字草稿的 V9 document、asset sidecar 和 component files 构建 archive；关闭脏判定与恢复快照使用同一份含草稿 canonical document。
 8. 保存 single-flight 与"保存期间继续编辑仍为 dirty"行为保留。
@@ -138,7 +141,7 @@
 - **Media**：AssetMeta / sidecar bytes / carrier 三层在一次操作内一致但不混成一个对象；AssetMeta 当前无持久化 `contentHash`，不为跨会话去重新增 V9 字段。
 - **全局层**：有效图层管线为 visibility filter → global Underlay（平面内排序）→ 当前本地合成（Flow 为 surface Underlay → 语义正文 → surface Overlay；Slide / Spatial 保留各自本地 carrier）→ global Overlay（平面内排序）→ rows/canvas/player；跨 owner `order` 不得泄漏成可编辑交错层级。
 - **Player/Preview/Export**：V2 主路径（active document → `buildPublishedCourseV2Payload` → CoursePlayer）必须保护；无 publish sources 的 fallback 先做可达性证明，不新建 sessionless V9 read model。远程资源与 connect origin 都由工程声明派生，不能分别维护 CSP、Electron allowlist 和 Player 私有名单。Slide 对应 PPTX；Flow 对应 DOCX。一个 Published Flow Surface 输出为一份连续 Word 文档，普通作者浮层只出现一次；1.2 唯一重复例外是 global teacher-controller 同时满足 visibility all 与 `includeInStaticExports=true`，此时映射到 footer。
-- **Table/Chart/Slide input**：三者是 V9 Native 和 Published V2 的匹配 strict 分支。当前 Native Table 只允许 Slide scene/surface，Flow 另有既存正文 FlowTableBlock；input 只允许 Slide scene。Chart 允许 Slide scene/surface、Flow strict 正文块与 Spatial world，Flow overlay、Spatial shared 和 global 继续拒绝。2026-09-06 已批准将 Flow 表格创作闭环和 Spatial world Table 纳入 1.3，具体扩域待 `r13-005-table-surface-contract` 独立交付，不能把路线批准当作当前 reader 已支持。不得进入 legacy `SceneNode`，不得改变既有 Native 或 presentation override 的合并语义。旧 V9 必须继续读取；旧编辑器或旧 Player 遇到新分支必须 fail loud，不能静默丢弃、截图覆盖作者工程或伪装成 Shape。1.3 具体载体及导出边界见本文件末尾与 V9 兼容策略。
+- **Table/Chart/Slide input**：三者是V9与Published V2匹配的strict分支。按当前Schema与本文件末尾已实现的1.3 domain，Native Table/Chart允许Slide scene/surface和Spatial world；Flow分别使用FlowTableBlock/FlowChartBlock正文，Flow overlay、Spatial shared和global不借此扩域；input仍只允许Slide scene。不得进入legacy SceneNode或改变presentation override合并语义。旧V9继续读取，旧strict reader遇新分支明确失败，不能静默丢弃或截图覆盖工程。路线批准不替代consumer证据；载体/适用导出仍按末尾domain及V9兼容策略逐项验收。
 - **Native 作者态同步**：合法持久化内容、非持久化 render input、authoring patch parser、宿主 frame/type guard 与 painter 的接受域必须闭合。Table/Chart/input 不能因旧六类 render input 白名单而在新宿主中被拒绝，也不能用扩大 legacy SceneNode、`any` 强转或旁路原始 JSON 消息绕过校验。类型/校验共享同一正式 Native content 定义；ACK、stale、target 与失败定位语义保留。
 - **颜色控件**：共享 ColorInput 持有局部未提交颜色，Surface/Feature adapter 持有 canonical 提交；控件身份只跟随实际编辑目标，不能跟随每次 revision 重建。连续调色预览与最终提交分离，取消/迟到/目标切换零误写，一次完成操作一条历史。1.2 的固定常用色不进入工程；1.3 项目色板复用 `designTokens.colors`，不另建主题状态或暗示当前对象已具有实时 token 绑定。
 - **input.submit**：提交事件携带本次输入的原始值；Published controller 先按答案类型归一化并原子写入输入框声明的 course-state key，再对同一事件匹配规则、计算条件和执行动作。该值是事件时快照，不通过通用 Surface DOM 读值端口补读，也不改变 `course-state.set` 的 wire 或作者态 `InteractionEngine`。
@@ -163,6 +166,17 @@
 
 `v1.1.1` 已完成 `editorStore.ts`、App/Workspace/Properties/Flow、Slide Published adapter 与 Course package builder 的既定 Owner 迁移；历史执行规格由 Git 历史保存，当前边界只看本合同、源码和 `FEATURE_CONSUMER_OWNER_LEDGER`。`buildPublishedCourse.ts`、V9 Schema/health、动态宿主和 Main/Preload 不做无 consumer 的机械拆分，后续出现真实第二 owner/consumer 时再进入同一门。
 
+### 6.2 三表面整合的目标边界（2026-09-07，尚待实现）
+
+[整合方案](THREE_SURFACE_ARCHITECTURE_INTEGRATION_PLAN.md)承接当前1.8的重复Native dispatch、Flow坐标割裂、Slide历史算法残留、包源码writer分裂和已支持段落语义的交付缺口；具体输入/输出、consumer迁移与退出门见方案C/F。以下为目标不变量，不表示当前源码已经达到：
+
+- 共同Native内容Owner只负责内容规则，表面wrapper只应用一次frame/rotation/opacity并持有布局/selection；不统一为一个渲染器，不把Flow正文改为LayerItem。
+- 三表面的基础document/resource历史算法归现有Core；Surface保留私有selection/session adapter，无第二Store/History。人工源码、fork、正式替换与AI包候选归同一Components Packages/Authoring准备/校验/事务；保持同版本异内容拒绝，宿主修订版本及全部实例引用一次更新。
+- 既有Flow段落对齐/行距语义由正文Owner解析，编辑/Player/print/DOCX消费；不借整合引入高级排版Schema。
+- 试运行/整课预览/HTML统一按以下目标边界：整课缩放优先从非Component/Runtime区域的手势/键鼠发起；动态区域优先内部逻辑，仅明确无冲突时转交，未知不接管。教师控制器有独立可见的“缩放”按钮，展开缩小/倍率/放大/恢复面板；播放区域底部横向、右侧纵向边条用于平移整个观察视图，Runtime铺满画面或占用内部拖拽时仍可操作。按钮、边条与手势共用同一临时view状态，控制器/边条固定且可达，缩小/resize后校正偏移；边条不重复修改Flow正文scroll，也不能只移动Spatial world而漏掉global Runtime。从外部或按钮发起整课缩放时，控制器以外全部内容和字体同比放大，控制器不变，答案/焦点/实例进度不重置。 保留原global Overlay排序/单实例，控制器按钮为内置宿主观察操作，不写自定义课程按钮或新增V9字段；动态iframe不强制转发。100%到200%视觉文字约×2，不能反向字号/逻辑viewport/fit补偿；不改工程/历史、不重播。Spatial world先经既有camera投影，再与普通HUD共同应用一次观察zoom/pan；HUD不跟world相机漫游，但必须响应边条的整课观察平移。观察操作不再次写camera，命中/剔除使用组合逆映射；边条只表达当前视窗有限范围，不给无限世界制造总长度。Flow正文scroll与观察pan分别保留单一真相，具体范围/拖动/恢复规则见整合方案C.3。
+- Flow几何的**D1已由Owner于2026-09-07批准方案A**：基准倍率1时正文与浮层采用1逻辑单位=1CSS px；窗口宽度决定正文响应式重排，paper项相对纸张布局原点随正文滚动，viewport项相对实际文档视口。主动观察缩放只在基准布局结果上应用共同矩阵，不反向调整排版宽度/字号或重建实例。接受旧Flow浮层初始投影大小/位置变化并复核旧课件，不修改持久frame数值；Slide/Spatial原页/HUD尺度保留。
+- Spatial当前真实动态复用范围为global Canvas Runtime API2；本地world/surface Runtime的静态/标签呈现不等于完整执行。整合先补已支持global API2作者consumer，local/API3扩域需精确作者—运行—导出合同，不能以统一之名伪报支持。
+
 ## 7. CLI 直连、暂存与会话边界
 
 - **内核分工**：用户自行安装并认证 Codex、Claude、OpenCode；CLI 保留各自的模型规划、Skills、子任务与工具循环。应用只实现版本化 `LocalAgentCliAdapterV1`、session harness、任务/快照接线、暂存区、回执/时间线与自动准入，当前不复制 CLI 的模型规划循环。Owner 已取消 MCP；未来脱离 CLI 后，以模型 API、自有工具和自建 harness 直接调用同一产品命令与准入/事务边界，另行定义模型循环和凭据合同，不提前建设通用 Agent 层。
@@ -171,7 +185,7 @@
 - **暂存和自动准入**：生成 Component/Runtime 源码、manifest、资源与诊断先进入暂存区。动态载体自动准入至少验证编译、协议、依赖、素材闭包、精确 origin、生命周期、资源上限、静态后备和真实宿主 smoke；未通过不得注册或写工程。Native、Recipe 与 Existing Component 候选不等待动态宿主门。内部稳定版默认不提供绕过准入的人工覆盖。
 - **自动可信能力**：通过自动准入的 Component/Runtime 自动成为当前可信扩展，可使用当前正式提供给可信扩展的父页面、本地、桌面、网络和其他宿主接口，无需人工代码审核。该授权不包含 Provider Secret、原始 Electron Main 对象、任意 OS 命令、未开放远程脚本或未经合同批准的新宿主接口。
 - **本地会话身份**：AI 会话、材料与 tool trace 保存于应用 `userData` 下的版本化目录，以工程 ID 与规范化文件位置共同标识。Save As 创建新的 workspace identity，不复制旧会话；可清除单个会话、当前工程或全部应用记录。它们不进入 Course Project、Published、Component、Runtime 或导出物；应用只能承诺删除自己的记录，CLI 自身历史由适配器能力另行说明。
-- **版本可见性**：1.6–1.9 的 CLI/生成/Agent/Chat 能力默认隐藏，2.0 才在内部生产构建中正式显示；这不改变产品的内部生产分发边界。CLI 未安装、未认证、不可用或异常退出时，全部人工编辑能力必须正常工作。
+- **版本可见性**：按 Owner 2026-09-07 决定，1.8 起 CLI/基础聊天入口在普通内部生产构建默认显示，无需环境开关；入口开放不代表版本门已验收；这不改变产品的内部生产分发边界。CLI 未安装、未认证、不可用或异常退出时，全部人工编辑能力必须正常工作。
 
 ## 8. 1.1 V8 清零棘轮与例外
 

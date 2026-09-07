@@ -1,10 +1,11 @@
-import type { CourseProjectDocument, LayerItem } from '../../../shared/courseProjectTypes'
+import type { CourseProjectDocument, FlowBlock, LayerItem } from '../../../shared/courseProjectTypes'
 import type { HistoryResourceState } from '../../store/courseResourceState'
 import { buildPublishedCourseV2Payload, collectPublishedCourseSourceIssues } from '../../export/course/buildPublishedCourse'
 import { AuthoringToolFailure } from './executeAuthoringTool'
 import { capturePublishedSurfacePng } from '../../../player/surfaces/publishedCapture'
 import { bytesToBase64 } from '../../export/base64'
 import { exercisePublishedDynamicUpdates } from '../../../player/surfaces/publishedDynamicUpdateProbe'
+import type { DynamicInstanceCapture } from '../../../shared/dynamicAdmissionContract'
 
 /** Exercise code even when its authored instance is hidden/disabled. This private
  * projection never participates in the candidate transaction or saved output. */
@@ -20,6 +21,17 @@ function admissionProjection(project: CourseProjectDocument, instanceIds: readon
   next.globalLayerItems.forEach(entry => { activate(entry.item); if (ids.has(entry.item.layerItemId)) entry.visibility = { mode: 'all', locationIds: [] } })
   for (const surface of next.surfaces) {
     surface.surfaceLayerItems.forEach(entry => { activate(entry.item); if (ids.has(entry.item.layerItemId)) entry.visibility = { mode: 'all', locationIds: [] } })
+    if (surface.type === 'flow') {
+      const expandTargets = (blocks: FlowBlock[]): boolean => {
+        let containsTarget = false
+        for (const block of blocks) {
+          if (ids.has(block.id)) containsTarget = true
+          if (block.type === 'section' && expandTargets(block.blocks)) { block.collapsedByDefault = false; containsTarget = true }
+        }
+        return containsTarget
+      }
+      expandTargets(surface.blocks)
+    }
     if (surface.type === 'spatial-2d') {
       surface.world.layerItems.forEach(activate)
       const worldTargets = surface.world.layerItems.filter(item => ids.has(item.layerItemId))
@@ -47,12 +59,13 @@ function admissionProjection(project: CourseProjectDocument, instanceIds: readon
 
 /** Fixed product admission: callers cannot supply a success flag or replace the host. */
 export async function admitDynamicCandidate(project: CourseProjectDocument, resources: HistoryResourceState,
-  targets: readonly { locationId: string; stateId?: string | null; instanceIds: readonly string[] }[], signal?: AbortSignal): Promise<void> {
+  targets: readonly { locationId: string; stateId?: string | null; instanceIds: readonly string[] }[], signal?: AbortSignal,
+  captureInstances = false): Promise<readonly DynamicInstanceCapture[]> {
   if (signal?.aborted) throw new Error('动态准入已取消')
   const api = typeof window !== 'undefined' ? window.desktopAPI?.dynamicAdmission : undefined
-  if (!api) return runDynamicCandidateHostSmoke(project, resources, targets)
+  if (!api) return runDynamicCandidateHostSmoke(project, resources, targets, captureInstances)
   const id = crypto.randomUUID()
-  const payload = { project, targets: targets.map(target => ({ ...target, instanceIds: [...target.instanceIds] })),
+  const payload = { project, captureInstances, targets: targets.map(target => ({ ...target, instanceIds: [...target.instanceIds] })),
     assetFiles: Object.fromEntries(Object.entries(resources.assetFiles).map(([key, bytes]) => [key, bytesToBase64(bytes)])),
     componentFiles: Object.fromEntries(Object.entries(resources.componentPackages).map(([key, data]) => [key,
       Object.fromEntries(Object.entries(data.files).map(([name, bytes]) => [name, bytesToBase64(bytes)]))])) }
@@ -62,12 +75,15 @@ export async function admitDynamicCandidate(project: CourseProjectDocument, reso
     const result = await api({ operation: 'run', id, payload })
     if (signal?.aborted || !result.ok) throw new AuthoringToolFailure(!signal?.aborted && result.diagnostics?.length ? result.diagnostics
       : [{ code: 'dynamic-host-failed', message: signal?.aborted ? '动态准入已取消' : result.message, path: [] }])
+    return result.captures ?? []
   } finally { signal?.removeEventListener('abort', cancel) }
 }
 
 /** Executes inside the disposable process, or the existing trusted browser Builder host. */
 export async function runDynamicCandidateHostSmoke(project: CourseProjectDocument, resources: HistoryResourceState,
-  targets: readonly { locationId: string; stateId?: string | null; instanceIds: readonly string[] }[]): Promise<void> {
+  targets: readonly { locationId: string; stateId?: string | null; instanceIds: readonly string[] }[], captureInstances = false): Promise<readonly DynamicInstanceCapture[]> {
+  const captures: DynamicInstanceCapture[] = []
+  let captureBytes = 0
   const sources = { project, assetFiles: resources.assetFiles, components: resources.componentPackages }
   const issues = collectPublishedCourseSourceIssues(sources)
   if (issues.length) throw new AuthoringToolFailure(issues.map(issue => ({ ...issue, path: issue.path.map(String) })))
@@ -108,6 +124,17 @@ export async function runDynamicCandidateHostSmoke(project: CourseProjectDocumen
           if (!suspended.ok) throw suspended.failure?.error ?? new Error('动态候选无法挂起')
           const resumed = await mountedSession.player.resumeSurface(location.surfaceId)
           if (!resumed.ok) throw resumed.failure?.error ?? new Error('动态候选无法恢复')
+          if (captureInstances) for (const element of mountedElements) {
+            const id = instanceId(element)
+            if (!id || !instanceIds.includes(id) || captures.some(capture => capture.instanceId === id)) continue
+            const width = Math.round(element.offsetWidth), height = Math.round(element.offsetHeight)
+            if (width <= 0 || height <= 0 || width > 4096 || height > 4096) throw new Error(`实例 ${id} 的后备图面尺寸超限或不可见`)
+            const dataUrl = await capturePublishedSurfacePng({ root: element, width, height, transparentBackground: true,
+              layers: [{ element, x: 0, y: 0, width, height, rotation: 0, opacity: 1 }] })
+            captureBytes += dataUrl.length
+            if (captureBytes > 48_000_000) throw new Error('实例后备图面超过本轮资源上限')
+            captures.push({ instanceId: id, locationId, width, height, dataUrl })
+          }
           if (surface?.type === 'spatial-2d' || surface?.type === 'flow') {
             // Flow's location JSON and Spatial's static camera pages are not
             // evidence that a candidate instance can prepare a capture. Probe
@@ -135,4 +162,5 @@ export async function runDynamicCandidateHostSmoke(project: CourseProjectDocumen
     }
     if (failures.length) throw new Error(failures.join('\n'))
   }
+  return captures
 }

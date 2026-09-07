@@ -11,13 +11,15 @@ import type { LayerItem } from './courseProjectTypes'
  */
 export const PUBLISHED_INTERACTION_PLAYBACK_SUPPORT = {
   status: 'partial',
-  triggerTypes: ['node.click', 'input.submit', 'scene.enter'],
+  triggerTypes: ['node.click', 'input.submit', 'scene.enter', 'presenter.command'],
   conditionTypes: [
     'scene.in',
     'course-state.exists',
     'course-state.compare',
   ],
   actionTypes: [
+    'step.next',
+    'step.previous',
     'node.enter',
     'node.exit',
     'scene.go',
@@ -35,8 +37,8 @@ export const PUBLISHED_INTERACTION_PLAYBACK_SUPPORT = {
   },
   navigationSemantics: {
     sceneGo: 'slide-scene-id-only',
-    nextPrevious: 'course-location-order-and-guarded-across-locations',
-    replay: 'same-location-and-not-guarded',
+    nextPrevious: 'scene-occurrence-order-and-guarded-across-locations',
+    replay: 'current-scene-first-step-and-not-guarded',
     restart: 'guard-bypassed-and-course-state-reset-to-declared-defaults',
   },
   limitations: [
@@ -55,8 +57,8 @@ export const PUBLISHED_INTERACTION_PLAYBACK_SUPPORT = {
   }>
   navigationSemantics: Readonly<{
     sceneGo: 'slide-scene-id-only'
-    nextPrevious: 'course-location-order-and-guarded-across-locations'
-    replay: 'same-location-and-not-guarded'
+    nextPrevious: 'scene-occurrence-order-and-guarded-across-locations'
+    replay: 'current-scene-first-step-and-not-guarded'
     restart: 'guard-bypassed-and-course-state-reset-to-declared-defaults'
   }>
   limitations: readonly ['no-assessment-branch-condition']

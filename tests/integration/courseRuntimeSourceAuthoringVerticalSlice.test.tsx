@@ -1,9 +1,10 @@
+import { isAuthoringHistoryTransactionFrame } from '../../src/renderer/authoring/resourceAwareAuthoringHistory'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { decodePublishedCode } from '@/player/decodePublishedExecutableCode'
 import { makeLayerItemAuthoringAddress } from '@/renderer/authoring/courseAuthoringScope'
 import type { CourseAuthoringTarget } from '@/renderer/authoring/courseAuthoringSession'
 import { isFlowEditorTransactionFrame } from '@/renderer/course/flowEditorSlice'
-import { isSlideAuthoringTransactionFrame } from '@/renderer/course/slideEditorCommands'
+
 import { isSpatialAuthoringTransactionFrame } from '@/renderer/course/spatialAuthoringHistory'
 import { buildPublishedCourseV2Payload } from '@/renderer/export/course/buildPublishedCourse'
 import {
@@ -323,7 +324,7 @@ function activeTransactionResourceChanges() {
   const active = activeHistory()
   const frame = active.history.past.at(-1)
   const isTransaction = active.kind === 'slide'
-    ? Boolean(frame && isSlideAuthoringTransactionFrame(frame))
+    ? Boolean(frame && isAuthoringHistoryTransactionFrame(frame))
     : active.kind === 'flow'
       ? Boolean(frame && isFlowEditorTransactionFrame(frame))
       : Boolean(frame && isSpatialAuthoringTransactionFrame(frame))

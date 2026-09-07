@@ -96,8 +96,8 @@ export default function App() {
   const [busy, setBusy] = useState(false)
   const [projectHealthOpen, setProjectHealthOpen] = useState(false)
   const [materialsOpen, setMaterialsOpen] = useState(false)
-  const [designTool, setDesignTool] = useState<{ kind: 'recipe' | 'productivity'; context: ProductivityContext } | null>(null)
-  const openDesignTool = (kind: 'recipe' | 'productivity') => {
+  const [designTool, setDesignTool] = useState<{ kind: 'recipe' | 'productivity' | 'pptx'; context: ProductivityContext } | null>(null)
+  const openDesignTool = (kind: 'recipe' | 'productivity' | 'pptx') => {
     const context = useEditorStore.getState().prepareDesignProduction()
     if (context) setDesignTool({ kind, context })
   }
@@ -479,6 +479,7 @@ export default function App() {
         onOpenHealth={() => setProjectHealthOpen(true)}
         onOpenRecipes={() => openDesignTool('recipe')}
         onOpenProductivity={() => openDesignTool('productivity')}
+        onImportPptx={() => openDesignTool('pptx')}
         onOpenMaterials={() => setMaterialsOpen(true)}
         onPreview={courseDelivery.openPreview}
         onExport={courseDelivery.exportCourse}
@@ -612,7 +613,9 @@ export default function App() {
             }} />
         </section>
       </div>}
-      {designTool?.kind === 'productivity' && <ProductivityDialog
+      {(designTool?.kind === 'productivity' || designTool?.kind === 'pptx') && <ProductivityDialog
+        key={designTool.kind}
+        pptxOnly={designTool.kind === 'pptx'}
         getContext={() => {
           const context = useEditorStore.getState().readDesignProductionContext()
           if (!context) throw new Error('当前工程会话已关闭')

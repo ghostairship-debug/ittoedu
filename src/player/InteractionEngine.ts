@@ -634,6 +634,12 @@ export class InteractionEngine {
             action.targetStateId,
           )
           break
+        case 'step.next':
+          result = this.hostActions.nextStep?.() ?? false
+          break
+        case 'step.previous':
+          result = this.hostActions.previousStep?.() ?? false
+          break
         case 'scene.next':
           result = this.hostActions.nextScene()
           break

@@ -11,8 +11,8 @@ export async function runLocalCliFailureProbe(app: ElectronApplication, page: Pa
   const packages = { codex: '@openai/codex', claude: '@anthropic-ai/claude-code', opencode: 'opencode-ai' }
   await app.evaluate((_, root) => {
     const state = globalThis as typeof globalThis & { r16Environment?: Record<string, string | undefined> }
-    state.r16Environment = Object.fromEntries(['PATH', 'APPDATA', 'USERPROFILE', 'COURSEWARE_CLI_DOGFOOD'].map(key => [key, process.env[key]]))
-    process.env.PATH = root; process.env.APPDATA = root; process.env.USERPROFILE = root; process.env.COURSEWARE_CLI_DOGFOOD = '1'
+    state.r16Environment = Object.fromEntries(['PATH', 'APPDATA', 'USERPROFILE'].map(key => [key, process.env[key]]))
+    process.env.PATH = root; process.env.APPDATA = root; process.env.USERPROFILE = root
   }, directory)
   const owner = { projectId: 'cli-failure-fixture', projectPath: join(runRoot, 'fixture.h5lesson') }
   try {

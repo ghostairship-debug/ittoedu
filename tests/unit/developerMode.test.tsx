@@ -1,5 +1,5 @@
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ComponentPackageData } from '../../src/shared/componentTypes'
 import { listCourseProjectV9Fixtures } from '../fixtures/course-project-v9/sources'
 import { RightSidebar } from '../../src/renderer/ui/RightSidebar'
@@ -145,7 +145,26 @@ function domComponentPackage(): ComponentPackageData {
   }
 }
 
+function applyPackageSources(packageId: string, patch: Partial<Pick<ComponentPackageData, 'manifest' | 'runtimeSource'>>) {
+  const state = useEditorStore.getState(), source = state.componentPackages[packageId]!
+  const files = { ...source.files }
+  if (patch.manifest) files['manifest.json'] = new TextEncoder().encode(JSON.stringify(patch.manifest))
+  if (patch.runtimeSource) files[source.manifest.entry] = new TextEncoder().encode(patch.runtimeSource)
+  return state.updateComponentPackageSources(state.captureComponentPackageSourceTarget(packageId), files)
+}
+
+// Unit receipt exercises the atomic consumer, not real-host visual admission.
+function installAdmissionReceipt() {
+  const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB'
+  vi.stubGlobal('desktopAPI', { dynamicAdmission: async (request: { payload: { targets: { locationId: string; instanceIds: string[] }[] } }) => ({
+    ok: true, message: 'unit receipt', captures: request.payload.targets.flatMap(target => target.instanceIds.map(instanceId => ({
+      instanceId, locationId: target.locationId, width: 1, height: 1, dataUrl: png,
+    }))),
+  }) })
+}
+
 afterEach(() => {
+  vi.unstubAllGlobals()
   cleanup()
   useEditorStore.setState({
     updateRuntimeSourceAtTarget: originalUpdateRuntimeSourceAtTarget,
@@ -155,6 +174,60 @@ afterEach(() => {
 })
 
 describe('专业开发模式', () => {
+  it.each(['cancel', 'stale', 'failure'] as const)('组件异步准入 %s 保留原工程和资源', async mode => {
+    useEditorStore.getState().createNewProject()
+    const source = domComponentPackage()
+    useEditorStore.getState().importComponentPackage(source)
+    useEditorStore.getState().addExternalComponentNode(source.manifest.id)
+    const state = useEditorStore.getState()
+    const target = state.captureComponentPackageSourceTarget(source.manifest.id)
+    let finish: ((value: unknown) => void) | undefined
+    let captures: unknown[] = []
+    vi.stubGlobal('desktopAPI', { dynamicAdmission: (request: { operation: string; payload: { targets: { locationId: string; instanceIds: string[] }[] } }) => {
+      if (request.operation === 'cancel') return Promise.resolve({ ok: true, message: 'cancelled' })
+      captures = request.payload.targets.flatMap(target => target.instanceIds.map(instanceId => ({ instanceId,
+        locationId: target.locationId, width: 1, height: 1, dataUrl: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB' })))
+      return new Promise(resolve => { finish = resolve })
+    } })
+    const controller = new AbortController()
+    const pending = state.updateComponentPackageSources(target, { ...source.files,
+      'runtime.js': new TextEncoder().encode(editableSource(source.manifest.id, 'const changed = true')) }, controller.signal)
+      .then(() => 'unexpected success', error => String(error))
+    await vi.waitFor(() => expect(finish).toBeDefined())
+    if (mode === 'cancel') controller.abort()
+    if (mode === 'stale') useEditorStore.getState().undo()
+    const before = structuredClone(selectActiveCourseProjectDocument(useEditorStore.getState()))
+    const packages = useEditorStore.getState().componentPackages
+    finish!(mode === 'failure' ? { ok: false, message: 'host rejected source' } : { ok: true, message: 'admitted', captures })
+    expect(await pending).toContain(mode === 'stale' ? 'stale' : mode === 'cancel' ? '取消' : 'host rejected')
+    expect(selectActiveCourseProjectDocument(useEditorStore.getState())).toEqual(before)
+    expect(useEditorStore.getState().componentPackages).toBe(packages)
+  })
+
+  it('组件文件和实例切换保留草稿，工程变化后必须显式载入基线', () => {
+    useEditorStore.getState().createNewProject()
+    const source = domComponentPackage()
+    useEditorStore.getState().importComponentPackage(source)
+    useEditorStore.getState().addExternalComponentNode(source.manifest.id)
+    const nodeId = selectSelectedNodeId(useEditorStore.getState())!
+    render(<DeveloperTab />)
+    fireEvent.click(screen.getByRole('tab', { name: /组件代码/ }))
+    fireEvent.change(screen.getByLabelText('组件 Runtime'), { target: { value: 'retained source draft' } })
+    fireEvent.click(screen.getByRole('tab', { name: 'manifest.json' }))
+    fireEvent.change(screen.getByLabelText('组件 Manifest'), { target: { value: JSON.stringify({ ...source.manifest, name: '草稿名称' }) } })
+    fireEvent.click(screen.getByRole('tab', { name: 'runtime.js' }))
+    expect(screen.getByLabelText('组件 Runtime')).toHaveValue('retained source draft')
+    act(() => useEditorStore.getState().selectNode(null))
+    act(() => useEditorStore.getState().selectNode(nodeId))
+    expect(screen.getByLabelText('组件 Runtime')).toHaveValue('retained source draft')
+    act(() => useEditorStore.getState().addExternalComponentNode(source.manifest.id))
+    expect(screen.getByRole('button', { name: '校验并应用组件源码' })).toBeDisabled()
+    fireEvent.click(screen.getByRole('button', { name: '载入当前基线并保留草稿' }))
+    expect(screen.getByLabelText('组件 Runtime')).toHaveValue('retained source draft')
+    fireEvent.click(screen.getByRole('tab', { name: 'manifest.json' }))
+    expect((screen.getByLabelText('组件 Manifest') as HTMLTextAreaElement).value).toContain('草稿名称')
+  })
+
   it('生成的可编辑副本 ID 会消除随机后缀中的分隔符边界', () => {
     expect(editableComponentPackageId('com.example.widget', '-A_b-')).toBe(
       'com.example.widget.editable.xaxbx',
@@ -605,7 +678,7 @@ describe('专业开发模式', () => {
     expect(screen.queryByLabelText('场景运行时源码')).not.toBeInTheDocument()
   })
 
-  it('创建组件可编辑副本会生成新身份、切换当前实例且一次撤销恢复', () => {
+  it('创建组件可编辑副本会生成新身份、切换当前实例且一次撤销恢复', async () => {
     useEditorStore.getState().createNewProject()
     const source = componentPackage()
     useEditorStore.getState().importComponentPackage(source)
@@ -631,8 +704,9 @@ describe('专业开发模式', () => {
       component: { packageId: copyId },
     })
 
+    installAdmissionReceipt()
     const updatedSource = editableSource(copyId!, 'const changed = true')
-    useEditorStore.getState().updateEditableComponentPackage(copyId!, {
+    await applyPackageSources(copyId!, {
       runtimeSource: updatedSource,
     })
     expect(useEditorStore.getState().componentPackages[copyId!]?.runtimeSource)
@@ -648,24 +722,19 @@ describe('专业开发模式', () => {
     })
   })
 
-  it('拒绝直接改写第三方组件代码', () => {
+  it.each(['com.example.developer', 'vendor.editable.widget'])('普通工程包 %s 可直接修订且身份不变', async id => {
     useEditorStore.getState().createNewProject()
-    const source = componentPackage()
+    const source = componentPackage(id)
     useEditorStore.getState().importComponentPackage(source)
-    expect(() => useEditorStore.getState().updateEditableComponentPackage(
-      source.manifest.id,
-      { runtimeSource: editableSource(source.manifest.id, 'const changed = true') },
-    )).toThrow('第三方组件包默认只读')
-  })
-
-  it('不会把名称中碰巧含 editable 的第三方组件视为可编辑副本', () => {
-    useEditorStore.getState().createNewProject()
-    const source = componentPackage('vendor.editable.widget')
-    useEditorStore.getState().importComponentPackage(source)
-    expect(() => useEditorStore.getState().updateEditableComponentPackage(
-      source.manifest.id,
-      { runtimeSource: editableSource(source.manifest.id, 'const changed = true') },
-    )).toThrow('第三方组件包默认只读')
+    useEditorStore.getState().addExternalComponentNode(id)
+    installAdmissionReceipt()
+    await applyPackageSources(id, { runtimeSource: editableSource(id, 'const changed = true') })
+    const updated = useEditorStore.getState().componentPackages[id]!
+    expect(updated.manifest.id).toBe(id)
+    expect(updated.manifest.version).not.toBe(source.manifest.version)
+    expect(source.runtimeSource).not.toContain('changed')
+    useEditorStore.getState().undo()
+    expect(useEditorStore.getState().componentPackages[id]!.runtimeSource).toBe(source.runtimeSource)
   })
 
   it('命名状态下阻止创建组件副本且不产生孤儿包', () => {
@@ -689,7 +758,7 @@ describe('专业开发模式', () => {
     expect(useEditorStore.getState().errorMessage).toContain('切换到“基础”')
   })
 
-  it('可编辑组件提交前复用完整包校验并保护现有实例作用域', () => {
+  it('可编辑组件提交前复用完整包校验并保护现有实例作用域', async () => {
     useEditorStore.getState().createNewProject()
     const source = domComponentPackage()
     useEditorStore.getState().importComponentPackage(source)
@@ -701,7 +770,7 @@ describe('专业开发模式', () => {
     )!
     const copied = useEditorStore.getState().componentPackages[copyId]!
 
-    expect(() => useEditorStore.getState().updateEditableComponentPackage(
+    await expect(applyPackageSources(
       copyId,
       {
         manifest: {
@@ -709,9 +778,9 @@ describe('专业开发模式', () => {
           supportedScopes: ['global'],
         } as typeof copied.manifest,
       },
-    )).toThrow('仍有场景实例')
+    )).rejects.toThrow('不支持现有场景层实例')
 
-    expect(() => useEditorStore.getState().updateEditableComponentPackage(
+    await expect(applyPackageSources(
       copyId,
       {
         manifest: {
@@ -719,6 +788,6 @@ describe('专业开发模式', () => {
           thumbnail: 'missing.png',
         } as typeof copied.manifest,
       },
-    )).toThrow('缺少缩略图')
+    )).rejects.toThrow('缺少缩略图')
   })
 })

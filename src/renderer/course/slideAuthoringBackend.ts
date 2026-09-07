@@ -1,3 +1,4 @@
+import { commitResourceAwareAuthoringHistory, createResourceAwareAuthoringHistory, redoResourceAwareAuthoringHistory, authoringHistoryRedoResourceTransition, authoringHistoryUndoResourceTransition, undoResourceAwareAuthoringHistory, type ResourceAwareAuthoringHistory, type AuthoringHistoryResourceTransition } from '../authoring/resourceAwareAuthoringHistory'
 import { nanoid } from 'nanoid'
 import { makeAuthoringAddress, type AuthoringCarrier } from '../../shared/authoringAddress'
 import { courseProjectDocumentSchema } from '../../shared/courseProjectSchema'
@@ -12,28 +13,7 @@ import type {
 } from '../../shared/courseProjectTypes'
 import type { InteractionRule } from '../../shared/interactionTypes'
 import type { TeacherControllerButton } from '../../shared/contracts/native-v1'
-import {
-  SLIDE_REJECT_STALE_REVISION,
-  SLIDE_REJECT_WRONG_OWNER,
-  commitSlideAuthoringHistory,
-  commitSlideProjectMutation,
-  createSlideAuthoringHistory,
-  redoSlideAuthoringHistory,
-  selectSlideEditorLayers,
-  slideAuthoringRedoResourceTransition,
-  slideAuthoringUndoResourceTransition,
-  transformSelectedSlideNativeLayers,
-  undoSlideAuthoringHistory,
-  SlideCommandError,
-  type SlideAuthoringHistory,
-  type SlideAuthoringSelection,
-  type SlideAuthoringSessionRef,
-  type SlideAuthoringResourceTransition,
-  type SlideAuthoringTarget,
-  type SlideCommandOptions,
-  type SlideCommandResult,
-  type SlideEditorTransformInput,
-} from './slideEditorCommands'
+import { SLIDE_REJECT_STALE_REVISION, SLIDE_REJECT_WRONG_OWNER, commitSlideProjectMutation, selectSlideEditorLayers, transformSelectedSlideNativeLayers, SlideCommandError, type SlideAuthoringSelection, type SlideAuthoringSessionRef, type SlideAuthoringTarget, type SlideCommandOptions, type SlideCommandResult, type SlideEditorTransformInput } from './slideEditorCommands'
 import {
   buildSlideEditorView,
   type SlideEditorLayerScope,
@@ -49,13 +29,7 @@ import {
   repairRemovedCourseReferences,
 } from './courseReferenceCleanup'
 
-export type {
-  SlideAuthoringHistory,
-  SlideAuthoringSelection,
-  SlideAuthoringTarget,
-  SlideCommandOptions,
-  SlideCommandResult,
-} from './slideEditorCommands'
+export type { SlideAuthoringSelection, SlideAuthoringTarget, SlideCommandOptions, SlideCommandResult } from './slideEditorCommands'
 export {
   SLIDE_REJECT_LOCKED,
   SLIDE_REJECT_STALE_REVISION,
@@ -96,7 +70,7 @@ function freezeSelection(selection: SlideAuthoringSelection): SlideAuthoringSele
   })
 }
 
-function freezeHistory(history: SlideAuthoringHistory): SlideAuthoringHistory {
+function freezeHistory(history: ResourceAwareAuthoringHistory): ResourceAwareAuthoringHistory {
   if (Object.isFrozen(history) && Object.isFrozen(history.past) && Object.isFrozen(history.future)) {
     return history
   }
@@ -120,7 +94,7 @@ function freezeSession(session: SlideAuthoringSession): SlideAuthoringSession {
 function succeed(
   next: SlideAuthoringSession,
   historyEntry: boolean,
-  resourceTransition?: SlideAuthoringResourceTransition,
+  resourceTransition?: AuthoringHistoryResourceTransition,
 ): SlideCommandResult {
   const session = freezeSession(next)
   return {
@@ -200,7 +174,7 @@ export function openSlideAuthoringSession(
   authoringGenerations.set(sessionId, 0)
   return freezeSession({
     sessionId,
-    history: createSlideAuthoringHistory(parsed),
+    history: createResourceAwareAuthoringHistory(parsed),
     selection,
     scope: 'scene',
     generation: 0,
@@ -435,7 +409,7 @@ function commitDocument(
 ): SlideAuthoringSession {
   return {
     sessionId: session.sessionId,
-    history: commitSlideAuthoringHistory(session.history, project),
+    history: commitResourceAwareAuthoringHistory(session.history, project),
     selection,
     scope,
     generation,
@@ -613,7 +587,7 @@ export function deleteSlideScene(
       }
       return succeed({
         ...session,
-        history: commitSlideAuthoringHistory(session.history, deleted.project),
+        history: commitResourceAwareAuthoringHistory(session.history, deleted.project),
         selection: {
           locationId: deleted.activatedLocationId,
           stateId: null,
@@ -893,7 +867,7 @@ export function transformSlideNativeLayers(
 
 function selectionForHistory(
   session: SlideAuthoringSession,
-  history: SlideAuthoringHistory,
+  history: ResourceAwareAuthoringHistory,
 ): SlideAuthoringSelection {
   try {
     return selectSlideEditorLayers({
@@ -938,8 +912,8 @@ export function undoSlideAuthoring(
 ): SlideCommandResult {
   const stale = rejectIfStale(session, options.expectedRevision)
   if (stale) return stale
-  const resourceTransition = slideAuthoringUndoResourceTransition(session.history)
-  const history = undoSlideAuthoringHistory(session.history)
+  const resourceTransition = authoringHistoryUndoResourceTransition(session.history)
+  const history = undoResourceAwareAuthoringHistory(session.history)
   if (history === session.history) return succeed(session, false)
   return succeed({
     ...session,
@@ -955,8 +929,8 @@ export function redoSlideAuthoring(
 ): SlideCommandResult {
   const stale = rejectIfStale(session, options.expectedRevision)
   if (stale) return stale
-  const resourceTransition = slideAuthoringRedoResourceTransition(session.history)
-  const history = redoSlideAuthoringHistory(session.history)
+  const resourceTransition = authoringHistoryRedoResourceTransition(session.history)
+  const history = redoResourceAwareAuthoringHistory(session.history)
   if (history === session.history) return succeed(session, false)
   return succeed({
     ...session,

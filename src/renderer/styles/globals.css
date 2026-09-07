@@ -5092,7 +5092,15 @@ button:disabled {
 }
 
 .developer-component-workspace {
-  grid-template-rows: auto auto minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.developer-card.component-source-editor {
+  grid-template-rows: auto auto minmax(0, 1fr) auto auto;
+}
+
+.component-source-editor .developer-code-editor {
+  min-height: 0;
 }
 
 .developer-rule-picker {

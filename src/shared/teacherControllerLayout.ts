@@ -67,7 +67,7 @@ export interface TeacherControllerViewStatus {
 export type TeacherControllerLayoutSource = Pick<
   TeacherControllerNode,
   'compact' | 'showSceneProgress' | 'collapsible' | 'buttons' | 'style'
->
+> & { playbackView?: boolean }
 
 function clamp(value: number, minimum: number, maximum: number): number {
   return Math.min(maximum, Math.max(minimum, value))
@@ -109,7 +109,7 @@ export function createTeacherControllerLayout(
     ? clamp(safeHeight - padding * 2, 18, 30)
     : 0
   const collapseGap = source.collapsible ? clamp(safeWidth * 0.006, 3, 7) : 0
-  const collapseReserve = collapseSize + collapseGap
+  const collapseReserve = collapseSize + collapseGap + (source.playbackView ? 58 : 0)
   const availableWidth = Math.max(0, safeWidth - padding * 2 - collapseReserve)
   const preferredGap = clamp(safeWidth * 0.008, 4, 9)
   const gap = buttonCount > 1
@@ -128,7 +128,7 @@ export function createTeacherControllerLayout(
     availableWidth - reservedTitleWidth - (buttonCount > 0 ? gap : 0),
   )
   const preferredButtonWidth = source.compact ? 92 : 86
-  const buttonWidth = buttonCount > 0
+  const singleRowButtonWidth = buttonCount > 0
     ? Math.max(
         0,
         Math.min(
@@ -137,15 +137,19 @@ export function createTeacherControllerLayout(
         ),
       )
     : 0
+  const rows = singleRowButtonWidth < 72 && buttonCount >= 4 && safeHeight >= 56 ? 2 : 1
+  const columns = Math.ceil(buttonCount / rows)
+  const buttonWidth = rows === 1 ? singleRowButtonWidth
+    : Math.max(0, (buttonAreaLimit - Math.max(0, columns - 1) * gap) / columns)
   const buttonAreaWidth = buttonCount > 0
-    ? buttonWidth * buttonCount + interButtonGaps
+    ? buttonWidth * columns + Math.max(0, columns - 1) * gap
     : 0
   const buttonStartX = safeWidth - padding - collapseReserve - buttonAreaWidth
   const titleWidth = Math.max(
     0,
     buttonStartX - padding - (buttonCount > 0 ? gap : 0),
   )
-  const buttonHeight = Math.max(16, safeHeight - padding * 2)
+  const buttonHeight = Math.max(16, (safeHeight - padding * 2 - (rows - 1) * 4) / rows)
   const hasProgress = source.showSceneProgress && !source.compact
   const titleHeight = hasProgress ? safeHeight * 0.46 : safeHeight - padding * 2
   const progressHeight = hasProgress
@@ -194,8 +198,8 @@ export function createTeacherControllerLayout(
       id: button.id,
       action: button.action,
       label: button.label,
-      x: buttonStartX + index * (buttonWidth + gap),
-      y: padding,
+      x: buttonStartX + (index % columns) * (buttonWidth + gap),
+      y: padding + Math.floor(index / columns) * (buttonHeight + 4),
       width: buttonWidth,
       height: buttonHeight,
     })),
@@ -206,7 +210,7 @@ export function createTeacherControllerLayout(
     ),
     progressFontSize: clamp(safeHeight * 0.17, 9, 12),
     buttonFontSize: clamp(
-      safeHeight * (source.compact ? 0.22 : 0.235),
+      rows > 1 ? buttonHeight * 0.6 : safeHeight * (source.compact ? 0.22 : 0.235),
       9,
       14,
     ),
@@ -254,6 +258,8 @@ export function teacherControllerButtonDisplayLabel(
 
 /** Authoring action set. Collapse is chrome, not a button type. */
 export const TEACHER_CONTROLLER_AUTHORING_ACTIONS = [
+  { type: 'step.previous', label: '上一步' },
+  { type: 'step.next', label: '下一步' },
   { type: 'scene.previous', label: '上一场景' },
   { type: 'scene.next', label: '下一场景' },
   { type: 'scene.open-picker', label: '场景目录' },

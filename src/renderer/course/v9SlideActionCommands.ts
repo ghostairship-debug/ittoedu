@@ -1,3 +1,4 @@
+import { type ResourceAwareAuthoringHistory, type AuthoringHistoryResourceTransition } from '../authoring/resourceAwareAuthoringHistory'
 import { MAX_SCENE_NODES } from '../../shared/constants'
 import { pruneUnusedInputState } from '../interactions/inputAuthoringState'
 import type { InteractionRule } from '../../shared/interactionTypes'
@@ -8,21 +9,7 @@ import type {
   SlidePresentationState,
   SlideSceneDocument,
 } from '../../shared/courseProjectTypes'
-import {
-  SLIDE_REJECT_LOCKED,
-  SLIDE_REJECT_STALE_REVISION,
-  SLIDE_REJECT_WRONG_OWNER,
-  SlideCommandError,
-  commitSlideActionTransaction,
-  commitSlideProjectMutation,
-  selectSlideEditorLayers,
-  type SlideAuthoringHistory,
-  type SlideAuthoringResourceTransition,
-  type SlideAuthoringSelection,
-  type SlideAuthoringSessionRef,
-  type SlideCommandOptions,
-  type SlideCommandResult,
-} from './slideEditorCommands'
+import { SLIDE_REJECT_LOCKED, SLIDE_REJECT_STALE_REVISION, SLIDE_REJECT_WRONG_OWNER, SlideCommandError, commitSlideActionTransaction, commitSlideProjectMutation, selectSlideEditorLayers, type SlideAuthoringSelection, type SlideAuthoringSessionRef, type SlideCommandOptions, type SlideCommandResult } from './slideEditorCommands'
 import {
   buildSlideEditorView,
   type SlideEditorLayerView,
@@ -275,7 +262,7 @@ function freezeSelection(selection: SlideAuthoringSelection): SlideAuthoringSele
   })
 }
 
-function freezeHistory(history: SlideAuthoringHistory): SlideAuthoringHistory {
+function freezeHistory(history: ResourceAwareAuthoringHistory): ResourceAwareAuthoringHistory {
   if (Object.isFrozen(history) && Object.isFrozen(history.past) && Object.isFrozen(history.future)) {
     return history
   }
@@ -299,7 +286,7 @@ function freezeSession(session: SlideAuthoringSessionRef): SlideAuthoringSession
 function succeed(
   next: SlideAuthoringSessionRef,
   historyEntry: boolean,
-  resourceTransition?: SlideAuthoringResourceTransition,
+  resourceTransition?: AuthoringHistoryResourceTransition,
 ): SlideCommandResult {
   const session = freezeSession(next)
   return {
@@ -1051,7 +1038,7 @@ function interactionTarget(session: SlideAuthoringSessionRef): SlideInteractionT
 
 function applyInteractionHistory(
   session: SlideAuthoringSessionRef,
-  history: SlideAuthoringHistory,
+  history: ResourceAwareAuthoringHistory,
 ): SlideCommandResult {
   if (history === session.history) return succeed(session, false)
   return succeed({

@@ -1,3 +1,4 @@
+import { buildFlowRichTextHtml } from '@/shared/flowRichText'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { insertFlowEditorBlock, updateFlowEditorBlock } from '@/renderer/course/flowEditorCommands'
@@ -15,7 +16,6 @@ import {
 } from '@/renderer/course/flowEditorView'
 import { selectFlowEditorBlocks, selectFlowOverlay } from '@/renderer/course/flowEditorSlice'
 import {
-  buildFlowRichTextHtml,
   formatFlowAuthoringTextStyle,
   markFlowTextComposing,
   updateFlowTextDraft,

@@ -11,7 +11,7 @@ import { LocalAgentHarness } from '../../src/main/localAgent/harness'
 import { createWorkspaceIdentity } from '../../src/main/workspaceIdentity'
 import type { LocalAgentCliAdapterV1, LocalAgentId } from '../../src/shared/localAgentContract'
 import { generationRequestSchema } from '../../src/shared/generationContract'
-import { parseGenerationText, GENERATION_OPEN, GENERATION_CLOSE } from '../../src/shared/generationResult'
+import { parseGenerationText, readGenerationResult, GENERATION_OPEN, GENERATION_CLOSE, GENERATION_RESULT_OPEN, GENERATION_RESULT_CLOSE } from '../../src/shared/generationResult'
 import { CandidateStaging } from '../../src/main/localAgent/candidateStaging'
 import { randomUUID } from 'node:crypto'
 
@@ -29,6 +29,19 @@ function generationTransportFixture(directory: string) {
 }
 
 describe('generation output channels and staging ingestion', () => {
+  it('distinguishes ordinary discussion, required missing candidates and bounded format failures', () => {
+    const { request } = generationTransportFixture(os.tmpdir())
+    expect(readGenerationResult('这里讨论 { 一个选项 }', request)).toEqual({ kind: 'answer', requestId: request.requestId })
+    expect(readGenerationResult('已准备修改', { ...request, expectedResult: 'candidate' })).toMatchObject({ kind: 'candidate-format-error', requestId: request.requestId, finding: expect.stringContaining('缺少') })
+    const edit = `${GENERATION_RESULT_OPEN}${JSON.stringify({ version: 1, requestId: request.requestId, kind: 'edit' })}${GENERATION_RESULT_CLOSE}`
+    expect(readGenerationResult(edit, request).kind).toBe('candidate-format-error')
+    const invalid = readGenerationResult(`${GENERATION_OPEN}{broken:${'x'.repeat(20000)}}${GENERATION_CLOSE}`, request)
+    expect(invalid.kind).toBe('candidate-format-error')
+    if (invalid.kind !== 'candidate-format-error') throw new Error('Missing finding')
+    expect(invalid.excerpt.length).toBeLessThanOrEqual(8000)
+    expect(invalid.finding.length).toBeLessThanOrEqual(4000)
+    expect(invalid.requestId).toBe(request.requestId)
+  })
   it('only parses one explicit candidate channel bound to the current request', () => {
     const { request, candidate } = generationTransportFixture(os.tmpdir())
     const block = `${GENERATION_OPEN}${JSON.stringify(candidate)}${GENERATION_CLOSE}`
@@ -49,6 +62,9 @@ describe('generation output channels and staging ingestion', () => {
     expect(await staging.read(request.requestId)).toBeNull()
     await fs.writeFile(path.join(root, 'candidate.json'), JSON.stringify(candidate))
     expect(await staging.read(request.requestId)).toEqual(candidate)
+    await fs.writeFile(path.join(root, 'candidate.json'), '{broken')
+    expect(await staging.readText(request.requestId)).toBe('{broken')
+    await expect(staging.read(request.requestId)).rejects.toThrow()
     await expect(staging.create(request)).rejects.toThrow()
     await fs.writeFile(path.join(root, 'candidate.json'), JSON.stringify({ ...candidate, requestId: randomUUID() }))
     await expect(staging.read(request.requestId)).rejects.toThrow('其他请求')
@@ -62,6 +78,28 @@ describe('generation output channels and staging ingestion', () => {
     await fs.unlink(root)
   })
 
+  it('keeps an invalid OpenCode candidate as a repairable format result before cleanup', async () => {
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'candidate-format-stage-')); directories.push(directory)
+    const { workspace, request } = generationTransportFixture(directory)
+    let stagingRoot = ''
+    const harness = new LocalAgentHarness(new LocalAgentRepository(directory), id => ({ id,
+      async probe() { return { adapter: id, status: 'ready', message: 'fixture' } },
+      async *start(_prompt, cwd) {
+        stagingRoot = path.join(cwd, 'candidates', request.requestId)
+        await fs.writeFile(path.join(stagingRoot, 'candidate.json'), '{broken')
+        yield { type: 'acp_session', sessionID: 'external-opencode' }
+        yield { type: 'acp_result', sessionID: 'external-opencode', stopReason: 'end_turn' }
+      },
+      async *resume() { throw new Error('unused') }, async cancel() {},
+    }))
+    try {
+      const id = await harness.generate(workspace, 'opencode', { ...request, expectedResult: 'candidate' })
+      await expect.poll(() => harness.running).toBe(false)
+      expect(await harness.candidate(workspace, id)).toMatchObject({ kind: 'candidate-format-error', requestId: request.requestId })
+      await expect(fs.stat(stagingRoot)).rejects.toMatchObject({ code: 'ENOENT' })
+    } finally { await harness.close() }
+  })
+
   it('routes a generation through the actual harness and resumes with fresh request identity in the same CLI directory', async () => {
     const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'generation-harness-')); directories.push(directory)
     const { workspace, request, candidate } = generationTransportFixture(directory)
@@ -71,6 +109,10 @@ describe('generation output channels and staging ingestion', () => {
       async probe() { return { adapter: id, status: 'ready', message: 'fixture' } },
       async *start(prompt, cwd) {
         expect(prompt).toContain(request.instruction); cwdValues.push(cwd)
+        if (prompt.includes('"expectedResult":"candidate"')) expect(prompt).toContain('显式生成/修复请求')
+        else expect(prompt).toContain('kind="reply"')
+        expect(prompt).toContain('原生 commentary 简短说明')
+        expect(prompt).toContain('stateId:null 不得省略')
         expect(await fs.stat(path.join(cwd, 'candidates', output.requestId, 'request.json'))).toBeTruthy()
         yield { type: 'thread.started', thread_id: 'external-generation' }
         yield { type: 'item.completed', item: { type: 'agent_message', text: `${GENERATION_OPEN}${JSON.stringify(output)}${GENERATION_CLOSE}` } }
@@ -84,7 +126,7 @@ describe('generation output channels and staging ingestion', () => {
     try {
       const id = await harness.generate(workspace, 'codex', request)
       await expect.poll(() => harness.running).toBe(false)
-      expect(await harness.candidate(workspace, id)).toEqual(candidate)
+      expect(await harness.candidate(workspace, id)).toEqual({ kind: 'candidate', requestId: request.requestId, candidate })
       expect((await repository.list(workspace)).records[0]?.generationRequest).toEqual(request)
       const hostResult = { requestId: request.requestId, status: 'committed' as const, beforeRevision: 0, afterRevision: 1, summary: '已应用文字' }
       await harness.hostResult(workspace, id, hostResult)
@@ -96,9 +138,17 @@ describe('generation output channels and staging ingestion', () => {
       output = { ...candidate, requestId: next.requestId, candidateId: randomUUID() }
       const resumed = await harness.generate(workspace, 'codex', next, id)
       await expect.poll(() => harness.running).toBe(false)
-      expect(await harness.candidate(workspace, resumed)).toEqual(output)
+      expect(await harness.candidate(workspace, resumed)).toEqual({ kind: 'candidate', requestId: next.requestId, candidate: output })
       expect(cwdValues[1]).toBe(cwdValues[0])
       await expect(harness.candidate(createWorkspaceIdentity(workspace.projectId, path.join(directory, 'other.h5lesson')), resumed)).rejects.toThrow('没有')
+      await harness.hostResult(workspace, resumed, { requestId: next.requestId, status: 'rejected', summary: '需要修复' })
+      const repair = { ...next, requestId: randomUUID(), expectedResult: 'candidate' as const, repair: { logicalRequestId: next.requestId, attempt: 1 as const } }
+      await expect(harness.generate(workspace, 'codex', { ...repair, instruction: '更换原任务' }, resumed)).rejects.toThrow('原请求')
+      output = { ...candidate, requestId: repair.requestId }
+      const repaired = await harness.generate(workspace, 'codex', repair, resumed)
+      await expect.poll(() => harness.running).toBe(false)
+      expect(await harness.candidate(workspace, repaired)).toMatchObject({ kind: 'candidate', requestId: repair.requestId })
+      await expect(harness.generate(workspace, 'codex', { ...repair, requestId: randomUUID() }, resumed)).rejects.toThrow('唯一一次')
     } finally { await harness.close() }
   })
 })

@@ -17,6 +17,8 @@ export const generationRequestSchema = z.object({
   version: z.literal(1), requestId: z.uuid(), workspace: workspaceIdentityV1Schema,
   documentRevision: z.number().int().nonnegative(), sessionGeneration: z.number().int().nonnegative(),
   purpose: z.enum(['single-page', 'whole-course', 'local-edit']),
+  expectedResult: z.enum(['auto', 'candidate']).optional(),
+  repair: z.object({ logicalRequestId: z.uuid(), attempt: z.literal(1) }).strict().optional(),
   instruction: z.string().trim().min(1).max(20000),
   destinations: z.array(authoringToolDestinationV1Schema).min(1).max(1000),
   context: z.json(),

@@ -2,16 +2,20 @@ import type { ChildProcessWithoutNullStreams } from 'node:child_process'
 import { StringDecoder } from 'node:string_decoder'
 import { localAgentProbeSchema, type LocalAgentCliAdapterV1, type LocalAgentId, type LocalAgentProbe } from '../../shared/localAgentContract'
 import { captureAgent, launchAgent, resolveAgentExecutable, stopAgent, type AgentExecutable } from './process'
+import { openCodeAcp } from './openCodeAcp'
+import { codexAppServer } from './codexAppServer'
+import type { GenerationRequest } from '../../shared/generationContract'
 
 export function agentArguments(id: LocalAgentId, prompt: string, externalId?: string): string[] {
-  if (id === 'codex') return ['exec', '-c', 'sandbox_mode="read-only"', '-c', 'suppress_unstable_features_warning=true', ...(externalId ? ['resume', externalId] : ['--color', 'never']), '--json', '--skip-git-repo-check', '-']
-  if (id === 'claude') return ['-p', '--output-format', 'stream-json', '--verbose', ...(externalId ? ['--resume', externalId] : [])]
-  return ['run', '--format', 'json', '--model', 'opencode/big-pickle', ...(externalId ? ['--session', externalId] : [])]
+  if (id === 'codex') return ['app-server', '--stdio', '-c', 'suppress_unstable_features_warning=true']
+  if (id === 'claude') return ['-p', '--output-format', 'stream-json', '--include-partial-messages', '--verbose', ...(externalId ? ['--resume', externalId] : [])]
+  return ['acp']
 }
 export class LocalAgentAdapter implements LocalAgentCliAdapterV1 {
   private child?: ChildProcessWithoutNullStreams
   private cancelled = false
-  constructor(readonly id: LocalAgentId, private readonly resolve = resolveAgentExecutable) {}
+  constructor(readonly id: LocalAgentId, private readonly resolve = resolveAgentExecutable,
+    private readonly generationRequest?: GenerationRequest) {}
   async probe(): Promise<LocalAgentProbe> {
     const result = (status: LocalAgentProbe['status'], message: string, version?: string) => localAgentProbeSchema.parse({ adapter: this.id, status, message, version })
     try {
@@ -46,6 +50,21 @@ export class LocalAgentAdapter implements LocalAgentCliAdapterV1 {
       child.once('close', code => resolve({ code }))
     })
     child.stdin.on('error', () => {})
+    if (this.id === 'opencode' || this.id === 'codex') {
+      try { yield* (this.id === 'opencode' ? openCodeAcp : codexAppServer)(child, cwd, prompt, externalId, this.generationRequest) }
+      catch (error) {
+        if (this.cancelled) return
+        if (error instanceof SyntaxError) throw new Error('protocol')
+        if (error instanceof Error && error.message === 'interrupted') {
+          const exit = await closed
+          if (exit.error) throw new Error('launch')
+          if (exit.code !== 0) throw new Error(/unauth|not logged|authentication|api.key/i.test(stderr) ? 'unauthenticated' : 'crash')
+        }
+        throw error
+      }
+      finally { await stopAgent(child); this.child = undefined }
+      return
+    }
     child.stdin.end(prompt)
     const decoder = new StringDecoder('utf8')
     let buffer = ''; let total = 0

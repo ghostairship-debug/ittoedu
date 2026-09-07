@@ -17,6 +17,7 @@ import {
   type PublishedCourseSession,
 } from '@/player/surfaces/publishedDynamicHosts'
 import { attachPublishedCoursePresenter } from '@/player/publishedCoursePresenter'
+import { adjacentPlaybackTarget, buildCoursePlaybackSequence, playbackNavigationProgress } from '@/player/navigation/coursePlaybackSequence'
 
 const NOW = '2026-08-17T21:00:00.000Z'
 
@@ -172,6 +173,65 @@ describe('published course Mixed navigation', () => {
     container.remove()
   })
 
+  it('steps through Slide states, crosses scene boundaries, skips scenes and replays their first step', async () => {
+    const project = mixedProject()
+    const slide = project.surfaces.find(surface => surface.type === 'slide')!
+    slide.scenes[0]!.presentation = {
+      initialStateId: 'reveal-1',
+      states: [1, 2, 3].map(index => ({ id: `reveal-${index}`, name: `步骤 ${index}`, layerItemOverrides: {} })),
+    }
+    const payload = buildPublishedCourseV2Payload({ project, assetFiles: {}, components: {} })
+    const before = structuredClone(payload)
+    const session = createPublishedCourseSession(payload)
+    sessions.push(session)
+    const container = document.createElement('div')
+    document.body.append(container)
+    await session.mount(container)
+    expect(session.getPlaybackProgress()).toMatchObject({ sceneIndex: 0, stepIndex: 0, stepCount: 3, canPreviousStep: false })
+    expect(await session.previousStep()).toBe(false)
+    expect(await session.nextStep()).toBe(true)
+    expect(session.getPlaybackProgress()).toMatchObject({ sceneIndex: 0, stepIndex: 1 })
+    expect(session.navigator.current?.locationId).toBe(payload.startLocationId)
+    expect(await session.nextScene()).toBe(true)
+    expect(session.getPlaybackProgress()).toMatchObject({ sceneIndex: 1, stepIndex: 0 })
+    expect(await session.previousStep()).toBe(true)
+    expect(session.getPlaybackProgress()).toMatchObject({ sceneIndex: 0, stepIndex: 2 })
+    expect(await session.replayScene()).toBe(true)
+    expect(session.getPlaybackProgress()).toMatchObject({ sceneIndex: 0, stepIndex: 0 })
+    await session.nextStep()
+    await session.nextStep()
+    await session.nextStep()
+    expect(session.getPlaybackProgress()).toMatchObject({ sceneIndex: 1, stepIndex: 0 })
+    await session.previousScene()
+    expect(session.getPlaybackProgress()).toMatchObject({ sceneIndex: 0, stepIndex: 0 })
+    await session.goToIndex(payload.locations.length - 1)
+    expect(await session.nextStep()).toBe(false)
+    expect(session.getPlaybackProgress()).toMatchObject({ canNextStep: false, canNextScene: false })
+    expect(payload).toEqual(before)
+    container.remove()
+  })
+
+  it('groups contiguous Flow anchors and Spatial cameras while retaining later scene occurrences and exact links', () => {
+    const payload = buildPublishedCourseV2Payload({ project: mixedProject(), assetFiles: {}, components: {} })
+    const flow = payload.locations.find(location => location.kind === 'flow-block')!
+    const spatial = payload.locations.find(location => location.kind === 'spatial-camera')!
+    payload.locations = [
+      payload.locations[0]!,
+      { ...flow, id: 'flow-a' }, { ...flow, id: 'flow-b' },
+      { ...spatial, id: 'camera-a' }, { ...spatial, id: 'camera-b' }, { ...spatial, id: 'camera-c' },
+      { ...flow, id: 'flow-return' },
+    ]
+    const scenes = buildCoursePlaybackSequence(payload)
+    expect(scenes.map(scene => [scene.kind, scene.steps.length])).toEqual([['slide', 1], ['flow', 2], ['spatial', 3], ['flow', 1]])
+    const progress = playbackNavigationProgress(scenes, 'camera-a')
+    expect(progress).toMatchObject({ sceneIndex: 2, stepIndex: 0, stepCount: 3 })
+    expect(adjacentPlaybackTarget(scenes, progress, 'step', 'previous')?.locationId).toBe('flow-b')
+    expect(adjacentPlaybackTarget(scenes, progress, 'scene', 'previous')?.locationId).toBe('flow-a')
+    expect(adjacentPlaybackTarget(scenes, progress, 'scene', 'next')?.locationId).toBe('flow-return')
+    expect(adjacentPlaybackTarget(scenes, playbackNavigationProgress(scenes, 'camera-c'), 'step', 'next')?.locationId).toBe('flow-return')
+    expect(playbackNavigationProgress(scenes, 'camera-b')).toMatchObject({ stepIndex: 1 })
+  })
+
   it('rejects an unknown location instead of inventing a destination', async () => {
     const project = mixedProject()
     const payload = buildPublishedCourseV2Payload({
@@ -300,7 +360,11 @@ describe('published course Mixed navigation', () => {
     const flowController = flowRoot?.querySelector<HTMLElement>('[data-testid="flow-runtime-teacher-controller"]')
     expect(flowRoot?.hidden).toBe(false)
     expect(flowController).not.toBeNull()
-    expect(flowRoot?.style.height).toBe('720px')
+    expect(flowRoot?.style.height).toBe('100%')
+    const flowContent = flowRoot?.querySelector<HTMLElement>('[data-playback-content]')
+    expect(flowContent).not.toBeNull()
+    expect(flowContent!.contains(flowController!)).toBe(false)
+    expect(flowController!.closest('[data-playback-controller-plane]')?.parentElement).toBe(flowRoot)
     expect(parseFloat(flowController!.style.top) + parseFloat(flowController!.style.height)).toBeLessThanOrEqual(720)
 
     await session.goToLocation(spatialLocation!.id)
@@ -341,6 +405,12 @@ describe('published course Mixed navigation', () => {
     expect(pickerLayer).not.toBeNull()
     expect(container.querySelectorAll('.lesson-scene-picker-layer')).toHaveLength(1)
     expect(await session.goToLocation(flowLocation.id).then(() => true, () => false)).toBe(false)
+    await session.goToIndex(1)
+    expect(session.requestPlaybackNavigation('step', 'next')).toBe(false)
+    expect(session.navigator.current?.index).toBe(1)
+    await expect(session.nextStep()).rejects.toThrow()
+    expect(session.navigator.current?.index).toBe(1)
+    await session.goToIndex(0)
 
     const openPickerFromActiveSurface = () => {
       const activeSlot = [...container.querySelectorAll<HTMLElement>('[data-course-surface-slot]')]

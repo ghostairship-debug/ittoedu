@@ -97,6 +97,8 @@ export interface PublishedInteractionSessionPort {
     signal: AbortSignal,
   ): PublishedInteractionPortResult
   nextScene(signal: AbortSignal): PublishedInteractionPortResult
+  nextStep?(signal: AbortSignal): PublishedInteractionPortResult
+  previousStep?(signal: AbortSignal): PublishedInteractionPortResult
   previousScene(signal: AbortSignal): PublishedInteractionPortResult
   replayScene(signal: AbortSignal): PublishedInteractionPortResult
   restartCourse(signal: AbortSignal): PublishedInteractionPortResult

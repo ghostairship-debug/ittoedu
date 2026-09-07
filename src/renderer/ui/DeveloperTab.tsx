@@ -1,3 +1,5 @@
+import { ComponentSourcesEditor } from './ComponentSourcesEditor'
+import { visitCourseComponentPackageInstances } from '../components/courseComponentPackageTransactions'
 import {
   Braces,
   Code2,
@@ -7,8 +9,6 @@ import {
   WandSparkles,
 } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { ComponentManifest } from '../../shared/componentTypes'
-import { componentManifestSchema } from '../../shared/componentSchema'
 import {
   courseRuntimeDefinitionSchema,
   layerItemSchema,
@@ -20,7 +20,6 @@ import type {
 } from '../../shared/courseProjectTypes'
 import { interactionRuleSchema } from '../../shared/interactionSchema'
 import { validateRuntimeSource } from '../../player/RuntimeRegistry'
-import { validateComponentRuntimeSource } from '../components/importComponentPackage'
 import type {
   CourseRuntimeTemplateCreationTarget,
 } from '../runtime/runtimeTemplateAuthoringCommands'
@@ -64,7 +63,6 @@ import {
 import { updateSlideSceneInteractionRule } from '../course/v9SlideActionCommands'
 
 type DeveloperSection = 'runtime' | 'object' | 'rules' | 'component'
-type ComponentDocument = 'manifest' | 'runtime'
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
@@ -651,7 +649,19 @@ export function DeveloperTab() {
   const selectedRow = (projection?.unifiedRows ?? []).find((row) => row.id === selectedNodeId)
     ?? null
   const selectedItem = selectedRow?.item ?? null
-  const componentTarget = selectedItem ? componentItemOf(selectedItem) : null
+  const flowBlockId = useEditorStore(state => state.flowSession?.selection.selectedBlockId ?? null)
+  const componentTarget = useMemo(() => {
+    const layer = selectedItem ? componentItemOf(selectedItem) : null
+    if (layer) return { packageId: layer.component.packageId, instanceId: layer.layerItemId }
+    if (!courseProject || !flowBlockId) return null
+    let found: { packageId: string; instanceId: string } | null = null
+    for (const packageId of Object.keys(courseProject.componentPackages)) {
+      visitCourseComponentPackageInstances(courseProject, packageId, (_, reference) => {
+        if (reference.carrier === 'flow-block' && reference.instanceId === flowBlockId) found = { packageId, instanceId: flowBlockId }
+      })
+    }
+    return found
+  }, [courseProject, flowBlockId, selectedItem])
   const componentPackages = useEditorStore((state) => state.componentPackages)
   const editingScope = useEditorStore(selectEditingScope)
   const activePresentationStateId = useEditorStore(selectActivePresentationStateId)
@@ -670,17 +680,12 @@ export function DeveloperTab() {
   const createEditableComponentCopy = useEditorStore(
     (state) => state.createEditableComponentCopy,
   )
-  const updateEditableComponentPackage = useEditorStore(
-    (state) => state.updateEditableComponentPackage,
-  )
   const setCanvasMode = useEditorStore((state) => state.setCanvasMode)
   const slideScene = developerSlideScene(courseProject, activeCourseLocationId)
   const rules = editingScope === 'global'
     ? courseProject?.globalInteractions ?? []
     : slideScene?.interactions ?? []
   const [activeSection, setActiveSection] = useState<DeveloperSection>('runtime')
-  const [componentDocument, setComponentDocument] =
-    useState<ComponentDocument>('runtime')
   const [selectedRuleId, setSelectedRuleId] = useState<string>('')
   useEffect(() => {
     if (!rules.some((rule) => rule.id === selectedRuleId)) {
@@ -689,12 +694,8 @@ export function DeveloperTab() {
   }, [rules, selectedRuleId])
   const selectedRule = rules.find((rule) => rule.id === selectedRuleId)
   const selectedComponent = componentTarget
-    ? componentPackages[componentTarget.component.packageId]
+    ? componentPackages[componentTarget.packageId]
     : undefined
-  const selectedComponentMeta = componentTarget
-    ? courseProject?.componentPackages[componentTarget.component.packageId]
-    : undefined
-  const componentEditable = selectedComponentMeta?.editableCopy === true
   const copyBlockedByPresentationState =
     editingScope === 'scene' && activePresentationStateId !== null
   const nodeJson = useMemo(
@@ -720,12 +721,6 @@ export function DeveloperTab() {
   const ruleDocumentKey = JSON.stringify([
     authoringDocumentKey,
     selectedRule?.id ?? null,
-  ])
-  const componentCodeDocumentKey = JSON.stringify([
-    authoringDocumentKey,
-    selectedComponent?.manifest.id ?? null,
-    selectedComponent?.manifest.version ?? null,
-    componentDocument,
   ])
   const runtimeView = useMemo<RuntimeSourceAuthoringView | null>(() => {
     if (!courseProject || !activeCourseLocationId || !courseAuthoringSession) {
@@ -787,7 +782,7 @@ export function DeveloperTab() {
       id: 'component',
       label: '组件代码',
       status: selectedComponent
-        ? componentEditable ? '工程副本' : '只读'
+        ? '共享工程包'
         : '未选择',
     },
   ]
@@ -927,98 +922,15 @@ export function DeveloperTab() {
                 <div>
                   <strong>{selectedComponent.manifest.name}</strong>
                   <span>
-                    {componentEditable
-                      ? '工程内可编辑副本，修改不会覆盖原第三方组件。'
-                      : copyBlockedByPresentationState
-                        ? '请先切换到“基础”状态，再创建可编辑副本。'
-                        : '第三方组件只读；创建新 ID 的工程副本后才能修改。'}
+                    工程包源码修改会同步所有引用；创建独立副本仅切换当前实例。
                   </span>
                 </div>
-                {!componentEditable && (
-                  <button
-                    type="button"
-                    className="secondary-button"
-                    disabled={copyBlockedByPresentationState}
-                    onClick={() => createEditableComponentCopy(
-                      selectedComponent.manifest.id,
-                      componentTarget.layerItemId,
-                    )}
-                  >
-                    <CopyPlus size={13} />创建可编辑副本
-                  </button>
-                )}
+                <button type="button" className="secondary-button" disabled={copyBlockedByPresentationState}
+                  onClick={() => createEditableComponentCopy(selectedComponent.manifest.id, componentTarget.instanceId)}>
+                  <CopyPlus size={13} />为当前实例创建独立副本
+                </button>
               </section>
-              <div
-                className="developer-document-tabs"
-                role="tablist"
-                aria-label="组件文档"
-              >
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={componentDocument === 'runtime'}
-                  className={componentDocument === 'runtime' ? 'is-active' : ''}
-                  onClick={() => setComponentDocument('runtime')}
-                >
-                  Runtime.js
-                </button>
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={componentDocument === 'manifest'}
-                  className={componentDocument === 'manifest' ? 'is-active' : ''}
-                  onClick={() => setComponentDocument('manifest')}
-                >
-                  Manifest.json
-                </button>
-              </div>
-              {componentDocument === 'manifest' ? (
-                <CodeDocumentEditor
-                  title="组件 Manifest"
-                  description="需通过版本、作用域、公开字段和素材引用校验。"
-                  value={JSON.stringify(selectedComponent.manifest, null, 2)}
-                  bindingKey={componentCodeDocumentKey}
-                  language="json"
-                  readOnly={!componentEditable}
-                  onApply={componentEditable
-                    ? (value) => {
-                        const result = componentManifestSchema.safeParse(JSON.parse(value))
-                        if (!result.success) {
-                          throw new Error(result.error.issues[0]?.message ?? 'Manifest 无效')
-                        }
-                        if (
-                          result.data.id !== selectedComponent.manifest.id ||
-                          result.data.version !== selectedComponent.manifest.version
-                        ) {
-                          throw new Error('可编辑副本的 ID 和版本不可在代码框中修改')
-                        }
-                        updateEditableComponentPackage(
-                          selectedComponent.manifest.id,
-                          { manifest: result.data as ComponentManifest },
-                        )
-                      }
-                    : undefined}
-                />
-              ) : (
-                <CodeDocumentEditor
-                  title="组件 Runtime"
-                  description="只接受离线普通 JavaScript；禁止 import、export 和 require。"
-                  value={selectedComponent.runtimeSource}
-                  bindingKey={componentCodeDocumentKey}
-                  language="javascript"
-                  readOnly={!componentEditable}
-                  onApply={componentEditable
-                    ? (source) => {
-                        validateComponentRuntimeSource(source)
-                        syntaxCheck(source)
-                        updateEditableComponentPackage(
-                          selectedComponent.manifest.id,
-                          { runtimeSource: source },
-                        )
-                      }
-                    : undefined}
-                />
-              )}
+              <ComponentSourcesEditor packageId={selectedComponent.manifest.id} />
             </div>
           ) : (
             <section className="developer-empty-card">

@@ -49,7 +49,7 @@ export class CandidateStaging {
     } catch (error) { await fs.rm(target, { recursive: true, force: true }); throw error }
   }
 
-  async read(requestId: string) {
+  async readText(requestId: string): Promise<string | null> {
     const root = await this.directory(requestId)
     const filename = path.join(root, 'candidate.json')
     let real: string
@@ -64,8 +64,13 @@ export class CandidateStaging {
       if (await fs.realpath(filename) !== real) throw new Error('候选文件位置在摄取期间发生变化')
       const bytes = await handle.readFile()
       if (bytes.byteLength > MAX_GENERATION_RESULT_BYTES) throw new Error('候选文件超过大小上限')
-      return parseGenerationCandidate(JSON.parse(bytes.toString('utf8')), requestId)
+      return bytes.toString('utf8')
     } finally { await handle.close() }
+  }
+
+  async read(requestId: string) {
+    const text = await this.readText(requestId)
+    return text === null ? null : parseGenerationCandidate(JSON.parse(text), requestId)
   }
 
   async remove(requestId: string): Promise<void> {

@@ -7,7 +7,6 @@ import {
   createPublishedCourseSession,
   type PublishedCourseSession,
 } from './surfaces/publishedDynamicHosts'
-import { attachPublishedCourseStageFit } from './surfaces/publishedStageFit'
 
 export const PLAYER_V2_ENTRY_UNSUPPORTED_ERROR =
   '当前播放器只接受 Published Course V2。旧版播放器导出包或旧 Player 课件不受支持，请用最新编辑器重新导出后再打开。'
@@ -128,7 +127,6 @@ async function mountPublishedCourseEntry(
     await session.destroy()
     return
   }
-  attachPublishedCourseStageFit(root)
   activePresenter = attachPublishedCoursePresenter(root, session, payload)
 }
 

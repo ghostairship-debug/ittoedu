@@ -2,7 +2,7 @@ import { FlowTableProperties } from './FlowTableProperties'
 import type { ChartCanvasTextPort } from '../../authoring/chartCanvasTextBridge'
 import { ChartProperties } from './ChartProperties'
 import { createChartPropertiesCommands } from './chartPropertiesCommands'
-import { useRef, type ChangeEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react'
 import {
   Bold,
   ImageIcon,
@@ -27,6 +27,7 @@ import type {
   FlowMediaBlock,
   LayerItem,
 } from '../../../shared/courseProjectTypes'
+import type { FlowBodyDestination } from '../../course/flowSharedAuthoringAdapters'
 import type { AssetMeta } from '../../../shared/contracts/media-v1'
 import type {
   CourseBackgroundFields,
@@ -104,7 +105,10 @@ export interface FlowPropertiesCommands {
   readonly importReplacementMedia: (imported: FlowImportedMediaBytes) => Promise<void> | void
   readonly moveSelectedBlock: (direction: 'up' | 'down') => void
   readonly convertSelectedToOverlay: () => void
-  readonly convertOverlayToDocument: () => void
+  readonly convertOverlayToDocument: (
+    destination?: FlowBodyDestination,
+    signal?: AbortSignal,
+  ) => Promise<void> | void
   readonly deleteSelectedBlocks: () => void
   readonly formatBlock: (spec: FlowBlockFormatCommand) => void
   readonly formatTextStyle: (style: TextRunStyle) => void
@@ -637,6 +641,105 @@ function FlowBlockProperties({ context }: { context: FlowPropertiesContext }) {
   )
 }
 
+type FlowDestinationChoice = {
+  readonly key: string
+  readonly label: string
+  readonly destination: Pick<FlowBodyDestination, 'parentBlockId' | 'index'>
+}
+
+function flowDestinationChoices(view: FlowEditorView): FlowDestinationChoice[] {
+  const parents = [
+    { id: null as string | null, label: '正文' },
+    ...view.blocks
+      .filter((entry) => entry.block.type === 'section')
+      .map((entry) => ({ id: entry.blockId, label: `分节「${entry.label}」` })),
+  ]
+  return parents.flatMap((parent) => {
+    const children = view.blocks
+      .filter((entry) => entry.parentId === parent.id)
+      .sort((left, right) => left.index - right.index)
+    return Array.from({ length: children.length + 1 }, (_, index) => {
+      const position = index === 0
+        ? '开头'
+        : index === children.length
+          ? '末尾'
+          : `在「${children[index - 1]!.label}」之后`
+      return {
+        key: JSON.stringify([parent.id, index]),
+        label: `${parent.label} · ${position}`,
+        destination: { parentBlockId: parent.id, index },
+      }
+    })
+  })
+}
+
+function FlowComponentConversionControls({ context }: { context: FlowPropertiesContext }) {
+  const choices = useMemo(() => flowDestinationChoices(context.view), [context.view])
+  const [choiceKey, setChoiceKey] = useState(() => choices.at(-1)?.key ?? '')
+  const [wrap, setWrap] = useState<'none' | 'left' | 'right'>('none')
+  const [pending, setPending] = useState(false)
+  const controllerRef = useRef<AbortController | null>(null)
+  useEffect(() => () => controllerRef.current?.abort(), [])
+  const selected = choices.find((choice) => choice.key === choiceKey) ?? choices.at(-1)
+
+  const convert = async () => {
+    if (!selected || pending) return
+    const controller = new AbortController()
+    controllerRef.current = controller
+    setPending(true)
+    try {
+      await context.commands.convertOverlayToDocument(
+        { ...selected.destination, wrap },
+        controller.signal,
+      )
+    } finally {
+      if (controllerRef.current === controller) controllerRef.current = null
+      setPending(false)
+    }
+  }
+
+  return (
+    <section className="property-section" data-testid="flow-overlay-component-properties">
+      <h3 className="property-title">浮层组件</h3>
+      <SelectField<string>
+        label="正文位置"
+        value={selected?.key ?? ''}
+        options={choices.map((choice) => ({ value: choice.key, label: choice.label }))}
+        onChange={setChoiceKey}
+      />
+      <SelectField<'none' | 'left' | 'right'>
+        label="文字环绕"
+        value={wrap}
+        options={[
+          { value: 'none', label: '不环绕（独占一行）' },
+          { value: 'left', label: '居左环绕' },
+          { value: 'right', label: '居右环绕' },
+        ]}
+        onChange={setWrap}
+      />
+      <button
+        type="button"
+        className="secondary-button"
+        data-testid="flow-overlay-to-document"
+        disabled={pending || !selected}
+        onClick={() => void convert()}
+      >
+        {pending ? '正在生成后备图…' : '转回指定正文位置'}
+      </button>
+      {pending ? (
+        <button
+          type="button"
+          className="secondary-button"
+          data-testid="flow-overlay-to-document-cancel"
+          onClick={() => controllerRef.current?.abort()}
+        >
+          取消转换
+        </button>
+      ) : null}
+    </section>
+  )
+}
+
 function FlowOverlayProperties({ context }: { context: FlowPropertiesContext }) {
   const { view, selection, commands } = context
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -799,17 +902,10 @@ function FlowOverlayProperties({ context }: { context: FlowPropertiesContext }) 
         </section>
       )}
       {item.kind === 'component' && (
-        <section className="property-section" data-testid="flow-overlay-component-properties">
-          <h3 className="property-title">浮层组件</h3>
-          <button
-            type="button"
-            className="secondary-button"
-            data-testid="flow-overlay-to-document"
-            onClick={() => commands.convertOverlayToDocument()}
-          >
-            转回正文
-          </button>
-        </section>
+        <FlowComponentConversionControls
+          key={`flow-component-conversion:${context.draftBindingKey}`}
+          context={context}
+        />
       )}
     </div>
   )

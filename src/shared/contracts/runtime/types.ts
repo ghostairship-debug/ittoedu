@@ -88,6 +88,9 @@ export interface CourseEventBus {
 }
 
 export interface RuntimeHostActions {
+  /** Published hosts expose continuous steps; feature-detect on older hosts. */
+  nextStep?(): boolean
+  previousStep?(): boolean
   goToScene(sceneId: string, targetStateId?: string): boolean
   nextScene(): boolean
   previousScene(): boolean

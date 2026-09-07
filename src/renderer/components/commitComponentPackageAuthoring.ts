@@ -1,8 +1,8 @@
 import { nanoid } from 'nanoid'
 import { captureComponentInsertionTarget, insertComponentPackagesAtTarget, type ComponentInsertionTarget } from './insertComponentPackages'
 import type { AssetMeta } from '../../shared/contracts/media-v1'
-import type { ComponentManifest, ComponentPackageData } from '../../shared/componentTypes'
-import { componentContentSha256 } from '../../shared/componentContentIntegrity'
+import type { ComponentPackageData } from '../../shared/componentTypes'
+import { captureComponentPackageSourceBaseline, assertComponentPackageSourceBaseline, prepareComponentPackageSourceRevision, planComponentPackageFork, type ComponentPackageSourceBaseline } from './componentPackageRevision'
 import { UserFacingError } from '../../shared/errors'
 import { createEditorTransactionStep, type EditorTransactionStep } from '../authoring/editorTransaction'
 import type { CourseProjectDocument } from '../../shared/courseProjectTypes'
@@ -24,17 +24,12 @@ import { commitSlideProjectMutation } from '../course/slideEditorCommands'
 import { addSlideComponentLayer } from '../course/v9SlideContentCommands'
 import { addSpatialWorldComponentLayer } from '../course/spatialEditorCommands'
 import { insertFlowSharedComponent } from '../course/flowSharedAuthoringAdapters'
-import { findMutableCourseLayerItem } from '../store/v9LayerMutations'
-import {
-  assertEditableComponentPackage,
-  componentFilesWithAuthoredCode,
-  componentPackageMeta,
-  editableComponentPackageId,
-  locateDocumentComponentMeta,
-  removeCourseComponentPackage,
-  rewriteComponentDefinitionId,
-  validateEditableComponentPackage,
-} from './editableComponentPackage'
+import { componentPackageMeta } from './editableComponentPackage'
+
+export interface ComponentPackageSourceTarget extends ComponentPackageSourceBaseline {
+  readonly projectPath: string | null
+  readonly sessionGeneration: number | null
+}
 
 export interface CourseProjectRevisionTarget {
   readonly projectId: string
@@ -58,6 +53,7 @@ export type ComponentPackageReplacementCommitResult =
     }
 
 export type ComponentAuthoringState = {
+  readonly projectPath?: string | null
   readonly document: CourseProjectDocument | null
   readonly sidecar: CourseAssetSidecar | null
   readonly componentPackages: Readonly<Record<string, ComponentPackageData>>
@@ -352,141 +348,40 @@ export function createComponentAuthoringActions(ports: ComponentAuthoringPorts) 
         })
         return null
       }
-      const selected = nodeId
-        ? findMutableCourseLayerItem(document, nodeId)
-        : null
-      if (
-        nodeId &&
-        (selected?.kind !== 'component' || selected.component.packageId !== packageId)
-      ) {
-        throw new UserFacingError(
-          '无法切换当前实例',
-          '所选实例与该组件包不一致。',
-          '请先选中该组件实例再创建。',
-        )
-      }
-      const suffix = nanoid(6)
-      const safeSuffix = suffix.toLowerCase().replace(/[^a-z0-9]/g, 'x')
-      const nextId = editableComponentPackageId(packageId, suffix)
-      const nextVersion = `0.1.0-edit.${safeSuffix}`
-      const manifest = {
-        ...structuredClone(source.manifest),
-        id: nextId,
-        name: `${source.manifest.name}（可编辑副本）`,
-        version: nextVersion,
-        description: `从工程内“${source.manifest.name}”创建的可编辑副本`,
-      } as ComponentManifest
-      const runtimeSource = rewriteComponentDefinitionId(
-        source.runtimeSource,
-        source.manifest.id,
-        nextId,
-      )
-      const sourceWithoutProvenance = { ...source }
-      delete sourceWithoutProvenance.provenance
-      const authoredFiles = componentFilesWithAuthoredCode(
-        source,
-        manifest,
-        runtimeSource,
-      )
-      const packageData: ComponentPackageData = {
-        ...sourceWithoutProvenance,
-        manifest,
-        runtimeSource,
-        files: authoredFiles,
-        contentSha256: componentContentSha256(authoredFiles),
-      }
-      validateEditableComponentPackage(
-        packageData,
-        document,
-        selected
-          ? [state.editingScope === 'global' ? 'global' : 'scene']
-          : [],
-      )
-      const sourceMeta = locateDocumentComponentMeta(
-        document,
-        packageId,
-        source.manifest.version,
-      )
-      const authoring = {
-        editableCopy: true as const,
-        sourcePackageId: sourceMeta?.sourcePackageId ?? packageId,
-      }
-      const project = commitSlideProjectMutation(document, (draft) => {
-        draft.componentPackages[nextId] = componentPackageMeta(packageData, authoring)
-        if (!selected || selected.kind !== 'component') return
-        const layer = findMutableCourseLayerItem(draft, selected.layerItemId)
-        if (layer?.kind === 'component') {
-          layer.component = { packageId: nextId, version: nextVersion }
-        }
-      })
-      ports.persistProject(project, {
-        componentPackages: { [nextId]: packageData },
-        statusMessage: `已创建“${manifest.name}”；原组件包仍保留`,
-      })
+      const nextId = `${packageId}.editable.${nanoid(6).toLowerCase().replace(/[^a-z0-9]/g, 'x')}`
+      const plan = planComponentPackageFork(document, state.componentPackages, packageId, nextId, nodeId)
+      const step = createEditorTransactionStep(document, plan)
+      if (!step || !ports.persistTransaction(step, '已为当前实例创建独立组件包；原包仍保留')) return null
       ports.setActiveTab('developer')
       ports.setFeedback({ errorMessage: null })
       return nextId
     },
-    updateEditableComponentPackage(
-      packageId: string,
-      patch: Partial<Pick<ComponentPackageData, 'manifest' | 'runtimeSource'>>,
-    ) {
+    captureComponentPackageSourceTarget(packageId: string): ComponentPackageSourceTarget {
       const state = ports.read()
-      const document = state.document
-      if (!document) {
-        ports.setFeedback({
-          errorMessage: '当前会话没有可编辑的组件包。',
-          statusMessage: null,
-        })
-        return
+      if (!state.document) throw new Error('当前没有工程')
+      return Object.freeze({ ...captureComponentPackageSourceBaseline(state.document, packageId),
+        projectPath: state.projectPath ?? null, sessionGeneration: state.authoringSession?.token.generation ?? null })
+    },
+    async updateComponentPackageSources(target: ComponentPackageSourceTarget, files: Readonly<Record<string, Uint8Array>>, signal?: AbortSignal): Promise<'updated' | 'unchanged'> {
+      const check = () => {
+        const current = ports.read()
+        if (signal?.aborted) throw new Error('组件源码校验已取消，草稿已保留')
+        if (!current.document || (current.projectPath ?? null) !== target.projectPath
+          || (current.authoringSession?.token.generation ?? null) !== target.sessionGeneration) throw new Error('stale：编辑会话已改变，草稿已保留')
+        assertComponentPackageSourceBaseline(current.document, target)
+        return current
       }
-      const currentPackage = state.componentPackages[packageId]
-      const currentMeta = locateDocumentComponentMeta(
-        document,
-        packageId,
-        currentPackage?.manifest.version,
-      )
-      assertEditableComponentPackage(packageId, currentPackage, currentMeta)
-      const manifest = patch.manifest
-        ? structuredClone(patch.manifest)
-        : structuredClone(currentPackage.manifest)
-      if (
-        manifest.id !== currentPackage.manifest.id ||
-        manifest.version !== currentPackage.manifest.version
-      ) {
-        throw new UserFacingError(
-          '组件身份不可修改',
-          '可编辑副本的 ID 和版本不能在创建后改写。',
-          '若需要新的身份，请从当前包再次创建副本。',
-        )
-      }
-      const runtimeSource = patch.runtimeSource ?? currentPackage.runtimeSource
-      const authoredFiles = componentFilesWithAuthoredCode(
-        currentPackage,
-        manifest,
-        runtimeSource,
-      )
-      const nextPackage: ComponentPackageData = {
-        ...currentPackage,
-        manifest,
-        runtimeSource,
-        files: authoredFiles,
-        contentSha256: componentContentSha256(authoredFiles),
-      }
-      validateEditableComponentPackage(nextPackage, document)
-      const project = commitSlideProjectMutation(document, (draft) => {
-        removeCourseComponentPackage(draft, packageId)
-        draft.componentPackages[packageId] = componentPackageMeta(nextPackage, {
-          editableCopy: true,
-          sourcePackageId: currentMeta?.sourcePackageId,
-        })
-      })
-      ports.persistProject(project, {
-        componentPackages: { [packageId]: nextPackage },
-        statusMessage: `组件“${nextPackage.manifest.name}”的代码已更新`,
-      })
-      ports.setActiveTab('developer')
+      const state = check()
+      const result = await prepareComponentPackageSourceRevision({ project: state.document!,
+        resources: { componentPackages: state.componentPackages, assetFiles: state.sidecar?.files ?? {} },
+        baseline: target, files, operationId: crypto.randomUUID() }, signal)
+      const current = check()
+      if (!result.ok) throw new Error(result.reason)
+      if (result.status === 'no-op') return 'unchanged'
+      const step = createEditorTransactionStep(current.document!, result.plan)
+      if (!step || !ports.persistTransaction(step, `组件源码已更新，${result.plan.feedback?.affectedInstances.length ?? 0} 个实例已同步`)) throw new Error('组件源码未提交，草稿已保留')
       ports.setFeedback({ errorMessage: null })
+      return 'updated'
     },
     addExternalComponentNode(packageId: string, x?: number, y?: number, presetId?: string) {
       const state = ports.read()

@@ -44,7 +44,7 @@ import {
 } from '../workspaceSlideAuthoring'
 import { buildSlideEditorView, type SlideEditorLayerView, type SlideEditorView } from '../../course/slideEditorView'
 import { materializeNativeLayerItem } from '../../../shared/courseProjectSchema'
-import { nativeRenderInputFromV9Item } from '../../../player/surfaces/slide/publishedNativeRendering'
+import { nativeRenderInputFromV9Item } from '../../../player/surfaces/native/publishedNativeRendering'
 import { TextEditOverlay } from '../TextEditOverlay'
 import { SlideLayerSelectionOverlay } from './SlideLayerSelectionOverlay'
 import { useSlideNativeTextEditor } from './useSlideNativeTextEditor'
@@ -63,7 +63,6 @@ import {
 } from '../../authoring/stageViewportTransform'
 import { createV9TeacherControllerAuthoringController } from '../../authoring/v9TeacherControllerAuthoring'
 import {
-  type attachPublishedCourseStageFit,
   type mountPublishedCourseAuthoring,
   type mountPublishedCourseTryRun,
 } from '../coursePlayerTryRun'
@@ -243,7 +242,6 @@ export interface SlideWorkspaceTryRunPort {
   readonly mount: (
     container: HTMLElement,
   ) => ReturnType<typeof mountPublishedCourseTryRun>
-  readonly attachStageFit: typeof attachPublishedCourseStageFit
 }
 
 export interface SlideWorkspacePorts {
@@ -751,7 +749,6 @@ export function SlideLocationWorkspace({
   const controllerPointerActiveRef = useRef(false)
   const courseTryRunRef = useRef<HTMLDivElement>(null)
   const courseTryRunSessionRef = useRef<PublishedCourseSession | null>(null)
-  const courseTryRunFitRef = useRef<(() => void) | null>(null)
   const courseTryRunMountChainRef = useRef(Promise.resolve())
   const [tryRunFeedback, setTryRunFeedback] = useState<RuntimePreviewFeedback>(null)
   const [tryRunEpoch, setTryRunEpoch] = useState(0)
@@ -1465,8 +1462,6 @@ export function SlideLocationWorkspace({
   useEffect(() => {
     const container = courseTryRunRef.current
     if (!useCoursePlayerTryRun || !snapshot.projectId || !container || !tryRunMountKey) {
-      courseTryRunFitRef.current?.()
-      courseTryRunFitRef.current = null
       const leftover = courseTryRunSessionRef.current
       courseTryRunSessionRef.current = null
       if (leftover) {
@@ -1488,8 +1483,6 @@ export function SlideLocationWorkspace({
     }
     return beginSerializedSessionMount(courseTryRunMountChainRef, () => ports.tryRun.mount(container), {
       onReady: (session) => {
-        courseTryRunFitRef.current?.()
-        courseTryRunFitRef.current = ports.tryRun.attachStageFit(container)
         courseTryRunSessionRef.current = session
         container.dataset.coursePlayerReady = 'true'
         setTryRunFeedback(null)
@@ -1505,8 +1498,6 @@ export function SlideLocationWorkspace({
       },
       onCleanup: () => {
         container.dataset.coursePlayerReady = 'false'
-        courseTryRunFitRef.current?.()
-        courseTryRunFitRef.current = null
         courseTryRunSessionRef.current = null
       },
     })

@@ -1,6 +1,6 @@
 import {
   useEffect,
-  useMemo,
+  useLayoutEffect,
   useRef,
   useState,
   type CSSProperties,
@@ -8,10 +8,8 @@ import {
   type ReactNode,
 } from 'react'
 import { CANVAS_HEIGHT, CANVAS_WIDTH, MIN_NODE_SIZE } from '../../../shared/constants'
-import type { FormulaAstNode, ShapeNode, TextNode } from '../../../shared/contracts/native-v1'
-import { renderShapeCanvas } from '../../../shared/canvasShapeRenderer'
-import { createNativePathSvg } from '../../../shared/nativePathRendering'
-import { paintPublishedNativeText } from '../../../player/surfaces/publishedNativeText'
+import { createFlowViewportGeometry, revealFlowSelectionPan, type FlowPoint } from '../../../shared/flowViewportGeometry'
+import { rotatedWorldRectAxisBounds } from '../../authoring/stageViewportTransform'
 import type { LayerItem } from '../../../shared/courseProjectTypes'
 import { constrainTeacherControllerAuthoringFrame } from '../../../shared/teacherControllerLayout'
 import type { ComponentPackageData } from '../../../shared/componentTypes'
@@ -28,16 +26,13 @@ import type {
 import type { FlowCurrentSessionCommandPort } from './useFlowTextAuthoringController'
 import { isTeacherControllerLayerItem } from '../../course/globalLayerCommands'
 import {
-  createStageViewportTransform,
   resizeWorldFrameFromHandle,
   STAGE_RESIZE_HANDLE_DIRECTIONS,
-  STAGE_VIEWPORT_HEIGHT,
-  STAGE_VIEWPORT_WIDTH,
   type StageRect,
   type StageResizeHandleDirection,
 } from '../../authoring/stageViewportTransform'
 import { TeacherControllerAuthoringChrome } from '../TeacherControllerAuthoringChrome'
-import { PublishedFormulaPaint } from '../PublishedFormulaPaint'
+import { PublishedNativeContent } from '../PublishedNativeContent'
 import {
   findComponentPackageSource,
   mountPublishedComponent,
@@ -49,54 +44,46 @@ function overlayCardStyle(
   layer: FlowEditorLayerView,
   preview?: StageRect | null,
   paperScrollTop = 0,
+  paperOrigin: FlowPoint = { x: 0, y: 0 },
+  paperScrollLeft = 0,
+  viewPan: FlowPoint = { x: 0, y: 0 },
 ): CSSProperties {
   const frame = preview ?? layer.item.frame
   const isController = isTeacherControllerLayerItem(layer.item)
   const isPaper = !isController && layer.item.paperSpace === 'paper'
-  const top = isPaper ? frame.y - paperScrollTop : frame.y
+  const geometry = createFlowViewportGeometry({
+    viewportClientRect: { x: 0, y: 0, width: 1, height: 1 },
+    layoutViewportSize: { width: 1, height: 1 },
+    paperOriginLayout: paperOrigin,
+    paperScrollLayout: { x: paperScrollLeft, y: paperScrollTop },
+    playbackPanClient: viewPan,
+  })
+  const point = isController ? frame : isPaper ? geometry.paperToClient(frame) : geometry.viewportToClient(frame)
   return {
     position: 'absolute',
-    left: frame.x,
-    top,
+    left: point.x,
+    top: point.y,
     width: frame.width,
     height: frame.height,
     boxSizing: 'border-box',
     pointerEvents: 'auto',
     zIndex: layer.stackOrder,
+    transform: isController ? undefined : `rotate(${layer.item.rotation}deg)`,
   }
 }
 
 function constrainFlowControllerOverlayFrame(
   layer: FlowEditorLayerView | undefined,
   frame: StageRect,
+  viewportSize: { width: number; height: number },
 ): StageRect {
   if (!layer || !isTeacherControllerLayerItem(layer.item)) return frame
   return constrainTeacherControllerAuthoringFrame(
     layer.item.content.data,
     frame,
     layer.item.rotation,
-    { width: CANVAS_WIDTH, height: CANVAS_HEIGHT },
+    viewportSize,
   )
-}
-
-function nativeOverlayMedia(item: LayerItem): {
-  readonly kind: 'image' | 'video'
-  readonly assetId: string
-  readonly posterAssetId?: string
-} | null {
-  if (item.kind !== 'native') return null
-  if (item.content.nativeType === 'image') {
-    return { kind: 'image', assetId: item.content.data.assetId }
-  }
-  if (item.content.nativeType === 'video') {
-    const posterAssetId = item.content.data.poster.assetId
-    return {
-      kind: 'video',
-      assetId: item.content.data.assetId,
-      ...(posterAssetId ? { posterAssetId } : {}),
-    }
-  }
-  return null
 }
 
 function overlayMediaFillStyle(): CSSProperties {
@@ -189,83 +176,6 @@ function FlowOverlayComponentContent({
   )
 }
 
-function FlowOverlayShapeContent({ layer }: { layer: FlowEditorLayerView }) {
-  const canvasRef = useRef<HTMLCanvasElement>(null)
-  const pathRef = useRef<HTMLDivElement>(null)
-  const item = layer.item as LayerItem
-  useEffect(() => {
-    if (item.kind === 'native' && item.content.nativeType === 'shape' && (item.content.data.pathGeometry || item.content.data.braceGeometry) && pathRef.current) {
-      const container = pathRef.current
-      container.replaceChildren(createNativePathSvg(container.ownerDocument, item.content.data, item.frame.width, item.frame.height))
-      return () => container.replaceChildren()
-    }
-    const canvas = canvasRef.current
-    if (!canvas || item.kind !== 'native' || item.content.nativeType !== 'shape') return
-    const context = canvas.getContext('2d')
-    if (!context) return
-    context.clearRect(0, 0, canvas.width, canvas.height)
-    renderShapeCanvas(context, {
-      ...item.content.data,
-      id: item.layerItemId,
-      name: item.label,
-      type: 'shape',
-      x: 0,
-      y: 0,
-      width: item.frame.width,
-      height: item.frame.height,
-      rotation: 0,
-      opacity: 1,
-      visible: item.visible,
-      locked: item.locked,
-      playbackInitialVisibility: item.playbackInitialVisibility,
-    }, canvas.width, canvas.height)
-  }, [item])
-
-  if (item.kind !== 'native' || item.content.nativeType !== 'shape') return null
-  if (item.content.data.pathGeometry || item.content.data.braceGeometry) return <div ref={pathRef} style={{ width: '100%', height: '100%', overflow: 'visible', pointerEvents: 'none' }} />
-  return (
-    <canvas
-      ref={canvasRef}
-      data-testid="flow-overlay-shape-canvas"
-      width={Math.max(1, Math.round(item.frame.width))}
-      height={Math.max(1, Math.round(item.frame.height))}
-      style={{
-        display: 'block',
-        width: '100%',
-        height: '100%',
-        pointerEvents: 'none',
-      }}
-    />
-  )
-}
-
-function FlowOverlayTextContent({ layer }: { layer: FlowEditorLayerView }) {
-  const containerRef = useRef<HTMLDivElement>(null)
-  const item = layer.item as LayerItem
-  useEffect(() => {
-    const container = containerRef.current
-    if (!container || item.kind !== 'native' || item.content.nativeType !== 'text') return
-    paintPublishedNativeText(
-      container,
-      item.content.data,
-      { width: item.frame.width, height: item.frame.height },
-    )
-  }, [item])
-
-  if (item.kind !== 'native' || item.content.nativeType !== 'text') return null
-  return (
-    <div
-      ref={containerRef}
-      data-testid="flow-overlay-text-content"
-      style={{
-        width: '100%',
-        height: '100%',
-        pointerEvents: 'none',
-      }}
-    />
-  )
-}
-
 function renderFlowOverlayCardContent(
   projectId: string,
   layer: FlowEditorLayerView,
@@ -282,78 +192,23 @@ function renderFlowOverlayCardContent(
       />
     )
   }
-  if (layer.item.kind === 'native' && layer.item.content.nativeType === 'formula') {
-    const data = layer.item.content.data
-    const frame = layer.item.frame
-    return (
-      <PublishedFormulaPaint
-        formulaId={data.formulaId}
-        accessibleText={data.accessibleText}
-        ast={data.ast as FormulaAstNode}
-        style={data.style}
-        width={Math.max(1, frame.width)}
-        height={Math.max(1, frame.height)}
-        lockHeight
-      />
-    )
+  if (layer.item.kind === 'native') {
+    return <PublishedNativeContent item={layer.item as Extract<LayerItem, { kind: 'native' }>} assetUrls={assetUrls} />
   }
-  if (layer.item.kind === 'native' && layer.item.content.nativeType === 'shape') {
-    return <FlowOverlayShapeContent layer={layer} />
-  }
-  if (layer.item.kind === 'native' && layer.item.content.nativeType === 'text') {
-    return <FlowOverlayTextContent layer={layer} />
-  }
-  const media = nativeOverlayMedia(layer.item as LayerItem)
-  if (!media) return layer.item.label || '浮层'
-  const url = assetUrls[media.assetId]
-  if (media.kind === 'image') {
-    const imageData = layer.item.kind === 'native' && layer.item.content.nativeType === 'image'
-      ? layer.item.content.data
-      : null
-    const transforms: string[] = []
-    if (imageData?.flipX) transforms.push('scaleX(-1)')
-    if (imageData?.flipY) transforms.push('scaleY(-1)')
-    return (
-      <img
-        data-flow-overlay-media="image"
-        data-flow-asset-id={media.assetId}
-        alt=""
-        {...(url ? { src: url } : {})}
-        style={{
-          ...overlayMediaFillStyle(),
-          objectFit: imageData?.fit === 'stretch' ? 'fill' : (imageData?.fit ?? 'contain'),
-          borderRadius: imageData?.cornerRadius ? `${imageData.cornerRadius}px` : undefined,
-          transform: transforms.length > 0 ? transforms.join(' ') : undefined,
-        }}
-      />
-    )
-  }
-  const posterUrl = media.posterAssetId ? assetUrls[media.posterAssetId] : undefined
-  return (
-    <video
-      data-flow-overlay-media="video"
-      data-flow-asset-id={media.assetId}
-      {...(url ? { src: url } : {})}
-      {...(posterUrl ? { poster: posterUrl } : {})}
-      muted
-      playsInline
-      preload="metadata"
-      style={overlayMediaFillStyle()}
-    />
-  )
+  return layer.item.label || '浮层'
 }
-
 function overlayLocalPoint(
   overlay: HTMLElement,
   clientX: number,
   clientY: number,
+  viewportSize: { width: number; height: number },
 ): { x: number; y: number } {
   const bounds = overlay.getBoundingClientRect()
   const width = Math.max(1, bounds.width)
   const height = Math.max(1, bounds.height)
   return {
-    x: (clientX - bounds.left) * (CANVAS_WIDTH / width),
-    y: (clientY - bounds.top) * (CANVAS_HEIGHT / height),
+    x: (clientX - bounds.left) * (viewportSize.width / width),
+    y: (clientY - bounds.top) * (viewportSize.height / height),
   }
 }
 
@@ -408,7 +263,11 @@ export interface FlowOverlayAuthoringLayerProps {
   readonly assetUrls: Record<string, string>
   readonly componentPackages?: Record<string, ComponentPackageData>
   readonly paperScrollTop: number
+  readonly paperScrollLeft?: number
+  readonly paperOrigin?: FlowPoint
   readonly overlayViewportSize: { readonly width: number; readonly height: number }
+  readonly viewPan?: FlowPoint
+  readonly onViewPanChange?: (pan: FlowPoint) => void
   readonly children: ReactNode
   readonly onBeforeGesture?: () => boolean
   readonly commands: FlowCurrentSessionCommandPort
@@ -423,7 +282,11 @@ export function FlowOverlayAuthoringLayer({
   assetUrls,
   componentPackages,
   paperScrollTop,
+  paperScrollLeft = 0,
+  paperOrigin = { x: 0, y: 0 },
   overlayViewportSize,
+  viewPan = { x: 0, y: 0 },
+  onViewPanChange,
   children,
   onBeforeGesture,
   commands,
@@ -432,15 +295,36 @@ export function FlowOverlayAuthoringLayer({
   const overlayGestureRef = useRef<FlowOverlayGesture | null>(null)
   const [overlayPreview, setOverlayPreview] = useState<{ id: string; frame: StageRect } | null>(null)
 
-  const overlayTransform = useMemo(() => createStageViewportTransform({
-    viewport: {
-      x: 0,
-      y: 0,
-      width: Math.max(1, overlayViewportSize.width),
-      height: Math.max(1, overlayViewportSize.height),
-    },
-    zoom: 1,
-  }), [overlayViewportSize.height, overlayViewportSize.width])
+  const geometry = createFlowViewportGeometry({
+    viewportClientRect: { x: 0, y: 0, ...overlayViewportSize },
+    layoutViewportSize: overlayViewportSize,
+    paperOriginLayout: paperOrigin,
+    paperScrollLayout: { x: paperScrollLeft, y: paperScrollTop },
+    playbackPanClient: viewPan,
+  })
+  const localForLayer = (overlay: HTMLElement, event: ReactPointerEvent<HTMLElement>, layer?: FlowEditorLayerView) => {
+    const point = overlayLocalPoint(overlay, event.clientX, event.clientY, overlayViewportSize)
+    if (layer && isTeacherControllerLayerItem(layer.item)) return point
+    return layer?.item.paperSpace === 'paper' ? geometry.clientToPaper(point) : geometry.clientToViewport(point)
+  }
+
+  const revealSelection = () => {
+    if (overlayGestureRef.current) return
+    const bounds = view.overlayLayers.filter(layer => layer.effectiveVisible && !isTeacherControllerLayerItem(layer.item)
+      && selection?.selectedOverlayIds.includes(layer.selectionId)).map(layer => {
+      const rect = rotatedWorldRectAxisBounds(layer.item.frame, layer.item.rotation)
+      const origin = { x: rect.left, y: rect.top }
+      const point = layer.item.paperSpace === 'paper' ? geometry.paperToClient(origin) : geometry.viewportToClient(origin)
+      return { ...rect, ...point }
+    })
+    if (!bounds.length) return
+    const x = Math.min(...bounds.map(rect => rect.x)), y = Math.min(...bounds.map(rect => rect.y))
+    onViewPanChange?.(revealFlowSelectionPan({ x, y,
+      width: Math.max(...bounds.map(rect => rect.x + rect.width)) - x,
+      height: Math.max(...bounds.map(rect => rect.y + rect.height)) - y }, overlayViewportSize, viewPan))
+  }
+  const selectedOverlayKey = selection?.selectedOverlayIds.join('\u0000') ?? ''
+  useLayoutEffect(revealSelection, [selectedOverlayKey, view.projectId, view.surfaceId, overlayViewportSize.width, overlayViewportSize.height])
 
   const overlayLayers = view.overlayLayers.filter((layer) => layer.effectiveVisible)
   const globalUnderlayLayers = overlayLayers.filter((layer) => (
@@ -501,7 +385,7 @@ export function FlowOverlayAuthoringLayer({
     if (onBeforeGesture?.() === false) return
     const target = selectOverlay(layer)
     if (!target) return
-    const local = overlayLocalPoint(overlay, event.clientX, event.clientY)
+    const local = localForLayer(overlay, event, layer)
     const startFrame = overlayFrameOf(layer)
     const handleEl = event.target instanceof HTMLElement
       ? event.target.closest('[data-handle]')
@@ -525,7 +409,7 @@ export function FlowOverlayAuthoringLayer({
     const gesture = overlayGestureRef.current
     const overlay = overlayRef.current
     if (!gesture || !overlay) return
-    const local = overlayLocalPoint(overlay, event.clientX, event.clientY)
+    const local = localForLayer(overlay, event, view.overlayLayers.find(layer => layer.selectionId === gesture.layerItemId))
     const rawNext = gesture.type === 'resize' && gesture.direction
       ? resizeWorldFrameFromHandle(
           gesture.startFrame,
@@ -542,6 +426,7 @@ export function FlowOverlayAuthoringLayer({
     const next = constrainFlowControllerOverlayFrame(
       view.overlayLayers.find((layer) => layer.selectionId === gesture.layerItemId),
       rawNext,
+      overlayViewportSize,
     )
     setOverlayPreview({ id: gesture.layerItemId, frame: next })
   }
@@ -554,7 +439,7 @@ export function FlowOverlayAuthoringLayer({
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId)
     }
-    const local = overlayLocalPoint(overlay, event.clientX, event.clientY)
+    const local = localForLayer(overlay, event, view.overlayLayers.find(layer => layer.selectionId === gesture.layerItemId))
     const rawNext = gesture.type === 'resize' && gesture.direction
       ? resizeWorldFrameFromHandle(
           gesture.startFrame,
@@ -571,6 +456,7 @@ export function FlowOverlayAuthoringLayer({
     const next = constrainFlowControllerOverlayFrame(
       view.overlayLayers.find((layer) => layer.selectionId === gesture.layerItemId),
       rawNext,
+      overlayViewportSize,
     )
     setOverlayPreview(null)
     commands.run(gesture.target, { kind: 'transform-overlay-frame', frame: next })
@@ -590,11 +476,10 @@ export function FlowOverlayAuthoringLayer({
 
   const overlayPlaneStyle = (zIndex: number): CSSProperties => ({
     position: 'absolute',
-    left: overlayTransform.stageRect.x,
-    top: overlayTransform.stageRect.y,
-    width: STAGE_VIEWPORT_WIDTH,
-    height: STAGE_VIEWPORT_HEIGHT,
-    transform: `scale(${overlayTransform.scale})`,
+    left: 0,
+    top: 0,
+    width: overlayViewportSize.width,
+    height: overlayViewportSize.height,
     transformOrigin: '0 0',
     zIndex,
     pointerEvents: 'none',
@@ -632,7 +517,8 @@ export function FlowOverlayAuthoringLayer({
         aria-label={interactive ? layer.item.label || '浮层' : undefined}
         {...(inertVisual ? { inert: true } : {})}
         style={{
-          ...overlayCardStyle(layer, preview, paperScrollTop),
+          ...overlayCardStyle(layer, preview, paperScrollTop, paperOrigin, paperScrollLeft, viewPan),
+          opacity: layer.item.opacity,
           pointerEvents: interactive ? 'auto' : 'none',
         }}
         onPointerDown={interactive ? (event) => beginOverlayGesture(event, layer) : undefined}
@@ -645,7 +531,7 @@ export function FlowOverlayAuthoringLayer({
             item={layer.item as LayerItem}
             frame={overlayFrameOf(layer)}
             rotation={layer.item.rotation}
-            canvas={{ width: CANVAS_WIDTH, height: CANVAS_HEIGHT }}
+            canvas={overlayViewportSize}
             getRenderedStageBounds={() => {
               const bounds = overlayRef.current?.getBoundingClientRect()
               return {
@@ -684,6 +570,9 @@ export function FlowOverlayAuthoringLayer({
             layer,
             overlayPreview?.id === layer.selectionId ? overlayPreview.frame : null,
             paperScrollTop,
+            paperOrigin,
+            paperScrollLeft,
+            viewPan,
           ),
           pointerEvents: readOnly ? 'none' : 'auto',
           background: 'transparent',
@@ -760,6 +649,10 @@ export function FlowOverlayAuthoringLayer({
       >
         {overlayLayers.map(renderSelectionChrome)}
       </div>
+      {(selectedOverlayKey || viewPan.x !== 0 || viewPan.y !== 0) && <div style={{ position: 'absolute', top: 8, right: 8, zIndex: 6, display: 'flex', gap: 6 }}>
+        {selectedOverlayKey && <button type="button" className="secondary-button" onClick={revealSelection}>定位选中内容</button>}
+        {(viewPan.x !== 0 || viewPan.y !== 0) && <button type="button" className="secondary-button" onClick={() => onViewPanChange?.({ x: 0, y: 0 })}>回到文档原位</button>}
+      </div>}
     </>
   )
 }

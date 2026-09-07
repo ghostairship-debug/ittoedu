@@ -22,6 +22,8 @@ Course Project V9、Published Course V2、Runtime API 2/3、Component API 4 继�
 
 ## 实现 DAG
 
+2026-09-07当前路线：在现有1.8上插入[三表面整合与收口](../THREE_SURFACE_ARCHITECTURE_INTEGRATION_PLAN.md)，独立阻断可先修，1.9–2.0新增能力等待S3后继续。新增15个1.8节点及发布依赖已同步manifest与1.8规格；U01–U11/R01–R09逐项追溯见[原整改方案](1.8/USABILITY_REPAIR_PLAN.md)。Flow几何政策D1待Owner决定，其他独立包不等待该选择；不新增V10、MCP或第二工程/历史。
+
 ```mermaid
 flowchart LR
     B["v1.1.1 已签署维护基线"]
@@ -31,8 +33,10 @@ flowchart LR
     R15["1.5 素材、导入、QA"]
     R16["1.6 本地 CLI 会话内核（隐藏）"]
     R17["1.7 生成与本地编辑（隐藏）"]
-    R18["1.8 CLI 直连、Skills 与基础聊天（隐藏）"]
-    R19["1.9 会话恢复、删除与 Dogfood（隐藏）"]
+    R18["1.8 CLI 直连、Skills 与基础聊天（入口默认显示）"]
+    I18["1.8 三表面整合工程结束门"]
+    S3["S3：整合 + 当前三CLI + 既有PPTX + 教师签署"]
+    R19["1.9 会话恢复、删除与 Dogfood（新增暂缓，入口延续可见）"]
     R20["2.0 内部生产 AI 作者工作流"]
     O["OpenMAIC 可选旁支"]
 
@@ -47,7 +51,7 @@ flowchart LR
     R14 --> R17
     R15 --> R17
     R16 --> R17
-    R17 --> R18 --> R19 --> R20
+    R17 --> R18 --> I18 --> S3 --> R19 --> R20
     R14 -. optional .-> O
 ```
 
@@ -63,8 +67,8 @@ flowchart LR
 | 1.5 | [README](1.5/README.md) | 共享 WorkspaceIdentity、素材、PPTX 导入、风格 Remix 与内容 QA | 无 AI | `v1.5.0` 源码 | S2 工具与素材 |
 | 1.6 | [README](1.6/README.md) | Codex / Claude / OpenCode 本地 CLI 会话内核 | 默认隐藏 | `v1.6.0-rc.N` 源码 | S3 在 1.8 统一签署 |
 | 1.7 | [README](1.7/README.md) | 单页、整课、局部编辑与动态载体的自动生成 / 修复 | 默认隐藏 | `v1.7.0-rc.N` 源码 | S3 在 1.8 统一签署 |
-| 1.8 | [README](1.8/README.md) | CLI 直连、Skills、基础聊天、引用与 Stop/Undo | 默认隐藏 | `v1.8.0` 源码 | S3 CLI 生成与基础聊天 |
-| 1.9 | [README](1.9/README.md) | 会话恢复、迁移、删除与真实课例持续使用 | 默认隐藏 | `v1.9.0-rc.N` 源码 | S4 在 2.0 统一签署 |
+| 1.8 | [README](1.8/README.md) | 保留CLI直连/Skills/聊天，完成三表面整合、包修改和播放观察收口 | 默认显示聊天入口 | `v1.8.0` 源码 | S3 整合及CLI生成与基础聊天 |
+| 1.9 | [README](1.9/README.md) | 会话恢复、迁移、删除与真实课例持续使用 | 默认显示聊天入口 | `v1.9.0-rc.N` 源码 | S4 在 2.0 统一签署 |
 | 2.0 | [README](2.0/README.md) | 三种 CLI 的内部生产 AI 作者工作流和数据边界 | 内部正式开放 | `v2.0.0` 源码 + 固定课例离线 HTML | S4 AI 产品 |
 
 `v1.1.0` 标签保持不可变；`v1.1.1` 已经 Flow 文字格式维护闭环与 Owner 验收创建新源码标签，并重新固定同一课例的离线 HTML。1.2–1.9 不发布离线 HTML，2.0 恢复固定课例离线 HTML；本路线不发布安装器。无后缀版本号绝不同时表示“仅自动化通过”和“Owner 已验收”。
@@ -74,7 +78,7 @@ PPTX 人工导入的跨版本增强与发布节点见 [能力增强计划](../PP
 ## 跨版本接口与数据合同
 
 - **Native 内容**：Table、Chart 与 Slide-only input 是获批的 V9 Native strict 窄增量；Published Course V2 只做匹配读取与运行所需的窄增量。input 的提交值先原子写入已声明状态键再求规则条件，只映射 PPTX；Flow 作者浮层进入一份连续 DOCX。线条和背景沿用既有对象 / Surface 所有权，不另建旁路状态。
-- **Chart/Table 与取色版本边界**：1.2 闭合真实 Native 作者同步、图表选择入口和共享常用色/连续调色；1.3 Chart 的 Flow 正文与 Spatial world 合同和 consumer 已落地。2026-09-06 补充 Table 的独立合同、共享编辑、Flow 正文和 Spatial world delivery 四个必选节点，当前待实现；沿用既有 FlowTableBlock，不把表格问题归结为仅需开放按钮。两个 Chart 和两个 Table delivery 都进入 S1 依赖闭包，1.4 对应 Surface tools 显式承接。项目色板复用 `designTokens.colors`，通过明确范围预览/应用配色；不提前创建持久化主题绑定。Table 合同及对应 consumer 落地前保持现有入口限制。
+- **Chart/Table 与取色版本边界**：1.2闭合真实Native同步、图表入口和共享取色；1.3的Flow正文及Spatial world Chart/Table已有正式分支和consumer，沿用FlowTableBlock，不能按旧“待实现”文字重新限制当前能力。两个Chart和两个Table delivery保留原S1依赖和验证边界，1.4工具显式承接。当前是否支持以Schema/consumer和有效证据为准，整合不扩Flow overlay/Spatial shared/global的有效域。项目色板复用`designTokens.colors`，不提前创建持久主题绑定。
 - **1.2 复审修复门**：当前收尾按 [1.2 执行指南](1.2/EXECUTION_GUIDE.md) 闭合作者增量、正确 owner/state 写入、input 及表格/图表/颜色的已确认可见缺口；未通过的共享能力不能被 1.3 图表/色板 delivery 当作完成前置。1.3 无关节点仍可按自己的依赖推进，S1 不替代 1.2 基础修复及 engineering candidate 验证。
 - **Recipe 互动**：分类使用声明式“选中项目→选中目标组”；排序的真实可见重排使用当前 Component 载体并公开可编辑参数，不扩拖放/放置触发器或顺序动作，也不要求先完成通用组件化。
 - **Authoring target**：所有写操作解析为 canonical target，至少包含工程稳定身份、Surface、容器、对象 / 内容路径与版本前提；工具回执必须报告实际落点和新版本。

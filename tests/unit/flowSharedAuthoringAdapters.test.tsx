@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { locateCourseLayer } from '@/renderer/course/effectiveLayerCommands'
 import { getEffectiveCourseLayerOrder } from '@/shared/courseProjectModel'
 import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
@@ -25,6 +26,7 @@ import {
 import {
   FLOW_AUDIO_OVERLAY_REASON,
   FLOW_CONTROLLER_NOT_FOOTER_REASON,
+  FLOW_COMPONENT_CONVERSION_UNSUPPORTED_REASON,
   FLOW_DOCUMENT_LAYER_REASON,
   FLOW_EMBED_COMPONENT_FALLBACK_REASON,
   FLOW_EMPTY_ASSET_REASON,
@@ -55,6 +57,18 @@ import {
   setFlowOverlayVisibleAtLocation,
 } from '@/renderer/course/flowSharedAuthoringAdapters'
 import {
+  FLOW_COMPONENT_CONVERSION_CANCELLED_REASON,
+  prepareFlowOverlayComponentConversion,
+} from '@/renderer/course/flowComponentConversion'
+import { buildFlowEditorView, captureFlowEditorAuthoringTarget } from '@/renderer/course/flowEditorView'
+import { applyEditorTransactionStep, createEditorTransactionStep } from '@/renderer/authoring/editorTransaction'
+import type { HistoryResourceState } from '@/renderer/store/courseResourceState'
+import { useEditorStore } from '@/renderer/store/editorStore'
+import { parseComponentPackageFiles } from '@/renderer/components/importComponentPackage'
+import { componentPackageMeta } from '@/renderer/components/editableComponentPackage'
+import { FlowPropertiesPanel } from '@/renderer/ui/properties/FlowPropertiesPanel'
+import { buildFlowPropertiesOwner } from '@/renderer/ui/properties/FlowPropertiesContextBuilder'
+import {
   FLOW_DOCUMENT_HIT_NOT_OVERLAY_REASON,
   resolveFlowOverlayAuthoringTarget,
   selectFlowAuthoringFromOverlayHit,
@@ -63,6 +77,8 @@ import { projectFlowUnifiedOverlays } from '@/renderer/course/flowOverlayProject
 
 const NOW = '2026-08-17T17:10:00.000Z'
 const PACKAGE_SHA = 'cd'.repeat(32)
+const ONE_PIXEL_PNG_BASE64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6ZAAAAABJRU5ErkJggg=='
+const ONE_PIXEL_PNG = Uint8Array.from(atob(ONE_PIXEL_PNG_BASE64), (char) => char.charCodeAt(0))
 
 const componentManifest: ComponentManifest = {
   schemaVersion: 4,
@@ -79,6 +95,15 @@ const componentManifest: ComponentManifest = {
   assets: {},
   defaultProps: { title: '默认标题' },
   editor: { properties: [{ key: 'title', label: '标题', type: 'text' }] },
+}
+
+function componentPackageData() {
+  return parseComponentPackageFiles({
+    'manifest.json': new TextEncoder().encode(JSON.stringify(componentManifest)),
+    'runtime.js': new TextEncoder().encode(
+      `CoursewareComponent.define({id:'${componentManifest.id}',runtimeApiVersion:4,create(ctx){const el=document.createElement('div');el.textContent='flow';ctx.dom.root.append(el);return{destroy(){el.remove()}}}})`,
+    ),
+  })
 }
 
 function courseShell(): Omit<CourseProjectDocument, 'locations' | 'startLocationId' | 'surfaces'> {
@@ -247,6 +272,58 @@ function engineIds(project: CourseProjectDocument, locationId = 'h1') {
     surfaceId: 'flow',
     locationId,
   }).map((entry) => entry.item.layerItemId)
+}
+
+function componentConversionFixture(withFallback: boolean) {
+  const base = createFlowProject()
+  const surface = flowOf(base)
+  surface.blocks.push({
+    id: 'section-target',
+    type: 'section',
+    title: '指定分节',
+    collapsedByDefault: false,
+    blocks: [{ id: 'section-paragraph', type: 'paragraph', text: '分节正文' }],
+  })
+  if (withFallback) {
+    base.assets['asset-fallback'] = {
+      ...base.assets['asset-fallback']!,
+      byteLength: ONE_PIXEL_PNG.byteLength,
+      width: 1,
+      height: 1,
+    }
+  }
+  syncFlowCourseLocations(base, surface.id)
+  const inserted = insertFlowSharedComponent(
+    courseProjectDocumentSchema.parse(base),
+    selectFlowEditorBlock(base, 'h1', 'p-body'),
+    {
+      packageId: componentManifest.id,
+      manifest: componentManifest,
+      ...(withFallback ? { staticFallbackAssetId: 'asset-fallback' } : {}),
+      id: 'overlay-conversion-target',
+    },
+    { now: NOW },
+  )
+  if (!inserted.ok || !inserted.nextDocument || !inserted.selection) {
+    throw new Error(inserted.reason ?? 'fixture component insertion failed')
+  }
+  const project = inserted.nextDocument
+  const view = buildFlowEditorView({ project, locationId: 'h1' })
+  const target = captureFlowEditorAuthoringTarget({
+    view,
+    sessionToken: {
+      locationId: 'h1',
+      surfaceType: 'flow',
+      revision: project.revision,
+      generation: 4,
+    },
+    target: { kind: 'overlay', layerItemId: 'overlay-conversion-target' },
+  })
+  const resources: HistoryResourceState = {
+    componentPackages: {},
+    assetFiles: withFallback ? { 'asset-fallback': ONE_PIXEL_PNG } : {},
+  }
+  return { project, target, resources }
 }
 
 function idleSelection(): FlowEditorSelection {
@@ -498,6 +575,289 @@ describe('Flow shared authoring adapters', () => {
     )
     expect(embedShape.ok).toBe(false)
     expect(embedShape.reason).toBe(FLOW_SHAPE_EMBED_REASON)
+  })
+
+  it('reuses a byte-valid fallback and commits the exact nested body destination atomically', async () => {
+    const { project, target, resources } = componentConversionFixture(true)
+    const admit = vi.fn()
+    const plan = await prepareFlowOverlayComponentConversion({
+      project,
+      resources,
+      target,
+      destination: { parentBlockId: 'section-target', index: 1, wrap: 'left' },
+      now: NOW,
+    }, undefined, { admit })
+
+    expect(admit).not.toHaveBeenCalled()
+    expect(plan.resourceChanges).toEqual({})
+    const step = createEditorTransactionStep(project, plan)
+    expect(step).not.toBeNull()
+    const applied = applyEditorTransactionStep({ document: project, resources }, step!, 'forward')
+    const surface = flowOf(applied.document)
+    const section = surface.blocks.find((block) => block.id === 'section-target')
+    expect(section?.type).toBe('section')
+    if (!section || section.type !== 'section') throw new Error('missing section')
+    expect(section.blocks.map((block) => block.id)).toEqual([
+      'section-paragraph',
+      plan.selectionHint!.itemIds[0],
+    ])
+    const converted = section.blocks[1]
+    expect(converted).toMatchObject({
+      type: 'component',
+      component: { packageId: componentManifest.id, version: componentManifest.version },
+      props: componentManifest.defaultProps,
+      staticFallbackAssetId: 'asset-fallback',
+      wrap: 'left',
+    })
+    expect(surface.surfaceLayerItems.some((entry) => (
+      entry.item.layerItemId === 'overlay-conversion-target'
+    ))).toBe(false)
+    expect(applied.resources.assetFiles['asset-fallback']).toEqual(ONE_PIXEL_PNG)
+  })
+
+  it('routes the explicitly chosen UI destination and wrap through the asynchronous conversion owner', async () => {
+    const { project, target } = componentConversionFixture(false)
+    const selection = selectFlowOverlay(project, 'h1', [target.itemId])
+    const convertOverlayComponent = vi.fn<NonNullable<Parameters<typeof buildFlowPropertiesOwner>[0]['convertOverlayComponent']>>(async () => ({ ok: true as const }))
+    const owner = buildFlowPropertiesOwner({
+      view: buildFlowEditorView({ project, locationId: 'h1' }),
+      selection,
+      assets: project.assets,
+      textEdit: null,
+      authoringToken: {
+        locationId: 'h1',
+        surfaceType: 'flow',
+        revision: project.revision,
+        generation: target.sessionGeneration,
+      },
+      course: project,
+      runIntent: vi.fn(() => ({ ok: true as const })),
+      convertOverlayComponent,
+      reportError: vi.fn(),
+    })
+    expect(owner.status).toBe('active')
+    if (owner.status !== 'active' || !owner.context) throw new Error('missing properties context')
+    render(<FlowPropertiesPanel context={owner.context} />)
+
+    fireEvent.change(screen.getByLabelText('正文位置'), {
+      target: { value: JSON.stringify(['section-target', 0]) },
+    })
+    fireEvent.change(screen.getByLabelText('文字环绕'), { target: { value: 'right' } })
+    fireEvent.click(screen.getByTestId('flow-overlay-to-document'))
+
+    await waitFor(() => expect(convertOverlayComponent).toHaveBeenCalledOnce())
+    expect(convertOverlayComponent.mock.calls[0]?.[1]).toEqual({
+      parentBlockId: 'section-target',
+      index: 0,
+      wrap: 'right',
+    })
+    expect(convertOverlayComponent.mock.calls[0]?.[2]).toBeInstanceOf(AbortSignal)
+  })
+
+  it('captures a missing fallback through shared admission and adds PNG bytes in the same transaction', async () => {
+    const { project, target, resources } = componentConversionFixture(false)
+    const admit = vi.fn(async (_project, _resources, targets, _signal, captureInstances) => {
+      expect(targets).toEqual([{
+        locationId: 'h1',
+        stateId: null,
+        instanceIds: ['overlay-conversion-target'],
+      }])
+      expect(captureInstances).toBe(true)
+      return [{
+        instanceId: 'overlay-conversion-target',
+        locationId: 'h1',
+        width: 1,
+        height: 1,
+        dataUrl: `data:image/png;base64,${ONE_PIXEL_PNG_BASE64}`,
+      }]
+    })
+    const plan = await prepareFlowOverlayComponentConversion({
+      project,
+      resources,
+      target,
+      destination: { parentBlockId: null, index: 1 },
+      now: NOW,
+    }, undefined, { admit })
+
+    expect(admit).toHaveBeenCalledOnce()
+    const createdAssetId = plan.resourceChanges.assetFileChanges?.[0]?.assetId
+    expect(createdAssetId).toMatch(/^component-capture-/)
+    expect(plan.nextDocument.assets[createdAssetId!]).toMatchObject({
+      id: createdAssetId,
+      mimeType: 'image/png',
+      byteLength: ONE_PIXEL_PNG.byteLength,
+      width: 1,
+      height: 1,
+    })
+    const bodyBlock = flowOf(plan.nextDocument).blocks[1]
+    expect(bodyBlock).toMatchObject({
+      type: 'component',
+      staticFallbackAssetId: createdAssetId,
+    })
+    expect(plan.resourceChanges.assetFileChanges?.[0]?.after).toEqual(ONE_PIXEL_PNG)
+  })
+
+  it('keeps project and resources unchanged on capture failure or cancellation after a late result', async () => {
+    const failed = componentConversionFixture(false)
+    const beforeProject = structuredClone(failed.project)
+    const beforeResources = structuredClone(failed.resources)
+    await expect(prepareFlowOverlayComponentConversion({
+      project: failed.project,
+      resources: failed.resources,
+      target: failed.target,
+      destination: { parentBlockId: null, index: 0 },
+    }, undefined, { admit: async () => { throw new Error('真实实例捕获失败') } }))
+      .rejects.toThrow('真实实例捕获失败')
+    expect(failed.project).toEqual(beforeProject)
+    expect(failed.resources).toEqual(beforeResources)
+
+    const cancelled = componentConversionFixture(false)
+    const cancelledProjectBefore = structuredClone(cancelled.project)
+    const cancelledResourcesBefore = structuredClone(cancelled.resources)
+    let finishAdmission!: (captures: Array<{
+      instanceId: string
+      locationId: string
+      width: number
+      height: number
+      dataUrl: string
+    }>) => void
+    const admit = vi.fn(() => new Promise<readonly any[]>((resolve) => {
+      finishAdmission = resolve
+    }))
+    const controller = new AbortController()
+    const pending = prepareFlowOverlayComponentConversion({
+      project: cancelled.project,
+      resources: cancelled.resources,
+      target: cancelled.target,
+      destination: { parentBlockId: null, index: 0 },
+    }, controller.signal, { admit })
+    controller.abort()
+    finishAdmission([{
+      instanceId: 'overlay-conversion-target',
+      locationId: 'h1',
+      width: 1,
+      height: 1,
+      dataUrl: `data:image/png;base64,${ONE_PIXEL_PNG_BASE64}`,
+    }])
+    await expect(pending).rejects.toThrow(FLOW_COMPONENT_CONVERSION_CANCELLED_REASON)
+    expect(cancelled.project).toEqual(cancelledProjectBefore)
+    expect(cancelled.resources).toEqual(cancelledResourcesBefore)
+  })
+
+  it('rejects layer-only state, references, and non-expressible body wrap instead of dropping them', async () => {
+    const framed = componentConversionFixture(false)
+    const item = flowOf(framed.project).surfaceLayerItems.find((entry) => (
+      entry.item.layerItemId === framed.target.itemId
+    ))!.item
+    item.rotation = 12
+    const admit = vi.fn()
+    await expect(prepareFlowOverlayComponentConversion({
+      project: framed.project,
+      resources: framed.resources,
+      target: framed.target,
+      destination: { parentBlockId: null, index: 0 },
+    }, undefined, { admit })).rejects.toThrow(FLOW_COMPONENT_CONVERSION_UNSUPPORTED_REASON)
+    expect(admit).not.toHaveBeenCalled()
+
+    const referenced = componentConversionFixture(false)
+    referenced.project.globalInteractions.push({
+      id: 'component-click',
+      enabled: true,
+      trigger: { type: 'node.click', nodeId: referenced.target.itemId },
+      conditions: [],
+      actions: [{
+        id: 'component-next',
+        start: 'after-previous',
+        delayMs: 0,
+        action: { type: 'scene.next' },
+      }],
+    })
+    await expect(prepareFlowOverlayComponentConversion({
+      project: referenced.project,
+      resources: referenced.resources,
+      target: referenced.target,
+      destination: { parentBlockId: null, index: 0 },
+    }, undefined, { admit })).rejects.toThrow('仍被 globalInteractions.0.trigger.nodeId 引用')
+
+    const body = createFlowProject()
+    const bodyComponent = flowOf(body).blocks.find((block) => block.id === 'component-inline')
+    if (!bodyComponent || bodyComponent.type !== 'component') throw new Error('missing body component')
+    bodyComponent.wrap = 'right'
+    const reverse = convertFlowComponentBlockToOverlay(
+      body,
+      selectFlowEditorBlock(body, 'h1', bodyComponent.id),
+    )
+    expect(reverse.ok).toBe(false)
+    expect(reverse.reason).toContain('文字环绕不能由浮层表达')
+    expect(flowOf(body).blocks).toContain(bodyComponent)
+  })
+
+  it('rejects a late host capture after the active revision changes without committing conversion resources', async () => {
+    const fixture = componentConversionFixture(false)
+    const packageData = componentPackageData()
+    fixture.project.componentPackages[componentManifest.id] = componentPackageMeta(packageData)
+    let finishAdmission: ((value: unknown) => void) | null = null
+    vi.stubGlobal('desktopAPI', {
+      dynamicAdmission: vi.fn(() => new Promise((resolve) => {
+        finishAdmission = resolve
+      })),
+    })
+    try {
+      useEditorStore.getState().loadCourseProject(
+        fixture.project,
+        'C:\\flow-conversion.h5lesson',
+        {},
+        { [componentManifest.id]: packageData },
+      )
+      useEditorStore.getState().applyFlowSelection(selectFlowOverlay(
+        fixture.project,
+        'h1',
+        [fixture.target.itemId],
+      ))
+      const state = useEditorStore.getState()
+      const document = state.flowSession!.history.present
+      const target = captureFlowEditorAuthoringTarget({
+        view: buildFlowEditorView({ project: document, locationId: 'h1' }),
+        sessionToken: state.courseAuthoringSession!.token,
+        target: { kind: 'overlay', layerItemId: fixture.target.itemId },
+      })
+      const pending = state.convertFlowOverlayComponentAtTarget(
+        target,
+        { parentBlockId: 'section-target', index: 0 },
+      )
+      await vi.waitFor(() => expect(finishAdmission).not.toBeNull())
+      useEditorStore.getState().addTextNode()
+      const deliberatelyChanged = useEditorStore.getState().flowSession!.history.present
+      finishAdmission!({
+        ok: true,
+        message: 'captured',
+        captures: [{
+          instanceId: fixture.target.itemId,
+          locationId: 'h1',
+          width: 1,
+          height: 1,
+          dataUrl: `data:image/png;base64,${ONE_PIXEL_PNG_BASE64}`,
+        }],
+      })
+      const receipt = await pending
+      expect(receipt.ok).toBe(false)
+      expect(receipt.reason).toContain('工程内容已改变')
+      const current = useEditorStore.getState().flowSession!.history.present
+      expect(current.revision).toBe(deliberatelyChanged.revision)
+      expect(flowOf(current).surfaceLayerItems.some((entry) => (
+        entry.item.layerItemId === fixture.target.itemId
+      ))).toBe(true)
+      expect(flowOf(current).blocks.some((block) => (
+        block.type === 'component' && block.props.title === '默认标题'
+      ))).toBe(false)
+      expect(Object.keys(current.assets).some((id) => id.startsWith('component-capture-'))).toBe(false)
+      expect(Object.keys(useEditorStore.getState().assetFiles).some((id) => (
+        id.startsWith('component-capture-')
+      ))).toBe(false)
+    } finally {
+      vi.unstubAllGlobals()
+      useEditorStore.getState().createNewProject()
+    }
   })
 
   it('routes delete and interaction with R4-A selection, and enters real global scope', () => {

@@ -1,4 +1,5 @@
 import { generationRequestSchema, type GenerationCandidate, type GenerationRequest } from '../../../shared/generationContract'
+import type { GenerationFormatError } from '../../../shared/generationResult'
 
 function ordered(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(ordered)
@@ -26,9 +27,12 @@ export function generationRepairMadeProgress(before: GenerationCandidate, after:
   return JSON.stringify(ordered(normalize(before))) !== JSON.stringify(ordered(normalize(after)))
 }
 
-export function captureGenerationRepair(request: GenerationRequest, candidate: GenerationCandidate, finding: string): GenerationRequest {
+export function captureGenerationRepair(request: GenerationRequest, rejected: GenerationCandidate | GenerationFormatError, finding: string): GenerationRequest {
+  if (request.repair) throw new Error('本轮的唯一一次修复机会已使用')
+  if (rejected.requestId !== request.requestId) throw new Error('修复结果不属于原请求')
   return generationRequestSchema.parse({ ...structuredClone(request), requestId: crypto.randomUUID(),
+    expectedResult: 'candidate', repair: { logicalRequestId: request.requestId, attempt: 1 },
     context: { ...(request.context && typeof request.context === 'object' && !Array.isArray(request.context) ? request.context : { snapshot: request.context }), repair: { budget: 1, previousRequestId: request.requestId,
-      candidate, finding: finding.slice(0, 4000),
+      ...('kind' in rejected ? { formatError: rejected } : { candidate: rejected }), finding: finding.slice(0, 4000),
       instruction: '只修复此候选的已报告问题，保持原任务、范围和不可变工程基线。仍须通过同一宿主检查；不要宣称已修改工程。' } } })
 }

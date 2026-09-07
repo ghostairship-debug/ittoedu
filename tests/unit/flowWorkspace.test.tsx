@@ -509,6 +509,22 @@ describe('FlowWorkspace paper', () => {
     expect(chrome.querySelector('[data-handle]')).not.toBeNull()
   })
 
+  it('reveals selected offscreen overlays and restores the document without changing authored frames/history', () => {
+    const project = createFlowProject()
+    project.globalLayerItems.find(entry => entry.item.layerItemId === 'global-overlay')!.item.frame = { mode: 'absolute', x: 1100, y: 700, width: 200, height: 80 }
+    const before = structuredClone(project)
+    const selection = selectFlowOverlay(project, 'h1', ['global-overlay'], 'global')
+    const { onProjectChange } = renderPaper(project, selection)
+    expect(screen.getByTestId('flow-layer-card-global-overlay')).toHaveStyle({ left: '1064px', top: '624px' })
+    expect(screen.getByTestId('flow-workspace-scroll')).toHaveStyle({ transform: 'translate(-36px, -76px)' })
+    expect(onProjectChange).not.toHaveBeenCalled()
+    expect(project).toEqual(before)
+    fireEvent.click(screen.getByRole('button', { name: '回到文档原位' }))
+    expect(screen.getByTestId('flow-layer-card-global-overlay')).toHaveStyle({ left: '1100px', top: '700px' })
+    expect(screen.getByTestId('flow-workspace-scroll')).toHaveStyle({ transform: 'translate(0px, 0px)' })
+    expect(onProjectChange).not.toHaveBeenCalled()
+  })
+
   it('keeps the original pointer gesture alive when selecting an overlay rerenders its chrome', () => {
     const project = createFlowProject()
     const overlay = project.globalLayerItems.find(
@@ -744,7 +760,7 @@ describe('FlowWorkspace paper', () => {
       expect(editor).toHaveStyle({
         display: 'block',
         width: '100%',
-        minHeight: '1.4em',
+        minHeight: '1lh',
         userSelect: 'text',
         cursor: 'text',
       })
@@ -756,7 +772,7 @@ describe('FlowWorkspace paper', () => {
       editor.textContent = '首'
       fireEvent.input(editor)
       expect(rendered.onTextEditChange.mock.calls.at(-1)?.[0]?.draft).toMatchObject({ text: '首' })
-      expect(editor).toHaveStyle({ display: 'block', width: '100%', minHeight: '1.4em' })
+      expect(editor).toHaveStyle({ display: 'block', width: '100%', minHeight: '1lh' })
       rendered.unmount()
     }
   })
@@ -909,13 +925,13 @@ describe('FlowWorkspace paper', () => {
     }
   })
 
-  it('reserves the complete below-toolbar footprint before neighboring blocks', () => {
+  it('keeps body geometry stable when the contextual toolbar opens', () => {
     const project = createFlowProject()
     const headingSelection = selectFlowEditorBlocks(project, 'h1', ['h1'])
     const headingRender = renderPaper(project, headingSelection)
     expect(screen.getByTestId('flow-block-context-toolbar'))
       .toHaveAttribute('data-flow-toolbar-placement', 'below')
-    expect(screen.getByTestId('flow-block-h1')).toHaveStyle({ marginBottom: '72px' })
+    expect(screen.getByTestId('flow-block-h1')).toHaveStyle({ marginBottom: '12px' })
     expect(screen.getByTestId('flow-block-p-body')).toHaveStyle({ marginBottom: '12px' })
     headingRender.unmount()
 
@@ -928,7 +944,7 @@ describe('FlowWorkspace paper', () => {
     media.wrap = 'left'
     const mediaSelection = selectFlowEditorBlocks(wrappedProject, 'h1', ['media-1'])
     renderPaper(wrappedProject, mediaSelection)
-    expect(screen.getByTestId('flow-block-media-1')).toHaveStyle({ marginBottom: '68px' })
+    expect(screen.getByTestId('flow-block-media-1')).toHaveStyle({ marginBottom: '8px' })
   })
 
   it('keeps the formula body target stable across selection rerender and opens on a second real click', () => {

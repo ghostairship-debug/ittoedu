@@ -1,3 +1,16 @@
+import { PlaybackViewSession } from '../playbackViewSession'
+import {
+  adjacentPlaybackTarget,
+  buildCoursePlaybackSequence,
+  playbackNavigationProgress,
+  playbackSceneKey,
+  type CoursePlaybackScene,
+  type CoursePlaybackStep,
+  type PlaybackDirection,
+  type PlaybackNavigationLevel,
+  type PlaybackNavigationProgress,
+  type PlaybackNavigationViewPort,
+} from '../navigation/coursePlaybackSequence'
 import { CANVAS_HEIGHT, CANVAS_WIDTH } from '../../shared/constants'
 import type { TeacherControllerAction } from '../../shared/contracts/native-v1'
 import type { CourseLocation } from '../../shared/courseProjectTypes'
@@ -86,6 +99,8 @@ interface PublishedInteractionHostFactoryOptions {
   onInteractionReady?: (surfaceId: string) => void
   /** Internal course/session authority shared by every Mixed surface host. */
   teacherControllerSession?: TeacherControllerRuntimeSessionStore
+  playbackView?: PlaybackViewSession
+  navigation?: PlaybackNavigationViewPort
   /** Internal route for a controller course.restart action. */
   restartCourse?: () => Promise<boolean>
   /** Internal route for a Slide controller scene.replay action. */
@@ -181,6 +196,8 @@ function createPublishedSurfaceHostInternal(
       onInteractionInvalidated: () => options.onInteractionInvalidated?.(surface.id),
       onInteractionReady: () => options.onInteractionReady?.(surface.id),
       teacherControllerSession: options.teacherControllerSession,
+      navigation: options.navigation,
+      playbackView: options.playbackView,
       replayScene: options.replayScene,
       executeTeacherControllerAction: async (action) => {
         if (options.executeTeacherControllerAction) {
@@ -209,6 +226,8 @@ function createPublishedSurfaceHostInternal(
       onInteractionInvalidated: () => options.onInteractionInvalidated?.(surface.id),
       onInteractionReady: () => options.onInteractionReady?.(surface.id),
       teacherControllerSession: options.teacherControllerSession,
+      navigation: options.navigation,
+      playbackView: options.playbackView,
       restartCourse: options.restartCourse,
       replayScene: options.replayScene,
       executeTeacherControllerAction: options.executeTeacherControllerAction,
@@ -231,6 +250,8 @@ function createPublishedSurfaceHostInternal(
       onInteractionInvalidated: () => options.onInteractionInvalidated?.(surface.id),
       onInteractionReady: () => options.onInteractionReady?.(surface.id),
       teacherControllerSession: options.teacherControllerSession,
+      navigation: options.navigation,
+      playbackView: options.playbackView,
       restartCourse: options.restartCourse,
       replayScene: options.replayScene,
       executeTeacherControllerAction: options.executeTeacherControllerAction,
@@ -272,7 +293,7 @@ function defaultCourseStateServices(
   }
 }
 
-class FrozenPublishedCourseStateStore extends CourseStateStore {
+export class FrozenPublishedCourseStateStore extends CourseStateStore {
   constructor(declarations: PublishedCourseV2Payload['courseState']) {
     super()
     for (const declaration of declarations) {
@@ -289,6 +310,32 @@ class FrozenPublishedCourseStateStore extends CourseStateStore {
   override delete(_key: string): void {}
 
   override clear(): void {}
+}
+
+/**
+ * Read-only Published state/services shared by same-document authoring hosts.
+ * Runtime authoring can inspect declared course state and resolve assets, but
+ * cannot navigate or mutate the playback session while the editor is inert.
+ */
+export function createPublishedAuthoringReadonlyState(
+  payload: PublishedCourseV2Payload,
+  resolveAsset: (assetId: string) => string | undefined = (
+    (assetId) => payload.assets[assetId]?.url
+  ),
+): {
+  readonly courseState: CourseStateStore
+  readonly services: SurfacePlayerServices
+} {
+  const courseState = new FrozenPublishedCourseStateStore(payload.courseState)
+  return Object.freeze({
+    courseState,
+    services: Object.freeze({
+      navigate: () => undefined,
+      getCourseState: (key: string) => courseState.get(key),
+      setCourseState: () => undefined,
+      resolveAsset,
+    }),
+  })
 }
 
 function unsupportedPublishedAuthoringMessage(
@@ -399,11 +446,14 @@ export class PublishedCourseSession {
   readonly #hosts: readonly SurfaceHost[]
   readonly #globalRuntimeOwner: PublishedGlobalCanvasRuntimeOwner | null
   readonly #authoringCoordinator: PublishedAuthoringSessionCoordinator | null
+  readonly playbackView: PlaybackViewSession | null
   #slots: HTMLElement[] = []
   #destroyPromise: Promise<void> | null = null
   #publicReplayAbortController: AbortController | null = null
   #publicReplaySettlement: Promise<boolean> | null = null
   #navigationFeedback: HTMLElement | null = null
+  readonly #playbackScenes: readonly CoursePlaybackScene[]
+  readonly #navigationListeners = new Set<() => void>()
 
   constructor(
     player: CoursePlayer,
@@ -411,12 +461,83 @@ export class PublishedCourseSession {
     hosts: readonly SurfaceHost[],
     globalRuntimeOwner: PublishedGlobalCanvasRuntimeOwner | null = null,
     authoringCoordinator: PublishedAuthoringSessionCoordinator | null = null,
+    playbackView: PlaybackViewSession | null = null,
+    playback?: PublishedCourseV2Payload,
   ) {
+    this.playbackView = playbackView
     this.player = player
     this.navigator = navigator
     this.#hosts = hosts
     this.#globalRuntimeOwner = globalRuntimeOwner
     this.#authoringCoordinator = authoringCoordinator
+    this.#playbackScenes = playback ? buildCoursePlaybackSequence(playback) : []
+  }
+
+  listPlaybackScenes(): readonly CoursePlaybackScene[] { return this.#playbackScenes }
+
+  getPlaybackProgress(): PlaybackNavigationProgress | null {
+    const current = this.navigator.current
+    const host = this.#hosts.find(entry => entry.id === current?.surfaceId) as
+      (SurfaceHost & { getPublishedPresentationStateId?(): string | null }) | undefined
+    return playbackNavigationProgress(this.#playbackScenes, current?.locationId ?? null, host?.getPublishedPresentationStateId?.())
+  }
+
+  subscribeNavigation(listener: () => void): () => void {
+    this.#navigationListeners.add(listener)
+    return () => this.#navigationListeners.delete(listener)
+  }
+
+  protected notifyNavigationChanged(): void {
+    for (const listener of this.#navigationListeners) listener()
+  }
+
+  protected playbackTarget(level: PlaybackNavigationLevel, direction: PlaybackDirection): CoursePlaybackStep | null {
+    return adjacentPlaybackTarget(this.#playbackScenes, this.getPlaybackProgress(), level, direction)
+  }
+
+  protected canAcceptPlaybackNavigation(): boolean {
+    return !this.#destroyPromise && !this.navigator.hasPendingNavigation && this.navigator.current !== null
+  }
+
+  canExecuteNavigationAction(action: TeacherControllerAction): boolean {
+    if (!this.canAcceptPlaybackNavigation()) return false
+    if (action.type === 'step.next') return this.playbackTarget('step', 'next') !== null
+    if (action.type === 'step.previous') return this.playbackTarget('step', 'previous') !== null
+    if (action.type === 'scene.next') return this.playbackTarget('scene', 'next') !== null
+    if (action.type === 'scene.previous') return this.playbackTarget('scene', 'previous') !== null
+    return true
+  }
+
+  protected acceptsPlaybackTarget(_target: CoursePlaybackStep): boolean { return true }
+
+  requestPlaybackNavigation(level: PlaybackNavigationLevel, direction: PlaybackDirection): boolean {
+    const target = this.playbackTarget(level, direction)
+    if (!this.canAcceptPlaybackNavigation() || !target || !this.acceptsPlaybackTarget(target)) return false
+    void this.movePlayback(level, direction).catch(error => {
+      this.showNavigationFeedback(error instanceof Error ? error.message : '播放导航失败', this.navigator.current?.surfaceId ?? 'published-course')
+    })
+    return true
+  }
+
+  nextStep(): Promise<boolean> { return this.movePlayback('step', 'next') }
+  previousStep(): Promise<boolean> { return this.movePlayback('step', 'previous') }
+  nextScene(): Promise<boolean> { return this.movePlayback('scene', 'next') }
+  previousScene(): Promise<boolean> { return this.movePlayback('scene', 'previous') }
+
+  /** Overridden by the interactive session to retain guard and terminal arbitration. */
+  protected async movePlayback(level: PlaybackNavigationLevel, direction: PlaybackDirection): Promise<boolean> {
+    const target = this.playbackTarget(level, direction)
+    if (!target || !this.canAcceptPlaybackNavigation()) return false
+    await this.navigator.goToLocation(target.locationId)
+    this.notifyNavigationChanged()
+    return true
+  }
+
+  /** Authored-command has no fallback navigation. */
+  dispatchPresenterCommand(_command: PlaybackDirection): boolean { return false }
+
+  reportPresenterFeedback(message: string): void {
+    this.showNavigationFeedback(message, this.navigator.current?.surfaceId ?? 'published-course')
   }
 
   getHostMode(): PlayerHostMode {
@@ -454,12 +575,11 @@ export class PublishedCourseSession {
     return this.navigator.goToIndex(index)
   }
 
-  /** Synchronous acceptance guard for the public Slide replay entry. */
+  /** Synchronous acceptance guard for replaying the current scene occurrence. */
   canReplayScene(): boolean {
     return this.#publicReplayAbortController === null
       && !this.navigator.hasPendingNavigation
       && this.canForceReplayCurrentLocation()
-      && this.navigator.current?.kind === 'slide'
   }
 
   /** Force-remount only the current location without adding a history entry. */
@@ -532,6 +652,7 @@ export class PublishedCourseSession {
   }
 
   async mount(container: HTMLElement): Promise<void> {
+    const viewport = this.playbackView?.mount(container) ?? container
     for (const host of this.#hosts) {
       const slot = container.ownerDocument.createElement('div')
       slot.dataset.courseSurfaceSlot = host.id
@@ -539,12 +660,14 @@ export class PublishedCourseSession {
       slot.style.inset = '0'
       slot.style.width = '100%'
       slot.style.height = '100%'
-      slot.style.overflow = 'hidden'
+      slot.style.overflow = this.playbackView ? 'clip' : 'hidden'
       slot.style.visibility = 'hidden'
+      slot.style.opacity = '0'
+      slot.inert = true
       slot.style.pointerEvents = 'none'
       slot.style.zIndex = '0'
       slot.setAttribute('aria-hidden', 'true')
-      container.appendChild(slot)
+      viewport.appendChild(slot)
       this.#slots.push(slot)
       const mounted = await this.player.mountSurface(host.id, slot)
       if (!mounted.ok) throw mounted.failure?.error ?? new Error(`Failed to mount ${host.id}`)
@@ -583,12 +706,16 @@ export class PublishedCourseSession {
   }
 
   syncActiveSlot(surfaceId: string): void {
+    this.playbackView?.activate(surfaceId)
     for (const slot of this.#slots) {
       const active = slot.dataset.courseSurfaceSlot === surfaceId
       slot.style.visibility = active ? 'visible' : 'hidden'
+      // A spatial child can explicitly restore visibility after camera culling.
+      // Opacity hides the complete inactive subtree without breaking measurement.
+      slot.style.opacity = active ? '1' : '0'
       slot.style.pointerEvents = active && !this.#authoringCoordinator ? 'auto' : 'none'
       slot.style.zIndex = active ? '1' : '0'
-      slot.inert = this.#authoringCoordinator !== null
+      slot.inert = !active || this.#authoringCoordinator !== null
       if (active && !this.#authoringCoordinator) slot.removeAttribute('aria-hidden')
       else slot.setAttribute('aria-hidden', 'true')
     }
@@ -646,8 +773,10 @@ export class PublishedCourseSession {
     }
     this.#globalRuntimeOwner?.destroy()
     await this.player.destroy()
+    this.playbackView?.destroy()
     this.#navigationFeedback?.remove()
     this.#navigationFeedback = null
+    this.#navigationListeners.clear()
     for (const slot of this.#slots) slot.remove()
     this.#slots = []
   }
@@ -685,8 +814,9 @@ class PublishedInteractionCourseSession extends PublishedCourseSession {
     audio: AudioManager,
     audioEvents: CourseEventBus,
     staticCapture: boolean,
+    playbackView: PlaybackViewSession | null,
   ) {
-    super(player, navigator, hosts, globalRuntimeOwner)
+    super(player, navigator, hosts, globalRuntimeOwner, null, playbackView, payload)
     this.#hostsById = new Map(hosts.map((host) => [host.id, host]))
     this.#payload = payload
     this.#services = services
@@ -717,6 +847,8 @@ class PublishedInteractionCourseSession extends PublishedCourseSession {
         this.#goToScene(sceneId, targetStateId, signal)
       ),
       nextScene: (signal) => this.#nextScene(signal),
+      nextStep: signal => this.#navigateAdjacent('step', 'next', signal),
+      previousStep: signal => this.#navigateAdjacent('step', 'previous', signal),
       previousScene: (signal) => this.#previousScene(signal),
       replayScene: (signal) => this.#replayScene(signal),
       restartCourse: (signal) => this.#restartCourse(signal),
@@ -728,20 +860,15 @@ class PublishedInteractionCourseSession extends PublishedCourseSession {
     if (this.#staticCapture || this.#interactionDestroyStarted || this.#scenePicker) return
     this.#scenePicker = new ScenePickerOverlay({
       stage: container,
-      scenes: this.navigator.listCatalog().map((location) => ({
-        id: location.id,
-        name: location.label,
-      })),
-      onSelect: (locationId) => {
-        const target = this.#payload.locations.find((location) => location.id === locationId)
-        if (!target || !this.#canAcceptHostAction()) return
+      scenes: this.listPlaybackScenes().map(scene => ({ id: scene.id, name: scene.name, steps: scene.steps })),
+      onSelect: (id) => {
+        const scenes = this.listPlaybackScenes()
+        const step = scenes.find(scene => scene.id === id)?.steps[0]
+          ?? scenes.flatMap(scene => scene.steps).find(candidate => candidate.id === id)
+        if (!step || !this.#canAcceptHostAction()) return
         this.#launchHostAction(
           'scenePicker',
-          this.#navigateFromTeacherController(
-            target,
-            undefined,
-            new AbortController().signal,
-          ),
+          this.#navigatePlaybackTarget(step, new AbortController().signal, { bypassGuards: true }),
         )
       },
     })
@@ -782,23 +909,9 @@ class PublishedInteractionCourseSession extends PublishedCourseSession {
     return true
   }
 
-  requestHostNextScene(): boolean {
-    if (!this.#canAcceptHostAction()) return false
-    const current = this.navigator.current
-    const target = current ? this.navigator.listCatalog()[current.index + 1] : undefined
-    if (!target || !this.#acceptNavigationTarget(target.id, target.surfaceId)) return false
-    this.#launchHostAction('nextScene', this.#nextScene(new AbortController().signal))
-    return true
-  }
+  requestHostNextScene(): boolean { return this.requestPlaybackNavigation('scene', 'next') }
 
-  requestHostPreviousScene(): boolean {
-    if (!this.#canAcceptHostAction()) return false
-    const current = this.navigator.current
-    const target = current ? this.navigator.listCatalog()[current.index - 1] : undefined
-    if (!target || !this.#acceptNavigationTarget(target.id, target.surfaceId)) return false
-    this.#launchHostAction('previousScene', this.#previousScene(new AbortController().signal))
-    return true
-  }
+  requestHostPreviousScene(): boolean { return this.requestPlaybackNavigation('scene', 'previous') }
 
   requestHostReplayScene(): boolean {
     if (!this.#canAcceptHostAction() || !this.canForceReplayCurrentLocation()) return false
@@ -816,6 +929,13 @@ class PublishedInteractionCourseSession extends PublishedCourseSession {
   async executeTeacherControllerAction(
     action: TeacherControllerAction,
   ): Promise<boolean | undefined> {
+    if (action.type === 'step.next' || action.type === 'step.previous') {
+      return this.movePlayback('step', action.type === 'step.next' ? 'next' : 'previous')
+    }
+    if (action.type === 'scene.next' || action.type === 'scene.previous') {
+      const target = this.playbackTarget('scene', action.type === 'scene.next' ? 'next' : 'previous')
+      return target ? this.#navigatePlaybackTarget(target, new AbortController().signal, { bypassGuards: true }) : false
+    }
     if (action.type === 'audio.toggle-mute') {
       if (this.#staticCapture || this.#interactionDestroyStarted) return false
       this.#audio.toggleMuted()
@@ -823,7 +943,9 @@ class PublishedInteractionCourseSession extends PublishedCourseSession {
     }
     if (action.type === 'scene.open-picker') {
       if (!this.#canAcceptHostAction() || !this.#scenePicker) return false
-      this.#scenePicker.open(this.navigator.current?.locationId ?? null, {
+      const progress = this.getPlaybackProgress()
+      this.#scenePicker.open(progress?.sceneId ?? null, {
+        currentStepId: progress?.stepId,
         bypassNavigationGuards: true,
       })
       return true
@@ -836,8 +958,6 @@ class PublishedInteractionCourseSession extends PublishedCourseSession {
     }
     if (
       action.type !== 'scene.go'
-      && action.type !== 'scene.next'
-      && action.type !== 'scene.previous'
     ) return undefined
     if (!this.#canAcceptHostAction()) return false
     const current = this.navigator.current
@@ -905,8 +1025,17 @@ class PublishedInteractionCourseSession extends PublishedCourseSession {
 
   handleNavigationSettled(state: MixedNavigationState): void {
     if (this.#interactionDestroyStarted || this.navigator.current?.locationId !== state.locationId) return
+    this.notifyNavigationChanged()
     this.#globalInteractionController?.enterScene()
     this.#localInteractionController?.enterScene()
+  }
+
+  override dispatchPresenterCommand(command: PlaybackDirection): boolean {
+    if (!this.#canAcceptHostAction()) return false
+    const global = this.#globalInteractionController?.dispatchPresenterCommand(command) ?? false
+    // Evaluate both scopes. The existing terminal claim admits only one navigation.
+    const local = this.#localInteractionController?.dispatchPresenterCommand(command) ?? false
+    return global || local
   }
 
   override restartCourse(): Promise<boolean> {
@@ -1088,6 +1217,7 @@ class PublishedInteractionCourseSession extends PublishedCourseSession {
     const shouldRemount = this.#terminalNavigationInvalidated
     this.#terminalNavigationClaimed = false
     this.#terminalNavigationInvalidated = false
+    this.notifyNavigationChanged()
     if (shouldRemount && !this.#interactionDestroyStarted) {
       this.#mountInteractionControllers()
     }
@@ -1098,109 +1228,70 @@ class PublishedInteractionCourseSession extends PublishedCourseSession {
     targetStateId: string | undefined,
     signal: AbortSignal,
   ): Promise<boolean> {
-    if (signal.aborted) return false
     const location = this.#slideLocationForScene(sceneId)
     if (!location) return false
-    const current = this.navigator.current
-    if (targetStateId === undefined && current?.locationId === location.id) return false
-    const targetHost = interactionCapableHost(this.#hostsById.get(location.surfaceId))
-    if (
-      !targetHost?.validatePublishedPresentationState
-      || !targetHost.validatePublishedPresentationState(location.id, targetStateId)
-    ) return false
-    if (!this.#claimTerminalNavigation(signal)) return false
-    try {
-      await this.navigator.goToLocation(location.id, {
-        force: targetStateId !== undefined,
-        recordHistory: current?.locationId !== location.id,
-        signal,
-        prepareTransition: () => {
-          if (
-            !targetHost.preparePublishedPresentationState
-            || !targetHost.preparePublishedPresentationState(location.id, targetStateId)
-          ) throw new Error(`Unable to prepare Published scene state for ${location.id}`)
-        },
-      })
-      return true
-    } catch (error) {
-      targetHost.cancelPreparedPublishedPresentationState?.(location.id)
-      this.#releaseTerminalNavigationClaim()
-      throw error
-    }
+    return this.#navigatePlaybackTarget({ id: location.id, name: location.label, locationId: location.id, stateId: targetStateId }, signal, { prepareInitialState: true })
   }
 
   async #nextScene(signal: AbortSignal): Promise<boolean> {
-    const current = this.navigator.current
-    if (!current || current.index >= current.total - 1) return false
-    const target = this.navigator.listCatalog()[current.index + 1]
-    if (!target) return false
-    if (!this.#claimTerminalNavigation(signal)) return false
-    try {
-      await this.navigator.goToLocation(target.id, { signal })
-      return true
-    } catch (error) {
-      this.#releaseTerminalNavigationClaim()
-      throw error
-    }
+    return this.#navigateAdjacent('scene', 'next', signal)
   }
 
   async #previousScene(signal: AbortSignal): Promise<boolean> {
-    const current = this.navigator.current
-    if (!current || current.index <= 0) return false
-    const target = this.navigator.listCatalog()[current.index - 1]
-    if (!target) return false
-    if (!this.#claimTerminalNavigation(signal)) return false
-    try {
-      await this.navigator.goToLocation(target.id, { signal })
-      return true
-    } catch (error) {
-      this.#releaseTerminalNavigationClaim()
-      throw error
-    }
+    return this.#navigateAdjacent('scene', 'previous', signal)
   }
 
-  async #navigateFromTeacherController(
-    target: CourseLocation,
-    targetStateId: string | undefined,
+  protected override canAcceptPlaybackNavigation(): boolean { return this.#canAcceptHostAction() }
+
+  protected override acceptsPlaybackTarget(target: CoursePlaybackStep): boolean {
+    const location = this.#locationById(target.locationId)
+    return !!location && this.#acceptNavigationTarget(location.id, location.surfaceId)
+  }
+
+  protected override movePlayback(level: PlaybackNavigationLevel, direction: PlaybackDirection): Promise<boolean> {
+    return this.#navigateAdjacent(level, direction, new AbortController().signal)
+  }
+
+  #navigateAdjacent(level: PlaybackNavigationLevel, direction: PlaybackDirection, signal: AbortSignal): Promise<boolean> {
+    const target = this.playbackTarget(level, direction)
+    if (!target) return Promise.resolve(false)
+    return this.#navigatePlaybackTarget(target, signal)
+  }
+
+  #navigateFromTeacherController(target: CourseLocation, targetStateId: string | undefined, signal: AbortSignal): Promise<boolean> {
+    return this.#navigatePlaybackTarget({ id: target.id, locationId: target.id, name: target.label, stateId: targetStateId }, signal, { bypassGuards: true })
+  }
+
+  /** One commit path for exact location, scene, step and explicit replay requests. */
+  async #navigatePlaybackTarget(
+    step: CoursePlaybackStep,
     signal: AbortSignal,
+    options: { bypassGuards?: boolean; force?: boolean; recordHistory?: boolean; prepareInitialState?: boolean } = {},
   ): Promise<boolean> {
-    if (signal.aborted) return false
+    const target = this.#locationById(step.locationId)
     const current = this.navigator.current
-    if (!current || (current.locationId === target.id && targetStateId === undefined)) return false
-    const targetHost = target.kind === 'slide-scene'
-      ? interactionCapableHost(this.#hostsById.get(target.surfaceId))
-      : null
-    if (
-      targetStateId !== undefined
-      && (
-        target.kind !== 'slide-scene'
-        || !targetHost?.validatePublishedPresentationState
-        || !targetHost.validatePublishedPresentationState(target.id, targetStateId)
-      )
-    ) return false
+    if (!target || !current || signal.aborted) return false
+    const force = options.force === true || step.stateId !== undefined
+    if (current.locationId === target.id && !force) return false
+    const targetHost = target.kind === 'slide-scene' ? interactionCapableHost(this.#hostsById.get(target.surfaceId)) : null
+    const prepareState = step.stateId !== undefined || (options.prepareInitialState === true && target.kind === 'slide-scene')
+    if (prepareState && (!targetHost?.validatePublishedPresentationState || !targetHost.validatePublishedPresentationState(target.id, step.stateId))) return false
     if (!this.#claimTerminalNavigation(signal)) return false
-    this.#navigationGuardBypassTargetId = target.id
+    if (options.bypassGuards) this.#navigationGuardBypassTargetId = target.id
     try {
       await this.navigator.goToLocation(target.id, {
-        force: targetStateId !== undefined,
-        recordHistory: current.locationId !== target.id,
+        force,
+        recordHistory: options.recordHistory ?? current.locationId !== target.id,
         signal,
-        ...(targetStateId !== undefined
-          ? {
-              prepareTransition: () => {
-                if (
-                  !targetHost?.preparePublishedPresentationState
-                  || !targetHost.preparePublishedPresentationState(target.id, targetStateId)
-                ) throw new Error(`Unable to prepare Published scene state for ${target.id}`)
-              },
-            }
-          : {}),
+        ...(prepareState ? { prepareTransition: () => {
+          if (!targetHost?.preparePublishedPresentationState || !targetHost.preparePublishedPresentationState(target.id, step.stateId)) {
+            throw new Error(`Unable to prepare Published scene state for ${target.id}`)
+          }
+        } } : {}),
       })
       return true
     } catch (error) {
-      if (targetStateId !== undefined) {
-        targetHost?.cancelPreparedPublishedPresentationState?.(target.id)
-      }
+      targetHost?.cancelPreparedPublishedPresentationState?.(target.id)
       this.#releaseTerminalNavigationClaim()
       throw error
     } finally {
@@ -1209,22 +1300,15 @@ class PublishedInteractionCourseSession extends PublishedCourseSession {
   }
 
   async #replayScene(signal: AbortSignal): Promise<boolean> {
-    if (
-      this.#interactionDestroyStarted
-      || this.#terminalNavigationClaimed
-      || !this.canForceReplayCurrentLocation()
-    ) return false
+    if (this.#interactionDestroyStarted || this.#terminalNavigationClaimed || !this.canForceReplayCurrentLocation()) return false
     return this.#forceReplayCurrentLocation(signal)
   }
 
-  async #forceReplayCurrentLocation(signal: AbortSignal): Promise<boolean> {
-    if (!this.#claimTerminalNavigation(signal)) return false
-    try {
-      return await this.forceReplayCurrentLocation(signal)
-    } catch (error) {
-      this.#releaseTerminalNavigationClaim()
-      throw error
-    }
+  #forceReplayCurrentLocation(signal: AbortSignal): Promise<boolean> {
+    const progress = this.getPlaybackProgress()
+    const first = progress ? this.listPlaybackScenes()[progress.sceneIndex]?.steps[0] : undefined
+    if (!first) return Promise.resolve(false)
+    return this.#navigatePlaybackTarget(first, signal, { force: true, bypassGuards: true, recordHistory: false })
   }
 
   async #restartCourse(signal: AbortSignal): Promise<boolean> {
@@ -1270,12 +1354,13 @@ function createPublishedAuthoringCourseSession(
   // hosts alive would reintroduce hidden dual rendering and authoring targets.
   playback.locations = [location]
   playback.surfaces = [surface]
-  const frozenCourseState = new FrozenPublishedCourseStateStore(playback.courseState)
   const resolveAsset = options.resolveAsset
     ?? options.services?.resolveAsset
     ?? ((assetId: string) => playback.assets[assetId]?.url)
+  const readonlyState = createPublishedAuthoringReadonlyState(playback, resolveAsset)
+  const frozenCourseState = readonlyState.courseState
   const services: SurfacePlayerServices = {
-    ...defaultCourseStateServices(playback, frozenCourseState),
+    ...readonlyState.services,
     ...options.services,
     navigate: () => undefined,
     getCourseState: (key) => frozenCourseState.get(key),
@@ -1393,6 +1478,7 @@ export function createPublishedCourseSession(
   }
   const globalInteractionVisibilityState = new PublishedInteractionVisibilityState()
   const teacherControllerSession = new TeacherControllerRuntimeSessionStore()
+  const playbackView = options.staticCapture ? null : new PlaybackViewSession()
   const courseState: CourseStateStore = options.staticCapture
     ? new FrozenPublishedCourseStateStore(playback.courseState)
     : new CourseStateStore()
@@ -1423,12 +1509,19 @@ export function createPublishedCourseSession(
     goToSceneById: (sceneId, targetStateId) => (
       session?.requestHostGoToScene(sceneId, targetStateId) ?? false
     ),
+    nextStep: () => session?.requestPlaybackNavigation('step', 'next') ?? false,
+    previousStep: () => session?.requestPlaybackNavigation('step', 'previous') ?? false,
     nextScene: () => session?.requestHostNextScene() ?? false,
     previousScene: () => session?.requestHostPreviousScene() ?? false,
     replayScene: () => session?.requestHostReplayScene() ?? false,
     restartCourse: () => session?.requestHostRestartCourse() ?? false,
   })
   const runtimeActions: Readonly<RuntimeHostActions> = componentActions
+  const navigation: PlaybackNavigationViewPort = {
+    getProgress: () => session?.getPlaybackProgress() ?? null,
+    canExecute: action => session?.canExecuteNavigationAction(action) ?? false,
+    subscribe: listener => session?.subscribeNavigation(listener) ?? (() => undefined),
+  }
   const hosts = playback.surfaces.map((surface) => createPublishedSurfaceHostInternal(
     playback,
     surface.id,
@@ -1438,6 +1531,8 @@ export function createPublishedCourseSession(
       playbackPathId: options.playbackPathId,
       globalInteractionVisibilityState,
       teacherControllerSession,
+      navigation: options.staticCapture ? undefined : navigation,
+      playbackView: playbackView ?? undefined,
       restartCourse,
       replayScene,
       executeTeacherControllerAction,
@@ -1523,6 +1618,7 @@ export function createPublishedCourseSession(
     audio,
     audioEvents,
     options.staticCapture === true,
+    playbackView,
   )
   return session
 }
@@ -1541,17 +1637,28 @@ export function publishedControllerNavigationTarget(
 ): CourseLocation | null {
   const { locations, currentLocationId, startLocationId } = input
   const index = locations.findIndex((location) => location.id === currentLocationId)
+  const key = index >= 0 ? playbackSceneKey(locations[index]!) : null
+  let first = index
+  let last = index
+  while (first > 0 && playbackSceneKey(locations[first - 1]!) === key) first--
+  while (last >= 0 && last + 1 < locations.length && playbackSceneKey(locations[last + 1]!) === key) last++
+  if (action.type === 'step.next') return index >= 0 ? locations[index + 1] ?? null : null
+  if (action.type === 'step.previous') return index > 0 ? locations[index - 1]! : null
   if (action.type === 'scene.next') {
-    return index >= 0 && index < locations.length - 1 ? locations[index + 1]! : null
+    return last >= 0 ? locations[last + 1] ?? null : null
   }
   if (action.type === 'scene.previous') {
-    return index > 0 ? locations[index - 1]! : null
+    if (first <= 0) return null
+    let previous = first - 1
+    const previousKey = playbackSceneKey(locations[previous]!)
+    while (previous > 0 && playbackSceneKey(locations[previous - 1]!) === previousKey) previous--
+    return locations[previous]!
   }
   if (action.type === 'course.restart') {
     return locations.find((location) => location.id === startLocationId) ?? locations[0] ?? null
   }
   if (action.type === 'scene.replay') {
-    return locations[index] ?? locations.find((location) => location.id === currentLocationId) ?? null
+    return locations[first] ?? null
   }
   if (action.type === 'scene.go') {
     return locations.find((location) => (
@@ -1587,6 +1694,8 @@ class FlowPublishedAdapter implements SurfaceHost {
       onInteractionInvalidated?: () => void
       onInteractionReady?: () => void
       teacherControllerSession?: TeacherControllerRuntimeSessionStore
+  playbackView?: PlaybackViewSession
+  navigation?: PlaybackNavigationViewPort
       restartCourse?: () => Promise<boolean>
       replayScene?: () => Promise<boolean>
       executeTeacherControllerAction?: (
@@ -1613,6 +1722,8 @@ class FlowPublishedAdapter implements SurfaceHost {
       onInteractionInvalidated: options.onInteractionInvalidated,
       onInteractionReady: options.onInteractionReady,
       teacherControllerSession: options.teacherControllerSession,
+      navigation: options.navigation,
+      playbackView: options.playbackView,
       deferTeacherControllerCourseReset: options.deferTeacherControllerCourseReset,
       courseState: options.courseState,
       runtimeActions: options.runtimeActions,
@@ -1761,6 +1872,8 @@ class SpatialPublishedAdapter implements SurfaceHost {
       onInteractionInvalidated?: () => void
       onInteractionReady?: () => void
       teacherControllerSession?: TeacherControllerRuntimeSessionStore
+  playbackView?: PlaybackViewSession
+  navigation?: PlaybackNavigationViewPort
       restartCourse?: () => Promise<boolean>
       replayScene?: () => Promise<boolean>
       executeTeacherControllerAction?: (
@@ -1792,6 +1905,8 @@ class SpatialPublishedAdapter implements SurfaceHost {
       onInteractionInvalidated: options.onInteractionInvalidated,
       onInteractionReady: options.onInteractionReady,
       teacherControllerSession: options.teacherControllerSession,
+      navigation: options.navigation,
+      playbackView: options.playbackView,
       deferTeacherControllerCourseReset: options.deferTeacherControllerCourseReset,
       courseState: options.courseState,
       runtimeActions: options.runtimeActions,

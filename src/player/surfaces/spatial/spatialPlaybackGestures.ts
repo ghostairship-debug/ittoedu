@@ -68,6 +68,7 @@ export function screenPointInRoot(
 
 export interface SpatialPlaybackCameraGestureHost {
   readonly root: HTMLElement
+  observation?: boolean
   isActive(): boolean
   getCamera(): SpatialRuntimeCamera | null
   setCamera(camera: SpatialRuntimeCamera): void
@@ -90,7 +91,7 @@ export function attachSpatialPlaybackCameraGestures(
   let suppressClick = false
 
   const onPointerDown = (event: PointerEvent) => {
-    if (event.button !== 0 || event.isPrimary === false) return
+    if (event.button !== 0 || event.isPrimary === false || (host.observation && event.pointerType === 'touch')) return
     if (!host.isActive() || spatialPlaybackGestureOccupied(event.target, root)) return
     pointer = {
       id: event.pointerId,
@@ -146,6 +147,7 @@ export function attachSpatialPlaybackCameraGestures(
   }
 
   const onWheel = (event: WheelEvent) => {
+    if (event.defaultPrevented || (host.observation && event.ctrlKey)) return
     if (!host.isActive() || spatialPlaybackGestureOccupied(event.target, root)) return
     const camera = host.getCamera()
     if (!camera) return

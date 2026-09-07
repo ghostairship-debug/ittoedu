@@ -81,6 +81,8 @@ export type TeacherControllerGestureOutcome = 'activate' | 'moved' | 'cancelled'
  */
 export type TeacherControllerRuntimeNode = TeacherControllerLayoutSource & {
   title: string
+  /** Ephemeral host chrome; never part of a course node. */
+  playbackView?: boolean
   x: number
   y: number
   width: number
@@ -115,7 +117,9 @@ export function teacherControllerVisibleLocalRect(
   if (collapsed) {
     const collapse = createTeacherControllerLayout(node, node.width, node.height)
       .collapse
-    if (collapse) return collapse
+    if (collapse) return node.playbackView
+      ? { x: Math.max(0, collapse.x - 58), y: collapse.y, width: collapse.width + Math.min(58, collapse.x), height: collapse.height }
+      : collapse
   }
   return { x: 0, y: 0, width: node.width, height: node.height }
 }

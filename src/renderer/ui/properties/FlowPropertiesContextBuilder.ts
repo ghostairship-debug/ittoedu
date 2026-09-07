@@ -17,6 +17,7 @@ import {
   type FlowEditorView,
 } from '../../course/flowEditorView'
 import type { FlowAuthoringIntent } from '../../store/slices/flowAuthoringSlice'
+import type { FlowBodyDestination } from '../../course/flowSharedAuthoringAdapters'
 import type {
   FlowPropertiesCommands,
   FlowPropertiesContext,
@@ -115,6 +116,12 @@ function createCommands(input: {
     target: CourseAuthoringTarget,
     intent: FlowAuthoringIntent,
   ) => { readonly ok: boolean; readonly reason?: string }
+  readonly selectedOverlayIsComponent: boolean
+  readonly convertOverlayComponent?: (
+    target: CourseAuthoringTarget,
+    destination: FlowBodyDestination,
+    signal?: AbortSignal,
+  ) => Promise<{ readonly ok: boolean; readonly reason?: string }>
   readonly reportError: (message: string) => void
   readonly setPreviewBackgroundColor?: (color: string | null) => void
 }): FlowPropertiesCommands {
@@ -166,7 +173,18 @@ function createCommands(input: {
     }),
     moveSelectedBlock: (direction) => run({ kind: 'move-block', direction }),
     convertSelectedToOverlay: () => run({ kind: 'convert-block-to-overlay' }),
-    convertOverlayToDocument: () => run({ kind: 'convert-overlay-to-document' }),
+    convertOverlayToDocument: async (destination, signal) => {
+      if (!input.selectedOverlayIsComponent) {
+        run({ kind: 'convert-overlay-to-document' })
+        return
+      }
+      if (!input.target || !destination || !input.convertOverlayComponent) {
+        input.reportError(COURSE_AUTHORING_STALE_SESSION_REASON)
+        return
+      }
+      const receipt = await input.convertOverlayComponent(input.target, destination, signal)
+      if (!receipt.ok && receipt.reason && !signal?.aborted) input.reportError(receipt.reason)
+    },
     deleteSelectedBlocks: () => run({ kind: 'delete-blocks', blockIds: selectedBlockIds }),
     formatBlock: (spec) => run({ kind: 'format-block', spec }),
     formatTextStyle: (style) => run({
@@ -265,6 +283,11 @@ export function buildFlowPropertiesOwner(input: {
     target: CourseAuthoringTarget,
     intent: FlowAuthoringIntent,
   ) => { readonly ok: boolean; readonly reason?: string }
+  readonly convertOverlayComponent?: (
+    target: CourseAuthoringTarget,
+    destination: FlowBodyDestination,
+    signal?: AbortSignal,
+  ) => Promise<{ readonly ok: boolean; readonly reason?: string }>
   readonly reportError: (message: string) => void
   readonly setPreviewBackgroundColor?: (color: string | null) => void
 }): FlowPropertiesOwnerResult {
@@ -300,6 +323,11 @@ export function buildFlowPropertiesOwner(input: {
         ? 'flow-block'
         : 'flow-page'
     const target = captureTarget(kind, view, selection, token)
+    const selectedOverlayId = selection.selectedOverlayIds.at(-1)
+    const selectedOverlayIsComponent = Boolean(
+      selectedOverlayId
+      && view.overlayLayers.find((entry) => entry.selectionId === selectedOverlayId)?.item.kind === 'component',
+    )
     return {
       status: 'active',
       locationId: selection.locationId,
@@ -317,6 +345,8 @@ export function buildFlowPropertiesOwner(input: {
           selection,
           textEdit: input.textEdit,
           runIntent: input.runIntent,
+          selectedOverlayIsComponent,
+          convertOverlayComponent: input.convertOverlayComponent,
           reportError: input.reportError,
           setPreviewBackgroundColor: input.setPreviewBackgroundColor,
         }),

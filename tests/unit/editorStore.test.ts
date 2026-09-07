@@ -2212,6 +2212,9 @@ describe('multi-selection operations', () => {
       ellipse!.id,
     ])
     expect(selectSelectedNodeId(useEditorStore.getState())).toBe(ellipse!.id)
+    expect(useEditorStore.getState().courseAuthoringSession?.itemIds).toEqual([text!.id, ellipse!.id])
+    store.selectNodes([])
+    expect(useEditorStore.getState().courseAuthoringSession?.itemIds).toEqual([])
   })
 
   it.each(['left', 'center', 'right', 'top', 'middle', 'bottom'] as const)(

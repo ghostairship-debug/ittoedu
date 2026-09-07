@@ -1,3 +1,4 @@
+import { commitResourceAwareAuthoringHistory, type ResourceAwareAuthoringHistory } from '../authoring/resourceAwareAuthoringHistory'
 import { create } from 'zustand'
 import { persistCrossSurfaceToolTransaction } from '../composition/courseToolTransaction'
 import type { ComponentPackageData } from '../../shared/componentTypes'
@@ -244,13 +245,7 @@ import {
   type SlideSceneActionId,
 } from '../course/v9SlideActionCommands'
 import type { V9SlideClipboardPayload } from '../course/v9SlideClipboard'
-import {
-  commitSlideAuthoringHistory,
-  commitSlideEditorTransactionHistory,
-  commitSlideProjectMutation,
-  selectSlideEditorLayers,
-  type SlideAuthoringHistory,
-} from '../course/slideEditorCommands'
+import { commitSlideEditorTransactionHistory, commitSlideProjectMutation, selectSlideEditorLayers } from '../course/slideEditorCommands'
 import {
   allocateCourseLayerOrder,
   setGlobalLayerScenePlane,
@@ -820,6 +815,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     read: () => {
       const state = get()
       return {
+        projectPath: state.projectPath,
         document: selectActiveCourseProjectDocument(state),
         sidecar: state.courseAssetSidecar,
         componentPackages: state.componentPackages,
@@ -865,7 +861,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
         ok: true,
         nextSession: {
           ...backend.getSession(),
-          history: commitSlideAuthoringHistory(backend.getSession().history, project),
+          history: commitResourceAwareAuthoringHistory(backend.getSession().history, project),
         },
         historyEntry: true,
         selection: backend.getSession().selection,

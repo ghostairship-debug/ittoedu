@@ -49,9 +49,19 @@ export function SpatialWorkspaceConnector() {
   const graphSelection = useEditorStore(selectSpatialGraphSelection)
   const runSpatialAuthoringIntent = useEditorStore(selectRunSpatialAuthoringIntent)
   const setCanvasMode = useEditorStore(selectSetCanvasMode)
+  const captureRuntimeContentTextTarget = useEditorStore(
+    (state) => state.captureRuntimeContentTextTarget,
+  )
+  const updateRuntimeContentTextAtTarget = useEditorStore(
+    (state) => state.updateRuntimeContentTextAtTarget,
+  )
   const commands = useMemo<SpatialAuthoringCommandPort>(() => ({
     run: runSpatialAuthoringIntent,
   }), [runSpatialAuthoringIntent])
+  const runtimeContentAuthoring = useMemo(() => ({
+    captureRuntimeContentTextTarget,
+    updateRuntimeContentTextAtTarget,
+  }), [captureRuntimeContentTextTarget, updateRuntimeContentTextAtTarget])
   const previewBackgroundColor = useEditorStore((state) => state.previewBackgroundColor)
   const view = useMemo(() => {
     if (!session) return null
@@ -138,6 +148,8 @@ export function SpatialWorkspaceConnector() {
       assetFiles={assetFiles}
       assetMimeTypes={assetMimeTypes}
       componentPackages={componentPackages}
+      project={session.history.present}
+      runtimeContentAuthoring={runtimeContentAuthoring}
       worldTarget={authoringTargets.worldTarget}
       layerTargets={authoringTargets.layerTargets}
       commands={commands}

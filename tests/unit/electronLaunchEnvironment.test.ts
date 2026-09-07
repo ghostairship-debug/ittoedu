@@ -1,9 +1,14 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { prepareElectronLaunchEnvironment } from '../../scripts/electronLaunchEnvironment'
-import { decodeAgentEvent } from '../../src/main/localAgent/protocol'
+import { createAgentEventDecoder, decodeAgentEvent } from '../../src/main/localAgent/protocol'
+import { localAgentText } from '../../src/shared/localAgentText'
+import type { LocalAgentEvent } from '../../src/shared/localAgentContract'
 import { agentArguments, LocalAgentAdapter } from '../../src/main/localAgent/adapter'
 import { agentEnvironment, captureAgent, launchAgent, stopAgent } from '../../src/main/localAgent/process'
 import { localAgentRequestSchema } from '../../src/shared/localAgentContract'
+import type { GenerationRequest } from '../../src/shared/generationContract'
+import { codexCandidateOutputSchema, codexTurnOutputSchema, decodeCodexStructuredOutput } from '../../src/main/localAgent/codexAppServer'
+import { readGenerationResult } from '../../src/shared/generationResult'
 import { promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -13,6 +18,21 @@ afterEach(() => {
 })
 
 describe('LocalAgentCliAdapterV1', () => {
+  it('reconciles Claude text after thinking when completed arrays omit the thinking block', () => {
+    const decode = createAgentEventDecoder('claude')
+    const wires = [
+      { type: 'stream_event', event: { type: 'message_start', message: { id: 'm1' } } },
+      { type: 'stream_event', event: { type: 'content_block_start', index: 0, content_block: { type: 'thinking' } } },
+      { type: 'stream_event', event: { type: 'content_block_start', index: 1, content_block: { type: 'text', text: '' } } },
+      { type: 'stream_event', event: { type: 'content_block_delta', index: 1, delta: { type: 'text_delta', text: '先讨论' } } },
+      { type: 'stream_event', event: { type: 'content_block_delta', index: 1, delta: { type: 'text_delta', text: '，再修改。' } } },
+      { type: 'assistant', message: { id: 'm1', content: [{ type: 'text', text: '先讨论，再修改。' }] } },
+    ]
+    const events: LocalAgentEvent[] = []
+    for (const wire of wires) events.push(...decode(wire).map(entry => ({ ...entry, version: 1 as const, adapter: 'claude' as const, sessionId: 'local', sequence: events.length + 1, time: 0 })))
+    expect(localAgentText(events.slice(0, 1))).toBe('先讨论')
+    expect(localAgentText(events)).toBe('先讨论，再修改。')
+  })
   it('cancels only the target process tree while a sibling session stays alive', async () => {
     const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'agent-tree-'))
     const fixture = path.join(directory, 'tree.cjs')
@@ -73,11 +93,11 @@ describe('LocalAgentCliAdapterV1', () => {
   it('strictly excludes arbitrary executable and environment requests', () => {
     expect(localAgentRequestSchema.safeParse({ operation: 'probe', adapter: 'codex', executable: 'cmd.exe' }).success).toBe(false)
     expect(agentEnvironment({ PATH: 'bin', OPENAI_API_KEY: 'secret', ELECTRON_RUN_AS_NODE: '1', NODE_OPTIONS: '--require evil' })).toEqual({ PATH: 'bin' })
-    expect(agentArguments('codex', 'ignored', 'external')).toContain('external')
+    expect(agentArguments('codex', 'ignored', 'external')).toContain('app-server')
     expect(agentArguments('claude', 'ignored', 'external')).toContain('--resume')
-    expect(agentArguments('opencode', '& echo bad', 'external').slice(-2)).toEqual(['--session', 'external'])
+    expect(agentArguments('opencode', '& echo bad', 'external')).toEqual(['acp'])
     expect(agentArguments('opencode', 'x'.repeat(50000)).join(' ').length).toBeLessThan(100)
-    expect(agentArguments('opencode', 'hello')).toContain('opencode/big-pickle')
+    expect(agentArguments('claude', 'hello')).toContain('--include-partial-messages')
   })
   it('uses the exact program and literal args with spaces, Chinese and shell metacharacters', async () => {
     const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'CLI 中文 space-'))
@@ -90,6 +110,95 @@ describe('LocalAgentCliAdapterV1', () => {
       expect(JSON.parse(result.text)).toEqual(args)
       expect(await fs.readdir(directory)).toEqual(['fixture with 空格.cjs'])
     } finally { await fs.rm(directory, { recursive: true, force: true }) }
+  })
+  it('builds a Codex app-server schema without unsupported free-form JSON keywords', () => {
+    const requestId = '89e7b74a-2ba4-4f03-ad94-89aef212a776'
+    const schema = codexCandidateOutputSchema({ requestId } as GenerationRequest)
+    const text = JSON.stringify(schema)
+    expect(text).not.toContain('"oneOf"')
+    expect(text).not.toContain('"propertyNames"')
+    expect(text).not.toContain('"format"')
+    expect(schema).toMatchObject({ properties: { requestId: { const: requestId } } })
+    expect(text).toContain('A complete JSON serialization of the selected authoring tool input.')
+  })
+  it('uses a strict reply-or-edit envelope for Codex auto requests', () => {
+    const requestId = '89e7b74a-2ba4-4f03-ad94-89aef212a776'
+    const schema = codexTurnOutputSchema({ requestId, expectedResult: 'auto' } as GenerationRequest) as any
+    expect(schema).toMatchObject({
+      type: 'object', additionalProperties: false,
+      properties: { requestId: { const: requestId }, kind: { enum: ['reply', 'edit'] } },
+      required: ['version', 'requestId', 'kind', 'reply', 'candidate'],
+    })
+    const text = JSON.stringify(schema)
+    expect(text).not.toContain('"oneOf"')
+    expect(text).not.toContain('"propertyNames"')
+    expect(text).not.toContain('"format"')
+  })
+  it('unwraps Codex auto replies and leaves malformed candidate input for host repair', () => {
+    const requestId = '89e7b74a-2ba4-4f03-ad94-89aef212a776'
+    const request = { requestId, expectedResult: 'auto' } as GenerationRequest
+    expect(decodeCodexStructuredOutput(JSON.stringify({
+      version: 1, requestId, kind: 'reply', reply: '平均分表示一组数据的整体水平。', candidate: null,
+    }), request)).toBe('平均分表示一组数据的整体水平。')
+    const candidate = {
+      version: 1, requestId, candidateId: '2a42b1a2-1b08-411f-9407-81332bc0a229', summary: '新增文字', steps: [{
+        id: 's1', tool: 'native.content', carrier: 'native', lowerCarrierReason: null,
+        destination: { kind: 'create', scope: {
+          projectId: 'project', documentRevision: 0, revisionPolicy: { kind: 'exact' }, sessionGeneration: 0,
+          surfaceType: 'slide', surfaceId: 'surface', locationId: 'location', stateId: null,
+          owner: 'scene', ownerKey: 'scene:location', parent: { kind: 'owner' }, insertion: { kind: 'append' },
+        } },
+        input: '{broken',
+      }],
+    }
+    const decoded = decodeCodexStructuredOutput(JSON.stringify({
+      version: 1, requestId, kind: 'edit', reply: null, candidate,
+    }), request)
+    expect(readGenerationResult(decoded, request)).toMatchObject({
+      kind: 'candidate', requestId, candidate: { steps: [{ input: '{broken' }] },
+    })
+    const valid = decodeCodexStructuredOutput(JSON.stringify({
+      version: 1, requestId, kind: 'edit', reply: null,
+      candidate: { ...candidate, steps: [{ ...candidate.steps[0], input: '{"operation":"insert"}' }] },
+    }), request)
+    expect(readGenerationResult(valid, request)).toMatchObject({
+      kind: 'candidate', candidate: { steps: [{ input: { operation: 'insert' } }] },
+    })
+    expect(() => decodeCodexStructuredOutput(JSON.stringify({
+      version: 1, requestId, kind: 'reply', reply: '说明', candidate,
+    }), request)).toThrow('reply envelope')
+  })
+  it('lets OpenCode replace only the current request candidate through ACP', async () => {
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'opencode-candidate-'))
+    const requestId = '2a42b1a2-1b08-411f-9407-81332bc0a229'
+    const relative = `candidates/${requestId}/candidate.json`
+    const candidateDirectory = path.join(directory, 'candidates', requestId)
+    await fs.mkdir(candidateDirectory, { recursive: true })
+    const fixture = path.join(directory, 'acp.cjs')
+    const permission = (id: number, target: string) => ({ jsonrpc: '2.0', id, method: 'session/request_permission', params: {
+      sessionId: 'session-1', toolCall: { toolCallId: `tool-${id}`, kind: 'edit', title: 'Write candidate', locations: [{ path: target }] },
+      options: [{ optionId: `allow-${id}`, kind: 'allow_once', name: 'Allow once' }],
+    } })
+    await fs.writeFile(fixture, `
+const readline=require('node:readline').createInterface({input:process.stdin});
+const send=value=>process.stdout.write(JSON.stringify(value)+'\\n'); let promptId=0;
+readline.on('line',line=>{const m=JSON.parse(line);
+ if(m.method==='initialize') return send({jsonrpc:'2.0',id:m.id,result:{protocolVersion:1,agentCapabilities:{loadSession:true}}});
+ if(m.method==='session/new') return send({jsonrpc:'2.0',id:m.id,result:{sessionId:'session-1'}});
+ if(m.method==='session/set_config_option') return send({jsonrpc:'2.0',id:m.id,result:{}});
+ if(m.method==='session/prompt'){promptId=m.id;return send(${JSON.stringify(permission(100, '../escape.json'))});}
+ if(m.id===100){if(m.result?.outcome?.outcome!=='cancelled')process.exit(10);return send(${JSON.stringify(permission(101, relative))});}
+ if(m.id===101){if(m.result?.outcome?.outcome!=='selected')process.exit(11);return send({jsonrpc:'2.0',id:102,method:'fs/write_text_file',params:{sessionId:'session-1',path:${JSON.stringify(relative)},content:'{"broken":true}'}});}
+ if(m.id===102)return send({jsonrpc:'2.0',id:103,method:'fs/write_text_file',params:{sessionId:'session-1',path:${JSON.stringify(relative)},content:'{"version":1}'}});
+ if(m.id===103)return send({jsonrpc:'2.0',id:promptId,result:{stopReason:'end_turn'}});
+});`)
+    const adapter = new LocalAgentAdapter('opencode', async () => ({ executable: process.execPath, prefix: [fixture] }), { requestId } as GenerationRequest)
+    try {
+      const wires: any[] = []
+      for await (const wire of adapter.start('write candidate', directory)) wires.push(wire)
+      expect(wires).toContainEqual(expect.objectContaining({ type: 'acp_permission_denied' }))
+      expect(JSON.parse(await fs.readFile(path.join(candidateDirectory, 'candidate.json'), 'utf8'))).toEqual({ version: 1 })
+    } finally { await adapter.cancel(); await fs.rm(directory, { recursive: true, force: true }) }
   })
 })
 

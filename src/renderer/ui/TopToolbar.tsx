@@ -5,6 +5,7 @@ import {
   Eye,
   FileDown,
   FilePlus2,
+  FileUp,
   FolderOpen,
   FileText,
   Presentation,
@@ -45,6 +46,7 @@ interface TopToolbarProps {
   onOpenHealth(): void
   onOpenRecipes?(): void
   onOpenProductivity?(): void
+  onImportPptx?(): void
   onOpenMaterials?(): void
   onPreview(): void
   onExport(format: ExportFormat, singleHtmlMode?: SingleHtmlExportMode): void
@@ -97,6 +99,7 @@ export function TopToolbar({
   onOpenHealth,
   onOpenRecipes,
   onOpenProductivity,
+  onImportPptx,
   onOpenMaterials,
   onPreview,
   onExport,
@@ -201,6 +204,9 @@ export function TopToolbar({
         <ToolButton label="打开" title="打开工程（Ctrl+O）" disabled={busy} onClick={onOpen}>
           <FolderOpen size={18} />
         </ToolButton>
+        {onImportPptx && <ToolButton label="导入 PPT" title="导入 PPT（.pptx）" disabled={busy} onClick={onImportPptx}>
+          <FileUp size={18} />
+        </ToolButton>}
         {editorMode === 'professional' && <details className="recent-projects">
           <summary className="tool-button" title="打开最近工程">
             <History size={18} />
@@ -269,7 +275,7 @@ export function TopToolbar({
           }}><span><strong>新建配方页</strong><small>封面、概念、例题和互动模板</small></span></button>
           <button type="button" role="menuitem" disabled={busy} onClick={event => {
             event.currentTarget.closest('details')?.removeAttribute('open'); onOpenProductivity?.()
-          }}><span><strong>批量编辑与参考页</strong><small>查找替换、项目配色、样板改写、PPTX 导入</small></span></button>
+          }}><span><strong>批量编辑与参考页</strong><small>查找替换、项目配色、样板改写</small></span></button>
         </div>
       </details>}
 

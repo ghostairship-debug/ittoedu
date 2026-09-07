@@ -67,11 +67,9 @@ export function attachPublishedCoursePresenter(
       keyboardNavigation: payload.playback.keyboardNavigation,
       presenter,
       onNavigate: (targetIndex) => goToIndex(targetIndex),
-      onAuthoredCommand: (command) => {
-        const currentIndex = readIndex()
-        const targetIndex = command === 'previous' ? currentIndex - 1 : currentIndex + 1
-        return goToIndex(targetIndex)
-      },
+      onStep: command => session.requestPlaybackNavigation('step', command),
+      onAuthoredCommand: command => session.dispatchPresenterCommand(command),
+      onFeedback: feedback => session.reportPresenterFeedback(feedback.message),
       readCurrentIndex: readIndex,
     })
     presenterInput.setIndex(readIndex())

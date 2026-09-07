@@ -138,11 +138,13 @@ function paragraph(
     keepNext?: boolean
     numbering?: { id: number; level?: number }
     leadingContent?: string
+    presentation?: import('../../../shared/flowBodyPresentation').FlowParagraphPresentation
   } = {},
 ): string {
   const properties = [
     options.style ? `<w:pStyle w:val="${xml(options.style)}"/>` : '',
     options.keepNext ? '<w:keepNext/>' : '',
+    options.presentation ? `<w:jc w:val="${options.presentation.textAlign}"/><w:spacing w:line="${Math.round(options.presentation.lineHeight * 240)}" w:lineRule="auto"/>` : '',
     options.numbering
       ? `<w:numPr><w:ilvl w:val="${options.numbering.level ?? 0}"/><w:numId w:val="${options.numbering.id}"/></w:numPr>`
       : '',
@@ -482,14 +484,14 @@ function renderPrintNode(
       return paragraph(node.text, { style: 'Title', keepNext: true, leadingContent })
     case 'heading':
       context.report.push({ blockId: node.blockId, disposition: 'preserved', detail: `Heading ${node.level}` })
-      return paragraph(node.text, { style: `Heading${node.level}`, keepNext: true, runs: node.runs, leadingContent })
+      return paragraph(node.text, { style: `Heading${node.level}`, keepNext: true, runs: node.runs, leadingContent, presentation: node.paragraph })
     case 'paragraph':
       context.report.push({ blockId: node.blockId, disposition: 'preserved', detail: 'Native paragraph' })
-      return paragraph(node.text, { runs: node.runs, leadingContent })
+      return paragraph(node.text, { runs: node.runs, leadingContent, presentation: node.paragraph })
     case 'quote':
       context.report.push({ blockId: node.blockId, disposition: 'preserved', detail: 'Native quote paragraphs' })
-      return `${paragraph(node.text, { style: 'Quote', italic: true, runs: node.runs, leadingContent })}${
-        node.citation ? paragraph(`— ${node.citation}`, { style: 'Quote' }) : ''
+      return `${paragraph(node.text, { style: 'Quote', italic: true, runs: node.runs, leadingContent, presentation: node.paragraph })}${
+        node.citation ? paragraph(`— ${node.citation}`, { style: 'Quote', presentation: node.paragraph }) : ''
       }`
     case 'list':
       context.report.push({

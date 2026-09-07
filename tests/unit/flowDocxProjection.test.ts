@@ -119,6 +119,25 @@ function mockFlowPayload(options: {
 }
 
 describe('flowDocxProjection', () => {
+  it('preserves existing paragraph alignment and proportional line spacing in Word', () => {
+    const { payload, surfaceId } = mockFlowPayload({ blocks: [
+      { id: 'aligned-title', type: 'heading', level: 2, text: '居中标题', textAlign: 'center', lineSpacing: 8 },
+      { id: 'aligned-body', type: 'paragraph', text: '靠右正文', textAlign: 'right', lineSpacing: 16 },
+      { id: 'aligned-quote', type: 'quote', text: '左对齐引用', textAlign: 'left', lineSpacing: 0 },
+    ] })
+    const output = buildFlowDocx(payload, surfaceId)
+    const xml = new DOMParser().parseFromString(strFromU8(unzipSync(output.bytes)['word/document.xml']!), 'application/xml')
+    const ns = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'
+    const paragraphs = [...xml.getElementsByTagNameNS(ns, 'p')]
+    for (const [text, alignment, line] of [['居中标题', 'center', '504'], ['靠右正文', 'right', '624'], ['左对齐引用', 'left', '384']]) {
+      const paragraph = paragraphs.find(node => node.textContent === text)!
+      expect(paragraph).toBeDefined()
+      expect(paragraph.getElementsByTagNameNS(ns, 'jc')[0]?.getAttributeNS(ns, 'val')).toBe(alignment)
+      const spacing = paragraph.getElementsByTagNameNS(ns, 'spacing')[0]!
+      expect(spacing.getAttributeNS(ns, 'line')).toBe(line)
+      expect(spacing.getAttributeNS(ns, 'lineRule')).toBe('auto')
+    }
+  })
   it('writes editable Native paths and gradient alpha into DOCX DrawingML instead of a rectangle', () => {
     const node = createShapeNode('rectangle', { style: { fillOpacity: 0.5, fillGradient: {
       kind: 'linear', start: [0, 0], end: [1, 0], stops: [{ offset: 0, color: '#ff0000', opacity: 1 }, { offset: 1, color: '#0000ff', opacity: 1 }],

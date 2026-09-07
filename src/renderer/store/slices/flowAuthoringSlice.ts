@@ -78,8 +78,13 @@ import {
   patchFlowOverlayPaperSpace,
   patchFlowOverlayProperties,
   transformFlowOverlayFrame,
+  type FlowBodyDestination,
   type FlowSharedAuthoringResult,
 } from '../../course/flowSharedAuthoringAdapters'
+import {
+  FLOW_COMPONENT_CONVERSION_CANCELLED_REASON,
+  prepareFlowOverlayComponentConversion,
+} from '../../course/flowComponentConversion'
 import {
   applyFlowTextEditGesture,
   beginFlowFormulaEdit,
@@ -110,7 +115,7 @@ import {
   buildFlowEditorView,
   captureFlowEditorAuthoringTarget,
 } from '../../course/flowEditorView'
-import type { EditorTransactionStep } from '../../authoring/editorTransaction'
+import { createEditorTransactionStep, type EditorTransactionStep } from '../../authoring/editorTransaction'
 import { exclusiveInactiveSurfaces } from '../../composition/surfaceRouter'
 import {
   commitSurfaceResourcePersist,
@@ -639,6 +644,11 @@ export function createFlowAuthoringSlice(
     target: CourseAuthoringTarget,
     intent: FlowAuthoringIntent,
   ): FlowAuthoringReceipt
+  convertFlowOverlayComponentAtTarget(
+    target: CourseAuthoringTarget,
+    destination: FlowBodyDestination,
+    signal?: AbortSignal,
+  ): Promise<FlowAuthoringReceipt>
   applyFlowCommand(
     result: FlowCommandResult | FlowSharedAuthoringResult,
     extra?: { statusMessage?: string | null; sidecar?: CourseAssetSidecar },
@@ -1422,8 +1432,45 @@ export function createFlowAuthoringSlice(
     }
   }
 
+  const convertFlowOverlayComponentAtTarget = async (
+    target: CourseAuthoringTarget,
+    destination: FlowBodyDestination,
+    signal?: AbortSignal,
+  ): Promise<FlowAuthoringReceipt> => {
+    const resolved = resolveFlowAuthoringTarget(flow, target)
+    if (!('session' in resolved)) return resolved
+    if (flow.read().flowTextEdit) return rejectedFlowReceipt(FLOW_ACTIVE_EDIT_REQUIRES_ATOMIC_COMMIT)
+    try {
+      const resources = kernel.readResources()
+      const plan = await prepareFlowOverlayComponentConversion({
+        project: resolved.document,
+        resources: {
+          componentPackages: resources.componentPackages,
+          assetFiles: resources.courseAssetSidecar?.files ?? {},
+        },
+        target,
+        destination,
+      }, signal)
+      if (signal?.aborted) return rejectedFlowReceipt(FLOW_COMPONENT_CONVERSION_CANCELLED_REASON)
+
+      const live = resolveFlowAuthoringTarget(flow, target)
+      if (!('session' in live)) return live
+      const step = createEditorTransactionStep(live.document, plan)
+      if (!step) return rejectedFlowReceipt('组件转换没有产生可提交的变化')
+      if (!persistFlowTransaction(flow, step, '组件已嵌入指定正文位置')) {
+        return rejectedFlowReceipt('当前 Course Project 没有可用的 Flow 作者会话')
+      }
+      return { ok: true, historyEntry: true }
+    } catch (error) {
+      return rejectedFlowReceipt(
+        error instanceof Error ? error.message : '组件转正文失败，未写入工程',
+      )
+    }
+  }
+
   return {
     runFlowAuthoringIntent,
+    convertFlowOverlayComponentAtTarget,
     applyFlowCommand(result, extra = {}) {
       return flow.persist(result, extra)
     },

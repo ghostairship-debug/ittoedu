@@ -6,13 +6,14 @@ import { cloneReferencePage } from '../../authoring/productivity/referenceClone'
 import { StyleRemixForm } from './StyleRemixForm'
 
 export interface ProductivityDialogProps {
+  pptxOnly?: boolean
   getContext(): ProductivityContext
   getAssetFiles(): Readonly<Record<string, Uint8Array>>
   onCommit(step: EditorTransactionStep): boolean
   onClose(): void
 }
-export function ProductivityDialog({ getContext, getAssetFiles, onCommit, onClose }: ProductivityDialogProps) {
-  const [mode, setMode] = useState<'text' | 'color' | 'clone' | 'remix' | 'pptx'>('text')
+export function ProductivityDialog({ pptxOnly = false, getContext, getAssetFiles, onCommit, onClose }: ProductivityDialogProps) {
+  const [mode, setMode] = useState<'text' | 'color' | 'clone' | 'remix' | 'pptx'>(pptxOnly ? 'pptx' : 'text')
   const [scope, setScope] = useState<ProductivityScope>('page')
   const [find, setFind] = useState(''); const [replacement, setReplacement] = useState('')
   const [tokenId, setTokenId] = useState(''); const [property, setProperty] = useState<ColorProperty>('text')
@@ -35,9 +36,9 @@ export function ProductivityDialog({ getContext, getAssetFiles, onCommit, onClos
     if (!result.step) { setMessage('请至少勾选一项'); return }
     if (onCommit(result.step)) onClose(); else setMessage('未能提交，请重新预览后重试')
   }
-  return <div className="modal-backdrop"><section role="dialog" aria-modal="true" aria-label="设计生产力" style={{ background: 'var(--panel-bg, #20242c)', color: 'inherit', padding: 24, borderRadius: 12, width: 'min(880px, 92vw)', maxHeight: '88vh', overflow: 'auto' }}>
-    <h2>设计生产力</h2>
-    <label>操作 <select aria-label="生产力操作" value={mode} onChange={e => { setMode(e.target.value as typeof mode); reset() }}><option value="text">批量查找替换</option><option value="color">应用项目色</option><option value="clone">克隆参考页</option><option value="remix">样板改写</option><option value="pptx">导入 PPTX</option></select></label>
+  return <div className="modal-backdrop"><section role="dialog" aria-modal="true" aria-label={pptxOnly ? '导入 PPT' : '设计生产力'} style={{ background: 'var(--panel-bg, #20242c)', color: 'inherit', padding: 24, borderRadius: 12, width: 'min(880px, 92vw)', maxHeight: '88vh', overflow: 'auto' }}>
+    <h2>{pptxOnly ? '导入 PPT' : '设计生产力'}</h2>
+    {!pptxOnly && <label>操作 <select aria-label="生产力操作" value={mode} onChange={e => { setMode(e.target.value as typeof mode); reset() }}><option value="text">批量查找替换</option><option value="color">应用项目色</option><option value="clone">克隆参考页</option><option value="remix">样板改写</option><option value="pptx">导入 PPTX</option></select></label>}
     {mode === 'pptx' ? <PptxImportForm getContext={getContext} getAssetFiles={getAssetFiles} onCommit={onCommit} onClose={onClose} /> : mode === 'remix' ? <StyleRemixForm getContext={getContext} getAssetFiles={getAssetFiles} onCommit={onCommit} onClose={onClose} /> : mode === 'clone' ? <><p>复制本工程的演示页及其可编辑内容；生成独立对象、状态和素材，一次撤销恢复。</p><label>参考页 <select aria-label="参考页" value={sceneId} onChange={e => setSceneId(e.target.value)}><option value="">选择参考页</option>{context.document.surfaces.flatMap(s => s.type === 'slide' ? s.scenes.map(scene => <option key={scene.id} value={scene.id}>{s.title} / {scene.name}</option>) : [])}</select></label></> : <>
       <p>当前页：Slide 当前页、Flow 当前文档、Spatial 当前世界；共享层仅随“当前 Surface / 整课”修改。</p>
       <label>范围 <select aria-label="修改范围" value={scope} onChange={e => { setScope(e.target.value as ProductivityScope); reset() }}><option value="page">当前页</option><option value="surface">当前 Surface</option><option value="course">整课</option></select></label>

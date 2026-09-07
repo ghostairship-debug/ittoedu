@@ -1,4 +1,9 @@
+import type { PlaybackNavigationViewPort } from '../../navigation/coursePlaybackSequence'
+import { createPlaybackContent, type PlaybackViewSession } from '../../playbackViewSession'
+import { buildFlowRichTextHtml } from '../../../shared/flowRichText'
 import { buildNativeChartSvg } from '../../../shared/nativeChartSvg'
+import { createFlowViewportGeometry, measureFlowPaperOrigin } from '../../../shared/flowViewportGeometry'
+import { FLOW_BODY_CSS, FLOW_BODY_PAPER_PADDING, FLOW_BODY_SCROLL_PADDING, resolveFlowParagraphPresentation } from '../../../shared/flowBodyPresentation'
 import { tableCellSpan } from '../../../shared/tableMerge'
 import { resolveCourseSurfaceBackgroundColor } from '../../../shared/courseProjectModel'
 import { resolveEffectiveBackground } from '../../../shared/effectiveBackground'
@@ -14,15 +19,17 @@ import {
   resolveFlowMediaLayoutProjection,
 } from '../../../shared/flowMediaLayout'
 import type { ShapeNode, TeacherControllerAction, TextRun } from '../../../shared/contracts/native-v1'
-import { renderShapeCanvas } from '../../../shared/canvasShapeRenderer'
-import { createNativePathSvg } from '../../../shared/nativePathRendering'
-import { paintPublishedNativeText } from '../publishedNativeText'
+
+
+import { nativeRenderInputFromPublishedItem, paintPublishedNativeRenderInput } from '../native/publishedNativeRendering'
 import type { ComponentHostActions } from '../../../shared/componentTypes'
 import type {
   CourseStateStore as CourseStateStoreContract,
   RuntimeHostActions,
 } from '../../../shared/runtimeTypes'
-import type { CourseAudioApi } from '../../AudioManager'
+import { AudioManager } from '../../AudioManager'
+import { CourseEventBus } from '../../CourseEventBus'
+import { mountPublishedNativeVideo, type PublishedNativeVideoHandle } from '../publishedNativeVideoMount'
 import type { CourseStateStore } from '../../CourseStateStore'
 import type { FlowBlock, FlowBodyLayerPlane, GlobalLayerPlane } from '../../../shared/courseProjectTypes'
 import {
@@ -44,7 +51,6 @@ import {
   cloneJson,
   findPublishedFlowSurface,
   flowPageStartLocationId,
-  flowRichTextSegments,
   flowSurfaceOrder,
   flowTableCellText,
   resolveFlowLocation,
@@ -107,6 +113,11 @@ interface PublishedFlowOverlayEntry {
   readonly stackOrder: number
 }
 
+interface FlowOverlayRecord {
+  wrap: HTMLElement
+  effects: PublishedCarrierSideEffects
+}
+
 export interface FlowCourseProgressSource {
   getLocations(): readonly TeacherControllerSceneInfo[]
   getCurrentLocationId(): string | null
@@ -127,13 +138,15 @@ export interface FlowSurfaceHostOptions {
   runtimeActions?: Readonly<RuntimeHostActions>
   /** Playback-only navigation actions exposed to Component API 4 instances. */
   componentActions?: Readonly<ComponentHostActions>
-  audio?: Pick<CourseAudioApi, 'muted' | 'setMuted' | 'toggleMuted'>
+  audio?: FlowHostAudioSession
   executeTeacherControllerAction?: (
     action: TeacherControllerAction,
   ) => boolean | void | Promise<boolean | void>
   onNavigateLocation?: (locationId: string) => void
   courseProgressSource?: FlowCourseProgressSource
   teacherControllerSession?: TeacherControllerRuntimeSessionStore
+  navigation?: PlaybackNavigationViewPort
+  playbackView?: PlaybackViewSession
   deferTeacherControllerCourseReset?: boolean
   /** Published-session only; shared by global LayerItem handles across surfaces. */
   globalInteractionVisibilityState?: PublishedInteractionVisibilityState
@@ -150,11 +163,8 @@ export interface FlowSurfaceHostOptions {
   reportActionError?: (action: TeacherControllerAction, error: Error) => void
 }
 
-export interface FlowHostAudioSession {
-  muted(): boolean
-  setMuted(value: boolean): void
-  toggleMuted(): boolean
-}
+export type FlowHostAudioSession = Pick<AudioManager,
+  'muted' | 'setMuted' | 'toggleMuted' | 'registerVideo' | 'beginBackgroundAudioInterruption'>
 
 /**
  * Playback host for Published Course V2 Flow surfaces. It never reads authoring
@@ -169,8 +179,14 @@ export class FlowSurfaceHost {
   #locationId: string
   #options: FlowSurfaceHostOptions
   #audio: FlowHostAudioSession
+  #ownedAudio: AudioManager | null = null
+  #videoHandles: PublishedNativeVideoHandle[] = []
+  #overlayRecords = new Map<string, FlowOverlayRecord>()
   #container: HTMLElement | null = null
+  #viewportObserver: ResizeObserver | null = null
   #root: HTMLElement | null = null
+  #content: HTMLElement | null = null
+  #controllerPlane: HTMLElement | null = null
   #article: HTMLElement | null = null
   #globalUnderlay: HTMLElement | null = null
   #surfaceUnderlay: HTMLElement | null = null
@@ -213,9 +229,12 @@ export class FlowSurfaceHost {
       ?? new TeacherControllerRuntimeSessionStore()
     this.#globalInteractionVisibilityState = options.globalInteractionVisibilityState
       ?? new PublishedInteractionVisibilityState()
-    this.#audio = options.audio ?? createFlowHostAudioSession(
-      this.#playback.media?.audio.defaultMuted === true,
+    this.#ownedAudio = options.audio ? null : new AudioManager(
+      this.#playback,
+      assetId => resolvePlaybackAssetUrl(this.#playback, assetId, this.#options.resolveAsset),
+      new CourseEventBus(),
     )
+    this.#audio = options.audio ?? this.#ownedAudio!
     const requestedLocation = options.locationId ?? this.#playback.startLocationId
     const resolved = tryResolveLocation(this.#playback, requestedLocation)
       ?? tryResolveLocation(this.#playback, this.#playback.startLocationId)
@@ -296,9 +315,9 @@ export class FlowSurfaceHost {
       root.dataset.surfaceId = this.#surfaceId
       root.style.position = 'relative'
       root.style.isolation = 'isolate'
-      root.style.width = `${CANVAS_WIDTH}px`
-      root.style.height = `${CANVAS_HEIGHT}px`
-      root.style.minHeight = `${CANVAS_HEIGHT}px`
+      root.style.width = '100%'
+      root.style.height = '100%'
+      root.style.minHeight = '0'
       root.style.overflow = 'hidden'
       root.style.setProperty('--flow-toc-inset', '0px')
       root.hidden = !this.#active
@@ -307,7 +326,15 @@ export class FlowSurfaceHost {
       const surfaceUnderlay = createFlowRuntimePlane(dom, 'surface-underlay', 1)
       const surfaceOverlay = createFlowRuntimePlane(dom, 'surface-overlay', 3)
       const overlay = createFlowRuntimePlane(dom, 'global-overlay', 4, true)
-      root.append(globalUnderlay, surfaceUnderlay, surfaceOverlay, overlay)
+      const content = this.#options.playbackView ? createPlaybackContent(root) : root
+      content.append(globalUnderlay, surfaceUnderlay, surfaceOverlay, overlay)
+      this.#content = content
+      if (this.#options.playbackView) {
+        this.#controllerPlane = createFlowRuntimePlane(dom, 'global-overlay', 5, true)
+        this.#controllerPlane.dataset.playbackControllerPlane = 'true'
+        root.appendChild(this.#controllerPlane)
+        this.#options.playbackView.register({ id: this.#surfaceId, kind: 'flow', root, content })
+      }
 
       container.appendChild(root)
       this.#root = root
@@ -326,6 +353,14 @@ export class FlowSurfaceHost {
       })
       this.#render()
       this.#applyShellLayout()
+      if (typeof ResizeObserver === 'function') {
+        this.#viewportObserver = new ResizeObserver(() => {
+          this.#applyShellLayout()
+          this.#syncTeacherControllerSession()
+        })
+        this.#viewportObserver.observe(root)
+        if (this.#article) this.#viewportObserver.observe(this.#article)
+      }
       this.#restoreInteractionsIfActive()
     })
   }
@@ -369,6 +404,7 @@ export class FlowSurfaceHost {
     this.#preparedRuntimeActivation = null
     this.#pendingRuntimeActivation = null
     this.#completedActiveResetLocationId = null
+    for (const handle of this.#videoHandles) handle.pause()
     for (const record of [...this.#runtimeHandles]) {
       record.handle?.setVisible(false)
       if (!record.retired) record.handle?.suspend()
@@ -394,7 +430,7 @@ export class FlowSurfaceHost {
       if (scope === 'course') this.#runtimeSession.resetCourse()
       const preparedReset = this.#preparedRuntimeActivation
       const resetWasActive = this.#active
-      this.#applyLocation(startLocationId)
+      this.#applyLocation(startLocationId, true)
       if (
         resetWasActive
         && preparedReset?.forced
@@ -445,6 +481,8 @@ export class FlowSurfaceHost {
 
   destroy(): Promise<void> {
     return this.#enqueue(async () => {
+      this.#viewportObserver?.disconnect()
+      this.#viewportObserver = null
       this.#invalidateInteractions()
       this.#carrierSideEffects.destroy()
       this.#interactionPort?.destroy()
@@ -452,6 +490,9 @@ export class FlowSurfaceHost {
       this.#interactionNodes.clear()
       this.#destroyRuntimeHandles()
       this.#destroyComponentHandles()
+      this.#destroyVideoHandles()
+      this.#clearOverlayRecords()
+      this.#ownedAudio?.destroy()
       this.#destroyController()
       this.#runtimeSession.destroy()
       this.#toc?.destroy()
@@ -494,6 +535,36 @@ export class FlowSurfaceHost {
     this.#componentHandles = []
   }
 
+  #destroyVideoHandles(): void {
+    for (const handle of this.#videoHandles) handle.destroy()
+    this.#videoHandles = []
+  }
+
+  #clearOverlayRecords(): void {
+    for (const record of this.#overlayRecords.values()) record.effects.retire()
+    this.#overlayRecords.clear()
+  }
+
+  #removeOverlayRecord(id: string, record: FlowOverlayRecord): void {
+    record.effects.retire()
+    for (const runtime of [...this.#runtimeHandles]) {
+      if (runtime.wrap === record.wrap) this.#retireRuntimeHandle(runtime)
+    }
+    this.#componentHandles = this.#componentHandles.filter(handle => {
+      if (!record.wrap.contains(handle.element)) return true
+      handle.destroy()
+      return false
+    })
+    this.#videoHandles = this.#videoHandles.filter(handle => {
+      if (!record.wrap.contains(handle.element)) return true
+      handle.destroy()
+      return false
+    })
+    record.wrap.remove()
+    this.#overlayRecords.delete(id)
+    this.#interactionNodes.delete(id)
+  }
+
   #destroyRuntimeHandles(): void {
     const records = [...this.#runtimeHandles]
     this.#runtimeHandles = []
@@ -513,7 +584,7 @@ export class FlowSurfaceHost {
     return true
   }
 
-  #mountRuntime(wrap: HTMLElement, item: PublishedRuntimeLayerItem): void {
+  #mountRuntime(wrap: HTMLElement, item: PublishedRuntimeLayerItem, effects = this.#carrierEffects): void {
     wrap.replaceChildren()
     wrap.dataset.flowRuntimeState = 'playback'
     wrap.style.pointerEvents = item.hitPolicy === 'auto' ? 'auto' : 'none'
@@ -535,11 +606,11 @@ export class FlowSurfaceHost {
         this.#options.resolveAsset,
       ),
       session: this.#runtimeSession,
-      ...(this.#carrierEffects.courseState
-        ? { courseState: this.#carrierEffects.courseState }
+      ...(effects.courseState
+        ? { courseState: effects.courseState }
         : {}),
-      ...(this.#carrierEffects.runtimeActions
-        ? { actions: this.#carrierEffects.runtimeActions }
+      ...(effects.runtimeActions
+        ? { actions: effects.runtimeActions }
         : {}),
       fallbackText: firstVisibleRuntimeText(item.runtime.content.values)
         ?? item.runtime.protocol,
@@ -585,20 +656,22 @@ export class FlowSurfaceHost {
     for (const mount of deferred) mount()
   }
 
-  #applyLocation(locationId: string): void {
+  #applyLocation(locationId: string, force = false): void {
     const location = resolveFlowLocation(this.#playback, locationId)
     const completedResetLocationId = this.#completedActiveResetLocationId
     this.#completedActiveResetLocationId = null
+    const preparedActivation = this.#preparedRuntimeActivation
     this.#preparedRuntimeActivation = null
     const sameLocation = location.id === this.#locationId
       && location.surfaceId === this.#surfaceId
     const pendingActivation = this.#pendingRuntimeActivation
+    const forced = force || (pendingActivation ?? preparedActivation)?.forced === true
     this.#pendingRuntimeActivation = null
     if (pendingActivation !== null) this.#carrierSideEffects.activate()
     if (completedResetLocationId === location.id && sameLocation) return
     if (
       pendingActivation?.locationId === location.id
-      && !pendingActivation.forced
+      && !forced
       && sameLocation
     ) {
       if (this.#deferredCarrierMounts.length > 0) {
@@ -619,10 +692,26 @@ export class FlowSurfaceHost {
     }
     this.#invalidateInteractions()
     this.#interactionPort?.resetLocalVisibility()
+    const preserveDocument = !forced && location.surfaceId === this.#surfaceId && this.#article !== null
     this.#locationId = location.id
     this.#surfaceId = location.surfaceId
     if (this.#root) this.#root.dataset.surfaceId = this.#surfaceId
-    this.#render()
+    if (preserveDocument) {
+      this.#renderOverlay(findPublishedFlowSurface(this.#playback, this.#surfaceId), true)
+      if (this.#active && pendingActivation !== null) {
+        for (const record of [...this.#runtimeHandles]) {
+          record.handle?.setVisible(true)
+          if (!record.retired) record.handle?.resume()
+        }
+        for (const handle of this.#componentHandles) {
+          handle.setVisible(true)
+          handle.resume()
+        }
+      }
+      if (this.#active) this.#mountDeferredCarriers()
+      this.#interactionPort?.refreshNodes(this.#interactionNodes.values(), ++this.#interactionGeneration)
+      this.#syncTeacherControllerSession()
+    } else this.#render()
     this.#applyShellLayout()
     this.#scrollToAnchor(
       location.blockId
@@ -642,7 +731,7 @@ export class FlowSurfaceHost {
     const shell = flowRuntimeTocShellLayout(this.tocOpen)
     if (this.#article) this.#article.style.marginLeft = `${shell.articleInsetPx}px`
     for (const plane of this.#layerPlanes()) {
-      plane.style.left = `${shell.viewportOverlayInsetPx}px`
+      plane.style.left = '0px'
     }
     if (this.#article) {
       this.#syncPaperOverlayPositions(
@@ -709,8 +798,10 @@ export class FlowSurfaceHost {
     this.#pendingRuntimeActivation = null
     this.#interactionPort?.refreshNodes([], ++this.#interactionGeneration)
     this.#interactionNodes.clear()
+    this.#clearOverlayRecords()
     this.#destroyRuntimeHandles()
     this.#destroyComponentHandles()
+    this.#destroyVideoHandles()
     const surface = findPublishedFlowSurface(this.#playback, this.#surfaceId)
     const article = renderFlowArticle(surface, {
       playback: this.#playback,
@@ -753,11 +844,21 @@ export class FlowSurfaceHost {
     } else {
       this.#root.style.backgroundImage = 'none'
     }
+    if (this.#options.playbackView && this.#content) {
+      this.#content.style.backgroundColor = this.#root.style.backgroundColor
+      this.#content.style.backgroundImage = this.#root.style.backgroundImage
+      this.#content.style.backgroundSize = 'cover'
+      this.#content.style.backgroundPosition = 'center'
+      this.#content.style.backgroundRepeat = 'no-repeat'
+      this.#root.style.backgroundImage = 'none'
+      this.#root.style.backgroundColor = 'transparent'
+    }
     article.addEventListener('scroll', () => {
       this.#syncPaperOverlayPositions(surface)
+      this.#options.playbackView?.refreshBounds()
     })
     this.#article?.remove()
-    this.#root.insertBefore(article, this.#surfaceOverlay)
+    this.#content!.insertBefore(article, this.#surfaceOverlay)
     this.#article = article
     this.#toc?.sync()
     this.#renderOverlay(surface)
@@ -771,8 +872,7 @@ export class FlowSurfaceHost {
     const article = this.#article
     if (!article) return
     const entries = publishedFlowOverlayEntries(this.#playback, surface, this.#locationId)
-    const scrollTop = article.scrollTop
-    const paperInset = flowRuntimeTocShellLayout(this.tocOpen).paperOverlayInsetPx
+    const geometry = this.#flowGeometry()
     for (const entry of entries) {
       if (isPublishedTeacherController(entry.item)) continue
       if (entry.item.paperSpace !== 'paper') continue
@@ -780,22 +880,51 @@ export class FlowSurfaceHost {
         `[data-flow-overlay-item="${entry.item.layerItemId}"]`,
       )
       if (wrap) {
-        wrap.style.left = `${entry.item.frame.x + paperInset}px`
-        wrap.style.top = `${entry.item.frame.y - scrollTop}px`
+        const point = geometry.paperToViewport(entry.item.frame)
+        wrap.style.left = `${point.x}px`
+        wrap.style.top = `${point.y}px`
       }
     }
   }
 
-  #renderOverlay(surface: PublishedFlowSurface): void {
+  #flowGeometry() {
+    const root = this.#root
+    const article = this.#article
+    const paper = article?.querySelector<HTMLElement>('.flow-runtime-reading')
+    const size = {
+      width: root?.clientWidth || CANVAS_WIDTH,
+      height: root?.clientHeight || CANVAS_HEIGHT,
+    }
+    return createFlowViewportGeometry({
+      viewportClientRect: { x: 0, y: 0, ...size },
+      layoutViewportSize: size,
+      paperOriginLayout: root && article && paper
+        ? measureFlowPaperOrigin(root, article, paper, this.#options.playbackView?.state.zoom ?? 1, this.#options.playbackView?.state.pan)
+        : { x: 0, y: 0 },
+      paperScrollLayout: { x: article?.scrollLeft ?? 0, y: article?.scrollTop ?? 0 },
+    })
+  }
+
+  #renderOverlay(surface: PublishedFlowSurface, preserve = false): void {
     const overlay = this.#overlay
     if (!overlay || !this.#globalUnderlay || !this.#surfaceUnderlay || !this.#surfaceOverlay) return
     this.#destroyController()
-    for (const plane of this.#layerPlanes()) plane.replaceChildren()
+    if (!preserve) for (const plane of this.#layerPlanes()) plane.replaceChildren()
+    else for (const plane of this.#layerPlanes()) {
+      plane.querySelectorAll('.flow-runtime-teacher-controller-frame').forEach(element => element.remove())
+    }
     const entries = publishedFlowOverlayEntries(this.#playback, surface, this.#locationId)
-    const scrollTop = this.#article?.scrollTop ?? 0
-    const paperInset = flowRuntimeTocShellLayout(this.tocOpen).paperOverlayInsetPx
+    const visibleIds = new Set(entries.map(entry => entry.item.layerItemId))
+    for (const id of this.#interactionNodes.keys()) {
+      if (!visibleIds.has(id)) this.#interactionNodes.delete(id)
+    }
+    for (const [id, record] of this.#overlayRecords) {
+      if (!visibleIds.has(id)) this.#removeOverlayRecord(id, record)
+    }
+    const geometry = this.#flowGeometry()
     for (const entry of entries) {
       if (isPublishedTeacherController(entry.item)) {
+        this.#interactionNodes.delete(entry.item.layerItemId)
         const wrap = this.#mountTeacherController(
           entry.item,
           entry.source,
@@ -806,6 +935,14 @@ export class FlowSurfaceHost {
       }
       const targetPlane = this.#layerPlaneForEntry(entry)
       if (!targetPlane) continue
+      const existing = this.#overlayRecords.get(entry.item.layerItemId)
+      if (existing) {
+        existing.wrap.style.zIndex = String(entry.stackOrder)
+        // Payload updates rebuild the host. Only location composition varies here.
+        this.#registerInteractionNode(existing.wrap, entry.item, entry.source)
+        continue
+      }
+      const effects = this.#carrierSideEffects.createScope()
       const wrap = renderStaticOverlayItem(
         targetPlane.ownerDocument,
         entry,
@@ -814,11 +951,13 @@ export class FlowSurfaceHost {
           projectId: this.#playback.courseId,
           components: this.#components,
           interactive: true,
-          ...(this.#carrierEffects.courseState
-            ? { courseState: this.#carrierEffects.courseState }
+          audio: this.#audio,
+          onMountVideo: handle => this.#videoHandles.push(handle),
+          ...(effects.courseState
+            ? { courseState: effects.courseState }
             : {}),
-          ...(this.#carrierEffects.componentActions
-            ? { componentActions: this.#carrierEffects.componentActions }
+          ...(effects.componentActions
+            ? { componentActions: effects.componentActions }
             : {}),
           ...(!this.#active
             ? {
@@ -827,22 +966,22 @@ export class FlowSurfaceHost {
                 },
               }
             : {}),
-          scrollTop,
-          paperInset,
+          geometry,
           onMountComponent: (handle) => {
             this.#componentHandles.push(handle)
           },
         },
       )
       targetPlane.appendChild(wrap)
+      this.#overlayRecords.set(entry.item.layerItemId, { wrap, effects })
       if (isExecutableFlowSurfaceRuntime(entry)) {
         wrap.dataset.flowRuntimeKind = entry.item.runtime.protocol
         wrap.style.pointerEvents = entry.item.hitPolicy === 'auto' ? 'auto' : 'none'
-        if (this.#active) this.#mountRuntime(wrap, entry.item)
+        if (this.#active) this.#mountRuntime(wrap, entry.item, effects)
         else {
           wrap.dataset.flowRuntimeState = 'deferred'
           this.#deferredCarrierMounts.push(() => {
-            if (this.#root?.contains(wrap) === true) this.#mountRuntime(wrap, entry.item)
+            if (this.#root?.contains(wrap) === true) this.#mountRuntime(wrap, entry.item, effects)
           })
         }
       } else if (entry.item.kind === 'runtime') {
@@ -871,7 +1010,7 @@ export class FlowSurfaceHost {
     source: 'global' | 'surface',
     stackOrder: number,
   ): HTMLElement | null {
-    const overlay = this.#overlay
+    const overlay = this.#controllerPlane ?? this.#overlay
     if (!overlay || item.content.nativeType !== 'teacher-controller') return null
     if (this.#playback.playback?.controls === 'none') return null
     const data = item.content.data
@@ -909,10 +1048,14 @@ export class FlowSurfaceHost {
     )
     const scenes = this.#controllerScenes()
     this.#controller = new TeacherControllerDom({
+      navigation: this.#options.navigation,
+      playbackView: this.#options.playbackView,
       node,
       container: frameEl,
       footprintElement: frameEl,
-      canvas: { ...FLOW_LOGICAL_CANVAS },
+      get canvas() {
+        return { width: overlay.clientWidth || CANVAS_WIDTH, height: overlay.clientHeight || CANVAS_HEIGHT }
+      },
       getRenderedStageBounds: () => stageBoundsFromElement(overlay, FLOW_LOGICAL_CANVAS),
       scenes,
       getCurrentSceneId: () => this.#options.courseProgressSource?.getCurrentLocationId()
@@ -985,7 +1128,9 @@ export class FlowSurfaceHost {
   }
 
   #destroyController(): void {
+    const frame = this.#controller?.rootElement.parentElement
     this.#controller?.destroy()
+    if (this.#controllerPlane?.contains(frame ?? null)) frame?.remove()
     this.#controller = null
   }
 
@@ -1076,6 +1221,9 @@ export class FlowSurfaceHost {
 
   #scrollToAnchor(anchorId: string): void {
     const target = this.#article?.querySelector<HTMLElement>(`#${cssEscape(anchorId)}`)
+    for (let ancestor = target?.parentElement; ancestor; ancestor = ancestor.parentElement) {
+      if (ancestor.tagName === 'DETAILS') (ancestor as HTMLDetailsElement).open = true
+    }
     target?.scrollIntoView({ block: 'start' })
   }
 }
@@ -1119,20 +1267,6 @@ function createFlowRuntimePlane(
     overflow: 'hidden',
   })
   return element
-}
-
-function createFlowHostAudioSession(defaultMuted: boolean): FlowHostAudioSession {
-  let muted = defaultMuted
-  return {
-    muted: () => muted,
-    setMuted: (value) => {
-      muted = value
-    },
-    toggleMuted: () => {
-      muted = !muted
-      return muted
-    },
-  }
 }
 
 export function composePublishedFlowLocation(input: {
@@ -1229,9 +1363,10 @@ function renderStaticOverlayItem(
     courseState?: CourseStateStoreContract
     componentActions?: Readonly<ComponentHostActions>
     onMountComponent?: (handle: PublishedComponentMountHandle) => void
+    audio?: FlowHostAudioSession
+    onMountVideo?: (handle: PublishedNativeVideoHandle) => void
     deferComponentMount?: (mount: () => void) => void
-    scrollTop?: number
-    paperInset?: number
+    geometry?: ReturnType<typeof createFlowViewportGeometry>
   },
 ): HTMLElement {
   const wrap = dom.createElement('div')
@@ -1242,13 +1377,18 @@ function renderStaticOverlayItem(
     wrap.dataset.flowPaperSpace = 'paper'
   }
   wrap.style.position = 'absolute'
-  const leftInset = entry.item.paperSpace === 'paper' ? (options?.paperInset ?? 0) : 0
-  wrap.style.left = `${entry.item.frame.x + leftInset}px`
-  const topOffset = entry.item.paperSpace === 'paper' ? (options?.scrollTop ?? 0) : 0
-  wrap.style.top = `${entry.item.frame.y - topOffset}px`
+  const point = entry.item.paperSpace === 'paper' && options?.geometry
+    ? options.geometry.paperToViewport(entry.item.frame)
+    : entry.item.frame
+  wrap.style.left = `${point.x}px`
+  wrap.style.top = `${point.y}px`
   wrap.style.width = `${entry.item.frame.width}px`
   wrap.style.height = `${entry.item.frame.height}px`
   wrap.style.opacity = String(entry.item.opacity)
+  wrap.dataset.playbackBounds = 'true'
+  if (entry.item.kind === 'runtime' || entry.item.kind === 'component') wrap.dataset.layerKind = entry.item.kind
+  wrap.style.transform = entry.item.rotation === 0 ? '' : `rotate(${entry.item.rotation}deg)`
+  wrap.style.transformOrigin = 'center center'
   wrap.inert = entry.item.hitPolicy !== 'auto'
   const intrinsicallyInteractive = (
     entry.item.kind === 'native' && entry.item.content.nativeType === 'video'
@@ -1257,96 +1397,17 @@ function renderStaticOverlayItem(
     ? 'auto'
     : 'none'
   wrap.style.zIndex = String(entry.stackOrder)
-  if (entry.item.kind === 'native' && entry.item.content.nativeType === 'image') {
-    const url = resolveAsset(entry.item.content.data.assetId)
-    if (url) {
-      const image = dom.createElement('img')
-      image.src = url
-      image.alt = ''
-      image.style.width = '100%'
-      image.style.height = '100%'
-      image.style.objectFit = entry.item.content.data.fit === 'stretch'
-        ? 'fill'
-        : (entry.item.content.data.fit ?? 'contain')
-      if (entry.item.content.data.cornerRadius) {
-        image.style.borderRadius = `${entry.item.content.data.cornerRadius}px`
-      }
-      const transforms: string[] = []
-      if (entry.item.content.data.flipX) transforms.push('scaleX(-1)')
-      if (entry.item.content.data.flipY) transforms.push('scaleY(-1)')
-      if (transforms.length > 0) image.style.transform = transforms.join(' ')
-      wrap.appendChild(image)
-      return wrap
-    }
-  }
-  if (entry.item.kind === 'native' && entry.item.content.nativeType === 'video') {
-    const url = resolveAsset(entry.item.content.data.assetId)
-    if (url) {
-      const video = dom.createElement('video')
-      video.controls = true
-      video.src = url
-      video.style.width = '100%'
-      video.style.height = '100%'
-      video.style.objectFit = 'contain'
+  if (entry.item.kind === 'native') {
+    const input = nativeRenderInputFromPublishedItem(entry.item)
+    paintPublishedNativeRenderInput(wrap, input, { resolveAsset })
+    const video = wrap.querySelector('video')
+    if (video && input.type === 'video') {
       video.style.pointerEvents = entry.item.hitPolicy === 'auto' ? 'auto' : 'none'
-      wrap.appendChild(video)
+      if (options?.interactive) {
+        const handle = mountPublishedNativeVideo(video, input, { audio: options.audio })
+        if (handle) options.onMountVideo?.(handle)
+      }
     }
-    return wrap
-  }
-  if (entry.item.kind === 'native' && entry.item.content.nativeType === 'shape') {
-    if (entry.item.content.data.pathGeometry || entry.item.content.data.braceGeometry) {
-      wrap.style.overflow = 'visible'
-      wrap.appendChild(createNativePathSvg(dom, entry.item.content.data, entry.item.frame.width, entry.item.frame.height))
-      return wrap
-    }
-    const canvas = dom.createElement('canvas')
-    canvas.width = Math.max(1, Math.round(entry.item.frame.width))
-    canvas.height = Math.max(1, Math.round(entry.item.frame.height))
-    Object.assign(canvas.style, {
-      display: 'block',
-      width: '100%',
-      height: '100%',
-    })
-    const context = canvas.getContext('2d')
-    if (context) {
-      renderShapeCanvas(context, {
-        ...entry.item.content.data,
-        id: entry.item.layerItemId,
-        name: entry.item.layerItemId,
-        type: 'shape',
-        x: 0,
-        y: 0,
-        width: entry.item.frame.width,
-        height: entry.item.frame.height,
-        rotation: 0,
-        opacity: 1,
-        visible: entry.item.visible,
-        locked: false,
-        playbackInitialVisibility: entry.item.playbackInitialVisibility,
-      }, canvas.width, canvas.height)
-    }
-    wrap.appendChild(canvas)
-    return wrap
-  }
-  if (entry.item.kind === 'native' && entry.item.content.nativeType === 'text') {
-    paintPublishedNativeText(
-      wrap,
-      entry.item.content.data,
-      { width: entry.item.frame.width, height: entry.item.frame.height },
-    )
-    return wrap
-  }
-  if (entry.item.kind === 'native' && entry.item.content.nativeType === 'formula') {
-    wrap.style.boxSizing = 'border-box'
-    wrap.style.overflow = 'hidden'
-    paintPublishedFormula(wrap, {
-      formulaId: entry.item.content.data.formulaId,
-      accessibleText: entry.item.content.data.accessibleText,
-      ast: entry.item.content.data.ast,
-      style: entry.item.content.data.style,
-      width: Math.max(1, entry.item.frame.width),
-      height: Math.max(1, entry.item.frame.height),
-    })
     return wrap
   }
   if (entry.item.kind === 'component') {
@@ -1370,7 +1431,9 @@ function renderStaticOverlayItem(
       })
       options?.onMountComponent?.(handle)
     }
-    if (options?.deferComponentMount) options.deferComponentMount(mountInstance)
+    if (options?.deferComponentMount) options.deferComponentMount(() => {
+      if (wrap.isConnected) mountInstance()
+    })
     else mountInstance()
     return wrap
   }
@@ -1449,9 +1512,11 @@ function renderFlowArticle(
   article.style.setProperty('container-type', FLOW_MEDIA_QUERY_CONTAINER_TYPE)
   article.style.setProperty('container-name', 'flow-media-root')
   article.style.background = 'transparent'
+  article.style.padding = FLOW_BODY_SCROLL_PADDING
   article.style.color = '#172033'
 
   article.addEventListener('wheel', (event: WheelEvent) => {
+    if (event.ctrlKey || event.defaultPrevented) return
     const maxScroll = Math.max(0, article.scrollHeight - article.clientHeight)
     if (maxScroll <= 0) return
     const prevScroll = article.scrollTop
@@ -1467,8 +1532,10 @@ function renderFlowArticle(
   let dragStartScroll = 0
   let activePointerId = -1
 
+  article.addEventListener('touchstart', event => { if (event.touches.length > 1) isDragging = false }, { passive: true })
+
   article.addEventListener('pointerdown', (event: PointerEvent) => {
-    if (event.button !== 0) return
+    if (event.button !== 0 || event.defaultPrevented) return
     const target = event.target as HTMLElement | null
     if (target && typeof target.closest === 'function') {
       if (target.closest('video, audio, button, a, input, textarea, [data-flow-interactive]')) {
@@ -1513,10 +1580,13 @@ function renderFlowArticle(
   article.addEventListener('pointercancel', endDrag)
 
   const reading = dom.createElement('div')
-  reading.className = 'flow-runtime-reading'
+  reading.className = 'flow-runtime-reading flow-body-content'
   reading.style.maxWidth = `${surface.layout.readingWidth}px`
   reading.style.margin = '0 auto'
-  reading.style.padding = '24px 32px 120px'
+  reading.style.padding = FLOW_BODY_PAPER_PADDING
+  const typography = dom.createElement('style')
+  typography.textContent = FLOW_BODY_CSS
+  article.appendChild(typography)
   article.appendChild(reading)
 
   for (const block of surface.blocks) {
@@ -1554,9 +1624,10 @@ function renderBlockDom(
   },
 ): void {
   const dom = parent.ownerDocument
-  const assignBlock = (element: HTMLElement) => {
+  const assignBlock = <T extends HTMLElement>(element: T): T => {
     element.dataset.flowBlockId = block.id
     element.dataset.flowBlockType = block.type
+    element.dataset.flowBodyBlock = block.type
     return element
   }
 
@@ -1680,7 +1751,6 @@ function renderBlockDom(
     }
     case 'chart': {
       const figure = assignBlock(dom.createElement('figure'))
-      figure.style.margin = '16px 0'
       figure.style.width = '100%'
       figure.style.aspectRatio = `${Math.max(240, (options.readingWidth ?? 760) - 104)} / ${block.height}`
       figure.innerHTML = buildNativeChartSvg(block.chart, Math.max(240, (options.readingWidth ?? 760) - 104), block.height, block.id)
@@ -1770,13 +1840,17 @@ function renderBlockDom(
       return
     }
     case 'section': {
-      const section = assignBlock(dom.createElement('section'))
+      const section = assignBlock(dom.createElement('details'))
+      section.open = !block.collapsedByDefault
       section.id = flowRuntimeTocAnchorId(block.id)
       section.dataset.flowTocAnchor = block.id
-      const title = dom.createElement('h2')
+      const title = dom.createElement('summary')
       title.textContent = block.title
       section.appendChild(title)
-      for (const child of block.blocks) renderBlockDom(child, section, options)
+      const contents = dom.createElement('div')
+      contents.className = 'flow-section-content'
+      for (const child of block.blocks) renderBlockDom(child, contents, options)
+      section.appendChild(contents)
       parent.appendChild(section)
       return
     }
@@ -1828,8 +1902,9 @@ function applyFlowBlockTypography(
   element: HTMLElement,
   block: { textAlign?: 'left' | 'center' | 'right'; lineSpacing?: number },
 ): void {
-  if (block.textAlign) element.style.textAlign = block.textAlign
-  element.style.lineHeight = block.lineSpacing === undefined ? '' : String(1.6 + block.lineSpacing / 16)
+  const presentation = resolveFlowParagraphPresentation(block)
+  element.style.textAlign = presentation.textAlign
+  element.style.lineHeight = String(presentation.lineHeight)
 }
 
 function appendRichText(
@@ -1837,30 +1912,10 @@ function appendRichText(
   text: string,
   runs?: TextRun[],
 ): void {
-  const segments = flowRichTextSegments(text, runs)
-  if (segments.length === 0) {
-    element.textContent = text
-    return
-  }
-  const dom = element.ownerDocument
-  for (const segment of segments) {
-    const span = dom.createElement('span')
-    span.textContent = segment.text
-    if (segment.style.fontFamily) span.style.fontFamily = segment.style.fontFamily
-    if (segment.style.fontSize !== undefined) span.style.fontSize = `${segment.style.fontSize}px`
-    if (segment.style.baseline !== undefined) span.style.verticalAlign = `${segment.style.baseline}em`
-    if (segment.style.bold) span.style.fontWeight = '700'
-    if (segment.style.italic) span.style.fontStyle = 'italic'
-    if (segment.style.underline) span.style.textDecoration = 'underline'
-    if (segment.style.strike) {
-      span.style.textDecoration = span.style.textDecoration
-        ? `${span.style.textDecoration} line-through`
-        : 'line-through'
-    }
-    if (segment.style.color) span.style.color = segment.style.color
-    if (segment.style.highlightColor) span.style.backgroundColor = segment.style.highlightColor
-    element.appendChild(span)
-  }
+  const content = element.ownerDocument.createElement('span')
+  content.dataset.flowPublishedRichText = 'true'
+  content.innerHTML = buildFlowRichTextHtml(text, runs)
+  element.appendChild(content)
 }
 
 function cssEscape(value: string): string {

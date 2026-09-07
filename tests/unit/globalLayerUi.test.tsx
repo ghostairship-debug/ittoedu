@@ -598,8 +598,8 @@ describe('Project V8 global-layer editor UI', () => {
     expect(updated.buttons?.at(-1)?.action).toEqual({
       type: 'scene.open-picker',
     })
-    expect(updated.buttons).toHaveLength(8)
-    expect(new Set((updated.buttons ?? []).map((button) => button.id)).size).toBe(8)
+    expect(updated.buttons).toHaveLength((controller.type === 'teacher-controller' ? controller.buttons?.length ?? 0 : 0) + 1)
+    expect(new Set((updated.buttons ?? []).map((button) => button.id)).size).toBe(updated.buttons?.length)
   })
 
   it('writes 图层位置 as one undoable global plane without changing authored order', () => {

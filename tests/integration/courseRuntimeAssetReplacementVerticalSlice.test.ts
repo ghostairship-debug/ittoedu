@@ -1,7 +1,8 @@
+import { isAuthoringHistoryTransactionFrame } from '../../src/renderer/authoring/resourceAwareAuthoringHistory'
 import { beforeEach, describe, expect, it } from 'vitest'
 import type { RuntimeTargetEditSession } from '@/renderer/authoring/runtimeTargetEditSession'
 import { isFlowEditorTransactionFrame } from '@/renderer/course/flowEditorSlice'
-import { isSlideAuthoringTransactionFrame } from '@/renderer/course/slideEditorCommands'
+
 import { isSpatialAuthoringTransactionFrame } from '@/renderer/course/spatialAuthoringHistory'
 import { buildPublishedCourseV2Payload } from '@/renderer/export/course/buildPublishedCourse'
 import {
@@ -369,7 +370,7 @@ function activeTransactionAssetIds(): string[] {
   const active = activeHistory()
   const frame = active.history.past.at(-1)
   const isTransaction = active.kind === 'slide'
-    ? Boolean(frame && isSlideAuthoringTransactionFrame(frame))
+    ? Boolean(frame && isAuthoringHistoryTransactionFrame(frame))
     : active.kind === 'flow'
       ? Boolean(frame && isFlowEditorTransactionFrame(frame))
       : Boolean(frame && isSpatialAuthoringTransactionFrame(frame))

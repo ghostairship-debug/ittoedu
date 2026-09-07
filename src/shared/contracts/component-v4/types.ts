@@ -133,6 +133,9 @@ export type ConfigurableComponentManifest = ComponentManifestV4
 export type ComponentManifest = ComponentManifestV4
 
 export interface ComponentHostActions {
+  /** Published hosts expose continuous steps; feature-detect on older hosts. */
+  nextStep?(): boolean
+  previousStep?(): boolean
   goToScene(sceneId: string, targetStateId?: string): boolean
   nextScene(): boolean
   previousScene(): boolean

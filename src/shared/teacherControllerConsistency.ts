@@ -36,6 +36,8 @@ type LegacyGlobalLayerItem = {
 }
 
 const NAVIGATION_ACTIONS = new Set([
+  'step.previous',
+  'step.next',
   'scene.previous',
   'scene.next',
   'scene.replay',

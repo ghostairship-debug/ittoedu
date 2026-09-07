@@ -1,3 +1,5 @@
+import type { PlaybackNavigationViewPort } from '../../navigation/coursePlaybackSequence'
+import { createPlaybackContent, type PlaybackViewSession } from '../../playbackViewSession'
 import type { SpatialPathDash } from '../../../shared/courseProjectTypes'
 import { resolveCourseSurfaceBackgroundColor } from '../../../shared/courseProjectModel'
 import { resolveEffectiveBackground } from '../../../shared/effectiveBackground'
@@ -62,7 +64,7 @@ import {
 import {
   paintPublishedNativeRenderInput,
   readonlyNativeRenderInputFromPublishedItem,
-} from '../slide/publishedNativeRendering'
+} from '../native/publishedNativeRendering'
 import {
   PublishedDomInteractionSurfacePort,
   PublishedInteractionVisibilityState,
@@ -117,6 +119,8 @@ export interface SpatialSurfaceHostOptions {
   audioChangeSource?: SpatialAudioChangeSource
   courseProgressSource?: SpatialCourseProgressSource
   teacherControllerSession?: TeacherControllerRuntimeSessionStore
+  navigation?: PlaybackNavigationViewPort
+  playbackView?: PlaybackViewSession
   deferTeacherControllerCourseReset?: boolean
   resolveAsset?: (assetId: string) => string | undefined
   projectId?: string
@@ -569,6 +573,7 @@ export class SpatialSurfaceHost {
   #options: SpatialSurfaceHostOptions
   #components: Record<string, PublishedComponentPackageSource> | undefined
   #root: HTMLElement | null = null
+  #controllerLayer: HTMLElement | null = null
   #svg: SVGSVGElement | null = null
   #world: SVGGElement | null = null
   #worldHtml: HTMLElement | null = null
@@ -761,6 +766,20 @@ export class SpatialSurfaceHost {
       root.style.pointerEvents = 'none'
       root.dataset.hostMode = 'capture'
     }
+    const content = this.#options.playbackView ? createPlaybackContent(root) : root
+    if (this.#options.playbackView) {
+      content.style.backgroundColor = root.style.backgroundColor
+      content.style.backgroundImage = root.style.backgroundImage
+      content.style.backgroundSize = 'cover'
+      content.style.backgroundPosition = 'center'
+      content.style.backgroundRepeat = 'no-repeat'
+      root.style.backgroundImage = 'none'
+      root.style.backgroundColor = 'transparent'
+      const controllerLayer = dom.createElement('div')
+      Object.assign(controllerLayer.style, { position: 'absolute', inset: '0', zIndex: '3', pointerEvents: 'none' })
+      root.appendChild(controllerLayer)
+      this.#controllerLayer = controllerLayer
+    }
     const svg = dom.createElementNS(SVG_NS, 'svg')
     svg.setAttribute('width', String(camera.viewportWidth))
     svg.setAttribute('height', String(camera.viewportHeight))
@@ -791,8 +810,8 @@ export class SpatialSurfaceHost {
       overflow: 'visible',
       pointerEvents: 'none',
     })
-    root.appendChild(underlayLayer)
-    root.appendChild(svg)
+    content.appendChild(underlayLayer)
+    content.appendChild(svg)
     const worldHtml = dom.createElement('div')
     worldHtml.className = 'spatial-world-html'
     worldHtml.setAttribute('data-testid', 'spatial-world-html')
@@ -804,7 +823,7 @@ export class SpatialSurfaceHost {
       transformOrigin: '0 0',
       zIndex: '1',
     })
-    root.appendChild(worldHtml)
+    content.appendChild(worldHtml)
     const screenLayer = dom.createElement('div')
     screenLayer.className = 'spatial-screen-layer spatial-global-overlay-layer'
     screenLayer.dataset.coordinateSpace = 'viewport'
@@ -818,7 +837,7 @@ export class SpatialSurfaceHost {
       pointerEvents: 'none',
       zIndex: '2',
     })
-    root.appendChild(screenLayer)
+    content.appendChild(screenLayer)
     container.appendChild(root)
     this.#root = root
     this.#svg = svg
@@ -828,7 +847,8 @@ export class SpatialSurfaceHost {
     this.#screenLayer = screenLayer
     this.#interactionPort = new PublishedDomInteractionSurfacePort(root)
     this.#gestureDisposer = attachSpatialPlaybackCameraGestures({
-      root,
+      root: content,
+      observation: this.#options.playbackView !== undefined,
       isActive: () => this.#active && this.#session.active && !this.#destroyed,
       getCamera: () => this.#session.camera,
       setCamera: (camera) => {
@@ -839,6 +859,10 @@ export class SpatialSurfaceHost {
     this.#renderWorldDecorations()
     this.#updateWorldTransform()
     this.#reconcileRecords()
+    if (this.#options.playbackView) {
+      svg.style.overflow = 'visible'
+      this.#options.playbackView.register({ id: this.id, kind: 'spatial', root, content, onObservationChange: () => this.#reconcileWorldVisibility() })
+    }
   }
 
   async activate(): Promise<void> {
@@ -971,6 +995,7 @@ export class SpatialSurfaceHost {
     this.#session = setSpatialRuntimeCamera(this.#session, camera)
     this.#updateWorldTransform()
     this.#reconcileWorldVisibility()
+    this.#options.playbackView?.refreshBounds()
   }
 
   async capture(request: SurfaceCaptureRequest): Promise<SurfaceCapture> {
@@ -1298,7 +1323,8 @@ export class SpatialSurfaceHost {
     for (const record of this.#records.values()) {
       const { item, coordinateSpace } = record.entry
       if (coordinateSpace === 'viewport') {
-        const parent = record.entry.source === 'global'
+        const parent = isSpatialTeacherControllerItem(item) && this.#controllerLayer
+          ? this.#controllerLayer : record.entry.source === 'global'
           && record.entry.globalPlane === 'underlay'
           ? this.#underlayLayer
           : this.#screenLayer
@@ -1306,7 +1332,7 @@ export class SpatialSurfaceHost {
         record.wrapper.style.display = ''
         continue
       }
-      const withinCamera = worldItemWithinRuntimeCamera(item, camera, rules)
+      const withinCamera = worldItemWithinRuntimeCamera(item, this.#observationCamera(camera), rules)
       const parent = isHtmlWorldWrapper(record.wrapper) ? this.#worldHtml : this.#world
       if (!parent.contains(record.wrapper)) parent.appendChild(record.wrapper)
       // Camera/semantic culling stays outside transient Interaction visibility.
@@ -1374,12 +1400,25 @@ export class SpatialSurfaceHost {
     this.#interactionNodes.set(item.layerItemId, handle)
   }
 
+  #observationCamera(camera: SpatialRuntimeCamera): SpatialRuntimeCamera {
+    const view = this.#options.playbackView?.state
+    if (!view || !this.#root) return camera
+    const scale = Number(this.#root.dataset.stageFitScale) || 1
+    const left = parseFloat(this.#root.style.left) || 0, top = parseFloat(this.#root.style.top) || 0
+    const centerX = ((view.viewport.width / 2 - view.pan.x) / view.zoom - left) / scale
+    const centerY = ((view.viewport.height / 2 - view.pan.y) / view.zoom - top) / scale
+    return { ...camera, x: camera.x + (centerX - camera.viewportWidth / 2) / camera.zoom,
+      y: camera.y + (centerY - camera.viewportHeight / 2) / camera.zoom,
+      zoom: camera.zoom * view.zoom,
+      viewportWidth: view.viewport.width / scale, viewportHeight: view.viewport.height / scale }
+  }
+
   #recordWithinRuntimeCamera(record: SpatialHostRecord): boolean {
     const camera = this.#session.camera
     if (!camera) return false
     return worldItemWithinRuntimeCamera(
       record.entry.item,
-      camera,
+      this.#observationCamera(camera),
       this.#session.input.surface.semanticZoom,
     )
   }
@@ -1427,6 +1466,8 @@ export class SpatialSurfaceHost {
       const wrapper = dom.createElement('div')
       wrapper.className = 'spatial-viewport-item'
       wrapper.dataset.spatialLayerRecord = 'true'
+      if (!isSpatialTeacherControllerItem(entry.item)) wrapper.dataset.playbackBounds = 'true'
+      if (entry.item.kind === 'runtime' || entry.item.kind === 'component') wrapper.dataset.layerKind = entry.item.kind
       wrapper.dataset.layerItemId = entry.item.layerItemId
       wrapper.dataset.layerKind = entry.item.kind
       wrapper.dataset.layerSource = entry.source
@@ -1570,6 +1611,8 @@ export class SpatialSurfaceHost {
   ): TeacherControllerDom {
     const node = teacherControllerDomNode(item.frame, item.rotation, item.content.data)
     return new TeacherControllerDom({
+      navigation: this.#options.navigation,
+      playbackView: this.#options.playbackView,
       node,
       container,
       footprintElement,

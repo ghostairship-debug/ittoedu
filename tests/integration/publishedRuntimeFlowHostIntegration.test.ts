@@ -479,23 +479,23 @@ describe('Published V2 Flow surface Runtime playback', () => {
 
     await session.goToLocation(fixture.secondFlowLocationId)
     const secondButton = container.querySelector<HTMLButtonElement>('[data-published-flow-runtime-button]')
-    expect(secondButton).not.toBe(firstButton)
-    expect(probe(view)).toMatchObject({ creates: 2, destroys: 1, busCalls: 2 })
+    expect(secondButton).toBe(firstButton)
+    expect(probe(view)).toMatchObject({ creates: 1, destroys: 0, busCalls: 1 })
     await vi.waitFor(() => {
-      expect(Reflect.get(view, '__flowCaptureFailureCreates')).toBe(2)
-      expect(Reflect.get(view, '__flowCaptureFailureDestroys')).toBe(2)
+      expect(Reflect.get(view, '__flowCaptureFailureCreates')).toBe(1)
+      expect(Reflect.get(view, '__flowCaptureFailureDestroys')).toBe(1)
     })
     const firstEmitter = (probe(view).emitters as unknown[])[0]
     if (typeof firstEmitter !== 'function') throw new Error('first Flow event emitter missing')
     firstEmitter()
     expect(probe(view)).toMatchObject({ busCalls: 2 })
     firstButton?.click()
-    expect(probe(view)).toMatchObject({ clicks: 0, detachedClicks: 0 })
+    expect(probe(view)).toMatchObject({ clicks: 1, detachedClicks: 0 })
 
     await session.goToLocation(fixture.slideLocationId)
     expect(probe(view)).toMatchObject({
-      creates: 2,
-      destroys: 1,
+      creates: 1,
+      destroys: 0,
       suspends: 1,
       visibleFalse: 1,
     })
@@ -511,10 +511,10 @@ describe('Published V2 Flow surface Runtime playback', () => {
     expect(lifecycleFallback?.querySelector('[data-flow-lifecycle-failure]')).toBeNull()
     expect(lifecycleFallback?.querySelector('[data-runtime-fallback="true"]')?.textContent)
       .toBe('生命周期失败')
-    expect(Reflect.get(view, '__flowLifecycleFailureDestroys')).toBe(2)
-    expect(Reflect.get(view, '__flowCaptureFailureDestroys')).toBe(2)
+    expect(Reflect.get(view, '__flowLifecycleFailureDestroys')).toBe(1)
+    expect(Reflect.get(view, '__flowCaptureFailureDestroys')).toBe(1)
     expect(Reflect.get(view, '__flowPostFailureSuspends')).toBe(1)
-    const failureEmitter = (probe(view).failureEmitters as unknown[])[1]
+    const failureEmitter = (probe(view).failureEmitters as unknown[])[0]
     if (typeof failureEmitter !== 'function') throw new Error('Flow failure emitter missing')
     failureEmitter()
     expect(Reflect.get(view, '__flowLifecycleStaleCalls')).toBe(0)
@@ -522,34 +522,34 @@ describe('Published V2 Flow surface Runtime playback', () => {
     await session.goToLocation(fixture.secondFlowLocationId)
     const resumedButton = container.querySelector<HTMLButtonElement>('[data-published-flow-runtime-button]')
     expect(resumedButton).toBe(secondButton)
-    expect(probe(view)).toMatchObject({ creates: 2, destroys: 1, resumes: 1, visibleTrue: 3 })
+    expect(probe(view)).toMatchObject({ creates: 1, destroys: 0, resumes: 1, visibleTrue: 2 })
     expect(Reflect.get(view, '__flowPostFailureResumes')).toBe(1)
 
     await session.navigator.goToLocation(fixture.secondFlowLocationId, { force: true })
     const forcedButton = container.querySelector<HTMLButtonElement>('[data-published-flow-runtime-button]')
     expect(forcedButton).not.toBe(secondButton)
-    expect(probe(view)).toMatchObject({ creates: 3, destroys: 2 })
+    expect(probe(view)).toMatchObject({ creates: 2, destroys: 1 })
     await vi.waitFor(() => {
-      expect(Reflect.get(view, '__flowLifecycleFailureDestroys')).toBe(2)
-      expect(Reflect.get(view, '__flowCaptureFailureDestroys')).toBe(3)
+      expect(Reflect.get(view, '__flowLifecycleFailureDestroys')).toBe(1)
+      expect(Reflect.get(view, '__flowCaptureFailureDestroys')).toBe(2)
     })
 
     await session.navigator.resetCurrentSurface()
     expect(session.navigator.current?.locationId).toBe(fixture.firstFlowLocationId)
-    expect(probe(view)).toMatchObject({ creates: 4, destroys: 3 })
+    expect(probe(view)).toMatchObject({ creates: 3, destroys: 2 })
     await session.navigator.resetCourse()
     expect(session.navigator.current?.locationId).toBe(fixture.firstFlowLocationId)
-    expect(probe(view)).toMatchObject({ creates: 5, destroys: 4 })
+    expect(probe(view)).toMatchObject({ creates: 4, destroys: 3 })
 
     await session.destroy()
     sessions.splice(sessions.indexOf(session), 1)
-    expect(probe(view)).toMatchObject({ creates: 5, destroys: 5, busCalls: 5 })
-    expect(Reflect.get(view, '__flowLifecycleFailureCreates')).toBe(5)
-    expect(Reflect.get(view, '__flowLifecycleFailureDestroys')).toBe(5)
-    expect(Reflect.get(view, '__flowCaptureFailureCreates')).toBe(5)
-    expect(Reflect.get(view, '__flowCaptureFailureDestroys')).toBe(5)
-    expect(Reflect.get(view, '__flowPostFailureCreates')).toBe(5)
-    expect(Reflect.get(view, '__flowPostFailureDestroys')).toBe(5)
+    expect(probe(view)).toMatchObject({ creates: 4, destroys: 4, busCalls: 5 })
+    expect(Reflect.get(view, '__flowLifecycleFailureCreates')).toBe(4)
+    expect(Reflect.get(view, '__flowLifecycleFailureDestroys')).toBe(4)
+    expect(Reflect.get(view, '__flowCaptureFailureCreates')).toBe(4)
+    expect(Reflect.get(view, '__flowCaptureFailureDestroys')).toBe(4)
+    expect(Reflect.get(view, '__flowPostFailureCreates')).toBe(4)
+    expect(Reflect.get(view, '__flowPostFailureDestroys')).toBe(4)
     const latestEmitter = (probe(view).emitters as unknown[]).at(-1)
     if (typeof latestEmitter !== 'function') throw new Error('latest Flow event emitter missing')
     latestEmitter()

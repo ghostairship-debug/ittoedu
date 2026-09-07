@@ -1,3 +1,4 @@
+import { commitResourceAwareAuthoringHistory } from '../../authoring/resourceAwareAuthoringHistory'
 import { updateSlideBackgroundOwner } from '../../course/courseBackgroundCommands'
 import { synchronizeCourseTeacherControllerControls } from '../../../shared/teacherControllerConsistency'
 import type { ComponentPackageData } from '../../../shared/componentTypes'
@@ -45,11 +46,7 @@ import {
 import { transformSlideNativeLayers } from '../../course/slideAuthoringBackend'
 import { createSlideAuthoringBackend } from '../../course/slideAuthoringBackend'
 import { updateSlideNativeLayerContent } from '../../course/v9SlideContentCommands'
-import {
-  SLIDE_REJECT_STALE_REVISION,
-  commitSlideAuthoringHistory,
-  commitSlideProjectMutation,
-} from '../../course/slideEditorCommands'
+import { SLIDE_REJECT_STALE_REVISION, commitSlideProjectMutation } from '../../course/slideEditorCommands'
 import { isSlideAuthoringBackend } from '../slideBackendPort'
 import { SESSIONLESS_COURSE_REASON, type EditorStoreKernel } from '../editorStoreKernel'
 import { projectV9EditingNodes, courseLayerItemToEditorCanvasNode } from '../slideEditorProjection'
@@ -132,7 +129,7 @@ export function createSlideOwnedCommands(
           historyEntry: true,
           nextSession: {
             ...session,
-            history: commitSlideAuthoringHistory(session.history, project),
+            history: commitResourceAwareAuthoringHistory(session.history, project),
             ...(extra.scope ? { scope: extra.scope } : {}),
           },
           selection: extra.selectionIds
@@ -224,7 +221,7 @@ export function createSlideOwnedCommands(
           historyEntry: true,
           nextSession: {
             ...session,
-            history: commitSlideAuthoringHistory(session.history, project),
+            history: commitResourceAwareAuthoringHistory(session.history, project),
           },
           selection: session.selection,
         }
@@ -255,7 +252,7 @@ export function createSlideOwnedCommands(
           historyEntry: true,
           nextSession: {
             ...session,
-            history: commitSlideAuthoringHistory(session.history, project),
+            history: commitResourceAwareAuthoringHistory(session.history, project),
           },
           selection: session.selection,
         }
@@ -306,7 +303,7 @@ export function createSlideOwnedCommands(
           historyEntry: true,
           nextSession: {
             ...session,
-            history: commitSlideAuthoringHistory(session.history, project),
+            history: commitResourceAwareAuthoringHistory(session.history, project),
           },
           selection: session.selection,
         }
@@ -334,7 +331,7 @@ export function createSlideOwnedCommands(
           historyEntry: true,
           nextSession: {
             ...session,
-            history: commitSlideAuthoringHistory(session.history, project),
+            history: commitResourceAwareAuthoringHistory(session.history, project),
           },
           selection: session.selection,
         }
@@ -362,7 +359,7 @@ export function createSlideOwnedCommands(
           historyEntry: true,
           nextSession: {
             ...session,
-            history: commitSlideAuthoringHistory(session.history, project),
+            history: commitResourceAwareAuthoringHistory(session.history, project),
           },
           selection: session.selection,
         }
@@ -381,7 +378,7 @@ export function createSlideOwnedCommands(
         if (!result.ok) return { ok: false, reason: result.reason, historyEntry: false, nextSession: session, selection: session.selection }
         return {
           ok: true, historyEntry: result.historyEntry,
-          nextSession: { ...session, history: result.historyEntry ? commitSlideAuthoringHistory(session.history, result.project) : session.history },
+          nextSession: { ...session, history: result.historyEntry ? commitResourceAwareAuthoringHistory(session.history, result.project) : session.history },
           selection: session.selection,
         }
       }, { statusMessage: '已更新演示页背景' })
@@ -426,7 +423,7 @@ export function createSlideOwnedCommands(
           historyEntry: true,
           nextSession: {
             ...session,
-            history: commitSlideAuthoringHistory(session.history, project),
+            history: commitResourceAwareAuthoringHistory(session.history, project),
           },
           selection: session.selection,
         }
@@ -448,7 +445,7 @@ export function createSlideOwnedCommands(
         if (!result.ok) return { ok: false, reason: result.reason, historyEntry: false, nextSession: session, selection: session.selection }
         return {
           ok: true, historyEntry: result.historyEntry,
-          nextSession: { ...session, history: result.historyEntry ? commitSlideAuthoringHistory(session.history, result.project) : session.history },
+          nextSession: { ...session, history: result.historyEntry ? commitResourceAwareAuthoringHistory(session.history, result.project) : session.history },
           selection: session.selection,
         }
       }, { statusMessage: '已更新场景背景' })
@@ -493,7 +490,7 @@ export function createSlideOwnedCommands(
           historyEntry: true,
           nextSession: {
             ...session,
-            history: commitSlideAuthoringHistory(session.history, project),
+            history: commitResourceAwareAuthoringHistory(session.history, project),
           },
           selection: session.selection,
         }
@@ -819,7 +816,7 @@ export function createSlideOwnedCommands(
             historyEntry: true,
             nextSession: {
               ...next,
-              history: commitSlideAuthoringHistory(session.history, next.history.present),
+              history: commitResourceAwareAuthoringHistory(session.history, next.history.present),
             },
             selection: next.selection,
           }

@@ -404,7 +404,21 @@ describe('Project V8 global-layer editor store', () => {
     store.updateGlobalLayerSettings(controllerId, {
       visibility: { mode: 'include', sceneIds: [secondScene!.id] },
     })
+    const controllerBefore = structuredClone(selectCandidateGlobalLayerItems(useEditorStore.getState())!
+      .find((entry) => entry.item.layerItemId === controllerId)!)
+    const historyLength = activeHistory().past.length
     expect(store.deleteScene(secondScene!.id)).toBe(true)
+    expect(activeHistory().past).toHaveLength(historyLength + 1)
+    expect(selectCandidateGlobalLayerItems(useEditorStore.getState())!
+      .find((entry) => entry.item.layerItemId === controllerId)?.item).toEqual(controllerBefore.item)
+    expect(projectedGlobalLayer(useEditorStore.getState()).find(
+      (item) => item.node.id === controllerId,
+    )?.visibility).toEqual({ mode: 'include', sceneIds: [firstScene!.id] })
+
+    store.undo()
+    expect(selectCandidateGlobalLayerItems(useEditorStore.getState())!
+      .find((entry) => entry.item.layerItemId === controllerId)).toEqual(controllerBefore)
+    store.redo()
     expect(projectedGlobalLayer(useEditorStore.getState()).find(
       (item) => item.node.id === controllerId,
     )?.visibility).toEqual({ mode: 'include', sceneIds: [firstScene!.id] })

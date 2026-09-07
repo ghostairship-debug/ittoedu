@@ -5,7 +5,7 @@ import {
   nativeMediaAssetIds,
   paintPublishedNativeRenderInput,
   readonlyNativeRenderInputFromV9Item,
-} from '../../src/player/surfaces/slide/publishedNativeRendering'
+} from '../../src/player/surfaces/native/publishedNativeRendering'
 import { SlidePublishedAdapter } from '../../src/player/surfaces/slide/SlidePublishedAdapter'
 import type {
   CourseProjectDocument,

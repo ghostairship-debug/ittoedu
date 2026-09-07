@@ -1,6 +1,6 @@
 # IttoEdu 开发总纲
 
-> 当前路线核实日期：2026-09-05。当前任务、数量和状态只看自动生成的 [任务板](docs/development-plan/TASK_BOARD.md)。
+> 当前路线核实日期：2026-09-07。当前任务、数量和状态只看自动生成的 [任务板](docs/development-plan/TASK_BOARD.md)。
 >
 > 本文件只保存当前产品决定、边界和开发路线。已经完成、取消或被取代的内容在下一次路线更新时移出正文，由 Git 历史保留；不得在这里维护 changelog、完成卡清单或行号级历史源码快照。
 
@@ -48,7 +48,7 @@ IttoEdu 是受控团队使用的内部生产工具。默认工程、Runtime、Co
 
 - 作者工程为 Course Project V9；发布为 Published Course V2；兼容 Runtime API 2/3、Component API 4 与 Interaction Protocol V1。
 - V9 软冻结：已有字段、判别器和语义不得静默改写；additive 可选字段必须独立合同提交并保持 `.strict()`。Table、Chart 与 Slide-only input 是 Owner 已批准的三个 strict discriminator 窄例外，不构成任意扩展授权。不导入 V8 `.h5lesson`，不借重构创建 V10。
-- 当前实现尚无可见 AI、聊天或 Provider。1.6–1.9 只允许在默认隐藏入口后建设本地 CLI Harness、生成内核、CLI 直连/Skills/基础聊天与会话 dogfood；2.0 才在内部生产构建中正式开放。任何版本节点未真实完成前，`courseAiHandoff` / `courseAiPatch` 等 internal/reserved 接口仍不得宣称为可用能力。
+- 当前已实现本地 CLI Harness、生成内核、CLI 直连/Skills/基础聊天。按 Owner 2026-09-07 决定，1.8 起普通内部生产构建默认显示创作助手，无需 dogfood 开关；入口开放不代替 S3 实际验收。任何版本节点未真实完成前，`courseAiHandoff` / `courseAiPatch` 等 internal/reserved 接口仍不得宣称为可用能力。
 - `artifacts/ai-capabilities` 是 Builder 的产品契约；repo-index 只是显式、可缺省、可重建且不 tracked 的本地导航缓存，不能覆盖源码事实或成为产品门。
 - Runtime/Component 是经过审核的可信扩展。外部导入只是分发方式；真实 consumer 需要宿主能力时走稳定宿主接口或同宿主执行语义，不建权限审批平台。
 - 1.7 起，生成的 Runtime/Component 必须先通过自动准入门；通过后可获得当前可信扩展已经正式具备的宿主能力，无需人工代码审核。该信任不会开放 Provider Secret、原始 Electron Main、任意 OS 命令、远程脚本或尚未进入正式合同的接口。
@@ -93,7 +93,19 @@ IttoEdu 是受控团队使用的内部生产工具。默认工程、Runtime、Co
 
 优先级仍以受支持场景中的用户可用性为第一轴。路线的完整任务图、发布制品、不可降级矩阵和次旗舰执行规格位于 [`docs/development-plan/roadmap/`](docs/development-plan/roadmap/README.md)；路线节点不是协调状态，只有满足依赖、届时事实与写锁后才按协议实例化，当前 `queued / active / blocked` 仍只看任务板。
 
-### 5.1 当前起点：1.3 Recipe 与设计生产力
+### 5.1 当前起点：1.8 三表面整合与可用性收口，S3 待验收
+
+2026-09-07后续Owner确认新增[场景/步骤导航分层](docs/development-plan/roadmap/1.8/r18-085-navigation-levels.md)：上/下一步连续推进并在场景边界自动跨场景，上一/下一场景直接跳过剩余内部步骤；Spatial镜头属于同画布内部步骤。新增r18-085→086→087必选链，r18-060/S3另等087；原r18-083工程证据保留。085–087已实施并完成真实Electron、保存重开与离线HTML工程验证，见[导航结束记录](docs/development-plan/reviews/1.8-navigation-level-exit.md)；S3仍待教师签署。
+
+以现有1.8为基础，按[三表面架构整合方案](docs/development-plan/THREE_SURFACE_ARCHITECTURE_INTEGRATION_PLAN.md)插入有限整合阶段，暂缓1.9–2.0新增能力扩张。Slide保留逐页/状态，Flow保留语义正文/滚动，Spatial保留世界/镜头；整合共同Native绘制、既有段落语义、Core历史、组件包修改和运行观察接口，不重写工程模型或创建万能Surface服务。V9结构足够；Owner已批准D1方案A：Flow正文响应式布局与浮层统一CSS尺度，主动运行缩放单独应用，接受旧浮层初始投影变化并复核旧课件。
+
+[可用性整改方案](docs/development-plan/roadmap/1.8/USABILITY_REPAIR_PLAN.md)的U01–U11/R01–R09编号和证据保留，独立阻断先修，坐标/绘制纳入整合。缩放仅在当前位置试运行和整课预览：整课缩放优先从非Component/Runtime区域的手势/键鼠发起；动态区域优先内部逻辑，仅明确无冲突时转交，未知不接管。教师控制器有独立可见的“缩放”按钮，展开缩小/倍率/放大/恢复面板；播放区域底部横向、右侧纵向边条用于平移整个观察视图，Runtime铺满画面或占用内部拖拽时仍可操作。按钮、边条与手势共用同一临时view状态，控制器/边条固定且可达，缩小/resize后校正偏移；边条不重复修改Flow正文scroll，也不能只移动Spatial world而漏掉global Runtime。从外部或按钮发起整课缩放时，控制器以外全部内容和字体同比放大，控制器不变，答案/焦点/实例进度不重置。 窗口resize排版不抵消主动放大；既有Flow对齐/行距贯通DOCX，高级排版不作为结束门。
+
+当前原生传输的Claude实际闭环及包源码两轮修订已通过；Codex、OpenCode基础聊天与组件源码连续两轮均已通过，Codex纯讨论保持零工程修改。调用与格式修复证据见[CLI修复记录](docs/development-plan/reviews/1.8-cli-call-format-repair.md)，S3继续待教师验收。三表面源码、两窗口几何、播放观察与Spatial Runtime已取得当前真实宿主及离线HTML证据，范围和限制见[整合交付记录](docs/development-plan/reviews/1.8-surface-integration-exit.md)。以下保留已签署基线与前置能力范围，不按历史阶段重新启动任务。
+
+Flow组件转正文补真实实例后备与一次资源事务；人工Runtime.js/Manifest.json和AI包修改先汇入同一个包修订、全部实例校验与replacement owner，再接专业面板和完整源码快照。不能只取消editableCopy只读，因为现有人工同版本源码写入与正式包替换的版本规则存在分裂。
+
+正式1.8 DAG新增15个整合节点，并同步manifest/规格；r18-083为工程结束门，r18-060仍须当前原生三CLI、既有PPTX两节点及S3教师签署。1.9的PPTX媒体/效果节点也显式等待r18-060，2.0沿原依赖后移。整合工程收口可与Codex外部服务恢复分开；不降低三CLI验收门。Owner已授权本轮实施1.8整合；沿现有协调卡推进，工程验证与S3签署分开，不提交或发布。
 
 当前开发以已签署的 `v1.1.1` 为维护基线；1.1 阶段的执行过程和已闭合评审由 Git 历史保存，不在当前总纲维护完成记录。
 
@@ -112,13 +124,13 @@ input 的作者/规则族/双键原子提交/Player/HTML/PPTX 纵切（F1）和�
 
 ### 5.3 1.6–2.0：本地 CLI 驱动的 AI
 
-- **1.6 Local CLI Harness**：探测、启动、流式事件、恢复、取消和本地会话隔离；Codex、Claude、OpenCode 自行登录，AI 默认隐藏，CLI 缺失不影响人工编辑。
+- **1.6 Local CLI Harness**：探测、启动、流式事件、恢复、取消和本地会话隔离；Codex、Claude、OpenCode 自行登录，1.6 阶段 AI 默认隐藏（1.8 起按 Owner 决定开放入口），CLI 缺失不影响人工编辑。
 - **1.7 生成内核**：Native → Recipe → Existing Component → Generated Component → Runtime 载体阶梯；CLI 只接收不可变最小 snapshot 并向 session staging/structured stdout 输出严格 typed candidate，宿主通过 1.4 canonical commands 原子提交；CLI 无 live 工程接口，自动准入失败时工程零写入。
 - **1.8 CLI 直连/Skills/基础聊天**：任务与每轮最小快照直接发给 CLI，复用 1.7 候选与宿主提交器；前移 Chat、引用、真实事件时间线、安全渲染和 Stop/Undo/Preview；S3 验收三 CLI 生成与基础聊天，不建设 MCP。
 - **1.9 会话/Dogfood**：在 1.8 基础聊天上闭合重启恢复、迁移、损坏隔离、范围删除与真实课例持续使用。
 - **2.0 内部生产 AI**：在内部生产构建中正式开放设置、生成、编辑、Agent 与内置 Profile，补齐发送上下文提示、可访问性、失败恢复和固定课例 Owner 验收；不把它描述成面向外部不受信用户的公开发行。
 
-1.6–1.9 只发布源码标签且 AI 默认隐藏；2.0 发布源码标签和固定课例离线 HTML，不做安装包。
+1.6–1.9 只发布源码标签；1.8 起 AI 入口默认显示；2.0 发布源码标签和固定课例离线 HTML，不做安装包。
 
 ### 5.3.1 PPTX 人工能力增强的版本节点
 
@@ -142,7 +154,7 @@ input 的作者/规则族/双键原子提交/Player/HTML/PPTX 纵切（F1）和�
 
 - 不创建 V10，不恢复 V8 导入，不建立 V9/V8 双轨或迁移 UI。
 - 不建设第二套模型规划循环、Provider 插件平台、权限审批平台、通用工作流引擎、长期 Provider Secret 存储或任意 OS 命令通道。
-- 1.6–1.9 不在普通内部生产构建中显示 AI；2.0 以前 internal/reserved 接口仍不能被宣传成可用能力。
+- 1.6–1.7 阶段 AI 默认隐藏；按 Owner 已明确决定，1.8 起普通内部生产构建默认显示创作助手，入口开放不代替 S3 验收。未完成的 internal/reserved 接口仍不能被宣传成可用能力。
 - 不因内部生产工具的主动模块化建设多租户隔离、公开插件权限市场、零信任审批平台、通用 capability broker 或假设性恶意扩展沙箱；只有分发范围、信任来源或宿主能力边界真实变化时才重新裁决威胁模型。
 - 不让 OpenMAIC、安装包、未证实的兼容矩阵、判题结果自动桥、图数据库、向量库、CRDT 或协同预研进入核心发布关键路径。
 - 不在交互协议中加入拖放/放置触发器或顺序动作；分类使用声明式点击路径，排序使用当前 Component 载体。只有真实教师反馈要求拖放手势时才单独立项。

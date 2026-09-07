@@ -1,3 +1,4 @@
+import { RESOURCE_AWARE_AUTHORING_HISTORY_LIMIT, commitResourceAwareAuthoringHistory, type ResourceAwareAuthoringHistory, type AuthoringHistoryResourceTransition } from '../authoring/resourceAwareAuthoringHistory'
 import type {
   CourseProjectDocument,
   LayerItem,
@@ -8,9 +9,7 @@ import {
   commitAuthoringDocumentTransaction,
 } from '../authoring/resourceAwareAuthoringHistory'
 import {
-  cloneHistoryResourceChanges,
   type HistoryResourceChanges,
-  type HistoryResourceDirection,
 } from '../store/courseResourceState'
 import { commitCourseProjectMutation as commitSlideProjectMutation } from './courseProjectMutation'
 import { buildSlideEditorView, type SlideEditorLayerScope } from './slideEditorView'
@@ -20,7 +19,6 @@ export { commitSlideProjectMutation }
 export const SLIDE_REJECT_LOCKED = 'locked'
 export const SLIDE_REJECT_STALE_REVISION = 'stale-revision'
 export const SLIDE_REJECT_WRONG_OWNER = 'wrong-owner'
-export const SLIDE_AUTHORING_HISTORY_LIMIT = 100
 
 /** Stable editor-only identities; they are never persisted in the project or history. */
 export interface SlideAuthoringSelection {
@@ -31,59 +29,6 @@ export interface SlideAuthoringSelection {
 
 /** @deprecated Use SlideAuthoringSelection. Kept as the donor command-layer alias. */
 export type SlideEditorSelection = SlideAuthoringSelection
-
-export interface SlideAuthoringHistory {
-  readonly present: CourseProjectDocument
-  readonly past: readonly SlideAuthoringHistoryEntry[]
-  readonly future: readonly SlideAuthoringHistoryEntry[]
-}
-
-export interface SlideAuthoringTransactionFrame {
-  readonly kind: 'editor-transaction'
-  readonly document: CourseProjectDocument
-  readonly resourceChanges: HistoryResourceChanges
-}
-
-export type SlideAuthoringHistoryEntry =
-  | CourseProjectDocument
-  | SlideAuthoringTransactionFrame
-
-export interface SlideAuthoringResourceTransition {
-  readonly resourceChanges: HistoryResourceChanges
-  readonly resourceDirection: HistoryResourceDirection
-}
-
-export function isSlideAuthoringTransactionFrame(
-  entry: SlideAuthoringHistoryEntry,
-): entry is SlideAuthoringTransactionFrame {
-  return 'kind' in entry && entry.kind === 'editor-transaction'
-}
-
-export function slideAuthoringLegacyHistoryEntryCount(
-  entries: readonly SlideAuthoringHistoryEntry[],
-): number {
-  return entries.reduce(
-    (count, entry) => count + (isSlideAuthoringTransactionFrame(entry) ? 0 : 1),
-    0,
-  )
-}
-
-function slideAuthoringHistoryDocument(
-  entry: SlideAuthoringHistoryEntry,
-): CourseProjectDocument {
-  return isSlideAuthoringTransactionFrame(entry) ? entry.document : entry
-}
-
-function slideAuthoringTransactionFrame(
-  document: CourseProjectDocument,
-  resourceChanges: HistoryResourceChanges,
-): SlideAuthoringTransactionFrame {
-  return Object.freeze({
-    kind: 'editor-transaction' as const,
-    document,
-    resourceChanges: cloneHistoryResourceChanges(resourceChanges),
-  })
-}
 
 /**
  * Stable authoring token. `authoringAddress` is always `makeAuthoringAddress`.
@@ -109,7 +54,7 @@ export interface SlideCommandResult {
   readonly nextSession?: SlideAuthoringSessionRef
   readonly historyEntry?: boolean
   readonly selection?: SlideAuthoringSelection
-  readonly resourceTransition?: SlideAuthoringResourceTransition
+  readonly resourceTransition?: AuthoringHistoryResourceTransition
 }
 
 /**
@@ -118,7 +63,7 @@ export interface SlideCommandResult {
  */
 export interface SlideAuthoringSessionRef {
   readonly sessionId: string
-  readonly history: SlideAuthoringHistory
+  readonly history: ResourceAwareAuthoringHistory
   readonly selection: SlideAuthoringSelection
   readonly scope: SlideEditorLayerScope
   readonly generation: number
@@ -155,37 +100,11 @@ export interface SlideEditorTransformInput {
   readonly nodes: readonly SlideEditorNodeTransform[]
 }
 
-export function createSlideAuthoringHistory(
-  project: CourseProjectDocument,
-): SlideAuthoringHistory {
-  return Object.freeze({
-    present: project,
-    past: Object.freeze([] as SlideAuthoringHistoryEntry[]),
-    future: Object.freeze([] as SlideAuthoringHistoryEntry[]),
-  })
-}
-
-export function commitSlideAuthoringHistory(
-  history: SlideAuthoringHistory,
-  next: CourseProjectDocument,
-  limit = SLIDE_AUTHORING_HISTORY_LIMIT,
-  resourceChanges?: HistoryResourceChanges,
-): SlideAuthoringHistory {
-  const previous = resourceChanges === undefined
-    ? history.present
-    : slideAuthoringTransactionFrame(history.present, resourceChanges)
-  return Object.freeze({
-    present: next,
-    past: Object.freeze([...history.past, previous].slice(-limit)),
-    future: Object.freeze([] as SlideAuthoringHistoryEntry[]),
-  })
-}
-
 export function commitSlideEditorTransactionHistory(
-  history: SlideAuthoringHistory,
+  history: ResourceAwareAuthoringHistory,
   step: EditorTransactionStep,
-  limit = SLIDE_AUTHORING_HISTORY_LIMIT,
-): SlideAuthoringHistory {
+  limit = RESOURCE_AWARE_AUTHORING_HISTORY_LIMIT,
+): ResourceAwareAuthoringHistory {
   if (
     history.present.id !== step.projectId ||
     history.present.revision !== step.baseRevision
@@ -195,7 +114,7 @@ export function commitSlideEditorTransactionHistory(
       '编辑事务与当前 Slide 文档不一致',
     )
   }
-  return commitSlideAuthoringHistory(
+  return commitResourceAwareAuthoringHistory(
     history,
     step.nextDocument,
     limit,
@@ -204,13 +123,13 @@ export function commitSlideEditorTransactionHistory(
 }
 
 export function commitSlideActionTransaction(
-  history: SlideAuthoringHistory,
+  history: ResourceAwareAuthoringHistory,
   next: CourseProjectDocument,
   resourceChanges: HistoryResourceChanges = {},
-  limit = SLIDE_AUTHORING_HISTORY_LIMIT,
+  limit = RESOURCE_AWARE_AUTHORING_HISTORY_LIMIT,
 ): {
-  readonly history: SlideAuthoringHistory
-  readonly resourceTransition: SlideAuthoringResourceTransition
+  readonly history: ResourceAwareAuthoringHistory
+  readonly resourceTransition: AuthoringHistoryResourceTransition
 } | null {
   try {
     const committed = commitAuthoringDocumentTransaction(
@@ -233,64 +152,6 @@ export function commitSlideActionTransaction(
     }
     throw error
   }
-}
-
-export function slideAuthoringUndoResourceTransition(
-  history: SlideAuthoringHistory,
-): SlideAuthoringResourceTransition | undefined {
-  const previous = history.past.at(-1)
-  if (!previous || !isSlideAuthoringTransactionFrame(previous)) return undefined
-  return Object.freeze({
-    resourceChanges: previous.resourceChanges,
-    resourceDirection: 'inverse' as const,
-  })
-}
-
-export function slideAuthoringRedoResourceTransition(
-  history: SlideAuthoringHistory,
-): SlideAuthoringResourceTransition | undefined {
-  const next = history.future[0]
-  if (!next || !isSlideAuthoringTransactionFrame(next)) return undefined
-  return Object.freeze({
-    resourceChanges: next.resourceChanges,
-    resourceDirection: 'forward' as const,
-  })
-}
-
-export function undoSlideAuthoringHistory(
-  history: SlideAuthoringHistory,
-): SlideAuthoringHistory {
-  const previous = history.past.at(-1)
-  if (!previous) return history
-  const transaction = isSlideAuthoringTransactionFrame(previous)
-  return Object.freeze({
-    present: slideAuthoringHistoryDocument(previous),
-    past: Object.freeze(history.past.slice(0, -1)),
-    future: Object.freeze([
-      transaction
-        ? slideAuthoringTransactionFrame(history.present, previous.resourceChanges)
-        : history.present,
-      ...history.future,
-    ]),
-  })
-}
-
-export function redoSlideAuthoringHistory(
-  history: SlideAuthoringHistory,
-): SlideAuthoringHistory {
-  const next = history.future[0]
-  if (!next) return history
-  const transaction = isSlideAuthoringTransactionFrame(next)
-  return Object.freeze({
-    present: slideAuthoringHistoryDocument(next),
-    past: Object.freeze([
-      ...history.past,
-      transaction
-        ? slideAuthoringTransactionFrame(history.present, next.resourceChanges)
-        : history.present,
-    ]),
-    future: Object.freeze(history.future.slice(1)),
-  })
 }
 
 export function selectSlideEditorLayers(
@@ -363,12 +224,12 @@ function isSceneFrameTransformableKind(kind: LayerItem['kind']): boolean {
  * most one Project revision and one history entry regardless of selection size.
  */
 export function transformSelectedSlideNativeLayers(
-  history: SlideAuthoringHistory,
+  history: ResourceAwareAuthoringHistory,
   selection: SlideAuthoringSelection,
   input: SlideEditorTransformInput,
   scope: SlideEditorLayerScope = 'scene',
   now?: string,
-): SlideAuthoringHistory {
+): ResourceAwareAuthoringHistory {
   if (input.nodes.length === 0) return history
   const nodeIds = input.nodes.map((node) => node.nodeId)
   if (new Set(nodeIds).size !== nodeIds.length) {
@@ -485,5 +346,5 @@ export function transformSelectedSlideNativeLayers(
     }
   }, now)
 
-  return commitSlideAuthoringHistory(history, next)
+  return commitResourceAwareAuthoringHistory(history, next)
 }

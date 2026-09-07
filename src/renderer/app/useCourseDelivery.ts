@@ -29,7 +29,7 @@ import {
 } from '../export/exportSize'
 import { loadPlayerBundle } from '../export/loadPlayerBundle'
 import type { PublishedCourseSession } from '../../player/surfaces/publishedDynamicHosts'
-import { attachPublishedCourseStageFit, mountPublishedCourseTryRun } from '../ui/coursePlayerTryRun'
+import { mountPublishedCourseTryRun } from '../ui/coursePlayerTryRun'
 import { beginSerializedSessionMount, enqueueSerial } from '../ui/serializedSessionMount'
 
 export type CourseDeliveryFormat =
@@ -581,7 +581,6 @@ export function useCourseDelivery(
     }), {
       onReady: (session) => {
         previewFitRef.current?.()
-        previewFitRef.current = attachPublishedCourseStageFit(previewHost)
         previewSessionRef.current = session
         setPreviewFeedback(null)
       },

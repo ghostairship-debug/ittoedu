@@ -1,14 +1,14 @@
 import type {
   VideoInteractionAction,
-} from '../../../shared/contracts/interaction-v1/types'
+} from '../../shared/contracts/interaction-v1/types'
 import type {
   ReadonlyNativeRenderInput,
-} from '../../../shared/contracts/native-v1/types'
+} from '../../shared/contracts/native-v1/types'
 import type {
   AudioManager,
   BackgroundAudioInterruption,
   VideoAudioRegistration,
-} from '../../AudioManager'
+} from '../AudioManager'
 
 export type PublishedVideoInput = Extract<
   ReadonlyNativeRenderInput,
@@ -22,7 +22,7 @@ export type PublishedVideoEventListener = (seconds?: number) => void
 export interface PublishedNativeVideoHandle {
   readonly nodeId: string
   readonly element: HTMLVideoElement
-  /** Formal autoplay flag; the Slide host decides when an autoplay may run. */
+  /** Formal autoplay flag; the owning host decides when an autoplay may run. */
   readonly autoplay: boolean
   execute(action: VideoInteractionAction): boolean
   subscribe(kind: PublishedVideoEventKind, listener: PublishedVideoEventListener): () => void
@@ -33,7 +33,7 @@ export interface PublishedNativeVideoHandle {
 export interface PublishedNativeVideoMountOptions {
   /** Capture/authoring stays inert: no playback, no events. */
   capture?: boolean
-  /** Whole-course audio owner; never created or copied by the Slide host. */
+  /** Whole-course audio owner; shared with the owning surface host. */
   audio?: Pick<AudioManager, 'registerVideo' | 'beginBackgroundAudioInterruption'>
 }
 
@@ -73,8 +73,8 @@ function isPlayingElement(video: HTMLVideoElement): boolean {
 }
 
 /**
- * Single scene-local lifecycle handle for one Published V2 Native video.
- * The registry lives in the Slide host; this handle never queries the DOM
+ * Lifecycle handle for one Published V2 Native video.
+ * The registry lives in its surface host; this handle never queries the DOM
  * by id and never touches a second controller or event bus.
  */
 export function mountPublishedNativeVideo(

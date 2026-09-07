@@ -331,7 +331,7 @@ export function createTeacherControllerNode(
   options: TeacherControllerNodeOptions = {},
 ): TeacherControllerNode {
   const idFactory = options.idFactory ?? nanoid
-  const width = options.width ?? 900
+  const width = options.width ?? 1120
   const height = options.height ?? 64
   return {
     id: nextId('teacher_controller', options.id, idFactory),
@@ -352,6 +352,8 @@ export function createTeacherControllerNode(
     collapsible: options.collapsible ?? true,
     defaultCollapsed: options.defaultCollapsed ?? true,
     buttons: options.buttons ?? [
+      { id: nextId('teacher_button', undefined, idFactory), action: { type: 'step.previous' }, label: '上一步', visible: true },
+      { id: nextId('teacher_button', undefined, idFactory), action: { type: 'step.next' }, label: '下一步', visible: true },
       { id: nextId('teacher_button', undefined, idFactory), action: { type: 'scene.previous' }, label: '上一场景', visible: true },
       { id: nextId('teacher_button', undefined, idFactory), action: { type: 'scene.next' }, label: '下一场景', visible: true },
       { id: nextId('teacher_button', undefined, idFactory), action: { type: 'scene.open-picker' }, label: '场景目录', visible: true },

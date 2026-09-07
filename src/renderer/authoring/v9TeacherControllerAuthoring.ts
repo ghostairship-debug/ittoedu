@@ -1,3 +1,4 @@
+import { commitResourceAwareAuthoringHistory } from './resourceAwareAuthoringHistory'
 import { CANVAS_HEIGHT, CANVAS_WIDTH, MIN_NODE_SIZE } from '../../shared/constants'
 import { makeAuthoringAddress } from '../../shared/authoringAddress'
 import type {
@@ -35,18 +36,7 @@ import {
 import {
   SLIDE_BACKEND_NOT_CANDIDATE,
 } from '../store/slideBackendPort'
-import {
-  commitSlideAuthoringHistory,
-  commitSlideProjectMutation,
-  SlideCommandError,
-  SLIDE_REJECT_LOCKED,
-  SLIDE_REJECT_STALE_REVISION,
-  SLIDE_REJECT_WRONG_OWNER,
-  type SlideAuthoringSessionRef,
-  type SlideAuthoringTarget,
-  type SlideCommandOptions,
-  type SlideCommandResult,
-} from '../course/slideEditorCommands'
+import { commitSlideProjectMutation, SlideCommandError, SLIDE_REJECT_LOCKED, SLIDE_REJECT_STALE_REVISION, SLIDE_REJECT_WRONG_OWNER, type SlideAuthoringSessionRef, type SlideAuthoringTarget, type SlideCommandOptions, type SlideCommandResult } from '../course/slideEditorCommands'
 import type { SlideAuthoringBackend, SlideAuthoringSession } from '../course/slideAuthoringBackend'
 import type { EffectiveLayerPropertiesPatchAtTarget } from '../course/effectiveLayerCommands'
 
@@ -313,7 +303,7 @@ export function commitTeacherControllerAuthoringFrame(
     }, options.now)
     const nextSession: SlideAuthoringSessionRef = {
       ...session,
-      history: commitSlideAuthoringHistory(session.history, project),
+      history: commitResourceAwareAuthoringHistory(session.history, project),
     }
     return {
       ok: true,
@@ -413,7 +403,7 @@ export function commitTeacherControllerPropertiesAtTarget(
     }
     const nextSession: SlideAuthoringSessionRef = {
       ...session,
-      history: commitSlideAuthoringHistory(session.history, project),
+      history: commitResourceAwareAuthoringHistory(session.history, project),
     }
     return {
       ok: true,

@@ -1,3 +1,4 @@
+import { commitResourceAwareAuthoringHistory } from '../authoring/resourceAwareAuthoringHistory'
 import { nanoid } from 'nanoid'
 import { CANVAS_HEIGHT, CANVAS_WIDTH, MAX_SCENE_NODES } from '../../shared/constants'
 import { rotatedRectangleAabb } from '../../shared/geometry'
@@ -49,19 +50,7 @@ import {
   createTextNode,
   createVideoNode,
 } from '../project/nativeNodeFactories'
-import {
-  SLIDE_REJECT_LOCKED,
-  SLIDE_REJECT_STALE_REVISION,
-  SLIDE_REJECT_WRONG_OWNER,
-  SlideCommandError,
-  commitSlideAuthoringHistory,
-  commitSlideProjectMutation,
-  selectSlideEditorLayers,
-  type SlideAuthoringSelection,
-  type SlideAuthoringSessionRef,
-  type SlideCommandOptions,
-  type SlideCommandResult,
-} from './slideEditorCommands'
+import { SLIDE_REJECT_LOCKED, SLIDE_REJECT_STALE_REVISION, SLIDE_REJECT_WRONG_OWNER, SlideCommandError, commitSlideProjectMutation, selectSlideEditorLayers, type SlideAuthoringSelection, type SlideAuthoringSessionRef, type SlideCommandOptions, type SlideCommandResult } from './slideEditorCommands'
 import { buildSlideEditorView, type SlideEditorLayerView } from './slideEditorView'
 import {
   makeSlideAuthoringTarget,
@@ -471,7 +460,7 @@ function commitAdded(
 ): SlideCommandResult {
   return succeed({
     sessionId: session.sessionId,
-    history: commitSlideAuthoringHistory(session.history, project),
+    history: commitResourceAwareAuthoringHistory(session.history, project),
     selection: selectAdded(session, project, layerItemId),
     scope: session.scope,
     generation: session.generation,
@@ -484,7 +473,7 @@ function commitUpdated(
 ): SlideCommandResult {
   return succeed({
     sessionId: session.sessionId,
-    history: commitSlideAuthoringHistory(session.history, project),
+    history: commitResourceAwareAuthoringHistory(session.history, project),
     selection: selectSlideEditorLayers({
       project,
       locationId: session.selection.locationId,
@@ -1801,7 +1790,7 @@ function slideResultFromLayerCommand(
     }
   }
   const nextHistory = result.historyEntry
-    ? commitSlideAuthoringHistory(session.history, result.nextDocument)
+    ? commitResourceAwareAuthoringHistory(session.history, result.nextDocument)
     : {
         present: result.nextDocument,
         past: session.history.past,
@@ -2153,7 +2142,7 @@ export function coalesceSlideAuthoringCommands(
     historyEntry: true,
     nextSession: {
       ...next,
-      history: commitSlideAuthoringHistory(session.history, next.history.present),
+      history: commitResourceAwareAuthoringHistory(session.history, next.history.present),
     },
     selection: next.selection,
   }

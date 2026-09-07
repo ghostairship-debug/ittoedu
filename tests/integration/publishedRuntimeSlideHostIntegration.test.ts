@@ -13,7 +13,7 @@ import {
 } from '@/renderer/ui/coursePlayerTryRun'
 import {
   nativeRenderInputFromV9Item,
-} from '@/player/surfaces/slide/publishedNativeRendering'
+} from '@/player/surfaces/native/publishedNativeRendering'
 import { SlidePublishedAdapter } from '@/player/surfaces/slide/SlidePublishedAdapter'
 import {
   PLAYER_AUTHORING_MESSAGE_TYPES,

@@ -16,6 +16,7 @@ import { contentQaFixture } from '../fixtures/contentQa'
 import { createProjectFontDeliveryFixture } from '../fixtures/projectFontDelivery'
 import { buildPublishedCourseStandaloneHtml } from '../../src/renderer/export/course/buildCoursePackages'
 import { runDynamicAdmissionProbe } from './dynamicAdmissionProbe'
+import { runFlowReviewProbe } from './flowReviewProbe'
 import { runLocalCliFailureProbe } from './localCliFailureProbe'
 import { installChatFailureFixture } from './chatFailureFixture'
 import { fractionFallback, fractionComponentInstruction, exerciseFractionComponent, oscillationFallback, oscillationRuntimeInstruction, exerciseOscillationRuntime } from './generatedCarrierProbe'
@@ -104,7 +105,7 @@ async function closeEditor(app: ElectronApplication, runRoot: string): Promise<v
   removeRunRoot(runRoot)
 }
 
-async function launchEditor(developmentUrl = '', cliDogfood = false): Promise<LaunchedEditor> {
+async function launchEditor(developmentUrl = ''): Promise<LaunchedEditor> {
   const runRoot = mkdtempSync(
     join(tmpdir(), `${APP_E2E_TEMP_DIRECTORY_NAME}-wave-a-${process.pid}-`),
   )
@@ -117,7 +118,7 @@ async function launchEditor(developmentUrl = '', cliDogfood = false): Promise<La
       env: {
         ...process.env,
         VITE_DEV_SERVER_URL: developmentUrl,
-        ...(cliDogfood ? { COURSEWARE_CLI_DOGFOOD: '1' } : {}),
+        COURSEWARE_CLI_DOGFOOD: '',
         ELECTRON_DISABLE_SECURITY_WARNINGS: 'true',
         [BACKGROUND_E2E_ENV]: '1',
       },
@@ -459,6 +460,25 @@ test('S2 Builder V2：两份 Markdown 生成三 Surface 并在离线 HTML 连续
   }
 })
 
+test('Flow review: video lifecycle, anchor continuity and overlay visibility', async () => {
+  const server = await createServer({ configFile: join(root, 'vite.renderer.config.ts'), server: { host: '127.0.0.1', port: 0, strictPort: false, hmr: false } })
+  await server.listen()
+  const browser = await chromium.launch({ headless: true })
+  try {
+    const address = server.httpServer!.address()
+    if (!address || typeof address === 'string') throw new Error('Missing fixture server address')
+    const page = await browser.newPage()
+    await page.goto(`http://127.0.0.1:${address.port}`)
+    const result = await runFlowReviewProbe(page)
+    const { rotation, ...checks } = result
+    for (const [name, passed] of Object.entries(checks)) expect(passed, name).toBe(true)
+    expect(rotation).toBe('matrix(0.866025, 0.5, -0.5, 0.866025, 0, 0)')
+  } finally {
+    await browser.close()
+    await server.close()
+  }
+})
+
 test('S3 独立动态准入：正常候选、同步死循环终止与编辑保存响应', async () => {
   test.setTimeout(120_000)
   const { app, page, runRoot } = await launchEditor()
@@ -567,7 +587,7 @@ test('S3 聊天失败注入：一次修复、无进展停止、取消与人工�
   try {
     const address = server.httpServer!.address()
     if (!address || typeof address === 'string') throw new Error('Missing fixture server address')
-    launch = await launchEditor(`http://127.0.0.1:${address.port}`, true)
+    launch = await launchEditor(`http://127.0.0.1:${address.port}`)
     const { app, page, runRoot } = launch
     fixture = await installChatFailureFixture(app, runRoot)
     const filename = join(runRoot, 'failure-chat.h5lesson')
@@ -623,7 +643,33 @@ test('S3 聊天失败注入：一次修复、无进展停止、取消与人工�
   }
 })
 
-test('S3 普通讨论：安全消息、分页事件重放及零工程写入', async () => {
+test('S3 候选格式：非法JSON与缺通道共用一次修复预算', async () => {
+  test.setTimeout(90000)
+  const launch = await launchEditor()
+  const { app, page, runRoot } = launch
+  const fixture = await installChatFailureFixture(app, runRoot)
+  try {
+    const filename = join(runRoot, 'format-repair.h5lesson')
+    const original = await saveAs(app, page, filename)
+    await page.getByRole('button', { name: '创作助手', exact: true }).click()
+    const chat = page.getByRole('complementary', { name: 'CLI 创作助手' })
+    for (const mode of ['format-repair', 'missing-candidate', 'format-repeat'] as const) {
+      const count = fixture.runs().length
+      fixture.mode(mode)
+      await chat.getByLabel('发送给创作助手').fill('添加平均分讲解')
+      await chat.getByRole('button', { name: '发送', exact: true }).click()
+      if (mode === 'format-repeat') {
+        await expect(chat.getByRole('alert')).toBeVisible({ timeout: 20000 })
+        await expect(chat.getByRole('button', { name: '应用候选', exact: true })).toHaveCount(0)
+      } else await expect(chat.getByRole('button', { name: '应用候选', exact: true })).toBeEnabled({ timeout: 20000 })
+      expect(fixture.runs().slice(count).map(run => [run.revision, run.repair])).toEqual([[original.revision, false], [original.revision, true]])
+      expect(await saveCurrent(page, filename)).toEqual(original)
+    }
+    expect(launch.pageErrors).toEqual([])
+  } finally { await fixture.restore(); await closeEditor(app, runRoot) }
+})
+
+test('S3 默认可见与普通讨论：安全消息、分页事件重放及零工程写入', async () => {
   test.setTimeout(90000)
   const server = await createServer({ configFile: join(root, 'vite.renderer.config.ts'), server: { host: '127.0.0.1', port: 0, strictPort: false, hmr: false, watch: { ignored: ['**/output/**', '**/test-results/**'] } } })
   await server.listen()
@@ -632,7 +678,7 @@ test('S3 普通讨论：安全消息、分页事件重放及零工程写入', as
   try {
     const address = server.httpServer!.address()
     if (!address || typeof address === 'string') throw new Error('Missing fixture server address')
-    launch = await launchEditor(`http://127.0.0.1:${address.port}`, true)
+    launch = await launchEditor(`http://127.0.0.1:${address.port}`)
     const { app, page, runRoot } = launch
     fixture = await installChatFailureFixture(app, runRoot); fixture.mode('discussion')
     const filename = join(runRoot, 'discussion.h5lesson')
@@ -643,7 +689,8 @@ test('S3 普通讨论：安全消息、分页事件重放及零工程写入', as
     await chat.getByLabel('发送给创作助手').fill('讨论如何解释平均分，先不修改课件。')
     await chat.getByRole('button', { name: '发送', exact: true }).click()
     await expect(chat.getByRole('heading', { name: '只讨论，不修改课件' })).toBeVisible({ timeout: 20000 })
-    await expect(chat.getByText('CLI 原生事件（214）', { exact: true })).toBeVisible()
+    await expect(chat.getByRole('button', { name: '发送', exact: true })).toBeDisabled()
+    await expect(chat.getByText('CLI 原生事件（215）', { exact: true })).toBeVisible()
     await expect(chat.getByRole('button', { name: '应用候选', exact: true })).toHaveCount(0)
     expect(await saveCurrent(page, filename)).toEqual(original)
     expect(await page.evaluate(() => Reflect.get(window, '__unsafeChatExecuted'))).toBeUndefined()
@@ -652,16 +699,16 @@ test('S3 普通讨论：安全消息、分页事件重放及零工程写入', as
     const id = await chat.getByLabel('会话', { exact: true }).inputValue()
     await chat.getByLabel('会话', { exact: true }).selectOption('')
     await chat.getByLabel('会话', { exact: true }).selectOption(id)
-    const summary = chat.getByText('CLI 原生事件（214）', { exact: true })
+    const summary = chat.getByText('CLI 原生事件（215）', { exact: true })
     await expect(summary).toBeVisible(); await summary.click()
     const timeline = summary.locator('..')
     await expect(timeline.locator('ol > li')).toHaveCount(100)
     await timeline.getByRole('button', { name: '显示更早的事件' }).click()
     await timeline.getByRole('button', { name: '显示更早的事件' }).click()
     const sequences = await timeline.locator('ol > li').evaluateAll(items => items.map(item => item.textContent!.match(/^#(\d+)/)![1]))
-    expect(sequences).toHaveLength(214)
-    expect(new Set(sequences).size).toBe(214)
-    expect(sequences[0]).toBe('1'); expect(sequences.at(-1)).toBe('214')
+    expect(sequences).toHaveLength(215)
+    expect(new Set(sequences).size).toBe(215)
+    expect(sequences[0]).toBe('1'); expect(sequences.at(-1)).toBe('215')
     expect(await saveCurrent(page, filename)).toEqual(original)
     expect(launch.pageErrors).toEqual([])
   } finally {
@@ -672,7 +719,7 @@ test('S3 普通讨论：安全消息、分页事件重放及零工程写入', as
 })
 
 for (const adapter of ['codex', 'claude', 'opencode'] as const) test(`S3 真实聊天：${adapter} 生成候选、继续修改、单次撤销与保存`, async () => {
-  test.setTimeout(240000)
+  test.setTimeout(600000)
   const server = await createServer({ configFile: join(root, 'vite.renderer.config.ts'), server: { host: '127.0.0.1', port: 0, strictPort: false, hmr: false, watch: { ignored: ['**/output/**', '**/test-results/**'] } } })
   await server.listen()
   let launch: LaunchedEditor | undefined
@@ -680,7 +727,7 @@ for (const adapter of ['codex', 'claude', 'opencode'] as const) test(`S3 真实�
   try {
     const address = server.httpServer!.address()
     if (!address || typeof address === 'string') throw new Error('Missing fixture server address')
-    launch = await launchEditor(`http://127.0.0.1:${address.port}`, true)
+    launch = await launchEditor(`http://127.0.0.1:${address.port}`)
     const { app, page, runRoot } = launch
     const path = join(runRoot, `chat-${adapter}.h5lesson`)
     await saveAs(app, page, path)
@@ -696,11 +743,30 @@ for (const adapter of ['codex', 'claude', 'opencode'] as const) test(`S3 真实�
     await page.getByRole('button', { name: '创作助手', exact: true }).click()
     const chat = page.getByRole('complementary', { name: 'CLI 创作助手' })
     const waitCandidate = async () => {
-      await expect.poll(async () => {
-        const alert = chat.getByRole('alert')
-        if (await alert.count()) throw new Error(await alert.innerText())
-        return chat.getByRole('button', { name: '应用候选', exact: true }).isEnabled().catch(() => false)
-      }, { timeout: 100000 }).toBe(true)
+      try {
+        await expect.poll(async () => {
+          const alert = chat.getByRole('alert')
+          if (await alert.count()) throw new Error(await alert.innerText())
+          return chat.getByRole('button', { name: '应用候选', exact: true }).isEnabled().catch(() => false)
+        }, { timeout: 245000 }).toBe(true)
+      } catch (error) {
+      const evidence = join(root, `output/playwright/r18-cli-${adapter}`); mkdirSync(evidence, { recursive: true })
+      const records = await page.evaluate(async owner => {
+        const listed = await window.desktopAPI.localAgent({ operation: 'list', ...owner })
+        return Promise.all((listed.records ?? []).map(async record => {
+          const events = []; let after = 0
+          for (;;) {
+            const response = await window.desktopAPI.localAgent({ operation: 'read', ...owner, sessionId: record.id, after })
+            const batch = response.records?.[0]?.events ?? []; events.push(...batch)
+            if (batch.length < 200) break
+            after = batch.at(-1)!.sequence
+          }
+          return { ...record, events }
+        }))
+      }, { projectId: readProject(path).id, projectPath: path })
+      writeFileSync(join(evidence, 'failure-records.json'), JSON.stringify(records, null, 2))
+        throw error
+      }
     }
     await chat.getByLabel('CLI', { exact: true }).selectOption(adapter)
     await chat.getByText('引用教学材料（0）', { exact: true }).click()
@@ -723,6 +789,13 @@ for (const adapter of ['codex', 'claude', 'opencode'] as const) test(`S3 真实�
     await chat.getByRole('button', { name: '撤销本次 AI 修改' }).click()
     const undone = await saveCurrent(page, path)
     expect(undone).toEqual(first)
+    if (adapter === 'codex') {
+      await chat.getByLabel('发送给创作助手').fill('本轮仅讨论，不修改课件，也不要产生候选：请用一句话解释为什么认识分数前要先理解平均分。')
+      await chat.getByRole('button', { name: '发送', exact: true }).click()
+      await expect(chat.getByText('回复完成；本轮没有可应用的修改候选。', { exact: true })).toBeVisible({ timeout: 120000 })
+      await expect(chat.getByRole('button', { name: '应用候选', exact: true })).toHaveCount(0)
+      expect(await saveCurrent(page, path)).toEqual(first)
+    }
     const sessions = await page.evaluate(owner => window.desktopAPI.localAgent({ operation: 'list', ...owner }), { projectId: first.id, projectPath: path })
     expect(sessions.records?.every(record => JSON.stringify(record.generationRequest?.context).includes('分数含义基准材料'))).toBe(true)
     await chat.getByRole('button', { name: '关闭', exact: true }).click()
@@ -764,7 +837,7 @@ for (const carrier of ['recipe', 'existing-component'] as const) test(`S3 真实
   try {
     const address = server.httpServer!.address()
     if (!address || typeof address === 'string') throw new Error('Missing server address')
-    launch = await launchEditor(`http://127.0.0.1:${address.port}`, true)
+    launch = await launchEditor(`http://127.0.0.1:${address.port}`)
     const { app, page, runRoot } = launch
     const filename = join(runRoot, `${carrier}.h5lesson`)
     const original = await saveAs(app, page, filename)
@@ -836,7 +909,7 @@ test('S3 真实整课：Codex 从确认文档生成、重开与离线逐页运�
   try {
     const address = server.httpServer!.address()
     if (!address || typeof address === 'string') throw new Error('Missing fixture server address')
-    launch = await launchEditor(`http://127.0.0.1:${address.port}`, true)
+    launch = await launchEditor(`http://127.0.0.1:${address.port}`)
     const { app, page, runRoot } = launch
     const filename = join(runRoot, 'whole-course.h5lesson')
     const original = await saveAs(app, page, filename)
@@ -912,7 +985,7 @@ test('S3 真实生成组件：Codex 候选、教师改属性、保存重开与�
   try {
     const address = server.httpServer!.address()
     if (!address || typeof address === 'string') throw new Error('Missing fixture server address')
-    launch = await launchEditor(`http://127.0.0.1:${address.port}`, true)
+    launch = await launchEditor(`http://127.0.0.1:${address.port}`)
     const { app, page, runRoot } = launch
     const filename = join(runRoot, 'generated-component.h5lesson')
     await saveAs(app, page, filename)
@@ -1003,7 +1076,7 @@ test('S3 真实生成Runtime：连续动画、文案编辑、历史与离线互�
   try {
     const address = server.httpServer!.address()
     if (!address || typeof address === 'string') throw new Error('Missing fixture server address')
-    launch = await launchEditor(`http://127.0.0.1:${address.port}`, true)
+    launch = await launchEditor(`http://127.0.0.1:${address.port}`)
     const { app, page, runRoot } = launch
     const filename = join(runRoot, 'generated-runtime.h5lesson')
     await saveAs(app, page, filename)
@@ -2316,5 +2389,421 @@ test('Wave A core authoring remains usable across Mixed surfaces', async () => {
     expectCleanDiagnostics(launch)
   } finally {
     await closeEditor(app, launch.runRoot)
+  }
+})
+
+
+for (const adapter of ['claude', 'opencode', 'codex'] as const) test(`S3 真实组件源码：${adapter} 读取既有包并连续修订`, async () => {
+  test.setTimeout(600000)
+  const server = await createServer({ configFile: join(root, 'vite.renderer.config.ts'), server: { host: '127.0.0.1', port: 0, strictPort: false, hmr: false, watch: { ignored: ['**/output/**', '**/test-results/**'] } } })
+  await server.listen()
+  let launch: LaunchedEditor | undefined
+  let browser: Awaited<ReturnType<typeof chromium.launch>> | undefined
+  const evidence = join(root, `output/playwright/r18-source-${adapter}`)
+  mkdirSync(evidence, { recursive: true })
+  try {
+    const address = server.httpServer!.address()
+    if (!address || typeof address === 'string') throw new Error('Missing source fixture server')
+    launch = await launchEditor(`http://127.0.0.1:${address.port}`)
+    const { app, page, runRoot } = launch
+    const font = new Uint8Array(readFileSync(join(root, 'node_modules/@fontsource-variable/noto-sans-sc/files/noto-sans-sc-latin-wght-normal.woff2')))
+    const fallback = new Uint8Array(Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6ZAAAAABJRU5ErkJggg==', 'base64'))
+    const sources = await createProjectFontDeliveryFixture(font, fallback)
+    const filename = join(runRoot, `component-source-${adapter}.h5lesson`)
+    writeFileSync(filename, createCourseProjectArchive({ project: sources.project, assetFiles: sources.assetFiles,
+      componentFiles: Object.fromEntries(Object.entries(sources.components ?? {}).map(([id, data]) => [id, data.files])) }))
+    await patchProjectDialogs(app, { projectOpen: filename, projectSave: filename })
+    await page.getByRole('button', { name: '打开工程（Ctrl+O）', exact: true }).click()
+    await page.getByRole('button', { name: '创作助手', exact: true }).click()
+    const chat = page.getByRole('complementary', { name: 'CLI 创作助手' })
+    await chat.getByLabel('CLI', { exact: true }).selectOption(adapter)
+    const records = () => page.evaluate(async owner => {
+      const response = await window.desktopAPI.localAgent({ operation: 'list', ...owner })
+      return Promise.all((response.records ?? []).map(async record => {
+        const events = []; let after = 0
+        for (;;) {
+          const read = await window.desktopAPI.localAgent({ operation: 'read', ...owner, sessionId: record.id, after })
+          const batch = read.records?.[0]?.events ?? []; events.push(...batch)
+          if (batch.length < 200) break
+          after = batch.at(-1)!.sequence
+        }
+        return { ...record, events }
+      }))
+    }, { projectId: sources.project.id, projectPath: filename })
+    const send = async (instruction: string) => {
+      await chat.getByLabel('发送给创作助手').fill(instruction)
+      await chat.getByRole('button', { name: '发送', exact: true }).click()
+      try {
+        await expect.poll(async () => {
+          const alert = chat.getByRole('alert')
+          if (await alert.count()) throw new Error(await alert.innerText())
+          return chat.getByRole('button', { name: '应用候选', exact: true }).isEnabled().catch(() => false)
+        }, { timeout: 245000 }).toBe(true)
+      } catch (error) { writeFileSync(join(evidence, 'failure-records.json'), JSON.stringify(await records(), null, 2)); throw error }
+      await chat.getByRole('button', { name: '应用候选', exact: true }).click()
+      await expect(chat.getByText('宿主已提交，可一次撤销', { exact: true })).toBeVisible()
+    }
+    await send('修改当前快照中已有的font-demo组件包源码：在runtime.js内把可见文字“ComponentFont loaded”改为“AI源码修订”，其余源码/文件/实例props/位置全部保留。必须读取context.componentSources提供的完整文件，使用其精确package target及baseVersion/baseContentIdentity，component.package operation revise提交完整files；manifest的id/version保持基线，由宿主生成版本。不能新建包、不能fork、不能改成Native或另造组件。本任务必须改原组件内部实现，Native/Recipe无法完成。只输出一个严格候选，JSON转义必须有效，不要读文件或调用外部工具。')
+    const first = await saveCurrent(page, filename)
+    expect(Object.keys(first.componentPackages)).toEqual(['font-demo'])
+    expect(first.componentPackages['font-demo']!.version).not.toBe('1.0.0')
+    await send('继续修改同一个font-demo组件包：将上一轮的可见文字“AI源码修订”改为“AI再次修订”，其他文件字节、实例props、位置与功能保持不变。从本轮context.componentSources取最新package target/baseVersion/baseContentIdentity，使用component.package operation revise返回完整files；manifest id/version仍保持本轮基线。不要新建包。本任务仍是原组件内部实现修改，Native/Recipe不足。只输出一个严格候选。')
+    const second = await saveCurrent(page, filename)
+    expect(second.componentPackages['font-demo']!.version).not.toBe(first.componentPackages['font-demo']!.version)
+    expect(Object.keys(second.assets).filter(id => id.startsWith('component-capture-'))).toHaveLength(1)
+    await chat.getByRole('button', { name: '撤销本次 AI 修改' }).click()
+    expect(await saveCurrent(page, filename)).toEqual(first)
+    await page.getByRole('button', { name: '重做（Ctrl+Y / Ctrl+Shift+Z）', exact: true }).click()
+    await saveCurrent(page, filename)
+    await chat.getByRole('button', { name: '关闭', exact: true }).click()
+    await page.getByRole('button', { name: '打开工程（Ctrl+O）', exact: true }).click()
+    const reopened = openCourseProjectArchive(new Uint8Array(readFileSync(filename)))
+    const components = Object.fromEntries(Object.values(reopened.componentFiles).map(files => { const data = parseComponentPackageFiles(files); return [data.manifest.id, data] }))
+    expect(components['font-demo']!.runtimeSource).toContain('AI再次修订')
+    const runs = await records()
+    expect(runs.every(record => JSON.stringify(record.generationRequest?.context).includes('componentSources'))).toBe(true)
+    writeFileSync(join(evidence, 'records.json'), JSON.stringify(runs, null, 2))
+    writeFileSync(join(evidence, 'generated.h5lesson'), readFileSync(filename))
+    const htmlPath = join(evidence, 'generated.html')
+    writeFileSync(htmlPath, buildPublishedCourseStandaloneHtml({ project: reopened.project, assetFiles: reopened.assetFiles, components }, readFileSync(join(root, 'dist-player/player.iife.js'), 'utf8')))
+    browser = await chromium.launch({ headless: true })
+    const player = await browser.newPage(); await player.context().setOffline(true)
+    await player.goto(pathToFileURL(htmlPath).href)
+    await expect(player.getByText('AI再次修订', { exact: true })).toBeVisible()
+    await player.screenshot({ path: join(evidence, 'player.png') })
+  } finally { await browser?.close(); if (launch) await closeEditor(launch.app, launch.runRoot); await server.close() }
+})
+
+test('S3 共享组件源码：两文件草稿、嵌套正文目标、真实准入与一次资源历史', async () => {
+  test.setTimeout(180000)
+  const server = await createServer({ configFile: join(root, 'vite.renderer.config.ts'), server: { host: '127.0.0.1', port: 0, strictPort: false, hmr: false, watch: { ignored: ['**/output/**', '**/test-results/**'] } } })
+  await server.listen()
+  let launch: LaunchedEditor | undefined
+  let browser: Awaited<ReturnType<typeof chromium.launch>> | undefined
+  try {
+    const address = server.httpServer!.address()
+    if (!address || typeof address === 'string') throw new Error('Missing server')
+    launch = await launchEditor(`http://127.0.0.1:${address.port}`)
+    const { app, page, runRoot } = launch
+    const { createBlankCourseProject } = await import('../../src/renderer/project/createCourseProject')
+    const { addCourseFlowPage, addCourseSpatialPage } = await import('../../src/renderer/course/courseLocationCommands')
+    const { componentPackageMeta } = await import('../../src/renderer/components/editableComponentPackage')
+    const { visitCourseComponentPackageInstances } = await import('../../src/renderer/components/courseComponentPackageTransactions')
+    const added = addCourseFlowPage(createBlankCourseProject())
+    if (!added.ok) throw new Error(added.reason)
+    const mixed = addCourseSpatialPage(added.project)
+    if (!mixed.ok) throw new Error(mixed.reason)
+    const project = mixed.project, id = 'com.example.shared-source'
+    const source = (marker: string) => `CoursewareComponent.define({id:${JSON.stringify(id)},runtimeApiVersion:4,create(ctx){var p=document.createElement('div');p.textContent=${JSON.stringify(marker)}+' '+ctx.props.label;p.style.cssText='background:#dbeafe;color:#153e75;padding:16px;font-size:22px';ctx.dom.root.appendChild(p);return{destroy(){p.remove()}}}})`
+    const manifest = { schemaVersion: 4, runtimeApiVersion: 4, id, name: '共享源码样例', version: '1.0.0', entry: 'runtime.js',
+      defaultSize: { width: 320, height: 150 }, minSize: { width: 16, height: 16 }, preserveAspectRatio: false,
+      assets: {}, defaultProps: {}, supportedScopes: ['scene', 'global'], renderMode: 'dom' }
+    const encoder = new TextEncoder()
+    const data = parseComponentPackageFiles({ 'manifest.json': encoder.encode(JSON.stringify(manifest)), 'runtime.js': encoder.encode(source('原始布局')), 'spare.js': encoder.encode('// preserve this file') })
+    project.componentPackages[id] = componentPackageMeta(data)
+    const fallback = new Uint8Array(Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6ZAAAAABJRU5ErkJggg==', 'base64'))
+    project.assets.fallback = { id: 'fallback', filename: 'fallback.png', path: 'assets/fallback.png', kind: 'image', mimeType: 'image/png', byteLength: fallback.length, width: 1, height: 1 }
+    const layer = (instanceId: string, x: number, y: number) => ({ kind: 'component' as const, layerItemId: instanceId, label: instanceId,
+      frame: { mode: 'absolute' as const, x, y, width: 320, height: 150 }, order: 10, visible: true, locked: false, rotation: 0, opacity: 1,
+      hitPolicy: 'auto' as const, playbackInitialVisibility: 'inherit' as const, component: { packageId: id, version: '1.0.0' }, props: { label: instanceId }, staticFallbackAssetId: 'fallback' })
+    const slide = project.surfaces.find(surface => surface.type === 'slide')!, flow = project.surfaces.find(surface => surface.type === 'flow')!, spatial = project.surfaces.find(surface => surface.type === 'spatial-2d')!
+    if (slide.type !== 'slide' || flow.type !== 'flow' || spatial.type !== 'spatial-2d') throw new Error('Incomplete Mixed')
+    slide.scenes[0]!.layerItems.push(layer('shared-slide', 100, 200))
+    flow.blocks.push({ id: 'shared-section', type: 'section', title: '嵌套组件', collapsedByDefault: false, blocks: [
+      { id: 'shared-flow', type: 'component', component: { packageId: id, version: '1.0.0' }, props: { label: 'shared-flow' }, staticFallbackAssetId: 'fallback', wrap: 'none' },
+    ] })
+    spatial.world.layerItems.push(layer('shared-spatial', -160, -75))
+    const filename = join(runRoot, 'shared-source.h5lesson')
+    writeFileSync(filename, createCourseProjectArchive({ project, assetFiles: { fallback }, componentFiles: { [id]: data.files } }))
+    await patchProjectDialogs(app, { projectOpen: filename, projectSave: filename })
+    await page.getByRole('button', { name: '打开工程（Ctrl+O）', exact: true }).click()
+    const selectComponent = async (instanceId: string) => page.evaluate(async instanceId => {
+      const load = new Function('path', 'return import(path)') as (path: string) => Promise<any>
+      const { useEditorStore } = await load('/src/renderer/store/editorStore.ts')
+      useEditorStore.getState().selectNode(instanceId)
+      useEditorStore.setState({ activeTab: 'developer' })
+    }, instanceId)
+    await selectComponent('shared-slide')
+    await page.getByRole('tab', { name: /组件代码/ }).click()
+    const runtime = page.getByLabel('组件 Runtime', { exact: true })
+    await expect(runtime).toBeEditable()
+    await runtime.fill(source('修订布局'))
+    await page.getByRole('tab', { name: 'manifest.json', exact: true }).click()
+    await page.getByLabel('组件 Manifest', { exact: true }).fill(JSON.stringify({ ...manifest, name: '共享源码修订' }))
+    await page.getByRole('tab', { name: 'runtime.js', exact: true }).click()
+    await expect(runtime).toHaveValue(source('修订布局'))
+    await page.getByRole('button', { name: '校验并应用组件源码', exact: true }).click()
+    await expect(page.getByText('源码已应用，所有引用实例已同步。', { exact: true })).toBeVisible({ timeout: 45000 })
+    const updated = await saveCurrent(page, filename)
+    expect(updated.revision).toBe(project.revision + 1)
+    expect(updated.componentPackages[id]!.version).not.toBe('1.0.0')
+    const refs: string[] = []
+    visitCourseComponentPackageInstances(updated, id, (instance, reference) => {
+      expect(instance.component.version).toBe(updated.componentPackages[id]!.version)
+      expect(instance.props).toEqual({ label: reference.instanceId })
+      expect(instance.staticFallbackAssetId).toMatch(/^component-capture-/)
+      refs.push(reference.instanceId)
+    })
+    expect(refs.sort()).toEqual(['shared-flow', 'shared-slide', 'shared-spatial'])
+    await page.getByRole('button', { name: '撤销（Ctrl+Z）', exact: true }).click()
+    const undone = await saveCurrent(page, filename)
+    expect(undone.componentPackages[id]!.version).toBe('1.0.0')
+    expect(Object.keys(undone.assets)).toEqual(['fallback'])
+    await page.getByRole('button', { name: '重做（Ctrl+Y / Ctrl+Shift+Z）', exact: true }).click()
+    await saveCurrent(page, filename)
+    await page.getByRole('button', { name: '打开工程（Ctrl+O）', exact: true }).click()
+    await openFlow(page)
+    await selectComponent('shared-flow')
+    await page.getByRole('tab', { name: /组件代码/ }).click()
+    await expect(runtime).toHaveValue(source('修订布局'))
+    await page.getByRole('tab', { name: 'manifest.json', exact: true }).click()
+    await expect(page.getByLabel('组件 Manifest', { exact: true })).toHaveValue(/共享源码修订/)
+    const rebase = page.getByRole('button', { name: '载入当前基线并保留草稿', exact: true })
+    if (await rebase.isVisible()) await rebase.click()
+    await page.getByRole('tab', { name: 'runtime.js', exact: true }).click()
+    await runtime.fill(source('正文发起修订'))
+    await page.getByRole('button', { name: '校验并应用组件源码', exact: true }).click()
+    await expect(page.getByText('源码已应用，所有引用实例已同步。', { exact: true })).toBeVisible({ timeout: 45000 })
+    const fromFlow = await saveCurrent(page, filename)
+    expect(fromFlow.componentPackages[id]!.version).not.toBe(updated.componentPackages[id]!.version)
+    expect(Object.keys(fromFlow.assets).filter(key => key.startsWith('component-capture-'))).toHaveLength(3)
+    visitCourseComponentPackageInstances(fromFlow, id, instance => expect(instance.component.version).toBe(fromFlow.componentPackages[id]!.version))
+    await page.getByRole('button', { name: '为当前实例创建独立副本', exact: true }).click()
+    const forked = await saveCurrent(page, filename)
+    expect(Object.keys(forked.componentPackages)).toHaveLength(2)
+    const sharedRefs: string[] = []
+    visitCourseComponentPackageInstances(forked, id, (_instance, reference) => sharedRefs.push(reference.instanceId))
+    expect(sharedRefs.sort()).toEqual(['shared-slide', 'shared-spatial'])
+    await page.getByRole('button', { name: '撤销（Ctrl+Z）', exact: true }).click()
+    const unforked = await saveCurrent(page, filename)
+    expect(Object.keys(unforked.componentPackages)).toEqual([id])
+    expect(unforked.componentPackages[id]!.version).toBe(fromFlow.componentPackages[id]!.version)
+    const archive = openCourseProjectArchive(new Uint8Array(readFileSync(filename)))
+    const components = Object.fromEntries(Object.values(archive.componentFiles).map(files => { const data = parseComponentPackageFiles(files); return [data.manifest.id, data] }))
+    expect(new TextDecoder().decode(components[id]!.files['spare.js'])).toBe('// preserve this file')
+    const htmlPath = join(runRoot, 'shared-source.html')
+    writeFileSync(htmlPath, buildPublishedCourseStandaloneHtml({ project: { ...archive.project, startLocationId: archive.project.locations.find(location => location.surfaceId === flow.id)!.id }, assetFiles: archive.assetFiles, components }, readFileSync(join(root, 'dist-player/player.iife.js'), 'utf8')))
+    browser = await chromium.launch({ headless: true })
+    const player = await browser.newPage()
+    await player.context().setOffline(true)
+    await player.goto(pathToFileURL(htmlPath).href)
+    await expect(player.getByText('正文发起修订 shared-flow', { exact: true })).toBeVisible()
+    mkdirSync(join(root, 'output/playwright/r18-integration'), { recursive: true })
+    await player.screenshot({ path: 'output/playwright/r18-integration/shared-source-flow.png' })
+  } finally { await browser?.close(); if (launch) await closeEditor(launch.app, launch.runRoot); await server.close() }
+})
+
+test('S3 三表面整合：控制器保全与响应式浮层几何', async () => {
+  test.setTimeout(120000)
+  const { app, page, runRoot, pageErrors } = await launchEditor()
+  let browser: Awaited<ReturnType<typeof chromium.launch>> | undefined
+  try {
+    const { createBlankCourseProject } = await import('../../src/renderer/project/createCourseProject')
+    const { addCourseFlowPage, addCourseSpatialPage } = await import('../../src/renderer/course/courseLocationCommands')
+    const { createTextNode } = await import('../../src/renderer/project/nativeNodeFactories')
+    const { sceneNodeToCourseLayerItem } = await import('../../src/shared/courseProjectModel')
+    const added = addCourseFlowPage(createBlankCourseProject())
+    if (!added.ok) throw new Error(added.reason)
+    const mixed = addCourseSpatialPage(added.project)
+    if (!mixed.ok) throw new Error(mixed.reason)
+    const project = mixed.project
+    const original = project.locations[0]!
+    const controller = project.globalLayerItems.find(entry => entry.item.kind === 'native' && entry.item.content.nativeType === 'teacher-controller')!
+    controller.visibility = { mode: 'include', locationIds: [original.id] }
+    const flow = project.surfaces.find(surface => surface.type === 'flow')!
+    if (flow.type !== 'flow') throw new Error('Missing Flow')
+    flow.blocks.push(...Array.from({ length: 40 }, (_, i) => ({ id: `geometry-p-${i}`, type: 'paragraph' as const, text: `响应式文档段落 ${i}。窗口改变时重新换行，浮层仍与正文采用同一尺度。`.repeat(3) })))
+    const topItem = sceneNodeToCourseLayerItem(createTextNode({ id: 'geometry-top', text: '顶部浮层 · 原生文字', x: 40, y: 0, width: 300, height: 65, style: { fontSize: 24, color: '#164c96', backgroundColor: '#dbeafe', backgroundOpacity: 1, cornerRadius: 9 } }))
+    topItem.order = Math.max(...project.globalLayerItems.map(entry => entry.item.order), 0) + 1
+    project.globalLayerItems.push({ item: topItem, plane: 'overlay', visibility: { mode: 'all', locationIds: [] } })
+    const farItem = sceneNodeToCourseLayerItem(createTextNode({ id: 'geometry-far', text: '屏外旧浮层', x: 1150, y: 660, width: 200, height: 100, style: { fontSize: 24 } }))
+    farItem.order = topItem.order + 1
+    project.globalLayerItems.push({ item: farItem, visibility: { mode: 'all', locationIds: [] } })
+    const paperItem = sceneNodeToCourseLayerItem(createTextNode({ id: 'geometry-paper', text: '随纸张滚动', x: 40, y: 340, width: 240, height: 60, style: { fontSize: 22 } }))
+    paperItem.paperSpace = 'paper'
+    paperItem.order = Math.max(...flow.surfaceLayerItems.map(entry => entry.item.order), 0) + 1
+    flow.surfaceLayerItems.push({ item: paperItem, visibility: { mode: 'all', locationIds: [] } })
+    const filename = join(runRoot, 'surface-integration.h5lesson')
+    writeFileSync(filename, createCourseProjectArchive({ project, assetFiles: {}, componentFiles: {} }))
+    await patchProjectDialogs(app, { projectOpen: filename, projectSave: filename })
+    await page.getByRole('button', { name: '打开工程（Ctrl+O）', exact: true }).click()
+    await page.locator('[data-kind="slide-page"]').first().getByRole('button', { name: /^删除页面/ }).click()
+    await page.getByRole('button', { name: '删除页面', exact: true }).click()
+    const deleted = await saveCurrent(page, filename)
+    const survivingController = deleted.globalLayerItems.find(entry => entry.item.layerItemId === controller.item.layerItemId)!
+    expect(survivingController.item).toEqual(controller.item)
+    expect(survivingController.visibility).toEqual({ mode: 'include', locationIds: deleted.locations.map(location => location.id) })
+    await page.getByRole('button', { name: '撤销（Ctrl+Z）', exact: true }).click()
+    expect((await saveCurrent(page, filename)).globalLayerItems.find(entry => entry.item.layerItemId === controller.item.layerItemId)).toEqual(controller)
+    await page.getByRole('button', { name: '重做（Ctrl+Y / Ctrl+Shift+Z）', exact: true }).click()
+    await saveCurrent(page, filename)
+    await page.getByRole('button', { name: '打开工程（Ctrl+O）', exact: true }).click()
+    await openFlow(page)
+    const measure = () => page.getByTestId('flow-workspace').evaluate(workspace => {
+      const viewport = workspace.getBoundingClientRect()
+      const paper = workspace.querySelector('[data-testid="flow-paper"]')!.getBoundingClientRect()
+      const top = workspace.querySelector('[data-layer-item-id="geometry-top"]')!.getBoundingClientRect()
+      const overlay = workspace.querySelector('[data-layer-item-id="geometry-paper"]')!.getBoundingClientRect()
+      return { width: viewport.width, top: top.top - viewport.top, x: top.left - viewport.left, itemWidth: top.width, paperX: overlay.left - paper.left, paperY: overlay.top - paper.top }
+    })
+    mkdirSync(join(root, 'output/playwright/r18-integration'), { recursive: true })
+    for (const [width, height] of [[1400, 900], [1000, 760]]) {
+      await app.evaluate(({ BrowserWindow }, size) => BrowserWindow.getAllWindows()[0]!.setSize(size[0]!, size[1]!), [width!, height!])
+      await expect.poll(async () => (await measure()).top).toBeCloseTo(0, 1)
+      await expect.poll(async () => (await measure()).itemWidth).toBeCloseTo(300, 1)
+      expect((await measure()).x).toBeCloseTo(40, 1)
+      expect((await measure()).paperX).toBeCloseTo(40, 1)
+      expect((await measure()).paperY).toBeCloseTo(340, 1)
+      await page.screenshot({ path: `output/playwright/r18-integration/flow-${width}.png` })
+    }
+    const scroll = page.getByTestId('flow-workspace-scroll')
+    await scroll.evaluate(element => { element.scrollTop = 180; element.dispatchEvent(new Event('scroll')) })
+    await expect.poll(async () => (await measure()).paperY).toBeCloseTo(340, 1)
+    expect((await measure()).top).toBeCloseTo(0, 1)
+    // A real pointer gesture on the paper item must not treat scroll as resize displacement.
+    const card = page.getByTestId('flow-layer-card-geometry-paper')
+    const box = (await card.boundingBox())!
+    await page.mouse.move(box.x + 90, box.y + 25)
+    await page.mouse.down()
+    await page.mouse.move(box.x + 120, box.y + 55, { steps: 6 })
+    await page.mouse.up()
+    const moved = await saveCurrent(page, filename)
+    const movedFlow = moved.surfaces.find(surface => surface.type === 'flow')!
+    if (movedFlow.type !== 'flow') throw new Error('Missing moved Flow')
+    expect(movedFlow.surfaceLayerItems.find(entry => entry.item.layerItemId === 'geometry-paper')!.item.frame).toMatchObject({ x: 70, y: 370 })
+    await page.getByRole('tab', { name: '图层', exact: true }).click()
+    await page.locator('[data-testid^="node-item-"][data-testid$="geometry-far"] .node-name').click()
+    const far = page.getByTestId('flow-layer-selection-geometry-far')
+    await expect(page.getByRole('button', { name: '回到文档原位', exact: true })).toBeVisible()
+    const viewport = (await page.getByTestId('flow-workspace').boundingBox())!, revealed = (await far.boundingBox())!
+    expect(revealed.x).toBeGreaterThanOrEqual(viewport.x + 15)
+    expect(revealed.y).toBeGreaterThanOrEqual(viewport.y + 15)
+    expect(revealed.x + revealed.width).toBeLessThanOrEqual(viewport.x + viewport.width - 15)
+    expect(revealed.y + revealed.height).toBeLessThanOrEqual(viewport.y + viewport.height - 15)
+    expect(await saveCurrent(page, filename)).toEqual(moved)
+    await page.mouse.move(revealed.x + 50, revealed.y + 40)
+    await page.mouse.down()
+    await page.mouse.move(revealed.x + 70, revealed.y + 50, { steps: 5 })
+    await page.mouse.up()
+    expect((await saveCurrent(page, filename)).globalLayerItems.find(entry => entry.item.layerItemId === 'geometry-far')!.item.frame).toMatchObject({ x: 1170, y: 670 })
+    await page.getByRole('button', { name: '撤销（Ctrl+Z）', exact: true }).click()
+    await saveCurrent(page, filename)
+    await page.getByRole('button', { name: '回到文档原位', exact: true }).click()
+    expect((await measure()).top).toBeCloseTo(0, 1)
+    const archive = openCourseProjectArchive(new Uint8Array(readFileSync(filename)))
+    const html = buildPublishedCourseStandaloneHtml({ project: { ...archive.project, startLocationId: archive.project.locations.find(location => location.surfaceId === flow.id)!.id }, assetFiles: {}, components: {} }, readFileSync(join(root, 'dist-player/player.iife.js'), 'utf8'))
+    const htmlPath = join(runRoot, 'surface-integration.html')
+    writeFileSync(htmlPath, html)
+    browser = await chromium.launch({ headless: true })
+    const player = await browser.newPage({ viewport: { width: 847, height: 721 } })
+    await player.context().setOffline(true)
+    await player.goto(pathToFileURL(htmlPath).href)
+    const runtimeTop = player.locator('[data-flow-overlay-item="geometry-top"]')
+    await expect(runtimeTop).toBeVisible()
+    expect((await runtimeTop.boundingBox())!.width).toBeCloseTo(300, 1)
+    expect((await runtimeTop.boundingBox())!.y).toBeCloseTo((await player.locator('.flow-surface-host').boundingBox())!.y, 1)
+    await player.screenshot({ path: 'output/playwright/r18-integration/flow-offline.png' })
+    expect(pageErrors).toEqual([])
+  } finally { await browser?.close(); await closeEditor(app, runRoot) }
+})
+
+test('S3 Flow 所见即所得：空段、连续换行、选择与保存重开', async () => {
+  test.setTimeout(120000)
+  const server = await createServer({ configFile: join(root, 'vite.renderer.config.ts'), server: { host: '127.0.0.1', port: 0, strictPort: false, hmr: false, watch: { ignored: ['**/output/**', '**/test-results/**'] } } })
+  await server.listen()
+  let launch: LaunchedEditor | undefined
+  let browser: Awaited<ReturnType<typeof chromium.launch>> | undefined
+  try {
+    const address = server.httpServer!.address()
+    if (!address || typeof address === 'string') throw new Error('Missing fixture server address')
+    launch = await launchEditor(`http://127.0.0.1:${address.port}`)
+    const { app, page, runRoot } = launch
+    const { createBlankCourseProject } = await import('../../src/renderer/project/createCourseProject')
+    const { addCourseFlowPage } = await import('../../src/renderer/course/courseLocationCommands')
+    const created = addCourseFlowPage(createBlankCourseProject())
+    if (!created.ok) throw new Error(created.reason)
+    const project = created.project
+    const flow = project.surfaces.find(surface => surface.type === 'flow')!
+    if (flow.type !== 'flow') throw new Error('Missing Flow')
+    const { createChartNode, createChartLayerItem } = await import('../../src/renderer/project/nativeNodeFactories')
+    const chart = createChartLayerItem(createChartNode()).content
+    if (chart.nativeType !== 'chart') throw new Error('Missing chart')
+    flow.blocks.push(
+      { id: 'spacing-a', type: 'paragraph', text: '第一行\n\n第三行', runs: [] },
+      { id: 'spacing-empty', type: 'paragraph', text: '', runs: [] },
+      { id: 'spacing-next', type: 'paragraph', text: '空段之后仍保留位置', runs: [] },
+      { id: 'spacing-rich', type: 'heading', level: 2, text: '字号与强调\n\n均须一致', runs: [{ start: 0, end: 2, style: { fontSize: 28, bold: false, emphasis: true } }] },
+      { id: 'spacing-quote', type: 'quote', text: '引用第一行\n\n引用第三行', citation: '来源' },
+      { id: 'spacing-list', type: 'list', ordered: true, items: [{ id: 'l1', text: '列表一\n\n保留换行' }, { id: 'l2', text: '列表二' }] },
+      { id: 'spacing-section', type: 'section', title: '小节标题', collapsedByDefault: false, blocks: [{ id: 'section-body', type: 'paragraph', text: '小节正文' }] },
+      { id: 'spacing-chart', type: 'chart', chart: chart.data, height: 180 },
+    )
+    const filename = join(runRoot, 'flow-spacing.h5lesson')
+    writeFileSync(filename, createCourseProjectArchive({ project, assetFiles: {}, componentFiles: {} }))
+    await patchProjectDialogs(app, { projectOpen: filename, projectSave: filename })
+    await page.getByRole('button', { name: '打开工程（Ctrl+O）', exact: true }).click()
+    await openFlow(page)
+    const paper = page.getByTestId('flow-paper')
+    await expect(paper).toBeVisible()
+    const measure = (scope: Locator) => scope.evaluate(element => {
+      const rootRect = element.getBoundingClientRect()
+      const scale = rootRect.width / (element as HTMLElement).offsetWidth
+      return ['spacing-a', 'spacing-empty', 'spacing-next', 'spacing-rich', 'spacing-quote', 'spacing-list', 'spacing-section', 'spacing-chart'].map(id => {
+        const block = element.querySelector<HTMLElement>(`[data-flow-block-id="${id}"]`)!
+        const rect = block.getBoundingClientRect()
+        return { id, x: (rect.x - rootRect.x) / scale, y: (rect.y - rootRect.y) / scale, width: rect.width / scale, height: rect.height / scale }
+      })
+    })
+    const before = await measure(paper)
+    const screenBefore = await paper.locator('[data-flow-block-id="spacing-a"]').boundingBox()
+    expect(before[0].height).toBeGreaterThan(70)
+    expect(before[1].height).toBeGreaterThan(20)
+    await paper.locator('[data-flow-block-id="spacing-a"]').click()
+    expect(await measure(paper)).toEqual(before)
+    await page.getByRole('button', { name: '创作助手', exact: true }).click()
+    const chat = page.getByRole('complementary', { name: 'CLI 创作助手' })
+    await chat.getByLabel('本轮引用', { exact: true }).selectOption('selection')
+    await chat.getByLabel('发送给创作助手').fill('解释当前选择的文字')
+    await expect(chat.getByLabel('本轮引用摘要')).not.toContainText('未选择对象')
+    await chat.getByRole('button', { name: '关闭', exact: true }).click()
+    await paper.locator('[data-flow-block-id="spacing-a"]').dblclick()
+    await page.getByTestId('flow-inline-editor').fill('第一行\n\n第三行')
+    await page.getByRole('button', { name: '当前位置试运行', exact: true }).click()
+    const runtime = page.locator('.flow-runtime-reading')
+    await expect(runtime).toBeVisible()
+    expect(await runtime.locator('[data-flow-block-id="spacing-list"] li').first().evaluate(element => getComputedStyle(element).display)).toBe('list-item')
+    const hostBounds = await page.locator('.flow-surface-host').boundingBox()
+    const tocBounds = await page.getByTestId('flow-runtime-toc-toggle').boundingBox()
+    expect(tocBounds!.x).toBeCloseTo(hostBounds!.x, 0)
+    const running = await measure(runtime)
+    const screenRunning = await runtime.locator('[data-flow-block-id="spacing-a"]').boundingBox()
+    for (const key of ['x', 'y', 'width', 'height'] as const) expect(screenRunning![key], `screen ${key}`).toBeCloseTo(screenBefore![key], 0)
+    for (let i = 0; i < before.length; i++) for (const key of ['x', 'y', 'width', 'height'] as const) expect(running[i][key], `${before[i].id}.${key}`).toBeCloseTo(before[i][key], 0)
+    const evidence = join(root, 'output', 'playwright', 'r18-flow-spacing')
+    mkdirSync(evidence, { recursive: true })
+    await page.screenshot({ path: join(evidence, 'run.png') })
+    await page.getByRole('button', { name: '编辑状态', exact: true }).click()
+    await page.screenshot({ path: join(evidence, 'edit.png') })
+    const saved = await saveCurrent(page, filename)
+    await page.getByRole('button', { name: '打开工程（Ctrl+O）', exact: true }).click()
+    await openFlow(page)
+    expect(await measure(page.getByTestId('flow-paper'))).toEqual(before)
+    const sources = { project: saved, assetFiles: {}, components: {} }
+    const offlineProject = { ...saved, startLocationId: created.activatedLocationId, locations: [...saved.locations.filter(location => location.id === created.activatedLocationId), ...saved.locations.filter(location => location.id !== created.activatedLocationId)] }
+    const html = buildPublishedCourseStandaloneHtml({ ...sources, project: offlineProject }, readFileSync(join(root, 'dist-player/player.iife.js'), 'utf8'))
+    const htmlPath = join(evidence, 'flow.html'); writeFileSync(htmlPath, html)
+    browser = await chromium.launch({ headless: true })
+    const offline = await browser.newPage({ viewport: { width: 1280, height: 900 } })
+    await offline.goto(pathToFileURL(htmlPath).href)
+    await expect(offline.locator('.flow-runtime-reading')).toBeVisible()
+    const published = await measure(offline.locator('.flow-runtime-reading'))
+    for (let i = 0; i < before.length; i++) for (const key of ['x', 'y', 'width', 'height'] as const) expect(published[i][key], `offline ${before[i].id}.${key}`).toBeCloseTo(before[i][key], 0)
+    await offline.screenshot({ path: join(evidence, 'offline.png') })
+    writeFileSync(join(evidence, 'geometry.json'), JSON.stringify({ before, running, published }, null, 2))
+    expect(launch.pageErrors).toEqual([])
+  } finally {
+    await browser?.close()
+    if (launch) await closeEditor(launch.app, launch.runRoot)
+    await server.close()
   }
 })

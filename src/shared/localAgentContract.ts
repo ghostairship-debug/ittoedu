@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import { workspaceIdentityV1Schema } from './workspaceIdentity'
-import { generationRequestSchema, generationCandidateSchema } from './generationContract'
+import { generationRequestSchema } from './generationContract'
+import { generationResultSchema } from './generationResult'
 
 export const localAgentIdSchema = z.enum(['codex', 'claude', 'opencode'])
 export type LocalAgentId = z.infer<typeof localAgentIdSchema>
@@ -57,7 +58,7 @@ export type LocalAgentRequest = z.infer<typeof localAgentRequestSchema>
 export const localAgentResponseSchema = z.object({
   enabled: z.boolean(), probe: localAgentProbeSchema.optional(), sessionId: z.uuid().optional(),
   records: z.array(localAgentRecordSchema).optional(), damaged: z.array(z.string()).optional(),
-  candidate: generationCandidateSchema.nullable().optional(),
+  generationResult: generationResultSchema.optional(),
   workspace: workspaceIdentityV1Schema.optional(),
 }).strict()
 export type LocalAgentResponse = z.infer<typeof localAgentResponseSchema>

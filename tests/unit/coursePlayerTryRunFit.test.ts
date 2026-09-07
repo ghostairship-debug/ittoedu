@@ -24,7 +24,7 @@ import {
   nativeRenderInputFromLayerItem,
   nativeRenderInputFromPublishedItem,
   nativeRenderInputFromV9Item,
-} from '@/player/surfaces/slide/publishedNativeRendering'
+} from '@/player/surfaces/native/publishedNativeRendering'
 import {
   PLAYER_AUTHORING_MESSAGE_TYPES,
   PLAYER_AUTHORING_PROTOCOL_VERSION,
@@ -49,7 +49,7 @@ function mockClientSize(element: HTMLElement, width: number, height: number): vo
 }
 
 describe('fitPublishedCourseStage', () => {
-  it('letterboxes Slide, Flow and Spatial stages into a larger host', () => {
+  it('letterboxes Slide and Spatial while leaving responsive Flow layout unscaled', () => {
     const host = document.createElement('div')
     const slide = document.createElement('section')
     slide.className = 'slide-published-adapter'
@@ -63,7 +63,7 @@ describe('fitPublishedCourseStage', () => {
     fitPublishedCourseStage(host)
 
     const scale = Math.min(1560 / CANVAS_WIDTH, 992 / CANVAS_HEIGHT)
-    for (const stage of [slide, flow, spatial]) {
+    for (const stage of [slide, spatial]) {
       expect(stage.style.position).toBe('absolute')
       expect(stage.style.transformOrigin).toBe('0 0')
       expect(stage.style.transform).toBe(`scale(${scale})`)
@@ -74,6 +74,15 @@ describe('fitPublishedCourseStage', () => {
       expect(stage.dataset.stageFitScale).toBe(String(scale))
       expect(CANVAS_WIDTH / CANVAS_HEIGHT).toBeCloseTo(16 / 9)
     }
+    expect(flow.style.transform).toBe('')
+    const plane = document.createElement('div')
+    plane.className = 'flow-runtime-layer-plane'
+    flow.append(plane)
+    mockClientSize(flow, 1560, 992)
+    fitPublishedCourseStage(host)
+    expect(plane.style.transform).toBe('')
+    expect(flow.style.width).toBe('')
+    expect(flow.style.height).toBe('')
   })
 
   it('falls back to the design canvas when the host has no layout yet', () => {

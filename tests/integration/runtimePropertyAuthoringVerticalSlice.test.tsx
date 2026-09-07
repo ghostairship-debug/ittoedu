@@ -1,6 +1,7 @@
+import { isAuthoringHistoryTransactionFrame } from '../../src/renderer/authoring/resourceAwareAuthoringHistory'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { decodePublishedCode } from '@/player/decodePublishedExecutableCode'
-import { isSlideAuthoringTransactionFrame } from '@/renderer/course/slideEditorCommands'
+
 import { isSpatialAuthoringTransactionFrame } from '@/renderer/course/spatialAuthoringHistory'
 import { buildPublishedCourseV2Payload } from '@/renderer/export/course/buildPublishedCourse'
 import {
@@ -309,7 +310,7 @@ function transactionResourceChanges() {
   const active = activeHistory()
   const frame = active.history.past.at(-1)
   const isTransaction = active.kind === 'slide'
-    ? Boolean(frame && isSlideAuthoringTransactionFrame(frame))
+    ? Boolean(frame && isAuthoringHistoryTransactionFrame(frame))
     : Boolean(frame && isSpatialAuthoringTransactionFrame(frame))
   expect(isTransaction).toBe(true)
   if (!frame || !('kind' in frame) || frame.kind !== 'editor-transaction') {

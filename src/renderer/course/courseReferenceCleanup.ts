@@ -77,6 +77,7 @@ function removeDeletedLocationVisibility(
   entries: ScopedLayerItem[],
   removedLocationIds: ReadonlySet<string>,
   removedLayerItemIds: Set<string>,
+  controllerFallbackLocationIds?: readonly string[],
 ): void {
   for (let index = entries.length - 1; index >= 0; index -= 1) {
     const entry = entries[index]!
@@ -86,6 +87,17 @@ function removeDeletedLocationVisibility(
     )
     if (entry.visibility.locationIds.length > 0) continue
     if (entry.visibility.mode === 'include') {
+      if (
+        controllerFallbackLocationIds
+        && entry.item.kind === 'native'
+        && entry.item.content.nativeType === 'teacher-controller'
+      ) {
+        if (controllerFallbackLocationIds.length === 0) {
+          throw new Error('不能清空教师控制器的全部可达位置')
+        }
+        entry.visibility.locationIds = [...controllerFallbackLocationIds]
+        continue
+      }
       removedLayerItemIds.add(entry.item.layerItemId)
       entries.splice(index, 1)
     } else entry.visibility = { mode: 'all', locationIds: [] }
@@ -336,6 +348,7 @@ export function repairRemovedCourseReferences(
       project.globalLayerItems,
       removed.removedLocationIds,
       removedLayerItemCandidates,
+      project.locations.map((location) => location.id),
     )
     project.surfaces.forEach((surface) => (
       removeDeletedLocationVisibility(

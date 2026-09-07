@@ -22,6 +22,8 @@ export interface PlayerPresenterInputOptions {
   keyboardNavigation: boolean
   presenter: Readonly<ProjectPresenterSettings>
   onNavigate(targetIndex: number, command: PresenterCommand): boolean | PresenterInputResult
+  /** Published scene/step owner judges its own boundaries; indexes stay capture-only. */
+  onStep?(command: PresenterCommand): boolean | PresenterInputResult
   onAuthoredCommand(command: PresenterCommand): boolean | PresenterInputResult
   onFeedback?(feedback: PresenterInputFeedback): void
   isModalOpen?(): boolean
@@ -117,6 +119,7 @@ export class PlayerPresenterInput {
   private readonly keyboardNavigation: boolean
   private readonly presenter: Readonly<ProjectPresenterSettings>
   private readonly onNavigate: PlayerPresenterInputOptions['onNavigate']
+  private readonly onStep: PlayerPresenterInputOptions['onStep']
   private readonly onAuthoredCommand: PlayerPresenterInputOptions['onAuthoredCommand']
   private readonly onFeedback: PlayerPresenterInputOptions['onFeedback']
   private readonly isModalOpen: () => boolean
@@ -133,6 +136,7 @@ export class PlayerPresenterInput {
     this.keyboardNavigation = options.keyboardNavigation
     this.presenter = options.presenter
     this.onNavigate = options.onNavigate
+    this.onStep = options.onStep
     this.onAuthoredCommand = options.onAuthoredCommand
     this.onFeedback = options.onFeedback
     this.isModalOpen = options.isModalOpen ?? (() => false)
@@ -230,22 +234,26 @@ export class PlayerPresenterInput {
     let result: PresenterInputResult
     if (input.source === 'keyboard-navigation' ||
       this.presenter.strategy === 'scene-navigation') {
-      const currentIndex = this.currentIndexAtDelivery()
-      const targetIndex = input.command === 'next'
-        ? currentIndex + 1
-        : currentIndex - 1
-      if (targetIndex < 0 || targetIndex >= this.totalPages) {
-        result = {
-          accepted: false,
-          message: input.command === 'next'
-            ? '已经是最后一个场景'
-            : '已经是第一个场景',
-        }
+      if (this.onStep) {
+        result = normalizeResult(this.onStep(input.command), input.command === 'next' ? '已到整课末尾或当前无法继续' : '已到整课开头或当前无法返回')
       } else {
-        result = normalizeResult(
-          this.onNavigate(targetIndex, input.command),
-          input.command === 'next' ? '无法前进到下一场景' : '无法返回上一场景',
-        )
+        const currentIndex = this.currentIndexAtDelivery()
+        const targetIndex = input.command === 'next'
+          ? currentIndex + 1
+          : currentIndex - 1
+        if (targetIndex < 0 || targetIndex >= this.totalPages) {
+          result = {
+            accepted: false,
+            message: input.command === 'next'
+              ? '已经是最后一个场景'
+              : '已经是第一个场景',
+          }
+        } else {
+          result = normalizeResult(
+            this.onNavigate(targetIndex, input.command),
+            input.command === 'next' ? '无法前进到下一场景' : '无法返回上一场景',
+          )
+        }
       }
     } else {
       result = normalizeResult(

@@ -174,6 +174,33 @@ afterEach(() => {
 })
 
 describe('PublishedInteractionController', () => {
+  it('dispatches authored presenter rules with scene conditions and cancels delayed work on destruction', async () => {
+    vi.useFakeTimers()
+    const host = surfaceHarness()
+    const navigation = sessionHarness('scene_one')
+    const controller = new PublishedInteractionController({
+      surfaceId: 'slide_surface',
+      surface: host.surface,
+      session: navigation.session,
+      rules: [{
+        ...clickRule('presenter', 'unused', [actionStep('later', { type: 'scene.next' }, { delayMs: 100 })], [{ type: 'scene.in', sceneIds: ['scene_one'] }]),
+        trigger: { type: 'presenter.command', command: 'next' },
+      }],
+    })
+    expect(controller.dispatchPresenterCommand('previous')).toBe(false)
+    navigation.setSceneId('scene_two')
+    expect(controller.dispatchPresenterCommand('next')).toBe(false)
+    navigation.setSceneId('scene_one')
+    expect(controller.dispatchPresenterCommand('next')).toBe(true)
+    await vi.advanceTimersByTimeAsync(101)
+    expect(navigation.nextScene).toHaveBeenCalledTimes(1)
+    expect(controller.dispatchPresenterCommand('next')).toBe(true)
+    controller.destroy()
+    await vi.advanceTimersByTimeAsync(101)
+    expect(navigation.nextScene).toHaveBeenCalledTimes(1)
+    expect(navigation.previousScene).not.toHaveBeenCalled()
+  })
+
   it('deduplicates click bindings and runs only enabled rules in the current scene', async () => {
     const host = surfaceHarness()
     const navigation = sessionHarness('scene_one')

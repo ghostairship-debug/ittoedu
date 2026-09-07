@@ -13,7 +13,6 @@ import {
 } from '../../store/editorStore'
 import { projectV9EditingNodesWithDraft } from '../../store/slideEditorProjection'
 import {
-  attachPublishedCourseStageFit,
   mountPublishedCourseAuthoring,
   mountPublishedCourseTryRun,
 } from '../coursePlayerTryRun'
@@ -351,7 +350,6 @@ export function SlideWorkspaceConnector({
           initialPresentationStateId: locationId ? activePresentationStateId : null,
         })
       },
-      attachStageFit: attachPublishedCourseStageFit,
     },
   }), [
     addExternalComponentNode,

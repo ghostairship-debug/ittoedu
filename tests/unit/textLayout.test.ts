@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createTextNode } from '@/renderer/project/nativeNodeFactories'
-import { nativeRenderInputFromV9Item } from '@/player/surfaces/slide/publishedNativeRendering'
+import { nativeRenderInputFromV9Item } from '@/player/surfaces/native/publishedNativeRendering'
 import { analyzeTextNodeLayout, renderTextNodeCanvas } from '@/shared/textLayout'
 import { listCourseProjectV9Fixtures } from '../fixtures/course-project-v9/sources'
 import type { NativeLayerItem } from '@/shared/courseProjectTypes'

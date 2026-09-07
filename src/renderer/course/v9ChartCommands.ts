@@ -1,3 +1,4 @@
+import { commitResourceAwareAuthoringHistory } from '../authoring/resourceAwareAuthoringHistory'
 import { nanoid } from 'nanoid'
 import { MAX_SCENE_NODES } from '../../shared/constants'
 import { chartNativeContentObjectSchema } from '../../shared/contracts/native-v1'
@@ -15,19 +16,7 @@ import type {
   SlideSceneDocument,
   SlideSurfaceDocument,
 } from '../../shared/courseProjectTypes'
-import {
-  SLIDE_REJECT_LOCKED,
-  SLIDE_REJECT_STALE_REVISION,
-  SLIDE_REJECT_WRONG_OWNER,
-  SlideCommandError,
-  commitSlideAuthoringHistory,
-  commitSlideProjectMutation,
-  selectSlideEditorLayers,
-  type SlideAuthoringSelection,
-  type SlideAuthoringSessionRef,
-  type SlideCommandOptions,
-  type SlideCommandResult,
-} from './slideEditorCommands'
+import { SLIDE_REJECT_LOCKED, SLIDE_REJECT_STALE_REVISION, SLIDE_REJECT_WRONG_OWNER, SlideCommandError, commitSlideProjectMutation, selectSlideEditorLayers, type SlideAuthoringSelection, type SlideAuthoringSessionRef, type SlideCommandOptions, type SlideCommandResult } from './slideEditorCommands'
 import { allocateCourseLayerOrder } from './globalLayerCommands'
 import type { SlideAuthoringSession } from './slideAuthoringBackend'
 import {
@@ -266,7 +255,7 @@ function commitAdded(
 ): SlideCommandResult {
   return succeed({
     sessionId: session.sessionId,
-    history: commitSlideAuthoringHistory(session.history, project),
+    history: commitResourceAwareAuthoringHistory(session.history, project),
     selection: selectAdded(session, project, layerItemId),
     scope: session.scope,
     generation: session.generation,
@@ -279,7 +268,7 @@ function commitUpdated(
 ): SlideCommandResult {
   return succeed({
     sessionId: session.sessionId,
-    history: commitSlideAuthoringHistory(session.history, project),
+    history: commitResourceAwareAuthoringHistory(session.history, project),
     selection: session.selection,
     scope: session.scope,
     generation: session.generation,

@@ -658,14 +658,15 @@ describe('Published Interaction Spatial host integration', () => {
     expect(bindUnavailable.every((diagnostic) => diagnostic.phase === 'execute')).toBe(true)
     expect(animationTargets).not.toContain(target.layerItemId)
 
-    const root = spatialRoot(container)
-    Object.defineProperty(root, 'getBoundingClientRect', {
+    const content = spatialRoot(container).querySelector<HTMLElement>('[data-playback-content]')!
+    expect(content).not.toBeNull()
+    Object.defineProperty(content, 'getBoundingClientRect', {
       configurable: true,
       value: () => ({ left: 0, top: 0, width: 1280, height: 720, right: 1280, bottom: 720 }),
     })
-    pointer(root, 'pointerdown', 0, 0)
-    pointer(root, 'pointermove', -5_000, -5_000)
-    pointer(root, 'pointerup', -5_000, -5_000)
+    pointer(content, 'pointerdown', 0, 0)
+    pointer(content, 'pointermove', -5_000, -5_000)
+    pointer(content, 'pointerup', -5_000, -5_000)
     await settle()
 
     expect(renderedSpatialItem(container, offCamera.layerItemId)).toBe(offCameraNode)
@@ -722,14 +723,15 @@ describe('Published Interaction Spatial host integration', () => {
       expectInteractionVisibility(renderedSpatialItem(container, item.layerItemId), true)
     }
 
-    const root = spatialRoot(container)
-    Object.defineProperty(root, 'getBoundingClientRect', {
+    const content = spatialRoot(container).querySelector<HTMLElement>('[data-playback-content]')!
+    expect(content).not.toBeNull()
+    Object.defineProperty(content, 'getBoundingClientRect', {
       configurable: true,
       value: () => ({ left: 0, top: 0, width: 1280, height: 720, right: 1280, bottom: 720 }),
     })
-    pointer(root, 'pointerdown', 200, 200)
-    pointer(root, 'pointermove', 230, 210)
-    pointer(root, 'pointerup', 230, 210)
+    pointer(content, 'pointerdown', 200, 200)
+    pointer(content, 'pointermove', 230, 210)
+    pointer(content, 'pointerup', 230, 210)
     await settle()
     expect(worldTransform(container)).not.toBe(HOME_WORLD_TRANSFORM)
     expectInteractionVisibility(renderedSpatialItem(container, surfaceTarget.layerItemId), true)
@@ -1024,17 +1026,18 @@ describe('Published Interaction Spatial host integration', () => {
       expectInteractionVisibility(renderedSpatialItem(container, item.layerItemId), true)
     }
 
-    const root = spatialRoot(container)
-    Object.defineProperty(root, 'getBoundingClientRect', {
+    const content = spatialRoot(container).querySelector<HTMLElement>('[data-playback-content]')!
+    expect(content).not.toBeNull()
+    Object.defineProperty(content, 'getBoundingClientRect', {
       configurable: true,
       value: () => ({ left: 0, top: 0, width: 1280, height: 720, right: 1280, bottom: 720 }),
     })
-    pointer(root, 'pointerdown', 200, 200)
-    pointer(root, 'pointermove', 250, 230)
-    pointer(root, 'pointerup', 250, 230)
+    pointer(content, 'pointerdown', 200, 200)
+    pointer(content, 'pointermove', 250, 230)
+    pointer(content, 'pointerup', 250, 230)
     await settle()
     expect(worldTransform(container)).not.toBe(HOME_WORLD_TRANSFORM)
-    expect(tap(root)).toBe(false)
+    expect(tap(content)).toBe(false)
 
     tap(renderedSpatialItem(container, replay.layerItemId))
     await vi.waitFor(() => {

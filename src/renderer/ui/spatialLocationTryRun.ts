@@ -2,7 +2,7 @@ import type { ComponentPackageData } from '../../shared/componentTypes'
 import { CANVAS_HEIGHT, CANVAS_WIDTH } from '../../shared/constants'
 import type { CourseProjectDocument } from '../../shared/courseProjectTypes'
 import { SpatialSurfaceHost } from '../../player/surfaces/spatial/SpatialSurfaceHost'
-import { publishedControllerNavigationTarget } from '../../player/surfaces/publishedDynamicHosts'
+import { createLocationTryRunNavigation } from './locationTryRunNavigation'
 import { buildPublishedCourseV2Payload } from '../export/course/buildPublishedCourse'
 
 /**
@@ -25,6 +25,7 @@ export async function mountSpatialLocationTryRun(input: {
     components: input.components ?? {},
   })
   let host!: SpatialSurfaceHost
+  const navigation = createLocationTryRunNavigation(published, () => host?.locationId ?? input.locationId)
   host = SpatialSurfaceHost.fromPublishedCourse(
     published,
     {
@@ -33,6 +34,7 @@ export async function mountSpatialLocationTryRun(input: {
     },
     {
       locationId: input.locationId,
+      navigation: navigation.port,
       playbackPathId: input.playbackPathId ?? null,
       playbackControls: published.playback.controls === 'none' ? 'none' : 'canvas',
       resolveAsset: (assetId) => published.assets[assetId]?.url,
@@ -45,16 +47,13 @@ export async function mountSpatialLocationTryRun(input: {
         getStateLabel: () => null,
       },
       executeTeacherControllerAction: async (action) => {
-        const target = publishedControllerNavigationTarget(action, {
-          locations: published.locations,
-          currentLocationId: host.locationId,
-          startLocationId: published.startLocationId,
-        })
+        const target = navigation.target(action)
         if (!target || target.kind !== 'spatial-camera' || target.surfaceId !== host.id) {
           return false
         }
         try {
           await host.setLocationId(target.id)
+          navigation.notify()
           return true
         } catch {
           return false

@@ -1,3 +1,4 @@
+import { commitResourceAwareAuthoringHistory } from '../authoring/resourceAwareAuthoringHistory'
 import { nanoid } from 'nanoid'
 import { MAX_SCENE_NODES } from '../../shared/constants'
 import { mergeCourseNativeData } from '../../shared/courseProjectSchema'
@@ -49,19 +50,7 @@ import {
   type CourseAssetSidecar,
   type CourseImportedAsset,
 } from '../project/v9AssetAdapter'
-import {
-  SLIDE_REJECT_LOCKED,
-  SLIDE_REJECT_STALE_REVISION,
-  SLIDE_REJECT_WRONG_OWNER,
-  SlideCommandError,
-  commitSlideAuthoringHistory,
-  commitSlideProjectMutation,
-  selectSlideEditorLayers,
-  type SlideAuthoringSelection,
-  type SlideAuthoringSessionRef,
-  type SlideCommandOptions,
-  type SlideCommandResult,
-} from './slideEditorCommands'
+import { SLIDE_REJECT_LOCKED, SLIDE_REJECT_STALE_REVISION, SLIDE_REJECT_WRONG_OWNER, SlideCommandError, commitSlideProjectMutation, selectSlideEditorLayers, type SlideAuthoringSelection, type SlideAuthoringSessionRef, type SlideCommandOptions, type SlideCommandResult } from './slideEditorCommands'
 import { buildSlideEditorView } from './slideEditorView'
 import {
   addSlideImageLayer,
@@ -665,7 +654,7 @@ function commitMediaProject(
   })
   const nextSession = freezeSession({
     sessionId: media.session.sessionId,
-    history: commitSlideAuthoringHistory(media.session.history, project),
+    history: commitResourceAwareAuthoringHistory(media.session.history, project),
     selection,
     scope: media.session.scope,
     generation: media.session.generation,

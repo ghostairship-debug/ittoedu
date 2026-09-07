@@ -1,3 +1,4 @@
+import { isAuthoringHistoryTransactionFrame } from '../../src/renderer/authoring/resourceAwareAuthoringHistory'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
 import type {
@@ -8,7 +9,7 @@ import type {
 import { allocateCourseLayerOrder } from '@/renderer/course/globalLayerCommands'
 import { insertFlowEditorBlock } from '@/renderer/course/flowEditorCommands'
 import { selectFlowEditorBlocks } from '@/renderer/course/flowEditorSlice'
-import { isSlideAuthoringTransactionFrame } from '@/renderer/course/slideEditorCommands'
+
 import {
   selectActiveCourseProjectDocument,
   selectSelectedNodeIds,
@@ -83,7 +84,7 @@ describe('unified Delete transaction', () => {
     expect(selectSelectedNodeIds(useEditorStore.getState())).toEqual([])
     const backend = selectSlideAuthoringBackend(useEditorStore.getState())
     const lastFrame = backend?.getSession().history.past.at(-1)
-    expect(lastFrame && isSlideAuthoringTransactionFrame(lastFrame)).toBe(true)
+    expect(lastFrame && isAuthoringHistoryTransactionFrame(lastFrame)).toBe(true)
 
     useEditorStore.getState().undo()
     expect(firstSlideScene().layerItems.map((item) => item.layerItemId))

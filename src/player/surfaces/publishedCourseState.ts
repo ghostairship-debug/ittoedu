@@ -24,6 +24,8 @@ function guardedRuntimeActions(
 ): Readonly<RuntimeHostActions> | undefined {
   if (!actions) return undefined
   return Object.freeze({
+    ...(actions.nextStep ? { nextStep: () => active() && actions.nextStep!() } : {}),
+    ...(actions.previousStep ? { previousStep: () => active() && actions.previousStep!() } : {}),
     goToScene: (sceneId: string, targetStateId?: string) => (
       active() && actions.goToScene(sceneId, targetStateId)
     ),

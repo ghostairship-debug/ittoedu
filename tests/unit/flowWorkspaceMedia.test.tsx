@@ -353,14 +353,14 @@ describe('FlowWorkspace edit media', () => {
   it('draws native image and video overlays instead of a label fallback', () => {
     renderMediaPaper()
     const imageCard = screen.getByTestId('flow-layer-card-overlay-image')
-    const overlayImage = imageCard.querySelector('[data-flow-overlay-media="image"]')
+    const overlayImage = imageCard.querySelector('[data-native-authoring-content="image"] img')
     expect(overlayImage?.tagName).toBe('IMG')
     expect(overlayImage).toHaveAttribute('src')
     expect(overlayImage?.getAttribute('src')).toMatch(/^blob:flow-image\/png-/)
     expect(imageCard.textContent).not.toContain('浮层图片')
 
     const videoCard = screen.getByTestId('flow-layer-card-overlay-video')
-    const overlayVideo = videoCard.querySelector('[data-flow-overlay-media="video"]')
+    const overlayVideo = videoCard.querySelector('[data-native-authoring-content="video"] video')
     expect(overlayVideo?.tagName).toBe('VIDEO')
     expect(overlayVideo).toHaveAttribute('src')
     expect(overlayVideo?.getAttribute('src')).toMatch(/^blob:flow-video\/mp4-/)

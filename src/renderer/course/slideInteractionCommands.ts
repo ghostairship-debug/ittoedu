@@ -1,3 +1,4 @@
+import { commitResourceAwareAuthoringHistory, type ResourceAwareAuthoringHistory } from '../authoring/resourceAwareAuthoringHistory'
 import { nanoid } from 'nanoid'
 import {
   MAX_INTERACTION_ACTIONS,
@@ -10,13 +11,7 @@ import type {
   CourseProjectDocument,
   LayerItem,
 } from '../../shared/courseProjectTypes'
-import {
-  SLIDE_REJECT_WRONG_OWNER,
-  SlideCommandError,
-  commitSlideAuthoringHistory,
-  commitSlideProjectMutation,
-  type SlideAuthoringHistory,
-} from './slideEditorCommands'
+import { SLIDE_REJECT_WRONG_OWNER, SlideCommandError, commitSlideProjectMutation } from './slideEditorCommands'
 
 /** Interaction rules live on the scene. Global writes belong to R3. */
 export type SlideInteractionScope = 'scene' | 'global'
@@ -149,10 +144,10 @@ function valuesEqual(left: unknown, right: unknown): boolean {
 }
 
 function commitHistory(
-  history: SlideAuthoringHistory,
+  history: ResourceAwareAuthoringHistory,
   project: CourseProjectDocument,
-): SlideAuthoringHistory {
-  return commitSlideAuthoringHistory(history, project)
+): ResourceAwareAuthoringHistory {
+  return commitResourceAwareAuthoringHistory(history, project)
 }
 
 /**
@@ -160,11 +155,11 @@ function commitHistory(
  * Exactly one Project revision and one history entry per invocation.
  */
 export function addSlideInteractionRule(
-  history: SlideAuthoringHistory,
+  history: ResourceAwareAuthoringHistory,
   target: SlideInteractionTarget,
   rule: InteractionRule,
   now?: string,
-): SlideAuthoringHistory {
+): ResourceAwareAuthoringHistory {
   assertSceneScope(target)
   const id = rule.id.trim()
   if (!id) throw new Error('规则 ID 不能为空')
@@ -188,12 +183,12 @@ export function addSlideInteractionRule(
  * Applies one patch to an existing scene rule. `ruleId` is immutable.
  */
 export function updateSlideInteractionRule(
-  history: SlideAuthoringHistory,
+  history: ResourceAwareAuthoringHistory,
   target: SlideInteractionTarget,
   ruleId: string,
   patch: Partial<Omit<InteractionRule, 'id'>>,
   now?: string,
-): SlideAuthoringHistory {
+): ResourceAwareAuthoringHistory {
   assertSceneScope(target)
   const project = history.present
   const current = locateRule(project, target, ruleId)
@@ -215,11 +210,11 @@ export function updateSlideInteractionRule(
 }
 
 export function deleteSlideInteractionRule(
-  history: SlideAuthoringHistory,
+  history: ResourceAwareAuthoringHistory,
   target: SlideInteractionTarget,
   ruleId: string,
   now?: string,
-): SlideAuthoringHistory {
+): ResourceAwareAuthoringHistory {
   assertSceneScope(target)
   const current = locateRule(history.present, target, ruleId)
   if (!current) throw new Error(emptyRuleScopeMessage())
@@ -239,11 +234,11 @@ export function deleteSlideInteractionRule(
 }
 
 export function duplicateSlideInteractionRule(
-  history: SlideAuthoringHistory,
+  history: ResourceAwareAuthoringHistory,
   target: SlideInteractionTarget,
   ruleId: string,
   now?: string,
-): SlideAuthoringHistory {
+): ResourceAwareAuthoringHistory {
   assertSceneScope(target)
   const current = locateRule(history.present, target, ruleId)
   if (!current) throw new Error(emptyRuleScopeMessage())
@@ -265,12 +260,12 @@ export function duplicateSlideInteractionRule(
 }
 
 export function moveSlideInteractionRule(
-  history: SlideAuthoringHistory,
+  history: ResourceAwareAuthoringHistory,
   target: SlideInteractionTarget,
   ruleId: string,
   direction: -1 | 1,
   now?: string,
-): SlideAuthoringHistory {
+): ResourceAwareAuthoringHistory {
   assertSceneScope(target)
   const project = history.present
   const rules = locateSceneInteractions(project, target.locationId)

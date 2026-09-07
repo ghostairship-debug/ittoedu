@@ -1,3 +1,4 @@
+import { isAuthoringHistoryTransactionFrame } from '../../src/renderer/authoring/resourceAwareAuthoringHistory'
 import { describe, expect, it } from 'vitest'
 import { MAX_SCENE_NODES } from '@/shared/constants'
 import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
@@ -43,7 +44,7 @@ import {
   shouldIgnoreSlideLayerDeleteForFocus,
   classifySlideAuthoringFocus,
 } from '@/renderer/course/v9SlideActionCommands'
-import { isSlideAuthoringTransactionFrame } from '@/renderer/course/slideEditorCommands'
+
 import {
   addSlideInteractionRule,
   SLIDE_INTERACTION_GLOBAL_WRITE_REASON,
@@ -709,7 +710,7 @@ describe('V9 Slide action transactions and clipboard resources', () => {
     expect(deleted.historyEntry).toBe(true)
     expect(deleted.resourceTransition?.resourceDirection).toBe('forward')
     expect(afterDelete.history.present.revision).toBe(2)
-    expect(isSlideAuthoringTransactionFrame(afterDelete.history.past.at(-1)!)).toBe(true)
+    expect(isAuthoringHistoryTransactionFrame(afterDelete.history.past.at(-1)!)).toBe(true)
 
     const copied = executeSlideSceneAction('copy', select(session, ['slide-runtime']))
     expect(copied.clipboard?.resourceReferences).toEqual({
@@ -720,13 +721,13 @@ describe('V9 Slide action transactions and clipboard resources', () => {
     const afterPaste = requireSession(pasted)
     expect(pasted.resourceTransition?.resourceDirection).toBe('forward')
     expect(afterPaste.history.present.revision).toBe(2)
-    expect(isSlideAuthoringTransactionFrame(afterPaste.history.past.at(-1)!)).toBe(true)
+    expect(isAuthoringHistoryTransactionFrame(afterPaste.history.past.at(-1)!)).toBe(true)
 
     const duplicated = duplicateSlideSceneLayers(session, ['slide-title'], { now: NOW })
     const afterDup = requireSession(duplicated)
     expect(duplicated.resourceTransition?.resourceDirection).toBe('forward')
     expect(afterDup.history.present.revision).toBe(2)
-    expect(isSlideAuthoringTransactionFrame(afterDup.history.past.at(-1)!)).toBe(true)
+    expect(isAuthoringHistoryTransactionFrame(afterDup.history.past.at(-1)!)).toBe(true)
   })
 
   it('rejects paste when clipboard resource references are missing or tampered', () => {
@@ -825,7 +826,7 @@ describe('V9 Slide action transactions and clipboard resources', () => {
     const after = requireSession(duplicated)
     expect(duplicated.resourceTransition?.resourceDirection).toBe('forward')
     expect(after.history.present.revision).toBe(2)
-    expect(isSlideAuthoringTransactionFrame(after.history.past.at(-1)!)).toBe(true)
+    expect(isAuthoringHistoryTransactionFrame(after.history.past.at(-1)!)).toBe(true)
     const ids = after.selection.selectionIds
     expect(ids).toHaveLength(2)
     expect(ids.some((id) => id === 'global-banner' || id === 'global-runtime')).toBe(false)

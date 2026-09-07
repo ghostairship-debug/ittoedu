@@ -1,3 +1,5 @@
+import type { PlaybackNavigationViewPort } from '../../navigation/coursePlaybackSequence'
+import type { PlaybackViewSession } from '../../playbackViewSession'
 import {
   composePublishedCourseLocation,
   type CourseLayerComposition,
@@ -66,12 +68,12 @@ import {
   paintPublishedNativeRenderInput,
   type PublishedNativeRenderInput,
   type PublishedTeacherControllerInput,
-} from './publishedNativeRendering'
+} from '../native/publishedNativeRendering'
 import {
   mountPublishedNativeVideo,
   type PublishedNativeVideoHandle,
   type PublishedVideoInput,
-} from './publishedNativeVideoMount'
+} from '../publishedNativeVideoMount'
 import {
   PublishedSlideInteractionSurfacePort,
 } from './publishedSlideInteractionSurfacePort'
@@ -469,6 +471,8 @@ function appendLayerNode(
   wrap.style.width = `${item.frame.width}px`
   wrap.style.height = `${item.frame.height}px`
   wrap.style.opacity = String(item.opacity)
+  wrap.dataset.playbackBounds = 'true'
+  if (item.kind === 'runtime' || item.kind === 'component') wrap.dataset.layerKind = item.kind
   wrap.style.transform = `rotate(${item.rotation}deg)`
   wrap.style.transformOrigin = 'center center'
   wrap.style.pointerEvents = options?.interactive === false
@@ -683,6 +687,8 @@ export class SlidePublishedAdapter implements SurfaceHost, PublishedAuthoringPat
   readonly #globalInteractionVisibilityState: PublishedInteractionVisibilityState
   readonly #onInteractionInvalidated?: () => void
   readonly #onInteractionReady?: () => void
+  readonly #navigation: PlaybackNavigationViewPort | undefined
+  readonly #playbackView: PlaybackViewSession | undefined
   readonly #teacherControllerSession: TeacherControllerRuntimeSessionStore
   readonly #executeTeacherControllerAction?: (
     action: TeacherControllerAction,
@@ -745,6 +751,8 @@ export class SlidePublishedAdapter implements SurfaceHost, PublishedAuthoringPat
       onInteractionInvalidated?: () => void
       onInteractionReady?: () => void
       teacherControllerSession?: TeacherControllerRuntimeSessionStore
+      navigation?: PlaybackNavigationViewPort
+  playbackView?: PlaybackViewSession
       replayScene?: () => Promise<boolean>
       executeTeacherControllerAction?: (
         action: TeacherControllerAction,
@@ -774,6 +782,8 @@ export class SlidePublishedAdapter implements SurfaceHost, PublishedAuthoringPat
       ?? new PublishedInteractionVisibilityState()
     this.#onInteractionInvalidated = options.onInteractionInvalidated
     this.#onInteractionReady = options.onInteractionReady
+    this.#navigation = options.navigation
+    this.#playbackView = options.playbackView
     this.#teacherControllerSession = options.teacherControllerSession
       ?? new TeacherControllerRuntimeSessionStore()
     this.#replayScene = options.replayScene
@@ -807,6 +817,8 @@ export class SlidePublishedAdapter implements SurfaceHost, PublishedAuthoringPat
   }
 
   /** Current Published Slide paint plan. Does not construct Scene/Project. */
+  getPublishedPresentationStateId(): string | null { return this.#presentationStateId ?? null }
+
   getPublishedSlideRenderPlan(): PublishedSlideRenderPlan {
     return publishedSlideRenderPlanFromComposition(composePublishedSlideLocation({
       payload: this.#payload,
@@ -1746,6 +1758,8 @@ export class SlidePublishedAdapter implements SurfaceHost, PublishedAuthoringPat
       },
     )
     const controller = new TeacherControllerDom({
+      navigation: this.#navigation,
+      playbackView: this.#playbackView,
       node,
       container: wrap,
       footprintElement: wrap,
@@ -1979,7 +1993,21 @@ export class SlidePublishedAdapter implements SurfaceHost, PublishedAuthoringPat
     stage.style.position = 'absolute'
     stage.style.inset = '0'
     root.appendChild(stage)
+    if (this.#playbackView) {
+      stage.dataset.playbackContent = 'true'
+      stage.style.transformOrigin = '0 0'
+      stage.style.background = root.style.background
+      stage.style.backgroundColor = root.style.backgroundColor
+      stage.style.backgroundImage = root.style.backgroundImage
+      stage.style.backgroundSize = 'cover'
+      stage.style.backgroundPosition = 'center'
+      stage.style.backgroundRepeat = 'no-repeat'
+      root.style.backgroundImage = 'none'
+      root.style.backgroundColor = 'transparent'
+      this.#playbackView.register({ id: this.id, kind: 'slide', root, content: stage })
+    }
     const mountController = (wrap: HTMLElement, input: PublishedTeacherControllerInput) => {
+      if (this.#playbackView) root.appendChild(wrap)
       this.#mountTeacherController(wrap, input)
     }
     if (this.#authoring) this.#publishAuthoringRuntimeTargets(scene.id)
@@ -2044,7 +2072,7 @@ export class SlidePublishedAdapter implements SurfaceHost, PublishedAuthoringPat
       }
       const wrap = appendLayerNode(
         root.ownerDocument,
-        stage,
+        this.#playbackView && renderedItem.kind === 'native' && renderedItem.content.nativeType === 'teacher-controller' ? root : stage,
         renderedItem,
         source,
         this.#resolveAsset,

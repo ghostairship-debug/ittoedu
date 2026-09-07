@@ -52,3 +52,18 @@ describe('teacher controller delivery consistency', () => {
     },
   )
 })
+
+
+it('keeps a step-only controller usable without rewriting its authored buttons', () => {
+  const project = createBlankCourseProject()
+  const entry = controllerEntry(project)
+  if (!isCourseTeacherControllerLayerItem(entry.item)) throw new Error('missing controller')
+  entry.item.content.data.buttons = [
+    { id: 'only-step', action: { type: 'step.next' }, label: '继续讲解', visible: true },
+  ]
+  const before = structuredClone(entry.item.content.data.buttons)
+  expect(hasCourseDeliveryVisibleTeacherController(project)).toBe(true)
+  synchronizeCourseTeacherControllerControls(project)
+  expect(project.playback.controls).toBe('canvas')
+  expect(entry.item.content.data.buttons).toEqual(before)
+})

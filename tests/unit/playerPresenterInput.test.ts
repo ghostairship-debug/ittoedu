@@ -63,6 +63,16 @@ afterEach(() => {
 })
 
 describe('PlayerPresenterInput', () => {
+  it('uses the session step owner even when one location has multiple presentation steps', () => {
+    const step = vi.fn(() => true)
+    const { navigate } = createInput({ totalPages: 1, onStep: step })
+    keydown('PageDown')
+    keydown('ArrowRight')
+    keydown('PageUp')
+    expect(step.mock.calls).toEqual([['next'], ['next'], ['previous']])
+    expect(navigate).not.toHaveBeenCalled()
+  })
+
   it('keeps Arrow navigation independent and maps standard presenter keys', () => {
     const { input, navigate, authored } = createInput()
 

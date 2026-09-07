@@ -3,6 +3,7 @@ import type { LocalAgentEvent, LocalAgentHostResult, LocalAgentId, LocalAgentRec
 import type { GenerationCandidate, GenerationRequest } from '../../../shared/generationContract'
 import type { MaterialRecordV1 } from '../../../shared/materialContract'
 import { GENERATION_OPEN } from '../../../shared/generationResult'
+import { localAgentText } from '../../../shared/localAgentText'
 import { captureGenerationSnapshot, type GenerationReferenceScope } from '../../authoring/generation/generationSnapshot'
 import { captureGenerationRepair, generationRepairMadeProgress } from '../../authoring/generation/generationRepair'
 import { selectActiveCourseProjectDocument, selectEffectiveLayerProjection, useEditorStore } from '../../store/editorStore'
@@ -14,10 +15,8 @@ import './course-chat.css'
 type Preview = Awaited<ReturnType<ReturnType<typeof useEditorStore.getState>['prepareGenerationCandidate']>> & { requestId: string; sessionId: string }
 type Turn = { id: string; request: GenerationRequest; events: LocalAgentEvent[]; status: string; result?: unknown }
 const message = (error: unknown) => error instanceof Error ? error.message : String(error)
-const assistantText = (events: LocalAgentEvent[]) => events.filter(event => event.kind === 'text').map(event => {
-  const payload = event.payload
-  return payload && typeof payload === 'object' && !Array.isArray(payload) && typeof payload.text === 'string' ? payload.text : ''
-}).join('\n').split(GENERATION_OPEN)[0]
+const eventMessage = (event?: LocalAgentEvent) => event?.payload && typeof event.payload === 'object' && !Array.isArray(event.payload) && typeof event.payload.message === 'string' ? event.payload.message : 'CLI 本轮未完成，请重试或检查本地 CLI。'
+const assistantText = (events: LocalAgentEvent[]) => localAgentText(events).split(GENERATION_OPEN)[0]
 const recordedReferenceNames = (request: GenerationRequest) => {
   const context = request.context as { pages?: { location?: { label?: string } }[] }
   return Array.isArray(context?.pages) ? context.pages.map(page => page?.location?.label).filter(Boolean).join('、') : ''
@@ -46,6 +45,11 @@ export function CourseChatPanel({ projectId, projectPath, onClose }: { projectId
   const [applied, setApplied] = useState<{ revision: number; sessionId: string; result: LocalAgentHostResult } | null>(null)
   const generation = useRef(0)
   const running = useRef<string | null>(null)
+  const scroll = useRef<HTMLDivElement | null>(null)
+  const followReply = useRef(true)
+  useEffect(() => {
+    if (followReply.current && scroll.current) scroll.current.scrollTop = scroll.current.scrollHeight
+  }, [events, turns, busy])
   const currentDocument = useEditorStore(selectActiveCourseProjectDocument)
   const authoringSession = useEditorStore(state => state.courseAuthoringSession)
   const revision = currentDocument?.revision
@@ -54,12 +58,11 @@ export function CourseChatPanel({ projectId, projectPath, onClose }: { projectId
     if (wholeCourse || scope === 'course') return `${currentDocument.title} · ${currentDocument.locations.length}个位置`
     const location = currentDocument.locations.find(item => item.id === authoringSession.token.locationId)
     if (!location) return '当前引用不可用'
-    if (scope === 'page') return location.label
     const selected = new Set(authoringSession.itemIds)
     const projection = projectEffectiveLayers({ project: currentDocument, locationId: location.id })
     const names = projection.unifiedRows.filter(row => selected.has(row.id)).map(row => row.item.label)
     if (projection.surfaceType === 'flow') names.push(...buildFlowEditorView({ project: currentDocument, locationId: location.id }).blocks.filter(block => selected.has(block.blockId)).map(block => block.label))
-    return `${location.label} · ${names.length ? names.join('、') : '未选择对象'}`
+    return scope === 'page' && !names.length ? location.label : `${location.label} · ${names.length ? `已选：${names.join('、')}` : '未选择对象'}`
   }, [currentDocument, authoringSession, wholeCourse, scope])
   const api = window.desktopAPI
   const owner = { projectId, projectPath: projectPath ?? '' }
@@ -119,8 +122,9 @@ export function CourseChatPanel({ projectId, projectPath, onClose }: { projectId
       let nextRequest = captureGenerationSnapshot({ document, workspace, projection, sessionToken: state.courseAuthoringSession.token,
         selectedIds: state.courseAuthoringSession.itemIds, scope: wholeCourse ? 'course' : scope, instruction,
         purpose: wholeCourse ? 'whole-course' : scope === 'selection' ? 'local-edit' : 'single-page',
+        expectedResult: wholeCourse ? 'candidate' : 'auto',
         confirmedDocuments: wholeCourse ? { teachingPlan, presentationScript } : undefined,
-        materials: selectedMaterials, catalogPackages: catalog.packages, previousResult: turns.at(-1)?.result ?? sessions.find(record => record.id === sessionId)?.hostResult })
+        materials: selectedMaterials, componentPackages: state.componentPackages, catalogPackages: catalog.packages, previousResult: turns.at(-1)?.result ?? sessions.find(record => record.id === sessionId)?.hostResult })
       let rejected: GenerationCandidate | undefined
       let resumeId = sessionId
       const isCurrent = () => {
@@ -147,24 +151,30 @@ export function CourseChatPanel({ projectId, projectPath, onClose }: { projectId
         if (!record) throw new Error('会话记录不可用')
         for (const event of record.events) if (event.sequence > after) { collected.push(event); after = event.sequence }
         setEvents([...collected]); setTurns(prior => prior.map(turn => turn.id === runId ? { ...turn, events: [...collected], status: record.status } : turn))
-        setNotice(record.status === 'running' ? 'CLI 正在处理，可继续人工编辑' : `CLI：${record.status}`)
+        const permission = [...collected].reverse().find(event => event.kind === 'session' && event.payload && typeof event.payload === 'object' && !Array.isArray(event.payload) && ['permission-denied', 'api-retry'].includes(String(event.payload.status)))
+        setNotice(record.status === 'running' ? (permission ? eventMessage(permission) : '正在回复…') : record.status === 'completed' ? '回复完成' : record.status === 'cancelled' ? '已停止' : '本轮未完成')
         // A terminal page may still have more than 200 events to drain.
         if (record.status !== 'running' && record.events.length < 200) {
           setSessions(prior => [...prior.filter(value => value.id !== record.id), { ...record, events: [] }])
           running.current = null
           if (record.status === 'failed') {
             const failure = [...collected].reverse().find(event => event.kind === 'failed')
-            setError(`CLI 失败（${failure?.failure ?? 'unknown'}）：${JSON.stringify(failure?.payload ?? {})}`)
+            setError(eventMessage(failure))
           }
           if (record.status === 'completed') {
             const result = await api.localAgent({ operation: 'candidate', ...owner, sessionId: runId })
             if (token !== generation.current) return
-            if (result.candidate) {
+            const outcome = result.generationResult
+            if (!outcome || outcome.requestId !== request.requestId) throw new Error('CLI 结果不属于当前请求')
+            if (outcome.kind === 'answer') setNotice('回复完成；本轮没有可应用的修改候选。')
+            else {
+              const candidate = outcome.kind === 'candidate' ? outcome.candidate : undefined
               setNotice('正在校验候选，尚未修改课件')
               try {
                 if (!isCurrent()) throw new Error('stale：工程或会话已改变')
-                if (rejected && !generationRepairMadeProgress(rejected, result.candidate)) throw new Error('修复候选没有可观察的变化；已停止')
-                const prepared = await useEditorStore.getState().prepareGenerationCandidate(request, result.candidate)
+                if (outcome.kind === 'candidate-format-error') throw new Error(outcome.finding)
+                if (rejected && !generationRepairMadeProgress(rejected, outcome.candidate)) throw new Error('修复候选没有可观察的变化；已停止')
+                const prepared = await useEditorStore.getState().prepareGenerationCandidate(request, outcome.candidate)
                 if (token !== generation.current) return
                 await rememberResult(runId, { requestId: request.requestId, status: 'checked', summary: prepared.summary,
                   candidateId: prepared.candidateId,
@@ -173,10 +183,10 @@ export function CourseChatPanel({ projectId, projectPath, onClose }: { projectId
                 setPreview({ ...prepared, requestId: request.requestId, sessionId: runId }); setNotice('候选检查通过，请查看变更后应用')
               } catch (reason) {
                 const fresh = isCurrent() && !message(reason).startsWith('stale：')
-                await rememberResult(runId, { requestId: request.requestId, candidateId: result.candidate.candidateId, status: fresh ? 'rejected' : 'stale', summary: message(reason).slice(0, 4000) })
+                await rememberResult(runId, { requestId: request.requestId, ...(candidate ? { candidateId: candidate.candidateId } : {}), status: fresh ? 'rejected' : 'stale', summary: message(reason).slice(0, 4000) })
                 if (!fresh || !isCurrent() || attempt === 1) throw reason
-                rejected = result.candidate
-                nextRequest = captureGenerationRepair(request, rejected, message(reason))
+                rejected = candidate
+                nextRequest = captureGenerationRepair(request, outcome.kind === 'candidate' ? outcome.candidate : outcome, message(reason))
                 resumeId = runId; repair = true
                 setNotice('候选未通过检查，正在进行唯一一次局部修复')
               }
@@ -212,12 +222,15 @@ export function CourseChatPanel({ projectId, projectPath, onClose }: { projectId
     } catch (reason) { setError(message(reason)) }
   }
   const text = assistantText(events)
-  return <aside className="course-chat" aria-label="CLI 创作助手">
+  return <aside className="course-chat" aria-label="CLI 创作助手" data-flow-selection-preserving-target="true">
     <header><strong>创作助手 · 内部试用</strong><button onClick={onClose}>关闭</button></header>
     {!projectPath ? <p>请先保存工程，再开始对话。</p> : <>
       <div className="chat-controls"><label>CLI<select aria-label="CLI" value={adapter} disabled={busy || !!sessionId} onChange={event => setAdapter(event.target.value as LocalAgentId)}><option value="codex">Codex</option><option value="claude">Claude</option><option value="opencode">OpenCode</option></select></label>
         <label>会话<select aria-label="会话" value={sessionId} disabled={busy} onChange={event => void selectSession(event.target.value)}><option value="">新对话</option>{sessions.map(record => <option key={record.id} value={record.id}>{record.adapter} · {record.id.slice(0, 8)} · {record.status}</option>)}{sessionId && !sessions.some(record => record.id === sessionId) && <option value={sessionId}>当前对话</option>}</select></label></div>
-      <div className="chat-scroll">
+      <div className="chat-scroll" ref={scroll} onScroll={event => {
+        const element = event.currentTarget
+        followReply.current = element.scrollHeight - element.scrollTop - element.clientHeight < 60
+      }}>
         {turns.map(turn => <details key={turn.id}><summary>你：{turn.request.instruction.slice(0, 60)}</summary><p>{turn.request.instruction}</p><p>引用：{recordedReferenceNames(turn.request)} · revision {turn.request.documentRevision}</p>{turn.id !== sessionId && <SafeChatMessage text={assistantText(turn.events)} />}<pre>{turn.result ? JSON.stringify(turn.result, null, 2) : turn.status}</pre></details>)}
         {text && <SafeChatMessage text={text} />}
         <details><summary>CLI 原生事件（{events.length}）</summary>{events.length > visibleEvents && <button onClick={() => setVisibleEvents(value => value + 100)}>显示更早的事件</button>}<ol>{events.slice(-visibleEvents).map(event => <li key={event.sequence}>#{event.sequence} {event.kind}<pre>{JSON.stringify(event.payload, null, 2)}</pre></li>)}</ol></details>

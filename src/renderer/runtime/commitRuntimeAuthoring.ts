@@ -1,3 +1,4 @@
+import { commitResourceAwareAuthoringHistory } from '../authoring/resourceAwareAuthoringHistory'
 import { nanoid } from 'nanoid'
 import type { AssetMeta } from '../../shared/contracts/media-v1'
 import {
@@ -51,7 +52,7 @@ import {
 } from './runtimeTemplateAuthoringCommands'
 import { setSlideSimpleEntranceAnimation } from '../course/v9SlideContentCommands'
 import { updateCoursePlaybackSettings } from '../course/globalLayerCommands'
-import { commitSlideAuthoringHistory, commitSlideProjectMutation } from '../course/slideEditorCommands'
+import { commitSlideProjectMutation } from '../course/slideEditorCommands'
 import type { ProjectDesignTokens } from '../../shared/contracts/design-v1'
 
 export type RuntimeAssetReplacementCommitResult =
@@ -247,6 +248,9 @@ export function createRuntimeAuthoringActions(ports: RuntimeAuthoringPorts) {
     const document = state.document
     const projection = state.projection
     let authoringSession = state.authoringSession
+    const targetContextId = projection?.surfaceType === 'spatial-2d'
+      ? projection.locationId
+      : state.activeSceneId
     if (
       !document
       || !projection
@@ -254,7 +258,7 @@ export function createRuntimeAuthoringActions(ports: RuntimeAuthoringPorts) {
       || session.kind !== 'text'
       || session.projectId !== document.id
       || session.scope !== state.editingScope
-      || session.sceneId !== state.activeSceneId
+      || session.sceneId !== targetContextId
       || authoringSession.token.locationId !== projection.locationId
       || authoringSession.token.surfaceType !== projection.surfaceType
     ) {
@@ -265,7 +269,10 @@ export function createRuntimeAuthoringActions(ports: RuntimeAuthoringPorts) {
     const projectedItemId = session.nodeId
     if (!projectedItemId) return null
     if (session.scope === 'global') {
-      if (projection.surfaceType !== 'slide') return null
+      if (
+        projection.surfaceType !== 'slide'
+        && projection.surfaceType !== 'spatial-2d'
+      ) return null
       expectedOwner = 'global'
     } else {
       const location = document.locations.find(
@@ -885,7 +892,7 @@ export function createRuntimeAuthoringActions(ports: RuntimeAuthoringPorts) {
             historyEntry: true,
             nextSession: {
               ...session,
-              history: commitSlideAuthoringHistory(session.history, project),
+              history: commitResourceAwareAuthoringHistory(session.history, project),
             },
             selection: session.selection,
           }

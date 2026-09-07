@@ -5,24 +5,43 @@
 ## 索引与命令
 
 - 生成合同：`<editor-root>/artifacts/ai-capabilities/index.json`。
-- 任意课例目录构建：`npm --prefix <editor-root> run --silent build:courseware-case -- --case-dir <case-dir> --builder implementation/build.ts --project <relative.h5lesson> --html <relative.html>`。课例模块由 `coursewareCaseBuilderApi.ts` 注入真实产品 API，不得静态导入编辑器内部路径。
+- 任意课例目录构建：`npm --prefix <editor-root> run --silent build:courseware-case -- --case-dir <case-dir> --builder implementation/build.ts --project <relative.h5lesson> --html <relative.html>`。V2 课例模块由 `scripts/courseware-builder-v2-host.ts` 提供受管 API，不得静态导入编辑器内部路径。
 - `protocols`：project **9**、publishedCourse **2**、runtime `[2, 3]`、component **4**、interaction **1**。
 - 仓库**没有** `agent-kit/bin/courseware-agent-kit.mjs` 或 `agent-kit/capabilities/index.json`。发现能力 = 读上述 `index.json`，再打开它列出的 `schemas/`、`diagnostics.json`、`limits.json`、组件快照。
 - 核对生成物：`npm run check:ai-capabilities`。不要手改索引冒充当前能力。
 - 无界面校验：`npm run --silent validate:course-project -- <project.h5lesson>`（`validate:project` 同一入口）。不要把 Project V8、Hash 或审批状态机写成现行教师工作流。
-- 索引里的 `headlessBuild.entrypoints.createCourseProject` 只指向默认 **Slide** 工厂。Flow / Spatial 工厂见下一节，不要以为索引没写就不存在。
+- 新课例使用 `apiVersion = 2` 和 `api.createCourseProject({ surfaceType, title })`；`session.tools` 提供真实工具清单，方法均按 [external-case-build.md](external-case-build.md) await 调用。索引里的底层工厂入口不等于 V2 API，不从它推断只能创建 Slide。
 
-## 三种 surface（已发布为产品能力）
+## V2 工具发现
+
+按需求从 `session.tools` 选择工具，再读取索引指向的输入 Schema；本文只提供导航，不复制所有输入字段。
+
+| 需求 | 当前工具方向 |
+|---|---|
+| Native / Flow 正文 | `native.content` / `flow.content`，先核对 Surface 与 owner 适用域 |
+| 页面、状态与位置 | `course.navigation` / `slide.structure` |
+| 课程状态、守卫、播放与网络 | `course.settings` |
+| Slide 声明式互动 | `slide.interaction`；不能据此推断 Flow/Spatial/global 都有同名作者接口 |
+| Recipe | `recipe.apply`，输出仍为普通工程内容 |
+| 组件 / Runtime | `component.insert`、`component.configure`、`component.package`；`runtime.insert`、`runtime.configure`、`runtime.source`，动态候选由产品准入 |
+| 素材、字体、材料引用 | `asset.media.import`、`asset.font.import`、`material.citation`；材料库 UI 功能不自动等于 Builder 工具 |
+| 背景与空间结构 | `owner.background` / `spatial.structure`，支持操作以清单、Schema 为准 |
+
+PPT 导入、批量编辑、Remix 等 GUI 能力不能仅因界面存在就写成 `session.execute()` 工具。当前清单没有所需导入或打开既有工程能力时，走真实产品入口或报告精确缺口，不静态导入内部模块绕过。
+
+## 三种 Surface 与底层 Owner 导航
 
 `index.json` → `surfaces.status = available`，`types = ["slide","flow","spatial-2d"]`。Published V2 同样列出这三项。
 
-| 教师入口 | 工厂 | 作者命令 | 试运行/预览宿主 |
+下表仅用于读源码定位，不是 V2 的 API 分组。写工程仍经上面的正式工具。
+
+| 教师入口 | 底层工厂 | 底层作者命令 | 试运行/预览宿主 |
 |---|---|---|---|
 | 新建课件 | `createBlankCourseProject` | `slideEditorCommands` / `v9SlideContentCommands` | `SlidePublishedAdapter`（文字含 `style` + `runs`） |
 | 新建流式讲义 | `createBlankFlowCourseProject` | `flowEditorCommands` / `flowSharedAuthoringAdapters` | `FlowSurfaceHost` |
 | 新建无限画布 | `createBlankSpatialCourseProject` | `spatialEditorCommands` | `SpatialSurfaceHost`（世界视频是 HTML `<video controls>`，不要放进 SVG `foreignObject`） |
 
-Mixed：同一 `CourseProjectDocument` 内用 `addCourseSlidePage` / `addCourseFlowPage` / `addCourseSpatialPage` 追加。界面由 `locations` / `surfaces` 推导。禁止新增 `projectMode` 或“四模式”字段。
+Mixed：同一 `CourseProjectDocument` 内由 `course.navigation` 追加表面；底层 Owner 为 `addCourseSlidePage` / `addCourseFlowPage` / `addCourseSpatialPage`。界面由 `locations` / `surfaces` 推导。禁止新增 `projectMode` 或“四模式”字段。
 
 无限画布运行态（当前位置试运行与整课预览）同时支持：
 
@@ -30,9 +49,9 @@ Mixed：同一 `CourseProjectDocument` 内用 `addCourseSlidePage` / `addCourseF
 - **镜头巡游**：`camera.frames`、播放路径、教师控制器切 `spatial-camera` location。
 - **让路**：指针落在 Runtime、组件、视频控件或教师控制器上时，那些手势优先，宿主不抢。
 
-打包：`createCourseProjectArchive`。打开非 `schemaVersion: 9` 的工程视为不受支持；不要导入 V8 `.h5lesson`。
+打包由外部构建入口调用 `createCourseProjectArchive`；课例模块只返回受管 `finish()` 结果。打开非 `schemaVersion: 9` 的工程视为不受支持；不要导入 V8 `.h5lesson`。
 
-## 编辑事实（与教师同一套命令）
+## 编辑事实（GUI 与底层源码导航）
 
 - 全局层 `globalLayerItems` 与 surface 层仍是 V9 引擎能力。教师控制器**只有一份全局图层**；场景/世界编辑态 inert，图层树仅 `editingScope === 'global'` 时列出。
 - 全局 Native 文字/图片可变换、可写内容；控制器 frame 仍走现有控制器命令。
@@ -45,7 +64,7 @@ Mixed：同一 `CourseProjectDocument` 内用 `addCourseSlidePage` / `addCourseF
 ## 课程逻辑（状态 + 导航守卫；2026-08-27 Owner 追认保留）
 
 - 能力声明：`index.json` → `interactions.courseLogicAuthoring`；播放器**实际执行**的交互切片看 `interactions.publishedPlayback`——当前 `node.click` 支持 `course-state.exists` / `course-state.compare` 条件和同步 `course-state.set` 动作，限制仍是无判题分支条件与无判题结果自动写状态桥。映射体验时以索引为准，不要凭印象。
-- 命令：`executeCourseLogicAuthoringCommand`（`courseLogicAuthoringCommands.ts`）；GUI 在专业模式「互动与动画」。
+- V2 使用 `course.settings`；底层为 `executeCourseLogicAuthoringCommand`（`courseLogicAuthoringCommands.ts`）；GUI 在专业模式「互动与动画」。
 - 守卫语义：只 `block`；只拦跨位置 go/next/previous；replay 不检查；restart 绕过并重置为默认值；教师控制器可绕过。
 - 状态写入：Published `node.click` 可同步执行 `course-state.set`；Runtime/Component 也可经 `ctx.courseState` 读写。判题器（`ctx.assessment.evaluate`）结果不会自动进状态，组件判完须自行写入。
 

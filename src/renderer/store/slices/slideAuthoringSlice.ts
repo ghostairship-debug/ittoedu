@@ -1,3 +1,4 @@
+import { commitResourceAwareAuthoringHistory, authoringLegacyHistoryEntryCount } from '../../authoring/resourceAwareAuthoringHistory'
 import type { ComponentPackageData } from '../../../shared/componentTypes'
 import { readAuthoringToolSelection } from '../../../shared/authoringToolContract'
 import { selectSlideToolResult } from '../../authoring/toolSelection'
@@ -14,13 +15,7 @@ import {
   type SlideAuthoringSnapshot,
   type SlideCommandResult,
 } from '../../course/slideAuthoringBackend'
-import {
-  commitSlideAuthoringHistory,
-  selectSlideEditorLayers,
-  commitSlideEditorTransactionHistory,
-  commitSlideProjectMutation,
-  slideAuthoringLegacyHistoryEntryCount,
-} from '../../course/slideEditorCommands'
+import { selectSlideEditorLayers, commitSlideEditorTransactionHistory, commitSlideProjectMutation } from '../../course/slideEditorCommands'
 import {
   addSlideFormulaLayer,
   addSlideShapeLayer,
@@ -192,8 +187,8 @@ export function persistSlideCandidateResult(
     sidecarDirection: resourceAware ? undefined : extra.sidecarDirection,
     componentPackages: resourceAware ? undefined : extra.componentPackages,
     historyEntry: result.historyEntry,
-    legacyPastCount: slideAuthoringLegacyHistoryEntryCount(nextHistory.past),
-    legacyFutureCount: slideAuthoringLegacyHistoryEntryCount(nextHistory.future),
+    legacyPastCount: authoringLegacyHistoryEntryCount(nextHistory.past),
+    legacyFutureCount: authoringLegacyHistoryEntryCount(nextHistory.future),
   })
   const historyDirection = extra.sidecarDirection ?? (
     result.resourceTransition
@@ -212,7 +207,12 @@ export function persistSlideCandidateResult(
         }, result.resourceTransition
           ? snapshot.authoringSession.itemIds
           : nextSnapshot.selection.selectionIds)
-      : undefined
+      : snapshot.authoringSession
+        ? updateCourseAuthoringSessionItems(
+            updateCourseAuthoringSessionRevision(snapshot.authoringSession, nextHistory.present.revision),
+            nextSnapshot.selection.selectionIds,
+          )
+        : undefined
   )
   commit({
     slideBackend: nextBackend,
@@ -638,7 +638,7 @@ export function createSlideAuthoringSlice(
           ok: true,
           nextSession: {
             ...session,
-            history: commitSlideAuthoringHistory(session.history, project),
+            history: commitResourceAwareAuthoringHistory(session.history, project),
           },
           historyEntry: true,
           selection: session.selection,
@@ -665,7 +665,7 @@ export function createSlideAuthoringSlice(
           historyEntry: true,
           nextSession: {
             ...session,
-            history: commitSlideAuthoringHistory(session.history, project),
+            history: commitResourceAwareAuthoringHistory(session.history, project),
           },
           selection: session.selection,
         }
@@ -997,7 +997,7 @@ export function persistSlideDocument(
   if (!isSlideAuthoringBackend(backend)) return false
   const session = backend.getSession()
   const history = options?.historyEntry
-    ? commitSlideAuthoringHistory(session.history, document)
+    ? commitResourceAwareAuthoringHistory(session.history, document)
     : { ...session.history, present: document }
   slide.persist({
     ok: true,

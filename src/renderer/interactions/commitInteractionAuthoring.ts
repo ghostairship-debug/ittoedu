@@ -1,3 +1,4 @@
+import { commitResourceAwareAuthoringHistory } from '../authoring/resourceAwareAuthoringHistory'
 import { createEditorTransactionStep, type EditorTransactionStep } from '../authoring/editorTransaction'
 import type { CourseAssetSidecar } from '../project/v9AssetAdapter'
 import type { ComponentPackageData } from '../../shared/componentTypes'
@@ -19,7 +20,7 @@ import {
   executeCourseLogicAuthoringCommand,
   type CourseLogicAuthoringCommand,
 } from '../course/courseLogicAuthoringCommands'
-import { commitSlideAuthoringHistory, commitSlideProjectMutation } from '../course/slideEditorCommands'
+import { commitSlideProjectMutation } from '../course/slideEditorCommands'
 import {
   addSlideInteractionRule,
   duplicateSlideInteractionRule,
@@ -343,7 +344,7 @@ export function createInteractionAuthoringActions(ports: InteractionAuthoringPor
             historyEntry: true,
             nextSession: {
               ...session,
-              history: commitSlideAuthoringHistory(session.history, project),
+              history: commitResourceAwareAuthoringHistory(session.history, project),
             },
             selection: session.selection,
           }
@@ -409,7 +410,7 @@ export function createInteractionAuthoringActions(ports: InteractionAuthoringPor
             historyEntry: project !== session.history.present,
             nextSession: {
               ...session,
-              history: commitSlideAuthoringHistory(session.history, project),
+              history: commitResourceAwareAuthoringHistory(session.history, project),
             },
             selection: session.selection,
           }
@@ -433,7 +434,7 @@ export function createInteractionAuthoringActions(ports: InteractionAuthoringPor
           historyEntry: true,
           nextSession: {
             ...session,
-            history: commitSlideAuthoringHistory(session.history, project),
+            history: commitResourceAwareAuthoringHistory(session.history, project),
           },
           selection: session.selection,
         }
@@ -450,7 +451,7 @@ export function createInteractionAuthoringActions(ports: InteractionAuthoringPor
           historyEntry: true,
           nextSession: {
             ...session,
-            history: commitSlideAuthoringHistory(session.history, project),
+            history: commitResourceAwareAuthoringHistory(session.history, project),
           },
           selection: session.selection,
         }
@@ -466,7 +467,7 @@ export function createInteractionAuthoringActions(ports: InteractionAuthoringPor
           historyEntry: true,
           nextSession: {
             ...session,
-            history: commitSlideAuthoringHistory(session.history, project),
+            history: commitResourceAwareAuthoringHistory(session.history, project),
           },
           selection: session.selection,
         }
@@ -488,7 +489,7 @@ export function createInteractionAuthoringActions(ports: InteractionAuthoringPor
           historyEntry: true,
           nextSession: {
             ...session,
-            history: commitSlideAuthoringHistory(session.history, project),
+            history: commitResourceAwareAuthoringHistory(session.history, project),
           },
           selection: session.selection,
         }
@@ -509,7 +510,7 @@ export function createInteractionAuthoringActions(ports: InteractionAuthoringPor
           historyEntry: true,
           nextSession: {
             ...session,
-            history: commitSlideAuthoringHistory(session.history, project),
+            history: commitResourceAwareAuthoringHistory(session.history, project),
           },
           selection: session.selection,
         }

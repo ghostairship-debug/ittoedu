@@ -287,6 +287,8 @@ const TEACHER_CONTROLLER_ACTION_OPTIONS: Array<{
   value: TeacherControllerAction['type']
   label: string
 }> = [
+  { value: 'step.previous', label: '上一步' },
+  { value: 'step.next', label: '下一步' },
   { value: 'scene.previous', label: '上一场景' },
   { value: 'scene.next', label: '下一场景' },
   { value: 'scene.replay', label: '重播当前场景' },

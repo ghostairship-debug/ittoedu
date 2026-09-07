@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { strFromU8, unzipSync } from 'fflate'
 import type { TeacherControllerAction } from '@/shared/contracts/native-v1'
 import type { PublishedCourseV2Payload } from '@/shared/publishedCourseTypes'
@@ -10,6 +10,9 @@ import {
   resolveFlowMediaLayoutProjection,
 } from '@/shared/flowMediaLayout'
 import { FlowSurfaceHost, type FlowSurfaceHostOptions } from '@/player/surfaces/flow/FlowSurfaceHost'
+import { AudioManager } from '@/player/AudioManager'
+import { CourseEventBus } from '@/player/CourseEventBus'
+import { PublishedInteractionVisibilityState } from '@/player/interactions/PublishedDomInteractionSurfacePort'
 import { isPublishedFlowSurface } from '@/player/surfaces/flow/flowModel'
 import {
   FLOW_RUNTIME_TOC_CLOSED_ARIA_LABEL,
@@ -250,6 +253,12 @@ async function mountHost(course = publishedCourse(), options: FlowSurfaceHostOpt
   return { host, container, course }
 }
 
+beforeEach(() => {
+  if (typeof HTMLElement.prototype.scrollIntoView !== 'function') {
+    HTMLElement.prototype.scrollIntoView = function scrollIntoView() {}
+  }
+})
+
 afterEach(() => {
   document.body.innerHTML = ''
   vi.clearAllMocks()
@@ -264,10 +273,10 @@ describe('FlowSurfaceHost runtime TOC', () => {
     expect(host.tocOpen).toBe(false)
     expect(toggle.getAttribute('aria-label')).toBe(FLOW_RUNTIME_TOC_CLOSED_ARIA_LABEL)
     expect(toggle.getAttribute('aria-expanded')).toBe('false')
-    expect(toggle.style.position).toBe('fixed')
+    expect(toggle.style.position).toBe('absolute')
     expect(toggle.style.left).toBe('0px')
     expect(toggle.querySelector('[data-flow-runtime-toc-chevron="right"]')).not.toBeNull()
-    expect(drawer.style.position).toBe('fixed')
+    expect(drawer.style.position).toBe('absolute')
     expect(drawer.style.transform).toBe('translateX(-100%)')
     expect(article.style.marginLeft).toBe('0px')
     const publishedFlow = course.surfaces.find(isPublishedFlowSurface)
@@ -543,6 +552,9 @@ describe('FlowSurfaceHost playback controller and video', () => {
       expect(plane.style.top).toBe('0px')
       expect(plane.style.right).toBe('0px')
       expect(plane.style.bottom).toBe('0px')
+      expect(plane.style.width).toBe('')
+      expect(plane.style.height).toBe('')
+      expect(plane.style.transform).toBe('')
     }
     await host.destroy()
   })
@@ -589,6 +601,64 @@ describe('FlowSurfaceHost playback controller and video', () => {
     await host.destroy()
   })
 
+  it('registers video with course mute, pauses on leave, and retains progress until reset', async () => {
+    const course = publishedCourse()
+    course.media.audio.defaultMuted = true
+    const audio = new AudioManager(course, () => undefined, new CourseEventBus())
+    const { host, container } = await mountHost(course, { audio })
+    const video = container.querySelector('video')!
+    const pause = vi.spyOn(video, 'pause').mockImplementation(() => {})
+    expect(video.muted).toBe(true)
+    audio.setMuted(false)
+    expect(video.muted).toBe(false)
+    video.currentTime = 7
+    for (let i = 0; i < 2; i++) {
+      await host.suspend()
+      expect(pause).toHaveBeenCalledTimes(i + 1)
+      await host.resume()
+      await host.setLocationId(i === 0 ? 'loc-h2' : 'loc-h1')
+      expect(container.querySelector('video')).toBe(video)
+      expect(video.currentTime).toBe(7)
+    }
+    audio.setMuted(true)
+    expect(video.muted).toBe(true)
+    await host.reset('surface', 'loc-h1')
+    expect(container.querySelector('video')).not.toBe(video)
+    audio.setMuted(false)
+    expect(video.muted).toBe(true) // The retired element is no longer registered.
+    expect(container.querySelector('video')!.muted).toBe(false)
+    await host.destroy()
+    audio.destroy()
+    pause.mockRestore()
+  })
+
+  it('keeps authored rotation on native overlays across formal location navigation', async () => {
+    const course = publishedCourse()
+    const item = overlayText()
+    item.rotation = 32
+    course.globalLayerItems.push({ item, visibility: { mode: 'all', locationIds: [] } })
+    const { host, container } = await mountHost(course)
+    const element = container.querySelector<HTMLElement>('[data-flow-overlay-item="flow-overlay-text"]')!
+    expect(element.style.transform).toBe('rotate(32deg)')
+    await host.setLocationId('loc-h2')
+    expect(container.querySelector('[data-flow-overlay-item="flow-overlay-text"]')).toBe(element)
+    expect(element.style.transform).toBe('rotate(32deg)')
+    await host.destroy()
+  })
+
+  it('can reveal a retained global video after navigating while it is hidden', async () => {
+    const visibility = new PublishedInteractionVisibilityState()
+    const { host, container } = await mountHost(publishedCourse(), { globalInteractionVisibilityState: visibility })
+    const wrapper = container.querySelector<HTMLElement>('[data-flow-overlay-item="flow-overlay-video"]')!
+    visibility.set('flow-overlay-video', false)
+    expect(wrapper.style.pointerEvents).toBe('none')
+    await host.setLocationId('loc-h2')
+    visibility.set('flow-overlay-video', true)
+    expect(wrapper.style.visibility).toBe('visible')
+    expect(wrapper.style.pointerEvents).toBe('auto')
+    await host.destroy()
+  })
+
   it('skips the teacher controller when playback.controls is none', async () => {
     const course = publishedCourse()
     course.playback.controls = 'none'
@@ -616,7 +686,7 @@ describe('FlowSurfaceHost playback controller and video', () => {
     await host.destroy()
   })
 
-  it('navigates Mixed locations from the Flow controller in a published session', async () => {
+  it('advances Flow anchors with step controls while scene controls stop at the only scene', async () => {
     if (typeof HTMLElement.prototype.scrollIntoView !== 'function') {
       HTMLElement.prototype.scrollIntoView = function scrollIntoView() {}
     }
@@ -625,7 +695,8 @@ describe('FlowSurfaceHost playback controller and video', () => {
     document.body.appendChild(container)
     await session.mount(container)
     expect(session.navigator.current?.locationId).toBe('loc-h1')
-    const next = container.querySelector<HTMLButtonElement>('[data-controller-button-id="next"]')!
+    expect(container.querySelector<HTMLButtonElement>('[data-controller-button-id="next"]')!.disabled).toBe(true)
+    const next = container.querySelector<HTMLButtonElement>('[data-controller-button-id="playback-step-next"]')!
     next.click()
     await vi.waitFor(() => {
       expect(session.navigator.current?.locationId).toBe('loc-h2')
@@ -683,6 +754,8 @@ describe('FlowSurfaceHost playback controller and video', () => {
             const btn = document.createElement('button')
             btn.className = 'quiz-submit'
             btn.textContent = context.props.question || '题目'
+            let count = 0
+            btn.onclick = () => { btn.textContent = String(++count) }
             context.dom.root.appendChild(btn)
             return {
               destroy() { btn.remove() },
@@ -747,6 +820,18 @@ describe('FlowSurfaceHost playback controller and video', () => {
     expect(overlayMount).not.toBeNull()
     const overlayBtn = overlayMount?.shadowRoot?.querySelector('.quiz-submit')
     expect(overlayBtn?.textContent).toBe('浮层测验')
+
+    ;(blockBtn as HTMLButtonElement).click()
+    ;(overlayBtn as HTMLButtonElement).click()
+    await host.setLocationId('loc-h1')
+    await host.setLocationId('loc-h2')
+    expect(container.querySelector('[data-flow-block-id="flow-comp-block"]')).toBe(blockEl)
+    expect(container.querySelector('[data-flow-overlay-item="overlay-comp-1"]')).toBe(overlayEl)
+    expect(blockBtn?.textContent).toBe('1')
+    expect(overlayBtn?.textContent).toBe('1')
+    await host.reset('surface', 'loc-h1')
+    expect(container.querySelector('[data-flow-block-id="flow-comp-block"]')).not.toBe(blockEl)
+    expect(container.querySelector('[data-flow-overlay-item="overlay-comp-1"]')).not.toBe(overlayEl)
 
     await host.destroy()
   })
@@ -936,7 +1021,7 @@ describe('FlowSurfaceHost paper scroll and media layout', () => {
     const paragraph = container.querySelector<HTMLElement>('[data-flow-block-id="p-typed"]')!
     expect(paragraph.style.textAlign).toBe('center')
     expect(paragraph.style.lineHeight).toBe('2.1')
-    const span = paragraph.querySelector('span')
+    const span = paragraph.querySelector<HTMLElement>('span[style]')
     expect(span?.style.fontFamily).toBe('serif')
     expect(span?.style.fontSize).toBe('20px')
     await host.destroy()
@@ -957,11 +1042,12 @@ describe('FlowSurfaceHost paper scroll and media layout', () => {
 
     const { host, container } = await mountHost(course)
     const spans = Array.from(
-      container.querySelectorAll<HTMLElement>('[data-flow-block-id="p-font-segments"] span'),
+      container.querySelectorAll<HTMLElement>('[data-flow-block-id="p-font-segments"] span[style]'),
     )
-    expect(spans.map((span) => span.textContent)).toEqual(['甲', '乙', '丙'])
-    expect(spans[1]?.style.fontFamily).toBe('SimSun')
-    expect(spans[2]?.style.fontSize).toBe('32px')
+    expect(container.querySelector('[data-flow-block-id="p-font-segments"]')?.textContent).toBe('甲乙丙')
+    expect(spans.map((span) => span.textContent)).toEqual(['乙', '丙'])
+    expect(spans[0]?.style.fontFamily).toBe('SimSun')
+    expect(spans[1]?.style.fontSize).toBe('32px')
     await host.destroy()
   })
 
@@ -1110,6 +1196,13 @@ describe('FlowSurfaceHost paper scroll and media layout', () => {
     expect(viewportOverlay.style.top).toBe('300px')
     expect(controller.style.top).toBe('640px')
 
+    // jsdom has no layout: model the measured paper origin, including TOC and scroll.
+    const root = container.querySelector<HTMLElement>('.flow-surface-host')!
+    const reading = article.querySelector<HTMLElement>('.flow-runtime-reading')!
+    root.getBoundingClientRect = () => new DOMRect(0, 0, 1280, 720)
+    reading.getBoundingClientRect = () => new DOMRect(
+      Number.parseFloat(article.style.marginLeft) || 0, -article.scrollTop, 800, 4000,
+    )
     host.setTocOpen(true)
     expect(article.style.marginLeft).toBe('260px')
     expect(paperOverlay.style.left).toBe('310px')

@@ -1,3 +1,4 @@
+import { teacherControllerNodeSchema, teacherControllerNativeContentSchema } from '../../src/shared/contracts/native-v1/schema'
 import { describe, expect, it } from 'vitest'
 import type { TeacherControllerNode } from '../../src/shared/contracts/native-v1'
 import { createTeacherControllerNode } from '../../src/renderer/project/nativeNodeFactories'
@@ -268,6 +269,8 @@ describe('teacher controller geometry contract', () => {
 
   it('exposes the authoring action set with collapse as chrome, not a locate action', () => {
     expect(TEACHER_CONTROLLER_AUTHORING_ACTIONS.map((action) => action.type)).toEqual([
+      'step.previous',
+      'step.next',
       'scene.previous',
       'scene.next',
       'scene.open-picker',
@@ -302,5 +305,44 @@ describe('teacher controller geometry contract', () => {
       layout,
       false,
     )).toBe('collapse')
+  })
+})
+
+
+describe('navigation level controller defaults', () => {
+  it('persists distinct step and scene actions through the strict native schema', () => {
+    const node = createTeacherControllerNode()
+    const parsed = teacherControllerNodeSchema.parse(node)
+    expect(parsed.buttons.filter(button => button.visible).map(button => button.action.type)).toEqual([
+      'step.previous', 'step.next', 'scene.previous', 'scene.next',
+      'scene.open-picker', 'scene.replay', 'audio.toggle-mute', 'player.fullscreen.toggle',
+    ])
+    const data = { title: node.title, showSceneProgress: node.showSceneProgress, compact: node.compact,
+      collapsible: node.collapsible, defaultCollapsed: node.defaultCollapsed, buttons: node.buttons,
+      style: node.style, includeInStaticExports: node.includeInStaticExports }
+    expect(teacherControllerNativeContentSchema.parse(data).buttons).toEqual(node.buttons)
+    expect(teacherControllerNativeContentSchema.safeParse({ ...data,
+      buttons: [{ ...node.buttons[0]!, action: { type: 'step.next', unexpected: true } }],
+    }).success).toBe(false)
+    const layout = createTeacherControllerLayout({ ...node, playbackView: true }, node.width, node.height)
+    expect(new Set(layout.buttons.map(button => button.y)).size).toBe(1)
+    for (const button of layout.buttons) {
+      expect(button.width).toBeGreaterThanOrEqual(60)
+      expect(button.x + button.width).toBeLessThanOrEqual(layout.collapse!.x - 58)
+    }
+    expect(layout.progress!.width).toBeGreaterThanOrEqual(160)
+  })
+
+  it('wraps crowded legacy controls without moving the collapse or zoom area', () => {
+    const node = createTeacherControllerNode({ width: 600 })
+    const layout = createTeacherControllerLayout({ ...node, playbackView: true }, node.width, node.height)
+    const original = createTeacherControllerLayout(node, node.width, node.height)
+    expect(layout.collapse).toEqual(original.collapse)
+    expect(new Set(layout.buttons.map(button => button.y)).size).toBe(2)
+    for (const button of layout.buttons) {
+      expect(button.width).toBeGreaterThanOrEqual(60)
+      expect(button.y + button.height).toBeLessThanOrEqual(node.height)
+      expect(button.x + button.width).toBeLessThanOrEqual(layout.collapse!.x - 58)
+    }
   })
 })

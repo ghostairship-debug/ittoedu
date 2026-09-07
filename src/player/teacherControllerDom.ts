@@ -1,3 +1,5 @@
+import type { PlaybackNavigationViewPort } from './navigation/coursePlaybackSequence'
+import type { PlaybackViewPort } from './playbackViewSession'
 import type {
   TeacherControllerAction,
   TeacherControllerButton,
@@ -34,6 +36,8 @@ export interface TeacherControllerDomSession {
 }
 
 export interface TeacherControllerDomOptions {
+  playbackView?: PlaybackViewPort
+  navigation?: PlaybackNavigationViewPort
   /** Frame + layout source composed by the surface host from the layer item. */
   node: TeacherControllerRuntimeNode
   /** Already positioned by the compositor; the controller fills it 1:1. */
@@ -71,6 +75,7 @@ export interface TeacherControllerDomOptions {
  * changes and actions upward. Keeps the adapter free of surface internals.
  */
 export interface TeacherControllerDomContext {
+  navigation?: PlaybackNavigationViewPort
   canvas: { width: number; height: number }
   getRenderedStageBounds(): { width: number; height: number; left?: number; top?: number }
   scenes: readonly TeacherControllerSceneInfo[]
@@ -172,10 +177,11 @@ export class TeacherControllerDom {
   #collapseButton: HTMLButtonElement | null = null
   #drag: DragCandidate | null = null
   #destroyed = false
+  #unsubscribeNavigation: (() => void) | null = null
 
   constructor(options: TeacherControllerDomOptions) {
     this.#options = options
-    this.#node = sanitizeRuntimeControllerNode(options.node)
+    this.#node = this.#runtimeNode(options.node)
     this.#session = options.getSession()
     const dom = options.container.ownerDocument
     const root = dom.createElement('nav')
@@ -207,6 +213,7 @@ export class TeacherControllerDom {
 
     this.#render()
     options.container.replaceChildren(root)
+    this.#unsubscribeNavigation = options.navigation?.subscribe(() => this.#refreshNavigation()) ?? null
   }
 
   get rootElement(): HTMLElement {
@@ -224,7 +231,7 @@ export class TeacherControllerDom {
   /** Re-renders after a node/status/scene change; session is re-read from the host. */
   update(node: TeacherControllerRuntimeNode): void {
     if (this.#destroyed) return
-    this.#node = sanitizeRuntimeControllerNode(node)
+    this.#node = this.#runtimeNode(node)
     this.#session = this.#options.getSession()
     this.#render()
   }
@@ -237,6 +244,8 @@ export class TeacherControllerDom {
   destroy(): void {
     if (this.#destroyed) return
     this.#destroyed = true
+    this.#unsubscribeNavigation?.()
+    this.#unsubscribeNavigation = null
     this.#drag = null
     const dom = this.#options.container.ownerDocument
     dom.defaultView?.removeEventListener('fullscreenchange', this.#handleFullscreenChange)
@@ -244,6 +253,15 @@ export class TeacherControllerDom {
   }
 
   #render(): void {
+    if (this.#options.playbackView) {
+      const offset = constrainTeacherControllerOffset(
+        this.#node, this.#session.offset, this.#session.collapsed, this.#options.canvas, false,
+      )
+      if (offset.dx !== this.#session.offset.dx || offset.dy !== this.#session.offset.dy) {
+        this.#session = { ...this.#session, offset }
+        this.#options.onSessionChange(this.#session)
+      }
+    }
     const layout = createTeacherControllerLayout(
       this.#node,
       this.#node.width,
@@ -352,7 +370,75 @@ export class TeacherControllerDom {
     } else {
       this.#collapseButton = null
     }
+    if (this.#options.playbackView) {
+      const zoom = dom.createElement('button')
+      zoom.type = 'button'
+      zoom.textContent = '缩放'
+      zoom.dataset.playbackChrome = 'zoom-button'
+      zoom.setAttribute('aria-label', '缩放')
+      zoom.setAttribute('aria-expanded', 'false')
+      const collapse = layout.collapse
+      applyRect(zoom, { x: Math.max(0, collapse ? collapse.x - 58 : layout.width - 64),
+        y: collapse?.y ?? 6, width: 54, height: collapse?.height ?? 30 })
+      Object.assign(zoom.style, { pointerEvents: 'auto', cursor: 'pointer', borderRadius: '8px',
+        background: palette.backgroundCss, color: palette.textCss, border: `1px solid ${palette.accentCss}`, font: 'bold 13px sans-serif' })
+      zoom.addEventListener('pointerdown', event => event.stopPropagation())
+      zoom.addEventListener('click', event => {
+        event.stopPropagation()
+        if (this.#options.getInteractive()) this.#options.playbackView?.openZoomPanel(zoom)
+      })
+      this.#root.appendChild(zoom)
+      const title = this.#root.querySelector<HTMLElement>('.slide-teacher-controller-title')
+      if (title) title.style.width = `${Math.max(0, Math.min(layout.title.width, parseFloat(zoom.style.left) - layout.title.x - 6))}px`
+    }
+    this.#refreshNavigation()
     this.#syncCollapsedFocusRing()
+  }
+
+  #runtimeNode(node: TeacherControllerRuntimeNode): TeacherControllerRuntimeNode {
+    const runtime = sanitizeRuntimeControllerNode(node)
+    // Compatibility chrome is a detached playback projection, never authored data.
+    if (this.#options.navigation && this.#options.getInteractive()
+      && !node.buttons.some(button => button.action.type === 'step.next' || button.action.type === 'step.previous')) {
+      const ids = new Set(runtime.buttons.map(button => button.id))
+      const shortcuts: TeacherControllerButton[] = (['previous', 'next'] as const).map(direction => {
+        let id = `playback-step-${direction}`
+        while (ids.has(id)) id += '-shortcut'
+        ids.add(id)
+        return { id, action: { type: direction === 'next' ? 'step.next' : 'step.previous' },
+          label: direction === 'next' ? '下一步' : '上一步', visible: true }
+      })
+      runtime.buttons = [...shortcuts, ...runtime.buttons]
+    }
+    return { ...runtime, playbackView: this.#options.playbackView !== undefined }
+  }
+
+  #canExecute(action: TeacherControllerAction): boolean {
+    return !this.#destroyed && this.#options.getInteractive()
+      && (this.#options.navigation?.canExecute(action) ?? true)
+  }
+
+  #refreshNavigation(): void {
+    if (this.#destroyed) return
+    const navigation = this.#options.navigation
+    if (!navigation) return
+    const state = navigation.getProgress()
+    const progress = this.#root.querySelector<HTMLElement>('.slide-teacher-controller-progress')
+      ?? (this.#node.showSceneProgress && this.#node.compact
+        ? this.#root.querySelector<HTMLElement>('.slide-teacher-controller-title') : null)
+    if (progress) {
+      progress.textContent = state
+        ? `场景 ${state.sceneIndex + 1}/${state.sceneCount} · 步骤 ${state.stepIndex + 1}/${state.stepCount}`
+        : '场景 — · 步骤 —'
+      progress.title = state ? `${state.sceneName} · ${state.stepName}` : '等待开始'
+    }
+    for (const button of this.#layout.buttons) {
+      const element = this.#buttons.get(button.id)
+      if (!element) continue
+      element.disabled = !this.#canExecute(button.action)
+      element.setAttribute('aria-disabled', String(element.disabled))
+      element.style.opacity = element.disabled ? '0.42' : '1'
+    }
   }
 
   #createButton(
@@ -378,9 +464,15 @@ export class TeacherControllerDom {
     element.style.color = textColor
     element.style.fontSize = `${this.#layout.buttonFontSize}px`
     element.style.fontWeight = '700'
+    element.style.padding = '0 2px'
+    element.style.lineHeight = '1.15'
+    element.style.whiteSpace = 'nowrap'
+    element.style.overflow = 'hidden'
+    element.title = element.textContent
+    element.disabled = !this.#canExecute(button.action)
     element.style.pointerEvents = 'none'
     element.addEventListener('click', () => {
-      if (this.#destroyed || !this.#options.getInteractive()) return
+      if (!this.#canExecute(button.action)) return
       this.#options.onAction(button.action)
     })
     return element
@@ -498,7 +590,7 @@ export class TeacherControllerDom {
       return
     }
     if (drag.target === 'button' && drag.buttonAction) {
-      if (!this.#destroyed && this.#options.getInteractive()) {
+      if (this.#canExecute(drag.buttonAction)) {
         this.#options.onAction(drag.buttonAction)
       }
     }

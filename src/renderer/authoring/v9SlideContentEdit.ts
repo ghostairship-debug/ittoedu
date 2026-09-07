@@ -1,3 +1,4 @@
+import { commitResourceAwareAuthoringHistory } from './resourceAwareAuthoringHistory'
 import { formulaAstToAccessibleText } from '../../shared/formulaLinear'
 import { applyTextRunStyle, remapTextRuns } from '../../shared/textRuns'
 import { readChartText, type ChartTextDraft, type ChartTextField } from './chartTextDraft'
@@ -22,15 +23,7 @@ import type {
   WritingMode,
 } from '../../shared/contracts/native-v1'
 import { SLIDE_BACKEND_NOT_CANDIDATE } from '../store/slideBackendPort'
-import {
-  SLIDE_REJECT_LOCKED,
-  SLIDE_REJECT_STALE_REVISION,
-  SLIDE_REJECT_WRONG_OWNER,
-  SlideCommandError,
-  commitSlideAuthoringHistory,
-  commitSlideProjectMutation,
-  selectSlideEditorLayers,
-} from '../course/slideEditorCommands'
+import { SLIDE_REJECT_LOCKED, SLIDE_REJECT_STALE_REVISION, SLIDE_REJECT_WRONG_OWNER, SlideCommandError, commitSlideProjectMutation, selectSlideEditorLayers } from '../course/slideEditorCommands'
 import {
   type SlideAuthoringSession,
   type SlideAuthoringTarget,
@@ -170,7 +163,7 @@ export function defaultCommitV9SlideContentDocument(
   if (!nextDocument) return succeedIdentity(session)
   const nextSession: SlideAuthoringSession = {
     sessionId: session.sessionId,
-    history: commitSlideAuthoringHistory(session.history, nextDocument),
+    history: commitResourceAwareAuthoringHistory(session.history, nextDocument),
     selection: session.selection,
     scope: session.scope,
     generation: session.generation,

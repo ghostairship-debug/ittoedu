@@ -169,7 +169,7 @@ function scoped(
 
 function v9ThreeLocationFixture(): CourseProjectDocument {
   const controller = sceneNodeToCourseLayerItem(
-    createTeacherControllerNode({ id: 'teacher-controller-main' }),
+    createTeacherControllerNode({ id: 'teacher-controller-main', x: 190, y: 638, width: 900, height: 64 }),
     90,
   )
   return courseProjectDocumentSchema.parse({

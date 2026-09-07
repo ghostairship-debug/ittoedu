@@ -1,12 +1,16 @@
-import { paintPublishedNativeTable, type PublishedNativeTableInput } from '../../../player/surfaces/slide/publishedNativeRendering'
+
 import { chartCanvasTextPort } from '../../authoring/chartCanvasTextBridge'
 import { EditableChartView } from '../EditableChartView'
 import type { ChartTextDraft } from '../../authoring/chartTextDraft'
 import { Hand, Maximize2, Minus, MousePointer2, Play, Plus } from 'lucide-react'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { ComponentPackageData } from '../../../shared/componentTypes'
-import type { NativeRenderInput } from '../../../shared/contracts/native-v1'
-import type { LayerItem, NativeLayerItem } from '../../../shared/courseProjectTypes'
+
+import type {
+  CourseProjectDocument,
+  LayerItem,
+  NativeLayerItem,
+} from '../../../shared/courseProjectTypes'
 import { materializeNativeLayerItem } from '../../../shared/courseProjectSchema'
 import { CANVAS_HEIGHT, CANVAS_WIDTH } from '../../../shared/constants'
 import { renderTextNodeCanvas } from '../../../shared/textLayout'
@@ -46,9 +50,8 @@ import {
 import type { PublishedCourseSession } from '../../../player/surfaces/publishedDynamicHosts'
 import { adaptV9SpatialEditorLayers, hitTestV9SpatialLayerItems } from '../../phaser/v9SpatialHitAdapter'
 import { FormulaEditDialog } from '../FormulaEditDialog'
-import { PublishedFormulaPaint } from '../PublishedFormulaPaint'
+import { PublishedNativeContent } from '../PublishedNativeContent'
 import {
-  attachPublishedCourseStageFit,
 } from '../coursePlayerTryRun'
 import {
   beginSerializedSessionMount,
@@ -56,6 +59,12 @@ import {
 } from '../serializedSessionMount'
 import { TeacherControllerAuthoringChrome } from '../TeacherControllerAuthoringChrome'
 import { TextEditOverlay } from '../TextEditOverlay'
+import {
+  isSpatialGlobalCanvasRuntimeLayer,
+  SpatialGlobalRuntimeAuthoring,
+  SpatialGlobalRuntimeMountTarget,
+  type SpatialRuntimeContentAuthoringPort,
+} from './spatial/SpatialGlobalRuntimeAuthoring'
 
 export type SpatialCanvasMode = 'edit' | 'run'
 
@@ -71,6 +80,8 @@ export interface SpatialLocationWorkspaceProps {
   readonly assetFiles: Record<string, Uint8Array>
   readonly assetMimeTypes: Readonly<Record<string, string>>
   readonly componentPackages: Record<string, ComponentPackageData>
+  readonly project: CourseProjectDocument
+  readonly runtimeContentAuthoring: SpatialRuntimeContentAuthoringPort
   readonly worldTarget: CourseAuthoringTarget
   readonly layerTargets: ReadonlyMap<string, CourseAuthoringTarget>
   readonly commands: SpatialAuthoringCommandPort
@@ -141,42 +152,6 @@ const SPATIAL_MEDIA_FILL = {
   pointerEvents: 'none' as const,
 }
 
-function spatialAuthoringMedia(
-  native: NativeRenderInput,
-  assetUrls: Readonly<Record<string, string>>,
-) {
-  if (native.type === 'image') {
-    const src = assetUrls[native.assetId]
-    return src
-      ? <img src={src} alt="" draggable={false} style={SPATIAL_MEDIA_FILL} />
-      : (native.name || native.type)
-  }
-  if (native.type === 'video') {
-    const src = assetUrls[native.assetId]
-    const poster = native.poster.mode === 'image' && native.poster.assetId
-      ? assetUrls[native.poster.assetId]
-      : undefined
-    if (src) {
-      return (
-        <video
-          src={src}
-          poster={poster}
-          muted
-          playsInline
-          preload="metadata"
-          draggable={false}
-          style={SPATIAL_MEDIA_FILL}
-        />
-      )
-    }
-    if (poster) {
-      return <img src={poster} alt="" draggable={false} style={SPATIAL_MEDIA_FILL} />
-    }
-    return native.name || native.type
-  }
-  return null
-}
-
 function spatialLayerPaintKind(item: {
   readonly kind: LayerItem['kind']
   readonly content?: { readonly nativeType: string }
@@ -186,74 +161,15 @@ function spatialLayerPaintKind(item: {
   return item.content?.nativeType ?? item.kind
 }
 
-function asSpatialNativeLayer(item: LayerItem): NativeLayerItem | null {
-  return item.kind === 'native' ? item : null
-}
-
-function SpatialTablePaint({ table }: { table: PublishedNativeTableInput }) {
-  const ref = useRef<HTMLDivElement>(null)
-  useLayoutEffect(() => {
-    const element = ref.current
-    if (!element) return
-    element.replaceChildren()
-    paintPublishedNativeTable(element, table)
-    return () => element.replaceChildren()
-  }, [table])
-  return <div ref={ref} style={{ width: '100%', height: '100%' }} />
-}
-
 function spatialNativePaint(
   item: LayerItem,
   assetUrls: Readonly<Record<string, string>>,
   size: { width: number; height: number },
 ) {
-  const nativeItem = asSpatialNativeLayer(item)
-  if (!nativeItem) return item.label || item.kind
-  const native = materializeNativeLayerItem(nativeItem)
-  if (native.type === 'formula') {
-    return (
-      <PublishedFormulaPaint
-        formulaId={native.formulaId}
-        accessibleText={native.accessibleText}
-        ast={native.ast}
-        style={native.style}
-        width={Math.max(1, size.width)}
-        height={Math.max(1, size.height)}
-        lockHeight
-      />
-    )
-  }
-  if (native.type === 'table') return <SpatialTablePaint table={{ ...native, width: size.width, height: size.height }} />
-  if (native.type === 'chart') return <EditableChartView id={native.id} chart={native} width={size.width} height={size.height} />
-  if (native.type === 'text') return native.text
-  return spatialAuthoringMedia(native, assetUrls) ?? (native.name || native.type)
+  return item.kind === 'native'
+    ? <PublishedNativeContent item={item} assetUrls={assetUrls} size={size} />
+    : item.label || item.kind
 }
-
-function spatialNativeWorldBoxStyle(item: LayerItem): {
-  background: string
-  color: string
-  fontSize: number
-  fontFamily?: string
-} {
-  const nativeItem = asSpatialNativeLayer(item)
-  if (!nativeItem) {
-    return { background: 'rgba(255,255,255,0.04)', color: '#e2e8f0', fontSize: 14 }
-  }
-  const native = materializeNativeLayerItem(nativeItem)
-  if (native.type === 'shape') {
-    return { background: native.style.fillColor, color: '#e2e8f0', fontSize: 14 }
-  }
-  if (native.type === 'text') {
-    return {
-      background: 'transparent',
-      color: native.style.color,
-      fontSize: native.style.fontSize,
-      fontFamily: native.style.fontFamily,
-    }
-  }
-  return { background: 'rgba(255,255,255,0.04)', color: '#e2e8f0', fontSize: 14 }
-}
-
 function SpatialComponentItemContent({
   projectId,
   layerItemId,
@@ -390,6 +306,8 @@ export function SpatialLocationWorkspace({
   assetFiles,
   assetMimeTypes,
   componentPackages,
+  project,
+  runtimeContentAuthoring,
   worldTarget,
   layerTargets,
   commands,
@@ -401,7 +319,6 @@ export function SpatialLocationWorkspace({
   const stageStackRef = useRef<HTMLDivElement>(null)
   const tryRunRef = useRef<HTMLDivElement>(null)
   const tryRunMountChainRef = useRef(Promise.resolve())
-  const tryRunFitRef = useRef<(() => void) | null>(null)
   const textProxyCanvasRef = useRef<HTMLCanvasElement | null>(null)
   const hostRef = useRef<PublishedCourseSession | null>(null)
   const pointerActiveRef = useRef(false)
@@ -513,8 +430,6 @@ export function SpatialLocationWorkspace({
     const container = tryRunRef.current
     if (!container) return
     if (canvasMode !== 'run') {
-      tryRunFitRef.current?.()
-      tryRunFitRef.current = null
       const leftover = hostRef.current
       hostRef.current = null
       if (leftover) enqueueSerial(tryRunMountChainRef, () => leftover.destroy())
@@ -523,12 +438,8 @@ export function SpatialLocationWorkspace({
     return beginSerializedSessionMount(tryRunMountChainRef, () => onMountTryRun(container), {
       onReady: (mounted) => {
         hostRef.current = mounted
-        tryRunFitRef.current?.()
-        tryRunFitRef.current = attachPublishedCourseStageFit(container)
       },
       onCleanup: () => {
-        tryRunFitRef.current?.()
-        tryRunFitRef.current = null
         hostRef.current = null
       },
     })
@@ -587,6 +498,95 @@ export function SpatialLocationWorkspace({
     setHudOverlay(authoring.viewportOverlayGeometry(LOGICAL_STAGE_VIEWPORT))
   }
 
+  const renderEditableChart = (
+    layer: (typeof view.layers)[number],
+    size: { width: number; height: number },
+  ) => {
+    if (layer.item.kind !== 'native' || layer.item.content.nativeType !== 'chart') return null
+    const editable = scope === layer.source && !layer.item.locked
+    return (
+      <EditableChartView
+        id={layer.selectionId}
+        chart={structuredClone(layer.item.content.data) as import('../../../shared/contracts/native-v1').NativeChartContent}
+        width={size.width}
+        height={size.height}
+        canvasTextPort={() => {
+          const target = layerTargets.get(layer.selectionId)
+          return target ? chartCanvasTextPort(target) : undefined
+        }}
+        textController={!editable ? undefined : {
+          draft: contentEdit?.kind === 'chart-text' && contentEdit.target.layerItemId === layer.selectionId
+            ? contentEdit.draft as ChartTextDraft
+            : null,
+          begin: (chartField, draft) => {
+            const target = layerTargets.get(layer.selectionId)
+            if (!target) return false
+            const receipt = commands.run(target, {
+              kind: 'begin-content-edit',
+              chartField,
+              source: 'canvas',
+              expectedEdit: contentEditRef.current,
+              expectedContentEdit: contentEditRef.current,
+            })
+            if (!receipt.ok || !receipt.edit) return false
+            contentEditRef.current = receipt.edit
+            const updated = commands.run(target, {
+              kind: 'update-chart-content-edit',
+              expectedEdit: receipt.edit,
+              expectedContentEdit: receipt.edit,
+              draft,
+              composing: false,
+            })
+            if (updated.ok && updated.edit) contentEditRef.current = updated.edit
+            return updated.ok
+          },
+          update: (draft, composing) => {
+            const edit = contentEditRef.current
+            if (!edit?.courseTarget || edit.kind !== 'chart-text') return
+            const receipt = commands.run(edit.courseTarget, {
+              kind: 'update-chart-content-edit',
+              expectedEdit: edit,
+              expectedContentEdit: edit,
+              draft,
+              composing,
+            })
+            if (receipt.ok && receipt.edit) contentEditRef.current = receipt.edit
+          },
+          commit: () => {
+            const edit = contentEditRef.current
+            if (!edit?.courseTarget || edit.kind !== 'chart-text') return
+            const receipt = commands.run(edit.courseTarget, {
+              kind: 'commit-chart-content-edit',
+              expectedEdit: edit,
+              expectedContentEdit: edit,
+            })
+            if (receipt.ok) contentEditRef.current = null
+          },
+          cancel: () => {
+            const edit = contentEditRef.current
+            if (!edit?.courseTarget || edit.kind !== 'chart-text') return
+            const receipt = commands.run(edit.courseTarget, {
+              kind: 'cancel-content-edit',
+              expectedEdit: edit,
+              expectedContentEdit: edit,
+            })
+            if (receipt.ok) contentEditRef.current = null
+          },
+        }}
+        onCommit={!editable ? undefined : (chart) => {
+          const target = layerTargets.get(layer.selectionId)
+          if (!target) return '图表目标已失效'
+          const receipt = commands.run(target, {
+            kind: 'replace-chart',
+            chart,
+            expectedContentEdit: contentEdit,
+          })
+          return receipt.ok ? null : receipt.reason ?? '图表提交失败'
+        }}
+      />
+    )
+  }
+
   const renderHudLayer = (
     items: typeof hudItems,
     plane: 'underlay' | 'overlay',
@@ -605,15 +605,17 @@ export function SpatialLocationWorkspace({
       }}
     >
       {items.map((layer) => {
-        if (layer.item.kind !== 'native' && layer.item.kind !== 'component') return null
+        const globalRuntime = isSpatialGlobalCanvasRuntimeLayer(layer)
+        if (
+          layer.item.kind !== 'native'
+          && layer.item.kind !== 'component'
+          && !globalRuntime
+        ) return null
         const preview = previewById.get(layer.selectionId)
         const frame = preview ?? layer.item.frame
         const paintKind = spatialLayerPaintKind(layer.item)
         const controller = isTeacherControllerLayerItem(layer.item as LayerItem)
         const rotation = preview?.rotation ?? layer.item.rotation
-        const nativeItem = asSpatialNativeLayer(layer.item as LayerItem)
-        const native = nativeItem && !controller ? materializeNativeLayerItem(nativeItem) : null
-        const media = native ? spatialAuthoringMedia(native, assetUrls) : null
         const size = {
           width: preview?.width ?? frame.width,
           height: preview?.height ?? frame.height,
@@ -632,21 +634,14 @@ export function SpatialLocationWorkspace({
               height: size.height,
               zIndex: layer.stackOrder,
               transform: !controller && rotation ? `rotate(${rotation}deg)` : undefined,
-              background: controller
-                ? 'transparent'
-                : media
-                  ? 'rgba(255,255,255,0.04)'
-                  : 'rgba(23,32,51,0.88)',
-              color: '#f8fafc',
-              borderRadius: 12,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontSize: 13,
+              opacity: layer.item.opacity,
+              background: 'transparent',
               overflow: 'hidden',
             }}
           >
-            {controller ? (
+            {globalRuntime ? (
+              <SpatialGlobalRuntimeMountTarget itemId={layer.selectionId} />
+            ) : controller ? (
               <TeacherControllerAuthoringChrome
                 item={layer.item as LayerItem}
                 frame={{
@@ -678,6 +673,8 @@ export function SpatialLocationWorkspace({
                 componentPackages={componentPackages}
                 assetUrls={assetUrls}
               />
+            ) : layer.item.kind === 'native' && layer.item.content.nativeType === 'chart' ? (
+              renderEditableChart(layer, size)
             ) : (
               spatialNativePaint(layer.item as LayerItem, assetUrls, size)
             )}
@@ -892,7 +889,16 @@ export function SpatialLocationWorkspace({
           }}
         >
         {canvasMode === 'edit' && (
-          <>
+          <SpatialGlobalRuntimeAuthoring
+            project={project}
+            locationId={view.locationId}
+            surfaceId={view.surfaceId}
+            scope={scope}
+            layers={view.layers}
+            assetFiles={assetFiles}
+            componentPackages={componentPackages}
+            content={runtimeContentAuthoring}
+          >
             {renderHudLayer(hudUnderlayItems, 'underlay')}
             <div
               className="spatial-world-layer"
@@ -990,7 +996,7 @@ export function SpatialLocationWorkspace({
                   width: preview?.width ?? frame.width,
                   height: preview?.height ?? frame.height,
                 }
-                const box = spatialNativeWorldBoxStyle(layer.item as LayerItem)
+
                 return (
                   <div
                     key={layer.selectionId}
@@ -1005,10 +1011,10 @@ export function SpatialLocationWorkspace({
                       zIndex: layer.stackOrder,
                       transform: rotation ? `rotate(${rotation}deg)` : undefined,
                       opacity: layer.item.opacity,
-                      background: box.background,
-                      color: box.color,
-                      fontSize: box.fontSize,
-                      fontFamily: box.fontFamily,
+                      background: 'transparent',
+
+
+
                     }}
                   >
                     {layer.item.kind === 'component' ? (
@@ -1020,45 +1026,7 @@ export function SpatialLocationWorkspace({
                         assetUrls={assetUrls}
                       />
                     ) : layer.item.kind === 'native' && layer.item.content.nativeType === 'chart' ? (
-                      <EditableChartView id={layer.selectionId} chart={structuredClone(layer.item.content.data) as import('../../../shared/contracts/native-v1').NativeChartContent} width={size.width} height={size.height}
-                        canvasTextPort={() => { const target = layerTargets.get(layer.selectionId); return target ? chartCanvasTextPort(target) : undefined }}
-                        textController={scope !== 'world' || layer.item.locked ? undefined : {
-                          draft: contentEdit?.kind === 'chart-text' && contentEdit.target.layerItemId === layer.selectionId ? contentEdit.draft as ChartTextDraft : null,
-                          begin: (chartField, draft) => {
-                            const target = layerTargets.get(layer.selectionId)
-                            if (!target) return false
-                            const receipt = commands.run(target, { kind: 'begin-content-edit', chartField, source: 'canvas', expectedEdit: contentEditRef.current, expectedContentEdit: contentEditRef.current })
-                            if (!receipt.ok || !receipt.edit) return false
-                            contentEditRef.current = receipt.edit
-                            const updated = commands.run(target, { kind: 'update-chart-content-edit', expectedEdit: receipt.edit, expectedContentEdit: receipt.edit, draft, composing: false })
-                            if (updated.ok && updated.edit) contentEditRef.current = updated.edit
-                            return updated.ok
-                          },
-                          update: (draft, composing) => {
-                            const edit = contentEditRef.current
-                            if (!edit?.courseTarget || edit.kind !== 'chart-text') return
-                            const receipt = commands.run(edit.courseTarget, { kind: 'update-chart-content-edit', expectedEdit: edit, expectedContentEdit: edit, draft, composing })
-                            if (receipt.ok && receipt.edit) contentEditRef.current = receipt.edit
-                          },
-                          commit: () => {
-                            const edit = contentEditRef.current
-                            if (!edit?.courseTarget || edit.kind !== 'chart-text') return
-                            const receipt = commands.run(edit.courseTarget, { kind: 'commit-chart-content-edit', expectedEdit: edit, expectedContentEdit: edit })
-                            if (receipt.ok) contentEditRef.current = null
-                          },
-                          cancel: () => {
-                            const edit = contentEditRef.current
-                            if (!edit?.courseTarget || edit.kind !== 'chart-text') return
-                            const receipt = commands.run(edit.courseTarget, { kind: 'cancel-content-edit', expectedEdit: edit, expectedContentEdit: edit })
-                            if (receipt.ok) contentEditRef.current = null
-                          },
-                        }}
-                        onCommit={scope !== 'world' || layer.item.locked ? undefined : chart => {
-                          const target = layerTargets.get(layer.selectionId)
-                          if (!target) return '图表目标已失效'
-                          const receipt = commands.run(target, { kind: 'replace-chart', chart, expectedContentEdit: contentEdit })
-                          return receipt.ok ? null : receipt.reason ?? '图表提交失败'
-                        }} />
+                      renderEditableChart(layer, size)
                     ) : (
                       spatialNativePaint(layer.item as LayerItem, assetUrls, size)
                     )}
@@ -1073,15 +1041,15 @@ export function SpatialLocationWorkspace({
             {hudOverlay ? (
               <SpatialSelectionOverlay overlay={hudOverlay} locked={selectedLocked} />
             ) : null}
-          </>
+          </SpatialGlobalRuntimeAuthoring>
         )}
+        </div>
         <div
           ref={tryRunRef}
           className="spatial-try-run-host"
           data-testid="spatial-try-run-host"
           hidden={canvasMode !== 'run'}
         />
-        </div>
       </div>
       {canvasMode === 'edit' && formulaNode?.type === 'formula' && (
         <FormulaEditDialog

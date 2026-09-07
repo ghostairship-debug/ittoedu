@@ -1,3 +1,4 @@
+import { isAuthoringHistoryTransactionFrame } from '../../src/renderer/authoring/resourceAwareAuthoringHistory'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { beforeEach, describe, expect, it } from 'vitest'
@@ -6,7 +7,7 @@ import {
   componentPackagesToArchiveFiles,
 } from '@/renderer/components/componentPackageStore'
 import { isFlowEditorTransactionFrame } from '@/renderer/course/flowEditorSlice'
-import { isSlideAuthoringTransactionFrame } from '@/renderer/course/slideEditorCommands'
+
 import { isSpatialAuthoringTransactionFrame } from '@/renderer/course/spatialAuthoringHistory'
 import { buildPublishedCourseV2Payload } from '@/renderer/export/course/buildPublishedCourse'
 import {
@@ -234,7 +235,7 @@ function lastComponentTransactionChange() {
   const active = activeHistory()
   const entry = active.history.past.at(-1)
   const transaction = active.kind === 'slide'
-    ? Boolean(entry && isSlideAuthoringTransactionFrame(entry))
+    ? Boolean(entry && isAuthoringHistoryTransactionFrame(entry))
     : active.kind === 'flow'
       ? Boolean(entry && isFlowEditorTransactionFrame(entry))
       : Boolean(entry && isSpatialAuthoringTransactionFrame(entry))

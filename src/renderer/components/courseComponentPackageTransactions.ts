@@ -319,17 +319,20 @@ function validProvenance(packageData: ComponentPackageData): boolean {
   )
 }
 
-export function collectCourseComponentPackageReferences(
+export type CourseComponentPackageInstance = Extract<LayerItem | FlowBlock, { kind: 'component' } | { type: 'component' }>
+
+/** One carrier traversal for package validation, replacement, fork and fallback refresh. */
+export function visitCourseComponentPackageInstances(
   project: CourseProjectDocument,
   packageId: string,
-): readonly CourseComponentPackageInstanceReference[] {
-  const references: CourseComponentPackageInstanceReference[] = []
+  visit: (instance: CourseComponentPackageInstance, reference: CourseComponentPackageInstanceReference) => void,
+): void {
   const appendLayer = (
     item: LayerItem,
     context: Omit<CourseComponentPackageInstanceReference, 'instanceId' | 'version'>,
   ): void => {
     if (item.kind !== 'component' || item.component.packageId !== packageId) return
-    references.push(Object.freeze({
+    visit(item, Object.freeze({
       ...context,
       instanceId: item.layerItemId,
       version: item.component.version,
@@ -339,7 +342,7 @@ export function collectCourseComponentPackageReferences(
     for (const block of blocks) {
       if (block.type === 'section') appendBlocks(block.blocks, surfaceId)
       else if (block.type === 'component' && block.component.packageId === packageId) {
-        references.push(Object.freeze({
+        visit(block, Object.freeze({
           carrier: 'flow-block',
           scope: 'scene',
           instanceId: block.id,
@@ -376,6 +379,14 @@ export function collectCourseComponentPackageReferences(
       }))
     }
   }
+}
+
+export function collectCourseComponentPackageReferences(
+  project: CourseProjectDocument,
+  packageId: string,
+): readonly CourseComponentPackageInstanceReference[] {
+  const references: CourseComponentPackageInstanceReference[] = []
+  visitCourseComponentPackageInstances(project, packageId, (_instance, reference) => references.push(reference))
   return Object.freeze(references)
 }
 
@@ -400,30 +411,7 @@ function retargetPackageReferences(
   packageId: string,
   version: string,
 ): void {
-  const retargetLayer = (item: LayerItem): void => {
-    if (item.kind === 'component' && item.component.packageId === packageId) {
-      item.component.version = version
-    }
-  }
-  const retargetBlocks = (blocks: FlowBlock[]): void => {
-    for (const block of blocks) {
-      if (block.type === 'section') retargetBlocks(block.blocks)
-      else if (block.type === 'component' && block.component.packageId === packageId) {
-        block.component.version = version
-      }
-    }
-  }
-  project.globalLayerItems.forEach((entry) => retargetLayer(entry.item))
-  for (const surface of project.surfaces) {
-    surface.surfaceLayerItems.forEach((entry) => retargetLayer(entry.item))
-    if (surface.type === 'slide') {
-      surface.scenes.forEach((scene) => scene.layerItems.forEach(retargetLayer))
-    } else if (surface.type === 'flow') {
-      retargetBlocks(surface.blocks)
-    } else {
-      surface.world.layerItems.forEach(retargetLayer)
-    }
-  }
+  visitCourseComponentPackageInstances(project, packageId, (instance) => { instance.component.version = version })
 }
 
 function replacementFeedback(

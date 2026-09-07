@@ -315,6 +315,9 @@ export function usePropertiesAuthoringBinding({
 }): PropertiesContext {
   const read = useEditorStore(selectPropertiesAuthoringReadModel)
   const runFlowAuthoringIntent = useEditorStore((state) => state.runFlowAuthoringIntent)
+  const convertFlowOverlayComponentAtTarget = useEditorStore(
+    (state) => state.convertFlowOverlayComponentAtTarget,
+  )
   const applyFlowCommand = useEditorStore((state) => state.applyFlowCommand)
   const runSpatialAuthoringIntent = useEditorStore((state) => state.runSpatialAuthoringIntent)
   const runSlideFieldTextIntent = useEditorStore((state) => state.runSlideFieldTextIntent)
@@ -413,6 +416,7 @@ export function usePropertiesAuthoringBinding({
     authoringToken: read.authoringToken,
     course: read.course,
     runIntent: runFlowAuthoringIntent,
+    convertOverlayComponent: convertFlowOverlayComponentAtTarget,
     reportError,
     setPreviewBackgroundColor: color => previewBackground(color, 'flow-surface'),
   })

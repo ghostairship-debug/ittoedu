@@ -162,10 +162,6 @@ export async function mountPublishedCourseTryRun(
     })
     input.onSessionCreated?.(session)
     await session.mount(input.container)
-    fitPublishedCourseHostForMode(
-      input.container,
-      input.authoring ? 'authoring' : 'playback',
-    )
 
     const destroySession = session.destroy.bind(session)
     session.destroy = async (): Promise<void> => {

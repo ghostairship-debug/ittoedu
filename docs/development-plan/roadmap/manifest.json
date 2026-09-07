@@ -1732,7 +1732,9 @@
         "r18-040-staging-file-boundary",
         "r18-043-context-references",
         "r18-045-safe-markdown-formula",
-        "r18-046-stop-undo-stale"
+        "r18-046-stop-undo-stale",
+        "r18-081-component-source-context",
+        "r18-082-candidate-format-repair"
       ],
       "optional": false,
       "writeLocks": [
@@ -1774,13 +1776,286 @@
       "spec": "1.8/README.md"
     },
     {
+      "id": "r18-070-surface-integration-contract",
+      "release": "1.8",
+      "title": "锁定三表面共享内容与运行观察的窄接口及Flow几何决策边界",
+      "dependencies": [],
+      "optional": false,
+      "writeLocks": [
+        "contracts-schema"
+      ],
+      "spec": "1.8/README.md"
+    },
+    {
+      "id": "r18-071-controller-preservation",
+      "release": "1.8",
+      "title": "删除最后include引用页时保全全局教师控制器",
+      "dependencies": [],
+      "optional": false,
+      "writeLocks": [
+        "store-course",
+        "store-kernel"
+      ],
+      "spec": "1.8/README.md"
+    },
+    {
+      "id": "r18-072-shared-authoring-history",
+      "release": "1.8",
+      "title": "将Slide重复资源历史算法迁入既有Editor Core",
+      "dependencies": [
+        "r18-070-surface-integration-contract"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "store-kernel",
+        "store-slide"
+      ],
+      "spec": "1.8/README.md"
+    },
+    {
+      "id": "r18-073-shared-native-painter",
+      "release": "1.8",
+      "title": "迁移正式Native内容Owner并保全现有跨表面和导出消费者",
+      "dependencies": [
+        "r18-070-surface-integration-contract"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "published-slide",
+        "published-spatial",
+        "published-producer",
+        "export-pptx"
+      ],
+      "spec": "1.8/README.md"
+    },
+    {
+      "id": "r18-074-flow-layout-authoring",
+      "release": "1.8",
+      "title": "统一Flow正文浮层滚动与作者命中的布局映射",
+      "dependencies": [
+        "r18-070-surface-integration-contract",
+        "r18-073-shared-native-painter"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "authoring-flow",
+        "published-flow",
+        "workspace-shell"
+      ],
+      "spec": "1.8/README.md"
+    },
+    {
+      "id": "r18-084-flow-paragraph-semantics",
+      "release": "1.8",
+      "title": "贯通已有Flow段落对齐行距与连续DOCX语义",
+      "dependencies": [
+        "r18-070-surface-integration-contract"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "authoring-flow",
+        "published-flow",
+        "export-docx-print"
+      ],
+      "spec": "1.8/README.md"
+    },
+    {
+      "id": "r18-075-spatial-native-authoring",
+      "release": "1.8",
+      "title": "让Spatial作者Native内容消费正式共同绘制",
+      "dependencies": [
+        "r18-070-surface-integration-contract",
+        "r18-073-shared-native-painter"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "authoring-spatial",
+        "published-spatial",
+        "workspace-shell"
+      ],
+      "spec": "1.8/README.md"
+    },
+    {
+      "id": "r18-076-spatial-runtime-authoring",
+      "release": "1.8",
+      "title": "补齐Spatial全局Canvas Runtime API2作者挂载与目标",
+      "dependencies": [
+        "r18-070-surface-integration-contract",
+        "r18-075-spatial-native-authoring"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "authoring-spatial",
+        "published-spatial",
+        "published-dynamic",
+        "workspace-shell"
+      ],
+      "spec": "1.8/README.md"
+    },
+    {
+      "id": "r18-077-playback-view-controls",
+      "release": "1.8",
+      "title": "统一三表面试运行预览观察缩放平移并保留动态状态",
+      "dependencies": [
+        "r18-074-flow-layout-authoring",
+        "r18-075-spatial-native-authoring",
+        "r18-076-spatial-runtime-authoring"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "workspace-shell",
+        "published-slide",
+        "published-flow",
+        "published-spatial",
+        "published-dynamic",
+        "contracts-schema"
+      ],
+      "spec": "1.8/README.md"
+    },
+    {
+      "id": "r18-078-component-package-revision",
+      "release": "1.8",
+      "title": "统一工程组件包修订校验引用更新与资源事务",
+      "dependencies": [
+        "r18-070-surface-integration-contract",
+        "r14-030-dynamic-code-tools"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "store-kernel",
+        "published-dynamic",
+        "authoring-flow",
+        "authoring-slide",
+        "authoring-spatial"
+      ],
+      "spec": "1.8/README.md"
+    },
+    {
+      "id": "r18-079-developer-package-targets",
+      "release": "1.8",
+      "title": "专业开发直接编辑工程包并支持Flow正文组件目标",
+      "dependencies": [
+        "r18-078-component-package-revision"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "workspace-shell",
+        "props-shared",
+        "props-flow"
+      ],
+      "spec": "1.8/README.md"
+    },
+    {
+      "id": "r18-080-flow-component-conversion",
+      "release": "1.8",
+      "title": "用真实实例后备资源闭合Flow浮层正文组件转换",
+      "dependencies": [
+        "r18-074-flow-layout-authoring"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "authoring-flow",
+        "store-flow",
+        "props-flow",
+        "published-dynamic"
+      ],
+      "spec": "1.8/README.md"
+    },
+    {
+      "id": "r18-081-component-source-context",
+      "release": "1.8",
+      "title": "为CLI提供完整引用组件源码与精确包修改目标",
+      "dependencies": [
+        "r18-078-component-package-revision",
+        "r18-079-developer-package-targets",
+        "r18-040-staging-file-boundary"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "ai-session",
+        "main-preload",
+        "cli-adapters",
+        "chat-ui",
+        "published-dynamic"
+      ],
+      "spec": "1.8/README.md"
+    },
+    {
+      "id": "r18-082-candidate-format-repair",
+      "release": "1.8",
+      "title": "让非法候选进入既有唯一一次格式修复机会",
+      "dependencies": [
+        "r18-046-stop-undo-stale"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "ai-session",
+        "cli-adapters",
+        "chat-ui",
+        "contracts-schema"
+      ],
+      "spec": "1.8/README.md"
+    },
+    {
+      "id": "r18-083-surface-integration-exit",
+      "release": "1.8",
+      "title": "闭合三表面整合工程结束门并交回1.8验收",
+      "dependencies": [
+        "r18-071-controller-preservation",
+        "r18-072-shared-authoring-history",
+        "r18-074-flow-layout-authoring",
+        "r18-075-spatial-native-authoring",
+        "r18-076-spatial-runtime-authoring",
+        "r18-077-playback-view-controls",
+        "r18-079-developer-package-targets",
+        "r18-080-flow-component-conversion",
+        "r18-081-component-source-context",
+        "r18-082-candidate-format-repair",
+        "r18-084-flow-paragraph-semantics"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "generated-index"
+      ],
+      "spec": "1.8/README.md"
+    },
+    {
+      "id": "r18-085-navigation-level-contract",
+      "release": "1.8",
+      "title": "定义场景与步骤分层及旧导航兼容合同",
+      "dependencies": ["r18-083-surface-integration-exit"],
+      "optional": false,
+      "writeLocks": ["contracts-schema"],
+      "spec": "1.8/README.md"
+    },
+    {
+      "id": "r18-086-navigation-level-implementation",
+      "release": "1.8",
+      "title": "统一三表面场景跳转与场景内步进",
+      "dependencies": ["r18-085-navigation-level-contract"],
+      "optional": false,
+      "writeLocks": ["published-dynamic", "published-interaction", "published-slide", "published-flow", "published-spatial", "props-global", "workspace-shell"],
+      "spec": "1.8/README.md"
+    },
+    {
+      "id": "r18-087-navigation-level-exit",
+      "release": "1.8",
+      "title": "闭合场景步骤分层的真实Mixed整合验收",
+      "dependencies": ["r18-086-navigation-level-implementation"],
+      "optional": false,
+      "writeLocks": ["generated-index"],
+      "spec": "1.8/README.md"
+    },
+    {
       "id": "r18-060-release",
       "release": "1.8",
       "title": "Owner 验收 S3 CLI 生成与基础聊天并发布 v1.8.0 accepted 源码标签",
       "dependencies": [
         "r18-050-three-cli-benchmark",
         "r18-051-pptx-editable-diagrams",
-        "r18-052-pptx-legacy-equations"
+        "r18-052-pptx-legacy-equations",
+        "r18-083-surface-integration-exit",
+        "r18-087-navigation-level-exit"
       ],
       "optional": false,
       "writeLocks": [
@@ -1825,7 +2100,8 @@
       "release": "1.9",
       "title": "增强内嵌媒体与可表达的简单演示效果",
       "dependencies": [
-        "r18-051-pptx-editable-diagrams"
+        "r18-051-pptx-editable-diagrams",
+        "r18-060-release"
       ],
       "optional": false,
       "writeLocks": [

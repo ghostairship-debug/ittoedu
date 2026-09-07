@@ -188,6 +188,8 @@ const baseActionSchemas = [
     sceneId: stableIdSchema,
     targetStateId: stableIdSchema.optional(),
   }).strict(),
+  z.object({ type: z.literal('step.next') }).strict(),
+  z.object({ type: z.literal('step.previous') }).strict(),
   z.object({ type: z.literal('scene.next') }).strict(),
   z.object({ type: z.literal('scene.previous') }).strict(),
   z.object({ type: z.literal('scene.replay') }).strict(),

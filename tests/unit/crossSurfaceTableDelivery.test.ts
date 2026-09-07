@@ -20,7 +20,7 @@ import { createTableNode } from '@/renderer/project/nativeNodeFactories'
 import { mergeTableCells, splitTableCells, deleteTableRow, insertTableColumn, reorderTableRows } from '@/renderer/course/tableContentOperations'
 import { rebuildTableItemIds } from '@/renderer/project/nativeNodeFactories'
 import { buildNativeTableLayout } from '@/shared/nativeTableLayout'
-import { paintPublishedNativeTable } from '@/player/surfaces/slide/publishedNativeRendering'
+import { paintPublishedNativeTable } from '@/player/surfaces/native/publishedNativeRendering'
 
 it('merges nonempty Native cells once, preserves identities, rejects split regions and paints only anchors', () => {
   const node = createTableNode({ headerRowCount: 0 })

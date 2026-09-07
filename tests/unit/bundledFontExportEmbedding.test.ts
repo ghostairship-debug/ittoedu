@@ -36,7 +36,7 @@ import { resolveEmbeddableBundledFonts } from '@/renderer/export/bundledFontEmbe
 import { installFetchBundledFontEmbedSource } from '@/renderer/export/bundledFontEmbedSourceFetch'
 import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
 import { createFormulaNode } from '@/renderer/project/nativeNodeFactories'
-import { nativeRenderInputFromV9Item } from '@/player/surfaces/slide/publishedNativeRendering'
+import { nativeRenderInputFromV9Item } from '@/player/surfaces/native/publishedNativeRendering'
 import { buildPublishedCourseTryRunPayload } from '@/renderer/ui/coursePlayerTryRun'
 import { listCourseProjectV9Fixtures } from '../fixtures/course-project-v9/sources'
 

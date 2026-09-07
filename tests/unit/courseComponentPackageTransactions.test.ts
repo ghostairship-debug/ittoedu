@@ -25,6 +25,57 @@ import type {
 } from '@/shared/courseProjectTypes'
 import type { EmbeddedComponentPackageMeta } from '@/shared/contracts/component-v4'
 import { listCourseProjectV9Fixtures } from '../fixtures/course-project-v9/sources'
+import { captureComponentPackageSourceBaseline, planComponentPackageSourceRevision } from '@/renderer/components/componentPackageRevision'
+import { captureGenerationSnapshot } from '@/renderer/authoring/generation/generationSnapshot'
+import { projectEffectiveLayers } from '@/renderer/course/effectiveLayerProjection'
+
+describe('shared source revision owner', () => {
+  it('revisions all carriers, preserves props and unchanged bytes, and switches entry without overwriting it', () => {
+    const { project, currentPackage } = mixedProjectFixture()
+    const baseline = captureComponentPackageSourceBaseline(project, PACKAGE_ID)
+    const resources = { componentPackages: { [PACKAGE_ID]: currentPackage }, assetFiles: {} }
+    expect(planComponentPackageSourceRevision({ project, resources, baseline, files: currentPackage.files, operationId: 'same' })).toMatchObject({ ok: true, status: 'no-op' })
+    const files = { ...currentPackage.files, 'next.js': encoder.encode('CoursewareComponent.define({ marker: "new entry" })'),
+      'manifest.json': encoder.encode(JSON.stringify({ ...currentPackage.manifest, entry: 'next.js' })) }
+    const result = planComponentPackageSourceRevision({ project, resources, baseline, files, operationId: 'entry-change' })
+    if (!result.ok || result.status !== 'planned') throw new Error(JSON.stringify(result))
+    const step = createEditorTransactionStep(project, result.plan)!
+    const next = applyEditorTransactionStep({ document: project, resources }, step, 'forward')
+    const data = next.resources.componentPackages[PACKAGE_ID]!
+    expect(data.runtimeSource).toContain('new entry')
+    expect(data.files['runtime.js']).toEqual(currentPackage.files['runtime.js'])
+    expect([...data.files['thumbnail.png']!]).toEqual([...currentPackage.files['thumbnail.png']!])
+    expect(data.provenance).toBeUndefined()
+    const original = componentCarriers(project)
+    for (const [id, item] of componentCarriers(next.document)) {
+      expect(item.component.version).toBe('1.0.0-edit.entry-change')
+      expect(item.props).toEqual(original.get(id)!.props)
+    }
+    const restored = applyEditorTransactionStep(next, step, 'inverse')
+    expect(restored.document).toEqual(project)
+    expect(componentContentSha256(restored.resources.componentPackages[PACKAGE_ID]!.files)).toBe(componentContentSha256(currentPackage.files))
+    expect(() => planComponentPackageSourceRevision({ project: next.document, resources: next.resources, baseline, files, operationId: 'late' })).toThrow('stale')
+  })
+
+  it('snapshots complete referenced package sources and exact package target; missing sources and budgets fail explicitly', () => {
+    const { project, currentPackage } = mixedProjectFixture()
+    const input = { document: project, workspace: { version: 1 as const, projectId: project.id, normalizedPath: '/mixed.h5lesson' },
+      sessionToken: { locationId: project.startLocationId, surfaceType: 'slide' as const, revision: project.revision, generation: 1 },
+      projection: projectEffectiveLayers({ project, locationId: project.startLocationId }), selectedIds: [], scope: 'page' as const,
+      instruction: '修改引用组件内部布局', purpose: 'local-edit' as const, componentPackages: { [PACKAGE_ID]: currentPackage } }
+    const request = captureGenerationSnapshot(input)
+    const sources = (request.context as any).componentSources
+    expect(sources).toHaveLength(1)
+    expect(sources[0].files['runtime.js']).toEqual({ encoding: 'utf8', text: currentPackage.runtimeSource })
+    expect(sources[0].files['thumbnail.png']).toBe(Buffer.from(currentPackage.files['thumbnail.png']!).toString('base64'))
+    expect(request.destinations).toContainEqual({ kind: 'update', target: sources[0].target })
+    expect(sources[0].target).toMatchObject({ owner: 'global', itemId: PACKAGE_ID, documentRevision: project.revision })
+    expect(() => captureGenerationSnapshot({ ...input, componentPackages: {} })).toThrow('完整源码')
+    const files = { ...currentPackage.files, 'large.txt': encoder.encode('x'.repeat(160000)) }
+    const big = structuredClone(project); big.componentPackages[PACKAGE_ID]!.contentSha256 = componentContentSha256(files)
+    expect(() => captureGenerationSnapshot({ ...input, document: big, componentPackages: { [PACKAGE_ID]: { ...currentPackage, files } } })).toThrow('预算')
+  })
+})
 
 const PACKAGE_ID = 'com.example.mixed-component'
 const NOW = '2026-08-24T08:30:00.000Z'

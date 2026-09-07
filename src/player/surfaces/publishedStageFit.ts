@@ -16,7 +16,7 @@ function measureHostSize(container: HTMLElement): { width: number; height: numbe
 }
 
 /**
- * Letterbox the authored 1280×720 stage into its host. Flow/Spatial HUD and
+ * Letterbox the authored 1280×720 stage into its host. Spatial HUD and
  * teacher controllers are authored in that canvas; sizing the host to the
  * window and keeping those frames would clip them.
  */
@@ -26,6 +26,8 @@ export function fitPublishedCourseStage(container: HTMLElement): void {
   const left = (width - CANVAS_WIDTH * scale) / 2
   const top = (height - CANVAS_HEIGHT * scale) / 2
   for (const stage of container.querySelectorAll<HTMLElement>(PUBLISHED_STAGE_SELECTOR)) {
+    // Flow body and overlays share the responsive document's CSS-pixel layout.
+    if (stage.classList.contains('flow-surface-host')) continue
     stage.style.position = 'absolute'
     stage.style.transformOrigin = '0 0'
     stage.style.transform = `scale(${scale})`

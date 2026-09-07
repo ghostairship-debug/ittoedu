@@ -1,3 +1,4 @@
+import type { PlaybackNavigationProgress, PlaybackNavigationViewPort } from '../../src/player/navigation/coursePlaybackSequence'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { createTeacherControllerNode } from '@/renderer/project/nativeNodeFactories'
 import {
@@ -89,7 +90,7 @@ describe('teacher controller runtime session geometry', () => {
   })
 
   it('shares the rotated visible pill between hit bounds and the DOM footprint', () => {
-    const node = createTeacherControllerNode({ x: 200, y: 100 })
+    const node = createTeacherControllerNode({ x: 200, y: 100, width: 900 })
     node.rotation = 90
     const visible = teacherControllerVisibleLocalRect(node, true)
     const collapse = createTeacherControllerLayout(node, node.width, node.height).collapse
@@ -563,5 +564,114 @@ describe('v9 teacher controller authoring bridge', () => {
     expect(result.reason).toBe(SLIDE_REJECT_WRONG_OWNER)
     expect(result.historyEntry).toBe(false)
     expect(session.history.present.revision).toBe(1)
+  })
+})
+
+
+describe('teacher controller navigation projection', () => {
+  it('shows live two-level progress and rejects disabled keyboard and pointer activation', () => {
+    const node = createTeacherControllerNode({ x: 0, y: 0 })
+    let progress: PlaybackNavigationProgress = {
+      sceneId: 'scene-b', sceneIndex: 1, sceneCount: 3, sceneName: '画布',
+      stepId: 'camera-one', stepIndex: 0, stepCount: 3, stepName: '镜头一',
+      canPreviousStep: true, canNextStep: false, canPreviousScene: true, canNextScene: true,
+    }
+    let listener: (() => void) | undefined
+    let released = false
+    const navigation: PlaybackNavigationViewPort = {
+      getProgress: () => progress,
+      canExecute: action => action.type !== 'step.next' || progress.canNextStep,
+      subscribe: callback => { listener = callback; return () => { released = true } },
+    }
+    const actions: string[] = []
+    const container = document.createElement('div')
+    document.body.append(container)
+    const controller = new TeacherControllerDom({
+      node, container, navigation, canvas: { width: 1280, height: 720 },
+      getRenderedStageBounds: () => ({ width: 1280, height: 720, left: 0, top: 0 }),
+      scenes: [], getCurrentSceneId: () => null, getStateLabel: () => null,
+      getStatus: () => ({ muted: false, fullscreen: false }),
+      getSession: () => ({ offset: { dx: 0, dy: 0 }, collapsed: false }),
+      onSessionChange: () => undefined, onAction: action => { actions.push(action.type) },
+      getInteractive: () => true,
+    })
+    try {
+      const next = node.buttons.find(button => button.action.type === 'step.next')!
+      const button = container.querySelector<HTMLButtonElement>(`[data-controller-button-id="${next.id}"]`)!
+      const label = container.querySelector('.slide-teacher-controller-progress')!
+      expect(label.textContent).toBe('场景 2/3 · 步骤 1/3')
+      expect(button.disabled).toBe(true)
+      button.click()
+      const pointer = (type: string) => {
+        const event = new Event(type, { bubbles: true })
+        Object.assign(event, { pointerId: 1, pointerType: 'mouse',
+          clientX: parseFloat(button.style.left) + 5, clientY: parseFloat(button.style.top) + 5 })
+        controller.rootElement.dispatchEvent(event)
+      }
+      pointer('pointerdown'); pointer('pointerup')
+      expect(actions).toEqual([])
+      progress = { ...progress, stepIndex: 1, canNextStep: true }
+      listener!()
+      expect(label.textContent).toBe('场景 2/3 · 步骤 2/3')
+      expect(button.disabled).toBe(false)
+      button.focus()
+      listener!()
+      expect(document.activeElement).toBe(button)
+      button.click()
+      expect(actions).toEqual(['step.next'])
+      pointer('pointerdown')
+      progress = { ...progress, canNextStep: false }
+      listener!()
+      pointer('pointerup')
+      expect(actions).toEqual(['step.next'])
+    } finally {
+      controller.destroy()
+      expect(released).toBe(true)
+      listener!()
+      container.remove()
+    }
+  })
+
+  it('adds only detached legacy step shortcuts and respects any authored step customization', () => {
+    const original = createTeacherControllerNode({ x: 0, y: 0 })
+    const legacy = { ...original, buttons: original.buttons.filter(button => !button.action.type.startsWith('step.')) }
+    const before = structuredClone(legacy)
+    const container = document.createElement('div')
+    let collapsed = true
+    const controller = new TeacherControllerDom({
+      node: legacy, container,
+      navigation: { getProgress: () => null, canExecute: () => true, subscribe: () => () => undefined },
+      playbackView: { openZoomPanel: () => undefined, subscribe: () => () => undefined,
+        zoomTo: () => undefined, panTo: () => undefined, reset: () => undefined,
+        state: { zoom: 1, pan: { x: 0, y: 0 }, viewport: { width: 1280, height: 720 },
+          bounds: { x: 0, y: 0, width: 1280, height: 720 }, generation: 0 } },
+      canvas: { width: 1280, height: 720 },
+      getRenderedStageBounds: () => ({ width: 1280, height: 720 }),
+      scenes: [], getCurrentSceneId: () => null, getStateLabel: () => null,
+      getStatus: () => ({ muted: false, fullscreen: false }),
+      getSession: () => ({ offset: { dx: 0, dy: 0 }, collapsed }),
+      onSessionChange: () => undefined, onAction: () => undefined, getInteractive: () => true,
+    })
+    try {
+      const collapse = container.querySelector<HTMLElement>('[data-teacher-controller-collapse]')!
+      const zoom = container.querySelector<HTMLElement>('[data-playback-chrome]')!
+      const positions = [collapse.style.left, collapse.style.top, zoom.style.left, zoom.style.top]
+      expect(container.querySelectorAll('[data-controller-button-id]')).toHaveLength(0)
+      collapsed = false
+      controller.update(legacy)
+      const buttons = [...container.querySelectorAll<HTMLButtonElement>('[data-controller-button-id]')]
+      expect(buttons.slice(0, 2).map(button => button.textContent)).toEqual(['上一步', '下一步'])
+      expect(buttons.slice(2).map(button => button.dataset.controllerButtonId))
+        .toEqual(legacy.buttons.filter(button => button.visible).map(button => button.id))
+      expect(legacy).toEqual(before)
+      const expandedCollapse = container.querySelector<HTMLElement>('[data-teacher-controller-collapse]')!
+      const expandedZoom = container.querySelector<HTMLElement>('[data-playback-chrome]')!
+      expect([expandedCollapse.style.left, expandedCollapse.style.top, expandedZoom.style.left, expandedZoom.style.top]).toEqual(positions)
+      controller.update({ ...legacy, buttons: [...legacy.buttons,
+        { id: 'authored-hidden-step', action: { type: 'step.next' }, label: '私有前进', visible: false }],
+      })
+      expect([...container.querySelectorAll<HTMLButtonElement>('[data-controller-button-id]')]
+        .some(button => button.textContent === '上一步' || button.textContent === '下一步')).toBe(false)
+    } finally { controller.destroy() }
   })
 })

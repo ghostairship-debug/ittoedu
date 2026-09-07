@@ -115,8 +115,8 @@ function applyTriangle(chevron: HTMLElement, direction: 'left' | 'right'): void 
 }
 
 /**
- * Runtime-session TOC chrome. Scheme 1: drawer and triangle are `position:fixed`
- * against the viewport. Collapsed = drawer fully off-screen + left-edge triangle
+ * Runtime-session TOC chrome. Drawer and triangle are positioned against the
+ * non-scrolling Flow viewport. Collapsed = drawer off-screen + left-edge triangle
  * only. Expanded = 240–280px left column; the host insets the article so body
  * is not covered. Never written to the project, history, print, or DOCX.
  */
@@ -144,7 +144,7 @@ export class FlowRuntimeTocChrome {
     this.#drawer.className = 'flow-runtime-toc-drawer'
     this.#drawer.dataset.testid = 'flow-runtime-toc-drawer'
     this.#drawer.setAttribute('aria-label', '目录')
-    this.#drawer.style.position = 'fixed'
+    this.#drawer.style.position = 'absolute'
     this.#drawer.style.top = '0'
     this.#drawer.style.left = '0'
     this.#drawer.style.bottom = '0'
@@ -175,7 +175,7 @@ export class FlowRuntimeTocChrome {
     this.#toggle.type = 'button'
     this.#toggle.className = 'flow-runtime-toc-toggle'
     this.#toggle.dataset.testid = 'flow-runtime-toc-toggle'
-    this.#toggle.style.position = 'fixed'
+    this.#toggle.style.position = 'absolute'
     this.#toggle.style.top = '42%'
     this.#toggle.style.transform = 'translateY(-50%)'
     this.#toggle.style.zIndex = '30'

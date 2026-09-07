@@ -843,7 +843,7 @@ describe('r11-055 architecture modularity gate', () => {
   })
 
   it('owns Slide Native painter and Course package analysis/preflight/emitter on single files', () => {
-    const painter = source('src/player/surfaces/slide/publishedNativeRendering.ts')
+    const painter = source('src/player/surfaces/native/publishedNativeRendering.ts')
     expect(painter).toContain('export function paintPublishedNativeRenderInput')
     expect(painter).toContain('freezeRenderSnapshot')
     expect(painter).toContain('readonlyNativeRenderInputFromPublishedItem')
@@ -866,7 +866,7 @@ describe('r11-055 architecture modularity gate', () => {
       || retiredPainterImports.some((fragment) => specifier.includes(fragment))
     ))).toEqual([])
     const slideAdapter = source('src/player/surfaces/slide/SlidePublishedAdapter.ts')
-    expect(slideAdapter).toContain("from './publishedNativeRendering'")
+    expect(slideAdapter).toContain("from '../native/publishedNativeRendering'")
     expect(slideAdapter).toContain('readonlyNativeRenderInputFromPublishedItem')
     expect(importSpecifiers(slideAdapter).filter((specifier) => (
       /sceneAssets|renderNode|canvasShapeRenderer|imageEffects|publishedNativeText|publishedFormula/.test(specifier)

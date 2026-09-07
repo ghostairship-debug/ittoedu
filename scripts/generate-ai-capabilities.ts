@@ -120,6 +120,8 @@ type AssertExactly<Left, Right> =
     : never
 
 const runtimeHostActionNames = [
+  'nextStep',
+  'previousStep',
   'goToScene',
   'nextScene',
   'previousScene',
@@ -137,6 +139,8 @@ const runtimeLifecycleHooks = [
 ] as const satisfies readonly (keyof RuntimeInstanceLifecycle)[]
 
 const componentHostActionNames = [
+  'nextStep',
+  'previousStep',
   'goToScene',
   'nextScene',
   'previousScene',

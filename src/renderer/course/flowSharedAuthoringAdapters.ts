@@ -8,6 +8,8 @@ import {
 import { componentSupportsScope } from '../../shared/componentCapabilities'
 import { sceneNodeToCourseLayerItem } from '../../shared/courseProjectModel'
 import type { ComponentManifest } from '../../shared/componentTypes'
+import type { AssetMeta } from '../../shared/contracts/media-v1'
+import { collectCourseProjectReferences } from '../../shared/contracts/course-project-v9/references'
 import type { FormulaAstNode, ShapeType } from '../../shared/contracts/native-v1'
 import type {
   ComponentLayerItem,
@@ -97,10 +99,23 @@ export const FLOW_COMPONENT_SCOPE_REASON = '该组件不支持当前作者范围
 export const FLOW_GLOBAL_ITEM_EMBED_REASON = '全局层内容不能嵌入 Flow 正文'
 export const FLOW_NO_OVERLAY_REASON = '没有可转换的浮层'
 export const FLOW_EMPTY_PACKAGE_REASON = '请先选择要插入的组件'
+export const FLOW_COMPONENT_CONVERSION_UNSUPPORTED_REASON = '该组件包含正文无法表达的图层属性或引用'
 
 export type FlowSharedOwnership = 'document-block' | 'viewport-overlay'
 export type FlowMediaInsertPlacement = FlowSharedOwnership
 export type FlowComponentInsertPlacement = FlowSharedOwnership
+
+export interface FlowBodyDestination {
+  readonly parentBlockId: string | null
+  readonly index: number
+  readonly wrap?: 'none' | 'left' | 'right'
+}
+
+export interface FlowComponentDocumentConversionOptions extends FlowCommandOptions {
+  readonly destination?: FlowBodyDestination
+  readonly fallbackAssetId?: string
+  readonly fallbackAsset?: AssetMeta
+}
 
 export interface FlowSharedAuthoringResult {
   readonly ok: boolean
@@ -260,6 +275,74 @@ function resolveInsertAnchor(
   const found = findFlowBlockRecursive(surface.blocks, preferredId)
   if (!found) return { parentId: null, index: surface.blocks.length }
   return { parentId: found.parentId, index: found.index + 1 }
+}
+
+function resolveFlowBodyDestination(
+  document: CourseProjectDocument,
+  surfaceId: string,
+  destination: FlowBodyDestination,
+): { parentId: string | null; index: number } | FlowSharedAuthoringResult {
+  if (!Number.isInteger(destination.index) || destination.index < 0) {
+    return fail('正文插入位置无效')
+  }
+  const surface = flowSurfaceIn(document, surfaceId)
+  if (destination.parentBlockId === null) {
+    if (destination.index > surface.blocks.length) return fail('正文插入位置已经失效')
+    return { parentId: null, index: destination.index }
+  }
+  const parent = findFlowBlockRecursive(surface.blocks, destination.parentBlockId)
+  if (!parent || parent.block.type !== 'section') {
+    return fail(`找不到 Flow 分节：${destination.parentBlockId}`)
+  }
+  if (destination.index > parent.block.blocks.length) return fail('正文插入位置已经失效')
+  return { parentId: destination.parentBlockId, index: destination.index }
+}
+
+function blockingReferenceReason(
+  document: CourseProjectDocument,
+  kind: 'block' | 'layer-item',
+  id: string,
+): string | null {
+  const reference = collectCourseProjectReferences(document).find((candidate) => (
+    candidate.kind === kind && candidate.id === id
+  ))
+  if (!reference) return null
+  const carrier = kind === 'layer-item' ? '图层' : '正文块'
+  return `${FLOW_COMPONENT_CONVERSION_UNSUPPORTED_REASON}：${carrier}仍被 ${reference.path.join('.')} 引用，请先移除该引用`
+}
+
+function componentOverlayUnsupportedFields(
+  document: CourseProjectDocument,
+  surfaceId: string,
+  item: ComponentLayerItem,
+): string[] {
+  const surface = flowSurfaceIn(document, surfaceId)
+  const entry = surface.surfaceLayerItems.find((candidate) => candidate.item.layerItemId === item.layerItemId)
+  if (!entry) return ['所属页面']
+  const unsupported: string[] = []
+  if ((entry.bodyPlane ?? 'overlay') !== 'overlay') unsupported.push('正文上下层级')
+  if (entry.visibility.mode !== 'all') unsupported.push('按课程位置可见性')
+  if (!item.visible) unsupported.push('隐藏状态')
+  if (item.locked) unsupported.push('锁定状态')
+  if (item.rotation !== 0) unsupported.push('旋转')
+  if (item.opacity !== 1) unsupported.push('透明度')
+  if (item.hitPolicy !== 'auto') unsupported.push('命中策略')
+  if (item.playbackInitialVisibility !== 'inherit') unsupported.push('初始播放可见性')
+  const canonicalFrame = item.frame.mode === 'absolute'
+    && item.frame.x === (CANVAS_WIDTH - 480) / 2
+    && item.frame.y === (CANVAS_HEIGHT - 280) / 2
+    && item.frame.width === 480
+    && item.frame.height === 280
+  if (!canonicalFrame) unsupported.push('浮层位置或尺寸')
+  const packageName = document.componentPackages[item.component.packageId]?.name
+  if (
+    item.label !== packageName
+    && item.label !== `组件·${item.component.packageId}`
+    && item.label !== '互动组件'
+  ) {
+    unsupported.push('自定义图层名称')
+  }
+  return unsupported
 }
 
 function overlayDestination(
@@ -766,6 +849,11 @@ export function convertFlowComponentBlockToOverlay(
     return fail('只有文中组件可以改为页面浮层')
   }
   const block = selected.block
+  if (block.wrap === 'left' || block.wrap === 'right') {
+    return fail(`${FLOW_COMPONENT_CONVERSION_UNSUPPORTED_REASON}：文字环绕不能由浮层表达，请先改为不环绕`)
+  }
+  const referenceReason = blockingReferenceReason(document, 'block', block.id)
+  if (referenceReason) return fail(referenceReason)
   const created = runOverlayMutation(document, options, (draft) => {
     const surface = flowSurfaceIn(draft, page.surfaceId)
     const found = findFlowBlockRecursive(surface.blocks, block.id)
@@ -795,40 +883,101 @@ export function convertFlowComponentBlockToOverlay(
   }
 }
 
+export type FlowOverlayComponentConversionInspection =
+  | {
+      readonly ok: true
+      readonly locationId: string
+      readonly surfaceId: string
+      readonly overlayId: string
+      readonly item: ComponentLayerItem
+      readonly destination: { readonly parentId: string | null; readonly index: number }
+    }
+  | { readonly ok: false; readonly reason: string }
+
+export function inspectFlowOverlayComponentConversion(
+  document: CourseProjectDocument,
+  selection: FlowEditorSelection,
+  destination: FlowBodyDestination,
+): FlowOverlayComponentConversionInspection {
+  const page = requireFlowPage(document, selection)
+  if (!('surfaceId' in page)) return { ok: false, reason: page.reason ?? FLOW_NO_PAGE_REASON }
+  if (selection.authoringScope === 'global') return { ok: false, reason: FLOW_GLOBAL_ITEM_EMBED_REASON }
+  const overlayId = selection.selectedOverlayIds[0]
+  if (!overlayId) return { ok: false, reason: FLOW_NO_OVERLAY_REASON }
+  const located = locateCourseLayer(document, overlayId)
+  if (!located) return { ok: false, reason: `找不到浮层：${overlayId}` }
+  if (located.source !== 'surface') return { ok: false, reason: FLOW_GLOBAL_ITEM_EMBED_REASON }
+  const locked = teacherLocked(located.item)
+  if (locked) return { ok: false, reason: locked.reason ?? lockedLayerWriteReason() }
+  if (located.item.kind === 'runtime') return { ok: false, reason: FLOW_RUNTIME_EMBED_REASON }
+  if (located.item.kind !== 'component') return { ok: false, reason: '只有组件浮层可以嵌入为文档块' }
+  const unsupported = componentOverlayUnsupportedFields(document, page.surfaceId, located.item)
+  if (unsupported.length > 0) {
+    return {
+      ok: false,
+      reason: `${FLOW_COMPONENT_CONVERSION_UNSUPPORTED_REASON}：${unsupported.join('、')}`,
+    }
+  }
+  const referenceReason = blockingReferenceReason(document, 'layer-item', overlayId)
+  if (referenceReason) return { ok: false, reason: referenceReason }
+  const resolvedDestination = resolveFlowBodyDestination(document, page.surfaceId, destination)
+  if ('ok' in resolvedDestination) {
+    return { ok: false, reason: resolvedDestination.reason ?? '正文插入位置无效' }
+  }
+  return {
+    ok: true,
+    locationId: page.locationId,
+    surfaceId: page.surfaceId,
+    overlayId,
+    item: located.item,
+    destination: resolvedDestination,
+  }
+}
+
 export function convertFlowOverlayComponentToDocument(
   document: CourseProjectDocument,
   selection: FlowEditorSelection,
-  options: FlowCommandOptions = {},
+  options: FlowComponentDocumentConversionOptions = {},
 ): FlowSharedAuthoringResult {
-  const page = requireFlowPage(document, selection)
-  if (!('surfaceId' in page)) return page
-  if (selection.authoringScope === 'global') return fail(FLOW_GLOBAL_ITEM_EMBED_REASON)
-  const overlayId = selection.selectedOverlayIds[0]
-  if (!overlayId) return fail(FLOW_NO_OVERLAY_REASON)
-  const located = locateCourseLayer(document, overlayId)
-  if (!located) return fail(`找不到浮层：${overlayId}`)
-  if (located.source !== 'surface') return fail(FLOW_GLOBAL_ITEM_EMBED_REASON)
-  const locked = teacherLocked(located.item)
-  if (locked) return locked
-  if (located.item.kind === 'runtime') return fail(FLOW_RUNTIME_EMBED_REASON)
-  if (located.item.kind !== 'component') return fail('只有组件浮层可以嵌入为文档块')
-  const fallback = located.item.staticFallbackAssetId?.trim()
+  const requestedDestination = options.destination ?? (() => {
+    const page = requireFlowPage(document, selection)
+    if (!('surfaceId' in page)) return null
+    const anchor = resolveInsertAnchor(document, selection, page.surfaceId)
+    return { parentBlockId: anchor.parentId, index: anchor.index }
+  })()
+  if (!requestedDestination) return fail(FLOW_NO_PAGE_REASON)
+  const inspection = inspectFlowOverlayComponentConversion(
+    document,
+    selection,
+    requestedDestination,
+  )
+  if (!inspection.ok) return fail(inspection.reason)
+  const { item: inspectedItem, locationId, surfaceId, overlayId, destination } = inspection
+  const fallback = options.fallbackAssetId?.trim()
+    || inspectedItem.staticFallbackAssetId?.trim()
   if (!fallback) return fail(FLOW_EMBED_COMPONENT_FALLBACK_REASON)
-  if (!document.assets[fallback]) return fail(`找不到素材：${fallback}`)
+  if (!document.assets[fallback] && options.fallbackAsset?.id !== fallback) {
+    return fail(`找不到素材：${fallback}`)
+  }
+  if (options.fallbackAsset && options.fallbackAsset.id !== fallback) {
+    return fail('组件后备素材 ID 与转换请求不一致')
+  }
   const created = runOverlayMutation(document, options, (draft) => {
-    const surface = flowSurfaceIn(draft, page.surfaceId)
+    const surface = flowSurfaceIn(draft, surfaceId)
     const index = surface.surfaceLayerItems.findIndex(
       (entry) => entry.item.layerItemId === overlayId,
     )
     if (index < 0) throw new Error(`找不到浮层：${overlayId}`)
     const item = surface.surfaceLayerItems[index]!.item
     if (item.kind !== 'component') throw new Error('只有组件浮层可以嵌入为文档块')
+    if (options.fallbackAsset) {
+      draft.assets[options.fallbackAsset.id] = structuredClone(options.fallbackAsset)
+    }
     surface.surfaceLayerItems.splice(index, 1)
-    const anchor = resolveInsertAnchor(draft, selection, page.surfaceId)
-    const parentBlocks = anchor.parentId
+    const parentBlocks = destination.parentId
       ? (() => {
-        const section = findFlowBlockRecursive(surface.blocks, anchor.parentId)
-        if (!section || section.block.type !== 'section') throw new Error(`找不到 Flow 分节：${anchor.parentId}`)
+        const section = findFlowBlockRecursive(surface.blocks, destination.parentId)
+        if (!section || section.block.type !== 'section') throw new Error(`找不到 Flow 分节：${destination.parentId}`)
         return section.block.blocks
       })()
       : surface.blocks
@@ -839,9 +988,12 @@ export function convertFlowOverlayComponentToDocument(
       component: { ...item.component },
       props: structuredClone(item.props),
       staticFallbackAssetId: fallback,
+      ...(options.destination?.wrap && options.destination.wrap !== 'none'
+        ? { wrap: options.destination.wrap }
+        : {}),
     }
-    parentBlocks.splice(anchor.index, 0, block)
-    syncFlowCourseLocations(draft, page.surfaceId)
+    parentBlocks.splice(destination.index, 0, block)
+    syncFlowCourseLocations(draft, surfaceId)
     return [blockId]
   }, '已嵌入为文档块')
   if (!created.ok || !created.nextDocument || !created.createdLayerItemIds?.[0]) return created
@@ -853,7 +1005,7 @@ export function convertFlowOverlayComponentToDocument(
     historyEntry: true,
     createdBlockIds: [blockId],
     ownership: 'document-block',
-    selection: selectFlowEditorBlock(created.nextDocument, page.locationId, blockId),
+    selection: selectFlowEditorBlock(created.nextDocument, locationId, blockId),
   }
 }
 

@@ -1,8 +1,9 @@
+import { isAuthoringHistoryTransactionFrame } from '../../src/renderer/authoring/resourceAwareAuthoringHistory'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { RuntimeTargetEditSession } from '@/renderer/authoring/runtimeTargetEditSession'
 import { isFlowEditorTransactionFrame } from '@/renderer/course/flowEditorSlice'
-import { isSlideAuthoringTransactionFrame } from '@/renderer/course/slideEditorCommands'
+
 import { isSpatialAuthoringTransactionFrame } from '@/renderer/course/spatialAuthoringHistory'
 import { buildPublishedCourseV2Payload } from '@/renderer/export/course/buildPublishedCourse'
 import {
@@ -255,7 +256,10 @@ function fixture(
     controls: 'none',
     idFactory: () => `runtime-content-fixture-${++sequence}`,
   })
-  const api = kind.startsWith('flow-') || kind.startsWith('spatial-') ? 3 : 2
+  const api = kind.startsWith('flow-')
+    || (kind.startsWith('spatial-') && kind !== 'spatial-global')
+    ? 3
+    : 2
   const itemId = `runtime-content-${kind}`
   const initialValue = `${kind} initial`
   const nextValue = `${kind} committed`
@@ -489,7 +493,9 @@ function discoverySession(
   return {
     projectId: activeProject().id,
     scope: source.owner === 'global' ? 'global' : 'scene',
-    sceneId: selectActiveSceneId(useEditorStore.getState()),
+    sceneId: source.kind.startsWith('spatial-')
+      ? source.locationId
+      : selectActiveSceneId(useEditorStore.getState()),
     targetId,
     nodeId: source.itemId,
     kind: 'text',
@@ -523,7 +529,9 @@ function captureProjectedTarget(source: RuntimeContentFixture): CourseRuntimeCon
 }
 
 function targetForStore(source: RuntimeContentFixture): CourseRuntimeContentTextTarget {
-  return source.kind === 'slide-scene' || source.kind === 'slide-global'
+  return source.kind === 'slide-scene'
+    || source.kind === 'slide-global'
+    || source.kind === 'spatial-global'
     ? captureProjectedTarget(source)
     : captureDirectTarget(source)
 }
@@ -562,7 +570,7 @@ function newestTransactionResourceChanges() {
   const active = activeHistory()
   const frame = active.history.past.at(-1)
   const isTransaction = active.kind === 'slide'
-    ? Boolean(frame && isSlideAuthoringTransactionFrame(frame))
+    ? Boolean(frame && isAuthoringHistoryTransactionFrame(frame))
     : active.kind === 'flow'
       ? Boolean(frame && isFlowEditorTransactionFrame(frame))
       : Boolean(frame && isSpatialAuthoringTransactionFrame(frame))
@@ -712,7 +720,7 @@ describe('ARCH-2 Runtime content text Store vertical slice', () => {
     },
   )
 
-  it.each(['slide-scene', 'slide-global'] as const)(
+  it.each(['slide-scene', 'slide-global', 'spatial-global'] as const)(
     'captures %s from the projected first Runtime, with host targetId discovery-only',
     (fixtureKind) => {
       const source = loadFixture(fixtureKind, { secondRuntime: true })
@@ -732,6 +740,12 @@ describe('ARCH-2 Runtime content text Store vertical slice', () => {
       expect(target?.courseTarget.authoringAddress).toContain(
         'field=runtime%2Fcontent%2Fvalues%2Ftitle~1~0lesson',
       )
+      if (fixtureKind === 'spatial-global') {
+        expect(runtimeItem(activeProject(), source.itemId).runtime).toMatchObject({
+          protocol: 'canvas-runtime',
+          runtimeApiVersion: 2,
+        })
+      }
       expect(JSON.stringify(target)).not.toContain('host-token')
     },
   )
@@ -742,7 +756,6 @@ describe('ARCH-2 Runtime content text Store vertical slice', () => {
     'flow-global',
     'spatial-surface',
     'spatial-world',
-    'spatial-global',
   ] as const)('does not fabricate projected visual capture for %s', (fixtureKind) => {
     const source = loadFixture(fixtureKind)
     expect(useEditorStore.getState().captureRuntimeContentTextTarget(

@@ -1093,7 +1093,7 @@ describe('Published Interaction Slide host integration', () => {
     expect(session.navigator.current?.locationId).toBe(LOCATION_B_ID)
     const root = container.querySelector<HTMLElement>('.slide-published-adapter')!
     expect(root.dataset.presentationStateId).toBe('initial-session-current')
-    expect(root.style.backgroundColor).toMatch(/#112233|rgb\(17,\s*34,\s*51\)/)
+    expect(root.querySelector<HTMLElement>('[data-playback-content]')!.style.backgroundColor).toMatch(/#112233|rgb\(17,\s*34,\s*51\)/)
     const materialized = renderedItem(container, stateTarget.layerItemId)
     expect(materialized.style.left).toBe('333px')
     expect(materialized.style.opacity).toBe('0.4')
@@ -1186,7 +1186,7 @@ describe('Published Interaction Slide host integration', () => {
     expect(root.dataset.sceneId).toBe(SCENE_B_ID)
     expect(root.dataset.locationId).toBe(LOCATION_B_ID)
     expect(root.dataset.presentationStateId).toBe('state-revealed')
-    expect(root.style.backgroundColor).toMatch(/#112233|rgb\(17,\s*34,\s*51\)/)
+    expect(root.querySelector<HTMLElement>('[data-playback-content]')!.style.backgroundColor).toMatch(/#112233|rgb\(17,\s*34,\s*51\)/)
     const materialized = renderedItem(container, stateTarget.layerItemId)
     expect(materialized.style.left).toBe('333px')
     expect(materialized.style.opacity).toBe('0.4')
@@ -1194,7 +1194,7 @@ describe('Published Interaction Slide host integration', () => {
     await session.goToLocation(LOCATION_A_ID)
     await session.goToLocation(LOCATION_B_ID)
     expect(root.dataset.presentationStateId).toBe('state-base')
-    expect(root.style.backgroundColor).toMatch(/#f8fafc|rgb\(248,\s*250,\s*252\)/)
+    expect(root.querySelector<HTMLElement>('[data-playback-content]')!.style.backgroundColor).toMatch(/#f8fafc|rgb\(248,\s*250,\s*252\)/)
     expect(container.querySelector(`[data-slide-layer-item="${stateTarget.layerItemId}"]`)).toBeNull()
     expect(payload).toEqual(before)
   })
@@ -1233,7 +1233,7 @@ describe('Published Interaction Slide host integration', () => {
 
     const root = container.querySelector<HTMLElement>('.slide-published-adapter')!
     expect(root.dataset.presentationStateId).toBe('state-authored-initial')
-    expect(root.style.backgroundColor).toMatch(/#123456|rgb\(18,\s*52,\s*86\)/)
+    expect(root.querySelector<HTMLElement>('[data-playback-content]')!.style.backgroundColor).toMatch(/#123456|rgb\(18,\s*52,\s*86\)/)
   })
 
   it('forces same-location scene.go to materialize its explicit targetStateId', async () => {

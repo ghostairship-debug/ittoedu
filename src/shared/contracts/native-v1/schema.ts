@@ -384,6 +384,8 @@ export const videoNodeSchema = videoNodeCoreSchema.and(playbackFieldsSchema)
 export const shapeNodeSchema = shapeNodeCoreSchema.and(playbackFieldsSchema)
 
 const teacherControllerActionSchemas = [
+  z.object({ type: z.literal('step.previous') }).strict(),
+  z.object({ type: z.literal('step.next') }).strict(),
   z.object({ type: z.literal('scene.previous') }).strict(),
   z.object({ type: z.literal('scene.next') }).strict(),
   z.object({ type: z.literal('scene.replay') }).strict(),

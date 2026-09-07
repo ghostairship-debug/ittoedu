@@ -6,16 +6,26 @@ import type { GenerationRequest } from '../../src/shared/generationContract'
 import { courseAgentSkills } from '../../src/shared/courseAgentSkills'
 
 describe('neutral CLI candidate profiles', () => {
-  it('loads identical skill guidance and candidate semantics for all adapters and rejects an unimplemented channel', () => {
+  it('loads identical skill guidance and declares each implemented candidate channel', () => {
     const request = { requestId: '89e7b74a-2ba4-4f03-ad94-89aef212a776', purpose: 'single-page' } as GenerationRequest
     const profiles = ['codex', 'claude', 'opencode'].map(adapter => createGenerationProfile(adapter as 'codex' | 'claude' | 'opencode', request))
     expect(profiles[0]?.skills).toEqual(profiles[1]?.skills)
     expect(profiles[1]?.skills).toEqual(profiles[2]?.skills)
-    expect(profiles.every(profile => profile.capability.liveProjectTools === false && profile.resultChannel === 'structured-stdout')).toBe(true)
+    expect(profiles.map(profile => [profile.resultChannel, profile.capability.candidateFileIngestion])).toEqual([
+      ['app-server-json-schema', false],
+      ['structured-stdout', false],
+      ['session-staging-file', true],
+    ])
+    expect(profiles.every(profile => profile.resultContract.mode === 'reply-or-edit')).toBe(true)
+    expect(createGenerationProfile('codex', { ...request, expectedResult: 'candidate' }).resultContract).toEqual({
+      mode: 'candidate', candidateInputEncoding: 'json-string',
+    })
+    expect(profiles.every(profile => profile.capability.liveProjectTools === false)).toBe(true)
     expect(courseAgentSkills).toHaveLength(7)
     const build = createGenerationProfile('codex', { ...request, purpose: 'whole-course' })
     expect(build.skills.map(skill => skill.name)).toContain('course-build')
     expect(() => createGenerationProfile('claude', request, 'live-mcp')).toThrow('未开放')
+    expect(() => createGenerationProfile('codex', request, 'session-staging-file')).toThrow('不支持')
   })
 })
 

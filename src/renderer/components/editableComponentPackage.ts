@@ -1,10 +1,11 @@
-import type { ComponentManifest, ComponentPackageData } from '../../shared/componentTypes'
+import { collectCourseComponentPackageReferences } from './courseComponentPackageTransactions'
+import type { ComponentPackageData } from '../../shared/componentTypes'
 import { componentManifestSchema } from '../../shared/componentSchema'
 import { componentSupportsScope } from '../../shared/componentCapabilities'
 import { componentContentSha256 } from '../../shared/componentContentIntegrity'
 import { UserFacingError } from '../../shared/errors'
 import type { EmbeddedComponentPackageMeta } from '../../shared/contracts/component-v4'
-import type { CourseProjectDocument, LayerItem } from '../../shared/courseProjectTypes'
+import type { CourseProjectDocument } from '../../shared/courseProjectTypes'
 import {
   parseComponentPackageFiles,
   validateComponentRuntimeSource,
@@ -59,61 +60,6 @@ export function rewriteComponentDefinitionId(
   return rewritten
 }
 
-export function componentFilesWithAuthoredCode(
-  packageData: ComponentPackageData,
-  manifest: ComponentManifest,
-  runtimeSource: string,
-): Record<string, Uint8Array> {
-  const files = Object.fromEntries(
-    Object.entries(packageData.files).map(([path, bytes]) => [
-      path,
-      Uint8Array.from(bytes),
-    ]),
-  )
-  const encoder = new TextEncoder()
-  files['manifest.json'] = encoder.encode(JSON.stringify(manifest, null, 2))
-  files[manifest.entry] = encoder.encode(runtimeSource)
-  return files
-}
-
-export function assertEditableComponentPackage(
-  packageId: string,
-  packageData: ComponentPackageData | undefined,
-  packageMeta: EmbeddedComponentPackageMeta | undefined,
-): asserts packageData is ComponentPackageData {
-  if (!packageData || packageMeta?.editableCopy !== true) {
-    throw new UserFacingError(
-      '组件代码不可修改',
-      '第三方组件包默认只读。',
-      '请先创建工程内可编辑副本，再修改其 Manifest 或 Runtime。',
-    )
-  }
-}
-
-function collectComponentInstanceScopes(
-  project: CourseProjectDocument,
-  packageId: string,
-): Set<'scene' | 'global'> {
-  const scopes = new Set<'scene' | 'global'>()
-  const visit = (item: LayerItem, scope: 'scene' | 'global') => {
-    if (item.kind === 'component' && item.component.packageId === packageId) {
-      scopes.add(scope)
-    }
-  }
-  for (const entry of project.globalLayerItems) visit(entry.item, 'global')
-  for (const surface of project.surfaces) {
-    for (const entry of surface.surfaceLayerItems) visit(entry.item, 'scene')
-    if (surface.type === 'slide') {
-      for (const scene of surface.scenes) {
-        for (const item of scene.layerItems) visit(item, 'scene')
-      }
-    } else if (surface.type === 'spatial-2d') {
-      for (const item of surface.world.layerItems) visit(item, 'scene')
-    }
-  }
-  return scopes
-}
-
 export function validateEditableComponentPackage(
   packageData: ComponentPackageData,
   project: CourseProjectDocument | null,
@@ -166,8 +112,8 @@ export function validateEditableComponentPackage(
 
   const requiredScopes = new Set<'scene' | 'global'>(additionalScopes)
   if (project) {
-    for (const scope of collectComponentInstanceScopes(project, id)) {
-      requiredScopes.add(scope)
+    for (const reference of collectCourseComponentPackageReferences(project, id)) {
+      requiredScopes.add(reference.scope)
     }
   }
   for (const scope of requiredScopes) {
@@ -178,15 +124,6 @@ export function validateEditableComponentPackage(
         '请保留现有实例所需作用域，或先删除/替换这些实例。',
       )
     }
-  }
-}
-
-export function removeCourseComponentPackage(
-  draft: CourseProjectDocument,
-  packageId: string,
-): void {
-  for (const [key, meta] of Object.entries(draft.componentPackages)) {
-    if (meta.packageId === packageId) delete draft.componentPackages[key]
   }
 }
 

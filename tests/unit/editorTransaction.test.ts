@@ -108,6 +108,12 @@ describe('CLI generation candidate atomic preparation and commit', () => {
     expect(repair.destinations).toEqual(f.request.destinations)
     expect(repair.documentRevision).toBe(f.request.documentRevision)
     expect(repair.sessionGeneration).toBe(f.request.sessionGeneration)
+    expect(repair.repair).toEqual({ logicalRequestId: f.request.requestId, attempt: 1 })
+    expect(() => captureGenerationRepair(repair, { ...bad, requestId: repair.requestId }, '再次失败')).toThrow('唯一一次')
+    const formatRepair = captureGenerationRepair(f.request, { kind: 'candidate-format-error', requestId: f.request.requestId, finding: '非法JSON', excerpt: '{broken}' }, '非法JSON')
+    expect(formatRepair.destinations).toEqual(f.request.destinations)
+    expect(formatRepair.expectedResult).toBe('candidate')
+    expect(formatRepair.context).toMatchObject({ repair: { formatError: { excerpt: '{broken}' } } })
     const noChange = { ...bad, requestId: repair.requestId, candidateId: crypto.randomUUID(), summary: '已经修复', steps: bad.steps.map((step, i) => ({ ...step, id: `renamed-${i}` })) }
     expect(generationRepairMadeProgress(bad, noChange)).toBe(false)
     const fixed = { ...f.candidate, requestId: repair.requestId }

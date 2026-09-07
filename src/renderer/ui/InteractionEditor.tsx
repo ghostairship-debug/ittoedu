@@ -80,6 +80,8 @@ const ACTION_TYPE_OPTIONS: ActionTypeOption[] = [
   { value: 'node.exit', label: '元素退出（退场）', needs: 'node' },
   { value: 'presentation.set', label: '切换状态', needs: 'state' },
   { value: 'scene.go', label: '跳转场景', needs: 'scene' },
+  { value: 'step.next', label: '下一步' },
+  { value: 'step.previous', label: '上一步' },
   { value: 'scene.next', label: '下一场景' },
   { value: 'scene.previous', label: '上一场景' },
   { value: 'scene.replay', label: '重播当前场景' },
@@ -297,6 +299,8 @@ function defaultAction(
       return { type, stateId: targets.stateId ?? '' }
     case 'scene.go':
       return { type, sceneId: targets.sceneId ?? '' }
+    case 'step.next':
+    case 'step.previous':
     case 'scene.next':
     case 'scene.previous':
     case 'scene.replay':
@@ -589,6 +593,10 @@ function describeAction(
           : ''
       }`
     }
+    case 'step.next':
+      return '下一步（场景边界自动前进）'
+    case 'step.previous':
+      return '上一步（场景边界自动返回）'
     case 'scene.next':
       return '进入下一场景'
     case 'scene.previous':

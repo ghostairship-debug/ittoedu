@@ -1,6 +1,7 @@
 export interface ScenePickerScene {
   id: string
   name: string
+  steps?: readonly { id: string; name: string }[]
 }
 
 export const SCENE_PICKER_OPEN_EVENT = 'player:scene-picker:open'
@@ -20,6 +21,7 @@ export interface ScenePickerOverlayOptions {
 }
 
 export interface ScenePickerOpenOptions {
+  currentStepId?: string | null
   bypassNavigationGuards?: boolean
 }
 
@@ -43,6 +45,8 @@ export class ScenePickerOverlay {
   private readonly closeButton: HTMLButtonElement
   private readonly sceneButtons: HTMLButtonElement[] = []
   private readonly sceneIds: string[] = []
+  private readonly stepButtons = new Map<string, HTMLButtonElement>()
+  private readonly stepGroups = new Map<string, { list: HTMLElement; toggle: HTMLButtonElement }>()
   private readonly onSelect: (
     sceneId: string,
     bypassNavigationGuards: boolean,
@@ -72,6 +76,9 @@ export class ScenePickerOverlay {
       display: 'none',
       placeItems: 'center',
       padding: 'clamp(12px, 3vw, 32px)',
+      boxSizing: 'border-box',
+      minWidth: '0',
+      minHeight: '0',
       background: 'rgba(5, 10, 20, 0.58)',
       backdropFilter: 'blur(3px)',
       pointerEvents: 'auto',
@@ -87,6 +94,8 @@ export class ScenePickerOverlay {
     applyStyles(dialog, {
       display: 'flex',
       width: 'min(600px, 100%)',
+      maxWidth: '100%',
+      boxSizing: 'border-box',
       maxHeight: 'min(82%, 640px)',
       minHeight: '0',
       flexDirection: 'column',
@@ -212,7 +221,55 @@ export class ScenePickerOverlay {
         this.close()
         this.onSelect(scene.id, bypassNavigationGuards)
       })
-      list.append(button)
+      if (scene.steps?.length) {
+        const group = this.document.createElement('section')
+        group.style.minWidth = '0'
+        const row = this.document.createElement('div')
+        applyStyles(row, { display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto', gap: '6px' })
+        const toggle = this.document.createElement('button')
+        toggle.type = 'button'
+        toggle.dataset.sceneStepsToggle = scene.id
+        toggle.setAttribute('aria-label', `${scene.name}的步骤`)
+        toggle.setAttribute('aria-expanded', 'false')
+        toggle.textContent = `步骤 ${scene.steps.length} ▾`
+        applyStyles(toggle, { padding: '6px 10px', borderRadius: '10px',
+          border: '1px solid rgba(148, 163, 184, 0.3)', background: 'transparent',
+          color: '#b9c5d8', cursor: 'pointer', font: 'inherit', fontSize: '12px' })
+        const steps = this.document.createElement('div')
+        steps.id = `lesson-scene-picker-steps-${instanceId}-${index}`
+        steps.dataset.sceneSteps = scene.id
+        steps.setAttribute('role', 'group')
+        steps.setAttribute('aria-label', `${scene.name}的步骤`)
+        steps.hidden = true
+        applyStyles(steps, { display: 'none', gap: '4px', padding: '6px 0 0 18px', minWidth: '0' })
+        toggle.setAttribute('aria-controls', steps.id)
+        this.stepGroups.set(scene.id, { list: steps, toggle })
+        toggle.addEventListener('click', () => this.setStepsExpanded(scene.id, steps.hidden !== false))
+        scene.steps.forEach((step, stepIndex) => {
+          const stepButton = this.document.createElement('button')
+          stepButton.type = 'button'
+          stepButton.className = 'lesson-scene-picker__step'
+          stepButton.dataset.stepId = step.id
+          stepButton.textContent = `步骤 ${stepIndex + 1} · ${step.name}`
+          applyStyles(stepButton, { width: '100%', minWidth: '0', minHeight: '36px',
+            padding: '7px 12px', border: '1px solid rgba(148, 163, 184, 0.2)', borderRadius: '8px',
+            color: '#dce5ef', background: 'rgba(255, 255, 255, 0.035)', textAlign: 'left',
+            font: 'inherit', fontSize: '13px', overflowWrap: 'anywhere', cursor: 'pointer' })
+          stepButton.addEventListener('click', () => {
+            if (this.destroyed) return
+            const bypass = this.bypassNavigationGuards
+            this.close()
+            this.onSelect(step.id, bypass)
+          })
+          this.stepButtons.set(step.id, stepButton)
+          steps.append(stepButton)
+        })
+        row.append(button, toggle)
+        group.append(row, steps)
+        list.append(group)
+      } else {
+        list.append(button)
+      }
       this.sceneButtons.push(button)
       this.sceneIds.push(scene.id)
     })
@@ -263,10 +320,20 @@ export class ScenePickerOverlay {
       }
     })
 
+    for (const sceneId of this.stepGroups.keys()) this.setStepsExpanded(sceneId, sceneId === currentSceneId)
+    for (const [stepId, button] of this.stepButtons) {
+      const current = stepId === options.currentStepId
+      if (current) button.setAttribute('aria-current', 'step')
+      else button.removeAttribute('aria-current')
+      button.style.borderColor = current ? 'rgba(231, 184, 92, 0.94)' : 'rgba(148, 163, 184, 0.2)'
+      button.style.background = current ? 'rgba(231, 184, 92, 0.16)' : 'rgba(255, 255, 255, 0.035)'
+    }
+    const currentStep = options.currentStepId ? this.stepButtons.get(options.currentStepId) : undefined
     const currentButton = this.sceneButtons.find(
       (button) => button.dataset.sceneId === currentSceneId,
     )
-    const focusTarget = currentButton ?? this.sceneButtons[0] ?? this.closeButton
+    const focusTarget = currentStep && !currentStep.closest('[hidden]')
+      ? currentStep : currentButton ?? this.sceneButtons[0] ?? this.closeButton
     queueMicrotask(() => {
       if (!this.openValue || this.destroyed) return
       focusTarget.focus({ preventScroll: true })
@@ -303,6 +370,20 @@ export class ScenePickerOverlay {
     this.layer.remove()
   }
 
+  private setStepsExpanded(sceneId: string, expanded: boolean): void {
+    const group = this.stepGroups.get(sceneId)
+    if (!group) return
+    if (!expanded && group.list.contains(this.document.activeElement)) group.toggle.focus()
+    group.list.hidden = !expanded
+    group.list.style.display = expanded ? 'grid' : 'none'
+    group.toggle.setAttribute('aria-expanded', String(expanded))
+  }
+
+  private visibleEntries(): HTMLButtonElement[] {
+    return [...this.layer.querySelectorAll<HTMLButtonElement>('.lesson-scene-picker__list button')]
+      .filter(button => !button.disabled && !button.closest('[hidden]'))
+  }
+
   private readonly handleCloseClick = (): void => {
     this.close()
   }
@@ -320,7 +401,8 @@ export class ScenePickerOverlay {
       return
     }
 
-    const focusables = [this.closeButton, ...this.sceneButtons]
+    const entries = this.visibleEntries()
+    const focusables = [this.closeButton, ...entries]
     const activeIndex = focusables.indexOf(this.document.activeElement as HTMLButtonElement)
     if (event.key === 'Tab') {
       if (event.shiftKey && activeIndex <= 0) {
@@ -334,19 +416,19 @@ export class ScenePickerOverlay {
     }
 
     let target: HTMLButtonElement | undefined
-    const sceneIndex = this.sceneButtons.indexOf(
+    const sceneIndex = entries.indexOf(
       this.document.activeElement as HTMLButtonElement,
     )
     if (event.key === 'ArrowDown' || event.key === 'ArrowRight') {
-      target = this.sceneButtons[(Math.max(-1, sceneIndex) + 1) % this.sceneButtons.length]
+      target = entries[(Math.max(-1, sceneIndex) + 1) % entries.length]
     } else if (event.key === 'ArrowUp' || event.key === 'ArrowLeft') {
-      target = this.sceneButtons[
-        sceneIndex <= 0 ? this.sceneButtons.length - 1 : sceneIndex - 1
+      target = entries[
+        sceneIndex <= 0 ? entries.length - 1 : sceneIndex - 1
       ]
     } else if (event.key === 'Home') {
-      target = this.sceneButtons[0]
+      target = entries[0]
     } else if (event.key === 'End') {
-      target = this.sceneButtons.at(-1)
+      target = entries.at(-1)
     }
 
     if (

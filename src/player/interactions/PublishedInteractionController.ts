@@ -40,6 +40,8 @@ export interface PublishedInteractionControllerOptions {
 }
 
 const SUPPORTED_ACTION_TYPES = new Set<InteractionActionPayload['type']>([
+  'step.next',
+  'step.previous',
   'node.enter',
   'node.exit',
   'scene.go',
@@ -110,6 +112,7 @@ export class PublishedInteractionController {
   ) => void
   readonly #clickRules = new Map<string, InteractionRule[]>()
   readonly #sceneEnterRules: InteractionRule[] = []
+  readonly #presenterRules = new Map<'next' | 'previous', InteractionRule[]>()
   readonly #inputRules = new Map<string, InteractionRule[]>()
   readonly #audioEndedRules = new Map<string, InteractionRule[]>()
   readonly #videoRules = new Map<string, InteractionRule[]>()
@@ -146,6 +149,7 @@ export class PublishedInteractionController {
     }
     this.#clickRules.clear()
     this.#sceneEnterRules.length = 0
+    this.#presenterRules.clear()
     this.#inputRules.clear()
     this.#audioEndedRules.clear()
     this.#videoRules.clear()
@@ -165,12 +169,30 @@ export class PublishedInteractionController {
     }
   }
 
+  /** Uses the same condition, cancellation and rule-concurrency owner as clicks. */
+  dispatchPresenterCommand(command: 'next' | 'previous'): boolean {
+    if (this.#destroyed) return false
+    let accepted = false
+    for (const rule of this.#presenterRules.get(command) ?? []) {
+      const conditions = rule.conditions.filter(condition => condition.type === 'scene.in')
+      if (conditions.length) {
+        const current = this.#readCurrentScene(rule)
+        if (!current.ok || !conditions.every(condition => current.sceneId !== null && condition.sceneIds.includes(current.sceneId))) continue
+      }
+      if (!this.#matchesCourseStateConditions(rule)) continue
+      this.#startRule(rule)
+      accepted = true
+    }
+    return accepted
+  }
+
   #inspectAndBindRules(): void {
     for (const rule of this.#rules) {
       if (!rule.enabled) continue
       if (
         rule.trigger.type !== 'node.click'
         && rule.trigger.type !== 'scene.enter'
+        && rule.trigger.type !== 'presenter.command'
         && rule.trigger.type !== 'audio.ended'
         && !SUPPORTED_VIDEO_TRIGGER_TYPES.has(rule.trigger.type)
         && rule.trigger.type !== 'input.submit'
@@ -217,6 +239,13 @@ export class PublishedInteractionController {
         })
       }
       if (!conditionsSupported) continue
+
+      if (rule.trigger.type === 'presenter.command') {
+        const rules = this.#presenterRules.get(rule.trigger.command) ?? []
+        rules.push(rule)
+        this.#presenterRules.set(rule.trigger.command, rules)
+        continue
+      }
 
       if (rule.trigger.type === 'input.submit') {
         const inputNodeId = rule.trigger.nodeId
@@ -707,6 +736,12 @@ export class PublishedInteractionController {
             action.targetStateId,
             signal,
           )
+          break
+        case 'step.next':
+          result = await this.#session.nextStep?.(signal) ?? false
+          break
+        case 'step.previous':
+          result = await this.#session.previousStep?.(signal) ?? false
           break
         case 'scene.next':
           result = await this.#session.nextScene(signal)

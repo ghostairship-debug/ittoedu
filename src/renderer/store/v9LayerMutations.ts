@@ -1,3 +1,4 @@
+import { commitResourceAwareAuthoringHistory } from '../authoring/resourceAwareAuthoringHistory'
 import type { ComponentPackageData } from '../../shared/componentTypes'
 import {
   CANVAS_HEIGHT,
@@ -20,7 +21,7 @@ import { commandTargetFromRow } from '../course/effectiveLayerProjection'
 import type { EffectiveLayerProjectionRow } from '../course/effectiveLayerProjection'
 import type { EffectiveLayerPropertyPatch } from '../course/effectiveLayerCommands'
 import type { LayerCommandResult } from '../course/effectiveLayerCommands'
-import { commitSlideAuthoringHistory } from '../course/slideEditorCommands'
+
 import type { SlideAuthoringSession, SlideCommandResult } from '../course/slideAuthoringBackend'
 import type {
   EditorCanvasNode,
@@ -511,7 +512,7 @@ export function sessionFromLayerResult(
     }
   }
   const nextHistory = result.historyEntry
-    ? commitSlideAuthoringHistory(session.history, result.nextDocument)
+    ? commitResourceAwareAuthoringHistory(session.history, result.nextDocument)
     : {
         present: result.nextDocument,
         past: session.history.past,

@@ -11,7 +11,7 @@ import {
 import type {
   PublishedNativeChartInput,
   PublishedNativeTableInput,
-} from '../../player/surfaces/slide/publishedNativeRendering'
+} from '../../player/surfaces/native/publishedNativeRendering'
 import {
   PIXELS_TO_POINTS,
   pptxColor,

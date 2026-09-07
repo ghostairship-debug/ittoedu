@@ -13,12 +13,25 @@ export async function installChatFailureFixture(app: ElectronApplication, runRoo
 const fs = require('node:fs'), path = require('node:path'), crypto = require('node:crypto');
 if (process.argv.includes('--version')) { console.log('0.153.0'); process.exit(0); }
 if (process.argv.includes('login')) { console.log('Logged in using ChatGPT'); process.exit(0); }
-let prompt = ''; process.stdin.on('data', chunk => prompt += chunk); process.stdin.on('end', () => {
- const request = JSON.parse(prompt.trim().split('\\n').at(-1));
+const send = value => console.log(JSON.stringify(value));
+const output = value => {
+ if(value.type === 'thread.started') return;
+ if(value.type === 'turn.completed') { send({method:'turn/completed',params:{threadId:'fixture-session',turn:{id:'turn',status:'completed',error:null}}});return; }
+ const types={agent_message:'agentMessage',command_execution:'commandExecution'};
+ send({method:value.type === 'item.started'?'item/started':'item/completed',params:{threadId:'fixture-session',turnId:'turn',item:{...value.item,type:types[value.item.type]}}});
+};
+require('node:readline').createInterface({input:process.stdin}).on('line', line => {
+ const rpc=JSON.parse(line);
+ if(rpc.method==='initialize') {send({id:rpc.id,result:{}});return;}
+ if(rpc.method==='initialized') return;
+ if(rpc.method==='thread/start'||rpc.method==='thread/resume') {send({id:rpc.id,result:{thread:{id:'fixture-session'}}});return;}
+ if(rpc.method!=='turn/start') return;
+ send({id:rpc.id,result:{turn:{id:'turn'}}});
+ const prompt=rpc.params.input[0].text;
+ const request = JSON.parse(prompt.trim().split('\\n').findLast(line => line.startsWith('{') && line.includes('"documentRevision"')));
  const root = ${JSON.stringify(directory)};
  const mode = fs.readFileSync(path.join(root, 'mode.txt'), 'utf8');
  fs.appendFileSync(path.join(root, 'runs.jsonl'), JSON.stringify({ requestId: request.requestId, revision: request.documentRevision, repair: !!request.context.repair }) + '\\n');
- const output = value => console.log(JSON.stringify(value));
  output({ type: 'thread.started', thread_id: 'fixture-session' });
  const finish = () => {
    if (mode === 'discussion') {
@@ -33,10 +46,14 @@ let prompt = ''; process.stdin.on('data', chunk => prompt += chunk); process.std
    const candidate = { version: 1, requestId: request.requestId, candidateId: crypto.randomUUID(), summary: '测试讲解文字',
      steps: [{ id: 's1', tool: 'native.content', carrier: 'native', destination: request.destinations.find(value => value.kind === 'create' && value.scope.owner !== 'global'),
        input: { operation: 'insert', template: { nativeType: bad ? 'unsupported' : 'text', text: '平均分的含义' } } }] };
-   output({ type: 'item.completed', item: { id: 'answer', type: 'agent_message', text: '<courseware-candidate-v1>' + JSON.stringify(candidate) + '</courseware-candidate-v1>' } });
+   let resultText = '<courseware-candidate-v1>' + JSON.stringify(candidate) + '</courseware-candidate-v1>';
+   if (mode === 'format-repeat' || mode === 'format-repair' && !request.repair) resultText = '<courseware-candidate-v1>{"invalid": unquoted}</courseware-candidate-v1>';
+   if (mode === 'missing-candidate' && !request.repair) resultText = '<courseware-result-v1>' + JSON.stringify({version:1,requestId:request.requestId,kind:'edit'}) + '</courseware-result-v1>';
+   output({ type: 'item.completed', item: { id: 'answer', type: 'agent_message', text: resultText } });
    output({ type: 'turn.completed', usage: {} });
  };
- setTimeout(finish, mode === 'delayed' ? 2500 : 0);
+ if (mode === 'discussion') send({method:'item/agentMessage/delta',params:{threadId:'fixture-session',itemId:'discussion',delta:'## 只讨论，不修改课件\\n'}});
+ setTimeout(finish, mode === 'delayed' ? 2500 : mode === 'discussion' ? 2000 : 0);
 });
 `)
   await app.evaluate((_, root) => {
@@ -45,7 +62,7 @@ let prompt = ''; process.stdin.on('data', chunk => prompt += chunk); process.std
     process.env.PATH = root; process.env.APPDATA = root; process.env.USERPROFILE = root
   }, directory)
   return {
-    mode(value: 'repair' | 'no-progress' | 'delayed' | 'discussion') { writeFileSync(join(directory, 'mode.txt'), value) },
+    mode(value: 'repair' | 'no-progress' | 'delayed' | 'discussion' | 'format-repair' | 'format-repeat' | 'missing-candidate') { writeFileSync(join(directory, 'mode.txt'), value) },
     runs() { const file = join(directory, 'runs.jsonl'); return existsSync(file) ? readFileSync(file, 'utf8').trim().split('\n').map(line => JSON.parse(line) as { requestId: string; revision: number; repair: boolean }) : [] },
     async restore() {
       await app.evaluate(() => {

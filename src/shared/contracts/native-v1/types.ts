@@ -277,6 +277,8 @@ export interface ShapeNode extends NativeRenderableBase {
 }
 
 export type TeacherControllerAction =
+  | { type: 'step.previous' }
+  | { type: 'step.next' }
   | { type: 'scene.previous' }
   | { type: 'scene.next' }
   | { type: 'scene.replay' }

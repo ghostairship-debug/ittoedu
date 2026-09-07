@@ -7,6 +7,7 @@ export const dynamicAdmissionPayloadSchema = z.object({
   project: courseProjectDocumentSchema,
   assetFiles: encodedFiles,
   componentFiles: z.record(z.string().min(1), encodedFiles),
+  captureInstances: z.boolean().optional(),
   targets: z.array(z.object({ locationId: z.string().min(1), stateId: z.string().nullable().optional(), instanceIds: z.array(z.string().min(1)).min(1).max(1000) }).strict()).min(1).max(1000),
 }).strict()
 export type DynamicAdmissionPayload = z.infer<typeof dynamicAdmissionPayloadSchema>
@@ -15,5 +16,11 @@ export const dynamicAdmissionRequestSchema = z.discriminatedUnion('operation', [
   z.object({ operation: z.literal('cancel'), id: z.uuid() }).strict(),
 ])
 export type DynamicAdmissionRequest = z.infer<typeof dynamicAdmissionRequestSchema>
-export const dynamicAdmissionResultSchema = z.object({ ok: z.boolean(), message: z.string().max(4000), processId: z.number().int().nonnegative().optional(), diagnostics: authoringToolReceiptV1Schema.shape.diagnostics.optional() }).strict()
+export const dynamicInstanceCaptureSchema = z.object({
+  instanceId: z.string().min(1), locationId: z.string().min(1),
+  width: z.number().int().positive().max(4096), height: z.number().int().positive().max(4096),
+  dataUrl: z.string().max(24_000_000).regex(/^data:image\/png;base64,[A-Za-z0-9+/]+=*$/),
+}).strict()
+export type DynamicInstanceCapture = z.infer<typeof dynamicInstanceCaptureSchema>
+export const dynamicAdmissionResultSchema = z.object({ ok: z.boolean(), message: z.string().max(4000), processId: z.number().int().nonnegative().optional(), diagnostics: authoringToolReceiptV1Schema.shape.diagnostics.optional(), captures: z.array(dynamicInstanceCaptureSchema).max(1000).optional() }).strict()
 export type DynamicAdmissionResult = z.infer<typeof dynamicAdmissionResultSchema>

@@ -15,7 +15,7 @@ import type {
 } from '../../interactions/PublishedInteractionSurfacePort'
 import type {
   PublishedNativeVideoHandle,
-} from './publishedNativeVideoMount'
+} from '../publishedNativeVideoMount'
 
 function videoListenerKey(nodeId: string, kind: PublishedVideoEventKind): string {
   return `${nodeId}::${kind}`

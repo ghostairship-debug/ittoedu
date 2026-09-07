@@ -35,6 +35,8 @@ export const INTERACTION_CONDITION_TYPES = [
 ] as const
 
 export const INTERACTION_ACTION_TYPES = [
+  'step.next',
+  'step.previous',
   'presentation.set',
   'scene.go',
   'scene.next',
@@ -200,6 +202,8 @@ export type NodeMotionAction = (
 
 /** Payload family used by both sequential and parallel Project V8 action steps. */
 export type InteractionActionPayload =
+  | { type: 'step.next' }
+  | { type: 'step.previous' }
   | {
       type: 'presentation.set'
       stateId: string
@@ -255,6 +259,8 @@ export type TerminalNavigationAction = Extract<
   InteractionActionPayload,
   {
     type:
+      | 'step.next'
+      | 'step.previous'
       | 'scene.go'
       | 'scene.next'
       | 'scene.previous'
@@ -264,6 +270,8 @@ export type TerminalNavigationAction = Extract<
 >
 
 const terminalNavigationTypes = new Set<InteractionActionPayload['type']>([
+  'step.next',
+  'step.previous',
   'scene.go',
   'scene.next',
   'scene.previous',

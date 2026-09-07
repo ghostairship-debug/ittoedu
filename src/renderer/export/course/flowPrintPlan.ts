@@ -1,4 +1,5 @@
 import { buildNativeChartSvg } from '../../../shared/nativeChartSvg'
+import { resolveFlowParagraphPresentation, type FlowParagraphPresentation } from '../../../shared/flowBodyPresentation'
 import { tableCellSpan, type TableCellSpan } from '../../../shared/tableMerge'
 import type { NativeChartContent } from '../../../shared/contracts/native-v1'
 import { serializeFormulaAst } from '../../../shared/formulaLinear'
@@ -28,9 +29,10 @@ export type FlowPrintNode =
       level: 1 | 2 | 3 | 4 | 5 | 6
       text: string
       runs: readonly TextRun[]
+      paragraph?: FlowParagraphPresentation
     }
-  | { type: 'paragraph'; blockId: string; text: string; runs: readonly TextRun[] }
-  | { type: 'quote'; blockId: string; text: string; runs: readonly TextRun[]; citation?: string }
+  | { type: 'paragraph'; blockId: string; text: string; runs: readonly TextRun[]; paragraph?: FlowParagraphPresentation }
+  | { type: 'quote'; blockId: string; text: string; runs: readonly TextRun[]; citation?: string; paragraph?: FlowParagraphPresentation }
   | {
       type: 'list'
       blockId: string
@@ -178,12 +180,14 @@ function printNodesForBlock(block: FlowBlock): FlowPrintNode[] {
         type: 'heading',
         blockId: block.id,
         level: block.level,
+        paragraph: resolveFlowParagraphPresentation(block),
         text: block.text,
         runs: block.runs ?? [],
       }]
     case 'paragraph':
       return [{
         type: 'paragraph',
+        paragraph: resolveFlowParagraphPresentation(block),
         blockId: block.id,
         text: block.text,
         runs: block.runs ?? [],
@@ -191,6 +195,7 @@ function printNodesForBlock(block: FlowBlock): FlowPrintNode[] {
     case 'quote':
       return [{
         type: 'quote',
+        paragraph: resolveFlowParagraphPresentation(block),
         blockId: block.id,
         text: block.text,
         runs: block.runs ?? [],
@@ -274,15 +279,19 @@ function printNodeToHtml(
   node: FlowPrintNode,
   options: FlowPrintRenderOptions,
 ): string {
+  const paragraph = 'paragraph' in node ? node.paragraph : undefined
+  const paragraphStyle = paragraph
+    ? ` style="text-align:${paragraph.textAlign};line-height:${paragraph.lineHeight}"`
+    : ''
   switch (node.type) {
     case 'document-title':
       return `<h1 data-flow-print-node="title">${escapeHtml(node.text)}</h1>`
     case 'heading':
-      return `<h${node.level} data-flow-print-block="${escapeHtml(node.blockId)}">${richTextToHtml(node.text, node.runs)}</h${node.level}>`
+      return `<h${node.level} data-flow-print-block="${escapeHtml(node.blockId)}"${paragraphStyle}>${richTextToHtml(node.text, node.runs)}</h${node.level}>`
     case 'paragraph':
-      return `<p data-flow-print-block="${escapeHtml(node.blockId)}">${richTextToHtml(node.text, node.runs)}</p>`
+      return `<p data-flow-print-block="${escapeHtml(node.blockId)}"${paragraphStyle}>${richTextToHtml(node.text, node.runs)}</p>`
     case 'quote':
-      return `<blockquote data-flow-print-block="${escapeHtml(node.blockId)}"><p>${richTextToHtml(node.text, node.runs)}</p>${
+      return `<blockquote data-flow-print-block="${escapeHtml(node.blockId)}"${paragraphStyle}><p>${richTextToHtml(node.text, node.runs)}</p>${
         node.citation ? `<cite>${escapeHtml(node.citation)}</cite>` : ''
       }</blockquote>`
     case 'list': {

@@ -1,4 +1,6 @@
+import { buildFlowRichTextHtml } from '../../shared/flowRichText'
 import { chartCanvasTextPort } from '../authoring/chartCanvasTextBridge'
+import { FLOW_BODY_CSS, FLOW_BODY_PAPER_PADDING, FLOW_BODY_SCROLL_PADDING, resolveFlowParagraphPresentation } from '../../shared/flowBodyPresentation'
 import { tableCellSpan } from '../../shared/tableMerge'
 import { EditableChartView } from './EditableChartView'
 import type { ChartTextDraft } from '../authoring/chartTextDraft'
@@ -37,7 +39,6 @@ import type {
 } from '../authoring/courseAuthoringSession'
 import { STAGE_VIEWPORT_HEIGHT, STAGE_VIEWPORT_WIDTH } from '../authoring/stageViewportTransform'
 import {
-  buildFlowRichTextHtml,
   cellToRichText,
   clearFlowTextEditRangeStyle,
   deriveFlowSelectionFormat,
@@ -75,6 +76,7 @@ import {
   type FlowCurrentSessionCommandPort,
 } from './flow/useFlowTextAuthoringController'
 import { FlowOverlayAuthoringLayer } from './flow/FlowOverlayAuthoringLayer'
+import { measureFlowPaperOrigin } from '../../shared/flowViewportGeometry'
 
 export interface FlowWorkspaceProps {
   readonly view: FlowEditorView
@@ -191,7 +193,7 @@ export function FlowInlineRichTextEditor({
         minWidth: 0,
         whiteSpace: 'pre-wrap',
         overflowWrap: 'anywhere',
-        minHeight: '1.4em',
+        minHeight: '1lh',
         userSelect: 'text',
         WebkitUserSelect: 'text',
         cursor: 'text',
@@ -453,10 +455,7 @@ function headingTag(level: 1 | 2 | 3 | 4 | 5 | 6): 'h1' | 'h2' | 'h3' | 'h4' | '
 
 function flowPaperBlockTypographyStyle(block: FlowBlock): CSSProperties | undefined {
   if (block.type !== 'heading' && block.type !== 'paragraph' && block.type !== 'quote') return undefined
-  const style: CSSProperties = {}
-  if (block.textAlign) style.textAlign = block.textAlign
-  if (block.lineSpacing !== undefined) style.lineHeight = String(1.6 + block.lineSpacing / 16)
-  return Object.keys(style).length > 0 ? style : undefined
+  return resolveFlowParagraphPresentation(block)
 }
 
 function blockLabel(block: FlowBlock): string {
@@ -493,6 +492,13 @@ export function FlowWorkspace({
   const [toolbarPlacement, setToolbarPlacement] = useState<'top' | 'below'>('below')
   const toolbarSelectionRef = useRef<{ start: number; end: number } | null>(null)
   const [paperScrollTop, setPaperScrollTop] = useState(0)
+  const [paperScrollLeft, setPaperScrollLeft] = useState(0)
+  const [paperOrigin, setPaperOrigin] = useState({ x: 0, y: 0 })
+  const viewKey = `${view.projectId}/${view.surfaceId}`
+  const [authoringView, setAuthoringView] = useState({ key: viewKey, pan: { x: 0, y: 0 } })
+  const viewPan = authoringView.key === viewKey ? authoringView.pan : { x: 0, y: 0 }
+  const setViewPan = (pan: { x: number; y: number }) => setAuthoringView(current => current.key === viewKey
+    && current.pan.x === pan.x && current.pan.y === pan.y ? current : { key: viewKey, pan })
   const [overlayViewportSize, setOverlayViewportSize] = useState({
     width: STAGE_VIEWPORT_WIDTH,
     height: STAGE_VIEWPORT_HEIGHT,
@@ -544,13 +550,17 @@ export function FlowWorkspace({
       const rect = node.getBoundingClientRect()
       if (rect.width > 0 && rect.height > 0) {
         setOverlayViewportSize({ width: rect.width, height: rect.height })
+        if (scrollRef.current && paperRef.current) {
+          setPaperOrigin(measureFlowPaperOrigin(node, scrollRef.current, paperRef.current, 1, viewPan))
+        }
       }
     }
     update()
     const observer = new ResizeObserver(update)
     observer.observe(node)
+    if (paperRef.current) observer.observe(paperRef.current)
     return () => observer.disconnect()
-  }, [])
+  }, [viewPan.x, viewPan.y])
 
   useEffect(() => {
     if (!edit || !scrollRef.current) return
@@ -853,15 +863,12 @@ export function FlowWorkspace({
     const isWrapRight = (block.type === 'media' || block.type === 'component') && block.wrap === 'right'
     const effectiveToolbarPlacement = editingThis ? toolbarPlacement : 'below'
     const baseMarginBottom = isWrapLeft || isWrapRight ? 8 : 12
-    const toolbarMarginReserve = showToolbar && effectiveToolbarPlacement === 'below'
-      ? FLOW_BLOCK_CONTEXT_TOOLBAR_BELOW_OFFSET
-      : 0
 
     const frameStyle: CSSProperties = {
       position: 'relative' as const,
       outline: selected ? '2px solid #5b9cff' : undefined,
       boxShadow: selected ? 'inset 4px 0 0 #5b9cff' : undefined,
-      padding: '12px 16px',
+      padding: 0,
       margin: '0 0 12px',
       ...(isWrapLeft
         ? {
@@ -876,10 +883,11 @@ export function FlowWorkspace({
               margin: '0 0 8px 16px',
             }
           : {}),
-      marginBottom: baseMarginBottom + toolbarMarginReserve,
+      marginBottom: baseMarginBottom,
     }
 
     const frameProps = {
+      'data-flow-body-block': block.type,
       'data-testid': `flow-block-${blockView.blockId}`,
       'data-flow-block-id': blockView.blockId,
       'data-flow-location-id': blockView.locationId ?? '',
@@ -1417,7 +1425,11 @@ export function FlowWorkspace({
         assetUrls={assetUrls}
         componentPackages={componentPackages}
         paperScrollTop={paperScrollTop}
+        paperScrollLeft={paperScrollLeft}
+        paperOrigin={paperOrigin}
         overlayViewportSize={overlayViewportSize}
+        viewPan={viewPan}
+        onViewPanChange={setViewPan}
         onBeforeGesture={() => {
           if (!editRef.current) return true
           commitCurrent(false)
@@ -1432,6 +1444,7 @@ export function FlowWorkspace({
           data-flow-media-query-root="true"
           onScroll={(e) => {
             setPaperScrollTop(e.currentTarget.scrollTop)
+            setPaperScrollLeft(e.currentTarget.scrollLeft)
           }}
           style={{
             flex: 1,
@@ -1439,14 +1452,15 @@ export function FlowWorkspace({
             zIndex: 2,
             overflow: 'auto',
             height: '100%',
-            padding: '24px 16px 48px',
+            padding: FLOW_BODY_SCROLL_PADDING,
             containerType: FLOW_MEDIA_QUERY_CONTAINER_TYPE,
             containerName: 'flow-media-root',
+            transform: `translate(${viewPan.x}px, ${viewPan.y}px)`,
           }}
         >
           <article
             ref={paperRef}
-            className="flow-paper"
+            className="flow-paper flow-body-content"
             data-testid="flow-paper"
             data-flow-reading-width={view.layout.readingWidth}
             onClick={handlePaperClick}
@@ -1455,12 +1469,13 @@ export function FlowWorkspace({
               maxWidth: view.layout.readingWidth,
               minHeight: '100%',
               margin: '0 auto',
-              padding: '28px 36px 64px',
+              padding: FLOW_BODY_PAPER_PADDING,
               background: 'transparent',
               color: FLOW_PAPER_TEXT_COLOR,
               boxShadow: '0 8px 32px rgba(15, 23, 42, 0.08)',
             }}
           >
+            <style>{FLOW_BODY_CSS}</style>
             {rootBlocks.map((blockView) => renderBlock(blockView))}
             <div style={{ clear: 'both' }} aria-hidden="true" />
           </article>

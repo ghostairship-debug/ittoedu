@@ -1,3 +1,4 @@
+import { buildFlowRichTextHtml } from '@/shared/flowRichText'
 import { describe, expect, it } from 'vitest'
 import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
 import {
@@ -19,7 +20,6 @@ import {
   applyFlowTextEditGesture,
   beginFlowFormulaEdit,
   beginFlowTextEdit,
-  buildFlowRichTextHtml,
   commitFlowTextEdit,
   deriveFlowSelectionFormat,
   extractFlowRichTextFromEditor,
