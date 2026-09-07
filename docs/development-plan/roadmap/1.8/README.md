@@ -1,28 +1,22 @@
-# 1.8：CLI 直连、Skills 与基础聊天（默认显示创作助手）
+# 1.8：可用AI创作、实时观察与Skills按需发现
 
-## 结果与边界
+## 结果与当前起点
 
-2026-09-06 Owner 决定：取消产品 MCP 路线。当前软件把任务、所选上下文快照和 Skills 直接发给 Codex、Claude、OpenCode，CLI 自己完成规划与工具循环并返回候选；宿主复用 1.7 的校验、动态准入与 1.4 canonical commands 应用结果。原 MCP server 和 MCP 工具映射节点删除，不另换名称建设 RPC 或 Agent 中间层。
+2026-09-07 Owner要求：创作助手至少达到VS Code Codex/Claude Code插件相应工作流体验，并实时理解当前课件；外部Build Skill同步采用按需发现/读取。[当前开发方案](../../AI_ASSISTANT_DELIVERY_PLAN.md)和[共同实施合同](IMPLEMENTATION_CONTRACT.md)将剩余工作正式编排为088–104。
 
-基础聊天框从 1.9 前移到本版，直接接 1.6 会话与 1.7 生成机制，包含引用、流式结果、真实事件时间线、安全消息渲染、预览、Stop、Undo 和多轮修改。CLI 原生工具事件不等于编辑器已经改动工程，只有宿主提交回执代表成功写入。1.9 继续完成聊天记录的恢复、迁移、删除和真实课例打磨。
+当前S3存在[实质可用性阻断G01–G12](../../reviews/1.8-ai-assistant-gap-register.md)：图片不可见/改色未闭环、选区替换缺依赖创建、模型/意图/可读事件缺失、全量能力与无运行自检、Flow控制器不可达。已有CLI文字/指定源码修订只证明其窄路径，不能外推普通自然语言编辑可用。新增规格尚未实施，本文不保存协调状态。
 
-每轮由宿主组装不可变最小快照；继续对话复用 CLI 会话但提供新的请求身份、目标与 revision，并带入必要的上轮候选检查/提交结果。CLI 不取得 live Store 或工程读写接口。教师并发编辑、Save As、关闭工程或 Stop 后，旧结果不得写入，也不得自动换 revision 重试。
+本版先证明原生能力并冻结任务/观察合同，再接通当前结构/草稿/画面/运行信息、按需能力、普通文字/图片/载体替换与宿主反馈，最后交付教师可控交互和真实三CLI/外部Skill工程结束门。核心编辑不能留到1.9/2.0；Native/Recipe/Existing Component不等待Generated动态准入。
 
-按 Owner 2026-09-07 决定，普通内部生产构建默认显示创作助手，无需环境开关。S3 Owner 验收 1.6–1.8 的 CLI 生成与基础聊天后发布 `v1.8.0` accepted 源码标签，不发布 HTML 或安装器。
+CLI拥有自己的规划与工具循环，宿主仍提供不可变观察并以唯一canonical transaction提交strict candidate。一个任务可以接收多次观察和host result，不能继续把一个CLI turn等同整个任务；不建MCP、替代工具RPC、第二Project/History。完整迁移/失败/草稿/资源规则以共同合同为准。
 
-PPTX 人工导入增强仍为本版必选：简单 SmartArt/流程层级图和受支持旧 OLE 公式的可编辑导入，不受 AI 开关影响。
+按Owner既定决定，普通内部生产构建默认显示创作助手，无需dogfood开关。全部必选节点及103通过后，由060/S3教师实际签署，才发布v1.8.0 accepted源码标签；本版不发布HTML或安装器。
 
-2026-09-07 最新反馈的定位与分批执行边界见 [可用性整改方案](USABILITY_REPAIR_PLAN.md)。S3 前需闭合 Flow 顶部浮层/统一视口、Spatial 编辑共享绘制、Slide/Flow 的试运行与整课预览缩放、工程内组件源码修改、OpenCode 多轮候选修复及全局控制器删除基线；当前Codex/OpenCode调用与格式修复已完成四项真实基础/源码闭环，见[修复记录](../../reviews/1.8-cli-call-format-repair.md)。缩放需求明确针对播放过程，不以编辑态已有缩放作为完成证据。实施与工程证据已交付，当前协调状态以任务板为准。
+## 既有证据与任务 DAG
 
-新增人工组件整改 R08/R09：Flow 浮层组件可自动准备必要后备资源后嵌入正文；专业开发可直接编辑当前工程包的 Runtime.js/Manifest.json，并识别正文组件 target。创建独立副本保留为隔离单个实例影响的选择，人工与 AI 复用正式包校验及资源事务。
+[三表面整合](../../THREE_SURFACE_ARCHITECTURE_INTEGRATION_PLAN.md)、[场景/步骤分层](r18-085-navigation-levels.md)及[CLI调用/格式修复](../../reviews/1.8-cli-call-format-repair.md)的有效证据按原范围保留。Owner已批准Flow D1方案A，085–087也已有工程证据；当前089修已复现剩余可达性问题，不重新启动全部历史整合。原[可用性整改方案](USABILITY_REPAIR_PLAN.md)和[整合结束记录](../../reviews/1.8-surface-integration-exit.md)保留追溯。
 
-## 任务 DAG
-
-Owner新增确认的U12/R10“场景与步骤分层”纳入本版必选：镜头/锚点属于场景内步骤，场景跳转跨内容单元；步进到场景边界自动跨场景，整课首尾才停止。见[085–087完整工作包](r18-085-navigation-levels.md)。原r18-083结束结论保留其已验范围，新增085合同→086实施→087真实整合，085–087现已取得[工程结束证据](../../reviews/1.8-navigation-level-exit.md)，S3仍待教师签署。
-
-本版新增[三表面整合阶段](../../THREE_SURFACE_ARCHITECTURE_INTEGRATION_PLAN.md)，正式节点为r18-070至r18-084（编号只作身份，依赖决定顺序）。完整结果、证据、Owner/允许写域、旧路径退出、最小验证与停止条件在该方案F；本表与manifest保存同一DAG。r18-071/r18-082可先闭合独立阻断；共同painter、历史和包Owner不等Flow几何。D1只作为r18-074的额外启动条件，不自动改变V9 frame解释。
-
-r18-083关闭工程整合；当前原生三CLI验证归r18-050；Codex/OpenCode本轮真实复核通过，Claude既有有效证据保留。两条原PPTX必选线保留。全部汇合后才由r18-060重新进入S3；1.9–2.0新增扩张等待该门。Owner已授权实施并批准D1方案A；各隔离工作包已集成，直接证据、旧路径退出及有限结束门见[整合交付记录](../../reviews/1.8-surface-integration-exit.md)。协调状态只看任务板。
+下面010–087历史规格保留其原目标和依赖；关于“仅补接线/一次快照/仅JSON事件”的旧实施边界由090–104正式演进，不能用历史Acceptance回避新增要求。两条PPTX图示/旧OLE公式仍是本版必选。新节点均有独立完整规格，manifest与此表保存同一DAG。
 
 | Task ID | 结果 | Dependencies | Optional | Write locks | Acceptance |
 | --- | --- | --- | --- | --- | --- |
@@ -61,19 +55,36 @@ r18-083关闭工程整合；当前原生三CLI验证归r18-050；Codex/OpenCode�
 | `r18-085-navigation-level-contract` | 定义场景与步骤分层及旧导航兼容合同 | `r18-083-surface-integration-exit` | 否 | `contracts-schema` | 场景/步骤、重复进入、深链、replay、旧action/API及strict兼容表明确；[完整工作包](r18-085-navigation-levels.md) |
 | `r18-086-navigation-level-implementation` | 统一三表面场景跳转与场景内步进 | `r18-085-navigation-level-contract` | 否 | `published-dynamic`, `published-interaction`, `published-slide`, `published-flow`, `published-spatial`, `props-global`, `workspace-shell` | 唯一导航owner，控制器/目录/翻页笔/交互/动态API一致，删除相邻location冒充scene/step算法；[完整工作包](r18-085-navigation-levels.md) |
 | `r18-087-navigation-level-exit` | 闭合场景步骤分层的真实Mixed整合验收 | `r18-086-navigation-level-implementation` | 否 | `generated-index` | 真实步进/跨场景/返回/重播/恢复视图及保存重开/HTML通过；[完整工作包](r18-085-navigation-levels.md) |
-| `r18-060-release` | Owner 验收 S3 CLI 生成与基础聊天并发布 v1.8.0 accepted 源码标签 | `r18-050-three-cli-benchmark`, `r18-051-pptx-editable-diagrams`, `r18-052-pptx-legacy-equations`, `r18-083-surface-integration-exit`, `r18-087-navigation-level-exit` | 否 | `none` | 先通过r18-083原整合与r18-087新增导航结束门和当前原生三CLI/PPTX必选节点；Owner 在同一固定课例完成 S3 CLI 生成与基础聊天验收：覆盖 1.6 的三 CLI 会话和人工隔离、1.7 的生成/局部编辑/动态载体准入、1.8 的直接 CLI 请求/Skills/聊天引用与安全渲染/Stop/Undo/人工并发 stale 与 staging 边界；同时关闭可用性整改方案中已证实的阻断，检查保存重开、Undo、Player、HTML、诊断和失败零写入，晋升 1.6–1.8 已验收行为到保全矩阵，签署 accepted 后创建 `v1.8.0` 源码标签；普通构建按 Owner 决定默认显示创作助手；本版新增 PPTX 增强节点也必须达到其验收边界，不能只完成 AI 主线即发布 |
+| `r18-088-plugin-baseline-probes` | 冻结插件工作流基线并证明三CLI关键原生能力 | `r18-087-navigation-level-exit` | 否 | `cli-adapters` | 三CLI所有共同基础能力有真实往返证据，图像读取使用实际像素输入；插件基线含画面与动作，平台独占功能单列。 [完整规格](r18-088-plugin-baseline-probes.md) |
+| `r18-089-flow-viewport-repair` | 修复Flow初始投影与教师控制器在真实窗口中的可达性 | `r18-077-playback-view-controls`, `r18-087-navigation-level-exit` | 否 | `authoring-flow`, `published-flow`, `workspace-shell` | 正文和浮层的选框命中准确；三个应用模式和离线HTML均可操作控制器、缩放按钮与边条。 [完整规格](r18-089-flow-viewport-repair.md) |
+| `r18-090-ai-task-contract` | 定义任务观察候选反馈与应用策略的版本化共同合同 | `r18-088-plugin-baseline-probes` | 否 | `contracts-schema`, `ai-session` | 所有生产consumer从同一正式合同导入；合法事件往返保持身份/null字段；讨论/计划不能进入工程候选提交。 [完整规格](r18-090-ai-task-contract.md) |
+| `r18-091-cli-model-controls` | 按三CLI真实能力发现模型强度与会话配置 | `r18-090-ai-task-contract` | 否 | `cli-adapters`, `main-preload` | 每CLI选用不同于原默认的可用模型并查看实际请求/原生确认；支持effort的模型可切换且真实生效。 [完整规格](r18-091-cli-model-controls.md) |
+| `r18-092-codex-interactive-adapter` | 接通Codex图片公开摘要提问纠正与原生回合控制 | `r18-091-cli-model-controls` | 否 | `cli-adapters`, `main-preload`, `ai-session` | 识别已有选中图片无需用户再上传；可读进度、一次回答与中途纠正真实到达，模型/effort为091已确认配置。 [完整规格](r18-092-codex-interactive-adapter.md) |
+| `r18-093-claude-interactive-adapter` | 接通Claude双向原生会话图片提问纠正与取消 | `r18-091-cli-model-controls` | 否 | `cli-adapters`, `main-preload`, `ai-session` | 真实Claude识图、读取指定能力卡、等待教师回答、执行后根据宿主结果继续修改；UI输入接收与CLI消费可区别。 [完整规格](r18-093-claude-interactive-adapter.md) |
+| `r18-094-opencode-interactive-adapter` | 接通OpenCode原生配置按需读取图片与交互续轮 | `r18-091-cli-model-controls` | 否 | `cli-adapters`, `main-preload`, `ai-session` | 真实OpenCode用已确认模型识图并按需展开能力，完成小编辑、结果回传与续轮；候选可解析并有host receipt。 [完整规格](r18-094-opencode-interactive-adapter.md) |
+| `r18-095-authoring-observation` | 从当前结构草稿画面与运行状态生成一致只读观察 | `r18-090-ai-task-contract`, `r18-089-flow-viewport-repair` | 否 | `authoring-slide`, `authoring-flow`, `authoring-spatial`, `published-slide`, `published-flow`, `published-spatial`, `published-dynamic` | T01能判断当前图像；发送前未保存文字、活动编辑草稿和最新选区可被解释；每张图能追到其结构/视图/运行版本。 [完整规格](r18-095-authoring-observation.md) |
+| `r18-096-capability-workspace` | 交付助手与Builder共用的精简发现查询和按需资源读取 | `r18-095-authoring-observation`, `r18-092-codex-interactive-adapter`, `r18-093-claude-interactive-adapter`, `r18-094-opencode-interactive-adapter` | 否 | `generated-index`, `ai-session`, `cli-adapters` | 简单选区任务初始技术说明≤12KB、精简发现入口≤8KB，必要完整合同仍可取；小任务不读取无关Runtime/Component资料。 [完整规格](r18-096-capability-workspace.md) |
+| `r18-097-semantic-edit-replacement` | 闭合一般语义编辑与选区依赖创建和原子替换 | `r18-090-ai-task-contract`, `r18-095-authoring-observation` | 否 | `authoring-slide`, `authoring-flow`, `authoring-spatial`, `store-kernel`, `contracts-schema`, `generated-index` | T04把正确标题改为“简谐运动”、放大并居中，实际文字/样式/位置一致；选区替换新增依赖并一次Undo/Redo准确恢复，保存重开与Player/导出可消费。 [完整规格](r18-097-semantic-edit-replacement.md) |
+| `r18-098-image-edit-transaction` | 交付保留原图内容的确定性图片变换与资产替换事务 | `r18-096-capability-workspace`, `r18-097-semantic-edit-replacement` | 否 | `authoring-slide`, `authoring-flow`, `authoring-spatial`, `store-kernel`, `generated-index`, `contracts-schema` | T02/T03得到实际绿色图片且文字/非目标区域/透明度符合要求；撤销重做、保存重开、Player/HTML/PPTX或对应导出均引用正确资产。 [完整规格](r18-098-image-edit-transaction.md) |
+| `r18-099-dynamic-edit-verification` | 闭合Runtime替换连续修改与真实运行效果验证 | `r18-096-capability-workspace`, `r18-097-semantic-edit-replacement`, `r18-100-task-feedback-loop` | 否 | `published-dynamic`, `published-slide`, `published-flow`, `published-spatial`, `store-kernel`, `contracts-schema` | T05是实际随时间翻滚的立方体；T06减慢后连续机制保留，撤销/保存重开/Player/HTML均一致，修订有真实结果观察。 [完整规格](r18-099-dynamic-edit-verification.md) |
+| `r18-100-task-feedback-loop` | 让同一CLI任务接收宿主结果观察并持续修正 | `r18-092-codex-interactive-adapter`, `r18-093-claude-interactive-adapter`, `r18-094-opencode-interactive-adapter`, `r18-095-authoring-observation`, `r18-097-semantic-edit-replacement` | 否 | `ai-session`, `cli-adapters`, `store-kernel`, `main-preload` | 自然语言任务能根据真实host结果继续，最终清楚区分回答、计划、已应用并验证、待应用、部分完成、失败/取消。 [完整规格](r18-100-task-feedback-loop.md) |
+| `r18-101-teacher-chat-workflow` | 交付讨论计划编辑模型控制可读进度与视觉变更审阅 | `r18-091-cli-model-controls`, `r18-096-capability-workspace`, `r18-100-task-feedback-loop` | 否 | `chat-ui`, `workspace-shell` | T01/T08/T11可仅用普通UI完成；编辑无法执行明确显示未完成，取消/失败不阻断人工编辑与保存。 [完整规格](r18-101-teacher-chat-workflow.md) |
+| `r18-102-freshness-conflict-recovery` | 闭合人工交替编辑中途纠正与过期候选恢复 | `r18-100-task-feedback-loop`, `r18-101-teacher-chat-workflow` | 否 | `ai-session`, `store-kernel`, `chat-ui` | T07在AI期间手动修改再继续，人工内容保留且AI结果落到原本授权目标；Stop/关闭/Save As后迟到零写。 [完整规格](r18-102-freshness-conflict-recovery.md) |
+| `r18-103-ai-usability-exit` | 完成助手与外部Builder自然语言可用性工程结束门 | `r18-089-flow-viewport-repair`, `r18-096-capability-workspace`, `r18-098-image-edit-transaction`, `r18-099-dynamic-edit-verification`, `r18-101-teacher-chat-workflow`, `r18-102-freshness-conflict-recovery`, `r18-104-builder-skill-discovery` | 否 | `generated-index`, `chat-ui` | 所有确定性失败边界通过，关键自然链达到有限重复门且无未关闭可复现宿主错误/假完成/数据错误；双入口真实结果及失败记录完整。 [完整规格](r18-103-ai-usability-exit.md) |
+| `r18-104-builder-skill-discovery` | 同步Build Skill与Builder发现入口并验证外部课例按需构建 | `r18-096-capability-workspace`, `r18-097-semantic-edit-replacement` | 否 | `generated-index`, `contracts-schema` | 应用与外部Builder取得相同能力ID/Schema/限制；小课例不全读技术库，复杂课例按需取得完整协议；产物可编辑、可保存重开、Player/HTML正确，已有工程增量修订保留人工修改。 [完整规格](r18-104-builder-skill-discovery.md) |
+| `r18-060-release` | Owner验收S3可用AI创作与Builder并发布v1.8.0 accepted源码标签 | `r18-050-three-cli-benchmark`, `r18-051-pptx-editable-diagrams`, `r18-052-pptx-legacy-equations`, `r18-083-surface-integration-exit`, `r18-087-navigation-level-exit`, `r18-103-ai-usability-exit` | 否 | `none` | 103及既有PPTX两线/三表面/导航均通过，当前候选经Owner明确S3签署；人工保存重开/Undo/Player/导出正常。 [完整规格](r18-060-release.md) |
 
-执行顺序：快照与 profile 复用现有合同，三 CLI 配置和 Skills 汇入基础聊天；引用、时间线与消息渲染共享 chat-ui，须按写锁串行或明确拆分 Owner 后执行。Stop/Undo 汇合并发语义，r18-083整合结束门、当前原生三CLI真实聊天闭环及PPTX两条增强线全部通过后进入S3。聊天接线不等待任何 MCP 节点。
+执行顺序：当前剩余frontier为088与089；090等088。091与095可按锁推进，三adapter共用锁默认串行；097在095后可与一个adapter包并行。096统一发现，104同步外部Builder/Skill。103汇合全部新增能力，060另等原050/051/052/083/087。依赖具体顺序见[开发方案](../../AI_ASSISTANT_DELIVERY_PLAN.md#3-当前依赖图与执行顺序)，不自行启动多代理。
 
 ## 接口与数据合同
 
-- 纯问答或教学策划允许只返回文字/Markdown，不强求工程候选；只有明确的工程修改候选才进入校验与提交，不能把普通回答或原生工具日志解析成工程写入。
-- 请求、candidate、admission 和 commit receipt 的唯一合同与提交器来自 1.7；本版只补必要的会话接线和 UI，不再定义一份 intent schema、工具注册表或写入器。
-- profile 是任务配置：版本、adapter capability、Skills、上下文预算和候选结果通道；不包含 server launch、模型推理步骤或 Provider key。三 CLI 参数可以不同，候选与工程语义必须相同。
-- Skills 指导 CLI 基于快照、正式能力索引和已确认 Markdown 生成候选。未提供的工程信息在下轮请求补充，不指示 CLI 直接读取 Store、修改 .h5lesson 或调用 live 产品工具。
-- 有文件工具的 adapter 使用当前 session staging，宿主只摄取当前 candidate root 内 realpath 闭合的内容；stdout-only 不承担文件工具 conformance。复用 1.7 的摄取与清理检查，不宣称通用 OS sandbox。
-- 基础聊天消息保留纯文本源、role、引用快照、adapter/session、sequence 与 render version；复用 WorkspaceIdentity 和 1.6 store owner，必要的本地 schema 扩展严格解析。消息不进工程与导出；1.9 任务负责重启、迁移和删除的完整 UI 验收。
-- 当前支持矩阵仍为三 CLI。未来脱离 CLI 时采用模型 API + 自有工具 + 自建 harness，直接调用同一产品命令与准入/事务边界；届时单独规划模型循环、凭据和恢复，不在本路线提前实现，也不通过 MCP 过渡。
+- [共同实施合同](IMPLEMENTATION_CONTRACT.md)统一Task/Observation/Proposal/HostResult/UserInput、模式/应用策略、草稿/渲染一致性、读写范围、原子替换与恢复。新本地AI版本严格迁移，不改V9/Published V2。
+- 纯讨论/计划不能写工程；编辑默认在授权范围自动应用并显示真实结果，可选先预览。只有host receipt代表写入；多阶段任务取消保留先前已提交部分，当前未提交阶段零写。
+- 当前画面与原始图片从正式宿主/资产获取，观察不可变且可更新。CLI消费原生图像、只读观察/能力文件及当前候选staging，不获得live Store/工程API。
+- 正式能力定义产生精简发现入口和完整卡片，应用CLI与外部Builder共用；不手写第二目录。Build Skill/受管安装版按104同步，编排Skill的两份Markdown确认门不改变。
+- 新建外部课例仍走API V2正式Facade；已有工程增量修改由Skill转编辑器正式目标，不编造未暴露的load方法、不重建覆盖人工内容。
+- 会话/观察/trace不进工程或导出；Save As创建新身份不复制会话。1.8交付新版本与最低旧记录可读迁移，1.9补重启/删除/未命名工程/长任务。
+- Native/Recipe/Existing Component与Generated Component/Runtime保持原准入分界，失败/过期/取消不产生当前阶段的半写入。
 
 ## 精确验证入口
 
@@ -85,4 +96,4 @@ npm run test:product -- tests/unit/serializedSessionMount.test.ts tests/unit/for
 npm run test:e2e -- tests/e2e/stabilizationOwnershipController.spec.ts tests/e2e/stabilizationCoreUsability.spec.ts
 ```
 
-版本候选再执行总路线统一验证与 S3 Owner 发布门；真实 CLI benchmark 不以 fixture 替代，fixture 用于确定性故障注入。未来自建 harness 不作为本版依赖。
+以上保留历史节点的目标入口；088–104与060各自完整规格给出当前1–3条聚焦命令及真实操作，不一次运行整张旧清单。103按开发方案固定自然语言与重复门验收，fixture仅证明确定性协议/故障边界。S3须实际教师签署，未来自建模型harness不作为本版依赖。

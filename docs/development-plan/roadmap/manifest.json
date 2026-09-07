@@ -2023,39 +2023,343 @@
       "id": "r18-085-navigation-level-contract",
       "release": "1.8",
       "title": "定义场景与步骤分层及旧导航兼容合同",
-      "dependencies": ["r18-083-surface-integration-exit"],
+      "dependencies": [
+        "r18-083-surface-integration-exit"
+      ],
       "optional": false,
-      "writeLocks": ["contracts-schema"],
+      "writeLocks": [
+        "contracts-schema"
+      ],
       "spec": "1.8/README.md"
     },
     {
       "id": "r18-086-navigation-level-implementation",
       "release": "1.8",
       "title": "统一三表面场景跳转与场景内步进",
-      "dependencies": ["r18-085-navigation-level-contract"],
+      "dependencies": [
+        "r18-085-navigation-level-contract"
+      ],
       "optional": false,
-      "writeLocks": ["published-dynamic", "published-interaction", "published-slide", "published-flow", "published-spatial", "props-global", "workspace-shell"],
+      "writeLocks": [
+        "published-dynamic",
+        "published-interaction",
+        "published-slide",
+        "published-flow",
+        "published-spatial",
+        "props-global",
+        "workspace-shell"
+      ],
       "spec": "1.8/README.md"
     },
     {
       "id": "r18-087-navigation-level-exit",
       "release": "1.8",
       "title": "闭合场景步骤分层的真实Mixed整合验收",
-      "dependencies": ["r18-086-navigation-level-implementation"],
+      "dependencies": [
+        "r18-086-navigation-level-implementation"
+      ],
       "optional": false,
-      "writeLocks": ["generated-index"],
+      "writeLocks": [
+        "generated-index"
+      ],
+      "spec": "1.8/README.md"
+    },
+    {
+      "id": "r18-088-plugin-baseline-probes",
+      "release": "1.8",
+      "title": "冻结插件工作流基线并证明三CLI关键原生能力",
+      "dependencies": [
+        "r18-087-navigation-level-exit"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "cli-adapters"
+      ],
+      "spec": "1.8/README.md"
+    },
+    {
+      "id": "r18-089-flow-viewport-repair",
+      "release": "1.8",
+      "title": "修复Flow初始投影与教师控制器在真实窗口中的可达性",
+      "dependencies": [
+        "r18-077-playback-view-controls",
+        "r18-087-navigation-level-exit"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "authoring-flow",
+        "published-flow",
+        "workspace-shell"
+      ],
+      "spec": "1.8/README.md"
+    },
+    {
+      "id": "r18-090-ai-task-contract",
+      "release": "1.8",
+      "title": "定义任务观察候选反馈与应用策略的版本化共同合同",
+      "dependencies": [
+        "r18-088-plugin-baseline-probes"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "contracts-schema",
+        "ai-session"
+      ],
+      "spec": "1.8/README.md"
+    },
+    {
+      "id": "r18-091-cli-model-controls",
+      "release": "1.8",
+      "title": "按三CLI真实能力发现模型强度与会话配置",
+      "dependencies": [
+        "r18-090-ai-task-contract"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "cli-adapters",
+        "main-preload"
+      ],
+      "spec": "1.8/README.md"
+    },
+    {
+      "id": "r18-092-codex-interactive-adapter",
+      "release": "1.8",
+      "title": "接通Codex图片公开摘要提问纠正与原生回合控制",
+      "dependencies": [
+        "r18-091-cli-model-controls"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "cli-adapters",
+        "main-preload",
+        "ai-session"
+      ],
+      "spec": "1.8/README.md"
+    },
+    {
+      "id": "r18-093-claude-interactive-adapter",
+      "release": "1.8",
+      "title": "接通Claude双向原生会话图片提问纠正与取消",
+      "dependencies": [
+        "r18-091-cli-model-controls"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "cli-adapters",
+        "main-preload",
+        "ai-session"
+      ],
+      "spec": "1.8/README.md"
+    },
+    {
+      "id": "r18-094-opencode-interactive-adapter",
+      "release": "1.8",
+      "title": "接通OpenCode原生配置按需读取图片与交互续轮",
+      "dependencies": [
+        "r18-091-cli-model-controls"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "cli-adapters",
+        "main-preload",
+        "ai-session"
+      ],
+      "spec": "1.8/README.md"
+    },
+    {
+      "id": "r18-095-authoring-observation",
+      "release": "1.8",
+      "title": "从当前结构草稿画面与运行状态生成一致只读观察",
+      "dependencies": [
+        "r18-090-ai-task-contract",
+        "r18-089-flow-viewport-repair"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "authoring-slide",
+        "authoring-flow",
+        "authoring-spatial",
+        "published-slide",
+        "published-flow",
+        "published-spatial",
+        "published-dynamic"
+      ],
+      "spec": "1.8/README.md"
+    },
+    {
+      "id": "r18-096-capability-workspace",
+      "release": "1.8",
+      "title": "交付助手与Builder共用的精简发现查询和按需资源读取",
+      "dependencies": [
+        "r18-095-authoring-observation",
+        "r18-092-codex-interactive-adapter",
+        "r18-093-claude-interactive-adapter",
+        "r18-094-opencode-interactive-adapter"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "generated-index",
+        "ai-session",
+        "cli-adapters"
+      ],
+      "spec": "1.8/README.md"
+    },
+    {
+      "id": "r18-097-semantic-edit-replacement",
+      "release": "1.8",
+      "title": "闭合一般语义编辑与选区依赖创建和原子替换",
+      "dependencies": [
+        "r18-090-ai-task-contract",
+        "r18-095-authoring-observation"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "authoring-slide",
+        "authoring-flow",
+        "authoring-spatial",
+        "store-kernel",
+        "contracts-schema",
+        "generated-index"
+      ],
+      "spec": "1.8/README.md"
+    },
+    {
+      "id": "r18-098-image-edit-transaction",
+      "release": "1.8",
+      "title": "交付保留原图内容的确定性图片变换与资产替换事务",
+      "dependencies": [
+        "r18-096-capability-workspace",
+        "r18-097-semantic-edit-replacement"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "authoring-slide",
+        "authoring-flow",
+        "authoring-spatial",
+        "store-kernel",
+        "generated-index",
+        "contracts-schema"
+      ],
+      "spec": "1.8/README.md"
+    },
+    {
+      "id": "r18-099-dynamic-edit-verification",
+      "release": "1.8",
+      "title": "闭合Runtime替换连续修改与真实运行效果验证",
+      "dependencies": [
+        "r18-096-capability-workspace",
+        "r18-097-semantic-edit-replacement",
+        "r18-100-task-feedback-loop"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "published-dynamic",
+        "published-slide",
+        "published-flow",
+        "published-spatial",
+        "store-kernel",
+        "contracts-schema"
+      ],
+      "spec": "1.8/README.md"
+    },
+    {
+      "id": "r18-100-task-feedback-loop",
+      "release": "1.8",
+      "title": "让同一CLI任务接收宿主结果观察并持续修正",
+      "dependencies": [
+        "r18-092-codex-interactive-adapter",
+        "r18-093-claude-interactive-adapter",
+        "r18-094-opencode-interactive-adapter",
+        "r18-095-authoring-observation",
+        "r18-097-semantic-edit-replacement"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "ai-session",
+        "cli-adapters",
+        "store-kernel",
+        "main-preload"
+      ],
+      "spec": "1.8/README.md"
+    },
+    {
+      "id": "r18-101-teacher-chat-workflow",
+      "release": "1.8",
+      "title": "交付讨论计划编辑模型控制可读进度与视觉变更审阅",
+      "dependencies": [
+        "r18-091-cli-model-controls",
+        "r18-096-capability-workspace",
+        "r18-100-task-feedback-loop"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "chat-ui",
+        "workspace-shell"
+      ],
+      "spec": "1.8/README.md"
+    },
+    {
+      "id": "r18-102-freshness-conflict-recovery",
+      "release": "1.8",
+      "title": "闭合人工交替编辑中途纠正与过期候选恢复",
+      "dependencies": [
+        "r18-100-task-feedback-loop",
+        "r18-101-teacher-chat-workflow"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "ai-session",
+        "store-kernel",
+        "chat-ui"
+      ],
+      "spec": "1.8/README.md"
+    },
+    {
+      "id": "r18-103-ai-usability-exit",
+      "release": "1.8",
+      "title": "完成助手与外部Builder自然语言可用性工程结束门",
+      "dependencies": [
+        "r18-089-flow-viewport-repair",
+        "r18-096-capability-workspace",
+        "r18-098-image-edit-transaction",
+        "r18-099-dynamic-edit-verification",
+        "r18-101-teacher-chat-workflow",
+        "r18-102-freshness-conflict-recovery",
+        "r18-104-builder-skill-discovery"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "generated-index",
+        "chat-ui"
+      ],
+      "spec": "1.8/README.md"
+    },
+    {
+      "id": "r18-104-builder-skill-discovery",
+      "release": "1.8",
+      "title": "同步Build Skill与Builder发现入口并验证外部课例按需构建",
+      "dependencies": [
+        "r18-096-capability-workspace",
+        "r18-097-semantic-edit-replacement"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "generated-index",
+        "contracts-schema"
+      ],
       "spec": "1.8/README.md"
     },
     {
       "id": "r18-060-release",
       "release": "1.8",
-      "title": "Owner 验收 S3 CLI 生成与基础聊天并发布 v1.8.0 accepted 源码标签",
+      "title": "Owner验收S3可用AI创作与Builder并发布v1.8.0 accepted源码标签",
       "dependencies": [
         "r18-050-three-cli-benchmark",
         "r18-051-pptx-editable-diagrams",
         "r18-052-pptx-legacy-equations",
         "r18-083-surface-integration-exit",
-        "r18-087-navigation-level-exit"
+        "r18-087-navigation-level-exit",
+        "r18-103-ai-usability-exit"
       ],
       "optional": false,
       "writeLocks": [
@@ -2079,15 +2383,64 @@
       "spec": "1.9/README.md"
     },
     {
+      "id": "r19-041-session-navigation",
+      "release": "1.9",
+      "title": "交付会话搜索分支多任务状态与既有事务历史审阅",
+      "dependencies": [
+        "r19-040-session-persistence-deletion"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "chat-ui",
+        "ai-session"
+      ],
+      "spec": "1.9/README.md"
+    },
+    {
+      "id": "r19-042-draft-workspace-continuity",
+      "release": "1.9",
+      "title": "支持未命名工程AI与首次保存后的明确身份切换",
+      "dependencies": [
+        "r19-040-session-persistence-deletion"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "contracts-schema",
+        "ai-session",
+        "app-save-recovery",
+        "chat-ui"
+      ],
+      "spec": "1.9/README.md"
+    },
+    {
+      "id": "r19-043-long-task-context",
+      "release": "1.9",
+      "title": "闭合长任务上下文压缩缓存失效与阶段性能诊断",
+      "dependencies": [
+        "r19-041-session-navigation",
+        "r19-042-draft-workspace-continuity"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "ai-session",
+        "cli-adapters",
+        "chat-ui"
+      ],
+      "spec": "1.9/README.md"
+    },
+    {
       "id": "r19-050-internal-dogfood",
       "release": "1.9",
-      "title": "用真实课例完成端到端内部 Dogfood 与问题分级",
+      "title": "以真实课例验证连续创作长任务恢复与跨入口衔接",
       "dependencies": [
         "r18-043-context-references",
         "r18-044-tool-timeline",
         "r18-045-safe-markdown-formula",
         "r18-046-stop-undo-stale",
-        "r19-040-session-persistence-deletion"
+        "r19-040-session-persistence-deletion",
+        "r19-041-session-navigation",
+        "r19-042-draft-workspace-continuity",
+        "r19-043-long-task-context"
       ],
       "optional": false,
       "writeLocks": [
@@ -2130,7 +2483,7 @@
     {
       "id": "r20-000-public-governance",
       "release": "2.0",
-      "title": "锁定内部生产可见性、支持矩阵、数据边界、错误分类与发布政策",
+      "title": "冻结内部生产支持矩阵数据边界与发布政策",
       "dependencies": [
         "r19-060-release"
       ],
@@ -2145,7 +2498,7 @@
     {
       "id": "r20-010-cli-setup-ui",
       "release": "2.0",
-      "title": "内部生产设置页完成自动探测、自定义路径、版本、登录指引与诊断",
+      "title": "完善CLI安装登录诊断与既有模型控制的生产设置",
       "dependencies": [
         "r20-000-public-governance",
         "r16-030-cli-lifecycle"
@@ -2173,7 +2526,7 @@
     {
       "id": "r20-020-public-authoring",
       "release": "2.0",
-      "title": "正式开放 Chat、生成、局部编辑、timeline、Stop、Undo 与 stale 体验",
+      "title": "贯通整课生成三表面连续编辑与实际效果QA的生产工作流",
       "dependencies": [
         "r20-010-cli-setup-ui",
         "r20-011-first-use-risk-notice",
@@ -2190,10 +2543,11 @@
     {
       "id": "r20-021-profile-controls",
       "release": "2.0",
-      "title": "教师可选择 CLI、内置 profile / Skills 和允许的上下文范围",
+      "title": "完善内置Skills选择与助手Builder共用发现的生产控制",
       "dependencies": [
         "r20-000-public-governance",
-        "r18-050-three-cli-benchmark"
+        "r18-050-three-cli-benchmark",
+        "r18-104-builder-skill-discovery"
       ],
       "optional": false,
       "writeLocks": [
@@ -2205,7 +2559,7 @@
     {
       "id": "r20-022-materials-privacy-controls",
       "release": "2.0",
-      "title": "材料引用、会话删除、Save As 隔离和 CLI 历史差异成为公共控制",
+      "title": "统一材料引用应用记录删除与Save As数据控制",
       "dependencies": [
         "r20-011-first-use-risk-notice",
         "r15-020-material-tools-citations",
@@ -2219,13 +2573,31 @@
       "spec": "2.0/README.md"
     },
     {
+      "id": "r20-025-plugin-workflow-parity",
+      "release": "2.0",
+      "title": "实测对照Codex和Claude插件并关闭课件工作流体验差距",
+      "dependencies": [
+        "r20-020-public-authoring",
+        "r20-021-profile-controls",
+        "r20-022-materials-privacy-controls"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "chat-ui",
+        "cli-adapters",
+        "workspace-shell"
+      ],
+      "spec": "2.0/README.md"
+    },
+    {
       "id": "r20-030-docs-accessibility",
       "release": "2.0",
       "title": "完成内部设置 / Chat / timeline 的键盘、读屏、错误恢复与用户文档",
       "dependencies": [
         "r20-020-public-authoring",
         "r20-021-profile-controls",
-        "r20-022-materials-privacy-controls"
+        "r20-022-materials-privacy-controls",
+        "r20-025-plugin-workflow-parity"
       ],
       "optional": false,
       "writeLocks": [
@@ -2237,11 +2609,13 @@
     {
       "id": "r20-040-three-cli-acceptance",
       "release": "2.0",
-      "title": "三种真实 CLI 在同一固定课例完成同一生成与局部编辑矩阵",
+      "title": "完成三CLI完整自然语言矩阵与持续创作的最终验收",
       "dependencies": [
         "r20-020-public-authoring",
         "r20-021-profile-controls",
-        "r20-022-materials-privacy-controls"
+        "r20-022-materials-privacy-controls",
+        "r20-025-plugin-workflow-parity",
+        "r20-030-docs-accessibility"
       ],
       "optional": false,
       "writeLocks": [

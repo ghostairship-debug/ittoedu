@@ -93,25 +93,21 @@ IttoEdu 是受控团队使用的内部生产工具。默认工程、Runtime、Co
 
 优先级仍以受支持场景中的用户可用性为第一轴。路线的完整任务图、发布制品、不可降级矩阵和次旗舰执行规格位于 [`docs/development-plan/roadmap/`](docs/development-plan/roadmap/README.md)；路线节点不是协调状态，只有满足依赖、届时事实与写锁后才按协议实例化，当前 `queued / active / blocked` 仍只看任务板。
 
-### 5.1 当前起点：1.8 三表面整合与可用性收口，S3 待验收
+### 5.1 当前起点：1.8 AI可用性阻断，按新路线完成至2.0
 
-2026-09-07后续Owner确认新增[场景/步骤导航分层](docs/development-plan/roadmap/1.8/r18-085-navigation-levels.md)：上/下一步连续推进并在场景边界自动跨场景，上一/下一场景直接跳过剩余内部步骤；Spatial镜头属于同画布内部步骤。新增r18-085→086→087必选链，r18-060/S3另等087；原r18-083工程证据保留。085–087已实施并完成真实Electron、保存重开与离线HTML工程验证，见[导航结束记录](docs/development-plan/reviews/1.8-navigation-level-exit.md)；S3仍待教师签署。
+2026-09-07 Owner实际使用证实图片不可见/改色未闭环、选区替换受阻、候选与模型/模式/反馈缺口、Flow控制器不可达。S3存在实质可用性阻断，不是仅等待签署。Owner要求助手至少达到VS Code Codex/Claude Code插件相应工作流体验，并实时理解当前课件；外部Build Skill同步按需发现/读取。
 
-以现有1.8为基础，按[三表面架构整合方案](docs/development-plan/THREE_SURFACE_ARCHITECTURE_INTEGRATION_PLAN.md)插入有限整合阶段，暂缓1.9–2.0新增能力扩张。Slide保留逐页/状态，Flow保留语义正文/滚动，Spatial保留世界/镜头；整合共同Native绘制、既有段落语义、Core历史、组件包修改和运行观察接口，不重写工程模型或创建万能Surface服务。V9结构足够；Owner已批准D1方案A：Flow正文响应式布局与浮层统一CSS尺度，主动运行缩放单独应用，接受旧浮层初始投影变化并复核旧课件。
+执行依据为[当前至2.0开发方案](docs/development-plan/AI_ASSISTANT_DELIVERY_PLAN.md)、[共同实施合同](docs/development-plan/roadmap/1.8/IMPLEMENTATION_CONTRACT.md)和已同步的各版DAG/独立规格。[G01–G12](docs/development-plan/reviews/1.8-ai-assistant-gap-register.md)与[官方对标评估](docs/development-plan/AI_ASSISTANT_VSCODE_BENCHMARK_ASSESSMENT.md)作为范围和基线依据；评估中W包/旧抽样建议由新方案取代。本轮仅编排计划，不代表新产品实现已完成或已启动。
 
-[可用性整改方案](docs/development-plan/roadmap/1.8/USABILITY_REPAIR_PLAN.md)的U01–U11/R01–R09编号和证据保留，独立阻断先修，坐标/绘制纳入整合。缩放仅在当前位置试运行和整课预览：整课缩放优先从非Component/Runtime区域的手势/键鼠发起；动态区域优先内部逻辑，仅明确无冲突时转交，未知不接管。教师控制器有独立可见的“缩放”按钮，展开缩小/倍率/放大/恢复面板；播放区域底部横向、右侧纵向边条用于平移整个观察视图，Runtime铺满画面或占用内部拖拽时仍可操作。按钮、边条与手势共用同一临时view状态，控制器/边条固定且可达，缩小/resize后校正偏移；边条不重复修改Flow正文scroll，也不能只移动Spatial world而漏掉global Runtime。从外部或按钮发起整课缩放时，控制器以外全部内容和字体同比放大，控制器不变，答案/焦点/实例进度不重置。 窗口resize排版不抵消主动放大；既有Flow对齐/行距贯通DOCX，高级排版不作为结束门。
+- 1.8新增088–104：原生可行性→任务/观察合同→模型与三adapter→当前结构/草稿/画面→共用按需能力→语义编辑/图片/Runtime→宿主反馈与教师交互→人工交替恢复→助手/Build Skill真实工程结束门。当前可开始的剩余集合为088与089，实际推进遵守依赖和写锁。
+- 1.9：在S3后完成恢复/迁移/删除、会话搜索与分支、多任务、未命名工程/首次保存、长任务上下文及真实连续课例。
+- 2.0：完善生产设置、整课/跨表面QA、Skills/数据控制和无障碍，025实测插件对照，040三CLI完整矩阵，041 PPTX生产验收，050/S4教师签署后发布同一源码与冻结HTML。
 
-当前原生传输的Claude实际闭环及包源码两轮修订已通过；Codex、OpenCode基础聊天与组件源码连续两轮均已通过，Codex纯讨论保持零工程修改。调用与格式修复证据见[CLI修复记录](docs/development-plan/reviews/1.8-cli-call-format-repair.md)，S3继续待教师验收。三表面源码、两窗口几何、播放观察与Spatial Runtime已取得当前真实宿主及离线HTML证据，范围和限制见[整合交付记录](docs/development-plan/reviews/1.8-surface-integration-exit.md)。以下保留已签署基线与前置能力范围，不按历史阶段重新启动任务。
+已有[三表面工程整合](docs/development-plan/reviews/1.8-surface-integration-exit.md)、[场景/步骤导航](docs/development-plan/reviews/1.8-navigation-level-exit.md)和[CLI调用/格式修复](docs/development-plan/reviews/1.8-cli-call-format-repair.md)证据按已验证范围保留，不能外推普通AI编辑已可用。Flow D1方案A已由Owner批准：正文响应式布局与浮层统一CSS尺度，主动运行缩放单独应用；不重问该选择。新089修实际剩余可达性问题。
 
-Flow组件转正文补真实实例后备与一次资源事务；人工Runtime.js/Manifest.json和AI包修改先汇入同一个包修订、全部实例校验与replacement owner，再接专业面板和完整源码快照。不能只取消editableCopy只读，因为现有人工同版本源码写入与正式包替换的版本规则存在分裂。
+缩放需求仍只针对当前位置试运行与整课预览：教师控制器的独立缩放按钮、横纵平移边条和可达性保留；动态内部输入优先且不重挂实例，Flow正文scroll不重复，Spatial观察包含HUD。Slide/Flow/Spatial作者模型、V9、单一Core历史/资源事务与既有导出都保留，不创建万能Surface或第二工程。
 
-正式1.8 DAG新增15个整合节点，并同步manifest/规格；r18-083为工程结束门，r18-060仍须当前原生三CLI、既有PPTX两节点及S3教师签署。1.9的PPTX媒体/效果节点也显式等待r18-060，2.0沿原依赖后移。整合工程收口可与Codex外部服务恢复分开；不降低三CLI验收门。Owner已授权本轮实施1.8整合；沿现有协调卡推进，工程验证与S3签署分开，不提交或发布。
-
-当前开发以已签署的 `v1.1.1` 为维护基线；1.1 阶段的执行过程和已闭合评审由 Git 历史保存，不在当前总纲维护完成记录。
-
-1.2 本地复审驱动的修复已完成工程验证。1.3 的 Recipe、跨 Surface Chart、设计生产力、Flow/Spatial 表格及 F1–F5 review 修复已实现；活动文字草稿进入正式 dirty、保存准备和恢复物化路径，1.3 构建的完整 Electron 回归 57/57 通过。1.3 accepted 标签按 S1 范围落在当前集成源码，先行的 1.4–1.5 能力不随之 accepted。Owner 已明确签署 S1，并授权持续推进到 1.5 末的 S2；不重复请求 S1，签署也不替代工程收口。1.4 已实现 target wire、receipt、部分三 Surface / course 工具，注册身份和失败隔离已获得真实浏览器证据；工程字体独立合同已获 Owner 批准并提交；动态源码 / 配置工具和 Builder V2 已通过真实宿主与离线纵切，1.4 集成回归及失败补跑完成，形成 v1.4.0-rc.1 工程候选。1.5 材料库、部分 PPTX 导入、Remix 与四类内容 QA 已形成基础工程候选；S2 教师反馈后新增母版/版式/占位符与常用对象整改；Owner 随后明确取消自动图片后备和外部渲染后端，普通表格映射提前到 1.5。1.5真实29页课件的画布同步、126个普通对象映射及题干自动扩框整改已完成工程收尾；跳过由193次降为67次，剩余复杂对象明确提示后由教师确认部分导入。Owner 已于2026-09-06接受当前范围并签署S2；真实课件仍有67次复杂内容遗漏，继续按后续路线整改，不宣称完整兼容。1.3 桌面回归不作为随后 1.4 改动的验证证据。既有实现与验收范围见各版复核记录，路线节点不自动创建任务卡。
-
-input 的作者/规则族/双键原子提交/Player/HTML/PPTX 纵切（F1）和共享颜色连续预览（F2）已完成实现；真实调色采用应用内连续面板，保留系统色盘、常用色与 HEX。Native 传输、Table/Chart owner/state、作者可用性及本轮收尾证据由[修复复核记录](docs/development-plan/reviews/1.2-usability-fixes-2026-09-05.md)承接，不再按旧失败清单重复开发。单元/集成失败项已定向关闭，57 个桌面用例经首次运行与补跑全部通过，最终 Flow 改动另经复验；未重复运行未受影响的全量组。S1 人工验收仍按 1.3 的签署边界执行；现已创建 v1.3.0（S1 范围）与 v1.4.0-rc.1 本地源码标签。Flow/Spatial 图表仍属于 1.3；1.2 保持当前 strict 有效域。
+r18-060/S3必须同时等待新增103双入口可用性、原050当前三CLI、051/052 PPTX、083三表面及087导航。PPTX媒体/效果在1.9继续、生产验收在2.0继续，不能因AI重排被遗漏。当前协调只沿既有任务卡记录阻断与新方案，不预建一批active卡，也不把历史实施授权当本轮已执行事实。
 
 ### 5.2 1.2–1.5：人工创作与外部 Builder 生产力
 
@@ -126,9 +122,9 @@ input 的作者/规则族/双键原子提交/Player/HTML/PPTX 纵切（F1）和�
 
 - **1.6 Local CLI Harness**：探测、启动、流式事件、恢复、取消和本地会话隔离；Codex、Claude、OpenCode 自行登录，1.6 阶段 AI 默认隐藏（1.8 起按 Owner 决定开放入口），CLI 缺失不影响人工编辑。
 - **1.7 生成内核**：Native → Recipe → Existing Component → Generated Component → Runtime 载体阶梯；CLI 只接收不可变最小 snapshot 并向 session staging/structured stdout 输出严格 typed candidate，宿主通过 1.4 canonical commands 原子提交；CLI 无 live 工程接口，自动准入失败时工程零写入。
-- **1.8 CLI 直连/Skills/基础聊天**：任务与每轮最小快照直接发给 CLI，复用 1.7 候选与宿主提交器；前移 Chat、引用、真实事件时间线、安全渲染和 Stop/Undo/Preview；S3 验收三 CLI 生成与基础聊天，不建设 MCP。
-- **1.9 会话/Dogfood**：在 1.8 基础聊天上闭合重启恢复、迁移、损坏隔离、范围删除与真实课例持续使用。
-- **2.0 内部生产 AI**：在内部生产构建中正式开放设置、生成、编辑、Agent 与内置 Profile，补齐发送上下文提示、可访问性、失败恢复和固定课例 Owner 验收；不把它描述成面向外部不受信用户的公开发行。
+- **1.8 可用AI创作**：以版本化任务接收多次不可变当前观察和host result，CLI原生图片/交互/模型控制、共用按需能力、文字/图片/载体替换、实际效果验证及教师交互闭环；Build Skill同步迁移。103工程门后由S3真实签署，不建设MCP。
+- **1.9 持续创作**：重启恢复、迁移/损坏隔离/删除、搜索分支/多任务、未命名工程/首次保存、原生长上下文与连续课例Dogfood。
+- **2.0 生产与对标**：完善设置、整课/跨表面QA、Skills/数据/无障碍，真实插件工作流比较与三CLI最终矩阵，S4教师签署及同一制品发布；不把它描述成面向外部不受信用户的公开发行。
 
 1.6–1.9 只发布源码标签；1.8 起 AI 入口默认显示；2.0 发布源码标签和固定课例离线 HTML，不做安装包。
 

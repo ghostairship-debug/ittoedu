@@ -1,57 +1,39 @@
-# 2.0：内部生产 AI 作者工作流
+# 2.0：内部生产创作与插件工作流对标
 
 ## 结果与边界
 
-2.0 在1.8已默认可见的聊天入口上完成内部生产工作流、设置和数据控制：团队用户可以设置 Codex、Claude 或 OpenCode，引用选定上下文，生成/编辑课件，查看工具轨迹，Stop、Undo、处理 stale，并管理应用保存的会话。CLI 由用户安装、登录并持有凭据；产品不读取或保存 API Key，也不重写 CLI 的模型/Agent 循环。本版本不代表面向外部不受信用户、公开插件市场或多租户 SaaS 发行；`r20-*` ID 中的 `public` 仅为稳定历史标识。
+按2026-09-07[当前开发方案](../../AI_ASSISTANT_DELIVERY_PLAN.md)，在1.8可用编辑和1.9持续会话上完善生产设置、整课与三表面QA、Skills/数据控制、可访问性，并实测对照VS Code Codex与Claude Code插件。核心编辑/模型/模式/观察已属于1.8门，2.0不再以“开放Chat入口”充当产品结果。
 
-2026-09-07路线调整：新增2.0扩张暂缓，先完成[1.8三表面整合与S3](../../THREE_SURFACE_ARCHITECTURE_INTEGRATION_PLAN.md)，再按原1.9→2.0依赖继续。既有1.6–1.8成果、三CLI和S4范围保留；整合不是新的模型harness、MCP或所有高级排版的前置重写，不改变源码/固定HTML发布门。
+以相应教师工作流的上下文可达性、行动、控制、审阅、验证和恢复为最低要求，并证明课件结构/画面/运行的同源理解。025是必选实测门；没有真实插件对照不能宣称达到插件级体验。平台专有的Git worktree/云环境/MCP配置如实单列，不把未实现能力说成全功能复制。
 
-首次使用必须说明外部 CLI 可能把用户选定上下文发送给其 Provider。产品不按材料类型猜测或阻止发送；是否发送由教师在可见引用和风险说明基础上决定。删除应用记录不声称删除 CLI 自身历史。
+产品仍是受控团队与受信代码环境中的内部生产版。三CLI由用户自行安装认证，应用不接管凭据/模型循环，不建MCP、第二工具目录或写通道；历史ID中的public只是稳定标识。首次发送说明和数据控制延续既定范围，不按教材/PDF/学生作业类别禁止发送，应用删除不承诺删除CLI历史。
 
-所有既有人工能力保持可见和可用；未安装、未登录、版本不兼容、CLI 崩溃、网络失败、Stop、stale 或准入失败都不能降低人工编辑器。
+S4由Owner实际签署1.9–2.0新增行为；然后发布同一 `v2.0.0` 源码与 `examples/render-host-benchmark/render-host-benchmark-v2.html` 离线HTML。HTML在签署前生成并冻结identity，签署后不重生成。AI验收工作区与纯课程发布HTML各证明自己的目标。无安装器，AI失败不得影响人工编辑/保存/Player/导出。
 
-S4 Owner 验收 1.9–2.0 后发布 `v2.0.0` 内部源码标签与从同一 accepted 候选冻结的 `examples/render-host-benchmark/render-host-benchmark-v2.html`，不发布安装器。三 CLI 的固定验收工作区证明内部生产 AI 工作流；发布 HTML 证明课程运行制品，二者不混为同一制品。
-
-PPTX 人工导入增强是本版并列交付线，始终可见，不受 AI 开关或 CLI 是否可用影响。版本节点、详细边界和实施顺序见 [PPTX 能力增强计划](../../PPTX_IMPORT_ENHANCEMENT_PLAN.md)。
+PPTX生产验收继续为必选并列线，范围见[PPTX能力增强计划](../../PPTX_IMPORT_ENHANCEMENT_PLAN.md)。PPTX不得依赖外部转换软件，旧PPT转换和复杂特性的明确边界保留。
 
 ## 任务 DAG
 
 | Task ID | 结果 | Dependencies | Optional | Write locks | Acceptance |
 | --- | --- | --- | --- | --- | --- |
-| `r20-000-public-governance` | 锁定内部生产可见性、支持矩阵、数据边界、错误分类与发布政策 | `r19-060-release` | 否 | `contracts-schema`, `generated-index`, `workspace-shell` | 正式 capability/settings 只列 Codex、Claude、OpenCode；明确内部生产分发、用户安装/登录、应用不保存 key、session owner、staging/候选校验与宿主提交边界和 AI 数据不入工程/导出；普通人工功能不受 AI 开关影响；发布矩阵只有内部源码 tag + 固定 HTML，并规定 Owner 签署后不得重生成 |
-| `r20-010-cli-setup-ui` | 内部生产设置页完成自动探测、自定义路径、版本、登录指引与诊断 | `r20-000-public-governance`, `r16-030-cli-lifecycle` | 否 | `workspace-shell`, `cli-adapters` | 三种 CLI 分别显示 installed/missing/unauthenticated/unsupported/ready；自定义路径通过 approved adapter launcher 验证；缺失状态提供安装/登录步骤；设置页不能显示/输入 API Key，任一失败不阻塞关闭设置并继续人工编辑；本节点在现有 `tests/unit/electronLaunchEnvironment.test.ts` 增加并通过三 CLI 内部设置状态用例 |
-| `r20-011-first-use-risk-notice` | 首次外部 CLI 使用前显示一般数据发送风险并记录本地确认 | `r20-000-public-governance` | 否 | `workspace-shell` | 每个 workspace identity 首次发送前显示 CLI / Provider、将发送的引用清单、应用不控制 Provider 保留策略和“继续 / 取消”；取消零启动 / 零发送；确认只保存在应用本地且可重看；PDF、教材、学生作业等材料类型不触发产品级禁止规则；本节点在现有 `tests/unit/courseAuthoringSession.test.ts` 增加并通过风险确认 workspace 隔离用例 |
-| `r20-020-public-authoring` | 正式开放 Chat、生成、局部编辑、timeline、Stop、Undo 与 stale 体验 | `r20-010-cli-setup-ui`, `r20-011-first-use-risk-notice`, `r18-046-stop-undo-stale` | 否 | `chat-ui`, `store-kernel`, `ai-session` | ready CLI 可从内部生产可见入口新建会话并完成单页生成和当前选择编辑；运行状态/tool receipt 可见；Stop 与迟到结果零写入；教师并发修改显示 stale；成功写入一次 Undo 恢复；关闭 Chat 后人工编辑、保存、Player 和导出继续工作；本节点在现有 `tests/integration/architectureBaselineFlows.test.tsx` 增加并通过正式 AI 提交/Stop/stale 用例 |
-| `r20-021-profile-controls` | 教师可选择 CLI、内置 profile / Skills 和允许的上下文范围 | `r20-000-public-governance`, `r18-050-three-cli-benchmark` | 否 | `generated-index`, `workspace-shell` | UI 只显示通过版本校验的内置 profile / Skills；切换 CLI 不改变产品 tool schema；发送前能查看 adapter、Skills、引用范围和 staging 边界；不提供任意 Main / OS / secret 权限开关；无效 profile 阻止 AI 启动但不影响人工功能 |
-| `r20-022-materials-privacy-controls` | 材料引用、会话删除、Save As 隔离和 CLI 历史差异成为公共控制 | `r20-011-first-use-risk-notice`, `r15-020-material-tools-citations`, `r19-040-session-persistence-deletion` | 否 | `main-preload`, `workspace-shell` | 发送前可逐项取消材料 / 页面 / 整课引用；Save As 后会话为空；按会话 / 工程 / 全部删除应用记录结果可复查；课程中的可见引用仍随工程保存；UI 明确链接到三种 CLI 各自历史处理说明且不宣称代删 |
-| `r20-030-docs-accessibility` | 完成内部设置 / Chat / timeline 的键盘、读屏、错误恢复与用户文档 | `r20-020-public-authoring`, `r20-021-profile-controls`, `r20-022-materials-privacy-controls` | 否 | `workspace-shell`, `generated-index` | 仅键盘可完成 CLI 设置、风险确认、引用选择、发送、Stop、查看 tool finding、Undo 和删除；焦点顺序/状态 announcement/对比度通过项目基线；内部文档逐项覆盖三 CLI 安装登录、数据边界、失败恢复、staging/候选应用、删除差异和人工回退 |
-| `r20-040-three-cli-acceptance` | 三种真实 CLI 在同一固定课例完成同一生成与局部编辑矩阵 | `r20-020-public-authoring`, `r20-021-profile-controls`, `r20-022-materials-privacy-controls` | 否 | `cli-adapters` | Codex、Claude、OpenCode 各自完成同一单页生成和同一现有页局部编辑；每种都覆盖 Stop、教师并发 stale、Undo、应用重启恢复和会话删除；产物保存重开、Player、单 HTML、诊断通过；任一种失败不得以另一种结果替代；本节点在现有 `tests/e2e/stabilizationCoreUsability.spec.ts` 增加并通过三 CLI 固定矩阵用例 |
-| `r20-041-pptx-production-acceptance` | 完成 PPTX 导入增强的内部生产创作验收 | `r19-051-pptx-media-effects`, `r20-030-docs-accessibility` | 否 | `app-save-recovery`, `workspace-shell`, `generated-index` | 用既定真实 PPT/PPTX 集完成导入→共享层修改→内容改写→保存重开→Player/导出；覆盖PPT转换软件缺失、取消、错误和手动另存为；PPTX不得依赖转换软件，明确每类可编辑/静态/未支持边界；复用未失效证据，S4 复核真实创作结果，不要求全部 PowerPoint 特性全保真 |
-| `r20-050-owner-acceptance` | Owner 验收 S4 AI 产品并签署 v2.0.0 accepted 候选 | `r20-030-docs-accessibility`, `r20-040-three-cli-acceptance`, `r20-041-pptx-production-acceptance` | 否 | `none` | Owner 在同一固定课例完成 S4 AI 产品验收：回归 1.8 的 Chat/timeline/safe render/Stop/Undo/stale，并覆盖 1.9 的 restart/migration/corruption/delete，以及 2.0 的三 CLI 设置、风险提示、生成、编辑、材料隐私、无障碍与人工回退；验证三 Surface、Native/Component/Runtime、保存重开、Player、适用导出和断网固定 HTML，晋升 1.9–2.0 已验收行为到保全矩阵并签署 `v2.0.0` accepted 候选，记录 HTML identity 后不得重生成；本版新增 PPTX 增强节点也必须达到其验收边界，不能只完成 AI 主线即发布 |
-| `r20-060-release` | 发布 v2.0.0 内部源码标签与固定课例离线 HTML | `r20-050-owner-acceptance` | 否 | `none` | 同一 accepted 候选的 `npm run verify` 已通过；发布前断网打开 Owner 已签署 identity 的固定 HTML且不重生成，扫描工程、Published 与 HTML 不含消息、tool trace、本地材料缓存或凭据；证明无第二 Store、tool catalog 或写入通道后创建 `v2.0.0` 内部源码标签并发布同一 HTML，无安装器 |
+| `r20-000-public-governance` | 冻结内部生产支持矩阵数据边界与发布政策 | `r19-060-release` | 否 | `contracts-schema`, `generated-index`, `workspace-shell` | 支持矩阵由真实能力与当前源码生成/核实，三CLI共同任务可完成；人工编辑在所有AI不可用状态继续。 [完整规格](r20-000-public-governance.md) |
+| `r20-010-cli-setup-ui` | 完善CLI安装登录诊断与既有模型控制的生产设置 | `r20-000-public-governance`, `r16-030-cli-lifecycle` | 否 | `workspace-shell`, `cli-adapters` | 三CLI分别从可用/缺失状态完成设置与恢复，真实模型配置生效；错误能定位到下一步动作。 [完整规格](r20-010-cli-setup-ui.md) |
+| `r20-011-first-use-risk-notice` | 首次外部 CLI 使用前显示一般数据发送风险并记录本地确认 | `r20-000-public-governance` | 否 | `workspace-shell` | 首次发送说明与实际引用一致；取消无外部启动/发送，确认只留应用本地且可查。 [完整规格](r20-011-first-use-risk-notice.md) |
+| `r20-020-public-authoring` | 贯通整课生成三表面连续编辑与实际效果QA的生产工作流 | `r20-010-cli-setup-ui`, `r20-011-first-use-risk-notice`, `r18-046-stop-undo-stale` | 否 | `chat-ui`, `store-kernel`, `ai-session` | 真实三表面课例含Native/Component/Runtime，生成/局部修改/QA修复/保存重开/Player/适用导出全部成立；课程内容保留教学路径。 [完整规格](r20-020-public-authoring.md) |
+| `r20-021-profile-controls` | 完善内置Skills选择与助手Builder共用发现的生产控制 | `r20-000-public-governance`, `r18-050-three-cli-benchmark`, `r18-104-builder-skill-discovery` | 否 | `generated-index`, `workspace-shell` | 教师可按目的选择Skill并看到真实生效；同一能力在应用/Builder的scope/输入/限制一致，简单任务继续按需读取。 [完整规格](r20-021-profile-controls.md) |
+| `r20-022-materials-privacy-controls` | 统一材料引用应用记录删除与Save As数据控制 | `r20-011-first-use-risk-notice`, `r15-020-material-tools-citations`, `r19-040-session-persistence-deletion` | 否 | `main-preload`, `workspace-shell` | 取消引用与实际输入一致，删除可复查且不误删课程内容，Save As新会话；导出数据边界成立。 [完整规格](r20-022-materials-privacy-controls.md) |
+| `r20-025-plugin-workflow-parity` | 实测对照Codex和Claude插件并关闭课件工作流体验差距 | `r20-020-public-authoring`, `r20-021-profile-controls`, `r20-022-materials-privacy-controls` | 否 | `chat-ui`, `cli-adapters`, `workspace-shell` | 所有适用于课件的基线工作流有双方实际结果，本产品可完成且无明确能力/控制缺口；课件当前状态理解含结构/画面/运行增量优势证据。 [完整规格](r20-025-plugin-workflow-parity.md) |
+| `r20-030-docs-accessibility` | 完成内部设置 / Chat / timeline 的键盘、读屏、错误恢复与用户文档 | `r20-020-public-authoring`, `r20-021-profile-controls`, `r20-022-materials-privacy-controls`, `r20-025-plugin-workflow-parity` | 否 | `workspace-shell`, `generated-index` | 实际键盘/读屏可完成完整流程，状态和重要错误可感知；帮助步骤在当前候选真实可执行。 [完整规格](r20-030-docs-accessibility.md) |
+| `r20-040-three-cli-acceptance` | 完成三CLI完整自然语言矩阵与持续创作的最终验收 | `r20-020-public-authoring`, `r20-021-profile-controls`, `r20-022-materials-privacy-controls`, `r20-025-plugin-workflow-parity`, `r20-030-docs-accessibility` | 否 | `cli-adapters` | 三CLI完整矩阵和025对照成立，无当前核心流程阻断、假完成或数据错误；每项结果对应真实实现/环境。 [完整规格](r20-040-three-cli-acceptance.md) |
+| `r20-041-pptx-production-acceptance` | 完成 PPTX 导入增强的内部生产创作验收 | `r19-051-pptx-media-effects`, `r20-030-docs-accessibility` | 否 | `app-save-recovery`, `workspace-shell`, `generated-index` | 支持范围可编辑且实际显示/播放正确；每类未支持项准确标页码/类型/原因，人工导入全过程可完成。 [完整规格](r20-041-pptx-production-acceptance.md) |
+| `r20-050-owner-acceptance` | Owner 验收 S4 AI 产品并签署 v2.0.0 accepted 候选 | `r20-030-docs-accessibility`, `r20-040-three-cli-acceptance`, `r20-041-pptx-production-acceptance` | 否 | `none` | Owner对当前候选明确S4签署；完整AI与PPTX支持范围成立，固定HTML真实断网运行且身份冻结。 [完整规格](r20-050-owner-acceptance.md) |
+| `r20-060-release` | 发布 v2.0.0 内部源码标签与固定课例离线 HTML | `r20-050-owner-acceptance` | 否 | `none` | 发布源码和HTML与050签署相同，离线运行正确、无AI记录/凭据；全部必选节点/签署门可追溯。 [完整规格](r20-060-release.md) |
 
-并行 frontier：CLI 设置和首次风险说明在治理合同后可并行；公共 authoring 与 profile / privacy 控制汇合到文档 / 无障碍和三 CLI 验收。`r20-050-owner-acceptance` 不能用自动化报告替代，`r20-060-release` 不能提前创建正式制品。
+000之后010/011在依赖上均可开始，但共享workspace-shell，默认串行；020/021/022也按实际锁集成，不虚报并行。三条生产线汇合025真实插件对照→030可访问性/文档→040三CLI完整矩阵；041 PPTX与其并列，最后050签署→060发布。数字ID不表示执行顺序。
 
-## 接口与数据合同
+## 共同合同与验证
 
-- 公共设置只保存 adapter ID、探测 / 用户选择的 executable 路径、可显示版本、profile 选择和非秘密偏好；认证由 CLI 自己完成。Renderer 不能传任意 executable / args。
-- 首次使用记录以 workspace identity + notice version 为键，只证明用户看过本应用说明，不代表 Provider 合规同意。每次发送仍展示实际引用；产品不做材料类别封锁。
-- 内部生产 authoring 复用 1.6–1.9 的 adapter、直接请求/结果通道、staging、admission、receipt、session generation 与 history，不建立 2.0 专用写入通道。
-- AI 会话 / message / tool trace / usage / staging / 材料缓存永不进入 CourseProject、Published、Component、Runtime、PPTX、PDF、Web package 或单 HTML。
-- Save As 创建新的本地 workspace identity，不复制会话。删除应用记录的范围与结果可验证；CLI 自身历史只提供说明，不做无法保证的删除承诺。
-- 2.0 固定课例离线 HTML 精确为 `examples/render-host-benchmark/render-host-benchmark-v2.html`；它是纯课程运行制品，没有 AI 设置、Chat 或 CLI 运行依赖。r20-050 签署其 identity 后，r20-060 只发布同一 bytes，不重新生成。
-
-## 精确验证入口
-
-内部生产实现只使用以下当前已存在的精确测试入口；对应节点在表格 Acceptance 指定的现有文件中增加命名用例：
-
-```text
-npm run test:product -- tests/unit/electronLaunchEnvironment.test.ts tests/unit/serializedSessionMount.test.ts tests/unit/courseProjectRoundTrip.test.ts
-npm run test:product -- tests/unit/courseProjectHealth.test.ts tests/unit/coursePackageExport.test.ts tests/unit/coursePrintArtifacts.test.ts
-npm run test:product -- tests/integration/courseExportPreflightApp.test.tsx tests/integration/architectureBaselineFlows.test.tsx
-npm run test:product -- tests/unit/courseAuthoringSession.test.ts tests/unit/electronLaunchEnvironment.test.ts tests/unit/serializedSessionMount.test.ts
-npm run test:e2e -- tests/e2e/stabilizationCoreUsability.spec.ts tests/e2e/publishedOnlineSingleHtml.spec.ts
-npm run verify
-```
-
-自动化只建立 engineering candidate；三种真实 CLI 与固定课例的 S4 Owner `accepted` 是 `v2.0.0` 发布的最终门。
+- 复用[实施合同](../1.8/IMPLEMENTATION_CONTRACT.md)的观察/候选/receipt、模式/应用策略、恢复/删除、按需发现和唯一事务；所有AI私有记录不进入CourseProject/Published/Component/Runtime或任何导出。
+- 自然语言原话和固定重复门遵循[开发方案第6节](../../AI_ASSISTANT_DELIVERY_PLAN.md#6-高可靠性验收)。025比较真实插件，040复用未失效证据并补最终变化；不反复运行同一付费矩阵。
+- 每个完整规格提供现有精确命令、可信反例和真实宿主操作。结构用解析/针对性测试，视觉/互动用实际呈现/动作，读屏需实际工具；自动化不代签Owner。
+- 050生成/验证固定HTML后冻结签署；060复用同一候选verify结果，只核对identity、数据边界并断网打开，不能再次执行会重生成HTML的命令。
