@@ -1,58 +1,65 @@
 # r19-043-long-task-context：闭合长任务上下文压缩缓存失效与阶段性能诊断
 
 - Release: 1.9
-- Dependencies: `r19-041-session-navigation`, `r19-042-draft-workspace-continuity`
+- Dependencies: `r19-040-session-persistence-deletion`, `r19-042-draft-workspace-continuity`, `r19-044-course-creation-workflows`, `r19-045-material-context`
 - Optional: 否
 - Write locks: `ai-session`, `cli-adapters`, `chat-ui`
 - Gaps: G07, G09
 
 ## 结果与现状
 
-长对话/多阶段课例在CLI上下文压缩与任务恢复后保持目标、已提交结果和最新课件事实；缓存和阶段性能可诊断。
+长对话和多阶段课例在原生CLI压缩、任务中断和恢复后保留目标、用户决定、已提交结果及最新课件事实；读取与阶段耗时可解释，主要重复输入和无效返工得到针对性改善。
 
-G07有上下文膨胀实证；1.8按需发现减少初始负担，仍需证明长任务不会依赖旧快照/被压掉的目标。
+1.8按需发现降低初始负担，044/045新增阶段与材料读取。长任务仍不能依靠旧完整snapshot或重新注入整段聊天维持正确性；本节点不建设第二模型总结循环。
+
+开发消费040/042的真实记录与身份、044的阶段制品和045的材料版本/读取事实，不以041整套UI完成为前置。先沿当前聊天入口核对这些实际数据；新的工作台展示与041由同一UI集成人接线，最终连续创作门由050汇合，不新增另一份阶段或材料状态。
 
 ## 开始前与阅读入口
 
-确认上述依赖的当前有效证据及写锁；以[开发总纲当前路线](../../../../COURSEWARE_DEVELOPMENT_PLAN.md#5-当前开发路线)、[任务板](../../TASK_BOARD.md)、[工作协议](../../WORKING_PROTOCOL.md)和[架构合同](../../ARCHITECTURE_CONTRACT.md)为上位约束。共用决定只读[AI开发方案](../../AI_ASSISTANT_DELIVERY_PLAN.md)及[实施合同](../1.8/IMPLEMENTATION_CONTRACT.md)相关条目，已读且未变的内容不重复全读。
+按[产品方案第5–8节](../../AGENT_AUTHORING_LONG_TERM_PLAN.md)、[开发计划](../../AI_ASSISTANT_DELIVERY_PLAN.md)、[架构合同](../../ARCHITECTURE_CONTRACT.md)、[工作协议](../../WORKING_PROTOCOL.md)与[共同实施合同](../1.8/IMPLEMENTATION_CONTRACT.md)核对范围、当前依赖和写锁。
 
-- [src/main/localAgent/harness.ts](../../../../src/main/localAgent/harness.ts)
-- [src/main/localAgent/repository.ts](../../../../src/main/localAgent/repository.ts)
-- [src/main/localAgent/profile.ts](../../../../src/main/localAgent/profile.ts)
-- [src/renderer/authoring/generation/generationSnapshot.ts](../../../../src/renderer/authoring/generation/generationSnapshot.ts)
-- [src/renderer/ui/chat/CourseChatPanel.tsx](../../../../src/renderer/ui/chat/CourseChatPanel.tsx)
+- [harness.ts](../../../../src/main/localAgent/harness.ts)、[repository.ts](../../../../src/main/localAgent/repository.ts)：唯一任务阶段、原生会话和恢复。
+- [profile.ts](../../../../src/main/localAgent/profile.ts)、[localAgentTaskContract.ts](../../../../src/shared/localAgentTaskContract.ts)：当前任务锚点、事件与usage。
+- [codexAppServer.ts](../../../../src/main/localAgent/codexAppServer.ts)、[claudeProcessTransport.ts](../../../../src/main/localAgent/claudeProcessTransport.ts)、[openCodeAcp.ts](../../../../src/main/localAgent/openCodeAcp.ts)：实际原生compact/usage/恢复映射，按发生差异的adapter读取。
+- [generationSnapshot.ts](../../../../src/renderer/authoring/generation/generationSnapshot.ts)、[CourseChatPanel.tsx](../../../../src/renderer/ui/chat/CourseChatPanel.tsx)：观察输入与阶段状态消费。
 
 ## 允许写域与旧路径退出
 
-同一任务Owner的上下文续接/缓存失效、原生compact/usage映射与Chat阶段诊断；不建立第二模型总结循环或另一份工程摘要真相。
+同一任务Owner的上下文续接、缓存失效、原生compact/usage事件及Chat阶段诊断；材料索引/提取事实由045持有，能力由096/104生成。只传版本化引用和必要当前事实，不维护可写的影子工程摘要。
+
+Write locks列出整节点可能触及的域，实际claim只覆盖当批文件和时段。同一粗锁覆盖不同adapter叶子时，由唯一协调Owner在同一协调任务内持锁并委派精确非重叠叶子到隔离工作区，不创建两个争用active卡。harness/repository、共享合同和CourseChatPanel各由唯一集成人顺序修改，不能以与041并行的名义并写同一文件或复制任务Owner。接口未就绪只做独立叶子，040/042/044/045真实数据和展示未集成不能报整节点完成。
 
 ## 执行步骤
 
-1. 以原生CLI压缩能力处理对话长度，宿主持续提供原始目标、当前授权/模式、新观察和已提交receipt引用；历史摘要标明来源和时间。
-2. 能力卡/原始资源可按内容版本缓存，doc/draft/view/runtime版本分别失效；压缩后未知内容按需重读，不能把缓存当最新事实。
-3. 任务预算与无进展停止沿用100；中断后从明确阶段恢复，不自动重复已提交步骤。
-4. 分拆宿主准备/进程/模型首响/工具/准入/提交/渲染耗时和真实usage，缺值标不可用；固定环境做与1.8的可比测量。
+1. 使用CLI原生上下文管理，宿主保留原始任务目标、当前意图/修改范围、有效教师决定、阶段制品引用和已提交receipt。压缩后需要的原文可按需取得，旧摘要有来源及版本，不伪装成当前文档。
+2. 分别核对材料/提取版本、能力语义、源码/资源身份和doc/draft/view/runtime观察版本。只有未变内容复用；同名材料更新、人工改稿、组件源码更新和运行视图变化必须失效对应缓存。
+3. 中断/首存/恢复后先读取新身份与观察，再接续明确未完阶段；复用正式receipt去重，不重新执行已完成单元。用户纠正能更新任务目标而不被旧阶段摘要覆盖。
+4. 记录宿主准备、能力/材料/源码读取、原生进程、首响、模型生成、准入、提交、渲染、返工与总耗时。输入按技术说明/材料/图片/源码分开；CLI未提供token或缓存指标时标未知，不由字符数编造。
+5. 用与1.8可比的真实任务找一个主要瓶颈并在原Owner修正，例如反复全量snapshot、累计回执、未改包源码或无关重检。独立资源准备可并行，同工程写入仍串行重校验；不添加分类模型、swarm或通用调度平台。
 
 ## 验收与可信反例
 
-- 真实对话触发至少一次CLI原生压缩/长上下文边界，再人工修改并继续，当前事实与目标/范围保持；有限预算可停止并恢复。
-- 反例：能力版本变化、资产同名更新、压缩丢目标、重启旧running、usage缺失、缓存命中但视图变化，不能错误提交/伪造性能。
+- 真实连续课例跨过一次原生压缩或已确认的长上下文/恢复边界，随后人工修改并继续；最新事实、有效决定与修改范围保持，已完成步骤不重做。
+- 能力版本变化、资产同名更新、压缩后丢目标、旧running重启、usage缺失、缓存命中但画面改变，均不能误改或伪造性能。
+- 有实际分阶段耗时与输入量对照，优化不删教学内容或省略必要视觉/互动检查。秒级/分钟级/整课30分钟目标留到2.0冻结规模后验收，不将本节点统计冒充达标。
 
 ## 停止条件
 
-某CLI不支持所需上下文控制时明确最低能力或可审阅恢复策略；不依赖宿主第二模型掩盖或无界增加上下文。
+原生CLI不提供某项控制/usage时明确差异，使用可审阅的原生恢复方式，不用另一模型掩盖、不无界加上下文。没有真实耗时或失败证据时不追加缓存/调度层。
 
 ## 聚焦验证
 
-在以下现有测试入口补本规格命名行为，不能用旧用例通过充当新能力证据。若确需新文件，先在实现diff中创建再同步入口。仅失败指向更广范围或版本门要求才扩大验证。
+按实际涉及的合同和adapter补测试，不为未改adapter重跑同义检查。
+
+按[开发计划§6.1](../../AI_ASSISTANT_DELIVERY_PLAN.md#61-准备与局部验证)一次准备后运行直接入口。下列E2E只覆盖既有失败/取消基线；新增真实长任务/材料失效行为先随实现加入命名用例，再以精确grep选中，零匹配不算通过，不运行整个stabilizationCoreUsability付费矩阵。
 
 ```text
-npm run test:product -- tests/unit/electronLaunchEnvironment.test.ts tests/unit/editorTransaction.test.ts
-npm run test:e2e -- tests/e2e/stabilizationCoreUsability.spec.ts
+npx --no-install vitest run tests/unit/localAgentTaskContract.test.ts tests/unit/diagnosticLog.test.ts tests/unit/editorTransaction.test.ts
+npx --no-install playwright test tests/e2e/stabilizationCoreUsability.spec.ts --grep 'S3 聊天失败注入：一次修复、无进展停止、取消与人工撤销后旧结果零写入$'
 ```
 
-每CLI实际长任务至少跨一个真实压缩/恢复边界，保留事件和全部阶段耗时；先复用既有长任务，不人为烧token凑长度。
+先复用一个实际长任务完成原生边界→人工修改→继续，并保留读取与阶段时间；其余CLI差异由050连续课例汇合，未变证据不重跑。不人为烧token凑长度，不能用模拟compact事件声称真实长任务通过。
 
 ## 回退与交接
 
-交付原生压缩/恢复支持表、缓存规则和阶段诊断；050连续课例按同一版本/模型比较。
+交付原生上下文支持差异、缓存失效与阶段时间证据，050据此优化连续课例，2.0复用完成口径。回退诊断/缓存不能丢用户决定、任务来源或已提交结果。

@@ -1,15 +1,69 @@
 import { buildCoursewareCase } from '../../scripts/build-courseware-case'
 import { createCoursewareBuilderV2 } from '../../src/renderer/course/coursewareBuilderV2'
+import { createCoursewareCaseBuilderApi } from '../../src/renderer/course/coursewareCaseBuilderApi'
+import { createCoursewareBuilderCatalogPort } from '../../scripts/courseware-builder-v2-host'
+import { queryCourseAgentCapabilities, type CourseAgentCapabilityData } from '../../src/shared/courseAgentCapabilities'
+import generatedCapabilities from '../../src/shared/generated/courseAgentCapabilities.json'
 import { openCourseProjectArchive } from '../../src/renderer/project/courseProjectArchive'
 import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const editorRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 
 describe('external courseware case builder', () => {
+  it('shares exact read-only discovery with the app and builds a discovered Recipe through the same Facade', async () => {
+    const session = createCoursewareBuilderV2({ surfaceType: 'slide', title: 'Discover Recipe' })
+    const api = createCoursewareCaseBuilderApi()
+    const query = { kind: 'recipe' as const, surface: 'slide' as const, owner: 'scene' as const }
+    const found = session.discover(query)
+    expect(found).toEqual(queryCourseAgentCapabilities(generatedCapabilities as CourseAgentCapabilityData, query))
+    expect(api.discover(query)).toEqual(found)
+    const card = session.readCapability(found.entries[0]!.id)
+    expect(card).toEqual(api.readCapability(found.entries[0]!.id))
+    if (!('content' in card)) throw new Error('Expected recipe content')
+    const view = session.observe()
+    const receipt = await session.execute('recipe.apply', card.content.input, { kind: 'create', scope: session.createScope({
+      parent: { kind: 'course-locations' }, insertion: { kind: 'after', siblingId: view.scope.locationId },
+    }) })
+    expect(receipt.status).toBe('committed')
+    expect(session.finish().project.locations).toHaveLength(2)
+    expect(() => session.discover({ semanticVersion: 'outdated' })).toThrow('版本')
+  })
+
+  it('reads paginated fresh targets and stage receipts without repeatedly returning a project or prior history', async () => {
+    const session = createCoursewareBuilderV2({ surfaceType: 'slide', title: 'Compact observations' })
+    const ids: string[] = []
+    for (let index = 0; index < 24; index++) {
+      const receipt = await session.execute('native.content', { operation: 'insert', template: { nativeType: 'text', text: `讲解 ${index}` } },
+        { kind: 'create', scope: session.createScope({ parent: { kind: 'owner' }, insertion: { kind: 'append' } }) })
+      expect(receipt.status).toBe('committed')
+      ids.push(receipt.affected[0]!.id)
+    }
+    const first = session.observe()
+    expect(first).not.toHaveProperty('project')
+    expect(first).not.toHaveProperty('receipts')
+    expect(first.targets.content).toHaveLength(20)
+    expect(first.targets.nextOffset).toBe(20)
+    expect(session.observe({ offset: 20 }).targets.content).toHaveLength(4)
+    const target = session.observe({ itemIds: [ids.at(-1)!], includeContent: true })
+    expect(target.targets.content).toHaveLength(1)
+    expect(target.targets.content[0]?.documentRevision).toBe(24)
+    expect(JSON.stringify(target.items)).toContain('讲解 23')
+    expect(Buffer.byteLength(JSON.stringify(target))).toBeLessThan(Buffer.byteLength(JSON.stringify(session.snapshot())) / 4)
+    const recent = session.readReceipts({ after: 20 })
+    expect(recent.receipts).toHaveLength(4)
+    expect(session.readReceipts({ after: recent.cursor }).receipts).toEqual([])
+    expect(() => session.readReceipts({ after: 100 })).toThrow('游标')
+    expect(() => session.observe({ itemIds: ['missing'] })).toThrow('当前 scope')
+    const copy = session.activateScope({ locationId: first.scope.locationId })
+    Reflect.set(copy.scope, 'locationId', 'external-mutation')
+    expect(session.observe().scope.locationId).toBe(first.scope.locationId)
+    expect(session.snapshot()).toHaveProperty('project')
+  })
+
   it('keeps Builder V2 snapshots private and rejects stale steps without a second write', async () => {
     const builder = createCoursewareBuilderV2({ surfaceType: 'slide', title: 'V2 私有工作会话' })
     const scope = builder.createScope({ parent: { kind: 'owner' }, insertion: { kind: 'append' } })
@@ -35,7 +89,19 @@ describe('external courseware case builder', () => {
   })
 
   afterEach(async () => {
+    vi.unstubAllEnvs()
     if (temporaryRoot) await rm(temporaryRoot, { recursive: true, force: true })
+  })
+
+  it('does not grant catalog trust to an unreviewed external directory', async () => {
+    const catalogRoot = path.join(temporaryRoot, 'catalog')
+    await mkdir(catalogRoot)
+    await writeFile(path.join(catalogRoot, 'catalog.json'), JSON.stringify({ catalogVersion: 1, name: 'Unreviewed', packages: [] }))
+    vi.stubEnv('COURSEWARE_COMPONENTS_DIR', catalogRoot)
+    const port = createCoursewareBuilderCatalogPort(editorRoot)
+    const catalog = await port.load()
+    expect(catalog.sources[0]?.trust).toBe('prompt')
+    await expect(port.read({ sourceId: catalog.sources[0]!.sourceId, packageId: 'invented', version: '1' })).rejects.toThrow('受信')
   })
 
   async function createExternalCase(): Promise<string> {

@@ -8,10 +8,9 @@ import {
   type ReactNode,
 } from 'react'
 import { CANVAS_HEIGHT, CANVAS_WIDTH, MIN_NODE_SIZE } from '../../../shared/constants'
-import { createFlowViewportGeometry, revealFlowSelectionPan, type FlowPoint } from '../../../shared/flowViewportGeometry'
+import { createFlowViewportGeometry, projectFlowControllerOverlayFrame, revealFlowSelectionPan, type FlowPoint } from '../../../shared/flowViewportGeometry'
 import { rotatedWorldRectAxisBounds } from '../../authoring/stageViewportTransform'
 import type { LayerItem } from '../../../shared/courseProjectTypes'
-import { constrainTeacherControllerAuthoringFrame } from '../../../shared/teacherControllerLayout'
 import type { ComponentPackageData } from '../../../shared/componentTypes'
 import {
   captureFlowEditorAuthoringTarget,
@@ -42,13 +41,15 @@ const FLOW_OVERLAY_HANDLE_RADIUS = 10
 
 function overlayCardStyle(
   layer: FlowEditorLayerView,
-  preview?: StageRect | null,
-  paperScrollTop = 0,
-  paperOrigin: FlowPoint = { x: 0, y: 0 },
-  paperScrollLeft = 0,
-  viewPan: FlowPoint = { x: 0, y: 0 },
+  preview: StageRect | null | undefined,
+  paperScrollTop: number,
+  paperOrigin: FlowPoint,
+  paperScrollLeft: number,
+  viewPan: FlowPoint,
+  viewportSize: { width: number; height: number },
 ): CSSProperties {
-  const frame = preview ?? layer.item.frame
+  const raw = preview ?? layer.item.frame
+  const frame = constrainFlowControllerOverlayFrame(layer, raw, viewportSize)
   const isController = isTeacherControllerLayerItem(layer.item)
   const isPaper = !isController && layer.item.paperSpace === 'paper'
   const geometry = createFlowViewportGeometry({
@@ -78,7 +79,7 @@ function constrainFlowControllerOverlayFrame(
   viewportSize: { width: number; height: number },
 ): StageRect {
   if (!layer || !isTeacherControllerLayerItem(layer.item)) return frame
-  return constrainTeacherControllerAuthoringFrame(
+  return projectFlowControllerOverlayFrame(
     layer.item.content.data,
     frame,
     layer.item.rotation,
@@ -345,13 +346,15 @@ export function FlowOverlayAuthoringLayer({
   }))
 
   const overlayFrameOf = (layer: FlowEditorLayerView): StageRect => {
-    if (overlayPreview?.id === layer.selectionId) return overlayPreview.frame
-    return {
-      x: layer.item.frame.x,
-      y: layer.item.frame.y,
-      width: layer.item.frame.width,
-      height: layer.item.frame.height,
-    }
+    const raw = overlayPreview?.id === layer.selectionId
+      ? overlayPreview.frame
+      : {
+          x: layer.item.frame.x,
+          y: layer.item.frame.y,
+          width: layer.item.frame.width,
+          height: layer.item.frame.height,
+        }
+    return constrainFlowControllerOverlayFrame(layer, raw, overlayViewportSize)
   }
 
   const selectOverlay = (layer: FlowEditorLayerView) => {
@@ -517,7 +520,15 @@ export function FlowOverlayAuthoringLayer({
         aria-label={interactive ? layer.item.label || '浮层' : undefined}
         {...(inertVisual ? { inert: true } : {})}
         style={{
-          ...overlayCardStyle(layer, preview, paperScrollTop, paperOrigin, paperScrollLeft, viewPan),
+          ...overlayCardStyle(
+            layer,
+            preview,
+            paperScrollTop,
+            paperOrigin,
+            paperScrollLeft,
+            viewPan,
+            overlayViewportSize,
+          ),
           opacity: layer.item.opacity,
           pointerEvents: interactive ? 'auto' : 'none',
         }}
@@ -573,6 +584,7 @@ export function FlowOverlayAuthoringLayer({
             paperOrigin,
             paperScrollLeft,
             viewPan,
+            overlayViewportSize,
           ),
           pointerEvents: readOnly ? 'none' : 'auto',
           background: 'transparent',

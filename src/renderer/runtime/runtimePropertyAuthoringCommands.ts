@@ -179,7 +179,7 @@ function resolutionFailure(
   return Object.freeze({ ok: false as const, code, reason })
 }
 
-function runtimePropertyAuthoringField(
+export function runtimePropertyAuthoringField(
   field: RuntimePropertyAuthoringField,
 ): typeof COURSE_RUNTIME_ENABLED_AUTHORING_FIELD
   | typeof COURSE_RUNTIME_RENDER_MODE_AUTHORING_FIELD {

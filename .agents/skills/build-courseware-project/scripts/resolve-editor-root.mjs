@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // resolve-editor-root.mjs — 确定性定位编辑器产品根目录，替代 LLM 逐目录探测。
-// 输出 JSON：{ ok, editorRoot, capabilityIndex, indexMtime, candidates, strategy, error? }
+// 输出路径与语义版本；mtime 仅为兼容显示字段，不作为能力缓存或版本选择依据。
 // 用法：node scripts/resolve-editor-root.mjs [--no-cache]
 import fs from 'node:fs'
 import path from 'node:path'
@@ -16,11 +16,16 @@ function validate(root) {
     const indexPath = path.join(root, 'artifacts', 'ai-capabilities', 'index.json')
     const pkgPath = path.join(root, 'package.json')
     const hostPath = path.join(root, 'scripts', 'courseware-builder-v2-host.ts')
-    if (!fs.existsSync(indexPath) || !fs.existsSync(pkgPath) || !fs.existsSync(hostPath)) return null
+    const discoveryPath = path.join(root, 'artifacts', 'ai-capabilities', 'discovery.json')
+    const queryPath = path.join(root, 'scripts', 'query-ai-capabilities.mjs')
+    if (!fs.existsSync(indexPath) || !fs.existsSync(pkgPath) || !fs.existsSync(hostPath) || !fs.existsSync(queryPath)) return null
     JSON.parse(fs.readFileSync(indexPath, 'utf8'))
+    const discovery = JSON.parse(fs.readFileSync(discoveryPath, 'utf8'))
+    if (discovery.version !== 1 || typeof discovery.semanticVersion !== 'string' || !discovery.semanticVersion) return null
     const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'))
     if (!pkg.scripts || !pkg.scripts['build:courseware-case']) return null
-    return { root, indexPath, indexMtime: fs.statSync(indexPath).mtimeMs, pkgVersion: pkg.version || null }
+    return { root, indexPath, discoveryPath, queryPath, semanticVersion: discovery.semanticVersion,
+      indexMtime: fs.statSync(indexPath).mtimeMs, pkgVersion: pkg.version || null }
   } catch { return null }
 }
 
@@ -37,7 +42,11 @@ function tryRoot(root, strategy) {
 }
 
 // 策略 1：环境变量
-tryRoot(process.env.COURSEWARE_EDITOR_ROOT, 'env')
+if (process.env.COURSEWARE_EDITOR_ROOT && !tryRoot(process.env.COURSEWARE_EDITOR_ROOT, 'env')) {
+  emit({ ok: false, error: 'explicit_editor_root_invalid', editorRoot: process.env.COURSEWARE_EDITOR_ROOT,
+    hint: '本轮明确指定的产品根或能力发现不可用；修复该路径，不改用其他产品版本。' })
+  process.exit(1)
+}
 
 // 策略 2：skill 本地戳（上次成功或同步脚本写入）
 if (!noCache && candidates.length === 0) {
@@ -79,8 +88,11 @@ if (candidates.length === 0) {
   process.exit(1)
 }
 
-// 多候选：取能力索引最新者为主选，全部列出供甄别
-candidates.sort((a, b) => b.indexMtime - a.indexMtime)
+// 不把文件时间当作产品能力版本；不同能力的搜索结果必须明确定位。
+if (new Set(candidates.map(candidate => candidate.semanticVersion)).size > 1) {
+  emit({ ok: false, error: 'ambiguous_editor_roots', candidates, hint: '存在不同能力版本，请通过 COURSEWARE_EDITOR_ROOT 选择本轮产品根目录。' })
+  process.exit(1)
+}
 const best = candidates[0]
 
 // 写本地戳，加速下次（仅文件，不进 Git 同步内容）
@@ -90,9 +102,12 @@ emit({
   ok: true,
   editorRoot: best.root,
   capabilityIndex: best.indexPath,
+  capabilityDiscovery: best.discoveryPath,
+  capabilityQuery: best.queryPath,
+  semanticVersion: best.semanticVersion,
   indexMtime: new Date(best.indexMtime).toISOString(),
   pkgVersion: best.pkgVersion,
   strategy: best.strategy,
-  candidates: candidates.map(c => ({ root: c.root, indexMtime: new Date(c.indexMtime).toISOString(), pkgVersion: c.pkgVersion, strategy: c.strategy })),
-  note: candidates.length > 1 ? '存在多个有效候选，已选能力索引最新者；若主选错误，请用 COURSEWARE_EDITOR_ROOT 显式指定' : undefined,
+  candidates: candidates.map(c => ({ root: c.root, semanticVersion: c.semanticVersion, pkgVersion: c.pkgVersion, strategy: c.strategy })),
+  note: candidates.length > 1 ? '多个候选具有相同能力语义版本，按发现顺序选择；可用 COURSEWARE_EDITOR_ROOT 显式指定。' : undefined,
 })

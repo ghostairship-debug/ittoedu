@@ -51,6 +51,7 @@ export type RuntimeSourceAuthoringFailureCode =
   | 'invalid-target'
   | 'target-locked'
   | 'invalid-source'
+  | 'invalid-fallback'
   | 'invalid-clock'
   | 'invalid-document'
 
@@ -82,6 +83,8 @@ export interface PlanRuntimeSourceUpdateInput {
   readonly currentIdentity: CurrentCourseAuthoringTargetIdentity
   readonly target: CourseAuthoringTarget
   readonly source: string
+  /** Rebind an explicitly supplied fallback; omission preserves the current one. */
+  readonly staticFallback?: NonNullable<RuntimeLayerItem['runtime']['staticFallback']>
   /** Explicit clock input keeps this planner deterministic and side-effect free. */
   readonly now: string
 }
@@ -122,6 +125,7 @@ const FAILURE_REASONS: Readonly<Record<RuntimeSourceAuthoringFailureCode, string
     'invalid-target': 'Runtime 源码目标的稳定作者地址、类型或状态无效',
     'target-locked': 'Runtime 图层已锁定，不能修改源码',
     'invalid-source': 'Runtime 源码无效',
+    'invalid-fallback': 'Runtime 后备必须引用当前工程中的有效图片资产',
     'invalid-clock': 'Runtime 源码提交需要有效的显式时间',
     'invalid-document': 'Runtime 源码提交产生了无效的 Course Project V9 文档',
   })
@@ -404,8 +408,9 @@ function validateSource(
 }
 
 /**
- * Plans one exact-field Runtime source edit without touching the V8 projection,
- * resources or any other Runtime/LayerItem field.
+ * Plans a Runtime source edit and optional fallback rebind in one transaction.
+ * Imported asset bytes remain owned by the resource transaction; every other
+ * Runtime/LayerItem field and its stable identity remain unchanged.
  */
 export function planRuntimeSourceUpdate(
   input: PlanRuntimeSourceUpdateInput,
@@ -452,8 +457,20 @@ export function planRuntimeSourceUpdate(
   const sourceFailure = validateSource(resolution.value.item, input.source)
   if (sourceFailure) return sourceFailure
 
+  if (input.staticFallback !== undefined) {
+    const parsedFallback = courseRuntimeDefinitionSchema.shape.staticFallback.safeParse(input.staticFallback)
+    if (!parsedFallback.success || !parsedFallback.data
+      || input.project.assets[parsedFallback.data.assetId]?.kind !== 'image') {
+      return fail('invalid-fallback')
+    }
+  }
+
   const hint = selectionHint(input.target, resolution.value.carrier)
-  if (resolution.value.item.runtime.source === input.source) {
+  const currentFallback = resolution.value.item.runtime.staticFallback
+  const fallbackUnchanged = input.staticFallback === undefined
+    || input.staticFallback.assetId === currentFallback?.assetId
+      && input.staticFallback.coverage === currentFallback.coverage
+  if (resolution.value.item.runtime.source === input.source && fallbackUnchanged) {
     const parsed = courseProjectDocumentSchema.safeParse(structuredClone(input.project))
     if (!parsed.success) {
       return fail(
@@ -480,6 +497,9 @@ export function planRuntimeSourceUpdate(
     return fail(nextResolution.code, nextResolution.reason)
   }
   nextResolution.value.item.runtime.source = input.source
+  if (input.staticFallback !== undefined) {
+    nextResolution.value.item.runtime.staticFallback = structuredClone(input.staticFallback)
+  }
   next.revision = input.project.revision + 1
   next.updatedAt = input.now
 

@@ -11,19 +11,31 @@ export const REBUILD_USER_DATA_DIRECTORY_NAME = 'ittoedu-courseware-editor-v8-re
 
 type ApplicationPathHost = Pick<App, 'getPath' | 'setPath'>
 
-function hasExplicitUserDataDirectory(argv: readonly string[]): boolean {
-  return argv.some(
-    (argument) =>
-      argument === '--user-data-dir' || argument.startsWith('--user-data-dir='),
-  )
+function explicitUserDataDirectory(argv: readonly string[]): string | null {
+  for (let index = 0; index < argv.length; index++) {
+    const argument = argv[index]!
+    if (argument === '--user-data-dir') {
+      const value = argv[index + 1]
+      if (!value || value.startsWith('--')) throw new Error('Missing value for --user-data-dir')
+      return path.resolve(value)
+    }
+    if (argument.startsWith('--user-data-dir=')) {
+      const value = argument.slice('--user-data-dir='.length)
+      if (!value) throw new Error('Missing value for --user-data-dir')
+      return path.resolve(value)
+    }
+  }
+  return null
 }
 
 export function configureApplicationStorage(
   application: ApplicationPathHost,
   argv: readonly string[] = process.argv,
 ): string {
-  if (hasExplicitUserDataDirectory(argv)) {
-    return application.getPath('userData')
+  const explicitUserDataDirectoryPath = explicitUserDataDirectory(argv)
+  if (explicitUserDataDirectoryPath) {
+    application.setPath('userData', explicitUserDataDirectoryPath)
+    return explicitUserDataDirectoryPath
   }
   const userDataPath = path.join(
     application.getPath('appData'),

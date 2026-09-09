@@ -84,6 +84,9 @@ import {
   type ComponentTextEditSession,
 } from '../../authoring/componentTextEditSession'
 import { isAuthoringCanvasInteractive } from '../../authoring/authoringReadiness'
+import { authoringObservationDraftToken } from '../../authoring/generation/authoringObservation'
+import { registerPublishedCaptureResource, waitForPublishedObservationReady } from '../../../player/surfaces/publishedCapture'
+import { SlideAuthoringObservationReady } from './slideAuthoringObservationReady'
 import {
   beginRuntimeTargetEditSession,
   runtimeTargetEditSessionMatchesContext,
@@ -142,6 +145,7 @@ export interface SlideWorkspaceSnapshot {
   readonly sceneId: string
   readonly projectId: string
   readonly projectRevision: number
+  readonly sessionGeneration: number
   readonly previewRebuildKey: string
   readonly tryRunMountKey: string | null
   /** Armed direct-draw tool; `null` keeps the canvas in select mode. */
@@ -696,6 +700,7 @@ export function SlideLocationWorkspace({
     node: AuthoringPatchNode
   }>())
   const authoringFrameRef = useRef<number | null>(null)
+  const authoringObservationReady = useMemo(() => new SlideAuthoringObservationReady(), [])
   const runtimeTargetsByHostRef = useRef(new Map<
     string,
     ReadonlyArray<Readonly<RuntimeAuthoringTarget>>
@@ -865,6 +870,8 @@ export function SlideLocationWorkspace({
     previewRebuildKey,
     previewRetryRevision,
   ])
+  const observationGenerationRef = useRef(previewGeneration)
+  observationGenerationRef.current = previewGeneration
   const authoringCanvasInteractive = isAuthoringCanvasInteractive({
     canvasMode,
     playerReady: authoringReadyRef.current,
@@ -1008,7 +1015,11 @@ export function SlideLocationWorkspace({
       patch,
     }
     try {
-      void session.applyAuthoringCommand(command).catch((error) => {
+      const pending = session.applyAuthoringCommand(command).then((response) => {
+        if (response.type === PLAYER_AUTHORING_MESSAGE_TYPES.error) throw new Error(response.message)
+      })
+      authoringObservationReady.track(observationGenerationRef.current, pending)
+      void pending.catch((error) => {
         failPublishedAuthoring(
           command.sessionId,
           error instanceof Error
@@ -1033,7 +1044,7 @@ export function SlideLocationWorkspace({
         playerAuthoringSnapshotBarrierForCommand(command)
     }
     return command
-  }, [failPublishedAuthoring])
+  }, [authoringObservationReady, failPublishedAuthoring])
 
   useEffect(() => onElementAnimationPreviewRequested(({ action, delayMs }) => {
     const currentSnapshot = readSnapshot()
@@ -1075,6 +1086,33 @@ export function SlideLocationWorkspace({
       })
     }
   }, [postAuthoringPatch])
+
+  useLayoutEffect(() => {
+    const owner = stageViewportRef.current
+    if (!owner || !usePublishedAuthoring) return
+    const waitForReady = async () => {
+      const generation = observationGenerationRef.current
+      // An observation can arrive before the scheduled frame flush. Submit the
+      // existing latest-node queue, then await its actual Published ACKs.
+      if (authoringFrameRef.current !== null) {
+        window.cancelAnimationFrame(authoringFrameRef.current)
+        flushAuthoringNodePatches()
+      }
+      await authoringObservationReady.waitForReady(generation)
+      const host = publishedAuthoringHostRef.current
+      if (!host || !authoringReadyRef.current || authoringSnapshotBarrierRef.current) {
+        throw new Error('当前 Slide Published 画布尚未完成同步')
+      }
+      // The ACK installs Native DOM synchronously; its images may still be
+      // decoding. Resolve readiness from the current child tree after the queue.
+      await waitForPublishedObservationReady(host)
+      await authoringObservationReady.waitForReady(generation)
+    }
+    return registerPublishedCaptureResource(owner, {
+      waitForCaptureReady: waitForReady,
+      waitForObservationReady: waitForReady,
+    })
+  }, [authoringObservationReady, flushAuthoringNodePatches, usePublishedAuthoring])
 
   const queueAuthoringNodePatch = useCallback((
     scope: 'scene' | 'global',
@@ -1386,6 +1424,7 @@ export function SlideLocationWorkspace({
       })
       return
     }
+    authoringObservationReady.begin(previewGeneration)
     authoringReadyRef.current = false
     authoringRevisionRef.current = 0
     authoringSnapshotBarrierRef.current = null
@@ -1436,6 +1475,7 @@ export function SlideLocationWorkspace({
           )
         },
         onCleanup: () => {
+          authoringObservationReady.end(previewGeneration)
           container.dataset.coursePlayerReady = 'false'
           if (publishedAuthoringInitRef.current?.token === token) {
             publishedAuthoringInitRef.current = null
@@ -1452,6 +1492,7 @@ export function SlideLocationWorkspace({
       },
     )
   }, [
+    authoringObservationReady,
     publishedAuthoringOwnerScope,
     failPublishedAuthoring,
     handlePublishedAuthoringMessage,
@@ -2893,7 +2934,17 @@ export function SlideLocationWorkspace({
             : slideEditorView?.presentation?.states.find((state) => state.active)?.name
               ?? '状态'}`}
       </div>
-      <div ref={stageViewportRef} className="canvas-viewport">
+      <div ref={stageViewportRef} className="canvas-viewport"
+        data-observation-source={canvasMode === 'edit' ? 'authoring' : undefined}
+        data-observation-project-id={snapshot.projectId}
+        data-observation-revision={snapshot.projectRevision}
+        data-observation-session-generation={snapshot.sessionGeneration}
+        data-observation-surface-id={slideEditorView.surfaceId}
+        data-observation-location-id={courseLocationId}
+        data-observation-state-id={activePresentationStateId ?? ''}
+        data-observation-ready={authoringCanvasInteractive ? 'true' : 'false'}
+        data-observation-draft-token={authoringObservationDraftToken(snapshot.contentEdit)}
+      >
         <div
           className="canvas-stage-stack"
           data-panning={panning || undefined}

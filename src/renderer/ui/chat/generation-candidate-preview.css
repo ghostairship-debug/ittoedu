@@ -1,0 +1,10 @@
+.generation-candidate-preview { display: grid; gap: 12px; min-width: 0; padding: 10px; border: 1px solid #dce3ec; border-radius: 10px; background: #f6f8fb; }
+.generation-candidate-preview figure { min-width: 0; margin: 0; }
+.generation-candidate-preview figcaption { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; margin-bottom: 6px; font-size: 13px; font-weight: 600; color: #26364d; }
+.generation-candidate-preview figcaption span { font-size: 11px; font-weight: 400; color: #5c6b80; }
+.generation-candidate-preview__before img { display: block; max-width: 100%; width: 100%; max-height: 180px; object-fit: contain; border: 1px solid #e0e6ee; border-radius: 6px; background: #fff; }
+.generation-candidate-preview__missing { margin: 0; padding: 12px; color: #66758b; font-size: 12px; }
+.generation-candidate-preview__viewport { position: relative; height: clamp(240px, 36vh, 420px); overflow: hidden; border: 1px solid #c8d3e1; border-radius: 6px; background: #fff; }
+.generation-candidate-preview__host { position: absolute; inset: 0; overflow: hidden; isolation: isolate; contain: layout paint; }
+.generation-candidate-preview__feedback { position: absolute; z-index: 2; inset: 0; display: flex; align-items: center; justify-content: center; margin: 0; padding: 16px; background: #ffffffed; color: #506078; font-size: 13px; }
+.generation-candidate-preview__error { color: #a52c27; }

@@ -1,0 +1,204 @@
+{
+  "candidateCarrier": {
+    "default": "runtime"
+  },
+  "inputSchema": {
+    "$defs": {
+      "__schema0": {
+        "enum": [
+          "canvas-runtime",
+          "surface-runtime"
+        ],
+        "type": "string"
+      },
+      "__schema1": {
+        "anyOf": [
+          {
+            "const": 2,
+            "type": "number"
+          },
+          {
+            "const": 3,
+            "type": "number"
+          }
+        ]
+      },
+      "__schema2": {
+        "type": "boolean"
+      },
+      "__schema3": {
+        "enum": [
+          "phaser",
+          "dom",
+          "hybrid"
+        ],
+        "type": "string"
+      },
+      "__schema4": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "__schema5": {
+        "additionalProperties": false,
+        "properties": {
+          "metadata": {
+            "additionalProperties": {
+              "additionalProperties": false,
+              "properties": {
+                "description": {
+                  "maxLength": 1000,
+                  "type": "string"
+                },
+                "label": {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                "maxLength": {
+                  "exclusiveMinimum": 0,
+                  "maximum": 1000000,
+                  "type": "integer"
+                },
+                "multiline": {
+                  "type": "boolean"
+                }
+              },
+              "type": "object"
+            },
+            "propertyNames": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "values": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
+            },
+            "type": "object"
+          }
+        },
+        "required": [
+          "values"
+        ],
+        "type": "object"
+      },
+      "__schema6": {
+        "additionalProperties": {
+          "additionalProperties": false,
+          "properties": {
+            "assetId": {
+              "$ref": "#/$defs/__schema7"
+            }
+          },
+          "required": [
+            "assetId"
+          ],
+          "type": "object"
+        },
+        "propertyNames": {
+          "type": "string"
+        },
+        "type": "object"
+      },
+      "__schema7": {
+        "maxLength": 240,
+        "minLength": 1,
+        "type": "string"
+      },
+      "__schema8": {
+        "additionalProperties": {
+          "$ref": "#/$defs/__schema7"
+        },
+        "propertyNames": {
+          "type": "string"
+        },
+        "type": "object"
+      },
+      "__schema9": {
+        "additionalProperties": false,
+        "properties": {
+          "assetId": {
+            "$ref": "#/$defs/__schema7"
+          },
+          "coverage": {
+            "enum": [
+              "surface",
+              "scene"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "assetId",
+          "coverage"
+        ],
+        "type": "object"
+      }
+    },
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": false,
+    "properties": {
+      "label": {
+        "maxLength": 120,
+        "minLength": 1,
+        "type": "string"
+      },
+      "runtime": {
+        "additionalProperties": false,
+        "properties": {
+          "assets": {
+            "$ref": "#/$defs/__schema6"
+          },
+          "content": {
+            "$ref": "#/$defs/__schema5"
+          },
+          "enabled": {
+            "$ref": "#/$defs/__schema2"
+          },
+          "nodeBindings": {
+            "$ref": "#/$defs/__schema8"
+          },
+          "protocol": {
+            "$ref": "#/$defs/__schema0"
+          },
+          "renderMode": {
+            "$ref": "#/$defs/__schema3"
+          },
+          "runtimeApiVersion": {
+            "$ref": "#/$defs/__schema1"
+          },
+          "source": {
+            "$ref": "#/$defs/__schema4"
+          },
+          "staticFallback": {
+            "$ref": "#/$defs/__schema9"
+          }
+        },
+        "required": [
+          "protocol",
+          "runtimeApiVersion",
+          "enabled",
+          "renderMode",
+          "source",
+          "content",
+          "assets"
+        ],
+        "type": "object"
+      }
+    },
+    "required": [
+      "runtime"
+    ],
+    "type": "object"
+  },
+  "name": "runtime.insert",
+  "support": "conditional-on-input-target-resources-and-host",
+  "supportedScopes": [
+    "slide:scene",
+    "slide:global",
+    "flow:surface"
+  ],
+  "version": 1
+}

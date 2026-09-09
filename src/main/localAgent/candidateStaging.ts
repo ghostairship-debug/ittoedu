@@ -1,9 +1,28 @@
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import { z } from 'zod'
-import { generationRequestSchema, type GenerationRequest } from '../../shared/generationContract'
+import { generationRequestSchema, generationResourceFileSchema, type GenerationRequest } from '../../shared/generationContract'
 import { MAX_GENERATION_RESULT_BYTES, parseGenerationCandidate } from '../../shared/generationResult'
-import { courseAgentSkills, courseAgentSkillMarkdown } from '../../shared/courseAgentSkills'
+import { generationRequestForPrompt } from './profile'
+import { ensureGenerationCapabilityWorkspace } from './capabilityWorkspace'
+
+function decodeResource(file: NonNullable<GenerationRequest['resourceFiles']>[number]): Buffer {
+  if (file.encoding === 'utf8') return Buffer.from(file.content, 'utf8')
+  const bytes = Buffer.from(file.content, 'base64')
+  if (bytes.toString('base64') !== file.content) throw new Error(`资源不是规范 base64: ${file.path}`)
+  return bytes
+}
+
+async function writeResource(root: string, relative: string, bytes: string | Buffer): Promise<void> {
+  generationResourceFileSchema.shape.path.parse(relative)
+  const target = path.join(root, ...relative.split('/'))
+  if (!within(root, target)) throw new Error('资源必须位于本轮资源根内')
+  const parent = path.dirname(target)
+  await fs.mkdir(parent, { recursive: true })
+  if (await fs.realpath(root) !== root || await fs.realpath(parent) !== parent) throw new Error('资源目录不能包含链接')
+  await fs.writeFile(target, bytes, { flag: 'wx', mode: 0o600 })
+  if (await fs.realpath(target) !== target) throw new Error('资源文件不能包含链接')
+}
 
 function within(root: string, target: string): boolean {
   const relative = path.relative(root, target)
@@ -39,12 +58,9 @@ export class CandidateStaging {
     const target = path.join(parent, request.requestId)
     await fs.mkdir(target) // Reusing a request must not pick up old or half-written output.
     try {
-      await fs.writeFile(path.join(target, 'request.json'), JSON.stringify(request), { flag: 'wx', mode: 0o600 })
-      for (const skill of courseAgentSkills) {
-        const directory = path.join(target, 'skills', skill.name)
-        await fs.mkdir(directory, { recursive: true })
-        await fs.writeFile(path.join(directory, 'SKILL.md'), courseAgentSkillMarkdown(skill), { flag: 'wx', mode: 0o600 })
-      }
+      await ensureGenerationCapabilityWorkspace(target)
+      await writeResource(target, 'request.json', JSON.stringify(generationRequestForPrompt(request)))
+      for (const resource of request.resourceFiles ?? []) await writeResource(target, `resources/${resource.path}`, decodeResource(resource))
       return target
     } catch (error) { await fs.rm(target, { recursive: true, force: true }); throw error }
   }

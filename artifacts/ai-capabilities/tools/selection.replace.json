@@ -1,0 +1,31 @@
+{
+  "candidateCarrier": {
+    "default": "native"
+  },
+  "description": "完整替换精确选中对象。先在附带 create scope 创建新对象和所需资源，再以 replacementItemId 引用前序创建步骤的 item-id。宿主保留原位置、层级、可见性、旋转和可映射引用；不兼容引用明确失败。所有步骤先私有准备，最终一次提交。修改文字、字号或参数优先使用 edit/component.configure。",
+  "inputSchema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": false,
+    "properties": {
+      "replacementItemId": {
+        "minLength": 1,
+        "type": "string"
+      }
+    },
+    "required": [
+      "replacementItemId"
+    ],
+    "type": "object"
+  },
+  "name": "selection.replace",
+  "support": "conditional-on-input-target-resources-and-host",
+  "supportedScopes": [
+    "slide:scene",
+    "slide:global",
+    "flow:surface",
+    "flow:global",
+    "spatial-2d:world",
+    "spatial-2d:global"
+  ],
+  "version": 1
+}

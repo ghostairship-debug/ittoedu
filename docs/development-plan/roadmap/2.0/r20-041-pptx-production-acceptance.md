@@ -43,11 +43,11 @@
 
 ## 聚焦验证
 
-在以下现有测试入口补本规格命名行为，不能用旧用例通过充当新能力证据。若确需新文件，先在实现diff中创建再同步入口。仅失败指向更广范围或版本门要求才扩大验证。
+准备与证据复用统一遵循[开发计划§6.1](../../AI_ASSISTANT_DELIVERY_PLAN.md#61-准备与局部验证)。相关产物准备一次后直接选择受影响PPTX测试；下列E2E只运行已有名称以“S2 PPTX ”或“S3 PPTX ”开头的PPTX用例，不附带三CLI付费矩阵。新媒体/效果用例先随实现创建，再列入实际FILE与--grep，零匹配不得通过；旧用例不能冒充新支持已验收。
 
 ```text
-npm run test:product -- tests/unit/pptxEquationImport.test.ts tests/unit/pptxDiagramImport.test.ts tests/unit/coursePptxExport.test.ts
-npm run test:e2e -- tests/e2e/stabilizationCoreUsability.spec.ts
+npx --no-install vitest run tests/unit/pptxEquationImport.test.ts tests/unit/pptxDiagramImport.test.ts tests/unit/coursePptxExport.test.ts
+npx --no-install playwright test tests/e2e/stabilizationCoreUsability.spec.ts --grep "S[23] PPTX "
 ```
 
 真实渲染/交互/媒体、保存重开、导出→再导入必须执行；XML/数量/fixture不能替代。

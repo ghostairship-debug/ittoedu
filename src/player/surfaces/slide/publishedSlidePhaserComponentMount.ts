@@ -380,6 +380,10 @@ export function mountPublishedSlidePhaserComponent(
         throw captureFailure ?? new Error(`Phaser 组件“${instanceId}”未完成启动`)
       }
     },
+    async waitForObservationReady() {
+      await handle.waitForReady()
+      await resources!.waitForCaptureReady()
+    },
     async waitForCaptureReady() {
       if (captureFailure) throw captureFailure
       if (destroyed) throw new Error(`Phaser 组件“${instanceId}”已销毁`)

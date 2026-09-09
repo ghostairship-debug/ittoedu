@@ -35,6 +35,22 @@ interface TextLine {
   width: number
 }
 
+interface PositionedTextLine extends TextLine {
+  start: number
+  end: number
+  x: number
+  top: number
+  baseline: number
+  height: number
+  glyphHeight: number
+}
+
+export interface HorizontalTextNodeLayout {
+  fontSize: number
+  contentHeight: number
+  lines: PositionedTextLine[]
+}
+
 interface TextColumn {
   characters: CharacterBox[]
 }
@@ -132,6 +148,10 @@ function roundedRectPath(
   context.closePath()
 }
 
+// Only Chinese punctuation boundaries: ASCII/English wrapping stays unchanged.
+const HORIZONTAL_OPEN_PUNCTUATION = new Set(Array.from('（［｛〔〈《「『【〖〘〚“‘'))
+const HORIZONTAL_CLOSE_PUNCTUATION = new Set(Array.from('，。、；：？！）］｝〕〉》」』】〗〙〛”’'))
+
 function layoutHorizontal(
   context: LayoutMeasureContext,
   node: TextNode,
@@ -139,10 +159,32 @@ function layoutHorizontal(
   availableWidth: number,
 ): TextLine[] {
   const lines: TextLine[] = []
-  let line: TextLine = { characters: [], width: 0 }
+  let paragraph: CharacterBox[] = []
   const push = () => {
-    lines.push(line)
-    line = { characters: [], width: 0 }
+    if (paragraph.length === 0) lines.push({ characters: [], width: 0 })
+    let start = 0
+    while (start < paragraph.length) {
+      let end = start, width = 0
+      while (end < paragraph.length) {
+        const nextWidth = width + paragraph[end]!.width
+        if (end > start && nextWidth > availableWidth) break
+        width = nextWidth
+        end += 1
+      }
+      if (end < paragraph.length) {
+        const widthBreak = end
+        while (end > start && (
+          HORIZONTAL_OPEN_PUNCTUATION.has(paragraph[end - 1]!.value)
+          || HORIZONTAL_CLOSE_PUNCTUATION.has(paragraph[end]!.value)
+        )) end -= 1
+        // An impossibly narrow frame still consumes at least one character.
+        if (end === start) end = widthBreak
+      }
+      const characters = paragraph.slice(start, end)
+      lines.push({ characters, width: characters.reduce((sum, character) => sum + character.width, 0) })
+      start = end
+    }
+    paragraph = []
   }
   Array.from(node.text).forEach((value, index) => {
     if (value === '\n') {
@@ -152,11 +194,9 @@ function layoutHorizontal(
     const style = runStyle(node, index)
     context.font = font(node, fontSize, style)
     const width = context.measureText(value).width + node.style.letterSpacing
-    if (line.characters.length > 0 && line.width + width > availableWidth) push()
-    line.characters.push({ value, index, width, style })
-    line.width += width
+    paragraph.push({ value, index, width, style })
   })
-  if (line.characters.length > 0 || lines.length === 0 || node.text.endsWith('\n')) push()
+  if (paragraph.length > 0 || lines.length === 0 || node.text.endsWith('\n')) push()
   return lines
 }
 
@@ -190,6 +230,50 @@ function requiredHorizontalHeight(
   lines: TextLine[],
 ): number {
   return node.style.padding * 2 + horizontalContentHeight(node, fontSize, lines)
+}
+
+function positionHorizontalTextLines(
+  node: TextNode,
+  fontSize: number,
+  lines: TextLine[],
+  width: number,
+  height: number,
+): HorizontalTextNodeLayout {
+  const padding = node.style.padding
+  const availableWidth = Math.max(1, width - padding * 2)
+  const contentHeight = horizontalContentHeight(node, fontSize, lines)
+  const verticalOffset = node.style.verticalAlign === 'middle'
+    ? Math.max(0, (height - padding * 2 - contentHeight) / 2)
+    : node.style.verticalAlign === 'bottom'
+      ? Math.max(0, height - padding * 2 - contentHeight)
+      : 0
+  let top = padding + verticalOffset
+  let cursor = 0
+  const characters = Array.from(node.text)
+  return { fontSize, contentHeight, lines: lines.map(line => {
+    const alignOffset = node.style.align === 'center' ? (availableWidth - line.width) / 2
+      : node.style.align === 'right' ? availableWidth - line.width : 0
+    const metrics = horizontalLineMetrics(node, fontSize, line)
+    const lineHeight = horizontalLineHeight(node, fontSize, line)
+    const start = line.characters[0]?.index ?? cursor
+    const end = line.characters.at(-1)?.index !== undefined ? line.characters.at(-1)!.index + 1 : start
+    cursor = end + (characters[end] === '\n' ? 1 : 0)
+    const positioned = { ...line, start, end, x: padding + Math.max(0, alignOffset), top,
+      baseline: top + metrics.ascent, height: lineHeight - node.style.lineSpacing,
+      glyphHeight: metrics.ascent + metrics.descent }
+    top += lineHeight
+    return positioned
+  }) }
+}
+
+/** The same measured lines and placements used by the Canvas painter, inside an authored frame. */
+export function layoutHorizontalTextNode(node: TextNode): HorizontalTextNodeLayout {
+  const { context } = resolveLayoutMeasureContext()
+  const availableWidth = Math.max(1, node.width - node.style.padding * 2)
+  const availableHeight = Math.max(1, node.height - node.style.padding * 2)
+  const fontSize = fitFontSize(context, node, availableWidth, availableHeight)
+  return positionHorizontalTextLines(node, fontSize,
+    layoutHorizontal(context, node, fontSize, availableWidth), node.width, node.height)
 }
 
 function layoutVertical(
@@ -491,21 +575,9 @@ export function renderTextNodeCanvas(
     })
   } else {
     const lineHeight = fontSize * 1.22 + node.style.lineSpacing
-    const contentHeight = horizontalContentHeight(node, fontSize, lines)
-    const verticalOffset = node.style.verticalAlign === 'middle'
-      ? Math.max(0, (outputHeight - padding * 2 - contentHeight) / 2)
-      : node.style.verticalAlign === 'bottom'
-        ? Math.max(0, outputHeight - padding * 2 - contentHeight)
-        : 0
-    let lineTop = padding + verticalOffset
-    lines.forEach((line) => {
-      const alignOffset = node.style.align === 'center'
-        ? (availableWidth - line.width) / 2
-        : node.style.align === 'right'
-          ? availableWidth - line.width
-          : 0
-      let x = padding + Math.max(0, alignOffset)
-      const baseline = lineTop + horizontalLineMetrics(node, fontSize, line).ascent
+    positionHorizontalTextLines(node, fontSize, lines, width, outputHeight).lines.forEach((line) => {
+      let x = line.x
+      const baseline = line.baseline
       for (const character of line.characters) {
         drawCharacter(context, node, character, fontSize, x, baseline, lineHeight)
         if (characterUsesEmphasis(character)) {
@@ -524,7 +596,6 @@ export function renderTextNodeCanvas(
         }
         x += character.width
       }
-      lineTop += horizontalLineHeight(node, fontSize, line)
     })
   }
   context.restore()

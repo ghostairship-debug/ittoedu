@@ -322,6 +322,7 @@ export async function buildCoursewareCase(
   const editorRoot = await realpath(dependencies.editorRoot ?? scriptRoot)
   const capabilityIndexPath = path.join(editorRoot, 'artifacts', 'ai-capabilities', 'index.json')
   const capabilityIndex = JSON.parse(await readFile(capabilityIndexPath, 'utf8')) as unknown
+  const capabilityDiscovery = JSON.parse(await readFile(path.join(editorRoot, 'artifacts', 'ai-capabilities', 'discovery.json'), 'utf8')) as unknown
   const [teachingPlan, presentationScript] = await Promise.all([
     readFile(teachingPlanPath, 'utf8'),
     readFile(presentationScriptPath, 'utf8'),
@@ -340,6 +341,7 @@ export async function buildCoursewareCase(
       presentationScript: Object.freeze({ path: presentationScriptPath, content: presentationScript }),
     }),
     capabilityIndex,
+    capabilityDiscovery,
     api: createCoursewareCaseBuilderApi(),
   })
   const requestedVersion = typeof imported === 'object' && imported !== null ? Reflect.get(imported, 'apiVersion') : undefined

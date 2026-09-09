@@ -7,6 +7,7 @@ import { selectFlowEditorBlock } from '../../course/flowEditorSlice'
 import { makeLayerItemAuthoringAddress } from '../courseAuthoringScope'
 import { resolveAuthoringToolScope } from './authoringToolScope'
 import { admitDynamicCandidate } from './dynamicCandidateAdmission'
+import type { DynamicBehaviorObservation } from '../../../shared/dynamicBehaviorObservation'
 import type { AuthoringToolDefinition } from './executeAuthoringTool'
 
 const schema = z.object({ runtime: courseRuntimeDefinitionSchema, label: z.string().trim().min(1).max(120).optional() }).strict()
@@ -36,11 +37,12 @@ export const runtimeInsertTool: AuthoringToolDefinition<z.infer<typeof schema>> 
       itemIds = result.createdLayerItemIds ?? []
     } else throw new Error('当前 owner 不支持 Runtime 创建')
     if (itemIds.length !== 1) throw new Error('Runtime 命令没有返回唯一创建身份')
-    await admitDynamicCandidate(nextDocument, resources, [{ locationId: target.locationId, stateId: target.stateId, instanceIds: itemIds }], signal)
+    const behaviorEvidence: DynamicBehaviorObservation[] = []
+    await admitDynamicCandidate(nextDocument, resources, [{ locationId: target.locationId, stateId: target.stateId, instanceIds: itemIds }], signal, false, { onBehaviorEvidence: evidence => behaviorEvidence.push(...evidence) })
     return { transaction: { projectId: document.id, baseRevision: document.revision, nextDocument, resourceChanges: {},
       selectionHint: { kind: 'authoring-tool-selection', locationId: target.locationId, stateId: target.stateId, owner: target.owner, itemIds,
         ...(surface.type === 'flow' ? { flowCarrier: 'overlay' } : {}) } },
       affected: itemIds.map(id => ({ id, operation: 'created' as const, ownerKey: target.ownerKey,
-        authoringAddress: makeLayerItemAuthoringAddress({ projectId: document.id, owner: target.owner, surfaceId: surface.id, sceneId: scope.sceneId, kind: 'runtime', layerItemId: id, field: 'runtime/source' }) })) }
+        authoringAddress: makeLayerItemAuthoringAddress({ projectId: document.id, owner: target.owner, surfaceId: surface.id, sceneId: scope.sceneId, kind: 'runtime', layerItemId: id, field: 'runtime/source' }) })), ...(behaviorEvidence.length ? { behaviorEvidence } : {}) }
   },
 }

@@ -12,7 +12,7 @@
 - Status / Owner: queued | active | blocked / <active 必须填写唯一写入者>
 - Outcome / Evidence: <一个可观察结果 + 当前失败或启动证据>
 - Write scope: <允许写入的精确路径；需要时补禁止路径、越界停止条件或 baseline>
-- Write locks: none | contracts-schema | generated-index | legacy-inventory | store-kernel | store-slide | store-flow | store-spatial | store-course | props-shared | props-slide | props-flow | props-spatial | props-global | workspace-shell | authoring-slide | authoring-flow | authoring-spatial | authoring-interaction | authoring-recipe | published-slide | published-flow | published-spatial | published-interaction | published-dynamic | published-producer | export-pptx | export-docx-print | app-save-recovery | diagnostics | main-preload | cli-adapters | ai-session | chat-ui
+- Write locks: none | contracts-schema | generated-index | legacy-inventory | store-kernel | store-slide | store-flow | store-spatial | store-course | props-shared | props-slide | props-flow | props-spatial | props-global | workspace-shell | authoring-slide | authoring-flow | authoring-spatial | authoring-interaction | authoring-recipe | published-slide | published-flow | published-spatial | published-interaction | published-dynamic | published-producer | export-pptx | export-docx-print | app-save-recovery | diagnostics | main-preload | cli-adapters | cli-adapter-codex | cli-adapter-claude | cli-adapter-opencode | ai-session | chat-ui
 - Acceptance: <完成后可直接判断的结果>
 - Validation: <最多 1–3 条直接证明结果的命令或人工检查；敏感变更在这里写明真实 carrier / fixture / 回退检查>
 ```
@@ -60,7 +60,10 @@
 | `app-save-recovery` | `src/renderer/app/useCourseDelivery.ts`、`src/renderer/project/courseProjectArchive.ts` 与保存 / 恢复路径 |
 | `diagnostics` | `src/shared/courseProjectHealth.ts`、`src/shared/courseProjectHealth/**`、`src/renderer/diagnostics/**` |
 | `main-preload` | `src/main/**`、`src/preload/**` |
-| `cli-adapters` | `src/main/localAgent/adapter.ts`、`process.ts`、`protocol.ts` 与 `src/shared/localAgentContract.ts`；CLI 协议与进程启动/终止 |
+| `cli-adapters` | （历史粗粒度锁，1.8 起拆分为细粒度子锁）`src/main/localAgent/adapter.ts`、`process.ts`、`protocol.ts` 与 `src/shared/localAgentContract.ts`；CLI 协议与进程启动/终止 |
+| `cli-adapter-codex` | `src/main/localAgent/codexAppServer.ts` 及专属测试 |
+| `cli-adapter-claude` | `src/main/localAgent/claudeProcessTransport.ts` 及专属测试 |
+| `cli-adapter-opencode` | `src/main/localAgent/openCodeAcp.ts` 及专属测试 |
 | `ai-session` | `src/main/localAgent/harness.ts`、`repository.ts`、`service.ts`；复用 WorkspaceIdentity 的唯一会话生命周期、存储与 staging Owner |
 | `chat-ui` | 1.9 起 Chat shell、timeline 与引用选择 Owner；首个节点创建目录时在写入前回填精确路径 |
 

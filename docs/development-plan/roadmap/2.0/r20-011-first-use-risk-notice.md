@@ -42,10 +42,10 @@ Workspace首次说明/本地确认投影，使用已有AI本地记录服务；�
 
 ## 聚焦验证
 
-在以下现有测试入口补本规格命名行为，不能用旧用例通过充当新能力证据。若确需新文件，先在实现diff中创建再同步入口。仅失败指向更广范围或版本门要求才扩大验证。
+准备与证据复用统一遵循[开发计划§6.1](../../AI_ASSISTANT_DELIVERY_PLAN.md#61-准备与局部验证)。相关产物准备一次后直接选目标文件；新首次说明用例先随实现创建再列入入口，不能用旧用例通过充当新能力证据，零匹配不得通过。需要E2E时只列实际存在的FILE和--grep命名用例，不整文件运行付费矩阵。
 
 ```text
-npm run test:product -- tests/unit/electronLaunchEnvironment.test.ts tests/unit/courseAuthoringSession.test.ts
+npx --no-install vitest run tests/unit/electronLaunchEnvironment.test.ts tests/unit/courseAuthoringSession.test.ts
 ```
 
 隔离workspace验证首次继续/取消和Save As，观察真实启动次数/引用；常规已确认编辑不会重复提示。

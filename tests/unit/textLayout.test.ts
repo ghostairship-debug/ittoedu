@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createTextNode } from '@/renderer/project/nativeNodeFactories'
 import { nativeRenderInputFromV9Item } from '@/player/surfaces/native/publishedNativeRendering'
-import { analyzeTextNodeLayout, renderTextNodeCanvas } from '@/shared/textLayout'
+import { analyzeTextNodeLayout, layoutHorizontalTextNode, renderTextNodeCanvas } from '@/shared/textLayout'
+import * as layoutMeasure from '@/shared/layoutMeasure'
 import { listCourseProjectV9Fixtures } from '../fixtures/course-project-v9/sources'
 import type { NativeLayerItem } from '@/shared/courseProjectTypes'
 
@@ -168,6 +169,79 @@ describe('direction-aware text layout', () => {
       expect(arcCalls[0]![0]).toBeGreaterThan(firstCharacter[1])
     },
   )
+})
+
+describe('Chinese horizontal punctuation boundaries', () => {
+  function measuredNode(text: string, width: number, fontSize = 10) {
+    const calls: FillTextCall[] = []
+    const context = canvasContext(calls)
+    context.measureText = vi.fn(() => ({
+      width: Number(/(\d+(?:\.\d+)?)px/u.exec(context.font)![1]),
+    } as TextMetrics))
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(context)
+    vi.spyOn(layoutMeasure, 'resolveLayoutMeasureContext').mockReturnValue({ context, mode: 'browser-canvas' })
+    const node = createTextNode({ text, width, height: 300,
+      style: { fontSize, padding: 0, letterSpacing: 0, lineSpacing: 6,
+        writingMode: 'horizontal', overflow: 'auto-height' },
+    })
+    return { node, calls }
+  }
+  function texts(node: ReturnType<typeof createTextNode>) {
+    return layoutHorizontalTextNode(node).lines.map(line => line.characters.map(character => character.value).join(''))
+  }
+
+  it('keeps the material sentence final period with text at its actual 1120px width and 42px size', () => {
+    const text = '分数表示把一个整体平均分成若干份，取其中的一份或几份。'
+    // Full-width CJK advances reproduce the browser failure: 26 glyphs fit, 27 do not.
+    const { node } = measuredNode(text, 1120, 42)
+    expect(texts(node)).toEqual([text.slice(0, -2), '份。'])
+    expect(node.text).toBe(text)
+  })
+
+  it.each(['，', '。', '、', '；', '：', '？', '！', '）', '》', '」', '』', '】', '”', '’'])(
+    'moves preceding text with closing punctuation %s', mark => {
+      const { node } = measuredNode(`甲乙${mark}丙`, 20)
+      expect(texts(node)).toEqual(['甲', `乙${mark}`, '丙'])
+    },
+  )
+
+  it.each(['（', '《', '「', '『', '【', '“', '‘'])(
+    'moves opening punctuation %s with following text', mark => {
+      const { node } = measuredNode(`甲${mark}乙丙`, 20)
+      expect(texts(node)).toEqual(['甲', `${mark}乙`, '丙'])
+    },
+  )
+
+  it('preserves explicit newlines, blank lines and ASCII wrapping', () => {
+    const { node } = measuredNode('甲（\n。乙\n\nabc,de\n', 30)
+    expect(texts(node)).toEqual(['甲（', '。乙', '', 'abc', ',de', ''])
+    expect(layoutHorizontalTextNode(node).lines.map(line => [line.start, line.end]))
+      .toEqual([[0, 2], [3, 5], [6, 6], [7, 10], [10, 13], [14, 14]])
+  })
+
+  it.each([1, 10])('terminates without lost or duplicated characters in a %spx frame', width => {
+    const text = '（甲）。，《乙》'
+    const { node } = measuredNode(text, width)
+    const lines = layoutHorizontalTextNode(node).lines
+    expect(lines).toHaveLength(Array.from(text).length)
+    expect(lines.flatMap(line => line.characters).map(character => character.value).join('')).toBe(text)
+    expect(lines.every(line => line.characters.length > 0)).toBe(true)
+  })
+
+  it('keeps indices, run styles, widths and auto height identical for layout, analysis and Canvas', () => {
+    const { node, calls } = measuredNode('甲乙。丙', 40)
+    node.runs = [{ start: 1, end: 3, style: { fontSize: 20, bold: true } }]
+    const layout = layoutHorizontalTextNode(node)
+    expect(texts(node)).toEqual(['甲', '乙。', '丙'])
+    expect(layout.lines.flatMap(line => line.characters).map(character => character.index)).toEqual([0, 1, 2, 3])
+    expect(layout.lines.flatMap(line => line.characters).slice(1, 3).map(character => character.style))
+      .toEqual([expect.objectContaining({ fontSize: 20, bold: true }), expect.objectContaining({ fontSize: 20, bold: true })])
+    expect(layout.lines.map(line => line.width)).toEqual([10, 40, 10])
+    expect(analyzeTextNodeLayout(node).requiredHeight).toBeCloseTo(layout.contentHeight)
+    const rendered = renderTextNodeCanvas(node)
+    expect(rendered.height).toBeCloseTo(layout.contentHeight)
+    expect(calls.map(([text]) => text).join('')).toBe(node.text)
+  })
 })
 
 describe('V9 NativeRenderInput text layout', () => {

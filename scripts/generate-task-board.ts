@@ -44,6 +44,9 @@ export const writeLockTags = [
   'diagnostics',
   'main-preload',
   'cli-adapters',
+  'cli-adapter-codex',
+  'cli-adapter-claude',
+  'cli-adapter-opencode',
   'ai-session',
   'chat-ui',
 ] as const

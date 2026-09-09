@@ -1,5 +1,8 @@
 import {
   createTeacherControllerLayout,
+  constrainTeacherControllerBounds,
+  teacherControllerAuthoringRecoveryBounds,
+  teacherControllerRecoveryLocalRect,
   type TeacherControllerLayoutSource,
   type TeacherControllerRect,
 } from '../shared/teacherControllerLayout'
@@ -108,7 +111,8 @@ interface AxisAlignedBounds {
 
 /**
  * Layout-local rectangle that is actually visible and interactive at runtime.
- * Constraints, DOM clipping and hit bounds must all consume this one result.
+ * DOM clipping and hit bounds consume this result. Oversized panels constrain
+ * their recovery controls instead of requiring the full panel to fit.
  */
 export function teacherControllerVisibleLocalRect(
   node: TeacherControllerRuntimeNode,
@@ -117,9 +121,7 @@ export function teacherControllerVisibleLocalRect(
   if (collapsed) {
     const collapse = createTeacherControllerLayout(node, node.width, node.height)
       .collapse
-    if (collapse) return node.playbackView
-      ? { x: Math.max(0, collapse.x - 58), y: collapse.y, width: collapse.width + Math.min(58, collapse.x), height: collapse.height }
-      : collapse
+    if (collapse) return teacherControllerRecoveryLocalRect(node, node)
   }
   return { x: 0, y: 0, width: node.width, height: node.height }
 }
@@ -158,21 +160,7 @@ function rotatedBounds(
   }
 }
 
-function moveInsideCanvas(
-  offset: TeacherControllerSessionOffset,
-  bounds: AxisAlignedBounds,
-  canvas: TeacherControllerLogicalSize,
-): TeacherControllerSessionOffset {
-  let dx = offset.dx
-  let dy = offset.dy
-  if (bounds.left < 0) dx -= bounds.left
-  if (bounds.right > canvas.width) dx -= bounds.right - canvas.width
-  if (bounds.top < 0) dy -= bounds.top
-  if (bounds.bottom > canvas.height) dy -= bounds.bottom - canvas.height
-  return { dx, dy }
-}
-
-/** Keeps the currently visible controller geometry on the logical canvas. */
+/** Keeps the panel, or its recovery controls on oversized axes, on canvas. */
 export function constrainTeacherControllerOffset(
   node: TeacherControllerRuntimeNode,
   proposed: TeacherControllerSessionOffset,
@@ -184,32 +172,34 @@ export function constrainTeacherControllerOffset(
     width: Math.max(1, canvas.width),
     height: Math.max(1, canvas.height),
   }
-  let offset = moveInsideCanvas(
-    proposed,
-    rotatedBounds(node, proposed, collapsed),
-    safeCanvas,
-  )
+  const visible = rotatedBounds(node, proposed, collapsed)
+  const recovery = teacherControllerAuthoringRecoveryBounds(node, {
+    x: node.x + proposed.dx,
+    y: node.y + proposed.dy,
+    width: node.width,
+    height: node.height,
+  }, node.rotation)
+  const horizontal = visible.right - visible.left <= safeCanvas.width ? visible : recovery
+  const vertical = visible.bottom - visible.top <= safeCanvas.height ? visible : recovery
+  const bounds = {
+    left: horizontal.left,
+    right: horizontal.right,
+    top: vertical.top,
+    bottom: vertical.bottom,
+  }
+  const correction = constrainTeacherControllerBounds(bounds, safeCanvas)
+  let offset = { dx: proposed.dx + correction.dx, dy: proposed.dy + correction.dy }
   if (!snapToEdge) return offset
 
-  const bounds = rotatedBounds(node, offset, collapsed)
-  if (bounds.left <= TEACHER_CONTROLLER_EDGE_SNAP) {
-    offset = { ...offset, dx: offset.dx - bounds.left }
-  } else if (safeCanvas.width - bounds.right <= TEACHER_CONTROLLER_EDGE_SNAP) {
-    offset = {
-      ...offset,
-      dx: offset.dx + safeCanvas.width - bounds.right,
-    }
+  const snap = (start: number, end: number, available: number): number => {
+    if (end - start > available) return 0
+    if (start <= TEACHER_CONTROLLER_EDGE_SNAP) return -start
+    if (available - end <= TEACHER_CONTROLLER_EDGE_SNAP) return available - end
+    return 0
   }
-  const snappedXBounds = rotatedBounds(node, offset, collapsed)
-  if (snappedXBounds.top <= TEACHER_CONTROLLER_EDGE_SNAP) {
-    offset = { ...offset, dy: offset.dy - snappedXBounds.top }
-  } else if (
-    safeCanvas.height - snappedXBounds.bottom <= TEACHER_CONTROLLER_EDGE_SNAP
-  ) {
-    offset = {
-      ...offset,
-      dy: offset.dy + safeCanvas.height - snappedXBounds.bottom,
-    }
+  offset = {
+    dx: offset.dx + snap(bounds.left + correction.dx, bounds.right + correction.dx, safeCanvas.width),
+    dy: offset.dy + snap(bounds.top + correction.dy, bounds.bottom + correction.dy, safeCanvas.height),
   }
   return offset
 }

@@ -15,7 +15,10 @@ import {
   applyTeacherControllerDomFootprint,
   TeacherControllerDom,
 } from '@/player/teacherControllerDom'
-import { createTeacherControllerLayout } from '@/shared/teacherControllerLayout'
+import {
+  createTeacherControllerLayout,
+  teacherControllerAuthoringRecoveryBounds,
+} from '@/shared/teacherControllerLayout'
 import { makeAuthoringAddress } from '@/shared/authoringAddress'
 import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
 import {
@@ -72,6 +75,89 @@ describe('teacher controller runtime session geometry', () => {
     )
 
     expect(constrained).toEqual({ dx: -200, dy: -100 })
+  })
+
+  it.each([false, true])('keeps zoom and collapse recoverable without oscillating a 900px panel in a 683px viewport (snap=%s)', snap => {
+    const node = { ...createTeacherControllerNode({ x: 190, y: 638, width: 900, height: 64 }), playbackView: true }
+    const before = structuredClone(node)
+    const canvas = { width: 683, height: 551 }
+    for (const rotation of [0, 27, 90]) {
+      const rotated = { ...node, rotation }
+      for (const proposed of [{ dx: 0, dy: 0 }, { dx: -10_000, dy: 10_000 }, { dx: 10_000, dy: -10_000 }]) {
+        let offset = constrainTeacherControllerOffset(rotated, proposed, false, canvas, snap)
+        const first = offset
+        for (let refresh = 0; refresh < 4; refresh += 1) {
+          offset = constrainTeacherControllerOffset(rotated, offset, false, canvas, snap)
+          expect(offset.dx).toBeCloseTo(first.dx)
+          expect(offset.dy).toBeCloseTo(first.dy)
+        }
+        const bounds = teacherControllerAuthoringRecoveryBounds(rotated, {
+          ...rotated, x: rotated.x + offset.dx, y: rotated.y + offset.dy,
+        }, rotation)
+        expect(bounds.left).toBeGreaterThanOrEqual(-0.001)
+        expect(bounds.top).toBeGreaterThanOrEqual(-0.001)
+        expect(bounds.right).toBeLessThanOrEqual(canvas.width + 0.001)
+        expect(bounds.bottom).toBeLessThanOrEqual(canvas.height + 0.001)
+      }
+    }
+    expect(node).toEqual(before)
+  })
+
+  it('does not keep changing the host session on refresh, collapse, expand or resize', () => {
+    const node = createTeacherControllerNode({ x: 190, y: 638, width: 900, height: 64 })
+    const before = structuredClone(node)
+    const canvas = { width: 683, height: 551 }
+    let session = { offset: { dx: 0, dy: 0 }, collapsed: false }
+    const updates: typeof session[] = []
+    const container = document.createElement('div')
+    const controller = new TeacherControllerDom({
+      node, container, canvas,
+      playbackView: { openZoomPanel: () => undefined, subscribe: () => () => undefined,
+        zoomTo: () => undefined, panTo: () => undefined, reset: () => undefined,
+        state: { zoom: 1, pan: { x: 0, y: 0 }, viewport: canvas,
+          bounds: { x: 0, y: 0, ...canvas }, generation: 0 } },
+      getRenderedStageBounds: () => ({ ...canvas }),
+      scenes: [], getCurrentSceneId: () => null, getStateLabel: () => null,
+      getStatus: () => ({ muted: false, fullscreen: false }),
+      getSession: () => session,
+      onSessionChange: next => { session = next; updates.push(next) },
+      onAction: () => { throw new Error('view correction must not execute a course action') },
+      getInteractive: () => true,
+    })
+    try {
+      const expectStable = () => {
+        const count = updates.length
+        const offset = { ...session.offset }
+        for (let refresh = 0; refresh < 4; refresh += 1) {
+          controller.refreshStatus()
+          controller.update(node)
+        }
+        expect(updates).toHaveLength(count)
+        expect(session.offset).toEqual(offset)
+        for (const selector of ['[data-playback-chrome="zoom-button"]', '[data-teacher-controller-collapse]']) {
+          const button = container.querySelector<HTMLElement>(selector)!
+          const x = node.x + offset.dx + parseFloat(button.style.left)
+          const y = node.y + offset.dy + parseFloat(button.style.top)
+          expect(x).toBeGreaterThanOrEqual(-0.001)
+          expect(y).toBeGreaterThanOrEqual(-0.001)
+          expect(x + parseFloat(button.style.width)).toBeLessThanOrEqual(canvas.width + 0.001)
+          expect(y + parseFloat(button.style.height)).toBeLessThanOrEqual(canvas.height + 0.001)
+        }
+      }
+      expect(updates).toHaveLength(1)
+      expectStable()
+      container.querySelector<HTMLButtonElement>('[data-teacher-controller-collapse]')!.click()
+      expect(session.collapsed).toBe(true)
+      expectStable()
+      container.querySelector<HTMLButtonElement>('[data-teacher-controller-collapse]')!.click()
+      expect(session.collapsed).toBe(false)
+      expectStable()
+      canvas.width = 520
+      canvas.height = 400
+      controller.update(node)
+      expectStable()
+      expect(node).toEqual(before)
+    } finally { controller.destroy() }
   })
 
   it('lets the collapsed pill reach an edge without reserving the hidden panel', () => {

@@ -20,6 +20,9 @@ import type { CourseProjectDocument } from '@/shared/courseProjectTypes'
 import { RECIPE_CATALOG } from '@/renderer/recipes/recipeCatalog'
 import { planRecipe } from '@/renderer/recipes/applyRecipe'
 import type { AuthoringToolReceiptV1 } from '@/shared/authoringToolContract'
+import generatedCapabilities from '@/shared/generated/courseAgentCapabilities.json'
+import { queryCourseAgentCapabilities, readCourseAgentCapability, type CourseAgentCapabilityData,
+  type CourseAgentCapabilityQuery, type CourseAgentCapabilityCardOptions } from '@/shared/courseAgentCapabilities'
 
 export const COURSEWARE_CASE_BUILDER_API_VERSION = 1 as const
 
@@ -37,6 +40,8 @@ export interface CoursewareCaseBuildOutput {
  */
 export function createCoursewareCaseBuilderApi() {
   return Object.freeze({
+    discover: (query: CourseAgentCapabilityQuery = {}) => queryCourseAgentCapabilities(generatedCapabilities as CourseAgentCapabilityData, query),
+    readCapability: (id: string, options: CourseAgentCapabilityCardOptions = {}) => readCourseAgentCapability(generatedCapabilities as CourseAgentCapabilityData, id, options),
     project: Object.freeze({
       createBlankCourseProject: slideProjectFactory.createBlankCourseProject,
       createCourseProject: slideProjectFactory.createCourseProject,
@@ -81,6 +86,7 @@ export interface CoursewareCaseBuilderContext {
     presentationScript: { path: string, content: string }
   }
   capabilityIndex: unknown
+  capabilityDiscovery?: unknown
   api: CoursewareCaseBuilderApi
 }
 

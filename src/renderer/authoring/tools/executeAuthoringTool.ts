@@ -12,8 +12,30 @@ import { createEditorTransactionStep, type EditorTransactionPlan, type EditorTra
 import type { HistoryResourceState } from '../../store/courseResourceState'
 
 type Diagnostic = AuthoringToolReceiptV1['diagnostics'][number]
+
+/** Union child paths are relative to their parent issue in Zod 4. Keep each
+ * alternative explicit: a union does not require every branch to match. */
+function schemaDiagnostics(issues: readonly z.ZodIssue[], code: string, prefix: string[] = [], alternatives: number[] = []): Diagnostic[] {
+  return issues.flatMap((issue): Diagnostic[] => {
+    const path = [...prefix, ...issue.path.map(String)]
+    if (issue.code === 'invalid_union' && issue.errors.length > 0) {
+      return issue.errors.flatMap((branch, index) => schemaDiagnostics(branch, code, path, [...alternatives, index + 1]))
+    }
+    return [{ code, path, message: alternatives.length ? `Union alternative ${alternatives.join('.')}: ${issue.message}` : issue.message }]
+  })
+}
+
+function diagnosticMessage(diagnostic: Diagnostic): string {
+  if (!diagnostic.path.length) return diagnostic.message
+  const path = diagnostic.path.reduce<string>((result, segment) => {
+    const key = String(segment)
+    return result + (/^[A-Za-z_$][\w$]*$/.test(key) ? `.${key}` : `[${JSON.stringify(segment)}]`)
+  }, '$')
+  return `${path}: ${diagnostic.message}`
+}
+
 export class AuthoringToolFailure extends Error {
-  constructor(readonly diagnostics: Diagnostic[]) { super(diagnostics.map(item => item.message).join('\n')) }
+  constructor(readonly diagnostics: Diagnostic[], readonly behaviorEvidence?: AuthoringToolReceiptV1['behaviorEvidence']) { super(diagnostics.map(diagnosticMessage).join('\n')) }
 }
 
 /** The existing Surface transaction adapter owns commit and its single history. */
@@ -44,6 +66,7 @@ export interface AuthoringToolPlan {
   transaction: EditorTransactionPlan
   affected: AuthoringToolReceiptV1['affected']
   diagnostics?: Diagnostic[]
+  behaviorEvidence?: AuthoringToolReceiptV1['behaviorEvidence']
 }
 
 /** Prepare with product commands; recheck after async work; commit exactly once. */
@@ -68,15 +91,11 @@ export async function executeAuthoringTool<T>(
   }
   const reject = (status: AuthoringToolReceiptV1['status'], diagnostics: Diagnostic[]) =>
     authoringToolReceiptV1Schema.parse({ ...receipt, status, diagnostics })
-  if (!parsed.success) return reject('rejected', parsed.error.issues.map((issue) => ({
-    code: 'invalid-request', message: issue.message, path: issue.path.map(String),
-  })))
+  if (!parsed.success) return reject('rejected', schemaDiagnostics(parsed.error.issues, 'invalid-request'))
   const request = parsed.data
   if (request.tool !== definition.name) return reject('rejected', [{ code: 'wrong-tool', message: 'Tool identity does not match', path: ['tool'] }])
   const value = definition.inputSchema.safeParse(request.input)
-  if (!value.success) return reject('rejected', value.error.issues.map((issue) => ({
-    code: 'invalid-input', message: issue.message, path: ['input', ...issue.path.map(String)],
-  })))
+  if (!value.success) return reject('rejected', schemaDiagnostics(value.error.issues, 'invalid-input', ['input']))
   const target = request.destination.kind === 'update' ? request.destination.target : request.destination.scope
   const stale = () => {
     const current = port.readDocument()
@@ -110,11 +129,12 @@ export async function executeAuthoringTool<T>(
         packageIds: step.resourceChanges.componentPackageChanges?.map((change) => change.packageId) ?? [],
       },
       diagnostics: plan.diagnostics ?? [],
+      ...(plan.behaviorEvidence ? { behaviorEvidence: plan.behaviorEvidence } : {}),
     })
     if (!port.commit(step)) return reject('stale', [staleDiagnostic])
     return success
   } catch (error) {
-    if (error instanceof AuthoringToolFailure) return reject('failed', error.diagnostics)
+    if (error instanceof AuthoringToolFailure) return authoringToolReceiptV1Schema.parse({ ...reject('failed', error.diagnostics), ...(error.behaviorEvidence ? { behaviorEvidence: error.behaviorEvidence } : {}) })
     return reject('failed', [{ code: 'tool-failed', message: error instanceof Error ? error.message : String(error), path: [] }])
   }
 }

@@ -4,6 +4,7 @@ import { courseProjectDocumentSchema } from '../../shared/courseProjectSchema'
 import { analyzeCourseAssetReferences } from '../../shared/contracts/course-project-v9/assetReferences'
 import { componentContentSha256 } from '../../shared/componentContentIntegrity'
 import type { DynamicInstanceCapture } from '../../shared/dynamicAdmissionContract'
+import type { DynamicBehaviorObservation } from '../../shared/dynamicBehaviorObservation'
 import type { HistoryResourceState, AssetFileHistoryChange } from '../store/courseResourceState'
 import { applyHistoryResourceChanges } from '../store/courseResourceState'
 import { admitDynamicCandidate } from '../authoring/tools/dynamicCandidateAdmission'
@@ -117,19 +118,20 @@ export function componentCaptureAsset(capture: DynamicInstanceCapture, id = `com
 }
 
 /** Manual and AI edits share the same replacement planner, all-instance admission and resource transaction. */
-export async function prepareComponentPackageSourceRevision(input: Parameters<typeof planComponentPackageSourceRevision>[0], signal?: AbortSignal): Promise<CourseComponentPackageReplacementPlanResult> {
+export async function prepareComponentPackageSourceRevision(input: Parameters<typeof planComponentPackageSourceRevision>[0], signal?: AbortSignal,
+  onBehaviorEvidence?: (evidence: readonly DynamicBehaviorObservation[]) => void): Promise<CourseComponentPackageReplacementPlanResult> {
   const result = planComponentPackageSourceRevision(input)
-  return prepareComponentPackageRevision(result, input.resources, input.baseline.packageId, signal)
+  return prepareComponentPackageRevision(result, input.resources, input.baseline.packageId, signal, onBehaviorEvidence)
 }
 
 export async function prepareComponentPackageRevision(result: CourseComponentPackageReplacementPlanResult, resources: HistoryResourceState,
-  packageId: string, signal?: AbortSignal): Promise<CourseComponentPackageReplacementPlanResult> {
+  packageId: string, signal?: AbortSignal, onBehaviorEvidence?: (evidence: readonly DynamicBehaviorObservation[]) => void): Promise<CourseComponentPackageReplacementPlanResult> {
   if (!result.ok || result.status === 'no-op') return result
   const next = result.plan.nextDocument
   const targets = componentPackageAdmissionTargets(next, packageId)
   if (!targets.length) throw new Error('组件源码准入需要工程内实际实例')
   const nextResources = applyHistoryResourceChanges(resources, result.plan.resourceChanges, 'forward')
-  const captures = await admitDynamicCandidate(next, nextResources, targets, signal, true)
+  const captures = await admitDynamicCandidate(next, nextResources, targets, signal, true, { onBehaviorEvidence })
   if (signal?.aborted) throw new Error('组件源码校验已取消')
   const document = structuredClone(next)
   const assetFileChanges: AssetFileHistoryChange[] = []

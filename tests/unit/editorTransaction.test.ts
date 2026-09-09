@@ -13,7 +13,7 @@ import { planAssetFileHistoryChange } from '@/renderer/store/courseResourceState
 import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
 import { courseAuthoringScopeFromLocation } from '@/renderer/authoring/courseAuthoringScope'
 import { createGenerationCandidateCoordinator } from '@/renderer/authoring/generation/prepareGenerationCandidate'
-import { generationRequestSchema, generationCandidateSchema, MAX_GENERATION_PROMPT_BYTES, type GenerationCandidate } from '@/shared/generationContract'
+import { generationRequestSchema, generationCandidateSchema, generationCommitReceiptSchema, MAX_GENERATION_PROMPT_BYTES, type GenerationCandidate } from '@/shared/generationContract'
 import { captureGenerationSnapshot } from '@/renderer/authoring/generation/generationSnapshot'
 import { projectEffectiveLayers } from '@/renderer/course/effectiveLayerProjection'
 import { describeAuthoringTools } from '@/renderer/authoring/tools/authoringToolFacade'
@@ -70,6 +70,28 @@ function generationFixture() {
 }
 
 describe('CLI generation candidate atomic preparation and commit', () => {
+  it('publishes one canonical batch receipt only after the actual transaction succeeds', async () => {
+    const f = generationFixture()
+    const preview = await f.coordinator.prepare(f.request, f.candidate)
+    expect(preview).not.toHaveProperty('receipt')
+    expect(f.commits).toHaveLength(0)
+    const result = f.coordinator.apply(preview.previewId)
+    if (result.status !== 'committed') throw new Error('Expected real transaction commit')
+    const receipt = generationCommitReceiptSchema.parse(result.receipt)
+    expect(receipt).toMatchObject({ requestId: f.request.requestId, candidateId: f.candidate.candidateId, workspace: f.request.workspace,
+      status: 'committed', beforeRevision: f.request.documentRevision, afterRevision: f.read().document.revision })
+    expect(receipt.affected).toHaveLength(2)
+    expect(f.coordinator.apply(preview.previewId)).toEqual({ status: 'stale' })
+    expect(f.commits).toHaveLength(1)
+  })
+  it('does not expose prepared receipts when the live commit is rejected', async () => {
+    const f = generationFixture(), before = structuredClone(f.read())
+    const coordinator = createGenerationCandidateCoordinator({ readDocument: () => f.read().document, readResources: () => f.read().resources,
+      readWorkspace: () => f.request.workspace, readSessionGeneration: () => f.request.sessionGeneration, commit: () => false })
+    const preview = await coordinator.prepare(f.request, f.candidate)
+    expect(coordinator.apply(preview.previewId)).toEqual({ status: 'stale' })
+    expect(f.read()).toEqual(before)
+  })
   it('imports an existing trusted catalog package atomically and rejects changed or untrusted catalog content', async () => {
     const f = generationFixture(), before = structuredClone(f.read())
     const manifest = { schemaVersion: 4, runtimeApiVersion: 4, id: 'com.example.catalog', name: '目录组件', version: '1.0.0', entry: 'runtime.js',

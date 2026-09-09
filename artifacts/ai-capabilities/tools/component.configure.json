@@ -1,0 +1,86 @@
+{
+  "candidateCarrier": {
+    "default": "existing-component"
+  },
+  "description": "配置已有或前序新建组件，carrier均为existing-component。props只提供要改变的参数，保留当前有效状态中未提供的参数，API 4 的 content 按正式递归合并合同保留其他文案。properties修改组件图层的frame/rotation/opacity/visible/locked/label。Flow正文组件只接受props，其排版通过flow.content。不要用native.content移动组件。",
+  "inputSchema": {
+    "$defs": {
+      "__schema0": {
+        "additionalProperties": {},
+        "propertyNames": {
+          "type": "string"
+        },
+        "type": "object"
+      },
+      "__schema1": {
+        "additionalProperties": false,
+        "properties": {
+          "frame": {
+            "additionalProperties": false,
+            "properties": {
+              "height": {
+                "$ref": "#/$defs/__schema2",
+                "exclusiveMinimum": 0
+              },
+              "width": {
+                "$ref": "#/$defs/__schema2",
+                "exclusiveMinimum": 0
+              },
+              "x": {
+                "$ref": "#/$defs/__schema2"
+              },
+              "y": {
+                "$ref": "#/$defs/__schema2"
+              }
+            },
+            "type": "object"
+          },
+          "label": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "locked": {
+            "type": "boolean"
+          },
+          "opacity": {
+            "maximum": 1,
+            "minimum": 0,
+            "type": "number"
+          },
+          "rotation": {
+            "$ref": "#/$defs/__schema2"
+          },
+          "visible": {
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "__schema2": {
+        "type": "number"
+      }
+    },
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": false,
+    "properties": {
+      "properties": {
+        "$ref": "#/$defs/__schema1"
+      },
+      "props": {
+        "$ref": "#/$defs/__schema0"
+      }
+    },
+    "type": "object"
+  },
+  "name": "component.configure",
+  "support": "conditional-on-input-target-resources-and-host",
+  "supportedScopes": [
+    "slide:scene",
+    "slide:global",
+    "flow:surface",
+    "flow:global",
+    "spatial-2d:world",
+    "spatial-2d:global"
+  ],
+  "version": 1
+}

@@ -321,6 +321,7 @@ export async function readImageDimensions(
   assertSupportedImage(mimeType, bytes)
   if (
     typeof Image === 'undefined' ||
+    typeof createImageBitmap !== 'function' ||
     typeof URL === 'undefined' ||
     typeof URL.createObjectURL !== 'function'
   ) {
@@ -331,10 +332,12 @@ export async function readImageDimensions(
     )
   }
 
-  const url = URL.createObjectURL(new Blob([Uint8Array.from(bytes)], { type: mimeType }))
+  const blob = new Blob([Uint8Array.from(bytes)], { type: mimeType })
+  const url = URL.createObjectURL(blob)
+  let bitmap: ImageBitmap | undefined
   try {
-    return await new Promise<ImageDimensions>((resolve, reject) => {
-      const image = new Image()
+    const image = new Image()
+    const dimensions = await new Promise<ImageDimensions>((resolve, reject) => {
       image.onload = () => {
         if (image.naturalWidth > 0 && image.naturalHeight > 0) {
           resolve({ width: image.naturalWidth, height: image.naturalHeight })
@@ -345,14 +348,34 @@ export async function readImageDimensions(
       image.onerror = () => reject(new Error('浏览器无法解码图片'))
       image.src = url
     })
+    if (mimeType === 'image/svg+xml') {
+      // Chromium does not decode SVG Blobs with createImageBitmap. Establish
+      // that this is really SVG before using its already loaded vector image;
+      // mislabeled raster bytes must never use the permissive Image decoder.
+      const encoding = bytes[0] === 0xff && bytes[1] === 0xfe ? 'utf-16le'
+        : bytes[0] === 0xfe && bytes[1] === 0xff ? 'utf-16be' : 'utf-8'
+      const svg = new DOMParser().parseFromString(new TextDecoder(encoding, { fatal: true }).decode(bytes), 'image/svg+xml')
+      if (svg.querySelector('parsererror') || svg.documentElement.localName !== 'svg'
+        || svg.documentElement.namespaceURI !== 'http://www.w3.org/2000/svg') throw new Error('SVG 文档无效')
+      bitmap = await createImageBitmap(image, { resizeWidth: dimensions.width, resizeHeight: dimensions.height })
+    } else {
+      // Image.onload, Image.decode and drawing to canvas can all accept a PNG
+      // whose compressed pixels are corrupt. Decode the original Blob fully.
+      bitmap = await createImageBitmap(blob)
+    }
+    if (!Number.isInteger(bitmap.width) || !Number.isInteger(bitmap.height) || bitmap.width <= 0 || bitmap.height <= 0) {
+      throw new Error('完整解码后的图片尺寸无效')
+    }
+    return { width: bitmap.width, height: bitmap.height }
   } catch (error) {
     throw new UserFacingError(
       '图片读取失败',
-      '无法识别所选图片的尺寸，文件可能已损坏。',
+      '无法完整解码所选图片，文件可能已损坏。',
       '请使用图片软件重新保存后再导入。',
       { cause: error },
     )
   } finally {
+    bitmap?.close()
     URL.revokeObjectURL(url)
   }
 }

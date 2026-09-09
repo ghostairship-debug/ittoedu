@@ -9,7 +9,9 @@ export const GENERATION_RESULT_CLOSE = '</courseware-result-v1>'
 const terminalResultSchema = z.object({ version: z.literal(1), requestId: z.uuid(), kind: z.enum(['answer', 'edit']) }).strict()
 export const generationResultSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('answer'), requestId: z.uuid() }).strict(),
+  z.object({ kind: z.literal('incomplete'), requestId: z.uuid(), finding: z.string().max(4000) }).strict(),
   z.object({ kind: z.literal('candidate'), requestId: z.uuid(), candidate: generationCandidateSchema }).strict(),
+  z.object({ kind: z.literal('candidate-rejected'), requestId: z.uuid(), candidateId: z.uuid(), finding: z.string().max(4000) }).strict(),
   z.object({ kind: z.literal('candidate-format-error'), requestId: z.uuid(), finding: z.string().max(4000), excerpt: z.string().max(8000) }).strict(),
 ])
 export type GenerationResult = z.infer<typeof generationResultSchema>

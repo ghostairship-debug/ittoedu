@@ -556,6 +556,13 @@ export class RuntimeHost {
     }
   }
 
+  async waitForObservationReady(): Promise<void> {
+    if (this.destroyed) throw new Error('当前 Runtime 已销毁')
+    if (this.failure) throw this.failure
+    await this.drainCapturePromises()
+    if (this.failure) throw this.failure
+  }
+
   async waitForCaptureReady(
     snapshotSurfaces?: CaptureSurfaceSnapshotter,
   ): Promise<void> {

@@ -16,6 +16,7 @@ import { applyPublishedRuntimeAuthoringText } from './publishedSurfaceRuntimeAut
 import type { PublishedSurfaceRuntimeSession } from './publishedSurfaceRuntimeMount'
 import { registerPublishedCaptureResource } from '../publishedCapture'
 import { registerPublishedDynamicUpdateProbe } from '../publishedDynamicUpdateProbe'
+import { isPublishedDomCanvasRuntime } from './publishedCanvasRuntimePointer'
 
 type PublishedCanvasRuntime = PublishedRuntimeLayerItem['runtime']
 type FailurePhase = 'register' | 'create' | 'lifecycle' | 'destroy'
@@ -25,6 +26,7 @@ export interface PublishedCanvasRuntimeMountHandle {
   readonly element: HTMLElement
   applyAuthoringContentValue(key: string, value: string): boolean
   waitForReady(): Promise<void>
+  waitForObservationReady?(): Promise<void>
   waitForCaptureReady(): Promise<void>
   failCapture?(error: Error): void
   restoreAfterCapture(): void
@@ -251,6 +253,7 @@ export function mountPublishedCanvasRuntime(
 
   const dom = container.ownerDocument
   const host = dom.createElement('div')
+  const pointerPlane = isPublishedDomCanvasRuntime(options.runtime) ? 'none' : 'inherit'
   host.className = 'published-canvas-runtime-mount'
   host.dataset.runtimeInstanceId = options.instanceId
   Object.assign(host.style, {
@@ -260,7 +263,7 @@ export function mountPublishedCanvasRuntime(
     width: '100%',
     height: '100%',
     overflow: 'hidden',
-    pointerEvents: 'inherit',
+    pointerEvents: pointerPlane,
   })
   const domUnderlay = dom.createElement('div')
   const canvasHost = dom.createElement('div')
@@ -283,7 +286,7 @@ export function mountPublishedCanvasRuntime(
       zIndex,
     })
   }
-  canvasHost.style.pointerEvents = 'inherit'
+  canvasHost.style.pointerEvents = pointerPlane
   host.append(domUnderlay, canvasHost, domOverlay)
   container.appendChild(host)
 
@@ -542,6 +545,10 @@ export function mountPublishedCanvasRuntime(
         throw captureFailure ?? new Error(`Canvas Runtime“${options.instanceId}”未完成启动`)
       }
     },
+    async waitForObservationReady() {
+      await handle.waitForReady()
+      await runtimeHost!.waitForObservationReady()
+    },
     async waitForCaptureReady() {
       if (captureFailure) throw captureFailure
       if (destroyed) throw new Error(`Canvas Runtime“${options.instanceId}”已销毁`)
@@ -633,6 +640,6 @@ export function mountPublishedCanvasRuntime(
       } catch (cause) { quarantine('lifecycle', cause) }
       await handle.waitForReady()
     }
-  })
+  }, { suspend: () => handle.suspend(), resume: () => handle.resume() })
   return handle
 }

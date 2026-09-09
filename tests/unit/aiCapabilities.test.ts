@@ -5,6 +5,7 @@ import path from 'node:path'
 import { unzipSync } from 'fflate'
 import { describe, expect, it } from 'vitest'
 import {
+  AI_CAPABILITY_DISCOVERY_MAX_BYTES,
   AI_CAPABILITY_INDEX_MAX_BYTES,
   assertIndexWithinLimit,
   canonicalJsonByteLength,
@@ -14,6 +15,7 @@ import {
   INTERACTION_PROTOCOL_VERSION,
   writeAiCapabilityArtifacts,
 } from '../../scripts/generate-ai-capabilities'
+import { describeAuthoringToolDiscovery } from '../../src/renderer/authoring/tools/authoringToolFacade'
 import { BUILT_IN_COMPONENT_CATALOG_SHA256 } from '../../src/shared/builtInComponentCatalog'
 import { componentManifestSchema } from '../../src/shared/componentSchema'
 import {
@@ -88,6 +90,43 @@ async function removeTemporaryDirectory(directory: string): Promise<void> {
 }
 
 describe('AI capability manifest generation', () => {
+  it('keeps complete tool schemas and discovery readable through native 2000-character line limits', async () => {
+    const generated = await generateAiCapabilityArtifacts({
+      componentCatalogRoot: path.resolve(process.cwd(), 'tests', '__missing-ai-capability-catalog__'),
+      componentCatalogLabel: 'test-fixture/missing-catalog',
+    })
+    const nativeRead = (source: string) => source.split(/\r?\n/).map(line =>
+      line.length > 2000 ? `${line.slice(0, 2000)}... (line truncated to 2000 chars)` : line,
+    ).join('\n')
+    const tools = describeAuthoringToolDiscovery()
+    expect(tools.some(tool => tool.name === 'runtime.insert')).toBe(true)
+    for (const tool of tools) {
+      const source = generated.files.get(`tools/${tool.name}.json`)!
+      const read = JSON.parse(nativeRead(source))
+      expect(read.inputSchema, `${tool.name} complete formal input schema`).toEqual(tool.inputSchema)
+      expect(read).toEqual(JSON.parse(JSON.stringify({ version: 1, ...tool })))
+    }
+    const source = generated.files.get('discovery.json')!
+    const discovery = JSON.parse(nativeRead(source))
+    expect(discovery).toEqual(JSON.parse(source))
+    expect(discovery.tools.map((tool: { id: string }) => tool.id).sort())
+      .toEqual(tools.map(tool => tool.name).sort())
+    expect(discovery.protocols.map((protocol: { id: string }) => protocol.id).sort())
+      .toEqual(['component-api4', 'runtime-api2', 'runtime-api3'])
+    for (const protocol of discovery.protocols) {
+      const card = JSON.parse(generated.files.get(protocol.path)!)
+      const guide = generated.files.get(protocol.authoringGuideFile)!
+      const authoritative = await fs.readFile(path.join(process.cwd(), card.documentation), 'utf8')
+      expect(guide).toBe(authoritative)
+      expect(card.authoringGuideFile).toBe(protocol.authoringGuideFile)
+      expect(card.authoringGuide).toBe(authoritative)
+      expect(nativeRead(guide)).toBe(authoritative.replaceAll('\r\n', '\n'))
+    }
+    expect(discovery.usage).toContain('保持原生工作目录')
+    expect(discovery.usage).toContain('绝对路径')
+    expect(Buffer.byteLength(source, 'utf8')).toBeLessThanOrEqual(AI_CAPABILITY_DISCOVERY_MAX_BYTES)
+  })
+
   it('is byte-deterministic and keeps the index small when the catalog is absent', async () => {
     const missingCatalog = path.resolve(
       process.cwd(),
@@ -1249,25 +1288,18 @@ describe('AI capability manifest generation', () => {
     expect(tracedSources).not.toContain(['src/shared/project', 'Types.ts'].join(''))
     expect(tracedSources).toContain('src/renderer/project/archivePath.ts')
 
-    // Broad producer implementations carry described behaviour, not generation
-    // input bytes; listing them churned the evidence on unrelated edits.
+    // Formal tool discovery now imports the sole Facade and its dependency closure.
+    // Unrelated app and export entrypoints remain outside generated provenance.
     for (const excluded of [
       'package-lock.json',
       'src/main/createWindow.ts',
       'src/main/previewNetworkPolicy.ts',
       'src/preload/index.ts',
-      'src/player/RuntimeHost.ts',
-      'src/player/surfaces/publishedDynamicHosts.ts',
-      'src/player/surfaces/runtime/publishedCanvasRuntimeMount.ts',
-      'src/player/surfaces/slide/SlidePublishedAdapter.ts',
       'src/renderer/components/componentPackageStore.ts',
       'src/renderer/export/course/buildCoursePackages.ts',
       'src/renderer/export/course/buildCoursePrintArtifacts.ts',
-      'src/renderer/export/course/buildPublishedCourse.ts',
-      'src/renderer/project/createCourseProject.ts',
       'src/renderer/project/courseProjectArchive.ts',
       'src/renderer/ui/coursePlayerTryRun.ts',
-      'src/renderer/project/nativeNodeFactories.ts',
       ['src/renderer/project/project', 'Archive.ts'].join(''),
       ['src/renderer/project/validateProject', 'Archive.ts'].join(''),
     ]) {
@@ -1276,8 +1308,9 @@ describe('AI capability manifest generation', () => {
     }
     expect(tracedSources.filter((entry) => entry.startsWith('src/main/'))).toEqual([])
     expect(tracedSources.filter((entry) => entry.startsWith('src/preload/'))).toEqual([])
-    expect(tracedSources.filter((entry) => entry.startsWith('src/renderer/export/course/')))
-      .toEqual([])
+    expect(tracedSources).toContain('src/renderer/authoring/tools/authoringToolFacade.ts')
+    expect(tracedSources).toContain('src/renderer/authoring/tools/nativeAuthoringTool.ts')
+    expect(tracedSources).toContain('src/renderer/export/course/buildPublishedCourse.ts')
     expect(tracedSources).toContain('src/player/HostEvidenceRecorder.ts')
 
     // Narrowing provenance inputs must not weaken catalog or output hashes.
@@ -1286,18 +1319,8 @@ describe('AI capability manifest generation', () => {
       expectedCatalogSha256: BUILT_IN_COMPONENT_CATALOG_SHA256,
       packages: [],
     })
-    expect(Object.keys(evidence.output)).toEqual([
-      'component-catalog.snapshot.json',
-      'diagnostics.json',
-      'index.json',
-      'limits.json',
-      'schemas/component-api4.json',
-      'schemas/course-project-v9.json',
-      'schemas/interactions.json',
-      'schemas/published-course-v2.json',
-      'schemas/runtime-api2.json',
-      'schemas/runtime-api3.json',
-    ])
+    expect(Object.keys(evidence.output)).toEqual([...generated.files.keys()]
+      .filter(value => value !== 'generation-evidence.json').sort((a, b) => a.localeCompare(b, 'en')))
     for (const [relativePath, entry] of Object.entries(evidence.output)) {
       expect(entry.sha256).toBe(
         createHash('sha256').update(generated.files.get(relativePath)!).digest('hex'),

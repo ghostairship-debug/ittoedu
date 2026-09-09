@@ -1618,7 +1618,7 @@
     {
       "id": "r18-040-staging-file-boundary",
       "release": "1.8",
-      "title": "启用文件工具的 CLI profile 通过当前 session staging 摄取约束",
+      "title": "落实候选摄取闭合与原生CLI文件权限的独立边界",
       "dependencies": [
         "r18-020-neutral-agent-profile",
         "r17-010-staging-workspace"
@@ -2103,7 +2103,9 @@
       "optional": false,
       "writeLocks": [
         "contracts-schema",
-        "ai-session"
+        "ai-session",
+        "main-preload",
+        "chat-ui"
       ],
       "spec": "1.8/README.md"
     },
@@ -2116,8 +2118,11 @@
       ],
       "optional": false,
       "writeLocks": [
-        "cli-adapters",
-        "main-preload"
+        "cli-adapter-codex",
+        "cli-adapter-claude",
+        "cli-adapter-opencode",
+        "main-preload",
+        "ai-session"
       ],
       "spec": "1.8/README.md"
     },
@@ -2130,9 +2135,7 @@
       ],
       "optional": false,
       "writeLocks": [
-        "cli-adapters",
-        "main-preload",
-        "ai-session"
+        "cli-adapter-codex"
       ],
       "spec": "1.8/README.md"
     },
@@ -2145,9 +2148,7 @@
       ],
       "optional": false,
       "writeLocks": [
-        "cli-adapters",
-        "main-preload",
-        "ai-session"
+        "cli-adapter-claude"
       ],
       "spec": "1.8/README.md"
     },
@@ -2160,9 +2161,7 @@
       ],
       "optional": false,
       "writeLocks": [
-        "cli-adapters",
-        "main-preload",
-        "ai-session"
+        "cli-adapter-opencode"
       ],
       "spec": "1.8/README.md"
     },
@@ -2191,10 +2190,7 @@
       "release": "1.8",
       "title": "交付助手与Builder共用的精简发现查询和按需资源读取",
       "dependencies": [
-        "r18-095-authoring-observation",
-        "r18-092-codex-interactive-adapter",
-        "r18-093-claude-interactive-adapter",
-        "r18-094-opencode-interactive-adapter"
+        "r18-090-ai-task-contract"
       ],
       "optional": false,
       "writeLocks": [
@@ -2245,7 +2241,7 @@
     {
       "id": "r18-099-dynamic-edit-verification",
       "release": "1.8",
-      "title": "闭合Runtime替换连续修改与真实运行效果验证",
+      "title": "闭合Runtime与Component增量修改和按影响运行验证",
       "dependencies": [
         "r18-096-capability-workspace",
         "r18-097-semantic-edit-replacement",
@@ -2258,7 +2254,10 @@
         "published-flow",
         "published-spatial",
         "store-kernel",
-        "contracts-schema"
+        "contracts-schema",
+        "ai-session",
+        "generated-index",
+        "main-preload"
       ],
       "spec": "1.8/README.md"
     },
@@ -2267,9 +2266,7 @@
       "release": "1.8",
       "title": "让同一CLI任务接收宿主结果观察并持续修正",
       "dependencies": [
-        "r18-092-codex-interactive-adapter",
-        "r18-093-claude-interactive-adapter",
-        "r18-094-opencode-interactive-adapter",
+        "r18-090-ai-task-contract",
         "r18-095-authoring-observation",
         "r18-097-semantic-edit-replacement"
       ],
@@ -2310,7 +2307,9 @@
       "writeLocks": [
         "ai-session",
         "store-kernel",
-        "chat-ui"
+        "chat-ui",
+        "app-save-recovery",
+        "main-preload"
       ],
       "spec": "1.8/README.md"
     },
@@ -2320,9 +2319,13 @@
       "title": "完成助手与外部Builder自然语言可用性工程结束门",
       "dependencies": [
         "r18-089-flow-viewport-repair",
+        "r18-092-codex-interactive-adapter",
+        "r18-093-claude-interactive-adapter",
+        "r18-094-opencode-interactive-adapter",
         "r18-096-capability-workspace",
         "r18-098-image-edit-transaction",
         "r18-099-dynamic-edit-verification",
+        "r18-100-task-feedback-loop",
         "r18-101-teacher-chat-workflow",
         "r18-102-freshness-conflict-recovery",
         "r18-104-builder-skill-discovery"
@@ -2385,21 +2388,23 @@
     {
       "id": "r19-041-session-navigation",
       "release": "1.9",
-      "title": "交付会话搜索分支多任务状态与既有事务历史审阅",
+      "title": "交付聊天首页、项目会话导航与极简/专业共用AI工作台",
       "dependencies": [
         "r19-040-session-persistence-deletion"
       ],
       "optional": false,
       "writeLocks": [
         "chat-ui",
-        "ai-session"
+        "ai-session",
+        "workspace-shell",
+        "props-shared"
       ],
       "spec": "1.9/README.md"
     },
     {
       "id": "r19-042-draft-workspace-continuity",
       "release": "1.9",
-      "title": "支持未命名工程AI与首次保存后的明确身份切换",
+      "title": "实现未命名工程与首次保存的AI身份连续性",
       "dependencies": [
         "r19-040-session-persistence-deletion"
       ],
@@ -2408,7 +2413,8 @@
         "contracts-schema",
         "ai-session",
         "app-save-recovery",
-        "chat-ui"
+        "chat-ui",
+        "main-preload"
       ],
       "spec": "1.9/README.md"
     },
@@ -2417,8 +2423,10 @@
       "release": "1.9",
       "title": "闭合长任务上下文压缩缓存失效与阶段性能诊断",
       "dependencies": [
-        "r19-041-session-navigation",
-        "r19-042-draft-workspace-continuity"
+        "r19-040-session-persistence-deletion",
+        "r19-042-draft-workspace-continuity",
+        "r19-044-course-creation-workflows",
+        "r19-045-material-context"
       ],
       "optional": false,
       "writeLocks": [
@@ -2429,9 +2437,45 @@
       "spec": "1.9/README.md"
     },
     {
+      "id": "r19-044-course-creation-workflows",
+      "release": "1.9",
+      "title": "内置自动材料与手动分阶段的整课创作流程",
+      "dependencies": [
+        "r19-042-draft-workspace-continuity",
+        "r19-045-material-context",
+        "r18-104-builder-skill-discovery"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "contracts-schema",
+        "ai-session",
+        "chat-ui",
+        "generated-index",
+        "store-kernel"
+      ],
+      "spec": "1.9/README.md"
+    },
+    {
+      "id": "r19-045-material-context",
+      "release": "1.9",
+      "title": "实现课程材料结构化读取、分片发现与可追溯引用",
+      "dependencies": [
+        "r19-040-session-persistence-deletion",
+        "r15-020-material-tools-citations"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "main-preload",
+        "contracts-schema",
+        "generated-index",
+        "workspace-shell"
+      ],
+      "spec": "1.9/README.md"
+    },
+    {
       "id": "r19-050-internal-dogfood",
       "release": "1.9",
-      "title": "以真实课例验证连续创作长任务恢复与跨入口衔接",
+      "title": "以真实课例验证双流程连续创作与主要耗时优化",
       "dependencies": [
         "r18-043-context-references",
         "r18-044-tool-timeline",
@@ -2440,7 +2484,9 @@
         "r19-040-session-persistence-deletion",
         "r19-041-session-navigation",
         "r19-042-draft-workspace-continuity",
-        "r19-043-long-task-context"
+        "r19-043-long-task-context",
+        "r19-044-course-creation-workflows",
+        "r19-045-material-context"
       ],
       "optional": false,
       "writeLocks": [
@@ -2526,11 +2572,13 @@
     {
       "id": "r20-020-public-authoring",
       "release": "2.0",
-      "title": "贯通整课生成三表面连续编辑与实际效果QA的生产工作流",
+      "title": "完成软件内部整课创作闭环与速度质量优化",
       "dependencies": [
         "r20-010-cli-setup-ui",
         "r20-011-first-use-risk-notice",
-        "r18-046-stop-undo-stale"
+        "r18-046-stop-undo-stale",
+        "r20-021-profile-controls",
+        "r20-022-materials-privacy-controls"
       ],
       "optional": false,
       "writeLocks": [
@@ -2543,15 +2591,18 @@
     {
       "id": "r20-021-profile-controls",
       "release": "2.0",
-      "title": "完善内置Skills选择与助手Builder共用发现的生产控制",
+      "title": "完成课件Skills内置交付与同源按需加载",
       "dependencies": [
         "r20-000-public-governance",
         "r18-050-three-cli-benchmark",
-        "r18-104-builder-skill-discovery"
+        "r18-104-builder-skill-discovery",
+        "r19-044-course-creation-workflows"
       ],
       "optional": false,
       "writeLocks": [
         "generated-index",
+        "ai-session",
+        "chat-ui",
         "workspace-shell"
       ],
       "spec": "2.0/README.md"
@@ -2559,15 +2610,17 @@
     {
       "id": "r20-022-materials-privacy-controls",
       "release": "2.0",
-      "title": "统一材料引用应用记录删除与Save As数据控制",
+      "title": "完成常见材料支持与引用删除数据控制",
       "dependencies": [
         "r20-011-first-use-risk-notice",
         "r15-020-material-tools-citations",
-        "r19-040-session-persistence-deletion"
+        "r19-040-session-persistence-deletion",
+        "r19-045-material-context"
       ],
       "optional": false,
       "writeLocks": [
         "main-preload",
+        "contracts-schema",
         "workspace-shell"
       ],
       "spec": "2.0/README.md"
@@ -2575,7 +2628,7 @@
     {
       "id": "r20-025-plugin-workflow-parity",
       "release": "2.0",
-      "title": "实测对照Codex和Claude插件并关闭课件工作流体验差距",
+      "title": "实测原生能力与课件质量对等并关闭GUI引入的差距",
       "dependencies": [
         "r20-020-public-authoring",
         "r20-021-profile-controls",
@@ -2594,22 +2647,20 @@
       "release": "2.0",
       "title": "完成内部设置 / Chat / timeline 的键盘、读屏、错误恢复与用户文档",
       "dependencies": [
-        "r20-020-public-authoring",
-        "r20-021-profile-controls",
-        "r20-022-materials-privacy-controls",
-        "r20-025-plugin-workflow-parity"
+        "r20-000-public-governance"
       ],
       "optional": false,
       "writeLocks": [
         "workspace-shell",
-        "generated-index"
+        "generated-index",
+        "chat-ui"
       ],
       "spec": "2.0/README.md"
     },
     {
       "id": "r20-040-three-cli-acceptance",
       "release": "2.0",
-      "title": "完成三CLI完整自然语言矩阵与持续创作的最终验收",
+      "title": "汇合三CLI内部全流程与速度质量证据",
       "dependencies": [
         "r20-020-public-authoring",
         "r20-021-profile-controls",
@@ -2642,8 +2693,12 @@
     {
       "id": "r20-050-owner-acceptance",
       "release": "2.0",
-      "title": "Owner 验收 S4 AI 产品并签署 v2.0.0 accepted 候选",
+      "title": "Owner验收S4内部全流程并签署v2.0.0 accepted",
       "dependencies": [
+        "r20-020-public-authoring",
+        "r20-021-profile-controls",
+        "r20-022-materials-privacy-controls",
+        "r20-025-plugin-workflow-parity",
         "r20-030-docs-accessibility",
         "r20-040-three-cli-acceptance",
         "r20-041-pptx-production-acceptance"

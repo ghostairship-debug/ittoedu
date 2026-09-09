@@ -1,9 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { prepareElectronLaunchEnvironment } from '../../scripts/electronLaunchEnvironment'
-import { createAgentEventDecoder, decodeAgentEvent } from '../../src/main/localAgent/protocol'
+import { createAgentEventDecoder, decodeAgentEvent } from '../fixtures/local-agent-v2/historicalWireDecoder'
 import { localAgentText } from '../../src/shared/localAgentText'
 import type { LocalAgentEvent } from '../../src/shared/localAgentContract'
-import { agentArguments, LocalAgentAdapter } from '../../src/main/localAgent/adapter'
+import { createLocalAgentCliAdapterV2 } from '../../src/main/localAgent/adapter'
+import { CLAUDE_CLI_ARGS } from '../../src/main/localAgent/claudeProcessTransport'
+import { randomUUID } from 'node:crypto'
 import { agentEnvironment, captureAgent, launchAgent, stopAgent } from '../../src/main/localAgent/process'
 import { localAgentRequestSchema } from '../../src/shared/localAgentContract'
 import type { GenerationRequest } from '../../src/shared/generationContract'
@@ -17,7 +19,7 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
-describe('LocalAgentCliAdapterV1', () => {
+describe('native V2 factory and read-only historical wire fixtures', () => {
   it('reconciles Claude text after thinking when completed arrays omit the thinking block', () => {
     const decode = createAgentEventDecoder('claude')
     const wires = [
@@ -51,33 +53,46 @@ describe('LocalAgentCliAdapterV1', () => {
       expect(alive(sibling.pid!)).toBe(true); expect(alive(siblingDescendant)).toBe(true)
     } finally { await stopAgent(target); await stopAgent(sibling); await fs.rm(directory, { recursive: true, force: true }) }
   })
-  it.each(['codex', 'claude', 'opencode'] as const)('%s normalizes installed, unsupported, bad JSON and crashes from a real fixture process', async id => {
+  it.each(['codex', 'claude', 'opencode'] as const)('%s probes installation and rejects broken native handshakes from a real fixture process', async id => {
     const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'adapter-contract-'))
     const fixture = path.join(directory, 'adapter.cjs')
-    const adapter = new LocalAgentAdapter(id, async () => ({ executable: process.execPath, prefix: [fixture] }))
+    const createAdapter = () => createLocalAgentCliAdapterV2(id, undefined, async () => ({ executable: process.execPath, prefix: [fixture] }))
+    const adapter = createAdapter()
     const write = (code: string) => fs.writeFile(fixture, code)
     try {
       await write('console.log("99.0.0")')
-      expect((await adapter.probe()).status).toBe('unsupported-version')
+      expect((await adapter.probe!()).status).toBe('unsupported-version')
       const version = id === 'codex' ? '0.153.0' : id === 'claude' ? '2.1.0' : '1.18.26'
       await write(`if(process.argv.includes('--version')) console.log(${JSON.stringify(version)}); else { console.log('{"loggedIn":true}'); }`)
-      expect((await adapter.probe()).status).toBe(id === 'opencode' ? 'unknown-auth' : 'ready')
+      expect((await adapter.probe!()).status).toBe(id === 'opencode' ? 'unknown-auth' : 'ready')
       await write(`if(process.argv.includes('--version')) console.log(${JSON.stringify(version)}); else { console.log('{"loggedIn":false}'); process.exitCode=1; }`)
-      expect((await adapter.probe()).status).toBe(id === 'opencode' ? 'unknown-auth' : 'unauthenticated')
-      const collect = async () => { for await (const _wire of adapter.start('hello', directory)) { /* parse at transport boundary */ } }
-      await write('console.log("{bad")')
-      await expect(collect()).rejects.toThrow('protocol')
-      await write('process.exitCode=7')
-      await expect(collect()).rejects.toThrow('crash')
-      await write('process.stderr.write("authentication failed"); process.exitCode=1')
-      await expect(collect()).rejects.toThrow('unauthenticated')
-      await write('process.stdout.write("x".repeat(1024*1024+1))')
-      await expect(collect()).rejects.toThrow('output-limit')
-    } finally { await adapter.cancel(); await fs.rm(directory, { recursive: true, force: true }) }
+      expect((await adapter.probe!()).status).toBe(id === 'opencode' ? 'unknown-auth' : 'unauthenticated')
+      for (const code of ['console.log("{bad")', 'process.exitCode=7', 'process.stderr.write("authentication failed"); process.exitCode=1']) {
+        await write(code)
+        const native = createAdapter()
+        try {
+          await expect(native.open({ cwd: directory, externalSessionId: null })).rejects.toThrow()
+          expect(native.getExternalSessionId?.()).toBeNull()
+        } finally { await native.close() }
+      }
+      await write(`if(process.argv.includes('--version')) console.log(${JSON.stringify(version)}); else process.stdout.write("x".repeat(1024*1024+1)+'\\n')`)
+      const oversized = createAdapter()
+      try {
+        const opened = oversized.open({ cwd: directory, externalSessionId: null })
+        if (id === 'claude') {
+          // Claude reports stream limits on its event channel while the failed
+          // initialize control separately rejects after the fixture exits.
+          await expect(opened).rejects.toThrow()
+          const collect = async () => { for await (const _ of oversized.events()) { /* drain native failure */ } }
+          await expect(collect()).rejects.toThrow('output-limit')
+        } else await expect(opened).rejects.toThrow('output-limit')
+        expect(oversized.getExternalSessionId?.()).toBeNull()
+      } finally { await oversized.close() }
+    } finally { await adapter.close(); await fs.rm(directory, { recursive: true, force: true }) }
   })
   it.each(['codex', 'claude', 'opencode'] as const)('%s reports missing without starting another executable', async id => {
-    const adapter = new LocalAgentAdapter(id, async () => null)
-    expect((await adapter.probe()).status).toBe('missing')
+    const adapter = createLocalAgentCliAdapterV2(id, undefined, async () => null)
+    expect((await adapter.probe!()).status).toBe('missing')
   })
   it('maps all three wire protocols and rejects unknown events', () => {
     expect(decodeAgentEvent('codex', { type: 'thread.started', thread_id: 'thread-1' })[0]).toMatchObject({ kind: 'session', externalSessionId: 'thread-1' })
@@ -90,14 +105,17 @@ describe('LocalAgentCliAdapterV1', () => {
     expect(decodeAgentEvent('opencode', { type: 'error', sessionID: 'session', error: { name: 'APIError', data: { statusCode: 429, message: 'FreeUsageLimitError' } } })[0]).toMatchObject({ kind: 'failed', failure: 'rate-limited' })
     for (const id of ['codex', 'claude', 'opencode'] as const) expect(() => decodeAgentEvent(id, { type: 'unexpected', sessionID: 's' })).toThrow()
   })
-  it('strictly excludes arbitrary executable and environment requests', () => {
+  it('rejects executable overrides while preserving native CLI environment and removing Electron host flags', () => {
     expect(localAgentRequestSchema.safeParse({ operation: 'probe', adapter: 'codex', executable: 'cmd.exe' }).success).toBe(false)
-    expect(agentEnvironment({ PATH: 'bin', OPENAI_API_KEY: 'secret', ELECTRON_RUN_AS_NODE: '1', NODE_OPTIONS: '--require evil' })).toEqual({ PATH: 'bin' })
-    expect(agentArguments('codex', 'ignored', 'external')).toContain('app-server')
-    expect(agentArguments('claude', 'ignored', 'external')).toContain('--resume')
-    expect(agentArguments('opencode', '& echo bad', 'external')).toEqual(['acp'])
-    expect(agentArguments('opencode', 'x'.repeat(50000)).join(' ').length).toBeLessThan(100)
-    expect(agentArguments('claude', 'hello')).toContain('--include-partial-messages')
+    expect(agentEnvironment({ PATH: 'bin', NATIVE_CLI_CONFIG: 'fixture-config', HTTPS_PROXY: 'fixture-proxy', ELECTRON_RUN_AS_NODE: '1', NODE_OPTIONS: '--max-old-space-size=1024' }))
+      .toEqual({ PATH: 'bin', NATIVE_CLI_CONFIG: 'fixture-config', HTTPS_PROXY: 'fixture-proxy', NODE_OPTIONS: '--max-old-space-size=1024' })
+    for (const id of ['codex', 'claude', 'opencode'] as const) {
+      const adapter = createLocalAgentCliAdapterV2(id, undefined, async () => null)
+      expect(adapter).toMatchObject({ id, open: expect.any(Function), startTurn: expect.any(Function), input: expect.any(Function), events: expect.any(Function), close: expect.any(Function) })
+      expect('start' in adapter).toBe(false)
+      expect('resume' in adapter).toBe(false)
+    }
+    expect(CLAUDE_CLI_ARGS).toContain('--include-partial-messages')
   })
   it('uses the exact program and literal args with spaces, Chinese and shell metacharacters', async () => {
     const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'CLI 中文 space-'))
@@ -168,16 +186,16 @@ describe('LocalAgentCliAdapterV1', () => {
       version: 1, requestId, kind: 'reply', reply: '说明', candidate,
     }), request)).toThrow('reply envelope')
   })
-  it('lets OpenCode replace only the current request candidate through ACP', async () => {
+  it('forwards explicit native permission answers and replaces a staged candidate through V2 ACP', async () => {
     const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'opencode-candidate-'))
     const requestId = '2a42b1a2-1b08-411f-9407-81332bc0a229'
-    const relative = `candidates/${requestId}/candidate.json`
     const candidateDirectory = path.join(directory, 'candidates', requestId)
     await fs.mkdir(candidateDirectory, { recursive: true })
+    const candidatePath = path.join(candidateDirectory, 'candidate.json')
     const fixture = path.join(directory, 'acp.cjs')
     const permission = (id: number, target: string) => ({ jsonrpc: '2.0', id, method: 'session/request_permission', params: {
       sessionId: 'session-1', toolCall: { toolCallId: `tool-${id}`, kind: 'edit', title: 'Write candidate', locations: [{ path: target }] },
-      options: [{ optionId: `allow-${id}`, kind: 'allow_once', name: 'Allow once' }],
+      options: [{ optionId: `allow-${id}`, kind: 'allow_once', name: 'Allow once' }, { optionId: `reject-${id}`, kind: 'reject_once', name: 'Reject once' }],
     } })
     await fs.writeFile(fixture, `
 const readline=require('node:readline').createInterface({input:process.stdin});
@@ -187,18 +205,32 @@ readline.on('line',line=>{const m=JSON.parse(line);
  if(m.method==='session/new') return send({jsonrpc:'2.0',id:m.id,result:{sessionId:'session-1'}});
  if(m.method==='session/set_config_option') return send({jsonrpc:'2.0',id:m.id,result:{}});
  if(m.method==='session/prompt'){promptId=m.id;return send(${JSON.stringify(permission(100, '../escape.json'))});}
- if(m.id===100){if(m.result?.outcome?.outcome!=='cancelled')process.exit(10);return send(${JSON.stringify(permission(101, relative))});}
- if(m.id===101){if(m.result?.outcome?.outcome!=='selected')process.exit(11);return send({jsonrpc:'2.0',id:102,method:'fs/write_text_file',params:{sessionId:'session-1',path:${JSON.stringify(relative)},content:'{"broken":true}'}});}
- if(m.id===102)return send({jsonrpc:'2.0',id:103,method:'fs/write_text_file',params:{sessionId:'session-1',path:${JSON.stringify(relative)},content:'{"version":1}'}});
+ if(m.id===100){if(m.result?.outcome?.optionId!=='reject-100')process.exit(10);return send(${JSON.stringify(permission(101, candidatePath))});}
+ if(m.id===101){if(m.result?.outcome?.optionId!=='allow-101')process.exit(11);return send({jsonrpc:'2.0',id:102,method:'fs/write_text_file',params:{sessionId:'session-1',path:${JSON.stringify(candidatePath)},content:'{"broken":true}'}});}
+ if(m.id===102)return send({jsonrpc:'2.0',id:103,method:'fs/write_text_file',params:{sessionId:'session-1',path:${JSON.stringify(candidatePath)},content:'{"version":1}'}});
  if(m.id===103)return send({jsonrpc:'2.0',id:promptId,result:{stopReason:'end_turn'}});
 });`)
-    const adapter = new LocalAgentAdapter('opencode', async () => ({ executable: process.execPath, prefix: [fixture] }), { requestId } as GenerationRequest)
+    const adapter = createLocalAgentCliAdapterV2('opencode', { requestId } as GenerationRequest, async () => ({ executable: process.execPath, prefix: [fixture] }))
     try {
-      const wires: any[] = []
-      for await (const wire of adapter.start('write candidate', directory)) wires.push(wire)
-      expect(wires).toContainEqual(expect.objectContaining({ type: 'acp_permission_denied' }))
-      expect(JSON.parse(await fs.readFile(path.join(candidateDirectory, 'candidate.json'), 'utf8'))).toEqual({ version: 1 })
-    } finally { await adapter.cancel(); await fs.rm(directory, { recursive: true, force: true }) }
+      await adapter.open({ cwd: directory, externalSessionId: null, candidateRoot: candidateDirectory })
+      const identity = { taskId: randomUUID(), epoch: 0, workspace: { version: 1 as const, projectId: 'p1', normalizedPath: 'c:/lessons/native-test.h5lesson' } }
+      await adapter.startTurn({ ...identity, runId: randomUUID(), observationId: randomUUID(), text: 'write candidate', imageFileIds: [] }, new Map())
+      const answers: string[] = []
+      let completed = false
+      for await (const event of adapter.events()) {
+        if (event.kind === 'question') {
+          const question = event.question
+          const value = answers.length ? 'Allow once' : 'Reject once'
+          const delivery = await adapter.input({ version: 1, ...identity, inputId: randomUUID(), turnId: question.turnId,
+            kind: 'answer', questionId: question.questionId, answers: [{ id: question.questions[0]!.id, values: [value] }] })
+          expect(delivery.status).toBe('accepted')
+          answers.push(value)
+        } else if (event.kind === 'turn-ended') completed = event.status === 'completed'
+      }
+      expect(answers).toEqual(['Reject once', 'Allow once'])
+      expect(completed).toBe(true)
+      expect(JSON.parse(await fs.readFile(candidatePath, 'utf8'))).toEqual({ version: 1 })
+    } finally { await adapter.close(); await fs.rm(directory, { recursive: true, force: true }) }
   })
 })
 

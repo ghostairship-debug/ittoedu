@@ -6,10 +6,12 @@ import { openSpatialAuthoringSession } from '../../course/spatialEditorCommands'
 import { createFlowEditorHistory, selectFlowEditorBlock } from '../../course/flowEditorSlice'
 import { applyHistoryResourceChanges } from '../../store/courseResourceState'
 import { makeLayerItemAuthoringAddress } from '../courseAuthoringScope'
-import { makeFlowBlockAuthoringAddress } from '../../course/flowDocumentModel'
+import { findFlowBlockRecursive, makeFlowBlockAuthoringAddress } from '../../course/flowDocumentModel'
+import { moveFlowEditorBlock } from '../../course/flowEditorCommands'
 import { dynamicPackageFilesSchema, parseDynamicPackageCandidate } from './dynamicPackageCandidate'
 import { resolveAuthoringToolScope } from './authoringToolScope'
 import { admitDynamicCandidate } from './dynamicCandidateAdmission'
+import type { DynamicBehaviorObservation } from '../../../shared/dynamicBehaviorObservation'
 import type { AuthoringToolDefinition } from './executeAuthoringTool'
 
 const schema = z.discriminatedUnion('operation', [
@@ -24,7 +26,9 @@ export const componentInsertTool: AuthoringToolDefinition<z.infer<typeof schema>
     if (!resources) throw new Error('组件工具缺少当前工程资源')
     if (destination.kind !== 'create' || destination.scope.insertion.kind !== 'append') throw new Error('组件插入需要追加 create scope')
     const body = surface.type === 'flow' && target.owner === 'surface' && destination.scope.parent.kind === 'flow-body'
-    if (body ? destination.scope.parent.kind !== 'flow-body' || destination.scope.parent.parentBlockId !== null : destination.scope.parent.kind !== 'owner') throw new Error('组件插入父 scope 不匹配')
+    if (body ? destination.scope.parent.kind !== 'flow-body' : destination.scope.parent.kind !== 'owner') throw new Error('组件插入父 scope 不匹配')
+    const parentBlockId = body && destination.scope.parent.kind === 'flow-body' ? destination.scope.parent.parentBlockId : null
+    if (parentBlockId !== null && (surface.type !== 'flow' || findFlowBlockRecursive(surface.blocks, parentBlockId)?.block.type !== 'section')) throw new Error('组件插入父分节已失效')
     if (surface.type === 'spatial-2d' && target.owner !== 'world') throw new Error('Spatial 组件插入需要 world owner')
     let data = value.operation === 'candidate' ? parseDynamicPackageCandidate(value.files) : resources.componentPackages[value.packageId]
     if (value.operation === 'catalog') {
@@ -48,11 +52,22 @@ export const componentInsertTool: AuthoringToolDefinition<z.infer<typeof schema>
       spatial: surface.type === 'spatial-2d' ? openSpatialAuthoringSession(document, { locationId: target.locationId }) : null,
       flow: location.kind === 'flow-block' && surface.type === 'flow' ? { history: createFlowEditorHistory(document), selection: { ...selectFlowEditorBlock(document, target.locationId, body ? surface.blocks.at(-1)!.id : location.blockId), authoringScope: target.owner === 'global' ? 'global' : 'page' } } : null,
     })
-    if (value.operation === 'candidate') await admitDynamicCandidate(planned.step.nextDocument, applyHistoryResourceChanges(resources, planned.step.resourceChanges, 'forward'), [{ locationId: target.locationId, stateId: target.stateId, instanceIds: planned.layerItemIds }], signal)
-    return { transaction: { ...planned.step, selectionHint: { kind: 'authoring-tool-selection', locationId: target.locationId, stateId: target.stateId, owner: target.owner,
+    let nextDocument = planned.step.nextDocument
+    if (parentBlockId !== null) for (const id of planned.layerItemIds) {
+      const nextSurface = nextDocument.surfaces.find(entry => entry.id === surface.id)
+      if (nextSurface?.type !== 'flow') throw new Error('正文表面已失效')
+      const current = findFlowBlockRecursive(nextSurface.blocks, id), parent = findFlowBlockRecursive(nextSurface.blocks, parentBlockId)?.block
+      if (!current || parent?.type !== 'section') throw new Error('正文组件插入位置已失效')
+      const moved = moveFlowEditorBlock(nextDocument, { surfaceId: surface.id, parentId: current.parentId, blockId: id }, { parentId: parentBlockId, index: parent.blocks.length }, { expectedRevision: nextDocument.revision })
+      if (!moved.ok || !moved.nextDocument) throw new Error(moved.reason)
+      nextDocument = { ...moved.nextDocument, revision: document.revision + 1 }
+    }
+    const behaviorEvidence: DynamicBehaviorObservation[] = []
+    if (value.operation === 'candidate') await admitDynamicCandidate(nextDocument, applyHistoryResourceChanges(resources, planned.step.resourceChanges, 'forward'), [{ locationId: target.locationId, stateId: target.stateId, instanceIds: planned.layerItemIds }], signal, false, { onBehaviorEvidence: evidence => behaviorEvidence.push(...evidence) })
+    return { transaction: { ...planned.step, nextDocument, selectionHint: { kind: 'authoring-tool-selection', locationId: target.locationId, stateId: target.stateId, owner: target.owner,
       ...(surface.type === 'flow' ? { flowCarrier: body ? 'block' : 'overlay' } : {}), itemIds: planned.layerItemIds } },
       affected: planned.layerItemIds.map(id => ({ id, operation: 'created' as const, ownerKey: target.ownerKey,
         authoringAddress: body ? makeFlowBlockAuthoringAddress({ projectId: document.id, surfaceId: surface.id, blockId: id, carrier: 'component' })
-          : makeLayerItemAuthoringAddress({ projectId: document.id, owner: target.owner, surfaceId: surface.id, sceneId: scope.sceneId, kind: 'component', layerItemId: id }) })) }
+          : makeLayerItemAuthoringAddress({ projectId: document.id, owner: target.owner, surfaceId: surface.id, sceneId: scope.sceneId, kind: 'component', layerItemId: id }) })), ...(behaviorEvidence.length ? { behaviorEvidence } : {}) }
   },
 }

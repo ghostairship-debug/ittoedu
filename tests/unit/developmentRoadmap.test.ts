@@ -334,6 +334,9 @@ describe('development roadmap validation', () => {
       'diagnostics',
       'main-preload',
       'cli-adapters',
+      'cli-adapter-codex',
+      'cli-adapter-claude',
+      'cli-adapter-opencode',
       'ai-session',
       'chat-ui',
     ])

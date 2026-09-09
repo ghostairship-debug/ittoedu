@@ -1,0 +1,41 @@
+{
+  "destination": {
+    "insertion": "after current locationId",
+    "kind": "create",
+    "owner": "scene",
+    "parent": {
+      "kind": "course-locations"
+    }
+  },
+  "example": "const view = await session.observe(); const scope = await session.createScope({parent:{kind:\"course-locations\"},insertion:{kind:\"after\",siblingId:view.scope.locationId}}); const receipt = await session.execute(\"recipe.apply\", card.input, {kind:\"create\",scope}); if(receipt.status!==\"committed\") throw new Error(JSON.stringify(receipt.diagnostics));",
+  "fields": [
+    {
+      "key": "title",
+      "label": "标题",
+      "value": "观察一粒种子的生长"
+    },
+    {
+      "key": "steps",
+      "label": "步骤（每行一步）",
+      "value": "种子吸收水分\n胚根首先突破种皮\n胚芽生长，形成幼苗"
+    },
+    {
+      "key": "initialStep",
+      "label": "初始显示步数",
+      "value": "0"
+    }
+  ],
+  "id": "step-reveal-v1",
+  "input": {
+    "recipeId": "step-reveal-v1",
+    "slots": {
+      "initialStep": "0",
+      "steps": "种子吸收水分\n胚根首先突破种皮\n胚芽生长，形成幼苗",
+      "title": "观察一粒种子的生长"
+    }
+  },
+  "label": "逐步揭示",
+  "output": "ordinary editable Course Project V9 content",
+  "tool": "recipe.apply",
+  "version": 1
+}

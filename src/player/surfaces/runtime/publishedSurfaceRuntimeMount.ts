@@ -43,6 +43,7 @@ export interface PublishedSurfaceRuntimeMountHandle {
   readonly element: HTMLElement
   applyAuthoringContentValue(key: string, value: string): boolean
   waitForReady(): Promise<void>
+  waitForObservationReady?(): Promise<void>
   waitForCaptureReady(): Promise<void>
   failCapture?(error: Error): void
   restoreAfterCapture(): void
@@ -665,6 +666,10 @@ export function mountPublishedSurfaceRuntime(
         throw captureFailure ?? new Error(`Surface Runtime“${options.instanceId}”未完成启动`)
       }
     },
+    async waitForObservationReady() {
+      await handle.waitForReady()
+      await captureBarrier.waitForReady()
+    },
     async waitForCaptureReady() {
       if (captureFailure) throw captureFailure
       if (instanceDestroyed) throw new Error(`Surface Runtime“${options.instanceId}”已销毁`)
@@ -726,6 +731,6 @@ export function mountPublishedSurfaceRuntime(
     await handle.waitForReady()
     invoke(() => lifecycle.resize?.(options.width, options.height))
     await handle.waitForReady()
-  })
+  }, { suspend: () => handle.suspend(), resume: () => handle.resume() })
   return handle
 }

@@ -3,6 +3,10 @@ import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { z } from 'zod'
+import { stripTypeScriptTypes } from 'node:module'
+import { describeAuthoringToolDiscovery } from '../src/renderer/authoring/tools/authoringToolFacade'
+import { courseAgentSkills, courseAgentSkillMarkdown } from '../src/shared/courseAgentSkills'
+import type { CourseAgentCapabilityData, CourseAgentCapabilityEntry } from '../src/shared/courseAgentCapabilities'
 import packageJson from '../package.json'
 import { importComponentPackage } from '../src/renderer/components/importComponentPackage'
 import { BUILT_IN_COMPONENT_CATALOG_SHA256 } from '../src/shared/builtInComponentCatalog'
@@ -104,6 +108,7 @@ import {
 } from '../src/renderer/export/exportSize'
 
 export const AI_CAPABILITY_INDEX_MAX_BYTES = 16_384
+export const AI_CAPABILITY_DISCOVERY_MAX_BYTES = 8_192
 export const AI_CAPABILITY_MANIFEST_VERSION = 1 as const
 export const INTERACTION_PROTOCOL_VERSION = 1 as const
 
@@ -325,6 +330,11 @@ export function canonicalJson(value: unknown): string {
 
 export function canonicalJsonByteLength(value: unknown): number {
   return Buffer.byteLength(canonicalJson(value), 'utf8')
+}
+
+/** Native file readers can cap each physical line; keep on-demand JSON navigable. */
+function readableResourceJson(value: unknown): string {
+  return `${JSON.stringify(normalizeJson(value), null, 2)}\n`
 }
 
 export function assertIndexWithinLimit(index: unknown): void {
@@ -841,6 +851,111 @@ async function directFileEvidence(
     path: relativePath,
     sha256: sha256(await fs.readFile(path.join(projectRoot, relativePath))),
   })))
+}
+
+async function addDiscoveryArtifacts(projectRoot: string, files: Map<string, string>, catalog: ComponentCatalogCapabilitySnapshot) {
+  const entries: CourseAgentCapabilityEntry[] = []
+  const resources = new Map<string, string>()
+  const allScopes = ['slide:scene', 'slide:surface', 'slide:global', 'flow:surface', 'flow:global', 'spatial-2d:world', 'spatial-2d:surface', 'spatial-2d:global']
+  const allCarriers = ['native', 'recipe', 'existing-component', 'generated-component', 'runtime']
+  const toolDefinitions = describeAuthoringToolDiscovery()
+  for (const tool of toolDefinitions) {
+    const location = `tools/${tool.name}.json`
+    resources.set(location, readableResourceJson({ version: 1, ...tool }))
+    entries.push({ id: tool.name, kind: 'tool', label: tool.name, path: location,
+      scopes: tool.supportedScopes, carriers: [...new Set([tool.candidateCarrier.default, ...Object.values(tool.candidateCarrier.operations ?? {})])],
+      summary: tool.description ?? '按完整输入 Schema、当前 canonical target 和宿主支持执行。',
+      dependencies: tool.name === 'component.package' ? ['component-api4'] : tool.name === 'runtime.insert' || tool.name === 'runtime.source' ? ['runtime-api2', 'runtime-api3'] : [],
+    })
+  }
+  for (const recipe of RECIPE_CATALOG) {
+    const location = `recipes/${recipe.id}.json`
+    const input = { recipeId: recipe.id, slots: Object.fromEntries(recipe.fields.map(field => [field.key, field.value])) }
+    resources.set(location, readableResourceJson({ ...recipe, tool: 'recipe.apply', input,
+      destination: { kind: 'create', owner: 'scene', parent: { kind: 'course-locations' }, insertion: 'after current locationId' },
+      example: 'const view = await session.observe(); const scope = await session.createScope({parent:{kind:"course-locations"},insertion:{kind:"after",siblingId:view.scope.locationId}}); const receipt = await session.execute("recipe.apply", card.input, {kind:"create",scope}); if(receipt.status!=="committed") throw new Error(JSON.stringify(receipt.diagnostics));',
+      output: 'ordinary editable Course Project V9 content',
+    }))
+    entries.push({ id: `recipe:${recipe.id}`, kind: 'recipe', label: recipe.label, path: location, scopes: ['slide:scene'], carriers: ['recipe'],
+      summary: recipe.fields.map(field => field.label).join('、'), keywords: recipe.fields.map(field => field.value).join(' '), dependencies: ['recipe.apply'],
+    })
+  }
+  for (const component of catalog.packages) {
+    const location = `components/${encodeURIComponent(component.packageId)}@${encodeURIComponent(component.version)}.json`
+    resources.set(location, readableResourceJson({ ...component, tool: 'component.insert',
+      catalogSource: catalog.source,
+      example: '按 request.context.componentCatalogFile.path 读取本轮完整目录，找到 packageId/version/sha256 与卡片完全匹配的 source，使用 {operation:"catalog",sourceId:source.sourceId,packageId:source.packageId,version:source.version,sha256:source.sha256}。sourceId 必须来自当前宿主，不能猜测。',
+      note: 'catalog 操作需要宿主目录 consumer；不能把生成时可用误作当前宿主可用。Builder 没有目录 consumer 时使用公开 candidate 文件输入或明确报告缺口。目录不可用不阻止创建或导入工程内组件。',
+    }))
+    const scopes = component.supportedScopes.flatMap(scope => scope === 'scene' ? ['slide:scene', 'flow:surface', 'spatial-2d:world'] : ['slide:global', 'flow:global'])
+    entries.push({ id: `component:${component.packageId}@${component.version}`, kind: 'component', label: component.name, path: location, scopes,
+      carriers: ['existing-component'], summary: component.description ?? component.name, available: component.availability === 'available',
+      keywords: JSON.stringify(component), dependencies: ['component.insert'],
+    })
+  }
+  const protocolSources = [
+    { id: 'component-api4', schema: 'schemas/component-api4.json', source: 'src/shared/contracts/component-v4/types.ts', carriers: ['generated-component', 'existing-component'], scopes: allScopes },
+    { id: 'runtime-api2', schema: 'schemas/runtime-api2.json', source: 'src/shared/contracts/runtime/types.ts', carriers: ['runtime'], scopes: ['slide:scene', 'slide:global'] },
+    { id: 'runtime-api3', schema: 'schemas/runtime-api3.json', source: 'src/shared/contracts/runtime/surface.ts', carriers: ['runtime'], scopes: ['slide:scene', 'flow:surface'] },
+  ]
+  for (const protocol of protocolSources) {
+    const location = `protocols/${protocol.id}.json`
+    const guideLocation = `protocols/${protocol.id}.authoring.md`
+    const guideId = `reference:${protocol.id}/authoring`
+    const schema = JSON.parse(files.get(protocol.schema)!)
+    const authoringGuide = await fs.readFile(path.join(projectRoot, schema.documentation), 'utf8')
+    resources.set(guideLocation, authoringGuide)
+    resources.set(location, readableResourceJson({ ...schema, types: await fs.readFile(path.join(projectRoot, protocol.source), 'utf8'),
+      sharedTypes: { assessment: await fs.readFile(path.join(projectRoot, 'src/shared/assessmentEvaluators.ts'), 'utf8'),
+        ...(protocol.id === 'runtime-api2' ? {} : { runtime: await fs.readFile(path.join(projectRoot, 'src/shared/contracts/runtime/types.ts'), 'utf8') }) },
+      authoringGuide, authoringGuideFile: guideLocation }))
+    entries.push({ id: protocol.id, kind: 'protocol', label: protocol.id, path: location, scopes: protocol.scopes, carriers: protocol.carriers,
+      dependencies: [guideId], summary: '完整正式协议、宿主范围、生命周期与验证限制；编写指南可通过同目录.authoring.md读取，不替代真实宿主准入。' })
+    entries.push({ id: guideId, kind: 'reference', label: `${protocol.id} 编写指南`, path: guideLocation, scopes: protocol.scopes,
+      carriers: protocol.carriers, summary: '正式协议同源的完整Markdown指南，保留自然换行供原生Read按需读取。' })
+  }
+  for (const skillName of ['orchestrate-courseware', 'build-courseware-project']) {
+    const sourceRoot = path.join(projectRoot, '.agents', 'skills', skillName)
+    const sourcePaths = ['SKILL.md', ...(await fs.readdir(path.join(sourceRoot, 'references'))).filter(name => name.endsWith('.md')).map(name => `references/${name}`)]
+    for (const sourcePath of sourcePaths) {
+      const text = await fs.readFile(path.join(sourceRoot, sourcePath), 'utf8')
+      const location = `skills/${skillName}/${sourcePath}`
+      resources.set(location, text)
+      const label = text.match(/^# (.+)$/m)?.[1] ?? sourcePath
+      entries.push({ id: sourcePath === 'SKILL.md' ? `skill:${skillName}` : `reference:${skillName}/${path.posix.basename(sourcePath, '.md')}`,
+        kind: sourcePath === 'SKILL.md' ? 'skill' : 'reference', label, path: location, scopes: allScopes, carriers: allCarriers,
+        summary: sourcePath === 'SKILL.md' ? text.match(/^description: (.+)$/m)?.[1]?.slice(0, 300) ?? label : label,
+        keywords: text.split('\n').filter(line => /^#{1,3} /.test(line)).join(' '),
+      })
+    }
+  }
+  for (const skill of courseAgentSkills) {
+    const location = `skills/${skill.name}/SKILL.md`
+    resources.set(location, courseAgentSkillMarkdown(skill))
+    entries.push({ id: `skill:${skill.name}`, kind: 'skill', label: skill.name, path: location, scopes: allScopes, carriers: allCarriers, summary: skill.body.split('。')[0]! })
+  }
+  resources.set('query-core.mjs', stripTypeScriptTypes(await fs.readFile(path.join(projectRoot, 'src/shared/courseAgentCapabilities.ts'), 'utf8')))
+  resources.set('query.mjs', [
+    "import {readFile} from 'node:fs/promises';",
+    `import {queryCourseAgentCapabilities,readCourseAgentCapability} from ${JSON.stringify("./query-core.mjs")};`,
+    "const data=JSON.parse(await readFile(new URL('./discovery-data.json',import.meta.url),'utf8'));",
+    "try { const args=process.argv.slice(2); const query={}; const options={}; let id; for(let i=0;i<args.length;i++){const key=args[i];const value=args[++i];if(!value)throw new Error('缺少查询参数值');if(key==='--id')id=value;else if(key==='--operation'||key==='--nativeType')options[key.slice(2)]=value;else if(['--query','--surface','--owner','--carrier','--kind','--task','--semanticVersion'].includes(key))query[key.slice(2)]=value;else if(key==='--limit')query.limit=Number(value);else throw new Error('未知查询参数 '+key);} console.log(JSON.stringify(id?readCourseAgentCapability(data,id,options):queryCourseAgentCapabilities(data,query),null,2));}catch(error){console.error(error.message);process.exitCode=1;}",
+  ].join('\n') + '\n')
+  entries.sort((a, b) => a.id.localeCompare(b.id, 'en'))
+  const semanticVersion = createHash('sha256').update(canonicalJson({ version: 1, entries, files: Object.fromEntries([...resources].sort(([a], [b]) => a.localeCompare(b, 'en'))) })).digest('hex')
+  const discovery = { version: 1, semanticVersion, query: 'query.mjs', data: 'discovery-data.json',
+    usage: '保持原生工作目录；node "<query.mjs绝对路径>" --query <关键词> --surface <slide|flow|spatial-2d>; --id <能力ID> [--operation <操作>] [--nativeType <类型>]',
+    groups: { recipes: 'query --kind recipe', components: 'query --kind component', skills: 'query --kind skill', references: 'query --kind reference' },
+    tools: entries.filter(entry => entry.kind === 'tool').map(entry => ({ id: entry.id, path: entry.path, scopes: entry.scopes, carriers: entry.carriers })),
+    protocols: entries.filter(entry => entry.kind === 'protocol').map(entry => ({ id: entry.id, path: entry.path, authoringGuideFile: `protocols/${entry.id}.authoring.md`, scopes: entry.scopes })),
+    cache: 'Reuse only with the same semanticVersion and the same query scope; source/material/observation versions are separate.',
+  }
+  const discoveryText = readableResourceJson(discovery)
+  if (Buffer.byteLength(discoveryText) > AI_CAPABILITY_DISCOVERY_MAX_BYTES) throw new Error('精简发现入口超过 8 KiB，不能截断能力')
+  resources.set('discovery.json', discoveryText)
+  const data: CourseAgentCapabilityData = { version: 1, semanticVersion, entries, files: Object.fromEntries(resources) }
+  for (const [location, content] of resources) files.set(location, content)
+  files.set('discovery-data.json', canonicalJson(data))
 }
 
 export async function generateAiCapabilityArtifacts(
@@ -1574,6 +1689,7 @@ export async function generateAiCapabilityArtifacts(
   }
   assertIndexWithinLimit(index)
   files.set('index.json', canonicalJson(index))
+  await addDiscoveryArtifacts(projectRoot, files, componentCatalogSnapshot)
 
   const indexedOutput = new Map(files)
   files.set('generation-evidence.json', canonicalJson({
@@ -1636,7 +1752,7 @@ async function listJsonFiles(rootPath: string): Promise<string[]> {
     for (const entry of entries) {
       const absolute = path.join(directory, entry.name)
       if (entry.isDirectory()) await visit(absolute)
-      else if (entry.isFile() && entry.name.endsWith('.json')) {
+      else if (entry.isFile() && /\.(json|md|mjs)$/.test(entry.name)) {
         output.push(path.relative(rootPath, absolute).replaceAll('\\', '/'))
       }
     }
@@ -1749,12 +1865,21 @@ async function main(): Promise<void> {
   })
   if (options.check) {
     await checkAiCapabilityArtifacts(options.outputRoot, generated)
+    if (options.outputRoot === path.join(options.projectRoot, 'artifacts', 'ai-capabilities')) {
+      const bundle = await fs.readFile(path.join(options.projectRoot, 'src/shared/generated/courseAgentCapabilities.json'), 'utf8').catch(() => '')
+      if (bundle !== generated.files.get('discovery-data.json')) throw new Error('打包能力资源过期，请运行 generate:ai-capabilities')
+    }
     console.log(
       `AI 能力清单已是最新状态；索引 ${generated.indexBytes} / ${AI_CAPABILITY_INDEX_MAX_BYTES} 字节，组件目录 ${generated.componentCatalogStatus}。`,
     )
     return
   }
   await writeAiCapabilityArtifacts(options.outputRoot, generated)
+  if (options.outputRoot === path.join(options.projectRoot, 'artifacts', 'ai-capabilities')) {
+    const target = path.join(options.projectRoot, 'src/shared/generated/courseAgentCapabilities.json')
+    await fs.mkdir(path.dirname(target), { recursive: true })
+    await fs.writeFile(target, generated.files.get('discovery-data.json')!, 'utf8')
+  }
   console.log(
     `已生成 ${generated.files.size} 个 AI 能力文件；索引 ${generated.indexBytes} / ${AI_CAPABILITY_INDEX_MAX_BYTES} 字节，组件目录 ${generated.componentCatalogStatus}。`,
   )

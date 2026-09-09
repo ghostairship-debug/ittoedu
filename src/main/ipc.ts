@@ -243,6 +243,22 @@ function registerSafeHandler<T>(
 }
 
 export function registerIpcHandlers(context: IpcContext): void {
+  registerSafeHandler(IPC_CHANNELS.captureAuthoringObservation, context, {
+    code: 'OBSERVATION_CAPTURE_FAILED', title: '当前画面尚未同步',
+    message: '无法读取当前课件画面。', suggestion: '请等待画面呈现完成后重试。',
+  }, async (event, args) => {
+    const rect = z.object({ x: z.number().finite().nonnegative(), y: z.number().finite().nonnegative(),
+      width: z.number().finite().positive().max(16384), height: z.number().finite().positive().max(16384) }).strict().parse(requireSingleArgument(args))
+    const window = context.getMainWindow()
+    if (!window || event.sender.isDestroyed()) throw new Error('观察窗口已关闭')
+    const zoom = event.sender.getZoomFactor()
+    const bounds = window.getContentBounds()
+    const region = { x: Math.floor(rect.x * zoom), y: Math.floor(rect.y * zoom), width: Math.ceil(rect.width * zoom), height: Math.ceil(rect.height * zoom) }
+    if (region.x + region.width > bounds.width + 1 || region.y + region.height > bounds.height + 1) throw new Error('观察区域已离开当前窗口，请重新同步')
+    const captured = await event.sender.capturePage(region)
+    if (captured.isEmpty()) throw new Error('当前画面未就绪')
+    return { dataUrl: captured.toDataURL(), capturedAt: Date.now(), ...captured.getSize() }
+  })
   registerSafeHandler(IPC_CHANNELS.dynamicAdmission, context, {
     code: 'DYNAMIC_ADMISSION_FAILED', title: '动态候选准入失败',
     message: '候选未通过独立进程检查。', suggestion: '请根据检查结果修正候选后重试。',

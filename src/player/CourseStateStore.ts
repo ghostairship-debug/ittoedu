@@ -70,6 +70,10 @@ function clonePureData<T>(value: T, key: string): T {
 
 export class CourseStateStore implements CourseStateStoreContract {
   private readonly values = new Map<string, CourseStateData>()
+  private stateVersion = 0
+
+  /** Host observation identity; never persisted into the course document. */
+  get version(): number { return this.stateVersion }
 
   constructor(
     private readonly onChange?: (
@@ -90,11 +94,13 @@ export class CourseStateStore implements CourseStateStoreContract {
   set(key: string, value: unknown): void {
     const cloned = clonePureData(value, key) as CourseStateData
     this.values.set(key, cloned)
+    this.stateVersion += 1
     this.onChange?.({ type: 'set', key, value: clonePureData(cloned, key) })
   }
 
   delete(key: string): void {
     if (this.values.delete(key)) {
+      this.stateVersion += 1
       this.onChange?.({ type: 'delete', key })
     }
   }
@@ -110,13 +116,14 @@ export class CourseStateStore implements CourseStateStoreContract {
     if (!prepared.length) return
     const notification = prepared.map(({ key, value }) => ({ key, value: clonePureData(value, key) }))
     for (const { key, value } of prepared) this.values.set(key, value)
+    this.stateVersion += 1
     this.onChange?.({ type: 'batch', entries: notification })
   }
 
   clear(): void {
     const hadValues = this.values.size > 0
     this.values.clear()
-    if (hadValues) this.onChange?.({ type: 'clear' })
+    if (hadValues) { this.stateVersion += 1; this.onChange?.({ type: 'clear' }) }
   }
 
   snapshot(): Record<string, unknown> {

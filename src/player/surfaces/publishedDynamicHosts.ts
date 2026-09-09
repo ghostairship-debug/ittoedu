@@ -454,6 +454,7 @@ export class PublishedCourseSession {
   #navigationFeedback: HTMLElement | null = null
   readonly #playbackScenes: readonly CoursePlaybackScene[]
   readonly #navigationListeners = new Set<() => void>()
+  #observationNavigationVersion = 0
 
   constructor(
     player: CoursePlayer,
@@ -475,6 +476,20 @@ export class PublishedCourseSession {
 
   listPlaybackScenes(): readonly CoursePlaybackScene[] { return this.#playbackScenes }
 
+  readObservationState(): { ready: boolean; surfaceId: string; locationId: string; stateId: string | null; stateVersion: number; publicState: Record<string, unknown> } {
+    const current = this.navigator.current
+    const host = this.#hosts.find(entry => entry.id === current?.surfaceId) as
+      (SurfaceHost & { getPublishedPresentationStateId?(): string | null }) | undefined
+    return {
+      ready: !this.#destroyPromise && !this.navigator.hasPendingNavigation && !!current
+        && this.player.statusOf(current.surfaceId) === 'active',
+      surfaceId: current?.surfaceId ?? '', locationId: current?.locationId ?? '',
+      stateId: host?.getPublishedPresentationStateId?.() ?? null,
+      stateVersion: this.#observationNavigationVersion,
+      publicState: { navigation: this.getPlaybackProgress(), courseState: null },
+    }
+  }
+
   getPlaybackProgress(): PlaybackNavigationProgress | null {
     const current = this.navigator.current
     const host = this.#hosts.find(entry => entry.id === current?.surfaceId) as
@@ -488,6 +503,7 @@ export class PublishedCourseSession {
   }
 
   protected notifyNavigationChanged(): void {
+    this.#observationNavigationVersion += 1
     for (const listener of this.#navigationListeners) listener()
   }
 
@@ -801,6 +817,12 @@ class PublishedInteractionCourseSession extends PublishedCourseSession {
   #interactionDestroyStarted = false
   #audioDestroyStarted = false
   #navigationGuardBypassTargetId: string | null = null
+
+  override readObservationState(): ReturnType<PublishedCourseSession['readObservationState']> {
+    const state = super.readObservationState()
+    return { ...state, stateVersion: state.stateVersion + this.#courseState.version,
+      publicState: { ...state.publicState, courseState: this.#courseState.snapshot() } }
+  }
 
   constructor(
     player: CoursePlayer,

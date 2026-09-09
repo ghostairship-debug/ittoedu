@@ -3,7 +3,7 @@ import type {
   NativeElementContent,
 } from '../../shared/courseProjectTypes'
 import type { TextNode } from '../../shared/contracts/native-v1'
-import { analyzeTextNodeLayout } from '../../shared/textLayout'
+import { analyzeTextNodeLayout, layoutHorizontalTextNode } from '../../shared/textLayout'
 import { flowRichTextSegments } from './flow/flowModel'
 import { colorWithAlpha } from '../../shared/colorAlpha'
 
@@ -38,9 +38,11 @@ export function paintPublishedNativeText(
   frame?: PublishedNativeTextFrame,
 ): void {
   const style = data.style
-  const fontSize = frame
+  const horizontalLayout = frame && style.writingMode === 'horizontal'
+    ? layoutHorizontalTextNode(publishedTextNode(data, frame)) : undefined
+  const fontSize = horizontalLayout?.fontSize ?? (frame
     ? analyzeTextNodeLayout(publishedTextNode(data, frame)).fontSize
-    : style.fontSize
+    : style.fontSize)
   wrap.style.boxSizing = 'border-box'
   wrap.style.backgroundColor = colorWithAlpha(style.backgroundColor, style.backgroundOpacity)
   wrap.style.borderRadius = `${Math.max(0, style.cornerRadius)}px`
@@ -54,7 +56,7 @@ export function paintPublishedNativeText(
   wrap.style.textAlign = style.align
   wrap.style.lineHeight = `${Math.max(1, (
     frame ? fontSize * 1.22 : fontSize
-  ) + style.lineSpacing)}px`
+  ) + (horizontalLayout ? 0 : style.lineSpacing))}px`
   wrap.style.letterSpacing = `${style.letterSpacing}px`
   wrap.style.padding = `${Math.max(0, style.padding)}px`
   wrap.style.textDecoration = 'none'
@@ -62,16 +64,21 @@ export function paintPublishedNativeText(
 
   wrap.textContent = ''
 
-  const segments = flowRichTextSegments(data.text, data.runs)
   const dom = wrap.ownerDocument
-  const textRoot = data.flipX || data.flipY ? dom.createElement('div') : wrap
+  const textRoot = horizontalLayout || data.flipX || data.flipY ? dom.createElement('div') : wrap
   if (textRoot !== wrap) {
     textRoot.style.width = '100%'; textRoot.style.height = '100%'
-    textRoot.style.transform = `scale(${data.flipX ? -1 : 1}, ${data.flipY ? -1 : 1})`
-    textRoot.dataset.textFlip = 'true'
+    if (horizontalLayout) {
+      textRoot.style.position = 'absolute'; textRoot.style.inset = '0'
+      textRoot.dataset.textLayout = 'horizontal'
+    }
+    if (data.flipX || data.flipY) {
+      textRoot.style.transform = `scale(${data.flipX ? -1 : 1}, ${data.flipY ? -1 : 1})`
+      textRoot.dataset.textFlip = 'true'
+    }
     wrap.appendChild(textRoot)
   }
-  for (const segment of segments) {
+  function appendSegment(parent: HTMLElement, segment: ReturnType<typeof flowRichTextSegments>[number]) {
     const span = dom.createElement('span')
     span.textContent = segment.text
     if (segment.style.fontFamily) span.style.fontFamily = segment.style.fontFamily
@@ -106,6 +113,24 @@ export function paintPublishedNativeText(
       ;(span.style as unknown as Record<string, string>).webkitTextEmphasis = 'filled dot'
     }
 
-    textRoot.appendChild(span)
+    parent.appendChild(span)
+  }
+  if (horizontalLayout) {
+    const characters = Array.from(data.text)
+    horizontalLayout.lines.forEach((line, index) => {
+      const row = dom.createElement('div')
+      row.dataset.textLine = String(index)
+      row.style.position = 'absolute'; row.style.left = `${line.x}px`; row.style.top = `${line.top}px`
+      row.style.height = `${line.height}px`; row.style.lineHeight = `${line.glyphHeight}px`
+      row.style.whiteSpace = 'pre'; row.style.textAlign = 'left'
+      const { start, end } = line
+      const runs = data.runs.filter(run => run.start < end && run.end > start)
+        .map(run => ({ ...run, start: Math.max(0, run.start - start), end: Math.min(end, run.end) - start }))
+      for (const segment of flowRichTextSegments(characters.slice(start, end).join(''), runs)) appendSegment(row, segment)
+      textRoot.appendChild(row)
+      if (characters[end] === '\n') textRoot.appendChild(dom.createTextNode('\n'))
+    })
+  } else {
+    for (const segment of flowRichTextSegments(data.text, data.runs)) appendSegment(textRoot, segment)
   }
 }

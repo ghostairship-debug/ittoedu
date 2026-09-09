@@ -2,10 +2,42 @@ import type { CourseProjectDocument, FlowBlock, LayerItem } from '../../../share
 import type { HistoryResourceState } from '../../store/courseResourceState'
 import { buildPublishedCourseV2Payload, collectPublishedCourseSourceIssues } from '../../export/course/buildPublishedCourse'
 import { AuthoringToolFailure } from './executeAuthoringTool'
-import { capturePublishedSurfacePng } from '../../../player/surfaces/publishedCapture'
+import { capturePublishedSurfacePng, waitForPublishedObservationReady } from '../../../player/surfaces/publishedCapture'
 import { bytesToBase64 } from '../../export/base64'
-import { exercisePublishedDynamicUpdates } from '../../../player/surfaces/publishedDynamicUpdateProbe'
+import { exercisePublishedDynamicUpdates, exercisePublishedDynamicLifecycle } from '../../../player/surfaces/publishedDynamicUpdateProbe'
 import type { DynamicInstanceCapture } from '../../../shared/dynamicAdmissionContract'
+import { DYNAMIC_BEHAVIOR_SAMPLING, dynamicBehaviorObservationSchema, type DynamicBehaviorFrame, type DynamicBehaviorObservation } from '../../../shared/dynamicBehaviorObservation'
+import { componentRuntimeSourceIdentity } from '../../../shared/componentRegistryIdentity'
+import { validateDynamicCandidateFallbackAssets } from './dynamicCandidateFallbackAssets'
+
+export interface DynamicVerificationOptions {
+  verificationMode?: 'full-admission' | 'public-props'
+  onBehaviorEvidence?: (evidence: readonly DynamicBehaviorObservation[]) => void
+}
+export interface DynamicBehaviorCapturePort {
+  captureFrame(): Promise<{ dataUrl: string; capturedAt: number; width: number; height: number }>
+}
+
+function sourceIdentities(project: CourseProjectDocument, resources: HistoryResourceState, ids: readonly string[]) {
+  const result: Record<string, string> = {}
+  const layer = (item: LayerItem) => {
+    if (!ids.includes(item.layerItemId)) return
+    if (item.kind === 'runtime') result[item.layerItemId] = componentRuntimeSourceIdentity(JSON.stringify({ runtime: item.runtime, frame: item.frame }))
+    if (item.kind === 'component') result[item.layerItemId] = componentRuntimeSourceIdentity(JSON.stringify({ component: item.component, contentIdentity: resources.componentPackages[item.component.packageId]?.contentSha256, props: item.props, frame: item.frame }))
+  }
+  const blocks = (items: FlowBlock[]) => items.forEach(item => {
+    if (item.type === 'section') blocks(item.blocks)
+    if (item.type === 'component' && ids.includes(item.id)) result[item.id] = componentRuntimeSourceIdentity(JSON.stringify({ component: item.component, contentIdentity: resources.componentPackages[item.component.packageId]?.contentSha256, props: item.props }))
+  })
+  project.globalLayerItems.forEach(entry => layer(entry.item))
+  project.surfaces.forEach(surface => {
+    surface.surfaceLayerItems.forEach(entry => layer(entry.item))
+    if (surface.type === 'slide') surface.scenes.forEach(scene => scene.layerItems.forEach(layer))
+    if (surface.type === 'spatial-2d') surface.world.layerItems.forEach(layer)
+    if (surface.type === 'flow') blocks(surface.blocks)
+  })
+  return result
+}
 
 /** Exercise code even when its authored instance is hidden/disabled. This private
  * projection never participates in the candidate transaction or saved output. */
@@ -60,12 +92,12 @@ function admissionProjection(project: CourseProjectDocument, instanceIds: readon
 /** Fixed product admission: callers cannot supply a success flag or replace the host. */
 export async function admitDynamicCandidate(project: CourseProjectDocument, resources: HistoryResourceState,
   targets: readonly { locationId: string; stateId?: string | null; instanceIds: readonly string[] }[], signal?: AbortSignal,
-  captureInstances = false): Promise<readonly DynamicInstanceCapture[]> {
+  captureInstances = false, options: DynamicVerificationOptions = {}): Promise<readonly DynamicInstanceCapture[]> {
   if (signal?.aborted) throw new Error('动态准入已取消')
   const api = typeof window !== 'undefined' ? window.desktopAPI?.dynamicAdmission : undefined
-  if (!api) return runDynamicCandidateHostSmoke(project, resources, targets, captureInstances)
+  if (!api) return runDynamicCandidateHostSmoke(project, resources, targets, captureInstances, options)
   const id = crypto.randomUUID()
-  const payload = { project, captureInstances, targets: targets.map(target => ({ ...target, instanceIds: [...target.instanceIds] })),
+  const payload = { project, captureInstances, observeBehavior: true, verificationMode: options.verificationMode ?? 'full-admission', targets: targets.map(target => ({ ...target, instanceIds: [...target.instanceIds] })),
     assetFiles: Object.fromEntries(Object.entries(resources.assetFiles).map(([key, bytes]) => [key, bytesToBase64(bytes)])),
     componentFiles: Object.fromEntries(Object.entries(resources.componentPackages).map(([key, data]) => [key,
       Object.fromEntries(Object.entries(data.files).map(([name, bytes]) => [name, bytesToBase64(bytes)]))])) }
@@ -74,18 +106,30 @@ export async function admitDynamicCandidate(project: CourseProjectDocument, reso
   try {
     const result = await api({ operation: 'run', id, payload })
     if (signal?.aborted || !result.ok) throw new AuthoringToolFailure(!signal?.aborted && result.diagnostics?.length ? result.diagnostics
-      : [{ code: 'dynamic-host-failed', message: signal?.aborted ? '动态准入已取消' : result.message, path: [] }])
+      : [{ code: 'dynamic-host-failed', message: signal?.aborted ? '动态准入已取消' : result.message, path: [] }], result.behaviorEvidence)
+    if (result.behaviorEvidence?.length) options.onBehaviorEvidence?.(result.behaviorEvidence)
     return result.captures ?? []
   } finally { signal?.removeEventListener('abort', cancel) }
 }
 
+/** Existing code and public props keep their identity; only affected live inputs are exercised. */
+export async function verifyDynamicCandidateBehavior(project: CourseProjectDocument, resources: HistoryResourceState,
+  targets: Parameters<typeof admitDynamicCandidate>[2], signal?: AbortSignal): Promise<DynamicBehaviorObservation[]> {
+  const evidence: DynamicBehaviorObservation[] = []
+  await admitDynamicCandidate(project, resources, targets, signal, false, { verificationMode: 'public-props', onBehaviorEvidence: values => evidence.push(...values) })
+  return evidence
+}
+
 /** Executes inside the disposable process, or the existing trusted browser Builder host. */
 export async function runDynamicCandidateHostSmoke(project: CourseProjectDocument, resources: HistoryResourceState,
-  targets: readonly { locationId: string; stateId?: string | null; instanceIds: readonly string[] }[], captureInstances = false): Promise<readonly DynamicInstanceCapture[]> {
+  targets: readonly { locationId: string; stateId?: string | null; instanceIds: readonly string[] }[], captureInstances = false,
+  options: DynamicVerificationOptions & { capturePort?: DynamicBehaviorCapturePort } = {}): Promise<readonly DynamicInstanceCapture[]> {
+  await validateDynamicCandidateFallbackAssets(project, resources, targets.flatMap(target => target.instanceIds))
   const captures: DynamicInstanceCapture[] = []
   let captureBytes = 0
   const sources = { project, assetFiles: resources.assetFiles, components: resources.componentPackages }
-  const issues = collectPublishedCourseSourceIssues(sources)
+  const fullAdmission = options.verificationMode !== 'public-props'
+  const issues = fullAdmission ? collectPublishedCourseSourceIssues(sources) : []
   if (issues.length) throw new AuthoringToolFailure(issues.map(issue => ({ ...issue, path: issue.path.map(String) })))
   if (typeof document === 'undefined' || !document.defaultView || !document.createElement('canvas').getContext('2d')) {
     throw new Error('动态工具需要产品浏览器中的真实 Published 宿主准入')
@@ -99,7 +143,7 @@ export async function runDynamicCandidateHostSmoke(project: CourseProjectDocumen
     const initialStateId = stateId ?? (surface?.type === 'slide' && location.kind === 'slide-scene'
       ? surface.scenes.find(entry => entry.id === location.sceneId)?.presentation?.initialStateId : undefined)
     const root = document.createElement('div')
-    Object.assign(root.style, { position: 'fixed', left: '-1400px', top: '0', width: '1280px', height: '720px', pointerEvents: 'none' })
+    Object.assign(root.style, { position: 'fixed', left: options.capturePort ? '0' : '-1400px', top: '0', width: '1280px', height: '720px', pointerEvents: 'none' })
     root.setAttribute('aria-hidden', 'true')
     document.body.append(root)
     const failures: string[] = []
@@ -113,17 +157,43 @@ export async function runDynamicCandidateHostSmoke(project: CourseProjectDocumen
       await Promise.race([
         (async () => {
           await mountedSession.mount(root)
+          await waitForPublishedObservationReady(root)
           const mountedElements = Array.from(root.querySelectorAll<HTMLElement>('.published-component-mount, .published-slide-phaser-component-mount, .published-surface-runtime-mount, .published-canvas-runtime-mount'))
           const instanceId = (element: HTMLElement) => element.dataset.componentInstanceId ?? element.dataset.runtimeInstanceId
           const mountedIds = new Set(mountedElements.map(instanceId))
           for (const id of instanceIds) if (!mountedIds.has(id)) throw new Error(`候选实例 ${id} 未实际挂载`)
-          for (const element of mountedElements) {
-            if (instanceIds.includes(instanceId(element) ?? '')) await exercisePublishedDynamicUpdates(element)
+          const startedAt = Date.now()
+          const frames: DynamicBehaviorFrame[] = []
+          const sample = async (phase: DynamicBehaviorFrame['phase']) => {
+            if (!options.capturePort) return
+            await waitForPublishedObservationReady(root)
+            const state = mountedSession.readObservationState()
+            if (phase !== 'paused' && !state.ready) throw new Error('动态观察宿主未就绪')
+            const capture = await options.capturePort.captureFrame()
+            captureBytes += capture.dataUrl.length
+            if (captureBytes > 48_000_000) throw new Error('动态观察图面超过本轮资源上限')
+            frames.push({ ...capture, phase, elapsedMs: Math.max(0, capture.capturedAt - startedAt), stateVersion: state.stateVersion, publicState: JSON.parse(JSON.stringify(state.publicState)) })
           }
+          if (options.capturePort && fullAdmission) for (const at of DYNAMIC_BEHAVIOR_SAMPLING.runningAtMs) {
+            const wait = at - (Date.now() - startedAt)
+            if (wait > 0) await new Promise(resolve => setTimeout(resolve, wait))
+            await sample('running')
+          }
+          for (const element of mountedElements) {
+            if (instanceIds.includes(instanceId(element) ?? '') && (fullAdmission || element.dataset.componentInstanceId)) await exercisePublishedDynamicUpdates(element, { resize: fullAdmission })
+          }
+          if (!fullAdmission) await sample('running')
+          if (fullAdmission) {
+          for (const element of mountedElements) if (instanceIds.includes(instanceId(element) ?? '')) await exercisePublishedDynamicLifecycle(element, 'suspend')
+          await sample('paused')
+          if (options.capturePort) { await new Promise(resolve => setTimeout(resolve, DYNAMIC_BEHAVIOR_SAMPLING.pausedForMs)); await sample('paused') }
+          for (const element of mountedElements) if (instanceIds.includes(instanceId(element) ?? '')) await exercisePublishedDynamicLifecycle(element, 'resume')
+          if (options.capturePort) { await new Promise(resolve => setTimeout(resolve, DYNAMIC_BEHAVIOR_SAMPLING.resumedForMs)); await sample('resumed') }
           const suspended = await mountedSession.player.suspendSurface(location.surfaceId)
           if (!suspended.ok) throw suspended.failure?.error ?? new Error('动态候选无法挂起')
           const resumed = await mountedSession.player.resumeSurface(location.surfaceId)
           if (!resumed.ok) throw resumed.failure?.error ?? new Error('动态候选无法恢复')
+          }
           if (captureInstances) for (const element of mountedElements) {
             const id = instanceId(element)
             if (!id || !instanceIds.includes(id) || captures.some(capture => capture.instanceId === id)) continue
@@ -135,7 +205,7 @@ export async function runDynamicCandidateHostSmoke(project: CourseProjectDocumen
             if (captureBytes > 48_000_000) throw new Error('实例后备图面超过本轮资源上限')
             captures.push({ instanceId: id, locationId, width, height, dataUrl })
           }
-          if (surface?.type === 'spatial-2d' || surface?.type === 'flow') {
+          if (fullAdmission && (surface?.type === 'spatial-2d' || surface?.type === 'flow')) {
             // Flow's location JSON and Spatial's static camera pages are not
             // evidence that a candidate instance can prepare a capture. Probe
             // the mounted instances through the shared product capture barrier.
@@ -145,12 +215,15 @@ export async function runDynamicCandidateHostSmoke(project: CourseProjectDocumen
                 if (!element) throw new Error('组件捕获容器已卸载')
                 return { element, x: 0, y: 0, width: Math.max(1, element.clientWidth), height: Math.max(1, element.clientHeight), rotation: 0, opacity: 1 }
               }) })
-          } else {
+          } else if (fullAdmission) {
             const capture = await mountedSession.player.captureSurface(location.surfaceId, { purpose: 'export', width: 1280, height: 720 })
             if (!capture.ok) throw new Error(`动态候选无法完成真实宿主捕获：${JSON.stringify(capture)}${failures.length ? `；${failures.join('；')}` : ''}`)
           }
           if (root.querySelector('.published-component-fallback, [data-runtime-fallback="true"], [data-slide-component-state="fallback"]')) throw new Error('动态候选触发了静态后备')
           if (failures.length) throw new Error(failures.join('\n'))
+          if (frames.length) options.onBehaviorEvidence?.([dynamicBehaviorObservationSchema.parse({ version: 1, status: 'observed', mode: fullAdmission ? 'full-admission' : 'public-props',
+            projectId: project.id, documentRevision: project.revision, locationId, stateId: initialStateId ?? null, instanceIds: [...instanceIds], sourceIdentities: sourceIdentities(project, resources, instanceIds),
+            actions: fullAdmission ? ['update-inputs', 'resize-and-restore', 'suspend', 'resume'] : ['update-inputs'], frames, elapsedMs: Date.now() - startedAt, semanticVerdict: 'requires-review' })])
         })(),
         new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('动态候选真实宿主准入超时')), 12_000) }),
       ])

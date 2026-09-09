@@ -78,6 +78,7 @@ import {
   PublishedSlideInteractionSurfacePort,
 } from './publishedSlideInteractionSurfacePort'
 import type { AudioManager } from '../../AudioManager'
+import { isPublishedDomCanvasRuntime } from '../runtime/publishedCanvasRuntimePointer'
 import {
   createPublishedSurfaceRuntimeSession,
   mountPublishedSurfaceRuntime,
@@ -483,6 +484,7 @@ function appendLayerNode(
       source === 'scene'
       && item.hitPolicy !== 'pass-through'
       && isPublishedSlidePlayableRuntime(item)
+      && !(item.kind === 'runtime' && isPublishedDomCanvasRuntime(item.runtime))
     )
       ? 'auto'
       : 'none'

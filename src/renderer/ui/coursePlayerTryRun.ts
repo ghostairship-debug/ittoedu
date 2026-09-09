@@ -11,6 +11,7 @@ import {
 import { buildPublishedCourseV2Payload } from '../export/course/buildPublishedCourse'
 import type { PublishedCourseV2Payload } from '../../shared/publishedCourseTypes'
 import type { PlayerAuthoringHostMessage } from '../../shared/playerAuthoringProtocol'
+import { registerAuthoringObservationHost } from '../authoring/generation/authoringObservation'
 
 export { attachPublishedCourseStageFit, fitPublishedCourseStage }
 
@@ -74,6 +75,8 @@ export async function waitForHostLayout(
 }
 
 export interface PublishedCourseMountInput {
+  /** Candidate review mounts must not replace the live authoring observation. */
+  observation?: false
   container: HTMLElement
   project: CourseProjectDocument
   assetFiles: Readonly<Record<string, Uint8Array>>
@@ -163,8 +166,17 @@ export async function mountPublishedCourseTryRun(
     input.onSessionCreated?.(session)
     await session.mount(input.container)
 
+    const mountedSession = session
+    const unregisterObservation = playback && input.observation !== false ? registerAuthoringObservationHost({
+      root: input.container,
+      source: input.container.classList.contains('course-preview-host') ? 'preview' : 'trial',
+      read: () => ({ projectId: input.project.id, documentRevision: input.project.revision,
+        ...mountedSession.readObservationState() }),
+    }) : () => undefined
+
     const destroySession = session.destroy.bind(session)
     session.destroy = async (): Promise<void> => {
+      unregisterObservation()
       try {
         await destroySession()
       } finally {

@@ -1,0 +1,171 @@
+{
+  "candidateCarrier": {
+    "default": "generated-component"
+  },
+  "description": "修改现有源码优先 patch：提供精确 basePackageId/baseVersion/baseContentIdentity、仅改变的 changedFiles、显式 deleteFiles；宿主补齐未变文件并校验完整包。mode:shared 使用 global package update target 修改所有实例；mode:instance 使用精确组件实例 update target，宿主另存副本仅重绑此实例。不得自行改 manifest ID/版本。公开参数足够时用 component.configure；完整 files revise 保持兼容。",
+  "inputSchema": {
+    "$defs": {
+      "__schema0": {
+        "additionalProperties": {
+          "anyOf": [
+            {
+              "maxLength": 24000000,
+              "pattern": "^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$",
+              "type": "string"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "encoding": {
+                  "const": "utf8",
+                  "type": "string"
+                },
+                "text": {
+                  "maxLength": 18000000,
+                  "type": "string"
+                }
+              },
+              "required": [
+                "encoding",
+                "text"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "propertyNames": {
+          "maxLength": 500,
+          "minLength": 1,
+          "type": "string"
+        },
+        "type": "object"
+      },
+      "__schema1": {
+        "const": "patch",
+        "type": "string"
+      },
+      "__schema2": {
+        "enum": [
+          "shared",
+          "instance"
+        ],
+        "type": "string"
+      },
+      "__schema3": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "__schema4": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "__schema5": {
+        "pattern": "^[a-f0-9]{64}$",
+        "type": "string"
+      },
+      "__schema6": {
+        "items": {
+          "$ref": "#/$defs/__schema7"
+        },
+        "maxItems": 512,
+        "type": "array"
+      },
+      "__schema7": {
+        "maxLength": 500,
+        "minLength": 1,
+        "type": "string"
+      }
+    },
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "oneOf": [
+      {
+        "additionalProperties": false,
+        "properties": {
+          "files": {
+            "$ref": "#/$defs/__schema0"
+          },
+          "operation": {
+            "const": "replace",
+            "type": "string"
+          }
+        },
+        "required": [
+          "operation",
+          "files"
+        ],
+        "type": "object"
+      },
+      {
+        "additionalProperties": false,
+        "properties": {
+          "baseContentIdentity": {
+            "pattern": "^[a-f0-9]{64}$",
+            "type": "string"
+          },
+          "baseVersion": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "files": {
+            "$ref": "#/$defs/__schema0"
+          },
+          "operation": {
+            "const": "revise",
+            "type": "string"
+          }
+        },
+        "required": [
+          "operation",
+          "baseVersion",
+          "baseContentIdentity",
+          "files"
+        ],
+        "type": "object"
+      },
+      {
+        "additionalProperties": false,
+        "properties": {
+          "baseContentIdentity": {
+            "$ref": "#/$defs/__schema5"
+          },
+          "basePackageId": {
+            "$ref": "#/$defs/__schema3"
+          },
+          "baseVersion": {
+            "$ref": "#/$defs/__schema4"
+          },
+          "changedFiles": {
+            "$ref": "#/$defs/__schema0"
+          },
+          "deleteFiles": {
+            "$ref": "#/$defs/__schema6"
+          },
+          "mode": {
+            "$ref": "#/$defs/__schema2"
+          },
+          "operation": {
+            "$ref": "#/$defs/__schema1"
+          }
+        },
+        "required": [
+          "operation",
+          "mode",
+          "basePackageId",
+          "baseVersion",
+          "baseContentIdentity",
+          "changedFiles",
+          "deleteFiles"
+        ],
+        "type": "object"
+      }
+    ]
+  },
+  "name": "component.package",
+  "support": "conditional-on-input-target-resources-and-host",
+  "supportedScopes": [
+    "slide:global",
+    "flow:global",
+    "spatial-2d:global"
+  ],
+  "version": 1
+}

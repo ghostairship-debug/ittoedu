@@ -1,7 +1,8 @@
 import { z } from 'zod'
 import { workspaceIdentityV1Schema } from './workspaceIdentity'
-import { generationRequestSchema } from './generationContract'
+import { generationCommitReceiptSchema, generationRequestSchema } from './generationContract'
 import { generationResultSchema } from './generationResult'
+import { aiUserInputSchema, aiInputDeliverySchema } from './localAgentInteraction'
 
 export const localAgentIdSchema = z.enum(['codex', 'claude', 'opencode'])
 export type LocalAgentId = z.infer<typeof localAgentIdSchema>
@@ -32,6 +33,12 @@ export const localAgentRecordSchema = z.object({
   cleanupIssue: z.string().min(1).max(1000).optional(),
   externalSessionId: z.string().min(1).max(200).optional(),
   status: z.enum(['running', 'completed', 'failed', 'cancelled']),
+  task: z.object({
+    taskId: z.uuid(), epoch: z.number().int().nonnegative(),
+    intent: z.enum(['discuss', 'plan', 'edit']), applyPolicy: z.enum(['auto', 'preview']),
+    status: z.enum(['observing', 'running', 'waiting-input', 'checking', 'awaiting-apply', 'committing', 'feeding-back', 'completed', 'failed', 'cancelled', 'partial']),
+    turnId: z.string().nullable(), deadlineAt: z.number().int().nonnegative().nullable(), committedStages: z.number().int().nonnegative(),
+  }).strict().optional(),
   events: z.array(localAgentEventSchema).max(20000),
 }).strict()
 export type LocalAgentRecord = z.infer<typeof localAgentRecordSchema>
@@ -40,16 +47,52 @@ export const localAgentProbeSchema = z.object({
   version: z.string().max(100).optional(), message: z.string().max(1000),
 }).strict()
 export type LocalAgentProbe = z.infer<typeof localAgentProbeSchema>
+const identity = z.string().min(1).max(200)
+const support = z.enum(['supported', 'unsupported', 'unknown'])
+export const localAgentCapabilitiesSchema = z.object({
+  version: z.literal(1), adapter: localAgentIdSchema, cliVersion: identity,
+  models: z.array(z.object({
+    id: identity, resolvedModel: identity.nullable(), label: z.string().min(1).max(300), image: support,
+    effort: z.discriminatedUnion('kind', [
+      z.object({ kind: z.literal('supported'), values: z.array(identity).min(1).max(20), default: identity.nullable() }).strict(),
+      z.object({ kind: z.literal('unsupported') }).strict(),
+      z.object({ kind: z.literal('unknown') }).strict(),
+    ]),
+  }).strict()).max(1000),
+  current: z.object({ model: identity.nullable(), resolvedModel: identity.nullable(), effort: identity.nullable() }).strict(),
+  // A requested next-turn configuration is not evidence that the native CLI applied it.
+  requestedConfiguration: z.object({ model: identity, effort: identity.nullable() }).strict().nullable().optional(),
+  input: z.object({ image: support, readFile: support, question: z.enum(['structured', 'text', 'unknown']), correction: z.enum(['active-turn', 'turn-boundary', 'unknown']), cancel: support }).strict(),
+}).strict().superRefine((capabilities, ctx) => {
+  const fail = (message: string) => ctx.addIssue({ code: 'custom', message })
+  if (new Set(capabilities.models.map(model => model.id)).size !== capabilities.models.length) fail('重复模型')
+  for (const model of capabilities.models) if (model.effort.kind === 'supported') {
+    if (new Set(model.effort.values).size !== model.effort.values.length || (model.effort.default !== null && !model.effort.values.includes(model.effort.default))) fail('无效原生强度选项')
+  }
+  const current = capabilities.models.find(model => model.id === capabilities.current.model)
+  if (capabilities.current.model !== null && !current) fail('当前模型不在原生目录中')
+  if (current?.resolvedModel && capabilities.current.resolvedModel && current.resolvedModel !== capabilities.current.resolvedModel) fail('实际模型与原生选择器解析不一致')
+  if (capabilities.current.effort !== null && (current?.effort.kind !== 'supported' || !current.effort.values.includes(capabilities.current.effort))) fail('当前强度没有原生确认依据')
+})
+export type LocalAgentCapabilities = z.infer<typeof localAgentCapabilitiesSchema>
+export const localAgentConfigurationSchema = z.object({ model: identity, effort: identity.nullable() }).strict()
+export type LocalAgentConfiguration = z.infer<typeof localAgentConfigurationSchema>
+
 const owner = { projectId: z.string().min(1).max(200), projectPath: z.string().min(1).max(32767) }
 export const localAgentRequestSchema = z.discriminatedUnion('operation', [
   z.object({ operation: z.literal('probe'), adapter: localAgentIdSchema }).strict(),
+  z.object({ operation: z.literal('capabilities'), adapter: localAgentIdSchema }).strict(),
+  z.object({ operation: z.literal('configure'), adapter: localAgentIdSchema, configuration: localAgentConfigurationSchema }).strict(),
   z.object({ operation: z.literal('workspace'), ...owner }).strict(),
+  z.object({ operation: z.literal('file-status'), ...owner }).strict(),
   z.object({ operation: z.literal('start'), ...owner, adapter: localAgentIdSchema, prompt: z.string().min(1).max(100000) }).strict(),
   z.object({ operation: z.literal('resume'), ...owner, sessionId: z.uuid(), prompt: z.string().min(1).max(100000) }).strict(),
   z.object({ operation: z.literal('generate'), ...owner, adapter: localAgentIdSchema, request: generationRequestSchema, resumeSessionId: z.uuid().optional() }).strict(),
+  z.object({ operation: z.literal('continue'), ...owner, sessionId: z.uuid(), request: generationRequestSchema }).strict(),
   z.object({ operation: z.literal('candidate'), ...owner, sessionId: z.uuid() }).strict(),
-  z.object({ operation: z.literal('host-result'), ...owner, sessionId: z.uuid(), result: localAgentHostResultSchema }).strict(),
+  z.object({ operation: z.literal('host-result'), ...owner, sessionId: z.uuid(), result: localAgentHostResultSchema, commitReceipt: generationCommitReceiptSchema.optional() }).strict(),
   z.object({ operation: z.literal('cancel'), ...owner, sessionId: z.uuid() }).strict(),
+  z.object({ operation: z.literal('input'), ...owner, sessionId: z.uuid(), input: aiUserInputSchema }).strict(),
   z.object({ operation: z.literal('list'), ...owner }).strict(),
   z.object({ operation: z.literal('read'), ...owner, sessionId: z.uuid(), after: z.number().int().nonnegative().default(0) }).strict(),
   z.object({ operation: z.literal('delete'), ...owner, sessionId: z.uuid().optional() }).strict(),
@@ -60,12 +103,8 @@ export const localAgentResponseSchema = z.object({
   records: z.array(localAgentRecordSchema).optional(), damaged: z.array(z.string()).optional(),
   generationResult: generationResultSchema.optional(),
   workspace: workspaceIdentityV1Schema.optional(),
+  capabilities: localAgentCapabilitiesSchema.optional(),
+  inputDelivery: aiInputDeliverySchema.optional(),
+  fileStatus: z.object({ status: z.enum(['current', 'changed', 'unavailable']), message: z.string().max(1000) }).strict().optional(),
 }).strict()
 export type LocalAgentResponse = z.infer<typeof localAgentResponseSchema>
-export interface LocalAgentCliAdapterV1 {
-  readonly id: LocalAgentId
-  probe(): Promise<LocalAgentProbe>
-  start(prompt: string, cwd: string): AsyncIterable<unknown>
-  resume(externalSessionId: string, prompt: string, cwd: string): AsyncIterable<unknown>
-  cancel(): Promise<void>
-}

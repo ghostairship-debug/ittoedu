@@ -14,6 +14,8 @@ import { makeLayerItemAuthoringAddress } from '../courseAuthoringScope'
 import { insertionIndex, resolveAuthoringToolScope } from './authoringToolScope'
 import type { AuthoringToolDefinition } from './executeAuthoringTool'
 import { layerItemPropertiesInputSchema } from './layerItemPropertiesInput'
+import { projectEffectiveLayers } from '../../course/effectiveLayerProjection'
+import { remapTextRuns } from '../../../shared/textRuns'
 
 const coordinate = z.number().finite()
 const templateBase = { x: coordinate.optional(), y: coordinate.optional(), width: coordinate.positive().optional(), height: coordinate.positive().optional(), label: z.string().optional() }
@@ -32,13 +34,19 @@ export const nativeAuthoringToolInputSchema = z.discriminatedUnion('operation', 
   z.object({ operation: z.literal('insert'), template }).strict(),
   z.object({ operation: z.literal('content'), content: nativeElementContentSchema }).strict(),
   z.object({ operation: z.literal('properties'), properties: layerItemPropertiesInputSchema }).strict(),
+  z.object({ operation: z.literal('edit'), text: z.string().optional(),
+    textStyle: nativeContentInputSchemaByType.text.shape.style.partial().extend({
+      emphasis: nativeContentInputSchemaByType.text.shape.style.shape.emphasis.unwrap().optional(),
+    }).strict().optional(),
+    properties: layerItemPropertiesInputSchema.optional() }).strict()
+    .refine(value => value.text !== undefined || value.textStyle !== undefined || value.properties !== undefined, '窄编辑至少提供文字、文字样式或属性'),
   z.object({ operation: z.literal('delete') }).strict(),
 ])
 
 export const nativeAuthoringTool: AuthoringToolDefinition<z.infer<typeof nativeAuthoringToolInputSchema>> = {
   name: 'native.content', inputSchema: nativeAuthoringToolInputSchema,
   referenceSchemas: nativeContentInputSchemaByType,
-  description: '仅支持Native对象：insert 使用 create + parent:owner；content/properties/delete 使用 update。content.data 必须满足 references[content.nativeType] 的完整字段合同，不是局部补丁；不得遗漏 required 字段或猜测样式字段。properties 只改 frame/rotation/opacity/visible/locked/label。移动组件使用component.configure的properties。Flow 正文使用 flow.content，不把正文伪装为 Native 浮层。',
+  description: '仅支持Native对象：insert 使用 create + parent:owner；edit/content/properties/delete 使用 update。修改已有文字、字号、字体或位置优先使用 edit 的 text/textStyle/properties，只提交要改变的字段，其余内容和有效状态保留。content.data 必须满足 references[content.nativeType] 的完整字段合同，不是局部补丁。移动组件使用component.configure的properties。Flow 正文使用 flow.content。完整载体替换使用 selection.replace。',
   plan({ document, destination, value }) {
     const { target, surface, scope } = resolveAuthoringToolScope(document, destination)
     const options = { expectedRevision: document.revision }
@@ -127,10 +135,21 @@ export const nativeAuthoringTool: AuthoringToolDefinition<z.infer<typeof nativeA
       if (located.source !== scope.owner || located.item.layerItemId !== destination.target.itemId || located.item.kind !== 'native') throw new Error('Native target 身份或 owner 不匹配')
       if (located.source !== 'global' && (located.surfaceId !== surface.id || (located.source === 'scene' && located.sceneId !== scope.sceneId))) throw new Error('Native target 不属于声明的 Surface / scene')
       if (value.operation === 'content' && value.content.nativeType !== located.item.content.nativeType) throw new Error('不得通过内容更新改变 Native 类型')
+      const effective = projectEffectiveLayers({ project: document, locationId: target.locationId, stateId: target.stateId, owner: target.owner }).unifiedRows.find(row => row.id === located.item.layerItemId)?.item
+      let editData: Record<string, unknown> | undefined
+      if (value.operation === 'edit' && (value.text !== undefined || value.textStyle !== undefined)) {
+        if (effective?.kind !== 'native' || effective.content.nativeType !== 'text') throw new Error('文字窄编辑只接受 Native 文本；其他字段使用对应内容工具')
+        const current = effective.content.data
+        const text = value.text ?? current.text
+        // Run overrides for explicitly changed whole-text fields must not mask the new style.
+        const runs = remapTextRuns(current.text, text, current.runs).map(run => ({ ...run, style: Object.fromEntries(Object.entries(run.style).filter(([key]) => !value.textStyle || !Object.hasOwn(value.textStyle, key))) })).filter(run => Object.keys(run.style).length > 0)
+        editData = { text, runs, ...(value.textStyle ? { style: value.textStyle } : {}) }
+      }
       const result = value.operation === 'delete'
         ? deleteEffectiveLayerItem(document, destination.target, options)
         : patchEffectiveLayerPropertiesAtTarget(document, destination.target,
-          value.operation === 'content' ? { nativeData: { ...value.content.data } } : value.properties, options)
+          value.operation === 'content' ? { nativeData: { ...value.content.data } }
+            : value.operation === 'edit' ? { ...value.properties, ...(editData ? { nativeData: editData } : {}) } : value.properties, options)
       if (!result.ok || !result.nextDocument) throw new Error(result.reason)
       nextDocument = result.nextDocument
       itemId = destination.target.itemId

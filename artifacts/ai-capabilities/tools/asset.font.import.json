@@ -1,0 +1,35 @@
+{
+  "candidateCarrier": {
+    "default": "native"
+  },
+  "inputSchema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": false,
+    "properties": {
+      "base64": {
+        "maxLength": 44739244,
+        "minLength": 1,
+        "pattern": "^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$",
+        "type": "string"
+      },
+      "filename": {
+        "maxLength": 500,
+        "minLength": 1,
+        "type": "string"
+      }
+    },
+    "required": [
+      "filename",
+      "base64"
+    ],
+    "type": "object"
+  },
+  "name": "asset.font.import",
+  "support": "conditional-on-input-target-resources-and-host",
+  "supportedScopes": [
+    "slide:global",
+    "flow:global",
+    "spatial-2d:global"
+  ],
+  "version": 1
+}

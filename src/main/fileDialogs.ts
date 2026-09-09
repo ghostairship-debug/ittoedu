@@ -1,5 +1,6 @@
 import crypto from 'node:crypto'
 import path from 'node:path'
+import { projectFileStatus, prepareProjectFileObservation, rememberProjectFileBytes } from './projectFileObservation'
 import { promises as fs } from 'node:fs'
 import { dialog, type BrowserWindow } from 'electron'
 import type {
@@ -76,6 +77,7 @@ const approvedProjectPaths = new Set<string>()
 interface ProjectOpenConfirmation {
   path: string
   recordPromise: Promise<void> | null
+  confirmFile(): void
 }
 
 const projectOpenConfirmations = new Map<string, ProjectOpenConfirmation>()
@@ -100,11 +102,12 @@ async function rememberSavedProject(value: string): Promise<void> {
   await recordRecentProjectSafely(value)
 }
 
-function issueProjectOpenConfirmation(value: string): string {
+function issueProjectOpenConfirmation(value: string, bytes: Uint8Array): string {
   const confirmationId = crypto.randomUUID()
   projectOpenConfirmations.set(confirmationId, {
     path: path.resolve(value),
     recordPromise: null,
+    confirmFile: prepareProjectFileObservation(value, bytes),
   })
   while (projectOpenConfirmations.size > MAX_PROJECT_OPEN_CONFIRMATIONS) {
     const oldestId = projectOpenConfirmations.keys().next().value
@@ -124,7 +127,7 @@ export async function confirmProjectOpen(confirmationId: string): Promise<void> 
       '工程仍可继续编辑；如果最近工程未更新，请重新打开一次。',
     )
   }
-  confirmation.recordPromise ??= recordRecentProjectSafely(confirmation.path)
+  confirmation.recordPromise ??= (async () => { confirmation.confirmFile(); await recordRecentProjectSafely(confirmation.path) })()
   await confirmation.recordPromise
 }
 
@@ -405,7 +408,7 @@ export async function openProjectFile(
     path: filePath,
     name: path.basename(filePath),
     bytes,
-    confirmationId: issueProjectOpenConfirmation(filePath),
+    confirmationId: issueProjectOpenConfirmation(filePath, bytes),
   }
 }
 
@@ -433,7 +436,7 @@ export async function openRecentProjectFile(
     path: filePath,
     name: path.basename(filePath),
     bytes,
-    confirmationId: issueProjectOpenConfirmation(filePath),
+    confirmationId: issueProjectOpenConfirmation(filePath, bytes),
   }
 }
 
@@ -465,6 +468,13 @@ export async function saveProjectFile(
       ? input.path
       : undefined
 
+  if (targetPath) {
+    const status = await projectFileStatus(targetPath)
+    const missing = await fs.stat(targetPath).then(() => false, (error: NodeJS.ErrnoException) => error.code === 'ENOENT')
+    // An explicit Save may recreate a deleted file; it must never overwrite changed bytes.
+    if (status.status !== 'current' && !missing) throw new DesktopOperationError('PROJECT_EXTERNAL_CHANGE', '磁盘工程已有变化', status.message, '请使用另存为保留当前稿，或重新打开磁盘文件；本次没有覆盖文件。')
+  }
+
   if (!targetPath) {
     const result = await dialog.showSaveDialog(window, {
       title: '保存课件工程',
@@ -489,6 +499,7 @@ export async function saveProjectFile(
   }
 
   await rememberSavedProject(targetPath)
+  rememberProjectFileBytes(targetPath, input.bytes)
   return { path: targetPath }
 }
 

@@ -1,0 +1,1159 @@
+import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
+import { PassThrough } from 'node:stream'
+
+afterEach(() => {
+  vi.restoreAllMocks()
+})
+import { createInterface } from 'node:readline'
+import path from 'node:path'
+import { randomUUID } from 'node:crypto'
+import type { ChildProcessWithoutNullStreams } from 'node:child_process'
+import * as processModule from '../../src/main/localAgent/process'
+import {
+  CodexAppServerAdapter,
+  discoverCodexCapabilities,
+  parseCodexCapabilities,
+  codexCandidateOutputSchema,
+  codexTurnOutputSchema,
+  decodeCodexStructuredOutput,
+} from '../../src/main/localAgent/codexAppServer'
+import { localAgentCapabilitiesSchema } from '../../src/shared/localAgentContract'
+import type { GenerationRequest } from '../../src/shared/generationContract'
+
+function createMockCodexProcess(responder?: (msg: any, send: (reply: any) => void) => void): {
+  child: ChildProcessWithoutNullStreams
+  stdinStream: PassThrough
+  stdoutStream: PassThrough
+  stderrStream: PassThrough
+} {
+  const stdinStream = new PassThrough()
+  const stdoutStream = new PassThrough()
+  const stderrStream = new PassThrough()
+
+  const send = (reply: any) => {
+    stdoutStream.write(JSON.stringify(reply) + '\n')
+  }
+
+  const lines = createInterface({ input: stdinStream })
+  lines.on('line', (line) => {
+    if (!line.trim()) return
+    try {
+      const msg = JSON.parse(line)
+      if (responder) {
+        responder(msg, send)
+      } else {
+        // Default standard Codex app-server responses
+        if (msg.method === 'initialize') {
+          send({ id: msg.id, result: { userAgent: 'courseware_editor/0.153.4' } })
+        } else if (msg.method === 'model/list') {
+          send({
+            id: msg.id,
+            result: {
+              data: [
+                {
+                  id: 'gpt-6-astra',
+                  model: 'gpt-6-astra',
+                  displayName: 'GPT-6-Astra',
+                  supportedReasoningEfforts: [
+                    { reasoningEffort: 'low' },
+                    { reasoningEffort: 'medium' },
+                    { reasoningEffort: 'high' },
+                    { reasoningEffort: 'xhigh' },
+                    { reasoningEffort: 'max' },
+                    { reasoningEffort: 'ultra' },
+                  ],
+                  defaultReasoningEffort: 'medium',
+                  inputModalities: ['text', 'image'],
+                  isDefault: true,
+                },
+                {
+                  id: 'gpt-5.6-sol',
+                  model: 'gpt-5.6-sol',
+                  displayName: 'GPT-5.6-Sol',
+                  supportedReasoningEfforts: [{ reasoningEffort: 'low' }, { reasoningEffort: 'medium' }],
+                  defaultReasoningEffort: 'low',
+                  inputModalities: ['text', 'image'],
+                  isDefault: false,
+                },
+              ],
+            },
+          })
+        } else if (msg.method === 'thread/start') {
+          send({ id: msg.id, result: { thread: { id: 'thread-test-123' }, model: 'gpt-6-astra' } })
+        } else if (msg.method === 'thread/resume') {
+          send({ id: msg.id, result: { thread: { id: msg.params.threadId }, model: 'gpt-6-astra' } })
+        } else if (msg.method === 'turn/start') {
+          send({ id: msg.id, result: { turn: { id: 'turn-test-456', status: 'inProgress' } } })
+          // Send turn/started notification
+          setTimeout(() => {
+            send({ method: 'turn/started', params: { threadId: msg.params.threadId, turn: { id: 'turn-test-456' } } })
+          }, 5)
+        } else if (msg.method === 'turn/steer') {
+          send({ id: msg.id, result: { turnId: msg.params.expectedTurnId } })
+        } else if (msg.method === 'turn/interrupt') {
+          send({ id: msg.id, result: {} })
+          send({ method: 'turn/completed', params: { threadId: msg.params.threadId, turn: { id: msg.params.turnId, status: 'interrupted' } } })
+        }
+      }
+    } catch {}
+  })
+
+  const child = {
+    stdin: stdinStream,
+    stdout: stdoutStream,
+    stderr: stderrStream,
+    pid: 12345,
+    exitCode: null,
+    kill: vi.fn(() => {
+      (child as any).exitCode = 0
+      stdoutStream.end()
+    }),
+    once: vi.fn((event: string, cb: (...args: any[]) => void) => {
+      if (event === 'close') {
+        // Can be triggered when child exits
+      }
+      return child
+    }),
+    on: vi.fn(),
+  } as unknown as ChildProcessWithoutNullStreams
+
+  return { child, stdinStream, stdoutStream, stderrStream }
+}
+
+describe('CodexAppServer capabilities discovery', () => {
+  it('parses models, reasoning efforts, defaults and image support correctly', () => {
+    const rawData = [
+      {
+        id: 'gpt-6-astra',
+        model: 'gpt-6-astra',
+        displayName: 'GPT-6-Astra',
+        supportedReasoningEfforts: [
+          { reasoningEffort: 'low', description: 'Fast' },
+          { reasoningEffort: 'medium', description: 'Balanced' },
+          { reasoningEffort: 'high', description: 'Deep' },
+          { reasoningEffort: 'xhigh', description: 'Extra high' },
+          { reasoningEffort: 'max', description: 'Max' },
+          { reasoningEffort: 'ultra', description: 'Ultra' },
+        ],
+        defaultReasoningEffort: 'medium',
+        inputModalities: ['text', 'image'],
+        isDefault: true,
+      },
+      {
+        id: 'gpt-5.3-codex-spark',
+        model: 'gpt-5.3-codex-spark',
+        displayName: 'GPT-5.3-Codex-Spark',
+        supportedReasoningEfforts: [{ reasoningEffort: 'high' }],
+        defaultReasoningEffort: 'high',
+        inputModalities: ['text'],
+        isDefault: false,
+      },
+    ]
+
+    const caps = parseCodexCapabilities(rawData, '0.153.4')
+    expect(localAgentCapabilitiesSchema.parse(caps)).toEqual(caps)
+    expect(caps.adapter).toBe('codex')
+    expect(caps.cliVersion).toBe('0.153.4')
+    expect(caps.models).toHaveLength(2)
+
+    const astra = caps.models.find(m => m.id === 'gpt-6-astra')!
+    expect(astra.image).toBe('supported')
+    expect(astra.effort).toEqual({
+      kind: 'supported',
+      values: ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
+      default: 'medium',
+    })
+
+    const spark = caps.models.find(m => m.id === 'gpt-5.3-codex-spark')!
+    expect(spark.image).toBe('unsupported')
+    expect(spark.effort).toEqual({
+      kind: 'supported',
+      values: ['high'],
+      default: 'high',
+    })
+
+    expect(caps.current).toEqual({
+      model: 'gpt-6-astra',
+      resolvedModel: 'gpt-6-astra',
+      effort: 'medium',
+    })
+    expect(caps.input).toEqual({
+      image: 'supported',
+      readFile: 'supported',
+      question: 'structured',
+      correction: 'active-turn',
+      cancel: 'supported',
+    })
+  })
+
+  it('discoverCodexCapabilities runs app-server --stdio and queries initialize and model/list', async () => {
+    const { child } = createMockCodexProcess()
+    vi.spyOn(processModule, 'launchAgent').mockReturnValue(child)
+    vi.spyOn(processModule, 'stopAgent').mockResolvedValue()
+
+    const caps = await discoverCodexCapabilities({ executable: 'C:\\bin\\codex.exe', prefix: [] })
+    expect(caps.adapter).toBe('codex')
+    expect(caps.cliVersion).toBe('0.153.4')
+    expect(caps.models[0]?.id).toBe('gpt-6-astra')
+    expect(caps.current.model).toBe('gpt-6-astra')
+    expect(caps.current.effort).toBe('medium')
+  })
+})
+
+describe('CodexAppServerAdapter lifecycle and wire protocol', () => {
+  const workspace = { version: 1 as const, projectId: 'proj-1', normalizedPath: 'c:/lessons/test.h5lesson' }
+
+  it('probes status correctly based on version and login status', async () => {
+    const mockResolve = vi.fn().mockResolvedValue({ executable: 'C:\\bin\\codex.exe', prefix: [] })
+    const adapter = new CodexAppServerAdapter(mockResolve)
+
+    vi.spyOn(processModule, 'captureAgent')
+      .mockResolvedValueOnce({ code: 0, text: 'codex-cli 0.153.4' })
+      .mockResolvedValueOnce({ code: 0, text: 'Logged in' })
+
+    const probe = await adapter.probe()
+    expect(probe.status).toBe('ready')
+    expect(probe.version).toBe('0.153.4')
+
+    vi.spyOn(processModule, 'captureAgent')
+      .mockResolvedValueOnce({ code: 0, text: 'codex-cli 0.152.0' })
+
+    const unsupported = await adapter.probe()
+    expect(unsupported.status).toBe('unsupported-version')
+
+    mockResolve.mockResolvedValueOnce(null)
+    const missing = await adapter.probe()
+    expect(missing.status).toBe('missing')
+  })
+
+  it('opens session and starts a new thread or resumes existing thread', async () => {
+    const { child } = createMockCodexProcess()
+    vi.spyOn(processModule, 'launchAgent').mockReturnValue(child)
+    vi.spyOn(processModule, 'stopAgent').mockResolvedValue()
+
+    const mockResolve = vi.fn().mockResolvedValue({ executable: 'C:\\bin\\codex.exe', prefix: [] })
+    const adapter = new CodexAppServerAdapter(mockResolve)
+
+    const opened = await adapter.open({ cwd: 'C:/test', externalSessionId: null })
+    expect(opened.externalSessionId).toBe('thread-test-123')
+    expect(opened.capabilities.adapter).toBe('codex')
+
+    await adapter.close()
+
+    const { child: child2 } = createMockCodexProcess()
+    vi.spyOn(processModule, 'launchAgent').mockReturnValue(child2)
+    const resumed = await adapter.open({ cwd: 'C:/test', externalSessionId: 'existing-thread-777' })
+    expect(resumed.externalSessionId).toBe('existing-thread-777')
+    await adapter.close()
+  })
+
+  it('keeps requested model and effort pending until native confirmation', async () => {
+    const { child } = createMockCodexProcess()
+    vi.spyOn(processModule, 'launchAgent').mockReturnValue(child)
+    vi.spyOn(processModule, 'stopAgent').mockResolvedValue()
+
+    const mockResolve = vi.fn().mockResolvedValue({ executable: 'C:\\bin\\codex.exe', prefix: [] })
+    const adapter = new CodexAppServerAdapter(mockResolve)
+    await adapter.open({ cwd: 'C:/test', externalSessionId: null })
+
+    const configured = await adapter.configure({ model: 'gpt-5.6-sol', effort: 'medium' })
+    expect(configured.current.model).toBe('gpt-6-astra')
+    expect(configured.requestedConfiguration).toEqual({ model: 'gpt-5.6-sol', effort: 'medium' })
+
+    // Invalid effort falls back to default effort
+    const fallback = await adapter.configure({ model: 'gpt-5.6-sol', effort: 'ultra' })
+    expect(fallback.requestedConfiguration).toEqual({ model: 'gpt-5.6-sol', effort: 'low' })
+
+    // Unknown model throws
+    await expect(adapter.configure({ model: 'unknown-model', effort: null })).rejects.toThrow('不在 Codex 原生目录中')
+    await adapter.close()
+  })
+
+  it('starts turn with text and localImage, and streams deltas and items', async () => {
+    let mockSend: (reply: any) => void
+    const { child, stdoutStream } = createMockCodexProcess((msg, send) => {
+      mockSend = send
+      if (msg.method === 'initialize') send({ id: msg.id, result: { userAgent: 'courseware_editor/0.153.4' } })
+      else if (msg.method === 'model/list') {
+        send({ id: msg.id, result: { data: [{ id: 'gpt-6-astra', model: 'gpt-6-astra', displayName: 'GPT-6-Astra', supportedReasoningEfforts: [{ reasoningEffort: 'low' }], defaultReasoningEffort: 'low', inputModalities: ['text', 'image'], isDefault: true }] } })
+      } else if (msg.method === 'thread/start') {
+        send({ id: msg.id, result: { thread: { id: 'thread-1' } } })
+      } else if (msg.method === 'turn/start') {
+        expect(msg.params.threadId).toBe('thread-1')
+        expect(msg.params.input).toEqual([
+          { type: 'text', text: 'Analyze this slide' },
+          { type: 'localImage', path: path.resolve('C:/test/image1.png') },
+        ])
+        send({ id: msg.id, result: { turn: { id: 'turn-1', status: 'inProgress' } } })
+        setTimeout(() => {
+          send({ method: 'turn/started', params: { threadId: 'thread-1', turn: { id: 'turn-1' } } })
+          send({ method: 'item/agentMessage/delta', params: { threadId: 'thread-1', turnId: 'turn-1', itemId: 'msg-1', delta: 'Hello ' } })
+          send({ method: 'item/agentMessage/delta', params: { threadId: 'thread-1', turnId: 'turn-1', itemId: 'msg-1', delta: 'World' } })
+          send({ method: 'item/completed', params: { threadId: 'thread-1', turnId: 'turn-1', item: { id: 'msg-1', type: 'agentMessage', text: 'Hello World', phase: 'final_answer' } } })
+          send({ method: 'thread/tokenUsage/updated', params: { threadId: 'thread-1', tokenUsage: { inputTokens: 10, outputTokens: 5, cachedInputTokens: 2 } } })
+          send({ method: 'turn/completed', params: { threadId: 'thread-1', turn: { id: 'turn-1', status: 'completed' } } })
+        }, 10)
+      }
+    })
+    vi.spyOn(processModule, 'launchAgent').mockReturnValue(child)
+    vi.spyOn(processModule, 'stopAgent').mockResolvedValue()
+
+    const mockResolve = vi.fn().mockResolvedValue({ executable: 'C:\\bin\\codex.exe', prefix: [] })
+    const adapter = new CodexAppServerAdapter(mockResolve)
+    await adapter.open({ cwd: 'C:/test', externalSessionId: null })
+
+    const files = new Map<string, string>([['img-1', 'C:/test/image1.png']])
+    const { nativeTurnId } = await adapter.startTurn({
+      taskId: randomUUID(),
+      epoch: 0,
+      workspace,
+      runId: randomUUID(),
+      observationId: randomUUID(),
+      text: 'Analyze this slide',
+      imageFileIds: ['img-1'],
+    }, files)
+
+    expect(nativeTurnId).toBe('turn-1')
+
+    const events: any[] = []
+    for await (const event of adapter.events()) {
+      events.push(event)
+    }
+
+    expect(events).toContainEqual(expect.objectContaining({
+      kind: 'text',
+      itemId: 'msg-1',
+      operation: 'append',
+      text: 'Hello ',
+    }))
+    expect(events).toContainEqual(expect.objectContaining({
+      kind: 'text',
+      itemId: 'msg-1',
+      operation: 'append',
+      text: 'World',
+    }))
+    expect(events).toContainEqual(expect.objectContaining({
+      kind: 'text',
+      itemId: 'msg-1',
+      operation: 'replace',
+      text: 'Hello World',
+    }))
+    expect(events).toContainEqual(expect.objectContaining({
+      kind: 'usage',
+      inputTokens: 10,
+      outputTokens: 5,
+    }))
+    expect(events).toContainEqual(expect.objectContaining({
+      kind: 'turn-ended',
+      status: 'completed',
+      failure: null,
+    }))
+
+    await adapter.close()
+  })
+
+  it('handles item/tool/requestUserInput structured questions and answers', async () => {
+    let capturedAnswerRpc: any = null
+    const { child } = createMockCodexProcess((msg, send) => {
+      if (msg.method === 'initialize') send({ id: msg.id, result: { userAgent: 'courseware_editor/0.153.4' } })
+      else if (msg.method === 'model/list') {
+        send({ id: msg.id, result: { data: [{ id: 'gpt-6-astra', model: 'gpt-6-astra', displayName: 'GPT-6-Astra', supportedReasoningEfforts: [{ reasoningEffort: 'low' }], defaultReasoningEffort: 'low', inputModalities: ['text'], isDefault: true }] } })
+      } else if (msg.method === 'thread/start') {
+        send({ id: msg.id, result: { thread: { id: 'thread-1' } } })
+      } else if (msg.method === 'turn/start') {
+        send({ id: msg.id, result: { turn: { id: 'turn-q', status: 'inProgress' } } })
+        setTimeout(() => {
+          send({ method: 'turn/started', params: { threadId: 'thread-1', turn: { id: 'turn-q' } } })
+          // Server asks question with RPC ID 10
+          send({
+            id: 10,
+            method: 'item/tool/requestUserInput',
+            params: {
+              threadId: 'thread-1',
+              turnId: 'turn-q',
+              itemId: 'call-q1',
+              questions: [
+                {
+                  id: 'color_choice',
+                  header: 'Color choice',
+                  question: 'Red or Blue?',
+                  options: [{ label: 'Red' }, { label: 'Blue' }],
+                },
+              ],
+            },
+          })
+        }, 10)
+      } else if (msg.id === 10) {
+        capturedAnswerRpc = msg
+        // Question answered, complete turn
+        send({ method: 'turn/completed', params: { threadId: 'thread-1', turn: { id: 'turn-q', status: 'completed' } } })
+      }
+    })
+    vi.spyOn(processModule, 'launchAgent').mockReturnValue(child)
+    vi.spyOn(processModule, 'stopAgent').mockResolvedValue()
+
+    const mockResolve = vi.fn().mockResolvedValue({ executable: 'C:\\bin\\codex.exe', prefix: [] })
+    const adapter = new CodexAppServerAdapter(mockResolve)
+    await adapter.open({ cwd: 'C:/test', externalSessionId: null })
+
+    const taskId = randomUUID()
+    await adapter.startTurn({
+      taskId,
+      epoch: 0,
+      workspace,
+      runId: randomUUID(),
+      observationId: randomUUID(),
+      text: 'Ask question',
+      imageFileIds: [],
+    }, new Map())
+
+    // Iterate events and answer question when received
+    const collected: any[] = []
+    for await (const event of adapter.events()) {
+      collected.push(event)
+      if (event.kind === 'question') {
+        const delivery = await adapter.input({
+          version: 1,
+          taskId,
+          epoch: 0,
+          workspace,
+          inputId: randomUUID(),
+          turnId: 'turn-q',
+          kind: 'answer',
+          questionId: event.question.questionId,
+          answers: [{ id: 'color_choice', values: ['Red'] }],
+        })
+        expect(delivery.status).toBe('accepted')
+      }
+    }
+
+    expect(capturedAnswerRpc).toEqual({
+      id: 10,
+      result: {
+        answers: {
+          color_choice: {
+            answers: ['Red'],
+          },
+        },
+      },
+    })
+    expect(collected.some(e => e.kind === 'turn-ended' && e.status === 'completed')).toBe(true)
+    await adapter.close()
+  })
+
+  it('handles mid-turn steer correction', async () => {
+    let capturedSteer: any = null
+    const { child } = createMockCodexProcess((msg, send) => {
+      if (msg.method === 'initialize') send({ id: msg.id, result: { userAgent: 'courseware_editor/0.153.4' } })
+      else if (msg.method === 'model/list') {
+        send({ id: msg.id, result: { data: [{ id: 'gpt-6-astra', model: 'gpt-6-astra', displayName: 'GPT-6-Astra', supportedReasoningEfforts: [{ reasoningEffort: 'low' }], defaultReasoningEffort: 'low', inputModalities: ['text'], isDefault: true }] } })
+      } else if (msg.method === 'thread/start') {
+        send({ id: msg.id, result: { thread: { id: 'thread-1' } } })
+      } else if (msg.method === 'turn/start') {
+        send({ id: msg.id, result: { turn: { id: 'turn-steer', status: 'inProgress' } } })
+        setTimeout(() => {
+          send({ method: 'turn/started', params: { threadId: 'thread-1', turn: { id: 'turn-steer' } } })
+        }, 5)
+      } else if (msg.method === 'turn/steer') {
+        capturedSteer = msg
+        send({ id: msg.id, result: { turnId: msg.params.expectedTurnId } })
+        send({ method: 'turn/completed', params: { threadId: 'thread-1', turn: { id: 'turn-steer', status: 'completed' } } })
+      }
+    })
+    vi.spyOn(processModule, 'launchAgent').mockReturnValue(child)
+    vi.spyOn(processModule, 'stopAgent').mockResolvedValue()
+
+    const mockResolve = vi.fn().mockResolvedValue({ executable: 'C:\\bin\\codex.exe', prefix: [] })
+    const adapter = new CodexAppServerAdapter(mockResolve)
+    await adapter.open({ cwd: 'C:/test', externalSessionId: null })
+
+    const taskId = randomUUID()
+    await adapter.startTurn({
+      taskId,
+      epoch: 0,
+      workspace,
+      runId: randomUUID(),
+      observationId: randomUUID(),
+      text: 'Long generation',
+      imageFileIds: [],
+    }, new Map())
+
+    // Mid-turn correction
+    const delivery = await adapter.input({
+      version: 1,
+      taskId,
+      epoch: 0,
+      workspace,
+      inputId: randomUUID(),
+      turnId: 'turn-steer',
+      kind: 'correct',
+      text: 'Correction: stop early',
+    })
+
+    expect(delivery.status).toBe('accepted')
+    expect(capturedSteer.params).toEqual({
+      threadId: 'thread-1',
+      expectedTurnId: 'turn-steer',
+      input: [{ type: 'text', text: 'Correction: stop early' }],
+    })
+
+    for await (const _ev of adapter.events()) {
+      // drain
+    }
+    await adapter.close()
+  })
+
+  it('handles cancellation and turn/interrupt', async () => {
+    let capturedInterrupt: any = null
+    const { child } = createMockCodexProcess((msg, send) => {
+      if (msg.method === 'initialize') send({ id: msg.id, result: { userAgent: 'courseware_editor/0.153.4' } })
+      else if (msg.method === 'model/list') {
+        send({ id: msg.id, result: { data: [{ id: 'gpt-6-astra', model: 'gpt-6-astra', displayName: 'GPT-6-Astra', supportedReasoningEfforts: [{ reasoningEffort: 'low' }], defaultReasoningEffort: 'low', inputModalities: ['text'], isDefault: true }] } })
+      } else if (msg.method === 'thread/start') {
+        send({ id: msg.id, result: { thread: { id: 'thread-1' } } })
+      } else if (msg.method === 'turn/start') {
+        send({ id: msg.id, result: { turn: { id: 'turn-cancel', status: 'inProgress' } } })
+        setTimeout(() => {
+          send({ method: 'turn/started', params: { threadId: 'thread-1', turn: { id: 'turn-cancel' } } })
+        }, 5)
+      } else if (msg.method === 'turn/interrupt') {
+        capturedInterrupt = msg
+        send({ id: msg.id, result: {} })
+        send({ method: 'turn/completed', params: { threadId: 'thread-1', turn: { id: 'turn-cancel', status: 'interrupted' } } })
+      }
+    })
+    vi.spyOn(processModule, 'launchAgent').mockReturnValue(child)
+    vi.spyOn(processModule, 'stopAgent').mockResolvedValue()
+
+    const mockResolve = vi.fn().mockResolvedValue({ executable: 'C:\\bin\\codex.exe', prefix: [] })
+    const adapter = new CodexAppServerAdapter(mockResolve)
+    await adapter.open({ cwd: 'C:/test', externalSessionId: null })
+
+    await adapter.startTurn({
+      taskId: randomUUID(),
+      epoch: 0,
+      workspace,
+      runId: randomUUID(),
+      observationId: randomUUID(),
+      text: 'Long text to cancel',
+      imageFileIds: [],
+    }, new Map())
+
+    await adapter.cancel()
+    expect(capturedInterrupt.params).toEqual({
+      threadId: 'thread-1',
+      turnId: 'turn-cancel',
+    })
+
+    const events: any[] = []
+    for await (const event of adapter.events()) {
+      events.push(event)
+    }
+
+    expect(events).toContainEqual(expect.objectContaining({
+      kind: 'turn-ended',
+      status: 'cancelled',
+      failure: null,
+    }))
+
+    await adapter.close()
+  })
+
+  it('enforces D-06 identity checks on input', async () => {
+    const { child } = createMockCodexProcess((msg, send) => {
+      if (msg.method === 'initialize') send({ id: msg.id, result: { userAgent: 'courseware_editor/0.153.4' } })
+      else if (msg.method === 'model/list') send({ id: msg.id, result: { data: [{ id: 'gpt-6-astra', model: 'gpt-6-astra' }] } })
+      else if (msg.method === 'thread/start') send({ id: msg.id, result: { thread: { id: 'thread-1' } } })
+      else if (msg.method === 'turn/start') {
+        send({ id: msg.id, result: { turn: { id: 'turn-identity', status: 'inProgress' } } })
+        send({ method: 'turn/started', params: { threadId: 'thread-1', turn: { id: 'turn-identity' } } })
+      }
+    })
+    vi.spyOn(processModule, 'launchAgent').mockReturnValue(child)
+    vi.spyOn(processModule, 'stopAgent').mockResolvedValue()
+
+    const mockResolve = vi.fn().mockResolvedValue({ executable: 'C:\\bin\\codex.exe', prefix: [] })
+    const adapter = new CodexAppServerAdapter(mockResolve)
+    await adapter.open({ cwd: 'C:/test', externalSessionId: null })
+
+    const taskId = randomUUID()
+
+    // 1. Rejected if no turn context is active
+    const rejectedNoContext = await adapter.input({
+      version: 1,
+      taskId,
+      epoch: 0,
+      workspace,
+      inputId: randomUUID(),
+      turnId: null,
+      kind: 'stop',
+    })
+    expect(rejectedNoContext.status).toBe('rejected')
+
+    // Start turn
+    await adapter.startTurn({
+      taskId,
+      epoch: 0,
+      workspace,
+      runId: randomUUID(),
+      observationId: randomUUID(),
+      text: 'Hello',
+      imageFileIds: [],
+    }, new Map())
+
+    // 2. Rejected if taskId mismatch
+    const rejectedTaskId = await adapter.input({
+      version: 1,
+      taskId: randomUUID(),
+      epoch: 0,
+      workspace,
+      inputId: randomUUID(),
+      turnId: 'turn-identity',
+      kind: 'correct',
+      text: 'Mismatch task',
+    })
+    expect(rejectedTaskId.status).toBe('rejected')
+
+    // 3. Rejected if epoch mismatch
+    const rejectedEpoch = await adapter.input({
+      version: 1,
+      taskId,
+      epoch: 99,
+      workspace,
+      inputId: randomUUID(),
+      turnId: 'turn-identity',
+      kind: 'correct',
+      text: 'Mismatch epoch',
+    })
+    expect(rejectedEpoch.status).toBe('rejected')
+
+    await adapter.close()
+  })
+
+  it('enforces D-04 steer turnId checks on correct and supplement inputs', async () => {
+    let capturedSteer: any = null
+    const { child } = createMockCodexProcess((msg, send) => {
+      if (msg.method === 'initialize') send({ id: msg.id, result: { userAgent: 'courseware_editor/0.153.4' } })
+      else if (msg.method === 'model/list') send({ id: msg.id, result: { data: [{ id: 'gpt-6-astra', model: 'gpt-6-astra' }] } })
+      else if (msg.method === 'thread/start') send({ id: msg.id, result: { thread: { id: 'thread-1' } } })
+      else if (msg.method === 'turn/start') {
+        send({ id: msg.id, result: { turn: { id: 'turn-active-1', status: 'inProgress' } } })
+        send({ method: 'turn/started', params: { threadId: 'thread-1', turn: { id: 'turn-active-1' } } })
+      }
+      else if (msg.method === 'turn/steer') {
+        capturedSteer = msg
+        send({ id: msg.id, result: { turnId: msg.params.expectedTurnId } })
+      }
+    })
+    vi.spyOn(processModule, 'launchAgent').mockReturnValue(child)
+    vi.spyOn(processModule, 'stopAgent').mockResolvedValue()
+
+    const mockResolve = vi.fn().mockResolvedValue({ executable: 'C:\\bin\\codex.exe', prefix: [] })
+    const adapter = new CodexAppServerAdapter(mockResolve)
+    await adapter.open({ cwd: 'C:/test', externalSessionId: null })
+
+    const taskId = randomUUID()
+    await adapter.startTurn({
+      taskId,
+      epoch: 0,
+      workspace,
+      runId: randomUUID(),
+      observationId: randomUUID(),
+      text: 'Hello',
+      imageFileIds: [],
+    }, new Map())
+
+    // 1. Rejected if input.turnId does not match activeTurnId
+    const rejectedTurnId = await adapter.input({
+      version: 1,
+      taskId,
+      epoch: 0,
+      workspace,
+      inputId: randomUUID(),
+      turnId: 'wrong-turn-id',
+      kind: 'correct',
+      text: 'Wrong turn id',
+    })
+    expect(rejectedTurnId.status).toBe('rejected')
+    expect(capturedSteer).toBeNull()
+
+    // 2. Accepted if input.turnId matches activeTurnId
+    const acceptedMatchingTurnId = await adapter.input({
+      version: 1,
+      taskId,
+      epoch: 0,
+      workspace,
+      inputId: randomUUID(),
+      turnId: 'turn-active-1',
+      kind: 'correct',
+      text: 'Matching turn id',
+    })
+    expect(acceptedMatchingTurnId.status).toBe('accepted')
+    expect(capturedSteer?.params?.expectedTurnId).toBe('turn-active-1')
+
+    // 3. Accepted if input.turnId is null
+    capturedSteer = null
+    const acceptedNullTurnId = await adapter.input({
+      version: 1,
+      taskId,
+      epoch: 0,
+      workspace,
+      inputId: randomUUID(),
+      turnId: null,
+      kind: 'supplement',
+      text: 'Null turn id supplement',
+    })
+    expect(acceptedNullTurnId.status).toBe('accepted')
+    expect(capturedSteer?.params?.expectedTurnId).toBe('turn-active-1')
+
+    await adapter.close()
+  })
+
+  it('rejects question answers when questionId does not match without loose fallback', async () => {
+    const { child } = createMockCodexProcess((msg, send) => {
+      if (msg.method === 'initialize') send({ id: msg.id, result: { userAgent: 'courseware_editor/0.153.4' } })
+      else if (msg.method === 'model/list') send({ id: msg.id, result: { data: [{ id: 'gpt-6-astra', model: 'gpt-6-astra' }] } })
+      else if (msg.method === 'thread/start') send({ id: msg.id, result: { thread: { id: 'thread-1' } } })
+      else if (msg.method === 'turn/start') {
+        send({ id: msg.id, result: { turn: { id: 'turn-q', status: 'inProgress' } } })
+        send({ method: 'turn/started', params: { threadId: 'thread-1', turn: { id: 'turn-q' } } })
+        setTimeout(() => {
+          send({
+            id: 20,
+            method: 'item/tool/requestUserInput',
+            params: {
+              threadId: 'thread-1',
+              turnId: 'turn-q',
+              itemId: 'call-exact-id',
+              questions: [{ id: 'q1', question: 'Favorite color?', options: ['Red', 'Blue'] }],
+            },
+          })
+        }, 5)
+      }
+    })
+    vi.spyOn(processModule, 'launchAgent').mockReturnValue(child)
+    vi.spyOn(processModule, 'stopAgent').mockResolvedValue()
+
+    const mockResolve = vi.fn().mockResolvedValue({ executable: 'C:\\bin\\codex.exe', prefix: [] })
+    const adapter = new CodexAppServerAdapter(mockResolve)
+    await adapter.open({ cwd: 'C:/test', externalSessionId: null })
+
+    const taskId = randomUUID()
+    await adapter.startTurn({
+      taskId,
+      epoch: 0,
+      workspace,
+      runId: randomUUID(),
+      observationId: randomUUID(),
+      text: 'Ask question',
+      imageFileIds: [],
+    }, new Map())
+
+    for await (const event of adapter.events()) {
+      if (event.kind === 'question') {
+        // Attempt answering with wrong questionId - must be rejected and not fall back
+        const rejected = await adapter.input({
+          version: 1,
+          taskId,
+          epoch: 0,
+          workspace,
+          inputId: randomUUID(),
+          turnId: 'turn-q',
+          kind: 'answer',
+          questionId: 'wrong-question-id',
+          answers: [{ id: 'q1', values: ['Red'] }],
+        })
+        expect(rejected.status).toBe('rejected')
+
+        // Answering with correct questionId should succeed
+        const accepted = await adapter.input({
+          version: 1,
+          taskId,
+          epoch: 0,
+          workspace,
+          inputId: randomUUID(),
+          turnId: 'turn-q',
+          kind: 'answer',
+          questionId: event.question.questionId,
+          answers: [{ id: 'q1', values: ['Red'] }],
+        })
+        expect(accepted.status).toBe('accepted')
+        break
+      }
+    }
+
+    await adapter.close()
+  })
+
+  it('keeps backward compatible helper functions intact', () => {
+    const requestId = randomUUID()
+    const request: GenerationRequest = {
+      version: 1,
+      requestId,
+      workspace: { version: 1, projectId: 'p1', normalizedPath: 'C:/p1' },
+      documentRevision: 1,
+      sessionGeneration: 1,
+      purpose: 'local-edit',
+      instruction: 'Edit title',
+      destinations: [{
+        kind: 'update',
+        target: {
+          projectId: 'p1',
+          documentRevision: 1,
+          revisionPolicy: { kind: 'exact' },
+          sessionGeneration: 1,
+          surfaceType: 'slide',
+          surfaceId: 's1',
+          locationId: 'l1',
+          stateId: null,
+          owner: 'scene',
+          ownerKey: 'scene:s1',
+          itemId: 'title-1',
+          authoringAddress: 'l1/title-1',
+        },
+      }],
+      context: {},
+      allowedCarriers: ['native'],
+      expectedResult: 'auto',
+    }
+
+    const schema = codexTurnOutputSchema(request)
+    expect(schema).toHaveProperty('properties')
+    const candidateSchema = codexCandidateOutputSchema(request)
+    expect(candidateSchema).toHaveProperty('properties')
+
+    const replyJson = JSON.stringify({
+      version: 1,
+      requestId,
+      kind: 'reply',
+      reply: 'No edits needed',
+      candidate: null,
+    })
+    expect(decodeCodexStructuredOutput(replyJson, request)).toBe('No edits needed')
+  })
+
+  it.runIf(process.env.TEST_LIVE_CODEX === '1')('runs live discovery with installed codex', async () => {
+    const caps = await discoverCodexCapabilities()
+    expect(caps.adapter).toBe('codex')
+    expect(caps.models.length).toBeGreaterThan(0)
+    expect(caps.current.model).toBeTruthy()
+  }, 30000)
+})
+
+function codexNativeProcess(options: { exitAt?: string; hangAt?: string; rejectAt?: string; confirmedModel?: string; omitEffort?: boolean } = {}): string {
+  return `
+const options = ${JSON.stringify(options)};
+const send = value => process.stdout.write(JSON.stringify(value) + '\\n');
+let threadId = null, model = 'native-default', effort = 'medium';
+require('node:readline').createInterface({ input: process.stdin }).on('line', line => {
+  const { id, method, params = {} } = JSON.parse(line);
+  if (options.exitAt && method === options.exitAt) process.exit(23);
+  if (options.hangAt && method === options.hangAt) return;
+  if (options.rejectAt && method === options.rejectAt) { send({ id, error: { code: -32602, message: 'native configuration refused' } }); return; }
+  if (method === 'initialize') send({ id, result: { userAgent: 'codex/0.153.4' } });
+  else if (method === 'model/list') send({ id, result: { data: ['native-default', 'native-selected'].map((name, i) => ({ id: name, model: name, displayName: name, isDefault: i === 0, inputModalities: ['text'], supportedReasoningEfforts: [{ reasoningEffort: 'medium' }, { reasoningEffort: 'high' }], defaultReasoningEffort: 'medium' })) } });
+  else if (method === 'thread/start' || method === 'thread/resume') {
+    threadId = params.threadId || 'confirmed-native-thread';
+    model = params.model || model;
+    send({ id, result: { thread: { id: threadId }, model, reasoningEffort: effort } });
+  } else if (method === 'turn/start') {
+    model = params.model || model; effort = params.effort || effort;
+    send({ id, result: { turn: { id: 'native-turn', status: 'inProgress' } } });
+    send({ method: 'turn/started', params: { threadId, turn: { id: 'native-turn' } } });
+  } else if (method === 'thread/read') {
+    send({ id, result: { thread: { id: threadId, model: options.confirmedModel || model, reasoningEffort: options.omitEffort ? null : effort } } });
+    setTimeout(() => send({ method: 'turn/completed', params: { threadId, turn: { id: 'native-turn', status: 'completed' } } }), 5);
+  } else if (method === 'turn/interrupt') {
+    send({ id, result: {} });
+    send({ method: 'turn/completed', params: { threadId, turn: { id: 'native-turn', status: 'interrupted' } } });
+  }
+});
+process.stdin.on('end', () => process.exit(0));
+`
+}
+
+function realCodexAdapter(script: string | (() => string), timeouts: { rpcTimeoutMs?: number; cancelTimeoutMs?: number } = {}) {
+  const messages: any[] = []
+  const children: ChildProcessWithoutNullStreams[] = []
+  const launch = processModule.launchAgent
+  vi.spyOn(processModule, 'launchAgent').mockImplementation((binary, args, cwd) => {
+    const child = launch(binary, args, cwd)
+    children.push(child)
+    const write = child.stdin.write.bind(child.stdin)
+    vi.spyOn(child.stdin, 'write').mockImplementation((chunk: any, ...rest: any[]) => {
+      for (const line of String(chunk).trim().split('\n')) if (line) messages.push(JSON.parse(line))
+      return (write as (...args: any[]) => boolean)(chunk, ...rest)
+    })
+    return child
+  })
+  const adapter = new CodexAppServerAdapter({
+    resolve: async () => ({ executable: process.execPath, prefix: ['-e', typeof script === 'function' ? script() : script, '--'] }),
+    ...timeouts,
+  })
+  return { adapter, messages, children }
+}
+
+function nativeCodexTurn() {
+  return { taskId: randomUUID(), epoch: 0, workspace: { version: 1 as const, projectId: 'native-test', normalizedPath: 'c:/lessons/native-test.h5lesson' },
+    runId: randomUUID(), observationId: randomUUID(), text: 'deterministic protocol test', imageFileIds: [] }
+}
+
+describe('Codex native subprocess failure and configuration boundaries', () => {
+  it('rejects an initialization exit and can open another native process on the same adapter', async () => {
+    let launchCount = 0
+    const { adapter, children } = realCodexAdapter(() => codexNativeProcess(++launchCount === 1 ? { exitAt: 'initialize' } : {}))
+    try {
+      await expect(adapter.open({ cwd: process.cwd(), externalSessionId: null })).rejects.toThrow('exit 23')
+      expect((adapter as any).pendingRpc.size).toBe(0)
+      expect(adapter.getExternalSessionId()).toBeNull()
+      const reopened = await adapter.open({ cwd: process.cwd(), externalSessionId: null })
+      expect(reopened.externalSessionId).toBe('confirmed-native-thread')
+      expect(children).toHaveLength(2)
+    } finally { await adapter.close() }
+  })
+
+  it('rejects pending initialization on a real process launch error', async () => {
+    const adapter = new CodexAppServerAdapter(async () => ({ executable: path.join(process.cwd(), 'missing-codex-native.exe'), prefix: [] }))
+    try {
+      await expect(adapter.open({ cwd: process.cwd(), externalSessionId: null })).rejects.toThrow(/ENOENT/)
+      expect((adapter as any).pendingRpc.size).toBe(0)
+      expect(adapter.getExternalSessionId()).toBeNull()
+    } finally { await adapter.close() }
+  })
+
+  it('closes an unresponsive initialization immediately and repeated close is idempotent', async () => {
+    const { adapter, messages, children } = realCodexAdapter(codexNativeProcess({ hangAt: 'initialize' }))
+    const opened = adapter.open({ cwd: process.cwd(), externalSessionId: null })
+    const rejected = expect(opened).rejects.toThrow('closed')
+    try {
+      await vi.waitFor(() => expect(messages.some(message => message.method === 'initialize')).toBe(true))
+      await Promise.all([adapter.close(), adapter.close()])
+      await rejected
+      expect((adapter as any).pendingRpc.size).toBe(0)
+      await vi.waitFor(() => expect(children[0]!.exitCode).not.toBeNull())
+    } finally { await adapter.close() }
+  })
+
+  it('does not launch a late process after close while executable resolution is pending', async () => {
+    let resolved!: (value: processModule.AgentExecutable) => void
+    const adapter = new CodexAppServerAdapter(() => new Promise(resolve => { resolved = resolve }))
+    const launch = vi.spyOn(processModule, 'launchAgent')
+    const opened = adapter.open({ cwd: process.cwd(), externalSessionId: null })
+    const rejected = expect(opened).rejects.toThrow('interrupted')
+    await adapter.close()
+    resolved({ executable: process.execPath, prefix: ['-e', codexNativeProcess(), '--'] })
+    await rejected
+    expect(launch).not.toHaveBeenCalled()
+  })
+
+  it('bounds an unanswered RPC and clears its request before ending the process', async () => {
+    const { adapter } = realCodexAdapter(codexNativeProcess({ hangAt: 'initialize' }), { rpcTimeoutMs: 150 })
+    try {
+      await expect(adapter.open({ cwd: process.cwd(), externalSessionId: null })).rejects.toThrow('initialize timeout')
+      expect((adapter as any).pendingRpc.size).toBe(0)
+    } finally { await adapter.close() }
+  })
+
+  it('ends cancellation once when the native interrupt does not respond', async () => {
+    const { adapter, messages } = realCodexAdapter(codexNativeProcess({ hangAt: 'turn/interrupt' }), { cancelTimeoutMs: 100 })
+    try {
+      await adapter.open({ cwd: process.cwd(), externalSessionId: null })
+      await adapter.startTurn(nativeCodexTurn(), new Map())
+      const collect = (async () => { const events = []; for await (const event of adapter.events()) events.push(event); return events })()
+      await Promise.all([adapter.cancel(), adapter.cancel()])
+      const events = await collect
+      expect(events.filter(event => event.kind === 'turn-ended')).toEqual([expect.objectContaining({ status: 'cancelled', failure: null })])
+      expect(messages.filter(message => message.method === 'turn/interrupt')).toHaveLength(1)
+      expect((adapter as any).pendingRpc.size).toBe(0)
+    } finally { await adapter.close() }
+  })
+
+  it.each([null, 'saved-native-thread'])('sends the selected configuration after opening %s and confirms it from native metadata', async externalSessionId => {
+    const { adapter, messages } = realCodexAdapter(codexNativeProcess())
+    try {
+      await adapter.open({ cwd: process.cwd(), externalSessionId })
+      const pending = await adapter.configure({ model: 'native-selected', effort: 'high' })
+      expect(pending.current).toEqual({ model: 'native-default', resolvedModel: 'native-default', effort: 'medium' })
+      expect(pending.requestedConfiguration).toEqual({ model: 'native-selected', effort: 'high' })
+      await adapter.startTurn(nativeCodexTurn(), new Map())
+      const events = []; for await (const event of adapter.events()) events.push(event)
+      expect(messages.find(message => message.method === 'turn/start').params).toMatchObject({ model: 'native-selected', effort: 'high' })
+      const confirmation = events.find(event => event.kind === 'configuration')
+      expect(confirmation).toMatchObject({ capabilities: { current: { model: 'native-selected', resolvedModel: 'native-selected', effort: 'high' }, requestedConfiguration: null } })
+      expect(adapter.getExternalSessionId()).toBe(externalSessionId ?? 'confirmed-native-thread')
+    } finally { await adapter.close() }
+  })
+
+  it.each([
+    { confirmedModel: 'native-default' },
+    { omitEffort: true },
+    { rejectAt: 'turn/start' },
+  ])('does not confirm or continue a configuration that the native process rejects: %j', async options => {
+    const { adapter } = realCodexAdapter(codexNativeProcess(options))
+    try {
+      await adapter.open({ cwd: process.cwd(), externalSessionId: null })
+      await adapter.configure({ model: 'native-selected', effort: 'high' })
+      await expect(adapter.startTurn(nativeCodexTurn(), new Map())).rejects.toThrow(/未确认|refused/)
+      expect((adapter as any).capabilities.current.model).toBe('native-default')
+      await expect(adapter.startTurn(nativeCodexTurn(), new Map())).rejects.toThrow('not open')
+    } finally { await adapter.close() }
+  })
+})
+
+describe('Codex native configuration and permission passthrough', () => {
+  it.each(['before-ack', 'after-null-read', 'after-old-read'] as const)('uses effective settings %s without aborting on unready thread metadata', async ordering => {
+    const settings = "send({ method: 'thread/settings/updated', params: { threadId, threadSettings: { model, effort } } });"
+    let script = codexNativeProcess()
+    if (ordering === 'before-ack') {
+      script = script.replace("send({ id, result: { turn: { id: 'native-turn', status: 'inProgress' } } });",
+        settings + "\n    send({ id, result: { turn: { id: 'native-turn', status: 'inProgress' } } });")
+      script = script.replace("send({ method: 'turn/started', params: { threadId, turn: { id: 'native-turn' } } });",
+        "send({ method: 'turn/started', params: { threadId, turn: { id: 'native-turn' } } });\n    setTimeout(() => send({ method: 'turn/completed', params: { threadId, turn: { id: 'native-turn', status: 'completed' } } }), 20);")
+    } else {
+      script = script.replace("send({ id, result: { thread: { id: threadId, model: options.confirmedModel || model, reasoningEffort: options.omitEffort ? null : effort } } });",
+        "send({ id, result: { thread: { id: threadId, model: " + (ordering === 'after-null-read' ? "null" : "'native-default'") + ", reasoningEffort: null } } });\n    setTimeout(() => { " + settings + " }, 1);")
+    }
+    const { adapter, messages } = realCodexAdapter(script)
+    try {
+      await adapter.open({ cwd: process.cwd(), externalSessionId: null })
+      await adapter.configure({ model: 'native-selected', effort: 'high' })
+      const started = await adapter.startTurn(nativeCodexTurn(), new Map())
+      const events = []; for await (const event of adapter.events()) events.push(event)
+      expect(events.find(event => event.kind === 'configuration')).toMatchObject({ nativeTurnId: started.nativeTurnId,
+        capabilities: { current: { model: 'native-selected', effort: 'high' }, requestedConfiguration: null } })
+      expect(events.at(-1)).toMatchObject({ kind: 'turn-ended', status: 'completed' })
+      if (ordering === 'before-ack') expect(messages.some(message => message.method === 'thread/read')).toBe(false)
+    } finally { await adapter.close() }
+  })
+
+  it.each([null, 'confirmed-native-thread'])('inherits native configuration for session %s without product permission overrides', async externalSessionId => {
+    const { adapter, messages } = realCodexAdapter(codexNativeProcess())
+    try {
+      await adapter.open({ cwd: process.cwd(), externalSessionId })
+      const opened = messages.find(message => message.method === (externalSessionId ? 'thread/resume' : 'thread/start'))
+      expect(opened.params).toEqual({ cwd: process.cwd(), ...(externalSessionId ? { threadId: externalSessionId } : {}) })
+    } finally { await adapter.close() }
+  })
+
+  it.each([
+    ['item/commandExecution/requestApproval', '允许一次', 'accept'],
+    ['item/commandExecution/requestApproval', '拒绝', 'decline'],
+    ['item/fileChange/requestApproval', '允许本会话', 'acceptForSession'],
+    ['item/fileChange/requestApproval', '取消', 'cancel'],
+  ])('relays %s decision %s through the exact pending native request', async (method, choice, decision) => {
+    const script = codexNativeProcess().replace("const { id, method, params = {} } = JSON.parse(line);", `
+  const { id, method, params = {} } = JSON.parse(line);
+  if (!method && id === 'approval-1') { send({ method: 'turn/completed', params: { threadId, turn: { id: 'native-turn', status: 'completed' } } }); return; }
+`).replace("send({ method: 'turn/started', params: { threadId, turn: { id: 'native-turn' } } });", `
+    send({ method: 'turn/started', params: { threadId, turn: { id: 'native-turn' } } });
+    send({ id: 'stale-approval', method: ${JSON.stringify(method)}, params: { threadId: 'another-thread', turnId: 'native-turn', command: 'wrong command' } });
+    send({ id: 'approval-1', method: ${JSON.stringify(method)}, params: { threadId, turnId: 'native-turn', itemId: 'native-item', reason: 'Apply requested change', command: 'native command' } });
+`)
+    const { adapter, messages } = realCodexAdapter(script)
+    const turn = nativeCodexTurn()
+    try {
+      await adapter.open({ cwd: process.cwd(), externalSessionId: null })
+      await adapter.startTurn(turn, new Map())
+      let questionCount = 0
+      for await (const event of adapter.events()) {
+        if (event.kind !== 'question') continue
+        questionCount++
+        expect(event.question.purpose).toBe('permission')
+        const input = { version: 1 as const, taskId: turn.taskId, epoch: turn.epoch, workspace: turn.workspace, inputId: randomUUID(),
+          kind: 'answer' as const, turnId: event.question.turnId, questionId: event.question.questionId,
+          answers: [{ id: event.question.questionId, values: [choice!] }] }
+        expect((await adapter.input({ ...input, turnId: 'old-turn' })).status).toBe('rejected')
+        expect((await adapter.input({ ...input, workspace: { ...input.workspace, projectId: 'another-project' } })).status).toBe('rejected')
+        expect((await adapter.input(input)).status).toBe('accepted')
+        expect((await adapter.input(input)).status).toBe('rejected')
+      }
+      expect(questionCount).toBe(1)
+      expect(messages.find(message => message.id === 'approval-1')).toEqual({ id: 'approval-1', result: { decision } })
+      expect(messages.find(message => message.id === 'stale-approval')?.error?.code).toBe(-32602)
+    } finally { await adapter.close() }
+  })
+
+  it('cancels native approval before interrupting the turn', async () => {
+    const script = codexNativeProcess().replace("send({ method: 'turn/started', params: { threadId, turn: { id: 'native-turn' } } });", `
+    send({ method: 'turn/started', params: { threadId, turn: { id: 'native-turn' } } });
+    send({ id: 'approval-cancel', method: 'item/commandExecution/requestApproval', params: { threadId, turnId: 'native-turn', command: 'native command' } });
+`)
+    const { adapter, messages } = realCodexAdapter(script)
+    try {
+      await adapter.open({ cwd: process.cwd(), externalSessionId: null })
+      await adapter.startTurn(nativeCodexTurn(), new Map())
+      for await (const event of adapter.events()) if (event.kind === 'question') await adapter.cancel()
+      expect(messages.find(message => message.id === 'approval-cancel')?.result).toEqual({ decision: 'cancel' })
+      expect(messages.findIndex(message => message.id === 'approval-cancel')).toBeLessThan(messages.findIndex(message => message.method === 'turn/interrupt'))
+    } finally { await adapter.close() }
+  })
+
+  it('reuses one native thread across two turns without leaking previous run events', async () => {
+    const script = codexNativeProcess().replace("let threadId = null, model = 'native-default', effort = 'medium';", "let threadId = null, model = 'native-default', effort = 'medium', turnNumber = 0;")
+      .replace('model = params.model || model; effort = params.effort || effort;', 'turnNumber++; model = params.model || model; effort = params.effort || effort;')
+      .replaceAll("'native-turn'", "'native-turn-' + turnNumber")
+      .replace("send({ method: 'turn/started', params: { threadId, turn: { id: 'native-turn-' + turnNumber } } });", `
+    send({ method: 'turn/started', params: { threadId, turn: { id: 'native-turn-' + turnNumber } } });
+    send({ method: 'item/agentMessage/delta', params: { threadId, turnId: 'native-turn-' + (turnNumber - 1), itemId: 'late-old-item', delta: 'stale output' } });
+`)
+    const { adapter, messages } = realCodexAdapter(script)
+    const first = nativeCodexTurn(), second = { ...first, runId: randomUUID(), observationId: randomUUID(), text: 'second observation and host result' }
+    try {
+      const opened = await adapter.open({ cwd: process.cwd(), externalSessionId: null })
+      await adapter.configure({ model: 'native-selected', effort: 'high' })
+      const ids: string[] = []
+      for (const turn of [first, second]) {
+        const started = await adapter.startTurn(turn, new Map()); ids.push(started.nativeTurnId!)
+        const events = []; for await (const event of adapter.events()) events.push(event)
+        expect(events.every(event => event.runId === turn.runId && event.nativeTurnId === started.nativeTurnId)).toBe(true)
+        expect(events.some(event => event.kind === 'text' && event.text === 'stale output')).toBe(false)
+        expect(events.filter(event => event.kind === 'turn-ended')).toEqual([expect.objectContaining({ status: 'completed' })])
+        expect(adapter.getExternalSessionId()).toBe(opened.externalSessionId)
+      }
+      expect(new Set(ids).size).toBe(2)
+      expect(messages.filter(message => message.method === 'thread/start')).toHaveLength(1)
+      expect(messages.filter(message => message.method === 'turn/start')).toHaveLength(2)
+    } finally { await adapter.close() }
+  })
+
+  it('returns granted native permission fields without adding access that was not requested', async () => {
+    const permissions = { network: { enabled: true } }
+    const script = codexNativeProcess().replace("const { id, method, params = {} } = JSON.parse(line);", `
+  const { id, method, params = {} } = JSON.parse(line);
+  if (!method && id === 'permissions-1') { send({ method: 'turn/completed', params: { threadId, turn: { id: 'native-turn', status: 'completed' } } }); return; }
+`).replace("send({ method: 'turn/started', params: { threadId, turn: { id: 'native-turn' } } });", `
+    send({ method: 'turn/started', params: { threadId, turn: { id: 'native-turn' } } });
+    send({ id: 'permissions-1', method: 'item/permissions/requestApproval', params: { threadId, turnId: 'native-turn', itemId: 'permission-item', permissions: ${JSON.stringify(permissions)} } });
+`)
+    const { adapter, messages } = realCodexAdapter(script), turn = nativeCodexTurn()
+    try {
+      await adapter.open({ cwd: process.cwd(), externalSessionId: null }); await adapter.startTurn(turn, new Map())
+      for await (const event of adapter.events()) if (event.kind === 'question') {
+        expect((await adapter.input({ version: 1, taskId: turn.taskId, epoch: 0, workspace: turn.workspace, inputId: randomUUID(), kind: 'answer',
+          questionId: event.question.questionId, turnId: event.question.turnId, answers: [{ id: event.question.questionId, values: ['允许本次请求'] }] })).status).toBe('accepted')
+      }
+      expect(messages.find(message => message.id === 'permissions-1')?.result).toEqual({ permissions, scope: 'turn' })
+    } finally { await adapter.close() }
+  })
+
+  it('relays native tool form input and validates it before sending the elicitation response', async () => {
+    const script = codexNativeProcess().replace("const { id, method, params = {} } = JSON.parse(line);", `
+  const { id, method, params = {} } = JSON.parse(line);
+  if (!method && id === 'form-1') { send({ method: 'turn/completed', params: { threadId, turn: { id: 'native-turn', status: 'completed' } } }); return; }
+`).replace("send({ method: 'turn/started', params: { threadId, turn: { id: 'native-turn' } } });", `
+    send({ method: 'turn/started', params: { threadId, turn: { id: 'native-turn' } } });
+    send({ id: 'form-1', method: 'mcpServer/elicitation/request', params: { threadId, turnId: 'native-turn', serverName: 'native-tool', mode: 'form', message: 'Confirm native tool input', requestedSchema: { type: 'object', properties: { label: { type: 'string', minLength: 2 }, count: { type: 'integer', minimum: 1 } }, required: ['label', 'count'], additionalProperties: false } } });
+`)
+    const { adapter, messages } = realCodexAdapter(script), turn = nativeCodexTurn()
+    try {
+      await adapter.open({ cwd: process.cwd(), externalSessionId: null }); await adapter.startTurn(turn, new Map())
+      for await (const event of adapter.events()) if (event.kind === 'question') {
+        const input = { version: 1 as const, taskId: turn.taskId, epoch: 0, workspace: turn.workspace, inputId: randomUUID(), kind: 'answer' as const,
+          questionId: event.question.questionId, turnId: event.question.turnId, answers: [{ id: event.question.questionId, values: ['提交'] }, { id: 'label', values: ['native'] }, { id: 'count', values: ['0'] }] }
+        expect((await adapter.input(input)).status).toBe('rejected')
+        expect((await adapter.input({ ...input, answers: [...input.answers.slice(0, 2), { id: 'count', values: ['2'] }] })).status).toBe('accepted')
+      }
+      expect(messages.find(message => message.id === 'form-1')?.result).toEqual({ action: 'accept', content: { label: 'native', count: 2 } })
+    } finally { await adapter.close() }
+  })
+})

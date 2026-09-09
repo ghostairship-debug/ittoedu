@@ -1,5 +1,5 @@
 import type { PlaybackNavigationViewPort } from '../../navigation/coursePlaybackSequence'
-import { createPlaybackContent, type PlaybackViewSession } from '../../playbackViewSession'
+import { createPlaybackContent, playbackGestureOccupied, type PlaybackViewSession } from '../../playbackViewSession'
 import { buildFlowRichTextHtml } from '../../../shared/flowRichText'
 import { buildNativeChartSvg } from '../../../shared/nativeChartSvg'
 import { createFlowViewportGeometry, measureFlowPaperOrigin } from '../../../shared/flowViewportGeometry'
@@ -270,6 +270,15 @@ export class FlowSurfaceHost {
 
   get rootElement(): HTMLElement | null {
     return this.#root
+  }
+
+  readObservationState() {
+    return {
+      surfaceId: this.#surfaceId, locationId: this.#locationId, stateId: null,
+      ready: this.#active && this.#pendingRuntimeActivation === null && this.#root?.isConnected === true,
+      stateVersion: this.#interactionGeneration + this.#runtimeSession.courseState.version,
+      publicState: { courseState: this.#runtimeSession.courseState.snapshot() },
+    }
   }
 
   getPublishedInteractionSurfacePort(): PublishedInteractionSurfacePort | null {
@@ -1516,7 +1525,7 @@ function renderFlowArticle(
   article.style.color = '#172033'
 
   article.addEventListener('wheel', (event: WheelEvent) => {
-    if (event.ctrlKey || event.defaultPrevented) return
+    if (event.ctrlKey || event.defaultPrevented || playbackGestureOccupied(event.target, article)) return
     const maxScroll = Math.max(0, article.scrollHeight - article.clientHeight)
     if (maxScroll <= 0) return
     const prevScroll = article.scrollTop
@@ -1535,13 +1544,7 @@ function renderFlowArticle(
   article.addEventListener('touchstart', event => { if (event.touches.length > 1) isDragging = false }, { passive: true })
 
   article.addEventListener('pointerdown', (event: PointerEvent) => {
-    if (event.button !== 0 || event.defaultPrevented) return
-    const target = event.target as HTMLElement | null
-    if (target && typeof target.closest === 'function') {
-      if (target.closest('video, audio, button, a, input, textarea, [data-flow-interactive]')) {
-        return
-      }
-    }
+    if (event.button !== 0 || event.defaultPrevented || playbackGestureOccupied(event.target, article)) return
     isDragging = true
     dragStartY = event.clientY
     dragStartScroll = article.scrollTop

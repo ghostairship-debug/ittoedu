@@ -66,14 +66,18 @@ describe('shared source revision owner', () => {
     const request = captureGenerationSnapshot(input)
     const sources = (request.context as any).componentSources
     expect(sources).toHaveLength(1)
-    expect(sources[0].files['runtime.js']).toEqual({ encoding: 'utf8', text: currentPackage.runtimeSource })
-    expect(sources[0].files['thumbnail.png']).toBe(Buffer.from(currentPackage.files['thumbnail.png']!).toString('base64'))
+    expect(sources[0].files['runtime.js']).toMatchObject({ encoding: 'utf8', path: `resources/components/${PACKAGE_ID}/runtime.js` })
+    expect(request.resourceFiles).toContainEqual({ path: `components/${PACKAGE_ID}/runtime.js`, encoding: 'utf8', content: currentPackage.runtimeSource, role: 'source' })
+    expect(sources[0].files['thumbnail.png']).toMatchObject({ encoding: 'base64', path: `resources/components/${PACKAGE_ID}/thumbnail.png` })
+    expect(request.resourceFiles).toContainEqual({ path: `components/${PACKAGE_ID}/thumbnail.png`, encoding: 'base64', content: Buffer.from(currentPackage.files['thumbnail.png']!).toString('base64'), role: 'source' })
     expect(request.destinations).toContainEqual({ kind: 'update', target: sources[0].target })
     expect(sources[0].target).toMatchObject({ owner: 'global', itemId: PACKAGE_ID, documentRevision: project.revision })
     expect(() => captureGenerationSnapshot({ ...input, componentPackages: {} })).toThrow('完整源码')
     const files = { ...currentPackage.files, 'large.txt': encoder.encode('x'.repeat(160000)) }
     const big = structuredClone(project); big.componentPackages[PACKAGE_ID]!.contentSha256 = componentContentSha256(files)
-    expect(() => captureGenerationSnapshot({ ...input, document: big, componentPackages: { [PACKAGE_ID]: { ...currentPackage, files } } })).toThrow('预算')
+    const large = captureGenerationSnapshot({ ...input, document: big, componentPackages: { [PACKAGE_ID]: { ...currentPackage, files } } })
+    expect(large.resourceFiles?.find(file => file.path.endsWith('large.txt'))?.content).toHaveLength(160000)
+    expect(JSON.stringify(large.context)).not.toContain('x'.repeat(1000))
   })
 })
 

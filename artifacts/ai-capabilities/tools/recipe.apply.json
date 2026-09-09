@@ -1,0 +1,48 @@
+{
+  "candidateCarrier": {
+    "default": "recipe"
+  },
+  "description": "仅 Slide：scene owner + create parent:course-locations，insertion={kind:after,siblingId:当前locationId}。slots 只能用 对应 Recipe 能力卡中的 fields.key（从 capabilities/discovery.json 或 query.mjs 按 recipeId 读取）。配方会新建一页，返回位置可用 created-scope。",
+  "inputSchema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": false,
+    "properties": {
+      "accentTokenId": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "recipeId": {
+        "enum": [
+          "cover-v1",
+          "concept-v1",
+          "worked-example-v1",
+          "step-reveal-v1",
+          "choice-feedback-v1",
+          "classify-sort-v1"
+        ],
+        "type": "string"
+      },
+      "slots": {
+        "additionalProperties": {
+          "maxLength": 1200,
+          "type": "string"
+        },
+        "propertyNames": {
+          "type": "string"
+        },
+        "type": "object"
+      }
+    },
+    "required": [
+      "recipeId",
+      "slots"
+    ],
+    "type": "object"
+  },
+  "name": "recipe.apply",
+  "support": "conditional-on-input-target-resources-and-host",
+  "supportedScopes": [
+    "slide:scene"
+  ],
+  "version": 1
+}

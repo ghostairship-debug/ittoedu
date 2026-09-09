@@ -253,14 +253,12 @@ export class TeacherControllerDom {
   }
 
   #render(): void {
-    if (this.#options.playbackView) {
-      const offset = constrainTeacherControllerOffset(
-        this.#node, this.#session.offset, this.#session.collapsed, this.#options.canvas, false,
-      )
-      if (offset.dx !== this.#session.offset.dx || offset.dy !== this.#session.offset.dy) {
-        this.#session = { ...this.#session, offset }
-        this.#options.onSessionChange(this.#session)
-      }
+    const offset = constrainTeacherControllerOffset(
+      this.#node, this.#session.offset, this.#session.collapsed, this.#options.canvas, false,
+    )
+    if (offset.dx !== this.#session.offset.dx || offset.dy !== this.#session.offset.dy) {
+      this.#session = { ...this.#session, offset }
+      this.#options.onSessionChange(this.#session)
     }
     const layout = createTeacherControllerLayout(
       this.#node,
@@ -377,9 +375,7 @@ export class TeacherControllerDom {
       zoom.dataset.playbackChrome = 'zoom-button'
       zoom.setAttribute('aria-label', '缩放')
       zoom.setAttribute('aria-expanded', 'false')
-      const collapse = layout.collapse
-      applyRect(zoom, { x: Math.max(0, collapse ? collapse.x - 58 : layout.width - 64),
-        y: collapse?.y ?? 6, width: 54, height: collapse?.height ?? 30 })
+      applyRect(zoom, layout.playbackZoom!)
       Object.assign(zoom.style, { pointerEvents: 'auto', cursor: 'pointer', borderRadius: '8px',
         background: palette.backgroundCss, color: palette.textCss, border: `1px solid ${palette.accentCss}`, font: 'bold 13px sans-serif' })
       zoom.addEventListener('pointerdown', event => event.stopPropagation())

@@ -1,0 +1,1247 @@
+{
+  "fixtureVersion": 1,
+  "scope": "Sanitized real native protocol examples; no live project commit or product acceptance is claimed.",
+  "adapter": "opencode",
+  "summaries": {
+    "conversation": {
+      "source": "output/r18-native-preflight/opencode-conversation-1788791034865",
+      "cliVersion": "1.18.26",
+      "model": "opencode/muse-spark-1.3",
+      "error": null
+    },
+    "control": {
+      "source": "output/r18-native-preflight/opencode-control-1788791236756",
+      "cliVersion": "1.18.26",
+      "model": "opencode/muse-spark-1.3",
+      "error": null
+    },
+    "nonvisualControl": {
+      "source": "output/r18-native-preflight/opencode-control-1788790935509",
+      "cliVersion": "1.18.26",
+      "model": "opencode/big-pickle",
+      "error": null
+    },
+    "nonvisual": {
+      "source": "output/r18-native-preflight/opencode-conversation-1788790831643",
+      "cliVersion": "1.18.26",
+      "model": "opencode/big-pickle",
+      "error": null
+    }
+  },
+  "examples": {
+    "conversation": [
+      {
+        "direction": "out",
+        "value": {
+          "jsonrpc": "2.0",
+          "id": 3,
+          "method": "session/set_config_option",
+          "params": {
+            "sessionId": "native-id-1",
+            "configId": "model",
+            "value": "opencode/muse-spark-1.3"
+          }
+        }
+      },
+      {
+        "direction": "out",
+        "value": {
+          "jsonrpc": "2.0",
+          "id": 4,
+          "method": "session/prompt",
+          "params": {
+            "sessionId": "native-id-1",
+            "prompt": [
+              {
+                "type": "text",
+                "text": "This is an isolated read-only protocol test. Do not read parent folders or invoke skills or agents. Describe the attached image left to right. Use your native file reading tool to read observation.txt in the current working directory, and quote its token exactly. Keep the reply under 60 words."
+              },
+              {
+                "type": "image",
+                "mimeType": "image/png",
+                "data": "iVBORw0KGgoAAAANSUhEUgAAAKAAAABQCAIAAAARP+ljAAAACXBIWXMAAAPoAAAD6AG1e1JrAAABvklEQVR4nOXOsQ0AMBCEsNt/6c8WuIjkHnbbV+YXWrpfm19o6X5tfqGl+7X5hZbu1+YXWrpfm19o6X5tfqGl+7X5hZbu1+YXWrpfm19o6X5tfqGl+7X5hZbu1+YXWrpfm19o6X5tfqGl+7X5hZbu1+YXWrpfm19o6X5tfqGl+7X5hZbu1+YXWrpfm19o6X5tfqGl+7X5hZbu1+YXWrpfm19o6X5tfqGl+7X5hZbu1+YXWrpfm19o6X5tfqGl+7X5hZbu1+YXWrpfm19o6X5tfqGl+7X5hZbu1+YXWrpfm19o6X5tfqGl+7X5hZbu1+YXWrpfm19o6X5tfqGl+7X5hZbu1+YXWrpfm19o6X5tfqGl+7X5hZbu1+YXWrpfm19o6X5tfqGl+7X5hZbu1+YXWrpfm19o6X5tfqGl+7X5hZbu1+YXWrpfm19o6X5tfqGl+7X5hZbu1+YXWrpfm19o6X5tfqGl+7X5hZbu1+YXWrpfm19o6X5tfqGl+7X5hZbu1+YXWrpfm19o6X5tfqGl+7X5hZbu1+YXWrpfm19o6X5tfqGl+7X5hZbu1+YXWrpfm19o6X5tfqGl+7X5hdQDJjLQ4FP65rgAAAAASUVORK5CYII="
+              }
+            ]
+          }
+        }
+      },
+      {
+        "direction": "in",
+        "value": {
+          "jsonrpc": "2.0",
+          "method": "session/update",
+          "params": {
+            "sessionId": "native-id-1",
+            "update": {
+              "sessionUpdate": "agent_message_chunk",
+              "messageId": "native-id-2",
+              "content": {
+                "type": "text",
+                "text": "Left"
+              }
+            }
+          }
+        }
+      },
+      {
+        "direction": "in",
+        "value": {
+          "jsonrpc": "2.0",
+          "method": "session/update",
+          "params": {
+            "sessionId": "native-id-1",
+            "update": {
+              "sessionUpdate": "agent_message_chunk",
+              "messageId": "native-id-2",
+              "content": {
+                "type": "text",
+                "text": ":"
+              }
+            }
+          }
+        }
+      },
+      {
+        "direction": "in",
+        "value": {
+          "jsonrpc": "2.0",
+          "method": "session/update",
+          "params": {
+            "sessionId": "native-id-1",
+            "update": {
+              "sessionUpdate": "agent_message_chunk",
+              "messageId": "native-id-2",
+              "content": {
+                "type": "text",
+                "text": " solid red vertical band. Right:"
+              }
+            }
+          }
+        }
+      },
+      {
+        "direction": "in",
+        "value": {
+          "jsonrpc": "2.0",
+          "method": "session/update",
+          "params": {
+            "sessionId": "native-id-1",
+            "update": {
+              "sessionUpdate": "agent_message_chunk",
+              "messageId": "native-id-2",
+              "content": {
+                "type": "text",
+                "text": " solid blue vertical band. Token:"
+              }
+            }
+          }
+        }
+      },
+      {
+        "direction": "in",
+        "value": {
+          "jsonrpc": "2.0",
+          "method": "session/update",
+          "params": {
+            "sessionId": "native-id-1",
+            "update": {
+              "sessionUpdate": "agent_message_chunk",
+              "messageId": "native-id-2",
+              "content": {
+                "type": "text",
+                "text": " \"OBS-595fff2b"
+              }
+            }
+          }
+        }
+      },
+      {
+        "direction": "in",
+        "value": {
+          "jsonrpc": "2.0",
+          "method": "session/update",
+          "params": {
+            "sessionId": "native-id-1",
+            "update": {
+              "sessionUpdate": "agent_message_chunk",
+              "messageId": "native-id-2",
+              "content": {
+                "type": "text",
+                "text": "\"."
+              }
+            }
+          }
+        }
+      },
+      {
+        "direction": "in",
+        "value": {
+          "jsonrpc": "2.0",
+          "id": 4,
+          "result": {
+            "stopReason": "end_turn",
+            "usage": {
+              "inputTokens": 337,
+              "outputTokens": 34,
+              "totalTokens": 13515,
+              "thoughtTokens": 103,
+              "cachedReadTokens": 13041
+            },
+            "_meta": {}
+          }
+        }
+      },
+      {
+        "direction": "out",
+        "value": {
+          "jsonrpc": "2.0",
+          "id": 5,
+          "method": "session/prompt",
+          "params": {
+            "sessionId": "native-id-1",
+            "prompt": [
+              {
+                "type": "text",
+                "text": "Host result for this PROBE ONLY: candidate rejected; diagnostic PROBE_WIDTH. No project was changed. In one sentence acknowledge that diagnostic and repeat the observation token from the previous turn. Do not read any files again."
+              }
+            ]
+          }
+        }
+      },
+      {
+        "direction": "in",
+        "value": {
+          "jsonrpc": "2.0",
+          "method": "session/update",
+          "params": {
+            "sessionId": "native-id-1",
+            "update": {
+              "sessionUpdate": "agent_message_chunk",
+              "messageId": "native-id-3",
+              "content": {
+                "type": "text",
+                "text": "Candidate"
+              }
+            }
+          }
+        }
+      },
+      {
+        "direction": "in",
+        "value": {
+          "jsonrpc": "2.0",
+          "method": "session/update",
+          "params": {
+            "sessionId": "native-id-1",
+            "update": {
+              "sessionUpdate": "agent_message_chunk",
+              "messageId": "native-id-3",
+              "content": {
+                "type": "text",
+                "text": " rejected per"
+              }
+            }
+          }
+        }
+      },
+      {
+        "direction": "in",
+        "value": {
+          "jsonrpc": "2.0",
+          "method": "session/update",
+          "params": {
+            "sessionId": "native-id-1",
+            "update": {
+              "sessionUpdate": "agent_message_chunk",
+              "messageId": "native-id-3",
+              "content": {
+                "type": "text",
+                "text": " diagnostic PROBE_WIDTH with"
+              }
+            }
+          }
+        }
+      },
+      {
+        "direction": "in",
+        "value": {
+          "jsonrpc": "2.0",
+          "method": "session/update",
+          "params": {
+            "sessionId": "native-id-1",
+            "update": {
+              "sessionUpdate": "agent_message_chunk",
+              "messageId": "native-id-3",
+              "content": {
+                "type": "text",
+                "text": " no project changed"
+              }
+            }
+          }
+        }
+      },
+      {
+        "direction": "in",
+        "value": {
+          "jsonrpc": "2.0",
+          "method": "session/update",
+          "params": {
+            "sessionId": "native-id-1",
+            "update": {
+              "sessionUpdate": "agent_message_chunk",
+              "messageId": "native-id-3",
+              "content": {
+                "type": "text",
+                "text": ", token \"OBS"
+              }
+            }
+          }
+        }
+      },
+      {
+        "direction": "in",
+        "value": {
+          "jsonrpc": "2.0",
+          "method": "session/update",
+          "params": {
+            "sessionId": "native-id-1",
+            "update": {
+              "sessionUpdate": "agent_message_chunk",
+              "messageId": "native-id-3",
+              "content": {
+                "type": "text",
+                "text": "-595fff2b\"."
+              }
+            }
+          }
+        }
+      },
+      {
+        "direction": "in",
+        "value": {
+          "jsonrpc": "2.0",
+          "id": 5,
+          "result": {
+            "stopReason": "end_turn",
+            "usage": {
+              "inputTokens": 13565,
+              "outputTokens": 31,
+              "totalTokens": 13624,
+              "thoughtTokens": 28
+            },
+            "_meta": {}
+          }
+        }
+      }
+    ],
+    "control": [
+      {
+        "direction": "out",
+        "value": {
+          "jsonrpc": "2.0",
+          "id": 3,
+          "method": "session/set_config_option",
+          "params": {
+            "sessionId": "native-id-4",
+            "configId": "model",
+            "value": "opencode/muse-spark-1.3"
+          }
+        }
+      },
+      {
+        "direction": "out",
+        "value": {
+          "jsonrpc": "2.0",
+          "id": 4,
+          "method": "session/prompt",
+          "params": {
+            "sessionId": "native-id-4",
+            "prompt": [
+              {
+                "type": "text",
+                "text": "Use your native structured user-question tool to ask whether the probe label should be Green or Blue. This choice is unknown and required for this protocol test. After I answer, reply only with the selected label. Do not inspect files, invoke agents or skills, or make changes."
+              }
+            ]
+          }
+        }
+      },
+      {
+        "direction": "in",
+        "value": {
+          "jsonrpc": "2.0",
+          "method": "session/update",
+          "params": {
+            "sessionId": "native-id-4",
+            "update": {
+              "sessionUpdate": "agent_message_chunk",
+              "messageId": "native-id-5",
+              "content": {
+                "type": "text",
+                "text": "Should the probe label be Green"
+              }
+            }
+          }
+        }
+      },
+      {
+        "direction": "in",
+        "value": {
+          "jsonrpc": "2.0",
+          "method": "session/update",
+          "params": {
+            "sessionId": "native-id-4",
+            "update": {
+              "sessionUpdate": "agent_message_chunk",
+              "messageId": "native-id-5",
+              "content": {
+                "type": "text",
+                "text": " or Blue?"
+              }
+            }
+          }
+        }
+      },
+      {
+        "direction": "in",
+        "value": {
+          "jsonrpc": "2.0",
+          "id": 4,
+          "result": {
+            "stopReason": "end_turn",
+            "usage": {
+              "inputTokens": 12933,
+              "outputTokens": 42,
+              "totalTokens": 13268,
+              "thoughtTokens": 180,
+              "cachedReadTokens": 113
+            },
+            "_meta": {}
+          }
+        }
+      },
+      {
+        "direction": "out",
+        "value": {
+          "jsonrpc": "2.0",
+          "id": 5,
+          "method": "session/prompt",
+          "params": {
+            "sessionId": "native-id-4",
+            "prompt": [
+              {
+                "type": "text",
+                "text": "Green. Reply with the selected label only."
+              }
+            ]
+          }
+        }
+      },
+      {
+        "direction": "in",
+        "value": {
+          "jsonrpc": "2.0",
+          "method": "session/update",
+          "params": {
+            "sessionId": "native-id-4",
+            "update": {
+              "sessionUpdate": "agent_message_chunk",
+              "messageId": "native-id-6",
+              "content": {
+                "type": "text",
+                "text": "Green"
+              }
+            }
+          }
+        }
+      },
+      {
+        "direction": "in",
+        "value": {
+          "jsonrpc": "2.0",
+          "id": 5,
+          "result": {
+            "stopReason": "end_turn",
+            "usage": {
+              "inputTokens": 347,
+              "outputTokens": 11,
+              "totalTokens": 13288,
+              "thoughtTokens": 17,
+              "cachedReadTokens": 12913
+            },
+            "_meta": {}
+          }
+        }
+      },
+      {
+        "direction": "out",
+        "value": {
+          "jsonrpc": "2.0",
+          "id": 6,
+          "method": "session/prompt",
+          "params": {
+            "sessionId": "native-id-4",
+            "prompt": [
+              {
+                "type": "text",
+                "text": "Write 100 short classroom examples. Do not use tools."
+              }
+            ]
+          }
+        }
+      },
+      {
+        "direction": "in",
+        "value": {
+          "jsonrpc": "2.0",
+          "method": "session/update",
+          "params": {
+            "sessionId": "native-id-4",
+            "update": {
+              "sessionUpdate": "agent_message_chunk",
+              "messageId": "native-id-7",
+              "content": {
+                "type": "text",
+                "text": "1. 老师"
+              }
+            }
+          }
+        }
+      },
+      {
+        "direction": "out",
+        "value": {
+          "jsonrpc": "2.0",
+          "method": "session/cancel",
+          "params": {
+            "sessionId": "native-id-4"
+          }
+        }
+      },
+      {
+        "direction": "in",
+        "value": {
+          "jsonrpc": "2.0",
+          "method": "session/update",
+          "params": {
+            "sessionId": "native-id-4",
+            "update": {
+              "sessionUpdate": "agent_message_chunk",
+              "messageId": "native-id-7",
+              "content": {
+                "type": "text",
+                "text": "用"
+              }
+            }
+          }
+        }
+      },
+      {
+        "direction": "in",
+        "value": {
+          "jsonrpc": "2.0",
+          "method": "session/update",
+          "params": {
+            "sessionId": "native-id-4",
+            "update": {
+              "sessionUpdate": "agent_message_chunk",
+              "messageId": "native-id-7",
+              "content": {
+                "type": "text",
+                "text": "粉"
+              }
+            }
+          }
+        }
+      },
+      {
+        "direction": "in",
+        "value": {
+          "jsonrpc": "2.0",
+          "id": 6,
+          "result": {
+            "stopReason": "cancelled",
+            "usage": {
+              "inputTokens": 0,
+              "outputTokens": 0,
+              "totalTokens": 0
+            },
+            "_meta": {}
+          }
+        }
+      },
+      {
+        "direction": "out",
+        "value": {
+          "jsonrpc": "2.0",
+          "id": 7,
+          "method": "session/prompt",
+          "params": {
+            "sessionId": "native-id-4",
+            "prompt": [
+              {
+                "type": "text",
+                "text": "Correction: say CORRECTION_RECEIVED only."
+              }
+            ]
+          }
+        }
+      },
+      {
+        "direction": "in",
+        "value": {
+          "jsonrpc": "2.0",
+          "method": "session/update",
+          "params": {
+            "sessionId": "native-id-4",
+            "update": {
+              "sessionUpdate": "agent_message_chunk",
+              "messageId": "native-id-8",
+              "content": {
+                "type": "text",
+                "text": "CORRECTION_RECEIVED"
+              }
+            }
+          }
+        }
+      },
+      {
+        "direction": "in",
+        "value": {
+          "jsonrpc": "2.0",
+          "id": 7,
+          "result": {
+            "stopReason": "end_turn",
+            "usage": {
+              "inputTokens": 315,
+              "outputTokens": 15,
+              "totalTokens": 13564,
+              "thoughtTokens": 65,
+              "cachedReadTokens": 13169
+            },
+            "_meta": {}
+          }
+        }
+      }
+    ],
+    "nonvisualControl": [
+      {
+        "direction": "out",
+        "value": {
+          "jsonrpc": "2.0",
+          "id": 3,
+          "method": "session/prompt",
+          "params": {
+            "sessionId": "native-id-9",
+            "prompt": [
+              {
+                "type": "text",
+                "text": "Use your native structured user-question tool to ask whether the probe label should be Green or Blue. This choice is unknown and required for this protocol test. After I answer, reply only with the selected label. Do not inspect files, invoke agents or skills, or make changes."
+              }
+            ]
+          }
+        }
+      },
+      {
+        "direction": "in",
+        "value": {
+          "jsonrpc": "2.0",
+          "method": "session/update",
+          "params": {
+            "sessionId": "native-id-9",
+            "update": {
+              "sessionUpdate": "agent_message_chunk",
+              "messageId": "native-id-10",
+              "content": {
+                "type": "text",
+                "text": "Probe"
+              }
+            }
+          }
+        }
+      },
+      {
+        "direction": "in",
+        "value": {
+          "jsonrpc": "2.0",
+          "method": "session/update",
+          "params": {
+            "sessionId": "native-id-9",
+            "update": {
+              "sessionUpdate": "agent_message_chunk",
+              "messageId": "native-id-10",
+              "content": {
+                "type": "text",
+                "text": " label"
+              }
+            }
+          }
+        }
+      },
+      {
+        "direction": "in",
+        "value": {
+          "jsonrpc": "2.0",
+          "method": "session/update",
+          "params": {
+            "sessionId": "native-id-9",
+            "update": {
+              "sessionUpdate": "agent_message_chunk",
+              "messageId": "native-id-10",
+              "content": {
+                "type": "text",
+                "text": " "
+              }
+            }
+          }
+        }
+      },
+      {
+        "direction": "in",
+        "value": {
+          "jsonrpc": "2.0",
+          "method": "session/update",
+          "params": {
+            "sessionId": "native-id-9",
+            "update": {
+              "sessionUpdate": "agent_message_chunk",
+              "messageId": "native-id-10",
+              "content": {
+                "type": "text",
+                "text": "应该是 **Green** "
+              }
+            }
+          }
+        }
+      },
+      {
+        "direction": "in",
+        "value": {
+          "jsonrpc": "2.0",
+          "method": "session/update",
+          "params": {
+            "sessionId": "native-id-9",
+            "update": {
+              "sessionUpdate": "agent_message_chunk",
+              "messageId": "native-id-10",
+              "content": {
+                "type": "text",
+                "text": "还是 **Blue**？"
+              }
+            }
+          }
+        }
+      },
+      {
+        "direction": "in",
+        "value": {
+          "jsonrpc": "2.0",
+          "id": 3,
+          "result": {
+            "stopReason": "end_turn",
+            "usage": {
+              "inputTokens": 12181,
+              "outputTokens": 192,
+              "totalTokens": 14485,
+              "cachedReadTokens": 2112
+            },
+            "_meta": {}
+          }
+        }
+      },
+      {
+        "direction": "out",
+        "value": {
+          "jsonrpc": "2.0",
+          "id": 4,
+          "method": "session/prompt",
+          "params": {
+            "sessionId": "native-id-9",
+            "prompt": [
+              {
+                "type": "text",
+                "text": "Write 100 short classroom examples. Do not use tools."
+              }
+            ]
+          }
+        }
+      },
+      {
+        "direction": "out",
+        "value": {
+          "jsonrpc": "2.0",
+          "method": "session/cancel",
+          "params": {
+            "sessionId": "native-id-9"
+          }
+        }
+      },
+      {
+        "direction": "in",
+        "value": {
+          "jsonrpc": "2.0",
+          "id": 4,
+          "result": {
+            "stopReason": "cancelled",
+            "usage": {
+              "inputTokens": 0,
+              "outputTokens": 0,
+              "totalTokens": 0
+            },
+            "_meta": {}
+          }
+        }
+      },
+      {
+        "direction": "out",
+        "value": {
+          "jsonrpc": "2.0",
+          "id": 5,
+          "method": "session/prompt",
+          "params": {
+            "sessionId": "native-id-9",
+            "prompt": [
+              {
+                "type": "text",
+                "text": "Correction: say CORRECTION_RECEIVED only."
+              }
+            ]
+          }
+        }
+      },
+      {
+        "direction": "in",
+        "value": {
+          "jsonrpc": "2.0",
+          "method": "session/update",
+          "params": {
+            "sessionId": "native-id-9",
+            "update": {
+              "sessionUpdate": "agent_message_chunk",
+              "messageId": "native-id-11",
+              "content": {
+                "type": "text",
+                "text": "CORRECTION_RECEIVED"
+              }
+            }
+          }
+        }
+      },
+      {
+        "direction": "in",
+        "value": {
+          "jsonrpc": "2.0",
+          "id": 5,
+          "result": {
+            "stopReason": "end_turn",
+            "usage": {
+              "inputTokens": 119,
+              "outputTokens": 49,
+              "totalTokens": 14568,
+              "cachedReadTokens": 14400
+            },
+            "_meta": {}
+          }
+        }
+      }
+    ],
+    "nonvisual": [
+      {
+        "direction": "out",
+        "value": {
+          "jsonrpc": "2.0",
+          "id": 3,
+          "method": "session/prompt",
+          "params": {
+            "sessionId": "native-id-12",
+            "prompt": [
+              {
+                "type": "text",
+                "text": "This is an isolated read-only protocol test. Do not read parent folders or invoke skills or agents. Describe the attached image left to right. Use your native file reading tool to read observation.txt in the current working directory, and quote its token exactly. Keep the reply under 60 words."
+              },
+              {
+                "type": "image",
+                "mimeType": "image/png",
+                "data": "iVBORw0KGgoAAAANSUhEUgAAAKAAAABQCAIAAAARP+ljAAAACXBIWXMAAAPoAAAD6AG1e1JrAAABvklEQVR4nOXOsQ0AMBCEsNt/6c8WuIjkHnbbV+YXWrpfm19o6X5tfqGl+7X5hZbu1+YXWrpfm19o6X5tfqGl+7X5hZbu1+YXWrpfm19o6X5tfqGl+7X5hZbu1+YXWrpfm19o6X5tfqGl+7X5hZbu1+YXWrpfm19o6X5tfqGl+7X5hZbu1+YXWrpfm19o6X5tfqGl+7X5hZbu1+YXWrpfm19o6X5tfqGl+7X5hZbu1+YXWrpfm19o6X5tfqGl+7X5hZbu1+YXWrpfm19o6X5tfqGl+7X5hZbu1+YXWrpfm19o6X5tfqGl+7X5hZbu1+YXWrpfm19o6X5tfqGl+7X5hZbu1+YXWrpfm19o6X5tfqGl+7X5hZbu1+YXWrpfm19o6X5tfqGl+7X5hZbu1+YXWrpfm19o6X5tfqGl+7X5hZbu1+YXWrpfm19o6X5tfqGl+7X5hZbu1+YXWrpfm19o6X5tfqGl+7X5hZbu1+YXWrpfm19o6X5tfqGl+7X5hZbu1+YXWrpfm19o6X5tfqGl+7X5hZbu1+YXWrpfm19o6X5tfqGl+7X5hZbu1+YXWrpfm19o6X5tfqGl+7X5hdQDJjLQ4FP65rgAAAAASUVORK5CYII="
+              }
+            ]
+          }
+        }
+      },
+      {
+        "direction": "in",
+        "value": {
+          "jsonrpc": "2.0",
+          "method": "session/update",
+          "params": {
+            "sessionId": "native-id-12",
+            "update": {
+              "sessionUpdate": "agent_message_chunk",
+              "messageId": "native-id-13",
+              "content": {
+                "type": "text",
+                "text": "**"
+              }
+            }
+          }
+        }
+      },
+      {
+        "direction": "in",
+        "value": {
+          "jsonrpc": "2.0",
+          "method": "session/update",
+          "params": {
+            "sessionId": "native-id-12",
+            "update": {
+              "sessionUpdate": "agent_message_chunk",
+              "messageId": "native-id-13",
+              "content": {
+                "type": "text",
+                "text": "Image"
+              }
+            }
+          }
+        }
+      },
+      {
+        "direction": "in",
+        "value": {
+          "jsonrpc": "2.0",
+          "method": "session/update",
+          "params": {
+            "sessionId": "native-id-12",
+            "update": {
+              "sessionUpdate": "agent_message_chunk",
+              "messageId": "native-id-13",
+              "content": {
+                "type": "text",
+                "text": ":** Cannot"
+              }
+            }
+          }
+        }
+      },
+      {
+        "direction": "in",
+        "value": {
+          "jsonrpc": "2.0",
+          "method": "session/update",
+          "params": {
+            "sessionId": "native-id-12",
+            "update": {
+              "sessionUpdate": "agent_message_chunk",
+              "messageId": "native-id-13",
+              "content": {
+                "type": "text",
+                "text": " read image —"
+              }
+            }
+          }
+        }
+      },
+      {
+        "direction": "in",
+        "value": {
+          "jsonrpc": "2.0",
+          "method": "session/update",
+          "params": {
+            "sessionId": "native-id-12",
+            "update": {
+              "sessionUpdate": "agent_message_chunk",
+              "messageId": "native-id-13",
+              "content": {
+                "type": "text",
+                "text": " this model does not support image input.\n\n"
+              }
+            }
+          }
+        }
+      },
+      {
+        "direction": "in",
+        "value": {
+          "jsonrpc": "2.0",
+          "method": "session/update",
+          "params": {
+            "sessionId": "native-id-12",
+            "update": {
+              "sessionUpdate": "agent_message_chunk",
+              "messageId": "native-id-13",
+              "content": {
+                "type": "text",
+                "text": "**Token"
+              }
+            }
+          }
+        }
+      },
+      {
+        "direction": "in",
+        "value": {
+          "jsonrpc": "2.0",
+          "method": "session/update",
+          "params": {
+            "sessionId": "native-id-12",
+            "update": {
+              "sessionUpdate": "agent_message_chunk",
+              "messageId": "native-id-13",
+              "content": {
+                "type": "text",
+                "text": ":** `OBS-"
+              }
+            }
+          }
+        }
+      },
+      {
+        "direction": "in",
+        "value": {
+          "jsonrpc": "2.0",
+          "method": "session/update",
+          "params": {
+            "sessionId": "native-id-12",
+            "update": {
+              "sessionUpdate": "agent_message_chunk",
+              "messageId": "native-id-13",
+              "content": {
+                "type": "text",
+                "text": "7a39a9ec`"
+              }
+            }
+          }
+        }
+      },
+      {
+        "direction": "in",
+        "value": {
+          "jsonrpc": "2.0",
+          "id": 3,
+          "result": {
+            "stopReason": "end_turn",
+            "usage": {
+              "inputTokens": 284,
+              "outputTokens": 101,
+              "totalTokens": 14657,
+              "cachedReadTokens": 14272
+            },
+            "_meta": {}
+          }
+        }
+      },
+      {
+        "direction": "out",
+        "value": {
+          "jsonrpc": "2.0",
+          "id": 4,
+          "method": "session/prompt",
+          "params": {
+            "sessionId": "native-id-12",
+            "prompt": [
+              {
+                "type": "text",
+                "text": "Host result for this PROBE ONLY: candidate rejected; diagnostic PROBE_WIDTH. No project was changed. In one sentence acknowledge that diagnostic and repeat the observation token from the previous turn. Do not read any files again."
+              }
+            ]
+          }
+        }
+      },
+      {
+        "direction": "in",
+        "value": {
+          "jsonrpc": "2.0",
+          "method": "session/update",
+          "params": {
+            "sessionId": "native-id-12",
+            "update": {
+              "sessionUpdate": "agent_message_chunk",
+              "messageId": "native-id-14",
+              "content": {
+                "type": "text",
+                "text": "Acknowledged"
+              }
+            }
+          }
+        }
+      },
+      {
+        "direction": "in",
+        "value": {
+          "jsonrpc": "2.0",
+          "method": "session/update",
+          "params": {
+            "sessionId": "native-id-12",
+            "update": {
+              "sessionUpdate": "agent_message_chunk",
+              "messageId": "native-id-14",
+              "content": {
+                "type": "text",
+                "text": ": candidate"
+              }
+            }
+          }
+        }
+      },
+      {
+        "direction": "in",
+        "value": {
+          "jsonrpc": "2.0",
+          "method": "session/update",
+          "params": {
+            "sessionId": "native-id-12",
+            "update": {
+              "sessionUpdate": "agent_message_chunk",
+              "messageId": "native-id-14",
+              "content": {
+                "type": "text",
+                "text": " rejected due"
+              }
+            }
+          }
+        }
+      },
+      {
+        "direction": "in",
+        "value": {
+          "jsonrpc": "2.0",
+          "method": "session/update",
+          "params": {
+            "sessionId": "native-id-12",
+            "update": {
+              "sessionUpdate": "agent_message_chunk",
+              "messageId": "native-id-14",
+              "content": {
+                "type": "text",
+                "text": " to diagnostic PRO"
+              }
+            }
+          }
+        }
+      },
+      {
+        "direction": "in",
+        "value": {
+          "jsonrpc": "2.0",
+          "method": "session/update",
+          "params": {
+            "sessionId": "native-id-12",
+            "update": {
+              "sessionUpdate": "agent_message_chunk",
+              "messageId": "native-id-14",
+              "content": {
+                "type": "text",
+                "text": "BE_WIDTH;"
+              }
+            }
+          }
+        }
+      },
+      {
+        "direction": "in",
+        "value": {
+          "jsonrpc": "2.0",
+          "method": "session/update",
+          "params": {
+            "sessionId": "native-id-12",
+            "update": {
+              "sessionUpdate": "agent_message_chunk",
+              "messageId": "native-id-14",
+              "content": {
+                "type": "text",
+                "text": " no"
+              }
+            }
+          }
+        }
+      },
+      {
+        "direction": "in",
+        "value": {
+          "jsonrpc": "2.0",
+          "method": "session/update",
+          "params": {
+            "sessionId": "native-id-12",
+            "update": {
+              "sessionUpdate": "agent_message_chunk",
+              "messageId": "native-id-14",
+              "content": {
+                "type": "text",
+                "text": " project"
+              }
+            }
+          }
+        }
+      },
+      {
+        "direction": "in",
+        "value": {
+          "jsonrpc": "2.0",
+          "method": "session/update",
+          "params": {
+            "sessionId": "native-id-12",
+            "update": {
+              "sessionUpdate": "agent_message_chunk",
+              "messageId": "native-id-14",
+              "content": {
+                "type": "text",
+                "text": " was changed. Token:"
+              }
+            }
+          }
+        }
+      },
+      {
+        "direction": "in",
+        "value": {
+          "jsonrpc": "2.0",
+          "method": "session/update",
+          "params": {
+            "sessionId": "native-id-12",
+            "update": {
+              "sessionUpdate": "agent_message_chunk",
+              "messageId": "native-id-14",
+              "content": {
+                "type": "text",
+                "text": " `OBS-7a39"
+              }
+            }
+          }
+        }
+      },
+      {
+        "direction": "in",
+        "value": {
+          "jsonrpc": "2.0",
+          "method": "session/update",
+          "params": {
+            "sessionId": "native-id-12",
+            "update": {
+              "sessionUpdate": "agent_message_chunk",
+              "messageId": "native-id-14",
+              "content": {
+                "type": "text",
+                "text": "a9ec`."
+              }
+            }
+          }
+        }
+      },
+      {
+        "direction": "in",
+        "value": {
+          "jsonrpc": "2.0",
+          "id": 4,
+          "result": {
+            "stopReason": "end_turn",
+            "usage": {
+              "inputTokens": 2420,
+              "outputTokens": 55,
+              "totalTokens": 14763,
+              "cachedReadTokens": 12288
+            },
+            "_meta": {}
+          }
+        }
+      }
+    ]
+  }
+}

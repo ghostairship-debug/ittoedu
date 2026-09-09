@@ -1,0 +1,200 @@
+{
+  "candidateCarrier": {
+    "default": "native"
+  },
+  "description": "读取 sourceAssetId 的原始图片字节，经确定性像素变换后只替换 update 目标图片实例（Native image 或 Flow media image）。保留未选共享实例和源资产；保留 alpha，输出无损 PNG。replace-color 必须 sourceColor，默认 targetColor=#22c55e、RGB 欧式容差=32；region 与逐行 0/1 mask 使用当前图片像素坐标。crop/resize 使用整数像素，resize 仅 nearest-neighbor，最多 1600 万像素。仅支持静态 8 位 PNG/JPEG/WebP；不支持语义擦除、重绘、动画或 16 位精度转换。模型只输出意图，禁止生成替代 base64 或纯色遮盖。",
+  "inputSchema": {
+    "$defs": {
+      "__schema0": {
+        "oneOf": [
+          {
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "const": "replace-color",
+                "type": "string"
+              },
+              "mask": {
+                "additionalProperties": false,
+                "properties": {
+                  "bits": {
+                    "$ref": "#/$defs/__schema5"
+                  },
+                  "height": {
+                    "$ref": "#/$defs/__schema4"
+                  },
+                  "width": {
+                    "$ref": "#/$defs/__schema4"
+                  }
+                },
+                "required": [
+                  "width",
+                  "height",
+                  "bits"
+                ],
+                "type": "object"
+              },
+              "region": {
+                "$ref": "#/$defs/__schema2"
+              },
+              "sourceColor": {
+                "$ref": "#/$defs/__schema1"
+              },
+              "targetColor": {
+                "$ref": "#/$defs/__schema1",
+                "default": "#22c55e"
+              },
+              "tolerance": {
+                "default": 32,
+                "maximum": 441,
+                "minimum": 0,
+                "type": "number"
+              }
+            },
+            "required": [
+              "kind",
+              "sourceColor"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "const": "crop",
+                "type": "string"
+              },
+              "region": {
+                "$ref": "#/$defs/__schema2"
+              }
+            },
+            "required": [
+              "kind",
+              "region"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "height": {
+                "$ref": "#/$defs/__schema4"
+              },
+              "kind": {
+                "$ref": "#/$defs/__schema6"
+              },
+              "method": {
+                "$ref": "#/$defs/__schema7"
+              },
+              "width": {
+                "$ref": "#/$defs/__schema4"
+              }
+            },
+            "required": [
+              "kind",
+              "width",
+              "height"
+            ],
+            "type": "object"
+          }
+        ]
+      },
+      "__schema1": {
+        "pattern": "^#[0-9a-fA-F]{6}$",
+        "type": "string"
+      },
+      "__schema2": {
+        "additionalProperties": false,
+        "properties": {
+          "height": {
+            "$ref": "#/$defs/__schema4"
+          },
+          "width": {
+            "$ref": "#/$defs/__schema4"
+          },
+          "x": {
+            "$ref": "#/$defs/__schema3"
+          },
+          "y": {
+            "$ref": "#/$defs/__schema3"
+          }
+        },
+        "required": [
+          "x",
+          "y",
+          "width",
+          "height"
+        ],
+        "type": "object"
+      },
+      "__schema3": {
+        "maximum": 16000000,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "__schema4": {
+        "exclusiveMinimum": 0,
+        "maximum": 16000000,
+        "type": "integer"
+      },
+      "__schema5": {
+        "maxLength": 16000000,
+        "minLength": 1,
+        "pattern": "^[01]+$",
+        "type": "string"
+      },
+      "__schema6": {
+        "const": "resize",
+        "type": "string"
+      },
+      "__schema7": {
+        "const": "nearest-neighbor",
+        "default": "nearest-neighbor",
+        "type": "string"
+      }
+    },
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": false,
+    "properties": {
+      "alpha": {
+        "const": "preserve",
+        "default": "preserve",
+        "type": "string"
+      },
+      "operations": {
+        "items": {
+          "$ref": "#/$defs/__schema0"
+        },
+        "maxItems": 16,
+        "minItems": 1,
+        "type": "array"
+      },
+      "outputFormat": {
+        "const": "png",
+        "default": "png",
+        "type": "string"
+      },
+      "sourceAssetId": {
+        "maxLength": 500,
+        "minLength": 1,
+        "type": "string"
+      }
+    },
+    "required": [
+      "sourceAssetId",
+      "operations"
+    ],
+    "type": "object"
+  },
+  "name": "asset.image.transform",
+  "support": "conditional-on-input-target-resources-and-host",
+  "supportedScopes": [
+    "slide:scene",
+    "slide:global",
+    "flow:surface",
+    "flow:global",
+    "spatial-2d:world",
+    "spatial-2d:global"
+  ],
+  "version": 1
+}

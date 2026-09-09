@@ -1674,9 +1674,10 @@ describe('Published Slide Phaser Component API 4 host', () => {
       locationId: fixture.flowLocationId,
     })
     expect(session.navigator.hasPendingNavigation).toBe(false)
-    expect(session.canReplayScene()).toBe(false)
-    expect(await session.replayScene()).toBe(false)
-    expect(bridge.replayScene()).toBe(false)
+    expect(session.canReplayScene()).toBe(true)
+    expect(await session.replayScene()).toBe(true)
+    expect(bridge.replayScene()).toBe(true)
+    await vi.waitFor(() => expect(session.canReplayScene()).toBe(true))
     expect(session.navigator.current?.locationId).toBe(fixture.flowLocationId)
 
     await session.goToLocation(initialLocationId)

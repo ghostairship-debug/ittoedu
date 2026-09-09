@@ -1,217 +1,195 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { LocalAgentEvent, LocalAgentHostResult, LocalAgentId, LocalAgentRecord } from '../../../shared/localAgentContract'
-import type { GenerationCandidate, GenerationRequest } from '../../../shared/generationContract'
+import type { LocalAgentEvent, LocalAgentId, LocalAgentRecord } from '../../../shared/localAgentContract'
+import type { GenerationRequest } from '../../../shared/generationContract'
 import type { MaterialRecordV1 } from '../../../shared/materialContract'
-import { GENERATION_OPEN } from '../../../shared/generationResult'
+import type { DynamicBehaviorObservation } from '../../../shared/dynamicBehaviorObservation'
+import { GENERATION_OPEN, GENERATION_CLOSE, GENERATION_RESULT_OPEN, GENERATION_RESULT_CLOSE } from '../../../shared/generationResult'
 import { localAgentText } from '../../../shared/localAgentText'
-import { captureGenerationSnapshot, type GenerationReferenceScope } from '../../authoring/generation/generationSnapshot'
-import { captureGenerationRepair, generationRepairMadeProgress } from '../../authoring/generation/generationRepair'
-import { selectActiveCourseProjectDocument, selectEffectiveLayerProjection, useEditorStore } from '../../store/editorStore'
+import type { GenerationReferenceScope } from '../../authoring/generation/generationSnapshot'
+import { GenerationTaskController, type GenerationTaskView } from '../../authoring/generation/generationTaskController'
+import { selectActiveCourseProjectDocument, useEditorStore } from '../../store/editorStore'
 import { projectEffectiveLayers } from '../../course/effectiveLayerProjection'
 import { buildFlowEditorView } from '../../course/flowEditorView'
 import { SafeChatMessage } from './SafeChatMessage'
+import { NativeAgentQuestion } from './NativeAgentQuestion'
+import { NativeAgentConfiguration } from './NativeAgentConfiguration'
+import { GenerationCandidatePreview } from './GenerationCandidatePreview'
+import { createCourseChatObservation } from './courseChatObservation'
+import { aiQuestionSchema, aiInputDeliverySchema } from '../../../shared/localAgentInteraction'
 import './course-chat.css'
 
-type Preview = Awaited<ReturnType<ReturnType<typeof useEditorStore.getState>['prepareGenerationCandidate']>> & { requestId: string; sessionId: string }
-type Turn = { id: string; request: GenerationRequest; events: LocalAgentEvent[]; status: string; result?: unknown }
+type Turn = { id: string; request: GenerationRequest; events: LocalAgentEvent[]; summary?: string }
 const message = (error: unknown) => error instanceof Error ? error.message : String(error)
-const eventMessage = (event?: LocalAgentEvent) => event?.payload && typeof event.payload === 'object' && !Array.isArray(event.payload) && typeof event.payload.message === 'string' ? event.payload.message : 'CLI 本轮未完成，请重试或检查本地 CLI。'
-const assistantText = (events: LocalAgentEvent[]) => localAgentText(events).split(GENERATION_OPEN)[0]
-const recordedReferenceNames = (request: GenerationRequest) => {
-  const context = request.context as { pages?: { location?: { label?: string } }[] }
-  return Array.isArray(context?.pages) ? context.pages.map(page => page?.location?.label).filter(Boolean).join('、') : ''
-}
-
-export function CourseChatPanel({ projectId, projectPath, onClose }: { projectId: string; projectPath: string | null; onClose(): void }) {
-  const [adapter, setAdapter] = useState<LocalAgentId>('codex')
-  const [scope, setScope] = useState<GenerationReferenceScope>('page')
-  const [wholeCourse, setWholeCourse] = useState(false)
-  const [teachingPlan, setTeachingPlan] = useState('')
-  const [presentationScript, setPresentationScript] = useState('')
-  const [planConfirmed, setPlanConfirmed] = useState(false)
-  const [scriptConfirmed, setScriptConfirmed] = useState(false)
-  const [visibleEvents, setVisibleEvents] = useState(100)
-  const [instruction, setInstruction] = useState('')
-  const [sessions, setSessions] = useState<LocalAgentRecord[]>([])
-  const [sessionId, setSessionId] = useState('')
-  const [turns, setTurns] = useState<Turn[]>([])
-  const [events, setEvents] = useState<LocalAgentEvent[]>([])
-  const [materials, setMaterials] = useState<MaterialRecordV1[]>([])
-  const [materialIds, setMaterialIds] = useState<string[]>([])
-  const [preview, setPreview] = useState<Preview | null>(null)
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState('')
-  const [notice, setNotice] = useState('')
-  const [applied, setApplied] = useState<{ revision: number; sessionId: string; result: LocalAgentHostResult } | null>(null)
-  const generation = useRef(0)
-  const running = useRef<string | null>(null)
-  const scroll = useRef<HTMLDivElement | null>(null)
-  const followReply = useRef(true)
-  useEffect(() => {
-    if (followReply.current && scroll.current) scroll.current.scrollTop = scroll.current.scrollHeight
-  }, [events, turns, busy])
-  const currentDocument = useEditorStore(selectActiveCourseProjectDocument)
-  const authoringSession = useEditorStore(state => state.courseAuthoringSession)
-  const revision = currentDocument?.revision
-  const referenceName = useMemo(() => {
-    if (!currentDocument || !authoringSession) return '当前引用不可用'
-    if (wholeCourse || scope === 'course') return `${currentDocument.title} · ${currentDocument.locations.length}个位置`
-    const location = currentDocument.locations.find(item => item.id === authoringSession.token.locationId)
-    if (!location) return '当前引用不可用'
-    const selected = new Set(authoringSession.itemIds)
-    const projection = projectEffectiveLayers({ project: currentDocument, locationId: location.id })
-    const names = projection.unifiedRows.filter(row => selected.has(row.id)).map(row => row.item.label)
-    if (projection.surfaceType === 'flow') names.push(...buildFlowEditorView({ project: currentDocument, locationId: location.id }).blocks.filter(block => selected.has(block.blockId)).map(block => block.label))
-    return scope === 'page' && !names.length ? location.label : `${location.label} · ${names.length ? `已选：${names.join('、')}` : '未选择对象'}`
-  }, [currentDocument, authoringSession, wholeCourse, scope])
-  const api = window.desktopAPI
-  const owner = { projectId, projectPath: projectPath ?? '' }
-  async function rememberResult(id: string, result: LocalAgentHostResult) {
-    setTurns(prior => prior.map(turn => turn.id === id ? { ...turn, result } : turn))
-    setSessions(prior => prior.map(record => record.id === id ? { ...record, hostResult: result } : record))
-    try { await api!.localAgent({ operation: 'host-result', ...owner, sessionId: id, result }) }
-    catch (reason) { setError(`工程操作结果已产生，但会话结果保存失败：${message(reason)}`) }
+const assistantText = (events: LocalAgentEvent[]) => {
+  let text = localAgentText(events)
+  for (const [open, close] of [[GENERATION_OPEN, GENERATION_CLOSE], [GENERATION_RESULT_OPEN, GENERATION_RESULT_CLOSE]]) {
+    for (let start = text.indexOf(open); start >= 0; start = text.indexOf(open)) {
+      const end = text.indexOf(close, start + open.length)
+      text = text.slice(0, start) + (end < 0 ? '' : text.slice(end + close.length))
+    }
   }
+  return text.trim()
+}
+const emptyView: GenerationTaskView = { busy: false, phase: 'completed', notice: '', events: [] }
+const statusLabels = { running: '运行中', completed: '已结束', failed: '未完成', cancelled: '已停止' }
+export function resolveChatIntent(text: string, selected: 'discuss' | 'plan' | 'edit') {
+  if (/先[^。\n]{0,18}(?:计划|方案)|只(?:做|写|出)(?:计划|方案)/.test(text)) return 'plan'
+  if (/只(?:和我)?讨论|先(?:和我)?讨论/.test(text)) return 'discuss'
+  if (/先别(?:修改|改动|动手)|不要(?:做任何动作|修改|改动|动手)|不(?:修改|改)课件/.test(text)) return selected === 'plan' ? 'plan' : 'discuss'
+  // A user can explicitly defer an edit until after they answer a question. This
+  // is a request-level decision only; model punctuation never changes the intent.
+  if (selected === 'edit' && /先(?:问|询问)(?:我|用户)?[^\n]{0,48}(?:等(?:我|用户)?(?:回答|回复|答复)|(?:我|用户)?(?:回答|回复|答复)后)[^\n]{0,24}(?:再)?(?:修改|改动|动手)/.test(text)) return 'discuss'
+  return selected
+}
+function nativeActivity(event: LocalAgentEvent): string | null {
+  const payload = event.payload && typeof event.payload === 'object' && !Array.isArray(event.payload) ? event.payload : null
+  if (event.kind === 'tool-call') return `CLI 正在使用：${String(payload?.name ?? payload?.toolName ?? payload?.tool ?? '原生工具').slice(0, 120)}`
+  if (event.kind === 'tool-result') return payload?.isError ? 'CLI 工具执行失败，正在处理' : 'CLI 工具已返回结果'
+  if (event.kind === 'failed') return typeof payload?.message === 'string' ? payload.message : 'CLI 本轮未完成'
+  if (event.kind === 'session' && payload?.status === 'input-delivery') {
+    const delivery = aiInputDeliverySchema.safeParse(payload.delivery)
+    if (delivery.success) return ({ accepted: '输入已接收', queued: '输入已排队，等待下一回合', consumed: '输入已消费', rejected: '输入未接收' })[delivery.data.status]
+  }
+  return null
+}
+export function CourseChatPanel({ projectId, projectPath, onClose }: { projectId: string; projectPath: string | null; onClose(): void }) {
+  const [adapter, setAdapter] = useState<LocalAgentId>('codex'), [scope, setScope] = useState<GenerationReferenceScope>('page')
+  const [intent, setIntent] = useState<'discuss' | 'plan' | 'edit'>('edit'), [applyPolicy, setApplyPolicy] = useState<'auto' | 'preview'>('auto')
+  const [inputKind, setInputKind] = useState<'supplement' | 'correct'>('supplement'), [wholeCourse, setWholeCourse] = useState(false)
+  const [teachingPlan, setTeachingPlan] = useState(''), [presentationScript, setPresentationScript] = useState('')
+  const [planConfirmed, setPlanConfirmed] = useState(false), [scriptConfirmed, setScriptConfirmed] = useState(false)
+  const [visibleEvents, setVisibleEvents] = useState(100), [instruction, setInstruction] = useState('')
+  const [sessions, setSessions] = useState<LocalAgentRecord[]>([]), [sessionId, setSessionId] = useState('')
+  const [turns, setTurns] = useState<Turn[]>([]), [events, setEvents] = useState<LocalAgentEvent[]>([])
+  const [materials, setMaterials] = useState<MaterialRecordV1[]>([]), [materialIds, setMaterialIds] = useState<string[]>([])
+  const [view, setView] = useState<GenerationTaskView>(emptyView), [preparing, setPreparing] = useState(false)
+  const [error, setError] = useState(''), [notice, setNotice] = useState('')
+  const [applied, setApplied] = useState<Pick<GenerationTaskView, 'receipt' | 'result' | 'sessionId'> | null>(null)
+  const [now, setNow] = useState(Date.now())
+  const generation = useRef(0), scroll = useRef<HTMLDivElement | null>(null), followReply = useRef(true)
+  const activeRequest = useRef<string | undefined>(undefined), behaviorEvidence = useRef<DynamicBehaviorObservation[]>([])
+  const currentDocument = useEditorStore(selectActiveCourseProjectDocument), authoringSession = useEditorStore(state => state.courseAuthoringSession)
+  const revision = currentDocument?.revision, busy = view.busy || preparing, api = window.desktopAPI
+  const owner = useMemo(() => ({ projectId, projectPath: projectPath ?? '' }), [projectId, projectPath])
+  const bridge = useMemo(() => api && projectPath ? createCourseChatObservation(api, owner) : null, [api, owner, projectPath])
+  const controller = useMemo(() => api && bridge ? new GenerationTaskController({ api, owner,
+    isCurrent: request => bridge.isCurrent(request), captureNext: (request, receipt) => bridge.captureNext(request, receipt, behaviorEvidence.current),
+    async prepare(request, candidate) {
+      const prepared = await useEditorStore.getState().prepareGenerationCandidate(request, candidate)
+      if (activeRequest.current === request.requestId) behaviorEvidence.current = prepared.behaviorEvidence
+      return prepared
+    },
+    apply: id => useEditorStore.getState().applyGenerationCandidate(id), beforeApply: () => bridge.fileCurrent(),
+    discard: () => useEditorStore.getState().discardGenerationCandidate(),
+    onView(next) {
+      if (next.request?.requestId !== activeRequest.current) { activeRequest.current = next.request?.requestId; behaviorEvidence.current = [] }
+      setView(next); setEvents(next.events); setNotice(next.notice); setError(next.error ?? '')
+      if (next.sessionId) setSessionId(next.sessionId)
+      if (next.record) setSessions(prior => [...prior.filter(item => item.id !== next.record!.id), { ...next.record!, events: [] }])
+      if (next.request) setTurns(prior => [...prior.filter(item => item.id !== next.request!.requestId), { id: next.request!.requestId, request: next.request!, events: next.events, summary: next.result?.summary }])
+      if (next.receipt?.status === 'committed') setApplied({ receipt: next.receipt, result: next.result, sessionId: next.sessionId })
+    },
+  }) : null, [api, bridge, owner])
   useEffect(() => {
     let live = true
     if (projectPath && api) {
       void api.localAgent({ operation: 'list', ...owner }).then(result => { if (live) setSessions(result.records ?? []) }).catch(reason => { if (live) setError(message(reason)) })
       void api.materials({ operation: 'search', ...owner, query: '' }).then(result => { if (live) setMaterials(result) }).catch(reason => { if (live) setError(message(reason)) })
     }
-    return () => {
-      live = false; generation.current++; useEditorStore.getState().discardGenerationCandidate()
-      if (running.current && api) void api.localAgent({ operation: 'cancel', ...owner, sessionId: running.current }).catch(() => {})
-    }
-  }, [projectId, projectPath])
-
-  useEffect(() => {
-    if (!preview || revision === preview.beforeRevision) return
-    useEditorStore.getState().discardGenerationCandidate(); setPreview(null)
-    void rememberResult(preview.sessionId, { requestId: preview.requestId, candidateId: preview.candidateId, status: 'stale', summary: '工程已改变，已丢弃未应用候选' })
-    setNotice('工程已改变，候选已过期；请重新发送。')
-  }, [revision, preview])
-
-  async function stop() {
-    generation.current++; useEditorStore.getState().stopGenerationCandidate(); setPreview(null)
-    if (preview) void rememberResult(preview.sessionId, { requestId: preview.requestId, candidateId: preview.candidateId, status: 'stale', summary: '用户已停止，未应用候选已丢弃' })
-    const id = running.current
-    running.current = null; setBusy(false); setNotice('已停止；未应用的候选已丢弃')
-    if (id) try { await api!.localAgent({ operation: 'cancel', ...owner, sessionId: id }) } catch (reason) { setError(message(reason)) }
+    return () => { live = false; generation.current++; bridge?.dispose(); void controller?.stop().catch(() => {}) }
+  }, [owner, bridge, controller, api, projectPath])
+  useEffect(() => { if (!busy) return; const interval = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(interval) }, [busy])
+  useEffect(() => { if (followReply.current && scroll.current) scroll.current.scrollTop = scroll.current.scrollHeight }, [events, turns, busy])
+  useEffect(() => { if (view.preview && revision !== view.preview.beforeRevision) void stop('工程已改变，未应用候选已丢弃') }, [revision, view.preview])
+  const referenceName = useMemo(() => {
+    if (!currentDocument || !authoringSession) return '当前引用不可用'
+    const bound = view.busy ? view.request : undefined
+    const context = bound?.context
+    const referenceScope = context && typeof context === 'object' && !Array.isArray(context) ? context.reference : wholeCourse ? 'course' : scope
+    if (referenceScope === 'course') return `${currentDocument.title} · ${currentDocument.locations.length}个位置`
+    const location = currentDocument.locations.find(item => item.id === (bound?.observation?.locationId ?? authoringSession.token.locationId))
+    if (!location) return '当前引用不可用'
+    const selected = new Set(bound ? bound.destinations.flatMap(destination => destination.kind === 'update' ? [destination.target.itemId] : []) : authoringSession.itemIds)
+    const projection = projectEffectiveLayers({ project: currentDocument, locationId: location.id })
+    const names = projection.unifiedRows.filter(row => selected.has(row.id)).map(row => row.item.label)
+    if (projection.surfaceType === 'flow') names.push(...buildFlowEditorView({ project: currentDocument, locationId: location.id }).blocks.filter(block => selected.has(block.blockId)).map(block => block.label))
+    return referenceScope === 'page' ? location.label : `${location.label} · ${names.length ? names.join('、') : '未选择对象'}`
+  }, [currentDocument, authoringSession, wholeCourse, scope, view.busy, view.request])
+  async function stop(reason?: string) {
+    generation.current++; setPreparing(false)
+    try { await controller?.stop(); if (reason) setNotice(reason) } catch (cause) { setError(message(cause)) }
+  }
+  async function confirmedResume(id?: string): Promise<string | undefined> {
+    if (!id || !api) return undefined
+    const record = (await api.localAgent({ operation: 'read', ...owner, sessionId: id, after: 0 })).records?.[0]
+    // Historical V1 entries use Main's read-only excerpt path; a new native record
+    // may resume only an identity actually confirmed before Stop/failure.
+    return record && (record.externalSessionId || !record.task) ? id : undefined
   }
   async function send() {
-    if (!api || !projectPath || busy || !instruction.trim()) return
+    if (!api || !bridge || !controller || !projectPath || !instruction.trim()) return
+    if (view.busy) {
+      const task = controller.current.record?.task, request = controller.current.request
+      if (!task || !request) { setError('CLI 正在建立任务，请稍后发送补充'); return }
+      const nextIntent = resolveChatIntent(instruction, intent)
+      if (!bridge.isCurrent(request) || nextIntent !== (request.intent ?? 'edit')) {
+        const token = ++generation.current, resumeId = controller.current.sessionId
+        await controller.stop()
+        setPreparing(true); setError(''); setNotice('已丢弃旧候选，正在按当前内容和选择重新同步')
+        try {
+          const fresh = await bridge.refreshFromUser(instruction.trim(), nextIntent)
+          if (token !== generation.current) return
+          const resumable = await confirmedResume(resumeId)
+          if (token !== generation.current) return
+          setInstruction(''); setPreparing(false)
+          await controller.start(fresh, adapter, resumable)
+        } catch (cause) { if (token === generation.current) setError(message(cause)) }
+        finally { if (token === generation.current) setPreparing(false) }
+        return
+      }
+      const token = generation.current, text = instruction.trim()
+      try {
+        await controller.input({ version: 1, kind: inputKind, inputId: crypto.randomUUID(), taskId: task.taskId, epoch: task.epoch, workspace: request.workspace, turnId: task.turnId, text })
+        if (token === generation.current) { bridge.rememberUserInput(text); setInstruction('') }
+      }
+      catch (cause) { if (token === generation.current) setError(message(cause)) }
+      return
+    }
+    if (preparing) return
+    // A manual edit can end the old turn before the user's correction arrives.
+    // Only that unresolved stale task keeps its goal; ordinary idle sends start fresh.
+    const continueStaleTask = view.phase === 'failed' && view.sessionId === sessionId && !!view.request
+      && !view.receipt && view.error?.startsWith('stale：') && !bridge.isCurrent(view.request)
+    const nextInstruction = continueStaleTask ? bridge.instructionWithUserInput(instruction.trim()) : instruction.trim()
     const token = ++generation.current
-    setBusy(true); setError(''); setNotice('正在准备本轮引用'); setPreview(null); setEvents([])
-    useEditorStore.getState().discardGenerationCandidate()
-    let runId: string | undefined
+    setPreparing(true); setError(''); setNotice('正在同步当前画面、草稿和引用')
     try {
       const workspace = (await api.localAgent({ operation: 'workspace', ...owner })).workspace
       if (!workspace) throw new Error('当前构建未启用 CLI 创作')
-      const selectedMaterials = await Promise.all(materialIds.map(async id => {
-        const records = await api.materials({ operation: 'locate', ...owner, id })
-        if (!records[0]) throw new Error('引用材料已删除，请重新选择')
-        return records[0]
-      }))
-      const catalog = await api.loadComponentCatalog()
+      const selectedMaterials = await Promise.all(materialIds.map(async id => { const records = await api.materials({ operation: 'read', ...owner, id }); if (!records[0]) throw new Error('引用材料已删除，请重新选择'); return records[0] }))
+      const catalog = await api.loadComponentCatalog(), requestedIntent = resolveChatIntent(instruction, intent)
+      if (requestedIntent === 'edit' && wholeCourse && (!planConfirmed || !scriptConfirmed || !teachingPlan.trim() || !presentationScript.trim())) throw new Error('整课生成前，请分别审阅并确认当前教学策划和呈现脚本')
       if (token !== generation.current) return
-      const state = useEditorStore.getState()
-      const document = selectActiveCourseProjectDocument(state)
-      const projection = selectEffectiveLayerProjection(state)
-      if (!document || !projection || !state.courseAuthoringSession || state.projectPath !== projectPath) throw new Error('工程已改变，请重新发送')
-      if (wholeCourse && (!planConfirmed || !scriptConfirmed || !teachingPlan.trim() || !presentationScript.trim())) throw new Error('整课生成前，请分别审阅并确认当前教学策划和呈现脚本')
-      let nextRequest = captureGenerationSnapshot({ document, workspace, projection, sessionToken: state.courseAuthoringSession.token,
-        selectedIds: state.courseAuthoringSession.itemIds, scope: wholeCourse ? 'course' : scope, instruction,
-        purpose: wholeCourse ? 'whole-course' : scope === 'selection' ? 'local-edit' : 'single-page',
-        expectedResult: wholeCourse ? 'candidate' : 'auto',
-        confirmedDocuments: wholeCourse ? { teachingPlan, presentationScript } : undefined,
-        materials: selectedMaterials, componentPackages: state.componentPackages, catalogPackages: catalog.packages, previousResult: turns.at(-1)?.result ?? sessions.find(record => record.id === sessionId)?.hostResult })
-      let rejected: GenerationCandidate | undefined
-      let resumeId = sessionId
-      const isCurrent = () => {
-        const current = useEditorStore.getState()
-        const active = selectActiveCourseProjectDocument(current)
-        return token === generation.current && current.projectPath === projectPath && active?.id === document.id
-          && active.revision === nextRequest.documentRevision && current.courseAuthoringSession?.token.generation === nextRequest.sessionGeneration
-      }
-      for (let attempt = 0; attempt < 2; attempt++) {
-      const request = nextRequest
-      if (!isCurrent()) throw new Error('stale：工程或会话已改变，请重新发送')
-      let repair = false
-      const launched = await api.localAgent({ operation: 'generate', ...owner, adapter, request, ...(resumeId ? { resumeSessionId: resumeId } : {}) })
-      runId = launched.sessionId
-      if (!runId) throw new Error('CLI 没有创建会话')
-      if (token !== generation.current) { await api.localAgent({ operation: 'cancel', ...owner, sessionId: runId }); return }
-      running.current = runId; setSessionId(runId); setInstruction('')
-      setTurns(prior => [...prior, { id: runId!, request, events: [], status: 'running' }])
-      let after = 0; const collected: LocalAgentEvent[] = []
-      for (;;) {
-        const response = await api.localAgent({ operation: 'read', ...owner, sessionId: runId, after })
-        if (token !== generation.current) return
-        const record = response.records?.[0]
-        if (!record) throw new Error('会话记录不可用')
-        for (const event of record.events) if (event.sequence > after) { collected.push(event); after = event.sequence }
-        setEvents([...collected]); setTurns(prior => prior.map(turn => turn.id === runId ? { ...turn, events: [...collected], status: record.status } : turn))
-        const permission = [...collected].reverse().find(event => event.kind === 'session' && event.payload && typeof event.payload === 'object' && !Array.isArray(event.payload) && ['permission-denied', 'api-retry'].includes(String(event.payload.status)))
-        setNotice(record.status === 'running' ? (permission ? eventMessage(permission) : '正在回复…') : record.status === 'completed' ? '回复完成' : record.status === 'cancelled' ? '已停止' : '本轮未完成')
-        // A terminal page may still have more than 200 events to drain.
-        if (record.status !== 'running' && record.events.length < 200) {
-          setSessions(prior => [...prior.filter(value => value.id !== record.id), { ...record, events: [] }])
-          running.current = null
-          if (record.status === 'failed') {
-            const failure = [...collected].reverse().find(event => event.kind === 'failed')
-            setError(eventMessage(failure))
-          }
-          if (record.status === 'completed') {
-            const result = await api.localAgent({ operation: 'candidate', ...owner, sessionId: runId })
-            if (token !== generation.current) return
-            const outcome = result.generationResult
-            if (!outcome || outcome.requestId !== request.requestId) throw new Error('CLI 结果不属于当前请求')
-            if (outcome.kind === 'answer') setNotice('回复完成；本轮没有可应用的修改候选。')
-            else {
-              const candidate = outcome.kind === 'candidate' ? outcome.candidate : undefined
-              setNotice('正在校验候选，尚未修改课件')
-              try {
-                if (!isCurrent()) throw new Error('stale：工程或会话已改变')
-                if (outcome.kind === 'candidate-format-error') throw new Error(outcome.finding)
-                if (rejected && !generationRepairMadeProgress(rejected, outcome.candidate)) throw new Error('修复候选没有可观察的变化；已停止')
-                const prepared = await useEditorStore.getState().prepareGenerationCandidate(request, outcome.candidate)
-                if (token !== generation.current) return
-                await rememberResult(runId, { requestId: request.requestId, status: 'checked', summary: prepared.summary,
-                  candidateId: prepared.candidateId,
-                  beforeRevision: prepared.beforeRevision, afterRevision: prepared.afterRevision })
-                if (token !== generation.current) return
-                setPreview({ ...prepared, requestId: request.requestId, sessionId: runId }); setNotice('候选检查通过，请查看变更后应用')
-              } catch (reason) {
-                const fresh = isCurrent() && !message(reason).startsWith('stale：')
-                await rememberResult(runId, { requestId: request.requestId, ...(candidate ? { candidateId: candidate.candidateId } : {}), status: fresh ? 'rejected' : 'stale', summary: message(reason).slice(0, 4000) })
-                if (!fresh || !isCurrent() || attempt === 1) throw reason
-                rejected = candidate
-                nextRequest = captureGenerationRepair(request, outcome.kind === 'candidate' ? outcome.candidate : outcome, message(reason))
-                resumeId = runId; repair = true
-                setNotice('候选未通过检查，正在进行唯一一次局部修复')
-              }
-            }
-          }
-          break
-        }
-        if (record.events.length < 200) await new Promise(resolve => setTimeout(resolve, 350))
-      }
-      if (!repair) break
-      }
-    } catch (reason) {
-      if (runId && running.current === runId) await api.localAgent({ operation: 'cancel', ...owner, sessionId: runId }).catch(() => {})
-      if (token === generation.current) setError(message(reason))
-    }
-    finally { if (token === generation.current) { running.current = null; setBusy(false) } }
+      const request = await bridge.capture({ workspace, scope: wholeCourse ? 'course' : scope, instruction: nextInstruction, intent: requestedIntent, applyPolicy,
+        purpose: wholeCourse ? 'whole-course' : scope === 'selection' ? 'local-edit' : 'single-page', expectedResult: wholeCourse && requestedIntent === 'edit' ? 'candidate' : 'auto',
+        confirmedDocuments: wholeCourse ? { teachingPlan, presentationScript } : undefined, materials: selectedMaterials, catalogPackages: catalog.packages })
+      if (token !== generation.current) return
+      const resumable = await confirmedResume(sessionId)
+      if (token !== generation.current) return
+      setInstruction(''); setPreparing(false)
+      await controller.start(request, adapter, resumable)
+    } catch (cause) { if (token === generation.current) setError(message(cause)) }
+    finally { if (token === generation.current) setPreparing(false) }
   }
   async function selectSession(id: string) {
-    generation.current++; useEditorStore.getState().discardGenerationCandidate(); setPreview(null); setEvents([]); setTurns([]); setSessionId(id)
+    const token = ++generation.current
+    setView(emptyView); setEvents([]); setTurns([]); setSessionId(id); setError(''); setNotice('')
     const record = sessions.find(value => value.id === id)
     if (!record) return
     setAdapter(record.adapter)
-    if (record.generationRequest) setTurns([{ id, request: record.generationRequest, events: [], status: record.status, result: record.hostResult }])
+    if (record.generationRequest) setTurns([{ id: record.generationRequest.requestId, request: record.generationRequest, events: [], summary: record.hostResult?.summary }])
     try {
-      let after = 0; const replay: LocalAgentEvent[] = []; const token = generation.current
+      let after = 0; const replay: LocalAgentEvent[] = []
       for (;;) {
         const response = await api!.localAgent({ operation: 'read', ...owner, sessionId: id, after })
         if (token !== generation.current) return
@@ -219,50 +197,60 @@ export function CourseChatPanel({ projectId, projectPath, onClose }: { projectId
         replay.push(...page.filter(event => event.sequence > after)); after = replay.at(-1)?.sequence ?? after
         setEvents([...replay]); if (page.length < 200) break
       }
-    } catch (reason) { setError(message(reason)) }
+    } catch (cause) { setError(message(cause)) }
   }
-  const text = assistantText(events)
+  const configurationSequence = [...events].reverse().find(event => event.kind === 'session' && event.payload && typeof event.payload === 'object' && !Array.isArray(event.payload) && event.payload.status === 'configuration')?.sequence ?? 0
+  const answered = new Set(events.flatMap(event => {
+    const payload = event.payload
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload) || payload.status !== 'input-delivery') return []
+    const parsed = aiInputDeliverySchema.safeParse(payload.delivery)
+    return parsed.success && parsed.data.status !== 'rejected' ? [parsed.data.questionId] : []
+  }))
+  const questions = [...new Map((view.busy ? events : []).flatMap(event => {
+    const payload = event.payload
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload) || payload.status !== 'question') return []
+    const parsed = aiQuestionSchema.safeParse(payload.question)
+    return parsed.success && !answered.has(parsed.data.questionId) ? [[parsed.data.questionId, parsed.data] as const] : []
+  })).values()]
+  const activities = events.flatMap(event => { const text = nativeActivity(event); return text ? [{ id: event.sequence, text }] : [] }).slice(-8)
+  const deadline = view.record?.task?.deadlineAt, remaining = deadline ? Math.max(0, Math.ceil((deadline - now) / 60000)) : null
   return <aside className="course-chat" aria-label="CLI 创作助手" data-flow-selection-preserving-target="true">
     <header><strong>创作助手 · 内部试用</strong><button onClick={onClose}>关闭</button></header>
     {!projectPath ? <p>请先保存工程，再开始对话。</p> : <>
       <div className="chat-controls"><label>CLI<select aria-label="CLI" value={adapter} disabled={busy || !!sessionId} onChange={event => setAdapter(event.target.value as LocalAgentId)}><option value="codex">Codex</option><option value="claude">Claude</option><option value="opencode">OpenCode</option></select></label>
-        <label>会话<select aria-label="会话" value={sessionId} disabled={busy} onChange={event => void selectSession(event.target.value)}><option value="">新对话</option>{sessions.map(record => <option key={record.id} value={record.id}>{record.adapter} · {record.id.slice(0, 8)} · {record.status}</option>)}{sessionId && !sessions.some(record => record.id === sessionId) && <option value={sessionId}>当前对话</option>}</select></label></div>
-      <div className="chat-scroll" ref={scroll} onScroll={event => {
-        const element = event.currentTarget
-        followReply.current = element.scrollHeight - element.scrollTop - element.clientHeight < 60
-      }}>
-        {turns.map(turn => <details key={turn.id}><summary>你：{turn.request.instruction.slice(0, 60)}</summary><p>{turn.request.instruction}</p><p>引用：{recordedReferenceNames(turn.request)} · revision {turn.request.documentRevision}</p>{turn.id !== sessionId && <SafeChatMessage text={assistantText(turn.events)} />}<pre>{turn.result ? JSON.stringify(turn.result, null, 2) : turn.status}</pre></details>)}
-        {text && <SafeChatMessage text={text} />}
-        <details><summary>CLI 原生事件（{events.length}）</summary>{events.length > visibleEvents && <button onClick={() => setVisibleEvents(value => value + 100)}>显示更早的事件</button>}<ol>{events.slice(-visibleEvents).map(event => <li key={event.sequence}>#{event.sequence} {event.kind}<pre>{JSON.stringify(event.payload, null, 2)}</pre></li>)}</ol></details>
-        <p role="status">{notice}</p>{error && <p role="alert">{error}</p>}
-        {preview && <section aria-label="候选变更预览"><h3>{preview.summary}</h3><p>预期 revision {preview.beforeRevision} → {preview.afterRevision}</p><ul>{preview.plannedEffects.map((effect, i) => <li key={i}>{effect.operation} · {effect.authoringAddress ?? effect.id}</li>)}</ul>
-          <dl>{preview.changes.map(change => <div key={change.path}><dt>{change.path}</dt><dd>原：{change.before}</dd><dd>新：{change.after}</dd></div>)}</dl>
-          {preview.omitted > 0 && <p>另有 {preview.omitted} 项变更，请展开候选文档查看。</p>}
-          <details><summary>查看候选文档</summary><pre>{JSON.stringify(preview.document, null, 2)}</pre></details>
-          <button disabled={revision !== preview.beforeRevision || busy} onClick={() => {
-            const result = useEditorStore.getState().applyGenerationCandidate(preview.previewId)
-            const requestId = preview.requestId
-            const recorded = requestId ? { ...result, requestId, candidateId: preview.candidateId, summary: preview.summary } : undefined
-            if (recorded) void rememberResult(sessionId, recorded)
-            setPreview(null)
-            setNotice(result.status === 'committed' ? '宿主已提交，可一次撤销' : '候选已过期，请重新发送')
-            if (result.status === 'committed' && recorded) setApplied({ revision: result.afterRevision, sessionId, result: recorded })
-          }}>应用候选</button>{revision !== preview.beforeRevision && <p>工程已改变，候选已过期；请重新发送。</p>}</section>}
-        {applied !== null && <button disabled={revision !== applied.revision} title={revision !== applied.revision ? '已有后续修改，请使用编辑器正常撤销顺序' : '撤销最近的 AI 事务'} onClick={() => {
+        <label>会话<select aria-label="会话" value={sessionId} disabled={busy} onChange={event => void selectSession(event.target.value)}><option value="">新对话</option>{sessions.map(record => <option key={record.id} value={record.id}>{record.adapter} · {record.id.slice(0, 8)} · {statusLabels[record.status]}</option>)}{sessionId && !sessions.some(record => record.id === sessionId) && <option value={sessionId}>当前对话</option>}</select></label></div>
+      <NativeAgentConfiguration key={adapter} adapter={adapter} configurationSequence={configurationSequence} />
+      <div className="chat-scroll" ref={scroll} onScroll={event => { const element = event.currentTarget; followReply.current = element.scrollHeight - element.scrollTop - element.clientHeight < 60 }}>
+        {turns.map(turn => <details key={turn.id}><summary>你：{turn.request.instruction.slice(0, 60)}</summary><p>{turn.request.instruction}</p>{turn.id !== view.request?.requestId && <SafeChatMessage text={assistantText(turn.events)} />}{turn.summary && <p>{turn.summary}</p>}</details>)}
+        {assistantText(events) && <SafeChatMessage text={assistantText(events)} />}
+        {questions.map(question => <NativeAgentQuestion key={question.questionId} question={question} onAnswer={async input => { if (!controller) throw new Error('当前任务已关闭'); await controller.input(input) }} />)}
+        {!!activities.length && <ol aria-label="任务活动" className="chat-activity">{activities.map(item => <li key={item.id}>{item.text}</li>)}</ol>}
+        <p role="status">{notice}{busy && remaining !== null ? ` · 本任务剩余约 ${remaining} 分钟` : ''}</p>{error && <p role="alert">{error}</p>}
+        {view.preview && view.request && <section aria-label="候选变更预览"><h3>{view.preview.summary}</h3><GenerationCandidatePreview prepared={view.preview} request={view.request} />
+          <ul>{view.preview.plannedEffects.map((effect, index) => <li key={index}>{effect.operation} · {effect.id}</li>)}</ul>
+          <button disabled={revision !== view.preview.beforeRevision} onClick={() => controller?.applyPreview()}>应用候选</button><small>也可以在输入框纠正要求，或停止以丢弃候选。</small>
+          <details><summary>字段与共享影响详情</summary><dl>{view.preview.changes.map(change => <div key={change.path}><dt>{change.path}</dt><dd>原：{change.before}</dd><dd>新：{change.after}</dd></div>)}</dl>{view.preview.omitted > 0 && <p>另有 {view.preview.omitted} 项变更。</p>}</details></section>}
+        {applied?.receipt && <button disabled={busy || revision !== applied.receipt.afterRevision} title="已有后续修改时，请使用编辑器正常撤销顺序" onClick={() => {
           useEditorStore.getState().undo()
-          void rememberResult(applied.sessionId, { ...applied.result, status: 'undone', afterRevision: selectActiveCourseProjectDocument(useEditorStore.getState())?.revision })
-          setApplied(null); setNotice('已撤销 AI 提交')
-        }}>撤销本次 AI 修改</button>}
+          if (applied.result && applied.sessionId) void api!.localAgent({ operation: 'host-result', ...owner, sessionId: applied.sessionId, result: { ...applied.result, status: 'undone', afterRevision: selectActiveCourseProjectDocument(useEditorStore.getState())?.revision } }).catch(cause => setError(message(cause)))
+          setApplied(null); setNotice('已撤销最近一次 AI 提交')
+        }}>撤销最近一次 AI 修改</button>}
+        <details><summary>诊断详情（{events.length} 个原生事件）</summary>{events.length > visibleEvents && <button onClick={() => setVisibleEvents(value => value + 100)}>显示更早的事件</button>}<ol>{events.slice(-visibleEvents).map(event => <li key={event.sequence}>#{event.sequence} {event.kind}<pre>{JSON.stringify(event.payload, null, 2)}</pre></li>)}</ol></details>
       </div>
       <form onSubmit={event => { event.preventDefault(); void send() }}>
-        <label>本轮引用<select aria-label="本轮引用" value={scope} disabled={busy || wholeCourse} onChange={event => setScope(event.target.value as GenerationReferenceScope)}><option value="page">当前页</option><option value="selection">当前选择</option><option value="course">整课内容</option></select></label><small aria-label="本轮引用摘要">{referenceName} · revision {revision} · 发送时捕获</small>
+        <div className="chat-controls"><label>意图<select aria-label="意图" disabled={busy} value={intent} onChange={event => setIntent(event.target.value as typeof intent)}><option value="discuss">讨论</option><option value="plan">计划</option><option value="edit">编辑</option></select></label>
+          {intent === 'edit' && <label>应用方式<select aria-label="应用方式" disabled={busy} value={applyPolicy} onChange={event => setApplyPolicy(event.target.value as typeof applyPolicy)}><option value="auto">自动应用</option><option value="preview">先看预览</option></select></label>}</div>
+        <label>本轮引用<select aria-label="本轮引用" value={scope} disabled={busy || wholeCourse} onChange={event => setScope(event.target.value as GenerationReferenceScope)}><option value="page">当前页</option><option value="selection">当前选择</option><option value="course">整课内容</option></select></label>
+        <small aria-label="本轮引用摘要">{referenceName} · {preparing ? '正在同步' : busy ? view.request && bridge && !bridge.isCurrent(view.request) ? '课件已变化，补充时重新同步原目标' : '本任务已捕获，应用后重新同步' : '发送时同步当前画面与内存草稿'}</small>
+        <small>{intent === 'edit' ? '修改范围受本轮引用约束；原生 CLI 文件和工具权限由其授权设置决定。' : '本轮只讨论或制定计划，不应用课件修改。'}</small>
         <details><summary>从已确认文档生成整课</summary><label><input type="checkbox" disabled={busy} checked={wholeCourse} onChange={event => setWholeCourse(event.target.checked)} />生成包含多个片段的完整课件</label>
           {wholeCourse && <><label>教学策划 Markdown<textarea value={teachingPlan} disabled={busy} onChange={event => { setTeachingPlan(event.target.value); setPlanConfirmed(false) }} /></label><label><input type="checkbox" disabled={busy || !teachingPlan.trim()} checked={planConfirmed} onChange={event => setPlanConfirmed(event.target.checked)} />已审阅并确认当前教学策划</label>
             <label>呈现脚本 Markdown<textarea value={presentationScript} disabled={busy} onChange={event => { setPresentationScript(event.target.value); setScriptConfirmed(false) }} /></label><label><input type="checkbox" disabled={busy || !presentationScript.trim()} checked={scriptConfirmed} onChange={event => setScriptConfirmed(event.target.checked)} />已审阅并确认当前呈现脚本</label><small>整课生成会引用整课内容；编辑文档后须重新确认。</small></>}
         </details>
         {!!materials.length && <details><summary>引用教学材料（{materialIds.length}）</summary>{materials.map(material => <label key={material.id}><input type="checkbox" checked={materialIds.includes(material.id)} disabled={busy} onChange={event => setMaterialIds(prior => event.target.checked ? [...prior, material.id] : prior.filter(id => id !== material.id))} />{material.title}</label>)}</details>}
-        <textarea aria-label="发送给创作助手" value={instruction} onChange={event => setInstruction(event.target.value)} placeholder="描述要讲解的内容或需要修改的地方…" rows={4} />
-        <button type="submit" disabled={busy || !instruction.trim()}>发送</button> <button type="button" disabled={!busy && !preview} onClick={() => void stop()}>停止</button>
+        <textarea aria-label="发送给创作助手" value={instruction} onChange={event => setInstruction(event.target.value)} placeholder={busy ? '补充或纠正当前任务…' : '描述要讲解的内容或需要修改的地方…'} rows={3} />
+        {view.busy && <label>输入用途<select aria-label="输入用途" value={inputKind} onChange={event => setInputKind(event.target.value as typeof inputKind)}><option value="supplement">补充要求</option><option value="correct">纠正方向</option></select></label>}
+        <button type="submit" disabled={preparing || !instruction.trim()}>{view.busy ? '发送输入' : '发送'}</button> <button type="button" disabled={!busy} onClick={() => void stop()}>停止</button>
       </form>
     </>}
   </aside>

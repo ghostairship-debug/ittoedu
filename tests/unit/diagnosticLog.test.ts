@@ -9,11 +9,18 @@ import { APP_NAME } from '../../src/shared/constants'
 import { LocalAgentRepository } from '../../src/main/localAgent/repository'
 import { LocalAgentHarness } from '../../src/main/localAgent/harness'
 import { createWorkspaceIdentity } from '../../src/main/workspaceIdentity'
-import type { LocalAgentCliAdapterV1, LocalAgentId } from '../../src/shared/localAgentContract'
+import type { LocalAgentId } from '../../src/shared/localAgentContract'
+import { createScriptedAgentV2Fixture } from '../fixtures/local-agent-v2/scriptedAdapter'
 import { generationRequestSchema } from '../../src/shared/generationContract'
 import { parseGenerationText, readGenerationResult, GENERATION_OPEN, GENERATION_CLOSE, GENERATION_RESULT_OPEN, GENERATION_RESULT_CLOSE } from '../../src/shared/generationResult'
 import { CandidateStaging } from '../../src/main/localAgent/candidateStaging'
 import { randomUUID } from 'node:crypto'
+
+function promptProfile(prompt: string) {
+  return JSON.parse(prompt.split('\n').find(line => line.startsWith('{"profile":'))!).profile as {
+    workspace: { root: string; capabilities: string }; resultContract: { mode: string; candidateInputEncoding: string }
+  }
+}
 
 function generationTransportFixture(directory: string) {
   const workspace = createWorkspaceIdentity('generation-project', path.join(directory, 'course.h5lesson'))
@@ -82,15 +89,13 @@ describe('generation output channels and staging ingestion', () => {
     const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'candidate-format-stage-')); directories.push(directory)
     const { workspace, request } = generationTransportFixture(directory)
     let stagingRoot = ''
-    const harness = new LocalAgentHarness(new LocalAgentRepository(directory), id => ({ id,
-      async probe() { return { adapter: id, status: 'ready', message: 'fixture' } },
-      async *start(_prompt, cwd) {
-        stagingRoot = path.join(cwd, 'candidates', request.requestId)
+    const harness = new LocalAgentHarness(new LocalAgentRepository(directory), id => createScriptedAgentV2Fixture(id, {
+      async *turn(prompt) {
+        stagingRoot = promptProfile(prompt).workspace.root
         await fs.writeFile(path.join(stagingRoot, 'candidate.json'), '{broken')
         yield { type: 'acp_session', sessionID: 'external-opencode' }
         yield { type: 'acp_result', sessionID: 'external-opencode', stopReason: 'end_turn' }
       },
-      async *resume() { throw new Error('unused') }, async cancel() {},
     }))
     try {
       const id = await harness.generate(workspace, 'opencode', { ...request, expectedResult: 'candidate' })
@@ -104,22 +109,23 @@ describe('generation output channels and staging ingestion', () => {
     const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'generation-harness-')); directories.push(directory)
     const { workspace, request, candidate } = generationTransportFixture(directory)
     const cwdValues: string[] = []
+    const capabilityRoots: string[] = []
     let output = candidate
-    const adapter = (id: LocalAgentId): LocalAgentCliAdapterV1 => ({ id,
-      async probe() { return { adapter: id, status: 'ready', message: 'fixture' } },
-      async *start(prompt, cwd) {
+    const adapter = (id: LocalAgentId) => createScriptedAgentV2Fixture(id, {
+      async *turn(prompt, { cwd, externalSessionId }) {
+        if (externalSessionId) expect(externalSessionId).toBe('external-generation')
         expect(prompt).toContain(request.instruction); cwdValues.push(cwd)
-        if (prompt.includes('"expectedResult":"candidate"')) expect(prompt).toContain('显式生成/修复请求')
-        else expect(prompt).toContain('kind="reply"')
-        expect(prompt).toContain('原生 commentary 简短说明')
-        expect(prompt).toContain('stateId:null 不得省略')
-        expect(await fs.stat(path.join(cwd, 'candidates', output.requestId, 'request.json'))).toBeTruthy()
+        const profile = promptProfile(prompt)
+        capabilityRoots.push(profile.workspace.capabilities)
+        expect(profile.resultContract.mode).toBe(prompt.includes('"expectedResult":"candidate"') ? 'candidate' : 'reply-or-edit')
+        expect(profile.resultContract.candidateInputEncoding).toBe('json-string')
+        expect(cwd).toBe(await fs.realpath(directory))
+        const candidateRoot = profile.workspace.root
+        expect(await fs.stat(path.join(candidateRoot, 'request.json'))).toBeTruthy()
         yield { type: 'thread.started', thread_id: 'external-generation' }
         yield { type: 'item.completed', item: { type: 'agent_message', text: `${GENERATION_OPEN}${JSON.stringify(output)}${GENERATION_CLOSE}` } }
         yield { type: 'turn.completed' }
       },
-      async *resume(externalId, prompt, cwd) { expect(externalId).toBe('external-generation'); yield* this.start(prompt, cwd) },
-      async cancel() {},
     })
     const repository = new LocalAgentRepository(directory)
     const harness = new LocalAgentHarness(repository, adapter)
@@ -128,11 +134,12 @@ describe('generation output channels and staging ingestion', () => {
       await expect.poll(() => harness.running).toBe(false)
       expect(await harness.candidate(workspace, id)).toEqual({ kind: 'candidate', requestId: request.requestId, candidate })
       expect((await repository.list(workspace)).records[0]?.generationRequest).toEqual(request)
-      const hostResult = { requestId: request.requestId, status: 'committed' as const, beforeRevision: 0, afterRevision: 1, summary: '已应用文字' }
-      await harness.hostResult(workspace, id, hostResult)
-      expect((await repository.list(workspace)).records[0]?.hostResult).toEqual(hostResult)
-      await expect(harness.hostResult(workspace, id, { ...hostResult, requestId: randomUUID() })).rejects.toThrow('不属于')
-      await expect(fs.stat(path.join(cwdValues[0]!, 'candidates', request.requestId))).rejects.toMatchObject({ code: 'ENOENT' })
+      const hostResult = { requestId: request.requestId, status: 'committed' as const, beforeRevision: 0, afterRevision: 1, candidateId: candidate.candidateId, summary: '已应用文字' }
+      const receipt = { version: 1 as const, requestId: request.requestId, candidateId: candidate.candidateId, workspace, status: 'committed' as const, beforeRevision: 0, afterRevision: 1, affected: [], resources: { assetIds: [], packageIds: [] } }
+      await harness.hostResult(workspace, id, hostResult, receipt)
+      expect((await repository.list(workspace)).records[0]?.hostResult).toMatchObject({ requestId: request.requestId, status: 'committed', beforeRevision: 0, afterRevision: 1 })
+      await expect(harness.hostResult(workspace, id, { ...hostResult, requestId: randomUUID() }, receipt)).rejects.toThrow('不属于')
+      await expect(fs.stat(path.join(repository.stagingPath(workspace, id, 2), 'candidates', request.requestId))).rejects.toMatchObject({ code: 'ENOENT' })
       await expect(harness.generate(workspace, 'codex', request)).rejects.toThrow('新的请求身份')
       const next = { ...request, requestId: randomUUID() }
       output = { ...candidate, requestId: next.requestId, candidateId: randomUUID() }
@@ -149,6 +156,13 @@ describe('generation output channels and staging ingestion', () => {
       await expect.poll(() => harness.running).toBe(false)
       expect(await harness.candidate(workspace, repaired)).toMatchObject({ kind: 'candidate', requestId: repair.requestId })
       await expect(harness.generate(workspace, 'codex', { ...repair, requestId: randomUUID() }, resumed)).rejects.toThrow('唯一一次')
+      expect(new Set(capabilityRoots).size).toBe(1)
+      expect(await fs.readFile(path.join(capabilityRoots[0]!, 'discovery.json'), 'utf8')).toContain('runtime-api2')
+      await harness.delete(workspace, id)
+      await harness.delete(workspace, resumed)
+      expect((await fs.stat(capabilityRoots[0]!)).isDirectory()).toBe(true)
+      await harness.delete(workspace, repaired)
+      await expect(fs.stat(capabilityRoots[0]!)).rejects.toMatchObject({ code: 'ENOENT' })
     } finally { await harness.close() }
   })
 })
@@ -161,14 +175,12 @@ describe('local CLI sessions', () => {
     const workspace = createWorkspaceIdentity('project', '/lesson.h5lesson', 'linux')
     class FailingRepository extends LocalAgentRepository {
       override async write(record: Parameters<LocalAgentRepository['write']>[0]) {
-        if (record.status === 'completed') throw new Error('disk full')
+        if (record.events.some(event => event.kind === 'turn-ended' && event.status === 'completed')) throw new Error('disk full')
         return super.write(record)
       }
     }
-    const harness = new LocalAgentHarness(new FailingRepository(directory), id => ({ id,
-      async probe() { return { adapter: id, status: 'ready', message: '' } },
-      async *start() { yield { type: 'thread.started', thread_id: 'external' }; yield { type: 'turn.completed' } },
-      resume() { return this.start('', '') }, async cancel() {},
+    const harness = new LocalAgentHarness(new FailingRepository(directory), id => createScriptedAgentV2Fixture(id, {
+      async *turn() { yield { type: 'thread.started', thread_id: 'external' }; yield { type: 'turn.completed' } },
     }))
     await harness.start(workspace, 'codex', 'hello')
     await expect.poll(() => harness.running).toBe(false)
@@ -183,11 +195,10 @@ describe('local CLI sessions', () => {
     const harness = new LocalAgentHarness(new LocalAgentRepository(directory), id => {
       let release!: () => void
       const cancelled = new Promise<void>(resolve => { release = resolve })
-      return { id,
-        async probe() { return { adapter: id, status: 'ready', message: '' } },
-        async *start() { yield { type: 'thread.started', thread_id: 'external' }; await cancelled; yield { type: 'item.completed', item: { id: 'late', type: 'agent_message', text: 'late' } } },
-        resume() { return this.start('', '') }, async cancel() { release() },
-      }
+      return createScriptedAgentV2Fixture(id, {
+        async *turn() { yield { type: 'thread.started', thread_id: 'external' }; await cancelled; yield { type: 'item.completed', item: { id: 'late', type: 'agent_message', text: 'late' } } },
+        async close() { release() },
+      })
     })
     const starts = Array.from({ length: 4 }, () => harness.start(workspace, 'codex', 'hello'))
     const outcomes = Promise.allSettled(starts)
@@ -206,9 +217,8 @@ describe('local CLI sessions', () => {
       : adapterId === 'claude'
         ? [{ type: 'system', subtype: 'init', session_id: 'external' }, { type: 'result', is_error: false }]
         : [{ type: 'step_start', sessionID: 'external' }, { type: 'step_finish', sessionID: 'external', part: { reason: 'stop' } }]
-    const harness = new LocalAgentHarness(new LocalAgentRepository(directory), id => ({ id,
-      async probe() { return { adapter: id, status: 'ready', message: '' } },
-      async *start() { yield* wire; yield wire.at(-1) }, resume() { return this.start('', '') }, async cancel() {},
+    const harness = new LocalAgentHarness(new LocalAgentRepository(directory), id => createScriptedAgentV2Fixture(id, {
+      async *turn() { yield* wire; yield wire.at(-1) },
     }))
     const id = await harness.start(workspace, adapterId, 'hello')
     await expect.poll(async () => (await harness.list(workspace)).records[0]?.status).toBe('failed')
@@ -219,19 +229,18 @@ describe('local CLI sessions', () => {
   })
   it('persists ordered events, isolates paths, resumes external identity and quarantines damage', async () => {
     const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'agent-store-')); directories.push(directory)
-    const workspace = createWorkspaceIdentity('project', 'C:\\lessons\\one.h5lesson', 'win32')
-    const other = createWorkspaceIdentity('project', 'C:\\lessons\\two.h5lesson', 'win32')
+    const workspace = createWorkspaceIdentity('project', path.join(directory, 'one.h5lesson'))
+    const other = createWorkspaceIdentity('project', path.join(directory, 'two.h5lesson'))
     const resumed: string[] = []
     const workingDirectories: string[] = []
-    const factory = (id: LocalAgentId): LocalAgentCliAdapterV1 => ({ id,
-      async probe() { return { adapter: id, status: 'ready', message: 'fixture' } },
-      async *start(_prompt, cwd) {
+    const factory = (id: LocalAgentId) => createScriptedAgentV2Fixture(id, {
+      async *turn(_prompt, { cwd, externalSessionId }) {
+        if (externalSessionId) resumed.push(externalSessionId)
         workingDirectories.push(cwd)
         yield { type: 'thread.started', thread_id: 'external' }
         yield { type: 'item.completed', item: { id: 'text', type: 'agent_message', text: 'hello' } }
         yield { type: 'turn.completed', usage: { input_tokens: 1 } }
       },
-      resume(external, prompt, cwd) { resumed.push(external); return this.start(prompt, cwd) }, async cancel() {},
     })
     const repository = new LocalAgentRepository(directory)
     const harness = new LocalAgentHarness(repository, factory)
@@ -242,27 +251,27 @@ describe('local CLI sessions', () => {
     expect(saved.events.map(event => event.sequence)).toEqual([1, 2, 3, 4])
     expect((await harness.list(other)).records).toEqual([])
     const next = await harness.resume(workspace, id, 'continue')
-    expect(next).not.toBe(id); expect(resumed).toEqual(['external'])
+    expect(next).not.toBe(id)
     await expect.poll(async () => (await harness.list(workspace)).records.find(record => record.id === next)?.status).toBe('completed')
+    expect(resumed).toEqual(['external'])
     expect(workingDirectories[1]).toBe(workingDirectories[0])
     expect((await harness.list(workspace)).records.find(record => record.id === next)?.workingDirectoryId).toBe(id)
-    await fs.writeFile(path.join(repository.directory(workspace), `${id}.json`), '{bad')
+    await fs.writeFile(path.join(repository.v2Directory(workspace), `${id}.json`), '{bad')
     const result = await harness.list(workspace)
     expect(result.records.map(record => record.id)).toEqual([next]); expect(result.damaged).toHaveLength(1)
     await harness.delete(workspace, id)
-    expect((await fs.stat(workingDirectories[0]!)).isDirectory()).toBe(true)
+    expect((await fs.stat(repository.stagingPath(workspace, id, 2))).isDirectory()).toBe(true)
     await harness.delete(workspace, next)
-    await expect(fs.stat(workingDirectories[0]!)).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(fs.stat(repository.stagingPath(workspace, id, 2))).rejects.toMatchObject({ code: 'ENOENT' })
+    expect((await fs.stat(workingDirectories[0]!)).isDirectory()).toBe(true)
     await harness.delete(workspace)
     expect((await harness.list(workspace)).records).toEqual([])
   })
   it('rejects out-of-order tool results and never changes a terminal state for late output', async () => {
     const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'agent-state-')); directories.push(directory)
     const workspace = createWorkspaceIdentity('project', '/lesson.h5lesson', 'linux')
-    const harness = new LocalAgentHarness(new LocalAgentRepository(directory), id => ({ id,
-      async probe() { return { adapter: id, status: 'ready', message: '' } },
-      async *start() { yield { type: 'thread.started', thread_id: 'external' }; yield { type: 'item.completed', item: { id: 'unknown', type: 'command_execution' } }; yield { type: 'turn.completed' } },
-      resume() { return this.start('', '') }, async cancel() {},
+    const harness = new LocalAgentHarness(new LocalAgentRepository(directory), id => createScriptedAgentV2Fixture(id, {
+      async *turn() { yield { type: 'thread.started', thread_id: 'external' }; yield { type: 'item.completed', item: { id: 'unknown', type: 'command_execution' } }; yield { type: 'turn.completed' } },
     }))
     await harness.start(workspace, 'codex', 'hello')
     await expect.poll(async () => (await harness.list(workspace)).records[0]?.status).toBe('failed')

@@ -6,6 +6,7 @@ import type { DesktopAPI } from '../shared/ipcTypes'
 const IPC_CHANNELS = {
   materials: 'materials:operate',
   localAgent: 'local-agent:operate',
+  captureAuthoringObservation: 'local-agent:capture-observation',
   dynamicAdmission: 'dynamic-admission:operate',
   legacyPpt: 'ppt:resave-import',
   openProject: 'project:open',
@@ -120,6 +121,7 @@ async function invoke<T>(channel: string, ...args: unknown[]): Promise<T> {
 const desktopAPI = Object.freeze<DesktopAPI>({
   legacyPpt: (input) => invoke(IPC_CHANNELS.legacyPpt, input),
   localAgent: (input) => invoke(IPC_CHANNELS.localAgent, input),
+  captureAuthoringObservation: (input) => invoke(IPC_CHANNELS.captureAuthoringObservation, input),
   dynamicAdmission: (input) => invoke(IPC_CHANNELS.dynamicAdmission, input),
   materials: (input) => invoke(IPC_CHANNELS.materials, input),
   openProject: () => invoke(IPC_CHANNELS.openProject),

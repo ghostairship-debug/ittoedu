@@ -47,6 +47,7 @@ export interface TeacherControllerLayout {
   title: TeacherControllerRect
   progress: TeacherControllerRect | null
   collapse: TeacherControllerRect | null
+  playbackZoom: TeacherControllerRect | null
   buttons: TeacherControllerButtonLayout[]
   titleFontSize: number
   progressFontSize: number
@@ -155,6 +156,14 @@ export function createTeacherControllerLayout(
   const progressHeight = hasProgress
     ? Math.max(10, safeHeight - padding * 2 - titleHeight)
     : 0
+  const collapse = source.collapsible
+    ? {
+        x: safeWidth - padding - collapseSize,
+        y: (safeHeight - collapseSize) / 2,
+        width: collapseSize,
+        height: collapseSize,
+      }
+    : null
 
   const backgroundCss = normalizeHexColor(
     source.style.backgroundColor,
@@ -186,12 +195,13 @@ export function createTeacherControllerLayout(
           height: progressHeight,
         }
       : null,
-    collapse: source.collapsible
+    collapse,
+    playbackZoom: source.playbackView
       ? {
-          x: safeWidth - padding - collapseSize,
-          y: (safeHeight - collapseSize) / 2,
-          width: collapseSize,
-          height: collapseSize,
+          x: Math.max(0, collapse ? collapse.x - 58 : safeWidth - 64),
+          y: collapse?.y ?? 6,
+          width: 54,
+          height: collapse?.height ?? 30,
         }
       : null,
     buttons: visibleButtons.map((button, index) => ({
@@ -286,19 +296,27 @@ function copyRect(rect: TeacherControllerRect): TeacherControllerRect {
   return { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
 }
 
-function recoveryLocalRect(
+export function teacherControllerRecoveryLocalRect(
   source: TeacherControllerLayoutSource,
   frame: TeacherControllerRect,
 ): TeacherControllerRect {
-  const collapse = createTeacherControllerLayout(source, frame.width, frame.height).collapse
-  if (collapse) return copyRect(collapse)
+  const { collapse, playbackZoom } = createTeacherControllerLayout(source, frame.width, frame.height)
   const width = Math.min(frame.width, MIN_VISIBLE_NODE_EDGE)
   const height = Math.min(frame.height, MIN_VISIBLE_NODE_EDGE)
-  return {
+  const grip = collapse ?? {
     x: frame.width - width,
     y: (frame.height - height) / 2,
     width,
     height,
+  }
+  if (!playbackZoom) return copyRect(grip)
+  const x = Math.min(grip.x, playbackZoom.x)
+  const y = Math.min(grip.y, playbackZoom.y)
+  return {
+    x,
+    y,
+    width: Math.max(grip.x + grip.width, playbackZoom.x + playbackZoom.width) - x,
+    height: Math.max(grip.y + grip.height, playbackZoom.y + playbackZoom.height) - y,
   }
 }
 
@@ -313,7 +331,7 @@ export function teacherControllerAuthoringRecoveryBounds(
   frame: TeacherControllerRect,
   rotation = 0,
 ): TeacherControllerBounds {
-  const recovery = recoveryLocalRect(source, frame)
+  const recovery = teacherControllerRecoveryLocalRect(source, frame)
   const radians = rotation * Math.PI / 180
   const cosine = Math.cos(radians)
   const sine = Math.sin(radians)
@@ -342,6 +360,25 @@ export function teacherControllerAuthoringRecoveryBounds(
   }
 }
 
+/** A fixed interval is used even when the recovery region exceeds the viewport. */
+export function constrainTeacherControllerBounds(
+  bounds: TeacherControllerBounds,
+  canvas: TeacherControllerCanvasSize,
+): { dx: number; dy: number } {
+  const shift = (start: number, end: number, available: number): number => {
+    const size = end - start
+    // If full containment is impossible, preserve the maximum visible area.
+    // Unlike correcting both edges in sequence, this interval is idempotent.
+    const minimum = size <= available ? -start : available - end
+    const maximum = size <= available ? available - end : -start
+    return clamp(0, minimum, maximum)
+  }
+  return {
+    dx: shift(bounds.left, bounds.right, Math.max(1, canvas.width)),
+    dy: shift(bounds.top, bounds.bottom, Math.max(1, canvas.height)),
+  }
+}
+
 /**
  * Preserves size and rotation while keeping the recovery surface fully inside
  * the logical course canvas. Preview and commit call the same function so a
@@ -353,17 +390,8 @@ export function constrainTeacherControllerAuthoringFrame(
   rotation: number,
   canvas: TeacherControllerCanvasSize,
 ): TeacherControllerRect {
-  const safeCanvas = {
-    width: Math.max(1, canvas.width),
-    height: Math.max(1, canvas.height),
-  }
   const bounds = teacherControllerAuthoringRecoveryBounds(source, frame, rotation)
-  let dx = 0
-  let dy = 0
-  if (bounds.left < 0) dx = -bounds.left
-  else if (bounds.right > safeCanvas.width) dx = safeCanvas.width - bounds.right
-  if (bounds.top < 0) dy = -bounds.top
-  else if (bounds.bottom > safeCanvas.height) dy = safeCanvas.height - bounds.bottom
+  const { dx, dy } = constrainTeacherControllerBounds(bounds, canvas)
   return {
     x: frame.x + dx,
     y: frame.y + dy,

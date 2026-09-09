@@ -1,0 +1,65 @@
+{
+  "destination": {
+    "insertion": "after current locationId",
+    "kind": "create",
+    "owner": "scene",
+    "parent": {
+      "kind": "course-locations"
+    }
+  },
+  "example": "const view = await session.observe(); const scope = await session.createScope({parent:{kind:\"course-locations\"},insertion:{kind:\"after\",siblingId:view.scope.locationId}}); const receipt = await session.execute(\"recipe.apply\", card.input, {kind:\"create\",scope}); if(receipt.status!==\"committed\") throw new Error(JSON.stringify(receipt.diagnostics));",
+  "fields": [
+    {
+      "key": "title",
+      "label": "标题",
+      "value": "把项目放进合适的组"
+    },
+    {
+      "key": "mode",
+      "label": "模式（classify 或 sort）",
+      "value": "classify"
+    },
+    {
+      "key": "groups",
+      "label": "分类组（每行一个）",
+      "value": "动物\n植物"
+    },
+    {
+      "key": "items",
+      "label": "项目（每行：稳定 ID | 文字 | 分类组名）",
+      "value": "cat | 小猫 | 动物\ntree | 大树 | 植物\nbird | 小鸟 | 动物"
+    },
+    {
+      "key": "correctOrder",
+      "label": "排序正确顺序（稳定 ID，用逗号分隔）",
+      "value": "tree,cat,bird"
+    },
+    {
+      "key": "success",
+      "label": "正确反馈",
+      "value": "全部正确！"
+    },
+    {
+      "key": "failure",
+      "label": "错误反馈",
+      "value": "还需要调整，再试一次。"
+    }
+  ],
+  "id": "classify-sort-v1",
+  "input": {
+    "recipeId": "classify-sort-v1",
+    "slots": {
+      "correctOrder": "tree,cat,bird",
+      "failure": "还需要调整，再试一次。",
+      "groups": "动物\n植物",
+      "items": "cat | 小猫 | 动物\ntree | 大树 | 植物\nbird | 小鸟 | 动物",
+      "mode": "classify",
+      "success": "全部正确！",
+      "title": "把项目放进合适的组"
+    }
+  },
+  "label": "分类 / 排序",
+  "output": "ordinary editable Course Project V9 content",
+  "tool": "recipe.apply",
+  "version": 1
+}

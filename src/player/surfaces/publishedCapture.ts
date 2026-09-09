@@ -91,6 +91,9 @@ export class PublishedCaptureBarrier {
 
 export interface PublishedCaptureResource {
   waitForCaptureReady(): Promise<void>
+  waitForReady?(): Promise<void>
+  /** Observes the current live frame without entering export/capture mode. */
+  waitForObservationReady?(): Promise<void>
   failCapture?(error: Error): void
   restoreAfterCapture?(): void
 }
@@ -146,6 +149,34 @@ function resourcesBelow(roots: readonly Element[]): PublishedCaptureResourceEntr
     })
   }))
   return [...found].map(([resource, owner]) => ({ owner, resource }))
+}
+
+/** Waits only for real resource readiness; never invokes final-frame preparation. */
+export async function waitForPublishedObservationReady(root: HTMLElement, timeoutMs = DEFAULT_CAPTURE_TIMEOUT_MS): Promise<void> {
+  const deadline = new PublishedCaptureDeadline(timeoutMs)
+  const active = (element: Element) => {
+    for (let current: Element | null = element; current; current = current.parentElement) {
+      const style = computedStyle(current)
+      if ((current as HTMLElement).hidden || style.display === 'none' || style.visibility === 'hidden') return false
+      if (current === root) break
+    }
+    return true
+  }
+  for (const { owner, resource } of resourcesBelow([root])) {
+    if (!active(owner)) continue
+    const ready = resource.waitForObservationReady ?? resource.waitForReady
+    if (!ready) throw new Error('当前动态资源尚未提供实时观察就绪接口')
+    await deadline.waitFor(ready.call(resource), '等待当前运行内容就绪超时')
+  }
+  if (root.ownerDocument.fonts?.ready) await deadline.waitFor(root.ownerDocument.fonts.ready, '等待当前画布字体就绪超时')
+  const images: HTMLImageElement[] = []
+  visitComposedElements(root, element => {
+    if (element instanceof HTMLImageElement && active(element) && (element.currentSrc || element.src)) images.push(element)
+  })
+  for (const image of images) {
+    if (!image.complete || image.naturalWidth === 0) await deadline.waitFor(image.decode(), '等待当前画布原图就绪超时')
+    if (image.naturalWidth === 0) throw new Error('当前画布图像未成功加载')
+  }
 }
 
 class PublishedCanvasSnapshots {

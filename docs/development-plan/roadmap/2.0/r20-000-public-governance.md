@@ -42,12 +42,12 @@
 
 ## 聚焦验证
 
-在以下现有测试入口补本规格命名行为，不能用旧用例通过充当新能力证据。若确需新文件，先在实现diff中创建再同步入口。仅失败指向更广范围或版本门要求才扩大验证。
+准备与证据复用统一遵循[开发计划§6.1](../../AI_ASSISTANT_DELIVERY_PLAN.md#61-准备与局部验证)。相关产物准备一次后直接选现有测试文件，不通过npm测试生命周期重复构建；仅补本规格实际变化的命名行为，不能用旧用例通过充当新能力证据。新文件/用例先随实现创建，再列入入口，零匹配不得通过。
 
 ```text
 npm run check:contracts
 npm run check:ai-capabilities
-npm run test:product -- tests/unit/electronLaunchEnvironment.test.ts
+npx --no-install vitest run tests/unit/electronLaunchEnvironment.test.ts
 ```
 
 真实候选核对设置状态和可读错误，版本事实复用有效探针，不重跑完整付费矩阵。

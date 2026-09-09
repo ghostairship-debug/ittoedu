@@ -6,21 +6,25 @@ import type { AvailableComponentCatalogPackage } from '../../../shared/component
 import { captureCourseAuthoringTarget, type CourseAuthoringSessionToken } from '../courseAuthoringSession'
 import { projectEffectiveLayers, type EffectiveLayerProjection } from '../../course/effectiveLayerProjection'
 import { buildFlowEditorView, captureFlowEditorAuthoringTarget } from '../../course/flowEditorView'
-import { describeAuthoringTools } from '../tools/authoringToolFacade'
-import { generationDynamicCapabilities } from './generationCapabilities'
-import { RECIPE_CATALOG } from '../../recipes/recipeCatalog'
+import { generationCapabilityContext } from './generationCapabilities'
 import type { ComponentPackageData } from '../../../shared/componentTypes'
 import { componentContentSha256 } from '../../../shared/componentContentIntegrity'
 import { componentPackageAddress } from '../tools/componentPackageTool'
 import { bytesToBase64 } from '../../export/base64'
+import { captureSelectionReplacementScopes } from '../tools/semanticReplacementTool'
 
 export type GenerationReferenceScope = 'selection' | 'page' | 'course'
 
 /** Read-only snapshot: only explicitly selected course content and materials leave the host. */
 export function captureGenerationSnapshot(input: {
   expectedResult?: GenerationRequest['expectedResult']
+  intent?: GenerationRequest['intent']
+  applyPolicy?: GenerationRequest['applyPolicy']
+  observation?: GenerationRequest['observation']
   document: CourseProjectDocument; workspace: WorkspaceIdentityV1; sessionToken: CourseAuthoringSessionToken
   projection: EffectiveLayerProjection; selectedIds: readonly string[]; scope: GenerationReferenceScope
+  /** Locations created by this task's actual receipts, in addition to its frozen page scope. */
+  additionalLocationIds?: readonly string[]
   instruction: string; purpose: GenerationRequest['purpose']; materials?: readonly MaterialRecordV1[]
   confirmedDocuments?: GenerationRequest['confirmedDocuments']; previousResult?: unknown
   catalogPackages?: readonly AvailableComponentCatalogPackage[]
@@ -40,7 +44,7 @@ export function captureGenerationSnapshot(input: {
     }
     if (record.type === 'section' && Array.isArray(record.blocks)) record.blocks.forEach(collectPackages)
   }
-  const locations = input.scope === 'course' ? document.locations : document.locations.filter(location => location.id === sessionToken.locationId)
+  const locations = input.scope === 'course' ? document.locations : document.locations.filter(location => location.id === sessionToken.locationId || input.additionalLocationIds?.includes(location.id))
   for (const location of locations) {
     const view = location.id === projection.locationId ? projection : projectEffectiveLayers({ project: document, locationId: location.id })
     const token = { ...sessionToken, locationId: location.id, surfaceType: view.surfaceType }
@@ -66,11 +70,41 @@ export function captureGenerationSnapshot(input: {
     rows.forEach(row => collectPackages(row.item))
     blocks.forEach(block => collectPackages(block.block))
     for (const block of blocks) destinations.push({ kind: 'update', target: captureFlowEditorAuthoringTarget({ view: flow!, sessionToken: token, target: { kind: 'block', blockId: block.blockId } }) })
+    const surface = document.surfaces.find(value => value.id === location.surfaceId)
     pages.push({ location, surfaceType: view.surfaceType,
+      ...(surface?.type === 'slide' ? { canvas: { ...surface.canvas } } : {}),
       items: rows.map(row => ({ target: row.authoringAddress, item: row.item, selected: location.id === sessionToken.locationId && input.selectedIds.includes(row.id) })),
       blocks: blocks.map(block => ({ target: block.authoringAddress, block: block.block, selected: location.id === sessionToken.locationId && input.selectedIds.includes(block.blockId) })) })
   }
   if (!destinations.length) throw new Error('请选择要引用的对象，或改为引用当前页')
+  if (input.scope === 'selection') destinations.push(...captureSelectionReplacementScopes(document,
+    destinations.flatMap(destination => destination.kind === 'update' ? [destination.target] : [])))
+  const resourceFiles: NonNullable<GenerationRequest['resourceFiles']> = []
+  const materialReferences = (input.materials ?? []).map(material => {
+    const { text, ...metadata } = material
+    const resourcePath = `materials/${encodeURIComponent(material.id)}.txt`
+    resourceFiles.push({ path: resourcePath, encoding: 'utf8', content: text, mediaType: 'text/plain', role: 'material' })
+    return { ...metadata, textFile: `resources/${resourcePath}`, textByteLength: new TextEncoder().encode(text).byteLength }
+  })
+  const runtimeSources: { path: string; runtimeApiVersion: number; target: unknown }[] = []
+  const detachRuntimeSources = (value: unknown): unknown => {
+    if (Array.isArray(value)) return value.map(detachRuntimeSources)
+    if (!value || typeof value !== 'object') return value
+    const node = value as Record<string, any>
+    const copy = Object.fromEntries(Object.entries(node).map(([key, nested]) => [key, detachRuntimeSources(nested)]))
+    if (node.kind === 'runtime' && typeof node.runtime?.source === 'string') {
+      const resourcePath = `runtimes/${encodeURIComponent(node.layerItemId)}.js`
+      if (!resourceFiles.some(file => file.path === resourcePath)) {
+        resourceFiles.push({ path: resourcePath, encoding: 'utf8', content: node.runtime.source, role: 'source' })
+        runtimeSources.push({ path: `resources/${resourcePath}`, runtimeApiVersion: node.runtime.runtimeApiVersion,
+          target: destinations.find(destination => destination.kind === 'update' && destination.target.itemId === node.layerItemId) })
+      }
+      const { source: _source, ...runtime } = node.runtime
+      copy.runtime = { ...runtime, sourceFile: `resources/${resourcePath}` }
+    }
+    return copy
+  }
+  const promptPages = pages.map(detachRuntimeSources)
   const componentSources = [...referencedPackages].map(packageId => {
     const data = input.componentPackages?.[packageId], meta = document.componentPackages[packageId]
     if (!data || !meta || data.manifest.version !== meta.version || componentContentSha256(data.files) !== meta.contentSha256) throw new Error(`引用组件 ${packageId} 的完整源码或身份不可用`)
@@ -80,23 +114,33 @@ export function captureGenerationSnapshot(input: {
     destinations.push({ kind: 'update', target })
     return { packageId, baseVersion: meta.version, baseContentIdentity: meta.contentSha256, target,
       documentRevision: document.revision, sharedEdit: true,
-      files: Object.fromEntries(Object.entries(data.files).map(([path, bytes]) => [path,
-        /\.(js|json|css|txt|svg)$/i.test(path) ? { encoding: 'utf8', text: new TextDecoder('utf-8', { fatal: true }).decode(bytes) } : bytesToBase64(bytes)])),
+      files: Object.fromEntries(Object.entries(data.files).map(([path, bytes]) => {
+        const resourcePath = `components/${encodeURIComponent(packageId)}/${path}`
+        const isText = /\.(js|json|css|txt|svg)$/i.test(path)
+        resourceFiles.push({ path: resourcePath, encoding: isText ? 'utf8' : 'base64', role: 'source',
+          content: isText ? new TextDecoder('utf-8', { fatal: true }).decode(bytes) : bytesToBase64(bytes) })
+        return [path, { path: `resources/${resourcePath}`, bytes: bytes.byteLength, encoding: isText ? 'utf8' : 'base64' }]
+      })),
       editInstruction: 'Use component.package operation revise with this exact target, baseVersion and baseContentIdentity. Return complete files including unchanged files; keep manifest ID and version at the baseline. The host assigns the new version and updates all instances.' }
   })
+  const componentCatalog = (input.catalogPackages ?? []).filter(entry => entry.sourceTrust !== 'prompt').map(entry => ({ sourceId: entry.sourceId,
+    packageId: entry.packageId, version: entry.version, sha256: entry.sha256, name: entry.name, description: entry.description,
+    tags: entry.tags, supportedScopes: entry.supportedScopes }))
+  resourceFiles.push({ path: 'component-catalog.json', encoding: 'utf8', role: 'capability', content: JSON.stringify(componentCatalog) })
   const request = generationRequestSchema.parse({ version: 1, requestId: crypto.randomUUID(), workspace,
     documentRevision: document.revision, sessionGeneration: sessionToken.generation, purpose: input.purpose,
-    expectedResult: input.expectedResult ?? 'candidate',
+    expectedResult: input.expectedResult ?? 'candidate', intent: input.intent, applyPolicy: input.applyPolicy, observation: input.observation,
     instruction: input.instruction, destinations, confirmedDocuments: input.confirmedDocuments,
     allowedCarriers: ['native', 'recipe', 'existing-component', 'generated-component', 'runtime'],
-    context: JSON.parse(JSON.stringify({ reference: input.scope, pages, materials: input.materials ?? [],
-      tools: describeAuthoringTools(), recipes: RECIPE_CATALOG, dynamicCapabilities: generationDynamicCapabilities(),
-      assets: document.assets, componentPackages: document.componentPackages, componentSources,
-      componentCatalog: (input.catalogPackages ?? []).filter(entry => entry.sourceTrust !== 'prompt').map(entry => ({ sourceId: entry.sourceId,
-        packageId: entry.packageId, version: entry.version, sha256: entry.sha256, name: entry.name, description: entry.description,
-        tags: entry.tags, supportedScopes: entry.supportedScopes })),
+    resourceFiles,
+    context: JSON.parse(JSON.stringify({ reference: input.scope, pages: promptPages, materials: materialReferences,
+      capabilities: generationCapabilityContext(promptPages, input.purpose),
+      assets: document.assets, componentPackages: document.componentPackages, componentSources, runtimeSources,
+      componentCatalog: componentCatalog.filter(entry => referencedPackages.has(entry.packageId)),
+      componentCatalogFile: { path: 'resources/component-catalog.json', count: componentCatalog.length },
       previousResult: input.previousResult ?? null })),
   })
-  if (new TextEncoder().encode(JSON.stringify(request)).byteLength > MAX_GENERATION_PROMPT_BYTES - 16000) throw new Error('引用超过本轮上下文预算，请缩小页面或材料范围')
+  const { resourceFiles: _resources, ...prompt } = request
+  if (new TextEncoder().encode(JSON.stringify(prompt)).byteLength > MAX_GENERATION_PROMPT_BYTES - 16000) throw new Error('引用超过本轮上下文预算，请缩小页面或材料范围')
   return request
 }

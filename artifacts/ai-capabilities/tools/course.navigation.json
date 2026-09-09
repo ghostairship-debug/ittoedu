@@ -1,0 +1,106 @@
+{
+  "candidateCarrier": {
+    "default": "native"
+  },
+  "description": "add-surface 使用 global owner + create parent:course-locations append，创建 Slide/Flow/Spatial 表面及起始页。后续内容用 created-scope 指向返回位置的默认 owner。其余操作用当前课程位置的正式 update target。",
+  "inputSchema": {
+    "$defs": {
+      "__schema0": {
+        "maxLength": 120,
+        "minLength": 1,
+        "type": "string"
+      },
+      "__schema1": {
+        "minLength": 1,
+        "type": "string"
+      }
+    },
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "oneOf": [
+      {
+        "additionalProperties": false,
+        "properties": {
+          "operation": {
+            "const": "add-surface",
+            "type": "string"
+          },
+          "surfaceType": {
+            "enum": [
+              "slide",
+              "flow",
+              "spatial-2d"
+            ],
+            "type": "string"
+          },
+          "title": {
+            "$ref": "#/$defs/__schema0"
+          }
+        },
+        "required": [
+          "operation",
+          "surfaceType"
+        ],
+        "type": "object"
+      },
+      {
+        "additionalProperties": false,
+        "properties": {
+          "operation": {
+            "const": "rename-location",
+            "type": "string"
+          },
+          "title": {
+            "$ref": "#/$defs/__schema0"
+          }
+        },
+        "required": [
+          "operation",
+          "title"
+        ],
+        "type": "object"
+      },
+      {
+        "additionalProperties": false,
+        "properties": {
+          "operation": {
+            "const": "delete-location",
+            "type": "string"
+          }
+        },
+        "required": [
+          "operation"
+        ],
+        "type": "object"
+      },
+      {
+        "additionalProperties": false,
+        "properties": {
+          "operation": {
+            "const": "reorder-surfaces",
+            "type": "string"
+          },
+          "surfaceIds": {
+            "items": {
+              "$ref": "#/$defs/__schema1"
+            },
+            "minItems": 1,
+            "type": "array"
+          }
+        },
+        "required": [
+          "operation",
+          "surfaceIds"
+        ],
+        "type": "object"
+      }
+    ]
+  },
+  "name": "course.navigation",
+  "support": "conditional-on-input-target-resources-and-host",
+  "supportedScopes": [
+    "slide:global",
+    "flow:global",
+    "spatial-2d:global"
+  ],
+  "version": 1
+}

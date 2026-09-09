@@ -2,6 +2,7 @@ import type {
   PublishedLayerItem,
   PublishedRuntimeLayerItem,
 } from '../../../shared/publishedCourseTypes'
+import { isPublishedDomCanvasRuntime } from './publishedCanvasRuntimePointer'
 
 type GlobalRuntimeState = 'playback' | 'fallback'
 type RuntimePointerTarget = HTMLElement | SVGElement
@@ -19,17 +20,19 @@ function applyPointerState(target: RuntimePointerTarget): void {
   const playback = target.dataset.globalRuntimeState === 'playback'
   const authoredHit = target.dataset.publishedGlobalRuntimeHitPolicy === 'auto'
   const interactionVisible = target.dataset.interactionVisibility !== 'hidden'
-  target.style.pointerEvents = playback && authoredHit && interactionVisible
+  const hasPointerPlane = target.dataset.publishedGlobalRuntimePointerPlane === 'true'
+  target.style.pointerEvents = playback && authoredHit && interactionVisible && hasPointerPlane
     ? 'auto'
     : 'none'
 }
 
 function initializePointerState(
   target: RuntimePointerTarget,
-  hitPolicy: PublishedRuntimeLayerItem['hitPolicy'],
+  item: PublishedRuntimeLayerItem,
   authoredVisible: boolean,
 ): void {
-  target.dataset.publishedGlobalRuntimeHitPolicy = hitPolicy
+  target.dataset.publishedGlobalRuntimeHitPolicy = item.hitPolicy
+  target.dataset.publishedGlobalRuntimePointerPlane = String(!isPublishedDomCanvasRuntime(item.runtime))
   target.dataset.interactionVisibility ??= authoredVisible ? 'visible' : 'hidden'
 }
 
@@ -41,7 +44,7 @@ export function setPublishedGlobalCanvasRuntimeState(
 ): void {
   initializePointerState(
     target,
-    item.hitPolicy,
+    item,
     item.playbackInitialVisibility !== 'hidden',
   )
   target.dataset.globalRuntimeState = state
@@ -56,7 +59,7 @@ export function setPublishedGlobalCanvasRuntimeInteractionVisibility(
 ): void {
   initializePointerState(
     target,
-    item.hitPolicy,
+    item,
     item.playbackInitialVisibility !== 'hidden',
   )
   target.dataset.interactionVisibility = visible ? 'visible' : 'hidden'

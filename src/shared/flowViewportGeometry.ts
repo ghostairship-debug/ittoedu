@@ -1,6 +1,33 @@
+import {
+  constrainTeacherControllerAuthoringFrame,
+  teacherControllerAuthoringRecoveryBounds,
+  type TeacherControllerLayoutSource,
+} from './teacherControllerLayout'
+
 export interface FlowPoint { readonly x: number; readonly y: number }
 export interface FlowSize { readonly width: number; readonly height: number }
 export interface FlowRect extends FlowPoint, FlowSize {}
+
+/** View-only controller projection shared by Flow overlay display and hit-testing. */
+export function projectFlowControllerOverlayFrame(
+  source: TeacherControllerLayoutSource,
+  frame: FlowRect,
+  rotation: number,
+  viewport: FlowSize,
+): FlowRect {
+  return constrainTeacherControllerAuthoringFrame(source, frame, rotation, viewport)
+}
+
+/** Client-space recovery bounds for a controller projected into the overlay viewport. */
+export function flowControllerOverlayRecoveryBounds(
+  source: TeacherControllerLayoutSource,
+  frame: FlowRect,
+  rotation: number,
+  viewport: FlowSize,
+) {
+  const projected = projectFlowControllerOverlayFrame(source, frame, rotation, viewport)
+  return teacherControllerAuthoringRecoveryBounds(source, projected, rotation)
+}
 
 /** Minimum view-only translation to reveal a selection; oversized content stays at 1:1. */
 export function revealFlowSelectionPan(bounds: FlowRect, viewport: FlowSize, current: FlowPoint, margin = 16): FlowPoint {

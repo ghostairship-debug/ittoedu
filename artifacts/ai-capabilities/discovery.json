@@ -1,0 +1,303 @@
+{
+  "cache": "Reuse only with the same semanticVersion and the same query scope; source/material/observation versions are separate.",
+  "data": "discovery-data.json",
+  "groups": {
+    "components": "query --kind component",
+    "recipes": "query --kind recipe",
+    "references": "query --kind reference",
+    "skills": "query --kind skill"
+  },
+  "protocols": [
+    {
+      "authoringGuideFile": "protocols/component-api4.authoring.md",
+      "id": "component-api4",
+      "path": "protocols/component-api4.json",
+      "scopes": [
+        "slide:scene",
+        "slide:surface",
+        "slide:global",
+        "flow:surface",
+        "flow:global",
+        "spatial-2d:world",
+        "spatial-2d:surface",
+        "spatial-2d:global"
+      ]
+    },
+    {
+      "authoringGuideFile": "protocols/runtime-api2.authoring.md",
+      "id": "runtime-api2",
+      "path": "protocols/runtime-api2.json",
+      "scopes": [
+        "slide:scene",
+        "slide:global"
+      ]
+    },
+    {
+      "authoringGuideFile": "protocols/runtime-api3.authoring.md",
+      "id": "runtime-api3",
+      "path": "protocols/runtime-api3.json",
+      "scopes": [
+        "slide:scene",
+        "flow:surface"
+      ]
+    }
+  ],
+  "query": "query.mjs",
+  "semanticVersion": "aedad6ceb0bbacefb952e635dbafa1185e6bad352bff4c41e19427e5913562c6",
+  "tools": [
+    {
+      "carriers": [
+        "native"
+      ],
+      "id": "asset.font.import",
+      "path": "tools/asset.font.import.json",
+      "scopes": [
+        "slide:global",
+        "flow:global",
+        "spatial-2d:global"
+      ]
+    },
+    {
+      "carriers": [
+        "native"
+      ],
+      "id": "asset.image.transform",
+      "path": "tools/asset.image.transform.json",
+      "scopes": [
+        "slide:scene",
+        "slide:global",
+        "flow:surface",
+        "flow:global",
+        "spatial-2d:world",
+        "spatial-2d:global"
+      ]
+    },
+    {
+      "carriers": [
+        "native"
+      ],
+      "id": "asset.media.import",
+      "path": "tools/asset.media.import.json",
+      "scopes": [
+        "slide:global",
+        "flow:global",
+        "spatial-2d:global"
+      ]
+    },
+    {
+      "carriers": [
+        "existing-component"
+      ],
+      "id": "component.configure",
+      "path": "tools/component.configure.json",
+      "scopes": [
+        "slide:scene",
+        "slide:global",
+        "flow:surface",
+        "flow:global",
+        "spatial-2d:world",
+        "spatial-2d:global"
+      ]
+    },
+    {
+      "carriers": [
+        "existing-component",
+        "generated-component"
+      ],
+      "id": "component.insert",
+      "path": "tools/component.insert.json",
+      "scopes": [
+        "slide:scene",
+        "slide:global",
+        "flow:surface",
+        "flow:global",
+        "spatial-2d:world"
+      ]
+    },
+    {
+      "carriers": [
+        "generated-component"
+      ],
+      "id": "component.package",
+      "path": "tools/component.package.json",
+      "scopes": [
+        "slide:global",
+        "flow:global",
+        "spatial-2d:global"
+      ]
+    },
+    {
+      "carriers": [
+        "native"
+      ],
+      "id": "course.navigation",
+      "path": "tools/course.navigation.json",
+      "scopes": [
+        "slide:global",
+        "flow:global",
+        "spatial-2d:global"
+      ]
+    },
+    {
+      "carriers": [
+        "native"
+      ],
+      "id": "course.settings",
+      "path": "tools/course.settings.json",
+      "scopes": [
+        "slide:global",
+        "flow:global",
+        "spatial-2d:global"
+      ]
+    },
+    {
+      "carriers": [
+        "native"
+      ],
+      "id": "flow.content",
+      "path": "tools/flow.content.json",
+      "scopes": [
+        "flow:surface"
+      ]
+    },
+    {
+      "carriers": [
+        "native"
+      ],
+      "id": "material.citation",
+      "path": "tools/material.citation.json",
+      "scopes": [
+        "slide:scene",
+        "slide:global",
+        "flow:surface",
+        "flow:global",
+        "spatial-2d:world",
+        "spatial-2d:global"
+      ]
+    },
+    {
+      "carriers": [
+        "native"
+      ],
+      "id": "native.content",
+      "path": "tools/native.content.json",
+      "scopes": [
+        "slide:scene",
+        "slide:global",
+        "flow:surface",
+        "flow:global",
+        "spatial-2d:world",
+        "spatial-2d:global"
+      ]
+    },
+    {
+      "carriers": [
+        "native"
+      ],
+      "id": "owner.background",
+      "path": "tools/owner.background.json",
+      "scopes": [
+        "slide:scene",
+        "slide:surface",
+        "slide:global",
+        "flow:surface",
+        "flow:global",
+        "spatial-2d:surface",
+        "spatial-2d:global"
+      ]
+    },
+    {
+      "carriers": [
+        "recipe"
+      ],
+      "id": "recipe.apply",
+      "path": "tools/recipe.apply.json",
+      "scopes": [
+        "slide:scene"
+      ]
+    },
+    {
+      "carriers": [
+        "runtime"
+      ],
+      "id": "runtime.configure",
+      "path": "tools/runtime.configure.json",
+      "scopes": [
+        "slide:scene",
+        "slide:global",
+        "flow:surface"
+      ]
+    },
+    {
+      "carriers": [
+        "runtime"
+      ],
+      "id": "runtime.insert",
+      "path": "tools/runtime.insert.json",
+      "scopes": [
+        "slide:scene",
+        "slide:global",
+        "flow:surface"
+      ]
+    },
+    {
+      "carriers": [
+        "runtime"
+      ],
+      "id": "runtime.source",
+      "path": "tools/runtime.source.json",
+      "scopes": [
+        "slide:scene",
+        "slide:global",
+        "flow:surface"
+      ]
+    },
+    {
+      "carriers": [
+        "native"
+      ],
+      "id": "selection.replace",
+      "path": "tools/selection.replace.json",
+      "scopes": [
+        "slide:scene",
+        "slide:global",
+        "flow:surface",
+        "flow:global",
+        "spatial-2d:world",
+        "spatial-2d:global"
+      ]
+    },
+    {
+      "carriers": [
+        "native"
+      ],
+      "id": "slide.interaction",
+      "path": "tools/slide.interaction.json",
+      "scopes": [
+        "slide:scene"
+      ]
+    },
+    {
+      "carriers": [
+        "native"
+      ],
+      "id": "slide.structure",
+      "path": "tools/slide.structure.json",
+      "scopes": [
+        "slide:scene"
+      ]
+    },
+    {
+      "carriers": [
+        "native"
+      ],
+      "id": "spatial.structure",
+      "path": "tools/spatial.structure.json",
+      "scopes": [
+        "spatial-2d:world"
+      ]
+    }
+  ],
+  "usage": "保持原生工作目录；node \"<query.mjs绝对路径>\" --query <关键词> --surface <slide|flow|spatial-2d>; --id <能力ID> [--operation <操作>] [--nativeType <类型>]",
+  "version": 1
+}

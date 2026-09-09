@@ -177,16 +177,18 @@
 - Flow几何的**D1已由Owner于2026-09-07批准方案A**：基准倍率1时正文与浮层采用1逻辑单位=1CSS px；窗口宽度决定正文响应式重排，paper项相对纸张布局原点随正文滚动，viewport项相对实际文档视口。主动观察缩放只在基准布局结果上应用共同矩阵，不反向调整排版宽度/字号或重建实例。接受旧Flow浮层初始投影大小/位置变化并复核旧课件，不修改持久frame数值；Slide/Spatial原页/HUD尺度保留。
 - Spatial当前真实动态复用范围为global Canvas Runtime API2；本地world/surface Runtime的静态/标签呈现不等于完整执行。整合先补已支持global API2作者consumer，local/API3扩域需精确作者—运行—导出合同，不能以统一之名伪报支持。
 
-## 7. CLI 直连、暂存与会话边界
+## 7. 原生CLI、编辑器连接、暂存与会话边界
 
-- **内核分工**：用户自行安装并认证 Codex、Claude、OpenCode；CLI 保留各自的模型规划、Skills、子任务与工具循环。应用只实现版本化 `LocalAgentCliAdapterV1`、session harness、任务/快照接线、暂存区、回执/时间线与自动准入，当前不复制 CLI 的模型规划循环。Owner 已取消 MCP；未来脱离 CLI 后，以模型 API、自有工具和自建 harness 直接调用同一产品命令与准入/事务边界，另行定义模型循环和凭据合同，不提前建设通用 Agent 层。
-- **待实施的1.8–2.0演进**：Owner要求当前课件的结构/画面/运行一致理解、插件级相应工作流和Build Skill按需发现同步。088–104及后续节点按[共同实施合同](roadmap/1.8/IMPLEMENTATION_CONTRACT.md)先版本化本地Task/Observation/Proposal/HostResult/UserInput，再迁consumer；每份观察不可变，一个任务可收到多次最新观察和提交/验证结果，由CLI原生会话决定下一步。应用不复制模型规划循环，不增加live Store、MCP/工具RPC或第二writer。正式能力源生成精简入口/查询/完整卡片供应用CLI和外部Builder共用；Build Skill由源与受管installer同步，已有教师工程不重建覆盖。这是新开发合同目标，不能宣称已接通。
-- **进程边界**：CLI adapter 以解析后的明确可执行文件和参数数组提供 probe/start/resume/cancel；Windows 不拼接 shell 命令字符串。CLI 自行登录并保存凭据，应用不读取或保存其 API Key。
-- **唯一写路径与版本分界**：CLI candidate 默认可通过结构化 stdout / artifact channel 返回；只有 adapter 确实启用通用文件工具时，文件工具才限定到应用管理的当前 session staging，并执行对应 conformance。无文件工具的 adapter 不因缺少文件系统沙箱而失败。文件工具始终不得直接写 `.h5lesson`、其他 session 或权威工程；staging 主要保证候选事务、恢复、清理和防止意外跨工程/半写入，不承担对受信 CLI 的通用 OS 沙箱证明。1.7 是 batch candidate pipeline：应用只提供不可变最小 context snapshot 或已确认 Markdown，CLI 不获得 Store 或 live project API，只输出 strict/versioned typed authoring intent envelope 或 dynamic package manifest；宿主重校验 target/revision，Native/Recipe/Existing Component 候选直接映射 1.4 canonical commands，只有 Generated Component/Runtime 额外进入动态准入，并以单一 document + resource transaction 提交，禁止 generic V9 patch/import。1.8–2.0 继续这条候选路径，聊天每轮由宿主提供新快照与必要的上轮提交结果；CLI 不获得 live 工程接口，不增加 MCP、工具 RPC 或第二写通道。update target 必须逐字段无损携带 canonical `CourseAuthoringTarget`；create target 使用独立 create-scope。CLI candidate receipt 与 host commit receipt 分离；stale、拒绝、坏候选、适用的准入失败和取消对当前未提交候选均零工程写入；多阶段任务中已经提交的先前事务必须保留并明确标部分完成，不能声称整个任务零写。
-- **暂存和自动准入**：生成 Component/Runtime 源码、manifest、资源与诊断先进入暂存区。动态载体自动准入至少验证编译、协议、依赖、素材闭包、精确 origin、生命周期、资源上限、静态后备和真实宿主 smoke；未通过不得注册或写工程。Native、Recipe 与 Existing Component 候选不等待动态宿主门。内部稳定版默认不提供绕过准入的人工覆盖。
-- **自动可信能力**：通过自动准入的 Component/Runtime 自动成为当前可信扩展，可使用当前正式提供给可信扩展的父页面、本地、桌面、网络和其他宿主接口，无需人工代码审核。该授权不包含 Provider Secret、原始 Electron Main 对象、任意 OS 命令、未开放远程脚本或未经合同批准的新宿主接口。
-- **本地会话身份**：AI 会话、材料与 tool trace 保存于应用 `userData` 下的版本化目录，以工程 ID 与规范化文件位置共同标识。Save As 创建新的 workspace identity，不复制旧会话；可清除单个会话、当前工程或全部应用记录。它们不进入 Course Project、Published、Component、Runtime 或导出物；应用只能承诺删除自己的记录，CLI 自身历史由适配器能力另行说明。
-- **版本可见性**：按 Owner 2026-09-07 决定，1.8 起 CLI/基础聊天入口在普通内部生产构建默认显示，无需环境开关；入口开放不代表版本门已验收；这不改变产品的内部生产分发边界。CLI 未安装、未认证、不可用或异常退出时，全部人工编辑能力必须正常工作。
+- **长期分工（Owner 2026-09-08）**：用户自行安装认证Codex、Claude、OpenCode；保留原生模型循环、文件/终端/网络、用户工具与连接、Skills和子任务。相同账号、配置、工作上下文和授权下，不因GUI包装默认降成只读、工具白名单或关闭终端。GUI承接原生权限请求与用户决定，不静默提权。应用做版本化adapter、会话、观察、候选摄取、回执、界面及自动准入，不预设迁往自建模型循环，不新建应用MCP/通用工具RPC平台；原生CLI已有用户连接仍保留。
+- **阶段与体验**：1.8修实际阻断、原生接线及当前工程观察/编辑反馈、按需能力与源码增量。1.9的042未命名/首存、045材料、044双流程与Skills、041聊天首页/画布/极简与专业模式共同形成工作流；删除未实施的r18-105。自动必须上传且成功读取材料：有效原件、整体结构与本次教学范围的实际文本/原图齐备，无关附录不阻塞；优先模板/设计；手动依次确认教学简报、策划、呈现简报和脚本。当前外部Skill在044迁移前保留现有确认路径，规划不表示guard已改。2.0所有课件步骤在软件内完成，速度、教学/视觉/互动质量和可编辑交付一起验收。2.x媒体与运行时服务沿[方案](AGENT_AUTHORING_LONG_TERM_PLAN.md)扩展原生CLI架构。
+- **观察与权限分开**：默认提供任务相关的不可变小观察、能力卡和必要材料，目标明确时不发送全量目录/源码。CLI可按原生授权继续查找文件、资料与Skills，观察scope不是OS权限沙箱。Task/Observation/Proposal/HostResult/UserInput由唯一Owner以strict版本合同管理；一个任务可收到多次观察和回执，由CLI决定下一步。极简/专业模式只组织入口，不建立第二工程、任务或历史，也不降低AI能力。
+- **原生接线**：明确可执行文件与参数数组，不拼shell命令。保留或明确选择原生cwd、非秘密配置和运行所需环境；staging不能强制替代全部工作上下文。工具活动、授权、问题、取消、配置确认和错误按实际原生协议接回GUI。CLI管理认证，应用不复制凭据或在诊断输出secret；能力不足须诚实呈现，不伪装成功。
+- **工程唯一写入路径**：编辑器消费strict typed candidate/dynamic manifest，通过结构化stdout/artifact或当前candidate staging返回；宿主重校验canonical target、revision、epoch与资源，经既有canonical commands和单一document/resource transaction提交。禁止generic V9 patch/import、raw Store和第二writer。snapshot不暴露live Store。原生文件工具完成不等于工程已应用；外部原生工具改变已打开工程的磁盘文件时，由既有打开/保存Owner处理必要的重载与保存冲突，重新取得工程事实再继续，不能静默覆盖内存或补造History receipt。
+- **候选摄取**：宿主只摄取当前candidate root内realpath闭合、身份相符且检查通过的内容；这不把CLI所有文件工具锁进staging。失败、Stop、stale、拒绝和迟到候选对当前未提交阶段零工程写入；先前已提交阶段保留并显示部分完成。candidate receipt与host commit receipt分开，只有后者证明应用事务成功。
+- **动态准入**：Generated Component/Runtime先留暂存，经编译、协议、依赖、素材闭包、精确origin、生命周期、资源上限、静态后备与真实宿主smoke后才能注册/提交。Native、Recipe、Existing Component承担自身合同门。证据按代码、资源、配置、宿主依赖与修改影响复用；编译结果不能替代受影响互动验证。候选检查只调用当前任务必要的既有宿主动作与采样，在同一任务剩余时间和既有宿主超时内累计约束；不建设通用断言DSL，Native/props不强制附带独立检查计划。
+- **扩展权限独立**：准入后的Component/Runtime获得当前正式可信扩展宿主能力，不能继承CLI终端或文件权限。Provider Secret、原始Electron Main、任意OS命令、未开放远程脚本及未经合同批准的新宿主API仍不授予扩展。
+- **本地身份**：保存工程按projectId+规范化路径隔离；1.9区分未绑定聊天、draft和已保存workspace，不造虚假CourseProject。首次保存终止旧epoch并切新身份，以新观察继续目标，不复制externalSessionId/trace；旧draft历史可读。Save As同样新身份。材料/对话/观察/trace只在应用本地版本化目录，不进工程或导出；删除只承诺应用自己的记录。
+- **可见性与验收**：1.8起普通内部生产构建默认显示CLI/聊天，无需环境开关；CLI不可用时人工能力仍正常。入口开放不代表S3/S4通过。2.0可用有限外部开发基线比较质量，但教师的材料、设计、构建、QA、修复和导出无需另开外部AI/终端。速度目标、有限复测与证据复用见[开发计划](AI_ASSISTANT_DELIVERY_PLAN.md)。
 
 ## 8. 1.1 V8 清零棘轮与例外
 

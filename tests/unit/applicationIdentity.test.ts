@@ -46,7 +46,34 @@ describe('application identity storage', () => {
     )
 
     expect(result).toBe(path.join('D:', 'isolated-profile'))
+    expect(setPath).toHaveBeenCalledExactlyOnceWith('userData', path.join('D:', 'isolated-profile'))
+    expect(getPath).not.toHaveBeenCalled()
+  })
+
+  it('accepts the separate explicit user-data-dir argument form', () => {
+    const setPath = vi.fn()
+    const getPath = vi.fn()
+
+    const result = configureApplicationStorage(
+      { getPath, setPath },
+      ['electron', '.', '--user-data-dir', 'D:\\isolated-profile'],
+    )
+
+    expect(result).toBe(path.join('D:', 'isolated-profile'))
+    expect(setPath).toHaveBeenCalledExactlyOnceWith('userData', path.join('D:', 'isolated-profile'))
+    expect(getPath).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ['without a following value', ['electron', '.', '--user-data-dir']],
+    ['with an empty equals value', ['electron', '.', '--user-data-dir=']],
+    ['when the following token is another switch', ['electron', '.', '--user-data-dir', '--other-switch']],
+  ])('rejects an explicit user-data-dir %s', (_case, argv) => {
+    const setPath = vi.fn()
+    const getPath = vi.fn()
+
+    expect(() => configureApplicationStorage({ getPath, setPath }, argv)).toThrow('Missing value for --user-data-dir')
     expect(setPath).not.toHaveBeenCalled()
-    expect(getPath).toHaveBeenCalledWith('userData')
+    expect(getPath).not.toHaveBeenCalled()
   })
 })

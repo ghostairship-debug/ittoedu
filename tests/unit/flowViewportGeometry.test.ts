@@ -1,5 +1,27 @@
 import { describe, expect, it } from 'vitest'
-import { createFlowViewportGeometry, revealFlowSelectionPan } from '@/shared/flowViewportGeometry'
+import {
+  createFlowViewportGeometry,
+  flowControllerOverlayRecoveryBounds,
+  revealFlowSelectionPan,
+} from '@/shared/flowViewportGeometry'
+import type { TeacherControllerLayoutSource } from '@/shared/teacherControllerLayout'
+
+const MIXED_GLOBAL_CONTROLLER: TeacherControllerLayoutSource = {
+  compact: false,
+  showSceneProgress: true,
+  collapsible: true,
+  buttons: [
+    { id: 'step-next', action: { type: 'step.next' }, label: '下一步', visible: true },
+    { id: 'scene-next', action: { type: 'scene.next' }, label: '下一场景', visible: true },
+  ],
+  style: {
+    backgroundColor: '#0b1720',
+    accentColor: '#d9bf73',
+    textColor: '#f3eee0',
+    backgroundOpacity: 0.92,
+    cornerRadius: 12,
+  },
+}
 
 describe('Flow responsive document geometry', () => {
   it('reveals right/bottom content with minimum view translation and keeps oversized content at 1:1', () => {
@@ -38,5 +60,17 @@ describe('Flow responsive document geometry', () => {
     expect(geometry.viewportToClient({ x: 20, y: 0 })).toEqual({ x: 20, y: 0 })
     expect(geometry.paperToClient({ x: 20, y: 400 })).toEqual({ x: 36, y: 24 })
     expect(geometry.visibleViewportBounds).toEqual({ x: 0, y: 0, width: 600, height: 900 })
+  })
+
+  it('projects mixed-global-controller into a 739×576 overlay without losing the recovery pill', () => {
+    const viewport = { width: 739, height: 576 }
+    const authored = { x: 190, y: 638, width: 900, height: 64 }
+    const bounds = flowControllerOverlayRecoveryBounds(MIXED_GLOBAL_CONTROLLER, authored, 0, viewport)
+    expect(bounds.left).toBeGreaterThanOrEqual(-0.001)
+    expect(bounds.top).toBeGreaterThanOrEqual(-0.001)
+    expect(bounds.right).toBeLessThanOrEqual(viewport.width + 0.001)
+    expect(bounds.bottom).toBeLessThanOrEqual(viewport.height + 0.001)
+    expect(bounds.right - bounds.left).toBeGreaterThan(0)
+    expect(bounds.bottom - bounds.top).toBeGreaterThan(0)
   })
 })

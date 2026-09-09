@@ -44,11 +44,10 @@ G02红色小图改绿未生成候选；单纯shape fill、色块覆盖或让模�
 
 ## 聚焦验证
 
-在以下现有测试入口补本规格命名行为，不能用旧用例通过充当新能力证据。若确需新文件，先在实现diff中创建再同步入口。仅失败指向更广范围或版本门要求才扩大验证。
+按[开发计划§6.1](../../AI_ASSISTANT_DELIVERY_PLAN.md#61-准备与局部验证)为本次代码变化和所选用例准备必要产物一次，再执行以下直接入口；纯逻辑/Schema测试不因此重构建。现有用例只证明其实际覆盖的行为；新增行为在实施diff中补命名测试，并同步文件及 `-t` / `--grep` 选择。执行时确认目标测试实际被选中，0匹配不算通过，不用旧用例通过代签新能力。未变化证据继续复用，仅失败指向更广范围或版本门要求才扩大验证。
 
 ```text
-npm run test:product -- tests/unit/assetTransactions.test.ts tests/unit/assetReferences.test.ts tests/unit/editorTransaction.test.ts
-npm run test:product -- tests/unit/courseProjectRoundTrip.test.ts tests/unit/coursePptxExport.test.ts
+npx --no-install vitest run tests/unit/assetTransactions.test.ts tests/unit/assetReferences.test.ts tests/unit/editorTransaction.test.ts tests/unit/courseProjectRoundTrip.test.ts tests/unit/coursePptxExport.test.ts
 ```
 
 真实UI比较T02/T03前后并检查alpha/文字/局部范围，导出后实际显示；像素断言用于算法保真，不能替代实际呈现。

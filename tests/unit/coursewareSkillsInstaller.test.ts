@@ -93,11 +93,12 @@ async function listFiles(directory: string, prefix = ''): Promise<string[]> {
   return files.sort((left, right) => left < right ? -1 : left > right ? 1 : 0)
 }
 
-async function treeSignature(directory: string): Promise<string> {
+async function treeSignature(directory: string, includeLocalRoot = false): Promise<string> {
   const entries: string[] = []
   for (const relative of await listFiles(directory)) {
     if (
-      relative.split('/').includes('__pycache__')
+      (!includeLocalRoot && relative === 'editor-root.local.json')
+      || relative.split('/').includes('__pycache__')
       || /\.py[co]$/i.test(relative)
     ) continue
     const bytes = await readFile(path.join(directory, ...relative.split('/')))
@@ -138,6 +139,7 @@ async function runInstaller(options: {
       ],
       {
         encoding: 'utf8',
+        windowsHide: true,
         env: { ...process.env, ...options.env },
         maxBuffer: 4 * 1024 * 1024,
       },
@@ -172,6 +174,29 @@ afterEach(async () => {
 })
 
 windowsDescribe('courseware Skill installer', { timeout: 20_000 }, () => {
+  it('publishes complete references while preserving a local root stamp across managed updates', async () => {
+    const sourceSkill = path.join(sourceRoot, 'build-courseware-project')
+    const installedSkill = path.join(destinationRoot, 'build-courseware-project')
+    await writeFile(path.join(sourceSkill, 'editor-root.local.json'), '{"editorRoot":"source-private-root"}')
+    await mkdir(path.join(sourceSkill, 'references'))
+    await writeFile(path.join(sourceSkill, 'references/build-method.md'), '# Complete methods\nTeaching, visuals, interactions and real host checks.\n')
+    await runInstaller()
+    expect(await exists(path.join(installedSkill, 'editor-root.local.json'))).toBe(false)
+    expect(await readFile(path.join(installedSkill, 'references/build-method.md'), 'utf8')).toContain('real host checks')
+    const stamp = '{"editorRoot":"teacher-selected-product","localOnly":true}'
+    await writeFile(path.join(installedSkill, 'editor-root.local.json'), stamp)
+    // A manifest emitted by the former installer included the root stamp.
+    const manifest = await readManifest()
+    manifest.skills['build-courseware-project']!.installedTreeSignature = await treeSignature(installedSkill, true)
+    await writeJson(path.join(destinationRoot, manifestName), manifest)
+    await writeFile(path.join(sourceSkill, 'SKILL.md'), '---\nname: build-courseware-project\ndescription: Updated.\n---\n# Updated Build\n')
+    const updated = await runInstaller()
+    expect(updated.stdout).toContain('Installed/updated: build-courseware-project')
+    expect(await readFile(path.join(installedSkill, 'SKILL.md'), 'utf8')).toContain('Updated Build')
+    expect(await readFile(path.join(installedSkill, 'editor-root.local.json'), 'utf8')).toBe(stamp)
+    expect((await readManifest()).skills['build-courseware-project']!.installedTreeSignature).toBe(await treeSignature(sourceSkill))
+  })
+
   it('installs the current Skills with manifest v2 signatures and is idempotent', async () => {
     const first = await runInstaller()
     expect(first.stdout).toContain('Installed/updated: orchestrate-courseware, build-courseware-project')
@@ -273,17 +298,17 @@ windowsDescribe('courseware Skill installer', { timeout: 20_000 }, () => {
     expect((await readManifest()).skills).not.toHaveProperty('orchestrate-courseware')
   })
 
-  it('replaces an unmanaged same-name current Skill with the repository copy', async () => {
+  it('preserves an unmanaged same-name current Skill for explicit resolution', async () => {
     await createSkill(destinationRoot, 'orchestrate-courseware', '# User custom copy\n')
 
     const result = await runInstaller()
-    expect(result.stdout).toContain('Installed/updated: orchestrate-courseware')
+    expect(result.stdout).toContain('unmanaged same-name copy')
     expect(await readFile(
       path.join(destinationRoot, 'orchestrate-courseware', 'SKILL.md'),
       'utf8',
-    )).toContain('# Orchestrate current')
+    )).toContain('# User custom copy')
     expect(await exists(path.join(destinationRoot, 'build-courseware-project', 'SKILL.md'))).toBe(true)
-    expect((await readManifest()).skills).toHaveProperty('orchestrate-courseware')
+    expect((await readManifest()).skills).not.toHaveProperty('orchestrate-courseware')
   })
 
   it('retires an unmodified v1-managed V7 copy whose bytes match a known signature', async () => {

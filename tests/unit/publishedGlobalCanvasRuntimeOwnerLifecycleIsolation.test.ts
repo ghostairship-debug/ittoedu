@@ -154,7 +154,7 @@ describe('Published global canvas Runtime owner lifecycle isolation', () => {
     expect(failedTarget.style.pointerEvents).toBe('none')
     expect(failedTarget.querySelector('[data-runtime-fallback="true"]')).not.toBeNull()
     expect(healthyTarget.dataset.globalRuntimeState).toBe('playback')
-    expect(healthyTarget.style.pointerEvents).toBe('auto')
+    expect(healthyTarget.style.pointerEvents).toBe('none')
     const healthyGeneration = mountCalls.get('owner-lifecycle-healthy')!
     const failedGeneration = mountCalls.get('owner-lifecycle-failure')!
     expect(healthyGeneration).toEqual([

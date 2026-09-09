@@ -91,6 +91,7 @@ export interface PublishedComponentMountHandle {
   readonly lifecycle?: GuardedComponentInstanceLifecycle
   readonly element: HTMLElement
   waitForReady(): Promise<void>
+  waitForObservationReady?(): Promise<void>
   waitForCaptureReady(): Promise<void>
   failCapture?(error: Error): void
   restoreAfterCapture(): void
@@ -667,6 +668,10 @@ export function mountPublishedComponent(
     async waitForReady() {
       if (destroyed) throw new Error(`组件“${instanceId}”已销毁`)
       if (quarantined) throw lifecycle.getFailure()?.error ?? new Error('组件实例已隔离')
+    },
+    async waitForObservationReady() {
+      await handle.waitForReady()
+      await resources.waitForCaptureReady()
     },
     async waitForCaptureReady() {
       if (capturePrepared) return

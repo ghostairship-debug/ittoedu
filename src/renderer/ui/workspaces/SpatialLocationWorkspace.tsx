@@ -48,6 +48,7 @@ import {
   mountPublishedComponent,
 } from '../../../player/surfaces/publishedComponentMount'
 import type { PublishedCourseSession } from '../../../player/surfaces/publishedDynamicHosts'
+import { authoringObservationCameraToken, authoringObservationDraftToken } from '../../authoring/generation/authoringObservation'
 import { adaptV9SpatialEditorLayers, hitTestV9SpatialLayerItems } from '../../phaser/v9SpatialHitAdapter'
 import { FormulaEditDialog } from '../FormulaEditDialog'
 import { PublishedNativeContent } from '../PublishedNativeContent'
@@ -763,6 +764,16 @@ export function SpatialLocationWorkspace({
         ref={viewportRef}
         className="canvas-viewport"
         data-testid="spatial-world-stage"
+        data-observation-source={canvasMode === 'edit' ? 'authoring' : undefined}
+        data-observation-project-id={project.id}
+        data-observation-revision={project.revision}
+        data-observation-session-generation={worldTarget.sessionGeneration}
+        data-observation-surface-id={view.surfaceId}
+        data-observation-location-id={view.locationId}
+        data-observation-state-id=""
+        data-observation-ready="true"
+        data-observation-draft-token={authoringObservationDraftToken(contentEdit)}
+        data-observation-spatial-camera={authoringObservationCameraToken(liveCamera)}
         style={{
           backgroundColor: 'transparent',
         }}

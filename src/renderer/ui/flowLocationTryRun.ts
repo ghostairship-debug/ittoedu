@@ -1,8 +1,10 @@
 import type { ComponentPackageData } from '../../shared/componentTypes'
 import type { CourseProjectDocument } from '../../shared/courseProjectTypes'
 import { FlowSurfaceHost } from '../../player/surfaces/flow/FlowSurfaceHost'
+import { PlaybackViewSession } from '../../player/playbackViewSession'
 import { createLocationTryRunNavigation } from './locationTryRunNavigation'
 import { buildPublishedCourseV2Payload } from '../export/course/buildPublishedCourse'
+import { registerAuthoringObservationHost } from '../authoring/generation/authoringObservation'
 
 /**
  * Workspace current-location try-run for Flow. Does not import Phaser or the
@@ -15,6 +17,7 @@ export async function mountFlowLocationTryRun(input: {
   components?: Record<string, ComponentPackageData>
   locationId: string
 }) {
+  const playbackView = new PlaybackViewSession()
   const published = buildPublishedCourseV2Payload({
     project: input.project,
     assetFiles: input.assetFiles ?? {},
@@ -26,6 +29,7 @@ export async function mountFlowLocationTryRun(input: {
     navigation: navigation.port,
     locationId: input.locationId,
     initialTocOpen: false,
+    playbackView,
     courseProgressSource: {
       getLocations: () => published.locations.map((location) => ({
         id: location.id,
@@ -46,7 +50,19 @@ export async function mountFlowLocationTryRun(input: {
       }
     },
   })
-  await host.mount(input.container)
+  const viewport = playbackView.mount(input.container)
+  await host.mount(viewport)
   await host.activate()
+  playbackView.activate(host.surfaceId)
+  const unregisterObservation = registerAuthoringObservationHost({
+    root: input.container, source: 'trial',
+    read: () => ({ projectId: input.project.id, documentRevision: input.project.revision, ...host.readObservationState() }),
+  })
+  const destroyHost = host.destroy.bind(host)
+  host.destroy = async () => {
+    unregisterObservation()
+    await destroyHost()
+    playbackView.destroy()
+  }
   return host
 }

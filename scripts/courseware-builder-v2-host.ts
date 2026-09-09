@@ -1,19 +1,61 @@
 import path from 'node:path'
+import { createHash } from 'node:crypto'
+import { readFile } from 'node:fs/promises'
 import { createServer } from 'vite'
 import { chromium, type Page } from 'playwright'
 import type { CoursewareBuilderV2, CoursewareBuilderV2Options } from '../src/renderer/course/coursewareBuilderV2'
 import type { CoursewareCaseBuildOutput } from '../src/renderer/course/coursewareCaseBuilderApi'
+import generatedCapabilities from '../src/shared/generated/courseAgentCapabilities.json'
+import { queryCourseAgentCapabilities, readCourseAgentCapability, type CourseAgentCapabilityData,
+  type CourseAgentCapabilityQuery, type CourseAgentCapabilityCardOptions } from '../src/shared/courseAgentCapabilities'
+import { scanComponentCatalogDirectory, readCatalogComponentPackage, type ScannedComponentCatalogSource } from '../src/main/componentCatalogScanner'
+import { trustForManagedCatalogDigest } from '../src/shared/builtInComponentCatalog'
+import type { ComponentCatalogSnapshot } from '../src/shared/componentCatalog'
 
 type AsyncMethod<T> = T extends (...args: infer A) => infer R ? (...args: A) => Promise<Awaited<R>> : never
-export type RemoteCoursewareBuilderV2 = { readonly tools: readonly string[] } & { [K in 'snapshot' | 'activate' | 'createScope' | 'execute' | 'finish']: AsyncMethod<CoursewareBuilderV2[K]> }
+export type RemoteCoursewareBuilderV2 = { readonly tools: readonly string[] } & { [K in 'snapshot' | 'activate' | 'observe' | 'activateScope' | 'readReceipts' | 'discover' | 'readCapability' | 'createScope' | 'execute' | 'finish']: AsyncMethod<CoursewareBuilderV2[K]> }
 export interface CoursewareCaseBuilderApiV2 {
   createCourseProject(options: CoursewareBuilderV2Options): Promise<RemoteCoursewareBuilderV2>
+  discover(query?: CourseAgentCapabilityQuery): ReturnType<typeof queryCourseAgentCapabilities>
+  readCapability(id: string, options?: CourseAgentCapabilityCardOptions): ReturnType<typeof readCourseAgentCapability>
+  componentCatalog(): Promise<ComponentCatalogSnapshot>
+}
+
+/** Read-only use of the product's catalog scanner and managed digest trust. */
+export function createCoursewareBuilderCatalogPort(editorRoot: string) {
+  const root = process.env.COURSEWARE_COMPONENTS_DIR ? path.resolve(process.env.COURSEWARE_COMPONENTS_DIR) : path.resolve(editorRoot, '..', 'courseware-components')
+  let source: ScannedComponentCatalogSource | undefined
+  const load = async (): Promise<ComponentCatalogSnapshot> => {
+    source = undefined
+    try {
+      const digest = createHash('sha256').update(await readFile(path.join(root, 'catalog.json'))).digest('hex')
+      source = await scanComponentCatalogDirectory(root, trustForManagedCatalogDigest(digest))
+      return { sources: [source.source], packages: source.packages.map(({ thumbnailDataUrl: _thumbnail, ...entry }) => entry), issues: source.issues }
+    } catch (error) {
+      return { sources: [], packages: [], issues: [{ sourceLabel: 'Builder managed component catalog', code: 'catalog-unreadable', message: error instanceof Error ? error.message : String(error) }] }
+    }
+  }
+  const read = async (input: { sourceId: string; packageId: string; version: string }) => {
+    await load()
+    if (!source || source.source.sourceId !== input.sourceId || source.source.trust === 'prompt') throw new Error('当前 Builder 没有相同受信组件目录，请刷新发现')
+    return readCatalogComponentPackage(source, input.packageId, input.version)
+  }
+  return Object.freeze({ load, read })
 }
 
 /** Product-owned browser worker keeps CLI dynamic admission on the actual Published hosts. */
 export async function createCoursewareBuilderV2Host(editorRoot: string) {
   const server = await createServer({ root: editorRoot, configFile: path.join(editorRoot, 'vite.renderer.config.ts'),
-    server: { host: '127.0.0.1', port: 19800, strictPort: false }, logLevel: 'error' })
+    server: { host: '127.0.0.1', port: 19800, strictPort: false }, logLevel: 'error',
+    plugins: [{ name: 'courseware-private-builder-page', configureServer(server) {
+      // Install before Vite's SPA fallback. The worker loads the real Published
+      // modules without also starting the editor UI and its export bundle.
+      server.middlewares.use('/__courseware_builder_v2', (_request, response) => {
+        response.setHeader('Content-Type', 'text/html; charset=utf-8')
+        response.end('<!doctype html><html><head><meta charset="utf-8"></head><body></body></html>')
+      })
+    } }],
+  })
   let browser: Awaited<ReturnType<typeof chromium.launch>> | undefined
   try {
     await server.listen()
@@ -22,11 +64,30 @@ export async function createCoursewareBuilderV2Host(editorRoot: string) {
     if (!address || typeof address === 'string') throw new Error('Builder 浏览器端口不可用')
     const pages: Page[] = []
     const outputs = new WeakMap<object, CoursewareCaseBuildOutput>()
+    const catalog = createCoursewareBuilderCatalogPort(editorRoot)
     const api: CoursewareCaseBuilderApiV2 = Object.freeze({
+      discover: (query: CourseAgentCapabilityQuery = {}) => queryCourseAgentCapabilities(generatedCapabilities as CourseAgentCapabilityData, query),
+      readCapability: (id: string, options: CourseAgentCapabilityCardOptions = {}) => readCourseAgentCapability(generatedCapabilities as CourseAgentCapabilityData, id, options),
+      componentCatalog: catalog.load,
       async createCourseProject(options: CoursewareBuilderV2Options): Promise<RemoteCoursewareBuilderV2> {
         const page = await browser!.newPage()
         pages.push(page)
-        await page.goto(`http://127.0.0.1:${address.port}`)
+        await page.goto(`http://127.0.0.1:${address.port}/__courseware_builder_v2`)
+        await page.exposeFunction('__coursewareBuilderCatalog', catalog.load)
+        await page.exposeFunction('__coursewareBuilderCatalogFile', async (input: { sourceId: string; packageId: string; version: string }) => {
+          const file = await catalog.read(input)
+          return { ...file, bytes: Array.from(file.bytes) }
+        })
+        // A static browser script avoids tsx keepNames helpers escaping the
+        // serialized evaluation closure through nested function expressions.
+        await page.evaluate(`window.desktopAPI = {
+          ...window.desktopAPI,
+          loadComponentCatalog() { return window.__coursewareBuilderCatalog(); },
+          async readComponentCatalogPackage(request) {
+            const file = await window.__coursewareBuilderCatalogFile(request);
+            return { ...file, bytes: new Uint8Array(file.bytes) };
+          }
+        };`)
         await page.evaluate(async input => {
           const modulePath = '/src/renderer/course/coursewareBuilderV2.ts'
           const { createCoursewareBuilderV2 } = await import(modulePath)
@@ -39,7 +100,12 @@ export async function createCoursewareBuilderV2Host(editorRoot: string) {
         const remote: RemoteCoursewareBuilderV2 = {
           tools: Object.freeze(await page.evaluate(() => Reflect.get(window, '__coursewareBuilderV2').tools as string[])),
           snapshot: () => call('snapshot', []),
+          discover: query => call('discover', [query]),
+          readCapability: (id, options) => call('readCapability', [id, options]),
+          observe: input => call('observe', [input]),
+          readReceipts: input => call('readReceipts', [input]),
           activate: input => call('activate', [input]),
+          activateScope: input => call('activateScope', [input]),
           createScope: input => call('createScope', [input]),
           execute: (tool, input, destination) => call('execute', [tool, input, destination]),
           async finish() {
@@ -78,6 +144,7 @@ export interface CoursewareCaseBuilderContextV2 {
   caseDir: string
   documents: { teachingPlan: { path: string; content: string }; presentationScript: { path: string; content: string } }
   capabilityIndex: unknown
+  capabilityDiscovery?: unknown
   api: CoursewareCaseBuilderApiV2
 }
 export type CoursewareCaseBuilderV2 = (context: CoursewareCaseBuilderContextV2) => Promise<CoursewareCaseBuildOutput>

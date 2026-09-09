@@ -25,6 +25,7 @@ export const materialRequestSchema = z.discriminatedUnion('operation', [
   workspaceRequest.extend({ operation: z.literal('search'), query: z.string().max(4096) }).strict(),
   workspaceRequest.extend({ operation: z.literal('import-text'), input: materialInputSchema }).strict(),
   workspaceRequest.extend({ operation: z.literal('import-file') }).strict(),
+  workspaceRequest.extend({ operation: z.literal('read'), id: z.uuid() }).strict(),
   workspaceRequest.extend({ operation: z.literal('locate'), id: z.uuid() }).strict(),
   workspaceRequest.extend({ operation: z.literal('delete'), id: z.uuid() }).strict(),
   workspaceRequest.extend({ operation: z.literal('clear') }).strict(),

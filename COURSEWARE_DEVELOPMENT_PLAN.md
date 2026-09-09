@@ -1,6 +1,6 @@
 # IttoEdu 开发总纲
 
-> 当前路线核实日期：2026-09-07。当前任务、数量和状态只看自动生成的 [任务板](docs/development-plan/TASK_BOARD.md)。
+> 当前路线核实日期：2026-09-08。当前任务、数量和状态只看自动生成的 [任务板](docs/development-plan/TASK_BOARD.md)。
 >
 > 本文件只保存当前产品决定、边界和开发路线。已经完成、取消或被取代的内容在下一次路线更新时移出正文，由 Git 历史保留；不得在这里维护 changelog、完成卡清单或行号级历史源码快照。
 
@@ -53,7 +53,7 @@ IttoEdu 是受控团队使用的内部生产工具。默认工程、Runtime、Co
 - Runtime/Component 是经过审核的可信扩展。外部导入只是分发方式；真实 consumer 需要宿主能力时走稳定宿主接口或同宿主执行语义，不建权限审批平台。
 - 1.7 起，生成的 Runtime/Component 必须先通过自动准入门；通过后可获得当前可信扩展已经正式具备的宿主能力，无需人工代码审核。该信任不会开放 Provider Secret、原始 Electron Main、任意 OS 命令、远程脚本或尚未进入正式合同的接口。
 - 远程资源和 API 按工程的精确 `https` / `wss` origin 声明开放。远程脚本暂不开放；长期 Provider Secret 不得写入工程、Published payload、组件包或导出 HTML。
-- 首发 Agent 集成只支持用户自行安装并自行认证的 Codex、Claude 与 OpenCode。CLI 保持自身规划循环；编辑器只提供本地 session harness、受管暂存区、自动准入、宿主 canonical command 提交边界与直接 CLI 请求/结果接线，不复制 CLI 的模型规划循环。Owner 已取消 MCP 路线；未来脱离 CLI 时采用模型 API、自有工具与自建 harness，直接复用产品命令、准入与事务，不建设 MCP 过渡层，也不把未来模型接入纳入 1.6–2.0 的当前交付范围。
+- 长期架构为完整原生CLI加GUI和编辑器连接。用户自行安装认证Codex、Claude、OpenCode；在相同账号、配置、工作上下文与有效授权下保留文件/终端/网络、用户工具/连接、Skills、子任务和模型循环。应用只做界面、原生请求与授权往返、观察、候选摄取、自动准入与canonical事务，不复制模型循环。按需小上下文不裁剪原生权限；应用不新建MCP/工具RPC平台，也不屏蔽用户原生CLI已有连接。2.x不预设迁往自建harness。
 - AI 会话与工具轨迹保存在应用本地，按工程 ID 与规范化文件位置隔离；Save As 不复制会话。会话、材料与工具轨迹不进入 `.h5lesson`、Published、组件包或导出物；产品只承诺删除自身记录，不代替外部 CLI 删除其历史。
 - 单 HTML 明确区分离线便携与在线轻量；这是导出选择，不新增持久化 `projectMode`。
 - `v1.1.0` 是不可改写的 V9-only、主动模块化、零遗留与零降级已签署基线；`v1.1.1` 已闭合 Flow 选区字体/字号控件失焦和折叠光标待输入样式，并固定为新的维护版源码标签，不重打或移动 `v1.1.0`。1.1 的发布制品仍是对应源码标签和固定的 `examples/render-host-benchmark/render-host-benchmark-v2.html`，不含安装包。既有证据只在相关实现、依赖、测试、fixture 和验证定义未变化时复用；后续版本的发布身份仍由对应路线节点重新固定。
@@ -93,15 +93,17 @@ IttoEdu 是受控团队使用的内部生产工具。默认工程、Runtime、Co
 
 优先级仍以受支持场景中的用户可用性为第一轴。路线的完整任务图、发布制品、不可降级矩阵和次旗舰执行规格位于 [`docs/development-plan/roadmap/`](docs/development-plan/roadmap/README.md)；路线节点不是协调状态，只有满足依赖、届时事实与写锁后才按协议实例化，当前 `queued / active / blocked` 仍只看任务板。
 
-### 5.1 当前起点：1.8 AI可用性阻断，按新路线完成至2.0
+### 5.1 当前阶段：汇合1.8真实使用证据，再贯通当前工程创作至2.0
 
 2026-09-07 Owner实际使用证实图片不可见/改色未闭环、选区替换受阻、候选与模型/模式/反馈缺口、Flow控制器不可达。S3存在实质可用性阻断，不是仅等待签署。Owner要求助手至少达到VS Code Codex/Claude Code插件相应工作流体验，并实时理解当前课件；外部Build Skill同步按需发现/读取。
 
-执行依据为[当前至2.0开发方案](docs/development-plan/AI_ASSISTANT_DELIVERY_PLAN.md)、[共同实施合同](docs/development-plan/roadmap/1.8/IMPLEMENTATION_CONTRACT.md)和已同步的各版DAG/独立规格。[G01–G12](docs/development-plan/reviews/1.8-ai-assistant-gap-register.md)与[官方对标评估](docs/development-plan/AI_ASSISTANT_VSCODE_BENCHMARK_ASSESSMENT.md)作为范围和基线依据；评估中W包/旧抽样建议由新方案取代。本轮仅编排计划，不代表新产品实现已完成或已启动。
+执行依据为[当前至2.0开发方案](docs/development-plan/AI_ASSISTANT_DELIVERY_PLAN.md)、[共同实施合同](docs/development-plan/roadmap/1.8/IMPLEMENTATION_CONTRACT.md)和已同步的各版DAG/独立规格。[G01–G12](docs/development-plan/reviews/1.8-ai-assistant-gap-register.md)与[官方对标评估](docs/development-plan/AI_ASSISTANT_VSCODE_BENCHMARK_ASSESSMENT.md)保留为范围和基线依据。2026-09-08[首批review](docs/development-plan/reviews/1.8-first-batch-review.md)后，Owner授权并行完成1.8开发；当前已集成089–104相关产品实现，并取得Flow新导出、共享组件全实例、104外部片段和Native文字自动尺寸的直接工程证据。103/050真实三CLI有限重复矩阵仍在汇合，实际失败返回对应Owner修复，S3尚未签署。
 
-- 1.8新增088–104：原生可行性→任务/观察合同→模型与三adapter→当前结构/草稿/画面→共用按需能力→语义编辑/图片/Runtime→宿主反馈与教师交互→人工交替恢复→助手/Build Skill真实工程结束门。当前可开始的剩余集合为088与089，实际推进遵守依赖和写锁。
-- 1.9：在S3后完成恢复/迁移/删除、会话搜索与分支、多任务、未命名工程/首次保存、长任务上下文及真实连续课例。
-- 2.0：完善生产设置、整课/跨表面QA、Skills/数据控制和无障碍，025实测插件对照，040三CLI完整矩阵，041 PPTX生产验收，050/S4教师签署后发布同一源码与冻结HTML。
+- 1.8：089–104相关实现已集成，当前按103汇合各依赖的有效工程证据和剩余真实三CLI自然任务；已通过且实现/环境未变的证据继续复用，仅补实际失败对应修复的受影响验证。原050三CLI、PPTX、三表面和导航仍进入S3；未命名与完整双流程归1.9。
+- 1.9：042未命名/首次保存、045材料结构与分片、044内置自动/手动和按阶段Skills；041聊天首页、项目/会话列表、极简/专业与局部AI，043长任务，050连续课例与主要瓶颈优化。051 PPTX并列，060汇合；软件与创作策略同时推进。
+- 2.0：021实际交付内置Skills，022材料/数据控制，020把材料、教学设计、呈现、生成、修改、实际运行检查、修复和导出全部在软件内闭环；025有限有效对照、040三CLI及速度质量汇合，041 PPTX并列，050/S4签署后发布同一源码与冻结HTML。
+
+Owner于2026-09-08最终决定分阶段完成1.8–2.0，不将全部功能压入1.8。自动创作必须上传且成功读取材料，优先模板/设计；手动依次确认教学简报、策划、呈现简报、脚本。默认极简，专业模式保留完整人工能力及相同AI。常见Native秒级、代表动态分钟级、标准整课30分钟内作为阶段目标，以真实固定课例衡量。2.0起教师无需外部AI、终端或Builder完成检查/修复。完整体验、创作策略、质量和2.1媒体/2.2运行时服务见[产品与创作优化方案](docs/development-plan/AGENT_AUTHORING_LONG_TERM_PLAN.md)。
 
 已有[三表面工程整合](docs/development-plan/reviews/1.8-surface-integration-exit.md)、[场景/步骤导航](docs/development-plan/reviews/1.8-navigation-level-exit.md)和[CLI调用/格式修复](docs/development-plan/reviews/1.8-cli-call-format-repair.md)证据按已验证范围保留，不能外推普通AI编辑已可用。Flow D1方案A已由Owner批准：正文响应式布局与浮层统一CSS尺度，主动运行缩放单独应用；不重问该选择。新089修实际剩余可达性问题。
 
@@ -122,9 +124,9 @@ r18-060/S3必须同时等待新增103双入口可用性、原050当前三CLI、0
 
 - **1.6 Local CLI Harness**：探测、启动、流式事件、恢复、取消和本地会话隔离；Codex、Claude、OpenCode 自行登录，1.6 阶段 AI 默认隐藏（1.8 起按 Owner 决定开放入口），CLI 缺失不影响人工编辑。
 - **1.7 生成内核**：Native → Recipe → Existing Component → Generated Component → Runtime 载体阶梯；CLI 只接收不可变最小 snapshot 并向 session staging/structured stdout 输出严格 typed candidate，宿主通过 1.4 canonical commands 原子提交；CLI 无 live 工程接口，自动准入失败时工程零写入。
-- **1.8 可用AI创作**：以版本化任务接收多次不可变当前观察和host result，CLI原生图片/交互/模型控制、共用按需能力、文字/图片/载体替换、实际效果验证及教师交互闭环；Build Skill同步迁移。103工程门后由S3真实签署，不建设MCP。
-- **1.9 持续创作**：重启恢复、迁移/损坏隔离/删除、搜索分支/多任务、未命名工程/首次保存、原生长上下文与连续课例Dogfood。
-- **2.0 生产与对标**：完善设置、整课/跨表面QA、Skills/数据/无障碍，真实插件工作流比较与三CLI最终矩阵，S4教师签署及同一制品发布；不把它描述成面向外部不受信用户的公开发行。
+- **1.8 当前工程AI与效率基础**：修实际阻断，接齐原生CLI必要能力与当前结构/画面/运行反馈、按需能力、窄修改；普通内部构建显示入口，103与原三CLI/PPTX/三表面/导航汇合S3。
+- **1.9 聊天创作工作流**：未命名/首存、材料结构/分片、内置自动/手动、聊天主工作台、极简/专业与局部AI；恢复、长任务和连续课例优化。
+- **2.0 内部生产闭环**：内置Skills、全课QA与修复、设置/数据/无障碍，标准任务速度质量与完整CLI对等；S4后发布内部生产源码与冻结HTML。
 
 1.6–1.9 只发布源码标签；1.8 起 AI 入口默认显示；2.0 发布源码标签和固定课例离线 HTML，不做安装包。
 
@@ -136,9 +138,9 @@ r18-060/S3必须同时等待新增103双入口可用性、原050当前三CLI、0
 
 ### 5.4 发布顺序、并行与证据
 
-版本发布门按 1.1.1 → 1.2 → … → 2.0 顺序通过；版本内与前置能力之间按真实依赖和写锁形成 DAG，不再把所有任务串成一条单链。OpenMAIC 等 optional 节点不得出现在核心依赖闭包。
+版本发布门按 1.1.1 → 1.2 → … → 2.0 顺序通过；版本内DAG只保留开工硬前置；窄接口稳定后先并行实现独立叶子，真实consumer接线和完整Acceptance再汇合。路线写域与当前批次占锁分开，同一粗锁由唯一Owner持有并委派非重叠叶子，共享实体文件顺序集成。OpenMAIC 等 optional 节点不得出现在核心依赖闭包。
 
-每个新增能力必须同时证明人工 UI、产品命令或 Authoring Tool、保存重开、Player、适用导出、诊断和能力索引；版本节点的自动化与目标测试只形成 `engineering candidate` 和 `vX.Y.Z-rc.N`。只有 S1–S4 的 Owner 对合并范围固定课例签署后，才晋升对应行为到不可降级矩阵并创建无后缀 accepted 标签；同时证明没有新增 raw Store consumer、跨 Owner deep import / 运行时依赖环、第二 Store/History/Session/writer 或重复 registry/catalog。验证仍遵循最小充分原则，不建设架构评分平台。
+每个新增能力的适用人工 UI、产品命令或 Authoring Tool、保存重开、Player、导出、诊断和能力索引证据须闭合；按本次受影响路径补检并复用有效结果，不要求每个局部节点重新生成整课或重复完整矩阵；版本节点的自动化与目标测试只形成 `engineering candidate` 和 `vX.Y.Z-rc.N`。只有 S1–S4 的 Owner 对合并范围固定课例签署后，才晋升对应行为到不可降级矩阵并创建无后缀 accepted 标签；同时证明没有新增 raw Store consumer、跨 Owner deep import / 运行时依赖环、第二 Store/History/Session/writer 或重复 registry/catalog。验证仍遵循最小充分原则，不建设架构评分平台。
 
 ### 5.5 独立兼容与供应链风险
 
@@ -149,7 +151,7 @@ r18-060/S3必须同时等待新增103双入口可用性、原050当前三CLI、0
 ## 6. 暂缓与非目标
 
 - 不创建 V10，不恢复 V8 导入，不建立 V9/V8 双轨或迁移 UI。
-- 不建设第二套模型规划循环、Provider 插件平台、权限审批平台、通用工作流引擎、长期 Provider Secret 存储或任意 OS 命令通道。
+- 完整原生CLI加GUI为长期方向，不预设自建模型循环、Provider插件平台、通用工作流/权限平台或应用另造OS命令通道。原生CLI已有终端、网络、工具与授权按原生能力保留；Runtime/Component不能继承这些CLI权限。
 - 1.6–1.7 阶段 AI 默认隐藏；按 Owner 已明确决定，1.8 起普通内部生产构建默认显示创作助手，入口开放不代替 S3 验收。未完成的 internal/reserved 接口仍不能被宣传成可用能力。
 - 不因内部生产工具的主动模块化建设多租户隔离、公开插件权限市场、零信任审批平台、通用 capability broker 或假设性恶意扩展沙箱；只有分发范围、信任来源或宿主能力边界真实变化时才重新裁决威胁模型。
 - 不让 OpenMAIC、安装包、未证实的兼容矩阵、判题结果自动桥、图数据库、向量库、CRDT 或协同预研进入核心发布关键路径。

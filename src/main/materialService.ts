@@ -40,10 +40,11 @@ export async function operateMaterials(window: BrowserWindow, request: unknown):
       const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes)
       return [await repository.import(workspace, { title: path.basename(filename), text, source: { kind: 'file', locator: filename } })]
     }
+    case 'read':
     case 'locate': {
       const record = await repository.read(workspace, input.id)
       if (!record) throw new Error('材料已删除或不属于当前工程')
-      if (record.source.kind === 'file') {
+      if (input.operation === 'locate' && record.source.kind === 'file') {
         await fs.access(record.source.locator)
         shell.showItemInFolder(record.source.locator)
       }

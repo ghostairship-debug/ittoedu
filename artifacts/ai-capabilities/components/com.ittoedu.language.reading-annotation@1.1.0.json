@@ -1,0 +1,64 @@
+{
+  "actualSha256": "b4b7b1104ff390f675811e4ca7460042b28f00aaa9f40614a4f79e56f00cb82a",
+  "availability": "available",
+  "catalogSource": {
+    "actualCatalogSha256": "fedf8315a8a1cc636771760be95931b31dba7f6625b62adc8247d7eebf044573",
+    "expectedCatalogSha256": "fedf8315a8a1cc636771760be95931b31dba7f6625b62adc8247d7eebf044573",
+    "kind": "external-component-catalog",
+    "location": "../courseware-components",
+    "trusted": true
+  },
+  "category": "语文标注",
+  "componentSchemaVersion": 4,
+  "description": "用可编辑标记文稿呈现重音、统一长停顿和文字上方的连读弧线",
+  "example": "按 request.context.componentCatalogFile.path 读取本轮完整目录，找到 packageId/version/sha256 与卡片完全匹配的 source，使用 {operation:\"catalog\",sourceId:source.sourceId,packageId:source.packageId,version:source.version,sha256:source.sha256}。sourceId 必须来自当前宿主，不能猜测。",
+  "hashVerified": true,
+  "license": {
+    "status": "unknown"
+  },
+  "maintainer": "unassigned",
+  "manifestVerified": true,
+  "name": "语文朗读标注",
+  "note": "catalog 操作需要宿主目录 consumer；不能把生成时可用误作当前宿主可用。Builder 没有目录 consumer 时使用公开 candidate 文件输入或明确报告缺口。目录不可用不阻止创建或导入工程内组件。",
+  "packageId": "com.ittoedu.language.reading-annotation",
+  "packagePath": "packages/reading-annotation.h5component",
+  "quality": "experimental",
+  "releaseBlockers": [
+    "license-unverified",
+    "maintainer-unassigned"
+  ],
+  "renderMode": "dom",
+  "runtimeApiVersion": 4,
+  "schoolStage": [],
+  "sha256": "b4b7b1104ff390f675811e4ca7460042b28f00aaa9f40614a4f79e56f00cb82a",
+  "source": {
+    "kind": "handoff",
+    "reference": "feedback-package:f0cd81e9642be799c7382bc84a46649e9e9d86031de2ceeb91d6c29cdb7c7a688/04/examples/language-annotation-components/reading-annotation"
+  },
+  "subject": [
+    "语文"
+  ],
+  "supportedScopes": [
+    "scene"
+  ],
+  "tags": [
+    "朗读",
+    "重音",
+    "停顿",
+    "连读",
+    "DOM"
+  ],
+  "thumbnailAvailable": true,
+  "thumbnailPath": "components/language/reading-annotation/thumbnail.svg",
+  "tool": "component.insert",
+  "unavailableReasons": [],
+  "verifiedAt": "2026-08-12T16:46:41.614Z",
+  "verifiedCases": [
+    "component-catalog-v8-matrix:catalog-ui-roundtrip",
+    "component-catalog-v8-matrix:editor-player-thumbnail",
+    "component-catalog-v8-matrix:offline-html-web",
+    "component-catalog-v8-matrix:pdf-pptx-static",
+    "component-catalog-v8-matrix:lifecycle-error-isolation-25x4"
+  ],
+  "version": "1.1.0"
+}

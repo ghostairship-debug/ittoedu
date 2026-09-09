@@ -1,0 +1,521 @@
+{
+  "candidateCarrier": {
+    "default": "native"
+  },
+  "inputSchema": {
+    "$defs": {
+      "__schema0": {
+        "oneOf": [
+          {
+            "additionalProperties": false,
+            "properties": {
+              "defaultValue": {
+                "type": "boolean"
+              },
+              "key": {
+                "$ref": "#/$defs/__schema1"
+              },
+              "valueType": {
+                "const": "boolean",
+                "type": "string"
+              }
+            },
+            "required": [
+              "key",
+              "valueType",
+              "defaultValue"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "defaultValue": {
+                "type": "number"
+              },
+              "key": {
+                "$ref": "#/$defs/__schema1"
+              },
+              "valueType": {
+                "const": "number",
+                "type": "string"
+              }
+            },
+            "required": [
+              "key",
+              "valueType",
+              "defaultValue"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "defaultValue": {
+                "type": "string"
+              },
+              "key": {
+                "$ref": "#/$defs/__schema1"
+              },
+              "valueType": {
+                "const": "string",
+                "type": "string"
+              }
+            },
+            "required": [
+              "key",
+              "valueType",
+              "defaultValue"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "defaultValue": {
+                "type": "null"
+              },
+              "key": {
+                "$ref": "#/$defs/__schema1"
+              },
+              "valueType": {
+                "const": "null",
+                "type": "string"
+              }
+            },
+            "required": [
+              "key",
+              "valueType",
+              "defaultValue"
+            ],
+            "type": "object"
+          }
+        ]
+      },
+      "__schema1": {
+        "maxLength": 240,
+        "minLength": 1,
+        "type": "string"
+      },
+      "__schema10": {
+        "items": {
+          "$ref": "#/$defs/__schema11"
+        },
+        "maxItems": 1000,
+        "type": "array"
+      },
+      "__schema11": {
+        "maxLength": 300,
+        "minLength": 1,
+        "type": "string"
+      },
+      "__schema12": {
+        "additionalProperties": false,
+        "properties": {
+          "altKey": {
+            "type": "boolean"
+          },
+          "command": {
+            "enum": [
+              "next",
+              "previous"
+            ],
+            "type": "string"
+          },
+          "ctrlKey": {
+            "type": "boolean"
+          },
+          "id": {
+            "maxLength": 240,
+            "minLength": 1,
+            "type": "string"
+          },
+          "key": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          },
+          "metaKey": {
+            "type": "boolean"
+          },
+          "shiftKey": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "command",
+          "key",
+          "altKey",
+          "ctrlKey",
+          "shiftKey",
+          "metaKey"
+        ],
+        "type": "object"
+      },
+      "__schema2": {
+        "const": "block",
+        "type": "string"
+      },
+      "__schema3": {
+        "items": {
+          "$ref": "#/$defs/__schema4"
+        },
+        "maxItems": 20000,
+        "minItems": 1,
+        "type": "array"
+      },
+      "__schema4": {
+        "maxLength": 240,
+        "minLength": 1,
+        "type": "string"
+      },
+      "__schema5": {
+        "items": {
+          "$ref": "#/$defs/__schema4"
+        },
+        "maxItems": 20000,
+        "minItems": 1,
+        "type": "array"
+      },
+      "__schema6": {
+        "enum": [
+          "all",
+          "any"
+        ],
+        "type": "string"
+      },
+      "__schema7": {
+        "items": {
+          "$ref": "#/$defs/__schema8"
+        },
+        "maxItems": 64,
+        "minItems": 1,
+        "type": "array"
+      },
+      "__schema8": {
+        "oneOf": [
+          {
+            "additionalProperties": false,
+            "properties": {
+              "exists": {
+                "type": "boolean"
+              },
+              "key": {
+                "$ref": "#/$defs/__schema1"
+              },
+              "type": {
+                "const": "exists",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "key",
+              "exists"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "key": {
+                "$ref": "#/$defs/__schema1"
+              },
+              "operator": {
+                "enum": [
+                  "eq",
+                  "neq",
+                  "gt",
+                  "gte",
+                  "lt",
+                  "lte"
+                ],
+                "type": "string"
+              },
+              "type": {
+                "const": "compare",
+                "type": "string"
+              },
+              "value": {
+                "anyOf": [
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "type",
+              "key",
+              "operator",
+              "value"
+            ],
+            "type": "object"
+          }
+        ]
+      },
+      "__schema9": {
+        "maxLength": 2000,
+        "minLength": 1,
+        "type": "string"
+      }
+    },
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "oneOf": [
+      {
+        "additionalProperties": false,
+        "properties": {
+          "declaration": {
+            "$ref": "#/$defs/__schema0"
+          },
+          "operation": {
+            "const": "add-state",
+            "type": "string"
+          }
+        },
+        "required": [
+          "operation",
+          "declaration"
+        ],
+        "type": "object"
+      },
+      {
+        "additionalProperties": false,
+        "properties": {
+          "declaration": {
+            "$ref": "#/$defs/__schema0"
+          },
+          "operation": {
+            "const": "update-state",
+            "type": "string"
+          }
+        },
+        "required": [
+          "operation",
+          "declaration"
+        ],
+        "type": "object"
+      },
+      {
+        "additionalProperties": false,
+        "properties": {
+          "operation": {
+            "const": "delete-state",
+            "type": "string"
+          }
+        },
+        "required": [
+          "operation"
+        ],
+        "type": "object"
+      },
+      {
+        "additionalProperties": false,
+        "properties": {
+          "guard": {
+            "additionalProperties": false,
+            "properties": {
+              "conditions": {
+                "$ref": "#/$defs/__schema7"
+              },
+              "effect": {
+                "$ref": "#/$defs/__schema2"
+              },
+              "fromLocationIds": {
+                "$ref": "#/$defs/__schema3"
+              },
+              "match": {
+                "$ref": "#/$defs/__schema6"
+              },
+              "message": {
+                "$ref": "#/$defs/__schema9"
+              },
+              "toLocationIds": {
+                "$ref": "#/$defs/__schema5"
+              }
+            },
+            "required": [
+              "effect",
+              "toLocationIds",
+              "match",
+              "conditions",
+              "message"
+            ],
+            "type": "object"
+          },
+          "operation": {
+            "const": "add-guard",
+            "type": "string"
+          }
+        },
+        "required": [
+          "operation",
+          "guard"
+        ],
+        "type": "object"
+      },
+      {
+        "additionalProperties": false,
+        "properties": {
+          "guard": {
+            "additionalProperties": false,
+            "properties": {
+              "conditions": {
+                "$ref": "#/$defs/__schema7"
+              },
+              "effect": {
+                "$ref": "#/$defs/__schema2"
+              },
+              "fromLocationIds": {
+                "$ref": "#/$defs/__schema3"
+              },
+              "match": {
+                "$ref": "#/$defs/__schema6"
+              },
+              "message": {
+                "$ref": "#/$defs/__schema9"
+              },
+              "toLocationIds": {
+                "$ref": "#/$defs/__schema5"
+              }
+            },
+            "required": [
+              "effect",
+              "toLocationIds",
+              "match",
+              "conditions",
+              "message"
+            ],
+            "type": "object"
+          },
+          "operation": {
+            "const": "update-guard",
+            "type": "string"
+          }
+        },
+        "required": [
+          "operation",
+          "guard"
+        ],
+        "type": "object"
+      },
+      {
+        "additionalProperties": false,
+        "properties": {
+          "operation": {
+            "const": "delete-guard",
+            "type": "string"
+          }
+        },
+        "required": [
+          "operation"
+        ],
+        "type": "object"
+      },
+      {
+        "additionalProperties": false,
+        "properties": {
+          "network": {
+            "additionalProperties": false,
+            "properties": {
+              "connectOrigins": {
+                "$ref": "#/$defs/__schema10"
+              }
+            },
+            "type": "object"
+          },
+          "operation": {
+            "const": "network",
+            "type": "string"
+          }
+        },
+        "required": [
+          "operation",
+          "network"
+        ],
+        "type": "object"
+      },
+      {
+        "additionalProperties": false,
+        "properties": {
+          "operation": {
+            "const": "playback",
+            "type": "string"
+          },
+          "playback": {
+            "additionalProperties": false,
+            "properties": {
+              "controls": {
+                "enum": [
+                  "canvas",
+                  "none"
+                ],
+                "type": "string"
+              },
+              "keyboardNavigation": {
+                "type": "boolean"
+              },
+              "presenter": {
+                "additionalProperties": false,
+                "properties": {
+                  "additionalBindings": {
+                    "items": {
+                      "$ref": "#/$defs/__schema12"
+                    },
+                    "maxItems": 32,
+                    "type": "array"
+                  },
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "strategy": {
+                    "enum": [
+                      "scene-navigation",
+                      "authored-command"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "enabled",
+                  "strategy",
+                  "additionalBindings"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "controls",
+              "keyboardNavigation",
+              "presenter"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "operation",
+          "playback"
+        ],
+        "type": "object"
+      }
+    ]
+  },
+  "name": "course.settings",
+  "support": "conditional-on-input-target-resources-and-host",
+  "supportedScopes": [
+    "slide:global",
+    "flow:global",
+    "spatial-2d:global"
+  ],
+  "version": 1
+}

@@ -1,0 +1,97 @@
+{
+  "candidateCarrier": {
+    "default": "runtime"
+  },
+  "description": "使用现有 Runtime 的原 update target 修改 enabled、renderMode 或已公开的 content 文本；initialValue须为观察中的当前值。保留实例身份与未改字段。速度等源码参数使用 runtime.source。",
+  "inputSchema": {
+    "$defs": {
+      "__schema0": {
+        "enum": [
+          "dom",
+          "phaser",
+          "hybrid"
+        ],
+        "type": "string"
+      }
+    },
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "oneOf": [
+      {
+        "additionalProperties": false,
+        "properties": {
+          "field": {
+            "const": "enabled",
+            "type": "string"
+          },
+          "initialValue": {
+            "type": "boolean"
+          },
+          "value": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "field",
+          "initialValue",
+          "value"
+        ],
+        "type": "object"
+      },
+      {
+        "additionalProperties": false,
+        "properties": {
+          "field": {
+            "const": "renderMode",
+            "type": "string"
+          },
+          "initialValue": {
+            "$ref": "#/$defs/__schema0"
+          },
+          "value": {
+            "$ref": "#/$defs/__schema0"
+          }
+        },
+        "required": [
+          "field",
+          "initialValue",
+          "value"
+        ],
+        "type": "object"
+      },
+      {
+        "additionalProperties": false,
+        "properties": {
+          "contentKey": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "field": {
+            "const": "content",
+            "type": "string"
+          },
+          "initialValue": {
+            "type": "string"
+          },
+          "value": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "field",
+          "contentKey",
+          "initialValue",
+          "value"
+        ],
+        "type": "object"
+      }
+    ]
+  },
+  "name": "runtime.configure",
+  "support": "conditional-on-input-target-resources-and-host",
+  "supportedScopes": [
+    "slide:scene",
+    "slide:global",
+    "flow:surface"
+  ],
+  "version": 1
+}

@@ -2,7 +2,29 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   capturePublishedSlidePng,
   registerPublishedCaptureResource,
+  waitForPublishedObservationReady,
 } from '../../src/player/surfaces/publishedCapture'
+
+it('waits for the current live resources without preparing, suspending or rendering a static final frame', async () => {
+  const root = document.createElement('div')
+  document.body.append(root)
+  const waitForCaptureReady = vi.fn(async () => undefined)
+  const restoreAfterCapture = vi.fn()
+  let release!: () => void
+  const pending = new Promise<void>(resolve => { release = resolve })
+  const waitForObservationReady = vi.fn(() => pending)
+  const unregister = registerPublishedCaptureResource(root, { waitForCaptureReady, waitForObservationReady, restoreAfterCapture })
+  try {
+    let completed = false
+    const capture = waitForPublishedObservationReady(root).then(() => { completed = true })
+    await Promise.resolve()
+    expect(completed).toBe(false)
+    release(); await capture
+    expect(waitForObservationReady).toHaveBeenCalledTimes(1)
+    expect(waitForCaptureReady).not.toHaveBeenCalled()
+    expect(restoreAfterCapture).not.toHaveBeenCalled()
+  } finally { unregister(); root.remove() }
+})
 
 function fixedRect(width: number, height: number): DOMRect {
   return {

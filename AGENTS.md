@@ -6,17 +6,19 @@
 
 ## 仓库开发入口
 
+- 2026-09-08目标分期：1.8修当前CLI/工程编辑及效率基础；1.9的044实现内置自动/手动流程，045处理材料，042未命名/首存，041聊天首页与极简/专业工作台。自动必须上传且成功读取材料；手动依次确认教学简报、策划、呈现简报、脚本。上述外部Skill在044实施前继续现有手动确认路径；044同步实际guard/Skill路由，不能把规划当已实现。2.0起教师的所有课件步骤在软件内完成，包括QA/修复，不依赖另开外部AI/终端。详见[创作方案](docs/development-plan/AGENT_AUTHORING_LONG_TERM_PLAN.md)及[开发计划](docs/development-plan/AI_ASSISTANT_DELIVERY_PLAN.md)。
+
 - 开始产品代码实现、缺陷修复或代码评审前，先读根目录 [当前开发总纲](COURSEWARE_DEVELOPMENT_PLAN.md) 的“当前开发路线”、[任务板](docs/development-plan/TASK_BOARD.md) 和任务涉及的源码、合同与目标测试；路线节点不是协调状态，满足依赖、当前事实与写锁后才按协议实例化，历史阶段名称不得自动恢复任务。
 - 涉及 Schema/持久化、Surface、global/surface 图层、教师控制器、Published/Player、Runtime/Component、网络、导出或稳定身份时，行动前必须补读 [架构合同](docs/development-plan/ARCHITECTURE_CONTRACT.md) 的相关条目。
-- 默认开发闭环、敏感变更、任务协调、写锁、验证停止条件与完成定义只遵循 [工作协议](docs/development-plan/WORKING_PROTOCOL.md)；不先做风险分级，单执行者单会话工作不建卡。当前 queued/active/blocked 协调状态只看任务板。
+- 默认开发闭环、敏感变更、任务协调、写锁、验证停止条件与完成定义只遵循 [工作协议](docs/development-plan/WORKING_PROTOCOL.md)；不先做风险分级，单执行者单会话工作不建卡。当前 queued/active/blocked 协调状态只看任务板。开工前置与真实集成验收分开；稳定窄接口后的独立叶子可并行，由唯一Owner持有共享锁并分配精确非重叠写域。局部检查选择实际命名用例，必要制品按变化只准备一次；不得整文件隐式触发真实CLI矩阵或把排除/零匹配算通过。
 - 当前产品事实以用户明确决定、正式 Schema/合同、源码和可复现结果为准。repo-index 只是可缺省的本地导航缓存，只有确能减少阅读量时才使用，不能阻断实现或覆盖源码事实。
 
 ## 自动加载硬边界
 
 - 当前协议为 Course Project V9、Published Course V2、Runtime API 2/3 与 Component API 4；不打开或导入 V8 `.h5lesson`，不借 1.1 清理创建 V10。1.1 同时完成 V8 清零与主动模块化：`editorStore.ts` 最终只作为唯一 Zustand composition root，App/Workspace/Properties/Flow、Slide Published Native painter 和 Course package analyzer/preflight/emitter 按独立规格迁入正式 Owner。必须先迁移并验证等价 consumer；每个提交删除对应旧 writer/实现，任一中间提交都不得双写或削弱当前 UI、三 Surface、保存恢复、Undo/Redo、Preview/Player、Runtime/Component、Builder、诊断或导出能力。
 - V9 已有字段、判别器和语义软冻结；additive 可选字段必须独立合同提交并保持 `.strict()`。Table、Chart 与 Slide Native input 是 Owner 明确批准的三个 V9 新 strict discriminator 窄例外，并在 Published Course V2 增加匹配的严格分支；旧 V9 必须继续可读，旧 reader 遇到新分支必须明确失败，不得静默剥离、截图降级或塞入 legacy SceneNode。
-- 按 Owner 2026-09-07 决定，1.8 起普通内部生产构建默认显示创作助手和 CLI 聊天入口，无需 dogfood 开关；不表示外部公开发行或自动通过版本验收。在对应版本门完成前不得宣称相应能力可用。`courseAiHandoff` / `courseAiPatch` 等 internal/reserved 名称不能作为接线依据；正式路径是用户自行安装并认证的 Codex、Claude、OpenCode CLI。1.7 起 CLI 始终消费不可变最小 snapshot，并经 structured stdout/artifact channel，或在启用文件工具时经当前 session staging 输出 strict candidate；宿主通过 1.4 canonical commands 原子提交，CLI 没有 live project API。Native/Recipe/Existing Component 不等待动态代码门；Generated Component/Runtime 才经静态与真实宿主准入。1.8 直接接 CLI 请求、Skills 与基础聊天，不建设 MCP 或替代工具 RPC；当前不复制 CLI 模型循环。未来脱离 CLI 时另行实现模型 API、自有工具与自建 harness，直接复用产品命令、准入和事务，不以 MCP 过渡，也不提前加入当前版本范围；不建立第二工程真相或第二历史。
+- 按Owner决定，1.8起普通内部构建默认显示创作助手和CLI聊天，无需dogfood开关；版本门前不得宣称可用或对外发行。长期架构是完整原生Codex、Claude、OpenCode加GUI和编辑器连接：同配置/授权下保留文件、终端、网络、工具/连接、Skills、子任务和模型循环，GUI承接原生授权，不默默提权。最小snapshot是输入优化，不是原生权限限制。应用不自建模型循环、MCP或替代工具RPC平台，不屏蔽CLI已有连接。编辑器candidate经structured stdout/artifact或staging返回，由宿主canonical commands与唯一资源事务提交；不暴露raw Store或live project API。Native/Recipe/Existing Component不等待动态门；Generated Component/Runtime仍经静态和真实宿主准入；不建立第二工程真相或历史。
 - AI 会话、材料和 tool trace 保存在应用本地版本化目录，以“工程 ID + 规范化文件位置”隔离；Save As 创建新 workspace identity 且不复制旧会话。它们可删除但不进入 `.h5lesson`、Published、Component/Runtime 或导出物；应用只能承诺删除自己的记录，不虚假承诺同时删除外部 CLI 历史。
 - Runtime/Component 是可信扩展，外部导入只是分发方式；自动生成的 Component/Runtime 源码必须先留在应用暂存区，经编译、协议、依赖、素材闭包、精确 origin、生命周期、资源上限、静态后备和真实宿主 smoke 自动准入后，才可自动取得当前正式可信扩展已有的宿主能力。自动可信不授予 Provider Secret、原始 Electron Main、任意 OS 命令、未开放远程脚本或未经合同批准的新宿主接口；长期 Provider Secret 不得写入工程、Published payload、组件包或任何导出物。
-- 产品默认运行在受控团队与受信代码环境；staging 的硬边界是宿主只摄取当前 candidate root 内 realpath 闭合内容、`.h5lesson` 只经 canonical transaction 写入、失败/迟到结果零工程写入。除非分发或信任来源改变，不把这些规则升级成公开恶意插件、多租户或通用 OS sandbox 平台。
+- 产品默认运行在受控团队与受信代码环境；staging硬边界是宿主只摄取当前candidate root内realpath闭合内容，正式工程修改只经canonical transaction，当前未提交的失败/迟到候选零工程写入。该规则不限制CLI整体文件权限；原生工具外部改变磁盘工程文件不算宿主提交，由既有打开/保存Owner处理必要的重载与保存冲突。除非信任来源改变，不扩为通用OS沙箱平台。
 - 自动化最多证明 `engineering candidate`；真实视觉、互动和教师复核决定 `art candidate` / `accepted`。

@@ -1,0 +1,53 @@
+{
+  "destination": {
+    "insertion": "after current locationId",
+    "kind": "create",
+    "owner": "scene",
+    "parent": {
+      "kind": "course-locations"
+    }
+  },
+  "example": "const view = await session.observe(); const scope = await session.createScope({parent:{kind:\"course-locations\"},insertion:{kind:\"after\",siblingId:view.scope.locationId}}); const receipt = await session.execute(\"recipe.apply\", card.input, {kind:\"create\",scope}); if(receipt.status!==\"committed\") throw new Error(JSON.stringify(receipt.diagnostics));",
+  "fields": [
+    {
+      "key": "title",
+      "label": "题干",
+      "value": "下面哪个数是偶数？"
+    },
+    {
+      "key": "options",
+      "label": "选项（每行一个）",
+      "value": "3\n8\n11"
+    },
+    {
+      "key": "correct",
+      "label": "正确选项序号（从 1 开始）",
+      "value": "2"
+    },
+    {
+      "key": "success",
+      "label": "正确反馈",
+      "value": "答对了！8 能被 2 整除。"
+    },
+    {
+      "key": "failure",
+      "label": "错误反馈",
+      "value": "再想一想：偶数能被 2 整除。"
+    }
+  ],
+  "id": "choice-feedback-v1",
+  "input": {
+    "recipeId": "choice-feedback-v1",
+    "slots": {
+      "correct": "2",
+      "failure": "再想一想：偶数能被 2 整除。",
+      "options": "3\n8\n11",
+      "success": "答对了！8 能被 2 整除。",
+      "title": "下面哪个数是偶数？"
+    }
+  },
+  "label": "选择与反馈",
+  "output": "ordinary editable Course Project V9 content",
+  "tool": "recipe.apply",
+  "version": 1
+}

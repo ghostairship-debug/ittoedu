@@ -43,11 +43,11 @@ PPTX是独立人工交付线，依赖1.8/S3后实施；不因新增AI工作包�
 
 ## 聚焦验证
 
-在以下现有测试入口补本规格命名行为，不能用旧用例通过充当新能力证据。若确需新文件，先在实现diff中创建再同步入口。仅失败指向更广范围或版本门要求才扩大验证。
+按[开发计划§6.1](../../AI_ASSISTANT_DELIVERY_PLAN.md#61-准备与局部验证)完成一次适用准备后，直接运行以下原有命名文件与现有S2/S3 PPTX用例组，复用未变保全证据；不执行整份stabilizationCoreUsability中的真实CLI矩阵。旧用例只证明已有行为，新媒体/效果实际路径须随实现补充命名用例，再用精确grep选中，零匹配不算通过，不能用旧用例通过代替新能力证据。仅失败指向更广范围或版本门要求才扩大验证。
 
 ```text
-npm run test:product -- tests/unit/courseProjectRoundTrip.test.ts tests/unit/assetReferences.test.ts tests/unit/coursePptxExport.test.ts
-npm run test:e2e -- tests/e2e/stabilizationCoreUsability.spec.ts
+npx --no-install vitest run tests/unit/courseProjectRoundTrip.test.ts tests/unit/assetReferences.test.ts tests/unit/coursePptxExport.test.ts
+npx --no-install playwright test tests/e2e/stabilizationCoreUsability.spec.ts --grep 'S[23] PPTX '
 ```
 
 使用真实内嵌音视频/简单效果PPTX，实际播放、暂停/跨页和离线HTML；导入对象计数或XML通过不等于播放通过。

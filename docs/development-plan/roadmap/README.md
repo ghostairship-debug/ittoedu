@@ -13,8 +13,8 @@ Course Project V9、Published Course V2、Runtime API 2/3、Component API 4 继�
 任务节点只有同时满足下列条件才可按工作协议实例化：
 
 1. 在当前工作树 HEAD 上复现该节点要补齐的行为，确认不是已经完成或已被替代的能力。
-2. 表格列出的全部依赖已经通过其 Acceptance，并留有实质 diff / commit 与有效证据；可选节点永远不能成为核心节点的隐含依赖。
-3. 按工作协议取得表格列出的写锁；存在重叠锁时不得并行写同一所有权面。
+2. Dependencies只列开始开发必须满足的硬前置；所列依赖已通过其Acceptance并留有有效证据。已定窄接口上的独立叶子可按规格并行，真实consumer接线与完整Acceptance仍约束本节点完成；最终汇合门显式保留各必选线。可选节点永远不能成为核心节点的隐含依赖。
+3. 按工作协议取得当前批次实际写域所需锁；路线Write locks列可能范围。粗锁覆盖不同叶子时由唯一协调Owner持锁并委派隔离的非重叠文件，同一实体文件保持单writer，共享接线顺序集成。
 4. 涉及 Schema、Published、Surface、Runtime / Component、网络、导出、稳定身份或 AI 会话时，先落定对应合同。
 5. 只有工作协议规定的多执行者、重叠写入、跨会话、交接或真实阻断场景才建任务卡；建卡时写明一个可观察结果、精确文件范围和最多三个最能证伪结果的目标测试。单执行者单会话节点直接执行，版本路线本身不预建状态。
 
@@ -22,7 +22,7 @@ Course Project V9、Published Course V2、Runtime API 2/3、Component API 4 继�
 
 ## 实现 DAG
 
-2026-09-07当前路线以[现状至2.0开发方案](../AI_ASSISTANT_DELIVERY_PLAN.md)为准：当前S3存在G01–G12实际可用性阻断，1.8新增088–104修当前观察/编辑/反馈/教师交互并同步外部Build Skill；1.9持续创作，2.0真实插件对标及生产验收。新增21个节点和所有剩余1.9/2.0节点均有独立规格，manifest/README保存同一DAG。既有三表面/导航/CLI窄路径证据按范围复用，D1方案A已获批准；PPTX必选线全部保留。不新增V10、MCP或第二工程/历史。
+2026-09-08路线以[产品与创作优化方案](../AGENT_AUTHORING_LONG_TERM_PLAN.md)及[开发计划](../AI_ASSISTANT_DELIVERY_PLAN.md)为准：1.8先修四项首批反例，再补完整原生CLI必要接线、当前工程观察/反馈、按需能力、窄修改与Builder基础效率，103汇合原三CLI/PPTX/三表面/导航后S3。1.9交付042未命名/首存、045材料、044内置自动/手动、041聊天首页与极简/专业工作台、连续课例优化；2.0所有课件步骤内部闭环，落实内置Skills、速度和成品质量。撤回未实施105。2.x沿完整原生CLI架构增加媒体和作品运行时服务，不预设自建模型循环。已批准Flow D1和PPTX必选门保留，不新增V10或第二工程/历史。
 
 ```mermaid
 flowchart LR
@@ -36,8 +36,8 @@ flowchart LR
     R18["1.8 088–104 可用AI创作与Build Skill按需发现"]
     I18["103 自然语言与双入口工程结束门"]
     S3["S3：103 + 三CLI/PPTX/三表面/导航 + 教师签署"]
-    R19["1.9 持续会话 / 未命名工程 / 长任务 / PPTX媒体"]
-    R20["2.0 生产工作流 / 真实插件对照 / 三CLI与PPTX / S4"]
+    R19["1.9 聊天工作台 / 材料与双流程 / 连续创作 / PPTX媒体"]
+    R20["2.0 内部全流程 / 速度质量 / 三CLI与PPTX / S4"]
     O["OpenMAIC 可选旁支"]
 
     B --> R12
@@ -67,9 +67,9 @@ flowchart LR
 | 1.5 | [README](1.5/README.md) | 共享 WorkspaceIdentity、素材、PPTX 导入、风格 Remix 与内容 QA | 无 AI | `v1.5.0` 源码 | S2 工具与素材 |
 | 1.6 | [README](1.6/README.md) | Codex / Claude / OpenCode 本地 CLI 会话内核 | 默认隐藏 | `v1.6.0-rc.N` 源码 | S3 在 1.8 统一签署 |
 | 1.7 | [README](1.7/README.md) | 单页、整课、局部编辑与动态载体的自动生成 / 修复 | 默认隐藏 | `v1.7.0-rc.N` 源码 | S3 在 1.8 统一签署 |
-| 1.8 | [README](1.8/README.md) | 当前结构/画面/运行理解、一般编辑与验证、教师交互、助手/Build Skill共用按需发现 | 默认显示聊天入口 | `v1.8.0` 源码 | S3 可用AI与既有人工能力 |
-| 1.9 | [README](1.9/README.md) | 恢复/删除、搜索分支、多任务、未命名工程、长上下文与连续课例 | 默认显示聊天入口 | `v1.9.0-rc.N` 源码 | S4 在 2.0 统一签署 |
-| 2.0 | [README](2.0/README.md) | 生产整课工作流、真实插件对照、三CLI/PPTX与无障碍验收 | 内部正式开放 | `v2.0.0` 源码 + 固定课例离线 HTML | S4 AI 产品 |
+| 1.8 | [README](1.8/README.md) | 完整原生CLI必要接线、当前工程观察/编辑反馈、按需能力和Builder效率基础 | 默认显示聊天入口 | `v1.8.0` 源码 | S3 可用AI与既有人工能力 |
+| 1.9 | [README](1.9/README.md) | 聊天首页与极简/专业、未命名/首存、材料结构/分片、内置自动/手动、连续创作 | 默认显示聊天入口 | `v1.9.0-rc.N` 源码 | S4 在 2.0 统一签署 |
+| 2.0 | [README](2.0/README.md) | 全流程软件内完成、完整内置Skills、速度与成品质量、CLI对等及三CLI/PPTX验收 | 内部正式开放 | `v2.0.0` 源码 + 固定课例离线 HTML | S4 AI 产品 |
 
 `v1.1.0` 标签保持不可变；`v1.1.1` 已经 Flow 文字格式维护闭环与 Owner 验收创建新源码标签，并重新固定同一课例的离线 HTML。1.2–1.9 不发布离线 HTML，2.0 恢复固定课例离线 HTML；本路线不发布安装器。无后缀版本号绝不同时表示“仅自动化通过”和“Owner 已验收”。
 
@@ -83,25 +83,16 @@ PPTX 人工导入的跨版本增强与发布节点见 [能力增强计划](../PP
 - **Recipe 互动**：分类使用声明式“选中项目→选中目标组”；排序的真实可见重排使用当前 Component 载体并公开可编辑参数，不扩拖放/放置触发器或顺序动作，也不要求先完成通用组件化。
 - **Authoring target**：所有写操作解析为 canonical target，至少包含工程稳定身份、Surface、容器、对象 / 内容路径与版本前提；工具回执必须报告实际落点和新版本。
 - **动态载体**：Component 注册身份固定为工程 / package / version / source / content；动态引用资产必须进入 Published 闭包；实例异常必须隔离并销毁旧实例，显示可见错误或 fallback。
-- **CLI 内核**：`LocalAgentCliAdapterV1` 是 Agent core 边界。应用只负责进程 / 会话 harness、staging、自动准入、产品命令适配与请求/结果接线，当前不重写 CLI 模型规划循环。取消 MCP；未来模型 API + 自有工具 + 自建 harness 直接复用产品边界，另行规划，不作为当前交付依赖。
-- **工程写入**：1.7 的 CLI 只接收不可变最小 snapshot 并输出 strict typed candidate/dynamic manifest；它没有 live project API，宿主重校验后通过 1.4 canonical commands 原子提交。1.8–2.0按[共同实施合同](1.8/IMPLEMENTATION_CONTRACT.md)演进为任务内多次不可变观察/宿主结果与CLI续轮，仍不依赖live工程工具。candidate 可默认经结构化 stdout / artifact channel 返回；只有 adapter 启用通用文件工具时才要求文件工具只写当前 session staging。Native/Recipe/Existing Component 不等待动态宿主准入，Generated Component/Runtime 才执行静态与宿主 gate；拒绝、Stop、stale 或适用的准入失败不得进入工程。
+- **CLI 内核**：版本化adapter连接完整原生CLI与GUI。相同账号、配置、授权下保留原生文件/终端/网络、工具与连接、Skills和子任务；按需上下文服务效率，不作权限裁剪。应用不自建模型循环或MCP/通用工具RPC平台，原生CLI已有连接不受此限制。
+- **工程写入**：宿主提供不可变观察并消费strict candidate，重校验后通过canonical commands原子提交。1.8–2.0演进为任务内多次观察、结果和原生续轮，仍不暴露live Store。candidate root realpath闭合只约束宿主摄取，不锁住CLI整体文件权限。Native/Recipe/Existing Component只走自身门，Generated Component/Runtime另经动态准入。当前未提交失败/Stop/stale候选零工程写入，前面已提交阶段明确部分完成。
 - **WorkspaceIdentity 与本地会话**：1.5 的共享基础节点唯一规定 `projectId + normalizedPath`；材料域和 AI 会话域分别依赖它，不相互承载私有语义。会话和工具轨迹按该身份隔离；Save As 创建新身份且不复制旧会话。它们可按会话 / 工程 / 全部删除，不进入 `.h5lesson`、Published payload、Component / Runtime 包或任何导出。
 - **可信扩展边界**：自动 gate 通过后可获得当前已批准的可信 Runtime / Component 宿主能力；仍不得获得 Provider secret、原始 Electron Main、任意 OS 控制、未批准脚本或未批准宿主 API。
 
 ## 统一验证与发布门
 
-任务表的 Acceptance 是逐项退出门，不能用未命名的替代性检查、通配符或只比较 Hash 替代行为证明。正式路线出现的每个 `tests/` 路径在路线落地时必须真实存在，路线检查器逐项验证；未来节点默认在版本文档指定的现有文件中增加命名用例。若确需新测试文件，先在该节点的实质 diff 中创建文件并同步更新路线，不能预先把未创建路径写成可执行入口。常规候选至少执行这些仓库现有命令：
+任务表的 Acceptance 是逐项退出门，不能用未命名的替代性检查、通配符或只比较 Hash 替代行为证明。正式路线出现的每个 `tests/` 路径在路线落地时必须真实存在，路线检查器逐项验证；未来节点默认在版本文档指定的现有文件中增加命名用例。若确需新测试文件，先在该节点的实质 diff 中创建文件并同步更新路线，不能预先把未创建路径写成可执行入口。局部节点只执行受影响的命名用例和必要准备，具体按[开发计划6.1](../AI_ASSISTANT_DELIVERY_PLAN.md#61-准备与局部验证)。纯文档/Schema、产品局部检查、真实CLI纵切和版本集成分别选择证据，不能统一要求contracts、capabilities、typecheck、全量test再加一次verify。npm生命周期钩子会额外构建/准备；同一候选所需制品只按变化准备一次，综合E2E必须明确筛选本次用例，零匹配/被排除不算通过。
 
-```text
-npm run check:contracts
-npm run check:ai-capabilities
-npm run typecheck
-npm run test:product
-npm run verify
-git diff --check
-```
-
-是否需要执行到 `verify` 由工作协议的风险和发布阶段决定；单个节点先运行其版本文档列出的精确目标测试。当前 `verify:release` 强制检查 Portable/win-unpacked/app.asar，而本路线 1.1–2.0 均不交付安装器，因此不得把它用作版本通过门；源码候选使用 `verify`，其中已经包含 `check:examples`、固定 HTML 准备和真实浏览器互动，不得在输入未变时重复执行同一 example check。离线 HTML 版本还需由 Owner 真实打开冻结后的同一文件。每版发布节点还必须满足：
+版本源码候选仍执行规定的verify及真实验收，复用有效证据，不先重复其内含整套检查；当前路线不交付安装器，安装包检查不是版本通过门。固定离线HTML在签署前准备并冻结，签署后沿同一制品核验。每版发布节点还必须满足：
 
 1. 所有非可选节点逐项通过 Acceptance；可选节点未完成时明确记录，但不得阻断发布。
 2. 固定课例通过人工创建 / 编辑、保存、重开、运行 / Player、适用导出、诊断检查；涉及三 Surface 或动态载体的版本覆盖相应载体。

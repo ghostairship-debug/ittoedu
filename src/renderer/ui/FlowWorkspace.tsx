@@ -77,6 +77,7 @@ import {
 } from './flow/useFlowTextAuthoringController'
 import { FlowOverlayAuthoringLayer } from './flow/FlowOverlayAuthoringLayer'
 import { measureFlowPaperOrigin } from '../../shared/flowViewportGeometry'
+import { authoringObservationDraftToken } from '../authoring/generation/authoringObservation'
 
 export interface FlowWorkspaceProps {
   readonly view: FlowEditorView
@@ -1400,6 +1401,15 @@ export function FlowWorkspace({
       data-flow-location-id={view.locationId}
       data-flow-surface-id={view.surfaceId}
       data-flow-active-block-id={view.activeBlockId}
+      data-observation-source="authoring"
+      data-observation-project-id={view.projectId}
+      data-observation-revision={view.revision}
+      data-observation-session-generation={sessionToken.generation}
+      data-observation-surface-id={view.surfaceId}
+      data-observation-location-id={view.locationId}
+      data-observation-state-id=""
+      data-observation-ready="true"
+      data-observation-draft-token={authoringObservationDraftToken(textEdit)}
       onKeyDown={handleHistoryKey}
       style={{
         position: 'relative',

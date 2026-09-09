@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { dynamicBehaviorEvidenceSchema } from './dynamicBehaviorObservation'
 
 const identity = z.string().min(1).refine((value) => value.trim().length > 0, 'Identity cannot be blank')
 const revision = z.number().int().nonnegative()
@@ -98,6 +99,7 @@ export const authoringToolReceiptV1Schema = z.object({
     message: identity,
     path: z.array(z.union([z.string(), z.number()])),
   }).strict()),
+  behaviorEvidence: dynamicBehaviorEvidenceSchema.optional(),
 }).strict()
 
 export type AuthoringToolReceiptV1 = z.infer<typeof authoringToolReceiptV1Schema>

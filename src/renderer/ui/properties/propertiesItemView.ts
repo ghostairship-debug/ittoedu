@@ -4,7 +4,7 @@ import type {
 } from '../../../shared/contracts/native-v1'
 import type { LayerItem } from '../../../shared/courseProjectTypes'
 import type { EffectiveLayerPropertiesPatchAtTarget } from '../../course/effectiveLayerCommands'
-import { renderTextNodeCanvas } from '../../../shared/textLayout'
+import { nativeTextAutoSizeFrame, type NativeTextLayoutPatch } from '../../authoring/nativeTextLayout'
 import type {
   PropertiesItemBase,
   PropertiesItemView,
@@ -66,24 +66,9 @@ export function normalizePropertiesPatch(
 ): PropertiesPatch {
   if (node.type !== 'text') return patch
   const textPatch = patch as DeepPartial<TextNode>
-  const nextNode = {
-    ...node,
-    ...textPatch,
-    style: { ...node.style, ...textPatch.style },
-  } as TextNode
-  const affectsTextLayout = (
-    'text' in textPatch
-    || 'runs' in textPatch
-    || 'style' in textPatch
-    || 'width' in textPatch
-    || 'height' in textPatch
-  )
-  if (!affectsTextLayout || nextNode.style.overflow !== 'auto-height') return patch
-  const rendered = renderTextNodeCanvas(nextNode, nextNode.width)
   return {
     ...patch,
-    width: rendered.width,
-    height: rendered.height,
+    ...nativeTextAutoSizeFrame(node, textPatch as NativeTextLayoutPatch),
   }
 }
 

@@ -761,7 +761,7 @@ describe('Published Interaction Spatial host integration', () => {
     expect(payload).toEqual(before)
   })
 
-  it('uses Published location order for next/previous camera navigation and keeps scene.in false on Spatial', async () => {
+  it('uses step actions for Published camera navigation and keeps scene.in false on Spatial', async () => {
     const next = textItem('spatial-next-trigger', 100)
     const previous = textItem('spatial-previous-trigger', 110)
     const conditionedTarget = textItem('spatial-scene-condition-target', 120, {
@@ -771,7 +771,7 @@ describe('Published Interaction Spatial host integration', () => {
       globalItems: [scoped(next), scoped(previous), scoped(conditionedTarget)],
       globalInteractions: [
         clickRule('spatial-next-rule', next.layerItemId, [
-          step('spatial-next-step', { type: 'scene.next' }),
+          step('spatial-next-step', { type: 'step.next' }),
         ]),
         clickRule(
           'spatial-scene-condition-rule',
@@ -780,7 +780,7 @@ describe('Published Interaction Spatial host integration', () => {
           [{ type: 'scene.in', sceneIds: [SLIDE_SCENE_ID] }],
         ),
         clickRule('spatial-previous-rule', previous.layerItemId, [
-          step('spatial-previous-step', { type: 'scene.previous' }),
+          step('spatial-previous-step', { type: 'step.previous' }),
         ]),
       ],
     })

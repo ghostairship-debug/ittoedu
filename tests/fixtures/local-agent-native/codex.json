@@ -1,0 +1,417 @@
+{
+  "fixtureVersion": 1,
+  "scope": "Sanitized real native protocol examples; no live project commit or product acceptance is claimed.",
+  "adapter": "codex",
+  "summaries": {
+    "conversation": {
+      "source": "output/r18-native-preflight/codex-conversation-1788790425588",
+      "cliVersion": "codex-cli 0.153.4",
+      "model": "gpt-6-astra",
+      "error": null
+    },
+    "control": {
+      "source": "output/r18-native-preflight/codex-control-1788790473493",
+      "cliVersion": "codex-cli 0.153.4",
+      "model": "gpt-6-astra",
+      "error": "Error: turn/interrupt: {\"code\":-32600,\"message\":\"no active turn to interrupt\"}"
+    },
+    "cancel": {
+      "source": "output/r18-native-preflight/codex-cancel-1788790831145",
+      "cliVersion": "codex-cli 0.153.4",
+      "model": "gpt-6-astra",
+      "error": null
+    }
+  },
+  "examples": {
+    "conversation": [
+      {
+        "direction": "out",
+        "value": {
+          "id": 4,
+          "method": "turn/start",
+          "params": {
+            "threadId": "native-id-1",
+            "input": [
+              {
+                "type": "text",
+                "text": "This is an isolated read-only protocol test. Do not read parent folders or invoke skills or agents. Describe the attached image left to right. Use your native file reading tool to read observation.txt in the current working directory, and quote its token exactly. Keep the reply under 60 words."
+              },
+              {
+                "type": "localImage",
+                "path": "<workspace>\\output\\r18-native-preflight\\codex-conversation-1788790425588\\workspace\\sample.png"
+              }
+            ],
+            "effort": "low"
+          }
+        }
+      },
+      {
+        "direction": "in",
+        "value": {
+          "method": "item/agentMessage/delta",
+          "params": {
+            "threadId": "native-id-1",
+            "turnId": "native-id-2",
+            "itemId": "native-id-3",
+            "delta": "I"
+          },
+          "emittedAtMs": 1788790439641
+        }
+      },
+      {
+        "direction": "in",
+        "value": {
+          "method": "turn/completed",
+          "params": {
+            "threadId": "native-id-1",
+            "turn": {
+              "id": "native-id-2",
+              "items": [
+                {
+                  "type": "agentMessage",
+                  "id": "native-id-4",
+                  "text": "Left to right: a solid red square, then a solid blue square, equal in size and touching.\n\nThe token in observation.txt is exactly “OBS-e18a869e”.",
+                  "phase": "final_answer",
+                  "memoryCitation": null,
+                  "delivery": null,
+                  "questions": null
+                }
+              ],
+              "itemsView": "summary",
+              "status": "completed",
+              "error": null,
+              "startedAt": 1788790426,
+              "completedAt": 1788790454,
+              "durationMs": 28554
+            }
+          },
+          "emittedAtMs": 1788790454680
+        }
+      },
+      {
+        "direction": "out",
+        "value": {
+          "id": 5,
+          "method": "turn/start",
+          "params": {
+            "threadId": "native-id-1",
+            "input": [
+              {
+                "type": "text",
+                "text": "Host result for this PROBE ONLY: candidate rejected; diagnostic PROBE_WIDTH. No project was changed. In one sentence acknowledge that diagnostic and repeat the observation token from the previous turn. Do not read any files again."
+              }
+            ],
+            "effort": "low"
+          }
+        }
+      },
+      {
+        "direction": "in",
+        "value": {
+          "method": "turn/completed",
+          "params": {
+            "threadId": "native-id-1",
+            "turn": {
+              "id": "native-id-5",
+              "items": [
+                {
+                  "type": "agentMessage",
+                  "id": "native-id-6",
+                  "text": "Acknowledged: the probe candidate was rejected with diagnostic PROBE_WIDTH, no project was changed, and the observation token is “OBS-e18a869e”.",
+                  "phase": "final_answer",
+                  "memoryCitation": null,
+                  "delivery": null,
+                  "questions": null
+                }
+              ],
+              "itemsView": "summary",
+              "status": "completed",
+              "error": null,
+              "startedAt": 1788790454,
+              "completedAt": 1788790459,
+              "durationMs": 4630
+            }
+          },
+          "emittedAtMs": 1788790459390
+        }
+      }
+    ],
+    "control": [
+      {
+        "direction": "out",
+        "value": {
+          "id": 4,
+          "method": "turn/start",
+          "params": {
+            "threadId": "native-id-7",
+            "input": [
+              {
+                "type": "text",
+                "text": "Use your native structured user-question tool to ask whether the probe label should be Green or Blue. This choice is unknown and required for this protocol test. After I answer, reply only with the selected label. Do not inspect files, invoke agents or skills, or make changes."
+              }
+            ],
+            "collaborationMode": {
+              "mode": "plan",
+              "settings": {
+                "model": "gpt-6-astra",
+                "reasoning_effort": "low",
+                "developer_instructions": null
+              }
+            }
+          }
+        }
+      },
+      {
+        "direction": "in",
+        "value": {
+          "method": "item/tool/requestUserInput",
+          "id": 0,
+          "params": {
+            "threadId": "native-id-7",
+            "turnId": "native-id-8",
+            "itemId": "call_5BhY5cqSGTT0HrTG8lfT6Aor",
+            "questions": [
+              {
+                "id": "probe_label",
+                "header": "Probe label",
+                "question": "Should the probe label be Green or Blue?",
+                "isOther": true,
+                "isSecret": false,
+                "options": [
+                  {
+                    "label": "Green",
+                    "description": "Select Green as the probe label."
+                  },
+                  {
+                    "label": "Blue",
+                    "description": "Select Blue as the probe label."
+                  }
+                ]
+              }
+            ],
+            "isBlocking": true,
+            "autoResolutionMs": null
+          }
+        }
+      },
+      {
+        "direction": "out",
+        "value": {
+          "id": 0,
+          "result": {
+            "answers": {
+              "probe_label": {
+                "answers": [
+                  "Green"
+                ]
+              }
+            }
+          }
+        }
+      },
+      {
+        "direction": "in",
+        "value": {
+          "method": "item/agentMessage/delta",
+          "params": {
+            "threadId": "native-id-7",
+            "turnId": "native-id-8",
+            "itemId": "native-id-9",
+            "delta": "Green"
+          },
+          "emittedAtMs": 1788790493982
+        }
+      },
+      {
+        "direction": "in",
+        "value": {
+          "method": "turn/completed",
+          "params": {
+            "threadId": "native-id-7",
+            "turn": {
+              "id": "native-id-8",
+              "items": [
+                {
+                  "type": "agentMessage",
+                  "id": "native-id-9",
+                  "text": "Green",
+                  "phase": "final_answer",
+                  "memoryCitation": null,
+                  "delivery": null,
+                  "questions": null
+                }
+              ],
+              "itemsView": "summary",
+              "status": "completed",
+              "error": null,
+              "startedAt": 1788790473,
+              "completedAt": 1788790494,
+              "durationMs": 20171
+            }
+          },
+          "emittedAtMs": 1788790494148
+        }
+      },
+      {
+        "direction": "out",
+        "value": {
+          "id": 5,
+          "method": "turn/start",
+          "params": {
+            "threadId": "native-id-7",
+            "input": [
+              {
+                "type": "text",
+                "text": "Write a numbered list of 100 short classroom examples. Do not use tools."
+              }
+            ],
+            "effort": "low"
+          }
+        }
+      },
+      {
+        "direction": "out",
+        "value": {
+          "id": 6,
+          "method": "turn/steer",
+          "params": {
+            "threadId": "native-id-7",
+            "expectedTurnId": "native-id-10",
+            "input": [
+              {
+                "type": "text",
+                "text": "Correction: stop the list and say CORRECTION_RECEIVED only."
+              }
+            ]
+          }
+        }
+      },
+      {
+        "direction": "in",
+        "value": {
+          "id": 6,
+          "result": {
+            "turnId": "native-id-10"
+          }
+        }
+      },
+      {
+        "direction": "in",
+        "value": {
+          "method": "turn/completed",
+          "params": {
+            "threadId": "native-id-7",
+            "turn": {
+              "id": "native-id-10",
+              "items": [
+                {
+                  "type": "agentMessage",
+                  "id": "native-id-11",
+                  "text": "CORRECTION_RECEIVED",
+                  "phase": "final_answer",
+                  "memoryCitation": null,
+                  "delivery": null,
+                  "questions": null
+                }
+              ],
+              "itemsView": "summary",
+              "status": "completed",
+              "error": null,
+              "startedAt": 1788790494,
+              "completedAt": 1788790538,
+              "durationMs": 44767
+            }
+          },
+          "emittedAtMs": 1788790538990
+        }
+      },
+      {
+        "direction": "out",
+        "value": {
+          "id": 7,
+          "method": "turn/start",
+          "params": {
+            "threadId": "native-id-7",
+            "input": [
+              {
+                "type": "text",
+                "text": "Write 100 more examples. Do not use tools."
+              }
+            ]
+          }
+        }
+      },
+      {
+        "direction": "out",
+        "value": {
+          "id": 8,
+          "method": "turn/interrupt",
+          "params": {
+            "threadId": "native-id-7",
+            "turnId": "native-id-12"
+          }
+        }
+      },
+      {
+        "direction": "in",
+        "value": {
+          "error": {
+            "code": -32600,
+            "message": "no active turn to interrupt"
+          },
+          "id": 8
+        }
+      }
+    ],
+    "cancel": [
+      {
+        "direction": "out",
+        "value": {
+          "id": 4,
+          "method": "turn/start",
+          "params": {
+            "threadId": "native-id-13",
+            "input": [
+              {
+                "type": "text",
+                "text": "Write 100 classroom examples. Do not use tools."
+              }
+            ],
+            "effort": "low"
+          }
+        }
+      },
+      {
+        "direction": "out",
+        "value": {
+          "id": 5,
+          "method": "turn/interrupt",
+          "params": {
+            "threadId": "native-id-13",
+            "turnId": "native-id-14"
+          }
+        }
+      },
+      {
+        "direction": "in",
+        "value": {
+          "method": "turn/completed",
+          "params": {
+            "threadId": "native-id-13",
+            "turn": {
+              "id": "native-id-14",
+              "items": [],
+              "itemsView": "notLoaded",
+              "status": "interrupted",
+              "error": null,
+              "startedAt": 1788790831,
+              "completedAt": 1788790831,
+              "durationMs": 170
+            }
+          },
+          "emittedAtMs": 1788790831906
+        }
+      }
+    ]
+  }
+}

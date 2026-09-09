@@ -1,0 +1,47 @@
+{
+  "destination": {
+    "insertion": "after current locationId",
+    "kind": "create",
+    "owner": "scene",
+    "parent": {
+      "kind": "course-locations"
+    }
+  },
+  "example": "const view = await session.observe(); const scope = await session.createScope({parent:{kind:\"course-locations\"},insertion:{kind:\"after\",siblingId:view.scope.locationId}}); const receipt = await session.execute(\"recipe.apply\", card.input, {kind:\"create\",scope}); if(receipt.status!==\"committed\") throw new Error(JSON.stringify(receipt.diagnostics));",
+  "fields": [
+    {
+      "key": "title",
+      "label": "标题",
+      "value": "一起探索新知识"
+    },
+    {
+      "key": "subtitle",
+      "label": "副标题",
+      "value": "观察 · 思考 · 表达"
+    },
+    {
+      "key": "author",
+      "label": "署名",
+      "value": "教师 / 班级"
+    },
+    {
+      "key": "visual",
+      "label": "视觉槽位说明",
+      "value": "在这里放入主题图片"
+    }
+  ],
+  "id": "cover-v1",
+  "input": {
+    "recipeId": "cover-v1",
+    "slots": {
+      "author": "教师 / 班级",
+      "subtitle": "观察 · 思考 · 表达",
+      "title": "一起探索新知识",
+      "visual": "在这里放入主题图片"
+    }
+  },
+  "label": "封面",
+  "output": "ordinary editable Course Project V9 content",
+  "tool": "recipe.apply",
+  "version": 1
+}

@@ -184,6 +184,7 @@ export function SlideWorkspaceConnector({
     drawSlideShapeNode,
   ] = useEditorStore(useShallow(selectSlideWorkspaceSource))
   const previewBackgroundColor = useEditorStore((state) => state.previewBackgroundColor)
+  const sessionGeneration = useEditorStore((state) => state.courseAuthoringSession?.token.generation ?? -1)
   const view = useMemo(() => {
     if (!project || !locationId) return null
     return buildSlideEditorView({
@@ -250,6 +251,7 @@ export function SlideWorkspaceConnector({
     })(),
     projectId: project?.id ?? '',
     projectRevision: project?.revision ?? 0,
+    sessionGeneration,
     previewRebuildKey,
     tryRunMountKey,
     drawTool: slideDrawTool,
@@ -268,6 +270,7 @@ export function SlideWorkspaceConnector({
     selectedNode,
     selectedNodeIds,
     sidecarFileIds,
+    sessionGeneration,
     slideDrawTool,
     tryRunMountKey,
     view,

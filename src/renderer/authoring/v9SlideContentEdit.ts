@@ -549,12 +549,6 @@ function rejectIfStaleEdit(
   return null
 }
 
-function deleteEmptyFrameOverride(override: LayerItemOverride): void {
-  if (override.frame && Object.keys(override.frame).length === 0) {
-    delete override.frame
-  }
-}
-
 function deleteEmptyLayerOverride(
   overrides: Record<string, LayerItemOverride>,
   layerItemId: string,
@@ -577,26 +571,6 @@ function assignSparseNativeData(
   }
   if (Object.keys(nativeData).length === 0) delete override.nativeData
   else override.nativeData = nativeData
-}
-
-function assignSparseFrame(
-  override: LayerItemOverride,
-  base: NativeLayerItem,
-  width: number | undefined,
-  height: number | undefined,
-): void {
-  if (width === undefined && height === undefined) return
-  const frame = { ...override.frame }
-  if (width !== undefined) {
-    if (width === base.frame.width) delete frame.width
-    else frame.width = width
-  }
-  if (height !== undefined) {
-    if (height === base.frame.height) delete frame.height
-    else frame.height = height
-  }
-  override.frame = frame
-  deleteEmptyFrameOverride(override)
 }
 
 function resolveWritableScene(
@@ -633,7 +607,6 @@ function resolveWritableScene(
 function applyNativeContentPatch(
   item: NativeLayerItem,
   patch: Record<string, unknown>,
-  frame?: { width?: number; height?: number },
 ): void {
   if (item.locked) {
     throw new SlideCommandError(SLIDE_REJECT_LOCKED, '当前元素已锁定')
@@ -642,8 +615,6 @@ function applyNativeContentPatch(
   for (const [key, value] of Object.entries(patch)) {
     data[key] = structuredClone(value)
   }
-  if (frame?.width !== undefined) item.frame.width = frame.width
-  if (frame?.height !== undefined) item.frame.height = frame.height
 }
 
 function writeNativeContent(
@@ -651,14 +622,13 @@ function writeNativeContent(
   session: SlideAuthoringSession,
   layerItemId: string,
   patch: Record<string, unknown>,
-  frame?: { width?: number; height?: number },
 ): void {
   if (session.scope === 'global') {
     const entry = project.globalLayerItems.find((candidate) => candidate.item.layerItemId === layerItemId)
     if (!entry || entry.item.kind !== 'native') {
       throw new SlideCommandError(V9_SLIDE_CONTENT_REJECT_INVALID_TARGET, '所选元素已失效，请重新选择')
     }
-    applyNativeContentPatch(entry.item, patch, frame)
+    applyNativeContentPatch(entry.item, patch)
     return
   }
   if (session.scope === 'surface') {
@@ -667,7 +637,7 @@ function writeNativeContent(
     if (!entry || entry.item.kind !== 'native') {
       throw new SlideCommandError(V9_SLIDE_CONTENT_REJECT_INVALID_TARGET, '所选元素已失效，请重新选择')
     }
-    applyNativeContentPatch(entry.item, patch, frame)
+    applyNativeContentPatch(entry.item, patch)
     return
   }
   const { scene, state } = resolveWritableScene(project, session)
@@ -679,7 +649,7 @@ function writeNativeContent(
     throw new SlideCommandError(SLIDE_REJECT_LOCKED, '当前元素已锁定')
   }
   if (!state) {
-    applyNativeContentPatch(base, patch, frame)
+    applyNativeContentPatch(base, patch)
     return
   }
   const override = state.layerItemOverrides[base.layerItemId] ?? {}
@@ -688,7 +658,6 @@ function writeNativeContent(
     base.content.data as unknown as Record<string, unknown>,
     patch,
   )
-  assignSparseFrame(override, base, frame?.width, frame?.height)
   state.layerItemOverrides[base.layerItemId] = override
   deleteEmptyLayerOverride(state.layerItemOverrides, base.layerItemId)
 }
@@ -764,13 +733,16 @@ export function commitV9SlideContentEdit(
       if (!textDraftChanged(original, draft)) {
         return commitKeepingEditedLayer(commit(session, null), edit.target.layerItemId)
       }
-      const next = mutateContentDocument(session, (project) => {
-        writeNativeContent(project, session, edit.target.layerItemId, {
-          text: draft.text,
-          runs: draft.runs,
-        }, { width: draft.width, height: draft.height })
-      }, options.now)
-      return commitKeepingEditedLayer(commit(session, next), edit.target.layerItemId)
+      const result = patchEffectiveLayerPropertiesAtTarget(session.history.present, {
+        authoringAddress: edit.target.authoringAddress,
+        locationId: session.selection.locationId,
+        stateId: session.selection.stateId,
+      }, {
+        nativeData: { text: draft.text, runs: draft.runs },
+        frame: { width: draft.width, height: draft.height },
+      }, { expectedRevision: edit.target.revision, now: options.now })
+      if (!result.ok) return rejectSession(session, result.reason ?? '文字提交失败')
+      return commitKeepingEditedLayer(commit(session, result.nextDocument ?? null), edit.target.layerItemId)
     }
 
     const original = edit.original as V9SlideFormulaContentSnapshot

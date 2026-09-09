@@ -2,6 +2,21 @@ import { describe, expect, it } from 'vitest'
 import { CourseStateStore } from '@/player/CourseStateStore'
 
 describe('CourseStateStore', () => {
+  it('advances the host observation version only after actual successful writes', () => {
+    const store = new CourseStateStore()
+    expect(store.version).toBe(0)
+    store.get('missing'); store.snapshot(); store.delete('missing'); store.clear(); store.setMany([])
+    expect(store.version).toBe(0)
+    store.set('answer', 1)
+    expect(store.version).toBe(1)
+    expect(() => store.set('answer', () => undefined)).toThrow()
+    expect(() => store.setMany([{ key: 'same', value: 1 }, { key: 'same', value: 2 }])).toThrow()
+    expect(store.version).toBe(1)
+    store.setMany([{ key: 'answer', value: 2 }, { key: 'progress', value: 3 }])
+    expect(store.version).toBe(2)
+    store.delete('answer'); store.clear()
+    expect(store.version).toBe(4)
+  })
   it('set、get 和 snapshot 都不会泄露可变引用', () => {
     const store = new CourseStateStore()
     const input = {

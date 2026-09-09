@@ -22,6 +22,7 @@ import type { NativeLineGeometry } from '../../shared/contracts/native-v1/types'
 import { convertLineGeometryForShapeType } from '../../shared/nativeLineGeometry'
 import { constrainTeacherControllerAuthoringFrame } from '../../shared/teacherControllerLayout'
 import { synchronizeCourseTeacherControllerControls } from '../../shared/teacherControllerConsistency'
+import { nativeLayerTextAutoSizeFrame } from '../authoring/nativeTextLayout'
 import {
   CONTROLLER_MOVE_REASON,
   CROSS_OWNER_REORDER_REASON,
@@ -418,10 +419,12 @@ function writeNamedStatePropertyPatch(
       throw new Error('当前元素不支持原生内容属性')
     }
     const currentData = effective.content.data as Record<string, unknown>
-    const nextData = mergeCourseNativeData(currentData, {
-      ...(patch.nativeTextStyle !== undefined ? { style: patch.nativeTextStyle } : {}),
-      ...(patch.nativeData ?? {}),
-    })
+    const nextData = mergeCourseNativeData(
+      patch.nativeTextStyle !== undefined
+        ? mergeCourseNativeData(currentData, { style: patch.nativeTextStyle })
+        : currentData,
+      patch.nativeData ?? {},
+    )
     const nativeData = sparseObjectDiff(
       base.content.data as Record<string, unknown>,
       nextData,
@@ -736,6 +739,8 @@ function normalizeEffectiveLayerPropertyPatch(
     }
   }
 
+  const textFrame = nativeLayerTextAutoSizeFrame(item, { frame, nativeTextStyle, nativeData })
+  const sizedFrame = Object.keys(textFrame).length > 0 ? { ...frame, ...textFrame } : frame
   const normalizedFrame = source === 'global' &&
     isTeacherControllerLayerItem(item) &&
     ((frame !== undefined && Object.keys(frame).length > 0) || patch.rotation !== undefined)
@@ -745,7 +750,7 @@ function normalizeEffectiveLayerPropertyPatch(
         patch.rotation ?? item.rotation,
         { width: CANVAS_WIDTH, height: CANVAS_HEIGHT },
       )
-    : frame
+    : sizedFrame
 
   const normalized: EffectiveLayerPropertyPatch = {
     ...(patch.label !== undefined ? { label: label!.slice(0, 200) } : {}),

@@ -1,5 +1,6 @@
+/** Test-only decoder for historical and malformed wire fixtures. Production uses native V2 adapters. */
 import { z } from 'zod'
-import type { LocalAgentEvent, LocalAgentId } from '../../shared/localAgentContract'
+import type { LocalAgentEvent, LocalAgentId } from '../../../src/shared/localAgentContract'
 
 export type AgentEventData = Pick<LocalAgentEvent, 'kind' | 'payload' | 'failure' | 'externalSessionId'>
 const object = z.record(z.string(), z.json())

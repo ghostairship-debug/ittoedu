@@ -1,0 +1,47 @@
+{
+  "destination": {
+    "insertion": "after current locationId",
+    "kind": "create",
+    "owner": "scene",
+    "parent": {
+      "kind": "course-locations"
+    }
+  },
+  "example": "const view = await session.observe(); const scope = await session.createScope({parent:{kind:\"course-locations\"},insertion:{kind:\"after\",siblingId:view.scope.locationId}}); const receipt = await session.execute(\"recipe.apply\", card.input, {kind:\"create\",scope}); if(receipt.status!==\"committed\") throw new Error(JSON.stringify(receipt.diagnostics));",
+  "fields": [
+    {
+      "key": "title",
+      "label": "概念",
+      "value": "什么是分数？"
+    },
+    {
+      "key": "explanation",
+      "label": "解释",
+      "value": "把一个整体平均分成若干份，表示其中一份或几份的数叫作分数。"
+    },
+    {
+      "key": "example",
+      "label": "例证",
+      "value": "把一个苹果平均分成四份，其中一份就是四分之一。"
+    },
+    {
+      "key": "visual",
+      "label": "视觉槽位说明",
+      "value": "放入四等分示意图"
+    }
+  ],
+  "id": "concept-v1",
+  "input": {
+    "recipeId": "concept-v1",
+    "slots": {
+      "example": "把一个苹果平均分成四份，其中一份就是四分之一。",
+      "explanation": "把一个整体平均分成若干份，表示其中一份或几份的数叫作分数。",
+      "title": "什么是分数？",
+      "visual": "放入四等分示意图"
+    }
+  },
+  "label": "概念讲解",
+  "output": "ordinary editable Course Project V9 content",
+  "tool": "recipe.apply",
+  "version": 1
+}

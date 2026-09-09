@@ -21,6 +21,7 @@
 - [src/renderer/authoring/tools/authoringToolScope.ts](../../../../src/renderer/authoring/tools/authoringToolScope.ts)
 - [src/renderer/authoring/tools/nativeAuthoringTool.ts](../../../../src/renderer/authoring/tools/nativeAuthoringTool.ts)
 - [src/renderer/authoring/tools/flowAuthoringTool.ts](../../../../src/renderer/authoring/tools/flowAuthoringTool.ts)
+- [src/renderer/authoring/tools/componentConfigureTool.ts](../../../../src/renderer/authoring/tools/componentConfigureTool.ts)
 - [src/renderer/authoring/generation/prepareGenerationCandidate.ts](../../../../src/renderer/authoring/generation/prepareGenerationCandidate.ts)
 
 ## 允许写域与旧路径退出
@@ -28,6 +29,8 @@
 正式语义操作/构造器及必要strict输入、各Surface工具Owner、唯一candidate prepare与document/resource transaction；输入增量独立合同提交后再迁consumer。
 
 ## 执行步骤
+
+先交付已授权标题/样式/位置和已有组件公开参数的窄编辑，再补完整选区替换。目标明确时模型只输出需要改变的字段，宿主补稳定引用和合法默认值；未提及props保留，不要求回写整个对象或整包源码。一组相关修改合并成一个正式事务。普通编辑可先展示内部结果，但整个097仍须完成以下替换与失败边界才关闭。
 
 1. 列明T04/T05所需窄意图与target/create依赖，构造器只解析已授权稳定引用和补齐正式默认值；不猜对象、不做generic JSON patch。
 2. 替换明确旧target及允许附带create scope，默认保留位置/尺寸/order/visibility/rotation与适用交互；不可表达引用输出诊断。
@@ -37,6 +40,7 @@
 ## 验收与可信反例
 
 - T04把正确标题改为“简谐运动”、放大并居中，实际文字/样式/位置一致；选区替换新增依赖并一次Undo/Redo准确恢复，保存重开与Player/导出可消费。
+- 一种主力CLI用普通语言完成上述短编辑，记录实际输入/输出、往返与准备/提交/呈现耗时；已知能力不反复发现，公开参数修改不改源码、不丢未提及参数。共享三表面事务边界仍分别验证，完整三CLI同任务矩阵归103。
 - 反例：create失败、后续步骤失败、目标被删、版本过期、共享引用歧义、无权限跨页，整个未提交替换零写，老内容保持。
 
 ## 停止条件
@@ -45,11 +49,10 @@
 
 ## 聚焦验证
 
-在以下现有测试入口补本规格命名行为，不能用旧用例通过充当新能力证据。若确需新文件，先在实现diff中创建再同步入口。仅失败指向更广范围或版本门要求才扩大验证。
+按[开发计划§6.1](../../AI_ASSISTANT_DELIVERY_PLAN.md#61-准备与局部验证)为本次代码变化和所选用例准备必要产物一次，再执行以下直接入口；纯逻辑/Schema测试不因此重构建。现有用例只证明其实际覆盖的行为；新增行为在实施diff中补命名测试，并同步文件及 `-t` / `--grep` 选择。执行时确认目标测试实际被选中，0匹配不算通过，不用旧用例通过代签新能力。未变化证据继续复用，仅失败指向更广范围或版本门要求才扩大验证。
 
 ```text
-npm run test:product -- tests/unit/editorTransaction.test.ts tests/unit/courseAuthoringSession.test.ts tests/unit/assetTransactions.test.ts
-npm run test:product -- tests/integration/mixedCrossSurfaceHistory.test.tsx
+npx --no-install vitest run tests/unit/editorTransaction.test.ts tests/unit/courseAuthoringSession.test.ts tests/unit/assetTransactions.test.ts tests/integration/mixedCrossSurfaceHistory.test.tsx
 ```
 
 真实UI检验文字编辑和一种跨carrier替换的前后、Undo/Redo、保存重开及运行；动态效果另由099验证。

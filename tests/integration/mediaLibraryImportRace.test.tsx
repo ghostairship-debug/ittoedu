@@ -253,6 +253,8 @@ beforeEach(() => {
     }
   })
   vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:arch2-media-library')
+  // jsdom port only; real corrupted-pixel rejection is covered in Chromium.
+  vi.stubGlobal('createImageBitmap', async () => ({ width: 2, height: 2, close() {} }))
   vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined)
   loadFixture()
 })

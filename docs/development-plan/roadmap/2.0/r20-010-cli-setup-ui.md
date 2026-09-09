@@ -43,11 +43,11 @@ Workspace设置、LocalAgent探测/路径验证与诊断consumer；认证由CLI�
 
 ## 聚焦验证
 
-在以下现有测试入口补本规格命名行为，不能用旧用例通过充当新能力证据。若确需新文件，先在实现diff中创建再同步入口。仅失败指向更广范围或版本门要求才扩大验证。
+准备与证据复用统一遵循[开发计划§6.1](../../AI_ASSISTANT_DELIVERY_PLAN.md#61-准备与局部验证)。相关产物准备一次后直接选现有测试；下列E2E只保全聊天可见性和普通讨论基线，不能证明新设置/安装流程。新设置用例先随实现创建，再将实际文件和名称列入FILE与--grep；零匹配不得通过，不整文件运行三CLI付费矩阵。
 
 ```text
-npm run test:product -- tests/unit/electronLaunchEnvironment.test.ts
-npm run test:e2e -- tests/e2e/stabilizationCoreUsability.spec.ts
+npx --no-install vitest run tests/unit/electronLaunchEnvironment.test.ts
+npx --no-install playwright test tests/e2e/stabilizationCoreUsability.spec.ts --grep "S3 默认可见与普通讨论：安全消息、分页事件重放及零工程写入$"
 ```
 
 真实Windows环境验证三CLI安装/登录/版本诊断和一次配置确认；不将fixture状态页当本机已登录证据。

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { registerAuthoringObservationDraft } from '../authoring/generation/authoringObservation'
 
 export interface CanvasPlainTextBounds {
   x: number
@@ -51,6 +52,19 @@ export function CanvasPlainTextEditor({
     if (cancel) onCancel()
     else onCommit(draft)
   }
+  const observationRef = useRef({ label, value: draft, initialValue: value, bounds })
+  observationRef.current = { label, value: draft, initialValue: value, bounds }
+  const finishRef = useRef(finish)
+  finishRef.current = finish
+
+  useEffect(() => {
+    const control = controlRef.current
+    if (!control || onDraftChange) return
+    return registerAuthoringObservationDraft(control, {
+      read: () => ({ ...observationRef.current, composing: composingRef.current }),
+      commit: () => finishRef.current(false),
+    })
+  }, [onDraftChange])
 
   useEffect(() => {
     const control = controlRef.current

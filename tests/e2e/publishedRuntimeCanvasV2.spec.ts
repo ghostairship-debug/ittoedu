@@ -208,7 +208,7 @@ for (const delivery of [
     await expect(domButton).toBeVisible({ timeout: 15_000 })
     await expect(domButton).toHaveText('DOM API2:0')
     await expect(page.locator('[data-slide-layer-item="published-api2-dom"]'))
-      .toHaveCSS('pointer-events', 'auto')
+      .toHaveCSS('pointer-events', 'none')
     await domButton.click()
     await expect(domButton).toHaveText('DOM API2:1')
 

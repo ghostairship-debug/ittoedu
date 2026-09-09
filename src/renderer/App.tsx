@@ -520,6 +520,7 @@ export default function App() {
           onAddCatalogComponents={componentLibrary.addCatalogPackages}
           onUpdateCatalogComponent={componentLibrary.requestCatalogUpdate}
         />
+        <CourseChatEntry />
       </div>
       <footer className="status-bar" aria-live="polite">
         <span className="status-dot" />
@@ -542,7 +543,6 @@ export default function App() {
         <span>·</span>
         <span>{projectPath ? '工程已命名' : '尚未保存'}</span>
       </footer>
-      <CourseChatEntry />
 
       {errorMessage && (
         <div className="toast" role="alert">

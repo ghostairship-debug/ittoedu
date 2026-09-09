@@ -1,0 +1,138 @@
+{
+  "candidateCarrier": {
+    "default": "existing-component",
+    "operations": {
+      "candidate": "generated-component",
+      "catalog": "existing-component",
+      "existing": "existing-component"
+    }
+  },
+  "inputSchema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "oneOf": [
+      {
+        "additionalProperties": false,
+        "properties": {
+          "operation": {
+            "const": "existing",
+            "type": "string"
+          },
+          "packageId": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "staticFallbackAssetId": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "operation",
+          "packageId"
+        ],
+        "type": "object"
+      },
+      {
+        "additionalProperties": false,
+        "properties": {
+          "operation": {
+            "const": "catalog",
+            "type": "string"
+          },
+          "packageId": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "sha256": {
+            "pattern": "^[a-f0-9]{64}$",
+            "type": "string"
+          },
+          "sourceId": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "staticFallbackAssetId": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "version": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "operation",
+          "sourceId",
+          "packageId",
+          "version",
+          "sha256"
+        ],
+        "type": "object"
+      },
+      {
+        "additionalProperties": false,
+        "properties": {
+          "files": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "maxLength": 24000000,
+                  "pattern": "^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$",
+                  "type": "string"
+                },
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "encoding": {
+                      "const": "utf8",
+                      "type": "string"
+                    },
+                    "text": {
+                      "maxLength": 18000000,
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "encoding",
+                    "text"
+                  ],
+                  "type": "object"
+                }
+              ]
+            },
+            "propertyNames": {
+              "maxLength": 500,
+              "minLength": 1,
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "operation": {
+            "const": "candidate",
+            "type": "string"
+          },
+          "staticFallbackAssetId": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "operation",
+          "files",
+          "staticFallbackAssetId"
+        ],
+        "type": "object"
+      }
+    ]
+  },
+  "name": "component.insert",
+  "support": "conditional-on-input-target-resources-and-host",
+  "supportedScopes": [
+    "slide:scene",
+    "slide:global",
+    "flow:surface",
+    "flow:global",
+    "spatial-2d:world"
+  ],
+  "version": 1
+}

@@ -149,13 +149,14 @@ function Test-TransientSkillTreeEntry {
 }
 
 function Get-CanonicalSkillFiles {
-  param([Parameter(Mandatory = $true)][string]$Root)
+  param([Parameter(Mandatory = $true)][string]$Root, [switch]$IncludeLocalRoot)
 
   return @(
     Get-ChildItem -LiteralPath $Root -File -Recurse -Force |
       Where-Object {
         $relativePath = $_.FullName.Substring($Root.Length) -replace '^[\\/]+', ''
-        -not (Test-TransientSkillTreeEntry -RelativePath $relativePath)
+        ($IncludeLocalRoot -or $relativePath -cne 'editor-root.local.json') -and
+          -not (Test-TransientSkillTreeEntry -RelativePath $relativePath)
       }
   )
 }
@@ -180,7 +181,7 @@ function Copy-CanonicalSkillTree {
 }
 
 function Get-DirectoryTreeSignature {
-  param([Parameter(Mandatory = $true)][string]$Path)
+  param([Parameter(Mandatory = $true)][string]$Path, [switch]$IncludeLocalRoot)
 
   if (-not (Test-Path -LiteralPath $Path -PathType Container)) {
     return $null
@@ -191,7 +192,7 @@ function Get-DirectoryTreeSignature {
     [System.IO.Path]::DirectorySeparatorChar
   )
   [string[]]$entries = @(
-    Get-CanonicalSkillFiles -Root $root |
+    Get-CanonicalSkillFiles -Root $root -IncludeLocalRoot:$IncludeLocalRoot |
       ForEach-Object {
         $relativePath = $_.FullName.Substring($root.Length) -replace '^[\\/]+', ''
         $relativePath = $relativePath.Replace('\', '/')
@@ -706,6 +707,10 @@ try {
     $safeManagedCopy = $false
     if ($v2Managed) {
       $safeManagedCopy = $targetSignature -ceq [string]$manifestState.v2ManagedSignatures[$skillName]
+      if (-not $safeManagedCopy) {
+        # Migrate a previously managed signature that included the local root stamp.
+        $safeManagedCopy = (Get-DirectoryTreeSignature -Path $targetSkillPath -IncludeLocalRoot) -ceq [string]$manifestState.v2ManagedSignatures[$skillName]
+      }
     } elseif ($v1Managed) {
       $safeManagedCopy = (
         $targetSignature -ceq $sourceSignature -or
@@ -723,16 +728,7 @@ try {
         $unchanged += $skillName
         continue
       }
-      $installPlans += [pscustomobject]@{
-        kind = 'install'
-        name = $skillName
-        sourcePath = $sourceSkillPath
-        targetPath = $targetSkillPath
-        hadTarget = $true
-        expectedOldSignature = $targetSignature
-        expectedNewSignature = $sourceSignature
-      }
-      $desiredManaged[$skillName] = $sourceSignature
+      $preserved += "$skillName (unmanaged same-name copy)"
       continue
     }
 
@@ -903,6 +899,12 @@ try {
         $backupPath = Join-Path $backupRoot $plan.name
         if ($plan.kind -eq 'install') {
           Copy-CanonicalSkillTree -Source $plan.sourcePath -Destination $stagedPath
+          if ($plan.hadTarget) {
+            $localRootFile = Join-Path $plan.targetPath 'editor-root.local.json'
+            if (Test-Path -LiteralPath $localRootFile -PathType Leaf) {
+              Copy-Item -LiteralPath $localRootFile -Destination (Join-Path $stagedPath 'editor-root.local.json')
+            }
+          }
           if ((Get-DirectoryTreeSignature -Path $stagedPath) -cne $plan.expectedNewSignature) {
             throw "Staged Skill verification failed: $($plan.name)"
           }

@@ -1,0 +1,123 @@
+{
+  "candidateCarrier": {
+    "default": "native"
+  },
+  "inputSchema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": false,
+    "properties": {
+      "createdAt": {
+        "maximum": 9007199254740991,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "id": {
+        "format": "uuid",
+        "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+        "type": "string"
+      },
+      "source": {
+        "oneOf": [
+          {
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "const": "text",
+                "type": "string"
+              },
+              "locator": {
+                "maxLength": 4096,
+                "minLength": 1,
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "locator"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "const": "file",
+                "type": "string"
+              },
+              "locator": {
+                "maxLength": 32767,
+                "minLength": 1,
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "locator"
+            ],
+            "type": "object"
+          }
+        ]
+      },
+      "text": {
+        "maxLength": 2097152,
+        "minLength": 1,
+        "type": "string"
+      },
+      "title": {
+        "maxLength": 300,
+        "minLength": 1,
+        "type": "string"
+      },
+      "version": {
+        "const": 1,
+        "type": "number"
+      },
+      "workspace": {
+        "additionalProperties": false,
+        "properties": {
+          "normalizedPath": {
+            "maxLength": 32767,
+            "minLength": 1,
+            "type": "string"
+          },
+          "projectId": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          },
+          "version": {
+            "const": 1,
+            "type": "number"
+          }
+        },
+        "required": [
+          "version",
+          "projectId",
+          "normalizedPath"
+        ],
+        "type": "object"
+      }
+    },
+    "required": [
+      "title",
+      "text",
+      "source",
+      "version",
+      "id",
+      "workspace",
+      "createdAt"
+    ],
+    "type": "object"
+  },
+  "name": "material.citation",
+  "support": "conditional-on-input-target-resources-and-host",
+  "supportedScopes": [
+    "slide:scene",
+    "slide:global",
+    "flow:surface",
+    "flow:global",
+    "spatial-2d:world",
+    "spatial-2d:global"
+  ],
+  "version": 1
+}

@@ -68,6 +68,24 @@ export interface NativePaintOptions {
   readonly staticCapture?: boolean
 }
 
+interface NativeImagePaint {
+  ready: Promise<void>
+  dispose(): void
+}
+const nativeImagePaints = new WeakMap<HTMLElement, NativeImagePaint>()
+
+async function waitForNativeImagePaint(wrap: HTMLElement): Promise<void> {
+  for (;;) {
+    const paint = nativeImagePaints.get(wrap)
+    if (!paint) return
+    try { await paint.ready }
+    catch (error) { if (nativeImagePaints.get(wrap) === paint) throw error }
+    // A repainted stable wrapper must await its newest image, even if this
+    // resource was discovered before the Published command queue completed.
+    if (nativeImagePaints.get(wrap) === paint) return
+  }
+}
+
 export type NativeLayerRenderSource = {
   readonly layerItemId: string
   readonly label?: string
@@ -215,6 +233,7 @@ export function paintPublishedNativeRenderInput(
   ports: NativePaintPorts,
   options: NativePaintOptions = {},
 ): void {
+  nativeImagePaints.get(wrap)?.dispose()
   wrap.dataset.nativeType = input.type
   const staticCapture = options.staticCapture === true
   switch (input.type) {
@@ -344,6 +363,7 @@ function paintPublishedNativeVideo(
         })
         registerPublishedCaptureResource(wrap, {
           waitForCaptureReady: () => ready,
+          waitForObservationReady: () => ready,
         })
         wrap.appendChild(video)
       }
@@ -443,6 +463,43 @@ function paintPublishedNativeImage(
   })
   wrap.append(image, pending)
 
+  let resolveReady!: () => void
+  let rejectReady!: (error: Error) => void
+  let settled = false
+  const frames: number[] = []
+  const view = wrap.ownerDocument.defaultView
+  const ready = new Promise<void>((resolve, reject) => { resolveReady = resolve; rejectReady = reject })
+  void ready.catch(() => undefined)
+  const settle = (error?: Error) => {
+    if (settled) return
+    settled = true
+    if (error) rejectReady(error)
+    else resolveReady()
+  }
+  const afterPaint = () => {
+    if (!view?.requestAnimationFrame) { settle(); return }
+    // The canvas pixels are now complete. Cross a rendered frame before an
+    // Electron capturePage call can observe the compositor's previous image.
+    frames.push(view.requestAnimationFrame(() => {
+      frames.push(view.requestAnimationFrame(() => settle()))
+    }))
+  }
+  const unregister = registerPublishedCaptureResource(wrap, {
+    waitForCaptureReady: () => waitForNativeImagePaint(wrap),
+    waitForObservationReady: () => waitForNativeImagePaint(wrap),
+  })
+  const paint: NativeImagePaint = { ready, dispose() {
+    image.removeEventListener('load', render)
+    image.removeEventListener('error', failImage)
+    frames.forEach(frame => view?.cancelAnimationFrame(frame))
+    unregister()
+    if (nativeImagePaints.get(wrap) === paint) nativeImagePaints.delete(wrap)
+    // Superseded work is no longer part of the current wrapper. Existing waiters
+    // re-read the registration above and follow its replacement generation.
+    settle()
+  } }
+  nativeImagePaints.set(wrap, paint)
+
   const node = {
     ...structuredClone(input) as ImageNode,
     x: 0,
@@ -481,12 +538,18 @@ function paintPublishedNativeImage(
       })
       rendered.setAttribute('aria-hidden', 'true')
       pending.replaceWith(rendered)
-    } catch {
+      afterPaint()
+    } catch (error) {
       showImageFallback()
+      settle(new Error(`图片“${input.id}”尚未成功绘制到当前画布`, { cause: error }))
     }
   }
+  const failImage = (): void => {
+    showImageFallback()
+    settle(new Error(`图片“${input.id}”无法解码，当前画布尚未同步`))
+  }
   image.addEventListener('load', render, { once: true })
-  image.addEventListener('error', showImageFallback, { once: true })
+  image.addEventListener('error', failImage, { once: true })
   image.src = url
   if (image.complete && image.naturalWidth > 0) render()
 }

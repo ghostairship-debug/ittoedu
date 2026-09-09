@@ -28,7 +28,7 @@ export async function operateDynamicAdmission(raw: unknown, owner: WebContents, 
   network.replacePreviewLease({ leaseId: request.id, connectOrigins: request.payload.project.network?.connectOrigins ?? [],
     remoteAssetUrls: Object.entries(request.payload.project.assets).flatMap(([id, asset]) => !request.payload.assetFiles[id] && asset.remote ? [asset.remote.url] : []) }, networkOwner)
   configureRestrictedSession(isolatedSession, url => network.allowsRequest(url))
-  const worker = new BrowserWindow({ width: 1280, height: 720, show: false, skipTaskbar: true,
+  const worker = new BrowserWindow({ width: 1280, height: 720, useContentSize: true, frame: false, show: false, skipTaskbar: true,
     webPreferences: { session: isolatedSession, contextIsolation: true, sandbox: true, nodeIntegration: false, webSecurity: true, backgroundThrottling: false } })
   worker.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
   const entry = new URL('admission.html', rendererEntryUrl).toString()
@@ -54,7 +54,23 @@ export async function operateDynamicAdmission(raw: unknown, owner: WebContents, 
       const processId = worker.webContents.getOSProcessId()
       if (!processId || processId === owner.getOSProcessId()) throw new Error('候选准入未获得独立执行进程')
       // This fixed entrypoint is shipped by the product. No candidate-supplied completion callback or preload API exists.
-      const outcome = await worker.webContents.executeJavaScript(`window.__COURSEWARE_ADMISSION_RUN__(${encoded})`)
+      let completed = false
+      const execute = worker.webContents.executeJavaScript(`window.__COURSEWARE_ADMISSION_RUN__(${encoded})`).finally(() => { completed = true })
+      const captureFrames = async () => {
+        let capturedBytes = 0
+        while (!completed && !worker.isDestroyed()) {
+          const frame = await worker.webContents.executeJavaScript('window.__COURSEWARE_ADMISSION_PENDING_FRAME__?.() ?? null') as { id: number } | null
+          if (completed || worker.isDestroyed()) break
+          if (!frame) { await new Promise(resolve => setTimeout(resolve, 16)); continue }
+          if (!Number.isSafeInteger(frame.id) || frame.id < 1) throw new Error('动态观察帧身份无效')
+          const bitmap = await worker.webContents.capturePage(), dataUrl = bitmap.toDataURL()
+          capturedBytes += dataUrl.length
+          if (capturedBytes > 48_000_000) throw new Error('动态观察图像超过本轮资源上限')
+          const size = bitmap.getSize(), payload = { dataUrl, capturedAt: Date.now(), width: size.width, height: size.height }
+          await worker.webContents.executeJavaScript(`window.__COURSEWARE_ADMISSION_ACCEPT_FRAME__(${frame.id},${JSON.stringify(payload)})`)
+        }
+      }
+      const [outcome] = await Promise.all([execute, request.payload.observeBehavior ? captureFrames() : Promise.resolve()])
       return dynamicAdmissionResultSchema.parse({ ...outcome, processId })
     })()])
     return result

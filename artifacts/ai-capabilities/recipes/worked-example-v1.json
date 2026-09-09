@@ -1,0 +1,47 @@
+{
+  "destination": {
+    "insertion": "after current locationId",
+    "kind": "create",
+    "owner": "scene",
+    "parent": {
+      "kind": "course-locations"
+    }
+  },
+  "example": "const view = await session.observe(); const scope = await session.createScope({parent:{kind:\"course-locations\"},insertion:{kind:\"after\",siblingId:view.scope.locationId}}); const receipt = await session.execute(\"recipe.apply\", card.input, {kind:\"create\",scope}); if(receipt.status!==\"committed\") throw new Error(JSON.stringify(receipt.diagnostics));",
+  "fields": [
+    {
+      "key": "title",
+      "label": "题干",
+      "value": "怎样计算 24 × 15？"
+    },
+    {
+      "key": "steps",
+      "label": "步骤（每行一步）",
+      "value": "把 15 拆成 10 + 5\n分别计算 24 × 10 和 24 × 5\n把 240 和 120 相加"
+    },
+    {
+      "key": "conclusion",
+      "label": "结论",
+      "value": "24 × 15 = 360"
+    },
+    {
+      "key": "hint",
+      "label": "提示",
+      "value": "运用乘法分配律，把复杂计算变简单。"
+    }
+  ],
+  "id": "worked-example-v1",
+  "input": {
+    "recipeId": "worked-example-v1",
+    "slots": {
+      "conclusion": "24 × 15 = 360",
+      "hint": "运用乘法分配律，把复杂计算变简单。",
+      "steps": "把 15 拆成 10 + 5\n分别计算 24 × 10 和 24 × 5\n把 240 和 120 相加",
+      "title": "怎样计算 24 × 15？"
+    }
+  },
+  "label": "分步例题",
+  "output": "ordinary editable Course Project V9 content",
+  "tool": "recipe.apply",
+  "version": 1
+}

@@ -299,6 +299,22 @@ describe('projectPersistence', () => {
     expect(now).toHaveBeenCalledTimes(2)
   })
 
+  it('外部覆盖已打开工程时保留磁盘版本，并可通过另存为保存内存稿', async () => {
+    const selectedPath = path.join(testRoot, 'external-change.h5lesson')
+    const original = makeV9RecoveryArchive('original'), external = makeV9RecoveryArchive('external')
+    await fs.writeFile(selectedPath, original)
+    electronState.showOpenDialog.mockResolvedValue({ canceled: false, filePaths: [selectedPath] })
+    const opened = await openProjectFile({} as Parameters<typeof openProjectFile>[0])
+    await confirmProjectOpen(opened!.confirmationId)
+    await fs.writeFile(selectedPath, external)
+    await expect(saveProjectFile({} as Parameters<typeof saveProjectFile>[0], { path: selectedPath, suggestedName: 'external-change', bytes: original })).rejects.toMatchObject({ code: 'PROJECT_EXTERNAL_CHANGE' })
+    expect([...await fs.readFile(selectedPath)]).toEqual([...external])
+    const newPath = path.join(testRoot, 'preserved.h5lesson')
+    electronState.showSaveDialog.mockResolvedValue({ canceled: false, filePath: newPath })
+    await expect(saveProjectFile({} as Parameters<typeof saveProjectFile>[0], { suggestedName: 'preserved', bytes: original })).resolves.toEqual({ path: newPath })
+    expect([...await fs.readFile(newPath)]).toEqual([...original])
+  })
+
   it('最近工程候选在 Renderer 确认前不提升，同一确认只提升一次', async () => {
     const recentPath = path.join(testRoot, 'recent-candidate.h5lesson')
     await fs.writeFile(recentPath, makeV9RecoveryArchive('recent-candidate'))

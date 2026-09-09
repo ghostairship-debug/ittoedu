@@ -1,0 +1,46 @@
+{
+  "candidateCarrier": {
+    "default": "native"
+  },
+  "inputSchema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": false,
+    "properties": {
+      "backgroundAssetId": {
+        "anyOf": [
+          {
+            "minLength": 1,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "backgroundColor": {
+        "pattern": "^#[0-9a-fA-F]{6}$",
+        "type": "string"
+      },
+      "backgroundMode": {
+        "enum": [
+          "inherit",
+          "own"
+        ],
+        "type": "string"
+      }
+    },
+    "type": "object"
+  },
+  "name": "owner.background",
+  "support": "conditional-on-input-target-resources-and-host",
+  "supportedScopes": [
+    "slide:scene",
+    "slide:surface",
+    "slide:global",
+    "flow:surface",
+    "flow:global",
+    "spatial-2d:surface",
+    "spatial-2d:global"
+  ],
+  "version": 1
+}

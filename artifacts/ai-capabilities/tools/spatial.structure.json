@@ -1,0 +1,330 @@
+{
+  "candidateCarrier": {
+    "default": "native"
+  },
+  "inputSchema": {
+    "$defs": {
+      "__schema0": {
+        "additionalProperties": false,
+        "properties": {
+          "x": {
+            "$ref": "#/$defs/__schema1"
+          },
+          "y": {
+            "$ref": "#/$defs/__schema1"
+          },
+          "zoom": {
+            "$ref": "#/$defs/__schema1",
+            "exclusiveMinimum": 0,
+            "maximum": 1000,
+            "type": "number"
+          }
+        },
+        "required": [
+          "x",
+          "y",
+          "zoom"
+        ],
+        "type": "object"
+      },
+      "__schema1": {
+        "type": "number"
+      },
+      "__schema2": {
+        "maxLength": 200,
+        "minLength": 1,
+        "type": "string"
+      },
+      "__schema3": {
+        "maxLength": 200,
+        "minLength": 1,
+        "type": "string"
+      },
+      "__schema4": {
+        "items": {
+          "$ref": "#/$defs/__schema5"
+        },
+        "maxItems": 20000,
+        "minItems": 1,
+        "type": "array"
+      },
+      "__schema5": {
+        "maxLength": 240,
+        "minLength": 1,
+        "type": "string"
+      },
+      "__schema6": {
+        "additionalProperties": false,
+        "properties": {
+          "color": {
+            "pattern": "^#[0-9a-fA-F]{6}$",
+            "type": "string"
+          },
+          "dash": {
+            "enum": [
+              "solid",
+              "dashed",
+              "dotted"
+            ],
+            "type": "string"
+          },
+          "width": {
+            "$ref": "#/$defs/__schema1",
+            "exclusiveMinimum": 0,
+            "maximum": 10000,
+            "type": "number"
+          }
+        },
+        "type": "object"
+      },
+      "__schema7": {
+        "maxLength": 500,
+        "minLength": 1,
+        "type": "string"
+      },
+      "__schema8": {
+        "enum": [
+          "line",
+          "arrow",
+          "bidirectional"
+        ],
+        "type": "string"
+      }
+    },
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "oneOf": [
+      {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "$ref": "#/$defs/__schema2"
+          },
+          "operation": {
+            "const": "add-camera",
+            "type": "string"
+          },
+          "pose": {
+            "$ref": "#/$defs/__schema0"
+          }
+        },
+        "required": [
+          "operation",
+          "pose"
+        ],
+        "type": "object"
+      },
+      {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "$ref": "#/$defs/__schema2"
+          },
+          "operation": {
+            "const": "update-camera",
+            "type": "string"
+          },
+          "pose": {
+            "$ref": "#/$defs/__schema0"
+          }
+        },
+        "required": [
+          "operation"
+        ],
+        "type": "object"
+      },
+      {
+        "additionalProperties": false,
+        "properties": {
+          "operation": {
+            "const": "delete-camera",
+            "type": "string"
+          }
+        },
+        "required": [
+          "operation"
+        ],
+        "type": "object"
+      },
+      {
+        "additionalProperties": false,
+        "properties": {
+          "operation": {
+            "const": "set-home",
+            "type": "string"
+          },
+          "pose": {
+            "$ref": "#/$defs/__schema0"
+          }
+        },
+        "required": [
+          "operation",
+          "pose"
+        ],
+        "type": "object"
+      },
+      {
+        "additionalProperties": false,
+        "properties": {
+          "operation": {
+            "const": "add-path",
+            "type": "string"
+          },
+          "path": {
+            "additionalProperties": false,
+            "properties": {
+              "layerItemIds": {
+                "$ref": "#/$defs/__schema4"
+              },
+              "name": {
+                "$ref": "#/$defs/__schema3"
+              },
+              "style": {
+                "$ref": "#/$defs/__schema6"
+              }
+            },
+            "required": [
+              "name",
+              "layerItemIds"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "operation",
+          "path"
+        ],
+        "type": "object"
+      },
+      {
+        "additionalProperties": false,
+        "properties": {
+          "operation": {
+            "const": "update-path",
+            "type": "string"
+          },
+          "path": {
+            "additionalProperties": false,
+            "properties": {
+              "layerItemIds": {
+                "$ref": "#/$defs/__schema4"
+              },
+              "name": {
+                "$ref": "#/$defs/__schema3"
+              },
+              "style": {
+                "$ref": "#/$defs/__schema6"
+              }
+            },
+            "type": "object"
+          }
+        },
+        "required": [
+          "operation",
+          "path"
+        ],
+        "type": "object"
+      },
+      {
+        "additionalProperties": false,
+        "properties": {
+          "operation": {
+            "const": "delete-path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "operation"
+        ],
+        "type": "object"
+      },
+      {
+        "additionalProperties": false,
+        "properties": {
+          "operation": {
+            "const": "add-relation",
+            "type": "string"
+          },
+          "relation": {
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "$ref": "#/$defs/__schema8"
+              },
+              "label": {
+                "$ref": "#/$defs/__schema7"
+              },
+              "sourceLayerItemId": {
+                "$ref": "#/$defs/__schema5"
+              },
+              "targetLayerItemId": {
+                "$ref": "#/$defs/__schema5"
+              }
+            },
+            "required": [
+              "sourceLayerItemId",
+              "targetLayerItemId",
+              "kind"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "operation",
+          "relation"
+        ],
+        "type": "object"
+      },
+      {
+        "additionalProperties": false,
+        "properties": {
+          "operation": {
+            "const": "update-relation",
+            "type": "string"
+          },
+          "relation": {
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "$ref": "#/$defs/__schema8"
+              },
+              "label": {
+                "$ref": "#/$defs/__schema7"
+              },
+              "sourceLayerItemId": {
+                "$ref": "#/$defs/__schema5"
+              },
+              "targetLayerItemId": {
+                "$ref": "#/$defs/__schema5"
+              }
+            },
+            "type": "object"
+          }
+        },
+        "required": [
+          "operation",
+          "relation"
+        ],
+        "type": "object"
+      },
+      {
+        "additionalProperties": false,
+        "properties": {
+          "operation": {
+            "const": "delete-relation",
+            "type": "string"
+          }
+        },
+        "required": [
+          "operation"
+        ],
+        "type": "object"
+      }
+    ]
+  },
+  "name": "spatial.structure",
+  "support": "conditional-on-input-target-resources-and-host",
+  "supportedScopes": [
+    "spatial-2d:world"
+  ],
+  "version": 1
+}

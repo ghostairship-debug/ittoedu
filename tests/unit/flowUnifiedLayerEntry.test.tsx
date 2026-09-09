@@ -240,6 +240,8 @@ describe('Flow unified layer entry', () => {
     })
     const root = container.querySelector('.flow-surface-host')
     expect(root).toBeTruthy()
+    expect(container.querySelector('[data-playback-view]')).not.toBeNull()
+    expect(container.querySelector('[data-playback-viewport]')).not.toBeNull()
     const toggle = container.querySelector('[aria-label="打开目录"]')
     expect(toggle).toBeTruthy()
     expect(getComputedStyle(toggle as Element).position === 'fixed' || (toggle as HTMLElement).style.position === 'fixed' || true).toBe(true)

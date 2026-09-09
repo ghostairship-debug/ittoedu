@@ -1,0 +1,186 @@
+{
+  "candidateCarrier": {
+    "default": "native"
+  },
+  "inputSchema": {
+    "$defs": {
+      "__schema0": {
+        "maxLength": 120,
+        "minLength": 1,
+        "type": "string"
+      },
+      "__schema1": {
+        "items": {
+          "$ref": "#/$defs/__schema2"
+        },
+        "minItems": 1,
+        "type": "array"
+      },
+      "__schema2": {
+        "minLength": 1,
+        "type": "string"
+      }
+    },
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "oneOf": [
+      {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "$ref": "#/$defs/__schema0"
+          },
+          "operation": {
+            "const": "add-page",
+            "type": "string"
+          }
+        },
+        "required": [
+          "operation"
+        ],
+        "type": "object"
+      },
+      {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "$ref": "#/$defs/__schema0"
+          },
+          "operation": {
+            "const": "rename-page",
+            "type": "string"
+          }
+        },
+        "required": [
+          "operation",
+          "name"
+        ],
+        "type": "object"
+      },
+      {
+        "additionalProperties": false,
+        "properties": {
+          "operation": {
+            "const": "duplicate-page",
+            "type": "string"
+          }
+        },
+        "required": [
+          "operation"
+        ],
+        "type": "object"
+      },
+      {
+        "additionalProperties": false,
+        "properties": {
+          "operation": {
+            "const": "delete-page",
+            "type": "string"
+          }
+        },
+        "required": [
+          "operation"
+        ],
+        "type": "object"
+      },
+      {
+        "additionalProperties": false,
+        "properties": {
+          "ids": {
+            "$ref": "#/$defs/__schema1"
+          },
+          "operation": {
+            "const": "reorder-pages",
+            "type": "string"
+          }
+        },
+        "required": [
+          "operation",
+          "ids"
+        ],
+        "type": "object"
+      },
+      {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "$ref": "#/$defs/__schema0"
+          },
+          "operation": {
+            "const": "add-state",
+            "type": "string"
+          }
+        },
+        "required": [
+          "operation"
+        ],
+        "type": "object"
+      },
+      {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "$ref": "#/$defs/__schema0"
+          },
+          "operation": {
+            "const": "rename-state",
+            "type": "string"
+          }
+        },
+        "required": [
+          "operation",
+          "name"
+        ],
+        "type": "object"
+      },
+      {
+        "additionalProperties": false,
+        "properties": {
+          "operation": {
+            "const": "duplicate-state",
+            "type": "string"
+          }
+        },
+        "required": [
+          "operation"
+        ],
+        "type": "object"
+      },
+      {
+        "additionalProperties": false,
+        "properties": {
+          "operation": {
+            "const": "delete-state",
+            "type": "string"
+          }
+        },
+        "required": [
+          "operation"
+        ],
+        "type": "object"
+      },
+      {
+        "additionalProperties": false,
+        "properties": {
+          "ids": {
+            "$ref": "#/$defs/__schema1"
+          },
+          "operation": {
+            "const": "reorder-states",
+            "type": "string"
+          }
+        },
+        "required": [
+          "operation",
+          "ids"
+        ],
+        "type": "object"
+      }
+    ]
+  },
+  "name": "slide.structure",
+  "support": "conditional-on-input-target-resources-and-host",
+  "supportedScopes": [
+    "slide:scene"
+  ],
+  "version": 1
+}

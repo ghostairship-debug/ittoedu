@@ -1183,39 +1183,18 @@ export function updateSlideNativeLayerContent(
     if (layer.item.content.nativeType === 'teacher-controller') {
       throw new SlideCommandError(SLIDE_REJECT_WRONG_OWNER, '教师控制器不由本命令编辑')
     }
-    const nativeData = patch.nativeData ?? {}
-    const current = layer.item as NativeLayerItem
-    const nextData = mergeCourseNativeData(
-      current.content.data as Record<string, unknown>,
-      nativeData,
+    const target = makeSlideAuthoringTarget(session, layerItemId, 'item')
+    return slideResultFromLayerCommand(
+      session,
+      patchEffectiveLayerPropertiesAtTarget(session.history.present, {
+        authoringAddress: target.authoringAddress,
+        locationId: session.selection.locationId,
+        stateId: session.selection.stateId,
+      }, { nativeData: patch.nativeData, label: patch.label }, {
+        expectedRevision: options.expectedRevision ?? target.revision,
+        now: options.now,
+      }),
     )
-    const nextLabel = patch.label ?? current.label
-    if (sameJson(current.content.data, nextData) && nextLabel === current.label) {
-      return succeed(session, false)
-    }
-    const project = commitSlideProjectMutation(session.history.present, (draft) => {
-      if (session.scope === 'global') {
-        const globalEntry = draft.globalLayerItems.find((entry) => entry.item.layerItemId === layerItemId)
-        if (!globalEntry || globalEntry.item.kind !== 'native') {
-          throw new SlideCommandError('invalid-selection', '所选元素已失效，请重新选择')
-        }
-        globalEntry.item.content.data = mergeCourseNativeData(
-          globalEntry.item.content.data as Record<string, unknown>,
-          nativeData,
-        ) as typeof globalEntry.item.content.data
-        if (patch.label !== undefined) globalEntry.item.label = patch.label
-        return
-      }
-      const { scene } = slideSceneContext(draft, session)
-      writeNativeData(
-        scene,
-        session.selection.stateId,
-        layerItemId,
-        nativeData,
-        patch.label,
-      )
-    }, options.now)
-    return commitUpdated(session, project)
   } catch (error) {
     return catchCommand(session, error)
   }

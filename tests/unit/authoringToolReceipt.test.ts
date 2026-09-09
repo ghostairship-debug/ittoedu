@@ -4,7 +4,8 @@ import { z } from 'zod'
 import { openCourseProjectArchive } from '@/renderer/project/courseProjectArchive'
 import { openSlideAuthoringSession } from '@/renderer/course/slideAuthoringBackend'
 import { addSlideTextLayer } from '@/renderer/course/v9SlideContentCommands'
-import { executeAuthoringTool, type AuthoringToolDefinition } from '@/renderer/authoring/tools/executeAuthoringTool'
+import { AuthoringToolFailure, executeAuthoringTool, type AuthoringToolDefinition } from '@/renderer/authoring/tools/executeAuthoringTool'
+import { runtimeInsertTool } from '@/renderer/authoring/tools/runtimeInsertTool'
 import { applyEditorTransactionStep, type EditorTransactionState, type EditorTransactionStep } from '@/renderer/authoring/editorTransaction'
 import { commitEditorTransactionToAuthoringHistory, createResourceAwareAuthoringHistory } from '@/renderer/authoring/resourceAwareAuthoringHistory'
 
@@ -97,5 +98,56 @@ describe('Authoring Tool single transaction receipt', () => {
     expect((await executeAuthoringTool(failed.request, failed.definition, failed.port)).status).toBe('failed')
     expect(failed.state()).toEqual(before)
     expect(failed.port.commit).not.toHaveBeenCalled()
+  })
+
+  it('returns actionable Runtime version and misplaced fallback diagnostics without planning or writing', async () => {
+    const test = setup()
+    const plan = vi.fn(runtimeInsertTool.plan)
+    const before = structuredClone(test.state())
+    const receipt = await executeAuthoringTool({ ...test.request, tool: runtimeInsertTool.name, input: {
+      label: 'Runtime candidate',
+      runtime: { protocol: 'surface-runtime', runtimeApiVersion: 1, enabled: true, renderMode: 'dom',
+        source: 'return { mount() {}, unmount() {} }', content: { values: {} }, assets: {} },
+      staticFallback: { assetId: 'selected-layer-item', coverage: 'scene' },
+    } }, { ...runtimeInsertTool, plan }, test.port)
+    expect(receipt.status).toBe('rejected')
+    expect(receipt.diagnostics).toEqual(expect.arrayContaining([
+      { code: 'invalid-input', path: ['input', 'runtime', 'runtimeApiVersion'], message: expect.stringMatching(/alternative 1:.*expected 2/) },
+      { code: 'invalid-input', path: ['input', 'runtime', 'runtimeApiVersion'], message: expect.stringMatching(/alternative 2:.*expected 3/) },
+      { code: 'invalid-input', path: ['input'], message: expect.stringContaining('staticFallback') },
+    ]))
+    // The coordinator adds a candidate step label; the existing CLI controller
+    // forwards Error.message. Both field identity and branch reason must survive.
+    const feedback = new AuthoringToolFailure(receipt.diagnostics.map(diagnostic => ({ ...diagnostic, message: `s1: ${diagnostic.message}` })))
+    expect(feedback.message).toContain('$.input.runtime.runtimeApiVersion: s1: Union alternative 1: Invalid input: expected 2')
+    expect(feedback.message).toContain('$.input.runtime.runtimeApiVersion: s1: Union alternative 2: Invalid input: expected 3')
+    expect(feedback.message).toContain('$.input: s1: Unrecognized key: "staticFallback"')
+    expect(plan).not.toHaveBeenCalled()
+    expect(test.port.commit).not.toHaveBeenCalled()
+    expect(test.state()).toEqual(before)
+  })
+
+  it('keeps complete relative paths and alternative context through nested object unions', async () => {
+    const test = setup()
+    const inputSchema = z.object({ payload: z.union([
+      z.object({ options: z.object({ mode: z.union([z.literal('fast'), z.literal('slow')]) }).strict() }).strict(),
+      z.object({ count: z.number() }).strict(),
+    ]) }).strict()
+    const plan = vi.fn<AuthoringToolDefinition<z.infer<typeof inputSchema>>['plan']>()
+    const receipt = await executeAuthoringTool({ ...test.request, input: { payload: { options: { mode: 'invalid' } } } },
+      { name: test.definition.name, inputSchema, plan }, test.port)
+    expect(receipt.status).toBe('rejected')
+    const leaves = receipt.diagnostics.filter(diagnostic => diagnostic.path.join('.') === 'input.payload.options.mode')
+    expect(leaves).toHaveLength(2)
+    expect(leaves[0].message).toContain('Union alternative 1.1:')
+    expect(leaves[0].message).toContain('"fast"')
+    expect(leaves[1].message).toContain('Union alternative 1.2:')
+    expect(leaves[1].message).toContain('"slow"')
+    expect(receipt.diagnostics).toEqual(expect.arrayContaining([
+      { code: 'invalid-input', path: ['input', 'payload', 'count'], message: expect.stringContaining('Union alternative 2:') },
+    ]))
+    expect(new AuthoringToolFailure(leaves).message).toContain('$.input.payload.options.mode:')
+    expect(plan).not.toHaveBeenCalled()
+    expect(test.port.commit).not.toHaveBeenCalled()
   })
 })

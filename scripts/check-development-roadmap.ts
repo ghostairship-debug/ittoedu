@@ -54,6 +54,9 @@ export const ROADMAP_WRITE_LOCKS = [
   'diagnostics',
   'main-preload',
   'cli-adapters',
+  'cli-adapter-codex',
+  'cli-adapter-claude',
+  'cli-adapter-opencode',
   'ai-session',
   'chat-ui',
 ] as const

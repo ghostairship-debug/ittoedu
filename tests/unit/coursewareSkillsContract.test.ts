@@ -1,4 +1,6 @@
 import { readFile } from 'node:fs/promises'
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { createGenerationProfile } from '../../src/main/localAgent/profile'
@@ -13,7 +15,7 @@ describe('neutral CLI candidate profiles', () => {
     expect(profiles[1]?.skills).toEqual(profiles[2]?.skills)
     expect(profiles.map(profile => [profile.resultChannel, profile.capability.candidateFileIngestion])).toEqual([
       ['app-server-json-schema', false],
-      ['structured-stdout', false],
+      ['session-staging-file', true],
       ['session-staging-file', true],
     ])
     expect(profiles.every(profile => profile.resultContract.mode === 'reply-or-edit')).toBe(true)
@@ -36,6 +38,33 @@ async function readRepoFile(relativePath: string): Promise<string> {
 }
 
 describe('courseware skill contracts', () => {
+  it('rejects an invalid explicit product root before consulting a cached or alternate product', async () => {
+    let failure: { stdout?: string } | undefined
+    try {
+      await promisify(execFile)(process.execPath, [path.join(repoRoot, '.agents/skills/build-courseware-project/scripts/resolve-editor-root.mjs'), '--no-cache'],
+        { windowsHide: true, env: { ...process.env, COURSEWARE_EDITOR_ROOT: path.join(repoRoot, 'output', `missing-product-${crypto.randomUUID()}`) } })
+    } catch (error) { failure = error as { stdout?: string } }
+    expect(JSON.parse(failure?.stdout ?? '{}')).toMatchObject({ ok: false, error: 'explicit_editor_root_invalid' })
+  })
+
+  it('keeps the cold entry small while preserving the full teaching, carrier, visual and verification methods', async () => {
+    const [entry, methods, resolver] = await Promise.all([
+      readRepoFile('.agents/skills/build-courseware-project/SKILL.md'),
+      readRepoFile('.agents/skills/build-courseware-project/references/build-method.md'),
+      readRepoFile('.agents/skills/build-courseware-project/scripts/resolve-editor-root.mjs'),
+    ])
+    expect(Buffer.byteLength(entry)).toBeLessThanOrEqual(6 * 1024)
+    expect(entry).toContain('[build-method.md](references/build-method.md)')
+    expect(entry).toContain('教师看过并明确确认')
+    expect(entry).toContain('observe()')
+    expect(entry).toContain('readReceipts')
+    for (const topic of ['载体所有权', '资产与任务图', '先做最高风险纵切', '增量构建与 Worker', '保持可编辑', '验证与交付', '停止条件']) expect(methods).toContain(topic)
+    expect(methods).toContain('分类与排序必须分开选载体')
+    expect(methods).not.toContain('编辑器内没有可见 AI')
+    expect(resolver).toContain('semanticVersion')
+    expect(resolver).not.toContain('b.indexMtime - a.indexMtime')
+  })
+
   it('loads the body-first progression contract from both workflow entrypoints', async () => {
     const [orchestrator, builder] = await Promise.all([
       readRepoFile('.agents/skills/orchestrate-courseware/SKILL.md'),

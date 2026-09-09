@@ -404,6 +404,49 @@ describe('planRuntimeSourceUpdate', () => {
     expect(source.project.revision).toBe(0)
   })
 
+  it.each(['slide-scene', 'flow-surface', 'global'] as const)('updates source and fallback atomically for %s without changing the Runtime identity', kind => {
+    const source = fixture(kind)
+    source.project.assets['new-fallback'] = { ...source.project.assets[ASSET_ID]!, id: 'new-fallback', path: 'assets/new-fallback.png' }
+    const original = structuredClone(findRuntime(source.project, source.itemId))
+    const staticFallback = { ...original.runtime.staticFallback!, assetId: 'new-fallback' }
+    const plan = planned(planRuntimeSourceUpdate(input(source, { staticFallback })))
+    expect(findRuntime(plan.nextDocument, source.itemId)).toEqual({ ...original,
+      runtime: { ...original.runtime, source: nextSource(source), staticFallback } })
+    const resources = { componentPackages: {}, assetFiles: {} }
+    const step = createEditorTransactionStep(source.project, plan)!
+    const forward = applyEditorTransactionStep({ document: source.project, resources }, step, 'forward')
+    const undone = applyEditorTransactionStep(forward, step, 'inverse')
+    expect(undone.document).toEqual(source.project)
+    expect(applyEditorTransactionStep(undone, step, 'forward')).toEqual(forward)
+    expect(plan.nextDocument.revision).toBe(source.project.revision + 1)
+    expect(plan.resourceChanges).toEqual({})
+  })
+
+  it('plans a fallback-only rebind with identical source and preserves a matching fallback as a no-op', () => {
+    const source = fixture('flow-surface'), original = structuredClone(findRuntime(source.project, source.itemId))
+    source.project.assets['new-fallback'] = { ...source.project.assets[ASSET_ID]!, id: 'new-fallback', path: 'assets/new-fallback.png' }
+    const staticFallback = { ...original.runtime.staticFallback!, assetId: 'new-fallback' }
+    const plan = planned(planRuntimeSourceUpdate(input(source, { source: original.runtime.source, staticFallback })))
+    expect(findRuntime(plan.nextDocument, source.itemId)).toEqual({ ...original, runtime: { ...original.runtime, staticFallback } })
+    expect(planRuntimeSourceUpdate(input(source, { source: original.runtime.source, staticFallback: original.runtime.staticFallback }))).toMatchObject({ ok: true, status: 'no-op' })
+  })
+
+  it('rejects invalid, missing, non-image, stale and locked fallback changes without a plan', () => {
+    for (const mode of ['invalid', 'missing', 'non-image', 'stale', 'locked'] as const) {
+      const source = fixture('slide-scene')
+      const fallback = { assetId: ASSET_ID, coverage: 'scene' as const }
+      if (mode === 'missing') fallback.assetId = 'missing'
+      if (mode === 'non-image') source.project.assets[ASSET_ID] = { ...source.project.assets[ASSET_ID]!, kind: 'audio', mimeType: 'audio/mpeg' }
+      if (mode === 'locked') findRuntime(source.project, source.itemId).locked = true
+      const before = structuredClone(source.project)
+      const result = planRuntimeSourceUpdate(input(source, { staticFallback: mode === 'invalid' ? { ...fallback, extra: true } as typeof fallback : fallback,
+        ...(mode === 'stale' ? { target: { ...source.target, documentRevision: source.project.revision + 1 } } : {}) }))
+      expect(result.ok, mode).toBe(false)
+      if (!result.ok) expect(result.code).toBe(mode === 'stale' ? 'revision-conflict' : mode === 'locked' ? 'target-locked' : 'invalid-fallback')
+      expect(source.project).toEqual(before)
+    }
+  })
+
   it('produces one reversible EditorTransactionStep with no resource delta', () => {
     const source = fixture('flow-surface')
     const plan = planned(planRuntimeSourceUpdate(input(source)))

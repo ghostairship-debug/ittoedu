@@ -95,6 +95,7 @@ export interface PreviewNetworkPolicyInput {
 export interface DesktopAPI {
   legacyPpt(input: { operation: 'select' | 'cancel' }): Promise<LegacyPptImportResult | null>
   localAgent(input: LocalAgentRequest): Promise<LocalAgentResponse>
+  captureAuthoringObservation?(input: { x: number; y: number; width: number; height: number }): Promise<{ dataUrl: string; capturedAt: number; width: number; height: number }>
   dynamicAdmission?(input: DynamicAdmissionRequest): Promise<DynamicAdmissionResult>
   materials(input: MaterialRequest): Promise<MaterialRecordV1[]>
   openProject(): Promise<OpenProjectFileResult | null>
@@ -159,6 +160,7 @@ export interface DesktopAPI {
 export const IPC_CHANNELS = {
   materials: 'materials:operate',
   localAgent: 'local-agent:operate',
+  captureAuthoringObservation: 'local-agent:capture-observation',
   dynamicAdmission: 'dynamic-admission:operate',
   legacyPpt: 'ppt:resave-import',
   openProject: 'project:open',

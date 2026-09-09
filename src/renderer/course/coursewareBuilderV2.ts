@@ -12,9 +12,17 @@ import { createResourceAwareAuthoringHistory, commitEditorTransactionToAuthoring
 import { applyEditorTransactionStep } from '../authoring/editorTransaction'
 import type { HistoryResourceState } from '../store/courseResourceState'
 import { readAuthoringToolSelection, type AuthoringToolCreateScopeV1, type AuthoringToolDestinationV1, type AuthoringToolReceiptV1 } from '../../shared/authoringToolContract'
+import generatedCapabilities from '../../shared/generated/courseAgentCapabilities.json'
+import { queryCourseAgentCapabilities, readCourseAgentCapability, type CourseAgentCapabilityData,
+  type CourseAgentCapabilityQuery, type CourseAgentCapabilityCardOptions } from '../../shared/courseAgentCapabilities'
 
 const optionsSchema = z.object({ surfaceType: z.enum(['slide', 'flow', 'spatial-2d']), title: z.string().trim().min(1).max(120) }).strict()
 export type CoursewareBuilderV2Options = z.infer<typeof optionsSchema>
+const capabilities = generatedCapabilities as CourseAgentCapabilityData
+const observeSchema = z.object({ itemIds: z.array(z.string().min(1)).max(100).optional(), includeContent: z.boolean().optional(),
+  includeLocations: z.boolean().optional(), offset: z.number().int().nonnegative().default(0), limit: z.number().int().min(1).max(100).default(20) }).strict()
+export type CoursewareBuilderObservationOptions = z.input<typeof observeSchema>
+const receiptQuerySchema = z.object({ after: z.number().int().nonnegative().default(0), limit: z.number().int().min(1).max(100).default(20) }).strict()
 
 /** Private builder document; every edit uses the same product tool and transaction as the editor. */
 export function createCoursewareBuilderV2(raw: CoursewareBuilderV2Options) {
@@ -49,7 +57,7 @@ export function createCoursewareBuilderV2(raw: CoursewareBuilderV2Options) {
   const currentWire = () => ({ projectId: history.present.id, documentRevision: history.present.revision, revisionPolicy: { kind: 'exact' as const },
     sessionGeneration: generation, surfaceType: history.present.surfaces.find(entry => entry.id === scope.surfaceId)!.type,
     surfaceId: scope.surfaceId, locationId: scope.locationId, stateId: scope.stateId, owner: scope.owner, ownerKey: scope.ownerKey })
-  const snapshot = () => {
+  const currentTargets = () => {
     const surface = history.present.surfaces.find(entry => entry.id === scope.surfaceId)!
     const wire = currentWire()
     const content = listOwnedLayerItems(history.present, scope.owner, { surfaceId: scope.surfaceId, sceneId: scope.sceneId }).map(item => ({ ...wire, itemId: item.layerItemId,
@@ -61,18 +69,61 @@ export function createCoursewareBuilderV2(raw: CoursewareBuilderV2Options) {
       } }
       append(surface.blocks)
     }
-    return structuredClone({ project: history.present, scope, generation, receipts, targets: { content } })
+    return content
+  }
+  const snapshot = () => structuredClone({ project: history.present, scope, generation, receipts, targets: { content: currentTargets() } })
+  const observe = (input: CoursewareBuilderObservationOptions = {}) => {
+    const query = observeSchema.parse(input)
+    const all = currentTargets()
+    if (query.itemIds?.some(id => !all.some(target => target.itemId === id))) throw new Error('观察目标不属于当前 scope')
+    const matches = query.itemIds ? all.filter(target => query.itemIds!.includes(target.itemId)) : all
+    const content = matches.slice(query.offset, query.offset + query.limit)
+    const surface = history.present.surfaces.find(entry => entry.id === scope.surfaceId)!
+    const selected = new Set(content.map(target => target.itemId))
+    const items: unknown[] = []
+    if (query.includeContent) {
+      for (const item of listOwnedLayerItems(history.present, scope.owner, { surfaceId: scope.surfaceId, sceneId: scope.sceneId })) {
+        if (selected.has(item.layerItemId)) {
+          if (item.kind === 'runtime') { const { source: _source, ...runtime } = item.runtime; items.push({ ...item, runtime, sourceAvailable: true }) }
+          else items.push(item)
+        }
+      }
+      if (surface.type === 'flow' && scope.owner === 'surface') {
+        const visit = (blocks: readonly FlowBlock[]) => { for (const block of blocks) {
+          if (selected.has(block.id)) items.push(block.type === 'section' ? { ...block, blocks: block.blocks.map(child => ({ id: child.id, type: child.type })) } : block)
+          if (block.type === 'section') visit(block.blocks)
+        } }
+        visit(surface.blocks)
+      }
+    }
+    return structuredClone({ version: 1 as const, projectId: history.present.id, documentRevision: history.present.revision, scope, generation,
+      targets: { content, total: matches.length, nextOffset: query.offset + content.length < matches.length ? query.offset + content.length : null },
+      receiptCount: receipts.length, ...(query.includeContent ? { items } : {}),
+      ...(query.includeLocations ? { locations: history.present.locations } : {}) })
+  }
+  const activate = (input: { locationId: string; owner?: CourseAuthoringOwner; stateId?: string | null }) => {
+    const next = courseAuthoringScopeFromLocation({ project: history.present, ...input })
+    if (JSON.stringify(next) !== JSON.stringify(scope)) generation++
+    scope = next
   }
   return Object.freeze({
     version: 2 as const,
     tools: facade.tools,
+    discover: (query: CourseAgentCapabilityQuery = {}) => queryCourseAgentCapabilities(capabilities, query),
+    readCapability: (id: string, options: CourseAgentCapabilityCardOptions = {}) => readCourseAgentCapability(capabilities, id, options),
+    observe,
+    readReceipts(input: z.input<typeof receiptQuerySchema> = {}) {
+      const query = receiptQuerySchema.parse(input)
+      if (query.after > receipts.length) throw new Error('回执游标不属于当前会话')
+      const entries = receipts.slice(query.after, query.after + query.limit)
+      return structuredClone({ after: query.after, cursor: query.after + entries.length, total: receipts.length, receipts: entries })
+    },
     snapshot,
     activate(input: { locationId: string; owner?: CourseAuthoringOwner; stateId?: string | null }) {
-      const next = courseAuthoringScopeFromLocation({ project: history.present, ...input })
-      if (JSON.stringify(next) !== JSON.stringify(scope)) generation++
-      scope = next
+      activate(input)
       return snapshot()
     },
+    activateScope(input: { locationId: string; owner?: CourseAuthoringOwner; stateId?: string | null }) { activate(input); return observe() },
     createScope(input: Pick<AuthoringToolCreateScopeV1, 'parent' | 'insertion'>): AuthoringToolCreateScopeV1 {
       const surface = history.present.surfaces.find(entry => entry.id === scope.surfaceId)!
       return { projectId: history.present.id, documentRevision: history.present.revision, revisionPolicy: { kind: 'exact' }, sessionGeneration: generation,
