@@ -16,12 +16,6 @@ import { parseGenerationText, readGenerationResult, GENERATION_OPEN, GENERATION_
 import { CandidateStaging } from '../../src/main/localAgent/candidateStaging'
 import { randomUUID } from 'node:crypto'
 
-function promptProfile(prompt: string) {
-  return JSON.parse(prompt.split('\n').find(line => line.startsWith('{"profile":'))!).profile as {
-    workspace: { root: string; capabilities: string }; resultContract: { mode: string; candidateInputEncoding: string }
-  }
-}
-
 function generationTransportFixture(directory: string) {
   const workspace = createWorkspaceIdentity('generation-project', path.join(directory, 'course.h5lesson'))
   const request = generationRequestSchema.parse({ version: 1, requestId: randomUUID(), workspace, documentRevision: 0, sessionGeneration: 1,
@@ -90,8 +84,9 @@ describe('generation output channels and staging ingestion', () => {
     const { workspace, request } = generationTransportFixture(directory)
     let stagingRoot = ''
     const harness = new LocalAgentHarness(new LocalAgentRepository(directory), id => createScriptedAgentV2Fixture(id, {
-      async *turn(prompt) {
-        stagingRoot = promptProfile(prompt).workspace.root
+      async *turn(_prompt, { candidateRoot }) {
+        if (!candidateRoot) throw new Error('The native adapter did not receive the current candidate root')
+        stagingRoot = candidateRoot
         await fs.writeFile(path.join(stagingRoot, 'candidate.json'), '{broken')
         yield { type: 'acp_session', sessionID: 'external-opencode' }
         yield { type: 'acp_result', sessionID: 'external-opencode', stopReason: 'end_turn' }
@@ -112,16 +107,14 @@ describe('generation output channels and staging ingestion', () => {
     const capabilityRoots: string[] = []
     let output = candidate
     const adapter = (id: LocalAgentId) => createScriptedAgentV2Fixture(id, {
-      async *turn(prompt, { cwd, externalSessionId }) {
+      async *turn(prompt, { cwd, externalSessionId, candidateRoot }) {
         if (externalSessionId) expect(externalSessionId).toBe('external-generation')
         expect(prompt).toContain(request.instruction); cwdValues.push(cwd)
-        const profile = promptProfile(prompt)
-        capabilityRoots.push(profile.workspace.capabilities)
-        expect(profile.resultContract.mode).toBe(prompt.includes('"expectedResult":"candidate"') ? 'candidate' : 'reply-or-edit')
-        expect(profile.resultContract.candidateInputEncoding).toBe('json-string')
         expect(cwd).toBe(await fs.realpath(directory))
-        const candidateRoot = profile.workspace.root
-        expect(await fs.stat(path.join(candidateRoot, 'request.json'))).toBeTruthy()
+        if (!candidateRoot) throw new Error('The native adapter did not receive the current candidate root')
+        const staged = JSON.parse(await fs.readFile(path.join(candidateRoot, 'request.json'), 'utf8'))
+        expect(staged.requestId).toBe(output.requestId)
+        capabilityRoots.push(staged.fileAccess.capabilities)
         yield { type: 'thread.started', thread_id: 'external-generation' }
         yield { type: 'item.completed', item: { type: 'agent_message', text: `${GENERATION_OPEN}${JSON.stringify(output)}${GENERATION_CLOSE}` } }
         yield { type: 'turn.completed' }

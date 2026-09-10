@@ -4,6 +4,17 @@ import { imageTransformInputSchema, MAX_IMAGE_TRANSFORM_PIXELS, type ImageTransf
 export interface ImagePixels { readonly width: number; readonly height: number; readonly data: Uint8Array }
 interface PngMetadata { type: string; bytes: Uint8Array }
 interface DecodedImage extends ImagePixels { metadata?: PngMetadata[] }
+export class ImageTransformSourceError extends Error {
+  readonly code: 'image-source-unsupported' | 'image-source-decode-failed'
+  constructor(readonly status: 'unsupported' | 'failed', message: string) {
+    super(message)
+    this.name = 'ImageTransformSourceError'
+    this.code = status === 'unsupported' ? 'image-source-unsupported' : 'image-source-decode-failed'
+  }
+}
+export type ImageTransformSourceInspection =
+  | { status: 'ready'; width: number; height: number }
+  | { status: 'unsupported' | 'failed'; code: ImageTransformSourceError['code']; message: string }
 const signature = [137, 80, 78, 71, 13, 10, 26, 10]
 const crcTable = Uint32Array.from({ length: 256 }, (_, byte) => {
   let value = byte
@@ -20,6 +31,15 @@ function crc(bytes: Uint8Array): number {
   let value = 0xffffffff
   for (const byte of bytes) value = crcTable[(value ^ byte) & 255]! ^ (value >>> 8)
   return (value ^ 0xffffffff) >>> 0
+}
+function adler32(bytes: Uint8Array): number {
+  let a = 1, b = 0
+  for (let offset = 0; offset < bytes.length;) {
+    const end = Math.min(offset + 5552, bytes.length)
+    for (; offset < end; offset++) { a += bytes[offset]!; b += a }
+    a %= 65521; b %= 65521
+  }
+  return ((b << 16) | a) >>> 0
 }
 function concat(parts: readonly Uint8Array[]): Uint8Array {
   const result = new Uint8Array(parts.reduce((sum, bytes) => sum + bytes.length, 0))
@@ -62,7 +82,7 @@ export function decodeImageTransformPng(bytes: Uint8Array): DecodedImage {
     const view = new DataView(bytes.buffer, bytes.byteOffset + offset, bytes.length - offset), length = view.getUint32(0)
     if (length > bytes.length - offset - 12) throw new Error('PNG 数据块不完整')
     const type = String.fromCharCode(...bytes.subarray(offset + 4, offset + 8)), data = bytes.subarray(offset + 8, offset + 8 + length)
-    if (crc(bytes.subarray(offset + 4, offset + 8 + length)) !== view.getUint32(8 + length)) throw new Error('PNG 数据块校验失败')
+    if (crc(bytes.subarray(offset + 4, offset + 8 + length)) !== view.getUint32(8 + length)) throw new Error(`PNG 数据块校验失败：${type}（偏移 ${offset}）`)
     if (offset === 8 && type !== 'IHDR') throw new Error('PNG 缺少首部')
     if (type === 'IHDR') {
       if (width || length !== 13) throw new Error('PNG 首部无效')
@@ -70,9 +90,9 @@ export function decodeImageTransformPng(bytes: Uint8Array): DecodedImage {
       width = header.getUint32(0); height = header.getUint32(4); dimensions(width, height)
       depth = data[8]!; color = data[9]!; interlace = data[12]!
       const depths: Record<number, number[]> = { 0: [1, 2, 4, 8], 2: [8], 3: [1, 2, 4, 8], 4: [8], 6: [8] }
-      if (depth === 16) throw new Error('16 位 PNG 需要先转为 8 位图片；当前操作不会静默丢失颜色精度')
+      if (depth === 16) throw new ImageTransformSourceError('unsupported', '16 位 PNG 需要先转为 8 位图片；当前操作不会静默丢失颜色精度')
       if (!depths[color]?.includes(depth) || data[10] || data[11] || interlace > 1) throw new Error('PNG 像素格式无效')
-    } else if (type === 'acTL') throw new Error('动画图片需要明确逐帧编辑范围，当前操作仅支持静态图片')
+    } else if (type === 'acTL') throw new ImageTransformSourceError('unsupported', '动画图片需要明确逐帧编辑范围，当前操作仅支持静态图片')
     else if (type === 'PLTE') palette = data
     else if (type === 'tRNS') transparency = data
     else if (type === 'IDAT') compressed.push(data)
@@ -87,10 +107,16 @@ export function decodeImageTransformPng(bytes: Uint8Array): DecodedImage {
   const passInfo = passes.map(([x, y, dx, dy]) => ({ x: x!, y: y!, dx: dx!, dy: dy!,
     width: Math.max(0, Math.ceil((width - x!) / dx!)), height: Math.max(0, Math.ceil((height - y!) / dy!)) }))
   const expected = passInfo.reduce((sum, pass) => sum + (pass.width ? pass.height * (1 + Math.ceil(pass.width * channels * depth / 8)) : 0), 0)
+  const zlib = concat(compressed)
+  if (zlib.length < 6) throw new Error('PNG IDAT zlib 数据不完整')
   let raw: Uint8Array
-  try { raw = unzlibSync(concat(compressed), { out: new Uint8Array(expected + 1) }) }
-  catch { throw new Error('PNG 像素无法解压') }
+  try { raw = unzlibSync(zlib, { out: new Uint8Array(expected + 1) }) }
+  catch { throw new Error('PNG IDAT 像素无法解压') }
   if (raw.length !== expected) throw new Error('PNG 像素长度无效')
+  // fflate checks zlib framing but does not validate its Adler-32 trailer.
+  if (adler32(raw) !== new DataView(zlib.buffer, zlib.byteOffset, zlib.byteLength).getUint32(zlib.length - 4)) {
+    throw new Error('PNG IDAT zlib 校验失败（Adler-32）')
+  }
   const rgba = new Uint8Array(width * height * 4), bpp = Math.max(1, channels * depth / 8)
   let at = 0
   for (const pass of passInfo) {
@@ -129,13 +155,13 @@ export function decodeImageTransformPng(bytes: Uint8Array): DecodedImage {
 
 async function decodeOriginal(bytes: Uint8Array, mimeType: string): Promise<DecodedImage> {
   if (mimeType === 'image/png') return decodeImageTransformPng(bytes)
-  if (!['image/jpeg', 'image/webp'].includes(mimeType)) throw new Error('当前确定性操作支持静态 PNG、JPEG、WebP；其他格式请先转为静态 PNG')
+  if (!['image/jpeg', 'image/webp'].includes(mimeType)) throw new ImageTransformSourceError('unsupported', '当前确定性操作支持静态 PNG、JPEG、WebP；其他格式请先转为静态 PNG')
   // VP8X animation flag / ANIM chunk: never flatten animation silently.
   if (mimeType === 'image/webp') {
     for (let at = 12; at + 8 <= bytes.length;) {
       const type = String.fromCharCode(...bytes.subarray(at, at + 4)), view = new DataView(bytes.buffer, bytes.byteOffset + at)
       const length = view.getUint32(4, true)
-      if (type === 'ANIM' || (type === 'VP8X' && (bytes[at + 8]! & 2))) throw new Error('动画 WebP 需要明确逐帧编辑范围')
+      if (type === 'ANIM' || (type === 'VP8X' && (bytes[at + 8]! & 2))) throw new ImageTransformSourceError('unsupported', '动画 WebP 需要明确逐帧编辑范围')
       at += 8 + length + (length & 1)
     }
   }
@@ -150,6 +176,31 @@ async function decodeOriginal(bytes: Uint8Array, mimeType: string): Promise<Deco
     return { width: canvas.width, height: canvas.height, data: new Uint8Array(context.getImageData(0, 0, canvas.width, canvas.height).data) }
   } catch (error) { throw new Error(`原图解码失败：${error instanceof Error ? error.message : String(error)}`) }
   finally { URL.revokeObjectURL(url) }
+}
+
+async function readImageTransformSource(bytes: Uint8Array, mimeType: string, signal?: AbortSignal): Promise<DecodedImage> {
+  abort(signal)
+  try {
+    if (!bytes.length || bytes.length > 64 * 1024 * 1024) throw new Error('原图为空或超过 64 MiB')
+    const source = await decodeOriginal(bytes, mimeType)
+    abort(signal)
+    return source
+  } catch (error) {
+    abort(signal)
+    if (error instanceof ImageTransformSourceError) throw error
+    throw new ImageTransformSourceError('failed', error instanceof Error ? error.message : String(error))
+  }
+}
+
+/** Read-only source readiness, not an operation check or a commit receipt. */
+export async function inspectImageTransformSource(bytes: Uint8Array, mimeType: string, signal?: AbortSignal): Promise<ImageTransformSourceInspection> {
+  try {
+    const source = await readImageTransformSource(bytes, mimeType, signal)
+    return { status: 'ready', width: source.width, height: source.height }
+  } catch (error) {
+    if (error instanceof ImageTransformSourceError) return { status: error.status, code: error.code, message: error.message }
+    throw error
+  }
 }
 
 /** Pure original-pixel operations; inputs and unselected pixel channels remain untouched. */
@@ -210,9 +261,7 @@ export function transformImagePixels(source: ImagePixels, input: ImageTransformI
 
 export async function transformImageAsset(bytes: Uint8Array, mimeType: string, rawInput: unknown, signal?: AbortSignal) {
   const input = imageTransformInputSchema.parse(rawInput)
-  abort(signal)
-  if (!bytes.length || bytes.length > 64 * 1024 * 1024) throw new Error('原图为空或超过 64 MiB')
-  const source = await decodeOriginal(bytes, mimeType)
+  const source = await readImageTransformSource(bytes, mimeType, signal)
   await new Promise<void>(resolve => setTimeout(resolve, 0))
   abort(signal)
   const result = transformImagePixels(source, input, signal)

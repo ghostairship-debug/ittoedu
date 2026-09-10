@@ -2,11 +2,36 @@
   "candidateCarrier": {
     "default": "runtime"
   },
-  "description": "修改现有 Runtime 的完整 source，使用观察中该对象的原 update target；保留实例ID、位置、尺寸、绑定和未指定字段。省略 staticFallback 时保留原后备；需修复或更新后备图片时可同时指定 strict {assetId,coverage}（coverage 为 scene 或 surface），先经 asset.media.import 导入有效图片，再用其 asset-id 回执引用。source 与后备在同一事务更新；仅换后备时仍提供当前完整 source。速度或机制修改无需新建或 selection.replace，所有修改仍须完整资源闭包与真实宿主准入。",
+  "description": "修改现有 Runtime 的完整 source，使用观察中该对象的原 update target；保留实例ID、位置、尺寸、绑定和未指定字段。省略 staticFallback 时保留原后备；需修复或更新后备图片时可同时指定 strict {assetId,coverage}（coverage 为 scene 或 surface），先经 asset.media.import 导入有效图片，再用其 asset-id 回执引用。source 与后备在同一事务更新；仅换后备时仍提供当前完整 source。速度或机制修改无需新建或 selection.replace，所有修改仍须完整资源闭包与真实宿主准入。修复明确DOM按钮时可附observeButton:{version:1,label:按钮完整名称}，在独立候选宿主点击该实例唯一可见可操作按钮一次，回传点击前后文本/帧供核对；不点击教师live session，不代表自动判定教学目标通过。",
+  "examples": [
+    {
+      "bindings": "values 的 source 来自当前观察、已读资源或用户要求，值须满足本卡 inputSchema；destination 原样复制当前目标。",
+      "code": "const input={\"source\":values[\"source\"]}; const receipt=await session.execute(\"runtime.source\",input,destination);"
+    }
+  ],
   "inputSchema": {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "additionalProperties": false,
     "properties": {
+      "observeButton": {
+        "additionalProperties": false,
+        "properties": {
+          "label": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          },
+          "version": {
+            "const": 1,
+            "type": "number"
+          }
+        },
+        "required": [
+          "version",
+          "label"
+        ],
+        "type": "object"
+      },
       "source": {
         "maxLength": 2000000,
         "minLength": 1,
@@ -40,12 +65,23 @@
     ],
     "type": "object"
   },
+  "invocation": "Builder: await session.execute(tool,input,destination)。input 遵循本卡完整 Schema；destination 原样使用当前 observe/createScope 的目标；只以 committed receipt 判定成功。",
   "name": "runtime.source",
+  "recovery": "invalid-input: 按本卡 Schema 修正字段；revision-conflict: 重新 observe 后复制新 target 和源码基线；tool-failed: 读取 diagnostics 修复所指输入/资源/宿主条件，失败不代表已提交。",
   "support": "conditional-on-input-target-resources-and-host",
   "supportedScopes": [
     "slide:scene",
     "slide:global",
     "flow:surface"
+  ],
+  "variants": [
+    {
+      "scopes": [
+        "slide:scene",
+        "slide:global",
+        "flow:surface"
+      ]
+    }
   ],
   "version": 1
 }

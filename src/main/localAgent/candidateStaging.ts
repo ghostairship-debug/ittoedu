@@ -59,7 +59,7 @@ export class CandidateStaging {
     await fs.mkdir(target) // Reusing a request must not pick up old or half-written output.
     try {
       await ensureGenerationCapabilityWorkspace(target)
-      await writeResource(target, 'request.json', JSON.stringify(generationRequestForPrompt(request)))
+      await writeResource(target, 'request.json', JSON.stringify(generationRequestForPrompt(request, target)))
       for (const resource of request.resourceFiles ?? []) await writeResource(target, `resources/${resource.path}`, decodeResource(resource))
       return target
     } catch (error) { await fs.rm(target, { recursive: true, force: true }); throw error }

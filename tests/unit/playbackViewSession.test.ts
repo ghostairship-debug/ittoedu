@@ -1,3 +1,4 @@
+import { PLAYBACK_VIEW_CHROME_GUTTER } from '@/shared/playbackViewGeometry'
 import { afterEach, describe, expect, it } from 'vitest'
 import { PlaybackViewSession, playbackGestureOccupied, playbackPanRange } from '@/player/playbackViewSession'
 import { TeacherControllerDom, teacherControllerDomNode } from '@/player/teacherControllerDom'
@@ -17,6 +18,27 @@ function mountView() {
 }
 afterEach(() => document.body.replaceChildren())
 describe('Playback observation ownership', () => {
+  it('keeps observation bars outside the Flow document scrollbar and preserves independent scroll state', () => {
+    const { view, viewport, container } = mountView()
+    const article = document.createElement('article')
+    article.style.overflow = 'auto'; viewport.append(article); article.scrollTop = 230
+    const vertical = container.querySelector<HTMLElement>('[data-playback-chrome="y-bar"]')!
+    const horizontal = container.querySelector<HTMLElement>('[data-playback-chrome="x-bar"]')!
+    expect(viewport.contains(vertical)).toBe(false)
+    expect(viewport.contains(horizontal)).toBe(false)
+    expect(viewport.style.right).toBe(vertical.style.width)
+    expect(viewport.style.bottom).toBe(horizontal.style.height)
+    expect(viewport.style.right).toBe(`${PLAYBACK_VIEW_CHROME_GUTTER}px`)
+    view.zoomTo(2)
+    vertical.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true, cancelable: true }))
+    expect(view.state.pan.y).toBe(-600)
+    expect(article.scrollTop).toBe(230)
+    article.scrollTop = 410
+    expect(view.state.pan.y).toBe(-600)
+    view.reset()
+    expect(article.scrollTop).toBe(410)
+    view.destroy()
+  })
   it('keeps the pointed content fixed, exposes every corner and clamps after shrinking or resize', () => {
     const { view, viewport } = mountView()
     view.zoomTo(2, { x: 200, y: 150 })

@@ -82,6 +82,88 @@ function describeHit(element: Element, view: Window) {
   }
 }
 
+function readVisibleInstanceText(mounts: HTMLElement[], targetId: string, view: Window) {
+  const styles = new Map<Element, CSSStyleDeclaration>(), visited = new Set<Node>()
+  const styleOf = (element: Element) => {
+    let style = styles.get(element)
+    if (!style) { style = view.getComputedStyle(element); styles.set(element, style) }
+    return style
+  }
+  const hidden = (element: Element) => {
+    const style = styleOf(element)
+    return element.hasAttribute('hidden') || style.display === 'none' || Number(style.opacity || 1) === 0
+      || style.contentVisibility === 'hidden'
+  }
+  const composedParent = (element: Element): Element | null => element.assignedSlot ?? parentElement(element)
+  const stack: Array<{ node: Node; visible: boolean } | null> = []
+  for (const mount of [...mounts].reverse()) {
+    let blocked = false
+    for (let ancestor = composedParent(mount); ancestor; ancestor = composedParent(ancestor)) {
+      if (hidden(ancestor)) { blocked = true; break }
+    }
+    if (!blocked) stack.push({ node: mount, visible: true })
+  }
+  let content = ''
+  const lineBreak = () => { if (content && !content.endsWith('\n')) content += '\n' }
+  while (stack.length && visited.size < 10_000 && content.length <= 8000) {
+    const entry = stack.pop()!
+    if (!entry) { lineBreak(); continue }
+    const { node } = entry
+    if (visited.has(node)) continue
+    visited.add(node)
+    if (node.nodeType === Node.TEXT_NODE) {
+      if (entry.visible) content += (node.nodeValue ?? '').replace(/\s+/g, ' ')
+      continue
+    }
+    let visible = entry.visible
+    let children: Node[] = [...node.childNodes]
+    if (node instanceof Element) {
+      if (!node.isConnected || instanceId(node) !== targetId || hidden(node)
+        || node.matches('style, script, template, noscript, head, meta, link, canvas, iframe, object, embed')) continue
+      const style = styleOf(node)
+      // Visibility may be restored by a descendant; only display/opacity prune
+      // the subtree. Read text nodes once instead of aggregating innerText.
+      visible = !['hidden', 'collapse'].includes(style.visibility)
+      if (node.matches('br, button, [role="button"]') || /^(block|flex|grid|table|list-item)/.test(style.display)) {
+        lineBreak(); stack.push(null)
+      }
+      if (node.shadowRoot) children = [node.shadowRoot]
+      else if (node.localName === 'details' && !node.hasAttribute('open')) {
+        const summary = [...node.children].find(child => child.localName === 'summary')
+        children = summary ? [summary] : []
+      } else if (node.localName === 'slot') {
+        const assigned = (node as HTMLSlotElement).assignedNodes({ flatten: true })
+        if (assigned.length) children = assigned
+      }
+    }
+    for (const child of children.reverse()) stack.push({ node: child, visible })
+  }
+  content = content.replace(/[^\S\n]+/g, ' ').replace(/ *\n */g, '\n').replace(/\n+/g, '\n').trim()
+  return { text: content.slice(0, 8000), truncated: content.length > 8000 || stack.length > 0 }
+}
+
+/** Admission-only lookup. The caller supplies a frozen instance and an exact
+ * accessible label; no CSS selector or script can be supplied by a candidate. */
+export function resolveRuntimeDomButton(root: HTMLElement, targetId: string, label: string) {
+  const view = root.ownerDocument.defaultView
+  if (!view) throw new Error('按钮检查没有实际窗口')
+  const mounts = [...root.querySelectorAll<HTMLElement>(MOUNT_SELECTOR)]
+    .filter(mount => (mount.dataset.runtimeInstanceId ?? mount.dataset.componentInstanceId) === targetId)
+  const normalized = (value: string) => value.replace(/\s+/g, ' ').trim()
+  const matching = [...new Set(mounts.flatMap(domControls))].filter(control => instanceId(control) === targetId
+    && normalized(control.getAttribute('aria-label') || control.innerText || control.textContent || '') === normalized(label)
+    && visibleBounds(control, root))
+  if (matching.length !== 1) throw new Error(`按钮检查需要当前实例内唯一可见控件“${label}”，实际找到 ${matching.length} 个`)
+  const element = matching[0]!
+  if (element.matches(':disabled') || element.getAttribute('aria-disabled') === 'true'
+    || view.getComputedStyle(element).pointerEvents === 'none') throw new Error(`按钮“${label}”不可操作`)
+  const bounds = visibleBounds(element, root)!
+  const x = bounds.x + bounds.width / 2, y = bounds.y + bounds.height / 2
+  if (x < 0 || x >= view.innerWidth || y < 0 || y >= view.innerHeight
+    || closest(centerHit(root.ownerDocument, x, y) ?? root, CONTROL_SELECTOR) !== element) throw new Error(`按钮“${label}”中心被遮挡或在窗口外`)
+  return { element, x, y, readText: () => readVisibleInstanceText(mounts, targetId, view) }
+}
+
 /** Reads only visible DOM facts in actual mounted target instances. Never clicks or infers private state. */
 export function observeRuntimeDomControls(root: HTMLElement, targets: readonly RuntimeDomObservationTarget[]) {
   const dom = root.ownerDocument, view = dom.defaultView

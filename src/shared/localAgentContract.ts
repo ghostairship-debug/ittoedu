@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import { workspaceIdentityV1Schema } from './workspaceIdentity'
-import { generationCommitReceiptSchema, generationRequestSchema } from './generationContract'
+import { generationAfterCommitSchema, generationFailureSchema, generationCommitReceiptSchema, generationRequestSchema } from './generationContract'
 import { generationResultSchema } from './generationResult'
 import { aiUserInputSchema, aiInputDeliverySchema } from './localAgentInteraction'
 
@@ -22,6 +22,8 @@ export const localAgentHostResultSchema = z.object({
   beforeRevision: z.number().int().nonnegative().optional(), afterRevision: z.number().int().nonnegative().optional(),
   candidateId: z.uuid().optional(),
   summary: z.string().max(4000),
+  afterCommit: generationAfterCommitSchema.optional(), failure: generationFailureSchema.optional(),
+  receiptDelivery: z.enum(['pending', 'delivered']).optional(),
 }).strict()
 export type LocalAgentHostResult = z.infer<typeof localAgentHostResultSchema>
 export const localAgentRecordSchema = z.object({
@@ -38,6 +40,8 @@ export const localAgentRecordSchema = z.object({
     intent: z.enum(['discuss', 'plan', 'edit']), applyPolicy: z.enum(['auto', 'preview']),
     status: z.enum(['observing', 'running', 'waiting-input', 'checking', 'awaiting-apply', 'committing', 'feeding-back', 'completed', 'failed', 'cancelled', 'partial']),
     turnId: z.string().nullable(), deadlineAt: z.number().int().nonnegative().nullable(), committedStages: z.number().int().nonnegative(),
+    completion: z.object({ version: z.literal(1), resultId: z.uuid(), outcome: z.enum(['modified', 'unchanged']) }).strict().optional(),
+    receiptDelivery: z.enum(['pending', 'delivered']).optional(),
   }).strict().optional(),
   events: z.array(localAgentEventSchema).max(20000),
 }).strict()
@@ -79,10 +83,11 @@ export const localAgentConfigurationSchema = z.object({ model: identity, effort:
 export type LocalAgentConfiguration = z.infer<typeof localAgentConfigurationSchema>
 
 const owner = { projectId: z.string().min(1).max(200), projectPath: z.string().min(1).max(32767) }
+const optionalOwner = { projectId: owner.projectId.optional(), projectPath: owner.projectPath.optional() }
 export const localAgentRequestSchema = z.discriminatedUnion('operation', [
   z.object({ operation: z.literal('probe'), adapter: localAgentIdSchema }).strict(),
-  z.object({ operation: z.literal('capabilities'), adapter: localAgentIdSchema }).strict(),
-  z.object({ operation: z.literal('configure'), adapter: localAgentIdSchema, configuration: localAgentConfigurationSchema }).strict(),
+  z.object({ operation: z.literal('capabilities'), adapter: localAgentIdSchema, ...optionalOwner, refresh: z.boolean().optional() }).strict(),
+  z.object({ operation: z.literal('configure'), adapter: localAgentIdSchema, configuration: localAgentConfigurationSchema, ...optionalOwner }).strict(),
   z.object({ operation: z.literal('workspace'), ...owner }).strict(),
   z.object({ operation: z.literal('file-status'), ...owner }).strict(),
   z.object({ operation: z.literal('start'), ...owner, adapter: localAgentIdSchema, prompt: z.string().min(1).max(100000) }).strict(),
@@ -96,7 +101,11 @@ export const localAgentRequestSchema = z.discriminatedUnion('operation', [
   z.object({ operation: z.literal('list'), ...owner }).strict(),
   z.object({ operation: z.literal('read'), ...owner, sessionId: z.uuid(), after: z.number().int().nonnegative().default(0) }).strict(),
   z.object({ operation: z.literal('delete'), ...owner, sessionId: z.uuid().optional() }).strict(),
-])
+]).superRefine((request, ctx) => {
+  if (request.operation === 'capabilities' || request.operation === 'configure') {
+    if ((request.projectId === undefined) !== (request.projectPath === undefined)) ctx.addIssue({ code: 'custom', message: '模型目录的工程身份和位置必须同时提供' })
+  }
+})
 export type LocalAgentRequest = z.infer<typeof localAgentRequestSchema>
 export const localAgentResponseSchema = z.object({
   enabled: z.boolean(), probe: localAgentProbeSchema.optional(), sessionId: z.uuid().optional(),

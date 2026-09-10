@@ -844,7 +844,8 @@ function currentCandidateRoot(run: NativeRun, policy: NativePermissionPolicy, re
     if (!sameNativePath(realpathSync(root), root)) return undefined
     // request.json is the CLI projection (resourceIndex instead of resourceFiles).
     // Its identity must match the strict durable request; it is not that schema.
-    const { resourceIndex: _resourceIndex, ...stagedRequest } = JSON.parse(readFileSync(requestPath, 'utf8'))
+    const { resourceIndex: _resourceIndex, fileAccess: _fileAccess, destinationAliases: _destinations,
+      assetAliases: _assets, ...stagedRequest } = JSON.parse(readFileSync(requestPath, 'utf8'))
     const staged = generationRequestSchema.safeParse(stagedRequest)
     if (!staged.success || staged.data.requestId !== metadata.requestId
       || !sameWorkspace(staged.data.workspace, metadata.workspace)

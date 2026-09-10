@@ -475,6 +475,32 @@ function expectCleanDiagnostics(diagnostics: Diagnostics): void {
   ))).toEqual([])
 }
 
+function readEffectiveTextStyles(element: HTMLElement) {
+  const view = element.ownerDocument.defaultView!
+  const walker = element.ownerDocument.createTreeWalker(element, view.NodeFilter.SHOW_TEXT)
+  const characters: Array<{ text: string; fontFamily: string; fontSize: string; fontWeight: string }> = []
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    const style = view.getComputedStyle(node.parentElement!)
+    for (const text of Array.from(node.textContent ?? '')) {
+      characters.push({ text, fontFamily: style.fontFamily, fontSize: style.fontSize,
+        fontWeight: style.fontWeight === 'normal' ? '400' : style.fontWeight === 'bold' ? '700' : style.fontWeight })
+    }
+  }
+  return characters
+}
+
+async function expectPublishedRangeStyles(block: Locator): Promise<void> {
+  // TextRun is a character range; its rendering may split or nest styled spans.
+  const characters = await block.evaluate(readEffectiveTextStyles)
+  expect(characters.map(character => character.text).join('')).toBe(`${FORMAT_TEXT}新`)
+  expect(characters.slice(2, 4)).toEqual(['丙', '丁'].map(text => ({
+    text, fontFamily: 'SimSun', fontSize: '30px', fontWeight: '700',
+  })))
+  expect(characters.slice(8)).toEqual([
+    { text: '新', fontFamily: 'KaiTi', fontSize: '32px', fontWeight: '400' },
+  ])
+}
+
 test('Wave C Flow authoring survives one real Editor and Player session', async () => {
   test.setTimeout(240_000)
   const launch = await launchEditor()
@@ -690,26 +716,7 @@ test('Wave C Flow authoring survives one real Editor and Player session', async 
       await expect(tryRunButton).toHaveAttribute('aria-pressed', 'true')
       const tryRunArticle = page.getByRole('main').getByTestId('flow-runtime-article')
       await expect(tryRunArticle).toBeVisible({ timeout: 15_000 })
-      const tryRunStyles = await tryRunArticle.locator(
-        '[data-flow-block-id="flow-paragraph"] span',
-      ).evaluateAll((spans) => spans.map((span) => ({
-        text: span.textContent,
-        fontFamily: (span as HTMLElement).style.fontFamily,
-        fontSize: (span as HTMLElement).style.fontSize,
-        fontWeight: (span as HTMLElement).style.fontWeight,
-      })))
-      expect(tryRunStyles).toContainEqual({
-        text: '丙丁',
-        fontFamily: 'SimSun',
-        fontSize: '30px',
-        fontWeight: '700',
-      })
-      expect(tryRunStyles).toContainEqual({
-        text: '新',
-        fontFamily: 'KaiTi',
-        fontSize: '32px',
-        fontWeight: '',
-      })
+      await expectPublishedRangeStyles(tryRunArticle.locator('[data-flow-block-id="flow-paragraph"]'))
       await canvasMode.getByRole('button', { name: '编辑状态', exact: true }).click()
       await expect(tryRunArticle).toBeHidden()
     })
@@ -772,26 +779,7 @@ test('Wave C Flow authoring survives one real Editor and Player session', async 
       await expect(preview).toBeVisible()
       const playerArticle = previewHost.getByTestId('flow-runtime-article')
       await expect(playerArticle).toBeVisible({ timeout: 15_000 })
-      const playerStyles = await previewHost.locator(
-        '[data-flow-block-id="flow-paragraph"] span',
-      ).evaluateAll((spans) => spans.map((span) => ({
-        text: span.textContent,
-        fontFamily: (span as HTMLElement).style.fontFamily,
-        fontSize: (span as HTMLElement).style.fontSize,
-        fontWeight: (span as HTMLElement).style.fontWeight,
-      })))
-      expect(playerStyles).toContainEqual({
-        text: '丙丁',
-        fontFamily: 'SimSun',
-        fontSize: '30px',
-        fontWeight: '700',
-      })
-      expect(playerStyles).toContainEqual({
-        text: '新',
-        fontFamily: 'KaiTi',
-        fontSize: '32px',
-        fontWeight: '',
-      })
+      await expectPublishedRangeStyles(previewHost.locator('[data-flow-block-id="flow-paragraph"]'))
       await expect(previewHost.getByTestId('flow-runtime-surface-underlay')
         .locator('[data-flow-overlay-item="wave-c-overlay"]'))
         .toHaveAttribute('data-flow-body-plane', 'underlay')

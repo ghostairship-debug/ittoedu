@@ -5,12 +5,19 @@ import type { LocalAgentId } from '../../shared/localAgentContract'
 
 export interface AgentExecutable { executable: string; prefix: string[] }
 const packages = { codex: '@openai/codex', claude: '@anthropic-ai/claude-code', opencode: 'opencode-ai' }
-export function agentEnvironment(source: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+export function agentEnvironment(source: NodeJS.ProcessEnv = process.env, candidateRoot?: string): NodeJS.ProcessEnv {
   // CLI authentication, configured tool discovery and proxy settings belong to the
-  // user's native environment. Only Electron's host-process mode is inapplicable.
-  return Object.fromEntries(Object.entries(source).filter(([key]) => ![
+  // user's native environment. Electron host modes and an inherited request's
+  // app-owned anchor must not leak into this native process.
+  const environment = Object.fromEntries(Object.entries(source).filter(([key]) => ![
     'electron_run_as_node', 'electron_no_attach_console', 'electron_enable_logging',
+    'courseware_candidate_root',
   ].includes(key.toLowerCase())))
+  if (candidateRoot !== undefined) {
+    if (!path.isAbsolute(candidateRoot)) throw new Error('候选环境路径必须是绝对路径')
+    environment.COURSEWARE_CANDIDATE_ROOT = candidateRoot
+  }
+  return environment
 }
 export async function nativeWorkspaceDirectory(projectPath: string): Promise<string> {
   const directory = await fs.realpath(path.dirname(projectPath))
@@ -44,10 +51,10 @@ export async function resolveAgentExecutable(id: LocalAgentId): Promise<AgentExe
   }
   return null
 }
-export function launchAgent(binary: AgentExecutable, args: string[], cwd: string): ChildProcessWithoutNullStreams {
+export function launchAgent(binary: AgentExecutable, args: string[], cwd: string, candidateRoot?: string): ChildProcessWithoutNullStreams {
   if (!path.isAbsolute(binary.executable) || /\.(cmd|bat|ps1)$/i.test(binary.executable)) throw new Error('CLI executable must be a resolved native program')
   return spawn(binary.executable, [...binary.prefix, ...args], {
-    cwd, env: agentEnvironment(), shell: false, windowsHide: true,
+    cwd, env: agentEnvironment(process.env, candidateRoot), shell: false, windowsHide: true,
     detached: process.platform !== 'win32', stdio: ['pipe', 'pipe', 'pipe'],
   })
 }

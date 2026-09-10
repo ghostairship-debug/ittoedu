@@ -18,6 +18,13 @@ export function nativeTextAutoSizeFrame(
   )) return {}
   const defined = Object.fromEntries(Object.entries(patch).filter(([, value]) => value !== undefined))
   const next = { ...node, ...defined, style: { ...node.style, ...patch.style } } as TextNode
+  // Reapplying current properties must not materialize a different auto-sized box
+  // (and an undo entry) for an otherwise unchanged authored node.
+  const changed = next.text !== node.text
+    || JSON.stringify(next.runs) !== JSON.stringify(node.runs)
+    || next.width !== node.width || next.height !== node.height
+    || Object.entries(next.style).some(([key, value]) => value !== node.style[key as keyof TextNode['style']])
+  if (!changed) return {}
   if (next.style.overflow !== 'auto-height') return {}
   const vertical = isVerticalWritingMode(next.style.writingMode)
   const axis = vertical ? 'width' : 'height'

@@ -447,12 +447,14 @@ test('S2 Builder V2：两份 Markdown 生成三 Surface 并在离线 HTML 连续
     await paintedClick(page.getByRole('button', { name: '下一场景', exact: true }))
     await expect(page.getByRole('heading', { name: '分数复习讲义', exact: true })).toBeVisible()
     await expect(page.getByRole('cell', { name: '平均分成四份，取一份', exact: true })).toBeVisible()
-    await page.screenshot({ path: 'output/playwright/r13-review/r14-builder-v2-flow.png' })
+    await page.screenshot({ path: 'output/r18-short-path/builder-v2-flow.png' })
     await paintedClick(page.getByRole('button', { name: '下一场景', exact: true }))
-    await expect(page.getByText('4 / 5 · 分数关系图 · 全景', { exact: true })).toBeVisible()
-    await paintedClick(page.getByRole('button', { name: '下一场景', exact: true }))
-    await expect(page.getByText('5 / 5 · 分数关系图 · 观察二分之一', { exact: true })).toBeVisible()
-    await page.screenshot({ path: 'output/playwright/r13-review/r14-builder-v2-spatial.png' })
+    const spatialRegion = page.getByRole('region', { name: '分数关系图 空间探索', exact: true })
+    await expect(spatialRegion).toBeVisible()
+    await expect(spatialRegion.getByText('场景 4/4 · 步骤 1/2', { exact: true })).toBeVisible()
+    await paintedClick(spatialRegion.getByRole('button', { name: '下一步', exact: true }))
+    await expect(spatialRegion.getByText('场景 4/4 · 步骤 2/2', { exact: true })).toBeVisible()
+    await page.screenshot({ path: 'output/r18-short-path/builder-v2-spatial.png' })
     expect(pageErrors).toEqual([])
   } finally {
     await browser?.close()
@@ -488,7 +490,7 @@ test('S3 独立动态准入：正常候选、同步死循环终止与编辑保�
   }))
   try {
     const font = new Uint8Array(readFileSync(join(root, 'node_modules/@fontsource-variable/noto-sans-sc/files/noto-sans-sc-latin-wght-normal.woff2')))
-    const fallback = new Uint8Array(Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6ZAAAAABJRU5ErkJggg==', 'base64'))
+    const fallback = new Uint8Array(Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR4nGP4DwQACfsD/fteaysAAAAASUVORK5CYII=', 'base64'))
     const sources = await createProjectFontDeliveryFixture(font, fallback)
     const payload = { project: sources.project,
       assetFiles: Object.fromEntries(Object.entries(sources.assetFiles).map(([id, data]) => [id, Buffer.from(data).toString('base64')])),
@@ -594,47 +596,84 @@ test('S3 聊天失败注入：一次修复、无进展停止、取消与人工�
     const original = await saveAs(app, page, filename)
     await page.getByRole('button', { name: '创作助手', exact: true }).click()
     const chat = page.getByRole('complementary', { name: 'CLI 创作助手' })
+    await chat.getByLabel('应用方式', { exact: true }).selectOption('preview')
+    const readSession = async (sessionId: string) => (await page.evaluate(input => window.desktopAPI.localAgent(input), {
+      operation: 'read' as const, sessionId, after: 0, projectId: original.id, projectPath: filename,
+    })).records![0]!
+    const assertContinuation = (runs: ReturnType<NonNullable<typeof fixture>['runs']>) => {
+      expect(new Set(runs.map(run => run.nativeThreadId)).size).toBe(1)
+      expect(new Set(runs.map(run => run.nativeTurnId)).size).toBe(runs.length)
+      expect(new Set(runs.map(run => run.requestId)).size).toBe(runs.length)
+      expect(runs[0].previousRequestId).toBeNull()
+      for (let index = 1; index < runs.length; index++) expect(runs[index].previousRequestId).toBe(runs[index - 1].requestId)
+    }
     const send = async () => {
       await chat.getByLabel('发送给创作助手').fill('添加平均分讲解')
       await chat.getByRole('button', { name: '发送', exact: true }).click()
     }
     fixture.mode('repair'); await send()
+    await expect.poll(() => fixture!.runs().length).toBeGreaterThanOrEqual(1)
+    await expect(chat.getByLabel('会话', { exact: true })).not.toHaveValue('')
+    const repairSessionId = await chat.getByLabel('会话', { exact: true }).inputValue()
+    const repairTaskId = (await readSession(repairSessionId)).task!.taskId
     await expect(chat.getByRole('button', { name: '应用候选', exact: true })).toBeEnabled({ timeout: 20000 })
     expect(fixture.runs().map(run => [run.revision, run.repair])).toEqual([[0, false], [0, true]])
-    expect(fixture.runs()[0].requestId).not.toBe(fixture.runs()[1].requestId)
+    assertContinuation(fixture.runs())
+    expect(await chat.getByLabel('会话', { exact: true }).inputValue()).toBe(repairSessionId)
+    expect((await readSession(repairSessionId)).task!.taskId).toBe(repairTaskId)
     expect(await saveCurrent(page, filename)).toEqual(original)
     await chat.getByRole('button', { name: '应用候选', exact: true }).click()
+    await expect(chat.getByLabel('会话', { exact: true })).toBeEnabled()
     const applied = await saveCurrent(page, filename)
     expect(applied.revision).toBe(1)
     fixture.mode('no-progress'); await send()
-    await expect(chat.getByRole('alert')).toContainText('没有可观察的变化', { timeout: 20000 })
-    expect(fixture.runs()).toHaveLength(4)
+    await expect.poll(() => fixture!.runs().length).toBeGreaterThanOrEqual(3)
+    await expect(chat.getByLabel('会话', { exact: true })).not.toHaveValue(repairSessionId)
+    const stagnantSessionId = await chat.getByLabel('会话', { exact: true }).inputValue()
+    const stagnantTaskId = (await readSession(stagnantSessionId)).task!.taskId
+    await expect(chat.getByRole('alert')).toContainText('连续两轮没有进展', { timeout: 20000 })
+    await expect(chat.getByLabel('会话', { exact: true })).toBeEnabled()
+    // The first rejected candidate establishes the baseline; two repeats stop
+    // this same task without dispatching a fourth native turn.
+    expect(fixture.runs().slice(2).map(run => [run.revision, run.repair])).toEqual([[1, false], [1, true], [1, true]])
+    assertContinuation(fixture.runs().slice(2))
+    expect(await chat.getByLabel('会话', { exact: true }).inputValue()).toBe(stagnantSessionId)
+    expect((await readSession(stagnantSessionId)).task!.taskId).toBe(stagnantTaskId)
     expect(await saveCurrent(page, filename)).toEqual(applied)
+    expect(fixture.runs()).toHaveLength(5)
     fixture.mode('delayed'); await send()
-    await expect.poll(() => fixture!.runs().length).toBe(5)
-    await chat.getByRole('button', { name: '停止', exact: true }).click()
-    await expect(chat.getByRole('status')).toContainText('已停止')
-    expect(await saveCurrent(page, filename)).toEqual(applied)
-    await send()
     await expect.poll(() => fixture!.runs().length).toBe(6)
-    await chat.getByRole('button', { name: '撤销本次 AI 修改' }).click()
-    await expect(chat.getByRole('alert')).toContainText('stale', { timeout: 10000 })
+    const cancelledSessionId = await chat.getByLabel('会话', { exact: true }).inputValue()
+    await chat.getByRole('button', { name: '停止', exact: true }).click()
+    await expect(chat.getByRole('status').filter({ hasText: '已停止' })).toBeVisible()
+    await expect.poll(async () => (await readSession(cancelledSessionId)).status).toBe('cancelled')
+    await expect.poll(() => Date.now(), { timeout: 6000 }).toBeGreaterThan(fixture.runs()[5].lateAt!)
+    expect(await saveCurrent(page, filename)).toEqual(applied)
     expect(fixture.runs()).toHaveLength(6)
-    expect(await saveCurrent(page, filename)).toEqual(original)
-    const records = await page.evaluate(owner => window.desktopAPI.localAgent({ operation: 'list', ...owner }), { projectId: original.id, projectPath: filename })
-    expect(records.records?.map(record => record.hostResult?.status)).toEqual(expect.arrayContaining(['rejected', 'undone', 'stale']))
     await send()
     await expect.poll(() => fixture!.runs().length).toBe(7)
+    // The dedicated AI undo is disabled during a task. A real editor undo must
+    // still invalidate a candidate captured against the pre-undo revision.
+    await page.getByRole('button', { name: '撤销（Ctrl+Z）', exact: true }).click()
+    await expect(chat.getByRole('alert')).toContainText('stale', { timeout: 10000 })
+    await expect(chat.getByLabel('会话', { exact: true })).toBeEnabled()
+    expect(fixture.runs()).toHaveLength(7)
+    expect(await saveCurrent(page, filename)).toEqual(original)
+    const records = await page.evaluate(owner => window.desktopAPI.localAgent({ operation: 'list', ...owner }), { projectId: original.id, projectPath: filename })
+    expect(records.records?.map(record => record.hostResult?.status)).toEqual(expect.arrayContaining(['committed', 'rejected', 'stale']))
+    await send()
+    await expect.poll(() => fixture!.runs().length).toBe(8)
     const newPath = join(runRoot, 'new-workspace.h5lesson')
     expect(await saveAs(app, page, newPath)).toEqual(original)
     await expect.poll(async () => {
       const result = await page.evaluate(owner => window.desktopAPI.localAgent({ operation: 'list', ...owner }), { projectId: original.id, projectPath: filename })
-      return result.records?.find(record => record.generationRequestId === fixture!.runs()[6].requestId)?.status
+      return result.records?.find(record => record.generationRequestId === fixture!.runs()[7].requestId)?.status
     }).toBe('cancelled')
+    await expect.poll(() => Date.now(), { timeout: 6000 }).toBeGreaterThan(fixture!.runs()[7].lateAt!)
     const newRecords = await page.evaluate(owner => window.desktopAPI.localAgent({ operation: 'list', ...owner }), { projectId: original.id, projectPath: newPath })
     expect(newRecords.records).toEqual([])
     expect(await saveCurrent(page, newPath)).toEqual(original)
-    expect(fixture.runs()).toHaveLength(7)
+    expect(fixture.runs()).toHaveLength(8)
     expect(launch.pageErrors).toEqual([])
   } finally {
     if (fixture) await fixture.restore()
@@ -653,17 +692,36 @@ test('S3 候选格式：非法JSON与缺通道共用一次修复预算', async (
     const original = await saveAs(app, page, filename)
     await page.getByRole('button', { name: '创作助手', exact: true }).click()
     const chat = page.getByRole('complementary', { name: 'CLI 创作助手' })
+    await chat.getByLabel('应用方式', { exact: true }).selectOption('preview')
     for (const mode of ['format-repair', 'missing-candidate', 'format-repeat'] as const) {
       const count = fixture.runs().length
+      const previousSessionId = await chat.getByLabel('会话', { exact: true }).inputValue()
       fixture.mode(mode)
       await chat.getByLabel('发送给创作助手').fill('添加平均分讲解')
       await chat.getByRole('button', { name: '发送', exact: true }).click()
+      await expect.poll(() => fixture.runs().length).toBeGreaterThan(count)
+      await expect(chat.getByLabel('会话', { exact: true })).not.toHaveValue(previousSessionId)
+      const sessionId = await chat.getByLabel('会话', { exact: true }).inputValue()
+      const readSession = async () => (await page.evaluate(input => window.desktopAPI.localAgent(input), {
+        operation: 'read' as const, sessionId, after: 0, projectId: original.id, projectPath: filename,
+      })).records![0]!
+      const taskId = (await readSession()).task!.taskId
       if (mode === 'format-repeat') {
-        await expect(chat.getByRole('alert')).toBeVisible({ timeout: 20000 })
+        await expect(chat.getByRole('alert')).toContainText('连续两轮没有进展', { timeout: 20000 })
         await expect(chat.getByRole('button', { name: '应用候选', exact: true })).toHaveCount(0)
       } else await expect(chat.getByRole('button', { name: '应用候选', exact: true })).toBeEnabled({ timeout: 20000 })
-      expect(fixture.runs().slice(count).map(run => [run.revision, run.repair])).toEqual([[original.revision, false], [original.revision, true]])
+      const runs = fixture.runs().slice(count)
+      expect(runs.map(run => [run.revision, run.repair])).toEqual([[original.revision, false], [original.revision, true]])
+      expect(runs.map(run => run.injection)).toEqual(mode === 'format-repeat' ? ['invalid-json', 'missing-channel'] : [mode === 'format-repair' ? 'invalid-json' : 'missing-channel', null])
+      expect(runs[1].previousRequestId).toBe(runs[0].requestId)
+      expect(runs[1].nativeThreadId).toBe(runs[0].nativeThreadId)
+      expect(runs[1].nativeTurnId).not.toBe(runs[0].nativeTurnId)
+      expect(await chat.getByLabel('会话', { exact: true }).inputValue()).toBe(sessionId)
+      expect((await readSession()).task!.taskId).toBe(taskId)
       expect(await saveCurrent(page, filename)).toEqual(original)
+      if (mode !== 'format-repeat') await chat.getByRole('button', { name: '停止', exact: true }).click()
+      await expect(chat.getByLabel('会话', { exact: true })).toBeEnabled()
+      expect(fixture.runs()).toHaveLength(count + 2)
     }
     expect(launch.pageErrors).toEqual([])
   } finally { await fixture.restore(); await closeEditor(app, runRoot) }
@@ -686,20 +744,23 @@ test('S3 默认可见与普通讨论：安全消息、分页事件重放及零�
     const requests: string[] = []; page.on('request', request => { if (request.url().includes('invalid.example')) requests.push(request.url()) })
     await page.getByRole('button', { name: '创作助手', exact: true }).click()
     const chat = page.getByRole('complementary', { name: 'CLI 创作助手' })
+    await chat.getByLabel('意图', { exact: true }).selectOption('discuss')
     await chat.getByLabel('发送给创作助手').fill('讨论如何解释平均分，先不修改课件。')
     await chat.getByRole('button', { name: '发送', exact: true }).click()
     await expect(chat.getByRole('heading', { name: '只讨论，不修改课件' })).toBeVisible({ timeout: 20000 })
-    await expect(chat.getByRole('button', { name: '发送', exact: true })).toBeDisabled()
-    await expect(chat.getByText('CLI 原生事件（215）', { exact: true })).toBeVisible()
+    await expect(chat.getByRole('button', { name: '发送输入', exact: true })).toBeDisabled()
+    await expect(chat.getByLabel('会话', { exact: true })).toBeEnabled({ timeout: 10000 })
+    await expect(chat.getByText('诊断详情（215 个原生事件）', { exact: true })).toBeVisible()
     await expect(chat.getByRole('button', { name: '应用候选', exact: true })).toHaveCount(0)
     expect(await saveCurrent(page, filename)).toEqual(original)
     expect(await page.evaluate(() => Reflect.get(window, '__unsafeChatExecuted'))).toBeUndefined()
+    await expect(chat.getByText('<script>window.__unsafeChatExecuted=true</script>', { exact: true })).toBeVisible()
     await expect(chat.locator('script, iframe, img, a[href^="javascript:"]')).toHaveCount(0)
     expect(requests).toEqual([])
     const id = await chat.getByLabel('会话', { exact: true }).inputValue()
     await chat.getByLabel('会话', { exact: true }).selectOption('')
     await chat.getByLabel('会话', { exact: true }).selectOption(id)
-    const summary = chat.getByText('CLI 原生事件（215）', { exact: true })
+    const summary = chat.getByText('诊断详情（215 个原生事件）', { exact: true })
     await expect(summary).toBeVisible(); await summary.click()
     const timeline = summary.locator('..')
     await expect(timeline.locator('ol > li')).toHaveCount(100)
@@ -1523,6 +1584,7 @@ test('S3 PPTX SmartArt：文字与位置编辑、历史、重开和导出', asyn
     }, sources)
     expect(exported.item.frame.x).toBeCloseTo(500, 1)
     const evidence = join(root, 'output/playwright/r18-diagrams'); mkdirSync(evidence, { recursive: true })
+    writeFileSync(join(evidence, 'edited.h5lesson'), readFileSync(filename))
     writeFileSync(join(evidence, 'edited.pptx'), new Uint8Array(exported.bytes))
     const htmlPath = join(evidence, 'edited.html')
     writeFileSync(htmlPath, buildPublishedCourseStandaloneHtml(sources, readFileSync(join(root, 'dist-player/player.iife.js'), 'utf8')))
@@ -1594,6 +1656,7 @@ test('S3 PPTX 旧公式：可编辑 AST、历史、保存重开及离线 Player 
     }, sources)
     expect(exported.length).toBeGreaterThan(1000)
     const evidence = join(root, 'output/playwright/r18-equations'); mkdirSync(evidence, { recursive: true })
+    writeFileSync(join(evidence, 'edited.h5lesson'), readFileSync(filename))
     writeFileSync(join(evidence, 'edited.pptx'), new Uint8Array(exported))
     const htmlPath = join(evidence, 'edited.html')
     writeFileSync(htmlPath, buildPublishedCourseStandaloneHtml(sources, readFileSync(join(root, 'dist-player/player.iife.js'), 'utf8')))
@@ -1969,7 +2032,7 @@ test('S2 工程字体：Component 和 Runtime 在离线 HTML 中加载直接引�
   const { app, runRoot } = await launchEditor()
   try {
     const font = new Uint8Array(readFileSync(join(root, 'node_modules/@fontsource-variable/noto-sans-sc/files/noto-sans-sc-latin-wght-normal.woff2')))
-    const fallback = new Uint8Array(Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6ZAAAAABJRU5ErkJggg==', 'base64'))
+    const fallback = new Uint8Array(Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR4nGP4DwQACfsD/fteaysAAAAASUVORK5CYII=', 'base64'))
     const sources = await createProjectFontDeliveryFixture(font, fallback)
     const html = buildPublishedCourseStandaloneHtml(sources, readFileSync(join(root, 'dist-player/player.iife.js'), 'utf8'))
     const filename = join(runRoot, 'font-offline.html')
@@ -2102,7 +2165,46 @@ test('活动文字草稿：Slide、Spatial、Flow 不失焦保存并可重开', 
 
     await addSurface(page, 'flow')
     const paragraph = page.getByTestId('flow-paper').locator('.flow-block-paragraph').first()
-    await paragraph.dblclick()
+    const diagnoseFlowHit = process.env.COURSEWARE_R18_FLOW_DIAGNOSTICS === '1'
+    const flowHitEvidence: unknown[] = []
+    const captureFlowHit = async (phase: string) => {
+      const geometry = await paragraph.evaluate(element => {
+        const rect = element.getBoundingClientRect()
+        const describe = (node: Element) => ({ tag: node.tagName, class: node.getAttribute('class'),
+          testId: node.getAttribute('data-testid'), label: node.getAttribute('aria-label'),
+          blockId: node.closest('[data-flow-block-id]')?.getAttribute('data-flow-block-id') })
+        const points = [0.05, 0.25, 0.5, 0.75, 0.95].flatMap(fx => [0.15, 0.5, 0.85].map(fy => {
+          const x = rect.x + rect.width * fx, y = rect.y + rect.height * fy
+          const hits = document.elementsFromPoint(x, y)
+          return { fx, fy, x, y, paragraphReceivesPoint: !!hits[0] && element.contains(hits[0]),
+            hits: hits.slice(0, 5).map(describe) }
+        }))
+        return { paragraph: { ...describe(element), rect: rect.toJSON(), text: element.textContent }, points,
+          toolbars: [...document.querySelectorAll<HTMLElement>('[data-testid="flow-block-context-toolbar"], [data-testid="flow-range-toolbar"]')]
+            .map(toolbar => ({ ...describe(toolbar), rect: toolbar.getBoundingClientRect().toJSON(),
+              placement: toolbar.dataset.flowToolbarPlacement, pointerEvents: getComputedStyle(toolbar).pointerEvents })),
+          selectedBlocks: [...document.querySelectorAll('.flow-block[aria-selected="true"]')].map(describe),
+          viewport: { width: innerWidth, height: innerHeight },
+          scroll: [...document.querySelectorAll<HTMLElement>('[data-testid="flow-workspace-scroll"]')].map(node => ({
+            rect: node.getBoundingClientRect().toJSON(), scrollTop: node.scrollTop, scrollLeft: node.scrollLeft,
+            clientWidth: node.clientWidth, offsetWidth: node.offsetWidth })) }
+      })
+      flowHitEvidence.push({ phase, geometry })
+      writeFileSync(test.info().outputPath('flow-paragraph-hit.json'), JSON.stringify(flowHitEvidence, null, 2))
+    }
+    if (diagnoseFlowHit) {
+      await captureFlowHit('before-original-double-click')
+      await page.screenshot({ path: test.info().outputPath('flow-paragraph-hit-ready.png') })
+    }
+    try {
+      await paragraph.dblclick()
+    } catch (error) {
+      if (diagnoseFlowHit) {
+        await captureFlowHit('original-double-click-failed')
+        await page.screenshot({ path: test.info().outputPath('flow-paragraph-hit-failure.png') })
+      }
+      throw error
+    }
     editor = page.getByTestId('flow-inline-editor')
     await expect(editor).toBeFocused()
     await editor.fill(flowText)
@@ -2146,8 +2248,7 @@ test('Wave A core authoring remains usable across Mixed surfaces', async () => {
   const { app, page } = launch
   try {
     await test.step('default Slide adds Spatial and two distinct world kinds', async () => {
-      await expect(page.getByRole('button', { name: /AI|聊天|Provider/i })).toHaveCount(0)
-      expect(await page.evaluate(() => window.desktopAPI.localAgent({ operation: 'probe', adapter: 'codex' }))).toEqual({ enabled: false })
+      await expect(page.getByRole('button', { name: '创作助手', exact: true })).toBeVisible()
       await runLocalCliFailureProbe(app, page, launch.runRoot)
       await expect(courseTreeKind(page, 'slide-scene')).toHaveCount(1)
       await addSurface(page, 'spatial')
@@ -2407,7 +2508,7 @@ for (const adapter of ['claude', 'opencode', 'codex'] as const) test(`S3 真实�
     launch = await launchEditor(`http://127.0.0.1:${address.port}`)
     const { app, page, runRoot } = launch
     const font = new Uint8Array(readFileSync(join(root, 'node_modules/@fontsource-variable/noto-sans-sc/files/noto-sans-sc-latin-wght-normal.woff2')))
-    const fallback = new Uint8Array(Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6ZAAAAABJRU5ErkJggg==', 'base64'))
+    const fallback = new Uint8Array(Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR4nGP4DwQACfsD/fteaysAAAAASUVORK5CYII=', 'base64'))
     const sources = await createProjectFontDeliveryFixture(font, fallback)
     const filename = join(runRoot, `component-source-${adapter}.h5lesson`)
     writeFileSync(filename, createCourseProjectArchive({ project: sources.project, assetFiles: sources.assetFiles,
@@ -2501,7 +2602,7 @@ test('S3 共享组件源码：两文件草稿、嵌套正文目标、真实准�
     const encoder = new TextEncoder()
     const data = parseComponentPackageFiles({ 'manifest.json': encoder.encode(JSON.stringify(manifest)), 'runtime.js': encoder.encode(source('原始布局')), 'spare.js': encoder.encode('// preserve this file') })
     project.componentPackages[id] = componentPackageMeta(data)
-    const fallback = new Uint8Array(Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6ZAAAAABJRU5ErkJggg==', 'base64'))
+    const fallback = new Uint8Array(Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR4nGP4DwQACfsD/fteaysAAAAASUVORK5CYII=', 'base64'))
     project.assets.fallback = { id: 'fallback', filename: 'fallback.png', path: 'assets/fallback.png', kind: 'image', mimeType: 'image/png', byteLength: fallback.length, width: 1, height: 1 }
     const layer = (instanceId: string, x: number, y: number) => ({ kind: 'component' as const, layerItemId: instanceId, label: instanceId,
       frame: { mode: 'absolute' as const, x, y, width: 320, height: 150 }, order: 10, visible: true, locked: false, rotation: 0, opacity: 1,
@@ -2756,6 +2857,37 @@ test('S3 Flow 所见即所得：空段、连续换行、选择与保存重开', 
     })
     const before = await measure(paper)
     const screenBefore = await paper.locator('[data-flow-block-id="spacing-a"]').boundingBox()
+    const diagnoseFlowLayout = process.env.COURSEWARE_R18_FLOW_DIAGNOSTICS === '1'
+    const flowLayoutEvidence: unknown[] = []
+    const captureFlowLayout = async (scope: Locator, phase: string) => {
+      const geometry = await scope.evaluate(element => {
+        const chain = []; let node: HTMLElement | null = element as HTMLElement
+        while (node) {
+          const style = getComputedStyle(node), rect = node.getBoundingClientRect()
+          chain.push({ tag: node.tagName, class: node.className, testId: node.dataset.testid,
+            rect: rect.toJSON(), clientWidth: node.clientWidth, offsetWidth: node.offsetWidth,
+            clientHeight: node.clientHeight, offsetHeight: node.offsetHeight,
+            scrollWidth: node.scrollWidth, scrollHeight: node.scrollHeight,
+            scrollLeft: node.scrollLeft, scrollTop: node.scrollTop,
+            verticalScrollbarWidth: node.offsetWidth - node.clientWidth
+              - Number.parseFloat(style.borderLeftWidth) - Number.parseFloat(style.borderRightWidth),
+            style: { overflowX: style.overflowX, overflowY: style.overflowY,
+              scrollbarWidth: style.scrollbarWidth, scrollbarGutter: style.scrollbarGutter,
+              boxSizing: style.boxSizing, width: style.width, maxWidth: style.maxWidth,
+              paddingLeft: style.paddingLeft, paddingRight: style.paddingRight,
+              marginLeft: style.marginLeft, marginRight: style.marginRight, transform: style.transform } })
+          node = node.parentElement
+        }
+        const block = element.querySelector<HTMLElement>('[data-flow-block-id="spacing-a"]')!
+        const bounds = block.getBoundingClientRect()
+        return { chain, block: bounds.toJSON(), viewport: { width: innerWidth, height: innerHeight },
+          centerHits: document.elementsFromPoint(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2)
+            .slice(0, 6).map(hit => ({ tag: hit.tagName, class: hit.getAttribute('class'), testId: hit.getAttribute('data-testid') })) }
+      })
+      flowLayoutEvidence.push({ phase, geometry })
+      writeFileSync(test.info().outputPath('flow-edit-run-geometry.json'), JSON.stringify(flowLayoutEvidence, null, 2))
+    }
+    if (diagnoseFlowLayout) await captureFlowLayout(paper, 'initial-editor-baseline')
     expect(before[0].height).toBeGreaterThan(70)
     expect(before[1].height).toBeGreaterThan(20)
     await paper.locator('[data-flow-block-id="spacing-a"]').click()
@@ -2766,6 +2898,7 @@ test('S3 Flow 所见即所得：空段、连续换行、选择与保存重开', 
     await chat.getByLabel('发送给创作助手').fill('解释当前选择的文字')
     await expect(chat.getByLabel('本轮引用摘要')).not.toContainText('未选择对象')
     await chat.getByRole('button', { name: '关闭', exact: true }).click()
+    if (diagnoseFlowLayout) await captureFlowLayout(paper, 'editor-after-chat-close')
     await paper.locator('[data-flow-block-id="spacing-a"]').dblclick()
     await page.getByTestId('flow-inline-editor').fill('第一行\n\n第三行')
     await page.getByRole('button', { name: '当前位置试运行', exact: true }).click()
@@ -2777,8 +2910,18 @@ test('S3 Flow 所见即所得：空段、连续换行、选择与保存重开', 
     expect(tocBounds!.x).toBeCloseTo(hostBounds!.x, 0)
     const running = await measure(runtime)
     const screenRunning = await runtime.locator('[data-flow-block-id="spacing-a"]').boundingBox()
-    for (const key of ['x', 'y', 'width', 'height'] as const) expect(screenRunning![key], `screen ${key}`).toBeCloseTo(screenBefore![key], 0)
-    for (let i = 0; i < before.length; i++) for (const key of ['x', 'y', 'width', 'height'] as const) expect(running[i][key], `${before[i].id}.${key}`).toBeCloseTo(before[i][key], 0)
+    if (diagnoseFlowLayout) await captureFlowLayout(runtime, 'current-position-runtime')
+    try {
+      for (const key of ['x', 'y', 'width', 'height'] as const) expect(screenRunning![key], `screen ${key}`).toBeCloseTo(screenBefore![key], 0)
+      for (let i = 0; i < before.length; i++) for (const key of ['x', 'y', 'width', 'height'] as const) expect(running[i][key], `${before[i].id}.${key}`).toBeCloseTo(before[i][key], 0)
+    } catch (error) {
+      if (diagnoseFlowLayout) {
+        flowLayoutEvidence.push({ phase: 'comparison-failed', screenBefore, screenRunning, before, running })
+        writeFileSync(test.info().outputPath('flow-edit-run-geometry.json'), JSON.stringify(flowLayoutEvidence, null, 2))
+        await page.screenshot({ path: test.info().outputPath('flow-edit-run-geometry-failure.png') })
+      }
+      throw error
+    }
     const evidence = join(root, 'output', 'playwright', 'r18-flow-spacing')
     mkdirSync(evidence, { recursive: true })
     await page.screenshot({ path: join(evidence, 'run.png') })

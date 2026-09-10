@@ -26,6 +26,10 @@ import { selectFlowEditorBlocks, selectFlowOverlay } from '@/renderer/course/flo
 import { FlowWorkspace as ProductFlowWorkspace, FlowInlineRichTextEditor } from '@/renderer/ui/FlowWorkspace'
 import { FlowWorkspaceTestHarness as FlowWorkspace } from '../helpers/FlowWorkspaceTestHarness'
 import { Workspace } from '@/renderer/ui/Workspace'
+import { FlowLocationWorkspace, type FlowLocationWorkspaceProps } from '@/renderer/ui/workspaces/FlowLocationWorkspace'
+import { FLOW_WORKSPACE_HEADER_HEIGHT } from '@/renderer/ui/FlowBlockContextToolbar'
+import { PLAYBACK_VIEW_CHROME_GUTTER } from '@/shared/playbackViewGeometry'
+import { PlaybackViewSession } from '@/player/playbackViewSession'
 import { useEditorStore } from '@/renderer/store/editorStore'
 import {
   extractFlowRichTextFromEditor,
@@ -783,8 +787,9 @@ describe('FlowWorkspace paper', () => {
     const { onProjectChange, onSelectionChange, onTextEditChange } = renderPaper(project, selection)
     const block = screen.getByTestId('flow-block-p-body')
     const toolbar = screen.getByTestId('flow-block-context-toolbar')
-    expect(block?.contains(toolbar)).toBe(true)
-    expect(toolbar).toHaveAttribute('data-flow-toolbar-placement', 'below')
+    expect(block?.contains(toolbar)).toBe(false)
+    expect(screen.getByTestId('flow-workspace-toolbar-host').contains(toolbar)).toBe(true)
+    expect(toolbar).toHaveAttribute('data-flow-toolbar-placement', 'workspace-header')
     expect(screen.getByTestId('flow-range-toolbar')).toBeTruthy()
     const bold = screen.getByLabelText('局部加粗')
     fireEvent.mouseDown(bold)
@@ -925,12 +930,54 @@ describe('FlowWorkspace paper', () => {
     }
   })
 
+  it('docks the live toolbar outside Flow paper and preserves one document viewport in edit and run modes', async () => {
+    const project = createFlowProject()
+    const view = buildFlowEditorView({ project, locationId: 'h1' })
+    const selection = selectFlowEditorBlocks(project, 'h1', ['h1'])
+    const commands = { run: vi.fn<FlowLocationWorkspaceProps['commands']['run']>(() => ({ ok: false, historyEntry: false })) }
+    const playback = new PlaybackViewSession()
+    const mountRun = vi.fn(async (container: HTMLElement) => {
+      playback.mount(container)
+      return { destroy: () => playback.destroy() }
+    })
+    const props: FlowLocationWorkspaceProps = { view, selection, assets: project.assets,
+      sessionToken: { locationId: 'h1', surfaceType: 'flow', revision: project.revision, generation: 1 },
+      textEdit: null, canvasMode: 'edit', editingScope: 'scene', assetFiles: {}, componentPackages: {},
+      commands, onCanvasModeChange: vi.fn(), onMountTryRun: mountRun }
+    const rendered = render(<FlowLocationWorkspace {...props} />)
+    const shell = screen.getByTestId('flow-workspace-shell')
+    const toolbarHost = screen.getByTestId('flow-workspace-toolbar-host')
+    const paper = screen.getByTestId('flow-paper')
+    const toolbar = screen.getByTestId('flow-block-context-toolbar')
+    expect(toolbarHost.contains(toolbar)).toBe(true)
+    expect(paper.contains(toolbar)).toBe(false)
+    expect(screen.getByTestId('flow-workspace-scroll').contains(toolbarHost)).toBe(false)
+    expect(screen.getByTestId('flow-workspace')).toHaveStyle({
+      width: `calc(100% - ${PLAYBACK_VIEW_CHROME_GUTTER}px)`,
+      height: `calc(100% - ${PLAYBACK_VIEW_CHROME_GUTTER}px)`,
+    })
+    expect(shell.style.getPropertyValue('--flow-workspace-header-height')).toBe(`${FLOW_WORKSPACE_HEADER_HEIGHT}px`)
+    fireEvent.pointerDown(screen.getByLabelText('整块加粗'))
+    fireEvent.click(screen.getByLabelText('整块加粗'))
+    expect(commands.run).toHaveBeenCalledTimes(1)
+    expect(commands.run.mock.calls[0]?.[0]).toMatchObject({ itemId: 'h1', owner: 'surface', surfaceId: 'flow', sessionGeneration: 1 })
+    rendered.rerender(<FlowLocationWorkspace {...props} canvasMode="run" />)
+    await waitFor(() => expect(mountRun).toHaveBeenCalledTimes(1))
+    expect(screen.getByTestId('flow-workspace-toolbar-host')).toBe(toolbarHost)
+    expect(screen.queryByTestId('flow-block-context-toolbar')).toBeNull()
+    const runtimeViewport = shell.querySelector<HTMLElement>('[data-playback-viewport]')!
+    expect(runtimeViewport).toHaveStyle({ right: `${PLAYBACK_VIEW_CHROME_GUTTER}px`, bottom: `${PLAYBACK_VIEW_CHROME_GUTTER}px` })
+    expect(shell.style.getPropertyValue('--flow-workspace-header-height')).toBe(`${FLOW_WORKSPACE_HEADER_HEIGHT}px`)
+    expect(screen.getByRole('button', { name: '编辑状态' })).toBeEnabled()
+    rendered.unmount()
+  })
+
   it('keeps body geometry stable when the contextual toolbar opens', () => {
     const project = createFlowProject()
     const headingSelection = selectFlowEditorBlocks(project, 'h1', ['h1'])
     const headingRender = renderPaper(project, headingSelection)
     expect(screen.getByTestId('flow-block-context-toolbar'))
-      .toHaveAttribute('data-flow-toolbar-placement', 'below')
+      .toHaveAttribute('data-flow-toolbar-placement', 'workspace-header')
     expect(screen.getByTestId('flow-block-h1')).toHaveStyle({ marginBottom: '12px' })
     expect(screen.getByTestId('flow-block-p-body')).toHaveStyle({ marginBottom: '12px' })
     headingRender.unmount()

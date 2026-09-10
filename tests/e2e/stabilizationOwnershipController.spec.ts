@@ -349,10 +349,46 @@ async function navigatePreviewSurface(
 
 async function expectDesignStage(surface: Locator): Promise<void> {
   await expect(surface).toBeVisible()
-  expect(await surface.evaluate((element) => ({
-    width: Number.parseFloat((element as HTMLElement).style.width),
-    height: Number.parseFloat((element as HTMLElement).style.height),
-  }))).toEqual({ width: 1280, height: 720 })
+  const geometry = await surface.evaluate((element) => {
+    const stage = element as HTMLElement
+    const viewport = stage.closest<HTMLElement>('[data-playback-viewport]')
+    if (!viewport) throw new Error('Published surface has no playback viewport')
+    const stageRect = stage.getBoundingClientRect()
+    const viewportRect = viewport.getBoundingClientRect()
+    return {
+      responsive: stage.classList.contains('flow-surface-host'),
+      layout: { width: stage.clientWidth, height: stage.clientHeight },
+      viewport: { width: viewport.clientWidth, height: viewport.clientHeight,
+        left: viewportRect.left, top: viewportRect.top },
+      rendered: { width: stageRect.width, height: stageRect.height,
+        left: stageRect.left, top: stageRect.top },
+    }
+  })
+  expectStageGeometry(geometry)
+}
+
+function expectStageGeometry(geometry: {
+  responsive: boolean
+  layout: { width: number; height: number }
+  viewport: { width: number; height: number; left: number; top: number }
+  rendered: { width: number; height: number; left: number; top: number }
+}): void {
+  const { viewport, responsive } = geometry
+  expect(viewport.width).toBeGreaterThan(0)
+  expect(viewport.height).toBeGreaterThan(0)
+  // Flow reflows in viewport CSS pixels; Slide and Spatial retain design coordinates.
+  const layout = responsive
+    ? { width: viewport.width, height: viewport.height }
+    : { width: 1280, height: 720 }
+  expect(geometry.layout).toEqual(layout)
+  const scale = responsive ? 1 : Math.min(viewport.width / 1280, viewport.height / 720)
+  const width = layout.width * scale, height = layout.height * scale
+  const expected = { width, height,
+    left: viewport.left + (viewport.width - width) / 2,
+    top: viewport.top + (viewport.height - height) / 2 }
+  for (const key of ['width', 'height', 'left', 'top'] as const) {
+    expect(geometry.rendered[key], `rendered stage ${key}`).toBeCloseTo(expected[key], 2)
+  }
 }
 
 async function controllerPosition(frame: Locator): Promise<{ left: number; top: number }> {

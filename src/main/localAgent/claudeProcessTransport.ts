@@ -311,7 +311,7 @@ export class ClaudeProcessTransportAdapter implements LocalAgentCliAdapterV2 {
     ]
 
     try {
-      this.child = launchAgent(binary, args, input.cwd)
+      this.child = launchAgent(binary, args, input.cwd, input.candidateRoot)
     } catch {
       throw new Error('launch')
     }
@@ -329,7 +329,10 @@ export class ClaudeProcessTransportAdapter implements LocalAgentCliAdapterV2 {
     this.child.once('close', code => {
       if (this.isClosed) return
       this.pendingQuestions.clear()
-      this.rejectControls(`Claude process exited ${code}`)
+      const isAuth = /unauth|not logged|authentication|api.key|401/i.test(this.stderr)
+      // Initialize can still be pending when authentication fails. Preserve the
+      // same actionable reason as an active turn without exposing raw stderr.
+      this.rejectControls(isAuth ? 'CLI 认证失效，请重新登录' : `Claude process exited ${code}`)
       if (!this.eventQueue.isDone()) {
         if (this.wasInterrupted) {
           this.eventQueue.push({
@@ -340,7 +343,6 @@ export class ClaudeProcessTransportAdapter implements LocalAgentCliAdapterV2 {
           })
           this.eventQueue.close()
         } else {
-          const isAuth = /unauth|not logged|authentication|api.key|401/i.test(this.stderr)
           this.eventQueue.push({
             ...this.baseIdentity(),
             kind: 'turn-ended',

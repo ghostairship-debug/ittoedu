@@ -6,10 +6,10 @@ import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { CandidateStaging } from '../../src/main/localAgent/candidateStaging'
 import { generationCapabilityDirectory } from '../../src/main/localAgent/capabilityWorkspace'
-import { buildGenerationPrompt, createGenerationProfile, generationProfileForPrompt, generationRequestForPrompt } from '../../src/main/localAgent/profile'
+import { buildGenerationPrompt, createGenerationProfile, generationInitialRequestForPrompt, generationProfileForPrompt, generationRequestForPrompt } from '../../src/main/localAgent/profile'
 import { generationRequestSchema } from '../../src/shared/generationContract'
 import { GENERATION_RESULT_OPEN, GENERATION_RESULT_CLOSE, readGenerationResult } from '../../src/shared/generationResult'
-import { courseAgentCapabilityCacheKey, queryCourseAgentCapabilities, readCourseAgentCapability } from '../../src/shared/courseAgentCapabilities'
+import { courseAgentCapabilityCacheKey, queryCourseAgentCapabilities, readCourseAgentCapability, runCourseAgentCapabilityQuery } from '../../src/shared/courseAgentCapabilities'
 import { generationCapabilityContext, generationCapabilityData } from '../../src/renderer/authoring/generation/generationCapabilities'
 import { captureGenerationSnapshot } from '../../src/renderer/authoring/generation/generationSnapshot'
 import { createBlankCourseProject } from '../../src/renderer/project/createCourseProject'
@@ -19,6 +19,8 @@ import { encodeImageTransformPng } from '../../src/renderer/project/imageTransfo
 import type { DynamicBehaviorObservation } from '../../src/shared/dynamicBehaviorObservation'
 import { createImageNode, createTextNode } from '../../src/renderer/project/nativeNodeFactories'
 import { sceneNodeToCourseLayerItem } from '../../src/shared/courseProjectModel'
+import { componentPackageTool } from '../../src/renderer/authoring/tools/componentPackageTool'
+import { imageTransformInputSchema } from '../../src/shared/imageTransformContract'
 
 function requestFixture(materialText?: string) {
   const document = createBlankCourseProject({ title: '能力发现' })
@@ -31,6 +33,56 @@ function requestFixture(materialText?: string) {
 }
 
 describe('offline capability workspace', () => {
+  it('reads exact staged image, source, skill and query paths from one request anchor without changing the native cwd', async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), '课件 路径入口-'))
+    try {
+      const request = requestFixture(), staging = new CandidateStaging(directory)
+      const image = Buffer.from(encodeImageTransformPng({ width: 1, height: 1, data: new Uint8Array([255, 0, 0, 255]) }))
+      request.resourceFiles!.push(
+        { path: 'images/原始 图片.png', encoding: 'base64', content: image.toString('base64'), role: 'image', mediaType: 'image/png' },
+        { path: 'runtimes/当前 互动.js', encoding: 'utf8', content: 'const answer = "点击后显示";', role: 'source' },
+      )
+      const before = JSON.stringify(request), root = await staging.create(request)
+      const profile = createGenerationProfile('opencode', request, undefined, root)
+      const prompt = buildGenerationPrompt('opencode', request, root)
+      const initialProfile = JSON.parse(prompt.split('\n').find(line => line.startsWith('{"profile":'))!).profile
+      expect(initialProfile.workspace).toEqual({ rootEnvironment: 'COURSEWARE_CANDIDATE_ROOT', request: 'request.json' })
+      const initial = JSON.parse(prompt.split('\n').at(-1)!)
+      const details = JSON.parse((await promisify(execFile)(process.execPath, ['-e', "process.stdout.write(require('node:fs').readFileSync(require('node:path').join(process.env.COURSEWARE_CANDIDATE_ROOT,'request.json'),'utf8'))"], {
+        cwd: directory, env: { ...process.env, COURSEWARE_CANDIDATE_ROOT: root }, windowsHide: true,
+      })).stdout)
+      expect(prompt).not.toContain(root)
+      expect(details.fileAccess).toMatchObject({ root, resources: path.join(root, 'resources'), query: profile.workspace.query, capabilities: profile.workspace.capabilities })
+      expect(JSON.parse(await readFile(details.fileAccess.discovery, 'utf8'))).toHaveProperty('tools')
+      for (const skill of profile.skills) {
+        expect(details.fileAccess.skills[skill.name]).toBe(skill.path)
+        expect(await readFile(details.fileAccess.skills[skill.name], 'utf8')).not.toHaveLength(0)
+      }
+      for (const file of request.resourceFiles!) {
+        const reference = details.resourceIndex.find((entry: { path: string }) => entry.path === `resources/${file.path}`)
+        expect(path.isAbsolute(reference.localPath)).toBe(true)
+        expect(path.relative(root, reference.localPath).split(path.sep).join('/')).toBe(reference.path)
+        expect(await readFile(reference.localPath)).toEqual(Buffer.from(file.content, file.encoding === 'base64' ? 'base64' : 'utf8'))
+      }
+      const query = await promisify(execFile)(process.execPath,
+        [details.fileAccess.query, '--id', 'native.content', '--operation', 'properties'], { cwd: directory, windowsHide: true })
+      expect(JSON.parse(query.stdout).content.inputSchema.oneOf[0].properties.operation.const).toBe('properties')
+      expect(initial.context.capabilities.cards).toEqual((request.context as any).capabilities.cards)
+      expect(initial).not.toHaveProperty('fileAccess')
+      expect(initial.resourceIndex.every((file: object) => !('localPath' in file))).toBe(true)
+      expect(prompt).not.toContain(details.fileAccess.capabilities)
+      expect(JSON.stringify(request)).toBe(before)
+
+      const next = { ...request, requestId: crypto.randomUUID(), resourceFiles: [{ path: 'images/原始 图片.png', encoding: 'utf8' as const, content: 'new request bytes', role: 'image' as const }] }
+      const nextRoot = await staging.create(next), nextDetails = JSON.parse(await readFile(path.join(nextRoot, 'request.json'), 'utf8'))
+      expect(nextDetails.fileAccess.capabilities).toBe(details.fileAccess.capabilities)
+      expect(nextDetails.resourceIndex[0].localPath).not.toBe(details.resourceIndex.find((file: { path: string }) => file.path === 'resources/images/原始 图片.png').localPath)
+      expect(await readFile(nextDetails.resourceIndex[0].localPath, 'utf8')).toBe('new request bytes')
+      await staging.remove(request.requestId)
+      await expect(readFile(details.resourceIndex[0].localPath)).rejects.toThrow()
+      expect(await readFile(nextDetails.resourceIndex[0].localPath, 'utf8')).toBe('new request bytes')
+    } finally { await rm(directory, { recursive: true, force: true }) }
+  })
   it('keeps deferred observation and source inventories readable from the staged request without losing initial image paths or targets', async () => {
     const request = requestFixture()
     const png = Buffer.from(encodeImageTransformPng({ width: 1, height: 1, data: new Uint8Array([255, 0, 0, 255]) }))
@@ -52,7 +104,8 @@ describe('offline capability workspace', () => {
       const root = await new CandidateStaging(directory).create(request)
       const wire = JSON.parse(buildGenerationPrompt('codex', request, root).split('\n').at(-1)!)
       const details = JSON.parse(await readFile(path.join(root, wire.requestDetails.path), 'utf8'))
-      expect(wire.destinations).toEqual(request.destinations)
+      expect(wire).not.toHaveProperty('destinations')
+      expect(Object.values(wire.destinationAliases)).toEqual(request.destinations)
       expect(wire.context.capabilities.cards).toEqual(details.context.capabilities.cards)
       expect(details.observation).toEqual(request.observation)
       expect(details.context.assets).toEqual((request.context as any).assets)
@@ -68,11 +121,20 @@ describe('offline capability workspace', () => {
   it('gives Claude a valid reply terminator after a committed edit without demanding another candidate', () => {
     const request = { ...requestFixture(), expectedResult: 'auto' as const }
     const prompt = buildGenerationPrompt('claude', request, path.resolve('candidate-root'))
-    const start = prompt.indexOf(GENERATION_RESULT_OPEN), end = prompt.indexOf(GENERATION_RESULT_CLOSE, start)
-    const example = prompt.slice(start, end + GENERATION_RESULT_CLOSE.length)
-    expect(start).toBeGreaterThan(-1)
+    const example = `${GENERATION_RESULT_OPEN}${JSON.stringify({ version: 1, requestId: request.requestId, kind: 'answer' })}${GENERATION_RESULT_CLOSE}`
+    expect(prompt).toContain(example)
     expect(readGenerationResult(`已核对宿主回执，修改完成。${example}`, request)).toEqual({ kind: 'answer', requestId: request.requestId })
     expect(readGenerationResult(example, { ...request, expectedResult: 'candidate' })).toMatchObject({ kind: 'candidate-format-error' })
+  })
+  it('classifies explicit file delivery without a received candidate as a format failure while an unsupported edit remains a plain reply', () => {
+    const request = { ...requestFixture(), expectedResult: 'auto' as const }
+    for (const adapter of ['claude', 'opencode'] as const) {
+      const prompt = buildGenerationPrompt(adapter, request, path.resolve('candidate-root'))
+      const delivered = `${GENERATION_RESULT_OPEN}${JSON.stringify({ version: 1, requestId: request.requestId, kind: 'edit' })}${GENERATION_RESULT_CLOSE}`
+      expect(prompt).toContain(delivered)
+      expect(readGenerationResult(`已写候选。${delivered}`, request)).toMatchObject({ kind: 'candidate-format-error', requestId: request.requestId })
+      expect(readGenerationResult('当前无法完成修改，需要核对素材。', request)).toEqual({ kind: 'answer', requestId: request.requestId })
+    }
   })
   it('keeps complete selected material text and provenance in an on-demand file instead of overflowing the technical prompt', async () => {
     const material = '分母表示平均分的份数。\n'.repeat(20_000)
@@ -134,6 +196,19 @@ describe('offline capability workspace', () => {
     expect(prompt.context).not.toHaveProperty('dynamicCapabilities')
   })
 
+  it('projects only explicit frozen media asset references and keeps the complete alias inventory on demand', () => {
+    const request = requestFixture()
+    const asset = (id: string) => ({ id, kind: 'image', filename: `${id}.png`, mimeType: 'image/png', path: `assets/${id}.png`, byteLength: 10 })
+    request.context = { assets: { 'a-hidden': asset('a-hidden'), 'b-image': asset('b-image'), 'c-flow-media': asset('c-flow-media'), invalid: { id: 'another-id' } },
+      pages: [{ items: [
+        { item: { kind: 'native', content: { nativeType: 'text', data: { text: 'a-hidden' } } } },
+        { item: { kind: 'native', content: { nativeType: 'image', data: { assetId: 'b-image' } } } },
+      ], blocks: [{ block: { type: 'media', assetId: 'c-flow-media' } }] }], arbitraryText: 'a-hidden' }
+    expect(generationRequestForPrompt(request).assetAliases).toEqual({ a1: 'a-hidden', a2: 'b-image', a3: 'c-flow-media' })
+    expect(generationInitialRequestForPrompt(request).assetAliases).toEqual({ a2: 'b-image', a3: 'c-flow-media' })
+    expect(generationInitialRequestForPrompt(request).requestDetails.fields).toContain('assetAliases')
+  })
+
   it.each([
     ['text', 'edit'], ['image', 'edit'], ['text', 'plan'], ['image', 'plan'],
   ] as const)('keeps the entire %s selection %s wire prompt under 12 KiB with current observation and native paths', (nativeType, intent) => {
@@ -152,6 +227,8 @@ describe('offline capability workspace', () => {
       projection: projectEffectiveLayers({ project: document, locationId: document.startLocationId }), selectedIds: [node.id], scope: 'selection',
       instruction: intent === 'plan' ? '先给我调整方案，不改课件' : nativeType === 'image' ? '帮我把颜色改为绿色。' : '把这个标题改成简谐运动，放大一点并居中。', purpose: 'local-edit', expectedResult: 'auto', intent })
     const context = request.context as unknown as { pages: unknown[]; capabilities: ReturnType<typeof generationCapabilityContext> }
+    const startedAt = Date.now()
+    request.execution = { version: 1, startedAt, deadlineAt: startedAt + 20 * 60 * 1000 }
     request.observation = { documentRevision: document.revision, sessionGeneration: 1, draftEpoch: 1, viewEpoch: 1, runtime: null,
       surfaceId: surface.id, locationId: document.startLocationId, stateId: null, source: 'authoring', capturedAt: Date.now(),
       files: ['current-frame.png', 'images/0.png'].map((name, index) => ({ fileId: `image-${index}`, relativePath: `observation/${name}`, mediaType: 'image/png', byteLength: 31640, role: 'image' })) }
@@ -164,15 +241,80 @@ describe('offline capability workspace', () => {
       expect(Buffer.byteLength(prompt), `${adapter} full prompt`).toBeLessThanOrEqual(12 * 1024)
       expect(prompt).not.toContain(Buffer.alloc(100).toString('base64'))
       expect(prompt).toContain('resources/observation/images/0.png')
+      const initial = JSON.parse(prompt.split('\n').at(-1)!)
+      if (nativeType === 'image') expect(initial.assetAliases).toEqual({ a1: 'red-artwork' })
+      else expect(initial).not.toHaveProperty('assetAliases')
       if (adapter !== 'codex') {
-        expect(prompt).toContain('workspace.root 下的 candidate.json')
-        expect(prompt).toContain('勿手工转抄base64')
+        expect(prompt).toContain('COURSEWARE_CANDIDATE_ROOT下request.json')
+        expect(prompt).toContain('勿手抄路径/UUID/base64')
         expect(prompt).not.toContain('写 candidate.json 不算交付')
       }
       const profile = createGenerationProfile(adapter, request, undefined, root), projected = generationProfileForPrompt(profile)
-      for (const skill of projected.skills) expect(path.resolve(projected.workspace.capabilities, skill.path)).toBe(profile.skills.find(value => value.name === skill.name)!.path)
+      expect(projected.skills).toEqual(profile.skills.map(skill => skill.name))
+      expect(projected.workspace).toEqual({ rootEnvironment: 'COURSEWARE_CANDIDATE_ROOT', request: 'request.json' })
       if (nativeType === 'image') expect(context.capabilities.cards[0]!.entry.id).toBe('asset.image.transform')
     }
+  })
+
+  it('discovers component patch modes by their exact destination domain and returns one complete directed card', () => {
+    const instance = queryCourseAgentCapabilities(generationCapabilityData, { ids: ['component.package'], operation: 'patch', mode: 'instance', surface: 'flow', owner: 'surface', detail: 'full' })
+    expect(instance.total).toBe(1)
+    expect(instance.entries[0]!.variants).toEqual([expect.objectContaining({ operation: 'patch', mode: 'instance', target: expect.stringContaining('只重绑此实例') })])
+    const card = instance.cards![0]!
+    expect(card.content.inputSchema.oneOf).toHaveLength(1)
+    expect(card.content.inputSchema.oneOf[0].properties.mode).toEqual({ type: 'string', const: 'instance' })
+    expect(card.content.inputSchema.oneOf[0].required).toEqual(expect.arrayContaining(['operation', 'mode', 'basePackageId', 'baseVersion', 'baseContentIdentity', 'changedFiles', 'deleteFiles']))
+    expect(card.content.examples).toHaveLength(1)
+    expect(card.content.examples[0]).toMatchObject({ operation: 'patch', mode: 'instance', code: expect.stringContaining('session.execute') })
+    expect(card.content.recovery).toContain('revision-conflict')
+    const scoped = readCourseAgentCapability(generationCapabilityData, 'component.package', { surface: 'flow', owner: 'surface' })
+    expect(scoped.content.inputSchema).toEqual(card.content.inputSchema)
+    expect(scoped.content.examples).toEqual(card.content.examples)
+    expect(queryCourseAgentCapabilities(generationCapabilityData, { ids: ['component.package'], operation: 'patch', mode: 'shared', surface: 'flow', owner: 'surface' }).total).toBe(0)
+    expect(readCourseAgentCapability(generationCapabilityData, 'component.package', { operation: 'patch', mode: 'shared', surface: 'slide', owner: 'global' }).content.variants).toEqual([expect.objectContaining({ mode: 'shared', target: expect.stringContaining('所有实例') })])
+    expect(() => readCourseAgentCapability(generationCapabilityData, 'component.package', { operation: 'replace', mode: 'instance' })).toThrow('不支持')
+    expect(() => readCourseAgentCapability(generationCapabilityData, 'component.package', { operation: 'patch', mode: 'shared', surface: 'slide', owner: 'scene' })).toThrow('不支持')
+    expect(queryCourseAgentCapabilities(generationCapabilityData, { ids: ['component.insert'], operation: 'existing', carrier: 'generated-component' }).total).toBe(0)
+    const generated = queryCourseAgentCapabilities(generationCapabilityData, { ids: ['component.insert'], carrier: 'generated-component', detail: 'full' })
+    expect(generated.cards![0]!.content.inputSchema.oneOf).toHaveLength(1)
+    expect(generated.cards![0]!.content.inputSchema.oneOf[0].properties.operation.const).toBe('candidate')
+  })
+
+  it('binds mode and image examples to current resource values accepted by the formal tool schemas', async () => {
+    const baseline = { packageId: 'observed-package', baseVersion: '1.0.0', baseContentIdentity: 'a'.repeat(64) }
+    const changedFiles = { 'index.js': { encoding: 'utf8', text: '/* changed current source */' } }
+    const target = { itemId: 'observed-instance' }
+    for (const mode of ['shared', 'instance']) {
+      const card = readCourseAgentCapability(generationCapabilityData, 'component.package', { operation: 'patch', mode })
+      const calls: any[] = []
+      const session = { execute: async (...args: any[]) => { calls.push(args); return { status: 'committed' } } }
+      const invoke = new Function('session', 'baseline', 'changedFiles', 'target', `return (async()=>{${card.content.examples[0].code}})()`)
+      await invoke(session, baseline, changedFiles, target)
+      expect(calls).toHaveLength(1)
+      expect(componentPackageTool.inputSchema.parse(calls[0][1])).toMatchObject({ operation: 'patch', mode, basePackageId: baseline.packageId, changedFiles })
+      expect(calls[0][2].target).toBe(target)
+    }
+    const card = readCourseAgentCapability(generationCapabilityData, 'asset.image.transform')
+    const calls: any[] = []
+    const invoke = new Function('session', 'sourceAssetId', 'sourceColor', 'target', `return (async()=>{${card.content.examples[0].code}})()`)
+    await invoke({ execute: async (...args: any[]) => calls.push(args) }, 'observed-image', '#dd3322', target)
+    expect(imageTransformInputSchema.parse(calls[0][1])).toMatchObject({ sourceAssetId: 'observed-image', operations: [{ kind: 'replace-color', sourceColor: '#dd3322', targetColor: '#22c55e' }] })
+  })
+
+  it('returns help and compact no-argument discovery while directed CLI queries include complete schemas and references', () => {
+    expect(runCourseAgentCapabilityQuery(generationCapabilityData, ['--help'])).toContain('--mode')
+    expect(runCourseAgentCapabilityQuery(generationCapabilityData, [])).toMatchObject({ tools: expect.any(Array), query: 'query.mjs' })
+    const args = ['--id', 'native.content', '--operation', 'content', '--nativeType', 'image']
+    const card = runCourseAgentCapabilityQuery(generationCapabilityData, args) as any
+    expect(card).toEqual(readCourseAgentCapability(generationCapabilityData, 'native.content', { operation: 'content', nativeType: 'image' }))
+    expect(card.content.references.image).toBeDefined()
+    expect(Object.keys(card.content.references)).toEqual(['image'])
+    expect(card.content.examples).toEqual([expect.objectContaining({ operation: 'content' })])
+    const query = runCourseAgentCapabilityQuery(generationCapabilityData, ['--query', 'component.package', '--operation', 'patch', '--mode', 'instance', '--owner', 'scene', '--surface', 'slide']) as any
+    expect(query.cards[0].content.inputSchema.oneOf[0].properties.mode.const).toBe('instance')
+    expect(runCourseAgentCapabilityQuery(generationCapabilityData, [...args, '--summary'])).not.toHaveProperty('cards')
+    expect(() => runCourseAgentCapabilityQuery(generationCapabilityData, ['--id'])).toThrow('缺少')
+    expect(() => runCourseAgentCapabilityQuery(generationCapabilityData, ['--nope'])).toThrow('未知')
   })
 
   it('filters supported destinations and rejects stale versions and unknown queries without losing complete resources', () => {

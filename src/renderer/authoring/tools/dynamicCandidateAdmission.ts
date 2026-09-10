@@ -6,16 +6,19 @@ import { capturePublishedSurfacePng, waitForPublishedObservationReady } from '..
 import { bytesToBase64 } from '../../export/base64'
 import { exercisePublishedDynamicUpdates, exercisePublishedDynamicLifecycle } from '../../../player/surfaces/publishedDynamicUpdateProbe'
 import type { DynamicInstanceCapture } from '../../../shared/dynamicAdmissionContract'
-import { DYNAMIC_BEHAVIOR_SAMPLING, dynamicBehaviorObservationSchema, type DynamicBehaviorFrame, type DynamicBehaviorObservation } from '../../../shared/dynamicBehaviorObservation'
+import { DYNAMIC_BEHAVIOR_SAMPLING, dynamicBehaviorObservationSchema, dynamicButtonCheckSchema, type DynamicBehaviorFrame, type DynamicBehaviorObservation, type DynamicButtonCheck, type DynamicButtonObservation } from '../../../shared/dynamicBehaviorObservation'
+import { resolveRuntimeDomButton } from '../generation/runtimeDomControlObservation'
 import { componentRuntimeSourceIdentity } from '../../../shared/componentRegistryIdentity'
 import { validateDynamicCandidateFallbackAssets } from './dynamicCandidateFallbackAssets'
 
 export interface DynamicVerificationOptions {
   verificationMode?: 'full-admission' | 'public-props'
+  buttonCheck?: DynamicButtonCheck
   onBehaviorEvidence?: (evidence: readonly DynamicBehaviorObservation[]) => void
 }
 export interface DynamicBehaviorCapturePort {
   captureFrame(): Promise<{ dataUrl: string; capturedAt: number; width: number; height: number }>
+  clickAt?(point: { x: number; y: number }): Promise<void>
 }
 
 function sourceIdentities(project: CourseProjectDocument, resources: HistoryResourceState, ids: readonly string[]) {
@@ -97,7 +100,8 @@ export async function admitDynamicCandidate(project: CourseProjectDocument, reso
   const api = typeof window !== 'undefined' ? window.desktopAPI?.dynamicAdmission : undefined
   if (!api) return runDynamicCandidateHostSmoke(project, resources, targets, captureInstances, options)
   const id = crypto.randomUUID()
-  const payload = { project, captureInstances, observeBehavior: true, verificationMode: options.verificationMode ?? 'full-admission', targets: targets.map(target => ({ ...target, instanceIds: [...target.instanceIds] })),
+  const payload = { project, captureInstances, observeBehavior: true, verificationMode: options.verificationMode ?? 'full-admission',
+    ...(options.buttonCheck ? { buttonCheck: dynamicButtonCheckSchema.parse(options.buttonCheck) } : {}), targets: targets.map(target => ({ ...target, instanceIds: [...target.instanceIds] })),
     assetFiles: Object.fromEntries(Object.entries(resources.assetFiles).map(([key, bytes]) => [key, bytesToBase64(bytes)])),
     componentFiles: Object.fromEntries(Object.entries(resources.componentPackages).map(([key, data]) => [key,
       Object.fromEntries(Object.entries(data.files).map(([name, bytes]) => [name, bytesToBase64(bytes)]))])) }
@@ -124,8 +128,11 @@ export async function verifyDynamicCandidateBehavior(project: CourseProjectDocum
 export async function runDynamicCandidateHostSmoke(project: CourseProjectDocument, resources: HistoryResourceState,
   targets: readonly { locationId: string; stateId?: string | null; instanceIds: readonly string[] }[], captureInstances = false,
   options: DynamicVerificationOptions & { capturePort?: DynamicBehaviorCapturePort } = {}): Promise<readonly DynamicInstanceCapture[]> {
+  if (options.buttonCheck && (options.verificationMode === 'public-props' || !options.capturePort?.clickAt
+    || targets.filter(target => target.instanceIds.includes(options.buttonCheck!.instanceId)).length !== 1)) throw new Error('按钮检查需要唯一候选目标和真实独立窗口输入端口')
   await validateDynamicCandidateFallbackAssets(project, resources, targets.flatMap(target => target.instanceIds))
   const captures: DynamicInstanceCapture[] = []
+  const observed: DynamicBehaviorObservation[] = []
   let captureBytes = 0
   const sources = { project, assetFiles: resources.assetFiles, components: resources.componentPackages }
   const fullAdmission = options.verificationMode !== 'public-props'
@@ -147,8 +154,17 @@ export async function runDynamicCandidateHostSmoke(project: CourseProjectDocumen
     root.setAttribute('aria-hidden', 'true')
     document.body.append(root)
     const failures: string[] = []
+    const frames: DynamicBehaviorFrame[] = []
+    const actions: DynamicBehaviorObservation['actions'] = []
+    let buttonClick: DynamicButtonObservation | undefined
+    let startedAt = Date.now()
+    let active = true
+    const observation = () => frames.length ? dynamicBehaviorObservationSchema.parse({ version: 1, status: 'observed', mode: fullAdmission ? 'full-admission' : 'public-props',
+      projectId: project.id, documentRevision: project.revision, locationId, stateId: initialStateId ?? null, instanceIds: [...instanceIds], sourceIdentities: sourceIdentities(project, resources, instanceIds),
+      actions, frames, ...(buttonClick ? { buttonClick } : {}), elapsedMs: Math.max(0, Date.now() - startedAt), semanticVerdict: 'requires-review' }) : undefined
     let session: ReturnType<typeof createPublishedCourseSession> | undefined
     let timer: ReturnType<typeof setTimeout> | undefined
+    let hostFailure: AuthoringToolFailure | undefined
     try {
       session = createPublishedCourseSession(payload, { initialLocationId: locationId,
         ...(initialStateId ? { initialPresentationStateId: initialStateId } : {}),
@@ -162,14 +178,15 @@ export async function runDynamicCandidateHostSmoke(project: CourseProjectDocumen
           const instanceId = (element: HTMLElement) => element.dataset.componentInstanceId ?? element.dataset.runtimeInstanceId
           const mountedIds = new Set(mountedElements.map(instanceId))
           for (const id of instanceIds) if (!mountedIds.has(id)) throw new Error(`候选实例 ${id} 未实际挂载`)
-          const startedAt = Date.now()
-          const frames: DynamicBehaviorFrame[] = []
+          startedAt = Date.now()
           const sample = async (phase: DynamicBehaviorFrame['phase']) => {
+            if (!active) throw new Error('动态观察已结束')
             if (!options.capturePort) return
             await waitForPublishedObservationReady(root)
             const state = mountedSession.readObservationState()
             if (phase !== 'paused' && !state.ready) throw new Error('动态观察宿主未就绪')
             const capture = await options.capturePort.captureFrame()
+            if (!active) throw new Error('动态观察已结束')
             captureBytes += capture.dataUrl.length
             if (captureBytes > 48_000_000) throw new Error('动态观察图面超过本轮资源上限')
             frames.push({ ...capture, phase, elapsedMs: Math.max(0, capture.capturedAt - startedAt), stateVersion: state.stateVersion, publicState: JSON.parse(JSON.stringify(state.publicState)) })
@@ -182,12 +199,16 @@ export async function runDynamicCandidateHostSmoke(project: CourseProjectDocumen
           for (const element of mountedElements) {
             if (instanceIds.includes(instanceId(element) ?? '') && (fullAdmission || element.dataset.componentInstanceId)) await exercisePublishedDynamicUpdates(element, { resize: fullAdmission })
           }
+          actions.push('update-inputs')
+          if (fullAdmission) actions.push('resize-and-restore')
           if (!fullAdmission) await sample('running')
           if (fullAdmission) {
           for (const element of mountedElements) if (instanceIds.includes(instanceId(element) ?? '')) await exercisePublishedDynamicLifecycle(element, 'suspend')
+          actions.push('suspend')
           await sample('paused')
           if (options.capturePort) { await new Promise(resolve => setTimeout(resolve, DYNAMIC_BEHAVIOR_SAMPLING.pausedForMs)); await sample('paused') }
           for (const element of mountedElements) if (instanceIds.includes(instanceId(element) ?? '')) await exercisePublishedDynamicLifecycle(element, 'resume')
+          actions.push('resume')
           if (options.capturePort) { await new Promise(resolve => setTimeout(resolve, DYNAMIC_BEHAVIOR_SAMPLING.resumedForMs)); await sample('resumed') }
           const suspended = await mountedSession.player.suspendSurface(location.surfaceId)
           if (!suspended.ok) throw suspended.failure?.error ?? new Error('动态候选无法挂起')
@@ -221,19 +242,48 @@ export async function runDynamicCandidateHostSmoke(project: CourseProjectDocumen
           }
           if (root.querySelector('.published-component-fallback, [data-runtime-fallback="true"], [data-slide-component-state="fallback"]')) throw new Error('动态候选触发了静态后备')
           if (failures.length) throw new Error(failures.join('\n'))
-          if (frames.length) options.onBehaviorEvidence?.([dynamicBehaviorObservationSchema.parse({ version: 1, status: 'observed', mode: fullAdmission ? 'full-admission' : 'public-props',
-            projectId: project.id, documentRevision: project.revision, locationId, stateId: initialStateId ?? null, instanceIds: [...instanceIds], sourceIdentities: sourceIdentities(project, resources, instanceIds),
-            actions: fullAdmission ? ['update-inputs', 'resize-and-restore', 'suspend', 'resume'] : ['update-inputs'], frames, elapsedMs: Date.now() - startedAt, semanticVerdict: 'requires-review' })])
+          if (options.buttonCheck && instanceIds.includes(options.buttonCheck.instanceId)) {
+            // Code has completed the normal admission path. Only this private
+            // instance receives one real input, never the editor's live session.
+            const check = options.buttonCheck
+            const button = resolveRuntimeDomButton(root, check.instanceId, check.label)
+            const before = button.readText()
+            await sample('before-button-click')
+            if (!active) throw new Error('按钮检查已取消')
+            const current = resolveRuntimeDomButton(root, check.instanceId, check.label)
+            const clickedAt = Date.now()
+            await options.capturePort!.clickAt!({ x: current.x, y: current.y })
+            actions.push('click-button')
+            const remainingObservation = DYNAMIC_BEHAVIOR_SAMPLING.buttonObserveForMs - (Date.now() - clickedAt)
+            if (remainingObservation > 0) await new Promise(resolve => setTimeout(resolve, remainingObservation))
+            await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
+            if (!active) throw new Error('按钮检查已取消')
+            const after = button.readText()
+            buttonClick = { version: 1, instanceId: check.instanceId, label: check.label, input: 'electron-mouse',
+              x: current.x, y: current.y, beforeText: before.text, afterText: after.text,
+              textTruncated: before.truncated || after.truncated, clickedAt, observedAt: Date.now(), functionalResult: 'requires-review' }
+            await sample('after-button-click')
+            if (failures.length) throw new Error(failures.join('\n'))
+          }
         })(),
         new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('动态候选真实宿主准入超时')), 12_000) }),
       ])
+      const evidence = observation()
+      if (evidence) { observed.push(evidence); options.onBehaviorEvidence?.([evidence]) }
     } catch (error) {
-      throw new AuthoringToolFailure([{ code: 'dynamic-host-failed', message: error instanceof Error ? error.message : String(error), path: ['locations', locationId, 'instances', ...instanceIds] }])
+      const evidence = observation()
+      hostFailure = new AuthoringToolFailure(error instanceof AuthoringToolFailure ? error.diagnostics : [{ code: 'dynamic-host-failed', message: error instanceof Error ? error.message : String(error), path: ['locations', locationId, 'instances', ...instanceIds] }],
+        [...observed, ...(evidence ? [evidence] : []), ...(error instanceof AuthoringToolFailure ? error.behaviorEvidence ?? [] : [])])
     } finally {
+      active = false
       clearTimeout(timer)
-      try { await session?.destroy() } finally { root.remove() }
+      try { await session?.destroy() }
+      catch (error) {
+        hostFailure = new AuthoringToolFailure([...(hostFailure?.diagnostics ?? []), { code: 'dynamic-host-destroy-failed', message: error instanceof Error ? error.message : String(error), path: ['locations', locationId, 'instances', ...instanceIds, 'destroy'] }], hostFailure?.behaviorEvidence ?? observed)
+      } finally { root.remove() }
     }
-    if (failures.length) throw new Error(failures.join('\n'))
+    if (hostFailure) throw hostFailure
+    if (failures.length) throw new AuthoringToolFailure([{ code: 'dynamic-host-failed', message: failures.join('\n'), path: ['locations', locationId, 'instances', ...instanceIds] }], observed)
   }
   return captures
 }

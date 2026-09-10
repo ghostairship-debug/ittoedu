@@ -3,8 +3,9 @@ import { authoringObservationSpatialViewSchema } from './authoringObservation'
 import { aiTaskIdentityFields, aiQuestionSchema, aiInputDeliverySchema, type AiUserInput } from './localAgentInteraction'
 import { workspaceIdentityV1Schema, workspaceIdentityKey } from './workspaceIdentity'
 import { authoringToolDestinationV1Schema } from './authoringToolContract'
-import { generationCandidateSchema, generationCommitReceiptSchema } from './generationContract'
+import { generationAfterCommitSchema, generationFailureSchema, generationCandidateSchema, generationCommitReceiptSchema } from './generationContract'
 import { localAgentIdSchema, localAgentRecordSchema, type LocalAgentProbe } from './localAgentContract'
+import { localAgentTokenUsageSchema } from './localAgentUsage'
 
 // Local AI protocol only. Version numbers here do not change Course Project V9.
 const revision = z.number().int().nonnegative()
@@ -18,6 +19,28 @@ export const aiReadScopeSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('location'), surfaceId: identity, locationId: identity }).strict(),
   z.object({ kind: z.literal('course') }).strict(),
 ])
+// Diagnostic boundaries only: no model/service attribution and no render or durability claim.
+export const MAX_AI_TASK_TIMING_ENTRIES = 256
+export const aiTaskTimingStageSchema = z.enum([
+  'requestPrepared', 'nativeOpenStarted', 'nativeOpened', 'turnDispatchStarted', 'turnAccepted',
+  'firstNativeEvent', 'candidateParsed', 'hostResultRecorded', 'hostCommitRecorded',
+])
+export const aiTaskTimingEntrySchema = z.object({
+  runId: z.uuid(), observationId: z.uuid(), stage: aiTaskTimingStageSchema, at: revision,
+}).strict()
+export const aiTaskTimingSchema = z.object({
+  version: z.literal(1), entries: z.array(aiTaskTimingEntrySchema).max(MAX_AI_TASK_TIMING_ENTRIES),
+}).strict().superRefine((timing, ctx) => {
+  const stages = new Set<string>(), observations = new Map<string, string>()
+  for (const entry of timing.entries) {
+    const key = `${entry.runId}:${entry.stage}`
+    if (stages.has(key)) ctx.addIssue({ code: 'custom', message: '重复原生回合计时阶段' })
+    if (observations.has(entry.runId) && observations.get(entry.runId) !== entry.observationId) ctx.addIssue({ code: 'custom', message: '同一原生回合计时引用不同观察' })
+    stages.add(key); observations.set(entry.runId, entry.observationId)
+  }
+})
+export type AiTaskTimingEntry = z.infer<typeof aiTaskTimingEntrySchema>
+export type AiTaskTimingStage = z.infer<typeof aiTaskTimingStageSchema>
 export const aiTaskSchema = z.object({
   version: z.literal(1), ...taskIdentity, sessionId: z.uuid(), adapter: localAgentIdSchema,
   goal: z.string().trim().min(1).max(20000), intent: aiIntentSchema,
@@ -26,10 +49,12 @@ export const aiTaskSchema = z.object({
   writeDestinations: z.array(authoringToolDestinationV1Schema).max(1000),
   status: aiTaskStatusSchema, observationId: z.uuid().nullable(),
   committedResultIds: z.array(z.uuid()).max(1000),
+  completion: z.object({ version: z.literal(1), resultId: z.uuid(), outcome: z.enum(['modified', 'unchanged']) }).strict().optional(),
   execution: z.object({
     startedAt: revision, deadlineAt: revision, turnCount: revision,
     formatRepairs: revision, stagnantCandidates: revision,
     lastChangeKey: z.string().max(160000).nullable(), lastDiagnostic: z.string().max(4000).nullable(),
+    timing: aiTaskTimingSchema.optional(),
   }).strict().optional(),
   pendingInputs: z.array(z.object({ inputId: z.uuid(), text: z.string().max(20000), kind: z.enum(['correct', 'supplement']) }).strict()).max(100).optional(),
 }).strict().superRefine((task, ctx) => {
@@ -84,7 +109,9 @@ export const aiHostResultSchema = aiProposalIdentitySchema.extend({
   // Only real live-project receipts belong here. Preparation effects are not receipts.
   receipts: z.array(generationCommitReceiptSchema).max(1),
   summary: z.string().max(4000),
-  diagnostics: z.array(z.object({ code: identity, message: z.string().min(1).max(4000) }).strict()).max(1000),
+  diagnostics: z.array(z.object({ code: identity, message: z.string().min(1).max(4000), path: z.array(z.union([z.string(), z.number()])).optional() }).strict()).max(1000),
+  afterCommit: generationAfterCommitSchema.optional(), failure: generationFailureSchema.optional(),
+  receiptDelivery: z.enum(['pending', 'delivered']).optional(),
 }).strict().superRefine((result, ctx) => {
   const fail = (message: string) => ctx.addIssue({ code: 'custom', message })
   if (result.status === 'committed') {
@@ -92,7 +119,8 @@ export const aiHostResultSchema = aiProposalIdentitySchema.extend({
     if (result.receipts.some(receipt => !['committed', 'unchanged'].includes(receipt.status))) fail('原子提交不能包含失败回执')
   } else if (result.afterRevision !== result.beforeRevision) fail('未提交结果不能改变revision')
   if (!['committed', 'unchanged'].includes(result.status) && result.receipts.length) fail('检查和拒绝不能携带提交回执')
-  if (result.status === 'unchanged' && result.receipts.some(receipt => receipt.status !== 'unchanged')) fail('未改变结果不能包含实际写入')
+  if (result.status === 'unchanged' && (result.receipts.length !== 1 || result.receipts.some(receipt => receipt.status !== 'unchanged'))) fail('未改变结果需要一份正式无变化回执')
+  if (result.afterCommit && !['committed', 'unchanged'].includes(result.status)) fail('只有正式应用结果可以决定提交后行为')
   if (new Set(result.receipts.map(receipt => receipt.requestId)).size !== result.receipts.length) fail('重复正式回执')
   for (const receipt of result.receipts) {
     if (receipt.beforeRevision !== result.beforeRevision || receipt.afterRevision !== result.afterRevision) fail('正式回执revision必须匹配原子事务')
@@ -118,12 +146,12 @@ const failure = z.object({
   category: z.enum(['transport', 'service', 'protocol', 'limit', 'capability', 'storage']), message: z.string().min(1).max(4000),
 }).strict()
 export const localAgentEventV2Schema = z.discriminatedUnion('kind', [
-  z.object({ ...eventIdentity, kind: z.literal('text'), itemId: identity, phase: z.enum(['body', 'public-summary', 'plan']), operation: z.enum(['append', 'replace']), text: z.string().max(100000) }).strict(),
+  z.object({ ...eventIdentity, kind: z.literal('text'), itemId: identity, phase: z.enum(['body', 'public-summary', 'plan', 'candidate']), operation: z.enum(['append', 'replace']), text: z.string().max(100000) }).strict(),
   z.object({ ...eventIdentity, kind: z.literal('tool'), itemId: identity, name: identity, status: z.enum(['running', 'completed', 'failed', 'cancelled']), detail: z.json() }).strict(),
   z.object({ ...eventIdentity, kind: z.literal('question'), question: aiQuestionSchema }).strict(),
   z.object({ ...eventIdentity, kind: z.literal('input-delivery'), delivery: aiInputDeliverySchema }).strict(),
   z.object({ ...eventIdentity, kind: z.literal('configuration'), capabilities: localAgentCapabilitiesSchema }).strict(),
-  z.object({ ...eventIdentity, kind: z.literal('usage'), inputTokens: revision.nullable(), outputTokens: revision.nullable(), cachedInputTokens: revision.nullable() }).strict(),
+  z.object({ ...eventIdentity, kind: z.literal('usage'), inputTokens: revision.nullable(), outputTokens: revision.nullable(), cachedInputTokens: revision.nullable(), tokenUsage: localAgentTokenUsageSchema.optional() }).strict(),
   z.object({ ...eventIdentity, kind: z.literal('turn-ended'), status: z.enum(['completed', 'cancelled', 'failed']), failure: failure.nullable() }).strict(),
 ]).superRefine((event, ctx) => {
   if (event.kind === 'turn-ended' && ((event.status === 'failed') !== (event.failure !== null))) ctx.addIssue({ code: 'custom', message: '失败回合必须且只能携带failure' })
@@ -157,7 +185,15 @@ export const localAgentRecordV2Schema = z.object({
   for (const task of record.tasks) for (const resultId of task.committedResultIds) {
     if (!record.hostResults.some(result => result.resultId === resultId && result.taskId === task.taskId && result.status === 'committed')) fail('任务引用不存在的实际提交')
   }
+  for (const task of record.tasks) if (task.completion) {
+    const result = record.hostResults.find(value => value.resultId === task.completion!.resultId && value.taskId === task.taskId)
+    if (task.status !== 'completed' || !result || result.afterCommit?.action !== 'finish'
+      || result.status !== (task.completion.outcome === 'modified' ? 'committed' : 'unchanged')) fail('完成状态必须对应真实的终结回执')
+  }
   for (const task of record.tasks) if (task.observationId !== null && !record.observations.some(observation => observation.observationId === task.observationId && observation.taskId === task.taskId)) fail('任务引用不存在的观察')
+  for (const task of record.tasks) for (const entry of task.execution?.timing?.entries ?? []) {
+    if (!record.observations.some(observation => observation.observationId === entry.observationId && observation.taskId === task.taskId)) fail('计时引用不属于当前任务的观察')
+  }
   for (const result of record.hostResults) if (!record.observations.some(observation => observation.observationId === result.observationId && observation.taskId === result.taskId && observation.epoch === result.epoch && observation.documentRevision === result.beforeRevision)) fail('结果引用不存在或版本不一致的观察')
 })
 export type LocalAgentRecordV2 = z.infer<typeof localAgentRecordV2Schema>
@@ -169,10 +205,10 @@ export const localAgentTurnInputSchema = z.object({
 /** Native transport port. Harness owns task state; renderer never supplies executable args/paths. */
 export interface LocalAgentCliAdapterV2 {
   readonly id: z.infer<typeof localAgentIdSchema>
-  open(input: { cwd: string; externalSessionId: string | null; candidateRoot?: string }): Promise<{ externalSessionId: string | null; capabilities: LocalAgentCapabilities }>
+  open(input: { cwd: string; externalSessionId: string | null; candidateRoot?: string; configuration?: LocalAgentConfiguration }): Promise<{ externalSessionId: string | null; capabilities: LocalAgentCapabilities }>
   /** Only an identity confirmed by the native process may be persisted or resumed. */
   getExternalSessionId?(): string | null
-  discoverCapabilities?(): Promise<LocalAgentCapabilities>
+  discoverCapabilities?(input?: { cwd: string }): Promise<LocalAgentCapabilities>
   configure(input: z.infer<typeof localAgentConfigurationSchema>): Promise<LocalAgentCapabilities>
   startTurn(input: z.infer<typeof localAgentTurnInputSchema>, observationFiles: ReadonlyMap<string, string>): Promise<{ nativeTurnId: string | null }>
   input(input: AiUserInput): Promise<z.infer<typeof aiInputDeliverySchema>>

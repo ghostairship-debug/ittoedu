@@ -3,6 +3,38 @@
     "default": "native"
   },
   "description": "insert 使用 create parent:flow-body；block 采用 replace.block 的完整 Schema，只省略最外层 id（由宿主生成）。修改标题、段落或引用块的文字和字号优先使用 edit 的 text/textStyle/textAlign/lineSpacing，仅提供改变字段，其余排版、富文本和元数据保留。replace/delete/move 使用 Flow block update target；replace 必须保留原 id 和类型。完整载体替换使用 selection.replace。",
+  "examples": [
+    {
+      "bindings": "values 的 block 来自当前观察、已读资源或用户要求，值须满足本卡 inputSchema；destination 原样复制当前目标。",
+      "code": "const input={\"operation\":\"insert\",\"block\":values[\"block\"]}; const receipt=await session.execute(\"flow.content\",input,destination);",
+      "operation": "insert"
+    },
+    {
+      "bindings": "values 的 block 来自当前观察、已读资源或用户要求，值须满足本卡 inputSchema；destination 原样复制当前目标。",
+      "code": "const input={\"operation\":\"replace\",\"block\":values[\"block\"]}; const receipt=await session.execute(\"flow.content\",input,destination);",
+      "operation": "replace"
+    },
+    {
+      "bindings": "values 的  来自当前观察、已读资源或用户要求，值须满足本卡 inputSchema；destination 原样复制当前目标。",
+      "code": "const input={\"operation\":\"edit\"}; const receipt=await session.execute(\"flow.content\",input,destination);",
+      "operation": "edit"
+    },
+    {
+      "bindings": "values 的  来自当前观察、已读资源或用户要求，值须满足本卡 inputSchema；destination 原样复制当前目标。",
+      "code": "const input={\"operation\":\"delete\"}; const receipt=await session.execute(\"flow.content\",input,destination);",
+      "operation": "delete"
+    },
+    {
+      "bindings": "values 的 parentId/index 来自当前观察、已读资源或用户要求，值须满足本卡 inputSchema；destination 原样复制当前目标。",
+      "code": "const input={\"operation\":\"move\",\"parentId\":values[\"parentId\"],\"index\":values[\"index\"]}; const receipt=await session.execute(\"flow.content\",input,destination);",
+      "operation": "move"
+    },
+    {
+      "bindings": "values 的 change 来自当前观察、已读资源或用户要求，值须满足本卡 inputSchema；destination 原样复制当前目标。",
+      "code": "const input={\"operation\":\"table-structure\",\"change\":values[\"change\"]}; const receipt=await session.execute(\"flow.content\",input,destination);",
+      "operation": "table-structure"
+    }
+  ],
   "inputSchema": {
     "$defs": {
       "__schema0": {
@@ -1695,10 +1727,50 @@
       }
     ]
   },
+  "invocation": "Builder: await session.execute(tool,input,destination)。input 遵循本卡完整 Schema；destination 原样使用当前 observe/createScope 的目标；只以 committed receipt 判定成功。",
   "name": "flow.content",
+  "recovery": "invalid-input: 按本卡 Schema 修正字段；revision-conflict: 重新 observe 后复制新 target 和源码基线；tool-failed: 读取 diagnostics 修复所指输入/资源/宿主条件，失败不代表已提交。",
   "support": "conditional-on-input-target-resources-and-host",
   "supportedScopes": [
     "flow:surface"
+  ],
+  "variants": [
+    {
+      "operation": "insert",
+      "scopes": [
+        "flow:surface"
+      ]
+    },
+    {
+      "operation": "replace",
+      "scopes": [
+        "flow:surface"
+      ]
+    },
+    {
+      "operation": "edit",
+      "scopes": [
+        "flow:surface"
+      ]
+    },
+    {
+      "operation": "delete",
+      "scopes": [
+        "flow:surface"
+      ]
+    },
+    {
+      "operation": "move",
+      "scopes": [
+        "flow:surface"
+      ]
+    },
+    {
+      "operation": "table-structure",
+      "scopes": [
+        "flow:surface"
+      ]
+    }
   ],
   "version": 1
 }

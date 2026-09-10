@@ -58,9 +58,23 @@ export async function operateDynamicAdmission(raw: unknown, owner: WebContents, 
       const execute = worker.webContents.executeJavaScript(`window.__COURSEWARE_ADMISSION_RUN__(${encoded})`).finally(() => { completed = true })
       const captureFrames = async () => {
         let capturedBytes = 0
+        let clicked = false
         while (!completed && !worker.isDestroyed()) {
-          const frame = await worker.webContents.executeJavaScript('window.__COURSEWARE_ADMISSION_PENDING_FRAME__?.() ?? null') as { id: number } | null
+          const pending = await worker.webContents.executeJavaScript('({frame:window.__COURSEWARE_ADMISSION_PENDING_FRAME__?.()??null,button:window.__COURSEWARE_ADMISSION_PENDING_BUTTON__?.()??null})') as { frame: { id: number } | null; button: { id: number; x: number; y: number } | null }
           if (completed || worker.isDestroyed()) break
+          if (pending.button) {
+            const { id, x, y } = pending.button, [width, height] = worker.getContentSize()
+            if (!request.payload.buttonCheck || clicked || !Number.isSafeInteger(id) || id < 1
+              || !Number.isFinite(x) || !Number.isFinite(y) || x < 0 || y < 0 || x >= width || y >= height) throw new Error('动态按钮输入超出单次候选检查范围')
+            clicked = true
+            const point = { x: Math.round(x), y: Math.round(y) }
+            worker.webContents.sendInputEvent({ type: 'mouseMove', ...point })
+            worker.webContents.sendInputEvent({ type: 'mouseDown', ...point, button: 'left', clickCount: 1 })
+            worker.webContents.sendInputEvent({ type: 'mouseUp', ...point, button: 'left', clickCount: 1 })
+            await worker.webContents.executeJavaScript(`window.__COURSEWARE_ADMISSION_ACCEPT_BUTTON__(${id})`)
+            continue
+          }
+          const frame = pending.frame
           if (!frame) { await new Promise(resolve => setTimeout(resolve, 16)); continue }
           if (!Number.isSafeInteger(frame.id) || frame.id < 1) throw new Error('动态观察帧身份无效')
           const bitmap = await worker.webContents.capturePage(), dataUrl = bitmap.toDataURL()

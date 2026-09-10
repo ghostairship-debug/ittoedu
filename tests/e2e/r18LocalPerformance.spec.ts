@@ -47,7 +47,11 @@ require('node:readline').createInterface({input:process.stdin}).on('line', line 
   else if (method === 'model/list') send({id,result:{data:[{id:model,model,displayName:model,isDefault:true,inputModalities:['text','image'],supportedReasoningEfforts:[{reasoningEffort:'medium'}],defaultReasoningEffort:'medium'}]}});
   else if (method === 'thread/start' || method === 'thread/resume') send({id,result:{thread:{id:threadId},model,reasoningEffort:'medium'}});
   else if (method === 'turn/start') {
-    requestId = params.outputSchema.properties.requestId.const;
+    // The schema is request-independent; the formal staging request owns this ID.
+    const candidateRoot = process.env.COURSEWARE_CANDIDATE_ROOT;
+    if (!candidateRoot) throw new Error('Local baseline requires the current candidate root');
+    requestId = JSON.parse(require('node:fs').readFileSync(require('node:path').join(candidateRoot, 'request.json'), 'utf8')).requestId;
+    if (typeof requestId !== 'string' || !requestId) throw new Error('Local baseline request ID is missing');
     send({id,result:{turn:{id:turnId,status:'inProgress'}}});
     send({method:'turn/started',params:{threadId,turn:{id:turnId}}});
     if (started) return;

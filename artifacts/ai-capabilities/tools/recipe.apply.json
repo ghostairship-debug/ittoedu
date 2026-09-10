@@ -3,6 +3,12 @@
     "default": "recipe"
   },
   "description": "仅 Slide：scene owner + create parent:course-locations，insertion={kind:after,siblingId:当前locationId}。slots 只能用 对应 Recipe 能力卡中的 fields.key（从 capabilities/discovery.json 或 query.mjs 按 recipeId 读取）。配方会新建一页，返回位置可用 created-scope。",
+  "examples": [
+    {
+      "bindings": "values 的 recipeId/slots 来自当前观察、已读资源或用户要求，值须满足本卡 inputSchema；destination 原样复制当前目标。",
+      "code": "const input={\"recipeId\":values[\"recipeId\"],\"slots\":values[\"slots\"]}; const receipt=await session.execute(\"recipe.apply\",input,destination);"
+    }
+  ],
   "inputSchema": {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "additionalProperties": false,
@@ -39,10 +45,19 @@
     ],
     "type": "object"
   },
+  "invocation": "Builder: await session.execute(tool,input,destination)。input 遵循本卡完整 Schema；destination 原样使用当前 observe/createScope 的目标；只以 committed receipt 判定成功。",
   "name": "recipe.apply",
+  "recovery": "invalid-input: 按本卡 Schema 修正字段；revision-conflict: 重新 observe 后复制新 target 和源码基线；tool-failed: 读取 diagnostics 修复所指输入/资源/宿主条件，失败不代表已提交。",
   "support": "conditional-on-input-target-resources-and-host",
   "supportedScopes": [
     "slide:scene"
+  ],
+  "variants": [
+    {
+      "scopes": [
+        "slide:scene"
+      ]
+    }
   ],
   "version": 1
 }

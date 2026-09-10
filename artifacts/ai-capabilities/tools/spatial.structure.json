@@ -2,6 +2,58 @@
   "candidateCarrier": {
     "default": "native"
   },
+  "examples": [
+    {
+      "bindings": "values 的 pose 来自当前观察、已读资源或用户要求，值须满足本卡 inputSchema；destination 原样复制当前目标。",
+      "code": "const input={\"operation\":\"add-camera\",\"pose\":values[\"pose\"]}; const receipt=await session.execute(\"spatial.structure\",input,destination);",
+      "operation": "add-camera"
+    },
+    {
+      "bindings": "values 的  来自当前观察、已读资源或用户要求，值须满足本卡 inputSchema；destination 原样复制当前目标。",
+      "code": "const input={\"operation\":\"update-camera\"}; const receipt=await session.execute(\"spatial.structure\",input,destination);",
+      "operation": "update-camera"
+    },
+    {
+      "bindings": "values 的  来自当前观察、已读资源或用户要求，值须满足本卡 inputSchema；destination 原样复制当前目标。",
+      "code": "const input={\"operation\":\"delete-camera\"}; const receipt=await session.execute(\"spatial.structure\",input,destination);",
+      "operation": "delete-camera"
+    },
+    {
+      "bindings": "values 的 pose 来自当前观察、已读资源或用户要求，值须满足本卡 inputSchema；destination 原样复制当前目标。",
+      "code": "const input={\"operation\":\"set-home\",\"pose\":values[\"pose\"]}; const receipt=await session.execute(\"spatial.structure\",input,destination);",
+      "operation": "set-home"
+    },
+    {
+      "bindings": "values 的 path 来自当前观察、已读资源或用户要求，值须满足本卡 inputSchema；destination 原样复制当前目标。",
+      "code": "const input={\"operation\":\"add-path\",\"path\":values[\"path\"]}; const receipt=await session.execute(\"spatial.structure\",input,destination);",
+      "operation": "add-path"
+    },
+    {
+      "bindings": "values 的 path 来自当前观察、已读资源或用户要求，值须满足本卡 inputSchema；destination 原样复制当前目标。",
+      "code": "const input={\"operation\":\"update-path\",\"path\":values[\"path\"]}; const receipt=await session.execute(\"spatial.structure\",input,destination);",
+      "operation": "update-path"
+    },
+    {
+      "bindings": "values 的  来自当前观察、已读资源或用户要求，值须满足本卡 inputSchema；destination 原样复制当前目标。",
+      "code": "const input={\"operation\":\"delete-path\"}; const receipt=await session.execute(\"spatial.structure\",input,destination);",
+      "operation": "delete-path"
+    },
+    {
+      "bindings": "values 的 relation 来自当前观察、已读资源或用户要求，值须满足本卡 inputSchema；destination 原样复制当前目标。",
+      "code": "const input={\"operation\":\"add-relation\",\"relation\":values[\"relation\"]}; const receipt=await session.execute(\"spatial.structure\",input,destination);",
+      "operation": "add-relation"
+    },
+    {
+      "bindings": "values 的 relation 来自当前观察、已读资源或用户要求，值须满足本卡 inputSchema；destination 原样复制当前目标。",
+      "code": "const input={\"operation\":\"update-relation\",\"relation\":values[\"relation\"]}; const receipt=await session.execute(\"spatial.structure\",input,destination);",
+      "operation": "update-relation"
+    },
+    {
+      "bindings": "values 的  来自当前观察、已读资源或用户要求，值须满足本卡 inputSchema；destination 原样复制当前目标。",
+      "code": "const input={\"operation\":\"delete-relation\"}; const receipt=await session.execute(\"spatial.structure\",input,destination);",
+      "operation": "delete-relation"
+    }
+  ],
   "inputSchema": {
     "$defs": {
       "__schema0": {
@@ -321,10 +373,74 @@
       }
     ]
   },
+  "invocation": "Builder: await session.execute(tool,input,destination)。input 遵循本卡完整 Schema；destination 原样使用当前 observe/createScope 的目标；只以 committed receipt 判定成功。",
   "name": "spatial.structure",
+  "recovery": "invalid-input: 按本卡 Schema 修正字段；revision-conflict: 重新 observe 后复制新 target 和源码基线；tool-failed: 读取 diagnostics 修复所指输入/资源/宿主条件，失败不代表已提交。",
   "support": "conditional-on-input-target-resources-and-host",
   "supportedScopes": [
     "spatial-2d:world"
+  ],
+  "variants": [
+    {
+      "operation": "add-camera",
+      "scopes": [
+        "spatial-2d:world"
+      ]
+    },
+    {
+      "operation": "update-camera",
+      "scopes": [
+        "spatial-2d:world"
+      ]
+    },
+    {
+      "operation": "delete-camera",
+      "scopes": [
+        "spatial-2d:world"
+      ]
+    },
+    {
+      "operation": "set-home",
+      "scopes": [
+        "spatial-2d:world"
+      ]
+    },
+    {
+      "operation": "add-path",
+      "scopes": [
+        "spatial-2d:world"
+      ]
+    },
+    {
+      "operation": "update-path",
+      "scopes": [
+        "spatial-2d:world"
+      ]
+    },
+    {
+      "operation": "delete-path",
+      "scopes": [
+        "spatial-2d:world"
+      ]
+    },
+    {
+      "operation": "add-relation",
+      "scopes": [
+        "spatial-2d:world"
+      ]
+    },
+    {
+      "operation": "update-relation",
+      "scopes": [
+        "spatial-2d:world"
+      ]
+    },
+    {
+      "operation": "delete-relation",
+      "scopes": [
+        "spatial-2d:world"
+      ]
+    }
   ],
   "version": 1
 }

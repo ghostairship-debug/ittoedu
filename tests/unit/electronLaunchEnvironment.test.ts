@@ -136,7 +136,10 @@ describe('native V2 factory and read-only historical wire fixtures', () => {
     expect(text).not.toContain('"oneOf"')
     expect(text).not.toContain('"propertyNames"')
     expect(text).not.toContain('"format"')
-    expect(schema).toMatchObject({ properties: { requestId: { const: requestId } } })
+    expect(schema).toMatchObject({ properties: { version: { const: 2 }, requestId: { type: 'string' } } })
+    expect(schema).toEqual(codexCandidateOutputSchema({ requestId: '2a42b1a2-1b08-411f-9407-81332bc0a229' } as GenerationRequest))
+    expect(text).not.toContain('"candidateId"')
+    expect(text).not.toContain('"authoringAddress"')
     expect(text).toContain('A complete JSON serialization of the selected authoring tool input.')
   })
   it('uses a strict reply-or-edit envelope for Codex auto requests', () => {
@@ -144,7 +147,7 @@ describe('native V2 factory and read-only historical wire fixtures', () => {
     const schema = codexTurnOutputSchema({ requestId, expectedResult: 'auto' } as GenerationRequest) as any
     expect(schema).toMatchObject({
       type: 'object', additionalProperties: false,
-      properties: { requestId: { const: requestId }, kind: { enum: ['reply', 'edit'] } },
+      properties: { requestId: { type: 'string' }, kind: { enum: ['reply', 'edit'] } },
       required: ['version', 'requestId', 'kind', 'reply', 'candidate'],
     })
     const text = JSON.stringify(schema)

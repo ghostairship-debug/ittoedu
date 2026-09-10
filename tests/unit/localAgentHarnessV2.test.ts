@@ -3,14 +3,14 @@
 import { promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { LocalAgentHarness } from '../../src/main/localAgent/harness'
 import { LocalAgentRepository } from '../../src/main/localAgent/repository'
 import { createWorkspaceIdentity } from '../../src/main/workspaceIdentity'
 import type { LocalAgentCapabilities, LocalAgentConfiguration } from '../../src/shared/localAgentContract'
 import type { LocalAgentCliAdapterV2, LocalAgentNativeEvent } from '../../src/shared/localAgentTaskContract'
 import { generationRequestSchema, type GenerationRequest, type GenerationCommitReceipt } from '../../src/shared/generationContract'
-import { GENERATION_OPEN, GENERATION_CLOSE } from '../../src/shared/generationResult'
+import { GENERATION_OPEN, GENERATION_CLOSE, GENERATION_RESULT_OPEN, GENERATION_RESULT_CLOSE } from '../../src/shared/generationResult'
 import { randomUUID } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
 
@@ -103,6 +103,68 @@ describe('V2 Harness native lifecycle', () => {
     } finally { await harness.close() }
   })
 
+  it('expires an unanswered waiting-input at the original absolute deadline without a commit or renewed budget', async () => {
+    const { directory, workspace } = await fixture(), repository = new LocalAgentRepository(directory)
+    const adapter = new NativeAdapter(), eventsStarted = deferred<void>(), ask = deferred<void>(), finishEvents = deferred<void>()
+    const waitingSaved = deferred<void>(), terminalSaved = deferred<void>()
+    const write = repository.write.bind(repository)
+    repository.write = async record => {
+      await write(record)
+      if (record.tasks.at(-1)?.status === 'waiting-input') waitingSaved.resolve()
+      if (record.tasks.at(-1)?.status === 'failed') terminalSaved.resolve()
+    }
+    let closes = 0
+    adapter.events = async function* () {
+      const input = this.turns.at(-1)!
+      const identity = { taskId: input.taskId, epoch: input.epoch, workspace, runId: input.runId, nativeTurnId: 'native-turn' }
+      eventsStarted.resolve()
+      await ask.promise
+      yield { ...identity, kind: 'question', question: { taskId: input.taskId, epoch: input.epoch, workspace,
+        questionId: 'deadline-question', turnId: 'native-turn', purpose: 'clarification',
+        questions: [{ id: 'title', title: '确认要修改的标题', options: ['当前标题', '全部标题'], multiple: false }] } }
+      await finishEvents.promise
+    }
+    adapter.close = async () => { closes++; finishEvents.resolve() }
+    const harness = new LocalAgentHarness(repository, () => adapter)
+    const startedAt = Date.now(), deadlineAt = startedAt + 1_000
+    vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] })
+    vi.setSystemTime(startedAt)
+    try {
+      const request = generationRequestSchema.parse({ ...generation(workspace), execution: { version: 1, startedAt, deadlineAt } })
+      const id = await harness.generate(workspace, 'claude', request)
+      await eventsStarted.promise
+      await vi.advanceTimersByTimeAsync(600)
+      ask.resolve(); await waitingSaved.promise
+      const waiting = (await repository.list(workspace)).v2.find(record => record.id === id)!
+      expect(waiting.tasks[0]).toMatchObject({ status: 'waiting-input', execution: { startedAt, deadlineAt, turnCount: 1 } })
+      expect(waiting.events.at(-1)).toMatchObject({ kind: 'question', time: startedAt + 600 })
+      await vi.advanceTimersByTimeAsync(399)
+      expect(harness.running).toBe(true)
+      expect(closes).toBe(0)
+      await vi.advanceTimersByTimeAsync(1)
+      expect(closes).toBeGreaterThan(0)
+      await terminalSaved.promise
+      await harness.close()
+      const persisted = (await new LocalAgentRepository(directory).list(workspace)).v2.find(record => record.id === id)!
+      expect(persisted.tasks[0]).toMatchObject({ status: 'failed', committedResultIds: [], execution: { startedAt, deadlineAt, turnCount: 1 } })
+      expect(persisted.tasks[0]!.completion).toBeUndefined()
+      expect(persisted.hostResults).toEqual([])
+      expect(persisted.events.filter(event => event.kind === 'input-delivery')).toEqual([])
+      expect(persisted.events.filter(event => event.kind === 'turn-ended')).toEqual([
+        expect.objectContaining({ status: 'failed', time: deadlineAt, failure: { category: 'limit', message: expect.any(String) } }),
+      ])
+      await expect(harness.candidate(workspace, id)).rejects.toThrow('尚未成功结束')
+      const reopened = new LocalAgentHarness(new LocalAgentRepository(directory), () => new NativeAdapter())
+      try {
+        const loaded = await reopened.list(workspace), record = loaded.records.find(record => record.id === id)!
+        expect(record).toMatchObject({ status: 'failed', task: { status: 'failed', deadlineAt, committedStages: 0 } })
+        expect((await reopened.repository.list(workspace)).v2.find(value => value.id === id)).toEqual(persisted)
+        await expect(reopened.continue(workspace, id, generation(workspace))).rejects.toThrow('没有可续轮')
+      } finally { await reopened.close() }
+      expect(adapter.turns).toHaveLength(1)
+    } finally { ask.resolve(); finishEvents.resolve(); await harness.close(); vi.useRealTimers() }
+  })
+
   it('persists an identity returned by open before the native model emits any events', async () => {
     const { directory, workspace } = await fixture()
     let release!: () => void
@@ -136,6 +198,8 @@ describe('V2 Harness native lifecycle', () => {
     await expect.poll(() => harness.running).toBe(false)
     const stored = (await new LocalAgentRepository(directory).list(workspace)).v2.find(record => record.id === id)!
     expect(stored.externalSessionId).toBe('native-confirmed-session')
+    expect(stored.events.at(-1)).toMatchObject({ kind: 'turn-ended', nativeTurnId: 'native-turn' })
+    expect(new Set(stored.events.map(event => event.nativeTurnId))).toEqual(new Set(['native-turn']))
     expect(stored.events.at(-1)).toMatchObject({ kind: 'turn-ended', status: 'completed' })
 
     const second = new NativeAdapter()
@@ -172,14 +236,14 @@ describe('V2 Harness native lifecycle', () => {
       const adapter = new NativeAdapter(); adapters.push(adapter); return adapter
     })
     const preference = { model: 'selected', effort: 'high' }
-    const selected = await harness.configure('claude', preference)
+    const selected = await harness.configure('claude', preference, workspace)
     expect(selected.current.model).toBe('default')
     expect(selected.requestedConfiguration).toEqual(preference)
     const id = await harness.start(workspace, 'claude', 'hello')
     await expect.poll(() => harness.running).toBe(false)
     expect(adapters[1]!.configurations).toEqual([preference])
     expect(adapters[1]!.turns).toHaveLength(1)
-    expect(await harness.capabilities('claude')).toMatchObject({ current: { model: 'selected', effort: 'high' }, requestedConfiguration: null })
+    expect(await harness.capabilities('claude', { workspace })).toMatchObject({ current: { model: 'selected', effort: 'high' }, requestedConfiguration: null })
     await harness.resume(workspace, id, 'continue')
     await expect.poll(() => harness.running).toBe(false)
     expect(adapters[2]!.configurations).toEqual([preference])
@@ -228,7 +292,7 @@ describe('V2 Harness native lifecycle', () => {
         close: async () => { call.closed = true },
       }
     })
-    const pending = await harness.configure('opencode', { model: 'selected', effort: 'max' })
+    const pending = await harness.configure('opencode', { model: 'selected', effort: 'max' }, workspace)
     expect(pending.current).toMatchObject({ model: 'default', effort: null })
     expect(pending.requestedConfiguration).toEqual({ model: 'selected', effort: 'max' })
     expect(pending.models.find(model => model.id === 'selected')?.effort).toEqual({ kind: 'supported', values: ['none', 'low', 'max'], default: 'none' })
@@ -237,7 +301,7 @@ describe('V2 Harness native lifecycle', () => {
     const id = await harness.start(workspace, 'opencode', 'hello')
     await expect.poll(() => harness.running).toBe(false)
     expect(calls[2]?.configurations).toEqual([{ model: 'selected', effort: 'max' }])
-    expect((await harness.capabilities('opencode')).current).toMatchObject({ model: 'selected', effort: 'max' })
+    expect((await harness.capabilities('opencode', { workspace })).current).toMatchObject({ model: 'selected', effort: 'max' })
     expect((await harness.list(workspace)).records.find(record => record.id === id)?.status).toBe('completed')
     const resumed = await harness.resume(workspace, id, 'continue')
     await expect.poll(() => harness.running).toBe(false)
@@ -256,7 +320,7 @@ describe('V2 Harness native lifecycle', () => {
     await harness.configure('claude', { model: 'selected', effort: null })
     const id = await harness.start(workspace, 'claude', 'hello')
     await expect.poll(() => harness.running).toBe(false)
-    expect((await harness.capabilities('claude')).current).toMatchObject({ model: 'selected', effort: 'low' })
+    expect((await harness.capabilities('claude', { workspace })).current).toMatchObject({ model: 'selected', effort: 'low' })
     expect((await harness.list(workspace)).records.find(record => record.id === id)?.status).toBe('completed')
     await harness.close()
   })
@@ -597,6 +661,56 @@ describe('native input turn boundaries', () => {
 })
 
 describe('same native task host feedback', () => {
+  it.each(['delivered', 'missing'] as const)('allows one repair for a missing candidate declared by an edit marker, then handles %s delivery', async delivery => {
+    const { directory, workspace } = await fixture(), repository = new LocalAgentRepository(directory)
+    const adapters: FileNativeAdapter[] = []
+    const harness = new LocalAgentHarness(repository, (_id, request) => {
+      const correction = adapters.length > 0
+      const adapter = new FileNativeAdapter(async root => {
+        if (!correction || delivery === 'missing') return
+        const staged = JSON.parse(await fs.readFile(path.join(root, 'request.json'), 'utf8'))
+        await fs.writeFile(path.join(root, 'candidate.json'), JSON.stringify({ version: 2, requestId: staged.requestId,
+          summary: '修正候选交付', afterCommit: { version: 1, action: 'finish' },
+          steps: [{ id: 'title', tool: 'native.content', destination: 'd1', input: { operation: 'edit', text: '修改后' } }] }))
+      })
+      adapter.reply = `已生成候选，等待宿主检查。${GENERATION_RESULT_OPEN}${JSON.stringify({ version: 1, requestId: request!.requestId, kind: 'edit' })}${GENERATION_RESULT_CLOSE}`
+      adapters.push(adapter)
+      return adapter
+    })
+    let request = generation(workspace)
+    try {
+      const id = await harness.generate(workspace, 'claude', request)
+      await expect.poll(() => harness.running).toBe(false)
+      const missing = await harness.candidate(workspace, id)
+      if (missing.kind !== 'candidate-format-error') throw new Error('Expected a missing candidate delivery diagnosis')
+      expect(missing.failure).toMatchObject({ stage: 'candidate-parse', requestId: request.requestId })
+      await harness.hostResult(workspace, id, { requestId: request.requestId, status: 'rejected', summary: missing.finding, failure: missing.failure })
+      const before = (await repository.list(workspace)).v2[0]!
+      expect(before.tasks[0]!.execution!.formatRepairs).toBe(1)
+      expect(before.hostResults.flatMap(result => result.receipts)).toEqual([])
+      request = generation(workspace)
+      await harness.continue(workspace, id, request)
+      await expect.poll(() => harness.running).toBe(false)
+      const corrected = await harness.candidate(workspace, id)
+      expect(adapters[1]!.opens[0]!.externalSessionId).toBe(adapters[0]!.nativeIdentity)
+      expect(adapters[1]!.opens[0]!.candidateRoot).not.toBe(adapters[0]!.opens[0]!.candidateRoot)
+      const current = (await repository.list(workspace)).v2[0]!
+      expect(current.tasks[0]!.taskId).toBe(before.tasks[0]!.taskId)
+      expect(current.tasks[0]!.execution!.deadlineAt).toBe(before.tasks[0]!.execution!.deadlineAt)
+      expect(current.tasks[0]!.execution!.turnCount).toBe(2)
+      if (delivery === 'delivered') {
+        expect(corrected).toMatchObject({ kind: 'candidate', requestId: request.requestId })
+        expect(current.tasks[0]!.execution!.formatRepairs).toBe(1)
+      } else {
+        if (corrected.kind !== 'candidate-format-error') throw new Error('Expected another missing candidate diagnosis')
+        await harness.hostResult(workspace, id, { requestId: request.requestId, status: 'rejected', summary: corrected.finding, failure: corrected.failure })
+        expect((await repository.list(workspace)).v2[0]!.tasks[0]!.execution!.formatRepairs).toBe(2)
+        await expect(harness.continue(workspace, id, generation(workspace))).rejects.toThrow('预算已到或连续两轮没有进展')
+        expect(adapters).toHaveLength(2)
+      }
+    } finally { await harness.close() }
+  })
+
   it('keeps relative edits as one applied goal and permits completion on the actual feedback channel', async () => {
     const { directory, workspace } = await fixture()
     const repository = new LocalAgentRepository(directory), adapters: NativeAdapter[] = [], requests: GenerationRequest[] = []
@@ -668,7 +782,8 @@ describe('same native task host feedback', () => {
       await harness.hostResult(workspace, id, { requestId: request.requestId, candidateId: rejected.candidateId, status: 'rejected', summary: rejected.finding })
       const failedStage = (await repository.list(workspace)).v2[0]!
       expect(failedStage.tasks[0]!.execution).toMatchObject({ formatRepairs: 1, stagnantCandidates: 0 })
-      expect(failedStage.hostResults).toHaveLength(0)
+      expect(failedStage.hostResults.map(result => result.status)).toEqual(['rejected', 'rejected'])
+      expect(failedStage.hostResults.flatMap(result => result.receipts)).toEqual([])
       request = generation(workspace)
       await harness.continue(workspace, id, request)
       await expect.poll(() => harness.running).toBe(false)
@@ -685,17 +800,17 @@ describe('same native task host feedback', () => {
       const finished = (await repository.list(workspace)).v2[0]!
       expect(finished.tasks[0]!.status).toBe('completed')
       expect(finished.tasks[0]!.execution).toMatchObject({ turnCount: 4, formatRepairs: 1 })
-      expect(finished.hostResults).toHaveLength(1)
+      expect(finished.hostResults.filter(result => result.status === 'committed')).toHaveLength(1)
     } finally { await harness.close() }
   })
 
-  it('stops repeated rejected destinations even when candidate IDs change', async () => {
+  it('stops repeated rejected destinations even when candidate IDs and diagnostic summaries change', async () => {
     const { directory, workspace } = await fixture()
     const repository = new LocalAgentRepository(directory)
     const harness = new LocalAgentHarness(repository, (_id, request) => {
       const adapter = new NativeAdapter(), destination = structuredClone(request!.destinations[0]!)
       if (destination.kind === 'update') destination.target.authoringAddress = 'page/tile'
-      adapter.reply = `${GENERATION_OPEN}${JSON.stringify({ version: 1, requestId: request!.requestId, candidateId: randomUUID(), summary: '修改标题',
+      adapter.reply = `${GENERATION_OPEN}${JSON.stringify({ version: 1, requestId: request!.requestId, candidateId: randomUUID(), summary: `修改标题 ${randomUUID()}`,
         steps: [{ id: randomUUID(), tool: 'native.content', carrier: 'native', destination, input: { label: '修改后' } }] })}${GENERATION_CLOSE}`
       return adapter
     })
@@ -706,7 +821,7 @@ describe('same native task host feedback', () => {
         await expect.poll(() => harness.running).toBe(false)
         const rejected = await harness.candidate(workspace, id)
         if (rejected.kind !== 'candidate-rejected') throw new Error('Expected semantic rejection')
-        await harness.hostResult(workspace, id, { requestId: request.requestId, candidateId: rejected.candidateId, status: 'rejected', summary: rejected.finding })
+        await harness.hostResult(workspace, id, { requestId: request.requestId, candidateId: rejected.candidateId, status: 'rejected', summary: `${rejected.finding} 第${index + 1}次说明` })
         if (index < 2) { request = generation(workspace); await harness.continue(workspace, id, request) }
       }
       expect((await repository.list(workspace)).v2[0]!.tasks[0]!.execution).toMatchObject({ formatRepairs: 0, stagnantCandidates: 2 })
@@ -791,7 +906,8 @@ describe('same native task host feedback', () => {
       beforeRevision: 1, afterRevision: 2, summary: '当前任务已创建新页' }, receipt)
     const stored = (await repository.list(workspace)).v2[0]!
     const oldTaskId = randomUUID(), oldObservationId = randomUUID(), oldRequestId = randomUUID(), oldCandidateId = randomUUID(), oldResultId = randomUUID()
-    stored.tasks.unshift({ ...stored.tasks[0]!, taskId: oldTaskId, status: 'completed', observationId: oldObservationId, committedResultIds: [oldResultId] })
+    stored.tasks.unshift({ ...stored.tasks[0]!, taskId: oldTaskId, status: 'completed', observationId: oldObservationId, committedResultIds: [oldResultId],
+      execution: stored.tasks[0]!.execution ? { ...stored.tasks[0]!.execution, timing: undefined } : undefined })
     stored.observations.unshift({ ...stored.observations[0]!, taskId: oldTaskId, observationId: oldObservationId })
     stored.hostResults.unshift({ ...stored.hostResults[0]!, taskId: oldTaskId, observationId: oldObservationId, requestId: oldRequestId,
       candidateId: oldCandidateId, resultId: oldResultId, receipts: [{ ...receipt, requestId: oldRequestId, candidateId: oldCandidateId,
@@ -861,5 +977,144 @@ describe('same native task host feedback', () => {
     await expect.poll(() => harness.running).toBe(false)
     await expect(harness.candidate(workspace, id)).rejects.toThrow('没有工程修改授权')
     expect((await harness.list(workspace)).records[0]!.task?.intent).toBe('discuss')
+  })
+})
+
+
+describe('short-path durable finish and recovery', () => {
+  async function finishFixture(short = false) {
+    const { directory, workspace } = await fixture()
+    const repository = new LocalAgentRepository(directory), adapters: NativeAdapter[] = []
+    const harness = new LocalAgentHarness(repository, (_id, request) => {
+      const adapter = new NativeAdapter()
+      if (request) adapter.reply = `${GENERATION_OPEN}${JSON.stringify({ version: short ? 2 : 1, requestId: request.requestId,
+        ...(short ? {} : { candidateId: randomUUID() }), summary: '目标已完成', afterCommit: { version: 1, action: 'finish' },
+        steps: [{ id: 'title', tool: 'native.content', ...(short ? {} : { carrier: 'native' }), destination: short ? 'd1' : request.destinations[0], input: {} }] })}${GENERATION_CLOSE}`
+      adapters.push(adapter); return adapter
+    })
+    const request = generation(workspace)
+    const id = await harness.generate(workspace, 'claude', request)
+    await expect.poll(() => harness.running).toBe(false)
+    const candidate = await harness.candidate(workspace, id)
+    if (candidate.kind !== 'candidate') throw new Error('Expected candidate')
+    const receipt: GenerationCommitReceipt = { version: 1, workspace, requestId: request.requestId, candidateId: candidate.candidate.candidateId,
+      status: 'committed', beforeRevision: 1, afterRevision: 2,
+      affected: [{ id: 'title', operation: 'updated', ownerKey: 'scene:page', authoringAddress: 'page/title' }], resources: { assetIds: [], packageIds: [] } }
+    const result = { requestId: request.requestId, candidateId: receipt.candidateId, status: 'committed' as const,
+      summary: '已应用目标修改', beforeRevision: 1, afterRevision: 2, afterCommit: { version: 1 as const, action: 'finish' as const } }
+    return { directory, repository, workspace, harness, request, id, candidate, receipt, result, adapters }
+  }
+  it('allocates one short candidate identity and durably finishes on the exact host receipt without a new model turn', async () => {
+    const f = await finishFixture(true)
+    try {
+      expect(await f.harness.candidate(f.workspace, f.id)).toEqual(f.candidate)
+      const response = await f.harness.hostResult(f.workspace, f.id, f.result, f.receipt)
+      expect(response.task).toMatchObject({ status: 'completed', completion: { outcome: 'modified' }, receiptDelivery: 'pending' })
+      expect(f.adapters).toHaveLength(1)
+      const reopened = new LocalAgentHarness(new LocalAgentRepository(f.directory), () => new NativeAdapter())
+      expect((await reopened.list(f.workspace)).records[0]).toMatchObject({ status: 'completed', task: { status: 'completed' }, hostResult: { afterCommit: { action: 'finish' } } })
+      await expect(f.harness.continue(f.workspace, f.id, generation(f.workspace, 2))).rejects.toThrow('没有可续轮')
+    } finally { await f.harness.close() }
+  })
+  it('durably finishes on a formal unchanged receipt and reopens without a revision or second native turn', async () => {
+    const f = await finishFixture(true), reopenedAdapters: NativeAdapter[] = []
+    const receipt: GenerationCommitReceipt = { ...f.receipt, status: 'unchanged', afterRevision: 1, affected: [] }
+    const result = { ...f.result, status: 'unchanged' as const, afterRevision: 1, summary: '正式命令确认当前目标无需修改' }
+    const reopened = new LocalAgentHarness(new LocalAgentRepository(f.directory), () => {
+      const adapter = new NativeAdapter(); reopenedAdapters.push(adapter); return adapter
+    })
+    try {
+      const response = await f.harness.hostResult(f.workspace, f.id, result, receipt)
+      expect(response).toMatchObject({ status: 'completed', task: { status: 'completed', committedStages: 0,
+        completion: { outcome: 'unchanged' } }, hostResult: result })
+      const persisted = (await new LocalAgentRepository(f.directory).list(f.workspace)).v2.find(record => record.id === f.id)!
+      expect(persisted.hostResults).toHaveLength(1)
+      expect(persisted.hostResults[0]).toMatchObject({ status: 'unchanged', beforeRevision: 1, afterRevision: 1,
+        receipts: [receipt], afterCommit: { action: 'finish' }, receiptDelivery: 'pending' })
+      expect(persisted.tasks[0]!.completion?.resultId).toBe(persisted.hostResults[0]!.resultId)
+      expect(persisted.tasks[0]!.committedResultIds).toEqual([])
+      expect(persisted.tasks[0]!.execution!.turnCount).toBe(1)
+      await f.harness.close()
+      const loaded = await reopened.list(f.workspace), record = loaded.records.find(value => value.id === f.id)!
+      expect(loaded.damaged).toEqual([])
+      expect(record.task).toEqual(response.task)
+      expect(record.hostResult).toEqual(response.hostResult)
+      expect((await reopened.repository.list(f.workspace)).v2.find(value => value.id === f.id)).toEqual(persisted)
+      await expect(reopened.continue(f.workspace, f.id, generation(f.workspace))).rejects.toThrow('没有可续轮')
+      expect(f.adapters).toHaveLength(1)
+      expect(f.adapters[0]!.turns).toHaveLength(1)
+      expect(reopenedAdapters).toEqual([])
+    } finally { await reopened.close(); await f.harness.close() }
+  })
+  it.each(['canonical', 'display'] as const)('retries an uncertain %s write without losing or duplicating a real finish receipt', async stage => {
+    const f = await finishFixture()
+    const key = stage === 'canonical' ? 'write' : 'writeDisplay'
+    const original = f.repository[key].bind(f.repository)
+    let fail = true
+    Object.assign(f.repository, { [key]: async (...args: unknown[]) => { if (fail) throw new Error('disk unavailable'); return Reflect.apply(original, null, args) } })
+    try {
+      await expect(f.harness.hostResult(f.workspace, f.id, f.result, f.receipt)).rejects.toThrow('disk unavailable')
+      await expect(f.harness.candidate(f.workspace, f.id)).rejects.toThrow('重试保存回执')
+      expect((await f.harness.list(f.workspace)).records[0]!.task).toMatchObject({ status: 'completed' })
+      fail = false
+      await f.harness.hostResult(f.workspace, f.id, f.result, f.receipt)
+      const stored = (await new LocalAgentRepository(f.directory).list(f.workspace)).v2[0]!
+      expect(stored.hostResults).toHaveLength(1)
+      expect(stored.hostResults[0]!.receipts).toEqual([f.receipt])
+      expect(stored.tasks[0]!.completion?.resultId).toBe(stored.hostResults[0]!.resultId)
+      expect((await f.harness.list(f.workspace)).damaged).toEqual([])
+    } finally { fail = false; await f.harness.close() }
+  })
+  it('injects pending formal receipts only on the next real native request and marks delivery after its start acknowledgement', async () => {
+    const f = await finishFixture()
+    await f.harness.hostResult(f.workspace, f.id, f.result, f.receipt)
+    const ack = deferred<void>(), adapter = new NativeAdapter(), reopened = new LocalAgentHarness(new LocalAgentRepository(f.directory), () => adapter)
+    const original = adapter.startTurn.bind(adapter)
+    adapter.startTurn = async input => { const value = await original(input); await ack.promise; return value }
+    try {
+      const id = await reopened.resume(f.workspace, f.id, '现在解释这次修改')
+      await expect.poll(() => adapter.turns.length).toBe(1)
+      expect(adapter.turns[0]!.text).toContain(f.receipt.candidateId)
+      expect(adapter.turns[0]!.text).toContain('修改已经应用，请勿重复执行')
+      expect((await f.repository.list(f.workspace)).v2.find(record => record.id === f.id)!.hostResults[0]!.receiptDelivery).toBe('pending')
+      ack.resolve(); await expect.poll(() => reopened.running).toBe(false)
+      expect((await f.repository.list(f.workspace)).v2.find(record => record.id === f.id)!.hostResults[0]!.receiptDelivery).toBe('delivered')
+      expect((await reopened.list(f.workspace)).records.find(record => record.id === id)!.status).toBe('completed')
+    } finally { ack.resolve(); await reopened.close(); await f.harness.close() }
+  })
+  it('keeps undelivered receipts pending when a resumed native turn rejects start', async () => {
+    const f = await finishFixture()
+    await f.harness.hostResult(f.workspace, f.id, f.result, f.receipt)
+    const adapter = new NativeAdapter()
+    adapter.startTurn = async () => { throw new Error('native start rejected') }
+    const reopened = new LocalAgentHarness(new LocalAgentRepository(f.directory), () => adapter)
+    try {
+      await reopened.resume(f.workspace, f.id, '继续讨论')
+      await expect.poll(() => reopened.running).toBe(false)
+      expect((await f.repository.list(f.workspace)).v2.find(record => record.id === f.id)!.hostResults[0]!.receiptDelivery).toBe('pending')
+    } finally { await reopened.close(); await f.harness.close() }
+  })
+  it('reopens an uncommitted preview as unresolved instead of inventing a commit or replaying its candidate', async () => {
+    const f = await finishFixture()
+    try {
+      await f.harness.hostResult(f.workspace, f.id, { requestId: f.request.requestId, candidateId: f.receipt.candidateId, status: 'checked', summary: '仅检查通过' })
+      const reopened = new LocalAgentHarness(new LocalAgentRepository(f.directory), () => new NativeAdapter())
+      const record = (await reopened.list(f.workspace)).records[0]!
+      expect(record).toMatchObject({ status: 'failed', task: { status: 'failed' } })
+      expect(record.task?.completion).toBeUndefined()
+      expect((await f.repository.list(f.workspace)).v2[0]!.hostResults.flatMap(result => result.receipts)).toEqual([])
+      await expect(reopened.candidate(f.workspace, f.id)).rejects.toThrow('尚未成功结束')
+    } finally { await f.harness.close() }
+  })
+  it('records structured prepare failures with their original path and target without declaring completion', async () => {
+    const f = await finishFixture()
+    try {
+      const failure = { version: 1 as const, stage: 'prepare' as const, requestId: f.request.requestId, candidateId: f.receipt.candidateId,
+        stepId: 'title', tool: 'native.content', destination: f.request.destinations[0]!, diagnostics: [{ code: 'invalid-font', message: 'Font unavailable', path: ['steps', 0, 'input', 'font'] }], assetIds: [], packageIds: [] }
+      await f.harness.hostResult(f.workspace, f.id, { requestId: f.request.requestId, candidateId: f.receipt.candidateId, status: 'rejected', summary: '准备失败', failure })
+      const result = (await f.repository.list(f.workspace)).v2[0]!.hostResults[0]!
+      expect(result.failure).toEqual(failure); expect(result.diagnostics).toEqual(failure.diagnostics)
+      expect(result.receipts).toEqual([]); expect(result.afterCommit).toBeUndefined()
+    } finally { await f.harness.close() }
   })
 })

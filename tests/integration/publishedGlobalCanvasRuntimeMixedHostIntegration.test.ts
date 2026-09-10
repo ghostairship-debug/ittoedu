@@ -321,6 +321,16 @@ function runtimeButton(inner: HTMLElement): HTMLButtonElement | null {
   return null
 }
 
+function expectDomRuntimePointerPlane(wrapper: HTMLElement): void {
+  // DOM-only Runtime leaves empty wrapper space available to lower layers;
+  // its actual controls explicitly receive pointer input.
+  expect(wrapper.dataset.publishedGlobalRuntimePointerPlane).toBe('false')
+  expect(wrapper.style.pointerEvents).toBe('none')
+  const button = runtimeButton(wrapper)
+  expect(button).not.toBeNull()
+  expect(button!.style.pointerEvents).toBe('auto')
+}
+
 afterEach(async () => {
   await Promise.all(sessions.splice(0).map((session) => session.destroy()))
   document.body.replaceChildren()
@@ -425,12 +435,17 @@ describe('Published V2 session-global canvas-runtime API 2 ownership', () => {
       await vi.waitFor(() => {
         expect(wrapper.dataset.interactionVisibility).toBe('visible')
         expect(wrapper.style.visibility).toBe('visible')
-        expect(wrapper.style.pointerEvents).toBe('auto')
+        expectDomRuntimePointerPlane(wrapper)
         expect(hitNoneWrapper.dataset.interactionVisibility).toBe('visible')
         expect(hitNoneWrapper.style.pointerEvents).toBe('none')
         expect(failed.dataset.interactionVisibility).toBe('visible')
         expect(failed.style.pointerEvents).toBe('none')
       })
+
+      const button = runtimeButton(wrapper)!
+      expect(button.textContent).toBe(`global:${index}`)
+      button.click()
+      expect(button.textContent).toBe(`global:${index + 1}`)
 
       globalWrapper(container, surfaceId, 'global-runtime-exit').click()
       await vi.waitFor(() => {
@@ -448,7 +463,7 @@ describe('Published V2 session-global canvas-runtime API 2 ownership', () => {
     const spatialSurfaceId = session.navigator.current!.surfaceId
     const spatialWrapper = globalWrapper(container, spatialSurfaceId, healthy.item.layerItemId)
     globalWrapper(container, spatialSurfaceId, 'global-runtime-enter').click()
-    await vi.waitFor(() => expect(spatialWrapper.style.pointerEvents).toBe('auto'))
+    await vi.waitFor(() => expectDomRuntimePointerPlane(spatialWrapper))
     expect(globalWrapper(container, spatialSurfaceId, hitNone.item.layerItemId)
       .style.pointerEvents).toBe('none')
     expect(globalWrapper(container, spatialSurfaceId, 'global-api2-create-failure')
@@ -529,7 +544,7 @@ describe('Published V2 session-global canvas-runtime API 2 ownership', () => {
       session.navigator.current!.locationId,
       'global-api2-healthy',
     )))
-    expect(slideWrapper.style.pointerEvents).toBe('auto')
+    expectDomRuntimePointerPlane(slideWrapper)
     expect(slideWrapper.style.padding).toBe('')
     expect(slideWrapper.querySelector('[data-runtime-fallback="true"]')).toBeNull()
     expect(slideWrapper.dataset.globalRuntimeState).toBe('playback')
@@ -569,7 +584,7 @@ describe('Published V2 session-global canvas-runtime API 2 ownership', () => {
     const restoredSlideWrapper = globalWrapper(container, slideSurfaceId, 'global-api2-healthy')
     expect(restoredSlideWrapper.firstElementChild).toBe(inner)
     expect(restoredSlideWrapper.dataset.globalRuntimeState).toBe('playback')
-    expect(restoredSlideWrapper.style.pointerEvents).toBe('auto')
+    expectDomRuntimePointerPlane(restoredSlideWrapper)
     expect(runtimeButton(inner)).toBe(button)
     expect(globalWrapper(container, failedTargetSurfaceId, 'global-api2-healthy')
       .querySelector('[data-published-global-runtime-inner]')).toBeNull()
@@ -589,7 +604,7 @@ describe('Published V2 session-global canvas-runtime API 2 ownership', () => {
       'data-flow-layer-plane',
       'global-underlay',
     )
-    expect(flowWrapper.style.pointerEvents).toBe('auto')
+    expectDomRuntimePointerPlane(flowWrapper)
     expect(runtimeButton(inner)).toBe(button)
 
     await vi.waitFor(() => {
@@ -614,6 +629,7 @@ describe('Published V2 session-global canvas-runtime API 2 ownership', () => {
       'global-api2-healthy',
     )))
     expect(spatialWrapper.parentElement?.dataset.globalPlane).toBe('underlay')
+    expectDomRuntimePointerPlane(spatialWrapper)
     expect(runtimeButton(inner)).toBe(button)
 
     await session.goToLocation(fixture.slideLocationIds[0]!)

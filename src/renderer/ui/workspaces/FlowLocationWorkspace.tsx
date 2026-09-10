@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState, type CSSProperties } from 'react'
 import { MousePointer2, Play } from 'lucide-react'
 import type { ComponentPackageData } from '../../../shared/componentTypes'
 import type { AssetMeta } from '../../../shared/contracts/media-v1'
@@ -16,6 +16,7 @@ import {
   enqueueSerial,
 } from '../serializedSessionMount'
 import { FlowWorkspace } from '../FlowWorkspace'
+import { FLOW_WORKSPACE_HEADER_HEIGHT } from '../FlowBlockContextToolbar'
 import type { FlowCurrentSessionCommandPort } from '../flow/useFlowTextAuthoringController'
 
 export type FlowCanvasMode = 'edit' | 'run'
@@ -55,6 +56,7 @@ export function FlowLocationWorkspace({
   onCanvasModeChange,
   onMountTryRun,
 }: FlowLocationWorkspaceProps) {
+  const [toolbarContainer, setToolbarContainer] = useState<HTMLDivElement | null>(null)
   const tryRunRef = useRef<HTMLDivElement>(null)
   const tryRunMountChainRef = useRef(Promise.resolve())
   const hostRef = useRef<FlowTryRunSession | null>(null)
@@ -94,7 +96,9 @@ export function FlowLocationWorkspace({
       className={`workspace workspace--${canvasMode} workspace--flow`}
       data-testid="flow-workspace-shell"
       data-flow-not-slide-stage="true"
+      style={{ '--flow-workspace-header-height': `${FLOW_WORKSPACE_HEADER_HEIGHT}px` } as CSSProperties}
     >
+      <div ref={setToolbarContainer} className="flow-workspace-toolbar-host" data-testid="flow-workspace-toolbar-host" />
       <div className="canvas-mode-switch" role="group" aria-label="画布模式">
         <button
           type="button"
@@ -119,6 +123,7 @@ export function FlowLocationWorkspace({
       <div className="canvas-viewport">
         {canvasMode === 'edit' ? (
           <FlowWorkspace
+            toolbarContainer={toolbarContainer}
             view={view}
             sessionToken={sessionToken}
             assets={assets}

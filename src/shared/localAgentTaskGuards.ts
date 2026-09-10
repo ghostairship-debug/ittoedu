@@ -1,5 +1,5 @@
 import { workspaceIdentityKey } from './workspaceIdentity'
-import { generationRequestSchema, type GenerationRequest } from './generationContract'
+import { generationRequestSchema, type GenerationRequest, type GenerationFailure } from './generationContract'
 import { aiHostResultSchema, aiObservationSchema, aiProposalSchema, aiTaskSchema, type AiHostResult, type AiObservation, type AiProposal, type AiTask } from './localAgentTaskContract'
 
 // Values have already passed strict JSON schemas. Object insertion order is not identity.
@@ -15,12 +15,15 @@ function requireSameTask(task: AiTask, value: { taskId: string; epoch: number; w
 }
 
 /** Only a current candidate's own destination can be repaired by the native task. */
-export class AiCandidateScopeError extends Error {}
+export class AiCandidateScopeError extends Error {
+  constructor(message: string, readonly failure?: GenerationFailure) { super(message) }
+}
 
 /** Validate before prepare and again synchronously inside the existing commit lease. No writer. */
 export function assertAiProposalCurrent(rawTask: AiTask, rawObservation: AiObservation, rawRequest: GenerationRequest, rawProposal: AiProposal): void {
   const task = aiTaskSchema.parse(rawTask), observation = aiObservationSchema.parse(rawObservation)
   const request = generationRequestSchema.parse(rawRequest), proposal = aiProposalSchema.parse(rawProposal)
+  if (task.execution && Date.now() >= task.execution.deadlineAt) throw new Error('expired-task：当前任务的执行期限已到，需以新观察重新准备')
   if (task.intent !== 'edit') throw new Error('read-only-intent：讨论和计划不能提交工程候选')
   if (observation.source === 'generation-snapshot' && task.applyPolicy !== 'preview') throw new Error('incomplete-observation：旧生成快照只能进入原有预览后手动应用路径')
   if (!['running', 'checking', 'awaiting-apply', 'committing'].includes(task.status)) throw new Error('inactive-task：任务不在可接受候选状态')
@@ -32,7 +35,12 @@ export function assertAiProposalCurrent(rawTask: AiTask, rawObservation: AiObser
   if (request.destinations.some(destination => !task.writeDestinations.some(allowed => sameJson(destination, allowed)))) throw new Error('scope-mismatch：请求超出当前写入授权')
   for (const step of proposal.candidate.steps) {
     if ('stepId' in step.destination) continue // Existing generation validation resolves prior results.
-    if (!request.destinations.some(destination => sameJson(step.destination, destination))) throw new AiCandidateScopeError('scope-mismatch：候选修改未经授权的目标；请原样使用 request.destinations 中的完整目标，包括 authoringAddress 和所有标识')
+    if (!request.destinations.some(destination => sameJson(step.destination, destination))) {
+      const message = 'scope-mismatch：候选修改未经授权的目标；请使用当前目标别名，或原样复制 request.destinations 的完整目标'
+      throw new AiCandidateScopeError(message, { version: 1, stage: 'candidate-parse', requestId: request.requestId,
+        candidateId: proposal.candidateId, stepId: step.id, tool: step.tool, destination: step.destination,
+        diagnostics: [{ code: 'scope-mismatch', message, path: ['steps', proposal.candidate.steps.indexOf(step), 'destination'] }], assetIds: [], packageIds: [] })
+    }
   }
 }
 
@@ -59,5 +67,9 @@ export function acceptAiHostResult(input: AiTask, proposal: AiProposal, rawResul
   if (task.observationId !== parsedProposal.observationId) throw new Error('stale-observation：结果对应观察已经失效')
   if (task.intent !== 'edit' || !['checking', 'awaiting-apply', 'committing', 'feeding-back'].includes(task.status)) throw new Error('inactive-task：当前任务不能接收新的候选结果')
   if (result.status === 'committed' && task.status !== 'committing') throw new Error('missing-commit-lease：只有提交阶段能接收新的实际写入结果')
-  return { task: aiTaskSchema.parse({ ...task, status: 'feeding-back', committedResultIds: result.status === 'committed' ? [...task.committedResultIds, result.resultId] : task.committedResultIds }), duplicate: false }
+  if (result.afterCommit?.action === 'finish' && parsedProposal.candidate.afterCommit?.action !== 'finish') throw new Error('result-mismatch：候选没有声明提交后完成')
+  const complete = result.afterCommit?.action === 'finish' && ['committed', 'unchanged'].includes(result.status)
+  return { task: aiTaskSchema.parse({ ...task, status: complete ? 'completed' : 'feeding-back',
+    ...(complete ? { completion: { version: 1, resultId: result.resultId, outcome: result.status === 'committed' ? 'modified' : 'unchanged' } } : {}),
+    committedResultIds: result.status === 'committed' ? [...task.committedResultIds, result.resultId] : task.committedResultIds }), duplicate: false }
 }

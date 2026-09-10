@@ -3,6 +3,12 @@
     "default": "native"
   },
   "description": "导入素材依赖，使用 global owner + create parent:owner append。base64 为真实媒体字节。新 asset ID 从该步骤回执的 asset-id 引用获得，不能自行指定。",
+  "examples": [
+    {
+      "bindings": "values 的 kind/filename/mimeType/base64 来自当前观察、已读资源或用户要求，值须满足本卡 inputSchema；destination 原样复制当前目标。",
+      "code": "const input={\"kind\":values[\"kind\"],\"filename\":values[\"filename\"],\"mimeType\":values[\"mimeType\"],\"base64\":values[\"base64\"]}; const receipt=await session.execute(\"asset.media.import\",input,destination);"
+    }
+  ],
   "inputSchema": {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "additionalProperties": false,
@@ -40,12 +46,23 @@
     ],
     "type": "object"
   },
+  "invocation": "Builder: await session.execute(tool,input,destination)。input 遵循本卡完整 Schema；destination 原样使用当前 observe/createScope 的目标；只以 committed receipt 判定成功。",
   "name": "asset.media.import",
+  "recovery": "invalid-input: 按本卡 Schema 修正字段；revision-conflict: 重新 observe 后复制新 target 和源码基线；tool-failed: 读取 diagnostics 修复所指输入/资源/宿主条件，失败不代表已提交。",
   "support": "conditional-on-input-target-resources-and-host",
   "supportedScopes": [
     "slide:global",
     "flow:global",
     "spatial-2d:global"
+  ],
+  "variants": [
+    {
+      "scopes": [
+        "slide:global",
+        "flow:global",
+        "spatial-2d:global"
+      ]
+    }
   ],
   "version": 1
 }

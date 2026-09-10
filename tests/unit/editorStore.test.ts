@@ -438,6 +438,13 @@ describe('Spatial canonical property updates', () => {
     expect(useEditorStore.getState().spatialSession).toBe(beforeNoop)
     expect(useEditorStore.getState().spatialSession?.history).toBe(beforeNoop.history)
 
+    useEditorStore.getState().updateNodes([{
+      nodeId: second.id,
+      patch: { width: second.width, style: { ...second.style } },
+    }])
+    expect(useEditorStore.getState().spatialSession).toBe(beforeNoop)
+    expect(useEditorStore.getState().spatialSession?.history.present).toBe(beforeNoop.history.present)
+
     useEditorStore.getState().updateNode(first.id, { locked: true })
     const beforeLocked = useEditorStore.getState().spatialSession!
     const secondOpacity = beforeLocked.history.present.surfaces

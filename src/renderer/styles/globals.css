@@ -5918,14 +5918,57 @@ button:disabled {
 }
 
 .workspace--flow {
+  container-type: inline-size;
+  container-name: flow-workspace;
+  --flow-workspace-mode-row-height: 36px;
   place-items: stretch;
   background: #eef1f6;
 }
 
+.flow-workspace-toolbar-host {
+  position: absolute;
+  top: 6px;
+  left: 9px;
+  right: 260px;
+  height: calc(var(--flow-workspace-header-height) - 12px);
+  min-width: 0;
+  z-index: 7;
+}
+
+.workspace--flow .canvas-label {
+  top: 42px;
+  left: auto;
+  right: 9px;
+  max-width: 240px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  transform: none;
+}
+
 .workspace--flow .canvas-viewport {
+  top: var(--flow-workspace-header-height);
   overflow: hidden;
   background: #eef1f6;
   pointer-events: auto;
+}
+
+@container flow-workspace (max-width: 560px) {
+  .flow-workspace-toolbar-host {
+    top: calc(var(--flow-workspace-mode-row-height) + 6px);
+    right: 9px;
+  }
+
+  .workspace--flow .canvas-viewport {
+    top: calc(var(--flow-workspace-header-height) + var(--flow-workspace-mode-row-height));
+  }
+
+  .workspace--flow .canvas-label {
+    top: 9px;
+    left: 9px;
+    right: auto;
+    max-width: calc(100% - 270px);
+  }
 }
 
 .workspace--flow .flow-workspace {

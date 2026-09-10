@@ -28,9 +28,19 @@ export function generationCapabilityContext(pages: readonly unknown[], purpose: 
       }
     }
     if (node.kind === 'component' || node.type === 'component') add('component.configure')
+    if (node.type === 'media' && node.mediaKind === 'image') add('asset.image.transform')
     if (node.kind === 'runtime') { add('runtime.configure'); add('runtime.source') }
     if (node.surfaceType === 'flow') add('flow.content')
     Object.values(node).forEach(visit)
+  }
+  // Selection is an observation focus, not a narrower authorization or a new
+  // page order. Expand its necessary contracts before unrelated sibling cards.
+  for (const page of pages) {
+    if (!page || typeof page !== 'object') continue
+    const { items, blocks } = page as { items?: unknown[]; blocks?: unknown[] }
+    for (const row of [...(items ?? []), ...(blocks ?? [])]) {
+      if (row && typeof row === 'object' && (row as { selected?: boolean }).selected === true) visit(row)
+    }
   }
   pages.forEach(visit)
   if (purpose !== 'local-edit' || !desired.size) add('native.content', 'insert', 'text')
@@ -40,9 +50,16 @@ export function generationCapabilityContext(pages: readonly unknown[], purpose: 
     const selection = Object.fromEntries(Object.entries(options).filter(([, value]) => value !== undefined))
     const complete = readCourseAgentCapability(generationCapabilityData, id, selection)
     // Search vocabulary is useful in discovery, but adds no tool input semantics.
-    const { keywords: _keywords, ...entry } = complete.entry
+    const { keywords: _keywords, variants: _variants, ...entry } = complete.entry
     const card = { ...complete, entry }
-    if ('content' in card && card.content?.description === entry.summary) delete card.content.description
+    if ('content' in card) {
+      if (card.content?.description === entry.summary) delete card.content.description
+      // The selected strict schema and entry.scopes already express these facts.
+      // Keep invocation, examples, recovery and the complete reference closure.
+      if (Array.isArray(card.content.variants) && card.content.variants.every((variant: { scopes: string[]; target?: string }) =>
+        !variant.target && JSON.stringify(variant.scopes) === JSON.stringify(entry.scopes))) delete card.content.variants
+      if (JSON.stringify(card.content.supportedScopes) === JSON.stringify(entry.scopes)) delete card.content.supportedScopes
+    }
     if (new TextEncoder().encode(JSON.stringify([...cards, card])).byteLength <= 5_200) cards.push(card)
     else deferred.push({ id, ...options, path: `capabilities/${card.entry.path}` })
   }

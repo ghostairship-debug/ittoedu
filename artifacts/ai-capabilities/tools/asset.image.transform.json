@@ -3,6 +3,12 @@
     "default": "native"
   },
   "description": "读取 sourceAssetId 的原始图片字节，经确定性像素变换后只替换 update 目标图片实例（Native image 或 Flow media image）。保留未选共享实例和源资产；保留 alpha，输出无损 PNG。replace-color 必须 sourceColor，默认 targetColor=#22c55e、RGB 欧式容差=32；region 与逐行 0/1 mask 使用当前图片像素坐标。crop/resize 使用整数像素，resize 仅 nearest-neighbor，最多 1600 万像素。仅支持静态 8 位 PNG/JPEG/WebP；不支持语义擦除、重绘、动画或 16 位精度转换。模型只输出意图，禁止生成替代 base64 或纯色遮盖。",
+  "examples": [
+    {
+      "bindings": "sourceAssetId 来自当前选中图片；sourceColor 为观察原图后选定的待替换颜色；target 复制当前图片的 update target。",
+      "code": "const receipt=await session.execute(\"asset.image.transform\",{sourceAssetId,operations:[{kind:\"replace-color\",sourceColor,targetColor:\"#22c55e\"}]},{kind:\"update\",target});"
+    }
+  ],
   "inputSchema": {
     "$defs": {
       "__schema0": {
@@ -186,7 +192,9 @@
     ],
     "type": "object"
   },
+  "invocation": "Builder: await session.execute(tool,input,destination)。input 遵循本卡完整 Schema；destination 原样使用当前 observe/createScope 的目标；只以 committed receipt 判定成功。",
   "name": "asset.image.transform",
+  "recovery": "invalid-input: 按本卡 Schema 修正字段；revision-conflict: 重新 observe 后复制新 target 和源码基线；tool-failed: 读取 diagnostics 修复所指输入/资源/宿主条件，失败不代表已提交。",
   "support": "conditional-on-input-target-resources-and-host",
   "supportedScopes": [
     "slide:scene",
@@ -195,6 +203,18 @@
     "flow:global",
     "spatial-2d:world",
     "spatial-2d:global"
+  ],
+  "variants": [
+    {
+      "scopes": [
+        "slide:scene",
+        "slide:global",
+        "flow:surface",
+        "flow:global",
+        "spatial-2d:world",
+        "spatial-2d:global"
+      ]
+    }
   ],
   "version": 1
 }

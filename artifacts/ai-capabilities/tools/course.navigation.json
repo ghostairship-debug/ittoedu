@@ -3,6 +3,28 @@
     "default": "native"
   },
   "description": "add-surface 使用 global owner + create parent:course-locations append，创建 Slide/Flow/Spatial 表面及起始页。后续内容用 created-scope 指向返回位置的默认 owner。其余操作用当前课程位置的正式 update target。",
+  "examples": [
+    {
+      "bindings": "values 的 surfaceType 来自当前观察、已读资源或用户要求，值须满足本卡 inputSchema；destination 原样复制当前目标。",
+      "code": "const input={\"operation\":\"add-surface\",\"surfaceType\":values[\"surfaceType\"]}; const receipt=await session.execute(\"course.navigation\",input,destination);",
+      "operation": "add-surface"
+    },
+    {
+      "bindings": "values 的 title 来自当前观察、已读资源或用户要求，值须满足本卡 inputSchema；destination 原样复制当前目标。",
+      "code": "const input={\"operation\":\"rename-location\",\"title\":values[\"title\"]}; const receipt=await session.execute(\"course.navigation\",input,destination);",
+      "operation": "rename-location"
+    },
+    {
+      "bindings": "values 的  来自当前观察、已读资源或用户要求，值须满足本卡 inputSchema；destination 原样复制当前目标。",
+      "code": "const input={\"operation\":\"delete-location\"}; const receipt=await session.execute(\"course.navigation\",input,destination);",
+      "operation": "delete-location"
+    },
+    {
+      "bindings": "values 的 surfaceIds 来自当前观察、已读资源或用户要求，值须满足本卡 inputSchema；destination 原样复制当前目标。",
+      "code": "const input={\"operation\":\"reorder-surfaces\",\"surfaceIds\":values[\"surfaceIds\"]}; const receipt=await session.execute(\"course.navigation\",input,destination);",
+      "operation": "reorder-surfaces"
+    }
+  ],
   "inputSchema": {
     "$defs": {
       "__schema0": {
@@ -95,12 +117,48 @@
       }
     ]
   },
+  "invocation": "Builder: await session.execute(tool,input,destination)。input 遵循本卡完整 Schema；destination 原样使用当前 observe/createScope 的目标；只以 committed receipt 判定成功。",
   "name": "course.navigation",
+  "recovery": "invalid-input: 按本卡 Schema 修正字段；revision-conflict: 重新 observe 后复制新 target 和源码基线；tool-failed: 读取 diagnostics 修复所指输入/资源/宿主条件，失败不代表已提交。",
   "support": "conditional-on-input-target-resources-and-host",
   "supportedScopes": [
     "slide:global",
     "flow:global",
     "spatial-2d:global"
+  ],
+  "variants": [
+    {
+      "operation": "add-surface",
+      "scopes": [
+        "slide:global",
+        "flow:global",
+        "spatial-2d:global"
+      ]
+    },
+    {
+      "operation": "rename-location",
+      "scopes": [
+        "slide:global",
+        "flow:global",
+        "spatial-2d:global"
+      ]
+    },
+    {
+      "operation": "delete-location",
+      "scopes": [
+        "slide:global",
+        "flow:global",
+        "spatial-2d:global"
+      ]
+    },
+    {
+      "operation": "reorder-surfaces",
+      "scopes": [
+        "slide:global",
+        "flow:global",
+        "spatial-2d:global"
+      ]
+    }
   ],
   "version": 1
 }

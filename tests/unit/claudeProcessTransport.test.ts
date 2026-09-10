@@ -51,6 +51,28 @@ function nativeTurn() {
   }
 }
 
+describe('Claude initialization failure reasons', () => {
+  it.each([
+    { stderr: 'authentication failed', code: 1, message: 'CLI 认证失效，请重新登录' },
+    { stderr: 'unrecognized native failure', code: 7, message: 'Claude process exited 7' },
+  ])('preserves the actionable reason before initialize: $stderr', async ({ stderr, code, message }) => {
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'claude-initialize-failure-'))
+    const fixture = path.join(directory, 'native.cjs')
+    await fs.writeFile(fixture, `
+      if (process.argv.includes('--version')) { console.log('2.1.263'); process.exit(0); }
+      process.stderr.write(${JSON.stringify(stderr)});
+      process.exitCode = ${code};
+    `)
+    const adapter = new ClaudeProcessTransportAdapter(async () => ({ executable: process.execPath, prefix: [fixture] }))
+    try {
+      await expect(adapter.open({ cwd: directory, externalSessionId: null })).rejects.toThrow(message)
+    } finally {
+      await adapter.close()
+      await fs.rm(directory, { recursive: true, force: true })
+    }
+  })
+})
+
 function questionAnswer(question: import('../../src/main/localAgent/claudeProcessTransport').AiQuestion, values: string[]) {
   return {
     version: 1 as const, taskId: question.taskId, epoch: question.epoch, workspace: question.workspace,
@@ -58,6 +80,34 @@ function questionAnswer(question: import('../../src/main/localAgent/claudeProces
     answers: [{ id: question.questions[0]!.id, values }],
   }
 }
+
+describe('Claude candidate environment anchor', () => {
+  it('launches each native session with the current candidate root and clears a stale inherited root', async () => {
+    const test = await nativeFixture(`
+      if (wire.type === 'user') {
+        fs.writeFileSync('environment.json', JSON.stringify({
+          cwd: process.cwd(), candidateRoot: process.env.COURSEWARE_CANDIDATE_ROOT ?? null,
+          nativeSetting: process.env.COURSEWARE_NATIVE_ENV_TEST,
+        }));
+        emit({type:'result', is_error:false, session_id:${JSON.stringify(randomUUID())}});
+      }
+    `)
+    vi.stubEnv('COURSEWARE_CANDIDATE_ROOT', 'stale-parent-root')
+    vi.stubEnv('COURSEWARE_NATIVE_ENV_TEST', 'keep-native-setting')
+    try {
+      for (const candidateRoot of [path.join(test.directory, '候选 A'), path.join(test.directory, '候选 B'), undefined]) {
+        await test.adapter.open({ cwd: test.directory, externalSessionId: null, candidateRoot })
+        await test.adapter.startTurn(nativeTurn(), new Map())
+        for await (const _ of test.adapter.events()) { /* wait for the native read */ }
+        expect(JSON.parse(await fs.readFile(path.join(test.directory, 'environment.json'), 'utf8'))).toEqual({
+          cwd: test.directory, candidateRoot: candidateRoot ?? null, nativeSetting: 'keep-native-setting',
+        })
+        expect(process.env.COURSEWARE_CANDIDATE_ROOT).toBe('stale-parent-root')
+        await test.adapter.close()
+      }
+    } finally { await test.cleanup(); vi.unstubAllEnvs() }
+  })
+})
 
 describe('Claude native text block identity', () => {
   it('replaces streamed text after a non-text block using its native index, preserving every raw text event', async () => {

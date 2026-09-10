@@ -569,6 +569,45 @@ function markdownLinkTarget(rawTarget: string): string {
   return trimmed.split(/\s+['"]/)[0]
 }
 
+function inlineMarkdownTargets(text: string): string[] {
+  const targets: string[] = []
+  for (const match of text.matchAll(/!?\[[^\]]*\]\(/g)) {
+    let cursor = match.index + match[0].length
+    while (/\s/.test(text[cursor] ?? '') && cursor < text.length) cursor += 1
+    const start = cursor
+    let depth = 0
+    const angled = text[cursor] === '<'
+    if (angled) cursor += 1
+    for (; cursor < text.length; cursor += 1) {
+      const character = text[cursor]
+      if (character === '\\' && /[!"#$%&'()*+,\-./:;<=>?@[\]\\^_`{|}~]/.test(text[cursor + 1] ?? '')) {
+        cursor += 1
+        continue
+      }
+      if (angled) {
+        if (character === '\n' || character === '<') break
+        if (character === '>') {
+          cursor += 1
+          break
+        }
+      } else {
+        if (character === '(') depth += 1
+        else if (character === ')') {
+          if (depth === 0) break
+          depth -= 1
+        } else if (/\s/.test(character)) break
+      }
+    }
+    if (depth !== 0 || (angled && text[cursor - 1] !== '>')) continue
+    const target = text.slice(start, cursor)
+    // The destination ends before the optional title, which can itself contain ')'.
+    const suffix = text.slice(cursor)
+    if (!/^\s*\)/.test(suffix) && !/^\s+(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|\((?:\\.|[^()\\])*\))\s*\)/.test(suffix)) continue
+    targets.push(target.replace(/\\([!"#$%&'()*+,\-./:;<=>?@[\]\\^_`{|}~])/g, '$1'))
+  }
+  return targets
+}
+
 function stripFencedMarkdown(text: string): string {
   const lines = text.split('\n')
   let fenceCharacter: '`' | '~' | undefined
@@ -701,8 +740,8 @@ export function validateMarkdownLinks(
     definitions.set(label, target)
     rawTargets.add(target)
   }
-  for (const match of stripped.matchAll(/!?\[[^\]]*\]\(([^)]+)\)/g)) {
-    rawTargets.add(match[1])
+  for (const target of inlineMarkdownTargets(stripped)) {
+    rawTargets.add(target)
   }
   for (const match of stripped.matchAll(/!?\[([^\]]+)\]\[([^\]]*)\]/g)) {
     const label = referenceLabel(match[2] || match[1])

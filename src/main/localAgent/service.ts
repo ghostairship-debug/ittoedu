@@ -19,8 +19,10 @@ async function operate(request: unknown): Promise<LocalAgentResponse> {
   const input = localAgentRequestSchema.parse(request)
   harness ??= new LocalAgentHarness(new LocalAgentRepository(app.getPath('userData')))
   if (input.operation === 'probe') return { enabled: true, probe: await harness.probe(input.adapter) }
-  if (input.operation === 'capabilities') return { enabled: true, capabilities: await harness.capabilities(input.adapter) }
-  if (input.operation === 'configure') return { enabled: true, capabilities: await harness.configure(input.adapter, input.configuration) }
+  if (input.operation === 'capabilities') return { enabled: true, capabilities: await harness.capabilities(input.adapter, { refresh: input.refresh,
+    ...(input.projectId && input.projectPath ? { workspace: createWorkspaceIdentity(input.projectId, input.projectPath) } : {}) }) }
+  if (input.operation === 'configure') return { enabled: true, capabilities: await harness.configure(input.adapter, input.configuration,
+    input.projectId && input.projectPath ? createWorkspaceIdentity(input.projectId, input.projectPath) : undefined) }
   const workspace = createWorkspaceIdentity(input.projectId, input.projectPath)
   switch (input.operation) {
     case 'workspace': return { enabled: true, workspace }
@@ -29,8 +31,12 @@ async function operate(request: unknown): Promise<LocalAgentResponse> {
     case 'resume': return { enabled: true, sessionId: await harness.resume(workspace, input.sessionId, input.prompt) }
     case 'generate': return { enabled: true, sessionId: await harness.generate(workspace, input.adapter, input.request, input.resumeSessionId) }
     case 'continue': return { enabled: true, sessionId: await harness.continue(workspace, input.sessionId, input.request) }
-    case 'candidate': return { enabled: true, generationResult: await harness.candidate(workspace, input.sessionId) }
-    case 'host-result': await harness.hostResult(workspace, input.sessionId, input.result, input.commitReceipt); return { enabled: true }
+    case 'candidate': {
+      const generationResult = await harness.candidate(workspace, input.sessionId)
+      const records = (await harness.list(workspace)).records.filter(record => record.id === input.sessionId)
+      return { enabled: true, generationResult, records }
+    }
+    case 'host-result': return { enabled: true, records: [await harness.hostResult(workspace, input.sessionId, input.result, input.commitReceipt)] }
     case 'cancel': await harness.cancel(workspace, input.sessionId); return { enabled: true }
     case 'input': return { enabled: true, inputDelivery: await harness.input(workspace, input.sessionId, input.input) }
     case 'delete': await harness.delete(workspace, input.sessionId); return { enabled: true }

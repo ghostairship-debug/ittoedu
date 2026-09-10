@@ -6,12 +6,13 @@ import { createAgentEventDecoder } from './historicalWireDecoder'
  * process and cannot be selected by a production factory. Native protocol tests
  * exercise the three actual V2 transports separately. */
 export function createScriptedAgentV2Fixture(id: LocalAgentId, script: {
-  turn(text: string, context: { cwd: string; externalSessionId: string | null }): AsyncIterable<unknown>
+  turn(text: string, context: { cwd: string; externalSessionId: string | null; candidateRoot?: string }): AsyncIterable<unknown>
   close?(): Promise<void>
   probe?(): Promise<LocalAgentProbe>
 }): LocalAgentCliAdapterV2 {
   let cwd = ''
   let externalSessionId: string | null = null
+  let candidateRoot: string | undefined
   let identity: Parameters<LocalAgentCliAdapterV2['startTurn']>[0] | undefined
   let stream: AsyncIterable<unknown> | undefined
   const capabilities = () => localAgentCapabilitiesSchema.parse({ version: 1, adapter: id, cliVersion: 'fixture-only', models: [],
@@ -21,11 +22,11 @@ export function createScriptedAgentV2Fixture(id: LocalAgentId, script: {
     id,
     probe: script.probe ?? (async () => ({ adapter: id, status: 'ready', message: 'test-only V2 fixture' })),
     getExternalSessionId: () => externalSessionId,
-    async open(input) { cwd = input.cwd; externalSessionId = input.externalSessionId; return { externalSessionId, capabilities: capabilities() } },
+    async open(input) { cwd = input.cwd; externalSessionId = input.externalSessionId; candidateRoot = input.candidateRoot; return { externalSessionId, capabilities: capabilities() } },
     async configure() { return capabilities() },
     async startTurn(input) {
       identity = input
-      stream = script.turn(input.text, { cwd, externalSessionId })
+      stream = script.turn(input.text, { cwd, externalSessionId, candidateRoot })
       return { nativeTurnId: input.runId }
     },
     async input(input) { return { taskId: input.taskId, epoch: input.epoch, workspace: input.workspace, inputId: input.inputId,

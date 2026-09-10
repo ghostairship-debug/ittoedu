@@ -2,6 +2,58 @@
   "candidateCarrier": {
     "default": "native"
   },
+  "examples": [
+    {
+      "bindings": "values 的  来自当前观察、已读资源或用户要求，值须满足本卡 inputSchema；destination 原样复制当前目标。",
+      "code": "const input={\"operation\":\"add-page\"}; const receipt=await session.execute(\"slide.structure\",input,destination);",
+      "operation": "add-page"
+    },
+    {
+      "bindings": "values 的 name 来自当前观察、已读资源或用户要求，值须满足本卡 inputSchema；destination 原样复制当前目标。",
+      "code": "const input={\"operation\":\"rename-page\",\"name\":values[\"name\"]}; const receipt=await session.execute(\"slide.structure\",input,destination);",
+      "operation": "rename-page"
+    },
+    {
+      "bindings": "values 的  来自当前观察、已读资源或用户要求，值须满足本卡 inputSchema；destination 原样复制当前目标。",
+      "code": "const input={\"operation\":\"duplicate-page\"}; const receipt=await session.execute(\"slide.structure\",input,destination);",
+      "operation": "duplicate-page"
+    },
+    {
+      "bindings": "values 的  来自当前观察、已读资源或用户要求，值须满足本卡 inputSchema；destination 原样复制当前目标。",
+      "code": "const input={\"operation\":\"delete-page\"}; const receipt=await session.execute(\"slide.structure\",input,destination);",
+      "operation": "delete-page"
+    },
+    {
+      "bindings": "values 的 ids 来自当前观察、已读资源或用户要求，值须满足本卡 inputSchema；destination 原样复制当前目标。",
+      "code": "const input={\"operation\":\"reorder-pages\",\"ids\":values[\"ids\"]}; const receipt=await session.execute(\"slide.structure\",input,destination);",
+      "operation": "reorder-pages"
+    },
+    {
+      "bindings": "values 的  来自当前观察、已读资源或用户要求，值须满足本卡 inputSchema；destination 原样复制当前目标。",
+      "code": "const input={\"operation\":\"add-state\"}; const receipt=await session.execute(\"slide.structure\",input,destination);",
+      "operation": "add-state"
+    },
+    {
+      "bindings": "values 的 name 来自当前观察、已读资源或用户要求，值须满足本卡 inputSchema；destination 原样复制当前目标。",
+      "code": "const input={\"operation\":\"rename-state\",\"name\":values[\"name\"]}; const receipt=await session.execute(\"slide.structure\",input,destination);",
+      "operation": "rename-state"
+    },
+    {
+      "bindings": "values 的  来自当前观察、已读资源或用户要求，值须满足本卡 inputSchema；destination 原样复制当前目标。",
+      "code": "const input={\"operation\":\"duplicate-state\"}; const receipt=await session.execute(\"slide.structure\",input,destination);",
+      "operation": "duplicate-state"
+    },
+    {
+      "bindings": "values 的  来自当前观察、已读资源或用户要求，值须满足本卡 inputSchema；destination 原样复制当前目标。",
+      "code": "const input={\"operation\":\"delete-state\"}; const receipt=await session.execute(\"slide.structure\",input,destination);",
+      "operation": "delete-state"
+    },
+    {
+      "bindings": "values 的 ids 来自当前观察、已读资源或用户要求，值须满足本卡 inputSchema；destination 原样复制当前目标。",
+      "code": "const input={\"operation\":\"reorder-states\",\"ids\":values[\"ids\"]}; const receipt=await session.execute(\"slide.structure\",input,destination);",
+      "operation": "reorder-states"
+    }
+  ],
   "inputSchema": {
     "$defs": {
       "__schema0": {
@@ -177,10 +229,74 @@
       }
     ]
   },
+  "invocation": "Builder: await session.execute(tool,input,destination)。input 遵循本卡完整 Schema；destination 原样使用当前 observe/createScope 的目标；只以 committed receipt 判定成功。",
   "name": "slide.structure",
+  "recovery": "invalid-input: 按本卡 Schema 修正字段；revision-conflict: 重新 observe 后复制新 target 和源码基线；tool-failed: 读取 diagnostics 修复所指输入/资源/宿主条件，失败不代表已提交。",
   "support": "conditional-on-input-target-resources-and-host",
   "supportedScopes": [
     "slide:scene"
+  ],
+  "variants": [
+    {
+      "operation": "add-page",
+      "scopes": [
+        "slide:scene"
+      ]
+    },
+    {
+      "operation": "rename-page",
+      "scopes": [
+        "slide:scene"
+      ]
+    },
+    {
+      "operation": "duplicate-page",
+      "scopes": [
+        "slide:scene"
+      ]
+    },
+    {
+      "operation": "delete-page",
+      "scopes": [
+        "slide:scene"
+      ]
+    },
+    {
+      "operation": "reorder-pages",
+      "scopes": [
+        "slide:scene"
+      ]
+    },
+    {
+      "operation": "add-state",
+      "scopes": [
+        "slide:scene"
+      ]
+    },
+    {
+      "operation": "rename-state",
+      "scopes": [
+        "slide:scene"
+      ]
+    },
+    {
+      "operation": "duplicate-state",
+      "scopes": [
+        "slide:scene"
+      ]
+    },
+    {
+      "operation": "delete-state",
+      "scopes": [
+        "slide:scene"
+      ]
+    },
+    {
+      "operation": "reorder-states",
+      "scopes": [
+        "slide:scene"
+      ]
+    }
   ],
   "version": 1
 }

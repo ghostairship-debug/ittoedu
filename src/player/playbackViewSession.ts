@@ -1,3 +1,5 @@
+import { PLAYBACK_VIEW_CHROME_GUTTER } from '../shared/playbackViewGeometry'
+
 /** Session-only observation of already laid out content. No navigation or document writes. */
 export interface ViewPoint { x: number; y: number }
 export interface ViewBounds { x: number; y: number; width: number; height: number }
@@ -104,7 +106,7 @@ export class PlaybackViewSession implements PlaybackViewPort {
     viewport.dataset.playbackViewport = 'true'
     viewport.tabIndex = 0
     viewport.setAttribute('aria-label', '课件播放视口')
-    Object.assign(viewport.style, { position: 'absolute', top: '0', left: '0', right: '18px', bottom: '18px', overflow: 'clip' })
+    Object.assign(viewport.style, { position: 'absolute', top: '0', left: '0', right: `${PLAYBACK_VIEW_CHROME_GUTTER}px`, bottom: `${PLAYBACK_VIEW_CHROME_GUTTER}px`, overflow: 'clip' })
     frame.appendChild(viewport)
     container.appendChild(frame)
     this.#frame = frame
@@ -236,9 +238,9 @@ export class PlaybackViewSession implements PlaybackViewPort {
     bar.setAttribute('role', 'scrollbar'); bar.setAttribute('aria-label', axis === 'x' ? '左右移动视图' : '上下移动视图')
     bar.setAttribute('aria-orientation', axis === 'x' ? 'horizontal' : 'vertical')
     Object.assign(bar.style, { position: 'absolute', background: '#e2e8f0', zIndex: '2147483646', touchAction: 'none',
-      ...(axis === 'x' ? { bottom: '0', left: '0', right: '18px', height: '18px' } : { right: '0', top: '0', bottom: '18px', width: '18px' }) })
+      ...(axis === 'x' ? { bottom: '0', left: '0', right: `${PLAYBACK_VIEW_CHROME_GUTTER}px`, height: `${PLAYBACK_VIEW_CHROME_GUTTER}px` } : { right: '0', top: '0', bottom: `${PLAYBACK_VIEW_CHROME_GUTTER}px`, width: `${PLAYBACK_VIEW_CHROME_GUTTER}px` }) })
     Object.assign(thumb.style, { position: 'absolute', background: '#64748b', border: '2px solid #e2e8f0', boxSizing: 'border-box', borderRadius: '7px',
-      ...(axis === 'x' ? { height: '18px' } : { width: '18px' }) })
+      ...(axis === 'x' ? { height: `${PLAYBACK_VIEW_CHROME_GUTTER}px` } : { width: `${PLAYBACK_VIEW_CHROME_GUTTER}px` }) })
     bar.appendChild(thumb); frame.appendChild(bar)
     let drag: { id: number; start: number; pan: number; min: number; max: number; travel: number; generation: number } | null = null
     let shield: HTMLElement | null = null
@@ -271,7 +273,7 @@ export class PlaybackViewSession implements PlaybackViewPort {
       drag = { id: event.pointerId, start: client, pan: this.#state.pan[axis], ...m, generation: this.#state.generation }
       try { bar.setPointerCapture(event.pointerId) } catch { /* synthetic events */ }
       shield = dom.createElement('div')
-      Object.assign(shield.style, { position: 'absolute', inset: '0 18px 18px 0', zIndex: '2147483645', cursor: axis === 'x' ? 'ew-resize' : 'ns-resize' })
+      Object.assign(shield.style, { position: 'absolute', inset: `0 ${PLAYBACK_VIEW_CHROME_GUTTER}px ${PLAYBACK_VIEW_CHROME_GUTTER}px 0`, zIndex: '2147483645', cursor: axis === 'x' ? 'ew-resize' : 'ns-resize' })
       frame.appendChild(shield)
     }
     const move = (event: PointerEvent) => {

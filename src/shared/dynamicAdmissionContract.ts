@@ -1,7 +1,7 @@
 import { z } from 'zod'
 import { courseProjectDocumentSchema } from './courseProjectSchema'
 import { authoringToolReceiptV1Schema } from './authoringToolContract'
-import { dynamicBehaviorEvidenceSchema } from './dynamicBehaviorObservation'
+import { dynamicBehaviorEvidenceSchema, dynamicButtonCheckSchema } from './dynamicBehaviorObservation'
 
 const encodedFiles = z.record(z.string().min(1).max(500), z.string().max(24_000_000).regex(/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/))
 export const dynamicAdmissionPayloadSchema = z.object({
@@ -11,8 +11,14 @@ export const dynamicAdmissionPayloadSchema = z.object({
   captureInstances: z.boolean().optional(),
   verificationMode: z.enum(['full-admission', 'public-props']).optional(),
   observeBehavior: z.boolean().optional(),
+  buttonCheck: dynamicButtonCheckSchema.optional(),
   targets: z.array(z.object({ locationId: z.string().min(1), stateId: z.string().nullable().optional(), instanceIds: z.array(z.string().min(1)).min(1).max(1000) }).strict()).min(1).max(1000),
-}).strict()
+}).strict().superRefine((payload, context) => {
+  if (payload.buttonCheck && (!payload.observeBehavior || payload.verificationMode === 'public-props'
+    || payload.targets.filter(target => target.instanceIds.includes(payload.buttonCheck!.instanceId)).length !== 1)) {
+    context.addIssue({ code: 'custom', path: ['buttonCheck'], message: '按钮检查必须绑定唯一候选目标、完整准入并启用真实行为观察' })
+  }
+})
 export type DynamicAdmissionPayload = z.infer<typeof dynamicAdmissionPayloadSchema>
 export const dynamicAdmissionRequestSchema = z.discriminatedUnion('operation', [
   z.object({ operation: z.literal('run'), id: z.uuid(), payload: dynamicAdmissionPayloadSchema }).strict(),

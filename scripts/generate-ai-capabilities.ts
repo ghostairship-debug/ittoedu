@@ -6,7 +6,7 @@ import { z } from 'zod'
 import { stripTypeScriptTypes } from 'node:module'
 import { describeAuthoringToolDiscovery } from '../src/renderer/authoring/tools/authoringToolFacade'
 import { courseAgentSkills, courseAgentSkillMarkdown } from '../src/shared/courseAgentSkills'
-import type { CourseAgentCapabilityData, CourseAgentCapabilityEntry } from '../src/shared/courseAgentCapabilities'
+import { courseAgentCapabilityQueryHelp, type CourseAgentCapabilityData, type CourseAgentCapabilityEntry } from '../src/shared/courseAgentCapabilities'
 import packageJson from '../package.json'
 import { importComponentPackage } from '../src/renderer/components/importComponentPackage'
 import { BUILT_IN_COMPONENT_CATALOG_SHA256 } from '../src/shared/builtInComponentCatalog'
@@ -864,6 +864,7 @@ async function addDiscoveryArtifacts(projectRoot: string, files: Map<string, str
     resources.set(location, readableResourceJson({ version: 1, ...tool }))
     entries.push({ id: tool.name, kind: 'tool', label: tool.name, path: location,
       scopes: tool.supportedScopes, carriers: [...new Set([tool.candidateCarrier.default, ...Object.values(tool.candidateCarrier.operations ?? {})])],
+      variants: tool.variants,
       summary: tool.description ?? '按完整输入 Schema、当前 canonical target 和宿主支持执行。',
       dependencies: tool.name === 'component.package' ? ['component-api4'] : tool.name === 'runtime.insert' || tool.name === 'runtime.source' ? ['runtime-api2', 'runtime-api3'] : [],
     })
@@ -934,17 +935,17 @@ async function addDiscoveryArtifacts(projectRoot: string, files: Map<string, str
     resources.set(location, courseAgentSkillMarkdown(skill))
     entries.push({ id: `skill:${skill.name}`, kind: 'skill', label: skill.name, path: location, scopes: allScopes, carriers: allCarriers, summary: skill.body.split('。')[0]! })
   }
-  resources.set('query-core.mjs', stripTypeScriptTypes(await fs.readFile(path.join(projectRoot, 'src/shared/courseAgentCapabilities.ts'), 'utf8')))
+  resources.set('query-core.mjs', stripTypeScriptTypes(await fs.readFile(path.join(projectRoot, 'src/shared/courseAgentCapabilities.ts'), 'utf8')).split('\n').map(line => line.trimEnd()).join('\n'))
   resources.set('query.mjs', [
     "import {readFile} from 'node:fs/promises';",
-    `import {queryCourseAgentCapabilities,readCourseAgentCapability} from ${JSON.stringify("./query-core.mjs")};`,
+    `import {runCourseAgentCapabilityQuery} from ${JSON.stringify("./query-core.mjs")};`,
     "const data=JSON.parse(await readFile(new URL('./discovery-data.json',import.meta.url),'utf8'));",
-    "try { const args=process.argv.slice(2); const query={}; const options={}; let id; for(let i=0;i<args.length;i++){const key=args[i];const value=args[++i];if(!value)throw new Error('缺少查询参数值');if(key==='--id')id=value;else if(key==='--operation'||key==='--nativeType')options[key.slice(2)]=value;else if(['--query','--surface','--owner','--carrier','--kind','--task','--semanticVersion'].includes(key))query[key.slice(2)]=value;else if(key==='--limit')query.limit=Number(value);else throw new Error('未知查询参数 '+key);} console.log(JSON.stringify(id?readCourseAgentCapability(data,id,options):queryCourseAgentCapabilities(data,query),null,2));}catch(error){console.error(error.message);process.exitCode=1;}",
+    "try {const result=runCourseAgentCapabilityQuery(data,process.argv.slice(2));console.log(typeof result==='string'?result:JSON.stringify(result,null,2));}catch(error){console.error(error.message);process.exitCode=1;}",
   ].join('\n') + '\n')
   entries.sort((a, b) => a.id.localeCompare(b.id, 'en'))
   const semanticVersion = createHash('sha256').update(canonicalJson({ version: 1, entries, files: Object.fromEntries([...resources].sort(([a], [b]) => a.localeCompare(b, 'en'))) })).digest('hex')
   const discovery = { version: 1, semanticVersion, query: 'query.mjs', data: 'discovery-data.json',
-    usage: '保持原生工作目录；node "<query.mjs绝对路径>" --query <关键词> --surface <slide|flow|spatial-2d>; --id <能力ID> [--operation <操作>] [--nativeType <类型>]',
+    usage: courseAgentCapabilityQueryHelp,
     groups: { recipes: 'query --kind recipe', components: 'query --kind component', skills: 'query --kind skill', references: 'query --kind reference' },
     tools: entries.filter(entry => entry.kind === 'tool').map(entry => ({ id: entry.id, path: entry.path, scopes: entry.scopes, carriers: entry.carriers })),
     protocols: entries.filter(entry => entry.kind === 'protocol').map(entry => ({ id: entry.id, path: entry.path, authoringGuideFile: `protocols/${entry.id}.authoring.md`, scopes: entry.scopes })),

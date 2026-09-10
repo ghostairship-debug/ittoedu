@@ -3,6 +3,20 @@
     "default": "runtime"
   },
   "description": "使用现有 Runtime 的原 update target 修改 enabled、renderMode 或已公开的 content 文本；initialValue须为观察中的当前值。保留实例身份与未改字段。速度等源码参数使用 runtime.source。",
+  "examples": [
+    {
+      "bindings": "values 的 initialValue/value 来自当前观察、已读资源或用户要求，值须满足本卡 inputSchema；destination 原样复制当前目标。",
+      "code": "const input={\"field\":\"enabled\",\"initialValue\":values[\"initialValue\"],\"value\":values[\"value\"]}; const receipt=await session.execute(\"runtime.configure\",input,destination);"
+    },
+    {
+      "bindings": "values 的 initialValue/value 来自当前观察、已读资源或用户要求，值须满足本卡 inputSchema；destination 原样复制当前目标。",
+      "code": "const input={\"field\":\"renderMode\",\"initialValue\":values[\"initialValue\"],\"value\":values[\"value\"]}; const receipt=await session.execute(\"runtime.configure\",input,destination);"
+    },
+    {
+      "bindings": "values 的 contentKey/initialValue/value 来自当前观察、已读资源或用户要求，值须满足本卡 inputSchema；destination 原样复制当前目标。",
+      "code": "const input={\"field\":\"content\",\"contentKey\":values[\"contentKey\"],\"initialValue\":values[\"initialValue\"],\"value\":values[\"value\"]}; const receipt=await session.execute(\"runtime.configure\",input,destination);"
+    }
+  ],
   "inputSchema": {
     "$defs": {
       "__schema0": {
@@ -86,12 +100,23 @@
       }
     ]
   },
+  "invocation": "Builder: await session.execute(tool,input,destination)。input 遵循本卡完整 Schema；destination 原样使用当前 observe/createScope 的目标；只以 committed receipt 判定成功。",
   "name": "runtime.configure",
+  "recovery": "invalid-input: 按本卡 Schema 修正字段；revision-conflict: 重新 observe 后复制新 target 和源码基线；tool-failed: 读取 diagnostics 修复所指输入/资源/宿主条件，失败不代表已提交。",
   "support": "conditional-on-input-target-resources-and-host",
   "supportedScopes": [
     "slide:scene",
     "slide:global",
     "flow:surface"
+  ],
+  "variants": [
+    {
+      "scopes": [
+        "slide:scene",
+        "slide:global",
+        "flow:surface"
+      ]
+    }
   ],
   "version": 1
 }

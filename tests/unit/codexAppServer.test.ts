@@ -1,5 +1,7 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import { PassThrough } from 'node:stream'
+import { promises as fs } from 'node:fs'
+import os from 'node:os'
 
 afterEach(() => {
   vi.restoreAllMocks()
@@ -247,6 +249,27 @@ describe('CodexAppServerAdapter lifecycle and wire protocol', () => {
     await adapter.close()
   })
 
+  it('resumes a large native history without replaying turns into the transport', async () => {
+    const { child } = createMockCodexProcess((msg, send) => {
+      if (msg.method === 'initialize') send({ id: msg.id, result: { userAgent: 'codex/0.153.4' } })
+      if (msg.method === 'model/list') send({ id: msg.id, result: { data: [{ id: 'native-model', model: 'native-model',
+        displayName: 'Native', isDefault: true, inputModalities: ['text'], supportedReasoningEfforts: [] }] } })
+      if (msg.method === 'thread/resume') send({ id: msg.id, result: {
+        thread: { id: msg.params.threadId, turns: msg.params.excludeTurns ? []
+          : [{ id: 'previous-turn', items: [{ type: 'commandExecution', aggregatedOutput: 'x'.repeat(1_200_000) }] }] },
+        model: 'native-model',
+      } })
+    })
+    vi.spyOn(processModule, 'launchAgent').mockReturnValue(child)
+    vi.spyOn(processModule, 'stopAgent').mockResolvedValue()
+    const adapter = new CodexAppServerAdapter(async () => ({ executable: 'C:\\bin\\codex.exe', prefix: [] }))
+    try {
+      const opened = await adapter.open({ cwd: 'C:/test', externalSessionId: 'stored-large-history' })
+      expect(opened.externalSessionId).toBe('stored-large-history')
+      expect(opened.capabilities.current.model).toBe('native-model')
+    } finally { await adapter.close() }
+  })
+
   it('keeps requested model and effort pending until native confirmation', async () => {
     const { child } = createMockCodexProcess()
     vi.spyOn(processModule, 'launchAgent').mockReturnValue(child)
@@ -290,7 +313,7 @@ describe('CodexAppServerAdapter lifecycle and wire protocol', () => {
           send({ method: 'item/agentMessage/delta', params: { threadId: 'thread-1', turnId: 'turn-1', itemId: 'msg-1', delta: 'Hello ' } })
           send({ method: 'item/agentMessage/delta', params: { threadId: 'thread-1', turnId: 'turn-1', itemId: 'msg-1', delta: 'World' } })
           send({ method: 'item/completed', params: { threadId: 'thread-1', turnId: 'turn-1', item: { id: 'msg-1', type: 'agentMessage', text: 'Hello World', phase: 'final_answer' } } })
-          send({ method: 'thread/tokenUsage/updated', params: { threadId: 'thread-1', tokenUsage: { inputTokens: 10, outputTokens: 5, cachedInputTokens: 2 } } })
+          send({ method: 'thread/tokenUsage/updated', params: { threadId: 'thread-1', tokenUsage: { last: { inputTokens: 10, outputTokens: 5, cachedInputTokens: 2 }, total: { inputTokens: 10, outputTokens: 5, cachedInputTokens: 2 } } } })
           send({ method: 'turn/completed', params: { threadId: 'thread-1', turn: { id: 'turn-1', status: 'completed' } } })
         }, 10)
       }
@@ -872,12 +895,12 @@ process.stdin.on('end', () => process.exit(0));
 `
 }
 
-function realCodexAdapter(script: string | (() => string), timeouts: { rpcTimeoutMs?: number; cancelTimeoutMs?: number } = {}) {
+function realCodexAdapter(script: string | (() => string), timeouts: { rpcTimeoutMs?: number; cancelTimeoutMs?: number; generationRequest?: GenerationRequest } = {}) {
   const messages: any[] = []
   const children: ChildProcessWithoutNullStreams[] = []
   const launch = processModule.launchAgent
-  vi.spyOn(processModule, 'launchAgent').mockImplementation((binary, args, cwd) => {
-    const child = launch(binary, args, cwd)
+  vi.spyOn(processModule, 'launchAgent').mockImplementation((binary, args, cwd, candidateRoot) => {
+    const child = launch(binary, args, cwd, candidateRoot)
     children.push(child)
     const write = child.stdin.write.bind(child.stdin)
     vi.spyOn(child.stdin, 'write').mockImplementation((chunk: any, ...rest: any[]) => {
@@ -897,6 +920,330 @@ function nativeCodexTurn() {
   return { taskId: randomUUID(), epoch: 0, workspace: { version: 1 as const, projectId: 'native-test', normalizedPath: 'c:/lessons/native-test.h5lesson' },
     runId: randomUUID(), observationId: randomUUID(), text: 'deterministic protocol test', imageFileIds: [] }
 }
+
+describe('Codex candidate environment anchor', () => {
+  it('refreshes a live native thread anchor while preserving its identity and requested configuration', async () => {
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'codex-candidate-env-'))
+    const snapshotPath = path.join(directory, 'environment.json')
+    const { adapter, messages, children } = realCodexAdapter(`require('node:fs').writeFileSync(${JSON.stringify(snapshotPath)}, JSON.stringify({
+      cwd:process.cwd(),candidateRoot:process.env.COURSEWARE_CANDIDATE_ROOT??null,nativeSetting:process.env.COURSEWARE_NATIVE_ENV_TEST,
+    }));` + codexNativeProcess())
+    const candidateA = path.join(directory, '候选 A'), candidateB = path.join(directory, '候选 B')
+    vi.stubEnv('COURSEWARE_CANDIDATE_ROOT', 'stale-parent-root')
+    vi.stubEnv('COURSEWARE_NATIVE_ENV_TEST', 'keep-native-setting')
+    try {
+      const opened = await adapter.open({ cwd: directory, externalSessionId: null, candidateRoot: candidateA,
+        configuration: { model: 'native-selected', effort: 'high' } })
+      const expectSnapshot = async (candidateRoot: string | null) => {
+        expect(JSON.parse(await fs.readFile(snapshotPath, 'utf8'))).toEqual({ cwd: directory, candidateRoot, nativeSetting: 'keep-native-setting' })
+        expect(process.env.COURSEWARE_CANDIDATE_ROOT).toBe('stale-parent-root')
+      }
+      await expectSnapshot(candidateA)
+      await adapter.open({ cwd: directory, externalSessionId: opened.externalSessionId, candidateRoot: candidateA })
+      expect(children).toHaveLength(1)
+      // A live null-ID reopen normally reuses the current thread; changing only
+      // the environment must retain that identity through thread/resume.
+      const reopened = await adapter.open({ cwd: directory, externalSessionId: null, candidateRoot: candidateB })
+      expect(reopened.externalSessionId).toBe(opened.externalSessionId)
+      expect(children).toHaveLength(2)
+      await expectSnapshot(candidateB)
+      expect(messages.filter(message => message.method === 'thread/resume').at(-1)?.params).toMatchObject({
+        threadId: opened.externalSessionId, model: 'native-selected', excludeTurns: true,
+      })
+      await adapter.startTurn(nativeCodexTurn(), new Map())
+      for await (const _ of adapter.events()) { /* wait for native configuration confirmation */ }
+      expect(messages.filter(message => message.method === 'turn/start').at(-1)?.params).toMatchObject({ model: 'native-selected', effort: 'high' })
+
+      const withoutRoot = await adapter.open({ cwd: directory, externalSessionId: opened.externalSessionId })
+      expect(withoutRoot.externalSessionId).toBe(opened.externalSessionId)
+      expect(children).toHaveLength(3)
+      await expectSnapshot(null)
+      await adapter.close()
+      await adapter.open({ cwd: directory, externalSessionId: null })
+      expect(children).toHaveLength(4)
+      expect(messages.filter(message => /^thread\/(start|resume)$/.test(message.method)).at(-1)?.method).toBe('thread/start')
+    } finally { await adapter.close(); await fs.rm(directory, { recursive: true, force: true }); vi.unstubAllEnvs() }
+  })
+})
+
+function shortPathRequest(): GenerationRequest {
+  return {
+    version: 1, requestId: randomUUID(), workspace: nativeCodexTurn().workspace,
+    documentRevision: 1, sessionGeneration: 1, purpose: 'local-edit', instruction: 'Enlarge the title',
+    destinations: [{ kind: 'update', target: {
+      projectId: 'native-test', documentRevision: 1, revisionPolicy: { kind: 'exact' }, sessionGeneration: 1,
+      surfaceType: 'slide', surfaceId: 's1', locationId: 'l1', stateId: null, owner: 'scene', ownerKey: 'scene:s1',
+      itemId: 'title', authoringAddress: 'l1/title',
+    } }], context: {}, allowedCarriers: ['native'], expectedResult: 'auto',
+  }
+}
+
+function shortPathCandidate(request: GenerationRequest) {
+  return { version: 2, requestId: request.requestId, summary: 'Title enlarged', afterCommit: { version: 1, action: 'finish' },
+    steps: [{ id: 'title', tool: 'native.patch', destination: 'd1', input: '{"fontSize":48}', lowerCarrierReason: null }] }
+}
+
+/** Real JSONL subprocess with explicit wire ordering; no installed CLI or network is used. */
+function shortPathProcess(notifications: Array<{ method: string; params: any }>): string {
+  return codexNativeProcess().replace("send({ method: 'turn/started', params: { threadId, turn: { id: 'native-turn' } } });", `
+    send({ method: 'turn/started', params: { threadId, turn: { id: 'native-turn' } } });
+    setTimeout(() => { for (const notification of ${JSON.stringify(notifications)}) send(notification); }, 5);
+  `)
+}
+
+function shortPathWire(method: string, params: Record<string, unknown>) {
+  return { method, params: { threadId: 'confirmed-native-thread', turnId: 'native-turn', ...params } }
+}
+
+describe('Codex short path transport', () => {
+  it.each(['started-and-completed', 'completed-only'] as const)('excludes native userMessage %s while preserving command, MCP, and typed agent output', async sequence => {
+    const request = shortPathRequest(), prompt = 'PRIVATE_NATIVE_REQUEST_WITH_FULL_HOST_CONTEXT'
+    // Captured native item shape; only the request text, image path, and ID are fixture values.
+    const userMessage = { type: 'userMessage', id: 'native-user-input', clientId: null, content: [
+      { type: 'text', text: prompt, text_elements: [] }, { type: 'localImage', detail: null, path: 'C:/fixture/observation.png' },
+    ] }
+    const wire = [
+      ...(sequence === 'started-and-completed' ? [shortPathWire('item/started', { item: userMessage })] : []),
+      shortPathWire('item/completed', { item: userMessage }),
+      shortPathWire('item/started', { item: { type: 'commandExecution', id: 'command', command: 'read local input' } }),
+      shortPathWire('item/completed', { item: { type: 'commandExecution', id: 'command', command: 'read local input' } }),
+      shortPathWire('item/started', { item: { type: 'mcpToolCall', id: 'mcp', server: 'fixture', tool: 'read_resource' } }),
+      shortPathWire('item/completed', { item: { type: 'mcpToolCall', id: 'mcp', server: 'fixture', tool: 'read_resource' } }),
+      shortPathWire('item/started', { item: { type: 'agentMessage', id: 'public', phase: 'commentary' } }),
+      shortPathWire('item/agentMessage/delta', { itemId: 'public', delta: 'Inspecting the title.' }),
+      shortPathWire('item/completed', { item: { type: 'agentMessage', id: 'public', phase: 'commentary', text: 'Inspecting the title.' } }),
+      shortPathWire('item/completed', { item: { type: 'agentMessage', id: 'final', phase: 'final_answer',
+        text: JSON.stringify({ version: 1, requestId: request.requestId, kind: 'reply', reply: 'Inspection finished.', candidate: null }) } }),
+      shortPathWire('turn/completed', { turn: { id: 'native-turn', status: 'completed' } }),
+    ]
+    const { adapter } = realCodexAdapter(shortPathProcess(wire), { generationRequest: request })
+    try {
+      await adapter.open({ cwd: process.cwd(), externalSessionId: null })
+      await adapter.startTurn(nativeCodexTurn(), new Map())
+      const events = []; for await (const event of adapter.events()) events.push(event)
+      expect(JSON.stringify(events)).not.toContain(prompt)
+      expect(events.some(event => 'itemId' in event && event.itemId === 'native-user-input')).toBe(false)
+      expect(events.filter(event => event.kind === 'tool')).toEqual([
+        expect.objectContaining({ itemId: 'command', name: 'commandExecution', status: 'running' }),
+        expect.objectContaining({ itemId: 'command', name: 'commandExecution', status: 'completed' }),
+        expect.objectContaining({ itemId: 'mcp', name: 'read_resource', status: 'running' }),
+        expect.objectContaining({ itemId: 'mcp', name: 'read_resource', status: 'completed' }),
+      ])
+      expect(events).toContainEqual(expect.objectContaining({ kind: 'text', itemId: 'public', phase: 'body', operation: 'append', text: 'Inspecting the title.' }))
+      expect(events).toContainEqual(expect.objectContaining({ kind: 'text', itemId: 'final', phase: 'body', operation: 'replace', text: 'Inspection finished.' }))
+      expect(events.at(-1)).toMatchObject({ kind: 'turn-ended', status: 'completed' })
+    } finally { await adapter.close() }
+  })
+
+  it('discovers models in the requested project directory and keeps its cache scoped to that directory', async () => {
+    const script = codexNativeProcess().replace('displayName: name,', 'displayName: process.cwd(),')
+    const { adapter, children } = realCodexAdapter(script)
+    const firstCwd = process.cwd(), secondCwd = path.dirname(firstCwd)
+    try {
+      const first = await adapter.discoverCapabilities({ cwd: firstCwd })
+      expect(first.models[0]?.label).toBe(firstCwd)
+      expect(await adapter.discoverCapabilities({ cwd: firstCwd })).toEqual(first)
+      const second = await adapter.discoverCapabilities({ cwd: secondCwd })
+      expect(second.models[0]?.label).toBe(secondCwd)
+      expect(await adapter.discoverCapabilities()).toEqual(second)
+      expect(children).toHaveLength(2)
+    } finally { await adapter.close() }
+  })
+
+  it('uses one stable short output schema across requests and checks both request identifiers at decode', () => {
+    const request = shortPathRequest(), other = { ...request, requestId: randomUUID() }
+    const schema = codexCandidateOutputSchema(request) as any
+    expect(schema).toEqual(codexCandidateOutputSchema(other))
+    expect(codexTurnOutputSchema(request)).toEqual(codexTurnOutputSchema(other))
+    expect(schema.properties.version.const).toBe(2)
+    expect(schema.properties.requestId).toEqual({ type: 'string' })
+    expect(JSON.stringify(schema)).not.toMatch(/candidateId|authoringAddress|revisionPolicy|"carrier"/)
+    expect(JSON.stringify(schema)).toContain('A complete JSON serialization')
+    const candidate = shortPathCandidate(request)
+    const edit = { version: 1, requestId: request.requestId, kind: 'edit', reply: null, candidate }
+    const decoded = decodeCodexStructuredOutput(JSON.stringify(edit), request)
+    expect(decoded).toContain('"input":{"fontSize":48}')
+    expect(decoded).not.toContain('lowerCarrierReason')
+    expect(() => decodeCodexStructuredOutput(JSON.stringify(edit), other)).toThrow('其他请求')
+    expect(() => decodeCodexStructuredOutput(JSON.stringify({ ...edit, candidate: { ...candidate, requestId: other.requestId } }), request)).toThrow('其他请求')
+    expect(() => decodeCodexStructuredOutput(JSON.stringify(candidate), { ...other, expectedResult: 'candidate' })).toThrow('其他请求')
+  })
+
+  it.each([null, 'saved-native-thread'])('applies the selected model at initial open %s and confirms effort on the first turn', async externalSessionId => {
+    const { adapter, messages } = realCodexAdapter(codexNativeProcess())
+    try {
+      const opened = await adapter.open({ cwd: process.cwd(), externalSessionId, configuration: { model: 'native-selected', effort: 'high' } })
+      const create = messages.find(message => message.method === (externalSessionId ? 'thread/resume' : 'thread/start'))
+      expect(create.params).toEqual({ cwd: process.cwd(), model: 'native-selected', ...(externalSessionId ? { threadId: externalSessionId, excludeTurns: true } : {}) })
+      expect(opened.capabilities.current).toMatchObject({ model: 'native-selected', effort: 'medium' })
+      expect(opened.capabilities.requestedConfiguration).toEqual({ model: 'native-selected', effort: 'high' })
+      await adapter.startTurn(nativeCodexTurn(), new Map())
+      const events = []; for await (const event of adapter.events()) events.push(event)
+      expect(messages.find(message => message.method === 'turn/start').params).toMatchObject({ model: 'native-selected', effort: 'high' })
+      expect(events.find(event => event.kind === 'configuration')).toMatchObject({ capabilities: { current: { model: 'native-selected', effort: 'high' }, requestedConfiguration: null } })
+    } finally { await adapter.close() }
+  })
+
+  it('publishes public text and tool progress but holds all machine output until the successful final outcome', async () => {
+    const request = shortPathRequest(), candidate = shortPathCandidate(request)
+    const intermediateReply = JSON.stringify({ version: 1, requestId: request.requestId, kind: 'reply', reply: 'I will adjust the title.', candidate: null })
+    const final = JSON.stringify({ version: 1, requestId: request.requestId, kind: 'edit', reply: null, candidate })
+    const previous = JSON.stringify({ version: 1, requestId: request.requestId, kind: 'reply', reply: 'Superseded final', candidate: null })
+    const wire = [
+      shortPathWire('item/started', { item: { type: 'agentMessage', id: 'public', phase: 'commentary' } }),
+      shortPathWire('item/agentMessage/delta', { itemId: 'public', delta: 'Checking title. ' }),
+      shortPathWire('item/agentMessage/delta', { itemId: 'public', delta: 'Ready.' }),
+      shortPathWire('item/completed', { item: { type: 'agentMessage', id: 'public', phase: 'commentary', text: 'Checking title. Ready.' } }),
+      shortPathWire('item/completed', { item: { type: 'agentMessage', id: 'json', phase: 'commentary', text: '{"example":{"fontSize":48}}' } }),
+      ...[intermediateReply.slice(0, 10), intermediateReply.slice(10)].map(delta => shortPathWire('item/agentMessage/delta', { itemId: 'reply', delta })),
+      shortPathWire('item/completed', { item: { type: 'agentMessage', id: 'reply', phase: 'commentary', text: intermediateReply } }),
+      shortPathWire('item/completed', { item: { type: 'agentMessage', id: 'nonfinal-edit', phase: 'commentary', text: final } }),
+      shortPathWire('item/completed', { item: { type: 'agentMessage', id: 'superseded', phase: 'final_answer', text: previous } }),
+      // No item/started phase: the JSON prefix must still remain private while ambiguous.
+      ...[final.slice(0, 1), final.slice(1, 35), final.slice(35)].map(delta => shortPathWire('item/agentMessage/delta', { itemId: 'final', delta })),
+      shortPathWire('item/completed', { item: { type: 'agentMessage', id: 'final', phase: 'final_answer', text: final } }),
+      shortPathWire('item/agentMessage/delta', { itemId: 'final', delta: 'duplicate late delta' }),
+      shortPathWire('item/completed', { turnId: 'old-turn', item: { type: 'agentMessage', id: 'stale', phase: 'final_answer', text: previous } }),
+      shortPathWire('item/started', { item: { type: 'commandExecution', id: 'after-final' } }),
+      shortPathWire('item/completed', { item: { type: 'commandExecution', id: 'after-final' } }),
+      shortPathWire('turn/completed', { turn: { id: 'native-turn', status: 'completed' } }),
+      shortPathWire('item/completed', { item: { type: 'agentMessage', id: 'too-late', phase: 'final_answer', text: final } }),
+    ]
+    const { adapter } = realCodexAdapter(shortPathProcess(wire), { generationRequest: request })
+    try {
+      await adapter.open({ cwd: process.cwd(), externalSessionId: null })
+      await adapter.startTurn(nativeCodexTurn(), new Map())
+      const events = []; for await (const event of adapter.events()) events.push(event)
+      const text = events.filter(event => event.kind === 'text')
+      expect(text).toContainEqual(expect.objectContaining({ itemId: 'public', operation: 'append', text: 'Checking title. ' }))
+      expect(text).toContainEqual(expect.objectContaining({ itemId: 'json', phase: 'body', text: '{"example":{"fontSize":48}}' }))
+      expect(text).toContainEqual(expect.objectContaining({ itemId: 'reply', text: 'I will adjust the title.' }))
+      expect(text.filter(event => event.phase === 'candidate')).toEqual([expect.objectContaining({ itemId: 'final', operation: 'replace', text: expect.stringContaining('"version":2') })])
+      expect(text.filter(event => event.phase !== 'candidate').every(event => !event.text.includes('requestId'))).toBe(true)
+      expect(text.some(event => ['nonfinal-edit', 'superseded', 'stale', 'too-late'].includes(event.itemId))).toBe(false)
+      expect(events.findIndex(event => event.kind === 'text' && event.phase === 'candidate')).toBeGreaterThan(events.findIndex(event => event.kind === 'tool' && event.itemId === 'after-final' && event.status === 'completed'))
+      expect(events.at(-1)).toMatchObject({ kind: 'turn-ended', status: 'completed' })
+    } finally { await adapter.close() }
+  })
+
+  it.each(['failed', 'interrupted'])('does not publish a completed final candidate when the native turn is %s', async status => {
+    const request = shortPathRequest(), candidate = JSON.stringify(shortPathCandidate(request))
+    const wire = [
+      shortPathWire('item/started', { item: { type: 'agentMessage', id: 'final', phase: 'final_answer' } }),
+      shortPathWire('item/agentMessage/delta', { itemId: 'final', delta: candidate }),
+      shortPathWire('item/completed', { item: { type: 'agentMessage', id: 'final', phase: 'final_answer', text: candidate } }),
+      shortPathWire('turn/completed', { turn: { id: 'native-turn', status } }),
+    ]
+    const { adapter } = realCodexAdapter(shortPathProcess(wire), { generationRequest: { ...request, expectedResult: 'candidate' } })
+    try {
+      await adapter.open({ cwd: process.cwd(), externalSessionId: null })
+      await adapter.startTurn(nativeCodexTurn(), new Map())
+      const events = []; for await (const event of adapter.events()) events.push(event)
+      expect(events.some(event => event.kind === 'text')).toBe(false)
+      expect(events.at(-1)).toMatchObject({ kind: 'turn-ended', status: status === 'interrupted' ? 'cancelled' : 'failed' })
+    } finally { await adapter.close() }
+  })
+
+  it('discards a buffered candidate when the user cancels before native completion', async () => {
+    const request = shortPathRequest(), candidate = JSON.stringify(shortPathCandidate(request))
+    const wire = [
+      shortPathWire('item/completed', { item: { type: 'agentMessage', id: 'final', phase: 'final_answer', text: candidate } }),
+      shortPathWire('item/started', { item: { type: 'commandExecution', id: 'cancel-here' } }),
+    ]
+    const { adapter, messages } = realCodexAdapter(shortPathProcess(wire), { generationRequest: { ...request, expectedResult: 'candidate' } })
+    try {
+      await adapter.open({ cwd: process.cwd(), externalSessionId: null })
+      await adapter.startTurn(nativeCodexTurn(), new Map())
+      const events = []
+      for await (const event of adapter.events()) {
+        events.push(event)
+        if (event.kind === 'tool') await adapter.cancel()
+      }
+      expect(messages.filter(message => message.method === 'turn/interrupt')).toHaveLength(1)
+      expect(events.some(event => event.kind === 'text')).toBe(false)
+      expect(events.at(-1)).toMatchObject({ kind: 'turn-ended', status: 'cancelled' })
+    } finally { await adapter.close() }
+  })
+
+  it.each(['malformed', 'other-request'])('fails a native successful turn with an invalid final transport: %s', async variant => {
+    const request = shortPathRequest()
+    const text = variant === 'malformed' ? '{"version":2,"requestId":' : JSON.stringify(shortPathCandidate({ ...request, requestId: randomUUID() }))
+    const { adapter } = realCodexAdapter(shortPathProcess([
+      shortPathWire('item/completed', { item: { type: 'agentMessage', id: 'final', phase: 'final_answer', text } }),
+      shortPathWire('turn/completed', { turn: { id: 'native-turn', status: 'completed' } }),
+    ]), { generationRequest: { ...request, expectedResult: 'candidate' } })
+    try {
+      await adapter.open({ cwd: process.cwd(), externalSessionId: null })
+      await adapter.startTurn(nativeCodexTurn(), new Map())
+      const events = []; for await (const event of adapter.events()) events.push(event)
+      expect(events.some(event => event.kind === 'text')).toBe(false)
+      expect(events.at(-1)).toMatchObject({ kind: 'turn-ended', status: 'failed' })
+    } finally { await adapter.close() }
+  })
+
+  it('keeps a final reply quoting a candidate tag on the public text channel', async () => {
+    const request = shortPathRequest(), reply = '<courseware-candidate-v1>{"example":true}</courseware-candidate-v1>'
+    const text = JSON.stringify({ version: 1, requestId: request.requestId, kind: 'reply', reply, candidate: null })
+    const { adapter } = realCodexAdapter(shortPathProcess([
+      shortPathWire('item/completed', { item: { type: 'agentMessage', id: 'final', phase: 'final_answer', text } }),
+      shortPathWire('turn/completed', { turn: { id: 'native-turn', status: 'completed' } }),
+    ]), { generationRequest: request })
+    try {
+      await adapter.open({ cwd: process.cwd(), externalSessionId: null })
+      await adapter.startTurn(nativeCodexTurn(), new Map())
+      const events = []; for await (const event of adapter.events()) events.push(event)
+      expect(events.filter(event => event.kind === 'text')).toEqual([expect.objectContaining({ phase: 'body', text: reply })])
+    } finally { await adapter.close() }
+  })
+
+  it('buffers an unphased reply envelope until its final item and successful turn are known', async () => {
+    const request = shortPathRequest(), reply = 'This final reply must be discarded.'
+    const text = JSON.stringify({ version: 1, requestId: request.requestId, kind: 'reply', reply, candidate: null })
+    const { adapter } = realCodexAdapter(shortPathProcess([
+      shortPathWire('item/agentMessage/delta', { itemId: 'final', delta: text }),
+      shortPathWire('item/completed', { item: { type: 'agentMessage', id: 'final', phase: 'final_answer', text } }),
+      shortPathWire('turn/completed', { turn: { id: 'native-turn', status: 'failed' } }),
+    ]), { generationRequest: request })
+    try {
+      await adapter.open({ cwd: process.cwd(), externalSessionId: null })
+      await adapter.startTurn(nativeCodexTurn(), new Map())
+      const events = []; for await (const event of adapter.events()) events.push(event)
+      expect(events.some(event => event.kind === 'text')).toBe(false)
+      expect(events.at(-1)).toMatchObject({ kind: 'turn-ended', status: 'failed' })
+    } finally { await adapter.close() }
+  })
+
+  it('keeps native last and total usage distinct and deduplicates only identified cumulative snapshots', async () => {
+    const last = { inputTokens: 10, outputTokens: 5, cachedInputTokens: 4, reasoningOutputTokens: 2, totalTokens: 15 }
+    const total1 = { inputTokens: 110, outputTokens: 25, cachedInputTokens: 54, reasoningOutputTokens: 12, totalTokens: 135 }
+    const total2 = { inputTokens: 120, outputTokens: 30, cachedInputTokens: 58, reasoningOutputTokens: 14, totalTokens: 150 }
+    const usages = [
+      { last, total: total1 }, { last, total: total1 }, { last, total: total2 }, { last, total: total1 },
+      { last: { inputTokens: -1, outputTokens: 1.5, cachedInputTokens: 0 } },
+      { last: { inputTokens: -1, outputTokens: 1.5, cachedInputTokens: 0 } }, { total: { inputTokens: 130 } },
+    ]
+    const wire = [...usages.map(tokenUsage => shortPathWire('thread/tokenUsage/updated', { tokenUsage })),
+      shortPathWire('turn/completed', { turn: { id: 'native-turn', status: 'completed' } })]
+    const { adapter } = realCodexAdapter(shortPathProcess(wire))
+    try {
+      await adapter.open({ cwd: process.cwd(), externalSessionId: null })
+      // Repeating the same native totals on a new run must not inherit the preceding turn's dedup set.
+      for (let i = 0; i < 2; i++) {
+        await adapter.startTurn(nativeCodexTurn(), new Map())
+        const events = []; for await (const event of adapter.events()) events.push(event)
+        const usage = events.filter(event => event.kind === 'usage')
+        expect(usage).toHaveLength(5)
+        expect(usage[0]).toMatchObject({ inputTokens: 10, outputTokens: 5, cachedInputTokens: 4,
+          tokenUsage: { version: 1, source: 'codex-app-server', last: { ...last, cacheWriteInputTokens: null }, total: { ...total1, cacheWriteInputTokens: null } } })
+        expect(usage[1]?.tokenUsage?.total).toEqual({ ...total2, cacheWriteInputTokens: null })
+        expect(usage[2]).toMatchObject({ inputTokens: null, outputTokens: null, cachedInputTokens: 0,
+          tokenUsage: { last: { inputTokens: null, outputTokens: null, reasoningOutputTokens: null, cacheWriteInputTokens: null, totalTokens: null }, total: null } })
+        expect(usage[4]).toMatchObject({ inputTokens: null, outputTokens: null, cachedInputTokens: null,
+          tokenUsage: { last: null, total: { inputTokens: 130, outputTokens: null } } })
+      }
+    } finally { await adapter.close() }
+  })
+})
 
 describe('Codex native subprocess failure and configuration boundaries', () => {
   it('rejects an initialization exit and can open another native process on the same adapter', async () => {
@@ -1031,7 +1378,7 @@ describe('Codex native configuration and permission passthrough', () => {
     try {
       await adapter.open({ cwd: process.cwd(), externalSessionId })
       const opened = messages.find(message => message.method === (externalSessionId ? 'thread/resume' : 'thread/start'))
-      expect(opened.params).toEqual({ cwd: process.cwd(), ...(externalSessionId ? { threadId: externalSessionId } : {}) })
+      expect(opened.params).toEqual({ cwd: process.cwd(), ...(externalSessionId ? { threadId: externalSessionId, excludeTurns: true } : {}) })
     } finally { await adapter.close() }
   })
 

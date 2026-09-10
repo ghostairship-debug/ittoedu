@@ -13,6 +13,9 @@ tmp/
 logs/
 .playwright-cli/
 .codex-remote-attachments/
+.verification/
+_verify/
+.agents/skills/**/editor-root.local.json
 coverage/
 repo-index/generated/
 __pycache__/

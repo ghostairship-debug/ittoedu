@@ -1,7 +1,7 @@
-import type { GenerationCandidate } from '../../../shared/generationContract'
+import type { GenerationCandidate } from './generationContract'
 
 type Carrier = GenerationCandidate['steps'][number]['carrier']
-/** The same tool policy is shown to the CLI and checked before execution. */
+/** The same tool policy is shown to the CLI, expanded from transport, and checked before execution. */
 export function authoringToolCarrierPolicy(tool: string): { default: Carrier; operations?: Record<string, Carrier> } {
   if (tool === 'component.insert') return { default: 'existing-component', operations: { candidate: 'generated-component', existing: 'existing-component', catalog: 'existing-component' } }
   if (tool === 'component.package') return { default: 'generated-component' }

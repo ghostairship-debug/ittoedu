@@ -30,35 +30,73 @@ import {
   type AgentExecutable,
 } from './process'
 
+interface AcpConfigSelectOption {
+  value: string
+  name?: string
+  description?: string
+}
+
+interface AcpConfigSelectGroup {
+  group: string
+  name?: string
+  options: AcpConfigSelectOption[]
+}
+
 export interface AcpConfigOption {
   id?: string
   name?: string
   category?: string
   type?: string
   currentValue?: string
-  options?: Array<{ value: string; name?: string; description?: string }>
+  options?: Array<AcpConfigSelectOption | AcpConfigSelectGroup>
+}
+
+function isSelectConfigOption(value: unknown): value is AcpConfigOption {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  const type = (value as AcpConfigOption).type
+  // Older OpenCode responses omitted type. Unknown future controls are not selects.
+  return type === undefined || type === 'select'
+}
+
+function readSelectOptions(option?: AcpConfigOption): Array<{ value: string; label: string }> {
+  if (!isSelectConfigOption(option) || !Array.isArray(option.options)) return []
+  const values: Array<{ value: string; label: string }> = []
+  const add = (entry: AcpConfigSelectOption, group?: string) => {
+    if (!entry || typeof entry.value !== 'string' || !entry.value.trim()) return
+    const name = typeof entry.name === 'string' && entry.name.trim() ? entry.name.trim() : entry.value
+    values.push({ value: entry.value, label: (group ? `${group}/${name}` : name).slice(0, 300) })
+  }
+  // ACP v1 SessionConfigSelectOptions permits flat values or one level of groups.
+  // Keep the native order and identity; group IDs are never selectable values.
+  for (const entry of option.options) {
+    if (!entry || typeof entry !== 'object') continue
+    if ('group' in entry) {
+      if (typeof entry.group !== 'string' || !Array.isArray(entry.options)) continue
+      const group = typeof entry.name === 'string' && entry.name.trim() ? entry.name.trim() : entry.group
+      for (const value of entry.options) add(value, group)
+    } else add(entry)
+  }
+  return values
 }
 
 export function buildOpenCodeCapabilities(cliVersion: string, modelOption?: AcpConfigOption, effortOption?: AcpConfigOption): LocalAgentCapabilities {
   const models: LocalAgentCapabilities['models'] = []
   const seen = new Set<string>()
 
-  if (modelOption?.options && Array.isArray(modelOption.options)) {
-    for (const opt of modelOption.options) {
-      if (opt && typeof opt.value === 'string' && opt.value.trim() && !seen.has(opt.value)) {
-        seen.add(opt.value)
-        models.push({
-          id: opt.value,
-          resolvedModel: null,
-          label: (opt.name && opt.name.trim()) || opt.value,
-          image: 'unknown',
-          effort: { kind: 'unknown' },
-        })
-      }
+  for (const opt of readSelectOptions(modelOption)) {
+    if (!seen.has(opt.value)) {
+      seen.add(opt.value)
+      models.push({
+        id: opt.value,
+        resolvedModel: null,
+        label: opt.label,
+        image: 'unknown',
+        effort: { kind: 'unknown' },
+      })
     }
   }
 
-  const currentValue = (modelOption?.currentValue && typeof modelOption.currentValue === 'string' && modelOption.currentValue.trim()) || null
+  const currentValue = (isSelectConfigOption(modelOption) && typeof modelOption.currentValue === 'string' && modelOption.currentValue.trim()) || null
 
   if (currentValue && !seen.has(currentValue)) {
     seen.add(currentValue)
@@ -72,14 +110,13 @@ export function buildOpenCodeCapabilities(cliVersion: string, modelOption?: AcpC
   }
 
   const currentModel = currentValue && seen.has(currentValue) ? currentValue : null
-  const effortValues = [...new Set((Array.isArray(effortOption?.options) ? effortOption.options : [])
-    .filter(option => option && typeof option.value === 'string' && option.value.trim()).map(option => option.value))]
+  const effortValues = [...new Set(readSelectOptions(effortOption).map(option => option.value))]
   const currentEffort = typeof effortOption?.currentValue === 'string' && effortValues.includes(effortOption.currentValue)
     ? effortOption.currentValue : null
   const current = models.find(model => model.id === currentModel)
   // ACP exposes effort for the currently selected model only. The directory
   // for another model is unknown until its own set_config_option response.
-  if (current) current.effort = effortOption?.id && (!effortOption.type || effortOption.type === 'select') && effortValues.length
+  if (current) current.effort = effortOption?.id && isSelectConfigOption(effortOption) && effortValues.length
     ? { kind: 'supported', values: effortValues, default: null }
     : { kind: 'unsupported' }
 
@@ -119,6 +156,7 @@ export class OpenCodeAcpAdapter implements LocalAgentCliAdapterV2 {
   readonly id = 'opencode' as const
   private child?: ChildProcessWithoutNullStreams
   private cwd = ''
+  private candidateRoot?: string
   private sessionId: string | null = null
   private capabilities?: LocalAgentCapabilities
   private cliVersion = '1.0.0'
@@ -160,7 +198,7 @@ export class OpenCodeAcpAdapter implements LocalAgentCliAdapterV2 {
   getExternalSessionId(): string | null { return this.sessionId }
 
   private readConfiguration(configOptions: unknown, fallbackModel?: AcpConfigOption, fallbackEffort?: AcpConfigOption): LocalAgentCapabilities {
-    const options: AcpConfigOption[] = Array.isArray(configOptions) ? configOptions : []
+    const options = Array.isArray(configOptions) ? configOptions.filter(isSelectConfigOption) : []
     this.modelOption = options.find(option => option && (option.id === this.modelConfigId || option.id === 'model' || option.category === 'model')) ?? fallbackModel
     this.effortOption = options.find(option => option && (option.id === 'effort' || option.category === 'thought_level')) ?? fallbackEffort
     this.modelConfigId = typeof this.modelOption?.id === 'string' ? this.modelOption.id : null
@@ -211,9 +249,10 @@ export class OpenCodeAcpAdapter implements LocalAgentCliAdapterV2 {
     if (lifecycle !== this.lifecycle || this.closed) throw new Error('interrupted')
     if (!binary) throw new Error('missing')
     this.cwd = input.cwd
+    this.candidateRoot = input.candidateRoot
 
     try {
-      this.child = launchAgent(binary, ['acp'], this.cwd)
+      this.child = launchAgent(binary, ['acp'], this.cwd, this.candidateRoot)
     } catch {
       throw new Error('launch')
     }
@@ -290,8 +329,8 @@ export class OpenCodeAcpAdapter implements LocalAgentCliAdapterV2 {
         value: config.model,
       })
 
-      const configOptions = Array.isArray(result?.configOptions) ? result.configOptions : []
-      const modelOption = configOptions.find((opt: any) => opt.id === this.modelConfigId || opt.id === 'model' || opt.category === 'model')
+      const configOptions = Array.isArray(result?.configOptions) ? result.configOptions.filter(isSelectConfigOption) : []
+      const modelOption = configOptions.find((opt: AcpConfigOption) => opt.id === this.modelConfigId || opt.id === 'model' || opt.category === 'model')
       const actualValue = modelOption?.currentValue ?? result?.currentValue ?? result?.value
       if (actualValue !== config.model) {
         throw new Error(`配置 OpenCode 模型失败：预期 ${config.model}，实际返回 ${String(actualValue)}`)
@@ -311,7 +350,7 @@ export class OpenCodeAcpAdapter implements LocalAgentCliAdapterV2 {
         const effortResult = await this.sendRequest('session/set_config_option', {
           sessionId: this.sessionId, configId: effortOption.id, value: config.effort,
         })
-        const effortOptions: AcpConfigOption[] = Array.isArray(effortResult?.configOptions) ? effortResult.configOptions : []
+        const effortOptions: AcpConfigOption[] = Array.isArray(effortResult?.configOptions) ? effortResult.configOptions.filter(isSelectConfigOption) : []
         const confirmedEffort = effortOptions.find(option => option.id === effortOption.id || option.category === 'thought_level')
         const actualEffort = confirmedEffort?.currentValue ?? effortResult?.currentValue ?? effortResult?.value
         this.readConfiguration(effortOptions, this.modelOption,
@@ -667,9 +706,12 @@ export class OpenCodeAcpAdapter implements LocalAgentCliAdapterV2 {
         if (params.args !== undefined && (!Array.isArray(params.args) || params.args.some((arg: unknown) => typeof arg !== 'string'))) throw new Error('Terminal args must be strings')
         if (params.cwd !== undefined && (typeof params.cwd !== 'string' || !path.isAbsolute(params.cwd))) throw new Error('Terminal cwd must be absolute')
         if (params.outputByteLimit !== undefined && (!Number.isInteger(params.outputByteLimit) || params.outputByteLimit < 1)) throw new Error('Terminal output limit must be positive')
-        const environment = agentEnvironment()
+        const environment = agentEnvironment(process.env, this.candidateRoot)
         for (const entry of params.env ?? []) {
           if (typeof entry?.name !== 'string' || !entry.name || entry.name.includes('=') || typeof entry.value !== 'string') throw new Error('Invalid terminal environment')
+          if (process.platform === 'win32' && entry.name.toLowerCase() === 'courseware_candidate_root') {
+            for (const key of Object.keys(environment)) if (key.toLowerCase() === 'courseware_candidate_root') delete environment[key]
+          }
           environment[entry.name] = entry.value
         }
         const terminalId = randomUUID()

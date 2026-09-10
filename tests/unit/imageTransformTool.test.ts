@@ -1,5 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it, vi } from 'vitest'
+import { readFileSync } from 'node:fs'
 import sharp from 'sharp'
 import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
 import { createBlankFlowCourseProject } from '@/renderer/project/createFlowCourseProject'
@@ -21,12 +22,14 @@ import { buildPublishedCourseV2Payload } from '@/renderer/export/course'
 import type { AuthoringToolDestinationV1 } from '@/shared/authoringToolContract'
 import type { CourseProjectDocument } from '@/shared/courseProjectTypes'
 
-function setup(kind: 'slide' | 'flow' | 'flow-overlay' | 'spatial-2d' = 'slide') {
+function setup(kind: 'slide' | 'flow' | 'flow-overlay' | 'spatial-2d' = 'slide', original = {
+  bytes: encodeImageTransformPng({ width: 2, height: 1, data: Uint8Array.from([255, 0, 0, 128, 0, 0, 0, 255]) }), width: 2, height: 1,
+}) {
   const project = kind === 'slide' ? createBlankCourseProject() : kind === 'spatial-2d' ? createBlankSpatialCourseProject() : createBlankFlowCourseProject()
   const surface = project.surfaces[0]!, location = project.locations[0]!
-  const source = encodeImageTransformPng({ width: 2, height: 1, data: Uint8Array.from([255, 0, 0, 128, 0, 0, 0, 255]) })
+  const source = original.bytes
   project.assets.original = { id: 'original', kind: 'image', filename: '原始示意图.png', mimeType: 'image/png',
-    path: 'assets/original.png', byteLength: source.length, width: 2, height: 1 }
+    path: 'assets/original.png', byteLength: source.length, width: original.width, height: original.height }
   const owner = surface.type === 'slide' ? 'scene' : surface.type === 'spatial-2d' ? 'world' : 'surface'
   const scope = courseAuthoringScopeFromLocation({ project, locationId: location.id, stateId: null, owner })
   const makeImage = (id: string, order: number) => sceneNodeToCourseLayerItem(createImageNode({ id, name: id,
@@ -69,6 +72,22 @@ function setup(kind: 'slide' | 'flow' | 'flow-overlay' | 'spatial-2d' = 'slide')
 }
 
 describe('image transform single-instance resource transaction', () => {
+  it.each(['slide', 'flow', 'flow-overlay', 'spatial-2d'] as const)('rejects the retained corrupt baseline PNG on %s without replacing either shared image', async kind => {
+    const bytes = new Uint8Array(readFileSync(new URL('../fixtures/image-validation/architecture-baseline-corrupt-idat.png', import.meta.url)))
+    const h = setup(kind, { bytes, width: 1, height: 1 }), before = structuredClone(h.state)
+    const receipt = await executeAuthoringTool(h.request, imageTransformTool, h.port)
+    expect(receipt).toMatchObject({ status: 'failed', beforeRevision: before.document.revision, afterRevision: before.document.revision,
+      affected: [], resources: { assetIds: [], packageIds: [] },
+      diagnostics: [{ code: 'image-source-decode-failed', path: ['input', 'sourceAssetId'] }] })
+    expect(receipt.diagnostics[0]!.message).toContain('original')
+    expect(receipt.diagnostics[0]!.message).toContain('IDAT')
+    expect(h.port.commit).not.toHaveBeenCalled()
+    expect(h.state).toEqual(before)
+    expect(h.history.past).toHaveLength(0)
+    expect(h.imageId(h.state.document, 'selected-image')).toBe('original')
+    expect(h.imageId(h.state.document, 'shared-image')).toBe('original')
+  })
+
   it.each(['slide', 'flow', 'flow-overlay', 'spatial-2d'] as const)('recolors one %s instance, preserves sharing and authoring data, and survives undo/redo/save/reopen/Published', async kind => {
     const h = setup(kind), before = structuredClone(h.state), untouched = structuredClone(h.item(h.state.document, 'shared-image'))
     const receipt = await executeAuthoringTool(h.request, imageTransformTool, h.port)

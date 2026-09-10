@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto'
 import { describe, expect, it, vi } from 'vitest'
 import { GenerationTaskController, type GenerationPrepared } from '../../src/renderer/authoring/generation/generationTaskController'
 import { createBlankCourseProject } from '../../src/renderer/project/createCourseProject'
-import { generationCandidateSchema, generationCommitReceiptSchema, generationRequestSchema, type GenerationCandidate, type GenerationCommitReceipt, type GenerationRequest } from '../../src/shared/generationContract'
+import { GenerationCandidatePreparationError, generationCandidateSchema, generationCommitReceiptSchema, generationRequestSchema, type GenerationAfterCommit, type GenerationCandidate, type GenerationCommitReceipt, type GenerationFailure, type GenerationRequest } from '../../src/shared/generationContract'
 import { localAgentRequestSchema, localAgentResponseSchema, type LocalAgentRequest, type LocalAgentResponse } from '../../src/shared/localAgentContract'
 import type { AiUserInput } from '../../src/shared/localAgentInteraction'
 
@@ -18,7 +18,7 @@ function deferred<T>() {
 
 /** Controller unit ports only: no CLI, browser, screenshot or production commit
  * is executed. Preparation and live apply deliberately return different effects. */
-function fixture(outcomes: Array<'candidate' | 'answer' | 'candidate-rejected' | 'incomplete'>, applyPolicy: 'auto' | 'preview' = 'auto', intent: 'edit' | 'discuss' | 'plan' = 'edit') {
+function fixture(outcomes: Array<'candidate' | 'answer' | 'candidate-rejected' | 'candidate-format-error' | 'incomplete'>, applyPolicy: 'auto' | 'preview' = 'auto', intent: 'edit' | 'discuss' | 'plan' = 'edit') {
   let document = createBlankCourseProject({ id: 'controller-unit-project', title: 'Before' })
   const workspace = { version: 1 as const, projectId: document.id, normalizedPath: 'c:/lessons/controller-unit.h5lesson' }
   const owner = { projectId: workspace.projectId, projectPath: workspace.normalizedPath }
@@ -28,7 +28,13 @@ function fixture(outcomes: Array<'candidate' | 'answer' | 'candidate-rejected' |
   const previews = new Map<string, { request: GenerationRequest; prepared: GenerationPrepared }>()
   let sessionId = randomUUID(), stage = -1, sequence = 0
   const behavior = {
+    afterCommit: undefined as GenerationAfterCommit | undefined,
+    failure: undefined as GenerationFailure | undefined,
+    projectedDeadline: undefined as number | undefined,
+    projectHostResult: false,
+    async onLaunch(_sessionId: string) {},
     async onHostResult(_call: HostResultCall) {},
+    async onRead() {},
     async beforeApply() {},
     async onInput(_input: AiUserInput) {},
     async onCancel(_sessionId: string) {},
@@ -49,6 +55,7 @@ function fixture(outcomes: Array<'candidate' | 'answer' | 'candidate-rejected' |
   }
   function candidate(input: GenerationRequest) {
     return generationCandidateSchema.parse({ version: 1, requestId: input.requestId, candidateId: randomUUID(), summary: `Stage ${stage + 1}`,
+      ...(behavior.afterCommit ? { afterCommit: behavior.afterCommit } : {}),
       steps: [{ id: 'title', tool: 'native.content', carrier: 'native', destination: input.destinations[0], input: { operation: 'update' } }] })
   }
   function makePrepared(input: GenerationRequest, value: GenerationCandidate): GenerationPrepared {
@@ -68,18 +75,28 @@ function fixture(outcomes: Array<'candidate' | 'answer' | 'candidate-rejected' |
       else expect(input.sessionId).toBe(sessionId)
       stage++
       requests.push(input.request)
-      response = { enabled: true, sessionId }
+      const launchedSessionId = sessionId
+      await behavior.onLaunch(launchedSessionId)
+      response = { enabled: true, sessionId: launchedSessionId }
     } else if (input.operation === 'read') {
+      await behavior.onRead()
       response = { enabled: true, records: [{ version: 1, id: sessionId, adapter: 'codex', workspace, status: 'completed',
+        ...(behavior.projectedDeadline === undefined ? {} : { task: { taskId: randomUUID(), epoch: 0, intent: 'edit', applyPolicy, status: 'checking', turnId: null, deadlineAt: behavior.projectedDeadline, committedStages: receipts.length } }),
         events: [{ version: 1, adapter: 'codex', sessionId, sequence: ++sequence, time: 0, kind: 'completed', payload: {} }] }] }
     } else if (input.operation === 'candidate') {
       const current = requests.at(-1)!
       response = { enabled: true, generationResult: outcomes[stage] === 'candidate'
         ? { kind: 'candidate', requestId: current.requestId, candidate: candidate(current) }
-        : outcomes[stage] === 'candidate-rejected' ? { kind: 'candidate-rejected', requestId: current.requestId, candidateId: randomUUID(), finding: 'scope-mismatch：authoringAddress 不属于当前授权目标' }
+        : outcomes[stage] === 'candidate-rejected' ? { kind: 'candidate-rejected', requestId: current.requestId, candidateId: randomUUID(), finding: 'scope-mismatch：authoringAddress 不属于当前授权目标', ...(behavior.failure ? { failure: behavior.failure } : {}) }
+        : outcomes[stage] === 'candidate-format-error' ? { kind: 'candidate-format-error', requestId: current.requestId, finding: '候选格式错误', excerpt: '{}', ...(behavior.failure ? { failure: behavior.failure } : {}) }
         : outcomes[stage] === 'incomplete' ? { kind: 'incomplete', requestId: current.requestId, finding: '编辑未完成：本任务没有正式修改回执' }
         : { kind: 'answer', requestId: current.requestId } }
-    } else if (input.operation === 'host-result') await behavior.onHostResult(input)
+    } else if (input.operation === 'host-result') {
+      await behavior.onHostResult(input)
+      if (behavior.projectHostResult) response = { enabled: true, records: [{ version: 1, id: sessionId, adapter: 'codex', workspace, status: 'completed', hostResult: { ...input.result, receiptDelivery: 'pending' },
+        task: { taskId: randomUUID(), epoch: 0, intent: 'edit', applyPolicy, status: input.result.afterCommit?.action === 'finish' ? 'completed' : 'feeding-back', turnId: null,
+          deadlineAt: behavior.projectedDeadline ?? null, committedStages: receipts.length, receiptDelivery: 'pending' }, events: [] }] }
+    }
     else if (input.operation === 'input') {
       await behavior.onInput(input.input)
       response = { enabled: true, inputDelivery: {
@@ -120,7 +137,299 @@ function fixture(outcomes: Array<'candidate' | 'answer' | 'candidate-rejected' |
   }
 }
 
+describe('GenerationTaskController deadline recovery feedback', () => {
+  it('reports zero modifications when Main reaches the same deadline before the checked-feedback timer', async () => {
+    vi.useFakeTimers(); vi.setSystemTime(1000)
+    const f = fixture(['candidate']), pending = deferred<void>()
+    f.behavior.onHostResult = async call => {
+      if (call.result.status === 'checked') { await pending.promise; throw new Error('Main：本任务已达到执行期限') }
+    }
+    try {
+      const running = f.controller.start({ ...f.request(), execution: { version: 1, startedAt: 1000, deadlineAt: 1100 } }, 'codex')
+      await vi.advanceTimersByTimeAsync(0)
+      expect(f.controller.current.phase).toBe('checking')
+      // Move the clock without firing renderer timers: Main's rejection wins
+      // at the same absolute deadline and must receive the same recovery detail.
+      vi.setSystemTime(1100); pending.resolve()
+      await vi.advanceTimersByTimeAsync(0); await running
+      expect(f.controller.current).toMatchObject({ busy: false, phase: 'failed', canRetryFeedback: false,
+        error: expect.stringContaining('宿主结果反馈未保存') })
+      expect(f.controller.current.notice).toContain('已完成：本任务零修改，没有已提交的修改')
+      expect(f.controller.current.notice).toContain('未完成：保存候选检查结果（Stage 1）')
+      expect(f.controller.current.notice).toContain('恢复点：从当前课件重新观察')
+      expect(f.controller.current.notice).toContain('旧候选已丢弃，不可直接应用')
+      pending.resolve(); await vi.advanceTimersByTimeAsync(0)
+      expect(f.apply).not.toHaveBeenCalled(); expect(f.receipts).toEqual([])
+    } finally { pending.resolve(); vi.useRealTimers() }
+  })
+
+  it('lists both actual committed stages and the unfinished third preparation without extending the budget', async () => {
+    vi.useFakeTimers(); vi.setSystemTime(1000)
+    const f = fixture(['candidate', 'candidate', 'candidate']), pending = deferred<void>()
+    let preparedCount = 0
+    f.prepare.mockImplementation(async (request, candidate) => {
+      const prepared = f.makePrepared(request, candidate)
+      if (++preparedCount === 3) await pending.promise
+      return prepared
+    })
+    try {
+      const running = f.controller.start({ ...f.request(), execution: { version: 1, startedAt: 1000, deadlineAt: 1100 } }, 'codex')
+      await vi.advanceTimersByTimeAsync(0)
+      expect(f.prepare).toHaveBeenCalledTimes(3); expect(f.receipts).toHaveLength(2)
+      await vi.advanceTimersByTimeAsync(100); await running
+      const notice = f.controller.current.notice, completed = notice.split('\n未完成：')[0]!
+      expect(completed).toContain('1. 已提交：Stage 1')
+      expect(completed).toContain('2. 已提交：Stage 2')
+      expect(completed).not.toContain('Stage 3')
+      expect(notice).toContain('未完成：检查并准入当前候选（Stage 3）')
+      expect(notice).toContain('此前合法提交已保留')
+      expect(notice).toContain('恢复点：从当前课件重新观察')
+      expect(notice).toContain('旧候选已丢弃，不可直接应用')
+      expect(f.requests.map(request => request.execution)).toEqual(Array.from({ length: 3 }, () => ({ version: 1, startedAt: 1000, deadlineAt: 1100 })))
+      pending.resolve(); await vi.advanceTimersByTimeAsync(0)
+      expect(f.apply).toHaveBeenCalledTimes(2); expect(f.receipts).toHaveLength(2)
+    } finally { pending.resolve(); vi.useRealTimers() }
+  })
+
+  it('preserves an applied stage when receipt storage times out and offers record-only recovery', async () => {
+    vi.useFakeTimers(); vi.setSystemTime(1000)
+    const f = fixture(['candidate']), pending = deferred<void>()
+    f.behavior.afterCommit = { version: 1, action: 'finish' }
+    f.behavior.onHostResult = async call => { if (call.commitReceipt) await pending.promise }
+    try {
+      const running = f.controller.start({ ...f.request(), execution: { version: 1, startedAt: 1000, deadlineAt: 1100 } }, 'codex')
+      await vi.advanceTimersByTimeAsync(0)
+      expect(f.receipts).toHaveLength(1)
+      await vi.advanceTimersByTimeAsync(100); await running
+      expect(f.controller.current).toMatchObject({ busy: false, phase: 'failed', canRetryFeedback: true, receipt: f.receipts[0] })
+      expect(f.controller.current.notice).toContain('已完成：1. 已提交：Stage 1')
+      expect(f.controller.current.notice).not.toContain('零修改')
+      expect(f.controller.current.notice).toContain('未完成：保存已应用阶段的正式回执（Stage 1）')
+      expect(f.controller.current.notice).toContain('先重试保存实际结果的回执，只补记录、不重复应用')
+      expect(f.controller.current.notice).toContain('从当前课件重新观察')
+      pending.resolve(); await vi.advanceTimersByTimeAsync(0)
+      await f.controller.retryFeedback()
+      expect(f.apply).toHaveBeenCalledTimes(1); expect(f.receipts).toHaveLength(1)
+      expect(f.captureNext).not.toHaveBeenCalled()
+    } finally { pending.resolve(); vi.useRealTimers() }
+  })
+})
+
 describe('GenerationTaskController unit task lifecycle', () => {
+  it('finishes an acknowledged terminal commit without another observation or native turn and adopts the host projection', async () => {
+    const f = fixture(['candidate'])
+    f.behavior.afterCommit = { version: 1, action: 'finish' }; f.behavior.projectHostResult = true
+    await f.controller.start(f.request(), 'codex')
+    expect(f.controller.current).toMatchObject({ busy: false, phase: 'completed', record: { task: { status: 'completed', receiptDelivery: 'pending' } } })
+    expect(f.hostResults().map(call => call.result.status)).toEqual(['checked', 'committed'])
+    expect(f.hostResults().at(-1)?.result.afterCommit).toEqual({ version: 1, action: 'finish' })
+    expect(f.apply).toHaveBeenCalledOnce(); expect(f.captureNext).not.toHaveBeenCalled()
+    expect(f.calls.filter(call => call.operation === 'continue' || call.operation === 'cancel')).toHaveLength(0)
+  })
+
+  it('finishes a terminal unchanged receipt without a commit or native round trip', async () => {
+    const f = fixture(['candidate']), request = f.request()
+    f.behavior.afterCommit = { version: 1, action: 'finish' }
+    f.apply.mockImplementation(previewId => {
+      const prepared = f.previews.get(previewId)!.prepared
+      return { status: 'unchanged', receipt: generationCommitReceiptSchema.parse({ version: 1, requestId: request.requestId, candidateId: prepared.candidateId, workspace: request.workspace,
+        status: 'unchanged', beforeRevision: request.documentRevision, afterRevision: request.documentRevision, affected: [], resources: { assetIds: [], packageIds: [] } }) }
+    })
+    await f.controller.start(request, 'codex')
+    expect(f.controller.current).toMatchObject({ phase: 'completed', notice: '已确认当前内容满足要求，无需修改', receipt: { status: 'unchanged' } })
+    expect(f.receipts).toHaveLength(0); expect(f.captureNext).not.toHaveBeenCalled()
+    expect(f.hostResults().at(-1)?.commitReceipt?.status).toBe('unchanged')
+  })
+
+  it('keeps a terminal preview pending until the actual apply and receipt acknowledgement', async () => {
+    const f = fixture(['candidate'], 'preview'); f.behavior.afterCommit = { version: 1, action: 'finish' }
+    const pending = deferred<void>()
+    f.behavior.onHostResult = async call => { if (call.commitReceipt) await pending.promise }
+    const running = f.controller.start(f.request(), 'codex')
+    await expect.poll(() => f.controller.current.phase).toBe('awaiting-apply')
+    expect(f.apply).not.toHaveBeenCalled(); expect(f.hostResults().at(-1)?.result.status).toBe('checked')
+    f.controller.applyPreview()
+    await expect.poll(() => f.hostResults().filter(call => call.commitReceipt).length).toBe(1)
+    expect(f.controller.current.busy).toBe(true); expect(f.controller.current.phase).not.toBe('completed')
+    pending.resolve(); await running
+    expect(f.controller.current.phase).toBe('completed'); expect(f.captureNext).not.toHaveBeenCalled()
+  })
+
+  it('continues explicit observe and dynamic evidence requiring review even when the candidate requested finish', async () => {
+    for (const dynamic of [false, true]) {
+      const f = fixture(['candidate', 'answer'])
+      f.behavior.afterCommit = dynamic ? { version: 1, action: 'finish' } : { version: 1, action: 'observe', reason: '检查修改后排版' }
+      if (dynamic) f.prepare.mockImplementation(async (request, candidate) => ({ ...f.makePrepared(request, candidate), behaviorEvidence: [{ version: 1, status: 'observed', mode: 'public-props', projectId: request.workspace.projectId,
+        documentRevision: request.documentRevision, locationId: 'location', stateId: null, instanceIds: ['instance'], sourceIdentities: { instance: 'source' }, actions: ['update-inputs'], elapsedMs: 1, semanticVerdict: 'requires-review',
+        frames: [{ phase: 'running', elapsedMs: 1, capturedAt: 1, stateVersion: 1, publicState: {}, width: 1, height: 1, dataUrl: 'data:image/png;base64,AA==' }] }] }))
+      await f.controller.start(f.request(), 'codex')
+      expect(f.hostResults().at(-1)?.result.afterCommit).toMatchObject({ action: 'observe', reason: expect.any(String) })
+      expect(f.captureNext).toHaveBeenCalledOnce(); expect(f.calls.filter(call => call.operation === 'continue')).toHaveLength(1)
+    }
+  })
+
+  it('passes complete preparation failure metadata to the host instead of replacing it with the display summary', async () => {
+    const f = fixture(['candidate', 'answer'])
+    f.prepare.mockImplementationOnce(async (request, candidate) => { throw new GenerationCandidatePreparationError({ version: 1, stage: 'dynamic-admission', requestId: request.requestId, candidateId: candidate.candidateId,
+      stepId: 'animate', tool: 'runtime.source', destination: candidate.steps[0]!.destination, assetIds: ['fallback'], packageIds: [], diagnostics: [{ code: 'dynamic-host-failed', message: '实例恢复失败', path: ['instances', 'runtime', 'resume'] }] }) })
+    await f.controller.start(f.request(), 'codex')
+    expect(f.hostResults()[0]?.result).toMatchObject({ status: 'rejected', failure: { stage: 'dynamic-admission', stepId: 'animate', tool: 'runtime.source', assetIds: ['fallback'], diagnostics: [{ code: 'dynamic-host-failed', path: ['instances', 'runtime', 'resume'] }] } })
+    expect(f.apply).not.toHaveBeenCalled()
+  })
+
+  it.each(['candidate-format-error', 'candidate-rejected'] as const)('preserves structured %s diagnostics before preparation', async kind => {
+    const f = fixture([kind, 'answer']), request = f.request()
+    f.behavior.failure = { version: 1, stage: 'candidate-parse', requestId: request.requestId, stepId: 'title', destination: request.destinations[0],
+      diagnostics: [{ code: 'invalid_type', message: 'Expected string', path: ['steps', 0, 'id'] }], assetIds: [], packageIds: [] }
+    await f.controller.start(request, 'codex')
+    expect(f.hostResults()[0]?.result).toMatchObject({ status: 'rejected', failure: f.behavior.failure })
+    expect(f.prepare).not.toHaveBeenCalled(); expect(f.apply).not.toHaveBeenCalled()
+  })
+
+  it('retries only an already committed terminal receipt after two storage failures and after the execution deadline', async () => {
+    vi.useFakeTimers(); vi.setSystemTime(1000)
+    try {
+      const f = fixture(['candidate']); f.behavior.afterCommit = { version: 1, action: 'finish' }
+      f.behavior.onHostResult = async call => { if (call.commitReceipt) throw new Error('disk unavailable') }
+      await f.controller.start({ ...f.request(), execution: { version: 1, startedAt: 1000, deadlineAt: 1100 } }, 'codex')
+      expect(f.controller.current).toMatchObject({ busy: false, phase: 'failed', canRetryFeedback: true, receipt: f.receipts[0] })
+      expect(f.calls.filter(call => call.operation === 'cancel')).toHaveLength(0)
+      vi.setSystemTime(2000); f.behavior.onHostResult = async () => {}
+      await f.controller.retryFeedback()
+      expect(f.controller.current).toMatchObject({ busy: false, phase: 'completed', canRetryFeedback: false })
+      const results = f.hostResults().filter(call => call.commitReceipt)
+      expect(results).toHaveLength(3); expect(results[0]).toEqual(results[2])
+      expect(f.apply).toHaveBeenCalledOnce(); expect(f.captureNext).not.toHaveBeenCalled()
+      expect(f.calls.filter(call => call.operation === 'continue' || call.operation === 'cancel')).toHaveLength(0)
+    } finally { vi.useRealTimers() }
+  })
+
+  it('does not revive a stopped task or resume a nonterminal task when retrying its known receipt', async () => {
+    for (const stop of [false, true]) {
+      const f = fixture(['candidate'])
+      f.behavior.afterCommit = stop ? { version: 1, action: 'finish' } : { version: 1, action: 'observe', reason: '检查布局' }
+      f.behavior.onHostResult = async call => { if (call.commitReceipt) throw new Error('disk unavailable') }
+      await f.controller.start(f.request(), 'codex')
+      if (stop) await f.controller.stop()
+      f.behavior.onHostResult = async () => {}
+      await f.controller.retryFeedback()
+      expect(f.controller.current).toMatchObject({ busy: false, phase: 'failed', canRetryFeedback: false })
+      expect(f.apply).toHaveBeenCalledOnce(); expect(f.captureNext).not.toHaveBeenCalled()
+      expect(f.calls.filter(call => call.operation === 'continue')).toHaveLength(0)
+    }
+  })
+
+  it('clears only the retry flag when its receipt ACK arrives after Stop without reviving the task', async () => {
+    const f = fixture(['candidate']), pending = deferred<void>()
+    f.behavior.afterCommit = { version: 1, action: 'finish' }
+    f.behavior.onHostResult = async call => { if (call.commitReceipt) throw new Error('disk unavailable') }
+    await f.controller.start(f.request(), 'codex')
+    f.behavior.onHostResult = async call => { if (call.commitReceipt) await pending.promise }
+    const retrying = f.controller.retryFeedback()
+    await expect.poll(() => f.hostResults().filter(call => call.commitReceipt).length).toBe(3)
+    await f.controller.stop()
+    expect(f.controller.current).toMatchObject({ phase: 'cancelled', busy: false, canRetryFeedback: true })
+    pending.resolve(); await retrying
+    expect(f.controller.current).toMatchObject({ phase: 'cancelled', busy: false, canRetryFeedback: false })
+    expect(f.apply).toHaveBeenCalledOnce(); expect(f.captureNext).not.toHaveBeenCalled()
+  })
+
+  it('publishes infrastructure failure without waiting for a stalled cancellation IPC', async () => {
+    vi.useFakeTimers(); vi.setSystemTime(1000)
+    const pending = deferred<void>()
+    try {
+      const f = fixture(['candidate'])
+      f.behavior.onHostResult = async () => { throw new Error('checked storage unavailable') }
+      f.behavior.onCancel = () => pending.promise
+      const running = f.controller.start({ ...f.request(), execution: { version: 1, startedAt: 1000, deadlineAt: 1100 } }, 'codex')
+      await vi.advanceTimersByTimeAsync(100)
+      expect(f.controller.current).toMatchObject({ busy: false, phase: 'failed', error: expect.stringContaining('checked storage unavailable') })
+      expect(f.calls.filter(call => call.operation === 'cancel')).toHaveLength(1)
+      await running
+    } finally { pending.resolve(); vi.useRealTimers() }
+  })
+
+  it.each(['prepare', 'preview', 'before-apply', 'capture-next', 'receipt-ipc', 'read-ipc'] as const)('expires during %s without permitting a late apply or native continuation', async boundary => {
+    vi.useFakeTimers(); vi.setSystemTime(1000)
+    const pending = deferred<void>()
+    try {
+      const f = fixture(['candidate', 'answer'], boundary === 'preview' ? 'preview' : 'auto')
+      if (boundary === 'prepare') f.prepare.mockImplementationOnce(async (request, candidate) => { const prepared = f.makePrepared(request, candidate); await pending.promise; return prepared })
+      if (boundary === 'before-apply') f.behavior.beforeApply = () => pending.promise
+      if (boundary === 'capture-next') f.captureNext.mockImplementationOnce(async () => { await pending.promise; return f.request() })
+      if (boundary === 'receipt-ipc') f.behavior.onHostResult = async call => { if (call.commitReceipt) await pending.promise }
+      if (boundary === 'read-ipc') f.behavior.onRead = () => pending.promise
+      const running = f.controller.start({ ...f.request(), execution: { version: 1, startedAt: 1000, deadlineAt: 1100 } }, 'codex')
+      await vi.advanceTimersByTimeAsync(100)
+      await running
+      expect(f.controller.current).toMatchObject({ busy: false, phase: 'failed', preview: undefined, error: expect.stringContaining('20分钟') })
+      const committed = boundary === 'capture-next' || boundary === 'receipt-ipc'
+      expect(f.apply).toHaveBeenCalledTimes(committed ? 1 : 0)
+      if (boundary === 'receipt-ipc') expect(f.controller.current.canRetryFeedback).toBe(true)
+      f.controller.applyPreview(); pending.resolve(); await vi.advanceTimersByTimeAsync(0)
+      expect(f.apply).toHaveBeenCalledTimes(committed ? 1 : 0)
+      expect(f.calls.filter(call => call.operation === 'continue')).toHaveLength(0)
+    } finally { pending.resolve(); vi.useRealTimers() }
+  })
+
+  it('takes an earlier main task deadline and keeps that absolute budget across successful continuations', async () => {
+    const normal = fixture(['candidate', 'candidate', 'answer'])
+    await normal.controller.start(normal.request(), 'codex')
+    expect(normal.requests.map(request => request.execution)).toEqual([normal.requests[0]!.execution, normal.requests[0]!.execution, normal.requests[0]!.execution])
+    vi.useFakeTimers(); vi.setSystemTime(1000)
+    const pending = deferred<void>()
+    try {
+      const f = fixture(['candidate'], 'preview'); f.behavior.projectedDeadline = 1050
+      const running = f.controller.start({ ...f.request(), execution: { version: 1, startedAt: 1000, deadlineAt: 1100 } }, 'codex')
+      await vi.advanceTimersByTimeAsync(50); await running
+      expect(f.controller.current.phase).toBe('failed'); expect(f.apply).not.toHaveBeenCalled()
+    } finally { pending.resolve(); vi.useRealTimers() }
+  })
+
+  it('keeps a newer preview intact when preparation from an expired task finally resolves', async () => {
+    vi.useFakeTimers(); vi.setSystemTime(1000)
+    const pending = deferred<void>()
+    try {
+      const f = fixture(['candidate', 'candidate', 'answer'], 'preview')
+      f.prepare.mockImplementationOnce(async (request, candidate) => { const prepared = f.makePrepared(request, candidate); await pending.promise; return prepared })
+      const expired = f.controller.start({ ...f.request(), execution: { version: 1, startedAt: 1000, deadlineAt: 1100 } }, 'codex')
+      await vi.advanceTimersByTimeAsync(100); await expired
+      const current = f.controller.start(f.request(), 'codex')
+      await vi.advanceTimersByTimeAsync(0)
+      const preview = f.controller.current.preview!
+      expect(f.controller.current.phase).toBe('awaiting-apply')
+      pending.resolve(); await vi.advanceTimersByTimeAsync(0)
+      expect(f.controller.current.preview).toBe(preview); expect(f.previews.has(preview.previewId)).toBe(true)
+      f.controller.applyPreview(); await current
+      expect(f.apply).toHaveBeenCalledOnce(); expect(f.apply.mock.calls[0]![0]).toBe(preview.previewId)
+    } finally { pending.resolve(); vi.useRealTimers() }
+  })
+
+  it.each(['stop', 'deadline'] as const)('cancels a late native launch after %s while preserving the newer task preview', async reason => {
+    vi.useFakeTimers(); vi.setSystemTime(1000)
+    const pending = deferred<void>()
+    try {
+      const f = fixture(['candidate', 'candidate', 'answer'], 'preview')
+      let oldSessionId: string | undefined
+      f.behavior.onLaunch = async sessionId => { if (!oldSessionId) { oldSessionId = sessionId; await pending.promise } }
+      const original = f.controller.start({ ...f.request(), execution: { version: 1, startedAt: 1000, deadlineAt: 1100 } }, 'codex')
+      await vi.advanceTimersByTimeAsync(0)
+      if (reason === 'stop') await f.controller.stop()
+      else await vi.advanceTimersByTimeAsync(100)
+      await original
+      const resumed = f.controller.start(f.request(), 'codex')
+      await vi.advanceTimersByTimeAsync(0)
+      const preview = f.controller.current.preview!, currentSessionId = f.controller.current.sessionId
+      expect(f.controller.current.phase).toBe('awaiting-apply'); expect(currentSessionId).not.toBe(oldSessionId)
+      pending.resolve(); await vi.advanceTimersByTimeAsync(0)
+      const cancellations = f.calls.filter(call => call.operation === 'cancel')
+      expect(cancellations).toEqual([expect.objectContaining({ sessionId: oldSessionId })])
+      expect(f.controller.current.preview).toBe(preview); expect(f.controller.current.sessionId).toBe(currentSessionId)
+      f.controller.applyPreview(); await resumed
+      expect(f.apply).toHaveBeenCalledOnce()
+    } finally { pending.resolve(); vi.useRealTimers() }
+  })
+
   it('feeds semantic candidate rejection to the same task without preparing or applying the rejected candidate', async () => {
     const f = fixture(['candidate-rejected', 'candidate', 'answer'])
     await f.controller.start(f.request(), 'claude')

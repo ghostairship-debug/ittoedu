@@ -56,7 +56,6 @@ describe('FlowBlockContextToolbar', () => {
     const props: FlowBlockContextToolbarProps = {
       block,
       selectionFormat: deriveFlowSelectionFormat({ block, edit }),
-      placement: 'below',
       onCommand,
       onPreserveSelection,
       ...input.props,
@@ -228,7 +227,7 @@ describe('FlowBlockContextToolbar', () => {
     renderToolbar({ hostWidth: 260 })
     expect(screen.getByTestId('flow-toolbar-host')).toHaveStyle({ width: '260px' })
     expect(screen.getByTestId('flow-block-context-toolbar')).toHaveStyle({
-      maxWidth: 'calc(100% - 16px)',
+      maxWidth: '100%',
     })
     expect(screen.getByTestId('flow-range-toolbar')).toHaveStyle({
       overflowX: 'auto',

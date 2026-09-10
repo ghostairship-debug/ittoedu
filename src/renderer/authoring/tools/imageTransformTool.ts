@@ -4,11 +4,11 @@ import { carrierForFlowBlock, findFlowBlockRecursive, makeFlowBlockAuthoringAddr
 import { commitCourseProjectMutation } from '../../course/courseProjectMutation'
 import { createImageAssetImport } from '../../project/assetManager'
 import { applyCourseAssetImports } from '../../project/v9AssetAdapter'
-import { transformImageAsset } from '../../project/imageTransform'
+import { ImageTransformSourceError, transformImageAsset } from '../../project/imageTransform'
 import { flowAuthoringTool } from './flowAuthoringTool'
 import { nativeAuthoringTool } from './nativeAuthoringTool'
 import { resolveAuthoringToolScope } from './authoringToolScope'
-import type { AuthoringToolDefinition } from './executeAuthoringTool'
+import { AuthoringToolFailure, type AuthoringToolDefinition } from './executeAuthoringTool'
 
 export const imageTransformTool: AuthoringToolDefinition<ImageTransformInput> = {
   name: 'asset.image.transform', usesResources: true, inputSchema: imageTransformInputSchema,
@@ -26,7 +26,12 @@ export const imageTransformTool: AuthoringToolDefinition<ImageTransformInput> = 
     if (sourceAssetId !== value.sourceAssetId) throw new Error('所选图片已不再引用本次原图，请重新观察')
     const source = document.assets[sourceAssetId], bytes = resources?.assetFiles[sourceAssetId]
     if (!source || source.kind !== 'image' || !bytes || bytes.length !== source.byteLength) throw new Error('当前原图资产与实际字节不完整')
-    const transformed = await transformImageAsset(bytes, source.mimeType, value, signal)
+    const transformed = await transformImageAsset(bytes, source.mimeType, value, signal).catch((error: unknown) => {
+      if (error instanceof ImageTransformSourceError) throw new AuthoringToolFailure([{
+        code: error.code, path: ['input', 'sourceAssetId'], message: `原图资产 ${sourceAssetId}：${error.message}`,
+      }])
+      throw error
+    })
     if (!transformed.changed) return { transaction: { projectId: document.id, baseRevision: document.revision, nextDocument: document, resourceChanges: {} }, affected: [] }
     const asset = createImageAssetImport({ name: `${source.filename.replace(/\.[^.]+$/, '')}-edited.png`, mimeType: 'image/png', bytes: transformed.bytes },
       { dimensions: { width: transformed.width, height: transformed.height } })

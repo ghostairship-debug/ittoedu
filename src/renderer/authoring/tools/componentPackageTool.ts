@@ -23,6 +23,23 @@ const schema = z.discriminatedUnion('operation', [
 ])
 export const componentPackageAddress = (projectId: string, packageId: string) => makeAuthoringAddress({ projectId, scope: 'global', carrier: 'component', layerItemId: packageId, field: 'componentPackages' })
 
+/** Mode domains describe the target validation in this tool, not UI guesses. */
+export const componentPackageDiscoveryVariants = [
+  { operation: 'replace', scopes: ['slide:global', 'flow:global', 'spatial-2d:global'], target: 'update: 精确 global package target；影响此包的所有实例。' },
+  { operation: 'revise', scopes: ['slide:global', 'flow:global', 'spatial-2d:global'], target: 'update: 精确 global package target；基线须为当前版本；影响此包的所有实例。' },
+  { operation: 'patch', mode: 'shared', scopes: ['slide:global', 'flow:global', 'spatial-2d:global'], target: 'update: 当前源码描述的 shared target；修改此包的所有实例。' },
+  { operation: 'patch', mode: 'instance', scopes: ['slide:scene', 'slide:surface', 'slide:global', 'flow:surface', 'flow:global', 'spatial-2d:world', 'spatial-2d:surface', 'spatial-2d:global'], target: 'update: 当前源码描述的精确组件实例 target；stateId 必须为 null；另存副本只重绑此实例。' },
+]
+
+export const componentPackageDiscoveryExamples = [
+  ...(['shared', 'instance'] as const).map(mode => ({ operation: 'patch', mode,
+    bindings: 'baseline 来自当前完整源码描述的 packageId/baseVersion/baseContentIdentity；changedFiles 只含实际改动文件；target 原样取对应模式的当前 target。',
+    code: `const input={operation:"patch",mode:"${mode}",basePackageId:baseline.packageId,baseVersion:baseline.baseVersion,baseContentIdentity:baseline.baseContentIdentity,changedFiles,deleteFiles:[]}; const receipt=await session.execute("component.package",input,{kind:"update",target});`,
+  })),
+  { operation: 'revise', bindings: 'baseline 为当前源码基线；files 为完整包文件；target 为当前 global package target。', code: 'const receipt=await session.execute("component.package",{operation:"revise",baseVersion:baseline.baseVersion,baseContentIdentity:baseline.baseContentIdentity,files},{kind:"update",target});' },
+  { operation: 'replace', bindings: 'files 为完整合法包文件；target 为当前 global package target。', code: 'const receipt=await session.execute("component.package",{operation:"replace",files},{kind:"update",target});' },
+]
+
 export const componentPackageTool: AuthoringToolDefinition<z.infer<typeof schema>> = {
   name: 'component.package', inputSchema: schema, usesResources: true,
   description: '修改现有源码优先 patch：提供精确 basePackageId/baseVersion/baseContentIdentity、仅改变的 changedFiles、显式 deleteFiles；宿主补齐未变文件并校验完整包。mode:shared 使用 global package update target 修改所有实例；mode:instance 使用精确组件实例 update target，宿主另存副本仅重绑此实例。不得自行改 manifest ID/版本。公开参数足够时用 component.configure；完整 files revise 保持兼容。',

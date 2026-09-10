@@ -1475,11 +1475,36 @@ export class SlidePublishedAdapter implements SurfaceHost, PublishedAuthoringPat
     if (!before.ok) return before
     this.#cancelAuthoringMotion(item.layerItemId)
     if (item.kind === 'component') {
-      if (!record.remountComponent) {
-        throw new Error(`Component“${item.layerItemId}”没有可重建的作者实例。`)
-      }
+      const previous = record.item
+      const handle = record.componentHandle
+      const samePackage = previous.kind === 'component'
+        && previous.component.packageId === item.component.packageId
+        && previous.component.version === item.component.version
+        && previous.staticFallbackAssetId === item.staticFallbackAssetId
+      const resized = previous.frame.width !== item.frame.width || previous.frame.height !== item.frame.height
+      const propsChanged = previous.kind !== 'component'
+        || JSON.stringify(previous.props) !== JSON.stringify(item.props)
+      // Selection and frame previews must not tear down the live text registry.
+      // Components without a lifecycle hook still need a fresh create() to consume
+      // an actual size/props change; package/source changes retain the rebuild path.
+      const canUpdate = samePackage && handle?.ok && handle.lifecycle
+        && (!resized || handle.lifecycle.resize)
+        && (!propsChanged || handle.lifecycle.updateProps)
       try {
-        await record.remountComponent(item)
+        if (canUpdate) {
+          record.item = item
+          this.#applyRecordFrame(record)
+          handle.updateAuthoringNode(publishedComponentAuthoringNode(item))
+          if (resized) handle.resize(item.frame.width, item.frame.height)
+          if (propsChanged) handle.updateProps(structuredClone(item.props))
+          if (previous.visible !== item.visible) handle.setVisible(item.visible)
+          await (handle.waitForObservationReady?.() ?? handle.waitForReady())
+        } else {
+          if (!record.remountComponent) {
+            throw new Error(`Component“${item.layerItemId}”没有可重建的作者实例。`)
+          }
+          await record.remountComponent(item)
+        }
       } catch (error) {
         const current = this.#validateCapturedAuthoringRecord(captured, record)
         if (!current.ok) return current

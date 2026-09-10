@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
 import { promises as fs } from 'node:fs'
+import { setTimeout as pause } from 'node:timers/promises'
 import path from 'node:path'
 import { z } from 'zod'
 import { localAgentRecordSchema, type LocalAgentRecord } from '../../shared/localAgentContract'
@@ -10,6 +11,22 @@ import { aiObservationFileSchema } from '../../shared/localAgentTaskContract'
 import { workspaceIdentityKey, type WorkspaceIdentityV1 } from '../../shared/workspaceIdentity'
 
 const GENERATION_REQUEST_FILE = 'generation-request.json'
+const WINDOWS_RENAME_RETRY_DELAYS_MS = [10, 25, 50, 100, 200] as const
+
+/** Windows can reject replacement while another reader holds the destination.
+ * Retry only replacement of the already complete temporary file, within the
+ * existing repository queue. Never remove or truncate the previous record. */
+async function replaceRecord(temporary: string, destination: string): Promise<void> {
+  for (let attempt = 0; ; attempt++) {
+    try { await fs.rename(temporary, destination); return }
+    catch (error) {
+      const delay = WINDOWS_RENAME_RETRY_DELAYS_MS[attempt]
+      if (process.platform !== 'win32' || delay === undefined
+        || !['EPERM', 'EACCES', 'EBUSY'].includes((error as NodeJS.ErrnoException).code ?? '')) throw error
+      await pause(delay)
+    }
+  }
+}
 
 export class LocalAgentRepository {
   private queue: Promise<unknown> = Promise.resolve()
@@ -102,7 +119,7 @@ export class LocalAgentRepository {
       const temporary = path.join(directory, `${record.id}.tmp`)
       try {
         await fs.writeFile(temporary, JSON.stringify(record), { mode: 0o600 })
-        await fs.rename(temporary, path.join(directory, `${record.id}.json`))
+        await replaceRecord(temporary, path.join(directory, `${record.id}.json`))
       } finally { await fs.rm(temporary, { force: true }) }
     })
   }

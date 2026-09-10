@@ -1,6 +1,6 @@
 # IttoEdu 开发总纲
 
-> 当前路线核实日期：2026-09-08。当前任务、数量和状态只看自动生成的 [任务板](docs/development-plan/TASK_BOARD.md)。
+> 当前路线核实日期：2026-09-09。当前任务、数量和状态只看自动生成的 [任务板](docs/development-plan/TASK_BOARD.md)。
 >
 > 本文件只保存当前产品决定、边界和开发路线。已经完成、取消或被取代的内容在下一次路线更新时移出正文，由 Git 历史保留；不得在这里维护 changelog、完成卡清单或行号级历史源码快照。
 
@@ -93,19 +93,23 @@ IttoEdu 是受控团队使用的内部生产工具。默认工程、Runtime、Co
 
 优先级仍以受支持场景中的用户可用性为第一轴。路线的完整任务图、发布制品、不可降级矩阵和次旗舰执行规格位于 [`docs/development-plan/roadmap/`](docs/development-plan/roadmap/README.md)；路线节点不是协调状态，只有满足依赖、届时事实与写锁后才按协议实例化，当前 `queued / active / blocked` 仍只看任务板。
 
-### 5.1 当前阶段：汇合1.8真实使用证据，再贯通当前工程创作至2.0
+### 5.1 当前阶段：关闭1.8已核实编辑缺口，再贯通创作至2.0
+
+2026-09-10 Owner授权的[延迟修复与工程收尾方案](docs/development-plan/roadmap/1.8/LATENCY_COMPLETION_PLAN.md)已实施路径、计时、实际按钮反馈及会话文件临时占用修复；OpenCode本机默认为OpenAI OAuth Luna。文字、图片、排版、互动、普通T11及确定性边界已有本轮通过，旧有效证据和完整PPTX复核副本已汇合。Owner随后临时改接DeepSeek，Claude Code文字预览/应用/恢复已补验通过，解除此前通道阻断；[最终工程验收](docs/development-plan/reviews/2026-09-10-final-acceptance.md)已完成约定范围和实际失败修复，同候选E2E原范围100通过、24条件跳过，新增恢复／隔离2项通过；版本检查通过。Owner S3及报告所列未验边界仍独立，未发布。[实施记录](docs/development-plan/reviews/2026-09-10-latency-completion.md)分列新旧配置、失败和耗时，不能宣称1.8完成或整体提速。
 
 2026-09-07 Owner实际使用证实图片不可见/改色未闭环、选区替换受阻、候选与模型/模式/反馈缺口、Flow控制器不可达。S3存在实质可用性阻断，不是仅等待签署。Owner要求助手至少达到VS Code Codex/Claude Code插件相应工作流体验，并实时理解当前课件；外部Build Skill同步按需发现/读取。
 
-执行依据为[当前至2.0开发方案](docs/development-plan/AI_ASSISTANT_DELIVERY_PLAN.md)、[共同实施合同](docs/development-plan/roadmap/1.8/IMPLEMENTATION_CONTRACT.md)和已同步的各版DAG/独立规格。[G01–G12](docs/development-plan/reviews/1.8-ai-assistant-gap-register.md)与[官方对标评估](docs/development-plan/AI_ASSISTANT_VSCODE_BENCHMARK_ASSESSMENT.md)保留为范围和基线依据。2026-09-08[首批review](docs/development-plan/reviews/1.8-first-batch-review.md)后，Owner授权并行完成1.8开发；当前已集成089–104相关产品实现，并取得Flow新导出、共享组件全实例、104外部片段和Native文字自动尺寸的直接工程证据。103/050真实三CLI有限重复矩阵仍在汇合，实际失败返回对应Owner修复，S3尚未签署。
+执行依据为[当前至2.0开发计划](docs/development-plan/AI_ASSISTANT_DELIVERY_PLAN.md)、[共同实施合同](docs/development-plan/roadmap/1.8/IMPLEMENTATION_CONTRACT.md)和各版DAG/独立规格。本轮专题取舍保存在[AI编辑最短路径统一方案](AI编辑最短路径产品决策报告.md)。089–104相关实现已集成，已有Flow新导出、共享组件全实例、104外部片段和Native文字自动尺寸的有效证据；不从9月8日四项审查或旧W包重新启动整批。9月9日授权批次已集成图片正例/诊断、Codex初始化/用量/消息、目录与发现、短目标/资产引用、条件终结及失败帧/预算/回执接线，实际结果和未完成事实见[实施记录](docs/development-plan/reviews/2026-09-09-short-path-implementation.md)。103/050继续汇合受影响真实三CLI证据；S3尚未签署，当前协调只看任务板。
 
-- 1.8：089–104相关实现已集成，当前按103汇合各依赖的有效工程证据和剩余真实三CLI自然任务；已通过且实现/环境未变的证据继续复用，仅补实际失败对应修复的受影响验证。原050三CLI、PPTX、三表面和导航仍进入S3；未命名与完整双流程归1.9。
-- 1.9：042未命名/首次保存、045材料结构与分片、044内置自动/手动和按阶段Skills；041聊天首页、项目/会话列表、极简/专业与局部AI，043长任务，050连续课例与主要瓶颈优化。051 PPTX并列，060汇合；软件与创作策略同时推进。
+- 1.8：先并行关闭图片、配置/可读消息、发现/提示的已核实缺口并补最小计时；在090共同合同下接齐短传输、结构化错误与100条件终结/预算/回执，保留合法多阶段续行。随后以准确小修改、整页关系调整和实际交互修改分别验证；既有组件patch/多步候选先用好，不重建。103复用有效证据并补受影响有限三CLI/双入口门，原050、PPTX、三表面、导航及S3保留；未命名与完整双流程归1.9。
+- 1.9：042未命名/首次保存、045材料结构与分片、044内置自动/手动和按阶段Skills；041聊天首页、项目/会话列表、极简/专业与局部AI，043继承同一任务预算和真实回执，050按连续课例瓶颈推进增量观察、静态证据/不可变资源复用或更细源码补丁。上述优化需直接耗时/失败证据，不全部预设必建。051 PPTX并列，060汇合。
 - 2.0：021实际交付内置Skills，022材料/数据控制，020把材料、教学设计、呈现、生成、修改、实际运行检查、修复和导出全部在软件内闭环；025有限有效对照、040三CLI及速度质量汇合，041 PPTX并列，050/S4签署后发布同一源码与冻结HTML。
 
 Owner于2026-09-08最终决定分阶段完成1.8–2.0，不将全部功能压入1.8。自动创作必须上传且成功读取材料，优先模板/设计；手动依次确认教学简报、策划、呈现简报、脚本。默认极简，专业模式保留完整人工能力及相同AI。常见Native秒级、代表动态分钟级、标准整课30分钟内作为阶段目标，以真实固定课例衡量。2.0起教师无需外部AI、终端或Builder完成检查/修复。完整体验、创作策略、质量和2.1媒体/2.2运行时服务见[产品与创作优化方案](docs/development-plan/AGENT_AUTHORING_LONG_TERM_PLAN.md)。
 
-已有[三表面工程整合](docs/development-plan/reviews/1.8-surface-integration-exit.md)、[场景/步骤导航](docs/development-plan/reviews/1.8-navigation-level-exit.md)和[CLI调用/格式修复](docs/development-plan/reviews/1.8-cli-call-format-repair.md)证据按已验证范围保留，不能外推普通AI编辑已可用。Flow D1方案A已由Owner批准：正文响应式布局与浮层统一CSS尺度，主动运行缩放单独应用；不重问该选择。新089修实际剩余可达性问题。
+已有[三表面工程整合](docs/development-plan/reviews/1.8-surface-integration-exit.md)、[场景/步骤导航](docs/development-plan/reviews/1.8-navigation-level-exit.md)和[CLI调用/格式修复](docs/development-plan/reviews/1.8-cli-call-format-repair.md)证据按已验证范围保留，不能外推普通AI编辑已可用。Flow D1方案A已由Owner批准：正文响应式布局与浮层统一CSS尺度，主动运行缩放单独应用；不重问该选择，089仅在相关新失败或证据失效时补修。
+
+高频准确编辑与复杂批量/交互编辑并列验收，主指标为请求到首次正确可用结果；固定实际模型/强度/服务档比较，auto/preview与用户等待分列。不得默认降低用户强度、用坏PNG对有效PNG计算提速，或以少量样本宣称P95。自动路由、专用应用模型、直连API及新增付费服务仍需实际瓶颈证据和新的产品决定，不是当前依赖。
 
 缩放需求仍只针对当前位置试运行与整课预览：教师控制器的独立缩放按钮、横纵平移边条和可达性保留；动态内部输入优先且不重挂实例，Flow正文scroll不重复，Spatial观察包含HUD。Slide/Flow/Spatial作者模型、V9、单一Core历史/资源事务与既有导出都保留，不创建万能Surface或第二工程。
 

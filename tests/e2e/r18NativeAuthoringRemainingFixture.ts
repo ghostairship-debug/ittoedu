@@ -1086,7 +1086,7 @@ export async function writeRemainingLesson(projectPath: string): Promise<CourseP
     style: { fillColor: '#2563eb', borderColor: '#172554', borderWidth: 3 } }), 1))
   const authored = createPublishedCanvasRuntimeV2Fixture([{ itemId: REMAINING_IDS.brokenRuntime, renderMode: 'dom', source: BROKEN_BUTTON_SOURCE }])
   const runtime = structuredClone(buttonRuntime(authored.project))
-  runtime.label = '点击显示答案'; runtime.frame = { mode: 'absolute', x: 635, y: 470, width: 555, height: 180 }
+  runtime.label = '点击显示答案'; runtime.frame = { mode: 'absolute', x: 635, y: 410, width: 555, height: 290 }
   const slide = project.surfaces.find(surface => surface.type === 'slide')!
   if (slide.type !== 'slide') throw new Error('Initial Slide is missing')
   runtime.order = 4; slide.scenes[0]!.layerItems.push(runtime)

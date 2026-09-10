@@ -3,6 +3,18 @@
     "default": "existing-component"
   },
   "description": "配置已有或前序新建组件，carrier均为existing-component。props只提供要改变的参数，保留当前有效状态中未提供的参数，API 4 的 content 按正式递归合并合同保留其他文案。properties修改组件图层的frame/rotation/opacity/visible/locked/label。Flow正文组件只接受props，其排版通过flow.content。不要用native.content移动组件。",
+  "examples": [
+    {
+      "input": {
+        "properties": {
+          "frame": {
+            "x": 80,
+            "y": 120
+          }
+        }
+      }
+    }
+  ],
   "inputSchema": {
     "$defs": {
       "__schema0": {
@@ -72,7 +84,9 @@
     },
     "type": "object"
   },
+  "invocation": "Builder: await session.execute(tool,input,destination)。input 遵循本卡完整 Schema；destination 原样使用当前 observe/createScope 的目标；只以 committed receipt 判定成功。",
   "name": "component.configure",
+  "recovery": "invalid-input: 按本卡 Schema 修正字段；revision-conflict: 重新 observe 后复制新 target 和源码基线；tool-failed: 读取 diagnostics 修复所指输入/资源/宿主条件，失败不代表已提交。",
   "support": "conditional-on-input-target-resources-and-host",
   "supportedScopes": [
     "slide:scene",
@@ -81,6 +95,18 @@
     "flow:global",
     "spatial-2d:world",
     "spatial-2d:global"
+  ],
+  "variants": [
+    {
+      "scopes": [
+        "slide:scene",
+        "slide:global",
+        "flow:surface",
+        "flow:global",
+        "spatial-2d:world",
+        "spatial-2d:global"
+      ]
+    }
   ],
   "version": 1
 }

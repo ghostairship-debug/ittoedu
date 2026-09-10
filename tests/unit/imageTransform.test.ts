@@ -1,15 +1,75 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { crc32, inflateSync } from 'node:zlib'
+import { unzipSync } from 'fflate'
 import sharp from 'sharp'
+import { buildArchitectureBaselineFixtureOutputs } from '../../scripts/build-architecture-baseline-fixtures'
 import { imageTransformInputSchema, MAX_IMAGE_TRANSFORM_PIXELS } from '@/shared/imageTransformContract'
-import { decodeImageTransformPng, encodeImageTransformPng, transformImageAsset, transformImagePixels } from '@/renderer/project/imageTransform'
+import { decodeImageTransformPng, encodeImageTransformPng, inspectImageTransformSource, transformImageAsset, transformImagePixels } from '@/renderer/project/imageTransform'
 
 const intent = (operations: unknown[]) => imageTransformInputSchema.parse({ sourceAssetId: 'original', operations })
 const redToGreen = () => intent([{ kind: 'replace-color', sourceColor: '#ff0000' }])
 const pixels = (values: number[][], width = values.length) => ({ width, height: values.length / width, data: Uint8Array.from(values.flat()) })
 const red = [255, 0, 0, 255], green = [34, 197, 94, 255]
+const corruptBaselinePng = () => new Uint8Array(readFileSync(new URL('../fixtures/image-validation/architecture-baseline-corrupt-idat.png', import.meta.url)))
 
 describe('deterministic original-image transforms', () => {
+  it('generates decodable and recolorable PNG assets in every architecture baseline archive', async () => {
+    const built = buildArchitectureBaselineFixtureOutputs()
+    for (const fixture of built.manifest.fixtures) {
+      const images = Object.entries(unzipSync(built.outputs[fixture.filename]!)).filter(([path]) => path.endsWith('.png'))
+      expect(images.length, fixture.filename).toBeGreaterThan(0)
+      for (const [path, bytes] of images) {
+        const original = await sharp(bytes, { failOn: 'warning' }).ensureAlpha().raw().toBuffer({ resolveWithObject: true })
+        expect(original.info, `${fixture.filename}/${path}`).toMatchObject({ width: 1, height: 1, channels: 4 })
+        expect([...original.data]).toEqual(red)
+        await expect(inspectImageTransformSource(bytes, 'image/png')).resolves.toEqual({ status: 'ready', width: 1, height: 1 })
+        const transformed = await transformImageAsset(bytes, 'image/png', redToGreen())
+        expect([...await sharp(transformed.bytes, { failOn: 'warning' }).ensureAlpha().raw().toBuffer()]).toEqual(green)
+      }
+    }
+  })
+
+  it('rejects the retained baseline PNG with its original corrupt IDAT checksum', async () => {
+    const source = corruptBaselinePng(), original = source.slice()
+    expect(() => decodeImageTransformPng(source)).toThrow('IDAT（偏移 33）')
+    await expect(inspectImageTransformSource(source, 'image/png')).resolves.toMatchObject({
+      status: 'failed', code: 'image-source-decode-failed', message: expect.stringContaining('IDAT（偏移 33）'),
+    })
+    expect(source).toEqual(original)
+  })
+
+  it('rejects the retained baseline zlib corruption even after the IDAT chunk CRC is repaired', async () => {
+    const bytes = corruptBaselinePng(), view = new DataView(bytes.buffer)
+    // Preserve the original bad zlib trailer; repair only its containing chunk.
+    view.setUint32(53, crc32(bytes.subarray(37, 53)))
+    expect(() => inflateSync(bytes.subarray(41, 53))).toThrow('incorrect data check')
+    expect(() => decodeImageTransformPng(bytes)).toThrow('Adler-32')
+    await expect(inspectImageTransformSource(bytes, 'image/png')).resolves.toMatchObject({
+      status: 'failed', code: 'image-source-decode-failed', message: expect.stringContaining('Adler-32'),
+    })
+  })
+
+  it('distinguishes unsupported source formats and 16-bit precision in preflight and execution', async () => {
+    const highPrecision = await sharp(Uint8Array.from(red), { raw: { width: 1, height: 1, channels: 4 } }).toColourspace('rgb16').png().toBuffer()
+    expect((await sharp(highPrecision).metadata()).bitsPerSample).toBe(16)
+    const gif = await sharp(Uint8Array.from(red), { raw: { width: 1, height: 1, channels: 4 } }).gif().toBuffer()
+    for (const [bytes, mimeType, message] of [[highPrecision, 'image/png', '16 位'], [gif, 'image/gif', '其他格式']] as const) {
+      await expect(inspectImageTransformSource(bytes, mimeType)).resolves.toMatchObject({
+        status: 'unsupported', code: 'image-source-unsupported', message: expect.stringContaining(message),
+      })
+      await expect(transformImageAsset(bytes, mimeType, redToGreen())).rejects.toMatchObject({
+        status: 'unsupported', code: 'image-source-unsupported', message: expect.stringContaining(message),
+      })
+    }
+  })
+
+  it('does not report a cancelled source inspection as ready or decode failure', async () => {
+    const stop = new AbortController(); stop.abort()
+    await expect(inspectImageTransformSource(encodeImageTransformPng(pixels([red])), 'image/png', stop.signal)).rejects.toThrow('已停止')
+  })
+
   it('changes a real 1×1 PNG from red to the declared default green and independently decodes output', async () => {
     const source = await sharp(Uint8Array.from(red), { raw: { width: 1, height: 1, channels: 4 } }).png().toBuffer()
     const result = await transformImageAsset(source, 'image/png', redToGreen())

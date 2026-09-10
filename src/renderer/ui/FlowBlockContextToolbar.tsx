@@ -48,7 +48,6 @@ export type FlowBlockContextCommand =
 export interface FlowBlockContextToolbarProps {
   readonly block: FlowBlock
   readonly selectionFormat: FlowSelectionFormat
-  readonly placement: 'top' | 'below'
   readonly onCommand: (command: FlowBlockContextCommand) => void
   readonly onPreserveSelection?: () => void
 }
@@ -58,8 +57,7 @@ export const FLOW_BLOCK_CONTEXT_TOOLBAR_SCROLLBAR_RESERVE = 18
 export const FLOW_BLOCK_CONTEXT_TOOLBAR_PRIMARY_HEIGHT =
   FLOW_BLOCK_CONTEXT_TOOLBAR_CONTROL_HEIGHT + FLOW_BLOCK_CONTEXT_TOOLBAR_SCROLLBAR_RESERVE
 export const FLOW_BLOCK_CONTEXT_TOOLBAR_HEIGHT = 54
-export const FLOW_BLOCK_CONTEXT_TOOLBAR_BELOW_OFFSET =
-  FLOW_BLOCK_CONTEXT_TOOLBAR_HEIGHT + 6
+export const FLOW_WORKSPACE_HEADER_HEIGHT = FLOW_BLOCK_CONTEXT_TOOLBAR_HEIGHT + 12
 
 function stopToolbarMouseDown(event: { stopPropagation(): void }): void {
   event.stopPropagation()
@@ -83,7 +81,6 @@ function formatFieldTitle(
 export function FlowBlockContextToolbar({
   block,
   selectionFormat,
-  placement,
   onCommand,
   onPreserveSelection,
 }: FlowBlockContextToolbarProps) {
@@ -155,19 +152,16 @@ export function FlowBlockContextToolbar({
     <div
       className="text-edit-toolbar flow-block-context-toolbar"
       data-testid="flow-block-context-toolbar"
-      data-flow-toolbar-placement={placement}
+      data-flow-toolbar-placement="workspace-header"
       data-flow-toolbar-layout="stable-primary"
       style={{
-        position: 'absolute',
-        left: 8,
-        top: placement === 'top' ? 8 : undefined,
-        bottom: placement === 'below' ? -FLOW_BLOCK_CONTEXT_TOOLBAR_BELOW_OFFSET : undefined,
+        position: 'relative',
         zIndex: 6,
         boxSizing: 'border-box',
         display: 'flex',
         flexWrap: 'nowrap',
         width: 440,
-        maxWidth: 'calc(100% - 16px)',
+        maxWidth: '100%',
         height: FLOW_BLOCK_CONTEXT_TOOLBAR_HEIGHT,
         overflow: 'visible',
       }}

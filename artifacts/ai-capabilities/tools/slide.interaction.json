@@ -3,6 +3,23 @@
     "default": "native"
   },
   "description": "仅 Slide scene owner；insert 使用 create owner append。rule 遵循 references.ruleWithId，但省略最外层 id（由宿主生成），保留 actions 内部的步骤 id。第一动作 start 必须 after-previous，导航动作必须最后。",
+  "examples": [
+    {
+      "bindings": "values 的 rule 来自当前观察、已读资源或用户要求，值须满足本卡 inputSchema；destination 原样复制当前目标。",
+      "code": "const input={\"operation\":\"insert\",\"rule\":values[\"rule\"]}; const receipt=await session.execute(\"slide.interaction\",input,destination);",
+      "operation": "insert"
+    },
+    {
+      "bindings": "values 的 rule 来自当前观察、已读资源或用户要求，值须满足本卡 inputSchema；destination 原样复制当前目标。",
+      "code": "const input={\"operation\":\"replace\",\"rule\":values[\"rule\"]}; const receipt=await session.execute(\"slide.interaction\",input,destination);",
+      "operation": "replace"
+    },
+    {
+      "bindings": "values 的  来自当前观察、已读资源或用户要求，值须满足本卡 inputSchema；destination 原样复制当前目标。",
+      "code": "const input={\"operation\":\"delete\"}; const receipt=await session.execute(\"slide.interaction\",input,destination);",
+      "operation": "delete"
+    }
+  ],
   "inputSchema": {
     "$defs": {
       "__schema0": {
@@ -64,7 +81,9 @@
       }
     ]
   },
+  "invocation": "Builder: await session.execute(tool,input,destination)。input 遵循本卡完整 Schema；destination 原样使用当前 observe/createScope 的目标；只以 committed receipt 判定成功。",
   "name": "slide.interaction",
+  "recovery": "invalid-input: 按本卡 Schema 修正字段；revision-conflict: 重新 observe 后复制新 target 和源码基线；tool-failed: 读取 diagnostics 修复所指输入/资源/宿主条件，失败不代表已提交。",
   "references": {
     "ruleWithId": {
       "$defs": {
@@ -1177,6 +1196,26 @@
   "support": "conditional-on-input-target-resources-and-host",
   "supportedScopes": [
     "slide:scene"
+  ],
+  "variants": [
+    {
+      "operation": "insert",
+      "scopes": [
+        "slide:scene"
+      ]
+    },
+    {
+      "operation": "replace",
+      "scopes": [
+        "slide:scene"
+      ]
+    },
+    {
+      "operation": "delete",
+      "scopes": [
+        "slide:scene"
+      ]
+    }
   ],
   "version": 1
 }

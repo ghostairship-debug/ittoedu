@@ -43,7 +43,7 @@
     }
   ],
   "query": "query.mjs",
-  "semanticVersion": "aedad6ceb0bbacefb952e635dbafa1185e6bad352bff4c41e19427e5913562c6",
+  "semanticVersion": "c498f68aa1c7c33154c4ca38abb48951607b8a86cf765d894d1b1e02e13a2951",
   "tools": [
     {
       "carriers": [
@@ -123,7 +123,12 @@
       "scopes": [
         "slide:global",
         "flow:global",
-        "spatial-2d:global"
+        "spatial-2d:global",
+        "slide:scene",
+        "slide:surface",
+        "flow:surface",
+        "spatial-2d:world",
+        "spatial-2d:surface"
       ]
     },
     {
@@ -298,6 +303,6 @@
       ]
     }
   ],
-  "usage": "保持原生工作目录；node \"<query.mjs绝对路径>\" --query <关键词> --surface <slide|flow|spatial-2d>; --id <能力ID> [--operation <操作>] [--nativeType <类型>]",
+  "usage": "保持原生工作目录；node \"<query.mjs绝对路径>\" [--help] [--id <能力ID> | --query <关键词>] [--operation <操作>] [--mode <模式>] [--nativeType <类型>] [--surface <slide|flow|spatial-2d>] [--owner <global|surface|scene|world>] [--carrier <载体>] [--kind <种类>] [--task <create|edit|repair|design>] [--limit <1..100>] [--semanticVersion <当前版本>] [--summary]。无参数返回精简发现入口；定向查询默认返回完整卡片，--summary 只返回索引。",
   "version": 1
 }

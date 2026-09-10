@@ -108,7 +108,7 @@ export function pptxImportFixture(options: { image?: boolean; unsupported?: bool
   }
   if (options.image) {
     files['ppt/slides/_rels/slide1.xml.rels'] = strToU8(relationships(rel('image', 'image', '../media/image.png')))
-    files['ppt/media/image.png'] = Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jZ1sAAAAASUVORK5CYII='), c => c.charCodeAt(0))
+    files['ppt/media/image.png'] = Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR4nGP4DwQACfsD/fteaysAAAAASUVORK5CYII='), c => c.charCodeAt(0))
   }
   return zipSync(files)
 }

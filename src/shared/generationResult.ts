@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { generationCandidateSchema, type GenerationCandidate, type GenerationRequest } from './generationContract'
+import { generationCandidateSchema, expandGenerationShortCandidate, generationFailureSchema, generationFailureDiagnostics, type GenerationCandidate, type GenerationRequest } from './generationContract'
 
 export const GENERATION_OPEN = '<courseware-candidate-v1>'
 export const GENERATION_CLOSE = '</courseware-candidate-v1>'
@@ -11,17 +11,19 @@ export const generationResultSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('answer'), requestId: z.uuid() }).strict(),
   z.object({ kind: z.literal('incomplete'), requestId: z.uuid(), finding: z.string().max(4000) }).strict(),
   z.object({ kind: z.literal('candidate'), requestId: z.uuid(), candidate: generationCandidateSchema }).strict(),
-  z.object({ kind: z.literal('candidate-rejected'), requestId: z.uuid(), candidateId: z.uuid(), finding: z.string().max(4000) }).strict(),
-  z.object({ kind: z.literal('candidate-format-error'), requestId: z.uuid(), finding: z.string().max(4000), excerpt: z.string().max(8000) }).strict(),
+  z.object({ kind: z.literal('candidate-rejected'), requestId: z.uuid(), candidateId: z.uuid(), finding: z.string().max(4000), failure: generationFailureSchema.optional() }).strict(),
+  z.object({ kind: z.literal('candidate-format-error'), requestId: z.uuid(), finding: z.string().max(4000), excerpt: z.string().max(8000), failure: generationFailureSchema.optional() }).strict(),
 ])
 export type GenerationResult = z.infer<typeof generationResultSchema>
 export type GenerationFormatError = Extract<GenerationResult, { kind: 'candidate-format-error' }>
+export interface GenerationCandidateParseOptions { candidateId: string }
+type ResultRequest = Pick<GenerationRequest, 'requestId' | 'expectedResult'> | GenerationRequest
 
 /** The bounded failure remains tied to the original request; it is never a fake candidate. */
-export function readGenerationResult(text: string, request: Pick<GenerationRequest, 'requestId' | 'expectedResult'>): GenerationResult {
+export function readGenerationResult(text: string, request: ResultRequest, options?: GenerationCandidateParseOptions): GenerationResult {
   const { requestId } = request
   try {
-    const candidate = parseGenerationText(text, requestId)
+    const candidate = parseGenerationText(text, request, options)
     if (candidate) return { kind: 'candidate', requestId, candidate }
     let required = request.expectedResult === 'candidate'
     const start = text.indexOf(GENERATION_RESULT_OPEN)
@@ -37,23 +39,30 @@ export function readGenerationResult(text: string, request: Pick<GenerationReque
     return { kind: 'answer', requestId }
   } catch (cause) {
     const start = Math.max(0, text.indexOf(GENERATION_OPEN))
+    const candidateId = z.uuid().safeParse(options?.candidateId)
     return { kind: 'candidate-format-error', requestId,
       finding: (cause instanceof Error ? cause.message : String(cause)).slice(0, 4000),
-      excerpt: text.slice(start, start + 8000) }
+      excerpt: text.slice(start, start + 8000), failure: { version: 1, stage: 'candidate-parse', requestId,
+        ...(candidateId.success ? { candidateId: candidateId.data } : {}), diagnostics: generationFailureDiagnostics(cause, 'candidate-format'), assetIds: [], packageIds: [] } }
   }
 }
 
 /** Only the explicitly designated channel is authoritative; ordinary chat and tool logs are not candidates. */
-export function parseGenerationText(text: string, requestId: string): GenerationCandidate | null {
+export function parseGenerationText(text: string, request: string | ResultRequest, options?: GenerationCandidateParseOptions): GenerationCandidate | null {
   const start = text.indexOf(GENERATION_OPEN)
   if (start < 0) return null
   if (new TextEncoder().encode(text).byteLength > MAX_GENERATION_RESULT_BYTES) throw new Error('生成结果超过大小上限')
   const end = text.indexOf(GENERATION_CLOSE, start + GENERATION_OPEN.length)
   if (end < 0 || text.indexOf(GENERATION_OPEN, start + GENERATION_OPEN.length) >= 0 || text.indexOf(GENERATION_CLOSE, end + GENERATION_CLOSE.length) >= 0) throw new Error('生成结果通道不完整或重复')
-  return parseGenerationCandidate(JSON.parse(text.slice(start + GENERATION_OPEN.length, end)), requestId)
+  return parseGenerationCandidate(JSON.parse(text.slice(start + GENERATION_OPEN.length, end)), request, options)
 }
 
-export function parseGenerationCandidate(value: unknown, requestId: string): GenerationCandidate {
+export function parseGenerationCandidate(value: unknown, request: string | ResultRequest, options?: GenerationCandidateParseOptions): GenerationCandidate {
+  const requestId = typeof request === 'string' ? request : request.requestId
+  if (value && typeof value === 'object' && Reflect.get(value, 'version') === 2) {
+    if (typeof request === 'string' || !('destinations' in request) || !options?.candidateId) throw new Error('短候选需要宿主冻结的完整请求与固定候选身份')
+    return expandGenerationShortCandidate(value, request, options.candidateId)
+  }
   const candidate = generationCandidateSchema.parse(value)
   if (candidate.requestId !== requestId) throw new Error('生成结果属于其他请求')
   return candidate

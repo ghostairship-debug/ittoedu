@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { observeRuntimeDomControls } from '@/renderer/authoring/generation/runtimeDomControlObservation'
+import { observeRuntimeDomControls, resolveRuntimeDomButton } from '@/renderer/authoring/generation/runtimeDomControlObservation'
 
 const originalHitDescriptor = Object.getOwnPropertyDescriptor(document, 'elementFromPoint')
 afterEach(() => {
@@ -25,6 +25,62 @@ function hit(element: Element | null) {
 }
 
 describe('current Runtime DOM controls are observations, not interaction verdicts', () => {
+  it('resolves one exact scoped button without dispatching input and rejects ambiguity, disabled and occluded controls', () => {
+    const { root, mount } = mounted(), button = document.createElement('button')
+    button.textContent = '显示答案'; mount.append(button); box(button); hit(button)
+    const clicked = vi.fn(); button.addEventListener('click', clicked)
+    expect(resolveRuntimeDomButton(root, 'actual-target', '显示答案')).toMatchObject({ element: button, x: 100, y: 80 })
+    expect(clicked).not.toHaveBeenCalled()
+    expect(() => resolveRuntimeDomButton(root, 'another-instance', '显示答案')).toThrow('实际找到 0 个')
+    button.disabled = true
+    expect(() => resolveRuntimeDomButton(root, 'actual-target', '显示答案')).toThrow('不可操作')
+    button.disabled = false
+    const duplicate = button.cloneNode(true) as HTMLButtonElement; mount.append(duplicate); box(duplicate)
+    expect(() => resolveRuntimeDomButton(root, 'actual-target', '显示答案')).toThrow('实际找到 2 个')
+    duplicate.remove(); hit(mount)
+    expect(() => resolveRuntimeDomButton(root, 'actual-target', '显示答案')).toThrow('被遮挡')
+    expect(clicked).not.toHaveBeenCalled()
+  })
+  it('reads only current visible answer text across open shadow roots without CSS or duplicate parent content', () => {
+    const { root, mount } = mounted(), host = document.createElement('div')
+    mount.append(host)
+    const shadow = host.attachShadow({ mode: 'open' })
+    const styles = [document.createElement('style'), document.createElement('style')]
+    for (const style of styles) {
+      style.textContent = '.non-visible-css { color: red; }'.repeat(100)
+      // Chromium exposes style source through style.innerText even though the
+      // style element is not rendered; reproduce that boundary in jsdom.
+      Object.defineProperty(style, 'innerText', { configurable: true, get: () => style.textContent })
+    }
+    const content = document.createElement('div'), button = document.createElement('button')
+    button.innerHTML = '<span>显示</span><span>答案</span>'
+    const answer = document.createElement('p'); answer.innerHTML = '答案：<strong>42</strong>'
+    const hidden = document.createElement('span'); hidden.style.display = 'none'; hidden.textContent = '不可见说明'
+    const invisible = document.createElement('p'); invisible.style.visibility = 'hidden'; invisible.textContent = '不可见答案'
+    const restored = document.createElement('span'); restored.style.visibility = 'visible'; restored.textContent = '重新显示的提示'; invisible.append(restored)
+    const details = document.createElement('details'); details.innerHTML = '<summary>解析入口</summary><p>折叠答案：99</p>'
+    const script = document.createElement('script'); script.textContent = 'notVisibleScript()'
+    const template = document.createElement('template'); template.innerHTML = '<p>模板中的答案</p>'
+    const otherOwner = document.createElement('section'); otherOwner.dataset.componentInstanceId = 'another-target'; otherOwner.textContent = '其他实例答案'
+    const nestedHost = document.createElement('div'), nestedShadow = nestedHost.attachShadow({ mode: 'open' })
+    const slotted = document.createElement('span'); slotted.slot = 'caption'; slotted.textContent = '当前实例说明'
+    const unslotted = document.createElement('span'); unslotted.textContent = '没有显示的 light DOM'
+    nestedHost.append(slotted, unslotted); nestedShadow.innerHTML = '<slot name="caption">插槽后备文本</slot>'
+    content.append(button, answer, hidden, script, template, otherOwner, nestedHost, invisible, details); shadow.append(...styles, content)
+    Object.defineProperty(content, 'innerText', { configurable: true, get: () => `显示答案\n${answer.textContent}\n当前实例说明` })
+    Object.defineProperty(mount, 'innerText', { configurable: true, get: () => content.innerText })
+    box(host, 20, 20, 400, 300); box(button); hit(host)
+    Object.defineProperty(shadow, 'elementFromPoint', { configurable: true, value: vi.fn(() => button) })
+    const clicked = vi.fn(); button.addEventListener('click', clicked)
+    const resolved = resolveRuntimeDomButton(root, 'actual-target', '显示答案')
+    expect(resolved.readText()).toEqual({ text: '显示答案\n答案：42\n当前实例说明\n重新显示的提示\n解析入口', truncated: false })
+    answer.querySelector('strong')!.textContent = '43'
+    details.open = true
+    expect(resolved.readText()).toEqual({ text: '显示答案\n答案：43\n当前实例说明\n重新显示的提示\n解析入口\n折叠答案：99', truncated: false })
+    root.style.display = 'none'
+    expect(resolved.readText()).toEqual({ text: '', truncated: false })
+    expect(clicked).not.toHaveBeenCalled()
+  })
   it('records a correctly hit target and its descendant without clicking, excludes other targets and bounds the output', () => {
     const { root, mount } = mounted(), button = document.createElement('button'), child = document.createElement('span')
     const shadowHost = document.createElement('div'), shadow = shadowHost.attachShadow({ mode: 'open' })

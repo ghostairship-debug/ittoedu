@@ -14,6 +14,29 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 const editorRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 
 describe('external courseware case builder', () => {
+  it('executes the complete discovered narrow edit example and reads fresh Builder targets and receipts', async () => {
+    const session = createCoursewareBuilderV2({ surfaceType: 'slide', title: 'Discovered narrow edit' })
+    const inserted = await session.execute('native.content', { operation: 'insert', template: { nativeType: 'text', text: '原题目' } },
+      { kind: 'create', scope: session.createScope({ parent: { kind: 'owner' }, insertion: { kind: 'append' } }) })
+    expect(inserted.status).toBe('committed')
+    const id = inserted.affected[0]!.id
+    const view = session.observe({ itemIds: [id], includeContent: true })
+    const target = view.targets.content[0]!
+    const query = { ids: ['native.content'], operation: 'edit', surface: 'slide' as const, owner: 'scene' as const, detail: 'full' as const }
+    const found = session.discover(query)
+    expect(found).toEqual(createCoursewareCaseBuilderApi().discover(query))
+    const input = found.cards![0]!.content.examples[0].input
+    const receipt = await session.execute('native.content', input, { kind: 'update', target })
+    expect(receipt.status).toBe('committed')
+    const after = session.observe({ itemIds: [id], includeContent: true })
+    expect(after.targets.content[0]!.documentRevision).toBe(target.documentRevision + 1)
+    expect(JSON.stringify(after.items)).toContain('原题目')
+    expect(JSON.stringify(after.items)).toContain('"fontSize":44')
+    expect(session.readReceipts({ after: 1 }).receipts).toEqual([receipt])
+    const instance = session.discover({ ids: ['component.package'], operation: 'patch', mode: 'instance', surface: 'slide', owner: 'scene', detail: 'full' })
+    expect(instance.cards![0]!.content.examples[0]).toMatchObject({ operation: 'patch', mode: 'instance' })
+  })
+
   it('shares exact read-only discovery with the app and builds a discovered Recipe through the same Facade', async () => {
     const session = createCoursewareBuilderV2({ surfaceType: 'slide', title: 'Discover Recipe' })
     const api = createCoursewareCaseBuilderApi()

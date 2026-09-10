@@ -121,16 +121,53 @@ describe('openCodeAcp capabilities discovery', () => {
     expect(buildOpenCodeCapabilities('1.18.26', model).models[0].effort).toEqual({ kind: 'unsupported' })
     expect(buildOpenCodeCapabilities('1.18.26', model, { id: 'effort', currentValue: 'max', options: [{ value: 'low' }] }).current.effort).toBeNull()
   })
+
+  it('reads grouped native model and effort options without selecting group identifiers', () => {
+    const caps = buildOpenCodeCapabilities('1.18.26', {
+      id: 'model', type: 'select', currentValue: 'provider-a/default', options: [
+        { group: 'provider-a', name: 'Provider A', options: [
+          { value: 'provider-a/default', name: 'Default' }, { value: 'provider-a/selected', name: 'Selected' },
+        ] },
+        { group: 'provider-b', name: 'Provider B', options: [
+          { value: 'provider-b/other', name: 'Other' }, { value: 'provider-a/default', name: 'Duplicate' },
+        ] },
+      ],
+    }, {
+      id: 'effort', category: 'thought_level', type: 'select', currentValue: 'none',
+      options: [{ group: 'reasoning', name: 'Reasoning', options: [{ value: 'none' }, { value: 'max' }, { value: 'max' }] }],
+    })
+    expect(caps.models.map(model => ({ id: model.id, label: model.label }))).toEqual([
+      { id: 'provider-a/default', label: 'Provider A/Default' },
+      { id: 'provider-a/selected', label: 'Provider A/Selected' },
+      { id: 'provider-b/other', label: 'Provider B/Other' },
+    ])
+    expect(caps.current).toEqual({ model: 'provider-a/default', resolvedModel: null, effort: 'none' })
+    expect(caps.models[0].effort).toEqual({ kind: 'supported', values: ['none', 'max'], default: null })
+    expect(caps.models.slice(1).every(model => model.effort.kind === 'unknown')).toBe(true)
+  })
+
+  it('ignores unsupported configuration types instead of advertising unusable model controls', () => {
+    const model = { id: 'model', type: 'future-control', currentValue: 'native/default', options: [{ value: 'native/default' }] }
+    const unsupported = buildOpenCodeCapabilities('1.18.26', model)
+    expect(unsupported.models).toEqual([])
+    expect(unsupported.current).toEqual({ model: null, resolvedModel: null, effort: null })
+    const effort = buildOpenCodeCapabilities('1.18.26', { ...model, type: 'select' }, {
+      id: 'effort', type: 'future-control', currentValue: 'max', options: [{ value: 'max' }],
+    })
+    expect(effort.current.effort).toBeNull()
+    expect(effort.models[0].effort).toEqual({ kind: 'unsupported' })
+  })
 })
 
 function openCodeNativeProcess(options: { exitAt?: string; hangAt?: string; rejectAt?: string; confirmedModel?: string; returnedSessionId?: string; hangPrompt?: boolean; ignoreCancel?: boolean; sessionDelayMs?: number;
-  initialModel?: string; initialEffort?: string; confirmedEffort?: string; effortByModel?: Record<string, { values: string[]; initial: string }> } = {}): string {
+  initialModel?: string; initialEffort?: string; confirmedEffort?: string; groupedConfig?: boolean; effortByModel?: Record<string, { values: string[]; initial: string }> } = {}): string {
   return `
 const options = ${JSON.stringify(options)};
 const send = value => process.stdout.write(JSON.stringify({ jsonrpc: '2.0', ...value }) + '\\n');
 let sessionId = null, model = options.initialModel || 'native/default', promptId = null, effort = options.initialEffort || options.effortByModel?.[model]?.initial;
-const configOptions = () => [{ id: 'native-model', category: 'model', currentValue: model, options: [{ value: 'native/default' }, { value: 'native/selected' }] },
-  ...(options.effortByModel?.[model] ? [{ id: 'native-effort', category: 'thought_level', type: 'select', currentValue: effort, options: options.effortByModel[model].values.map(value => ({ value })) }] : [])];
+const selectOptions = (group, values) => options.groupedConfig ? [{ group, name: group, options: values }] : values;
+const configOptions = () => [{ id: 'native-model', category: 'model', currentValue: model, options: selectOptions('Native models', [{ value: 'native/default' }, { value: 'native/selected' }]) },
+  ...(options.effortByModel?.[model] ? [{ id: 'native-effort', category: 'thought_level', type: 'select', currentValue: effort, options: selectOptions('Reasoning', options.effortByModel[model].values.map(value => ({ value }))) }] : [])];
 require('node:readline').createInterface({ input: process.stdin }).on('line', line => {
   const { id, method, params = {} } = JSON.parse(line);
   if (options.exitAt && method === options.exitAt) process.exit(23);
@@ -165,8 +202,8 @@ function realOpenCodeAdapter(script: string | (() => string), timeouts: { rpcTim
   const messages: any[] = []
   const children: ChildProcessWithoutNullStreams[] = []
   const launch = processModule.launchAgent
-  vi.spyOn(processModule, 'launchAgent').mockImplementation((binary, args, cwd) => {
-    const child = launch(binary, args, cwd)
+  vi.spyOn(processModule, 'launchAgent').mockImplementation((binary, args, cwd, candidateRoot) => {
+    const child = launch(binary, args, cwd, candidateRoot)
     children.push(child)
     const write = child.stdin.write.bind(child.stdin)
     vi.spyOn(child.stdin, 'write').mockImplementation((chunk: any, ...rest: any[]) => {
@@ -203,6 +240,56 @@ require('node:readline').createInterface({ input: process.stdin }).on('line', li
 });
 `
 }
+
+describe('OpenCode candidate environment anchor', () => {
+  it('refreshes the candidate anchor in both ACP and native client terminals on every open', async () => {
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'opencode-candidate-env-'))
+    const childSnapshot = path.join(directory, 'acp.json'), terminalSnapshot = path.join(directory, 'terminal.json')
+    const snapshot = `JSON.stringify({cwd:process.cwd(),candidateRoot:process.env.COURSEWARE_CANDIDATE_ROOT??null,nativeSetting:process.env.COURSEWARE_NATIVE_ENV_TEST})`
+    const { adapter } = realOpenCodeAdapter(`require('node:fs').writeFileSync(${JSON.stringify(childSnapshot)}, ${snapshot});` + openCodeNativeClientProcess([
+      { method: 'terminal/create', params: { command: process.execPath,
+        args: ['-e', `require('node:fs').writeFileSync(${JSON.stringify(terminalSnapshot)}, ${snapshot})`], cwd: directory } },
+      { method: 'terminal/wait_for_exit', params: { terminalId: '@terminal' } },
+      { method: 'terminal/release', params: { terminalId: '@terminal' } },
+    ]))
+    vi.stubEnv('COURSEWARE_CANDIDATE_ROOT', 'stale-parent-root')
+    vi.stubEnv('COURSEWARE_NATIVE_ENV_TEST', 'keep-native-setting')
+    try {
+      for (const candidateRoot of [path.join(directory, '候选 A'), path.join(directory, '候选 B'), undefined]) {
+        await adapter.open({ cwd: directory, externalSessionId: null, candidateRoot })
+        await adapter.startTurn(nativeOpenCodeTurn(), new Map())
+        for await (const _ of adapter.events()) { /* wait for the terminal read */ }
+        const expected = { cwd: directory, candidateRoot: candidateRoot ?? null, nativeSetting: 'keep-native-setting' }
+        expect(JSON.parse(await fs.readFile(childSnapshot, 'utf8'))).toEqual(expected)
+        expect(JSON.parse(await fs.readFile(terminalSnapshot, 'utf8'))).toEqual(expected)
+        expect(process.env.COURSEWARE_CANDIDATE_ROOT).toBe('stale-parent-root')
+      }
+    } finally { await adapter.close(); await fs.rm(directory, { recursive: true, force: true }); vi.unstubAllEnvs() }
+  })
+
+  it.each(['COURSEWARE_CANDIDATE_ROOT', ...(process.platform === 'win32' ? ['courseware_candidate_root'] : [])])(
+    'preserves the native terminal environment override for %s', async name => {
+      const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'opencode-candidate-override-'))
+      const resultPath = path.join(directory, 'terminal.json')
+      const { adapter } = realOpenCodeAdapter(openCodeNativeClientProcess([
+        { method: 'terminal/create', params: { command: process.execPath,
+          args: ['-e', `require('node:fs').writeFileSync(${JSON.stringify(resultPath)}, JSON.stringify({candidateRoot:process.env.COURSEWARE_CANDIDATE_ROOT,nativeSetting:process.env.COURSEWARE_NATIVE_ENV_TEST}))`],
+          cwd: directory, env: [
+            { name: 'COURSEWARE_CANDIDATE_ROOT', value: 'earlier-native-override' },
+            { name, value: 'last-native-override' }, { name: 'COURSEWARE_NATIVE_ENV_TEST', value: 'native-choice' },
+          ] } },
+        { method: 'terminal/wait_for_exit', params: { terminalId: '@terminal' } },
+        { method: 'terminal/release', params: { terminalId: '@terminal' } },
+      ]))
+      try {
+        await adapter.open({ cwd: directory, externalSessionId: null, candidateRoot: path.join(directory, '候选') })
+        await adapter.startTurn(nativeOpenCodeTurn(), new Map())
+        for await (const _ of adapter.events()) { /* wait for the terminal read */ }
+        expect(JSON.parse(await fs.readFile(resultPath, 'utf8'))).toEqual({ candidateRoot: 'last-native-override', nativeSetting: 'native-choice' })
+      } finally { await adapter.close(); await fs.rm(directory, { recursive: true, force: true }) }
+    },
+  )
+})
 
 describe('OpenCode native subprocess failure and configuration boundaries', () => {
   function outputBudgetProcess(replayBytes: number, turnBytes: number, chunkBytes = 128 * 1024) {
@@ -422,6 +509,30 @@ function emitText(bytes) {
     } finally { await adapter.close() }
   })
 
+  it.each([null, 'saved-native-session'])('selects grouped native model and effort options before prompting session %s', async externalSessionId => {
+    const { adapter, messages } = realOpenCodeAdapter(openCodeNativeProcess({ groupedConfig: true, effortByModel: {
+      'native/default': { values: ['low', 'high'], initial: 'low' },
+      'native/selected': { values: ['none', 'max'], initial: 'none' },
+    } }))
+    try {
+      const opened = await adapter.open({ cwd: process.cwd(), externalSessionId })
+      expect(opened.capabilities.models.map(model => model.id)).toEqual(['native/default', 'native/selected'])
+      expect(opened.capabilities.current.effort).toBe('low')
+      const configured = await adapter.configure({ model: 'native/selected', effort: 'max' })
+      expect(configured.current).toEqual({ model: 'native/selected', resolvedModel: null, effort: 'max' })
+      expect(configured.models.find(model => model.id === 'native/selected')?.effort).toEqual({ kind: 'supported', values: ['none', 'max'], default: null })
+      expect(messages.filter(message => message.method === 'session/set_config_option').map(message => message.params)).toEqual([
+        { sessionId: externalSessionId ?? 'confirmed-native-session', configId: 'native-model', value: 'native/selected' },
+        { sessionId: externalSessionId ?? 'confirmed-native-session', configId: 'native-effort', value: 'max' },
+      ])
+      await adapter.startTurn(nativeOpenCodeTurn(), new Map())
+      const events = []
+      for await (const event of adapter.events()) events.push(event)
+      expect(events.find(event => event.kind === 'configuration')).toMatchObject({ capabilities: { current: { model: 'native/selected', effort: 'max' } } })
+      expect(events.at(-1)).toMatchObject({ kind: 'turn-ended', status: 'completed' })
+    } finally { await adapter.close() }
+  })
+
   it('preserves the loaded native effort when no override is requested', async () => {
     const { adapter, messages } = realOpenCodeAdapter(openCodeNativeProcess({ initialModel: 'native/selected', initialEffort: 'max',
       effortByModel: { 'native/selected': { values: ['none', 'max'], initial: 'none' } } }))
@@ -444,8 +555,8 @@ function emitText(bytes) {
     } finally { await adapter.close() }
   })
 
-  it('publishes external model and effort changes from the same native config update', async () => {
-    const script = openCodeNativeProcess({ effortByModel: {
+  it.each([false, true])('publishes external model and effort changes from the same native config update (grouped=%s)', async groupedConfig => {
+    const script = openCodeNativeProcess({ groupedConfig, effortByModel: {
       'native/default': { values: ['none', 'low'], initial: 'low' },
       'native/selected': { values: ['none', 'max'], initial: 'none' },
     } }).replace('promptId = id;', `promptId = id;

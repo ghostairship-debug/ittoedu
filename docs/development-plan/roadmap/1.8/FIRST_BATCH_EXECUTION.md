@@ -1,125 +1,104 @@
-# 1.8首批执行包：审查修复与原生交互基础
+# 1.8当前执行包：准确编辑、短操作与可靠结束
 
-2026-09-08根据Owner review与最新分阶段方案更新。本包只覆盖089及090–094的既有实现修复；下一实施批次先关闭Claude恢复身份、Codex/OpenCode退出收口、真实模型配置和Flow恢复入口四项反例。完成后交付首批实际证据，不自动扩成三adapter完整能力对等、095–104、1.9、2.0或签署S3。后续开发已排入[开发计划](../../AI_ASSISTANT_DELIVERY_PLAN.md#3-正式依赖与执行顺序)，本次文档更新不代表已启动产品实施。
+> 2026-09-10：[延迟修复与工程收尾](LATENCY_COMPLETION_PLAN.md)的路径、计时、实际互动核对及Windows会话持久化修复已集成；OpenCode 使用 OpenAI OAuth Luna 默认，受影响代表用例通过。Owner临时接入DeepSeek后Claude Code文字预览已补验通过；[原记录](../../reviews/2026-09-10-latency-completion.md)保留Sonnet 503及当时状态；[最终工程验收](../../reviews/2026-09-10-final-acceptance.md)已完成约定工程范围与失败修复，Owner S3仍未签署。下文A/B/C/D及原有限矩阵按有效范围复用，不作为整批重开指令。
 
-长期方向是完整原生CLI加GUI与编辑器连接，CLI自身负责模型循环、工具、Skills和上下文管理。首批四修之后，090/091/092–094仍需在原Owner接齐工作上下文、原生能力与授权往返；无需另建模型循环。r18-105已撤回，未命名/首存归1.9的042，材料结构与分片归045，自动/手动流程归044，聊天工作台归041；2.0完成软件内全部课件操作与速度质量验收，不要求教师到外部AI、终端或Builder补步骤。这些后续目标不进入本次四项修复。
+2026-09-09按[统一方案](../../../../AI编辑最短路径产品决策报告.md)与[开发计划](../../AI_ASSISTANT_DELIVERY_PLAN.md)更新并经用户授权实施。文件名沿用首批入口以保留引用；下文定义本批结果边界，实际完成范围与保留失败见[实施记录](../../reviews/2026-09-09-short-path-implementation.md)。089–104相关实现已集成，9月8日Claude身份、退出收口、配置链和Flow修复及有效证据按未变范围复用，不再全部重开；当前协调仍只看任务板。
 
-## 1. 从这里开始
+## 1. 当前起点
 
-先读根目录总纲的“当前开发路线”、当前任务板/工作协议，以及[首批审查](../../reviews/1.8-first-batch-review.md)、本文件、对应089/090–094规格和直接源码。原[预检证据](../../reviews/1.8-first-batch-preflight.md)只按未受影响范围复用；旧read-only、固定工具白名单或拒绝授权配置下的probe仅证明当时实际覆盖的协议/行为，不是后续目标配置，也不证明完整原生能力对等。上位共同语义见[实施合同](IMPLEMENTATION_CONTRACT.md)相应章节；无需每轮全读总方案、能力索引或无关Skill。
+先读总纲“当前开发路线”、任务板/工作协议、[共同实施合同](IMPLEMENTATION_CONTRACT.md)相关条目、本包和本次节点的直接源码/测试。[历史审查](../../reviews/1.8-first-batch-review.md)与[预检](../../reviews/1.8-first-batch-preflight.md)是证据来源，不覆盖当前源码事实。旧只读/白名单探针不证明完整原生能力，也不证明当前仍有相同限制。
 
-已有正式合同和防错核心可直接使用：
+| 已有基础 | 当前应补的结果 |
+| --- | --- |
+| 三CLI原生transport、V2任务/记录、真实观察、手动/自动应用和多阶段反馈 | 创建前正确配置、真实usage和可读消息；提交后能可靠结束 |
+| strict candidate、多步/$result、正式资源事务与commit receipt | 当前request短投影展开；结构化失败和finish/observe声明贯通 |
+| asset.image.transform的copy-on-write资产及Native/Flow引用更新 | 有效PNG正例、原坏输入负例、首个候选即有准确图片诊断 |
+| 小能力卡、查询脚本、instance/shared patch与源码增量 | 选区必要卡优先、一次完整发现、正确help与operation/mode写域、消除full shared revise旧提示 |
+| deadline、无进展、格式修复和回执保存重试 | 覆盖观察至提交前及预览到期；唯一终态/持久化/待送回执一致 |
+| Builder V2 execute/finish及observe/readReceipts/activateScope | 同源发现和高频窄操作接线；不发明打开已有工程的方法 |
 
-| 路径/符号 | 可复用基础 | 需要核对的直接consumer |
+不得把已有基础重新实施，也不因“已集成”宣称103、060/S3或三CLI全部通过。当前故障、代码变化和明确验收门决定补查范围。
+
+## 2. 执行顺序与写入边界
+
+A/B/C/D是原Owner的剩余工作批次，不新增manifest节点或依赖。先由090 Owner定本次公共增量接口；不依赖新接口的图片夹具、帮助、发现、消息修复和最小计时可同步开始。A的必要基础汇入B；C使用已有增量能力可随A/B开始，D集中补真实集成证据。C中需实测触发的后续深化不阻塞D；1.9/2.0不进入本包。
+
+| 叶子 / 原Owner | 可独立负责 | 必须由唯一Owner顺序集成 |
 | --- | --- | --- |
-| src/shared/localAgentTaskContract.ts：aiTaskSchema、aiObservationSchema、aiProposalSchema、aiHostResultSchema | strict字段、null保留、scope、回执及版本 | 复核090现有harness/repository/窄桥；095才接真实完整观察 |
-| 同文件：localAgentRecordV2Schema、localAgentEventV2Schema、LocalAgentCliAdapterV2 | V2记录/增量事件和原生端口，生产consumer已存在 | 修现有090身份/失败路径及092–094原生接线，不重新换一套transport |
-| src/shared/localAgentContract.ts：localAgentCapabilitiesSchema | 目录选择器id与resolvedModel分开；unknown、unsupported、原生effort | 091修实际配置链，101消费未来控件 |
-| src/shared/localAgentTaskContract.ts：parseLocalAgentLegacyRecord、projectLegacyAgentHistory | repository已消费唯一V1解析，V2持久化/只读投影已存在 | 复核旧记录保全，修原生身份进入V2记录及恢复，不重复建设磁盘Owner |
-| src/shared/localAgentTaskGuards.ts | 候选关联、防越界、Stop、部分完成、回执幂等 | 090/100的唯一任务Owner调用；校验函数本身不是工程事务 |
-| src/shared/generationContract.ts：generationCommitReceiptSchema；现有coordinator.apply | 实际提交成功后返回批次receipt，拒绝/重复apply无成功回执；当前Chat的V1投影已隔离新字段 | V2的HostResult直接消费该receipt，不能再造提交凭据 |
-| tests/fixtures/local-agent-native/*.json | 实际脱敏wire含失败和取消竞态 | 092–094编写对应decoder/transport回归，不靠文字猜字段 |
+| 098图片 | 图像变换/正式tool与夹具的直接修复及测试 | generationSnapshot诊断、共享失败字段、事务接口 |
+| 091/092 Codex | 一个writer统一codexAppServer初始化、Schema、usage、typed事件及专属测试 | harness open/configure、shared合同、repository/projection |
+| 094 OpenCode | ACP启动/目录/解析分组/配置确认及缓存，专属测试 | 共用发现/配置接口与UI状态 |
+| 095/096/099/104发现与提示 | 能力生成/查询、组件模式提示、Builder consumer | generationSnapshot由一个writer汇总焦点/组件目标/诊断；生成目录单writer |
+| 097短操作 | 正式candidate构造/展开、批量和引用测试 | 090公共传输与100结果/生命周期 |
+| 100/101/102终态与界面 | 窄接口稳定后的独立Chat展示/恢复consumer | generationTaskController、harness/guard/repository、IPC只由公共Owner修改 |
+| 089/093保全 | 仅受影响的新失败或相关回归 | 复用既有Flow与Claude证据，不作为全部重开项 |
 
-表中原生端口、V2持久化/投影、能力发现和三transport已存在实现，不能按最初预检状态重新建设。当前需要修复生产接线的具体反例，并核对首批尚缺的真实路径；类型、目录、测试数量均不能单独证明节点完成。
+多执行者实施按工作协议建当前必要卡，由协调Owner持共享锁，将实际非重叠叶子分到隔离工作区；同一实体文件始终单writer。共享合同、harness、generationSnapshot、codexAppServer不按功能名拆成并发writer。真实窗口、输出目录与工程提交串行，独立准备可并行；无并行条件按同一结果顺序串行。
 
-## 2. 修复顺序与写入边界
+## 3. A批：先恢复正确性与必要观测
 
-一个协调者持有共享Harness/Repository/service、合同、工厂与公共测试，并持有其共同写锁；在该写域内只委派实际文件非重叠的CLI叶子，Flow在独立写域并行，使用隔离工作区并保留当前相关未提交实现。当前cli-adapter-codex/claude/opencode细粒度锁已存在，不重新拆锁或改校验器；叶子是协调者写域内的明确分工，不另开与main-preload、ai-session或粗粒度cli-adapters重叠占锁的并行卡。同一实体文件保持单writer，共享变更由协调者顺序集成。
+### 3.1 图片与失败事实
 
-1. 优先关闭P1：协调者和Claude叶子完成真实身份→持久化→应用继续；Codex/OpenCode叶子完成退出/取消RPC收口，协调者验证运行槽释放和下次启动。
-2. 接通091配置链：Harness在新建/恢复边界应用唯一偏好，三个adapter提供真实原生配置/确认；从产品入口验证实际请求，不只断言current。共享与叶子变更顺序集成。
-3. Flow独立关闭超宽控制器非幂等与默认按钮裁剪，并补真正长正文的滚动/点击证据。
+原红点PNG的IDAT CRC和zlib校验损坏是已确认事实。修scripts/build-architecture-baseline-fixtures.ts的正例，保留原坏字节负例，只重建受影响派生夹具，不批量改用户工程。
 
-第3–6节保留本批会触及的既有基础与后续同Owner约束，独立规格定义节点完整目标；它们不要求本批顺便补完全部新增能力。已有有效实现不重建，只补四项反例与受影响真实路径。每项修复默认1–3条最小充分检查，不因多个节点共享测试而重复执行。进程故障可用不触发模型调用的隔离注入；配置和Claude恢复必须有真实原生确认/应用路径。
+复用src/renderer/project/imageTransform.ts和authoring/tools/imageTransformTool.ts的新asset+局部引用事务。有效1×1红图、含文字/alpha图与损坏图分开证明：目标像素正确，未要求内容/隐藏RGB/alpha、节点身份及其他共享引用保留，Undo与资源可恢复。首候选就区分未附图、解码/预检失败、不支持与未知；失败不得替换为绿色文字或shape。合法载体转换继续遵循097原合同。
 
-准备与入口统一按[开发计划§6.1](../../AI_ASSISTANT_DELIVERY_PLAN.md#61-准备与局部验证)：依本次代码变化和命名用例准备必要产物一次，纯逻辑/Schema测试不因此触发构建；随后直接执行下列Vitest/Playwright命令。共享检查合并执行或复用，不通过npm测试生命周期钩子反复构建Player和准备全样例。新增反例先在实施diff补命名测试再同步文件/选择条件，实际0匹配不算通过；局部E2E不得运行整个stabilizationCoreUsability三CLI付费矩阵。
+### 3.2 原生配置、Schema、用量与消息
 
-多执行者才维护必要协调卡，不预建全部active节点。若并行，子代理只改已分配叶子源码与专属测试；harness、公共合同、Chat、工厂和共享测试均由协调者唯一写入。共享窗口、输出目录与真实宿主检查顺序执行；无并行能力就按同一结果顺序串行。
+091/092在原生thread创建前带入用户已选model；未选则原生默认。创建所需配置与只能在首次turn后确认的effort分阶段记录，不能等待后者再开turn。实际请求/原生确认与UI requested/effective一致，失败不静默换模型；恢复和active切换各用合法边界。
 
-首批退出是四项反例关闭、现有发送/读取/取消/候选手动应用保全、相应原生与真实窗口证据明确。092–094的原生工具/权限/授权对等、095完整观察、097语义替换、100自动反馈、101完整教师交互均未因本批修复自动完成；不改变有限generation-snapshot的preview边界。共享能力与完整三CLI任务矩阵分别在原Owner和103汇合，不能用首批通过提前签署。
+同版本同模式outputSchema去本轮requestId常量，值由输入/信封严格校验；candidate/auto两处检查都保留。按真实嵌套tokenUsage.last/total贯通adapter、strict事件、projection、repository、diagnostic和UI，保留reasoning、unknown=null和去重。typed消息按item/phase/type分流，机器候选增量不进入正文，完整终态才提取；普通讨论JSON仍可见。不要根据本例所有JSON推断原生Schema必然约束中途消息。
 
-## 3. 089：Flow已知缺陷
+094按启动→目录请求→分组解析→实际配置确认定位；不预断言本机模型缺失的完整根因。目录按CLI版本/cwd/非秘密身份缓存与合并请求，区分错误、空列表和过期结果并可刷新。已有terminal/file/授权和pending RPC清理保全。
 
-**固定事实**：tests/fixtures/architecture-baseline/mixed-spatial.h5lesson副本；“证据讲义”的mixed-global-controller，frame=(190,638,900,64)。1280×720时编辑区域739×576、起点(227,95)，试运行控制器屏幕框(417,733,900,64)，完全低于视口底部671。证据在output/playwright/user-flow-cli-analysis/REPORT.md及flow-*-720.png。
+### 3.3 一次可用发现与现有增量
 
-**先读**：src/shared/flowViewportGeometry.ts的createFlowViewportGeometry/revealFlowSelectionPan；src/shared/teacherControllerLayout.ts的teacherControllerAuthoringRecoveryBounds/constrainTeacherControllerAuthoringFrame；src/renderer/ui/flow/FlowOverlayAuthoringLayer.tsx的初始frame投影；src/player/teacherControllerDom.ts的初始校正条件；src/renderer/ui/flowLocationTryRun.ts的mountFlowLocationTryRun；FlowSurfaceHost与现有playbackViewSession的直接接口。
+095选区必要信息优先，保留整页关系和冻结目标；混合页不能被首个文本工具占掉图片必要卡。096修help独立处理及operation/mode支持域，一次查询返回完整输入/目标/依赖/示例/诊断和引用。简单选区初始技术说明≤12KB，原图/材料/源码单列；必要技术内容超出该样本边界须报告分项和原因，不截断字段或宣称已通过简单选区验收，也不强制三轮目录→卡→Schema。
 
-**089-A**：将现有可达范围算法用于初次投影和resize，不只是拖动后。可达兜底是view-only，不打开工程就写revision或history。共享几何解释必须同时驱动显示和命中；不能只给选框补CSS、对内容留旧位置。控制器较宽时至少保住正式recovery bounds中的可操作入口，正文仍响应式排版。
+099把旧full shared revise提示改为真实instance/shared patch与changedFiles/deleteFiles合同，保持基线与未变内容；104通过同源能力和既有Builder窄观察/回执消费，不复制字段表或新增Builder协议。源码/动态范围不是所有编辑的默认输入；已有多步候选和资源依赖先直接使用。
 
-**089-B**：当前位置试运行接入正式Playback View生命周期（创建、mount/activate、resize、destroy），不能再借“没有playbackView”绕开初始校正。200%缩放/平移/恢复只改变观察，不重新挂载Runtime/Component。使用1280×720与1440×900，分别检查编辑、试运行、预览、离线HTML；长正文中/尾、resize和恢复都要观察实际画面。保留既定D1方案A，不把Flow恢复成固定16:9画布。
+## 4. B批：短投影、完整终态与预算
 
-上述初始投影与Playback View已有实现。本次修复聚焦900宽面板/约683 CSS px视口的非幂等校正：按正式recovery bounds保证缩放/收起可操作，重复render/resize不左右震荡。E2E须检查实际按钮裁剪与点击效果，不能只判断面板部分相交；长正文必须真实可滚动并断言scrollTop及画面变化。复核现成失败截图即可确定边界，不重做全部三表面整合。
+090先版本化增量字段及strict consumer，097再将当前request内target/asset别名展开为完整candidate，绑定canonical target/revision/sessionGeneration/task epoch。未知、跨范围、过期别名拒绝；不以活动选区或自然语言补猜。参数来自正式Schema，展开后仍走当前Facade/prepare/事务。短/完整传输产生同一业务结果与Undo；批量相关操作与$result仍保持依赖和原子性。
 
-**检查（本子包最多3条）**：
-- npx --no-install vitest run tests/unit/flowViewportGeometry.test.ts tests/unit/teacherControllerAuthoringBounds.test.ts tests/unit/teacherControllerConsistency.test.ts
-- npx --no-install playwright test tests/e2e/r18-089-flow-viewport.spec.ts --grep "mixed-global-controller stays reachable at 1280×720 and 1440×900"
-- 两个真实窗口的上述动作/截图。硬件手势没有实际设备就保留未验，不扩展为模拟通过。
+afterCommit的finish必须经过实际committed或正式unchanged、必要证据与已保存回执，再由generationTaskController、main harness、AiTask guard/持久化和UI一起终结。unchanged不增revision/Undo；preview待应用不算完成。必要observe/continue附具体理由，保留复杂任务、后续阶段和受影响真实互动检查，不增加强制总结轮。
 
-## 4. 090-B：公共Owner和旧记录接线
+回执先保存于唯一应用会话；原生无推理追加仅在实际版本验证角色/身份/幂等/恢复后启用，缺失则持久标记待送并在下次真正请求前带入，不阻塞本地完成。已提交但记录失败保留内存receipt，只重试保存；回执未落盘即崩溃则核实当前工程事实，未知如实显示，不自动重复修改或造回执。
 
-**先读**：src/main/localAgent/harness.ts、repository.ts、service.ts；src/shared/localAgentContract.ts、localAgentTaskContract.ts、localAgentTaskGuards.ts；src/shared/ipcTypes.ts、src/main/ipc.ts、src/preload/index.ts；当前直接consumer src/renderer/ui/chat/CourseChatPanel.tsx和generation/prepareGenerationCandidate.ts。
+工具/prepare/controller/LocalAgent/AiHostResult/下一输入保留阶段、步骤、code、target/asset、字段路径、revision、committed、恢复动作和实际帧/状态。动态smoke失败不丢已有证据；replacement-unmappable仍表示引用映射错误，不滥用于意图越界。
 
-**确定实现边界**：
+沿现有20分钟绝对deadline覆盖观察、原生执行、prepare、准入和提交前。子检查/等待/重试不延期；preview或waiting-input到期后旧候选不可应用，再次用户输入经新观察准备。首个失败建立基线，其后连续两次无实质进展停止；保留一次有诊断格式修复。candidateId、注释或summary变化不算进展。超时列已完成/未完成/恢复点，保留此前合法提交。
 
-- Task仍由LocalAgentHarness持有，Generation Owner持有正式prepare/commit。Chat只发操作和显示投影；不新增Chat私有任务状态或第二Store/History。
-- repository按version严格读取，V1经已经实现的parseLocalAgentLegacyRecord/projectLegacyAgentHistory；V2经localAgentRecordV2Schema。新会话只写V2，原V1文件不重写成新内容。可用单一repository按版本分目录读取，不能同一个sessionId同时写两份记录。损坏只隔离该条；保留既有临时文件rename、容量上限、目录引用清理语义。
-- V2中CLI会话、Task、runId和nativeTurnId不同。harness为每次原生调用生成runId并追加全会话sequence/time/sessionId；adapter只返回LocalAgentNativeEvent。native turn-ended不自动把Task标completed。候选ready、宿主checked、live committed分别处理。
-- 当前start/resume/generate入口迁移到同一个V2 Owner。旧记录的“继续”只提取可读目标/对话上下文并新建任务与当前快照；不能传旧candidate或externalSessionId自动续写。现有生成请求的canonical目标/材料/确认文档约束保留。
-- 当前UI若需要阶段性的V1显示格式，可由V2生成只读投影；不得持久化该投影或拿投影字段提交。新增功能消费V2事件，删除对应已迁移私有类型。090对尚未替换的原生单轮adapter可使用有明确删除点的transport适配层，不能宣称它已支持中途输入。
-- 首批已有明确的有限观察分支：source=generation-snapshot，保存现有generation snapshot的范围及documentRevision/sessionGeneration，draftEpoch/viewEpoch/runtime必须为null，不能填0假装已捕获；结构/材料文件可随其新observationId保存。旧UI生成入口按现有行为记录applyPolicy=preview，并保留正式commit的活动草稿拒绝；防错核心禁止这种有限观察进入auto应用。095才生成完整authoring/trial/preview观察，101新UI采用既定默认auto。Task.observationId在尚未准备时允许null；不能把有限观察算作T01/T07通过。092–094隔离探针可消费真实捕获的观察fixture。
-- assertAiProposalCurrent在prepare前使用，并在既有提交租约内以最新正式状态重新校验。它只约束传入身份，不证明调用者传入的是当前文档；现有documentRevision/sessionGeneration及未来draftEpoch检查不能删除。
-- Stop先同步stopAiTask并失效epoch，再await原生取消/自有进程清理。Save As/删除/close的迟到事件可归档，不驱动工程。先前已提交resultIds保留为partial；取消仅保证当前未提交阶段零写。
-- acceptAiHostResult只在正式事务已经返回后调用；提交精确使revision+1。直接使用现有coordinator.apply新增的generationCommitReceipt；每个HostResult至多对应一个当前候选批次回执。prepare的plannedEffects不是live receipt，不能把准备副本上的单工具回执填成已提交。重复完整结果返回duplicate，内容冲突失败；不能让重启恢复自动重放。
+## 5. C批复杂编辑与D批真实汇合
 
-本次共享修复必须消费所有V2 adapter的原生确认身份，不能只同步V1 wrapper；新建/恢复应用唯一模型偏好并消费原生确认；进程初始化失败/取消后等待结束、槽位释放。上述变化用真实V2 adapter与Harness之间的反例验证，旧V1模拟路径通过不替代。
+C批按统一方案先用已有patch/多步候选完成整页和互动修改，其发现/提示接线随A/B推进；进一步观察、检查或资源复用只有实测瓶颈成立才在099/1.9-050深化，不另设未触发功能前置。
 
-**本批检查（选择直接对应修复的1–3条）**：
-- npx --no-install vitest run tests/unit/localAgentTaskContract.test.ts tests/unit/diagnosticLog.test.ts tests/unit/editorTransaction.test.ts
-- npm run typecheck
-- 用真实Claude首轮→结束进程→应用继续，核对原生确认身份已进入唯一V2记录；对退出/取消反例核对有界结束、运行槽释放和下一任务可启动。旧V1读取与现有Native候选手动应用按受影响范围检查或复用有效证据，保留唯一持久记录和真实事务。
+D批集中真实结果与有限对照。100先用一家已具对应原生基础能力的CLI证明共用链，完整三家在103汇合，不要求每个叶子都跑全部矩阵。成功finish与有理由继续两条都验，不能用单轮通过证明复杂创作完成。
 
-## 5. 091：模型、能力与配置
+| 待证明结果 | 必要反例 / 真实证据 |
+| --- | --- |
+| 正确图片/精确文字 | 有效与坏图分离；首候选正确目标，保持身份/内容/共享引用，保存重开与Undo按受影响范围 |
+| 正确调用与短操作 | 混合页图片优先、scene/Flow实例patch、共享域、帮助和query Schema可解析；短/完整等价，错别名/stale拒绝 |
+| 模型、消息与usage | 实际请求model/effort分阶段确认；真实last/total wire去重；机器JSON不泄漏、正常JSON可读 |
+| 任务与恢复 | auto/preview、finish/unchanged/observe、拒绝/stale、prepare超时、待应用到期、回执失败只重试记录、未落盘崩溃未知 |
+| 复杂编辑与动态 | 整页关系、多步依赖、实例/共享patch；真实互动动作和失败帧，lifecycle smoke不冒称语义完成 |
+| 双入口与三CLI | 应用当前工程与普通非Git课例目录Builder；各adapter能力差异准确，保留103原有限自然任务和生命周期范围 |
 
-**091-A**：复核现有adapter owner中的发现实现，service通过现有local-agent:operate窄桥提供模型配置结果，不借该接口开放任意命令行参数；这个配置接口边界不用于裁剪CLI原有文件、终端、网络或工具能力。Codex用model/list的原生目录/effort；Claude双向initialize返回models/value/resolvedModel/supportedEffortLevels；OpenCode用session/new/configOptions及原生确认，目录未暴露的model vision/effort标unknown，不补固定列表。
+计时主指标为请求→首次正确且可用结果，总任务终结另列；effective model/effort/service tier、auto/preview、冷/热与用户等待分组。保留原始样本、失败和中位数/范围，不用3次样本报P95，不拿坏PNG负例对比有效图制造提速。continuation/native turn/candidate/token事件和不可见内部模型请求分开计数。仅实测表明瓶颈后，在099/1.9-050选择增量观察、细粒度补丁、检查/资源复用。
 
-**091-B**：期望选择与已确认current分开。Codex选择进入thread/turn原生参数，Claude使用程序化原生模型设置/强度支持入口并验证实际modelUsage，OpenCode使用session/set_config_option返回的currentValue/configOptions。模型变化清理失效effort，原生无默认值时保持null，不填low。运行中不支持配置时排到下一合法边界，显示pending，不能静默重启另一个模型。仅保存非秘密偏好，账号或CLI目录变化刷新发现。
+## 6. 精确验证入口与停止
 
-本次优先修复“返回配置成功但实际请求未用”的断点：从Harness configure→新建/恢复→实际原生请求捕获model/effort，确认失败时不得发布虚假current或继续另一模型。专属configure单测仅断言本地current的现有证据不足。
+准备统一按[开发计划6.1](../../AI_ASSISTANT_DELIVERY_PLAN.md#61-准备与局部验证)。以下是实际已有文件的导航，不是一次全跑的命令清单；实施时先补待验证的新命名用例，再选择对应文件/过滤。0匹配、skip/exclude不算通过；纯逻辑不因此构建Player，相关制品按变化只准备一次。
 
-**原生实证陷阱**：Claude的default/opus别名可能解析为同一个模型，不从resolvedModel反猜用户选择；本合同同时保留selector id与resolvedModel。OpenCode的transport image=true不等于Big Pickle能识图，不能把Muse探针结果算给Big Pickle。
+| 写域 | 直接阅读 / 验证导航（相对仓库根） |
+| --- | --- |
+| 图片 | src/shared/imageTransformContract.ts；src/renderer/project/imageTransform.ts；src/renderer/authoring/tools/imageTransformTool.ts；scripts/build-architecture-baseline-fixtures.ts；tests/unit/imageTransform.test.ts、imageTransformTool.test.ts |
+| 原生配置/通信 | src/main/localAgent/codexAppServer.ts、openCodeAcp.ts、harness.ts；src/shared/localAgentContract.ts、localAgentTaskContract.ts、localAgentProjection.ts；tests/unit/codexAppServer.test.ts、openCodeAcp.test.ts、localAgentHarnessV2.test.ts |
+| 观察/发现 | src/renderer/authoring/generation/generationSnapshot.ts；src/main/localAgent/capabilityWorkspace.ts；scripts/generate-ai-capabilities.ts、query-ai-capabilities.mjs；tests/unit/generationSnapshotCanvas.test.ts、generationCapabilityWorkspace.test.ts、aiCapabilities.test.ts |
+| 短操作/动态 | src/renderer/authoring/generation/prepareGenerationCandidate.ts；src/renderer/authoring/tools/componentPackageTool.ts；src/renderer/course/coursewareBuilderV2.ts；tests/unit/courseComponentPackageTransactions.test.ts；其余直接用例按097/099/104规格 |
+| 终态/恢复 | src/renderer/authoring/generation/generationTaskController.ts；src/shared/localAgentTaskGuards.ts；src/main/localAgent/harness.ts、repository.ts；tests/unit/generationTaskController.test.ts、localAgentTaskContract.test.ts、localAgentHarnessV2.test.ts |
+| 真实汇合 | tests/e2e/stabilizationCoreUsability.spec.ts按103命名用例精确选入；局部不得整文件隐式触发三CLI付费生成 |
 
-**检查**：
-- npx --no-install vitest run tests/unit/diagnosticLog.test.ts tests/unit/codexAppServer.test.ts tests/unit/claudeProcessTransport.test.ts tests/unit/openCodeAcp.test.ts
-- npm run typecheck（同一未变共享代码已通过则复用）
-- 每CLI一次发现→不同于默认的可用模型选择→请求/原生确认；有原生effort的验证切换，无原生依据的不展示。复用本轮已有效模型发现/ACP选择证据，不重复计费探针。
+共享检查一次运行或复用有效证据；重跑需相关源码、合同、fixture、配置或验证定义变化。既有090/093恢复、退出和089 Flow通过只在本轮相关变化时补检，不因审查者或上下文变化全部重跑。生产代码不import tests/fixtures或output，不写死本机模型/会话/账号；不改用户全局CLI配置或个人Skill。
 
-## 6. 092–094：独立原生映射与统一集成
-
-| 子包 | 唯一路径与输入 | 控制/结束语义 | 删除点 |
-| --- | --- | --- | --- |
-| 092 Codex | codexAppServer.ts；app-server；原生text/localImage；默认工程文件来自当前不可变观察根，其他原生工具按真实授权工作 | requestUserInput关联question/turn并回复answers；steer带expectedTurnId；Stop等待started竞态；host结果用同thread下一turn | 原来仅text输入、丢弃公开summary/plan及每轮finally杀会话路径；后续接齐原生能力时移除固定read-only/never限制 |
-| 093 Claude | 现有claudeProcessTransport.ts；--input-format stream-json；原生image内容块、Read | initialize/control_request/control_response；AskUserQuestion回传；stdin整段任务保持打开；匹配本地interrupt后识别aborted_streaming；原生ID确认/持久化后正确继续 | 修正未确认随机ID和仅本地配置；复核旧单向consumer已退出，不再拆另一transport |
-| 094 OpenCode | openCodeAcp.ts；ACP prompt image；选定session/config；候选摄取闭合，原生文件/终端与授权由真实协议接通 | session/update消息/plan/tool identity；正文问题用普通输入回答；补充排到下一turn或取消当前turn后同session继续；cancelled是取消终态 | 强制Big Pickle、全局fs.read=false、所有非end_turn都归失败及每轮杀进程路径；后续接齐原生能力时移除终端关闭与统一拒绝授权 |
-
-每家都遵循LocalAgentCliAdapterV2。不要为了让三家方法同名而伪造三家都支持active steer或结构化问答。整个任务的多阶段自动反馈由100实现；同会话继续送入消息/真实host结果的完整原生映射仍归092–094。本批修复Claude实际恢复并保全现有继续能力，不将所有新增接线列为四修退出条件，也不另建模型循环。
-
-首批结束后的同Owner工作还包括原生cwd/配置发现、文件/终端/网络、已有Skills和工具连接、子任务以及授权请求/回答。应用不新增独立MCP服务或通用工具RPC平台，但不能屏蔽CLI已配置的原生连接。默认小观察、候选目录和旧隔离probe不是全CLI权限限制；沿用用户真实有效授权，在GUI保留允许、拒绝和取消语义，不代用户提权。Claude固定工具白名单等旧限制同样属于后续要纠正的配置，旧probe不能作为目标能力对等证据。
-
-本次092/094先关闭初始化退出pending RPC反例：error/close/主动close均清空并拒绝等待请求，关闭幂等，配置/启动阶段等待有界，Stop/删除和下一任务可完成。093先闭合原生确认ID→Harness持久记录→应用继续的恢复路径，禁止随机占位ID直接作为resume句柄。实际请求模型接线与091共享Owner顺序集成；各节点专属测试入口见其最新规格。
-
-**事件投影**：正文增量append、终态全文replace使用同一itemId，避免重复正文；原始reasoning/thinking/redacted内容不进入正文。只有原生明确公开的summary/plan进入对应phase，工具detail保留诊断用途。未知事件可有界记录；未知终态/超限必须明确失败，不用“所有异常忽略”获得绿色。对问题、input-delivery、turn-ended分别验证run/epoch；主进程负责记录sequence。
-
-**默认观察与候选摄取边界**：renderer为应用提供的工程观察传fileId和正式引用；Main把当前Observation中的ID映射到已验证文件路径，映射需realpath闭合，字符串相对路径Schema不是磁盘闭合证明。CLI按任务和真实授权使用其原生工具读取其他资料；当前观察根和candidate root不替代完整原生工作上下文，也不构成通用OS沙箱。OpenCode原生Read与fs/read_text_file等通道各自以实际调用为证，旧探针只证明当时路径。本产品仍按已批准受信团队模型运行；硬边界是宿主只摄取当前candidate root闭合制品、正式事务写入、迟到零工程写入。原生文件操作成功不能冒称当前画布/History已提交。
-
-**本批检查（按受影响adapter选择，不补跑完整对等矩阵）**：
-- 按对应092/093/094规格执行专属adapter测试与tests/unit/diagnosticLog.test.ts；共享Harness检查只运行一次。新增反例必须覆盖真实wire/身份持久化/待处理请求结束，不能仅断言返回对象。
-- npm run typecheck（同一未变证据复用）
-- Claude真实应用恢复与三CLI配置确认按第4、5节合并验证；Codex/OpenCode退出收口先用确定性故障反例，再核对受影响的实际应用启动/停止。已有识图、读取、回答、续轮等证据仅在覆盖范围仍有效时复用，接线变化才补相关链。完整原生能力与三家自然语言任务矩阵留给同Owner后续和103，不通过重复付费探针扩大本批。
-
-生产代码不能import tests/fixtures或output路径；不能写死本机模型、token、会话ID。探针只用于定位受影响差异，不自动在pretest/build中运行。
-
-## 7. 本批结束与升级边界
-
-交付改动文件、四项修复实际结果、复用/新增证据、未通过或外部阻断。只有本批目标和反例通过才写首批完成；保留090–094尚待接齐的完整原生能力，以及S3仍待095–104与既有汇合门的事实。103仍保留三CLI与双入口要求，050、051/052 PPTX、083/087及060/S3没有因撤105削减。同步当前任务卡与任务板，按工作协议清除已结束交接卡；不要把路线节点都做成active卡。
-
-不修改V9、Published、用户账号/全局CLI配置、受管Skill、未来路线内容或用户已有editor-root.local.json；不自行commit/push/发布。子代理仅用于第2节已划定的独立任务。若原生协议事实与本包冲突，保留最小失败样本和具体受影响节点，独立子包继续；不得用假能力/放宽身份/静默降载体通过。仅遇到真实产品语义取舍、超出已批准合同的Schema/权限变化、新服务或无法继续的外部条件才回报Owner；已明确的原生能力对等决定不重复征求，普通CLI授权请求由其原生机制和GUI承接。一般代码分文件与测试安排由执行者完成。
+交付每个本轮目标的实际结果、受影响检查与未完成事实。A/B/C/D只更新实际协调卡，不预建全部active节点；完成后按协议清卡/生成任务板。103、050、051/052 PPTX、083/087及060/S3门全部保留，不由本包自动签署；1.9/2.0按正式计划继续，不在本批顺便实施。未获本次实施授权时只维护计划，不自行改产品、commit/push/发布或标accepted。

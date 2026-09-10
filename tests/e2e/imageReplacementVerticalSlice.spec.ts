@@ -767,15 +767,22 @@ test.describe.serial('ARCH-1 VS-06 image replacement desktop regression', () => 
           await page.goto(pathToFileURL(exported.path).toString())
           const publishedAdapter = page.locator('.slide-published-adapter')
           await expect(publishedAdapter).toBeVisible({ timeout: 15_000 })
-          const nextButton = page.locator('[data-controller-button-id="next"]')
-          await expect(nextButton).toHaveText('下一场景', { timeout: 15_000 })
-          for (const locationId of [
-            'slide-location-evidence',
-            'slide-location-practice',
-            'slide-location-summary',
+          await expect.poll(() => publishedAdapter.getAttribute('data-location-id'))
+            .toBe('slide-location-intro')
+          // Intro and evidence are two steps in one scene. Scene navigation skips
+          // the remaining step; returning enters that scene at its first step.
+          for (const { buttonId, label, locationId } of [
+            { buttonId: 'next', label: '下一场景', locationId: 'slide-location-practice' },
+            { buttonId: 'previous', label: '上一场景', locationId: 'slide-location-intro' },
+            { buttonId: 'playback-step-next', label: '下一步', locationId: 'slide-location-evidence' },
+            { buttonId: 'next', label: '下一场景', locationId: 'slide-location-practice' },
+            { buttonId: 'next', label: '下一场景', locationId: 'slide-location-summary' },
           ]) {
-            const bounds = await nextButton.boundingBox()
-            if (!bounds) throw new Error('Exported player next-scene button has no bounds')
+            const button = page.locator(`[data-controller-button-id="${buttonId}"]`)
+            await expect(button).toHaveText(label, { timeout: 15_000 })
+            await expect(button).toBeEnabled()
+            const bounds = await button.boundingBox()
+            if (!bounds) throw new Error(`Exported player ${label} button has no bounds`)
             await page.mouse.click(
               bounds.x + bounds.width / 2,
               bounds.y + bounds.height / 2,

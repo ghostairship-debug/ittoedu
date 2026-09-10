@@ -138,6 +138,37 @@ describe('deterministic repo-index generator', () => {
     ).toThrow(/reference is undefined/)
   })
 
+  it('parses angle-delimited and balanced Markdown destinations before validating repository links', () => {
+    const fixtureRoot = resolve(temporaryRoot, 'markdown-parentheses')
+    mkdirSync(fixtureRoot, { recursive: true })
+    for (const name of ['课程 (RJ).md', 'target(one(two)).md', 'target).md']) {
+      writeFileSync(resolve(fixtureRoot, name), '# Valid Heading\n', 'utf8')
+    }
+    const source = [
+      '[local](<./课程 (RJ).md#valid-heading> "review (title)")',
+      '[nested](./target(one(two)).md)',
+      '[escaped](./target\\).md \'title)\')',
+      '[title](./target(one(two)).md (optional title))',
+      '[external](<D:/台式机桌面/九数上(RJ)/教学 材料.md>)',
+      '[external-url](https://example.test/course(one(two)))',
+      '[external-ref][review]',
+      '[review]: <D:/台式机桌面/九数上(RJ)/教学 材料.md>',
+    ].join('\n')
+    expect(validateMarkdownLinks(fixtureRoot, 'source.md', source)).toEqual([
+      'target(one(two)).md',
+      'target).md',
+      '课程 (RJ).md#valid-heading',
+    ])
+    for (const destination of ['<./missing (RJ).md>', './missing(one(two)).md']) {
+      expect(() => validateMarkdownLinks(fixtureRoot, 'source.md', `[bad](${destination})`))
+        .toThrow(/target does not exist/)
+    }
+    expect(() => validateMarkdownLinks(fixtureRoot, 'source.md', '[bad](<./课程 (RJ).md#missing>)'))
+      .toThrow(/anchor does not exist/)
+    expect(() => validateMarkdownLinks(fixtureRoot, 'source.md', '[bad](<../outside (RJ).md>)'))
+      .toThrow(/escapes repository/)
+  })
+
   it('atomically replaces an existing directory and restores it after an injected failure', () => {
     const files = new Map([['manifest.json', Buffer.from('{"new":true}\n')]])
     const successTarget = resolve(temporaryRoot, 'atomic-success/generated')

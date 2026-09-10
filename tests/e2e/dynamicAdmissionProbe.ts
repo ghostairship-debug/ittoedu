@@ -9,7 +9,7 @@ export async function runDynamicAdmissionProbe(page: Page) {
     const { applyEditorTransactionStep } = await load('/src/renderer/authoring/editorTransaction.ts')
     const { componentPackageAddress } = await load('/src/renderer/authoring/tools/componentPackageTool.ts')
     const font = new Uint8Array(await (await fetch('/node_modules/@fontsource-variable/noto-sans-sc/files/noto-sans-sc-latin-wght-normal.woff2')).arrayBuffer())
-    const fallback = Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6ZAAAAABJRU5ErkJggg=='), c => c.charCodeAt(0))
+    const fallback = Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR4nGP4DwQACfsD/fteaysAAAAASUVORK5CYII='), c => c.charCodeAt(0))
     const sources = await createProjectFontDeliveryFixture(font, fallback)
     let document = sources.project
     let resources = { assetFiles: sources.assetFiles, componentPackages: sources.components }

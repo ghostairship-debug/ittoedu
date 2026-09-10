@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { LocalAgentEvent, LocalAgentId, LocalAgentRecord } from '../../../shared/localAgentContract'
-import type { GenerationRequest } from '../../../shared/generationContract'
+import { MAX_GENERATION_TASK_DURATION_MS, readGenerationFailure, type GenerationRequest } from '../../../shared/generationContract'
 import type { MaterialRecordV1 } from '../../../shared/materialContract'
 import type { DynamicBehaviorObservation } from '../../../shared/dynamicBehaviorObservation'
 import { GENERATION_OPEN, GENERATION_CLOSE, GENERATION_RESULT_OPEN, GENERATION_RESULT_CLOSE } from '../../../shared/generationResult'
 import { localAgentText } from '../../../shared/localAgentText'
+import { latestLocalAgentTokenUsage } from '../../../shared/localAgentUsage'
 import type { GenerationReferenceScope } from '../../authoring/generation/generationSnapshot'
 import { GenerationTaskController, type GenerationTaskView } from '../../authoring/generation/generationTaskController'
 import { selectActiveCourseProjectDocument, useEditorStore } from '../../store/editorStore'
@@ -14,11 +15,12 @@ import { SafeChatMessage } from './SafeChatMessage'
 import { NativeAgentQuestion } from './NativeAgentQuestion'
 import { NativeAgentConfiguration } from './NativeAgentConfiguration'
 import { GenerationCandidatePreview } from './GenerationCandidatePreview'
-import { createCourseChatObservation } from './courseChatObservation'
+import { awaitCourseChatStage, createCourseChatObservation } from './courseChatObservation'
 import { aiQuestionSchema, aiInputDeliverySchema } from '../../../shared/localAgentInteraction'
 import './course-chat.css'
 
 type Turn = { id: string; request: GenerationRequest; events: LocalAgentEvent[]; summary?: string }
+type Preparation = { token: number; execution: NonNullable<GenerationRequest['execution']>; abort: AbortController }
 const message = (error: unknown) => error instanceof Error ? error.message : String(error)
 const assistantText = (events: LocalAgentEvent[]) => {
   let text = localAgentText(events)
@@ -31,7 +33,9 @@ const assistantText = (events: LocalAgentEvent[]) => {
   return text.trim()
 }
 const emptyView: GenerationTaskView = { busy: false, phase: 'completed', notice: '', events: [] }
-const statusLabels = { running: '运行中', completed: '已结束', failed: '未完成', cancelled: '已停止' }
+const statusLabels = { observing: '正在同步', running: '运行中', 'waiting-input': '等待回答', checking: '正在检查',
+  'awaiting-apply': '等待应用', committing: '正在应用', 'feeding-back': '正在核对',
+  completed: '已完成', failed: '未完成', cancelled: '已停止', partial: '部分完成' }
 export function resolveChatIntent(text: string, selected: 'discuss' | 'plan' | 'edit') {
   if (/先[^。\n]{0,18}(?:计划|方案)|只(?:做|写|出)(?:计划|方案)/.test(text)) return 'plan'
   if (/只(?:和我)?讨论|先(?:和我)?讨论/.test(text)) return 'discuss'
@@ -63,41 +67,59 @@ export function CourseChatPanel({ projectId, projectPath, onClose }: { projectId
   const [turns, setTurns] = useState<Turn[]>([]), [events, setEvents] = useState<LocalAgentEvent[]>([])
   const [materials, setMaterials] = useState<MaterialRecordV1[]>([]), [materialIds, setMaterialIds] = useState<string[]>([])
   const [view, setView] = useState<GenerationTaskView>(emptyView), [preparing, setPreparing] = useState(false)
+  const [preparationExecution, setPreparationExecution] = useState<GenerationRequest['execution']>()
   const [error, setError] = useState(''), [notice, setNotice] = useState('')
   const [applied, setApplied] = useState<Pick<GenerationTaskView, 'receipt' | 'result' | 'sessionId'> | null>(null)
   const [now, setNow] = useState(Date.now())
   const generation = useRef(0), scroll = useRef<HTMLDivElement | null>(null), followReply = useRef(true)
+  const preparation = useRef<Preparation | null>(null)
   const activeRequest = useRef<string | undefined>(undefined), behaviorEvidence = useRef<DynamicBehaviorObservation[]>([])
   const currentDocument = useEditorStore(selectActiveCourseProjectDocument), authoringSession = useEditorStore(state => state.courseAuthoringSession)
   const revision = currentDocument?.revision, busy = view.busy || preparing, api = window.desktopAPI
   const owner = useMemo(() => ({ projectId, projectPath: projectPath ?? '' }), [projectId, projectPath])
-  const bridge = useMemo(() => api && projectPath ? createCourseChatObservation(api, owner) : null, [api, owner, projectPath])
-  const controller = useMemo(() => api && bridge ? new GenerationTaskController({ api, owner,
-    isCurrent: request => bridge.isCurrent(request), captureNext: (request, receipt) => bridge.captureNext(request, receipt, behaviorEvidence.current),
-    async prepare(request, candidate) {
-      const prepared = await useEditorStore.getState().prepareGenerationCandidate(request, candidate)
-      if (activeRequest.current === request.requestId) behaviorEvidence.current = prepared.behaviorEvidence
-      return prepared
-    },
-    apply: id => useEditorStore.getState().applyGenerationCandidate(id), beforeApply: () => bridge.fileCurrent(),
-    discard: () => useEditorStore.getState().discardGenerationCandidate(),
-    onView(next) {
-      if (next.request?.requestId !== activeRequest.current) { activeRequest.current = next.request?.requestId; behaviorEvidence.current = [] }
-      setView(next); setEvents(next.events); setNotice(next.notice); setError(next.error ?? '')
-      if (next.sessionId) setSessionId(next.sessionId)
-      if (next.record) setSessions(prior => [...prior.filter(item => item.id !== next.record!.id), { ...next.record!, events: [] }])
-      if (next.request) setTurns(prior => [...prior.filter(item => item.id !== next.request!.requestId), { id: next.request!.requestId, request: next.request!, events: next.events, summary: next.result?.summary }])
-      if (next.receipt?.status === 'committed') setApplied({ receipt: next.receipt, result: next.result, sessionId: next.sessionId })
-    },
-  }) : null, [api, bridge, owner])
+  const [resources, setResources] = useState<{ owner: typeof owner; api: typeof api;
+    bridge: ReturnType<typeof createCourseChatObservation>; controller: GenerationTaskController } | null>(null)
+  const currentResources = resources?.owner === owner && resources.api === api ? resources : null
+  const bridge = currentResources?.bridge ?? null, controller = currentResources?.controller ?? null
   useEffect(() => {
+    if (!projectPath || !api) { setResources(null); return }
     let live = true
-    if (projectPath && api) {
-      void api.localAgent({ operation: 'list', ...owner }).then(result => { if (live) setSessions(result.records ?? []) }).catch(reason => { if (live) setError(message(reason)) })
-      void api.materials({ operation: 'search', ...owner, query: '' }).then(result => { if (live) setMaterials(result) }).catch(reason => { if (live) setError(message(reason)) })
+    // Create and dispose both owners in the same effect lifetime. StrictMode's
+    // setup/cleanup/setup must never reuse a terminally disposed observation.
+    const bridge = createCourseChatObservation(api, owner)
+    const controller = new GenerationTaskController({ api, owner,
+      isCurrent: request => bridge.isCurrent(request), captureNext: (request, receipt) => bridge.captureNext(request, receipt, behaviorEvidence.current),
+      async prepare(request, candidate) {
+        try {
+          const prepared = await useEditorStore.getState().prepareGenerationCandidate(request, candidate)
+          if (live && activeRequest.current === request.requestId) behaviorEvidence.current = prepared.behaviorEvidence
+          return prepared
+        } catch (error) {
+          if (live && activeRequest.current === request.requestId) behaviorEvidence.current = readGenerationFailure(error)?.behaviorEvidence ?? []
+          throw error
+        }
+      },
+      apply: id => useEditorStore.getState().applyGenerationCandidate(id), beforeApply: () => bridge.fileCurrent(),
+      discard: () => useEditorStore.getState().discardGenerationCandidate(),
+      onView(next) {
+        if (!live) return
+        if (next.request?.requestId !== activeRequest.current) { activeRequest.current = next.request?.requestId; behaviorEvidence.current = [] }
+        setView(next); setEvents(next.events); setNotice(next.notice); setError(next.error ?? '')
+        if (next.sessionId) setSessionId(next.sessionId)
+        if (next.record) setSessions(prior => [...prior.filter(item => item.id !== next.record!.id), { ...next.record!, events: [] }])
+        if (next.request) setTurns(prior => [...prior.filter(item => item.id !== next.request!.requestId), { id: next.request!.requestId, request: next.request!, events: next.events, summary: next.result?.summary }])
+        if (next.receipt?.status === 'committed') setApplied({ receipt: next.receipt, result: next.result, sessionId: next.sessionId })
+      },
+    })
+    setResources({ owner, api, bridge, controller })
+    void api.localAgent({ operation: 'list', ...owner }).then(result => { if (live) setSessions(result.records ?? []) }).catch(reason => { if (live) setError(message(reason)) })
+    void api.materials({ operation: 'search', ...owner, query: '' }).then(result => { if (live) setMaterials(result) }).catch(reason => { if (live) setError(message(reason)) })
+    return () => {
+      live = false; generation.current++
+      preparation.current?.abort.abort(); preparation.current = null
+      bridge.dispose(); void controller.stop().catch(() => {})
     }
-    return () => { live = false; generation.current++; bridge?.dispose(); void controller?.stop().catch(() => {}) }
-  }, [owner, bridge, controller, api, projectPath])
+  }, [owner, api, projectPath])
   useEffect(() => { if (!busy) return; const interval = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(interval) }, [busy])
   useEffect(() => { if (followReply.current && scroll.current) scroll.current.scrollTop = scroll.current.scrollHeight }, [events, turns, busy])
   useEffect(() => { if (view.preview && revision !== view.preview.beforeRevision) void stop('工程已改变，未应用候选已丢弃') }, [revision, view.preview])
@@ -115,9 +137,36 @@ export function CourseChatPanel({ projectId, projectPath, onClose }: { projectId
     if (projection.surfaceType === 'flow') names.push(...buildFlowEditorView({ project: currentDocument, locationId: location.id }).blocks.filter(block => selected.has(block.blockId)).map(block => block.label))
     return referenceScope === 'page' ? location.label : `${location.label} · ${names.length ? names.join('、') : '未选择对象'}`
   }, [currentDocument, authoringSession, wholeCourse, scope, view.busy, view.request])
+  function beginPreparation(): Preparation {
+    preparation.current?.abort.abort()
+    bridge?.invalidate()
+    const token = ++generation.current, startedAt = Date.now()
+    const execution = { version: 1 as const, startedAt, deadlineAt: startedAt + MAX_GENERATION_TASK_DURATION_MS }
+    const current = { token, execution, abort: new AbortController() }
+    preparation.current = current
+    setPreparing(true); setPreparationExecution(execution); setNow(startedAt); setError('')
+    return current
+  }
+  async function prepareStage<T>(current: Preparation, operation: () => Promise<T>): Promise<T> {
+    if (current.token !== generation.current) throw new Error('stale：任务已停止或重新开始')
+    const result = await awaitCourseChatStage(operation, current.execution, current.abort.signal)
+    if (current.token !== generation.current) throw new Error('stale：任务已停止或重新开始')
+    return result
+  }
+  function finishPreparation(current: Preparation) {
+    if (preparation.current !== current) return
+    preparation.current = null
+    current.abort.abort()
+    setPreparing(false); setPreparationExecution(undefined)
+  }
   async function stop(reason?: string) {
-    generation.current++; setPreparing(false)
-    try { await controller?.stop(); if (reason) setNotice(reason) } catch (cause) { setError(message(cause)) }
+    const token = ++generation.current
+    preparation.current?.abort.abort(); preparation.current = null
+    bridge?.invalidate()
+    setPreparing(false); setPreparationExecution(undefined)
+    setNotice(reason ?? '已停止；准备中的结果和未应用候选已丢弃')
+    try { await controller?.stop(); if (token === generation.current && reason) setNotice(reason) }
+    catch (cause) { if (token === generation.current) setError(message(cause)) }
   }
   async function confirmedResume(id?: string): Promise<string | undefined> {
     if (!id || !api) return undefined
@@ -128,23 +177,27 @@ export function CourseChatPanel({ projectId, projectPath, onClose }: { projectId
   }
   async function send() {
     if (!api || !bridge || !controller || !projectPath || !instruction.trim()) return
+    if (preparation.current) return
     if (view.busy) {
       const task = controller.current.record?.task, request = controller.current.request
       if (!task || !request) { setError('CLI 正在建立任务，请稍后发送补充'); return }
       const nextIntent = resolveChatIntent(instruction, intent)
       if (!bridge.isCurrent(request) || nextIntent !== (request.intent ?? 'edit')) {
-        const token = ++generation.current, resumeId = controller.current.sessionId
-        await controller.stop()
-        setPreparing(true); setError(''); setNotice('已丢弃旧候选，正在按当前内容和选择重新同步')
+        const current = beginPreparation(), resumeId = controller.current.sessionId
+        setNotice('已丢弃旧候选，正在按当前内容和选择重新同步')
         try {
-          const fresh = await bridge.refreshFromUser(instruction.trim(), nextIntent)
-          if (token !== generation.current) return
-          const resumable = await confirmedResume(resumeId)
-          if (token !== generation.current) return
-          setInstruction(''); setPreparing(false)
+          await prepareStage(current, () => controller.stop())
+          setNotice('已丢弃旧候选，正在按当前内容和选择重新同步')
+          const fresh = await prepareStage(current, () => bridge.refreshFromUser(instruction.trim(), nextIntent, current.execution))
+          const resumable = await prepareStage(current, () => confirmedResume(resumeId))
+          setInstruction(''); finishPreparation(current)
           await controller.start(fresh, adapter, resumable)
-        } catch (cause) { if (token === generation.current) setError(message(cause)) }
-        finally { if (token === generation.current) setPreparing(false) }
+        } catch (cause) {
+          if (current.token === generation.current) {
+            if (preparation.current === current) setNotice('本次准备未完成，请调整后重新发送')
+            bridge.invalidate(); setError(message(cause))
+          }
+        } finally { finishPreparation(current) }
         return
       }
       const token = generation.current, text = instruction.trim()
@@ -161,28 +214,33 @@ export function CourseChatPanel({ projectId, projectPath, onClose }: { projectId
     const continueStaleTask = view.phase === 'failed' && view.sessionId === sessionId && !!view.request
       && !view.receipt && view.error?.startsWith('stale：') && !bridge.isCurrent(view.request)
     const nextInstruction = continueStaleTask ? bridge.instructionWithUserInput(instruction.trim()) : instruction.trim()
-    const token = ++generation.current
-    setPreparing(true); setError(''); setNotice('正在同步当前画面、草稿和引用')
+    const current = beginPreparation()
+    setNotice('正在同步当前画面、草稿和引用')
     try {
-      const workspace = (await api.localAgent({ operation: 'workspace', ...owner })).workspace
+      const workspace = (await prepareStage(current, () => api.localAgent({ operation: 'workspace', ...owner }))).workspace
       if (!workspace) throw new Error('当前构建未启用 CLI 创作')
-      const selectedMaterials = await Promise.all(materialIds.map(async id => { const records = await api.materials({ operation: 'read', ...owner, id }); if (!records[0]) throw new Error('引用材料已删除，请重新选择'); return records[0] }))
-      const catalog = await api.loadComponentCatalog(), requestedIntent = resolveChatIntent(instruction, intent)
+      const materialResults = await prepareStage(current, () => Promise.all(materialIds.map(id => api.materials({ operation: 'read', ...owner, id }))))
+      const selectedMaterials = materialResults.map(records => { if (!records[0]) throw new Error('引用材料已删除，请重新选择'); return records[0] })
+      const catalog = await prepareStage(current, () => api.loadComponentCatalog()), requestedIntent = resolveChatIntent(instruction, intent)
       if (requestedIntent === 'edit' && wholeCourse && (!planConfirmed || !scriptConfirmed || !teachingPlan.trim() || !presentationScript.trim())) throw new Error('整课生成前，请分别审阅并确认当前教学策划和呈现脚本')
-      if (token !== generation.current) return
-      const request = await bridge.capture({ workspace, scope: wholeCourse ? 'course' : scope, instruction: nextInstruction, intent: requestedIntent, applyPolicy,
+      const request = await prepareStage(current, () => bridge.capture({ workspace, execution: current.execution,
+        scope: wholeCourse ? 'course' : scope, instruction: nextInstruction, intent: requestedIntent, applyPolicy,
         purpose: wholeCourse ? 'whole-course' : scope === 'selection' ? 'local-edit' : 'single-page', expectedResult: wholeCourse && requestedIntent === 'edit' ? 'candidate' : 'auto',
-        confirmedDocuments: wholeCourse ? { teachingPlan, presentationScript } : undefined, materials: selectedMaterials, catalogPackages: catalog.packages })
-      if (token !== generation.current) return
-      const resumable = await confirmedResume(sessionId)
-      if (token !== generation.current) return
-      setInstruction(''); setPreparing(false)
+        confirmedDocuments: wholeCourse ? { teachingPlan, presentationScript } : undefined, materials: selectedMaterials, catalogPackages: catalog.packages }))
+      const resumable = await prepareStage(current, () => confirmedResume(sessionId))
+      setInstruction(''); finishPreparation(current)
       await controller.start(request, adapter, resumable)
-    } catch (cause) { if (token === generation.current) setError(message(cause)) }
-    finally { if (token === generation.current) setPreparing(false) }
+    } catch (cause) {
+      if (current.token === generation.current) {
+        if (preparation.current === current) setNotice('本次准备未完成，请调整后重新发送')
+        bridge.invalidate(); setError(message(cause))
+      }
+    } finally { finishPreparation(current) }
   }
   async function selectSession(id: string) {
     const token = ++generation.current
+    preparation.current?.abort.abort(); preparation.current = null; bridge?.invalidate()
+    setPreparing(false); setPreparationExecution(undefined)
     setView(emptyView); setEvents([]); setTurns([]); setSessionId(id); setError(''); setNotice('')
     const record = sessions.find(value => value.id === id)
     if (!record) return
@@ -213,22 +271,28 @@ export function CourseChatPanel({ projectId, projectPath, onClose }: { projectId
     return parsed.success && !answered.has(parsed.data.questionId) ? [[parsed.data.questionId, parsed.data] as const] : []
   })).values()]
   const activities = events.flatMap(event => { const text = nativeActivity(event); return text ? [{ id: event.sequence, text }] : [] }).slice(-8)
-  const deadline = view.record?.task?.deadlineAt, remaining = deadline ? Math.max(0, Math.ceil((deadline - now) / 60000)) : null
+  const taskDeadline = Math.min(view.record?.task?.deadlineAt ?? Infinity, view.request?.execution?.deadlineAt ?? Infinity)
+  const deadline = preparationExecution?.deadlineAt ?? taskDeadline
+  const remaining = Number.isFinite(deadline) ? Math.max(0, Math.ceil((deadline - now) / 60000)) : null
+  const tokenUsage = latestLocalAgentTokenUsage(events)
+  const tokenCount = (value: number | null | undefined) => value == null ? '未知' : value.toLocaleString()
   return <aside className="course-chat" aria-label="CLI 创作助手" data-flow-selection-preserving-target="true">
     <header><strong>创作助手 · 内部试用</strong><button onClick={onClose}>关闭</button></header>
     {!projectPath ? <p>请先保存工程，再开始对话。</p> : <>
       <div className="chat-controls"><label>CLI<select aria-label="CLI" value={adapter} disabled={busy || !!sessionId} onChange={event => setAdapter(event.target.value as LocalAgentId)}><option value="codex">Codex</option><option value="claude">Claude</option><option value="opencode">OpenCode</option></select></label>
-        <label>会话<select aria-label="会话" value={sessionId} disabled={busy} onChange={event => void selectSession(event.target.value)}><option value="">新对话</option>{sessions.map(record => <option key={record.id} value={record.id}>{record.adapter} · {record.id.slice(0, 8)} · {statusLabels[record.status]}</option>)}{sessionId && !sessions.some(record => record.id === sessionId) && <option value={sessionId}>当前对话</option>}</select></label></div>
-      <NativeAgentConfiguration key={adapter} adapter={adapter} configurationSequence={configurationSequence} />
+        <label>会话<select aria-label="会话" value={sessionId} disabled={busy} onChange={event => void selectSession(event.target.value)}><option value="">新对话</option>{sessions.map(record => <option key={record.id} value={record.id}>{record.adapter} · {record.id.slice(0, 8)} · {statusLabels[record.task?.status ?? record.status]}</option>)}{sessionId && !sessions.some(record => record.id === sessionId) && <option value={sessionId}>当前对话</option>}</select></label></div>
+      <NativeAgentConfiguration key={adapter} adapter={adapter} projectId={projectId} projectPath={projectPath} configurationSequence={configurationSequence} />
       <div className="chat-scroll" ref={scroll} onScroll={event => { const element = event.currentTarget; followReply.current = element.scrollHeight - element.scrollTop - element.clientHeight < 60 }}>
         {turns.map(turn => <details key={turn.id}><summary>你：{turn.request.instruction.slice(0, 60)}</summary><p>{turn.request.instruction}</p>{turn.id !== view.request?.requestId && <SafeChatMessage text={assistantText(turn.events)} />}{turn.summary && <p>{turn.summary}</p>}</details>)}
         {assistantText(events) && <SafeChatMessage text={assistantText(events)} />}
         {questions.map(question => <NativeAgentQuestion key={question.questionId} question={question} onAnswer={async input => { if (!controller) throw new Error('当前任务已关闭'); await controller.input(input) }} />)}
         {!!activities.length && <ol aria-label="任务活动" className="chat-activity">{activities.map(item => <li key={item.id}>{item.text}</li>)}</ol>}
         <p role="status">{notice}{busy && remaining !== null ? ` · 本任务剩余约 ${remaining} 分钟` : ''}</p>{error && <p role="alert">{error}</p>}
+        {view.canRetryFeedback && <button onClick={() => void controller?.retryFeedback().catch(cause => setError(message(cause)))}>重试保存回执</button>}
+        {tokenUsage && <small aria-label="原生用量">本次输入 {tokenCount(tokenUsage.last?.inputTokens)} / 输出 {tokenCount(tokenUsage.last?.outputTokens)} token；原生累计输入 {tokenCount(tokenUsage.total?.inputTokens)} / 输出 {tokenCount(tokenUsage.total?.outputTokens)}，缓存输入 {tokenCount(tokenUsage.total?.cachedInputTokens)}，推理输出 {tokenCount(tokenUsage.total?.reasoningOutputTokens)}</small>}
         {view.preview && view.request && <section aria-label="候选变更预览"><h3>{view.preview.summary}</h3><GenerationCandidatePreview prepared={view.preview} request={view.request} />
           <ul>{view.preview.plannedEffects.map((effect, index) => <li key={index}>{effect.operation} · {effect.id}</li>)}</ul>
-          <button disabled={revision !== view.preview.beforeRevision} onClick={() => controller?.applyPreview()}>应用候选</button><small>也可以在输入框纠正要求，或停止以丢弃候选。</small>
+          <button disabled={preparing || revision !== view.preview.beforeRevision || now >= taskDeadline} onClick={() => controller?.applyPreview()}>应用候选</button><small>也可以在输入框纠正要求，或停止以丢弃候选。</small>
           <details><summary>字段与共享影响详情</summary><dl>{view.preview.changes.map(change => <div key={change.path}><dt>{change.path}</dt><dd>原：{change.before}</dd><dd>新：{change.after}</dd></div>)}</dl>{view.preview.omitted > 0 && <p>另有 {view.preview.omitted} 项变更。</p>}</details></section>}
         {applied?.receipt && <button disabled={busy || revision !== applied.receipt.afterRevision} title="已有后续修改时，请使用编辑器正常撤销顺序" onClick={() => {
           useEditorStore.getState().undo()

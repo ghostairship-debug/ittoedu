@@ -3,6 +3,56 @@
     "default": "native"
   },
   "description": "仅支持Native对象：insert 使用 create + parent:owner；edit/content/properties/delete 使用 update。修改已有文字、字号、字体或位置优先使用 edit 的 text/textStyle/properties，只提交要改变的字段，其余内容和有效状态保留。content.data 必须满足 references[content.nativeType] 的完整字段合同，不是局部补丁。移动组件使用component.configure的properties。Flow 正文使用 flow.content。完整载体替换使用 selection.replace。",
+  "examples": [
+    {
+      "input": {
+        "operation": "edit",
+        "textStyle": {
+          "fontSize": 44
+        }
+      },
+      "operation": "edit"
+    },
+    {
+      "input": {
+        "operation": "properties",
+        "properties": {
+          "frame": {
+            "x": 80,
+            "y": 120
+          }
+        }
+      },
+      "operation": "properties"
+    },
+    {
+      "input": {
+        "operation": "insert",
+        "template": {
+          "nativeType": "text",
+          "text": "标题"
+        }
+      },
+      "nativeType": "text",
+      "operation": "insert"
+    },
+    {
+      "bindings": "values 的 template 来自当前观察、已读资源或用户要求，值须满足本卡 inputSchema；destination 原样复制当前目标。",
+      "code": "const input={\"operation\":\"insert\",\"template\":values[\"template\"]}; const receipt=await session.execute(\"native.content\",input,destination);",
+      "operation": "insert"
+    },
+    {
+      "bindings": "content 原样复制当前对象的完整 content，修改所需字段后仍须满足 references[nativeType]。",
+      "code": "const receipt=await session.execute(\"native.content\",{operation:\"content\",content},{kind:\"update\",target});",
+      "operation": "content"
+    },
+    {
+      "input": {
+        "operation": "delete"
+      },
+      "operation": "delete"
+    }
+  ],
   "inputSchema": {
     "$defs": {
       "__schema0": {
@@ -708,7 +758,9 @@
       }
     ]
   },
+  "invocation": "Builder: await session.execute(tool,input,destination)。input 遵循本卡完整 Schema；destination 原样使用当前 observe/createScope 的目标；只以 committed receipt 判定成功。",
   "name": "native.content",
+  "recovery": "invalid-input: 按本卡 Schema 修正字段；revision-conflict: 重新 observe 后复制新 target 和源码基线；tool-failed: 读取 diagnostics 修复所指输入/资源/宿主条件，失败不代表已提交。",
   "references": {
     "chart": {
       "$defs": {
@@ -3096,6 +3148,63 @@
     "flow:global",
     "spatial-2d:world",
     "spatial-2d:global"
+  ],
+  "variants": [
+    {
+      "operation": "insert",
+      "scopes": [
+        "slide:scene",
+        "slide:global",
+        "flow:surface",
+        "flow:global",
+        "spatial-2d:world",
+        "spatial-2d:global"
+      ]
+    },
+    {
+      "operation": "content",
+      "scopes": [
+        "slide:scene",
+        "slide:global",
+        "flow:surface",
+        "flow:global",
+        "spatial-2d:world",
+        "spatial-2d:global"
+      ]
+    },
+    {
+      "operation": "properties",
+      "scopes": [
+        "slide:scene",
+        "slide:global",
+        "flow:surface",
+        "flow:global",
+        "spatial-2d:world",
+        "spatial-2d:global"
+      ]
+    },
+    {
+      "operation": "edit",
+      "scopes": [
+        "slide:scene",
+        "slide:global",
+        "flow:surface",
+        "flow:global",
+        "spatial-2d:world",
+        "spatial-2d:global"
+      ]
+    },
+    {
+      "operation": "delete",
+      "scopes": [
+        "slide:scene",
+        "slide:global",
+        "flow:surface",
+        "flow:global",
+        "spatial-2d:world",
+        "spatial-2d:global"
+      ]
+    }
   ],
   "version": 1
 }

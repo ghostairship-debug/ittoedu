@@ -1,9 +1,9 @@
-import { generationCandidateSchema, generationRequestSchema, generationInputReferenceSchema, generationCommitReceiptSchema, type GenerationCandidate, type GenerationRequest, type GenerationCommitReceipt } from '../../../shared/generationContract'
+import { generationCandidateSchema, generationRequestSchema, generationInputReferenceSchema, generationCommitReceiptSchema, GenerationCandidatePreparationError, generationFailureDiagnostics, type GenerationFailure, type GenerationCandidate, type GenerationRequest, type GenerationCommitReceipt } from '../../../shared/generationContract'
 import { workspaceIdentityKey, type WorkspaceIdentityV1 } from '../../../shared/workspaceIdentity'
 import { authoringToolDestinationV1Schema, type AuthoringToolDestinationV1, type AuthoringToolReceiptV1 } from '../../../shared/authoringToolContract'
 import type { CourseProjectDocument } from '../../../shared/courseProjectTypes'
 import { createAuthoringToolFacade } from '../tools/authoringToolFacade'
-import { authoringToolCarrier } from '../tools/authoringToolCarrier'
+import { authoringToolCarrier } from '../../../shared/authoringToolCarrier'
 import { resolveAuthoringToolScope } from '../tools/authoringToolScope'
 import { courseAuthoringScopeFromLocation } from '../courseAuthoringScope'
 import { applyEditorTransactionStep, createEditorTransactionStep, type EditorTransactionStep } from '../editorTransaction'
@@ -20,8 +20,23 @@ export interface GenerationCommitPort {
   commit(step: EditorTransactionStep): boolean
 }
 
+function failureDiagnostics(error: unknown): GenerationFailure['diagnostics'] {
+  if (error instanceof AuthoringToolFailure && error.diagnostics.length) return error.diagnostics
+  const message = error instanceof Error ? error.message : String(error)
+  return generationFailureDiagnostics(error, message.startsWith('stale：') ? 'stale' : 'candidate-prepare-failed')
+}
+
+function preparationError(error: unknown, context: Omit<GenerationFailure, 'version' | 'diagnostics' | 'behaviorEvidence'>,
+  evidence: NonNullable<AuthoringToolReceiptV1['behaviorEvidence']>): GenerationCandidatePreparationError {
+  if (error instanceof GenerationCandidatePreparationError) return error
+  const failedEvidence = error instanceof AuthoringToolFailure ? error.behaviorEvidence ?? [] : []
+  return new GenerationCandidatePreparationError({ version: 1, ...context, diagnostics: failureDiagnostics(error),
+    ...(evidence.length || failedEvidence.length ? { behaviorEvidence: [...evidence, ...failedEvidence] } : {}) })
+}
+
 function current(request: GenerationRequest, port: GenerationCommitPort) {
   return workspaceIdentityKey(port.readWorkspace()) === workspaceIdentityKey(request.workspace)
+    && (!request.execution || Date.now() < request.execution.deadlineAt)
     && port.readDocument().id === request.workspace.projectId
     && port.readDocument().revision === request.documentRevision
     && port.readSessionGeneration() === request.sessionGeneration
@@ -152,8 +167,14 @@ export function createGenerationCandidateCoordinator(port: GenerationCommitPort)
   return Object.freeze({
     discard() { epoch++; controller?.abort(); prepared.clear() },
     async prepare(rawRequest: unknown, rawCandidate: unknown) {
+      const failureContext: Omit<GenerationFailure, 'version' | 'diagnostics' | 'behaviorEvidence'> = { stage: 'candidate-parse', assetIds: [], packageIds: [] }
+      const acquiredEvidence: NonNullable<AuthoringToolReceiptV1['behaviorEvidence']> = []
+      try {
       const request = generationRequestSchema.parse(rawRequest)
+      failureContext.requestId = request.requestId
       const candidate = generationCandidateSchema.parse(rawCandidate)
+      failureContext.candidateId = candidate.candidateId
+      failureContext.stage = 'prepare'
       if ((request.intent ?? 'edit') !== 'edit') throw new Error('讨论或规划意图仅允许只读答复，不能准备工程写入')
       if (candidate.requestId !== request.requestId) throw new Error('候选不属于当前请求')
       if (!current(request, port)) throw new Error('stale：工程或会话已改变')
@@ -176,6 +197,7 @@ export function createGenerationCandidateCoordinator(port: GenerationCommitPort)
         commit(step) { state = applyEditorTransactionStep(state, step, 'forward'); plans.push(step); return true },
       })
       for (const item of candidate.steps) {
+        failureContext.stepId = item.id; failureContext.tool = item.tool; failureContext.destination = item.destination
         if (token !== epoch || !current(request, port)) throw new Error('stale：候选运行已取消或工程已改变')
         if (!request.allowedCarriers.includes(item.carrier)) throw new Error('请求未允许此载体')
         const actualCarrier = authoringToolCarrier(item.tool, item.input)
@@ -186,10 +208,27 @@ export function createGenerationCandidateCoordinator(port: GenerationCommitPort)
           const created = receipts.get(replacement.stepId)?.affected.filter(effect => effect.operation === 'created')[replacement.index]
           if (!created?.authoringAddress || item.destination.kind !== 'update' || created.ownerKey !== item.destination.target.ownerKey) throw new Error('替换创建回执不属于原对象 owner')
         }
-        const receipt = await facade.execute({ version: 1, requestId: `${candidate.candidateId}:${item.id}`, tool: item.tool,
-          destination: destinationFor(item, request, state.document, receipts), input: resolveInput(item.input, receipts) })
+        const destination = destinationFor(item, request, state.document, receipts)
+        const input = resolveInput(item.input, receipts)
+        failureContext.destination = destination
+        const collectResourceIds = (value: unknown): void => {
+          if (!value || typeof value !== 'object') return
+          for (const [key, nested] of Object.entries(value)) {
+            if (typeof nested === 'string' && (key === 'assetId' || key === 'staticFallbackAssetId') && !failureContext.assetIds.includes(nested)) failureContext.assetIds.push(nested)
+            if (typeof nested === 'string' && key === 'packageId' && !failureContext.packageIds.includes(nested)) failureContext.packageIds.push(nested)
+            collectResourceIds(nested)
+          }
+        }
+        collectResourceIds(input)
+        const receipt = await facade.execute({ version: 1, requestId: `${candidate.candidateId}:${item.id}`, tool: item.tool, destination, input })
+        failureContext.assetIds = [...new Set([...failureContext.assetIds, ...receipt.resources.assetIds])]
+        failureContext.packageIds = [...new Set([...failureContext.packageIds, ...receipt.resources.packageIds])]
+        acquiredEvidence.push(...receipt.behaviorEvidence ?? [])
         if (abort.signal.aborted || token !== epoch || receipt.status === 'stale' || !current(request, port)) throw new Error('stale：候选运行已取消或工程已改变')
-        if (receipt.status !== 'committed' && receipt.status !== 'unchanged') throw new AuthoringToolFailure(receipt.diagnostics.map(value => ({ ...value, message: `${item.id}: ${value.message}` })), receipt.behaviorEvidence)
+        if (receipt.status !== 'committed' && receipt.status !== 'unchanged') {
+          if (receipt.diagnostics.some(value => value.code.startsWith('dynamic-'))) failureContext.stage = 'dynamic-admission'
+          throw new AuthoringToolFailure(receipt.diagnostics.length ? receipt.diagnostics : [{ code: `tool-${receipt.status}`, message: `工具 ${item.tool} 未成功完成`, path: [] }])
+        }
         receipts.set(item.id, receipt)
       }
       if (replacementPlan.selectionOnly) {
@@ -220,6 +259,7 @@ export function createGenerationCandidateCoordinator(port: GenerationCommitPort)
         behaviorEvidence: [...receipts.values()].flatMap(value => value.behaviorEvidence ?? []),
         ...describeGenerationChanges(initial, step?.nextDocument ?? initial),
         document: step?.nextDocument ?? initial, resources: state.resources })
+      } catch (error) { throw preparationError(error, failureContext, acquiredEvidence) }
     },
     apply(previewId: string) {
       const entry = prepared.get(previewId)

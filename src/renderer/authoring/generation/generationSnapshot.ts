@@ -12,6 +12,7 @@ import { componentContentSha256 } from '../../../shared/componentContentIntegrit
 import { componentPackageAddress } from '../tools/componentPackageTool'
 import { bytesToBase64 } from '../../export/base64'
 import { captureSelectionReplacementScopes } from '../tools/semanticReplacementTool'
+import { generationImageDiagnostics } from './generationImageDiagnostics'
 
 export type GenerationReferenceScope = 'selection' | 'page' | 'course'
 
@@ -21,6 +22,7 @@ export function captureGenerationSnapshot(input: {
   intent?: GenerationRequest['intent']
   applyPolicy?: GenerationRequest['applyPolicy']
   observation?: GenerationRequest['observation']
+  observationResourceFiles?: GenerationRequest['resourceFiles']
   document: CourseProjectDocument; workspace: WorkspaceIdentityV1; sessionToken: CourseAuthoringSessionToken
   projection: EffectiveLayerProjection; selectedIds: readonly string[]; scope: GenerationReferenceScope
   /** Locations created by this task's actual receipts, in addition to its frozen page scope. */
@@ -112,8 +114,22 @@ export function captureGenerationSnapshot(input: {
       stateId: null, owner: 'global', ownerKey: projectEffectiveLayers({ project: document, locationId: sessionToken.locationId, owner: 'global' }).scope.ownerKey,
       itemId: packageId, authoringAddress: componentPackageAddress(document.id, packageId) })
     destinations.push({ kind: 'update', target })
+    const instances = pages.flatMap(page => {
+      const { items, blocks } = page as { items: { target: string; item: any; selected: boolean }[]; blocks: { target: string; block: any; selected: boolean }[] }
+      return [...items.map(row => ({ ...row, node: row.item })), ...blocks.map(row => ({ ...row, node: row.block }))]
+        .filter(row => (row.node.kind === 'component' || row.node.type === 'component') && row.node.component.packageId === packageId)
+        .flatMap(row => {
+          const destination = destinations.find(value => value.kind === 'update' && value.target.authoringAddress === row.target)
+          if (!destination || destination.kind !== 'update') return []
+          const reason = destination.target.stateId !== null ? 'named-state-package-rebind-unsupported'
+            : row.node.locked ? 'instance-locked' : undefined
+          return [{ target: destination.target, selected: row.selected,
+            sourcePatch: reason ? { status: 'unavailable', reason } : { status: 'available' } }]
+        })
+    })
     return { packageId, baseVersion: meta.version, baseContentIdentity: meta.contentSha256, target,
-      documentRevision: document.revision, sharedEdit: true,
+      documentRevision: document.revision,
+      editTargets: { instance: instances, shared: { target, affects: 'all-package-instances', requiresExplicitSharedScope: true } },
       files: Object.fromEntries(Object.entries(data.files).map(([path, bytes]) => {
         const resourcePath = `components/${encodeURIComponent(packageId)}/${path}`
         const isText = /\.(js|json|css|txt|svg)$/i.test(path)
@@ -121,7 +137,7 @@ export function captureGenerationSnapshot(input: {
           content: isText ? new TextDecoder('utf-8', { fatal: true }).decode(bytes) : bytesToBase64(bytes) })
         return [path, { path: `resources/${resourcePath}`, bytes: bytes.byteLength, encoding: isText ? 'utf8' : 'base64' }]
       })),
-      editInstruction: 'Use component.package operation revise with this exact target, baseVersion and baseContentIdentity. Return complete files including unchanged files; keep manifest ID and version at the baseline. The host assigns the new version and updates all instances.' }
+      editInstruction: 'Public parameter edits use component.configure. Source edits prefer component.package operation patch with basePackageId equal to packageId, exact baseVersion and baseContentIdentity; send only changedFiles and explicit deleteFiles. For one instance use mode:instance and its available editTargets.instance target; the host forks and rebinds only that instance. Use mode:shared and editTargets.shared.target only when the user explicitly requests all package instances. Read baseline files as needed and keep manifest ID/version unchanged; the host fills unchanged files and assigns identity/version. Full files operation revise remains available for an explicitly shared full-package revision.' }
   })
   const componentCatalog = (input.catalogPackages ?? []).filter(entry => entry.sourceTrust !== 'prompt').map(entry => ({ sourceId: entry.sourceId,
     packageId: entry.packageId, version: entry.version, sha256: entry.sha256, name: entry.name, description: entry.description,
@@ -135,6 +151,8 @@ export function captureGenerationSnapshot(input: {
     resourceFiles,
     context: JSON.parse(JSON.stringify({ reference: input.scope, pages: promptPages, materials: materialReferences,
       capabilities: generationCapabilityContext(promptPages, input.purpose),
+      imageDiagnostics: generationImageDiagnostics({ pages: promptPages, assets: document.assets,
+        observation: input.observation, resourceFiles: input.observationResourceFiles }),
       assets: document.assets, componentPackages: document.componentPackages, componentSources, runtimeSources,
       componentCatalog: componentCatalog.filter(entry => referencedPackages.has(entry.packageId)),
       componentCatalogFile: { path: 'resources/component-catalog.json', count: componentCatalog.length },

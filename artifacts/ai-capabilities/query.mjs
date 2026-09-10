@@ -1,4 +1,4 @@
 import {readFile} from 'node:fs/promises';
-import {queryCourseAgentCapabilities,readCourseAgentCapability} from "./query-core.mjs";
+import {runCourseAgentCapabilityQuery} from "./query-core.mjs";
 const data=JSON.parse(await readFile(new URL('./discovery-data.json',import.meta.url),'utf8'));
-try { const args=process.argv.slice(2); const query={}; const options={}; let id; for(let i=0;i<args.length;i++){const key=args[i];const value=args[++i];if(!value)throw new Error('缺少查询参数值');if(key==='--id')id=value;else if(key==='--operation'||key==='--nativeType')options[key.slice(2)]=value;else if(['--query','--surface','--owner','--carrier','--kind','--task','--semanticVersion'].includes(key))query[key.slice(2)]=value;else if(key==='--limit')query.limit=Number(value);else throw new Error('未知查询参数 '+key);} console.log(JSON.stringify(id?readCourseAgentCapability(data,id,options):queryCourseAgentCapabilities(data,query),null,2));}catch(error){console.error(error.message);process.exitCode=1;}
+try {const result=runCourseAgentCapabilityQuery(data,process.argv.slice(2));console.log(typeof result==='string'?result:JSON.stringify(result,null,2));}catch(error){console.error(error.message);process.exitCode=1;}

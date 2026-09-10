@@ -2109,13 +2109,69 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
       if (!initialComponentTargetHandle) throw new Error('组件作者目标不可见')
       const initialTargetBounds = await componentTarget.boundingBox()
       if (!initialTargetBounds) throw new Error('组件作者目标不可见')
-      await page.mouse.dblclick(
-        initialTargetBounds.x + initialTargetBounds.width / 2,
-        initialTargetBounds.y + initialTargetBounds.height / 2,
-        { delay: 40 },
-      )
+      const diagnoseDoubleClick = process.env.COURSEWARE_R18_COMPONENT_DOUBLECLICK_DIAGNOSTICS === '1'
+      const observationKey = '__r18ComponentDoubleClickObservation'
+      if (diagnoseDoubleClick) await componentTarget.evaluate((initialTarget, { bounds, key }) => {
+        const events: unknown[] = []
+        const label = initialTarget.getAttribute('aria-label')!
+        const point = { x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2 }
+        const describe = (element: Element) => ({ tag: element.tagName, class: element.getAttribute('class'),
+          label: element.getAttribute('aria-label'), testId: element.getAttribute('data-testid') })
+        const snapshot = () => {
+          const target = document.querySelector(`[aria-label="${CSS.escape(label)}"]`)
+          const viewport = document.querySelector<HTMLElement>('.canvas-viewport')
+          const rect = target?.getBoundingClientRect()
+          return { at: performance.now(), point, targetConnected: initialTarget.isConnected,
+            targetBounds: rect?.toJSON(), pointerEvents: target ? getComputedStyle(target).pointerEvents : null,
+            viewportBounds: viewport?.getBoundingClientRect().toJSON(), observation: { ...viewport?.dataset },
+            pointHits: document.elementsFromPoint(point.x, point.y).slice(0, 8).map(describe),
+            textEditorPresent: !!document.querySelector('[data-testid="canvas-plain-text-editor"]'),
+            footer: document.querySelector('footer')?.textContent }
+        }
+        events.push({ kind: 'before-input', ...snapshot() })
+        const eventTypes = ['pointerdown', 'pointerup', 'click', 'dblclick']
+        const observe = (event: Event) => {
+          const mouse = event as MouseEvent
+          const path = event.composedPath().filter((node): node is Element => node instanceof Element).slice(0, 6).map(describe)
+          queueMicrotask(() => events.push({ kind: event.type, detail: mouse.detail, x: mouse.clientX, y: mouse.clientY,
+            defaultPrevented: event.defaultPrevented, path, ...snapshot() }))
+        }
+        eventTypes.forEach(type => document.addEventListener(type, observe, true))
+        let previous = ''
+        const mutations = new MutationObserver(() => {
+          const state = snapshot()
+          const signature = JSON.stringify([state.textEditorPresent, state.footer, state.observation.observationDraftToken])
+          if (signature !== previous) { previous = signature; events.push({ kind: 'editor-state', ...state }) }
+        })
+        mutations.observe(document.body, { subtree: true, childList: true, attributes: true, characterData: true })
+        Reflect.set(window, key, () => {
+          mutations.disconnect(); eventTypes.forEach(type => document.removeEventListener(type, observe, true))
+          events.push({ kind: 'after-input', ...snapshot() }); Reflect.deleteProperty(window, key)
+          return { initialBounds: bounds, events }
+        })
+      }, { bounds: initialTargetBounds, key: observationKey })
       const canvasTextEditor = page.getByTestId('canvas-plain-text-editor')
-      await expect(canvasTextEditor).toBeVisible()
+      try {
+        // Preserve the original real mouse gesture and its original assertion.
+        await page.mouse.dblclick(
+          initialTargetBounds.x + initialTargetBounds.width / 2,
+          initialTargetBounds.y + initialTargetBounds.height / 2,
+          { delay: 40 },
+        )
+        await expect(canvasTextEditor).toBeVisible()
+        if (diagnoseDoubleClick) await page.screenshot({ path: test.info().outputPath('component-doubleclick-ready.png') })
+      } catch (error) {
+        if (diagnoseDoubleClick) await page.screenshot({ path: test.info().outputPath('component-doubleclick-failure.png') })
+        throw error
+      } finally {
+        if (diagnoseDoubleClick) {
+          const evidence = await page.evaluate(key => {
+            const finish = Reflect.get(window, key)
+            return typeof finish === 'function' ? finish() : null
+          }, observationKey)
+          writeFileSync(test.info().outputPath('component-doubleclick.json'), JSON.stringify(evidence, null, 2))
+        }
+      }
       await canvasTextEditor.getByRole('textbox', { name: '组件标题' })
         .fill('画布内积分器')
       await canvasTextEditor.getByRole('textbox', { name: '组件标题' })

@@ -30,6 +30,22 @@ function fixture() {
 }
 
 describe('admission evidence in the next native feedback', () => {
+  it('keeps explicit candidate click frames and a compact factual result after commit without labelling them live', () => {
+    const { request, evidence, receipt } = fixture()
+    evidence.buttonClick = { version: 1, instanceId: 'cube', label: '显示答案', input: 'electron-mouse', x: 120, y: 80,
+      beforeText: '答案尚未显示', afterText: '正确答案：一个周期', textTruncated: false,
+      clickedAt: 800, observedAt: 900, functionalResult: 'requires-review' }
+    evidence.actions.push('click-button')
+    evidence.frames.push({ ...evidence.frames[0]!, phase: 'before-button-click' }, { ...evidence.frames[0]!, phase: 'after-button-click' })
+    const result = attachGenerationBehaviorEvidence(request, [evidence], receipt)
+    expect(result.observation!.files.filter(file => file.role === 'image')).toHaveLength(3)
+    expect(result.context).toMatchObject({ behaviorEvidence: { buttonClicks: [{ afterText: '正确答案：一个周期',
+      source: 'candidate-host-before-commit', functionalResult: 'requires-review' }] } })
+    const metadata = JSON.parse(result.resourceFiles!.find(file => file.path === 'observation/dynamic/behavior.json')!.content)
+    expect(metadata.observations[0].frames[0].fileId).toBeUndefined()
+    expect(metadata.observations[0].frames[4]).toMatchObject({ phase: 'after-button-click', source: 'candidate-host-before-commit' })
+    expect(result.resourceFiles!.find(file => file.path === 'observation/dynamic/0/frame-4.png')!.content).toBe(png)
+  })
   it('retains candidate images and their actual resource references when no formal commit exists', () => {
     const { request, evidence } = fixture()
     const result = attachGenerationBehaviorEvidence(request, [evidence])

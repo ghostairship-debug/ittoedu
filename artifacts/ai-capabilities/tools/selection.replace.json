@@ -3,6 +3,12 @@
     "default": "native"
   },
   "description": "完整替换精确选中对象。先在附带 create scope 创建新对象和所需资源，再以 replacementItemId 引用前序创建步骤的 item-id。宿主保留原位置、层级、可见性、旋转和可映射引用；不兼容引用明确失败。所有步骤先私有准备，最终一次提交。修改文字、字号或参数优先使用 edit/component.configure。",
+  "examples": [
+    {
+      "bindings": "values 的 replacementItemId 来自当前观察、已读资源或用户要求，值须满足本卡 inputSchema；destination 原样复制当前目标。",
+      "code": "const input={\"replacementItemId\":values[\"replacementItemId\"]}; const receipt=await session.execute(\"selection.replace\",input,destination);"
+    }
+  ],
   "inputSchema": {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "additionalProperties": false,
@@ -17,7 +23,9 @@
     ],
     "type": "object"
   },
+  "invocation": "Builder: await session.execute(tool,input,destination)。input 遵循本卡完整 Schema；destination 原样使用当前 observe/createScope 的目标；只以 committed receipt 判定成功。",
   "name": "selection.replace",
+  "recovery": "invalid-input: 按本卡 Schema 修正字段；revision-conflict: 重新 observe 后复制新 target 和源码基线；tool-failed: 读取 diagnostics 修复所指输入/资源/宿主条件，失败不代表已提交。",
   "support": "conditional-on-input-target-resources-and-host",
   "supportedScopes": [
     "slide:scene",
@@ -26,6 +34,18 @@
     "flow:global",
     "spatial-2d:world",
     "spatial-2d:global"
+  ],
+  "variants": [
+    {
+      "scopes": [
+        "slide:scene",
+        "slide:global",
+        "flow:surface",
+        "flow:global",
+        "spatial-2d:world",
+        "spatial-2d:global"
+      ]
+    }
   ],
   "version": 1
 }

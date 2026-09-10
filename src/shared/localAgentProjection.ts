@@ -40,7 +40,8 @@ function projectEvent(record: LocalAgentRecordV2, event: LocalAgentEventV2, sequ
   if (event.kind === 'usage') {
     return localAgentEventSchema.parse({
       ...base, kind: 'usage',
-      payload: { input_tokens: event.inputTokens, output_tokens: event.outputTokens, cached_input_tokens: event.cachedInputTokens },
+      payload: { input_tokens: event.inputTokens, output_tokens: event.outputTokens, cached_input_tokens: event.cachedInputTokens,
+        ...(event.tokenUsage ? { tokenUsage: event.tokenUsage } : {}) },
     })
   }
   if (event.kind === 'turn-ended') {
@@ -68,6 +69,9 @@ export function projectAiHostResult(result: AiHostResult): LocalAgentHostResult 
     requestId: result.requestId, candidateId: result.candidateId, summary: result.summary,
     status: result.status === 'failed' ? 'rejected' : result.status,
     beforeRevision: result.beforeRevision, afterRevision: result.afterRevision,
+    ...(result.afterCommit ? { afterCommit: result.afterCommit } : {}),
+    ...(result.failure ? { failure: result.failure } : {}),
+    ...(result.receiptDelivery ? { receiptDelivery: result.receiptDelivery } : {}),
   }
 }
 
@@ -93,16 +97,21 @@ export function projectV2RecordToV1(record: LocalAgentRecordV2, input: LocalAgen
   const task = record.tasks.at(-1)
   const terminal = [...events].reverse().find(event => ['completed', 'failed', 'cancelled'].includes(event.kind))
   const status = input.live ? 'running' as const
+    : task && ['completed', 'failed', 'cancelled', 'partial'].includes(task.status) ? (task.status === 'partial' ? 'failed' : task.status)
     : terminal?.kind === 'failed' || terminal?.kind === 'cancelled' || terminal?.kind === 'completed' ? terminal.kind
-    : task && ['completed', 'failed', 'cancelled', 'partial'].includes(task.status) ? (task.status === 'partial' ? 'completed' : task.status)
     : 'running'
-  const hostResult = input.hostResult ?? (record.hostResults.at(-1) ? projectAiHostResult(record.hostResults.at(-1)!) : undefined)
+  const latestResult = record.hostResults.at(-1)
+  const hostResult = input.hostResult?.status === 'undone' || !latestResult ? input.hostResult : projectAiHostResult(latestResult)
   return localAgentRecordSchema.parse({
     version: 1, id: record.id, adapter: record.adapter, workspace: record.workspace,
     workingDirectoryId: record.workingDirectoryId, status, events,
     ...(task ? { task: { taskId: task.taskId, epoch: task.epoch, intent: task.intent, applyPolicy: task.applyPolicy,
       status: task.status, turnId: record.events.at(-1)?.nativeTurnId ?? null,
-      deadlineAt: task.execution?.deadlineAt ?? null, committedStages: task.committedResultIds.length } } : {}),
+      deadlineAt: task.execution?.deadlineAt ?? null, committedStages: task.committedResultIds.length,
+      ...(task.completion ? { completion: task.completion } : {}),
+      ...(record.hostResults.some(result => result.taskId === task.taskId && result.receiptDelivery === 'pending')
+        ? { receiptDelivery: 'pending' as const } : record.hostResults.some(result => result.taskId === task.taskId && result.receiptDelivery === 'delivered')
+          ? { receiptDelivery: 'delivered' as const } : {}) } } : {}),
     ...(record.externalSessionId ? { externalSessionId: record.externalSessionId } : {}),
     ...(input.generationRequest ? { generationRequest: input.generationRequest, generationRequestId: input.generationRequest.requestId } : {}),
     ...(hostResult ? { hostResult } : {}),

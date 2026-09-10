@@ -1,3 +1,5 @@
+import { createPortal } from 'react-dom'
+import { PLAYBACK_VIEW_CHROME_GUTTER } from '../../shared/playbackViewGeometry'
 import { buildFlowRichTextHtml } from '../../shared/flowRichText'
 import { chartCanvasTextPort } from '../authoring/chartCanvasTextBridge'
 import { FLOW_BODY_CSS, FLOW_BODY_PAPER_PADDING, FLOW_BODY_SCROLL_PADDING, resolveFlowParagraphPresentation } from '../../shared/flowBodyPresentation'
@@ -61,7 +63,7 @@ import {
 import { FormulaEditDialog } from './FormulaEditDialog'
 import { PublishedFormulaPaint } from './PublishedFormulaPaint'
 import {
-  FLOW_BLOCK_CONTEXT_TOOLBAR_BELOW_OFFSET,
+  FLOW_WORKSPACE_HEADER_HEIGHT,
   FlowBlockContextToolbar,
   type FlowBlockContextCommand,
 } from './FlowBlockContextToolbar'
@@ -80,6 +82,7 @@ import { measureFlowPaperOrigin } from '../../shared/flowViewportGeometry'
 import { authoringObservationDraftToken } from '../authoring/generation/authoringObservation'
 
 export interface FlowWorkspaceProps {
+  readonly toolbarContainer?: HTMLElement | null
   readonly view: FlowEditorView
   readonly sessionToken: CourseAuthoringSessionToken
   readonly assets: Readonly<Record<string, AssetMeta>>
@@ -471,6 +474,7 @@ function blockLabel(block: FlowBlock): string {
 }
 
 export function FlowWorkspace({
+  toolbarContainer,
   view,
   sessionToken,
   assets,
@@ -490,7 +494,9 @@ export function FlowWorkspace({
     readonly target: CourseAuthoringTarget
     readonly expectedEdit: FlowTextEditSession | null
   } | null>(null)
-  const [toolbarPlacement, setToolbarPlacement] = useState<'top' | 'below'>('below')
+  const [localToolbarContainer, setLocalToolbarContainer] = useState<HTMLDivElement | null>(null)
+  const toolbarHost = toolbarContainer === undefined ? localToolbarContainer : toolbarContainer
+  const localHeaderHeight = toolbarContainer === undefined ? FLOW_WORKSPACE_HEADER_HEIGHT : 0
   const toolbarSelectionRef = useRef<{ start: number; end: number } | null>(null)
   const [paperScrollTop, setPaperScrollTop] = useState(0)
   const [paperScrollLeft, setPaperScrollLeft] = useState(0)
@@ -562,30 +568,6 @@ export function FlowWorkspace({
     if (paperRef.current) observer.observe(paperRef.current)
     return () => observer.disconnect()
   }, [viewPan.x, viewPan.y])
-
-  useEffect(() => {
-    if (!edit || !scrollRef.current) return
-    const block = scrollRef.current.querySelector(`[data-flow-block-id="${edit.blockId}"]`)
-    if (!(block instanceof HTMLElement) || !scrollRef.current) return
-    const update = () => {
-      const scrollRect = scrollRef.current!.getBoundingClientRect()
-      const blockRect = block.getBoundingClientRect()
-      const hasLayout = scrollRect.height > 0 && blockRect.height > 0
-      setToolbarPlacement(
-        hasLayout && scrollRect.bottom - blockRect.bottom < FLOW_BLOCK_CONTEXT_TOOLBAR_BELOW_OFFSET
-          ? 'top'
-          : 'below',
-      )
-    }
-    update()
-    const observer = new ResizeObserver(update)
-    observer.observe(scrollRef.current)
-    scrollRef.current.addEventListener('scroll', update)
-    return () => {
-      observer.disconnect()
-      scrollRef.current?.removeEventListener('scroll', update)
-    }
-  }, [edit?.blockId])
 
   useLayoutEffect(() => {
     const blockId = selection?.selectedBlockId
@@ -844,7 +826,7 @@ export function FlowWorkspace({
     const block = blockView.block as FlowBlock
     const selected = selection?.selectedBlockIds.includes(blockView.blockId) ?? false
     const editingThis = edit?.blockId === blockView.blockId
-    const showToolbar = selected && !readOnly
+    const showToolbar = blockView.blockId === selection?.selectedBlockId && !readOnly
     const formulaEditingAvailable = !readOnly && selection?.authoringScope !== 'global'
     const richDraft = edit?.kind === 'rich-text' && editingThis
       ? edit.draft as { text: string; runs: TextRun[] }
@@ -862,7 +844,6 @@ export function FlowWorkspace({
 
     const isWrapLeft = (block.type === 'media' || block.type === 'component') && block.wrap === 'left'
     const isWrapRight = (block.type === 'media' || block.type === 'component') && block.wrap === 'right'
-    const effectiveToolbarPlacement = editingThis ? toolbarPlacement : 'below'
     const baseMarginBottom = isWrapLeft || isWrapRight ? 8 : 12
 
     const frameStyle: CSSProperties = {
@@ -1368,11 +1349,10 @@ export function FlowWorkspace({
             }}
           />
         ) : null}
-        {showToolbar ? (
+        {showToolbar && toolbarHost ? createPortal(
           <FlowBlockContextToolbar
             block={block}
             selectionFormat={selectionFormat}
-            placement={effectiveToolbarPlacement}
             onPreserveSelection={() => {
               const editor = scrollRef.current?.querySelector('[data-testid="flow-inline-editor"]')
               if (editor instanceof HTMLElement) {
@@ -1380,7 +1360,7 @@ export function FlowWorkspace({
               }
             }}
             onCommand={applyToolbarCommand}
-          />
+          />, toolbarHost, blockView.blockId,
         ) : null}
         {body}
       </div>
@@ -1392,120 +1372,129 @@ export function FlowWorkspace({
   const backgroundImageUrl = view.backgroundAssetId ? assetUrls[view.backgroundAssetId] : undefined
 
   return (
-    <div
-      ref={workspaceMeasureRef}
-      className="flow-workspace"
-      data-testid="flow-workspace"
-      data-flow-not-slide-stage="true"
-      data-flow-project-id={view.projectId}
-      data-flow-location-id={view.locationId}
-      data-flow-surface-id={view.surfaceId}
-      data-flow-active-block-id={view.activeBlockId}
-      data-observation-source="authoring"
-      data-observation-project-id={view.projectId}
-      data-observation-revision={view.revision}
-      data-observation-session-generation={sessionToken.generation}
-      data-observation-surface-id={view.surfaceId}
-      data-observation-location-id={view.locationId}
-      data-observation-state-id=""
-      data-observation-ready="true"
-      data-observation-draft-token={authoringObservationDraftToken(textEdit)}
-      onKeyDown={handleHistoryKey}
-      style={{
-        position: 'relative',
-        display: 'flex',
-        width: '100%',
-        height: '100%',
-        minHeight: 320,
-        overflow: 'hidden',
-        isolation: 'isolate',
-        backgroundColor: surfaceBackground,
-        backgroundImage: backgroundImageUrl ? `url(${JSON.stringify(backgroundImageUrl)})` : undefined,
-        backgroundPosition: 'center',
-        backgroundRepeat: 'no-repeat',
-        backgroundSize: 'cover',
-      }}
-    >
-      <FlowOverlayAuthoringLayer
-        view={view}
-        sessionToken={sessionToken}
-        selection={selection}
-        locationId={locationId}
-        readOnly={readOnly}
-        assetUrls={assetUrls}
-        componentPackages={componentPackages}
-        paperScrollTop={paperScrollTop}
-        paperScrollLeft={paperScrollLeft}
-        paperOrigin={paperOrigin}
-        overlayViewportSize={overlayViewportSize}
-        viewPan={viewPan}
-        onViewPanChange={setViewPan}
-        onBeforeGesture={() => {
-          if (!editRef.current) return true
-          commitCurrent(false)
-          return false
+    <div style={{ position: 'relative', width: '100%', height: '100%' }}>
+      {toolbarContainer === undefined ? <div
+        ref={setLocalToolbarContainer}
+        data-testid="flow-workspace-toolbar-host"
+        style={{ position: 'absolute', top: 6, left: 8, right: 8, height: FLOW_WORKSPACE_HEADER_HEIGHT - 12, zIndex: 7 }}
+      /> : null}
+      <div
+        ref={workspaceMeasureRef}
+        className="flow-workspace"
+        data-testid="flow-workspace"
+        data-flow-not-slide-stage="true"
+        data-flow-project-id={view.projectId}
+        data-flow-location-id={view.locationId}
+        data-flow-surface-id={view.surfaceId}
+        data-flow-active-block-id={view.activeBlockId}
+        data-observation-source="authoring"
+        data-observation-project-id={view.projectId}
+        data-observation-revision={view.revision}
+        data-observation-session-generation={sessionToken.generation}
+        data-observation-surface-id={view.surfaceId}
+        data-observation-location-id={view.locationId}
+        data-observation-state-id=""
+        data-observation-ready="true"
+        data-observation-draft-token={authoringObservationDraftToken(textEdit)}
+        onKeyDown={handleHistoryKey}
+        style={{
+          position: 'absolute',
+          top: localHeaderHeight,
+          left: 0,
+          display: 'flex',
+          width: `calc(100% - ${PLAYBACK_VIEW_CHROME_GUTTER}px)`,
+          height: `calc(100% - ${PLAYBACK_VIEW_CHROME_GUTTER + localHeaderHeight}px)`,
+          minHeight: 0,
+          overflow: 'hidden',
+          isolation: 'isolate',
+          backgroundColor: surfaceBackground,
+          backgroundImage: backgroundImageUrl ? `url(${JSON.stringify(backgroundImageUrl)})` : undefined,
+          backgroundPosition: 'center',
+          backgroundRepeat: 'no-repeat',
+          backgroundSize: 'cover',
         }}
-        commands={commands}
       >
-        <div
-          ref={scrollRef}
-          className="flow-workspace__scroll flow-media-query-root"
-          data-testid="flow-workspace-scroll"
-          data-flow-media-query-root="true"
-          onScroll={(e) => {
-            setPaperScrollTop(e.currentTarget.scrollTop)
-            setPaperScrollLeft(e.currentTarget.scrollLeft)
+        <FlowOverlayAuthoringLayer
+          view={view}
+          sessionToken={sessionToken}
+          selection={selection}
+          locationId={locationId}
+          readOnly={readOnly}
+          assetUrls={assetUrls}
+          componentPackages={componentPackages}
+          paperScrollTop={paperScrollTop}
+          paperScrollLeft={paperScrollLeft}
+          paperOrigin={paperOrigin}
+          overlayViewportSize={overlayViewportSize}
+          viewPan={viewPan}
+          onViewPanChange={setViewPan}
+          onBeforeGesture={() => {
+            if (!editRef.current) return true
+            commitCurrent(false)
+            return false
           }}
-          style={{
-            flex: 1,
-            position: 'relative',
-            zIndex: 2,
-            overflow: 'auto',
-            height: '100%',
-            padding: FLOW_BODY_SCROLL_PADDING,
-            containerType: FLOW_MEDIA_QUERY_CONTAINER_TYPE,
-            containerName: 'flow-media-root',
-            transform: `translate(${viewPan.x}px, ${viewPan.y}px)`,
-          }}
+          commands={commands}
         >
-          <article
-            ref={paperRef}
-            className="flow-paper flow-body-content"
-            data-testid="flow-paper"
-            data-flow-reading-width={view.layout.readingWidth}
-            onClick={handlePaperClick}
+          <div
+            ref={scrollRef}
+            className="flow-workspace__scroll flow-media-query-root"
+            data-testid="flow-workspace-scroll"
+            data-flow-media-query-root="true"
+            onScroll={(e) => {
+              setPaperScrollTop(e.currentTarget.scrollTop)
+              setPaperScrollLeft(e.currentTarget.scrollLeft)
+            }}
             style={{
-              width: '100%',
-              maxWidth: view.layout.readingWidth,
-              minHeight: '100%',
-              margin: '0 auto',
-              padding: FLOW_BODY_PAPER_PADDING,
-              background: 'transparent',
-              color: FLOW_PAPER_TEXT_COLOR,
-              boxShadow: '0 8px 32px rgba(15, 23, 42, 0.08)',
+              flex: 1,
+              position: 'relative',
+              zIndex: 2,
+              overflow: 'auto',
+              height: '100%',
+              padding: FLOW_BODY_SCROLL_PADDING,
+              containerType: FLOW_MEDIA_QUERY_CONTAINER_TYPE,
+              containerName: 'flow-media-root',
+              transform: `translate(${viewPan.x}px, ${viewPan.y}px)`,
             }}
           >
-            <style>{FLOW_BODY_CSS}</style>
-            {rootBlocks.map((blockView) => renderBlock(blockView))}
-            <div style={{ clear: 'both' }} aria-hidden="true" />
-          </article>
-        </div>
-      </FlowOverlayAuthoringLayer>
-      {formulaNode && formulaDraft ? (
-        <FormulaEditDialog
-          node={formulaNode}
-          draftSource={formulaDraft.source}
-          onDraftChange={updateFormulaDraft}
-          onCompositionChange={setFormulaComposing}
-          onCancel={() => {
-            setFormulaBlockId(null)
-            cancelCurrent()
-          }}
-          onCommit={(ast, accessibleText) => {
-            commitFormula(ast, accessibleText)
-          }}
-        />
-      ) : null}
+            <article
+              ref={paperRef}
+              className="flow-paper flow-body-content"
+              data-testid="flow-paper"
+              data-flow-reading-width={view.layout.readingWidth}
+              onClick={handlePaperClick}
+              style={{
+                width: '100%',
+                maxWidth: view.layout.readingWidth,
+                minHeight: '100%',
+                margin: '0 auto',
+                padding: FLOW_BODY_PAPER_PADDING,
+                background: 'transparent',
+                color: FLOW_PAPER_TEXT_COLOR,
+                boxShadow: '0 8px 32px rgba(15, 23, 42, 0.08)',
+              }}
+            >
+              <style>{FLOW_BODY_CSS}</style>
+              {rootBlocks.map((blockView) => renderBlock(blockView))}
+              <div style={{ clear: 'both' }} aria-hidden="true" />
+            </article>
+          </div>
+        </FlowOverlayAuthoringLayer>
+        {formulaNode && formulaDraft ? (
+          <FormulaEditDialog
+            node={formulaNode}
+            draftSource={formulaDraft.source}
+            onDraftChange={updateFormulaDraft}
+            onCompositionChange={setFormulaComposing}
+            onCancel={() => {
+              setFormulaBlockId(null)
+              cancelCurrent()
+            }}
+            onCommit={(ast, accessibleText) => {
+              commitFormula(ast, accessibleText)
+            }}
+          />
+        ) : null}
+      </div>
     </div>
   )
 }
