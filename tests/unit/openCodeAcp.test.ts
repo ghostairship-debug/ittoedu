@@ -335,6 +335,17 @@ function emitText(bytes) {
     } finally { await adapter.close() }
   })
 
+  it('accepts a multi-megabyte tool patch without charging it as model text', async () => {
+    const script = outputBudgetProcess(0, 2 * 1024 * 1024, 2 * 1024 * 1024).replace("sessionUpdate: 'agent_message_chunk'", "sessionUpdate: 'tool_call_update'")
+    const { adapter } = realOpenCodeAdapter(script)
+    try {
+      await adapter.open({ cwd: process.cwd(), externalSessionId: null })
+      await adapter.startTurn(nativeOpenCodeTurn(), new Map())
+      const events = []; for await (const event of adapter.events()) events.push(event)
+      expect(events.at(-1)).toMatchObject({ kind: 'turn-ended', status: 'completed' })
+    } finally { await adapter.close() }
+  })
+
   it('still limits one native turn exceeding the output budget', async () => {
     const { adapter } = realOpenCodeAdapter(outputBudgetProcess(0, 9 * 1024 * 1024))
     try {
@@ -342,12 +353,12 @@ function emitText(bytes) {
       await adapter.startTurn(nativeOpenCodeTurn(), new Map())
       const events = []
       for await (const event of adapter.events()) events.push(event)
-      expect(events.at(-1)).toMatchObject({ kind: 'turn-ended', status: 'failed', failure: { category: 'limit', message: 'output-limit' } })
+      expect(events.at(-1)).toMatchObject({ kind: 'turn-ended', status: 'failed', failure: { category: 'limit', message: expect.stringContaining('output-limit: OpenCode text') } })
     } finally { await adapter.close() }
   })
 
   it('still limits an oversized native replay message', async () => {
-    const { adapter } = realOpenCodeAdapter(outputBudgetProcess(2 * 1024 * 1024, 0, 2 * 1024 * 1024))
+    const { adapter } = realOpenCodeAdapter(outputBudgetProcess(33 * 1024 * 1024, 0, 33 * 1024 * 1024))
     try {
       await expect(adapter.open({ cwd: process.cwd(), externalSessionId: 'saved-native-session' })).rejects.toThrow('output-limit')
     } finally { await adapter.close() }
@@ -946,6 +957,9 @@ describe('OpenCodeAcpAdapter lifecycle and turn handling', () => {
               update: { sessionUpdate: 'tool_call_update', toolCallId: 'call_2', title: longToolTitle, status: 'failed' },
             },
           }) + '\n')
+          // The native plan is readable status, not its raw ACP envelope.
+          stdoutStream.write(JSON.stringify({ jsonrpc: '2.0', method: 'session/update', params: { sessionId: 'ses_turn_test',
+            update: { sessionUpdate: 'plan', entries: [{ content: 'Read the page', status: 'completed' }, { content: 'Prepare the result', status: 'in_progress' }] } } }) + '\n')
           // usage_update
           stdoutStream.write(JSON.stringify({
             jsonrpc: '2.0', method: 'session/update',
@@ -990,10 +1004,11 @@ describe('OpenCodeAcpAdapter lifecycle and turn handling', () => {
     // Verify thoughts were excluded
     expect(events.some(e => e.kind === 'text' && e.text.includes('Thinking'))).toBe(false)
     // Verify text chunks arrived
-    const texts = events.filter(e => e.kind === 'text')
+    const texts = events.filter(e => e.kind === 'text' && e.phase === 'body')
     expect(texts).toHaveLength(2)
     expect(texts[0].text).toBe('Hello! ')
     expect(texts[1].text).toBe('I am ready.')
+    expect(events.filter(e => e.kind === 'text' && e.phase === 'plan')).toEqual([expect.objectContaining({ text: '已完成：Read the page\n正在进行：Prepare the result' })])
     // Verify tools
     const tools = events.filter(e => e.kind === 'tool')
     expect(tools).toHaveLength(3)

@@ -94,6 +94,7 @@ export interface FlowPropertiesCommands {
   readonly connectChartCanvasText?: (port: ChartCanvasTextPort) => () => void
   readonly previewNative?: (patch: PropertiesPatch | null) => void
   readonly previewTextColor?: (color: string | null) => void
+  readonly setWidthMode?: (widthMode: 'fluid' | 'reading') => void
   readonly renamePage: (surfaceId: string, title: string) => void
   readonly setPaperBackground: (surfaceId: string, backgroundColor: string) => void
   readonly updateSurfaceBackground: (patch: FlowSurfaceBackgroundFields) => void
@@ -178,6 +179,12 @@ function FlowPageProperties({ context }: { context: FlowPropertiesContext }) {
       <p className="property-hint">
         标题和段落在稿纸里编辑。这里只改页面名称与稿纸底色/背景图，不会出现 1280×720 场景背景。
       </p>
+      <SelectField
+        label="讲义宽度"
+        value={view.layout.widthMode ?? 'reading'}
+        options={[{ value: 'fluid', label: '自适应宽度' }, { value: 'reading', label: '固定阅读宽度' }]}
+        onChange={(mode) => commands.setWidthMode?.(mode as 'fluid' | 'reading')}
+      />
       <SharedBackgroundProperties
         key={`flow-surface-background:${view.surfaceId}`}
         ownerLabel="流式讲义页"
@@ -755,9 +762,7 @@ function FlowOverlayProperties({ context }: { context: FlowPropertiesContext }) 
     commands.patchOverlayProperties(normalized)
   }
 
-  const paperSpaceField = item.kind === 'native' && item.content.nativeType === 'teacher-controller'
-    ? null
-    : (
+  const paperSpaceField = (
       <div data-testid="flow-overlay-paper-space">
         <SelectField<'viewport' | 'paper'>
           label="定位空间"
@@ -895,6 +900,11 @@ function FlowOverlayProperties({ context }: { context: FlowPropertiesContext }) 
           <FormulaAuthoringEditor
             key={`flow-overlay-formula:${context.draftBindingKey}`}
             node={node as FormulaNode}
+            draftSource={context.textEdit?.kind === 'formula' && context.textEdit.blockId === node.id ? (context.textEdit.draft as FlowFormulaDraft).source : undefined}
+            onBeginEdit={commands.beginBlockFormulaEdit}
+            onDraftChange={commands.updateBlockFormulaDraft}
+            onCompositionChange={commands.setBlockFormulaComposing}
+            onCancel={commands.cancelBlockFormulaEdit}
             onCommit={(committedAst, committedAccessibleText) => {
               commands.commitOverlayFormula(committedAst, committedAccessibleText)
             }}

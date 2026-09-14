@@ -21,6 +21,7 @@ import { createImageNode, createTextNode } from '../../src/renderer/project/nati
 import { sceneNodeToCourseLayerItem } from '../../src/shared/courseProjectModel'
 import { componentPackageTool } from '../../src/renderer/authoring/tools/componentPackageTool'
 import { imageTransformInputSchema } from '../../src/shared/imageTransformContract'
+import { withDefaultComponentController } from '../../src/renderer/components/teacherControllerComponent'
 
 function requestFixture(materialText?: string) {
   const document = createBlankCourseProject({ title: '能力发现' })
@@ -33,6 +34,21 @@ function requestFixture(materialText?: string) {
 }
 
 describe('offline capability workspace', () => {
+  it('discovers a compact file transport while keeping the strict document schema available on demand', async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'file-contract-'))
+    try {
+      const root = await new CandidateStaging(directory).create(requestFixture())
+      const caps = generationCapabilityDirectory(root)
+      const raw = await readFile(path.join(caps, 'tools/project.document.json'), 'utf8'), card = JSON.parse(raw)
+      expect(Buffer.byteLength(raw)).toBeLessThan(4096)
+      expect(card.inputSchema.properties.artifact.required).toEqual(['$candidateFile'])
+      const canonical = JSON.parse(await readFile(path.join(caps, card.artifactSchema), 'utf8'))
+      expect(canonical.required).toContain('document')
+      expect(canonical.required).not.toContain('artifact')
+      expect(canonical.properties.document).toBeDefined()
+      expect(canonical.additionalProperties).toBe(false)
+    } finally { await rm(directory, { recursive: true, force: true }) }
+  })
   it('reads exact staged image, source, skill and query paths from one request anchor without changing the native cwd', async () => {
     const directory = await mkdtemp(path.join(os.tmpdir(), '课件 路径入口-'))
     try {
@@ -46,7 +62,7 @@ describe('offline capability workspace', () => {
       const profile = createGenerationProfile('opencode', request, undefined, root)
       const prompt = buildGenerationPrompt('opencode', request, root)
       const initialProfile = JSON.parse(prompt.split('\n').find(line => line.startsWith('{"profile":'))!).profile
-      expect(initialProfile.workspace).toEqual({ rootEnvironment: 'COURSEWARE_CANDIDATE_ROOT', request: 'request.json' })
+      expect(initialProfile.workspace).toEqual({ rootEnvironment: 'COURSEWARE_CANDIDATE_ROOT', request: path.join(root, 'request.json') })
       const initial = JSON.parse(prompt.split('\n').at(-1)!)
       const details = JSON.parse((await promisify(execFile)(process.execPath, ['-e', "process.stdout.write(require('node:fs').readFileSync(require('node:path').join(process.env.COURSEWARE_CANDIDATE_ROOT,'request.json'),'utf8'))"], {
         cwd: directory, env: { ...process.env, COURSEWARE_CANDIDATE_ROOT: root }, windowsHide: true,
@@ -67,7 +83,10 @@ describe('offline capability workspace', () => {
       const query = await promisify(execFile)(process.execPath,
         [details.fileAccess.query, '--id', 'native.content', '--operation', 'properties'], { cwd: directory, windowsHide: true })
       expect(JSON.parse(query.stdout).content.inputSchema.oneOf[0].properties.operation.const).toBe('properties')
-      expect(initial.context.capabilities.cards).toEqual((request.context as any).capabilities.cards)
+      expect(initial.context.capabilities.semanticVersion).toBe((request.context as any).capabilities.semanticVersion)
+      expect(initial.context.capabilities.cards.map((card: any) => ({ ...card,
+        semanticVersion: card.semanticVersion ?? initial.context.capabilities.semanticVersion,
+      }))).toEqual((request.context as any).capabilities.cards)
       expect(initial).not.toHaveProperty('fileAccess')
       expect(initial.resourceIndex.every((file: object) => !('localPath' in file))).toBe(true)
       expect(prompt).not.toContain(details.fileAccess.capabilities)
@@ -106,7 +125,7 @@ describe('offline capability workspace', () => {
       const details = JSON.parse(await readFile(path.join(root, wire.requestDetails.path), 'utf8'))
       expect(wire).not.toHaveProperty('destinations')
       expect(Object.values(wire.destinationAliases)).toEqual(request.destinations)
-      expect(wire.context.capabilities.cards).toEqual(details.context.capabilities.cards)
+      expect(wire.context.capabilities.cards.map((card: any) => ({ semanticVersion: wire.context.capabilities.semanticVersion, ...card }))).toEqual(details.context.capabilities.cards)
       expect(details.observation).toEqual(request.observation)
       expect(details.context.assets).toEqual((request.context as any).assets)
       expect(details.context.runtimeSources).toEqual((request.context as any).runtimeSources)
@@ -122,7 +141,7 @@ describe('offline capability workspace', () => {
     const request = { ...requestFixture(), expectedResult: 'auto' as const }
     const prompt = buildGenerationPrompt('claude', request, path.resolve('candidate-root'))
     const example = `${GENERATION_RESULT_OPEN}${JSON.stringify({ version: 1, requestId: request.requestId, kind: 'answer' })}${GENERATION_RESULT_CLOSE}`
-    expect(prompt).toContain(example)
+    expect(prompt).toContain('将kind改为answer')
     expect(readGenerationResult(`已核对宿主回执，修改完成。${example}`, request)).toEqual({ kind: 'answer', requestId: request.requestId })
     expect(readGenerationResult(example, { ...request, expectedResult: 'candidate' })).toMatchObject({ kind: 'candidate-format-error' })
   })
@@ -196,6 +215,37 @@ describe('offline capability workspace', () => {
     expect(prompt.context).not.toHaveProperty('dynamicCapabilities')
   })
 
+  it('supplies complete image, text and layout branches together for a mixed redesign', () => {
+    const context = generationCapabilityContext([{ items: [{ item: { kind: 'native', content: { nativeType: 'text' } } }] }],
+      'local-edit', generationCapabilityData, '重构本页，将红色图片改为秦始皇的图片，背景改为战国地图，文案、布局也要重新适配')
+    expect(context.cards.map(card => card.entry.id)).toEqual(['media.apply', 'native.content', 'native.content', 'native.content'])
+    expect(context.deferred.filter(card => card.id === 'native.content')).toEqual([])
+    expect(Buffer.byteLength(JSON.stringify(context.cards))).toBeLessThanOrEqual(16_000)
+  })
+
+  it('keeps a fixed shape-to-image request unchanged when unrelated capability families grow', () => {
+    const pages = [{ items: [{ selected: true, item: { kind: 'native', content: { nativeType: 'shape' } } }] }]
+    const instruction = '帮我将这个形状替换为卡通小狗图片'
+    const context = generationCapabilityContext(pages, 'local-edit', generationCapabilityData, instruction)
+    expect(context.cards[0]!.entry.id).toBe('media.apply')
+    const source = context.cards[0]!
+    expect('content' in source && source.content.inputSchema.properties.source).toBeDefined()
+    const unrelated = { id: 'unrelated.future-family', kind: 'tool' as const, label: 'Independent family',
+      path: 'tools/unrelated.future-family.json', scopes: ['slide:scene'], carriers: ['native'], summary: 'Unrelated operation' }
+    const grown = { ...generationCapabilityData, entries: [...generationCapabilityData.entries, unrelated],
+      files: { ...generationCapabilityData.files, [unrelated.path]: JSON.stringify({ inputSchema: { description: 'unrelated'.repeat(10_000) } }) } }
+    const after = generationCapabilityContext(pages, 'local-edit', grown, instruction)
+    expect(after).toEqual(context)
+    const request = generationRequestSchema.parse({ ...requestFixture(), instruction, context: { pages, capabilities: context } })
+    const root = path.resolve('C:/teacher/current-candidate')
+    for (const adapter of ['codex', 'claude', 'opencode'] as const) {
+      const beforePrompt = buildGenerationPrompt(adapter, request, root)
+      const afterPrompt = buildGenerationPrompt(adapter, generationRequestSchema.parse({ ...request, context: { pages, capabilities: after } }), root)
+      expect(afterPrompt).toBe(beforePrompt)
+      expect(Buffer.byteLength(afterPrompt)).toBeLessThanOrEqual(12 * 1024)
+    }
+  })
+
   it('projects only explicit frozen media asset references and keeps the complete alias inventory on demand', () => {
     const request = requestFixture()
     const asset = (id: string) => ({ id, kind: 'image', filename: `${id}.png`, mimeType: 'image/png', path: `assets/${id}.png`, byteLength: 10 })
@@ -245,13 +295,13 @@ describe('offline capability workspace', () => {
       if (nativeType === 'image') expect(initial.assetAliases).toEqual({ a1: 'red-artwork' })
       else expect(initial).not.toHaveProperty('assetAliases')
       if (adapter !== 'codex') {
-        expect(prompt).toContain('COURSEWARE_CANDIDATE_ROOT下request.json')
+        expect(prompt).toContain(JSON.stringify(path.join(root, 'request.json')))
         expect(prompt).toContain('勿手抄路径/UUID/base64')
         expect(prompt).not.toContain('写 candidate.json 不算交付')
       }
       const profile = createGenerationProfile(adapter, request, undefined, root), projected = generationProfileForPrompt(profile)
       expect(projected.skills).toEqual(profile.skills.map(skill => skill.name))
-      expect(projected.workspace).toEqual({ rootEnvironment: 'COURSEWARE_CANDIDATE_ROOT', request: 'request.json' })
+      expect(projected.workspace).toEqual({ rootEnvironment: 'COURSEWARE_CANDIDATE_ROOT', request: path.join(root, 'request.json') })
       if (nativeType === 'image') expect(context.capabilities.cards[0]!.entry.id).toBe('asset.image.transform')
     }
   })
@@ -393,4 +443,52 @@ describe('offline capability workspace', () => {
       await expect(new CandidateStaging(directory).create({ ...request, resourceFiles: [{ path: 'bad.png', encoding: 'base64', content: '??' }] })).rejects.toThrow('base64')
     } finally { await rm(directory, { recursive: true, force: true }) }
   })
+})
+
+
+it('QP06 bundled helper writes a valid candidate in an unrelated Chinese path and rejects an operation-target mismatch', async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), '候选 helper 无仓库 '))
+  try {
+    const request = requestFixture(), root = await new CandidateStaging(directory).create(request)
+    const details = JSON.parse(await readFile(path.join(root, 'request.json'), 'utf8'))
+    const create = Object.entries(details.destinationAliases).find(([,d]: any) => d.kind === 'create' && d.scope.owner === 'scene' && d.scope.parent.kind === 'owner')![0]
+    const input = path.join(directory, '草稿.json')
+    await writeFile(input, JSON.stringify({ summary: '创建独立图形', steps: [{ id: 'shape', tool: 'native.content', destination: create, input: { operation: 'insert', template: { nativeType: 'shape', shapeType: 'ellipse', style: { fillColor: '#ffff00' } } } }] }))
+    const args = [details.fileAccess.candidateHelper, '--request', path.join(root, 'request.json'), '--input', input]
+    const result = await promisify(execFile)(process.execPath, args, { cwd: directory, windowsHide: true })
+    expect(JSON.parse(result.stdout)).toMatchObject({ status: 'prechecked', candidateFile: 'candidate.json' })
+    const candidate = JSON.parse(await readFile(path.join(root, 'candidate.json'), 'utf8'))
+    expect(candidate).toMatchObject({ version: 1, requestId: request.requestId, steps: [{ id: 'shape' }] })
+    await writeFile(input, JSON.stringify({ summary: '错误目标', steps: [{ id: 'bad', tool: 'native.content', destination: create, input: { operation: 'content', content: {} } }] }))
+    await expect(promisify(execFile)(process.execPath, args, { cwd: directory, windowsHide: true })).rejects.toMatchObject({ code: 1, stderr: expect.stringContaining('operation-target-mismatch') })
+    expect(JSON.parse(await readFile(path.join(root, 'candidate.json'), 'utf8'))).toEqual(candidate)
+  } finally { await rm(directory, { recursive: true, force: true }) }
+})
+
+it('prechecks tool shape and prepares a source patch without copying baseline metadata by hand', async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), '源码 helper '))
+  try {
+    const { project: document, componentPackages } = withDefaultComponentController(createBlankCourseProject())
+    const request = captureGenerationSnapshot({ document, componentPackages, workspace: { version: 1, projectId: document.id, normalizedPath: '/helper.h5lesson' },
+      sessionToken: { locationId: document.startLocationId, surfaceType: 'slide', revision: document.revision, generation: 1 },
+      projection: projectEffectiveLayers({ project: document, locationId: document.startLocationId, owner: 'global' }),
+      selectedIds: [document.globalLayerItems[0]!.item.layerItemId], scope: 'selection', instruction: '修改控制台源码', purpose: 'single-page' })
+    const root = await new CandidateStaging(directory).create(request), details = JSON.parse(await readFile(path.join(root, 'request.json'), 'utf8'))
+    const alias = Object.entries(details.destinationAliases).find(([, d]: any) => d.kind === 'update' && d.target.itemId === document.globalLayerItems[0]!.item.layerItemId)![0]
+    const baseArgs = [details.fileAccess.candidateHelper, '--request', path.join(root, 'request.json')]
+    const draft = path.join(directory, 'draft.json')
+    await writeFile(draft, JSON.stringify({ summary: '错误参数', steps: [{ id: 'bad', tool: 'component.configure', destination: alias, input: { props: 123 } }] }))
+    await expect(promisify(execFile)(process.execPath, [...baseArgs, '--input', draft], { cwd: directory, windowsHide: true })).rejects.toMatchObject({ code: 1, stderr: expect.stringContaining('invalid-input') })
+    const work = path.join(root, 'component-work'), patchArgs = [...baseArgs, '--component-target', alias, '--work-dir', work]
+    await promisify(execFile)(process.execPath, [...patchArgs, '--init'], { cwd: directory, windowsHide: true })
+    const source = (request.context as any).componentSources[0], original = await readFile(path.join(root, source.files['runtime.js'].path), 'utf8')
+    await writeFile(path.join(work, 'runtime.js'), original + '\n// teacher custom text')
+    await writeFile(path.join(work, 'new.svg'), '<svg xmlns="http://www.w3.org/2000/svg"/>')
+    await promisify(execFile)(process.execPath, [...patchArgs, '--summary', '定制控制台'], { cwd: directory, windowsHide: true })
+    const candidate = JSON.parse(await readFile(path.join(root, 'candidate.json'), 'utf8'))
+    expect(candidate.steps[0].input).toMatchObject({ operation: 'patch', mode: 'instance', basePackageId: source.packageId, baseVersion: source.baseVersion, baseContentIdentity: source.baseContentIdentity, deleteFiles: [] })
+    expect(Object.keys(candidate.steps[0].input.changedFiles).sort()).toEqual(['new.svg', 'runtime.js'])
+    expect(candidate.steps[0]).not.toHaveProperty('lowerCarrierReason')
+    expect(await readFile(path.join(root, source.files['runtime.js'].path), 'utf8')).toBe(original)
+  } finally { await rm(directory, { recursive: true, force: true }) }
 })

@@ -1,3 +1,4 @@
+import { isControllerFixture } from '../tests/fixtures/teacherController'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { promises as fs } from 'node:fs'
@@ -270,8 +271,7 @@ function validateGeneratedProject(project: CourseProjectDocument): void {
     throw new Error('示例工程必须是两页 Slide 的 Course Project V9')
   }
   const controller = project.globalLayerItems.find(
-    (entry) => entry.item.kind === 'native' &&
-      entry.item.content.nativeType === 'teacher-controller',
+    (entry) => isControllerFixture(entry.item),
   )
   if (!controller || controller.visibility.mode !== 'all' || project.playback.controls !== 'canvas') {
     throw new Error('示例工程未保留 V9 工厂的默认全局教师控制器')

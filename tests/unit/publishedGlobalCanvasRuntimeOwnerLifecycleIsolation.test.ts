@@ -1,3 +1,4 @@
+import { buildPublishedFixture as buildPublishedCourseV2Payload } from '../fixtures/teacherController'
 import { describe, expect, it, vi } from 'vitest'
 import type {
   PublishedCanvasRuntimeMountHandle,
@@ -55,7 +56,7 @@ vi.mock('@/player/surfaces/runtime/publishedCanvasRuntimeMount', () => ({
 
 import { PublishedGlobalCanvasRuntimeOwner } from '@/player/surfaces/runtime/publishedGlobalCanvasRuntimeOwner'
 import { CourseStateStore } from '@/player/CourseStateStore'
-import { buildPublishedCourseV2Payload } from '@/renderer/export/course/buildPublishedCourse'
+
 import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
 import type { RuntimeLayerItem } from '@/shared/courseProjectTypes'
 import { createPublishedCanvasRuntimeV2Fixture } from '../fixtures/publishedCanvasRuntimeV2Fixture'

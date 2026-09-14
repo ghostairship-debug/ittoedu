@@ -1,3 +1,5 @@
+import { buildPublishedFixture as buildPublishedCourseV2Payload } from '../fixtures/teacherController'
+import { isControllerFixture } from '../fixtures/teacherController'
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import type { CourseProjectDocument, NativeLayerItem, ScopedLayerItem } from '@/shared/courseProjectTypes'
 import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
@@ -11,7 +13,7 @@ import {
   PLAYER_AUTHORING_PROTOCOL_VERSION,
   type PlayerAuthoringHostMessage,
 } from '@/shared/playerAuthoringProtocol'
-import { buildPublishedCourseV2Payload } from '@/renderer/export/course/buildPublishedCourse'
+
 import {
   createPublishedCourseSession,
   type PublishedCourseSession,
@@ -308,7 +310,7 @@ describe('published course Mixed navigation', () => {
       components: {},
     })
     const controllerId = payload.globalLayerItems.find((entry) => (
-      entry.item.kind === 'native' && entry.item.content.nativeType === 'teacher-controller'
+      isControllerFixture(entry.item)
     ))?.item.layerItemId
     expect(controllerId).toBeTruthy()
     const session = createPublishedCourseSession(payload)

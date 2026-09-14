@@ -1,8 +1,9 @@
+import { buildPublishedFixture as buildPublishedCourseV2Payload } from '../fixtures/teacherController'
 import { describe, expect, it } from 'vitest'
 import { assetMetaSchema, courseProjectAssetMetaSchema } from '../../src/shared/contracts/media-v1/schema'
 import { publishedCourseV2Schema } from '../../src/shared/publishedCourseSchema'
 import { createBlankCourseProject } from '../../src/renderer/project/createCourseProject'
-import { buildPublishedCourseV2Payload } from '../../src/renderer/export/course/buildPublishedCourse'
+
 
 describe('approved project font asset contract', () => {
   const base = { id: 'font-a', filename: 'lesson.woff2', mimeType: 'font/woff2', path: 'assets/lesson.woff2', byteLength: 4 }

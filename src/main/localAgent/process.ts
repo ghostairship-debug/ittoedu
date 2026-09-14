@@ -51,10 +51,15 @@ export async function resolveAgentExecutable(id: LocalAgentId): Promise<AgentExe
   }
   return null
 }
-export function launchAgent(binary: AgentExecutable, args: string[], cwd: string, candidateRoot?: string): ChildProcessWithoutNullStreams {
+export function launchAgent(binary: AgentExecutable, args: string[], cwd: string, candidateRoot?: string, environment: NodeJS.ProcessEnv = {}): ChildProcessWithoutNullStreams {
   if (!path.isAbsolute(binary.executable) || /\.(cmd|bat|ps1)$/i.test(binary.executable)) throw new Error('CLI executable must be a resolved native program')
+  const inherited = agentEnvironment(process.env, candidateRoot)
+  for (const [key, value] of Object.entries(environment)) {
+    for (const old of Object.keys(inherited)) if (old.toLowerCase() === key.toLowerCase()) delete inherited[old]
+    inherited[key] = value
+  }
   return spawn(binary.executable, [...binary.prefix, ...args], {
-    cwd, env: agentEnvironment(process.env, candidateRoot), shell: false, windowsHide: true,
+    cwd, env: inherited, shell: false, windowsHide: true,
     detached: process.platform !== 'win32', stdio: ['pipe', 'pipe', 'pipe'],
   })
 }

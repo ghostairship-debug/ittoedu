@@ -1,3 +1,7 @@
+import { controllerMetadata } from '../fixtures/teacherController'
+import type { LayerItem } from '../../src/shared/courseProjectTypes'
+import { isControllerFixture } from '../fixtures/teacherController'
+import { controllerPackage } from '../fixtures/teacherController'
 import { describe, expect, it } from 'vitest'
 import { makeAuthoringAddress } from '@/shared/authoringAddress'
 import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
@@ -93,7 +97,7 @@ function nativeText(
   }
 }
 
-function scoped(item: NativeLayerItem, locationIds: string[] = []): ScopedLayerItem {
+function scoped(item: LayerItem, locationIds: string[] = []): ScopedLayerItem {
   return {
     item,
     visibility: locationIds.length === 0
@@ -120,7 +124,7 @@ function sceneComponent(layerItemId: string, order: number): ComponentLayerItem 
   }
 }
 
-function teacherController(layerItemId: string, order: number, targetId: string): NativeLayerItem {
+function teacherController(layerItemId: string, order: number, targetId: string): ComponentLayerItem {
   return {
     layerItemId,
     label: '教师控制',
@@ -132,10 +136,8 @@ function teacherController(layerItemId: string, order: number, targetId: string)
     opacity: 1,
     hitPolicy: 'auto',
     playbackInitialVisibility: 'inherit',
-    kind: 'native',
-    content: {
-      nativeType: 'teacher-controller',
-      data: {
+    kind: 'component',
+    role: 'teacher-controller', component: { packageId: controllerPackage.manifest.id, version: controllerPackage.manifest.version }, props: {
         title: '教师控制',
         showSceneProgress: true,
         compact: false,
@@ -156,7 +158,6 @@ function teacherController(layerItemId: string, order: number, targetId: string)
         },
         includeInStaticExports: false,
       },
-    },
   }
 }
 
@@ -169,7 +170,7 @@ function v9SlideFixture(): CourseProjectDocument {
     createdAt: NOW,
     updatedAt: NOW,
     assets: {},
-    componentPackages: {},
+    componentPackages: { ...controllerMetadata,},
     designTokens: {
       fonts: [{
         id: 'body',
@@ -462,8 +463,8 @@ describe('V9 Slide domain', () => {
     const controller = deleted.history.present.globalLayerItems.find(
       (entry) => entry.item.layerItemId === 'controller-kept-by-flow-alias',
     )?.item
-    expect(controller?.kind === 'native' && controller.content.nativeType === 'teacher-controller'
-      ? controller.content.data.buttons[0]?.action
+    expect(isControllerFixture(controller)
+      ? controller.props.buttons[0]?.action
       : undefined).toEqual({ type: 'scene.go', sceneId: removedSceneId })
     expect(courseProjectDocumentSchema.parse(deleted.history.present))
       .toEqual(deleted.history.present)
@@ -585,7 +586,7 @@ describe('V9 Slide domain', () => {
   it('writes scene component frames through transformSlideNativeLayers', () => {
     const project = courseProjectDocumentSchema.parse({
       ...v9SlideFixture(),
-      componentPackages: {
+      componentPackages: { ...controllerMetadata,
         'component.quiz': {
           packageId: 'component.quiz',
           version: '4.0.0',

@@ -3,7 +3,7 @@ import { promises as fs } from 'node:fs'
 import { setTimeout as pause } from 'node:timers/promises'
 import path from 'node:path'
 import { z } from 'zod'
-import { localAgentRecordSchema, type LocalAgentRecord } from '../../shared/localAgentContract'
+import { localAgentRecordSchema, localAgentConfigurationSchema, localAgentIdSchema, type LocalAgentRecord, type LocalAgentConfiguration, type LocalAgentId } from '../../shared/localAgentContract'
 import { localAgentRecordV2Schema, parseLocalAgentLegacyRecord, type LocalAgentRecordV2 } from '../../shared/localAgentTaskContract'
 import { projectV2RecordToV1 } from '../../shared/localAgentProjection'
 import { generationRequestSchema, type GenerationRequest } from '../../shared/generationContract'
@@ -31,6 +31,31 @@ async function replaceRecord(temporary: string, destination: string): Promise<vo
 export class LocalAgentRepository {
   private queue: Promise<unknown> = Promise.resolve()
   constructor(private readonly userData: string) {}
+  readConfiguration(adapter: LocalAgentId): Promise<LocalAgentConfiguration | undefined> {
+    localAgentIdSchema.parse(adapter)
+    return this.serialize(async () => {
+      try {
+        const value = JSON.parse(await fs.readFile(path.join(this.userData, 'local-agent', 'preferences', 'v1', `${adapter}.json`), 'utf8'))
+        return z.object({ version: z.literal(1), configuration: localAgentConfigurationSchema }).strict().parse(value).configuration
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined
+        throw new Error('无法读取已保存的 CLI 配置，请重新选择模型与强度')
+      }
+    })
+  }
+  writeConfiguration(adapter: LocalAgentId, input: LocalAgentConfiguration): Promise<void> {
+    localAgentIdSchema.parse(adapter)
+    const configuration = localAgentConfigurationSchema.parse(input)
+    return this.serialize(async () => {
+      const directory = path.join(this.userData, 'local-agent', 'preferences', 'v1')
+      await fs.mkdir(directory, { recursive: true })
+      const destination = path.join(directory, `${adapter}.json`), temporary = `${destination}.tmp`
+      try {
+        await fs.writeFile(temporary, JSON.stringify({ version: 1, configuration }), { mode: 0o600 })
+        await replaceRecord(temporary, destination)
+      } finally { await fs.rm(temporary, { force: true }) }
+    })
+  }
   directory(workspace: WorkspaceIdentityV1): string {
     return this.versionDirectory(workspace, 1)
   }

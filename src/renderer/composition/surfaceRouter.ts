@@ -30,11 +30,10 @@ export type SurfaceActivationPlan =
     }
   | {
       readonly ok: true
-      readonly kind: 'open-flow' | 'open-spatial' | 'open-slide' | 'activate-slide-scene'
+      readonly kind: 'open-flow' | 'open-spatial' | 'open-slide' | 'activate-slide-location'
       readonly locationId: string
       readonly surface: ActiveSurfaceKind
       readonly authoringSession: CourseAuthoringSession
-      readonly sceneId?: string
     }
 
 export function detectActiveSurface(
@@ -137,16 +136,14 @@ export function planActivateCourseLocation(input: {
         locationId: input.locationId,
         surface: 'slide',
         authoringSession: nextAuthoringSession,
-        sceneId: location.sceneId,
       }
     }
     return {
       ok: true,
-      kind: 'activate-slide-scene',
+      kind: 'activate-slide-location',
       locationId: input.locationId,
       surface: 'slide',
       authoringSession: nextAuthoringSession,
-      sceneId: location.sceneId,
     }
   }
 

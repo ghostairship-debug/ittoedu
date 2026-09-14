@@ -1,5 +1,9 @@
+import { queryDeep, dragController } from '../fixtures/teacherController'
+import { publishedControllerPackages } from '../fixtures/teacherController'
+import { controllerPackage } from '../fixtures/teacherController'
+import type { PublishedComponentLayerItem } from '../../src/shared/publishedCourseTypes'
 import { describe, expect, it, vi } from 'vitest'
-import type { TeacherControllerAction } from '@/shared/contracts/native-v1'
+import type { TeacherControllerAction } from '@/shared/teacherControllerConfig'
 import {
   PUBLISHED_COURSE_FORMAT,
   PUBLISHED_COURSE_VERSION,
@@ -114,7 +118,7 @@ function teacherController(
   layerItemId: string,
   frame: { x: number; y: number; width: number; height: number },
   order: number,
-): PublishedNativeLayerItem {
+): PublishedComponentLayerItem {
   return {
     layerItemId,
     frame: { mode: 'absolute', ...frame },
@@ -124,10 +128,8 @@ function teacherController(
     opacity: 1,
     hitPolicy: 'auto',
     playbackInitialVisibility: 'inherit',
-    kind: 'native',
-    content: {
-      nativeType: 'teacher-controller',
-      data: {
+    kind: 'component',
+    role: 'teacher-controller', component: { packageId: controllerPackage.manifest.id, version: controllerPackage.manifest.version }, props: {
         title: '课堂导航',
         compact: false,
         showSceneProgress: true,
@@ -147,7 +149,6 @@ function teacherController(
         },
         includeInStaticExports: false,
       },
-    },
   }
 }
 
@@ -184,7 +185,7 @@ function publishedCourse(): PublishedCourseV2Payload {
     courseId: 'course-spatial',
     title: '空间课',
     assets: {},
-    components: {},
+    components: { ...publishedControllerPackages,},
     designTokens: {
       fonts: [{ id: 'body', label: '正文', fontFamily: 'sans-serif' }],
       colors: [{ id: 'text', label: '正文', color: '#172033' }],
@@ -276,16 +277,16 @@ describe('SpatialSurfaceHost published V2 runtime', () => {
     await host.mount(container)
     await host.activate()
 
-    const root = container.querySelector<HTMLElement>('.spatial-surface')!
-    const world = root.querySelector<SVGGElement>('[data-spatial-world]')!
+    const root = queryDeep<HTMLElement>(container, '.spatial-surface')!
+    const world = queryDeep<SVGGElement>(root, '[data-spatial-world]')!
     expect(root.style.width).toBe('400px')
     expect(root.style.height).toBe('240px')
     expect(root.dataset.worldBoundsMode).toBe('infinite')
-    expect(root.querySelector('svg')!.getAttribute('viewBox')).toBe('0 0 400 240')
-    expect(root.querySelector('[data-slide-page]')).toBeNull()
-    expect(world.querySelector('[data-layer-item-id="world-a"]')).not.toBeNull()
-    expect(world.querySelector('[data-spatial-path-id="path-1"]')).not.toBeNull()
-    expect(world.querySelector('[data-spatial-relation-id="relation-1"]')).not.toBeNull()
+    expect(queryDeep(root, 'svg')!.getAttribute('viewBox')).toBe('0 0 400 240')
+    expect(queryDeep(root, '[data-slide-page]')).toBeNull()
+    expect(queryDeep(world, '[data-layer-item-id="world-a"]')).not.toBeNull()
+    expect(queryDeep(world, '[data-spatial-path-id="path-1"]')).not.toBeNull()
+    expect(queryDeep(world, '[data-spatial-relation-id="relation-1"]')).not.toBeNull()
     expect(host.publishedPaths().map((path) => path.id)).toEqual(['path-1'])
     expect(host.publishedRelations().map((relation) => relation.id)).toEqual(['relation-1'])
     expect(host.camera).toMatchObject({ x: 0, y: 0, zoom: 1, viewportWidth: 400, viewportHeight: 240 })
@@ -309,10 +310,10 @@ describe('SpatialSurfaceHost published V2 runtime', () => {
       expect(options.root.style.backgroundColor).toBe('rgb(219, 234, 254)')
       expect(options.root.style.width).toBe('1120px')
       expect(options.root.style.height).toBe('760px')
-      expect(options.root.querySelector('svg')?.getAttribute('viewBox')).toBe('0 0 1120 760')
+      expect(queryDeep(options.root, 'svg')?.getAttribute('viewBox')).toBe('0 0 1120 760')
       const decorationLayer = options.layers[0]
-      expect(decorationLayer?.element.querySelector('[data-spatial-path-id="path-1"]')).not.toBeNull()
-      expect(decorationLayer?.element.querySelector('[data-spatial-relation-id="relation-1"]')).not.toBeNull()
+      expect(queryDeep(decorationLayer?.element, '[data-spatial-path-id="path-1"]')).not.toBeNull()
+      expect(queryDeep(decorationLayer?.element, '[data-spatial-relation-id="relation-1"]')).not.toBeNull()
       expect(decorationLayer).toEqual(expect.objectContaining({
         x: 0,
         y: 0,
@@ -362,8 +363,8 @@ describe('SpatialSurfaceHost published V2 runtime', () => {
     expect(host.camera).toEqual(cameraBefore)
     expect(host.rootElement?.style.width).toBe('400px')
     expect(host.rootElement?.style.height).toBe('240px')
-    expect(host.rootElement?.querySelector('svg')?.getAttribute('viewBox')).toBe('0 0 400 240')
-    expect(host.rootElement?.querySelector('[data-layer-item-id="surface-note"]')).not.toBeNull()
+    expect(queryDeep(host.rootElement, 'svg')?.getAttribute('viewBox')).toBe('0 0 400 240')
+    expect(queryDeep(host.rootElement, '[data-layer-item-id="surface-note"]')).not.toBeNull()
 
     capturePublishedSurfacePng.mockRejectedValueOnce(new Error('capture failed'))
     await expect(host.capture({
@@ -376,7 +377,7 @@ describe('SpatialSurfaceHost published V2 runtime', () => {
     expect(host.camera).toEqual(cameraBefore)
     expect(host.rootElement?.style.width).toBe('400px')
     expect(host.rootElement?.style.height).toBe('240px')
-    expect(host.rootElement?.querySelector('[data-layer-item-id="surface-note"]')).not.toBeNull()
+    expect(queryDeep(host.rootElement, '[data-layer-item-id="surface-note"]')).not.toBeNull()
 
     capturePublishedSurfacePng.mockRestore()
     await host.destroy()
@@ -428,18 +429,18 @@ describe('SpatialSurfaceHost published V2 runtime', () => {
     await host.mount(container)
     await host.activate()
 
-    const root = container.querySelector<HTMLElement>('.spatial-surface')!
-    expect(root.querySelector('[data-layer-item-id="global-hud"]')).not.toBeNull()
-    expect(root.querySelector('[data-layer-item-id="surface-note"]')).not.toBeNull()
+    const root = queryDeep<HTMLElement>(container, '.spatial-surface')!
+    expect(queryDeep(root, '[data-layer-item-id="global-hud"]')).not.toBeNull()
+    expect(queryDeep(root, '[data-layer-item-id="surface-note"]')).not.toBeNull()
 
     await host.setLocationId('loc-detail')
-    expect(root.querySelector('[data-layer-item-id="global-hud"]')).toBeNull()
-    expect(root.querySelector('[data-layer-item-id="surface-note"]')).toBeNull()
+    expect(queryDeep(root, '[data-layer-item-id="global-hud"]')).toBeNull()
+    expect(queryDeep(root, '[data-layer-item-id="surface-note"]')).toBeNull()
     expect(host.camera).toMatchObject({ x: 300, y: 90, zoom: 2 })
 
     await host.setLocationId('loc-home')
-    expect(root.querySelector('[data-layer-item-id="global-hud"]')).not.toBeNull()
-    expect(root.querySelector('[data-layer-item-id="surface-note"]')).not.toBeNull()
+    expect(queryDeep(root, '[data-layer-item-id="global-hud"]')).not.toBeNull()
+    expect(queryDeep(root, '[data-layer-item-id="surface-note"]')).not.toBeNull()
 
     await host.setRuntimeCamera({
       x: 180,
@@ -486,7 +487,7 @@ describe('SpatialSurfaceHost playback camera gestures', () => {
     await host.mount(container)
     await host.activate()
 
-    const root = container.querySelector<HTMLElement>('.spatial-surface')!
+    const root = queryDeep<HTMLElement>(container, '.spatial-surface')!
     dispatchPointer(root, 'pointerdown', 40, 40)
     dispatchPointer(root, 'pointermove', 80, 40)
     expect(host.camera).toMatchObject({ x: -40, y: 0, zoom: 1 })
@@ -511,7 +512,7 @@ describe('SpatialSurfaceHost playback camera gestures', () => {
     await host.mount(container)
     await host.activate()
 
-    const video = container.querySelector('video')
+    const video = queryDeep(container, 'video')
     expect(video).not.toBeNull()
     dispatchPointer(video!, 'pointerdown', 20, 20)
     dispatchPointer(video!, 'pointermove', 90, 20)
@@ -547,19 +548,19 @@ describe('SpatialSurfaceHost playback video and controller actions', () => {
     await host.mount(container)
     await host.activate()
 
-    const htmlLayer = container.querySelector('[data-testid="spatial-world-html"]')
-    const video = container.querySelector('video')
+    const htmlLayer = queryDeep(container, '[data-testid="spatial-world-html"]')
+    const video = queryDeep(container, 'video')
     expect(htmlLayer).not.toBeNull()
     expect(video).not.toBeNull()
     expect(video?.controls).toBe(true)
     expect(video?.getAttribute('src')).toBe('https://example.test/clip.mp4')
     expect(video?.closest('foreignObject')).toBeNull()
     expect(htmlLayer?.contains(video)).toBe(true)
-    expect(container.querySelector('[data-spatial-world] video')).toBeNull()
+    expect(queryDeep(container, '[data-spatial-world] video')).toBeNull()
 
-    const world = container.querySelector<SVGGElement>('[data-spatial-world]')!
-    expect(world.querySelector('image[href=""]')).toBeNull()
-    expect(world.querySelector('[data-layer-item-id="world-missing-image"] image')).toBeNull()
+    const world = queryDeep<SVGGElement>(container, '[data-spatial-world]')!
+    expect(queryDeep(world, 'image[href=""]')).toBeNull()
+    expect(queryDeep(world, '[data-layer-item-id="world-missing-image"] image')).toBeNull()
 
     await host.destroy()
   })
@@ -573,15 +574,15 @@ describe('SpatialSurfaceHost playback video and controller actions', () => {
     await host.mount(container)
     await host.activate()
 
-    const world = container.querySelector<SVGGElement>('[data-spatial-world]')!
-    const video = container.querySelector('video')
+    const world = queryDeep<SVGGElement>(container, '[data-spatial-world]')!
+    const video = queryDeep(container, 'video')
     expect(video).not.toBeNull()
     expect(video?.controls).toBe(true)
     expect(video?.getAttribute('src')).toBe('https://example.test/clip.mp4')
     expect(video?.closest('foreignObject')).toBeNull()
-    expect(world.querySelector('video')).toBeNull()
-    expect(world.querySelector('image[href=""]')).toBeNull()
-    expect(world.querySelector('[data-layer-item-id="world-missing-image"] image')).toBeNull()
+    expect(queryDeep(world, 'video')).toBeNull()
+    expect(queryDeep(world, 'image[href=""]')).toBeNull()
+    expect(queryDeep(world, '[data-layer-item-id="world-missing-image"] image')).toBeNull()
 
     await host.destroy()
   })
@@ -600,8 +601,8 @@ describe('SpatialSurfaceHost playback video and controller actions', () => {
     await host.mount(container)
     await host.activate()
 
-    const wrapper = container.querySelector<HTMLElement>('[data-layer-item-id="world-video"]')!
-    const video = wrapper.querySelector<HTMLVideoElement>('video')!
+    const wrapper = queryDeep<HTMLElement>(container, '[data-layer-item-id="world-video"]')!
+    const video = queryDeep<HTMLVideoElement>(wrapper, 'video')!
     expect(wrapper.style.pointerEvents).toBe('none')
     expect(video.style.pointerEvents).toBe('none')
 
@@ -648,21 +649,13 @@ describe('SpatialSurfaceHost playback video and controller actions', () => {
     await host.mount(container)
     await host.activate()
 
-    const local = container.querySelector<HTMLElement>(
-      '[data-layer-item-id="surface-local-cover"]',
-    )!
-    const underlayItem = container.querySelector<HTMLElement>(
-      '[data-layer-item-id="global-explicit-underlay"]',
-    )!
-    const controller = container.querySelector<HTMLElement>(
-      '[data-layer-item-id="global-controller"]',
-    )!
-    const laterGlobal = container.querySelector<HTMLElement>(
-      '[data-layer-item-id="global-after-controller"]',
-    )!
-    const underlayRoot = container.querySelector<HTMLElement>('.spatial-global-underlay-layer')!
-    const overlayRoot = container.querySelector<HTMLElement>('.spatial-global-overlay-layer')!
-    const worldRoot = container.querySelector<SVGSVGElement>('[data-spatial-world-canvas]')!
+    const local = queryDeep<HTMLElement>(container, '[data-layer-item-id="surface-local-cover"]')!
+    const underlayItem = queryDeep<HTMLElement>(container, '[data-layer-item-id="global-explicit-underlay"]')!
+    const controller = queryDeep<HTMLElement>(container, '[data-layer-item-id="global-controller"]')!
+    const laterGlobal = queryDeep<HTMLElement>(container, '[data-layer-item-id="global-after-controller"]')!
+    const underlayRoot = queryDeep<HTMLElement>(container, '.spatial-global-underlay-layer')!
+    const overlayRoot = queryDeep<HTMLElement>(container, '.spatial-global-overlay-layer')!
+    const worldRoot = queryDeep<SVGSVGElement>(container, '[data-spatial-world-canvas]')!
     expect(underlayItem.parentElement).toBe(underlayRoot)
     expect(controller.parentElement).toBe(overlayRoot)
     expect(laterGlobal.parentElement).toBe(overlayRoot)
@@ -694,7 +687,7 @@ describe('SpatialSurfaceHost playback video and controller actions', () => {
     await host.mount(container)
     await host.activate()
 
-    const next = container.querySelector<HTMLButtonElement>('[data-controller-button-id="next"]')!
+    const next = queryDeep<HTMLButtonElement>(container, '[data-controller-button-id="next"]')!
     next.click()
     await vi.waitFor(() => {
       expect(actions).toEqual([{ type: 'scene.next' }])
@@ -713,7 +706,7 @@ describe('SpatialSurfaceHost playback video and controller actions', () => {
     await host.mount(container)
     await host.activate()
 
-    const controller = container.querySelector<HTMLElement>('[data-layer-item-id="global-controller"]')!
+    const controller = queryDeep<HTMLElement>(container, '[data-layer-item-id="global-controller"]')!
     expect(controller.hidden).toBe(true)
 
     await host.destroy()
@@ -811,33 +804,29 @@ describe('SpatialSurfaceHost playback video and controller actions', () => {
     const container = document.createElement('div')
     const host = SpatialSurfaceHost.fromPublishedCourse(course, VIEWPORT)
     await host.mount(container)
-    expect(container.querySelector('.published-component-mount')).toBeNull()
+    expect(queryDeep(container, '.published-component-mount:not([data-component-package-id="com.ittoedu.teacher-controller"])')).toBeNull()
     host.preparePublishedLocation('loc-detail', false)
     await host.activate()
-    expect(container.querySelector('.published-component-mount')).toBeNull()
+    expect(queryDeep(container, '.published-component-mount:not([data-component-package-id="com.ittoedu.teacher-controller"])')).toBeNull()
     await host.setLocationId('loc-detail')
 
     // World component in foreignObject
-    const worldItem = container.querySelector('[data-layer-item-id="world-comp-1"]')
+    const worldItem = queryDeep(container, '[data-layer-item-id="world-comp-1"]')
     expect(worldItem).not.toBeNull()
-    const foreign = worldItem?.querySelector('foreignObject')
+    const foreign = queryDeep(worldItem, 'foreignObject')
     expect(foreign).not.toBeNull()
-    const worldMount = foreign?.querySelector('.published-component-mount')
+    const worldMount = queryDeep(foreign, '.published-component-mount')
     expect(worldMount).not.toBeNull()
-    const worldCard = worldMount?.shadowRoot?.querySelector('.spatial-interactive-card')
+    const worldCard = queryDeep(worldMount?.shadowRoot, '.spatial-interactive-card')
     expect(worldCard?.textContent).toBe('世界组件')
 
     // A pass-through boundary must stay inert even when the mounted component
     // explicitly opts its own descendants back into pointer hit testing.
-    const passThroughWorldItem = container.querySelector<SVGGElement>(
-      '[data-layer-item-id="world-pass-comp-1"]',
-    )!
-    const passThroughForeign = passThroughWorldItem.querySelector('foreignObject')!
+    const passThroughWorldItem = queryDeep<SVGGElement>(container, '[data-layer-item-id="world-pass-comp-1"]')!
+    const passThroughForeign = queryDeep(passThroughWorldItem, 'foreignObject')!
     const passThroughHolder = passThroughForeign.firstElementChild as HTMLElement
-    const passThroughMount = passThroughHolder.querySelector<HTMLElement>('.published-component-mount')!
-    const passThroughCard = passThroughMount.shadowRoot?.querySelector<HTMLElement>(
-      '.spatial-interactive-card',
-    )!
+    const passThroughMount = queryDeep<HTMLElement>(passThroughHolder, '.published-component-mount')!
+    const passThroughCard = queryDeep<HTMLElement>(passThroughMount.shadowRoot, '.spatial-interactive-card')!
     expect(passThroughWorldItem.style.pointerEvents).toBe('none')
     expect(passThroughWorldItem.hasAttribute('data-spatial-gesture-owner')).toBe(false)
     expect(passThroughForeign.hasAttribute('data-spatial-gesture-owner')).toBe(false)
@@ -848,18 +837,16 @@ describe('SpatialSurfaceHost playback video and controller actions', () => {
     expect(passThroughCard.style.pointerEvents).toBe('auto')
 
     // HUD component in screenLayer
-    const hudItem = container.querySelector('[data-layer-item-id="hud-comp-1"]')
+    const hudItem = queryDeep(container, '[data-layer-item-id="hud-comp-1"]')
     expect(hudItem).not.toBeNull()
-    const hudMount = hudItem?.querySelector('.published-component-mount')
+    const hudMount = queryDeep(hudItem, '.published-component-mount')
     expect(hudMount).not.toBeNull()
-    const hudCard = hudMount?.shadowRoot?.querySelector('.spatial-interactive-card')
+    const hudCard = queryDeep(hudMount?.shadowRoot, '.spatial-interactive-card')
     expect(hudCard?.textContent).toBe('HUD组件')
 
     host.preparePublishedLocation('loc-detail', true)
     await host.setLocationId('loc-detail')
-    const replayedWorldMount = container.querySelector(
-      '[data-layer-item-id="world-comp-1"] .published-component-mount',
-    )
+    const replayedWorldMount = queryDeep(container, '[data-layer-item-id="world-comp-1"] .published-component-mount')
     expect(replayedWorldMount).not.toBeNull()
     expect(replayedWorldMount).not.toBe(worldMount)
 

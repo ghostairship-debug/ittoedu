@@ -468,25 +468,42 @@ function linearGradient(
   cssValue: string,
   rect: CaptureRect,
 ): CanvasGradient | null {
-  const match = /^linear-gradient\((.*)\)$/i.exec(cssValue.trim())
+  const match = /^(repeating-)?linear-gradient\((.*)\)$/i.exec(cssValue.trim())
   if (!match) return null
-  const values = topLevelParts(match[1] ?? '')
+  const values = topLevelParts(match[2] ?? '')
   if (values.length < 2) return null
   const hasDirection = /^(?:to\s|[-+.\d]+deg)/i.test(values[0] ?? '')
   const direction = hasDirection ? values.shift() ?? '' : 'to bottom'
-  const gradient = context.createLinearGradient(...gradientCoordinates(direction, rect))
-  values.forEach((stop, index) => {
-    const positionMatch = /\s+([-+.\d]+)%\s*$/.exec(stop)
+  const coordinates = gradientCoordinates(direction, rect)
+  const length = Math.hypot(coordinates[2] - coordinates[0], coordinates[3] - coordinates[1])
+  const gradient = context.createLinearGradient(...coordinates)
+  const stops = values.map((stop, index) => {
+    const positionMatch = /\s+([-+.\d]+)(%|px)\s*$/.exec(stop)
     const color = positionMatch ? stop.slice(0, positionMatch.index).trim() : stop.trim()
     const offset = positionMatch
-      ? Math.max(0, Math.min(1, cssNumber(positionMatch[1] ?? '') / 100))
+      ? cssNumber(positionMatch[1] ?? '') / (positionMatch[2] === '%' ? 100 : Math.max(1, length))
       : index / Math.max(1, values.length - 1)
+    return { color, offset }
+  })
+  const add = (color: string, offset: number) => {
     try {
       gradient.addColorStop(offset, color)
     } catch {
       // Keep valid authored stops when one stop is not accepted by Canvas.
     }
-  })
+  }
+  if (match[1]) {
+    const first = stops[0]!.offset, period = stops.at(-1)!.offset - first
+    // Bound pathological subpixel patterns while preserving ordinary paper/wood textures.
+    if (period <= 0 || stops.length / period > 4096) return null
+    const begin = Math.floor(-first / period) - 1, end = Math.ceil((1 - first) / period) + 1
+    for (let repeat = begin; repeat <= end; repeat++) {
+      for (const stop of stops) {
+        const offset = stop.offset + repeat * period
+        if (offset >= 0 && offset <= 1) add(stop.color, offset)
+      }
+    }
+  } else for (const stop of stops) add(stop.color, Math.max(0, Math.min(1, stop.offset)))
   return gradient
 }
 

@@ -1,3 +1,6 @@
+import { controllerMetadata } from '../fixtures/teacherController'
+import type { LayerItem } from '../../src/shared/courseProjectTypes'
+import { createControllerFixture } from '../fixtures/teacherController'
 import { describe, expect, it } from 'vitest'
 import { makeAuthoringAddress } from '@/shared/authoringAddress'
 import {
@@ -11,7 +14,6 @@ import {
   type NativeLayerItem,
   type ScopedLayerItem,
 } from '@/shared/courseProjectTypes'
-import { createTeacherControllerNode } from '@/renderer/project/nativeNodeFactories'
 import {
   commandTargetFromRow,
   courseAuthoringScopeFromLocation,
@@ -84,18 +86,15 @@ function nativeText(
 }
 
 function scoped(
-  item: NativeLayerItem,
+  item: LayerItem,
   visibility: ScopedLayerItem['visibility'] = { mode: 'all', locationIds: [] },
 ): ScopedLayerItem {
   return { item, visibility }
 }
 
 function v9ProjectionFixture(): CourseProjectDocument {
-  const controller = sceneNodeToCourseLayerItem(
-    createTeacherControllerNode({ id: 'teacher-controller', name: '教师控制器' }),
-    110,
-  )
-  if (controller.kind !== 'native') throw new Error('expected native controller')
+  const controller = createControllerFixture({ id: 'teacher-controller', name: '教师控制器' }, 110)
+  if (controller.kind !== 'component') throw new Error('expected native controller')
   return courseProjectDocumentSchema.parse({
     schemaVersion: COURSE_PROJECT_SCHEMA_VERSION,
     id: 'r3d-effective-layers',
@@ -104,7 +103,7 @@ function v9ProjectionFixture(): CourseProjectDocument {
     createdAt: NOW,
     updatedAt: NOW,
     assets: {},
-    componentPackages: {},
+    componentPackages: { ...controllerMetadata,},
     designTokens: {
       fonts: [{
         id: 'body',
@@ -135,7 +134,7 @@ function v9ProjectionFixture(): CourseProjectDocument {
     globalLayerItems: [
       { ...scoped(nativeText('global-banner', 100, '全局条')), plane: 'underlay' },
       {
-        ...scoped(controller as NativeLayerItem, {
+        ...scoped(controller, {
           mode: 'exclude',
           locationIds: ['location-scene-2'],
         }),

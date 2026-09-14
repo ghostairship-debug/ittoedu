@@ -1,3 +1,4 @@
+import { isTeacherController } from '../../shared/teacherControllerRole'
 import { commitResourceAwareAuthoringHistory } from '../authoring/resourceAwareAuthoringHistory'
 import { nanoid } from 'nanoid'
 import { CANVAS_HEIGHT, CANVAS_WIDTH, MAX_SCENE_NODES } from '../../shared/constants'
@@ -530,9 +531,7 @@ function requireUnlockedOwnedLayer(
   if (layer.item.locked) {
     throw new SlideCommandError(SLIDE_REJECT_LOCKED, '当前元素已锁定')
   }
-  if (layer.item.kind === 'native' && layer.item.content.nativeType === 'teacher-controller') {
-    throw new SlideCommandError(SLIDE_REJECT_WRONG_OWNER, '教师控制器不由本命令编辑')
-  }
+  
   return layer
 }
 
@@ -1180,9 +1179,7 @@ export function updateSlideNativeLayerContent(
     if (layer.item.kind !== 'native') {
       throw new SlideCommandError('invalid-target', '当前选择不是原生图层')
     }
-    if (layer.item.content.nativeType === 'teacher-controller') {
-      throw new SlideCommandError(SLIDE_REJECT_WRONG_OWNER, '教师控制器不由本命令编辑')
-    }
+    
     const target = makeSlideAuthoringTarget(session, layerItemId, 'item')
     return slideResultFromLayerCommand(
       session,
@@ -1837,7 +1834,8 @@ export function patchSlideLayerPropertiesAtTarget(
   if (
     target.sessionId !== session.sessionId
     || target.generation !== session.generation
-    || target.scope !== session.scope
+    || (target.scope !== session.scope && !(session.scope === 'scene' && target.scope === 'global'
+      && isTeacherController(session.history.present.globalLayerItems.find(entry => entry.item.layerItemId === target.layerItemId)?.item)))
     || session.selection.selectionIds.length !== 1
     || session.selection.selectionIds[0] !== target.layerItemId
   ) {

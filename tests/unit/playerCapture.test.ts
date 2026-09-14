@@ -1,3 +1,4 @@
+import { buildPublishedFixture as buildPublishedCourseV2Payload } from '../fixtures/teacherController'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import * as publishedDynamicHosts from '../../src/player/surfaces/publishedDynamicHosts'
 import {
@@ -6,7 +7,7 @@ import {
   PUBLISHED_COURSE_V2_SEAM_LEGACY_ERROR,
   waitForPublishedCourseCaptureReady,
 } from '../../src/renderer/export/playerCapture'
-import { buildPublishedCourseV2Payload } from '../../src/renderer/export/course/buildPublishedCourse'
+
 import { createBlankCourseProject } from '../../src/renderer/project/createCourseProject'
 import { createBlankSpatialCourseProject } from '../../src/renderer/project/createSpatialCourseProject'
 

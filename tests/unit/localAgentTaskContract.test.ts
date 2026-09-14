@@ -18,6 +18,19 @@ function fixture() {
 }
 
 describe('local AI task identity and canonical commit fence', () => {
+  it('keeps historical text unclassified and validates persisted user message ownership and strict fields', () => {
+    const f = fixture(), base = { version: 2, taskId: f.task.taskId, epoch: f.task.epoch, workspace: f.task.workspace,
+      sessionId: f.task.sessionId, runId: randomUUID(), nativeTurnId: null, sequence: 1, time: 1 }
+    const text = localAgentEventV2Schema.parse({ ...base, kind: 'text', itemId: 'legacy-text', operation: 'append', text: '旧记录' })
+    expect(text).not.toHaveProperty('phase')
+    expect(localAgentEventV2Schema.safeParse({ ...text, phase: 'invented-private-reasoning' }).success).toBe(false)
+    const message = localAgentEventV2Schema.parse({ ...base, kind: 'user-message', itemId: 'input-id', purpose: 'supplement', text: '保留背景' })
+    const record = { version: 2, id: f.task.sessionId, adapter: 'codex', workspace: f.task.workspace, externalSessionId: null,
+      workingDirectoryId: f.task.sessionId, tasks: [f.task], observations: [f.observation], hostResults: [], events: [message] }
+    expect(localAgentRecordV2Schema.safeParse(record).success).toBe(true)
+    expect(localAgentRecordV2Schema.safeParse({ ...record, events: [{ ...message, taskId: randomUUID() }] }).success).toBe(false)
+    expect(localAgentEventV2Schema.safeParse({ ...message, rawStore: {} }).success).toBe(false)
+  })
   it('preserves canonical nulls and accepts the exact authorized candidate', () => {
     const f = fixture()
     expect(() => assertAiProposalCurrent(f.task, f.observation, f.request, f.proposal)).not.toThrow()

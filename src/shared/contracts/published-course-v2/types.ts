@@ -68,6 +68,7 @@ export interface PublishedNativeLayerItem extends PublishedLayerItemBase {
 
 export interface PublishedComponentLayerItem extends PublishedLayerItemBase {
   kind: 'component'
+  role?: 'teacher-controller'
   component: { packageId: string; version: string }
   props: Record<string, unknown>
   staticFallbackAssetId?: string
@@ -165,7 +166,7 @@ export interface PublishedFlowSurface extends PublishedSurfaceBase {
   backgroundMode?: BackgroundMode
   backgroundColor?: string
   backgroundAssetId?: string | null
-  layout: { readingWidth: number; wideContentWidth: number }
+  layout: { widthMode?: 'fluid' | 'reading'; readingWidth: number; wideContentWidth: number }
   blocks: FlowBlock[]
 }
 

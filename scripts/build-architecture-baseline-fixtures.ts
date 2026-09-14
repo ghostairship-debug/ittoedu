@@ -1,3 +1,4 @@
+import { controllerPackage, controllerMetadata } from '../tests/fixtures/teacherController'
 import { createHash } from 'node:crypto'
 import {
   existsSync,
@@ -318,7 +319,7 @@ function nativeShape(
   }
 }
 
-function teacherController(layerItemId: string, order: number): NativeLayerItem {
+function teacherController(layerItemId: string, order: number): ComponentLayerItem {
   return {
     ...layerBase(layerItemId, order, {
       mode: 'absolute',
@@ -328,10 +329,8 @@ function teacherController(layerItemId: string, order: number): NativeLayerItem 
       height: 64,
     }),
     label: '教师控制器',
-    kind: 'native',
-    content: {
-      nativeType: 'teacher-controller',
-      data: {
+    kind: 'component',
+    role: 'teacher-controller', component: { packageId: controllerPackage.manifest.id, version: controllerPackage.manifest.version }, props: {
         title: '教师控制台',
         showSceneProgress: true,
         compact: false,
@@ -354,7 +353,6 @@ function teacherController(layerItemId: string, order: number): NativeLayerItem 
         },
         includeInStaticExports: false,
       },
-    },
   }
 }
 
@@ -662,7 +660,7 @@ function slideHeavyArchive(): CourseProjectArchiveData {
         [componentFallback]: imageAsset(componentFallback),
         [runtimeFallback]: imageAsset(runtimeFallback),
       },
-      componentPackages: { [COMPONENT_ID]: component.metadata },
+      componentPackages: { ...controllerMetadata, [COMPONENT_ID]: component.metadata },
       media: {
         audio: {
           defaultMuted: false,
@@ -842,7 +840,7 @@ function slideHeavyArchive(): CourseProjectArchiveData {
       [componentFallback]: PNG_BYTES,
       [runtimeFallback]: PNG_BYTES,
     },
-    componentFiles: { [component.componentFilesKey]: component.files },
+    componentFiles: { [controllerPackage.manifest.id]: controllerPackage.files, [component.componentFilesKey]: component.files },
   }
 }
 
@@ -1065,7 +1063,7 @@ function mixedSpatialArchive(): CourseProjectArchiveData {
         [componentFallback]: imageAsset(componentFallback),
         [runtimeFallback]: imageAsset(runtimeFallback),
       },
-      componentPackages: { [COMPONENT_ID]: component.metadata },
+      componentPackages: { ...controllerMetadata, [COMPONENT_ID]: component.metadata },
       playback: {
         controls: 'canvas',
         keyboardNavigation: true,
@@ -1244,7 +1242,7 @@ function mixedSpatialArchive(): CourseProjectArchiveData {
       [componentFallback]: PNG_BYTES,
       [runtimeFallback]: PNG_BYTES,
     },
-    componentFiles: { [component.componentFilesKey]: component.files },
+    componentFiles: { [controllerPackage.manifest.id]: controllerPackage.files, [component.componentFilesKey]: component.files },
   }
 }
 

@@ -1,3 +1,6 @@
+import { controllerPackages } from '../fixtures/teacherController'
+import { controllerMetadata } from '../fixtures/teacherController'
+import { createControllerFixture } from '../fixtures/teacherController'
 import { describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { locateCourseLayer } from '@/renderer/course/effectiveLayerCommands'
@@ -12,7 +15,7 @@ import {
 import { sceneNodeToCourseLayerItem } from '@/shared/courseProjectModel'
 import type { ComponentManifest } from '@/shared/componentTypes'
 import {
-  createTeacherControllerNode,
+  
   createTextNode,
 } from '@/renderer/project/nativeNodeFactories'
 import { syncFlowCourseLocations } from '@/renderer/course/flowDocumentModel'
@@ -154,7 +157,7 @@ function courseShell(): Omit<CourseProjectDocument, 'locations' | 'startLocation
         height: 80,
       },
     },
-    componentPackages: {
+    componentPackages: { ...controllerMetadata,
       'com.example.flow': {
         packageId: 'com.example.flow',
         version: '1.0.0',
@@ -192,9 +195,9 @@ function courseShell(): Omit<CourseProjectDocument, 'locations' | 'startLocation
     courseState: [],
     navigationGuards: [],
     globalLayerItems: [{
-      item: sceneNodeToCourseLayerItem(createTeacherControllerNode({
+      item: createControllerFixture({
         id: 'teacher-controller-main',
-      }), 90),
+      }, 90),
       visibility: { mode: 'all', locationIds: [] },
     }],
     globalInteractions: [],
@@ -320,7 +323,7 @@ function componentConversionFixture(withFallback: boolean) {
     target: { kind: 'overlay', layerItemId: 'overlay-conversion-target' },
   })
   const resources: HistoryResourceState = {
-    componentPackages: {},
+    componentPackages: { ...controllerPackages },
     assetFiles: withFallback ? { 'asset-fallback': ONE_PIXEL_PNG } : {},
   }
   return { project, target, resources }

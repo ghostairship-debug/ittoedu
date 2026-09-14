@@ -1,3 +1,5 @@
+import { canEditLayerInScope } from '../../shared/teacherControllerRole'
+import { controllerDisplayFrame } from '../authoring/controllerDisplayBounds'
 import type { LayerItem } from '../../shared/courseProjectTypes'
 import { MIN_NODE_SIZE } from '../../shared/constants'
 import type { NativeLineGeometry } from '../../shared/contracts/native-v1/types'
@@ -164,7 +166,7 @@ function layerTargets(backend: SlideAuthoringBackend): V9SlideHitTarget[] {
     stateId: session.selection.stateId,
   })
   return view.layers.flatMap((layer) => {
-    if (layer.source !== session.scope) return []
+    if (!canEditLayerInScope(layer, session.scope)) return []
     return [adaptV9SlideLayerItemHit(
       layer.item as LayerItem,
       layer.effectiveVisible,
@@ -182,8 +184,8 @@ function nativeFrames(backend: SlideAuthoringBackend): Map<string, SlideEditorNo
   })
   const frames = new Map<string, SlideEditorNodeTransform>()
   for (const layer of view.layers) {
-    if (layer.source !== session.scope) continue
-    if (layer.item.kind === 'native' && layer.item.content.nativeType === 'teacher-controller') continue
+    if (!canEditLayerInScope(layer, session.scope)) continue
+
     if (
       layer.item.kind !== 'native' &&
       layer.item.kind !== 'component' &&
@@ -234,13 +236,8 @@ function overlayForSelection(
   const items = session.selection.selectionIds.flatMap((id) => {
     const previewNode = previewById.get(id)
     if (previewNode) {
-      return [{
-        x: previewNode.x,
-        y: previewNode.y,
-        width: previewNode.width,
-        height: previewNode.height,
-        rotation: previewNode.rotation,
-      }]
+      const item = session.history.present.globalLayerItems.find(entry => entry.item.layerItemId === id)?.item
+      return [{ ...(item ? controllerDisplayFrame(item, previewNode) : previewNode), rotation: previewNode.rotation }]
     }
     const hit = hits.get(id)
     if (!hit) return []

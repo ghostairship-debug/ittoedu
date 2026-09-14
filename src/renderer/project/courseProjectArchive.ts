@@ -328,6 +328,11 @@ function addArchiveFile(
   foldedPaths.add(folded)
 }
 
+/** Shared save/CLI-result closure validation without serializing another archive. */
+export function validateCourseProjectArchiveData(data: CourseProjectArchiveData): void {
+  createCourseProjectArchiveFiles(data)
+}
+
 function createCourseProjectArchiveFiles(
   data: CourseProjectArchiveData,
 ): Record<string, Uint8Array> {

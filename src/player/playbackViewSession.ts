@@ -1,4 +1,4 @@
-import { PLAYBACK_VIEW_CHROME_GUTTER } from '../shared/playbackViewGeometry'
+import { PLAYBACK_VIEW_CHROME_GUTTER, PLAYBACK_VIEW_OVERFLOW_EPSILON, PLAYBACK_VIEW_MAX_ZOOM, playbackControllerInsets, type PlaybackChromeGeometry } from '../shared/playbackViewGeometry'
 
 /** Session-only observation of already laid out content. No navigation or document writes. */
 export interface ViewPoint { x: number; y: number }
@@ -9,6 +9,7 @@ export interface PlaybackViewState {
   viewport: { width: number; height: number }
   bounds: ViewBounds
   generation: number
+  chromeInsets?: { right: number; bottom: number }
 }
 export interface PlaybackViewHost {
   id: string
@@ -19,23 +20,27 @@ export interface PlaybackViewHost {
 }
 export interface PlaybackViewPort {
   readonly state: PlaybackViewState
+  readonly chrome?: PlaybackChromeGeometry
   subscribe(listener: () => void): () => void
   zoomTo(zoom: number, anchor?: ViewPoint): void
   panTo(pan: ViewPoint): void
   reset(): void
   openZoomPanel(button: HTMLButtonElement): void
+  closeZoomPanel(button: HTMLButtonElement): void
 }
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value))
 export function playbackPanRange(state: PlaybackViewState) {
-  const axis = (origin: number, size: number, viewport: number) => ({
-    min: Math.min(0, viewport - (origin + size) * state.zoom),
-    max: Math.max(0, -origin * state.zoom),
-  })
-  return { x: axis(state.bounds.x, state.bounds.width, state.viewport.width),
-    y: axis(state.bounds.y, state.bounds.height, state.viewport.height) }
+  const axis = (origin: number, size: number, viewport: number, inset = 0) => {
+    const min = Math.min(0, viewport - (origin + size) * state.zoom)
+    const max = Math.max(0, -origin * state.zoom)
+    return max - min <= PLAYBACK_VIEW_OVERFLOW_EPSILON ? { min: 0, max: 0 }
+      : { min: Math.min(0, viewport - inset - (origin + size) * state.zoom), max }
+  }
+  return { x: axis(state.bounds.x, state.bounds.width, state.viewport.width, state.chromeInsets?.right),
+    y: axis(state.bounds.y, state.bounds.height, state.viewport.height, state.chromeInsets?.bottom) }
 }
 export function playbackZoomAt(state: PlaybackViewState, value: number, anchor: ViewPoint): PlaybackViewState {
-  const zoom = clamp(value, .25, 4)
+  const zoom = clamp(value, .25, PLAYBACK_VIEW_MAX_ZOOM)
   const ratio = zoom / state.zoom
   const next = { ...state, zoom, generation: state.generation + 1,
     pan: { x: anchor.x - (anchor.x - state.pan.x) * ratio,
@@ -48,7 +53,7 @@ const occupiedSelector = [
   'iframe', 'input', 'textarea', 'select', 'button', 'a[href]', 'video', 'audio', 'summary',
   '[role="button"]', '[role="link"]', '[role="textbox"]', '[role="slider"]', '[role="combobox"]',
   '[contenteditable]:not([contenteditable="false"])', '[data-playback-chrome]',
-  '.slide-native-teacher-controller', '[data-spatial-gesture-owner]',
+  '[data-spatial-gesture-owner]',
   '[data-layer-kind="runtime"]', '[data-layer-kind="component"]',
   '[data-kind="runtime"]', '[data-kind="component"]',
   '.flow-block-component', '[data-flow-interactive]', '[data-runtime-instance-id]',
@@ -80,7 +85,9 @@ export class PlaybackViewSession implements PlaybackViewPort {
   #panel: HTMLElement | null = null
   #panelButton: HTMLButtonElement | null = null
   #anchor: ViewPoint | undefined
+  #chrome: PlaybackChromeGeometry = { x: false, y: false, native: { right: 0, bottom: 0 }, insets: { right: 0, bottom: 0 }, controllerInsets: playbackControllerInsets({ right: 0, bottom: 0 }) }
   get state(): PlaybackViewState { return structuredClone(this.#state) }
+  get chrome(): PlaybackChromeGeometry { return structuredClone(this.#chrome) }
   subscribe(listener: () => void): () => void { this.#listeners.add(listener); return () => this.#listeners.delete(listener) }
   register(host: PlaybackViewHost): void {
     const previous = this.#hosts.get(host.id)
@@ -106,7 +113,7 @@ export class PlaybackViewSession implements PlaybackViewPort {
     viewport.dataset.playbackViewport = 'true'
     viewport.tabIndex = 0
     viewport.setAttribute('aria-label', '课件播放视口')
-    Object.assign(viewport.style, { position: 'absolute', top: '0', left: '0', right: `${PLAYBACK_VIEW_CHROME_GUTTER}px`, bottom: `${PLAYBACK_VIEW_CHROME_GUTTER}px`, overflow: 'clip' })
+    Object.assign(viewport.style, { position: 'absolute', inset: '0', overflow: 'clip' })
     frame.appendChild(viewport)
     container.appendChild(frame)
     this.#frame = frame
@@ -119,6 +126,15 @@ export class PlaybackViewSession implements PlaybackViewPort {
     }
     this.resize()
     return viewport
+  }
+  /** Fullscreen the viewport, retaining the stage fit and observation layers. */
+  async toggleFullscreen(): Promise<boolean> {
+    const frame = this.#frame
+    if (!frame) return false
+    const dom = frame.ownerDocument
+    if (dom.fullscreenElement) await dom.exitFullscreen?.()
+    else await frame.requestFullscreen?.()
+    return true
   }
   resize(): void {
     this.#closePanel(true)
@@ -177,6 +193,9 @@ export class PlaybackViewSession implements PlaybackViewPort {
     this.#paint()
   }
   #paint(): void {
+    this.#deriveChrome()
+    const range = playbackPanRange(this.#state)
+    this.#state.pan = { x: clamp(this.#state.pan.x, range.x.min, range.x.max), y: clamp(this.#state.pan.y, range.y.min, range.y.max) }
     const state = this.#state
     for (const host of this.#hosts.values()) {
       const scale = Number(host.root.dataset.stageFitScale) || 1
@@ -184,9 +203,30 @@ export class PlaybackViewSession implements PlaybackViewPort {
       const top = parseFloat(host.root.style.top) || 0
       // Base root fit remains fixed, so controller siblings never inherit observation.
       host.content.style.transform = `translate(${(state.pan.x + (state.zoom - 1) * left) / scale}px, ${(state.pan.y + (state.zoom - 1) * top) / scale}px) scale(${state.zoom})`
-      host.onObservationChange?.()
     }
+    for (const host of this.#hosts.values()) host.onObservationChange?.()
     for (const listener of this.#listeners) listener()
+  }
+  #deriveChrome(): void {
+    const range = playbackPanRange({ ...this.#state, chromeInsets: undefined })
+    const x = range.x.max > range.x.min, y = range.y.max > range.y.min
+    const native = { right: 0, bottom: 0 }
+    const host = this.#active ? this.#hosts.get(this.#active) : undefined
+    const scroll = host?.kind === 'flow' ? host.content.querySelector<HTMLElement>('[data-flow-paper-scroll]') : null
+    if (scroll) {
+      // Use layout scrollbar thickness, independent of pan. Otherwise reaching
+      // an edge changes its exclusion strip and makes the pan endpoint oscillate.
+      native.right = Math.max(0, scroll.offsetWidth - scroll.clientWidth) * this.#state.zoom
+      native.bottom = Math.max(0, scroll.offsetHeight - scroll.clientHeight) * this.#state.zoom
+    }
+    this.#chrome = { x, y, native, controllerInsets: playbackControllerInsets({
+      right: scroll ? Math.max(0, scroll.offsetWidth - scroll.clientWidth) : 0,
+      bottom: scroll ? Math.max(0, scroll.offsetHeight - scroll.clientHeight) : 0,
+    }), insets: {
+      right: native.right + (y ? PLAYBACK_VIEW_CHROME_GUTTER : 0),
+      bottom: native.bottom + (x ? PLAYBACK_VIEW_CHROME_GUTTER : 0),
+    } }
+    this.#state.chromeInsets = this.#chrome.insets
   }
   openZoomPanel(button: HTMLButtonElement): void {
     if (this.#panelButton === button) { this.#closePanel(true); return }
@@ -210,19 +250,25 @@ export class PlaybackViewSession implements PlaybackViewPort {
     }
     const percent = dom.createElement('output')
     Object.assign(percent.style, { alignSelf: 'center', minWidth: '44px', textAlign: 'center' })
-    const update = () => { percent.textContent = `${Math.round(this.#state.zoom * 100)}%` }
+    const update = () => {
+      percent.textContent = `${Math.round(this.#state.zoom * 100)}%`
+      const frameRect = this.#frame!.getBoundingClientRect(), buttonRect = button.getBoundingClientRect()
+      panel.style.left = `${clamp(buttonRect.left - frameRect.left, 4, Math.max(4, this.#state.viewport.width - this.#chrome.insets.right - (panel.offsetWidth || 310) - 4))}px`
+      panel.style.top = `${clamp(buttonRect.bottom - frameRect.top + 6, 4, Math.max(4, this.#state.viewport.height - this.#chrome.insets.bottom - (panel.offsetHeight || 54) - 4))}px`
+    }
     update()
     const unsubscribe = this.subscribe(update)
     panel.append(make('缩小', () => this.zoomTo(this.#state.zoom - .25, anchor)), percent,
       make('放大', () => this.zoomTo(this.#state.zoom + .25, anchor)), make('恢复视图', () => this.reset()), make('关闭', () => this.#closePanel(true)))
     panel.addEventListener('keydown', event => { if (event.key === 'Escape') { event.preventDefault(); this.#closePanel(true) } })
     this.#frame.appendChild(panel)
-    const frameRect = this.#frame.getBoundingClientRect(), buttonRect = button.getBoundingClientRect()
-    panel.style.left = `${clamp(buttonRect.left - frameRect.left, 4, Math.max(4, this.#state.viewport.width - (panel.offsetWidth || 310)))}px`
-    panel.style.top = `${clamp(buttonRect.bottom - frameRect.top + 6, 4, Math.max(4, this.#state.viewport.height - (panel.offsetHeight || 54)))}px`
+    update()
     this.#panel = panel
     panel.addEventListener('playback-panel-close', unsubscribe, { once: true })
     panel.querySelector('button')?.focus({ preventScroll: true })
+  }
+  closeZoomPanel(button: HTMLButtonElement): void {
+    if (this.#panelButton === button) this.#closePanel(true)
   }
   #closePanel(focus: boolean): void {
     if (this.#panel) this.#panel.dispatchEvent(new Event('playback-panel-close'))
@@ -253,8 +299,22 @@ export class PlaybackViewSession implements PlaybackViewPort {
     }
     const update = () => {
       if (drag && drag.generation !== this.#state.generation) stop()
+      const enabled = this.#chrome[axis]
+      if (!enabled) {
+        stop()
+        if (bar.contains(dom.activeElement)) this.#viewport?.focus({ preventScroll: true })
+      }
+      bar.hidden = !enabled
+      bar.tabIndex = enabled ? 0 : -1
+      bar.setAttribute('aria-hidden', String(!enabled))
+      if (axis === 'x') {
+        bar.style.bottom = `${this.#chrome.native.bottom}px`
+        bar.style.right = `${this.#chrome.insets.right}px`
+      } else {
+        bar.style.right = `${this.#chrome.native.right}px`
+        bar.style.bottom = `${this.#chrome.insets.bottom}px`
+      }
       const { min, max, size, travel } = metrics()
-      const enabled = max > min
       bar.setAttribute('aria-disabled', String(!enabled)); bar.setAttribute('aria-valuemin', '0'); bar.setAttribute('aria-valuemax', String(max - min)); bar.setAttribute('aria-valuenow', String(max - this.#state.pan[axis]))
       thumb.style.opacity = enabled ? '1' : '.25'
       thumb.style[axis === 'x' ? 'width' : 'height'] = `${size}px`
@@ -273,7 +333,7 @@ export class PlaybackViewSession implements PlaybackViewPort {
       drag = { id: event.pointerId, start: client, pan: this.#state.pan[axis], ...m, generation: this.#state.generation }
       try { bar.setPointerCapture(event.pointerId) } catch { /* synthetic events */ }
       shield = dom.createElement('div')
-      Object.assign(shield.style, { position: 'absolute', inset: `0 ${PLAYBACK_VIEW_CHROME_GUTTER}px ${PLAYBACK_VIEW_CHROME_GUTTER}px 0`, zIndex: '2147483645', cursor: axis === 'x' ? 'ew-resize' : 'ns-resize' })
+      Object.assign(shield.style, { position: 'absolute', inset: '0', zIndex: '2147483645', cursor: axis === 'x' ? 'ew-resize' : 'ns-resize' })
       frame.appendChild(shield)
     }
     const move = (event: PointerEvent) => {

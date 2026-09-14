@@ -95,6 +95,18 @@ IttoEdu 是受控团队使用的内部生产工具。默认工程、Runtime、Co
 
 ### 5.1 当前阶段：关闭1.8已核实编辑缺口，再贯通创作至2.0
 
+2026-09-14 产品方向与工程候选专题：[教师控制台组件化与课件内深度定制方案](docs/development-plan/TEACHER_CONTROLLER_COMPONENT_PLAN.md)。默认控制台以内置组件形式嵌入工程，源码与素材随课件保存，支持纹理图片、透明分散控件及背景融合；宿主保持唯一导航和观察状态。role 合同及三 Surface/源码/导出路径已实现。2026-09-15 Owner 明确暂无生产兼容要求，删除原生控制台与转换路径，默认工厂直接创建组件，属性页统一管理组件设置。独立定位与源码事务验证通过；真实 Luna 经反馈修复已完成自动提交、保存重开、纸纹及目录布局验证，教师美术验收未完成，详见专题实施记录。复杂视觉/局部互动优先组件，原生按高频直接编辑收益补强；本专题不自动启动全部原生改造。
+
+2026-09-14 机制实施：常规操作完整输入、候选依赖组合、同源能力条件、候选预检与恢复/结果检查，以及 Codex 原生快速模式已落地当前纵切，详见[实施方案第 9 节](docs/development-plan/AI_AUTHORING_MECHANISM_IMPLEMENTATION_PLAN.md#9-2026-09-14-开发批次与新增快速模式)及[实测记录](docs/development-plan/reviews/2026-09-14-authoring-mechanism-implementation.md)。三家 CLI 的自然跨页图形任务首次候选均经原生操作完成并保存重开；早期失败与文件路线样本保留。B2–B4 完整布局/数据/互动/批量仍归 1.9，原生 CLI 与唯一事务不变，Owner 验收独立。
+
+2026-09-14：根据 OpenCode/Claude 真实任务复核及 Owner 明确决定，[开放修改与 CLI 文件兜底增补](docs/development-plan/R18_USER_EXPERIENCE_REPAIR_PLAN.md)已完成实现与聚焦工程验证：选择仅为输入焦点，快捷工具之外的实际 V9 文件结果经正式入口纳入唯一事务；已修复无候选早停、任务输入权限、系统代理与真实工具进度。原生 OpenCode 拒绝后文件兜底、Claude 跨页独立图形/保存重开已有真实证据；[修复记录](docs/development-plan/reviews/2026-09-14-native-editing-repair.md)区分首次错误、续跑成功与剩余原生延迟。旧证据按原范围保留，未宣称速度全解或 Owner S3。
+
+2026-09-12：按Owner授权的[1.8真实使用修复方案](docs/development-plan/R18_USER_EXPERIENCE_REPAIR_PLAN.md)，背景与原生失败恢复、Flow失焦/版式、完整可读聊天及已核实高频入口已完成本轮工程开发与验证，见[集成记录](docs/development-plan/reviews/2026-09-12-r18-user-experience-integration.md)。当前为engineering candidate，等待Owner S3；此前B0/B1证据按原范围保留，原生CLI、单一工程事务及1.9归属保持。
+
+2026-09-12：按[常规任务三层方案](docs/development-plan/AI_COMMON_TASK_EXECUTION_PLAN.md)完成本轮1.8 B0/B1工程实现和受影响真实验证：精确场景导航、默认选区与冻结目标、跨页后台事务/草稿/Stop、文字公式窄编辑、图片准备/语义应用及输入计时。原课件Luna/medium换图与已有图片连续编辑均有真实保存恢复证据，首轮缺陷和后修复分别记录于[B0/B1验收记录](docs/development-plan/reviews/2026-09-12-r18-b01-integration.md)。60项定义冻结但未计分；B2–B4归1.9，Owner S3、历史未验边界与正式版本标签独立保留。
+
+2026-09-11晚间Owner真实使用仍出现Luna换图失败、slide-heavy三场景仅显示两项及默认编辑范围问题。根据后续产品讨论形成[常规任务三层执行与修改方案](docs/development-plan/AI_COMMON_TASK_EXECUTION_PLAN.md)：B0/B1关闭当前导航、目标、异步和常规应用阻断；B2–B4分批补齐常见第二层，以固定代表集及后续真实使用分别验证前两层覆盖80%以上。当前仅生成方案，尚未执行新批次；既有底座和有效证据复用，普通换图与整体速度不能凭下午Astra简化夹具通过宣称完成。
+
 2026-09-10 Owner授权的[延迟修复与工程收尾方案](docs/development-plan/roadmap/1.8/LATENCY_COMPLETION_PLAN.md)已实施路径、计时、实际按钮反馈及会话文件临时占用修复；OpenCode本机默认为OpenAI OAuth Luna。文字、图片、排版、互动、普通T11及确定性边界已有本轮通过，旧有效证据和完整PPTX复核副本已汇合。Owner随后临时改接DeepSeek，Claude Code文字预览/应用/恢复已补验通过，解除此前通道阻断；[最终工程验收](docs/development-plan/reviews/2026-09-10-final-acceptance.md)已完成约定范围和实际失败修复，同候选E2E原范围100通过、24条件跳过，新增恢复／隔离2项通过；版本检查通过。Owner S3及报告所列未验边界仍独立，未发布。[实施记录](docs/development-plan/reviews/2026-09-10-latency-completion.md)分列新旧配置、失败和耗时，不能宣称1.8完成或整体提速。
 
 2026-09-07 Owner实际使用证实图片不可见/改色未闭环、选区替换受阻、候选与模型/模式/反馈缺口、Flow控制器不可达。S3存在实质可用性阻断，不是仅等待签署。Owner要求助手至少达到VS Code Codex/Claude Code插件相应工作流体验，并实时理解当前课件；外部Build Skill同步按需发现/读取。

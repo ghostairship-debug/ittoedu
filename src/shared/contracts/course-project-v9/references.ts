@@ -121,12 +121,6 @@ function addLayerReferences(
     if (item.content.data.poster.assetId) {
       emit({ kind: 'asset', id: item.content.data.poster.assetId, path: [...path, 'content', 'data', 'poster', 'assetId'] })
     }
-  } else if (item.content.nativeType === 'teacher-controller') {
-    item.content.data.buttons.forEach((button, index) => {
-      if (button.action.type === 'scene.go') {
-        emit({ kind: 'scene', id: button.action.sceneId, path: [...path, 'content', 'data', 'buttons', index, 'action', 'sceneId'] })
-      }
-    })
   }
 }
 

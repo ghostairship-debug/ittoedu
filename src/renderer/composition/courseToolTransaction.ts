@@ -1,7 +1,7 @@
 import { readAuthoringToolSelection } from '../../shared/authoringToolContract'
 import type { EditorTransactionStep } from '../authoring/editorTransaction'
 import { authoringLegacyHistoryEntryCount, commitEditorTransactionToAuthoringHistory, type ResourceAwareAuthoringHistory } from '../authoring/resourceAwareAuthoringHistory'
-import { buildCourseAuthoringSessionForProject, updateCourseAuthoringSessionItems, type CourseAuthoringSession } from '../authoring/courseAuthoringSession'
+import { buildCourseAuthoringSessionForProject, updateCourseAuthoringSessionItems, updateCourseAuthoringSessionRevision, type CourseAuthoringSession } from '../authoring/courseAuthoringSession'
 import { selectSlideToolResult, selectFlowToolResult, selectSpatialToolResult } from '../authoring/toolSelection'
 import { createSlideAuthoringBackend, openSlideAuthoringSession } from '../course/slideAuthoringBackend'
 import { selectFlowEditorBlock } from '../course/flowEditorSlice'
@@ -19,7 +19,24 @@ export function persistCrossSurfaceToolTransaction(step: EditorTransactionStep, 
   readHistory(): ResourceAwareAuthoringHistory | null
   readResources(): CourseResourceState
   write(patch: Record<string, unknown>): void
+  preserveBrowsing?: boolean
+  reprojectBrowsing?(history: ResourceAwareAuthoringHistory): Record<string, unknown> | null
 }): boolean | undefined {
+  if (ports.preserveBrowsing) {
+    const history = ports.readHistory(), session = ports.session
+    if (!history || !session || !step.nextDocument.locations.some(location => location.id === session.token.locationId)) return false
+    const nextHistory = commitEditorTransactionToAuthoringHistory(history, step)
+    const backend = ports.reprojectBrowsing?.(nextHistory)
+    if (!backend) return false
+    const resources = commitSurfaceResourcePersist(ports.readResources(), {
+      document: step.nextDocument, applyDocument: history.present, transactionStep: step,
+      historyEntry: true, legacyPastCount: authoringLegacyHistoryEntryCount(nextHistory.past),
+      legacyFutureCount: authoringLegacyHistoryEntryCount(nextHistory.future),
+    })
+    ports.write({ ...backend, ...resources, dirty: true, errorMessage: null, statusMessage,
+      courseAuthoringSession: updateCourseAuthoringSessionRevision(session, step.nextDocument.revision) })
+    return true
+  }
   const hint = readAuthoringToolSelection(step.selectionHint)
   const location = hint && step.nextDocument.locations.find(entry => entry.id === hint.locationId)
   const surface = location && step.nextDocument.surfaces.find(entry => entry.id === location.surfaceId)

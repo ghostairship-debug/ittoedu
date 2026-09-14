@@ -1,3 +1,4 @@
+import { isControllerFixture } from '../fixtures/teacherController'
 import type { Page } from 'playwright'
 
 /** Real media and Published host probe; fixtures never touch an open editor project. */
@@ -90,7 +91,7 @@ export async function runFlowReviewProbe(page: Page) {
         onTime()
       })
       const playing = !video.paused
-      const controllerItem = project.globalLayerItems.find((entry: any) => entry.item.kind === 'native' && entry.item.content.nativeType === 'teacher-controller').item
+      const controllerItem = project.globalLayerItems.find((entry: any) => isControllerFixture(entry.item)).item
       const muteId = controllerItem.content.data.buttons.find((button: any) => button.action.type === 'audio.toggle-mute').id
       root.querySelector<HTMLElement>('.flow-surface-host [aria-label="展开教师控制器"]')?.click()
       const mute = root.querySelector<HTMLElement>(`[data-controller-button-id="${muteId}"]`)!

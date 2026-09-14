@@ -1,3 +1,5 @@
+import type { TeacherControllerAction } from '../teacherControllerConfig'
+import { readTeacherControllerConfig } from '../teacherControllerConfig'
 import {
   getComponentPropValue,
   mergeComponentProps,
@@ -12,7 +14,7 @@ import type {
   SlideSceneDocument,
 } from '../courseProjectTypes'
 import type { AssetKind } from '../contracts/media-v1'
-import type { TeacherControllerAction } from '../contracts/native-v1'
+
 import {
   hasCourseDeliveryVisibleTeacherController,
 } from '../teacherControllerConsistency'
@@ -229,10 +231,15 @@ function addControllerChecks(
   item: LayerItem,
   path: Array<string | number>,
   surfaceId: string | undefined,
-  dataPath: Array<string | number> = [...path, 'content', 'data'],
+  dataPath: Array<string | number> = [...path, 'props'],
 ): void {
-  if (item.kind !== 'native' || item.content.nativeType !== 'teacher-controller') return
-  item.content.data.buttons.forEach((button, index) => {
+  if (item.kind !== 'component' || item.role !== 'teacher-controller') return
+  const buttons = readTeacherControllerConfig(item.props).buttons
+  if (new Set(buttons.map(button => button.id)).size !== buttons.length) drafts.push({
+    severity: 'warning', code: 'controller-button-id-duplicate', message: '控制台按钮的标识重复，请检查按钮配置。',
+    path: [...path, 'props', 'buttons'], layerItemId: item.layerItemId, ...(surfaceId ? { surfaceId } : {}),
+  })
+  buttons.forEach((button, index) => {
     if (button.action.type !== 'scene.go') return
     const action = button.action
     const target = mixedControllerTarget(project, action)
@@ -302,7 +309,7 @@ function presenterChecks(
     drafts.push({
       severity: 'info',
       code: 'presenter-rules-bypassed',
-      message: '翻页笔当前使用“直接切换场景”模式，presenter.command 规则不会由翻页笔触发。',
+      message: '翻页笔当前使用“上一步 / 下一步”模式，翻页笔命令规则不会由翻页笔触发。',
       path: ['playback', 'presenter', 'strategy'],
     })
   }
@@ -595,20 +602,7 @@ export function collectCourseProjectControllerMediaHealth(
         }
         if (item.kind === 'native' && override.nativeData) {
           const effective = effectiveLayerItem(item, override)
-          if (
-            effective.kind === 'native'
-            && effective.content.nativeType === 'teacher-controller'
-            && Array.isArray(override.nativeData.buttons)
-          ) {
-            addControllerChecks(
-              project,
-              drafts,
-              effective,
-              location.path,
-              surface.id,
-              [...location.path, 'nativeData'],
-            )
-          }
+          
           if (effective.kind === 'native' && effective.content.nativeType === 'image') {
             addAssetCheck(
               project,

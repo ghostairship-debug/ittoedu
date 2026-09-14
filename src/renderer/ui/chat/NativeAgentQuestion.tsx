@@ -1,9 +1,22 @@
 import { useState } from 'react'
+import { readableChatError } from './readableChatStatus'
 import type { z } from 'zod'
 import type { aiQuestionSchema } from '../../../shared/localAgentInteraction'
 import type { AiUserInput } from '../../../shared/localAgentTaskContract'
 
 type Question = z.infer<typeof aiQuestionSchema>
+export function readablePermissionTitle(title: string): string {
+  for (const line of title.split('\n')) {
+    try {
+      const input = JSON.parse(line)
+      const file = input.filepath ?? input.filePath ?? input.path
+      if (typeof file === 'string') return `CLI 需要访问此文件：${file}`
+      if (typeof input.command === 'string') return `CLI 需要执行此命令：${input.command}`
+    } catch { /* Native titles are normally plain text. */ }
+  }
+  return title
+}
+const permissionOption = (option: string) => ({ 'Allow once': '仅允许这次', 'Always allow': '按原生规则持续允许', Reject: '拒绝', Allow: '允许' })[option] ?? option
 export function NativeAgentQuestion({ question, onAnswer }: { question: Question; onAnswer(input: AiUserInput): Promise<void> }) {
   const [answers, setAnswers] = useState<Record<string, string[]>>({})
   const [submitting, setSubmitting] = useState(false)
@@ -18,13 +31,13 @@ export function NativeAgentQuestion({ question, onAnswer }: { question: Question
       void onAnswer({ version: 1, kind: 'answer', taskId: question.taskId, epoch: question.epoch, workspace: question.workspace,
         inputId: crypto.randomUUID(), turnId: question.turnId, questionId: question.questionId,
         answers: question.questions.map(item => ({ id: item.id, values: answers[item.id]! })) })
-        .catch(reason => setError(reason instanceof Error ? reason.message : String(reason)))
+        .catch(reason => setError(readableChatError(reason)))
         .finally(() => setSubmitting(false))
     }}>
-      {question.questions.map(item => <fieldset key={item.id} disabled={submitting}><legend>{item.title}</legend>
+      {question.questions.map(item => <fieldset key={item.id} disabled={submitting}><legend>{permission ? readablePermissionTitle(item.title) : item.title}</legend>
         {item.options.map(option => <label key={option}><input type={item.multiple ? 'checkbox' : 'radio'} name={item.id}
           checked={answers[item.id]?.includes(option) ?? false} onChange={event => setAnswers(prior => ({ ...prior,
-            [item.id]: item.multiple ? event.target.checked ? [...(prior[item.id] ?? []), option] : (prior[item.id] ?? []).filter(value => value !== option) : [option] }))} />{option}</label>)}
+            [item.id]: item.multiple ? event.target.checked ? [...(prior[item.id] ?? []), option] : (prior[item.id] ?? []).filter(value => value !== option) : [option] }))} />{permission ? permissionOption(option) : option}</label>)}
         {!permission && <label>填写回答<input aria-label={item.title + '：填写回答'} type="text" value={(answers[item.id] ?? []).filter(value => !item.options.includes(value)).join('、')}
           onChange={event => setAnswers(prior => ({ ...prior, [item.id]: event.target.value ? [event.target.value] : [] }))} /></label>}
       </fieldset>)}
@@ -33,4 +46,3 @@ export function NativeAgentQuestion({ question, onAnswer }: { question: Question
     </form>
   </section>
 }
-

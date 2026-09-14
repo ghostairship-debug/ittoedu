@@ -3,7 +3,7 @@ import {
   mergeComponentProps,
 } from '../../componentProps'
 import type { ComponentPackageData } from '../component-v4/types'
-import { directProjectAssetReferences } from '../../directProjectAssetReferences'
+import { directProjectAssetReferences, analyzeProjectAssetCalls } from '../../directProjectAssetReferences'
 import type {
   ComponentLayerItem,
   CourseProjectDocument,
@@ -265,6 +265,9 @@ export function analyzeCourseAssetReferences(
     directProjectAssetReferences(runtime.source).forEach(({ assetId, offset }) => add(
       assetId, 'runtime-source', 'direct', { ...location, path: [...location.path, 'source', offset] },
     ))
+    if (analyzeProjectAssetCalls(runtime.source).dynamic) knownAssetIds.forEach(assetId => add(
+      assetId, 'runtime-source', 'direct', { ...location, path: [...location.path, 'source'] },
+    ))
   }
 
   const scanComponent = (
@@ -361,6 +364,9 @@ export function analyzeCourseAssetReferences(
         ...location, packageId: component.packageId,
         path: ['componentPackages', packageKey, 'runtimeSource', offset],
       },
+    ))
+    if (analyzeProjectAssetCalls(data.runtimeSource).dynamic) knownAssetIds.forEach(assetId => add(
+      assetId, 'component-runtime-source', 'direct', { ...location, packageId: component.packageId, path: ['componentPackages', packageKey, 'runtimeSource'] },
     ))
   }
 

@@ -1,29 +1,15 @@
 import { describe, expect, it } from 'vitest'
 import {
   createFlowViewportGeometry,
-  flowControllerOverlayRecoveryBounds,
+  projectFlowComponentControllerFrame,
   revealFlowSelectionPan,
 } from '@/shared/flowViewportGeometry'
-import type { TeacherControllerLayoutSource } from '@/shared/teacherControllerLayout'
-
-const MIXED_GLOBAL_CONTROLLER: TeacherControllerLayoutSource = {
-  compact: false,
-  showSceneProgress: true,
-  collapsible: true,
-  buttons: [
-    { id: 'step-next', action: { type: 'step.next' }, label: '下一步', visible: true },
-    { id: 'scene-next', action: { type: 'scene.next' }, label: '下一场景', visible: true },
-  ],
-  style: {
-    backgroundColor: '#0b1720',
-    accentColor: '#d9bf73',
-    textColor: '#f3eee0',
-    backgroundOpacity: 0.92,
-    cornerRadius: 12,
-  },
-}
-
 describe('Flow responsive document geometry', () => {
+  it('fits a component frame to the usable viewport without changing authored geometry', () => {
+    const frame = { x: 190, y: 638, width: 900, height: 64 }
+    expect(projectFlowComponentControllerFrame(frame, { width: 440, height: 650 }, { right: 18, bottom: 18 })).toEqual({ x: 0, y: 568, width: 422, height: 64 })
+    expect(frame).toEqual({ x: 190, y: 638, width: 900, height: 64 })
+  })
   it('reveals right/bottom content with minimum view translation and keeps oversized content at 1:1', () => {
     const pan = revealFlowSelectionPan({ x: 1150, y: 660, width: 200, height: 100 }, { width: 600, height: 450 }, { x: 0, y: 0 })
     expect(pan).toEqual({ x: -766, y: -326 })
@@ -65,7 +51,8 @@ describe('Flow responsive document geometry', () => {
   it('projects mixed-global-controller into a 739×576 overlay without losing the recovery pill', () => {
     const viewport = { width: 739, height: 576 }
     const authored = { x: 190, y: 638, width: 900, height: 64 }
-    const bounds = flowControllerOverlayRecoveryBounds(MIXED_GLOBAL_CONTROLLER, authored, 0, viewport)
+    const projected = projectFlowComponentControllerFrame(authored, viewport)
+    const bounds = { left: projected.x, top: projected.y, right: projected.x + projected.width, bottom: projected.y + projected.height }
     expect(bounds.left).toBeGreaterThanOrEqual(-0.001)
     expect(bounds.top).toBeGreaterThanOrEqual(-0.001)
     expect(bounds.right).toBeLessThanOrEqual(viewport.width + 0.001)

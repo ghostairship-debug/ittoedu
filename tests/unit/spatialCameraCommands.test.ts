@@ -1,3 +1,8 @@
+import { controllerMetadata } from '../fixtures/teacherController'
+import type { LayerItem } from '../../src/shared/courseProjectTypes'
+import { isControllerFixture } from '../fixtures/teacherController'
+import { controllerPackage } from '../fixtures/teacherController'
+import type { ComponentLayerItem } from '../../src/shared/courseProjectTypes'
 import { describe, expect, it } from 'vitest'
 import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
 import {
@@ -82,7 +87,7 @@ function nativeText(
   }
 }
 
-function teacherController(layerItemId: string, order: number, targetId: string): NativeLayerItem {
+function teacherController(layerItemId: string, order: number, targetId: string): ComponentLayerItem {
   return {
     layerItemId,
     label: '教师控制',
@@ -94,10 +99,8 @@ function teacherController(layerItemId: string, order: number, targetId: string)
     opacity: 1,
     hitPolicy: 'auto',
     playbackInitialVisibility: 'inherit',
-    kind: 'native',
-    content: {
-      nativeType: 'teacher-controller',
-      data: {
+    kind: 'component',
+    role: 'teacher-controller', component: { packageId: controllerPackage.manifest.id, version: controllerPackage.manifest.version }, props: {
         title: '教师控制',
         showSceneProgress: true,
         compact: false,
@@ -118,11 +121,10 @@ function teacherController(layerItemId: string, order: number, targetId: string)
         },
         includeInStaticExports: false,
       },
-    },
   }
 }
 
-function scoped(item: NativeLayerItem): ScopedLayerItem {
+function scoped(item: LayerItem): ScopedLayerItem {
   return { item, visibility: { mode: 'all', locationIds: [] } }
 }
 
@@ -135,7 +137,7 @@ function v9SpatialFixture(): CourseProjectDocument {
     createdAt: NOW,
     updatedAt: NOW,
     assets: {},
-    componentPackages: {},
+    componentPackages: { ...controllerMetadata,},
     designTokens: {
       fonts: [{
         id: 'body',
@@ -341,8 +343,8 @@ describe('Spatial camera project data vs session pan/zoom', () => {
     const controller = next.globalLayerItems.find(
       (entry) => entry.item.layerItemId === 'camera-controller',
     )?.item
-    expect(controller?.kind === 'native' && controller.content.nativeType === 'teacher-controller'
-      ? controller.content.data.buttons.map((button) => button.action.type)
+    expect(isControllerFixture(controller)
+      ? controller.props.buttons.map((button) => button.action.type)
       : []).toEqual(['scene.next'])
     expect(courseProjectDocumentSchema.parse(next)).toEqual(next)
   })

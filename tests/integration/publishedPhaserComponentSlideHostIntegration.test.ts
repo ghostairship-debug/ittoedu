@@ -1,3 +1,5 @@
+import { buildPublishedFixture as buildPublishedCourseV2Payload } from '../fixtures/teacherController'
+import { isControllerFixture } from '../fixtures/teacherController'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('phaser', () => {
@@ -142,7 +144,7 @@ import {
   createPublishedCourseSession,
   createPublishedSurfaceHost,
 } from '../../src/player/surfaces/publishedDynamicHosts'
-import { buildPublishedCourseV2Payload } from '../../src/renderer/export/course/buildPublishedCourse'
+
 import { mountPublishedCourseAuthoring } from '../../src/renderer/ui/coursePlayerTryRun'
 import type {
   ComponentAuthoringTargetUpdate,
@@ -1474,15 +1476,14 @@ describe('Published Slide Phaser Component API 4 host', () => {
       Math.max(...firstScene.layerItems.map((item) => item.order)) + 10,
     ))
     const authoredController = project.globalLayerItems.find(({ item }) => (
-      item.kind === 'native' && item.content.nativeType === 'teacher-controller'
+      isControllerFixture(item)
     ))?.item
     if (
       !authoredController
-      || authoredController.kind !== 'native'
-      || authoredController.content.nativeType !== 'teacher-controller'
+      || !isControllerFixture(authoredController)
     ) throw new Error('expected authored teacher controller')
-    authoredController.content.data.collapsible = false
-    authoredController.content.data.defaultCollapsed = false
+    authoredController.props.collapsible = false
+    authoredController.props.defaultCollapsed = false
     const validProject = courseProjectDocumentSchema.parse(project)
     const payload = buildPublishedCourseV2Payload({
       project: validProject,
@@ -1490,17 +1491,16 @@ describe('Published Slide Phaser Component API 4 host', () => {
       components: fixture.components,
     })
     const publishedController = payload.globalLayerItems.find(({ item }) => (
-      item.kind === 'native' && item.content.nativeType === 'teacher-controller'
+      isControllerFixture(item)
     ))?.item
     if (
       !publishedController
-      || publishedController.kind !== 'native'
-      || publishedController.content.nativeType !== 'teacher-controller'
+      || !isControllerFixture(publishedController)
     ) throw new Error('expected Published teacher controller')
-    const replayButtonId = publishedController.content.data.buttons.find(
+    const replayButtonId = publishedController.props.buttons.find(
       (button) => button.action.type === 'scene.replay',
     )?.id
-    const nextButtonId = publishedController.content.data.buttons.find(
+    const nextButtonId = publishedController.props.buttons.find(
       (button) => button.action.type === 'scene.next',
     )?.id
     if (!replayButtonId || !nextButtonId) throw new Error('expected controller replay/next buttons')

@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { teacherControllerRoleIssues } from '../../teacherControllerRole'
 import { tableMergeRegionSchema, tableMergeIssues, tableCellSpan } from '../../tableMerge'
 import { sceneInteractionsSchema } from '../interaction-v1/schema'
 import {
@@ -181,10 +182,6 @@ export const nativeElementContentSchema = z.discriminatedUnion('nativeType', [
     data: nativeContentSchemaByType.shape,
   }).strict(),
   z.object({
-    nativeType: z.literal('teacher-controller'),
-    data: nativeContentSchemaByType['teacher-controller'],
-  }).strict(),
-  z.object({
     nativeType: z.literal('table'),
     data: nativeContentSchemaByType.table,
   }).strict(),
@@ -267,6 +264,7 @@ const nativeLayerItemSchema = z.object({
 const componentLayerItemSchema = z.object({
   ...layerItemBaseFields,
   kind: z.literal('component'),
+  role: z.literal('teacher-controller').optional(),
   component: componentReferenceSchema,
   props: z.record(z.string(), z.unknown()),
   staticFallbackAssetId: stableIdSchema.optional(),
@@ -311,8 +309,6 @@ export function materializeNativeLayerItem(
       return { ...item.content.data, ...layout, type: 'video' }
     case 'shape':
       return { ...item.content.data, ...layout, type: 'shape' }
-    case 'teacher-controller':
-      return { ...item.content.data, ...layout, type: 'teacher-controller' }
     case 'table':
       return { ...item.content.data, ...layout, type: 'table' }
     case 'chart':
@@ -424,8 +420,8 @@ export const globalLayerEntrySchema: z.ZodType<GlobalLayerEntry> = z.object({
   }
   if (
     entry.plane === 'underlay'
-    && entry.item.kind === 'native'
-    && entry.item.content.nativeType === 'teacher-controller'
+    && entry.item.kind === 'component'
+    && entry.item.role === 'teacher-controller'
   ) {
     context.addIssue({
       code: 'custom',
@@ -887,6 +883,7 @@ const flowSurfaceSchema = z.object({
   backgroundColor: colorSchema.optional(),
   backgroundAssetId: stableIdSchema.nullable().optional(),
   layout: z.object({
+    widthMode: z.enum(['fluid', 'reading']).optional(),
     readingWidth: finiteNumber.min(320).max(2_400),
     wideContentWidth: finiteNumber.min(320).max(4_000),
   }).strict(),
@@ -1201,6 +1198,7 @@ export const courseProjectDocumentSchema = z.object({
   surfaces: z.array(courseSurfaceSchema).min(1).max(10_000),
   mixedPrintPlan: mixedPrintPlanSchema.optional(),
 }).strict().superRefine((project, context) => {
+  teacherControllerRoleIssues(project).forEach(issue => context.addIssue({ code: 'custom', ...issue }))
   const assetIds = new Set(Object.keys(project.assets))
   Object.entries(project.assets).forEach(([key, asset]) => {
     if (asset.id !== key) addReferenceIssue(context, ['assets', key, 'id'], 'Asset record key must equal asset.id')

@@ -1,3 +1,5 @@
+import { controllerMetadata } from '../fixtures/teacherController'
+import { controllerPackage } from '../fixtures/teacherController'
 import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -218,7 +220,7 @@ function runtimeItem(): RuntimeLayerItem {
   }
 }
 
-function globalController(): NativeLayerItem {
+function globalController(): ComponentLayerItem {
   return {
     layerItemId: 'global-teacher-controller',
     label: '教师控制器',
@@ -230,10 +232,8 @@ function globalController(): NativeLayerItem {
     opacity: 1,
     hitPolicy: 'auto',
     playbackInitialVisibility: 'inherit',
-    kind: 'native',
-    content: {
-      nativeType: 'teacher-controller',
-      data: {
+    kind: 'component',
+    role: 'teacher-controller', component: { packageId: controllerPackage.manifest.id, version: controllerPackage.manifest.version }, props: {
         title: '教师控制台',
         showSceneProgress: true,
         compact: false,
@@ -252,7 +252,6 @@ function globalController(): NativeLayerItem {
         },
         includeInStaticExports: false,
       },
-    },
   }
 }
 
@@ -290,7 +289,7 @@ function fixture(): CourseProjectDocument {
         height: 360,
       },
     },
-    componentPackages: {
+    componentPackages: { ...controllerMetadata,
       'pkg-1': {
         packageId: 'pkg-1',
         version: '1.0.0',

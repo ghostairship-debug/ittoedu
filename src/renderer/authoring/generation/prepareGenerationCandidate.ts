@@ -1,4 +1,4 @@
-import { generationCandidateSchema, generationRequestSchema, generationInputReferenceSchema, generationCommitReceiptSchema, GenerationCandidatePreparationError, generationFailureDiagnostics, type GenerationFailure, type GenerationCandidate, type GenerationRequest, type GenerationCommitReceipt } from '../../../shared/generationContract'
+import { generationCandidateSchema, generationRequestSchema, generationInputReferenceSchema, generationCommitReceiptSchema, GenerationCandidatePreparationError, generationFailureDiagnostics, generationRecovery, type GenerationFailure, type GenerationCandidate, type GenerationRequest, type GenerationCommitReceipt } from '../../../shared/generationContract'
 import { workspaceIdentityKey, type WorkspaceIdentityV1 } from '../../../shared/workspaceIdentity'
 import { authoringToolDestinationV1Schema, type AuthoringToolDestinationV1, type AuthoringToolReceiptV1 } from '../../../shared/authoringToolContract'
 import type { CourseProjectDocument } from '../../../shared/courseProjectTypes'
@@ -9,14 +9,17 @@ import { courseAuthoringScopeFromLocation } from '../courseAuthoringScope'
 import { applyEditorTransactionStep, createEditorTransactionStep, type EditorTransactionStep } from '../editorTransaction'
 import type { HistoryResourceChanges, HistoryResourceState } from '../../store/courseResourceState'
 import { describeGenerationChanges } from './generationPreview'
-import { captureSelectionReplacementScopes } from '../tools/semanticReplacementTool'
 import { AuthoringToolFailure } from '../tools/executeAuthoringTool'
+import { expandGenerationSemanticCandidate } from './expandGenerationSemanticCandidate'
+import { captureBackgroundTargets } from '../tools/backgroundTool'
+import { captureSelectionReplacementScopes } from '../tools/semanticReplacementTool'
 
 export interface GenerationCommitPort {
   readDocument(): CourseProjectDocument
   readResources(): HistoryResourceState
   readWorkspace(): WorkspaceIdentityV1
   readSessionGeneration(): number
+  isRequestCurrent?(request: GenerationRequest): boolean
   commit(step: EditorTransactionStep): boolean
 }
 
@@ -30,7 +33,8 @@ function preparationError(error: unknown, context: Omit<GenerationFailure, 'vers
   evidence: NonNullable<AuthoringToolReceiptV1['behaviorEvidence']>): GenerationCandidatePreparationError {
   if (error instanceof GenerationCandidatePreparationError) return error
   const failedEvidence = error instanceof AuthoringToolFailure ? error.behaviorEvidence ?? [] : []
-  return new GenerationCandidatePreparationError({ version: 1, ...context, diagnostics: failureDiagnostics(error),
+  const diagnostics = failureDiagnostics(error)
+  return new GenerationCandidatePreparationError({ version: 1, ...context, diagnostics, recovery: generationRecovery(diagnostics),
     ...(evidence.length || failedEvidence.length ? { behaviorEvidence: [...evidence, ...failedEvidence] } : {}) })
 }
 
@@ -39,14 +43,14 @@ function current(request: GenerationRequest, port: GenerationCommitPort) {
     && (!request.execution || Date.now() < request.execution.deadlineAt)
     && port.readDocument().id === request.workspace.projectId
     && port.readDocument().revision === request.documentRevision
-    && port.readSessionGeneration() === request.sessionGeneration
+    && (port.isRequestCurrent ? port.isRequestCurrent(request) : port.readSessionGeneration() === request.sessionGeneration)
 }
 
 function destinationFor(step: GenerationCandidate['steps'][number], request: GenerationRequest,
   document: CourseProjectDocument, receipts: Map<string, AuthoringToolReceiptV1>): AuthoringToolDestinationV1 {
   const raw = step.destination
   if (raw.kind === 'create' || raw.kind === 'update') {
-    if (!request.destinations.some(allowed => JSON.stringify(allowed) === JSON.stringify(raw))) throw new Error('候选目标不在本次请求范围内')
+    if (!request.destinations.some(allowed => JSON.stringify(allowed) === JSON.stringify(raw))) throw new AuthoringToolFailure([{ code: 'unknown-request-target', path: ['destination'], message: '目标与本轮快照身份不匹配；请使用 request.json 当前目标别名，新建对象使用前序结果引用。选中对象不限制其他对象的修改。' }])
     const destination = structuredClone(raw)
     const target = destination.kind === 'update' ? destination.target : destination.scope
     // Only the private planning document advances. The live revision is checked separately.
@@ -59,6 +63,12 @@ function destinationFor(step: GenerationCandidate['steps'][number], request: Gen
   const hint = receipt.selection
   const scope = courseAuthoringScopeFromLocation({ project: document, locationId: hint.locationId, stateId: hint.stateId, owner: hint.owner })
   const surface = document.surfaces.find(value => value.id === scope.surfaceId)!
+  if (raw.kind === 'created-background') {
+    // A created item on an existing page is not evidence that a page was created.
+    if (!created.some(effect => effect.id === hint.locationId || effect.id === scope.sceneId || effect.id === surface.id)) throw new Error('前序回执没有创建页面或 Surface，不能派生页面背景目标')
+    return { kind: 'update', target: captureBackgroundTargets({ document, sessionToken: { locationId: hint.locationId, surfaceType: surface.type,
+      revision: document.revision, generation: request.sessionGeneration }, stateId: null, reference: 'page' })[0]!.target }
+  }
   const wire = { projectId: document.id, documentRevision: document.revision, revisionPolicy: { kind: 'exact' as const },
     sessionGeneration: request.sessionGeneration, surfaceType: surface.type, surfaceId: surface.id,
     locationId: hint.locationId, stateId: hint.stateId, owner: hint.owner, ownerKey: scope.ownerKey }
@@ -84,79 +94,37 @@ function foldResources(steps: readonly EditorTransactionStep[]): HistoryResource
   return { assetFileChanges: [...assets.values()], componentPackageChanges: [...packages.values()] }
 }
 
-function resolveInput(value: unknown, receipts: Map<string, AuthoringToolReceiptV1>): unknown {
+function resolveInput(value: unknown, receipts: Map<string, AuthoringToolReceiptV1>, path: string[] = ['input']): unknown {
   if (!value || typeof value !== 'object') return value
   if ('$result' in value) {
     const reference = generationInputReferenceSchema.parse(value).$result
     const receipt = receipts.get(reference.stepId)
-    if (!receipt) throw new Error('输入引用没有前序宿主回执')
+    if (!receipt) throw new AuthoringToolFailure([{ code: 'missing-step-result', path, message: '输入引用没有前序宿主回执' }])
     const values = reference.kind === 'asset-id' ? receipt.resources.assetIds
       : reference.kind === 'package-id' ? receipt.resources.packageIds
       : reference.kind === 'location-id' ? receipt.selection ? [receipt.selection.locationId] : []
-      : receipt.affected.filter(effect => effect.operation === 'created').map(effect => effect.id)
+      : receipt.affected.filter(effect => effect.operation === 'created' && receipt.selection?.itemIds.includes(effect.id)).map(effect => effect.id)
     const result = values[reference.index]
-    if (!result) throw new Error(`前序宿主回执没有 ${reference.kind}[${reference.index}]`)
+    if (!result) throw new AuthoringToolFailure([{ code: 'invalid-result-reference', path, message: `前序宿主回执没有 ${reference.kind}[${reference.index}]；引用类别和索引必须匹配该步实际结果。` }])
     return result
   }
-  return Array.isArray(value) ? value.map(entry => resolveInput(entry, receipts))
-    : Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, resolveInput(entry, receipts)]))
+  return Array.isArray(value) ? value.map((entry, index) => resolveInput(entry, receipts, [...path, String(index)]))
+    : Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, resolveInput(entry, receipts, [...path, key])]))
 }
 
-function selectionDependencies(candidate: GenerationCandidate, request: GenerationRequest, document: CourseProjectDocument) {
-  const byId = new Map(candidate.steps.map(step => [step.id, step]))
-  const selectionOnly = typeof request.context === 'object' && request.context !== null && !Array.isArray(request.context) && request.context.reference === 'selection'
-  const dependencies = new Set<string>()
+/** Replacement lineage is checked independently of the UI focus. */
+function replacementDependencies(candidate: GenerationCandidate) {
   const replacements = new Map<string, { stepId: string; index: number }>()
-  const visit = (id: string) => {
-    if (dependencies.has(id)) return
-    const step = byId.get(id)
-    if (!step) throw new Error('替换依赖步骤不存在')
-    dependencies.add(id)
-    const scan = (value: unknown): void => {
-      if (!value || typeof value !== 'object') return
-      if ('$result' in value) { visit(generationInputReferenceSchema.parse(value).$result.stepId); return }
-      Object.values(value).forEach(scan)
-    }
-    scan(step.input)
-    if (step.destination.kind === 'created-item' || step.destination.kind === 'created-scope') visit(step.destination.stepId)
-  }
-  for (const step of candidate.steps) if (step.tool === 'selection.replace') {
-    if (step.destination.kind !== 'update') throw new Error('替换目标必须是原请求的精确选中对象')
+  for (const [index, step] of candidate.steps.entries()) if (step.tool === 'selection.replace') {
+    if (step.destination.kind !== 'update' && step.destination.kind !== 'created-item') throw new Error('替换需要精确对象 update 或前序 created-item 目标')
     const reference = generationInputReferenceSchema.safeParse(step.input && typeof step.input === 'object' && !Array.isArray(step.input) ? step.input.replacementItemId : null)
     if (!reference.success || reference.data.$result.kind !== 'item-id') throw new Error('replacementItemId 必须引用前序创建回执的 item-id，不能提供既有对象 ID')
     const result = reference.data.$result
-    if (candidate.steps.findIndex(entry => entry.id === result.stepId) >= candidate.steps.indexOf(step)) throw new Error('替换对象必须先创建')
+    const source = candidate.steps.findIndex(entry => entry.id === result.stepId)
+    if (source < 0 || source >= index) throw new Error('替换对象必须先创建')
     replacements.set(step.id, { stepId: result.stepId, index: result.index })
-    visit(step.id)
   }
-  // A selected Runtime can consume one imported fallback without replacing the
-  // Runtime itself. Admit only this exact, preceding resource dependency; do
-  // not grant the import's arbitrary transitive references creation authority.
-  for (const [index, step] of candidate.steps.entries()) if (selectionOnly && step.tool === 'runtime.source') {
-    const fallback = step.input && typeof step.input === 'object' && !Array.isArray(step.input)
-      ? step.input.staticFallback : undefined
-    const assetId = fallback && typeof fallback === 'object' && !Array.isArray(fallback)
-      ? (fallback as Record<string, unknown>).assetId : undefined
-    if (!assetId || typeof assetId !== 'object' || !('$result' in assetId)) continue
-    const reference = generationInputReferenceSchema.parse(assetId).$result
-    const imported = byId.get(reference.stepId)
-    if (reference.kind !== 'asset-id' || reference.index !== 0 || !imported || imported.tool !== 'asset.media.import'
-      || imported.destination.kind !== 'create' || candidate.steps.indexOf(imported) >= index) {
-      throw new Error('Runtime 后备图片必须引用前序 asset.media.import 的 asset-id[0] 回执')
-    }
-    dependencies.add(imported.id)
-  }
-  if (selectionOnly) {
-    const targets = request.destinations.flatMap(destination => destination.kind === 'update' ? [destination.target] : [])
-    const scopes = captureSelectionReplacementScopes(document, targets)
-    for (const step of candidate.steps) {
-      if (step.destination.kind === 'created-scope') throw new Error('选中对象替换只允许附带的精确创建 scope')
-      if (step.destination.kind !== 'create') continue
-      if (!dependencies.has(step.id) || !scopes.some(scope => JSON.stringify(scope) === JSON.stringify(step.destination))) throw new Error('选中对象的附带创建 scope 仅可用于完整替换依赖或 Runtime 后备资源更新')
-      if (['slide.structure', 'course.navigation'].includes(step.tool) || step.destination.scope.parent.kind === 'course-locations') throw new Error('选中对象替换不得创建课程位置')
-    }
-  }
-  return { replacements, selectionOnly }
+  return replacements
 }
 
 /** Private candidate planning uses the existing product facade; the live document is never a scratchpad. */
@@ -183,10 +151,13 @@ export function createGenerationCandidateCoordinator(port: GenerationCommitPort)
       const abort = controller = new AbortController()
       prepared.clear()
       const initial = structuredClone(port.readDocument())
-      const replacementPlan = selectionDependencies(candidate, request, initial)
-      let state = { document: initial, resources: structuredClone(port.readResources()) }
+      const initialResources = structuredClone(port.readResources())
+      const replacementPlan = replacementDependencies(candidate)
+      let state = { document: initial, resources: initialResources }
       const plans: EditorTransactionStep[] = []
       const receipts = new Map<string, AuthoringToolReceiptV1>()
+      const semanticResources = new Map<string, AuthoringToolReceiptV1['resources']>()
+      const semanticCreated = new Map<string, Set<string>>()
       const facade = createAuthoringToolFacade({
         signal: abort.signal,
         readDocument: () => state.document, readResources: () => state.resources,
@@ -196,21 +167,53 @@ export function createGenerationCandidateCoordinator(port: GenerationCommitPort)
         },
         commit(step) { state = applyEditorTransactionStep(state, step, 'forward'); plans.push(step); return true },
       })
-      for (const item of candidate.steps) {
+      const queue = candidate.steps.map(item => ({ item, expanded: false, sourceId: item.id }))
+      for (let cursor = 0; cursor < queue.length; cursor++) {
+        const { item, expanded, sourceId } = queue[cursor]!
         failureContext.stepId = item.id; failureContext.tool = item.tool; failureContext.destination = item.destination
         if (token !== epoch || !current(request, port)) throw new Error('stale：候选运行已取消或工程已改变')
         if (!request.allowedCarriers.includes(item.carrier)) throw new Error('请求未允许此载体')
         const actualCarrier = authoringToolCarrier(item.tool, item.input)
         if (item.carrier !== actualCarrier) throw new Error(`${item.id}: ${item.tool} 要求carrier=${actualCarrier}，声明载体与实际工具不一致`)
         if ((actualCarrier === 'generated-component' || actualCarrier === 'runtime') && (typeof window === 'undefined' || !window.desktopAPI?.dynamicAdmission)) throw new Error('自动动态候选需要桌面独立进程准入')
-        const replacement = replacementPlan.replacements.get(item.id)
+        const replacement = replacementPlan.get(item.id)
+        const rebase = (raw: AuthoringToolDestinationV1) => {
+          const next = structuredClone(raw)
+          ;(next.kind === 'update' ? next.target : next.scope).documentRevision = state.document.revision
+          return next
+        }
+        const destination = expanded && (item.destination.kind === 'create' || item.destination.kind === 'update')
+          ? rebase(item.destination) : destinationFor(item, request, state.document, receipts)
+        const input = resolveInput(item.input, receipts)
         if (replacement) {
           const created = receipts.get(replacement.stepId)?.affected.filter(effect => effect.operation === 'created')[replacement.index]
-          if (!created?.authoringAddress || item.destination.kind !== 'update' || created.ownerKey !== item.destination.target.ownerKey) throw new Error('替换创建回执不属于原对象 owner')
+          if (!created?.authoringAddress || destination.kind !== 'update' || created.ownerKey !== destination.target.ownerKey) throw new Error('替换创建回执不属于原对象 owner')
         }
-        const destination = destinationFor(item, request, state.document, receipts)
-        const input = resolveInput(item.input, receipts)
         failureContext.destination = destination
+        if (item.tool === 'media.apply') {
+          // Validate and resolve the public target first. Expansion sees only
+          // current private state and canonical scopes derived from that target.
+          const destinations = request.destinations.map(rebase)
+          destinations.push(destination)
+          const { target, surface } = resolveAuthoringToolScope(state.document, destination)
+          const resourceScope = courseAuthoringScopeFromLocation({ project: state.document, locationId: target.locationId, stateId: null, owner: 'global' })
+          const { itemId: _item, authoringAddress: _address, ...resourceTarget } = target as typeof target & { itemId?: string; authoringAddress?: string }
+          destinations.push(authoringToolDestinationV1Schema.parse({ kind: 'create', scope: { ...resourceTarget,
+            surfaceId: surface.id, owner: 'global', ownerKey: resourceScope.ownerKey, stateId: null,
+            parent: { kind: 'owner' }, insertion: { kind: 'append' } } }))
+          if (destination.kind === 'update' && !(input && typeof input === 'object' && Reflect.get(input, 'placement') === 'background')) {
+            destinations.push(...captureSelectionReplacementScopes(state.document, [destination.target]))
+          }
+          const effectiveRequest = { ...request, destinations, selectionActions: request.selectionActions?.map(action => ({ ...action,
+            target: { ...action.target, documentRevision: state.document.revision },
+            ...('destination' in action ? { destination: rebase(action.destination) } : {}) })) } as GenerationRequest
+          const expansion = await expandGenerationSemanticCandidate({ ...candidate, steps: [{ ...item, destination, input: input as typeof item.input }] },
+            effectiveRequest, state.document, state.resources.assetFiles, () => token === epoch && current(request, port), new Set(queue.map(entry => entry.item.id)))
+          for (const [id, dependency] of replacementDependencies(expansion)) replacementPlan.set(id, dependency)
+          queue.splice(cursor, 1, ...expansion.steps.map(item => ({ item, expanded: true, sourceId })))
+          cursor--; continue
+        }
+        failureContext.stepId = sourceId
         const collectResourceIds = (value: unknown): void => {
           if (!value || typeof value !== 'object') return
           for (const [key, nested] of Object.entries(value)) {
@@ -229,15 +232,16 @@ export function createGenerationCandidateCoordinator(port: GenerationCommitPort)
           if (receipt.diagnostics.some(value => value.code.startsWith('dynamic-'))) failureContext.stage = 'dynamic-admission'
           throw new AuthoringToolFailure(receipt.diagnostics.length ? receipt.diagnostics : [{ code: `tool-${receipt.status}`, message: `工具 ${item.tool} 未成功完成`, path: [] }])
         }
-        receipts.set(item.id, receipt)
-      }
-      if (replacementPlan.selectionOnly) {
-        const replacedIds = new Set([...replacementPlan.replacements.values()].map(reference => receipts.get(reference.stepId)?.affected.filter(effect => effect.operation === 'created')[reference.index]?.id))
-        for (const item of candidate.steps) if (item.destination.kind === 'create') {
-          const receipt = receipts.get(item.id)!
-          const resourceIds = new Set([...receipt.resources.assetIds, ...receipt.resources.packageIds])
-          if (receipt.affected.some(effect => effect.operation === 'created' && !resourceIds.has(effect.id) && !replacedIds.has(effect.id))) throw new Error('选中对象替换不能附带未被消费的新对象')
-        }
+        if (expanded) {
+          const prior = semanticResources.get(sourceId) ?? { assetIds: [], packageIds: [] }
+          const resources = { assetIds: [...new Set([...prior.assetIds, ...receipt.resources.assetIds])], packageIds: [...new Set([...prior.packageIds, ...receipt.resources.packageIds])] }
+          semanticResources.set(sourceId, resources)
+          const created = semanticCreated.get(sourceId) ?? new Set<string>()
+          for (const effect of receipt.affected) if (effect.operation === 'created' && receipt.selection?.itemIds.includes(effect.id)) created.add(effect.id)
+          semanticCreated.set(sourceId, created)
+          receipts.set(item.id, item.id === sourceId ? { ...receipt, resources,
+            affected: receipt.affected.map(effect => created.has(effect.id) && effect.operation === 'updated' ? { ...effect, operation: 'created' } : effect) } : receipt)
+        } else receipts.set(item.id, receipt)
       }
       if (token !== epoch || !current(request, port)) throw new Error('stale：候选已过期')
       const step = plans.length ? createEditorTransactionStep(initial, {

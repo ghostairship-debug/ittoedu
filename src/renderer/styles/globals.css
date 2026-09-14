@@ -995,7 +995,8 @@ button:disabled {
 
 .course-preview-shell {
   position: relative;
-  display: block;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
   width: 100%;
   height: 100%;
   min-height: 0;
@@ -1003,22 +1004,14 @@ button:disabled {
 }
 
 .course-preview-chrome {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
+  position: relative;
   z-index: 8;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 16px;
   padding: 12px 18px;
-  pointer-events: none;
-  background: linear-gradient(180deg, rgba(11, 13, 18, 0.92), rgba(11, 13, 18, 0.35) 70%, transparent);
-}
-
-.course-preview-chrome > *,
-.course-preview-chrome__actions {
-  pointer-events: auto;
+  background: #0b0d12;
 }
 
 .course-preview-chrome__actions {
@@ -1028,8 +1021,9 @@ button:disabled {
 }
 
 .course-preview-viewport {
-  position: absolute;
-  inset: 0;
+  position: relative;
+  min-height: 0;
+  min-width: 0;
 }
 
 .course-preview-host {
@@ -6062,3 +6056,11 @@ button:disabled {
 .design-production-dialog > header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
 .design-production-dialog label { min-width: 0; }
 .design-production-dialog textarea { width: 100%; min-height: 80px; resize: vertical; }
+
+/* Secondary controller settings stay out of the main form. */
+.controller-property-group + .controller-property-group { border-top: 1px solid var(--border-color, #363b46); margin-top: 16px; padding-top: 12px; }
+.controller-property-group h4 { margin: 0 0 12px; font-size: 12px; color: var(--text-secondary, #aeb6c4); }
+.controller-property-details > summary { cursor: pointer; font-size: 13px; font-weight: 600; padding: 4px 0; }
+.controller-property-details[open] > summary { margin-bottom: 12px; }
+.controller-property-details > .property-section { padding: 8px 0; border: 0; }
+.controller-property-details .controller-button-row { min-width: 0; }

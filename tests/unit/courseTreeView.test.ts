@@ -163,12 +163,54 @@ describe('buildCourseTreeView', () => {
     expect(view.pages[0]?.children.every((child) => (
       child.kind === 'slide-scene'
       && child.isLocation
-      && child.writesHistory
+      && !child.writesHistory
       && child.locationId === child.id
     ))).toBe(true)
     expect(view.pages[0]?.children.map((child) => child.label)).toEqual(
       surface.scenes.map((scene) => scene.name),
     )
+  })
+
+  it('keeps every scene in formal order when the first scene has only state locations', () => {
+    const project = createBlankCourseProject({ now: NOW })
+    const surface = slideSurface(project)
+    const template = surface.scenes[0]!
+    surface.scenes = ['intro', 'practice', 'summary'].map((id) => ({
+      ...structuredClone(template), id, name: id, layerItems: [],
+      ...(id === 'summary' ? {} : { presentation: {
+        initialStateId: `${id}-one`,
+        states: ['one', 'two'].map((state) => ({
+          id: `${id}-${state}`, name: state, layerItemOverrides: {},
+        })),
+      } }),
+    }))
+    const location = (sceneId: string, suffix?: string) => ({
+      id: suffix ? `location-${sceneId}-${suffix}` : `location-${sceneId}`,
+      label: sceneId, kind: 'slide-scene' as const, surfaceId: surface.id, sceneId,
+      ...(suffix ? { stateId: `${sceneId}-${suffix}` } : {}),
+    })
+    project.locations = [
+      location('summary'), location('intro', 'one'), location('practice', 'two'),
+      location('intro', 'two'), location('practice', 'one'), location('practice'),
+    ]
+    project.startLocationId = 'location-intro-two'
+    const parsed = courseProjectDocumentSchema.parse(project)
+    const view = buildCourseTreeView(parsed)
+    expect(view.pages[0]?.children.map((child) => [child.label, child.locationId])).toEqual([
+      ['intro', 'location-intro-two'], ['practice', 'location-practice'], ['summary', 'location-summary'],
+    ])
+    expect(view.pages[0]?.locationId).toBe('location-intro-two')
+    expect(view.pages[0]?.children.every((child) => !child.writesHistory)).toBe(true)
+    expect(parsed).toEqual(project)
+
+    const withoutBases = structuredClone(parsed)
+    withoutBases.locations = withoutBases.locations.filter((entry) => entry.id !== 'location-practice')
+    withoutBases.startLocationId = 'location-summary'
+    const fallback = buildCourseTreeView(withoutBases)
+    expect(fallback.pages[0]?.children.map((child) => child.locationId)).toEqual([
+      'location-intro-one', 'location-practice-two', 'location-summary',
+    ])
+    expect(fallback.pages[0]?.locationId).toBe('location-intro-one')
   })
 
   it('projects Flow headings from listFlowCourseTreePages and omits paragraphs', () => {

@@ -1,9 +1,10 @@
+import { buildPublishedFixture as buildPublishedCourseV2Payload } from '../fixtures/teacherController'
 import { isAuthoringHistoryTransactionFrame } from '../../src/renderer/authoring/resourceAwareAuthoringHistory'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { decodePublishedCode } from '@/player/decodePublishedExecutableCode'
 
 import { isSpatialAuthoringTransactionFrame } from '@/renderer/course/spatialAuthoringHistory'
-import { buildPublishedCourseV2Payload } from '@/renderer/export/course/buildPublishedCourse'
+
 import {
   createCourseProjectArchive,
   openCourseProjectArchive,

@@ -773,7 +773,7 @@ test('Wave C Flow authoring survives one real Editor and Player session', async 
         wrap: 'none',
       })
 
-      await page.getByRole('button', { name: '全屏 16:9 整课预览' }).click()
+      await page.getByRole('button', { name: '整课预览' }).click()
       const preview = page.getByTestId('course-preview-overlay')
       const previewHost = page.getByTestId('course-preview-host')
       await expect(preview).toBeVisible()

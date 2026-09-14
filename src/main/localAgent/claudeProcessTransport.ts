@@ -3,7 +3,9 @@ import { createInterface } from 'node:readline'
 import { randomUUID } from 'node:crypto'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
+import { nativeProxyEnvironment } from './nativeProxy'
 import type { z } from 'zod'
+import { measureLocalAgentInput, type LocalAgentInputMetrics } from '../../shared/localAgentInputMetrics'
 import {
   localAgentCapabilitiesSchema,
   localAgentProbeSchema,
@@ -311,7 +313,9 @@ export class ClaudeProcessTransportAdapter implements LocalAgentCliAdapterV2 {
     ]
 
     try {
-      this.child = launchAgent(binary, args, input.cwd, input.candidateRoot)
+      const environment = await nativeProxyEnvironment('claude')
+      if (this.isClosed) throw new Error('Claude session was closed before launch')
+      this.child = launchAgent(binary, args, input.cwd, input.candidateRoot, environment)
     } catch {
       throw new Error('launch')
     }
@@ -426,7 +430,7 @@ export class ClaudeProcessTransportAdapter implements LocalAgentCliAdapterV2 {
   async startTurn(
     turnInput: z.infer<typeof localAgentTurnInputSchema>,
     observationFiles: ReadonlyMap<string, string>,
-  ): Promise<{ nativeTurnId: string | null }> {
+  ): Promise<{ nativeTurnId: string | null; inputMetrics: LocalAgentInputMetrics }> {
     if (!this.child || this.isClosed || this.child.exitCode !== null) throw new Error('Claude process is not running')
     if (this.identityFailure) throw this.identityFailure
     if (this.currentTurn && !this.eventQueue.isDone()) throw new Error('Claude turn is already running')
@@ -482,8 +486,12 @@ export class ClaudeProcessTransportAdapter implements LocalAgentCliAdapterV2 {
     }
 
     // STDIN IS KEPT OPEN! Do NOT call stdin.end()
+    const inputMetrics = measureLocalAgentInput({
+      boundary: 'native-user-message', prompt: turnInput.text, transport: message,
+      technicalTransport: { ...message, message: { ...message.message, content: content.filter(item => item.type !== 'image') } },
+    })
     this.send(message)
-    return { nativeTurnId: this.activeTurnId }
+    return { nativeTurnId: this.activeTurnId, inputMetrics }
   }
 
   async input(userInput: AiUserInput): Promise<z.infer<typeof aiInputDeliverySchema>> {
@@ -711,8 +719,8 @@ export class ClaudeProcessTransportAdapter implements LocalAgentCliAdapterV2 {
   }
 
   private handleStdoutLine(line: string): void {
-    if (line.length > 1024 * 1024) {
-      this.eventQueue.fail(new Error('output-limit'))
+    if (Buffer.byteLength(line) > 32 * 1024 * 1024) {
+      this.eventQueue.fail(new Error(`output-limit: Claude message ${Buffer.byteLength(line)} bytes exceeds 32 MiB`))
       return
     }
 
@@ -863,6 +871,10 @@ export class ClaudeProcessTransportAdapter implements LocalAgentCliAdapterV2 {
         const index = event.index ?? 0
         if (!indices.includes(index)) indices.push(index)
         this.knownMessageIds.set(this.currentMessageId, indices)
+        if (typeof event.content_block.text === 'string' && event.content_block.text) this.eventQueue.push({
+          ...this.baseIdentity(), kind: 'text', itemId: this.currentMessageId ? `${this.currentMessageId}:${index}` : `text-${index}`,
+          phase: 'body', operation: 'append', text: event.content_block.text,
+        })
       }
       if (event.type === 'content_block_delta' && event.delta?.type === 'text_delta') {
         const text = typeof event.delta.text === 'string' ? event.delta.text : ''
@@ -894,7 +906,7 @@ export class ClaudeProcessTransportAdapter implements LocalAgentCliAdapterV2 {
             ...this.baseIdentity(),
             kind: 'text',
             itemId,
-            phase: 'body',
+            phase: wire.message.stop_reason === 'end_turn' ? 'final' : blocks.some((part: { type?: string }) => part.type === 'tool_use') ? 'progress' : 'body',
             operation: 'replace',
             text: block.text,
           })

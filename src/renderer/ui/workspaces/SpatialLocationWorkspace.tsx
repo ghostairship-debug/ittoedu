@@ -1,6 +1,8 @@
+import { useControllerDisplayRevision } from '../../authoring/controllerDisplayBounds'
 
 import { chartCanvasTextPort } from '../../authoring/chartCanvasTextBridge'
 import { EditableChartView } from '../EditableChartView'
+import { useAssetObjectUrls } from '../useAssetObjectUrls'
 import type { ChartTextDraft } from '../../authoring/chartTextDraft'
 import { Hand, Maximize2, Minus, MousePointer2, Play, Plus } from 'lucide-react'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
@@ -414,6 +416,7 @@ export function SpatialLocationWorkspace({
     layer.source === 'global' && layer.globalPlane === 'underlay'
   ))
   const previewById = new Map((previewFrames ?? []).map((frame) => [frame.layerItemId, frame]))
+  const controllerDisplayRevision = useControllerDisplayRevision()
   const targetIds = new Set(targets.map((target) => target.layerItemId))
 
   useEffect(() => {
@@ -425,7 +428,7 @@ export function SpatialLocationWorkspace({
     const authoring = authoringRef.current
     setWorldOverlay(authoring.overlayGeometry(LOGICAL_STAGE_VIEWPORT))
     setHudOverlay(authoring.viewportOverlayGeometry(LOGICAL_STAGE_VIEWPORT))
-  }, [canvasMode, scope, view, selectionIds])
+  }, [canvasMode, scope, view, selectionIds, controllerDisplayRevision])
 
   useEffect(() => {
     const container = tryRunRef.current
@@ -453,19 +456,7 @@ export function SpatialLocationWorkspace({
     })
   }, [])
 
-  const assetUrls = useMemo(() => {
-    const urls: Record<string, string> = {}
-    for (const [assetId, bytes] of Object.entries(assetFiles)) {
-      urls[assetId] = URL.createObjectURL(
-        new Blob([Uint8Array.from(bytes)], { type: assetMimeTypes[assetId] ?? 'application/octet-stream' }),
-      )
-    }
-    return urls
-  }, [assetFiles, assetMimeTypes])
-
-  useEffect(() => () => {
-    for (const url of Object.values(assetUrls)) URL.revokeObjectURL(url)
-  }, [assetUrls])
+  const assetUrls = useAssetObjectUrls(assetFiles, assetMimeTypes)
 
   assertActiveSpatialEditorView(view)
 
@@ -637,13 +628,14 @@ export function SpatialLocationWorkspace({
               transform: !controller && rotation ? `rotate(${rotation}deg)` : undefined,
               opacity: layer.item.opacity,
               background: 'transparent',
-              overflow: 'hidden',
+              overflow: controller ? 'visible' : 'hidden',
             }}
           >
             {globalRuntime ? (
               <SpatialGlobalRuntimeMountTarget itemId={layer.selectionId} />
             ) : controller ? (
               <TeacherControllerAuthoringChrome
+                projectId={view.projectId} componentPackages={componentPackages} assetUrls={assetUrls}
                 item={layer.item as LayerItem}
                 frame={{
                   x: preview?.x ?? frame.x,
@@ -803,7 +795,7 @@ export function SpatialLocationWorkspace({
           )
           const layerHit = hitTestV9SpatialLayerItems(
             adaptV9SpatialEditorLayers(view.layers).filter((target) => (
-              scope === 'global' || target.nativeType !== 'teacher-controller'
+              true
             )),
             { viewport: hudPoint, world },
           )

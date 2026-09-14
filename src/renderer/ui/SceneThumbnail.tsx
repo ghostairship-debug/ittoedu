@@ -222,19 +222,6 @@ export function SceneThumbnail(props: {
             context.lineTo(-4, 7)
             context.closePath()
             context.fill()
-          } else if (node.type === 'teacher-controller') {
-            const width = node.width * SCALE
-            const height = node.height * SCALE
-            context.fillStyle = node.style.backgroundColor
-            context.globalAlpha *= node.style.backgroundOpacity
-            context.beginPath()
-            context.roundRect(-width / 2, -height / 2, width, height, Math.min(6, height / 2))
-            context.fill()
-            context.fillStyle = node.style.accentColor
-            context.font = '600 6px "Microsoft YaHei", sans-serif'
-            context.textAlign = 'center'
-            context.textBaseline = 'middle'
-            context.fillText(node.title || '教师控制台', 0, 0, Math.max(12, width - 8))
           } else {
             const width = node.width * SCALE
             const height = node.height * SCALE

@@ -7,6 +7,11 @@ export const MAX_GENERATION_RESULT_BYTES = 8 * 1024 * 1024
 export const GENERATION_RESULT_OPEN = '<courseware-result-v1>'
 export const GENERATION_RESULT_CLOSE = '</courseware-result-v1>'
 const terminalResultSchema = z.object({ version: z.literal(1), requestId: z.uuid(), kind: z.enum(['answer', 'edit']) }).strict()
+export const generationStagedCandidateReferenceSchema = z.object({
+  version: z.literal(1), requestId: z.uuid(), candidateFile: z.literal('candidate.json'),
+}).strict()
+export const generationStagedCandidateMarker = (requestId: string): string =>
+  `${GENERATION_RESULT_OPEN}${JSON.stringify({ version: 1, requestId, kind: 'edit' })}${GENERATION_RESULT_CLOSE}`
 export const generationResultSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('answer'), requestId: z.uuid() }).strict(),
   z.object({ kind: z.literal('incomplete'), requestId: z.uuid(), finding: z.string().max(4000) }).strict(),
@@ -58,6 +63,7 @@ export function parseGenerationText(text: string, request: string | ResultReques
 }
 
 export function parseGenerationCandidate(value: unknown, request: string | ResultRequest, options?: GenerationCandidateParseOptions): GenerationCandidate {
+  value = normalizeGenerationCandidateTransport(value)
   const requestId = typeof request === 'string' ? request : request.requestId
   if (value && typeof value === 'object' && Reflect.get(value, 'version') === 2) {
     if (typeof request === 'string' || !('destinations' in request) || !options?.candidateId) throw new Error('短候选需要宿主冻结的完整请求与固定候选身份')
@@ -66,4 +72,22 @@ export function parseGenerationCandidate(value: unknown, request: string | Resul
   const candidate = generationCandidateSchema.parse(value)
   if (candidate.requestId !== requestId) throw new Error('生成结果属于其他请求')
   return candidate
+}
+
+/** Decode only the documented tool-input projection, once, at every ingestion
+ * boundary. Strings inside the input (including JavaScript) are never touched. */
+export function normalizeGenerationCandidateTransport(value: unknown): unknown {
+  if (!value || typeof value !== 'object' || !Array.isArray(Reflect.get(value, 'steps'))) return value
+  return { ...value, steps: Reflect.get(value, 'steps').map((raw: unknown, index: number) => {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return raw
+    const step = { ...raw } as Record<string, unknown>
+    // Retire the old transport-only explanation; it is not part of a candidate.
+    if (typeof step.lowerCarrierReason === 'string' || step.lowerCarrierReason === null) delete step.lowerCarrierReason
+    if (typeof step.input === 'string') {
+      try { step.input = JSON.parse(step.input) }
+      catch { throw new z.ZodError([{ code: 'custom', path: ['steps', index, 'input'], message: '工具 input 必须是对象或一次有效 JSON 序列化' }]) }
+      if (typeof step.input === 'string') throw new z.ZodError([{ code: 'custom', path: ['steps', index, 'input'], message: '工具 input 被重复序列化；请直接提供对象' }])
+    }
+    return step
+  }) }
 }

@@ -6,7 +6,9 @@ import {
   type ScopedLayerItem,
 } from '../../shared/courseProjectTypes'
 import { sceneNodeToCourseLayerItem } from '../../shared/courseProjectModel'
-import { createTeacherControllerNode } from '../project/nativeNodeFactories'
+import { createTeacherControllerComponentItem } from '../components/teacherControllerComponent'
+import { createDefaultTeacherControllerPackage } from '../../shared/defaultTeacherControllerComponent'
+import { componentPackageMeta } from '../components/editableComponentPackage'
 import {
   createSlideAuthoringBackend,
   openSlideAuthoringSession,
@@ -76,10 +78,9 @@ function scoped(
 }
 
 function r3CandidateSmokeFixture(): CourseProjectDocument {
-  const controller = sceneNodeToCourseLayerItem(
-    createTeacherControllerNode({ id: 'teacher-controller-main' }),
-    90,
-  )
+  const controller = createTeacherControllerComponentItem('teacher-controller-main')
+  controller.order = 90
+  const pkg = createDefaultTeacherControllerPackage()
   return courseProjectDocumentSchema.parse({
     schemaVersion: COURSE_PROJECT_SCHEMA_VERSION,
     id: 'r3z-layers',
@@ -88,7 +89,7 @@ function r3CandidateSmokeFixture(): CourseProjectDocument {
     createdAt: NOW,
     updatedAt: NOW,
     assets: {},
-    componentPackages: {},
+    componentPackages: { [pkg.manifest.id]: componentPackageMeta(pkg, { editableCopy: true }) },
     designTokens: {
       fonts: [{
         id: 'body',
@@ -118,7 +119,7 @@ function r3CandidateSmokeFixture(): CourseProjectDocument {
     navigationGuards: [],
     globalLayerItems: [
       scoped(nativeText('global-banner', 0, '全课横幅')),
-      scoped(controller as NativeLayerItem),
+      { item: controller, visibility: { mode: 'all', locationIds: [] }, plane: 'overlay' },
     ],
     globalInteractions: [],
     locations: [

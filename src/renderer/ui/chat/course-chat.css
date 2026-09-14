@@ -28,3 +28,23 @@
 .native-agent-question legend { white-space: pre-wrap; overflow-wrap: anywhere; }
 .native-agent-question input[type=text] { max-width: 100%; }
 .native-agent-configuration .chat-controls { align-items: start; flex-wrap: wrap; gap: 4px; }
+.course-chat { gap: 8px; padding: 10px 12px; }
+.course-chat header { flex-shrink: 0; }
+.course-chat label { margin: 3px 0; font-size: 12px; }
+.course-chat select { max-width: 170px; }
+.course-chat > form { max-height: 42%; }
+.course-chat > form textarea { min-height: 64px; margin: 6px 0; }
+.chat-scroll { padding: 4px 3px 12px; overflow-anchor: none; scrollbar-gutter: stable; }
+.chat-transcript { display: flex; flex-direction: column; gap: 16px; }
+.chat-transcript > section, .chat-transcript > details { min-width: 0; }
+.chat-user-message { background: var(--app-bg); padding: 10px 12px; border-radius: 9px; }
+.chat-progress { border-left: 2px solid var(--border); padding-left: 10px; }
+.chat-progress summary, .native-agent-configuration summary { cursor: pointer; color: var(--text-muted); font-size: 12px; overflow-wrap: anywhere; }
+.chat-message p { margin: 7px 0; }
+.chat-message h4 { margin: 12px 0 6px; }
+.chat-message ul, .chat-message ol { padding-left: 22px; margin: 8px 0; }
+.chat-message > button { opacity: .7; font-size: 11px; padding: 2px 6px; }
+.chat-message table { display: block; max-width: 100%; overflow-x: auto; border-collapse: collapse; margin: 10px 0; font-size: 13px; }
+.chat-message th, .chat-message td { border: 1px solid var(--border); padding: 6px 9px; white-space: normal; }
+.native-agent-configuration { flex-shrink: 0; max-height: 28%; overflow-y: auto; }
+.chat-usage { color: var(--text-muted); font-size: 11px; }

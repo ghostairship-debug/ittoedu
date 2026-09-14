@@ -1,9 +1,10 @@
+import { buildPublishedFixture as buildPublishedCourseV2Payload } from '../fixtures/teacherController'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { componentPackagesFromArchive } from '@/renderer/components/componentPackageStore'
 import { buildPublishedCourseStandaloneHtml } from '@/renderer/export/course/buildCoursePackages'
-import { buildPublishedCourseV2Payload } from '@/renderer/export/course/buildPublishedCourse'
+
 import {
   createCourseProjectArchive,
   openCourseProjectArchive,

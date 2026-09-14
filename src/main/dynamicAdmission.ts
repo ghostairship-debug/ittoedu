@@ -16,10 +16,28 @@ export async function operateDynamicAdmission(raw: unknown, owner: WebContents, 
     return { ok: false, message: '准入已取消' }
   }
   if (runs.has(request.id) || runs.size >= 2) throw new Error('动态准入正在运行，请稍后重试')
-  const encoded = JSON.stringify(request.payload)
+  const assets = new Map<string, { bytes: Uint8Array; mimeType: string }>()
+  const assetResources: Record<string, { url: string; byteLength: number }> = {}
+  const resourcePrefix = `/admission-assets/${request.id}/`
+  for (const [id, value] of Object.entries(request.payload.assetFiles)) {
+    const meta = request.payload.project.assets[id] ?? Object.values(request.payload.project.assets).find(meta => meta.id === id)
+    if (!meta) continue
+    const bytes = typeof value === 'string' ? new Uint8Array(Buffer.from(value, 'base64')) : value
+    const resourcePath = `${resourcePrefix}${assets.size}`
+    assets.set(resourcePath, { bytes, mimeType: meta.mimeType })
+    assetResources[id] = { url: `courseware-editor://app${resourcePath}`, byteLength: bytes.byteLength }
+  }
+  // Bytes travel via structured clone, never JSON/base64, and are served lazily
+  // by this run's isolated session. Callers cannot supply their own URL claims.
+  const encoded = JSON.stringify({ ...request.payload, assetFiles: {}, assetResources })
   if (Buffer.byteLength(encoded) > 64 * 1024 * 1024) throw new Error('动态候选准入载荷超过 64 MiB')
   const isolatedSession = session.fromPartition(`admission-${randomUUID()}`)
-  installEditorProtocol(isolatedSession)
+  installEditorProtocol(isolatedSession, url => {
+    if (!url.pathname.startsWith('/admission-assets/')) return undefined
+    const asset = assets.get(url.pathname)
+    return asset ? new Response(asset.bytes.slice().buffer as ArrayBuffer, { headers: { 'Content-Type': asset.mimeType, 'Cache-Control': 'no-store',
+      ...(/^https?:/.test(rendererEntryUrl) ? { 'Access-Control-Allow-Origin': new URL(rendererEntryUrl).origin } : {}) } }) : new Response('Not found', { status: 404 })
+  })
   const network = new PreviewNetworkPolicy()
   const entryOrigin = new URL(rendererEntryUrl)
   network.replaceBaseOrigins(['http:', 'https:'].includes(entryOrigin.protocol) ? [entryOrigin.origin] : [])
@@ -47,7 +65,8 @@ export async function operateDynamicAdmission(raw: unknown, owner: WebContents, 
   runs.set(request.id, { owner, cancel: () => stop('动态准入已取消') })
   owner.once('destroyed', ownerGone)
   worker.webContents.once('render-process-gone', workerGone)
-  const timer = setTimeout(() => stop('动态候选独立进程准入超时'), 20_000)
+  let timer = setTimeout(() => stop('动态候选启动或单目标准入超时'), 20_000)
+  const absoluteTimer = setTimeout(() => stop('动态准入超过绝对任务上限'), 20 * 60_000)
   try {
     const result = await Promise.race([stopped, (async () => {
       await worker.loadURL(entry)
@@ -59,8 +78,14 @@ export async function operateDynamicAdmission(raw: unknown, owner: WebContents, 
       const captureFrames = async () => {
         let capturedBytes = 0
         let clicked = false
+        let progress = 0
         while (!completed && !worker.isDestroyed()) {
-          const pending = await worker.webContents.executeJavaScript('({frame:window.__COURSEWARE_ADMISSION_PENDING_FRAME__?.()??null,button:window.__COURSEWARE_ADMISSION_PENDING_BUTTON__?.()??null})') as { frame: { id: number } | null; button: { id: number; x: number; y: number } | null }
+          const pending = await worker.webContents.executeJavaScript('({frame:window.__COURSEWARE_ADMISSION_PENDING_FRAME__?.()??null,button:window.__COURSEWARE_ADMISSION_PENDING_BUTTON__?.()??null,progress:window.__COURSEWARE_ADMISSION_PROGRESS__?.()??0})') as { frame: { id: number } | null; button: { id: number; x: number; y: number } | null; progress: number }
+          if (Number.isInteger(pending.progress) && pending.progress > progress && pending.progress <= request.payload.targets.length) {
+            progress = pending.progress
+            clearTimeout(timer)
+            timer = setTimeout(() => stop('动态候选单目标准入超时'), 20_000)
+          }
           if (completed || worker.isDestroyed()) break
           if (pending.button) {
             const { id, x, y } = pending.button, [width, height] = worker.getContentSize()
@@ -84,7 +109,7 @@ export async function operateDynamicAdmission(raw: unknown, owner: WebContents, 
           await worker.webContents.executeJavaScript(`window.__COURSEWARE_ADMISSION_ACCEPT_FRAME__(${frame.id},${JSON.stringify(payload)})`)
         }
       }
-      const [outcome] = await Promise.all([execute, request.payload.observeBehavior ? captureFrames() : Promise.resolve()])
+      const [outcome] = await Promise.all([execute, captureFrames()])
       return dynamicAdmissionResultSchema.parse({ ...outcome, processId })
     })()])
     return result
@@ -92,9 +117,11 @@ export async function operateDynamicAdmission(raw: unknown, owner: WebContents, 
     return { ok: false, message: (error instanceof Error ? error.message : String(error)).slice(0, 4000) }
   } finally {
     clearTimeout(timer)
+    clearTimeout(absoluteTimer)
     runs.delete(request.id)
     owner.removeListener('destroyed', ownerGone)
     if (!worker.isDestroyed()) worker.destroy()
     await isolatedSession.clearStorageData()
+    assets.clear()
   }
 }

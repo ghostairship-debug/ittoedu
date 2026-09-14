@@ -469,11 +469,11 @@ describe('Read model boundary checks', () => {
     expect(store).not.toMatch(/\bcreateCourseProjectArchive\b/)
     expect(store).not.toMatch(/\bopenCourseProjectArchive\b/)
     const teacher = readFileSync(
-      join(root, 'src/renderer/authoring/v9TeacherControllerAuthoring.ts'),
+      join(root, 'src/renderer/components/teacherControllerComponent.ts'),
       'utf8',
     )
     expect(teacher).not.toMatch(/useEditorStore/)
-    expect(teacher).toMatch(/TeacherControllerAuthoringPorts/)
+    expect(teacher).toMatch(/planTeacherControllerComponentEdit/)
     expect(readFileSync(join(root, 'src/renderer/store/slices/slideAuthoringSlice.ts'), 'utf8'))
       .toMatch(/persistSlideCandidateResult/)
     expect(readFileSync(join(root, 'src/renderer/store/slices/flowAuthoringSlice.ts'), 'utf8'))

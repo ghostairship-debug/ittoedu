@@ -6,7 +6,9 @@ import { dynamicBehaviorEvidenceSchema, dynamicButtonCheckSchema } from './dynam
 const encodedFiles = z.record(z.string().min(1).max(500), z.string().max(24_000_000).regex(/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/))
 export const dynamicAdmissionPayloadSchema = z.object({
   project: courseProjectDocumentSchema,
-  assetFiles: encodedFiles,
+  assetFiles: z.record(z.string().min(1).max(500), z.union([encodedFiles.valueType, z.instanceof(Uint8Array)])),
+  /** Main-owned read-only resources, scoped to one isolated admission session. */
+  assetResources: z.record(z.string(), z.object({ url: z.string().min(1), byteLength: z.number().int().nonnegative() }).strict()).optional(),
   componentFiles: z.record(z.string().min(1), encodedFiles),
   captureInstances: z.boolean().optional(),
   verificationMode: z.enum(['full-admission', 'public-props']).optional(),

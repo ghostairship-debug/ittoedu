@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { withDefaultComponentController } from '../components/teacherControllerComponent'
 import { bytesToBase64 } from '../export/base64'
 import { createBlankCourseProject } from '../project/createCourseProject'
 import { createBlankFlowCourseProject } from '../project/createFlowCourseProject'
@@ -27,9 +28,10 @@ const receiptQuerySchema = z.object({ after: z.number().int().nonnegative().defa
 /** Private builder document; every edit uses the same product tool and transaction as the editor. */
 export function createCoursewareBuilderV2(raw: CoursewareBuilderV2Options) {
   const options = optionsSchema.parse(raw)
-  const project = (options.surfaceType === 'slide' ? createBlankCourseProject : options.surfaceType === 'flow' ? createBlankFlowCourseProject : createBlankSpatialCourseProject)({ title: options.title })
+  const bundle = withDefaultComponentController((options.surfaceType === 'slide' ? createBlankCourseProject : options.surfaceType === 'flow' ? createBlankFlowCourseProject : createBlankSpatialCourseProject)({ title: options.title }))
+  const project = bundle.project
   let history = createResourceAwareAuthoringHistory(project)
-  let resources: HistoryResourceState = { assetFiles: {}, componentPackages: {} }
+  let resources: HistoryResourceState = { assetFiles: {}, componentPackages: bundle.componentPackages }
   let scope = courseAuthoringScopeFromLocation({ project, locationId: project.startLocationId })
   let generation = 1
   let sequence = 0

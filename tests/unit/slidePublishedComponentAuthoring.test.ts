@@ -1,8 +1,9 @@
+import { buildPublishedFixture as buildPublishedCourseV2Payload } from '../fixtures/teacherController'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ComponentAuthoringTargetUpdate, ComponentPackageData } from '@/shared/componentTypes'
 import type { PublishedComponentLayerItem } from '@/shared/publishedCourseTypes'
 import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
-import { buildPublishedCourseV2Payload } from '@/renderer/export/course/buildPublishedCourse'
+
 import { SlidePublishedAdapter } from '@/player/surfaces/slide/SlidePublishedAdapter'
 import { publishedComponentAuthoringNode } from '@/player/surfaces/slide/publishedSlideAuthoringPatch'
 

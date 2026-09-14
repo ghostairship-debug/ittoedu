@@ -1,9 +1,14 @@
+import type { TeacherControllerAction } from '../../../shared/teacherControllerConfig'
 import type { PlaybackNavigationViewPort } from '../../navigation/coursePlaybackSequence'
+import { TeacherControllerComponentHost } from '../../teacherControllerComponentHost'
+import { controllerGeometryItem, isControllerItem, type PublishedTeacherControllerItem } from '../../teacherControllerComponentGeometry'
+import { projectFlowComponentControllerFrame } from '../../../shared/flowViewportGeometry'
+import type { TeacherControllerHostOptions } from '../../teacherControllerHostContract'
 import { createPlaybackContent, playbackGestureOccupied, type PlaybackViewSession } from '../../playbackViewSession'
 import { buildFlowRichTextHtml } from '../../../shared/flowRichText'
 import { buildNativeChartSvg } from '../../../shared/nativeChartSvg'
 import { createFlowViewportGeometry, measureFlowPaperOrigin } from '../../../shared/flowViewportGeometry'
-import { FLOW_BODY_CSS, FLOW_BODY_PAPER_PADDING, FLOW_BODY_SCROLL_PADDING, resolveFlowParagraphPresentation } from '../../../shared/flowBodyPresentation'
+import { FLOW_BODY_CSS, FLOW_BODY_PAPER_PADDING, FLOW_BODY_SCROLL_PADDING, flowPaperMaxWidth, resolveFlowParagraphPresentation } from '../../../shared/flowBodyPresentation'
 import { tableCellSpan } from '../../../shared/tableMerge'
 import { resolveCourseSurfaceBackgroundColor } from '../../../shared/courseProjectModel'
 import { resolveEffectiveBackground } from '../../../shared/effectiveBackground'
@@ -18,7 +23,7 @@ import {
   FLOW_MEDIA_QUERY_CONTAINER_TYPE,
   resolveFlowMediaLayoutProjection,
 } from '../../../shared/flowMediaLayout'
-import type { ShapeNode, TeacherControllerAction, TextRun } from '../../../shared/contracts/native-v1'
+import { ShapeNode,  TextRun } from '../../../shared/contracts/native-v1'
 
 
 import { nativeRenderInputFromPublishedItem, paintPublishedNativeRenderInput } from '../native/publishedNativeRendering'
@@ -33,13 +38,12 @@ import { mountPublishedNativeVideo, type PublishedNativeVideoHandle } from '../p
 import type { CourseStateStore } from '../../CourseStateStore'
 import type { FlowBlock, FlowBodyLayerPlane, GlobalLayerPlane } from '../../../shared/courseProjectTypes'
 import {
-  TeacherControllerDom,
   stageBoundsFromElement,
-  teacherControllerDomNode,
-  type TeacherControllerDomSession,
-} from '../../teacherControllerDom'
+  teacherControllerHostNode,
+  type TeacherControllerHostSession,
+} from '../../teacherControllerHostContract'
 import { TeacherControllerRuntimeSessionStore } from '../../teacherControllerRuntimeSession'
-import type { TeacherControllerSceneInfo } from '../../../shared/teacherControllerLayout'
+import type { TeacherControllerSceneInfo } from '../../teacherControllerHostContract'
 import type {
   PublishedFlowSurface,
   PublishedLayerItem,
@@ -194,9 +198,10 @@ export class FlowSurfaceHost {
   /** Legacy overlay handle and the physical global Overlay plane. */
   #overlay: HTMLElement | null = null
   #toc: FlowRuntimeTocChrome | null = null
-  #controller: TeacherControllerDom | null = null
+  #controller: TeacherControllerComponentHost | null = null
   readonly #teacherControllerSession: TeacherControllerRuntimeSessionStore
   #componentHandles: PublishedComponentMountHandle[] = []
+  #bodyLayoutCleanups: Array<() => void> = []
   readonly #globalInteractionVisibilityState: PublishedInteractionVisibilityState
   #interactionPort: PublishedDomInteractionSurfacePort | null = null
   #interactionGeneration = 0
@@ -342,7 +347,8 @@ export class FlowSurfaceHost {
         this.#controllerPlane = createFlowRuntimePlane(dom, 'global-overlay', 5, true)
         this.#controllerPlane.dataset.playbackControllerPlane = 'true'
         root.appendChild(this.#controllerPlane)
-        this.#options.playbackView.register({ id: this.#surfaceId, kind: 'flow', root, content })
+        this.#options.playbackView.register({ id: this.#surfaceId, kind: 'flow', root, content,
+          onObservationChange: () => this.#syncTeacherControllerSession(true) })
       }
 
       container.appendChild(root)
@@ -379,6 +385,7 @@ export class FlowSurfaceHost {
     const preparedActivation = this.#preparedRuntimeActivation
     this.#preparedRuntimeActivation = null
     this.#active = true
+    if (this.#controller instanceof TeacherControllerComponentHost) this.#controller.resume()
     if (this.#root) this.#root.hidden = false
     this.#pendingRuntimeActivation = null
     if (!(wasInactive && preparedActivation !== null)) {
@@ -409,6 +416,7 @@ export class FlowSurfaceHost {
   async suspend(): Promise<void> {
     this.#invalidateInteractions()
     this.#active = false
+    if (this.#controller instanceof TeacherControllerComponentHost) this.#controller.suspend()
     this.#carrierSideEffects.suspend()
     this.#preparedRuntimeActivation = null
     this.#pendingRuntimeActivation = null
@@ -533,6 +541,7 @@ export class FlowSurfaceHost {
   }
 
   #destroyComponentHandles(): void {
+    for (const cleanup of this.#bodyLayoutCleanups.splice(0)) cleanup()
     this.#deferredCarrierMounts = []
     for (const handle of this.#componentHandles) {
       try {
@@ -835,6 +844,7 @@ export class FlowSurfaceHost {
       onMountComponent: (handle) => {
         this.#componentHandles.push(handle)
       },
+      onLayoutCleanup: cleanup => this.#bodyLayoutCleanups.push(cleanup),
     })
     const effectiveBg = resolveEffectiveBackground({
       owner: 'flow-surface',
@@ -883,7 +893,7 @@ export class FlowSurfaceHost {
     const entries = publishedFlowOverlayEntries(this.#playback, surface, this.#locationId)
     const geometry = this.#flowGeometry()
     for (const entry of entries) {
-      if (isPublishedTeacherController(entry.item)) continue
+      if (isControllerItem(entry.item)) continue
       if (entry.item.paperSpace !== 'paper') continue
       const wrap = this.#layerPlaneForEntry(entry)?.querySelector<HTMLElement>(
         `[data-flow-overlay-item="${entry.item.layerItemId}"]`,
@@ -932,7 +942,7 @@ export class FlowSurfaceHost {
     }
     const geometry = this.#flowGeometry()
     for (const entry of entries) {
-      if (isPublishedTeacherController(entry.item)) {
+      if (isControllerItem(entry.item)) {
         this.#interactionNodes.delete(entry.item.layerItemId)
         const wrap = this.#mountTeacherController(
           entry.item,
@@ -1007,7 +1017,7 @@ export class FlowSurfaceHost {
   }
 
   #layerPlaneForEntry(entry: PublishedFlowOverlayEntry): HTMLElement | null {
-    if (isPublishedTeacherController(entry.item)) return this.#overlay
+    if (isControllerItem(entry.item)) return this.#overlay
     if (entry.source === 'surface') {
       return entry.flowBodyPlane === 'underlay' ? this.#surfaceUnderlay : this.#surfaceOverlay
     }
@@ -1015,15 +1025,15 @@ export class FlowSurfaceHost {
   }
 
   #mountTeacherController(
-    item: PublishedNativeLayerItem,
+    item: PublishedTeacherControllerItem,
     source: 'global' | 'surface',
     stackOrder: number,
   ): HTMLElement | null {
     const overlay = this.#controllerPlane ?? this.#overlay
-    if (!overlay || item.content.nativeType !== 'teacher-controller') return null
+    if (!overlay) return null
     if (this.#playback.playback?.controls === 'none') return null
-    const data = item.content.data
-    const frame = item.frame
+    const data = controllerGeometryItem(item).config
+    const frame = this.#controllerFrame(item)
     const dom = overlay.ownerDocument
     const frameEl = dom.createElement('div')
     frameEl.className = 'flow-runtime-teacher-controller-frame'
@@ -1043,27 +1053,25 @@ export class FlowSurfaceHost {
     frameEl.style.zIndex = String(stackOrder)
     overlay.appendChild(frameEl)
 
-    const node = teacherControllerDomNode(
-      { x: frame.x, y: frame.y, width: frame.width, height: frame.height },
-      item.rotation,
-      {
-        title: data.title,
-        compact: data.compact,
-        showSceneProgress: data.showSceneProgress,
-        collapsible: data.collapsible,
-        buttons: data.buttons,
-        style: data.style,
-      },
-    )
+    const node = teacherControllerHostNode({ x: frame.x, y: frame.y, width: frame.width, height: frame.height }, item.rotation)
     const scenes = this.#controllerScenes()
-    this.#controller = new TeacherControllerDom({
+    const options: TeacherControllerHostOptions = {
       navigation: this.#options.navigation,
       playbackView: this.#options.playbackView,
-      node,
+      node: { ...node, flowViewport: true },
       container: frameEl,
       footprintElement: frameEl,
       get canvas() {
         return { width: overlay.clientWidth || CANVAS_WIDTH, height: overlay.clientHeight || CANVAS_HEIGHT }
+      },
+      getConstraintCanvas: () => {
+        const chrome = this.#options.playbackView?.chrome?.controllerInsets
+        return { width: (overlay.clientWidth || CANVAS_WIDTH) - (chrome?.right ?? 0),
+          height: (overlay.clientHeight || CANVAS_HEIGHT) - (chrome?.bottom ?? 0) }
+      },
+      onPositionChange: (node, offset) => {
+        Object.assign(frameEl.style, { left: `${node.x + offset.dx}px`, top: `${node.y + offset.dy}px`,
+          width: `${node.width}px`, height: `${node.height}px` })
       },
       getRenderedStageBounds: () => stageBoundsFromElement(overlay, FLOW_LOGICAL_CANVAS),
       scenes,
@@ -1081,24 +1089,28 @@ export class FlowSurfaceHost {
           surfaceSessionId: this.#surfaceId,
           defaultCollapsed: data.collapsible && data.defaultCollapsed === true,
         }, next)
-        frameEl.style.left = `${frame.x + next.offset.dx}px`
-        frameEl.style.top = `${frame.y + next.offset.dy}px`
       },
-      onAction: (action) => {
-        void this.#handleControllerAction(action).catch((cause) => {
-          const error = cause instanceof Error ? cause : new Error(String(cause))
-          this.#options.reportActionError?.(action, error)
-        })
+      onAction: async action => {
+      const accepted = await this.#options.executeTeacherControllerAction?.(action)
+      if (accepted !== undefined) return accepted
+      await this.#handleControllerAction(action)
+      return true
       },
+      onActionError: (action, error) => { this.#options.reportActionError?.(action, error) },
       getInteractive: () => this.#active,
+    }
+    this.#controller = new TeacherControllerComponentHost(options, {
+      container: frameEl, componentId: item.component.packageId, version: item.component.version,
+      instanceId: item.layerItemId, props: item.props, width: frame.width, height: frame.height,
+      projectId: this.#playback.courseId, components: this.#components, scope: 'global',
+      resolveAsset: id => resolvePlaybackAssetUrl(this.#playback, id, this.#options.resolveAsset),
+      interactive: true, mode: 'preview',
     })
     return frameEl
   }
 
-  #controllerSessionFor(item: PublishedNativeLayerItem): TeacherControllerDomSession {
-    const data = item.content.nativeType === 'teacher-controller'
-      ? item.content.data
-      : null
+  #controllerSessionFor(item: PublishedTeacherControllerItem): TeacherControllerHostSession {
+    const data = controllerGeometryItem(item).config
     return this.#teacherControllerSession.get({
       controllerId: item.layerItemId,
       surfaceSessionId: this.#surfaceId,
@@ -1106,34 +1118,26 @@ export class FlowSurfaceHost {
     })
   }
 
-  #syncTeacherControllerSession(): void {
+  #controllerFrame(item: PublishedTeacherControllerItem) {
+    const overlay = this.#controllerPlane ?? this.#overlay
+    return projectFlowComponentControllerFrame(item.frame,
+      { width: overlay?.clientWidth || CANVAS_WIDTH, height: overlay?.clientHeight || CANVAS_HEIGHT }, this.#options.playbackView?.chrome?.controllerInsets)
+  }
+
+  #syncTeacherControllerSession(geometryOnly = false): void {
     const controller = this.#controller
     if (!controller) return
     const surface = findPublishedFlowSurface(this.#playback, this.#surfaceId)
-    const item = publishedFlowOverlayEntries(this.#playback, surface, this.#locationId)
+    const original = publishedFlowOverlayEntries(this.#playback, surface, this.#locationId)
       .map((entry) => entry.item)
-      .find(isPublishedTeacherController)
-    if (!item || item.content.nativeType !== 'teacher-controller') return
-    const data = item.content.data
-    const frame = item.frame
-    const session = this.#controllerSessionFor(item)
-    const frameEl = controller.rootElement.parentElement
-    if (frameEl) {
-      frameEl.style.left = `${frame.x + session.offset.dx}px`
-      frameEl.style.top = `${frame.y + session.offset.dy}px`
-    }
-    controller.update(teacherControllerDomNode(
-      { x: frame.x, y: frame.y, width: frame.width, height: frame.height },
-      item.rotation,
-      {
-        title: data.title,
-        compact: data.compact,
-        showSceneProgress: data.showSceneProgress,
-        collapsible: data.collapsible,
-        buttons: data.buttons,
-        style: data.style,
-      },
-    ))
+      .find(isControllerItem)
+    const item = original
+    if (!item) return
+    const data = controllerGeometryItem(item).config
+    const frame = this.#controllerFrame(item)
+    const node = { ...teacherControllerHostNode({ x: frame.x, y: frame.y, width: frame.width, height: frame.height }, item.rotation), flowViewport: true }
+    if (geometryOnly) controller.updateGeometry(node)
+    else controller.update(node)
   }
 
   #destroyController(): void {
@@ -1157,7 +1161,7 @@ export class FlowSurfaceHost {
     if (!this.#active) return
     if (this.#options.executeTeacherControllerAction) {
       const handled = await this.#options.executeTeacherControllerAction(action)
-      if (handled !== false) {
+      if (handled !== undefined) {
         this.#controller?.refreshStatus()
         return
       }
@@ -1310,13 +1314,6 @@ export function publishedFlowOverlayEntries(
     }))
 }
 
-function isPublishedTeacherController(
-  item: PublishedLayerItem,
-): item is PublishedNativeLayerItem & {
-  content: Extract<PublishedNativeLayerItem['content'], { nativeType: 'teacher-controller' }>
-} {
-  return item.kind === 'native' && item.content.nativeType === 'teacher-controller'
-}
 
 function publishedInteractionOwnership(
   item: PublishedLayerItem,
@@ -1324,7 +1321,7 @@ function publishedInteractionOwnership(
   if (item.kind === 'component') return 'component'
   if (item.kind === 'runtime') return 'runtime'
   if (item.content.nativeType === 'video') return 'media'
-  if (item.content.nativeType === 'teacher-controller') return 'teacher-controller'
+  
   return 'native'
 }
 
@@ -1372,6 +1369,7 @@ function renderStaticOverlayItem(
     courseState?: CourseStateStoreContract
     componentActions?: Readonly<ComponentHostActions>
     onMountComponent?: (handle: PublishedComponentMountHandle) => void
+    onLayoutCleanup?: (cleanup: () => void) => void
     audio?: FlowHostAudioSession
     onMountVideo?: (handle: PublishedNativeVideoHandle) => void
     deferComponentMount?: (mount: () => void) => void
@@ -1394,7 +1392,8 @@ function renderStaticOverlayItem(
   wrap.style.width = `${entry.item.frame.width}px`
   wrap.style.height = `${entry.item.frame.height}px`
   wrap.style.opacity = String(entry.item.opacity)
-  wrap.dataset.playbackBounds = 'true'
+  // Paper annotations belong to document scrolling, not observation pan bounds.
+  if (entry.item.paperSpace !== 'paper') wrap.dataset.playbackBounds = 'true'
   if (entry.item.kind === 'runtime' || entry.item.kind === 'component') wrap.dataset.layerKind = entry.item.kind
   wrap.style.transform = entry.item.rotation === 0 ? '' : `rotate(${entry.item.rotation}deg)`
   wrap.style.transformOrigin = 'center center'
@@ -1501,6 +1500,7 @@ function renderFlowArticle(
     courseState?: CourseStateStoreContract
     componentActions?: Readonly<ComponentHostActions>
     onMountComponent?: (handle: PublishedComponentMountHandle) => void
+    onLayoutCleanup?: (cleanup: () => void) => void
     deferComponentMount?: (mount: () => void) => void
   },
 ): HTMLElement {
@@ -1584,7 +1584,8 @@ function renderFlowArticle(
 
   const reading = dom.createElement('div')
   reading.className = 'flow-runtime-reading flow-body-content'
-  reading.style.maxWidth = `${surface.layout.readingWidth}px`
+  reading.style.maxWidth = flowPaperMaxWidth(surface.layout)
+  reading.style.width = '100%'
   reading.style.margin = '0 auto'
   reading.style.padding = FLOW_BODY_PAPER_PADDING
   const typography = dom.createElement('style')
@@ -1595,6 +1596,7 @@ function renderFlowArticle(
   for (const block of surface.blocks) {
     renderBlockDom(block, reading, {
       ...options,
+      widthMode: surface.layout.widthMode,
       readingWidth: surface.layout.readingWidth,
       wideContentWidth: surface.layout.wideContentWidth,
     })
@@ -1608,6 +1610,20 @@ function renderFlowArticle(
   return article
 }
 
+/** Repaint only static content. Dynamic hosts receive resize without remounting. */
+function observeFlowBlockWidth(element: HTMLElement, resize: (width: number) => void, register?: (cleanup: () => void) => void): void {
+  if (typeof ResizeObserver !== 'function') return
+  let previous = 0
+  const observer = new ResizeObserver(() => {
+    const width = element.clientWidth
+    if (width <= 0 || width === previous) return
+    previous = width
+    resize(width)
+  })
+  observer.observe(element)
+  register?.(() => observer.disconnect())
+}
+
 function renderBlockDom(
   block: FlowBlock,
   parent: HTMLElement,
@@ -1617,12 +1633,14 @@ function renderBlockDom(
     components?: Record<string, PublishedComponentPackageSource>
     resolveAsset?: (assetId: string) => string | undefined
     dom: Document
+    widthMode?: 'fluid' | 'reading'
     readingWidth?: number
     wideContentWidth?: number
     interactive?: boolean
     courseState?: CourseStateStoreContract
     componentActions?: Readonly<ComponentHostActions>
     onMountComponent?: (handle: PublishedComponentMountHandle) => void
+    onLayoutCleanup?: (cleanup: () => void) => void
     deferComponentMount?: (mount: () => void) => void
   },
 ): void {
@@ -1685,6 +1703,7 @@ function renderBlockDom(
       const readingWidth = options.readingWidth ?? 760
       const wideContentWidth = options.wideContentWidth ?? 1120
       const projection = resolveFlowMediaLayoutProjection(block.layout, {
+        widthMode: options.widthMode,
         readingWidth,
         wideContentWidth,
       })
@@ -1755,9 +1774,13 @@ function renderBlockDom(
     case 'chart': {
       const figure = assignBlock(dom.createElement('figure'))
       figure.style.width = '100%'
-      figure.style.aspectRatio = `${Math.max(240, (options.readingWidth ?? 760) - 104)} / ${block.height}`
-      figure.innerHTML = buildNativeChartSvg(block.chart, Math.max(240, (options.readingWidth ?? 760) - 104), block.height, block.id)
+      figure.style.height = `${block.height}px`
+      const paint = (width: number) => {
+        figure.innerHTML = buildNativeChartSvg(block.chart, Math.max(240, width), block.height, block.id)
+      }
+      paint((options.readingWidth ?? 760) - 72)
       parent.appendChild(figure)
+      observeFlowBlockWidth(figure, paint, options.onLayoutCleanup)
       break
     }
     case 'table': {
@@ -1813,11 +1836,16 @@ function renderBlockDom(
       }
       const size = fittedPublishedFormulaSize(paint)
       wrap.style.width = '100%'
-      wrap.style.maxWidth = `${readingWidth}px`
       wrap.style.height = `${size.height}px`
       wrap.style.overflow = 'hidden'
       paintPublishedFormula(wrap, { ...paint, height: size.height })
       parent.appendChild(wrap)
+      observeFlowBlockWidth(wrap, width => {
+        const next = { ...paint, width: Math.max(160, width) }
+        const fitted = fittedPublishedFormulaSize(next)
+        wrap.style.height = `${fitted.height}px`
+        paintPublishedFormula(wrap, { ...next, height: fitted.height })
+      }, options.onLayoutCleanup)
       return
     }
     case 'code': {
@@ -1880,7 +1908,7 @@ function renderBlockDom(
           componentId: block.component.packageId,
           version: block.component.version,
           instanceId: block.id,
-          width: options.readingWidth ?? 760,
+          width: figure.clientWidth || options.readingWidth || 760,
           height: 320,
           props: block.props,
           staticFallbackAssetId: block.staticFallbackAssetId,
@@ -1891,6 +1919,12 @@ function renderBlockDom(
           ...(options.courseState ? { courseState: options.courseState } : {}),
           ...(options.componentActions ? { actions: options.componentActions } : {}),
         })
+        const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(() => {
+          if (figure.clientWidth > 0) handle.resize(figure.clientWidth, 320)
+        }) : null
+        observer?.observe(figure)
+        const destroy = handle.destroy.bind(handle)
+        handle.destroy = () => { observer?.disconnect(); destroy() }
         options.onMountComponent?.(handle)
       }
       if (options.deferComponentMount) options.deferComponentMount(mountInstance)

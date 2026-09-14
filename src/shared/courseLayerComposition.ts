@@ -1,4 +1,5 @@
 import { mergeCourseNativeData } from './courseProjectSchema'
+import { isTeacherController } from './teacherControllerRole'
 import type {
   BackgroundMode,
   CourseLocation,
@@ -257,7 +258,7 @@ function resolveExactState(
 }
 
 function isComposableTeacherController(item: ComposableLayerItem): boolean {
-  return item.kind === 'native' && item.content.nativeType === 'teacher-controller'
+  return isTeacherController(item)
 }
 
 /**

@@ -312,7 +312,7 @@ test('V9 current/full preview embeds local assets and leases declared origins pe
     // holds its own lease for the active project after try-run releases its lease.
     await expect(fetchSucceeded(page, `${api.origin}/authoring-after-current`)).resolves.toBe(true)
 
-    await page.getByTitle('全屏 16:9 整课预览').click()
+    await page.getByTitle('整课预览').click()
     await expect(page.getByTestId('course-preview-overlay')).toBeVisible()
     const fullPreviewImages = page.getByTestId('course-preview-host').locator('img')
     const assetARemoteBeforeFull = remoteImageRequestCount(assetA)

@@ -1,3 +1,4 @@
+import { buildPublishedFixture as buildPublishedCourseV2Payload } from '../fixtures/teacherController'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { strFromU8, unzipSync } from 'fflate'
 import type { CourseProjectDocument } from '@/shared/courseProjectTypes'
@@ -7,7 +8,7 @@ import {
   addCourseSpatialPage,
 } from '@/renderer/course/courseLocationCommands'
 import { componentPackagesFromArchive } from '@/renderer/components/componentPackageStore'
-import { buildPublishedCourseV2Payload, type CoursePublishSources } from '@/renderer/export/course/buildPublishedCourse'
+import {  type CoursePublishSources } from '@/renderer/export/course/buildPublishedCourse'
 import {
   buildCourseExportPageList,
   buildCoursePrintArtifacts,

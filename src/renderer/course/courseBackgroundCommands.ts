@@ -6,6 +6,7 @@ import {
   rejectIfStaleDocument,
 } from './globalLayerCommands'
 import { commitSlideProjectMutation } from './slideEditorCommands'
+import { resolveEffectiveBackground } from '../../shared/effectiveBackground'
 
 /**
  * Course has no `backgroundMode`: per IMPLEMENTATION_CONTRACT.md §7.1/§7.2 it
@@ -99,11 +100,11 @@ export function updateSlideBackgroundOwner(
       if (!target.stateId) return { owner: scene, base: null }
       const state = scene.presentation?.states.find((entry) => entry.id === target.stateId)
       if (!state) throw new Error('找不到当前状态')
-      return { owner: state, base: scene }
+      return { owner: state, base: resolveEffectiveBackground({ owner: 'slide-scene', course: document, surface, scene }) }
     }
     const { owner, base } = resolve(project)
-    const nextColor = base && color === base.backgroundColor ? undefined : color
-    const nextAsset = base && patch.backgroundAssetId === base.backgroundAssetId ? undefined : patch.backgroundAssetId
+    const nextColor = base && color === base.color ? undefined : color
+    const nextAsset = base && patch.backgroundAssetId === base.assetId ? undefined : patch.backgroundAssetId
     const modeChanges = patch.backgroundMode !== undefined && patch.backgroundMode !== ('backgroundMode' in owner ? owner.backgroundMode ?? (target.sceneId ? 'own' : 'inherit') : 'inherit')
     const colorChanges = patch.backgroundColor !== undefined && nextColor !== owner.backgroundColor
     const assetChanges = patch.backgroundAssetId !== undefined && (base ? nextAsset !== owner.backgroundAssetId : nextAsset !== (owner.backgroundAssetId ?? null))

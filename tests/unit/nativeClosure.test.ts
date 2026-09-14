@@ -1,3 +1,4 @@
+import { buildPublishedFixture as buildPublishedCourseV2Payload } from '../fixtures/teacherController'
 import { describe, expect, it } from 'vitest'
 import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
 import { publishedCourseV2Schema } from '@/shared/publishedCourseSchema'
@@ -11,7 +12,7 @@ import {
 } from '@/renderer/project/nativeNodeFactories'
 import { sceneNodeToCourseLayerItem } from '@/shared/courseProjectModel'
 import {
-  buildPublishedCourseV2Payload,
+  
   collectPublishedCourseAssetIds,
 } from '@/renderer/export/course/buildPublishedCourse'
 import {

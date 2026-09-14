@@ -85,6 +85,7 @@ export interface FlowTextAuthoringController {
   ) => void
   readonly openFormula: (blockId: string) => void
   readonly updateFormulaDraft: (draft: {
+    readonly composing?: boolean
     readonly source: string
     readonly ast: FormulaAstNode | null
     readonly accessibleText: string
@@ -114,6 +115,7 @@ export function useFlowTextAuthoringController(
   } = input
   const editRef = useRef<FlowTextEditSession | null>(textEdit)
   const editTargetRef = useRef<CourseAuthoringTarget | null>(null)
+  const pendingCommitSelection = useRef<{ keepSelected: boolean; nextBlockId?: string } | null>(null)
   const publishedEditRef = useRef<FlowTextEditSession | null>(null)
   const [restyleRequest, setRestyleRequest] = useState<{
     readonly token: number
@@ -126,7 +128,7 @@ export function useFlowTextAuthoringController(
     captureFlowEditorAuthoringTarget({
       view,
       sessionToken,
-      target: { kind: 'block', blockId },
+      target: view.overlayLayers.some(layer => layer.selectionId === blockId) ? { kind: 'overlay', layerItemId: blockId } : { kind: 'block', blockId },
     })
   ), [sessionToken, view])
 
@@ -231,9 +233,12 @@ export function useFlowTextAuthoringController(
     if (!current) return
     const action = resolveFlowTextBlur({ composing: current.composing, blurReady: true })
     if (action === 'defer') {
+      pendingCommitSelection.current = { keepSelected, nextBlockId }
       setEditState(deferFlowTextAction(current, 'commit'))
       return
     }
+    const pending = pendingCommitSelection.current
+    if (pending) { keepSelected = pending.keepSelected; nextBlockId = pending.nextBlockId }
     const target = editTargetRef.current
     if (!target) return
     const receipt = commands.run(target, {
@@ -243,6 +248,7 @@ export function useFlowTextAuthoringController(
       ...(nextBlockId ? { nextBlockId } : {}),
     })
     if (!receipt.ok) return
+    pendingCommitSelection.current = null
     publishedEditRef.current = null
     editRef.current = null
     editTargetRef.current = null
@@ -313,7 +319,7 @@ export function useFlowTextAuthoringController(
   }, [commands])
 
   const openFormula = useCallback((blockId: string) => {
-    if (readOnly || selection?.authoringScope === 'global') return
+    if (readOnly) return
     if (editRef.current?.kind === 'formula' && editRef.current.blockId === blockId) {
       setFormulaBlockId(blockId)
       return
@@ -328,6 +334,7 @@ export function useFlowTextAuthoringController(
   }, [commands, readOnly, selection?.authoringScope, targetForBlock])
 
   const updateFormulaDraft = useCallback((draft: {
+    readonly composing?: boolean
     readonly source: string
     readonly ast: FormulaAstNode | null
     readonly accessibleText: string
@@ -337,20 +344,27 @@ export function useFlowTextAuthoringController(
     const current = editRef.current
     if (!current || current.kind !== 'formula') return
     const previous = current.draft as FlowFormulaDraft
-    setEditState(updateFlowTextDraft(current, {
+    const updated = markFlowTextComposing(updateFlowTextDraft(current, {
       ast: draft.ast ?? previous.ast,
       accessibleText: draft.ast ? draft.accessibleText : previous.accessibleText,
       source: draft.source,
       valid: draft.committable,
       hasSlots: draft.hasSlots,
-    }))
-  }, [setEditState])
+    }), draft.composing ?? current.composing)
+    setEditState(updated)
+    if (draft.composing === false && updated.pendingAction === 'commit') commitCurrent()
+  }, [setEditState, commitCurrent])
 
   const setFormulaComposing = useCallback((composing: boolean) => {
     const current = editRef.current
     if (!current || current.kind !== 'formula' || current.composing === composing) return
-    setEditState(markFlowTextComposing(current, composing))
-  }, [setEditState])
+    if (composing) setEditState(markFlowTextComposing(current, true))
+    else {
+      const finished = finishFlowTextComposition(current)
+      setEditState(finished.edit)
+      if (finished.action === 'commit') commitCurrent()
+    }
+  }, [setEditState, commitCurrent])
 
   const enterText = useCallback((
     blockId: string,

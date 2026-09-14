@@ -1,3 +1,5 @@
+import { buildPublishedFixture as buildPublishedCourseV2Payload } from '../fixtures/teacherController'
+import { isControllerFixture } from '../fixtures/teacherController'
 import { describe, expect, it } from 'vitest'
 import {
   composeCourseProjectLocation,
@@ -23,7 +25,7 @@ import {
   buildSpatialEditorView,
   composeSpatialEditorLocation,
 } from '@/renderer/course/spatialEditorView'
-import { buildPublishedCourseV2Payload } from '@/renderer/export/course/buildPublishedCourse'
+
 import {
   composePublishedSlideLocation,
 } from '@/player/surfaces/slide/SlidePublishedAdapter'
@@ -154,7 +156,7 @@ describe('shared ↔ renderer ↔ raw Published V2 composition parity', () => {
     const source = fixture('global-layer-teacher-controller').data
     const project = structuredClone(source.project)
     const controller = project.globalLayerItems.find((entry) => (
-      entry.item.kind === 'native' && entry.item.content.nativeType === 'teacher-controller'
+      isControllerFixture(entry.item)
     ))
     if (!controller) throw new Error('expected global teacher controller')
     controller.visibility = { mode: 'include', locationIds: ['location-scene-2'] }
@@ -179,7 +181,7 @@ describe('shared ↔ renderer ↔ raw Published V2 composition parity', () => {
       stateId: null,
     }))
     expect(shared.entries.find((entry) => (
-      entry.item.kind === 'native' && entry.item.content.nativeType === 'teacher-controller'
+      isControllerFixture(entry.item)
     ))).toMatchObject({ applicable: false, globalPlane: 'overlay' })
   })
 

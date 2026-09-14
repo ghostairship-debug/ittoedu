@@ -130,7 +130,6 @@ import {
   type V9SlideFormulaContentDraft,
   type V9SlideTextContentDraft,
 } from '../authoring/v9SlideContentEdit'
-import { commitTeacherControllerAuthoringFrame } from '../authoring/v9TeacherControllerAuthoring'
 import type { RuntimeTargetEditSession } from '../authoring/runtimeTargetEditSession'
 import {
   commandTargetFromRow,
@@ -253,6 +252,7 @@ import {
   updateCoursePlaybackSettings,
 } from '../course/globalLayerCommands'
 import { createBlankCourseProject } from '../project/createCourseProject'
+import { withDefaultComponentController } from '../components/teacherControllerComponent'
 import {
   courseProjectStartsAsSpatial,
   createBlankSpatialCourseProject,
@@ -626,7 +626,8 @@ export function selectHasUnsavedCourseChanges(state: EditorState): boolean {
 }
 
 export const useEditorStore = create<EditorState>((set, get) => {
-  const initialCourse = createBlankCourseProject()
+  const initialBundle = withDefaultComponentController(createBlankCourseProject())
+  const initialCourse = initialBundle.project
   const initialBackend = createSlideAuthoringBackend(openSlideAuthoringSession(initialCourse))
   const initialSidecar = emptyCourseAssetSidecar()
   const initialSnapshot = initialBackend.getSnapshot()
@@ -964,13 +965,23 @@ export const useEditorStore = create<EditorState>((set, get) => {
         none: () => false,
       })
     },
-    persistTransaction: (step, statusMessage) => {
+    persistTransaction: (step, statusMessage, policy) => {
       const state = get()
       const crossSurface = persistCrossSurfaceToolTransaction(step, statusMessage, {
         session: state.courseAuthoringSession, path: state.projectPath,
         readHistory: () => state.spatialSession?.history ?? state.flowSession?.history
           ?? (isSlideAuthoringBackend(state.slideBackend) ? state.slideBackend.getSession().history : null),
         readResources: () => kernel.readResources(), write: patch => set(patch),
+        preserveBrowsing: policy?.preserveBrowsing,
+        reprojectBrowsing: history => {
+          if (state.spatialSession) return { spatialSession: { ...state.spatialSession, history } }
+          if (state.flowSession) return { flowSession: { ...state.flowSession, history } }
+          if (isSlideAuthoringBackend(state.slideBackend)) {
+            const backend = createSlideAuthoringBackend({ ...state.slideBackend.getSession(), history })
+            return { slideBackend: backend, slideCandidateSnapshot: backend.getSnapshot() }
+          }
+          return null
+        },
       })
       if (crossSurface !== undefined) return crossSurface
       const active = detectActiveSurface({
@@ -1223,7 +1234,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     get assetFiles() {
       return selectMediaAssetFiles(get())
     },
-    componentPackages: {},
+    componentPackages: initialBundle.componentPackages,
     editorMode: loadEditorMode(),
     activeTab: 'elements',
     editingTextNodeId: null,

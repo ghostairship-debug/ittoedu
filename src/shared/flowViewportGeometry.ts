@@ -1,32 +1,14 @@
-import {
-  constrainTeacherControllerAuthoringFrame,
-  teacherControllerAuthoringRecoveryBounds,
-  type TeacherControllerLayoutSource,
-} from './teacherControllerLayout'
+import type { PlaybackChromeInsets } from './playbackViewGeometry'
 
 export interface FlowPoint { readonly x: number; readonly y: number }
 export interface FlowSize { readonly width: number; readonly height: number }
 export interface FlowRect extends FlowPoint, FlowSize {}
 
-/** View-only controller projection shared by Flow overlay display and hit-testing. */
-export function projectFlowControllerOverlayFrame(
-  source: TeacherControllerLayoutSource,
-  frame: FlowRect,
-  rotation: number,
-  viewport: FlowSize,
-): FlowRect {
-  return constrainTeacherControllerAuthoringFrame(source, frame, rotation, viewport)
-}
-
-/** Client-space recovery bounds for a controller projected into the overlay viewport. */
-export function flowControllerOverlayRecoveryBounds(
-  source: TeacherControllerLayoutSource,
-  frame: FlowRect,
-  rotation: number,
-  viewport: FlowSize,
-) {
-  const projected = projectFlowControllerOverlayFrame(source, frame, rotation, viewport)
-  return teacherControllerAuthoringRecoveryBounds(source, projected, rotation)
+/** Component layout is authored code: preserve its frame instead of applying native button rows. */
+export function projectFlowComponentControllerFrame(frame: FlowRect, viewport: FlowSize, chrome: PlaybackChromeInsets = { right: 0, bottom: 0 }): FlowRect {
+  const available = { width: Math.max(16, viewport.width - chrome.right), height: Math.max(16, viewport.height - chrome.bottom) }
+  const width = Math.min(frame.width, available.width), height = Math.min(frame.height, available.height)
+  return { width, height, x: Math.max(0, Math.min(frame.x, available.width - width)), y: Math.max(0, Math.min(frame.y, available.height - height)) }
 }
 
 /** Minimum view-only translation to reveal a selection; oversized content stays at 1:1. */

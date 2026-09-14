@@ -20,7 +20,15 @@
 
 机器发现入口为 [`artifacts/ai-capabilities/index.json`](../artifacts/ai-capabilities/index.json)，组件细节按需读取 `schemas/component-api4.json` 与 `component-catalog.snapshot.json`。快照只接纳与预期 catalog SHA-256、包字节哈希和 manifest 身份一致的条目；审核摘要缺失、目录缺失或完整性不匹配时必须标记为不可用/降级。这里的 catalog 状态表达发行身份与完整性，不决定组件执行权限。它不是组件生成器，也不解除质量门禁。目录不可用时仍可通过「导入外部组件」或课例构建写入工程内嵌包。不得因生成物存在或矩阵测试通过就宣称稳定、可商用或发布就绪。
 
-组件不应重复实现编辑器已有的一等能力：常规视频使用 `VideoNode`，课程声音使用 `media.audio` 声音库与声道，默认教师控制平台使用 `globalLayer` 中的 `TeacherControllerNode`。内置控制器的默认 `scene.open-picker` 按钮展开全部场景，选择后只进入目标初始状态；固定 `scene.go` 是高级按钮动作。只有策划要求独特视觉、复用封装或内置节点无法表达的行为时，才把媒体播放器或控制平台制作成 V4 组件。
+组件不应重复实现编辑器已有的导航和播放状态。常规视频使用 Native video，课程声音使用 `media.audio`；新建工程的教师控制台使用内嵌的 Component API 4 包，旧 Native 控制台继续兼容，并通过 `component.controller` 的 `convert` 显式转换。
+
+教师控制台是全局 Overlay 中唯一的 `kind: component, role: teacher-controller` 实例，角色不藏在 props，也不由包名推断。UI 保留全局属性入口；参数走 `component.configure`，布局、纹理、图片和结构走 `component.package` 的增量 `patch`。源码、素材和实例进入同一工程资源事务，保存、重开与导出继续使用工程包。`component.controller` 的 `restore` 恢复默认源码，可撤销。
+
+仅正式控制台角色收到可选 `ctx.teacherController`。完整类型见 `src/shared/contracts/component-v4/teacherController.ts`，能力协议的 `sharedTypes.teacherController` 同源提供：`read/subscribe` 读取当前场景、步骤、目录、静音、全屏、缩放与折叠状态；`canExecute/execute` 使用正式教师动作并返回接受结果；`setCollapsed/moveBy/setZoom/resetView` 操作唯一临时 Session。订阅必须销毁；作者态与捕获态不执行动作。普通组件沿用自己的受守卫导航接口，不能借用教师强制跳转。
+
+控制台可采用透明底板、非矩形和分散按钮，与背景在视觉上融合，但始终独立于课件缩放、平移、Flow 滚动和 Spatial 镜头；空白区域设 `pointer-events:none`，真实控件显式接收输入并提供标签/焦点。默认包支持 `backgroundAssetId` 和 `sceneStyles[locationId]`；包素材使用 `ctx.assetUrl`，工程图片使用 `ctx.projectAssetUrl`，加载与动画就绪使用 `ctx.capture.waitUntil`。源码不必保留默认面板结构。背景融合任务不能只改颜色就声称完成。
+
+运行时异常或不可达可用 `Ctrl+Alt+Home` 唤起临时“恢复教师控制台”，仅在当前播放会话恢复默认组件，不改工程。静态输出默认不包含控制台；`props.includeInStaticExports:true` 时使用组件捕获图面，Flow 的全局全页控制台作为页脚图片输出。
 
 ### 0.1 当前组件来源
 

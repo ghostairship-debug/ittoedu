@@ -1,3 +1,5 @@
+import { controllerMetadata } from '../fixtures/teacherController'
+import { createControllerFixture } from '../fixtures/teacherController'
 import { describe, expect, it } from 'vitest'
 import { getEffectiveCourseLayerOrder } from '@/shared/courseProjectModel'
 import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
@@ -7,7 +9,7 @@ import {
   type FlowBlock,
 } from '@/shared/courseProjectTypes'
 import { sceneNodeToCourseLayerItem } from '@/shared/courseProjectModel'
-import { createTeacherControllerNode, createTextNode } from '@/renderer/project/nativeNodeFactories'
+import {  createTextNode } from '@/renderer/project/nativeNodeFactories'
 import { syncFlowCourseLocations } from '@/renderer/course/flowDocumentModel'
 import {
   flowBlockLayerMembership,
@@ -49,7 +51,7 @@ function courseShell(): Omit<CourseProjectDocument, 'locations' | 'startLocation
         height: 80,
       },
     },
-    componentPackages: {
+    componentPackages: { ...controllerMetadata,
       'com.example.flow': {
         packageId: 'com.example.flow',
         version: '1.0.0',
@@ -87,9 +89,9 @@ function courseShell(): Omit<CourseProjectDocument, 'locations' | 'startLocation
     courseState: [],
     navigationGuards: [],
     globalLayerItems: [{
-      item: sceneNodeToCourseLayerItem(createTeacherControllerNode({
+      item: createControllerFixture({
         id: 'teacher-controller-main',
-      }), 90),
+      }, 90),
       visibility: { mode: 'all', locationIds: [] },
     }],
     globalInteractions: [],

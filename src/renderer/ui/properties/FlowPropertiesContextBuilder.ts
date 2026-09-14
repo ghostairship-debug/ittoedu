@@ -1,3 +1,4 @@
+import type { FormulaAuthoringBinding } from '../FormulaAuthoringEditor'
 import { connectChartCanvasText } from '../../authoring/chartCanvasTextBridge'
 import type {
   CourseAuthoringSessionToken,
@@ -26,6 +27,7 @@ import type {
 
 type FlowPropertiesIntent = Extract<FlowAuthoringIntent, {
   readonly kind:
+    | 'set-width-mode'
     | 'rename-page'
     | 'set-paper-background'
     | 'set-surface-background'
@@ -58,6 +60,7 @@ export type FlowPropertiesOwnerResult =
       readonly locationId: string
       readonly editingGlobal: boolean
       readonly context: FlowPropertiesContext | null
+      readonly globalFormulaAuthoring?: FormulaAuthoringBinding
     }
 
 function draftBindingKey(target: CourseAuthoringTarget | null): string {
@@ -140,6 +143,7 @@ function createCommands(input: {
   })
   return {
     connectChartCanvasText: port => input.target ? connectChartCanvasText(input.target, port) : () => {},
+    setWidthMode: widthMode => run({ kind: 'set-width-mode', widthMode }),
     renamePage: (_surfaceId, title) => run({ kind: 'rename-page', title }),
     setPaperBackground: (_surfaceId, backgroundColor) => run({
       kind: 'set-paper-background',
@@ -196,11 +200,10 @@ function createCommands(input: {
       kind: 'patch-overlay-paper-space',
       paperSpace,
     }),
-    commitOverlayFormula: (ast, accessibleText) => run({
-      kind: 'commit-overlay-formula',
-      ast,
-      accessibleText,
-    }),
+    commitOverlayFormula: (ast, accessibleText) => {
+      if (input.textEdit?.kind === 'formula') dispatch({ kind: 'commit-text-edit', edit: input.textEdit })
+      else run({ kind: 'commit-overlay-formula', ast, accessibleText })
+    },
     patchOverlayProperties: (patch) => run({
       kind: 'patch-overlay-properties',
       patch,
@@ -230,13 +233,13 @@ function createCommands(input: {
       dispatch({
         kind: 'update-text-edit',
         expectedEdit: input.textEdit,
-        edit: updateFlowTextDraft(input.textEdit, {
+        edit: markFlowTextComposing(updateFlowTextDraft(input.textEdit, {
           ast: draft.ast ?? previous.ast,
           accessibleText: draft.ast ? draft.accessibleText : previous.accessibleText,
           source: draft.source,
           valid: draft.committable,
           hasSlots: draft.hasSlots,
-        }),
+        }), draft.composing ?? input.textEdit.composing),
       })
     },
     setBlockFormulaComposing: (composing) => {
@@ -309,11 +312,27 @@ export function buildFlowPropertiesOwner(input: {
       }
     }
     if (editingGlobal) {
+      const id = selection.selectedOverlayIds.at(-1)
+      const item = id ? view.overlayLayers.find(layer => layer.selectionId === id)?.item : null
+      const target = item?.kind === 'native' && item.content.nativeType === 'formula'
+        ? captureTarget('flow-overlay', view, selection, token) : null
+      const commands = target ? createCommands({ target, selection, textEdit: input.textEdit,
+        runIntent: input.runIntent, selectedOverlayIsComponent: false, reportError: input.reportError }) : null
+      const draft = input.textEdit?.kind === 'formula' && input.textEdit.blockId === id
+        ? input.textEdit.draft as FlowFormulaDraft : null
       return {
         status: 'active',
         locationId: selection.locationId,
         editingGlobal,
         context: null,
+        ...(commands ? { globalFormulaAuthoring: {
+          draftSource: draft?.source,
+          onBeginEdit: commands.beginBlockFormulaEdit,
+          onDraftChange: commands.updateBlockFormulaDraft,
+          onCompositionChange: commands.setBlockFormulaComposing,
+          onCancel: commands.cancelBlockFormulaEdit,
+          onCommit: commands.commitOverlayFormula,
+        } } : {}),
       }
     }
     const kind: FlowPropertiesKind = selection.focus === 'overlay'

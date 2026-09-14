@@ -1,3 +1,4 @@
+import { canEditLayerInScope } from '../../shared/teacherControllerRole'
 import type {
   ComponentLayerItem,
   LayerItem,
@@ -27,7 +28,6 @@ const NATIVE_NODE_TYPES = new Set([
   'image',
   'video',
   'shape',
-  'teacher-controller',
 ])
 
 function slideSurface(
@@ -115,7 +115,7 @@ export function projectV9EditingNodes(backend: SlideAuthoringBackend): EditorCan
     stateId: session.selection.stateId,
   })
   return view.layers.flatMap((layer) => {
-    if (layer.source !== session.scope) return []
+    if (!canEditLayerInScope(layer, session.scope)) return []
     const node = courseLayerItemToEditorCanvasNode(layer.item as LayerItem)
     return node ? [node] : []
   })

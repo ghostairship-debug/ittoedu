@@ -11,7 +11,7 @@ export const localAgentEventSchema = z.object({
   version: z.literal(1), adapter: localAgentIdSchema, sessionId: z.uuid(),
   externalSessionId: z.string().min(1).max(200).optional(),
   sequence: z.number().int().positive(), time: z.number().int().nonnegative(),
-  kind: z.enum(['session', 'text', 'tool-call', 'tool-result', 'usage', 'completed', 'failed', 'cancelled']),
+  kind: z.enum(['session', 'user-message', 'text', 'tool-call', 'tool-result', 'usage', 'completed', 'failed', 'cancelled']),
   payload: z.json(), failure: localAgentFailureSchema.optional(),
 }).strict().superRefine((event, ctx) => {
   if ((event.kind === 'failed') !== (event.failure !== undefined)) ctx.addIssue({ code: 'custom', message: 'failed requires a failure category' })
@@ -53,19 +53,24 @@ export const localAgentProbeSchema = z.object({
 export type LocalAgentProbe = z.infer<typeof localAgentProbeSchema>
 const identity = z.string().min(1).max(200)
 const support = z.enum(['supported', 'unsupported', 'unknown'])
+const serviceTier = identity.nullable().optional()
+const configurationShape = { model: identity, effort: identity.nullable(), serviceTier }
 export const localAgentCapabilitiesSchema = z.object({
   version: z.literal(1), adapter: localAgentIdSchema, cliVersion: identity,
   models: z.array(z.object({
     id: identity, resolvedModel: identity.nullable(), label: z.string().min(1).max(300), image: support,
+    serviceTiers: z.array(z.object({ id: identity, name: identity, description: z.string().max(4000) }).strict()).max(20).optional(),
     effort: z.discriminatedUnion('kind', [
       z.object({ kind: z.literal('supported'), values: z.array(identity).min(1).max(20), default: identity.nullable() }).strict(),
       z.object({ kind: z.literal('unsupported') }).strict(),
       z.object({ kind: z.literal('unknown') }).strict(),
     ]),
   }).strict()).max(1000),
-  current: z.object({ model: identity.nullable(), resolvedModel: identity.nullable(), effort: identity.nullable() }).strict(),
+  current: z.object({ model: identity.nullable(), resolvedModel: identity.nullable(), effort: identity.nullable(), serviceTier }).strict(),
+  currentSource: z.enum(['native-config', 'native-session']).optional(),
+  selectedConfiguration: z.object(configurationShape).strict().optional(),
   // A requested next-turn configuration is not evidence that the native CLI applied it.
-  requestedConfiguration: z.object({ model: identity, effort: identity.nullable() }).strict().nullable().optional(),
+  requestedConfiguration: z.object(configurationShape).strict().nullable().optional(),
   input: z.object({ image: support, readFile: support, question: z.enum(['structured', 'text', 'unknown']), correction: z.enum(['active-turn', 'turn-boundary', 'unknown']), cancel: support }).strict(),
 }).strict().superRefine((capabilities, ctx) => {
   const fail = (message: string) => ctx.addIssue({ code: 'custom', message })
@@ -79,7 +84,7 @@ export const localAgentCapabilitiesSchema = z.object({
   if (capabilities.current.effort !== null && (current?.effort.kind !== 'supported' || !current.effort.values.includes(capabilities.current.effort))) fail('当前强度没有原生确认依据')
 })
 export type LocalAgentCapabilities = z.infer<typeof localAgentCapabilitiesSchema>
-export const localAgentConfigurationSchema = z.object({ model: identity, effort: identity.nullable() }).strict()
+export const localAgentConfigurationSchema = z.object(configurationShape).strict()
 export type LocalAgentConfiguration = z.infer<typeof localAgentConfigurationSchema>
 
 const owner = { projectId: z.string().min(1).max(200), projectPath: z.string().min(1).max(32767) }
@@ -92,7 +97,7 @@ export const localAgentRequestSchema = z.discriminatedUnion('operation', [
   z.object({ operation: z.literal('file-status'), ...owner }).strict(),
   z.object({ operation: z.literal('start'), ...owner, adapter: localAgentIdSchema, prompt: z.string().min(1).max(100000) }).strict(),
   z.object({ operation: z.literal('resume'), ...owner, sessionId: z.uuid(), prompt: z.string().min(1).max(100000) }).strict(),
-  z.object({ operation: z.literal('generate'), ...owner, adapter: localAgentIdSchema, request: generationRequestSchema, resumeSessionId: z.uuid().optional() }).strict(),
+  z.object({ operation: z.literal('generate'), ...owner, adapter: localAgentIdSchema, request: generationRequestSchema, resumeSessionId: z.uuid().optional(), userMessage: z.string().min(1).max(20000).optional() }).strict(),
   z.object({ operation: z.literal('continue'), ...owner, sessionId: z.uuid(), request: generationRequestSchema }).strict(),
   z.object({ operation: z.literal('candidate'), ...owner, sessionId: z.uuid() }).strict(),
   z.object({ operation: z.literal('host-result'), ...owner, sessionId: z.uuid(), result: localAgentHostResultSchema, commitReceipt: generationCommitReceiptSchema.optional() }).strict(),

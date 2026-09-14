@@ -1,7 +1,6 @@
+import { controllerDisplayFrame } from './controllerDisplayBounds'
 import { CANVAS_HEIGHT, CANVAS_WIDTH, MIN_NODE_SIZE } from '../../shared/constants'
 import type { LayerItem } from '../../shared/courseProjectTypes'
-import { isCourseTeacherControllerLayerItem } from '../../shared/teacherControllerConsistency'
-import { constrainTeacherControllerAuthoringFrame } from '../../shared/teacherControllerLayout'
 import {
   clientToWorld,
   resizeWorldFrameFromHandle,
@@ -130,7 +129,7 @@ function hits(snapshot: SpatialWorldAuthoringSnapshot): V9SpatialHitTarget[] {
   const all = adaptV9SpatialEditorLayers(snapshot.view.layers)
   return snapshot.scope === 'global'
     ? all
-    : all.filter((target) => target.nativeType !== 'teacher-controller')
+    : all.filter((target) => true)
 }
 
 function pointInWorld(
@@ -172,14 +171,9 @@ function transforms(
       || (coordinateSpace === 'world' && target.source !== 'world')
       || (coordinateSpace === 'viewport' && target.source !== 'global')
     ) return []
-    return [{
-      layerItemId: id,
-      x: target.bounds.x,
-      y: target.bounds.y,
-      width: target.bounds.width,
-      height: target.bounds.height,
-      rotation: target.bounds.rotation,
-    }]
+    const item = snapshot.view.layers.find(layer => layer.selectionId === id)?.item
+    if (!item) return []
+    return [{ layerItemId: id, ...item.frame, rotation: item.rotation }]
   })
 }
 
@@ -202,6 +196,8 @@ function overlayRects(
     const target = byId.get(id)
     if (!target || target.coordinateSpace !== coordinateSpace) return []
     const node = previewById.get(id)
+    const item = snapshot.view.layers.find(layer => layer.selectionId === id)?.item
+    if (node && item) return [{ ...controllerDisplayFrame(item as LayerItem, node), rotation: node.rotation }]
     return [{
       x: node?.x ?? target.bounds.x,
       y: node?.y ?? target.bounds.y,
@@ -305,23 +301,6 @@ function previewRotate(
   })
 }
 
-function constrainViewportControllers(
-  snapshot: SpatialWorldAuthoringSnapshot,
-  nodes: readonly SpatialEditorWorldTransform[],
-): SpatialEditorWorldTransform[] {
-  const items = new Map(snapshot.view.layers.map((layer) => [layer.selectionId, layer.item as LayerItem]))
-  return nodes.map((node) => {
-    const item = items.get(node.layerItemId)
-    if (!item || !isCourseTeacherControllerLayerItem(item)) return node
-    const frame = constrainTeacherControllerAuthoringFrame(
-      item.content.data,
-      node,
-      node.rotation,
-      { width: CANVAS_WIDTH, height: CANVAS_HEIGHT },
-    )
-    return { ...node, ...frame }
-  })
-}
 
 function marqueeRect(start: StagePoint, point: StagePoint): StageRect {
   return {
@@ -537,7 +516,7 @@ export function createSpatialWorldTargetAuthoringController(port: SpatialWorldTa
       preview = previewRotate(gesture.nodes, gesture.center, gesture.startAngle, point)
     }
     if (gesture.type === 'viewport-move' || gesture.type === 'viewport-resize') {
-      if (preview) preview = constrainViewportControllers(gesture.snapshot, preview)
+      if (preview) preview = preview
     }
     return result(viewport)
   }
@@ -590,7 +569,7 @@ export function createSpatialWorldTargetAuthoringController(port: SpatialWorldTa
         return result(viewport)
       }
       const coordinateSpace = active.type.startsWith('viewport') ? 'viewport' : 'world'
-      if (coordinateSpace === 'viewport') next = constrainViewportControllers(active.snapshot, next)
+      if (coordinateSpace === 'viewport') next = next
       command = port.commands.run(active.targets[0]!, {
         kind: 'transform-layers',
         coordinateSpace,

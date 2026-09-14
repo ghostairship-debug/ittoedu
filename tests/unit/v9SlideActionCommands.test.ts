@@ -1,3 +1,5 @@
+import { controllerMetadata } from '../fixtures/teacherController'
+import { createControllerFixture } from '../fixtures/teacherController'
 import { isAuthoringHistoryTransactionFrame } from '../../src/renderer/authoring/resourceAwareAuthoringHistory'
 import { describe, expect, it } from 'vitest'
 import { MAX_SCENE_NODES } from '@/shared/constants'
@@ -12,7 +14,6 @@ import {
   type ScopedLayerItem,
 } from '@/shared/courseProjectTypes'
 import type { InteractionRule } from '@/shared/interactionTypes'
-import { createTeacherControllerNode } from '@/renderer/project/nativeNodeFactories'
 import {
   SLIDE_REJECT_LOCKED,
   SLIDE_REJECT_STALE_REVISION,
@@ -246,7 +247,7 @@ function v9SlideFixture(): CourseProjectDocument {
     createdAt: NOW,
     updatedAt: NOW,
     assets: {},
-    componentPackages: {},
+    componentPackages: { ...controllerMetadata,},
     designTokens: {
       fonts: [{
         id: 'body',
@@ -533,10 +534,7 @@ describe('V9 Slide scene actions', () => {
     expect(foreign.nextSession?.history.present).toBe(globalSession.history.present)
 
     const controllerProject = v9SlideFixture()
-    const controller = sceneNodeToCourseLayerItem(
-      createTeacherControllerNode({ id: 'global-controller' }),
-      100,
-    )
+    const controller = createControllerFixture({ id: 'global-controller' }, 100)
     controllerProject.globalLayerItems.push({
       item: controller,
       visibility: { mode: 'all', locationIds: [] },
@@ -779,7 +777,7 @@ describe('V9 Slide action transactions and clipboard resources', () => {
   it('copies and pastes a scene Component with package references and new ids', () => {
     const project = courseProjectDocumentSchema.parse({
       ...v9SlideFixture(),
-      componentPackages: { 'component.quiz': quizPackageMeta() },
+      componentPackages: { ...controllerMetadata, 'component.quiz': quizPackageMeta() },
     })
     const scene = project.surfaces[0]
     if (!scene || scene.type !== 'slide') throw new Error('expected slide')

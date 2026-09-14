@@ -37,7 +37,7 @@ require('node:readline').createInterface({input:process.stdin}).on('line', line 
  if (!candidateRoot) throw new Error('Fixture requires the formal candidate root');
  const request = JSON.parse(fs.readFileSync(path.join(candidateRoot, 'request.json'), 'utf8'));
  const lines = rpc.params.input.find(value => value.type === 'text').text.split('\n');
- const feedbackIndex = lines.indexOf('宿主已完成上一阶段。下列是正式结果，不是CLI自述：');
+ const feedbackIndex = lines.indexOf('上一阶段已返回宿主正式结果，不是CLI自述；只有committed或unchanged表示已应用或确认无需修改：');
  const feedback = feedbackIndex < 0 ? null : JSON.parse(lines[feedbackIndex + 1]);
  const repair = feedback?.status === 'rejected';
  const root = ${JSON.stringify(directory)};

@@ -1,5 +1,6 @@
+import { buildPublishedFixture as buildPublishedCourseV2Payload } from '../fixtures/teacherController'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { buildPublishedCourseV2Payload } from '../../src/renderer/export/course/buildPublishedCourse'
+
 import type { CoursePublishSources } from '../../src/renderer/export/course/buildPublishedCourse'
 import { componentPackagesFromArchive } from '../../src/renderer/components/componentPackageStore'
 import {

@@ -16,7 +16,7 @@ export default String.raw`(function () {
       function make(tag, text) { var el = document.createElement(tag); if (text) el.textContent = text; return el }
       function render(message, focusId, direction) {
         root.replaceChildren()
-        var style = make('style'); style.textContent = ':host{display:block;width:100%;height:100%}.sort{box-sizing:border-box;height:100%;overflow:auto;padding:20px;background:#f1f5f9;border-radius:16px;font:22px Microsoft YaHei,sans-serif;color:#172554}.row{display:flex;align-items:center;gap:12px;padding:8px;border-bottom:1px solid #cbd5e1}.label{flex:1}button{font:inherit;border:1px solid #94a3b8;background:white;border-radius:6px;padding:5px 12px;margin:4px;cursor:pointer}button:focus-visible{outline:3px solid #2563eb}.status{min-height:32px;margin-top:12px}'
+        var style = make('style'); style.textContent = ':host{display:block;width:100%;height:100%}.sort{box-sizing:border-box;height:100%;overflow:auto;padding:20px;background:#f1f5f9;border-radius:16px;font:22px "Noto Sans SC","Microsoft YaHei",sans-serif;color:#172554}.row{display:flex;align-items:center;gap:12px;padding:8px;border-bottom:1px solid #cbd5e1}.label{flex:1}button{color:inherit;font:inherit;border:1px solid #94a3b8;background:white;border-radius:6px;padding:5px 12px;margin:4px;cursor:pointer}button:focus-visible{outline:3px solid #2563eb}.status{min-height:32px;margin-top:12px}'
         var shell = make('div'); shell.className = 'sort'
         var enabled = mode === 'preview' && !suspended && !problem
         order.forEach(function (id, index) {

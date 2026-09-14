@@ -103,7 +103,7 @@ describe('CLI generation candidate atomic preparation and commit', () => {
     Object.defineProperty(window, 'desktopAPI', { configurable: true, value: { loadComponentCatalog: async () => ({ packages: [entry] }), readComponentCatalogPackage: read } })
     try {
       const request = { ...f.request, allowedCarriers: ['existing-component'] }
-      const candidate = { ...f.candidate, steps: [{ ...f.candidate.steps[0], tool: 'component.insert', carrier: 'existing-component', lowerCarrierReason: '需要现有组件交互',
+      const candidate = { ...f.candidate, steps: [{ ...f.candidate.steps[0], tool: 'component.insert', carrier: 'existing-component',
         input: { operation: 'catalog', sourceId: entry.sourceId, packageId: entry.packageId, version: entry.version, sha256: entry.sha256 } }] }
       entry.sourceTrust = 'prompt'
       await expect(f.coordinator.prepare(request, candidate)).rejects.toThrow('尚未受信')

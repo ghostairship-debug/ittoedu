@@ -50,6 +50,24 @@ function fixture() {
 }
 
 describe('Incremental source files enter the existing package transaction', () => {
+  it('revises an isolated editable instance ten times without growing IDs or package history in the document', async () => {
+    const f = fixture()
+    expect((await f.run(componentPackageTool, f.patch('instance'), f.destination('instance'))).status).toBe('committed')
+    const isolated = Object.keys(f.read().document.componentPackages).find(id => id !== f.pkg.manifest.id)!
+    const before = f.read()
+    for (let index = 0; index < 10; index++) {
+      const pkg = f.read().resources.componentPackages[isolated]!
+      const receipt = await f.run(componentPackageTool, { operation: 'patch', mode: 'instance', basePackageId: isolated,
+        baseVersion: pkg.manifest.version, baseContentIdentity: pkg.contentSha256,
+        changedFiles: { [pkg.manifest.entry]: { encoding: 'utf8', text: `${pkg.runtimeSource}\n// edit ${index}` } }, deleteFiles: [] }, f.destination('instance'))
+      expect(receipt.status, JSON.stringify(receipt.diagnostics)).toBe('committed')
+      expect(Object.keys(f.read().document.componentPackages)).toEqual(Object.keys(before.document.componentPackages))
+      expect(Object.keys(f.read().resources.componentPackages)).toEqual(Object.keys(before.resources.componentPackages))
+    }
+    const last = f.commits.at(-1)!, undone = applyEditorTransactionStep(f.read(), last, 'inverse')
+    expect(undone.resources.componentPackages[isolated]!.runtimeSource).not.toContain('// edit 9')
+    expect(applyEditorTransactionStep(undone, last, 'forward')).toEqual(f.read())
+  })
   it('merges unchanged files, explicitly deletes, revises all shared instances and undoes resources once', async () => {
     const f = fixture(), patch = f.patch('shared'); patch.deleteFiles = ['unused.txt']
     const receipt = await f.run(componentPackageTool, patch)

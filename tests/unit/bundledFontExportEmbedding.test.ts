@@ -35,6 +35,7 @@ import {
 import { resolveEmbeddableBundledFonts } from '@/renderer/export/bundledFontEmbedSourceNode'
 import { installFetchBundledFontEmbedSource } from '@/renderer/export/bundledFontEmbedSourceFetch'
 import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
+import { createBlankFlowCourseProject } from '@/renderer/project/createFlowCourseProject'
 import { createFormulaNode } from '@/renderer/project/nativeNodeFactories'
 import { nativeRenderInputFromV9Item } from '@/player/surfaces/native/publishedNativeRendering'
 import { buildPublishedCourseTryRunPayload } from '@/renderer/ui/coursePlayerTryRun'
@@ -45,6 +46,14 @@ const PLAYER_BUNDLE = 'window.__PLAYER_PLACEHOLDER__=true;'
 const NOTO_STACK = `"${BUNDLED_TEXT_FONT_FAMILY}", "Microsoft YaHei", sans-serif`
 const SINGLE_HTML_WARNING_BYTES = 50 * 1024 * 1024
 const repoRoot = resolve(__dirname, '..', '..')
+
+it('embeds the implicit Flow text font without needing authored fontFamily fields', () => {
+  const project = createBlankFlowCourseProject()
+  expect(collectBundledFontFamiliesInUse(project)).toContain(BUNDLED_TEXT_FONT_FAMILY)
+  const html = buildPublishedCourseStandaloneHtml({ project, assetFiles: {}, components: {} }, { playerBundle: PLAYER_BUNDLE })
+  expect(/font-family\s*:\s*["']Noto Sans SC["']/.test(html)).toBe(true)
+  expect(html.includes('data:font/woff2;base64,')).toBe(true)
+})
 
 /** Importing the Node byte source registers it; restore it after opt-out tests. */
 afterEach(() => {

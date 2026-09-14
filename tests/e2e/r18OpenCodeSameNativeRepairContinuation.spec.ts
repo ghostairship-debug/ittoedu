@@ -65,7 +65,7 @@ const repairPrompt = [
 ].join('')
 
 async function observeCubeContainment(run: NativeRun, name: string) {
-  await run.page.getByRole('button', { name: '全屏 16:9 整课预览', exact: true }).click()
+  await run.page.getByRole('button', { name: '整课预览', exact: true }).click()
   const stage = run.page.getByTestId('course-preview-host').locator('.slide-published-adapter')
   const cube = stage.locator('[data-slide-layer-item="runtime-WapXfJ1IDl"]')
   await expect(cube).toBeVisible()

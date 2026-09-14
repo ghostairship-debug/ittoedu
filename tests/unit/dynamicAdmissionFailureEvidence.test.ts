@@ -3,7 +3,7 @@ import { createBlankCourseProject } from '@/renderer/project/createCourseProject
 import { runDynamicCandidateHostSmoke } from '@/renderer/authoring/tools/dynamicCandidateAdmission'
 import { AuthoringToolFailure } from '@/renderer/authoring/tools/executeAuthoringTool'
 
-const probe = vi.hoisted(() => ({ mounts: 0, destroys: 0, failMount: 1, failDestroy: false }))
+const probe = vi.hoisted(() => ({ mounts: 0, destroys: 0, failMount: 1, failDestroy: false, locationId: '', stateId: null as string | null }))
 vi.mock('@/renderer/authoring/tools/dynamicCandidateFallbackAssets', () => ({ validateDynamicCandidateFallbackAssets: vi.fn(async () => {}) }))
 vi.mock('@/renderer/export/course/buildPublishedCourse', () => ({ buildPublishedCourseV2Payload: vi.fn(() => ({})), collectPublishedCourseSourceIssues: vi.fn(() => []) }))
 vi.mock('@/player/surfaces/publishedCapture', () => ({ waitForPublishedObservationReady: vi.fn(async () => {}), capturePublishedSurfacePng: vi.fn(async () => 'data:image/png;base64,AA==') }))
@@ -11,14 +11,15 @@ vi.mock('@/player/surfaces/publishedDynamicUpdateProbe', () => ({
   exercisePublishedDynamicUpdates: vi.fn(async () => { if (probe.mounts === probe.failMount) throw new Error('updateProps rejected after sampled frames') }),
   exercisePublishedDynamicLifecycle: vi.fn(async () => {}),
 }))
-vi.mock('@/player/surfaces/publishedDynamicHosts', () => ({ createPublishedCourseSession: () => ({
-  async mount(root: HTMLElement) { probe.mounts++; const element = document.createElement('div'); element.className = 'published-component-mount'; element.dataset.componentInstanceId = 'instance'; root.append(element) },
-  readObservationState: () => ({ ready: true, stateVersion: 7, publicState: { speed: 0.5 } }),
+vi.mock('@/player/surfaces/publishedDynamicHosts', () => ({ createPublishedCourseSession: (_payload: unknown, options: { initialLocationId: string; initialPresentationStateId?: string }) => ({
+  async mount(root: HTMLElement) { probe.locationId = options.initialLocationId; probe.stateId = options.initialPresentationStateId ?? null; probe.mounts++; const element = document.createElement('div'); element.className = 'published-component-mount'; element.dataset.componentInstanceId = 'instance'; root.append(element) },
+  async goToObservationTarget(locationId: string, stateId?: string) { probe.locationId = locationId; probe.stateId = stateId ?? null; probe.mounts++ },
+  readObservationState: () => ({ ready: true, locationId: probe.locationId, stateId: probe.stateId, stateVersion: 7, publicState: { speed: 0.5 } }),
   player: { suspendSurface: async () => ({ ok: true }), resumeSurface: async () => ({ ok: true }), captureSurface: async () => ({ ok: true }) },
   async destroy() { probe.destroys++; if (probe.failDestroy) throw new Error('destroy rejected') },
 }) }))
 
-beforeEach(() => { probe.mounts = 0; probe.destroys = 0; probe.failMount = 1; probe.failDestroy = false; vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({} as CanvasRenderingContext2D) })
+beforeEach(() => { probe.mounts = 0; probe.destroys = 0; probe.failMount = 1; probe.failDestroy = false; vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({ x: 0, y: 0, width: 100, height: 100, top: 0, left: 0, right: 100, bottom: 100, toJSON() {} }); vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({} as CanvasRenderingContext2D) })
 afterEach(() => { vi.restoreAllMocks() })
 
 describe('dynamic admission acquired failure evidence', () => {
@@ -40,9 +41,9 @@ describe('dynamic admission acquired failure evidence', () => {
     const error = await runDynamicCandidateHostSmoke(project, { assetFiles: {}, componentPackages: {} }, [1, 2].map(() => ({ locationId: project.startLocationId, instanceIds: ['instance'] })), false,
       { onBehaviorEvidence: observed, capturePort: { captureFrame: async () => ({ capturedAt: Date.now(), width: 1, height: 1, dataUrl: 'data:image/png;base64,AA==' }) } }).catch(value => value)
     expect(error).toBeInstanceOf(AuthoringToolFailure)
-    expect(error.behaviorEvidence.map((item: { frames: unknown[] }) => item.frames.length)).toEqual([6, 3])
+    expect(error.behaviorEvidence.map((item: { frames: unknown[] }) => item.frames.length)).toEqual([6, 1])
     expect(error.behaviorEvidence[0].actions).toEqual(['update-inputs', 'resize-and-restore', 'suspend', 'resume'])
-    expect(observed).toHaveBeenCalledOnce(); expect(probe.destroys).toBe(2)
+    expect(observed).toHaveBeenCalledOnce(); expect(probe.destroys).toBe(1)
   })
 
   it('retains the original failed frames and diagnostic when cleanup also fails', async () => {

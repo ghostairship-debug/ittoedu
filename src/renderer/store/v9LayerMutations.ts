@@ -6,8 +6,6 @@ import {
   MIN_NODE_SIZE,
   MIN_VISIBLE_NODE_EDGE,
 } from '../../shared/constants'
-import { constrainTeacherControllerAuthoringFrame } from '../../shared/teacherControllerLayout'
-import { isCourseTeacherControllerLayerItem } from '../../shared/teacherControllerConsistency'
 import type {
   CourseProjectDocument,
   GlobalLayerPlane,
@@ -459,19 +457,6 @@ function v9NodePatchTouchesFrame(patch: EditorCanvasNodePatch): boolean {
     patch.rotation !== undefined
 }
 
-export function constrainRoundTripTeacherControllerFrame(
-  item: LayerItem,
-  patch: EditorCanvasNodePatch,
-): void {
-  if (!v9NodePatchTouchesFrame(patch) || !isCourseTeacherControllerLayerItem(item)) return
-  const frame = constrainTeacherControllerAuthoringFrame(
-    item.content.data,
-    item.frame,
-    item.rotation,
-    { width: CANVAS_WIDTH, height: CANVAS_HEIGHT },
-  )
-  item.frame = { ...item.frame, ...frame }
-}
 
 export function commandTargetForRow(row: EffectiveLayerProjectionRow) {
   const input = commandTargetFromRow(row)
@@ -648,8 +633,7 @@ export function slideSurfaceLayerPropertyPatch(
       return { ok: false, reason: `当前表面图层不支持属性“${key}”。` }
     }
     if (
-      item.kind !== 'native' ||
-      item.content.nativeType === 'teacher-controller'
+      item.kind !== 'native'
     ) {
       return { ok: false, reason: `当前表面图层不支持原生内容属性“${key}”。` }
     }

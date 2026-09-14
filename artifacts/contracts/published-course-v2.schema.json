@@ -1020,21 +1020,6 @@
                         "properties": {
                           "nativeType": {
                             "type": "string",
-                            "const": "teacher-controller"
-                          },
-                          "data": {}
-                        },
-                        "required": [
-                          "nativeType",
-                          "data"
-                        ],
-                        "additionalProperties": false
-                      },
-                      {
-                        "type": "object",
-                        "properties": {
-                          "nativeType": {
-                            "type": "string",
                             "const": "table"
                           },
                           "data": {}
@@ -1174,6 +1159,10 @@
                   "kind": {
                     "type": "string",
                     "const": "component"
+                  },
+                  "role": {
+                    "type": "string",
+                    "const": "teacher-controller"
                   },
                   "component": {
                     "type": "object",
@@ -1721,21 +1710,6 @@
                                   "properties": {
                                     "nativeType": {
                                       "type": "string",
-                                      "const": "teacher-controller"
-                                    },
-                                    "data": {}
-                                  },
-                                  "required": [
-                                    "nativeType",
-                                    "data"
-                                  ],
-                                  "additionalProperties": false
-                                },
-                                {
-                                  "type": "object",
-                                  "properties": {
-                                    "nativeType": {
-                                      "type": "string",
                                       "const": "table"
                                     },
                                     "data": {}
@@ -1875,6 +1849,10 @@
                             "kind": {
                               "type": "string",
                               "const": "component"
+                            },
+                            "role": {
+                              "type": "string",
+                              "const": "teacher-controller"
                             },
                             "component": {
                               "type": "object",
@@ -2477,21 +2455,6 @@
                                     "properties": {
                                       "nativeType": {
                                         "type": "string",
-                                        "const": "teacher-controller"
-                                      },
-                                      "data": {}
-                                    },
-                                    "required": [
-                                      "nativeType",
-                                      "data"
-                                    ],
-                                    "additionalProperties": false
-                                  },
-                                  {
-                                    "type": "object",
-                                    "properties": {
-                                      "nativeType": {
-                                        "type": "string",
                                         "const": "table"
                                       },
                                       "data": {}
@@ -2631,6 +2594,10 @@
                               "kind": {
                                 "type": "string",
                                 "const": "component"
+                              },
+                              "role": {
+                                "type": "string",
+                                "const": "teacher-controller"
                               },
                               "component": {
                                 "type": "object",
@@ -3310,21 +3277,6 @@
                                   "properties": {
                                     "nativeType": {
                                       "type": "string",
-                                      "const": "teacher-controller"
-                                    },
-                                    "data": {}
-                                  },
-                                  "required": [
-                                    "nativeType",
-                                    "data"
-                                  ],
-                                  "additionalProperties": false
-                                },
-                                {
-                                  "type": "object",
-                                  "properties": {
-                                    "nativeType": {
-                                      "type": "string",
                                       "const": "table"
                                     },
                                     "data": {}
@@ -3464,6 +3416,10 @@
                             "kind": {
                               "type": "string",
                               "const": "component"
+                            },
+                            "role": {
+                              "type": "string",
+                              "const": "teacher-controller"
                             },
                             "component": {
                               "type": "object",
@@ -3848,6 +3804,13 @@
               "layout": {
                 "type": "object",
                 "properties": {
+                  "widthMode": {
+                    "type": "string",
+                    "enum": [
+                      "fluid",
+                      "reading"
+                    ]
+                  },
                   "readingWidth": {
                     "type": "number",
                     "minimum": 320,
@@ -4069,21 +4032,6 @@
                                   "properties": {
                                     "nativeType": {
                                       "type": "string",
-                                      "const": "teacher-controller"
-                                    },
-                                    "data": {}
-                                  },
-                                  "required": [
-                                    "nativeType",
-                                    "data"
-                                  ],
-                                  "additionalProperties": false
-                                },
-                                {
-                                  "type": "object",
-                                  "properties": {
-                                    "nativeType": {
-                                      "type": "string",
                                       "const": "table"
                                     },
                                     "data": {}
@@ -4223,6 +4171,10 @@
                             "kind": {
                               "type": "string",
                               "const": "component"
+                            },
+                            "role": {
+                              "type": "string",
+                              "const": "teacher-controller"
                             },
                             "component": {
                               "type": "object",
@@ -4818,21 +4770,6 @@
                                   "properties": {
                                     "nativeType": {
                                       "type": "string",
-                                      "const": "teacher-controller"
-                                    },
-                                    "data": {}
-                                  },
-                                  "required": [
-                                    "nativeType",
-                                    "data"
-                                  ],
-                                  "additionalProperties": false
-                                },
-                                {
-                                  "type": "object",
-                                  "properties": {
-                                    "nativeType": {
-                                      "type": "string",
                                       "const": "table"
                                     },
                                     "data": {}
@@ -4972,6 +4909,10 @@
                             "kind": {
                               "type": "string",
                               "const": "component"
+                            },
+                            "role": {
+                              "type": "string",
+                              "const": "teacher-controller"
                             },
                             "component": {
                               "type": "object",

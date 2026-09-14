@@ -1,3 +1,4 @@
+import { buildPublishedFixture as buildPublishedCourseV2Payload } from '../fixtures/teacherController'
 import { expect, it } from 'vitest'
 import { strFromU8, unzipSync } from 'fflate'
 import { createBlankFlowCourseProject } from '@/renderer/project/createFlowCourseProject'
@@ -7,7 +8,7 @@ import { duplicateSpatialLayers } from '@/renderer/course/spatialClipboardComman
 import { insertFlowEditorBlock, duplicateFlowEditorBlock } from '@/renderer/course/flowEditorCommands'
 import { changeFlowTableStructure } from '@/renderer/course/flowTableContentOperations'
 import { patchTableCellText } from '@/renderer/course/tableContentOperations'
-import { buildPublishedCourseV2Payload } from '@/renderer/export/course/buildPublishedCourse'
+
 import { buildFlowDocx } from '@/renderer/export/course/flowDocx'
 import { buildFlowPrintPlan, renderFlowPrintBodyHtml } from '@/renderer/export/course/flowPrintPlan'
 import { SpatialSurfaceHost } from '@/player/surfaces/spatial/SpatialSurfaceHost'

@@ -1,10 +1,11 @@
+import { buildPublishedFixture as buildPublishedCourseV2Payload } from '../fixtures/teacherController'
 import { copyFileSync, mkdirSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { _electron as electron, expect, test } from '@playwright/test'
 import { createServer, type ViteDevServer } from 'vite'
 import sharp from 'sharp'
 import { BACKGROUND_E2E_ENV } from '../../src/main/windowVisibility'
-import { buildPublishedCourseV2Payload } from '../../src/renderer/export/course/buildPublishedCourse'
+
 import { closeNativeEditor, nativeRecords, readSaved, runtimeItem, saveStage, type NativeRun } from './r18NativeAuthoringFixture'
 import { expectBackgroundWindowsIsolated } from './expectBackgroundWindowsIsolated'
 

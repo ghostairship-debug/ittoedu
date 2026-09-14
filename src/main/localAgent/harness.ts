@@ -7,11 +7,12 @@ import {
 } from '../../shared/localAgentContract'
 import { workspaceIdentityKey, type WorkspaceIdentityV1 } from '../../shared/workspaceIdentity'
 import { createLocalAgentCliAdapterV2 } from './adapter'
-import { localAgentText } from '../../shared/localAgentText'
+import { codexCandidateFileMessage } from './codexAppServer'
+import { localAgentText, visibleLocalAgentText } from '../../shared/localAgentText'
 import { LocalAgentRepository } from './repository'
 import { generationCommitReceiptSchema, generationRequestSchema, MAX_GENERATION_PROMPT_BYTES, MAX_GENERATION_TASK_DURATION_MS, type GenerationCommitReceipt, type GenerationRequest } from '../../shared/generationContract'
-import { GENERATION_OPEN, GENERATION_CLOSE, readGenerationResult, type GenerationResult } from '../../shared/generationResult'
-import { CandidateStaging } from './candidateStaging'
+import { GENERATION_OPEN, GENERATION_CLOSE, generationStagedCandidateMarker, readGenerationResult, type GenerationResult } from '../../shared/generationResult'
+import { CandidateMediaFileError, CandidateStaging } from './candidateStaging'
 import { buildGenerationPrompt, createGenerationProfile, type GenerationPromptPhase } from './profile'
 import {
   aiHostResultSchema, aiObservationSchema, aiProposalSchema, aiTaskSchema, localAgentEventV2Schema, localAgentRecordV2Schema,
@@ -23,8 +24,9 @@ import { aiInputDeliverySchema, aiUserInputSchema, type AiUserInput } from '../.
 import { nativeWorkspaceDirectory } from './process'
 import { NativeCapabilityCache } from './capabilityCache'
 import { candidateChangeKey } from './candidateChangeKey'
-import { generationHostFeedback } from './generationHostFeedback'
+import { generationHostFeedback, generationReceiptFeedback } from './generationHostFeedback'
 import { recordAiTaskTiming } from '../../shared/localAgentTiming'
+import { recordAiTaskInputMetrics } from '../../shared/localAgentInputMetrics'
 
 type AdapterFactory = (id: LocalAgentId, request?: GenerationRequest) => LocalAgentCliAdapterV2
 interface SessionOwner {
@@ -42,6 +44,10 @@ interface ActiveRun {
   cancelled: boolean
   acceptingInputs: boolean
   inputWrites: Set<Promise<void>>
+}
+
+function taskMediaIdentity(task: AiTask) {
+  return task.execution ? { taskId: task.taskId, deadlineAt: task.execution.deadlineAt } : undefined
 }
 
 function destinationScope(request: GenerationRequest) {
@@ -70,7 +76,7 @@ export class LocalAgentHarness {
   private pendingLaunches = 0
   private readonly launches = new Set<Promise<void>>()
   private readonly launching = new Set<string>()
-  private readonly proposals = new Map<string, { proposal: AiProposal; admission: 'accepted' | 'rejected' }>()
+  private readonly proposals = new Map<string, { proposal: AiProposal; admission: 'accepted' | 'rejected'; wireCandidate: AiProposal['candidate'] }>()
   private readonly candidateIds = new Map<string, { requestId: string; candidateId: string }>()
   private readonly preparedSessions = new Set<string>()
   // A known live receipt survives an uncertain disk/IPC result. Retrying only writes this exact record.
@@ -78,7 +84,7 @@ export class LocalAgentHarness {
   private closing = false
   private readonly storageFailures = new Map<string, { workspace: string; record: LocalAgentRecord }>()
   private readonly cachedCapabilities = new NativeCapabilityCache()
-  private readonly preferences = new Map<LocalAgentId, LocalAgentConfiguration>()
+  private readonly configurationWrites = new Map<LocalAgentId, Promise<LocalAgentCapabilities>>()
   get running(): boolean { return this.active.size > 0 || this.pendingLaunches > 0 }
   constructor(readonly repository: LocalAgentRepository, private readonly factory: AdapterFactory =
     (id, request) => createLocalAgentCliAdapterV2(id, request)) {}
@@ -88,6 +94,9 @@ export class LocalAgentHarness {
     throw new Error('当前 adapter 没有探测接口')
   }
   async capabilities(id: LocalAgentId, options: { workspace?: WorkspaceIdentityV1; refresh?: boolean } = {}): Promise<LocalAgentCapabilities> {
+    return this.withRequestedConfiguration(await this.discoverCapabilities(id, options), await this.repository.readConfiguration(id))
+  }
+  private async discoverCapabilities(id: LocalAgentId, options: { workspace?: WorkspaceIdentityV1; refresh?: boolean } = {}): Promise<LocalAgentCapabilities> {
     const cwd = options.workspace ? await nativeWorkspaceDirectory(options.workspace.normalizedPath) : process.cwd()
     const caps = await this.cachedCapabilities.read(id, cwd, !!options.refresh, async () => {
       const adapter = this.factory(id)
@@ -96,12 +105,20 @@ export class LocalAgentHarness {
           ? await adapter.discoverCapabilities({ cwd }) : (await adapter.open({ cwd, externalSessionId: null })).capabilities)
       } finally { await adapter.close() }
     })
-    return this.withRequestedConfiguration(caps)
+    return caps
   }
-  async configure(id: LocalAgentId, config: LocalAgentConfiguration, workspace?: WorkspaceIdentityV1): Promise<LocalAgentCapabilities> {
-    let caps = await this.capabilities(id, { workspace })
+  configure(id: LocalAgentId, config: LocalAgentConfiguration, workspace?: WorkspaceIdentityV1): Promise<LocalAgentCapabilities> {
+    const pending = (this.configurationWrites.get(id) ?? Promise.resolve()).catch(() => {}).then(() => this.saveConfiguration(id, config, workspace))
+    this.configurationWrites.set(id, pending)
+    void pending.catch(() => {})
+    return pending
+  }
+  private async saveConfiguration(id: LocalAgentId, config: LocalAgentConfiguration, workspace?: WorkspaceIdentityV1): Promise<LocalAgentCapabilities> {
+    let caps = await this.discoverCapabilities(id, { workspace })
     let targetModel = caps.models.find(m => m.id === config.model)
     if (!targetModel) throw new Error(`模型 ${config.model} 不在 ${id} 原生目录中`)
+    if (config.serviceTier !== undefined && id !== 'codex') throw new Error('该 CLI 尚未提供速度档位配置')
+    if (config.serviceTier != null && config.serviceTier !== 'default' && !targetModel.serviceTiers?.some(tier => tier.id === config.serviceTier)) throw new Error('所选速度不在当前原生模型目录中，请刷新目录')
     if (id === 'opencode' && targetModel.effort.kind === 'unknown') {
       const probe = this.factory(id)
       try {
@@ -118,25 +135,25 @@ export class LocalAgentHarness {
     }
     if (config.effort !== null && targetModel.effort.kind === 'unsupported') throw new Error('所选原生模型不支持强度配置')
     if (config.effort !== null && targetModel.effort.kind === 'supported' && !targetModel.effort.values.includes(config.effort)) throw new Error(`强度 ${config.effort} 不在所选模型的原生目录中`)
-    this.preferences.set(id, { model: config.model, effort: config.effort })
-    return this.withRequestedConfiguration(caps)
+    await this.repository.writeConfiguration(id, config)
+    return this.withRequestedConfiguration(caps, config)
   }
-  private withRequestedConfiguration(caps: LocalAgentCapabilities): LocalAgentCapabilities {
-    const pref = this.preferences.get(caps.adapter)
+  private withRequestedConfiguration(caps: LocalAgentCapabilities, pref?: LocalAgentConfiguration): LocalAgentCapabilities {
     if (!pref) return caps
     return localAgentCapabilitiesSchema.parse({
-      ...caps, requestedConfiguration: this.configurationMatches(pref, caps) ? null : pref,
+      ...caps, selectedConfiguration: pref, requestedConfiguration: this.configurationMatches(pref, caps) ? null : pref,
     })
   }
   private configurationMatches(config: LocalAgentConfiguration, caps: LocalAgentCapabilities): boolean {
     // Null leaves the native effort unchanged/defaulted; only an explicit value
     // is an exact override. Keep the returned actual value visible and persisted.
-    return caps.current.model === config.model && (config.effort === null || caps.current.effort === config.effort) && !caps.requestedConfiguration
+    return caps.current.model === config.model && (config.effort === null || caps.current.effort === config.effort)
+      && (config.serviceTier === undefined || caps.current.serviceTier === config.serviceTier) && !caps.requestedConfiguration
   }
   private assertRequestedConfiguration(config: LocalAgentConfiguration, caps: LocalAgentCapabilities): void {
     if (this.configurationMatches(config, caps)) return
     const pending = caps.requestedConfiguration
-    if (pending?.model !== config.model || pending.effort !== config.effort) throw new Error('原生CLI没有接受所选模型配置')
+    if (pending?.model !== config.model || pending.effort !== config.effort || pending.serviceTier !== config.serviceTier) throw new Error('原生CLI没有接受所选模型配置')
   }
   private async rememberCapabilities(cwd: string, caps: LocalAgentCapabilities): Promise<void> {
     this.cachedCapabilities.invalidate(caps.adapter, caps.cliVersion)
@@ -144,7 +161,7 @@ export class LocalAgentHarness {
       const selected = caps.models.find(model => model.id === caps.current.model)
       const models = current.models.map(model => model.id === selected?.id ? selected : model)
       if (selected && !models.some(model => model.id === selected.id)) models.push(selected)
-      return localAgentCapabilitiesSchema.parse({ ...current, models, current: caps.current, input: caps.input,
+      return localAgentCapabilitiesSchema.parse({ ...current, models, current: caps.current, currentSource: caps.currentSource, input: caps.input,
         requestedConfiguration: caps.requestedConfiguration ?? null })
     }, 'native-session').catch(() => { /* A newer discovery owns its cache; native confirmation is still preserved in the event record. */ })
   }
@@ -189,7 +206,9 @@ export class LocalAgentHarness {
           result.records.push(this.project(session, false))
         }
       }
-      if (record.generationRequestId && record.status !== 'running' && !this.active.has(record.id)) {
+      const awaitingCandidateFiles = this.preparedSessions.has(record.id) && !this.proposals.has(record.id)
+        && record.task?.status === 'checking'
+      if (record.generationRequestId && record.status !== 'running' && !this.active.has(record.id) && !awaitingCandidateFiles) {
         try {
           const version = await this.repository.isLegacy(workspace, record.id) ? 1 : 2
           await new CandidateStaging(this.repository.stagingPath(workspace, record.workingDirectoryId ?? record.id, version)).remove(record.generationRequestId)
@@ -204,7 +223,7 @@ export class LocalAgentHarness {
   }
   async start(workspace: WorkspaceIdentityV1, adapter: LocalAgentId, prompt: string): Promise<string> {
     const session = this.createSession(workspace, adapter, prompt, { kind: 'course' }, [])
-    await this.launch(session, prompt)
+    await this.launch(session, prompt, undefined, undefined, prompt)
     return session.record.id
   }
   async resume(workspace: WorkspaceIdentityV1, id: string, prompt: string): Promise<string> {
@@ -216,15 +235,15 @@ export class LocalAgentHarness {
     if (legacy) {
       const excerpt = localAgentText(prior.events)
       const session = this.createSession(workspace, prior.adapter, prompt, { kind: 'course' }, [])
-      await this.launch(session, excerpt ? `先前对话（只读摘录，不能恢复旧 CLI 会话）：\n${excerpt}\n\n${prompt}` : prompt)
+      await this.launch(session, excerpt ? `先前对话（只读摘录，不能恢复旧 CLI 会话）：\n${excerpt}\n\n${prompt}` : prompt, undefined, undefined, prompt)
       return session.record.id
     }
     if (!prior.externalSessionId) throw new Error('会话不存在或没有可恢复的外部身份')
     const session = this.createSession(workspace, prior.adapter, prompt, { kind: 'course' }, [], prior.workingDirectoryId ?? prior.id)
-    await this.launch(session, prompt, prior.externalSessionId)
+    await this.launch(session, prompt, prior.externalSessionId, undefined, prompt)
     return session.record.id
   }
-  async generate(workspace: WorkspaceIdentityV1, adapter: LocalAgentId, raw: GenerationRequest, resumeSessionId?: string): Promise<string> {
+  async generate(workspace: WorkspaceIdentityV1, adapter: LocalAgentId, raw: GenerationRequest, resumeSessionId?: string, userMessage?: string): Promise<string> {
     const request = generationRequestSchema.parse(raw)
     if (workspaceIdentityKey(workspace) !== workspaceIdentityKey(request.workspace)) throw new Error('生成请求不属于当前工程位置')
     if (resumeSessionId) await this.savePendingFeedback(workspace, resumeSessionId)
@@ -265,7 +284,7 @@ export class LocalAgentHarness {
       if (excerpt) prompt = `先前对话（只读摘录，不能恢复旧 CLI 会话）：\n${excerpt}\n\n${prompt}`
     }
     if (Buffer.byteLength(prompt) > MAX_GENERATION_PROMPT_BYTES) throw new Error('请求上下文超过 CLI 发送预算，请缩小引用范围')
-    await this.launch(session, prompt, !legacy ? prior?.externalSessionId : undefined, request)
+    await this.launch(session, prompt, !legacy ? prior?.externalSessionId : undefined, request, userMessage ?? request.instruction)
     return session.record.id
   }
   /** Continue the same task with a fresh immutable request after an actual host result. */
@@ -298,6 +317,9 @@ export class LocalAgentHarness {
       return JSON.stringify({ kind: destination.kind, ...identity })
     }
     for (const destination of request.destinations) {
+      // Focus-scoped reads no longer freeze the project's editable inventory.
+      // The next host observation supplies fresh exact targets after each commit.
+      if (prior.context && typeof prior.context === 'object' && !Array.isArray(prior.context) && prior.context.modificationScope === 'project') continue
       if (task.writeDestinations.some(allowed => stable(allowed) === stable(destination))) continue
       if (destination.kind === 'update' && created.has(destination.target.itemId)) continue
       if (destination.kind === 'create' && canCreateLocations && created.has(destination.scope.locationId)) continue
@@ -313,7 +335,7 @@ export class LocalAgentHarness {
     this.candidateIds.delete(id)
     const owner: SessionOwner = { record: native, generationRequest: request }
     await this.persistRequestObservation(owner, request, observationId)
-    const feedback = `宿主已完成上一阶段。下列是正式结果，不是CLI自述：\n${JSON.stringify(projectedFeedback.result)}\n已记录正式提交回执：\n${JSON.stringify(projectedFeedback.hostResult)}\n${projectedFeedback.resourcePath ? `完整宿主反馈文件（相对 workspace.root）：${projectedFeedback.resourcePath}\n` : ''}请结合新的真实观察判断用户目标是否完成；若完成请自然语言答复，不再产生重复修改。若未完成请给下一阶段候选。\n${(task.pendingInputs ?? []).map(input => `用户${input.kind === 'correct' ? '纠正' : '补充'}：${input.text}`).join('\n')}`
+    const feedback = `上一阶段已返回宿主正式结果，不是CLI自述；只有committed或unchanged表示已应用或确认无需修改：\n${JSON.stringify(projectedFeedback.result)}\n已记录的宿主结果（拒绝不代表提交）：\n${JSON.stringify(projectedFeedback.hostResult)}\n${projectedFeedback.resourcePath ? `完整宿主反馈文件（相对 workspace.root）：${projectedFeedback.resourcePath}\n` : ''}请结合新的真实观察判断用户目标是否完成；若完成请自然语言答复，不再产生重复修改。尚有可执行的合法步骤才给下一阶段候选；确实受阻时通过答复通道说明未完成及具体缺失条件并结束，不提交空steps、自造操作或用于索取诊断的非法候选。\n${(task.pendingInputs ?? []).map(input => `用户${input.kind === 'correct' ? '纠正' : '补充'}：${input.text}`).join('\n')}`
     const prompt = `${feedback}\n${this.generationPrompt(native.adapter, request, path.join(this.repository.stagingPath(workspace, native.workingDirectoryId, 2), 'candidates', request.requestId), 'host-feedback')}`
     if (Buffer.byteLength(prompt) > MAX_GENERATION_PROMPT_BYTES) throw new Error('续轮上下文超过发送预算')
     await this.launch(owner, prompt, native.externalSessionId, request)
@@ -324,7 +346,24 @@ export class LocalAgentHarness {
     const record = (await this.list(workspace)).records.find(value => value.id === id)
     if (!record?.generationRequestId) throw new Error('当前工程没有此生成请求')
     if (record.status !== 'completed' || this.active.has(id)) throw new Error('生成运行尚未成功结束')
-    const nativeRecord = (await this.repository.list(workspace)).v2.find(value => value.id === id)
+    let nativeRecord = (await this.repository.list(workspace)).v2.find(value => value.id === id)
+    const mediaTask = nativeRecord?.tasks.at(-1)
+    if (nativeRecord && mediaTask?.execution && !this.proposals.has(id)) {
+      const staging = new CandidateStaging(this.repository.stagingPath(workspace, nativeRecord.workingDirectoryId, 2))
+      // The delivery helper registers only files it successfully copied. Keep
+      // these even when the candidate JSON itself needs a native repair turn.
+      try { await staging.retainDeliveredMedia(record.generationRequestId, taskMediaIdentity(mediaTask)!) }
+      catch { /* Explicit candidate references still receive their exact validation below. */ }
+      nativeRecord = (await this.repository.list(workspace)).v2.find(value => value.id === id)
+      const current = nativeRecord?.tasks.at(-1)
+      if (!current || current.taskId !== mediaTask.taskId || current.epoch !== mediaTask.epoch
+        || current.observationId !== mediaTask.observationId
+        || !['running', 'checking', 'awaiting-apply', 'committing'].includes(current.status)
+        || Date.now() >= mediaTask.execution.deadlineAt) {
+        await staging.releaseTaskMedia(mediaTask.taskId).catch(() => {})
+        throw new Error('候选任务已停止、过期或观察已失效')
+      }
+    }
     const lastRun = nativeRecord?.events.at(-1)?.runId
     const currentEvents = nativeRecord ? projectV2RecordToV1({ ...nativeRecord, events: nativeRecord.events.filter(event => event.runId === lastRun) }).events : record.events
     let stable = this.candidateIds.get(id)
@@ -339,19 +378,21 @@ export class LocalAgentHarness {
     if (result.kind === 'answer' && nativeRecord && activeTask) {
       const incomplete = activeTask.intent === 'edit' && !nativeRecord.hostResults.some(value => value.taskId === activeTask.taskId
         && (value.status === 'committed' || value.status === 'unchanged'))
-      if (incomplete) result = { kind: 'incomplete', requestId: result.requestId, finding: '编辑未完成：CLI 已回复，但本任务没有实际应用或确认无需修改的正式回执；课件未修改。' }
-      nativeRecord.tasks[nativeRecord.tasks.length - 1] = aiTaskSchema.parse({ ...activeTask, status: incomplete ? 'failed' : 'completed' })
+      if (incomplete) result = { kind: 'incomplete', requestId: result.requestId, finding: '编辑未完成：本任务尚无实际修改回执。当前选择仅是上下文，不限制修改其他对象或新增对象。请使用原生 CLI 工具完成目标；快捷工具不足时可编辑暂存 V9 文档并通过 project.document 提交实际结果。不要仅以宿主不支持为由结束，也不要重复请求已明确的编辑授权。' }
+      nativeRecord.tasks[nativeRecord.tasks.length - 1] = aiTaskSchema.parse({ ...activeTask, status: incomplete ? 'checking' : 'completed' })
       await this.persist({ record: nativeRecord, generationRequest: record.generationRequest, hostResult: record.hostResult })
     }
     if (result.kind === 'candidate') {
-      const native = (await this.repository.list(workspace)).v2.find(value => value.id === id)
-      const task = native?.tasks.at(-1)
+      let native = (await this.repository.list(workspace)).v2.find(value => value.id === id)
+      let task = native?.tasks.at(-1)
       if (native && task?.observationId) {
+        if (lastRun && activeTask) this.markTiming(native, activeTask, lastRun, 'candidateParsed', parsedAt)
         const proposal = aiProposalSchema.parse({
           version: 1, taskId: task.taskId, epoch: task.epoch, workspace: task.workspace, observationId: task.observationId,
           requestId: result.requestId, candidateId: result.candidate.candidateId, candidate: result.candidate,
         })
-        const observation = native.observations.find(value => value.observationId === task.observationId)
+        const wireCandidate = proposal.candidate
+        const observation = native.observations.find(value => value.observationId === proposal.observationId)
         if (!record.generationRequest || !observation) throw new Error('候选缺少当前真实观察')
         let admission: 'accepted' | 'rejected' = 'accepted'
         try { assertAiProposalCurrent(task, observation, record.generationRequest, proposal) }
@@ -361,12 +402,55 @@ export class LocalAgentHarness {
           admission = 'rejected'
           result = { kind: 'candidate-rejected', requestId: result.requestId, candidateId: proposal.candidateId, finding: error.message.slice(0, 4000), ...(error.failure ? { failure: error.failure } : {}) }
         }
-        this.proposals.set(id, { proposal, admission })
+        const staging = new CandidateStaging(this.repository.stagingPath(workspace, native.workingDirectoryId, 2))
+        const mediaTask = taskMediaIdentity(task)
+        if (admission === 'accepted' && result.kind === 'candidate') {
+          try {
+            const cached = this.proposals.get(id)
+            if (lastRun) this.markTiming(native, task, lastRun, 'resourcePreparationStarted')
+            proposal.candidate = cached?.admission === 'accepted' && cached.proposal.candidateId === proposal.candidateId
+              ? cached.proposal.candidate
+              : await staging.resolveMediaFiles(proposal.candidate, mediaTask)
+            if (lastRun) this.markTiming(native, task, lastRun, 'resourcePrepared')
+            result = { ...result, candidate: proposal.candidate }
+          } catch (error) {
+            admission = 'rejected'
+            result = { kind: 'candidate-rejected', requestId: result.requestId, candidateId: proposal.candidateId,
+              finding: (error instanceof Error ? error.message : String(error)).slice(0, 4000),
+              ...(error instanceof CandidateMediaFileError ? { failure: error.failure } : {}) }
+          }
+        } else {
+          // Retain only explicitly referenced, valid media for this current task.
+          // A scope error stays a scope error, and the rejected candidate is never applied.
+          try { await staging.resolveMediaFiles(proposal.candidate, mediaTask) } catch { /* Preserve the original scope diagnostic. */ }
+        }
+        // File IO must not resurrect a task cancelled or superseded meanwhile.
+        const fileTiming = native.tasks.at(-1)?.execution?.timing
+        native = (await this.repository.list(workspace)).v2.find(value => value.id === id)
+        task = native?.tasks.at(-1)
+        try {
+          if (!native || !task) throw new Error('候选任务已失效')
+          assertAiProposalCurrent(task, observation, record.generationRequest, proposal)
+        } catch (error) {
+          if (!(error instanceof AiCandidateScopeError) || admission !== 'rejected') {
+            if (mediaTask) await staging.releaseTaskMedia(mediaTask.taskId).catch(() => {})
+            throw error
+          }
+        }
+        if (!native || !task) throw new Error('候选任务已失效')
+        // Merge only these synchronous marks into the freshly revalidated task.
+        for (const entry of fileTiming?.entries ?? []) if (entry.runId === lastRun
+          && ['candidateParsed', 'resourcePreparationStarted', 'resourcePrepared'].includes(entry.stage)) this.markTiming(native, task, entry.runId, entry.stage, entry.at)
+        task = native.tasks.at(-1)!
+        this.proposals.set(id, { proposal, admission, wireCandidate })
         native.tasks[native.tasks.length - 1] = aiTaskSchema.parse({ ...task, status: 'checking' })
-        if (lastRun && lastRun === native.events.at(-1)?.runId && activeTask) this.markTiming(native, activeTask, lastRun, 'candidateParsed', parsedAt)
         await this.persist({ record: native, generationRequest: record.generationRequest, hostResult: record.hostResult, cleanupIssue: record.cleanupIssue })
       }
     }
+    // All successful file references now live in the accepted proposal. Keep
+    // the existing transient staging lifecycle for answers and rejected output.
+    try { await new CandidateStaging(this.repository.stagingPath(workspace, record.workingDirectoryId ?? id, 2)).remove(record.generationRequestId) }
+    catch { /* list() retains the existing cleanup retry and diagnostic. */ }
     return result
   }
   async hostResult(workspace: WorkspaceIdentityV1, id: string, raw: LocalAgentHostResult, receipt?: GenerationCommitReceipt): Promise<LocalAgentRecord> {
@@ -416,19 +500,26 @@ export class LocalAgentHarness {
     } else if (result.status === 'undone') {
       if (!native.hostResults.some(value => value.requestId === result.requestId && value.status === 'committed')) throw new Error('没有可标记撤销的正式提交')
     } else {
-      if (stopped) throw new Error('任务已停止，不能接收晚到候选结果')
-      if (task.execution && Date.now() >= task.execution.deadlineAt) throw new Error('本任务的执行期限已到，未应用候选已失效')
+      const diagnosticOnly = ['rejected', 'stale', 'failed'].includes(result.status)
+      const expired = Boolean(task.execution && Date.now() >= task.execution.deadlineAt)
+      if (stopped && !diagnosticOnly) throw new Error('任务已停止，不能接收晚到候选结果')
+      if (expired && !diagnosticOnly) throw new Error('本任务的执行期限已到，未应用候选已失效')
       if (result.afterCommit) throw new Error('未应用的候选不能完成任务')
       if (result.failure?.requestId && result.failure.requestId !== result.requestId
         || result.failure?.candidateId && result.failure.candidateId !== candidateId) throw new Error('失败诊断不属于当前候选')
       const beforeRevision = projected.generationRequest!.documentRevision
-      const aiResult = aiHostResultSchema.parse({ version: 1, taskId: task.taskId, epoch: task.epoch, workspace: task.workspace,
+      const observationEpoch = native.observations.find(observation => observation.observationId === task.observationId && observation.taskId === task.taskId)?.epoch
+      if (observationEpoch === undefined) throw new Error('失败结果缺少原任务观察')
+      const aiResult = aiHostResultSchema.parse({ version: 1, taskId: task.taskId, epoch: observationEpoch, workspace: task.workspace,
         observationId: task.observationId, requestId: result.requestId, candidateId, resultId: randomUUID(), status: result.status,
         beforeRevision, afterRevision: beforeRevision, receipts: [], summary: result.summary,
-        diagnostics: result.failure?.diagnostics ?? [], ...(result.failure ? { failure: result.failure } : {}) })
+        diagnostics: result.failure?.diagnostics ?? [], ...(result.failure ? { failure: result.failure } : {}),
+        ...(['rejected', 'stale', 'failed'].includes(result.status) ? { receiptDelivery: 'pending' } : {}) })
       native.hostResults.push(aiResult)
       owner.hostResult = projectAiHostResult(aiResult)
-      native.tasks[native.tasks.length - 1] = result.status === 'stale' ? stopAiTask(task)
+      // A failed IPC may deliver a known rejection after Stop/deadline. Archive
+      // that diagnostic without admitting a candidate or reviving execution.
+      native.tasks[native.tasks.length - 1] = stopped ? task : expired || result.status === 'stale' ? stopAiTask(task)
         : aiTaskSchema.parse({ ...task, status: result.status === 'checked' ? 'awaiting-apply' : 'checking' })
     }
     const updated = native.tasks.at(-1)!
@@ -473,6 +564,7 @@ export class LocalAgentHarness {
       if (duplicate && (duplicate.text !== input.text || duplicate.kind !== input.kind)) throw new Error('输入身份对应的内容冲突')
       if (!duplicate) {
         record.tasks[record.tasks.length - 1] = aiTaskSchema.parse({ ...task, pendingInputs: [...pending, { inputId: input.inputId, text: input.text, kind: input.kind }] })
+        this.appendUserMessage(record, record.events.at(-1)?.runId ?? randomUUID(), input.inputId, input.text, input.kind)
         await this.persist({ record, generationRequest: projected.generationRequest, hostResult: projected.hostResult })
       }
       return aiInputDeliverySchema.parse({ taskId: task.taskId, epoch: task.epoch, workspace, inputId: input.inputId, turnId: input.turnId, status: 'queued', reason: '将在候选重新检查的下一原生回合消费' })
@@ -486,9 +578,10 @@ export class LocalAgentHarness {
       await this.cancel(workspace, id)
       return aiInputDeliverySchema.parse({ taskId: input.taskId, epoch: input.epoch, workspace, inputId: input.inputId, turnId: input.turnId, status: 'consumed', reason: null })
     }
-    if (input.kind === 'answer' && !run.owner.record.events.some(event => event.kind === 'question'
+    const answeredQuestion = input.kind === 'answer' ? [...run.owner.record.events].reverse().find(event => event.kind === 'question'
       && event.question.questionId === input.questionId && event.question.epoch === input.epoch
-      && event.question.turnId === input.turnId)) throw new Error('提问不属于当前运行回合')
+      && event.question.turnId === input.turnId) : undefined
+    if (input.kind === 'answer' && !answeredQuestion) throw new Error('提问不属于当前运行回合')
     let finishWrite!: () => void
     const writing = new Promise<void>(resolve => { finishWrite = resolve })
     run.inputWrites.add(writing)
@@ -498,6 +591,12 @@ export class LocalAgentHarness {
       || workspaceIdentityKey(delivery.workspace) !== workspaceIdentityKey(workspace)) throw new Error('原生输入回执身份不一致')
     if (run.cancelled || run.owner.record.tasks.at(-1)?.epoch !== input.epoch) throw new Error('输入返回时任务已停止')
     this.append(run.owner.record, run.runId, { kind: 'input-delivery', delivery, ...this.identity(run.owner.record, run.runId), nativeTurnId: delivery.turnId })
+    if (delivery.status !== 'rejected') this.appendUserMessage(run.owner.record, run.runId, input.inputId,
+      input.kind === 'answer' ? input.answers.map(answer => {
+        const title = answeredQuestion?.kind === 'question' ? answeredQuestion.question.questions.find(question => question.id === answer.id)?.title : undefined
+        const text = answer.values.join('、')
+        return title ? `${title}：${text}` : text
+      }).join('\n') : input.text, input.kind)
     if (delivery.status === 'queued' && (input.kind === 'correct' || input.kind === 'supplement')) {
       const currentTask = run.owner.record.tasks.at(-1)!
       run.owner.record.tasks[run.owner.record.tasks.length - 1] = aiTaskSchema.parse({ ...currentTask,
@@ -584,12 +683,16 @@ export class LocalAgentHarness {
     if (task) record.tasks[record.tasks.length - 1] = recordAiTaskTiming(task, observed, runId, stage, at)
   }
   private append(record: LocalAgentRecordV2, runId: string, event: LocalAgentNativeEvent | Omit<Extract<LocalAgentEventV2, { kind: 'turn-ended' }>, 'version' | 'sessionId' | 'sequence' | 'time'>): void {
-    const last = record.events.at(-1)
-    if (last?.kind === 'turn-ended' && last.runId === runId) return
+    const last = [...record.events].reverse().find(value => value.kind !== 'user-message')
+    if (last?.kind === 'turn-ended' && last.runId === runId && event.kind !== 'user-message') return
     record.events.push(localAgentEventV2Schema.parse({
       version: 2, sessionId: record.id, sequence: record.events.length + 1, time: Date.now(),
       ...this.identity(record, runId), ...event,
     }))
+  }
+  private appendUserMessage(record: LocalAgentRecordV2, runId: string, itemId: string, text: string, purpose: 'initial' | 'supplement' | 'correct' | 'answer') {
+    if (record.events.some(event => event.kind === 'user-message' && event.itemId === itemId)) return
+    this.append(record, runId, { ...this.identity(record, runId), kind: 'user-message', itemId, text, purpose })
   }
   private failInterrupted(owner: SessionOwner): void {
     const task = owner.record.tasks.at(-1)
@@ -600,7 +703,20 @@ export class LocalAgentHarness {
     })
   }
   private async persist(owner: SessionOwner): Promise<void> {
+    const task = owner.record.tasks.at(-1)
+    const terminal = task && ['completed', 'failed', 'cancelled', 'partial'].includes(task.status)
+    const runId = owner.record.events.at(-1)?.runId
+    if (terminal && runId) this.markTiming(owner.record, task, runId, 'taskEnded')
     await this.repository.write(localAgentRecordV2Schema.parse(owner.record))
+    if (task && (terminal || task.execution && Date.now() >= task.execution.deadlineAt)) {
+      // A Stop can race with an actual renderer receipt, so retain its small
+      // original wire identity while releasing materialized image payloads.
+      const proposal = this.proposals.get(owner.record.id)
+      if (proposal) proposal.proposal.candidate = proposal.wireCandidate
+      try {
+        await new CandidateStaging(this.repository.stagingPath(owner.record.workspace, owner.record.workingDirectoryId, 2)).releaseTaskMedia(task.taskId)
+      } catch { owner.cleanupIssue = '任务素材清理失败，可重试删除' }
+    }
     await this.repository.writeDisplay(owner.record.workspace, owner.record.id, { hostResult: owner.hostResult, cleanupIssue: owner.cleanupIssue })
   }
   private async savePendingFeedback(workspace: WorkspaceIdentityV1, id: string): Promise<void> {
@@ -651,22 +767,26 @@ export class LocalAgentHarness {
     owner.record.observations.push(createObservation(owner.record.tasks.at(-1)!, request, observationId, files))
     await this.repository.writeObservation(owner.record.workspace, owner.record.workingDirectoryId, observationId, 'generation-request.json', payload)
   }
-  private launch(owner: SessionOwner, prompt: string, externalId?: string, request?: GenerationRequest): Promise<void> {
+  private launch(owner: SessionOwner, prompt: string, externalId?: string, request?: GenerationRequest, userMessage?: string): Promise<void> {
     if (this.closing) return Promise.reject(new Error('会话服务正在关闭'))
     this.launching.add(owner.record.id)
-    const pending = this.prepareLaunch(owner, prompt, externalId, request)
+    const pending = this.prepareLaunch(owner, prompt, externalId, request, userMessage)
     this.launches.add(pending)
     return pending.finally(() => { this.launches.delete(pending); this.launching.delete(owner.record.id) })
   }
-  private async prepareLaunch(owner: SessionOwner, prompt: string, externalId?: string, request?: GenerationRequest): Promise<void> {
+  private async prepareLaunch(owner: SessionOwner, prompt: string, externalId?: string, request?: GenerationRequest, userMessage?: string): Promise<void> {
     if (this.active.size + this.pendingLaunches >= 3) throw new Error('最多同时运行三个 CLI 会话')
     this.pendingLaunches++
     let cwd: string | undefined
     try {
       const adapter = this.factory(owner.record.adapter, request)
       cwd = await this.repository.staging(owner.record.workspace, owner.record.workingDirectoryId, 2)
-      if (request) await new CandidateStaging(cwd).create(request)
+      if (request) {
+        const task = owner.record.tasks.at(-1)!
+        await new CandidateStaging(cwd).create(request, taskMediaIdentity(task))
+      }
       const run: ActiveRun = { owner, adapter, done: Promise.resolve(), runId: randomUUID(), nativeTurnId: null, cancelled: false, acceptingInputs: true, inputWrites: new Set() }
+      if (userMessage) this.appendUserMessage(owner.record, run.runId, randomUUID(), userMessage, 'initial')
       this.markTiming(owner.record, owner.record.tasks.at(-1)!, run.runId, 'requestPrepared')
       await this.persist(owner)
       this.active.set(owner.record.id, run)
@@ -683,7 +803,7 @@ export class LocalAgentHarness {
     let lastFlush = Date.now()
     const task = owner.record.tasks.at(-1)!
     const files = new Map<string, string>()
-    const preference = this.preferences.get(adapter.id)
+    let preference: LocalAgentConfiguration | undefined
     let turnPending = task.pendingInputs ?? []
     const remaining = (task.execution?.deadlineAt ?? Date.now() + MAX_GENERATION_TASK_DURATION_MS) - Date.now()
     const timeout = setTimeout(() => {
@@ -693,12 +813,18 @@ export class LocalAgentHarness {
       run.cancelled = true
       void adapter.close().catch(() => {})
     }, Math.max(1, remaining))
-    let configurationConfirmed = !preference
+    let configurationConfirmed = true
     const observation = owner.record.observations.find(value => value.observationId === task.observationId)
     if (observation) for (const file of observation.files) files.set(file.fileId, path.join(this.repository.observationPath(owner.record.workspace, owner.record.workingDirectoryId, observation.observationId), file.relativePath))
     const images = observation?.files.filter(file => file.role === 'image').map(file => file.fileId) ?? []
     let stage = '打开原生 CLI'
     try {
+      await this.configurationWrites.get(adapter.id)
+      preference = await this.repository.readConfiguration(adapter.id)
+      configurationConfirmed = !preference
+      owner.record.tasks[owner.record.tasks.length - 1] = aiTaskSchema.parse({ ...owner.record.tasks.at(-1)!,
+        configurationRuns: [...(owner.record.tasks.at(-1)!.configurationRuns ?? []), { runId: run.runId, requested: preference ?? null }] })
+      await this.persist(owner)
       const nativeCwd = await nativeWorkspaceDirectory(owner.record.workspace.normalizedPath)
       if (run.cancelled) return
       this.markTiming(owner.record, task, run.runId, 'nativeOpenStarted')
@@ -717,7 +843,7 @@ export class LocalAgentHarness {
       let feedbackSources = await this.pendingReceipts(owner, externalId)
       const pendingResults = feedbackSources.flatMap(source => source.record.hostResults.filter(result => result.receiptDelivery === 'pending'))
       let turnPrompt = pendingResults.length
-        ? `以下是宿主正式回执；其中修改已经应用，请勿重复执行。请先将其纳入会话事实，再处理本轮用户要求。\n${JSON.stringify(pendingResults)}\n${prompt}` : prompt
+        ? `以下是当前工程尚未送达的宿主实际结果。只有 committed / unchanged 表示已应用或确认无需修改；rejected / stale / failed 均未应用该候选。保留已经提交的成果，不重复执行；失败结果用于理解未完成目标和原因。本轮若仅询问状态或停止原因，只作解释，不自动继续编辑。\n${JSON.stringify({ workspace: owner.record.workspace, results: generationReceiptFeedback(pendingResults) })}\n${prompt}` : prompt
       if (Buffer.byteLength(turnPrompt) > MAX_GENERATION_PROMPT_BYTES) throw new Error('正式回执与请求超过本轮发送预算')
       for (;;) {
       completed = false
@@ -728,6 +854,16 @@ export class LocalAgentHarness {
         taskId: task.taskId, epoch: task.epoch, workspace: task.workspace, runId: run.runId,
         observationId: task.observationId ?? randomUUID(), text: turnPrompt, imageFileIds: images,
       }, files)
+      const configuredTask = owner.record.tasks.at(-1)!
+      const configurationRuns = configuredTask.configurationRuns ?? []
+      const configurationRun = { runId: run.runId, requested: preference ?? null, ...started.configuration }
+      owner.record.tasks[owner.record.tasks.length - 1] = aiTaskSchema.parse({ ...configuredTask,
+        configurationRuns: configurationRuns.some(entry => entry.runId === run.runId)
+          ? configurationRuns.map(entry => entry.runId === run.runId ? configurationRun : entry) : [...configurationRuns, configurationRun] })
+      if (started.inputMetrics) {
+        const current = owner.record.tasks.at(-1)!
+        owner.record.tasks[owner.record.tasks.length - 1] = recordAiTaskInputMetrics(current, task, run.runId, started.inputMetrics)
+      }
       if (!run.cancelled) this.markTiming(owner.record, task, run.runId, 'turnAccepted')
       run.nativeTurnId = started.nativeTurnId
       // startTurn acknowledgement is the first evidence that the native session received these facts.
@@ -746,6 +882,14 @@ export class LocalAgentHarness {
         if (run.cancelled) break
         if (event.taskId === task.taskId && event.epoch === task.epoch && event.runId === run.runId
           && workspaceIdentityKey(event.workspace) === workspaceIdentityKey(task.workspace)) this.markTiming(owner.record, task, run.runId, 'firstNativeEvent')
+        if (event.kind === 'text' && event.phase !== 'candidate'
+          && !owner.record.tasks.at(-1)?.execution?.timing?.entries.some(entry => entry.runId === run.runId && entry.stage === 'firstVisibleText')) {
+          const prior = projectV2RecordToV1({ ...owner.record, events: owner.record.events.filter(value => value.runId === run.runId) })
+          const textEvents = [...prior.events, { version: 1, adapter: owner.record.adapter, sessionId: owner.record.id,
+            sequence: owner.record.events.length + 1, kind: 'text', time: Date.now(),
+            payload: { text: event.text, messageId: event.itemId, phase: event.phase, delta: event.operation === 'append' } } as LocalAgentRecord['events'][number]]
+          if (visibleLocalAgentText(localAgentText(textEvents))) this.markTiming(owner.record, task, run.runId, 'firstVisibleText')
+        }
         if (event.nativeTurnId !== null) run.nativeTurnId = event.nativeTurnId
         if (owner.record.events.length >= 19990) throw new Error('output-limit')
         if (this.captureExternalSession(owner, adapter.getExternalSessionId?.(), externalId)) await this.persist(owner)
@@ -754,6 +898,9 @@ export class LocalAgentHarness {
           if (capabilities.adapter !== adapter.id) throw new Error('protocol')
           if (preference) this.assertRequestedConfiguration(preference, capabilities)
           configurationConfirmed = !preference || this.configurationMatches(preference, capabilities)
+          const current = owner.record.tasks.at(-1)!
+          owner.record.tasks[owner.record.tasks.length - 1] = aiTaskSchema.parse({ ...current,
+            configurationRuns: current.configurationRuns?.map(entry => entry.runId === run.runId ? { ...entry, confirmed: capabilities.current } : entry) })
           await this.rememberCapabilities(nativeCwd, capabilities)
         }
         if (event.kind === 'turn-ended') {
@@ -800,11 +947,16 @@ export class LocalAgentHarness {
       }
       if (!run.cancelled && !owner.record.events.some(event => event.kind === 'turn-ended' && event.runId === run.runId)) {
         if (tools.size || !completed || !owner.record.externalSessionId || !configurationConfirmed) throw new Error('protocol')
-        if (owner.generationRequest && createGenerationProfile(owner.record.adapter, owner.generationRequest).capability.candidateFileIngestion) {
+        const explicitCandidateFile = owner.generationRequest && owner.record.adapter === 'codex' && owner.record.events.some(event =>
+          event.runId === run.runId && event.kind === 'text' && event.phase === 'candidate'
+          && event.text === generationStagedCandidateMarker(owner.generationRequest!.requestId))
+        if (owner.generationRequest && (explicitCandidateFile || createGenerationProfile(owner.record.adapter, owner.generationRequest).capability.candidateFileIngestion)) {
           const candidate = await new CandidateStaging(cwd).readText(owner.generationRequest.requestId)
+          if (run.cancelled) return
+          if (explicitCandidateFile && candidate === null) throw new Error('已声明交付候选，但当前请求缺少 candidate.json')
           if (candidate !== null) this.append(owner.record, run.runId, {
             kind: 'text', itemId: `candidate-file:${owner.generationRequest.requestId}`, phase: 'candidate', operation: 'replace',
-            text: `${GENERATION_OPEN}${candidate}${GENERATION_CLOSE}`, ...this.identity(owner.record, run.runId),
+            text: owner.record.adapter === 'codex' ? codexCandidateFileMessage(candidate) : `${GENERATION_OPEN}${candidate}${GENERATION_CLOSE}`, ...this.identity(owner.record, run.runId),
           })
         }
         this.append(owner.record, run.runId, { kind: 'turn-ended', status: 'completed', failure: null, ...this.identity(owner.record, run.runId) })
@@ -826,7 +978,7 @@ export class LocalAgentHarness {
       const terminal = owner.record.events.at(-1)
       if (!run.cancelled && terminal?.kind === 'turn-ended' && terminal.status !== 'completed') owner.record.tasks[owner.record.tasks.length - 1] = aiTaskSchema.parse({ ...owner.record.tasks.at(-1)!, status: owner.record.tasks.at(-1)!.committedResultIds.length ? 'partial' : terminal.status })
       try { await adapter.close() } catch { /* Terminal failure stays observable even if the child already exited. */ }
-      if (owner.generationRequest) {
+      if (owner.generationRequest && (run.cancelled || terminal?.kind !== 'turn-ended' || terminal.status !== 'completed')) {
         try { await new CandidateStaging(cwd).remove(owner.generationRequest.requestId) }
         catch { owner.cleanupIssue = '候选暂存清理失败，可重试删除' }
       }

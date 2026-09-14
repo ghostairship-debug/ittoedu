@@ -156,12 +156,12 @@ export function PresenterSettingsEditor({
             strategy: event.currentTarget.value as ProjectPresenterSettings['strategy'],
           })}
         >
-          <option value="scene-navigation">相邻场景导航</option>
+          <option value="scene-navigation">上一步 / 下一步</option>
           <option value="authored-command">只触发作者规则</option>
         </select>
       </div>
       <p className="property-hint">
-        PageDown/PageUp 始终是标准前进/后退键。选择“只触发作者规则”后，没有显式规则时不会自动切幕。
+        PageDown 前进到下一步，PageUp 返回上一步；跨过场景首尾时进入相邻场景。选择“只触发作者规则”后，仅执行配置的规则，不自动推进。
       </p>
       <button
         type="button"

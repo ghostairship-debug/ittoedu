@@ -109,14 +109,25 @@ function locationsForSurface(
 }
 
 function primarySlideLocations(
+  surface: SlideSurfaceDocument,
   locations: readonly CourseLocation[],
+  startLocationId: string,
 ): Array<Extract<CourseLocation, { kind: 'slide-scene' }>> {
   const slideLocations = locations.filter(
     (location): location is Extract<CourseLocation, { kind: 'slide-scene' }> =>
       location.kind === 'slide-scene',
   )
-  const withoutState = slideLocations.filter((location) => location.stateId === undefined)
-  return withoutState.length > 0 ? withoutState : slideLocations
+  return surface.scenes.flatMap((scene) => {
+    const sceneLocations = slideLocations.filter((location) => (
+      location.sceneId === scene.id
+      && (location.stateId === undefined
+        || scene.presentation?.states.some((state) => state.id === location.stateId))
+    ))
+    const primary = sceneLocations.find((location) => location.stateId === undefined)
+      ?? sceneLocations.find((location) => location.id === startLocationId)
+      ?? sceneLocations[0]
+    return primary ? [primary] : []
+  })
 }
 
 function slideSceneLabel(
@@ -130,8 +141,9 @@ function slideSceneLabel(
 function slideSceneNodes(
   surface: SlideSurfaceDocument,
   locations: readonly CourseLocation[],
+  startLocationId: string,
 ): CourseTreeNode[] {
-  return primarySlideLocations(locations).map((location) => ({
+  return primarySlideLocations(surface, locations, startLocationId).map((location) => ({
     id: location.id,
     kind: 'slide-scene' as const,
     surfaceId: surface.id,
@@ -139,7 +151,7 @@ function slideSceneNodes(
     label: slideSceneLabel(surface, location),
     locationId: location.id,
     isLocation: true,
-    writesHistory: true,
+    writesHistory: false,
     children: [],
   }))
 }
@@ -202,7 +214,7 @@ function buildSurfacePageNode(
   const locations = locationsForSurface(project, surfaceId)
 
   if (surface.type === 'slide') {
-    const scenes = slideSceneNodes(surface, locations)
+    const scenes = slideSceneNodes(surface, locations, project.startLocationId)
     return {
       id: surfaceId,
       kind: 'slide-page',

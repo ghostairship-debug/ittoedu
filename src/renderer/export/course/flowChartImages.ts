@@ -1,4 +1,6 @@
 import type { PublishedCourseV2Payload } from '../../../shared/publishedCourseTypes'
+import { capturePublishedCourseV2Stage } from '../playerCapture'
+import { publishedCourseV2Schema } from '../../../shared/contracts/published-course-v2/schema'
 import { buildNativeChartSvg } from '../../../shared/nativeChartSvg'
 import { buildFlowPrintPlan } from './flowPrintPlan'
 import { buildFlowDocx, type FlowDocxAsset, type FlowDocxOptions, type FlowDocxResult } from './flowDocx'
@@ -36,5 +38,31 @@ export async function buildFlowDocxWithCharts(payload: PublishedCourseV2Payload,
     const bytes = await svgPng(buildNativeChartSvg(node.chart, 656, node.height, node.blockId), 656, node.height)
     chartImages.set(node.blockId, { bytes, mimeType: 'image/png' })
   }
-  return buildFlowDocx(payload, surfaceId, { ...options, chartImages })
+  const capturedAssets = new Map<string, FlowDocxAsset>()
+  let output = payload
+  for (const entry of payload.globalLayerItems) {
+    const item = entry.item
+    if (item.kind !== 'component' || item.role !== 'teacher-controller' || item.props.includeInStaticExports !== true || !item.visible) continue
+    const location = payload.locations.find(l => l.surfaceId === surfaceId &&
+      (entry.visibility.mode === 'all' || (entry.visibility.mode === 'include') === entry.visibility.locationIds.includes(l.id)))
+    if (!location) continue
+    // A static component picture uses the same isolated Slide capture carrier as PPTX.
+    // It is a one-way Published projection, never an author document conversion.
+    const capturePayload = publishedCourseV2Schema.parse({
+      ...payload, mixedPrintPlan: undefined, navigationGuards: [], globalInteractions: [],
+      locations: [{ id: location.id, label: location.label, kind: 'slide-scene', surfaceId, sceneId: 'controller-capture' }],
+      startLocationId: location.id,
+      surfaces: [{ id: surfaceId, title: surface.title, type: 'slide', canvas: { width: 1280, height: 720 }, surfaceLayerItems: [],
+        scenes: [{ id: 'controller-capture', name: surface.title, backgroundColor: '#ffffff', layerItems: [], interactions: [] }] }],
+      globalLayerItems: [{ ...entry, visibility: { mode: 'all', locationIds: [] }, item: { ...item, frame: { ...item.frame, x: 0, y: 0 }, props: { ...item.props, defaultCollapsed: false } } }],
+    })
+    const dataUrl = await capturePublishedCourseV2Stage({ payload: capturePayload, locationId: location.id, surfaceId, layerItemId: item.layerItemId, includeGlobalLayerItems: true })
+    const assetId = 'controller-capture:' + item.layerItemId
+    if (!dataUrl.startsWith('data:image/png;base64,')) throw new Error('控制台捕获未返回 PNG')
+    capturedAssets.set(assetId, { bytes: Uint8Array.from(atob(dataUrl.slice(dataUrl.indexOf(',') + 1)), c => c.charCodeAt(0)), mimeType: 'image/png' })
+    if (output === payload) output = structuredClone(payload)
+    const target = output.globalLayerItems.find(e => e.item.layerItemId === item.layerItemId)!.item
+    if (target.kind === 'component') target.staticFallbackAssetId = assetId
+  }
+  return buildFlowDocx(output, surfaceId, { ...options, chartImages, resolveAsset: id => capturedAssets.get(id) ?? options.resolveAsset?.(id) })
 }

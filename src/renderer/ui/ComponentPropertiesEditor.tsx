@@ -25,6 +25,8 @@ export interface ComponentPropertiesEditorProps {
   node: ComponentPropertiesTarget
   assets: Readonly<Record<string, AssetMeta>>
   onChange(nextProps: Record<string, unknown>): void
+  title?: string
+  groups?: readonly { title: string; matches(key: string): boolean }[]
 }
 
 function inputId(nodeId: string, key: string): string {
@@ -213,6 +215,8 @@ export function ComponentPropertiesEditor({
   node,
   assets,
   onChange,
+  title = '组件内容',
+  groups,
 }: ComponentPropertiesEditorProps) {
   const effectiveProps = mergeComponentProps(manifest, node.props)
   const editorState = resolveComponentEditorState(manifest, effectiveProps)
@@ -226,7 +230,7 @@ export function ComponentPropertiesEditor({
 
   return (
     <section className="property-section component-properties-editor" data-testid="component-properties-editor">
-      <h3 className="property-title"><SlidersHorizontal size={14} />组件内容</h3>
+      <h3 className="property-title"><SlidersHorizontal size={14} />{title}</h3>
       {manifest.presets && manifest.presets.length > 0 ? (
         <label className="property-row">
           <span>应用预设</span>
@@ -288,16 +292,13 @@ export function ComponentPropertiesEditor({
         </label>
       ) : null}
 
-      {properties.map((field) => (
-        <PropertyField
-          key={field.key}
-          field={field}
-          node={node}
-          effectiveProps={effectiveProps}
-          assets={assets}
-          onChange={onChange}
-        />
-      ))}
+      {(groups ?? [{ title: '', matches: () => true }]).map((group, index, all) => {
+        const fields = properties.filter(field => group.matches(field.key) && !all.slice(0, index).some(previous => previous.matches(field.key)))
+        return fields.length > 0 ? <div key={group.title} className="controller-property-group">
+          {group.title && <h4>{group.title}</h4>}
+          {fields.map(field => <PropertyField key={field.key} field={field} node={node} effectiveProps={effectiveProps} assets={assets} onChange={onChange} />)}
+        </div> : null
+      })}
       {properties.length === 0 ? (
         <p className="property-hint">当前页面没有公开的可编辑字段。</p>
       ) : null}

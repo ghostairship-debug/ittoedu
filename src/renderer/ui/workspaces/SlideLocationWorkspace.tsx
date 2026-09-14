@@ -1,3 +1,5 @@
+import { canEditLayerInScope } from '../../../shared/teacherControllerRole'
+import { useControllerDisplayRevision } from '../../authoring/controllerDisplayBounds'
 import {
   Hand,
   LoaderCircle,
@@ -61,7 +63,7 @@ import {
   type StageRect,
   type StageSelectionOverlayGeometry,
 } from '../../authoring/stageViewportTransform'
-import { createV9TeacherControllerAuthoringController } from '../../authoring/v9TeacherControllerAuthoring'
+
 import {
   type mountPublishedCourseAuthoring,
   type mountPublishedCourseTryRun,
@@ -280,7 +282,7 @@ function phaserDocumentFromView(
 ): SlidePhaserDocument {
   const source = editingScope === 'global' ? 'global' : 'scene'
   const nodes = view.layers.flatMap((layer) => {
-    if (layer.source !== source) return []
+    if (!canEditLayerInScope(layer, source)) return []
     const node = courseLayerItemToEditorCanvasNode(layer.item as LayerItem)
     return node ? [node] : []
   })
@@ -603,49 +605,9 @@ type CanvasAuthoringHit =
   | { kind: 'runtime'; target: Readonly<RuntimeAuthoringTarget> }
   | { kind: 'component'; target: Readonly<ComponentAuthoringTextTarget> }
 
-function controllerGestureConsumed(
-  overlay: StageSelectionOverlayGeometry | null | undefined,
-  preview: unknown,
-  target: unknown,
-): boolean {
-  return Boolean(overlay && (preview || target))
-}
 
-function TeacherControllerAuthoringOverlay({
-  overlay,
-}: {
-  overlay: StageSelectionOverlayGeometry
-}) {
-  const box = overlay.selectionBox
-  return (
-    <div
-      className="teacher-controller-overlay"
-      data-testid="teacher-controller-overlay"
-      aria-hidden="true"
-    >
-      <div
-        className="teacher-controller-overlay__box"
-        style={{
-          left: box.x,
-          top: box.y,
-          width: box.width,
-          height: box.height,
-        }}
-      />
-      {STAGE_RESIZE_HANDLE_DIRECTIONS.map((direction) => {
-        const point = overlay.handles[direction]
-        return (
-          <div
-            key={direction}
-            className="teacher-controller-overlay__handle"
-            data-handle={direction}
-            style={{ left: point.x - 4, top: point.y - 4 }}
-          />
-        )
-      })}
-    </div>
-  )
-}
+
+
 
 export function SlideLocationWorkspace({
   snapshot,
@@ -746,23 +708,20 @@ export function SlideLocationWorkspace({
       afterSelectLayers: (command) => commandPortRef.current.afterSelectLayers?.(command),
     },
   }))
-  const controllerAuthoringRef = useRef(createV9TeacherControllerAuthoringController({
-    readBackend: () => backendRef.current,
-    commit: (run) => commandPortRef.current.run((live) => run(live.getSession())),
-  }))
+  
   const candidatePointerActiveRef = useRef(false)
-  const controllerPointerActiveRef = useRef(false)
+  
   const courseTryRunRef = useRef<HTMLDivElement>(null)
   const courseTryRunSessionRef = useRef<PublishedCourseSession | null>(null)
   const courseTryRunMountChainRef = useRef(Promise.resolve())
   const [tryRunFeedback, setTryRunFeedback] = useState<RuntimePreviewFeedback>(null)
   const [tryRunEpoch, setTryRunEpoch] = useState(0)
-  const [controllerOverlay, setControllerOverlay] =
-    useState<StageSelectionOverlayGeometry | null>(null)
+  
+  const controllerDisplayRevision = useControllerDisplayRevision()
   const [layerOverlay, setLayerOverlay] = useState<StageSelectionOverlayGeometry | null>(null)
   const needsLayerOverlay = Boolean(slideEditorView?.layers.some(layer =>
-    selectedNodeIds.includes(layer.selectionId) && layer.item.kind === 'native' &&
-    ['table', 'chart', 'input'].includes(layer.item.content.nativeType)))
+    selectedNodeIds.includes(layer.selectionId) && (isTeacherControllerLayerItem(layer.item) || (layer.item.kind === 'native' &&
+    ['table', 'chart', 'input'].includes(layer.item.content.nativeType)))))
   const drawTool = snapshot.drawTool
   const drawGestureRef = useRef<{
     pointerId: number
@@ -818,40 +777,14 @@ export function SlideLocationWorkspace({
     }
   }, [view.x, view.y, view.zoom])
 
-  useEffect(() => {
-    if (
-      slideBackendKind !== 'slide-authoring' ||
-      canvasMode !== 'edit' ||
-      editingScope !== 'global'
-    ) {
-      setControllerOverlay(null)
-      return
-    }
-    if (controllerPointerActiveRef.current) return
-    const viewport = readCandidateViewport()
-    if (!viewport) return
-    if (isTeacherControllerLayerItem(
-      slideEditorView?.layers.find((layer) => selectedNodeIds.includes(layer.selectionId))?.item,
-    )) {
-      setControllerOverlay(controllerAuthoringRef.current.overlayGeometry(viewport))
-      return
-    }
-    setControllerOverlay(null)
-  }, [
-    canvasMode,
-    editingScope,
-    readCandidateViewport,
-    selectedNodeIds,
-    slideBackendKind,
-    slideEditorView,
-  ])
+  
 
   useLayoutEffect(() => {
     if (candidatePointerActiveRef.current) return
     const viewport = readCandidateViewport()
     setLayerOverlay(needsLayerOverlay && canvasMode === 'edit' && viewport
       ? slideAuthoringRef.current.overlayGeometry(viewport) : null)
-  }, [needsLayerOverlay, canvasMode, slideEditorView, selectedNodeIds, readCandidateViewport, stageViewportSize])
+  }, [needsLayerOverlay, canvasMode, slideEditorView, selectedNodeIds, readCandidateViewport, stageViewportSize, controllerDisplayRevision])
 
   const stageTransform = useMemo(() => createStageViewportTransform({
     viewport: {
@@ -1118,9 +1051,11 @@ export function SlideLocationWorkspace({
     scope: 'scene' | 'global',
     node: AuthoringPatchNode,
   ) => {
+    const owner = readSnapshot().view?.layers.find(layer => layer.selectionId === node.id)?.source
+    const targetScope = owner === 'global' ? 'global' : scope
     pendingAuthoringNodesRef.current.set(
-      `${scope}:${node.id}`,
-      { scope, node: structuredClone(node) },
+      `${targetScope}:${node.id}`,
+      { scope: targetScope, node: structuredClone(node) },
     )
     if (authoringFrameRef.current !== null) return
     authoringFrameRef.current = window.requestAnimationFrame(
@@ -2507,30 +2442,7 @@ export function SlideLocationWorkspace({
           event.stopPropagation()
           return
         }
-        if (currentSnapshot.editingScope === 'global') {
-          const controllerResult = controllerAuthoringRef.current.pointerDown({
-            x: event.clientX,
-            y: event.clientY,
-          }, viewport)
-          if (
-            controllerResult.kind !== 'v8' &&
-            controllerGestureConsumed(
-              controllerResult.overlay,
-              controllerResult.preview,
-              controllerResult.target,
-            )
-          ) {
-            controllerPointerActiveRef.current = true
-            if (controllerResult.target) {
-              ports.selection.selectNode(controllerResult.target.layerItemId)
-            }
-            setControllerOverlay(controllerResult.overlay)
-            event.currentTarget.setPointerCapture(event.pointerId)
-            event.preventDefault()
-            event.stopPropagation()
-            return
-          }
-        }
+        
         const result = slideAuthoringRef.current.pointerDown({
           x: event.clientX,
           y: event.clientY,
@@ -2588,24 +2500,7 @@ export function SlideLocationWorkspace({
             event.stopPropagation()
             return
           }
-          if (
-            slideBackendKind === 'slide-authoring' &&
-            controllerPointerActiveRef.current
-          ) {
-            const viewport = readCandidateViewport()
-            if (viewport) {
-              const controllerResult = controllerAuthoringRef.current.pointerMove({
-                x: event.clientX,
-                y: event.clientY,
-              }, viewport)
-              if (controllerResult.kind !== 'v8') {
-                setControllerOverlay(controllerResult.overlay)
-              }
-              event.preventDefault()
-              event.stopPropagation()
-              return
-            }
-          }
+          
           if (
             slideBackendKind === 'slide-authoring' &&
             candidatePointerActiveRef.current
@@ -2679,38 +2574,7 @@ export function SlideLocationWorkspace({
           event.stopPropagation()
           return
         }
-        if (
-          slideBackendKind === 'slide-authoring' &&
-          controllerPointerActiveRef.current
-        ) {
-          const viewport = readCandidateViewport()
-          if (viewport) {
-            const currentSnapshot = readSnapshot()
-            const controllerResult = currentSnapshot.editingScope === 'global'
-              ? controllerAuthoringRef.current.pointerUp({
-                  x: event.clientX,
-                  y: event.clientY,
-                }, viewport)
-              : controllerAuthoringRef.current.pointerCancel({
-                  x: event.clientX,
-                  y: event.clientY,
-                }, viewport)
-            if (controllerResult.kind !== 'v8') {
-              setControllerOverlay(
-                currentSnapshot.editingScope === 'global'
-                  ? controllerResult.overlay
-                  : null,
-              )
-            }
-          }
-          controllerPointerActiveRef.current = false
-          if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-            event.currentTarget.releasePointerCapture(event.pointerId)
-          }
-          event.preventDefault()
-          event.stopPropagation()
-          return
-        }
+        
         if (
           slideBackendKind === 'slide-authoring' &&
           candidatePointerActiveRef.current
@@ -2777,26 +2641,7 @@ export function SlideLocationWorkspace({
           event.stopPropagation()
           return
         }
-        if (
-          slideBackendKind === 'slide-authoring' &&
-          controllerPointerActiveRef.current
-        ) {
-          const viewport = readCandidateViewport()
-          if (viewport) {
-            controllerAuthoringRef.current.pointerCancel({
-              x: event.clientX,
-              y: event.clientY,
-            }, viewport)
-          }
-          controllerPointerActiveRef.current = false
-          setControllerOverlay(null)
-          if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-            event.currentTarget.releasePointerCapture(event.pointerId)
-          }
-          event.preventDefault()
-          event.stopPropagation()
-          return
-        }
+        
         if (panRef.current?.pointerId === event.pointerId) {
           panRef.current = null
           setPanning(false)
@@ -3091,9 +2936,7 @@ export function SlideLocationWorkspace({
           </div>
         ) : null}
       </div>
-      {canvasMode === 'edit' && editingScope === 'global' && controllerOverlay ? (
-        <TeacherControllerAuthoringOverlay overlay={controllerOverlay} />
-      ) : null}
+      
       {canvasMode === 'edit' && needsLayerOverlay && layerOverlay ? <SlideLayerSelectionOverlay overlay={layerOverlay} /> : null}
       {canvasMode === 'edit' && editingFormulaNode && (
         <FormulaEditDialog

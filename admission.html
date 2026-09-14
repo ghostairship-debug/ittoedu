@@ -2,7 +2,7 @@
 <html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self' blob: data:; script-src 'self' blob: 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data: https:; media-src 'self' blob: data: https:; font-src 'self' data: https:; connect-src 'self' blob: https: wss:; object-src 'none'; frame-src blob:; base-uri 'none'; form-action 'none'" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self' blob: data:; script-src 'self' blob: 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data: https: courseware-editor://app; media-src 'self' blob: data: https: courseware-editor://app; font-src 'self' data: https: courseware-editor://app; connect-src 'self' blob: https: wss: courseware-editor://app; object-src 'none'; frame-src blob:; base-uri 'none'; form-action 'none'" />
     <title>课件候选准入</title>
   </head>
   <body><script type="module" src="/src/renderer/authoring/generation/admissionWorker.ts"></script></body>

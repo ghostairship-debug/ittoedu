@@ -383,59 +383,6 @@ export const imageNodeSchema = imageNodeCoreSchema.and(playbackFieldsSchema)
 export const videoNodeSchema = videoNodeCoreSchema.and(playbackFieldsSchema)
 export const shapeNodeSchema = shapeNodeCoreSchema.and(playbackFieldsSchema)
 
-const teacherControllerActionSchemas = [
-  z.object({ type: z.literal('step.previous') }).strict(),
-  z.object({ type: z.literal('step.next') }).strict(),
-  z.object({ type: z.literal('scene.previous') }).strict(),
-  z.object({ type: z.literal('scene.next') }).strict(),
-  z.object({ type: z.literal('scene.replay') }).strict(),
-  z.object({ type: z.literal('course.restart') }).strict(),
-  z.object({
-    type: z.literal('scene.go'),
-    sceneId: z.string().trim().min(1).max(200),
-    targetStateId: z.string().trim().min(1).max(200).optional(),
-  }).strict(),
-  z.object({ type: z.literal('audio.toggle-mute') }).strict(),
-  z.object({ type: z.literal('player.fullscreen.toggle') }).strict(),
-  z.object({ type: z.literal('scene.open-picker') }).strict(),
-] as const
-
-const teacherControllerActionSchema = z.discriminatedUnion(
-  'type',
-  teacherControllerActionSchemas,
-)
-
-export const teacherControllerNodeSchema = nativeRenderableBaseSchema
-  .and(playbackFieldsSchema)
-  .and(z.object({
-    type: z.literal('teacher-controller'),
-    title: z.string().max(80),
-    showSceneProgress: z.boolean(),
-    compact: z.boolean(),
-    collapsible: z.boolean(),
-    defaultCollapsed: z.boolean(),
-    buttons: z.array(z.object({
-      id: z.string().trim().min(1).max(200),
-      action: teacherControllerActionSchema,
-      label: z.string().min(1).max(20),
-      visible: z.boolean(),
-    }).strict()).min(1).max(12).superRefine((buttons, context) => {
-      const ids = buttons.map((button) => button.id)
-      if (new Set(ids).size !== ids.length) {
-        context.addIssue({ code: 'custom', message: '控制器按钮 ID 不能重复' })
-      }
-    }),
-    style: z.object({
-      backgroundColor: colorSchema,
-      backgroundOpacity: unitInterval,
-      accentColor: colorSchema,
-      textColor: colorSchema,
-      cornerRadius: finiteNumber.min(0).max(100),
-    }),
-    includeInStaticExports: z.boolean(),
-  }))
-
-
 export const NATIVE_RENDERABLE_BASE_KEYS = [
   'id',
   'name',
@@ -692,43 +639,11 @@ const shapeNativeContentObjectSchema = z.object({
   }).strict(),
 }).strict().superRefine(refineShapeLineGeometry)
 
-const teacherControllerNativeContentObjectSchema = z.object({
-  title: z.string().max(80),
-  showSceneProgress: z.boolean(),
-  compact: z.boolean(),
-  collapsible: z.boolean(),
-  defaultCollapsed: z.boolean(),
-  buttons: z.array(z.object({
-    id: z.string().trim().min(1).max(200),
-    action: teacherControllerActionSchema,
-    label: z.string().min(1).max(20),
-    visible: z.boolean(),
-  }).strict()).min(1).max(12).superRefine((buttons, context) => {
-    const ids = buttons.map((button) => button.id)
-    if (new Set(ids).size !== ids.length) {
-      context.addIssue({ code: 'custom', message: '控制器按钮 ID 不能重复' })
-    }
-  }),
-  style: z.object({
-    backgroundColor: colorSchema,
-    backgroundOpacity: unitInterval,
-    accentColor: colorSchema,
-    textColor: colorSchema,
-    cornerRadius: finiteNumber.min(0).max(100),
-  }),
-  includeInStaticExports: z.boolean(),
-})
-
 export const textNativeContentSchema = nativeContentSchema('text', textNativeContentObjectSchema)
 export const formulaNativeContentSchema = nativeContentSchema('formula', formulaNativeContentObjectSchema)
 export const imageNativeContentSchema = nativeContentSchema('image', imageNativeContentObjectSchema)
 export const videoNativeContentSchema = nativeContentSchema('video', videoNativeContentObjectSchema)
 export const shapeNativeContentSchema = nativeContentSchema('shape', shapeNativeContentObjectSchema)
-export const teacherControllerNativeContentSchema = nativeContentSchema(
-  'teacher-controller',
-  teacherControllerNativeContentObjectSchema,
-)
-
 const nativeTableCellStyleSchema = z.object({
   fillColor: colorSchema.optional(),
   fillOpacity: unitInterval.optional(),
@@ -1070,7 +985,6 @@ export const nativeRenderableNodeSchema = z.union([
   imageNodeSchema,
   videoNodeSchema,
   shapeNodeSchema,
-  teacherControllerNodeSchema,
   tableNodeSchema,
   chartNodeSchema,
   inputNodeSchema,
@@ -1082,7 +996,6 @@ export const nativeContentSchemaByType = {
   image: imageNativeContentSchema,
   video: videoNativeContentSchema,
   shape: shapeNativeContentSchema,
-  'teacher-controller': teacherControllerNativeContentSchema,
   table: tableNativeContentSchema,
   chart: chartNativeContentSchema,
   input: inputNativeContentSchema,
@@ -1096,7 +1009,6 @@ export const nativeContentInputSchemaByType = {
   image: imageNativeContentObjectSchema,
   video: videoNativeContentObjectSchema,
   shape: shapeNativeContentObjectSchema,
-  'teacher-controller': teacherControllerNativeContentObjectSchema,
   table: tableNativeContentObjectSchema,
   chart: chartNativeContentObjectSchema,
   input: nativeInputContentObjectSchema,

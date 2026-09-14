@@ -1,10 +1,10 @@
+import { isControllerFixture } from '../fixtures/teacherController'
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { makeAuthoringAddress } from '@/shared/authoringAddress'
 import type { ComponentPackageData } from '@/shared/componentTypes'
 import { CANVAS_HEIGHT, CANVAS_WIDTH } from '@/shared/constants'
 import type { AssetMeta } from '@/shared/contracts/media-v1'
-import { constrainTeacherControllerAuthoringFrame } from '@/shared/teacherControllerLayout'
 import { stageResizeHandleWorldPoint, worldToClient } from '@/renderer/authoring/stageViewportTransform'
 import { createSpatialWorldAuthoringController } from '@/renderer/authoring/spatialWorldAuthoring'
 import {
@@ -899,9 +899,9 @@ describe('Spatial product shell wiring', () => {
     const initial = useEditorStore.getState().spatialSession!
     const document = structuredClone(initial.history.present)
     const controller = document.globalLayerItems.find((entry) => (
-      entry.item.kind === 'native' && entry.item.content.nativeType === 'teacher-controller'
+      isControllerFixture(entry.item)
     ))?.item
-    if (!controller || controller.kind !== 'native' || controller.content.nativeType !== 'teacher-controller') {
+    if (!controller || !isControllerFixture(controller)) {
       throw new Error('expected global teacher controller')
     }
     controller.rotation = 37
@@ -917,18 +917,12 @@ describe('Spatial product shell wiring', () => {
     const locatedBefore = locateCourseLayer(before.history.present, controller.layerItemId)
     if (
       !locatedBefore ||
-      locatedBefore.item.kind !== 'native' ||
-      locatedBefore.item.content.nativeType !== 'teacher-controller'
+      !isControllerFixture(locatedBefore.item)
     ) {
       throw new Error('expected selected global teacher controller')
     }
     const proposedFrame = { ...locatedBefore.item.frame, x: -5_000 }
-    const expectedFrame = constrainTeacherControllerAuthoringFrame(
-      locatedBefore.item.content.data,
-      proposedFrame,
-      locatedBefore.item.rotation,
-      { width: CANVAS_WIDTH, height: CANVAS_HEIGHT },
-    )
+    const expectedFrame = proposedFrame
 
     const xInput = screen.getByLabelText('X')
     fireEvent.change(xInput, { target: { value: String(proposedFrame.x) } })

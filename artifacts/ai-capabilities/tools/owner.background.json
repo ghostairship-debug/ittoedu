@@ -1,7 +1,21 @@
 {
+  "background": {
+    "description": "修改正式背景目标的颜色、图片或继承模式。当前页使用 pages.backgrounds 中 role=page 的 update 目标；Course/共享 Surface 仅在相应授权范围中可用。省略字段保持原值；backgroundAssetId:null 移除图片。Course 和命名状态没有 backgroundMode；命名状态只覆盖给定颜色/图片，其余继承。",
+    "fallback": "图片优先 media.apply placement=background；失败后可读取 asset.media.import 与 owner.background 完整卡，在同一候选中导入真实图片并以 {$result:{stepId:\"import\",kind:\"asset-id\",index:0}} 更新同一背景目标。使用当前 request 的 global create 素材依赖范围；已有有效 assetId 可直接复用。失败不扩大修改范围，不直接写工程。",
+    "supportedScopes": [
+      "slide:scene",
+      "slide:surface",
+      "slide:global",
+      "flow:surface",
+      "flow:global",
+      "spatial-2d:surface",
+      "spatial-2d:global"
+    ]
+  },
   "candidateCarrier": {
     "default": "native"
   },
+  "description": "修改正式背景目标的颜色、图片或继承模式。当前页使用 pages.backgrounds 中 role=page 的 update 目标；Course/共享 Surface 仅在相应授权范围中可用。省略字段保持原值；backgroundAssetId:null 移除图片。Course 和命名状态没有 backgroundMode；命名状态只覆盖给定颜色/图片，其余继承。",
   "examples": [
     {
       "input": {

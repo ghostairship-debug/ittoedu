@@ -1,3 +1,4 @@
+import { buildPublishedFixture as buildPublishedCourseV2Payload } from '../fixtures/teacherController'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { addCourseFlowPage } from '@/renderer/course/courseLocationCommands'
 import { syncFlowCourseLocations } from '@/renderer/course/flowDocumentModel'
@@ -6,7 +7,7 @@ import {
   selectFlowGlobalScope,
 } from '@/renderer/course/flowEditorSlice'
 import { insertFlowSharedRuntime } from '@/renderer/course/flowSharedAuthoringAdapters'
-import { buildPublishedCourseV2Payload } from '@/renderer/export/course/buildPublishedCourse'
+
 import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
 import { mountFlowLocationTryRun } from '@/renderer/ui/flowLocationTryRun'
 import {

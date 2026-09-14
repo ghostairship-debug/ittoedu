@@ -70,6 +70,7 @@ export interface PublishedComponentMountOptions {
   sceneId?: string
   interactive?: boolean
   actions?: Readonly<ComponentHostActions>
+  teacherController?: ComponentCreateContextV4['teacherController']
   events?: ComponentCreateContextV4['events']
   courseState?: ComponentCreateContextV4['courseState']
   presentation?: ComponentCreateContextV4['presentation']
@@ -447,6 +448,7 @@ export function createPublishedComponentContextResources(
       editorState,
       mode,
       actions: scopeDynamicHostApi(actions, () => !disposed),
+      teacherController: options.teacherController ? scopeDynamicHostApi(options.teacherController, () => !disposed) : undefined,
       scope: options.scope ?? 'scene',
       events: eventScope.events,
       courseState: options.courseState ? scopeDynamicHostApi(options.courseState, () => !disposed) : undefined,

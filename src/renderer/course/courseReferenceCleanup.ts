@@ -1,3 +1,4 @@
+import type { TeacherControllerButton } from '../../shared/teacherControllerConfig'
 import { nanoid } from 'nanoid'
 import type {
   CourseLocation,
@@ -8,7 +9,7 @@ import type {
   SlideSceneDocument,
 } from '../../shared/courseProjectTypes'
 import type { InteractionRule } from '../../shared/interactionTypes'
-import type { TeacherControllerButton } from '../../shared/contracts/native-v1'
+
 
 export interface RemovedCourseReferences {
   /** Course-location ids only. These never stand in for scene, block, or layer ids. */
@@ -87,17 +88,7 @@ function removeDeletedLocationVisibility(
     )
     if (entry.visibility.locationIds.length > 0) continue
     if (entry.visibility.mode === 'include') {
-      if (
-        controllerFallbackLocationIds
-        && entry.item.kind === 'native'
-        && entry.item.content.nativeType === 'teacher-controller'
-      ) {
-        if (controllerFallbackLocationIds.length === 0) {
-          throw new Error('不能清空教师控制器的全部可达位置')
-        }
-        entry.visibility.locationIds = [...controllerFallbackLocationIds]
-        continue
-      }
+      
       removedLayerItemIds.add(entry.item.layerItemId)
       entries.splice(index, 1)
     } else entry.visibility = { mode: 'all', locationIds: [] }
@@ -203,23 +194,17 @@ function removeControllerTargetsFromItem(
   item: LayerItem,
   removedIds: ReadonlySet<string>,
 ): void {
-  if (item.kind !== 'native' || item.content.nativeType !== 'teacher-controller') return
-  item.content.data.buttons = removeControllerButtonTargets(item.content.data.buttons, removedIds)
+  if (item.kind === 'component' && item.role === 'teacher-controller') {
+    if (Array.isArray(item.props.buttons)) item.props.buttons = removeControllerButtonTargets(item.props.buttons as TeacherControllerButton[], removedIds)
+    if (item.props.sceneStyles && typeof item.props.sceneStyles === 'object') {
+      for (const id of removedIds) delete (item.props.sceneStyles as Record<string, unknown>)[id]
+    }
+    return
+  }
 }
 
-function teacherControllerOverrideButtons(
-  item: LayerItem | undefined,
-  override: LayerItemOverride,
-): TeacherControllerButton[] | undefined {
-  if (
-    item?.kind !== 'native'
-    || item.content.nativeType !== 'teacher-controller'
-    || !override.nativeData
-    || !Array.isArray(override.nativeData.buttons)
-  ) {
-    return undefined
-  }
-  return override.nativeData.buttons as TeacherControllerButton[]
+function teacherControllerOverrideButtons(item: LayerItem | undefined, override: LayerItemOverride): TeacherControllerButton[] | undefined {
+  return item?.kind === 'component' && item.role === 'teacher-controller' && Array.isArray(override.componentProps?.buttons) ? override.componentProps.buttons as TeacherControllerButton[] : undefined
 }
 
 function removeControllerTargetsFromSceneOverrides(
@@ -230,8 +215,8 @@ function removeControllerTargetsFromSceneOverrides(
   scene.presentation?.states.forEach((state) => {
     Object.entries(state.layerItemOverrides).forEach(([layerItemId, override]) => {
       const buttons = teacherControllerOverrideButtons(items.get(layerItemId), override)
-      if (buttons && override.nativeData) {
-        override.nativeData.buttons = removeControllerButtonTargets(buttons, removedIds)
+      if (buttons && override.componentProps) {
+        override.componentProps!.buttons = removeControllerButtonTargets(buttons, removedIds)
       }
     })
   })

@@ -9,6 +9,8 @@ import { carrierForFlowBlock, findFlowBlockRecursive, makeFlowBlockAuthoringAddr
 import { makeLayerItemAuthoringAddress } from '../courseAuthoringScope'
 import { resolveAuthoringToolScope } from './authoringToolScope'
 import { AuthoringToolFailure, type AuthoringToolDefinition } from './executeAuthoringTool'
+import { collectCourseProjectReferences } from '../../../shared/contracts/course-project-v9/references'
+import { materializeCourseSlideLayerItems } from '../../../shared/courseLayerComposition'
 
 const schema = z.object({ replacementItemId: z.string().min(1) }).strict()
 const incompatible = (message: string, path: (string | number)[] = []) => { throw new AuthoringToolFailure([{ code: 'replacement-unmappable', message, path }]) }
@@ -82,6 +84,68 @@ function migrateLayerReferences(document: CourseProjectDocument, before: LayerIt
   })
 }
 
+/** A named-state shape can change carrier without changing its inherited base
+ * or the other states. The existing two carriers and overrides express this;
+ * only references whose state domain is explicit may be redirected. */
+function replaceInheritedShapeInState(document: CourseProjectDocument, target: AuthoringToolTargetWireV1, before: LayerItem, after: LayerItem) {
+  if (before.kind !== 'native' || before.content.nativeType !== 'shape' || after.kind !== 'native' || after.content.nativeType !== 'image') {
+    incompatible('此对象继承自基础状态或被其他状态使用；该载体转换无法仅修改当前状态，请窄编辑或显式选择基础状态进行完整替换')
+  }
+  const surfaceIndex = document.surfaces.findIndex(surface => surface.id === target.surfaceId), surface = document.surfaces[surfaceIndex]!
+  if (surface.type !== 'slide' || target.owner !== 'scene') incompatible('命名状态局部换图只适用于 Slide scene 对象')
+  if (surface.type !== 'slide') throw new Error('Slide target')
+  const sceneIndex = surface.scenes.findIndex(scene => scene.layerItems.some(item => item.layerItemId === before.layerItemId)), scene = surface.scenes[sceneIndex]!
+  const state = scene.presentation?.states.find(state => state.id === target.stateId)
+  if (!state) incompatible('当前呈现状态已失效')
+  const currentState = state!
+  const relevantRules = new Set<number>()
+  for (const reference of collectCourseProjectReferences(document)) {
+    if (reference.kind !== 'layer-item' || reference.id !== before.layerItemId) continue
+    const path = reference.path
+    if (path[0] === 'surfaces' && path[1] === surfaceIndex && path[2] === 'scenes' && path[3] === sceneIndex) {
+      if (path[4] === 'presentation') continue // Other state overrides continue to address the old carrier.
+      if (path[4] === 'interactions' && typeof path[5] === 'number') { relevantRules.add(path[5]); continue }
+    }
+    incompatible('此引用没有当前呈现状态的独立绑定，局部换图无法保留其他状态行为', [...path])
+  }
+  const additions: InteractionRule[] = []
+  for (const index of relevantRules) {
+    const rule = scene.interactions[index]!, conditions = rule.conditions.filter(condition => condition.type === 'presentation.in')
+    if (!conditions.length) incompatible('无呈现状态范围的交互引用无法只重绑当前状态', ['interactions', index, 'conditions'])
+    if (conditions.some(condition => !condition.stateIds.includes(currentState.id))) continue
+    if (conditions.some(condition => condition.stateIds.length === 1)) {
+      migrateRules([rule], before, after, ['interactions', index]); continue
+    }
+    const actionIds = new Set(rule.actions.map(action => action.id))
+    if ([...scene.interactions, ...document.globalInteractions].some(entry => entry.trigger.type === 'animation.completed' && actionIds.has(entry.trigger.actionId))) {
+      incompatible('动画完成引用跨越多个呈现状态，局部换图需要先拆分这条状态链', ['interactions', index])
+    }
+    const copy = structuredClone(rule)
+    copy.id = `replacement-${crypto.randomUUID()}`
+    copy.actions.forEach(action => { action.id = `replacement-${crypto.randomUUID()}` })
+    copy.conditions = [...copy.conditions.filter(condition => condition.type !== 'presentation.in'), { type: 'presentation.in', stateIds: [currentState.id] }]
+    migrateRules([copy], before, after, ['interactions', index])
+    // Each state condition included the current state and at least one other;
+    // removing it from one ANDed condition preserves their original intersection.
+    conditions[0]!.stateIds = conditions[0]!.stateIds.filter(id => id !== currentState.id)
+    additions.push(copy)
+  }
+  scene.interactions.push(...additions)
+  const effective = materializeCourseSlideLayerItems(scene.layerItems, currentState).find(item => item.layerItemId === before.layerItemId)!
+  if (effective.locked) incompatible('当前呈现状态中的对象已锁定')
+  const fields = ['label', 'frame', 'rotation', 'opacity', 'locked', 'hitPolicy', 'playbackInitialVisibility', 'paperSpace'] as const
+  for (const key of fields) {
+    if (Object.hasOwn(effective, key)) Object.assign(after, { [key]: structuredClone(Reflect.get(effective, key)) })
+    else Reflect.deleteProperty(after, key)
+  }
+  after.visible = false
+  currentState.layerItemOverrides[before.layerItemId] = { ...currentState.layerItemOverrides[before.layerItemId], visible: false }
+  currentState.layerItemOverrides[after.layerItemId] = { ...currentState.layerItemOverrides[after.layerItemId], visible: effective.visible }
+  const ids = materializeCourseSlideLayerItems(scene.layerItems, currentState).filter(item => item.layerItemId !== after.layerItemId).map(item => item.layerItemId)
+  ids.splice(ids.indexOf(before.layerItemId), 0, after.layerItemId)
+  currentState.layerItemOrder = ids
+}
+
 export const semanticReplacementTool: AuthoringToolDefinition<z.infer<typeof schema>> = {
   name: 'selection.replace', inputSchema: schema,
   description: '完整替换精确选中对象。先在附带 create scope 创建新对象和所需资源，再以 replacementItemId 引用前序创建步骤的 item-id。宿主保留原位置、层级、可见性、旋转和可映射引用；不兼容引用明确失败。所有步骤先私有准备，最终一次提交。修改文字、字号或参数优先使用 edit/component.configure。',
@@ -91,6 +155,7 @@ export const semanticReplacementTool: AuthoringToolDefinition<z.infer<typeof sch
     if (value.replacementItemId === destination.target.itemId) throw new Error('替换对象必须来自新的创建回执')
     const body = surface.type === 'flow' && target.owner === 'surface' ? findFlowBlockRecursive(surface.blocks, destination.target.itemId) : null
     let address: string
+    let retainedOriginal = false
     const nextDocument = commitCourseProjectMutation(document, draft => {
       if (body && surface.type === 'flow') {
         if (destination.target.authoringAddress !== makeFlowBlockAuthoringAddress({ projectId: document.id, surfaceId: surface.id, blockId: body.block.id, carrier: carrierForFlowBlock(body.block) })) throw new Error('正文替换目标身份不匹配')
@@ -119,13 +184,18 @@ export const semanticReplacementTool: AuthoringToolDefinition<z.infer<typeof sch
       const old = resolveEffectiveLayerTarget(draft, destination.target), replacement = locateCourseLayer(draft, value.replacementItemId)
       if (old.source !== scope.owner || old.item.layerItemId !== destination.target.itemId || !replacement || replacement.source !== old.source || replacement.surfaceId !== old.surfaceId || replacement.sceneId !== old.sceneId) throw new Error('替换对象必须来自原对象同一 owner、表面和场景')
       if (old.item.locked) throw new Error('图层已锁定，不能替换')
-      if (old.item.kind === 'native' && old.item.content.nativeType === 'teacher-controller') incompatible('教师控制器具有独立宿主身份，不能通过普通对象替换')
-      if (target.stateId !== null) {
+      
+      if (target.stateId !== null && old.source === 'scene') {
         const scene = surface.type === 'slide' ? surface.scenes.find(entry => entry.id === old.sceneId) : null
         const selected = scene?.presentation?.states.find(entry => entry.id === target.stateId)
         const exclusivelyStateOwned = old.item.visible === false && selected?.layerItemOverrides[old.item.layerItemId]?.visible === true
           && scene?.presentation?.states.every(state => state.id === target.stateId || state.layerItemOverrides[old.item.layerItemId]?.visible !== true)
-        if (!exclusivelyStateOwned) incompatible('此对象继承自基础状态或被其他状态使用；局部替换无法无损迁移跨状态引用，请窄编辑或显式选择基础状态进行完整替换')
+        if (!exclusivelyStateOwned) {
+          replaceInheritedShapeInState(draft, destination.target, old.item, replacement.item)
+          retainedOriginal = true
+          address = makeLayerItemAuthoringAddress({ projectId: draft.id, owner: old.source, surfaceId: surface.id, sceneId: old.sceneId, kind: replacement.item.kind, layerItemId: replacement.item.layerItemId })
+          return
+        }
       }
       const { kind: _kind, layerItemId: _id, ...base } = old.item
       const wrapper = Object.fromEntries(Object.entries(base).filter(([key]) => ['label', 'frame', 'order', 'visible', 'locked', 'rotation', 'opacity', 'hitPolicy', 'playbackInitialVisibility', 'paperSpace'].includes(key)))
@@ -154,7 +224,7 @@ export const semanticReplacementTool: AuthoringToolDefinition<z.infer<typeof sch
     })
     return { transaction: { projectId: document.id, baseRevision: document.revision, nextDocument, resourceChanges: {},
       selectionHint: { kind: 'authoring-tool-selection', locationId: target.locationId, stateId: target.stateId, owner: target.owner, itemIds: [value.replacementItemId], ...(surface.type === 'flow' ? { flowCarrier: body ? 'block' : 'overlay' } : {}) } },
-      affected: [{ id: destination.target.itemId, operation: 'deleted', ownerKey: target.ownerKey, authoringAddress: destination.target.authoringAddress },
+      affected: [{ id: destination.target.itemId, operation: retainedOriginal ? 'updated' : 'deleted', ownerKey: target.ownerKey, authoringAddress: destination.target.authoringAddress },
         { id: value.replacementItemId, operation: 'updated', ownerKey: target.ownerKey, authoringAddress: address! }] }
   },
 }

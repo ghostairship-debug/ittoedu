@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   formulaAstToAccessibleText,
@@ -75,6 +75,25 @@ afterEach(() => {
 })
 
 describe('FormulaNode authoring UI', () => {
+  it('applies valid dialog edits on outside click, retains invalid slots, and delays completion during IME', async () => {
+    const onCancel = vi.fn()
+    const onCommit = vi.fn()
+    render(<FormulaEditDialog node={structuredClone(formulaNode())} onCancel={onCancel} onCommit={onCommit} />)
+    const input = screen.getByRole('textbox', { name: '公式内容（线性输入）' })
+    fireEvent.change(input, { target: { value: 'x+□' } })
+    fireEvent.pointerDown(screen.getByTestId('formula-edit-dialog-backdrop'))
+    expect(onCommit).not.toHaveBeenCalled()
+    expect(onCancel).not.toHaveBeenCalled()
+    expect(screen.getByRole('dialog')).toBeTruthy()
+    fireEvent.compositionStart(input)
+    fireEvent.change(input, { target: { value: 'x+y' } })
+    fireEvent.click(screen.getByRole('button', { name: '关闭公式编辑' }))
+    expect(onCommit).not.toHaveBeenCalled()
+    fireEvent.compositionEnd(input)
+    await waitFor(() => expect(onCommit).toHaveBeenCalledTimes(1))
+    expect(onCancel).not.toHaveBeenCalled()
+  })
+
   it('uses linear input and one history transaction instead of editable AST JSON', () => {
     const original = structuredClone(formulaNode())
     const historyBefore = activeHistory().past.length

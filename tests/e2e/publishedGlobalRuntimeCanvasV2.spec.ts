@@ -1,3 +1,4 @@
+import { isControllerFixture } from '../fixtures/teacherController'
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
@@ -158,17 +159,15 @@ function writeFixture(): void {
   ], { includeFlow: true, includeSpatial: true })
   const project = structuredClone(fixture.project)
   const controller = project.globalLayerItems.find((entry) => (
-    entry.item.kind === 'native'
-    && entry.item.content.nativeType === 'teacher-controller'
+    isControllerFixture(entry.item)
   ))
   if (
     !controller
-    || controller.item.kind !== 'native'
-    || controller.item.content.nativeType !== 'teacher-controller'
+    || !isControllerFixture(controller.item)
   ) throw new Error('expected global teacher controller')
-  controller.item.content.data.defaultCollapsed = false
+  controller.item.props.defaultCollapsed = false
   controllerItemId = controller.item.layerItemId
-  const restartButton = controller.item.content.data.buttons.find(
+  const restartButton = controller.item.props.buttons.find(
     (button) => button.action.type === 'course.restart',
   )
   if (!restartButton) throw new Error('expected course.restart controller button')

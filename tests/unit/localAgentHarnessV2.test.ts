@@ -6,11 +6,12 @@ import path from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { LocalAgentHarness } from '../../src/main/localAgent/harness'
 import { LocalAgentRepository } from '../../src/main/localAgent/repository'
+import { CandidateStaging } from '../../src/main/localAgent/candidateStaging'
 import { createWorkspaceIdentity } from '../../src/main/workspaceIdentity'
 import type { LocalAgentCapabilities, LocalAgentConfiguration } from '../../src/shared/localAgentContract'
 import type { LocalAgentCliAdapterV2, LocalAgentNativeEvent } from '../../src/shared/localAgentTaskContract'
 import { generationRequestSchema, type GenerationRequest, type GenerationCommitReceipt } from '../../src/shared/generationContract'
-import { GENERATION_OPEN, GENERATION_CLOSE, GENERATION_RESULT_OPEN, GENERATION_RESULT_CLOSE } from '../../src/shared/generationResult'
+import { GENERATION_OPEN, GENERATION_CLOSE, GENERATION_RESULT_OPEN, GENERATION_RESULT_CLOSE, generationStagedCandidateMarker } from '../../src/shared/generationResult'
 import { randomUUID } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
 
@@ -76,6 +77,36 @@ class NativeAdapter implements LocalAgentCliAdapterV2 {
 }
 
 describe('V2 Harness native lifecycle', () => {
+  it('persists accepted answer values with saved question titles and omits unmatched internal IDs', async () => {
+    const { directory, workspace } = await fixture(), repository = new LocalAgentRepository(directory), release = deferred<void>()
+    const adapter = new NativeAdapter()
+    adapter.events = async function* () {
+      const turn = this.turns.at(-1)!
+      const identity = { taskId: turn.taskId, epoch: turn.epoch, workspace, runId: turn.runId, nativeTurnId: 'native-turn' }
+      yield { ...identity, kind: 'question', question: { taskId: turn.taskId, epoch: turn.epoch, workspace,
+        questionId: 'private-question-id', turnId: 'native-turn', purpose: 'clarification',
+        questions: [{ id: 'private-item-id', title: '背景选择', options: ['浅色', '保持原图'], multiple: true }] } }
+      await release.promise
+    }
+    adapter.input = async input => ({ taskId: input.taskId, epoch: input.epoch, workspace, inputId: input.inputId,
+      turnId: input.turnId, status: 'accepted', reason: null })
+    adapter.close = async () => { release.resolve() }
+    const harness = new LocalAgentHarness(repository, () => adapter)
+    try {
+      const id = await harness.start(workspace, 'claude', '选择背景')
+      await expect.poll(async () => (await repository.list(workspace)).v2[0]?.tasks[0]?.status).toBe('waiting-input')
+      const task = (await repository.list(workspace)).v2[0]!.tasks[0]!
+      const input = { version: 1 as const, taskId: task.taskId, epoch: task.epoch, workspace, inputId: randomUUID(), turnId: 'native-turn',
+        kind: 'answer' as const, questionId: 'private-question-id', answers: [{ id: 'private-item-id', values: ['浅色', '保持原图'] },
+          { id: 'unmatched-private-id', values: ['备用答案原文'] }] }
+      await harness.input(workspace, id, input)
+      await harness.input(workspace, id, input)
+      const answers = (await repository.list(workspace)).v2[0]!.events.filter(event => event.kind === 'user-message' && event.purpose === 'answer')
+      expect(answers).toHaveLength(1)
+      expect(answers[0]).toMatchObject({ itemId: input.inputId, text: '背景选择：浅色、保持原图\n备用答案原文' })
+      expect(JSON.stringify(answers[0])).not.toContain('private-id')
+    } finally { release.resolve(); await harness.close() }
+  })
   it('persists an unanswered native question while the event stream is suspended', async () => {
     const { directory, workspace } = await fixture()
     let release!: () => void
@@ -186,7 +217,7 @@ describe('V2 Harness native lifecycle', () => {
       await expect.poll(async () => (await new LocalAgentRepository(directory).list(workspace)).v2.find(record => record.id === id)?.externalSessionId)
         .toBe('confirmed-before-output')
       expect(harness.running).toBe(true)
-      expect((await new LocalAgentRepository(directory).list(workspace)).v2.find(record => record.id === id)?.events).toEqual([])
+      expect((await new LocalAgentRepository(directory).list(workspace)).v2.find(record => record.id === id)?.events).toEqual([expect.objectContaining({ kind: 'user-message', text: 'wait for native output' })])
     } finally { await harness.close() }
   })
 
@@ -199,7 +230,7 @@ describe('V2 Harness native lifecycle', () => {
     const stored = (await new LocalAgentRepository(directory).list(workspace)).v2.find(record => record.id === id)!
     expect(stored.externalSessionId).toBe('native-confirmed-session')
     expect(stored.events.at(-1)).toMatchObject({ kind: 'turn-ended', nativeTurnId: 'native-turn' })
-    expect(new Set(stored.events.map(event => event.nativeTurnId))).toEqual(new Set(['native-turn']))
+    expect(new Set(stored.events.filter(event => event.kind !== 'user-message').map(event => event.nativeTurnId))).toEqual(new Set(['native-turn']))
     expect(stored.events.at(-1)).toMatchObject({ kind: 'turn-ended', status: 'completed' })
 
     const second = new NativeAdapter()
@@ -247,6 +278,32 @@ describe('V2 Harness native lifecycle', () => {
     await harness.resume(workspace, id, 'continue')
     await expect.poll(() => harness.running).toBe(false)
     expect(adapters[2]!.configurations).toEqual([preference])
+  })
+
+  it('waits for a concurrent preference save and restores the selection after a harness restart', async () => {
+    const { directory, workspace } = await fixture(), repository = new LocalAgentRepository(directory)
+    const writing = deferred<void>(), release = deferred<void>(), preference = { model: 'selected', effort: 'high' }
+    const write = repository.writeConfiguration.bind(repository)
+    vi.spyOn(repository, 'writeConfiguration').mockImplementation(async (...args) => { writing.resolve(); await release.promise; return write(...args) })
+    const adapter = new NativeAdapter(), harness = new LocalAgentHarness(repository, () => adapter)
+    const saving = harness.configure('claude', preference, workspace)
+    await writing.promise
+    const id = await harness.start(workspace, 'claude', 'hello')
+    expect(adapter.turns).toHaveLength(0)
+    release.resolve(); await saving
+    await expect.poll(() => harness.running).toBe(false)
+    expect(adapter.configurations).toEqual([preference])
+    expect((await repository.list(workspace)).v2[0]?.tasks[0]?.configurationRuns).toEqual([
+      expect.objectContaining({ requested: preference, confirmed: { ...preference, resolvedModel: 'resolved-selected' } }),
+    ])
+    await harness.close()
+    const restoredAdapter = new NativeAdapter(), restored = new LocalAgentHarness(new LocalAgentRepository(directory), () => restoredAdapter)
+    try {
+      expect(await restored.capabilities('claude', { workspace })).toMatchObject({ selectedConfiguration: preference, requestedConfiguration: preference })
+      await restored.resume(workspace, id, 'continue after restart')
+      await expect.poll(() => restored.running).toBe(false)
+      expect(restoredAdapter.configurations).toEqual([preference])
+    } finally { await restored.close() }
   })
 
   it('does not start a user turn when the native adapter rejects the requested configuration', async () => {
@@ -399,6 +456,231 @@ class FileNativeAdapter extends NativeAdapter {
     yield* super.events()
   }
 }
+
+async function writeMediaReferenceCandidate(root: string, reference: unknown = { $candidateFile: 'resources/小狗.png' }) {
+  const request = JSON.parse(await fs.readFile(path.join(root, 'request.json'), 'utf8'))
+  await fs.mkdir(path.join(root, 'resources'), { recursive: true })
+  await fs.copyFile(candidatePng, path.join(root, 'resources/小狗.png'))
+  await fs.writeFile(path.join(root, 'candidate.json'), JSON.stringify({ version: 2, requestId: request.requestId,
+    summary: 'Import native generated image file', afterCommit: { version: 1, action: 'finish' },
+    steps: [{ id: 'image', tool: 'asset.media.import', destination: 'd1',
+      input: { kind: 'image', filename: '小狗.png', mimeType: 'image/png', base64: reference } }] }))
+}
+
+describe('Native candidate media file ingestion', () => {
+  it.each(['finish', 'stop'] as const)('reuses a helper-delivered image after a malformed candidate and releases it on %s', async ending => {
+    const { directory, workspace } = await fixture(), repository = new LocalAgentRepository(directory)
+    let turn = 0
+    const adapters: FileNativeAdapter[] = []
+    const harness = new LocalAgentHarness(repository, () => {
+      const index = turn++
+      const adapter = new FileNativeAdapter(async root => {
+        const request = JSON.parse(await fs.readFile(path.join(root, 'request.json'), 'utf8'))
+        let source: { $candidateFile: string }
+        if (index === 0) {
+          source = { $candidateFile: 'resources/dog.png' }
+          await fs.mkdir(path.join(root, 'resources'), { recursive: true })
+          await fs.copyFile(candidatePng, path.join(root, source.$candidateFile))
+          await fs.writeFile(path.join(root, 'delivered-media.jsonl'), JSON.stringify({ version: 1, source }) + '\n')
+        } else {
+          expect(request.reusableMedia).toHaveLength(1)
+          source = request.reusableMedia[0].source
+          expect(source.$candidateFile).toMatch(/^resources\/reused\//)
+          expect(await fs.readFile(path.join(root, source.$candidateFile))).toEqual(await fs.readFile(candidatePng))
+        }
+        await fs.writeFile(path.join(root, 'candidate.json'), JSON.stringify({ version: 2, requestId: request.requestId,
+          summary: 'Reuse delivered image', afterCommit: { version: 1, action: 'finish' }, steps: [{ id: 'image', tool: 'media.apply',
+            destination: 'd1', input: { kind: 'image', source, fit: index === 0 ? 'invalid-fit' : 'contain' } }] }))
+      })
+      adapters.push(adapter); return adapter
+    })
+    try {
+      const first = generation(workspace), id = await harness.generate(workspace, 'claude', first)
+      await expect.poll(() => harness.running).toBe(false)
+      const invalid = await harness.candidate(workspace, id)
+      expect(invalid.kind).toBe('candidate-format-error')
+      const prior = (await repository.list(workspace)).v2.find(record => record.id === id)!
+      const retainedRoot = path.join(repository.stagingPath(workspace, prior.workingDirectoryId, 2), 'task-media', prior.tasks[0]!.taskId)
+      expect(await fs.readdir(retainedRoot)).toHaveLength(1)
+      await harness.hostResult(workspace, id, { requestId: first.requestId, status: 'rejected', summary: '修复显示方式，复用已交付素材' })
+      const next = generation(workspace)
+      await harness.continue(workspace, id, next)
+      await expect.poll(() => harness.running).toBe(false)
+      const result = await harness.candidate(workspace, id)
+      if (result.kind !== 'candidate') throw new Error(JSON.stringify(result))
+      expect(result.candidate.steps[0]!.input).toMatchObject({ source: { base64: (await fs.readFile(candidatePng)).toString('base64') } })
+      const current = (await repository.list(workspace)).v2.find(record => record.id === id)!
+      expect(current.tasks[0]!.taskId).toBe(prior.tasks[0]!.taskId)
+      expect(current.tasks[0]!.execution!.deadlineAt).toBe(prior.tasks[0]!.execution!.deadlineAt)
+      expect(current.observations).toHaveLength(2)
+      if (ending === 'stop') await harness.cancel(workspace, id)
+      else {
+        const receipt: GenerationCommitReceipt = { version: 1, workspace, requestId: next.requestId, candidateId: result.candidate.candidateId,
+          status: 'committed', beforeRevision: 1, afterRevision: 2, affected: [], resources: { assetIds: ['applied-image'], packageIds: [] } }
+        await harness.hostResult(workspace, id, { requestId: next.requestId, candidateId: receipt.candidateId, status: 'committed',
+          summary: '正式宿主已应用', afterCommit: { version: 1, action: 'finish' } }, receipt)
+      }
+      await expect(fs.access(retainedRoot)).rejects.toThrow()
+      const retainedProposals = Reflect.get(harness, 'proposals') as Map<string, unknown>
+      expect(JSON.stringify([...retainedProposals.values()])).not.toContain((await fs.readFile(candidatePng)).toString('base64'))
+      expect(adapters).toHaveLength(2)
+    } finally { await harness.close() }
+  })
+
+  it('expands real media bytes once while keeping file references in native text and waiting for the host', async () => {
+    const { directory, workspace } = await fixture(), repository = new LocalAgentRepository(directory)
+    const adapter = new FileNativeAdapter(writeMediaReferenceCandidate), request = fileCandidateRequest(workspace)
+    const harness = new LocalAgentHarness(repository, () => adapter)
+    try {
+      const id = await harness.generate(workspace, 'claude', request)
+      await expect.poll(() => harness.running).toBe(false)
+      const result = await harness.candidate(workspace, id)
+      if (result.kind !== 'candidate') throw new Error(`Expected media candidate, got ${JSON.stringify(result)}`)
+      const bytes = await fs.readFile(candidatePng)
+      expect((result.candidate.steps[0]!.input as { base64: string }).base64).toBe(bytes.toString('base64'))
+      await expect(fs.access(adapter.opens.at(-1)!.candidateRoot!)).rejects.toThrow()
+      expect(await harness.candidate(workspace, id)).toEqual(result)
+      const record = (await repository.list(workspace)).v2.find(value => value.id === id)!
+      expect(JSON.stringify(record.events)).toContain('$candidateFile')
+      expect(JSON.stringify(record.events)).not.toContain(bytes.toString('base64'))
+      expect(record.tasks.at(-1)).toMatchObject({ status: 'checking', committedResultIds: [] })
+      expect(record.hostResults).toEqual([])
+    } finally { await harness.close() }
+  })
+
+  it.each(['missing', 'traversal', 'absolute', 'extra-field', 'oversize', 'linked-directory'] as const)('rejects %s media references with an exact step diagnostic and no host result', async scenario => {
+    const { directory, workspace } = await fixture(), repository = new LocalAgentRepository(directory)
+    const adapter = new FileNativeAdapter(async root => {
+      const file = scenario === 'missing' ? 'resources/missing.png' : scenario === 'traversal' ? 'resources/../request.json'
+        : scenario === 'absolute' ? candidatePng : scenario === 'linked-directory' ? 'resources/link/image.png' : 'resources/小狗.png'
+      await writeMediaReferenceCandidate(root, { $candidateFile: file, ...(scenario === 'extra-field' ? { encoding: 'base64' } : {}) })
+      if (scenario === 'oversize') await fs.truncate(path.join(root, file), 12 * 1024 * 1024 + 1)
+      if (scenario === 'linked-directory') {
+        const outside = path.join(directory, 'outside-candidate')
+        await fs.mkdir(outside)
+        await fs.copyFile(candidatePng, path.join(outside, 'image.png'))
+        await fs.symlink(outside, path.join(root, 'resources/link'), 'junction')
+      }
+    })
+    const harness = new LocalAgentHarness(repository, () => adapter), request = fileCandidateRequest(workspace)
+    try {
+      const id = await harness.generate(workspace, 'claude', request)
+      await expect.poll(() => harness.running).toBe(false)
+      expect(await harness.candidate(workspace, id)).toMatchObject({ kind: 'candidate-rejected', requestId: request.requestId,
+        failure: { stepId: 'image', tool: 'asset.media.import', diagnostics: [{ code: 'candidate-media-file', path: ['steps', 0, 'input', 'base64'] }] } })
+      const record = (await repository.list(workspace)).v2.find(value => value.id === id)!
+      expect(record.hostResults).toEqual([])
+      expect(record.tasks.at(-1)!.committedResultIds).toEqual([])
+    } finally { await harness.close() }
+  })
+
+  it('does not return media or revive checking when Stop arrives during file ingestion', async () => {
+    const { directory, workspace } = await fixture(), repository = new LocalAgentRepository(directory)
+    const adapter = new FileNativeAdapter(writeMediaReferenceCandidate), request = fileCandidateRequest(workspace)
+    const harness = new LocalAgentHarness(repository, () => adapter), reading = deferred<void>(), release = deferred<void>()
+    const resolve = CandidateStaging.prototype.resolveMediaFiles
+    const spy = vi.spyOn(CandidateStaging.prototype, 'resolveMediaFiles').mockImplementation(async function (this: CandidateStaging, candidate) {
+      reading.resolve(); await release.promise; return resolve.call(this, candidate)
+    })
+    try {
+      const id = await harness.generate(workspace, 'claude', request)
+      await expect.poll(() => harness.running).toBe(false)
+      const candidate = harness.candidate(workspace, id)
+      await reading.promise
+      await harness.cancel(workspace, id)
+      release.resolve()
+      await expect(candidate).rejects.toThrow(/inactive-task|stale-task/)
+      const record = (await repository.list(workspace)).v2.find(value => value.id === id)!
+      expect(record.tasks.at(-1)).toMatchObject({ status: 'cancelled', committedResultIds: [] })
+      expect(record.hostResults).toEqual([])
+    } finally { release.resolve(); spy.mockRestore(); await harness.close() }
+  })
+})
+
+describe('Codex explicit candidate file delivery', () => {
+  it('does not ingest or revive a cancelled turn while its candidate file is being read', async () => {
+    const { directory, workspace } = await fixture(), repository = new LocalAgentRepository(directory)
+    const request = fileCandidateRequest(workspace), adapter = new FileNativeAdapter(writeMediaReferenceCandidate)
+    Object.defineProperty(adapter, 'id', { value: 'codex' })
+    const stream = adapter.events.bind(adapter), reading = deferred<void>(), release = deferred<void>()
+    adapter.events = async function* () {
+      for await (const event of stream()) yield event.kind === 'text'
+        ? { ...event, phase: 'candidate', text: generationStagedCandidateMarker(request.requestId) }
+        : event.kind === 'configuration' ? { ...event, capabilities: { ...event.capabilities, adapter: 'codex' } } : event
+    }
+    const read = CandidateStaging.prototype.readText
+    const spy = vi.spyOn(CandidateStaging.prototype, 'readText').mockImplementation(async function (this: CandidateStaging, requestId) {
+      const text = await read.call(this, requestId); reading.resolve(); await release.promise; return text
+    })
+    const harness = new LocalAgentHarness(repository, () => adapter)
+    try {
+      const id = await harness.generate(workspace, 'codex', request)
+      await reading.promise
+      const stopping = harness.cancel(workspace, id)
+      release.resolve(); await stopping
+      const record = (await repository.list(workspace)).v2[0]!
+      expect(record.tasks.at(-1)).toMatchObject({ status: 'cancelled', committedResultIds: [] })
+      expect(record.events.some(event => event.kind === 'text' && event.itemId?.startsWith('candidate-file:'))).toBe(false)
+      await expect(harness.candidate(workspace, id)).rejects.toThrow('尚未成功结束')
+    } finally { release.resolve(); spy.mockRestore(); await harness.close() }
+  })
+
+  it.each(['valid', 'codex-wire', 'wire-missing-reason', 'wire-invalid-input', 'undeclared', 'missing', 'wrong-request', 'malformed'] as const)('handles %s staged results only after a successful native final', async scenario => {
+    const { directory, workspace } = await fixture(), repository = new LocalAgentRepository(directory)
+    const request = fileCandidateRequest(workspace)
+    const adapter = new FileNativeAdapter(async root => {
+      if (scenario === 'missing') return
+      await writeMediaReferenceCandidate(root)
+      if (scenario === 'codex-wire' || scenario === 'wire-missing-reason' || scenario === 'wire-invalid-input') {
+        const candidate = JSON.parse(await fs.readFile(path.join(root, 'candidate.json'), 'utf8'))
+        candidate.steps.forEach((step: Record<string, unknown>) => {
+          step.input = JSON.stringify(step.input)
+          step.lowerCarrierReason = null
+          if (scenario === 'wire-missing-reason') step.tool = 'component.package'
+          if (scenario === 'wire-invalid-input') step.input = '{'
+        })
+        await fs.writeFile(path.join(root, 'candidate.json'), JSON.stringify(candidate))
+      }
+      if (scenario === 'wrong-request') {
+        const candidate = JSON.parse(await fs.readFile(path.join(root, 'candidate.json'), 'utf8'))
+        candidate.requestId = randomUUID()
+        await fs.writeFile(path.join(root, 'candidate.json'), JSON.stringify(candidate))
+      }
+      if (scenario === 'malformed') await fs.writeFile(path.join(root, 'candidate.json'), '{')
+    })
+    Object.defineProperty(adapter, 'id', { value: 'codex' })
+    const stream = adapter.events.bind(adapter)
+    adapter.events = async function* () {
+      for await (const event of stream()) {
+        if (event.kind === 'text' && scenario !== 'undeclared') yield { ...event, phase: 'candidate', text: generationStagedCandidateMarker(request.requestId) }
+        else if (event.kind === 'configuration') yield { ...event, capabilities: { ...event.capabilities, adapter: 'codex' } }
+        else yield event
+      }
+    }
+    const harness = new LocalAgentHarness(repository, () => adapter)
+    try {
+      const id = await harness.generate(workspace, 'codex', request)
+      await expect.poll(() => harness.running).toBe(false)
+      const record = (await repository.list(workspace)).v2[0]!
+      if (scenario === 'missing') {
+        expect(record.tasks.at(-1)?.status).toBe('failed')
+        expect(record.events.at(-1)).toMatchObject({ failure: { message: expect.stringContaining('缺少 candidate.json') } })
+      } else {
+        const result = await harness.candidate(workspace, id)
+        expect(result.kind).toBe(scenario === 'valid' || scenario === 'codex-wire' || scenario === 'wire-invalid-input' ? 'candidate' : scenario === 'undeclared' ? 'incomplete' : 'candidate-format-error')
+        if (result.kind === 'candidate') {
+          // Tool-specific validation must see malformed input unchanged; transport must not invent a repair.
+          if (scenario === 'wire-invalid-input') expect(result.candidate.steps[0]!.input).toBe('{')
+          else expect((result.candidate.steps[0]!.input as { base64: string }).base64).toBe((await fs.readFile(candidatePng)).toString('base64'))
+          expect(await harness.candidate(workspace, id)).toEqual(result)
+        }
+      }
+      expect(record.hostResults).toEqual([])
+      expect(record.tasks.at(-1)?.committedResultIds).toEqual([])
+      if (scenario === 'undeclared') expect(record.events.some(event => event.kind === 'text' && event.itemId?.startsWith('candidate-file:'))).toBe(false)
+    } finally { await harness.close() }
+  })
+})
 
 describe('Claude native candidate file delivery', () => {
   it('delivers the native-script PNG bytes exactly and awaits a host receipt without committing or completing the task', async () => {
@@ -559,6 +841,7 @@ describe('native input turn boundaries', () => {
     const harness = new LocalAgentHarness(repository, () => { if (first) { first = false; return new NativeAdapter() }; return adapter })
     const previousId = await harness.generate(workspace, 'claude', generation(workspace))
     await expect.poll(() => harness.running).toBe(false)
+    await harness.cancel(workspace, previousId)
     const id = await harness.generate(workspace, 'claude', request)
     await adapter.firstEvents.promise
     const isLegacy = repository.isLegacy.bind(repository)
@@ -596,6 +879,9 @@ describe('native input turn boundaries', () => {
       const waiting = (await repository.list(workspace)).v2[0]!
       expect(waiting.tasks[0]!.pendingInputs).toEqual([{ inputId: input.inputId, kind: input.kind, text: input.text }])
       expect(waiting.events.filter(event => event.kind === 'input-delivery').map(event => event.delivery.status)).toEqual(['queued'])
+      expect(waiting.events.filter(event => event.kind === 'user-message')).toMatchObject([
+        { purpose: 'initial' }, { itemId: input.inputId, purpose: input.kind, text: input.text },
+      ])
       expect(adapter.opens).toHaveLength(1)
       expect(adapter.turns[1]).toMatchObject({ taskId: adapter.turns[0]!.taskId, epoch: adapter.turns[0]!.epoch,
         observationId: adapter.turns[0]!.observationId, workspace })
@@ -608,6 +894,7 @@ describe('native input turn boundaries', () => {
       expect(finished.tasks[0]!.pendingInputs).toEqual([])
       expect(finished.tasks[0]!.execution!.deadlineAt).toBe(waiting.tasks[0]!.execution!.deadlineAt)
       expect(finished.events.filter(event => event.kind === 'input-delivery').map(event => event.delivery.status)).toEqual(['queued', 'consumed'])
+      expect(finished.events.filter(event => event.kind === 'user-message')).toHaveLength(2)
       expect(await harness.candidate(workspace, id)).toMatchObject({ kind: 'candidate', candidate: { candidateId: adapter.candidateIds[1] } })
     } finally { adapter.inputAck.resolve(); await harness.close() }
   })
@@ -661,6 +948,69 @@ describe('native input turn boundaries', () => {
 })
 
 describe('same native task host feedback', () => {
+  it('continues an early answer once in the same native session and stops repeated incomplete replies within the existing budget', async () => {
+    const { directory, workspace } = await fixture(), repository = new LocalAgentRepository(directory)
+    const adapters: NativeAdapter[] = []
+    const harness = new LocalAgentHarness(repository, (_id, request) => {
+      const adapter = new NativeAdapter()
+      adapter.reply = `宿主不支持，所以尚未修改。${GENERATION_RESULT_OPEN}${JSON.stringify({ version: 1, requestId: request!.requestId, kind: 'answer' })}${GENERATION_RESULT_CLOSE}`
+      adapters.push(adapter); return adapter
+    })
+    let request = { ...generation(workspace), intent: 'edit' as const }
+    try {
+      const id = await harness.generate(workspace, 'claude', request)
+      for (let turn = 0; turn < 2; turn++) {
+        await expect.poll(() => harness.running).toBe(false)
+        const result = await harness.candidate(workspace, id)
+        if (result.kind !== 'incomplete') throw new Error('Expected recoverable incomplete reply')
+        expect(result.finding).toContain('project.document')
+        await harness.hostResult(workspace, id, { requestId: request.requestId, status: 'rejected', summary: result.finding })
+        request = { ...request, requestId: randomUUID() }
+        if (turn === 0) await harness.continue(workspace, id, request)
+        else await expect(harness.continue(workspace, id, request)).rejects.toThrow('预算已到或连续两轮没有进展')
+      }
+      expect(adapters).toHaveLength(2)
+      expect(adapters[1]!.opens[0]!.externalSessionId).toBe(adapters[0]!.nativeIdentity)
+      const record = (await repository.list(workspace)).v2[0]!
+      expect(record.tasks).toHaveLength(1)
+      expect(record.tasks[0]).toMatchObject({ committedResultIds: [], execution: { turnCount: 2, formatRepairs: 2 } })
+      expect(record.hostResults.flatMap(result => result.receipts)).toEqual([])
+    } finally { await harness.close() }
+  })
+  it('ends a blocked edit after rejected output with an honest reply instead of demanding a diagnostic candidate', async () => {
+    const { directory, workspace } = await fixture(), repository = new LocalAgentRepository(directory)
+    const adapters: NativeAdapter[] = []
+    const harness = new LocalAgentHarness(repository, (_id, request) => {
+      const adapter = new NativeAdapter()
+      adapter.reply = adapters.length === 0
+        ? `${GENERATION_OPEN}${JSON.stringify({ version: 2, requestId: request!.requestId, summary: '无法取得所需素材', steps: [] })}${GENERATION_CLOSE}`
+        : `当前已连接工具无法生成所需图片，也没有可用素材，课件尚未修改。${GENERATION_RESULT_OPEN}${JSON.stringify({ version: 1, requestId: request!.requestId, kind: 'answer' })}${GENERATION_RESULT_CLOSE}`
+      adapters.push(adapter)
+      return adapter
+    })
+    const request = { ...generation(workspace), instruction: '把图片替换为卡通小狗' }
+    try {
+      const id = await harness.generate(workspace, 'claude', request)
+      await expect.poll(() => harness.running).toBe(false)
+      const first = await harness.candidate(workspace, id)
+      if (first.kind !== 'candidate-format-error') throw new Error('Empty candidate must remain invalid')
+      await harness.hostResult(workspace, id, { requestId: request.requestId, status: 'rejected', summary: first.finding, failure: first.failure })
+      const next = { ...request, requestId: randomUUID() }
+      await harness.continue(workspace, id, next)
+      await expect.poll(() => harness.running).toBe(false)
+      expect(await harness.candidate(workspace, id)).toMatchObject({ kind: 'incomplete', requestId: next.requestId })
+      const prompt = adapters[1]!.turns[0]!.text
+      expect(prompt).toContain('保留CLI文件/终端/网络/连接/Skills')
+      expect(prompt).toContain('确实受阻时通过答复通道说明未完成')
+      expect(prompt).not.toContain('若未完成请给下一阶段候选')
+      const saved = (await repository.list(workspace)).v2[0]!
+      expect(saved.tasks[0]).toMatchObject({ status: 'checking', committedResultIds: [], execution: { turnCount: 2, formatRepairs: 1 } })
+      expect(saved.hostResults).toHaveLength(1)
+      expect(saved.hostResults[0]).toMatchObject({ status: 'rejected', receipts: [] })
+      expect(adapters).toHaveLength(2)
+    } finally { await harness.close() }
+  })
+
   it.each(['delivered', 'missing'] as const)('allows one repair for a missing candidate declared by an edit marker, then handles %s delivery', async delivery => {
     const { directory, workspace } = await fixture(), repository = new LocalAgentRepository(directory)
     const adapters: FileNativeAdapter[] = []
@@ -727,7 +1077,7 @@ describe('same native task host feedback', () => {
     const id = await harness.generate(workspace, 'claude', request)
     try {
       await expect.poll(() => harness.running).toBe(false)
-      expect(adapters[0]!.turns[0]!.text).toContain('本轮要求修改，须交付候选')
+      expect(adapters[0]!.turns[0]!.text).toContain('修改先用实际能力准备有效候选')
       const result = await harness.candidate(workspace, id)
       if (result.kind !== 'candidate') throw new Error('Expected one initial candidate')
       const receipt: GenerationCommitReceipt = { version: 1, workspace, requestId: request.requestId, candidateId: result.candidate.candidateId,
@@ -741,7 +1091,7 @@ describe('same native task host feedback', () => {
       const prompt = adapters[1]!.turns[0]!.text
       expect(prompt).toContain('不是重新执行原请求')
       expect(prompt).toContain('相对修改不得因收到新观察再次累计执行')
-      expect(prompt).not.toContain('本轮要求修改，须交付候选')
+      expect(prompt).not.toContain('本轮目标是修改')
       expect(await harness.candidate(workspace, id)).toEqual({ kind: 'answer', requestId: next.requestId })
       const finished = (await repository.list(workspace)).v2[0]!
       expect(finished.tasks.at(-1)?.status).toBe('completed')
@@ -870,7 +1220,7 @@ describe('same native task host feedback', () => {
       await expect.poll(() => harness.running).toBe(false)
       expect(await harness.candidate(workspace, id)).toMatchObject({ kind: intent === 'edit' ? 'incomplete' : 'answer', requestId: request.requestId })
       const stored = (await repository.list(workspace)).v2[0]!
-      expect(stored.tasks[0]!.status).toBe(intent === 'edit' ? 'failed' : 'completed')
+      expect(stored.tasks[0]!.status).toBe(intent === 'edit' ? 'checking' : 'completed')
       expect(stored.events.some(event => event.kind === 'text' && event.text === adapter.reply)).toBe(true)
       expect(stored.hostResults).toHaveLength(0)
       expect(adapter.turns).toHaveLength(1)
@@ -957,7 +1307,7 @@ describe('same native task host feedback', () => {
     expect(after.observations).toHaveLength(2)
     expect(after.tasks[0]!.execution!.deadlineAt).toBe(before.tasks[0]!.execution!.deadlineAt)
     expect(adapters[1]!.opens[0]!.externalSessionId).toBe('native-confirmed-session')
-    const feedbackResult = JSON.parse(adapters[1]!.turns[0]!.text.split('已记录正式提交回执：\n')[1]!.split('\n')[0]!)
+    const feedbackResult = JSON.parse(adapters[1]!.turns[0]!.text.split('已记录的宿主结果（拒绝不代表提交）：\n')[1]!.split('\n')[0]!)
     expect(feedbackResult.receipts).toEqual([receipt])
     expect(await harness.candidate(workspace, id)).toMatchObject({ kind: 'candidate', candidate: { requestId: next.requestId, candidateId: candidates[1] } })
     await harness.cancel(workspace, id)
@@ -1075,7 +1425,15 @@ describe('short-path durable finish and recovery', () => {
       const id = await reopened.resume(f.workspace, f.id, '现在解释这次修改')
       await expect.poll(() => adapter.turns.length).toBe(1)
       expect(adapter.turns[0]!.text).toContain(f.receipt.candidateId)
-      expect(adapter.turns[0]!.text).toContain('修改已经应用，请勿重复执行')
+      expect(adapter.turns[0]!.text).toContain('保留已经提交的成果，不重复执行')
+      const feedback = JSON.parse(adapter.turns[0]!.text.split('\n')[1]!)
+      expect(feedback.workspace).toEqual(f.workspace)
+      expect(feedback.results).toHaveLength(1)
+      expect(feedback.results[0]).toMatchObject({ requestId: f.receipt.requestId, candidateId: f.receipt.candidateId,
+        status: 'committed', beforeRevision: f.receipt.beforeRevision, afterRevision: f.receipt.afterRevision,
+        affected: f.receipt.affected.map(({ id, operation, ownerKey }) => ({ id, operation, ownerKey })), resources: [f.receipt.resources] })
+      expect(feedback.results[0]).not.toHaveProperty('receipts')
+      expect((await f.repository.list(f.workspace)).v2.find(record => record.id === f.id)!.hostResults[0]!.receipts).toEqual([f.receipt])
       expect((await f.repository.list(f.workspace)).v2.find(record => record.id === f.id)!.hostResults[0]!.receiptDelivery).toBe('pending')
       ack.resolve(); await expect.poll(() => reopened.running).toBe(false)
       expect((await f.repository.list(f.workspace)).v2.find(record => record.id === f.id)!.hostResults[0]!.receiptDelivery).toBe('delivered')
@@ -1115,6 +1473,76 @@ describe('short-path durable finish and recovery', () => {
       const result = (await f.repository.list(f.workspace)).v2[0]!.hostResults[0]!
       expect(result.failure).toEqual(failure); expect(result.diagnostics).toEqual(failure.diagnostics)
       expect(result.receipts).toEqual([]); expect(result.afterCommit).toBeUndefined()
+    } finally { await f.harness.close() }
+  })
+  it('delivers rejected diagnostics on explicit recovery only after native acknowledgement and persists the real user message', async () => {
+    const f = await finishFixture()
+    const failure = { version: 1 as const, stage: 'prepare' as const, requestId: f.request.requestId, candidateId: f.receipt.candidateId,
+      stepId: 'background', tool: 'native.content', destination: f.request.destinations[0]!,
+      diagnostics: [{ code: 'controlled-fast-path-failure', message: 'Use a supported base command', path: ['steps', 0] }], assetIds: ['reusable-image'], packageIds: [] }
+    await f.harness.hostResult(f.workspace, f.id, { requestId: f.request.requestId, candidateId: f.receipt.candidateId, status: 'rejected', summary: '背景快捷入口失败', failure })
+    const ack = deferred<void>(), adapter = new NativeAdapter(), reopened = new LocalAgentHarness(new LocalAgentRepository(f.directory), () => adapter)
+    const original = adapter.startTurn.bind(adapter)
+    adapter.startTurn = async input => { const result = await original(input); await ack.promise; return result }
+    try {
+      const next = generation(f.workspace)
+      next.instruction = `${f.request.instruction}\n用户明确继续：继续`
+      const id = await reopened.generate(f.workspace, 'claude', next, f.id, '继续')
+      await expect.poll(() => adapter.turns.length).toBe(1)
+      const text = adapter.turns[0]!.text
+      expect(text).toContain('rejected / stale / failed 均未应用该候选')
+      expect(text).toContain('本轮若仅询问状态或停止原因，只作解释，不自动继续编辑')
+      expect(JSON.parse(text.split('\n')[1]!).results[0]).toMatchObject({ status: 'rejected', failure, affected: [], resources: [] })
+      let records = (await f.repository.list(f.workspace)).v2
+      expect(records.find(record => record.id === f.id)!.hostResults.at(-1)?.receiptDelivery).toBe('pending')
+      expect(records.find(record => record.id === id)!.events.filter(event => event.kind === 'user-message')).toMatchObject([{ text: '继续', purpose: 'initial' }])
+      ack.resolve(); await expect.poll(() => reopened.running).toBe(false)
+      records = (await f.repository.list(f.workspace)).v2
+      expect(records.find(record => record.id === f.id)!.hostResults.at(-1)?.receiptDelivery).toBe('delivered')
+      expect(records.flatMap(record => record.hostResults).flatMap(result => result.receipts)).toEqual([])
+    } finally { ack.resolve(); await reopened.close(); await f.harness.close() }
+  })
+  it('keeps rejected feedback pending when recovery transport refuses the native turn', async () => {
+    const f = await finishFixture()
+    await f.harness.hostResult(f.workspace, f.id, { requestId: f.request.requestId, candidateId: f.receipt.candidateId, status: 'rejected', summary: '可恢复失败' })
+    const adapter = new NativeAdapter()
+    adapter.startTurn = async () => { throw new Error('native start rejected') }
+    const reopened = new LocalAgentHarness(new LocalAgentRepository(f.directory), () => adapter)
+    try {
+      await reopened.resume(f.workspace, f.id, '为什么停止')
+      await expect.poll(() => reopened.running).toBe(false)
+      expect((await f.repository.list(f.workspace)).v2.find(record => record.id === f.id)!.hostResults.at(-1)?.receiptDelivery).toBe('pending')
+    } finally { await reopened.close(); await f.harness.close() }
+  })
+  it('archives a delayed rejection after Stop without reviving the task or accepting a late checked candidate', async () => {
+    const f = await finishFixture()
+    try {
+      await f.harness.cancel(f.workspace, f.id)
+      const stopped = (await f.repository.list(f.workspace)).v2[0]!.tasks.at(-1)!
+      const result = { requestId: f.request.requestId, candidateId: f.receipt.candidateId, status: 'rejected' as const, summary: 'IPC重试补存的失败原因' }
+      await f.harness.hostResult(f.workspace, f.id, result)
+      await f.harness.hostResult(f.workspace, f.id, result)
+      const stored = (await f.repository.list(f.workspace)).v2[0]!
+      expect(stored.tasks.at(-1)).toMatchObject({ status: stopped.status, epoch: stopped.epoch })
+      expect(stored.hostResults).toHaveLength(1)
+      expect(stored.hostResults[0]).toMatchObject({ status: 'rejected', receiptDelivery: 'pending', receipts: [] })
+      await expect(f.harness.hostResult(f.workspace, f.id, { ...result, status: 'checked' })).rejects.toThrow('停止')
+      await expect(f.harness.continue(f.workspace, f.id, generation(f.workspace))).rejects.toThrow('没有可续轮')
+    } finally { await f.harness.close() }
+  })
+  it('persists idle user corrections once without changing the last candidate run or losing its completed native status', async () => {
+    const f = await finishFixture()
+    try {
+      const before = (await f.repository.list(f.workspace)).v2[0]!, task = before.tasks.at(-1)!, runId = before.events.at(-1)!.runId
+      const input = { version: 1 as const, taskId: task.taskId, epoch: task.epoch, workspace: f.workspace, inputId: randomUUID(), turnId: null,
+        kind: 'supplement' as const, text: '请保留已经生成的图片' }
+      await f.harness.input(f.workspace, f.id, input)
+      await f.harness.input(f.workspace, f.id, input)
+      const saved = (await f.repository.list(f.workspace)).v2[0]!
+      expect(saved.events.at(-1)).toMatchObject({ kind: 'user-message', itemId: input.inputId, runId, text: input.text })
+      expect(saved.events.filter(event => event.kind === 'user-message' && event.itemId === input.inputId)).toHaveLength(1)
+      expect((await f.harness.list(f.workspace)).records[0]!.status).toBe('completed')
+      expect(await f.harness.candidate(f.workspace, f.id)).toMatchObject({ kind: 'candidate', requestId: f.request.requestId })
     } finally { await f.harness.close() }
   })
 })

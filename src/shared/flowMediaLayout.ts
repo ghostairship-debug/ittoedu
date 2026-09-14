@@ -1,6 +1,7 @@
 export type FlowMediaLayoutValue = 'content-width' | 'wide' | 'full-width'
 
 export interface FlowMediaLayoutWidths {
+  readonly widthMode?: 'fluid' | 'reading'
   readonly readingWidth: number
   readonly wideContentWidth: number
 }
@@ -66,7 +67,9 @@ export function resolveFlowMediaLayoutProjection(
   const content = `min(${px(readingWidth)}, ${containerInlineSize(FLOW_MEDIA_CONTENT_SIDE_GUTTER_PX)})`
   const wide = `min(${px(wideContentWidth)}, ${containerInlineSize(FLOW_MEDIA_WIDE_SIDE_GUTTER_PX)})`
   const full = containerInlineSize(FLOW_MEDIA_CONTAINER_SIDE_GUTTER_PX)
-  const inlineSize = layout === 'content-width'
+  const inlineSize = widths.widthMode === 'fluid'
+    ? containerInlineSize(layout === 'content-width' ? 36 : layout === 'wide' ? 16 : 0)
+    : layout === 'content-width'
     ? content
     : layout === 'wide'
       ? wide
@@ -92,6 +95,7 @@ export function resolveFlowMediaLayoutInlineSize(
   const readingWidth = safeWidth(widths.readingWidth)
   const wideContentWidth = Math.max(readingWidth, safeWidth(widths.wideContentWidth))
   const container = safeWidth(containerWidth)
+  if (widths.widthMode === 'fluid') return Math.max(0, container - (layout === 'content-width' ? 72 : layout === 'wide' ? 32 : 0))
   const full = Math.max(0, container - FLOW_MEDIA_CONTAINER_SIDE_GUTTER_PX * 2)
   const content = Math.min(
     readingWidth,

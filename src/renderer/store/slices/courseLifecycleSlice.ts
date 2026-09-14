@@ -1,4 +1,5 @@
 import type { CourseProjectDocument } from '../../../shared/courseProjectTypes'
+import { withDefaultComponentController } from '../../components/teacherControllerComponent'
 import type { ComponentPackageData } from '../../../shared/componentTypes'
 import type { EditorStoreKernel } from '../editorStoreKernel'
 import {
@@ -270,7 +271,9 @@ export function createCourseLifecycleSlice(
       return allChangesSaved
     },
     createNewProject() {
-      lifecycle.applySlide(createBlankCourseProject(), {
+      const bundle = withDefaultComponentController(createBlankCourseProject())
+      lifecycle.applySlide(bundle.project, {
+        componentPackages: bundle.componentPackages,
         sidecar: emptyCourseAssetSidecar(),
         path: null,
         dirty: false,
@@ -278,7 +281,9 @@ export function createCourseLifecycleSlice(
       })
     },
     createNewSpatialProject() {
-      lifecycle.applySpatial(createBlankSpatialCourseProject(), {
+      const bundle = withDefaultComponentController(createBlankSpatialCourseProject())
+      lifecycle.applySpatial(bundle.project, {
+        componentPackages: bundle.componentPackages,
         sidecar: emptyCourseAssetSidecar(),
         path: null,
         dirty: false,
@@ -286,7 +291,9 @@ export function createCourseLifecycleSlice(
       })
     },
     createNewFlowProject() {
-      lifecycle.applyFlow(createBlankFlowCourseProject(), {
+      const bundle = withDefaultComponentController(createBlankFlowCourseProject())
+      lifecycle.applyFlow(bundle.project, {
+        componentPackages: bundle.componentPackages,
         sidecar: emptyCourseAssetSidecar(),
         path: null,
         dirty: false,

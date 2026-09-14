@@ -3,6 +3,27 @@ import { dynamicBehaviorEvidenceSchema } from '../../shared/dynamicBehaviorObser
 import type { LocalAgentHostResult } from '../../shared/localAgentContract'
 import type { AiHostResult } from '../../shared/localAgentTaskContract'
 
+/** Native history needs the committed facts, not the duplicated persistence
+ * envelope. Exact owner + item IDs preserve target identity; the full receipt,
+ * including authoring addresses, remains in the local session record. */
+export function generationReceiptFeedback(results: readonly AiHostResult[]) {
+  return results.map(result => ({
+    resultId: result.resultId, requestId: result.requestId, candidateId: result.candidateId,
+    status: result.status, beforeRevision: result.beforeRevision, afterRevision: result.afterRevision,
+    summary: result.summary,
+    affected: result.receipts.flatMap(receipt => receipt.affected.map(({ id, operation, ownerKey }) => ({ id, operation, ownerKey }))),
+    resources: result.receipts.map(receipt => receipt.resources),
+    ...(result.diagnostics.length ? { diagnostics: result.diagnostics } : {}),
+    ...(result.failure ? { failure: { ...result.failure,
+      ...(result.failure.behaviorEvidence?.length ? { behaviorEvidence: result.failure.behaviorEvidence.map(observation => ({
+        ...observation, frames: observation.frames.map(({ dataUrl: _dataUrl, ...frame }) => frame),
+        frameDelivery: 'Binary frames remain in the durable task record; edit continuation supplies verified observation resources.',
+      })) } : {}),
+    } } : {}),
+    ...(result.afterCommit ? { afterCommit: result.afterCommit } : {}),
+  }))
+}
+
 function record(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('失败行为证据资源格式无效')
   return value as Record<string, unknown>

@@ -1,3 +1,4 @@
+import { isControllerFixture } from '../fixtures/teacherController'
 import { describe, expect, it, vi } from 'vitest'
 import { collectCourseProjectExportPreflight } from '@/renderer/export/exportPreflight'
 import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
@@ -233,8 +234,7 @@ describe('export preflight', () => {
     const controller = project.globalLayerItems[0]?.item
     if (
       !controller
-      || controller.kind !== 'native'
-      || controller.content.nativeType !== 'teacher-controller'
+      || !isControllerFixture(controller)
     ) {
       throw new Error('expected default teacher controller')
     }

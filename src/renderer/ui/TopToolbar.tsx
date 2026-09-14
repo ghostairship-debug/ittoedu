@@ -398,7 +398,7 @@ export function TopToolbar({
 
       <ToolButton
         label="整课预览"
-        title="全屏 16:9 整课预览"
+        title="整课预览"
         disabled={busy}
         accent
         onClick={onPreview}

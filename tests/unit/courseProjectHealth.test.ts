@@ -1,3 +1,5 @@
+import { controllerPackage, controllerMetadata } from '../fixtures/teacherController'
+import { createControllerFixture } from '../fixtures/teacherController'
 import { strToU8 } from 'fflate'
 import { describe, expect, it } from 'vitest'
 import { collectCourseProjectContentHealth } from '@/shared/courseProjectHealth/content'
@@ -8,7 +10,7 @@ import { createBlankCourseProject } from '@/renderer/project/createCourseProject
 import {
   createImageNode,
   createRectangleNode,
-  createTeacherControllerNode,
+  
   createVideoNode,
 } from '@/renderer/project/nativeNodeFactories'
 import {
@@ -505,7 +507,7 @@ describe('V9-native Course Project health', () => {
       clickToToggle: true,
       showControls: true,
     }), 1)
-    const controller = sceneNodeToCourseLayerItem(createTeacherControllerNode({
+    const controller = createControllerFixture({
       id: 'bad-controller',
       buttons: [{
         id: 'bad-target',
@@ -523,20 +525,14 @@ describe('V9-native Course Project health', () => {
         visible: true,
         action: { type: 'scene.go', sceneId: 'spatial-frame' },
       }],
-    }), 2)
-    scene.layerItems.push(image, video, controller)
+    }, 2)
+    scene.layerItems.push(image, video)
+    controller.visible = false
+    controller.props.buttons = [{ id: 'bad-target', label: '坏目标', visible: true, action: { type: 'scene.go', sceneId: 'missing-location' } }]
+    project.globalLayerItems = [{ item: controller, plane: 'overlay', visibility: { mode: 'all', locationIds: [] } }]
+    project.componentPackages = { ...project.componentPackages, ...controllerMetadata }
     scene.presentation!.states[0]!.layerItemOverrides[image.layerItemId] = {
       nativeData: { assetId: 'missing-state-asset' },
-    }
-    scene.presentation!.states[0]!.layerItemOverrides[controller.layerItemId] = {
-      nativeData: {
-        buttons: [{
-          id: 'bad-state-target',
-          label: '坏目标',
-          visible: true,
-          action: { type: 'scene.go', sceneId: 'missing-location' },
-        }],
-      },
     }
     scene.interactions.push(
       {
@@ -566,12 +562,11 @@ describe('V9-native Course Project health', () => {
     )
 
     expect(courseProjectDocumentSchema.safeParse(project).success).toBe(true)
-    const findings = collectCourseProjectHealth(project, { assetFiles, componentFiles: {} })
+    const findings = collectCourseProjectHealth(project, { assetFiles, componentFiles: { [controllerPackage.manifest.id + '@' + controllerPackage.manifest.version]: controllerPackage.files } })
     const codes = new Set(findings.map(({ code }) => code))
     expect(codes).toEqual(new Set([
       'asset-kind-mismatch',
       'asset-reference-missing',
-      'asset-unused',
       'controller-required-for-canvas',
       'controller-scene-target-missing',
       'looping-video-ended-unreachable',
@@ -1030,7 +1025,7 @@ describe('V9-native Course Project health', () => {
       name: '全局规则可达隐藏元素',
       playbackInitialVisibility: 'hidden',
     }), 2)
-    const controller = sceneNodeToCourseLayerItem(createTeacherControllerNode({
+    const controller = createControllerFixture({
       id: 'state-controller',
       buttons: [{
         id: 'missing-target-state',
@@ -1042,7 +1037,7 @@ describe('V9-native Course Project health', () => {
           targetStateId: 'missing-controller-state',
         },
       }],
-    }), 3)
+    }, 3)
     scene.layerItems.push(selfHidden, unreachable, globallyReachable, controller)
     scene.interactions.push(
       {
@@ -1293,9 +1288,9 @@ describe('V9-native Course Project health', () => {
 
   it('detects a delivery-visible global controller when controls are disabled', () => {
     const project = blankProject()
-    const item = sceneNodeToCourseLayerItem(createTeacherControllerNode({
+    const item = createControllerFixture({
       id: 'global-controller',
-    }), 0)
+    }, 0)
     project.globalLayerItems.push({
       item,
       visibility: { mode: 'all', locationIds: [] },

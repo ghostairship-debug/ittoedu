@@ -1,3 +1,4 @@
+import { isControllerFixture } from '../fixtures/teacherController'
 // @vitest-environment jsdom
 import { describe, expect, it } from 'vitest'
 import { paintPublishedNativeText } from '../../src/player/surfaces/publishedNativeText'
@@ -458,17 +459,6 @@ describe('paintPublishedNativeText', () => {
         if (nested && typeof nested === 'object') expect(snapshot[key]).not.toBe(nested)
       }
     }
-
-    const controllerSource = items.find((item) => (
-      item.content.nativeType === 'teacher-controller'
-    ))
-    if (!controllerSource || controllerSource.content.nativeType !== 'teacher-controller') {
-      throw new Error('missing controller fixture')
-    }
-    const controller = readonlyNativeRenderInputFromV9Item(controllerSource)
-    if (controller.type !== 'teacher-controller') throw new Error('expected controller input')
-    expect(controller.buttons.map((button) => button.action))
-      .toEqual(controllerSource.content.data.buttons.map((button) => button.action))
 
     const imageSource = items.find((item) => item.content.nativeType === 'image')
     if (!imageSource || imageSource.content.nativeType !== 'image') {

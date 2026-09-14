@@ -4,8 +4,13 @@ import { aiTaskIdentityFields, aiQuestionSchema, aiInputDeliverySchema, type AiU
 import { workspaceIdentityV1Schema, workspaceIdentityKey } from './workspaceIdentity'
 import { authoringToolDestinationV1Schema } from './authoringToolContract'
 import { generationAfterCommitSchema, generationFailureSchema, generationCandidateSchema, generationCommitReceiptSchema } from './generationContract'
-import { localAgentIdSchema, localAgentRecordSchema, type LocalAgentProbe } from './localAgentContract'
+import {
+  localAgentIdSchema, localAgentRecordSchema, type LocalAgentProbe,
+  localAgentCapabilitiesSchema, type LocalAgentCapabilities,
+  localAgentConfigurationSchema, type LocalAgentConfiguration,
+} from './localAgentContract'
 import { localAgentTokenUsageSchema } from './localAgentUsage'
+import { aiTaskInputMetricsSchema, type LocalAgentInputMetrics } from './localAgentInputMetrics'
 
 // Local AI protocol only. Version numbers here do not change Course Project V9.
 const revision = z.number().int().nonnegative()
@@ -23,7 +28,8 @@ export const aiReadScopeSchema = z.discriminatedUnion('kind', [
 export const MAX_AI_TASK_TIMING_ENTRIES = 256
 export const aiTaskTimingStageSchema = z.enum([
   'requestPrepared', 'nativeOpenStarted', 'nativeOpened', 'turnDispatchStarted', 'turnAccepted',
-  'firstNativeEvent', 'candidateParsed', 'hostResultRecorded', 'hostCommitRecorded',
+  'firstNativeEvent', 'firstVisibleText', 'resourcePreparationStarted', 'resourcePrepared',
+  'candidateParsed', 'hostResultRecorded', 'hostCommitRecorded', 'taskEnded',
 ])
 export const aiTaskTimingEntrySchema = z.object({
   runId: z.uuid(), observationId: z.uuid(), stage: aiTaskTimingStageSchema, at: revision,
@@ -41,6 +47,12 @@ export const aiTaskTimingSchema = z.object({
 })
 export type AiTaskTimingEntry = z.infer<typeof aiTaskTimingEntrySchema>
 export type AiTaskTimingStage = z.infer<typeof aiTaskTimingStageSchema>
+export const aiTaskConfigurationRunSchema = z.object({
+  runId: z.uuid(), requested: localAgentConfigurationSchema.nullable(),
+  sent: z.object({ model: identity.optional(), effort: identity.optional(), serviceTier: identity.nullable().optional() }).strict().optional(),
+  confirmed: localAgentCapabilitiesSchema.shape.current.optional(),
+}).strict()
+export type AiTaskConfigurationRun = z.infer<typeof aiTaskConfigurationRunSchema>
 export const aiTaskSchema = z.object({
   version: z.literal(1), ...taskIdentity, sessionId: z.uuid(), adapter: localAgentIdSchema,
   goal: z.string().trim().min(1).max(20000), intent: aiIntentSchema,
@@ -49,12 +61,14 @@ export const aiTaskSchema = z.object({
   writeDestinations: z.array(authoringToolDestinationV1Schema).max(1000),
   status: aiTaskStatusSchema, observationId: z.uuid().nullable(),
   committedResultIds: z.array(z.uuid()).max(1000),
+  configurationRuns: z.array(aiTaskConfigurationRunSchema).max(256).optional(),
   completion: z.object({ version: z.literal(1), resultId: z.uuid(), outcome: z.enum(['modified', 'unchanged']) }).strict().optional(),
   execution: z.object({
     startedAt: revision, deadlineAt: revision, turnCount: revision,
     formatRepairs: revision, stagnantCandidates: revision,
     lastChangeKey: z.string().max(160000).nullable(), lastDiagnostic: z.string().max(4000).nullable(),
     timing: aiTaskTimingSchema.optional(),
+    inputMetrics: aiTaskInputMetricsSchema.optional(),
   }).strict().optional(),
   pendingInputs: z.array(z.object({ inputId: z.uuid(), text: z.string().max(20000), kind: z.enum(['correct', 'supplement']) }).strict()).max(100).optional(),
 }).strict().superRefine((task, ctx) => {
@@ -63,6 +77,13 @@ export const aiTaskSchema = z.object({
   for (const destination of task.writeDestinations) {
     const target = destination.kind === 'update' ? destination.target : destination.scope
     if (target.projectId !== task.workspace.projectId) ctx.addIssue({ code: 'custom', message: '写入授权不属于当前工程' })
+  }
+  const observationsByRun = new Map<string, string>()
+  for (const entry of [...task.execution?.timing?.entries ?? [], ...task.execution?.inputMetrics?.entries ?? []]) {
+    if (observationsByRun.has(entry.runId) && observationsByRun.get(entry.runId) !== entry.observationId) {
+      ctx.addIssue({ code: 'custom', message: '同一原生回合输入计量与计时引用不同观察' })
+    }
+    observationsByRun.set(entry.runId, entry.observationId)
   }
 })
 export type AiTask = z.infer<typeof aiTaskSchema>
@@ -131,10 +152,6 @@ export type AiHostResult = z.infer<typeof aiHostResultSchema>
 
 export { aiQuestionSchema, aiUserInputSchema, aiInputDeliverySchema, type AiUserInput } from './localAgentInteraction'
 
-import {
-  localAgentCapabilitiesSchema, type LocalAgentCapabilities,
-  localAgentConfigurationSchema, type LocalAgentConfiguration,
-} from './localAgentContract'
 export {
   localAgentCapabilitiesSchema, type LocalAgentCapabilities,
   localAgentConfigurationSchema, type LocalAgentConfiguration,
@@ -146,7 +163,8 @@ const failure = z.object({
   category: z.enum(['transport', 'service', 'protocol', 'limit', 'capability', 'storage']), message: z.string().min(1).max(4000),
 }).strict()
 export const localAgentEventV2Schema = z.discriminatedUnion('kind', [
-  z.object({ ...eventIdentity, kind: z.literal('text'), itemId: identity, phase: z.enum(['body', 'public-summary', 'plan', 'candidate']), operation: z.enum(['append', 'replace']), text: z.string().max(100000) }).strict(),
+  z.object({ ...eventIdentity, kind: z.literal('text'), itemId: identity, phase: z.enum(['body', 'public-summary', 'plan', 'candidate', 'progress', 'final']).optional(), operation: z.enum(['append', 'replace']), text: z.string().max(100000) }).strict(),
+  z.object({ ...eventIdentity, kind: z.literal('user-message'), itemId: identity, text: z.string().min(1).max(2000000), purpose: z.enum(['initial', 'supplement', 'correct', 'answer']) }).strict(),
   z.object({ ...eventIdentity, kind: z.literal('tool'), itemId: identity, name: identity, status: z.enum(['running', 'completed', 'failed', 'cancelled']), detail: z.json() }).strict(),
   z.object({ ...eventIdentity, kind: z.literal('question'), question: aiQuestionSchema }).strict(),
   z.object({ ...eventIdentity, kind: z.literal('input-delivery'), delivery: aiInputDeliverySchema }).strict(),
@@ -194,6 +212,9 @@ export const localAgentRecordV2Schema = z.object({
   for (const task of record.tasks) for (const entry of task.execution?.timing?.entries ?? []) {
     if (!record.observations.some(observation => observation.observationId === entry.observationId && observation.taskId === task.taskId)) fail('计时引用不属于当前任务的观察')
   }
+  for (const task of record.tasks) for (const entry of task.execution?.inputMetrics?.entries ?? []) {
+    if (!record.observations.some(observation => observation.observationId === entry.observationId && observation.taskId === task.taskId)) fail('输入计量引用不属于当前任务的观察')
+  }
   for (const result of record.hostResults) if (!record.observations.some(observation => observation.observationId === result.observationId && observation.taskId === result.taskId && observation.epoch === result.epoch && observation.documentRevision === result.beforeRevision)) fail('结果引用不存在或版本不一致的观察')
 })
 export type LocalAgentRecordV2 = z.infer<typeof localAgentRecordV2Schema>
@@ -210,7 +231,7 @@ export interface LocalAgentCliAdapterV2 {
   getExternalSessionId?(): string | null
   discoverCapabilities?(input?: { cwd: string }): Promise<LocalAgentCapabilities>
   configure(input: z.infer<typeof localAgentConfigurationSchema>): Promise<LocalAgentCapabilities>
-  startTurn(input: z.infer<typeof localAgentTurnInputSchema>, observationFiles: ReadonlyMap<string, string>): Promise<{ nativeTurnId: string | null }>
+  startTurn(input: z.infer<typeof localAgentTurnInputSchema>, observationFiles: ReadonlyMap<string, string>): Promise<{ nativeTurnId: string | null; inputMetrics?: LocalAgentInputMetrics; configuration?: Pick<AiTaskConfigurationRun, 'sent' | 'confirmed'> }>
   input(input: AiUserInput): Promise<z.infer<typeof aiInputDeliverySchema>>
   events(): AsyncIterable<LocalAgentNativeEvent>
   close(): Promise<void>

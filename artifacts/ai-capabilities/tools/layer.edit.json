@@ -1,0 +1,183 @@
+{
+  "candidateCarrier": {
+    "default": "native"
+  },
+  "description": "精确LayerItem update target的两个窄操作。reorder.position指定front/back或同owner同plane的before/after siblingId；不跨Flow正文、global平面或owner。duplicate只复制该实例一次，placement.side/gap相对当前有效frame放置（右侧间距24用right/24）；原实例及共享资源保留。Slide scene命名态只改变当前状态的呈现。Flow正文不是图层，不接受此工具。selectionActions仅提供焦点操作提示；其他对象使用当前request的精确目标，新建对象使用native.content insert或其他正式创建工具。",
+  "examples": [
+    {
+      "bindings": "values 的 position 来自当前观察、已读资源或用户要求，值须满足本卡 inputSchema；destination 原样复制当前目标。",
+      "code": "const input={\"operation\":\"reorder\",\"position\":values[\"position\"]}; const receipt=await session.execute(\"layer.edit\",input,destination);",
+      "operation": "reorder"
+    },
+    {
+      "bindings": "values 的 placement 来自当前观察、已读资源或用户要求，值须满足本卡 inputSchema；destination 原样复制当前目标。",
+      "code": "const input={\"operation\":\"duplicate\",\"placement\":values[\"placement\"]}; const receipt=await session.execute(\"layer.edit\",input,destination);",
+      "operation": "duplicate"
+    }
+  ],
+  "inputSchema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "oneOf": [
+      {
+        "additionalProperties": false,
+        "properties": {
+          "operation": {
+            "const": "reorder",
+            "type": "string"
+          },
+          "position": {
+            "oneOf": [
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "kind": {
+                    "const": "front",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "kind"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "kind": {
+                    "const": "back",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "kind"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "kind": {
+                    "const": "before",
+                    "type": "string"
+                  },
+                  "siblingId": {
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "siblingId"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "kind": {
+                    "const": "after",
+                    "type": "string"
+                  },
+                  "siblingId": {
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "siblingId"
+                ],
+                "type": "object"
+              }
+            ]
+          }
+        },
+        "required": [
+          "operation",
+          "position"
+        ],
+        "type": "object"
+      },
+      {
+        "additionalProperties": false,
+        "properties": {
+          "operation": {
+            "const": "duplicate",
+            "type": "string"
+          },
+          "placement": {
+            "additionalProperties": false,
+            "properties": {
+              "gap": {
+                "minimum": 0,
+                "type": "number"
+              },
+              "side": {
+                "enum": [
+                  "right",
+                  "left",
+                  "above",
+                  "below"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "side",
+              "gap"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "operation",
+          "placement"
+        ],
+        "type": "object"
+      }
+    ]
+  },
+  "invocation": "Builder: await session.execute(tool,input,destination)。input 遵循本卡完整 Schema；destination 原样使用当前 observe/createScope 的目标；只以 committed receipt 判定成功。",
+  "name": "layer.edit",
+  "recovery": "invalid-input: 按本卡 Schema 修正字段；revision-conflict: 重新 observe 后复制新 target 和源码基线；tool-failed: 读取 diagnostics 修复所指输入/资源/宿主条件，失败不代表已提交。",
+  "support": "conditional-on-input-target-resources-and-host",
+  "supportedScopes": [
+    "slide:scene",
+    "slide:global",
+    "flow:surface",
+    "flow:global",
+    "spatial-2d:world",
+    "spatial-2d:global",
+    "slide:surface",
+    "spatial-2d:surface"
+  ],
+  "variants": [
+    {
+      "operation": "reorder",
+      "scopes": [
+        "slide:scene",
+        "slide:global",
+        "flow:surface",
+        "flow:global",
+        "spatial-2d:world",
+        "spatial-2d:global",
+        "slide:surface",
+        "spatial-2d:surface"
+      ]
+    },
+    {
+      "operation": "duplicate",
+      "scopes": [
+        "slide:scene",
+        "slide:global",
+        "flow:surface",
+        "flow:global",
+        "spatial-2d:world",
+        "spatial-2d:global",
+        "slide:surface",
+        "spatial-2d:surface"
+      ]
+    }
+  ],
+  "version": 1
+}

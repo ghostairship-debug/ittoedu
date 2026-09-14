@@ -2,6 +2,17 @@
   "candidateCarrier": {
     "default": "native"
   },
+  "candidateTransport": {
+    "input": {
+      "base64": {
+        "$candidateFile": "resources/dog.png"
+      },
+      "filename": "dog.png",
+      "kind": "image",
+      "mimeType": "image/png"
+    },
+    "instruction": "候选传输允许 base64 使用本轮文件引用，Main 摄取真实字节后才调用正式工具。使用 request.destinations 的 global create 素材依赖目标；后续 owner.background.backgroundAssetId 可引用该步 asset-id 结果。所有步骤同一事务，失败零写入。"
+  },
   "description": "导入素材依赖，使用 global owner + create parent:owner append。base64 为真实媒体字节。新 asset ID 从该步骤回执的 asset-id 引用获得，不能自行指定。",
   "examples": [
     {

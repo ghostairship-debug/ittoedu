@@ -80,6 +80,8 @@ function createMockCodexProcess(responder?: (msg: any, send: (reply: any) => voi
               ],
             },
           })
+        } else if (msg.method === 'config/read') {
+          send({ id: msg.id, result: { config: { model: 'gpt-6-astra', model_reasoning_effort: 'xhigh' } } })
         } else if (msg.method === 'thread/start') {
           send({ id: msg.id, result: { thread: { id: 'thread-test-123' }, model: 'gpt-6-astra' } })
         } else if (msg.method === 'thread/resume') {
@@ -174,11 +176,9 @@ describe('CodexAppServer capabilities discovery', () => {
       default: 'high',
     })
 
-    expect(caps.current).toEqual({
-      model: 'gpt-6-astra',
-      resolvedModel: 'gpt-6-astra',
-      effort: 'medium',
-    })
+    expect(caps.current).toEqual({ model: null, resolvedModel: null, effort: null })
+    expect(parseCodexCapabilities(rawData, '0.153.4', { model: 'gpt-6-astra', effort: 'xhigh' }))
+      .toMatchObject({ current: { model: 'gpt-6-astra', effort: 'xhigh' }, currentSource: 'native-config' })
     expect(caps.input).toEqual({
       image: 'supported',
       readFile: 'supported',
@@ -198,7 +198,8 @@ describe('CodexAppServer capabilities discovery', () => {
     expect(caps.cliVersion).toBe('0.153.4')
     expect(caps.models[0]?.id).toBe('gpt-6-astra')
     expect(caps.current.model).toBe('gpt-6-astra')
-    expect(caps.current.effort).toBe('medium')
+    expect(caps.current.effort).toBe('xhigh')
+    expect(caps.currentSource).toBe('native-config')
   })
 })
 
@@ -283,9 +284,8 @@ describe('CodexAppServerAdapter lifecycle and wire protocol', () => {
     expect(configured.current.model).toBe('gpt-6-astra')
     expect(configured.requestedConfiguration).toEqual({ model: 'gpt-5.6-sol', effort: 'medium' })
 
-    // Invalid effort falls back to default effort
-    const fallback = await adapter.configure({ model: 'gpt-5.6-sol', effort: 'ultra' })
-    expect(fallback.requestedConfiguration).toEqual({ model: 'gpt-5.6-sol', effort: 'low' })
+    // An explicit selection must never silently become another effort.
+    await expect(adapter.configure({ model: 'gpt-5.6-sol', effort: 'ultra' })).rejects.toThrow('请重新选择')
 
     // Unknown model throws
     await expect(adapter.configure({ model: 'unknown-model', effort: null })).rejects.toThrow('不在 Codex 原生目录中')
@@ -874,6 +874,7 @@ require('node:readline').createInterface({ input: process.stdin }).on('line', li
   if (options.hangAt && method === options.hangAt) return;
   if (options.rejectAt && method === options.rejectAt) { send({ id, error: { code: -32602, message: 'native configuration refused' } }); return; }
   if (method === 'initialize') send({ id, result: { userAgent: 'codex/0.153.4' } });
+  else if (method === 'config/read') send({ id, result: { config: { model: 'native-default', model_reasoning_effort: 'high' } } });
   else if (method === 'model/list') send({ id, result: { data: ['native-default', 'native-selected'].map((name, i) => ({ id: name, model: name, displayName: name, isDefault: i === 0, inputModalities: ['text'], supportedReasoningEfforts: [{ reasoningEffort: 'medium' }, { reasoningEffort: 'high' }], defaultReasoningEffort: 'medium' })) } });
   else if (method === 'thread/start' || method === 'thread/resume') {
     threadId = params.threadId || 'confirmed-native-thread';
@@ -996,6 +997,32 @@ function shortPathWire(method: string, params: Record<string, unknown>) {
 }
 
 describe('Codex short path transport', () => {
+  it('replays the captured native turn final snapshot and publishes only explicit public reasoning summaries', async () => {
+    const fixture = JSON.parse(await fs.readFile(path.join(process.cwd(), 'tests/fixtures/local-agent-native/codex.json'), 'utf8'))
+    const captured = fixture.examples.conversation.find((entry: any) => entry.direction === 'in' && entry.value.method === 'turn/completed').value.params.turn
+    const expected = captured.items.filter((item: any) => item.type === 'agentMessage').map((item: any) => item.text)
+    const wire = [
+      shortPathWire('item/reasoning/textDelta', { itemId: 'reasoning', delta: 'PRIVATE_RAW_REASONING' }),
+      shortPathWire('item/reasoning/summaryTextDelta', { itemId: 'reasoning', summaryIndex: 0, delta: 'Checking the public evidence.' }),
+      shortPathWire('item/completed', { item: { id: 'reasoning', type: 'reasoning', summary: ['Checking the public evidence.'], content: ['PRIVATE_RAW_REASONING'] } }),
+      shortPathWire('turn/completed', { turn: { ...captured, id: 'native-turn' } }),
+    ]
+    const { adapter } = realCodexAdapter(shortPathProcess(wire))
+    try {
+      await adapter.open({ cwd: process.cwd(), externalSessionId: null })
+      await adapter.startTurn(nativeCodexTurn(), new Map())
+      const events = []; for await (const event of adapter.events()) events.push(event)
+      const text = events.filter(event => event.kind === 'text')
+      expect(text.filter(event => event.phase === 'final').map(event => event.text)).toEqual(expected)
+      expect(text.filter(event => event.phase === 'public-summary')).toEqual([
+        expect.objectContaining({ itemId: 'reasoning:summary:0', operation: 'append', text: 'Checking the public evidence.' }),
+        expect.objectContaining({ itemId: 'reasoning:summary:0', operation: 'replace', text: 'Checking the public evidence.' }),
+      ])
+      expect(JSON.stringify(text)).not.toContain('PRIVATE_RAW_REASONING')
+      expect(events.at(-1)).toMatchObject({ kind: 'turn-ended', status: 'completed' })
+    } finally { await adapter.close() }
+  })
+
   it.each(['started-and-completed', 'completed-only'] as const)('excludes native userMessage %s while preserving command, MCP, and typed agent output', async sequence => {
     const request = shortPathRequest(), prompt = 'PRIVATE_NATIVE_REQUEST_WITH_FULL_HOST_CONTEXT'
     // Captured native item shape; only the request text, image path, and ID are fixture values.
@@ -1029,8 +1056,8 @@ describe('Codex short path transport', () => {
         expect.objectContaining({ itemId: 'mcp', name: 'read_resource', status: 'running' }),
         expect.objectContaining({ itemId: 'mcp', name: 'read_resource', status: 'completed' }),
       ])
-      expect(events).toContainEqual(expect.objectContaining({ kind: 'text', itemId: 'public', phase: 'body', operation: 'append', text: 'Inspecting the title.' }))
-      expect(events).toContainEqual(expect.objectContaining({ kind: 'text', itemId: 'final', phase: 'body', operation: 'replace', text: 'Inspection finished.' }))
+      expect(events).toContainEqual(expect.objectContaining({ kind: 'text', itemId: 'public', phase: 'progress', operation: 'append', text: 'Inspecting the title.' }))
+      expect(events).toContainEqual(expect.objectContaining({ kind: 'text', itemId: 'final', phase: 'final', operation: 'replace', text: 'Inspection finished.' }))
       expect(events.at(-1)).toMatchObject({ kind: 'turn-ended', status: 'completed' })
     } finally { await adapter.close() }
   })
@@ -1055,7 +1082,9 @@ describe('Codex short path transport', () => {
     const schema = codexCandidateOutputSchema(request) as any
     expect(schema).toEqual(codexCandidateOutputSchema(other))
     expect(codexTurnOutputSchema(request)).toEqual(codexTurnOutputSchema(other))
-    expect(schema.properties.version.const).toBe(2)
+    const version = schema.properties.version
+    const resolvedVersion = version.$ref ? schema.$defs[version.$ref.split('/').at(-1)!] : version
+    expect(resolvedVersion.const).toBe(2)
     expect(schema.properties.requestId).toEqual({ type: 'string' })
     expect(JSON.stringify(schema)).not.toMatch(/candidateId|authoringAddress|revisionPolicy|"carrier"/)
     expect(JSON.stringify(schema)).toContain('A complete JSON serialization')
@@ -1067,6 +1096,19 @@ describe('Codex short path transport', () => {
     expect(() => decodeCodexStructuredOutput(JSON.stringify(edit), other)).toThrow('其他请求')
     expect(() => decodeCodexStructuredOutput(JSON.stringify({ ...edit, candidate: { ...candidate, requestId: other.requestId } }), request)).toThrow('其他请求')
     expect(() => decodeCodexStructuredOutput(JSON.stringify(candidate), { ...other, expectedResult: 'candidate' })).toThrow('其他请求')
+  })
+
+  it('accepts only an explicit current-request candidate.json reference and retains inline compatibility', () => {
+    const request = shortPathRequest()
+    const envelope = { version: 1, requestId: request.requestId, kind: 'edit', reply: null,
+      candidate: { version: 1, requestId: request.requestId, candidateFile: 'candidate.json' } }
+    expect(decodeCodexStructuredOutput(JSON.stringify(envelope), request)).toContain('"kind":"edit"')
+    expect(decodeCodexStructuredOutput(JSON.stringify(envelope), { ...request, expectedResult: 'candidate' })).toContain('courseware-result-v1')
+    for (const candidate of [{ ...envelope.candidate, candidateFile: '../candidate.json' },
+      { ...envelope.candidate, requestId: randomUUID() }, { ...envelope.candidate, extra: true }]) {
+      expect(() => decodeCodexStructuredOutput(JSON.stringify({ ...envelope, candidate }), request)).toThrow()
+    }
+    expect(decodeCodexStructuredOutput(JSON.stringify(shortPathCandidate(request)), { ...request, expectedResult: 'candidate' })).toContain('courseware-candidate-v1')
   })
 
   it.each([null, 'saved-native-thread'])('applies the selected model at initial open %s and confirms effort on the first turn', async externalSessionId => {
@@ -1116,7 +1158,7 @@ describe('Codex short path transport', () => {
       const events = []; for await (const event of adapter.events()) events.push(event)
       const text = events.filter(event => event.kind === 'text')
       expect(text).toContainEqual(expect.objectContaining({ itemId: 'public', operation: 'append', text: 'Checking title. ' }))
-      expect(text).toContainEqual(expect.objectContaining({ itemId: 'json', phase: 'body', text: '{"example":{"fontSize":48}}' }))
+      expect(text).toContainEqual(expect.objectContaining({ itemId: 'json', phase: 'progress', text: '{"example":{"fontSize":48}}' }))
       expect(text).toContainEqual(expect.objectContaining({ itemId: 'reply', text: 'I will adjust the title.' }))
       expect(text.filter(event => event.phase === 'candidate')).toEqual([expect.objectContaining({ itemId: 'final', operation: 'replace', text: expect.stringContaining('"version":2') })])
       expect(text.filter(event => event.phase !== 'candidate').every(event => !event.text.includes('requestId'))).toBe(true)
@@ -1192,7 +1234,7 @@ describe('Codex short path transport', () => {
       await adapter.open({ cwd: process.cwd(), externalSessionId: null })
       await adapter.startTurn(nativeCodexTurn(), new Map())
       const events = []; for await (const event of adapter.events()) events.push(event)
-      expect(events.filter(event => event.kind === 'text')).toEqual([expect.objectContaining({ phase: 'body', text: reply })])
+      expect(events.filter(event => event.kind === 'text')).toEqual([expect.objectContaining({ phase: 'final', text: reply })])
     } finally { await adapter.close() }
   })
 
@@ -1246,6 +1288,37 @@ describe('Codex short path transport', () => {
 })
 
 describe('Codex native subprocess failure and configuration boundaries', () => {
+  it.each(['imageGeneration', 'extension'] as const)('accepts generated image frames and sustained traffic without copying base64 into the display trace: %s', async type => {
+    const script = codexNativeProcess().replace("send({ id, result: { thread: { id: threadId, model: options.confirmedModel || model, reasoningEffort: options.omitEffort ? null : effort } } });",
+      `send({ id, result: { thread: { id: threadId, model, reasoningEffort: effort } } });
+      for (let i = 0; i < 6; i++) send({ method: 'item/completed', params: { threadId, turnId: 'native-turn', item: {
+        type: '${type}', ${type === 'extension' ? "kind: 'image_gen.generation'," : ''} id: 'image-' + i, status: 'completed',
+        result: 'a'.repeat(1861132), savedPath: 'generated/puppy.png' } } });`)
+    const { adapter } = realCodexAdapter(script)
+    try {
+      await adapter.open({ cwd: process.cwd(), externalSessionId: null, configuration: { model: 'native-selected', effort: 'high' } })
+      await adapter.startTurn(nativeCodexTurn(), new Map())
+      const events = []; for await (const event of adapter.events()) events.push(event)
+      expect(events.at(-1)).toMatchObject({ kind: 'turn-ended', status: 'completed' })
+      const completed = events.filter(event => event.kind === 'tool' && event.status === 'completed')
+      expect(completed).toHaveLength(6)
+      expect(completed[0]).toMatchObject({ detail: { savedPath: 'generated/puppy.png', imageBase64Bytes: 1861132 } })
+      expect(JSON.stringify(events).length).toBeLessThan(20000)
+    } finally { await adapter.close() }
+  })
+
+  it('reports oversized individual frames as a limit failure', async () => {
+    const script = codexNativeProcess().replace("send({ id, result: { thread: { id: threadId, model: options.confirmedModel || model, reasoningEffort: options.omitEffort ? null : effort } } });",
+      "send({ id, result: { thread: { id: threadId, model, reasoningEffort: effort } } });\nsetTimeout(() => send({ method: 'oversized', params: { data: 'a'.repeat(32 * 1024 * 1024) } }), 1);")
+    const { adapter } = realCodexAdapter(script)
+    try {
+      await adapter.open({ cwd: process.cwd(), externalSessionId: null, configuration: { model: 'native-selected', effort: 'high' } })
+      await adapter.startTurn(nativeCodexTurn(), new Map())
+      const events = []; for await (const event of adapter.events()) events.push(event)
+      expect(events.at(-1)).toMatchObject({ kind: 'turn-ended', status: 'failed', failure: { category: 'limit' } })
+    } finally { await adapter.close() }
+  })
+
   it('rejects an initialization exit and can open another native process on the same adapter', async () => {
     let launchCount = 0
     const { adapter, children } = realCodexAdapter(() => codexNativeProcess(++launchCount === 1 ? { exitAt: 'initialize' } : {}))
@@ -1348,7 +1421,26 @@ describe('Codex native subprocess failure and configuration boundaries', () => {
 })
 
 describe('Codex native configuration and permission passthrough', () => {
-  it.each(['before-ack', 'after-null-read', 'after-old-read'] as const)('uses effective settings %s without aborting on unready thread metadata', async ordering => {
+  it.each([null, 'saved-native-thread'])('inherits already confirmed settings for %s without reading an empty rollout or waiting for a change', async externalSessionId => {
+    const script = codexNativeProcess({ rejectAt: 'thread/read' }).replace(
+      "send({ method: 'turn/started', params: { threadId, turn: { id: 'native-turn' } } });",
+      "send({ method: 'turn/started', params: { threadId, turn: { id: 'native-turn' } } });\n    setTimeout(() => send({ method: 'turn/completed', params: { threadId, turn: { id: 'native-turn', status: 'completed' } } }), 5);")
+    const { adapter, messages } = realCodexAdapter(script)
+    try {
+      await adapter.open({ cwd: process.cwd(), externalSessionId, configuration: { model: 'native-selected', effort: 'medium' } })
+      const started = await adapter.startTurn(nativeCodexTurn(), new Map())
+      const events = []; for await (const event of adapter.events()) events.push(event)
+      const params = messages.find(message => message.method === 'turn/start').params
+      expect(params).toMatchObject({ model: 'native-selected', effort: 'medium' })
+      expect(started.configuration).toMatchObject({ sent: { model: 'native-selected', effort: 'medium' }, confirmed: { model: 'native-selected', effort: 'medium' } })
+      expect(messages.some(message => message.method === 'thread/read')).toBe(false)
+      expect(events.find(event => event.kind === 'configuration')).toMatchObject({ nativeTurnId: started.nativeTurnId,
+        capabilities: { current: { model: 'native-selected', effort: 'medium' }, requestedConfiguration: null } })
+      expect(events.at(-1)).toMatchObject({ kind: 'turn-ended', status: 'completed' })
+    } finally { await adapter.close() }
+  })
+
+  it.each(['before-ack', 'after-null-read', 'after-old-read', 'after-empty-rollout'] as const)('uses effective settings %s without aborting on unready thread metadata', async ordering => {
     const settings = "send({ method: 'thread/settings/updated', params: { threadId, threadSettings: { model, effort } } });"
     let script = codexNativeProcess()
     if (ordering === 'before-ack') {
@@ -1356,6 +1448,9 @@ describe('Codex native configuration and permission passthrough', () => {
         settings + "\n    send({ id, result: { turn: { id: 'native-turn', status: 'inProgress' } } });")
       script = script.replace("send({ method: 'turn/started', params: { threadId, turn: { id: 'native-turn' } } });",
         "send({ method: 'turn/started', params: { threadId, turn: { id: 'native-turn' } } });\n    setTimeout(() => send({ method: 'turn/completed', params: { threadId, turn: { id: 'native-turn', status: 'completed' } } }), 20);")
+    } else if (ordering === 'after-empty-rollout') {
+      script = script.replace("send({ id, result: { thread: { id: threadId, model: options.confirmedModel || model, reasoningEffort: options.omitEffort ? null : effort } } });",
+        "send({ id, error: { message: 'failed to read thread: failed to read session metadata rollout.jsonl: rollout at rollout.jsonl is empty' } });\n    setTimeout(() => { " + settings + " }, 1);")
     } else {
       script = script.replace("send({ id, result: { thread: { id: threadId, model: options.confirmedModel || model, reasoningEffort: options.omitEffort ? null : effort } } });",
         "send({ id, result: { thread: { id: threadId, model: " + (ordering === 'after-null-read' ? "null" : "'native-default'") + ", reasoningEffort: null } } });\n    setTimeout(() => { " + settings + " }, 1);")
@@ -1369,6 +1464,7 @@ describe('Codex native configuration and permission passthrough', () => {
       expect(events.find(event => event.kind === 'configuration')).toMatchObject({ nativeTurnId: started.nativeTurnId,
         capabilities: { current: { model: 'native-selected', effort: 'high' }, requestedConfiguration: null } })
       expect(events.at(-1)).toMatchObject({ kind: 'turn-ended', status: 'completed' })
+      expect(messages.filter(message => message.method === 'turn/start')).toHaveLength(1)
       if (ordering === 'before-ack') expect(messages.some(message => message.method === 'thread/read')).toBe(false)
     } finally { await adapter.close() }
   })
@@ -1442,6 +1538,7 @@ describe('Codex native configuration and permission passthrough', () => {
       .replace("send({ method: 'turn/started', params: { threadId, turn: { id: 'native-turn-' + turnNumber } } });", `
     send({ method: 'turn/started', params: { threadId, turn: { id: 'native-turn-' + turnNumber } } });
     send({ method: 'item/agentMessage/delta', params: { threadId, turnId: 'native-turn-' + (turnNumber - 1), itemId: 'late-old-item', delta: 'stale output' } });
+    if (turnNumber > 1) setTimeout(() => send({ method: 'turn/completed', params: { threadId, turn: { id: 'native-turn-' + turnNumber, status: 'completed' } } }), 5);
 `)
     const { adapter, messages } = realCodexAdapter(script)
     const first = nativeCodexTurn(), second = { ...first, runId: randomUUID(), observationId: randomUUID(), text: 'second observation and host result' }
@@ -1503,4 +1600,24 @@ describe('Codex native configuration and permission passthrough', () => {
       expect(messages.find(message => message.id === 'form-1')?.result).toEqual({ action: 'accept', content: { label: 'native', count: 2 } })
     } finally { await adapter.close() }
   })
+})
+
+
+it.each(['priority', 'default'])('sends and confirms Codex speed %s without changing medium effort or permissions', async serviceTier => {
+  let script = codexNativeProcess()
+    .replace("defaultReasoningEffort: 'medium' }))", "defaultReasoningEffort: 'medium', serviceTiers: [{id:'priority',name:'Fast',description:'increased usage'}] }))")
+    .replace("reasoningEffort: effort } });", "reasoningEffort: effort, serviceTier: params.serviceTier } });")
+    .replace("send({ method: 'turn/started', params: { threadId, turn: { id: 'native-turn' } } });", "send({ method: 'thread/settings/updated', params: { threadId, threadSettings: { model, effort, serviceTier: params.serviceTier } } }); setTimeout(() => send({method:'turn/completed',params:{threadId,turn:{id:'native-turn',status:'completed'}}}),10);")
+  const { adapter, messages } = realCodexAdapter(script)
+  try {
+    await adapter.open({ cwd: process.cwd(), externalSessionId: 'confirmed-native-thread', configuration: { model: 'native-selected', effort: 'medium', serviceTier } })
+    const started = await adapter.startTurn(nativeCodexTurn(), new Map())
+    const events = []; for await (const event of adapter.events()) events.push(event)
+    expect(messages.find(message => message.method === 'thread/resume').params).toMatchObject({ model: 'native-selected', serviceTier })
+    const params = messages.find(message => message.method === 'turn/start').params
+    expect(params).toMatchObject({ model: 'native-selected', effort: 'medium', serviceTier })
+    expect(params.approvalPolicy).toBeUndefined()
+    expect(started.configuration).toMatchObject({ sent: { serviceTier, effort: 'medium' }, confirmed: { serviceTier, effort: 'medium' } })
+    expect(events.at(-1)).toMatchObject({ kind: 'turn-ended', status: 'completed' })
+  } finally { await adapter.close() }
 })

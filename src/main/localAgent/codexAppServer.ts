@@ -1,9 +1,10 @@
 import type { ChildProcessWithoutNullStreams } from 'node:child_process'
 import { createInterface } from 'node:readline'
 import path from 'node:path'
+import { nativeProxyEnvironment } from './nativeProxy'
 import { z } from 'zod'
 import { generationShortCandidateSchema, type GenerationRequest } from '../../shared/generationContract'
-import { GENERATION_CLOSE, GENERATION_OPEN } from '../../shared/generationResult'
+import { GENERATION_CLOSE, GENERATION_OPEN, generationStagedCandidateMarker, generationStagedCandidateReferenceSchema, normalizeGenerationCandidateTransport } from '../../shared/generationResult'
 import {
   localAgentCapabilitiesSchema,
   localAgentConfigurationSchema,
@@ -18,10 +19,12 @@ import {
   aiQuestionSchema,
   localAgentTurnInputSchema,
   type AiUserInput,
+  type AiTaskConfigurationRun,
   type LocalAgentCliAdapterV2,
   type LocalAgentNativeEvent,
 } from '../../shared/localAgentTaskContract'
 import { captureAgent, launchAgent, resolveAgentExecutable, stopAgent, type AgentExecutable } from './process'
+import { measureLocalAgentInput, type LocalAgentInputMetrics } from '../../shared/localAgentInputMetrics'
 
 type AiQuestion = z.infer<typeof aiQuestionSchema>
 
@@ -64,9 +67,7 @@ export function codexCandidateOutputSchema(_request: GenerationRequest): Record<
     if (Array.isArray(value)) { value.forEach(adaptToolInput); return }
     const definition = value as Record<string, any>
     if (definition.properties?.tool && definition.properties?.input && definition.properties?.destination) {
-      definition.properties.lowerCarrierReason = { anyOf: [definition.properties.lowerCarrierReason, { type: 'null' }] }
       definition.properties.input = { type: 'string', description: 'A complete JSON serialization of the selected authoring tool input.' }
-      definition.required = Array.from(new Set([...(definition.required ?? []), 'lowerCarrierReason']))
     }
     Object.values(definition).forEach(adaptToolInput)
   }
@@ -79,16 +80,18 @@ export function codexCandidateOutputSchema(_request: GenerationRequest): Record<
 /** Auto requests still use one strict final transport while allowing either prose or an edit. */
 export function codexTurnOutputSchema(request: GenerationRequest): Record<string, unknown> {
   const candidate = codexCandidateOutputSchema(request) as Record<string, any>
-  if (request.expectedResult === 'candidate') return candidate
   const { $defs, ...candidateValue } = candidate
+  const fileReference = z.toJSONSchema(generationStagedCandidateReferenceSchema, { io: 'output' }) as Record<string, any>
+  delete fileReference.$schema
+  normalizeOutputSchema(fileReference)
   return {
     type: 'object',
     properties: {
       version: { type: 'integer', const: 1 },
       requestId: { type: 'string' },
-      kind: { type: 'string', enum: ['reply', 'edit'] },
-      reply: { anyOf: [{ type: 'string', maxLength: 500_000 }, { type: 'null' }] },
-      candidate: { anyOf: [candidateValue, { type: 'null' }] },
+      kind: { type: 'string', enum: request.expectedResult === 'candidate' ? ['edit'] : ['reply', 'edit'] },
+      reply: request.expectedResult === 'candidate' ? { type: 'null' } : { anyOf: [{ type: 'string', maxLength: 500_000 }, { type: 'null' }] },
+      candidate: { anyOf: [candidateValue, fileReference, ...(request.expectedResult === 'candidate' ? [] : [{ type: 'null' }])] },
     },
     required: ['version', 'requestId', 'kind', 'reply', 'candidate'],
     additionalProperties: false,
@@ -97,14 +100,17 @@ export function codexTurnOutputSchema(request: GenerationRequest): Record<string
 }
 
 function candidateMessage(value: any): string {
-  if (Array.isArray(value?.steps)) for (const step of value.steps) {
-    if (step && typeof step === 'object' && step.lowerCarrierReason === null) delete step.lowerCarrierReason
-    if (step && typeof step === 'object' && typeof step.input === 'string') {
-      try { step.input = JSON.parse(step.input) }
-      catch { /* Preserve malformed tool input for the host's bounded candidate-format repair. */ }
-    }
-  }
+  try { value = normalizeGenerationCandidateTransport(value) }
+  catch { /* Keep the malformed projection for the shared structured repair diagnostic. */ }
   return `${GENERATION_OPEN}${JSON.stringify(value)}${GENERATION_CLOSE}`
+}
+
+/** Files may retain Codex's structured-output projection. Decode it exactly as
+ * inline output, leaving malformed JSON to the host's candidate repair path. */
+export function codexCandidateFileMessage(text: string): string {
+  let value: unknown
+  try { value = JSON.parse(text) } catch { return `${GENERATION_OPEN}${text}${GENERATION_CLOSE}` }
+  return candidateMessage(value)
 }
 
 function decodeCodexStructuredResult(text: string, request: GenerationRequest): { kind: 'reply' | 'candidate'; text: string } {
@@ -112,15 +118,21 @@ function decodeCodexStructuredResult(text: string, request: GenerationRequest): 
   const candidate = (input: unknown): { kind: 'candidate'; text: string } => {
     if (!input || typeof input !== 'object' || Array.isArray(input)
       || (input as Record<string, unknown>).requestId !== request.requestId) throw new Error('生成候选属于其他请求')
+    if ('candidateFile' in input) {
+      generationStagedCandidateReferenceSchema.parse(input)
+      return { kind: 'candidate', text: generationStagedCandidateMarker(request.requestId) }
+    }
     return { kind: 'candidate', text: candidateMessage(input) }
   }
-  if (request.expectedResult === 'candidate') return candidate(value)
+  // Existing native sessions may finish an inline candidate using the earlier schema.
+  if (request.expectedResult === 'candidate' && value?.version === 2) return candidate(value)
   const envelope = z.object({
     version: z.literal(1), requestId: z.string(), kind: z.enum(['reply', 'edit']),
     reply: z.string().max(500_000).nullable(), candidate: z.unknown().nullable(),
   }).strict().parse(value)
   if (envelope.requestId !== request.requestId) throw new Error('生成结果属于其他请求')
   if (envelope.kind === 'reply') {
+    if (request.expectedResult === 'candidate') throw new Error('本轮要求修改候选')
     if (envelope.candidate !== null || envelope.reply === null || !envelope.reply.trim()) throw new Error('Codex reply envelope 不完整')
     return { kind: 'reply', text: envelope.reply }
   }
@@ -150,8 +162,9 @@ interface CodexAgentMessage {
   completed: boolean
 }
 
-function publicMessagePhase(phase: string | null): 'body' | 'public-summary' | 'plan' {
-  return phase === 'summary' || phase === 'public_summary' ? 'public-summary' : phase === 'plan' ? 'plan' : 'body'
+function publicMessagePhase(phase: string | null): 'body' | 'public-summary' | 'plan' | 'progress' | 'final' {
+  return phase === 'summary' || phase === 'public_summary' ? 'public-summary' : phase === 'plan' ? 'plan'
+    : phase === 'commentary' ? 'progress' : phase === 'final_answer' ? 'final' : 'body'
 }
 
 /** Only the transport envelope is machine data; ordinary JSON/code remains readable. */
@@ -201,28 +214,15 @@ export function parseCodexCapabilities(
       effort = { kind: 'unsupported' }
     }
 
-    models.push({ id, resolvedModel, label, image, effort })
+    const serviceTiers = Array.isArray(item.serviceTiers) ? item.serviceTiers.filter((tier: any) =>
+      tier && typeof tier.id === 'string' && tier.id && typeof tier.name === 'string' && tier.name && typeof tier.description === 'string') : undefined
+    models.push({ id, resolvedModel, label, image, effort, ...(serviceTiers ? { serviceTiers } : {}) })
   }
 
-  const defaultItem = (modelsData ?? []).find((m: any) => m?.isDefault) ?? modelsData?.[0]
-  const defaultModel = models.find(m => m.id === defaultItem?.id) ?? models[0] ?? null
-
-  let currentModel = defaultModel
-  let currentEffort: string | null = defaultModel?.effort.kind === 'supported' ? defaultModel.effort.default : null
-
-  if (preferredConfig && preferredConfig.model) {
-    const preferred = models.find(m => m.id === preferredConfig.model)
-    if (preferred) {
-      currentModel = preferred
-      if (preferred.effort.kind === 'supported') {
-        currentEffort = preferredConfig.effort && preferred.effort.values.includes(preferredConfig.effort)
-          ? preferredConfig.effort
-          : preferred.effort.default
-      } else {
-        currentEffort = null
-      }
-    }
-  }
+  // Catalog defaults describe recommendations, never the effective configuration.
+  const currentModel = preferredConfig && models.find(m => m.id === preferredConfig.model || m.resolvedModel === preferredConfig.model)
+  const currentEffort = currentModel?.effort.kind === 'supported' && preferredConfig?.effort
+    && currentModel.effort.values.includes(preferredConfig.effort) ? preferredConfig.effort : null
 
   return localAgentCapabilitiesSchema.parse({
     version: 1,
@@ -233,7 +233,9 @@ export function parseCodexCapabilities(
       model: currentModel?.id ?? null,
       resolvedModel: currentModel?.resolvedModel ?? null,
       effort: currentEffort,
+      ...(preferredConfig?.serviceTier !== undefined ? { serviceTier: preferredConfig.serviceTier } : {}),
     },
+    ...(preferredConfig ? { currentSource: 'native-config' as const } : {}),
     input: {
       image: 'supported',
       readFile: 'supported',
@@ -319,7 +321,14 @@ export async function discoverCodexCapabilities(
       new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Codex app-server model/list timeout')), 10000)),
     ])
 
-    return parseCodexCapabilities(listResult?.data ?? [], cliVersion)
+    const effective = await Promise.race([
+      send('config/read', { cwd, includeLayers: false }),
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Codex config/read timeout')), 10000)),
+    ]) as any
+    return parseCodexCapabilities(listResult?.data ?? [], cliVersion, typeof effective?.config?.model === 'string'
+      ? { model: effective.config.model, effort: typeof effective.config.model_reasoning_effort === 'string' ? effective.config.model_reasoning_effort : null,
+        ...(Object.hasOwn(effective.config, 'service_tier') ? { serviceTier: effective.config.service_tier } : {}) }
+      : undefined)
   } finally {
     lines.close()
     try { child.stdin.end() } catch {}
@@ -419,6 +428,7 @@ export class CodexAppServerAdapter implements LocalAgentCliAdapterV2 {
   private turnEndedPromise: Promise<void> = Promise.resolve()
   private resolveTurnEnded?: () => void
   private turnConfigurationEvent: LocalAgentNativeEvent | null = null
+  private turnRequestedConfiguration: LocalAgentConfiguration | null = null
   private resolveTurnConfiguration?: () => void
   private drainingEvents = false
   private isCancelled = false
@@ -525,7 +535,9 @@ export class CodexAppServerAdapter implements LocalAgentCliAdapterV2 {
 
     let child: ChildProcessWithoutNullStreams
     try {
-      child = this.child = launchAgent(binary, ['app-server', '--stdio'], input.cwd, input.candidateRoot)
+      const proxy = await nativeProxyEnvironment('codex')
+      if (lifecycle !== this.lifecycle || this.isClosed) throw new Error('interrupted')
+      child = this.child = launchAgent(binary, ['app-server', '--stdio'], input.cwd, input.candidateRoot, proxy)
       this.candidateRoot = input.candidateRoot
     } catch {
       throw new Error('launch')
@@ -567,7 +579,8 @@ export class CodexAppServerAdapter implements LocalAgentCliAdapterV2 {
       this.capabilities = parseCodexCapabilities(listResult?.data ?? [], this.cliVersion)
       this.capabilitiesCwd = path.resolve(input.cwd)
       const requested = configuration ? (await this.configure(configuration)).requestedConfiguration ?? null : null
-      const modelOverride = requested ? { model: requested.model } : {}
+      const modelOverride = requested ? { model: requested.model,
+        ...(requested.serviceTier !== undefined ? { serviceTier: requested.serviceTier } : {}) } : {}
 
       let threadResult: any
       if (externalSessionId) {
@@ -614,9 +627,12 @@ export class CodexAppServerAdapter implements LocalAgentCliAdapterV2 {
     if (target.effort.kind !== 'supported') {
       effort = null
     } else if (effort !== null && !target.effort.values.includes(effort)) {
-      effort = target.effort.default ?? null
+      throw new Error('所选强度不在当前原生模型目录中，请重新选择')
     }
-    this.activeConfiguration = { model: config.model, effort }
+    if (config.serviceTier != null && config.serviceTier !== 'default' && !target.serviceTiers?.some(tier => tier.id === config.serviceTier)) {
+      throw new Error('所选速度不在 Codex 原生模型目录中，请刷新目录')
+    }
+    this.activeConfiguration = { ...config, effort }
     this.capabilities = localAgentCapabilitiesSchema.parse({
       ...capabilities,
       requestedConfiguration: this.activeConfiguration,
@@ -627,7 +643,7 @@ export class CodexAppServerAdapter implements LocalAgentCliAdapterV2 {
   async startTurn(
     input: z.infer<typeof localAgentTurnInputSchema>,
     observationFiles: ReadonlyMap<string, string>
-  ): Promise<{ nativeTurnId: string | null }> {
+  ): Promise<{ nativeTurnId: string | null; inputMetrics: LocalAgentInputMetrics; configuration: Pick<AiTaskConfigurationRun, 'sent' | 'confirmed'> }> {
     if (!this.child || !this.threadId || this.isClosed) {
       throw new Error('Codex adapter session is not open')
     }
@@ -674,13 +690,28 @@ export class CodexAppServerAdapter implements LocalAgentCliAdapterV2 {
       input: content,
     }
     const requestedConfiguration = this.activeConfiguration
+    this.turnRequestedConfiguration = requestedConfiguration
+    // Resend explicit choices even when they match the native thread settings.
+    // Unchanged settings need not emit a change notification, and a brand-new
+    // rollout may not be readable yet; the confirmed thread value still applies.
+    const confirmedConfiguration = this.capabilities!.current
+    const inheritsConfiguration = requestedConfiguration !== null
+      && confirmedConfiguration.model === requestedConfiguration.model
+      && (requestedConfiguration.effort === null || confirmedConfiguration.effort === requestedConfiguration.effort)
+      && (requestedConfiguration.serviceTier === undefined || confirmedConfiguration.serviceTier === requestedConfiguration.serviceTier)
     if (requestedConfiguration) {
       params.model = requestedConfiguration.model
       if (requestedConfiguration.effort !== null) params.effort = requestedConfiguration.effort
+      if (requestedConfiguration.serviceTier !== undefined) params.serviceTier = requestedConfiguration.serviceTier
     }
     if (this.generationRequest) {
       params.outputSchema = codexTurnOutputSchema(this.generationRequest)
     }
+    const inputMetrics = measureLocalAgentInput({
+      boundary: 'native-turn-params', prompt: turnInput.text, transport: params,
+      technicalTransport: { ...params, input: content.filter(item => item.type !== 'localImage') },
+      outputSchema: params.outputSchema,
+    })
 
     try {
       const turnResult = await this.sendRpc('turn/start', params)
@@ -689,15 +720,27 @@ export class CodexAppServerAdapter implements LocalAgentCliAdapterV2 {
       if (!this.turnEndedEmitted) this.activeTurnId = turnId
 
       if (requestedConfiguration) {
+        if (!this.turnConfigurationEvent && inheritsConfiguration) {
+          this.confirmConfiguration({ model: confirmedConfiguration.resolvedModel ?? confirmedConfiguration.model,
+            reasoningEffort: confirmedConfiguration.effort, serviceTier: confirmedConfiguration.serviceTier }, requestedConfiguration)
+          this.turnConfigurationEvent = { ...this.baseEventIdentity(), nativeTurnId: turnId, kind: 'configuration', capabilities: this.capabilities! }
+        }
         // The settings notification is the native effective configuration. An
         // immediate thread/read can legitimately contain null metadata while
         // the new turn is starting, so null is pending rather than a mismatch.
         if (!this.turnConfigurationEvent) {
-          const result = await this.sendRpc('thread/read', { threadId: this.threadId, includeTurns: false })
-          if (result?.thread?.id !== this.threadId) throw new Error('protocol: configuration belongs to another Codex thread')
+          const result = await this.sendRpc('thread/read', { threadId: this.threadId, includeTurns: false }).catch(error => {
+            // A new rollout can still be empty after turn/start has succeeded.
+            // Do not abort that live turn or dispatch it again: its settings
+            // notification remains the authoritative configuration confirmation.
+            if (error instanceof Error && /failed to read session metadata[\s\S]*rollout[\s\S]*is empty/.test(error.message)) return null
+            throw error
+          })
+          if (result && result.thread?.id !== this.threadId) throw new Error('protocol: configuration belongs to another Codex thread')
           const selected = this.capabilities!.models.find(model => model.id === requestedConfiguration.model)
           if (!this.turnConfigurationEvent && [selected?.id, selected?.resolvedModel].filter(Boolean).includes(result?.thread?.model)
-            && (requestedConfiguration.effort === null || result.thread.reasoningEffort === requestedConfiguration.effort)) {
+            && (requestedConfiguration.effort === null || result.thread.reasoningEffort === requestedConfiguration.effort)
+            && (requestedConfiguration.serviceTier === undefined || result.thread.serviceTier === requestedConfiguration.serviceTier)) {
             this.confirmConfiguration(result, requestedConfiguration)
             this.turnConfigurationEvent = { ...this.baseEventIdentity(), nativeTurnId: turnId, kind: 'configuration', capabilities: this.capabilities! }
           }
@@ -707,7 +750,11 @@ export class CodexAppServerAdapter implements LocalAgentCliAdapterV2 {
       }
       if (this.turnConfigurationEvent) this.turnConfigurationEvent = { ...this.turnConfigurationEvent, nativeTurnId: turnId }
 
-      return { nativeTurnId: turnId }
+      return { nativeTurnId: turnId, inputMetrics, configuration: {
+        sent: { ...(params.model ? { model: params.model } : {}), ...(params.effort ? { effort: params.effort } : {}),
+          ...(params.serviceTier !== undefined ? { serviceTier: params.serviceTier } : {}) },
+        confirmed: this.capabilities!.current,
+      } }
     } catch (error) {
       await this.shutdown(error instanceof Error ? error : new Error(String(error)), 'protocol').catch(() => {})
       throw error
@@ -895,16 +942,20 @@ export class CodexAppServerAdapter implements LocalAgentCliAdapterV2 {
     const actualModel = result?.model ?? result?.thread?.model
     const model = capabilities.models.find(value => value.id === actualModel || value.resolvedModel === actualModel)
     const actualEffort = result?.reasoningEffort ?? result?.thread?.reasoningEffort ?? null
+    const actualTier = Object.hasOwn(result ?? {}, 'serviceTier') ? result.serviceTier : result?.thread?.serviceTier
     if (expected) {
       const requestedModel = capabilities.models.find(value => value.id === expected.model)!
       if (!model || (actualModel !== requestedModel.id && actualModel !== requestedModel.resolvedModel)
-        || (expected.effort !== null && actualEffort !== expected.effort)) {
+        || (expected.effort !== null && actualEffort !== expected.effort)
+        || (expected.serviceTier !== undefined && actualTier !== expected.serviceTier)) {
         throw new Error('Codex 原生返回的模型/强度与请求不一致，未确认所选配置')
       }
     }
     this.capabilities = localAgentCapabilitiesSchema.parse({ ...capabilities,
+      currentSource: 'native-session',
       current: { model: model?.id ?? null, resolvedModel: model ? model.resolvedModel ?? actualModel : null,
-        effort: model?.effort.kind === 'supported' && model.effort.values.includes(actualEffort) ? actualEffort : null },
+        effort: model?.effort.kind === 'supported' && model.effort.values.includes(actualEffort) ? actualEffort : null,
+        ...(actualTier !== undefined ? { serviceTier: actualTier } : {}) },
       ...(expected ? { requestedConfiguration: null } : {}),
     })
   }
@@ -971,7 +1022,7 @@ export class CodexAppServerAdapter implements LocalAgentCliAdapterV2 {
       }
       const id = ++this.nextRpcId
       const timer = setTimeout(() => { void this.shutdown(new Error(`Codex ${method} timeout`)).catch(() => {}) }, timeoutMs)
-      this.pendingRpc.set(id, { resolve, reject, timer })
+      this.pendingRpc.set(id, { resolve, reject: error => reject(new Error(`Codex ${method}: ${error.message}`)), timer })
       try { this.child.stdin.write(JSON.stringify({ id, method, params }) + '\n') }
       catch (error) { void this.shutdown(error instanceof Error ? error : new Error(String(error))).catch(() => {}) }
     })
@@ -998,15 +1049,15 @@ export class CodexAppServerAdapter implements LocalAgentCliAdapterV2 {
   }
 
   private startLineReader(lines: ReturnType<typeof createInterface>): void {
-    let totalBytes = 0
     const child = this.child
     void (async () => {
       try {
         for await (const line of lines) {
           if (this.isClosed || this.child !== child) break
-          totalBytes += Buffer.byteLength(line)
-          if (totalBytes > 8 * 1024 * 1024 || Buffer.byteLength(line) > 1024 * 1024) {
-            void this.shutdown(new Error('output-limit'), 'limit').catch(() => {})
+          // Native image tools return base64 in a single event. Bound individual
+          // frames, not cumulative traffic over a long-lived native session.
+          if (Buffer.byteLength(line) > 32 * 1024 * 1024) {
+            void this.shutdown(new Error('output-limit: Codex message exceeds 32 MiB'), 'limit').catch(() => {})
             return
           }
           if (!line.trim()) continue
@@ -1015,6 +1066,14 @@ export class CodexAppServerAdapter implements LocalAgentCliAdapterV2 {
             wire = JSON.parse(line)
           } catch {
             continue
+          }
+          // Keep the native saved file reference in the display trace, without
+          // persisting another copy of the generated image in every tool event.
+          const item = wire.params?.item
+          if ((item?.type === 'imageGeneration' || item?.kind === 'image_gen.generation')
+            && typeof item.result === 'string' && typeof item.savedPath === 'string' && item.savedPath) {
+            const { result, ...metadata } = item
+            wire.params.item = { ...metadata, imageBase64Bytes: Buffer.byteLength(result) }
           }
           this.handleWireMessage(wire)
         }
@@ -1118,7 +1177,7 @@ export class CodexAppServerAdapter implements LocalAgentCliAdapterV2 {
             id: q.id ?? 'question',
             title: q.question || q.header || q.id || '',
             options: (q.options ?? []).map((opt: any) => (typeof opt === 'string' ? opt : opt.label ?? opt.description ?? '')),
-            multiple: Boolean(q.multiple || false),
+            multiple: Boolean(q.multiple),
           }))
           const turnId: string = (params?.turnId as string | undefined) ?? base.nativeTurnId ?? 'turn'
           this.eventQueue.push({
@@ -1150,7 +1209,8 @@ export class CodexAppServerAdapter implements LocalAgentCliAdapterV2 {
     if (wire.method === 'thread/settings/updated') {
       if (!this.currentTurnContext || this.turnEndedEmitted || wire.params?.threadId !== this.threadId) return
       const settings = wire.params.threadSettings
-      this.confirmConfiguration({ model: settings?.model, reasoningEffort: settings?.effort }, this.activeConfiguration ?? undefined)
+      this.confirmConfiguration({ model: settings?.model, reasoningEffort: settings?.effort,
+        ...(settings?.serviceTier !== undefined ? { serviceTier: settings.serviceTier } : {}) }, this.turnRequestedConfiguration ?? undefined)
       const event: LocalAgentNativeEvent = { ...this.baseEventIdentity(), kind: 'configuration', capabilities: this.capabilities! }
       if (this.drainingEvents) this.eventQueue.push(event)
       else this.turnConfigurationEvent = event
@@ -1178,6 +1238,14 @@ export class CodexAppServerAdapter implements LocalAgentCliAdapterV2 {
     if (eventTurnId && this.activeTurnId && eventTurnId !== this.activeTurnId) return
     const base = this.baseEventIdentity()
 
+    // Only the explicitly public summary channel is displayed, never raw reasoning deltas.
+    if (wire.method === 'item/reasoning/summaryTextDelta') {
+      if (typeof wire.params?.itemId === 'string' && typeof wire.params?.delta === 'string' && !this.isCancelled) {
+        this.eventQueue.push({ ...base, kind: 'text', itemId: `${wire.params.itemId}:summary:${wire.params.summaryIndex ?? 0}`,
+          phase: 'public-summary', operation: 'append', text: wire.params.delta })
+      }
+      return
+    }
     if (wire.method === 'item/agentMessage/delta') {
       const itemId = wire.params?.itemId
       const delta = wire.params?.delta
@@ -1219,6 +1287,12 @@ export class CodexAppServerAdapter implements LocalAgentCliAdapterV2 {
     if (wire.method === 'item/completed') {
       const item = wire.params?.item
       if (!item) return
+      if (item.type === 'reasoning' && Array.isArray(item.summary) && !this.isCancelled) {
+        item.summary.forEach((part: unknown, index: number) => {
+          if (typeof part === 'string') this.eventQueue.push({ ...base, kind: 'text', itemId: `${item.id}:summary:${index}`,
+            phase: 'public-summary', operation: 'replace', text: part })
+        })
+      }
       if (['userMessage', 'reasoning', 'thought', 'redacted_thinking'].includes(item.type)) return
 
       if (item.type === 'agentMessage') {
@@ -1283,6 +1357,13 @@ export class CodexAppServerAdapter implements LocalAgentCliAdapterV2 {
 
     if (wire.method === 'turn/completed') {
       const turn = wire.params?.turn
+      // Some native versions supply the final public snapshot only on turn/completed.
+      if (!this.isCancelled && Array.isArray(turn?.items)) {
+        for (const item of turn.items) if (item.type === 'agentMessage' || item.type === 'reasoning') {
+          if (item.type === 'agentMessage' && this.agentMessages.get(item.id)?.completed) continue
+          this.handleWireMessage({ method: 'item/completed', params: { threadId: this.threadId, turnId: turn.id, item } })
+        }
+      }
       const status = this.isCancelled || turn?.status === 'interrupted' ? 'cancelled' : turn?.status === 'completed' ? 'completed' : 'failed'
       let failure: { category: 'transport' | 'service' | 'protocol' | 'limit' | 'capability' | 'storage'; message: string } | null = null
       if (status === 'failed') {

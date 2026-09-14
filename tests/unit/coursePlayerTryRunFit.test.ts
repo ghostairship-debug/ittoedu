@@ -1,3 +1,4 @@
+import { buildPublishedFixture as buildPublishedCourseV2Payload } from '../fixtures/teacherController'
 import { describe, expect, it, vi } from 'vitest'
 
 const publishedSessionProbe = vi.hoisted(() => ({
@@ -18,7 +19,7 @@ vi.mock('@/player/surfaces/publishedDynamicHosts', () => ({
 }))
 
 import { CANVAS_HEIGHT, CANVAS_WIDTH } from '@/shared/constants'
-import { buildPublishedCourseV2Payload } from '@/renderer/export/course/buildPublishedCourse'
+
 import { buildSlideEditorView } from '@/renderer/course/slideEditorView'
 import {
   nativeRenderInputFromLayerItem,

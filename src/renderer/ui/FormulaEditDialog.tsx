@@ -1,3 +1,4 @@
+import { useRef } from 'react'
 import { X } from 'lucide-react'
 import type { FormulaAstNode, FormulaNode } from '../../shared/contracts/native-v1'
 import {
@@ -23,12 +24,13 @@ export function FormulaEditDialog({
   onDraftChange,
   onCompositionChange,
 }: FormulaEditDialogProps) {
+  const finishRef = useRef<() => void>(() => {})
   return (
     <div
       className="formula-edit-dialog-backdrop"
       data-testid="formula-edit-dialog-backdrop"
       onPointerDown={(event) => {
-        if (event.target === event.currentTarget) onCancel()
+        if (event.target === event.currentTarget) finishRef.current()
       }}
       onDoubleClick={(event) => {
         event.preventDefault()
@@ -51,14 +53,15 @@ export function FormulaEditDialog({
           <button
             type="button"
             aria-label="关闭公式编辑"
-            title="取消未应用的修改"
-            onClick={onCancel}
+            title="应用并关闭公式编辑"
+            onClick={() => finishRef.current()}
           >
             <X size={16} aria-hidden="true" />
           </button>
         </header>
         <div className="formula-edit-dialog__body">
           <FormulaAuthoringEditor
+            onFinishReady={(finish) => { finishRef.current = finish }}
             node={node}
             autoFocus
             onCancel={onCancel}

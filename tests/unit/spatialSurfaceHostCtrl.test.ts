@@ -1,3 +1,5 @@
+import { controllerPackage } from '../fixtures/teacherController'
+import type { PublishedComponentLayerItem } from '../../src/shared/publishedCourseTypes'
 import { describe, expect, it } from 'vitest'
 import type {
   PublishedNativeLayerItem,
@@ -62,7 +64,7 @@ function teacherController(
   layerItemId: string,
   frame: { x: number; y: number; width: number; height: number },
   order: number,
-): PublishedNativeLayerItem {
+): PublishedComponentLayerItem {
   return {
     layerItemId,
     frame: { mode: 'absolute', ...frame },
@@ -72,10 +74,8 @@ function teacherController(
     opacity: 1,
     hitPolicy: 'auto',
     playbackInitialVisibility: 'inherit',
-    kind: 'native',
-    content: {
-      nativeType: 'teacher-controller',
-      data: {
+    kind: 'component',
+    role: 'teacher-controller', component: { packageId: controllerPackage.manifest.id, version: controllerPackage.manifest.version }, props: {
         title: '课堂导航',
         compact: false,
         showSceneProgress: false,
@@ -95,7 +95,6 @@ function teacherController(
         },
         includeInStaticExports: false,
       },
-    },
   }
 }
 

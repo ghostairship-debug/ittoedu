@@ -1,3 +1,4 @@
+import { buildPublishedFixture as buildPublishedCourseV2Payload } from '../fixtures/teacherController'
 import { unzipSync } from 'fflate'
 import { describe, expect, it } from 'vitest'
 import { ZodError } from 'zod'
@@ -21,7 +22,7 @@ import {
   createTableNode,
 } from '@/renderer/project/nativeNodeFactories'
 import {
-  buildPublishedCourseV2Payload,
+  
   collectPublishedCourseAssetIds,
   collectPublishedCourseSourceIssues,
   collectPublishedCourseComponentKeys,

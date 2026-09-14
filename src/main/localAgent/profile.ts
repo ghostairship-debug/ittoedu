@@ -1,9 +1,11 @@
 import type { LocalAgentId } from '../../shared/localAgentContract'
+import type { AssetMeta } from '../../shared/contracts/media-v1'
 import { generationAssetAliases, generationDestinationAliases, MAX_GENERATION_PROMPT_BYTES, type GenerationRequest } from '../../shared/generationContract'
 import path from 'node:path'
-import { courseAgentSkills } from '../../shared/courseAgentSkills'
+import { courseAgentSkills, candidateMediaFileGuidance, publicCourseReplyGuidance } from '../../shared/courseAgentSkills'
 import { GENERATION_OPEN, GENERATION_CLOSE, GENERATION_RESULT_OPEN, GENERATION_RESULT_CLOSE } from '../../shared/generationResult'
 import { generationCapabilityDirectory } from './capabilityWorkspace'
+import { candidateMediaDeliveryAccess } from './candidateMediaDelivery'
 
 /** The CLI receives file identities, never an inline duplicate of attachment bytes. */
 export function generationRequestForPrompt(request: GenerationRequest, candidateRoot?: string) {
@@ -26,7 +28,9 @@ export function generationRequestForPrompt(request: GenerationRequest, candidate
  * references, not candidate ingestion permissions or a second resource store. */
 function generationFileAccess(candidateRoot: string) {
   const root = path.resolve(candidateRoot), capabilities = generationCapabilityDirectory(root)
-  return { root, capabilities, resources: path.join(root, 'resources'),
+  return { root, request: path.join(root, 'request.json'), capabilities, resources: path.join(root, 'resources'),
+    candidateHelper: path.join(capabilities, 'candidate-helper.mjs'),
+    mediaDelivery: candidateMediaDeliveryAccess(root),
     discovery: path.join(capabilities, 'discovery.json'), query: path.join(capabilities, 'query.mjs'),
     skills: Object.fromEntries(courseAgentSkills.map(skill => [skill.name, path.join(capabilities, 'skills', skill.name, 'SKILL.md')])),
   }
@@ -40,6 +44,10 @@ function initialReferencedAssetIds(context: Record<string, unknown>): Set<string
   const add = (value: unknown) => { if (typeof value === 'string') ids.add(value) }
   for (const page of Array.isArray(context.pages) ? context.pages : []) {
     const rows = record(page)
+    for (const background of Array.isArray(rows.backgrounds) ? rows.backgrounds : []) {
+      add(record(record(background).fields).backgroundAssetId)
+      add(record(record(background).effective).assetId)
+    }
     for (const row of Array.isArray(rows.items) ? rows.items : []) {
       const item = record(record(row).item), content = record(item.content)
       if (item.kind === 'native' && (content.nativeType === 'image' || content.nativeType === 'video')) add(record(content.data).assetId)
@@ -52,6 +60,31 @@ function initialReferencedAssetIds(context: Record<string, unknown>): Set<string
   return ids
 }
 
+/** A bounded view of the same frozen inventory for explicit existing-image reuse.
+ * Page references alone cannot identify an unused asset requested by the teacher. */
+function initialReusableImageAssets(request: GenerationRequest, context: Record<string, unknown>, aliases: Record<string, string>) {
+  const capabilities = context.capabilities as { toolIds?: unknown } | undefined
+  const imageCapability = Array.isArray(capabilities?.toolIds)
+    && capabilities.toolIds.some(id => ['media.apply', 'asset.media.import', 'owner.background'].includes(id))
+  const reuse = /已有|现有|已导入|素材库|课件[里中]|工程[里中]|\b(existing|reuse|already imported|asset library)\b/i.test(request.instruction)
+  if (!imageCapability || !reuse) return undefined
+  // generationAssetAliases already validated these exact inventory entries.
+  const inventory = context.assets as Record<string, AssetMeta>
+  const candidates = Object.entries(aliases).filter(([, id]) => inventory[id]!.kind === 'image')
+  const assets: Record<string, Pick<AssetMeta, 'filename' | 'kind' | 'mimeType' | 'width' | 'height'>> = {}
+  const selectedAliases: Record<string, string> = {}
+  for (const [alias, id] of candidates) {
+    const { filename, kind, mimeType, width, height } = inventory[id]!
+    const summary = { filename, kind, mimeType, ...(width === undefined ? {} : { width }), ...(height === undefined ? {} : { height }) }
+    if (Buffer.byteLength(JSON.stringify({ assets: { ...assets, [id]: summary }, aliases: { ...selectedAliases, [alias]: id } })) > 1_536) continue
+    assets[id] = summary
+    selectedAliases[alias] = id
+  }
+  return { assets, aliases: selectedAliases, coverage: { kind: 'image', total: candidates.length,
+    included: Object.keys(assets).length, partial: Object.keys(assets).length < candidates.length,
+    instruction: '按真实文件名、类型和尺寸核对所需素材，再使用同源assetAliases；页内已引用图片不代表它就是所需素材。摘要不全或不能确认身份时，先读取request.json的context.assets和assetAliases，禁止猜选。' } }
+}
+
 /** Initial wire view only. The staged request retains the complete inventories. */
 export function generationInitialRequestForPrompt(request: GenerationRequest) {
   const full = generationRequestForPrompt(request)
@@ -60,27 +93,55 @@ export function generationInitialRequestForPrompt(request: GenerationRequest) {
   // Sources remain attached to their items and all readable files stay indexed.
   // These inventories duplicate those paths/targets or are read on demand.
   const { assets: _assets, runtimeSources: _runtimeSources, ...initialContext } = context ?? {}
+  if (Array.isArray(initialContext.pages) && initialContext.modificationScope === 'project' && initialContext.reference !== 'course') {
+    initialContext.pages = initialContext.pages.filter((page: any) => page.location?.id === initialContext.focusLocationId)
+      .map((page: any) => initialContext.reference === 'selection' ? { ...page, backgrounds: undefined,
+        items: page.items?.filter((row: any) => row.selected), blocks: page.blocks?.filter((row: any) => row.selected) } : page)
+  }
+  // The prompt's native-path guidance already states this instruction verbatim
+  // in meaning. Keep all actual capability cards, schemas and references intact.
+  if (initialContext.capabilities && typeof initialContext.capabilities === 'object' && !Array.isArray(initialContext.capabilities)) {
+    const { instruction: _capabilityInstruction, ...capabilities } = initialContext.capabilities as Record<string, unknown>
+    if (typeof capabilities.semanticVersion === 'string' && Array.isArray(capabilities.cards)) {
+      capabilities.cards = capabilities.cards.map(card => {
+        if (!card || typeof card !== 'object' || Array.isArray(card) || card.semanticVersion !== capabilities.semanticVersion) return card
+        // The surrounding capability set carries this exact shared identity.
+        const { semanticVersion: _duplicateVersion, ...contract } = card
+        return contract
+      })
+    }
+    initialContext.capabilities = capabilities
+  }
   const { files: _files, ...observationIdentity } = full.observation ?? {}
   const { destinations: _destinations, execution, assetAliases: fullAssetAliases, ...wire } = full
   const referencedAssetIds = initialReferencedAssetIds(initialContext)
-  const assetAliases = Object.fromEntries(Object.entries(fullAssetAliases).filter(([, id]) => referencedAssetIds.has(id)))
+  const reusable = initialReusableImageAssets(request, context ?? {}, fullAssetAliases)
+  const assetAliases = { ...Object.fromEntries(Object.entries(fullAssetAliases).filter(([, id]) => referencedAssetIds.has(id))), ...reusable?.aliases }
+  const focused = new Set((Array.isArray(initialContext.pages) ? initialContext.pages : []).flatMap((page: any) =>
+    [...page.items ?? [], ...page.blocks ?? []].map((row: any) => row.target)))
+  const focusedOwners = new Set(Object.values(full.destinationAliases).flatMap(d => d.kind === 'update' && focused.has(d.target.authoringAddress) ? [d.target.ownerKey] : []))
+  const destinationAliases = initialContext.modificationScope === 'project' && initialContext.reference === 'selection'
+    ? Object.fromEntries(Object.entries(full.destinationAliases).filter(([, d]) => d.kind === 'update' ? focused.has(d.target.authoringAddress)
+      : d.scope.locationId === initialContext.focusLocationId && focusedOwners.has(d.scope.ownerKey) && d.scope.parent.kind === 'owner' && d.scope.insertion.kind === 'append'))
+    : full.destinationAliases
   return { ...wire,
+    destinationAliases,
     ...(execution ? { deadlineAt: execution.deadlineAt } : {}),
-    ...(context ? { context: initialContext } : {}),
+    ...(context ? { context: { ...initialContext, ...(reusable ? { assets: reusable.assets } : {}) } } : {}),
     ...(full.observation ? { observation: observationIdentity } : {}),
     ...(Object.keys(assetAliases).length ? { assetAliases } : {}),
-    resourceIndex: full.resourceIndex.map(({ encoding: _encoding, ...file }) => file),
-    requestDetails: { path: 'request.json', fields: ['context.assets', 'assetAliases', 'context.runtimeSources', 'observation.files'] },
+    resourceIndex: full.resourceIndex.filter(file => !['resources/project/document.json', 'resources/project/targets.json'].includes(file.path)).map(({ encoding: _encoding, ...file }) => file),
+    requestDetails: { path: 'request.json', fields: ['destinationAliases', 'context.assets', 'assetAliases', 'context.runtimeSources', 'observation.files'],
+      ...(reusable ? { assetInventory: reusable.coverage } : {}) },
   }
 }
 
 /** Native process environment locates the current request without transcribing
  * paths or request IDs. The full staged request retains exact file references. */
 export function generationProfileForPrompt(profile: ReturnType<typeof createGenerationProfile>) {
-  const relative = (file: string) => path.relative(profile.workspace.root, file).split(path.sep).join('/')
   return { version: profile.version, adapter: profile.adapter, candidateVersion: profile.candidateVersion,
     resultChannel: profile.resultChannel,
-    workspace: { rootEnvironment: 'COURSEWARE_CANDIDATE_ROOT', request: relative(profile.workspace.request) },
+    workspace: { rootEnvironment: 'COURSEWARE_CANDIDATE_ROOT', request: profile.workspace.request },
     skills: profile.skills.map(skill => skill.name),
   }
 }
@@ -90,34 +151,42 @@ export type GenerationPromptPhase = 'initial' | 'host-feedback'
 /** Resource bytes and full capability files stay on demand in both phases. */
 export function buildGenerationPrompt(adapter: LocalAgentId, request: GenerationRequest, candidateRoot: string, phase: GenerationPromptPhase = 'initial'): string {
   const profile = createGenerationProfile(adapter, request, undefined, candidateRoot)
+  const capabilityContext = request.context && typeof request.context === 'object' && !Array.isArray(request.context)
+    ? Reflect.get(request.context, 'capabilities') : undefined
+  const relevantTools = capabilityContext && typeof capabilityContext === 'object' && !Array.isArray(capabilityContext)
+    ? capabilityContext.toolIds : undefined
+  const mayApplyImage = Array.isArray(relevantTools) && relevantTools.includes('media.apply')
   const channel = profile.resultChannel
   const terminal = (kind: 'answer' | 'edit') => `${GENERATION_RESULT_OPEN}${JSON.stringify({ version: 1, requestId: request.requestId, kind })}${GENERATION_RESULT_CLOSE}`
   const output = channel === 'session-staging-file'
-    ? `用原生脚本读取环境变量COURSEWARE_CANDIDATE_ROOT下request.json，requestId取文件值，写同根candidate.json；勿手抄路径/UUID/base64，勿用不展开环境变量的文件补丁工具交付候选。聊天勿复述候选JSON。写完最终回复附${terminal('edit')}；只答复/明确受阻/宿主已完成核对附${terminal('answer')}。`
+    ? `draft.json={summary,steps,afterCommit}。node <fileAccess.candidateHelper> --request <request.json> --input <draft.json>生成candidate.json；预检非提交。勿手抄路径/UUID/base64。候选附${terminal('edit')}；无新候选将kind改为answer。`
     : channel === 'app-server-json-schema'
-      ? profile.resultContract.mode === 'candidate'
-        ? 'final_answer遵循outputSchema，直接返回候选；step.input为JSON字符串。'
-        : 'final_answer遵循outputSchema：答复kind=reply/reply=文本/candidate=null；修改kind=edit/reply=null/candidate=候选。step.input为JSON字符串。'
+      ? 'final_answer按outputSchema：编辑kind=edit/reply=null。多步写本轮candidate.json（version=2，step.input对象）并检查；candidate只交{version:1,requestId:本轮ID,candidateFile:"candidate.json"}。小候选直接交candidate，step.input用JSON字符串。答复kind=reply/reply=文本/candidate=null。'
       : `候选只在最终正文用 ${GENERATION_OPEN}JSON${GENERATION_CLOSE} 交付，写 candidate.json 不算交付。没有新候选（含宿主提交后的完成确认）直接自然语言回复。`
   return [
-    '课件助手使用原生工具/Skills；观察含未保存内容、范围、版本；进展用自然语言。',
+    publicCourseReplyGuidance,
     phase === 'host-feedback'
-      ? '这是同一任务的宿主反馈与目标核对阶段，不是重新执行原请求。以正式回执和当前观察核对原目标；已完成则直接答复，只有尚未完成的具体差距才提交下一阶段候选。“再放大一点”等相对修改不得因收到新观察再次累计执行。'
+      ? '这是同一任务的宿主反馈与目标核对阶段，不是重新执行原请求。以正式回执和当前观察核对原目标；已完成则直接答复，只有尚未完成的具体差距才提交下一阶段候选。“再放大一点”等相对修改不得因收到新观察再次累计执行。request.json.reusableArtifacts 可复用上轮文件成果，须核对当前基线后修正。'
       : request.intent === 'plan'
       ? '本轮只读计划：基于当前范围给出可执行方案，不改课件；仅缺少决定核心目标的信息时提问。'
       : request.intent === 'discuss' ? '本轮只读讨论，禁止修改候选。'
-      : request.intent === 'edit' || profile.resultContract.mode === 'candidate' ? '本轮要求修改，须交付候选；缺能力卡先查完整发现入口，无法完成须明确说明未完成。' : '本轮允许讨论或编辑指定范围，按实际结果选择回复或候选。',
-    '工程只经候选事务修改，禁写Store/History或覆盖工程；正式回执前不算应用。缺必要信息用原生提问等待。',
-    '保留原生cwd/权限。本轮根由进程环境COURSEWARE_CANDIDATE_ROOT提供，Node用process.env.COURSEWARE_CANDIDATE_ROOT。初始cards足够时直接生成，不重复发现；参数编辑无需源码。缺能力/源码/图像时读该根request.json：fileAccess.query/skills与resourceIndex.localPath为绝对路径；query用node执行。候选requestId从该文件读取。',
+      : request.intent === 'edit' || profile.resultContract.mode === 'candidate' ? '修改先用实际能力准备有效候选；禁空steps、虚构操作和诊断候选。' : '本轮可讨论或编辑指定范围，按实际结果回复或交候选。',
+    '仅经候选事务修改，禁直写Store/History/工程。需提问时用原生工具等待。',
+    'Keep cwd/permissions. workspace.request is absolute; query/helper: fileAccess.',
+    'CLI工具保持开放。asset.image.transform只做卡中像素操作，禁semantic-redraw。',
     output,
+    ...(profile.resultContract.mode === 'reply-or-edit' ? ['受阻或无法合法修正则答复未完成；禁诊断候选。'] : []),
     ...(!request.intent || request.intent === 'edit' ? [
-    '候选version=2：requestId/summary/afterCommit/steps；宿主给candidateId/carrier。step:id/tool/destination/input，非native须lowerCarrierReason；destination填destinationAliases的别名键（如"d1"），不要填其完整target对象。遵守Schema/$refs，禁整工程/通用JSON patch。',
-    'afterCommit={version:1,action:"finish"}：修改完成且宿主校验足够即结束；尚需操作/互动验证才用{version:1,action:"observe",reason:"未完成事项"}。勿为总结/重读回执续轮；失败返回诊断。',
+    'v2: requestId/summary/afterCommit/steps; step=id/tool/destination/input. d1 etc: destinationAliases. Selection is focus, not permission; preserve other content.',
+    ...((request.context as any)?.componentSources?.length ? ['组件源码：先读 context.componentSources。node <fileAccess.candidateHelper> --request <fileAccess.request> --component-target <实例别名> --work-dir <fileAccess.root>/component-work --init；编辑副本后去掉 --init，加 --summary <修改>，需验证加 --observe <检查事项>。helper 自动封装基线/补丁，不手抄 hash 或内联源码。能力/历史按需读取。'] : []),
+    'Use supplied cards; host fills IDs/defaults. Query insert with --nativeType. Fallback: edit resources/project/document.json keeping id/revision/editability; write {document:V9} to resources/result.json; project.document input={artifact:{$candidateFile:"resources/result.json"}}, any current alias.',
+    'afterCommit={version:1,action:"finish"}结束；需验证用{version:1,action:"observe",reason:"具体检查"}。勿为总结续轮。',
     '已有资产{"$asset":"a1"}见assetAliases/request.json；前序用{"$result":{"stepId":"s1","kind":"asset-id","index":0}}。kind还可package-id/item-id/location-id，禁猜ID。',
     ...(request.destinations.some(destination => destination.kind === 'create') ? [
-      '前序对象destination={kind:"created-item",stepId:"s1",index:0}；新页用 {kind:"created-scope",stepId:"s1",parent:{kind:"owner"},insertion:{kind:"append"}}，Flow正文parent={kind:"flow-body",parentBlockId:null}。替换先创建再selection.replace；动态先读runtime-api2/3或component-api4。',
+      'Created destination={kind:"created-item",stepId:"s1",index:0}; new page content={kind:"created-scope",stepId:"s1",parent:{kind:"owner"},insertion:{kind:"append"}}; new page background={kind:"created-background",stepId:"s1"}. Flow body parent={kind:"flow-body",parentBlockId:null}. Combine replacement+insertion freely. Images:media.apply; dynamic:read runtime-api2/3 or component-api4.',
     ] : []),
-    '动态smoke不算语义通过，动画看连续帧。Slide标题“居中”需textStyle.align=center且frame在页面水平中心；仅框内对齐时不移frame。',
+    '用户要求纹理、布局、动画或按钮行为时，查看相应实际图面/操作证据再宣布完成；仅有 smoke 不证明效果正确。观察后只修具体差距，不为总结续轮。Slide标题居中须textStyle.align=center且frame水平居中。',
+    ...(mayApplyImage ? [candidateMediaFileGuidance] : []),
     ] : ['本轮只读，按当前事实答复，不生成候选。']),
     JSON.stringify({ profile: generationProfileForPrompt(profile) }),
     JSON.stringify(generationInitialRequestForPrompt(request)),

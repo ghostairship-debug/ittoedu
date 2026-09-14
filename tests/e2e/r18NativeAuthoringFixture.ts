@@ -675,9 +675,8 @@ export async function closeNativeEditor(run: NativeRun): Promise<void> {
   const stop = chat.getByRole('button', { name: '停止', exact: true })
   if (await stop.count().catch(() => 0) && await stop.isEnabled().catch(() => false)) await stop.click().catch(() => {})
   await expectBackgroundWindowsIsolated(run.app, true).catch(() => {})
-  await run.app.evaluate(({ app, BrowserWindow }) => {
+  await run.app.evaluate(({ BrowserWindow }) => {
     BrowserWindow.getAllWindows().forEach(window => window.destroy())
-    setTimeout(() => app.quit(), 0)
   }).catch(() => {})
   await run.app.close().catch(() => {})
   // Run roots are intentionally retained, including failed native sessions.
@@ -935,7 +934,7 @@ async function answerNativeQuestion(run: NativeRun, section: Locator, deadline: 
   const questionId = [...new Set(labels.map(label => label.name).filter((name): name is string => typeof name === 'string' && name.length > 0))]
   const question: VisibleNativePermission | undefined = questionId.length === 1 ? { questionId: questionId[0]!, title, labels, paths: nativePermissionPaths(title) } : undefined
   const fileRequest = /\b(Read|Write|Edit|file|path)\b|读[取写]|写入|文件/i.test(title) && !/\b(Bash|PowerShell|terminal|command|execute|network|permissions)\b|执行|终端|网络/i.test(title)
-  const allow = labels.find(label => /^(允许一次|允许这次操作|Allow once|Allow this time)$/i.test(label.text))
+  const allow = labels.find(label => /^(仅允许这次|允许一次|允许这次操作|Allow once|Allow this time)$/i.test(label.text))
   const preauthorized = question && allow && await section.getAttribute('aria-label') === 'CLI 授权请求'
     ? await preauthorizedNativePermission(run, question)
     : undefined
@@ -1048,7 +1047,7 @@ export async function verifyGreenImage(before: CourseProjectArchiveData, after: 
 }
 
 async function openRuntimePreview(run: NativeRun, runtime: RuntimeLayerItem) {
-  await run.page.getByRole('button', { name: '全屏 16:9 整课预览', exact: true }).click()
+  await run.page.getByRole('button', { name: '整课预览', exact: true }).click()
   const overlay = run.page.getByTestId('course-preview-overlay')
   const stage = run.page.getByTestId('course-preview-host').locator('.slide-published-adapter')
   await expect(stage).toBeVisible()

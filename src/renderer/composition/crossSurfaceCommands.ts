@@ -506,10 +506,13 @@ export function createCrossSurfaceCommands(ports: CrossSurfaceCommandPorts) {
         ports.kernel.writeAuthoringSession(nextAuthoringSession)
         return
       }
-      if (plan.kind === 'activate-slide-scene' && plan.sceneId) {
-        ports.slide.activateScene(plan.sceneId)
-        ports.kernel.writeAuthoringSession(updateCourseAuthoringSessionItems(nextAuthoringSession, []))
-        ports.slide.selectNode(null)
+      if (plan.kind === 'activate-slide-location' && slide.slideBackend) {
+        const result = ports.slide.persist(slide.slideBackend.activateLocation(plan.locationId, {
+          expectedRevision: project.revision,
+        }))
+        if (result.ok) {
+          ports.kernel.writeAuthoringSession(updateCourseAuthoringSessionItems(nextAuthoringSession, []))
+        }
       }
     },
 

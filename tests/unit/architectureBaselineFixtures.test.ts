@@ -1,3 +1,4 @@
+import { isControllerFixture } from '../fixtures/teacherController'
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
@@ -360,7 +361,7 @@ describe('ARCH-0 representative Course Project V9 fixtures', () => {
     )
     expect(project.surfaces.every((surface) => surface.surfaceLayerItems.length > 0)).toBe(true)
     expect(project.globalLayerItems.some((entry) => (
-      entry.item.kind === 'native' && entry.item.content.nativeType === 'teacher-controller'
+      isControllerFixture(entry.item)
     ))).toBe(true)
     expect(project.mixedPrintPlan?.entries.map((entry) => entry.kind)).toEqual([
       'slide-scenes',

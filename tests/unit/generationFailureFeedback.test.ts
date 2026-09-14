@@ -26,15 +26,17 @@ import type { DesktopAPI } from '@/shared/ipcTypes'
 
 // Only the visual observation/admission ports are fixtures. Source patch
 // preparation, captureNext resources, durable Harness records and staging run.
-const h = vi.hoisted(() => ({ state: undefined as any, capture: vi.fn(), admit: vi.fn() }))
+const h = vi.hoisted(() => ({ state: undefined as any, assetFiles: {}, capture: vi.fn(), admit: vi.fn() }))
 vi.mock('@/renderer/store/editorStore', () => ({
-  useEditorStore: { getState: () => h.state },
+  useEditorStore: { getState: () => h.state, subscribe: () => () => {} },
   selectActiveCourseProjectDocument: (state: any) => state.document,
   selectEffectiveLayerProjection: () => null,
-  selectMediaAssetFiles: () => ({}),
+  selectMediaAssetFiles: () => h.assetFiles,
 }))
-vi.mock('@/renderer/authoring/generation/authoringObservation', () => ({
-  createAuthoringObservationController: () => ({ capture: h.capture, dispose() {} }),
+vi.mock('@/renderer/authoring/generation/authoringObservation', async importOriginal => ({
+  ...(await importOriginal<typeof import('@/renderer/authoring/generation/authoringObservation')>()),
+  readAuthoringObservationDraftState: () => '[]',
+  createAuthoringObservationController: () => ({ capture: h.capture, prepareForEdit() {}, dispose() {} }),
 }))
 vi.mock('@/renderer/authoring/tools/dynamicCandidateAdmission', async importOriginal => ({
   ...(await importOriginal<typeof import('@/renderer/authoring/tools/dynamicCandidateAdmission')>()),
@@ -123,6 +125,7 @@ it('resourceizes over 80KB of failed prepare frames through captureNext and a bu
   const owner = { projectId: document.id, projectPath: path.join(directory, 'course.h5lesson') }
   const workspace = createWorkspaceIdentity(document.id, owner.projectPath)
   h.state = { document, projectPath: owner.projectPath, componentPackages: { [componentId]: data },
+    bindGenerationTaskRequest() {}, releaseGenerationTaskRequest() {}, isGenerationTaskCommitting: () => false,
     courseAuthoringSession: createCourseAuthoringSession({ locationId: document.startLocationId, surfaceType: 'flow',
       revision: document.revision, itemIds: ['failed-component'] }) }
   h.capture.mockImplementation(async () => ({ document, resourceFiles: [{ path: 'observation/current-frame.png',
@@ -143,7 +146,6 @@ it('resourceizes over 80KB of failed prepare frames through captureNext and a bu
     const candidate: GenerationCandidate = { version: 1, requestId: request.requestId, candidateId: randomUUID(),
       summary: 'Repair existing component behavior', afterCommit: { version: 1, action: 'observe', reason: 'Inspect the behavior.' },
       steps: [{ id: 'patch-source', tool: 'component.package', carrier: 'generated-component', destination,
-        lowerCarrierReason: 'The requested behavior requires changing the existing component source.',
         input: { operation: 'patch', mode: 'shared', basePackageId: componentId, baseVersion: data.manifest.version,
           baseContentIdentity: document.componentPackages[componentId]!.contentSha256,
           changedFiles: { 'runtime.js': Buffer.from(runtime('after')).toString('base64') }, deleteFiles: [] } }] }

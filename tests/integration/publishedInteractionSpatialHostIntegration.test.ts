@@ -1,3 +1,5 @@
+import { publishedControllerPackages } from '../fixtures/teacherController'
+import { controllerPackage } from '../fixtures/teacherController'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type {
   InteractionActionPayload,
@@ -141,13 +143,11 @@ function videoItem(
   }
 }
 
-function teacherControllerItem(id: string, order: number): PublishedNativeLayerItem {
+function teacherControllerItem(id: string, order: number): PublishedComponentLayerItem {
   return {
     ...layerBase(id, order),
-    kind: 'native',
-    content: {
-      nativeType: 'teacher-controller',
-      data: {
+    kind: 'component',
+    role: 'teacher-controller', component: { packageId: controllerPackage.manifest.id, version: controllerPackage.manifest.version }, props: {
         title: '教师控制器',
         showSceneProgress: true,
         compact: true,
@@ -168,7 +168,6 @@ function teacherControllerItem(id: string, order: number): PublishedNativeLayerI
         },
         includeInStaticExports: false,
       },
-    },
   }
 }
 
@@ -273,7 +272,7 @@ function publishedFixture(options: FixtureOptions = {}): PublishedCourseV2Payloa
         url: 'data:video/mp4;base64,AA==',
       },
     },
-    components: {
+    components: { ...publishedControllerPackages,
       'component-owned': {
         id: 'component-owned',
         name: 'Owned component',

@@ -1,3 +1,4 @@
+import { buildPublishedFixture as buildPublishedCourseV2Payload } from '../fixtures/teacherController'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { strFromU8, unzipSync } from 'fflate'
@@ -10,7 +11,7 @@ import { duplicateSpatialLayers } from '@/renderer/course/spatialClipboardComman
 import { changeChartType } from '@/renderer/course/chartContentOperations'
 import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
 import { publishedCourseV2Schema } from '@/shared/publishedCourseSchema'
-import { buildPublishedCourseV2Payload } from '@/renderer/export/course/buildPublishedCourse'
+
 import { buildFlowPrintPlan, renderFlowPrintBodyHtml } from '@/renderer/export/course/flowPrintPlan'
 import { buildFlowDocx } from '@/renderer/export/course/flowDocx'
 import { FlowSurfaceHost } from '@/player/surfaces/flow/FlowSurfaceHost'

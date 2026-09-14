@@ -159,7 +159,7 @@ async function openSurface(page: Page, kind: 'slide-scene' | 'flow-page' | 'spat
 async function expectInteractivePreview(run: NativeRun, mode: Mode) {
   const surfaces = [{ kind: 'slide-scene', id: ids.slide }, { kind: 'flow-page', id: ids.flow },
     { kind: 'spatial-camera', id: ids.spatial }] as const
-  await run.page.getByRole('button', { name: '全屏 16:9 整课预览', exact: true }).click()
+  await run.page.getByRole('button', { name: '整课预览', exact: true }).click()
   const overlay = run.page.getByTestId('course-preview-overlay'), host = run.page.getByTestId('course-preview-host')
   await expect(overlay).toBeVisible()
   // Whole-course preview starts at the saved start location, independently of

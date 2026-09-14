@@ -3,9 +3,38 @@ import {
   detectActiveSurface,
   dispatchActiveSurface,
   exclusiveInactiveSurfaces,
+  planActivateCourseLocation,
 } from '../../src/renderer/composition/surfaceRouter'
+import { createBlankCourseProject } from '../../src/renderer/project/createCourseProject'
+import { buildCourseAuthoringSessionForProject } from '../../src/renderer/authoring/courseAuthoringSession'
 
 describe('surfaceRouter', () => {
+  it('keeps exact Slide location identity for both same-surface and cross-surface routes', () => {
+    const project = createBlankCourseProject()
+    const base = project.locations[0]!
+    if (base.kind !== 'slide-scene') throw new Error('expected Slide location')
+    const exact = { ...base, id: 'location-step-two', stateId: 'state-two' }
+    project.locations.push(exact)
+    for (const flowLocationId of [null, 'location-flow']) {
+      const plan = planActivateCourseLocation({
+        project, locationId: exact.id,
+        snapshot: {
+          spatialLocationId: null, flowLocationId,
+          slideLocationId: flowLocationId ? null : base.id,
+          editingScope: 'scene', composing: false,
+        },
+        authoringSession: buildCourseAuthoringSessionForProject(project, base.id),
+        buildSession: (id) => buildCourseAuthoringSessionForProject(project, id),
+      })
+      expect(plan).toMatchObject({
+        ok: true,
+        kind: flowLocationId ? 'open-slide' : 'activate-slide-location',
+        locationId: exact.id,
+        authoringSession: { token: { locationId: exact.id, surfaceType: 'slide' } },
+      })
+    }
+  })
+
   describe('detectActiveSurface', () => {
     it('detects spatial surface when spatialLocationId is set', () => {
       const surface = detectActiveSurface({

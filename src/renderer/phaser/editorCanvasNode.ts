@@ -1,9 +1,10 @@
+import type { TeacherControllerButton } from '../../shared/teacherControllerConfig'
 import type { InteractionRule } from '../../shared/interactionTypes'
 import type { RuntimeDocument } from '../../shared/runtimeTypes'
-import type {
+import {
   FormulaAstNode,
   NativeLineGeometry,
-  TeacherControllerButton,
+  
   TextRun,
 } from '../../shared/contracts/native-v1/types'
 

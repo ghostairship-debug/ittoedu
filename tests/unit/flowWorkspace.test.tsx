@@ -28,7 +28,6 @@ import { FlowWorkspaceTestHarness as FlowWorkspace } from '../helpers/FlowWorksp
 import { Workspace } from '@/renderer/ui/Workspace'
 import { FlowLocationWorkspace, type FlowLocationWorkspaceProps } from '@/renderer/ui/workspaces/FlowLocationWorkspace'
 import { FLOW_WORKSPACE_HEADER_HEIGHT } from '@/renderer/ui/FlowBlockContextToolbar'
-import { PLAYBACK_VIEW_CHROME_GUTTER } from '@/shared/playbackViewGeometry'
 import { PlaybackViewSession } from '@/player/playbackViewSession'
 import { useEditorStore } from '@/renderer/store/editorStore'
 import {
@@ -315,6 +314,44 @@ function beginStoreFormulaDraft(input: {
 }
 
 describe('FlowWorkspace paper', () => {
+  it.each(['flow-paper', 'flow-workspace-scroll'])('commits an edit then clears selection on %s whitespace without empty history', (testId) => {
+    const project = createFlowProject()
+    const selection = selectFlowEditorBlocks(project, 'h1', ['p-body'], { focus: 'text', textRange: { blockId: 'p-body', start: 0, end: 0 } })
+    const { onProjectChange, onSelectionChange, onTextEditChange } = renderPaper(project, selection)
+    const editor = screen.getByTestId('flow-inline-editor')
+    editor.textContent = '应用后清选'
+    fireEvent.input(editor)
+    fireEvent.click(screen.getByTestId(testId))
+    expect(onProjectChange.mock.calls.filter(([result]) => result.historyEntry)).toHaveLength(1)
+    expect(onSelectionChange.mock.calls.at(-1)?.[0]).toMatchObject({ focus: 'idle', selectedBlockIds: [], selectedOverlayIds: [] })
+    expect(onTextEditChange.mock.calls.at(-1)?.[0]).toBeNull()
+    fireEvent.click(screen.getByTestId(testId))
+    expect(onProjectChange.mock.calls.filter(([result]) => result.historyEntry)).toHaveLength(1)
+  })
+
+  it('defers whitespace completion during IME and retains the requested selection clearing', () => {
+    const project = createFlowProject()
+    const selection = selectFlowEditorBlocks(project, 'h1', ['p-body'], { focus: 'text', textRange: { blockId: 'p-body', start: 0, end: 0 } })
+    const { onProjectChange, onSelectionChange } = renderPaper(project, selection)
+    const editor = screen.getByTestId('flow-inline-editor')
+    fireEvent.compositionStart(editor)
+    editor.textContent = '输入法完成'
+    fireEvent.input(editor)
+    fireEvent.click(screen.getByTestId('flow-workspace-scroll'))
+    expect(onProjectChange.mock.calls.filter(([result]) => result.historyEntry)).toHaveLength(0)
+    fireEvent.compositionEnd(editor)
+    expect(onProjectChange.mock.calls.filter(([result]) => result.historyEntry)).toHaveLength(1)
+    expect(onSelectionChange.mock.calls.at(-1)?.[0]?.focus).toBe('idle')
+  })
+
+  it('clears an existing overlay selection from outside paper without changing the document', () => {
+    const project = createFlowProject()
+    const { onProjectChange, onSelectionChange } = renderPaper(project, selectFlowOverlay(project, 'h1', ['overlay-text']))
+    fireEvent.click(screen.getByTestId('flow-workspace-scroll'))
+    expect(onSelectionChange.mock.calls.at(-1)?.[0]).toMatchObject({ focus: 'idle', selectedBlockIds: [], selectedOverlayIds: [] })
+    expect(onProjectChange.mock.calls.filter(([result]) => result.historyEntry)).toHaveLength(0)
+  })
+
   it('root Workspace keeps a missing Flow session in the Flow fail-loud shell', () => {
     useEditorStore.getState().createNewFlowProject()
     expect(useEditorStore.getState().courseAuthoringSession?.token.surfaceType).toBe('flow')
@@ -953,8 +990,8 @@ describe('FlowWorkspace paper', () => {
     expect(paper.contains(toolbar)).toBe(false)
     expect(screen.getByTestId('flow-workspace-scroll').contains(toolbarHost)).toBe(false)
     expect(screen.getByTestId('flow-workspace')).toHaveStyle({
-      width: `calc(100% - ${PLAYBACK_VIEW_CHROME_GUTTER}px)`,
-      height: `calc(100% - ${PLAYBACK_VIEW_CHROME_GUTTER}px)`,
+      width: '100%',
+      height: 'calc(100% - 0px)',
     })
     expect(shell.style.getPropertyValue('--flow-workspace-header-height')).toBe(`${FLOW_WORKSPACE_HEADER_HEIGHT}px`)
     fireEvent.pointerDown(screen.getByLabelText('整块加粗'))
@@ -966,7 +1003,7 @@ describe('FlowWorkspace paper', () => {
     expect(screen.getByTestId('flow-workspace-toolbar-host')).toBe(toolbarHost)
     expect(screen.queryByTestId('flow-block-context-toolbar')).toBeNull()
     const runtimeViewport = shell.querySelector<HTMLElement>('[data-playback-viewport]')!
-    expect(runtimeViewport).toHaveStyle({ right: `${PLAYBACK_VIEW_CHROME_GUTTER}px`, bottom: `${PLAYBACK_VIEW_CHROME_GUTTER}px` })
+    expect(runtimeViewport).toHaveStyle({ inset: '0' })
     expect(shell.style.getPropertyValue('--flow-workspace-header-height')).toBe(`${FLOW_WORKSPACE_HEADER_HEIGHT}px`)
     expect(screen.getByRole('button', { name: '编辑状态' })).toBeEnabled()
     rendered.unmount()

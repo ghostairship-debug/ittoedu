@@ -4,7 +4,10 @@ import { StringDecoder } from 'node:string_decoder'
 import { createInterface } from 'node:readline'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
+import { isTaskInputRead } from './nativeTaskFiles'
+import { nativeProxyEnvironment } from './nativeProxy'
 import type { z } from 'zod'
+import { measureLocalAgentInput, type LocalAgentInputMetrics } from '../../shared/localAgentInputMetrics'
 import type { GenerationRequest } from '../../shared/generationContract'
 import {
   localAgentCapabilitiesSchema,
@@ -175,6 +178,7 @@ export class OpenCodeAcpAdapter implements LocalAgentCliAdapterV2 {
   private closed = false
   private activePromptRequestId: number | null = null
   private totalBytes = 0
+  private textBytes = 0
   private loadingSessionId: string | null = null
   private linesReader?: ReturnType<typeof createInterface>
   private modelConfigId: string | null = null
@@ -242,7 +246,7 @@ export class OpenCodeAcpAdapter implements LocalAgentCliAdapterV2 {
     this.configurationFailure = undefined
     this.eventQueue.length = 0
     this.toolNames.clear()
-    this.totalBytes = 0
+    this.totalBytes = 0; this.textBytes = 0
     this.loadingSessionId = null
     this.stderr = ''
     const binary = await this.resolve('opencode')
@@ -252,7 +256,9 @@ export class OpenCodeAcpAdapter implements LocalAgentCliAdapterV2 {
     this.candidateRoot = input.candidateRoot
 
     try {
-      this.child = launchAgent(binary, ['acp'], this.cwd, this.candidateRoot)
+      const proxy = await nativeProxyEnvironment('opencode')
+      if (lifecycle !== this.lifecycle || this.closed) throw new Error('interrupted')
+      this.child = launchAgent(binary, ['acp'], this.cwd, this.candidateRoot, proxy)
     } catch {
       throw new Error('launch')
     }
@@ -370,13 +376,13 @@ export class OpenCodeAcpAdapter implements LocalAgentCliAdapterV2 {
   async startTurn(
     turnInput: z.infer<typeof localAgentTurnInputSchema>,
     observationFiles: ReadonlyMap<string, string>
-  ): Promise<{ nativeTurnId: string | null }> {
+  ): Promise<{ nativeTurnId: string | null; inputMetrics: LocalAgentInputMetrics }> {
     if (!this.sessionId || !this.child || this.closed) throw new Error('Session not active')
     if (this.configurationFailure) throw this.configurationFailure
     if (this.currentTurnInput && !this.turnCompleted) throw new Error('OpenCode turn is already running')
 
     this.currentTurnInput = turnInput
-    this.totalBytes = 0
+    this.totalBytes = 0; this.textBytes = 0
     this.turnCompleted = false
     this.turnEndedPromise = new Promise(resolve => { this.resolveTurnEnded = resolve })
     this.cancelling = undefined
@@ -407,12 +413,17 @@ export class OpenCodeAcpAdapter implements LocalAgentCliAdapterV2 {
     const reqId = ++this.nextRequestId
     this.activePromptRequestId = reqId
     if (this.capabilities) this.pushEvent({ kind: 'configuration', capabilities: this.capabilities })
-    this.send('session/prompt', {
+    const params = {
       sessionId: this.sessionId,
       prompt: promptContent,
-    }, reqId)
+    }
+    const inputMetrics = measureLocalAgentInput({
+      boundary: 'native-turn-params', prompt: turnInput.text, transport: params,
+      technicalTransport: { ...params, prompt: promptContent.filter(item => item.type !== 'image') },
+    })
+    this.send('session/prompt', params, reqId)
 
-    return { nativeTurnId: String(reqId) }
+    return { nativeTurnId: String(reqId), inputMetrics }
   }
 
   async input(userInput: AiUserInput): Promise<z.infer<typeof aiInputDeliverySchema>> {
@@ -657,6 +668,12 @@ export class OpenCodeAcpAdapter implements LocalAgentCliAdapterV2 {
     }
     try {
       if (wire.method === 'session/request_permission') {
+        const once = (Array.isArray(params.options) ? params.options : []).find((option: any) => option.kind === 'allow_once' && typeof option.optionId === 'string')
+        if (once && await isTaskInputRead(params.toolCall ?? {}, this.candidateRoot)) {
+          // Only this native read request is fulfilled; no Always allow policy is installed.
+          reply({ outcome: { outcome: 'selected', optionId: once.optionId } })
+          return
+        }
         const options = new Map<string, string>()
         for (const option of Array.isArray(params.options) ? params.options : []) {
           if (typeof option?.optionId !== 'string' || !option.optionId || !['allow_once', 'allow_always', 'reject_once', 'reject_always'].includes(option.kind)) continue
@@ -788,7 +805,7 @@ export class OpenCodeAcpAdapter implements LocalAgentCliAdapterV2 {
         for await (const line of lines) {
           if (this.closed || this.child !== child) break
           const lineBytes = Buffer.byteLength(line)
-          if (lineBytes > 1024 * 1024) throw new Error('output-limit')
+          if (lineBytes > 32 * 1024 * 1024) throw new Error(`output-limit: OpenCode message ${lineBytes} bytes exceeds 32 MiB`)
           const trimmed = line.trim()
           if (!trimmed) continue
           let wire: any
@@ -806,13 +823,19 @@ export class OpenCodeAcpAdapter implements LocalAgentCliAdapterV2 {
             && !Object.prototype.hasOwnProperty.call(wire, 'id')
             && wire.params?.sessionId === this.loadingSessionId) continue
           this.totalBytes += lineBytes
-          if (this.totalBytes > 8 * 1024 * 1024) throw new Error('output-limit')
+          // Tool snapshots, patches and resource metadata are protocol traffic,
+          // not visible model text. Do not terminate a valid native tool loop at
+          // the old 1 MiB frame / 8 MiB mixed-traffic limit.
+          const update = wire?.params?.update
+          if (update?.sessionUpdate === 'agent_message_chunk' || update?.sessionUpdate === 'agent_thought_chunk') this.textBytes += Buffer.byteLength(update.content?.text ?? '')
+          if (this.textBytes > 8 * 1024 * 1024) throw new Error(`output-limit: OpenCode text ${this.textBytes} bytes exceeds 8 MiB`)
+          if (this.totalBytes > 128 * 1024 * 1024) throw new Error(`output-limit: OpenCode turn traffic ${this.totalBytes} bytes exceeds 128 MiB`)
           // Terminal waits and filesystem IO must not block cancellation or RPC responses.
           void this.handleWireMessage(wire).catch(error => this.handleFatalError('protocol', error instanceof Error ? error.message : String(error)))
         }
       } catch (err: any) {
         if (!this.closed && this.child === child) {
-          const category = err.message === 'output-limit' ? 'limit' : 'protocol'
+          const category = err.message.startsWith('output-limit') ? 'limit' : 'protocol'
           this.handleFatalError(category, err.message)
         }
       }
@@ -884,7 +907,10 @@ export class OpenCodeAcpAdapter implements LocalAgentCliAdapterV2 {
             cachedInputTokens: typeof update.usage.cachedReadTokens === 'number' ? update.usage.cachedReadTokens : null,
           })
         } else if (updateType === 'plan') {
-          const planText = typeof update.text === 'string' ? update.text : JSON.stringify(update)
+          const planText = typeof update.text === 'string' ? update.text : Array.isArray(update.entries)
+            ? update.entries.flatMap((entry: { content?: unknown; status?: unknown }) => typeof entry.content === 'string'
+              ? [`${entry.status === 'completed' ? '已完成' : entry.status === 'in_progress' ? '正在进行' : '待处理'}：${entry.content}`] : []).join('\n') : ''
+          if (!planText) return
           this.pushEvent({
             kind: 'text',
             itemId: typeof update.messageId === 'string' ? update.messageId : 'acp-plan',

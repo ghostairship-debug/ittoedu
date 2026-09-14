@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
+import { buildNativeTableLayout } from '@/shared/nativeTableLayout'
+import { readSlideNativeLayer } from '@/renderer/course/v9SlideContentCommands'
 import {
   COURSE_PROJECT_SCHEMA_VERSION,
   type CourseProjectDocument,
@@ -122,6 +124,15 @@ function getNativeItem(scene: ReturnType<typeof getSlideScene>, index = 0) {
 
 function getTableData(session: SlideAuthoringSession) {
   return (getNativeItem(getSlideScene(session)).content as any).data
+}
+
+function readEffectiveTableLayer(session: SlideAuthoringSession, id: string) {
+  if (session.scope !== 'surface') return readSlideNativeLayer(session, id)
+  const surface = session.history.present.surfaces[0]!
+  if (surface.type !== 'slide') throw new Error('expected slide')
+  const item = surface.surfaceLayerItems.find(entry => entry.item.layerItemId === id)!.item
+  if (item.kind !== 'native') throw new Error('expected native')
+  return item
 }
 
 describe('r12-010-table-core Table Factory & Rebuild IDs', () => {
@@ -576,6 +587,58 @@ describe('r12-010-table-core Canonical Table Commands', () => {
     expect(rejectGlobal.reason).toBe(SLIDE_REJECT_WRONG_OWNER)
   })
 
+  it.each(['scene', 'surface'] as const)('preserves rendered table dimensions when structure changes in %s scope', (scope) => {
+    let session = makeSession()
+    if (scope === 'surface') session = requireSession(setSlideEditingScope(session, scope))
+    const content = createTableNode()
+    const added = addSlideTableLayer(session, { width: 1200, height: 240, rows: content.rows, columns: content.columns })
+    session = requireSession(added)
+    const id = added.selection!.selectionIds[0]!
+    const before = readEffectiveTableLayer(session, id)
+    if (before.content.nativeType !== 'table') throw new Error('expected table')
+    const initialLayout = buildNativeTableLayout(before.content.data, before.frame)
+    const lastCell = before.content.data.rows.at(-1)!.cells.at(-1)!
+    const appended = requireSession(commitSlideTableLastCellAndAppendRow(session, { layerItemId: id, cellId: lastCell.id, text: 'Last answer' }))
+    const after = readEffectiveTableLayer(appended, id)
+    if (after.content.nativeType !== 'table') throw new Error('expected table')
+    expect(after.frame).toEqual({ ...before.frame, height: 320 })
+    expect(buildNativeTableLayout(after.content.data, after.frame).rows.map(row => row.height)).toEqual([80, 80, 80, 80])
+    expect(initialLayout.rows.map(row => row.height)).toEqual([80, 80, 80])
+    expect(readEffectiveTableLayer(requireSession(undoSlideAuthoring(appended)), id)).toEqual(before)
+    expect(readEffectiveTableLayer(requireSession(redoSlideAuthoring(requireSession(undoSlideAuthoring(appended)))), id)).toEqual(after)
+    const textOnly = requireSession(patchSlideTableCellText(appended, { layerItemId: id, cellId: lastCell.id, text: 'Reworded' }))
+    expect(readEffectiveTableLayer(textOnly, id).frame).toEqual(after.frame)
+    const columnAdded = requireSession(insertSlideTableColumn(textOnly, { layerItemId: id, referenceColumnId: content.columns[0]!.id, position: 'after' }))
+    expect(readEffectiveTableLayer(columnAdded, id).frame).toEqual({ ...after.frame, width: 1600 })
+  })
+
+  it('resizes only the current named-state table override after appending a row', () => {
+    const added = addSlideTableLayer(makeSession())
+    let session = requireSession(added)
+    const id = added.selection!.selectionIds[0]!
+    session = requireSession(addSlidePresentationState(session, 'A'))
+    const stateAId = session.selection.stateId!
+    session = requireSession(addSlidePresentationState(session, 'B'))
+    const stateBId = session.selection.stateId!
+    const fixture = structuredClone(session.history.present)
+    const surface = fixture.surfaces[0]!
+    if (surface.type !== 'slide') throw new Error('expected slide')
+    const scene = surface.scenes[0]!
+    scene.presentation!.states.find(state => state.id === stateAId)!.layerItemOverrides[id] = { frame: { x: 77, height: 240 } }
+    scene.presentation!.states.find(state => state.id === stateBId)!.layerItemOverrides[id] = { frame: { y: 88 } }
+    session = requireSession(activateSlidePresentationState(openSlideAuthoringSession(courseProjectDocumentSchema.parse(fixture)), stateAId))
+    const before = readEffectiveTableLayer(session, id)
+    if (before.content.nativeType !== 'table') throw new Error('expected table')
+    const lastCell = before.content.data.rows.at(-1)!.cells.at(-1)!
+    const appended = requireSession(commitSlideTableLastCellAndAppendRow(session, { layerItemId: id, cellId: lastCell.id, text: 'State answer' }))
+    const nextScene = getSlideScene(appended)
+    expect(readEffectiveTableLayer(appended, id).frame).toEqual({ ...before.frame, height: 320 })
+    expect(nextScene.layerItems).toEqual(scene.layerItems)
+    expect(nextScene.presentation!.states.find(state => state.id === stateBId)).toEqual(scene.presentation!.states.find(state => state.id === stateBId))
+    expect(appended.history.present.globalLayerItems).toEqual(fixture.globalLayerItems)
+    expect(getSlideScene(requireSession(undoSlideAuthoring(appended)))).toEqual(scene)
+  })
+
   it('executes commitSlideTableLastCellAndAppendRow atomically, supports Undo/Redo, and rolls back on failure', () => {
     const session = makeSession()
     const added = addSlideTableLayer(session)
@@ -665,4 +728,3 @@ describe('r12-010-table-core Canonical Table Commands', () => {
     expect(redoneTable.rows[2].cells[2].text).toBe('Completed Answer')
   })
 })
-

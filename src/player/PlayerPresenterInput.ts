@@ -110,9 +110,10 @@ function normalizeResult(
 }
 
 /**
- * Owns every delivery-time scene navigation key. Direction keys remain an
+ * Owns delivery-time step navigation keys. Direction keys remain an
  * independent author setting, while PageUp/PageDown and additional bindings
- * follow the Project V8 presenter strategy.
+ * follow the project presenter strategy. The persisted scene-navigation value
+ * uses the session step owner when supplied by the Published Course presenter.
  */
 export class PlayerPresenterInput {
   private readonly totalPages: number

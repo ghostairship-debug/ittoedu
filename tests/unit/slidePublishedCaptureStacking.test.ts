@@ -1,7 +1,9 @@
+import { buildPublishedFixture as buildPublishedCourseV2Payload } from '../fixtures/teacherController'
+import { isControllerFixture } from '../fixtures/teacherController'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { NativeLayerItem } from '@/shared/courseProjectTypes'
 import type { CapturePublishedSlideOptions } from '@/player/surfaces/publishedCapture'
-import { buildPublishedCourseV2Payload } from '@/renderer/export/course/buildPublishedCourse'
+
 import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
 
 const captureMocks = vi.hoisted(() => ({
@@ -74,15 +76,13 @@ describe('SlidePublishedAdapter static capture stacking', () => {
     const surface = project.surfaces.find((candidate) => candidate.type === 'slide')
     if (!surface || surface.type !== 'slide') throw new Error('expected Slide surface')
     const controller = project.globalLayerItems.find((candidate) => (
-      candidate.item.kind === 'native'
-      && candidate.item.content.nativeType === 'teacher-controller'
+      isControllerFixture(candidate.item)
     ))
     if (
       !controller
-      || controller.item.kind !== 'native'
-      || controller.item.content.nativeType !== 'teacher-controller'
+      || !isControllerFixture(controller.item)
     ) throw new Error('expected teacher controller')
-    controller.item.content.data.includeInStaticExports = true
+    controller.item.props.includeInStaticExports = true
     surface.scenes[0]!.layerItems.push(textItem('slide-local-cover', 100_000))
     project.globalLayerItems.push({
       item: textItem('global-after-controller', 200_000),

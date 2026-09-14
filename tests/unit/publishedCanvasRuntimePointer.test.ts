@@ -1,3 +1,4 @@
+import { buildPublishedFixture as buildPublishedCourseV2Payload } from '../fixtures/teacherController'
 import { describe, expect, it, vi } from 'vitest'
 import type { RuntimeHostOptions } from '@/player/RuntimeHost'
 
@@ -38,7 +39,7 @@ import { mountPublishedCanvasRuntime } from '@/player/surfaces/runtime/published
 import { createPublishedSurfaceRuntimeSession } from '@/player/surfaces/runtime/publishedSurfaceRuntimeMount'
 import { setPublishedGlobalCanvasRuntimeState, setPublishedGlobalCanvasRuntimeInteractionVisibility } from '@/player/surfaces/runtime/publishedGlobalCanvasRuntimePointer'
 import { SlidePublishedAdapter } from '@/player/surfaces/slide/SlidePublishedAdapter'
-import { buildPublishedCourseV2Payload } from '@/renderer/export/course/buildPublishedCourse'
+
 import { createPublishedCanvasRuntimeV2Fixture } from '../fixtures/publishedCanvasRuntimeV2Fixture'
 import type { PublishedRuntimeLayerItem } from '@/shared/publishedCourseTypes'
 import type { RuntimeRenderMode } from '@/shared/runtimeTypes'

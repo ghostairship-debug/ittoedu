@@ -2,7 +2,7 @@ import { nanoid } from 'nanoid'
 import { allocateInputStateKeys } from '../interactions/inputAuthoringState'
 import { MAX_SCENE_NODES } from '../../shared/constants'
 import { resolveEffectiveGlobalLayerPlanes } from '../../shared/courseLayerComposition'
-import { isCourseTeacherControllerLayerItem } from '../../shared/teacherControllerConsistency'
+import { isTeacherController } from '../../shared/teacherControllerRole'
 import {
   MAX_SCENE_INTERACTIONS,
   isNodeMotionAction,
@@ -128,9 +128,7 @@ function controllerMinOrder(
   const surface = project.surfaces.find((candidate) => candidate.id === surfaceId)
   const orders: number[] = []
   const visit = (item: LayerItem): void => {
-    if (item.kind === 'native' && item.content.nativeType === 'teacher-controller') {
-      orders.push(item.order)
-    }
+    
   }
   project.globalLayerItems.forEach((entry) => visit(entry.item))
   if (!surface || surface.type !== 'slide') {
@@ -461,7 +459,7 @@ export function copySlideGlobalClipboard(
   if (missing !== undefined) {
     throw new SlideCommandError('invalid-selection', '所选全局元素已失效，请重新选择')
   }
-  if (uniqueIds.some((id) => isCourseTeacherControllerLayerItem(byId.get(id)?.item))) {
+  if (uniqueIds.some((id) => isTeacherController(byId.get(id)?.item))) {
     throw new Error(SLIDE_GLOBAL_CONTROLLER_CLIPBOARD_REASON)
   }
   const effectivePlanes = resolveEffectiveGlobalLayerPlanes(project.globalLayerItems)
@@ -583,7 +581,7 @@ export function mutatePasteSlideGlobalClipboard(
   if (draft.globalLayerItems.length + clipboard.items.length > MAX_SCENE_NODES) {
     throw new Error(`粘贴后将超过全局层 ${MAX_SCENE_NODES} 个元素的上限。`)
   }
-  if (clipboard.items.some(({ entry }) => isCourseTeacherControllerLayerItem(entry.item))) {
+  if (clipboard.items.some(({ entry }) => isTeacherController(entry.item))) {
     throw new Error(SLIDE_GLOBAL_CONTROLLER_CLIPBOARD_REASON)
   }
   const derivedReferences = collectSlideClipboardResourceReferences(

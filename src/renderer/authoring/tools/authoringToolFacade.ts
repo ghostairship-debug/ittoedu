@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { teacherControllerComponentTool } from './teacherControllerComponentTool'
 import { componentConfigureTool } from './componentConfigureTool'
 import { runtimeConfigureTool } from './runtimeConfigureTool'
 import { mediaAssetTool } from './mediaAssetTool'
@@ -11,11 +12,13 @@ import { courseNavigationTool } from './courseNavigationTool'
 import { fontAssetTool } from './fontAssetTool'
 import { materialCitationTool } from './materialCitationTool'
 import { courseSettingsTool } from './courseSettingsTool'
-import { backgroundTool } from './backgroundTool'
+import { backgroundTool, backgroundDiscovery } from './backgroundTool'
 import { slideInteractionTool } from './slideInteractionTool'
 import { spatialStructureTool } from './spatialStructureTool'
+import { projectDocumentTool } from './projectDocumentTool'
 import { slideStructureTool } from './slideStructureTool'
 import { nativeAuthoringTool } from './nativeAuthoringTool'
+import { layerEditTool } from './layerEditTool'
 import { flowAuthoringTool } from './flowAuthoringTool'
 import { semanticReplacementTool } from './semanticReplacementTool'
 import { imageTransformTool } from './imageTransformTool'
@@ -25,12 +28,14 @@ import { authoringToolCarrierPolicy } from '../../../shared/authoringToolCarrier
 import type { CourseAgentCapabilityVariant } from '../../../shared/courseAgentCapabilities'
 
 function register<T>(definition: AuthoringToolDefinition<T>) {
-  return { name: definition.name, inputSchema: definition.inputSchema, description: definition.description, referenceSchemas: definition.referenceSchemas,
+  return { name: definition.name, inputSchema: definition.inputSchema, description: definition.description, referenceSchemas: definition.referenceSchemas, conditions: definition.conditions,
     execute: (request: unknown, port: AuthoringToolCommitPort) => executeAuthoringTool(request, definition, port) }
 }
 
 // Execution and exported CLI contracts derive from the same formal definitions.
 const catalog = [
+  register(teacherControllerComponentTool),
+  register(projectDocumentTool),
   register(componentConfigureTool),
   register(runtimeConfigureTool),
   register(mediaAssetTool),
@@ -48,6 +53,7 @@ const catalog = [
   register(spatialStructureTool),
   register(slideStructureTool),
   register(nativeAuthoringTool),
+  register(layerEditTool),
   register(flowAuthoringTool),
   register(semanticReplacementTool),
   register(imageTransformTool),
@@ -58,6 +64,7 @@ export function describeAuthoringTools(names?: readonly string[]) {
   if (names?.some(name => !Object.hasOwn(executors, name))) throw new Error('未开放的 Authoring Tool')
   return catalog.filter(entry => !names || names.includes(entry.name)).map(entry => ({
     name: entry.name, candidateCarrier: authoringToolCarrierPolicy(entry.name), description: entry.description, inputSchema: z.toJSONSchema(entry.inputSchema, { io: 'input', reused: 'ref' }),
+    conditions: entry.conditions,
     references: entry.referenceSchemas ? Object.fromEntries(Object.entries(entry.referenceSchemas).map(([name, schema]) => [name, z.toJSONSchema(schema, { io: 'input', reused: 'ref' })])) : undefined,
   }))
 }
@@ -87,7 +94,10 @@ export function describeAuthoringToolDiscovery() {
   const content = ['slide:scene', 'slide:global', 'flow:surface', 'flow:global', 'spatial-2d:world', 'spatial-2d:global']
   const global = ['slide:global', 'flow:global', 'spatial-2d:global']
   const scopes: Record<string, readonly string[]> = {
+    'component.controller': global,
+    'project.document': [...content, 'slide:surface', 'spatial-2d:surface'],
     'native.content': content,
+    'layer.edit': [...content, 'slide:surface', 'spatial-2d:surface'],
     'selection.replace': content,
     'asset.image.transform': content,
     'flow.content': ['flow:surface'],
@@ -102,7 +112,7 @@ export function describeAuthoringToolDiscovery() {
     'course.navigation': global,
     'course.settings': global,
     'material.citation': content,
-    'owner.background': ['slide:scene', 'slide:surface', 'slide:global', 'flow:surface', 'flow:global', 'spatial-2d:surface', 'spatial-2d:global'],
+    'owner.background': backgroundDiscovery.supportedScopes,
     'recipe.apply': ['slide:scene'],
     'slide.interaction': ['slide:scene'],
     'slide.structure': ['slide:scene'],
@@ -149,8 +159,13 @@ export function describeAuthoringToolDiscovery() {
     })
     const examples = tool.name === 'component.package' ? componentPackageDiscoveryExamples : tool.name === 'native.content' ? [
       { operation: 'edit', input: { operation: 'edit', textStyle: { fontSize: 44 } } },
+      { operation: 'edit-text', input: { operation: 'edit-text', textStyle: { fontSize: 44 } } },
+      { operation: 'edit-shape', input: { operation: 'edit-shape', shapeStyle: { fillColor: '#22c55e' } } },
+      { operation: 'edit-formula', input: { operation: 'edit-formula', formula: { ast: { type: 'token', value: 'x' }, accessibleText: 'x' } } },
+      { operation: 'edit-image', bindings: 'assetId来自当前工程图片素材或前序导入回执。', code: 'const receipt=await session.execute("native.content",{operation:"edit-image",image:{assetId}},destination);' },
       { operation: 'properties', input: { operation: 'properties', properties: { frame: { x: 80, y: 120 } } } },
       { operation: 'insert', nativeType: 'text', input: { operation: 'insert', template: { nativeType: 'text', text: '标题' } } },
+      { operation: 'insert', nativeType: 'shape', input: { operation: 'insert', template: { nativeType: 'shape', shapeType: 'ellipse', width: 120, height: 120, style: { fillColor: '#ffff00' } } } },
       ...schemaExamples.filter((example: any) => example.operation === 'insert'),
       { operation: 'content', bindings: 'content 原样复制当前对象的完整 content，修改所需字段后仍须满足 references[nativeType]。', code: 'const receipt=await session.execute("native.content",{operation:"content",content},{kind:"update",target});' },
       { operation: 'delete', input: { operation: 'delete' } },
@@ -159,6 +174,7 @@ export function describeAuthoringToolDiscovery() {
         : tool.name === 'owner.background' ? [{ input: { backgroundColor: '#ffffff' } }] : schemaExamples
     for (const example of examples ?? []) if ('input' in example) catalog.find(entry => entry.name === tool.name)!.inputSchema.parse(example.input)
     return { ...tool, supportedScopes: [...supportedScopes], variants,
+      ...(tool.name === 'owner.background' ? { background: backgroundDiscovery } : {}),
       ...(examples ? { examples } : {}),
       invocation: 'Builder: await session.execute(tool,input,destination)。input 遵循本卡完整 Schema；destination 原样使用当前 observe/createScope 的目标；只以 committed receipt 判定成功。',
       recovery: 'invalid-input: 按本卡 Schema 修正字段；revision-conflict: 重新 observe 后复制新 target 和源码基线；tool-failed: 读取 diagnostics 修复所指输入/资源/宿主条件，失败不代表已提交。',

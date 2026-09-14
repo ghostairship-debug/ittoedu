@@ -24,6 +24,7 @@ interface Ports {
   api: Pick<DesktopAPI, 'localAgent'>
   owner: { projectId: string; projectPath: string }
   isCurrent(request: GenerationRequest): boolean
+  currentReason?(request: GenerationRequest): string | null
   captureNext(previous: GenerationRequest, receipt?: GenerationCommitReceipt): Promise<GenerationRequest>
   prepare(request: GenerationRequest, candidate: GenerationCandidate): Promise<GenerationPrepared>
   apply(previewId: string): ApplyResult
@@ -33,6 +34,22 @@ interface Ports {
 }
 const explanation = (error: unknown) => error instanceof Error ? error.message : String(error)
 const pause = () => new Promise<void>(resolve => setTimeout(resolve, 250))
+/** Native events, not the model's prose, identify tool work and silent intervals. */
+export function generationNativeActivity(events: readonly LocalAgentEvent[], now = Date.now()): string {
+  const tools = new Set<string>()
+  let last: LocalAgentEvent | undefined
+  for (const event of events) {
+    if (!['text', 'tool-call', 'tool-result'].includes(event.kind)) continue
+    last = event
+    const payload = event.payload
+    const id = payload && typeof payload === 'object' && !Array.isArray(payload) ? payload.id : undefined
+    if (typeof id !== 'string') continue
+    if (event.kind === 'tool-call') tools.add(id)
+    if (event.kind === 'tool-result') tools.delete(id)
+  }
+  const state = tools.size ? `CLI 正在执行 ${tools.size} 项工具` : '等待 CLI 的下一步结果'
+  return last ? `${state}；距最近原生活动 ${Math.max(0, Math.floor((now - last.time) / 1000))} 秒` : state
+}
 class HostResultFeedbackError extends Error {
   constructor(readonly cause: unknown) { super(`宿主结果反馈未保存：${explanation(cause)}`) }
 }
@@ -56,6 +73,7 @@ export class GenerationTaskController {
   private confirmedStages: Array<{ receipt: GenerationCommitReceipt; summary: string }> = []
   private currentOperation = '连接 CLI 并开始任务'
   private candidateSummary?: string
+  private guardedRequest?: GenerationRequest
   constructor(private readonly ports: Ports) {}
   get current() { return this.view }
   private update(patch: Partial<GenerationTaskView>) {
@@ -64,7 +82,7 @@ export class GenerationTaskController {
   }
   private requireCurrent(request: GenerationRequest, epoch: number) {
     this.requireActive(epoch)
-    if (epoch !== this.epoch || !this.ports.isCurrent(request)) throw new Error('stale：工程或任务已改变，未应用的修改已丢弃')
+    if (epoch !== this.epoch || !this.ports.isCurrent(request)) throw new Error(this.ports.currentReason?.(request) ?? 'stale：工程或任务已改变，未应用的修改已丢弃')
   }
   private requireActive(epoch: number) {
     if (epoch !== this.epoch) throw new Error('stale：任务已改变')
@@ -73,7 +91,11 @@ export class GenerationTaskController {
   private async stage<T>(operation: () => Promise<T>, epoch: number): Promise<T> {
     this.requireActive(epoch)
     let timer: ReturnType<typeof setTimeout> | undefined
+    let currentTimer: ReturnType<typeof setInterval> | undefined
     const signal = this.stageAbort.signal
+    const request = this.guardedRequest
+    const checkCurrent = () => { if (request && this.guardedRequest === request) this.requireCurrent(request, epoch) }
+    checkCurrent()
     let onAbort: (() => void) | undefined
     try {
       const value = await Promise.race([operation(), new Promise<never>((_, reject) => {
@@ -81,10 +103,12 @@ export class GenerationTaskController {
         signal.addEventListener('abort', onAbort, { once: true })
         if (signal.aborted) onAbort()
         timer = setTimeout(() => { if (epoch === this.epoch) this.ports.discard(); reject(new TaskDeadlineError()) }, Math.max(0, this.deadlineAt - Date.now()))
+        currentTimer = setInterval(() => { try { checkCurrent() } catch (error) { reject(error) } }, 100)
       })])
       this.requireActive(epoch)
+      checkCurrent()
       return value
-    } finally { clearTimeout(timer); if (onAbort) signal.removeEventListener('abort', onAbort) }
+    } finally { clearTimeout(timer); clearInterval(currentTimer); if (onAbort) signal.removeEventListener('abort', onAbort) }
   }
   private acceptRecord(response: LocalAgentResponse) {
     const record = response.records?.[0]
@@ -109,15 +133,15 @@ export class GenerationTaskController {
       : `本任务零修改，没有已提交的修改。${stages ? `${stages}。` : ''}`
     const operation = this.currentOperation === '等待 CLI 的本阶段结果' && this.view.record?.task?.status === 'waiting-input'
       ? '等待回答 CLI 的当前问题' : this.currentOperation
-    const unfinished = `${operation}${this.candidateSummary ? `（${this.candidateSummary}）` : ''}`
+    const unfinished = `${operation}${this.currentOperation === '等待 CLI 的本阶段结果' ? `；${generationNativeActivity(this.view.events)}` : ''}${this.candidateSummary ? `（${this.candidateSummary}）` : ''}`
     const recovery = this.pendingFeedback
       ? '先重试保存实际结果的回执，只补记录、不重复应用；然后从当前课件重新观察，准备剩余操作。'
       : '从当前课件重新观察，再根据未完成操作准备新候选。'
     return `已完成：${completed}\n未完成：${unfinished}。\n恢复点：${recovery}未应用的旧候选已丢弃，不可直接应用。`
   }
-  async start(request: GenerationRequest, adapter: LocalAgentId, resumeSessionId?: string) {
+  async start(request: GenerationRequest, adapter: LocalAgentId, resumeSessionId?: string, userMessage?: string) {
     if (this.view.busy) throw new Error('当前任务正在运行')
-    if (this.pendingFeedback) throw new Error('请先重试保存已经应用的宿主结果，避免丢失真实回执')
+    if (this.pendingFeedback) throw new Error('请先重试保存待送的宿主结果，避免丢失实际结果')
     const epoch = ++this.epoch
     this.stageAbort.abort(); this.stageAbort = new AbortController()
     this.startedAt = request.execution?.startedAt ?? Date.now()
@@ -129,7 +153,7 @@ export class GenerationTaskController {
     this.ports.discard()
     this.update({ busy: true, phase: 'observing', notice: '已同步当前课件，正在连接 CLI', error: undefined,
       events: [], request, record: undefined, result: undefined, receipt: undefined, preview: undefined, sessionId: undefined, canRetryFeedback: false })
-    try { await this.drive(request, adapter, epoch, resumeSessionId) }
+    try { await this.drive(request, adapter, epoch, resumeSessionId, userMessage) }
     catch (error) {
       if (epoch !== this.epoch) return
       this.ports.discard()
@@ -144,20 +168,21 @@ export class GenerationTaskController {
         || error instanceof HostResultFeedbackError && error.cause instanceof TaskDeadlineError
       this.update({ busy: false, phase: 'failed', preview: undefined, error: explanation(error), canRetryFeedback: Boolean(this.pendingFeedback),
         notice: timedOut ? this.deadlineNotice() : this.view.receipt ? '本任务未全部完成；已提交的阶段保留' : '本任务未完成，课件未应用本轮候选' })
-    }
+    } finally { if (epoch === this.epoch) this.guardedRequest = undefined }
   }
-  private async drive(initial: GenerationRequest, adapter: LocalAgentId, epoch: number, resumeSessionId?: string) {
+  private async drive(initial: GenerationRequest, adapter: LocalAgentId, epoch: number, resumeSessionId?: string, userMessage?: string) {
     let request = initial
     let continuation = false
     for (;;) {
+      this.guardedRequest = request
       this.candidateSummary = undefined
       this.currentOperation = continuation ? '将实际反馈交回 CLI 并继续处理' : '连接 CLI 并开始任务'
       this.requireCurrent(request, epoch)
       const launchDeadline = this.deadlineAt
       const launch = await this.stage(() => this.ports.api.localAgent(continuation
         ? { operation: 'continue', ...this.ports.owner, sessionId: this.view.sessionId!, request }
-        : { operation: 'generate', ...this.ports.owner, adapter, request, ...(resumeSessionId ? { resumeSessionId } : {}) }).then(response => {
-        if (response.sessionId && (epoch !== this.epoch || Date.now() >= launchDeadline)) this.cancelLateLaunch(response.sessionId, epoch)
+        : { operation: 'generate', ...this.ports.owner, adapter, request, ...(resumeSessionId ? { resumeSessionId } : {}), ...(userMessage ? { userMessage } : {}) }).then(response => {
+        if (response.sessionId && (epoch !== this.epoch || Date.now() >= launchDeadline || !this.view.busy || !this.ports.isCurrent(request))) this.cancelLateLaunch(response.sessionId, epoch)
         return response
       }), epoch)
       if (!launch.sessionId) throw new Error('CLI 没有返回当前会话')
@@ -165,7 +190,7 @@ export class GenerationTaskController {
       if (epoch !== this.epoch) { this.cancelLateLaunch(sessionId, epoch); return }
       this.sessionEpoch = epoch
       this.currentOperation = '等待 CLI 的本阶段结果'
-      this.update({ phase: 'running', sessionId: launch.sessionId, request, events: [], preview: undefined, notice: continuation ? '已把实际结果交回同一 CLI，正在继续' : '正在回复…' })
+      this.update({ phase: 'running', sessionId: launch.sessionId, request, events: [], preview: undefined, notice: continuation ? '正在连接 CLI 并发送已保存的实际结果' : '正在回复…' })
       const events: LocalAgentEvent[] = []
       let record: LocalAgentRecord
       for (;;) {
@@ -175,9 +200,10 @@ export class GenerationTaskController {
         record = response.records?.[0]!
         if (!record) throw new Error('会话记录不可用')
         this.acceptRecord(response)
+        if (continuation && record.hostResult?.receiptDelivery === 'delivered') this.update({ notice: 'CLI 已收到实际结果，正在继续处理' })
         this.requireActive(epoch)
         for (const event of record.events) if (event.sequence > this.after) { events.push(event); this.after = event.sequence }
-        this.update({ record, events: [...events] })
+        this.update({ record, events: [...events], notice: record.task?.status === 'waiting-input' ? '等待回答 CLI 的当前问题' : generationNativeActivity(events) })
         if (record.status !== 'running' && record.events.length < 200) break
         if (record.events.length < 200) await this.stage(pause, epoch)
       }
@@ -192,10 +218,6 @@ export class GenerationTaskController {
       this.acceptRecord(response)
       const outcome = response.generationResult
       if (!outcome || outcome.requestId !== request.requestId) throw new Error('CLI 返回结果与当前请求不一致')
-      if (outcome.kind === 'incomplete') {
-        this.update({ busy: false, phase: 'failed', notice: outcome.finding, error: outcome.finding })
-        return
-      }
       if (outcome.kind === 'answer') {
         this.update({ busy: false, phase: 'completed', notice: this.view.receipt ? '本任务已应用修改，CLI 已收到实际结果' : request.intent === 'plan' ? '本轮已回复，尚未修改课件' : request.intent === 'discuss' ? '讨论完成，尚未修改课件' : '回复完成，本轮没有修改课件' })
         return
@@ -205,6 +227,7 @@ export class GenerationTaskController {
       let receipt: GenerationCommitReceipt | undefined
       try {
         this.requireCurrent(request, epoch)
+        if (outcome.kind === 'incomplete') throw new Error(outcome.finding)
         if (outcome.kind === 'candidate-format-error' || outcome.kind === 'candidate-rejected') throw outcome.failure ? new GenerationCandidatePreparationError(outcome.failure) : new Error(outcome.finding)
         this.candidateSummary = outcome.candidate.summary
         this.currentOperation = '检查并准入当前候选'
@@ -232,20 +255,20 @@ export class GenerationTaskController {
         const applied = this.ports.apply(prepared.previewId)
         if (applied.status === 'stale') throw new Error('stale：工程已改变，未应用候选')
         receipt = applied.receipt
+        this.guardedRequest = undefined
         // Capture only actual apply receipts before any fallible feedback await.
         // This is a task-local presentation of facts, not an additional history.
         this.confirmedStages.push({ receipt, summary: prepared.summary })
         result = { requestId: request.requestId, candidateId: prepared.candidateId, status: applied.status, summary: prepared.summary,
           beforeRevision: receipt.beforeRevision, afterRevision: receipt.afterRevision,
-          ...(prepared.behaviorEvidence.some(evidence => evidence.semanticVerdict === 'requires-review')
-            ? { afterCommit: { version: 1, action: 'observe', reason: '需要结合已采集的动态行为帧确认效果' } }
-            : outcome.candidate.afterCommit ? { afterCommit: outcome.candidate.afterCommit } : {}) }
+          ...(outcome.candidate.afterCommit ? { afterCommit: outcome.candidate.afterCommit } : {}) }
       } catch (error) {
         // A cancelled turn must not discard a newer task's prepared candidate.
         if (epoch !== this.epoch) return
         if (error instanceof HostResultFeedbackError || error instanceof TaskDeadlineError) throw error
         this.ports.discard()
         const fresh = this.ports.isCurrent(request) && !explanation(error).startsWith('stale：')
+        if (!fresh) this.guardedRequest = undefined
         const failure = readGenerationFailure(error)
         result = { requestId: request.requestId, ...(outcome.kind === 'candidate' ? { candidateId: outcome.candidate.candidateId }
           : outcome.kind === 'candidate-rejected' ? { candidateId: outcome.candidateId } : {}),
@@ -268,8 +291,17 @@ export class GenerationTaskController {
       }
       if (epoch !== this.epoch) return
       this.currentOperation = receipt ? '重新观察课件并核对本阶段效果' : '重新观察课件以修正失败候选'
-      this.update({ phase: 'feeding-back', preview: undefined, notice: receipt ? '本阶段已应用；正在同步最新画面给 CLI' : '已将具体问题交回 CLI 修正', result })
-      const next = await this.stage(() => this.ports.captureNext(request, receipt), epoch)
+      this.update({ phase: 'feeding-back', preview: undefined, notice: receipt ? '本阶段已应用；正在准备最新观察' : '具体问题已保存，正在准备新观察以继续修正', result })
+      const next = await this.stage(async () => {
+        const captured = await this.ports.captureNext(request, receipt)
+        // captureNext validates the frozen anchor throughout capture, then retires
+        // the old request while binding this one. Transfer the guard before stage
+        // performs its final check; the retired request is no longer current.
+        this.requireCurrent(captured, epoch)
+        this.guardedRequest = captured
+        this.update({ request: captured })
+        return captured
+      }, epoch)
       if (epoch !== this.epoch) return
       request = this.withBudget({ ...next, expectedResult: 'auto' })
       continuation = true
@@ -278,17 +310,19 @@ export class GenerationTaskController {
   private async remember(result: LocalAgentHostResult, receipt?: GenerationCommitReceipt) {
     const epoch = this.epoch
     const request: HostResultRequest = { operation: 'host-result', ...this.ports.owner, sessionId: this.view.sessionId!, result, ...(receipt ? { commitReceipt: receipt } : {}) }
-    if (receipt) this.pendingFeedback = structuredClone(request)
+    const recoverable = Boolean(receipt) || ['rejected', 'stale', 'failed'].includes(result.status)
+    if (recoverable) this.pendingFeedback = structuredClone(request)
     let response: LocalAgentResponse
     try { response = await this.stage(() => this.ports.api.localAgent(request), epoch) }
     catch (error) {
+      if (!receipt && explanation(error).startsWith('stale：')) throw error
       // Idempotent receipt storage is safe to retry after an uncertain IPC response.
       if (receipt && epoch === this.epoch && !(error instanceof TaskDeadlineError)) {
         try { response = await this.stage(() => this.ports.api.localAgent(request), epoch) }
         catch (retryError) { throw new HostResultFeedbackError(retryError) }
       } else throw new HostResultFeedbackError(error)
     }
-    if (receipt && this.pendingFeedback?.sessionId === request.sessionId && this.pendingFeedback.result.requestId === request.result.requestId) this.pendingFeedback = undefined
+    if (recoverable && this.pendingFeedback?.sessionId === request.sessionId && this.pendingFeedback.result.requestId === request.result.requestId) this.pendingFeedback = undefined
     if (epoch === this.epoch) { this.acceptRecord(response); this.update({ result, canRetryFeedback: false }) }
   }
   private finishReceipt(result: LocalAgentHostResult) {
@@ -300,43 +334,47 @@ export class GenerationTaskController {
     this.update({ busy: false, phase: 'completed', preview: undefined, error: undefined, canRetryFeedback: false,
       notice: result.status === 'unchanged' ? '已确认当前内容满足要求，无需修改' : '修改已应用，实际结果已保存' })
   }
-  /** Repairs only the known host receipt. It never reapplies a candidate or starts a native turn. */
+  /** Stores only a known result. It never reapplies a candidate or starts a native turn. */
   async retryFeedback() {
     if (this.view.busy) throw new Error('当前任务正在运行')
     const request = this.pendingFeedback
-    if (!request?.commitReceipt) throw new Error('没有待保存的实际提交回执')
+    if (!request) throw new Error('没有待保存的宿主结果')
     const epoch = this.epoch
-    this.update({ busy: true, phase: 'feeding-back', error: undefined, notice: '正在重试保存已应用的实际结果' })
+    this.update({ busy: true, phase: 'feeding-back', error: undefined, notice: '正在重试保存实际结果' })
     try {
       // Recording an already completed transaction remains valid after the execution deadline.
       const response = await this.ports.api.localAgent(structuredClone(request))
       if (this.pendingFeedback === request) this.pendingFeedback = undefined
       if (epoch !== this.epoch) {
-        if (!this.pendingFeedback && this.view.sessionId === request.sessionId && this.view.receipt?.candidateId === request.commitReceipt.candidateId) this.update({ canRetryFeedback: false })
+        if (!this.pendingFeedback && this.view.sessionId === request.sessionId) this.update({ canRetryFeedback: false })
         return
       }
       this.acceptRecord(response)
-      this.update({ result: request.result, receipt: request.commitReceipt, canRetryFeedback: false })
+      this.update({ result: request.result, ...(request.commitReceipt ? { receipt: request.commitReceipt } : {}), canRetryFeedback: false })
       if (request.result.afterCommit?.action === 'finish') this.finishReceipt(request.result)
-      else this.update({ busy: false, phase: 'failed', notice: '实际结果已保存；已提交的阶段保留，请补充要求并重新观察后继续' })
+      else this.update({ busy: false, phase: 'failed', notice: '实际结果已保存；可以明确要求继续，重新观察后处理未完成的目标' })
     } catch (error) {
       if (epoch !== this.epoch) return
       this.update({ busy: false, phase: 'failed', canRetryFeedback: true, error: explanation(error), notice: '实际结果仍未保存；已提交的阶段保留，可再次重试' })
     }
   }
   applyPreview() { this.decision?.('apply') }
-  async input(input: AiUserInput) {
+  async input(input: AiUserInput, options?: { preservePreview?: boolean }) {
     if (!this.view.busy || !this.view.sessionId) throw new Error('任务已经结束')
     const epoch = this.epoch, sessionId = this.view.sessionId
     const result = await this.stage(() => this.ports.api.localAgent({ operation: 'input', ...this.ports.owner, sessionId, input }), epoch)
     if (epoch !== this.epoch || sessionId !== this.view.sessionId) return result.inputDelivery
     if (!result.inputDelivery || result.inputDelivery.status === 'rejected') throw new Error(result.inputDelivery?.reason ?? 'CLI 没有接受输入')
-    if (this.view.phase === 'awaiting-apply' && (input.kind === 'correct' || input.kind === 'supplement')) this.decision?.('correct')
+    // Status inquiries still use the native input owner and durable user event,
+    // but do not withdraw an already checked preview. Actual corrections always
+    // invalidate it, including when a caller accidentally supplies this option.
+    if (this.view.phase === 'awaiting-apply' && (input.kind === 'correct' || input.kind === 'supplement' && !options?.preservePreview)) this.decision?.('correct')
     this.update({ notice: result.inputDelivery.status === 'queued' ? '输入已排队，将在下一原生回合消费' : 'CLI 已接收输入，正在继续' })
     return result.inputDelivery
   }
   async stop() {
     ++this.epoch
+    this.guardedRequest = undefined
     this.stageAbort.abort()
     this.feedbackStopped = true
     this.ports.discard()

@@ -1,7 +1,8 @@
+import { buildPublishedFixture as buildPublishedCourseV2Payload } from '../fixtures/teacherController'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('phaser', () => ({}))
-import { buildPublishedCourseV2Payload } from '@/renderer/export/course/buildPublishedCourse'
+
 import { mountPublishedCourseTryRun } from '@/renderer/ui/coursePlayerTryRun'
 import {
   createPublishedCourseSession,

@@ -1,3 +1,4 @@
+import { isControllerItem, type PublishedTeacherControllerItem } from '../../teacherControllerComponentGeometry'
 import type {
   CourseLocation,
   GlobalLayerPlane,
@@ -180,10 +181,8 @@ export function isPublishedScopedVisible(
 
 export function isSpatialTeacherControllerItem(
   item: PublishedLayerItem,
-): item is PublishedNativeLayerItem & {
-  content: Extract<PublishedNativeLayerItem['content'], { nativeType: 'teacher-controller' }>
-} {
-  return item.kind === 'native' && item.content.nativeType === 'teacher-controller'
+): item is PublishedTeacherControllerItem {
+  return isControllerItem(item)
 }
 
 export function spatialPlaybackCoordinateSpace(

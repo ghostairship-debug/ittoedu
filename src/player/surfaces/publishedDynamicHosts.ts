@@ -1,3 +1,4 @@
+import type { TeacherControllerAction } from '../../shared/teacherControllerConfig'
 import { PlaybackViewSession } from '../playbackViewSession'
 import {
   adjacentPlaybackTarget,
@@ -12,7 +13,7 @@ import {
   type PlaybackNavigationViewPort,
 } from '../navigation/coursePlaybackSequence'
 import { CANVAS_HEIGHT, CANVAS_WIDTH } from '../../shared/constants'
-import type { TeacherControllerAction } from '../../shared/contracts/native-v1'
+
 import type { CourseLocation } from '../../shared/courseProjectTypes'
 import type { PublishedCourseSurface, PublishedCourseV2Payload } from '../../shared/publishedCourseTypes'
 import type {
@@ -202,9 +203,9 @@ function createPublishedSurfaceHostInternal(
       executeTeacherControllerAction: async (action) => {
         if (options.executeTeacherControllerAction) {
           const outcome = await options.executeTeacherControllerAction(action)
-          if (outcome !== undefined) return true
+          if (outcome !== undefined) return outcome
         }
-        if (action.type !== 'course.restart' || !options.restartCourse) return false
+        if (action.type !== 'course.restart' || !options.restartCourse) return undefined
         return options.restartCourse()
       },
       deferTeacherControllerCourseReset: options.deferTeacherControllerCourseReset,
@@ -587,6 +588,11 @@ export class PublishedCourseSession {
     return this.navigator.goToLocation(locationId)
   }
 
+  /** Internal observation uses the same navigation owner and real session. */
+  async goToObservationTarget(locationId: string, _stateId?: string): Promise<void> {
+    await this.navigator.goToLocation(locationId)
+  }
+
   goToIndex(index: number): Promise<MixedNavigationState> {
     return this.navigator.goToIndex(index)
   }
@@ -951,6 +957,10 @@ class PublishedInteractionCourseSession extends PublishedCourseSession {
   async executeTeacherControllerAction(
     action: TeacherControllerAction,
   ): Promise<boolean | undefined> {
+    if (action.type === 'player.fullscreen.toggle' && this.playbackView) {
+      if (this.#staticCapture || this.#interactionDestroyStarted) return false
+      return this.playbackView.toggleFullscreen()
+    }
     if (action.type === 'step.next' || action.type === 'step.previous') {
       return this.movePlayback('step', action.type === 'step.next' ? 'next' : 'previous')
     }
@@ -1243,6 +1253,12 @@ class PublishedInteractionCourseSession extends PublishedCourseSession {
     if (shouldRemount && !this.#interactionDestroyStarted) {
       this.#mountInteractionControllers()
     }
+  }
+
+  override async goToObservationTarget(locationId: string, stateId?: string): Promise<void> {
+    const ok = await this.#navigatePlaybackTarget({ id: locationId, locationId, name: locationId, stateId }, new AbortController().signal,
+      { force: true, recordHistory: false, bypassGuards: true, prepareInitialState: true })
+    if (!ok) throw new Error(`Unable to observe Published target ${locationId}/${stateId ?? ''}`)
   }
 
   async #goToScene(
@@ -1837,10 +1853,10 @@ class FlowPublishedAdapter implements SurfaceHost {
     this.#services = null
   }
 
-  async #executeControllerAction(action: TeacherControllerAction): Promise<boolean> {
+  async #executeControllerAction(action: TeacherControllerAction): Promise<boolean | undefined> {
     if (this.#executeTeacherControllerAction) {
       const outcome = await this.#executeTeacherControllerAction(action)
-      if (outcome !== undefined) return true
+      if (outcome !== undefined) return outcome
     }
     if (action.type === 'course.restart' && this.#restartCourse) {
       return this.#restartCourse()
@@ -1853,7 +1869,7 @@ class FlowPublishedAdapter implements SurfaceHost {
       currentLocationId: this.#host.locationId,
       startLocationId: this.#payload.startLocationId,
     })
-    if (!target) return false
+    if (!target) return undefined
     if (action.type === 'course.restart') {
       this.#host.resetTeacherControllerSession('course')
       if (target.surfaceId === this.id) {
@@ -2013,10 +2029,10 @@ class SpatialPublishedAdapter implements SurfaceHost {
     this.#services = null
   }
 
-  async #executeControllerAction(action: TeacherControllerAction): Promise<boolean> {
+  async #executeControllerAction(action: TeacherControllerAction): Promise<boolean | undefined> {
     if (this.#executeTeacherControllerAction) {
       const outcome = await this.#executeTeacherControllerAction(action)
-      if (outcome !== undefined) return true
+      if (outcome !== undefined) return outcome
     }
     if (action.type === 'course.restart' && this.#restartCourse) {
       return this.#restartCourse()
@@ -2029,7 +2045,7 @@ class SpatialPublishedAdapter implements SurfaceHost {
       currentLocationId: this.#host.locationId,
       startLocationId: this.#payload.startLocationId,
     })
-    if (!target) return false
+    if (!target) return undefined
     if (action.type === 'course.restart') {
       this.#host.resetTeacherControllerSession('course')
       if (target.surfaceId === this.id) {

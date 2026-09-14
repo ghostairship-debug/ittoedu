@@ -1,3 +1,4 @@
+import { isControllerFixture } from '../fixtures/teacherController'
 import { beforeEach, describe, expect, it } from 'vitest'
 import type {
   ComponentManifestV4,
@@ -678,7 +679,7 @@ describe('Course Project V9 cross-surface playback controls', () => {
     const initial = selectActiveCourseProjectDocument(useEditorStore.getState())
     if (!initial) throw new Error('缺少 Slide Course Project')
     const controller = initial.globalLayerItems.find(
-      (entry) => entry.item.kind === 'native' && entry.item.content.nativeType === 'teacher-controller',
+      (entry) => isControllerFixture(entry.item),
     )
     if (!controller) throw new Error('缺少 Slide 教师控制器')
     const initialPastCount = activeHistory().past.length
@@ -739,7 +740,7 @@ describe('Course Project V9 cross-surface playback controls', () => {
     if (!initial) throw new Error('缺少 Flow Course Project')
     const hidden = structuredClone(initial)
     const controller = hidden.globalLayerItems.find(
-      (entry) => entry.item.kind === 'native' && entry.item.content.nativeType === 'teacher-controller',
+      (entry) => isControllerFixture(entry.item),
     )
     if (!controller) throw new Error('缺少 Flow 教师控制器')
     controller.item.playbackInitialVisibility = 'hidden'
@@ -754,7 +755,7 @@ describe('Course Project V9 cross-surface playback controls', () => {
     expect(document.playback.controls).toBe('canvas')
     expect(document.globalLayerItems).toHaveLength(hidden.globalLayerItems.length)
     expect(document.globalLayerItems.find(
-      (entry) => entry.item.kind === 'native' && entry.item.content.nativeType === 'teacher-controller',
+      (entry) => isControllerFixture(entry.item),
     )?.item.playbackInitialVisibility).toBe('inherit')
     expect(state.flowSession!.history.past).toHaveLength(before.past.length + 1)
     expect(state.statusMessage).toBe('已恢复教师控制器')
@@ -764,7 +765,7 @@ describe('Course Project V9 cross-surface playback controls', () => {
     document = useEditorStore.getState().flowSession!.history.present
     expect(document.playback.controls).toBe('none')
     expect(document.globalLayerItems.find(
-      (entry) => entry.item.kind === 'native' && entry.item.content.nativeType === 'teacher-controller',
+      (entry) => isControllerFixture(entry.item),
     )?.item.playbackInitialVisibility).toBe('hidden')
 
     useEditorStore.getState().redo()
@@ -792,7 +793,7 @@ describe('Course Project V9 cross-surface playback controls', () => {
     let document = state.flowSession!.history.present
     expect(document.playback).toEqual(patch)
     expect(document.globalLayerItems.find(
-      (entry) => entry.item.kind === 'native' && entry.item.content.nativeType === 'teacher-controller',
+      (entry) => isControllerFixture(entry.item),
     )?.item.playbackInitialVisibility).toBe('hidden')
     expect(state.flowSession!.history.past).toHaveLength(before.past.length + 1)
     expect(state.statusMessage).toBe('成品控制设置已更新')
@@ -836,7 +837,7 @@ describe('Course Project V9 cross-surface playback controls', () => {
     let document = state.spatialSession!.history.present
     expect(document.playback).toEqual(patch)
     expect(document.globalLayerItems.find(
-      (entry) => entry.item.kind === 'native' && entry.item.content.nativeType === 'teacher-controller',
+      (entry) => isControllerFixture(entry.item),
     )?.item.playbackInitialVisibility).toBe('hidden')
     expect(state.spatialSession!.history.past).toHaveLength(before.past.length + 1)
     expect(state.statusMessage).toBe('成品控制设置已更新')

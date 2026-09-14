@@ -685,7 +685,7 @@ export function DeveloperTab() {
   const rules = editingScope === 'global'
     ? courseProject?.globalInteractions ?? []
     : slideScene?.interactions ?? []
-  const [activeSection, setActiveSection] = useState<DeveloperSection>('runtime')
+  const [activeSection, setActiveSection] = useState<DeveloperSection>(selectedItem?.kind === 'component' ? 'component' : 'runtime')
   const [selectedRuleId, setSelectedRuleId] = useState<string>('')
   useEffect(() => {
     if (!rules.some((rule) => rule.id === selectedRuleId)) {

@@ -3,9 +3,11 @@ import { describe, expect, it } from 'vitest'
 import { captureGenerationSnapshot, type GenerationReferenceScope } from '@/renderer/authoring/generation/generationSnapshot'
 import { generationCapabilityContext } from '@/renderer/authoring/generation/generationCapabilities'
 import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
+import { createBlankFlowCourseProject } from '@/renderer/project/createFlowCourseProject'
 import { createImageNode, createTextNode } from '@/renderer/project/nativeNodeFactories'
 import { createSortComponentPackage } from '@/renderer/recipes/sort-component/package'
 import { parseComponentPackageFiles } from '@/renderer/components/importComponentPackage'
+import { withDefaultComponentController } from '@/renderer/components/teacherControllerComponent'
 import { projectEffectiveLayers } from '@/renderer/course/effectiveLayerProjection'
 import { sceneNodeToCourseLayerItem } from '@/shared/courseProjectModel'
 import type { ComponentLayerItem, CourseProjectDocument } from '@/shared/courseProjectTypes'
@@ -18,6 +20,57 @@ function snapshot(document: CourseProjectDocument, selectedIds: string[], scope:
 }
 
 describe('selection focus in whole-page generation snapshots', () => {
+  it('describes one global source target once across twenty locations', () => {
+    const { project, componentPackages } = withDefaultComponentController(createBlankCourseProject())
+    const surface = project.surfaces[0]
+    if (surface.type !== 'slide') throw new Error('Slide required')
+    const scene = surface.scenes[0], location = project.locations[0]
+    surface.scenes = Array.from({ length: 20 }, (_, index) => ({ ...structuredClone(scene), id: `scene-${index}` }))
+    project.locations = surface.scenes.map(scene => ({ ...location, id: scene.id, sceneId: scene.id }))
+    project.startLocationId = project.locations[0].id
+    const id = project.globalLayerItems[0].item.layerItemId
+    const request = snapshot(project, [id], 'selection', componentPackages)
+    expect((request.context as any).componentSources[0].editTargets.instance).toHaveLength(1)
+  })
+  it('observes a newly inserted Flow component without expanding feedback to its existing shared package source', () => {
+    const document = createBlankFlowCourseProject(), pkg = createSortComponentPackage()
+    document.componentPackages[pkg.manifest.id] = pkg.metadata
+    const before = snapshot(document, [], 'page', { [pkg.manifest.id]: pkg })
+    const flow = document.surfaces.find(surface => surface.type === 'flow')!
+    flow.blocks.push({ type: 'component', id: 'created-sort', component: { packageId: pkg.manifest.id, version: pkg.manifest.version }, props: {}, staticFallbackAssetId: 'fallback' })
+    flow.blocks.push({ type: 'heading', id: 'created-heading', level: 2, text: '观察步骤' })
+    document.locations.push({ id: 'created-heading', label: '观察步骤', kind: 'flow-block', blockId: 'created-heading', surfaceId: flow.id })
+    document.revision++
+    const projection = projectEffectiveLayers({ project: document, locationId: document.startLocationId })
+    const next = captureGenerationSnapshot({ document, workspace: before.workspace, projection, selectedIds: ['created-sort'], scope: 'page',
+      sessionToken: { locationId: document.startLocationId, surfaceType: 'flow', revision: document.revision, generation: 2 },
+      additionalLocationIds: ['created-heading'],
+      sharedComponentSourceAddresses: before.destinations.flatMap(destination => destination.kind === 'update' ? [destination.target.authoringAddress] : []),
+      instruction: before.instruction, purpose: before.purpose, componentPackages: { [pkg.manifest.id]: pkg } })
+    const source = (next.context as any).componentSources[0]
+    expect(source.editTargets.shared).toEqual({ status: 'unavailable', reason: 'outside-original-task-scope' })
+    expect(source.editTargets.instance[0].target.itemId).toBe('created-sort')
+    expect(next.destinations.some(destination => destination.kind === 'update' && destination.target.itemId === pkg.manifest.id)).toBe(false)
+    expect(next.destinations.some(destination => destination.kind === 'update' && destination.target.itemId === 'created-sort')).toBe(true)
+    expect(source.files['runtime.js']).toBeDefined()
+    const stable = (destination: typeof before.destinations[number]) => {
+      const { documentRevision: _revision, sessionGeneration: _generation, revisionPolicy: _policy, ...identity } = destination.kind === 'update' ? destination.target : destination.scope
+      return JSON.stringify({ kind: destination.kind, ...identity })
+    }
+    const allowed = new Set(before.destinations.map(stable))
+    expect(next.destinations.every(destination => allowed.has(stable(destination)) || destination.kind === 'update' && ['created-heading', 'created-sort'].includes(destination.target.itemId))).toBe(true)
+  })
+
+  it('includes Flow layout and coordinate semantics while retaining missing-mode reading compatibility', () => {
+    const project = createBlankFlowCourseProject()
+    const surface = project.surfaces.find(surface => surface.type === 'flow')!
+    const current = snapshot(project, []).context as any
+    expect(current.pages[0].layout.widthMode).toBe('fluid')
+    expect(current.pages[0].coordinates.paper).toContain('does not reserve space')
+    delete surface.layout.widthMode
+    expect((snapshot(project, []).context as any).pages[0].layout.widthMode).toBe('reading')
+    expect(surface.layout.widthMode).toBeUndefined()
+  })
   it('expands the selected image transform before earlier text without narrowing page/course relationships or frozen targets', () => {
     const document = createBlankCourseProject({ includeDefaultController: false, controls: 'none' }), second = createBlankCourseProject({ includeDefaultController: false, controls: 'none' })
     const firstSurface = document.surfaces[0]!, secondSurface = second.surfaces[0]!
@@ -30,11 +83,11 @@ describe('selection focus in whole-page generation snapshots', () => {
     const context = focused.context as any
     expect(context.capabilities.cards[0].entry.id).toBe('asset.image.transform')
     expect(context.capabilities.cards[0].content.inputSchema).toBeDefined()
-    expect(context.capabilities.deferred.map((value: any) => `${value.id}:${value.operation}`)).toContain('native.content:edit')
+    expect(context.capabilities.deferred.map((value: any) => `${value.id}:${value.operation}`)).toContain('native.content:edit-text')
     expect(context.pages.map((page: any) => page.location.id)).toEqual(document.locations.map(location => location.id))
     expect(context.pages[0].items.map((row: any) => row.item.layerItemId)).toEqual(['first-text', 'focus-image'])
     expect(context.pages[1].items[0].item.content.data.text).toBe('其他页')
-    expect(focused.destinations).toEqual(noFocus.destinations)
+    expect(new Set(focused.destinations.map(d => JSON.stringify(d)))).toEqual(new Set(noFocus.destinations.map(d => JSON.stringify(d))))
     expect(context.pages[0].items.map((row: any) => row.selected)).toEqual([false, true])
   })
 
@@ -76,7 +129,7 @@ describe('selection focus in whole-page generation snapshots', () => {
     expect(source.editInstruction).toContain('mode:instance')
     expect(source.editInstruction).not.toContain('Return complete files including unchanged files')
     const local = snapshot(document, ['selected'], 'selection', { [pkg.manifest.id]: pkg })
-    expect((local.context as any).componentSources[0].editTargets.instance.map((value: any) => value.target.itemId)).toEqual(['selected'])
+    expect((local.context as any).componentSources[0].editTargets.instance.map((value: any) => value.target.itemId)).toEqual(['selected', 'other', 'locked'])
     surface.scenes[0]!.presentation = { initialStateId: 'named', states: [{ id: 'named', name: '命名状态', layerItemOverrides: {} }] }
     const named = snapshot(document, ['selected'], 'selection', { [pkg.manifest.id]: pkg }, 'named')
     expect((named.context as any).componentSources[0].editTargets.instance[0]).toMatchObject({

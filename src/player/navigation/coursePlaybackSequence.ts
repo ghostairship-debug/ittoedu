@@ -1,4 +1,5 @@
-import type { TeacherControllerAction } from '../../shared/contracts/native-v1'
+import type { TeacherControllerAction } from '../../shared/teacherControllerConfig'
+
 import type { PublishedCourseV2Payload } from '../../shared/publishedCourseTypes'
 import type { CourseLocation } from '../../shared/courseProjectTypes'
 

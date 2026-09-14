@@ -234,11 +234,12 @@ export const COURSE_PROJECT_VALIDATION_FINDING_CODE_LEDGER = [
     sections: ['projectHealth'],
     note: 'Course Project V9 Schema rejects component instances whose version does not match package metadata.',
   },
+
   {
     code: 'controller-button-id-duplicate',
-    status: 'schema-shadowed',
+    status: 'active',
     sections: ['projectHealth'],
-    note: 'Native teacher-controller Schema rejects duplicate button ids before semantic reports run.',
+    note: 'Reports duplicate ids in the component controller button configuration.',
   },
   {
     code: 'controller-required-for-canvas',

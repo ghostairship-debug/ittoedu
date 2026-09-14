@@ -1,5 +1,6 @@
+import { buildPublishedFixture as buildPublishedCourseV2Payload } from '../fixtures/teacherController'
 import { beforeEach, describe, expect, it } from 'vitest'
-import { buildPublishedCourseV2Payload } from '@/renderer/export/course/buildPublishedCourse'
+
 import type { InteractionAuthoringTarget } from '@/renderer/interactions/interactionAuthoringCommands'
 import {
   SCENE_ENTER_REVEAL_SEQUENCE_TEMPLATE_ID,

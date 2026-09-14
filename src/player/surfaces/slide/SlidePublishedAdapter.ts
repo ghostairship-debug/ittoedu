@@ -1,4 +1,8 @@
+import type { TeacherControllerAction } from '../../../shared/teacherControllerConfig'
 import type { PlaybackNavigationViewPort } from '../../navigation/coursePlaybackSequence'
+import { TeacherControllerComponentHost } from '../../teacherControllerComponentHost'
+import { controllerHostInput, isControllerItem, type PublishedTeacherControllerItem } from '../../teacherControllerComponentGeometry'
+import type { TeacherControllerHostOptions } from '../../teacherControllerHostContract'
 import type { PlaybackViewSession } from '../../playbackViewSession'
 import {
   composePublishedCourseLocation,
@@ -9,8 +13,7 @@ import type {
 } from '../../../shared/courseProjectTypes'
 import {
   isNativeRenderInput,
-  type TeacherControllerAction,
-  type TeacherControllerNode,
+  
 } from '../../../shared/contracts/native-v1/types'
 import type {
   PlayerAuthoringContext,
@@ -48,11 +51,10 @@ import type {
   SurfaceResetScope,
 } from '../SurfaceHost'
 import {
-  TeacherControllerDom,
   stageBoundsFromElement,
-  teacherControllerDomNode,
-  type TeacherControllerDomSession,
-} from '../../teacherControllerDom'
+  teacherControllerHostNode,
+  type TeacherControllerHostSession,
+} from '../../teacherControllerHostContract'
 import { TeacherControllerRuntimeSessionStore } from '../../teacherControllerRuntimeSession'
 import {
   extractPublishedComponentManifest,
@@ -67,7 +69,6 @@ import {
   readonlyNativeRenderInputFromPublishedItem,
   paintPublishedNativeRenderInput,
   type PublishedNativeRenderInput,
-  type PublishedTeacherControllerInput,
 } from '../native/publishedNativeRendering'
 import {
   mountPublishedNativeVideo,
@@ -377,16 +378,9 @@ function appendVisibleTextFallback(
   wrap.appendChild(fallback)
 }
 
-function isPublishedTeacherController(
-  item: PublishedLayerItem,
-): item is PublishedNativeLayerItem & {
-  content: Extract<PublishedNativeLayerItem['content'], { nativeType: 'teacher-controller' }>
-} {
-  return item.kind === 'native' && item.content.nativeType === 'teacher-controller'
-}
 
 function isPublishedInteractiveLayer(item: PublishedLayerItem): boolean {
-  return isPublishedTeacherController(item)
+  return isControllerItem(item)
     || (item.kind === 'native' && item.content.nativeType === 'video')
 }
 
@@ -415,7 +409,7 @@ function publishedInteractionOwnership(
   if (item.kind === 'component') return 'component'
   if (item.kind === 'runtime') return 'runtime'
   if (item.content.nativeType === 'video') return 'media'
-  if (item.content.nativeType === 'teacher-controller') return 'teacher-controller'
+  
   return 'native'
 }
 
@@ -433,8 +427,8 @@ function appendLayerNode(
   item: PublishedLayerItem,
   source: 'scene' | 'surface' | 'global',
   resolveAsset: (assetId: string) => string | undefined,
-  mountTeacherController?: (wrap: HTMLElement, input: PublishedTeacherControllerInput) => void,
   options?: {
+    mountControllerComponent?: (wrap: HTMLElement, item: Extract<PublishedLayerItem, { kind: 'component' }>) => void
     projectId?: string
     components?: Readonly<Record<string, PublishedComponentPackageSource>>
     interactive?: boolean
@@ -503,15 +497,15 @@ function appendLayerNode(
     wrap.style.pointerEvents = 'none'
     wrap.setAttribute('aria-hidden', 'true')
   }
-  if (item.kind === 'native') {
+  if (item.kind === 'component' && item.role === 'teacher-controller' && options?.mountControllerComponent) {
+    delete wrap.dataset.playbackBounds
+    options.mountControllerComponent(wrap, item)
+  } else if (item.kind === 'native') {
     paintPublishedNativeRenderInput(
       wrap,
       options?.renderInput ?? readonlyNativeRenderInputFromPublishedItem(item),
       {
         resolveAsset,
-        ...(mountTeacherController
-          ? { mountTeacherController }
-          : {}),
       },
       { staticCapture: options?.staticCapture === true },
     )
@@ -710,7 +704,7 @@ export class SlidePublishedAdapter implements SurfaceHost, PublishedAuthoringPat
   #root: HTMLElement | null = null
   #active = false
   #services: SurfacePlayerServices | null = null
-  #controllers: TeacherControllerDom[] = []
+  #controllers: (TeacherControllerComponentHost)[] = []
   #componentHandles: PublishedComponentMountHandle[] = []
   #phaserComponentHandles: PublishedComponentMountHandle[] = []
   #deferredCarrierMounts: Array<() => void> = []
@@ -1138,6 +1132,7 @@ export class SlidePublishedAdapter implements SurfaceHost, PublishedAuthoringPat
     const preparedActivation = this.#preparedRuntimeActivation
     this.#preparedRuntimeActivation = null
     this.#active = true
+    for (const controller of this.#controllers) if (controller instanceof TeacherControllerComponentHost) controller.resume()
     if (this.#root) this.#root.hidden = false
     this.#pendingRuntimeActivation = null
     if (!(wasInactive && preparedActivation !== null)) {
@@ -1166,6 +1161,7 @@ export class SlidePublishedAdapter implements SurfaceHost, PublishedAuthoringPat
   async suspend(): Promise<void> {
     this.#invalidateInteractions()
     this.#active = false
+    for (const controller of this.#controllers) if (controller instanceof TeacherControllerComponentHost) controller.suspend()
     this.#pausePublishedVideos()
     this.#carrierSideEffects.suspend()
     this.#preparedRuntimeActivation = null
@@ -1339,8 +1335,8 @@ export class SlidePublishedAdapter implements SurfaceHost, PublishedAuthoringPat
       record.source === 'global'
       && !this.#includeGlobalLayerItemsForStaticCapture
     ) return false
-    if (isPublishedTeacherController(record.item)) {
-      return record.item.content.data.includeInStaticExports
+    if (isControllerItem(record.item)) {
+      return record.item.props.includeInStaticExports === true
     }
     return true
   }
@@ -1474,7 +1470,11 @@ export class SlidePublishedAdapter implements SurfaceHost, PublishedAuthoringPat
     const before = this.#validateCapturedAuthoringRecord(captured, record)
     if (!before.ok) return before
     this.#cancelAuthoringMotion(item.layerItemId)
-    if (item.kind === 'component') {
+    if (isControllerItem(item)) {
+      record.item = item
+      this.#applyRecordFrame(record)
+      this.#remountAuthoringControllers()
+    } else if (item.kind === 'component') {
       const previous = record.item
       const handle = record.componentHandle
       const samePackage = previous.kind === 'component'
@@ -1514,10 +1514,6 @@ export class SlidePublishedAdapter implements SurfaceHost, PublishedAuthoringPat
       if (!current.ok) return current
       record.item = item
       this.#applyRecordFrame(record)
-    } else if (item.kind === 'native' && item.content.nativeType === 'teacher-controller') {
-      record.item = item
-      this.#applyRecordFrame(record)
-      this.#remountAuthoringControllers()
     } else if (item.kind === 'native') {
       record.item = item
       this.#applyRecordFrame(record)
@@ -1538,11 +1534,11 @@ export class SlidePublishedAdapter implements SurfaceHost, PublishedAuthoringPat
   #remountAuthoringControllers(): void {
     this.#destroyControllers()
     for (const record of this.#renderedLayers.values()) {
-      if (!isPublishedTeacherController(record.item)) continue
+      if (!isControllerItem(record.item)) continue
       record.wrap.replaceChildren()
       this.#mountTeacherController(
         record.wrap,
-        readonlyNativeRenderInputFromPublishedItem(record.item),
+        record.item,
       )
     }
   }
@@ -1757,7 +1753,8 @@ export class SlidePublishedAdapter implements SurfaceHost, PublishedAuthoringPat
     })
   }
 
-  #controllerSessionFor(input: PublishedTeacherControllerInput): TeacherControllerDomSession {
+  #controllerSessionFor(input: ReturnType<typeof controllerHostInput>): TeacherControllerHostSession {
+    if (this.#authoring || this.#staticCapture) return { offset: { dx: 0, dy: 0 }, collapsed: input.collapsible && input.defaultCollapsed }
     return this.#teacherControllerSession.get({
       controllerId: input.id,
       surfaceSessionId: this.id,
@@ -1765,26 +1762,16 @@ export class SlidePublishedAdapter implements SurfaceHost, PublishedAuthoringPat
     })
   }
 
-  #mountTeacherController(wrap: HTMLElement, input: PublishedNativeRenderInput): void {
-    if (input.type !== 'teacher-controller' || this.#payload.playback.controls === 'none') return
+  #mountTeacherController(wrap: HTMLElement, component: PublishedTeacherControllerItem): void {
+    const input = controllerHostInput(component)
+    if ( this.#payload.playback.controls === 'none') return
     const root = this.#root
     if (!root) return
     const session = this.#controllerSessionFor(input)
     wrap.style.left = `${input.x + session.offset.dx}px`
     wrap.style.top = `${input.y + session.offset.dy}px`
-    const node = teacherControllerDomNode(
-      { x: input.x, y: input.y, width: input.width, height: input.height },
-      input.rotation,
-      {
-        title: input.title,
-        compact: input.compact,
-        showSceneProgress: input.showSceneProgress,
-        collapsible: input.collapsible,
-        buttons: structuredClone(input.buttons) as TeacherControllerNode['buttons'],
-        style: structuredClone(input.style),
-      },
-    )
-    const controller = new TeacherControllerDom({
+    const node = teacherControllerHostNode({ x: input.x, y: input.y, width: input.width, height: input.height }, input.rotation)
+    const options: TeacherControllerHostOptions = {
       navigation: this.#navigation,
       playbackView: this.#playbackView,
       node,
@@ -1812,19 +1799,21 @@ export class SlidePublishedAdapter implements SurfaceHost, PublishedAuthoringPat
         wrap.style.left = `${input.x + next.offset.dx}px`
         wrap.style.top = `${input.y + next.offset.dy}px`
       },
-      onAction: (action) => {
-        void this.#handleControllerAction(action).catch((cause) => {
-          const message = cause instanceof Error ? cause.message : String(cause)
-          this.#services?.reportDiagnostic?.({
-            surfaceId: this.id,
-            phase: 'execute',
-            severity: 'error',
-            message: `教师控制器动作“${action.type}”执行失败：${message}`,
-            cause,
-          })
-        })
+      onAction: async action => {
+      const accepted = await this.#executeTeacherControllerAction?.(action)
+      if (accepted !== undefined) return accepted
+      await this.#handleControllerAction(action)
+      return true
       },
+      onActionError: (action, error) => { this.#services?.reportDiagnostic?.({ surfaceId: this.id, phase: 'execute', severity: 'error', message: `教师控制台动作执行失败：${error.message}`, cause: error }) },
       getInteractive: () => this.#active && !this.#authoring && !this.#staticCapture,
+    }
+    const controller = new TeacherControllerComponentHost(options, {
+      container: wrap, componentId: component.component.packageId, version: component.component.version,
+      instanceId: component.layerItemId, props: component.props, width: component.frame.width, height: component.frame.height,
+      components: this.#authoring?.componentPackages ?? this.#payload.components, projectId: this.#payload.courseId,
+      resolveAsset: this.#resolveAsset, scope: 'global', mode: this.#authoring ? 'edit' : this.#staticCapture ? 'capture' : 'preview',
+      interactive: !this.#authoring && !this.#staticCapture,
     })
     this.#controllers.push(controller)
   }
@@ -1833,7 +1822,7 @@ export class SlidePublishedAdapter implements SurfaceHost, PublishedAuthoringPat
     if (this.#authoring) return
     if (this.#executeTeacherControllerAction) {
       const handled = await this.#executeTeacherControllerAction(action)
-      if (handled !== false) {
+      if (handled !== undefined) {
         for (const controller of this.#controllers) controller.refreshStatus()
         return
       }
@@ -2033,10 +2022,6 @@ export class SlidePublishedAdapter implements SurfaceHost, PublishedAuthoringPat
       root.style.backgroundColor = 'transparent'
       this.#playbackView.register({ id: this.id, kind: 'slide', root, content: stage })
     }
-    const mountController = (wrap: HTMLElement, input: PublishedTeacherControllerInput) => {
-      if (this.#playbackView) root.appendChild(wrap)
-      this.#mountTeacherController(wrap, input)
-    }
     if (this.#authoring) this.#publishAuthoringRuntimeTargets(scene.id)
     for (const entry of plan.layers) {
       const source = entry.source
@@ -2099,13 +2084,16 @@ export class SlidePublishedAdapter implements SurfaceHost, PublishedAuthoringPat
       }
       const wrap = appendLayerNode(
         root.ownerDocument,
-        this.#playbackView && renderedItem.kind === 'native' && renderedItem.content.nativeType === 'teacher-controller' ? root : stage,
+        this.#playbackView && isControllerItem(renderedItem) ? root : stage,
         renderedItem,
         source,
         this.#resolveAsset,
-        mountController,
         {
           projectId: this.#payload.courseId,
+          mountControllerComponent: (wrap, item) => {
+            if (!isControllerItem(item)) return
+            this.#mountTeacherController(wrap, item)
+          },
           components: this.#authoring?.componentPackages ?? this.#payload.components,
           interactive: !this.#authoring && !this.#staticCapture,
           includeInvisible: this.#authoring !== null,

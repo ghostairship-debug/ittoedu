@@ -1,5 +1,11 @@
 # AI 编辑最短路径统一方案
 
+> 2026-09-14 机制接续：常规操作完整输入、依赖组合、同源条件、预检/恢复和结果检查的当前纵切，以及 Codex 快速模式已实现，见[机制方案第 9 节](docs/development-plan/AI_AUTHORING_MECHANISM_IMPLEMENTATION_PLAN.md#9-2026-09-14-开发批次与新增快速模式)和[实测记录](docs/development-plan/reviews/2026-09-14-authoring-mechanism-implementation.md)。三家 CLI 已有自然图形任务首次原生候选证据；先前指定文件/失败续跑样本仍单列。本文保留历史决策，完整后续任务族与 Owner 验收不因本批自动完成。
+
+> 2026-09-14 接续：Owner 明确选择仅是上下文焦点，宿主快捷工具不是能力上限。当前开放修改、CLI 文件兜底、原生权限/代理接线及等待体验按[修复方案](docs/development-plan/R18_USER_EXPERIENCE_REPAIR_PLAN.md)完成工程修复；[真实记录](docs/development-plan/reviews/2026-09-14-native-editing-repair.md)分列首次失败、兜底提交和剩余延迟。下文历史范围规则与此决定不一致时，以本次明确决定和架构合同为准。
+
+> 2026-09-11接续：当晚真实使用证明常规换图、场景导航与默认目标仍未闭环；当前修改方案移至[常规任务三层执行与修改方案](docs/development-plan/AI_COMMON_TASK_EXECUTION_PLAN.md)，明确软件接管确定性工程步骤、10类第二层任务、分批开发及前两层80%以上覆盖目标。2026-09-12经Owner授权完成1.8 B0/B1工程实现与受影响验证，原始Luna样本、后修复及软件应用链分列于[验收记录](docs/development-plan/reviews/2026-09-12-r18-b01-integration.md)；60项未计分，B2–B4及S3仍保留相应边界。下文保留9月9日原决策、已执行批次和证据，不作为并行新执行清单；未被新方案替代的正式边界继续有效。
+
 > 整合与核验日期：2026-09-09。源码基线：`c839c205e594ab61bfa01c22b4a4f28303862d8d`。\
 > 本文原位替代《AI 编辑最短路径产品决策报告》，是本轮原方案与八份模型评估整合后的唯一专题方案。评估报告保留为评估时的输入证据，其中的建议、估算和任务编号不再作为并行执行方案。\
 > 状态：经用户授权，当前 A/B/C/D 执行包已进入产品实施与真实验证；已集成行为、原始失败和通过证据见[实施记录](docs/development-plan/reviews/2026-09-09-short-path-implementation.md)。本文继续保留决策及原事故事实，不用后续结果改写原样本；未形成新的 S3/S4 或 Owner 验收结论。长期路线仍由[开发总纲](COURSEWARE_DEVELOPMENT_PLAN.md)负责，技术边界服从[架构合同](docs/development-plan/ARCHITECTURE_CONTRACT.md)，实施遵循[工作协议](docs/development-plan/WORKING_PROTOCOL.md)。

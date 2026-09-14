@@ -10,7 +10,6 @@ import {
 } from '../../../shared/courseProjectTypes'
 import { rotatedRectangleAabb } from '../../../shared/geometry'
 export type AlignmentMode = 'left' | 'center' | 'right' | 'top' | 'middle' | 'bottom'
-import { commitTeacherControllerAuthoringFrame } from '../../authoring/v9TeacherControllerAuthoring'
 import { commitV9SlideContentEdit, commitV9SlideTextRunStyle } from '../../authoring/v9SlideContentEdit'
 import { createImageAssetImport } from '../../project/assetManager'
 import {
@@ -55,7 +54,6 @@ import {
   applySceneNodePatchToCourseOverride,
   applySceneNodePatchToLayerItem,
   commandTargetForRow,
-  constrainRoundTripTeacherControllerFrame,
   findCourseSlideScene,
   findMutableCourseLayerItem,
   locationVisibilityFromScenePatch,
@@ -638,6 +636,11 @@ export function createSlideOwnedCommands(
       if (snapshot.scope === 'scene' && snapshot.stateId !== null) {
         runV9DocumentMutation((draft) => {
           for (const item of patches) {
+            const global = draft.globalLayerItems.find(entry => entry.item.layerItemId === item.nodeId)?.item
+            if (global) {
+              if (!global.locked || item.patch.locked === false) applySceneNodePatchToLayerItem(global, item.patch, packages)
+              continue
+            }
             applySceneNodePatchToCourseOverride(
               draft,
               snapshot.sceneId,
@@ -692,7 +695,6 @@ export function createSlideOwnedCommands(
             const layer = findMutableCourseLayerItem(draft, item.nodeId)
             if (!layer || (layer.locked && item.patch.locked !== false)) continue
             applySceneNodePatchToLayerItem(layer, item.patch, packages)
-            constrainRoundTripTeacherControllerFrame(layer, item.patch)
           }
           synchronizeCourseTeacherControllerControls(draft)
         })
@@ -722,22 +724,7 @@ export function createSlideOwnedCommands(
           { expectedRevision: live.getSnapshot().revision },
         ))
       }
-      const controllerPatches = framePatches.filter((item) => slideRow(item.nodeId)?.isTeacherController)
-      const sceneFramePatches = framePatches.filter((item) => !slideRow(item.nodeId)?.isTeacherController)
-      for (const item of controllerPatches) {
-        const row = slideRow(item.nodeId)
-        if (!row || row.item.kind !== 'native') continue
-        slide.persist(commitTeacherControllerAuthoringFrame(live.getSession(), {
-          layerItemId: item.nodeId,
-          frame: {
-            x: typeof item.patch.x === 'number' ? item.patch.x : row.item.frame.x,
-            y: typeof item.patch.y === 'number' ? item.patch.y : row.item.frame.y,
-            width: typeof item.patch.width === 'number' ? item.patch.width : row.item.frame.width,
-            height: typeof item.patch.height === 'number' ? item.patch.height : row.item.frame.height,
-          },
-          rotation: typeof item.patch.rotation === 'number' ? item.patch.rotation : row.item.rotation,
-        }, { expectedRevision: live.getSnapshot().revision }))
-      }
+      const sceneFramePatches = framePatches
       const contentPatches = remaining.filter((item) => (
         ('text' in item.patch && item.patch.text !== undefined) ||
         ('style' in item.patch && item.patch.style !== undefined) ||

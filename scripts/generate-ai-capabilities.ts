@@ -4,7 +4,9 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { z } from 'zod'
 import { stripTypeScriptTypes } from 'node:module'
+import { build } from 'esbuild'
 import { describeAuthoringToolDiscovery } from '../src/renderer/authoring/tools/authoringToolFacade'
+import { describeGenerationSemanticTools, generationProjectDocumentWireInputSchema } from '../src/shared/generationContract'
 import { courseAgentSkills, courseAgentSkillMarkdown } from '../src/shared/courseAgentSkills'
 import { courseAgentCapabilityQueryHelp, type CourseAgentCapabilityData, type CourseAgentCapabilityEntry } from '../src/shared/courseAgentCapabilities'
 import packageJson from '../package.json'
@@ -688,17 +690,7 @@ const nodeCapabilitySummary = {
       pptx: 'native-shape',
     },
   },
-  'teacher-controller': {
-    label: '教师控制器',
-    authoringModes: ['professional'],
-    authoringScopes: ['global'],
-    exports: {
-      singleHtml: 'interactive',
-      webPackage: 'interactive',
-      pdf: 'omitted-by-default',
-      pptx: 'omitted-by-default',
-    },
-  },
+
 } as const satisfies Record<CourseNativeType, {
   label: string
   authoringModes: readonly string[]
@@ -861,13 +853,42 @@ async function addDiscoveryArtifacts(projectRoot: string, files: Map<string, str
   const toolDefinitions = describeAuthoringToolDiscovery()
   for (const tool of toolDefinitions) {
     const location = `tools/${tool.name}.json`
-    resources.set(location, readableResourceJson({ version: 1, ...tool }))
+    // The CLI sends a file reference, not an inline 100 KB document schema.
+    // Preserve the complete canonical input contract as an on-demand resource.
+    const artifactSchema = 'schemas/project-document-artifact.json'
+    if (tool.name === 'project.document') {
+      const input = tool.inputSchema as Record<string, any>
+      resources.set(artifactSchema, readableResourceJson({ $schema: input.$schema, ...input.properties.artifact, $defs: input.$defs }))
+    }
+    resources.set(location, readableResourceJson({ version: 1, ...tool,
+      ...(tool.name === 'project.document' ? {
+        inputSchema: z.toJSONSchema(generationProjectDocumentWireInputSchema),
+        artifactSchema,
+        examples: [{ input: { artifact: { $candidateFile: 'resources/result.json' } } }],
+        invocation: '候选提交文件引用，宿主解析文件并严格验证 V9。通常直接编辑冻结 document.json 的已有结构，无需读取完整 Schema 或编写验证器；新增未知结构时按需读取 artifactSchema。保留工程 cwd，用绝对路径读写暂存文件，避免 Windows 长工作目录错误。',
+      } : {}),
+      ...(tool.name === 'asset.media.import' ? { candidateTransport: {
+        instruction: '候选传输允许 base64 使用本轮文件引用，Main 摄取真实字节后才调用正式工具。使用 request.destinations 的 global create 素材依赖目标；后续 owner.background.backgroundAssetId 可引用该步 asset-id 结果。所有步骤同一事务，失败零写入。',
+        input: { kind: 'image', filename: 'dog.png', mimeType: 'image/png', base64: { $candidateFile: 'resources/dog.png' } },
+      } } : {}),
+    }))
     entries.push({ id: tool.name, kind: 'tool', label: tool.name, path: location,
       scopes: tool.supportedScopes, carriers: [...new Set([tool.candidateCarrier.default, ...Object.values(tool.candidateCarrier.operations ?? {})])],
       variants: tool.variants,
       summary: tool.description ?? '按完整输入 Schema、当前 canonical target 和宿主支持执行。',
       dependencies: tool.name === 'component.package' ? ['component-api4'] : tool.name === 'runtime.insert' || tool.name === 'runtime.source' ? ['runtime-api2', 'runtime-api3'] : [],
     })
+  }
+  // Candidate semantic operations expand the same formal commands. They are
+  // discoverable through this one generated catalog, not standalone Facade RPCs.
+  for (const tool of describeGenerationSemanticTools()) {
+    const location = `tools/${tool.name}.json`
+    resources.set(location, readableResourceJson({ version: 1, ...tool, supportedScopes: tool.scopes,
+      invocation: { channel: 'generation-candidate', destination: 'current request destination alias',
+        instruction: '作为当前候选的一步返回；由宿主展开和提交，不直接调用 session.execute。' } }))
+    entries.push({ id: tool.name, kind: 'tool', label: tool.name, path: location,
+      scopes: tool.scopes, carriers: [tool.candidateCarrier.default], summary: tool.description,
+      keywords: '图片 插图 换图 形状 背景 素材 替换 image picture replace background' })
   }
   for (const recipe of RECIPE_CATALOG) {
     const location = `recipes/${recipe.id}.json`
@@ -908,6 +929,7 @@ async function addDiscoveryArtifacts(projectRoot: string, files: Map<string, str
     resources.set(guideLocation, authoringGuide)
     resources.set(location, readableResourceJson({ ...schema, types: await fs.readFile(path.join(projectRoot, protocol.source), 'utf8'),
       sharedTypes: { assessment: await fs.readFile(path.join(projectRoot, 'src/shared/assessmentEvaluators.ts'), 'utf8'),
+        ...(protocol.id === 'component-api4' ? { teacherController: await fs.readFile(path.join(projectRoot, 'src/shared/contracts/component-v4/teacherController.ts'), 'utf8') } : {}),
         ...(protocol.id === 'runtime-api2' ? {} : { runtime: await fs.readFile(path.join(projectRoot, 'src/shared/contracts/runtime/types.ts'), 'utf8') }) },
       authoringGuide, authoringGuideFile: guideLocation }))
     entries.push({ id: protocol.id, kind: 'protocol', label: protocol.id, path: location, scopes: protocol.scopes, carriers: protocol.carriers,
@@ -936,6 +958,10 @@ async function addDiscoveryArtifacts(projectRoot: string, files: Map<string, str
     entries.push({ id: `skill:${skill.name}`, kind: 'skill', label: skill.name, path: location, scopes: allScopes, carriers: allCarriers, summary: skill.body.split('。')[0]! })
   }
   resources.set('query-core.mjs', stripTypeScriptTypes(await fs.readFile(path.join(projectRoot, 'src/shared/courseAgentCapabilities.ts'), 'utf8')).split('\n').map(line => line.trimEnd()).join('\n'))
+  const helper = await build({ entryPoints: [path.join(projectRoot, 'scripts/candidate-helper.ts')], bundle: true, write: false,
+    format: 'esm', platform: 'node', target: 'node20', minify: true, legalComments: 'none' })
+  resources.set('candidate-helper-core.mjs', helper.outputFiles[0]!.text)
+  resources.set('candidate-helper.mjs', '// Run: node candidate-helper.mjs --request <request.json> --input <draft.json> [--check]\n// Draft: {summary,steps,afterCommit?}; IDs and version come from the request.\n// Precheck is not host commit. Keep native cwd; use absolute paths.\nimport "./candidate-helper-core.mjs";\n')
   resources.set('query.mjs', [
     "import {readFile} from 'node:fs/promises';",
     `import {runCourseAgentCapabilityQuery} from ${JSON.stringify("./query-core.mjs")};`,
@@ -951,7 +977,8 @@ async function addDiscoveryArtifacts(projectRoot: string, files: Map<string, str
     protocols: entries.filter(entry => entry.kind === 'protocol').map(entry => ({ id: entry.id, path: entry.path, authoringGuideFile: `protocols/${entry.id}.authoring.md`, scopes: entry.scopes })),
     cache: 'Reuse only with the same semanticVersion and the same query scope; source/material/observation versions are separate.',
   }
-  const discoveryText = readableResourceJson(discovery)
+  // One-space indentation keeps the routing index below 8 KiB and each native Read line short.
+  const discoveryText = JSON.stringify(JSON.parse(canonicalJson(discovery)), null, 1) + '\n'
   if (Buffer.byteLength(discoveryText) > AI_CAPABILITY_DISCOVERY_MAX_BYTES) throw new Error('精简发现入口超过 8 KiB，不能截断能力')
   resources.set('discovery.json', discoveryText)
   const data: CourseAgentCapabilityData = { version: 1, semanticVersion, entries, files: Object.fromEntries(resources) }

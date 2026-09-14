@@ -29,9 +29,7 @@ function escapeXml(value: string): string {
 }
 
 function shouldOmitPublishedItemFromStaticExport(item: PublishedLayerItem): boolean {
-  return item.kind === 'native'
-    && item.content.nativeType === 'teacher-controller'
-    && !item.content.data.includeInStaticExports
+  return false
 }
 
 function publishedDynamicFallbackAssetId(item: PublishedLayerItem): string | undefined {
@@ -174,10 +172,7 @@ function renderSpatialItemMarkup(
     }
     return `${prefix}<rect x="${x}" y="${y}" width="${width}" height="${height}" fill="#0f172a"/><text x="${x + width / 2}" y="${y + height / 2}" text-anchor="middle" dominant-baseline="middle" font-size="16" fill="#f8fafc">视频静态封面</text></g>`
   }
-  if (item.kind === 'native' && item.content.nativeType === 'teacher-controller') {
-    const { x, y, width, height } = item.frame
-    return `${prefix}<rect x="${x}" y="${y}" width="${width}" height="${height}" rx="${item.content.data.style.cornerRadius}" fill="${escapeXml(item.content.data.style.backgroundColor)}" fill-opacity="${item.content.data.style.backgroundOpacity}"/><text x="${x + width / 2}" y="${y + height / 2}" text-anchor="middle" dominant-baseline="middle" font-size="14" fill="${escapeXml(item.content.data.style.textColor)}">${escapeXml(item.content.data.title)}</text></g>`
-  }
+  
   if (item.kind === 'component' || item.kind === 'runtime') {
     const { x, y, width, height } = item.frame
     const fallbackId = publishedDynamicFallbackAssetId(item)

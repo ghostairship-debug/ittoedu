@@ -2,7 +2,7 @@
 
 import { randomUUID } from 'node:crypto'
 import { describe, expect, it, vi } from 'vitest'
-import { GenerationTaskController, type GenerationPrepared } from '../../src/renderer/authoring/generation/generationTaskController'
+import { GenerationTaskController, generationNativeActivity, type GenerationPrepared } from '../../src/renderer/authoring/generation/generationTaskController'
 import { createBlankCourseProject } from '../../src/renderer/project/createCourseProject'
 import { GenerationCandidatePreparationError, generationCandidateSchema, generationCommitReceiptSchema, generationRequestSchema, type GenerationAfterCommit, type GenerationCandidate, type GenerationCommitReceipt, type GenerationFailure, type GenerationRequest } from '../../src/shared/generationContract'
 import { localAgentRequestSchema, localAgentResponseSchema, type LocalAgentRequest, type LocalAgentResponse } from '../../src/shared/localAgentContract'
@@ -10,6 +10,13 @@ import type { AiUserInput } from '../../src/shared/localAgentInteraction'
 
 type Ports = ConstructorParameters<typeof GenerationTaskController>[0]
 type HostResultCall = Extract<LocalAgentRequest, { operation: 'host-result' }>
+it('reports native tool activity without treating model prose or status heartbeats as tool completion', () => {
+  const base = { version: 1 as const, adapter: 'codex' as const, sessionId: randomUUID(), sequence: 1, time: 1000 }
+  const call = { ...base, kind: 'tool-call' as const, payload: { id: 'a' } }
+  const text = { ...base, time: 2000, kind: 'text' as const, payload: { text: '工具已完成' } }
+  expect(generationNativeActivity([call, text], 7000)).toBe('CLI 正在执行 1 项工具；距最近原生活动 5 秒')
+  expect(generationNativeActivity([call, { ...base, time: 3000, kind: 'tool-result', payload: { id: 'a' } }], 7000)).toBe('等待 CLI 的下一步结果；距最近原生活动 4 秒')
+})
 function deferred<T>() {
   let resolve!: (value: T) => void
   const promise = new Promise<T>(done => { resolve = done })
@@ -138,6 +145,44 @@ function fixture(outcomes: Array<'candidate' | 'answer' | 'candidate-rejected' |
 }
 
 describe('GenerationTaskController deadline recovery feedback', () => {
+  it('preserves the stale recovery reason when content changes during checked-result feedback', async () => {
+    vi.useFakeTimers()
+    const f = fixture(['candidate']), delayed = deferred<void>()
+    f.behavior.onHostResult = call => call.result.status === 'checked' ? delayed.promise : Promise.resolve()
+    try {
+      const running = f.controller.start(f.request(), 'codex')
+      await vi.advanceTimersByTimeAsync(0)
+      expect(f.controller.current.phase).toBe('checking')
+      f.drift(); await vi.advanceTimersByTimeAsync(100); await running
+      expect(f.controller.current).toMatchObject({ busy: false, phase: 'failed', error: expect.stringMatching(/^stale：/) })
+      expect(f.hostResults().at(-1)?.result.status).toBe('stale')
+      expect(f.apply).not.toHaveBeenCalled()
+    } finally { delayed.resolve(); vi.useRealTimers() }
+  })
+
+  it('stops a hanging native read on document drift and keeps a late result from overwriting a fresh task', async () => {
+    vi.useFakeTimers()
+    const f = fixture(['candidate', 'answer']), delayed = deferred<void>()
+    f.behavior.onRead = () => delayed.promise
+    try {
+      const old = f.controller.start(f.request(), 'codex')
+      await vi.advanceTimersByTimeAsync(0)
+      f.drift()
+      await vi.advanceTimersByTimeAsync(100)
+      await old
+      expect(f.controller.current).toMatchObject({ busy: false, phase: 'failed', error: expect.stringContaining('stale：') })
+      expect(f.prepare).not.toHaveBeenCalled()
+      expect(f.calls.some(call => call.operation === 'cancel')).toBe(true)
+      f.behavior.onRead = async () => undefined
+      await f.controller.start(f.request(), 'codex')
+      const fresh = f.controller.current
+      delayed.resolve(); await vi.advanceTimersByTimeAsync(0)
+      expect(f.controller.current).toBe(fresh)
+      expect(f.controller.current.phase).toBe('completed')
+      expect(f.apply).not.toHaveBeenCalled()
+    } finally { delayed.resolve(); vi.useRealTimers() }
+  })
+
   it('reports zero modifications when Main reaches the same deadline before the checked-feedback timer', async () => {
     vi.useFakeTimers(); vi.setSystemTime(1000)
     const f = fixture(['candidate']), pending = deferred<void>()
@@ -216,6 +261,19 @@ describe('GenerationTaskController deadline recovery feedback', () => {
 })
 
 describe('GenerationTaskController unit task lifecycle', () => {
+  it('retains a rejected result after feedback storage failure and retries only that result without applying or starting a turn', async () => {
+    const f = fixture(['candidate-rejected'])
+    f.behavior.onHostResult = async () => { throw new Error('disk temporarily unavailable') }
+    await f.controller.start(f.request(), 'codex')
+    expect(f.controller.current).toMatchObject({ phase: 'failed', canRetryFeedback: true })
+    expect(f.calls.filter(call => call.operation === 'cancel')).toHaveLength(0)
+    const result = f.hostResults()[0]!.result
+    f.behavior.onHostResult = async () => {}
+    await f.controller.retryFeedback()
+    expect(f.hostResults().at(-1)?.result).toEqual(result)
+    expect(f.controller.current).toMatchObject({ busy: false, phase: 'failed', canRetryFeedback: false })
+    expect(f.requests).toHaveLength(1); expect(f.apply).not.toHaveBeenCalled(); expect(f.captureNext).not.toHaveBeenCalled()
+  })
   it('finishes an acknowledged terminal commit without another observation or native turn and adopts the host projection', async () => {
     const f = fixture(['candidate'])
     f.behavior.afterCommit = { version: 1, action: 'finish' }; f.behavior.projectHostResult = true
@@ -255,7 +313,7 @@ describe('GenerationTaskController unit task lifecycle', () => {
     expect(f.controller.current.phase).toBe('completed'); expect(f.captureNext).not.toHaveBeenCalled()
   })
 
-  it('continues explicit observe and dynamic evidence requiring review even when the candidate requested finish', async () => {
+  it('continues explicit observe but respects finish with inconclusive semantic evidence', async () => {
     for (const dynamic of [false, true]) {
       const f = fixture(['candidate', 'answer'])
       f.behavior.afterCommit = dynamic ? { version: 1, action: 'finish' } : { version: 1, action: 'observe', reason: '检查修改后排版' }
@@ -263,8 +321,9 @@ describe('GenerationTaskController unit task lifecycle', () => {
         documentRevision: request.documentRevision, locationId: 'location', stateId: null, instanceIds: ['instance'], sourceIdentities: { instance: 'source' }, actions: ['update-inputs'], elapsedMs: 1, semanticVerdict: 'requires-review',
         frames: [{ phase: 'running', elapsedMs: 1, capturedAt: 1, stateVersion: 1, publicState: {}, width: 1, height: 1, dataUrl: 'data:image/png;base64,AA==' }] }] }))
       await f.controller.start(f.request(), 'codex')
-      expect(f.hostResults().at(-1)?.result.afterCommit).toMatchObject({ action: 'observe', reason: expect.any(String) })
-      expect(f.captureNext).toHaveBeenCalledOnce(); expect(f.calls.filter(call => call.operation === 'continue')).toHaveLength(1)
+      expect(f.hostResults().at(-1)?.result.afterCommit).toEqual(f.behavior.afterCommit)
+      expect(f.captureNext).toHaveBeenCalledTimes(dynamic ? 0 : 1)
+      expect(f.calls.filter(call => call.operation === 'continue')).toHaveLength(dynamic ? 0 : 1)
     }
   })
 
@@ -441,13 +500,15 @@ describe('GenerationTaskController unit task lifecycle', () => {
     expect(f.calls.filter(call => call.operation === 'cancel')).toHaveLength(0)
   })
 
-  it('shows an unfulfilled edit answer without retrying, applying or cancelling its terminal task', async () => {
-    const f = fixture(['incomplete'])
+  it('recovers an unfulfilled edit answer on the same task and applies a real candidate', async () => {
+    const f = fixture(['incomplete', 'candidate', 'answer'])
     await f.controller.start(f.request(), 'claude')
-    expect(f.controller.current).toMatchObject({ busy: false, phase: 'failed', notice: expect.stringContaining('编辑未完成') })
-    expect(f.prepare).not.toHaveBeenCalled()
-    expect(f.apply).not.toHaveBeenCalled()
-    expect(f.captureNext).not.toHaveBeenCalled()
+    expect(f.controller.current).toMatchObject({ busy: false, phase: 'completed' })
+    expect(f.prepare).toHaveBeenCalledTimes(1)
+    expect(f.apply).toHaveBeenCalledTimes(1)
+    expect(f.captureNext).toHaveBeenCalledTimes(2)
+    expect(f.calls.filter(call => call.operation === 'generate')).toHaveLength(1)
+    expect(f.calls.filter(call => call.operation === 'continue')).toHaveLength(2)
     expect(f.calls.filter(call => call.operation === 'cancel')).toHaveLength(0)
   })
 
@@ -569,6 +630,23 @@ describe('GenerationTaskController unit task lifecycle', () => {
     await running
     expect(f.apply).toHaveBeenCalledTimes(1)
     expect(f.apply.mock.calls[0]![0]).not.toBe(oldPreview)
+    expect(f.controller.current.phase).toBe('completed')
+  })
+  it('delivers a status inquiry without withdrawing the checked preview or changing its editing goal', async () => {
+    const f = fixture(['candidate', 'answer'], 'preview')
+    const initial = f.request(), running = f.controller.start(initial, 'codex')
+    await vi.waitFor(() => expect(f.controller.current.phase).toBe('awaiting-apply'))
+    const preview = f.controller.current.preview, request = f.controller.current.request
+    const inquiry = { ...f.input('supplement'), text: '现在怎么样？' }
+    expect(await f.controller.input(inquiry, { preservePreview: true })).toMatchObject({ status: 'queued' })
+    expect(f.calls.find(call => call.operation === 'input')).toMatchObject({ input: inquiry })
+    expect(f.controller.current).toMatchObject({ busy: true, phase: 'awaiting-apply', preview, request })
+    expect(f.apply).not.toHaveBeenCalled(); expect(f.captureNext).not.toHaveBeenCalled()
+    expect(f.requests).toHaveLength(1)
+    expect(f.calls.some(call => call.operation === 'cancel')).toBe(false)
+    f.controller.applyPreview(); await running
+    expect(f.apply).toHaveBeenCalledTimes(1)
+    expect(f.requests[1]!.instruction).toBe(initial.instruction)
     expect(f.controller.current.phase).toBe('completed')
   })
 

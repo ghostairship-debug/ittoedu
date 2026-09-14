@@ -1,9 +1,10 @@
+import { buildPublishedFixture as buildPublishedCourseV2Payload } from '../fixtures/teacherController'
 import { afterEach, describe, expect, it } from 'vitest'
 import { CourseStateStore } from '@/player/CourseStateStore'
 import { FlowSurfaceHost } from '@/player/surfaces/flow/FlowSurfaceHost'
 import { createPublishedCourseSession } from '@/player/surfaces/publishedDynamicHosts'
 import { createBlankFlowCourseProject } from '@/renderer/project/createFlowCourseProject'
-import { buildPublishedCourseV2Payload } from '@/renderer/export/course/buildPublishedCourse'
+
 
 afterEach(() => document.body.replaceChildren())
 

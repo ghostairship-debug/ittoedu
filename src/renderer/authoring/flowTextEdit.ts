@@ -1,4 +1,6 @@
 import { applyTextRunStyle, remapTextRuns, toggleTextRunEmphasis } from '../../shared/textRuns'
+import { locateCourseLayer } from '../course/effectiveLayerCommands'
+import { commitFlowOverlayFormulaAst } from '../course/flowSharedAuthoringAdapters'
 import { tableCellSpan } from '../../shared/tableMerge'
 import { formulaAstToAccessibleText, serializeFormulaAst } from '../../shared/formulaLinear'
 import type { FormulaAstNode, FormulaNode, TextRun, TextRunStyle } from '../../shared/contracts/native-v1'
@@ -19,6 +21,7 @@ import {
 } from '../course/flowEditorCommands'
 import {
   enterFlowTextEditing,
+  selectFlowOverlay,
   flowBlockTargetFromSelection,
   selectFlowEditorBlocks,
   type FlowEditorSelection,
@@ -59,6 +62,7 @@ export interface FlowFormulaDraft {
 }
 
 export interface FlowTextEditSession {
+  readonly overlayScope?: 'page' | 'global'
   readonly kind: FlowTextEditKind
   readonly source: FlowTextEditSource
   readonly blockId: string
@@ -592,12 +596,16 @@ export function beginFlowFormulaEdit(input: {
   readonly blockId: string
   readonly source?: FlowTextEditSource
 }): BeginFlowTextEditResult {
-  const block = locateBlock(input.project, input.selection.surfaceId, input.blockId)
-  if (!block || !isFlowFormulaBlock(block)) {
+  const overlay = input.selection.selectedOverlayIds.includes(input.blockId)
+    ? locateCourseLayer(input.project, input.blockId) : null
+  const block = overlay?.item.kind === 'native' && overlay.item.content.nativeType === 'formula'
+    ? { type: 'formula' as const, ...overlay.item.content.data }
+    : locateBlock(input.project, input.selection.surfaceId, input.blockId)
+  if (!block || block.type !== 'formula') {
     return { ok: false, reason: FLOW_TEXT_REJECT_NOT_EDITABLE }
   }
-  const selected = selectFlowEditorBlocks(input.project, input.selection.locationId, [input.blockId])
-  const target = flowBlockTargetFromSelection(input.project, selected)
+  const selected = overlay ? input.selection : selectFlowEditorBlocks(input.project, input.selection.locationId, [input.blockId])
+  const target = overlay ? { surfaceId: input.selection.surfaceId, parentId: null } : flowBlockTargetFromSelection(input.project, selected)
   const original: FlowFormulaDraft = {
     ast: structuredClone(block.ast),
     accessibleText: block.accessibleText,
@@ -610,6 +618,7 @@ export function beginFlowFormulaEdit(input: {
     selection: selected,
     edit: freezeEdit({
       kind: 'formula',
+      ...(overlay ? { overlayScope: input.selection.authoringScope } : {}),
       source: input.source ?? 'paper',
       blockId: input.blockId,
       surfaceId: target.surfaceId,
@@ -859,6 +868,7 @@ export function finishFlowTextComposition(
 }
 
 export function resolveFlowTextKeyDown(input: {
+  readonly overlayScope?: 'page' | 'global'
   readonly kind: FlowTextEditKind
   readonly composing: boolean
   readonly isComposingEvent?: boolean
@@ -925,6 +935,7 @@ export function flowTextEditSelection(
   locationId: string,
   edit: FlowTextEditSession,
 ): FlowEditorSelection {
+  if (edit.overlayScope) return selectFlowOverlay(document, locationId, [edit.blockId], edit.overlayScope)
   if (edit.kind === 'formula' || edit.kind === 'chart-text' || edit.field === 'table-caption' || edit.field === 'table-header') {
     return selectFlowEditorBlocks(document, locationId, [edit.blockId])
   }
@@ -1009,6 +1020,11 @@ export function commitFlowTextEdit(
       )
     }
     const accessibleText = draft.accessibleText || formulaAstToAccessibleText(draft.ast)
+    if (edit.overlayScope) {
+      const selected = selectFlowOverlay(document, selection.locationId, [edit.blockId], edit.overlayScope)
+      const result = commitFlowOverlayFormulaAst(document, selected, draft.ast, accessibleText, options)
+      return { ...result, nextEdit: result.ok ? null : edit, nextSelection: selected }
+    }
     const result = updateFlowEditorBlock(document, {
       surfaceId: edit.surfaceId,
       blockId: edit.blockId,
@@ -1428,6 +1444,7 @@ export function restoreFlowLogicalSelection(
 export {
   applyFlowCommittedText,
   enterFlowTextEditing,
+  selectFlowOverlay,
   executeFlowEditorCommand,
   formatFlowEditorBlock,
   selectFlowEditorBlocks,

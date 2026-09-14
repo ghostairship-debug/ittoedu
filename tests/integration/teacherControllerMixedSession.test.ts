@@ -1,7 +1,10 @@
+import { queryDeep, dragController } from '../fixtures/teacherController'
+import { buildPublishedFixture as buildPublishedCourseV2Payload } from '../fixtures/teacherController'
+import { isControllerFixture } from '../fixtures/teacherController'
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import type { InteractionRule } from '@/shared/contracts/interaction-v1/types'
 import { addCourseFlowPage, addCourseSpatialPage } from '@/renderer/course/courseLocationCommands'
-import { buildPublishedCourseV2Payload } from '@/renderer/export/course/buildPublishedCourse'
+
 import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
 import { createPublishedCourseSession, type PublishedCourseSession } from '@/player/surfaces/publishedDynamicHosts'
 import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
@@ -58,24 +61,21 @@ function mixedControllerProject(): CourseProjectDocument {
     ...project,
     globalLayerItems: project.globalLayerItems.map((entry) => {
       const item = entry.item
-      if (item.kind !== 'native' || item.content.nativeType !== 'teacher-controller') {
+      if (!isControllerFixture(item)) {
         return entry
       }
       return {
         ...entry,
         item: {
           ...item,
-          content: {
-            ...item.content,
-            data: {
-              ...item.content.data,
+          props: {
+              ...item.props,
               defaultCollapsed: true,
-              buttons: item.content.data.buttons.map((button) => (
+              buttons: item.props.buttons.map((button) => (
                 button.action.type === 'course.restart'
                   ? { ...button, visible: true }
                   : button
               )),
-            },
           },
         },
       }
@@ -150,13 +150,13 @@ function controllerFrame(
     : kind === 'flow'
       ? `.flow-runtime-teacher-controller-frame[data-layer-item-id="${controllerId}"]`
       : `.spatial-screen-teacher-controller[data-layer-item-id="${controllerId}"]`
-  const frame = container.querySelector<HTMLElement>(selector)
+  const frame = queryDeep<HTMLElement>(container, selector)
   if (!frame) throw new Error(`missing ${kind} controller ${controllerId}`)
   return frame
 }
 
 function controllerRoot(frame: HTMLElement): HTMLElement {
-  const root = frame.querySelector<HTMLElement>('.slide-native-teacher-controller')
+  const root = queryDeep<HTMLElement>(frame, 'nav[aria-label="教师控制台"]')
   if (!root) throw new Error('missing teacher controller root')
   return root
 }
@@ -176,24 +176,21 @@ function globalInteractionFrame(
     : kind === 'flow'
       ? `[data-flow-overlay-item="${layerItemId}"]`
       : `[data-layer-item-id="${layerItemId}"]`
-  const item = container.querySelector<HTMLElement>(`${rootSelector} ${itemSelector}`)
+  const item = queryDeep<HTMLElement>(container, `${rootSelector} ${itemSelector}`)
   if (!item) throw new Error(`missing ${kind} global interaction item ${layerItemId}`)
   return item
 }
 
 function expectCollapsed(frame: HTMLElement, collapsed: boolean): void {
-  const button = frame.querySelector<HTMLButtonElement>('[data-teacher-controller-collapse="true"]')
+  const button = queryDeep<HTMLButtonElement>(frame, '.launcher')
   expect(button?.getAttribute('aria-label')).toBe(
     collapsed ? '展开教师控制器' : '收起教师控制器',
   )
+  expect(queryDeep(frame, '[aria-label="缩放"]') !== null).toBe(!collapsed)
 }
 
 function moveController(frame: HTMLElement, key: 'ArrowLeft' | 'ArrowRight'): number {
-  controllerRoot(frame).dispatchEvent(new KeyboardEvent('keydown', {
-    key,
-    altKey: true,
-    bubbles: true,
-  }))
+  dragController(controllerRoot(frame), key === 'ArrowLeft' ? -8 : 8)
   return Number.parseFloat(frame.style.left)
 }
 
@@ -229,17 +226,15 @@ describe('Mixed teacher controller runtime Session', () => {
     addGlobalVisibilityProbe(payload)
     const payloadBefore = structuredClone(payload)
     const controllerEntry = payload.globalLayerItems.find((entry) => (
-      entry.item.kind === 'native'
-      && entry.item.content.nativeType === 'teacher-controller'
+      isControllerFixture(entry.item)
     ))
     if (
       !controllerEntry
-      || controllerEntry.item.kind !== 'native'
-      || controllerEntry.item.content.nativeType !== 'teacher-controller'
+      || !isControllerFixture(controllerEntry.item)
     ) throw new Error('fixture requires a stable global teacher controller')
     const controllerId = controllerEntry.item.layerItemId
     const authoredLeft = controllerEntry.item.frame.x
-    const restartButtonId = controllerEntry.item.content.data.buttons.find(
+    const restartButtonId = controllerEntry.item.props.buttons.find(
       (button) => button.action.type === 'course.restart',
     )?.id
     if (!restartButtonId) throw new Error('fixture requires a course.restart button')
@@ -264,7 +259,7 @@ describe('Mixed teacher controller runtime Session', () => {
 
     let slide = controllerFrame(container, 'slide', controllerId)
     expectCollapsed(slide, true)
-    slide.querySelector<HTMLButtonElement>('[data-teacher-controller-collapse="true"]')?.click()
+    queryDeep<HTMLButtonElement>(slide, '.launcher')?.click()
     slide = controllerFrame(container, 'slide', controllerId)
     expectCollapsed(slide, false)
     expect(moveController(slide, 'ArrowRight')).toBe(authoredLeft + 8)
@@ -338,9 +333,7 @@ describe('Mixed teacher controller runtime Session', () => {
     spatial = controllerFrame(container, 'spatial', controllerId)
     expectCollapsed(spatial, false)
     expect(Number.parseFloat(spatial.style.left)).toBe(authoredLeft - 8)
-    const restart = spatial.querySelector<HTMLButtonElement>(
-      `[data-controller-button-id="${restartButtonId}"]`,
-    )
+    const restart = queryDeep<HTMLButtonElement>(spatial, `[data-controller-button-id="${restartButtonId}"]`)
     if (!restart) throw new Error('expanded controller must expose course.restart')
     restart.click()
 
@@ -444,27 +437,25 @@ describe('Mixed teacher controller runtime Session', () => {
       },
     ]
     const controllerEntry = payload.globalLayerItems.find((entry) => (
-      entry.item.kind === 'native'
-      && entry.item.content.nativeType === 'teacher-controller'
+      isControllerFixture(entry.item)
     ))
     if (
       !controllerEntry
-      || controllerEntry.item.kind !== 'native'
-      || controllerEntry.item.content.nativeType !== 'teacher-controller'
+      || !isControllerFixture(controllerEntry.item)
     ) throw new Error('fixture requires a global teacher controller')
     const controllerId = controllerEntry.item.layerItemId
-    controllerEntry.item.content.data.defaultCollapsed = false
-    const nextButton = controllerEntry.item.content.data.buttons.find(
+    controllerEntry.item.props.defaultCollapsed = false
+    const nextButton = controllerEntry.item.props.buttons.find(
       (button) => button.action.type === 'scene.next',
     )
-    const previousButton = controllerEntry.item.content.data.buttons.find(
+    const previousButton = controllerEntry.item.props.buttons.find(
       (button) => button.action.type === 'scene.previous',
     )
     if (!nextButton || !previousButton) throw new Error('fixture requires next/previous controls')
     nextButton.visible = true
     previousButton.visible = true
     const goToSlideButtonId = 'controller-go-to-slide'
-    controllerEntry.item.content.data.buttons.push({
+    controllerEntry.item.props.buttons.push({
       id: goToSlideButtonId,
       action: { type: 'scene.go', sceneId: slideLocation.sceneId },
       label: 'Go to Slide',
@@ -483,8 +474,7 @@ describe('Mixed teacher controller runtime Session', () => {
       kind: 'slide' | 'flow' | 'spatial',
       buttonId: string,
     ): void => {
-      const button = controllerFrame(container, kind, controllerId)
-        .querySelector<HTMLButtonElement>(`[data-controller-button-id="${buttonId}"]`)
+      const button = queryDeep<HTMLButtonElement>(controllerFrame(container, kind, controllerId), `[data-controller-button-id="${buttonId}"]`)
       if (!button) throw new Error(`missing ${kind} controller button ${buttonId}`)
       button.click()
     }

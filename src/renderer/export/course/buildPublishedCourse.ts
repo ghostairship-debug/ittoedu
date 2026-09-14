@@ -48,6 +48,8 @@ export interface CoursePublishSources {
   project: CourseProjectDocument
   /** Binary project assets keyed by AssetMeta.id or by the project record key. */
   assetFiles: Readonly<Record<string, Uint8Array>>
+  /** Internal frozen preview resources. Standalone export supplies real bytes. */
+  assetResources?: Readonly<Record<string, { url: string; byteLength: number }>>
   /** Parsed component packages keyed by package id, package@version, or project record key. */
   components: Readonly<Record<string, ComponentPackageData>>
 }
@@ -393,7 +395,8 @@ function collectPublishedCourseSourceIssuesFromFacts(
     }
     const [recordKey, metadata] = entry
     const bytes = findAssetBytes(sources, recordKey, metadata)
-    if (!bytes) {
+    const resource = sources.assetResources?.[metadata.id] ?? sources.assetResources?.[recordKey]
+    if (!bytes && !resource) {
       for (const path of origins.length ? originPaths : [['assets', recordKey]]) add({
         code: 'asset-bytes-missing',
         message: `素材“${metadata.filename}”只有工程元数据，没有可嵌入导出物的本地字节。`,
@@ -401,7 +404,7 @@ function collectPublishedCourseSourceIssuesFromFacts(
       })
       continue
     }
-    if (bytes.byteLength !== metadata.byteLength) {
+    if ((bytes?.byteLength ?? resource?.byteLength) !== metadata.byteLength) {
       add({
         code: 'asset-byte-length-mismatch',
         message: `素材“${metadata.filename}”的本地字节长度与工程元数据不一致。`,
@@ -760,6 +763,12 @@ export function buildPublishedCourseV2Payload(
     const entry = findAssetEntry(project, assetId)
     if (!entry) throw new Error(`Published course references missing asset ${assetId}`)
     const bytes = findAssetBytes(sources, entry[0], entry[1])
+    const resource = sources.assetResources?.[entry[1].id] ?? sources.assetResources?.[entry[0]]
+    if (resource) {
+      if (resource.byteLength !== entry[1].byteLength) throw new Error(`Asset ${entry[1].filename} byte length does not match project metadata`)
+      assets[assetId] = { mimeType: entry[1].mimeType, url: resource.url }
+      continue
+    }
     if (!bytes) throw new Error(`Asset ${entry[1].filename} has no binary content`)
     if (bytes.byteLength !== entry[1].byteLength) {
       throw new Error(`Asset ${entry[1].filename} byte length does not match project metadata`)

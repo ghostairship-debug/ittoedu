@@ -136,7 +136,12 @@ describe('native V2 factory and read-only historical wire fixtures', () => {
     expect(text).not.toContain('"oneOf"')
     expect(text).not.toContain('"propertyNames"')
     expect(text).not.toContain('"format"')
-    expect(schema).toMatchObject({ properties: { version: { const: 2 }, requestId: { type: 'string' } } })
+    const properties = schema.properties as Record<string, { $ref?: string; const?: number; type?: string }>
+    const definitions = schema.$defs as Record<string, unknown>
+    const version = properties.version
+    const resolvedVersion = version.$ref ? definitions[version.$ref.split('/').at(-1)!] : version
+    expect(resolvedVersion).toMatchObject({ const: 2 })
+    expect(properties.requestId).toMatchObject({ type: 'string' })
     expect(schema).toEqual(codexCandidateOutputSchema({ requestId: '2a42b1a2-1b08-411f-9407-81332bc0a229' } as GenerationRequest))
     expect(text).not.toContain('"candidateId"')
     expect(text).not.toContain('"authoringAddress"')

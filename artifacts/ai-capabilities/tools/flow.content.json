@@ -2,7 +2,7 @@
   "candidateCarrier": {
     "default": "native"
   },
-  "description": "insert 使用 create parent:flow-body；block 采用 replace.block 的完整 Schema，只省略最外层 id（由宿主生成）。修改标题、段落或引用块的文字和字号优先使用 edit 的 text/textStyle/textAlign/lineSpacing，仅提供改变字段，其余排版、富文本和元数据保留。replace/delete/move 使用 Flow block update target；replace 必须保留原 id 和类型。完整载体替换使用 selection.replace。",
+  "description": "新Flow默认fluid，沿实际容器排版；已有Flow保留其layout。普通标题、正文、图片和互动放正文block以自然占位，不用viewport绝对文字替代。insert使用create parent:flow-body，block只省略宿主生成的id。修改标题、段落或引用块优先edit的text/textStyle/textAlign/lineSpacing；公式用edit.formula的ast和accessibleText，保留formulaId；图片用edit.image.assetId，保留正文布局、说明和块身份。常规图片应用优先media.apply。未指定排版、富文本和元数据保留。replace/delete/move使用Flow block update target；replace必须保留id和类型。完整载体替换使用selection.replace。",
   "examples": [
     {
       "bindings": "values 的 block 来自当前观察、已读资源或用户要求，值须满足本卡 inputSchema；destination 原样复制当前目标。",
@@ -1183,13 +1183,16 @@
         "type": "object"
       },
       "__schema47": {
+        "$ref": "#/$defs/__schema48"
+      },
+      "__schema48": {
         "oneOf": [
           {
             "additionalProperties": false,
             "properties": {
               "children": {
                 "items": {
-                  "$ref": "#/$defs/__schema47"
+                  "$ref": "#/$defs/__schema48"
                 },
                 "maxItems": 128,
                 "minItems": 1,
@@ -1248,10 +1251,10 @@
             "additionalProperties": false,
             "properties": {
               "denominator": {
-                "$ref": "#/$defs/__schema47"
+                "$ref": "#/$defs/__schema48"
               },
               "numerator": {
-                "$ref": "#/$defs/__schema47"
+                "$ref": "#/$defs/__schema48"
               },
               "type": {
                 "const": "fraction",
@@ -1269,10 +1272,10 @@
             "additionalProperties": false,
             "properties": {
               "index": {
-                "$ref": "#/$defs/__schema47"
+                "$ref": "#/$defs/__schema48"
               },
               "radicand": {
-                "$ref": "#/$defs/__schema47"
+                "$ref": "#/$defs/__schema48"
               },
               "type": {
                 "const": "root",
@@ -1289,13 +1292,13 @@
             "additionalProperties": false,
             "properties": {
               "base": {
-                "$ref": "#/$defs/__schema47"
+                "$ref": "#/$defs/__schema48"
               },
               "subscript": {
-                "$ref": "#/$defs/__schema47"
+                "$ref": "#/$defs/__schema48"
               },
               "superscript": {
-                "$ref": "#/$defs/__schema47"
+                "$ref": "#/$defs/__schema48"
               },
               "type": {
                 "const": "script",
@@ -1312,7 +1315,7 @@
             "additionalProperties": false,
             "properties": {
               "body": {
-                "$ref": "#/$defs/__schema47"
+                "$ref": "#/$defs/__schema48"
               },
               "close": {
                 "maxLength": 4,
@@ -1339,11 +1342,8 @@
           }
         ]
       },
-      "__schema48": {
-        "const": "edit",
-        "type": "string"
-      },
       "__schema49": {
+        "const": "edit",
         "type": "string"
       },
       "__schema5": {
@@ -1353,6 +1353,40 @@
         "type": "number"
       },
       "__schema50": {
+        "type": "string"
+      },
+      "__schema51": {
+        "additionalProperties": false,
+        "properties": {
+          "assetId": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "assetId"
+        ],
+        "type": "object"
+      },
+      "__schema52": {
+        "additionalProperties": false,
+        "properties": {
+          "accessibleText": {
+            "maxLength": 4000,
+            "minLength": 1,
+            "type": "string"
+          },
+          "ast": {
+            "$ref": "#/$defs/__schema47"
+          }
+        },
+        "required": [
+          "ast",
+          "accessibleText"
+        ],
+        "type": "object"
+      },
+      "__schema53": {
         "properties": {
           "baseline": {
             "$ref": "#/$defs/__schema38",
@@ -1402,7 +1436,7 @@
         },
         "type": "object"
       },
-      "__schema51": {
+      "__schema54": {
         "enum": [
           "left",
           "center",
@@ -1410,12 +1444,12 @@
         ],
         "type": "string"
       },
-      "__schema52": {
+      "__schema55": {
         "maximum": 200,
         "minimum": 0,
         "type": "number"
       },
-      "__schema53": {
+      "__schema56": {
         "minLength": 1,
         "type": "string"
       },
@@ -1479,20 +1513,26 @@
       {
         "additionalProperties": false,
         "properties": {
-          "lineSpacing": {
+          "formula": {
             "$ref": "#/$defs/__schema52"
           },
-          "operation": {
-            "$ref": "#/$defs/__schema48"
-          },
-          "text": {
-            "$ref": "#/$defs/__schema49"
-          },
-          "textAlign": {
+          "image": {
             "$ref": "#/$defs/__schema51"
           },
-          "textStyle": {
+          "lineSpacing": {
+            "$ref": "#/$defs/__schema55"
+          },
+          "operation": {
+            "$ref": "#/$defs/__schema49"
+          },
+          "text": {
             "$ref": "#/$defs/__schema50"
+          },
+          "textAlign": {
+            "$ref": "#/$defs/__schema54"
+          },
+          "textStyle": {
+            "$ref": "#/$defs/__schema53"
           }
         },
         "required": [
@@ -1528,7 +1568,7 @@
           "parentId": {
             "anyOf": [
               {
-                "$ref": "#/$defs/__schema53"
+                "$ref": "#/$defs/__schema56"
               },
               {
                 "type": "null"
@@ -1569,14 +1609,14 @@
                 "additionalProperties": false,
                 "properties": {
                   "columnId": {
-                    "$ref": "#/$defs/__schema53"
+                    "$ref": "#/$defs/__schema56"
                   },
                   "kind": {
                     "const": "split",
                     "type": "string"
                   },
                   "rowId": {
-                    "$ref": "#/$defs/__schema53"
+                    "$ref": "#/$defs/__schema56"
                   }
                 },
                 "required": [
@@ -1590,7 +1630,7 @@
                 "additionalProperties": false,
                 "properties": {
                   "afterId": {
-                    "$ref": "#/$defs/__schema53"
+                    "$ref": "#/$defs/__schema56"
                   },
                   "kind": {
                     "const": "insert-row",
@@ -1606,7 +1646,7 @@
                 "additionalProperties": false,
                 "properties": {
                   "afterId": {
-                    "$ref": "#/$defs/__schema53"
+                    "$ref": "#/$defs/__schema56"
                   },
                   "kind": {
                     "const": "insert-column",
@@ -1622,7 +1662,7 @@
                 "additionalProperties": false,
                 "properties": {
                   "id": {
-                    "$ref": "#/$defs/__schema53"
+                    "$ref": "#/$defs/__schema56"
                   },
                   "kind": {
                     "const": "delete-row",
@@ -1639,7 +1679,7 @@
                 "additionalProperties": false,
                 "properties": {
                   "id": {
-                    "$ref": "#/$defs/__schema53"
+                    "$ref": "#/$defs/__schema56"
                   },
                   "kind": {
                     "const": "delete-column",
@@ -1668,7 +1708,7 @@
                     ]
                   },
                   "id": {
-                    "$ref": "#/$defs/__schema53"
+                    "$ref": "#/$defs/__schema56"
                   },
                   "kind": {
                     "const": "move-row",
@@ -1698,7 +1738,7 @@
                     ]
                   },
                   "id": {
-                    "$ref": "#/$defs/__schema53"
+                    "$ref": "#/$defs/__schema56"
                   },
                   "kind": {
                     "const": "move-column",

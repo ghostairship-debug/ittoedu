@@ -1,3 +1,4 @@
+import { missingTeacherControllerTransaction } from '../../components/teacherControllerComponent'
 import { beginFlowTableFieldEdit, updateFlowTextDraft } from '../../authoring/flowTextEdit'
 import { createChartNode, createChartLayerItem } from '../../project/nativeNodeFactories'
 import type { ChartType } from '../../course/chartContentOperations'
@@ -42,6 +43,7 @@ import {
   updateFlowEditorBlock,
   updateFlowSurfaceBackground,
   updateFlowSurfaceBackgroundColor,
+  updateFlowWidthMode,
   type FlowCommandResult,
   type FlowDeleteRequest,
   type FlowEditorCommandRequest,
@@ -240,6 +242,8 @@ export type FlowAuthoringIntent = (
       readonly accessibleText: string
       readonly expectedEdit: FlowTextEditSession | null
     }
+  | { readonly kind: 'clear-selection' }
+  | { readonly kind: 'set-width-mode'; readonly widthMode: 'fluid' | 'reading' }
   | { readonly kind: 'rename-page'; readonly title: string }
   | { readonly kind: 'set-paper-background'; readonly backgroundColor: string }
   | { readonly kind: 'set-surface-background'; readonly patch: FlowSurfaceBackgroundPatch }
@@ -284,6 +288,8 @@ function flowIntentMutatesDocument(intent: FlowAuthoringIntent): boolean {
     case 'execute-editor-command':
     case 'delete-blocks':
     case 'transform-overlay-frame':
+    case 'set-width-mode':
+    case 'clear-selection':
     case 'rename-page':
     case 'set-paper-background':
     case 'set-surface-background':
@@ -317,6 +323,7 @@ function sameFlowEditIdentity(
   right: FlowTextEditSession,
 ): boolean {
   return left.kind === right.kind
+    && left.overlayScope === right.overlayScope
     && left.source === right.source
     && left.blockId === right.blockId
     && left.surfaceId === right.surfaceId
@@ -756,11 +763,7 @@ export function createFlowAuthoringSlice(
       committedTextEdit: edit,
       ...(result.ok
         ? {
-            selection: selectFlowEditorBlocks(
-              result.nextDocument ?? session.history.present,
-              session.selection.locationId,
-              [edit.blockId],
-            ),
+            selection: edit.overlayScope ? flowTextEditSelection(result.nextDocument ?? session.history.present, session.selection.locationId, edit) : selectFlowEditorBlocks(result.nextDocument ?? session.history.present, session.selection.locationId, [edit.blockId]),
           }
         : {}),
     })
@@ -916,11 +919,7 @@ export function createFlowAuthoringSlice(
         document = committed.nextDocument ?? document
         committedEdit = currentEdit
         committedHistoryEntry = Boolean(committed.historyEntry)
-        committedSelection = selectFlowEditorBlocks(
-          document,
-          session.selection.locationId,
-          [currentEdit.blockId],
-        )
+        committedSelection = flowTextEditSelection(document, session.selection.locationId, currentEdit)
       }
     }
 
@@ -1027,7 +1026,7 @@ export function createFlowAuthoringSlice(
           if (flow.read().flowTextEdit) {
             return rejectedFlowReceipt(LAYER_REJECT_STALE_REVISION)
           }
-          const selection = flowBlockSelection(document, target)
+          const selection = locateCourseLayer(document, target.itemId) ? flowOverlaySelection(document, target, [target.itemId]) : flowBlockSelection(document, target)
           const begun = beginFlowFormulaEdit({
             project: document,
             selection,
@@ -1073,7 +1072,7 @@ export function createFlowAuthoringSlice(
             ...(intent.edit.tableRowId ? { tableRowId: intent.edit.tableRowId } : {}),
             ...(intent.edit.tableColumnId ? { tableColumnId: intent.edit.tableColumnId } : {}),
           }
-          const selection = (intent.edit.kind === 'chart-text' || intent.edit.field === 'table-header' || intent.edit.field === 'table-caption')
+          const selection = intent.edit.overlayScope ? flowTextEditSelection(document, target.locationId, intent.edit) : (intent.edit.kind === 'chart-text' || intent.edit.field === 'table-header' || intent.edit.field === 'table-caption')
             ? flowBlockSelection(document, target)
             : flowBlockSelection(document, target, [target.itemId], {
             focus: 'text',
@@ -1083,11 +1082,9 @@ export function createFlowAuthoringSlice(
             expectedRevision: target.documentRevision,
           })
           const resultDocument = result.nextDocument ?? document
-          const nextSelection = flowBlockSelection(
-            resultDocument,
-            target,
-            [intent.nextBlockId ?? target.itemId],
-          )
+          const nextSelection = intent.keepSelected === false && !intent.nextBlockId
+            ? clearFlowEditorSelection(resultDocument, target.locationId, session.selection.authoringScope)
+            : intent.edit.overlayScope ? flowTextEditSelection(resultDocument, target.locationId, intent.edit) : flowBlockSelection(resultDocument, target, [intent.nextBlockId ?? target.itemId])
           return persistIntentResult(result, {
             selection: nextSelection,
             clearTextEdit: result.ok,
@@ -1101,7 +1098,7 @@ export function createFlowAuthoringSlice(
           ) {
             return rejectedFlowReceipt(LAYER_REJECT_STALE_REVISION)
           }
-          const selection = flowBlockSelection(document, target)
+          const selection = intent.edit.overlayScope ? flowTextEditSelection(document, target.locationId, intent.edit) : flowBlockSelection(document, target)
           return persistIntentResult({
             ok: true,
             nextDocument: document,
@@ -1204,6 +1201,13 @@ export function createFlowAuthoringSlice(
             clearTextEdit: true,
             ...(intent.expectedEdit ? { committedTextEdit: intent.expectedEdit } : {}),
           }, null)
+        }
+        case 'clear-selection': {
+          const selection = clearFlowEditorSelection(document, session.selection.locationId, session.selection.authoringScope)
+          return persistIntentResult({ ok: true, nextDocument: document, historyEntry: false, selection }, { selection, clearTextEdit: true })
+        }
+        case 'set-width-mode': {
+          return persistIntentResult(updateFlowWidthMode(document, target.surfaceId, intent.widthMode, { expectedRevision: document.revision }))
         }
         case 'rename-page': {
           return persistIntentResult({
@@ -1868,6 +1872,11 @@ export function createFlowAuthoringSlice(
         expectedRevision: session.history.present.revision,
       })
       if (!result.ok || !result.nextDocument) return
+      if (result.createdLayerItemId && !session.history.present.globalLayerItems.some(e => e.item.layerItemId === result.createdLayerItemId)) {
+        const step = missingTeacherControllerTransaction(session.history.present, result.nextDocument!, result.createdLayerItemId)
+        if (step && kernel.persistTransaction(step, '已恢复组件教师控制台')) selectNode(result.createdLayerItemId)
+        return
+      }
       flow.persist({
         ok: true,
         nextDocument: result.nextDocument,

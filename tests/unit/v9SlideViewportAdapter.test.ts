@@ -1,3 +1,5 @@
+import { controllerMetadata } from '../fixtures/teacherController'
+import { controllerPackage } from '../fixtures/teacherController'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { makeAuthoringAddress } from '@/shared/authoringAddress'
 import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
@@ -274,13 +276,11 @@ function scoped(item: LayerItem): ScopedLayerItem {
   return { item, visibility: { mode: 'all', locationIds: [] } }
 }
 
-function teacherControllerItem(): NativeLayerItem {
+function teacherControllerItem(): ComponentLayerItem {
   return {
     ...layerBase('teacher-ctrl', 99, { mode: 'absolute', x: 190, y: 638, width: 900, height: 64 }),
-    kind: 'native',
-    content: {
-      nativeType: 'teacher-controller',
-      data: {
+    kind: 'component',
+    role: 'teacher-controller', component: { packageId: controllerPackage.manifest.id, version: controllerPackage.manifest.version }, props: {
         title: '教师控制台',
         showSceneProgress: true,
         compact: false,
@@ -298,7 +298,6 @@ function teacherControllerItem(): NativeLayerItem {
         },
         includeInStaticExports: false,
       },
-    },
   }
 }
 
@@ -330,7 +329,7 @@ function v9ViewportFixture(): CourseProjectDocument {
         byteLength: 8,
       },
     },
-    componentPackages: {
+    componentPackages: { ...controllerMetadata,
       'component.quiz': {
         packageId: 'component.quiz',
         version: '4.0.0',
@@ -782,7 +781,7 @@ describe('V9 Slide viewport adapter', () => {
     expect(mergeSlidePreviewIntoNodes(nodes, undefined)).toEqual([])
   })
 
-  it('transforms global Native layers on global scope without touching scene layerItems and refuses teacher-controller', () => {
+  it('transforms global Native layers on global scope without touching scene layerItems and edits the component teacher controller', () => {
     const backend = injectCandidate()
     const controller = createController()
 
@@ -848,7 +847,7 @@ describe('V9 Slide viewport adapter', () => {
       height: 80,
     })
 
-    // Direct transform on teacher-controller must fail wrong-owner
+    // The component controller keeps its global owner when transformed.
     controller.selectFromLayerIds(['teacher-ctrl'], VIEW)
     const transformController = controller.transformSelection([{
       nodeId: 'teacher-ctrl',
@@ -859,8 +858,8 @@ describe('V9 Slide viewport adapter', () => {
       rotation: 0,
     }], VIEW)
     if (transformController.kind !== 'slide-authoring') throw new Error('expected V9')
-    expect(transformController.command?.ok).toBe(false)
-    expect(transformController.command?.reason).toBe(SLIDE_REJECT_WRONG_OWNER)
+    expect(transformController.command?.ok).toBe(true)
+    expect(selectSlideAuthoringBackend(useEditorStore.getState())!.getSession().history.present.globalLayerItems.find(entry => entry.item.layerItemId === 'teacher-ctrl')?.item.frame).toMatchObject({ x: 190, y: 600 })
 
     // Content update on global text
     const currentBackend = selectSlideAuthoringBackend(useEditorStore.getState())!

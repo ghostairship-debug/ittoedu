@@ -1,3 +1,4 @@
+import { buildPublishedFixture as buildPublishedCourseV2Payload } from '../fixtures/teacherController'
 // @vitest-environment jsdom
 
 import { createElement } from 'react'
@@ -11,7 +12,7 @@ import {
   type ScopedLayerItem,
 } from '@/shared/courseProjectTypes'
 import { publishedCourseV2Schema } from '@/shared/publishedCourseSchema'
-import { buildPublishedCourseV2Payload } from '@/renderer/export/course/buildPublishedCourse'
+
 import {
   addSpatialCameraFrameFromSession,
 } from '@/renderer/course/spatialCameraCommands'

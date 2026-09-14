@@ -147,25 +147,34 @@ describe('request-scoped short generation candidates', () => {
       stage: 'candidate-parse', diagnostics: [{ code: 'candidate-format', path: [], message: expect.any(String) }] } })
   })
 
-  it.each(['unknown-alias', 'cross-request', 'identity-override', 'scope-override', 'forward-reference', 'missing-reason', 'empty-candidate'] as const)('rejects %s instead of guessing current selection', mode => {
+  it.each(['unknown-alias', 'cross-request', 'identity-override', 'scope-override', 'forward-reference', 'empty-candidate'] as const)('rejects %s instead of guessing current selection', mode => {
     const f = fixture(), invalid: any = structuredClone(f.short)
     if (mode === 'unknown-alias') invalid.steps[0].destination = 'd99'
     if (mode === 'cross-request') invalid.requestId = crypto.randomUUID()
     if (mode === 'identity-override') invalid.candidateId = crypto.randomUUID()
     if (mode === 'scope-override') invalid.steps[0].destination = f.request.destinations[0]
     if (mode === 'forward-reference') invalid.steps[0].input = { assetId: { $result: { stepId: 'future', kind: 'asset-id' } } }
-    if (mode === 'missing-reason') invalid.steps[0].tool = 'runtime.source'
     if (mode === 'empty-candidate') invalid.steps = []
     expect(() => expandGenerationShortCandidate(invalid, f.request, f.candidateId)).toThrow()
     expect(f.create().commits).toHaveLength(0)
   })
 
   it('derives the carrier for actual operations and requires an explicit observe reason while accepting legacy V1', () => {
-    const f = fixture(), raw = { ...f.short, afterCommit: { version: 1, action: 'observe', reason: '核对动画周期' }, steps: [{ ...f.short.steps[0], tool: 'component.insert', lowerCarrierReason: '需要既有分类互动', input: { operation: 'existing', packageId: 'example' } }] }
+    const f = fixture(), raw = { ...f.short, afterCommit: { version: 1, action: 'observe', reason: '核对动画周期' }, steps: [{ ...f.short.steps[0], tool: 'component.insert', input: { operation: 'existing', packageId: 'example' } }] }
     expect(expandGenerationShortCandidate(raw, f.request, f.candidateId).steps[0]?.carrier).toBe('existing-component')
     expect(generationShortCandidateSchema.safeParse({ ...raw, afterCommit: { version: 1, action: 'observe' } }).success).toBe(false)
     const { afterCommit: _, ...legacy } = expandGenerationShortCandidate(f.short, f.request, f.candidateId)
     expect(parseGenerationCandidate(legacy, f.request.requestId)).toEqual(legacy)
+  })
+
+  it('retires rationale and normalizes one tool-input projection without touching source strings', () => {
+    const f = fixture(), input = { source: 'const text = "{\\"x\\":1}";' }
+    const raw = { ...f.short, steps: [{ ...f.short.steps[0], tool: 'runtime.source', input: JSON.stringify(input), lowerCarrierReason: 'old unused reason' }] }
+    const candidate = parseGenerationCandidate(raw, f.request, { candidateId: f.candidateId })
+    expect(candidate.steps[0]!.input).toEqual(input)
+    expect(candidate.steps[0]).not.toHaveProperty('lowerCarrierReason')
+    expect(generationShortCandidateSchema.safeParse(raw).success).toBe(false)
+    expect(() => parseGenerationCandidate({ ...raw, steps: [{ ...raw.steps[0], input: JSON.stringify(JSON.stringify(input)) }] }, f.request, { candidateId: f.candidateId })).toThrow('重复序列化')
   })
 
   it('resolves ordered short batch destinations and input result references in one host transaction', async () => {

@@ -1,3 +1,4 @@
+import { missingTeacherControllerTransaction } from '../../components/teacherControllerComponent'
 import { addSpatialWorldTableLayer, replaceSpatialWorldTable, addSpatialWorldChartLayer, replaceSpatialWorldChart } from '../../course/spatialEditorCommands'
 import type { ChartType } from '../../course/chartContentOperations'
 import type { ComponentPackageData } from '../../../shared/componentTypes'
@@ -1653,6 +1654,11 @@ export function createSpatialAuthoringSlice(
         expectedRevision: session.history.present.revision,
       })
       if (!result.ok || !result.nextDocument) return
+      if (result.createdLayerItemId && !session.history.present.globalLayerItems.some(e => e.item.layerItemId === result.createdLayerItemId)) {
+        const step = missingTeacherControllerTransaction(session.history.present, result.nextDocument!, result.createdLayerItemId)
+        if (step && kernel.persistTransaction(step, '已恢复组件教师控制台')) selectNode(result.createdLayerItemId)
+        return
+      }
       spatial.persist(succeedSpatialCommand({
         ...session,
         history: result.historyEntry

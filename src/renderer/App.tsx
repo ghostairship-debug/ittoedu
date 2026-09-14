@@ -680,7 +680,7 @@ export default function App() {
             <header className="course-preview-chrome">
               <div>
                 <h2 className="modal__title" id="course-preview-title">整课预览</h2>
-                <p className="modal__message">Published Course V2 · CoursePlayer · 1280 × 720</p>
+                <p className="modal__message">查看课件实际播放效果</p>
               </div>
               <div className="course-preview-chrome__actions">
                 <button

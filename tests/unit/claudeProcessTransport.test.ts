@@ -12,6 +12,7 @@ import {
 } from '../../src/main/localAgent/claudeProcessTransport'
 import type { AgentExecutable } from '../../src/main/localAgent/process'
 import { localAgentCapabilitiesSchema } from '../../src/shared/localAgentContract'
+import { configureNativeSystemProxy } from '../../src/main/localAgent/nativeProxy'
 
 afterEach(() => {
   vi.restoreAllMocks()
@@ -52,6 +53,22 @@ function nativeTurn() {
 }
 
 describe('Claude initialization failure reasons', () => {
+  it('does not launch a native process after Stop during system proxy resolution', async () => {
+    const test = await nativeFixture('')
+    let release!: (value: string) => void, entered!: () => void
+    const waiting = new Promise<string>(resolve => { release = resolve })
+    const started = new Promise<void>(resolve => { entered = resolve })
+    for (const key of ['HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'http_proxy', 'https_proxy', 'all_proxy']) vi.stubEnv(key, undefined)
+    configureNativeSystemProxy(async () => { entered(); return waiting })
+    try {
+      const opening = test.adapter.open({ cwd: test.directory, externalSessionId: null }).catch(error => error as Error)
+      await started; await test.adapter.close(); release('DIRECT')
+      expect(await opening).toBeInstanceOf(Error)
+      await expect(fs.access(path.join(test.directory, 'argv.json'))).rejects.toThrow()
+    } finally {
+      release('DIRECT'); configureNativeSystemProxy(async () => 'DIRECT'); vi.unstubAllEnvs(); await test.cleanup()
+    }
+  })
   it.each([
     { stderr: 'authentication failed', code: 1, message: 'CLI 认证失效，请重新登录' },
     { stderr: 'unrecognized native failure', code: 7, message: 'Claude process exited 7' },
@@ -110,6 +127,29 @@ describe('Claude candidate environment anchor', () => {
 })
 
 describe('Claude native text block identity', () => {
+  it('preserves initial text block content and marks only an explicit end_turn snapshot as final', async () => {
+    const test = await nativeFixture(`
+      if (wire.type === 'user') {
+        emit({type:'system', subtype:'init', session_id:${JSON.stringify(randomUUID())}});
+        emit({type:'stream_event', event:{type:'message_start', message:{id:'visible-message'}}});
+        emit({type:'stream_event', event:{type:'content_block_start', index:0, content_block:{type:'text', text:'Initial words. '}}});
+        emit({type:'stream_event', event:{type:'content_block_delta', index:0, delta:{type:'text_delta', text:'Complete reply.'}}});
+        emit({type:'assistant', message:{id:'visible-message', stop_reason:'end_turn', content:[{type:'text', text:'Initial words. Complete reply.'}]}});
+        emit({type:'result', is_error:false});
+      }
+    `)
+    try {
+      await test.adapter.open({ cwd: test.directory, externalSessionId: null })
+      await test.adapter.startTurn(nativeTurn(), new Map())
+      const events = []; for await (const event of test.adapter.events()) if (event.kind === 'text') events.push(event)
+      expect(events.map(event => [event.itemId, event.operation, event.phase, event.text])).toEqual([
+        ['visible-message:0', 'append', 'body', 'Initial words. '],
+        ['visible-message:0', 'append', 'body', 'Complete reply.'],
+        ['visible-message:0', 'replace', 'final', 'Initial words. Complete reply.'],
+      ])
+    } finally { await test.cleanup() }
+  })
+
   it('replaces streamed text after a non-text block using its native index, preserving every raw text event', async () => {
     const text = '<courseware-candidate-v1>{"candidate":"unit"}</courseware-candidate-v1>'
     const test = await nativeFixture(`

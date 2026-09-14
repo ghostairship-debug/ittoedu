@@ -1,3 +1,4 @@
+import { buildPublishedFixture as buildPublishedCourseV2Payload } from '../fixtures/teacherController'
 import { describe, expect, it } from 'vitest'
 import { strFromU8, unzipSync } from 'fflate'
 import type {
@@ -13,7 +14,7 @@ import type {
   PublishedSpatialSurface,
 } from '@/shared/publishedCourseTypes'
 import {
-  buildPublishedCourseV2Payload,
+  
   collectPublishedCourseAssetIds,
 } from '@/renderer/export/course/buildPublishedCourse'
 import { buildCoursePptx } from '@/renderer/export/course/buildCoursePptx'

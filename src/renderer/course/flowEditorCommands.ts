@@ -1082,6 +1082,22 @@ export function updateFlowSurfaceBackground(
   }, '已修改稿纸背景', options)
 }
 
+export function updateFlowWidthMode(
+  document: CourseProjectDocument,
+  surfaceId: string,
+  widthMode: 'fluid' | 'reading',
+  options: FlowCommandOptions = {},
+): FlowCommandResult {
+  const stale = rejectIfStaleDocument(document, options.expectedRevision)
+  if (stale) return failCommand(stale.reason ?? LAYER_REJECT_STALE_REVISION)
+  if (widthMode !== 'fluid' && widthMode !== 'reading') return failCommand('不支持的 Flow 宽度模式')
+  const surface = flowSurfaceIn(document, surfaceId)
+  if ((surface.layout.widthMode ?? 'reading') === widthMode) return succeedNoop(document, '版式未变化')
+  return runMutation(document, draft => {
+    flowSurfaceIn(draft, surfaceId).layout.widthMode = widthMode
+  }, '已修改讲义宽度模式', options)
+}
+
 export function updateFlowSurfaceBackgroundColor(
   document: CourseProjectDocument,
   surfaceId: string,

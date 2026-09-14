@@ -3,6 +3,7 @@ import { isAbsolute, join, relative, resolve } from 'node:path'
 import { _electron as electron, expect, test, type ElectronApplication, type Page } from '@playwright/test'
 import { createServer, type ViteDevServer } from 'vite'
 import { BACKGROUND_E2E_ENV } from '../../src/main/windowVisibility'
+import { localAgentMessages } from '../../src/shared/localAgentText'
 import { localAgentRecordV2Schema } from '../../src/shared/localAgentTaskContract'
 import { readSaved, nativeRecords, type NativeRun } from './r18NativeAuthoringFixture'
 import { expectBackgroundWindowsIsolated } from './expectBackgroundWindowsIsolated'
@@ -157,13 +158,10 @@ test('R18 retained three-CLI sessions restore read-only without replay or docume
         await expect(chat.getByLabel('CLI', { exact: true })).toHaveValue(fixture.adapter)
         await expect(sessions.locator('option:checked')).toContainText('已完成')
         const goal = historical.tasks.at(-1)!.goal
-        const userTurn = chat.locator('.chat-scroll > details').filter({ has: page.getByText(`你：${goal.slice(0, 60)}`, { exact: true }) })
-        await expect(userTurn).toHaveCount(1)
-        await userTurn.locator('summary').click()
-        await expect(userTurn.getByText(goal, { exact: true })).toBeVisible()
+        await expect(chat.getByRole('region', { name: '历史任务要求' }).getByText(goal, { exact: true })).toBeVisible()
         const summary = historical.hostResults.at(-1)?.summary
         expect(summary, 'A completed historical edit must retain its actual host summary').toBeTruthy()
-        await expect(userTurn.getByText(summary!, { exact: true })).toBeVisible()
+        await expect(chat.getByRole('region', { name: '实际应用结果' }).getByText(summary!, { exact: true })).toBeVisible()
         // Wait until history pagination completes, including the >200-event records.
         const projected = await page.evaluate(async owner => {
           const events = []; let after = 0
@@ -179,7 +177,10 @@ test('R18 retained three-CLI sessions restore read-only without replay or docume
         }, { projectId: fixture.projectId, projectPath, sessionId: fixture.sessionId })
         expect(projected).toMatchObject({ id: fixture.sessionId, adapter: fixture.adapter,
           externalSessionId: fixture.externalSessionId, status: 'completed', task: { status: 'completed' } })
-        await expect(chat.getByText(`诊断详情（${projected.events.length} 个原生事件）`, { exact: true })).toBeVisible()
+        await expect(chat.getByText(/诊断详情|原生事件/)).toHaveCount(0)
+        const messages = localAgentMessages(projected.events)
+        await expect(chat.locator('.chat-transcript [data-message-id]')).toHaveCount(messages.length)
+        expect(await chat.locator('.chat-transcript [data-message-id]').evaluateAll(nodes => nodes.map(node => node.getAttribute('data-message-id')))).toEqual(messages.map(message => message.id))
         await expect(chat.getByRole('button', { name: '停止', exact: true })).toBeDisabled()
         await expect(chat.getByRole('button', { name: '发送', exact: true })).toBeDisabled()
         await expect(chat.getByRole('region', { name: '候选变更预览' })).toHaveCount(0)

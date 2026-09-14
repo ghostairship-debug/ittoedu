@@ -28,6 +28,10 @@ export type EditorFeedback = {
   statusMessage?: string | null
 }
 
+export interface CourseTransactionCommitPolicy {
+  readonly preserveBrowsing?: boolean
+}
+
 export type EditorStoreKernel = {
   tryReadDocument(): CourseProjectDocument | null
   readDocument(): CourseProjectDocument
@@ -56,7 +60,7 @@ export type EditorStoreKernel = {
   markDirty(dirty?: boolean): void
   readDirty(): boolean
   persistDocument(document: CourseProjectDocument, options?: { statusMessage?: string | null; historyEntry?: boolean }): boolean
-  persistTransaction(step: EditorTransactionStep, statusMessage: string): boolean
+  persistTransaction(step: EditorTransactionStep, statusMessage: string, policy?: CourseTransactionCommitPolicy): boolean
   failSessionless(reason?: string): never
 }
 
@@ -68,7 +72,7 @@ export type EditorStoreKernelHost = {
   commit(patch: Record<string, unknown>): void
   readDirty(): boolean
   persistDocument?(document: CourseProjectDocument, options?: { statusMessage?: string | null; historyEntry?: boolean }): boolean
-  persistTransaction(step: EditorTransactionStep, statusMessage: string): boolean
+  persistTransaction(step: EditorTransactionStep, statusMessage: string, policy?: CourseTransactionCommitPolicy): boolean
 }
 
 export function createEditorStoreKernel(host: EditorStoreKernelHost): EditorStoreKernel {
@@ -96,8 +100,8 @@ export function createEditorStoreKernel(host: EditorStoreKernelHost): EditorStor
     persistDocument(document, options) {
       return host.persistDocument ? host.persistDocument(document, options) : false
     },
-    persistTransaction(step, statusMessage) {
-      return host.persistTransaction(step, statusMessage)
+    persistTransaction(step, statusMessage, policy) {
+      return host.persistTransaction(step, statusMessage, policy)
     },
     failSessionless(reason = SESSIONLESS_COURSE_REASON): never {
       throw new Error(reason)

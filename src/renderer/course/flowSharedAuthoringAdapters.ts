@@ -788,7 +788,6 @@ export function convertFlowOverlayMediaToDocument(
   if (located.item.kind !== 'native') return fail('只有图片或视频浮层可以嵌入正文')
   const nativeType = located.item.content.nativeType
   if (nativeType !== 'image' && nativeType !== 'video') {
-    if (nativeType === 'teacher-controller') return fail(FLOW_CONTROLLER_EMBED_REASON)
     if (nativeType === 'shape') return fail(FLOW_SHAPE_EMBED_REASON)
     return fail('该浮层不能嵌入正文')
   }
@@ -1334,9 +1333,7 @@ export function patchFlowOverlayPaperSpace(
   if (!overlayId) return fail('请先选择一个浮层或全局层项目')
   const located = locateCourseLayer(document, overlayId)
   if (!located) return fail(`找不到浮层：${overlayId}`)
-  if (located.item.kind === 'native' && located.item.content.nativeType === 'teacher-controller') {
-    return fail('教师控制器始终钉在视口')
-  }
+  
   const locked = teacherLocked(located.item)
   if (locked) return locked
   const current = located.item.paperSpace ?? 'viewport'

@@ -1,3 +1,4 @@
+import { controllerDisplayFrame, useControllerDisplayRevision } from '../../authoring/controllerDisplayBounds'
 import {
   useEffect,
   useLayoutEffect,
@@ -8,7 +9,8 @@ import {
   type ReactNode,
 } from 'react'
 import { CANVAS_HEIGHT, CANVAS_WIDTH, MIN_NODE_SIZE } from '../../../shared/constants'
-import { createFlowViewportGeometry, projectFlowControllerOverlayFrame, revealFlowSelectionPan, type FlowPoint } from '../../../shared/flowViewportGeometry'
+import { createFlowViewportGeometry, projectFlowComponentControllerFrame, revealFlowSelectionPan, type FlowPoint } from '../../../shared/flowViewportGeometry'
+import { playbackControllerInsets, type PlaybackChromeInsets } from '../../../shared/playbackViewGeometry'
 import { rotatedWorldRectAxisBounds } from '../../authoring/stageViewportTransform'
 import type { LayerItem } from '../../../shared/courseProjectTypes'
 import type { ComponentPackageData } from '../../../shared/componentTypes'
@@ -24,6 +26,7 @@ import type {
 } from '../../authoring/courseAuthoringSession'
 import type { FlowCurrentSessionCommandPort } from './useFlowTextAuthoringController'
 import { isTeacherControllerLayerItem } from '../../course/globalLayerCommands'
+import { controllerGeometryItem } from '../../../player/teacherControllerComponentGeometry'
 import {
   resizeWorldFrameFromHandle,
   STAGE_RESIZE_HANDLE_DIRECTIONS,
@@ -46,10 +49,12 @@ function overlayCardStyle(
   paperOrigin: FlowPoint,
   paperScrollLeft: number,
   viewPan: FlowPoint,
-  viewportSize: { width: number; height: number },
+  viewportSize: { width: number; height: number; nativeChrome?: PlaybackChromeInsets },
+  display = false,
 ): CSSProperties {
   const raw = preview ?? layer.item.frame
-  const frame = constrainFlowControllerOverlayFrame(layer, raw, viewportSize)
+  const authored = constrainFlowControllerOverlayFrame(layer, raw, viewportSize)
+  const frame = display ? controllerDisplayFrame(layer.item as LayerItem, authored) : authored
   const isController = isTeacherControllerLayerItem(layer.item)
   const isPaper = !isController && layer.item.paperSpace === 'paper'
   const geometry = createFlowViewportGeometry({
@@ -69,22 +74,26 @@ function overlayCardStyle(
     boxSizing: 'border-box',
     pointerEvents: 'auto',
     zIndex: layer.stackOrder,
-    transform: isController ? undefined : `rotate(${layer.item.rotation}deg)`,
+    transform: `rotate(${layer.item.rotation}deg)`,
   }
 }
 
 function constrainFlowControllerOverlayFrame(
   layer: FlowEditorLayerView | undefined,
   frame: StageRect,
-  viewportSize: { width: number; height: number },
+  viewportSize: { width: number; height: number; nativeChrome?: PlaybackChromeInsets },
 ): StageRect {
   if (!layer || !isTeacherControllerLayerItem(layer.item)) return frame
-  return projectFlowControllerOverlayFrame(
-    layer.item.content.data,
-    frame,
-    layer.item.rotation,
-    viewportSize,
-  )
+  if (layer.item.kind === 'component') {
+    const insets = playbackControllerInsets(viewportSize.nativeChrome ?? { right: 0, bottom: 0 })
+    const projected = projectFlowComponentControllerFrame(frame, viewportSize, insets)
+    const visible = controllerDisplayFrame(layer.item as LayerItem, { ...projected, x: 0, y: 0 })
+    return { ...projected,
+      x: Math.max(-visible.x, Math.min(frame.x, viewportSize.width - insets.right - visible.x - visible.width)),
+      y: Math.max(-visible.y, Math.min(frame.y, viewportSize.height - insets.bottom - visible.y - visible.height)),
+    }
+  }
+  return frame
 }
 
 function overlayMediaFillStyle(): CSSProperties {
@@ -266,10 +275,11 @@ export interface FlowOverlayAuthoringLayerProps {
   readonly paperScrollTop: number
   readonly paperScrollLeft?: number
   readonly paperOrigin?: FlowPoint
-  readonly overlayViewportSize: { readonly width: number; readonly height: number }
+  readonly overlayViewportSize: { readonly width: number; readonly height: number; readonly nativeChrome?: PlaybackChromeInsets }
   readonly viewPan?: FlowPoint
   readonly onViewPanChange?: (pan: FlowPoint) => void
   readonly children: ReactNode
+  readonly onEditFormula?: (layerItemId: string) => void
   readonly onBeforeGesture?: () => boolean
   readonly commands: FlowCurrentSessionCommandPort
 }
@@ -290,6 +300,7 @@ export function FlowOverlayAuthoringLayer({
   onViewPanChange,
   children,
   onBeforeGesture,
+  onEditFormula,
   commands,
 }: FlowOverlayAuthoringLayerProps) {
   const overlayRef = useRef<HTMLDivElement>(null)
@@ -345,6 +356,7 @@ export function FlowOverlayAuthoringLayer({
     name: entry.label,
   }))
 
+  useControllerDisplayRevision()
   const overlayFrameOf = (layer: FlowEditorLayerView): StageRect => {
     const raw = overlayPreview?.id === layer.selectionId
       ? overlayPreview.frame
@@ -389,7 +401,9 @@ export function FlowOverlayAuthoringLayer({
     const target = selectOverlay(layer)
     if (!target) return
     const local = localForLayer(overlay, event, layer)
-    const startFrame = overlayFrameOf(layer)
+    const projectedFrame = overlayFrameOf(layer)
+    const componentController = layer.item.kind === 'component' && isTeacherControllerLayerItem(layer.item)
+    const startFrame = componentController ? { ...projectedFrame, width: layer.item.frame.width, height: layer.item.frame.height } : projectedFrame
     const handleEl = event.target instanceof HTMLElement
       ? event.target.closest('[data-handle]')
       : null
@@ -431,7 +445,9 @@ export function FlowOverlayAuthoringLayer({
       rawNext,
       overlayViewportSize,
     )
-    setOverlayPreview({ id: gesture.layerItemId, frame: next })
+    const layer = view.overlayLayers.find(layer => layer.selectionId === gesture.layerItemId)
+    const persisted = layer?.item.kind === 'component' && isTeacherControllerLayerItem(layer.item) ? { ...next, width: rawNext.width, height: rawNext.height } : next
+    setOverlayPreview({ id: gesture.layerItemId, frame: persisted })
   }
 
   const endOverlayGesture = (event: ReactPointerEvent<HTMLElement>) => {
@@ -462,7 +478,9 @@ export function FlowOverlayAuthoringLayer({
       overlayViewportSize,
     )
     setOverlayPreview(null)
-    commands.run(gesture.target, { kind: 'transform-overlay-frame', frame: next })
+    const layer = view.overlayLayers.find(layer => layer.selectionId === gesture.layerItemId)
+    const persisted = layer?.item.kind === 'component' && isTeacherControllerLayerItem(layer.item) ? { ...next, width: rawNext.width, height: rawNext.height } : next
+    commands.run(gesture.target, { kind: 'transform-overlay-frame', frame: persisted })
   }
 
   const cancelOverlayGesture = (event: ReactPointerEvent<HTMLElement>) => {
@@ -530,15 +548,19 @@ export function FlowOverlayAuthoringLayer({
             overlayViewportSize,
           ),
           opacity: layer.item.opacity,
+          ...(controller ? (() => { const base = overlayFrameOf(layer), visible = controllerDisplayFrame(layer.item as LayerItem, base); return { clipPath: `inset(${visible.y-base.y}px ${base.width-(visible.x-base.x)-visible.width}px ${base.height-(visible.y-base.y)-visible.height}px ${visible.x-base.x}px)` } })() : {}),
           pointerEvents: interactive ? 'auto' : 'none',
         }}
         onPointerDown={interactive ? (event) => beginOverlayGesture(event, layer) : undefined}
+        onDoubleClick={!readOnly && layer.item.kind === 'native' && layer.item.content.nativeType === 'formula' ? event => { event.stopPropagation(); onEditFormula?.(layer.selectionId) } : undefined}
         onPointerMove={readOnly ? undefined : moveOverlayGesture}
         onPointerUp={readOnly ? undefined : endOverlayGesture}
         onPointerCancel={readOnly ? undefined : cancelOverlayGesture}
       >
         {controller ? (
           <TeacherControllerAuthoringChrome
+            projectId={view.projectId} componentPackages={componentPackages} assetUrls={assetUrls}
+            flowViewport
             item={layer.item as LayerItem}
             frame={overlayFrameOf(layer)}
             rotation={layer.item.rotation}
@@ -585,18 +607,20 @@ export function FlowOverlayAuthoringLayer({
             paperScrollLeft,
             viewPan,
             overlayViewportSize,
+            true,
           ),
           pointerEvents: readOnly ? 'none' : 'auto',
           background: 'transparent',
         }}
         onPointerDown={readOnly ? undefined : (event) => beginOverlayGesture(event, layer)}
+        onDoubleClick={!readOnly && layer.item.kind === 'native' && layer.item.content.nativeType === 'formula' ? event => { event.stopPropagation(); onEditFormula?.(layer.selectionId) } : undefined}
         onPointerMove={readOnly ? undefined : moveOverlayGesture}
         onPointerUp={readOnly ? undefined : endOverlayGesture}
         onPointerCancel={readOnly ? undefined : cancelOverlayGesture}
       >
         {editable ? STAGE_RESIZE_HANDLE_DIRECTIONS.map((direction) => {
-          const point = overlayHandlePoint(overlayFrameOf(layer), direction)
-          const frame = overlayFrameOf(layer)
+          const frame = controllerDisplayFrame(layer.item as LayerItem, overlayFrameOf(layer))
+          const point = overlayHandlePoint(frame, direction)
           return (
             <div
               key={direction}

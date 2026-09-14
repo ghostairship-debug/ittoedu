@@ -1,4 +1,5 @@
 import type { ComponentPackageData } from '../../shared/componentTypes'
+import { omitTeacherControllerFromStaticExport } from '../../shared/teacherControllerRole'
 import { collectCourseProjectHealth } from '../../shared/courseProjectHealth'
 import type {
   CourseProjectHealthCode,
@@ -269,11 +270,7 @@ function adaptCourseStaticFormatProducerFindings(
   const videoCount = layerItems.filter((item) => (
     item.kind === 'native' && item.content.nativeType === 'video'
   )).length
-  const omittedControllerCount = layerItems.filter((item) => (
-    item.kind === 'native'
-    && item.content.nativeType === 'teacher-controller'
-    && !item.content.data.includeInStaticExports
-  )).length
+  const omittedControllerCount = layerItems.filter(omitTeacherControllerFromStaticExport).length
   const flowMediaKinds: Array<'audio' | 'video'> = []
   const visitFlowBlocks = (blocks: readonly FlowBlock[]): void => {
     blocks.forEach((block) => {

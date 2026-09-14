@@ -1,0 +1,69 @@
+{
+  "artifactSchema": "schemas/project-document-artifact.json",
+  "candidateCarrier": {
+    "default": "native"
+  },
+  "description": "CLI 文件兜底：读取本轮 resources/project/document.json，用原生脚本任意编辑其 V9 内容，保留工程 id 和基线 revision。把 {document:修改后的完整V9文档,assetFiles?:{素材ID:base64},componentFiles?:{包ID:{相对文件名:base64或{encoding:\"utf8\",text:\"源码\"}}}} 写入当前 resources/result.json。候选 input={artifact:{$candidateFile:\"resources/result.json\"}}，destination 使用本轮任意有效目标别名作为版本锚点，不限制修改对象。未提供的资源从当前工程复用；新增/替换资源必须真实提供并更新 document 元数据。可替换、新增、删除多个独立对象、跨页、修改结构和快捷工具未覆盖的字段。宿主严格解析、检查资源闭包、为动态内容执行实际准入，并在一次工程/资源/历史事务中提交；不直接覆盖磁盘工程。只在当前工作副本操作，不依赖本机仓库源码或其他工程。",
+  "examples": [
+    {
+      "input": {
+        "artifact": {
+          "$candidateFile": "resources/result.json"
+        }
+      }
+    }
+  ],
+  "inputSchema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": false,
+    "properties": {
+      "artifact": {
+        "additionalProperties": false,
+        "properties": {
+          "$candidateFile": {
+            "maxLength": 1000,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "$candidateFile"
+        ],
+        "type": "object"
+      }
+    },
+    "required": [
+      "artifact"
+    ],
+    "type": "object"
+  },
+  "invocation": "候选提交文件引用，宿主解析文件并严格验证 V9。通常直接编辑冻结 document.json 的已有结构，无需读取完整 Schema 或编写验证器；新增未知结构时按需读取 artifactSchema。保留工程 cwd，用绝对路径读写暂存文件，避免 Windows 长工作目录错误。",
+  "name": "project.document",
+  "recovery": "invalid-input: 按本卡 Schema 修正字段；revision-conflict: 重新 observe 后复制新 target 和源码基线；tool-failed: 读取 diagnostics 修复所指输入/资源/宿主条件，失败不代表已提交。",
+  "support": "conditional-on-input-target-resources-and-host",
+  "supportedScopes": [
+    "slide:scene",
+    "slide:global",
+    "flow:surface",
+    "flow:global",
+    "spatial-2d:world",
+    "spatial-2d:global",
+    "slide:surface",
+    "spatial-2d:surface"
+  ],
+  "variants": [
+    {
+      "scopes": [
+        "slide:scene",
+        "slide:global",
+        "flow:surface",
+        "flow:global",
+        "spatial-2d:world",
+        "spatial-2d:global",
+        "slide:surface",
+        "spatial-2d:surface"
+      ]
+    }
+  ],
+  "version": 1
+}

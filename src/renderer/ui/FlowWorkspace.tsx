@@ -1,10 +1,10 @@
 import { createPortal } from 'react-dom'
-import { PLAYBACK_VIEW_CHROME_GUTTER } from '../../shared/playbackViewGeometry'
 import { buildFlowRichTextHtml } from '../../shared/flowRichText'
 import { chartCanvasTextPort } from '../authoring/chartCanvasTextBridge'
-import { FLOW_BODY_CSS, FLOW_BODY_PAPER_PADDING, FLOW_BODY_SCROLL_PADDING, resolveFlowParagraphPresentation } from '../../shared/flowBodyPresentation'
+import { FLOW_BODY_CSS, FLOW_BODY_PAPER_PADDING, FLOW_BODY_SCROLL_PADDING, flowPaperMaxWidth, resolveFlowBodyWidth, resolveFlowParagraphPresentation } from '../../shared/flowBodyPresentation'
 import { tableCellSpan } from '../../shared/tableMerge'
 import { EditableChartView } from './EditableChartView'
+import { useAssetObjectUrls } from './useAssetObjectUrls'
 import type { ChartTextDraft } from '../authoring/chartTextDraft'
 import {
   useEffect,
@@ -315,21 +315,6 @@ function FlowPlainStringEditor({
   return <input {...shared} />
 }
 
-function createFlowAssetObjectUrls(
-  assets: Readonly<Record<string, AssetMeta>>,
-  files: Record<string, Uint8Array>,
-): Record<string, string> {
-  const urls: Record<string, string> = {}
-  if (typeof URL.createObjectURL !== 'function') return urls
-  for (const [assetId, bytes] of Object.entries(files)) {
-    const meta = assets[assetId]
-    urls[assetId] = URL.createObjectURL(
-      new Blob([Uint8Array.from(bytes)], { type: meta?.mimeType ?? 'application/octet-stream' }),
-    )
-  }
-  return urls
-}
-
 function renderFlowPaperMedia(
   block: Extract<FlowBlock, { type: 'media' }>,
   assetUrls: Record<string, string>,
@@ -342,7 +327,7 @@ function renderFlowPaperMedia(
         data-flow-media-kind="image"
         {...(url ? { src: url } : {})}
         alt={block.altText ?? ''}
-        style={{ maxWidth: '100%', display: 'block' }}
+        style={{ maxWidth: '100%' }}
       />
     )
   }
@@ -357,7 +342,7 @@ function renderFlowPaperMedia(
         muted
         playsInline
         preload="metadata"
-        style={{ maxWidth: '100%', display: 'block' }}
+        style={{ maxWidth: '100%' }}
       />
     )
   }
@@ -395,7 +380,7 @@ function FlowComponentBlockView({
       componentId: block.component.packageId,
       version: block.component.version,
       instanceId: block.id,
-      width: readingWidth,
+      width: el.clientWidth || readingWidth,
       height: 320,
       props: block.props,
       staticFallbackAssetId: block.staticFallbackAssetId,
@@ -404,8 +389,10 @@ function FlowComponentBlockView({
       mode: 'edit',
       interactive: false,
     })
-    return () => handle.destroy()
-  }, [block.component.packageId, block.component.version, block.id, block.props, block.staticFallbackAssetId, componentPackages, assetUrls, readingWidth, pkg, projectId])
+    const observer = new ResizeObserver(() => { if (el.clientWidth > 0) handle.resize(el.clientWidth, 320) })
+    observer.observe(el)
+    return () => { observer.disconnect(); handle.destroy() }
+  }, [block.component.packageId, block.component.version, block.id, block.props, block.staticFallbackAssetId, componentPackages, assetUrls, pkg, projectId])
 
   if (!pkg) {
     return (
@@ -473,6 +460,8 @@ function blockLabel(block: FlowBlock): string {
   return '编辑段落文本'
 }
 
+const EMPTY_ASSET_FILES: Record<string, Uint8Array> = {}
+
 export function FlowWorkspace({
   toolbarContainer,
   view,
@@ -483,7 +472,7 @@ export function FlowWorkspace({
   previewTextEdit,
   commands,
   readOnly = false,
-  assetFiles = {},
+  assetFiles = EMPTY_ASSET_FILES,
   componentPackages = {},
 }: FlowWorkspaceProps) {
   assertActiveFlowEditorView(view)
@@ -501,6 +490,7 @@ export function FlowWorkspace({
   const [paperScrollTop, setPaperScrollTop] = useState(0)
   const [paperScrollLeft, setPaperScrollLeft] = useState(0)
   const [paperOrigin, setPaperOrigin] = useState({ x: 0, y: 0 })
+  const [paperContentWidth, setPaperContentWidth] = useState(0)
   const viewKey = `${view.projectId}/${view.surfaceId}`
   const [authoringView, setAuthoringView] = useState({ key: viewKey, pan: { x: 0, y: 0 } })
   const viewPan = authoringView.key === viewKey ? authoringView.pan : { x: 0, y: 0 }
@@ -509,13 +499,14 @@ export function FlowWorkspace({
   const [overlayViewportSize, setOverlayViewportSize] = useState({
     width: STAGE_VIEWPORT_WIDTH,
     height: STAGE_VIEWPORT_HEIGHT,
+    nativeChrome: { right: 0, bottom: 0 },
   })
+  const bodyWidth = paperContentWidth || resolveFlowBodyWidth(view.layout, overlayViewportSize.width)
   const locationId = selection?.locationId ?? view.locationId
-  const sidecarFiles = assetFiles
-  const assetUrls = useMemo(
-    () => createFlowAssetObjectUrls(assets, sidecarFiles),
-    [assets, sidecarFiles],
-  )
+  const assetMimeTypes = useMemo(() => Object.fromEntries(
+    Object.entries(assets).map(([id, asset]) => [id, asset.mimeType]),
+  ), [assets])
+  const assetUrls = useAssetObjectUrls(assetFiles, assetMimeTypes)
 
   const {
     edit,
@@ -545,19 +536,19 @@ export function FlowWorkspace({
     commands,
   })
 
-  useEffect(() => () => {
-    if (typeof URL.revokeObjectURL !== 'function') return
-    for (const url of Object.values(assetUrls)) URL.revokeObjectURL(url)
-  }, [assetUrls])
-
   useLayoutEffect(() => {
     const node = workspaceMeasureRef.current
     if (!node) return
     const update = () => {
       const rect = node.getBoundingClientRect()
       if (rect.width > 0 && rect.height > 0) {
-        setOverlayViewportSize({ width: rect.width, height: rect.height })
+        const scroll = scrollRef.current
+        setOverlayViewportSize({ width: rect.width, height: rect.height, nativeChrome: {
+          right: scroll ? Math.max(0, scroll.offsetWidth - scroll.clientWidth) : 0,
+          bottom: scroll ? Math.max(0, scroll.offsetHeight - scroll.clientHeight) : 0,
+        } })
         if (scrollRef.current && paperRef.current) {
+          if (paperRef.current.clientWidth > 0) setPaperContentWidth(Math.max(0, paperRef.current.clientWidth - 72))
           setPaperOrigin(measureFlowPaperOrigin(node, scrollRef.current, paperRef.current, 1, viewPan))
         }
       }
@@ -635,7 +626,9 @@ export function FlowWorkspace({
 
   const handlePaperClick = (event: ReactMouseEvent<HTMLElement>) => {
     if (event.target !== event.currentTarget) return
+    if (readOnly) return
     if (editRef.current) commitCurrent(false)
+    else commands.run(captureFlowEditorAuthoringTarget({ view, sessionToken, target: { kind: 'surface' } }), { kind: 'clear-selection', expectedEdit: null })
   }
 
   const handleBlockKeyDown = (blockId: string, event: ReactKeyboardEvent<HTMLElement>) => {
@@ -799,7 +792,10 @@ export function FlowWorkspace({
   const formulaBlock = formulaBlockId
     ? view.blocks.find((entry) => entry.blockId === formulaBlockId)?.block
     : undefined
-  const formulaNode = formulaBlock?.type === 'formula'
+  const formulaOverlay = view.overlayLayers.find(layer => layer.selectionId === formulaBlockId)?.item
+  const formulaNode = formulaOverlay?.kind === 'native' && formulaOverlay.content.nativeType === 'formula'
+    ? { ...flowFormulaBlockToAuthoringNode({ id: formulaOverlay.layerItemId, ...formulaOverlay.content.data } as Parameters<typeof flowFormulaBlockToAuthoringNode>[0]), name: formulaOverlay.label }
+    : formulaBlock?.type === 'formula'
     ? flowFormulaBlockToAuthoringNode({
         id: formulaBlock.id,
         formulaId: formulaBlock.formulaId,
@@ -818,6 +814,7 @@ export function FlowWorkspace({
     else childrenByParent.set(blockView.parentId, [blockView])
   }
   const flowMediaWidths = {
+    widthMode: view.layout.widthMode,
     readingWidth: view.layout.readingWidth,
     wideContentWidth: view.layout.wideContentWidth,
   }
@@ -1101,7 +1098,7 @@ export function FlowWorkspace({
         break
       }
       case 'chart':
-        body = <EditableChartView id={block.id} chart={structuredClone(block.chart) as import('../../shared/contracts/native-v1').NativeChartContent} width={Math.max(240, view.layout.readingWidth - 104)} height={block.height}
+        body = <EditableChartView id={block.id} chart={structuredClone(block.chart) as import('../../shared/contracts/native-v1').NativeChartContent} width={Math.max(240, bodyWidth)} height={block.height}
           onEditStart={event => selectBlock(block.id, event)}
           canvasTextPort={() => chartCanvasTextPort(targetForBlock(block.id))}
           textController={readOnly ? undefined : {
@@ -1191,7 +1188,7 @@ export function FlowWorkspace({
               accessibleText={block.accessibleText}
               ast={block.ast as FormulaAstNode}
               style={{ fontSize: 32, color: '#1f2937', align: 'left' }}
-              width={Math.max(160, view.layout.readingWidth)}
+              width={Math.max(160, bodyWidth)}
               height={96}
               pointerEvents={formulaEditingAvailable ? 'none' : 'auto'}
             />
@@ -1308,7 +1305,7 @@ export function FlowWorkspace({
             <FlowComponentBlockView
               projectId={view.projectId}
               block={block}
-              readingWidth={view.layout.readingWidth}
+              readingWidth={bodyWidth}
               componentPackages={componentPackages}
               assetUrls={assetUrls}
             />
@@ -1402,8 +1399,8 @@ export function FlowWorkspace({
           top: localHeaderHeight,
           left: 0,
           display: 'flex',
-          width: `calc(100% - ${PLAYBACK_VIEW_CHROME_GUTTER}px)`,
-          height: `calc(100% - ${PLAYBACK_VIEW_CHROME_GUTTER + localHeaderHeight}px)`,
+          width: '100%',
+          height: `calc(100% - ${localHeaderHeight}px)`,
           minHeight: 0,
           overflow: 'hidden',
           isolation: 'isolate',
@@ -1428,6 +1425,7 @@ export function FlowWorkspace({
           overlayViewportSize={overlayViewportSize}
           viewPan={viewPan}
           onViewPanChange={setViewPan}
+          onEditFormula={openFormula}
           onBeforeGesture={() => {
             if (!editRef.current) return true
             commitCurrent(false)
@@ -1440,6 +1438,7 @@ export function FlowWorkspace({
             className="flow-workspace__scroll flow-media-query-root"
             data-testid="flow-workspace-scroll"
             data-flow-media-query-root="true"
+            onClick={handlePaperClick}
             onScroll={(e) => {
               setPaperScrollTop(e.currentTarget.scrollTop)
               setPaperScrollLeft(e.currentTarget.scrollLeft)
@@ -1464,7 +1463,7 @@ export function FlowWorkspace({
               onClick={handlePaperClick}
               style={{
                 width: '100%',
-                maxWidth: view.layout.readingWidth,
+                maxWidth: flowPaperMaxWidth(view.layout),
                 minHeight: '100%',
                 margin: '0 auto',
                 padding: FLOW_BODY_PAPER_PADDING,

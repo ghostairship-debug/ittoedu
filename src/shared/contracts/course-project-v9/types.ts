@@ -8,7 +8,7 @@ export type {
   CourseStateDeclaration,
   CourseStateScalar,
 } from '../course-state/types'
-import type {
+import {
   FormulaAstNode,
   NativeChartContent,
   NativeFormulaContent,
@@ -16,7 +16,6 @@ import type {
   NativeInputContent,
   NativeShapeContent,
   NativeTableContent,
-  NativeTeacherControllerContent,
   NativeTextContent,
   NativeVideoContent,
   TextRun,
@@ -88,7 +87,6 @@ export type NativeElementContent =
   | { nativeType: 'image'; data: NativeImageContent }
   | { nativeType: 'video'; data: NativeVideoContent }
   | { nativeType: 'shape'; data: NativeShapeContent }
-  | { nativeType: 'teacher-controller'; data: NativeTeacherControllerContent }
   | { nativeType: 'table'; data: NativeTableContent }
   | { nativeType: 'chart'; data: NativeChartContent }
   | { nativeType: 'input'; data: NativeInputContent }
@@ -100,6 +98,8 @@ export interface NativeLayerItem extends LayerItemBase {
 
 export interface ComponentLayerItem extends LayerItemBase {
   kind: 'component'
+  /** Host-owned global Overlay identity; not inferred from package names or props. */
+  role?: 'teacher-controller'
   component: {
     packageId: string
     version: string
@@ -407,6 +407,8 @@ export interface FlowSurfaceDocument extends SurfaceBase {
   backgroundColor?: string
   backgroundAssetId?: string | null
   layout: {
+    /** Missing means legacy fixed reading width. */
+    widthMode?: 'fluid' | 'reading'
     readingWidth: number
     wideContentWidth: number
   }

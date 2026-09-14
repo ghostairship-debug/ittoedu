@@ -1,3 +1,7 @@
+import { controllerMetadata } from '../fixtures/teacherController'
+import type { LayerItem } from '../../src/shared/courseProjectTypes'
+import { controllerPackage } from '../fixtures/teacherController'
+import type { ComponentLayerItem } from '../../src/shared/courseProjectTypes'
 import { describe, expect, it } from 'vitest'
 import { makeAuthoringAddress } from '@/shared/authoringAddress'
 import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
@@ -103,7 +107,7 @@ function nativeText(
   }
 }
 
-function globalController(): NativeLayerItem {
+function globalController(): ComponentLayerItem {
   return {
     layerItemId: 'global-teacher-controller',
     label: '教师控制器',
@@ -115,10 +119,8 @@ function globalController(): NativeLayerItem {
     opacity: 1,
     hitPolicy: 'auto',
     playbackInitialVisibility: 'inherit',
-    kind: 'native',
-    content: {
-      nativeType: 'teacher-controller',
-      data: {
+    kind: 'component',
+    role: 'teacher-controller', component: { packageId: controllerPackage.manifest.id, version: controllerPackage.manifest.version }, props: {
         title: '教师控制台',
         showSceneProgress: true,
         compact: false,
@@ -141,11 +143,10 @@ function globalController(): NativeLayerItem {
         },
         includeInStaticExports: false,
       },
-    },
   }
 }
 
-function scoped(item: NativeLayerItem, locationIds: string[] = []): ScopedLayerItem {
+function scoped(item: LayerItem, locationIds: string[] = []): ScopedLayerItem {
   return {
     item,
     visibility: locationIds.length === 0
@@ -184,7 +185,7 @@ function v9SpatialFixture(): CourseProjectDocument {
         height: 360,
       },
     },
-    componentPackages: {
+    componentPackages: { ...controllerMetadata,
       'pkg-1': {
         packageId: 'pkg-1',
         version: '1.0.0',

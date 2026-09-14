@@ -1,3 +1,4 @@
+import { checkAuthoringOperationConditions, type AuthoringOperationCondition } from '../../../shared/authoringOperationConditions'
 import type { z } from 'zod'
 import {
   authoringToolRequestV1Schema,
@@ -53,6 +54,7 @@ export interface AuthoringToolDefinition<T> {
   referenceSchemas?: Readonly<Record<string, z.ZodType>>
   usesResources?: boolean
   inputSchema: z.ZodType<T>
+  conditions?: readonly AuthoringOperationCondition[]
   plan(input: {
     document: CourseProjectDocument
     destination: AuthoringToolDestinationV1
@@ -105,6 +107,8 @@ export async function executeAuthoringTool<T>(
   if (stale()) return reject('stale', [staleDiagnostic])
   const invalid = port.validateDestination(request.destination)
   if (invalid) return reject('rejected', [invalid])
+  const conditionErrors = checkAuthoringOperationConditions(definition.conditions ?? [], request.destination, value.data)
+  if (conditionErrors.length) return reject('rejected', conditionErrors)
   try {
     // A planner can only mutate its private input, never the authoritative document.
     if (port.signal?.aborted) return reject('stale', [staleDiagnostic])

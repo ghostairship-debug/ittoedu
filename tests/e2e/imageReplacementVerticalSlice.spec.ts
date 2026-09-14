@@ -700,7 +700,7 @@ test.describe.serial('ARCH-1 VS-06 image replacement desktop regression', () => 
       })
       await returnToEdit(launch.page)
 
-      await launch.page.getByRole('button', { name: '全屏 16:9 整课预览' }).click()
+      await launch.page.getByRole('button', { name: '整课预览', exact: true }).click()
       const preview = launch.page.getByTestId('course-preview-overlay')
       const previewHost = launch.page.getByTestId('course-preview-host')
       const previewAdapter = previewHost.locator('.slide-published-adapter')

@@ -15,7 +15,7 @@ export function editableComponentPackageId(
   sourceId: string,
   suffix: string,
 ): string {
-  return `${sourceId}.editable.${suffix.toLowerCase().replace(/[^a-z0-9]/g, 'x')}`
+  return `${sourceId.split('.editable.')[0]!.slice(0, 100)}.editable.${suffix.toLowerCase().replace(/[^a-z0-9]/g, 'x').slice(0, 64)}`
 }
 
 export function componentPackageMeta(

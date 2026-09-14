@@ -1,3 +1,5 @@
+import { controllerMetadata } from '../teacherController'
+import { controllerPackage } from '../teacherController'
 import { componentContentSha256 } from '../../../src/shared/componentContentIntegrity'
 import type { ComponentManifest } from '../../../src/shared/componentTypes'
 import type { AssetMeta } from '../../../src/shared/contracts/media-v1/types'
@@ -228,14 +230,12 @@ function nativeVideo(layerItemId: string, order: number, assetId: string): Nativ
   }
 }
 
-function teacherController(layerItemId: string, order: number): NativeLayerItem {
+function teacherController(layerItemId: string, order: number): ComponentLayerItem {
   return {
     ...layerBase(layerItemId, order, { mode: 'absolute', x: 190, y: 638, width: 900, height: 64 }),
     label: '教师控制器',
-    kind: 'native',
-    content: {
-      nativeType: 'teacher-controller',
-      data: {
+    kind: 'component',
+    role: 'teacher-controller', component: { packageId: controllerPackage.manifest.id, version: controllerPackage.manifest.version }, props: {
         title: '教师控制台',
         showSceneProgress: true,
         compact: false,
@@ -258,7 +258,6 @@ function teacherController(layerItemId: string, order: number): NativeLayerItem 
         },
         includeInStaticExports: false,
       },
-    },
   }
 }
 
@@ -355,7 +354,7 @@ function courseShell(
     createdAt: COURSE_PROJECT_V9_FIXTURE_MTIME,
     updatedAt: COURSE_PROJECT_V9_FIXTURE_MTIME,
     assets: {},
-    componentPackages: {},
+    componentPackages: { ...controllerMetadata,},
     designTokens: {
       fonts: [{
         id: 'body',
@@ -447,7 +446,7 @@ function emptyArchive(
   return {
     project: courseProjectDocumentSchema.parse(project),
     assetFiles,
-    componentFiles,
+    componentFiles: { [controllerPackage.manifest.id]: controllerPackage.files, ...componentFiles },
   }
 }
 
@@ -795,7 +794,7 @@ function componentFixture(): CourseProjectArchiveData {
   const project: CourseProjectDocument = {
     ...courseShell('v9-fixture-component', 'V9 夹具 · Component'),
     assets: { 'quiz-fallback': imageAsset('quiz-fallback') },
-    componentPackages: { [quiz.packageId]: quiz.meta },
+    componentPackages: { ...controllerMetadata, [quiz.packageId]: quiz.meta },
     locations: [{
       id: 'location-scene-1',
       label: '组件页',

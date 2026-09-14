@@ -25,10 +25,15 @@ function projectEvent(record: LocalAgentRecordV2, event: LocalAgentEventV2, sequ
     ...(record.externalSessionId ? { externalSessionId: record.externalSessionId } : {}),
     sequence, time: event.time,
   }
+  if (event.kind === 'user-message') {
+    return localAgentEventSchema.parse({ ...base, kind: 'user-message', payload: {
+      text: event.text, messageId: `${event.runId}:${event.itemId}`, purpose: event.purpose,
+    } })
+  }
   if (event.kind === 'text') {
     return localAgentEventSchema.parse({
       ...base, kind: 'text',
-      payload: { text: event.text, messageId: `${event.runId}:${event.itemId}`, phase: event.phase, ...(event.operation === 'append' ? { delta: true } : {}) },
+      payload: { text: event.text, messageId: `${event.runId}:${event.itemId}`, ...(event.phase ? { phase: event.phase } : {}), ...(event.operation === 'append' ? { delta: true } : {}) },
     })
   }
   if (event.kind === 'tool') {
@@ -84,9 +89,10 @@ export function projectV2RecordToV1(record: LocalAgentRecordV2, input: LocalAgen
       sequence: 1, time: record.events[0]?.time ?? 0, kind: 'session', payload: {},
     }))
   }
+  const lastNativeEvent = [...record.events].reverse().find(event => !['user-message', 'input-delivery', 'configuration'].includes(event.kind))
   for (const event of record.events) {
     // Old turns remain visible history without terminating the current display run.
-    if (event.kind === 'turn-ended' && event !== record.events.at(-1)) {
+    if (event.kind === 'turn-ended' && event !== lastNativeEvent) {
       events.push(localAgentEventSchema.parse({ version: 1, adapter: record.adapter, sessionId: record.id,
         sequence: events.length + 1, time: event.time, kind: 'session', payload: { status: 'turn-ended', outcome: event.status, runId: event.runId } }))
       continue

@@ -27,7 +27,8 @@
 3. Spatial 运行时可自由逛并支持镜头巡游，会话相机不写回工程。
 4. Phaser 保持 Slide 编辑能力，不重新成为 V9 运行主路径。
 5. 高级编辑、组件、Runtime、互动、媒体和代码能力不被删除；低频能力可渐进披露，但必须可发现、可保存、可撤销。
-6. 全局层入口保持可发现；教师控制器保持全局单份、固定属于 Overlay，运行态会话拖拽不写回工程；页面作者态控制器 inert，全局层是唯一持久化编辑入口。控制器在作者、试运行、Player 与 HTML 中始终高于当前 surface/scene/world 的 Native、Runtime、Component 内容，并只承担恢复、手动跳转、重播和临时越过；它可为课堂强制跳转绕过导航守卫，但课程主推进不得依赖它，也不得为它预留正文安全区。控制器与其他全局 Overlay 元素的关系仍由全局平面内排序决定。
+6. 全局层入口保持可发现；教师控制器保持全局单份、固定属于 Overlay，运行态会话拖拽不写回工程；2026-09-15 Owner 允许在场景作者页直接选中并编辑全局控制台，当前页面与场景状态保持不变，属性与变换仍写入同一份全局组件；全局层保留管理入口。作者页不执行播放动作。控制器在作者、试运行、Player 与 HTML 中始终高于当前 surface/scene/world 的 Native、Runtime、Component 内容，并只承担恢复、手动跳转、重播和临时越过；它可为课堂强制跳转绕过导航守卫，但课程主推进不得依赖它，也不得为它预留正文安全区。控制器与其他全局 Overlay 元素的关系仍由全局平面内排序决定。
+   - 2026-09-14 经 Owner 批准：V9 与 Published V2 ComponentLayerItem 同步新增 strict 可选 role: 'teacher-controller'，仅全局 Overlay 单份。新建与恢复直接使用工程内嵌 Component API4 源码/素材；专用组件属性页管理参数、源码与恢复。2026-09-15 Owner 明确尚未生产且无兼容要求：删除 Native 控制台 discriminator、工厂、渲染器和专用编辑器，不保留转换入口或旧工程兼容分支；旧原生工程在 Schema 边界明确失败。教师控制台端口受角色、作者/捕获模式和生命周期约束，导航与观察状态仍归既有 Owner。无论透明/分散/背景融合外观，控制台独立于课件主动观察 zoom/pan、Flow scroll 与 Spatial camera；窗口尺寸、最大化切换和宿主可用区域变化仍按所在 Surface 正常适配，不能反向抵消 fit-to-window 或用整个应用窗口代替实际播放区域。源码恢复只位于属性中的折叠维护区，通过可撤销事务执行；播放画面不注入恢复按钮、隐式恢复快捷键或临时默认控制台，异常仍归组件诊断。
 
 ### 保存与运行
 
@@ -173,18 +174,26 @@
 - 共同Native内容Owner只负责内容规则，表面wrapper只应用一次frame/rotation/opacity并持有布局/selection；不统一为一个渲染器，不把Flow正文改为LayerItem。
 - 三表面的基础document/resource历史算法归现有Core；Surface保留私有selection/session adapter，无第二Store/History。人工源码、fork、正式替换与AI包候选归同一Components Packages/Authoring准备/校验/事务；保持同版本异内容拒绝，宿主修订版本及全部实例引用一次更新。
 - 既有Flow段落对齐/行距语义由正文Owner解析，编辑/Player/print/DOCX消费；不借整合引入高级排版Schema。
-- 试运行/整课预览/HTML统一按以下目标边界：整课缩放优先从非Component/Runtime区域的手势/键鼠发起；动态区域优先内部逻辑，仅明确无冲突时转交，未知不接管。教师控制器有独立可见的“缩放”按钮，展开缩小/倍率/放大/恢复面板；播放区域底部横向、右侧纵向边条用于平移整个观察视图，Runtime铺满画面或占用内部拖拽时仍可操作。按钮、边条与手势共用同一临时view状态，控制器/边条固定且可达，缩小/resize后校正偏移；边条不重复修改Flow正文scroll，也不能只移动Spatial world而漏掉global Runtime。从外部或按钮发起整课缩放时，控制器以外全部内容和字体同比放大，控制器不变，答案/焦点/实例进度不重置。 保留原global Overlay排序/单实例，控制器按钮为内置宿主观察操作，不写自定义课程按钮或新增V9字段；动态iframe不强制转发。100%到200%视觉文字约×2，不能反向字号/逻辑viewport/fit补偿；不改工程/历史、不重播。Spatial world先经既有camera投影，再与普通HUD共同应用一次观察zoom/pan；HUD不跟world相机漫游，但必须响应边条的整课观察平移。观察操作不再次写camera，命中/剔除使用组合逆映射；边条只表达当前视窗有限范围，不给无限世界制造总长度。Flow正文scroll与观察pan分别保留单一真相，具体范围/拖动/恢复规则见整合方案C.3。
+- 试运行/整课预览/HTML统一按以下目标边界：整课缩放优先从非Component/Runtime区域的手势/键鼠发起；动态区域优先内部逻辑，仅明确无冲突时转交，未知不接管。教师控制器展开时显示“缩放”按钮，打开缩小/倍率/放大/恢复面板；收起控制器同时隐藏缩放按钮并关闭面板，保留当前倍率和平移；播放区域底部横向、右侧纵向边条用于平移整个观察视图，Runtime铺满画面或占用内部拖拽时仍可操作。按钮、边条与手势共用同一临时view状态，控制器/边条固定且可达，缩小/resize后校正偏移；边条不重复修改Flow正文scroll，也不能只移动Spatial world而漏掉global Runtime。从外部或按钮发起整课缩放时，控制器以外全部内容和字体同比放大，控制器不变，答案/焦点/实例进度不重置。 保留原global Overlay排序/单实例，默认组件按钮调用唯一宿主观察端口，不把观察状态写为自定义课程动作；教师控制台 role 字段按本节批准的窄合同扩展；动态iframe不强制转发。100%到200%视觉文字约×2，不能反向字号/逻辑viewport/fit补偿；不改工程/历史、不重播。Spatial world先经既有camera投影，再与普通HUD共同应用一次观察zoom/pan；HUD不跟world相机漫游，但必须响应边条的整课观察平移。观察操作不再次写camera，命中/剔除使用组合逆映射；边条只表达当前视窗有限范围，不给无限世界制造总长度。Flow正文scroll与观察pan分别保留单一真相，具体范围/拖动/恢复规则见整合方案C.3。
 - Flow几何的**D1已由Owner于2026-09-07批准方案A**：基准倍率1时正文与浮层采用1逻辑单位=1CSS px；窗口宽度决定正文响应式重排，paper项相对纸张布局原点随正文滚动，viewport项相对实际文档视口。主动观察缩放只在基准布局结果上应用共同矩阵，不反向调整排版宽度/字号或重建实例。接受旧Flow浮层初始投影大小/位置变化并复核旧课件，不修改持久frame数值；Slide/Spatial原页/HUD尺度保留。
 - Spatial当前真实动态复用范围为global Canvas Runtime API2；本地world/surface Runtime的静态/标签呈现不等于完整执行。整合先补已支持global API2作者consumer，local/API3扩域需精确作者—运行—导出合同，不能以统一之名伪报支持。
 
 ## 7. 原生CLI、编辑器连接、暂存与会话边界
 
+2026-09-14 设计接续：[AI 创作操作机制实施方案](AI_AUTHORING_MECHANISM_IMPLEMENTATION_PLAN.md)细化完整操作、前序依赖、发现/预检和恢复检查；新增机制尚未实施。候选字段仅在正式 strict 合同与实际 consumer 同批落地后才成为当前能力，本节既有原生权限、焦点、唯一事务与版本边界继续有效。
+
+- **配置证据**：原生模型目录推荐值、应用按 CLI 保存的用户选择、原生有效配置与任务确认值分别管理。显式选择保存于应用本地版本化偏好目录，不进入课件；发送等待保存并冻结本轮选择，Codex 每轮显式传入所选 model/effort，默认强度仍继承原生语义。任务日志保存所选、发送及确认值，目录缓存不能冒充当前任务证据。
+- **Codex 文件候选**：app-server 结构化 edit 结果允许 candidate 为 `{version:1,requestId,candidateFile:"candidate.json"}`。只有成功终态明确声明本轮引用才读取当前 request 根内固定文件；不扫描任意路径。文件内仍是正式候选，经原有身份、大小、realpath、资源和 canonical transaction 校验；旧文件、普通答复、失败或 Stop 不触发摄取。小候选可继续内联交付。
+
+- **B0/B1冻结任务与后台应用（Owner 2026-09-11授权）**：纯浏览/换选不重定向已发出的AI任务；以原目标、工程revision、workspace、资源、task epoch及草稿一致性重校验。提交仍走唯一document/resource/History事务；教师已浏览或换选时保留当前位置/选择，未变化时采用事务结果选择，允许继续编辑替换后的新对象，不自动提交或覆盖另一页草稿。初始/修正/续轮观察的结构和图像必须同源于原目标；离屏证据只能来自正式候选/预览宿主，不能冒充live。工程变化、Undo/Redo、Save As、关闭、Stop及期限使旧候选失效，普通人工异步session约束不因此放宽。第二层media.apply展开既有媒体/内容/替换Owner；任务内文件复用仍受当轮root闭包摄取约束，具体strict输入见共同实施合同。
+
 - **长期分工（Owner 2026-09-08）**：用户自行安装认证Codex、Claude、OpenCode；保留原生模型循环、文件/终端/网络、用户工具与连接、Skills和子任务。相同账号、配置、工作上下文和授权下，不因GUI包装默认降成只读、工具白名单或关闭终端。GUI承接原生权限请求与用户决定，不静默提权。应用做版本化adapter、会话、观察、候选摄取、回执、界面及自动准入，不预设迁往自建模型循环，不新建应用MCP/通用工具RPC平台；原生CLI已有用户连接仍保留。
 - **阶段与体验**：1.8修实际阻断、原生接线及当前工程观察/编辑反馈、按需能力与源码增量。1.9的042未命名/首存、045材料、044双流程与Skills、041聊天首页/画布/极简与专业模式共同形成工作流；删除未实施的r18-105。自动必须上传且成功读取材料：有效原件、整体结构与本次教学范围的实际文本/原图齐备，无关附录不阻塞；优先模板/设计；手动依次确认教学简报、策划、呈现简报和脚本。当前外部Skill在044迁移前保留现有确认路径，规划不表示guard已改。2.0所有课件步骤在软件内完成，速度、教学/视觉/互动质量和可编辑交付一起验收。2.x媒体与运行时服务沿[方案](AGENT_AUTHORING_LONG_TERM_PLAN.md)扩展原生CLI架构。
 - **观察与权限分开**：默认提供任务相关的不可变小观察、能力卡和必要材料，目标明确时不发送全量目录/源码。CLI可按原生授权继续查找文件、资料与Skills，观察scope不是OS权限沙箱。Task/Observation/Proposal/HostResult/UserInput由唯一Owner以strict版本合同管理；一个任务可收到多次观察和回执，由CLI决定下一步。极简/专业模式只组织入口，不建立第二工程、任务或历史，也不降低AI能力。
 - **原生接线**：明确可执行文件与参数数组，不拼shell命令。保留或明确选择原生cwd、非秘密配置和运行所需环境；staging不能强制替代全部工作上下文。工具活动、授权、问题、取消、配置确认和错误按实际原生协议接回GUI。CLI管理认证，应用不复制凭据或在诊断输出secret；能力不足须诚实呈现，不伪装成功。
-- **工程唯一写入路径**：编辑器消费strict typed candidate/dynamic manifest，通过结构化stdout/artifact或当前candidate staging返回；宿主重校验canonical target、revision、epoch与资源，经既有canonical commands和单一document/resource transaction提交。禁止generic V9 patch/import、raw Store和第二writer。snapshot不暴露live Store。原生文件工具完成不等于工程已应用；外部原生工具改变已打开工程的磁盘文件时，由既有打开/保存Owner处理必要的重载与保存冲突，重新取得工程事实再继续，不能静默覆盖内存或补造History receipt。
-- **短传输与终态（2026-09-09）**：短操作仅是当前request内的strict投影，绑定canonical target/revision/sessionGeneration/epoch，宿主展开后仍经完整candidate和现有Facade/事务；不得引入第二工程协议、自然语言目标猜测或generic V9 patch。成功后finish须有实际committed或正式unchanged、必要证据和已保存回执，并贯通唯一任务状态/持久化；preview待应用不算完成，unchanged不增revision/Undo。必要observe/continue保留。已提交后记录失败只重试回执，不重提事务；无推理追加按真实原生能力，缺失时下次请求前送入，跨崩溃未知如实核实。绝对任务预算覆盖观察至提交前，等待不隐式延期。详细状态及失败合同见[共同实施合同](roadmap/1.8/IMPLEMENTATION_CONTRACT.md)。
+- **工程唯一写入路径**：编辑器消费strict typed candidate/dynamic manifest，通过结构化stdout/artifact或当前candidate staging返回；宿主重校验canonical target、revision、epoch与资源，经既有canonical commands和单一document/resource transaction提交。2026-09-14 Owner 明确选择/页面仅为输入焦点，不是授权边界；宿主工具是快捷通道。CLI 可编辑本轮冻结 V9 工作副本，经 project.document 正式制品入口回收完整文档及真实资源，复用 V9/归档闭包/动态准入检查和唯一 EditorTransaction；不受快捷命令字段覆盖限制。制品必须保留工程 ID/基线 revision，宿主只递增一次版本；禁止 raw Store 和第二 writer，snapshot 不暴露 live Store。原生文件工具完成不等于工程已应用；外部原生工具改变已打开工程的磁盘文件时，由既有打开/保存Owner处理必要的重载与保存冲突，重新取得工程事实再继续，不能静默覆盖内存或补造History receipt。
+- **短传输与终态（2026-09-09）**：短操作仅是当前request内的strict投影，绑定canonical target/revision/sessionGeneration/epoch，宿主展开后仍经完整candidate和现有Facade/事务；不得引入第二工程协议、自然语言目标猜测；完整文件结果使用上述 project.document 入口，不向 live Store 发 patch。成功后finish须有实际committed或正式unchanged、必要证据和已保存回执，并贯通唯一任务状态/持久化；preview待应用不算完成，unchanged不增revision/Undo。必要observe/continue保留。已提交后记录失败只重试回执，不重提事务；无推理追加按真实原生能力，缺失时下次请求前送入，跨崩溃未知如实核实。绝对任务预算覆盖观察至提交前，等待不隐式延期。详细状态及失败合同见[共同实施合同](roadmap/1.8/IMPLEMENTATION_CONTRACT.md)。
+- **任务输入与恢复（2026-09-14）**：本轮宿主提供的候选根/能力目录内真实文件读取视为任务输入，仅响应原生 allow_once，不为命令/写操作/其他目录设置自动授权；其他原生权限及显式拒绝保留。原生 CLI 在无显式代理环境配置时使用本机实际系统代理，保留 loopback 直连。编辑没有实际回执而只回复文字时记录可恢复失败，向同一原生会话反馈文件兜底路径；受原有期限/无进展预算、Stop 和只读意图约束。
 - **候选摄取**：宿主只摄取当前candidate root内realpath闭合、身份相符且检查通过的内容；这不把CLI所有文件工具锁进staging。失败、Stop、stale、拒绝和迟到候选对当前未提交阶段零工程写入；先前已提交阶段保留并显示部分完成。candidate receipt与host commit receipt分开，只有后者证明应用事务成功。
 - **动态准入**：Generated Component/Runtime先留暂存，经编译、协议、依赖、素材闭包、精确origin、生命周期、资源上限、静态后备与真实宿主smoke后才能注册/提交。Native、Recipe、Existing Component承担自身合同门。证据按代码、资源、配置、宿主依赖与修改影响复用；编译结果不能替代受影响互动验证。候选检查只调用当前任务必要的既有宿主动作与采样，在同一任务剩余时间和既有宿主超时内累计约束；不建设通用断言DSL，Native/props不强制附带独立检查计划。
 - **扩展权限独立**：准入后的Component/Runtime获得当前正式可信扩展宿主能力，不能继承CLI终端或文件权限。Provider Secret、原始Electron Main、任意OS命令、未开放远程脚本及未经合同批准的新宿主API仍不授予扩展。
@@ -250,3 +259,15 @@ NativeTableContent 与 FlowTableBlock 增加可选 strict `merges: { rowIds, col
 Owner 要求三 Surface 表格均可插入、编辑、保存/恢复/重开、播放及按格式导出，执行边界见 [1.3 独立 Table 方案](roadmap/1.3/README.md)。Flow 沿用既有 FlowTableBlock 及字符串/富文本单元格，不另建正文表格模型；Spatial 允许 Native Table 位于 world，沿用 world 几何、层级和相机。共享内容操作和编辑控件不能共享 Surface writer，target、revision、草稿与历史仍由对应 Surface 持有。
 
 Slide 保持原生可编辑 PPTX；Flow DOCX 保留可编辑 Word 表格和正文顺序；Spatial 沿用静态相机页并明确静态结果，作者工程的数据始终可编辑。Flow overlay、Spatial shared、global 和 input 不扩域。`r13-005` 必须先交付 V9/Published 对等有效域、兼容反例、能力差异与生成合同，再由 `r13-006`–`r13-008` 交付公共编辑与两个 Surface consumer；在此之前当前 Schema 的 Spatial Table 拒绝仍有效。
+
+### Flow 宽度模式（1.8 窄 additive 合同）
+
+`Flow.layout.widthMode?: 'fluid' | 'reading'` 在 V9 与 Published V2 对等且保持 strict。缺字段继续读取为既有 reading 模式，不静默迁移；新建 Flow 显式 fluid，属性命令变更参与保存和 Undo/Redo。旧 strict reader 必须拒绝新增字段。fluid 正文、媒体与组件消费实际内容容器宽度，reading 保留 readingWidth/wideContentWidth 上限。编辑、试运行、Player 与 HTML 共用宽度解析，观察 zoom/pan 不改变排版宽度；DOCX 消费固定纸张的可用宽度，不承诺与响应式屏幕逐像素一致。此字段不改变任何 Slide/Spatial 或既有 overlay paperSpace 语义。
+
+2026-09-13 Flow 生成与播放视口补充：
+
+- 新建项目、追加 Flow 和 Builder 消费同一正式 fluid 默认值；已有缺省 reading 的 Flow 在增补时不迁移。正常标题、正文、图片和局部互动使用正文 block；`native.content` 的 Flow overlay 可显式指定 `paperSpace: paper | viewport`，未指定时保持既有默认值/原值，提交消费 canonical paperSpace command。非 Flow 和教师控制器不接受此定位参数；工程 Schema 不新增分支。
+- 生成 snapshot 提供已解析的 layout 和正文/稿纸/视口语义；当前观察提供实际 CSS px 容器、稿纸、正文宽度及 scroll/观察比例。这些测量是观察事实，不构成第二份布局状态。同一 Flow 的目录锚点共享一个正文 Surface，生成观察按 Surface 收集一次并保持冻结的活动锚点；新增标题后的反馈不复制成新页面目标，不扩大原任务授权。反馈观察新发现组件依赖时，可按需发现真实源码与精确目标并保留已创建实例配置；只改单个实例不得隐式修改共享包，用户明确要求共享源码变更时，通过当前正式目标与包更新 Owner 执行。初始或反馈目标列表本身不构成修改授权上限，执行仍需有效目标、版本和原生授权。Flow 默认正文、控制器使用共享 Noto Sans SC 字体链，HTML 导出收集该隐式字体并通过已有字体 Owner 打包。
+- Flow 控制器由实际视口投影到安全区域底部居中，默认底距12 CSS px；作者 frame 的 x/y 不再直接指定 Flow 初始播放位置，宽度以上限偏好保留。窄窗按按钮行列重排，不整组缩小。编辑展示、生成观察与播放使用同一投影；既有会话保存手动偏移/折叠，自动越界纠偏只作用于显示，不回写工程或手动偏移。观察变换不缩放控制器、不重挂实例。Slide/Spatial 保留自身投影。
+- `PlaybackViewSession` 逐轴从实际 pan range 派生边条显隐，0.5 CSS px 内的数值噪声不产生边条。平移条是按需浮层，不保留18 px正文空槽；隐藏时退出 Tab 和无障碍操作树，释放拖动与 capture。Flow 正文按自身 overflow 滚动，paper 浮层属于正文滚动范围，不再重复计入整课 pan bounds。
+- 边条、原生滚动条避让和控制器读取同一 chrome 派生值；pan 末端可露出被浮层覆盖的有效内容。控制器宽度按最高观察倍率下的 chrome 预算稳定计算，位置按当前可见 chrome 避让，预算不占用正文宽度。正文 scroll 与观察 pan 各自保留单一状态，边条显隐和观察缩放不得触发正文基准宽度重排或清空交互状态。

@@ -2,7 +2,7 @@
   "candidateCarrier": {
     "default": "generated-component"
   },
-  "description": "修改现有源码优先 patch：提供精确 basePackageId/baseVersion/baseContentIdentity、仅改变的 changedFiles、显式 deleteFiles；宿主补齐未变文件并校验完整包。mode:shared 使用 global package update target 修改所有实例；mode:instance 使用精确组件实例 update target，宿主另存副本仅重绑此实例。不得自行改 manifest ID/版本。公开参数足够时用 component.configure；完整 files revise 保持兼容。",
+  "description": "修改现有源码优先 patch：提供精确 basePackageId/baseVersion/baseContentIdentity、仅改变的 changedFiles、显式 deleteFiles；宿主补齐未变文件并校验完整包。mode:shared 使用 global package update target 修改所有实例；mode:instance 使用精确组件实例 update target，独占可编辑包保持包 ID，其他情况宿主另存副本仅重绑此实例。不得自行改 manifest ID/版本。公开参数足够时用 component.configure；完整 files revise 保持兼容。",
   "examples": [
     {
       "bindings": "baseline 来自当前完整源码描述的 packageId/baseVersion/baseContentIdentity；changedFiles 只含实际改动文件；target 原样取对应模式的当前 target。",
@@ -240,7 +240,7 @@
         "spatial-2d:surface",
         "spatial-2d:global"
       ],
-      "target": "update: 当前源码描述的精确组件实例 target；stateId 必须为 null；另存副本只重绑此实例。"
+      "target": "update: 当前源码描述的精确组件实例 target；stateId 必须为 null；独占可编辑包原位修订；其他情况另存副本只重绑此实例。"
     }
   ],
   "version": 1

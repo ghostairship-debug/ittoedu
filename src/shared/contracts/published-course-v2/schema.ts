@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { teacherControllerRoleIssues } from '../../teacherControllerRole'
 import {
   addCanonicalLayerOrderIssues,
   backgroundModeSchema,
@@ -129,6 +130,7 @@ export const publishedLayerItemSchema: z.ZodType<PublishedLayerItem> = z.discrim
   z.object({
     ...publishedLayerBaseFields,
     kind: z.literal('component'),
+    role: z.literal('teacher-controller').optional(),
     component: z.object({
       packageId: stableIdSchema,
       version: z.string().trim().min(1).max(100),
@@ -206,8 +208,8 @@ const publishedGlobalLayerEntrySchema: z.ZodType<PublishedGlobalLayerEntry> = z.
   }
   if (
     entry.plane === 'underlay'
-    && entry.item.kind === 'native'
-    && entry.item.content.nativeType === 'teacher-controller'
+    && entry.item.kind === 'component'
+    && entry.item.role === 'teacher-controller'
   ) {
     context.addIssue({
       code: 'custom',
@@ -364,6 +366,7 @@ const publishedFlowSurfaceSchema = z.object({
   backgroundColor: colorSchema.optional(),
   backgroundAssetId: stableIdSchema.nullable().optional(),
   layout: z.object({
+    widthMode: z.enum(['fluid', 'reading']).optional(),
     readingWidth: finiteNumber.min(320).max(2_400),
     wideContentWidth: finiteNumber.min(320).max(4_000),
   }).strict(),
@@ -1107,7 +1110,9 @@ export const publishedCourseV2Schema = z.object({
   globalInteractions: strictCourseInteractionsSchema,
   surfaces: z.array(publishedCourseSurfaceSchema).min(1).max(10_000),
   mixedPrintPlan: mixedPrintPlanSchema.optional(),
-}).strict().superRefine(validatePublishedCourseSemantics)
+}).strict().superRefine(validatePublishedCourseSemantics).superRefine((payload, context) => {
+  teacherControllerRoleIssues(payload).forEach(issue => context.addIssue({ code: 'custom', ...issue }))
+})
 
 const _publishedCourseSchemaTypeContract: z.ZodType<PublishedCourseV2Payload> = publishedCourseV2Schema
 void _publishedCourseSchemaTypeContract

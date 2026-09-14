@@ -1,26 +1,29 @@
+import type { TeacherControllerAction } from '../../../shared/teacherControllerConfig'
 import type { PlaybackNavigationViewPort } from '../../navigation/coursePlaybackSequence'
+import { TeacherControllerComponentHost } from '../../teacherControllerComponentHost'
+import { controllerGeometryItem, type PublishedTeacherControllerItem } from '../../teacherControllerComponentGeometry'
+import type { TeacherControllerHostOptions } from '../../teacherControllerHostContract'
 import { createPlaybackContent, type PlaybackViewSession } from '../../playbackViewSession'
 import type { SpatialPathDash } from '../../../shared/courseProjectTypes'
 import { resolveCourseSurfaceBackgroundColor } from '../../../shared/courseProjectModel'
 import { resolveEffectiveBackground } from '../../../shared/effectiveBackground'
-import type { TeacherControllerAction } from '../../../shared/contracts/native-v1'
+
 import type { ComponentHostActions } from '../../../shared/componentTypes'
 import type {
   CourseStateStore as CourseStateStoreContract,
   RuntimeHostActions,
 } from '../../../shared/runtimeTypes'
-import type { TeacherControllerSceneInfo } from '../../../shared/teacherControllerLayout'
+import type { TeacherControllerSceneInfo } from '../../teacherControllerHostContract'
 import type {
   PublishedCourseV2Payload,
   PublishedLayerItem,
   PublishedNativeLayerItem,
 } from '../../../shared/publishedCourseTypes'
 import {
-  TeacherControllerDom,
   stageBoundsFromElement,
-  teacherControllerDomNode,
-  type TeacherControllerDomSession,
-} from '../../teacherControllerDom'
+  teacherControllerHostNode,
+  type TeacherControllerHostSession,
+} from '../../teacherControllerHostContract'
 import { TeacherControllerRuntimeSessionStore } from '../../teacherControllerRuntimeSession'
 import {
   collectSpatialPlaybackEntries,
@@ -133,7 +136,7 @@ export interface SpatialSurfaceHostOptions {
   componentActions?: Readonly<ComponentHostActions>
   executeTeacherControllerAction?: (
     action: TeacherControllerAction,
-    item: PublishedNativeLayerItem,
+    item: PublishedTeacherControllerItem,
   ) => boolean | void | Promise<boolean | void>
   /** Published-session only; shared by global LayerItem handles across surfaces. */
   globalInteractionVisibilityState?: PublishedInteractionVisibilityState
@@ -148,14 +151,11 @@ export interface SpatialSurfaceHostOptions {
   includeGlobalLayerItemsForStaticCapture?: boolean
 }
 
-type TeacherControllerNativeItem = PublishedNativeLayerItem & {
-  content: Extract<PublishedNativeLayerItem['content'], { nativeType: 'teacher-controller' }>
-}
 
 interface SpatialHostRecord {
   entry: SpatialPlaybackEntry
   wrapper: HTMLElement | SVGGElement
-  controllerDom: TeacherControllerDom | null
+  controllerDom: TeacherControllerComponentHost | null
   componentHandle: PublishedComponentMountHandle | null
   componentEffects: PublishedCarrierSideEffects | null
   deferredComponentMount: (() => void) | null
@@ -172,9 +172,7 @@ function nativeLabel(item: PublishedLayerItem): string {
   if (item.kind === 'native' && item.content.nativeType === 'formula') {
     return item.content.data.accessibleText
   }
-  if (item.kind === 'native' && item.content.nativeType === 'teacher-controller') {
-    return item.content.data.title
-  }
+  
   if (item.kind === 'component') return item.component.packageId
   if (item.kind === 'runtime') return 'runtime'
   return item.kind
@@ -187,9 +185,7 @@ function publishedDynamicFallbackAssetId(item: PublishedLayerItem): string | und
 }
 
 function omittedFromSpatialStaticCapture(item: PublishedLayerItem): boolean {
-  return item.kind === 'native'
-    && item.content.nativeType === 'teacher-controller'
-    && !item.content.data.includeInStaticExports
+  return false
 }
 
 function pathDashArray(dash: SpatialPathDash | undefined): string | undefined {
@@ -455,7 +451,7 @@ function publishedInteractionOwnership(
   if (item.kind === 'component') return 'component'
   if (item.kind === 'runtime') return 'runtime'
   if (item.content.nativeType === 'video') return 'media'
-  if (item.content.nativeType === 'teacher-controller') return 'teacher-controller'
+  
   return 'native'
 }
 
@@ -870,6 +866,7 @@ export class SpatialSurfaceHost {
     const preparedActivation = this.#preparedRuntimeActivation
     this.#preparedRuntimeActivation = null
     this.#active = true
+    for (const record of this.#records.values()) if (record.controllerDom instanceof TeacherControllerComponentHost) record.controllerDom.resume()
     if (this.#root) this.#root.hidden = false
     this.#pendingRuntimeActivation = null
     if (wasInactive && preparedActivation !== null) {
@@ -891,6 +888,7 @@ export class SpatialSurfaceHost {
   async suspend(): Promise<void> {
     this.#invalidateInteractions()
     this.#active = false
+    for (const record of this.#records.values()) if (record.controllerDom instanceof TeacherControllerComponentHost) record.controllerDom.suspend()
     this.#carrierSideEffects.suspend()
     this.#preparedRuntimeActivation = null
     this.#pendingRuntimeActivation = null
@@ -1450,7 +1448,7 @@ export class SpatialSurfaceHost {
       : undefined
     const finish = (
       wrapper: HTMLElement | SVGGElement,
-      controllerDom: TeacherControllerDom | null,
+      controllerDom: TeacherControllerComponentHost | null,
     ): SpatialHostRecord => {
       record = {
         entry,
@@ -1482,8 +1480,9 @@ export class SpatialSurfaceHost {
       if (gestureOwner && entry.item.hitPolicy !== 'pass-through') {
         wrapper.setAttribute(SPATIAL_GESTURE_OWNER_ATTR, gestureOwner)
       }
-      let controllerDom: TeacherControllerDom | null = null
+      let controllerDom: TeacherControllerComponentHost | null = null
       if (isSpatialTeacherControllerItem(entry.item)) {
+        if (entry.item.kind === 'component') wrapper.style.overflow = 'visible'
         const content = dom.createElement('div')
         content.className = 'spatial-screen-teacher-controller-content'
         Object.assign(content.style, {
@@ -1494,6 +1493,7 @@ export class SpatialSurfaceHost {
           boxSizing: 'border-box',
         })
         wrapper.classList.add('spatial-screen-teacher-controller')
+        if (entry.item.kind === 'component') content.style.overflow = 'visible'
         wrapper.setAttribute(SPATIAL_GESTURE_OWNER_ATTR, 'controller')
         wrapper.appendChild(content)
         controllerDom = this.#mountTeacherController(entry.item, content, wrapper)
@@ -1595,22 +1595,23 @@ export class SpatialSurfaceHost {
     }
   }
 
-  #controllerSessionFor(item: PublishedLayerItem): TeacherControllerDomSession | undefined {
+  #controllerSessionFor(item: PublishedLayerItem): TeacherControllerHostSession | undefined {
     if (!isSpatialTeacherControllerItem(item)) return undefined
     return this.#teacherControllerSession.get({
       controllerId: item.layerItemId,
       surfaceSessionId: this.id,
-      defaultCollapsed: item.content.data.collapsible && item.content.data.defaultCollapsed,
+      defaultCollapsed: controllerGeometryItem(item).config.collapsible && controllerGeometryItem(item).config.defaultCollapsed,
     })
   }
 
   #mountTeacherController(
-    item: TeacherControllerNativeItem,
+    original: PublishedTeacherControllerItem,
     container: HTMLElement,
     footprintElement: HTMLElement,
-  ): TeacherControllerDom {
-    const node = teacherControllerDomNode(item.frame, item.rotation, item.content.data)
-    return new TeacherControllerDom({
+  ): TeacherControllerComponentHost {
+    const item = controllerGeometryItem(original)
+    const node = teacherControllerHostNode(item.frame, item.rotation)
+    const options: TeacherControllerHostOptions = {
       navigation: this.#options.navigation,
       playbackView: this.#options.playbackView,
       node,
@@ -1633,7 +1634,7 @@ export class SpatialSurfaceHost {
         this.#teacherControllerSession.set({
           controllerId: item.layerItemId,
           surfaceSessionId: this.id,
-          defaultCollapsed: item.content.data.collapsible && item.content.data.defaultCollapsed,
+          defaultCollapsed: item.config.collapsible && item.config.defaultCollapsed,
         }, {
           offset: { ...next.offset },
           collapsed: next.collapsed,
@@ -1641,13 +1642,20 @@ export class SpatialSurfaceHost {
         const record = this.#records.get(item.layerItemId)
         if (record) this.#applyRecord(record)
       },
-      onAction: (action) => {
-        void this.#handleTeacherControllerAction(action, item).catch((cause) => {
-          const error = cause instanceof Error ? cause : new Error(String(cause))
-          this.#options.reportActionError?.(action, error)
-        })
+      onAction: async action => {
+      const accepted = await this.#options.executeTeacherControllerAction?.(action, item)
+      if (accepted !== undefined) return accepted
+      await this.#handleTeacherControllerAction(action, item)
+      return true
       },
-      getInteractive: () => this.#session.active && (this.#options.playbackControls ?? 'canvas') === 'canvas',
+      onActionError: (action, error) => { this.#options.reportActionError?.(action, error) },
+      getInteractive: () => this.#session.active && !this.#options.staticCapture && (this.#options.playbackControls ?? 'canvas') === 'canvas',
+    }
+    return new TeacherControllerComponentHost(options, {
+      container, componentId: original.component.packageId, version: original.component.version,
+      instanceId: original.layerItemId, props: original.props, width: original.frame.width, height: original.frame.height,
+      projectId: this.#options.projectId, components: this.#components, resolveAsset: this.#resolveAsset,
+      scope: 'global', mode: this.#options.staticCapture ? 'capture' : 'preview', interactive: !this.#options.staticCapture,
     })
   }
 
@@ -1669,11 +1677,7 @@ export class SpatialSurfaceHost {
   #refreshControllers(): void {
     for (const record of this.#records.values()) {
       if (!record.controllerDom || !isSpatialTeacherControllerItem(record.entry.item)) continue
-      record.controllerDom.update(teacherControllerDomNode(
-        record.entry.item.frame,
-        record.entry.item.rotation,
-        record.entry.item.content.data,
-      ))
+      record.controllerDom.update(teacherControllerHostNode(record.entry.item.frame, record.entry.item.rotation))
     }
   }
 
@@ -1691,12 +1695,12 @@ export class SpatialSurfaceHost {
 
   async #handleTeacherControllerAction(
     action: TeacherControllerAction,
-    item: PublishedNativeLayerItem,
+    item: PublishedTeacherControllerItem,
   ): Promise<void> {
     if (!this.#active) return
     if (this.#options.executeTeacherControllerAction) {
       const handled = await this.#options.executeTeacherControllerAction(action, item)
-      if (handled !== false) {
+      if (handled !== undefined) {
         const CustomEventConstructor = this.#root?.ownerDocument.defaultView?.CustomEvent
         if (CustomEventConstructor && this.#root) {
           this.#root.dispatchEvent(new CustomEventConstructor('courseware:teacher-controller-action', {

@@ -1,11 +1,13 @@
+import { buildPublishedFixture as buildPublishedCourseV2Payload } from '../fixtures/teacherController'
+import { isControllerFixture } from '../fixtures/teacherController'
 import { PLAYBACK_VIEW_CHROME_GUTTER } from '@/shared/playbackViewGeometry'
 import { afterEach, describe, expect, it } from 'vitest'
 import { PlaybackViewSession, playbackGestureOccupied, playbackPanRange } from '@/player/playbackViewSession'
-import { TeacherControllerDom, teacherControllerDomNode } from '@/player/teacherControllerDom'
+
 import { addCourseFlowPage } from '@/renderer/course/courseLocationCommands'
 import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
 import { createPublishedCourseSession } from '@/player/surfaces/publishedDynamicHosts'
-import { buildPublishedCourseV2Payload } from '@/renderer/export/course/buildPublishedCourse'
+
 
 const size = (element: HTMLElement, width: number, height: number) => {
   Object.defineProperties(element, { clientWidth: { configurable: true, value: width }, clientHeight: { configurable: true, value: height } })
@@ -18,6 +20,7 @@ function mountView() {
 }
 afterEach(() => document.body.replaceChildren())
 describe('Playback observation ownership', () => {
+  
   it('keeps observation bars outside the Flow document scrollbar and preserves independent scroll state', () => {
     const { view, viewport, container } = mountView()
     const article = document.createElement('article')
@@ -26,17 +29,38 @@ describe('Playback observation ownership', () => {
     const horizontal = container.querySelector<HTMLElement>('[data-playback-chrome="x-bar"]')!
     expect(viewport.contains(vertical)).toBe(false)
     expect(viewport.contains(horizontal)).toBe(false)
-    expect(viewport.style.right).toBe(vertical.style.width)
-    expect(viewport.style.bottom).toBe(horizontal.style.height)
-    expect(viewport.style.right).toBe(`${PLAYBACK_VIEW_CHROME_GUTTER}px`)
+    expect(parseFloat(viewport.style.inset)).toBe(0)
+    expect(vertical.hidden).toBe(true)
+    expect(horizontal.hidden).toBe(true)
+    expect(vertical.tabIndex).toBe(-1)
     view.zoomTo(2)
+    expect(vertical.hidden).toBe(false)
+    expect(horizontal.hidden).toBe(false)
+    expect(view.chrome.insets).toEqual({ right: PLAYBACK_VIEW_CHROME_GUTTER, bottom: PLAYBACK_VIEW_CHROME_GUTTER })
     vertical.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true, cancelable: true }))
-    expect(view.state.pan.y).toBe(-600)
+    expect(view.state.pan.y).toBe(-618)
     expect(article.scrollTop).toBe(230)
     article.scrollTop = 410
-    expect(view.state.pan.y).toBe(-600)
+    expect(view.state.pan.y).toBe(-618)
     view.reset()
+    expect(vertical.hidden).toBe(true)
+    expect(view.chrome.insets).toEqual({ right: 0, bottom: 0 })
     expect(article.scrollTop).toBe(410)
+    view.destroy()
+  })
+  it('shows only the overflowing axis at 100%, tolerates subpixels and returns hidden bar focus to the viewport', () => {
+    const { view, viewport, container } = mountView()
+    const root = document.createElement('div'), content = document.createElement('div'), item = document.createElement('div')
+    item.dataset.playbackBounds = 'true'; content.append(item); root.append(content); viewport.append(root)
+    let extraWidth = 60, extraHeight = 0.25
+    item.getBoundingClientRect = () => DOMRect.fromRect({ x: 0, y: 0, width: 800 + extraWidth, height: 600 + extraHeight })
+    view.register({ id: 'flow', kind: 'flow', root, content }); view.activate('flow')
+    const horizontal = container.querySelector<HTMLElement>('[data-playback-chrome="x-bar"]')!
+    const vertical = container.querySelector<HTMLElement>('[data-playback-chrome="y-bar"]')!
+    expect(horizontal.hidden).toBe(false); expect(vertical.hidden).toBe(true)
+    horizontal.focus(); extraWidth = 0; extraHeight = 0; view.refreshBounds()
+    expect(horizontal.hidden).toBe(true); expect(document.activeElement).toBe(viewport)
+    expect(view.state.viewport).toEqual({ width: 800, height: 600 })
     view.destroy()
   })
   it('keeps the pointed content fixed, exposes every corner and clamps after shrinking or resize', () => {
@@ -44,13 +68,13 @@ describe('Playback observation ownership', () => {
     view.zoomTo(2, { x: 200, y: 150 })
     expect(view.state.pan).toEqual({ x: -200, y: -150 })
     expect((200 - view.state.pan.x) / view.state.zoom).toBe(200)
-    expect(playbackPanRange(view.state)).toEqual({ x: { min: -800, max: 0 }, y: { min: -600, max: 0 } })
+    expect(playbackPanRange(view.state)).toEqual({ x: { min: -818, max: 0 }, y: { min: -618, max: 0 } })
     view.panTo({ x: -800, y: -600 })
     view.zoomTo(.5)
     expect(view.state.pan).toEqual({ x: 0, y: 0 })
     view.zoomTo(4); view.panTo({ x: -2400, y: -1800 })
     size(viewport, 400, 300); view.resize()
-    expect(view.state.pan).toEqual({ x: -1200, y: -900 })
+    expect(view.state.pan).toEqual({ x: -1218, y: -918 })
     view.destroy()
   })
   it('measures bounds against the new DOM matrix after resize and switching hosts', () => {
@@ -89,7 +113,7 @@ describe('Playback observation ownership', () => {
     expect(view.state.zoom).toBeCloseTo(2)
     const bar = container.querySelector<HTMLElement>('[aria-label="左右移动视图"]')!
     bar.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true, cancelable: true }))
-    expect(view.state.pan.x).toBeCloseTo(-800)
+    expect(view.state.pan.x).toBeCloseTo(-818)
     input.focus(); input.dispatchEvent(new KeyboardEvent('keydown', { key: '0', ctrlKey: true, bubbles: true, cancelable: true }))
     expect(view.state.zoom).toBeCloseTo(2)
     viewport.focus(); viewport.dispatchEvent(new KeyboardEvent('keydown', { key: '0', ctrlKey: true, bubbles: true, cancelable: true }))
@@ -135,27 +159,7 @@ describe('Playback observation ownership', () => {
     expect(view.state.zoom).toBe(2.5)
     view.destroy()
   })
-  it('clamps the collapsed zoom entry when a responsive Flow viewport becomes narrow', () => {
-    const { view, viewport } = mountView()
-    const project = createBlankCourseProject({ id: 'controller-view', now: '2026-09-07T00:00:00.000Z' })
-    const item = project.globalLayerItems[0]!.item
-    if (item.kind !== 'native' || item.content.nativeType !== 'teacher-controller') throw new Error('controller fixture missing')
-    const node = teacherControllerDomNode({ x: 830, y: 470, width: 420, height: 210 }, 0, item.content.data)
-    let session = { offset: { dx: 0, dy: 0 }, collapsed: true }
-    let width = 1262
-    const frame = document.createElement('div'); viewport.append(frame)
-    const controller = new TeacherControllerDom({ node, container: frame, footprintElement: frame, playbackView: view,
-      get canvas() { return { width, height: 882 } }, getRenderedStageBounds: () => ({ width, height: 882 }),
-      scenes: [], getCurrentSceneId: () => null, getStateLabel: () => null,
-      getStatus: () => ({ muted: false, fullscreen: false }), getSession: () => session,
-      onSessionChange: next => { session = next }, onAction: () => undefined, getInteractive: () => true })
-    width = 942; controller.update(node)
-    const zoom = frame.querySelector<HTMLElement>('[data-playback-chrome="zoom-button"]')!
-    const left = node.x + session.offset.dx + parseFloat(zoom.style.left)
-    expect(left).toBeGreaterThanOrEqual(0)
-    expect(left + parseFloat(zoom.style.width)).toBeLessThanOrEqual(942)
-    controller.destroy(); view.destroy()
-  })
+  
   it('hands two native touches to observation without also dragging Flow paper', async () => {
     const initial = createBlankCourseProject({ id: 'touch-flow', now: '2026-09-07T00:00:00.000Z' })
     const added = addCourseFlowPage(initial, { title: '阅读', now: '2026-09-07T00:00:00.000Z', expectedRevision: initial.revision })

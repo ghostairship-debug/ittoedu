@@ -15,6 +15,7 @@ import type {
 
 export const BLANK_FLOW_HEADING_PLACEHOLDER = '无标题'
 export const DEFAULT_FLOW_LAYOUT = {
+  widthMode: 'fluid',
   readingWidth: 760,
   wideContentWidth: 1120,
 } as const

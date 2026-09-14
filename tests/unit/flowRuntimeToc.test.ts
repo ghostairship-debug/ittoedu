@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'vitest'
-import { teacherControllerHitBounds } from '@/player/teacherControllerRuntimeSession'
 import type { FlowBlock } from '@/shared/courseProjectTypes'
 import type { PublishedFlowSurface } from '@/shared/publishedCourseTypes'
 import {
@@ -89,13 +88,6 @@ describe('Flow runtime TOC model', () => {
     expect(sequence.map((layout) => layout.paperOverlayInsetPx)).toEqual([0, 260, 0, 260])
     expect(sequence.map((layout) => layout.viewportOverlayInsetPx)).toEqual([0, 0, 0, 0])
 
-    const pill = teacherControllerHitBounds(controller, sessionOffset, true)
-    for (const layout of sequence) {
-      expect(pill.left + layout.viewportOverlayInsetPx).toBeGreaterThanOrEqual(0)
-      expect(pill.top).toBeGreaterThanOrEqual(0)
-      expect(pill.right + layout.viewportOverlayInsetPx).toBeLessThanOrEqual(1280)
-      expect(pill.bottom).toBeLessThanOrEqual(720)
-    }
     expect(sessionOffset).toEqual({ dx: 0, dy: 0 })
   })
 

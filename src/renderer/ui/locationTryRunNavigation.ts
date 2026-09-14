@@ -1,5 +1,6 @@
+import type { TeacherControllerAction } from '../../shared/teacherControllerConfig'
 import type { PublishedCourseV2Payload } from '../../shared/publishedCourseTypes'
-import type { TeacherControllerAction } from '../../shared/contracts/native-v1'
+
 import { buildCoursePlaybackSequence, playbackNavigationProgress, type PlaybackNavigationViewPort } from '../../player/navigation/coursePlaybackSequence'
 import { publishedControllerNavigationTarget } from '../../player/surfaces/publishedDynamicHosts'
 

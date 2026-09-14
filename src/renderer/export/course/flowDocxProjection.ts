@@ -1,4 +1,5 @@
 import type { LayerFrame } from '../../../shared/contracts/course-project-v9/types'
+import { isTeacherController, omitTeacherControllerFromStaticExport } from '../../../shared/teacherControllerRole'
 import type {
   PublishedCourseV2Payload,
   PublishedFlowSurface,
@@ -161,13 +162,6 @@ export function rotationToDrawingMlDegree(deg: number): number {
   return norm
 }
 
-export function isTeacherControllerPublishedItem(
-  item: PublishedLayerItem,
-): item is PublishedNativeLayerItem & {
-  content: Extract<PublishedNativeLayerItem['content'], { nativeType: 'teacher-controller' }>
-} {
-  return item.kind === 'native' && item.content.nativeType === 'teacher-controller'
-}
 
 const SUPPORTED_PRESET_SHAPES = new Set([
   'rectangle',
@@ -256,8 +250,8 @@ export function buildFlowDocxProjection(
     }
 
     // Teacher controller check
-    if (isTeacherControllerPublishedItem(item)) {
-      if (item.content.data.includeInStaticExports !== true) {
+    if (isTeacherController(item)) {
+      if (omitTeacherControllerFromStaticExport(item)) {
         layerReport.push({
           surfaceId: targetSurfaceId,
           layerItemId: item.layerItemId,
@@ -418,12 +412,7 @@ export function buildFlowDocxProjection(
           message = '视频浮层缺少封面素材，已生成可见占位文本框。'
           placeholderText = `[视频：${item.layerItemId}]`
         }
-      } else if (item.content.nativeType === 'teacher-controller') {
-        disposition = 'editable-shape'
-        carrierKind = 'textbox'
-        reasonCode = 'teacher-controller-body'
-        message = '教师控制器已作为 DrawingML 文本框锚定到文档中。'
-      }
+      } 
     } else if (item.kind === 'component') {
       if (item.staticFallbackAssetId) {
         disposition = 'static-fallback'
@@ -504,8 +493,8 @@ export function buildFlowDocxProjection(
     }
 
     // Global teacher controller
-    if (isTeacherControllerPublishedItem(item)) {
-      if (item.content.data.includeInStaticExports !== true) {
+    if (isTeacherController(item)) {
+      if (omitTeacherControllerFromStaticExport(item)) {
         layerReport.push({
           surfaceId: targetSurfaceId,
           layerItemId: item.layerItemId,
@@ -529,8 +518,9 @@ export function buildFlowDocxProjection(
           fieldPath,
           planeRank: 3,
           locationId: null,
-          disposition: 'editable-shape',
-          carrierKind: 'textbox',
+          disposition: item.kind === 'component' ? (item.staticFallbackAssetId ? 'static-fallback' : 'placeholder') : 'editable-shape',
+          carrierKind: item.kind === 'component' ? (item.staticFallbackAssetId ? 'image' : 'placeholder') : 'textbox',
+          ...(item.kind === 'component' ? { assetId: item.staticFallbackAssetId, placeholderText: '教师控制台（缺少静态后备图片）' } : {}),
           reasonCode: 'global-teacher-controller-footer',
           message: '全局教师控制器已放入页脚跨页呈现。',
           sourceFrame,
@@ -652,12 +642,7 @@ export function buildFlowDocxProjection(
           message = '全局视频缺少封面素材，已生成可见占位文本框。'
           placeholderText = `[视频：${item.layerItemId}]`
         }
-      } else if (item.content.nativeType === 'teacher-controller') {
-        disposition = 'editable-shape'
-        carrierKind = 'textbox'
-        reasonCode = 'teacher-controller-body'
-        message = '全局教师控制器已作为 DrawingML 文本框锚定到文档首段。'
-      }
+      } 
     } else if (item.kind === 'component') {
       if (item.staticFallbackAssetId) {
         disposition = 'static-fallback'

@@ -1,4 +1,5 @@
 import { cleanup, render, screen } from '@testing-library/react'
+import { StrictMode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
 import {
@@ -275,6 +276,23 @@ function renderMediaPaper(project = createMediaFlowProject()) {
 }
 
 describe('FlowWorkspace edit media', () => {
+  it('keeps mounted image URLs alive through StrictMode effect replay and releases them on unmount', () => {
+    const project = createMediaFlowProject()
+    const view = buildFlowEditorView({ project, locationId: 'h1' })
+    const mounted = render(<StrictMode><FlowWorkspace
+      project={project} view={view} selection={null} assetFiles={SIDECAR_FILES}
+    /></StrictMode>)
+    const image = screen.getByTestId('flow-block-media-image').querySelector('img')!
+    const activeUrl = image.getAttribute('src')!
+    expect(activeUrl).toMatch(/^blob:/)
+    expect(revokeObjectUrl).not.toHaveBeenCalledWith(activeUrl)
+    mounted.unmount()
+    expect(revokeObjectUrl).toHaveBeenCalledWith(activeUrl)
+    for (const result of createObjectUrl.mock.results) {
+      expect(revokeObjectUrl).toHaveBeenCalledWith(result.value)
+    }
+  })
+
   it('projects all three media tiers from the shared responsive mapping', () => {
     const widths = { readingWidth: 760, wideContentWidth: 1120 }
     const matrix = [700, 904, 1280].map((containerWidth) => [

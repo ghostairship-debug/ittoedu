@@ -1,4 +1,5 @@
 import { nanoid } from 'nanoid'
+import { isTeacherController } from '../../shared/teacherControllerRole'
 import {
   makeAuthoringAddress,
   type AuthoringAddressParts,
@@ -21,12 +22,10 @@ import type {
 } from '../../shared/courseProjectTypes'
 import type { ProjectPlaybackSettings } from '../../shared/contracts/playback-v1'
 import { CANVAS_HEIGHT, CANVAS_WIDTH } from '../../shared/constants'
-import {
-  centerTeacherControllerAuthoringFrame,
-  teacherControllerAuthoringRecoveryBounds,
-} from '../../shared/teacherControllerLayout'
 import type { DeepReadonly } from './slideEditorView'
-import { createTeacherControllerNode } from '../project/nativeNodeFactories'
+import { createTeacherControllerComponentItem, createTeacherControllerTemplate } from '../components/teacherControllerComponent'
+import { createDefaultTeacherControllerPackage } from '../../shared/defaultTeacherControllerComponent'
+import { componentPackageMeta } from '../components/editableComponentPackage'
 import {
   restoreCourseTeacherControllerLayer,
   synchronizeCourseTeacherControllerControls,
@@ -102,20 +101,14 @@ export function crossOwnerReorderReason(): string {
 
 export function isTeacherControllerLayerItem(
   item: LayerItem | DeepReadonly<LayerItem> | undefined,
-): item is NativeLayerItem & {
-  content: Extract<NativeLayerItem['content'], { nativeType: 'teacher-controller' }>
-} {
-  return Boolean(
-    item &&
-    item.kind === 'native' &&
-    item.content.nativeType === 'teacher-controller',
-  )
+): item is (Extract<LayerItem, { kind: 'component' }> & { role: 'teacher-controller' }) {
+  return Boolean(item && isTeacherController(item))
 }
 
 export function findGlobalTeacherController(
   project: Pick<CourseProjectDocument, 'globalLayerItems'>,
 ): GlobalLayerEntry | undefined {
-  return project.globalLayerItems.find((entry) => isTeacherControllerLayerItem(entry.item))
+  return project.globalLayerItems.find((entry) => isTeacherController(entry.item))
 }
 
 export function carrierForLayerItem(item: LayerItem): AuthoringCarrier {
@@ -289,19 +282,19 @@ export function describeGlobalLayerDeleteImpact(
   const labels = project.locations
     .filter((location) => locationIds.includes(location.id))
     .map((location) => location.label)
-  const isTeacherController = isTeacherControllerLayerItem(entry.item)
+  const controller = isTeacherController(entry.item)
   const scope = locationIds.length === project.locations.length
     ? '全部页面'
     : labels.length > 0
       ? labels.join('、')
       : '当前可见范围'
-  const restoreHint = isTeacherController
+  const restoreHint = controller
     ? '删除后可用“恢复教师控制器”重新加入默认控制台。'
     : '该全局内容不会复制到各页，删除后所有适用页面都会失去它。'
   return {
     layerItemId,
     label: entry.item.label,
-    isTeacherController,
+    isTeacherController: controller,
     affectedLocationIds: locationIds,
     affectedLocationLabels: labels,
     message: `删除全局层“${entry.item.label}”会影响${scope}。${restoreHint}`,
@@ -403,7 +396,7 @@ export function setGlobalLayerScenePlane(
     const locked = refuseLockedLayerWrite(entry.item, false)
     if (locked) return locked
     requireLocation(document, target.locationId)
-    if (isTeacherControllerLayerItem(entry.item) && plane !== 'overlay') {
+    if (isTeacherController(entry.item) && plane !== 'overlay') {
       return failLayerCommand(CONTROLLER_PLANE_REASON)
     }
     const currentPlane = readGlobalLayerScenePlane(document, entry.item.layerItemId)
@@ -412,7 +405,7 @@ export function setGlobalLayerScenePlane(
     }
     return runDocumentMutation(document, (draft) => {
       const current = requireGlobalLayerEntry(draft, entry.item.layerItemId)
-      if (isTeacherControllerLayerItem(current.item) && plane !== 'overlay') {
+      if (isTeacherController(current.item) && plane !== 'overlay') {
         throw new Error(CONTROLLER_PLANE_REASON)
       }
       current.plane = plane
@@ -717,7 +710,7 @@ export function duplicateGlobalLayerItem(
   if (stale) return stale
   try {
     const entry = resolveGlobalLayerTarget(document, target)
-    if (isTeacherControllerLayerItem(entry.item)) {
+    if (isTeacherController(entry.item)) {
       return failLayerCommand(CONTROLLER_DUPLICATE_REASON)
     }
     const locked = refuseLockedLayerWrite(entry.item, false)
@@ -764,7 +757,7 @@ export function deleteGlobalLayerItem(
         removedLocationIds: new Set(),
         removedLayerItemIds: new Set([entry.item.layerItemId]),
       })
-      if (isTeacherControllerLayerItem(entry.item)) {
+      if (isTeacherController(entry.item)) {
         synchronizeCourseTeacherControllerControls(draft)
       }
     }, impact?.message ?? `已删除“${entry.item.label}”`, options)
@@ -783,14 +776,18 @@ function nextFrontGlobalOrder(project: CourseProjectDocument): number {
 
 function appendDefaultTeacherController(
   project: CourseProjectDocument,
-  node = createTeacherControllerNode({
-    id: `teacher-controller-${nanoid(8)}`,
-  }),
+  item = createTeacherControllerComponentItem(`teacher-controller-${nanoid(8)}`),
 ): string {
   if (findGlobalTeacherController(project)) {
     throw new Error(CONTROLLER_DUPLICATE_REASON)
   }
-  const item = sceneNodeToCourseLayerItem(node, nextFrontGlobalOrder(project))
+  item.order = nextFrontGlobalOrder(project)
+  const baseId = item.component.packageId
+  let packageId = baseId, sequence = 2
+  while (project.componentPackages[packageId]) packageId = `${baseId}.${sequence++}`
+  const pkg = createTeacherControllerTemplate(packageId)
+  item.component = { packageId, version: pkg.manifest.version }
+  project.componentPackages[pkg.manifest.id] = componentPackageMeta(pkg, { editableCopy: true })
   project.globalLayerItems.push({
     item,
     plane: 'overlay',
@@ -815,7 +812,7 @@ function applyCoursePlaybackPatch(
 
   if (patch.controls === 'none') {
     for (const entry of project.globalLayerItems) {
-      if (isTeacherControllerLayerItem(entry.item)) {
+      if (isTeacherController(entry.item)) {
         entry.item.playbackInitialVisibility = 'hidden'
       }
     }
@@ -867,27 +864,13 @@ interface TeacherControllerRestoreOptions extends LayerCommandOptions {
 
 function resetCourseTeacherControllerAuthoringFrame(entry: ScopedLayerItem): void {
   if (!isTeacherControllerLayerItem(entry.item)) return
-  const recovery = teacherControllerAuthoringRecoveryBounds(
-    entry.item.content.data,
-    entry.item.frame,
-    entry.item.rotation,
-  )
-  if (
-    recovery.left >= 0 &&
-    recovery.top >= 0 &&
-    recovery.right <= CANVAS_WIDTH &&
-    recovery.bottom <= CANVAS_HEIGHT
-  ) return
-  const frame = centerTeacherControllerAuthoringFrame(
-    entry.item.content.data,
-    entry.item.frame,
-    entry.item.rotation,
-    { width: CANVAS_WIDTH, height: CANVAS_HEIGHT },
-  )
-  entry.item.frame = {
-    ...entry.item.frame,
-    ...frame,
+  if (entry.item.kind === 'component') {
+    if (entry.item.frame.x < 0 || entry.item.frame.y < 0 || entry.item.frame.x + entry.item.frame.width > CANVAS_WIDTH || entry.item.frame.y + entry.item.frame.height > CANVAS_HEIGHT) {
+      entry.item.frame.x = 16; entry.item.frame.y = 16
+    }
+    return
   }
+
 }
 
 /**
@@ -912,7 +895,7 @@ export function restoreDefaultTeacherController(
       if (unchanged) return succeedLayerNoop(document, '教师控制器已可用')
       return runDocumentMutation(document, (draft) => {
         const entry = findGlobalTeacherController(draft)
-        if (!entry || !isTeacherControllerLayerItem(entry.item)) {
+        if (!entry || !isTeacherController(entry.item)) {
           throw new Error('全课控制器已失效，请重新选择。')
         }
         if (!options.preserveAuthoringLock) entry.item.locked = false
@@ -922,10 +905,10 @@ export function restoreDefaultTeacherController(
         synchronizeCourseTeacherControllerControls(draft)
       }, '已恢复教师控制器', options, existing.item.layerItemId)
     }
-    const node = createTeacherControllerNode({ id: `teacher-controller-${nanoid(8)}` })
-    const createdId = node.id
+    const item = createTeacherControllerComponentItem(`teacher-controller-${nanoid(8)}`)
+    const createdId = item.layerItemId
     return runDocumentMutation(document, (draft) => {
-      appendDefaultTeacherController(draft, node)
+      appendDefaultTeacherController(draft, item)
     }, '已恢复教师控制器', options, createdId)
   } catch (error) {
     return failLayerCommand(error instanceof Error ? error.message : '无法恢复教师控制器')

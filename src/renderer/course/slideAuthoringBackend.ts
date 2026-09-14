@@ -1,3 +1,5 @@
+import { canEditLayerInScope } from '../../shared/teacherControllerRole'
+import type { TeacherControllerButton } from '../../shared/teacherControllerConfig'
 import { commitResourceAwareAuthoringHistory, createResourceAwareAuthoringHistory, redoResourceAwareAuthoringHistory, authoringHistoryRedoResourceTransition, authoringHistoryUndoResourceTransition, undoResourceAwareAuthoringHistory, type ResourceAwareAuthoringHistory, type AuthoringHistoryResourceTransition } from '../authoring/resourceAwareAuthoringHistory'
 import { nanoid } from 'nanoid'
 import { makeAuthoringAddress, type AuthoringCarrier } from '../../shared/authoringAddress'
@@ -12,7 +14,7 @@ import type {
   SlideSurfaceDocument,
 } from '../../shared/courseProjectTypes'
 import type { InteractionRule } from '../../shared/interactionTypes'
-import type { TeacherControllerButton } from '../../shared/contracts/native-v1'
+
 import { SLIDE_REJECT_STALE_REVISION, SLIDE_REJECT_WRONG_OWNER, commitSlideProjectMutation, selectSlideEditorLayers, transformSelectedSlideNativeLayers, SlideCommandError, type SlideAuthoringSelection, type SlideAuthoringSessionRef, type SlideAuthoringTarget, type SlideCommandOptions, type SlideCommandResult, type SlideEditorTransformInput } from './slideEditorCommands'
 import {
   buildSlideEditorView,
@@ -263,14 +265,8 @@ function selectableLayers(
     stateId: session.selection.stateId,
   })
   return new Map(view.layers.flatMap((layer) => {
-    if (layer.source !== session.scope) return []
-    if (
-      layer.item.kind === 'native' &&
-      session.scope !== 'global' &&
-      layer.item.content.nativeType === 'teacher-controller'
-    ) {
-      return []
-    }
+    if (!canEditLayerInScope(layer, session.scope)) return []
+    
     return [[layer.selectionId, layer] as const]
   }))
 }
@@ -416,6 +412,41 @@ function commitDocument(
   }
 }
 
+/** Opens an exact course location, including its named presentation state. */
+export function activateSlideLocation(
+  session: SlideAuthoringSession,
+  locationId: string,
+  options: SlideCommandOptions = {},
+): SlideCommandResult {
+  const stale = rejectIfStale(session, options.expectedRevision)
+  if (stale) return stale
+  try {
+    const location = session.history.present.locations.find((candidate) => candidate.id === locationId)
+    if (location?.kind !== 'slide-scene') throw new Error('找不到 Slide 场景位置')
+    const selection = selectSlideEditorLayers({
+      project: session.history.present,
+      locationId,
+      stateId: location.stateId ?? null,
+      selectionIds: [],
+    })
+    if (
+      session.scope === 'scene'
+      && session.selection.locationId === selection.locationId
+      && session.selection.stateId === selection.stateId
+      && session.selection.selectionIds.length === 0
+    ) return succeed(session, false)
+    return succeed({
+      ...session,
+      selection,
+      scope: 'scene',
+      generation: bumpGeneration(session),
+    }, false)
+  } catch (error) {
+    return catchCommand(session, error)
+  }
+}
+
+/** Opens the scene's base editing state, independently of exact location navigation. */
 export function activateSlideScene(
   session: SlideAuthoringSession,
   sceneId: string,
@@ -954,6 +985,7 @@ export interface SlideAuthoringBackend {
     options?: SlideCommandOptions,
   ): SlideCommandResult
   setScope(scope: SlideEditorLayerScope, options?: SlideCommandOptions): SlideCommandResult
+  activateLocation(locationId: string, options?: SlideCommandOptions): SlideCommandResult
   activateScene(sceneId: string, options?: SlideCommandOptions): SlideCommandResult
   addScene(options?: SlideCommandOptions & { name?: string }): SlideCommandResult
   renameScene(sceneId: string, name: string, options?: SlideCommandOptions): SlideCommandResult
@@ -999,6 +1031,8 @@ export function createSlideAuthoringBackend(
     selectLayers: (nodeIds, additive, options) =>
       run((current) => selectSlideLayers(current, { nodeIds, additive }, options)),
     setScope: (scope, options) => run((current) => setSlideEditingScope(current, scope, options)),
+    activateLocation: (locationId, options) =>
+      run((current) => activateSlideLocation(current, locationId, options)),
     activateScene: (sceneId, options) =>
       run((current) => activateSlideScene(current, sceneId, options)),
     addScene: (options) => run((current) => addSlideScene(current, options)),
@@ -1241,27 +1275,16 @@ function remapTeacherControllerButtons(
   sceneIdMap: ReadonlyMap<string, string>,
   stateIdMap: ReadonlyMap<string, string>,
 ): void {
-  if (item.kind !== 'native' || item.content.nativeType !== 'teacher-controller') return
-  item.content.data.buttons = remapTeacherControllerButtonList(
-    item.content.data.buttons,
+  if (item.kind !== 'component' || item.role !== 'teacher-controller' || !Array.isArray(item.props.buttons)) return
+  item.props.buttons = remapTeacherControllerButtonList(
+    item.props.buttons as TeacherControllerButton[],
     sceneIdMap,
     stateIdMap,
   )
 }
 
-function teacherControllerOverrideButtons(
-  item: LayerItem | undefined,
-  override: LayerItemOverride,
-): TeacherControllerButton[] | undefined {
-  if (
-    item?.kind !== 'native' ||
-    item.content.nativeType !== 'teacher-controller' ||
-    !override.nativeData ||
-    !Array.isArray(override.nativeData.buttons)
-  ) {
-    return undefined
-  }
-  return override.nativeData.buttons as TeacherControllerButton[]
+function teacherControllerOverrideButtons(item: LayerItem | undefined, override: LayerItemOverride): TeacherControllerButton[] | undefined {
+  return item?.kind === 'component' && item.role === 'teacher-controller' && Array.isArray(override.componentProps?.buttons) ? override.componentProps.buttons as TeacherControllerButton[] : undefined
 }
 
 function duplicateSlideSceneDocument(
@@ -1310,8 +1333,8 @@ function duplicateSlideSceneDocument(
             source.layerItems.find((item) => item.layerItemId === layerItemId),
             override,
           )
-          if (buttons && override.nativeData) {
-            override.nativeData.buttons = remapTeacherControllerButtonList(
+          if (buttons && override.componentProps) {
+            override.componentProps!.buttons = remapTeacherControllerButtonList(
               buttons,
               sceneIdMap,
               stateIdMap,
@@ -1484,7 +1507,7 @@ function updateTeacherControllerStateOverrides(
   scene.presentation?.states.forEach((state) => {
     Object.entries(state.layerItemOverrides).forEach(([layerItemId, override]) => {
       const buttons = teacherControllerOverrideButtons(items.get(layerItemId), override)
-      if (buttons && override.nativeData) override.nativeData.buttons = update(buttons)
+      if (buttons && override.componentProps) override.componentProps!.buttons = update(buttons)
     })
   })
 }
@@ -1750,9 +1773,9 @@ function clearSceneGoTargetState(
     }
   })
   const visit = (item: LayerItem) => {
-    if (item.kind !== 'native' || item.content.nativeType !== 'teacher-controller') return
-    item.content.data.buttons = clearSceneGoTargetStateButtonList(
-      item.content.data.buttons,
+    if (item.kind !== 'component' || item.role !== 'teacher-controller' || !Array.isArray(item.props.buttons)) return
+    item.props.buttons = clearSceneGoTargetStateButtonList(
+      item.props.buttons as TeacherControllerButton[],
       sceneId,
       stateId,
     )

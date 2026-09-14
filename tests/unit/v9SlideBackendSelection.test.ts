@@ -6,6 +6,7 @@ import {
   createSlideAuthoringBackend,
   openSlideAuthoringSession,
 } from '@/renderer/course/slideAuthoringBackend'
+import { buildSlideEditorView } from '@/renderer/course/slideEditorView'
 import {
   selectActiveCourseProjectDocument,
   selectSlideAuthoringBackend,
@@ -172,6 +173,70 @@ afterEach(() => {
 })
 
 describe('V9 slide authoring backend single document transaction', () => {
+  it('navigates exact state locations through the Store without history and preserves scene base editing', () => {
+    const source = v9CandidateFixture()
+    const surface = source.surfaces[0]!
+    if (surface.type !== 'slide') throw new Error('expected Slide surface')
+    const scene = surface.scenes[0]!
+    scene.presentation = {
+      initialStateId: 'state-one',
+      states: [
+        { id: 'state-one', name: '第一步', layerItemOverrides: {}, backgroundColor: '#111111' },
+        { id: 'state-two', name: '第二步', layerItemOverrides: {}, backgroundColor: '#222222' },
+      ],
+    }
+    surface.scenes.push({ ...structuredClone(scene), id: 'scene-2', name: '第二场景', layerItems: [] })
+    source.locations = [
+      { id: 'location-two', label: '第二场景', kind: 'slide-scene', surfaceId: surface.id, sceneId: 'scene-2' },
+      { id: 'location-step-one', label: '第一步', kind: 'slide-scene', surfaceId: surface.id, sceneId: scene.id, stateId: 'state-one' },
+      { id: 'location-step-two', label: '第二步', kind: 'slide-scene', surfaceId: surface.id, sceneId: scene.id, stateId: 'state-two' },
+    ]
+    source.startLocationId = 'location-step-one'
+    useEditorStore.getState().injectV9SlideCandidateBackend(createSlideAuthoringBackend(
+      openSlideAuthoringSession(source, { locationId: 'location-two' }),
+    ))
+    const history = selectSlideAuthoringBackend(useEditorStore.getState())!.getSession().history
+    const dirty = useEditorStore.getState().dirty
+    const assertExact = (locationId: string, stateId: string) => {
+      const current = useEditorStore.getState()
+      const backend = selectSlideAuthoringBackend(current)!
+      expect(backend.getSession().selection).toMatchObject({ locationId, stateId, selectionIds: [] })
+      expect(selectSlideAuthoringSnapshot(current)).toMatchObject({ locationId, stateId, sceneId: scene.id })
+      expect(current.courseAuthoringSession?.token.locationId).toBe(locationId)
+      const view = buildSlideEditorView({
+        project: backend.getSession().history.present,
+        locationId: backend.getSnapshot().locationId,
+        stateId: backend.getSnapshot().stateId,
+      })
+      expect(view.presentation?.activeStateId).toBe(stateId)
+      expect(view.backgroundColor).toBe(stateId === 'state-two' ? '#222222' : '#111111')
+    }
+    useEditorStore.getState().activateCourseLocation('location-step-two')
+    assertExact('location-step-two', 'state-two')
+    useEditorStore.getState().activateCourseLocation('location-step-one')
+    assertExact('location-step-one', 'state-one')
+    useEditorStore.getState().runSlideCandidateCommand((backend) => backend.activateScene(scene.id))
+    expect(selectSlideAuthoringSnapshot(useEditorStore.getState())?.stateId).toBeNull()
+    // The location can already match while the explicit base editing state differs.
+    useEditorStore.getState().activateCourseLocation('location-step-one')
+    assertExact('location-step-one', 'state-one')
+    expect(selectSlideAuthoringBackend(useEditorStore.getState())!.getSession().history).toEqual(history)
+    expect(useEditorStore.getState().dirty).toBe(dirty)
+
+    const backend = selectSlideAuthoringBackend(useEditorStore.getState())!
+    const beforeRejected = backend.getSnapshot()
+    expect(backend.activateLocation('missing-location').ok).toBe(false)
+    expect(backend.activateLocation('location-step-two', { expectedRevision: source.revision + 1 }).ok).toBe(false)
+    expect(backend.getSnapshot()).toEqual(beforeRejected)
+
+    useEditorStore.getState().addCourseContent('flow-page')
+    const flowHistory = useEditorStore.getState().flowSession!.history
+    useEditorStore.getState().activateCourseLocation('location-step-two')
+    assertExact('location-step-two', 'state-two')
+    expect(selectSlideAuthoringBackend(useEditorStore.getState())!.getSession().history).toEqual(flowHistory)
+    expect(useEditorStore.getState().flowSession).toBeNull()
+  })
+
   it('defaults to the V9 slide authoring backend', () => {
     const state = useEditorStore.getState()
     expect(selectSlideBackendKind(state)).toBe('slide-authoring')

@@ -20,6 +20,7 @@ import { formulaAstSchema } from '../../shared/contracts/native-v1'
 import type { FormulaAstNode, FormulaNode } from '../../shared/contracts/native-v1'
 
 export interface FormulaAuthoringDraftChange {
+  readonly composing?: boolean
   readonly source: string
   readonly ast: FormulaAstNode | null
   readonly accessibleText: string
@@ -38,7 +39,10 @@ interface FormulaAuthoringEditorProps {
   onDraftChange?: (draft: FormulaAuthoringDraftChange) => void
   onCompositionChange?: (composing: boolean) => void
   onBeginEdit?: () => void
+  onFinishReady?: (finish: () => void) => void
 }
+
+export type FormulaAuthoringBinding = Pick<FormulaAuthoringEditorProps, 'onCommit' | 'onCancel' | 'draftSource' | 'onDraftChange' | 'onCompositionChange' | 'onBeginEdit'>
 
 interface ParsedDraft {
   ast: FormulaAstNode | null
@@ -210,6 +214,7 @@ export function FormulaAuthoringEditor({
   onDraftChange,
   onCompositionChange,
   onBeginEdit,
+  onFinishReady,
 }: FormulaAuthoringEditorProps) {
   const canonicalSource = useMemo(() => serializeFormulaAst(node.ast), [node.ast])
   const [localDraftSource, setLocalDraftSource] = useState(canonicalSource)
@@ -218,6 +223,10 @@ export function FormulaAuthoringEditor({
   const inputRef = useRef<HTMLInputElement>(null)
   const pendingSelectionRef = useRef<[number, number] | null>(null)
   const composingRef = useRef(false)
+  const pendingFinishRef = useRef<boolean | null>(null)
+  const deferredCommitRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const latestCommitRef = useRef<(finish: boolean) => void>(() => {})
+  const finishedSourceRef = useRef<string | null>(null)
   const parsed = useMemo(() => parseDraft(draftSource), [draftSource])
   const accessibilityAutomatic = isAutomaticAccessibleText(node)
   const dirty = !sameAst(parsed.ast, node.ast)
@@ -244,10 +253,12 @@ export function FormulaAuthoringEditor({
     inputRef.current?.setSelectionRange(selection[0], selection[1])
   }, [draftSource])
 
-  const publishDraftSource = (source: string) => {
+  const publishDraftSource = (source: string, composing = composingRef.current) => {
+    finishedSourceRef.current = null
     if (controlledDraftSource === undefined) setLocalDraftSource(source)
     const next = parseDraft(source)
     onDraftChange?.({
+      composing,
       source,
       ast: next.ast,
       accessibleText: accessibilityAutomatic ? next.accessibleText : node.accessibleText,
@@ -267,7 +278,11 @@ export function FormulaAuthoringEditor({
     queueMicrotask(() => inputRef.current?.focus())
   }
 
-  const commitDraft = () => {
+  const commitDraft = (finish = false) => {
+    if (composingRef.current) { pendingFinishRef.current = finish; return }
+    const source = inputRef.current?.value ?? draftSource
+    if (finishedSourceRef.current === source) return
+    const parsed = parseDraft(source)
     if (parsed.error || !parsed.ast) {
       setNotice('请先修复输入错误，工程未变更')
       return
@@ -276,11 +291,13 @@ export function FormulaAuthoringEditor({
       setNotice(`请先补全公式中的“${FORMULA_SLOT}”占位符，工程未变更`)
       return
     }
-    if (!dirty) {
+    if (!dirty && !finish) {
       if (controlledDraftSource === undefined) setLocalDraftSource(canonicalSource)
       setNotice('公式内容没有变化')
       return
     }
+    finishedSourceRef.current = source
+    queueMicrotask(() => { finishedSourceRef.current = null })
     onCommit(
       parsed.ast,
       accessibilityAutomatic ? parsed.accessibleText : node.accessibleText,
@@ -289,6 +306,12 @@ export function FormulaAuthoringEditor({
       ? '公式已应用，无障碍描述已同步更新'
       : '公式已应用；请复核你的自定义无障碍描述')
   }
+
+  latestCommitRef.current = commitDraft
+  useLayoutEffect(() => { onFinishReady?.(() => latestCommitRef.current(true)) })
+  useEffect(() => () => {
+    if (deferredCommitRef.current !== null) clearTimeout(deferredCommitRef.current)
+  }, [node.id])
 
   const insertTemplate = (template: FormulaTemplate) => {
     const input = inputRef.current
@@ -320,6 +343,7 @@ export function FormulaAuthoringEditor({
   }
 
   const handleKeyDown = (event: ReactKeyboardEvent<HTMLInputElement>) => {
+    if (composingRef.current || event.nativeEvent.isComposing) return
     if (event.key === 'Tab' && draftSource.includes(FORMULA_SLOT)) {
       event.preventDefault()
       selectNextSlot()
@@ -341,7 +365,10 @@ export function FormulaAuthoringEditor({
   }
 
   return (
-    <div className="formula-authoring-editor" data-testid="formula-authoring-editor">
+    <div className="formula-authoring-editor" data-testid="formula-authoring-editor"
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) commitDraft(onFinishReady !== undefined)
+      }}>
       <div className="form-field">
         <label htmlFor={`formula-linear-${node.id}`}>公式内容</label>
         <input
@@ -362,9 +389,20 @@ export function FormulaAuthoringEditor({
             composingRef.current = true
             onCompositionChange?.(true)
           }}
-          onCompositionEnd={() => {
+          onCompositionEnd={(event) => {
             composingRef.current = false
-            onCompositionChange?.(false)
+            // The final source and IME state are one draft update; two callbacks
+            // would both capture the same expected edit and make the second stale.
+            if (onDraftChange) publishDraftSource(event.currentTarget.value, false)
+            else { publishDraftSource(event.currentTarget.value, false); onCompositionChange?.(false) }
+            if (pendingFinishRef.current !== null) {
+              const finish = pendingFinishRef.current
+              pendingFinishRef.current = null
+              deferredCommitRef.current = setTimeout(() => {
+                deferredCommitRef.current = null
+                latestCommitRef.current(finish)
+              }, 0)
+            }
           }}
           onKeyDown={handleKeyDown}
         />
@@ -440,7 +478,7 @@ export function FormulaAuthoringEditor({
           type="button"
           className="primary-button"
           disabled={!dirty || Boolean(parsed.error) || parsed.hasSlots}
-          onClick={commitDraft}
+          onClick={() => commitDraft()}
         >
           应用公式
         </button>

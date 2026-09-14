@@ -49,19 +49,11 @@ export type PublishedNativeRenderInput =
   | PublishedNativeChartInput
   | PublishedNativeInputLayerInput
 
-export type PublishedTeacherControllerInput = Extract<
-  PublishedNativeRenderInput,
-  { readonly type: 'teacher-controller' }
->
-
 export type NativePaintAssetResolver = (assetId: string) => string | undefined
 
 export interface NativePaintPorts {
   readonly resolveAsset: NativePaintAssetResolver
-  readonly mountTeacherController?: (
-    wrap: HTMLElement,
-    input: PublishedTeacherControllerInput,
-  ) => void
+
 }
 
 export interface NativePaintOptions {
@@ -162,12 +154,7 @@ export function nativeRenderInputFromLayerItem(
         ...layout,
         type: 'shape' as const,
       })
-    case 'teacher-controller':
-      return freezeRenderSnapshot({
-        ...structuredClone(item.content.data),
-        ...layout,
-        type: 'teacher-controller' as const,
-      })
+    
     case 'table':
       return freezeRenderSnapshot({
         ...structuredClone(item.content.data),
@@ -237,9 +224,6 @@ export function paintPublishedNativeRenderInput(
   wrap.dataset.nativeType = input.type
   const staticCapture = options.staticCapture === true
   switch (input.type) {
-    case 'teacher-controller':
-      ports.mountTeacherController?.(wrap, input)
-      return
     case 'text':
       paintPublishedNativeText(
         wrap,

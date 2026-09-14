@@ -1,10 +1,11 @@
+import { buildPublishedFixture as buildPublishedCourseV2Payload } from '../fixtures/teacherController'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('phaser', () => ({}))
 
 import { createPublishedAuthoringReadonlyState } from '@/player/surfaces/publishedDynamicHosts'
 import { PublishedGlobalCanvasRuntimeOwner } from '@/player/surfaces/runtime/publishedGlobalCanvasRuntimeOwner'
-import { buildPublishedCourseV2Payload } from '@/renderer/export/course/buildPublishedCourse'
+
 import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
 import type { RuntimeLayerItem } from '@/shared/courseProjectTypes'
 import type { RuntimeAuthoringTargetUpdate } from '@/shared/runtimeTypes'

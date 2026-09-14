@@ -1,3 +1,5 @@
+import { controllerMetadata } from '../fixtures/teacherController'
+import { controllerPackage } from '../fixtures/teacherController'
 import { describe, expect, it } from 'vitest'
 import type {
   CourseRuntimeDefinition,
@@ -113,7 +115,7 @@ function input(
     candidateLocalItems: null,
     candidateAssets: null,
     sidecarFileIds: ['asset-photo'],
-    componentPackages: {
+    componentPackages: { ...controllerMetadata,
       'pkg-clock': {
         manifest: { id: 'pkg-clock', version: '1.0.0' },
       },
@@ -138,7 +140,7 @@ describe('buildSlidePreviewRebuildKey', () => {
       })),
       assets: { ...left.assets, 'asset-photo': { ...left.assets['asset-photo']! } },
       sidecarFileIds: [...left.sidecarFileIds],
-      componentPackages: {
+      componentPackages: { ...controllerMetadata,
         'pkg-clock': {
           manifest: { id: 'pkg-clock', version: '1.0.0' },
         },
@@ -193,7 +195,7 @@ describe('buildSlidePreviewRebuildKey', () => {
 
     expect(
       buildSlidePreviewRebuildKey(input({
-        componentPackages: {
+        componentPackages: { ...controllerMetadata,
           'pkg-clock': { manifest: { id: 'pkg-clock', version: '1.0.0' } },
           'pkg-quiz': { manifest: { id: 'pkg-quiz', version: '2.0.0' } },
         },
@@ -385,7 +387,7 @@ describe('buildSlidePreviewRebuildKey', () => {
     }
     const baseline = buildSlidePreviewRebuildKey(input({
       scene: { ...scene('scene-1'), nodes: [first, second] },
-      componentPackages: {
+      componentPackages: { ...controllerMetadata,
         'pkg-clock': {
           manifest: { id: 'pkg-clock', version: '1.0.0' },
           files: { 'runtime.js': Uint8Array.of(1, 2, 3) },
@@ -395,7 +397,7 @@ describe('buildSlidePreviewRebuildKey', () => {
 
     expect(buildSlidePreviewRebuildKey(input({
       scene: { ...scene('scene-1'), nodes: [second, first] },
-      componentPackages: {
+      componentPackages: { ...controllerMetadata,
         'pkg-clock': {
           manifest: { id: 'pkg-clock', version: '1.0.0' },
           files: { 'runtime.js': Uint8Array.of(1, 2, 3) },
@@ -408,7 +410,7 @@ describe('buildSlidePreviewRebuildKey', () => {
         ...scene('scene-1'),
         nodes: [changedComponent, second],
       },
-      componentPackages: {
+      componentPackages: { ...controllerMetadata,
         'pkg-clock': {
           manifest: { id: 'pkg-clock', version: '1.0.0' },
           files: { 'runtime.js': Uint8Array.of(1, 2, 3) },
@@ -424,7 +426,7 @@ describe('buildSlidePreviewRebuildKey', () => {
           component: { packageId: 'pkg-clock', version: '2.0.0' },
         }, second],
       },
-      componentPackages: {
+      componentPackages: { ...controllerMetadata,
         'pkg-clock': {
           manifest: { id: 'pkg-clock', version: '1.0.0' },
           files: { 'runtime.js': Uint8Array.of(1, 2, 3) },
@@ -434,7 +436,7 @@ describe('buildSlidePreviewRebuildKey', () => {
 
     expect(buildSlidePreviewRebuildKey(input({
       scene: { ...scene('scene-1'), nodes: [first, second] },
-      componentPackages: {
+      componentPackages: { ...controllerMetadata,
         'pkg-clock': {
           manifest: { id: 'pkg-clock', version: '1.0.0' },
           files: { 'runtime.js': Uint8Array.of(1, 2, 4) },
@@ -457,7 +459,7 @@ describe('buildSlidePreviewRebuildKey', () => {
         ...item,
         nodes: item.nodes.map((node) => ({ ...node })),
       })),
-      componentPackages: {
+      componentPackages: { ...controllerMetadata,
         'pkg-clock': { manifest: { id: 'pkg-clock', version: '1.0.0' } },
       },
     })
@@ -484,10 +486,8 @@ describe('buildSlidePreviewRebuildKey', () => {
         opacity: 1,
         hitPolicy: 'auto' as const,
         playbackInitialVisibility: 'inherit' as const,
-        kind: 'native' as const,
-        content: {
-          nativeType: 'teacher-controller' as const,
-          data: {
+        kind: 'component' as const,
+        role: 'teacher-controller' as const, component: { packageId: controllerPackage.manifest.id, version: controllerPackage.manifest.version }, props: {
             title: '教师控制台',
             showSceneProgress: true,
             compact: false,
@@ -503,7 +503,6 @@ describe('buildSlidePreviewRebuildKey', () => {
             },
             includeInStaticExports: false,
           },
-        },
       },
       visibility: { mode: 'all' as const, locationIds: [] },
     })

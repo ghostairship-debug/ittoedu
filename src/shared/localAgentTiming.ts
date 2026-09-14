@@ -8,7 +8,8 @@ export function recordAiTaskTiming(task: AiTask, observed: TimingIdentity, runId
     || task.observationId !== observed.observationId || !Number.isSafeInteger(at) || at < 0) return task
   const entries = task.execution.timing?.entries ?? []
   if (entries.length >= MAX_AI_TASK_TIMING_ENTRIES || entries.some(entry => entry.runId === runId
-    && (entry.stage === stage || entry.observationId !== observed.observationId))) return task
+    && (entry.stage === stage || entry.observationId !== observed.observationId))
+    || task.execution.inputMetrics?.entries.some(entry => entry.runId === runId && entry.observationId !== observed.observationId)) return task
   return { ...task, execution: { ...task.execution, timing: { version: 1,
     entries: [...entries, { runId, observationId: task.observationId, stage, at }],
   } } }
@@ -31,10 +32,13 @@ export function summarizeAiTaskTiming(task: AiTask) {
       nativeOpen: elapsed('nativeOpenStarted', 'nativeOpened'),
       turnDispatch: elapsed('turnDispatchStarted', 'turnAccepted'),
       acceptedToFirstNativeEvent: elapsed('turnAccepted', 'firstNativeEvent'),
+      acceptedToFirstVisibleText: elapsed('turnAccepted', 'firstVisibleText'),
+      resourcePreparation: elapsed('resourcePreparationStarted', 'resourcePrepared'),
       firstNativeEventToCandidateParsed: elapsed('firstNativeEvent', 'candidateParsed'),
       preparedToCandidateParsed: elapsed('requestPrepared', 'candidateParsed'),
       candidateParsedToHostResultRecorded: elapsed('candidateParsed', 'hostResultRecorded'),
       candidateParsedToHostCommitRecorded: elapsed('candidateParsed', 'hostCommitRecorded'),
+      preparedToTaskEnded: elapsed('requestPrepared', 'taskEnded'),
     } }
   })
 }

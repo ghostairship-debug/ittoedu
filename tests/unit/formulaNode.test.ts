@@ -1,5 +1,6 @@
+import { buildPublishedFixture as buildPublishedCourseV2Payload } from '../fixtures/teacherController'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { buildPublishedCourseV2Payload } from '@/renderer/export/course/buildPublishedCourse'
+
 import { collectCourseProjectExportPreflight } from '@/renderer/export/exportPreflight'
 import { createFormulaNode, type FormulaNodeOptions } from '@/renderer/project/nativeNodeFactories'
 import { createBlankCourseProject } from '@/renderer/project/createCourseProject'

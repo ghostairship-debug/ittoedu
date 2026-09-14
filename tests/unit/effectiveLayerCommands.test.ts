@@ -1,3 +1,7 @@
+import { controllerMetadata } from '../fixtures/teacherController'
+import type { LayerItem } from '../../src/shared/courseProjectTypes'
+import { isControllerFixture } from '../fixtures/teacherController'
+import { createControllerFixture } from '../fixtures/teacherController'
 import { describe, expect, it } from 'vitest'
 import { makeAuthoringAddress } from '@/shared/authoringAddress'
 import { resolveEffectiveGlobalLayerPlanes } from '@/shared/courseLayerComposition'
@@ -13,7 +17,6 @@ import {
   type NativeLayerItem,
   type ScopedLayerItem,
 } from '@/shared/courseProjectTypes'
-import { createTeacherControllerNode } from '@/renderer/project/nativeNodeFactories'
 import {
   CONTROLLER_MOVE_REASON,
   CROSS_OWNER_REORDER_REASON,
@@ -102,17 +105,14 @@ function nativeText(
 }
 
 function scoped(
-  item: NativeLayerItem,
+  item: LayerItem,
   visibility: ScopedLayerItem['visibility'] = { mode: 'all', locationIds: [] },
 ): ScopedLayerItem {
   return { item, visibility }
 }
 
 function v9LayerFixture(): CourseProjectDocument {
-  const controller = sceneNodeToCourseLayerItem(
-    createTeacherControllerNode({ id: 'teacher-controller-main' }),
-    90,
-  )
+  const controller = createControllerFixture({ id: 'teacher-controller-main' }, 90)
   return courseProjectDocumentSchema.parse({
     schemaVersion: COURSE_PROJECT_SCHEMA_VERSION,
     id: 'r3a-layers',
@@ -121,7 +121,7 @@ function v9LayerFixture(): CourseProjectDocument {
     createdAt: NOW,
     updatedAt: NOW,
     assets: {},
-    componentPackages: {},
+    componentPackages: { ...controllerMetadata,},
     designTokens: {
       fonts: [{
         id: 'body',
@@ -152,7 +152,7 @@ function v9LayerFixture(): CourseProjectDocument {
     globalLayerItems: [
       scoped(nativeText('global-banner', 0, '全课横幅')),
       scoped(nativeText('global-footer', 5, '全课页脚')),
-      scoped(controller as NativeLayerItem),
+      scoped(controller),
     ],
     globalInteractions: [],
     locations: [
@@ -856,9 +856,9 @@ describe('V9 effective / global layer commands', () => {
     const controller = findGlobalTeacherController(restored.nextDocument!)
     expect(controller).toBeDefined()
     expect(locateCourseLayer(restored.nextDocument!, controller!.item.layerItemId)?.source).toBe('global')
-    expect(controller?.item.kind === 'native' &&
-      controller.item.content.nativeType === 'teacher-controller' &&
-      controller.item.content.data.defaultCollapsed).toBe(true)
+    expect(controller?.item.kind === 'component' &&
+      isControllerFixture(controller.item) &&
+      controller.item.props.defaultCollapsed).toBe(true)
     expect(restored.nextDocument?.globalLayerItems.find(
       (entry) => entry.item.layerItemId === controller?.item.layerItemId,
     )?.plane).toBe('overlay')
@@ -871,10 +871,10 @@ describe('V9 effective / global layer commands', () => {
     (defaultCollapsed) => {
       const project = v9LayerFixture()
       const controller = findGlobalTeacherController(project)
-      if (!controller || !isTeacherControllerLayerItem(controller.item)) {
+      if (!controller || !isTeacherControllerLayerItem(controller.item) || controller.item.kind !== 'component') {
         throw new Error('expected teacher controller')
       }
-      controller.item.content.data.defaultCollapsed = defaultCollapsed
+      controller.item.props.defaultCollapsed = defaultCollapsed
       const beforeRestore = structuredClone(project)
 
       const restored = restoreDefaultTeacherController(project, {
@@ -885,7 +885,7 @@ describe('V9 effective / global layer commands', () => {
       expect(restored).toMatchObject({ ok: true, historyEntry: false })
       expect(restored.nextDocument).toBe(project)
       expect(project).toEqual(beforeRestore)
-      expect(controller.item.content.data.defaultCollapsed).toBe(defaultCollapsed)
+      expect(controller.item.props.defaultCollapsed).toBe(defaultCollapsed)
       expect(project.revision).toBe(beforeRestore.revision)
     },
   )

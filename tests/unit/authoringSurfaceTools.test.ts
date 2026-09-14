@@ -1,3 +1,4 @@
+import { buildPublishedFixture as buildPublishedCourseV2Payload } from '../fixtures/teacherController'
 import { describe, expect, it } from 'vitest'
 import { runtimeConfigureTool } from '@/renderer/authoring/tools/runtimeConfigureTool'
 import { courseNavigationAddress } from '@/renderer/authoring/tools/courseNavigationTool'
@@ -18,7 +19,7 @@ import { slideStructureAddress } from '@/renderer/authoring/tools/slideStructure
 import { makeAuthoringAddress } from '@/shared/authoringAddress'
 import { applyEditorTransactionStep, type EditorTransactionStep } from '@/renderer/authoring/editorTransaction'
 import { createResourceAwareAuthoringHistory, commitEditorTransactionToAuthoringHistory } from '@/renderer/authoring/resourceAwareAuthoringHistory'
-import { buildPublishedCourseV2Payload } from '@/renderer/export/course/buildPublishedCourse'
+
 import type { CourseProjectDocument } from '@/shared/courseProjectTypes'
 import type { AuthoringToolCreateScopeV1, AuthoringToolDestinationV1, AuthoringToolReceiptV1 } from '@/shared/authoringToolContract'
 import { useEditorStore, selectActiveCourseProjectDocument, selectSelectedNodeId } from '@/renderer/store/editorStore'
@@ -56,6 +57,29 @@ function harness(project: CourseProjectDocument, resources: HistoryResourceState
 }
 
 describe('Product commands behind versioned Surface tools', () => {
+  it.each(['scene', 'global'] as const)('clears removed %s selections after a Slide tool transaction is undone', async owner => {
+    useEditorStore.getState().createNewProject()
+    useEditorStore.getState().setEditingScope(owner)
+    const original = selectActiveCourseProjectDocument(useEditorStore.getState())!
+    const scope = { ...harness(original).scope(), owner,
+      sessionGeneration: useEditorStore.getState().courseAuthoringSession!.token.generation }
+    if (owner === 'global') scope.ownerKey = 'global'
+    const inserted = await useEditorStore.getState().runAuthoringTool({ version: 1, requestId: `undo-${owner}-selection`, tool: 'native.content',
+      destination: { kind: 'create', scope }, input: { operation: 'insert', template: { nativeType: 'text', text: '平均分的含义' } } })
+    expect(inserted.status, JSON.stringify(inserted.diagnostics)).toBe('committed')
+    const applied = selectActiveCourseProjectDocument(useEditorStore.getState())!
+    const selected = useEditorStore.getState().courseAuthoringSession!
+    expect(selected.itemIds).toEqual([inserted.affected[0]!.id])
+    useEditorStore.getState().undo()
+    const undone = useEditorStore.getState()
+    expect(selectActiveCourseProjectDocument(undone)).toEqual(original)
+    expect(undone.slideCandidateSnapshot?.selection.selectionIds).toEqual([])
+    expect(undone.courseAuthoringSession?.itemIds).toEqual([])
+    expect(undone.courseAuthoringSession!.token.generation).toBeGreaterThan(selected.token.generation)
+    useEditorStore.getState().redo()
+    expect(selectActiveCourseProjectDocument(useEditorStore.getState())).toEqual(applied)
+    expect(useEditorStore.getState().courseAuthoringSession?.itemIds).toEqual([])
+  })
   it('can disable an existing broken Runtime without executing it and can Undo the single transaction', async () => {
     const project = createBlankCourseProject()
     const surface = project.surfaces[0]!

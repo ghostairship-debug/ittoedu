@@ -214,7 +214,7 @@ function slideSceneTreeNodes(page: Page) {
 }
 
 async function openCoursePreviewOverlay(page: Page) {
-  await page.getByRole('button', { name: '全屏 16:9 整课预览' }).click()
+  await page.getByRole('button', { name: '整课预览', exact: true }).click()
   const overlay = page.getByTestId('course-preview-overlay')
   const host = page.getByTestId('course-preview-host')
   const adapter = host.locator('.slide-published-adapter')

@@ -1,3 +1,6 @@
+import { controllerMetadata } from '../fixtures/teacherController'
+import { controllerPackage } from '../fixtures/teacherController'
+import type { ComponentLayerItem } from '../../src/shared/courseProjectTypes'
 import { describe, expect, it } from 'vitest'
 import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
 import {
@@ -92,7 +95,7 @@ function nativeText(
   }
 }
 
-function globalController(): NativeLayerItem {
+function globalController(): ComponentLayerItem {
   return {
     layerItemId: 'global-teacher-controller',
     label: '教师控制器',
@@ -104,10 +107,8 @@ function globalController(): NativeLayerItem {
     opacity: 1,
     hitPolicy: 'auto',
     playbackInitialVisibility: 'inherit',
-    kind: 'native',
-    content: {
-      nativeType: 'teacher-controller',
-      data: {
+    kind: 'component',
+    role: 'teacher-controller', component: { packageId: controllerPackage.manifest.id, version: controllerPackage.manifest.version }, props: {
         title: '教师控制台',
         showSceneProgress: true,
         compact: false,
@@ -126,7 +127,6 @@ function globalController(): NativeLayerItem {
         },
         includeInStaticExports: false,
       },
-    },
   }
 }
 
@@ -143,7 +143,7 @@ function fixture(worldRotation = 0): CourseProjectDocument {
     createdAt: NOW,
     updatedAt: NOW,
     assets: {},
-    componentPackages: {},
+    componentPackages: { ...controllerMetadata,},
     designTokens: {
       fonts: [{
         id: 'body',

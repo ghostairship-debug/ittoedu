@@ -1,4 +1,5 @@
-import { app } from 'electron'
+import { app, session } from 'electron'
+import { configureNativeSystemProxy } from './nativeProxy'
 import { localAgentRequestSchema, localAgentResponseSchema, type LocalAgentResponse } from '../../shared/localAgentContract'
 import { createWorkspaceIdentity } from '../workspaceIdentity'
 import { LocalAgentHarness } from './harness'
@@ -16,6 +17,7 @@ export async function operateLocalAgent(request: unknown): Promise<LocalAgentRes
   }
 }
 async function operate(request: unknown): Promise<LocalAgentResponse> {
+  configureNativeSystemProxy(url => session.defaultSession.resolveProxy(url))
   const input = localAgentRequestSchema.parse(request)
   harness ??= new LocalAgentHarness(new LocalAgentRepository(app.getPath('userData')))
   if (input.operation === 'probe') return { enabled: true, probe: await harness.probe(input.adapter) }
@@ -29,7 +31,7 @@ async function operate(request: unknown): Promise<LocalAgentResponse> {
     case 'file-status': return { enabled: true, fileStatus: await projectFileStatus(input.projectPath) }
     case 'start': return { enabled: true, sessionId: await harness.start(workspace, input.adapter, input.prompt) }
     case 'resume': return { enabled: true, sessionId: await harness.resume(workspace, input.sessionId, input.prompt) }
-    case 'generate': return { enabled: true, sessionId: await harness.generate(workspace, input.adapter, input.request, input.resumeSessionId) }
+    case 'generate': return { enabled: true, sessionId: await harness.generate(workspace, input.adapter, input.request, input.resumeSessionId, input.userMessage) }
     case 'continue': return { enabled: true, sessionId: await harness.continue(workspace, input.sessionId, input.request) }
     case 'candidate': {
       const generationResult = await harness.candidate(workspace, input.sessionId)

@@ -413,11 +413,6 @@ function deriveLayerInventory(
     if (content.data.poster.assetId) {
       addInventoryEntry(project, inventory, target, 'content.data.poster.assetId', '视频封面', content.data.poster.assetId, 'asset')
     }
-  } else if (content.nativeType === 'teacher-controller') {
-    addInventoryEntry(project, inventory, target, 'content.data.title', '教师控制器标题', content.data.title)
-    content.data.buttons.forEach((button, index) => {
-      addInventoryEntry(project, inventory, target, `content.data.buttons.${index}.label`, `按钮：${button.id}`, button.label)
-    })
   } else if (content.nativeType === 'table') {
     content.data.rows.forEach((row, rIdx) => {
       row.cells.forEach((cell, cIdx) => {

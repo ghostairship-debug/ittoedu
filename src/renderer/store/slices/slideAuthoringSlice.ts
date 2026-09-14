@@ -1,3 +1,4 @@
+import { missingTeacherControllerTransaction } from '../../components/teacherControllerComponent'
 import { commitResourceAwareAuthoringHistory, authoringLegacyHistoryEntryCount } from '../../authoring/resourceAwareAuthoringHistory'
 import type { ComponentPackageData } from '../../../shared/componentTypes'
 import { readAuthoringToolSelection } from '../../../shared/authoringToolContract'
@@ -204,9 +205,7 @@ export function persistSlideCandidateResult(
             revision: nextHistory.present.revision,
           }, snapshot.authoringSession.token.generation + 1),
           itemIds: snapshot.authoringSession.itemIds,
-        }, result.resourceTransition
-          ? snapshot.authoringSession.itemIds
-          : nextSnapshot.selection.selectionIds)
+        }, nextSnapshot.selection.selectionIds)
       : snapshot.authoringSession
         ? updateCourseAuthoringSessionItems(
             updateCourseAuthoringSessionRevision(snapshot.authoringSession, nextHistory.present.revision),
@@ -408,7 +407,9 @@ export function createSlideAuthoringSlice(
       flowSession: null,
     })
     const row = projection?.unifiedRows.find((candidate) => candidate.id === nodeId)
-    const nextScope = row?.owner === 'global' || row?.owner === 'surface' || row?.owner === 'scene'
+    const nextScope = row?.isTeacherController && live.getSession().scope === 'scene'
+      ? 'scene'
+      : row?.owner === 'global' || row?.owner === 'surface' || row?.owner === 'scene'
       ? row.owner
       : live.getSession().scope
     if (nextScope !== live.getSession().scope) {
@@ -850,6 +851,11 @@ export function createSlideAuthoringSlice(
       })
       if (!result.ok || !result.nextDocument) {
         kernel.setFeedback({ errorMessage: result.reason, statusMessage: null })
+        return
+      }
+      if (result.createdLayerItemId && !document.globalLayerItems.some(e => e.item.layerItemId === result.createdLayerItemId)) {
+        const step = missingTeacherControllerTransaction(document, result.nextDocument!, result.createdLayerItemId)
+        if (step && kernel.persistTransaction(step, '已恢复组件教师控制台')) selectNode(result.createdLayerItemId)
         return
       }
       const mapped = sessionFromLayerResult(backend.getSession(), result)

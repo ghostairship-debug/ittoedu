@@ -22,7 +22,7 @@ export function generationRepairMadeProgress(before: GenerationCandidate, after:
     }
     return candidate.steps.map((step, index) => ({ ...step, id: index,
       destination: 'stepId' in step.destination ? { ...step.destination, stepId: ids.get(step.destination.stepId) } : step.destination,
-      input: input(step.input), lowerCarrierReason: undefined }))
+      input: input(step.input) }))
   }
   return JSON.stringify(ordered(normalize(before))) !== JSON.stringify(ordered(normalize(after)))
 }

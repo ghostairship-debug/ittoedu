@@ -4,15 +4,23 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { CourseChatPanel } from '@/renderer/ui/chat/CourseChatPanel'
 import { GenerationCandidatePreparationError, MAX_GENERATION_TASK_DURATION_MS } from '@/shared/generationContract'
 import type { DynamicBehaviorObservation } from '@/shared/dynamicBehaviorObservation'
+import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
+import { createBlankFlowCourseProject } from '@/renderer/project/createFlowCourseProject'
+import { createCourseAuthoringSession } from '@/renderer/authoring/courseAuthoringSession'
+import { createTextNode } from '@/renderer/project/nativeNodeFactories'
+import { sceneNodeToCourseLayerItem } from '@/shared/courseProjectModel'
+import { selectFlowEditorBlocks, enterFlowTextEditing } from '@/renderer/course/flowEditorSlice'
+import { captureGenerationSnapshot } from '@/renderer/authoring/generation/generationSnapshot'
+import { projectEffectiveLayers } from '@/renderer/course/effectiveLayerProjection'
 
 // Exercise the real form/send branching with controller and observation unit ports.
 // No native CLI, screenshot, live project commit or acceptance is claimed here.
 const h = vi.hoisted(() => ({ view: {} as any, onView: undefined as any, capture: vi.fn(), starts: [] as any[], startCalls: [] as any[],
   cumulative: '', terminal: {} as any, current: true, input: vi.fn(), remember: vi.fn(), invalidate: vi.fn(), stop: vi.fn(), store: {} as any,
-  controllerPorts: undefined as any, captureNext: vi.fn(), bridges: [] as any[], controllers: [] as any[] }))
+  controllerPorts: undefined as any, recovery: vi.fn(), captureNext: vi.fn(), freeze: vi.fn(), bridges: [] as any[], controllers: [] as any[] }))
 vi.mock('@/renderer/store/editorStore', () => ({
   useEditorStore: Object.assign((selector: any) => selector(h.store), { getState: () => h.store }),
-  selectActiveCourseProjectDocument: () => null,
+  selectActiveCourseProjectDocument: (state: any) => state.document ?? null,
 }))
 vi.mock('@/renderer/ui/chat/courseChatObservation', async importOriginal => ({ ...(await importOriginal<typeof import('@/renderer/ui/chat/courseChatObservation')>()), createCourseChatObservation: () => {
   // Observation disposal is terminal in the real port. A remount needs a new owner.
@@ -23,10 +31,11 @@ vi.mock('@/renderer/ui/chat/courseChatObservation', async importOriginal => ({ .
     if (bridge.disposed) throw new Error('stale：任务已停止或重新开始')
     return result
   },
-  isCurrent: () => !bridge.disposed && h.current, dispose() { bridge.disposed = true }, invalidate: h.invalidate, fileCurrent() {}, captureNext: h.captureNext,
+  isCurrent: () => !bridge.disposed && h.current, currentReason: () => h.current ? null : 'stale：课件已改变',
+  captureRecovery: h.recovery, freezeTarget: h.freeze, dispose() { bridge.disposed = true }, invalidate: h.invalidate, fileCurrent() {}, captureNext: h.captureNext,
   instructionWithUserInput: (text: string) => `${h.cumulative}\n\n用户最新输入（优先于此前要求）：${text}`,
   rememberUserInput: (text: string) => { h.remember(text); h.cumulative += `\n${text}` },
-  refreshFromUser: async (text: string, intent: string, execution: unknown) => bridge.capture({ instruction: `${h.cumulative}\n${text}`, intent, execution }),
+  refreshFromUser: async (text: string, intent: string, execution: unknown, target: unknown, scope: unknown) => bridge.capture({ instruction: `${h.cumulative}\n${text}`, intent, execution, target, scope }),
   }
   h.bridges.push(bridge)
   return bridge
@@ -34,15 +43,16 @@ vi.mock('@/renderer/ui/chat/courseChatObservation', async importOriginal => ({ .
 vi.mock('@/renderer/authoring/generation/generationTaskController', () => ({ GenerationTaskController: class {
   constructor(ports: any) { h.onView = ports.onView; h.controllerPorts = ports; h.controllers.push(ports) }
   get current() { return h.view }
-  async start(request: any, adapter: any, resumeId?: string) {
+  async start(request: any, adapter: any, resumeId?: string, userMessage?: string) {
     h.starts.push(request)
-    h.startCalls.push({ request, adapter, resumeId })
+    h.startCalls.push({ request, adapter, resumeId, userMessage })
     h.view = { busy: false, phase: 'failed', error: 'stale：工程或任务已改变，未应用的修改已丢弃', notice: '', events: [],
       request, sessionId: 'native-session', record: { id: 'native-session', adapter: 'claude', status: 'completed', events: [],
         task: { taskId: 'task-1', epoch: 1, turnId: 'turn-1' } }, ...h.terminal }
+    if (h.view.record && !h.view.record.generationRequest) h.view.record.generationRequest = request
     h.current = false; h.onView(h.view)
   }
-  async input(input: any) { return h.input(input) }
+  async input(input: any, options?: any) { return h.input(input, options) }
   async stop() { await h.stop() }
 } }))
 beforeEach(() => {
@@ -50,6 +60,10 @@ beforeEach(() => {
   h.input.mockResolvedValue({ status: 'accepted' })
   h.stop.mockResolvedValue(undefined)
   h.captureNext.mockResolvedValue(undefined)
+  h.recovery.mockImplementation(async (previous, text, execution) => ({ ...previous, instruction: `${previous.instruction}\n用户明确继续：${text}`, execution, context: { reference: 'page' } }))
+  h.freeze.mockImplementation(() => ({ anchorId: 'send-time-target', locationId: h.store.courseAuthoringSession?.token.locationId ?? 'location',
+    surfaceId: h.store.document?.surfaces[0]?.id ?? 'surface', stateId: null,
+    selectedIds: [...(h.store.courseAuthoringSession?.itemIds ?? [])], sessionToken: { ...h.store.courseAuthoringSession?.token } }))
   h.capture.mockImplementation(async (input: any) => { h.cumulative = input.instruction; return { ...input, requestId: `request-${h.starts.length}`, destinations: [] } })
   window.desktopAPI = { localAgent: vi.fn(async (input: any) => input.operation === 'workspace'
     ? { enabled: true, workspace: { version: 1, projectId: 'chat-unit', normalizedPath: 'c:/chat.h5lesson' } }
@@ -62,7 +76,7 @@ async function send(text: string, count: number) {
   fireEvent.submit(screen.getByLabelText('发送给创作助手').closest('form')!)
   await waitFor(() => expect(h.starts).toHaveLength(count))
 }
-function mount() { render(<CourseChatPanel projectId="chat-unit" projectPath="C:/chat.h5lesson" onClose={() => {}} />) }
+function mount() { return render(<CourseChatPanel projectId="chat-unit" projectPath="C:/chat.h5lesson" onClose={() => {}} />) }
 function deferred<T>() {
   let resolve!: (value: T) => void
   const promise = new Promise<T>(yes => { resolve = yes })
@@ -74,7 +88,197 @@ async function submitPreparation(text: string) {
   await act(async () => { await vi.advanceTimersByTimeAsync(0) })
 }
 
+describe('chat reference defaults and send-time target', () => {
+  function slideFixture() {
+    const document = createBlankCourseProject({ id: 'chat-unit' }), surface = document.surfaces[0]!
+    if (surface.type !== 'slide') throw new Error('Slide required')
+    surface.scenes[0]!.layerItems.push(...['first', 'second'].map((id, index) => sceneNodeToCourseLayerItem(createTextNode({ id, name: `标题${index + 1}` }), index)))
+    h.store = { document, courseAuthoringSession: createCourseAuthoringSession({ locationId: document.startLocationId,
+      surfaceType: 'slide', revision: document.revision, itemIds: ['first'] }) }
+    return document
+  }
+  const scope = () => (screen.getByLabelText('本轮引用') as HTMLSelectElement).value
+
+  it('blocks sending while model selection is saving and sends once after it succeeds', async () => {
+    slideFixture()
+    const saved = deferred<any>(), original = window.desktopAPI!.localAgent
+    const caps = { version: 1, adapter: 'codex', cliVersion: 'fixture', currentSource: 'native-config',
+      models: [{ id: 'astra', label: 'Astra', resolvedModel: 'astra', image: 'supported', effort: { kind: 'supported', values: ['medium', 'xhigh'], default: 'medium' } }],
+      current: { model: 'astra', resolvedModel: 'astra', effort: 'xhigh' },
+      input: { image: 'supported', readFile: 'supported', question: 'structured', correction: 'active-turn', cancel: 'supported' } }
+    window.desktopAPI!.localAgent = vi.fn(async input => input.operation === 'capabilities' ? { enabled: true, capabilities: caps }
+      : input.operation === 'configure' ? saved.promise : original(input)) as any
+    mount()
+    await waitFor(() => expect(screen.getByLabelText('强度')).toHaveValue('xhigh'))
+    expect(screen.getByText('新任务原生默认：astra · xhigh')).toBeTruthy()
+    fireEvent.change(screen.getByLabelText('强度'), { target: { value: 'medium' } })
+    fireEvent.change(screen.getByLabelText('发送给创作助手'), { target: { value: '修改标题' } })
+    expect(screen.getByRole('button', { name: '正在保存配置…' })).toBeDisabled()
+    fireEvent.submit(screen.getByLabelText('发送给创作助手').closest('form')!)
+    expect(h.starts).toHaveLength(0)
+    await act(async () => { saved.resolve({ enabled: true, capabilities: { ...caps,
+      selectedConfiguration: { model: 'astra', effort: 'medium' }, requestedConfiguration: { model: 'astra', effort: 'medium' } } }) })
+    await send('修改标题', 1)
+  })
+
+  it('keeps the selected focus while accepting a page background instruction', async () => {
+    slideFixture(); mount()
+    fireEvent.change(screen.getByLabelText('发送给创作助手'), { target: { value: '帮我在本页插入一个卡通小狗的图片作为背景' } })
+    expect(scope()).toBe('selection')
+    fireEvent.change(screen.getByLabelText('本轮引用'), { target: { value: 'selection' } })
+    expect(screen.queryByText(/指令要求修改本页背景/)).toBeNull()
+    await send('帮我在本页插入一个卡通小狗的图片作为背景', 1)
+    expect(h.capture).toHaveBeenCalledWith(expect.objectContaining({ scope: 'selection' }))
+  })
+
+
+  it('preserves manual scope through selection changes, clearing and revision changes until the user chooses again', () => {
+    const document = slideFixture(), mounted = mount()
+    const rerender = () => mounted.rerender(<CourseChatPanel projectId="chat-unit" projectPath="C:/chat.h5lesson" onClose={() => {}} />)
+    expect(scope()).toBe('selection')
+    expect(screen.getByLabelText('本轮引用摘要')).toHaveTextContent('标题1')
+    fireEvent.change(screen.getByLabelText('本轮引用'), { target: { value: 'course' } })
+    h.store.document = { ...document, revision: 1 }
+    h.store.courseAuthoringSession = { ...h.store.courseAuthoringSession, token: { ...h.store.courseAuthoringSession.token, revision: 1, generation: 9 } }
+    rerender()
+    fireEvent.focus(screen.getByLabelText('发送给创作助手'))
+    fireEvent.change(screen.getByLabelText('发送给创作助手'), { target: { value: '保留我的范围' } })
+    fireEvent.focus(screen.getByLabelText('应用方式'))
+    fireEvent.blur(window)
+    expect(scope()).toBe('course')
+    expect(h.store.courseAuthoringSession.itemIds).toEqual(['first'])
+    h.store.courseAuthoringSession = { ...h.store.courseAuthoringSession, itemIds: ['second'] }; rerender()
+    expect(scope()).toBe('course')
+    fireEvent.change(screen.getByLabelText('本轮引用'), { target: { value: 'page' } })
+    rerender(); expect(scope()).toBe('page')
+    h.store.courseAuthoringSession = { ...h.store.courseAuthoringSession, itemIds: [] }; rerender()
+    expect(scope()).toBe('page')
+    h.store.courseAuthoringSession = { ...h.store.courseAuthoringSession, itemIds: ['first'] }; rerender()
+    expect(scope()).toBe('page')
+  })
+
+  it('can send with an empty reference selection because it does not restrict editing', async () => {
+    const document = slideFixture(), mounted = mount()
+    fireEvent.change(screen.getByLabelText('本轮引用'), { target: { value: 'selection' } })
+    h.store.courseAuthoringSession = { ...h.store.courseAuthoringSession, itemIds: [],
+      token: { ...h.store.courseAuthoringSession.token, generation: 2 } }
+    mounted.rerender(<CourseChatPanel projectId="chat-unit" projectPath="C:/chat.h5lesson" onClose={() => {}} />)
+    expect(scope()).toBe('selection')
+    expect(screen.getByLabelText('本轮引用摘要')).toHaveTextContent('未选择对象')
+    h.capture.mockImplementation(async input => captureGenerationSnapshot({ ...input, document, applyPolicy: 'preview',
+      workspace: { version: 1, projectId: 'chat-unit', normalizedPath: 'c:/chat.h5lesson' },
+      sessionToken: input.target.sessionToken, selectedIds: input.target.selectedIds,
+      projection: projectEffectiveLayers({ project: document, locationId: document.startLocationId }) }))
+    fireEvent.change(screen.getByLabelText('发送给创作助手'), { target: { value: '把所选标题改为红色' } })
+    fireEvent.submit(screen.getByLabelText('发送给创作助手').closest('form')!)
+    await waitFor(() => expect(h.capture).toHaveBeenCalled())
+    await expect(h.capture.mock.results[0]!.value).resolves.toBeDefined()
+    await waitFor(() => expect(h.starts).toHaveLength(1))
+    expect(h.capture).toHaveBeenCalledWith(expect.objectContaining({ scope: 'selection', target: expect.objectContaining({ selectedIds: [] }) }))
+    expect(h.starts).toHaveLength(1)
+    expect(scope()).toBe('selection')
+  })
+
+  it('updates automatic scope when selection clears and resets explicit scope on workspace changes', () => {
+    slideFixture(); const mounted = mount()
+    expect(scope()).toBe('selection')
+    h.store.courseAuthoringSession = { ...h.store.courseAuthoringSession, itemIds: [] }
+    mounted.rerender(<CourseChatPanel projectId="chat-unit" projectPath="C:/chat.h5lesson" onClose={() => {}} />)
+    expect(scope()).toBe('page')
+    fireEvent.change(screen.getByLabelText('本轮引用'), { target: { value: 'selection' } })
+    mounted.rerender(<CourseChatPanel projectId="chat-unit" projectPath="C:/saved-as.h5lesson" onClose={() => {}} />)
+    expect(scope()).toBe('page')
+    h.store.courseAuthoringSession = { ...h.store.courseAuthoringSession, itemIds: ['second'] }
+    mounted.rerender(<CourseChatPanel projectId="chat-unit" projectPath="C:/saved-as.h5lesson" onClose={() => {}} />)
+    expect(scope()).toBe('selection')
+    fireEvent.change(screen.getByLabelText('本轮引用'), { target: { value: 'course' } })
+    mounted.rerender(<CourseChatPanel projectId="another-project" projectPath="C:/saved-as.h5lesson" onClose={() => {}} />)
+    expect(scope()).toBe('selection')
+  })
+
+  it('uses formal Flow body selection while preserving manual scope across text-range changes', async () => {
+    const document = createBlankFlowCourseProject({ id: 'chat-unit' }), surface = document.surfaces[0]!
+    if (surface.type !== 'flow') throw new Error('Flow required')
+    surface.blocks.push({ type: 'paragraph', id: 'paragraph-one', text: '原生讲义正文' })
+    h.store = { document, courseAuthoringSession: createCourseAuthoringSession({ locationId: document.startLocationId,
+      surfaceType: 'flow', revision: document.revision, itemIds: ['paragraph-one'] }),
+      flowSession: { selection: selectFlowEditorBlocks(document, document.startLocationId, ['paragraph-one']) } }
+    const mounted = mount()
+    expect(scope()).toBe('selection')
+    expect(screen.getByLabelText('本轮引用摘要')).toHaveTextContent('原生讲义正文')
+    fireEvent.change(screen.getByLabelText('本轮引用'), { target: { value: 'page' } })
+    h.store.flowSession = { selection: enterFlowTextEditing(document, h.store.flowSession.selection, { blockId: 'paragraph-one', start: 0, end: 2 }) }
+    mounted.rerender(<CourseChatPanel projectId="chat-unit" projectPath="C:/chat.h5lesson" onClose={() => {}} />)
+    expect(scope()).toBe('page')
+    fireEvent.change(screen.getByLabelText('本轮引用'), { target: { value: 'selection' } })
+    expect(scope()).toBe('selection')
+    await send('改写所选正文', 1)
+    expect(h.starts[0]).toMatchObject({ scope: 'selection', purpose: 'local-edit', target: { selectedIds: ['paragraph-one'] } })
+  })
+
+  it('freezes scope and target before preparation waits and keeps their summary while browsing another selection', async () => {
+    const document = slideFixture(), later = createBlankFlowCourseProject()
+    document.surfaces.push(...later.surfaces); document.locations.push(...later.locations)
+    const delayed = deferred<any>(), api = window.desktopAPI!, localAgent = vi.mocked(api.localAgent), nativeOperate = localAgent.getMockImplementation()!
+    localAgent.mockImplementation(input => input.operation === 'workspace' ? delayed.promise : nativeOperate(input))
+    h.terminal = { busy: true, phase: 'running', error: undefined }
+    const mounted = mount()
+    fireEvent.change(screen.getByLabelText('发送给创作助手'), { target: { value: '修改原标题' } })
+    fireEvent.submit(screen.getByLabelText('发送给创作助手').closest('form')!)
+    expect(h.freeze).toHaveBeenCalledTimes(1)
+    h.store.courseAuthoringSession = createCourseAuthoringSession({ locationId: later.startLocationId, surfaceType: 'flow', revision: document.revision, itemIds: [] })
+    mounted.rerender(<CourseChatPanel projectId="chat-unit" projectPath="C:/chat.h5lesson" onClose={() => {}} />)
+    expect(scope()).toBe('selection')
+    expect(screen.getByLabelText('本轮引用摘要')).toHaveTextContent('标题1')
+    expect(h.capture).not.toHaveBeenCalled()
+    await act(async () => { delayed.resolve({ workspace: { version: 1, projectId: 'chat-unit', normalizedPath: 'c:/chat.h5lesson' } }) })
+    await waitFor(() => expect(h.starts).toHaveLength(1))
+    expect(h.starts[0]).toMatchObject({ scope: 'selection', target: { locationId: document.startLocationId, selectedIds: ['first'] } })
+    expect(scope()).toBe('selection')
+    expect(screen.getByLabelText('本轮引用摘要')).toHaveTextContent('标题1')
+    await act(async () => { h.view = { ...h.view, busy: false, phase: 'completed' }; h.onView(h.view) })
+    expect(scope()).toBe('page')
+    expect(screen.getByLabelText('本轮引用摘要')).not.toHaveTextContent('标题1')
+  })
+})
+
 describe('chat observation owner lifecycle', () => {
+  it('refreshes a failed session row from Main cancellation without losing its diagnosis or overwriting a newer task', async () => {
+    vi.useFakeTimers()
+    const running = { id: 'native-session', adapter: 'codex', status: 'running', events: [],
+      task: { taskId: 'task-1', epoch: 1, turnId: 'turn-1', status: 'running' } }
+    const cancelled = { ...running, status: 'cancelled', task: { ...running.task, epoch: running.task.epoch + 1, status: 'cancelled' } }
+    const late = deferred<any>(), reads = vi.fn().mockResolvedValueOnce({ records: [running] })
+      .mockResolvedValueOnce({ records: [cancelled] }).mockImplementationOnce(() => late.promise)
+    const localAgent = vi.mocked(window.desktopAPI!.localAgent), nativeOperate = localAgent.getMockImplementation()!
+    localAgent.mockImplementation(input => input.operation === 'read' ? reads(input) : nativeOperate(input))
+    h.terminal = { busy: true, phase: 'running', error: undefined, record: running }
+    mount(); await submitPreparation('修改原标题')
+    await act(async () => {
+      h.view = { ...h.view, busy: false, phase: 'failed', notice: '本任务未完成，课件未应用本轮候选', error: 'stale：另一页草稿已保留' }
+      h.onView(h.view)
+    })
+    expect(screen.getByRole('button', { name: '停止' })).toBeDisabled()
+    expect(screen.getByRole('option', { name: /codex · 对话 1 · 运行中/ })).toBeTruthy()
+    await act(async () => { await vi.advanceTimersByTimeAsync(500) })
+    expect(screen.getByRole('option', { name: /codex · 对话 1 · 已停止/ })).toBeTruthy()
+    expect(screen.getByText('课件或任务已变化，本次未应用的修改已丢弃。请核对当前内容，再发送要求或明确继续。')).toHaveAttribute('role', 'alert')
+    expect(screen.getByText('本任务未完成，课件未应用本轮候选')).toHaveAttribute('role', 'status')
+    expect(h.view.record.task.status).toBe('running')
+    await act(async () => { h.view = { ...h.view }; h.onView(h.view) })
+    expect(reads).toHaveBeenCalledTimes(3)
+    await act(async () => {
+      h.view = { ...h.view, busy: true, phase: 'running', error: undefined, notice: '新任务运行中',
+        request: { ...h.view.request, requestId: 'new-request' }, record: { ...running, task: { ...running.task, taskId: 'task-2', epoch: 2 } } }
+      h.onView(h.view)
+    })
+    await act(async () => { late.resolve({ records: [cancelled] }); await vi.advanceTimersByTimeAsync(1000) })
+    expect(screen.getByRole('option', { name: /codex · 对话 1 · 运行中/ })).toBeTruthy()
+    expect(screen.queryByRole('option', { name: /已停止/ })).toBeNull()
+    expect(screen.getByText(/^新任务运行中/)).toHaveAttribute('role', 'status')
+    expect(reads).toHaveBeenCalledTimes(3)
+  })
+
   it('sends after StrictMode effect replay without reusing a disposed observation or accepting its late view', async () => {
     render(<StrictMode><CourseChatPanel projectId="chat-unit" projectPath="C:/chat.h5lesson" onClose={() => {}} /></StrictMode>)
     await send('讨论当前标题', 1)
@@ -306,7 +510,7 @@ describe('chat initial preparation budget', () => {
     expect(screen.getByText(/本任务剩余约 20 分钟/)).toBeTruthy()
     expect(screen.getByRole('button', { name: '停止' })).not.toBeDisabled()
     await act(async () => { await vi.advanceTimersByTimeAsync(MAX_GENERATION_TASK_DURATION_MS) })
-    expect(screen.getByText(/20分钟执行期限已到/)).toBeTruthy()
+    expect(screen.getByText(/本次处理超时，尚未完成/)).toBeTruthy()
     expect(screen.getByRole('button', { name: '停止' })).toBeDisabled()
     expect(screen.getByRole('button', { name: '发送' })).not.toBeDisabled()
     expect(h.starts).toHaveLength(startCount)
@@ -328,7 +532,7 @@ describe('chat initial preparation budget', () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(0) })
     expect(h.capture).toHaveBeenLastCalledWith(expect.objectContaining({ execution: { version: 1, startedAt: 1000, deadlineAt: 1000 + MAX_GENERATION_TASK_DURATION_MS } }))
     await act(async () => { await vi.advanceTimersByTimeAsync(100) })
-    expect(screen.getByText(/20分钟执行期限已到/)).toBeTruthy()
+    expect(screen.getByText(/本次处理超时，尚未完成/)).toBeTruthy()
     expect(h.starts).toHaveLength(0)
   })
 
@@ -359,10 +563,106 @@ describe('chat initial preparation budget', () => {
     h.capture.mockImplementationOnce(() => new Promise(() => {}))
     await submitPreparation('以现在的内容继续')
     const refreshed = h.capture.mock.calls.at(-1)![0].execution
+    expect(h.capture.mock.calls.at(-1)![0]).toMatchObject({ scope: 'page', target: { anchorId: 'send-time-target' } })
     expect(refreshed.startedAt).toBe(original.deadlineAt + 1)
     expect(refreshed.deadlineAt).toBe(refreshed.startedAt + MAX_GENERATION_TASK_DURATION_MS)
     expect(screen.getByText(/本任务剩余约 20 分钟/)).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: '停止' }))
     await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+  })
+})
+
+
+describe('readable chat recovery and continuous history', () => {
+  it.each(['为什么停止？', '为什么停止了？', '现在怎么样？'])('keeps a status inquiry read-only without replaying the unresolved editing goal: %s', async text => {
+    mount(); await send('将标题放大', 1); await send(text, 2)
+    expect(h.starts[1].intent).toBe('discuss')
+    expect(h.starts[1].instruction).toBe(text)
+    expect(h.recovery).not.toHaveBeenCalled()
+  })
+  it('restores the frozen goal only on explicit continue and persists the actual user wording', async () => {
+    h.terminal = { phase: 'failed', error: '图片读取失败' }
+    mount(); await send('将小狗图片设为本页背景', 1); await send('继续', 2)
+    expect(h.recovery).toHaveBeenCalledWith(h.starts[0], '继续', expect.objectContaining({ deadlineAt: expect.any(Number) }))
+    expect(h.starts[1].instruction).toContain('将小狗图片设为本页背景')
+    expect(h.startCalls[1].userMessage).toBe('继续')
+  })
+  it('shows tool progress during execution and clears running messages when the task ends', async () => {
+    mount()
+    const tool = { version: 1, adapter: 'claude', sessionId: 'session', kind: 'tool-call', time: 0, sequence: 1, payload: { name: 'Read' } }
+    await act(async () => { h.onView({ busy: true, phase: 'running', notice: '', events: [tool] }) })
+    expect(screen.getByLabelText('任务活动').textContent).toContain('正在读取任务所需内容')
+    await act(async () => { h.onView({ busy: false, phase: 'completed', notice: '', events: [tool] }) })
+    expect(screen.queryByLabelText('任务活动')).toBeNull()
+  })
+  it('merges automatic native runs without losing earlier paragraphs or forcibly scrolling a reader', async () => {
+    const mounted = mount()
+    const scroll = mounted.container.querySelector('.chat-scroll')! as HTMLDivElement
+    Object.defineProperties(scroll, { scrollHeight: { configurable: true, value: 1200 }, clientHeight: { configurable: true, value: 300 } })
+    scroll.scrollTop = 200
+    fireEvent.scroll(scroll)
+    const base = { version: 1, adapter: 'codex', sessionId: 'session', kind: 'text', time: 0 }
+    const one = { ...base, sequence: 1, payload: { text: '先核对背景目标。', messageId: 'run1:one', phase: 'progress' } }
+    const two = { ...base, sequence: 2, payload: { text: '收到失败原因，继续处理。', messageId: 'run2:one', phase: 'progress' } }
+    await act(async () => { h.onView({ busy: true, phase: 'running', notice: '', events: [one] }) })
+    await act(async () => { h.onView({ busy: true, phase: 'running', notice: '', events: [two] }) })
+    expect(screen.getByText('先核对背景目标。')).toBeTruthy()
+    expect(screen.getByText('收到失败原因，继续处理。')).toBeTruthy()
+    expect(scroll.scrollTop).toBe(200)
+    expect(screen.queryByText(/诊断详情|原生事件/)).toBeNull()
+  })
+})
+
+
+describe('native conversation records across user turns', () => {
+  const nativeRecord = (id: string) => ({ id, adapter: 'codex', externalSessionId: 'same-native-thread', workingDirectoryId: 'same-working-directory',
+    status: 'failed', events: [], task: { taskId: 'task-1', epoch: 0, turnId: 'native-turn', status: 'failed' } })
+  const textEvent = (sessionId: string, sequence: number, text: string, user = false) => ({ version: 1, adapter: 'codex', sessionId,
+    time: sessionId === 'edit-local' ? sequence : 10 + sequence, sequence, kind: user ? 'user-message' : 'text', payload: { text, messageId: `run:${sequence}`, phase: 'body' } })
+  it('keeps the original editing goal and all public messages through failure, status inquiry, then explicit continue', async () => {
+    h.terminal = { sessionId: 'edit-local', record: nativeRecord('edit-local'), events: [textEvent('edit-local', 1, '将标题放大', true), textEvent('edit-local', 2, '本阶段未能完成。')] }
+    mount(); await send('将标题放大', 1)
+    const original = h.starts[0]
+    h.terminal = { sessionId: 'status-local', record: nativeRecord('status-local'), phase: 'completed', error: undefined,
+      events: [textEvent('status-local', 1, '为什么停止？', true), textEvent('status-local', 2, '因为图片读取未完成。')] }
+    await send('为什么停止？', 2)
+    expect(h.starts[1].intent).toBe('discuss')
+    expect(screen.getByText('本阶段未能完成。')).toBeTruthy()
+    expect(screen.getByText('因为图片读取未完成。')).toBeTruthy()
+    expect(screen.getAllByRole('region', { name: '用户消息' })).toHaveLength(2)
+    h.terminal = { sessionId: 'continue-local', record: nativeRecord('continue-local'), phase: 'completed', error: undefined }
+    await send('继续', 3)
+    expect(h.recovery).toHaveBeenCalledWith(original, '继续', expect.any(Object))
+    expect(h.starts[2].instruction).toContain('将标题放大')
+    expect(h.starts[2].intent).toBe('edit')
+  })
+  it('records a busy status question without stopping, replacing the goal or discarding a checked preview', async () => {
+    h.terminal = { busy: true, phase: 'awaiting-apply', error: undefined }
+    mount(); await send('添加讲解', 1)
+    fireEvent.change(screen.getByLabelText('发送给创作助手'), { target: { value: '现在怎么样？' } })
+    fireEvent.submit(screen.getByLabelText('发送给创作助手').closest('form')!)
+    await waitFor(() => expect(h.input).toHaveBeenCalledWith(expect.objectContaining({ kind: 'supplement', text: '现在怎么样？' }), { preservePreview: true }))
+    expect(h.stop).not.toHaveBeenCalled()
+    expect(h.remember).not.toHaveBeenCalled()
+    expect(h.starts).toHaveLength(1)
+    expect(screen.getByText(/当前状态：等待应用/)).toBeTruthy()
+  })
+  it('reopens every record in the same native conversation read-only in timestamp order', async () => {
+    const a = { ...nativeRecord('edit-local'), generationRequest: { instruction: '将标题放大', intent: 'edit', execution: { startedAt: 0 } } }
+    const b = { ...nativeRecord('status-local'), generationRequest: { instruction: '为什么停止？', intent: 'discuss', execution: { startedAt: 10 } } }
+    const localAgent = vi.mocked(window.desktopAPI!.localAgent), original = localAgent.getMockImplementation()!
+    localAgent.mockImplementation(async input => input.operation === 'list' ? { enabled: true, records: [b, a] } as any
+      : input.operation === 'read' ? { enabled: true, records: [{ ...(input.sessionId === a.id ? a : b), events: input.sessionId === a.id
+        ? [textEvent(a.id, 1, '将标题放大', true), textEvent(a.id, 2, '正在检查标题。')]
+        : [textEvent(b.id, 1, '为什么停止？', true), textEvent(b.id, 2, '连接暂时中断。')] }] } as any : original(input))
+    const mounted = mount()
+    await waitFor(() => expect(screen.getByLabelText('会话').querySelectorAll('option')).toHaveLength(3))
+    fireEvent.change(screen.getByLabelText('会话'), { target: { value: b.id } })
+    await waitFor(() => expect(screen.getByText('连接暂时中断。')).toBeTruthy())
+    expect([...mounted.container.querySelectorAll('[data-message-id]')].map(node => node.getAttribute('data-message-id'))).toEqual([
+      'edit-local:run:1', 'edit-local:run:2', 'status-local:run:1', 'status-local:run:2',
+    ])
+    expect(h.starts).toHaveLength(0)
+    expect(h.input).not.toHaveBeenCalled()
   })
 })

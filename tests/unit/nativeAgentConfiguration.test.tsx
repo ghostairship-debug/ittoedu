@@ -53,6 +53,16 @@ it('shows directory loading and preserves all native model IDs and order without
   expect(operate.mock.calls[1]?.[0]).toEqual({ operation: 'capabilities', adapter: 'opencode', ...workspace })
 })
 
+it('keeps the saved default choice and task confirmation distinct from the cached native configuration', async () => {
+  const caps = { ...capabilities(), currentSource: 'native-config' as const, selectedConfiguration: { model: 'provider/native-1', effort: null } }
+  install(async () => ({ enabled: true, capabilities: caps }))
+  render(<NativeAgentConfiguration adapter="opencode" configurationSequence={0} taskConfiguration={{ model: 'provider/native-1', resolvedModel: 'actual-model', effort: 'low' }} />)
+  await waitFor(() => expect(screen.getByLabelText('模型')).toHaveValue('provider/native-1'))
+  expect(screen.getByLabelText('强度')).toHaveValue('')
+  expect(screen.getByText('新任务原生默认：provider/native-2 · high')).toBeTruthy()
+  expect(screen.getByText('当前任务原生确认：actual-model · low')).toBeTruthy()
+})
+
 it('distinguishes a native empty directory from a missing directory response', async () => {
   const operate = install(async () => ({ enabled: true, capabilities: capabilities(0) }))
   render(<NativeAgentConfiguration adapter="opencode" configurationSequence={0} />)
@@ -96,11 +106,11 @@ it('keeps failed refresh data visibly stale and disabled until another refresh s
   expect(screen.getByLabelText('模型')).toHaveValue(caps.current.model)
   expect(screen.getByLabelText('模型')).toBeDisabled()
   expect(screen.getByLabelText('强度')).toBeDisabled()
-  expect(screen.getByText('上次确认：provider/native-2 · high')).toBeTruthy()
+  expect(screen.getByText('上次读取：provider/native-2 · high')).toBeTruthy()
   expect(screen.queryByText(/^已生效：/)).toBeNull()
   fireEvent.click(screen.getByRole('button', { name: '刷新模型目录' }))
   await waitFor(() => expect(screen.getByLabelText('模型')).not.toBeDisabled())
-  expect(screen.getByText('已生效：provider/native-2 · high')).toBeTruthy()
+  expect(screen.getByText('最近原生确认：provider/native-2 · high')).toBeTruthy()
 })
 
 it('keeps confirmed model and effort visible beside the next-turn request using the same workspace', async () => {
@@ -113,10 +123,10 @@ it('keeps confirmed model and effort visible beside the next-turn request using 
   await waitFor(() => expect(screen.getByLabelText('模型')).toHaveValue('provider/native-1'))
   expect(operate).toHaveBeenLastCalledWith({ operation: 'configure', adapter: 'opencode', ...workspace,
     configuration: { model: 'provider/native-1', effort: 'low' } })
-  expect(screen.getByText('已生效：provider/native-2 · high')).toBeTruthy()
+  expect(screen.getByText('最近原生确认：provider/native-2 · high')).toBeTruthy()
   expect(screen.getByText(/待应用：provider\/native-1 · low/)).toHaveTextContent('所选配置将在下次发送或继续时应用')
   expect(screen.getByLabelText('强度')).toHaveValue('low')
-  expect(screen.queryByText('已生效：provider/native-1 · low')).toBeNull()
+  expect(screen.queryByText('最近原生确认：provider/native-1 · low')).toBeNull()
 })
 
 it.each([
@@ -172,4 +182,21 @@ it.each(['success', 'failure'] as const)('waits for configuration %s before read
     expect(screen.getByRole('alert')).toHaveTextContent('原生 CLI 拒绝当前配置')
     expect(screen.getByLabelText('模型')).toHaveValue(caps.current.model)
   }
+})
+
+
+it('warns about Fast usage and preserves model and effort when changing native speed tiers', async () => {
+  const caps = capabilities(2, 'codex')
+  caps.models[0]!.serviceTiers = [{ id: 'priority', name: 'Fast', description: 'increased usage' }]
+  caps.current.serviceTier = 'default'
+  const operate = install(async input => ({ enabled: true, capabilities: input.operation === 'configure'
+    ? { ...caps, selectedConfiguration: input.configuration, requestedConfiguration: input.configuration } : caps }))
+  render(<NativeAgentConfiguration adapter="codex" configurationSequence={0} />)
+  await waitFor(() => expect(screen.getByLabelText('速度')).toHaveValue('default'))
+  expect(screen.getByText(/快速模式会增加用量消耗/)).toBeTruthy()
+  fireEvent.change(screen.getByLabelText('速度'), { target: { value: 'priority' } })
+  await waitFor(() => expect(operate).toHaveBeenLastCalledWith({ operation: 'configure', adapter: 'codex', configuration: { model: caps.current.model, effort: 'high', serviceTier: 'priority' } }))
+  await waitFor(() => expect(screen.getByLabelText('速度')).toHaveValue('priority'))
+  fireEvent.change(screen.getByLabelText('速度'), { target: { value: 'default' } })
+  await waitFor(() => expect(operate).toHaveBeenLastCalledWith({ operation: 'configure', adapter: 'codex', configuration: { model: caps.current.model, effort: 'high', serviceTier: 'default' } }))
 })

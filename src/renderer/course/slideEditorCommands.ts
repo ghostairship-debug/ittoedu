@@ -1,3 +1,4 @@
+import { canEditLayerInScope } from '../../shared/teacherControllerRole'
 import { RESOURCE_AWARE_AUTHORING_HISTORY_LIMIT, commitResourceAwareAuthoringHistory, type ResourceAwareAuthoringHistory, type AuthoringHistoryResourceTransition } from '../authoring/resourceAwareAuthoringHistory'
 import type {
   CourseProjectDocument,
@@ -252,15 +253,13 @@ export function transformSelectedSlideNativeLayers(
   const plans = input.nodes.map((transform) => {
     const layer = layerById.get(transform.nodeId)
     if (!layer) throw new SlideCommandError('invalid-selection', '所选元素已失效，请重新选择')
-    if (layer.source !== scope) {
+    if (!canEditLayerInScope(layer, scope)) {
       throw new SlideCommandError(
         SLIDE_REJECT_WRONG_OWNER,
         scope === 'global' ? '当前选择不属于全局层' : '当前选择不属于当前幻灯片场景',
       )
     }
-    if (layer.item.kind === 'native' && layer.item.content.nativeType === 'teacher-controller') {
-      throw new SlideCommandError(SLIDE_REJECT_WRONG_OWNER, '教师控制器不由本命令编辑')
-    }
+
     if (!isSceneFrameTransformableKind(layer.item.kind)) {
       throw new SlideCommandError('invalid-target', '当前选择包含暂不可变换的元素')
     }
@@ -276,14 +275,15 @@ export function transformSelectedSlideNativeLayers(
       layer.item.frame.width !== transform.width ||
       layer.item.frame.height !== transform.height ||
       layer.item.rotation !== transform.rotation
-    return { transform, changed }
+    return { transform, changed, source: layer.source }
   })
   if (!plans.some((plan) => plan.changed)) return history
 
   const next = commitSlideProjectMutation(history.present, (draft) => {
-    if (scope === 'global') {
+    const globalPlans = plans.filter(plan => plan.source === 'global')
+    if (globalPlans.length > 0) {
       const globalById = new Map(draft.globalLayerItems.map((entry) => [entry.item.layerItemId, entry.item]))
-      for (const { transform, changed } of plans) {
+      for (const { transform, changed } of globalPlans) {
         if (!changed) continue
         const item = globalById.get(transform.nodeId)
         if (!item || !isSceneFrameTransformableKind(item.kind)) {
@@ -295,7 +295,7 @@ export function transformSelectedSlideNativeLayers(
         item.frame.height = transform.height
         item.rotation = transform.rotation
       }
-      return
+      if (globalPlans.length === plans.length) return
     }
 
     const location = draft.locations.find((candidate) => candidate.id === selection.locationId)
@@ -316,7 +316,7 @@ export function transformSelectedSlideNativeLayers(
       throw new SlideCommandError('invalid-target', '当前状态已失效')
     }
 
-    for (const { transform, changed } of plans) {
+    for (const { transform, changed } of plans.filter(plan => plan.source !== 'global')) {
       if (!changed) continue
       const base = baseById.get(transform.nodeId)
       if (!base || !isSceneFrameTransformableKind(base.kind)) {

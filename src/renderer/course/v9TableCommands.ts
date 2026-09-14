@@ -299,6 +299,22 @@ interface ResolvedTableTarget {
   commit(nextTable: NativeTableContent): void
 }
 
+/** Content dimensions keep their current display scale when rows/columns change. */
+function resizedTableFrame(
+  frame: Pick<LayerItem['frame'], 'width' | 'height'>,
+  before: NativeTableContent,
+  after: NativeTableContent,
+): Partial<Pick<LayerItem['frame'], 'width' | 'height'>> {
+  const previousWidth = before.columns.reduce((sum, column) => sum + column.width, 0)
+  const nextWidth = after.columns.reduce((sum, column) => sum + column.width, 0)
+  const previousHeight = before.rows.reduce((sum, row) => sum + row.height, 0)
+  const nextHeight = after.rows.reduce((sum, row) => sum + row.height, 0)
+  return {
+    ...(nextWidth !== previousWidth ? { width: frame.width * nextWidth / previousWidth } : {}),
+    ...(nextHeight !== previousHeight ? { height: frame.height * nextHeight / previousHeight } : {}),
+  }
+}
+
 function resolveTableTarget(
   project: CourseProjectDocument,
   session: SlideAuthoringSessionRef,
@@ -339,6 +355,7 @@ function resolveTableTarget(
       table,
       commit(nextTable: NativeTableContent) {
         tableNativeContentObjectSchema.parse(nextTable)
+        Object.assign(nativeScopedItem.frame, resizedTableFrame(nativeScopedItem.frame, table, nextTable))
         nativeScopedItem.content.data = structuredClone(nextTable)
       },
     }
@@ -381,6 +398,7 @@ function resolveTableTarget(
       table,
       commit(nextTable: NativeTableContent) {
         tableNativeContentObjectSchema.parse(nextTable)
+        Object.assign(nativeBaseItem.frame, resizedTableFrame(nativeBaseItem.frame, table, nextTable))
         nativeBaseItem.content.data = structuredClone(nextTable)
       },
     }
@@ -404,6 +422,16 @@ function resolveTableTarget(
         nextTable as unknown as Record<string, unknown>,
       )
       const itemOverride = state.layerItemOverrides[layerItemId] ?? {}
+      const framePatch = resizedTableFrame({ ...nativeBaseItem.frame, ...currentOverride.frame }, currentData, nextTable)
+      for (const axis of ['width', 'height'] as const) {
+        const value = framePatch[axis]
+        if (value === undefined) continue
+        const frameOverride = itemOverride.frame ?? {}
+        if (value === nativeBaseItem.frame[axis]) delete frameOverride[axis]
+        else frameOverride[axis] = value
+        if (Object.keys(frameOverride).length) itemOverride.frame = frameOverride
+        else delete itemOverride.frame
+      }
       if (Object.keys(nextNative).length === 0) {
         delete itemOverride.nativeData
       } else {

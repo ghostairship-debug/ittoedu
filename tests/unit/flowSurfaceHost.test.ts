@@ -1,6 +1,10 @@
+import { queryDeep, dragController } from '../fixtures/teacherController'
+import { publishedControllerPackages } from '../fixtures/teacherController'
+import { controllerPackage } from '../fixtures/teacherController'
+import type { PublishedComponentLayerItem } from '../../src/shared/publishedCourseTypes'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { strFromU8, unzipSync } from 'fflate'
-import type { TeacherControllerAction } from '@/shared/contracts/native-v1'
+import type { TeacherControllerAction } from '@/shared/teacherControllerConfig'
 import type { PublishedCourseV2Payload } from '@/shared/publishedCourseTypes'
 import type { PublishedFlowSurface, PublishedNativeLayerItem } from '@/shared/publishedCourseTypes'
 import {
@@ -105,10 +109,10 @@ function overlayText(): PublishedNativeLayerItem {
   }
 }
 
-function teacherController(): PublishedNativeLayerItem {
+function teacherController(): PublishedComponentLayerItem {
   return {
     layerItemId: 'flow-controller',
-    kind: 'native',
+    kind: 'component',
     frame: { mode: 'absolute', x: 24, y: 640, width: 520, height: 64 },
     order: 20,
     visible: true,
@@ -116,9 +120,7 @@ function teacherController(): PublishedNativeLayerItem {
     opacity: 1,
     hitPolicy: 'auto',
     playbackInitialVisibility: 'inherit',
-    content: {
-      nativeType: 'teacher-controller',
-      data: {
+    role: 'teacher-controller', component: { packageId: controllerPackage.manifest.id, version: controllerPackage.manifest.version }, props: {
         title: '教师控制',
         showSceneProgress: true,
         compact: false,
@@ -138,7 +140,6 @@ function teacherController(): PublishedNativeLayerItem {
         },
         includeInStaticExports: false,
       },
-    },
   }
 }
 
@@ -196,7 +197,7 @@ function publishedCourse(): PublishedCourseV2Payload {
     assets: {
       clip: { mimeType: 'video/mp4', url: 'https://example.test/clip.mp4' },
     },
-    components: {},
+    components: { ...publishedControllerPackages,},
     designTokens: {
       fonts: [{
         id: 'body',
@@ -267,15 +268,15 @@ afterEach(() => {
 describe('FlowSurfaceHost runtime TOC', () => {
   it('starts collapsed against the viewport left edge and does not read author DOM', async () => {
     const { host, container, course } = await mountHost()
-    const toggle = container.querySelector<HTMLButtonElement>('[data-testid="flow-runtime-toc-toggle"]')!
-    const drawer = container.querySelector<HTMLElement>('[data-testid="flow-runtime-toc-drawer"]')!
-    const article = container.querySelector<HTMLElement>('[data-testid="flow-runtime-article"]')!
+    const toggle = queryDeep<HTMLButtonElement>(container, '[data-testid="flow-runtime-toc-toggle"]')!
+    const drawer = queryDeep<HTMLElement>(container, '[data-testid="flow-runtime-toc-drawer"]')!
+    const article = queryDeep<HTMLElement>(container, '[data-testid="flow-runtime-article"]')!
     expect(host.tocOpen).toBe(false)
     expect(toggle.getAttribute('aria-label')).toBe(FLOW_RUNTIME_TOC_CLOSED_ARIA_LABEL)
     expect(toggle.getAttribute('aria-expanded')).toBe('false')
     expect(toggle.style.position).toBe('absolute')
     expect(toggle.style.left).toBe('0px')
-    expect(toggle.querySelector('[data-flow-runtime-toc-chevron="right"]')).not.toBeNull()
+    expect(queryDeep(toggle, '[data-flow-runtime-toc-chevron="right"]')).not.toBeNull()
     expect(drawer.style.position).toBe('absolute')
     expect(drawer.style.transform).toBe('translateX(-100%)')
     expect(article.style.marginLeft).toBe('0px')
@@ -288,23 +289,23 @@ describe('FlowSurfaceHost runtime TOC', () => {
 
   it('opens a left inset drawer, jumps heading anchors, and keeps paragraphs out of TOC', async () => {
     const { host, container } = await mountHost()
-    const toggle = container.querySelector<HTMLButtonElement>('[data-testid="flow-runtime-toc-toggle"]')!
-    const drawer = container.querySelector<HTMLElement>('[data-testid="flow-runtime-toc-drawer"]')!
-    const article = container.querySelector<HTMLElement>('[data-testid="flow-runtime-article"]')!
+    const toggle = queryDeep<HTMLButtonElement>(container, '[data-testid="flow-runtime-toc-toggle"]')!
+    const drawer = queryDeep<HTMLElement>(container, '[data-testid="flow-runtime-toc-drawer"]')!
+    const article = queryDeep<HTMLElement>(container, '[data-testid="flow-runtime-article"]')!
     toggle.click()
     expect(host.tocOpen).toBe(true)
     expect(toggle.getAttribute('aria-label')).toBe(FLOW_RUNTIME_TOC_OPEN_ARIA_LABEL)
     expect(toggle.style.left).toBe(`${FLOW_RUNTIME_TOC_DRAWER_WIDTH_PX}px`)
-    expect(toggle.querySelector('[data-flow-runtime-toc-chevron="left"]')).not.toBeNull()
+    expect(queryDeep(toggle, '[data-flow-runtime-toc-chevron="left"]')).not.toBeNull()
     expect(drawer.style.transform).toBe('translateX(0)')
     expect(article.style.marginLeft).toBe(`${FLOW_RUNTIME_TOC_DRAWER_WIDTH_PX}px`)
 
     const items = [...container.querySelectorAll<HTMLElement>('[data-flow-runtime-toc-item]')]
     expect(items.map((item) => item.dataset.flowTocBlockId).filter(Boolean)).toEqual(['h1', 'h2'])
-    expect(container.querySelector('[data-flow-toc-block-id="p1"]')).toBeNull()
-    expect(container.querySelector(`#${flowRuntimeTocAnchorId('h1')}`)?.tagName).toBe('H1')
+    expect(queryDeep(container, '[data-flow-toc-block-id="p1"]')).toBeNull()
+    expect(queryDeep(container, `#${flowRuntimeTocAnchorId('h1')}`)?.tagName).toBe('H1')
 
-    const heading = container.querySelector<HTMLElement>(`#${flowRuntimeTocAnchorId('h2')}`)!
+    const heading = queryDeep<HTMLElement>(container, `#${flowRuntimeTocAnchorId('h2')}`)!
     heading.scrollIntoView = vi.fn()
     items.find((item) => item.dataset.flowTocBlockId === 'h2')!.click()
     expect(heading.scrollIntoView).toHaveBeenCalled()
@@ -320,16 +321,16 @@ describe('FlowSurfaceHost runtime TOC', () => {
 describe('FlowSurfaceHost course session overlay', () => {
   it('mounts the shared teacher controller on the viewport overlay, not as a document footer', async () => {
     const { host, container } = await mountHost()
-    const article = container.querySelector<HTMLElement>('[data-testid="flow-runtime-article"]')!
-    const overlay = container.querySelector<HTMLElement>('[data-testid="flow-runtime-overlay"]')!
-    const controller = overlay.querySelector<HTMLElement>('[data-testid="flow-runtime-teacher-controller"]')
+    const article = queryDeep<HTMLElement>(container, '[data-testid="flow-runtime-article"]')!
+    const overlay = queryDeep<HTMLElement>(container, '[data-testid="flow-runtime-overlay"]')!
+    const controller = queryDeep<HTMLElement>(overlay, '[data-testid="flow-runtime-teacher-controller"]')
     expect(controller).not.toBeNull()
     expect(article.contains(controller)).toBe(false)
-    expect(article.querySelector('.slide-native-teacher-controller')).toBeNull()
-    expect(overlay.querySelector('.slide-native-teacher-controller')).not.toBeNull()
-    const progress = overlay.querySelector<HTMLElement>('.slide-teacher-controller-progress')
-    expect(progress?.textContent).toContain('运行讲义')
-    expect(progress?.textContent).not.toContain('语义长文覆盖图层')
+    expect(queryDeep(article, 'nav[aria-label="教师控制台"]')).toBeNull()
+    expect(queryDeep(overlay, 'nav[aria-label="教师控制台"]')).not.toBeNull()
+    const progress = queryDeep<HTMLElement>(overlay, '.progress')
+    expect(queryDeep<HTMLElement>(overlay, '.identity strong')?.textContent).toBe('教师控制')
+    expect(queryDeep<HTMLElement>(overlay, '.identity')?.textContent).not.toContain('语义长文覆盖图层')
     expect(host.surface.id).toBe('flow-host')
     await host.destroy()
   })
@@ -375,34 +376,16 @@ describe('FlowSurfaceHost course session overlay', () => {
       visibility: { mode: 'all', locationIds: [] },
     })
     const { host, container } = await mountHost(course)
-    const local = container.querySelector<HTMLElement>(
-      '[data-flow-overlay-item="flow-local-cover"]',
-    )!
-    const controller = container.querySelector<HTMLElement>(
-      '[data-testid="flow-runtime-teacher-controller"]',
-    )!
-    const laterGlobal = container.querySelector<HTMLElement>(
-      '[data-flow-overlay-item="flow-global-after-controller"]',
-    )!
-    const globalUnderlay = container.querySelector<HTMLElement>(
-      '[data-flow-layer-plane="global-underlay"]',
-    )!
-    const surfaceUnderlay = container.querySelector<HTMLElement>(
-      '[data-flow-layer-plane="surface-underlay"]',
-    )!
-    const surfaceOverlay = container.querySelector<HTMLElement>(
-      '[data-flow-layer-plane="surface-overlay"]',
-    )!
-    const globalOverlay = container.querySelector<HTMLElement>(
-      '[data-flow-layer-plane="global-overlay"]',
-    )!
-    const article = container.querySelector<HTMLElement>('[data-testid="flow-runtime-article"]')!
-    const underlayItem = container.querySelector<HTMLElement>(
-      '[data-flow-overlay-item="flow-overlay-video"]',
-    )!
-    const localUnderlay = container.querySelector<HTMLElement>(
-      '[data-flow-overlay-item="flow-local-underlay"]',
-    )!
+    const local = queryDeep<HTMLElement>(container, '[data-flow-overlay-item="flow-local-cover"]')!
+    const controller = queryDeep<HTMLElement>(container, '[data-testid="flow-runtime-teacher-controller"]')!
+    const laterGlobal = queryDeep<HTMLElement>(container, '[data-flow-overlay-item="flow-global-after-controller"]')!
+    const globalUnderlay = queryDeep<HTMLElement>(container, '[data-flow-layer-plane="global-underlay"]')!
+    const surfaceUnderlay = queryDeep<HTMLElement>(container, '[data-flow-layer-plane="surface-underlay"]')!
+    const surfaceOverlay = queryDeep<HTMLElement>(container, '[data-flow-layer-plane="surface-overlay"]')!
+    const globalOverlay = queryDeep<HTMLElement>(container, '[data-flow-layer-plane="global-overlay"]')!
+    const article = queryDeep<HTMLElement>(container, '[data-testid="flow-runtime-article"]')!
+    const underlayItem = queryDeep<HTMLElement>(container, '[data-flow-overlay-item="flow-overlay-video"]')!
+    const localUnderlay = queryDeep<HTMLElement>(container, '[data-flow-overlay-item="flow-local-underlay"]')!
 
     expect([...host.rootElement!.children].slice(0, 5)).toEqual([
       globalUnderlay,
@@ -441,9 +424,7 @@ describe('FlowSurfaceHost course session overlay', () => {
     })
     const { host, container } = await mountHost(course)
     const port = host.getPublishedInteractionSurfacePort()!
-    const text = container.querySelector<HTMLElement>(
-      '[data-flow-overlay-item="flow-overlay-text"]',
-    )!
+    const text = queryDeep<HTMLElement>(container, '[data-flow-overlay-item="flow-overlay-text"]')!
     let clicks = 0
     const unbind = port.bindNodeClick('flow-overlay-text', () => {
       clicks += 1
@@ -456,7 +437,7 @@ describe('FlowSurfaceHost course session overlay', () => {
     invalid.surfaces = []
     await expect(host.updatePublishedCourse(invalid)).rejects.toThrow('课件没有 Flow 页面')
 
-    expect(container.querySelector('[data-flow-overlay-item="flow-overlay-text"]')).toBe(text)
+    expect(queryDeep(container, '[data-flow-overlay-item="flow-overlay-text"]')).toBe(text)
     text.click()
     expect(clicks).toBe(2)
     unbind?.()
@@ -467,7 +448,7 @@ describe('FlowSurfaceHost course session overlay', () => {
 describe('Flow print and DOCX helpers', () => {
   it('keeps document structure and never ships the runtime TOC drawer', async () => {
     const { host, container } = await mountHost()
-    expect(container.querySelector('[data-testid="flow-runtime-toc-drawer"]')).not.toBeNull()
+    expect(queryDeep(container, '[data-testid="flow-runtime-toc-drawer"]')).not.toBeNull()
 
     const plan = buildFlowPrintPlan(host.surface)
     expect(plan.includesRuntimeToc).toBe(false)
@@ -561,12 +542,12 @@ describe('FlowSurfaceHost playback controller and video', () => {
 
   it('writes the teacher-controller session offset back to the overlay frame', async () => {
     const { host, container } = await mountHost()
-    const frame = container.querySelector<HTMLElement>('[data-testid="flow-runtime-teacher-controller"]')!
-    const nav = frame.querySelector<HTMLElement>('.slide-native-teacher-controller')!
+    const frame = queryDeep<HTMLElement>(container, '[data-testid="flow-runtime-teacher-controller"]')!
+    const nav = queryDeep<HTMLElement>(frame, 'nav[aria-label="教师控制台"]')!
     expect(frame.style.left).toBe('24px')
     expect(frame.style.top).toBe('640px')
     nav.focus()
-    nav.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', altKey: true, bubbles: true }))
+    dragController(nav, 8)
     expect(frame.style.left).toBe('32px')
     expect(frame.style.top).toBe('640px')
     await host.destroy()
@@ -574,8 +555,8 @@ describe('FlowSurfaceHost playback controller and video', () => {
 
   it('renders a playable overlay video from the published asset URL', async () => {
     const { host, container } = await mountHost()
-    const wrapper = container.querySelector<HTMLElement>('[data-flow-overlay-item="flow-overlay-video"]')!
-    const video = wrapper.querySelector<HTMLVideoElement>('video')
+    const wrapper = queryDeep<HTMLElement>(container, '[data-flow-overlay-item="flow-overlay-video"]')!
+    const video = queryDeep<HTMLVideoElement>(wrapper, 'video')
     expect(video).not.toBeNull()
     expect(video?.controls).toBe(true)
     expect(video?.getAttribute('src')).toBe('https://example.test/clip.mp4')
@@ -593,8 +574,8 @@ describe('FlowSurfaceHost playback controller and video', () => {
     if (!videoEntry) throw new Error('expected overlay video')
     videoEntry.item.hitPolicy = 'pass-through'
     const { host, container } = await mountHost(course)
-    const wrapper = container.querySelector<HTMLElement>('[data-flow-overlay-item="flow-overlay-video"]')!
-    const video = wrapper.querySelector<HTMLVideoElement>('video')!
+    const wrapper = queryDeep<HTMLElement>(container, '[data-flow-overlay-item="flow-overlay-video"]')!
+    const video = queryDeep<HTMLVideoElement>(wrapper, 'video')!
     expect(wrapper.style.pointerEvents).toBe('none')
     expect(wrapper.inert).toBe(true)
     expect(video.style.pointerEvents).toBe('none')
@@ -606,7 +587,7 @@ describe('FlowSurfaceHost playback controller and video', () => {
     course.media.audio.defaultMuted = true
     const audio = new AudioManager(course, () => undefined, new CourseEventBus())
     const { host, container } = await mountHost(course, { audio })
-    const video = container.querySelector('video')!
+    const video = queryDeep(container, 'video')!
     const pause = vi.spyOn(video, 'pause').mockImplementation(() => {})
     expect(video.muted).toBe(true)
     audio.setMuted(false)
@@ -617,16 +598,16 @@ describe('FlowSurfaceHost playback controller and video', () => {
       expect(pause).toHaveBeenCalledTimes(i + 1)
       await host.resume()
       await host.setLocationId(i === 0 ? 'loc-h2' : 'loc-h1')
-      expect(container.querySelector('video')).toBe(video)
+      expect(queryDeep(container, 'video')).toBe(video)
       expect(video.currentTime).toBe(7)
     }
     audio.setMuted(true)
     expect(video.muted).toBe(true)
     await host.reset('surface', 'loc-h1')
-    expect(container.querySelector('video')).not.toBe(video)
+    expect(queryDeep(container, 'video')).not.toBe(video)
     audio.setMuted(false)
     expect(video.muted).toBe(true) // The retired element is no longer registered.
-    expect(container.querySelector('video')!.muted).toBe(false)
+    expect(queryDeep(container, 'video')!.muted).toBe(false)
     await host.destroy()
     audio.destroy()
     pause.mockRestore()
@@ -638,10 +619,10 @@ describe('FlowSurfaceHost playback controller and video', () => {
     item.rotation = 32
     course.globalLayerItems.push({ item, visibility: { mode: 'all', locationIds: [] } })
     const { host, container } = await mountHost(course)
-    const element = container.querySelector<HTMLElement>('[data-flow-overlay-item="flow-overlay-text"]')!
+    const element = queryDeep<HTMLElement>(container, '[data-flow-overlay-item="flow-overlay-text"]')!
     expect(element.style.transform).toBe('rotate(32deg)')
     await host.setLocationId('loc-h2')
-    expect(container.querySelector('[data-flow-overlay-item="flow-overlay-text"]')).toBe(element)
+    expect(queryDeep(container, '[data-flow-overlay-item="flow-overlay-text"]')).toBe(element)
     expect(element.style.transform).toBe('rotate(32deg)')
     await host.destroy()
   })
@@ -649,7 +630,7 @@ describe('FlowSurfaceHost playback controller and video', () => {
   it('can reveal a retained global video after navigating while it is hidden', async () => {
     const visibility = new PublishedInteractionVisibilityState()
     const { host, container } = await mountHost(publishedCourse(), { globalInteractionVisibilityState: visibility })
-    const wrapper = container.querySelector<HTMLElement>('[data-flow-overlay-item="flow-overlay-video"]')!
+    const wrapper = queryDeep<HTMLElement>(container, '[data-flow-overlay-item="flow-overlay-video"]')!
     visibility.set('flow-overlay-video', false)
     expect(wrapper.style.pointerEvents).toBe('none')
     await host.setLocationId('loc-h2')
@@ -663,9 +644,9 @@ describe('FlowSurfaceHost playback controller and video', () => {
     const course = publishedCourse()
     course.playback.controls = 'none'
     const { host, container } = await mountHost(course)
-    expect(container.querySelector('[data-testid="flow-runtime-teacher-controller"]')).toBeNull()
-    expect(container.querySelector('.slide-native-teacher-controller')).toBeNull()
-    expect(container.querySelector('video')).not.toBeNull()
+    expect(queryDeep(container, '[data-testid="flow-runtime-teacher-controller"]')).toBeNull()
+    expect(queryDeep(container, 'nav[aria-label="教师控制台"]')).toBeNull()
+    expect(queryDeep(container, 'video')).not.toBeNull()
     await host.destroy()
   })
 
@@ -677,7 +658,7 @@ describe('FlowSurfaceHost playback controller and video', () => {
         return true
       },
     })
-    const next = container.querySelector<HTMLButtonElement>('[data-controller-button-id="next"]')!
+    const next = queryDeep<HTMLButtonElement>(container, '[data-controller-button-id="next"]')!
     next.click()
     await vi.waitFor(() => {
       expect(actions).toEqual([{ type: 'scene.next' }])
@@ -695,8 +676,8 @@ describe('FlowSurfaceHost playback controller and video', () => {
     document.body.appendChild(container)
     await session.mount(container)
     expect(session.navigator.current?.locationId).toBe('loc-h1')
-    expect(container.querySelector<HTMLButtonElement>('[data-controller-button-id="next"]')!.disabled).toBe(true)
-    const next = container.querySelector<HTMLButtonElement>('[data-controller-button-id="playback-step-next"]')!
+    expect(queryDeep<HTMLButtonElement>(container, '[data-controller-button-id="next"]')!.disabled).toBe(true)
+    const next = queryDeep<HTMLButtonElement>(container, '[data-controller-button-id="step-next"]')!
     next.click()
     await vi.waitFor(() => {
       expect(session.navigator.current?.locationId).toBe('loc-h2')
@@ -799,39 +780,39 @@ describe('FlowSurfaceHost playback controller and video', () => {
     document.body.appendChild(container)
     const host = new FlowSurfaceHost(course)
     await host.mount(container)
-    expect(container.querySelector('.published-component-mount')).toBeNull()
+    expect(queryDeep(container, '.published-component-mount:not([data-component-package-id="com.ittoedu.teacher-controller"])')).toBeNull()
     host.preparePublishedLocation('loc-h2', false)
     await host.activate()
-    expect(container.querySelector('.published-component-mount')).toBeNull()
+    expect(queryDeep(container, '.published-component-mount:not([data-component-package-id="com.ittoedu.teacher-controller"])')).toBeNull()
     await host.setLocationId('loc-h2')
 
     // Paper block component
-    const blockEl = container.querySelector('[data-flow-block-id="flow-comp-block"]')
+    const blockEl = queryDeep(container, '[data-flow-block-id="flow-comp-block"]')
     expect(blockEl).not.toBeNull()
-    const blockMount = blockEl?.querySelector('.published-component-mount')
+    const blockMount = queryDeep(blockEl, '.published-component-mount')
     expect(blockMount).not.toBeNull()
-    const blockBtn = blockMount?.shadowRoot?.querySelector('.quiz-submit')
+    const blockBtn = queryDeep(blockMount?.shadowRoot, '.quiz-submit')
     expect(blockBtn?.textContent).toBe('互动测验一')
 
     // Overlay component
-    const overlayEl = container.querySelector('[data-flow-overlay-item="overlay-comp-1"]')
+    const overlayEl = queryDeep(container, '[data-flow-overlay-item="overlay-comp-1"]')
     expect(overlayEl).not.toBeNull()
-    const overlayMount = overlayEl?.querySelector('.published-component-mount')
+    const overlayMount = queryDeep(overlayEl, '.published-component-mount')
     expect(overlayMount).not.toBeNull()
-    const overlayBtn = overlayMount?.shadowRoot?.querySelector('.quiz-submit')
+    const overlayBtn = queryDeep(overlayMount?.shadowRoot, '.quiz-submit')
     expect(overlayBtn?.textContent).toBe('浮层测验')
 
     ;(blockBtn as HTMLButtonElement).click()
     ;(overlayBtn as HTMLButtonElement).click()
     await host.setLocationId('loc-h1')
     await host.setLocationId('loc-h2')
-    expect(container.querySelector('[data-flow-block-id="flow-comp-block"]')).toBe(blockEl)
-    expect(container.querySelector('[data-flow-overlay-item="overlay-comp-1"]')).toBe(overlayEl)
+    expect(queryDeep(container, '[data-flow-block-id="flow-comp-block"]')).toBe(blockEl)
+    expect(queryDeep(container, '[data-flow-overlay-item="overlay-comp-1"]')).toBe(overlayEl)
     expect(blockBtn?.textContent).toBe('1')
     expect(overlayBtn?.textContent).toBe('1')
     await host.reset('surface', 'loc-h1')
-    expect(container.querySelector('[data-flow-block-id="flow-comp-block"]')).not.toBe(blockEl)
-    expect(container.querySelector('[data-flow-overlay-item="overlay-comp-1"]')).not.toBe(overlayEl)
+    expect(queryDeep(container, '[data-flow-block-id="flow-comp-block"]')).not.toBe(blockEl)
+    expect(queryDeep(container, '[data-flow-overlay-item="overlay-comp-1"]')).not.toBe(overlayEl)
 
     await host.destroy()
   })
@@ -852,9 +833,9 @@ describe('FlowSurfaceHost playback controller and video', () => {
     })
 
     const { host, container } = await mountHost(course)
-    const blockEl = container.querySelector('[data-flow-block-id="missing-comp-block"]')
+    const blockEl = queryDeep(container, '[data-flow-block-id="missing-comp-block"]')
     expect(blockEl).not.toBeNull()
-    const img = blockEl?.querySelector('img')
+    const img = queryDeep(blockEl, 'img')
     expect(img).not.toBeNull()
     expect(img?.getAttribute('src')).toBe('https://example.test/missing-fallback.png')
     await host.destroy()
@@ -862,6 +843,22 @@ describe('FlowSurfaceHost playback controller and video', () => {
 })
 
 describe('FlowSurfaceHost paper scroll and media layout', () => {
+  it('keeps images and videos out of text baseline line boxes', async () => {
+    const course = publishedCourse()
+    const surface = course.surfaces[0] as PublishedFlowSurface
+    surface.blocks = ['image', 'video'].map((mediaKind) => ({
+      id: `baseline-${mediaKind}`, type: 'media', assetId: 'clip',
+      mediaKind: mediaKind as 'image' | 'video', layout: 'content-width',
+    }))
+    const { host, container } = await mountHost(course)
+    for (const mediaKind of ['image', 'video']) {
+      const media = queryDeep(container, `[data-flow-block-id="baseline-${mediaKind}"] > ${mediaKind === 'image' ? 'img' : 'video'}`)!
+      expect(media).not.toBeNull()
+      expect(getComputedStyle(media).display).toBe('block')
+    }
+    await host.destroy()
+  })
+
   it('supports wheel scrolling on long papers with pointerEvents auto and overflow auto', async () => {
     const course = publishedCourse()
     const surf = course.surfaces[0] as PublishedFlowSurface
@@ -875,7 +872,7 @@ describe('FlowSurfaceHost paper scroll and media layout', () => {
     ]
 
     const { host, container } = await mountHost(course)
-    const article = container.querySelector<HTMLElement>('[data-testid="flow-runtime-article"]')!
+    const article = queryDeep<HTMLElement>(container, '[data-testid="flow-runtime-article"]')!
     expect(article).not.toBeNull()
     expect(article.dataset.flowPaperScroll).toBe('true')
     expect(article.style.pointerEvents).toBe('auto')
@@ -913,10 +910,10 @@ describe('FlowSurfaceHost paper scroll and media layout', () => {
     expect(planes).toHaveLength(4)
     expect(planes.every((plane) => plane.style.pointerEvents === 'none')).toBe(true)
 
-    const frame = container.querySelector<HTMLElement>('[data-testid="flow-runtime-teacher-controller"]')!
-    expect(frame.style.pointerEvents).toBe('auto')
+    const frame = queryDeep<HTMLElement>(container, '[data-testid="flow-runtime-teacher-controller"]')!
+    expect(frame.style.pointerEvents).toBe('none')
 
-    const next = container.querySelector<HTMLButtonElement>('[data-controller-button-id="next"]')!
+    const next = queryDeep<HTMLButtonElement>(container, '[data-controller-button-id="next"]')!
     next.click()
     await vi.waitFor(() => {
       expect(actions).toEqual([{ type: 'scene.next' }])
@@ -955,7 +952,7 @@ describe('FlowSurfaceHost paper scroll and media layout', () => {
     })
 
     const { host, container } = await mountHost(course)
-    const article = container.querySelector<HTMLElement>('[data-testid="flow-runtime-article"]')!
+    const article = queryDeep<HTMLElement>(container, '[data-testid="flow-runtime-article"]')!
     expect(article.style.containerType).toBe('inline-size')
     expect(article.dataset.flowMediaQueryRoot).toBe('true')
 
@@ -980,7 +977,7 @@ describe('FlowSurfaceHost paper scroll and media layout', () => {
     ] as const
     for (const [blockId, layout] of cases) {
       const projection = resolveFlowMediaLayoutProjection(layout, surf.layout)
-      const media = container.querySelector<HTMLElement>(`[data-flow-block-id="${blockId}"]`)!
+      const media = queryDeep<HTMLElement>(container, `[data-flow-block-id="${blockId}"]`)!
       expect(media.classList.contains(projection.className)).toBe(true)
       expect(media.dataset.flowMediaWidthTier).toBe(projection.tier)
       expect(media.style.getPropertyValue(FLOW_MEDIA_INLINE_SIZE_CUSTOM_PROPERTY)).toBe(projection.inlineSize)
@@ -993,12 +990,12 @@ describe('FlowSurfaceHost paper scroll and media layout', () => {
       expect(media.style.transform).toBe('translateX(-50%)')
     }
 
-    const figure = container.querySelector<HTMLElement>('[data-flow-block-id="media-wide"]')!
+    const figure = queryDeep<HTMLElement>(container, '[data-flow-block-id="media-wide"]')!
     expect(figure).not.toBeNull()
     expect(figure.dataset.flowMediaLayout).toBe('wide')
     expect(figure.style.maxWidth).toBe(FLOW_MEDIA_INLINE_SIZE_REFERENCE)
 
-    const video = figure.querySelector('video')
+    const video = queryDeep(figure, 'video')
     expect(video).not.toBeNull()
     expect(video?.style.maxWidth).toBe('100%')
 
@@ -1018,10 +1015,10 @@ describe('FlowSurfaceHost paper scroll and media layout', () => {
     }]
 
     const { host, container } = await mountHost(course)
-    const paragraph = container.querySelector<HTMLElement>('[data-flow-block-id="p-typed"]')!
+    const paragraph = queryDeep<HTMLElement>(container, '[data-flow-block-id="p-typed"]')!
     expect(paragraph.style.textAlign).toBe('center')
     expect(paragraph.style.lineHeight).toBe('2.1')
-    const span = paragraph.querySelector<HTMLElement>('span[style]')
+    const span = queryDeep<HTMLElement>(paragraph, 'span[style]')
     expect(span?.style.fontFamily).toBe('serif')
     expect(span?.style.fontSize).toBe('20px')
     await host.destroy()
@@ -1044,7 +1041,7 @@ describe('FlowSurfaceHost paper scroll and media layout', () => {
     const spans = Array.from(
       container.querySelectorAll<HTMLElement>('[data-flow-block-id="p-font-segments"] span[style]'),
     )
-    expect(container.querySelector('[data-flow-block-id="p-font-segments"]')?.textContent).toBe('甲乙丙')
+    expect(queryDeep(container, '[data-flow-block-id="p-font-segments"]')?.textContent).toBe('甲乙丙')
     expect(spans.map((span) => span.textContent)).toEqual(['乙', '丙'])
     expect(spans[0]?.style.fontFamily).toBe('SimSun')
     expect(spans[1]?.style.fontSize).toBe('32px')
@@ -1092,7 +1089,7 @@ describe('FlowSurfaceHost paper scroll and media layout', () => {
     })
 
     const { host, container } = await mountHost(course)
-    const figLeft = container.querySelector<HTMLElement>('[data-flow-block-id="media-wrap-left"]')!
+    const figLeft = queryDeep<HTMLElement>(container, '[data-flow-block-id="media-wrap-left"]')!
     expect(figLeft).not.toBeNull()
     expect(figLeft.style.float).toBe('left')
     expect(figLeft.style.width).toBe('48%')
@@ -1102,12 +1099,12 @@ describe('FlowSurfaceHost paper scroll and media layout', () => {
     expect(figLeft.style.transform).toBe('')
     expect(figLeft.style.margin).toBe('0px 16px 8px 0px')
 
-    const pAfter = container.querySelector<HTMLElement>('[data-flow-block-id="p-after-left"]')!
+    const pAfter = queryDeep<HTMLElement>(container, '[data-flow-block-id="p-after-left"]')!
     expect(pAfter).not.toBeNull()
     expect(figLeft.parentElement).toBe(pAfter.parentElement)
     expect(figLeft.nextElementSibling).toBe(pAfter)
 
-    const figRight = container.querySelector<HTMLElement>('[data-flow-block-id="media-wrap-right"]')!
+    const figRight = queryDeep<HTMLElement>(container, '[data-flow-block-id="media-wrap-right"]')!
     expect(figRight).not.toBeNull()
     expect(figRight.style.float).toBe('right')
     expect(figRight.style.width).toBe('48%')
@@ -1117,7 +1114,7 @@ describe('FlowSurfaceHost paper scroll and media layout', () => {
     expect(figRight.style.transform).toBe('')
     expect(figRight.style.margin).toBe('0px 0px 8px 16px')
 
-    const figNone = container.querySelector<HTMLElement>('[data-flow-block-id="media-wrap-none"]')!
+    const figNone = queryDeep<HTMLElement>(container, '[data-flow-block-id="media-wrap-none"]')!
     expect(figNone).not.toBeNull()
     expect(figNone.style.float).toBe('none')
     expect(figNone.style.width).toBe(FLOW_MEDIA_INLINE_SIZE_REFERENCE)
@@ -1125,7 +1122,7 @@ describe('FlowSurfaceHost paper scroll and media layout', () => {
     expect(figNone.style.insetInlineStart).toBe('')
     expect(figNone.style.transform).toBe('translateX(-50%)')
 
-    const compLeft = container.querySelector<HTMLElement>('[data-flow-block-id="comp-wrap-left"]')!
+    const compLeft = queryDeep<HTMLElement>(container, '[data-flow-block-id="comp-wrap-left"]')!
     expect(compLeft).not.toBeNull()
     expect(compLeft.style.float).toBe('left')
     expect(compLeft.style.width).toBe('48%')
@@ -1174,17 +1171,18 @@ describe('FlowSurfaceHost paper scroll and media layout', () => {
     })
 
     const { host, container } = await mountHost(course)
-    const article = container.querySelector<HTMLElement>('[data-testid="flow-runtime-article"]')!
-    const paperOverlay = container.querySelector<HTMLElement>('[data-flow-overlay-item="overlay-paper-item"]')!
-    const globalPaperOverlay = container.querySelector<HTMLElement>(
-      '[data-flow-overlay-item="flow-overlay-video"]',
-    )!
-    const viewportOverlay = container.querySelector<HTMLElement>('[data-flow-overlay-item="overlay-viewport-item"]')!
-    const controller = container.querySelector<HTMLElement>('[data-testid="flow-runtime-teacher-controller"]')!
+    const article = queryDeep<HTMLElement>(container, '[data-testid="flow-runtime-article"]')!
+    const paperOverlay = queryDeep<HTMLElement>(container, '[data-flow-overlay-item="overlay-paper-item"]')!
+    const globalPaperOverlay = queryDeep<HTMLElement>(container, '[data-flow-overlay-item="flow-overlay-video"]')!
+    const viewportOverlay = queryDeep<HTMLElement>(container, '[data-flow-overlay-item="overlay-viewport-item"]')!
+    const controller = queryDeep<HTMLElement>(container, '[data-testid="flow-runtime-teacher-controller"]')!
 
     expect(paperOverlay).not.toBeNull()
     expect(paperOverlay.dataset.flowPaperSpace).toBe('paper')
     expect(globalPaperOverlay.dataset.flowPaperSpace).toBe('paper')
+    expect(paperOverlay.hasAttribute('data-playback-bounds')).toBe(false)
+    expect(globalPaperOverlay.hasAttribute('data-playback-bounds')).toBe(false)
+    expect(viewportOverlay).toHaveAttribute('data-playback-bounds', 'true')
     expect(globalPaperOverlay.parentElement).toHaveAttribute(
       'data-flow-layer-plane',
       'global-underlay',
@@ -1197,8 +1195,8 @@ describe('FlowSurfaceHost paper scroll and media layout', () => {
     expect(controller.style.top).toBe('640px')
 
     // jsdom has no layout: model the measured paper origin, including TOC and scroll.
-    const root = container.querySelector<HTMLElement>('.flow-surface-host')!
-    const reading = article.querySelector<HTMLElement>('.flow-runtime-reading')!
+    const root = queryDeep<HTMLElement>(container, '.flow-surface-host')!
+    const reading = queryDeep<HTMLElement>(article, '.flow-runtime-reading')!
     root.getBoundingClientRect = () => new DOMRect(0, 0, 1280, 720)
     reading.getBoundingClientRect = () => new DOMRect(
       Number.parseFloat(article.style.marginLeft) || 0, -article.scrollTop, 800, 4000,

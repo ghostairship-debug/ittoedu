@@ -1,3 +1,4 @@
+import { isControllerFixture } from '../fixtures/teacherController'
 import {
   existsSync,
   mkdtempSync,
@@ -42,9 +43,7 @@ interface LaunchedEditor extends Diagnostics {
 
 type ControllerKind = 'slide' | 'flow' | 'spatial'
 
-type TeacherControllerItem = NativeLayerItem & {
-  content: Extract<NativeLayerItem['content'], { nativeType: 'teacher-controller' }>
-}
+type TeacherControllerItem = import('../fixtures/teacherController').ControllerFixture
 
 function removeRunRoot(runRoot: string): void {
   const absolute = resolve(runRoot)
@@ -246,10 +245,9 @@ async function selectLayer(page: Page, layerItemId: string): Promise<void> {
 
 function teacherController(project: CourseProjectDocument): TeacherControllerItem {
   const item = project.globalLayerItems.find((entry) => (
-    entry.item.kind === 'native'
-    && entry.item.content.nativeType === 'teacher-controller'
+    isControllerFixture(entry.item)
   ))?.item
-  if (!item || item.kind !== 'native' || item.content.nativeType !== 'teacher-controller') {
+  if (!item || !isControllerFixture(item)) {
     throw new Error('Saved project is missing its global teacher controller')
   }
   return item as TeacherControllerItem
@@ -726,7 +724,7 @@ test('Wave B ownership and controller contracts survive one real Mixed session',
         name: '重做（Ctrl+Y / Ctrl+Shift+Z）',
       }).isEnabled()
 
-      await page.getByRole('button', { name: '全屏 16:9 整课预览' }).click()
+      await page.getByRole('button', { name: '整课预览' }).click()
       const preview = page.getByTestId('course-preview-overlay')
       const host = page.getByTestId('course-preview-host')
       await expect(preview).toContainText('Published Course V2 · CoursePlayer · 1280 × 720')

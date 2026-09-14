@@ -2,6 +2,7 @@ import {
   composeCourseProjectLocation,
   type CourseLayerComposition,
 } from '../../shared/courseLayerComposition'
+import { isTeacherController } from '../../shared/teacherControllerRole'
 import type {
   CourseProjectDocument,
   CourseSurfaceType,
@@ -182,16 +183,8 @@ export function layerContentSummary(item: LayerItem): EffectiveLayerContentSumma
   }
 }
 
-export function isTeacherControllerLayerItem(
-  item: LayerItem | undefined,
-): item is NativeLayerItem & {
-  content: Extract<NativeLayerItem['content'], { nativeType: 'teacher-controller' }>
-} {
-  return Boolean(
-    item &&
-    item.kind === 'native' &&
-    item.content.nativeType === 'teacher-controller',
-  )
+export function isTeacherControllerLayerItem(item: LayerItem | undefined): item is Extract<LayerItem, { kind: 'component' }> & { role: 'teacher-controller' } {
+  return isTeacherController(item)
 }
 
 export function visualFrontToBackRows(
@@ -541,7 +534,7 @@ function toRow(input: {
     }),
     scopeToken,
     kind: item.kind,
-    isTeacherController: isTeacherControllerLayerItem(item),
+    isTeacherController: isTeacherController(item),
     locked: item.locked,
     hidden: !item.visible,
     visibleAtLocation,

@@ -33,6 +33,14 @@ export function SafeChatMessage({ text }: { text: string }) {
       const start = i; let formula = line.slice(2)
       while (!formula.endsWith('$$') && ++i < lines.length) formula += `\n${lines[i]}`
       nodes.push(<Formula key={start} id={`chat-formula-${start}`} text={formula.endsWith('$$') ? formula.slice(0, -2) : formula} />)
+    } else if (line.includes('|') && /^\s*\|?\s*:?-{3,}/.test(lines[i + 1] ?? '')) {
+      const start = i
+      const cells = (row: string) => row.trim().replace(/^\||\|$/g, '').split('|').map(value => value.trim())
+      const headings = cells(line), rows: string[][] = []
+      i += 2
+      while (i < lines.length && lines[i].includes('|') && lines[i].trim()) rows.push(cells(lines[i++]))
+      i--
+      nodes.push(<table key={start}><thead><tr>{headings.map((cell, index) => <th key={index}>{inline(cell)}</th>)}</tr></thead><tbody>{rows.map((row, index) => <tr key={index}>{row.map((cell, column) => <td key={column}>{inline(cell)}</td>)}</tr>)}</tbody></table>)
     } else if (/^#{1,6} /.test(line)) nodes.push(<h4 key={i}>{inline(line.replace(/^#+ /, ''))}</h4>)
     else if (/^([-*]|\d+\.) /.test(line)) {
       const start = i; const items: ReactNode[] = []; const ordered = /^\d/.test(line)

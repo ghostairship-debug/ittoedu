@@ -50,6 +50,7 @@ class TimingAdapter implements LocalAgentCliAdapterV2 {
   gate = deferred()
   blocked?: 'open' | 'start' | 'events'
   failOpen = false
+  publicUpdates = 128
   turns: Parameters<LocalAgentCliAdapterV2['startTurn']>[0][] = []
   constructor(private readonly generation?: GenerationRequest) {}
   async open() {
@@ -74,7 +75,7 @@ class TimingAdapter implements LocalAgentCliAdapterV2 {
     const turn = this.turns.at(-1)!
     const identity = { taskId: turn.taskId, epoch: turn.epoch, workspace: turn.workspace, runId: turn.runId, nativeTurnId: turn.runId }
     yield { ...identity, kind: 'configuration', capabilities }
-    for (let index = 0; index < 128; index++) yield { ...identity, kind: 'text', itemId: 'progress', phase: 'public-summary', operation: 'append', text: '.' }
+    for (let index = 0; index < this.publicUpdates; index++) yield { ...identity, kind: 'text', itemId: 'progress', phase: 'public-summary', operation: 'append', text: '.' }
     const text = this.generation ? `${GENERATION_OPEN}${JSON.stringify({ version: 1, requestId: this.generation.requestId,
       candidateId: randomUUID(), summary: '修改标题', steps: [{ id: 'title', tool: 'native.content', carrier: 'native',
         destination: this.generation.destinations[0], input: {} }] })}${GENERATION_CLOSE}` : 'done'
@@ -85,6 +86,21 @@ class TimingAdapter implements LocalAgentCliAdapterV2 {
 }
 
 describe('bounded native task timing', () => {
+  it('does not count hidden body candidate envelopes as a first visible reply', async () => {
+    const { workspace, repository } = await fixture()
+    const harness = new LocalAgentHarness(repository, (_id, generation) => {
+      const adapter = new TimingAdapter(generation); adapter.publicUpdates = 0; return adapter
+    })
+    try {
+      const id = await harness.generate(workspace, 'claude', request(workspace))
+      await expect.poll(() => harness.running).toBe(false)
+      expect((await harness.candidate(workspace, id)).kind).toBe('candidate')
+      const timing = summarizeAiTaskTiming((await repository.list(workspace)).v2[0]!.tasks[0]!)[0]!
+      expect(timing.marks.candidateParsed).toBeTypeOf('number')
+      expect(timing.marks.firstVisibleText).toBeUndefined()
+      expect(timing.durationsMs.acceptedToFirstVisibleText).toBeNull()
+    } finally { await harness.close() }
+  })
   it('persists distinct candidate, preview and actual commit boundaries without per-token writes', async () => {
     const { workspace, repository, directory } = await fixture()
     const writes = vi.spyOn(repository, 'write')
@@ -111,11 +127,13 @@ describe('bounded native task timing', () => {
       const saved = (await new LocalAgentRepository(directory).list(workspace)).v2[0]!
       const entries = saved.tasks[0]!.execution!.timing!.entries
       expect(entries.map(entry => entry.stage)).toEqual(['requestPrepared', 'nativeOpenStarted', 'nativeOpened', 'turnDispatchStarted',
-        'turnAccepted', 'firstNativeEvent', 'candidateParsed', 'hostResultRecorded', 'hostCommitRecorded'])
+        'turnAccepted', 'firstNativeEvent', 'firstVisibleText', 'candidateParsed', 'resourcePreparationStarted', 'resourcePrepared', 'hostResultRecorded', 'hostCommitRecorded'])
       expect(entries.map(entry => entry.at)).toEqual(entries.map(entry => entry.at).sort((a, b) => a - b))
-      expect(entries.find(entry => entry.stage === 'candidateParsed')).toEqual(before.execution!.timing!.entries.at(-1))
+      expect(entries.find(entry => entry.stage === 'candidateParsed')).toEqual(before.execution!.timing!.entries.find(entry => entry.stage === 'candidateParsed'))
       expect(entries.find(entry => entry.stage === 'hostResultRecorded')).toEqual(preview.execution!.timing!.entries.at(-1))
-      expect(Object.values(summarizeAiTaskTiming(saved.tasks[0]!)[0]!.durationsMs).every(value => value !== null && value >= 0)).toBe(true)
+      const { preparedToTaskEnded, ...confirmedDurations } = summarizeAiTaskTiming(saved.tasks[0]!)[0]!.durationsMs
+      expect(preparedToTaskEnded).toBeNull() // This candidate requested another observation, not task completion.
+      expect(Object.values(confirmedDurations).every(value => value !== null && value >= 0)).toBe(true)
       expect(writes.mock.calls.length).toBeLessThan(20)
     } finally { await harness.close() }
   })

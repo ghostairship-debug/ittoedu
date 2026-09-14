@@ -1,9 +1,11 @@
+import { buildPublishedFixture as buildPublishedCourseV2Payload } from '../fixtures/teacherController'
+import { isControllerFixture } from '../fixtures/teacherController'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('phaser', () => ({}))
 import { createPublishedCourseSession, type PublishedCourseSession } from '@/player/surfaces/publishedDynamicHosts'
 import { PublishedGlobalCanvasRuntimeOwner } from '@/player/surfaces/runtime/publishedGlobalCanvasRuntimeOwner'
-import { buildPublishedCourseV2Payload } from '@/renderer/export/course/buildPublishedCourse'
+
 import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
 import { composePublishedCourseLocation } from '@/shared/courseLayerComposition'
 import type { CourseProjectDocument, RuntimeLayerItem } from '@/shared/courseProjectTypes'
@@ -203,17 +205,15 @@ function mixedGlobalRuntimeProject(): {
   }
   const project = structuredClone(fixture.project)
   const controller = project.globalLayerItems.find((entry) => (
-    entry.item.kind === 'native'
-    && entry.item.content.nativeType === 'teacher-controller'
+    isControllerFixture(entry.item)
   ))
   if (
     !controller
-    || controller.item.kind !== 'native'
-    || controller.item.content.nativeType !== 'teacher-controller'
+    || !isControllerFixture(controller.item)
   ) throw new Error('expected global teacher controller')
-  controller.item.content.data.defaultCollapsed = false
+  controller.item.props.defaultCollapsed = false
   controller.item.order = 10_000
-  const restartButton = controller.item.content.data.buttons.find(
+  const restartButton = controller.item.props.buttons.find(
     (button) => button.action.type === 'course.restart',
   )
   if (!restartButton) throw new Error('expected course.restart controller button')

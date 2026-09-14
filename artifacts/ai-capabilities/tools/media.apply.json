@@ -1,0 +1,161 @@
+{
+  "candidateCarrier": {
+    "default": "native"
+  },
+  "description": "将真实图片应用到目标：已有图片保留实例身份和未指定显示属性；形状转换为图片并保留位置、层级与可映射引用；create目标插入图片。placement:background只用于正式背景目标。source使用本轮图片文件或已有图片资产。fit省略时保留已有显示方式，新图默认contain；Flow正文与背景只接受contain。preserveResolution:true保留文字图或大图原始清晰度。宿主完成图片准备、素材导入和一次可撤销提交，无需拼装工程步骤。",
+  "examples": [
+    {
+      "input": {
+        "fit": "contain",
+        "kind": "image",
+        "source": {
+          "$candidateFile": "resources/dog.png"
+        }
+      }
+    }
+  ],
+  "inputSchema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": false,
+    "properties": {
+      "fit": {
+        "enum": [
+          "contain",
+          "cover",
+          "stretch"
+        ],
+        "type": "string"
+      },
+      "kind": {
+        "const": "image",
+        "type": "string"
+      },
+      "placement": {
+        "enum": [
+          "content",
+          "background"
+        ],
+        "type": "string"
+      },
+      "preserveResolution": {
+        "type": "boolean"
+      },
+      "source": {
+        "anyOf": [
+          {
+            "additionalProperties": false,
+            "properties": {
+              "$candidateFile": {
+                "maxLength": 1000,
+                "minLength": 1,
+                "type": "string"
+              }
+            },
+            "required": [
+              "$candidateFile"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "$asset": {
+                "pattern": "^a[1-9][0-9]*$",
+                "type": "string"
+              }
+            },
+            "required": [
+              "$asset"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "assetId": {
+                "anyOf": [
+                  {
+                    "maxLength": 200,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "$result": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "index": {
+                            "default": 0,
+                            "maximum": 9007199254740991,
+                            "minimum": 0,
+                            "type": "integer"
+                          },
+                          "kind": {
+                            "const": "asset-id",
+                            "type": "string"
+                          },
+                          "stepId": {
+                            "maxLength": 200,
+                            "minLength": 1,
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "stepId",
+                          "kind",
+                          "index"
+                        ],
+                        "type": "object"
+                      }
+                    },
+                    "required": [
+                      "$result"
+                    ],
+                    "type": "object"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "assetId"
+            ],
+            "type": "object"
+          }
+        ]
+      }
+    },
+    "required": [
+      "kind",
+      "source"
+    ],
+    "type": "object"
+  },
+  "invocation": {
+    "channel": "generation-candidate",
+    "destination": "current request destination alias",
+    "instruction": "作为当前候选的一步返回；由宿主展开和提交，不直接调用 session.execute。"
+  },
+  "name": "media.apply",
+  "scopes": [
+    "slide:scene",
+    "slide:surface",
+    "slide:global",
+    "flow:surface",
+    "flow:global",
+    "spatial-2d:world",
+    "spatial-2d:surface",
+    "spatial-2d:global"
+  ],
+  "supportedScopes": [
+    "slide:scene",
+    "slide:surface",
+    "slide:global",
+    "flow:surface",
+    "flow:global",
+    "spatial-2d:world",
+    "spatial-2d:surface",
+    "spatial-2d:global"
+  ],
+  "version": 1
+}

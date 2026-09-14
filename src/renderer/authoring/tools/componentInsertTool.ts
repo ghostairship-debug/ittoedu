@@ -21,6 +21,8 @@ const schema = z.discriminatedUnion('operation', [
 ])
 export const componentInsertTool: AuthoringToolDefinition<z.infer<typeof schema>> = {
   name: 'component.insert', inputSchema: schema, usesResources: true,
+  conditions: [{ destination: 'create', parents: ['owner', 'flow-body'], requiredForParent: { parent: 'flow-body', field: 'staticFallbackAssetId' }, message: '组件插入使用 create；Flow 正文必须提供当前工程或前序导入的真实图片 staticFallbackAssetId。' }],
+  description: '插入已有、目录或候选组件。Flow正文使用create parent:flow-body，并且必须提供当前工程真实图片assetId作为staticFallbackAssetId；该字段在Slide等其他载体可省略，不能将输入Schema的optional理解为Flow可省略。优先复用已有组件包与可用后备素材，正文组件自然占位并随内容宽度排版。',
   async plan({ document, destination, value, resources, signal }) {
     const { target, surface, location, scope } = resolveAuthoringToolScope(document, destination)
     if (!resources) throw new Error('组件工具缺少当前工程资源')

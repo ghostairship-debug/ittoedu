@@ -1,5 +1,7 @@
 import { nanoid } from 'nanoid'
-import { sceneNodeToCourseLayerItem } from '@/shared/courseProjectModel'
+import { createTeacherControllerComponentItem } from '../components/teacherControllerComponent'
+import { createDefaultTeacherControllerPackage } from '../../shared/defaultTeacherControllerComponent'
+import { componentPackageMeta } from '../components/editableComponentPackage'
 import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
 import {
   COURSE_PROJECT_SCHEMA_VERSION,
@@ -9,7 +11,6 @@ import {
 import { CANVAS_HEIGHT, CANVAS_WIDTH } from '@/shared/constants'
 import type { ProjectPlaybackSettings } from '@/shared/contracts/playback-v1/types'
 import {
-  createTeacherControllerNode,
   type IdFactory,
 } from './nativeNodeFactories'
 
@@ -76,15 +77,12 @@ export function createBlankCourseProject(
   const sceneId = nextId('scene', undefined, idFactory)
   const slideSurfaceId = `slide:${projectId}`
   const title = options.title ?? '未命名课件'
-  const controller = includeDefaultController
-    ? createTeacherControllerNode({
-        idFactory,
-        playbackInitialVisibility: controls === 'canvas' ? 'inherit' : 'hidden',
-      })
-    : null
+  const controller = includeDefaultController ? createTeacherControllerComponentItem(nextId('teacher_controller', undefined, idFactory)) : null
+  if (controller) controller.playbackInitialVisibility = controls === 'canvas' ? 'inherit' : 'hidden'
+  const controllerPackage = controller ? createDefaultTeacherControllerPackage() : null
   const globalLayerItems: GlobalLayerEntry[] = controller
     ? [{
-        item: sceneNodeToCourseLayerItem(controller, 1),
+        item: controller,
         visibility: { mode: 'all', locationIds: [] },
         plane: 'overlay',
       }]
@@ -98,7 +96,7 @@ export function createBlankCourseProject(
     createdAt: timestamp,
     updatedAt: timestamp,
     assets: {},
-    componentPackages: {},
+    componentPackages: controllerPackage ? { [controllerPackage.manifest.id]: componentPackageMeta(controllerPackage, { editableCopy: true }) } : {},
     designTokens: {
       fonts: [{
         id: 'body',

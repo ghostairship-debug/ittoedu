@@ -61,7 +61,6 @@ export const NATIVE_NODE_TYPES = [
   'image',
   'video',
   'shape',
-  'teacher-controller',
   'table',
   'chart',
   'input',
@@ -276,53 +275,12 @@ export interface ShapeNode extends NativeRenderableBase {
   }
 }
 
-export type TeacherControllerAction =
-  | { type: 'step.previous' }
-  | { type: 'step.next' }
-  | { type: 'scene.previous' }
-  | { type: 'scene.next' }
-  | { type: 'scene.replay' }
-  | { type: 'course.restart' }
-  | { type: 'scene.open-picker' }
-  | {
-      type: 'scene.go'
-      sceneId: string
-      targetStateId?: string
-    }
-  | { type: 'audio.toggle-mute' }
-  | { type: 'player.fullscreen.toggle' }
-
-export interface TeacherControllerButton {
-  id: string
-  action: TeacherControllerAction
-  label: string
-  visible: boolean
-}
-
-export interface TeacherControllerNode extends NativeRenderableBase {
-  type: 'teacher-controller'
-  title: string
-  showSceneProgress: boolean
-  compact: boolean
-  collapsible: boolean
-  defaultCollapsed: boolean
-  buttons: TeacherControllerButton[]
-  style: {
-    backgroundColor: string
-    backgroundOpacity: number
-    accentColor: string
-    textColor: string
-    cornerRadius: number
-  }
-  includeInStaticExports: boolean
-}
 
 export type NativeTextContent = Omit<TextNode, keyof NativeRenderableBase>
 export type NativeFormulaContent = Omit<FormulaNode, keyof NativeRenderableBase>
 export type NativeImageContent = Omit<ImageNode, keyof NativeRenderableBase>
 export type NativeVideoContent = Omit<VideoNode, keyof NativeRenderableBase>
 export type NativeShapeContent = Omit<ShapeNode, keyof NativeRenderableBase>
-export type NativeTeacherControllerContent = Omit<TeacherControllerNode, keyof NativeRenderableBase>
 
 export type NativeTableHorizontalAlign = 'left' | 'center' | 'right'
 export type NativeTableVerticalAlign = 'top' | 'middle' | 'bottom'
@@ -469,7 +427,6 @@ export type NativeElementData =
   | NativeImageContent
   | NativeVideoContent
   | NativeShapeContent
-  | NativeTeacherControllerContent
   | NativeTableContent
   | NativeChartContent
   | NativeInputContent
@@ -490,7 +447,6 @@ export type NativeRenderableNode =
   | ImageNode
   | VideoNode
   | ShapeNode
-  | TeacherControllerNode
   | TableNode
   | ChartNode
   | InputNode

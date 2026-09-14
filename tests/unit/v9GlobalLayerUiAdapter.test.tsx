@@ -1,3 +1,7 @@
+import { controllerMetadata } from '../fixtures/teacherController'
+import type { LayerItem } from '../../src/shared/courseProjectTypes'
+import { isControllerFixture } from '../fixtures/teacherController'
+import { createControllerFixture } from '../fixtures/teacherController'
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
@@ -10,7 +14,7 @@ import {
   type ScopedLayerItem,
 } from '@/shared/courseProjectTypes'
 import { sceneNodeToCourseLayerItem } from '@/shared/courseProjectModel'
-import { createFormulaNode, createTeacherControllerNode } from '@/renderer/project/nativeNodeFactories'
+import { createFormulaNode, } from '@/renderer/project/nativeNodeFactories'
 import {
   createSlideAuthoringBackend,
   openSlideAuthoringSession,
@@ -25,10 +29,7 @@ import { SLIDE_GLOBAL_CONTROLLER_CLIPBOARD_REASON } from '@/renderer/course/v9Sl
 import {
   rowsForListKind,
 } from '@/renderer/course/effectiveLayerProjection'
-import {
-  createV9TeacherControllerAuthoringController,
-  teacherControllerPropertiesPreview,
-} from '@/renderer/authoring/v9TeacherControllerAuthoring'
+
 import {
   clientToWorld,
   createStageViewportTransform,
@@ -161,17 +162,14 @@ function globalComponent(layerItemId: string, order: number): ComponentLayerItem
 }
 
 function scoped(
-  item: NativeLayerItem,
+  item: LayerItem,
   visibility: ScopedLayerItem['visibility'] = { mode: 'all', locationIds: [] },
 ): ScopedLayerItem {
   return { item, visibility }
 }
 
 function v9ThreeLocationFixture(): CourseProjectDocument {
-  const controller = sceneNodeToCourseLayerItem(
-    createTeacherControllerNode({ id: 'teacher-controller-main', x: 190, y: 638, width: 900, height: 64 }),
-    90,
-  )
+  const controller = createControllerFixture({ id: 'teacher-controller-main', x: 190, y: 638, width: 900, height: 64 }, 90)
   return courseProjectDocumentSchema.parse({
     schemaVersion: COURSE_PROJECT_SCHEMA_VERSION,
     id: 'r3z-layers',
@@ -180,7 +178,7 @@ function v9ThreeLocationFixture(): CourseProjectDocument {
     createdAt: NOW,
     updatedAt: NOW,
     assets: {},
-    componentPackages: {},
+    componentPackages: { ...controllerMetadata,},
     designTokens: {
       fonts: [{
         id: 'body',
@@ -210,7 +208,7 @@ function v9ThreeLocationFixture(): CourseProjectDocument {
     navigationGuards: [],
     globalLayerItems: [
       scoped(nativeText('global-banner', 0, '全课横幅')),
-      scoped(controller as NativeLayerItem),
+      scoped(controller),
     ],
     globalInteractions: [],
     locations: [
@@ -343,7 +341,7 @@ function v9WithMisplacedControllerCopies(): CourseProjectDocument {
   const controller = project.globalLayerItems.find(
     (entry) => entry.item.layerItemId === 'teacher-controller-main',
   )?.item
-  if (!controller || controller.kind !== 'native') throw new Error('missing global controller')
+  if (!controller || controller.kind !== 'component') throw new Error('missing global controller')
   const slide = project.surfaces[0]
   if (!slide || slide.type !== 'slide') throw new Error('expected slide')
   slide.surfaceLayerItems = [
@@ -733,10 +731,7 @@ describe('V9 global layer UI adapter on the real V8 Nodes/Properties', () => {
         isTeacherController: true,
         ownerKey: 'global',
       }),
-      item: sceneNodeToCourseLayerItem(
-        createTeacherControllerNode({ id: 'teacher-controller-main' }),
-        100_000,
-      ),
+      item: createControllerFixture({ id: 'teacher-controller-main' }, 100_000),
     }
     const banner = visualRow('global-banner', 'global', { ownerKey: 'global' })
     const scene = visualRow('slide-title', 'scene', { ownerKey: 'scene:scene-1' })
@@ -1199,58 +1194,5 @@ describe('V9 global layer UI adapter on the real V8 Nodes/Properties', () => {
     expect(useEditorStore.getState().slideCandidateSnapshot?.locationId).toBe('location-scene-1')
   })
 
-  it('uses the same controller layout in Properties as the canvas frame, and west-resizes on pointerup', () => {
-    injectCandidate()
-    useEditorStore.getState().selectNode('teacher-controller-main')
-    const item = selectSlideAuthoringDocument(useEditorStore.getState())!
-      .globalLayerItems
-      .find((entry) => entry.item.layerItemId === 'teacher-controller-main')
-      ?.item
-    if (!item || item.kind !== 'native' || item.content.nativeType !== 'teacher-controller') {
-      throw new Error('missing controller')
-    }
-    const layout = teacherControllerPropertiesPreview(item.content.data, item.frame)
-    render(<PropertiesTab onReplaceImage={() => undefined} />)
-    const preview = screen.getByTestId('teacher-controller-layout-preview')
-    expect(preview.textContent).toContain(`${layout.width} × ${layout.height}`)
-    expect(preview.textContent).toContain(layout.buttons[0]!.label)
-
-    // With scope === 'scene', pointerDown on teacher controller returns no target or preview
-    useEditorStore.getState().setEditingScope('scene')
-    const controller = createV9TeacherControllerAuthoringController({
-      readBackend: () => selectSlideAuthoringBackend(useEditorStore.getState()),
-      commit: (run) => useEditorStore.getState().applySlideCandidateCommand(run),
-    })
-    const transform = createStageViewportTransform(VIEW)
-    const west = worldToClient(transform, { x: 190, y: 670 })
-    const sceneDown = controller.pointerDown({ x: west.x, y: west.y }, VIEW)
-    expect(sceneDown.kind).toBe('v9-controller-candidate')
-    if (sceneDown.kind !== 'v9-controller-candidate') throw new Error('expected candidate')
-    expect(sceneDown.target).toBeUndefined()
-    expect(sceneDown.preview).toBeUndefined()
-
-    // Switch scope to 'global', pointerDown on teacher controller activates authoring target and preview
-    useEditorStore.getState().setEditingScope('global')
-    const down = controller.pointerDown({ x: west.x, y: west.y }, VIEW)
-    expect(down.kind).toBe('v9-controller-candidate')
-    if (down.kind !== 'v9-controller-candidate') throw new Error('expected candidate')
-    expect(down.overlay).toBeTruthy()
-    expect(down.target?.layerItemId).toBe('teacher-controller-main')
-    const dragged = { x: west.x - 40, y: west.y }
-    expect(clientToWorld(transform, dragged).x).toBeCloseTo(150)
-    const previewMove = controller.pointerMove(dragged, VIEW)
-    if (previewMove.kind !== 'v9-controller-candidate') throw new Error('expected candidate')
-    expect(previewMove.preview).toEqual({ x: 150, y: 638, width: 940, height: 64 })
-    expect(controllerFrame().revision).toBe(1)
-    const committed = controller.pointerUp(dragged, VIEW)
-    if (committed.kind !== 'v9-controller-candidate') throw new Error('expected candidate')
-    expect(committed.command?.historyEntry).toBe(true)
-    expect(controllerFrame()).toMatchObject({
-      x: 150,
-      y: 638,
-      width: 940,
-      height: 64,
-      revision: 2,
-    })
-  })
+  
 })

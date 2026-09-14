@@ -1,3 +1,4 @@
+import { buildPublishedFixture as buildPublishedCourseV2Payload } from '../fixtures/teacherController'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
 import type {
@@ -8,7 +9,7 @@ import type {
 } from '@/shared/courseProjectTypes'
 import { publishedCourseV2Schema } from '@/shared/publishedCourseSchema'
 import type { PublishedCourseV2Payload } from '@/shared/publishedCourseTypes'
-import { buildPublishedCourseV2Payload } from '@/renderer/export/course/buildPublishedCourse'
+
 import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
 import { createBlankSpatialCourseProject } from '@/renderer/project/createSpatialCourseProject'
 import { createTableLayerItem, createTableNode } from '@/renderer/project/nativeNodeFactories'

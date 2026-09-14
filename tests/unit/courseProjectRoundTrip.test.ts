@@ -1,3 +1,4 @@
+import { isControllerFixture } from '../fixtures/teacherController'
 import { describe, expect, it } from 'vitest'
 import { parseComponentPackageFiles } from '@/renderer/components/importComponentPackage'
 import { makeAuthoringAddress } from '@/shared/authoringAddress'
@@ -399,7 +400,7 @@ describe('Course Project V9 protocol round-trip', () => {
     expect(globalLayer.surfaces[0]?.type === 'slide'
       && globalLayer.surfaces[0].scenes.some((scene) => (
         scene.layerItems.some((item) => (
-          item.kind === 'native' && item.content.nativeType === 'teacher-controller'
+          isControllerFixture(item)
         ))
       ))).toBe(false)
 

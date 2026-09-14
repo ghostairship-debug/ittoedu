@@ -1,3 +1,4 @@
+import type { FormulaAuthoringBinding } from '../FormulaAuthoringEditor'
 import {
   Box,
   Globe2,
@@ -7,16 +8,12 @@ import { nanoid } from 'nanoid'
 import { useEffect, useState } from 'react'
 import type {
   TeacherControllerAction,
-  TeacherControllerNode,
-} from '../../../shared/contracts/native-v1'
+  TeacherControllerConfig,
+} from '../../../shared/teacherControllerConfig'
 import type { ProjectPlaybackSettings } from '../../../shared/contracts/playback-v1'
 import type { ProjectDesignTokens } from '../../../shared/contracts/design-v1/types'
 import type { RuntimeLayer } from '../../../shared/runtimeTypes'
 import type { LocationVisibility } from '../../../shared/courseProjectTypes'
-import {
-  opacityToTransparencyPercent,
-  transparencyPercentToOpacity,
-} from '../../../shared/opacity'
 import type { AssetMeta } from '../../../shared/contracts/media-v1'
 import type { ComponentManifest } from '../../../shared/componentTypes'
 import type { EffectiveBackground } from '../../../shared/effectiveBackground'
@@ -36,7 +33,6 @@ import {
 import {
   BufferedInput,
   PropertyDraftBoundary,
-  RangeField,
   SelectField,
   ToggleRow,
 } from './PropertyControls'
@@ -83,12 +79,6 @@ export interface CourseGlobalEmptyView {
   }
 }
 
-export interface TeacherControllerLayoutPreviewView {
-  readonly width: number
-  readonly height: number
-  readonly buttons: readonly { readonly label: string }[]
-}
-
 export interface TeacherControllerSceneView {
   readonly id: string
   readonly name: string
@@ -99,6 +89,8 @@ export interface TeacherControllerSceneView {
 
 export interface CourseGlobalPropertiesContext {
   readonly kind: 'course-global'
+  readonly formulaAuthoring?: FormulaAuthoringBinding
+  readonly flowPlacement?: { readonly paperSpace: 'paper' | 'viewport'; readonly onChange: (paperSpace: 'paper' | 'viewport') => void }
   readonly draftBindingKey: string | null
   readonly mode: 'empty' | 'selected'
   readonly editorMode: EditorModeView
@@ -111,8 +103,8 @@ export interface CourseGlobalPropertiesContext {
     readonly contentEditingEnabled: boolean
     readonly spatialMode: boolean
     readonly videoDiagnostics: readonly string[]
-    readonly controller: TeacherControllerNode | null
-    readonly controllerPreview: TeacherControllerLayoutPreviewView | null
+    readonly controller: TeacherControllerConfig | null
+    readonly controllerComponent?: boolean
     readonly controllerScenes: readonly TeacherControllerSceneView[]
     readonly component: {
       readonly manifest: ComponentManifest
@@ -132,6 +124,8 @@ export interface CourseGlobalPropertiesContext {
     readonly previewCourseBackground?: (patch: { backgroundColor?: string | null }) => void
     readonly updatePlayback: (patch: Partial<ProjectPlaybackSettings>) => void
     readonly ensureTeacherController: () => void
+    readonly manageTeacherControllerComponent?: (itemId: string, operation: 'restore') => void
+    readonly editControllerSource?: () => void
     readonly updateDesignTokens: (tokens: ProjectDesignTokens) => void
     readonly setVisibleAtLocation: (nodeId: string, visible: boolean) => void
     readonly setLocationVisibility: (nodeId: string, visibility: LocationVisibility) => void
@@ -311,17 +305,15 @@ function defaultTeacherControllerAction(
 function TeacherControllerProperties({
   node,
   scenes,
-  layoutPreview,
   update,
 }: {
-  node: TeacherControllerNode
+  node: TeacherControllerConfig
   scenes: readonly TeacherControllerSceneView[]
-  layoutPreview: TeacherControllerLayoutPreviewView | null
-  update(patch: PropertiesPatch): void
+  update(patch: Partial<TeacherControllerConfig>): void
 }) {
   const replaceButton = (
     index: number,
-    patch: Partial<TeacherControllerNode['buttons'][number]>,
+    patch: Partial<TeacherControllerConfig['buttons'][number]>,
   ) => update({
     buttons: node.buttons.map((button, buttonIndex) => (
       buttonIndex === index ? { ...button, ...patch } : button
@@ -336,47 +328,7 @@ function TeacherControllerProperties({
   }
   return (
     <section className="property-section">
-      <h3 className="property-title"><SlidersHorizontal size={14} />教师控制器</h3>
-      {layoutPreview ? (
-        <div
-          className="controller-layout-preview"
-          data-testid="teacher-controller-layout-preview"
-        >
-          <div className="readonly-value">
-            {layoutPreview.width} × {layoutPreview.height}
-          </div>
-          <p className="property-hint">
-            {layoutPreview.buttons.map((button) => button.label).join(' · ')}
-          </p>
-        </div>
-      ) : null}
-      <BufferedInput label="控制器标题" value={node.title} onCommit={(title) => update({ title })} />
-      <ToggleRow label="显示场景与状态进度" checked={node.showSceneProgress} onChange={(showSceneProgress) => update({ showSceneProgress })} />
-      <ToggleRow label="紧凑布局" checked={node.compact} onChange={(compact) => update({ compact })} />
-      <ToggleRow label="允许折叠" checked={node.collapsible} onChange={(collapsible) => update({
-        collapsible,
-        ...(!collapsible ? { defaultCollapsed: false } : {}),
-      })} />
-      <ToggleRow
-        label="打开课件时默认折叠"
-        checked={node.defaultCollapsed}
-        disabled={!node.collapsible}
-        onChange={(defaultCollapsed) => update({ defaultCollapsed })}
-      />
-      <ColorInput previewPatch={backgroundColor => ({ style: { backgroundColor } })} id="controller-background" label="背景色" value={node.style.backgroundColor} onChange={(backgroundColor) => update({ style: { backgroundColor } })} />
-      <RangeField
-        label="背景透明度"
-        value={opacityToTransparencyPercent(node.style.backgroundOpacity)}
-        min={0}
-        max={100}
-        suffix="%"
-        onChange={(value) => update({
-          style: { backgroundOpacity: transparencyPercentToOpacity(value) },
-        })}
-      />
-      <ColorInput previewPatch={accentColor => ({ style: { accentColor } })} id="controller-accent" label="强调色" value={node.style.accentColor} onChange={(accentColor) => update({ style: { accentColor } })} />
-      <ColorInput previewPatch={textColor => ({ style: { textColor } })} id="controller-text" label="文字色" value={node.style.textColor} onChange={(textColor) => update({ style: { textColor } })} />
-      <RangeField label="圆角" value={node.style.cornerRadius} min={0} max={40} suffix="px" onChange={(cornerRadius) => update({ style: { cornerRadius } })} />
+      <h3 className="property-title"><SlidersHorizontal size={14} />按钮与动作</h3>
       <div className="form-field">
         <label>控制按钮</label>
         <div className="controller-button-editor">
@@ -393,7 +345,7 @@ function TeacherControllerProperties({
               key={button.id}
               style={{ display: 'grid', gap: 8, padding: 8, margin: '0 0 8px' }}
             >
-              <legend>{`按钮 ${index + 1}`}</legend>
+              <legend>{button.label}</legend>
               <input
                 aria-label={`${button.label}显示`}
                 type="checkbox"
@@ -401,11 +353,6 @@ function TeacherControllerProperties({
                 onChange={(event) => replaceButton(index, {
                   visible: event.currentTarget.checked,
                 })}
-              />
-              <BufferedInput
-                label="按钮文字"
-                value={button.label}
-                onCommit={(label) => replaceButton(index, { label: String(label) })}
               />
               <SelectField<TeacherControllerAction['type']>
                 label="点击动作"
@@ -493,8 +440,6 @@ function TeacherControllerProperties({
           })}
         >添加按钮（{node.buttons.length}/12）</button>
       </div>
-      <ToggleRow label="包含在 PDF/PPTX" checked={node.includeInStaticExports} onChange={(includeInStaticExports) => update({ includeInStaticExports })} />
-      <p className="property-hint">该元素属于画布全局层。开启折叠后，可直接点击画布中的“收/展”按钮临时预览，该临时状态不写入工程。</p>
     </section>
   )
 }
@@ -621,6 +566,43 @@ export function CourseGlobalPropertiesPanel({
       })}
     >
       <div className="properties-scroll" data-testid="properties-tab">
+      {selected.controllerComponent && node.type === 'external-component' ? <>
+        <section className="property-section teacher-controller-properties" data-testid="teacher-controller-properties">
+          <h3 className="property-title">教师控制台</h3>
+          <p className="property-hint">全课共用，固定在内容上方。适应窗口大小，播放时不随内容缩放和移动。</p>
+          <button type="button" className="secondary-button" onClick={context.commands.editControllerSource}>编辑控制台源码</button>
+        </section>
+        {selected.component && <ComponentPropertiesEditor
+          title="控制台设置"
+          groups={[
+            { title: '显示与收展', matches: key => ['title', 'showSceneProgress', 'compact', 'collapsible', 'defaultCollapsed'].includes(key) },
+            { title: '背景与外观', matches: key => key.startsWith('style.') || key === 'backgroundAssetId' },
+            { title: '导出', matches: key => key === 'includeInStaticExports' },
+            { title: '自定义参数', matches: () => true },
+          ]}
+          manifest={selected.component.manifest} node={node} assets={selected.component.assets}
+          onChange={props => update({ props })}
+        />}
+        {selected.controller && Array.isArray(node.props.buttons) && <details className="property-section controller-property-details">
+          <summary>按钮与动作</summary>
+          <TeacherControllerProperties node={selected.controller} scenes={selected.controllerScenes}
+            update={patch => update({ props: { ...node.props, ...patch } })} />
+        </details>}
+        <details className="property-section controller-property-details">
+          <summary>位置与尺寸</summary>
+          <p className="property-hint">这里设置展开尺寸。收起后的选框随圆按钮变化。</p>
+          <CommonNodeProperties node={node} editorMode={context.editorMode} update={update} />
+        </details>
+        <details className="property-section controller-property-details">
+          <summary>显示范围</summary>
+          {layer && <GlobalLayerSettings view={layer} commands={context.commands} />}
+        </details>
+        <details className="property-section controller-property-details">
+          <summary>源码与维护</summary>
+          <p className="property-hint">源码、图片和纹理随本课件保存，可由 AI 深度定制。恢复默认源码会覆盖源码定制，可以撤销。</p>
+          <button type="button" className="secondary-button secondary-button--danger" onClick={() => context.commands.manageTeacherControllerComponent?.(node.id, 'restore')}>恢复默认控制台源码</button>
+        </details>
+      </> : <>
       <SlideNativeNotices
         notices={selected.notices}
         onClearPresentationOverride={context.commands.clearPresentationOverride}
@@ -630,10 +612,19 @@ export function CourseGlobalPropertiesPanel({
         editorMode={context.editorMode}
         update={update}
       />
+      {context.flowPlacement && (
+        <section className="property-section" data-testid="flow-global-paper-space">
+          <h3 className="property-title">讲义内定位</h3>
+          <SelectField label="定位空间" value={context.flowPlacement.paperSpace}
+            options={[{ value: 'paper', label: '随稿纸滚动' }, { value: 'viewport', label: '固定在视口' }]}
+            onChange={context.flowPlacement.onChange} />
+        </section>
+      )}
       {layer && (
         <GlobalLayerSettings view={layer} commands={context.commands} />
       )}
       <SlideNativeTypeFields
+        formulaAuthoring={context.formulaAuthoring}
         node={node}
         update={update}
         contentEditingEnabled={selected.contentEditingEnabled}
@@ -646,14 +637,13 @@ export function CourseGlobalPropertiesPanel({
         chartCommands={null}
       />
       {context.editorMode === 'professional' &&
-        context.flowOrSpatial &&
-        node.type !== 'teacher-controller' && (
+        context.flowOrSpatial && (
         <FlowSpatialInteractionUnavailableSection
           editingScopeGlobal={context.editingScopeGlobal}
           onOpenAutomation={context.commands.openProfessionalAutomation}
         />
       )}
-      {context.interaction && node.type !== 'teacher-controller' && (
+      {context.interaction && (
         <InteractionEditor {...context.interaction} />
       )}
       {node.type === 'external-component' && (
@@ -674,14 +664,7 @@ export function CourseGlobalPropertiesPanel({
           )}
         </>
       )}
-      {selected.controller && (
-        <TeacherControllerProperties
-          node={selected.controller}
-          scenes={selected.controllerScenes}
-          layoutPreview={selected.controllerPreview}
-          update={update}
-        />
-      )}
+      </>}
       </div>
     </PropertyDraftBoundary>
     </NativeColorPreviewContext.Provider>

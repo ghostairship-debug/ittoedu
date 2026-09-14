@@ -1,3 +1,4 @@
+import { isControllerFixture } from '../fixtures/teacherController'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ComponentPackageData } from '@/shared/componentTypes'
 import { MAX_PROJECT_SCENES, MAX_SCENE_NODES } from '@/shared/constants'
@@ -706,8 +707,7 @@ describe('Spatial canonical clipboard commands', () => {
     expect(afterWrongOwner.errorMessage).toMatch(/编辑范围/)
 
     const controllerId = beforeWrongOwner.spatialSession?.history.present.globalLayerItems.find(
-      (entry) => entry.item.kind === 'native'
-        && entry.item.content.nativeType === 'teacher-controller',
+      (entry) => isControllerFixture(entry.item),
     )?.item.layerItemId
     if (!controllerId) throw new Error('expected teacher controller')
     const beforeController = useEditorStore.getState()

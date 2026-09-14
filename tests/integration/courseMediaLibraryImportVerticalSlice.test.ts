@@ -1,3 +1,4 @@
+import { buildPublishedFixture as buildPublishedCourseV2Payload } from '../fixtures/teacherController'
 import { isAuthoringHistoryTransactionFrame } from '../../src/renderer/authoring/resourceAwareAuthoringHistory'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -6,7 +7,7 @@ import { componentPackagesFromArchive } from '@/renderer/components/componentPac
 import { isFlowEditorTransactionFrame } from '@/renderer/course/flowEditorSlice'
 
 import { isSpatialAuthoringTransactionFrame } from '@/renderer/course/spatialAuthoringHistory'
-import { buildPublishedCourseV2Payload } from '@/renderer/export/course/buildPublishedCourse'
+
 import {
   createCourseProjectArchive,
   openCourseProjectArchive,

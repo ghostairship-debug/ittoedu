@@ -1,10 +1,11 @@
+import { buildPublishedFixture as buildPublishedCourseV2Payload } from '../fixtures/teacherController'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   addCourseFlowPage,
   addCourseScene,
   addCourseSlidePage,
 } from '@/renderer/course/courseLocationCommands'
-import { buildPublishedCourseV2Payload } from '@/renderer/export/course/buildPublishedCourse'
+
 import { buildSlideEditorView } from '@/renderer/course/slideEditorView'
 import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
 import {

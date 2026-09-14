@@ -37,7 +37,9 @@ export function collectCourseProjectComponentHealth(
         path: [...base, 'thumbnailPath'],
       })
     }
-    if (!metadata.sha256) {
+    // Editable/generated source packages have no selected external archive.
+    // Their embedded bytes are already covered by required contentSha256.
+    if (!metadata.sha256 && !metadata.editableCopy) {
       drafts.push({
         severity: 'warning',
         code: 'component-package-hash-missing',
@@ -46,7 +48,7 @@ export function collectCourseProjectComponentHealth(
         path: [...base, 'sha256'],
       })
     }
-    if (!metadata.sourceLabel) {
+    if (!metadata.sourceLabel && !metadata.editableCopy) {
       drafts.push({
         severity: 'info',
         code: 'component-package-source-missing',

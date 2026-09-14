@@ -1,4 +1,6 @@
+import { controllerDisplayFrame } from '../authoring/controllerDisplayBounds'
 import type { LayerItem } from '../../shared/courseProjectTypes'
+import { isTeacherController } from '../../shared/teacherControllerRole'
 import {
   lineStrokeHit,
   resolveNativeLinePoints,
@@ -73,13 +75,7 @@ function lineStrokeOf(item: LayerItem): LayerItemLineStroke | undefined {
 }
 
 export function layerItemBounds(item: LayerItem): LayerItemHitBounds {
-  return {
-    x: item.frame.x,
-    y: item.frame.y,
-    width: item.frame.width,
-    height: item.frame.height,
-    rotation: item.rotation,
-  }
+  return { ...controllerDisplayFrame(item), rotation: item.rotation }
 }
 
 export function layerItemIsHittable(
@@ -90,9 +86,8 @@ export function layerItemIsHittable(
   if (!effectiveVisible) return false
   if (item.hitPolicy === 'pass-through') return false
   if (
-    item.kind === 'native' &&
-    item.content.nativeType === 'teacher-controller' &&
-    scope !== 'global'
+    isTeacherController(item) &&
+    scope !== 'global' && scope !== 'scene'
   ) {
     return false
   }

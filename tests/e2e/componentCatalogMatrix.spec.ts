@@ -731,7 +731,7 @@ test.describe.serial('Component Catalog V9 四组件全矩阵', () => {
       })
 
       await page.getByRole('button', {
-        name: '全屏 16:9 整课预览',
+        name: '整课预览',
       }).click()
       const previewOverlay = page.getByTestId('course-preview-overlay')
       const previewHost = page.getByTestId('course-preview-host')

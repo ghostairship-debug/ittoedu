@@ -1,3 +1,4 @@
+import { buildPublishedFixture as buildPublishedCourseV2Payload } from '../fixtures/teacherController'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
@@ -29,7 +30,7 @@ import {
   updateFlowEditorBlock,
   type FlowCommandResult,
 } from '../../src/renderer/course/flowEditorCommands'
-import { buildPublishedCourseV2Payload } from '../../src/renderer/export/course/buildPublishedCourse'
+
 import {
   MixedCourseNavigator,
   mixedCourseDefinitionFromPublished,

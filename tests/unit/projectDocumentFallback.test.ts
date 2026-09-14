@@ -1,0 +1,136 @@
+// @vitest-environment node
+import { describe, expect, it, vi } from 'vitest'
+import { randomUUID } from 'node:crypto'
+import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
+import { createShapeNode } from '@/renderer/project/nativeNodeFactories'
+import { sceneNodeToCourseLayerItem } from '@/shared/courseProjectModel'
+import { captureGenerationSnapshot } from '@/renderer/authoring/generation/generationSnapshot'
+import { createGenerationCandidateCoordinator } from '@/renderer/authoring/generation/prepareGenerationCandidate'
+import { projectEffectiveLayers } from '@/renderer/course/effectiveLayerProjection'
+import { createCourseProjectArchive, openCourseProjectArchive } from '@/renderer/project/courseProjectArchive'
+import { applyEditorTransactionStep, type EditorTransactionStep } from '@/renderer/authoring/editorTransaction'
+import { buildPublishedCourseV2Payload } from '@/renderer/export/course'
+import { generationInitialRequestForPrompt } from '@/main/localAgent/profile'
+import type { HistoryResourceState } from '@/renderer/store/courseResourceState'
+import { projectDynamicTargets } from '@/renderer/authoring/tools/projectDocumentTool'
+import { readGenerationFailure } from '@/shared/generationContract'
+
+function fixture() {
+  const project = createBlankCourseProject({ id: 'offline-fallback', includeDefaultController: false, controls: 'none' })
+  const surface = project.surfaces[0]!
+  if (surface.type !== 'slide') throw new Error('Slide')
+  surface.scenes[0]!.layerItems.push(sceneNodeToCourseLayerItem(createShapeNode('rectangle', { id: 'selected-square', style: { fillColor: '#ff0000' } }), 0))
+  const second = createBlankCourseProject({ id: 'second', includeDefaultController: false, controls: 'none' })
+  const other = second.surfaces[0]!
+  if (other.type !== 'slide') throw new Error('Slide')
+  other.scenes[0]!.layerItems.push(sceneNodeToCourseLayerItem(createShapeNode('rectangle', { id: 'other-square', style: { fillColor: '#ff0000' } }), 0))
+  surface.scenes.push(other.scenes[0]!); project.locations.push(...second.locations.map(location => ({ ...location, surfaceId: surface.id })))
+  let state = { document: project, resources: { assetFiles: {}, componentPackages: {} } as HistoryResourceState }
+  const workspace = { version: 1 as const, projectId: project.id, normalizedPath: 'c:/fresh-machine/lesson.h5lesson' }
+  const request = captureGenerationSnapshot({ document: project, workspace,
+    sessionToken: { locationId: project.startLocationId, surfaceType: 'slide', revision: project.revision, generation: 1 },
+    projection: projectEffectiveLayers({ project, locationId: project.startLocationId }), selectedIds: ['selected-square'], scope: 'selection',
+    instruction: '把另一页的方形改成蓝色，在它中间新增独立黄色圆形，保持选中方形不变。', purpose: 'local-edit' })
+  const commits: EditorTransactionStep[] = []
+  const coordinator = createGenerationCandidateCoordinator({ readDocument: () => state.document, readResources: () => state.resources,
+    readWorkspace: () => workspace, readSessionGeneration: () => 1,
+    commit: step => { commits.push(step); state = applyEditorTransactionStep(state, step, 'forward'); return true } })
+  const next = structuredClone(project), target = next.surfaces[0]!
+  if (target.type !== 'slide') throw new Error('Slide')
+  const square = target.scenes[1]!.layerItems[0]!
+  if (square.kind !== 'native' || square.content.nativeType !== 'shape') throw new Error('Shape')
+  square.content.data.style.fillColor = '#0000ff'
+  target.scenes[1]!.layerItems.push(sceneNodeToCourseLayerItem(createShapeNode('ellipse', { id: 'yellow-circle', style: { fillColor: '#ffff00' }, x: 80, y: 80, width: 100, height: 100 }), 1))
+  const candidate = { version: 1, requestId: request.requestId, candidateId: randomUUID(), summary: '另一页方形变蓝并新增独立黄圆',
+    steps: [{ id: 'file-result', tool: 'project.document', carrier: 'native', destination: request.destinations[0], input: { artifact: { document: next } } }] }
+  return { project, next, request, candidate, coordinator, commits, read: () => state,
+    undo: () => { state = applyEditorTransactionStep(state, commits[0]!, 'inverse') }, redo: () => { state = applyEditorTransactionStep(state, commits[0]!, 'forward') } }
+}
+
+describe('CLI project result through the canonical transaction', () => {
+  it('QP08 rejects an old full document after a prepared native edit without overwriting either live state or resources', async () => {
+    const f = fixture()
+    const destination = f.request.destinations.find(value => value.kind === 'update' && value.target.itemId === 'other-square')!
+    const candidate = { ...f.candidate, steps: [{ id: 'native-edit', tool: 'native.content', carrier: 'native', destination,
+      input: { operation: 'edit-shape', shapeStyle: { fillColor: '#00ff00' } } }, ...f.candidate.steps] }
+    const error = await f.coordinator.prepare(f.request, candidate).catch(error => error)
+    expect(readGenerationFailure(error)).toMatchObject({ stepId: 'file-result',
+      diagnostics: [expect.objectContaining({ code: 'artifact-baseline-conflict', path: ['input', 'artifact', 'document', 'revision'] })],
+      recovery: { action: 'refresh-baseline' } })
+    expect(f.commits).toHaveLength(0)
+    expect(f.read()).toEqual({ document: f.project, resources: { assetFiles: {}, componentPackages: {} } })
+  })
+  it('admits changed dynamic instances and resource/layout dependencies without rerunning unrelated dynamic hosts for a native edit', () => {
+    const f = fixture(), project = structuredClone(f.project), surface = project.surfaces[0]!
+    if (surface.type !== 'slide') throw new Error('Slide')
+    const { content: _content, ...wrapper } = surface.scenes[0]!.layerItems[0]! as any
+    surface.scenes[0]!.layerItems.push({ ...wrapper, layerItemId: 'runtime', kind: 'runtime', runtime: { source: 'before' } })
+    const nativeEdit = structuredClone(project); nativeEdit.title = 'New title'
+    expect(projectDynamicTargets(nativeEdit, project, false)).toEqual([])
+    expect(projectDynamicTargets(nativeEdit, project, true)[0]!.instanceIds).toEqual(['runtime'])
+    const changed = structuredClone(project), nextSurface = changed.surfaces[0]!
+    if (nextSurface.type !== 'slide') throw new Error('Slide')
+    ;(nextSurface.scenes[0]!.layerItems.at(-1)! as any).runtime.source = 'after'
+    expect(projectDynamicTargets(changed, project, false)[0]!.instanceIds).toEqual(['runtime'])
+    nextSurface.canvas.width++
+    expect(projectDynamicTargets(changed, project, false)).toHaveLength(1)
+    const moved = structuredClone(project), movedSurface = moved.surfaces[0]!
+    if (movedSurface.type !== 'slide') throw new Error('Slide')
+    movedSurface.scenes[1]!.layerItems.push(movedSurface.scenes[0]!.layerItems.pop()!)
+    expect(projectDynamicTargets(moved, project, false)).toMatchObject([{ locationId: project.locations[1]!.id, instanceIds: ['runtime'] }])
+  })
+
+  it('rejects a new file-authored Runtime through the actual admission port without a live transaction', async () => {
+    const f = fixture(), surface = f.next.surfaces[0]!
+    if (surface.type !== 'slide') throw new Error('Slide')
+    const { content: _content, ...wrapper } = surface.scenes[1]!.layerItems[0]! as any
+    const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jM1sAAAAASUVORK5CYII='
+    f.next.assets.fallback = { id: 'fallback', kind: 'image', filename: 'fallback.png', path: 'assets/fallback.png', mimeType: 'image/png', byteLength: Buffer.from(png, 'base64').length, width: 1, height: 1 }
+    surface.scenes[1]!.layerItems.push({ ...wrapper, layerItemId: 'new-runtime', order: 2, kind: 'runtime', runtime: {
+      protocol: 'canvas-runtime', runtimeApiVersion: 2, enabled: true, renderMode: 'dom',
+      source: 'CoursewareRuntime.define({runtimeApiVersion:2,create(){return {destroy(){}}}})',
+      content: { values: {} }, assets: {}, nodeBindings: {}, staticFallback: { assetId: 'fallback', coverage: 'scene' },
+    } })
+    Object.assign(f.candidate.steps[0]!.input.artifact, { assetFiles: { fallback: png } })
+    const admission = vi.fn().mockResolvedValue({ ok: false, message: 'actual host rejected' })
+    vi.stubGlobal('window', { desktopAPI: { dynamicAdmission: admission } })
+    try {
+      await expect(f.coordinator.prepare(f.request, f.candidate)).rejects.toThrow('actual host rejected')
+      expect(admission).toHaveBeenCalledOnce()
+      expect(admission.mock.calls[0]![0]).toMatchObject({ operation: 'run', payload: {
+        targets: [{ locationId: f.next.locations[1]!.id, instanceIds: ['new-runtime'] }], assetFiles: { fallback: png },
+      } })
+      expect(f.commits).toHaveLength(0); expect(f.read().document).toEqual(f.project)
+    } finally { vi.unstubAllGlobals() }
+  })
+  it('discovers another page while keeping the first prompt focused, and commits two editable objects with save/reopen/undo/redo', async () => {
+    const f = fixture()
+    expect(f.request.destinations.some(d => d.kind === 'update' && d.target.itemId === 'other-square')).toBe(true)
+    expect((generationInitialRequestForPrompt(f.request).context as any).pages).toHaveLength(1)
+    expect((generationInitialRequestForPrompt(f.request).context as any).pages[0].items).toHaveLength(1)
+    const preview = await f.coordinator.prepare(f.request, f.candidate)
+    expect(f.commits).toHaveLength(0)
+    expect(f.coordinator.apply(preview.previewId).status).toBe('committed')
+    expect(f.commits).toHaveLength(1)
+    expect((f.read().document.surfaces[0] as any).scenes[0]).toEqual((f.project.surfaces[0] as any).scenes[0])
+    const reopened = openCourseProjectArchive(createCourseProjectArchive({ project: f.read().document, assetFiles: {}, componentFiles: {} }))
+    expect(reopened.project.surfaces[0]).toEqual(f.next.surfaces[0])
+    expect(reopened.project.revision).toBe(f.project.revision + 1)
+    expect(() => buildPublishedCourseV2Payload({ project: reopened.project, assetFiles: {}, components: {} })).not.toThrow()
+    f.undo(); expect(f.read().document).toEqual(f.project)
+    f.redo(); expect(f.read().document).toEqual(reopened.project)
+    expect(f.coordinator.apply(preview.previewId).status).toBe('stale')
+  })
+
+  it.each(['foreign-id', 'stale-revision', 'broken-resource', 'unknown-field'])('rejects %s without document or resource writes', async mode => {
+    const f = fixture(), document = f.candidate.steps[0]!.input.artifact.document as any
+    if (mode === 'foreign-id') document.id = 'foreign'
+    if (mode === 'stale-revision') document.revision++
+    if (mode === 'unknown-field') document.unknownField = true
+    if (mode === 'broken-resource') {
+      document.surfaces[0].scenes[1].layerItems[0].content = { nativeType: 'image', data: { assetId: 'missing', fit: 'contain' } }
+    }
+    await expect(f.coordinator.prepare(f.request, f.candidate)).rejects.toThrow()
+    expect(f.commits).toHaveLength(0); expect(f.read().document).toEqual(f.project)
+  })
+})

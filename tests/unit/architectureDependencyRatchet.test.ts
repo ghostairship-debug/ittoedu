@@ -734,8 +734,8 @@ describe('ARCH-2 Runtime and Interaction ratchet', () => {
     expect(source('src/renderer/store/slices/spatialAuthoringSlice.ts')).toContain('export function persistSpatialResult')
     expect(source('src/renderer/store/courseResourceState.ts')).toContain('commitCourseResourceState')
     expect(source('src/renderer/composition/surfaceRouter.ts')).toContain('planActivateCourseLocation')
-    expect(source('src/renderer/authoring/v9TeacherControllerAuthoring.ts')).not.toMatch(/\buseEditorStore\b/)
-    expect(source('src/renderer/authoring/v9TeacherControllerAuthoring.ts')).toContain('TeacherControllerAuthoringPorts')
+    expect(source('src/renderer/components/teacherControllerComponent.ts')).not.toMatch(/\buseEditorStore\b/)
+    expect(source('src/renderer/components/teacherControllerComponent.ts')).toContain('planTeacherControllerComponentEdit')
   })
 })
 
@@ -777,7 +777,7 @@ describe('r11-055 architecture modularity gate', () => {
       'src/renderer/media/commitCourseMediaAuthoring.ts',
       'src/renderer/components/commitComponentPackageAuthoring.ts',
       'src/renderer/interactions/commitInteractionAuthoring.ts',
-      'src/renderer/authoring/v9TeacherControllerAuthoring.ts',
+      'src/renderer/components/teacherControllerComponent.ts',
       'src/renderer/composition/surfaceRouter.ts',
       'src/renderer/store/editorStoreKernel.ts',
       'src/renderer/store/courseResourceState.ts',
@@ -924,7 +924,7 @@ describe('r11-055 architecture modularity gate', () => {
       ['fixture/a.ts', ['fixture/b.ts']],
       ['fixture/b.ts', ['fixture/a.ts']],
     ]))).toEqual(['fixture/a.ts -> fixture/b.ts -> fixture/a.ts'])
-    const teacher = source('src/renderer/authoring/v9TeacherControllerAuthoring.ts')
+    const teacher = source('src/renderer/components/teacherControllerComponent.ts')
     expect(teacher).not.toMatch(/\buseEditorStore\b/)
     expect(runtimeImportSpecifiers(teacher).filter((specifier) => /editorStore/.test(specifier))).toEqual([])
 
@@ -940,7 +940,7 @@ describe('r11-055 architecture modularity gate', () => {
       'src/renderer/store/slices/editorShellSlice.ts',
       'src/renderer/composition/crossSurfaceCommands.ts',
       'src/renderer/composition/surfaceRouter.ts',
-      'src/renderer/authoring/v9TeacherControllerAuthoring.ts',
+      'src/renderer/components/teacherControllerComponent.ts',
       'src/renderer/runtime/commitRuntimeAuthoring.ts',
       'src/renderer/media/commitCourseMediaAuthoring.ts',
       'src/renderer/components/commitComponentPackageAuthoring.ts',

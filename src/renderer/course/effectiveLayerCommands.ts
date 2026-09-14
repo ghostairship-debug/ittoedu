@@ -20,7 +20,6 @@ import type {
 import type { TextNode } from '../../shared/contracts/native-v1'
 import type { NativeLineGeometry } from '../../shared/contracts/native-v1/types'
 import { convertLineGeometryForShapeType } from '../../shared/nativeLineGeometry'
-import { constrainTeacherControllerAuthoringFrame } from '../../shared/teacherControllerLayout'
 import { synchronizeCourseTeacherControllerControls } from '../../shared/teacherControllerConsistency'
 import { nativeLayerTextAutoSizeFrame } from '../authoring/nativeTextLayout'
 import {
@@ -741,16 +740,7 @@ function normalizeEffectiveLayerPropertyPatch(
 
   const textFrame = nativeLayerTextAutoSizeFrame(item, { frame, nativeTextStyle, nativeData })
   const sizedFrame = Object.keys(textFrame).length > 0 ? { ...frame, ...textFrame } : frame
-  const normalizedFrame = source === 'global' &&
-    isTeacherControllerLayerItem(item) &&
-    ((frame !== undefined && Object.keys(frame).length > 0) || patch.rotation !== undefined)
-    ? constrainTeacherControllerAuthoringFrame(
-        item.content.data,
-        { ...item.frame, ...frame },
-        patch.rotation ?? item.rotation,
-        { width: CANVAS_WIDTH, height: CANVAS_HEIGHT },
-      )
-    : sizedFrame
+  const normalizedFrame = sizedFrame
 
   const normalized: EffectiveLayerPropertyPatch = {
     ...(patch.label !== undefined ? { label: label!.slice(0, 200) } : {}),

@@ -39,6 +39,8 @@ export const flowAuthoringToolInputSchema = z.discriminatedUnion('operation', [
   z.object({ operation: z.literal('insert'), block: newBlock }).strict(),
   z.object({ operation: z.literal('replace'), block: flowBlockSchema }).strict(),
   z.object({ operation: z.literal('edit'), text: z.string().optional(),
+    image: z.object({ assetId: z.string().min(1) }).strict().optional(),
+    formula: nativeContentInputSchemaByType.formula.pick({ ast: true, accessibleText: true }).extend({ accessibleText: z.string().trim().min(1).max(4_000) }).strict().optional(),
     textStyle: nativeContentInputSchemaByType.text.shape.runs.element.shape.style.optional(),
     textAlign: z.enum(['left', 'center', 'right']).optional(), lineSpacing: z.number().finite().min(0).max(200).optional() }).strict()
     .refine(value => Object.keys(value).length > 1, '正文窄编辑至少提供一个字段'),
@@ -49,7 +51,7 @@ export const flowAuthoringToolInputSchema = z.discriminatedUnion('operation', [
 
 export const flowAuthoringTool: AuthoringToolDefinition<z.infer<typeof flowAuthoringToolInputSchema>> = {
   name: 'flow.content',
-  description: 'insert 使用 create parent:flow-body；block 采用 replace.block 的完整 Schema，只省略最外层 id（由宿主生成）。修改标题、段落或引用块的文字和字号优先使用 edit 的 text/textStyle/textAlign/lineSpacing，仅提供改变字段，其余排版、富文本和元数据保留。replace/delete/move 使用 Flow block update target；replace 必须保留原 id 和类型。完整载体替换使用 selection.replace。',
+  description: '新Flow默认fluid，沿实际容器排版；已有Flow保留其layout。普通标题、正文、图片和互动放正文block以自然占位，不用viewport绝对文字替代。insert使用create parent:flow-body，block只省略宿主生成的id。修改标题、段落或引用块优先edit的text/textStyle/textAlign/lineSpacing；公式用edit.formula的ast和accessibleText，保留formulaId；图片用edit.image.assetId，保留正文布局、说明和块身份。常规图片应用优先media.apply。未指定排版、富文本和元数据保留。replace/delete/move使用Flow block update target；replace必须保留id和类型。完整载体替换使用selection.replace。',
   inputSchema: flowAuthoringToolInputSchema,
   plan({ document, destination, value }) {
     const { target, surface } = resolveAuthoringToolScope(document, destination)
@@ -80,7 +82,13 @@ export const flowAuthoringTool: AuthoringToolDefinition<z.infer<typeof flowAutho
       if (value.operation === 'delete') result = deleteFlowEditorBlock(document, blockTarget, options)
       else if (value.operation === 'move') result = moveFlowEditorBlock(document, blockTarget, { parentId: value.parentId, index: value.index }, options)
       else {
-        if (value.operation === 'edit' && block.type !== 'heading' && block.type !== 'paragraph' && block.type !== 'quote') throw new Error('正文文字窄编辑只接受标题、段落或引用块')
+        if (value.operation === 'edit') {
+          const textFields = value.text !== undefined || value.textStyle !== undefined || value.textAlign !== undefined || value.lineSpacing !== undefined
+          if ([textFields, value.image !== undefined, value.formula !== undefined].filter(Boolean).length !== 1) throw new Error('一次正文窄编辑只能修改一种内容类型')
+          if (textFields && block.type !== 'heading' && block.type !== 'paragraph' && block.type !== 'quote') throw new Error('正文文字窄编辑只接受标题、段落或引用块')
+          if (value.formula && block.type !== 'formula') throw new Error('正文公式窄编辑只接受公式块')
+          if (value.image && (block.type !== 'media' || block.mediaKind !== 'image' || document.assets[value.image.assetId]?.kind !== 'image')) throw new Error('正文图片窄编辑需要图片块和有效图片资产')
+        }
         const replacement = value.operation === 'edit' && (block.type === 'heading' || block.type === 'paragraph' || block.type === 'quote')
           ? (() => {
             const text = value.text ?? block.text
@@ -89,6 +97,8 @@ export const flowAuthoringTool: AuthoringToolDefinition<z.infer<typeof flowAutho
               ...(block.runs !== undefined || value.textStyle ? { runs: value.textStyle ? applyTextRunStyle(text, runs, 0, Array.from(text).length, value.textStyle) : runs } : {}),
               ...(value.textAlign !== undefined ? { textAlign: value.textAlign } : {}), ...(value.lineSpacing !== undefined ? { lineSpacing: value.lineSpacing } : {}) })
           })()
+          : value.operation === 'edit' && value.image && block.type === 'media' ? { ...block, assetId: value.image.assetId }
+          : value.operation === 'edit' && value.formula && block.type === 'formula' ? { ...block, ...value.formula }
           : value.operation === 'table-structure'
           ? block.type === 'table' ? changeFlowTableStructure(block, value.change) : null
           : value.operation === 'replace' ? value.block : null

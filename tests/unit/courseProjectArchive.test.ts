@@ -1,3 +1,4 @@
+import { isControllerFixture } from '../fixtures/teacherController'
 import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -694,17 +695,16 @@ describe('createBlankCourseProject', () => {
       sceneId: project.startLocationId,
     })
     expect(project.globalLayerItems.some((entry) => (
-      entry.item.kind === 'native' && entry.item.content.nativeType === 'teacher-controller'
+      isControllerFixture(entry.item)
     ))).toBe(true)
     const controller = project.globalLayerItems.find((entry) => (
-      entry.item.kind === 'native' && entry.item.content.nativeType === 'teacher-controller'
+      isControllerFixture(entry.item)
     ))
-    if (!controller || controller.item.kind !== 'native' ||
-      controller.item.content.nativeType !== 'teacher-controller') {
+    if (!controller || !isControllerFixture(controller.item)) {
       throw new Error('expected teacher controller')
     }
     expect(controller.plane).toBe('overlay')
-    expect(controller.item.content.data.defaultCollapsed).toBe(true)
+    expect(controller.item.props.defaultCollapsed).toBe(true)
     expect(courseProjectDocumentSchema.parse(structuredClone(project))).toEqual(project)
     expect(courseProjectDocumentSchema.parse(structuredClone(aliased))).toEqual(aliased)
   })
@@ -718,13 +718,12 @@ describe('createBlankCourseProject', () => {
         now: NOW,
       })
       const controller = project.globalLayerItems.find((entry) => (
-        entry.item.kind === 'native' && entry.item.content.nativeType === 'teacher-controller'
+        isControllerFixture(entry.item)
       ))
-      if (!controller || controller.item.kind !== 'native' ||
-        controller.item.content.nativeType !== 'teacher-controller') {
+      if (!controller || !isControllerFixture(controller.item)) {
         throw new Error('expected teacher controller')
       }
-      controller.item.content.data.defaultCollapsed = defaultCollapsed
+      controller.item.props.defaultCollapsed = defaultCollapsed
       const revisionBeforeSave = project.revision
 
       const bytes = createCourseProjectArchive({
@@ -734,15 +733,14 @@ describe('createBlankCourseProject', () => {
       }, { mtime: NOW })
       const reopened = openCourseProjectArchive(bytes)
       const reopenedController = reopened.project.globalLayerItems.find((entry) => (
-        entry.item.kind === 'native' && entry.item.content.nativeType === 'teacher-controller'
+        isControllerFixture(entry.item)
       ))
-      if (!reopenedController || reopenedController.item.kind !== 'native' ||
-        reopenedController.item.content.nativeType !== 'teacher-controller') {
+      if (!reopenedController || !isControllerFixture(reopenedController.item)) {
         throw new Error('expected reopened teacher controller')
       }
 
       expect(reopenedController.plane).toBe('overlay')
-      expect(reopenedController.item.content.data.defaultCollapsed).toBe(defaultCollapsed)
+      expect(reopenedController.item.props.defaultCollapsed).toBe(defaultCollapsed)
       expect(reopened.project.revision).toBe(revisionBeforeSave)
       expect(reopened.project).toEqual(project)
     },

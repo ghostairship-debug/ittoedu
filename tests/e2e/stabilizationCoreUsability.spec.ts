@@ -1,3 +1,4 @@
+import { isControllerFixture } from '../fixtures/teacherController'
 import {
   existsSync,
   mkdtempSync,
@@ -40,7 +41,7 @@ import {
   CANVAS_HEIGHT,
   CANVAS_WIDTH,
 } from '../../src/shared/constants'
-import { teacherControllerAuthoringRecoveryBounds } from '../../src/shared/teacherControllerLayout'
+import { rotatedRectangleAabb } from '../../src/shared/geometry'
 import { BACKGROUND_E2E_ENV } from '../../src/main/windowVisibility'
 import { expectBackgroundWindowsIsolated } from './expectBackgroundWindowsIsolated'
 
@@ -60,9 +61,7 @@ interface LaunchedEditor extends Diagnostics {
   runRoot: string
 }
 
-type TeacherControllerItem = NativeLayerItem & {
-  content: Extract<NativeLayerItem['content'], { nativeType: 'teacher-controller' }>
-}
+type TeacherControllerItem = import('../fixtures/teacherController').ControllerFixture
 
 function removeRunRoot(runRoot: string): void {
   const absolute = resolve(runRoot)
@@ -292,9 +291,9 @@ function teacherControllerRows(page: Page): Locator {
 
 function teacherController(project: CourseProjectDocument): TeacherControllerItem {
   const item = project.globalLayerItems.find((entry) => (
-    entry.item.kind === 'native' && entry.item.content.nativeType === 'teacher-controller'
+    isControllerFixture(entry.item)
   ))?.item
-  if (!item || item.kind !== 'native' || item.content.nativeType !== 'teacher-controller') {
+  if (!item || !isControllerFixture(item)) {
     throw new Error('Saved project is missing its global teacher controller')
   }
   return item as TeacherControllerItem
@@ -655,14 +654,48 @@ test('S3 聊天失败注入：一次修复、无进展停止、取消与人工�
     // The dedicated AI undo is disabled during a task. A real editor undo must
     // still invalidate a candidate captured against the pre-undo revision.
     await page.getByRole('button', { name: '撤销（Ctrl+Z）', exact: true }).click()
-    await expect(chat.getByRole('alert')).toContainText('stale', { timeout: 10000 })
+    await expect(chat.getByRole('alert')).toContainText('课件或任务已变化，本次未应用的修改已丢弃', { timeout: 10000 })
     await expect(chat.getByLabel('会话', { exact: true })).toBeEnabled()
     expect(fixture.runs()).toHaveLength(7)
     expect(await saveCurrent(page, filename)).toEqual(original)
     const records = await page.evaluate(owner => window.desktopAPI.localAgent({ operation: 'list', ...owner }), { projectId: original.id, projectPath: filename })
-    expect(records.records?.map(record => record.hostResult?.status)).toEqual(expect.arrayContaining(['committed', 'rejected', 'stale']))
+    expect(records.records?.map(record => record.hostResult?.status)).toEqual(expect.arrayContaining(['committed', 'rejected']))
+    // Undo invalidates this task before its delayed candidate enters host preparation.
+    // No candidate result should be invented for a turn that was cancelled while waiting.
+    const invalidatedRequestId = fixture.runs()[6].requestId
+    const invalidatedRecord = async () => {
+      const value = await page.evaluate(owner => window.desktopAPI.localAgent({ operation: 'list', ...owner }), { projectId: original.id, projectPath: filename })
+      const record = value.records?.find(record => record.generationRequestId === invalidatedRequestId)
+      return record ? readSession(record.id) : undefined
+    }
+    await expect.poll(async () => (await invalidatedRecord())?.status).toBe('cancelled')
+    expect((await invalidatedRecord())?.hostResult).toBeUndefined()
+    expect((await invalidatedRecord())?.task?.committedStages).toBe(0)
+    await expect.poll(() => Date.now(), { timeout: 6000 }).toBeGreaterThan(fixture.runs()[6].lateAt!)
+    expect(await saveCurrent(page, filename)).toEqual(original)
+    expect(fixture.runs()).toHaveLength(7)
+    await expect(chat.getByRole('button', { name: '应用候选', exact: true })).toHaveCount(0)
     await send()
-    await expect.poll(() => fixture!.runs().length).toBe(8)
+    try {
+      await expect.poll(() => fixture!.runs().length).toBe(8)
+    } finally {
+      const diagnosticRoot = join(root, 'output', 'r18-ux', `failure-injection-${new Date().toISOString().replace(/[:.]/g, '-')}`)
+      mkdirSync(diagnosticRoot, { recursive: true })
+      const snapshots = await Promise.allSettled([
+        chat.ariaSnapshot(),
+        chat.getByRole('alert').allTextContents(),
+        page.evaluate(async owner => {
+          const listed = await window.desktopAPI.localAgent({ operation: 'list', ...owner })
+          return Promise.all((listed.records ?? []).map(record => window.desktopAPI.localAgent({ operation: 'read', ...owner, sessionId: record.id, after: 0 })))
+        }, { projectId: original.id, projectPath: filename }),
+        page.screenshot({ path: join(diagnosticRoot, 'after-eighth-send.png') }),
+      ])
+      writeFileSync(join(diagnosticRoot, 'after-eighth-send.json'), JSON.stringify({
+        fixtureRuns: fixture.runs(), pageErrors: launch.pageErrors,
+        snapshots: snapshots.slice(0, 3).map(result => result.status === 'fulfilled' ? result.value : { error: String(result.reason) }),
+      }, null, 2))
+      console.log(`Failure-injection diagnostic: ${diagnosticRoot}`)
+    }
     const newPath = join(runRoot, 'new-workspace.h5lesson')
     expect(await saveAs(app, page, newPath)).toEqual(original)
     await expect.poll(async () => {
@@ -727,7 +760,7 @@ test('S3 候选格式：非法JSON与缺通道共用一次修复预算', async (
   } finally { await fixture.restore(); await closeEditor(app, runRoot) }
 })
 
-test('S3 默认可见与普通讨论：安全消息、分页事件重放及零工程写入', async () => {
+test('S3 默认可见与普通讨论：安全消息、完整历史及零工程写入', async () => {
   test.setTimeout(90000)
   const server = await createServer({ configFile: join(root, 'vite.renderer.config.ts'), server: { host: '127.0.0.1', port: 0, strictPort: false, hmr: false, watch: { ignored: ['**/output/**', '**/test-results/**'] } } })
   await server.listen()
@@ -750,7 +783,8 @@ test('S3 默认可见与普通讨论：安全消息、分页事件重放及零�
     await expect(chat.getByRole('heading', { name: '只讨论，不修改课件' })).toBeVisible({ timeout: 20000 })
     await expect(chat.getByRole('button', { name: '发送输入', exact: true })).toBeDisabled()
     await expect(chat.getByLabel('会话', { exact: true })).toBeEnabled({ timeout: 10000 })
-    await expect(chat.getByText('诊断详情（215 个原生事件）', { exact: true })).toBeVisible()
+    await expect(chat.getByText(/诊断详情|原生事件/)).toHaveCount(0)
+    await expect(chat.locator('.chat-transcript [data-message-id]')).toHaveCount(2)
     await expect(chat.getByRole('button', { name: '应用候选', exact: true })).toHaveCount(0)
     expect(await saveCurrent(page, filename)).toEqual(original)
     expect(await page.evaluate(() => Reflect.get(window, '__unsafeChatExecuted'))).toBeUndefined()
@@ -760,16 +794,16 @@ test('S3 默认可见与普通讨论：安全消息、分页事件重放及零�
     const id = await chat.getByLabel('会话', { exact: true }).inputValue()
     await chat.getByLabel('会话', { exact: true }).selectOption('')
     await chat.getByLabel('会话', { exact: true }).selectOption(id)
-    const summary = chat.getByText('诊断详情（215 个原生事件）', { exact: true })
-    await expect(summary).toBeVisible(); await summary.click()
-    const timeline = summary.locator('..')
-    await expect(timeline.locator('ol > li')).toHaveCount(100)
-    await timeline.getByRole('button', { name: '显示更早的事件' }).click()
-    await timeline.getByRole('button', { name: '显示更早的事件' }).click()
-    const sequences = await timeline.locator('ol > li').evaluateAll(items => items.map(item => item.textContent!.match(/^#(\d+)/)![1]))
-    expect(sequences).toHaveLength(215)
-    expect(new Set(sequences).size).toBe(215)
-    expect(sequences[0]).toBe('1'); expect(sequences.at(-1)).toBe('215')
+    await expect(chat.getByText(/诊断详情|原生事件/)).toHaveCount(0)
+    await expect(chat.getByRole('heading', { name: '只讨论，不修改课件' })).toBeVisible()
+    await expect(chat.getByText('平均分是分数的前提。', { exact: true })).toBeVisible()
+    await expect(chat.locator('.chat-transcript [data-message-id]')).toHaveCount(2)
+    await expect(chat.getByRole('region', { name: '用户消息' })).toHaveText(/讨论如何解释平均分，先不修改课件。/)
+    const recorded = (await page.evaluate(input => window.desktopAPI.localAgent(input), {
+      operation: 'read' as const, sessionId: id, after: 200, projectId: original.id, projectPath: filename,
+    })).records![0]!
+    expect(recorded.events.length).toBeGreaterThan(0)
+    expect(recorded.events.some(event => event.kind === 'completed')).toBe(true)
     expect(await saveCurrent(page, filename)).toEqual(original)
     expect(launch.pageErrors).toEqual([])
   } finally {
@@ -2404,11 +2438,7 @@ test('Wave A core authoring remains usable across Mixed surfaces', async () => {
       const afterClamp = await saveCurrent(page, projectPath)
       expect(afterClamp.revision).toBe(baseline.revision + 1)
       const clampedController = teacherController(afterClamp)
-      const recovery = teacherControllerAuthoringRecoveryBounds(
-        clampedController.content.data,
-        clampedController.frame,
-        clampedController.rotation,
-      )
+      const recovery = rotatedRectangleAabb({ ...clampedController.frame, rotation: clampedController.rotation })
       expect(recovery.left).toBeGreaterThanOrEqual(-0.01)
       expect(recovery.top).toBeGreaterThanOrEqual(-0.01)
       expect(recovery.right).toBeLessThanOrEqual(CANVAS_WIDTH + 0.01)
@@ -2437,7 +2467,7 @@ test('Wave A core authoring remains usable across Mixed surfaces', async () => {
         .toContainText(FLOW_SELECTION_TEXT)
 
       await openSlide(page)
-      await page.getByRole('button', { name: '全屏 16:9 整课预览' }).click()
+      await page.getByRole('button', { name: '整课预览' }).click()
       const preview = page.getByTestId('course-preview-overlay')
       const previewHost = page.getByTestId('course-preview-host')
       await expect(preview).toBeVisible()
@@ -2709,7 +2739,7 @@ test('S3 三表面整合：控制器保全与响应式浮层几何', async () =>
     if (!mixed.ok) throw new Error(mixed.reason)
     const project = mixed.project
     const original = project.locations[0]!
-    const controller = project.globalLayerItems.find(entry => entry.item.kind === 'native' && entry.item.content.nativeType === 'teacher-controller')!
+    const controller = project.globalLayerItems.find(entry => isControllerFixture(entry.item))!
     controller.visibility = { mode: 'include', locationIds: [original.id] }
     const flow = project.surfaces.find(surface => surface.type === 'flow')!
     if (flow.type !== 'flow') throw new Error('Missing Flow')

@@ -8,6 +8,8 @@ import { dynamicBehaviorFrameSchema, type DynamicBehaviorObservation } from '../
 
 const frameSchema = dynamicBehaviorFrameSchema.pick({ dataUrl: true, capturedAt: true, width: true, height: true })
 let frameSequence = 0
+let completedTargets = 0
+Object.defineProperty(window, '__COURSEWARE_ADMISSION_PROGRESS__', { writable: false, value: () => completedTargets })
 let pendingFrame: { id: number; resolve(frame: ReturnType<typeof frameSchema.parse>): void } | null = null
 let pendingButton: { id: number; x: number; y: number; resolve(): void } | null = null
 Object.defineProperty(window, '__COURSEWARE_ADMISSION_PENDING_BUTTON__', { writable: false, value: () => pendingButton ? { id: pendingButton.id, x: pendingButton.x, y: pendingButton.y } : null })
@@ -31,7 +33,8 @@ Object.defineProperty(window, '__COURSEWARE_ADMISSION_RUN__', { configurable: fa
       const input = dynamicAdmissionPayloadSchema.parse(raw)
       installBundledFontFaces()
       await ensureBundledFonts()
-      const assetFiles = Object.fromEntries(Object.entries(input.assetFiles).map(([id, value]) => [id, decode(value)]))
+      completedTargets = 0
+      const assetFiles = Object.fromEntries(Object.entries(input.assetFiles).map(([id, value]) => [id, typeof value === 'string' ? decode(value) : value]))
       const componentPackages = Object.fromEntries(Object.entries(input.componentFiles).map(([id, files]) => [id,
         parseComponentPackageFiles(Object.fromEntries(Object.entries(files).map(([name, value]) => [name, decode(value)])))]))
       const failures: string[] = []
@@ -43,6 +46,7 @@ Object.defineProperty(window, '__COURSEWARE_ADMISSION_RUN__', { configurable: fa
       let captures: readonly DynamicInstanceCapture[] = []
       try {
         captures = await runDynamicCandidateHostSmoke(input.project, { assetFiles, componentPackages }, input.targets, input.captureInstances, {
+          assetResources: input.assetResources, onTargetComplete: () => { completedTargets++ },
           verificationMode: input.verificationMode, onBehaviorEvidence: evidence => behaviorEvidence.push(...evidence),
           ...(input.buttonCheck ? { buttonCheck: input.buttonCheck } : {}),
           ...(input.observeBehavior ? { capturePort: { captureFrame: () => new Promise<ReturnType<typeof frameSchema.parse>>(resolve => {

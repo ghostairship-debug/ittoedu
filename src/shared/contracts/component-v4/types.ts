@@ -220,6 +220,8 @@ export interface ComponentEditorHost {
 }
 
 interface ComponentCreateContextV4Base {
+  /** Optional role-scoped port; never available to ordinary component instances. */
+  teacherController?: import('./teacherController').ComponentTeacherControllerPort
   runtimeApiVersion: 4
   renderMode: ComponentRenderMode
   instanceId: string

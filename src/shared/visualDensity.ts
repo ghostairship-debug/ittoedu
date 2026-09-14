@@ -79,7 +79,7 @@ export function analyzeVisualDensityState(
   input: AnalyzeVisualDensityStateInput,
 ): VisualDensityStateReport {
   const nodes = input.nodes.filter(
-    (node) => node.visible && node.type !== 'teacher-controller',
+    (node) => node.visible,
   )
   const bounds = nodes.map((node) => rotatedRectangleAabb(node))
   const canvasArea = input.canvas.width * input.canvas.height

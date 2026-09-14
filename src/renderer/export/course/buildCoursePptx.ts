@@ -1,4 +1,5 @@
 import { APP_COMPANY, APP_NAME } from '../../../shared/constants'
+import { omitTeacherControllerFromStaticExport } from '../../../shared/teacherControllerRole'
 import { applyPptxShapeExtensions, type PptxShapeExtensions } from '../pptxShapeGeometry'
 import type PptxGenJS from 'pptxgenjs'
 import { resolveEffectiveBackground } from '../../../shared/effectiveBackground'
@@ -355,23 +356,6 @@ async function addNativeItem(
   } else if (node.type === 'video') {
     addPlaceholder(slide, item, scale, `▶ 视频\n${item.layerItemId}`)
     sceneWarnings.push(`视频“${item.layerItemId}”在 PPTX 中使用可选择占位，不保留播放交互。`)
-  } else if (node.type === 'teacher-controller') {
-    if (!node.includeInStaticExports) return
-    slide.addText(node.title, {
-      ...pptxNodePosition(node, scale),
-      rotate: pptxRotation(node.rotation),
-      color: pptxColor(node.style.textColor, 'F8FAFC'),
-      fill: {
-        color: pptxColor(node.style.backgroundColor, '172033'),
-        transparency: pptxTransparency(node.style.backgroundOpacity),
-      },
-      line: { color: pptxColor(node.style.accentColor, 'E7B85C'), width: 1 },
-      fontFace: 'Microsoft YaHei',
-      fontSize: 13,
-      align: 'center',
-      valign: 'middle',
-      objectName: `${item.layerItemId} · 教师控制器`,
-    })
   } else {
     addPlaceholder(slide, item, scale, `不受支持的原生对象\n${item.layerItemId}`)
     sceneWarnings.push(
@@ -421,9 +405,7 @@ function locationVisibilityApplies(
 }
 
 function omittedFromStaticPptx(item: PublishedLayerItem): boolean {
-  return item.kind === 'native'
-    && item.content.nativeType === 'teacher-controller'
-    && !item.content.data.includeInStaticExports
+  return omitTeacherControllerFromStaticExport(item)
 }
 
 function publishedSpatialWorldNotice(

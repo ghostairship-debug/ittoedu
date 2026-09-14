@@ -1,6 +1,6 @@
 import type { CourseProjectDocument, FlowBlock, LayerItem } from '../../../shared/courseProjectTypes'
 import type { HistoryResourceState } from '../../store/courseResourceState'
-import { buildPublishedCourseV2Payload, collectPublishedCourseSourceIssues } from '../../export/course/buildPublishedCourse'
+import { buildPublishedCourseV2Payload, collectPublishedCourseSourceIssues, collectPublishedCourseComponentKeys } from '../../export/course/buildPublishedCourse'
 import { AuthoringToolFailure } from './executeAuthoringTool'
 import { capturePublishedSurfacePng, waitForPublishedObservationReady } from '../../../player/surfaces/publishedCapture'
 import { bytesToBase64 } from '../../export/base64'
@@ -10,11 +10,14 @@ import { DYNAMIC_BEHAVIOR_SAMPLING, dynamicBehaviorObservationSchema, dynamicBut
 import { resolveRuntimeDomButton } from '../generation/runtimeDomControlObservation'
 import { componentRuntimeSourceIdentity } from '../../../shared/componentRegistryIdentity'
 import { validateDynamicCandidateFallbackAssets } from './dynamicCandidateFallbackAssets'
+import { dynamicAdmissionScope } from './dynamicAdmissionScope'
 
 export interface DynamicVerificationOptions {
   verificationMode?: 'full-admission' | 'public-props'
   buttonCheck?: DynamicButtonCheck
   onBehaviorEvidence?: (evidence: readonly DynamicBehaviorObservation[]) => void
+  assetResources?: Readonly<Record<string, { url: string; byteLength: number }>>
+  onTargetComplete?: () => void
 }
 export interface DynamicBehaviorCapturePort {
   captureFrame(): Promise<{ dataUrl: string; capturedAt: number; width: number; height: number }>
@@ -97,12 +100,16 @@ export async function admitDynamicCandidate(project: CourseProjectDocument, reso
   targets: readonly { locationId: string; stateId?: string | null; instanceIds: readonly string[] }[], signal?: AbortSignal,
   captureInstances = false, options: DynamicVerificationOptions = {}): Promise<readonly DynamicInstanceCapture[]> {
   if (signal?.aborted) throw new Error('动态准入已取消')
+  // A click can navigate beyond the initial target; retain its real destination.
+  if (!options.buttonCheck) project = dynamicAdmissionScope(project, targets.map(target => target.locationId))
+  const packages = collectPublishedCourseComponentKeys(project)
+  resources = { ...resources, componentPackages: Object.fromEntries(Object.entries(resources.componentPackages).filter(([, pkg]) => packages.has(`${pkg.manifest.id}@${pkg.manifest.version}`))) }
   const api = typeof window !== 'undefined' ? window.desktopAPI?.dynamicAdmission : undefined
   if (!api) return runDynamicCandidateHostSmoke(project, resources, targets, captureInstances, options)
   const id = crypto.randomUUID()
   const payload = { project, captureInstances, observeBehavior: true, verificationMode: options.verificationMode ?? 'full-admission',
     ...(options.buttonCheck ? { buttonCheck: dynamicButtonCheckSchema.parse(options.buttonCheck) } : {}), targets: targets.map(target => ({ ...target, instanceIds: [...target.instanceIds] })),
-    assetFiles: Object.fromEntries(Object.entries(resources.assetFiles).map(([key, bytes]) => [key, bytesToBase64(bytes)])),
+    assetFiles: Object.fromEntries(Object.entries(resources.assetFiles).map(([id, bytes]) => [id, new Uint8Array(bytes)])),
     componentFiles: Object.fromEntries(Object.entries(resources.componentPackages).map(([key, data]) => [key,
       Object.fromEntries(Object.entries(data.files).map(([name, bytes]) => [name, bytesToBase64(bytes)]))])) }
   const cancel = () => { void api({ operation: 'cancel', id }).catch(() => {}) }
@@ -130,11 +137,11 @@ export async function runDynamicCandidateHostSmoke(project: CourseProjectDocumen
   options: DynamicVerificationOptions & { capturePort?: DynamicBehaviorCapturePort } = {}): Promise<readonly DynamicInstanceCapture[]> {
   if (options.buttonCheck && (options.verificationMode === 'public-props' || !options.capturePort?.clickAt
     || targets.filter(target => target.instanceIds.includes(options.buttonCheck!.instanceId)).length !== 1)) throw new Error('按钮检查需要唯一候选目标和真实独立窗口输入端口')
-  await validateDynamicCandidateFallbackAssets(project, resources, targets.flatMap(target => target.instanceIds))
+  await validateDynamicCandidateFallbackAssets(project, resources, targets.flatMap(target => target.instanceIds), options.assetResources)
   const captures: DynamicInstanceCapture[] = []
   const observed: DynamicBehaviorObservation[] = []
   let captureBytes = 0
-  const sources = { project, assetFiles: resources.assetFiles, components: resources.componentPackages }
+  const sources = { project, assetFiles: resources.assetFiles, components: resources.componentPackages, assetResources: options.assetResources }
   const fullAdmission = options.verificationMode !== 'public-props'
   const issues = fullAdmission ? collectPublishedCourseSourceIssues(sources) : []
   if (issues.length) throw new AuthoringToolFailure(issues.map(issue => ({ ...issue, path: issue.path.map(String) })))
@@ -142,18 +149,22 @@ export async function runDynamicCandidateHostSmoke(project: CourseProjectDocumen
     throw new Error('动态工具需要产品浏览器中的真实 Published 宿主准入')
   }
   const { createPublishedCourseSession } = await import('../../../player/surfaces/publishedDynamicHosts')
+  const payload = buildPublishedCourseV2Payload({ ...sources, project: admissionProjection(project, targets.flatMap(target => [...target.instanceIds])) })
+  const root = document.createElement('div')
+  Object.assign(root.style, { position: 'fixed', left: options.capturePort ? '0' : '-1400px', top: '0', width: '1280px', height: '720px', pointerEvents: 'none' })
+  root.setAttribute('aria-hidden', 'true')
+  document.body.append(root)
+  const failures: string[] = []
+  const exercised = new Set<string>()
+  let session: ReturnType<typeof createPublishedCourseSession> | undefined
+  let runFailure: unknown
+  try {
   for (const { locationId, stateId, instanceIds } of targets) {
-    const payload = buildPublishedCourseV2Payload({ ...sources, project: admissionProjection(project, instanceIds) })
     const location = project.locations.find((entry) => entry.id === locationId)
     if (!location) throw new Error(`动态准入位置已失效：${locationId}`)
     const surface = project.surfaces.find(entry => entry.id === location.surfaceId)
     const initialStateId = stateId ?? (surface?.type === 'slide' && location.kind === 'slide-scene'
       ? surface.scenes.find(entry => entry.id === location.sceneId)?.presentation?.initialStateId : undefined)
-    const root = document.createElement('div')
-    Object.assign(root.style, { position: 'fixed', left: options.capturePort ? '0' : '-1400px', top: '0', width: '1280px', height: '720px', pointerEvents: 'none' })
-    root.setAttribute('aria-hidden', 'true')
-    document.body.append(root)
-    const failures: string[] = []
     const frames: DynamicBehaviorFrame[] = []
     const actions: DynamicBehaviorObservation['actions'] = []
     let buttonClick: DynamicButtonObservation | undefined
@@ -162,22 +173,39 @@ export async function runDynamicCandidateHostSmoke(project: CourseProjectDocumen
     const observation = () => frames.length ? dynamicBehaviorObservationSchema.parse({ version: 1, status: 'observed', mode: fullAdmission ? 'full-admission' : 'public-props',
       projectId: project.id, documentRevision: project.revision, locationId, stateId: initialStateId ?? null, instanceIds: [...instanceIds], sourceIdentities: sourceIdentities(project, resources, instanceIds),
       actions, frames, ...(buttonClick ? { buttonClick } : {}), elapsedMs: Math.max(0, Date.now() - startedAt), semanticVerdict: 'requires-review' }) : undefined
-    let session: ReturnType<typeof createPublishedCourseSession> | undefined
     let timer: ReturnType<typeof setTimeout> | undefined
     let hostFailure: AuthoringToolFailure | undefined
     try {
-      session = createPublishedCourseSession(payload, { initialLocationId: locationId,
+      const firstTarget = !session
+      session ??= createPublishedCourseSession(payload, { initialLocationId: locationId,
         ...(initialStateId ? { initialPresentationStateId: initialStateId } : {}),
+        resolveAsset: assetId => {
+          const url = payload.assets[assetId]?.url
+          if (!url) failures.push(`运行场景缺少实际请求的素材：${assetId}`)
+          return url
+        },
         onFailure: failure => { failures.push(String(failure.error)) } })
       const mountedSession = session
       await Promise.race([
         (async () => {
-          await mountedSession.mount(root)
+          if (firstTarget) await mountedSession.mount(root)
+          else await mountedSession.goToObservationTarget(locationId, initialStateId)
           await waitForPublishedObservationReady(root)
-          const mountedElements = Array.from(root.querySelectorAll<HTMLElement>('.published-component-mount, .published-slide-phaser-component-mount, .published-surface-runtime-mount, .published-canvas-runtime-mount'))
+          const currentMounts = () => Array.from(root.querySelectorAll<HTMLElement>('.published-component-mount, .published-slide-phaser-component-mount, .published-surface-runtime-mount, .published-canvas-runtime-mount')).filter(element => {
+            // Reused sessions retain hidden hosts for other surfaces.
+            const bounds = element.getBoundingClientRect()
+            return bounds.width > 0 && bounds.height > 0
+          })
+          let mountedElements = currentMounts()
           const instanceId = (element: HTMLElement) => element.dataset.componentInstanceId ?? element.dataset.runtimeInstanceId
           const mountedIds = new Set(mountedElements.map(instanceId))
           for (const id of instanceIds) if (!mountedIds.has(id)) throw new Error(`候选实例 ${id} 未实际挂载`)
+          const identities = sourceIdentities(project, resources, instanceIds)
+          const stateOverrides = surface?.type === 'slide' && location.kind === 'slide-scene'
+            ? surface.scenes.find(scene => scene.id === location.sceneId)?.presentation?.states.find(state => state.id === initialStateId)?.layerItemOverrides : undefined
+          const exerciseKeys = mountedElements.filter(element => instanceIds.includes(instanceId(element) ?? '')).map(element =>
+            JSON.stringify([surface?.type, instanceId(element), identities[instanceId(element)!], stateOverrides?.[instanceId(element)!], element.offsetWidth, element.offsetHeight]))
+          const exerciseLifecycle = fullAdmission && exerciseKeys.some(key => !exercised.has(key))
           startedAt = Date.now()
           const sample = async (phase: DynamicBehaviorFrame['phase']) => {
             if (!active) throw new Error('动态观察已结束')
@@ -185,24 +213,25 @@ export async function runDynamicCandidateHostSmoke(project: CourseProjectDocumen
             await waitForPublishedObservationReady(root)
             const state = mountedSession.readObservationState()
             if (phase !== 'paused' && !state.ready) throw new Error('动态观察宿主未就绪')
+            if (phase !== 'after-button-click' && (state.locationId !== locationId || state.stateId !== (initialStateId ?? null))) throw new Error('动态观察期间组件改变了待检查的位置或状态，需要检查实际跳转目标')
             const capture = await options.capturePort.captureFrame()
             if (!active) throw new Error('动态观察已结束')
             captureBytes += capture.dataUrl.length
             if (captureBytes > 48_000_000) throw new Error('动态观察图面超过本轮资源上限')
             frames.push({ ...capture, phase, elapsedMs: Math.max(0, capture.capturedAt - startedAt), stateVersion: state.stateVersion, publicState: JSON.parse(JSON.stringify(state.publicState)) })
           }
-          if (options.capturePort && fullAdmission) for (const at of DYNAMIC_BEHAVIOR_SAMPLING.runningAtMs) {
+          if (options.capturePort && exerciseLifecycle) for (const at of DYNAMIC_BEHAVIOR_SAMPLING.runningAtMs) {
             const wait = at - (Date.now() - startedAt)
             if (wait > 0) await new Promise(resolve => setTimeout(resolve, wait))
             await sample('running')
           }
+          if (!exerciseLifecycle) await sample('running')
           for (const element of mountedElements) {
-            if (instanceIds.includes(instanceId(element) ?? '') && (fullAdmission || element.dataset.componentInstanceId)) await exercisePublishedDynamicUpdates(element, { resize: fullAdmission })
+            if (instanceIds.includes(instanceId(element) ?? '') && (fullAdmission || element.dataset.componentInstanceId)) await exercisePublishedDynamicUpdates(element, { resize: exerciseLifecycle })
           }
           actions.push('update-inputs')
-          if (fullAdmission) actions.push('resize-and-restore')
-          if (!fullAdmission) await sample('running')
-          if (fullAdmission) {
+          if (exerciseLifecycle) actions.push('resize-and-restore')
+          if (exerciseLifecycle) {
           for (const element of mountedElements) if (instanceIds.includes(instanceId(element) ?? '')) await exercisePublishedDynamicLifecycle(element, 'suspend')
           actions.push('suspend')
           await sample('paused')
@@ -214,6 +243,10 @@ export async function runDynamicCandidateHostSmoke(project: CourseProjectDocumen
           if (!suspended.ok) throw suspended.failure?.error ?? new Error('动态候选无法挂起')
           const resumed = await mountedSession.player.resumeSurface(location.surfaceId)
           if (!resumed.ok) throw resumed.failure?.error ?? new Error('动态候选无法恢复')
+          await waitForPublishedObservationReady(root)
+          mountedElements = currentMounts()
+          for (const id of instanceIds) if (!mountedElements.some(element => instanceId(element) === id)) throw new Error(`候选实例 ${id} 恢复后未实际挂载`)
+          exerciseKeys.forEach(key => exercised.add(key))
           }
           if (captureInstances) for (const element of mountedElements) {
             const id = instanceId(element)
@@ -231,9 +264,7 @@ export async function runDynamicCandidateHostSmoke(project: CourseProjectDocumen
             // evidence that a candidate instance can prepare a capture. Probe
             // the mounted instances through the shared product capture barrier.
             await capturePublishedSurfacePng({ root, width: 1280, height: 720,
-              layers: mountedElements.filter(element => instanceIds.includes(instanceId(element) ?? '')).map(mount => {
-                const element = mount.parentElement
-                if (!element) throw new Error('组件捕获容器已卸载')
+              layers: mountedElements.filter(element => instanceIds.includes(instanceId(element) ?? '')).map(element => {
                 return { element, x: 0, y: 0, width: Math.max(1, element.clientWidth), height: Math.max(1, element.clientHeight), rotation: 0, opacity: 1 }
               }) })
           } else if (fullAdmission) {
@@ -270,6 +301,7 @@ export async function runDynamicCandidateHostSmoke(project: CourseProjectDocumen
       ])
       const evidence = observation()
       if (evidence) { observed.push(evidence); options.onBehaviorEvidence?.([evidence]) }
+      options.onTargetComplete?.()
     } catch (error) {
       const evidence = observation()
       hostFailure = new AuthoringToolFailure(error instanceof AuthoringToolFailure ? error.diagnostics : [{ code: 'dynamic-host-failed', message: error instanceof Error ? error.message : String(error), path: ['locations', locationId, 'instances', ...instanceIds] }],
@@ -277,13 +309,18 @@ export async function runDynamicCandidateHostSmoke(project: CourseProjectDocumen
     } finally {
       active = false
       clearTimeout(timer)
-      try { await session?.destroy() }
-      catch (error) {
-        hostFailure = new AuthoringToolFailure([...(hostFailure?.diagnostics ?? []), { code: 'dynamic-host-destroy-failed', message: error instanceof Error ? error.message : String(error), path: ['locations', locationId, 'instances', ...instanceIds, 'destroy'] }], hostFailure?.behaviorEvidence ?? observed)
-      } finally { root.remove() }
     }
     if (hostFailure) throw hostFailure
     if (failures.length) throw new AuthoringToolFailure([{ code: 'dynamic-host-failed', message: failures.join('\n'), path: ['locations', locationId, 'instances', ...instanceIds] }], observed)
   }
+  } catch (error) { runFailure = error }
+  finally {
+    try { await session?.destroy() }
+    catch (error) { runFailure = new AuthoringToolFailure([...(runFailure instanceof AuthoringToolFailure ? runFailure.diagnostics : []),
+      { code: 'dynamic-host-destroy-failed', message: error instanceof Error ? error.message : String(error), path: ['destroy'] }], runFailure instanceof AuthoringToolFailure ? runFailure.behaviorEvidence : observed) }
+    finally { root.remove() }
+  }
+  if (runFailure) throw runFailure
+  if (failures.length) throw new AuthoringToolFailure([{ code: 'dynamic-host-failed', message: failures.join('\n'), path: ['destroy'] }], observed)
   return captures
 }

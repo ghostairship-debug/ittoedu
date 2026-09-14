@@ -5,7 +5,7 @@ import type {
   SpatialGraphSelection,
 } from '../../authoring/spatialAuthoringIntents'
 import type { SpatialWorldContentEditSession } from '../../authoring/spatialWorldAuthoring'
-import { findGlobalTeacherController } from '../../authoring/v9TeacherControllerAuthoring'
+import { findGlobalTeacherController } from '../../course/globalLayerCommands'
 import { buildFlowEditorView, type FlowEditorView } from '../../course/flowEditorView'
 import type { FlowEditorSelection } from '../../course/flowEditorSlice'
 import type { EffectiveLayerProjectionRow } from '../../course/effectiveLayerProjection'
@@ -226,7 +226,7 @@ function buildGlobalLayerView(
     visibleHere: isCourseLayerVisibleAtLocation(entry, locationId),
     visibility: entry.visibility,
     scenePlane: readGlobalLayerScenePlane(project, nodeId),
-    isController: isTeacherControllerLayerItem(entry.item),
+    isController: entry.item.kind === 'component' ? entry.item.role === 'teacher-controller' : isTeacherControllerLayerItem(entry.item),
     locationKind: project.locations.find((location) => location.id === locationId)?.kind,
     locations: project.locations.map((location) => ({
       id: location.id,
@@ -284,13 +284,14 @@ export function selectPropertiesAuthoringReadModel(state: EditorState): Properti
   const projection = selectEffectiveLayerProjection(state)
   const flowSession = state.flowSession
   const spatialSession = state.spatialSession
-  const propertiesOwner = !flowSession && !spatialSession && snapshot?.scope
+  const pageOwner = !flowSession && !spatialSession && snapshot?.scope
     ? snapshot.scope
     : selectEditingScope(state)
   const selectedRows = (projection?.unifiedRows ?? []).filter((row) => (
     selectSelectedNodeIds(state).includes(row.id)
   ))
   const selectedRow = selectedRows.length === 1 ? selectedRows[0]! : null
+  const propertiesOwner = selectedRow?.isTeacherController ? 'global' : pageOwner
   const selectedViews = selectedRows.map((row) => (
     propertiesViewWithSlideContentDraft(row, state.v9ContentEdit)
   ))

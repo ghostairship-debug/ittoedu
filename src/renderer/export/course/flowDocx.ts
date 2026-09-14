@@ -412,19 +412,7 @@ function renderAnchoredItem(item: FlowDocxProjectedItem, context: BuildContext):
       return anchorXml(drawingId, item, graphic)
     }
 
-    if (item.item.kind === 'native' && item.item.content.nativeType === 'teacher-controller') {
-      const graphic = textBoxGraphicXml(item, '教师控制栏', {
-        fontFamily: 'Microsoft YaHei',
-        fontSize: 12,
-        color: '#475569',
-        backgroundColor: '#F8FAFC',
-        borderColor: '#CBD5E1',
-        borderWidth: 1,
-        align: 'center',
-        verticalAlign: 'middle',
-      })
-      return anchorXml(drawingId, item, graphic)
-    }
+    
   }
 
   if (item.carrierKind === 'shape') {
@@ -629,11 +617,13 @@ function renderHeaderXml(
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:hdr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"><w:p><w:r><w:drawing><wp:anchor distT="0" distB="0" distL="0" distR="0" simplePos="0" relativeHeight="0" behindDoc="1" locked="0" layoutInCell="1" allowOverlap="1"><wp:simplePos x="0" y="0"/><wp:positionH relativeFrom="page"><wp:posOffset>0</wp:posOffset></wp:positionH><wp:positionV relativeFrom="page"><wp:posOffset>0</wp:posOffset></wp:positionV><wp:extent cx="${cxEMU}" cy="${cyEMU}"/><wp:effectExtent l="0" t="0" r="0" b="0"/><wp:wrapNone/><wp:docPr id="1000" name="${xml(bgImagePath)}" descr="Background Image"/><wp:cNvGraphicFramePr/><a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:nvPicPr><pic:cNvPr id="1000" name="${xml(bgImagePath)}"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed="${bgImageRelId}"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${cxEMU}" cy="${cyEMU}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:anchor></w:drawing></w:r></w:p></w:hdr>`
 }
 
-function renderFooterXml(footerItems: readonly FlowDocxProjectedItem[]): string {
+function renderFooterXml(footerItems: readonly FlowDocxProjectedItem[], context?: BuildContext): string {
+  if (context && footerItems.some(item => item.item.kind === 'component')) {
+    const drawings = footerItems.map(item => renderAnchoredItem({ ...item, outputFrame: { ...item.outputFrame, x: 0, y: 0 } }, context)).join('')
+    return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:ftr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture" xmlns:wps="http://schemas.microsoft.com/office/word/2010/wordprocessingShape"><w:p>${drawings}</w:p></w:ftr>`
+  }
   const text = footerItems.map((item) => {
-    if (item.item.kind === 'native' && item.item.content.nativeType === 'teacher-controller') {
-      return '教师控制栏：上一页 | 下一页 | 重新播放'
-    }
+    
     return `[教师控制栏：${item.layerItemId}]`
   }).join('   ')
 
@@ -821,7 +811,7 @@ export function buildFlowDocxFromProjection(
   if (projection.footerItems.length > 0) {
     footerRelId = `rId${context.nextRelationshipId++}`
     footerRefXml = `<w:footerReference w:type="default" r:id="${footerRelId}"/>`
-    footerXmlContent = renderFooterXml(projection.footerItems)
+    footerXmlContent = renderFooterXml(projection.footerItems, context)
   }
 
   // Background color handling
@@ -856,6 +846,7 @@ export function buildFlowDocxFromProjection(
   }
   if (footerXmlContent !== null) {
     files['word/footer1.xml'] = strToU8(footerXmlContent)
+    files['word/_rels/footer1.xml.rels'] = strToU8(wordRelationships(context.images, null, null))
   }
 
   for (const image of allImages) files[`word/${image.path}`] = image.bytes

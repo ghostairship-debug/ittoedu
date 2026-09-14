@@ -1,7 +1,7 @@
 import { nanoid } from 'nanoid'
 import { CANVAS_HEIGHT, CANVAS_WIDTH } from '@/shared/constants'
 import { isStrokeOnlyShapeType } from '@/shared/contracts/native-v1'
-import type {
+import {
   FormulaAstNode,
   FormulaNode,
   ImageNode,
@@ -10,7 +10,6 @@ import type {
   NativeTableContent,
   ShapeNode,
   ShapeType,
-  TeacherControllerNode,
   TextNode,
   VideoNode,
 } from '@/shared/contracts/native-v1'
@@ -315,61 +314,6 @@ export function createVideoNode(options: VideoNodeOptions): VideoNode {
       ...(options.poster?.assetId ? { assetId: options.poster.assetId } : {}),
     },
     backgroundAudioMode: options.backgroundAudioMode ?? 'duck',
-  }
-}
-
-type TeacherControllerNodeOptions = Partial<
-  Omit<TeacherControllerNode, 'id' | 'type' | 'style' | 'buttons'>
-> & {
-  id?: string
-  style?: Partial<TeacherControllerNode['style']>
-  buttons?: TeacherControllerNode['buttons']
-  idFactory?: IdFactory
-}
-
-export function createTeacherControllerNode(
-  options: TeacherControllerNodeOptions = {},
-): TeacherControllerNode {
-  const idFactory = options.idFactory ?? nanoid
-  const width = options.width ?? 1120
-  const height = options.height ?? 64
-  return {
-    id: nextId('teacher_controller', options.id, idFactory),
-    name: options.name ?? '教师控制器',
-    type: 'teacher-controller',
-    x: options.x ?? (CANVAS_WIDTH - width) / 2,
-    y: options.y ?? CANVAS_HEIGHT - height - 18,
-    width,
-    height,
-    rotation: options.rotation ?? 0,
-    opacity: options.opacity ?? 1,
-    visible: options.visible ?? true,
-    locked: options.locked ?? false,
-    playbackInitialVisibility: options.playbackInitialVisibility ?? 'inherit',
-    title: options.title ?? '教师控制台',
-    showSceneProgress: options.showSceneProgress ?? true,
-    compact: options.compact ?? false,
-    collapsible: options.collapsible ?? true,
-    defaultCollapsed: options.defaultCollapsed ?? true,
-    buttons: options.buttons ?? [
-      { id: nextId('teacher_button', undefined, idFactory), action: { type: 'step.previous' }, label: '上一步', visible: true },
-      { id: nextId('teacher_button', undefined, idFactory), action: { type: 'step.next' }, label: '下一步', visible: true },
-      { id: nextId('teacher_button', undefined, idFactory), action: { type: 'scene.previous' }, label: '上一场景', visible: true },
-      { id: nextId('teacher_button', undefined, idFactory), action: { type: 'scene.next' }, label: '下一场景', visible: true },
-      { id: nextId('teacher_button', undefined, idFactory), action: { type: 'scene.open-picker' }, label: '场景目录', visible: true },
-      { id: nextId('teacher_button', undefined, idFactory), action: { type: 'scene.replay' }, label: '重播', visible: true },
-      { id: nextId('teacher_button', undefined, idFactory), action: { type: 'course.restart' }, label: '重新开始', visible: false },
-      { id: nextId('teacher_button', undefined, idFactory), action: { type: 'audio.toggle-mute' }, label: '声音', visible: true },
-      { id: nextId('teacher_button', undefined, idFactory), action: { type: 'player.fullscreen.toggle' }, label: '全屏', visible: true },
-    ],
-    style: {
-      backgroundColor: options.style?.backgroundColor ?? '#172033',
-      backgroundOpacity: options.style?.backgroundOpacity ?? 0.94,
-      accentColor: options.style?.accentColor ?? '#e7b85c',
-      textColor: options.style?.textColor ?? '#f8fafc',
-      cornerRadius: options.style?.cornerRadius ?? 16,
-    },
-    includeInStaticExports: options.includeInStaticExports ?? false,
   }
 }
 

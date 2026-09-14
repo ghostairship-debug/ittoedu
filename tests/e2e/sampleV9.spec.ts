@@ -1,3 +1,4 @@
+import { isControllerFixture } from '../fixtures/teacherController'
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -30,17 +31,15 @@ test.beforeAll(() => {
     components[key] = parseComponentPackageFiles(files)
   }
   const controller = opened.project.globalLayerItems.find(
-    (entry) => entry.item.kind === 'native' &&
-      entry.item.content.nativeType === 'teacher-controller',
+    (entry) => isControllerFixture(entry.item),
   )
   if (
     !controller ||
-    controller.item.kind !== 'native' ||
-    controller.item.content.nativeType !== 'teacher-controller'
+    !isControllerFixture(controller.item)
   ) {
     throw new Error('sample V9 project has no global teacher controller')
   }
-  const nextButton = controller.item.content.data.buttons.find(
+  const nextButton = controller.item.props.buttons.find(
     (button) => button.action.type === 'scene.next' && button.visible,
   )
   if (!nextButton) throw new Error('sample teacher controller has no visible next button')

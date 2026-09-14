@@ -1,3 +1,4 @@
+import { isControllerFixture } from '../fixtures/teacherController'
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { enterFlowTextEditing, selectFlowEditorBlocks } from '@/renderer/course/flowEditorSlice'
@@ -101,7 +102,7 @@ describe('Flow unified layer entry', () => {
     }
 
     const controller = flowDocument().globalLayerItems.find((entry) => (
-      entry.item.kind === 'native' && entry.item.content.nativeType === 'teacher-controller'
+      isControllerFixture(entry.item)
     ))
     if (controller) {
       expect(screen.queryByTestId(`node-item-${controller.item.layerItemId}`)).toBeNull()
@@ -153,7 +154,7 @@ describe('Flow unified layer entry', () => {
     expect(flowDocument().revision).toBe(startRevision)
     expect(flowDocument().locations.length).toBe(startLocationCount)
     const controller = flowDocument().globalLayerItems.find((entry) => (
-      entry.item.kind === 'native' && entry.item.content.nativeType === 'teacher-controller'
+      isControllerFixture(entry.item)
     ))
     expect(controller).toBeTruthy()
     cleanup()

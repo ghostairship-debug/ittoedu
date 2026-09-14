@@ -11,7 +11,7 @@ const destination: GenerationCandidate['steps'][number]['destination'] = { kind:
 function candidate(input: GenerationCandidate['steps'][number]['input'], tool = 'native.content'): GenerationCandidate {
   return { version: 1, requestId: '0d7707e8-a038-4268-bb34-486289611708', candidateId: 'fed9470a-e68f-4bd6-928d-b9c4c54e60f2', summary: 'Change title',
     afterCommit: { version: 1, action: 'finish' }, steps: [{ id: 'edit', tool, carrier: tool === 'runtime.source' ? 'runtime' : 'native', destination,
-      input, lowerCarrierReason: 'Required by current content' }] }
+      input }] }
 }
 function source(text: string): GenerationCandidate { return candidate({ source: text }, 'runtime.source') }
 function fileSource(text: string, operation: 'patch' | 'revise', encoding: 'utf8' | 'base64' = 'utf8'): GenerationCandidate {
@@ -30,7 +30,6 @@ describe('candidate operation semantic change key', () => {
     second.summary = 'Different explanation'
     second.afterCommit = { version: 1, action: 'observe', reason: 'Different commentary' }
     second.steps[0]!.id = 'renamed-display-label'
-    second.steps[0]!.lowerCarrierReason = 'Different explanation'
     expect(candidateChangeKey(second)).toBe(candidateChangeKey(first))
     expect(first.steps[0]!.id).toBe('edit')
   })

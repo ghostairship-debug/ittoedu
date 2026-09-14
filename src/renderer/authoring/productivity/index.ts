@@ -75,7 +75,7 @@ function fields(document: CourseProjectDocument, token: CourseAuthoringSessionTo
       content.data.categories.forEach(c => add(c, 'label', `${target}/分类${c.id}`, owner))
       content.data.series.forEach(s => { add(s, 'name', `${target}/系列${s.id}`, owner); add(s, 'color', `${target}/系列${s.id}`, owner, 'fill') })
     } else if (content.nativeType === 'input') add(content.data, 'placeholder', target, owner)
-    else if (content.nativeType === 'teacher-controller') unsupported.push(`${owner} · ${target}：控制器配置不参与批量修改`)
+    
   }
   const blocks = (entries: FlowBlock[], owner: string) => entries.forEach(block => {
     const target = `正文 (${block.id})`

@@ -1,3 +1,5 @@
+import { publishedControllerPackages } from '../fixtures/teacherController'
+import { controllerPackage } from '../fixtures/teacherController'
 import { describe, expect, it } from 'vitest'
 import { strFromU8, unzipSync } from 'fflate'
 import type {
@@ -86,7 +88,7 @@ function mockFlowPayload(options: {
       'asset-comp-fallback': { mimeType: 'image/png', url: 'data:image/png;base64,CC==' },
       'asset-runtime-fallback': { mimeType: 'image/png', url: 'data:image/png;base64,DD==' },
     },
-    components: {},
+    components: { ...publishedControllerPackages,},
     designTokens: { colors: [], fonts: [{ id: 'f1', label: '微软雅黑', fontFamily: 'Microsoft YaHei' }] },
     media: {
       audio: {
@@ -719,7 +721,7 @@ describe('flowDocxProjection', () => {
       visibility: { mode: 'all', locationIds: [] },
       item: {
         layerItemId: 'ctrl-disabled',
-        kind: 'native',
+        kind: 'component',
         visible: true,
         order: 1,
         rotation: 0,
@@ -727,9 +729,7 @@ describe('flowDocxProjection', () => {
         hitPolicy: 'auto',
         playbackInitialVisibility: 'inherit',
         frame: { mode: 'absolute', x: 0, y: 0, width: 400, height: 48 },
-        content: {
-          nativeType: 'teacher-controller',
-          data: {
+        role: 'teacher-controller', component: { packageId: controllerPackage.manifest.id, version: controllerPackage.manifest.version }, props: {
             title: '教师控制栏',
             showSceneProgress: true,
             compact: false,
@@ -748,7 +748,6 @@ describe('flowDocxProjection', () => {
             },
             includeInStaticExports: false,
           },
-        },
       },
     }
 
@@ -765,7 +764,7 @@ describe('flowDocxProjection', () => {
       visibility: { mode: 'all', locationIds: [] },
       item: {
         layerItemId: 'ctrl-enabled',
-        kind: 'native',
+        kind: 'component',
         visible: true,
         order: 1,
         rotation: 0,
@@ -773,9 +772,7 @@ describe('flowDocxProjection', () => {
         hitPolicy: 'auto',
         playbackInitialVisibility: 'inherit',
         frame: { mode: 'absolute', x: 0, y: 0, width: 400, height: 48 },
-        content: {
-          nativeType: 'teacher-controller',
-          data: {
+        role: 'teacher-controller', component: { packageId: controllerPackage.manifest.id, version: controllerPackage.manifest.version }, props: {
             title: '教师控制栏',
             showSceneProgress: true,
             compact: false,
@@ -794,7 +791,6 @@ describe('flowDocxProjection', () => {
             },
             includeInStaticExports: true,
           },
-        },
       },
     }
 

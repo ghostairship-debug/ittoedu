@@ -4,6 +4,30 @@
 
 ## 1. 用户工作流与应用策略
 
+### 2026-09-12 真实使用修复增量
+
+背景目标由正式背景 Owner 在当前授权范围中捕获，发现、snapshot 与执行共用其有效域；明确“本页背景”先于默认选区，发送摘要和冻结范围一致。Course/命名状态不接受独立背景模式，未指定颜色、图片及继承字段保持。快捷图片接口失败后仍允许发现并组合现有素材导入和背景命令，所有路径进入同一 canonical transaction。
+
+G1新增[选区动作窄合同](../../reviews/2026-09-12-r18-g1-selection-contract.md)：宿主根据明确指令和实际选区捕获 `selectionActions`，只允许同owner/plane的排序、单个保真副本或真实父容器中的单张after插图；candidate不能自报授权。消费者复用正式命令与唯一事务，晚步失败零写入。Flow宽度的V9/Published strict可选字段和各门实际验收见[本轮集成记录](../../reviews/2026-09-12-r18-user-experience-integration.md)。
+
+候选拒绝后在同一 task/epoch、原冻结目标与期限内建立新观察，原子替换被检查的请求；旧请求退役不构成任务失效，真实 Stop、草稿、工程变化和超时继续拒绝。宿主拒绝与成功结果都保留待送状态，只有原生 startTurn 确认后标为已送达；显式继续接回原目标、最新提交及失败，询问状态只解释事实。旧记录不能还原的目标或材料如实阻断，不猜测恢复。
+
+LocalAgent V2 的同一事件日志新增 strict `user-message`，含原 `itemId`、`text` 与 `purpose:initial|supplement|correct|answer`，沿既有 task/epoch/run 身份归属；输入队列继续管理实际消费，消息事件仅保存用户原话。generate 的可选 `userMessage` 保存原始输入，与包含恢复说明的执行目标分开。公开 text 的 phase 允许 `progress`/`final`，缺 phase 的旧文本作为普通消息保留。聊天由这份日志按 run/item 合并 append/replace，不创建另一套对话事实；原始事件仅留本地日志，公开过程与候选摘要可读展示，正式宿主结果决定完成状态。
+
+### 2026-09-11 B0/B1 授权实施增量
+
+本批分段计时增加首条可见原生正文、资源处理起止及任务终态等实际边界，不改变任务推进和预算。既有task.execution允许可选、版本1的每原生run输入量记录：原生adapter在实际发送边界测量prompt原始UTF-8字节、prompt JSON字节、outputSchema JSON字节、其余宿主JSON字节、宿主技术JSON总量、图片传输JSON差量及实际消息/params JSON总量；明确测量边界，分项必须闭合。只存计数，原图字节/按需读取/原生历史与token用量另列，不能把≤12KiB prompt冒称模型全部上下文。旧任务无该项表示未知；记录绑定run/observation且只首见，旧strict reader遇新增字段明确失败。
+
+连续请求将待送正式回执投影为一次workspace及各result/request/candidate身份、状态、revision前后值、summary、准确owner/item操作、资源变化与后续动作；只移除重复持久化身份和可由owner/item确定的重复地址。完整回执仍存本地，禁止用此提示投影反写工程或代替正式回执。原生启动确认后才标已送达，失败仍pending，不靠额外总结回合送达。
+
+Owner已授权按《常规课件任务三层执行与修改方案》完成1.8的B0/B1。单纯浏览页面或换选不重定向也不取消已冻结的任务：任务继续绑定原workspace/location/state/owner/item、内容revision、资源和task epoch。所有真实工程修改、Undo/Redo、Save As、关闭/切换工程、Stop和期限仍拒绝旧候选；不能通过关闭session检查放行。提交时以正式位置、Surface、状态、owner、选择及Flow正文范围比较教师是否已浏览或换选：有变化则保留当前浏览，无变化则采用事务的结果选择，使形状转图片后可以继续修改新图片；不使用session generation或revision猜测浏览。不得替教师提交或丢弃另一页草稿。初始、拒绝修正及提交后观察均须来自同一原目标的实际宿主，离屏结果明确标为候选/预览，无法取得有效观察时如实受阻。普通人工异步编辑的既有session/目标约束保持有效。
+
+第二层首个窄语义族为候选内的`media.apply`：strict图片输入含`kind:image`、真实文件或既有asset的`source`、可选`fit`、`placement:content|background`及`preserveResolution`；目标继续使用本request内destination短引用或完整canonical destination。文件来源只接受本轮`$candidateFile`，既有素材只接受本轮asset短引用或真实assetId；Main将已校验文件投影为内部strict字节/文件名/媒体类型。Renderer从冻结的真实目标确定图片同实例更新、合法形状替换、支持的Flow媒体更新/插入或正式背景操作，展开现有工具并进入同一私有准备和单document/resource/History事务。命名状态中的形状转换仅在当前状态隐藏原形状、显示新图片，其他状态继承关系保留；不能映射的引用仍明确拒绝。模型无需拼装导入、创建和替换步骤；闲置导入、兄弟对象及越界写入继续拒绝，共享图片其他实例不变。Native的`edit-text`、`edit-image`、`edit-formula`窄输入与旧`edit`复用同一内容Owner，Flow文字/公式复用正文Owner，保持持久化Schema不变。完整候选和既有字符串媒体导入兼容。
+
+素材交付帮助只在原生CLI已有权限下将其工具实际返回的文件复制到当前candidate root；不授予Main任意外部路径读取。图片准备在唯一资源准备边界进行完整解码、尺寸/编码与透明度检查并优化副本，不覆盖源文件。普通图片按fit和有效显示尺寸计算2倍显示预算，长边预算为512–1024，不放大或裁剪源内容；较大的PNG仅在最大质量WebP有实质节省时转换。明确保原图及动画/SVG保留源字节。已合法交付的素材可以在同一逻辑任务内跨拒绝/修正观察复用，新观察重新物化并获得新请求引用；释放跟随逻辑任务终态/期限，同时释放展开的图片内存，保留素材不恢复旧候选或别名。具体strict类型与首个consumer共同落地，不扩Course V9或Published V2。
+
+2026-09-11媒体文件候选补充：在现有候选传输中，仅 `asset.media.import.input.base64` 可使用 strict `{"$candidateFile":"resources/相对文件名"}`。Main 在当前任务/request/observation/epoch 校验后，只读取该 candidate root 内 realpath 闭合的非空普通文件，合计最多 12 MiB，展开为正式工具原有 Base64 字符串；读取后重验最新任务状态和期限，再交同一 proposal、Facade 与唯一资源事务。缺失、非法路径、链接逃逸或超量文件返回带步骤定位的拒绝诊断；取消、stale、迟到零工程写入。同候选重复准备复用已摄取字节，原始会话保留文件引用。旧字符串输入保持兼容，工具正式 Schema、V9 与 Published 不变；不提供通用文件 RPC，不从候选根外自动复制素材。
+
 2026-09-10路径交付补充：三CLI的每次原生进程启动可注入仅本次的`COURSEWARE_CANDIDATE_ROOT`，值为当前已创建的候选根；原生终端子进程继承该值，OpenCode ACP客户端终端同样接线。它仅是文件定位信息，不改变cwd、权限、原生工具或候选摄取边界；不修改全局环境/用户CLI配置。初始提示以此环境变量读取`request.json`并程序化带入requestId和输出文件位置，避免手抄UUID/hash。新观察的新进程覆盖旧值；未绑定候选的进程不得继承父进程中同名旧值。
 
 2026-09-10窄增量：LocalAgent V2任务的既有execution允许可选`timing:{version:1,entries:[{runId,observationId,stage,at}]}`，最多256条、同run/stage首见去重。只描述实际准备/原生打开与发送/事件/候选解析/宿主结果登记边界；缺失即未知，不参与任务推进或更改预算。旧记录继续可读，旧strict reader遇新增字段明确失败，不静默改写。
@@ -201,3 +225,12 @@ candidate root只限定宿主摄取realpath闭合候选，与CLI原生文件工�
 103精确编辑与复杂编辑并列：有效图片/文字、整页关系、多步依赖、实例/共享patch、真实Component/Runtime互动。主指标是请求→首次正确且可用结果；总任务终结耗时另列，并按auto/preview、冷/热、有效模型/effort/service tier及用户等待分组。保留原始样本和失败，有限样本报中位数/范围，不以3次样本报P95，不预报提速百分比。坏PNG只作负例，不能和有效修复结果组成速度基线。按需观察、细粒度补丁或资源复用只有实测瓶颈触发才在后续深化。
 
 实现若发现正式Scope/持久化/导出或CLI能力无法满足目标，应以具体失败与可审阅替代方案更新本合同，不偷偷降低要求。无法完成本节点时保留上一有效consumer和明确未完成边界，不伪造支持、不用截图后备掩盖普通可编辑能力。
+
+
+## 11. 2026-09-14 机制纵切与原生速度参数
+
+Owner 已授权实施 [AI 创作操作机制方案](../../AI_AUTHORING_MECHANISM_IMPLEMENTATION_PLAN.md) 当前 1.8 纵切及 F0 Codex 快速模式。正式候选 additive 字段由现有 generationContract 严格读取：media source.assetId 可为 asset-id 前序结果；created-background 只来自已验证创建页回执。Native 工具接初始样式/内容、edit-shape 与中心锚点，复用原工厂/patch/事务。完整文件不隐式 rebase。
+
+serviceTier 是可选的原生配置维度，独立于 model/effort，目录 ID 驱动；UI 提醒增加消耗，默认不自动开启。selected/requested/sent/confirmed 必须分别可审计，实际确认失败不能降格成“已应用”。不得改变 CLI 原生权限或跨项目/全局配置。旧配置缺该字段继续可读。
+
+当前验收以对应 QP/F0 与不指定路线的 AG 自然任务为准；指定文件兜底回归不替代首次快捷证据，M5/B2–B4 不因本批接线提前宣称完成。

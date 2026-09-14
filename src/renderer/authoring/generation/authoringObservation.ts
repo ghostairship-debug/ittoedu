@@ -118,6 +118,26 @@ export function registerAuthoringObservationDraft(element: HTMLElement, port: { 
   return () => { if (canvasDrafts.get(element) === port) canvasDrafts.delete(element) }
 }
 
+/** Read through the registered input Owners, including composing local controls. */
+export function readAuthoringObservationDraftState(dom: Document = document): string {
+  return observationJson([...canvasDrafts].filter(([element]) => element.ownerDocument === dom && visible(element))
+    .flatMap(([, port]) => {
+      const draft = port.read()
+      return draft.composing || draft.value !== draft.initialValue
+        ? [[authoringObservationDraftToken(port), draft.value, draft.initialValue, draft.composing]] : []
+    }))
+}
+
+export interface AuthoringObservationTarget {
+  readonly surfaceId: string
+  readonly locationId: string
+  readonly stateId: string | null
+}
+
+function matchesTarget(facts: AuthoringObservationTarget, target: AuthoringObservationTarget): boolean {
+  return facts.surfaceId === target.surfaceId && facts.locationId === target.locationId && facts.stateId === target.stateId
+}
+
 function currentCanvasDrafts(root: HTMLElement): CanvasObservationDraft[] {
   return [...canvasDrafts].filter(([element]) => root.contains(element) && visible(element)).map(([, port]) => port.read())
 }
@@ -218,9 +238,22 @@ function currentStructure(document: CourseProjectDocument, host: ResolvedHost, s
   const projection = projectEffectiveLayers({ project: document, locationId: host.facts.locationId, stateId: host.facts.stateId })
   const flow = projection.surfaceType === 'flow'
     ? buildFlowEditorView({ project: document, locationId: host.facts.locationId }) : null
+  const paper = flow ? host.root.querySelector<HTMLElement>('.flow-body-content') : null
+  const scroll = flow ? host.root.querySelector<HTMLElement>('[data-flow-media-query-root]') : null
+  const paperRect = paper?.getBoundingClientRect(), viewportRect = host.root.getBoundingClientRect()
+  const paperStyle = paper ? paper.ownerDocument.defaultView?.getComputedStyle(paper) : null
   return {
     surfaceId: projection.surfaceId, locationId: projection.locationId, stateId: projection.stateId,
     surfaceType: projection.surfaceType,
+    ...(flow ? { layout: { ...flow.layout, widthMode: flow.layout.widthMode ?? 'reading' },
+      flowView: paper && scroll && paperRect ? {
+        unit: 'CSS px', viewport: { width: host.root.clientWidth, height: host.root.clientHeight },
+        paperWidth: paper.offsetWidth,
+        bodyWidth: paper.clientWidth - (parseFloat(paperStyle?.paddingLeft ?? '0') || 0) - (parseFloat(paperStyle?.paddingRight ?? '0') || 0),
+        paperScroll: { x: scroll.scrollLeft, y: scroll.scrollTop },
+        paperClientOrigin: { x: paperRect.left - viewportRect.left, y: paperRect.top - viewportRect.top },
+        observationScale: paper.offsetWidth > 0 ? paperRect.width / paper.offsetWidth : 1,
+      } : null } : {}),
     items: projection.unifiedRows.map(row => ({ id: row.id, target: row.authoringAddress, item: row.item,
       selected: selectedIds.includes(row.id) })),
     blocks: flow?.blocks.map(block => ({ id: block.blockId, target: block.authoringAddress, block: block.block,
@@ -261,14 +294,18 @@ export function createAuthoringObservationController(ports: AuthoringObservation
     state.document.id, state.sessionGeneration, authoringObservationDraftToken(state.draft),
     authoringObservationDraftToken(state.previewBackgroundColor),
   ])
-  const resolveHost = (state: AuthoringObservationState): ResolvedHost => {
+  const resolveHost = (state: AuthoringObservationState, target?: AuthoringObservationTarget): ResolvedHost => {
     const previewOpen = [...dom.querySelectorAll<HTMLElement>('[data-testid="course-preview-overlay"]')].some(visible)
-    const playback = [...mountedHosts].filter(host => host.root.ownerDocument === dom && visible(host.root))
+    const playback = [...mountedHosts].filter(host => host.root.ownerDocument === dom && visible(host.root)
+      && (!target || matchesTarget(host.read(), target)))
       .sort((a, b) => Number(b.source === 'preview') - Number(a.source === 'preview'))[0]
     if (previewOpen && playback?.source !== 'preview') throw new AuthoringObservationUnavailable('整课预览正在准备，不能引用后面的作者画布')
     if (playback) return readMountedHost(playback)
-    const root = [...dom.querySelectorAll<HTMLElement>('[data-observation-source="authoring"]')].find(visible)
-    if (!root) throw new AuthoringObservationUnavailable('实际作者画布尚未就绪')
+    const root = [...dom.querySelectorAll<HTMLElement>('[data-observation-source="authoring"]')].find(root => visible(root)
+      && (!target || matchesTarget({ surfaceId: root.dataset.observationSurfaceId ?? '',
+        locationId: root.dataset.observationLocationId ?? '', stateId: root.dataset.observationStateId || null }, target)))
+    if (!root) throw new AuthoringObservationUnavailable(target
+      ? '原任务目标没有可用的正式作者、试运行或预览宿主；请返回原目标后重新观察继续' : '实际作者画布尚未就绪')
     if (root !== authoringRoot) {
       authoringView?.dispose(); authoringRoot = root; authoringDomEpoch += 1
       authoringView = observeView(root, () => { authoringDomEpoch += 1 }, () => { authoringInteractionEpoch += 1 })
@@ -311,23 +348,25 @@ export function createAuthoringObservationController(ports: AuthoringObservation
     }
   }
 
+  const prepareForEdit = () => {
+    for (const [element, owner] of canvasDrafts) {
+      if (element.ownerDocument !== dom || !visible(element)) continue
+      const draft = owner.read()
+      if (draft.composing) throw new AuthoringObservationUnavailable('输入法组合中，请完成当前文字后再编辑')
+      owner.commit()
+    }
+    const prepared = ports.prepareForEdit()
+    if (!prepared.ok) throw new AuthoringObservationUnavailable(`活动草稿无法提交：${prepared.reason}`)
+  }
   return {
     dispose() { authoringView?.dispose(); authoringView = null; authoringRoot = null },
-    async capture(input: { intent: 'discuss' | 'plan' | 'edit'; dynamicTargetIds?: readonly string[] }) {
-      if (input.intent === 'edit') {
-        for (const [element, owner] of canvasDrafts) {
-          if (element.ownerDocument !== dom || !visible(element)) continue
-          const draft = owner.read()
-          if (draft.composing) throw new AuthoringObservationUnavailable('输入法组合中，请完成当前文字后再编辑')
-          owner.commit()
-        }
-        const prepared = ports.prepareForEdit()
-        if (!prepared.ok) throw new AuthoringObservationUnavailable(`活动草稿无法提交：${prepared.reason}`)
-      }
+    prepareForEdit,
+    async capture(input: { intent: 'discuss' | 'plan' | 'edit'; dynamicTargetIds?: readonly string[]; target?: AuthoringObservationTarget; prepareDrafts?: boolean }) {
+      if (input.intent === 'edit' && input.prepareDrafts !== false) prepareForEdit()
       const started = performance.now()
       await waitForPaint()
       const before = read()
-      let host = resolveHost(before)
+      let host = resolveHost(before, input.target)
       assertHost(before, host)
       const readinessIdentity = identity(before, host, false)
       const preview = before.previewBackgroundColor
@@ -346,7 +385,7 @@ export function createAuthoringObservationController(ports: AuthoringObservation
       // frame wait. Cross a rendered frame after those Owners finish so the
       // native capture contains their current text, geometry and resources.
       await waitForPaint()
-      const settled = read(), settledHost = resolveHost(settled)
+      const settled = read(), settledHost = resolveHost(settled, input.target)
       assertHost(settled, settledHost)
       // The same Owner may finish painting while resources settle. Bind the
       // screenshot to that completed DOM, while rejecting document, draft,
@@ -398,7 +437,7 @@ export function createAuthoringObservationController(ports: AuthoringObservation
         return { fileId, path, mediaType: 'application/json', role, content, encoding: 'utf8', byteLength: new TextEncoder().encode(content).byteLength }
       }
       const assertCurrent = () => {
-        const after = read(), afterHost = resolveHost(after)
+        const after = read(), afterHost = resolveHost(after, input.target)
         assertHost(after, afterHost)
         if (baseIdentity !== identity(after, afterHost) || before.document !== after.document || host.root !== afterHost.root) {
           throw new AuthoringObservationUnavailable('捕获期间内容、选区、草稿、视图或运行状态已变化，请重试')

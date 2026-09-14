@@ -169,7 +169,7 @@ function deepFreeze<T>(value: T): DeepReadonly<T> {
 }
 
 export function isSpatialTeacherController(item: DeepReadonly<LayerItem> | LayerItem): boolean {
-  return item.kind === 'native' && item.content.nativeType === 'teacher-controller'
+  return false
 }
 
 export function spatialLayerCoordinateSpace(

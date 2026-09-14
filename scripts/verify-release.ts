@@ -1,3 +1,4 @@
+import { isControllerFixture } from '../tests/fixtures/teacherController'
 import { _electron as electron, chromium } from '@playwright/test'
 import { prepareElectronLaunchEnvironment } from './electronLaunchEnvironment'
 import { unzipSync } from 'fflate'
@@ -146,15 +147,13 @@ function sampleControllerTarget(
     '示例工程必须使用画布内教师控制器',
   )
   const placement = project.globalLayerItems.find(
-    (entry) => entry.item.kind === 'native' &&
-      entry.item.content.nativeType === 'teacher-controller' &&
+    (entry) => isControllerFixture(entry.item) &&
       entry.item.visible,
   )
   assert(placement, '示例工程缺少可见的画布内教师控制器')
   const controller = placement.item
   assert(
-    controller.kind === 'native' &&
-      controller.content.nativeType === 'teacher-controller',
+    isControllerFixture(controller),
     '教师控制器图层类型错误',
   )
   assert(
@@ -169,7 +168,7 @@ function sampleControllerTarget(
       controller.frame.y + controller.frame.height <= slide.canvas.height,
     '发布验收样例的教师控制器位置超出 Slide 画布',
   )
-  const nextButton = controller.content.data.buttons.find(
+  const nextButton = controller.props.buttons.find(
     (button) => button.action.type === 'scene.next',
   )
   assert(nextButton, '示例工程教师控制器缺少可见的下一场景按钮')
@@ -953,8 +952,7 @@ async function main(): Promise<void> {
   )
   assert(
     benchmarkProject.project.globalLayerItems.filter(
-      ({ item, visibility }) => item.kind === 'native' &&
-        item.content.nativeType === 'teacher-controller' &&
+      ({ item, visibility }) => isControllerFixture(item) &&
         item.visible && visibility.mode === 'all',
     ).length === 1,
     '渲染宿主 V9 基准必须只有一个全局教师控制器入口',
@@ -1030,8 +1028,7 @@ async function main(): Promise<void> {
   )
   assert(
     publishedBenchmark.globalLayerItems.filter(
-      ({ item, visibility }) => item.kind === 'native' &&
-        item.content.nativeType === 'teacher-controller' &&
+      ({ item, visibility }) => isControllerFixture(item) &&
         item.visible && visibility.mode === 'all',
     ).length === 1,
     '渲染宿主 Published Course V2 缺少唯一全局教师控制器入口',

@@ -1,3 +1,4 @@
+import { buildPublishedFixture as buildPublishedCourseV2Payload } from '../fixtures/teacherController'
 // @vitest-environment node
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
@@ -11,7 +12,7 @@ import { createCourseProjectArchive, openCourseProjectArchive } from '../../src/
 import { planProjectFontImport } from '../../src/renderer/course/projectFontImport'
 import { createEditorTransactionStep, applyEditorTransactionStep } from '../../src/renderer/authoring/editorTransaction'
 import { createProjectFontDeliveryFixture } from '../fixtures/projectFontDelivery'
-import { buildPublishedCourseV2Payload, collectPublishedCourseSourceIssues } from '../../src/renderer/export/course/buildPublishedCourse'
+import {  collectPublishedCourseSourceIssues } from '../../src/renderer/export/course/buildPublishedCourse'
 
 describe('project font import transaction', () => {
   const bytes = new Uint8Array(readFileSync(resolve('node_modules/@fontsource-variable/noto-sans-sc/files/noto-sans-sc-latin-wght-normal.woff2')))

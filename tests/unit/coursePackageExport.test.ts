@@ -1,3 +1,4 @@
+import { buildPublishedFixture as buildPublishedCourseV2Payload } from '../fixtures/teacherController'
 import { strFromU8, unzipSync, zipSync } from 'fflate'
 import { describe, expect, it } from 'vitest'
 import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
@@ -10,7 +11,7 @@ import {
 import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
 import { parseComponentPackageFiles } from '@/renderer/components/importComponentPackage'
 import type { CoursePublishSources } from '@/renderer/export/course/buildPublishedCourse'
-import { buildPublishedCourseV2Payload } from '@/renderer/export/course/buildPublishedCourse'
+
 import { decodePublishedCode } from '@/player/decodePublishedExecutableCode'
 import {
   buildCoursePackages,

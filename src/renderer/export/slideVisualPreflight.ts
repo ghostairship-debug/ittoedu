@@ -408,14 +408,14 @@ function collectControllerObstructionItems(input: {
 }): void {
   const visibleNodes = input.nodes.filter((node) => node.visible)
   const interactiveNodes = visibleNodes.filter((node) => (
-    node.type !== 'teacher-controller' && (
+    (
       input.interactiveNodeIds.has(node.id) ||
       node.type === 'external-component' ||
       (node.type === 'video' && (node.clickToToggle || node.showControls))
     )
   ))
   visibleNodes
-    .filter((node) => node.type === 'teacher-controller')
+    .filter((node) => false)
     .forEach((controller) => {
       const controllerBounds = rotatedRectangleAabb(controller)
       interactiveNodes.forEach((interactive) => {
@@ -615,8 +615,7 @@ export function collectCourseSlideLocationVisualPreflightItems(input: {
   })
   const visibleContent = initialComposition.entries.some((entry) => (
     entry.mounted && !(
-      entry.item.kind === 'native' &&
-      entry.item.content.nativeType === 'teacher-controller'
+      false
     )
   ))
   if (!visibleContent && !initialComposition.background?.assetId) {

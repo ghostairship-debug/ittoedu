@@ -2,7 +2,7 @@ import { z } from 'zod'
 import { makeAuthoringAddress } from '../../../shared/authoringAddress'
 import { componentRegistryKey, componentRuntimeSourceIdentity } from '../../../shared/componentRegistryIdentity'
 import { dynamicPackageFilesSchema, parseDynamicPackageCandidate, decodeDynamicPackageFiles, parseDecodedDynamicPackageCandidate } from './dynamicPackageCandidate'
-import { planCourseComponentPackageReplacement } from '../../components/courseComponentPackageTransactions'
+import { collectCourseComponentPackageReferences, planCourseComponentPackageReplacement } from '../../components/courseComponentPackageTransactions'
 import { prepareComponentPackageSourceRevision, prepareComponentPackageRevision, planComponentPackageSourceRevision, planComponentPackageFork, assertComponentPackageSourceBaseline, captureComponentPackageSourceBaseline } from '../../components/componentPackageRevision'
 import { resolveAuthoringToolScope } from './authoringToolScope'
 import type { AuthoringToolDefinition } from './executeAuthoringTool'
@@ -28,7 +28,7 @@ export const componentPackageDiscoveryVariants = [
   { operation: 'replace', scopes: ['slide:global', 'flow:global', 'spatial-2d:global'], target: 'update: 精确 global package target；影响此包的所有实例。' },
   { operation: 'revise', scopes: ['slide:global', 'flow:global', 'spatial-2d:global'], target: 'update: 精确 global package target；基线须为当前版本；影响此包的所有实例。' },
   { operation: 'patch', mode: 'shared', scopes: ['slide:global', 'flow:global', 'spatial-2d:global'], target: 'update: 当前源码描述的 shared target；修改此包的所有实例。' },
-  { operation: 'patch', mode: 'instance', scopes: ['slide:scene', 'slide:surface', 'slide:global', 'flow:surface', 'flow:global', 'spatial-2d:world', 'spatial-2d:surface', 'spatial-2d:global'], target: 'update: 当前源码描述的精确组件实例 target；stateId 必须为 null；另存副本只重绑此实例。' },
+  { operation: 'patch', mode: 'instance', scopes: ['slide:scene', 'slide:surface', 'slide:global', 'flow:surface', 'flow:global', 'spatial-2d:world', 'spatial-2d:surface', 'spatial-2d:global'], target: 'update: 当前源码描述的精确组件实例 target；stateId 必须为 null；独占可编辑包原位修订；其他情况另存副本只重绑此实例。' },
 ]
 
 export const componentPackageDiscoveryExamples = [
@@ -42,7 +42,7 @@ export const componentPackageDiscoveryExamples = [
 
 export const componentPackageTool: AuthoringToolDefinition<z.infer<typeof schema>> = {
   name: 'component.package', inputSchema: schema, usesResources: true,
-  description: '修改现有源码优先 patch：提供精确 basePackageId/baseVersion/baseContentIdentity、仅改变的 changedFiles、显式 deleteFiles；宿主补齐未变文件并校验完整包。mode:shared 使用 global package update target 修改所有实例；mode:instance 使用精确组件实例 update target，宿主另存副本仅重绑此实例。不得自行改 manifest ID/版本。公开参数足够时用 component.configure；完整 files revise 保持兼容。',
+  description: '修改现有源码优先 patch：提供精确 basePackageId/baseVersion/baseContentIdentity、仅改变的 changedFiles、显式 deleteFiles；宿主补齐未变文件并校验完整包。mode:shared 使用 global package update target 修改所有实例；mode:instance 使用精确组件实例 update target，独占可编辑包保持包 ID，其他情况宿主另存副本仅重绑此实例。不得自行改 manifest ID/版本。公开参数足够时用 component.configure；完整 files revise 保持兼容。',
   async plan({ document, destination, value, resources, signal }) {
     const { target, surface, scope } = resolveAuthoringToolScope(document, destination)
     if (destination.kind !== 'update') throw new Error('组件源码修订需要精确 update target')
@@ -77,8 +77,10 @@ export const componentPackageTool: AuthoringToolDefinition<z.infer<typeof schema
     } else replacement = parseDynamicPackageCandidate(value.files)
     let result
     const behaviorEvidence: DynamicBehaviorObservation[] = [], collectEvidence = (values: readonly DynamicBehaviorObservation[]) => behaviorEvidence.push(...values)
-    if (instanceMode) {
-      const nextId = editableComponentPackageId(packageId, crypto.randomUUID())
+    const needsFork = instanceMode && (!document.componentPackages[packageId]?.editableCopy
+      || collectCourseComponentPackageReferences(document, packageId).length !== 1)
+    if (needsFork) {
+      const nextId = editableComponentPackageId(document.componentPackages[packageId]?.sourcePackageId ?? packageId, crypto.randomUUID())
       const fork = planComponentPackageFork(document, resources.componentPackages, packageId, nextId, destination.target.itemId)
       const forkResources = applyHistoryResourceChanges(resources, fork.resourceChanges, 'forward')
       const manifest = { ...replacement.manifest, id: nextId, version: forkResources.componentPackages[nextId]!.manifest.version }
@@ -108,7 +110,7 @@ export const componentPackageTool: AuthoringToolDefinition<z.infer<typeof schema
     const identity = componentRegistryKey({ projectId: document.id, packageId, version: admitted.manifest.version,
       sourceIdentity: componentRuntimeSourceIdentity(admitted.runtimeSource), contentIdentity: admitted.contentSha256! })
     return { transaction: result.plan, affected: instanceMode ? [{ id: destination.target.itemId, operation: 'updated', ownerKey: target.ownerKey, authoringAddress: destination.target.authoringAddress },
-      { id: packageId, operation: 'created', ownerKey: 'global', authoringAddress: componentPackageAddress(document.id, packageId) }]
+      { id: packageId, operation: needsFork ? 'created' : 'updated', ownerKey: 'global', authoringAddress: componentPackageAddress(document.id, packageId) }]
       : [{ id: packageId, operation: 'updated', ownerKey: 'global', authoringAddress: destination.target.authoringAddress }],
       diagnostics: [{ code: 'dynamic-admitted', message: identity, path: ['componentPackages', packageId] }], ...(behaviorEvidence.length ? { behaviorEvidence } : {}) }
   },

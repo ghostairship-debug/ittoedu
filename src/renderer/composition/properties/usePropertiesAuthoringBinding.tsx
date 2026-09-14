@@ -1,3 +1,5 @@
+import { readTeacherControllerConfig } from '../../../shared/teacherControllerConfig'
+import { captureFlowEditorAuthoringTarget } from '../../course/flowEditorView'
 import * as tableContent from '../../course/tableContentOperations'
 import type { NativeTableContent } from '../../../shared/contracts/native-v1'
 import { createChartPropertiesCommands } from '../../ui/properties/chartPropertiesCommands'
@@ -59,10 +61,6 @@ import {
   replaceSlideChartTableData,
 } from '../../course/v9ChartCommands'
 import { interactionLayerTargetFromItem } from '../../course/slideInteractionView'
-import {
-  commitTeacherControllerPropertiesAtTarget,
-  teacherControllerPropertiesPreview,
-} from '../../authoring/v9TeacherControllerAuthoring'
 import type {
   SpatialAuthoringIntent,
 } from '../../authoring/spatialAuthoringIntents'
@@ -147,7 +145,7 @@ function makeSlideTarget(
     !row
     || !session
     || row.owner === 'world'
-    || session.scope !== row.owner
+    || (session.scope !== row.owner && !(session.scope === 'scene' && row.isTeacherController))
     || session.locationId !== row.scopeToken.locationId
     || session.stateId !== row.scopeToken.stateId
     || session.revision !== read.identity.revision
@@ -157,7 +155,7 @@ function makeSlideTarget(
     revision: session.revision,
     generation: session.generation,
     authoringAddress: row.authoringAddress,
-    scope: session.scope,
+    scope: row.owner,
     layerItemId: row.id,
   })
 }
@@ -344,6 +342,7 @@ export function usePropertiesAuthoringBinding({
   const updatePlayback = useEditorStore((state) => state.updatePlayback)
   const updateDesignTokens = useEditorStore((state) => state.updateDesignTokens)
   const ensureTeacherController = useEditorStore((state) => state.ensureTeacherController)
+  const manageTeacherControllerComponent = useEditorStore((state) => state.manageTeacherControllerComponent)
   const setCandidateGlobalLayerVisibleAtLocation = useEditorStore(
     (state) => state.setCandidateGlobalLayerVisibleAtLocation,
   )
@@ -725,14 +724,7 @@ export function usePropertiesAuthoringBinding({
     }
     if (slideTarget) {
       const result = applySlideCandidateCommand((session) => (
-        node.type === 'teacher-controller'
-          ? commitTeacherControllerPropertiesAtTarget(
-              session,
-              slideTarget,
-              effectivePatchFromProperties(selectedRow.item, normalized),
-              { expectedRevision: slideTarget.revision },
-            )
-          : patchSlideLayerPropertiesAtTarget(
+        patchSlideLayerPropertiesAtTarget(
               session,
               slideTarget,
               effectivePatchFromProperties(selectedRow.item, normalized),
@@ -1252,7 +1244,6 @@ export function usePropertiesAuthoringBinding({
       || read.flow
       || read.spatial
       || !node
-      || node.type === 'teacher-controller'
       || !selectedRow
       || !read.identity.projectId
     ) return null
@@ -1507,18 +1498,23 @@ export function usePropertiesAuthoringBinding({
   }
   const selectedComponent = componentPort(read, node)
 
-  if (read.selectedIsGlobal || node.type === 'teacher-controller') {
-    const controller = node.type === 'teacher-controller' ? node : null
-    const controllerLayout = controller
-      ? teacherControllerPropertiesPreview(controller, {
-          x: controller.x,
-          y: controller.y,
-          width: controller.width,
-          height: controller.height,
-        })
-      : null
+  if (read.selectedIsGlobal) {
+    const controller = node.type === 'external-component' && read.selectedRow?.item.kind === 'component' && read.selectedRow.item.role === 'teacher-controller'
+        ? readTeacherControllerConfig(node.props) : null
     return {
       kind: 'course-global',
+      ...(flowOwner.status === 'active' && flowOwner.globalFormulaAuthoring ? { formulaAuthoring: flowOwner.globalFormulaAuthoring } : {}),
+      ...(read.flow && read.authoringToken && !controller ? {
+        flowPlacement: {
+          paperSpace: selectedRow.item.paperSpace === 'paper' ? 'paper' as const : 'viewport' as const,
+          onChange: (paperSpace: 'paper' | 'viewport') => {
+            if (!requireLiveOwner() || !read.flow || !read.authoringToken) return
+            const target = captureFlowEditorAuthoringTarget({ view: read.flow.view, sessionToken: read.authoringToken, target: { kind: 'overlay', layerItemId: node.id } })
+            const result = runFlowAuthoringIntent(target, { kind: 'patch-overlay-paper-space', paperSpace, expectedEdit: read.flow.textEdit })
+            if (!result.ok) reportError(result.reason ?? STALE_PROPERTY_TARGET)
+          },
+        },
+      } : {}),
       draftBindingKey: propertyDraftBindingKey(read, node.id),
       mode: 'selected',
       editorMode: read.editorMode,
@@ -1532,13 +1528,7 @@ export function usePropertiesAuthoringBinding({
         spatialMode: Boolean(read.spatial),
         videoDiagnostics: videoDiagnostics(read, node),
         controller,
-        controllerPreview: controllerLayout
-          ? {
-              width: controllerLayout.width,
-              height: controllerLayout.height,
-              buttons: controllerLayout.buttons.map((button) => ({ label: button.label })),
-            }
-          : null,
+        controllerComponent: read.selectedRow?.item.kind === 'component' && read.selectedRow.item.role === 'teacher-controller',
         controllerScenes: read.slideScenes,
         component: selectedComponent,
       },
@@ -1549,6 +1539,12 @@ export function usePropertiesAuthoringBinding({
       commands: {
         ...sharedCommands(),
         ...projectCommands,
+        manageTeacherControllerComponent: (itemId, operation) => {
+          if (!requireLiveOwner()) return
+          try { manageTeacherControllerComponent(itemId, operation) }
+          catch (error) { reportError(error instanceof Error ? error.message : String(error)) }
+        },
+        editControllerSource: () => { setEditorMode('professional'); setActiveTab('developer') },
         // Course background editing lives in the empty (nothing-selected)
         // global view only; a selected node has no use for it.
         updateCourseBackground: () => undefined,

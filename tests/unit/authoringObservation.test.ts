@@ -45,6 +45,50 @@ function harness(options: Pick<AuthoringObservationPorts, 'prepareImageResources
 }
 
 describe('current authoring observation', () => {
+  it('reports measured Flow body width, scroll and paper origin separately from authored layout', async () => {
+    const h = harness(), scroll = document.createElement('div'), paper = document.createElement('article')
+    scroll.dataset.flowMediaQueryRoot = 'true'; paper.className = 'flow-body-content'; paper.style.padding = '28px 36px 64px'
+    scroll.append(paper); h.root.append(scroll)
+    Object.defineProperties(paper, { offsetWidth: { value: 650 }, clientWidth: { value: 650 } })
+    paper.getBoundingClientRect = () => DOMRect.fromRect({ x: 36, y: -46, width: 650, height: 1000 })
+    scroll.scrollTop = 100
+    const captured = await h.controller.capture({ intent: 'edit' })
+    const file = captured.resourceFiles.find(file => file.path === 'observation/current-structure.json')!
+    expect(JSON.parse(file.content)).toMatchObject({ layout: { widthMode: 'fluid' }, flowView: {
+      paperWidth: 650, bodyWidth: 578, paperScroll: { x: 0, y: 100 }, paperClientOrigin: { x: 16, y: -76 }, observationScale: 1,
+    } })
+  })
+  it('uses only the formal preview matching the frozen target and never flushes a background draft', async () => {
+    const h = harness(), target = { locationId: h.state.locationId, surfaceId: h.state.surfaceId, stateId: h.state.stateId }
+    h.root.dataset.observationLocationId = 'currently-browsed-other-page'
+    const addPreview = (locationId: string, left: number) => {
+      const root = document.createElement('section'); document.body.append(root)
+      vi.spyOn(root, 'getBoundingClientRect').mockReturnValue({ x: left, y: 0, left, top: 0, right: left + 100, bottom: 100,
+        width: 100, height: 100, toJSON: () => ({}) })
+      disposers.push(registerAuthoringObservationHost({ root, source: 'preview', read: () => ({
+        projectId: h.state.document.id, documentRevision: h.state.document.revision, surfaceId: target.surfaceId,
+        locationId, stateId: null, ready: true, stateVersion: 1, publicState: { locationId },
+      }) }))
+    }
+    addPreview('currently-browsed-other-page', 0)
+    addPreview(target.locationId, 200)
+    const captured = await h.controller.capture({ intent: 'edit', target, prepareDrafts: false })
+    expect(captured.observation).toMatchObject({ source: 'preview', ...target })
+    expect(h.captureImage).toHaveBeenCalledWith({ x: 200, y: 0, width: 100, height: 100 })
+    expect(h.prepare).not.toHaveBeenCalled()
+    expect(h.materialize).not.toHaveBeenCalled()
+    const stateFile = captured.resourceFiles.find(file => file.path === 'observation/runtime-state.json')!
+    expect(JSON.parse(stateFile.content).state).toEqual({ locationId: target.locationId })
+  })
+
+  it('rejects an unavailable original host before taking an image of the currently browsed page', async () => {
+    const h = harness(), target = { locationId: h.state.locationId, surfaceId: h.state.surfaceId, stateId: h.state.stateId }
+    h.root.dataset.observationLocationId = 'another-page'
+    await expect(h.controller.capture({ intent: 'edit', target, prepareDrafts: false })).rejects.toThrow('原任务目标没有可用的正式')
+    expect(h.captureImage).not.toHaveBeenCalled()
+    expect(h.prepare).not.toHaveBeenCalled()
+  })
+
   it('waits for a rendered frame after actual resource readiness before native capture', async () => {
     const h = harness(), order: string[] = []
     let finishResource!: () => void, finishPaint!: () => void, secondPaintStarted!: () => void

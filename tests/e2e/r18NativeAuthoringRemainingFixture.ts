@@ -1,3 +1,4 @@
+import { createControllerFixture } from '../fixtures/teacherController'
 import { existsSync, readFileSync, readdirSync, realpathSync, statSync, writeFileSync } from 'node:fs'
 import { isAbsolute, join, relative, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -10,7 +11,7 @@ import { courseProjectDocumentSchema } from '../../src/shared/courseProjectSchem
 import { materialRecordV1Schema } from '../../src/shared/materialContract'
 import { LocalAgentRepository } from '../../src/main/localAgent/repository'
 import { sceneNodeToCourseLayerItem } from '../../src/shared/courseProjectModel'
-import { createShapeNode, createTeacherControllerNode } from '../../src/renderer/project/nativeNodeFactories'
+import { createShapeNode, } from '../../src/renderer/project/nativeNodeFactories'
 import { createCourseProjectArchive, type CourseProjectArchiveData } from '../../src/renderer/project/courseProjectArchive'
 import { addCourseFlowPage, addCourseSlidePage, addCourseSpatialPage } from '../../src/renderer/course/courseLocationCommands'
 import { createPublishedCanvasRuntimeV2Fixture } from '../fixtures/publishedCanvasRuntimeV2Fixture'
@@ -1091,7 +1092,7 @@ export async function writeRemainingLesson(projectPath: string): Promise<CourseP
   if (slide.type !== 'slide') throw new Error('Initial Slide is missing')
   runtime.order = 4; slide.scenes[0]!.layerItems.push(runtime)
   project.playback.controls = 'canvas'
-  project.globalLayerItems.push({ item: sceneNodeToCourseLayerItem(createTeacherControllerNode(), 100),
+  project.globalLayerItems.push({ item: createControllerFixture({}, 100),
     plane: 'overlay', visibility: { mode: 'all', locationIds: [] } })
   const data = { ...base, project: courseProjectDocumentSchema.parse(project) }
   writeFileSync(projectPath, createCourseProjectArchive(data))
@@ -1232,7 +1233,7 @@ export async function verifyButtonClick(run: NativeRun, expected: 'broken' | 're
 }
 
 export async function verifyPublishedControls(run: NativeRun, name: string) {
-  await run.page.getByRole('button', { name: '全屏 16:9 整课预览', exact: true }).click()
+  await run.page.getByRole('button', { name: '整课预览', exact: true }).click()
   const overlay = run.page.getByTestId('course-preview-overlay')
   try {
     const control = overlay.getByRole('button', { name: '缩放', exact: true })

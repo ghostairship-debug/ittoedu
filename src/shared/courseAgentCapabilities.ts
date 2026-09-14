@@ -233,11 +233,11 @@ export function readCourseAgentCapability(data: CourseAgentCapabilityData, id: s
   }
   if (entry.kind === 'tool' && Object.keys(selectors).length) {
     if (content.references) {
-      content.references = options.nativeType && Object.hasOwn(content.references, options.nativeType)
-        ? { [options.nativeType]: content.references[options.nativeType] }
-        : options.operation && options.operation !== 'content' ? undefined : content.references
+      content.references = options.operation && options.operation !== 'content' ? undefined
+        : options.nativeType && Object.hasOwn(content.references, options.nativeType) ? { [options.nativeType]: content.references[options.nativeType] } : content.references
     }
   }
+  if (content.conditions && options.operation) content.conditions = content.conditions.filter((condition: { operations?: string[] }) => !condition.operations || condition.operations.includes(options.operation!))
   if (content.variants) content.variants = content.variants.filter((variant: CourseAgentCapabilityVariant) => variants.some(match => match.operation === variant.operation && match.mode === variant.mode))
   if (content.variants) content.supportedScopes = [...new Set(variants.flatMap(variant => variant.scopes))]
   if (content.examples && Object.keys(selectors).length) {

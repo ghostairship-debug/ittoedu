@@ -1,3 +1,4 @@
+import { buildPublishedFixture as buildPublishedCourseV2Payload } from '../fixtures/teacherController'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
@@ -11,7 +12,7 @@ import {
   openCourseProjectArchive,
   type CourseProjectArchiveData,
 } from '../../src/renderer/project/courseProjectArchive'
-import { buildPublishedCourseV2Payload } from '../../src/renderer/export/course/buildPublishedCourse'
+
 import { buildPublishedCourseStandaloneHtml } from '../../src/renderer/export/course/buildCoursePackages'
 import {
   selectActiveCourseLocationId,

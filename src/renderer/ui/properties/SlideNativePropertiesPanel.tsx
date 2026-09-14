@@ -54,7 +54,7 @@ import type { ComponentManifest } from '../../../shared/componentTypes'
 import type { InteractionRule } from '../../../shared/interactionTypes'
 import { NativeColorInput as ColorInput } from './NativeColorPreview'
 import { ComponentPropertiesEditor } from '../ComponentPropertiesEditor'
-import { FormulaAuthoringEditor } from '../FormulaAuthoringEditor'
+import { FormulaAuthoringEditor, type FormulaAuthoringBinding } from '../FormulaAuthoringEditor'
 import {
   InteractionEditor,
   type InteractionEditorProps,
@@ -447,7 +447,8 @@ export function TextProperties({
   )
 }
 
-function FormulaProperties({ node, update }: {
+function FormulaProperties({ node, update, formulaAuthoring }: {
+  formulaAuthoring?: FormulaAuthoringBinding
   node: FormulaNode
   update(patch: PropertiesPatch): void
 }) {
@@ -465,6 +466,7 @@ function FormulaProperties({ node, update }: {
           ast,
           accessibleText,
         } as PropertiesPatch)}
+        {...formulaAuthoring}
       />
       <BufferedInput
         label="无障碍描述"
@@ -710,7 +712,9 @@ export function SlideNativeTypeFields({
   draftBindingKey,
   tableCommands,
   chartCommands,
+  formulaAuthoring,
 }: {
+  formulaAuthoring?: FormulaAuthoringBinding
   node: PropertiesItemView
   update(patch: PropertiesPatch): void
   contentEditingEnabled: boolean
@@ -748,7 +752,7 @@ export function SlideNativeTypeFields({
         />
       )}
       {!spatialMode && node.type === 'formula' && (
-        <FormulaProperties node={node} update={update} />
+        <FormulaProperties node={node} update={update} formulaAuthoring={formulaAuthoring} />
       )}
       {!spatialMode && node.type === 'image' && (
         <ImageProperties node={node} update={update} onReplaceImage={onReplaceImage} />
@@ -895,14 +899,13 @@ export function SlideNativePropertiesPanel({
         chartCommands={commands.chart}
       />
       {editorMode === 'professional' &&
-        flowOrSpatial &&
-        node.type !== 'teacher-controller' && (
+        flowOrSpatial && (
         <FlowSpatialInteractionUnavailableSection
           editingScopeGlobal={editingScopeGlobal}
           onOpenAutomation={commands.openProfessionalAutomation}
         />
       )}
-      {globalInteraction && node.type !== 'teacher-controller' && (
+      {globalInteraction && (
         <InteractionEditor {...globalInteraction} />
       )}
       {node.type === 'external-component' && (

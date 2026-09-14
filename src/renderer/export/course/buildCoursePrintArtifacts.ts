@@ -248,20 +248,8 @@ export function buildCourseExportPageList(
   return pages
 }
 
-export function isTeacherControllerPublishedItem(
-  item: PublishedLayerItem,
-): item is PublishedNativeLayerItem & {
-  content: Extract<PublishedNativeLayerItem['content'], { nativeType: 'teacher-controller' }>
-} {
-  return item.kind === 'native' && item.content.nativeType === 'teacher-controller'
-}
-
-/** Teacher controllers stay out unless the author explicitly enables static export. */
 export function shouldOmitPublishedItemFromStaticExport(item: PublishedLayerItem): boolean {
-  if (isTeacherControllerPublishedItem(item)) {
-    return !item.content.data.includeInStaticExports
-  }
-  return false
+  return item.kind === 'component' && item.role === 'teacher-controller' && item.props.includeInStaticExports !== true
 }
 
 export function isPureSlidePublishedCourse(

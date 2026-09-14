@@ -72,9 +72,8 @@ function TableCellInput({
   const [draft, setDraft] = useState(value)
   const editingRef = useRef(false)
   const composingRef = useRef(false)
+  const pendingBlurRef = useRef(false)
   const baselineRef = useRef(value)
-  const valueRef = useRef(value)
-  valueRef.current = value
 
   useEffect(() => {
     if (!editingRef.current) {
@@ -90,6 +89,7 @@ function TableCellInput({
       aria-label={`单元格 ${rowId} / ${columnId}`}
       value={draft}
       onFocus={() => {
+        pendingBlurRef.current = false
         editingRef.current = true
         baselineRef.current = draft
         onActivate({ rowId, columnId })
@@ -107,15 +107,20 @@ function TableCellInput({
         composingRef.current = false
         setDraft(event.currentTarget.value)
         commands.updateCellDraft(cellId, event.currentTarget.value, false)
+        if (pendingBlurRef.current) {
+          pendingBlurRef.current = false
+          editingRef.current = false
+          if (event.currentTarget.value === baselineRef.current) commands.cancelCellEdit(cellId)
+          else commands.commitCellText(cellId, event.currentTarget.value)
+        }
       }}
       onBlur={() => {
         if (!editingRef.current) return
-        commands.cancelCellEdit(cellId)
-        // r12-011 write scope: a dirty cell draft must never be committed by an
-        // unconfirmed blur. Enter/Tab commit; leaving the cell discards.
+        if (composingRef.current) { pendingBlurRef.current = true; return }
         editingRef.current = false
-        setDraft(valueRef.current)
-        baselineRef.current = valueRef.current
+        if (draft === baselineRef.current) commands.cancelCellEdit(cellId)
+        else commands.commitCellText(cellId, draft)
+        baselineRef.current = draft
       }}
       onKeyDown={(event) => {
         if (composingRef.current || event.nativeEvent.isComposing) return
@@ -193,7 +198,8 @@ export function NativeTableProperties({
     const editable = rows.flatMap(row => columns.filter(column => !tableCellSpan(node, row.id, column.id).covered).map(column => ({ rowId: row.id, columnId: column.id })))
     const flatIndex = editable.findIndex(entry => entry.rowId === from.rowId && entry.columnId === from.columnId) + direction
     if (flatIndex < editable.length) {
-      commands.commitCellText(cell.id, text)
+      if (cell.text === text) commands.cancelCellEdit(cell.id)
+      else commands.commitCellText(cell.id, text)
     }
     if (flatIndex < 0) {
       focusCell(rows[0]!.id, columns[0]!.id)
@@ -255,7 +261,7 @@ export function NativeTableProperties({
         ))}
       </div>
       <p className="property-hint">
-        Enter/Tab 提交并前进，Shift+Tab 后退，Esc 或点击其它位置放弃未提交的修改；最后一个单元格再按 Tab 会在表格末尾追加一行。
+        点击其它位置会保存修改；Enter/Tab 提交并前进，Shift+Tab 后退，Esc 取消修改；最后一个单元格再按 Tab 会在表格末尾追加一行。
       </p>
 
       {activeRow && activeColumn && (

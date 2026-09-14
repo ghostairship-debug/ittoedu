@@ -8,14 +8,14 @@
  * only loads faces its host document declares (`ensureBundledFonts`), and the
  * host document is what this module writes.
  *
- * A bundled family is embedded on either of two triggers.
- *   - The project declares it in a font stack. The default project keeps the
- *     Microsoft YaHei chain, declares no bundled family, and therefore still
- *     produces byte-identical exports.
+ * A bundled family is embedded when declared explicitly or used implicitly.
+ *   - The project declares it in a font stack. Slide content without a bundled family does not add a font.
  *   - The project contains a formula node. `STIX Two Math` heads the formula
  *     renderer's chain (`MATH_FONT_FAMILY`) and that chain is a module constant,
  *     never a document property, so no declaration walk can ever find it. The
  *     node's presence is the declaration.
+ *   - A Flow surface uses Noto Sans SC through the shared body/controller CSS.
+ *     Embed that implicit family so offline HTML keeps the editor typography.
  *
  * This module is pure and import-safe in every host: it pulls in no font bytes,
  * no `node:` builtin and no bundler-specific module. The bytes arrive through
@@ -27,6 +27,7 @@ import { bytesToDataUrl } from './base64'
 import {
   BUNDLED_FONT_FAMILIES,
   BUNDLED_MATH_FONT_FAMILY,
+  BUNDLED_TEXT_FONT_FAMILY,
 } from '../../shared/fonts/bundledFontFamilies'
 import { buildBundledFontFaceCss } from '../../shared/fonts/bundledFontFaceCss'
 import type {
@@ -180,6 +181,10 @@ export function collectBundledFontFamiliesInUse(value: unknown): string[] {
       }
       continue
     }
+
+    // Flow's default font is a renderer contract, like formula math fonts;
+    // ordinary body blocks do not repeat a fontFamily property in the document.
+    if ((current as { type?: unknown }).type === 'flow') found.add(BUNDLED_TEXT_FONT_FAMILY)
 
     for (const [key, entry] of Object.entries(current)) {
       if (key === 'fontFamily' && typeof entry === 'string') {
