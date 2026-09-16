@@ -59,6 +59,8 @@
 
 ## 5. 执行状态
 
+2026-09-16 第 6 节 E–G 批次已实施并形成工程候选：E 交付 `slide.interaction` compose 窄分支（意图到规范规则、精确目标解析、导航语义保持、不支持组合作者边界拒绝）；F 交付声明缺候选的有界可恢复反馈（`missing-candidate-delivery` 诊断沿 rejected→continue 续接）与 helper 三事实交付回执；G 交付反馈链缺口清单（G1–G4，缺口集中在播放期→反馈）、冻结有界共同目标任务包与 10 项免费反例。三个隔离 worktree 并行、ROOT 顺序集成零冲突，ai-capabilities 已再生成；汇合后三套 typecheck 与 39+88 项聚焦测试通过。详见[实施记录](reviews/2026-09-16-r19-efg-implementation.md)。方案 6.4 三通道有界真实验证尚未启动，冻结任务包已就绪；G1–G4 反馈接线未实施；050/060 与 Owner accepted 保持独立。
+
 当前：A–D 已实施并形成工程候选，详见[实施结果](reviews/2026-09-16-r19-product-usability.md)。类型检查、Main/Renderer 构建与受影响行为检查通过；Claude/DeepSeek 和 OpenCode/Luna Fast 各一次真实即时纠正通过，未重跑冻结样例。真实 Electron 宽窄窗口、文档编辑/面板切换/保存并重开标签、独立课件入口已检查。
 
 A–D 批次协调完成。后续推荐入口、Published 条件状态切换和 helper 预检交付提示也已修复：18 个不同聚焦用例、类型/生成/三端构建及原样制品重开与离线状态切换已有证据。能力存在、免费检查通过不证明 Luna / DeepSeek 已更容易首次完成；后续真实模型改进效果尚未验证。050 / 060 的版本结论和 Owner accepted 保持独立，2.0 软件内教学 QA 不因此启动。

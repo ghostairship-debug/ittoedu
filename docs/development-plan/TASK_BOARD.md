@@ -6,4 +6,4 @@ Tasks: 1 · queued: 1
 
 | Task | Status | Owner | Write locks | Outcome |
 |---|---|---|---|---|
-| [r19-final-closeout](tasks/r19/r19-final-closeout.md) | queued | ROOT | none | 已完成的推荐入口、Published条件状态切换和helper交付提示及其18项聚焦/三端构建/真实播放证据保留，见 reviews/2026-09-16-r19-final-closeout.md。Owner已选择先完善产品再定向验证三CLI；本次只更新 R19_PRODUCT_USABILITY_IMPROVEMENT_PLAN.md 第6节，E–G待实施，不再等待是否转入2.0的选择。 |
+| [r19-final-closeout](tasks/r19/r19-final-closeout.md) | queued | ROOT | none | E–G 产品工作包已实施并形成工程候选：compose 窄分支、missing-candidate-delivery 有界续接、反馈缺口清单与冻结任务包，ai-capabilities 已再生成，汇合 typecheck 与 39+88 项聚焦测试通过，见 reviews/2026-09-16-r19-efg-implementation.md。方案 6.4 三通道有界真实验证（Codex/Luna、OpenCode/Luna、Claude/DeepSeek 各一项）待启动，冻结任务包位于 output/r19-efg-coordination/bounded-goal/；G1–G4 播放期反馈接线未实施。 |
