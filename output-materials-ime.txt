@@ -1,9 +1,0 @@
-
- RUN  v4.1.10 C:/Users/74755/Documents/HTML课件编辑器
-
-
- Test Files  1 passed (1)
-      Tests  1 passed | 5 skipped (6)
-   Start at  17:49:06
-   Duration  36.93s (transform 5.24s, setup 3.06s, import 11.27s, tests 542ms, environment 21.26s)
-
