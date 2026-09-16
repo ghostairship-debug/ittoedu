@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto'
 import { z } from 'zod'
 import { prepareComponentPatch } from './candidate-component-patch'
 import { generationRequestSchema } from '../src/shared/generationContract'
-import { parseGenerationCandidate, MAX_GENERATION_RESULT_BYTES } from '../src/shared/generationResult'
+import { parseGenerationCandidate, MAX_GENERATION_RESULT_BYTES, generationStagedCandidateMarker } from '../src/shared/generationResult'
 import { checkAuthoringOperationConditions, type AuthoringOperationCondition } from '../src/shared/authoringOperationConditions'
 import { checkGenerationStaticPrecheck } from '../src/shared/generationStaticPrecheck'
 
@@ -70,6 +70,7 @@ async function main() {
     ? { status: 'prechecked', requestId: request.requestId, candidateFile: null, delivery: 'not-delivered', deferred,
       message: '仅预检通过，未生成交付文件，不能声明已交付；交付须去掉 --check 再运行。候选结构、工具字段及静态目标条件通过；素材、运行期细化约束、当前版本与动态行为仍需宿主检查，尚未提交。' }
     : { status: 'ready-for-host', requestId: request.requestId, candidateFile: 'candidate.json', delivery: 'ready-for-host', deferred,
-      message: '候选已写入当前请求的 candidate.json，可向宿主声明交付；这还不是工程提交。候选结构、工具字段及静态目标条件通过；素材、运行期细化约束、当前版本与动态行为仍需宿主检查，尚未提交。' }))
+      declaration: generationStagedCandidateMarker(request.requestId),
+      message: '候选已写入当前请求的 candidate.json，这还不是工程提交；只有宿主回执 committed/unchanged 才可声称已应用。声明交付：文件通道在最终答复原样附上 declaration；结构化输出通道在其 candidate 字段声明 candidateFile。候选结构、工具字段及静态目标条件通过；素材、运行期细化约束、当前版本与动态行为仍需宿主检查，尚未提交。' }))
 }
 main().catch(error => { console.error(JSON.stringify({ status: 'rejected', diagnostics: error.issues ?? [{ code: 'candidate-precheck', path: [], message: error.message }] })); process.exitCode = 1 })
