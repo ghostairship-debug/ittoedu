@@ -9,6 +9,8 @@ export async function runFlowComponentConversionProbe(page: Page) {
     const load = (path: string): Promise<any> => import(path)
     const { createBlankFlowCourseProject } = await load('/src/renderer/project/createFlowCourseProject.ts')
     const { parseComponentPackageFiles } = await load('/src/renderer/components/importComponentPackage.ts')
+    const { withDefaultComponentController } = await load('/src/renderer/components/teacherControllerComponent.ts')
+    const { componentPackagesToArchiveFiles } = await load('/src/renderer/components/componentPackageStore.ts')
     const { componentPackageMeta } = await load('/src/renderer/components/editableComponentPackage.ts')
     const { insertFlowSharedComponent, convertFlowComponentBlockToOverlay } = await load('/src/renderer/course/flowSharedAuthoringAdapters.ts')
     const {
@@ -55,8 +57,6 @@ export async function runFlowComponentConversionProbe(page: Page) {
       id: 'flow-component-conversion-probe',
       title: 'Flow component conversion probe',
       now: '2026-09-07T08:00:00.000Z',
-      includeDefaultController: false,
-      controls: 'none',
     })
     project.componentPackages[packageId] = componentPackageMeta(component)
     const surface = project.surfaces.find((candidate: any) => candidate.type === 'flow')
@@ -83,7 +83,7 @@ export async function runFlowComponentConversionProbe(page: Page) {
       throw new Error(inserted.reason ?? 'Flow overlay component insertion failed')
     }
     project = inserted.nextDocument
-    const resources = { assetFiles: {}, componentPackages: { [packageId]: component } }
+    const resources = { assetFiles: {}, componentPackages: { ...withDefaultComponentController(project).componentPackages, [packageId]: component } }
     const view = buildFlowEditorView({ project, locationId: location.id })
     const target = captureFlowEditorAuthoringTarget({
       view,
@@ -155,7 +155,7 @@ export async function runFlowComponentConversionProbe(page: Page) {
     const archiveBytes = createCourseProjectArchive({
       project: applied.document,
       assetFiles: applied.resources.assetFiles,
-      componentFiles: { [`${packageId}@${manifest.version}`]: component.files },
+      componentFiles: componentPackagesToArchiveFiles(applied.resources.componentPackages),
     }, { mtime: '2026-09-07T08:00:03.000Z' })
     const reopened = openCourseProjectArchive(archiveBytes)
     const reopenedComponents = Object.fromEntries(Object.entries(reopened.componentFiles).map(
@@ -229,6 +229,8 @@ export async function installFlowComponentConversionUiFixture(page: Page) {
     const load = (path: string): Promise<any> => import(path)
     const { createBlankFlowCourseProject } = await load('/src/renderer/project/createFlowCourseProject.ts')
     const { parseComponentPackageFiles } = await load('/src/renderer/components/importComponentPackage.ts')
+    const { withDefaultComponentController } = await load('/src/renderer/components/teacherControllerComponent.ts')
+    const { componentPackagesToArchiveFiles } = await load('/src/renderer/components/componentPackageStore.ts')
     const { componentPackageMeta } = await load('/src/renderer/components/editableComponentPackage.ts')
     const { insertFlowSharedComponent } = await load('/src/renderer/course/flowSharedAuthoringAdapters.ts')
     const { selectFlowEditorBlock, selectFlowOverlay } = await load('/src/renderer/course/flowEditorSlice.ts')
@@ -265,8 +267,6 @@ export async function installFlowComponentConversionUiFixture(page: Page) {
       id: 'flow-component-conversion-ui-probe',
       title: 'Flow component conversion UI probe',
       now: '2026-09-07T08:10:00.000Z',
-      includeDefaultController: false,
-      controls: 'none',
     })
     project.componentPackages[packageId] = componentPackageMeta(component)
     project.assets['ui-existing-fallback'] = {
@@ -289,9 +289,9 @@ export async function installFlowComponentConversionUiFixture(page: Page) {
     surface.blocks.push({
       id: 'ui-nested-destination',
       type: 'section',
-      title: '嵌套目标',
+      title: { inlines: [{ type: 'text', text: '嵌套目标' }] },
       collapsedByDefault: false,
-      blocks: [{ id: 'ui-nested-existing', type: 'paragraph', text: '已有正文' }],
+      blocks: [{ id: 'ui-nested-existing', type: 'paragraph', content: { inlines: [{ type: 'text', text: '已有正文' }] } }],
     })
     project = courseProjectDocumentSchema.parse(project)
     const inserted = insertFlowSharedComponent(
@@ -313,9 +313,9 @@ export async function installFlowComponentConversionUiFixture(page: Page) {
     project = inserted.nextDocument
     useEditorStore.getState().loadCourseProject(
       project,
-      'C:\\flow-component-conversion-ui-probe.h5lesson',
+      null,
       { 'ui-existing-fallback': fallback },
-      { [packageId]: component },
+      { ...withDefaultComponentController(project).componentPackages, [packageId]: component },
     )
     useEditorStore.getState().applyFlowSelection(
       selectFlowOverlay(project, location.id, ['ui-overlay-component']),

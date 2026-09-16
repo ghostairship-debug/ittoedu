@@ -1,3 +1,4 @@
+import { controllerPackages } from '../fixtures/teacherController'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useEditorStore, selectActiveCourseProjectDocument } from '@/renderer/store/editorStore'
 import { openCourseProjectArchive } from '@/renderer/project/courseProjectArchive'
@@ -39,7 +40,7 @@ describe('input authoring delivery', () => {
     useEditorStore.getState().redo()
     expect(inputIn().data).toEqual(data)
   })
-  it('copies fresh keys and rule IDs, then deletes unused copied declarations', () => {
+  it('copies fresh keys and rule IDs, and conservatively retains declarations when component source is unavailable', () => {
     useEditorStore.getState().addInputNode()
     const { item, data } = inputIn()
     const session = useEditorStore.getState().slideBackend!.getSession()
@@ -56,7 +57,8 @@ describe('input authoring delivery', () => {
     expect(inspectInputRuleFamily(id, copy.content.data, scene.interactions).conflict).toBe(false)
     const removed = deleteSlideSceneLayers(next, [id])
     expect(removed.ok, removed.reason).toBe(true)
-    expect(removed.nextSession!.history.present.courseState).toEqual(session.history.present.courseState)
+    expect(removed.nextSession!.history.present.courseState).toEqual(project.courseState)
+    expect(inputIn(removed.nextSession!.history.present).scene.layerItems.some(item => item.layerItemId === id)).toBe(false)
   })
   it('switches to number atomically and rejects stale or invalid answers', () => {
     useEditorStore.getState().addInputNode()
@@ -88,7 +90,7 @@ describe('input authoring delivery', () => {
   it('exports a parseable editable PPTX field and reports the static interaction boundary', async () => {
     useEditorStore.getState().addInputNode()
     const project = active()
-    const resources = { assetFiles: {}, components: {} }
+    const resources = { assetFiles: {}, components: controllerPackages }
     const preflight = collectCourseProjectExportPreflight(project, 'pptx', resources)
     expect(preflight.items.some(item => item.message.includes('静态填写区'))).toBe(true)
     expect(preflight.items.some(item => item.code === 'project-health:published-interaction-trigger-unsupported')).toBe(false)

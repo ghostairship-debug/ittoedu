@@ -234,14 +234,18 @@ describe('ARCH-0 representative Course Project V9 fixtures', () => {
       'slide-heavy.h5lesson',
     ])
     for (const [id, entries] of Object.entries(utc.provenance)) {
-      expect(entries).toHaveLength(1)
-      const [meta] = entries
-      if (!meta) throw new Error(`Fixture ${id} recorded no component provenance`)
-      // The ZIP timestamp changed, the recorded business instant must not.
-      expect(meta.importedAt).toBe(ARCHITECTURE_BASELINE_FIXTURE_MTIME)
-      expect(meta.sha256).toMatch(/^[0-9a-f]{64}$/)
-      expect(meta.contentSha256).toMatch(/^[0-9a-f]{64}$/)
-      expect(meta.sha256).not.toBe(meta.contentSha256)
+      expect(entries).toHaveLength(id === 'flow-heavy' ? 1 : 2)
+      const imported = entries.filter(meta => meta.importedAt !== undefined)
+      expect(imported).toHaveLength(1)
+      for (const meta of entries) {
+        expect(meta.contentSha256).toMatch(/^[0-9a-f]{64}$/)
+      }
+      for (const meta of imported) {
+        // Built-in controller metadata has no import timestamp; imported packages retain it.
+        expect(meta.importedAt).toBe(ARCHITECTURE_BASELINE_FIXTURE_MTIME)
+        expect(meta.sha256).toMatch(/^[0-9a-f]{64}$/)
+        expect(meta.sha256).not.toBe(meta.contentSha256)
+      }
     }
   }, 180_000)
 
@@ -293,7 +297,8 @@ describe('ARCH-0 representative Course Project V9 fixtures', () => {
     )
     expect(new Set(layers.flatMap((item) => (
       item.kind === 'native' ? [item.content.nativeType] : []
-    )))).toEqual(new Set(['text', 'teacher-controller', 'formula', 'image', 'shape']))
+    )))).toEqual(new Set(['text', 'formula', 'image', 'shape']))
+    expect(layers.some(isControllerFixture)).toBe(true)
     expect(layers.some((item) => (
       item.kind === 'runtime' &&
       item.runtime.protocol === 'canvas-runtime' &&
@@ -304,11 +309,13 @@ describe('ARCH-0 representative Course Project V9 fixtures', () => {
     expect(Object.values(project.assets).map((asset) => asset.kind).sort())
       .toEqual(['audio', 'image', 'image', 'image'])
     expect(Object.values(project.media.audio.sounds)).toHaveLength(1)
-    expect(Object.keys(project.componentPackages)).toEqual([
+    expect(Object.keys(project.componentPackages).sort()).toEqual([
       'com.ittoedu.baseline.evidence-panel',
+      'com.ittoedu.teacher-controller',
     ])
-    expect(Object.keys(archive.componentFiles)).toEqual([
+    expect(Object.keys(archive.componentFiles).sort()).toEqual([
       'com.ittoedu.baseline.evidence-panel@4.0.0',
+      'com.ittoedu.teacher-controller@1.0.0',
     ])
   })
 
@@ -337,8 +344,8 @@ describe('ARCH-0 representative Course Project V9 fixtures', () => {
     ]))
     const ime = blocks.find((block) => block.id === 'flow-ime-paragraph')
     expect(ime).toMatchObject({ type: 'paragraph' })
-    expect(ime && 'text' in ime ? ime.text : '').toContain('中文输入法（IME）')
-    expect(ime && 'runs' in ime ? ime.runs?.length : 0).toBeGreaterThan(0)
+    expect(ime?.type === 'paragraph' ? ime.content.inlines.map(inline => inline.type === 'text' ? inline.text : inline.accessibleText).join('') : '').toContain('中文输入法（IME）')
+    expect(ime?.type === 'paragraph' ? ime.content.inlines.filter(inline => inline.style).length : 0).toBeGreaterThan(0)
     const componentBlock = blocks.find((block) => block.type === 'component')
     expect(componentBlock).toMatchObject({
       type: 'component',
@@ -347,7 +354,7 @@ describe('ARCH-0 representative Course Project V9 fixtures', () => {
     })
     expect('layerItems' in surface).toBe(false)
     expect(surface.surfaceLayerItems[0]?.item.paperSpace).toBe('viewport')
-    expect(Object.keys(archive.componentFiles)).toEqual([
+    expect(Object.keys(archive.componentFiles).sort()).toEqual([
       'com.ittoedu.baseline.evidence-panel@4.0.0',
     ])
   })
@@ -386,10 +393,11 @@ describe('ARCH-0 representative Course Project V9 fixtures', () => {
       item.kind === 'runtime' &&
       item.runtime.protocol === 'surface-runtime' &&
       item.runtime.runtimeApiVersion === 3 &&
-      item.runtime.staticFallback?.coverage === 'surface'
+        item.runtime.staticFallback?.coverage === 'surface'
     ))).toBe(true)
-    expect(Object.keys(archive.componentFiles)).toEqual([
+    expect(Object.keys(archive.componentFiles).sort()).toEqual([
       'com.ittoedu.baseline.evidence-panel@4.0.0',
+      'com.ittoedu.teacher-controller@1.0.0',
     ])
   })
 })

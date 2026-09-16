@@ -14,7 +14,7 @@ export const generationStagedCandidateMarker = (requestId: string): string =>
   `${GENERATION_RESULT_OPEN}${JSON.stringify({ version: 1, requestId, kind: 'edit' })}${GENERATION_RESULT_CLOSE}`
 export const generationResultSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('answer'), requestId: z.uuid() }).strict(),
-  z.object({ kind: z.literal('incomplete'), requestId: z.uuid(), finding: z.string().max(4000) }).strict(),
+  z.object({ kind: z.literal('incomplete'), requestId: z.uuid(), finding: z.string().max(4000), failure: generationFailureSchema.optional() }).strict(),
   z.object({ kind: z.literal('candidate'), requestId: z.uuid(), candidate: generationCandidateSchema }).strict(),
   z.object({ kind: z.literal('candidate-rejected'), requestId: z.uuid(), candidateId: z.uuid(), finding: z.string().max(4000), failure: generationFailureSchema.optional() }).strict(),
   z.object({ kind: z.literal('candidate-format-error'), requestId: z.uuid(), finding: z.string().max(4000), excerpt: z.string().max(8000), failure: generationFailureSchema.optional() }).strict(),

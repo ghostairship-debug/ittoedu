@@ -1,4 +1,5 @@
 import { buildPublishedFixture as buildPublishedCourseV2Payload } from '../fixtures/teacherController'
+import { plainDocumentText } from '@/shared/document/content'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
 import type {
@@ -145,7 +146,7 @@ function flowProject(blocks: FlowBlock[]): CourseProjectDocument {
     id: 'published-flow',
     locations: [{
       id: 'location-flow',
-      label: start.type === 'heading' ? start.text : '正文',
+      label: start.type === 'heading' ? plainDocumentText(start.content) : '正文',
       kind: 'flow-block',
       surfaceId: 'surface-flow',
       blockId: start.id,
@@ -210,7 +211,7 @@ function spatialProject(worldItems: LayerItem[]): CourseProjectDocument {
 describe('Published Course V2 protocol', () => {
   it('is a strict one-way payload: schema accepts producer output and rejects author-only fields', () => {
     const published = publish(flowProject([
-      { id: 'heading', type: 'heading', level: 1, text: '标题' },
+      { id: 'heading', type: 'heading', level: 1, content: { inlines: [{ type: 'text', text: '标题' }] } },
     ]))
     expect(publishedCourseV2Schema.parse(published)).toEqual(published)
     expect(publishedCourseV2Schema.safeParse({
@@ -228,7 +229,7 @@ describe('Published Course V2 protocol', () => {
 
   it('owns the historical Published asset-key and layer-item ID boundaries directly', () => {
     const published = publish(flowProject([
-      { id: 'heading', type: 'heading', level: 1, text: '标题' },
+      { id: 'heading', type: 'heading', level: 1, content: { inlines: [{ type: 'text', text: '标题' }] } },
     ]))
     const assetIdAtLimit = 'a'.repeat(240)
     published.assets[assetIdAtLimit] = { mimeType: 'image/png', url: './asset.png' }
@@ -244,7 +245,7 @@ describe('Published Course V2 protocol', () => {
 
     const layerIdAtLimit = 'l'.repeat(200)
     const layerProject = flowProject([
-      { id: 'heading', type: 'heading', level: 1, text: '标题' },
+      { id: 'heading', type: 'heading', level: 1, content: { inlines: [{ type: 'text', text: '标题' }] } },
     ])
     layerProject.globalLayerItems = [{
       item: nativeText(layerIdAtLimit, 10, '全局层'),
@@ -303,9 +304,9 @@ describe('Published Course V2 protocol', () => {
     const flow = publish(flowProject([{
       id: 'section',
       type: 'section',
-      title: '章节',
+      title: { inlines: [{ type: 'text', text: '章节' }] },
       collapsedByDefault: false,
-      blocks: [{ id: 'paragraph', type: 'paragraph', text: '正文' }],
+      blocks: [{ id: 'paragraph', type: 'paragraph', content: { inlines: [{ type: 'text', text: '正文' }] } }],
     }]))
     const duplicateBlock = structuredClone(flow)
     const duplicateFlow = duplicateBlock.surfaces[0]
@@ -343,7 +344,7 @@ describe('Published Course V2 protocol', () => {
 
   it('round-trips Unicode titles and package-relative asset URLs through the V2 entry parser', () => {
     const published = publish(flowProject([
-      { id: 'heading', type: 'heading', level: 1, text: '中文课件 🎓' },
+      { id: 'heading', type: 'heading', level: 1, content: { inlines: [{ type: 'text', text: '中文课件 🎓' }] } },
     ]))
     const packaged = {
       ...published,
@@ -362,7 +363,7 @@ describe('Published Course V2 protocol', () => {
   })
 
   it('accepts an optional plane only on global entries and rejects an Underlay controller', () => {
-    const project = flowProject([{ id: 'heading', type: 'heading', level: 1, text: '标题' }])
+    const project = flowProject([{ id: 'heading', type: 'heading', level: 1, content: { inlines: [{ type: 'text', text: '标题' }] } }])
     project.globalLayerItems = [{
       item: nativeText('global-underlay', 10, '底层'),
       visibility: { mode: 'all', locationIds: [] },
@@ -389,7 +390,7 @@ describe('Published Course V2 protocol', () => {
 
   it('preserves declarative course-state interactions and closes their Published references', () => {
     const project = flowProject([
-      { id: 'heading', type: 'heading', level: 1, text: '标题' },
+      { id: 'heading', type: 'heading', level: 1, content: { inlines: [{ type: 'text', text: '标题' }] } },
     ])
     project.courseState = [{
       key: 'ready',
@@ -443,23 +444,21 @@ describe('Published Course V2 protocol', () => {
         id: 'heading',
         type: 'heading',
         level: 1,
-        text: '标题',
-        runs: [{ start: 0, end: 2, style: { bold: true } }],
+        content: { inlines: [{"type":"text","text":"标题","style":{"bold":true}}] },
       },
       {
         id: 'paragraph',
         type: 'paragraph',
-        text: '正文强调',
-        runs: [{ start: 2, end: 4, style: { italic: true, color: '#2563eb' } }],
+        content: { inlines: [{"type":"text","text":"正文"},{"type":"text","text":"强调","style":{"italic":true,"color":"#2563eb"}}] },
       },
       {
         id: 'table',
         type: 'table',
-        columns: [{ id: 'c1', header: '列' }],
+        columns: [{ id: 'c1', header: { inlines: [{ type: 'text', text: '列' }] } }],
         rows: [{
           id: 'r1',
           cells: {
-            c1: { text: '值', runs: [{ start: 0, end: 1, style: { strike: true } }] },
+            c1: { inlines: [{ type: 'text', text: '值', style: { strike: true } }] },
           },
         }],
       },
@@ -471,23 +470,21 @@ describe('Published Course V2 protocol', () => {
         id: 'heading',
         type: 'heading',
         level: 1,
-        text: '标题',
-        runs: [{ start: 0, end: 2, style: { bold: true } }],
+        content: { inlines: [{"type":"text","text":"标题","style":{"bold":true}}] },
       },
       {
         id: 'paragraph',
         type: 'paragraph',
-        text: '正文强调',
-        runs: [{ start: 2, end: 4, style: { italic: true, color: '#2563eb' } }],
+        content: { inlines: [{"type":"text","text":"正文"},{"type":"text","text":"强调","style":{"italic":true,"color":"#2563eb"}}] },
       },
       {
         id: 'table',
         type: 'table',
-        columns: [{ id: 'c1', header: '列' }],
+        columns: [{ id: 'c1', header: { inlines: [{ type: 'text', text: '列' }] } }],
         rows: [{
           id: 'r1',
           cells: {
-            c1: { text: '值', runs: [{ start: 0, end: 1, style: { strike: true } }] },
+            c1: { inlines: [{ type: 'text', text: '值', style: { strike: true } }] },
           },
         }],
       },
@@ -564,7 +561,7 @@ describe('Player bundle entry is Published V2 only', () => {
 
   it('strict-parses Published V2 and mounts CoursePlayer', async () => {
     const published = publish(flowProject([
-      { id: 'heading', type: 'heading', level: 1, text: '标题' },
+      { id: 'heading', type: 'heading', level: 1, content: { inlines: [{ type: 'text', text: '标题' }] } },
     ]))
     const root = document.createElement('div')
     root.id = 'course-root'
@@ -588,7 +585,7 @@ describe('Player bundle entry is Published V2 only', () => {
   it('keeps a replacement Player mounted when the abandoned start settles late', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => undefined)
     const published = publish(flowProject([
-      { id: 'heading', type: 'heading', level: 1, text: '标题' },
+      { id: 'heading', type: 'heading', level: 1, content: { inlines: [{ type: 'text', text: '标题' }] } },
     ]))
     const root = document.createElement('div')
     root.id = 'course-root'
@@ -627,7 +624,7 @@ describe('Player bundle entry is Published V2 only', () => {
     })).toThrow(PLAYER_V2_ENTRY_UNSUPPORTED_ERROR)
 
     const published = publish(flowProject([
-      { id: 'heading', type: 'heading', level: 1, text: '标题' },
+      { id: 'heading', type: 'heading', level: 1, content: { inlines: [{ type: 'text', text: '标题' }] } },
     ]))
     expect(() => parsePublishedCourseV2Entry({
       ...published,
@@ -654,7 +651,7 @@ describe('Player bundle entry is Published V2 only', () => {
 
   it('bootstraps __H5_COURSE_PAYLOAD__ onto #course-root', async () => {
     const published = publish(flowProject([
-      { id: 'heading', type: 'heading', level: 1, text: '标题' },
+      { id: 'heading', type: 'heading', level: 1, content: { inlines: [{ type: 'text', text: '标题' }] } },
     ]))
     const root = document.createElement('div')
     root.id = 'course-root'
@@ -806,7 +803,7 @@ describe('Player bundle entry is Published V2 only', () => {
           type: 'flow',
           surfaceLayerItems: [],
           layout: { readingWidth: 760, wideContentWidth: 1120 },
-          blocks: [{ id: 'block-1', type: 'paragraph', text: '内容' }],
+          blocks: [{ id: 'block-1', type: 'paragraph', content: { inlines: [{ type: 'text', text: '内容' }] } }],
         }],
       }
 

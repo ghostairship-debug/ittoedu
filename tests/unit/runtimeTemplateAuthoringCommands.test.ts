@@ -1,3 +1,5 @@
+import { createTextNode } from '@/renderer/project/nativeNodeFactories'
+import { sceneNodeToCourseLayerItem } from '@/shared/courseProjectModel'
 import { describe, expect, it } from 'vitest'
 import {
   applyEditorTransactionStep,
@@ -215,10 +217,7 @@ describe('planRuntimeTemplateCreation', () => {
     const project = structuredClone(baseProject())
     const surface = project.surfaces[0]!
     if (surface.type !== 'slide') throw new Error('expected Slide')
-    const controller = project.globalLayerItems[0]!.item
-    const local = structuredClone(controller)
-    local.layerItemId = 'local-existing'
-    local.label = 'Local existing'
+    const local = sceneNodeToCourseLayerItem(createTextNode({ id: 'local-existing', name: 'Local existing' }))
     local.order = 0
     surface.scenes[0]!.layerItems.push(local)
     const valid = courseProjectDocumentSchema.parse(project)

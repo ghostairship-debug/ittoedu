@@ -86,7 +86,7 @@ class TimingAdapter implements LocalAgentCliAdapterV2 {
 }
 
 describe('bounded native task timing', () => {
-  it('does not count hidden body candidate envelopes as a first visible reply', async () => {
+  it('counts the human-readable candidate summary as the first visible reply', async () => {
     const { workspace, repository } = await fixture()
     const harness = new LocalAgentHarness(repository, (_id, generation) => {
       const adapter = new TimingAdapter(generation); adapter.publicUpdates = 0; return adapter
@@ -97,8 +97,8 @@ describe('bounded native task timing', () => {
       expect((await harness.candidate(workspace, id)).kind).toBe('candidate')
       const timing = summarizeAiTaskTiming((await repository.list(workspace)).v2[0]!.tasks[0]!)[0]!
       expect(timing.marks.candidateParsed).toBeTypeOf('number')
-      expect(timing.marks.firstVisibleText).toBeUndefined()
-      expect(timing.durationsMs.acceptedToFirstVisibleText).toBeNull()
+      expect(timing.marks.firstVisibleText).toBeTypeOf('number')
+      expect(timing.durationsMs.acceptedToFirstVisibleText).toBeGreaterThanOrEqual(0)
     } finally { await harness.close() }
   })
   it('persists distinct candidate, preview and actual commit boundaries without per-token writes', async () => {

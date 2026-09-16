@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { workspaceIdentityV1Schema } from './workspaceIdentity'
+import { workspaceIdentityV1Schema, aiWorkspaceIdentitySchema, lessonAgentWorkspaceSchema } from './workspaceIdentity'
 import { generationAfterCommitSchema, generationFailureSchema, generationCommitReceiptSchema, generationRequestSchema } from './generationContract'
 import { generationResultSchema } from './generationResult'
 import { aiUserInputSchema, aiInputDeliverySchema } from './localAgentInteraction'
@@ -27,7 +27,7 @@ export const localAgentHostResultSchema = z.object({
 }).strict()
 export type LocalAgentHostResult = z.infer<typeof localAgentHostResultSchema>
 export const localAgentRecordSchema = z.object({
-  version: z.literal(1), id: z.uuid(), adapter: localAgentIdSchema, workspace: workspaceIdentityV1Schema,
+  version: z.literal(1), id: z.uuid(), adapter: localAgentIdSchema, workspace: aiWorkspaceIdentitySchema, lessonWorkspace: lessonAgentWorkspaceSchema.optional(),
   workingDirectoryId: z.uuid().optional(),
   generationRequestId: z.uuid().optional(),
   generationRequest: generationRequestSchema.optional(),
@@ -40,6 +40,8 @@ export const localAgentRecordSchema = z.object({
     intent: z.enum(['discuss', 'plan', 'edit']), applyPolicy: z.enum(['auto', 'preview']),
     status: z.enum(['observing', 'running', 'waiting-input', 'checking', 'awaiting-apply', 'committing', 'feeding-back', 'completed', 'failed', 'cancelled', 'partial']),
     turnId: z.string().nullable(), deadlineAt: z.number().int().nonnegative().nullable(), committedStages: z.number().int().nonnegative(),
+    startedAt: z.number().int().nonnegative().optional(), lastActivityAt: z.number().int().nonnegative().optional(),
+    budgetStopReason: z.enum(['resource-budget', 'native-inactivity']).optional(),
     completion: z.object({ version: z.literal(1), resultId: z.uuid(), outcome: z.enum(['modified', 'unchanged']) }).strict().optional(),
     receiptDelivery: z.enum(['pending', 'delivered']).optional(),
   }).strict().optional(),
@@ -71,7 +73,7 @@ export const localAgentCapabilitiesSchema = z.object({
   selectedConfiguration: z.object(configurationShape).strict().optional(),
   // A requested next-turn configuration is not evidence that the native CLI applied it.
   requestedConfiguration: z.object(configurationShape).strict().nullable().optional(),
-  input: z.object({ image: support, readFile: support, question: z.enum(['structured', 'text', 'unknown']), correction: z.enum(['active-turn', 'turn-boundary', 'unknown']), cancel: support }).strict(),
+  input: z.object({ image: support, readFile: support, question: z.enum(['structured', 'text', 'unknown']), correction: z.enum(['active-turn', 'interrupt-resume', 'turn-boundary', 'unknown']), cancel: support }).strict(),
 }).strict().superRefine((capabilities, ctx) => {
   const fail = (message: string) => ctx.addIssue({ code: 'custom', message })
   if (new Set(capabilities.models.map(model => model.id)).size !== capabilities.models.length) fail('重复模型')
@@ -87,9 +89,18 @@ export type LocalAgentCapabilities = z.infer<typeof localAgentCapabilitiesSchema
 export const localAgentConfigurationSchema = z.object(configurationShape).strict()
 export type LocalAgentConfiguration = z.infer<typeof localAgentConfigurationSchema>
 
-const owner = { projectId: z.string().min(1).max(200), projectPath: z.string().min(1).max(32767) }
+const owner = { projectId: z.string().min(1).max(200), projectPath: z.string().min(1).max(32767), lessonWorkspace: lessonAgentWorkspaceSchema.optional() }
 const optionalOwner = { projectId: owner.projectId.optional(), projectPath: owner.projectPath.optional() }
 export const localAgentRequestSchema = z.discriminatedUnion('operation', [
+  z.object({ operation: z.literal('lesson-prepare-generation'), workspace: lessonAgentWorkspaceSchema }).strict(),
+  z.object({ operation: z.literal('lesson-start'), workspace: lessonAgentWorkspaceSchema, adapter: localAgentIdSchema, prompt: z.string().min(1).max(100000), userMessage: z.string().min(1).max(20000).optional(), intent: z.enum(['discuss', 'plan']).default('discuss') }).strict(),
+  z.object({ operation: z.literal('lesson-resume'), workspace: lessonAgentWorkspaceSchema, sessionId: z.uuid(), prompt: z.string().min(1).max(100000), userMessage: z.string().min(1).max(20000).optional() }).strict(),
+  z.object({ operation: z.literal('lesson-list'), workspace: lessonAgentWorkspaceSchema }).strict(),
+  z.object({ operation: z.literal('lesson-read'), workspace: lessonAgentWorkspaceSchema, sessionId: z.uuid(), after: z.number().int().nonnegative().default(0) }).strict(),
+  z.object({ operation: z.literal('lesson-cancel'), workspace: lessonAgentWorkspaceSchema, sessionId: z.uuid() }).strict(),
+  z.object({ operation: z.literal('lesson-delete'), workspace: lessonAgentWorkspaceSchema, sessionId: z.uuid().optional() }).strict(),
+  z.object({ operation: z.literal('lesson-input'), workspace: lessonAgentWorkspaceSchema, sessionId: z.uuid(), input: aiUserInputSchema }).strict(),
+
   z.object({ operation: z.literal('probe'), adapter: localAgentIdSchema }).strict(),
   z.object({ operation: z.literal('capabilities'), adapter: localAgentIdSchema, ...optionalOwner, refresh: z.boolean().optional() }).strict(),
   z.object({ operation: z.literal('configure'), adapter: localAgentIdSchema, configuration: localAgentConfigurationSchema, ...optionalOwner }).strict(),
@@ -116,6 +127,7 @@ export const localAgentResponseSchema = z.object({
   enabled: z.boolean(), probe: localAgentProbeSchema.optional(), sessionId: z.uuid().optional(),
   records: z.array(localAgentRecordSchema).optional(), damaged: z.array(z.string()).optional(),
   generationResult: generationResultSchema.optional(),
+  lessonGeneration: z.object({ confirmedDocuments: z.object({ teachingPlan: z.string().min(1), presentationScript: z.string().min(1) }).strict() }).strict().optional(),
   workspace: workspaceIdentityV1Schema.optional(),
   capabilities: localAgentCapabilitiesSchema.optional(),
   inputDelivery: aiInputDeliverySchema.optional(),

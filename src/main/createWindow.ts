@@ -66,30 +66,34 @@ function confirmClose(window: BrowserWindow): 'save' | 'discard' | 'cancel' {
   return 'cancel'
 }
 
-function requestRendererSaveBeforeClose(window: BrowserWindow): Promise<boolean> {
+function requestRendererBeforeClose(window: BrowserWindow, mode: 'save' | 'preserve'): Promise<boolean> {
+  const requestId = randomUUID()
+  const resultChannel = mode === 'save' ? IPC_CHANNELS.saveAndCloseResult : IPC_CHANNELS.preserveAndCloseResult
+  const requestChannel = mode === 'save' ? IPC_CHANNELS.requestSaveAndClose : IPC_CHANNELS.requestPreserveAndClose
   return new Promise((resolve) => {
     let settled = false
     const finish = (saved: boolean) => {
       if (settled) return
       settled = true
       clearTimeout(timeout)
-      ipcMain.removeListener(IPC_CHANNELS.saveAndCloseResult, onResult)
+      ipcMain.removeListener(resultChannel, onResult)
       window.removeListener('closed', onClosed)
       resolve(saved)
     }
     const onResult = (
       event: Electron.IpcMainEvent,
+      receivedRequestId: unknown,
       saved: unknown,
     ) => {
-      if (event.sender !== window.webContents) return
+      if (event.sender !== window.webContents || receivedRequestId !== requestId) return
       finish(saved === true)
     }
     const onClosed = () => finish(false)
     const timeout = setTimeout(() => finish(false), 5 * 60_000)
-    ipcMain.on(IPC_CHANNELS.saveAndCloseResult, onResult)
+    ipcMain.on(resultChannel, onResult)
     window.once('closed', onClosed)
     try {
-      window.webContents.send(IPC_CHANNELS.requestSaveAndClose)
+      window.webContents.send(requestChannel, requestId)
     } catch (error) {
       console.error('发送关闭前保存请求失败', error)
       finish(false)
@@ -212,7 +216,7 @@ export async function createMainWindow(
       const dirty = rendererDirty || appState.isDirty()
       const decision = dirty ? confirmClose(window) : 'discard'
       if (decision === 'cancel') return
-      if (decision === 'save' && !(await requestRendererSaveBeforeClose(window))) {
+      if (!(await requestRendererBeforeClose(window, decision === 'save' ? 'save' : 'preserve'))) {
         return
       }
       if (dirty) {

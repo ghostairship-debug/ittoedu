@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type {
   ComponentPackageData,
@@ -42,6 +42,9 @@ function activeHistory() {
 }
 
 const PACKAGE_ID = 'com.example.managed'
+let initialPackages: ReturnType<typeof useEditorStore.getState>['componentPackages']
+let initialMetadata: ReturnType<typeof activeCourseProject>['componentPackages']
+function managedMenu() { return within(screen.getByLabelText('管理可管理组件').closest('details')!) }
 
 function componentPackage(
   version: string,
@@ -98,7 +101,7 @@ function activeCourseProject() {
 
 function clickLocateUsage() {
   fireEvent.click(screen.getByLabelText('管理可管理组件'))
-  fireEvent.click(screen.getByRole('menuitem', { name: '定位使用位置' }))
+  fireEvent.click(managedMenu().getByRole('menuitem', { name: '定位使用位置' }))
 }
 
 function openFlowProjectWithEmbeddedComponentBlock(): { surfaceId: string; blockId: string } {
@@ -151,6 +154,8 @@ function expectFlowBlockUsageReference(surfaceId: string, blockId: string) {
 beforeEach(() => {
   useEditorStore.getState().createNewProject()
   useEditorStore.setState({ editorMode: 'professional' })
+  initialPackages = structuredClone(useEditorStore.getState().componentPackages)
+  initialMetadata = structuredClone(activeCourseProject().componentPackages)
 })
 
 afterEach(() => cleanup())
@@ -163,15 +168,15 @@ describe('editorStore component package management', () => {
     useEditorStore.getState().importComponentPackages([first, second])
     let state = useEditorStore.getState()
     expect(Object.keys(state.componentPackages)).toEqual([
-      PACKAGE_ID,
+      ...Object.keys(initialPackages), PACKAGE_ID,
       'com.example.second',
     ])
     expect(activeHistory().past).toHaveLength(1)
 
     state.undo()
     state = useEditorStore.getState()
-    expect(state.componentPackages).toEqual({})
-    expect(selectActiveCourseProjectDocument(state)!.componentPackages).toEqual({})
+    expect(state.componentPackages).toEqual(initialPackages)
+    expect(selectActiveCourseProjectDocument(state)!.componentPackages).toEqual(initialMetadata)
 
     state.redo()
     state = useEditorStore.getState()
@@ -310,7 +315,7 @@ describe('editorStore component package management', () => {
     useEditorStore.getState().setEditingScope('global')
     useEditorStore.getState().addExternalComponentNode(PACKAGE_ID)
     const globalNodeId = projectedGlobalLayer(useEditorStore.getState())
-      .find(({ node }) => node.type === 'external-component')!.node.id
+      .find(({ node }) => node.type === 'external-component' && node.component?.packageId === PACKAGE_ID)!.node.id
     useEditorStore.getState().updateNode(globalNodeId, {
       props: { label: '全局自定义', theme: 'dark' },
     })
@@ -396,9 +401,9 @@ describe('ComponentsTab project component management', () => {
       expect(manager).toHaveTextContent('v1.0.0')
       expect(manager).toHaveTextContent('场景 1 · 全局 0')
       fireEvent.click(screen.getByLabelText('管理可管理组件'))
-      expect(screen.getByRole('menuitem', { name: '从工程移除' })).toBeDisabled()
+      expect(managedMenu().getByRole('menuitem', { name: '从工程移除' })).toBeDisabled()
 
-      fireEvent.click(screen.getByRole('menuitem', { name: '替换组件包' }))
+      fireEvent.click(managedMenu().getByRole('menuitem', { name: '替换组件包' }))
       expect(onReplaceComponent).toHaveBeenCalledWith(PACKAGE_ID)
     } finally {
       HTMLCanvasElement.prototype.getContext = originalGetContext
@@ -413,7 +418,7 @@ describe('ComponentsTab project component management', () => {
     try {
       render(<ComponentsTab onReplaceComponent={vi.fn()} />)
       fireEvent.click(screen.getByLabelText('管理可管理组件'))
-      const deleteButton = screen.getByRole('menuitem', { name: '从工程移除' })
+      const deleteButton = managedMenu().getByRole('menuitem', { name: '从工程移除' })
       expect(deleteButton).toBeEnabled()
       fireEvent.click(deleteButton)
       expect(screen.queryByTestId(`component-package-${PACKAGE_ID}`))
@@ -435,7 +440,7 @@ describe('ComponentsTab project component management', () => {
       const manager = screen.getByTestId(`component-package-${PACKAGE_ID}`)
       expect(manager).toHaveTextContent('场景 1 · 全局 0')
       fireEvent.click(screen.getByLabelText('管理可管理组件'))
-      expect(screen.getByRole('menuitem', { name: '从工程移除' })).toBeDisabled()
+      expect(managedMenu().getByRole('menuitem', { name: '从工程移除' })).toBeDisabled()
     } finally {
       HTMLCanvasElement.prototype.getContext = originalGetContext
     }
@@ -481,7 +486,7 @@ describe('ComponentsTab locate component usage', () => {
     if (!surface || surface.type !== 'flow') throw new Error('Expected the usage Flow surface')
     const currentBlockId = 'flow-composing-current-block'
     const currentLocationId = 'flow-composing-current-location'
-    surface.blocks.push({ id: currentBlockId, type: 'paragraph', text: '输入中的段落' })
+    surface.blocks.push({ id: currentBlockId, type: 'paragraph', content: { inlines: [{ type: 'text', text: '输入中的段落' }] } })
     project.locations.push({
       id: currentLocationId,
       label: '输入中的位置',
@@ -631,7 +636,7 @@ describe('add component packages directly to the current canvas', () => {
       const target = useEditorStore.getState().captureComponentInsertionTarget()!
       expect(useEditorStore.getState().insertComponentPackagesAtTarget(target, [data]).ok).toBe(true)
     }
-    expect(Object.keys(activeCourseProject().componentPackages)).toEqual([PACKAGE_ID])
+    expect(Object.keys(activeCourseProject().componentPackages)).toEqual([...Object.keys(initialMetadata), PACKAGE_ID])
     expect(collectCourseComponentPackageUsage(activeCourseProject(), PACKAGE_ID).references).toHaveLength(2)
     useEditorStore.getState().undo()
     expect(collectCourseComponentPackageUsage(activeCourseProject(), PACKAGE_ID).references).toHaveLength(1)
@@ -646,7 +651,7 @@ describe('add component packages directly to the current canvas', () => {
     const before = activeCourseProject()
     expect(useEditorStore.getState().insertComponentPackagesAtTarget(target, [componentPackage('1.0.0')]).ok).toBe(false)
     expect(activeCourseProject()).toEqual(before)
-    expect(useEditorStore.getState().componentPackages).toEqual({})
+    expect(useEditorStore.getState().componentPackages).toEqual(initialPackages)
   })
 
   it('rolls back the whole batch if one component cannot be placed', () => {
@@ -658,6 +663,6 @@ describe('add component packages directly to the current canvas', () => {
     ])
     expect(result.ok).toBe(false)
     expect(activeCourseProject()).toEqual(before)
-    expect(useEditorStore.getState().componentPackages).toEqual({})
+    expect(useEditorStore.getState().componentPackages).toEqual(initialPackages)
   })
 })

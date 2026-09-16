@@ -41,3 +41,8 @@ export function jsonToBase64(value: unknown): string {
 export function bytesToDataUrl(bytes: Uint8Array, mimeType: string): string {
   return `data:${mimeType};base64,${bytesToBase64(bytes)}`
 }
+
+/** Portable Builder context encoding; strings are UTF-8 in both hosts. */
+export function encodeBase64(value: Uint8Array | string): string {
+  return bytesToBase64(typeof value === 'string' ? new TextEncoder().encode(value) : value)
+}

@@ -75,7 +75,7 @@ describe('native V2 factory and read-only historical wire fixtures', () => {
           expect(native.getExternalSessionId?.()).toBeNull()
         } finally { await native.close() }
       }
-      await write(`if(process.argv.includes('--version')) console.log(${JSON.stringify(version)}); else process.stdout.write("x".repeat(1024*1024+1)+'\\n')`)
+      await write(`if(process.argv.includes('--version')) console.log(${JSON.stringify(version)}); else process.stdout.write("x".repeat(32*1024*1024+1)+'\\n')`)
       const oversized = createAdapter()
       try {
         const opened = oversized.open({ cwd: directory, externalSessionId: null })
@@ -181,7 +181,7 @@ describe('native V2 factory and read-only historical wire fixtures', () => {
       version: 1, requestId, kind: 'edit', reply: null, candidate,
     }), request)
     expect(readGenerationResult(decoded, request)).toMatchObject({
-      kind: 'candidate', requestId, candidate: { steps: [{ input: '{broken' }] },
+      kind: 'candidate-format-error', requestId,
     })
     const valid = decodeCodexStructuredOutput(JSON.stringify({
       version: 1, requestId, kind: 'edit', reply: null,

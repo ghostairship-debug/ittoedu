@@ -357,7 +357,7 @@ function fixture(
         type: 'flow',
         layout: { readingWidth: 760, wideContentWidth: 1120 },
         surfaceLayerItems: kind === 'flow-surface' ? scopedItems : [],
-        blocks: [{ id: blockId, type: 'heading', level: 1, text: 'Flow' }],
+        blocks: [{ id: blockId, type: 'heading', level: 1, content: { inlines: [{ type: 'text', text: 'Flow' }] } }],
       }],
     })
     return {

@@ -100,6 +100,22 @@ describe('Authoring Tool single transaction receipt', () => {
     expect(failed.port.commit).not.toHaveBeenCalled()
   })
 
+  it('preserves a concrete cause code from failed plans and keeps tool-failed only for opaque errors', async () => {
+    const coded = setup()
+    coded.definition.plan = () => { throw Object.assign(new Error('候选媒体文件没有真实字节'), { code: 'candidate-media-file' }) }
+    expect((await executeAuthoringTool(coded.request, coded.definition, coded.port))).toMatchObject({ status: 'failed', diagnostics: [{ code: 'candidate-media-file', path: [] }] })
+    expect(coded.port.commit).not.toHaveBeenCalled()
+    const nested = setup()
+    nested.definition.plan = () => { throw new Error('写入失败', { cause: Object.assign(new Error('目标对象不存在'), { code: 'invalid-target' }) }) }
+    expect((await executeAuthoringTool(nested.request, nested.definition, nested.port)).diagnostics[0]).toMatchObject({ code: 'invalid-target' })
+    const prefixed = setup()
+    prefixed.definition.plan = () => { throw new Error('invalid-target: 目标对象不存在') }
+    expect((await executeAuthoringTool(prefixed.request, prefixed.definition, prefixed.port)).diagnostics[0]).toMatchObject({ code: 'invalid-target' })
+    const opaque = setup()
+    opaque.definition.plan = () => { throw new Error('磁盘暂时不可用') }
+    expect((await executeAuthoringTool(opaque.request, opaque.definition, opaque.port)).diagnostics[0]).toMatchObject({ code: 'tool-failed' })
+  })
+
   it('returns actionable Runtime version and misplaced fallback diagnostics without planning or writing', async () => {
     const test = setup()
     const plan = vi.fn(runtimeInsertTool.plan)

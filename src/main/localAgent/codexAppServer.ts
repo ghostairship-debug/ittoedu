@@ -1,3 +1,4 @@
+import { workspaceIdentityKey } from '../../shared/workspaceIdentity'
 import type { ChildProcessWithoutNullStreams } from 'node:child_process'
 import { createInterface } from 'node:readline'
 import path from 'node:path'
@@ -438,6 +439,9 @@ export class CodexAppServerAdapter implements LocalAgentCliAdapterV2 {
   private cancelling?: Promise<void>
   private readonly rpcTimeoutMs: number
   private readonly cancelTimeoutMs: number
+  private readonly terminalCheckMs: number
+  private terminalCheckTimer?: ReturnType<typeof setTimeout>
+  private terminalCheckPending = false
   private stderr = ''
   private readonly resolve: (id: LocalAgentId) => Promise<AgentExecutable | null>
   private readonly generationRequest?: GenerationRequest
@@ -448,11 +452,13 @@ export class CodexAppServerAdapter implements LocalAgentCliAdapterV2 {
       generationRequest?: GenerationRequest
       rpcTimeoutMs?: number
       cancelTimeoutMs?: number
+      terminalCheckMs?: number
     },
     generationRequest?: GenerationRequest
   ) {
     this.rpcTimeoutMs = typeof resolverOrOptions === 'object' ? resolverOrOptions.rpcTimeoutMs ?? 10000 : 10000
     this.cancelTimeoutMs = typeof resolverOrOptions === 'object' ? resolverOrOptions.cancelTimeoutMs ?? 1500 : 1500
+    this.terminalCheckMs = typeof resolverOrOptions === 'object' ? resolverOrOptions.terminalCheckMs ?? 30000 : 30000
     if (typeof resolverOrOptions === 'function') {
       this.resolve = resolverOrOptions
       this.generationRequest = generationRequest
@@ -749,6 +755,7 @@ export class CodexAppServerAdapter implements LocalAgentCliAdapterV2 {
         }
       }
       if (this.turnConfigurationEvent) this.turnConfigurationEvent = { ...this.turnConfigurationEvent, nativeTurnId: turnId }
+      this.scheduleTerminalCheck()
 
       return { nativeTurnId: turnId, inputMetrics, configuration: {
         sent: { ...(params.model ? { model: params.model } : {}), ...(params.effort ? { effort: params.effort } : {}),
@@ -775,7 +782,7 @@ export class CodexAppServerAdapter implements LocalAgentCliAdapterV2 {
       })
 
     if (!this.currentTurnContext || input.taskId !== this.currentTurnContext.taskId || input.epoch !== this.currentTurnContext.epoch
-      || input.workspace.projectId !== this.currentTurnContext.workspace.projectId || input.workspace.normalizedPath !== this.currentTurnContext.workspace.normalizedPath) {
+      || workspaceIdentityKey(input.workspace) !== workspaceIdentityKey(this.currentTurnContext.workspace)) {
       return delivery('rejected', '任务或 Epoch 不匹配', input.turnId ?? null)
     }
 
@@ -900,6 +907,7 @@ export class CodexAppServerAdapter implements LocalAgentCliAdapterV2 {
   }
 
   private shutdown(error: Error, category: 'transport' | 'protocol' | 'limit' | 'capability' = 'transport'): Promise<void> {
+    this.clearTerminalCheck()
     this.cancelPendingQuestions()
     this.isClosed = true
     for (const pending of this.pendingRpc.values()) {
@@ -1083,6 +1091,44 @@ export class CodexAppServerAdapter implements LocalAgentCliAdapterV2 {
     })()
   }
 
+  private clearTerminalCheck(): void {
+    if (this.terminalCheckTimer) clearTimeout(this.terminalCheckTimer)
+    this.terminalCheckTimer = undefined
+  }
+
+  private scheduleTerminalCheck(delay = this.terminalCheckMs): void {
+    this.clearTerminalCheck()
+    if (this.isClosed || this.turnEndedEmitted || !this.activeTurnId) return
+    this.terminalCheckTimer = setTimeout(() => { void this.reconcileTerminalTurn() }, delay)
+    this.terminalCheckTimer.unref?.()
+  }
+
+  /** Recover a dropped terminal notification from native state, never from silence itself. */
+  private async reconcileTerminalTurn(): Promise<void> {
+    if (this.terminalCheckPending) { this.scheduleTerminalCheck(); return }
+    const context = this.currentTurnContext, threadId = this.threadId, turnId = this.activeTurnId
+    const lifecycle = this.lifecycle
+    if (!context || !threadId || !turnId || this.isClosed || this.turnEndedEmitted) return
+    this.terminalCheckPending = true
+    try {
+      // Current Codex exposes paginated turn summaries. Do not hydrate a long
+      // thread or read its rollout file (which is not the app-server protocol).
+      const result = await this.sendRpc('thread/turns/list', { threadId, limit: 1, sortDirection: 'desc', itemsView: 'summary' })
+      if (context !== this.currentTurnContext || lifecycle !== this.lifecycle || turnId !== this.activeTurnId
+        || this.isClosed || this.turnEndedEmitted) return
+      const turn = result?.data?.find((entry: any) => entry.id === turnId)
+      if (turn && ['completed', 'interrupted', 'failed'].includes(turn.status)) {
+        this.handleWireMessage({ method: 'turn/completed', params: { threadId, turn } })
+      }
+    } catch {
+      // A read failure is not evidence that the native turn ended. Keep the
+      // active turn and retry only after another bounded quiet period.
+    } finally {
+      this.terminalCheckPending = false
+      if (context === this.currentTurnContext && lifecycle === this.lifecycle) this.scheduleTerminalCheck()
+    }
+  }
+
   private handleWireMessage(wire: any): void {
     // 1. Response to client RPC request
     if (wire.id !== undefined && !wire.method) {
@@ -1206,6 +1252,12 @@ export class CodexAppServerAdapter implements LocalAgentCliAdapterV2 {
     }
 
     // 3. Notifications from server
+    if (wire.method === 'thread/status/changed') {
+      if (wire.params?.threadId !== this.threadId || !this.currentTurnContext || this.turnEndedEmitted) return
+      if (wire.params.status?.type === 'idle' || wire.params.status?.type === 'systemError') this.scheduleTerminalCheck(0)
+      else this.scheduleTerminalCheck()
+      return
+    }
     if (wire.method === 'thread/settings/updated') {
       if (!this.currentTurnContext || this.turnEndedEmitted || wire.params?.threadId !== this.threadId) return
       const settings = wire.params.threadSettings
@@ -1237,6 +1289,7 @@ export class CodexAppServerAdapter implements LocalAgentCliAdapterV2 {
     const eventTurnId = wire.params?.turnId ?? wire.params?.turn?.id
     if (eventTurnId && this.activeTurnId && eventTurnId !== this.activeTurnId) return
     const base = this.baseEventIdentity()
+    this.scheduleTerminalCheck()
 
     // Only the explicitly public summary channel is displayed, never raw reasoning deltas.
     if (wire.method === 'item/reasoning/summaryTextDelta') {
@@ -1356,6 +1409,7 @@ export class CodexAppServerAdapter implements LocalAgentCliAdapterV2 {
     }
 
     if (wire.method === 'turn/completed') {
+      this.clearTerminalCheck()
       const turn = wire.params?.turn
       // Some native versions supply the final public snapshot only on turn/completed.
       if (!this.isCancelled && Array.isArray(turn?.items)) {
@@ -1393,6 +1447,7 @@ export class CodexAppServerAdapter implements LocalAgentCliAdapterV2 {
 
     if (wire.method === 'error') {
       if (!wire.params?.willRetry) {
+        this.clearTerminalCheck()
         const errMsg = wire.params?.error?.message ?? 'Codex error'
         this.turnEndedEmitted = true
         this.resolveTurnEnded?.()

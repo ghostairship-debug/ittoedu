@@ -296,9 +296,9 @@ function publishedFixture(options: FixtureOptions = {}): PublishedCourseV2Payloa
         backgroundColor: '#ffffff',
         layout: { readingWidth: 760, wideContentWidth: 1120 },
         blocks: [
-          { id: 'flow-heading-a', type: 'heading', level: 1, text: 'Flow A' },
-          { id: 'flow-paragraph', type: 'paragraph', text: 'Flow body' },
-          { id: 'flow-heading-b', type: 'heading', level: 2, text: 'Flow B' },
+          { id: 'flow-heading-a', type: 'heading', level: 1, content: { inlines: [{ type: 'text', text: 'Flow A' }] } },
+          { id: 'flow-paragraph', type: 'paragraph', content: { inlines: [{ type: 'text', text: 'Flow body' }] } },
+          { id: 'flow-heading-b', type: 'heading', level: 2, content: { inlines: [{ type: 'text', text: 'Flow B' }] } },
         ],
       },
       {

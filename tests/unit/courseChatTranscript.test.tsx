@@ -16,6 +16,22 @@ function event(sequence: number, itemId: string, text: string, phase?: string, d
 }
 afterEach(cleanup)
 describe('readable native message transcript', () => {
+  it('updates a correction delivery on its original message when a later native turn consumes it', () => {
+    const inputId = '55555555-5555-4555-8555-555555555555'
+    const user: LocalAgentEvent = { ...event(1, inputId, '保留原有布局'), kind: 'user-message' }
+    const delivery = (sequence: number, status: 'queued' | 'consumed'): LocalAgentEvent => ({
+      ...event(sequence, 'delivery', ''), kind: 'session', payload: { status: 'input-delivery', delivery: {
+        taskId, epoch: 0, workspace, inputId, turnId: status === 'queued' ? 'old-turn' : 'new-turn', status,
+        reason: status === 'queued' ? '正在中断当前回合，将带着新要求继续。' : null,
+      } },
+    })
+    const ui = render(<CourseChatTranscript events={[user, delivery(2, 'queued')]} />)
+    expect(screen.getByText('正在中断当前回合，将带着新要求继续。')).toBeInTheDocument()
+    ui.rerender(<CourseChatTranscript events={[user, delivery(2, 'queued'), delivery(3, 'consumed')]} />)
+    expect(screen.getAllByText('保留原有布局')).toHaveLength(1)
+    expect(screen.getByText('已送达后续回合')).toBeInTheDocument()
+    expect(screen.queryByText('正在中断当前回合，将带着新要求继续。')).toBeNull()
+  })
   it('reconciles incremental and final native snapshots while retaining distinct messages, repairs and legacy text', () => {
     const events = [event(1, 'a', '先核对', 'progress', true), event(2, 'a', '当前页面。', 'progress', true),
       event(3, 'a', '先核对当前页面。', 'progress'), event(4, 'b', '图片已经准备好。'),
@@ -46,7 +62,7 @@ describe('readable native message transcript', () => {
     expect(visibleLocalAgentText('正在准备。<courseware-candidate-v1>{"requestId":')).toBe('正在准备。')
   })
 
-  it('round trips user corrections and answers in the same V2 record without inventing automatic continuation turns', () => {
+  it('round trips user corrections and answers in the same V3 record without inventing automatic continuation turns', () => {
     const identity = { version: 2 as const, workspace, taskId, epoch: 0, sessionId, runId, nativeTurnId: 'native-turn' }
     const events: LocalAgentEventV2[] = [
       { ...identity, sequence: 1, time: 1, kind: 'user-message', itemId: 'initial', purpose: 'initial', text: '添加小狗背景' },
@@ -57,7 +73,7 @@ describe('readable native message transcript', () => {
       { ...identity, sequence: 6, time: 6, kind: 'turn-ended', status: 'completed', failure: null },
       { ...identity, sequence: 7, time: 7, kind: 'user-message', itemId: 'answer', purpose: 'answer', text: '同意使用浅色背景' },
     ]
-    const record = localAgentRecordV2Schema.parse(JSON.parse(JSON.stringify({ version: 2, id: sessionId, adapter: 'codex', workspace,
+    const record = localAgentRecordV2Schema.parse(JSON.parse(JSON.stringify({ version: 3, id: sessionId, adapter: 'codex', workspace,
       externalSessionId: 'native-thread', workingDirectoryId: sessionId, tasks: [{ version: 1, taskId, epoch: 0, workspace, sessionId, adapter: 'codex', goal: '添加小狗背景', intent: 'discuss', applyPolicy: 'preview', readScope: { kind: 'course' }, writeDestinations: [], status: 'completed', observationId: null, committedResultIds: [] }], observations: [], hostResults: [], events })))
     const display = projectV2RecordToV1(record)
     expect(display.status).toBe('completed')

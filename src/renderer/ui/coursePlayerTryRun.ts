@@ -11,7 +11,12 @@ import {
 import { buildPublishedCourseV2Payload } from '../export/course/buildPublishedCourse'
 import type { PublishedCourseV2Payload } from '../../shared/publishedCourseTypes'
 import type { PlayerAuthoringHostMessage } from '../../shared/playerAuthoringProtocol'
-import { registerAuthoringObservationHost } from '../authoring/generation/authoringObservation'
+import type { SurfaceDiagnostic } from '../../player/surfaces/SurfaceHost'
+import type { PublishedInteractionDiagnostic } from '../../player/interactions/PublishedInteractionSurfacePort'
+import {
+  registerAuthoringObservationHost,
+  type AuthoringInteractionDiagnosticRecord,
+} from '../authoring/generation/authoringObservation'
 
 export { attachPublishedCourseStageFit, fitPublishedCourseStage }
 
@@ -94,11 +99,35 @@ export interface PublishedCourseMountInput {
     onMessage?: (message: PlayerAuthoringHostMessage) => void
   }
   onSessionCreated?: (session: PublishedCourseSession) => void
+  /**
+   * Optional try-run/preview interaction diagnostics hook. Callers that leave
+   * it unset keep the current behavior: no diagnostics are collected at all.
+   */
+  onInteractionDiagnostic?: (diagnostic: PublishedInteractionDiagnostic) => void
+}
+
+/** Bounded per-session ring buffer for try-run interaction diagnostics. */
+export const TRY_RUN_INTERACTION_DIAGNOSTIC_LIMIT = 50
+
+/**
+ * Forward a try-run/preview interaction diagnostic to the app diagnostic log.
+ * Passing this callback also enables the bounded session buffer that the
+ * authoring observation captures into interaction-diagnostics.json.
+ */
+export function reportTryRunInteractionDiagnostic(diagnostic: PublishedInteractionDiagnostic): void {
+  const message = `[interaction] ${diagnostic.code} surface=${diagnostic.surfaceId} phase=${diagnostic.phase}`
+    + ` rule=${diagnostic.ruleId ?? '-'} step=${diagnostic.stepId ?? '-'} node=${diagnostic.nodeId ?? '-'} ${diagnostic.message}`
+  void window.desktopAPI?.reportDiagnostic?.({ source: 'preview', message })
+}
+
+export type PublishedCourseTryRunSession = PublishedCourseSession & {
+  /** Snapshot of the bounded diagnostics buffer collected for this session. */
+  readInteractionDiagnostics(): readonly AuthoringInteractionDiagnosticRecord[]
 }
 
 export async function mountPublishedCourseTryRun(
   input: PublishedCourseMountInput,
-): Promise<PublishedCourseSession> {
+): Promise<PublishedCourseTryRunSession> {
   const publishSources = {
     project: input.project,
     assetFiles: input.assetFiles,
@@ -111,6 +140,18 @@ export async function mountPublishedCourseTryRun(
   if (!playback && input.initialPresentationStateId != null) {
     throw new Error('Published 作者宿主不能接收试运行初始命名状态。')
   }
+  const diagnostics: AuthoringInteractionDiagnosticRecord[] = []
+  let droppedDiagnosticCount = 0
+  const reportDiagnostic = input.onInteractionDiagnostic === undefined ? undefined
+    : (diagnostic: SurfaceDiagnostic): void => {
+        diagnostics.push({ receivedAt: Date.now(), diagnostic })
+        if (diagnostics.length > TRY_RUN_INTERACTION_DIAGNOSTIC_LIMIT) {
+          const dropped = diagnostics.length - TRY_RUN_INTERACTION_DIAGNOSTIC_LIMIT
+          diagnostics.splice(0, dropped)
+          droppedDiagnosticCount += dropped
+        }
+        input.onInteractionDiagnostic!(diagnostic as PublishedInteractionDiagnostic)
+      }
   const published = buildPublishedCourseTryRunPayload(publishSources)
   const remoteAssetUrls = previewRemoteAssetUrls(published)
   const connectOrigins = input.project.network?.connectOrigins ?? []
@@ -152,6 +193,7 @@ export async function mountPublishedCourseTryRun(
       ...(playback && input.initialPresentationStateId != null
         ? { initialPresentationStateId: input.initialPresentationStateId }
         : {}),
+      ...(reportDiagnostic ? { services: { reportDiagnostic } } : {}),
       ...(input.authoring
         ? {
             authoring: {
@@ -166,12 +208,14 @@ export async function mountPublishedCourseTryRun(
     input.onSessionCreated?.(session)
     await session.mount(input.container)
 
-    const mountedSession = session
+    const mountedSession = session as PublishedCourseTryRunSession
+    mountedSession.readInteractionDiagnostics = () => [...diagnostics]
     const unregisterObservation = playback && input.observation !== false ? registerAuthoringObservationHost({
       root: input.container,
       source: input.container.classList.contains('course-preview-host') ? 'preview' : 'trial',
       read: () => ({ projectId: input.project.id, documentRevision: input.project.revision,
         ...mountedSession.readObservationState() }),
+      ...(reportDiagnostic ? { readInteractionDiagnostics: () => ({ records: diagnostics, droppedCount: droppedDiagnosticCount }) } : {}),
     }) : () => undefined
 
     const destroySession = session.destroy.bind(session)
@@ -180,10 +224,11 @@ export async function mountPublishedCourseTryRun(
       try {
         await destroySession()
       } finally {
+        diagnostics.length = 0
         await releaseLease()
       }
     }
-    return session
+    return mountedSession
   } catch (error) {
     try {
       await session?.destroy()

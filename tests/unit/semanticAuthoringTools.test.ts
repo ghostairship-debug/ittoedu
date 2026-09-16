@@ -1,3 +1,4 @@
+import { createArchiveFixture as createCourseProjectArchive } from '../fixtures/teacherController'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
 import { createBlankFlowCourseProject } from '@/renderer/project/createFlowCourseProject'
@@ -19,11 +20,11 @@ import { executeAuthoringTool, type AuthoringToolDefinition } from '@/renderer/a
 import { applyEditorTransactionStep, type EditorTransactionStep } from '@/renderer/authoring/editorTransaction'
 import { createGenerationCandidateCoordinator } from '@/renderer/authoring/generation/prepareGenerationCandidate'
 import { generationRequestSchema, generationCandidateSchema, generationShortCandidateSchema, expandGenerationShortCandidate, generationMediaApplyWireInputSchema, describeGenerationSemanticTools, type GenerationCandidate } from '@/shared/generationContract'
-import { captureGenerationSnapshot } from '@/renderer/authoring/generation/generationSnapshot'
+import { captureGenerationFixture as captureGenerationSnapshot } from '../fixtures/generationSnapshot'
 import { readFileSync } from 'node:fs'
-import { createCourseProjectArchive, openCourseProjectArchive } from '@/renderer/project/courseProjectArchive'
+import { openCourseProjectArchive } from '@/renderer/project/courseProjectArchive'
 import { parseComponentPackageFiles } from '@/renderer/components/importComponentPackage'
-import { buildPublishedCourseV2Payload } from '@/renderer/export/course'
+import { buildPublishedFixture as buildPublishedCourseV2Payload } from '../fixtures/teacherController'
 import { materializeCourseSlideLayerItems } from '@/shared/courseLayerComposition'
 import type { HistoryResourceState } from '@/renderer/store/courseResourceState'
 import { createSortComponentPackage } from '@/renderer/recipes/sort-component/package'
@@ -108,11 +109,11 @@ describe('Semantic authoring retains omitted content and effective state', () =>
   it('edits Flow formula content without replacing the block or formula identity', async () => {
     const project = createBlankFlowCourseProject(), surface = project.surfaces[0]!
     if (surface.type !== 'flow') throw new Error('flow')
-    surface.blocks.push({ id: 'formula', type: 'formula', formulaId: 'retained', accessibleText: 'x', ast: { type: 'token', value: 'x' } })
-    const test = harness(project), receipt = await test.run(flowAuthoringTool, { operation: 'edit', formula: { ast: { type: 'token', value: 'y' }, accessibleText: 'y' } }, { kind: 'update', target: target(project, 'formula') })
+    surface.blocks.push({ id: 'formula', type: 'formula', formulaId: 'retained', accessibleText: 'x', latex: 'x' })
+    const test = harness(project), receipt = await test.run(flowAuthoringTool, { operation: 'edit', formula: { latex: 'y', accessibleText: 'y' } }, { kind: 'update', target: target(project, 'formula') })
     expect(receipt.status, JSON.stringify(receipt.diagnostics)).toBe('committed')
     const after = test.read().document.surfaces[0]!
-    expect(after.type === 'flow' && after.blocks.at(-1)).toEqual({ id: 'formula', type: 'formula', formulaId: 'retained', accessibleText: 'y', ast: { type: 'token', value: 'y' } })
+    expect(after.type === 'flow' && after.blocks.at(-1)).toEqual({ id: 'formula', type: 'formula', formulaId: 'retained', accessibleText: 'y', latex: 'y' })
   })
   it.each(['slide', 'flow', 'global'] as const)('edits %s Runtime source and public fields from the actual selected item address without replacing its identity', async owner => {
     const project = owner === 'flow' ? createBlankFlowCourseProject() : createBlankCourseProject()
@@ -180,12 +181,12 @@ describe('Semantic authoring retains omitted content and effective state', () =>
   it('changes Flow paragraph text/font without losing wrap, alignment or unrelated fields', async () => {
     const project = createBlankFlowCourseProject(), surface = project.surfaces[0]!
     if (surface.type !== 'flow') throw new Error('Expected Flow')
-    const block = { id: 'paragraph', type: 'paragraph' as const, text: '保留😀文字', textAlign: 'right' as const, lineSpacing: 2, runs: [{ start: 0, end: 2, style: { bold: true } }] }
+    const block = { id: 'paragraph', type: 'paragraph' as const, content: { inlines: [{ type: 'text' as const, text: '保留', style: { bold: true } }, { type: 'text' as const, text: '😀文字' }] }, textAlign: 'right' as const, lineSpacing: 2 }
     surface.blocks.push(block)
-    const test = harness(project), receipt = await test.run(flowAuthoringTool, { operation: 'edit', text: '保留😀文字增加', textStyle: { fontSize: 24 } }, { kind: 'update', target: target(project, block.id) })
+    const test = harness(project), receipt = await test.run(flowAuthoringTool, { operation: 'edit', content: { inlines: [{ type: 'text', text: '保留', style: { bold: true } }, { type: 'text', text: '😀文字增加' }] }, textStyle: { fontSize: 24 } }, { kind: 'update', target: target(project, block.id) })
     expect(receipt.status, JSON.stringify(receipt.diagnostics)).toBe('committed')
     const nextSurface = test.read().document.surfaces[0]!; if (nextSurface.type !== 'flow') throw new Error('Expected Flow')
-    expect(nextSurface.blocks.at(-1)).toMatchObject({ ...block, text: '保留😀文字增加', runs: [{ start: 0, end: 2, style: { bold: true, fontSize: 24 } }, { start: 2, end: 7, style: { fontSize: 24 } }] })
+    expect(nextSurface.blocks.at(-1)).toMatchObject({ ...block, content: { inlines: [{ type: 'text', text: '保留', style: { bold: true, fontSize: 24 } }, { type: 'text', text: '😀文字增加', style: { fontSize: 24 } }] } })
   })
   it('merges component parameters with the selected state and recursive API 4 copy', async () => {
     const project = createBlankCourseProject(), pkg = createSortComponentPackage(), base = text('component')
@@ -311,8 +312,8 @@ describe('B1 media application expands one intention into one existing transacti
   it('updates a Flow image within a section, preserving body layout and captions', async () => {
     const project = createBlankFlowCourseProject(), bytes = asset(project, 'shared'), surface = project.surfaces[0]!
     if (surface.type !== 'flow') throw new Error('flow')
-    const block = { id: 'image', type: 'media' as const, assetId: 'shared', mediaKind: 'image' as const, layout: 'wide' as const, wrap: 'left' as const, caption: '保留说明', altText: '保留替代文字' }
-    surface.blocks.push({ id: 'section', type: 'section', title: '图片段落', collapsedByDefault: false, blocks: [block] })
+    const block = { id: 'image', type: 'media' as const, assetId: 'shared', mediaKind: 'image' as const, layout: 'wide' as const, wrap: 'left' as const, caption: { inlines: [{ type: 'text' as const, text: '保留说明' }] }, altText: '保留替代文字' }
+    surface.blocks.push({ id: 'section', type: 'section', title: { inlines: [{ type: 'text', text: '图片段落' }] }, collapsedByDefault: false, blocks: [block] })
     const f = fixture(project, target(project, 'image'), { assetFiles: { shared: bytes }, componentPackages: {} }), preview = await f.coordinator.prepare(f.request, f.candidate)
     expect(f.coordinator.apply(preview.previewId).status).toBe('committed')
     const after = f.test.read().document.surfaces[0]!
@@ -462,7 +463,7 @@ describe('Complete replacement maps formal identities and preserves wrappers', (
   it('replaces a Flow anchor while preserving the location identity and paragraph ordering', async () => {
     const project = createBlankFlowCourseProject(), surface = project.surfaces[0]!
     if (surface.type !== 'flow') throw new Error('Expected Flow')
-    const old = surface.blocks[0]!; surface.blocks.push({ id: 'replacement', type: 'heading', level: 2, text: '新标题' })
+    const old = surface.blocks[0]!; surface.blocks.push({ id: 'replacement', type: 'heading', level: 2, content: { inlines: [{ type: 'text', text: '新标题' }] } })
     const test = harness(project), receipt = await test.run(semanticReplacementTool, { replacementItemId: 'replacement' }, { kind: 'update', target: target(project, old.id) })
     expect(receipt.status, JSON.stringify(receipt.diagnostics)).toBe('committed')
     expect(test.read().document.startLocationId).toBe(project.startLocationId)
@@ -649,7 +650,7 @@ describe('Replacement candidate keeps create and delete in one existing history 
   it('replaces a paragraph inside a Flow section with a component in that exact parent and one transaction', async () => {
     const project = createBlankFlowCourseProject(), surface = project.surfaces[0]!, pkg = createSortComponentPackage()
     if (surface.type !== 'flow') throw new Error('Expected Flow')
-    surface.blocks.push({ id: 'section', type: 'section', title: '嵌套内容', collapsedByDefault: false, blocks: [{ id: 'nested', type: 'paragraph', text: '替换此段落' }] })
+    surface.blocks.push({ id: 'section', type: 'section', title: { inlines: [{ type: 'text', text: '嵌套内容' }] }, collapsedByDefault: false, blocks: [{ id: 'nested', type: 'paragraph', content: { inlines: [{ type: 'text', text: '替换此段落' }] } }] })
     project.componentPackages[pkg.manifest.id] = pkg.metadata
     const bytes = Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jM1sAAAAASUVORK5CYII='), character => character.charCodeAt(0))
     project.assets.fallback = { id: 'fallback', kind: 'image', filename: 'fallback.png', path: 'assets/fallback.png', mimeType: 'image/png', byteLength: bytes.length, width: 1, height: 1 }

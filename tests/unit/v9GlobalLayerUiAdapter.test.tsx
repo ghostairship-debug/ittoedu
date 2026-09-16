@@ -365,7 +365,7 @@ function v9WithMisplacedControllerCopies(): CourseProjectDocument {
       },
     ],
   }
-  return courseProjectDocumentSchema.parse(project)
+  return project
 }
 
 function layerGroupNodeIds(
@@ -431,7 +431,7 @@ describe('V9 global layer UI adapter on the real V8 Nodes/Properties', () => {
     expect(layerGroupNodeIds('scene')).toEqual(['slide-title'])
     expect(
       screen.getByTestId('nodes-layer-group-scene')
-        .querySelector('.node-type-icon[title="teacher-controller"]'),
+        .querySelector('.node-type-icon[title="external-component"]'),
     ).toBeNull()
     expect(screen.getByTestId('node-source-slide-title').textContent).toContain('本页')
     expect(screen.getByTestId('node-source-global-banner').textContent).toContain('全课')
@@ -444,7 +444,7 @@ describe('V9 global layer UI adapter on the real V8 Nodes/Properties', () => {
     expect(layerGroupNodeIds('global-underlay')).toEqual(['global-banner'])
     expect(screen.getByTestId('node-source-teacher-controller-main').textContent).toContain('全课')
     expect(screen.getByTestId('node-source-teacher-controller-main').textContent).toContain('不可下沉')
-    expect(document.querySelectorAll('.node-type-icon[title="teacher-controller"]')).toHaveLength(1)
+    expect(document.querySelectorAll('.node-type-icon[title="external-component"]')).toHaveLength(1)
   })
 
   it('selects and edits a Slide surface row through its own stable owner scope', () => {
@@ -836,29 +836,20 @@ describe('V9 global layer UI adapter on the real V8 Nodes/Properties', () => {
       .toEqual([...worldIds].reverse())
   })
 
-  it('hides misplaced teacher-controller copies without rewriting globalLayerItems', () => {
-    injectCandidate(v9WithMisplacedControllerCopies())
+  it('rejects misplaced teacher-controller copies and leaves the valid global layer unchanged', () => {
+    injectCandidate()
     const before = selectSlideAuthoringDocument(useEditorStore.getState())!
-    const globalBefore = JSON.stringify(before.globalLayerItems)
+    const globalBefore = structuredClone(before.globalLayerItems)
+    const parsed = courseProjectDocumentSchema.safeParse(v9WithMisplacedControllerCopies())
+    expect(parsed.success).toBe(false)
+    if (parsed.success) throw new Error('misplaced controller unexpectedly accepted')
+    expect(parsed.error.issues.filter(issue => issue.message === '教师控制台只能位于全局 Overlay')).toHaveLength(2)
     useEditorStore.getState().setEditingScope('global')
     render(<NodesTab />)
     expect(screen.queryByTestId('node-item-teacher-controller-scene-copy')).toBeNull()
     expect(screen.queryByTestId('node-item-teacher-controller-surface-copy')).toBeNull()
-    expect(layerGroupNodeIds('scene')).toEqual(['slide-title'])
-    expect(layerGroupNodeIds('surface')).toEqual(['page-shared'])
     expect(layerGroupNodeIds('global-overlay')).toContain('teacher-controller-main')
-    expect(layerGroupNodeIds('global-overlay')).not.toContain('teacher-controller-scene-copy')
-    expect(document.querySelectorAll('.node-type-icon[title="teacher-controller"]')).toHaveLength(1)
-    expect(screen.getByTestId('node-source-teacher-controller-main').textContent)
-      .toContain('全课 Overlay、不可下沉')
-
-    const after = selectSlideAuthoringDocument(useEditorStore.getState())!
-    expect(JSON.stringify(after.globalLayerItems)).toBe(globalBefore)
-    const slide = after.surfaces[0]
-    if (!slide || slide.type !== 'slide') throw new Error('expected slide')
-    expect(slide.scenes[0]!.layerItems.some((item) => item.layerItemId === 'teacher-controller-scene-copy')).toBe(true)
-    expect(slide.surfaceLayerItems.some((entry) => entry.item.layerItemId === 'teacher-controller-surface-copy')).toBe(true)
-    expect(slide.scenes[0]!.layerItems.some((item) => item.layerItemId === 'teacher-controller-main')).toBe(false)
+    expect(selectSlideAuthoringDocument(useEditorStore.getState())!.globalLayerItems).toEqual(globalBefore)
   })
 
   it('reorders inside one owner with one history entry and refuses moving the controller onto a scene', () => {

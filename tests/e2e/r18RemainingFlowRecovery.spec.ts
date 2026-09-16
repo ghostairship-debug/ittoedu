@@ -1,3 +1,5 @@
+import { plainDocumentText } from '../../src/shared/document/content'
+import { requireProjectWorkspace } from './r18NativeAuthoringFixture'
 import { copyFileSync, readdirSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { _electron as electron, expect, test, type Page } from '@playwright/test'
@@ -49,8 +51,8 @@ test('recover and save the actual partial Flow commit while retaining the origin
     .toMatchObject([{ beforeRevision: 5, afterRevision: 6 }])
   expect(recovery.project.id).toBe(original.project.id)
   const paragraph = flowParagraph(recovery.project, REMAINING_IDS.paragraphTwo)
-  expect(paragraph.text.length).toBeLessThan(SECOND_PARAGRAPH.length * .8)
-  expect(paragraph.text).toMatch(/周期/)
+  expect(plainDocumentText(paragraph.content).length).toBeLessThan(SECOND_PARAGRAPH.length * .8)
+  expect(plainDocumentText(paragraph.content)).toMatch(/周期/)
   expect(flowParagraph(recovery.project, REMAINING_IDS.paragraphOne)).toEqual(flowParagraph(original.project, REMAINING_IDS.paragraphOne))
   const execution = { runRoot, profilePath, projectPath }
   const source = { runRoot: sourceRoot, profilePath: sourceProfile, projectPath: sourceProjectPath, recoveryPath,
@@ -94,7 +96,7 @@ test('recover and save the actual partial Flow commit while retaining the origin
       const state = useEditorStore.getState(), project = selectActiveCourseProjectDocument(state)
       state.activateCourseLocation(project.locations.find((location: any) => location.surfaceId === surfaceId).id)
     }, target.id)
-    await expect(page.getByTestId(`flow-block-${REMAINING_IDS.paragraphTwo}`)).toContainText(paragraph.text)
+    await expect(page.getByTestId(`flow-block-${REMAINING_IDS.paragraphTwo}`)).toContainText(plainDocumentText(paragraph.content))
     await page.screenshot({ path: join(runRoot, '02-recovered-flow.png') })
     const boundary = await page.evaluate(async ({ projectId, projectPath }) => {
       const workspace = await window.desktopAPI.localAgent({ operation: 'workspace', projectId, projectPath })
@@ -102,12 +104,13 @@ test('recover and save the actual partial Flow commit while retaining the origin
       return { workspace: workspace.workspace, records: records.records ?? [] }
     }, { projectId: recovery.project.id, projectPath })
     expect(boundary.records).toEqual([])
-    expect(boundary.workspace?.normalizedPath).not.toBe(failed!.workspace.normalizedPath)
+    if (!boundary.workspace || !failed) throw new Error('Missing project workspace recovery evidence')
+    expect(requireProjectWorkspace(boundary.workspace).normalizedPath).not.toBe(requireProjectWorkspace(failed.workspace).normalizedPath)
     expect(nativeRecords(run)).toEqual(sourceRecords)
     expect(pageErrors).toEqual([])
     writeFileSync(join(runRoot, 'recovery-result.json'), JSON.stringify({ version: 1, kind: 'remaining-Flow-recovery',
       status: 'recovered-saved-reopened-zero-model', source, execution, modelCalls: 0,
-      sourceRevision: 5, restoredRevision: 6, paragraph: paragraph.text,
+      sourceRevision: 5, restoredRevision: 6, paragraph: plainDocumentText(paragraph.content),
       sourceNativeStatus: 'partial', originalNativeHistoryPreserved: true, workspaceBoundary: boundary,
       nativeIdentityContinuity: 'not-claimed-across-save-as', modelCandidateReplayed: false, fixtureRestored: false,
       futureCoverage: ['T09 Flow feedback after repair', 'T09 Spatial', 'T10', 'T11', 'T12', '050'], ownerAcceptance: false,

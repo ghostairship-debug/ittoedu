@@ -1033,3 +1033,17 @@ task_finished / task_cancelled / task_failed
 **[S5] Cursor：Editing Files at 1000 Tokens per Second。** 参考专门优化代码应用环节的思路；标题中的速度不是本项目性能目标或可复用承诺。
 
 `https://cursor.com/blog/instant-apply`
+
+
+[R1]: https://github.com/ghostairship-debug/ittoedu/commit/c839c205e594ab61bfa01c22b4a4f28303862d8d
+[R2]: https://github.com/ghostairship-debug/ittoedu/blob/c839c205e594ab61bfa01c22b4a4f28303862d8d/src/renderer/authoring/generation/generationTaskController.ts
+[R3]: https://github.com/ghostairship-debug/ittoedu/blob/c839c205e594ab61bfa01c22b4a4f28303862d8d/src/renderer/authoring/generation/prepareGenerationCandidate.ts
+[R4]: https://github.com/ghostairship-debug/ittoedu/blob/c839c205e594ab61bfa01c22b4a4f28303862d8d/src/renderer/authoring/generation/generationCapabilities.ts
+[R5]: https://github.com/ghostairship-debug/ittoedu/blob/c839c205e594ab61bfa01c22b4a4f28303862d8d/src/renderer/authoring/tools/componentConfigureTool.ts
+[R6]: https://github.com/ghostairship-debug/ittoedu/blob/c839c205e594ab61bfa01c22b4a4f28303862d8d/src/renderer/authoring/tools/runtimeConfigureTool.ts
+[R7]: https://github.com/ghostairship-debug/ittoedu/blob/c839c205e594ab61bfa01c22b4a4f28303862d8d/src/renderer/authoring/tools/dynamicCandidateAdmission.ts
+[S1]: https://developers.openai.com/api/docs/guides/latency-optimization
+[S2]: https://tldraw.dev/starter-kits/agent
+[S3]: https://www.anthropic.com/engineering/advanced-tool-use
+[S4]: https://developers.openai.com/api/docs/guides/prompt-caching
+[S5]: https://cursor.com/blog/instant-apply

@@ -1,3 +1,4 @@
+import { plainDocumentText } from '../../shared/document/content'
 import { CANVAS_HEIGHT, CANVAS_WIDTH, MAX_SCENE_NODES, MIN_NODE_SIZE } from '../../shared/constants'
 import { formulaAstToAccessibleText } from '../../shared/formulaLinear'
 import {
@@ -481,7 +482,7 @@ export function insertFlowSharedMedia(
         mediaKind: asset.mediaKind,
         layout: 'content-width',
         ...(request.altText ? { altText: request.altText } : {}),
-        ...(request.caption ? { caption: request.caption } : {}),
+        ...(request.caption ? { caption: { inlines: [{ type: 'text' as const, text: request.caption }] } } : {}),
       },
     }, options)
     const createdId = inserted.createdBlockIds?.[0]
@@ -751,7 +752,7 @@ export function convertFlowMediaBlockToOverlay(
     const item = nativeMediaOverlay(draft, {
       assetId: found.block.assetId,
       mediaKind: found.block.mediaKind,
-      label: found.block.caption ?? found.block.altText,
+      label: found.block.caption ? plainDocumentText(found.block.caption) : found.block.altText,
     })
     surface.blocks = removeBlocksById(surface.blocks, new Set([blockId]))
     syncFlowCourseLocations(draft, page.surfaceId)
@@ -813,7 +814,7 @@ export function convertFlowOverlayMediaToDocument(
       type: 'media',
       assetId,
       mediaKind: nativeType,
-      caption: located.item.label,
+      caption: { inlines: [{ type: 'text', text: located.item.label }] },
       layout: 'content-width',
     })
     syncFlowCourseLocations(draft, page.surfaceId)
@@ -1542,7 +1543,7 @@ export function insertFlowSharedText(
       surfaceId: page.surfaceId,
       parentId: anchor.parentId,
       index: anchor.index,
-      block: { type: 'paragraph', text: request.text ?? '' },
+      block: { type: 'paragraph', content: { inlines: request.text ? [{ type: 'text', text: request.text }] : [] } },
     }, options)
     const createdId = inserted.createdBlockIds?.[0]
     if (!inserted.ok || !inserted.nextDocument || !createdId) {

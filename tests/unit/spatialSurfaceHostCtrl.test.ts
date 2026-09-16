@@ -1,4 +1,5 @@
-import { controllerPackage } from '../fixtures/teacherController'
+import { queryDeep } from '../fixtures/teacherController'
+import { controllerPackage, publishedControllerPackages } from '../fixtures/teacherController'
 import type { PublishedComponentLayerItem } from '../../src/shared/publishedCourseTypes'
 import { describe, expect, it } from 'vitest'
 import type {
@@ -155,7 +156,7 @@ function geometry(element: HTMLElement) {
 describe('SpatialSurfaceHost viewport teacher controller', () => {
   it('keeps the real R3 controller on the viewport when world zoom and pan change', async () => {
     const container = document.createElement('div')
-    const host = new SpatialSurfaceHost(spatialInput(), VIEWPORT)
+    const host = new SpatialSurfaceHost(spatialInput(), VIEWPORT, { components: publishedControllerPackages })
     await host.mount(container)
     await host.activate()
 
@@ -165,7 +166,7 @@ describe('SpatialSurfaceHost viewport teacher controller', () => {
     const screen = root.querySelector<HTMLElement>('.spatial-screen-layer')!
     const controller = screen.querySelector<HTMLElement>('[data-layer-item-id="global-controller"]')!
     const hud = underlay.querySelector<HTMLElement>('[data-layer-item-id="global-hud"]')!
-    const nav = controller.querySelector<HTMLElement>('.slide-native-teacher-controller')!
+    const nav = queryDeep<HTMLElement>(controller, '.controller')!
 
     expect(world.contains(controller)).toBe(false)
     expect(controller.parentElement).toBe(screen)
@@ -177,8 +178,8 @@ describe('SpatialSurfaceHost viewport teacher controller', () => {
     expect(Number(underlay.style.zIndex)).toBeLessThan(Number(screen.style.zIndex))
     expect(root.querySelector('svg')?.style.backgroundColor).toBe('transparent')
     expect(nav).not.toBeNull()
-    expect(nav.querySelector('[data-controller-button-id="prev"]')?.textContent).toBe('上一')
-    expect(nav.querySelector('[data-controller-button-id="next"]')?.textContent).toBe('下一')
+    expect(nav.querySelector('[data-controller-button-id="prev"]')?.getAttribute('aria-label')).toBe('上一')
+    expect(nav.querySelector('[data-controller-button-id="next"]')?.getAttribute('aria-label')).toBe('下一')
     expect(controller.style.backgroundColor).not.toBe('rgb(254, 242, 242)')
     expect(getComputedStyle(controller).backgroundColor).not.toBe('rgb(254, 242, 242)')
 

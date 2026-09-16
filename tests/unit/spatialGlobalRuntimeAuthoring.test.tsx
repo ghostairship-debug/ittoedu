@@ -1,3 +1,4 @@
+import { withDefaultComponentController } from '@/renderer/components/teacherControllerComponent'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import type { RuntimeAuthoringTargetUpdate } from '@/shared/runtimeTypes'
@@ -258,7 +259,7 @@ describe('Spatial global Runtime authoring adapter', () => {
           scope={scope}
           layers={layers}
           assetFiles={assetFiles}
-          componentPackages={{}}
+          componentPackages={withDefaultComponentController(project).componentPackages}
           content={{
             captureRuntimeContentTextTarget: capture as never,
             updateRuntimeContentTextAtTarget: update as never,
@@ -388,7 +389,7 @@ describe('Spatial global Runtime authoring adapter', () => {
       read: () => ({
         document: project,
         sidecar: null,
-        componentPackages: {},
+        componentPackages: withDefaultComponentController(project).componentPackages,
         authoringSession,
         editingScope: 'global',
         activeSceneId: undefined,
@@ -487,7 +488,7 @@ describe('Spatial global Runtime authoring adapter', () => {
         contentEdit={null}
         assetFiles={fixture.assetFiles}
         assetMimeTypes={{}}
-        componentPackages={{}}
+        componentPackages={withDefaultComponentController(parsed).componentPackages}
         project={parsed}
         runtimeContentAuthoring={{
           captureRuntimeContentTextTarget: () => null,

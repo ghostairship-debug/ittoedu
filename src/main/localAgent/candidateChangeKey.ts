@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { parse, tokenizer } from 'acorn'
-import { generationInputReferenceSchema, type GenerationCandidate } from '../../shared/generationContract'
+import { generationInputReferenceSchema, type GenerationCandidate, type GenerationFailure } from '../../shared/generationContract'
 
 function object(value: unknown): Record<string, unknown> | null {
   return value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null
@@ -112,4 +112,41 @@ export function candidateChangeKey(candidate: GenerationCandidate): string {
       input: sourceInput(step.tool, resultReferences(step.input, steps)) }
   })
   return `candidate-change-v1:${createHash('sha256').update(JSON.stringify(ordered(operations))).digest('hex')}`
+}
+
+/** A rejection envelope alone does not identify a cause. In that case the
+ * existing semantic candidate key still detects unchanged attempts. */
+const opaqueFailureCodes = new Set(['tool-failed', 'candidate-prepare-failed', 'dynamic-host-failed', 'dynamic-host-destroy-failed'])
+
+function failureDestination(value: unknown): unknown {
+  const destination = object(value)
+  if (!destination) return value
+  const field = destination.kind === 'update' ? 'target' : 'scope'
+  const target = object(destination[field])
+  if (!target) return destination
+  const { documentRevision: _revision, sessionGeneration: _generation, ...identity } = target
+  return { ...destination, [field]: identity }
+}
+
+/** Bind a precise producer cause to the failing field and target, not candidate
+ * wording or the position/name of its step. Actual field corrections permit a
+ * new attempt; changing unrelated input does not erase the previous failure. */
+export function failureReasonKey(failure: GenerationFailure | undefined, candidate?: GenerationCandidate): string | null {
+  if (!failure) return null
+  if (failure.diagnostics.some(diagnostic => opaqueFailureCodes.has(diagnostic.code))) return null
+  const diagnostics = failure.diagnostics
+    .map(diagnostic => {
+      const indexed = diagnostic.path[0] === 'steps' && typeof diagnostic.path[1] === 'number'
+      const step = candidate?.steps.find(step => step.id === failure.stepId)
+        ?? (indexed ? candidate?.steps[diagnostic.path[1] as number] : undefined)
+      const path = indexed ? diagnostic.path.slice(2) : diagnostic.path
+      const destination = failureDestination(step?.destination ?? failure.destination)
+      const input = step ? sourceInput(step.tool, step.input) : undefined
+      const value = path.reduce<unknown>((value, key) => value && typeof value === 'object'
+        ? Reflect.get(value, key) : undefined, { input, destination })
+      return { code: diagnostic.code, path, tool: step?.tool ?? failure.tool ?? null, destination,
+        ...(value !== undefined ? { value } : {}) }
+    })
+    .sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right)))
+  return `failure-reason-v2:${createHash('sha256').update(JSON.stringify(ordered(diagnostics))).digest('hex')}`
 }

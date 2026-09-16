@@ -5634,6 +5634,204 @@
             },
             "type": {
               "type": "string",
+              "const": "paragraph"
+            },
+            "content": {
+              "type": "object",
+              "properties": {
+                "inlines": {
+                  "type": "array",
+                  "items": {
+                    "oneOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "const": "text"
+                          },
+                          "text": {
+                            "type": "string"
+                          },
+                          "style": {
+                            "type": "object",
+                            "properties": {
+                              "baseline": {
+                                "type": "number",
+                                "minimum": -1,
+                                "maximum": 1
+                              },
+                              "color": {
+                                "type": "string",
+                                "pattern": "^#[0-9a-fA-F]{6}$"
+                              },
+                              "bold": {
+                                "type": "boolean"
+                              },
+                              "italic": {
+                                "type": "boolean"
+                              },
+                              "underline": {
+                                "type": "boolean"
+                              },
+                              "strike": {
+                                "type": "boolean"
+                              },
+                              "emphasis": {
+                                "type": "boolean"
+                              },
+                              "highlightColor": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "pattern": "^#[0-9a-fA-F]{6}$"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "fontFamily": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 300
+                              },
+                              "fontSize": {
+                                "type": "number",
+                                "minimum": 8,
+                                "maximum": 400
+                              }
+                            },
+                            "additionalProperties": false
+                          },
+                          "code": {
+                            "type": "boolean"
+                          },
+                          "link": {
+                            "type": "object",
+                            "properties": {
+                              "href": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "title": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "href"
+                            ],
+                            "additionalProperties": false
+                          }
+                        },
+                        "required": [
+                          "type",
+                          "text"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "const": "math"
+                          },
+                          "formulaId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 240
+                          },
+                          "latex": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 16384
+                          },
+                          "accessibleText": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 4000
+                          },
+                          "style": {
+                            "type": "object",
+                            "properties": {
+                              "fontSize": {
+                                "type": "number",
+                                "minimum": 8,
+                                "maximum": 400
+                              },
+                              "color": {
+                                "type": "string",
+                                "pattern": "^#[0-9a-fA-F]{6}$"
+                              }
+                            },
+                            "additionalProperties": false
+                          },
+                          "link": {
+                            "type": "object",
+                            "properties": {
+                              "href": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "title": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "href"
+                            ],
+                            "additionalProperties": false
+                          }
+                        },
+                        "required": [
+                          "type",
+                          "formulaId",
+                          "latex",
+                          "accessibleText"
+                        ],
+                        "additionalProperties": false
+                      }
+                    ]
+                  }
+                }
+              },
+              "required": [
+                "inlines"
+              ],
+              "additionalProperties": false
+            },
+            "textAlign": {
+              "type": "string",
+              "enum": [
+                "left",
+                "center",
+                "right"
+              ]
+            },
+            "lineSpacing": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 200
+            }
+          },
+          "required": [
+            "id",
+            "type",
+            "content"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 240
+            },
+            "type": {
+              "type": "string",
               "const": "heading"
             },
             "level": {
@@ -5664,6 +5862,171 @@
                 }
               ]
             },
+            "content": {
+              "type": "object",
+              "properties": {
+                "inlines": {
+                  "type": "array",
+                  "items": {
+                    "oneOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "const": "text"
+                          },
+                          "text": {
+                            "type": "string"
+                          },
+                          "style": {
+                            "type": "object",
+                            "properties": {
+                              "baseline": {
+                                "type": "number",
+                                "minimum": -1,
+                                "maximum": 1
+                              },
+                              "color": {
+                                "type": "string",
+                                "pattern": "^#[0-9a-fA-F]{6}$"
+                              },
+                              "bold": {
+                                "type": "boolean"
+                              },
+                              "italic": {
+                                "type": "boolean"
+                              },
+                              "underline": {
+                                "type": "boolean"
+                              },
+                              "strike": {
+                                "type": "boolean"
+                              },
+                              "emphasis": {
+                                "type": "boolean"
+                              },
+                              "highlightColor": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "pattern": "^#[0-9a-fA-F]{6}$"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "fontFamily": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 300
+                              },
+                              "fontSize": {
+                                "type": "number",
+                                "minimum": 8,
+                                "maximum": 400
+                              }
+                            },
+                            "additionalProperties": false
+                          },
+                          "code": {
+                            "type": "boolean"
+                          },
+                          "link": {
+                            "type": "object",
+                            "properties": {
+                              "href": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "title": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "href"
+                            ],
+                            "additionalProperties": false
+                          }
+                        },
+                        "required": [
+                          "type",
+                          "text"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "const": "math"
+                          },
+                          "formulaId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 240
+                          },
+                          "latex": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 16384
+                          },
+                          "accessibleText": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 4000
+                          },
+                          "style": {
+                            "type": "object",
+                            "properties": {
+                              "fontSize": {
+                                "type": "number",
+                                "minimum": 8,
+                                "maximum": 400
+                              },
+                              "color": {
+                                "type": "string",
+                                "pattern": "^#[0-9a-fA-F]{6}$"
+                              }
+                            },
+                            "additionalProperties": false
+                          },
+                          "link": {
+                            "type": "object",
+                            "properties": {
+                              "href": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "title": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "href"
+                            ],
+                            "additionalProperties": false
+                          }
+                        },
+                        "required": [
+                          "type",
+                          "formulaId",
+                          "latex",
+                          "accessibleText"
+                        ],
+                        "additionalProperties": false
+                      }
+                    ]
+                  }
+                }
+              },
+              "required": [
+                "inlines"
+              ],
+              "additionalProperties": false
+            },
             "textAlign": {
               "type": "string",
               "enum": [
@@ -5676,92 +6039,13 @@
               "type": "number",
               "minimum": 0,
               "maximum": 200
-            },
-            "text": {
-              "type": "string"
-            },
-            "runs": {
-              "maxItems": 10000,
-              "type": "array",
-              "items": {
-                "type": "object",
-                "properties": {
-                  "start": {
-                    "type": "integer",
-                    "minimum": 0,
-                    "maximum": 9007199254740991
-                  },
-                  "end": {
-                    "type": "integer",
-                    "minimum": 0,
-                    "maximum": 9007199254740991
-                  },
-                  "style": {
-                    "type": "object",
-                    "properties": {
-                      "baseline": {
-                        "type": "number",
-                        "minimum": -1,
-                        "maximum": 1
-                      },
-                      "color": {
-                        "type": "string",
-                        "pattern": "^#[0-9a-fA-F]{6}$"
-                      },
-                      "bold": {
-                        "type": "boolean"
-                      },
-                      "italic": {
-                        "type": "boolean"
-                      },
-                      "underline": {
-                        "type": "boolean"
-                      },
-                      "strike": {
-                        "type": "boolean"
-                      },
-                      "emphasis": {
-                        "type": "boolean"
-                      },
-                      "highlightColor": {
-                        "anyOf": [
-                          {
-                            "type": "string",
-                            "pattern": "^#[0-9a-fA-F]{6}$"
-                          },
-                          {
-                            "type": "null"
-                          }
-                        ]
-                      },
-                      "fontFamily": {
-                        "type": "string",
-                        "minLength": 1,
-                        "maxLength": 300
-                      },
-                      "fontSize": {
-                        "type": "number",
-                        "minimum": 8,
-                        "maximum": 400
-                      }
-                    },
-                    "additionalProperties": false
-                  }
-                },
-                "required": [
-                  "start",
-                  "end",
-                  "style"
-                ],
-                "additionalProperties": false
-              }
             }
           },
           "required": [
             "id",
             "type",
             "level",
-            "text"
+            "content"
           ],
           "additionalProperties": false
         },
@@ -5775,7 +6059,172 @@
             },
             "type": {
               "type": "string",
-              "const": "paragraph"
+              "const": "quote"
+            },
+            "content": {
+              "type": "object",
+              "properties": {
+                "inlines": {
+                  "type": "array",
+                  "items": {
+                    "oneOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "const": "text"
+                          },
+                          "text": {
+                            "type": "string"
+                          },
+                          "style": {
+                            "type": "object",
+                            "properties": {
+                              "baseline": {
+                                "type": "number",
+                                "minimum": -1,
+                                "maximum": 1
+                              },
+                              "color": {
+                                "type": "string",
+                                "pattern": "^#[0-9a-fA-F]{6}$"
+                              },
+                              "bold": {
+                                "type": "boolean"
+                              },
+                              "italic": {
+                                "type": "boolean"
+                              },
+                              "underline": {
+                                "type": "boolean"
+                              },
+                              "strike": {
+                                "type": "boolean"
+                              },
+                              "emphasis": {
+                                "type": "boolean"
+                              },
+                              "highlightColor": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "pattern": "^#[0-9a-fA-F]{6}$"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "fontFamily": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 300
+                              },
+                              "fontSize": {
+                                "type": "number",
+                                "minimum": 8,
+                                "maximum": 400
+                              }
+                            },
+                            "additionalProperties": false
+                          },
+                          "code": {
+                            "type": "boolean"
+                          },
+                          "link": {
+                            "type": "object",
+                            "properties": {
+                              "href": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "title": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "href"
+                            ],
+                            "additionalProperties": false
+                          }
+                        },
+                        "required": [
+                          "type",
+                          "text"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "const": "math"
+                          },
+                          "formulaId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 240
+                          },
+                          "latex": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 16384
+                          },
+                          "accessibleText": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 4000
+                          },
+                          "style": {
+                            "type": "object",
+                            "properties": {
+                              "fontSize": {
+                                "type": "number",
+                                "minimum": 8,
+                                "maximum": 400
+                              },
+                              "color": {
+                                "type": "string",
+                                "pattern": "^#[0-9a-fA-F]{6}$"
+                              }
+                            },
+                            "additionalProperties": false
+                          },
+                          "link": {
+                            "type": "object",
+                            "properties": {
+                              "href": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "title": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "href"
+                            ],
+                            "additionalProperties": false
+                          }
+                        },
+                        "required": [
+                          "type",
+                          "formulaId",
+                          "latex",
+                          "accessibleText"
+                        ],
+                        "additionalProperties": false
+                      }
+                    ]
+                  }
+                }
+              },
+              "required": [
+                "inlines"
+              ],
+              "additionalProperties": false
             },
             "textAlign": {
               "type": "string",
@@ -5790,90 +6239,176 @@
               "minimum": 0,
               "maximum": 200
             },
-            "text": {
-              "type": "string"
-            },
-            "runs": {
-              "maxItems": 10000,
-              "type": "array",
-              "items": {
-                "type": "object",
-                "properties": {
-                  "start": {
-                    "type": "integer",
-                    "minimum": 0,
-                    "maximum": 9007199254740991
-                  },
-                  "end": {
-                    "type": "integer",
-                    "minimum": 0,
-                    "maximum": 9007199254740991
-                  },
-                  "style": {
-                    "type": "object",
-                    "properties": {
-                      "baseline": {
-                        "type": "number",
-                        "minimum": -1,
-                        "maximum": 1
-                      },
-                      "color": {
-                        "type": "string",
-                        "pattern": "^#[0-9a-fA-F]{6}$"
-                      },
-                      "bold": {
-                        "type": "boolean"
-                      },
-                      "italic": {
-                        "type": "boolean"
-                      },
-                      "underline": {
-                        "type": "boolean"
-                      },
-                      "strike": {
-                        "type": "boolean"
-                      },
-                      "emphasis": {
-                        "type": "boolean"
-                      },
-                      "highlightColor": {
-                        "anyOf": [
-                          {
+            "citation": {
+              "type": "object",
+              "properties": {
+                "inlines": {
+                  "type": "array",
+                  "items": {
+                    "oneOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "type": {
                             "type": "string",
-                            "pattern": "^#[0-9a-fA-F]{6}$"
+                            "const": "text"
                           },
-                          {
-                            "type": "null"
+                          "text": {
+                            "type": "string"
+                          },
+                          "style": {
+                            "type": "object",
+                            "properties": {
+                              "baseline": {
+                                "type": "number",
+                                "minimum": -1,
+                                "maximum": 1
+                              },
+                              "color": {
+                                "type": "string",
+                                "pattern": "^#[0-9a-fA-F]{6}$"
+                              },
+                              "bold": {
+                                "type": "boolean"
+                              },
+                              "italic": {
+                                "type": "boolean"
+                              },
+                              "underline": {
+                                "type": "boolean"
+                              },
+                              "strike": {
+                                "type": "boolean"
+                              },
+                              "emphasis": {
+                                "type": "boolean"
+                              },
+                              "highlightColor": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "pattern": "^#[0-9a-fA-F]{6}$"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "fontFamily": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 300
+                              },
+                              "fontSize": {
+                                "type": "number",
+                                "minimum": 8,
+                                "maximum": 400
+                              }
+                            },
+                            "additionalProperties": false
+                          },
+                          "code": {
+                            "type": "boolean"
+                          },
+                          "link": {
+                            "type": "object",
+                            "properties": {
+                              "href": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "title": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "href"
+                            ],
+                            "additionalProperties": false
                           }
-                        ]
+                        },
+                        "required": [
+                          "type",
+                          "text"
+                        ],
+                        "additionalProperties": false
                       },
-                      "fontFamily": {
-                        "type": "string",
-                        "minLength": 1,
-                        "maxLength": 300
-                      },
-                      "fontSize": {
-                        "type": "number",
-                        "minimum": 8,
-                        "maximum": 400
+                      {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "const": "math"
+                          },
+                          "formulaId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 240
+                          },
+                          "latex": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 16384
+                          },
+                          "accessibleText": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 4000
+                          },
+                          "style": {
+                            "type": "object",
+                            "properties": {
+                              "fontSize": {
+                                "type": "number",
+                                "minimum": 8,
+                                "maximum": 400
+                              },
+                              "color": {
+                                "type": "string",
+                                "pattern": "^#[0-9a-fA-F]{6}$"
+                              }
+                            },
+                            "additionalProperties": false
+                          },
+                          "link": {
+                            "type": "object",
+                            "properties": {
+                              "href": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "title": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "href"
+                            ],
+                            "additionalProperties": false
+                          }
+                        },
+                        "required": [
+                          "type",
+                          "formulaId",
+                          "latex",
+                          "accessibleText"
+                        ],
+                        "additionalProperties": false
                       }
-                    },
-                    "additionalProperties": false
+                    ]
                   }
-                },
-                "required": [
-                  "start",
-                  "end",
-                  "style"
-                ],
-                "additionalProperties": false
-              }
+                }
+              },
+              "required": [
+                "inlines"
+              ],
+              "additionalProperties": false
             }
           },
           "required": [
             "id",
             "type",
-            "text"
+            "content"
           ],
           "additionalProperties": false
         },
@@ -5904,89 +6439,175 @@
                     "minLength": 1,
                     "maxLength": 240
                   },
-                  "text": {
-                    "type": "string"
-                  },
-                  "runs": {
-                    "maxItems": 10000,
-                    "type": "array",
-                    "items": {
-                      "type": "object",
-                      "properties": {
-                        "start": {
-                          "type": "integer",
-                          "minimum": 0,
-                          "maximum": 9007199254740991
-                        },
-                        "end": {
-                          "type": "integer",
-                          "minimum": 0,
-                          "maximum": 9007199254740991
-                        },
-                        "style": {
-                          "type": "object",
-                          "properties": {
-                            "baseline": {
-                              "type": "number",
-                              "minimum": -1,
-                              "maximum": 1
-                            },
-                            "color": {
-                              "type": "string",
-                              "pattern": "^#[0-9a-fA-F]{6}$"
-                            },
-                            "bold": {
-                              "type": "boolean"
-                            },
-                            "italic": {
-                              "type": "boolean"
-                            },
-                            "underline": {
-                              "type": "boolean"
-                            },
-                            "strike": {
-                              "type": "boolean"
-                            },
-                            "emphasis": {
-                              "type": "boolean"
-                            },
-                            "highlightColor": {
-                              "anyOf": [
-                                {
+                  "content": {
+                    "type": "object",
+                    "properties": {
+                      "inlines": {
+                        "type": "array",
+                        "items": {
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "type": {
                                   "type": "string",
-                                  "pattern": "^#[0-9a-fA-F]{6}$"
+                                  "const": "text"
                                 },
-                                {
-                                  "type": "null"
+                                "text": {
+                                  "type": "string"
+                                },
+                                "style": {
+                                  "type": "object",
+                                  "properties": {
+                                    "baseline": {
+                                      "type": "number",
+                                      "minimum": -1,
+                                      "maximum": 1
+                                    },
+                                    "color": {
+                                      "type": "string",
+                                      "pattern": "^#[0-9a-fA-F]{6}$"
+                                    },
+                                    "bold": {
+                                      "type": "boolean"
+                                    },
+                                    "italic": {
+                                      "type": "boolean"
+                                    },
+                                    "underline": {
+                                      "type": "boolean"
+                                    },
+                                    "strike": {
+                                      "type": "boolean"
+                                    },
+                                    "emphasis": {
+                                      "type": "boolean"
+                                    },
+                                    "highlightColor": {
+                                      "anyOf": [
+                                        {
+                                          "type": "string",
+                                          "pattern": "^#[0-9a-fA-F]{6}$"
+                                        },
+                                        {
+                                          "type": "null"
+                                        }
+                                      ]
+                                    },
+                                    "fontFamily": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 300
+                                    },
+                                    "fontSize": {
+                                      "type": "number",
+                                      "minimum": 8,
+                                      "maximum": 400
+                                    }
+                                  },
+                                  "additionalProperties": false
+                                },
+                                "code": {
+                                  "type": "boolean"
+                                },
+                                "link": {
+                                  "type": "object",
+                                  "properties": {
+                                    "href": {
+                                      "type": "string",
+                                      "minLength": 1
+                                    },
+                                    "title": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "href"
+                                  ],
+                                  "additionalProperties": false
                                 }
-                              ]
+                              },
+                              "required": [
+                                "type",
+                                "text"
+                              ],
+                              "additionalProperties": false
                             },
-                            "fontFamily": {
-                              "type": "string",
-                              "minLength": 1,
-                              "maxLength": 300
-                            },
-                            "fontSize": {
-                              "type": "number",
-                              "minimum": 8,
-                              "maximum": 400
+                            {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "const": "math"
+                                },
+                                "formulaId": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 240
+                                },
+                                "latex": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 16384
+                                },
+                                "accessibleText": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 4000
+                                },
+                                "style": {
+                                  "type": "object",
+                                  "properties": {
+                                    "fontSize": {
+                                      "type": "number",
+                                      "minimum": 8,
+                                      "maximum": 400
+                                    },
+                                    "color": {
+                                      "type": "string",
+                                      "pattern": "^#[0-9a-fA-F]{6}$"
+                                    }
+                                  },
+                                  "additionalProperties": false
+                                },
+                                "link": {
+                                  "type": "object",
+                                  "properties": {
+                                    "href": {
+                                      "type": "string",
+                                      "minLength": 1
+                                    },
+                                    "title": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "href"
+                                  ],
+                                  "additionalProperties": false
+                                }
+                              },
+                              "required": [
+                                "type",
+                                "formulaId",
+                                "latex",
+                                "accessibleText"
+                              ],
+                              "additionalProperties": false
                             }
-                          },
-                          "additionalProperties": false
+                          ]
                         }
-                      },
-                      "required": [
-                        "start",
-                        "end",
-                        "style"
-                      ],
-                      "additionalProperties": false
-                    }
+                      }
+                    },
+                    "required": [
+                      "inlines"
+                    ],
+                    "additionalProperties": false
                   }
                 },
                 "required": [
                   "id",
-                  "text"
+                  "content"
                 ],
                 "additionalProperties": false
               }
@@ -5997,122 +6618,6 @@
             "type",
             "ordered",
             "items"
-          ],
-          "additionalProperties": false
-        },
-        {
-          "type": "object",
-          "properties": {
-            "id": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 240
-            },
-            "type": {
-              "type": "string",
-              "const": "quote"
-            },
-            "textAlign": {
-              "type": "string",
-              "enum": [
-                "left",
-                "center",
-                "right"
-              ]
-            },
-            "lineSpacing": {
-              "type": "number",
-              "minimum": 0,
-              "maximum": 200
-            },
-            "text": {
-              "type": "string"
-            },
-            "runs": {
-              "maxItems": 10000,
-              "type": "array",
-              "items": {
-                "type": "object",
-                "properties": {
-                  "start": {
-                    "type": "integer",
-                    "minimum": 0,
-                    "maximum": 9007199254740991
-                  },
-                  "end": {
-                    "type": "integer",
-                    "minimum": 0,
-                    "maximum": 9007199254740991
-                  },
-                  "style": {
-                    "type": "object",
-                    "properties": {
-                      "baseline": {
-                        "type": "number",
-                        "minimum": -1,
-                        "maximum": 1
-                      },
-                      "color": {
-                        "type": "string",
-                        "pattern": "^#[0-9a-fA-F]{6}$"
-                      },
-                      "bold": {
-                        "type": "boolean"
-                      },
-                      "italic": {
-                        "type": "boolean"
-                      },
-                      "underline": {
-                        "type": "boolean"
-                      },
-                      "strike": {
-                        "type": "boolean"
-                      },
-                      "emphasis": {
-                        "type": "boolean"
-                      },
-                      "highlightColor": {
-                        "anyOf": [
-                          {
-                            "type": "string",
-                            "pattern": "^#[0-9a-fA-F]{6}$"
-                          },
-                          {
-                            "type": "null"
-                          }
-                        ]
-                      },
-                      "fontFamily": {
-                        "type": "string",
-                        "minLength": 1,
-                        "maxLength": 300
-                      },
-                      "fontSize": {
-                        "type": "number",
-                        "minimum": 8,
-                        "maximum": 400
-                      }
-                    },
-                    "additionalProperties": false
-                  }
-                },
-                "required": [
-                  "start",
-                  "end",
-                  "style"
-                ],
-                "additionalProperties": false
-              }
-            },
-            "citation": {
-              "type": "string",
-              "maxLength": 1000
-            }
-          },
-          "required": [
-            "id",
-            "type",
-            "text"
           ],
           "additionalProperties": false
         },
@@ -6165,8 +6670,169 @@
               "maxLength": 4000
             },
             "caption": {
-              "type": "string",
-              "maxLength": 4000
+              "type": "object",
+              "properties": {
+                "inlines": {
+                  "type": "array",
+                  "items": {
+                    "oneOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "const": "text"
+                          },
+                          "text": {
+                            "type": "string"
+                          },
+                          "style": {
+                            "type": "object",
+                            "properties": {
+                              "baseline": {
+                                "type": "number",
+                                "minimum": -1,
+                                "maximum": 1
+                              },
+                              "color": {
+                                "type": "string",
+                                "pattern": "^#[0-9a-fA-F]{6}$"
+                              },
+                              "bold": {
+                                "type": "boolean"
+                              },
+                              "italic": {
+                                "type": "boolean"
+                              },
+                              "underline": {
+                                "type": "boolean"
+                              },
+                              "strike": {
+                                "type": "boolean"
+                              },
+                              "emphasis": {
+                                "type": "boolean"
+                              },
+                              "highlightColor": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "pattern": "^#[0-9a-fA-F]{6}$"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "fontFamily": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 300
+                              },
+                              "fontSize": {
+                                "type": "number",
+                                "minimum": 8,
+                                "maximum": 400
+                              }
+                            },
+                            "additionalProperties": false
+                          },
+                          "code": {
+                            "type": "boolean"
+                          },
+                          "link": {
+                            "type": "object",
+                            "properties": {
+                              "href": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "title": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "href"
+                            ],
+                            "additionalProperties": false
+                          }
+                        },
+                        "required": [
+                          "type",
+                          "text"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "const": "math"
+                          },
+                          "formulaId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 240
+                          },
+                          "latex": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 16384
+                          },
+                          "accessibleText": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 4000
+                          },
+                          "style": {
+                            "type": "object",
+                            "properties": {
+                              "fontSize": {
+                                "type": "number",
+                                "minimum": 8,
+                                "maximum": 400
+                              },
+                              "color": {
+                                "type": "string",
+                                "pattern": "^#[0-9a-fA-F]{6}$"
+                              }
+                            },
+                            "additionalProperties": false
+                          },
+                          "link": {
+                            "type": "object",
+                            "properties": {
+                              "href": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "title": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "href"
+                            ],
+                            "additionalProperties": false
+                          }
+                        },
+                        "required": [
+                          "type",
+                          "formulaId",
+                          "latex",
+                          "accessibleText"
+                        ],
+                        "additionalProperties": false
+                      }
+                    ]
+                  }
+                }
+              },
+              "required": [
+                "inlines"
+              ],
+              "additionalProperties": false
             },
             "layout": {
               "type": "string",
@@ -6197,40 +6863,6 @@
         {
           "type": "object",
           "properties": {
-            "merges": {
-              "maxItems": 10000,
-              "type": "array",
-              "items": {
-                "type": "object",
-                "properties": {
-                  "rowIds": {
-                    "minItems": 1,
-                    "maxItems": 100000,
-                    "type": "array",
-                    "items": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 200
-                    }
-                  },
-                  "columnIds": {
-                    "minItems": 1,
-                    "maxItems": 256,
-                    "type": "array",
-                    "items": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 200
-                    }
-                  }
-                },
-                "required": [
-                  "rowIds",
-                  "columnIds"
-                ],
-                "additionalProperties": false
-              }
-            },
             "id": {
               "type": "string",
               "minLength": 1,
@@ -6241,8 +6873,169 @@
               "const": "table"
             },
             "caption": {
-              "type": "string",
-              "maxLength": 4000
+              "type": "object",
+              "properties": {
+                "inlines": {
+                  "type": "array",
+                  "items": {
+                    "oneOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "const": "text"
+                          },
+                          "text": {
+                            "type": "string"
+                          },
+                          "style": {
+                            "type": "object",
+                            "properties": {
+                              "baseline": {
+                                "type": "number",
+                                "minimum": -1,
+                                "maximum": 1
+                              },
+                              "color": {
+                                "type": "string",
+                                "pattern": "^#[0-9a-fA-F]{6}$"
+                              },
+                              "bold": {
+                                "type": "boolean"
+                              },
+                              "italic": {
+                                "type": "boolean"
+                              },
+                              "underline": {
+                                "type": "boolean"
+                              },
+                              "strike": {
+                                "type": "boolean"
+                              },
+                              "emphasis": {
+                                "type": "boolean"
+                              },
+                              "highlightColor": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "pattern": "^#[0-9a-fA-F]{6}$"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "fontFamily": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 300
+                              },
+                              "fontSize": {
+                                "type": "number",
+                                "minimum": 8,
+                                "maximum": 400
+                              }
+                            },
+                            "additionalProperties": false
+                          },
+                          "code": {
+                            "type": "boolean"
+                          },
+                          "link": {
+                            "type": "object",
+                            "properties": {
+                              "href": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "title": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "href"
+                            ],
+                            "additionalProperties": false
+                          }
+                        },
+                        "required": [
+                          "type",
+                          "text"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "const": "math"
+                          },
+                          "formulaId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 240
+                          },
+                          "latex": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 16384
+                          },
+                          "accessibleText": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 4000
+                          },
+                          "style": {
+                            "type": "object",
+                            "properties": {
+                              "fontSize": {
+                                "type": "number",
+                                "minimum": 8,
+                                "maximum": 400
+                              },
+                              "color": {
+                                "type": "string",
+                                "pattern": "^#[0-9a-fA-F]{6}$"
+                              }
+                            },
+                            "additionalProperties": false
+                          },
+                          "link": {
+                            "type": "object",
+                            "properties": {
+                              "href": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "title": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "href"
+                            ],
+                            "additionalProperties": false
+                          }
+                        },
+                        "required": [
+                          "type",
+                          "formulaId",
+                          "latex",
+                          "accessibleText"
+                        ],
+                        "additionalProperties": false
+                      }
+                    ]
+                  }
+                }
+              },
+              "required": [
+                "inlines"
+              ],
+              "additionalProperties": false
             },
             "columns": {
               "minItems": 1,
@@ -6257,7 +7050,169 @@
                     "maxLength": 240
                   },
                   "header": {
-                    "type": "string"
+                    "type": "object",
+                    "properties": {
+                      "inlines": {
+                        "type": "array",
+                        "items": {
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "const": "text"
+                                },
+                                "text": {
+                                  "type": "string"
+                                },
+                                "style": {
+                                  "type": "object",
+                                  "properties": {
+                                    "baseline": {
+                                      "type": "number",
+                                      "minimum": -1,
+                                      "maximum": 1
+                                    },
+                                    "color": {
+                                      "type": "string",
+                                      "pattern": "^#[0-9a-fA-F]{6}$"
+                                    },
+                                    "bold": {
+                                      "type": "boolean"
+                                    },
+                                    "italic": {
+                                      "type": "boolean"
+                                    },
+                                    "underline": {
+                                      "type": "boolean"
+                                    },
+                                    "strike": {
+                                      "type": "boolean"
+                                    },
+                                    "emphasis": {
+                                      "type": "boolean"
+                                    },
+                                    "highlightColor": {
+                                      "anyOf": [
+                                        {
+                                          "type": "string",
+                                          "pattern": "^#[0-9a-fA-F]{6}$"
+                                        },
+                                        {
+                                          "type": "null"
+                                        }
+                                      ]
+                                    },
+                                    "fontFamily": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 300
+                                    },
+                                    "fontSize": {
+                                      "type": "number",
+                                      "minimum": 8,
+                                      "maximum": 400
+                                    }
+                                  },
+                                  "additionalProperties": false
+                                },
+                                "code": {
+                                  "type": "boolean"
+                                },
+                                "link": {
+                                  "type": "object",
+                                  "properties": {
+                                    "href": {
+                                      "type": "string",
+                                      "minLength": 1
+                                    },
+                                    "title": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "href"
+                                  ],
+                                  "additionalProperties": false
+                                }
+                              },
+                              "required": [
+                                "type",
+                                "text"
+                              ],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "const": "math"
+                                },
+                                "formulaId": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 240
+                                },
+                                "latex": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 16384
+                                },
+                                "accessibleText": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 4000
+                                },
+                                "style": {
+                                  "type": "object",
+                                  "properties": {
+                                    "fontSize": {
+                                      "type": "number",
+                                      "minimum": 8,
+                                      "maximum": 400
+                                    },
+                                    "color": {
+                                      "type": "string",
+                                      "pattern": "^#[0-9a-fA-F]{6}$"
+                                    }
+                                  },
+                                  "additionalProperties": false
+                                },
+                                "link": {
+                                  "type": "object",
+                                  "properties": {
+                                    "href": {
+                                      "type": "string",
+                                      "minLength": 1
+                                    },
+                                    "title": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "href"
+                                  ],
+                                  "additionalProperties": false
+                                }
+                              },
+                              "required": [
+                                "type",
+                                "formulaId",
+                                "latex",
+                                "accessibleText"
+                              ],
+                              "additionalProperties": false
+                            }
+                          ]
+                        }
+                      }
+                    },
+                    "required": [
+                      "inlines"
+                    ],
+                    "additionalProperties": false
                   }
                 },
                 "required": [
@@ -6284,31 +7239,21 @@
                       "type": "string"
                     },
                     "additionalProperties": {
-                      "anyOf": [
-                        {
-                          "type": "string"
-                        },
-                        {
-                          "type": "object",
-                          "properties": {
-                            "text": {
-                              "type": "string"
-                            },
-                            "runs": {
-                              "maxItems": 10000,
-                              "type": "array",
-                              "items": {
+                      "type": "object",
+                      "properties": {
+                        "inlines": {
+                          "type": "array",
+                          "items": {
+                            "oneOf": [
+                              {
                                 "type": "object",
                                 "properties": {
-                                  "start": {
-                                    "type": "integer",
-                                    "minimum": 0,
-                                    "maximum": 9007199254740991
+                                  "type": {
+                                    "type": "string",
+                                    "const": "text"
                                   },
-                                  "end": {
-                                    "type": "integer",
-                                    "minimum": 0,
-                                    "maximum": 9007199254740991
+                                  "text": {
+                                    "type": "string"
                                   },
                                   "style": {
                                     "type": "object",
@@ -6360,29 +7305,143 @@
                                       }
                                     },
                                     "additionalProperties": false
+                                  },
+                                  "code": {
+                                    "type": "boolean"
+                                  },
+                                  "link": {
+                                    "type": "object",
+                                    "properties": {
+                                      "href": {
+                                        "type": "string",
+                                        "minLength": 1
+                                      },
+                                      "title": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": [
+                                      "href"
+                                    ],
+                                    "additionalProperties": false
                                   }
                                 },
                                 "required": [
-                                  "start",
-                                  "end",
-                                  "style"
+                                  "type",
+                                  "text"
+                                ],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "type": {
+                                    "type": "string",
+                                    "const": "math"
+                                  },
+                                  "formulaId": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 240
+                                  },
+                                  "latex": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 16384
+                                  },
+                                  "accessibleText": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 4000
+                                  },
+                                  "style": {
+                                    "type": "object",
+                                    "properties": {
+                                      "fontSize": {
+                                        "type": "number",
+                                        "minimum": 8,
+                                        "maximum": 400
+                                      },
+                                      "color": {
+                                        "type": "string",
+                                        "pattern": "^#[0-9a-fA-F]{6}$"
+                                      }
+                                    },
+                                    "additionalProperties": false
+                                  },
+                                  "link": {
+                                    "type": "object",
+                                    "properties": {
+                                      "href": {
+                                        "type": "string",
+                                        "minLength": 1
+                                      },
+                                      "title": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": [
+                                      "href"
+                                    ],
+                                    "additionalProperties": false
+                                  }
+                                },
+                                "required": [
+                                  "type",
+                                  "formulaId",
+                                  "latex",
+                                  "accessibleText"
                                 ],
                                 "additionalProperties": false
                               }
-                            }
-                          },
-                          "required": [
-                            "text"
-                          ],
-                          "additionalProperties": false
+                            ]
+                          }
                         }
-                      ]
+                      },
+                      "required": [
+                        "inlines"
+                      ],
+                      "additionalProperties": false
                     }
                   }
                 },
                 "required": [
                   "id",
                   "cells"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "merges": {
+              "maxItems": 10000,
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "rowIds": {
+                    "minItems": 1,
+                    "maxItems": 100000,
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 200
+                    }
+                  },
+                  "columnIds": {
+                    "minItems": 1,
+                    "maxItems": 256,
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 200
+                    }
+                  }
+                },
+                "required": [
+                  "rowIds",
+                  "columnIds"
                 ],
                 "additionalProperties": false
               }
@@ -6952,21 +8011,38 @@
               "minLength": 1,
               "maxLength": 240
             },
+            "latex": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 16384
+            },
             "accessibleText": {
               "type": "string",
               "minLength": 1,
               "maxLength": 4000
             },
-            "ast": {
-              "$ref": "#/$defs/__schema1"
+            "style": {
+              "type": "object",
+              "properties": {
+                "fontSize": {
+                  "type": "number",
+                  "minimum": 8,
+                  "maximum": 400
+                },
+                "color": {
+                  "type": "string",
+                  "pattern": "^#[0-9a-fA-F]{6}$"
+                }
+              },
+              "additionalProperties": false
             }
           },
           "required": [
             "id",
             "type",
             "formulaId",
-            "accessibleText",
-            "ast"
+            "latex",
+            "accessibleText"
           ],
           "additionalProperties": false
         },
@@ -6982,14 +8058,14 @@
               "type": "string",
               "const": "code"
             },
+            "code": {
+              "type": "string",
+              "maxLength": 5000000
+            },
             "language": {
               "type": "string",
               "minLength": 1,
               "maxLength": 100
-            },
-            "code": {
-              "type": "string",
-              "maxLength": 5000000
             }
           },
           "required": [
@@ -7021,11 +8097,334 @@
               ]
             },
             "title": {
-              "type": "string",
-              "maxLength": 500
+              "type": "object",
+              "properties": {
+                "inlines": {
+                  "type": "array",
+                  "items": {
+                    "oneOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "const": "text"
+                          },
+                          "text": {
+                            "type": "string"
+                          },
+                          "style": {
+                            "type": "object",
+                            "properties": {
+                              "baseline": {
+                                "type": "number",
+                                "minimum": -1,
+                                "maximum": 1
+                              },
+                              "color": {
+                                "type": "string",
+                                "pattern": "^#[0-9a-fA-F]{6}$"
+                              },
+                              "bold": {
+                                "type": "boolean"
+                              },
+                              "italic": {
+                                "type": "boolean"
+                              },
+                              "underline": {
+                                "type": "boolean"
+                              },
+                              "strike": {
+                                "type": "boolean"
+                              },
+                              "emphasis": {
+                                "type": "boolean"
+                              },
+                              "highlightColor": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "pattern": "^#[0-9a-fA-F]{6}$"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "fontFamily": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 300
+                              },
+                              "fontSize": {
+                                "type": "number",
+                                "minimum": 8,
+                                "maximum": 400
+                              }
+                            },
+                            "additionalProperties": false
+                          },
+                          "code": {
+                            "type": "boolean"
+                          },
+                          "link": {
+                            "type": "object",
+                            "properties": {
+                              "href": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "title": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "href"
+                            ],
+                            "additionalProperties": false
+                          }
+                        },
+                        "required": [
+                          "type",
+                          "text"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "const": "math"
+                          },
+                          "formulaId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 240
+                          },
+                          "latex": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 16384
+                          },
+                          "accessibleText": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 4000
+                          },
+                          "style": {
+                            "type": "object",
+                            "properties": {
+                              "fontSize": {
+                                "type": "number",
+                                "minimum": 8,
+                                "maximum": 400
+                              },
+                              "color": {
+                                "type": "string",
+                                "pattern": "^#[0-9a-fA-F]{6}$"
+                              }
+                            },
+                            "additionalProperties": false
+                          },
+                          "link": {
+                            "type": "object",
+                            "properties": {
+                              "href": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "title": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "href"
+                            ],
+                            "additionalProperties": false
+                          }
+                        },
+                        "required": [
+                          "type",
+                          "formulaId",
+                          "latex",
+                          "accessibleText"
+                        ],
+                        "additionalProperties": false
+                      }
+                    ]
+                  }
+                }
+              },
+              "required": [
+                "inlines"
+              ],
+              "additionalProperties": false
             },
             "body": {
-              "type": "string"
+              "type": "object",
+              "properties": {
+                "inlines": {
+                  "type": "array",
+                  "items": {
+                    "oneOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "const": "text"
+                          },
+                          "text": {
+                            "type": "string"
+                          },
+                          "style": {
+                            "type": "object",
+                            "properties": {
+                              "baseline": {
+                                "type": "number",
+                                "minimum": -1,
+                                "maximum": 1
+                              },
+                              "color": {
+                                "type": "string",
+                                "pattern": "^#[0-9a-fA-F]{6}$"
+                              },
+                              "bold": {
+                                "type": "boolean"
+                              },
+                              "italic": {
+                                "type": "boolean"
+                              },
+                              "underline": {
+                                "type": "boolean"
+                              },
+                              "strike": {
+                                "type": "boolean"
+                              },
+                              "emphasis": {
+                                "type": "boolean"
+                              },
+                              "highlightColor": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "pattern": "^#[0-9a-fA-F]{6}$"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "fontFamily": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 300
+                              },
+                              "fontSize": {
+                                "type": "number",
+                                "minimum": 8,
+                                "maximum": 400
+                              }
+                            },
+                            "additionalProperties": false
+                          },
+                          "code": {
+                            "type": "boolean"
+                          },
+                          "link": {
+                            "type": "object",
+                            "properties": {
+                              "href": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "title": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "href"
+                            ],
+                            "additionalProperties": false
+                          }
+                        },
+                        "required": [
+                          "type",
+                          "text"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "const": "math"
+                          },
+                          "formulaId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 240
+                          },
+                          "latex": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 16384
+                          },
+                          "accessibleText": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 4000
+                          },
+                          "style": {
+                            "type": "object",
+                            "properties": {
+                              "fontSize": {
+                                "type": "number",
+                                "minimum": 8,
+                                "maximum": 400
+                              },
+                              "color": {
+                                "type": "string",
+                                "pattern": "^#[0-9a-fA-F]{6}$"
+                              }
+                            },
+                            "additionalProperties": false
+                          },
+                          "link": {
+                            "type": "object",
+                            "properties": {
+                              "href": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "title": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "href"
+                            ],
+                            "additionalProperties": false
+                          }
+                        },
+                        "required": [
+                          "type",
+                          "formulaId",
+                          "latex",
+                          "accessibleText"
+                        ],
+                        "additionalProperties": false
+                      }
+                    ]
+                  }
+                }
+              },
+              "required": [
+                "inlines"
+              ],
+              "additionalProperties": false
             }
           },
           "required": [
@@ -7049,9 +8448,169 @@
               "const": "section"
             },
             "title": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 500
+              "type": "object",
+              "properties": {
+                "inlines": {
+                  "type": "array",
+                  "items": {
+                    "oneOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "const": "text"
+                          },
+                          "text": {
+                            "type": "string"
+                          },
+                          "style": {
+                            "type": "object",
+                            "properties": {
+                              "baseline": {
+                                "type": "number",
+                                "minimum": -1,
+                                "maximum": 1
+                              },
+                              "color": {
+                                "type": "string",
+                                "pattern": "^#[0-9a-fA-F]{6}$"
+                              },
+                              "bold": {
+                                "type": "boolean"
+                              },
+                              "italic": {
+                                "type": "boolean"
+                              },
+                              "underline": {
+                                "type": "boolean"
+                              },
+                              "strike": {
+                                "type": "boolean"
+                              },
+                              "emphasis": {
+                                "type": "boolean"
+                              },
+                              "highlightColor": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "pattern": "^#[0-9a-fA-F]{6}$"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "fontFamily": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 300
+                              },
+                              "fontSize": {
+                                "type": "number",
+                                "minimum": 8,
+                                "maximum": 400
+                              }
+                            },
+                            "additionalProperties": false
+                          },
+                          "code": {
+                            "type": "boolean"
+                          },
+                          "link": {
+                            "type": "object",
+                            "properties": {
+                              "href": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "title": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "href"
+                            ],
+                            "additionalProperties": false
+                          }
+                        },
+                        "required": [
+                          "type",
+                          "text"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "const": "math"
+                          },
+                          "formulaId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 240
+                          },
+                          "latex": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 16384
+                          },
+                          "accessibleText": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 4000
+                          },
+                          "style": {
+                            "type": "object",
+                            "properties": {
+                              "fontSize": {
+                                "type": "number",
+                                "minimum": 8,
+                                "maximum": 400
+                              },
+                              "color": {
+                                "type": "string",
+                                "pattern": "^#[0-9a-fA-F]{6}$"
+                              }
+                            },
+                            "additionalProperties": false
+                          },
+                          "link": {
+                            "type": "object",
+                            "properties": {
+                              "href": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "title": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "href"
+                            ],
+                            "additionalProperties": false
+                          }
+                        },
+                        "required": [
+                          "type",
+                          "formulaId",
+                          "latex",
+                          "accessibleText"
+                        ],
+                        "additionalProperties": false
+                      }
+                    ]
+                  }
+                }
+              },
+              "required": [
+                "inlines"
+              ],
+              "additionalProperties": false
             },
             "collapsedByDefault": {
               "type": "boolean"
@@ -7110,7 +8669,9 @@
               "propertyNames": {
                 "type": "string"
               },
-              "additionalProperties": {}
+              "additionalProperties": {
+                "$ref": "#/$defs/__schema1"
+              }
             },
             "staticFallbackAssetId": {
               "type": "string",
@@ -7138,159 +8699,33 @@
       ]
     },
     "__schema1": {
-      "oneOf": [
+      "anyOf": [
         {
-          "type": "object",
-          "properties": {
-            "type": {
-              "type": "string",
-              "const": "row"
-            },
-            "children": {
-              "minItems": 1,
-              "maxItems": 128,
-              "type": "array",
-              "items": {
-                "$ref": "#/$defs/__schema1"
-              }
-            }
-          },
-          "required": [
-            "type",
-            "children"
-          ],
-          "additionalProperties": false
+          "type": "string"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/__schema1"
+          }
         },
         {
           "type": "object",
-          "properties": {
-            "type": {
-              "type": "string",
-              "const": "token"
-            },
-            "value": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 128
-            }
+          "propertyNames": {
+            "type": "string"
           },
-          "required": [
-            "type",
-            "value"
-          ],
-          "additionalProperties": false
-        },
-        {
-          "type": "object",
-          "properties": {
-            "type": {
-              "type": "string",
-              "const": "operator"
-            },
-            "value": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 16
-            }
-          },
-          "required": [
-            "type",
-            "value"
-          ],
-          "additionalProperties": false
-        },
-        {
-          "type": "object",
-          "properties": {
-            "type": {
-              "type": "string",
-              "const": "fraction"
-            },
-            "numerator": {
-              "$ref": "#/$defs/__schema1"
-            },
-            "denominator": {
-              "$ref": "#/$defs/__schema1"
-            }
-          },
-          "required": [
-            "type",
-            "numerator",
-            "denominator"
-          ],
-          "additionalProperties": false
-        },
-        {
-          "type": "object",
-          "properties": {
-            "type": {
-              "type": "string",
-              "const": "root"
-            },
-            "radicand": {
-              "$ref": "#/$defs/__schema1"
-            },
-            "index": {
-              "$ref": "#/$defs/__schema1"
-            }
-          },
-          "required": [
-            "type",
-            "radicand"
-          ],
-          "additionalProperties": false
-        },
-        {
-          "type": "object",
-          "properties": {
-            "type": {
-              "type": "string",
-              "const": "script"
-            },
-            "base": {
-              "$ref": "#/$defs/__schema1"
-            },
-            "superscript": {
-              "$ref": "#/$defs/__schema1"
-            },
-            "subscript": {
-              "$ref": "#/$defs/__schema1"
-            }
-          },
-          "required": [
-            "type",
-            "base"
-          ],
-          "additionalProperties": false
-        },
-        {
-          "type": "object",
-          "properties": {
-            "type": {
-              "type": "string",
-              "const": "fenced"
-            },
-            "open": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 4
-            },
-            "close": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 4
-            },
-            "body": {
-              "$ref": "#/$defs/__schema1"
-            }
-          },
-          "required": [
-            "type",
-            "open",
-            "close",
-            "body"
-          ],
-          "additionalProperties": false
+          "additionalProperties": {
+            "$ref": "#/$defs/__schema1"
+          }
         }
       ]
     }

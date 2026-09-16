@@ -174,6 +174,27 @@ afterEach(() => {
 })
 
 describe('PublishedInteractionController', () => {
+  it('uses the current Slide scene for presentation.set and rejects a missing scene', async () => {
+    const host = surfaceHarness()
+    const navigation = sessionHarness('scene_current')
+    const diagnostics: PublishedInteractionDiagnostic[] = []
+    const controller = new PublishedInteractionController({
+      surfaceId: 'slide_surface', surface: host.surface, session: navigation.session,
+      rules: [clickRule('set_state', 'button', [
+        actionStep('set_state_step', { type: 'presentation.set', stateId: 'revealed' }),
+      ])],
+      reportDiagnostic: diagnostic => diagnostics.push(diagnostic),
+    })
+    host.listeners.get('button')?.()
+    await vi.waitFor(() => expect(navigation.goToScene).toHaveBeenCalledWith('scene_current', 'revealed', expect.any(AbortSignal)))
+    navigation.goToScene.mockClear()
+    navigation.setSceneId(null)
+    host.listeners.get('button')?.()
+    await vi.waitFor(() => expect(diagnostics.some(value => value.code === 'navigation-failed')).toBe(true))
+    expect(navigation.goToScene).not.toHaveBeenCalled()
+    controller.destroy()
+  })
+
   it('dispatches authored presenter rules with scene conditions and cancels delayed work on destruction', async () => {
     vi.useFakeTimers()
     const host = surfaceHarness()
@@ -502,12 +523,9 @@ describe('PublishedInteractionController', () => {
       item.surfaceId === 'slide_surface' && item.phase === 'execute'
     ))).toBe(true)
 
-    expect([...host.listeners.keys()]).toEqual(['button'])
-    host.listeners.get('button')?.()
-    await vi.waitFor(() => expect(host.executeNodeMotion).toHaveBeenCalledTimes(1))
-    expect(host.executeNodeMotion.mock.calls[0]?.[0]).toMatchObject({
-      nodeId: 'supported_answer',
-    })
+    expect([...host.listeners.keys()]).toEqual([])
+    expect(host.executeNodeMotion).not.toHaveBeenCalled()
+    expect(navigation.goToScene).not.toHaveBeenCalled()
     expect(diagnostics).toHaveLength(4)
     controller.destroy()
   })

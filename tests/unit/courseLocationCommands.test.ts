@@ -320,7 +320,7 @@ describe('courseLocationCommands', () => {
       surfaceId: flow.id,
       parentId: null,
       index: flow.blocks.length,
-      block: { type: 'heading', level: 1, text: '第二节' },
+      block: { type: 'heading', level: 1, content: { inlines: [{ type: 'text', text: '第二节' }] } },
     }, { now: NOW, expectedRevision: project.revision })
     expect(inserted.ok).toBe(true)
     if (!inserted.ok || !inserted.nextDocument) throw new Error(inserted.reason ?? 'insert failed')

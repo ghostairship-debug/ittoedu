@@ -16,31 +16,35 @@ export function buildFlowRichTextHtml(text: string, runs: readonly TextRun[] = [
   return Array.from(text).map((character, index) => {
     if (character === '\n') return '<br>'
     const style = styleAt(runs, index)
-    const decorations = [
-      style.underline ? 'underline' : '',
-      style.strike ? 'line-through' : '',
-    ].filter(Boolean).join(' ')
-    const css = [
-      style.color !== undefined ? `color:${style.color}` : '',
-      style.fontFamily !== undefined ? `font-family:${style.fontFamily}` : '',
-      style.fontSize !== undefined ? `font-size:${style.fontSize}px` : '',
-      style.baseline !== undefined ? `vertical-align:${style.baseline}em` : '',
-      style.bold !== undefined ? `font-weight:${style.bold ? '700' : '400'}` : '',
-      style.italic !== undefined ? `font-style:${style.italic ? 'italic' : 'normal'}` : '',
-      decorations ? 'display:inline-block' : '',
-      decorations ? `text-decoration-line:${decorations}` : '',
-      style.highlightColor ? `background-color:${style.highlightColor}` : '',
-      style.highlightColor === null ? 'background-color:transparent' : '',
-      style.emphasis !== undefined
-        ? `text-emphasis-style:${style.emphasis ? 'filled circle' : 'none'}`
-        : '',
-      style.emphasis !== undefined
-        ? `-webkit-text-emphasis-style:${style.emphasis ? 'filled circle' : 'none'}`
-        : '',
-      style.emphasis !== undefined ? 'text-emphasis-position:under right' : '',
-      style.emphasis !== undefined ? '-webkit-text-emphasis-position:under right' : '',
-    ].filter(Boolean).join(';')
+    const css = buildFlowTextStyleCss(style)
     return css ? `<span style="${escapeHtml(css)}">${escapeHtml(character)}</span>` : escapeHtml(character)
   }).join('')
 }
 
+/** Shared inline appearance for editable text and every Published carrier. */
+export function buildFlowTextStyleCss(style: TextRunStyle): string {
+  const decorations = [
+    style.underline ? 'underline' : '',
+    style.strike ? 'line-through' : '',
+  ].filter(Boolean).join(' ')
+  return [
+    style.color !== undefined ? `color:${style.color}` : '',
+    style.fontFamily !== undefined ? `font-family:${style.fontFamily}` : '',
+    style.fontSize !== undefined ? `font-size:${style.fontSize}px` : '',
+    style.baseline !== undefined ? `vertical-align:${style.baseline}em` : '',
+    style.bold !== undefined ? `font-weight:${style.bold ? '700' : '400'}` : '',
+    style.italic !== undefined ? `font-style:${style.italic ? 'italic' : 'normal'}` : '',
+    decorations ? 'display:inline-block' : '',
+    decorations ? `text-decoration-line:${decorations}` : '',
+    style.highlightColor ? `background-color:${style.highlightColor}` : '',
+    style.highlightColor === null ? 'background-color:transparent' : '',
+    style.emphasis !== undefined
+      ? `text-emphasis-style:${style.emphasis ? 'filled circle' : 'none'}`
+      : '',
+    style.emphasis !== undefined
+      ? `-webkit-text-emphasis-style:${style.emphasis ? 'filled circle' : 'none'}`
+      : '',
+    style.emphasis !== undefined ? 'text-emphasis-position:under right' : '',
+    style.emphasis !== undefined ? '-webkit-text-emphasis-position:under right' : '',
+  ].filter(Boolean).join(';')
+}

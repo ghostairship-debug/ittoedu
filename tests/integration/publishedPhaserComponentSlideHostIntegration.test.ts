@@ -1,5 +1,5 @@
 import { buildPublishedFixture as buildPublishedCourseV2Payload } from '../fixtures/teacherController'
-import { isControllerFixture } from '../fixtures/teacherController'
+import { isControllerFixture, controllerPackages, queryDeep } from '../fixtures/teacherController'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('phaser', () => {
@@ -163,6 +163,7 @@ import {
   createPublishedPhaserComponentV2Fixture,
   PUBLISHED_PHASER_COMPONENT_ID,
   PUBLISHED_PHASER_COMPONENT_ITEM_ID,
+  PUBLISHED_PHASER_COMPONENT_RUNTIME_SOURCE,
 } from '../fixtures/publishedPhaserComponentV2Fixture'
 
 interface FakeGameProbe {
@@ -781,7 +782,7 @@ describe('Published Slide Phaser Component API 4 host', () => {
     const payload = buildPublishedCourseV2Payload({
       project: fixture.project,
       assetFiles: fixture.assetFiles,
-      components: fixture.components,
+      components: { ...controllerPackages, ...fixture.components },
     })
     const component = payload.components[`${PUBLISHED_PHASER_COMPONENT_ID}@4.0.0`]
     if (!component) throw new Error('expected fixture component')
@@ -881,7 +882,7 @@ describe('Published Slide Phaser Component API 4 host', () => {
     const published = buildPublishedCourseV2Payload({
       project: fixture.project,
       assetFiles: fixture.assetFiles,
-      components: fixture.components,
+      components: { ...controllerPackages, ...fixture.components },
     })
     const publishedComponent = published.components[
       `${PUBLISHED_PHASER_COMPONENT_ID}@4.0.0`
@@ -900,7 +901,7 @@ describe('Published Slide Phaser Component API 4 host', () => {
       container,
       project: fixture.project,
       assetFiles: fixture.assetFiles,
-      components: fixture.components,
+      components: { ...controllerPackages, ...fixture.components },
       locationId: fixture.slideLocationIds[0],
       sessionId: 'phaser-component-sidecar-authoring',
       scope: 'scene',
@@ -933,7 +934,10 @@ describe('Published Slide Phaser Component API 4 host', () => {
   })
 
   it('rejects a delayed component authoring remount after its Slide generation is replaced', async () => {
-    const fixture = createPublishedPhaserComponentV2Fixture()
+    // Without updateProps, this package must remount to consume an authored change.
+    const fixture = createPublishedPhaserComponentV2Fixture(
+      PUBLISHED_PHASER_COMPONENT_RUNTIME_SOURCE.replace('updateProps(props)', 'unusedUpdateProps(props)'),
+    )
     const location = fixture.project.locations.find((candidate) => (
       candidate.id === fixture.slideLocationIds[0] && candidate.kind === 'slide-scene'
     ))
@@ -951,7 +955,7 @@ describe('Published Slide Phaser Component API 4 host', () => {
       container,
       project: fixture.project,
       assetFiles: fixture.assetFiles,
-      components: fixture.components,
+      components: { ...controllerPackages, ...fixture.components },
       locationId: location.id,
       sessionId: 'phaser-component-generation-race',
       scope: 'scene',
@@ -1227,7 +1231,7 @@ describe('Published Slide Phaser Component API 4 host', () => {
     const payload = buildPublishedCourseV2Payload({
       project: fixture.project,
       assetFiles: fixture.assetFiles,
-      components: fixture.components,
+      components: { ...controllerPackages, ...fixture.components },
     })
     const container = document.createElement('div')
     document.body.appendChild(container)
@@ -1264,7 +1268,7 @@ describe('Published Slide Phaser Component API 4 host', () => {
     const payload = buildPublishedCourseV2Payload({
       project: fixture.project,
       assetFiles: fixture.assetFiles,
-      components: fixture.components,
+      components: { ...controllerPackages, ...fixture.components },
     })
     const slide = payload.surfaces.find((surface) => surface.id === fixture.slideSurfaceId)
     if (!slide || slide.type !== 'slide') throw new Error('expected Slide payload')
@@ -1338,7 +1342,7 @@ describe('Published Slide Phaser Component API 4 host', () => {
       const payload = buildPublishedCourseV2Payload({
         project: fixture.project,
         assetFiles: fixture.assetFiles,
-        components: fixture.components,
+        components: { ...controllerPackages, ...fixture.components },
       })
       const container = document.createElement('div')
       document.body.appendChild(container)
@@ -1393,7 +1397,7 @@ describe('Published Slide Phaser Component API 4 host', () => {
     const payload = buildPublishedCourseV2Payload({
       project: fixture.project,
       assetFiles: fixture.assetFiles,
-      components: fixture.components,
+      components: { ...controllerPackages, ...fixture.components },
     })
 
     const currentRoot = document.createElement('div')
@@ -1488,7 +1492,7 @@ describe('Published Slide Phaser Component API 4 host', () => {
     const payload = buildPublishedCourseV2Payload({
       project: validProject,
       assetFiles: fixture.assetFiles,
-      components: fixture.components,
+      components: { ...controllerPackages, ...fixture.components },
     })
     const publishedController = payload.globalLayerItems.find(({ item }) => (
       isControllerFixture(item)
@@ -1535,9 +1539,9 @@ describe('Published Slide Phaser Component API 4 host', () => {
     if (!bridge) throw new Error('expected Published presenter bridge')
 
     const controllerButton = (buttonId: string): HTMLButtonElement => {
-      const button = root.querySelector<HTMLButtonElement>(
-        `[data-global-layer-item="${publishedController.layerItemId}"] `
-          + `[data-controller-button-id="${buttonId}"]`,
+      const button = queryDeep<HTMLButtonElement>(
+        root.querySelector(`[data-global-layer-item="${publishedController.layerItemId}"]`),
+        `[data-controller-button-id="${buttonId}"]`,
       )
       if (!button) throw new Error(`missing controller button ${buttonId}`)
       return button
@@ -1617,7 +1621,7 @@ describe('Published Slide Phaser Component API 4 host', () => {
       surfaceId: fixture.slideSurfaceId,
       phase: 'execute',
       severity: 'error',
-      message: '教师控制器动作“scene.replay”执行失败：replay failed intentionally',
+      message: '教师控制台动作执行失败：replay failed intentionally',
       cause: replayFailure,
     }))
     goToLocation.mockRestore()
@@ -1725,7 +1729,7 @@ describe('Published Slide Phaser Component API 4 host', () => {
     const payload = buildPublishedCourseV2Payload({
       project: courseProjectDocumentSchema.parse(project),
       assetFiles: fixture.assetFiles,
-      components: fixture.components,
+      components: { ...controllerPackages, ...fixture.components },
     })
     const root = document.createElement('div')
     Object.defineProperties(root, {

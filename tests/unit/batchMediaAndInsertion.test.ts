@@ -347,9 +347,9 @@ describe('continuous insertion context', () => {
     const state = useEditorStore.getState()
     expect(state.activeTab).toBe('elements')
     expect(projectedGlobalLayer(state)).toHaveLength(1)
-    expect(projectedGlobalLayer(state)[0]!.node.type).toBe('teacher-controller')
+    expect(projectedGlobalLayer(state)[0]!.node).toMatchObject({ type: 'external-component', component: { packageId: 'com.ittoedu.teacher-controller' } })
     expect(selectSelectedNodeId(state)).toBe(projectedGlobalLayer(state)[0]!.node.id)
-    expect(selectEditingScope(state)).toBe('global')
+    expect(selectEditingScope(state)).toBe('scene')
 
     store.updatePlayback({ controls: 'none' })
     store.setActiveTab('elements')

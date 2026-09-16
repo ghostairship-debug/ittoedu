@@ -139,6 +139,18 @@ export async function executeAuthoringTool<T>(
     return success
   } catch (error) {
     if (error instanceof AuthoringToolFailure) return authoringToolReceiptV1Schema.parse({ ...reject('failed', error.diagnostics), ...(error.behaviorEvidence ? { behaviorEvidence: error.behaviorEvidence } : {}) })
-    return reject('failed', [{ code: 'tool-failed', message: error instanceof Error ? error.message : String(error), path: [] }])
+    // Keep a concrete producer code when the cause carries one (a `code` field,
+    // one level of `cause`, or a `code: detail` message prefix), so recovery can
+    // distinguish parameter/target errors from unsupported capabilities. Only
+    // opaque failures keep the generic tool-failed code.
+    const message = error instanceof Error ? error.message : String(error)
+    const codeField = (value: unknown): string | undefined => {
+      if (!value || typeof value !== 'object') return undefined
+      const code = Reflect.get(value, 'code')
+      return typeof code === 'string' && code.trim() ? code : undefined
+    }
+    const prefixCode = /^([a-z][a-z0-9-]{1,60})[:：]\s/.exec(message)?.[1]
+    const code = (codeField(error) ?? codeField(error && typeof error === 'object' ? Reflect.get(error, 'cause') : undefined) ?? prefixCode ?? 'tool-failed').slice(0, 100)
+    return reject('failed', [{ code, message, path: [] }])
   }
 }

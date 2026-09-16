@@ -262,7 +262,7 @@ function runtimeFixture(
               visibility: { mode: 'all' as const, locationIds: [] },
             }))
           : [],
-        blocks: [{ id: blockId, type: 'heading', level: 1, text: 'Runtime Flow' }],
+        blocks: [{ id: blockId, type: 'heading', level: 1, content: { inlines: [{ type: 'text', text: 'Runtime Flow' }] } }],
       }],
     })
     return {

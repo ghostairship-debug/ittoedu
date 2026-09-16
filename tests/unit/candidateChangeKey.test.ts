@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest'
-import { candidateChangeKey } from '../../src/main/localAgent/candidateChangeKey'
-import type { GenerationCandidate } from '../../src/shared/generationContract'
+import { candidateChangeKey, failureReasonKey } from '../../src/main/localAgent/candidateChangeKey'
+import type { GenerationCandidate, GenerationFailure } from '../../src/shared/generationContract'
 
 const destination: GenerationCandidate['steps'][number]['destination'] = { kind: 'update', target: {
   projectId: 'project', documentRevision: 1, revisionPolicy: { kind: 'exact' }, sessionGeneration: 1,
@@ -22,6 +22,20 @@ function fileSource(text: string, operation: 'patch' | 'revise', encoding: 'utf8
 }
 
 describe('candidate operation semantic change key', () => {
+  it('compares the failing field while allowing real parameter corrections and ignoring irrelevant revisions', () => {
+    const first = candidate({ fontSize: -1, label: 'first' })
+    const failure: GenerationFailure = { version: 1, stage: 'prepare', stepId: 'edit', tool: 'native.content',
+      diagnostics: [{ code: 'invalid-input', message: 'positive size required', path: ['input', 'fontSize'] }], assetIds: [], packageIds: [] }
+    const key = failureReasonKey(failure, first)
+    const unrelated = candidate({ fontSize: -1, label: 'rewritten' })
+    unrelated.steps[0]!.destination = structuredClone(destination)
+    if (unrelated.steps[0]!.destination.kind === 'update') unrelated.steps[0]!.destination.target.documentRevision++
+    expect(failureReasonKey(failure, unrelated)).toBe(key)
+    expect(failureReasonKey(failure, candidate({ fontSize: 20, label: 'first' }))).not.toBe(key)
+    expect(failureReasonKey({ ...failure, diagnostics: [{ ...failure.diagnostics[0]!, code: 'tool-failed' }] }, first)).toBeNull()
+    expect(failureReasonKey(undefined, first)).toBeNull()
+  })
+
   it('ignores candidate presentation, step labels, and object key insertion order', () => {
     const first = candidate({ operation: 'patch', props: { fontSize: 48, text: 'Title' } })
     const second = candidate({ props: { text: 'Title', fontSize: 48 }, operation: 'patch' })

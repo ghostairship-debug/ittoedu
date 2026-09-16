@@ -19,10 +19,10 @@
 确认上述依赖的当前有效证据及写锁；以[开发总纲当前路线](../../../../COURSEWARE_DEVELOPMENT_PLAN.md#5-当前开发路线)、[任务板](../../TASK_BOARD.md)、[工作协议](../../WORKING_PROTOCOL.md)和[架构合同](../../ARCHITECTURE_CONTRACT.md)为上位约束。共用决定只读[AI开发方案](../../AI_ASSISTANT_DELIVERY_PLAN.md)及[实施合同](IMPLEMENTATION_CONTRACT.md)相关条目，已读且未变的内容不重复全读。
 
 - [src/shared/flowViewportGeometry.ts](../../../../src/shared/flowViewportGeometry.ts)
-- [src/shared/teacherControllerLayout.ts](../../../../src/shared/teacherControllerLayout.ts)
+- `src/shared/teacherControllerLayout.ts`（1.8 历史实现；1.9 当前组件几何见 [teacherControllerComponentGeometry.ts](../../../../src/player/teacherControllerComponentGeometry.ts)）
 - [src/renderer/ui/FlowWorkspace.tsx](../../../../src/renderer/ui/FlowWorkspace.tsx)
 - [src/renderer/ui/TeacherControllerAuthoringChrome.tsx](../../../../src/renderer/ui/TeacherControllerAuthoringChrome.tsx)
-- [src/player/teacherControllerDom.ts](../../../../src/player/teacherControllerDom.ts)
+- `src/player/teacherControllerDom.ts`（1.8 历史实现；1.9 当前组件宿主见 [teacherControllerComponentHost.ts](../../../../src/player/teacherControllerComponentHost.ts)）
 - [src/player/teacherControllerRuntimeSession.ts](../../../../src/player/teacherControllerRuntimeSession.ts)
 - [tests/e2e/r18-089-flow-viewport.spec.ts](../../../../tests/e2e/r18-089-flow-viewport.spec.ts)
 - [docs/development-plan/THREE_SURFACE_ARCHITECTURE_INTEGRATION_PLAN.md](../../THREE_SURFACE_ARCHITECTURE_INTEGRATION_PLAN.md)

@@ -1,7 +1,7 @@
 import type { TeacherControllerAction } from '../../shared/teacherControllerConfig'
 
 import type { PublishedCourseV2Payload } from '../../shared/publishedCourseTypes'
-import type { CourseLocation } from '../../shared/courseProjectTypes'
+import type { CourseLocation, CourseProjectDocument } from '../../shared/courseProjectTypes'
 
 export function playbackSceneKey(location: CourseLocation): string {
   return location.kind === 'slide-scene'
@@ -51,7 +51,7 @@ export type PlaybackDirection = 'next' | 'previous'
 export type PlaybackNavigationLevel = 'step' | 'scene'
 
 export function buildCoursePlaybackSequence(
-  payload: Pick<PublishedCourseV2Payload, 'locations' | 'surfaces'>,
+  payload: Pick<PublishedCourseV2Payload, 'locations' | 'surfaces'> | Pick<CourseProjectDocument, 'locations' | 'surfaces'>,
 ): readonly CoursePlaybackScene[] {
   const scenes: Array<Omit<CoursePlaybackScene, 'steps'> & { steps: CoursePlaybackStep[] }> = []
   let previousKey: string | undefined

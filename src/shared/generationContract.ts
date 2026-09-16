@@ -12,7 +12,10 @@ export const generationInputReferenceSchema = z.object({ $result: z.object({
 const assetResultReferenceSchema = z.object({ $result: generationInputReferenceSchema.shape.$result.extend({ kind: z.literal('asset-id') }) }).strict()
 export const MAX_GENERATION_PROMPT_BYTES = 160_000
 export const MAX_GENERATION_RESOURCE_BYTES = 12 * 1024 * 1024
-export const MAX_GENERATION_TASK_DURATION_MS = 20 * 60 * 1000
+export const DEFAULT_GENERATION_TASK_DURATION_MS = 20 * 60 * 1000
+export const MAX_GENERATION_TASK_DURATION_MS = 120 * 60 * 1000
+export const GENERATION_TASK_BUDGET_MINUTES = [20, 40, 60, 120] as const
+export const GENERATION_NATIVE_INACTIVITY_MS = 20 * 60 * 1000
 export const generationResourceFileSchema = z.object({
   path: z.string().min(1).max(1000).refine(value => !value.includes('\\') && !value.includes(':') && !value.includes('\0')
     && !value.startsWith('/') && !value.split('/').some(part => !part || part === '.' || part === '..'), '需要资源根内相对路径'),
@@ -87,7 +90,7 @@ export const generationRequestSchema = z.object({
   confirmedDocuments: z.object({ teachingPlan: z.string().min(1), presentationScript: z.string().min(1) }).strict().optional(),
   allowedCarriers: z.array(generationCarrierSchema).min(1),
 }).strict().superRefine((request, ctx) => {
-  if (request.execution && (request.execution.deadlineAt <= request.execution.startedAt || request.execution.deadlineAt > request.execution.startedAt + MAX_GENERATION_TASK_DURATION_MS)) ctx.addIssue({ code: 'custom', message: '任务执行期限必须在起点后的20分钟内', path: ['execution'] })
+  if (request.execution && (request.execution.deadlineAt <= request.execution.startedAt || request.execution.deadlineAt > request.execution.startedAt + MAX_GENERATION_TASK_DURATION_MS)) ctx.addIssue({ code: 'custom', message: '任务执行期限必须在起点后的120分钟内', path: ['execution'] })
   const resources = request.resourceFiles ?? []
   if (request.observation && (request.observation.documentRevision !== request.documentRevision || request.observation.sessionGeneration !== request.sessionGeneration)) ctx.addIssue({ code: 'custom', message: '当前画面观察与工程结构版本不一致', path: ['observation'] })
   if (request.applyPolicy === 'auto' && !request.observation) ctx.addIssue({ code: 'custom', message: '自动编辑需要当前真实画面观察', path: ['applyPolicy'] })
@@ -246,10 +249,14 @@ export type GenerationFailure = z.infer<typeof generationFailureSchema>
 export function generationRecovery(diagnostics: GenerationFailure['diagnostics']): GenerationFailure['recovery'] {
   const codes = new Set(diagnostics.map(diagnostic => diagnostic.code))
   if (codes.has('artifact-baseline-conflict') || codes.has('revision-conflict')) return { action: 'refresh-baseline', message: '保持用户变化；读取当前基线并重建完整结果或快捷组合，不改版本号覆盖已有变化。' }
-  if (codes.has('shortcut-not-supported')) return { action: 'use-open-path', message: '此快捷入口未覆盖当前目标；可组合正式基础命令或由原生 CLI 提交 project.document，保留要求的可编辑结构。' }
-  if (codes.has('missing-required-resource')) return { action: 'supply-resource', message: '复用已交付素材或补齐真实资源与前序引用，不重复生成有效素材。' }
+  if (codes.has('shortcut-not-supported') || codes.has('unknown-tool')) return { action: 'use-open-path', message: '此入口不在当前能力目录或未覆盖当前目标；查询能力目录改用已存在工具，或组合正式基础命令、由原生 CLI 提交 project.document，保留要求的可编辑结构；不要原样重试同一未知工具。' }
+  if (codes.has('missing-required-resource') || codes.has('candidate-media-file')) return { action: 'supply-resource', message: '补齐候选引用的真实媒体文件或前序资源引用，或复用已交付素材；不重复生成已有效素材。' }
+  if (codes.has('missing-candidate-delivery')) return { action: 'repair-candidate', message: '本轮编辑没有实际候选交付：修正后重新运行交付工具（去掉 --check）把候选写入当前请求根的 candidate.json，或在最终正文给出完整 courseware-candidate-v1 候选；预检和自然语言说明都不算交付。' }
+  if (codes.has('dynamic-host-failed') || codes.has('dynamic-host-destroy-failed')) return { action: 'repair-candidate', message: '生成的组件/Runtime 在真实宿主准入中失败：按诊断中的实例与字段修正实现后重交同一任务候选；这是实现缺陷而非运输故障，不原样重试，也不退化为截图或静态替代。' }
   if (codes.has('result-mismatch')) return { action: 'verify-result', message: '依据所列具体结果缺项修正；本次候选未提交，不将摘要当作完成证明。' }
-  if (['invalid-input', 'operation-target-mismatch', 'operation-parent-mismatch', 'unknown-request-target', 'invalid-result-reference', 'missing-step-result'].some(code => codes.has(code))) return { action: 'repair-candidate', message: '按准确 step/path 修正输入或目标后重交同一任务候选，保留有效资源；无需默认重写完整工程。' }
+  if (['invalid-input', 'operation-target-mismatch', 'operation-parent-mismatch', 'unknown-request-target', 'invalid-result-reference', 'missing-step-result', 'invalid-target',
+    'compose-node-ambiguous', 'compose-node-not-found', 'compose-state-ambiguous', 'compose-state-not-found', 'compose-motion-target-unmounted',
+    'native-interaction-result-mismatch', 'native-interaction-check-unavailable'].some(code => codes.has(code))) return { action: 'repair-candidate', message: '按准确 step/path 修正输入或目标后重交同一任务候选，保留有效资源；无需默认重写完整工程，也不自动更换对象或载体。' }
   return undefined
 }
 

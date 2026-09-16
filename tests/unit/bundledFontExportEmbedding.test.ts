@@ -1,3 +1,4 @@
+import { controllerPackages } from '../fixtures/teacherController'
 import { readFileSync, readdirSync } from 'node:fs'
 import { join, relative, resolve } from 'node:path'
 import { strFromU8 } from 'fflate'
@@ -50,7 +51,7 @@ const repoRoot = resolve(__dirname, '..', '..')
 it('embeds the implicit Flow text font without needing authored fontFamily fields', () => {
   const project = createBlankFlowCourseProject()
   expect(collectBundledFontFamiliesInUse(project)).toContain(BUNDLED_TEXT_FONT_FAMILY)
-  const html = buildPublishedCourseStandaloneHtml({ project, assetFiles: {}, components: {} }, { playerBundle: PLAYER_BUNDLE })
+  const html = buildPublishedCourseStandaloneHtml({ project, assetFiles: {}, components: controllerPackages }, { playerBundle: PLAYER_BUNDLE })
   expect(/font-family\s*:\s*["']Noto Sans SC["']/.test(html)).toBe(true)
   expect(html.includes('data:font/woff2;base64,')).toBe(true)
 })
@@ -158,7 +159,7 @@ function courseProject(options: {
 }
 
 function courseSources(project: CourseProjectDocument): CoursePublishSources {
-  return { project, assetFiles: {}, components: {} }
+  return { project, assetFiles: {}, components: controllerPackages }
 }
 
 function faceBlocks(css: string): string[] {
@@ -254,7 +255,7 @@ describe('bundled font declaration scanning', () => {
     const published = buildPublishedCourseTryRunPayload({
       project,
       assetFiles: fixture.data.assetFiles,
-      components: {},
+      components: controllerPackages,
     })
     expect(collectBundledFontFamiliesInUse(input)).toEqual([BUNDLED_TEXT_FONT_FAMILY])
     expect(collectBundledFontFamiliesInUse(published)).toEqual([

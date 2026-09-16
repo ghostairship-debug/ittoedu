@@ -1,3 +1,4 @@
+import { controllerPackage } from '../fixtures/teacherController'
 import { buildCoursewareCase } from '../../scripts/build-courseware-case'
 import { createCoursewareBuilderV2 } from '../../src/renderer/course/coursewareBuilderV2'
 import { createCoursewareCaseBuilderApi } from '../../src/renderer/course/coursewareCaseBuilderApi'
@@ -164,9 +165,12 @@ export default function buildCoursewareCase(context) {
       importBuilder: async () => ({
         default: (context: {
           apiVersion: number
+          encodeBase64(value: string | Uint8Array): string
           documents: { teachingPlan: { content: string } }
           api: { project: { createBlankCourseProject: (input: unknown) => unknown } }
         }) => {
+          expect(context.encodeBase64('电路✓')).toBe('55S16Lev4pyT')
+          expect(context.encodeBase64(new Uint8Array([0,255,128]))).toBe('AP+A')
           if (context.apiVersion !== 1) throw new Error('unexpected builder API version')
           if (!context.documents.teachingPlan.content.includes('教学策划')) {
             throw new Error('missing plan')
@@ -179,7 +183,7 @@ export default function buildCoursewareCase(context) {
               controls: 'canvas',
             }),
             assetFiles: {},
-            componentFiles: {},
+            componentFiles: { [`${controllerPackage.manifest.id}@${controllerPackage.manifest.version}`]: controllerPackage.files },
           }
         },
       }),

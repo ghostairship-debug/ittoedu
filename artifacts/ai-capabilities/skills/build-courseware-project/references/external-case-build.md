@@ -53,7 +53,7 @@ export default async function build({ api }) {
 - `api.componentCatalog()`：本轮受管目录实际可用的包和 sourceId，未知受信来源不能冒充内置；
 - `api.createCourseProject({ surfaceType, title })`：创建产品管理的浏览器构建会话，`surfaceType` 按脚本选 `slide` / `flow` / `spatial-2d`。
 
-会话的 `tools` 保留工具名列表；常用 `observe({itemIds?,includeContent?,includeLocations?,offset?,limit?})` 只取当前 scope 和最多 20 个目标（limit 可至 100），返回 total / nextOffset，按需展开具体内容；Runtime 源码不随窄观察返回。`activateScope()` 切换位置、owner、状态并返回窄观察；`createScope()` 获取插入地址；`execute()` 返回本次正式 receipt，`readReceipts({after,limit})` 用 cursor 分段取历史。会话的 discover/readCapability 与 api 同源，会话方法及 finish 均须 await。一次成功修改后重新取需要使用的 target/scope，不复用旧 revision；失败先读 diagnostics，不能跳过失败继续组装交付物。
+会话的 `tools` 保留工具名列表；常用 `observe({itemIds?,includeContent?,includeLocations?,offset?,limit?})` 只取当前 scope 和最多 20 个目标（limit 可至 100），返回 total / nextOffset，按需展开具体内容；Runtime 源码不随窄观察返回。 每次返回 surfaceGeometry（Slide canvas / Flow layout / Spatial bounds 与 camera）；includeContent 同时返回 contentMode:"raw" 的 items，以及仅本页当前 owner、同一分页对象的 effectiveLayout 和 componentDefinitions。effectiveLayout 使用当前命名状态后的外框/旋转/透明度/可见性/层序，保留原始 items 供编辑；Flow 正文按语义排版，无虚构固定外框。组件定义只含正式默认/最小尺寸与公开属性描述，不携带包源码或全部资源。其他 owner 的遮挡需切换 owner 分别观察，不能把当前 owner 列表当作整页合成。`activateScope()` 切换位置、owner、状态并返回窄观察；`createScope()` 获取插入地址；`execute()` 返回本次正式 receipt，`readReceipts({after,limit})` 用 cursor 分段取历史。会话的 discover/readCapability 与 api 同源，会话方法及 finish 均须 await。一次成功修改后重新取需要使用的 target/scope，不复用旧 revision；失败先读 diagnostics，不能跳过失败继续组装交付物。
 
 旧 `snapshot()` / `activate()` 的完整快照返回保留兼容，只有确实需要全工程或完整 Runtime 源码时才调用。`snapshot().project` 用于读取；不得直接修改它作为写入。最终原样返回 `await session.finish()` 的结果，不拼装、克隆或篡改输出对象。完整公开 API 示例见 `<editor-root>/tests/fixtures/builder-v2-case/build.mjs`，类型入口为 `<editor-root>/scripts/courseware-builder-v2-host.ts`。
 

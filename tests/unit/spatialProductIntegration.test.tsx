@@ -894,7 +894,7 @@ describe('Spatial product shell wiring', () => {
     }
   })
 
-  it('constrains an out-of-bounds global teacher controller Properties write once', () => {
+  it('writes a global component teacher controller frame through Properties once', () => {
     useEditorStore.getState().createNewSpatialProject()
     const initial = useEditorStore.getState().spatialSession!
     const document = structuredClone(initial.history.present)
@@ -940,7 +940,12 @@ describe('Spatial product shell wiring', () => {
         rotation: 37,
       },
     })
-    expect(expectedFrame.x).not.toBe(proposedFrame.x)
+    // Component controllers use the same canonical geometry as other global components.
+    expect(after.history.present.globalLayerItems.find(entry => entry.item.layerItemId === controller.layerItemId)?.plane).toBe('overlay')
+    act(() => useEditorStore.getState().undo())
+    expect(useEditorStore.getState().spatialSession!.history.present).toEqual(before.history.present)
+    act(() => useEditorStore.getState().redo())
+    expect(useEditorStore.getState().spatialSession!.history.present).toEqual(after.history.present)
   })
 
   it('hides unsupported Spatial type controls and disables non-atomic multi actions', () => {

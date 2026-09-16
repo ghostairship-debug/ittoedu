@@ -78,25 +78,25 @@ function courseShell(): Omit<CourseProjectDocument, 'locations' | 'startLocation
 
 function flowBlocksFixture(): FlowBlock[] {
   return [
-    { id: 'block-h1', type: 'heading', level: 1, text: '第一章 开始' },
-    { id: 'block-paragraph', type: 'paragraph', text: '正文段落' },
+    { id: 'block-h1', type: 'heading', level: 1, content: { inlines: [{ type: 'text', text: '第一章 开始' }] }},
+    { id: 'block-paragraph', type: 'paragraph', content: { inlines: [{ type: 'text', text: '正文段落' }] }},
     {
       id: 'block-list',
       type: 'list',
       ordered: true,
       items: [
-        { id: 'list-item-1', text: '项目一' },
-        { id: 'list-item-2', text: '项目二' },
+        { id: 'list-item-1', content: { inlines: [{ type: 'text', text: '项目一' }] }},
+        { id: 'list-item-2', content: { inlines: [{ type: 'text', text: '项目二' }] }},
       ],
     },
-    { id: 'block-quote', type: 'quote', text: '引用文字', citation: '出处' },
+    { id: 'block-quote', type: 'quote', content: { inlines: [{ type: 'text', text: '引用文字' }] }, citation: { inlines: [{ type: 'text', text: '出处' }] }},
     {
       id: 'block-media',
       type: 'media',
       assetId: 'asset-image',
       mediaKind: 'image',
       altText: '示意图',
-      caption: '封面图',
+      caption: { inlines: [{ type: 'text', text: '封面图' }] },
       layout: 'content-width',
     },
     {
@@ -104,23 +104,16 @@ function flowBlocksFixture(): FlowBlock[] {
       type: 'formula',
       formulaId: 'formula-1',
       accessibleText: 'a + b',
-      ast: {
-        type: 'row',
-        children: [
-          { type: 'token', value: 'a' },
-          { type: 'operator', value: '+' },
-          { type: 'token', value: 'b' },
-        ],
-      },
+      latex: "a+b",
     },
     {
       id: 'block-section',
       type: 'section',
-      title: '章节 A',
+      title: { inlines: [{ type: 'text', text: '章节 A' }] },
       collapsedByDefault: true,
       blocks: [
-        { id: 'block-h2', type: 'heading', level: 2, text: '小节 1' },
-        { id: 'block-section-p', type: 'paragraph', text: '节内正文' },
+        { id: 'block-h2', type: 'heading', level: 2, content: { inlines: [{ type: 'text', text: '小节 1' }] }},
+        { id: 'block-section-p', type: 'paragraph', content: { inlines: [{ type: 'text', text: '节内正文' }] }},
       ],
     },
   ]

@@ -2,6 +2,7 @@
   "candidateCarrier": {
     "default": "native"
   },
+  "description": "Spatial world 结构。镜头操作只能写当前 Spatial world。fit-world-content 不接收模型计算的坐标：以已发布的 1280×720 设计视口和既有 padding 适配当前可见 world 内容，在一个事务中更新 camera.home 与 destination.target.locationId 对应的入口镜头帧；global HUD、教师控制器和其他 viewport 层不参与范围。它不改其他课程入口帧；无可见 world 内容时 unchanged。",
   "examples": [
     {
       "bindings": "values 的 pose 来自当前观察、已读资源或用户要求，值须满足本卡 inputSchema；destination 原样复制当前目标。",
@@ -22,6 +23,11 @@
       "bindings": "values 的 pose 来自当前观察、已读资源或用户要求，值须满足本卡 inputSchema；destination 原样复制当前目标。",
       "code": "const input={\"operation\":\"set-home\",\"pose\":values[\"pose\"]}; const receipt=await session.execute(\"spatial.structure\",input,destination);",
       "operation": "set-home"
+    },
+    {
+      "bindings": "values 的  来自当前观察、已读资源或用户要求，值须满足本卡 inputSchema；destination 原样复制当前目标。",
+      "code": "const input={\"operation\":\"fit-world-content\"}; const receipt=await session.execute(\"spatial.structure\",input,destination);",
+      "operation": "fit-world-content"
     },
     {
       "bindings": "values 的 path 来自当前观察、已读资源或用户要求，值须满足本卡 inputSchema；destination 原样复制当前目标。",
@@ -218,6 +224,19 @@
         "additionalProperties": false,
         "properties": {
           "operation": {
+            "const": "fit-world-content",
+            "type": "string"
+          }
+        },
+        "required": [
+          "operation"
+        ],
+        "type": "object"
+      },
+      {
+        "additionalProperties": false,
+        "properties": {
+          "operation": {
             "const": "add-path",
             "type": "string"
           },
@@ -401,6 +420,12 @@
     },
     {
       "operation": "set-home",
+      "scopes": [
+        "spatial-2d:world"
+      ]
+    },
+    {
+      "operation": "fit-world-content",
       "scopes": [
         "spatial-2d:world"
       ]

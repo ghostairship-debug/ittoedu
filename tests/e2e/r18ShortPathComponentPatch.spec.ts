@@ -62,7 +62,7 @@ async function writeFixture(path: string) {
   const spatial = project.surfaces.find(surface => surface.type === 'spatial-2d')!
   if (slide.type !== 'slide' || flow.type !== 'flow' || spatial.type !== 'spatial-2d') throw new Error('Incomplete three-surface fixture')
   slide.scenes[0]!.layerItems.push(layer(ids.slide, 100, 200))
-  flow.blocks.push({ id: 'patch-section', type: 'section', title: 'Nested component', collapsedByDefault: false,
+  flow.blocks.push({ id: 'patch-section', type: 'section', title: { inlines: [{ type: 'text', text: 'Nested component' }] }, collapsedByDefault: false,
     blocks: [{ id: ids.flow, type: 'component', component: { packageId, version: '1.0.0' },
       props: { label: ids.flow, preserve: { value: ids.flow } }, staticFallbackAssetId: 'fallback', wrap: 'none' }] })
   spatial.world.layerItems.push(layer(ids.spatial, -160, -75))

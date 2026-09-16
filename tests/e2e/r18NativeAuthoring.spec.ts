@@ -1,3 +1,4 @@
+import { requireProjectWorkspace } from './r18NativeAuthoringFixture'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { join, resolve } from 'node:path'
@@ -236,7 +237,7 @@ for (let offset = 0; offset < runCount; offset++) {
         confirmNativeConfiguration(record)
         if (resume?.recoveredT05) {
           expect(record.externalSessionId).not.toBe(resume.recoveredT05.previousExternalSessionId)
-          expect(record.workspace.normalizedPath).toBe(projectPath.replace(/\\/g, '/').toLowerCase())
+          expect(requireProjectWorkspace(record.workspace).normalizedPath).toBe(projectPath.replace(/\\/g, '/').toLowerCase())
           firstNativeId = record.externalSessionId
           const continuation = manifest.continuation as Record<string, unknown>
           continuation.currentExternalSessionId = firstNativeId

@@ -1,6 +1,8 @@
+import { createArchiveFixture as createCourseProjectArchive } from '../fixtures/teacherController'
+import { captureGenerationFixture as captureGenerationSnapshot } from '../fixtures/generationSnapshot'
 import { readFileSync } from 'node:fs'
 import { describe, expect, it, vi } from 'vitest'
-import { captureGenerationSnapshot, resolveGenerationReferenceScope, type GenerationReferenceScope } from '@/renderer/authoring/generation/generationSnapshot'
+import { resolveGenerationReferenceScope, type GenerationReferenceScope } from '@/renderer/authoring/generation/generationSnapshot'
 import { resolveBackgroundTarget, backgroundSupportedScopes } from '@/renderer/authoring/tools/backgroundTool'
 import { describeAuthoringToolDiscovery } from '@/renderer/authoring/tools/authoringToolFacade'
 import { createGenerationCandidateCoordinator } from '@/renderer/authoring/generation/prepareGenerationCandidate'
@@ -8,7 +10,7 @@ import { projectEffectiveLayers } from '@/renderer/course/effectiveLayerProjecti
 import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
 import { createBlankFlowCourseProject } from '@/renderer/project/createFlowCourseProject'
 import { createBlankSpatialCourseProject } from '@/renderer/project/createSpatialCourseProject'
-import { createCourseProjectArchive, openCourseProjectArchive } from '@/renderer/project/courseProjectArchive'
+import { openCourseProjectArchive } from '@/renderer/project/courseProjectArchive'
 import { applyEditorTransactionStep, type EditorTransactionStep } from '@/renderer/authoring/editorTransaction'
 import type { CourseProjectDocument } from '@/shared/courseProjectTypes'
 import type { GenerationCandidate, GenerationRequest } from '@/shared/generationContract'
@@ -179,7 +181,7 @@ describe('D10 / I05 formal background entry from captured destinations', () => {
   it('allows page backgrounds from selected focus while rejecting forged owner identities', async () => {
     const document = createBlankFlowCourseProject(), surface = document.surfaces[0]!
     if (surface.type !== 'flow') throw new Error('Flow')
-    surface.blocks.push({ id: 'text', type: 'paragraph', text: '选中段落' })
+    surface.blocks.push({ id: 'text', type: 'paragraph', content: { inlines: [{ type: 'text', text: '选中段落' }] } })
     const projection = projectEffectiveLayers({ project: document, locationId: document.startLocationId })
     const request = captureGenerationSnapshot({ document, workspace: { version: 1, projectId: document.id, normalizedPath: '/background.h5lesson' }, projection,
       sessionToken: { locationId: document.startLocationId, surfaceType: 'flow', revision: document.revision, generation: 7 },

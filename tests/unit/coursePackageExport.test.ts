@@ -646,13 +646,13 @@ describe('course package export', () => {
     const fixture = listCourseProjectV9Fixtures().find(({ id }) => id === 'component')
     if (!fixture) throw new Error('component fixture is missing')
     const project = structuredClone(fixture.data.project)
-    const [componentKey, componentFiles] = Object.entries(fixture.data.componentFiles)[0] ?? []
-    if (!componentKey || !componentFiles) throw new Error('component fixture package is missing')
-    const separator = componentKey.lastIndexOf('@')
-    const component = parseComponentPackageFiles(componentFiles, {
-      expectedId: componentKey.slice(0, separator),
-      expectedVersion: componentKey.slice(separator + 1),
-    })
+    const components = Object.fromEntries(Object.values(fixture.data.componentFiles).map(files => {
+      const component = parseComponentPackageFiles(files)
+      return [component.manifest.id, component]
+    }))
+    const sceneComponent = project.surfaces.flatMap(surface => surface.type === 'slide' ? surface.scenes.flatMap(scene => scene.layerItems) : []).find(item => item.kind === 'component')
+    if (!sceneComponent || sceneComponent.kind !== 'component') throw new Error('component fixture scene instance is missing')
+    const component = components[sceneComponent.component.packageId]!
     component.runtimeSource = `fetch('https://component-api.example.com/data')`
 
     const referenced = collectCoursePackageExportPreflight(
@@ -660,7 +660,7 @@ describe('course package export', () => {
       'standalone-html',
       {
         assetFiles: fixture.data.assetFiles,
-        components: { [component.manifest.id]: component },
+        components,
       },
       PLAYER_BUNDLE,
       new Date('2026-08-17T00:00:00.000Z'),
@@ -682,7 +682,7 @@ describe('course package export', () => {
       'standalone-html',
       {
         assetFiles: fixture.data.assetFiles,
-        components: { [component.manifest.id]: component },
+        components,
       },
       PLAYER_BUNDLE,
       new Date('2026-08-17T00:00:00.000Z'),

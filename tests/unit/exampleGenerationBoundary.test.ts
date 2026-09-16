@@ -1,3 +1,4 @@
+import { createDefaultTeacherControllerPackage } from '../../src/shared/defaultTeacherControllerComponent'
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
@@ -31,6 +32,8 @@ import {
   parseRenderHostBenchmarkGenerationMode,
 } from '../../scripts/build-render-host-benchmark'
 import { importComponentPackage } from '../../src/renderer/components/importComponentPackage'
+
+const controllerPackage = createDefaultTeacherControllerPackage()
 
 const projectRoot = path.resolve(__dirname, '..', '..')
 const examplesDirectory = path.join(projectRoot, 'examples')
@@ -177,8 +180,9 @@ describe('example generation boundary', () => {
     expect(reopened.project.globalLayerItems).toEqual([
       expect.objectContaining({
         item: expect.objectContaining({
-          kind: 'native',
-          content: expect.objectContaining({ nativeType: 'teacher-controller' }),
+          kind: 'component',
+          role: 'teacher-controller',
+          component: { packageId: controllerPackage.manifest.id, version: controllerPackage.manifest.version },
         }),
         visibility: { mode: 'all', locationIds: [] },
       }),
@@ -316,6 +320,7 @@ describe('example generation boundary', () => {
       createdAt: '2026-07-20T00:00:00.000Z',
       updatedAt: '2026-07-20T00:00:00.000Z',
       componentPackages: {
+        [controllerPackage.manifest.id]: { contentSha256: controllerPackage.contentSha256, importedAt: null },
         'com.example.sample-counter': {
           contentSha256: expect.stringMatching(/^[0-9a-f]{64}$/),
           importedAt: null,

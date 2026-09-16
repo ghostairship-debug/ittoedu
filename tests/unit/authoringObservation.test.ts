@@ -5,6 +5,7 @@ import {
   createAuthoringObservationController,
   registerAuthoringObservationHost,
   registerAuthoringObservationDraft,
+  type AuthoringInteractionDiagnosticRecord,
   type AuthoringObservationPorts,
   type AuthoringObservationState,
 } from '@/renderer/authoring/generation/authoringObservation'
@@ -21,7 +22,7 @@ function harness(options: Pick<AuthoringObservationPorts, 'prepareImageResources
   const project = createBlankFlowCourseProject()
   const surface = project.surfaces[0]!
   if (surface.type !== 'flow') throw new Error('Flow fixture required')
-  surface.blocks.push({ id: 'observation-paragraph', type: 'paragraph', text: '已提交的正文' })
+  surface.blocks.push({ id: 'observation-paragraph', type: 'paragraph', content: { inlines: [{ type: 'text', text: '已提交的正文' }] } })
   let state: AuthoringObservationState = { document: project, sessionGeneration: 3, surfaceId: surface.id,
     locationId: project.startLocationId, stateId: null, selectedIds: ['observation-paragraph'], draft: null, assetFiles: {} }
   const root = document.createElement('main')
@@ -54,6 +55,8 @@ describe('current authoring observation', () => {
     scroll.scrollTop = 100
     const captured = await h.controller.capture({ intent: 'edit' })
     const file = captured.resourceFiles.find(file => file.path === 'observation/current-structure.json')!
+    expect(JSON.parse(file.content).navigation).toMatchObject({ evidence: 'declared-navigation-targets',
+      current: { nextStep: null, nextScene: null }, states: [], rules: [] })
     expect(JSON.parse(file.content)).toMatchObject({ layout: { widthMode: 'fluid' }, flowView: {
       paperWidth: 650, bodyWidth: 578, paperScroll: { x: 0, y: 100 }, paperClientOrigin: { x: 16, y: -76 }, observationScale: 1,
     } })
@@ -200,7 +203,7 @@ describe('current authoring observation', () => {
     const projected = structuredClone(canonical)
     const surface = projected.surfaces[0]!
     if (surface.type !== 'flow') throw new Error('Flow fixture required')
-    surface.blocks.push({ id: 'current-draft', type: 'paragraph', text: draft.text })
+    surface.blocks.push({ id: 'current-draft', type: 'paragraph', content: { inlines: [{ type: 'text', text: draft.text }] } })
     projected.revision += 1 // Some recovery Owners materialize a transient revision.
     h.materialize.mockReturnValue({ ok: true, snapshot: { project: projected } })
     const result = await h.controller.capture({ intent: 'discuss' })
@@ -389,5 +392,86 @@ describe('current authoring observation', () => {
     expect(authoringObservationInputSchema.safeParse({ ...observation, taskId: crypto.randomUUID() }).success).toBe(false)
     expect(authoringObservationInputSchema.safeParse({ ...observation, files: [] }).success).toBe(false)
     expect(authoringObservationInputSchema.safeParse({ ...observation, files: [{ ...observation.files[0], relativePath: '../old.png' }] }).success).toBe(false)
+  })
+})
+
+describe('interaction diagnostics evidence', () => {
+  function diagnosticsHarness(droppedCount = () => 0) {
+    const h = harness()
+    const records: AuthoringInteractionDiagnosticRecord[] = []
+    disposers.push(registerAuthoringObservationHost({ root: h.root, source: 'trial', read: () => ({
+      projectId: h.state.document.id, documentRevision: h.state.document.revision, surfaceId: h.state.surfaceId,
+      locationId: h.state.locationId, stateId: null, ready: true, stateVersion: 1, publicState: {},
+    }), readInteractionDiagnostics: () => ({ records, droppedCount: droppedCount() }) }))
+    const file = (result: Awaited<ReturnType<typeof h.controller.capture>>) =>
+      result.resourceFiles.find(entry => entry.path === 'observation/interaction-diagnostics.json')!
+    return { h, records, file }
+  }
+
+  it('retains diagnostics when capture fails its attachment budget and consumes them only on success', async () => {
+    const { h, records, file } = diagnosticsHarness()
+    records.push({ receivedAt: Date.now(), diagnostic: { surfaceId: h.state.surfaceId, phase: 'execute',
+      severity: 'warning', message: '已跳过规则', code: 'unsupported-trigger', ruleId: 'keep-me' } })
+    h.captureImage.mockResolvedValueOnce({ dataUrl: 'data:image/png;base64,' + 'A'.repeat(MAX_GENERATION_RESOURCE_BYTES + 4),
+      capturedAt: Date.now(), width: 700, height: 500 })
+    await expect(h.controller.capture({ intent: 'discuss' })).rejects.toThrow('12 MiB')
+    const retry = await h.controller.capture({ intent: 'discuss' })
+    expect(JSON.parse(file(retry).content).diagnostics.map((entry: { ruleId: string }) => entry.ruleId)).toEqual(['keep-me'])
+    expect(JSON.parse(file(await h.controller.capture({ intent: 'discuss' })).content).diagnostics).toEqual([])
+  })
+
+  it('marks evictions before the first capture and after an acknowledged capture without duplicating retained entries', async () => {
+    let dropped = 10
+    const { h, records, file } = diagnosticsHarness(() => dropped)
+    const record = (i: number): AuthoringInteractionDiagnosticRecord => ({ receivedAt: Date.now(), diagnostic: {
+      surfaceId: h.state.surfaceId, phase: 'execute', severity: 'warning', message: '跳过', code: 'unsupported-trigger', ruleId: `r${i}` } })
+    records.push(...Array.from({ length: 50 }, (_, i) => record(i + 10)))
+    const first = JSON.parse(file(await h.controller.capture({ intent: 'discuss' })).content)
+    expect(first).toMatchObject({ truncated: true }); expect(first.diagnostics).toHaveLength(50)
+    records.splice(0, 50, ...Array.from({ length: 50 }, (_, i) => record(i + 70))); dropped = 70
+    const next = JSON.parse(file(await h.controller.capture({ intent: 'discuss' })).content)
+    expect(next).toMatchObject({ truncated: true }); expect(next.diagnostics[0].ruleId).toBe('r70')
+    expect(JSON.parse(file(await h.controller.capture({ intent: 'discuss' })).content))
+      .toMatchObject({ truncated: false, diagnostics: [] })
+  })
+
+  it('writes interaction-diagnostics.json with rule/node identity and consumes only new entries per capture', async () => {
+    const { h, records, file } = diagnosticsHarness()
+    records.push(
+      { receivedAt: Date.now() - 5, diagnostic: { surfaceId: h.state.surfaceId, phase: 'execute', severity: 'warning',
+        message: '已跳过规则', code: 'unsupported-trigger', ruleId: 'rule-a', nodeId: 'node-a', interactionType: 'node.activated' } },
+      { receivedAt: Date.now(), diagnostic: { surfaceId: h.state.surfaceId, phase: 'execute', severity: 'error',
+        message: '导航未执行', code: 'navigation-failed', ruleId: 'rule-b' } },
+    )
+    const first = await h.controller.capture({ intent: 'discuss' })
+    const parsed = JSON.parse(file(first).content)
+    expect(parsed).toMatchObject({ version: 1, kind: 'interaction-diagnostics', truncated: false })
+    expect(parsed.diagnostics).toHaveLength(2)
+    expect(parsed.diagnostics[0]).toMatchObject({ code: 'unsupported-trigger', ruleId: 'rule-a', nodeId: 'node-a',
+      phase: 'execute', severity: 'warning', message: '已跳过规则', interactionType: 'node.activated' })
+    expect(parsed.diagnostics[0].ageMs).toBeGreaterThanOrEqual(0)
+    expect(parsed.diagnostics[1]).toMatchObject({ code: 'navigation-failed', ruleId: 'rule-b' })
+    expect(parsed.diagnostics[1]).not.toHaveProperty('nodeId')
+    expect(first.observation.files.find(entry => entry.relativePath === 'observation/interaction-diagnostics.json'))
+      .toMatchObject({ fileId: 'interaction-diagnostics', role: 'runtime-evidence' })
+
+    const second = await h.controller.capture({ intent: 'discuss' })
+    expect(JSON.parse(file(second).content).diagnostics).toEqual([])
+
+    records.push({ receivedAt: Date.now(), diagnostic: { surfaceId: h.state.surfaceId, phase: 'execute',
+      severity: 'warning', message: '新增诊断', code: 'bind-failed', ruleId: 'rule-c', nodeId: 'node-c' } })
+    const third = await h.controller.capture({ intent: 'discuss' })
+    expect(JSON.parse(file(third).content).diagnostics.map((entry: { ruleId: string }) => entry.ruleId)).toEqual(['rule-c'])
+  })
+
+  it('writes an empty diagnostics array for a runtime host without a diagnostics read port', async () => {
+    const h = harness()
+    disposers.push(registerAuthoringObservationHost({ root: h.root, source: 'trial', read: () => ({
+      projectId: h.state.document.id, documentRevision: h.state.document.revision, surfaceId: h.state.surfaceId,
+      locationId: h.state.locationId, stateId: null, ready: true, stateVersion: 1, publicState: {},
+    }) }))
+    const captured = await h.controller.capture({ intent: 'discuss' })
+    const file = captured.resourceFiles.find(entry => entry.path === 'observation/interaction-diagnostics.json')!
+    expect(JSON.parse(file.content)).toMatchObject({ kind: 'interaction-diagnostics', truncated: false, diagnostics: [] })
   })
 })

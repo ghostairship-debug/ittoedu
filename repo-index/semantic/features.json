@@ -608,13 +608,13 @@
         "global": "CourseProjectDocument.globalLayerItems (ScopedLayerItem[])",
         "surface-shared": "CourseSurfaceDocument.surfaceLayerItems (ScopedLayerItem[])",
         "local-layer": "SlideSceneDocument.layerItems or SpatialSurfaceDocument.world.layerItems (not Flow paper)",
-        "teacher-controller": "One global NativeLayerItem(nativeType=teacher-controller)",
+        "teacher-controller": "One global ComponentLayerItem(role=teacher-controller)",
         "effective-order": "LayerItem.order across global/surface/local storage scopes"
       },
       "canonicalFiles": [
         "src/renderer/course/effectiveLayerCommands.ts",
         "src/renderer/course/effectiveLayerProjection.ts",
-        "src/renderer/authoring/v9TeacherControllerAuthoring.ts"
+        "src/renderer/components/teacherControllerComponent.ts"
       ],
       "entrypoints": [
         "src/renderer/course/effectiveLayerCommands.ts"

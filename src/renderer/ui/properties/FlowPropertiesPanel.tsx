@@ -236,11 +236,7 @@ function FlowMediaBlockProperties({
           onCommit={(altText) => patchMedia({ altText })}
         />
       ) : null}
-      <BufferedInput
-        label="题注"
-        value={block.caption ?? ''}
-        onCommit={(caption) => patchMedia({ caption })}
-      />
+      {!block.caption ? <button type="button" onClick={() => patchMedia({ caption: { inlines: [] } })}>添加题注</button> : <p className="property-hint">在正文中编辑题注。</p>}
       <SelectField<FlowMediaBlock['layout']>
         label="版式"
         value={block.layout}
@@ -337,49 +333,12 @@ function FlowMediaBlockProperties({
   )
 }
 
-function FlowFormulaBlockProperties({ context, block }: {
-  context: FlowPropertiesContext
-  block: Extract<FlowBlock, { type: 'formula' }>
-}) {
-  const formulaEdit = context.textEdit?.kind === 'formula'
-    && context.textEdit.blockId === block.id
-    ? context.textEdit.draft as FlowFormulaDraft
-    : null
-  const node = {
-    id: block.id,
-    name: '公式',
-    type: 'formula' as const,
-    x: 0,
-    y: 0,
-    width: 420,
-    height: 160,
-    rotation: 0,
-    opacity: 1,
-    visible: true,
-    locked: false,
-    playbackInitialVisibility: 'inherit' as const,
-    formulaId: block.formulaId,
-    accessibleText: block.accessibleText,
-    ast: block.ast,
-    style: { fontSize: 24, color: FLOW_PAPER_TEXT_COLOR, align: 'left' as const },
-  }
-  return (
-    <section className="property-section" data-testid="flow-formula-properties">
-      <h3 className="property-title">公式</h3>
-      <FormulaAuthoringEditor
-        key={`flow-block-formula:${context.draftBindingKey}`}
-        node={node}
-        {...(formulaEdit ? { draftSource: formulaEdit.source } : {})}
-        onBeginEdit={() => context.commands.beginBlockFormulaEdit()}
-        onDraftChange={(draft) => context.commands.updateBlockFormulaDraft(draft)}
-        onCompositionChange={(composing) => context.commands.setBlockFormulaComposing(composing)}
-        onCancel={() => context.commands.cancelBlockFormulaEdit()}
-        onCommit={(ast, accessibleText) => {
-          context.commands.commitBlockFormula(ast, accessibleText)
-        }}
-      />
-    </section>
-  )
+function FlowFormulaBlockProperties({ block }: { context: FlowPropertiesContext; block: Extract<FlowBlock, { type: 'formula' }> }) {
+  return <section className="property-section" data-testid="flow-formula-properties">
+    <h3 className="property-title">公式</h3>
+    <p className="property-hint">在正文中选择公式，编辑 LaTeX 和朗读文字。</p>
+    <code>{block.latex}</code>
+  </section>
 }
 
 function FlowBlockProperties({ context }: { context: FlowPropertiesContext }) {
@@ -396,6 +355,7 @@ function FlowBlockProperties({ context }: { context: FlowPropertiesContext }) {
   const selectionFormat = deriveFlowSelectionFormat({
     block,
     edit: textEdit?.blockId === block.id ? textEdit : null,
+    range: context.selection.textRange?.blockId === block.id ? context.selection.textRange : null,
   })
   const formatDisabled = !selectionFormat.canApplyInlineStyle
   const formatScopeTitle = selectionFormat.mode === 'caret'
@@ -535,7 +495,7 @@ function FlowBlockProperties({ context }: { context: FlowPropertiesContext }) {
           />
         ) : null}
         {block.type === 'media' || block.type === 'formula' ? null : (
-          <p className="property-hint">改正文请在稿纸里双击就地编辑，不要在这里整段替换。</p>
+          <p className="property-hint">在正文中直接编辑文字、数学和段落。</p>
         )}
       </section>
       {block.type === 'media' ? (

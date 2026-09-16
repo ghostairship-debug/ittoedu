@@ -1,3 +1,4 @@
+import { workspaceIdentityV1Schema } from '../../src/shared/workspaceIdentity'
 import { describe, expect, it } from 'vitest'
 import { randomUUID } from 'node:crypto'
 import { promises as fs } from 'node:fs'
@@ -33,7 +34,7 @@ function fixture() {
     surfaceId: 'slide', locationId: 'page', stateId: null, source: 'generation-snapshot', readScope: task.readScope, files: [],
   })
   const record = (current: AiTask) => ({
-    version: 2, id: task.sessionId, adapter: 'codex', workspace: task.workspace,
+    version: 3, id: task.sessionId, adapter: 'codex', workspace: task.workspace,
     externalSessionId: null, workingDirectoryId: randomUUID(), tasks: [current], observations: [observation], hostResults: [], events: [],
   })
   return { task, observation, record }
@@ -78,7 +79,7 @@ describe('native input byte metrics', () => {
       version: 1, requestId: randomUUID(), workspace: task.workspace, documentRevision: 1, sessionGeneration: 0,
       purpose: 'local-edit', instruction: '检查标题', context: {}, allowedCarriers: ['native'],
       destinations: [{ kind: 'update', target: {
-        projectId: task.workspace.projectId, documentRevision: 1, revisionPolicy: { kind: 'exact' }, sessionGeneration: 0,
+        projectId: workspaceIdentityV1Schema.parse(task.workspace).projectId, documentRevision: 1, revisionPolicy: { kind: 'exact' }, sessionGeneration: 0,
         surfaceType: 'slide', surfaceId: 'slide', locationId: 'page', stateId: null, owner: 'scene', ownerKey: 'scene:page',
         itemId: 'title', authoringAddress: 'page/title',
       } }],

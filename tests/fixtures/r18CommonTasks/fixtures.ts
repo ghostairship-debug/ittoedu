@@ -173,13 +173,17 @@ function flowBlockFor(task: CommonTask, role: InputRole, index: number): FlowBlo
   if (item.kind === 'component') return { id, type: 'component', component: item.component, props: item.props, staticFallbackAssetId: 'r18-original', wrap: 'none' }
   if (item.kind !== 'native') throw new Error(`No Flow body carrier for ${role}`)
   switch (item.content.nativeType) {
-    case 'text': return role === 'title' ? { id, type: 'heading', level: 2, text: item.content.data.text, runs: item.content.data.runs }
-      : { id, type: 'paragraph', text: item.content.data.text, runs: item.content.data.runs, textAlign: 'left', lineSpacing: 1.6 }
-    case 'image': return { id, type: 'media', assetId: item.content.data.assetId, mediaKind: 'image', altText: role === 'image' ? 'A图' : 'B图', caption: '判别式与交点', layout: 'content-width', wrap: 'none' }
-    case 'formula': return { id, type: 'formula', ast: item.content.data.ast, accessibleText: item.content.data.accessibleText, formulaId: `${id}-formula` }
+    case 'text': {
+      const text = textFor(task, role)
+      const boundary = role === 'body' ? text.indexOf('Δ<0') : -1
+      const content = { inlines: boundary >= 0 ? [{ type: 'text' as const, text: text.slice(0, boundary) }, { type: 'text' as const, text: text.slice(boundary), style: { bold: true } }] : [{ type: 'text' as const, text }] }
+      return role === 'title' ? { id, type: 'heading', level: 2, content } : { id, type: 'paragraph', content, textAlign: 'left', lineSpacing: 1.6 }
+    }
+    case 'image': return { id, type: 'media', assetId: item.content.data.assetId, mediaKind: 'image', altText: role === 'image' ? 'A图' : 'B图', caption: { inlines: [{ type: 'text', text: '判别式与交点' }] }, layout: 'content-width', wrap: 'none' }
+    case 'formula': return { id, type: 'formula', latex: '\\Delta = b^{2} - 4ac', accessibleText: item.content.data.accessibleText, formulaId: `${id}-formula` }
     case 'table': return {
-      id, type: 'table', caption: '月份与次数', columns: [{ id: `${id}-month`, header: '月份' }, { id: `${id}-count`, header: '次数' }],
-      rows: [12, 18, 15].map((n, i) => ({ id: `${id}-row-${i}`, cells: { [`${id}-month`]: `${i + 1}月`, [`${id}-count`]: i === 1 ? { text: String(n), runs: [{ start: 0, end: 2, style: { bold: true } }] } : String(n) } })),
+      id, type: 'table', caption: { inlines: [{ type: 'text', text: '月份与次数' }] }, columns: [{ id: `${id}-month`, header: { inlines: [{ type: 'text', text: '月份' }] } }, { id: `${id}-count`, header: { inlines: [{ type: 'text', text: '次数' }] } }],
+      rows: [12, 18, 15].map((n, i) => ({ id: `${id}-row-${i}`, cells: { [`${id}-month`]: { inlines: [{ type: 'text', text: `${i + 1}月` }] }, [`${id}-count`]: { inlines: [{ type: 'text', text: String(n), ...(i === 1 ? { style: { bold: true } } : {}) }] } } })),
     }
     case 'chart': return { id, type: 'chart', chart: item.content.data, height: 380 }
     default: throw new Error(`Unsupported Flow body role ${role}: ${item.content.nativeType}`)
@@ -251,10 +255,10 @@ export async function createR18TaskInput(task: CommonTask, variant: TaskVariant)
   }
   if (variant.carrier.startsWith('flow-')) {
     const flow = project.surfaces.find(s => s.id === 'flow-surface') as FlowSurfaceDocument
-    const heading: FlowBlock = { id: 'r18-flow-heading', type: 'heading', level: 1, text: '判别式练习材料' }
-    flow.blocks = variant.carrier === 'flow-body' ? [heading, ...task.inputRoles.map((role, i) => flowBlockFor(task, role, i)), { id: 'r18-flow-end', type: 'paragraph', text: '此段未选中，内容与顺序必须保持。' }]
-      : [heading, { id: 'r18-flow-background', type: 'paragraph', text: accurateBody }, { id: 'r18-flow-end', type: 'paragraph', text: '未选中正文应保持。' }]
-    if (task.id === 'N03') flow.blocks = [heading, { id: 'r18-n03-chapter', type: 'section', title: '判别式讲义', collapsedByDefault: false, blocks: task.inputRoles.map((role, i) => flowBlockFor(task, role, i)) }, { id: 'r18-flow-end', type: 'paragraph', text: '未选中尾段保持。' }]
+    const heading: FlowBlock = { id: 'r18-flow-heading', type: 'heading', level: 1, content: { inlines: [{ type: 'text', text: '判别式练习材料' }] } }
+    flow.blocks = variant.carrier === 'flow-body' ? [heading, ...task.inputRoles.map((role, i) => flowBlockFor(task, role, i)), { id: 'r18-flow-end', type: 'paragraph', content: { inlines: [{ type: 'text', text: '此段未选中，内容与顺序必须保持。' }] } }]
+      : [heading, { id: 'r18-flow-background', type: 'paragraph', content: { inlines: [{ type: 'text', text: accurateBody }] } }, { id: 'r18-flow-end', type: 'paragraph', content: { inlines: [{ type: 'text', text: '未选中正文应保持。' }] } }]
+    if (task.id === 'N03') flow.blocks = [heading, { id: 'r18-n03-chapter', type: 'section', title: { inlines: [{ type: 'text', text: '判别式讲义' }] }, collapsedByDefault: false, blocks: task.inputRoles.map((role, i) => flowBlockFor(task, role, i)) }, { id: 'r18-flow-end', type: 'paragraph', content: { inlines: [{ type: 'text', text: '未选中尾段保持。' }] } }]
     project.locations = project.locations.filter(l => l.surfaceId !== flow.id)
     project.locations.push({ id: 'r18-flow-location', label: '代表任务讲义', kind: 'flow-block', surfaceId: flow.id, blockId: 'r18-flow-heading' })
     flow.surfaceLayerItems = flow.surfaceLayerItems.map(e => ({ ...e, visibility: { mode: 'all', locationIds: [] } }))

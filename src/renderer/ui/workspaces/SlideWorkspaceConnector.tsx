@@ -15,6 +15,7 @@ import { projectV9EditingNodesWithDraft } from '../../store/slideEditorProjectio
 import {
   mountPublishedCourseAuthoring,
   mountPublishedCourseTryRun,
+  reportTryRunInteractionDiagnostic,
 } from '../coursePlayerTryRun'
 import { sidecarFileIdsFrom } from '../workspaceSlidePreviewRebuild'
 import {
@@ -351,6 +352,7 @@ export function SlideWorkspaceConnector({
           components: componentPackages,
           locationId,
           initialPresentationStateId: locationId ? activePresentationStateId : null,
+          onInteractionDiagnostic: reportTryRunInteractionDiagnostic,
         })
       },
     },

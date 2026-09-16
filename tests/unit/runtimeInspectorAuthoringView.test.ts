@@ -170,7 +170,7 @@ function fixture(kind: CarrierKind): {
             item: runtimeLayer(itemId, 'surface-runtime'),
             visibility: { mode: 'all', locationIds: [] },
           }],
-          blocks: [{ id: blockId, type: 'heading', level: 1, text: 'Flow' }],
+          blocks: [{ id: blockId, type: 'heading', level: 1, content: { inlines: [{ type: 'text', text: 'Flow' }] } }],
         }],
       }),
       locationId: 'location-flow',

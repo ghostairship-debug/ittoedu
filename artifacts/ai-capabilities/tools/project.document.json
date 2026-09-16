@@ -3,7 +3,7 @@
   "candidateCarrier": {
     "default": "native"
   },
-  "description": "CLI 文件兜底：读取本轮 resources/project/document.json，用原生脚本任意编辑其 V9 内容，保留工程 id 和基线 revision。把 {document:修改后的完整V9文档,assetFiles?:{素材ID:base64},componentFiles?:{包ID:{相对文件名:base64或{encoding:\"utf8\",text:\"源码\"}}}} 写入当前 resources/result.json。候选 input={artifact:{$candidateFile:\"resources/result.json\"}}，destination 使用本轮任意有效目标别名作为版本锚点，不限制修改对象。未提供的资源从当前工程复用；新增/替换资源必须真实提供并更新 document 元数据。可替换、新增、删除多个独立对象、跨页、修改结构和快捷工具未覆盖的字段。宿主严格解析、检查资源闭包、为动态内容执行实际准入，并在一次工程/资源/历史事务中提交；不直接覆盖磁盘工程。只在当前工作副本操作，不依赖本机仓库源码或其他工程。",
+  "description": "CLI 文件兜底：读取本轮 resources/project/document.json，用原生脚本任意编辑其 V9 内容，保留工程 id 和基线 revision。把 {document:修改后的完整V9文档,assetFiles?:{素材ID:base64},componentFiles?:{包ID:{相对文件名:base64或{encoding:\"utf8\",text:\"源码\"}}}} 写入当前 resources/result.json。候选 input={artifact:{$candidateFile:\"resources/result.json\"}}，destination 使用本轮任意有效目标别名作为版本锚点，不限制修改对象。未提供的资源从当前工程复用；新增/替换资源必须真实提供并更新 document 元数据。新增第二个或更多 Surface 时，document 必须同时提供 mixedPrintPlan：每个 Surface 恰有一项，且 Slide 用 slide-scenes、Flow 用 flow-document、Spatial 用 spatial-frames。每个已存储的 global/surface/scene/world 图层列表内部按 item.order 严格递增；不要跨 owner 比较 order。Flow 的 backgroundColor 只能是六位 #RRGGBB（例如 #f8fafc）。宿主严格解析、检查资源闭包、为动态内容执行实际准入，并在一次工程/资源/历史事务中提交；不直接覆盖磁盘工程。只在当前工作副本操作，不依赖本机仓库源码或其他工程。",
   "examples": [
     {
       "input": {

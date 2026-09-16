@@ -19,7 +19,6 @@ import type { FlowEditorSelection } from '../../course/flowEditorSlice'
 import {
   deferFlowTextAction,
   finishFlowTextComposition,
-  FLOW_TEXT_REJECT_FORMULA_RUNS,
   isFlowTextDraftDirty,
   markFlowTextComposing,
   resolveFlowTextBlur,
@@ -78,11 +77,6 @@ export interface FlowTextAuthoringController {
   readonly commitCurrent: (keepSelected?: boolean, nextBlockId?: string) => void
   readonly cancelCurrent: () => void
   readonly flushOpenTextEdit: () => void
-  readonly enterText: (
-    blockId: string,
-    gesture: 'double-click' | 'enter' | 'click-text',
-    extra?: { offset?: number; listItemId?: string; tableRowId?: string; tableColumnId?: string },
-  ) => void
   readonly openFormula: (blockId: string) => void
   readonly updateFormulaDraft: (draft: {
     readonly composing?: boolean
@@ -197,36 +191,6 @@ export function useFlowTextAuthoringController(
     if (!next) editTargetRef.current = null
   }, [commands])
 
-  useEffect(() => {
-    if (readOnly) return
-    if (selection?.focus !== 'text' || !selection.selectedBlockId) return
-    if (editRef.current?.blockId === selection.selectedBlockId) return
-    const target = targetForBlock(selection.selectedBlockId)
-    const receipt = commands.run(target, {
-      kind: 'begin-text-edit',
-      gesture: 'click-text',
-      ...(selection.textRange?.start === undefined
-        ? {}
-        : { offset: selection.textRange.start }),
-      ...(selection.textRange?.end === undefined
-        ? {}
-        : { end: selection.textRange.end }),
-      ...(selection.textRange?.listItemId
-        ? { listItemId: selection.textRange.listItemId }
-        : {}),
-      ...(selection.textRange?.tableRowId
-        ? { tableRowId: selection.textRange.tableRowId }
-        : {}),
-      ...(selection.textRange?.tableColumnId
-        ? { tableColumnId: selection.textRange.tableColumnId }
-        : {}),
-    })
-    if (!receipt.ok || !receipt.edit) return
-    editTargetRef.current = target
-    publishedEditRef.current = receipt.edit
-    editRef.current = receipt.edit
-    bumpRestyle(receipt.edit.range)
-  }, [bumpRestyle, commands, readOnly, selection, targetForBlock])
 
   const commitCurrent = useCallback((keepSelected = true, nextBlockId?: string) => {
     const current = editRef.current
@@ -319,7 +283,7 @@ export function useFlowTextAuthoringController(
   }, [commands])
 
   const openFormula = useCallback((blockId: string) => {
-    if (readOnly) return
+    if (readOnly || !view.overlayLayers.some(layer => layer.selectionId === blockId)) return
     if (editRef.current?.kind === 'formula' && editRef.current.blockId === blockId) {
       setFormulaBlockId(blockId)
       return
@@ -331,7 +295,7 @@ export function useFlowTextAuthoringController(
     publishedEditRef.current = receipt.edit
     editRef.current = receipt.edit
     setFormulaBlockId(blockId)
-  }, [commands, readOnly, selection?.authoringScope, targetForBlock])
+  }, [commands, readOnly, selection?.authoringScope, targetForBlock, view.overlayLayers])
 
   const updateFormulaDraft = useCallback((draft: {
     readonly composing?: boolean
@@ -366,31 +330,6 @@ export function useFlowTextAuthoringController(
     }
   }, [setEditState, commitCurrent])
 
-  const enterText = useCallback((
-    blockId: string,
-    gesture: 'double-click' | 'enter' | 'click-text',
-    extra?: { offset?: number; listItemId?: string; tableRowId?: string; tableColumnId?: string },
-  ) => {
-    if (readOnly || selection?.authoringScope === 'global') return
-    const target = targetForBlock(blockId)
-    const receipt = commands.run(target, {
-      kind: 'begin-text-edit',
-      gesture,
-      ...(extra?.offset === undefined ? {} : { offset: extra.offset }),
-      ...(extra?.listItemId ? { listItemId: extra.listItemId } : {}),
-      ...(extra?.tableRowId ? { tableRowId: extra.tableRowId } : {}),
-      ...(extra?.tableColumnId ? { tableColumnId: extra.tableColumnId } : {}),
-    })
-    if (!receipt.ok) {
-      if (receipt.reason === FLOW_TEXT_REJECT_FORMULA_RUNS) openFormula(blockId)
-      return
-    }
-    if (!receipt.edit) return
-    editTargetRef.current = target
-    publishedEditRef.current = receipt.edit
-    editRef.current = receipt.edit
-    bumpRestyle(receipt.edit.range)
-  }, [bumpRestyle, commands, openFormula, readOnly, selection?.authoringScope, targetForBlock])
 
   const commitFormula = useCallback((ast: FormulaAstNode, accessibleText: string) => {
     void ast
@@ -453,7 +392,6 @@ export function useFlowTextAuthoringController(
     commitCurrent,
     cancelCurrent,
     flushOpenTextEdit,
-    enterText,
     openFormula,
     updateFormulaDraft,
     setFormulaComposing,

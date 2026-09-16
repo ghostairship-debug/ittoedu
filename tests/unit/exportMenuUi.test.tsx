@@ -1,3 +1,4 @@
+import { controllerPackages } from '../fixtures/teacherController'
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { RecentProjectEntry } from '@/shared/ipcTypes'
@@ -151,7 +152,7 @@ describe('unified export menu', () => {
     const html = buildPublishedCourseStandaloneHtml({
       project: document!,
       assetFiles: {},
-      components: {},
+      components: controllerPackages,
     }, '(function(){})();')
     expect(html).toContain('window.__H5_COURSE_PAYLOAD__=')
     expect(html).not.toContain('.course-nav')

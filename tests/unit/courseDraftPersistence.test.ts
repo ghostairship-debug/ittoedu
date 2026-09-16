@@ -1,4 +1,6 @@
-import { beginFlowTableFieldEdit } from '@/renderer/authoring/flowTextEdit'
+import { buildFlowEditorView, captureFlowEditorAuthoringTarget } from '@/renderer/course/flowEditorView'
+import type { FlowDocumentDraft } from '@/renderer/authoring/flowDocumentDraft'
+import { plainDocumentText } from '@/shared/document/content'
 import { beginSpatialWorldTableTextEdit } from '@/renderer/authoring/spatialWorldAuthoring'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
@@ -9,12 +11,9 @@ import { componentPackagesToArchiveFiles } from '@/renderer/components/component
 import { findFlowBlockRecursive, flowSurfaceIn } from '@/renderer/course/flowDocumentModel'
 import { selectFlowEditorBlocks } from '@/renderer/course/flowEditorSlice'
 import {
-  beginFlowFormulaEdit,
   beginFlowChartTextEdit,
   updateFlowChartTextDraft,
-  beginFlowTextEdit,
   updateFlowTextDraft,
-  type FlowFormulaDraft,
 } from '@/renderer/authoring/flowTextEdit'
 import { locateCourseLayer } from '@/renderer/course/effectiveLayerCommands'
 import {
@@ -154,61 +153,10 @@ function createSpatialFixture(): DraftFixture {
   }
 }
 
-function createFlowFixture(): DraftFixture {
-  const store = useEditorStore.getState()
-  store.createNewFlowProject()
-  const flow = useEditorStore.getState().flowSession
-  if (!flow) throw new Error('expected Flow session')
-  const surface = flowSurfaceIn(flow.history.present, flow.selection.surfaceId)
-  const paragraph = surface?.blocks.find((block) => block.type === 'paragraph')
-  if (!surface || !paragraph || paragraph.type !== 'paragraph') {
-    throw new Error('expected Flow paragraph')
-  }
-  const targetId = paragraph.id
-  const originalText = paragraph.text
-  acknowledgeBaseline('flow-baseline.h5lesson')
-  const historyBeforeDraft = activeHistory().past.length
-  const begin = () => {
-    const current = useEditorStore.getState().flowSession
-    if (!current) throw new Error('expected Flow session')
-    const selection = selectFlowEditorBlocks(
-      current.history.present,
-      current.selection.locationId,
-      [targetId],
-    )
-    const begun = beginFlowTextEdit({
-      project: current.history.present,
-      selection,
-      blockId: targetId,
-    })
-    if (!begun.ok) throw new Error(begun.reason)
-    useEditorStore.getState().applyFlowSelection(begun.selection)
-    useEditorStore.getState().setFlowTextEdit(begun.edit)
-  }
-  return {
-    kind: 'flow',
-    targetId,
-    originalText,
-    historyBeforeDraft,
-    begin,
-    update(text) {
-      begin()
-      const edit = useEditorStore.getState().flowTextEdit
-      if (!edit) throw new Error('expected Flow edit')
-      useEditorStore.getState().setFlowTextEdit(updateFlowTextDraft(edit, {
-        text,
-        runs: [],
-      }))
-    },
-    read(document) {
-      const currentSurface = flowSurfaceIn(document, surface.id)
-      const block = currentSurface
-        ? findFlowBlockRecursive(currentSurface.blocks, targetId)?.block
-        : undefined
-      if (!block || block.type !== 'paragraph') throw new Error('expected Flow paragraph')
-      return block.text
-    },
-  }
+function currentFlowTarget() {
+  const state = useEditorStore.getState()
+  const session = state.flowSession!
+  return captureFlowEditorAuthoringTarget({ view: buildFlowEditorView({ project: session.history.present, locationId: session.selection.locationId }), sessionToken: state.courseAuthoringSession!.token, target: { kind: 'surface' } })
 }
 
 function archiveAndReopen(snapshot: CourseProjectPersistenceSnapshot): CourseProjectDocument {
@@ -223,7 +171,6 @@ function archiveAndReopen(snapshot: CourseProjectPersistenceSnapshot): CoursePro
 const fixtures: Array<[SurfaceKind, () => DraftFixture]> = [
   ['slide', createSlideFixture],
   ['spatial', createSpatialFixture],
-  ['flow', createFlowFixture],
 ]
 
 beforeEach(() => {
@@ -381,33 +328,34 @@ describe('active Course Project text draft persistence', () => {
     expect(read(activeDocument())).toBe(item.content.data.rows[0]!.cells[0]!.text)
   })
 
-  it.each(['table-caption', 'table-header'] as const)('archives and recovers a focused Flow %s without changing live recovery history', field => {
+  it.each(['table-caption', 'table-header'] as const)('saves canonical Flow %s through recovery and archive with one history entry', field => {
     useEditorStore.getState().createNewFlowProject()
     useEditorStore.getState().addTableNode()
     const session = useEditorStore.getState().flowSession!
-    const table = flowSurfaceIn(session.history.present, session.selection.surfaceId).blocks.find(block => block.type === 'table')!
+    const surface = flowSurfaceIn(session.history.present, session.selection.surfaceId)
+    const blocks = structuredClone(surface.blocks)
+    const table = blocks.find(block => block.type === 'table')!
     if (table.type !== 'table') throw new Error('expected table')
     acknowledgeBaseline('flow-table.h5lesson')
     const before = activeHistory().past.length
-    const begun = beginFlowTableFieldEdit({ project: activeDocument(), selection: session.selection, blockId: table.id, field, columnId: field === 'table-header' ? table.columns[0]!.id : undefined })
-    if (!begun.ok) throw new Error(begun.reason)
-    useEditorStore.getState().setFlowTextEdit(updateFlowTextDraft(begun.edit, { text: '未失焦的表格文字' }))
+    const content = { inlines: [{ type: 'text' as const, text: '未失焦的表格文字' }] }
+    if (field === 'table-caption') table.caption = content
+    else table.columns[0]!.header = content
+    expect(useEditorStore.getState().runFlowAuthoringIntent(currentFlowTarget(), { kind: 'replace-document-content', blocks, historyGroup: field }).ok).toBe(true)
     const read = (document: CourseProjectDocument) => {
-      const block = flowSurfaceIn(document, session.selection.surfaceId).blocks.find(block => block.id === table.id)!
+      const block = flowSurfaceIn(document, surface.id).blocks.find(block => block.id === table.id)!
       if (block.type !== 'table') throw new Error('expected table')
-      return field === 'table-caption' ? block.caption : block.columns[0]!.header
+      return plainDocumentText((field === 'table-caption' ? block.caption : block.columns[0]!.header) ?? { inlines: [] })
     }
-    expect(selectHasUnsavedCourseChanges(useEditorStore.getState())).toBe(true)
     const recovered = useEditorStore.getState().captureCourseProjectRecoverySnapshot()
     if (!recovered.ok) throw new Error(recovered.reason)
     expect(read(recovered.snapshot.project)).toBe('未失焦的表格文字')
-    expect(activeHistory().past).toHaveLength(before)
     const saved = useEditorStore.getState().prepareCourseProjectPersistence()
     if (!saved.ok) throw new Error(saved.reason)
     expect(read(archiveAndReopen(saved.snapshot))).toBe('未失焦的表格文字')
     expect(activeHistory().past).toHaveLength(before + 1)
     useEditorStore.getState().undo()
-    expect(read(activeDocument())).toBe(field === 'table-caption' ? table.caption : table.columns[0]!.header)
+    expect(read(activeDocument())).not.toBe('未失焦的表格文字')
   })
 
   it('recovers a focused Flow chart label and archives it with one history entry', () => {
@@ -632,127 +580,82 @@ describe('active Course Project text draft persistence', () => {
     expect(selectHasUnsavedCourseChanges(useEditorStore.getState())).toBe(false)
   })
 
-  it('refuses a manual save during Flow IME composition without clearing the draft', () => {
-    const fixture = createFlowFixture()
-    fixture.update('输入法组合中的文字')
-    const edit = useEditorStore.getState().flowTextEdit
-    if (!edit) throw new Error('expected Flow edit')
-    const composingEdit = { ...edit, composing: true }
-    useEditorStore.setState({ flowTextEdit: composingEdit })
-    const historyBefore = activeHistory().past.length
-
-    const preparation = useEditorStore.getState().prepareCourseProjectPersistence()
-    expect(preparation.ok).toBe(false)
-    expect(activeHistory().past).toHaveLength(historyBefore)
-    expect(useEditorStore.getState().flowTextEdit).toBe(composingEdit)
-    expect(selectHasUnsavedCourseChanges(useEditorStore.getState())).toBe(true)
-
-    const recovery = useEditorStore.getState().captureCourseProjectRecoverySnapshot()
-    expect(recovery.ok).toBe(true)
-    if (!recovery.ok) throw new Error(recovery.reason)
-    expect(fixture.read(recovery.snapshot.project)).toBe('输入法组合中的文字')
-    expect(activeHistory().past).toHaveLength(historyBefore)
-  })
-
-  it('materializes the Store-owned Flow formula draft for recovery and saves it once', () => {
+  it('saves canonical Flow content, keeps later source drafts dirty, and groups editing history', () => {
     useEditorStore.getState().createNewFlowProject()
-    useEditorStore.getState().addFormulaNode()
-    const flow = useEditorStore.getState().flowSession
-    if (!flow) throw new Error('expected Flow session')
+    const flow = useEditorStore.getState().flowSession!
     const surface = flowSurfaceIn(flow.history.present, flow.selection.surfaceId)
-    const formula = surface.blocks.find((block) => block.type === 'formula')
-    if (!formula || formula.type !== 'formula') throw new Error('expected Flow formula')
-    const selection = selectFlowEditorBlocks(
-      flow.history.present,
-      flow.selection.locationId,
-      [formula.id],
-    )
-    const begun = beginFlowFormulaEdit({
-      project: flow.history.present,
-      selection,
-      blockId: formula.id,
-    })
-    if (!begun.ok) throw new Error(begun.reason)
-    useEditorStore.getState().applyFlowSelection(begun.selection)
-    const ast = {
-      type: 'row' as const,
-      children: [
-        { type: 'token' as const, value: 'a' },
-        { type: 'operator' as const, value: '+' },
-        { type: 'token' as const, value: 'b' },
-      ],
+    const paragraph = surface.blocks.find(block => block.type === 'paragraph')!
+    acknowledgeBaseline('flow.h5lesson')
+    const before = activeHistory().past.length
+    const update = (text: string) => {
+      const blocks = structuredClone(flowSurfaceIn(activeDocument(), surface.id).blocks)
+      const block = blocks.find(block => block.id === paragraph.id)!
+      if (block.type !== 'paragraph') throw new Error('expected paragraph')
+      block.content = { inlines: [{ type: 'text', text }] }
+      expect(useEditorStore.getState().runFlowAuthoringIntent(currentFlowTarget(), { kind: 'replace-document-content', blocks, historyGroup: 'typing' }).ok).toBe(true)
     }
-    const drafted = updateFlowTextDraft(begun.edit, {
-      ast,
-      accessibleText: 'a加b',
-      source: 'a+b',
-      valid: true,
-      hasSlots: false,
-    })
-    useEditorStore.getState().setFlowTextEdit(drafted)
-    const historyBefore = activeHistory().past.length
-
-    const recovery = useEditorStore.getState().captureCourseProjectRecoverySnapshot()
-    expect(recovery.ok).toBe(true)
-    if (!recovery.ok) throw new Error(recovery.reason)
-    const recovered = flowSurfaceIn(recovery.snapshot.project, surface.id)
-      .blocks.find((block) => block.id === formula.id)
-    expect(recovered).toMatchObject({ type: 'formula', ast, accessibleText: 'a加b' })
-    expect(activeHistory().past).toHaveLength(historyBefore)
-
+    update('版本A')
+    update('版本B')
+    expect(activeHistory().past).toHaveLength(before + 1)
     const preparation = useEditorStore.getState().prepareCourseProjectPersistence()
-    expect(preparation.ok).toBe(true)
     if (!preparation.ok) throw new Error(preparation.reason)
-    expect(useEditorStore.getState().flowTextEdit).toBeNull()
-    expect(activeHistory().past).toHaveLength(historyBefore + 1)
-    const saved = flowSurfaceIn(preparation.snapshot.project, surface.id)
-      .blocks.find((block) => block.id === formula.id)
-    expect(saved).toMatchObject({ type: 'formula', ast, accessibleText: 'a加b' })
+    const reopened = flowSurfaceIn(archiveAndReopen(preparation.snapshot), surface.id).blocks.find(block => block.id === paragraph.id)!
+    expect(reopened.type === 'paragraph' && plainDocumentText(reopened.content)).toBe('版本B')
+    const target = currentFlowTarget()
+    expect(useEditorStore.getState().runFlowAuthoringIntent(target, { kind: 'update-document-draft', source: '$未闭合', diagnostics: [{ message: '公式未闭合', line: 1, column: 1, offset: 0, endOffset: 4 }], composing: false }).ok).toBe(true)
+    expect(useEditorStore.getState().acknowledgeCourseProjectSaved('flow.h5lesson', preparation.token)).toBe(false)
+    expect(selectHasUnsavedCourseChanges(useEditorStore.getState())).toBe(true)
+    expect(useEditorStore.getState().prepareCourseProjectPersistence().ok).toBe(false)
+    expect(useEditorStore.getState().captureCourseProjectRecoverySnapshot().ok).toBe(true)
+    useEditorStore.getState().runFlowAuthoringIntent(target, { kind: 'clear-document-draft' })
+    useEditorStore.getState().undo()
+    const restored = flowSurfaceIn(activeDocument(), surface.id).blocks.find(block => block.id === paragraph.id)!
+    expect(restored.type === 'paragraph' && plainDocumentText(restored.content)).toBe('')
   })
 
-  it('keeps an invalid Flow formula source in the Store and refuses save or recovery', () => {
+  it('preserves a composing Flow source separately and refuses premature save', () => {
+    useEditorStore.getState().createNewFlowProject()
+    const target = currentFlowTarget()
+    const before = activeDocument()
+    const draft: FlowDocumentDraft = { surfaceId: target.surfaceId!, revision: target.documentRevision, source: '输入法组合中的文字', diagnostics: [], composing: true }
+    useEditorStore.setState({ flowDocumentDraft: draft })
+    expect(useEditorStore.getState().prepareCourseProjectPersistence().ok).toBe(false)
+    expect(useEditorStore.getState().flowDocumentDraft).toBe(draft)
+    expect(selectHasUnsavedCourseChanges(useEditorStore.getState())).toBe(true)
+    const recovery = useEditorStore.getState().captureCourseProjectRecoverySnapshot()
+    if (!recovery.ok) throw new Error(recovery.reason)
+    expect(recovery.snapshot.project).toBe(before)
+  })
+
+  it('saves canonical Flow formula LaTeX through the archive without adding save history', () => {
     useEditorStore.getState().createNewFlowProject()
     useEditorStore.getState().addFormulaNode()
-    const flow = useEditorStore.getState().flowSession
-    if (!flow) throw new Error('expected Flow session')
-    const surface = flowSurfaceIn(flow.history.present, flow.selection.surfaceId)
-    const formula = surface.blocks.find((block) => block.type === 'formula')
-    if (!formula || formula.type !== 'formula') throw new Error('expected Flow formula')
-    const selection = selectFlowEditorBlocks(
-      flow.history.present,
-      flow.selection.locationId,
-      [formula.id],
-    )
-    const begun = beginFlowFormulaEdit({
-      project: flow.history.present,
-      selection,
-      blockId: formula.id,
-    })
-    if (!begun.ok) throw new Error(begun.reason)
-    useEditorStore.getState().applyFlowSelection(begun.selection)
-    const original = begun.edit.draft as FlowFormulaDraft
-    const invalid = updateFlowTextDraft(begun.edit, {
-      ...original,
-      source: '\\frac{x}',
-      valid: false,
-    })
-    useEditorStore.getState().setFlowTextEdit(invalid)
-    const before = useEditorStore.getState()
-    const beforeSession = before.flowSession!
+    const session = useEditorStore.getState().flowSession!
+    const surface = flowSurfaceIn(session.history.present, session.selection.surfaceId)
+    const blocks = structuredClone(surface.blocks)
+    const formula = blocks.find(block => block.type === 'formula')!
+    if (formula.type !== 'formula') throw new Error('expected formula')
+    const before = activeHistory().past.length
+    formula.latex = 'a+b'
+    formula.accessibleText = 'a加b'
+    expect(useEditorStore.getState().runFlowAuthoringIntent(currentFlowTarget(), { kind: 'replace-document-content', blocks, historyGroup: 'formula' }).ok).toBe(true)
+    const saved = useEditorStore.getState().prepareCourseProjectPersistence()
+    if (!saved.ok) throw new Error(saved.reason)
+    expect(flowSurfaceIn(archiveAndReopen(saved.snapshot), surface.id).blocks.find(block => block.id === formula.id)).toMatchObject({ latex: 'a+b', accessibleText: 'a加b' })
+    expect(activeHistory().past).toHaveLength(before + 1)
+  })
 
-    expect(selectHasUnsavedCourseChanges(before)).toBe(true)
-    expect(before.captureCourseProjectRecoverySnapshot()).toMatchObject({ ok: false })
-    expect(useEditorStore.getState().prepareCourseProjectPersistence()).toMatchObject({ ok: false })
+  it('keeps invalid Flow formula source outside V9 and refuses save without corrupting recovery', () => {
+    useEditorStore.getState().createNewFlowProject()
+    const before = useEditorStore.getState()
+    const target = currentFlowTarget()
+    expect(before.runFlowAuthoringIntent(target, { kind: 'update-document-draft', source: '$\\frac{x}$', diagnostics: [{ message: '分母缺失', offset: 0, endOffset: 10, line: 1, column: 1 }], composing: false }).ok).toBe(true)
     const after = useEditorStore.getState()
-    expect(after.flowTextEdit).toBe(invalid)
-    expect(after.flowSession?.history.present).toBe(beforeSession.history.present)
-    expect(after.flowSession?.history.past).toBe(beforeSession.history.past)
-    expect(after.flowSession?.history.future).toBe(beforeSession.history.future)
-    expect(after.flowSession?.selection).toBe(beforeSession.selection)
+    expect(selectHasUnsavedCourseChanges(after)).toBe(true)
+    expect(after.prepareCourseProjectPersistence().ok).toBe(false)
+    expect(after.captureCourseProjectRecoverySnapshot().ok).toBe(true)
+    expect(after.flowSession?.history).toBe(before.flowSession?.history)
     expect(after.courseAssetSidecar).toBe(before.courseAssetSidecar)
-    expect(after.courseAssetSidecarPast).toBe(before.courseAssetSidecarPast)
-    expect(after.courseAssetSidecarFuture).toBe(before.courseAssetSidecarFuture)
-    expect(after.courseAuthoringSession).toBe(before.courseAuthoringSession)
-    expect(after.dirty).toBe(before.dirty)
+    expect(after.flowDocumentDraft?.source).toBe('$\\frac{x}$')
   })
 })

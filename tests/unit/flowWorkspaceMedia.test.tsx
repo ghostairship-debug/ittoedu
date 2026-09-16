@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from '@testing-library/react'
+import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import { StrictMode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
@@ -161,14 +161,14 @@ function courseShell(): Omit<CourseProjectDocument, 'locations' | 'startLocation
 
 function createMediaFlowProject(): CourseProjectDocument {
   const blocks: FlowBlock[] = [
-    { id: 'h1', type: 'heading', level: 1, text: '媒体稿纸' },
+    { id: 'h1', type: 'heading', level: 1, content: { inlines: [{ type: 'text', text: '媒体稿纸' }] }},
     {
       id: 'media-image',
       type: 'media',
       assetId: 'asset-image',
       mediaKind: 'image',
       altText: '示意图',
-      caption: '封面图',
+      caption: { inlines: [{ type: 'text', text: '封面图' }] },
       layout: 'content-width',
     },
     {
@@ -177,7 +177,7 @@ function createMediaFlowProject(): CourseProjectDocument {
       assetId: 'asset-video',
       mediaKind: 'video',
       altText: '讲解步骤视频',
-      caption: '讲解视频',
+      caption: { inlines: [{ type: 'text', text: '讲解视频' }] },
       layout: 'wide',
     },
     {
@@ -193,7 +193,7 @@ function createMediaFlowProject(): CourseProjectDocument {
       type: 'media',
       assetId: 'asset-audio',
       mediaKind: 'audio',
-      caption: '旁白',
+      caption: { inlines: [{ type: 'text', text: '旁白' }] },
       layout: 'content-width',
     },
   ]
@@ -276,24 +276,54 @@ function renderMediaPaper(project = createMediaFlowProject()) {
 }
 
 describe('FlowWorkspace edit media', () => {
-  it('keeps mounted image URLs alive through StrictMode effect replay and releases them on unmount', () => {
+  it('keeps mounted image URLs alive through StrictMode effect replay and releases them on unmount', async () => {
     const project = createMediaFlowProject()
     const view = buildFlowEditorView({ project, locationId: 'h1' })
     const mounted = render(<StrictMode><FlowWorkspace
       project={project} view={view} selection={null} assetFiles={SIDECAR_FILES}
     /></StrictMode>)
+    await waitFor(() => expect(screen.getByTestId('flow-block-media-image').querySelector('img')).toBeTruthy())
     const image = screen.getByTestId('flow-block-media-image').querySelector('img')!
     const activeUrl = image.getAttribute('src')!
     expect(activeUrl).toMatch(/^blob:/)
     expect(revokeObjectUrl).not.toHaveBeenCalledWith(activeUrl)
     mounted.unmount()
+    await Promise.resolve() // The media root releases its lease after actual unmount.
     expect(revokeObjectUrl).toHaveBeenCalledWith(activeUrl)
     for (const result of createObjectUrl.mock.results) {
       expect(revokeObjectUrl).toHaveBeenCalledWith(result.value)
     }
   })
 
-  it('projects all three media tiers from the shared responsive mapping', () => {
+  it('changes caption and resource bytes together without leaving a revoked source in a media consumer', async () => {
+    const project = createMediaFlowProject()
+    const mounted = render(<FlowWorkspace project={project} view={buildFlowEditorView({ project, locationId: 'h1' })} selection={null} assetFiles={SIDECAR_FILES} />)
+    await waitFor(() => expect(screen.getByTestId('flow-block-media-image').querySelector('img')).toHaveAttribute('src'))
+    const oldUrl = screen.getByTestId('flow-block-media-image').querySelector('img')!.getAttribute('src')!
+    revokeObjectUrl.mockImplementation((url: string) => {
+      expect([...document.querySelectorAll('[src]')].some(element => element.getAttribute('src') === url)).toBe(false)
+    })
+    const next = structuredClone(project)
+    next.revision++
+    const surface = next.surfaces[0]
+    if (surface.type !== 'flow') throw new Error('expected Flow')
+    const media = surface.blocks.find(block => block.id === 'media-image')!
+    if (media.type !== 'media') throw new Error('expected media')
+    media.caption = { inlines: [{ type: 'text', text: '同批修改题注' }] }
+    mounted.rerender(<FlowWorkspace project={next} view={buildFlowEditorView({ project: next, locationId: 'h1' })} selection={null} assetFiles={{ ...SIDECAR_FILES, 'asset-image': new Uint8Array([...PNG, 5]) }} />)
+    await waitFor(() => {
+      const block = screen.getByTestId('flow-block-media-image')
+      expect(block.querySelector('img')).toHaveAttribute('src')
+      expect(block.querySelector('img')!.getAttribute('src')).not.toBe(oldUrl)
+      expect(block).toHaveTextContent('同批修改题注')
+      expect(revokeObjectUrl).toHaveBeenCalledWith(oldUrl)
+    })
+    mounted.unmount()
+    await Promise.resolve()
+    expect(revokeObjectUrl).toHaveBeenCalledTimes(createObjectUrl.mock.calls.length)
+  })
+
+  it('projects all three media tiers from the shared responsive mapping', async () => {
     const widths = { readingWidth: 760, wideContentWidth: 1120 }
     const matrix = [700, 904, 1280].map((containerWidth) => [
       resolveFlowMediaLayoutInlineSize('content-width', widths, containerWidth),
@@ -322,7 +352,8 @@ describe('FlowWorkspace edit media', () => {
     ] as const
     for (const [blockId, layout] of cases) {
       const projection = resolveFlowMediaLayoutProjection(layout, widths)
-      const figure = screen.getByTestId(`flow-block-${blockId}`).querySelector<HTMLElement>('figure')!
+      await waitFor(() => expect(screen.getByTestId(`flow-block-${blockId}`).closest<HTMLElement>('figure')).toBeTruthy())
+      const figure = screen.getByTestId(`flow-block-${blockId}`).closest<HTMLElement>('figure')!
       expect(figure).toHaveClass(projection.className)
       expect(figure.dataset.flowMediaWidthTier).toBe(projection.tier)
       expect(figure.style.getPropertyValue(FLOW_MEDIA_INLINE_SIZE_CUSTOM_PROPERTY)).toBe(projection.inlineSize)
@@ -336,10 +367,11 @@ describe('FlowWorkspace edit media', () => {
     }
   })
 
-  it('fills paper image src from sidecar object URLs and keeps the block as document-block', () => {
+  it('fills paper image src from sidecar object URLs and keeps the block as document-block', async () => {
     renderMediaPaper()
     const block = screen.getByTestId('flow-block-media-image')
     expect(block.getAttribute('data-flow-layer-kind')).toBe('document-block')
+    await waitFor(() => expect(block.querySelector('img')).toBeTruthy())
     const image = block.querySelector('img')
     expect(image).toBeTruthy()
     expect(image).toHaveAttribute('data-flow-asset-id', 'asset-image')
@@ -349,11 +381,12 @@ describe('FlowWorkspace edit media', () => {
     expect(createObjectUrl).toHaveBeenCalled()
   })
 
-  it('renders paper video as a video element instead of a permanent placeholder label', () => {
+  it('renders paper video as a video element instead of a permanent placeholder label', async () => {
     renderMediaPaper()
     const block = screen.getByTestId('flow-block-media-video')
     expect(block.getAttribute('data-flow-layer-kind')).toBe('document-block')
     expect(block.textContent).not.toContain('视频占位符')
+    await waitFor(() => expect(block.querySelector('video')).toBeTruthy())
     const video = block.querySelector('video')
     expect(video).toBeTruthy()
     expect(video).toHaveAttribute('data-flow-asset-id', 'asset-video')
@@ -415,7 +448,7 @@ describe('FlowWorkspace edit media', () => {
     expect(card).toHaveAttribute('inert')
   })
 
-  it('marks a selected paper image and writes alt, layout, and a same-kind replacement assetId', () => {
+  it('marks a selected paper image and writes alt, layout, and a same-kind replacement assetId', async () => {
     const project = createMediaFlowProject()
     const selection = selectFlowEditorBlock(project, 'h1', 'media-image')
     const view = buildFlowEditorView({ project, locationId: 'h1' })
@@ -429,16 +462,18 @@ describe('FlowWorkspace edit media', () => {
         />
       </div>,
     )
-    const selectedFigure = screen.getByTestId('flow-block-media-image').querySelector('figure')
+    await waitFor(() => expect(screen.getByTestId('flow-block-media-image').closest<HTMLElement>('figure')).toBeTruthy())
+    const selectedFigure = screen.getByTestId('flow-block-media-image').closest<HTMLElement>('figure')
     expect(selectedFigure).toHaveAttribute('data-flow-media-selected', 'true')
+    expect(selectedFigure).toHaveStyle({ outline: '2px solid #2563eb', outlineOffset: '3px' })
     expect(selectedFigure).toHaveAttribute('data-flow-media-layout', 'content-width')
-    expect(screen.getByTestId('flow-block-media-video').querySelector('figure'))
+    expect(screen.getByTestId('flow-block-media-video').closest<HTMLElement>('figure'))
       .not.toHaveAttribute('data-flow-media-selected')
 
     const target = flowBlockTargetFromSelection(project, selection)
     const updated = updateFlowEditorBlock(project, target, {
       altText: '新说明',
-      caption: '新题注',
+      caption: { inlines: [{ type: 'text', text: '新题注' }] },
       layout: 'wide',
     })
     expect(updated.ok).toBe(true)
@@ -456,15 +491,22 @@ describe('FlowWorkspace edit media', () => {
         />
       </div>,
     )
+    await waitFor(() => expect(screen.getByTestId('flow-block-media-image').querySelector('img')).toBeTruthy())
     const image = screen.getByTestId('flow-block-media-image').querySelector('img')
     expect(image).toHaveAttribute('data-flow-asset-id', 'asset-image-2')
     expect(image).toHaveAttribute('alt', '新说明')
     expect(image).toHaveAttribute('src')
     expect(image?.getAttribute('src')).toMatch(/^blob:flow-image\/png-/)
-    expect(screen.getByTestId('flow-block-media-image').querySelector('figure'))
+    expect(screen.getByTestId('flow-block-media-image').closest<HTMLElement>('figure'))
       .toHaveAttribute('data-flow-media-layout', 'wide')
     expect(screen.getByTestId('flow-block-media-image').textContent).toContain('新题注')
     expect(screen.getByTestId('flow-block-media-image').getAttribute('data-flow-layer-kind'))
       .toBe('document-block')
+    const currentFigure = screen.getByTestId('flow-block-media-image').closest<HTMLElement>('figure')!
+    rerender(<div style={{ width: 900, height: 640 }}><FlowWorkspace project={next} view={nextView} selection={selectFlowEditorBlock(next, 'h1', 'media-video')} assetFiles={SIDECAR_FILES} /></div>)
+    expect(currentFigure.isConnected).toBe(true)
+    expect(currentFigure).not.toHaveAttribute('data-flow-media-selected')
+    expect(currentFigure.style.outline).toBe('')
+    expect(screen.getByTestId('flow-block-media-video').closest<HTMLElement>('figure')).toHaveAttribute('data-flow-media-selected', 'true')
   })
 })

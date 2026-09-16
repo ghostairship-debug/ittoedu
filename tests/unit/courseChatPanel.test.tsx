@@ -2,7 +2,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { StrictMode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { CourseChatPanel } from '@/renderer/ui/chat/CourseChatPanel'
-import { GenerationCandidatePreparationError, MAX_GENERATION_TASK_DURATION_MS } from '@/shared/generationContract'
+import { GenerationCandidatePreparationError, DEFAULT_GENERATION_TASK_DURATION_MS } from '@/shared/generationContract'
 import type { DynamicBehaviorObservation } from '@/shared/dynamicBehaviorObservation'
 import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
 import { createBlankFlowCourseProject } from '@/renderer/project/createFlowCourseProject'
@@ -67,7 +67,7 @@ beforeEach(() => {
   h.capture.mockImplementation(async (input: any) => { h.cumulative = input.instruction; return { ...input, requestId: `request-${h.starts.length}`, destinations: [] } })
   window.desktopAPI = { localAgent: vi.fn(async (input: any) => input.operation === 'workspace'
     ? { enabled: true, workspace: { version: 1, projectId: 'chat-unit', normalizedPath: 'c:/chat.h5lesson' } }
-    : input.operation === 'read' ? { records: [{ id: 'native-session', externalSessionId: 'confirmed-native' }] } : { records: [] }),
+    : input.operation === 'read' ? { records: [{ id: 'native-session', workspace: { version: 1, projectId: 'chat-unit', normalizedPath: 'c:/chat.h5lesson' }, externalSessionId: 'confirmed-native' }] } : { records: [] }),
   materials: vi.fn(async () => []), loadComponentCatalog: vi.fn(async () => ({ packages: [] })) } as any
 })
 afterEach(() => { cleanup(); vi.useRealTimers() })
@@ -89,6 +89,50 @@ async function submitPreparation(text: string) {
 }
 
 describe('chat reference defaults and send-time target', () => {
+  it('sends the selected resource budget and displays the authoritative extended deadline', async () => {
+    slideFixture(); mount()
+    expect(screen.getByLabelText('本次时间预算')).toHaveValue('20')
+    fireEvent.change(screen.getByLabelText('本次时间预算'), { target: { value: '60' } })
+    await send('把标题改成实验记录', 1)
+    const request = h.starts[0]
+    expect(request.execution.deadlineAt - request.execution.startedAt).toBe(60 * 60000)
+    h.current = true
+    const task = { ...h.view.record.task, startedAt: request.execution.startedAt, deadlineAt: request.execution.deadlineAt + 20 * 60000 }
+    await act(async () => { h.view = { ...h.view, busy: true, phase: 'running', error: undefined, record: { ...h.view.record, task } }; h.onView(h.view) })
+    expect(screen.getByText(/本任务剩余约 80 分钟/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '增加20分钟' }))
+    await waitFor(() => expect(h.input).toHaveBeenCalledWith(expect.objectContaining({ kind: 'extend-budget', minutes: 20, taskId: task.taskId, epoch: task.epoch }), { preservePreview: true }))
+    expect(h.starts).toHaveLength(1)
+    expect(h.stop).not.toHaveBeenCalled()
+    expect(screen.getByLabelText('输入用途')).toHaveValue('correct')
+  })
+  it('captures current lesson documents from the preparation port without requiring duplicated textarea confirmations', async () => {
+    slideFixture()
+    const original = window.desktopAPI!.localAgent
+    const confirmedDocuments = { teachingPlan: '# 当前真实策划', presentationScript: '# 当前真实脚本' }
+    window.desktopAPI!.localAgent = vi.fn(async input => input.operation === 'lesson-prepare-generation' ? { enabled: true, lessonGeneration: { confirmedDocuments } } : original(input)) as any
+    render(<CourseChatPanel projectId="chat-unit" projectPath="C:/chat.h5lesson" lessonWorkspace={{ version: 1, kind: 'lesson', lessonId: '11111111-1111-4111-8111-111111111111', conversationId: '22222222-2222-4222-8222-222222222222', normalizedDirectory: 'c:/lesson' }} onClose={() => {}} />)
+    fireEvent.click(screen.getByLabelText('生成包含多个片段的完整课件'))
+    expect(screen.queryByLabelText('教学策划 Markdown')).toBeNull()
+    await send('请生成整课', 1)
+    expect(h.capture).toHaveBeenCalledWith(expect.objectContaining({ confirmedDocuments, purpose: 'whole-course' }))
+    expect(window.desktopAPI!.materials).not.toHaveBeenCalled()
+  })
+  it('keeps lesson generation input when current file confirmation is rejected before capture', async () => {
+    slideFixture()
+    const original = window.desktopAPI!.localAgent
+    window.desktopAPI!.localAgent = vi.fn(async input => {
+      if (input.operation === 'lesson-prepare-generation') throw new Error('教学策划已修改，请重新确认')
+      return original(input)
+    }) as any
+    render(<CourseChatPanel projectId="chat-unit" projectPath="C:/chat.h5lesson" lessonWorkspace={{ version: 1, kind: 'lesson', lessonId: '11111111-1111-4111-8111-111111111111', conversationId: '22222222-2222-4222-8222-222222222222', normalizedDirectory: 'c:/lesson' }} onClose={() => {}} />)
+    fireEvent.click(screen.getByLabelText('生成包含多个片段的完整课件'))
+    fireEvent.change(screen.getByLabelText('发送给创作助手'), { target: { value: '请生成整课' } })
+    fireEvent.submit(screen.getByLabelText('发送给创作助手').closest('form')!)
+    await screen.findByText('教学策划已修改，请重新确认')
+    expect(screen.getByLabelText('发送给创作助手')).toHaveValue('请生成整课')
+    expect(h.capture).not.toHaveBeenCalled(); expect(h.starts).toHaveLength(0)
+  })
   function slideFixture() {
     const document = createBlankCourseProject({ id: 'chat-unit' }), surface = document.surfaces[0]!
     if (surface.type !== 'slide') throw new Error('Slide required')
@@ -199,7 +243,7 @@ describe('chat reference defaults and send-time target', () => {
   it('uses formal Flow body selection while preserving manual scope across text-range changes', async () => {
     const document = createBlankFlowCourseProject({ id: 'chat-unit' }), surface = document.surfaces[0]!
     if (surface.type !== 'flow') throw new Error('Flow required')
-    surface.blocks.push({ type: 'paragraph', id: 'paragraph-one', text: '原生讲义正文' })
+    surface.blocks.push({ type: 'paragraph', id: 'paragraph-one', content: { inlines: [{ type: 'text', text: '原生讲义正文' }] } })
     h.store = { document, courseAuthoringSession: createCourseAuthoringSession({ locationId: document.startLocationId,
       surfaceType: 'flow', revision: document.revision, itemIds: ['paragraph-one'] }),
       flowSession: { selection: selectFlowEditorBlocks(document, document.startLocationId, ['paragraph-one']) } }
@@ -509,13 +553,13 @@ describe('chat initial preparation budget', () => {
     await submitPreparation('准备本轮任务')
     expect(screen.getByText(/本任务剩余约 20 分钟/)).toBeTruthy()
     expect(screen.getByRole('button', { name: '停止' })).not.toBeDisabled()
-    await act(async () => { await vi.advanceTimersByTimeAsync(MAX_GENERATION_TASK_DURATION_MS) })
+    await act(async () => { await vi.advanceTimersByTimeAsync(DEFAULT_GENERATION_TASK_DURATION_MS) })
     expect(screen.getByText(/本次处理超时，尚未完成/)).toBeTruthy()
     expect(screen.getByRole('button', { name: '停止' })).toBeDisabled()
     expect(screen.getByRole('button', { name: '发送' })).not.toBeDisabled()
     expect(h.starts).toHaveLength(startCount)
     delayed.resolve(stage === 'workspace' ? { workspace: { version: 1, projectId: 'chat-unit', normalizedPath: 'c:/chat.h5lesson' } }
-      : stage === 'materials' ? [material] : stage === 'catalog' ? { packages: [] } : stage === 'resume' ? { records: [{ externalSessionId: 'confirmed-native' }] }
+      : stage === 'materials' ? [material] : stage === 'catalog' ? { packages: [] } : stage === 'resume' ? { records: [{ workspace: { version: 1, projectId: 'chat-unit', normalizedPath: 'c:/chat.h5lesson' }, externalSessionId: 'confirmed-native' }] }
         : { ...h.capture.mock.calls.at(-1)![0], requestId: 'late-request', destinations: [] })
     await act(async () => { await vi.advanceTimersByTimeAsync(0) })
     expect(h.starts).toHaveLength(startCount)
@@ -526,11 +570,11 @@ describe('chat initial preparation budget', () => {
     const delayed = deferred<any>(), api = window.desktopAPI!, localAgent = vi.mocked(api.localAgent), nativeOperate = localAgent.getMockImplementation()!
     localAgent.mockImplementation(input => input.operation === 'workspace' ? delayed.promise : nativeOperate(input))
     mount(); await submitPreparation('同步这页')
-    await act(async () => { await vi.advanceTimersByTimeAsync(MAX_GENERATION_TASK_DURATION_MS - 100) })
+    await act(async () => { await vi.advanceTimersByTimeAsync(DEFAULT_GENERATION_TASK_DURATION_MS - 100) })
     h.capture.mockImplementationOnce(() => new Promise(() => {}))
     delayed.resolve({ workspace: { version: 1, projectId: 'chat-unit', normalizedPath: 'c:/chat.h5lesson' } })
     await act(async () => { await vi.advanceTimersByTimeAsync(0) })
-    expect(h.capture).toHaveBeenLastCalledWith(expect.objectContaining({ execution: { version: 1, startedAt: 1000, deadlineAt: 1000 + MAX_GENERATION_TASK_DURATION_MS } }))
+    expect(h.capture).toHaveBeenLastCalledWith(expect.objectContaining({ execution: { version: 1, startedAt: 1000, deadlineAt: 1000 + DEFAULT_GENERATION_TASK_DURATION_MS } }))
     await act(async () => { await vi.advanceTimersByTimeAsync(100) })
     expect(screen.getByText(/本次处理超时，尚未完成/)).toBeTruthy()
     expect(h.starts).toHaveLength(0)
@@ -559,13 +603,13 @@ describe('chat initial preparation budget', () => {
     h.terminal = { busy: true, phase: 'running', error: undefined }
     mount(); await submitPreparation('先讨论这个标题')
     const original = h.starts[0].execution
-    await act(async () => { await vi.advanceTimersByTimeAsync(MAX_GENERATION_TASK_DURATION_MS + 1) })
+    await act(async () => { await vi.advanceTimersByTimeAsync(DEFAULT_GENERATION_TASK_DURATION_MS + 1) })
     h.capture.mockImplementationOnce(() => new Promise(() => {}))
     await submitPreparation('以现在的内容继续')
     const refreshed = h.capture.mock.calls.at(-1)![0].execution
     expect(h.capture.mock.calls.at(-1)![0]).toMatchObject({ scope: 'page', target: { anchorId: 'send-time-target' } })
     expect(refreshed.startedAt).toBe(original.deadlineAt + 1)
-    expect(refreshed.deadlineAt).toBe(refreshed.startedAt + MAX_GENERATION_TASK_DURATION_MS)
+    expect(refreshed.deadlineAt).toBe(refreshed.startedAt + DEFAULT_GENERATION_TASK_DURATION_MS)
     expect(screen.getByText(/本任务剩余约 20 分钟/)).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: '停止' }))
     await act(async () => { await vi.advanceTimersByTimeAsync(0) })

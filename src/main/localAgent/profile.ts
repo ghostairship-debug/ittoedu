@@ -93,6 +93,14 @@ export function generationInitialRequestForPrompt(request: GenerationRequest) {
   // Sources remain attached to their items and all readable files stay indexed.
   // These inventories duplicate those paths/targets or are read on demand.
   const { assets: _assets, runtimeSources: _runtimeSources, ...initialContext } = context ?? {}
+  if (initialContext.navigation && typeof initialContext.navigation === 'object' && !Array.isArray(initialContext.navigation)) {
+    const navigation = initialContext.navigation as { current?: unknown; states?: unknown[]; rules?: unknown[] }
+    // Keep the concrete step/scene distinction hot when it can affect this page.
+    // Full per-state targets and unchanged rules remain in the staged request.
+    initialContext.navigation = (navigation.states?.length ?? 0) > 1 || navigation.rules?.length
+      ? { current: navigation.current, details: 'request.json context.navigation：当前导航事实优先于旧记忆；完整逐状态目标与未改规则，须核对用户要求。声明目标不等于实际点击证据。' }
+      : undefined
+  }
   if (Array.isArray(initialContext.pages) && initialContext.modificationScope === 'project' && initialContext.reference !== 'course') {
     initialContext.pages = initialContext.pages.filter((page: any) => page.location?.id === initialContext.focusLocationId)
       .map((page: any) => initialContext.reference === 'selection' ? { ...page, backgrounds: undefined,
@@ -100,8 +108,10 @@ export function generationInitialRequestForPrompt(request: GenerationRequest) {
   }
   // The prompt's native-path guidance already states this instruction verbatim
   // in meaning. Keep all actual capability cards, schemas and references intact.
+  // The applicability projection stays in the staged request.json (same-source
+  // first-route exclusions); the wire prompt cannot afford its repeated bytes.
   if (initialContext.capabilities && typeof initialContext.capabilities === 'object' && !Array.isArray(initialContext.capabilities)) {
-    const { instruction: _capabilityInstruction, ...capabilities } = initialContext.capabilities as Record<string, unknown>
+    const { instruction: _capabilityInstruction, applicability: _applicability, ...capabilities } = initialContext.capabilities as Record<string, unknown>
     if (typeof capabilities.semanticVersion === 'string' && Array.isArray(capabilities.cards)) {
       capabilities.cards = capabilities.cards.map(card => {
         if (!card || typeof card !== 'object' || Array.isArray(card) || card.semanticVersion !== capabilities.semanticVersion) return card
@@ -109,6 +119,15 @@ export function generationInitialRequestForPrompt(request: GenerationRequest) {
         const { semanticVersion: _duplicateVersion, ...contract } = card
         return contract
       })
+    }
+    if (Array.isArray(capabilities.createRecommendations)) {
+      // Creation recommendations repeat full discovery entries for each
+      // destination/carrier. Keep the discovered tool identities hot; exact
+      // destination indexes, conditions and query entries remain in request.json.
+      capabilities.createToolIds = [...new Set(capabilities.createRecommendations.flatMap(recommendation =>
+        recommendation && typeof recommendation === 'object' && Array.isArray(recommendation.entries)
+          ? recommendation.entries.map((entry: { id: string }) => entry.id) : []))]
+      delete capabilities.createRecommendations
     }
     initialContext.capabilities = capabilities
   }
@@ -124,14 +143,32 @@ export function generationInitialRequestForPrompt(request: GenerationRequest) {
     ? Object.fromEntries(Object.entries(full.destinationAliases).filter(([, d]) => d.kind === 'update' ? focused.has(d.target.authoringAddress)
       : d.scope.locationId === initialContext.focusLocationId && focusedOwners.has(d.scope.ownerKey) && d.scope.parent.kind === 'owner' && d.scope.insertion.kind === 'append'))
     : full.destinationAliases
+  // The initial view names the existing aliases; the staged request remains the
+  // only source of complete revision-bound destinations used by the helper.
+  const targetAliases = new Map(Object.entries(destinationAliases).flatMap(([alias, destination]) =>
+    destination.kind === 'update' ? [[JSON.stringify(destination.target), alias] as const] : []))
+  if (Array.isArray(initialContext.pages)) {
+    initialContext.pages = initialContext.pages.map((page: any) => ({ ...page,
+      ...(Array.isArray(page.backgrounds) ? { backgrounds: page.backgrounds.map((background: any) => ({ ...background,
+        target: targetAliases.get(JSON.stringify(background.target)) ?? background.target,
+      })) } : {}),
+    }))
+  }
+  const initialDestinations = Object.fromEntries(Object.entries(destinationAliases).map(([alias, destination]) => {
+    if (destination.kind === 'update') return [alias, { kind: destination.kind,
+      target: { owner: destination.target.owner, itemId: destination.target.itemId, authoringAddress: destination.target.authoringAddress } }]
+    const { projectId: _projectId, documentRevision: _revision, revisionPolicy: _policy,
+      sessionGeneration: _generation, ownerKey: _ownerKey, ...scope } = destination.scope
+    return [alias, { kind: destination.kind, scope }]
+  }))
   return { ...wire,
-    destinationAliases,
+    destinationAliases: initialDestinations,
     ...(execution ? { deadlineAt: execution.deadlineAt } : {}),
     ...(context ? { context: { ...initialContext, ...(reusable ? { assets: reusable.assets } : {}) } } : {}),
     ...(full.observation ? { observation: observationIdentity } : {}),
     ...(Object.keys(assetAliases).length ? { assetAliases } : {}),
     resourceIndex: full.resourceIndex.filter(file => !['resources/project/document.json', 'resources/project/targets.json'].includes(file.path)).map(({ encoding: _encoding, ...file }) => file),
-    requestDetails: { path: 'request.json', fields: ['destinationAliases', 'context.assets', 'assetAliases', 'context.runtimeSources', 'observation.files'],
+    requestDetails: { path: 'request.json', fields: ['destinationAliases', 'context.assets', 'assetAliases', 'context.runtimeSources', ...(initialContext.navigation ? ['context.navigation'] : []), 'observation.files', 'context.capabilities.applicability', 'context.capabilities.createRecommendations'],
       ...(reusable ? { assetInventory: reusable.coverage } : {}) },
   }
 }
@@ -159,9 +196,9 @@ export function buildGenerationPrompt(adapter: LocalAgentId, request: Generation
   const channel = profile.resultChannel
   const terminal = (kind: 'answer' | 'edit') => `${GENERATION_RESULT_OPEN}${JSON.stringify({ version: 1, requestId: request.requestId, kind })}${GENERATION_RESULT_CLOSE}`
   const output = channel === 'session-staging-file'
-    ? `draft.json={summary,steps,afterCommit}。node <fileAccess.candidateHelper> --request <request.json> --input <draft.json>生成candidate.json；预检非提交。勿手抄路径/UUID/base64。候选附${terminal('edit')}；无新候选将kind改为answer。`
+    ? `draft.json={summary,steps,afterCommit}。node <fileAccess.candidateHelper> --request <request.json> --input <draft.json> [--check]生成candidate.json；三态边界：--check通过返回status:prechecked/delivery:not-delivered且未写candidate.json，不算交付；去掉--check写文件后返回status:ready-for-host/delivery:ready-for-host/candidateFile:candidate.json，只是候选但未提交；只有宿主最终回执committed/unchanged才可声称已应用。勿手抄路径/UUID/base64。候选附${terminal('edit')}；无新候选将kind改为answer。`
     : channel === 'app-server-json-schema'
-      ? 'final_answer按outputSchema：编辑kind=edit/reply=null。多步写本轮candidate.json（version=2，step.input对象）并检查；candidate只交{version:1,requestId:本轮ID,candidateFile:"candidate.json"}。小候选直接交candidate，step.input用JSON字符串。答复kind=reply/reply=文本/candidate=null。'
+      ? 'final_answer按outputSchema：编辑kind=edit/reply=null。多步写本轮candidate.json并检查：helper生成的完整version=1保持原样；手写version=2使用本轮destination别名字符串，不写carrier，step.input为对象。不得只改version混用两种步骤格式；预检拒绝后须修正再交付。candidate只交{version:1,requestId:本轮ID,candidateFile:"candidate.json"}。小候选直接交candidate，step.input用JSON字符串。答复kind=reply/reply=文本/candidate=null。'
       : `候选只在最终正文用 ${GENERATION_OPEN}JSON${GENERATION_CLOSE} 交付，写 candidate.json 不算交付。没有新候选（含宿主提交后的完成确认）直接自然语言回复。`
   return [
     publicCourseReplyGuidance,
@@ -179,7 +216,7 @@ export function buildGenerationPrompt(adapter: LocalAgentId, request: Generation
     ...(!request.intent || request.intent === 'edit' ? [
     'v2: requestId/summary/afterCommit/steps; step=id/tool/destination/input. d1 etc: destinationAliases. Selection is focus, not permission; preserve other content.',
     ...((request.context as any)?.componentSources?.length ? ['组件源码：先读 context.componentSources。node <fileAccess.candidateHelper> --request <fileAccess.request> --component-target <实例别名> --work-dir <fileAccess.root>/component-work --init；编辑副本后去掉 --init，加 --summary <修改>，需验证加 --observe <检查事项>。helper 自动封装基线/补丁，不手抄 hash 或内联源码。能力/历史按需读取。'] : []),
-    'Use supplied cards; host fills IDs/defaults. Query insert with --nativeType. Fallback: edit resources/project/document.json keeping id/revision/editability; write {document:V9} to resources/result.json; project.document input={artifact:{$candidateFile:"resources/result.json"}}, any current alias.',
+    'Use supplied cards; host fills IDs/defaults. Query insert with --nativeType. Fallback: read document.json via resourceIndex.localPath; keep id/revision/editability; write {document:V9} to fileAccess.root/resources/result.json; project.document input={artifact:{$candidateFile:"resources/result.json"}}, any current alias.',
     'afterCommit={version:1,action:"finish"}结束；需验证用{version:1,action:"observe",reason:"具体检查"}。勿为总结续轮。',
     '已有资产{"$asset":"a1"}见assetAliases/request.json；前序用{"$result":{"stepId":"s1","kind":"asset-id","index":0}}。kind还可package-id/item-id/location-id，禁猜ID。',
     ...(request.destinations.some(destination => destination.kind === 'create') ? [

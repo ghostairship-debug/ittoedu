@@ -1,3 +1,4 @@
+import { createArchiveFixture as createCourseProjectArchive } from '../fixtures/teacherController'
 import crypto from 'node:crypto'
 import os from 'node:os'
 import path from 'node:path'
@@ -6,7 +7,6 @@ import { strToU8, zipSync } from 'fflate'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
 import {
-  createCourseProjectArchive,
   detectCourseProjectArchiveFormat,
 } from '@/renderer/project/courseProjectArchive'
 import { shouldOfferCourseProjectRecovery } from '@/renderer/project/courseProjectLifecycle'

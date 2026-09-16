@@ -91,13 +91,33 @@ export function createFlowEditorHistory(project: CourseProjectDocument): FlowEdi
   return createResourceAwareAuthoringHistory(project)
 }
 
+// Ephemeral grouping metadata only; the existing past/present/future remain the sole history.
+const flowInputGroups = new WeakMap<FlowEditorHistory, { group: string; surfaceId: string }>()
+
+function changedFlowTarget(before: CourseProjectDocument, after: CourseProjectDocument): string | undefined {
+  if (before.id !== after.id || after.revision !== before.revision + 1) return undefined
+  if (JSON.stringify(before.assets) !== JSON.stringify(after.assets) || JSON.stringify(before.componentPackages) !== JSON.stringify(after.componentPackages)) return undefined
+  if (before.surfaces.length !== after.surfaces.length) return undefined
+  const changed = before.surfaces.filter((surface, index) => JSON.stringify(surface) !== JSON.stringify(after.surfaces[index]))
+  return changed.length === 1 && changed[0]!.type === 'flow' && after.surfaces.some(surface => surface.id === changed[0]!.id && surface.type === 'flow') ? changed[0]!.id : undefined
+}
+
 export function commitFlowEditorHistory(
   history: FlowEditorHistory,
   next: CourseProjectDocument,
+  groupOrLimit?: string | number,
   limit = FLOW_EDITOR_HISTORY_LIMIT,
 ): FlowEditorHistory {
   if (next === history.present) return history
-  return commitResourceAwareAuthoringHistory(history, next, limit)
+  const group = typeof groupOrLimit === 'string' ? groupOrLimit : undefined
+  const target = group ? changedFlowTarget(history.present, next) : undefined
+  const previous = flowInputGroups.get(history)
+  const grouped = group && target && previous?.group === group && previous.surfaceId === target && history.future.length === 0 && history.past.length > 0 && !isFlowEditorTransactionFrame(history.past.at(-1)!)
+  const result = grouped
+    ? Object.freeze({ present: next, past: history.past, future: history.future })
+    : commitResourceAwareAuthoringHistory(history, next, typeof groupOrLimit === 'number' ? groupOrLimit : limit)
+  if (group && target) flowInputGroups.set(result, { group, surfaceId: target })
+  return result
 }
 
 export function commitFlowEditorTransactionHistory(
@@ -121,10 +141,12 @@ export function flowEditorRedoResourceTransition(
 }
 
 export function undoFlowEditorHistory(history: FlowEditorHistory): FlowEditorHistory {
+  flowInputGroups.delete(history)
   return undoResourceAwareAuthoringHistory(history)
 }
 
 export function redoFlowEditorHistory(history: FlowEditorHistory): FlowEditorHistory {
+  flowInputGroups.delete(history)
   return redoResourceAwareAuthoringHistory(history)
 }
 

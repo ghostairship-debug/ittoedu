@@ -68,6 +68,7 @@ interface SlideVisualStateContext {
 }
 
 interface ComponentVisualNode {
+  role?: 'teacher-controller'
   id: string
   name: string
   type: 'external-component'
@@ -415,10 +416,11 @@ function collectControllerObstructionItems(input: {
     )
   ))
   visibleNodes
-    .filter((node) => false)
+    .filter((node) => node.type === 'external-component' && node.role === 'teacher-controller')
     .forEach((controller) => {
       const controllerBounds = rotatedRectangleAabb(controller)
       interactiveNodes.forEach((interactive) => {
+        if (interactive.id === controller.id) return
         const interactiveBounds = rotatedRectangleAabb(interactive)
         const targetArea = area(interactiveBounds)
         if (
@@ -506,6 +508,7 @@ function layerItemToVisualNode(item: LayerItem): VisualInspectNode | null {
     return {
       ...base,
       type: 'external-component',
+      ...(item.role ? { role: item.role } : {}),
       component: structuredClone(item.component),
       props: structuredClone(item.props),
     }

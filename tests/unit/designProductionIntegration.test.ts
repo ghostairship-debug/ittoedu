@@ -1,3 +1,4 @@
+import { plainDocumentText } from '@/shared/document/content'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { useEditorStore, selectActiveCourseProjectDocument } from '../../src/renderer/store/editorStore'
 import { recipeDefaults } from '../../src/renderer/recipes/recipeCatalog'
@@ -12,21 +13,23 @@ describe('design production through the active editor transaction', () => {
   it('creates a Recipe with one undo and reopens the actual sorting component bytes', () => {
     const store = useEditorStore.getState()
     const context = store.prepareDesignProduction()!
+    const initialPackages = structuredClone(store.componentPackages)
+    const initialCount = Object.keys(initialPackages).length
     expect(store.applyCourseRecipe({ recipeId: 'classify-sort-v1', target: {
       projectId: context.document.id, revision: context.document.revision, locationId: context.sessionToken.locationId,
     }, slots: { ...recipeDefaults('classify-sort-v1'), mode: 'sort' } }, context.sessionToken)).toBe(true)
     const created = document()
-    expect(Object.keys(useEditorStore.getState().componentPackages)).toHaveLength(1)
+    expect(Object.keys(useEditorStore.getState().componentPackages)).toHaveLength(initialCount + 1)
     useEditorStore.getState().undo()
     expect(document()).toEqual(context.document)
-    expect(Object.keys(useEditorStore.getState().componentPackages)).toHaveLength(0)
+    expect(useEditorStore.getState().componentPackages).toEqual(initialPackages)
     useEditorStore.getState().redo()
     expect(document()).toEqual(created)
     const bytes = useEditorStore.getState().exportV9SlideCandidateArchive()!
     useEditorStore.getState().createNewProject()
     expect(useEditorStore.getState().reopenV9SlideCandidateArchive(bytes)).toBe(true)
     expect(document()).toEqual(created)
-    expect(Object.keys(componentPackagesToArchiveFiles(useEditorStore.getState().componentPackages))).toHaveLength(1)
+    expect(Object.keys(componentPackagesToArchiveFiles(useEditorStore.getState().componentPackages))).toHaveLength(initialCount + 1)
   })
 
   it('commits batch edits in Flow as one history entry and rejects an old preview after an edit', () => {
@@ -40,7 +43,7 @@ describe('design production through the active editor transaction', () => {
     const body = fixture.surfaces.find(s => s.type === 'flow')!
     const paragraph = body.blocks.find(b => b.id === block.id)!
     if (paragraph.type !== 'paragraph') throw new Error('expected paragraph')
-    paragraph.text = '旧内容 旧内容'
+    paragraph.content = { inlines: [{ type: 'text', text: '旧内容 旧内容' }] }
     useEditorStore.getState().loadCourseProject(fixture, null)
     const live = useEditorStore.getState().prepareDesignProduction()!
     const preview = createTextReplacePreview(live, { scope: 'page', find: '旧内容', replacement: '新内容' })

@@ -206,14 +206,14 @@ function courseShell(): Omit<CourseProjectDocument, 'locations' | 'startLocation
 
 function createFlowProject(): CourseProjectDocument {
   const blocks: FlowBlock[] = [
-    { id: 'h1', type: 'heading', level: 1, text: '标题一' },
-    { id: 'p-body', type: 'paragraph', text: '普通段落' },
+    { id: 'h1', type: 'heading', level: 1, content: { inlines: [{ type: 'text', text: '标题一' }] }},
+    { id: 'p-body', type: 'paragraph', content: { inlines: [{ type: 'text', text: '普通段落' }] }},
     {
       id: 'media-inline',
       type: 'media',
       assetId: 'asset-image',
       mediaKind: 'image',
-      caption: '文中图',
+      caption: { inlines: [{ type: 'text', text: '文中图' }] },
       layout: 'content-width',
     },
     {
@@ -221,7 +221,7 @@ function createFlowProject(): CourseProjectDocument {
       type: 'media',
       assetId: 'asset-audio',
       mediaKind: 'audio',
-      caption: '文中声音',
+      caption: { inlines: [{ type: 'text', text: '文中声音' }] },
       layout: 'content-width',
     },
     {
@@ -231,7 +231,7 @@ function createFlowProject(): CourseProjectDocument {
       props: { title: '文中组件' },
       staticFallbackAssetId: 'asset-fallback',
     },
-    { id: 'h2', type: 'heading', level: 2, text: '标题二' },
+    { id: 'h2', type: 'heading', level: 2, content: { inlines: [{ type: 'text', text: '标题二' }] }},
   ]
   const project: CourseProjectDocument = {
     ...courseShell(),
@@ -283,9 +283,9 @@ function componentConversionFixture(withFallback: boolean) {
   surface.blocks.push({
     id: 'section-target',
     type: 'section',
-    title: '指定分节',
+    title: { inlines: [{ type: 'text', text: '指定分节' }] },
     collapsedByDefault: false,
-    blocks: [{ id: 'section-paragraph', type: 'paragraph', text: '分节正文' }],
+    blocks: [{ id: 'section-paragraph', type: 'paragraph', content: { inlines: [{ type: 'text', text: '分节正文' }] }}],
   })
   if (withFallback) {
     base.assets['asset-fallback'] = {

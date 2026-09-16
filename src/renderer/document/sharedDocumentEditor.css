@@ -1,0 +1,14 @@
+.shared-document-editor{color-scheme:light;color:#1f2937;background:white;min-height:240px}.shared-document-toolbar{display:flex;gap:6px;position:sticky;top:0;background:#f8fafc;padding:8px;z-index:1}.shared-document-editor .ProseMirror{outline:none;padding:24px;min-height:200px;white-space:pre-wrap;overflow-wrap:break-word;line-height:1.7}.shared-document-editor:not(.shared-document-editor--flow) .ProseMirror p{margin:0 0 12px}.document-object{border-left:3px solid #cbd5e1;padding:8px 14px;margin:12px 0}.document-table [data-document-slot]{border:1px solid #cbd5e1;padding:6px}.document-object-card{padding:20px;background:#f1f5f9;border:1px solid #cbd5e1;border-radius:6px}.document-math{cursor:text}.shared-document-editor .ProseMirror-selectednode{outline:2px solid #2563eb}.shared-document-editor .cm-editor{min-height:240px}.shared-document-editor [role=alert]{color:#b91c1c}
+.shared-document-toolbar{flex-wrap:wrap}.shared-document-toolbar input[type=number]{width:52px}.shared-document-toolbar input[type=color]{width:28px;height:24px}.shared-document-editor table{border-collapse:collapse;width:100%}.shared-document-editor:not(.shared-document-editor--flow) td,.shared-document-editor:not(.shared-document-editor--flow) th{border:1px solid #cbd5e1;min-width:60px;padding:6px;position:relative}.shared-document-editor .selectedCell{background:#dbeafe}.flow-paper .shared-document-editor{background:transparent}
+
+.shared-document-editor--flow .ProseMirror{padding:0;min-height:0;line-height:inherit;display:flow-root}
+.flow-body-content .shared-document-editor--flow{min-height:0;color:inherit;background:transparent}
+.flow-document-format-host{position:absolute;top:4px;right:8px;z-index:6;max-width:calc(100% - 16px);max-height:calc(100% - 8px);overflow:auto}
+.flow-document-format{background:#f8fafc;border:1px solid #cbd5e1;border-radius:5px;font-size:14px;color:#1f2937}
+.flow-document-format>summary{cursor:pointer;padding:3px 8px;text-align:right}
+.flow-document-format[open]{max-width:680px;box-shadow:0 3px 12px #0002}
+.flow-document-format .shared-document-toolbar{position:static}
+
+.shared-document-form{display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:8px;background:#f8fafc;border-top:1px solid #cbd5e1}
+.shared-document-form label{display:flex;align-items:center;gap:4px;max-width:100%}
+.shared-document-form input:not([type=checkbox]){min-width:0;max-width:100%}

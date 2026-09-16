@@ -16,6 +16,23 @@
       "observeButton": {
         "additionalProperties": false,
         "properties": {
+          "expectLocationId": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          },
+          "expectStateId": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "label": {
             "maxLength": 200,
             "minLength": 1,

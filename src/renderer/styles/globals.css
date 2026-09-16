@@ -6064,3 +6064,20 @@ button:disabled {
 .controller-property-details[open] > summary { margin-bottom: 12px; }
 .controller-property-details > .property-section { padding: 8px 0; border: 0; }
 .controller-property-details .controller-button-row { min-width: 0; }
+
+/* Embedded lesson workbench uses its own available width, not desktop width. */
+.editor-panel-slot { display: contents; }
+.editor-panel-slot[hidden] { display: none; }
+.lesson-course-tab .app-shell { min-width: 0; min-height: 0; grid-template-rows: auto minmax(0, 1fr) 26px; }
+.lesson-course-tab .toolbar { flex-wrap: wrap; min-height: 52px; padding: 6px 8px; gap: 4px; }
+.lesson-course-tab .toolbar__brand { min-width: 0; }
+.lesson-course-tab .status-bar { min-width: 0; overflow: hidden; }
+.editor-panel-layout--compact { position: relative; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
+.editor-panel-controls { display: flex; flex-wrap: wrap; gap: 6px; padding: 5px 8px; border-bottom: 1px solid var(--border); }
+.editor-panel-controls button { padding: 5px 9px; border: 1px solid var(--border); border-radius: 5px; background: var(--panel-bg); color: var(--text-primary); }
+.editor-panel-controls button[aria-expanded=true] { background: var(--accent-soft); }
+.editor-panel-layout--compact > .editor-center { grid-column: 1; grid-row: 2; }
+.editor-panel-layout--compact > .editor-panel-slot:not([hidden]) { display: block; position: absolute; top: 40px; bottom: 0; width: min(312px, 100%); z-index: 40; background: var(--panel-bg); box-shadow: 0 4px 18px #0008; }
+.editor-panel-layout--compact > .editor-panel-slot--structure { left: 0; }
+.editor-panel-layout--compact > .editor-panel-slot--properties { right: 0; }
+.editor-panel-layout--compact .editor-panel-slot > .panel { height: 100%; min-width: 0; width: 100%; }

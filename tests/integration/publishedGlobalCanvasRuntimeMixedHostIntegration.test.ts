@@ -1,3 +1,4 @@
+import { queryDeep } from '../fixtures/teacherController'
 import { buildPublishedFixture as buildPublishedCourseV2Payload } from '../fixtures/teacherController'
 import { isControllerFixture } from '../fixtures/teacherController'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -715,7 +716,7 @@ describe('Published V2 session-global canvas-runtime API 2 ownership', () => {
     expect(restartedContext.courseState.get('restart-probe')).toBe('fresh-write')
 
     const controllerFrame = globalWrapper(container, slideSurfaceId, fixture.controllerId)
-    const controllerRestart = controllerFrame.querySelector<HTMLButtonElement>(
+    const controllerRestart = queryDeep<HTMLButtonElement>(controllerFrame,
       `[data-controller-button-id="${fixture.restartButtonId}"]`,
     )
     if (!controllerRestart) throw new Error('missing controller restart button')

@@ -1,3 +1,4 @@
+import { withDefaultComponentController } from '@/renderer/components/teacherControllerComponent'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createBlankFlowCourseProject } from '@/renderer/project/createFlowCourseProject'
 import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
@@ -7,7 +8,7 @@ import { createCourseAuthoringSession, updateCourseAuthoringSessionRevision } fr
 import { createCourseChatObservation } from '@/renderer/ui/chat/courseChatObservation'
 import { GenerationTaskController } from '@/renderer/authoring/generation/generationTaskController'
 import type { DesktopAPI } from '@/shared/ipcTypes'
-import { generationCommitReceiptSchema, MAX_GENERATION_TASK_DURATION_MS, type GenerationRequest } from '@/shared/generationContract'
+import { generationCommitReceiptSchema, DEFAULT_GENERATION_TASK_DURATION_MS, type GenerationRequest } from '@/shared/generationContract'
 
 // Observation transport is a unit port; snapshot generation and target construction are real.
 const h = vi.hoisted(() => ({ state: undefined as any, capture: vi.fn(), activate: vi.fn(), inspect: vi.fn(), prepare: vi.fn(),
@@ -40,10 +41,10 @@ function fixture() {
   document.surfaces.push(...later.surfaces); document.locations.push(...later.locations)
   const first = document.surfaces[0]!, second = document.surfaces[1]!
   if (first.type !== 'flow' || second.type !== 'flow') throw new Error('Flow required')
-  first.blocks.push({ type: 'paragraph', id: 'old-selection', text: '旧正文' })
-  second.blocks.push({ type: 'paragraph', id: 'current-selection', text: '手改后的正文' })
+  first.blocks.push({ type: 'paragraph', id: 'old-selection', content: { inlines: [{ type: 'text', text: '旧正文' }] } })
+  second.blocks.push({ type: 'paragraph', id: 'current-selection', content: { inlines: [{ type: 'text', text: '手改后的正文' }] } })
   const owner = { projectId: document.id, projectPath: 'C:/chat-unit.h5lesson' }
-  h.state = { document, projectPath: owner.projectPath, assetFiles: {}, componentPackages: {}, activateCourseLocation: h.activate,
+  h.state = { document, projectPath: owner.projectPath, assetFiles: {}, componentPackages: withDefaultComponentController(document).componentPackages, activateCourseLocation: h.activate,
     bindGenerationTaskRequest: (request: GenerationRequest, ports: { committed(receipt: unknown): void }) => h.bindings.set(request.requestId, ports),
     releaseGenerationTaskRequest: (id: string) => h.bindings.delete(id), isGenerationTaskCommitting: () => false,
     courseAuthoringSession: createCourseAuthoringSession({ locationId: document.startLocationId, surfaceType: 'flow', revision: 0, itemIds: ['old-selection'] }) }
@@ -70,7 +71,7 @@ describe('chat observation refresh', () => {
   it('keeps a newly committed Flow heading inside the frozen document without widening feedback destinations', async () => {
     const { bridge, input } = fixture(), first = await bridge.capture({ ...input, scope: 'page' })
     const document = h.state.document, surface = document.surfaces[0]
-    surface.blocks.push({ type: 'heading', id: 'new-heading', level: 2, text: '新小节' })
+    surface.blocks.push({ type: 'heading', id: 'new-heading', level: 2, content: { inlines: [{ type: 'text', text: '新小节' }] } })
     document.locations.push({ id: 'new-heading', kind: 'flow-block', blockId: 'new-heading', surfaceId: surface.id, label: '新小节' })
     document.revision = 1
     const created = buildFlowEditorView({ project: document, locationId: document.startLocationId }).blocks.find(block => block.blockId === 'new-heading')!
@@ -193,7 +194,7 @@ describe('chat observation refresh', () => {
   it.each(['selection', 'page'] as const)('recovers the selected replacement in the latest %s snapshot after a committed stage', async scope => {
     const { bridge, input } = fixture(), first = await bridge.capture({ ...input, scope })
     const surface = h.state.document.surfaces[0]
-    surface.blocks = surface.blocks.map((block: any) => block.id === 'old-selection' ? { id: 'replacement-content', type: 'paragraph', text: '替换后的正文' } : block)
+    surface.blocks = surface.blocks.map((block: any) => block.id === 'old-selection' ? { id: 'replacement-content', type: 'paragraph', content: { inlines: [{ type: 'text', text: '替换后的正文' }] } } : block)
     h.state.document.revision = 1
     const oldTarget = first.destinations.find(value => value.kind === 'update' && value.target.itemId === 'old-selection')!
     if (oldTarget.kind !== 'update') throw new Error('Expected target')
@@ -339,15 +340,15 @@ describe('chat observation preparation lifecycle', () => {
     const pending = bridge.capture(input).catch(error => error)
     await vi.advanceTimersByTimeAsync(0)
     expect(h.capture).toHaveBeenCalledTimes(1)
-    await vi.advanceTimersByTimeAsync(MAX_GENERATION_TASK_DURATION_MS)
-    expect(await pending).toMatchObject({ message: expect.stringContaining('20分钟执行期限已到') })
+    await vi.advanceTimersByTimeAsync(DEFAULT_GENERATION_TASK_DURATION_MS)
+    expect(await pending).toMatchObject({ message: expect.stringContaining('设置的执行预算已到') })
     expect(() => bridge.instructionWithUserInput('继续')).toThrow('当前任务引用已关闭')
     delayed.resolve(lateValue)
     await vi.advanceTimersByTimeAsync(0)
     expect(() => bridge.instructionWithUserInput('继续')).toThrow('当前任务引用已关闭')
     const fresh = await bridge.capture({ ...input, instruction: '新的任务' })
     expect(fresh.instruction).toBe('新的任务')
-    expect(fresh.execution?.startedAt).toBe(1000 + MAX_GENERATION_TASK_DURATION_MS)
+    expect(fresh.execution?.startedAt).toBe(1000 + DEFAULT_GENERATION_TASK_DURATION_MS)
   })
 
   it.each(['file-status', 'capture', 'inspection'] as const)('ignores a superseded late %s result without overwriting the new task', async stage => {
@@ -428,10 +429,10 @@ describe('chat observation preparation lifecycle', () => {
     await vi.advanceTimersByTimeAsync(5000)
     const next = await bridge.captureNext(first)
     expect(next.execution).toEqual(first.execution)
-    await vi.advanceTimersByTimeAsync(MAX_GENERATION_TASK_DURATION_MS - 5000)
-    await expect(bridge.captureNext(next)).rejects.toThrow('20分钟执行期限已到')
+    await vi.advanceTimersByTimeAsync(DEFAULT_GENERATION_TASK_DURATION_MS - 5000)
+    await expect(bridge.captureNext(next)).rejects.toThrow('设置的执行预算已到')
     const fresh = await bridge.refreshFromUser('以最新要求继续', 'edit')
-    expect(fresh.execution).toEqual({ version: 1, startedAt: Date.now(), deadlineAt: Date.now() + MAX_GENERATION_TASK_DURATION_MS })
+    expect(fresh.execution).toEqual({ version: 1, startedAt: Date.now(), deadlineAt: Date.now() + DEFAULT_GENERATION_TASK_DURATION_MS })
     const supplied: NonNullable<GenerationRequest['execution']> = { version: 1, startedAt: Date.now() - 10, deadlineAt: Date.now() + 1000 }
     expect((await bridge.refreshFromUser('再次补充', 'edit', supplied)).execution).toEqual(supplied)
   })

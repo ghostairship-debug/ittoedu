@@ -1,3 +1,4 @@
+import { plainDocumentText, type FlowTextContent } from '@/shared/document/content'
 import { describe, expect, it } from 'vitest'
 import {
   collectCourseProjectReferences,
@@ -230,7 +231,7 @@ function flowProject(blocks: FlowBlock[], backgroundColor?: string): CourseProje
     id: 'course-flow',
     locations: [{
       id: 'location-flow',
-      label: start.type === 'heading' ? start.text : '正文',
+      label: start.type === 'heading' ? plainDocumentText(start.content) : '正文',
       kind: 'flow-block',
       surfaceId: 'surface-flow',
       blockId: start.id,
@@ -272,7 +273,7 @@ describe('Course Project V9 core contract', () => {
     expect(flowBlockSchema.safeParse({
       id: 'bad',
       type: 'paragraph',
-      text: 'x',
+      content: { inlines: [{ type: 'text', text: 'x' }] },
       level: 2,
     }).success).toBe(false)
   })
@@ -606,154 +607,34 @@ describe('Course Project V9 core contract', () => {
     expect(courseProjectDocumentSchema.safeParse(invalidOrdering).success).toBe(false)
   })
 
-  it('reads legacy Flow plain-text JSON without runs', () => {
-    const legacyBlocks = [
-      { id: 'heading', type: 'heading', level: 1, text: '标题' },
-      { id: 'paragraph', type: 'paragraph', text: '正文' },
-      {
-        id: 'list',
-        type: 'list',
-        ordered: true,
-        items: [{ id: 'item-1', text: '第一项' }],
-      },
-      { id: 'quote', type: 'quote', text: '引用', citation: '出处' },
-      {
-        id: 'table',
-        type: 'table',
-        columns: [{ id: 'c1', header: '列' }],
-        rows: [{ id: 'r1', cells: { c1: '值' } }],
-      },
-    ] as const
-
-    const parsedBlocks = legacyBlocks.map((block) => flowBlockSchema.parse(block))
-    expect(parsedBlocks).toEqual(legacyBlocks)
-
-    const project = courseProjectDocumentSchema.parse(flowProject([...parsedBlocks]))
-    const surface = project.surfaces[0]
-    if (surface?.type !== 'flow') throw new Error('expected flow surface')
-    const heading = surface.blocks[0]
-    const paragraph = surface.blocks[1]
-    const list = surface.blocks[2]
-    const quote = surface.blocks[3]
-    const table = surface.blocks[4]
-    if (heading?.type !== 'heading') throw new Error('expected heading')
-    if (paragraph?.type !== 'paragraph') throw new Error('expected paragraph')
-    if (list?.type !== 'list') throw new Error('expected list')
-    if (quote?.type !== 'quote') throw new Error('expected quote')
-    if (table?.type !== 'table') throw new Error('expected table')
-
-    expect(heading.runs).toBeUndefined()
-    expect(paragraph.runs).toBeUndefined()
-    expect(list.items[0]?.runs).toBeUndefined()
-    expect(quote.runs).toBeUndefined()
-    expect(table.rows[0]?.cells.c1).toBe('值')
-
-    expect(normalizeFlowRichText({ text: heading.text })).toEqual({
-      text: '标题',
-      runs: [{ start: 0, end: 2, style: {} }],
-    })
-    expect(decodeFlowTableCell(table.rows[0]!.cells.c1!)).toEqual({
-      text: '值',
-      runs: [{ start: 0, end: 1, style: {} }],
-    })
+  it('rejects old Flow body shapes in every former string carrier', () => {
+    const oldBlocks = [
+      { id: 'h', type: 'heading', level: 1, text: '旧标题' },
+      { id: 'p', type: 'paragraph', text: '旧正文', runs: [] },
+      { id: 'l', type: 'list', ordered: true, items: [{ id: 'i', text: '旧列表' }] },
+      { id: 'q', type: 'quote', content: { inlines: [] }, citation: '旧引用' },
+      { id: 't', type: 'table', columns: [{ id: 'c', header: '旧列' }], rows: [{ id: 'r', cells: { c: '旧格' } }] },
+      { id: 'f', type: 'formula', formulaId: 'eq', accessibleText: 'x', ast: { type: 'token', value: 'x' } },
+    ]
+    for (const block of oldBlocks) expect(flowBlockSchema.safeParse(block).success).toBe(false)
   })
 
-  it('round-trips Flow runs and keeps plain-text fallback consistent', () => {
+  it('round-trips styled inlines and keeps derived plain text consistent', () => {
+    const text = (value: string, style = {}): FlowTextContent => ({ inlines: [{ type: 'text', text: value, style }] })
     const richBlocks: FlowBlock[] = [
-      {
-        id: 'heading',
-        type: 'heading',
-        level: 1,
-        text: '标题',
-        runs: [{ start: 0, end: 2, style: { bold: true } }],
-      },
-      {
-        id: 'paragraph',
-        type: 'paragraph',
-        text: '正文强调',
-        runs: [{ start: 2, end: 4, style: { italic: true, color: '#2563eb' } }],
-      },
-      {
-        id: 'list',
-        type: 'list',
-        ordered: false,
-        items: [{
-          id: 'item-1',
-          text: '第一项',
-          runs: [{ start: 0, end: 3, style: { underline: true } }],
-        }],
-      },
-      {
-        id: 'quote',
-        type: 'quote',
-        text: '引用',
-        citation: '出处',
-        runs: [{ start: 0, end: 2, style: { highlightColor: '#fde68a' } }],
-      },
-      {
-        id: 'table',
-        type: 'table',
-        columns: [{ id: 'c1', header: '列' }],
-        rows: [{
-          id: 'r1',
-          cells: {
-            c1: {
-              text: '值',
-              runs: [{ start: 0, end: 1, style: { strike: true } }],
-            },
-          },
-        }],
-      },
+      { id: 'h', type: 'heading', level: 1, content: text('标题', { bold: true }) },
+      { id: 'p', type: 'paragraph', content: { inlines: [{ type: 'text', text: '正文' }, { type: 'text', text: '强调', style: { italic: true, color: '#2563eb' } }] } },
+      { id: 'l', type: 'list', ordered: false, items: [{ id: 'i', content: text('第一项', { underline: true }) }] },
+      { id: 'q', type: 'quote', content: text('引用', { highlightColor: '#fde68a' }), citation: text('出处') },
+      { id: 't', type: 'table', columns: [{ id: 'c', header: text('列') }], rows: [{ id: 'r', cells: { c: text('值', { strike: true }) } }] },
     ]
-
-    const parsed = richBlocks.map((block) => flowBlockSchema.parse(block))
-    const reparsed = parsed.map((block) => flowBlockSchema.parse(
-      JSON.parse(JSON.stringify(block)) as unknown,
-    ))
-    expect(reparsed).toEqual(parsed)
-
-    const heading = parsed[0]
-    const paragraph = parsed[1]
-    const list = parsed[2]
-    const quote = parsed[3]
-    const table = parsed[4]
-    if (heading?.type !== 'heading') throw new Error('expected heading')
-    if (paragraph?.type !== 'paragraph') throw new Error('expected paragraph')
-    if (list?.type !== 'list') throw new Error('expected list')
-    if (quote?.type !== 'quote') throw new Error('expected quote')
-    if (table?.type !== 'table') throw new Error('expected table')
-
-    expect(flowPlainTextFallback(heading)).toBe('标题')
-    expect(flowRunsFallback({ text: heading.text })).toEqual([
-      { start: 0, end: 2, style: {} },
-    ])
-    expect(flowRunsFallback(heading)).toEqual(heading.runs)
-    expect(flowPlainTextFallback({ runs: heading.runs })).toBe('')
-    expect(decodeFlowTableCell(table.rows[0]!.cells.c1!)).toEqual({
-      text: '值',
-      runs: [{ start: 0, end: 1, style: { strike: true } }],
-    })
-
-    const project = courseProjectDocumentSchema.parse(flowProject(parsed))
-    const surface = project.surfaces[0]
-    if (surface?.type !== 'flow') throw new Error('expected flow surface')
-    expect(surface.blocks).toEqual(parsed)
-    expect(flowBlockSchema.safeParse({
-      id: 'overflow',
-      type: 'paragraph',
-      text: '短',
-      runs: [{ start: 0, end: 8, style: { bold: true } }],
-    }).success).toBe(false)
-    expect(flowBlockSchema.safeParse({
-      id: 'unknown-run-style',
-      type: 'paragraph',
-      text: '严格',
-      runs: [{
-        start: 0,
-        end: 2,
-        style: { bold: true, unexpected: 'must-reject' },
-      }],
-    }).success).toBe(false)
+    const parsed = courseProjectDocumentSchema.parse(flowProject(richBlocks))
+    expect(courseProjectDocumentSchema.parse(JSON.parse(JSON.stringify(parsed)))).toEqual(parsed)
+    expect(normalizeFlowRichText(text('标题'))).toEqual({ text: '标题', runs: [{ start: 0, end: 2, style: {} }] })
+    expect(flowPlainTextFallback(text('标题'))).toBe('标题')
+    expect(flowRunsFallback(text('标题', { bold: true }))).toEqual([{ start: 0, end: 2, style: { bold: true } }])
+    expect(decodeFlowTableCell(text('值', { strike: true }))).toEqual({ text: '值', runs: [{ start: 0, end: 1, style: { strike: true } }] })
+    expect(flowBlockSchema.safeParse({ id: 'bad', type: 'paragraph', content: { inlines: [{ type: 'text', text: '严格', style: { unexpected: true } }] } }).success).toBe(false)
   })
 
   it('treats omitted Spatial and Flow backgroundColor as white without injecting the field', () => {
@@ -772,7 +653,7 @@ describe('Course Project V9 core contract', () => {
       id: 'heading',
       type: 'heading',
       level: 1,
-      text: '标题',
+      content: { inlines: [{ type: 'text', text: '标题' }] },
     }]))
     const flowSurface = flow.surfaces[0]
     if (flowSurface?.type !== 'flow') throw new Error('expected flow surface')
@@ -793,7 +674,7 @@ describe('Course Project V9 core contract', () => {
       id: 'heading',
       type: 'heading',
       level: 1,
-      text: '标题',
+      content: { inlines: [{ type: 'text', text: '标题' }] },
     }], '#ecfdf5'))
     const flowSurface = flow.surfaces[0]
     if (flowSurface?.type !== 'flow') throw new Error('expected flow surface')
@@ -804,7 +685,7 @@ describe('Course Project V9 core contract', () => {
       id: 'heading',
       type: 'heading',
       level: 1,
-      text: '标题',
+      content: { inlines: [{ type: 'text', text: '标题' }] },
     }], '#111318ff')).success).toBe(false)
 
     const slide = minimalSlideProject()
@@ -975,7 +856,7 @@ describe('Course Project V9 core contract', () => {
   })
 
   it('adds Flow surface backgroundMode/backgroundAssetId that default to own and are strict', () => {
-    const project = flowProject([{ id: 'heading', type: 'heading', level: 1, text: '标题' }])
+    const project = flowProject([{ id: 'heading', type: 'heading', level: 1, content: { inlines: [{ type: 'text', text: '标题' }] } }])
     const flowSurface = project.surfaces[0]
     if (flowSurface?.type !== 'flow') throw new Error('expected flow surface')
 
@@ -1208,9 +1089,9 @@ describe('Course Project V9 core contract', () => {
       if (block.type === 'heading' || block.type === 'paragraph' || block.type === 'quote') {
         expect(block.textAlign).toBeUndefined()
         expect(block.lineSpacing).toBeUndefined()
-        block.runs?.forEach((run) => {
-          expect(run.style.fontFamily).toBeUndefined()
-          expect(run.style.fontSize).toBeUndefined()
+        block.content.inlines.forEach((inline) => {
+          expect((inline.type === 'text' ? inline.style?.fontFamily : undefined)).toBeUndefined()
+          expect(inline.style?.fontSize).toBeUndefined()
         })
       }
       if (block.type === 'media' || block.type === 'component') {
@@ -1232,32 +1113,23 @@ describe('Course Project V9 core contract', () => {
         id: 'heading-additive',
         type: 'heading',
         level: 2,
-        text: '标题与自定义字体',
+        content: { inlines: [{ type: 'text', text: '标题', style: { fontFamily: 'CustomFont, sans-serif', fontSize: 32 } }, { type: 'text', text: '与自定义字体' }] },
         textAlign: 'center',
         lineSpacing: 24,
-        runs: [
-          {
-            start: 0,
-            end: 2,
-            style: {
-              fontFamily: 'CustomFont, sans-serif',
-              fontSize: 32,
-            },
-          },
-        ],
+
       },
       {
         id: 'paragraph-additive',
         type: 'paragraph',
-        text: '段落右对齐',
+        content: { inlines: [{ type: 'text', text: '段落右对齐' }] },
         textAlign: 'right',
         lineSpacing: 18,
       },
       {
         id: 'quote-additive',
         type: 'quote',
-        text: '引用文本',
-        citation: '出处',
+        content: { inlines: [{ type: 'text', text: '引用文本' }] },
+        citation: { inlines: [{ type: 'text', text: '出处' }] },
         textAlign: 'left',
         lineSpacing: 16,
       },
@@ -1367,8 +1239,8 @@ describe('Course Project V9 core contract', () => {
     if (headingBlock?.type !== 'heading') throw new Error('expected heading block')
     expect(headingBlock.textAlign).toBe('center')
     expect(headingBlock.lineSpacing).toBe(24)
-    expect(headingBlock.runs?.[0]?.style.fontFamily).toBe('CustomFont, sans-serif')
-    expect(headingBlock.runs?.[0]?.style.fontSize).toBe(32)
+    expect((headingBlock.content.inlines[0]?.type === 'text' ? headingBlock.content.inlines[0].style?.fontFamily : undefined)).toBe('CustomFont, sans-serif')
+    expect(headingBlock.content.inlines[0]?.style?.fontSize).toBe(32)
   })
 
   it('keeps additive NET-01 fields undefined on a minimal project', () => {
@@ -1746,7 +1618,7 @@ describe('Course Project V9 core contract', () => {
         expect(flowBlockSchema.safeParse(block).success).toBe(true)
         expect(flowBlockSchema.safeParse({ ...block, x: 1 }).success).toBe(false)
         expect(flowBlockSchema.safeParse({ ...block, height: 0 }).success).toBe(false)
-        expect(flowBlockSchema.safeParse({ id: 'section-chart', type: 'section', title: 'Charts', collapsedByDefault: true, blocks: [block] }).success).toBe(true)
+        expect(flowBlockSchema.safeParse({ id: 'section-chart', type: 'section', title: { inlines: [{ type: 'text', text: 'Charts' }] }, collapsedByDefault: true, blocks: [block] }).success).toBe(true)
       }
     })
 

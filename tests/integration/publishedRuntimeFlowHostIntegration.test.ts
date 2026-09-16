@@ -230,8 +230,8 @@ function flowRuntimeFixture(): FlowRuntimeFixture {
   const flow = withLocations.surfaces.find((surface) => surface.type === 'flow')
   if (!flow || flow.type !== 'flow') throw new Error('expected authored Flow surface')
   flow.blocks = [
-    { id: 'flow-runtime-heading-a', type: 'heading', level: 1, text: 'Runtime A' },
-    { id: 'flow-runtime-heading-b', type: 'heading', level: 1, text: 'Runtime B' },
+    { id: 'flow-runtime-heading-a', type: 'heading', level: 1, content: { inlines: [{ type: 'text', text: 'Runtime A' }] } },
+    { id: 'flow-runtime-heading-b', type: 'heading', level: 1, content: { inlines: [{ type: 'text', text: 'Runtime B' }] } },
   ]
   syncFlowCourseLocations(withLocations, flow.id)
   project = courseProjectDocumentSchema.parse(withLocations)
@@ -402,6 +402,7 @@ describe('Published V2 Flow surface Runtime playback', () => {
     const host = await mountFlowLocationTryRun({
       container,
       project: fixture.project,
+      components: withDefaultComponentController(fixture.project).componentPackages,
       locationId: fixture.firstFlowLocationId,
     })
 
@@ -586,3 +587,4 @@ describe('Published V2 Flow surface Runtime playback', () => {
     frame.remove()
   })
 })
+import { withDefaultComponentController } from '@/renderer/components/teacherControllerComponent'

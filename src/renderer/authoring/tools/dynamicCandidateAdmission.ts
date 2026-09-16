@@ -11,6 +11,7 @@ import { resolveRuntimeDomButton } from '../generation/runtimeDomControlObservat
 import { componentRuntimeSourceIdentity } from '../../../shared/componentRegistryIdentity'
 import { validateDynamicCandidateFallbackAssets } from './dynamicCandidateFallbackAssets'
 import { dynamicAdmissionScope } from './dynamicAdmissionScope'
+import { componentHasVisibleContent } from './dynamicInstanceContent'
 
 export interface DynamicVerificationOptions {
   verificationMode?: 'full-admission' | 'public-props'
@@ -255,6 +256,11 @@ export async function runDynamicCandidateHostSmoke(project: CourseProjectDocumen
             if (width <= 0 || height <= 0 || width > 4096 || height > 4096) throw new Error(`实例 ${id} 的后备图面尺寸超限或不可见`)
             const dataUrl = await capturePublishedSurfacePng({ root: element, width, height, transparentBackground: true,
               layers: [{ element, x: 0, y: 0, width, height, rotation: 0, opacity: 1 }] })
+            if (fullAdmission && element.dataset.componentInstanceId && !await componentHasVisibleContent(element, dataUrl)) {
+              throw new AuthoringToolFailure([{ code: 'dynamic-component-empty-content',
+                message: `组件 ${id} 的 create 已返回，但实际宿主没有可见内容；请将创建的界面挂入 ctx.dom.root，并在就绪后提供实际绘制内容。`,
+                path: ['locations', locationId, 'instances', id, 'create'] }])
+            }
             captureBytes += dataUrl.length
             if (captureBytes > 48_000_000) throw new Error('实例后备图面超过本轮资源上限')
             captures.push({ instanceId: id, locationId, width, height, dataUrl })
@@ -290,9 +296,26 @@ export async function runDynamicCandidateHostSmoke(project: CourseProjectDocumen
             await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
             if (!active) throw new Error('按钮检查已取消')
             const after = button.readText()
+            // Optional positive destination check: the click must land on the
+            // expected location/state inside the real session, not merely
+            // avoid an accidental change. Without expectations the behavior
+            // is exactly the previous observe-only path.
+            let destination: DynamicButtonObservation['destination']
+            if (check.expectLocationId !== undefined || check.expectStateId !== undefined) {
+              const arrived = mountedSession.readObservationState()
+              destination = {
+                ...(check.expectLocationId !== undefined ? { expectedLocationId: check.expectLocationId } : {}),
+                ...(check.expectStateId !== undefined ? { expectedStateId: check.expectStateId } : {}),
+                actualLocationId: arrived.locationId,
+                actualStateId: arrived.stateId,
+                matched: (check.expectLocationId === undefined || arrived.locationId === check.expectLocationId)
+                  && (check.expectStateId === undefined || arrived.stateId === check.expectStateId),
+              }
+            }
             buttonClick = { version: 1, instanceId: check.instanceId, label: check.label, input: 'electron-mouse',
               x: current.x, y: current.y, beforeText: before.text, afterText: after.text,
-              textTruncated: before.truncated || after.truncated, clickedAt, observedAt: Date.now(), functionalResult: 'requires-review' }
+              textTruncated: before.truncated || after.truncated, clickedAt, observedAt: Date.now(),
+              ...(destination ? { destination } : {}), functionalResult: 'requires-review' }
             await sample('after-button-click')
             if (failures.length) throw new Error(failures.join('\n'))
           }

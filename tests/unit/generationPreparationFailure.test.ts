@@ -27,6 +27,7 @@ describe('structured candidate preparation failure', () => {
     const candidateId = crypto.randomUUID(), candidate = { version: 1, requestId: request.requestId, candidateId, summary: '更新参数', steps: ['first', 'failed'].map(id => ({ id, tool: 'component.configure', carrier: 'existing-component', destination: request.destinations[0], input: { operation: 'update', packageId: 'input-package', staticFallback: { assetId: 'input-asset' } } })) }
     const error = await coordinator.prepare(request, candidate).catch(value => value)
     expect(readGenerationFailure(error)).toEqual({ version: 1, stage: 'dynamic-admission', requestId: request.requestId, candidateId, stepId: 'failed', tool: 'component.configure', destination: request.destinations[0], diagnostics,
+      recovery: { action: 'repair-candidate', message: '生成的组件/Runtime 在真实宿主准入中失败：按诊断中的实例与字段修正实现后重交同一任务候选；这是实现缺陷而非运输故障，不原样重试，也不退化为截图或静态替代。' },
       assetIds: ['input-asset', 'known-asset'], packageIds: ['input-package', 'known-package'], behaviorEvidence: [first, failed] })
     expect(commit).not.toHaveBeenCalled(); expect(document).toEqual(before)
   })

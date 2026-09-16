@@ -1,4 +1,4 @@
-import { applyTextRunStyle, remapTextRuns } from '../../shared/textRuns'
+import { documentContentSchema, documentTextLength, normalizeDocumentText, plainDocumentText, type FlowTextContent } from '../../shared/document/content'
 import type { AssetMeta } from '../../shared/contracts/media-v1'
 import type { TextRunStyle } from '../../shared/contracts/native-v1'
 import {
@@ -132,7 +132,7 @@ export type FlowEditorCommandRequest =
   | { name: 'copy' }
   | { name: 'paste'; clipboard?: readonly FlowBlock[] }
   | { name: 'duplicate' }
-  | { name: 'apply-text'; text: string; runs?: FlowRichText['runs'] }
+  | { name: 'apply-text'; content: FlowTextContent }
 
 function failCommand(reason: string): FlowCommandResult {
   return { ok: false, reason, historyEntry: false }
@@ -203,7 +203,7 @@ function blocksAtParent(surfaceBlocks: FlowBlock[], parentId: string | null): Fl
 }
 
 function defaultInsertBlock(): FlowEditorBlockInput {
-  return { type: 'paragraph', text: '' }
+  return { type: 'paragraph', content: { inlines: [] } }
 }
 
 export function insertFlowEditorBlock(
@@ -314,11 +314,32 @@ export function importAndReplaceFlowMediaBlock(
   }, '已替换素材', options)
 }
 
+export function replaceFlowDocumentContent(
+  document: CourseProjectDocument,
+  surfaceId: string,
+  blocks: FlowBlock[],
+  options: FlowCommandOptions = {},
+): FlowCommandResult {
+  const blocked = staleOrGlobal(document, options)
+  if (blocked) return blocked
+  const parsed = documentContentSchema.safeParse({ blocks })
+  if (!parsed.success) return failCommand(parsed.error.issues[0]?.message ?? '正文无效')
+  if (listFlowCourseAnchors(parsed.data.blocks).length === 0) return failCommand(FLOW_LAST_HEADING_REASON)
+  const retained = new Set<string>()
+  for (const block of listFlowCourseAnchors(parsed.data.blocks)) retained.add(block.id)
+  const removed = document.locations.filter(location => location.kind === 'flow-block' && location.surfaceId === surfaceId && !retained.has(location.blockId))
+  return runMutation(document, draft => {
+    flowSurfaceIn(draft, surfaceId).blocks = structuredClone(parsed.data.blocks)
+    syncFlowCourseLocations(draft, surfaceId)
+    repairRemovedCourseReferences(draft, { removedLocationIds: new Set(removed.map(location => location.id)), removedControllerTargetIds: controllerTargetIdsForLocations(removed) })
+  }, '已更新正文', options)
+}
+
 export function applyFlowCommittedText(
   document: CourseProjectDocument,
   target: FlowEditorBlockTarget,
-  nextText: string,
-  options: FlowCommandOptions & { runs?: FlowRichText['runs'] } = {},
+  nextContent: FlowTextContent,
+  options: FlowCommandOptions = {},
 ): FlowCommandResult {
   const blocked = staleOrGlobal(document, options)
   if (blocked) return blocked
@@ -333,22 +354,15 @@ export function applyFlowCommittedText(
   return runMutation(document, (draft) => {
     const found = resolveFlowBlock(draft, target)
     if (found.block.type === 'callout') {
-      found.block.body = nextText
+      found.block.body = structuredClone(nextContent)
       return
     }
     if (found.block.type === 'code') {
-      found.block.code = nextText
+      found.block.code = plainDocumentText(nextContent)
       return
     }
     if (!isRichTextFlowBlock(found.block)) throw new Error('当前块不能写入正文')
-    const previous = found.block.text
-    found.block.text = nextText
-    if (options.runs) found.block.runs = options.runs
-    else if (found.block.runs) {
-      const remapped = remapTextRuns(previous, nextText, found.block.runs)
-      if (remapped.length > 0) found.block.runs = remapped
-      else delete found.block.runs
-    }
+    found.block.content = structuredClone(nextContent)
     syncFlowCourseLocations(draft, target.surfaceId)
   }, '已更新文字', options)
 }
@@ -591,7 +605,7 @@ export function splitFlowEditorBlock(
   try {
     const found = resolveFlowBlock(document, target)
     if (!isRichTextFlowBlock(found.block)) return failCommand('当前块不能从文字中间拆分')
-    const length = Array.from(found.block.text).length
+    const length = documentTextLength(found.block.content)
     if (!Number.isInteger(offset) || offset < 0 || offset > length) {
       return failCommand('拆分位置无效')
     }
@@ -601,16 +615,15 @@ export function splitFlowEditorBlock(
   return runMutation(document, (draft) => {
     const found = resolveFlowBlock(draft, target)
     if (!isRichTextFlowBlock(found.block)) throw new Error('当前块不能从文字中间拆分')
-    const left = sliceFlowRichText(found.block, 0, offset)
-    const right = sliceFlowRichText(found.block, offset, Array.from(found.block.text).length)
-    found.block.text = left.text
-    if (left.runs) found.block.runs = left.runs
-    else delete found.block.runs
+    const left = sliceFlowRichText(found.block.content, 0, offset)
+    const right = sliceFlowRichText(found.block.content, offset, documentTextLength(found.block.content))
+    found.block.content = left
     const nextParagraph: FlowParagraphBlock = {
       id: stableFlowId('block'),
       type: 'paragraph',
-      text: right.text,
-      ...(right.runs ? { runs: right.runs } : {}),
+      content: right,
+      ...(found.block.textAlign === undefined ? {} : { textAlign: found.block.textAlign }),
+      ...(found.block.lineSpacing === undefined ? {} : { lineSpacing: found.block.lineSpacing }),
     }
     found.blocks.splice(found.index + 1, 0, nextParagraph)
     syncFlowCourseLocations(draft, target.surfaceId)
@@ -631,6 +644,7 @@ export function mergeFlowEditorBlock(
     if (found.index === 0) return failCommand('没有可合并的上一段')
     const previous = found.blocks[found.index - 1]
     if (!previous || !isRichTextFlowBlock(previous)) return failCommand('上一段不能与当前块合并')
+    if (wouldLeaveSurfaceWithoutAnchor(flowSurfaceIn(document, target.surfaceId), new Set([found.block.id]))) return failCommand(FLOW_LAST_HEADING_REASON)
   } catch (error) {
     return failCommand(error instanceof Error ? error.message : '无法合并')
   }
@@ -640,12 +654,12 @@ export function mergeFlowEditorBlock(
     if (!isRichTextFlowBlock(found.block) || !previous || !isRichTextFlowBlock(previous)) {
       throw new Error('当前块不能合并')
     }
-    const merged = mergeFlowRichText(previous, found.block)
-    previous.text = merged.text
-    if (merged.runs) previous.runs = merged.runs
-    else delete previous.runs
+    const removedLocations = draft.locations.filter(location => location.kind === 'flow-block' && location.surfaceId === target.surfaceId && location.blockId === found.block.id)
+    const merged = mergeFlowRichText(previous.content, found.block.content)
+    previous.content = merged
     found.blocks.splice(found.index, 1)
     syncFlowCourseLocations(draft, target.surfaceId)
+    repairRemovedCourseReferences(draft, { removedLocationIds: new Set(removedLocations.map(location => location.id)), removedControllerTargetIds: controllerTargetIdsForLocations(removedLocations) })
   }, '已合并段落', options)
 }
 
@@ -654,24 +668,26 @@ function applyStyleToRichText(
   style: TextRunStyle,
   range: { start: number; end: number } | 'all',
 ): FlowRichText {
-  const length = Array.from(content.text).length
+  const length = documentTextLength(content)
   const start = range === 'all' ? 0 : range.start
   const end = range === 'all' ? length : range.end
-  const from = Math.max(0, Math.min(length, start))
-  const to = Math.max(from, Math.min(length, end === from ? length : end))
-  if (to <= from) return content
-  const runs = applyTextRunStyle(content.text, content.runs ?? [], from, to, style)
-  return runs.length > 0 ? { text: content.text, runs } : { text: content.text }
+  const middle = sliceFlowRichText(content, start, end)
+  for (const inline of middle.inlines) {
+    inline.style = inline.type === 'text' ? { ...inline.style, ...style } : { ...inline.style, ...(style.fontSize === undefined ? {} : { fontSize: style.fontSize }), ...(style.color === undefined ? {} : { color: style.color }) }
+  }
+  return normalizeDocumentText({ inlines: [...sliceFlowRichText(content, 0, start).inlines, ...middle.inlines, ...sliceFlowRichText(content, end, length).inlines] })
 }
 
 export function formatFlowEditorBlock(
   document: CourseProjectDocument,
   target: FlowEditorBlockTarget,
   spec: FlowBlockFormatSpec,
-  options: FlowCommandOptions & { textRange?: { start: number; end: number } } = {},
+  options: FlowCommandOptions & { textRange?: { start: number; end: number; listItemId?: string; tableRowId?: string; tableColumnId?: string } } = {},
 ): FlowCommandResult {
   const blocked = staleOrGlobal(document, options)
   if (blocked) return blocked
+  const textRange = spec.kind === 'text-style' ? spec.range ?? options.textRange : undefined
+  if (textRange && textRange !== 'all' && textRange.end <= textRange.start) return succeedNoop(document, '没有选中的文字')
   try {
     resolveFlowBlock(document, target)
   } catch (error) {
@@ -690,8 +706,9 @@ export function formatFlowEditorBlock(
           id: block.id,
           type: 'heading',
           level: spec.level,
-          text: block.text,
-          ...(block.runs ? { runs: block.runs } : {}),
+          content: block.content,
+          ...(block.textAlign === undefined ? {} : { textAlign: block.textAlign }),
+          ...(block.lineSpacing === undefined ? {} : { lineSpacing: block.lineSpacing }),
         }
         found.blocks[found.index] = next
       } else {
@@ -706,16 +723,18 @@ export function formatFlowEditorBlock(
         const next: FlowParagraphBlock = {
           id: block.id,
           type: 'paragraph',
-          text: block.text,
-          ...(block.runs ? { runs: block.runs } : {}),
+          content: block.content,
+          ...(block.textAlign === undefined ? {} : { textAlign: block.textAlign }),
+          ...(block.lineSpacing === undefined ? {} : { lineSpacing: block.lineSpacing }),
         }
         found.blocks[found.index] = next
       } else if (block.type === 'quote') {
         const next: FlowParagraphBlock = {
           id: block.id,
           type: 'paragraph',
-          text: block.text,
-          ...(block.runs ? { runs: block.runs } : {}),
+          content: block.content,
+          ...(block.textAlign === undefined ? {} : { textAlign: block.textAlign }),
+          ...(block.lineSpacing === undefined ? {} : { lineSpacing: block.lineSpacing }),
         }
         found.blocks[found.index] = next
       } else if (block.type !== 'paragraph') {
@@ -730,16 +749,18 @@ export function formatFlowEditorBlock(
         const next: FlowQuoteBlock = {
           id: block.id,
           type: 'quote',
-          text: block.text,
-          ...(block.runs ? { runs: block.runs } : {}),
+          content: block.content,
+          ...(block.textAlign === undefined ? {} : { textAlign: block.textAlign }),
+          ...(block.lineSpacing === undefined ? {} : { lineSpacing: block.lineSpacing }),
         }
         found.blocks[found.index] = next
       } else if (block.type === 'paragraph') {
         const next: FlowQuoteBlock = {
           id: block.id,
           type: 'quote',
-          text: block.text,
-          ...(block.runs ? { runs: block.runs } : {}),
+          content: block.content,
+          ...(block.textAlign === undefined ? {} : { textAlign: block.textAlign }),
+          ...(block.lineSpacing === undefined ? {} : { lineSpacing: block.lineSpacing }),
         }
         found.blocks[found.index] = next
       } else if (block.type !== 'quote') {
@@ -751,10 +772,17 @@ export function formatFlowEditorBlock(
     } else if (spec.kind === 'text-style') {
       const range = spec.range ?? options.textRange ?? 'all'
       if (isRichTextFlowBlock(block)) {
-        const next = applyStyleToRichText(block, spec.style, range)
-        block.text = next.text
-        if (next.runs) block.runs = next.runs
-        else delete block.runs
+        const next = applyStyleToRichText(block.content, spec.style, range)
+        block.content = next
+      } else if (block.type === 'list' && options.textRange?.listItemId) {
+        const item = block.items.find(item => item.id === options.textRange!.listItemId)
+        if (!item) throw new Error('列表项已失效')
+        item.content = applyStyleToRichText(item.content, spec.style, range)
+      } else if (block.type === 'table' && options.textRange?.tableRowId && options.textRange.tableColumnId) {
+        const row = block.rows.find(row => row.id === options.textRange!.tableRowId)
+        const content = row?.cells[options.textRange.tableColumnId]
+        if (!content || !row) throw new Error('表格单元格已失效')
+        row.cells[options.textRange.tableColumnId] = applyStyleToRichText(content, spec.style, range)
       } else {
         throw new Error('此类块不支持选区级文字格式')
       }
@@ -776,7 +804,7 @@ function deleteFlowText(
   try {
     const found = resolveFlowBlock(document, target)
     if (!isRichTextFlowBlock(found.block)) return failCommand('当前块不能删除文字')
-    const length = Array.from(found.block.text).length
+    const length = documentTextLength(found.block.content)
     let start = selection.textRange.start
     let end = selection.textRange.end
     if (start === end) {
@@ -791,10 +819,8 @@ function deleteFlowText(
     return runMutation(document, (draft) => {
       const draftFound = resolveFlowBlock(draft, target)
       if (!isRichTextFlowBlock(draftFound.block)) throw new Error('当前块不能删除文字')
-      const next = deleteFlowRichTextRange(draftFound.block, start, end)
-      draftFound.block.text = next.text
-      if (next.runs) draftFound.block.runs = next.runs
-      else delete draftFound.block.runs
+      const next = deleteFlowRichTextRange(draftFound.block.content, start, end)
+      draftFound.block.content = next
       syncFlowCourseLocations(draft, target.surfaceId)
     }, '已删除文字', options)
   } catch (error) {
@@ -979,7 +1005,7 @@ export function executeFlowEditorCommand(
       return formatFlowEditorBlock(document, primary, command.spec, {
         ...options,
         textRange: selection.textRange
-          ? { start: selection.textRange.start, end: selection.textRange.end }
+          ? { ...selection.textRange }
           : undefined,
       })
     case 'cut': {
@@ -1018,10 +1044,7 @@ export function executeFlowEditorCommand(
     }
     case 'apply-text':
       if (!primary) return failCommand('没有可写入的 Flow 块')
-      return applyFlowCommittedText(document, primary, command.text, {
-        ...options,
-        runs: command.runs,
-      })
+      return applyFlowCommittedText(document, primary, command.content, options)
     default:
       return failCommand('Flow 不支持该动作')
   }

@@ -1,3 +1,5 @@
+import { withDefaultComponentController } from '@/renderer/components/teacherControllerComponent'
+import { plainDocumentText } from '@/shared/document/content'
 import { isAuthoringHistoryTransactionFrame } from '../../src/renderer/authoring/resourceAwareAuthoringHistory'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
@@ -221,7 +223,7 @@ describe('unified Delete transaction', () => {
     const remaining = activeDocument().surfaces.find((candidate) => candidate.type === 'flow')
     expect(remaining?.type === 'flow'
       && remaining.blocks.some((block) => (
-        block.type === 'heading' && block.id === heading.id && block.text === heading.text
+        block.type === 'heading' && block.id === heading.id && plainDocumentText(block.content) === plainDocumentText(heading.content)
       )))
       .toBe(true)
   })
@@ -237,7 +239,7 @@ describe('unified Delete transaction', () => {
       surfaceId: initialSurface.id,
       parentId: null,
       index: initialSurface.blocks.length,
-      block: { type: 'heading', level: 1, text: '第二节' },
+      block: { type: 'heading', level: 1, content: { inlines: [{ type: 'text', text: '第二节' }] } },
     }, { expectedRevision: initial.history.present.revision })
     expect(inserted.ok).toBe(true)
     store.applyFlowCommand(inserted)
@@ -245,7 +247,7 @@ describe('unified Delete transaction', () => {
     if (!ready) throw new Error('expected updated Flow session')
     const readySurface = ready.history.present.surfaces.find((candidate) => candidate.type === 'flow')
     if (!readySurface || readySurface.type !== 'flow') throw new Error('expected updated Flow surface')
-    const heading = readySurface.blocks.find((block) => block.type === 'heading' && block.text === '第二节')
+    const heading = readySurface.blocks.find((block) => block.type === 'heading' && plainDocumentText(block.content) === '第二节')
     if (!heading) throw new Error('expected inserted Flow heading')
     const location = ready.history.present.locations.find((candidate) => (
       candidate.kind === 'flow-block' && candidate.blockId === heading.id
@@ -396,7 +398,7 @@ describe('unified Delete transaction', () => {
       },
     )
     courseProjectDocumentSchema.parse(document)
-    store.loadCourseProject(document, null)
+    store.loadCourseProject(document, null, {}, withDefaultComponentController(document).componentPackages)
     useEditorStore.getState().selectNodes([targetId])
 
     const result = useEditorStore.getState().routeEditorAction('delete')

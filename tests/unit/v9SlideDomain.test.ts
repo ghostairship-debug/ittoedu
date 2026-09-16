@@ -250,7 +250,7 @@ function v9SlideFixture(): CourseProjectDocument {
         type: 'flow',
         surfaceLayerItems: [],
         layout: { readingWidth: 760, wideContentWidth: 1120 },
-        blocks: [{ type: 'heading', id: 'flow-h1', level: 1, text: '讲义' }],
+        blocks: [{ type: 'heading', id: 'flow-h1', level: 1, content: { inlines: [{ type: 'text', text: '讲义' }] } }],
       },
     ],
     mixedPrintPlan: {

@@ -1,3 +1,4 @@
+import { plainDocumentText } from '../../src/shared/document/content'
 import {
   existsSync,
   appendFileSync,
@@ -60,7 +61,7 @@ function prepareMixedCopy(widthMode?: 'fluid'): void {
   for (let index = 0; index < 24; index += 1) {
     flow.blocks.push({
       id: `r18-089-scroll-${index}`, type: 'paragraph',
-      text: `第 ${index + 1} 段：${'正文随窗口宽度重排，纸张滚动与课件观察缩放保持独立。'.repeat(8)}`,
+      content: { inlines: [{ type: 'text', text: `第 ${index + 1} 段：${'正文随窗口宽度重排，纸张滚动与课件观察缩放保持独立。'.repeat(8)}` }] },
     })
   }
   const packageId = 'com.ittoedu.baseline.evidence-panel'
@@ -482,7 +483,7 @@ async function verifyFlowViewport(widthMode?: 'fluid'): Promise<void> {
     await expect.poll(() => {
       const flow = savedProject().surfaces.find(surface => surface.type === 'flow')
       const block = flow?.type === 'flow' && flow.blocks.find(item => item.id === 'mixed-flow-paragraph')
-      return block && block.type === 'paragraph' ? block.text : null
+      return block && block.type === 'paragraph' ? plainDocumentText(block.content) : null
     }).toBe('人工改稿后仍可保存重开。')
     expect(savedProject().revision).toBe(originalProject.revision + 1)
     expect(savedProject().globalLayerItems.find(entry => entry.item.layerItemId === 'mixed-global-controller')!.item).toEqual(originalController)

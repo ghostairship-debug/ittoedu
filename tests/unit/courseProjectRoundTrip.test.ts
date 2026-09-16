@@ -396,7 +396,7 @@ describe('Course Project V9 protocol round-trip', () => {
     const globalLayer = projects['global-layer-teacher-controller']!
     expect(globalLayer.globalLayerItems.map((entry) => (
       entry.item.kind === 'native' ? entry.item.content.nativeType : entry.item.kind
-    ))).toEqual(['text', 'teacher-controller'])
+    ))).toEqual(['text', 'component'])
     expect(globalLayer.surfaces[0]?.type === 'slide'
       && globalLayer.surfaces[0].scenes.some((scene) => (
         scene.layerItems.some((item) => (
@@ -428,7 +428,7 @@ describe('Course Project V9 protocol round-trip', () => {
     expect(surfaceRuntime.frame.mode).toBe('absolute')
 
     const component = projects.component!
-    expect(Object.keys(component.componentPackages)).toEqual(['com.example.v9-quiz'])
+    expect(Object.keys(component.componentPackages).sort()).toEqual(['com.example.v9-quiz', 'com.ittoedu.teacher-controller'])
     const componentSurface = component.surfaces[0]
     if (componentSurface?.type !== 'slide') throw new Error('expected slide surface')
     expect(componentSurface.scenes[0]?.layerItems.some((item) => item.kind === 'component')).toBe(true)
@@ -550,8 +550,8 @@ describe('Course Project V9 protocol round-trip', () => {
         surfaceLayerItems: [],
         layout: { readingWidth: 760, wideContentWidth: 1120 },
         blocks: [
-          { id: 'heading-1', type: 'heading', level: 1, text: '标题' },
-          { id: 'paragraph-1', type: 'paragraph', text: '正文' },
+          { id: 'heading-1', type: 'heading', level: 1, content: { inlines: [{ type: 'text', text: '标题' }] } },
+          { id: 'paragraph-1', type: 'paragraph', content: { inlines: [{ type: 'text', text: '正文' }] } },
         ],
       }],
     }

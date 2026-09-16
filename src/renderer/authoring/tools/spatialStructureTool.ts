@@ -1,7 +1,8 @@
 import { z } from 'zod'
 import { spatialCameraPoseSchema, spatialPathDocumentSchema, spatialRelationDocumentSchema } from '../../../shared/courseProjectSchema'
 import { openSpatialAuthoringSession, spatialSurfaceIn } from '../../course/spatialEditorCommands'
-import { addSpatialEditorCameraFrame, renameSpatialCameraFrame, updateSpatialCameraFramePose, deleteSpatialCameraFrameInSession, setSpatialCameraHome, reorderSpatialCameraFrames } from '../../course/spatialCameraCommands'
+import { addSpatialEditorCameraFrame, renameSpatialCameraFrame, updateSpatialCameraFramePose, deleteSpatialCameraFrameInSession, setSpatialCameraHome, reorderSpatialCameraFrames, spatialSessionCameraFittingWorldContent, spatialSessionHasWorldContent } from '../../course/spatialCameraCommands'
+import { STAGE_VIEWPORT_HEIGHT, STAGE_VIEWPORT_WIDTH } from '../../authoring/stageViewportTransform'
 import { addSpatialPath, updateSpatialPath, deleteSpatialPath, spatialPathAuthoringAddress, spatialCameraFrameAuthoringAddress, spatialGraphAuthoringAddress } from '../../course/spatialPathCommands'
 import { addSpatialRelation, updateSpatialRelation, deleteSpatialRelation, spatialRelationAuthoringAddress } from '../../course/spatialRelationCommands'
 import type { AuthoringToolDefinition } from './executeAuthoringTool'
@@ -15,6 +16,7 @@ export const spatialStructureToolInputSchema = z.discriminatedUnion('operation',
   z.object({ operation: z.literal('update-camera'), pose: spatialCameraPoseSchema.optional(), name: name.optional() }).strict(),
   z.object({ operation: z.literal('delete-camera') }).strict(),
   z.object({ operation: z.literal('set-home'), pose: spatialCameraPoseSchema }).strict(),
+  z.object({ operation: z.literal('fit-world-content') }).strict(),
   z.object({ operation: z.literal('add-path'), path }).strict(),
   z.object({ operation: z.literal('update-path'), path: path.partial() }).strict(),
   z.object({ operation: z.literal('delete-path') }).strict(),
@@ -25,6 +27,7 @@ export const spatialStructureToolInputSchema = z.discriminatedUnion('operation',
 
 export const spatialStructureTool: AuthoringToolDefinition<z.infer<typeof spatialStructureToolInputSchema>> = {
   name: 'spatial.structure', inputSchema: spatialStructureToolInputSchema,
+  description: 'Spatial world 结构。镜头操作只能写当前 Spatial world。fit-world-content 不接收模型计算的坐标：以已发布的 1280×720 设计视口和既有 padding 适配当前可见 world 内容，在一个事务中更新 camera.home 与 destination.target.locationId 对应的入口镜头帧；global HUD、教师控制器和其他 viewport 层不参与范围。它不改其他课程入口帧；无可见 world 内容时 unchanged。',
   plan({ document, destination, value }) {
     const { target, surface } = resolveAuthoringToolScope(document, destination)
     if (surface.type !== 'spatial-2d' || target.owner !== 'world') throw new Error('Spatial 结构工具需要 world owner')
@@ -34,7 +37,7 @@ export const spatialStructureTool: AuthoringToolDefinition<z.infer<typeof spatia
     let entityId = destination.kind === 'update' ? destination.target.itemId : ''
     const creating = value.operation.startsWith('add-')
     const kind = value.operation.endsWith('path') ? 'path' : value.operation.endsWith('relation') ? 'relation' : 'camera'
-    const addressFor = (id: string) => value.operation === 'set-home'
+    const addressFor = (id: string) => value.operation === 'set-home' || value.operation === 'fit-world-content'
       ? spatialGraphAuthoringAddress({ projectId: document.id, surfaceId: surface.id, entityId: id, field: 'camera.home' })
       : kind === 'path' ? spatialPathAuthoringAddress(document.id, surface.id, id)
       : kind === 'relation' ? spatialRelationAuthoringAddress(document.id, surface.id, id)
@@ -44,7 +47,7 @@ export const spatialStructureTool: AuthoringToolDefinition<z.infer<typeof spatia
       if (kind !== 'camera' && destination.scope.insertion.kind !== 'append') throw new Error('路径和关系仅追加，路径点顺序通过内容工具设置')
     } else {
       if (destination.kind !== 'update' || destination.target.authoringAddress !== addressFor(entityId)) throw new Error('Spatial 结构 authoringAddress 不匹配')
-      const exists = value.operation === 'set-home' ? entityId === surface.id
+      const exists = value.operation === 'set-home' || value.operation === 'fit-world-content' ? entityId === surface.id
         : kind === 'path' ? surface.world.paths?.some((entry) => entry.id === entityId)
         : kind === 'relation' ? surface.world.relations?.some((entry) => entry.id === entityId)
         : surface.camera.frames.some((entry) => entry.id === entityId)
@@ -64,6 +67,21 @@ export const spatialStructureTool: AuthoringToolDefinition<z.infer<typeof spatia
         break
       }
       case 'set-home': history = setSpatialCameraHome(history, surface.id, value.pose); break
+      case 'fit-world-content': {
+        if (!spatialSessionHasWorldContent(session)) break
+        const location = document.locations.find((entry) => entry.id === target.locationId)
+        if (
+          location?.kind !== 'spatial-camera'
+          || location.surfaceId !== surface.id
+        ) throw new Error('Spatial 取景需要当前镜头位置')
+        const pose = spatialSessionCameraFittingWorldContent(session, {
+          viewportWidth: STAGE_VIEWPORT_WIDTH,
+          viewportHeight: STAGE_VIEWPORT_HEIGHT,
+        })
+        history = setSpatialCameraHome(history, surface.id, pose)
+        history = updateSpatialCameraFramePose(history, surface.id, location.cameraFrameId, pose)
+        break
+      }
       case 'add-path': history = addSpatialPath(history, { surfaceId: surface.id, ...value.path }); break
       case 'update-path': history = updateSpatialPath(history, surface.id, entityId, value.path); break
       case 'delete-path': history = deleteSpatialPath(history, surface.id, entityId); break
@@ -85,13 +103,27 @@ export const spatialStructureTool: AuthoringToolDefinition<z.infer<typeof spatia
         }
       }
     }
-    const operation = creating ? 'created' : value.operation.startsWith('delete-') ? 'deleted' : 'updated'
+    const operation: 'created' | 'deleted' | 'updated' = creating
+      ? 'created'
+      : value.operation.startsWith('delete-') ? 'deleted' : 'updated'
+    const affected = [{ id: entityId, operation, ownerKey: target.ownerKey, authoringAddress: addressFor(entityId) }]
+    if (value.operation === 'fit-world-content') {
+      const location = document.locations.find((entry) => entry.id === target.locationId)
+      if (location?.kind === 'spatial-camera') {
+        affected.push({
+          id: location.cameraFrameId,
+          operation,
+          ownerKey: target.ownerKey,
+          authoringAddress: spatialCameraFrameAuthoringAddress(document.id, surface.id, location.cameraFrameId),
+        })
+      }
+    }
     return {
       transaction: { projectId: document.id, baseRevision: document.revision,
         nextDocument: history.present === session.history.present ? document : { ...history.present, revision: document.revision + 1 }, resourceChanges: {},
         selectionHint: { kind: 'authoring-tool-selection', locationId, stateId: null, owner: 'world', itemIds: [],
           graphSelection: kind !== 'camera' && operation !== 'deleted' ? { kind, id: entityId } : null } },
-      affected: [{ id: entityId, operation, ownerKey: target.ownerKey, authoringAddress: addressFor(entityId) }],
+      affected,
     }
   },
 }

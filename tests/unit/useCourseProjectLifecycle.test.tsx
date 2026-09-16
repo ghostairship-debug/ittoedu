@@ -6,6 +6,7 @@ import {
   type CourseProjectLifecyclePorts,
   type CourseProjectLifecycleWatch,
 } from '../../src/renderer/app/useCourseProjectLifecycle'
+import * as projectIo from '../../src/renderer/project/courseProjectIo'
 import { createCourseProjectArchive } from '../../src/renderer/project/courseProjectArchive'
 import { createBlankCourseProject } from '../../src/renderer/project/createCourseProject'
 import type { OpenProjectFileResult } from '../../src/shared/ipcTypes'
@@ -38,7 +39,7 @@ function deferred<T>(): Deferred<T> {
 
 function createSnapshot(): CanonicalCourseProjectSnapshot {
   return {
-    project: createBlankCourseProject(),
+    project: createBlankCourseProject({ includeDefaultController: false, controls: 'none' }),
     assetFiles: {},
     componentPackages: {},
   }
@@ -262,5 +263,127 @@ describe('useCourseProjectLifecycle stale results', () => {
     expect(ports.reportError).toHaveBeenCalledWith(
       '最近工程列表暂时无法更新，但不影响当前工程。',
     )
+  })
+})
+
+
+describe('course replacement and close ownership', () => {
+  it('detaches only after a successful standalone replacement and preserves lesson-origin activation', async () => {
+    const order: string[] = []
+    const ports = createPorts({ beforeReplace: vi.fn(async () => { order.push('flush'); return true }), createFlowProject: vi.fn(() => { order.push('create') }), onProjectReplaced: vi.fn(() => { order.push('detach') }) })
+    const { result } = renderHook(() => useCourseProjectLifecycle(ports, WATCH))
+    await act(async () => { expect(await result.current.newFlowProject()).toBe(true) })
+    expect(order).toEqual(['flush', 'create', 'detach'])
+    order.length = 0
+    await act(async () => { expect(await result.current.newFlowProject({ origin: 'lesson' })).toBe(true) })
+    expect(order).toEqual(['flush', 'create'])
+  })
+  it('flushes and detaches a toolbar recent-open only after a valid archive is loaded', async () => {
+    const order: string[] = []
+    const ports = createPorts({ beforeReplace: async () => { order.push('flush'); return true }, loadOpenedProject: () => { order.push('load') }, onProjectReplaced: () => { order.push('detach') } })
+    const { result } = renderHook(() => useCourseProjectLifecycle(ports, WATCH))
+    await act(async () => { expect(await result.current.openRecentProject('standalone.h5lesson')).toBe(true) })
+    expect(order).toEqual(['flush', 'load', 'detach'])
+    order.length = 0
+    await act(async () => { expect(await result.current.openRecentProject('lesson.h5lesson', { origin: 'lesson' })).toBe(true) })
+    expect(order).toEqual(['flush', 'load'])
+  })
+  it('retains project and lesson binding on flush failure, open cancellation, or edits during flush', async () => {
+    const ports = createPorts({ beforeReplace: vi.fn(async () => false), onProjectReplaced: vi.fn() })
+    const { result } = renderHook(() => useCourseProjectLifecycle(ports, WATCH))
+    await act(async () => { expect(await result.current.newProject()).toBe(false); result.current.openProject() })
+    expect(ports.createBlankProject).not.toHaveBeenCalled()
+    expect(ports.loadOpenedProject).not.toHaveBeenCalled()
+    expect(ports.onProjectReplaced).not.toHaveBeenCalled()
+    expect(ports.clearRecoveryProject).not.toHaveBeenCalled()
+    const flush = deferred<boolean>()
+    ports.beforeReplace = vi.fn(() => flush.promise)
+    let replacement!: Promise<boolean>
+    act(() => { replacement = result.current.newProject() })
+    await vi.waitFor(() => expect(ports.beforeReplace).toHaveBeenCalledTimes(1))
+    ports.captureIdentity = vi.fn(() => ({ ...IDENTITY, revision: 2 }))
+    await act(async () => { flush.resolve(true); expect(await replacement).toBe(false) })
+    expect(ports.createBlankProject).not.toHaveBeenCalled()
+    expect(ports.onProjectReplaced).not.toHaveBeenCalled()
+  })
+  it('keeps save cancellation unbound and reports the real prior path for Save As', async () => {
+    const ports = createPorts({ projectPath: () => 'original.h5lesson', saveProjectFile: vi.fn(async () => null), onProjectSaved: vi.fn() })
+    const { result } = renderHook(() => useCourseProjectLifecycle(ports, WATCH))
+    await act(async () => { expect(await result.current.saveProject(true)).toBe(false) })
+    expect(ports.acknowledgeSaved).not.toHaveBeenCalled()
+    expect(ports.onProjectSaved).not.toHaveBeenCalled()
+    expect(ports.clearRecoveryProject).not.toHaveBeenCalled()
+    ports.saveProjectFile = vi.fn(async () => ({ path: 'copy.h5lesson' }))
+    await act(async () => { expect(await result.current.saveProject(true)).toBe(true) })
+    expect(ports.onProjectSaved).toHaveBeenCalledWith(expect.objectContaining({ previousPath: 'original.h5lesson', path: 'copy.h5lesson', saveAs: true }))
+  })
+  it('acknowledges discard-close only after all recovery owners durably preserve drafts', async () => {
+    let close!: () => Promise<boolean>
+    const ports = createPorts({ desktopAvailable: () => true, preserveBeforeClose: vi.fn(async () => false), subscribePreserveAndCloseRequest: handler => { close = handler; return () => undefined } })
+    renderHook(() => useCourseProjectLifecycle(ports, WATCH))
+    await act(async () => { expect(await close()).toBe(false) })
+    ports.preserveBeforeClose = vi.fn(async () => true)
+    await act(async () => { expect(await close()).toBe(true) })
+    expect(ports.saveProjectFile).not.toHaveBeenCalled()
+    expect(ports.clearRecoveryProject).not.toHaveBeenCalled()
+  })
+})
+
+
+describe('lesson scope guard with unchanged project identity', () => {
+  it.each(['newProject', 'newFlowProject', 'newSpatialProject'] as const)('%s rejects scope changes after each asynchronous replacement boundary', async method => {
+    for (const boundary of ['confirm', 'flush', 'clear'] as const) {
+      let current = true
+      const ports = createPorts({
+        hasUnsavedChanges: () => true,
+        confirmDiscardChanges: vi.fn(async () => { if (boundary === 'confirm') current = false; return 'discard' as const }),
+        beforeReplace: vi.fn(async () => { if (boundary === 'flush') current = false; return true }),
+        clearRecoveryProject: vi.fn(async () => { if (boundary === 'clear') current = false }),
+      })
+      const hook = renderHook(() => useCourseProjectLifecycle(ports, WATCH))
+      let saved: boolean | undefined
+      await act(async () => { saved = await hook.result.current[method]({ origin: 'lesson', isCurrent: () => current }) })
+      expect(saved).toBe(false)
+      expect(ports.captureIdentity()).toEqual(IDENTITY)
+      expect(ports.createBlankProject).not.toHaveBeenCalled()
+      expect(ports.createFlowProject).not.toHaveBeenCalled()
+      expect(ports.createSpatialProject).not.toHaveBeenCalled()
+      hook.unmount()
+    }
+  })
+  it.each(['flush', 'pack', 'write'] as const)('save rejects a scope change after %s without acknowledging or binding it', async boundary => {
+    let current = true
+    const original = projectIo.saveCourseProjectDocumentAsync
+    if (boundary === 'pack') vi.spyOn(projectIo, 'saveCourseProjectDocumentAsync').mockImplementation(async data => { const bytes = await original(data); current = false; return bytes })
+    const ports = createPorts({
+      beforeSave: vi.fn(async () => { if (boundary === 'flush') current = false; return true }),
+      saveProjectFile: vi.fn(async () => { if (boundary === 'write') current = false; return { path: 'scope.h5lesson' } }),
+      onProjectSaved: vi.fn(async () => undefined),
+    })
+    const hook = renderHook(() => useCourseProjectLifecycle(ports, WATCH))
+    let saved: boolean | undefined
+    await act(async () => { saved = await hook.result.current.saveProject(false, { isCurrent: () => current }) })
+    expect(saved).toBe(false)
+    expect(ports.captureIdentity()).toEqual(IDENTITY)
+    expect(ports.saveProjectFile).toHaveBeenCalledTimes(boundary === 'write' ? 1 : 0)
+    expect(ports.acknowledgeSaved).not.toHaveBeenCalled()
+    expect(ports.onProjectSaved).not.toHaveBeenCalled()
+    hook.unmount()
+  })
+  it('preserves successful guarded creation and save', async () => {
+    const ports = createPorts({ onProjectSaved: vi.fn(async () => undefined) })
+    const hook = renderHook(() => useCourseProjectLifecycle(ports, WATCH))
+    await act(async () => {
+      expect(await hook.result.current.newProject({ origin: 'lesson', isCurrent: () => true })).toBe(true)
+      expect(await hook.result.current.newFlowProject({ origin: 'lesson', isCurrent: () => true })).toBe(true)
+      expect(await hook.result.current.newSpatialProject({ origin: 'lesson', isCurrent: () => true })).toBe(true)
+      expect(await hook.result.current.saveProject(false, { isCurrent: () => true })).toBe(true)
+    })
+    expect(ports.createBlankProject).toHaveBeenCalledOnce()
+    expect(ports.createFlowProject).toHaveBeenCalledOnce()
+    expect(ports.createSpatialProject).toHaveBeenCalledOnce()
+    expect(ports.acknowledgeSaved).toHaveBeenCalledOnce()
+    expect(ports.onProjectSaved).toHaveBeenCalledOnce()
+    hook.unmount()
   })
 })

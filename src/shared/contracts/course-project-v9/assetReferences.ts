@@ -1,3 +1,4 @@
+import { DEFAULT_TEACHER_CONTROLLER_SOURCE } from '../../defaultTeacherControllerSource'
 import {
   getComponentPropValue,
   mergeComponentProps,
@@ -365,7 +366,11 @@ export function analyzeCourseAssetReferences(
         path: ['componentPackages', packageKey, 'runtimeSource', offset],
       },
     ))
-    if (analyzeProjectAssetCalls(data.runtimeSource).dynamic) knownAssetIds.forEach(assetId => add(
+    // The exact bundled source only reads the declared background image prop.
+    // Edited or third-party source retains the conservative dynamic closure.
+    const declaredControllerAssets = data.runtimeSource === DEFAULT_TEACHER_CONTROLLER_SOURCE
+      && data.manifest.editor?.properties.some(property => property.type === 'image' && property.key === 'backgroundAssetId')
+    if (!declaredControllerAssets && analyzeProjectAssetCalls(data.runtimeSource).dynamic) knownAssetIds.forEach(assetId => add(
       assetId, 'component-runtime-source', 'direct', { ...location, packageId: component.packageId, path: ['componentPackages', packageKey, 'runtimeSource'] },
     ))
   }

@@ -1,3 +1,4 @@
+import type { TeacherControllerConfig } from '../../src/shared/teacherControllerConfig'
 import { isControllerFixture } from '../fixtures/teacherController'
 import { beforeEach, describe, expect, it } from 'vitest'
 import type {
@@ -213,7 +214,7 @@ describe('Project V8 global-layer editor store', () => {
     const store = useEditorStore.getState()
     store.setEditingScope('global')
     const controller = projectedGlobalLayer(useEditorStore.getState()).find(
-      (item) => item.node.type === 'teacher-controller',
+      (item) => item.node.type === 'external-component' && item.node.component?.packageId === 'com.ittoedu.teacher-controller',
     )!.node
 
     store.updateNode(controller.id, { visible: false })
@@ -237,14 +238,14 @@ describe('Project V8 global-layer editor store', () => {
     const currentController = projectedGlobalLayer(useEditorStore.getState()).find(
       (item) => item.node.id === controller.id,
     )!.node
-    if (currentController.type !== 'teacher-controller') throw new Error('缺少教师控制器')
+    if (currentController.type !== 'external-component') throw new Error('缺少教师控制器')
     useEditorStore.getState().updateNode(controller.id, {
       x: 2000,
       opacity: 0,
-      buttons: (currentController.buttons ?? []).map((button) => ({
+      props: { ...currentController.props, title: '保留教师标题', buttons: ((currentController.props as unknown as TeacherControllerConfig).buttons ?? []).map((button) => ({
         ...button,
         visible: false,
-      })),
+      })) },
     })
     useEditorStore.getState().updateGlobalLayerSettings(controller.id, {
       layer: 'underlay',
@@ -262,9 +263,10 @@ describe('Project V8 global-layer editor store', () => {
       visibility: { mode: 'all', sceneIds: [] },
       node: { opacity: 1, visible: true },
     })
-    if (repaired.node.type !== 'teacher-controller') throw new Error('缺少教师控制器')
+    if (repaired.node.type !== 'external-component') throw new Error('缺少教师控制器')
+    expect(repaired.node.props?.title).toBe('保留教师标题')
     expect(repaired.node.x).toBeLessThan(1280)
-    expect(repaired.node.buttons?.some((button) => button.visible)).toBe(true)
+    expect((repaired.node.props as unknown as TeacherControllerConfig).buttons?.some((button) => button.visible)).toBe(true)
   })
 
   it('accepts only global-capable V4 packages and creates an undoable placement', () => {
@@ -285,7 +287,7 @@ describe('Project V8 global-layer editor store', () => {
     store.addExternalComponentNode(global.manifest.id, 240, 90)
     const state = useEditorStore.getState()
     const placement = projectedGlobalLayer(state).find(
-      (item) => item.node.type === 'external-component',
+      (item) => item.node.type === 'external-component' && item.node.component?.packageId !== 'com.ittoedu.teacher-controller',
     )!
     expect(placement).toMatchObject({
       layer: 'overlay',
@@ -320,7 +322,7 @@ describe('Project V8 global-layer editor store', () => {
     store.setEditingScope('global')
     store.addExternalComponentNode(global.manifest.id)
     const nodeId = projectedGlobalLayer(useEditorStore.getState()).find(
-      (item) => item.node.type === 'external-component',
+      (item) => item.node.type === 'external-component' && item.node.component?.packageId !== 'com.ittoedu.teacher-controller',
     )!.node.id
 
     store.updateNode(nodeId, {
@@ -399,7 +401,7 @@ describe('Project V8 global-layer editor store', () => {
     store.addScene()
     let [firstScene, secondScene] = selectSlideSceneList(useEditorStore.getState())
     const controllerId = projectedGlobalLayer(useEditorStore.getState()).find(
-      (item) => item.node.type === 'teacher-controller',
+      (item) => item.node.type === 'external-component' && item.node.component?.packageId === 'com.ittoedu.teacher-controller',
     )!.node.id
 
     store.updateGlobalLayerSettings(controllerId, {
@@ -456,7 +458,7 @@ describe('Project V8 global-layer editor store', () => {
 
     let layer = projectedGlobalLayer(useEditorStore.getState())
     expect(layer.map((item) => item.node.type)).toEqual([
-      'teacher-controller',
+      'external-component',
       'text',
       'shape',
       'image',
@@ -552,7 +554,7 @@ describe('Project V8 global-layer editor store', () => {
     expect(selectSelectedNodeIds(useEditorStore.getState())).toEqual([])
     store.addExternalComponentNode(global.manifest.id)
     const globalNode = projectedGlobalLayer(useEditorStore.getState()).find(
-      (item) => item.node.type === 'external-component',
+      (item) => item.node.type === 'external-component' && item.node.component?.packageId !== 'com.ittoedu.teacher-controller',
     )!.node
     store.updateNode(globalNode.id, { x: 900 })
 
@@ -623,12 +625,12 @@ describe('Project V8 global-layer editor store', () => {
     store.addPresentationState('目标状态')
     const targetStateId = selectActivePresentationStateId(useEditorStore.getState())!
     const controller = projectedGlobalLayer(useEditorStore.getState()).find(
-      (item) => item.node.type === 'teacher-controller',
+      (item) => item.node.type === 'external-component' && item.node.component?.packageId === 'com.ittoedu.teacher-controller',
     )!.node
-    if (controller.type !== 'teacher-controller') throw new Error('缺少教师控制器')
+    if (controller.type !== 'external-component') throw new Error('缺少教师控制器')
     store.setEditingScope('global')
     store.updateNode(controller.id, {
-      buttons: (controller.buttons ?? []).map((button, index) => index === 0
+      props: { ...controller.props, buttons: ((controller.props as unknown as TeacherControllerConfig).buttons ?? []).map((button, index) => index === 0
         ? {
             ...button,
             action: {
@@ -637,7 +639,7 @@ describe('Project V8 global-layer editor store', () => {
               targetStateId,
             },
           }
-        : button),
+        : button) },
     })
     store.addGlobalInteractionRule({
       id: 'target-scene-scope',
@@ -663,10 +665,10 @@ describe('Project V8 global-layer editor store', () => {
       { type: 'scene.in', sceneIds: [copiedSceneId] },
     ])
     const nextController = projectedGlobalLayer(useEditorStore.getState()).find(
-      (item) => item.node.type === 'teacher-controller',
+      (item) => item.node.type === 'external-component' && item.node.component?.packageId === 'com.ittoedu.teacher-controller',
     )!.node
-    if (nextController.type !== 'teacher-controller') throw new Error('缺少教师控制器')
-    expect((nextController.buttons ?? []).some((button) => (
+    if (nextController.type !== 'external-component') throw new Error('缺少教师控制器')
+    expect(((nextController.props as unknown as TeacherControllerConfig).buttons ?? []).some((button) => (
       button.action.type === 'scene.go' && button.action.sceneId === targetSceneId
     ))).toBe(false)
   })

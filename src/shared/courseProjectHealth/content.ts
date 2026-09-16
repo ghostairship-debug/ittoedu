@@ -1,3 +1,5 @@
+import { documentTextSlots, plainDocumentText } from '../document/content'
+import { parseDocumentMath } from '../document/math'
 import type { CourseProjectDocument } from '../courseProjectTypes'
 import type { NativeChartContent } from '../contracts/native-v1/types'
 import { parseFormulaLinear, formulaAstContainsSlot } from '../formulaLinear'
@@ -40,12 +42,11 @@ export function collectCourseProjectContentHealth(project: CourseProjectDocument
     }
   }
   visitCourseFlowBlocks(project, ({ block, path, surfaceId }) => {
-    if ('text' in block && typeof block.text === 'string') texts.push({ text: block.text, path: [...path, 'text'], scope: surfaceId })
-    if (block.type === 'callout') texts.push({ text: block.body, path: [...path, 'body'], scope: surfaceId })
-    if (block.type === 'list') block.items.forEach((item, index) => texts.push({ text: item.text, path: [...path, 'items', index, 'text'], scope: surfaceId }))
+    for (const slot of documentTextSlots(block)) texts.push({ text: plainDocumentText(slot.content), path: [...path, slot.key], scope: surfaceId })
     if (block.type === 'chart') charts.push({ data: block.chart, scope: surfaceId })
-    if (block.type === 'formula' && formulaAstContainsSlot(block.ast)) add('content-math-parse', path, '流式公式仍有未填写的结构槽位。', '语义公式 AST 包含 slot', '补全公式槽位。')
-    if (block.type === 'quote' && (!block.citation?.trim() || /^(待补|待补充|未知|TODO)$/i.test(block.citation.trim()))) add('content-source-missing', [...path, 'citation'], '引用段落缺少来源定位。', `引用：${block.text.slice(0, 120)}`, '填写可识别的材料标题与页码、章节或 URL。')
+    const formulas = block.type === 'formula' ? [block] : documentTextSlots(block).flatMap(slot => slot.content.inlines.filter(inline => inline.type === 'math'))
+    for (const formula of formulas) try { parseDocumentMath(formula.latex) } catch (error) { add('content-math-parse', path, '流式公式语法无效。', error instanceof Error ? error.message : '公式解析失败', '在公式编辑器中修正当前公式。') }
+    if (block.type === 'quote' && (!block.citation || !plainDocumentText(block.citation).trim() || /^(待补|待补充|未知|TODO)$/i.test(plainDocumentText(block.citation).trim()))) add('content-source-missing', [...path, 'citation'], '引用段落缺少来源定位。', `引用：${plainDocumentText(block.content).slice(0, 120)}`, '填写可识别的材料标题与页码、章节或 URL。')
   })
   for (const entry of texts) for (const line of entry.text.split(/\r?\n/)) {
     const formula = /^\s*公式[：:]\s*(.*)$/.exec(line)

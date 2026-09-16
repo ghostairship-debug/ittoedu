@@ -1,3 +1,4 @@
+import { componentPackagesFromArchive } from '@/renderer/components/componentPackageStore'
 import { beforeEach, describe, expect, it } from 'vitest'
 import {
   panSpatialSessionCamera,
@@ -72,6 +73,11 @@ function mixedProject(): CourseProjectDocument {
   return structuredClone(fixture.data.project)
 }
 
+function loadMixed(path: string | null) {
+  const fixture = listCourseProjectV9Fixtures().find(candidate => candidate.id === 'mixed')!.data
+  useEditorStore.getState().loadCourseProject(mixedProject(), path, fixture.assetFiles, componentPackagesFromArchive(fixture.project, fixture.componentFiles))
+}
+
 function activeDocument(): CourseProjectDocument {
   const document = selectActiveCourseProjectDocument(useEditorStore.getState())
   if (!document) throw new Error('Expected active Course Project V9 document')
@@ -110,21 +116,21 @@ function expectComponentPackageAbsent(packageId: string): void {
 
 beforeEach(() => {
   useEditorStore.getState().createNewProject()
-  useEditorStore.getState().loadCourseProject(mixedProject(), null)
+  loadMixed(null)
 })
 
 describe('Mixed cross-surface history continuity', () => {
   it('applies a mixed CLI candidate through the real store kernel and restores it with one Undo', async () => {
     const projectPath = '/fixtures/ai-mixed.h5lesson'
-    useEditorStore.getState().loadCourseProject(mixedProject(), projectPath)
+    loadMixed(projectPath)
     const state = useEditorStore.getState(), document = activeDocument()
     const request = captureGenerationSnapshot({ document, workspace: { version: 1, projectId: document.id, normalizedPath: projectPath },
-      sessionToken: state.courseAuthoringSession!.token, projection: selectEffectiveLayerProjection(state)!, selectedIds: [], scope: 'course',
+      sessionToken: state.courseAuthoringSession!.token, projection: selectEffectiveLayerProjection(state)!, selectedIds: [], scope: 'course', componentPackages: state.componentPackages,
       instruction: '修改 Flow 与 Spatial 内容', purpose: 'local-edit' })
     const flow = request.destinations.find(destination => destination.kind === 'create' && destination.scope.surfaceType === 'flow' && destination.scope.parent.kind === 'flow-body')!
     const spatial = request.destinations.find(destination => destination.kind === 'create' && destination.scope.surfaceType === 'spatial-2d' && destination.scope.owner === 'world')!
     const candidate = { version: 1, requestId: request.requestId, candidateId: crypto.randomUUID(), summary: '增加两处讲解', steps: [
-      { id: 'flow', tool: 'flow.content', carrier: 'native', destination: flow, input: { operation: 'insert', block: { type: 'paragraph', text: '新增 Flow 讲解' } } },
+      { id: 'flow', tool: 'flow.content', carrier: 'native', destination: flow, input: { operation: 'insert', block: { type: 'paragraph', content: { inlines: [{ type: 'text', text: '新增 Flow 讲解' }] } } } },
       { id: 'spatial', tool: 'native.content', carrier: 'native', destination: spatial, input: { operation: 'insert', template: { nativeType: 'text', text: '新增 Spatial 讲解' } } },
     ] }
     const preview = await state.prepareGenerationCandidate(request, candidate)

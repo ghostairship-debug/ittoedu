@@ -1,3 +1,4 @@
+import type { FlowDocumentDraft } from '../../authoring/flowDocumentDraft'
 import { projectWithBackgroundPreview, flowTextColorPreview } from '../../authoring/backgroundPreview'
 import { useCallback, useMemo } from 'react'
 import type { ComponentPackageData } from '../../../shared/componentTypes'
@@ -19,6 +20,7 @@ type FlowWorkspaceStore = {
   readonly courseAuthoringSession: CourseAuthoringSession | null
   readonly canvasMode: 'edit' | 'run'
   readonly componentPackages: Record<string, ComponentPackageData>
+  readonly flowDocumentDraft?: FlowDocumentDraft | null
   readonly flowTextEdit: FlowTextEditSession | null
   readonly runFlowAuthoringIntent: FlowCurrentSessionCommandPort['run']
   readonly setCanvasMode: (mode: 'edit' | 'run') => void
@@ -40,6 +42,7 @@ export function FlowWorkspaceConnector() {
   const assetFiles = useEditorStore(selectMediaAssetFiles)
   const componentPackages = useEditorStore(selectComponentPackages)
   const textEdit = useEditorStore(selectFlowTextEdit)
+  const documentDraft = useEditorStore(state => state.flowDocumentDraft)
   const runFlowAuthoringIntent = useEditorStore(selectRunFlowAuthoringIntent)
   const setCanvasMode = useEditorStore(selectSetCanvasMode)
   const commands = useMemo<FlowCurrentSessionCommandPort>(() => ({
@@ -100,6 +103,7 @@ export function FlowWorkspaceConnector() {
       assets={session.history.present.assets}
       selection={session.selection}
       textEdit={textEdit}
+      documentDraft={documentDraft}
       previewTextEdit={textPreview?.edit ?? null}
       canvasMode={canvasMode}
       editingScope={editingScope === 'global' ? 'global' : 'scene'}

@@ -1,7 +1,8 @@
+import { plainDocumentText } from '../../src/shared/document/content'
 import { buildPublishedFixture as buildPublishedCourseV2Payload } from '../fixtures/teacherController'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { componentPackagesFromArchive } from '../../src/renderer/components/componentPackageStore'
 import {
@@ -88,6 +89,13 @@ beforeEach(() => {
   vi.stubGlobal('ResizeObserver', class {
     observe() {}
     disconnect() {}
+  })
+  const createRange = document.createRange.bind(document)
+  vi.spyOn(document, 'createRange').mockImplementation(() => {
+    const range = createRange()
+    range.getClientRects = () => [] as unknown as DOMRectList
+    range.getBoundingClientRect = () => new DOMRect(0, 0, 0, 0)
+    return range
   })
   vi.spyOn(HTMLCanvasElement.prototype, 'getContext')
     .mockImplementation(() => null)
@@ -188,11 +196,21 @@ describe('ARCH-0 representative functional baseline', () => {
         />
       </div>,
     )
-    const editor = screen.getByTestId('flow-inline-editor')
-    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)) })
+    const editor = screen.getByRole('textbox', { name: '正文排版编辑' })
+    await new Promise((resolve) => setTimeout(resolve, 0))
     const composed = '中文输入法（IME）基线：春风又绿江南岸。'
+    const paragraph = editor.querySelector('[data-document-id="flow-ime-paragraph"]')
+    if (!paragraph) throw new Error('Missing IME paragraph')
+    const contentDOM = paragraph.querySelector('[data-flow-idle-rich-text]')
+    if (!contentDOM) throw new Error('Missing editable Flow content DOM')
+    editor.focus()
+    const range = document.createRange()
+    range.selectNodeContents(contentDOM)
+    const domSelection = window.getSelection()!
+    domSelection.removeAllRanges()
+    domSelection.addRange(range)
     fireEvent.compositionStart(editor, { data: '中' })
-    editor.textContent = composed
+    contentDOM.textContent = composed
     fireEvent.input(editor)
     fireEvent.keyDown(editor, {
       key: 'Enter',
@@ -200,6 +218,8 @@ describe('ARCH-0 representative functional baseline', () => {
       isComposing: true,
     })
     fireEvent.blur(editor)
+    expect(onProjectChange).not.toHaveBeenCalled()
+    await new Promise(resolve => setTimeout(resolve, 0))
     expect(onProjectChange).not.toHaveBeenCalled()
     fireEvent.compositionEnd(editor, { data: composed })
     fireEvent.blur(editor)
@@ -211,10 +231,9 @@ describe('ARCH-0 representative functional baseline', () => {
     if (!next) throw new Error('Flow composition did not produce a document')
     const surface = next.surfaces.find((candidate) => candidate.id === 'flow-surface')
     if (!surface || surface.type !== 'flow') throw new Error('Missing Flow surface')
-    expect(flowBlock(surface.blocks, 'flow-ime-paragraph')).toMatchObject({
-      type: 'paragraph',
-      text: composed,
-    })
+    const paragraphAfter = flowBlock(surface.blocks, 'flow-ime-paragraph')
+    if (paragraphAfter?.type !== 'paragraph') throw new Error('Missing committed paragraph')
+    expect(plainDocumentText(paragraphAfter.content)).toBe(composed)
 
     let history = createFlowEditorHistory(project)
     history = commitFlowEditorHistory(history, next)

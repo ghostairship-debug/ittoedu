@@ -1,3 +1,4 @@
+import type { TeacherControllerConfig } from '../../src/shared/teacherControllerConfig'
 import '@testing-library/jest-dom/vitest'
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -217,7 +218,7 @@ describe('Project V8 global-layer editor UI', () => {
     expect(projectedGlobalLayer(useEditorStore.getState())).toHaveLength(3)
     expect(
       projectedGlobalLayer(useEditorStore.getState()).map((item) => item.node.type),
-    ).toEqual(['teacher-controller', 'text', 'external-component'])
+    ).toEqual(['external-component', 'text', 'external-component'])
   })
 
   it('edits global placement, every component copy field, and both runtime content tables', () => {
@@ -232,7 +233,7 @@ describe('Project V8 global-layer editor UI', () => {
     store.setEditingScope('global')
     useEditorStore.getState().addExternalComponentNode(globalPackage.manifest.id)
     const globalNode = projectedGlobalLayer(useEditorStore.getState()).find(
-      (item) => item.node.type === 'external-component',
+      (item) => item.node.type === 'external-component' && item.node.component?.packageId !== 'com.ittoedu.teacher-controller',
     )!.node
     const locationId = selectActiveCourseLocationId(useEditorStore.getState())
     if (!locationId) throw new Error('缺少当前课程位置')
@@ -550,7 +551,7 @@ describe('Project V8 global-layer editor UI', () => {
     const targetStateId = selectActivePresentationStateId(useEditorStore.getState())!
     store.setEditingScope('global')
     const controller = projectedGlobalLayer(useEditorStore.getState()).find(
-      (item) => item.node.type === 'teacher-controller',
+      (item) => item.node.type === 'external-component' && item.node.component?.packageId === 'com.ittoedu.teacher-controller',
     )!.node
     store.selectNode(controller.id)
 
@@ -566,7 +567,7 @@ describe('Project V8 global-layer editor UI', () => {
     }).length).toBeGreaterThan(0)
 
     const defaultCollapsedCheckbox = screen.getByLabelText<HTMLInputElement>(
-      '打开课件时默认折叠',
+      '默认收起',
     )
     expect(defaultCollapsedCheckbox).toBeChecked()
     fireEvent.click(defaultCollapsedCheckbox)
@@ -585,21 +586,21 @@ describe('Project V8 global-layer editor UI', () => {
     const updated = projectedGlobalLayer(useEditorStore.getState()).find(
       (item) => item.node.id === controller.id,
     )!.node
-    if (updated.type !== 'teacher-controller') throw new Error('缺少教师控制器')
-    expect(updated).toMatchObject({
+    if (updated.type !== 'external-component') throw new Error('缺少教师控制器')
+    expect(updated.type === 'external-component' && updated.props).toMatchObject({
       collapsible: true,
       defaultCollapsed: false,
     })
-    expect(updated.buttons?.[0]?.action).toEqual({
+    expect((updated.props as unknown as TeacherControllerConfig).buttons?.[0]?.action).toEqual({
       type: 'scene.go',
       sceneId: targetSceneId,
       targetStateId,
     })
-    expect(updated.buttons?.at(-1)?.action).toEqual({
+    expect((updated.props as unknown as TeacherControllerConfig).buttons?.at(-1)?.action).toEqual({
       type: 'scene.open-picker',
     })
-    expect(updated.buttons).toHaveLength((controller.type === 'teacher-controller' ? controller.buttons?.length ?? 0 : 0) + 1)
-    expect(new Set((updated.buttons ?? []).map((button) => button.id)).size).toBe(updated.buttons?.length)
+    expect((updated.props as unknown as TeacherControllerConfig).buttons).toHaveLength((controller.type === 'external-component' ? (controller.props as unknown as TeacherControllerConfig).buttons?.length ?? 0 : 0) + 1)
+    expect(new Set(((updated.props as unknown as TeacherControllerConfig).buttons ?? []).map((button) => button.id)).size).toBe((updated.props as unknown as TeacherControllerConfig).buttons?.length)
   })
 
   it('writes 图层位置 as one undoable global plane without changing authored order', () => {

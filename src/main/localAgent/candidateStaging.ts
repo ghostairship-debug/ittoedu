@@ -92,7 +92,7 @@ export class CandidateStaging {
       for (const [filename, source] of Object.entries(candidateMediaDeliveryFiles())) await writeResource(target, filename, source)
       await writeResource(target, 'request.json', JSON.stringify({ ...generationRequestForPrompt(request, target),
         ...(reusableMedia.some(file => file.mimeType !== 'application/json') ? { reusableMedia: reusableMedia.filter(file => file.mimeType !== 'application/json') } : {}),
-        ...(reusableMedia.some(file => file.mimeType === 'application/json') ? { reusableArtifacts: reusableMedia.filter(file => file.mimeType === 'application/json') } : {}) }))
+        ...(reusableMedia.some(file => file.mimeType === 'application/json') ? { reusableArtifacts: reusableMedia.filter(file => file.mimeType === 'application/json') } : {}) }, null, 2))
       return target
     } catch (error) { await fs.rm(target, { recursive: true, force: true }); throw error }
   }

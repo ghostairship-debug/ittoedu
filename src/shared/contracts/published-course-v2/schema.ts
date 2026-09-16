@@ -1,3 +1,4 @@
+import { documentContentSchema } from '../../document/content'
 import { z } from 'zod'
 import { teacherControllerRoleIssues } from '../../teacherControllerRole'
 import {
@@ -379,21 +380,8 @@ const publishedFlowSurfaceSchema = z.object({
       message: 'Wide content width cannot be narrower than reading width',
     })
   }
-  const seen = new Set<string>()
-  const visit = (blocks: FlowBlock[]): void => {
-    blocks.forEach((block) => {
-      if (seen.has(block.id)) {
-        context.addIssue({
-          code: 'custom',
-          path: ['blocks'],
-          message: `Flow block ids must be unique: ${block.id}`,
-        })
-      }
-      seen.add(block.id)
-      if (block.type === 'section') visit(block.blocks)
-    })
-  }
-  visit(surface.blocks)
+  const validated = documentContentSchema.safeParse({ blocks: surface.blocks })
+  if (!validated.success) for (const issue of validated.error.issues) context.addIssue({ ...issue, path: issue.path })
 })
 
 const semanticZoomSchema = z.object({

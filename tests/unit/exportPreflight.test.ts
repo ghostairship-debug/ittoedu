@@ -1,3 +1,4 @@
+import { controllerPackages } from '../fixtures/teacherController'
 import { isControllerFixture } from '../fixtures/teacherController'
 import { describe, expect, it, vi } from 'vitest'
 import { collectCourseProjectExportPreflight } from '@/renderer/export/exportPreflight'
@@ -291,7 +292,7 @@ describe('export preflight', () => {
 
     const report = collectCourseProjectExportPreflight(project, 'single-html', {
       assetFiles: { hero: new Uint8Array([1, 2, 3, 4]) },
-      components: {},
+      components: controllerPackages,
     }, new Date(), { playerBundle })
     expect(report.items).toEqual(expect.arrayContaining([
       expect.objectContaining({ code: 'text-low-contrast', severity: 'warning' }),
@@ -299,6 +300,12 @@ describe('export preflight', () => {
       expect.objectContaining({ code: 'controller-interactive-obstruction', severity: 'warning' }),
       expect.objectContaining({ code: 'visual-density-high', severity: 'warning' }),
     ]))
+    // The controller itself is interactive, but must never obstruct itself.
+    scene.interactions = []
+    const withoutInteractiveTarget = collectCourseProjectExportPreflight(project, 'single-html', {
+      assetFiles: { hero: new Uint8Array([1, 2, 3, 4]) }, components: controllerPackages,
+    }, new Date(), { playerBundle })
+    expect(withoutInteractiveTarget.items.some(item => item.code === 'controller-interactive-obstruction')).toBe(false)
     getContext.mockRestore()
   })
 })

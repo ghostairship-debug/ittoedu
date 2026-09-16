@@ -1,3 +1,4 @@
+import { workspaceIdentityKey } from '../../shared/workspaceIdentity'
 import type { ChildProcessWithoutNullStreams } from 'node:child_process'
 import { createInterface } from 'node:readline'
 import { randomUUID } from 'node:crypto'
@@ -91,7 +92,7 @@ export function buildClaudeCapabilities(cliVersion: string, rawModels: any[]): L
       image: 'supported',
       readFile: 'supported',
       question: 'structured',
-      correction: 'turn-boundary',
+      correction: 'interrupt-resume',
       cancel: 'supported',
     },
   })
@@ -499,8 +500,7 @@ export class ClaudeProcessTransportAdapter implements LocalAgentCliAdapterV2 {
       !this.currentTurnContext ||
       userInput.taskId !== this.currentTurnContext.taskId ||
       userInput.epoch !== this.currentTurnContext.epoch ||
-      userInput.workspace.projectId !== this.currentTurnContext.workspace.projectId ||
-      userInput.workspace.normalizedPath !== this.currentTurnContext.workspace.normalizedPath ||
+      workspaceIdentityKey(userInput.workspace) !== workspaceIdentityKey(this.currentTurnContext.workspace) ||
       (userInput.turnId !== null && userInput.turnId !== this.activeTurnId) ||
       this.eventQueue.isDone()
     ) {
@@ -523,7 +523,8 @@ export class ClaudeProcessTransportAdapter implements LocalAgentCliAdapterV2 {
         inputId: userInput.inputId,
         status: 'queued',
         turnId: userInput.turnId ?? this.activeTurnId ?? null,
-        reason: 'Claude 不支持原生回合中纠正；已排队，由宿主在当前原生回合结束后作为下一回合消息发送',
+        reason: userInput.kind === 'correct' ? '正在中断当前回合，将在同一原生会话立即处理新的引导'
+          : '已排队，将在当前回合结束后作为下一回合消息处理',
       })
     }
 
@@ -600,6 +601,14 @@ export class ClaudeProcessTransportAdapter implements LocalAgentCliAdapterV2 {
 
   cancel(): Promise<void> {
     return this.interrupt()
+  }
+
+  async interruptTurn(): Promise<void> {
+    const queue = this.eventQueue
+    await this.interrupt()
+    const deadline = Date.now() + 1500
+    while (!queue.isDone() && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 25))
+    if (!queue.isDone()) { await this.close(); throw new Error('Claude 未确认回合中断；已停止传输，新的引导仍待处理') }
   }
 
   async interrupt(): Promise<void> {

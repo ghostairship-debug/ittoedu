@@ -1,3 +1,4 @@
+import { withDefaultComponentController } from '../src/renderer/components/teacherControllerComponent'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -518,6 +519,7 @@ function buildV9BenchmarkProject(input: {
     ...project,
     assets: structuredClone(input.projectAssets),
     componentPackages: {
+      ...project.componentPackages,
       [input.tableComponent.data.manifest.id]: input.tableComponent.data.metadata,
       [input.phaserMeterComponent.data.manifest.id]: input.phaserMeterComponent.data.metadata,
     },
@@ -682,15 +684,18 @@ export async function buildRenderHostBenchmarkOutputs(): Promise<GeneratedExampl
     tableComponent,
     phaserMeterComponent,
   })
+  const controllerPackages = withDefaultComponentController(projectV9).componentPackages
   const courseSources = {
     project: projectV9,
     assetFiles,
     components: {
+      ...controllerPackages,
       [tableComponent.data.key]: tableComponent.data,
       [phaserMeterComponent.data.key]: phaserMeterComponent.data,
     },
   }
   const componentFilesV9 = {
+    ...Object.fromEntries(Object.values(controllerPackages).map(pkg => [`${pkg.manifest.id}@${pkg.manifest.version}`, pkg.files])),
     [tableComponent.data.key]: tableComponent.data.files,
     [phaserMeterComponent.data.key]: phaserMeterComponent.data.files,
   }
@@ -707,7 +712,7 @@ export async function buildRenderHostBenchmarkOutputs(): Promise<GeneratedExampl
     !reopenedSlide ||
     reopenedSlide.type !== 'slide' ||
     reopenedSlide.scenes.length !== 5 ||
-    Object.keys(reopenedV9.componentFiles).length !== 2
+    Object.keys(reopenedV9.componentFiles).length !== 3
   ) {
     throw new Error('生成后的 V9 基准 .h5lesson 重新打开校验失败')
   }

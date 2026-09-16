@@ -349,8 +349,16 @@ describe('Spatial camera project data vs session pan/zoom', () => {
     expect(courseProjectDocumentSchema.parse(next)).toEqual(next)
   })
 
-  it('G2: fit-to-window restores home camera; AABB fit is a separate session command', () => {
+  it('G2: fit-to-window restores home camera; AABB fit excludes global HUD and teacher-controller layers', () => {
     let session = openSession()
+    const projectWithViewportLayers = structuredClone(session.history.present)
+    projectWithViewportLayers.globalLayerItems.push(
+      scoped(teacherController('global-controller', 60, HOME_FRAME_ID)),
+    )
+    session = openSpatialAuthoringSession(courseProjectDocumentSchema.parse(projectWithViewportLayers), {
+      locationId: LOCATION_ID,
+      sessionId: 'spatial-camera-fit-excludes-viewport-layers',
+    })
     const revision = session.history.present.revision
     session = panSpatialSessionCamera(session, { x: 900, y: -400 }).nextSession!
     session = zoomSpatialSessionCamera(session, 2).nextSession!

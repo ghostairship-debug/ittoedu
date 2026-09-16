@@ -1,5 +1,5 @@
 import { buildPublishedFixture as buildPublishedCourseV2Payload } from '../fixtures/teacherController'
-import { isControllerFixture } from '../fixtures/teacherController'
+import { isControllerFixture, queryDeep } from '../fixtures/teacherController'
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import type { CourseProjectDocument, NativeLayerItem, ScopedLayerItem } from '@/shared/courseProjectTypes'
 import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
@@ -320,8 +320,8 @@ describe('published course Mixed navigation', () => {
     await session.mount(container)
 
     const slideRoot = container.querySelector<HTMLElement>('.slide-published-adapter')
-    expect(slideRoot?.querySelector('.slide-native-teacher-controller')).not.toBeNull()
-    expect(slideRoot?.querySelector(`[data-native-type="teacher-controller"]`)).not.toBeNull()
+    expect(queryDeep(slideRoot, '.controller')).not.toBeNull()
+    expect(slideRoot?.querySelector(`[data-component-package-id="com.ittoedu.teacher-controller"]`)).not.toBeNull()
     expect(container.querySelector('[data-testid="teacher-escape-controls"]')).toBeNull()
     expect(container.querySelector('.lesson-footer')).toBeNull()
     const controller = slideRoot?.querySelector<HTMLElement>(
@@ -379,7 +379,7 @@ describe('published course Mixed navigation', () => {
     container.remove()
   })
 
-  it('opens one session-owned picker from every Surface and force-navigates its location order', async () => {
+  it('opens the component directory on every Surface and force-navigates its location order', async () => {
     const project = mixedProject()
     const payload = buildPublishedCourseV2Payload({
       project,
@@ -414,32 +414,27 @@ describe('published course Mixed navigation', () => {
     expect(session.navigator.current?.index).toBe(1)
     await session.goToIndex(0)
 
+    const activeSlot = () => [...container.querySelectorAll<HTMLElement>('[data-course-surface-slot]')]
+      .find(slot => slot.style.visibility !== 'hidden')!
     const openPickerFromActiveSurface = () => {
-      const activeSlot = [...container.querySelectorAll<HTMLElement>('[data-course-surface-slot]')]
-        .find((slot) => slot.style.visibility !== 'hidden')!
-      let button = [...activeSlot.querySelectorAll<HTMLButtonElement>('button')]
-        .find((candidate) => candidate.textContent?.includes('场景目录'))
-      if (!button) {
-        activeSlot.querySelector<HTMLButtonElement>(
-          '[data-teacher-controller-collapse="true"]',
-        )?.click()
-        button = [...activeSlot.querySelectorAll<HTMLButtonElement>('button')]
-          .find((candidate) => candidate.textContent?.includes('场景目录'))
-      }
-      expect(button).toBeDefined()
+      queryDeep<HTMLButtonElement>(activeSlot(), '[aria-label="展开教师控制器"]')?.click()
+      const button = queryDeep<HTMLButtonElement>(activeSlot(), '[data-controller-button-id="directory"]')
+      expect(button).not.toBeNull()
       button!.click()
     }
     const choose = (locationId: string) => {
-      container.querySelector<HTMLButtonElement>(
-        `.lesson-scene-picker__item[data-scene-id="${locationId}"]`,
-      )!.click()
+      const location = payload.locations.find(item => item.id === locationId)!
+      const popup = queryDeep<HTMLElement>(activeSlot(), '[role="dialog"][aria-label="场景目录"]')!
+      const button = [...popup.querySelectorAll<HTMLButtonElement>('.scene-row')]
+        .find(item => item.getAttribute('aria-label') === location.label)
+      expect(button).toBeDefined()
+      button!.click()
     }
 
     openPickerFromActiveSurface()
     await Promise.resolve()
-    expect(pickerLayer).toBeVisible()
-    expect(pickerLayer.querySelector('[aria-current="page"]'))
-      .toHaveAttribute('data-scene-id', payload.startLocationId)
+    expect(queryDeep(activeSlot(), '[role="dialog"][aria-label="场景目录"]')).not.toBeNull()
+    expect(queryDeep(activeSlot(), '.scene-row[aria-current="page"]')).not.toBeNull()
     choose(flowLocation.id)
     await vi.waitFor(() => expect(session.navigator.current?.locationId).toBe(flowLocation.id))
     expect(pickerLayer).not.toBeVisible()

@@ -805,7 +805,7 @@ function slideSceneChartData() {
 }
 
 describe('slide table properties UI', () => {
-  it('commits cell edits on Enter, discards them on blur, and appends a row on last-cell Tab', () => {
+  it('commits cell edits on Enter and blur, and appends a row on last-cell Tab', () => {
     const store = useEditorStore.getState()
     store.addTableNode()
     render(<PropertiesTab onReplaceImage={() => undefined} />)
@@ -828,12 +828,18 @@ describe('slide table properties UI', () => {
     expect(slideSceneTableData().rows[0]!.cells[0]!.text).toBe('已提交文本')
     expect(activeHistory().past).toHaveLength(historyBefore + 1)
 
-    // Blur without Enter/Tab discards the dirty draft: zero writes.
+    // The current table owner commits a changed draft on blur, preventing input loss.
     fireEvent.focus(firstCell)
     fireEvent.change(firstCell, { target: { value: '未提交文本' } })
     fireEvent.blur(firstCell)
-    expect(slideSceneTableData().rows[0]!.cells[0]!.text).toBe('已提交文本')
-    expect(activeHistory().past).toHaveLength(historyBefore + 1)
+    expect(slideSceneTableData().rows[0]!.cells[0]!.text).toBe('未提交文本')
+    expect(activeHistory().past).toHaveLength(historyBefore + 2)
+
+    fireEvent.focus(firstCell)
+    fireEvent.change(firstCell, { target: { value: '取消输入' } })
+    fireEvent.keyDown(firstCell, { key: 'Escape' })
+    expect(slideSceneTableData().rows[0]!.cells[0]!.text).toBe('未提交文本')
+    expect(activeHistory().past).toHaveLength(historyBefore + 2)
 
     // Tab past the last cell appends one row in a single history entry and
     // restores focus by stable rowId+columnId, not by stale array index.
@@ -844,7 +850,7 @@ describe('slide table properties UI', () => {
     fireEvent.keyDown(lastCell, { key: 'Tab' })
     const grown = slideSceneTableData()
     expect(grown.rows).toHaveLength(table.rows.length + 1)
-    expect(activeHistory().past).toHaveLength(historyBefore + 2)
+    expect(activeHistory().past).toHaveLength(historyBefore + 3)
     const appendedRowId = grown.rows[grown.rows.length - 1]!.id
     const focused = section.querySelector(`[data-cell-key="${appendedRowId}::${firstColumnId}"]`)
     expect(focused).not.toBeNull()

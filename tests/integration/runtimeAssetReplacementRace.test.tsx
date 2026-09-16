@@ -128,6 +128,7 @@ function deferred<T>(): Deferred<T> {
 function fixture(): {
   project: CourseProjectDocument
   assetFiles: Record<string, Uint8Array>
+  componentFiles: ReturnType<typeof openCourseProjectArchive>['componentFiles']
 } {
   const source = openCourseProjectArchive(
     readCourseProjectV9FixtureArchive('canvas-runtime'),
@@ -152,6 +153,7 @@ function fixture(): {
   })
   return {
     project: courseProjectDocumentSchema.parse(project),
+    componentFiles: source.componentFiles,
     assetFiles: Object.fromEntries(
       Object.entries(source.assetFiles).map(([assetId, bytes]) => [
         assetId,
@@ -167,7 +169,7 @@ function loadFixture(): void {
     source.project,
     null,
     source.assetFiles,
-    componentPackagesFromArchive(source.project, {}),
+    componentPackagesFromArchive(source.project, source.componentFiles),
   )
   useEditorStore.getState().activateCourseLocation(FIRST_LOCATION_ID)
 }

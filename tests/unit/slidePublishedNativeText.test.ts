@@ -415,7 +415,7 @@ describe('paintPublishedNativeText', () => {
     expect(spans[1]?.style.fontWeight).toBe('400')
   })
 
-  it('materializes all six Native variants as detached frozen snapshots', () => {
+  it('materializes all five Native variants as detached frozen snapshots', () => {
     const items = listCourseProjectV9Fixtures().flatMap((fixture) => (
       nativeItemsIn(fixture.data.project)
     ))
@@ -425,7 +425,6 @@ describe('paintPublishedNativeText', () => {
       'image',
       'video',
       'shape',
-      'teacher-controller',
     ] as const
 
     for (const nativeType of nativeTypes) {

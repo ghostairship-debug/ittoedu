@@ -2,14 +2,12 @@ import { buildNativeChartSvg } from '../../../shared/nativeChartSvg'
 import { resolveFlowParagraphPresentation, type FlowParagraphPresentation } from '../../../shared/flowBodyPresentation'
 import { tableCellSpan, type TableCellSpan } from '../../../shared/tableMerge'
 import type { NativeChartContent } from '../../../shared/contracts/native-v1'
-import { serializeFormulaAst } from '../../../shared/formulaLinear'
+import { renderDocumentText, renderDocumentMath } from '../../../shared/document/render'
+import { plainDocumentText, type FlowTextContent } from '../../../shared/document/content'
 import type { MixedPrintEntry, MixedPrintPlan } from '../../../shared/courseProjectTypes'
 import type { PublishedFlowSurface } from '../../../shared/publishedCourseTypes'
 import { resolveCourseSurfaceBackgroundColor } from '../../../shared/courseProjectModel'
-import type { TextRun, TextRunStyle } from '../../../shared/contracts/native-v1'
 import {
-  flowTableCellText,
-  flowRichTextSegments,
   walkFlowBlocks,
   type FlowBlock,
 } from '../../../player/surfaces/flow/flowModel'
@@ -27,29 +25,29 @@ export type FlowPrintNode =
       type: 'heading'
       blockId: string
       level: 1 | 2 | 3 | 4 | 5 | 6
-      text: string
-      runs: readonly TextRun[]
+      content: FlowTextContent
       paragraph?: FlowParagraphPresentation
     }
-  | { type: 'paragraph'; blockId: string; text: string; runs: readonly TextRun[]; paragraph?: FlowParagraphPresentation }
-  | { type: 'quote'; blockId: string; text: string; runs: readonly TextRun[]; citation?: string; paragraph?: FlowParagraphPresentation }
+  | { type: 'paragraph'; blockId: string; content: FlowTextContent; paragraph?: FlowParagraphPresentation }
+  | { type: 'quote'; blockId: string; content: FlowTextContent; citation?: FlowTextContent; paragraph?: FlowParagraphPresentation }
   | {
       type: 'list'
       blockId: string
       ordered: boolean
-      items: Array<{ id: string; text: string; runs: readonly TextRun[] }>
+      items: Array<{ id: string; content: FlowTextContent }>
     }
   | {
       type: 'table'
       blockId: string
-      caption?: string
-      headers: string[]
-      rows: Array<Array<{ text: string; runs: readonly TextRun[]; span?: TableCellSpan }>>
+      caption?: FlowTextContent
+      headers: FlowTextContent[]
+      rows: Array<Array<{ content: FlowTextContent; span?: TableCellSpan }>>
     }
   | {
       type: 'formula'
       blockId: string
-      linear: string
+      latex: string
+      style?: { fontSize?: number; color?: string }
       accessibleText: string
     }
   | {
@@ -59,17 +57,17 @@ export type FlowPrintNode =
       assetId: string
       fallbackLabel: string
       altText?: string
-      caption?: string
+      caption?: FlowTextContent
     }
   | { type: 'code'; blockId: string; language?: string; code: string }
   | {
       type: 'callout'
       blockId: string
       tone: 'note' | 'example' | 'warning' | 'conclusion'
-      title?: string
-      body: string
+      title?: FlowTextContent
+      body: FlowTextContent
     }
-  | { type: 'section'; blockId: string; title: string }
+  | { type: 'section'; blockId: string; title: FlowTextContent }
   | { type: 'divider'; blockId: string }
   | {
       type: 'component'
@@ -181,24 +179,21 @@ function printNodesForBlock(block: FlowBlock): FlowPrintNode[] {
         blockId: block.id,
         level: block.level,
         paragraph: resolveFlowParagraphPresentation(block),
-        text: block.text,
-        runs: block.runs ?? [],
+        content: block.content,
       }]
     case 'paragraph':
       return [{
         type: 'paragraph',
         paragraph: resolveFlowParagraphPresentation(block),
         blockId: block.id,
-        text: block.text,
-        runs: block.runs ?? [],
+        content: block.content,
       }]
     case 'quote':
       return [{
         type: 'quote',
         paragraph: resolveFlowParagraphPresentation(block),
         blockId: block.id,
-        text: block.text,
-        runs: block.runs ?? [],
+        content: block.content,
         ...(block.citation ? { citation: block.citation } : {}),
       }]
     case 'list':
@@ -208,8 +203,7 @@ function printNodesForBlock(block: FlowBlock): FlowPrintNode[] {
         ordered: block.ordered,
         items: block.items.map((item) => ({
           id: item.id,
-          text: item.text,
-          runs: item.runs ?? [],
+          content: item.content,
         })),
       }]
     case 'chart':
@@ -223,9 +217,8 @@ function printNodesForBlock(block: FlowBlock): FlowPrintNode[] {
         rows: block.rows.map((row) => block.columns.map((column) => {
           const cell = row.cells[column.id]
           return {
-            text: flowTableCellText(cell),
+            content: cell ?? { inlines: [] },
             ...(block.merges?.length ? { span: tableCellSpan(block, row.id, column.id) } : {}),
-            runs: typeof cell === 'object' && cell ? cell.runs ?? [] : [],
           }
         })),
       }]
@@ -233,7 +226,8 @@ function printNodesForBlock(block: FlowBlock): FlowPrintNode[] {
       return [{
         type: 'formula',
         blockId: block.id,
-        linear: serializeFormulaAst(block.ast),
+        latex: block.latex,
+        ...(block.style ? { style: block.style } : {}),
         accessibleText: block.accessibleText,
       }]
     case 'media':
@@ -242,7 +236,7 @@ function printNodesForBlock(block: FlowBlock): FlowPrintNode[] {
         blockId: block.id,
         mediaKind: block.mediaKind,
         assetId: block.assetId,
-        fallbackLabel: block.altText?.trim() || block.caption?.trim() || block.assetId,
+        fallbackLabel: block.altText?.trim() || (block.caption ? plainDocumentText(block.caption).trim() : undefined) || block.assetId,
         ...(block.altText ? { altText: block.altText } : {}),
         ...(block.caption ? { caption: block.caption } : {}),
       }]
@@ -287,50 +281,50 @@ function printNodeToHtml(
     case 'document-title':
       return `<h1 data-flow-print-node="title">${escapeHtml(node.text)}</h1>`
     case 'heading':
-      return `<h${node.level} data-flow-print-block="${escapeHtml(node.blockId)}"${paragraphStyle}>${richTextToHtml(node.text, node.runs)}</h${node.level}>`
+      return `<h${node.level} data-flow-print-block="${escapeHtml(node.blockId)}"${paragraphStyle}>${richTextToHtml(node.content)}</h${node.level}>`
     case 'paragraph':
-      return `<p data-flow-print-block="${escapeHtml(node.blockId)}"${paragraphStyle}>${richTextToHtml(node.text, node.runs)}</p>`
+      return `<p data-flow-print-block="${escapeHtml(node.blockId)}"${paragraphStyle}>${richTextToHtml(node.content)}</p>`
     case 'quote':
-      return `<blockquote data-flow-print-block="${escapeHtml(node.blockId)}"${paragraphStyle}><p>${richTextToHtml(node.text, node.runs)}</p>${
-        node.citation ? `<cite>${escapeHtml(node.citation)}</cite>` : ''
+      return `<blockquote data-flow-print-block="${escapeHtml(node.blockId)}"${paragraphStyle}><p>${richTextToHtml(node.content)}</p>${
+        node.citation ? `<cite>${richTextToHtml(node.citation)}</cite>` : ''
       }</blockquote>`
     case 'list': {
       const tag = node.ordered ? 'ol' : 'ul'
       return `<${tag} data-flow-print-block="${escapeHtml(node.blockId)}">${
-        node.items.map((item) => `<li>${richTextToHtml(item.text, item.runs)}</li>`).join('')
+        node.items.map((item) => `<li>${richTextToHtml(item.content)}</li>`).join('')
       }</${tag}>`
     }
     case 'chart':
       return `<figure data-flow-print-block="${escapeHtml(node.blockId)}" style="width:100%;margin:16px 0;aspect-ratio:656/${node.height}">${buildNativeChartSvg(node.chart, 656, node.height, node.blockId)}</figure>`
     case 'table': {
-      const head = `<tr>${node.headers.map((header) => `<th>${escapeHtml(header)}</th>`).join('')}</tr>`
-      const body = node.rows.map((row) => `<tr>${row.filter(cell => !cell.span?.covered).map((cell) => `<td${cell.span ? ` rowspan="${cell.span.rowSpan}" colspan="${cell.span.columnSpan}"` : ''}>${richTextToHtml(cell.text, cell.runs)}</td>`).join('')}</tr>`).join('')
+      const head = `<tr>${node.headers.map((header) => `<th>${richTextToHtml(header)}</th>`).join('')}</tr>`
+      const body = node.rows.map((row) => `<tr>${row.filter(cell => !cell.span?.covered).map((cell) => `<td${cell.span ? ` rowspan="${cell.span.rowSpan}" colspan="${cell.span.columnSpan}"` : ''}>${richTextToHtml(cell.content)}</td>`).join('')}</tr>`).join('')
       return `<figure data-flow-print-block="${escapeHtml(node.blockId)}">${
-        node.caption ? `<figcaption>${escapeHtml(node.caption)}</figcaption>` : ''
+        node.caption ? `<figcaption>${richTextToHtml(node.caption)}</figcaption>` : ''
       }<table>${head}${body}</table></figure>`
     }
     case 'formula':
-      return `<p data-flow-print-block="${escapeHtml(node.blockId)}" data-flow-print="formula"><span>${escapeHtml(node.linear)}</span><span>公式说明：${escapeHtml(node.accessibleText)}</span></p>`
+      return `<p data-flow-print-block="${escapeHtml(node.blockId)}" data-flow-print="formula">${richTextToHtml({ inlines: [{ type: 'math', formulaId: node.blockId, latex: node.latex, accessibleText: node.accessibleText, style: node.style }] }, true)}</p>`
     case 'media': {
       const assetUrl = node.mediaKind === 'image'
         ? options.resolveAssetUrl?.(node.assetId)?.trim()
         : undefined
       if (assetUrl) {
-        const alt = node.altText?.trim() || node.caption?.trim() || node.fallbackLabel
+        const alt = node.altText?.trim() || (node.caption ? plainDocumentText(node.caption).trim() : undefined) || node.fallbackLabel
         return `<figure data-flow-print-block="${escapeHtml(node.blockId)}" data-flow-print="image"><img class="flow-print-image" src="${escapeHtml(assetUrl)}" alt="${escapeHtml(alt)}"/>${
-          node.caption ? `<figcaption>${escapeHtml(node.caption)}</figcaption>` : ''
+          node.caption ? `<figcaption>${richTextToHtml(node.caption)}</figcaption>` : ''
         }</figure>`
       }
-      return `<p data-flow-print-block="${escapeHtml(node.blockId)}" data-flow-print="media-fallback">[媒体后备：${escapeHtml(node.fallbackLabel)}]</p>`
+      return `<figure data-flow-print-block="${escapeHtml(node.blockId)}" data-flow-print="media-fallback"><p>[媒体后备：${escapeHtml(node.fallbackLabel)}]</p>${node.caption ? `<figcaption>${richTextToHtml(node.caption)}</figcaption>` : ''}</figure>`
     }
     case 'code':
       return `<pre data-flow-print-block="${escapeHtml(node.blockId)}"><code>${escapeHtml(node.code)}</code></pre>`
     case 'callout':
       return `<aside data-flow-print-block="${escapeHtml(node.blockId)}">${
-        node.title ? `<strong>${escapeHtml(node.title)}</strong>` : ''
-      }<p>${escapeHtml(node.body)}</p></aside>`
+        node.title ? `<strong>${richTextToHtml(node.title)}</strong>` : ''
+      }<p>${richTextToHtml(node.body)}</p></aside>`
     case 'section':
-      return `<h2 data-flow-print-block="${escapeHtml(node.blockId)}" data-flow-print="section">${escapeHtml(node.title)}</h2>`
+      return `<h2 data-flow-print-block="${escapeHtml(node.blockId)}" data-flow-print="section">${richTextToHtml(node.title)}</h2>`
     case 'divider':
       return `<hr data-flow-print-block="${escapeHtml(node.blockId)}"/>`
     case 'component':
@@ -338,32 +332,12 @@ function printNodeToHtml(
   }
 }
 
-function richTextStyleToCss(style: TextRunStyle): string {
-  const decorations = [
-    style.underline ? 'underline' : '',
-    style.strike ? 'line-through' : '',
-  ].filter(Boolean).join(' ')
-  return [
-    style.fontFamily ? `font-family:${style.fontFamily}` : '',
-    style.fontSize !== undefined ? `font-size:${style.fontSize}px` : '',
-    style.baseline !== undefined ? `vertical-align:${style.baseline}em` : '',
-    style.color ? `color:${style.color}` : '',
-    style.bold !== undefined ? `font-weight:${style.bold ? '700' : '400'}` : '',
-    style.italic !== undefined ? `font-style:${style.italic ? 'italic' : 'normal'}` : '',
-    decorations ? `text-decoration-line:${decorations}` : '',
-    style.highlightColor ? `background-color:${style.highlightColor}` : '',
-    style.emphasis !== undefined
-      ? `text-emphasis-style:${style.emphasis ? 'filled circle' : 'none'}`
-      : '',
-  ].filter(Boolean).join(';')
-}
-
-function richTextToHtml(text: string, runs: readonly TextRun[]): string {
-  return flowRichTextSegments(text, runs).map((segment) => {
-    const content = escapeHtml(segment.text).replace(/\n/g, '<br/>')
-    const css = richTextStyleToCss(segment.style)
-    return css ? `<span style="${escapeHtml(css)}">${content}</span>` : content
-  }).join('')
+function richTextToHtml(content: FlowTextContent, displayMode = false): string {
+  if (!displayMode) return renderDocumentText(content)
+  const inline = content.inlines[0]
+  if (!inline || inline.type !== 'math') return renderDocumentText(content)
+  const style = `${inline.style?.fontSize ? `font-size:${inline.style.fontSize}px;` : ''}${inline.style?.color ? `color:${inline.style.color};` : ''}`
+  return `<span aria-label="${escapeHtml(inline.accessibleText)}" style="${escapeHtml(style)}">${renderDocumentMath(inline.latex, true)}</span>`
 }
 
 function escapeHtml(value: string): string {

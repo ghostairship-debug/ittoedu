@@ -29,7 +29,7 @@ import {
 } from '../export/exportSize'
 import { loadPlayerBundle } from '../export/loadPlayerBundle'
 import type { PublishedCourseSession } from '../../player/surfaces/publishedDynamicHosts'
-import { mountPublishedCourseTryRun } from '../ui/coursePlayerTryRun'
+import { mountPublishedCourseTryRun, reportTryRunInteractionDiagnostic } from '../ui/coursePlayerTryRun'
 import { beginSerializedSessionMount, enqueueSerial } from '../ui/serializedSessionMount'
 
 export type CourseDeliveryFormat =
@@ -578,6 +578,7 @@ export function useCourseDelivery(
       project: snapshot.project,
       assetFiles: snapshot.assetFiles,
       components: snapshot.components,
+      onInteractionDiagnostic: reportTryRunInteractionDiagnostic,
     }), {
       onReady: (session) => {
         previewFitRef.current?.()

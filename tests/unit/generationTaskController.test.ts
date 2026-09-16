@@ -96,7 +96,7 @@ function fixture(outcomes: Array<'candidate' | 'answer' | 'candidate-rejected' |
         ? { kind: 'candidate', requestId: current.requestId, candidate: candidate(current) }
         : outcomes[stage] === 'candidate-rejected' ? { kind: 'candidate-rejected', requestId: current.requestId, candidateId: randomUUID(), finding: 'scope-mismatch：authoringAddress 不属于当前授权目标', ...(behavior.failure ? { failure: behavior.failure } : {}) }
         : outcomes[stage] === 'candidate-format-error' ? { kind: 'candidate-format-error', requestId: current.requestId, finding: '候选格式错误', excerpt: '{}', ...(behavior.failure ? { failure: behavior.failure } : {}) }
-        : outcomes[stage] === 'incomplete' ? { kind: 'incomplete', requestId: current.requestId, finding: '编辑未完成：本任务没有正式修改回执' }
+        : outcomes[stage] === 'incomplete' ? { kind: 'incomplete', requestId: current.requestId, finding: '编辑未完成：本任务没有正式修改回执', ...(behavior.failure ? { failure: behavior.failure } : {}) }
         : { kind: 'answer', requestId: current.requestId } }
     } else if (input.operation === 'host-result') {
       await behavior.onHostResult(input)
@@ -108,7 +108,8 @@ function fixture(outcomes: Array<'candidate' | 'answer' | 'candidate-rejected' |
       await behavior.onInput(input.input)
       response = { enabled: true, inputDelivery: {
         taskId: input.input.taskId, epoch: input.input.epoch, workspace, inputId: input.input.inputId,
-        turnId: input.input.turnId, status: 'queued', reason: 'unit turn boundary',
+        turnId: input.input.turnId, status: input.input.kind === 'extend-budget' ? 'accepted' : 'queued', reason: 'unit turn boundary',
+        ...(input.input.kind === 'extend-budget' ? { deadlineAt: behavior.projectedDeadline } : {}),
       } }
     }
     else if (input.operation === 'cancel') await behavior.onCancel(input.sessionId)
@@ -145,6 +146,55 @@ function fixture(outcomes: Array<'candidate' | 'answer' | 'candidate-rejected' |
 }
 
 describe('GenerationTaskController deadline recovery feedback', () => {
+  it('limits successful click feedback to changed declared rules without claiming complete goal verification', async () => {
+    const f = fixture(['candidate', 'answer'])
+    f.prepare.mockImplementationOnce(async (request, candidate) => ({ ...f.makePrepared(request, candidate),
+      interactionChecks: { checked: ['changed-switch'], skipped: [] } }))
+    await f.controller.start(f.request(), 'codex')
+    const result = f.hostResults().find(call => call.result.status === 'committed')!.result
+    expect(result.status).toBe('committed')
+    expect(result.summary).toContain('已改规则的声明行为点击检查 1 项通过')
+    expect(result.summary).toContain('未改规则及完整任务目标仍需核对')
+  })
+  it('discards a candidate still preparing when a correction is accepted and continues with a fresh observation without applying it', async () => {
+    const f = fixture(['candidate', 'answer']), preparing = deferred<void>(), prepared = deferred<void>()
+    f.prepare.mockImplementationOnce(async (request, candidate) => {
+      preparing.resolve(); await prepared.promise
+      return f.makePrepared(request, candidate)
+    })
+    const running = f.controller.start(f.request(), 'codex')
+    await preparing.promise
+    await f.controller.input(f.input('correct'))
+    prepared.resolve(); await running
+    expect(f.apply).not.toHaveBeenCalled()
+    expect(f.receipts).toEqual([])
+    expect(f.hostResults()).toMatchObject([{ result: { status: 'rejected', summary: expect.stringContaining('当前候选未应用') } }])
+    expect(f.captureNext).toHaveBeenCalledOnce()
+    expect(f.controller.current.phase).toBe('completed')
+    expect(f.calls.some(call => call.operation === 'cancel')).toBe(false)
+  })
+  it('uses the explicitly extended owner deadline through an already waiting stage and candidate preparation', async () => {
+    vi.useFakeTimers(); vi.setSystemTime(1000)
+    const f = fixture(['candidate', 'answer']), readStarted = deferred<void>(), releaseRead = deferred<void>()
+    let reads = 0
+    f.behavior.projectedDeadline = 1100
+    f.behavior.onRead = async () => { if (++reads === 1) { readStarted.resolve(); await releaseRead.promise } }
+    f.behavior.onInput = async input => { expect(input.kind).toBe('extend-budget'); f.behavior.projectedDeadline = 1100 + 20 * 60_000 }
+    try {
+      const running = f.controller.start({ ...f.request(), execution: { version: 1, startedAt: 1000, deadlineAt: 1100 } }, 'codex')
+      await readStarted.promise
+      const base = f.input()
+      await f.controller.input({ version: 1, taskId: base.taskId, epoch: base.epoch, workspace: base.workspace,
+        inputId: base.inputId, turnId: base.turnId, kind: 'extend-budget', minutes: 20 })
+      await vi.advanceTimersByTimeAsync(101)
+      expect(f.controller.current.busy).toBe(true)
+      releaseRead.resolve(); await running
+      expect(f.controller.current.phase).toBe('completed')
+      expect(f.receipts).toHaveLength(1)
+      expect(f.prepare.mock.calls[0]![0].execution!.deadlineAt).toBe(1100 + 20 * 60_000)
+      expect(f.requests.at(-1)!.execution!.deadlineAt).toBe(1100 + 20 * 60_000)
+    } finally { releaseRead.resolve(); await f.controller.stop(); vi.useRealTimers() }
+  })
   it('preserves the stale recovery reason when content changes during checked-result feedback', async () => {
     vi.useFakeTimers()
     const f = fixture(['candidate']), delayed = deferred<void>()
@@ -345,6 +395,17 @@ describe('GenerationTaskController unit task lifecycle', () => {
     expect(f.prepare).not.toHaveBeenCalled(); expect(f.apply).not.toHaveBeenCalled()
   })
 
+  it('forwards the structured missing-delivery failure of an unfulfilled edit answer as a machine-readable rejection', async () => {
+    const f = fixture(['incomplete', 'answer']), request = f.request()
+    f.behavior.failure = { version: 1, stage: 'candidate-parse', requestId: request.requestId, assetIds: [], packageIds: [],
+      diagnostics: [{ code: 'missing-candidate-delivery', message: '编辑未完成：本任务尚无实际修改回执', path: [] }],
+      recovery: { action: 'repair-candidate', message: '把候选写入当前请求根的 candidate.json 或给出完整 courseware-candidate-v1 候选' } }
+    await f.controller.start(request, 'codex')
+    expect(f.hostResults()[0]?.result).toMatchObject({ status: 'rejected',
+      failure: { stage: 'candidate-parse', diagnostics: [{ code: 'missing-candidate-delivery', path: [] }], recovery: { action: 'repair-candidate' } } })
+    expect(f.prepare).not.toHaveBeenCalled(); expect(f.apply).not.toHaveBeenCalled()
+  })
+
   it('retries only an already committed terminal receipt after two storage failures and after the execution deadline', async () => {
     vi.useFakeTimers(); vi.setSystemTime(1000)
     try {
@@ -421,7 +482,7 @@ describe('GenerationTaskController unit task lifecycle', () => {
       const running = f.controller.start({ ...f.request(), execution: { version: 1, startedAt: 1000, deadlineAt: 1100 } }, 'codex')
       await vi.advanceTimersByTimeAsync(100)
       await running
-      expect(f.controller.current).toMatchObject({ busy: false, phase: 'failed', preview: undefined, error: expect.stringContaining('20分钟') })
+      expect(f.controller.current).toMatchObject({ busy: false, phase: 'failed', preview: undefined, error: expect.stringContaining('执行预算') })
       const committed = boundary === 'capture-next' || boundary === 'receipt-ipc'
       expect(f.apply).toHaveBeenCalledTimes(committed ? 1 : 0)
       if (boundary === 'receipt-ipc') expect(f.controller.current.canRetryFeedback).toBe(true)

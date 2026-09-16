@@ -15,10 +15,15 @@ import { executeAuthoringTool, type AuthoringToolDefinition } from '@/renderer/a
 import { nativeAuthoringTool } from '@/renderer/authoring/tools/nativeAuthoringTool'
 import { materialCitationTool } from '@/renderer/authoring/tools/materialCitationTool'
 import { flowAuthoringTool } from '@/renderer/authoring/tools/flowAuthoringTool'
+import { spatialStructureTool } from '@/renderer/authoring/tools/spatialStructureTool'
 import { slideStructureAddress } from '@/renderer/authoring/tools/slideStructureTool'
+import { spatialGraphAuthoringAddress } from '@/renderer/course/spatialPathCommands'
 import { makeAuthoringAddress } from '@/shared/authoringAddress'
+import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
 import { applyEditorTransactionStep, type EditorTransactionStep } from '@/renderer/authoring/editorTransaction'
 import { createResourceAwareAuthoringHistory, commitEditorTransactionToAuthoringHistory } from '@/renderer/authoring/resourceAwareAuthoringHistory'
+import { SpatialSurfaceHost } from '@/player/surfaces/spatial/SpatialSurfaceHost'
+import { spatialWorldToScreen } from '@/player/surfaces/spatial/spatialModel'
 
 import type { CourseProjectDocument } from '@/shared/courseProjectTypes'
 import type { AuthoringToolCreateScopeV1, AuthoringToolDestinationV1, AuthoringToolReceiptV1 } from '@/shared/authoringToolContract'
@@ -287,6 +292,94 @@ describe('Product commands behind versioned Surface tools', () => {
     for (let index = 0; index < 6; index++) useEditorStore.getState().undo()
     expect(selectActiveCourseProjectDocument(useEditorStore.getState())).toEqual(original)
   })
+  it('fits visible world content through the candidate transaction, persists its selected entry frame, and enters it in Player', async () => {
+    const emptyProject = createBlankSpatialCourseProject()
+    const empty = harness(emptyProject)
+    const emptySurface = emptyProject.surfaces[0]
+    if (emptySurface?.type !== 'spatial-2d') throw new Error('Expected empty Spatial surface')
+    const emptyScope = empty.scope()
+    const { parent: _emptyParent, insertion: _emptyInsertion, ...emptyTarget } = emptyScope
+    const emptyFit = await empty.run(spatialStructureTool, { operation: 'fit-world-content' }, {
+      kind: 'update',
+      target: {
+        ...emptyTarget,
+        itemId: emptySurface.id,
+        authoringAddress: spatialGraphAuthoringAddress({
+          projectId: emptyProject.id,
+          surfaceId: emptySurface.id,
+          entityId: emptySurface.id,
+          field: 'camera.home',
+        }),
+      },
+    })
+    expect(emptyFit.status).toBe('unchanged')
+    expect(empty.steps).toHaveLength(0)
+    expect(empty.document()).toEqual(emptyProject)
+
+    const test = harness(createBlankSpatialCourseProject())
+    const first = await test.run(nativeAuthoringTool, {
+      operation: 'insert',
+      template: { nativeType: 'text', text: '左下内容', x: -2000, y: 3000, width: 400, height: 80 },
+    })
+    const second = await test.run(nativeAuthoringTool, {
+      operation: 'insert',
+      template: { nativeType: 'text', text: '右上内容', x: 2000, y: -1200, width: 300, height: 100 },
+    })
+    expect(first.status).toBe('committed')
+    expect(second.status).toBe('committed')
+
+    const beforeFit = test.document()
+    const surface = beforeFit.surfaces[0]
+    if (surface?.type !== 'spatial-2d') throw new Error('Expected Spatial surface')
+    const scope = test.scope()
+    const { parent: _parent, insertion: _insertion, ...target } = scope
+    const fit = await test.run(spatialStructureTool, { operation: 'fit-world-content' }, {
+      kind: 'update',
+      target: {
+        ...target,
+        itemId: surface.id,
+        authoringAddress: spatialGraphAuthoringAddress({
+          projectId: beforeFit.id,
+          surfaceId: surface.id,
+          entityId: surface.id,
+          field: 'camera.home',
+        }),
+      },
+    })
+    expect(fit.status, JSON.stringify(fit.diagnostics)).toBe('committed')
+    expect(test.steps).toHaveLength(3)
+
+    const reopened = courseProjectDocumentSchema.parse(JSON.parse(JSON.stringify(test.document())))
+    const reopenedSurface = reopened.surfaces.find((candidate) => candidate.id === surface.id)
+    if (reopenedSurface?.type !== 'spatial-2d') throw new Error('Expected reopened Spatial surface')
+    const entry = reopened.locations.find((location) => location.id === reopened.startLocationId)
+    if (entry?.kind !== 'spatial-camera') throw new Error('Expected Spatial entry location')
+    const entryFrame = reopenedSurface.camera.frames.find((frame) => frame.id === entry.cameraFrameId)
+    const expected = {
+      x: 150,
+      y: 940,
+      zoom: 720 / (4280 + 80),
+    }
+    expect(reopenedSurface.camera.home).toEqual(expected)
+    expect(entryFrame).toMatchObject(expected)
+    expect(fit.affected.map((effect) => effect.id)).toEqual([surface.id, entry.cameraFrameId])
+
+    const published = buildPublishedCourseV2Payload({ project: reopened, assetFiles: {}, components: {} })
+    const container = document.createElement('div')
+    const host = SpatialSurfaceHost.fromPublishedCourse(published, { width: 1280, height: 720 })
+    await host.mount(container)
+    await host.activate()
+    await host.setLocationId(entry.id)
+    expect(host.camera).toMatchObject(expected)
+    const camera = host.camera!
+    const lowerLeft = spatialWorldToScreen(camera, { x: -2000, y: 3000 })
+    const upperRight = spatialWorldToScreen(camera, { x: 2300, y: -1200 })
+    expect(lowerLeft.x).toBeGreaterThanOrEqual(0)
+    expect(lowerLeft.y).toBeGreaterThanOrEqual(0)
+    expect(upperRight.x).toBeLessThanOrEqual(1280)
+    expect(upperRight.y).toBeLessThanOrEqual(720)
+    await host.destroy()
+  })
   it('commits page/state navigation atomically and recovers valid targets through delete and Undo', async () => {
     useEditorStore.getState().createNewProject()
     const original = selectActiveCourseProjectDocument(useEditorStore.getState())!
@@ -340,7 +433,7 @@ describe('Product commands behind versioned Surface tools', () => {
     const scope = harness(original).scope()
     scope.sessionGeneration = useEditorStore.getState().courseAuthoringSession!.token.generation
     const request = { version: 1, requestId: 'live-tool', tool: surfaceType === 'flow' ? 'flow.content' : 'native.content', destination: { kind: 'create', scope },
-      input: surfaceType === 'flow' ? { operation: 'insert', block: { type: 'paragraph', text: '工具写入' } } : { operation: 'insert', template: { nativeType: 'text', text: '工具写入' } } }
+      input: surfaceType === 'flow' ? { operation: 'insert', block: { type: 'paragraph', content: { inlines: [{ type: 'text', text: '工具写入' }] } } } : { operation: 'insert', template: { nativeType: 'text', text: '工具写入' } } }
     const receipt = await useEditorStore.getState().runAuthoringTool(request)
     expect(receipt.status, JSON.stringify(receipt.diagnostics)).toBe('committed')
     const selected = surfaceType === 'flow' ? useEditorStore.getState().flowSession?.selection.selectedBlockId : selectSelectedNodeId(useEditorStore.getState())
@@ -376,11 +469,11 @@ describe('Product commands behind versioned Surface tools', () => {
 
   it('addresses a Flow table stably after preceding insertion and uses shared structural edits', async () => {
     const test = harness(createBlankFlowCourseProject())
-    const table = await test.run(flowAuthoringTool, { operation: 'insert', block: { type: 'table', columns: [{ id: 'a', header: '甲' }], rows: [{ id: 'r', cells: { a: '首格' } }] } })
+    const table = await test.run(flowAuthoringTool, { operation: 'insert', block: { type: 'table', columns: [{ id: 'a', header: { inlines: [{ type: 'text', text: '甲' }] } }], rows: [{ id: 'r', cells: { a: { inlines: [{ type: 'text', text: '首格' }] } } }] } })
     expect(table.status).toBe('committed')
     const before = test.scope()
     before.insertion = { kind: 'before', siblingId: table.affected[0]!.id }
-    expect((await test.run(flowAuthoringTool, { operation: 'insert', block: { type: 'paragraph', text: '前置段落' } }, { kind: 'create', scope: before })).status).toBe('committed')
+    expect((await test.run(flowAuthoringTool, { operation: 'insert', block: { type: 'paragraph', content: { inlines: [{ type: 'text', text: '前置段落' }] } } }, { kind: 'create', scope: before })).status).toBe('committed')
     expect((await test.run(flowAuthoringTool, { operation: 'table-structure', change: { kind: 'insert-row' } }, test.target(table))).status).toBe('committed')
     const surface = test.document().surfaces[0]!
     if (surface.type !== 'flow') throw new Error('Expected Flow')

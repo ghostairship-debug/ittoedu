@@ -1,3 +1,4 @@
+import { withDefaultComponentController } from '../../src/renderer/components/teacherControllerComponent'
 import {
   mkdtempSync,
   mkdirSync,
@@ -132,11 +133,8 @@ function authorFlowRuntimeFixture(): CourseProjectDocument {
 }
 
 function writeFixture(): void {
-  const sources = {
-    project: authorFlowRuntimeFixture(),
-    assetFiles: {},
-    components: {},
-  }
+  const project = authorFlowRuntimeFixture()
+  const sources = { project, assetFiles: {}, components: withDefaultComponentController(project).componentPackages }
   const playerBundle = readFileSync(join(root, 'dist-player', 'player.iife.js'), 'utf8')
   writeFileSync(
     standalonePath,

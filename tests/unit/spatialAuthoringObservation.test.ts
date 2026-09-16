@@ -1,3 +1,4 @@
+import { withDefaultComponentController } from '@/renderer/components/teacherControllerComponent'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createBlankSpatialCourseProject } from '@/renderer/project/createSpatialCourseProject'
 import {
@@ -55,7 +56,7 @@ describe('Spatial current camera observation', () => {
     expect(worldToClient(createSpatialWorldViewTransform(view.viewport, view.camera), view.camera)).toEqual({ x: 640, y: 360 })
     const structure = JSON.parse(captured.resourceFiles.find(file => file.role === 'structure')!.content)
     expect(structure.spatialView).toEqual(view)
-    const request = captureGenerationSnapshot({ document: h.project, observation: captured.observation,
+    const request = captureGenerationSnapshot({ document: h.project, componentPackages: withDefaultComponentController(h.project).componentPackages, observation: captured.observation,
       workspace: { version: 1, projectId: h.project.id, normalizedPath: '/fixtures/current-spatial.h5lesson' },
       sessionToken: { locationId: h.state.locationId, surfaceType: 'spatial-2d', generation: 3, revision: h.project.revision },
       projection: projectEffectiveLayers({ project: h.project, locationId: h.state.locationId }),

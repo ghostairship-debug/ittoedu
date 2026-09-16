@@ -1,4 +1,4 @@
-import { publishedControllerPackages } from '../fixtures/teacherController'
+import { publishedControllerPackages, queryDeep } from '../fixtures/teacherController'
 import { controllerPackage } from '../fixtures/teacherController'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type {
@@ -69,7 +69,7 @@ interface FixtureOptions {
   sceneBItems?: PublishedLayerItem[]
   sceneBInteractions?: InteractionRule[]
   sceneBPresentation?: PublishedSlidePresentation
-  globalItems?: PublishedScopedLayerItem[]
+  globalItems?: PublishedCourseV2Payload['globalLayerItems']
   globalInteractions?: InteractionRule[]
 }
 
@@ -374,7 +374,7 @@ function publishedFixture(options: FixtureOptions = {}): PublishedCourseV2Payloa
         surfaceLayerItems: [],
         backgroundColor: '#ffffff',
         layout: { readingWidth: 760, wideContentWidth: 1120 },
-        blocks: [{ id: 'flow-heading', type: 'heading', level: 1, text: 'Flow' }],
+        blocks: [{ id: 'flow-heading', type: 'heading', level: 1, content: { inlines: [{ type: 'text', text: 'Flow' }] } }],
       },
     ],
     mixedPrintPlan: {
@@ -1024,7 +1024,8 @@ describe('Published Interaction Slide host integration', () => {
       textItem('surface-owned-trigger', 60, { hitPolicy: 'surface' }),
     ]
     const payload = publishedFixture({
-      sceneAItems: [...ownedItems, ownedTarget],
+      sceneAItems: [...ownedItems.filter(item => item.layerItemId !== 'controller-trigger'), ownedTarget],
+      globalItems: [{ item: ownedItems.find(item => item.layerItemId === 'controller-trigger')!, plane: 'overlay', visibility: { mode: 'all', locationIds: [] } }],
       sceneAInteractions: ownedItems.map((item, index) => clickRule(
         `owned-rule-${index}`,
         item.layerItemId,
@@ -1053,6 +1054,116 @@ describe('Published Interaction Slide host integration', () => {
       ownedItems.map((item) => item.layerItemId).sort(),
     )
     expect(unavailable.every((diagnostic) => diagnostic.phase === 'execute')).toBe(true)
+  })
+
+  it('presentation.set updates the actual Published Slide repeatedly without changing its location or payload', async () => {
+    const diagnostics: PublishedInteractionDiagnostic[] = []
+    const payload = publishedFixture({
+      sceneBItems: [textItem('state-open-button', 10), textItem('state-close-button', 20), textItem('state-label', 30, { text: '灯灭' })],
+      sceneBInteractions: [
+        clickRule('set-open', 'state-open-button', [step('set-open-step', { type: 'presentation.set', stateId: 'on' })]),
+        clickRule('set-close', 'state-close-button', [step('set-close-step', { type: 'presentation.set', stateId: 'off' })]),
+      ],
+      sceneBPresentation: { initialStateId: 'off', states: [
+        { id: 'off', name: 'Off', layerItemOverrides: {} },
+        { id: 'on', name: 'On', layerItemOverrides: { 'state-label': { nativeData: { text: '灯亮' } } } },
+      ] },
+    })
+    const before = structuredClone(payload)
+    const { container, session } = await mount(payload, diagnostics, { initialLocationId: LOCATION_B_ID })
+    for (let cycle = 0; cycle < 2; cycle += 1) {
+      renderedItem(container, 'state-open-button').click()
+      await vi.waitFor(() => expect(renderedItem(container, 'state-label').textContent).toContain('灯亮'))
+      expect(session.readObservationState().stateId).toBe('on')
+      expect(session.navigator.current?.locationId).toBe(LOCATION_B_ID)
+      renderedItem(container, 'state-close-button').click()
+      await vi.waitFor(() => expect(renderedItem(container, 'state-label').textContent).toContain('灯灭'))
+      expect(session.readObservationState().stateId).toBe('off')
+      expect(session.navigator.current?.locationId).toBe(LOCATION_B_ID)
+    }
+    expect(payload).toEqual(before)
+    expect(diagnostics.filter(value => value.code === 'unsupported-action' || value.code === 'navigation-failed')).toEqual([])
+  })
+
+  it('presentation.set rejects a state absent from the current actual Published Slide', async () => {
+    const diagnostics: PublishedInteractionDiagnostic[] = []
+    const payload = publishedFixture({
+      sceneBItems: [textItem('unknown-state-button', 10), textItem('unchanged-state-label', 20, { text: '保留原状态' })],
+      sceneBInteractions: [clickRule('unknown-state', 'unknown-state-button', [
+        step('unknown-state-step', { type: 'presentation.set', stateId: 'missing' }),
+      ])],
+      sceneBPresentation: { initialStateId: 'only-state', states: [{ id: 'only-state', name: 'Only', layerItemOverrides: {} }] },
+    })
+    const before = structuredClone(payload)
+    const { container, session } = await mount(payload, diagnostics, { initialLocationId: LOCATION_B_ID })
+    renderedItem(container, 'unknown-state-button').click()
+    await vi.waitFor(() => expect(diagnostics.some(value => value.code === 'navigation-failed')).toBe(true))
+    expect(session.readObservationState().stateId).toBe('only-state')
+    expect(session.navigator.current?.locationId).toBe(LOCATION_B_ID)
+    expect(renderedItem(container, 'unchanged-state-label').textContent).toContain('保留原状态')
+    expect(payload).toEqual(before)
+  })
+
+  it('rejects automatic or unguarded global presentation.set, keeps its guarded manual command inert in Flow, then executes it on the guarded Slide', async () => {
+    const diagnostics: PublishedInteractionDiagnostic[] = []
+    const payload = publishedFixture({
+      sceneBPresentation: { initialStateId: 'off', states: [
+        { id: 'off', name: 'Off', layerItemOverrides: {} },
+        { id: 'on', name: 'On', layerItemOverrides: {} },
+      ] },
+      globalInteractions: [
+        { id: 'global-set-without-scene', enabled: true, trigger: { type: 'presenter.command', command: 'next' }, conditions: [], actions: [
+          step('global-set-without-scene-step', { type: 'presentation.set', stateId: 'on' }),
+        ] },
+        { id: 'global-set-on-enter', enabled: true, trigger: { type: 'scene.enter' }, conditions: [
+          { type: 'scene.in', sceneIds: [SCENE_B_ID] },
+        ], actions: [step('global-set-on-enter-step', { type: 'presentation.set', stateId: 'on' })] },
+        { id: 'global-set-on-beta-command', enabled: true, trigger: { type: 'presenter.command', command: 'next' }, conditions: [
+          { type: 'scene.in', sceneIds: [SCENE_B_ID] },
+        ], actions: [step('global-set-on-beta-command-step', { type: 'presentation.set', stateId: 'on' })] },
+      ],
+    })
+    const before = structuredClone(payload)
+    const { session } = await mount(payload, diagnostics)
+    await session.goToLocation(FLOW_LOCATION_ID)
+    await settle()
+    expect(session.navigator.current?.locationId).toBe(FLOW_LOCATION_ID)
+    expect(diagnostics.some(value => value.code === 'unsupported-action' && value.message.includes('全局 presentation.set 必须使用 scene.in'))).toBe(true)
+    expect(diagnostics.some(value => value.code === 'unsupported-action' && value.message.includes('presentation.set 暂不支持 scene.enter'))).toBe(true)
+    expect(diagnostics.some(value => value.code === 'navigation-failed')).toBe(false)
+    expect(session.dispatchPresenterCommand('next')).toBe(false)
+
+    await session.goToLocation(LOCATION_B_ID)
+    expect(session.dispatchPresenterCommand('next')).toBe(true)
+    await vi.waitFor(() => expect(session.readObservationState().stateId).toBe('on'))
+    expect(session.navigator.current?.locationId).toBe(LOCATION_B_ID)
+    expect(payload).toEqual(before)
+  })
+
+  it.each(['tail', 'parallel', 'transition'] as const)('presentation.set explicitly rejects unsupported %s rules before any actual host action', async kind => {
+    const diagnostics: PublishedInteractionDiagnostic[] = []
+    const set = step('restricted-state', { type: 'presentation.set', stateId: 'on', ...(kind === 'transition' ? { transition: { duration: 200 } } : {}) })
+    const write = step('must-not-write', { type: 'course-state.set', key: 'touched', value: true })
+    if (kind === 'parallel') set.start = 'with-previous'
+    const actions = kind === 'tail' ? [set, write] : [write, set]
+    const payload = publishedFixture({
+      courseState: [{ key: 'touched', valueType: 'boolean', defaultValue: false }],
+      sceneBItems: [textItem('restricted-state-button', 10)],
+      sceneBInteractions: [clickRule('restricted-state-rule', 'restricted-state-button', actions)],
+      sceneBPresentation: { initialStateId: 'off', states: [
+        { id: 'off', name: 'Off', layerItemOverrides: {} },
+        { id: 'on', name: 'On', layerItemOverrides: {} },
+      ] },
+    })
+    const before = structuredClone(payload)
+    const { container, session } = await mount(payload, diagnostics, { initialLocationId: LOCATION_B_ID })
+    renderedItem(container, 'restricted-state-button').click()
+    await settle()
+    expect(diagnostics.some(value => value.code === 'unsupported-action' && value.message.includes('整条规则未执行'))).toBe(true)
+    expect(session.readObservationState().stateId).toBe('off')
+    expect(session.navigator.current?.locationId).toBe(LOCATION_B_ID)
+    expect(session.readObservationState().publicState.courseState).toMatchObject({ touched: false })
+    expect(payload).toEqual(before)
   })
 
   it('uses an explicit current state only for the initial playback mount', async () => {
@@ -1509,9 +1620,9 @@ describe('Published Interaction Slide host integration', () => {
           volume: 0.5,
           backgroundAudioMode: 'pause',
         }),
-        controllerItem('controller-audio', 40),
         endedTarget,
       ],
+      globalItems: [{ item: controllerItem('controller-audio', 40), plane: 'overlay', visibility: { mode: 'all', locationIds: [] } }],
       sceneAInteractions: [
         clickRule('play-music-rule', 'play-music', [
           step('play-music-step', { type: 'audio.play', soundId: 'music' }),
@@ -1548,7 +1659,7 @@ describe('Published Interaction Slide host integration', () => {
     expect(play.mock.instances.filter((instance) => instance === music).length)
       .toBe(musicPlayCount + 1)
 
-    const muteButton = container.querySelector<HTMLButtonElement>(
+    const muteButton = queryDeep<HTMLButtonElement>(container,
       '[data-controller-button-id="mute"]',
     )!
     muteButton.click()

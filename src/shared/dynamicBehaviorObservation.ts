@@ -9,12 +9,22 @@ export const dynamicBehaviorFrameSchema = z.object({
   dataUrl: z.string().max(24_000_000).regex(/^data:image\/png;base64,[A-Za-z0-9+/]+=*$/),
 }).strict()
 export const dynamicButtonCheckSchema = z.object({ version: z.literal(1),
-  instanceId: z.string().trim().min(1).max(200), label: z.string().trim().min(1).max(200) }).strict()
+  instanceId: z.string().trim().min(1).max(200), label: z.string().trim().min(1).max(200),
+  /** Optional destination expectations checked against the real session after the click. */
+  expectLocationId: z.string().trim().min(1).max(200).optional(),
+  expectStateId: z.string().trim().min(1).max(200).nullable().optional() }).strict()
 export const dynamicButtonObservationSchema = z.object({
   version: z.literal(1), instanceId: z.string().min(1), label: z.string().min(1).max(200),
   input: z.literal('electron-mouse'), x: z.number().finite().nonnegative(), y: z.number().finite().nonnegative(),
   beforeText: z.string().max(8000), afterText: z.string().max(8000), textTruncated: z.boolean(),
   clickedAt: z.number().int().nonnegative(), observedAt: z.number().int().nonnegative(),
+  destination: z.object({
+    expectedLocationId: z.string().min(1).max(200).optional(),
+    expectedStateId: z.string().min(1).max(200).nullable().optional(),
+    actualLocationId: z.string().min(1).max(500),
+    actualStateId: z.string().min(1).max(500).nullable(),
+    matched: z.boolean(),
+  }).strict().optional(),
   functionalResult: z.literal('requires-review'),
 }).strict()
 export type DynamicButtonCheck = z.infer<typeof dynamicButtonCheckSchema>

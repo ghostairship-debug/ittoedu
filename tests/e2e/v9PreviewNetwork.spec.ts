@@ -156,7 +156,7 @@ function writeRemoteProject(input: {
       photo: localPhotoBytes,
       unused: localPhotoBytes,
     },
-    componentFiles: {},
+    componentFiles: fixture.data.componentFiles,
   })
   writeFileSync(input.filePath, bytes)
 }
@@ -286,6 +286,7 @@ test('V9 current/full preview embeds local assets and leases declared origins pe
       },
     })
     const page = await app.firstWindow()
+    await page.getByRole('button', { name: '新建独立课件', exact: true }).click()
     await page.locator('[data-testid="canvas-stage"] canvas').waitFor()
     const professional = page.getByRole('button', { name: '专业' })
     if (await professional.getAttribute('aria-pressed') !== 'true') await professional.click()
@@ -370,7 +371,7 @@ test('V9 current/full preview embeds local assets and leases declared origins pe
       }, { once: true })
     }, assetA.origin)
     await page.reload({ waitUntil: 'domcontentloaded' })
-    await page.locator('[data-testid="canvas-stage"] canvas').waitFor()
+    await page.getByRole('button', { name: '新建独立课件', exact: true }).waitFor()
     await expect(page.evaluate(() => window.name)).resolves
       .toBe('old-document-late-invoke-sent')
     const assetAAfterReload = assetA.requests.length

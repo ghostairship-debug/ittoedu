@@ -6,6 +6,9 @@ import type { ChartTextField } from '../../authoring/chartTextDraft'
 import type { ComponentPackageData } from '../../../shared/componentTypes'
 import type { CourseProjectDocument, FlowBlock } from '../../../shared/courseProjectTypes'
 import type { FormulaAstNode } from '../../../shared/contracts/native-v1'
+import type { DocumentDiagnostic } from '../../../shared/document/ports'
+import { flowDocumentDraftSaveBlock, type FlowDocumentDraft } from '../../authoring/flowDocumentDraft'
+export type { FlowDocumentDraft } from '../../authoring/flowDocumentDraft'
 import type { TextRun, TextRunStyle } from '../../../shared/contracts/native-v1'
 import type { CourseAssetSidecar } from '../../project/v9AssetAdapter'
 import { emptyCourseAssetSidecar, freezeCourseAssetSidecar } from '../../project/v9AssetAdapter'
@@ -36,6 +39,7 @@ import {
 import {
   executeFlowDelete,
   executeFlowEditorCommand,
+  replaceFlowDocumentContent,
   importAndReplaceFlowMediaBlock,
   importFlowSurfaceBackgroundAsset,
   insertFlowEditorBlock,
@@ -133,6 +137,7 @@ import {
 } from '../courseResourceState'
 
 export type FlowOwnedState = {
+  flowDocumentDraft?: FlowDocumentDraft | null
   flowSession: FlowAuthoringSession | null
   flowTextEdit: FlowTextEditSession | null
   flowClipboard: {
@@ -142,6 +147,7 @@ export type FlowOwnedState = {
 }
 
 export type FlowPersistExtra = {
+  historyGroup?: string
   statusMessage?: string | null
   sidecar?: CourseAssetSidecar
   sidecarDirection?: 'undo' | 'redo'
@@ -202,6 +208,10 @@ export type FlowAuthoringIntent = (
       readonly tableColumnId?: string
     }
   | { readonly kind: 'begin-formula-edit' }
+  | { readonly kind: 'replace-document-content'; readonly blocks: FlowBlock[]; readonly historyGroup: string; readonly preparedResources?: unknown }
+  | { readonly kind: 'document-history'; readonly direction: 'undo' | 'redo' }
+  | { readonly kind: 'update-document-draft'; readonly source: string; readonly diagnostics: DocumentDiagnostic[]; readonly composing: boolean }
+  | { readonly kind: 'clear-document-draft' }
   | { readonly kind: 'begin-table-field-edit'; readonly field: 'table-caption' | 'table-header'; readonly columnId?: string; readonly text?: string; readonly composing?: boolean }
   | { readonly kind: 'begin-chart-text-edit'; readonly field: ChartTextField }
   | {
@@ -286,6 +296,7 @@ function flowIntentMutatesDocument(intent: FlowAuthoringIntent): boolean {
   switch (intent.kind) {
     case 'format-block':
     case 'execute-editor-command':
+    case 'replace-document-content':
     case 'delete-blocks':
     case 'transform-overlay-frame':
     case 'set-width-mode':
@@ -405,7 +416,7 @@ export function persistFlowResult(
   }
   const nextDocument = extra.replaceHistory?.present ?? result.nextDocument ?? session.history.present
   const history = extra.replaceHistory ?? (result.historyEntry
-    ? commitFlowEditorHistory(session.history, nextDocument)
+    ? commitFlowEditorHistory(session.history, nextDocument, extra.historyGroup)
     : { ...session.history, present: nextDocument })
   const nextSelection = extra.selection === undefined
     ? (result.selection ?? session.selection)
@@ -493,6 +504,7 @@ export function applyFlowBackendState(
     ...exclusiveInactiveSurfaces('flow'),
     flowSession: session,
     flowTextEdit: null,
+    flowDocumentDraft: null,
     ...continuedCourseResourceStacks(extra.resourceHistory),
     courseAssetSidecar: sidecar,
     editingTextNodeId: null,
@@ -884,6 +896,70 @@ export function createFlowAuthoringSlice(
     }
   }
 
+  function navigateDocumentHistory(direction: 'undo' | 'redo') {
+    const bodyDraft = flow.read().flowDocumentDraft
+    if (bodyDraft) {
+      if (!bodyDraft.composing && direction === 'undo') flow.patch({ flowDocumentDraft: null })
+      return
+    }
+    if (direction === 'undo') {
+      const owned = flow.read()
+      const session = owned.flowSession
+      if (!session) return
+      const edit = owned.flowTextEdit
+      if (edit?.composing) return
+      if (edit && isFlowTextDraftDirty(edit)) {
+        flow.persist({
+          ok: true,
+          nextDocument: session.history.present,
+          historyEntry: false,
+          selection: session.selection,
+        }, {
+          clearTextEdit: true,
+          discardedTextEdit: edit,
+          statusMessage: '已取消本次编辑',
+        })
+        return
+      }
+      const resourceTransition = flowEditorUndoResourceTransition(session.history)
+      const nextHistory = undoFlowEditorHistory(session.history)
+      if (nextHistory === session.history) return
+      flow.persist({
+        ok: true,
+        nextDocument: nextHistory.present,
+        historyEntry: false,
+        selection: reconcileFlowSelection(nextHistory.present, session.selection),
+      }, {
+        replaceHistory: nextHistory,
+        ...(resourceTransition ? { resourceTransition } : { sidecarDirection: 'undo' as const }),
+        clearTextEdit: true,
+        statusMessage: '已撤销',
+      })
+
+    } else {
+      const owned = flow.read()
+      const session = owned.flowSession
+      if (!session) return
+      const edit = owned.flowTextEdit
+      if (edit?.composing || (edit && isFlowTextDraftDirty(edit))) return
+      const resourceTransition = flowEditorRedoResourceTransition(session.history)
+      const nextHistory = redoFlowEditorHistory(session.history)
+      if (nextHistory === session.history) return
+      flow.persist({
+        ok: true,
+        nextDocument: nextHistory.present,
+        historyEntry: false,
+        selection: reconcileFlowSelection(nextHistory.present, session.selection),
+      }, {
+        replaceHistory: nextHistory,
+        ...(resourceTransition ? { resourceTransition } : { sidecarDirection: 'redo' as const }),
+        clearTextEdit: true,
+        statusMessage: '已重做',
+      })
+
+    }
+  }
+
   const runFlowAuthoringIntent = (
     target: CourseAuthoringTarget,
     intent: FlowAuthoringIntent,
@@ -950,6 +1026,30 @@ export function createFlowAuthoringSlice(
 
     try {
       switch (intent.kind) {
+        case 'replace-document-content': {
+          if (intent.preparedResources !== undefined) {
+            const prepared = prepareFlowDocumentResourceTransaction(document, target.surfaceId, intent.blocks, intent.preparedResources)
+            if (!prepared.result.ok) return rejectedFlowReceipt(prepared.result.reason ?? '正文资源准备失败')
+            if (!prepared.step || !persistFlowTransaction(flow, prepared.step, '正文与素材已粘贴')) return rejectedFlowReceipt('正文资源事务未提交')
+            flow.patch({ flowDocumentDraft: null })
+            return { ok: true, historyEntry: true }
+          }
+          const receipt = persistIntentResult(replaceFlowDocumentContent(document, target.surfaceId, intent.blocks, { expectedRevision: target.documentRevision }), { historyGroup: intent.historyGroup })
+          if (receipt.ok) flow.patch({ flowDocumentDraft: null })
+          return receipt
+        }
+        case 'update-document-draft': {
+          flow.patch({ flowDocumentDraft: { surfaceId: target.surfaceId, revision: target.documentRevision, source: intent.source, diagnostics: intent.diagnostics, composing: intent.composing } })
+          return { ok: true, historyEntry: false }
+        }
+        case 'clear-document-draft': {
+          flow.patch({ flowDocumentDraft: null })
+          return { ok: true, historyEntry: false }
+        }
+        case 'document-history': {
+          navigateDocumentHistory(intent.direction)
+          return { ok: true, historyEntry: false }
+        }
         case 'select-blocks': {
           const selection = flowBlockSelection(document, target, intent.blockIds, {
             ...(intent.focus ? { focus: intent.focus } : {}),
@@ -1603,6 +1703,8 @@ export function createFlowAuthoringSlice(
     commitDraft,
     commitDraftForPersistence(): { ok: true } | { ok: false; reason: string } {
       const owned = flow.read()
+      const bodyDraftBlock = flowDocumentDraftSaveBlock(owned.flowDocumentDraft)
+      if (bodyDraftBlock) return bodyDraftBlock
       const session = owned.flowSession
       const edit = owned.flowTextEdit
       if (edit && session) {
@@ -1635,61 +1737,8 @@ export function createFlowAuthoringSlice(
       }
       return { ok: true, document: committed.nextDocument }
     },
-    undo() {
-      const owned = flow.read()
-      const session = owned.flowSession
-      if (!session) return
-      const edit = owned.flowTextEdit
-      if (edit?.composing) return
-      if (edit && isFlowTextDraftDirty(edit)) {
-        flow.persist({
-          ok: true,
-          nextDocument: session.history.present,
-          historyEntry: false,
-          selection: session.selection,
-        }, {
-          clearTextEdit: true,
-          discardedTextEdit: edit,
-          statusMessage: '已取消本次编辑',
-        })
-        return
-      }
-      const resourceTransition = flowEditorUndoResourceTransition(session.history)
-      const nextHistory = undoFlowEditorHistory(session.history)
-      if (nextHistory === session.history) return
-      flow.persist({
-        ok: true,
-        nextDocument: nextHistory.present,
-        historyEntry: false,
-        selection: reconcileFlowSelection(nextHistory.present, session.selection),
-      }, {
-        replaceHistory: nextHistory,
-        ...(resourceTransition ? { resourceTransition } : { sidecarDirection: 'undo' as const }),
-        clearTextEdit: true,
-        statusMessage: '已撤销',
-      })
-    },
-    redo() {
-      const owned = flow.read()
-      const session = owned.flowSession
-      if (!session) return
-      const edit = owned.flowTextEdit
-      if (edit?.composing || (edit && isFlowTextDraftDirty(edit))) return
-      const resourceTransition = flowEditorRedoResourceTransition(session.history)
-      const nextHistory = redoFlowEditorHistory(session.history)
-      if (nextHistory === session.history) return
-      flow.persist({
-        ok: true,
-        nextDocument: nextHistory.present,
-        historyEntry: false,
-        selection: reconcileFlowSelection(nextHistory.present, session.selection),
-      }, {
-        replaceHistory: nextHistory,
-        ...(resourceTransition ? { resourceTransition } : { sidecarDirection: 'redo' as const }),
-        clearTextEdit: true,
-        statusMessage: '已重做',
-      })
-    },
+    undo() { navigateDocumentHistory('undo') },
+    redo() { navigateDocumentHistory('redo') },
     setScope(scope) {
       if (!commitDraft()) return
       const session = flow.read().flowSession
@@ -1772,12 +1821,12 @@ export function createFlowAuthoringSlice(
       const found = session.selection.selectedBlockId
         ? findFlowBlockRecursive(surface.blocks, session.selection.selectedBlockId)
         : null
-      const columns = Array.from({ length: 3 }, (_, index) => ({ id: `col-${nanoid()}`, header: `标题 ${index + 1}` }))
+      const columns = Array.from({ length: 3 }, (_, index) => ({ id: `col-${nanoid()}`, header: { inlines: [{ type: 'text' as const, text: `标题 ${index + 1}` }] } }))
       const inserted = insertFlowEditorBlock(document, {
         surfaceId: session.selection.surfaceId,
         parentId: found?.parentId ?? null,
         index: found ? found.index + 1 : surface.blocks.length,
-        block: { type: 'table', columns, rows: Array.from({ length: 3 }, () => ({ id: `row-${nanoid()}`, cells: Object.fromEntries(columns.map(column => [column.id, ''])) })) },
+        block: { type: 'table', columns, rows: Array.from({ length: 3 }, () => ({ id: `row-${nanoid()}`, cells: Object.fromEntries(columns.map(column => [column.id, { inlines: [] }])) })) },
       }, { expectedRevision: document.revision })
       const createdId = inserted.createdBlockIds?.[0]
       flow.persist(inserted, {
@@ -1800,7 +1849,7 @@ export function createFlowAuthoringSlice(
         surfaceId: session.selection.surfaceId,
         parentId: found?.parentId ?? null,
         index: found ? found.index + 1 : surface.blocks.length,
-        block: { type: 'paragraph', text: '' },
+        block: { type: 'paragraph', content: { inlines: [] } },
       }, { expectedRevision: document.revision })
       const createdId = inserted.createdBlockIds?.[0]
       flow.persist(inserted, {
@@ -1827,7 +1876,7 @@ export function createFlowAuthoringSlice(
           type: 'formula',
           formulaId: `formula-${nanoid(8)}`,
           accessibleText: 'x',
-          ast: { type: 'token', value: 'x' },
+          latex: 'x',
         },
       }, { expectedRevision: document.revision }), { statusMessage: '已插入公式' })
     },
@@ -2310,3 +2359,5 @@ export function persistFlowDocument(
 }
 import { readAuthoringToolSelection } from '../../../shared/authoringToolContract'
 import { selectFlowToolResult } from '../../authoring/toolSelection'
+
+import { prepareFlowDocumentResourceTransaction } from '../../document/flowDocumentResources'

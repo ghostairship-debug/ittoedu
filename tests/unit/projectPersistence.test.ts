@@ -39,8 +39,8 @@ import {
   writeRecoveryProject,
 } from '../../src/main/projectPersistence'
 import { createBlankCourseProject } from '../../src/renderer/project/createCourseProject'
+import { createArchiveFixture as createCourseProjectArchive } from '../fixtures/teacherController'
 import {
-  createCourseProjectArchive,
   detectCourseProjectArchiveFormat,
 } from '../../src/renderer/project/courseProjectArchive'
 

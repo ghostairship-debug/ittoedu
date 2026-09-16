@@ -13,7 +13,7 @@ import {
   type SpatialEditorGraphSelection,
 } from '../../course/spatialEditorView'
 import { selectMediaAssetFiles, useEditorStore } from '../../store/editorStore'
-import { mountPublishedCourseTryRun } from '../coursePlayerTryRun'
+import { mountPublishedCourseTryRun, reportTryRunInteractionDiagnostic } from '../coursePlayerTryRun'
 import { SpatialLocationWorkspace } from './SpatialLocationWorkspace'
 
 type SpatialWorkspaceStore = {
@@ -123,6 +123,7 @@ export function SpatialWorkspaceConnector() {
       components: tryRunSnapshot.componentPackages,
       locationId: tryRunSnapshot.locationId,
       playbackPathId: tryRunSnapshot.playbackPathId,
+      onInteractionDiagnostic: reportTryRunInteractionDiagnostic,
     })
   }, [tryRunSnapshot])
 

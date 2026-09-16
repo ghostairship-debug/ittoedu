@@ -48,9 +48,9 @@ it('merges nonempty Native cells once, preserves identities, rejects split regio
 })
 
 it('preserves merged Flow rich text and produces real Word gridSpan/vMerge and matching HTML', () => {
-  const original: FlowTableBlock = { id: 'merged-flow', type: 'table', columns: [{ id: 'a', header: '甲' }, { id: 'b', header: '乙' }], rows: [{ id: 'r1', cells: { a: '😀', b: { text: '强调', runs: [{ start: 0, end: 2, style: { bold: true } }] } } }, { id: 'r2', cells: { a: '下方', b: '末格' } }] }
+  const original: FlowTableBlock = { id: 'merged-flow', type: 'table', columns: [{ id: 'a', header: { inlines: [{ type: 'text', text: '甲' }] }}, { id: 'b', header: { inlines: [{ type: 'text', text: '乙' }] }}], rows: [{ id: 'r1', cells: { a: { inlines: [{ type: 'text', text: '😀' }] }, b: { inlines: [{"type":"text","text":"强调","style":{"bold":true}}] }} }, { id: 'r2', cells: { a: { inlines: [{ type: 'text', text: '下方' }] }, b: { inlines: [{ type: 'text', text: '末格' }] }} }] }
   const merged = changeFlowTableStructure(original, { kind: 'merge', region: { rowIds: ['r1', 'r2'], columnIds: ['a', 'b'] } })
-  expect(merged.rows[0]!.cells.a).toEqual({ text: '😀\n强调\n下方\n末格', runs: [{ start: 2, end: 4, style: { bold: true } }] })
+  expect(merged.rows[0]!.cells.a).toEqual({ inlines: [{ type: 'text', text: '😀\n' }, { type: 'text', text: '强调', style: { bold: true } }, { type: 'text', text: '\n下方\n末格' }] })
   expect(() => changeFlowTableStructure(merged, { kind: 'delete-row', id: 'r1' })).toThrow()
   const project = createBlankFlowCourseProject()
   const surface = project.surfaces.find(surface => surface.type === 'flow')!
@@ -79,20 +79,20 @@ it('strictly accepts rectangular stable merge regions and rejects dangling, over
   expect(tableNativeContentObjectSchema.safeParse({ ...table, merges: [{ ...merge, extra: true }] }).success).toBe(false)
   table.rows[1]!.cells[1]!.text = 'hidden'
   expect(tableNativeContentObjectSchema.safeParse({ ...table, merges: [merge] }).success).toBe(false)
-  const flow: FlowTableBlock = { id: 'flow', type: 'table', columns: [{ id: 'a', header: 'A' }, { id: 'b', header: 'B' }], rows: [{ id: 'r', cells: { a: 'anchor', b: '' } }], merges: [{ rowIds: ['r'], columnIds: ['a', 'b'] }] }
+  const flow: FlowTableBlock = { id: 'flow', type: 'table', columns: [{ id: 'a', header: { inlines: [{ type: 'text', text: 'A' }] }}, { id: 'b', header: { inlines: [{ type: 'text', text: 'B' }] }}], rows: [{ id: 'r', cells: { a: { inlines: [{ type: 'text', text: 'anchor' }] }, b: { inlines: [{ type: 'text', text: '' }] }} }], merges: [{ rowIds: ['r'], columnIds: ['a', 'b'] }] }
   expect(flowBlockSchema.safeParse(flow).success).toBe(true)
   expect(flowBlockSchema.safeParse({ ...flow, merges: [{ rowIds: ['r'], columnIds: ['b', 'a'] }] }).success).toBe(false)
 })
 
 it('preserves rich cells through Flow structure edits, identity duplication, Published and editable DOCX', () => {
-  const original: FlowTableBlock = { id: 'table', type: 'table', caption: '可编辑表格', columns: [{ id: 'a', header: '甲' }, { id: 'b', header: '乙' }], rows: [{ id: 'row', cells: { a: { text: '强调文字', runs: [{ start: 0, end: 2, style: { bold: true } }] }, b: '另一列' } }] }
+  const original: FlowTableBlock = { id: 'table', type: 'table', caption: { inlines: [{ type: 'text', text: '可编辑表格' }] }, columns: [{ id: 'a', header: { inlines: [{ type: 'text', text: '甲' }] }}, { id: 'b', header: { inlines: [{ type: 'text', text: '乙' }] }}], rows: [{ id: 'row', cells: { a: { inlines: [{"type":"text","text":"强调","style":{"bold":true}},{"type":"text","text":"文字"}] }, b: { inlines: [{ type: 'text', text: '另一列' }] }} }] }
   const changed = changeFlowTableStructure(changeFlowTableStructure(original, { kind: 'insert-row' }), { kind: 'move-column', id: 'b', direction: -1 })
   expect(changed.columns.map(column => column.id)).toEqual(['b', 'a'])
   expect(changed.rows[0]!.cells.a).toEqual(original.rows[0]!.cells.a)
   expect(original.rows).toHaveLength(1)
   const project = createBlankFlowCourseProject()
   const surface = project.surfaces.find(surface => surface.type === 'flow')!
-  surface.blocks.push({ id: 'section', type: 'section', title: '正文', collapsedByDefault: false, blocks: [] })
+  surface.blocks.push({ id: 'section', type: 'section', title: { inlines: [{ type: 'text', text: '正文' }] }, collapsedByDefault: false, blocks: [] })
   const inserted = insertFlowEditorBlock(project, { surfaceId: surface.id, parentId: 'section', index: 0, block: changed })
   expect(inserted.ok).toBe(true)
   const copied = duplicateFlowEditorBlock(inserted.nextDocument!, { surfaceId: surface.id, parentId: 'section', blockId: changed.id })

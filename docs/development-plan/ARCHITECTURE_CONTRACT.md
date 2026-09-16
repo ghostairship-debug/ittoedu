@@ -6,6 +6,7 @@
 
 - Course Project V9 是唯一受支持的作者工程格式；不导入 V8 `.h5lesson`；不借重构创建 V10。
 - V9 已有字段、判别器和语义软冻结；additive 可选字段必须独立合同提交并保持 `.strict()`。Table、Chart 与 Slide Native input 是 Owner 明确批准的三个新 strict discriminator 窄例外，不构成任意联合类型扩展授权。
+- **1.9 Flow/共用文档特定例外（2026-09-15 Owner 决定，统一模型已切换并通过工程验证，完整交付见[实施方案](R19_SHARED_DOCUMENT_EDITOR_IMPLEMENTATION_PLAN.md#44-043--050--060验收边界与当前候选缺口)）：**Owner 明确本次不保留兼容边界。按[统一正文合同](R19_SHARED_DOCUMENT_CONTENT_CONTRACT.md)直接以inlines/LaTeX替换Flow目标域，覆盖标题/段落/列表/表格/说明/章节及代码/链接表达；V9/Published严格定义、工厂与直接consumer在同一可运行批次切换，不保留旧正文/旧AST/旧工程读取转换。新课例/会话/材料记录不迁移旧格式。本例外优先于本次目标域的旧软冻结/兼容表述，不扩为删除其他Surface实际能力或创建V10。
 - Published Course V2、Runtime API 2 / Surface Runtime API 3、Component API 4、Interaction Protocol V1 的版本边界保留。Table、Chart 与 Slide Native input 使用 Published V2 对等 strict 分支并与匹配 Player 成对交付，不为此升级 Published V3。
 - Owner 2026-09-07批准导航分层并授权实施后，085独立窄合同增加TeacherControllerAction/InteractionAction的`step.next`与`step.previous`两个strict无参分支，V9/Published共用；不增加文档字段或第二顺序，不扩Native节点discriminator。旧动作继续可读，新动作在旧reader明确失败；scene.next/previous按已批准场景层级纠正，精确location/deep link/index接口不重解释。Runtime/Component仅additive可选步进方法，旧宿主feature-detect；实施与兼容反例见085合同。
 - 项目 `id` 与单调 `revision` 语义保留；`globalLayerItems`、`surfaceLayerItems` 和三 Surface 保留；不新增 persisted `projectMode`。
@@ -84,6 +85,7 @@
 | Authoring identity | projectId/revision/location/surface/generation/owner | 否 | 否 |
 | Surface selection | block/layer/path/camera selection | 否 | 通常否 |
 | Draft/IME/drag | 文本、代码、表单、临时 frame | 不原样序列化 UI 会话；合法内容经提交或恢复物化进入工程快照 | 提交后才进入 |
+| 未应用正文源文 | 未闭合公式、无效扩展等可恢复输入 | 1.9应用本地恢复稿，绑定课例/文件或工程目标与基准版本；不把非法结构写入V9 | 正式应用后进入对应历史 |
 | Runtime/preview session | mount、会话相机、播放状态 | 否 | 否 |
 | AI/CLI session and trace | CLI session mapping、消息、tool trace、usage、状态 | 应用本地版本化目录；不进工程 | 否 |
 | AI staging workspace | 待准入 Component/Runtime 源码、manifest、诊断与候选资源 | 应用管理的本地暂存；准入前不进工程 | 否 |
@@ -188,7 +190,7 @@
 - **B0/B1冻结任务与后台应用（Owner 2026-09-11授权）**：纯浏览/换选不重定向已发出的AI任务；以原目标、工程revision、workspace、资源、task epoch及草稿一致性重校验。提交仍走唯一document/resource/History事务；教师已浏览或换选时保留当前位置/选择，未变化时采用事务结果选择，允许继续编辑替换后的新对象，不自动提交或覆盖另一页草稿。初始/修正/续轮观察的结构和图像必须同源于原目标；离屏证据只能来自正式候选/预览宿主，不能冒充live。工程变化、Undo/Redo、Save As、关闭、Stop及期限使旧候选失效，普通人工异步session约束不因此放宽。第二层media.apply展开既有媒体/内容/替换Owner；任务内文件复用仍受当轮root闭包摄取约束，具体strict输入见共同实施合同。
 
 - **长期分工（Owner 2026-09-08）**：用户自行安装认证Codex、Claude、OpenCode；保留原生模型循环、文件/终端/网络、用户工具与连接、Skills和子任务。相同账号、配置、工作上下文和授权下，不因GUI包装默认降成只读、工具白名单或关闭终端。GUI承接原生权限请求与用户决定，不静默提权。应用做版本化adapter、会话、观察、候选摄取、回执、界面及自动准入，不预设迁往自建模型循环，不新建应用MCP/通用工具RPC平台；原生CLI已有用户连接仍保留。
-- **阶段与体验**：1.8修实际阻断、原生接线及当前工程观察/编辑反馈、按需能力与源码增量。1.9的042未命名/首存、045材料、044双流程与Skills、041聊天首页/画布/极简与专业模式共同形成工作流；删除未实施的r18-105。自动必须上传且成功读取材料：有效原件、整体结构与本次教学范围的实际文本/原图齐备，无关附录不阻塞；优先模板/设计；手动依次确认教学简报、策划、呈现简报和脚本。当前外部Skill在044迁移前保留现有确认路径，规划不表示guard已改。2.0所有课件步骤在软件内完成，速度、教学/视觉/互动质量和可编辑交付一起验收。2.x媒体与运行时服务沿[方案](AGENT_AUTHORING_LONG_TERM_PLAN.md)扩展原生CLI架构。
+- **阶段与体验**：1.8修当前工程AI基础；1.9以真实工作空间/独立课例为起点，042身份/保存、041整合工作台、045三格式课例材料、046–049共用正文/Flow/Word/文件共编、044双流程共同形成工作流。自动须成功读取实际采用材料，手动分别确认四阶段真实当前文件；构建前核对正文/附件版本，改稿使依赖旧稿的在途候选失效。外部Skill在044实际迁移前保留当前停点。2.0完成全部软件内QA/修复等步骤，长期专项不反向成为1.9前置。
 - **观察与权限分开**：默认提供任务相关的不可变小观察、能力卡和必要材料，目标明确时不发送全量目录/源码。CLI可按原生授权继续查找文件、资料与Skills，观察scope不是OS权限沙箱。Task/Observation/Proposal/HostResult/UserInput由唯一Owner以strict版本合同管理；一个任务可收到多次观察和回执，由CLI决定下一步。极简/专业模式只组织入口，不建立第二工程、任务或历史，也不降低AI能力。
 - **原生接线**：明确可执行文件与参数数组，不拼shell命令。保留或明确选择原生cwd、非秘密配置和运行所需环境；staging不能强制替代全部工作上下文。工具活动、授权、问题、取消、配置确认和错误按实际原生协议接回GUI。CLI管理认证，应用不复制凭据或在诊断输出secret；能力不足须诚实呈现，不伪装成功。
 - **工程唯一写入路径**：编辑器消费strict typed candidate/dynamic manifest，通过结构化stdout/artifact或当前candidate staging返回；宿主重校验canonical target、revision、epoch与资源，经既有canonical commands和单一document/resource transaction提交。2026-09-14 Owner 明确选择/页面仅为输入焦点，不是授权边界；宿主工具是快捷通道。CLI 可编辑本轮冻结 V9 工作副本，经 project.document 正式制品入口回收完整文档及真实资源，复用 V9/归档闭包/动态准入检查和唯一 EditorTransaction；不受快捷命令字段覆盖限制。制品必须保留工程 ID/基线 revision，宿主只递增一次版本；禁止 raw Store 和第二 writer，snapshot 不暴露 live Store。原生文件工具完成不等于工程已应用；外部原生工具改变已打开工程的磁盘文件时，由既有打开/保存Owner处理必要的重载与保存冲突，重新取得工程事实再继续，不能静默覆盖内存或补造History receipt。
@@ -197,7 +199,7 @@
 - **候选摄取**：宿主只摄取当前candidate root内realpath闭合、身份相符且检查通过的内容；这不把CLI所有文件工具锁进staging。失败、Stop、stale、拒绝和迟到候选对当前未提交阶段零工程写入；先前已提交阶段保留并显示部分完成。candidate receipt与host commit receipt分开，只有后者证明应用事务成功。
 - **动态准入**：Generated Component/Runtime先留暂存，经编译、协议、依赖、素材闭包、精确origin、生命周期、资源上限、静态后备与真实宿主smoke后才能注册/提交。Native、Recipe、Existing Component承担自身合同门。证据按代码、资源、配置、宿主依赖与修改影响复用；编译结果不能替代受影响互动验证。候选检查只调用当前任务必要的既有宿主动作与采样，在同一任务剩余时间和既有宿主超时内累计约束；不建设通用断言DSL，Native/props不强制附带独立检查计划。
 - **扩展权限独立**：准入后的Component/Runtime获得当前正式可信扩展宿主能力，不能继承CLI终端或文件权限。Provider Secret、原始Electron Main、任意OS命令、未开放远程脚本及未经合同批准的新宿主API仍不授予扩展。
-- **本地身份**：保存工程按projectId+规范化路径隔离；1.9区分未绑定聊天、draft和已保存workspace，不造虚假CourseProject。首次保存终止旧epoch并切新身份，以新观察继续目标，不复制externalSessionId/trace；旧draft历史可读。Save As同样新身份。材料/对话/观察/trace只在应用本地版本化目录，不进工程或导出；删除只承诺应用自己的记录。
+- **本地身份（1.9已实现，身份/首存/另存/删除/复制移动已获工程验证，完整双流程接续见[实施方案](R19_SHARED_DOCUMENT_EDITOR_IMPLEMENTATION_PLAN.md#44-043--050--060验收边界与当前候选缺口)）**：按[课例与文件合同](R19_LESSON_DOCUMENT_WORKSPACE_CONTRACT.md)从真实目录创建时取得lessonId，对话归课例；工程修改仍绑定projectId/实际路径/revision/epoch。首次工程保存只绑定文件和更新编辑目标，课例对话不断。Save As建立新工程身份且不复制原目标会话/候选/句柄。四阶段正文和独立材料集在课例真实文件中，应用记录不保存第二正文；本版本课例移动可重关联记录，复制则新身份。旧格式记录不迁移，删除聊天不删除真实课例文件或恢复稿。
 - **可见性与验收**：1.8起普通内部生产构建默认显示CLI/聊天，无需环境开关；CLI不可用时人工能力仍正常。入口开放不代表S3/S4通过。2.0可用有限外部开发基线比较质量，但教师的材料、设计、构建、QA、修复和导出无需另开外部AI/终端。速度目标、有限复测与证据复用见[开发计划](AI_ASSISTANT_DELIVERY_PLAN.md)。
 
 ## 8. 1.1 V8 清零棘轮与例外

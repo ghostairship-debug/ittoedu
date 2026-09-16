@@ -735,6 +735,8 @@ export function validateMarkdownLinks(
   const definitions = new Map<string, string>()
 
   for (const match of stripped.matchAll(/^\s{0,3}\[([^\]]+)\]:\s*(<[^>]+>|\S+)/gm)) {
+    // Footnote definitions contain prose, not link destinations.
+    if (match[1].startsWith('^')) continue
     const label = referenceLabel(match[1])
     const target = match[2]
     definitions.set(label, target)
@@ -744,6 +746,7 @@ export function validateMarkdownLinks(
     rawTargets.add(target)
   }
   for (const match of stripped.matchAll(/!?\[([^\]]+)\]\[([^\]]*)\]/g)) {
+    if (match[1].startsWith('^') || match[2].startsWith('^')) continue
     const label = referenceLabel(match[2] || match[1])
     const target = definitions.get(label)
     if (!target) {

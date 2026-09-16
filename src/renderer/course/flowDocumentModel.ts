@@ -2,7 +2,7 @@ import { rebuildChartItemIds } from '../project/nativeNodeFactories'
 import { nanoid } from 'nanoid'
 import { makeAuthoringAddress } from '../../shared/authoringAddress'
 import { DEFAULT_COURSE_SURFACE_BACKGROUND_COLOR } from '../../shared/courseProjectModel'
-import { remapTextRuns } from '../../shared/textRuns'
+import { plainDocumentText, normalizeDocumentText, documentTextLength, documentTextSlots } from '../../shared/document/content'
 import type {
   CourseLocation,
   CourseProjectDocument,
@@ -51,12 +51,12 @@ export function createBlankFlowPageBlocks(ids?: {
       id: stableFlowId('block', ids?.headingId),
       type: 'heading',
       level: 1,
-      text: BLANK_FLOW_HEADING_PLACEHOLDER,
+      content: { inlines: [{ type: 'text', text: BLANK_FLOW_HEADING_PLACEHOLDER }] },
     },
     {
       id: stableFlowId('block', ids?.paragraphId),
       type: 'paragraph',
-      text: '',
+      content: { inlines: [] },
     },
   ]
 }
@@ -86,7 +86,7 @@ export function createBlankFlowSurface(input: {
     },
     location: {
       id: heading.id,
-      label: heading.text,
+      label: plainDocumentText(heading.content),
       kind: 'flow-block',
       surfaceId: input.id,
       blockId: heading.id,
@@ -149,23 +149,23 @@ export function isFlowCourseBlockLocation(
 
 export function flowBlockLabel(block: FlowBlock): string {
   if (block.type === 'heading' || block.type === 'paragraph' || block.type === 'quote') {
-    return block.text.trim() || (block.type === 'heading' ? BLANK_FLOW_HEADING_PLACEHOLDER : block.type)
+    return plainDocumentText(block.content).trim() || (block.type === 'heading' ? BLANK_FLOW_HEADING_PLACEHOLDER : block.type)
   }
-  if (block.type === 'callout') return block.title?.trim() || block.body.trim().slice(0, 48) || '提示'
-  if (block.type === 'section') return block.title.trim() || '分节'
-  if (block.type === 'media') return block.caption?.trim() || block.altText?.trim() || '媒体'
+  if (block.type === 'callout') return (block.title ? plainDocumentText(block.title).trim() : undefined) || plainDocumentText(block.body).trim().slice(0, 48) || '提示'
+  if (block.type === 'section') return plainDocumentText(block.title).trim() || '分节'
+  if (block.type === 'media') return (block.caption ? plainDocumentText(block.caption).trim() : undefined) || block.altText?.trim() || '媒体'
   if (block.type === 'code') return block.language ? `代码·${block.language}` : '代码'
   if (block.type === 'formula') return block.accessibleText.trim() || '公式'
   if (block.type === 'component') return `组件·${block.component.packageId}`
-  if (block.type === 'list') return block.items[0]?.text.trim().slice(0, 48) || '列表'
+  if (block.type === 'list') return (block.items[0] ? plainDocumentText(block.items[0].content).trim().slice(0, 48) : '') || '列表'
   if (block.type === 'chart') return block.chart.title?.trim() || '图表'
-  if (block.type === 'table') return block.caption?.trim() || '表格'
+  if (block.type === 'table') return (block.caption ? plainDocumentText(block.caption).trim() : undefined) || '表格'
   return '分隔线'
 }
 
 export function flowCourseAnchorLabel(block: FlowCourseAnchorBlock): string {
-  if (block.type === 'heading') return block.text.trim() || BLANK_FLOW_HEADING_PLACEHOLDER
-  return block.title.trim() || '分节'
+  if (block.type === 'heading') return plainDocumentText(block.content).trim() || BLANK_FLOW_HEADING_PLACEHOLDER
+  return plainDocumentText(block.title).trim() || '分节'
 }
 
 export function makeFlowBlockAuthoringAddress(input: {
@@ -298,41 +298,24 @@ export function sliceFlowRichText(
   start: number,
   end: number,
 ): FlowRichText {
-  const chars = Array.from(content.text)
-  const from = Math.max(0, Math.min(chars.length, start))
-  const to = Math.max(from, Math.min(chars.length, end))
-  const text = chars.slice(from, to).join('')
-  if (!content.runs) return { text }
-  const sliced = remapTextRuns(content.text, text, content.runs)
-  return sliced.length > 0 ? { text, runs: sliced } : { text }
+  const from = Math.max(0, Math.min(documentTextLength(content), start))
+  const to = Math.max(from, Math.min(documentTextLength(content), end))
+  let cursor = 0
+  return normalizeDocumentText({ inlines: content.inlines.flatMap(inline => {
+    const size = inline.type === 'math' ? 1 : Array.from(inline.text).length
+    const left = Math.max(0, from - cursor), right = Math.min(size, to - cursor)
+    cursor += size
+    if (right <= left) return []
+    return [inline.type === 'math' ? structuredClone(inline) : { ...structuredClone(inline), text: Array.from(inline.text).slice(left, right).join('') }]
+  }) })
 }
 
 export function mergeFlowRichText(left: FlowRichText, right: FlowRichText): FlowRichText {
-  const text = `${left.text}${right.text}`
-  if (!left.runs && !right.runs) return { text }
-  const leftCount = Array.from(left.text).length
-  const leftRuns = left.runs ?? []
-  const rightRuns = (right.runs ?? []).map((run) => ({
-    ...run,
-    start: run.start + leftCount,
-    end: run.end + leftCount,
-  }))
-  const runs = [...leftRuns, ...rightRuns]
-  return runs.length > 0 ? { text, runs } : { text }
+  return normalizeDocumentText({ inlines: [...left.inlines, ...right.inlines] })
 }
 
-export function deleteFlowRichTextRange(
-  content: FlowRichText,
-  start: number,
-  end: number,
-): FlowRichText {
-  const chars = Array.from(content.text)
-  const from = Math.max(0, Math.min(chars.length, start))
-  const to = Math.max(from, Math.min(chars.length, end))
-  const text = [...chars.slice(0, from), ...chars.slice(to)].join('')
-  if (!content.runs) return { text }
-  const runs = remapTextRuns(content.text, text, content.runs)
-  return runs.length > 0 ? { text, runs } : { text }
+export function deleteFlowRichTextRange(content: FlowRichText, start: number, end: number): FlowRichText {
+  return mergeFlowRichText(sliceFlowRichText(content, 0, start), sliceFlowRichText(content, end, documentTextLength(content)))
 }
 
 export function regenerateFlowIdentities(block: FlowBlock): FlowBlock {
@@ -350,7 +333,7 @@ export function regenerateFlowIdentities(block: FlowBlock): FlowBlock {
       cells: Object.fromEntries(
         next.columns.map((column, index) => {
           const previousId = previousColumns[index]?.id
-          return [column.id, previousId ? row.cells[previousId] ?? '' : '']
+          return [column.id, previousId ? row.cells[previousId] ?? { inlines: [] } : { inlines: [] }]
         }),
       ),
     }))
@@ -365,6 +348,7 @@ export function regenerateFlowIdentities(block: FlowBlock): FlowBlock {
   } else if (next.type === 'section') {
     next.blocks = next.blocks.map(regenerateFlowIdentities)
   }
+  for (const slot of documentTextSlots(next)) for (const inline of slot.content.inlines) if (inline.type === 'math') inline.formulaId = stableFlowId('formula')
   return next
 }
 

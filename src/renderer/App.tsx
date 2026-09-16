@@ -1,5 +1,9 @@
 import { AlertCircle, LoaderCircle, X } from 'lucide-react'
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { executeLessonAssembly, observeEmptyLessonBuildTarget, LessonAssemblyError } from './lessonAuthoring/builderIntegration'
+import { LessonWorkspaceHost } from './app/LessonWorkspaceHost'
+import type { LessonWorkspaceShellHandle } from './lessonWorkspace/LessonWorkspaceShell'
+import type { LessonWorkspace, LessonConversation } from '../shared/lessonWorkspace'
 import {
   APP_EXECUTABLE_NAME,
   RECOMMENDED_PROJECT_SCENES,
@@ -17,6 +21,8 @@ import { emptyCourseAssetSidecar } from './project/v9AssetAdapter'
 import { useComponentLibrary } from './app/useComponentLibrary'
 import { useCourseDelivery } from './app/useCourseDelivery'
 import { useCourseProjectLifecycle } from './app/useCourseProjectLifecycle'
+import { useFlowDocumentRecovery } from './app/useFlowDocumentRecovery'
+import { buildFlowEditorView, captureFlowEditorAuthoringTarget } from './course/flowEditorView'
 import { useEditorKeyboardRouter } from './app/useEditorKeyboardRouter'
 import { useMediaImport } from './app/useMediaImport'
 import {
@@ -49,6 +55,7 @@ import { RecipePanel } from './ui/recipes/RecipePanel'
 import { ProductivityDialog } from './ui/productivity/ProductivityDialog'
 import { MaterialLibraryDialog } from './ui/MaterialLibraryDialog'
 import { CourseChatEntry } from './ui/chat/CourseChatPanel'
+import { EditorPanelLayout } from './ui/EditorPanelLayout'
 import { createMaterialCitationRequest } from './authoring/tools/materialCitationRequest'
 import type { ProductivityContext } from './authoring/productivity'
 import { resolveCourseProjectDiagnosticTargetRoute } from './diagnostics/projectHealthNavigation'
@@ -93,6 +100,25 @@ function captureCourseIdentity() {
 }
 
 export default function App() {
+  const lessonShell = useRef<LessonWorkspaceShellHandle>(null)
+  const activeLesson = useRef<{ lesson: LessonWorkspace; conversation: LessonConversation } | null>(null)
+  const [hasLessonConversation, setHasLessonConversation] = useState(false)
+  const onActiveLesson = useCallback((lesson: LessonWorkspace | null, conversation: LessonConversation | null) => {
+    activeLesson.current = lesson && conversation ? { lesson, conversation } : null
+    setHasLessonConversation(!!activeLesson.current)
+  }, [])
+  const observeCurrentEmptyLessonProject = useCallback((expectedLesson: LessonWorkspace['identity'], conversationId: string) => {
+    const current = activeLesson.current
+    if (!current || current.lesson.identity.lessonId !== expectedLesson.lessonId || current.lesson.identity.normalizedDirectory !== expectedLesson.normalizedDirectory || current.conversation.conversationId !== conversationId) throw new Error('当前课例或对话已切换，不能接续原构建')
+    return observeEmptyLessonBuildTarget(useEditorStore.getState().createCoursewareBuilderOwner())
+  }, [])
+  useEffect(() => {
+    const testWindow = window as Window & { __COURSEWARE_E2E_BACKGROUND__?: boolean; __COURSEWARE_E2E_OBSERVE_EMPTY_BUILD__?: typeof observeCurrentEmptyLessonProject }
+    if (!testWindow.__COURSEWARE_E2E_BACKGROUND__) return
+    testWindow.__COURSEWARE_E2E_OBSERVE_EMPTY_BUILD__ = observeCurrentEmptyLessonProject
+    return () => { delete testWindow.__COURSEWARE_E2E_OBSERVE_EMPTY_BUILD__ }
+  }, [observeCurrentEmptyLessonProject])
+  const [lessonDirty, setLessonDirty] = useState(false)
   const [busy, setBusy] = useState(false)
   const [projectHealthOpen, setProjectHealthOpen] = useState(false)
   const [materialsOpen, setMaterialsOpen] = useState(false)
@@ -116,6 +142,7 @@ export default function App() {
   const v9ContentEdit = useEditorStore((state) => state.v9ContentEdit)
   const spatialContentEdit = useEditorStore((state) => state.spatialContentEdit)
   const flowTextEdit = useEditorStore((state) => state.flowTextEdit)
+  const flowDocumentDraft = useEditorStore((state) => state.flowDocumentDraft)
   const selectedItemName = useEditorStore(state =>
     selectEffectiveLayerProjection(state)?.unifiedRows.find(row => row.selected)?.name ?? selectSelectedNode(state)?.name ?? null)
   const selectedNodeIds = useEditorStore(selectSelectedNodeIds)
@@ -182,6 +209,31 @@ export default function App() {
     [busy, setError],
   )
 
+  const flowRecoveryPort = useMemo(() => window.desktopAPI?.flowDocumentRecovery ?? null, [])
+  const flowRecovery = useFlowDocumentRecovery({
+    target: flowSession && designSessionToken?.surfaceType === 'flow' ? {
+      projectId: flowSession.history.present.id,
+      projectPath,
+      surfaceId: flowSession.selection.surfaceId,
+      revision: flowSession.history.present.revision,
+      epoch: designSessionToken.generation,
+    } : null,
+    draft: flowDocumentDraft,
+    port: flowRecoveryPort,
+    onRestore(draft) {
+      const current = useEditorStore.getState()
+      const session = current.flowSession
+      const token = current.courseAuthoringSession?.token
+      if (!session || !token || token.surfaceType !== 'flow' || current.flowDocumentDraft
+        || session.selection.surfaceId !== draft.surfaceId || session.history.present.revision !== draft.revision) return
+      const view = buildFlowEditorView({ project: session.history.present, locationId: session.selection.locationId })
+      current.runFlowAuthoringIntent(captureFlowEditorAuthoringTarget({ view, sessionToken: token, target: { kind: 'surface' } }), {
+        kind: 'update-document-draft', source: draft.source, diagnostics: draft.diagnostics, composing: false,
+      })
+    },
+    onError: setError,
+  })
+
   const courseProjectLifecycle = useCourseProjectLifecycle({
     captureIdentity() {
       const state = useEditorStore.getState()
@@ -223,14 +275,40 @@ export default function App() {
     reportError: setError,
     desktopAvailable: () => Boolean(window.desktopAPI),
     openProjectFile: () => desktopApi().openProject(),
+    openWorkspaceProjectFile: async path => {
+      const result = await desktopApi().lesson?.({ operation: 'open-project', path })
+      if (!result?.projectFile) throw new Error('课件文件未读取成功')
+      return result.projectFile
+    },
     openRecentProjectFile: (path) => desktopApi().openRecentProject({ path }),
     confirmProjectOpen: (confirmationId) => desktopApi().confirmProjectOpen({ confirmationId }),
-    saveProjectFile: (input) => desktopApi().saveProject(input),
+    beforeReplace: async () => await flowRecovery.flush() && (await lessonShell.current?.flushAll() ?? true),
+    onProjectReplaced: () => lessonShell.current?.detachLesson(),
+    preserveBeforeClose: async () => await flowRecovery.flush() && (await lessonShell.current?.preserveAll() ?? true),
+    subscribePreserveAndCloseRequest: handler => window.desktopAPI?.onRequestPreserveAndClose?.(handler) ?? (() => undefined),
+    beforeSave: async () => {
+      await flowRecovery.flush()
+      const documentsSaved = await (lessonShell.current?.flushAll() ?? Promise.resolve(true))
+      return documentsSaved
+    },
+    saveProjectFile: (input) => desktopApi().saveProject({ ...input, suggestedDirectory: activeLesson.current?.lesson.identity.normalizedDirectory }),
+    onProjectSaved: async input => {
+      const current = activeLesson.current
+      if (!current || !window.desktopAPI?.lesson) return
+      const result = await window.desktopAPI.lesson({ operation: 'bind-project', lesson: current.lesson.identity, conversationId: current.conversation.conversationId,
+        projectId: input.projectId, projectPath: input.path, saveAs: input.saveAs && current.conversation.projectTarget !== undefined })
+      if (activeLesson.current !== current || !result.lesson || !result.conversation) return
+      activeLesson.current = { lesson: result.lesson, conversation: result.conversation }
+      lessonShell.current?.applyBinding(result.lesson, result.conversation)
+    },
     listRecentProjects: async () => {
       if (!window.desktopAPI) return []
       return window.desktopAPI.listRecentProjects()
     },
-    confirmDiscardChanges: () => desktopApi().confirmDiscardChanges(),
+    confirmDiscardChanges: async () => {
+      if (!(await flowRecovery.flush())) return 'cancel'
+      return desktopApi().confirmDiscardChanges()
+    },
     clearRecoveryProject: () => desktopApi().clearRecoveryProject(),
     writeRecoveryProject: (input) => desktopApi().writeRecoveryProject(input),
     readRecoveryProject: async () => {
@@ -254,7 +332,7 @@ export default function App() {
       return window.desktopAPI.onRequestSaveAndClose(handler)
     },
   }, {
-    dirty,
+    dirty: dirty || lessonDirty,
     projectTitle: activeCourseDocument?.title ?? '',
     projectPath,
     documentTrigger: activeCourseDocument,
@@ -262,7 +340,7 @@ export default function App() {
     componentPackagesTrigger: componentPackages,
     slideDraftTrigger: v9ContentEdit,
     spatialDraftTrigger: spatialContentEdit,
-    flowDraftTrigger: flowTextEdit,
+    flowDraftTrigger: flowDocumentDraft ?? flowTextEdit,
     textEditTrigger: undefined,
   })
 
@@ -465,6 +543,73 @@ export default function App() {
 
   return (
     <ProjectColorPaletteContext.Provider value={projectColors}>
+    <LessonWorkspaceHost ref={lessonShell} projectId={activeCourseDocument?.id ?? ''} projectPath={projectPath}
+      onOpenProject={path => courseProjectLifecycle.openRecentProject(path, { origin: 'lesson' })} onNewProject={() => courseProjectLifecycle.newProject({ origin: 'lesson' })} onActiveLesson={onActiveLesson} onDirtyChange={setLessonDirty}
+      observeEmptyProject={observeCurrentEmptyLessonProject}
+      continueProjectEditing={async (lesson, conversationId, expectedProjectId) => {
+        const isCurrent = () => {
+          const active = activeLesson.current
+          return active?.lesson.identity.lessonId === lesson.lessonId
+            && active.lesson.identity.normalizedDirectory === lesson.normalizedDirectory
+            && active.conversation.conversationId === conversationId
+            && useEditorStore.getState().createCoursewareBuilderOwner().readDocument().id === expectedProjectId
+        }
+        if (!isCurrent()) throw new Error('当前课例或课件已切换，请回到原课件继续编辑')
+        if (!await courseProjectLifecycle.saveProject(false, { isCurrent })) throw new Error('保存已取消，当前课件仍保留在画布中')
+        if (!isCurrent()) throw new Error('当前课例或课件已切换，未切换其他课件的编辑入口')
+        lessonShell.current?.showProject()
+      }}
+      assemble={async (input, conversationId) => {
+        const context = { lesson: input.ticket.lesson, conversationId }
+        const isCurrent = () => {
+          const active = activeLesson.current
+          return active?.lesson.identity.lessonId === context.lesson.lessonId
+            && active.lesson.identity.normalizedDirectory === context.lesson.normalizedDirectory
+            && active.conversation.conversationId === conversationId
+        }
+        const assertCurrent = () => { if (!isCurrent()) throw new Error('当前课例或对话已切换，旧构建已停止') }
+        assertCurrent()
+        const operate = desktopApi().lessonAuthoring
+        if (!operate) throw new Error('创作流程服务不可用')
+        return executeLessonAssembly(input, {
+          createCourseProject: async options => {
+            assertCurrent()
+            const replacement = { origin: 'lesson' as const, isCurrent }
+            const created = await (options.surfaceType === 'flow' ? courseProjectLifecycle.newFlowProject(replacement) : options.surfaceType === 'spatial-2d' ? courseProjectLifecycle.newSpatialProject(replacement) : courseProjectLifecycle.newProject(replacement))
+            if (!created) throw new LessonAssemblyError('新建已取消，尚未开始构建', false)
+            assertCurrent()
+            useEditorStore.getState().renameProject(options.title)
+          },
+          owner: () => {
+            const owner = useEditorStore.getState().createCoursewareBuilderOwner()
+            return { ...owner, commit: step => {
+              const committed = owner.commit(step)
+              if (committed) lessonShell.current?.showProject()
+              return committed
+            } }
+          },
+          validate: async ticket => {
+            assertCurrent()
+            const result = await operate({ operation: 'validate', ...context, ticket })
+            assertCurrent()
+            return result.validation ?? { allowed: false, issues: ['无法核实当前教学文件'] }
+          },
+          saveProject: async () => {
+            assertCurrent()
+            if (!await courseProjectLifecycle.saveProject(false, { isCurrent })) throw new Error('课件尚未保存，请继续保存后重试')
+            assertCurrent()
+            const path = useEditorStore.getState().projectPath
+            if (!path) throw new Error('未取得保存后的工程路径')
+            return path
+          },
+          readAsset: async relativePath => {
+            const result = await operate({ operation: 'read-asset', ...context, ticket: input.ticket, relativePath })
+            if (!result.asset) throw new Error('构建素材未读取成功')
+            return result.asset
+          },
+          componentCatalog: () => desktopApi().loadComponentCatalog(),
+        })
+      }}>
     <div className="app-shell">
       <TopToolbar
         busy={busy}
@@ -484,7 +629,7 @@ export default function App() {
         onPreview={courseDelivery.openPreview}
         onExport={courseDelivery.exportCourse}
       />
-      <div
+      <EditorPanelLayout
         className={`app-main${
           editorMode === 'professional' && activeTab === 'developer'
             ? ' app-main--developer'
@@ -520,8 +665,8 @@ export default function App() {
           onAddCatalogComponents={componentLibrary.addCatalogPackages}
           onUpdateCatalogComponent={componentLibrary.requestCatalogUpdate}
         />
-        <CourseChatEntry />
-      </div>
+        {!hasLessonConversation && <CourseChatEntry />}
+      </EditorPanelLayout>
       <footer className="status-bar" aria-live="polite">
         <span className="status-dot" />
         <span>{busy ? '正在处理…' : (statusMessage ?? '就绪')}</span>
@@ -739,6 +884,7 @@ export default function App() {
         </div>
       ) : null}
     </div>
+    </LessonWorkspaceHost>
     </ProjectColorPaletteContext.Provider>
   )
 }

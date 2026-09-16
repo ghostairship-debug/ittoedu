@@ -112,7 +112,7 @@ describe('Dynamic fallback bytes use the same complete decoder', () => {
     project.assets = source.assets
     const surface = project.surfaces[0]!
     if (surface.type !== 'flow') throw new Error('Expected Flow')
-    surface.blocks = [{ type: 'section', id: 'section', title: 'Nested', collapsedByDefault: true,
+    surface.blocks = [{ type: 'section', id: 'section', title: { inlines: [{ type: 'text', text: 'Nested' }] }, collapsedByDefault: true,
       blocks: [{ type: 'component', id: 'nested-component', component: { packageId: 'test-package', version: '1.0.0' }, props: {}, staticFallbackAssetId: 'bad' }] }]
     await expect(validateDynamicCandidateFallbackAssets(project, resources, ['nested-component']))
       .rejects.toMatchObject({ diagnostics: [{ code: 'dynamic-fallback-image-invalid', path: ['surfaces', '0', 'blocks', '0', 'blocks', '0', 'staticFallbackAssetId'] }] })

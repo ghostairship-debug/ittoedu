@@ -1,4 +1,10 @@
 import {
+  publishedPresentationSetUnsupportedReason,
+  isPublishedInteractionActionSupported,
+  isPublishedInteractionConditionSupported,
+  isPublishedInteractionTriggerSupported,
+} from '../../shared/publishedInteractionSupport'
+import {
   isAudioInteractionAction,
   isNodeMotionAction,
   isTerminalNavigationAction,
@@ -36,39 +42,10 @@ export interface PublishedInteractionControllerOptions {
   rules: readonly InteractionRule[]
   surface: PublishedInteractionSurfacePort
   session: PublishedInteractionSessionPort
+  /** Course-global rules need a Slide scene guard before presentation.set. */
+  scope?: 'scene' | 'global'
   reportDiagnostic?(diagnostic: PublishedInteractionDiagnostic): void
 }
-
-const SUPPORTED_ACTION_TYPES = new Set<InteractionActionPayload['type']>([
-  'step.next',
-  'step.previous',
-  'node.enter',
-  'node.exit',
-  'scene.go',
-  'scene.next',
-  'scene.previous',
-  'scene.replay',
-  'course.restart',
-  'course-state.set',
-  'audio.play',
-  'audio.pause',
-  'audio.resume',
-  'audio.stop',
-  'audio.toggle-mute',
-  'video.play',
-  'video.pause',
-  'video.restart',
-  'video.stop',
-  'video.toggle',
-  'video.seek',
-])
-
-const SUPPORTED_VIDEO_TRIGGER_TYPES = new Set<InteractionTrigger['type']>([
-  'video.started',
-  'video.paused',
-  'video.ended',
-  'video.time',
-])
 
 function videoEventKindOf(trigger: InteractionTrigger): PublishedVideoEventKind | null {
   switch (trigger.type) {
@@ -107,6 +84,7 @@ export class PublishedInteractionController {
   readonly #rules: readonly InteractionRule[]
   readonly #surface: PublishedInteractionSurfacePort
   readonly #session: PublishedInteractionSessionPort
+  readonly #scope: 'scene' | 'global'
   readonly #reportDiagnostic?: (
     diagnostic: PublishedInteractionDiagnostic,
   ) => void
@@ -126,6 +104,7 @@ export class PublishedInteractionController {
     this.#rules = [...options.rules]
     this.#surface = options.surface
     this.#session = options.session
+    this.#scope = options.scope ?? 'scene'
     this.#reportDiagnostic = options.reportDiagnostic
     this.#inspectAndBindRules()
   }
@@ -189,14 +168,20 @@ export class PublishedInteractionController {
   #inspectAndBindRules(): void {
     for (const rule of this.#rules) {
       if (!rule.enabled) continue
-      if (
-        rule.trigger.type !== 'node.click'
-        && rule.trigger.type !== 'scene.enter'
-        && rule.trigger.type !== 'presenter.command'
-        && rule.trigger.type !== 'audio.ended'
-        && !SUPPORTED_VIDEO_TRIGGER_TYPES.has(rule.trigger.type)
-        && rule.trigger.type !== 'input.submit'
-      ) {
+      // Same-location activation retires this controller: only an isolated
+      // final immediate state action is supported, never a silently lost tail.
+      const unsupportedPresentation = rule.actions.flatMap((step, index) => {
+        const reason = publishedPresentationSetUnsupportedReason(rule, index, this.#scope)
+        return reason ? [{ step, reason }] : []
+      })
+      if (unsupportedPresentation.length > 0) {
+        for (const { step, reason } of unsupportedPresentation) this.#diagnose({
+          code: 'unsupported-action', severity: 'warning', message: reason,
+          ruleId: rule.id, stepId: step.id, interactionType: step.action.type,
+        })
+        continue
+      }
+      if (!isPublishedInteractionTriggerSupported(rule.trigger.type)) {
         this.#diagnose({
           code: 'unsupported-trigger',
           severity: 'warning',
@@ -211,11 +196,7 @@ export class PublishedInteractionController {
         ?? (rule.trigger.type === 'node.click' || rule.trigger.type === 'input.submit' ? rule.trigger.nodeId : undefined)
       let conditionsSupported = true
       for (const condition of rule.conditions) {
-        if (
-          condition.type === 'scene.in'
-          || condition.type === 'course-state.exists'
-          || condition.type === 'course-state.compare'
-        ) continue
+        if (isPublishedInteractionConditionSupported(condition.type)) continue
         conditionsSupported = false
         this.#diagnose({
           code: 'unsupported-condition',
@@ -227,7 +208,7 @@ export class PublishedInteractionController {
         })
       }
       for (const step of rule.actions) {
-        if (SUPPORTED_ACTION_TYPES.has(step.action.type)) continue
+        if (isPublishedInteractionActionSupported(step.action.type)) continue
         this.#diagnose({
           code: 'unsupported-action',
           severity: 'warning',
@@ -666,7 +647,7 @@ export class PublishedInteractionController {
   ): Promise<StepOutcome> {
     const { action } = step
     const signal = run.controller.signal
-    if (!SUPPORTED_ACTION_TYPES.has(action.type)) return 'completed'
+    if (!isPublishedInteractionActionSupported(action.type)) return 'completed'
 
     try {
       let result: boolean | void
@@ -730,6 +711,16 @@ export class PublishedInteractionController {
         case 'course-state.set':
           this.#session.courseState.set(action.key, action.value)
           return 'completed'
+        case 'presentation.set': {
+          // Reuse the Published scene/state navigation owner used by Runtime
+          // presentation.setState; it validates the state before activation.
+          const current = this.#readCurrentScene(rule, step)
+          if (!current.ok) return 'cancelled'
+          result = current.sceneId === null
+            ? false
+            : await this.#session.goToScene(current.sceneId, action.stateId, signal)
+          break
+        }
         case 'scene.go':
           result = await this.#session.goToScene(
             action.sceneId,

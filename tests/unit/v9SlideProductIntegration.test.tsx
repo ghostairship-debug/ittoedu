@@ -221,11 +221,11 @@ describe('V9 slide product integration on the real V8 UI', () => {
     )
 
     const revisionBefore = selectSlideAuthoringSnapshot(useEditorStore.getState())?.revision ?? 0
-    const nodesBefore = selectEditingNodes(useEditorStore.getState()).length
+    const nodesBefore = selectEditingNodes(useEditorStore.getState())
     render(<ElementsTab onAddImage={() => undefined} />)
     fireEvent.click(screen.getByRole('button', { name: '文本' }))
-    expect(selectEditingNodes(useEditorStore.getState())).toHaveLength(nodesBefore + 1)
-    expect(selectEditingNodes(useEditorStore.getState()).at(-1)?.type).toBe('text')
+    expect(selectEditingNodes(useEditorStore.getState())).toHaveLength(nodesBefore.length + 1)
+    expect(selectEditingNodes(useEditorStore.getState()).filter(node => !nodesBefore.some(before => before.id === node.id))).toMatchObject([{ type: 'text' }])
     expect(selectSlideAuthoringSnapshot(useEditorStore.getState())?.revision).toBe(revisionBefore + 1)
     expect(slideSceneLayerItems().some((item) => (
       item.kind === 'native' && item.content.nativeType === 'text'

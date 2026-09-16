@@ -219,12 +219,12 @@ function mixedProjectFixture(): {
   flow.blocks.push({
     id: 'component-section-outer',
     type: 'section',
-    title: 'Outer section',
+    title: { inlines: [{ type: 'text', text: 'Outer section' }] },
     collapsedByDefault: false,
     blocks: [{
       id: 'component-section-inner',
       type: 'section',
-      title: 'Inner section',
+      title: { inlines: [{ type: 'text', text: 'Inner section' }] },
       collapsedByDefault: true,
       blocks: [{
         id: 'component-flow',

@@ -101,6 +101,7 @@ import { createEditorShellSlice } from './slices/editorShellSlice'
 import { createCourseStructureSlice } from './slices/courseStructureSlice'
 import { createDesignProductionActions } from '../composition/designProductionActions'
 import { createAuthoringToolActions } from '../composition/authoringToolActions'
+import { courseAuthoringScopeFromLocation } from '../authoring/courseAuthoringScope'
 import {
   applyEditorTransactionStep,
   createEditorTransactionStep,
@@ -616,6 +617,7 @@ export function selectHasDirtyCourseContentDraft(state: EditorState): boolean {
   ) {
     return true
   }
+  if (state.flowDocumentDraft) return true
   if (state.flowTextEdit && isFlowTextDraftDirty(state.flowTextEdit)) return true
   if (state.v9ContentEdit && isV9SlideContentDraftDirty(state.v9ContentEdit)) return true
   return false
@@ -739,6 +741,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
         {
           flowSession: current.flowSession,
           flowTextEdit: current.flowTextEdit,
+          flowDocumentDraft: current.flowDocumentDraft,
           flowClipboard: current.flowClipboard,
         },
         current,
@@ -952,7 +955,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
         slideLocationId: state.slideCandidateSnapshot?.locationId ?? null,
         editingScope: selectEditingScope(state),
         composing: Boolean(
-          state.flowTextEdit?.composing ||
+          state.flowTextEdit?.composing || state.flowDocumentDraft?.composing ||
           state.v9ContentEdit ||
           state.spatialContentEdit ||
           state.editingTextNodeId,
@@ -990,7 +993,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
         slideLocationId: state.slideCandidateSnapshot?.locationId ?? null,
         editingScope: selectEditingScope(state),
         composing: Boolean(
-          state.flowTextEdit?.composing ||
+          state.flowTextEdit?.composing || state.flowDocumentDraft?.composing ||
           state.v9ContentEdit ||
           state.spatialContentEdit ||
           state.editingTextNodeId,
@@ -1024,6 +1027,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
       return {
         flowSession: current.flowSession,
         flowTextEdit: current.flowTextEdit,
+          flowDocumentDraft: current.flowDocumentDraft,
         flowClipboard: current.flowClipboard,
       }
     },
@@ -1056,7 +1060,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     slideLocationId: get().slideCandidateSnapshot?.locationId ?? null,
     editingScope: selectEditingScope(get()),
     composing: Boolean(
-      get().flowTextEdit?.composing ||
+      get().flowTextEdit?.composing || get().flowDocumentDraft?.composing ||
       get().v9ContentEdit ||
       get().spatialContentEdit ||
       get().editingTextNodeId,
@@ -1114,7 +1118,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
       slideLocationId: get().slideCandidateSnapshot?.locationId ?? null,
       editingScope: selectEditingScope(get()),
       composing: Boolean(
-        get().flowTextEdit?.composing ||
+        get().flowTextEdit?.composing || get().flowDocumentDraft?.composing ||
         get().v9ContentEdit ||
         get().spatialContentEdit ||
         get().editingTextNodeId,
@@ -1141,6 +1145,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
         return {
           flowSession: current.flowSession,
           flowTextEdit: current.flowTextEdit,
+          flowDocumentDraft: current.flowDocumentDraft,
           flowClipboard: current.flowClipboard,
         }
       },
@@ -1222,7 +1227,21 @@ export const useEditorStore = create<EditorState>((set, get) => {
     readScope: () => {
       const projection = buildCandidateEffectiveLayers(get())
       if (!projection) throw new Error('当前没有有效的作者表面')
-      return { owner: projection.scope.owner, stateId: projection.stateId }
+      return { ...projection.scope, stateId: projection.stateId }
+    },
+    activateScope: input => {
+      const project = kernel.readDocument()
+      const expected = courseAuthoringScopeFromLocation({ project, ...input })
+      const surface = project.surfaces.find(item => item.id === expected.surfaceId)!
+      const localOwner = surface.type === 'slide' ? 'scene' : surface.type === 'flow' ? 'surface' : 'world'
+      if (expected.owner !== 'global' && expected.owner !== localOwner) throw new Error('当前表面不支持此作者范围')
+      crossSurfaceCommands.activateCourseLocation(input.locationId)
+      if (surface.type === 'slide') slideAuthoringSlice.setActivePresentationState(expected.stateId)
+      crossSurfaceCommands.setEditingScope(expected.owner === 'global' ? 'global' : 'scene')
+      const actual = buildCandidateEffectiveLayers(get())
+      if (!actual || actual.scope.locationId !== expected.locationId || actual.scope.owner !== expected.owner || actual.stateId !== expected.stateId) {
+        throw new Error('作者范围切换未完成，请完成当前编辑后重试')
+      }
     },
     hasContentDraft: () => selectHasDirtyCourseContentDraft(get()),
   })
@@ -1258,6 +1277,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     spatialPlaybackPathId: null,
     flowSession: null,
     flowTextEdit: null,
+    flowDocumentDraft: null,
     flowClipboard: null,
     courseAuthoringSession: buildCourseAuthoringSessionForProject(
       initialCourse,

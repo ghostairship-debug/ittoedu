@@ -8,11 +8,14 @@ import {
   type AuthoringObservationSource,
   type AuthoringObservationSpatialView,
 } from '../../../shared/authoringObservation'
+import type { SurfaceDiagnostic } from '../../../player/surfaces/SurfaceHost'
+import type { PublishedInteractionDiagnostic } from '../../../player/interactions/PublishedInteractionSurfacePort'
 import type { CourseProjectDocument } from '../../../shared/courseProjectTypes'
 import type { ComponentPackageData } from '../../../shared/componentTypes'
 import { analyzeCourseAssetReferences } from '../../../shared/contracts/course-project-v9/assetReferences'
 import { projectEffectiveLayers } from '../../course/effectiveLayerProjection'
 import { buildFlowEditorView } from '../../course/flowEditorView'
+import { generationNavigationContext } from './generationNavigationContext'
 import { bytesToBase64 } from '../../export/base64'
 import { waitForPublishedObservationReady } from '../../../player/surfaces/publishedCapture'
 import type { BackgroundPreview } from '../backgroundPreview'
@@ -79,6 +82,22 @@ export interface AuthoringObservationPorts {
   prepareImageResources?: (input: ObservationImageResourceInput) => Promise<ObservationImageResourceResult>
 }
 
+/**
+ * One interaction diagnostic observed by a mounted try-run/preview session.
+ * Diagnostics without interaction fields (plain SurfaceDiagnostic) stay intact.
+ */
+export interface AuthoringInteractionDiagnosticRecord {
+  readonly receivedAt: number
+  readonly diagnostic: SurfaceDiagnostic & Partial<Pick<PublishedInteractionDiagnostic,
+    'code' | 'ruleId' | 'stepId' | 'nodeId' | 'interactionType'>>
+}
+
+export interface AuthoringInteractionDiagnosticSnapshot {
+  readonly records: readonly AuthoringInteractionDiagnosticRecord[]
+  /** Total records evicted since this mounted session began. */
+  readonly droppedCount: number
+}
+
 export interface MountedObservationFacts {
   readonly projectId: string
   readonly documentRevision: number
@@ -96,6 +115,10 @@ interface MountedObservationHost {
   source: 'trial' | 'preview'
   sessionId: string
   read(): MountedObservationFacts
+  /** Bounded per-session diagnostics buffer; capture consumes only new entries. */
+  readInteractionDiagnostics?(): AuthoringInteractionDiagnosticSnapshot
+  /** Count acknowledged by successfully built observations in this session. */
+  diagnosticCursor: number
   viewEpoch: number
   interactionEpoch: number
   flush(): void
@@ -179,9 +202,11 @@ export function registerAuthoringObservationHost(input: {
   root: HTMLElement
   source: 'trial' | 'preview'
   read(): MountedObservationFacts
+  /** Optional per-session interaction diagnostics read port (bounded buffer). */
+  readInteractionDiagnostics?(): AuthoringInteractionDiagnosticSnapshot
 }): () => void {
   const host: MountedObservationHost = {
-    ...input, sessionId: crypto.randomUUID(), viewEpoch: 0, interactionEpoch: 0,
+    ...input, sessionId: crypto.randomUUID(), diagnosticCursor: 0, viewEpoch: 0, interactionEpoch: 0,
     flush: () => undefined, dispose: () => undefined,
   }
   const view = observeView(input.root, () => { host.viewEpoch += 1 }, () => { host.interactionEpoch += 1 })
@@ -225,13 +250,30 @@ interface ResolvedHost {
   viewEpoch: number
   interactionEpoch: number
   spatialView?: AuthoringObservationSpatialView
+  /** Snapshot now, acknowledge only when this capture has built all resources. */
+  snapshotInteractionDiagnostics?: () => {
+    records: readonly AuthoringInteractionDiagnosticRecord[]
+    truncated: boolean
+    acknowledge(): void
+  }
 }
 
 function readMountedHost(host: MountedObservationHost): ResolvedHost {
   host.flush()
   const facts = host.read()
   return { root: host.root, source: host.source, facts,
-    runtime: { sessionId: host.sessionId, stateVersion: facts.stateVersion }, viewEpoch: host.viewEpoch, interactionEpoch: host.interactionEpoch }
+    runtime: { sessionId: host.sessionId, stateVersion: facts.stateVersion }, viewEpoch: host.viewEpoch, interactionEpoch: host.interactionEpoch,
+    ...(host.readInteractionDiagnostics ? {
+      snapshotInteractionDiagnostics: () => {
+        const { records, droppedCount } = host.readInteractionDiagnostics!()
+        const end = droppedCount + records.length
+        return {
+          records: records.slice(Math.max(0, host.diagnosticCursor - droppedCount)),
+          truncated: host.diagnosticCursor < droppedCount,
+          acknowledge: () => { host.diagnosticCursor = Math.max(host.diagnosticCursor, end) },
+        }
+      },
+    } : {}) }
 }
 
 function currentStructure(document: CourseProjectDocument, host: ResolvedHost, selectedIds: readonly string[]) {
@@ -245,6 +287,7 @@ function currentStructure(document: CourseProjectDocument, host: ResolvedHost, s
   return {
     surfaceId: projection.surfaceId, locationId: projection.locationId, stateId: projection.stateId,
     surfaceType: projection.surfaceType,
+    navigation: generationNavigationContext(document, projection.locationId, projection.stateId),
     ...(flow ? { layout: { ...flow.layout, widthMode: flow.layout.widthMode ?? 'reading' },
       flowView: paper && scroll && paperRect ? {
         unit: 'CSS px', viewport: { width: host.root.clientWidth, height: host.root.clientHeight },
@@ -486,6 +529,35 @@ export function createAuthoringObservationController(ports: AuthoringObservation
         state: host.facts.publicState,
         domControls: observeRuntimeDomControls(host.root, dynamicTargets),
       }))
+      const diagnosticSnapshot = host.runtime ? host.snapshotInteractionDiagnostics?.() : undefined
+      if (host.runtime) {
+        // Feedback only: the observation package records what the live session
+        // diagnosed since the previous capture. It never creates candidates or
+        // commits project changes.
+        const fresh = diagnosticSnapshot ?? { records: [] as const, truncated: false }
+        const records = fresh.records.slice(-100)
+        mandatoryResources.push(jsonResource('interaction-diagnostics', 'observation/interaction-diagnostics.json', 'runtime-evidence', {
+          version: 1,
+          kind: 'interaction-diagnostics',
+          sessionId: host.runtime.sessionId,
+          stateVersion: host.runtime.stateVersion,
+          capturedAt: image.capturedAt,
+          truncated: fresh.truncated || fresh.records.length > records.length,
+          diagnostics: records.map(record => ({
+            receivedAt: record.receivedAt,
+            ageMs: Math.max(0, image.capturedAt - record.receivedAt),
+            surfaceId: record.diagnostic.surfaceId,
+            phase: record.diagnostic.phase,
+            severity: record.diagnostic.severity,
+            message: record.diagnostic.message,
+            ...(record.diagnostic.code !== undefined ? { code: record.diagnostic.code } : {}),
+            ...(record.diagnostic.ruleId !== undefined ? { ruleId: record.diagnostic.ruleId } : {}),
+            ...(record.diagnostic.stepId !== undefined ? { stepId: record.diagnostic.stepId } : {}),
+            ...(record.diagnostic.nodeId !== undefined ? { nodeId: record.diagnostic.nodeId } : {}),
+            ...(record.diagnostic.interactionType !== undefined ? { interactionType: record.diagnostic.interactionType } : {}),
+          })),
+        }))
+      }
       const unavailableDerivedImages = [...imageResources.unavailableDerivedImages]
       const acceptedDerivedImages = [...imageResources.derivedImages]
       const plan = (): PlannedResource[] => {
@@ -549,6 +621,7 @@ export function createAuthoringObservationController(ports: AuthoringObservation
         sessionGeneration: before.sessionGeneration, draftEpoch, viewEpoch, runtime: host.runtime,
         surfaceId: host.facts.surfaceId, locationId: host.facts.locationId, stateId: host.facts.stateId,
         source: host.source, spatialView: host.spatialView, capturedAt: image.capturedAt, files })
+      diagnosticSnapshot?.acknowledge()
       return { observation, resourceFiles, document: before.document, captureDurationMs: performance.now() - started }
     },
   }

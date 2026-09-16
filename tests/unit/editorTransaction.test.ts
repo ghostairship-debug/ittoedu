@@ -14,7 +14,7 @@ import { createBlankCourseProject } from '@/renderer/project/createCourseProject
 import { courseAuthoringScopeFromLocation } from '@/renderer/authoring/courseAuthoringScope'
 import { createGenerationCandidateCoordinator } from '@/renderer/authoring/generation/prepareGenerationCandidate'
 import { generationRequestSchema, generationCandidateSchema, generationCommitReceiptSchema, MAX_GENERATION_PROMPT_BYTES, type GenerationCandidate } from '@/shared/generationContract'
-import { captureGenerationSnapshot } from '@/renderer/authoring/generation/generationSnapshot'
+import { captureGenerationFixture as captureGenerationSnapshot } from '../fixtures/generationSnapshot'
 import { projectEffectiveLayers } from '@/renderer/course/effectiveLayerProjection'
 import { describeAuthoringTools } from '@/renderer/authoring/tools/authoringToolFacade'
 import { captureGenerationRepair, generationRepairMadeProgress } from '@/renderer/authoring/generation/generationRepair'
@@ -37,7 +37,10 @@ describe('generation context snapshots', () => {
     expect(describeAuthoringTools(['component.configure'])[0]?.candidateCarrier).toEqual({ default: 'existing-component' })
     expect(describeAuthoringTools(['component.insert'])[0]?.candidateCarrier.operations?.candidate).toBe('generated-component')
     expect(() => describeAuthoringTools(['unregistered'])).toThrow('未开放')
-    expect(() => captureGenerationSnapshot({ ...input, scope: 'selection' })).toThrow('请选择')
+    const emptySelection = captureGenerationSnapshot({ ...input, scope: 'selection' })
+    expect(emptySelection.context).toMatchObject({ reference: 'selection', modificationScope: 'project' })
+    expect(emptySelection.selectionActions ?? []).toEqual([])
+    expect(emptySelection.destinations).toEqual(first.destinations)
     expect(() => captureGenerationSnapshot({ ...input, sessionToken: { ...input.sessionToken, revision: 100 } })).toThrow('过期')
   })
 })
@@ -155,7 +158,7 @@ describe('CLI generation candidate atomic preparation and commit', () => {
     const request = { ...f.request, destinations: [destination], purpose: 'whole-course', confirmedDocuments: { teachingPlan: '认识分数：先讲解平均分，再操作观察。', presentationScript: 'Flow 讲义解释；Spatial 观察不同分法。' } }
     const candidate = { ...f.candidate, steps: [
       { id: 'flow', tool: 'course.navigation', carrier: 'native', destination, input: { operation: 'add-surface', surfaceType: 'flow', title: '分数讲义' } },
-      { id: 'paragraph', tool: 'flow.content', carrier: 'native', destination: { kind: 'created-scope', stepId: 'flow', parent: { kind: 'flow-body', parentBlockId: null }, insertion: { kind: 'append' } }, input: { operation: 'insert', block: { type: 'paragraph', text: '平均分是各份大小相同。' } } },
+      { id: 'paragraph', tool: 'flow.content', carrier: 'native', destination: { kind: 'created-scope', stepId: 'flow', parent: { kind: 'flow-body', parentBlockId: null }, insertion: { kind: 'append' } }, input: { operation: 'insert', block: { type: 'paragraph', content: { inlines: [{ type: 'text', text: '平均分是各份大小相同。' }] } } } },
       { id: 'spatial', tool: 'course.navigation', carrier: 'native', destination, input: { operation: 'add-surface', surfaceType: 'spatial-2d', title: '观察分法' } },
       { id: 'world-text', tool: 'native.content', carrier: 'native', destination: { kind: 'created-scope', stepId: 'spatial', parent: { kind: 'owner' }, insertion: { kind: 'append' } }, input: { operation: 'insert', template: { nativeType: 'text', text: '各份是否同样大？' } } },
     ] }
@@ -244,7 +247,7 @@ describe('CLI generation candidate atomic preparation and commit', () => {
     f.candidate.steps[0]!.destination = { kind: 'created-item', stepId: 's1', index: 0 }
     expect(generationCandidateSchema.safeParse(f.candidate).success).toBe(false)
     f.candidate.steps[0]!.destination = { ...f.request.destinations[0]!, scope: { ...(f.request.destinations[0] as Extract<typeof f.request.destinations[number], {kind:'create'}>).scope, ownerKey: 'other' } } as GenerationCandidate['steps'][number]['destination']
-    await expect(f.coordinator.prepare(f.request, f.candidate)).rejects.toThrow('范围')
+    await expect(f.coordinator.prepare(f.request, f.candidate)).rejects.toThrow('unknown-request-target [destination]')
     expect(f.commits).toHaveLength(0)
   })
 })

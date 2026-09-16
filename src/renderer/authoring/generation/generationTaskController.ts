@@ -1,7 +1,8 @@
 import type { DesktopAPI } from '../../../shared/ipcTypes'
 import type { LocalAgentEvent, LocalAgentHostResult, LocalAgentId, LocalAgentRecord, LocalAgentRequest, LocalAgentResponse } from '../../../shared/localAgentContract'
 import type { AiUserInput } from '../../../shared/localAgentInteraction'
-import { MAX_GENERATION_TASK_DURATION_MS, readGenerationFailure, GenerationCandidatePreparationError, type GenerationCandidate, type GenerationCommitReceipt, type GenerationRequest } from '../../../shared/generationContract'
+import { workspaceIdentityKey } from '../../../shared/workspaceIdentity'
+import { DEFAULT_GENERATION_TASK_DURATION_MS, MAX_GENERATION_TASK_DURATION_MS, readGenerationFailure, GenerationCandidatePreparationError, type GenerationCandidate, type GenerationCommitReceipt, type GenerationRequest } from '../../../shared/generationContract'
 import type { createGenerationCandidateCoordinator } from './prepareGenerationCandidate'
 
 export type GenerationPrepared = Awaited<ReturnType<ReturnType<typeof createGenerationCandidateCoordinator>['prepare']>>
@@ -54,7 +55,7 @@ class HostResultFeedbackError extends Error {
   constructor(readonly cause: unknown) { super(`宿主结果反馈未保存：${explanation(cause)}`) }
 }
 class TaskDeadlineError extends Error {
-  constructor() { super('本任务的20分钟执行期限已到，请补充要求并重新观察后继续；未应用候选已丢弃') }
+  constructor() { super('本次设置的执行预算已到，请补充要求并重新观察后继续；未应用候选已丢弃') }
 }
 type HostResultRequest = Extract<LocalAgentRequest, { operation: 'host-result' }>
 
@@ -66,6 +67,9 @@ export class GenerationTaskController {
   private after = 0
   private startedAt = 0
   private deadlineAt = Infinity
+  private ownerDeadlineAt?: number
+  private inputRevision = 0
+  private readonly candidateInputWrites = new Set<Promise<void>>()
   private pendingFeedback?: HostResultRequest
   private feedbackStopped = false
   private stageAbort = new AbortController()
@@ -102,7 +106,12 @@ export class GenerationTaskController {
         onAbort = () => reject(new Error('stale：任务已停止'))
         signal.addEventListener('abort', onAbort, { once: true })
         if (signal.aborted) onAbort()
-        timer = setTimeout(() => { if (epoch === this.epoch) this.ports.discard(); reject(new TaskDeadlineError()) }, Math.max(0, this.deadlineAt - Date.now()))
+        const checkDeadline = () => {
+          if (Date.now() < this.deadlineAt) { timer = setTimeout(checkDeadline, this.deadlineAt - Date.now()); return }
+          if (epoch === this.epoch) this.ports.discard()
+          reject(new TaskDeadlineError())
+        }
+        timer = setTimeout(checkDeadline, Math.max(0, this.deadlineAt - Date.now()))
         currentTimer = setInterval(() => { try { checkCurrent() } catch (error) { reject(error) } }, 100)
       })])
       this.requireActive(epoch)
@@ -111,13 +120,19 @@ export class GenerationTaskController {
     } finally { clearTimeout(timer); clearInterval(currentTimer); if (onAbort) signal.removeEventListener('abort', onAbort) }
   }
   private acceptRecord(response: LocalAgentResponse) {
-    const record = response.records?.[0]
+    let record = response.records?.[0]
     if (!record) return
-    if (record.task?.deadlineAt != null) this.deadlineAt = Math.min(this.deadlineAt, record.task.deadlineAt)
+    if (record.task?.deadlineAt != null && (this.ownerDeadlineAt === undefined || record.task.deadlineAt >= this.ownerDeadlineAt)) {
+      this.deadlineAt = Math.min(this.startedAt + MAX_GENERATION_TASK_DURATION_MS, record.task.deadlineAt)
+      this.ownerDeadlineAt = record.task.deadlineAt
+    }
+    if (record.task && this.ownerDeadlineAt !== undefined && record.task.deadlineAt !== this.ownerDeadlineAt) record = { ...record,
+      task: { ...record.task, deadlineAt: this.ownerDeadlineAt } }
+    if (this.guardedRequest?.execution) this.guardedRequest.execution.deadlineAt = this.deadlineAt
+    if (this.view.request?.execution) this.view.request.execution.deadlineAt = this.deadlineAt
     this.update({ record })
   }
   private withBudget(request: GenerationRequest): GenerationRequest {
-    if (request.execution) this.deadlineAt = Math.min(this.deadlineAt, request.execution.deadlineAt)
     return { ...request, execution: { version: 1, startedAt: this.startedAt, deadlineAt: this.deadlineAt } }
   }
   private cancelLateLaunch(sessionId: string, epoch: number) {
@@ -145,7 +160,8 @@ export class GenerationTaskController {
     const epoch = ++this.epoch
     this.stageAbort.abort(); this.stageAbort = new AbortController()
     this.startedAt = request.execution?.startedAt ?? Date.now()
-    this.deadlineAt = Math.min(request.execution?.deadlineAt ?? Infinity, this.startedAt + MAX_GENERATION_TASK_DURATION_MS)
+    this.ownerDeadlineAt = undefined
+    this.deadlineAt = Math.min(request.execution?.deadlineAt ?? this.startedAt + DEFAULT_GENERATION_TASK_DURATION_MS, this.startedAt + MAX_GENERATION_TASK_DURATION_MS)
     request = this.withBudget(request)
     this.feedbackStopped = false
     this.after = 0
@@ -178,11 +194,10 @@ export class GenerationTaskController {
       this.candidateSummary = undefined
       this.currentOperation = continuation ? '将实际反馈交回 CLI 并继续处理' : '连接 CLI 并开始任务'
       this.requireCurrent(request, epoch)
-      const launchDeadline = this.deadlineAt
       const launch = await this.stage(() => this.ports.api.localAgent(continuation
         ? { operation: 'continue', ...this.ports.owner, sessionId: this.view.sessionId!, request }
         : { operation: 'generate', ...this.ports.owner, adapter, request, ...(resumeSessionId ? { resumeSessionId } : {}), ...(userMessage ? { userMessage } : {}) }).then(response => {
-        if (response.sessionId && (epoch !== this.epoch || Date.now() >= launchDeadline || !this.view.busy || !this.ports.isCurrent(request))) this.cancelLateLaunch(response.sessionId, epoch)
+        if (response.sessionId && (epoch !== this.epoch || Date.now() >= this.deadlineAt || !this.view.busy || !this.ports.isCurrent(request))) this.cancelLateLaunch(response.sessionId, epoch)
         return response
       }), epoch)
       if (!launch.sessionId) throw new Error('CLI 没有返回当前会话')
@@ -200,6 +215,7 @@ export class GenerationTaskController {
         record = response.records?.[0]!
         if (!record) throw new Error('会话记录不可用')
         this.acceptRecord(response)
+        record = this.view.record!
         if (continuation && record.hostResult?.receiptDelivery === 'delivered') this.update({ notice: 'CLI 已收到实际结果，正在继续处理' })
         this.requireActive(epoch)
         for (const event of record.events) if (event.sequence > this.after) { events.push(event); this.after = event.sequence }
@@ -213,6 +229,12 @@ export class GenerationTaskController {
         throw new Error(payload && typeof payload === 'object' && !Array.isArray(payload) && typeof payload.message === 'string' ? payload.message : 'CLI 本轮未完成，请检查原生认证或重试')
       }
       this.currentOperation = '读取 CLI 的本阶段结果'
+      const candidateInputRevision = this.inputRevision
+      const requireCandidateIntent = async () => {
+        while (this.candidateInputWrites.size) await this.stage(() => Promise.all([...this.candidateInputWrites]), epoch)
+        this.requireCurrent(request, epoch)
+        if (candidateInputRevision !== this.inputRevision) throw new Error('用户已补充或纠正要求；当前候选未应用，请结合最新输入重新准备')
+      }
       const response = await this.stage(() => this.ports.api.localAgent({ operation: 'candidate', ...this.ports.owner, sessionId }), epoch)
       if (epoch !== this.epoch) return
       this.acceptRecord(response)
@@ -227,13 +249,13 @@ export class GenerationTaskController {
       let receipt: GenerationCommitReceipt | undefined
       try {
         this.requireCurrent(request, epoch)
-        if (outcome.kind === 'incomplete') throw new Error(outcome.finding)
+        if (outcome.kind === 'incomplete') throw outcome.failure ? new GenerationCandidatePreparationError(outcome.failure) : new Error(outcome.finding)
         if (outcome.kind === 'candidate-format-error' || outcome.kind === 'candidate-rejected') throw outcome.failure ? new GenerationCandidatePreparationError(outcome.failure) : new Error(outcome.finding)
         this.candidateSummary = outcome.candidate.summary
         this.currentOperation = '检查并准入当前候选'
         this.update({ phase: 'checking', notice: '正在检查修改内容和运行结果' })
         const prepared = await this.stage(() => this.ports.prepare(request, outcome.candidate), epoch)
-        this.requireCurrent(request, epoch)
+        await requireCandidateIntent()
         this.currentOperation = '保存候选检查结果'
         await this.remember({ requestId: request.requestId, candidateId: prepared.candidateId, status: 'checked', summary: prepared.summary,
           beforeRevision: prepared.beforeRevision, afterRevision: prepared.afterRevision })
@@ -250,7 +272,7 @@ export class GenerationTaskController {
         this.currentOperation = '提交前核对当前工程'
         this.update({ phase: 'committing', notice: '正在应用本阶段修改', preview: undefined })
         if (this.ports.beforeApply) await this.stage(() => this.ports.beforeApply!(), epoch)
-        this.requireCurrent(request, epoch)
+        await requireCandidateIntent()
         this.currentOperation = '应用当前候选'
         const applied = this.ports.apply(prepared.previewId)
         if (applied.status === 'stale') throw new Error('stale：工程已改变，未应用候选')
@@ -259,7 +281,10 @@ export class GenerationTaskController {
         // Capture only actual apply receipts before any fallible feedback await.
         // This is a task-local presentation of facts, not an additional history.
         this.confirmedStages.push({ receipt, summary: prepared.summary })
-        result = { requestId: request.requestId, candidateId: prepared.candidateId, status: applied.status, summary: prepared.summary,
+        const checks = prepared.interactionChecks
+        const verificationSummary = checks && (checks.checked.length || checks.skipped.length)
+          ? `；已改规则的声明行为点击检查 ${checks.checked.length} 项通过${checks.skipped.length ? `，${checks.skipped.length} 项需对应运行条件下另行观察` : ''}；未改规则及完整任务目标仍需核对` : ''
+        result = { requestId: request.requestId, candidateId: prepared.candidateId, status: applied.status, summary: (prepared.summary + verificationSummary).slice(0, 4000),
           beforeRevision: receipt.beforeRevision, afterRevision: receipt.afterRevision,
           ...(outcome.candidate.afterCommit ? { afterCommit: outcome.candidate.afterCommit } : {}) }
       } catch (error) {
@@ -362,15 +387,40 @@ export class GenerationTaskController {
   async input(input: AiUserInput, options?: { preservePreview?: boolean }) {
     if (!this.view.busy || !this.view.sessionId) throw new Error('任务已经结束')
     const epoch = this.epoch, sessionId = this.view.sessionId
-    const result = await this.stage(() => this.ports.api.localAgent({ operation: 'input', ...this.ports.owner, sessionId, input }), epoch)
+    let finishInput!: () => void
+    const writing = new Promise<void>(resolve => { finishInput = resolve })
+    const changesIntent = input.kind === 'correct' || input.kind === 'supplement' && !options?.preservePreview
+    if (changesIntent) this.candidateInputWrites.add(writing)
+    try {
+    const result = await this.stage(() => this.ports.api.localAgent({ operation: 'input', ...this.ports.owner, sessionId, input }).then(response => {
+      const delivery = response.inputDelivery
+      if (delivery && (delivery.taskId !== input.taskId || delivery.epoch !== input.epoch || delivery.inputId !== input.inputId
+        || workspaceIdentityKey(delivery.workspace) !== workspaceIdentityKey(input.workspace))) throw new Error('输入回执身份与当前任务不一致')
+      if (changesIntent && delivery && delivery.status !== 'rejected' && epoch === this.epoch && sessionId === this.view.sessionId) this.inputRevision++
+      if (input.kind === 'extend-budget' && delivery?.status === 'accepted' && delivery.deadlineAt !== undefined
+        && epoch === this.epoch && sessionId === this.view.sessionId) {
+        this.deadlineAt = Math.max(this.deadlineAt, Math.min(this.startedAt + MAX_GENERATION_TASK_DURATION_MS, delivery.deadlineAt))
+        this.ownerDeadlineAt = this.deadlineAt
+        if (this.guardedRequest?.execution) this.guardedRequest.execution.deadlineAt = this.deadlineAt
+        if (this.view.request?.execution) this.view.request.execution.deadlineAt = this.deadlineAt
+        if (this.view.record?.task) this.update({ record: { ...this.view.record, task: { ...this.view.record.task, deadlineAt: this.deadlineAt } } })
+      }
+      return response
+    }), epoch)
     if (epoch !== this.epoch || sessionId !== this.view.sessionId) return result.inputDelivery
     if (!result.inputDelivery || result.inputDelivery.status === 'rejected') throw new Error(result.inputDelivery?.reason ?? 'CLI 没有接受输入')
+    if (input.kind === 'extend-budget') {
+      if (result.inputDelivery.deadlineAt === undefined) throw new Error('预算延期缺少宿主确认的执行期限')
+      this.update({ notice: '已增加本次执行预算；已提交阶段保留' })
+      return result.inputDelivery
+    }
     // Status inquiries still use the native input owner and durable user event,
     // but do not withdraw an already checked preview. Actual corrections always
     // invalidate it, including when a caller accidentally supplies this option.
     if (this.view.phase === 'awaiting-apply' && (input.kind === 'correct' || input.kind === 'supplement' && !options?.preservePreview)) this.decision?.('correct')
-    this.update({ notice: result.inputDelivery.status === 'queued' ? '输入已排队，将在下一原生回合消费' : 'CLI 已接收输入，正在继续' })
+    this.update({ notice: result.inputDelivery.reason ?? (result.inputDelivery.status === 'queued' ? '输入已排队，将在下一原生回合消费' : 'CLI 已接收输入，正在继续') })
     return result.inputDelivery
+    } finally { this.candidateInputWrites.delete(writing); finishInput() }
   }
   async stop() {
     ++this.epoch

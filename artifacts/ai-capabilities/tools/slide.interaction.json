@@ -2,8 +2,34 @@
   "candidateCarrier": {
     "default": "native"
   },
-  "description": "仅 Slide scene owner；insert 使用 create owner append。rule 遵循 references.ruleWithId，但省略最外层 id（由宿主生成），保留 actions 内部的步骤 id。第一动作 start 必须 after-previous，导航动作必须最后。",
+  "conditions": [
+    {
+      "destination": "create",
+      "message": "互动创建使用 create parent:owner append；compose 只需触发与效果，宿主生成完整规则。",
+      "operations": [
+        "compose",
+        "insert"
+      ],
+      "parents": [
+        "owner"
+      ]
+    },
+    {
+      "destination": "update",
+      "message": "replace/delete 需要前序互动回执的 update target；新建规则请用 compose 或 insert。",
+      "operations": [
+        "replace",
+        "delete"
+      ]
+    }
+  ],
+  "description": "仅 Slide scene owner。常用“点击/输入提交/翻页 → 显示或隐藏解释、切换呈现状态（图形与文字随状态同步变化）、设置分数、进入下一步或下一场景”用 compose：触发与目标可给图层/状态/场景的 id 或唯一名称，效果按顺序给出，宿主生成一致引用、步骤 id、分组与收尾导航，并在边界明确拒绝 Published 不支持的组合。显隐语义：show/hide 是已挂载节点的入退场动画，不能解除 visible:false；初始动画隐藏使用 playbackInitialVisibility:hidden。若已有目标呈现状态负责显隐，只需 set-state，不要先 show 隐藏节点再切状态。导航语义：next-step 先走完当前页剩余呈现步骤再进入下一场景；next-scene 直接跳过剩余步骤进入下一场景（跨 Slide/Flow/Spatial 位置复用课程顺序）；go-to-scene 精确进入指定 Slide 场景。限制：presentation.enter/presentation.in 当前 Published 播放不执行，因此 compose 不提供 state-enter 触发与 inStates 条件；状态进入类需求用 click/presenter 触发 + 末尾 set-state 效果（当前 Slide 场景、无 transition、独占最后执行组）表达，状态条件用 course-state.compare/course-state.exists，场景限定用 scene.in。需要延迟、动画/媒体触发或完整条件组合时用 insert/replace（本卡完整 rule Schema，不含最外层 id；第一动作 start 必须 after-previous，导航动作必须最后）。",
   "examples": [
+    {
+      "bindings": "values 的 trigger/effects 来自当前观察、已读资源或用户要求，值须满足本卡 inputSchema；destination 原样复制当前目标。",
+      "code": "const input={\"operation\":\"compose\",\"trigger\":values[\"trigger\"],\"effects\":values[\"effects\"]}; const receipt=await session.execute(\"slide.interaction\",input,destination);",
+      "operation": "compose"
+    },
     {
       "bindings": "values 的 rule 来自当前观察、已读资源或用户要求，值须满足本卡 inputSchema；destination 原样复制当前目标。",
       "code": "const input={\"operation\":\"insert\",\"rule\":values[\"rule\"]}; const receipt=await session.execute(\"slide.interaction\",input,destination);",
@@ -23,15 +49,1463 @@
   "inputSchema": {
     "$defs": {
       "__schema0": {
-        "additionalProperties": {},
-        "propertyNames": {
-          "type": "string"
+        "maxLength": 200,
+        "minLength": 1,
+        "type": "string"
+      },
+      "__schema1": {
+        "maxLength": 240,
+        "minLength": 1,
+        "type": "string"
+      },
+      "__schema10": {
+        "type": "boolean"
+      },
+      "__schema11": {
+        "oneOf": [
+          {
+            "additionalProperties": false,
+            "properties": {
+              "nodeId": {
+                "$ref": "#/$defs/__schema12"
+              },
+              "type": {
+                "const": "node.click",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "nodeId"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "type": {
+                "const": "scene.enter",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "stateId": {
+                "$ref": "#/$defs/__schema12"
+              },
+              "type": {
+                "const": "presentation.enter",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "stateId"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "eventName": {
+                "$ref": "#/$defs/__schema13"
+              },
+              "nodeId": {
+                "$ref": "#/$defs/__schema12"
+              },
+              "type": {
+                "const": "component.event",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "nodeId",
+              "eventName"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "eventName": {
+                "$ref": "#/$defs/__schema13"
+              },
+              "scope": {
+                "enum": [
+                  "scene",
+                  "global"
+                ],
+                "type": "string"
+              },
+              "type": {
+                "const": "runtime.event",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "scope",
+              "eventName"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "soundId": {
+                "$ref": "#/$defs/__schema12"
+              },
+              "type": {
+                "const": "audio.ended",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "soundId"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "nodeId": {
+                "$ref": "#/$defs/__schema12"
+              },
+              "type": {
+                "const": "video.started",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "nodeId"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "nodeId": {
+                "$ref": "#/$defs/__schema12"
+              },
+              "type": {
+                "const": "video.paused",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "nodeId"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "nodeId": {
+                "$ref": "#/$defs/__schema12"
+              },
+              "type": {
+                "const": "video.ended",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "nodeId"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "nodeId": {
+                "$ref": "#/$defs/__schema12"
+              },
+              "seconds": {
+                "$ref": "#/$defs/__schema14"
+              },
+              "type": {
+                "const": "video.time",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "nodeId",
+              "seconds"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "nodeId": {
+                "$ref": "#/$defs/__schema12"
+              },
+              "type": {
+                "const": "node.activated",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "nodeId"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "actionId": {
+                "$ref": "#/$defs/__schema12"
+              },
+              "type": {
+                "const": "animation.completed",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "actionId"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "command": {
+                "enum": [
+                  "next",
+                  "previous"
+                ],
+                "type": "string"
+              },
+              "type": {
+                "const": "presenter.command",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "command"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "nodeId": {
+                "$ref": "#/$defs/__schema12"
+              },
+              "type": {
+                "const": "input.submit",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "nodeId"
+            ],
+            "type": "object"
+          }
+        ]
+      },
+      "__schema12": {
+        "maxLength": 200,
+        "minLength": 1,
+        "type": "string"
+      },
+      "__schema13": {
+        "maxLength": 160,
+        "minLength": 1,
+        "type": "string"
+      },
+      "__schema14": {
+        "maximum": 604800,
+        "minimum": 0,
+        "type": "number"
+      },
+      "__schema15": {
+        "items": {
+          "$ref": "#/$defs/__schema16"
         },
+        "maxItems": 16,
+        "type": "array"
+      },
+      "__schema16": {
+        "anyOf": [
+          {
+            "additionalProperties": false,
+            "properties": {
+              "stateIds": {
+                "$ref": "#/$defs/__schema18"
+              },
+              "type": {
+                "$ref": "#/$defs/__schema17"
+              }
+            },
+            "required": [
+              "type",
+              "stateIds"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "sceneIds": {
+                "$ref": "#/$defs/__schema20"
+              },
+              "type": {
+                "$ref": "#/$defs/__schema19"
+              }
+            },
+            "required": [
+              "type",
+              "sceneIds"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "exists": {
+                "type": "boolean"
+              },
+              "key": {
+                "$ref": "#/$defs/__schema1"
+              },
+              "type": {
+                "const": "course-state.exists",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "key",
+              "exists"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "key": {
+                "$ref": "#/$defs/__schema1"
+              },
+              "operator": {
+                "$ref": "#/$defs/__schema2"
+              },
+              "type": {
+                "const": "course-state.compare",
+                "type": "string"
+              },
+              "value": {
+                "$ref": "#/$defs/__schema3"
+              }
+            },
+            "required": [
+              "type",
+              "key",
+              "operator",
+              "value"
+            ],
+            "type": "object"
+          }
+        ]
+      },
+      "__schema17": {
+        "const": "presentation.in",
+        "type": "string"
+      },
+      "__schema18": {
+        "items": {
+          "$ref": "#/$defs/__schema12"
+        },
+        "maxItems": 256,
+        "minItems": 1,
+        "type": "array"
+      },
+      "__schema19": {
+        "const": "scene.in",
+        "type": "string"
+      },
+      "__schema2": {
+        "enum": [
+          "eq",
+          "neq",
+          "gt",
+          "gte",
+          "lt",
+          "lte"
+        ],
+        "type": "string"
+      },
+      "__schema20": {
+        "items": {
+          "$ref": "#/$defs/__schema12"
+        },
+        "maxItems": 1000,
+        "minItems": 1,
+        "type": "array"
+      },
+      "__schema21": {
+        "items": {
+          "$ref": "#/$defs/__schema22"
+        },
+        "maxItems": 32,
+        "minItems": 1,
+        "type": "array"
+      },
+      "__schema22": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "anyOf": [
+              {
+                "oneOf": [
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "stateId": {
+                        "$ref": "#/$defs/__schema12"
+                      },
+                      "transition": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "duration": {
+                            "maximum": 10000,
+                            "minimum": 0,
+                            "type": "number"
+                          },
+                          "ease": {
+                            "maxLength": 80,
+                            "minLength": 1,
+                            "type": "string"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "type": {
+                        "const": "presentation.set",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "stateId"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "sceneId": {
+                        "$ref": "#/$defs/__schema12"
+                      },
+                      "targetStateId": {
+                        "$ref": "#/$defs/__schema12"
+                      },
+                      "type": {
+                        "const": "scene.go",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "sceneId"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "type": {
+                        "const": "step.next",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "type"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "type": {
+                        "const": "step.previous",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "type"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "type": {
+                        "const": "scene.next",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "type"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "type": {
+                        "const": "scene.previous",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "type"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "type": {
+                        "const": "scene.replay",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "type"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "type": {
+                        "const": "course.restart",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "type"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "key": {
+                        "$ref": "#/$defs/__schema1"
+                      },
+                      "type": {
+                        "const": "course-state.set",
+                        "type": "string"
+                      },
+                      "value": {
+                        "$ref": "#/$defs/__schema3"
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "key",
+                      "value"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "fadeInMs": {
+                        "$ref": "#/$defs/__schema23"
+                      },
+                      "ifPlaying": {
+                        "enum": [
+                          "restart",
+                          "continue",
+                          "ignore"
+                        ],
+                        "type": "string"
+                      },
+                      "lifetime": {
+                        "enum": [
+                          "scene",
+                          "course"
+                        ],
+                        "type": "string"
+                      },
+                      "loop": {
+                        "type": "boolean"
+                      },
+                      "soundId": {
+                        "$ref": "#/$defs/__schema12"
+                      },
+                      "type": {
+                        "const": "audio.play",
+                        "type": "string"
+                      },
+                      "volume": {
+                        "maximum": 1,
+                        "minimum": 0,
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "soundId"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "fadeOutMs": {
+                        "$ref": "#/$defs/__schema23"
+                      },
+                      "target": {
+                        "$ref": "#/$defs/__schema24"
+                      },
+                      "type": {
+                        "const": "audio.pause",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "target"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "fadeInMs": {
+                        "$ref": "#/$defs/__schema23"
+                      },
+                      "target": {
+                        "$ref": "#/$defs/__schema24"
+                      },
+                      "type": {
+                        "const": "audio.resume",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "target"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "fadeOutMs": {
+                        "$ref": "#/$defs/__schema23"
+                      },
+                      "target": {
+                        "$ref": "#/$defs/__schema24"
+                      },
+                      "type": {
+                        "const": "audio.stop",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "target"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "target": {
+                        "$ref": "#/$defs/__schema24"
+                      },
+                      "type": {
+                        "const": "audio.toggle-mute",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "target"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "nodeId": {
+                        "$ref": "#/$defs/__schema12"
+                      },
+                      "type": {
+                        "const": "video.play",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "nodeId"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "nodeId": {
+                        "$ref": "#/$defs/__schema12"
+                      },
+                      "type": {
+                        "const": "video.pause",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "nodeId"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "nodeId": {
+                        "$ref": "#/$defs/__schema12"
+                      },
+                      "type": {
+                        "const": "video.restart",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "nodeId"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "nodeId": {
+                        "$ref": "#/$defs/__schema12"
+                      },
+                      "type": {
+                        "const": "video.stop",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "nodeId"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "nodeId": {
+                        "$ref": "#/$defs/__schema12"
+                      },
+                      "type": {
+                        "const": "video.toggle",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "nodeId"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "nodeId": {
+                        "$ref": "#/$defs/__schema12"
+                      },
+                      "seconds": {
+                        "$ref": "#/$defs/__schema14"
+                      },
+                      "type": {
+                        "const": "video.seek",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "nodeId",
+                      "seconds"
+                    ],
+                    "type": "object"
+                  }
+                ]
+              },
+              {
+                "anyOf": [
+                  {
+                    "anyOf": [
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "direction": {
+                            "enum": [
+                              "left",
+                              "right",
+                              "up",
+                              "down"
+                            ],
+                            "type": "string"
+                          },
+                          "durationMs": {
+                            "$ref": "#/$defs/__schema23"
+                          },
+                          "easing": {
+                            "$ref": "#/$defs/__schema25"
+                          },
+                          "effect": {
+                            "const": "slide",
+                            "type": "string"
+                          },
+                          "nodeId": {
+                            "$ref": "#/$defs/__schema12"
+                          },
+                          "type": {
+                            "const": "node.enter",
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "type",
+                          "nodeId",
+                          "durationMs",
+                          "easing",
+                          "effect",
+                          "direction"
+                        ],
+                        "type": "object"
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "durationMs": {
+                            "$ref": "#/$defs/__schema23"
+                          },
+                          "easing": {
+                            "$ref": "#/$defs/__schema25"
+                          },
+                          "effect": {
+                            "enum": [
+                              "none",
+                              "fade",
+                              "scale"
+                            ],
+                            "type": "string"
+                          },
+                          "nodeId": {
+                            "$ref": "#/$defs/__schema12"
+                          },
+                          "type": {
+                            "const": "node.enter",
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "type",
+                          "nodeId",
+                          "durationMs",
+                          "easing",
+                          "effect"
+                        ],
+                        "type": "object"
+                      }
+                    ]
+                  },
+                  {
+                    "anyOf": [
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "direction": {
+                            "enum": [
+                              "left",
+                              "right",
+                              "up",
+                              "down"
+                            ],
+                            "type": "string"
+                          },
+                          "durationMs": {
+                            "$ref": "#/$defs/__schema23"
+                          },
+                          "easing": {
+                            "$ref": "#/$defs/__schema25"
+                          },
+                          "effect": {
+                            "const": "slide",
+                            "type": "string"
+                          },
+                          "nodeId": {
+                            "$ref": "#/$defs/__schema12"
+                          },
+                          "type": {
+                            "const": "node.exit",
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "type",
+                          "nodeId",
+                          "durationMs",
+                          "easing",
+                          "effect",
+                          "direction"
+                        ],
+                        "type": "object"
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "durationMs": {
+                            "$ref": "#/$defs/__schema23"
+                          },
+                          "easing": {
+                            "$ref": "#/$defs/__schema25"
+                          },
+                          "effect": {
+                            "enum": [
+                              "none",
+                              "fade",
+                              "scale"
+                            ],
+                            "type": "string"
+                          },
+                          "nodeId": {
+                            "$ref": "#/$defs/__schema12"
+                          },
+                          "type": {
+                            "const": "node.exit",
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "type",
+                          "nodeId",
+                          "durationMs",
+                          "easing",
+                          "effect"
+                        ],
+                        "type": "object"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          "delayMs": {
+            "$ref": "#/$defs/__schema23"
+          },
+          "id": {
+            "$ref": "#/$defs/__schema12"
+          },
+          "start": {
+            "enum": [
+              "after-previous",
+              "with-previous"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "start",
+          "delayMs",
+          "action"
+        ],
         "type": "object"
+      },
+      "__schema23": {
+        "maximum": 60000,
+        "minimum": 0,
+        "type": "number"
+      },
+      "__schema24": {
+        "oneOf": [
+          {
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "const": "sound",
+                "type": "string"
+              },
+              "soundId": {
+                "$ref": "#/$defs/__schema12"
+              }
+            },
+            "required": [
+              "kind",
+              "soundId"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "channel": {
+                "enum": [
+                  "music",
+                  "narration",
+                  "sfx",
+                  "ui"
+                ],
+                "type": "string"
+              },
+              "kind": {
+                "const": "channel",
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "channel"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "const": "all",
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind"
+            ],
+            "type": "object"
+          }
+        ]
+      },
+      "__schema25": {
+        "enum": [
+          "linear",
+          "ease-in",
+          "ease-out",
+          "ease-in-out"
+        ],
+        "type": "string"
+      },
+      "__schema3": {
+        "anyOf": [
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "number"
+          },
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "__schema4": {
+        "oneOf": [
+          {
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "const": "set-state",
+                "type": "string"
+              },
+              "state": {
+                "$ref": "#/$defs/__schema0"
+              }
+            },
+            "required": [
+              "kind",
+              "state"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "durationMs": {
+                "$ref": "#/$defs/__schema6"
+              },
+              "easing": {
+                "$ref": "#/$defs/__schema7"
+              },
+              "effect": {
+                "$ref": "#/$defs/__schema5"
+              },
+              "kind": {
+                "const": "show",
+                "type": "string"
+              },
+              "nodes": {
+                "items": {
+                  "$ref": "#/$defs/__schema0"
+                },
+                "maxItems": 32,
+                "minItems": 1,
+                "type": "array"
+              }
+            },
+            "required": [
+              "kind",
+              "nodes"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "durationMs": {
+                "$ref": "#/$defs/__schema6"
+              },
+              "easing": {
+                "$ref": "#/$defs/__schema7"
+              },
+              "effect": {
+                "$ref": "#/$defs/__schema5"
+              },
+              "kind": {
+                "const": "hide",
+                "type": "string"
+              },
+              "nodes": {
+                "items": {
+                  "$ref": "#/$defs/__schema0"
+                },
+                "maxItems": 32,
+                "minItems": 1,
+                "type": "array"
+              }
+            },
+            "required": [
+              "kind",
+              "nodes"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "const": "next-step",
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "const": "previous-step",
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "const": "next-scene",
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "const": "previous-scene",
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "const": "go-to-scene",
+                "type": "string"
+              },
+              "scene": {
+                "$ref": "#/$defs/__schema0"
+              },
+              "state": {
+                "$ref": "#/$defs/__schema0"
+              }
+            },
+            "required": [
+              "kind",
+              "scene"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "key": {
+                "$ref": "#/$defs/__schema1"
+              },
+              "kind": {
+                "const": "set-course-state",
+                "type": "string"
+              },
+              "value": {
+                "$ref": "#/$defs/__schema3"
+              }
+            },
+            "required": [
+              "kind",
+              "key",
+              "value"
+            ],
+            "type": "object"
+          }
+        ]
+      },
+      "__schema5": {
+        "enum": [
+          "none",
+          "fade",
+          "scale"
+        ],
+        "type": "string"
+      },
+      "__schema6": {
+        "maximum": 60000,
+        "minimum": 0,
+        "type": "number"
+      },
+      "__schema7": {
+        "enum": [
+          "linear",
+          "ease-in",
+          "ease-out",
+          "ease-in-out"
+        ],
+        "type": "string"
+      },
+      "__schema8": {
+        "additionalProperties": false,
+        "properties": {
+          "actions": {
+            "$ref": "#/$defs/__schema21"
+          },
+          "conditions": {
+            "$ref": "#/$defs/__schema15"
+          },
+          "enabled": {
+            "$ref": "#/$defs/__schema10"
+          },
+          "name": {
+            "$ref": "#/$defs/__schema9"
+          },
+          "trigger": {
+            "$ref": "#/$defs/__schema11"
+          }
+        },
+        "required": [
+          "enabled",
+          "trigger",
+          "conditions",
+          "actions"
+        ],
+        "type": "object"
+      },
+      "__schema9": {
+        "maxLength": 80,
+        "minLength": 1,
+        "type": "string"
       }
     },
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "oneOf": [
+      {
+        "additionalProperties": false,
+        "properties": {
+          "effects": {
+            "items": {
+              "$ref": "#/$defs/__schema4"
+            },
+            "maxItems": 32,
+            "minItems": 1,
+            "type": "array"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "name": {
+            "maxLength": 80,
+            "minLength": 1,
+            "type": "string"
+          },
+          "operation": {
+            "const": "compose",
+            "type": "string"
+          },
+          "trigger": {
+            "oneOf": [
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "kind": {
+                    "const": "click",
+                    "type": "string"
+                  },
+                  "node": {
+                    "$ref": "#/$defs/__schema0"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "node"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "kind": {
+                    "const": "input-submit",
+                    "type": "string"
+                  },
+                  "node": {
+                    "$ref": "#/$defs/__schema0"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "node"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "kind": {
+                    "const": "scene-enter",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "kind"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "command": {
+                    "enum": [
+                      "next",
+                      "previous"
+                    ],
+                    "type": "string"
+                  },
+                  "kind": {
+                    "const": "presenter",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "command"
+                ],
+                "type": "object"
+              }
+            ]
+          },
+          "when": {
+            "additionalProperties": false,
+            "properties": {
+              "courseState": {
+                "anyOf": [
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "exists": {
+                        "type": "boolean"
+                      },
+                      "key": {
+                        "$ref": "#/$defs/__schema1"
+                      }
+                    },
+                    "required": [
+                      "key",
+                      "exists"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "key": {
+                        "$ref": "#/$defs/__schema1"
+                      },
+                      "operator": {
+                        "$ref": "#/$defs/__schema2"
+                      },
+                      "value": {
+                        "$ref": "#/$defs/__schema3"
+                      }
+                    },
+                    "required": [
+                      "key",
+                      "operator",
+                      "value"
+                    ],
+                    "type": "object"
+                  }
+                ]
+              }
+            },
+            "type": "object"
+          }
+        },
+        "required": [
+          "operation",
+          "trigger",
+          "effects"
+        ],
+        "type": "object"
+      },
       {
         "additionalProperties": false,
         "properties": {
@@ -40,7 +1514,7 @@
             "type": "string"
           },
           "rule": {
-            "$ref": "#/$defs/__schema0"
+            "$ref": "#/$defs/__schema8"
           }
         },
         "required": [
@@ -57,7 +1531,7 @@
             "type": "string"
           },
           "rule": {
-            "$ref": "#/$defs/__schema0"
+            "$ref": "#/$defs/__schema8"
           }
         },
         "required": [
@@ -84,1120 +1558,17 @@
   "invocation": "Builder: await session.execute(tool,input,destination)。input 遵循本卡完整 Schema；destination 原样使用当前 observe/createScope 的目标；只以 committed receipt 判定成功。",
   "name": "slide.interaction",
   "recovery": "invalid-input: 按本卡 Schema 修正字段；revision-conflict: 重新 observe 后复制新 target 和源码基线；tool-failed: 读取 diagnostics 修复所指输入/资源/宿主条件，失败不代表已提交。",
-  "references": {
-    "ruleWithId": {
-      "$defs": {
-        "__schema0": {
-          "maxLength": 200,
-          "minLength": 1,
-          "type": "string"
-        },
-        "__schema1": {
-          "maxLength": 80,
-          "minLength": 1,
-          "type": "string"
-        },
-        "__schema10": {
-          "const": "scene.in",
-          "type": "string"
-        },
-        "__schema11": {
-          "items": {
-            "$ref": "#/$defs/__schema0"
-          },
-          "maxItems": 1000,
-          "minItems": 1,
-          "type": "array"
-        },
-        "__schema12": {
-          "maxLength": 240,
-          "minLength": 1,
-          "type": "string"
-        },
-        "__schema13": {
-          "anyOf": [
-            {
-              "type": "boolean"
-            },
-            {
-              "type": "number"
-            },
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "__schema14": {
-          "items": {
-            "$ref": "#/$defs/__schema15"
-          },
-          "maxItems": 32,
-          "minItems": 1,
-          "type": "array"
-        },
-        "__schema15": {
-          "additionalProperties": false,
-          "properties": {
-            "action": {
-              "anyOf": [
-                {
-                  "oneOf": [
-                    {
-                      "additionalProperties": false,
-                      "properties": {
-                        "stateId": {
-                          "$ref": "#/$defs/__schema0"
-                        },
-                        "transition": {
-                          "additionalProperties": false,
-                          "properties": {
-                            "duration": {
-                              "maximum": 10000,
-                              "minimum": 0,
-                              "type": "number"
-                            },
-                            "ease": {
-                              "maxLength": 80,
-                              "minLength": 1,
-                              "type": "string"
-                            }
-                          },
-                          "type": "object"
-                        },
-                        "type": {
-                          "const": "presentation.set",
-                          "type": "string"
-                        }
-                      },
-                      "required": [
-                        "type",
-                        "stateId"
-                      ],
-                      "type": "object"
-                    },
-                    {
-                      "additionalProperties": false,
-                      "properties": {
-                        "sceneId": {
-                          "$ref": "#/$defs/__schema0"
-                        },
-                        "targetStateId": {
-                          "$ref": "#/$defs/__schema0"
-                        },
-                        "type": {
-                          "const": "scene.go",
-                          "type": "string"
-                        }
-                      },
-                      "required": [
-                        "type",
-                        "sceneId"
-                      ],
-                      "type": "object"
-                    },
-                    {
-                      "additionalProperties": false,
-                      "properties": {
-                        "type": {
-                          "const": "step.next",
-                          "type": "string"
-                        }
-                      },
-                      "required": [
-                        "type"
-                      ],
-                      "type": "object"
-                    },
-                    {
-                      "additionalProperties": false,
-                      "properties": {
-                        "type": {
-                          "const": "step.previous",
-                          "type": "string"
-                        }
-                      },
-                      "required": [
-                        "type"
-                      ],
-                      "type": "object"
-                    },
-                    {
-                      "additionalProperties": false,
-                      "properties": {
-                        "type": {
-                          "const": "scene.next",
-                          "type": "string"
-                        }
-                      },
-                      "required": [
-                        "type"
-                      ],
-                      "type": "object"
-                    },
-                    {
-                      "additionalProperties": false,
-                      "properties": {
-                        "type": {
-                          "const": "scene.previous",
-                          "type": "string"
-                        }
-                      },
-                      "required": [
-                        "type"
-                      ],
-                      "type": "object"
-                    },
-                    {
-                      "additionalProperties": false,
-                      "properties": {
-                        "type": {
-                          "const": "scene.replay",
-                          "type": "string"
-                        }
-                      },
-                      "required": [
-                        "type"
-                      ],
-                      "type": "object"
-                    },
-                    {
-                      "additionalProperties": false,
-                      "properties": {
-                        "type": {
-                          "const": "course.restart",
-                          "type": "string"
-                        }
-                      },
-                      "required": [
-                        "type"
-                      ],
-                      "type": "object"
-                    },
-                    {
-                      "additionalProperties": false,
-                      "properties": {
-                        "key": {
-                          "$ref": "#/$defs/__schema12"
-                        },
-                        "type": {
-                          "const": "course-state.set",
-                          "type": "string"
-                        },
-                        "value": {
-                          "$ref": "#/$defs/__schema13"
-                        }
-                      },
-                      "required": [
-                        "type",
-                        "key",
-                        "value"
-                      ],
-                      "type": "object"
-                    },
-                    {
-                      "additionalProperties": false,
-                      "properties": {
-                        "fadeInMs": {
-                          "$ref": "#/$defs/__schema16"
-                        },
-                        "ifPlaying": {
-                          "enum": [
-                            "restart",
-                            "continue",
-                            "ignore"
-                          ],
-                          "type": "string"
-                        },
-                        "lifetime": {
-                          "enum": [
-                            "scene",
-                            "course"
-                          ],
-                          "type": "string"
-                        },
-                        "loop": {
-                          "type": "boolean"
-                        },
-                        "soundId": {
-                          "$ref": "#/$defs/__schema0"
-                        },
-                        "type": {
-                          "const": "audio.play",
-                          "type": "string"
-                        },
-                        "volume": {
-                          "maximum": 1,
-                          "minimum": 0,
-                          "type": "number"
-                        }
-                      },
-                      "required": [
-                        "type",
-                        "soundId"
-                      ],
-                      "type": "object"
-                    },
-                    {
-                      "additionalProperties": false,
-                      "properties": {
-                        "fadeOutMs": {
-                          "$ref": "#/$defs/__schema16"
-                        },
-                        "target": {
-                          "$ref": "#/$defs/__schema17"
-                        },
-                        "type": {
-                          "const": "audio.pause",
-                          "type": "string"
-                        }
-                      },
-                      "required": [
-                        "type",
-                        "target"
-                      ],
-                      "type": "object"
-                    },
-                    {
-                      "additionalProperties": false,
-                      "properties": {
-                        "fadeInMs": {
-                          "$ref": "#/$defs/__schema16"
-                        },
-                        "target": {
-                          "$ref": "#/$defs/__schema17"
-                        },
-                        "type": {
-                          "const": "audio.resume",
-                          "type": "string"
-                        }
-                      },
-                      "required": [
-                        "type",
-                        "target"
-                      ],
-                      "type": "object"
-                    },
-                    {
-                      "additionalProperties": false,
-                      "properties": {
-                        "fadeOutMs": {
-                          "$ref": "#/$defs/__schema16"
-                        },
-                        "target": {
-                          "$ref": "#/$defs/__schema17"
-                        },
-                        "type": {
-                          "const": "audio.stop",
-                          "type": "string"
-                        }
-                      },
-                      "required": [
-                        "type",
-                        "target"
-                      ],
-                      "type": "object"
-                    },
-                    {
-                      "additionalProperties": false,
-                      "properties": {
-                        "target": {
-                          "$ref": "#/$defs/__schema17"
-                        },
-                        "type": {
-                          "const": "audio.toggle-mute",
-                          "type": "string"
-                        }
-                      },
-                      "required": [
-                        "type",
-                        "target"
-                      ],
-                      "type": "object"
-                    },
-                    {
-                      "additionalProperties": false,
-                      "properties": {
-                        "nodeId": {
-                          "$ref": "#/$defs/__schema0"
-                        },
-                        "type": {
-                          "const": "video.play",
-                          "type": "string"
-                        }
-                      },
-                      "required": [
-                        "type",
-                        "nodeId"
-                      ],
-                      "type": "object"
-                    },
-                    {
-                      "additionalProperties": false,
-                      "properties": {
-                        "nodeId": {
-                          "$ref": "#/$defs/__schema0"
-                        },
-                        "type": {
-                          "const": "video.pause",
-                          "type": "string"
-                        }
-                      },
-                      "required": [
-                        "type",
-                        "nodeId"
-                      ],
-                      "type": "object"
-                    },
-                    {
-                      "additionalProperties": false,
-                      "properties": {
-                        "nodeId": {
-                          "$ref": "#/$defs/__schema0"
-                        },
-                        "type": {
-                          "const": "video.restart",
-                          "type": "string"
-                        }
-                      },
-                      "required": [
-                        "type",
-                        "nodeId"
-                      ],
-                      "type": "object"
-                    },
-                    {
-                      "additionalProperties": false,
-                      "properties": {
-                        "nodeId": {
-                          "$ref": "#/$defs/__schema0"
-                        },
-                        "type": {
-                          "const": "video.stop",
-                          "type": "string"
-                        }
-                      },
-                      "required": [
-                        "type",
-                        "nodeId"
-                      ],
-                      "type": "object"
-                    },
-                    {
-                      "additionalProperties": false,
-                      "properties": {
-                        "nodeId": {
-                          "$ref": "#/$defs/__schema0"
-                        },
-                        "type": {
-                          "const": "video.toggle",
-                          "type": "string"
-                        }
-                      },
-                      "required": [
-                        "type",
-                        "nodeId"
-                      ],
-                      "type": "object"
-                    },
-                    {
-                      "additionalProperties": false,
-                      "properties": {
-                        "nodeId": {
-                          "$ref": "#/$defs/__schema0"
-                        },
-                        "seconds": {
-                          "$ref": "#/$defs/__schema5"
-                        },
-                        "type": {
-                          "const": "video.seek",
-                          "type": "string"
-                        }
-                      },
-                      "required": [
-                        "type",
-                        "nodeId",
-                        "seconds"
-                      ],
-                      "type": "object"
-                    }
-                  ]
-                },
-                {
-                  "anyOf": [
-                    {
-                      "anyOf": [
-                        {
-                          "additionalProperties": false,
-                          "properties": {
-                            "direction": {
-                              "enum": [
-                                "left",
-                                "right",
-                                "up",
-                                "down"
-                              ],
-                              "type": "string"
-                            },
-                            "durationMs": {
-                              "$ref": "#/$defs/__schema16"
-                            },
-                            "easing": {
-                              "$ref": "#/$defs/__schema18"
-                            },
-                            "effect": {
-                              "const": "slide",
-                              "type": "string"
-                            },
-                            "nodeId": {
-                              "$ref": "#/$defs/__schema0"
-                            },
-                            "type": {
-                              "const": "node.enter",
-                              "type": "string"
-                            }
-                          },
-                          "required": [
-                            "type",
-                            "nodeId",
-                            "durationMs",
-                            "easing",
-                            "effect",
-                            "direction"
-                          ],
-                          "type": "object"
-                        },
-                        {
-                          "additionalProperties": false,
-                          "properties": {
-                            "durationMs": {
-                              "$ref": "#/$defs/__schema16"
-                            },
-                            "easing": {
-                              "$ref": "#/$defs/__schema18"
-                            },
-                            "effect": {
-                              "enum": [
-                                "none",
-                                "fade",
-                                "scale"
-                              ],
-                              "type": "string"
-                            },
-                            "nodeId": {
-                              "$ref": "#/$defs/__schema0"
-                            },
-                            "type": {
-                              "const": "node.enter",
-                              "type": "string"
-                            }
-                          },
-                          "required": [
-                            "type",
-                            "nodeId",
-                            "durationMs",
-                            "easing",
-                            "effect"
-                          ],
-                          "type": "object"
-                        }
-                      ]
-                    },
-                    {
-                      "anyOf": [
-                        {
-                          "additionalProperties": false,
-                          "properties": {
-                            "direction": {
-                              "enum": [
-                                "left",
-                                "right",
-                                "up",
-                                "down"
-                              ],
-                              "type": "string"
-                            },
-                            "durationMs": {
-                              "$ref": "#/$defs/__schema16"
-                            },
-                            "easing": {
-                              "$ref": "#/$defs/__schema18"
-                            },
-                            "effect": {
-                              "const": "slide",
-                              "type": "string"
-                            },
-                            "nodeId": {
-                              "$ref": "#/$defs/__schema0"
-                            },
-                            "type": {
-                              "const": "node.exit",
-                              "type": "string"
-                            }
-                          },
-                          "required": [
-                            "type",
-                            "nodeId",
-                            "durationMs",
-                            "easing",
-                            "effect",
-                            "direction"
-                          ],
-                          "type": "object"
-                        },
-                        {
-                          "additionalProperties": false,
-                          "properties": {
-                            "durationMs": {
-                              "$ref": "#/$defs/__schema16"
-                            },
-                            "easing": {
-                              "$ref": "#/$defs/__schema18"
-                            },
-                            "effect": {
-                              "enum": [
-                                "none",
-                                "fade",
-                                "scale"
-                              ],
-                              "type": "string"
-                            },
-                            "nodeId": {
-                              "$ref": "#/$defs/__schema0"
-                            },
-                            "type": {
-                              "const": "node.exit",
-                              "type": "string"
-                            }
-                          },
-                          "required": [
-                            "type",
-                            "nodeId",
-                            "durationMs",
-                            "easing",
-                            "effect"
-                          ],
-                          "type": "object"
-                        }
-                      ]
-                    }
-                  ]
-                }
-              ]
-            },
-            "delayMs": {
-              "$ref": "#/$defs/__schema16"
-            },
-            "id": {
-              "$ref": "#/$defs/__schema0"
-            },
-            "start": {
-              "enum": [
-                "after-previous",
-                "with-previous"
-              ],
-              "type": "string"
-            }
-          },
-          "required": [
-            "id",
-            "start",
-            "delayMs",
-            "action"
-          ],
-          "type": "object"
-        },
-        "__schema16": {
-          "maximum": 60000,
-          "minimum": 0,
-          "type": "number"
-        },
-        "__schema17": {
-          "oneOf": [
-            {
-              "additionalProperties": false,
-              "properties": {
-                "kind": {
-                  "const": "sound",
-                  "type": "string"
-                },
-                "soundId": {
-                  "$ref": "#/$defs/__schema0"
-                }
-              },
-              "required": [
-                "kind",
-                "soundId"
-              ],
-              "type": "object"
-            },
-            {
-              "additionalProperties": false,
-              "properties": {
-                "channel": {
-                  "enum": [
-                    "music",
-                    "narration",
-                    "sfx",
-                    "ui"
-                  ],
-                  "type": "string"
-                },
-                "kind": {
-                  "const": "channel",
-                  "type": "string"
-                }
-              },
-              "required": [
-                "kind",
-                "channel"
-              ],
-              "type": "object"
-            },
-            {
-              "additionalProperties": false,
-              "properties": {
-                "kind": {
-                  "const": "all",
-                  "type": "string"
-                }
-              },
-              "required": [
-                "kind"
-              ],
-              "type": "object"
-            }
-          ]
-        },
-        "__schema18": {
-          "enum": [
-            "linear",
-            "ease-in",
-            "ease-out",
-            "ease-in-out"
-          ],
-          "type": "string"
-        },
-        "__schema2": {
-          "type": "boolean"
-        },
-        "__schema3": {
-          "oneOf": [
-            {
-              "additionalProperties": false,
-              "properties": {
-                "nodeId": {
-                  "$ref": "#/$defs/__schema0"
-                },
-                "type": {
-                  "const": "node.click",
-                  "type": "string"
-                }
-              },
-              "required": [
-                "type",
-                "nodeId"
-              ],
-              "type": "object"
-            },
-            {
-              "additionalProperties": false,
-              "properties": {
-                "type": {
-                  "const": "scene.enter",
-                  "type": "string"
-                }
-              },
-              "required": [
-                "type"
-              ],
-              "type": "object"
-            },
-            {
-              "additionalProperties": false,
-              "properties": {
-                "stateId": {
-                  "$ref": "#/$defs/__schema0"
-                },
-                "type": {
-                  "const": "presentation.enter",
-                  "type": "string"
-                }
-              },
-              "required": [
-                "type",
-                "stateId"
-              ],
-              "type": "object"
-            },
-            {
-              "additionalProperties": false,
-              "properties": {
-                "eventName": {
-                  "$ref": "#/$defs/__schema4"
-                },
-                "nodeId": {
-                  "$ref": "#/$defs/__schema0"
-                },
-                "type": {
-                  "const": "component.event",
-                  "type": "string"
-                }
-              },
-              "required": [
-                "type",
-                "nodeId",
-                "eventName"
-              ],
-              "type": "object"
-            },
-            {
-              "additionalProperties": false,
-              "properties": {
-                "eventName": {
-                  "$ref": "#/$defs/__schema4"
-                },
-                "scope": {
-                  "enum": [
-                    "scene",
-                    "global"
-                  ],
-                  "type": "string"
-                },
-                "type": {
-                  "const": "runtime.event",
-                  "type": "string"
-                }
-              },
-              "required": [
-                "type",
-                "scope",
-                "eventName"
-              ],
-              "type": "object"
-            },
-            {
-              "additionalProperties": false,
-              "properties": {
-                "soundId": {
-                  "$ref": "#/$defs/__schema0"
-                },
-                "type": {
-                  "const": "audio.ended",
-                  "type": "string"
-                }
-              },
-              "required": [
-                "type",
-                "soundId"
-              ],
-              "type": "object"
-            },
-            {
-              "additionalProperties": false,
-              "properties": {
-                "nodeId": {
-                  "$ref": "#/$defs/__schema0"
-                },
-                "type": {
-                  "const": "video.started",
-                  "type": "string"
-                }
-              },
-              "required": [
-                "type",
-                "nodeId"
-              ],
-              "type": "object"
-            },
-            {
-              "additionalProperties": false,
-              "properties": {
-                "nodeId": {
-                  "$ref": "#/$defs/__schema0"
-                },
-                "type": {
-                  "const": "video.paused",
-                  "type": "string"
-                }
-              },
-              "required": [
-                "type",
-                "nodeId"
-              ],
-              "type": "object"
-            },
-            {
-              "additionalProperties": false,
-              "properties": {
-                "nodeId": {
-                  "$ref": "#/$defs/__schema0"
-                },
-                "type": {
-                  "const": "video.ended",
-                  "type": "string"
-                }
-              },
-              "required": [
-                "type",
-                "nodeId"
-              ],
-              "type": "object"
-            },
-            {
-              "additionalProperties": false,
-              "properties": {
-                "nodeId": {
-                  "$ref": "#/$defs/__schema0"
-                },
-                "seconds": {
-                  "$ref": "#/$defs/__schema5"
-                },
-                "type": {
-                  "const": "video.time",
-                  "type": "string"
-                }
-              },
-              "required": [
-                "type",
-                "nodeId",
-                "seconds"
-              ],
-              "type": "object"
-            },
-            {
-              "additionalProperties": false,
-              "properties": {
-                "nodeId": {
-                  "$ref": "#/$defs/__schema0"
-                },
-                "type": {
-                  "const": "node.activated",
-                  "type": "string"
-                }
-              },
-              "required": [
-                "type",
-                "nodeId"
-              ],
-              "type": "object"
-            },
-            {
-              "additionalProperties": false,
-              "properties": {
-                "actionId": {
-                  "$ref": "#/$defs/__schema0"
-                },
-                "type": {
-                  "const": "animation.completed",
-                  "type": "string"
-                }
-              },
-              "required": [
-                "type",
-                "actionId"
-              ],
-              "type": "object"
-            },
-            {
-              "additionalProperties": false,
-              "properties": {
-                "command": {
-                  "enum": [
-                    "next",
-                    "previous"
-                  ],
-                  "type": "string"
-                },
-                "type": {
-                  "const": "presenter.command",
-                  "type": "string"
-                }
-              },
-              "required": [
-                "type",
-                "command"
-              ],
-              "type": "object"
-            },
-            {
-              "additionalProperties": false,
-              "properties": {
-                "nodeId": {
-                  "$ref": "#/$defs/__schema0"
-                },
-                "type": {
-                  "const": "input.submit",
-                  "type": "string"
-                }
-              },
-              "required": [
-                "type",
-                "nodeId"
-              ],
-              "type": "object"
-            }
-          ]
-        },
-        "__schema4": {
-          "maxLength": 160,
-          "minLength": 1,
-          "type": "string"
-        },
-        "__schema5": {
-          "maximum": 604800,
-          "minimum": 0,
-          "type": "number"
-        },
-        "__schema6": {
-          "items": {
-            "$ref": "#/$defs/__schema7"
-          },
-          "maxItems": 16,
-          "type": "array"
-        },
-        "__schema7": {
-          "anyOf": [
-            {
-              "additionalProperties": false,
-              "properties": {
-                "stateIds": {
-                  "$ref": "#/$defs/__schema9"
-                },
-                "type": {
-                  "$ref": "#/$defs/__schema8"
-                }
-              },
-              "required": [
-                "type",
-                "stateIds"
-              ],
-              "type": "object"
-            },
-            {
-              "additionalProperties": false,
-              "properties": {
-                "sceneIds": {
-                  "$ref": "#/$defs/__schema11"
-                },
-                "type": {
-                  "$ref": "#/$defs/__schema10"
-                }
-              },
-              "required": [
-                "type",
-                "sceneIds"
-              ],
-              "type": "object"
-            },
-            {
-              "additionalProperties": false,
-              "properties": {
-                "exists": {
-                  "type": "boolean"
-                },
-                "key": {
-                  "$ref": "#/$defs/__schema12"
-                },
-                "type": {
-                  "const": "course-state.exists",
-                  "type": "string"
-                }
-              },
-              "required": [
-                "type",
-                "key",
-                "exists"
-              ],
-              "type": "object"
-            },
-            {
-              "additionalProperties": false,
-              "properties": {
-                "key": {
-                  "$ref": "#/$defs/__schema12"
-                },
-                "operator": {
-                  "enum": [
-                    "eq",
-                    "neq",
-                    "gt",
-                    "gte",
-                    "lt",
-                    "lte"
-                  ],
-                  "type": "string"
-                },
-                "type": {
-                  "const": "course-state.compare",
-                  "type": "string"
-                },
-                "value": {
-                  "$ref": "#/$defs/__schema13"
-                }
-              },
-              "required": [
-                "type",
-                "key",
-                "operator",
-                "value"
-              ],
-              "type": "object"
-            }
-          ]
-        },
-        "__schema8": {
-          "const": "presentation.in",
-          "type": "string"
-        },
-        "__schema9": {
-          "items": {
-            "$ref": "#/$defs/__schema0"
-          },
-          "maxItems": 256,
-          "minItems": 1,
-          "type": "array"
-        }
-      },
-      "$schema": "https://json-schema.org/draft/2020-12/schema",
-      "additionalProperties": false,
-      "properties": {
-        "actions": {
-          "$ref": "#/$defs/__schema14"
-        },
-        "conditions": {
-          "$ref": "#/$defs/__schema6"
-        },
-        "enabled": {
-          "$ref": "#/$defs/__schema2"
-        },
-        "id": {
-          "$ref": "#/$defs/__schema0"
-        },
-        "name": {
-          "$ref": "#/$defs/__schema1"
-        },
-        "trigger": {
-          "$ref": "#/$defs/__schema3"
-        }
-      },
-      "required": [
-        "id",
-        "enabled",
-        "trigger",
-        "conditions",
-        "actions"
-      ],
-      "type": "object"
-    }
-  },
   "support": "conditional-on-input-target-resources-and-host",
   "supportedScopes": [
     "slide:scene"
   ],
   "variants": [
+    {
+      "operation": "compose",
+      "scopes": [
+        "slide:scene"
+      ]
+    },
     {
       "operation": "insert",
       "scopes": [

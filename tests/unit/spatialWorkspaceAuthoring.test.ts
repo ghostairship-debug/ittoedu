@@ -506,19 +506,19 @@ describe('Spatial world authoring adapter', () => {
     )?.layerItemId).toBe('global-hud')
 
     const inertDown = controller.pointerDown({ x: overlap.x, y: overlap.y }, VIEWPORT)
-    expect(host.session().scope).toBe('world')
-    expect(inertDown.hit?.nativeType).not.toBe('teacher-controller')
+    expect(host.session().scope).toBe('global')
+    expect(inertDown.hit?.layerItemId).toBe('global-teacher-controller')
     controller.pointerUp({ x: overlap.x, y: overlap.y }, VIEWPORT)
 
     enterGlobal(host)
     const down = controller.pointerDown({ x: overlap.x, y: overlap.y }, VIEWPORT)
     expect(down.hit?.layerItemId).toBe('global-teacher-controller')
     expect(down.hit?.coordinateSpace).toBe('viewport')
-    expect(down.hit?.nativeType).toBe('teacher-controller')
+    expect(down.hit?.kind).toBe('component')
     expect(down.targets?.[0]?.authoringAddress).toBe(makeAuthoringAddress({
       projectId: 'r5b-spatial-world',
       scope: 'global',
-      carrier: 'native',
+      carrier: 'component',
       layerItemId: 'global-teacher-controller',
       field: 'item',
     }))

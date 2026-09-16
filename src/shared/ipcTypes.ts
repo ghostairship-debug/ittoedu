@@ -24,6 +24,7 @@ export interface ConfirmProjectOpenInput {
 }
 
 export interface SaveBinaryFileInput {
+  suggestedDirectory?: string
   path?: string
   suggestedName: string
   bytes: Uint8Array
@@ -93,6 +94,12 @@ export interface PreviewNetworkPolicyInput {
 }
 
 export interface DesktopAPI {
+  lessonDocumentAi?: import('./lessonDocumentAiTask').LessonDocumentAiAPI
+  lessonAuthoring?(input: import('./lessonAuthoringDesktop').LessonAuthoringDesktopRequest): Promise<import('./lessonAuthoringDesktop').LessonAuthoringDesktopResult>
+  flowDocumentRecovery?: import('./flowDocumentRecovery').FlowDocumentRecoveryAPI
+  lessonMaterials?: import('./lessonMaterialDesktop').LessonMaterialDesktopAPI
+  lessonFiles?: import('./lessonDocumentDesktop').LessonDocumentDesktopAPI
+  lesson?(input: import('./lessonDesktopContract').LessonDesktopRequest): Promise<import('./lessonDesktopContract').LessonDesktopResult>
   legacyPpt(input: { operation: 'select' | 'cancel' }): Promise<LegacyPptImportResult | null>
   localAgent(input: LocalAgentRequest): Promise<LocalAgentResponse>
   captureAuthoringObservation?(input: { x: number; y: number; width: number; height: number }): Promise<{ dataUrl: string; capturedAt: number; width: number; height: number }>
@@ -148,6 +155,7 @@ export interface DesktopAPI {
   confirmDiscardChanges(): Promise<'discard' | 'cancel'>
   setDirtyState(dirty: boolean): Promise<void>
   onRequestSave(handler: () => void): () => void
+  onRequestPreserveAndClose?(handler: () => Promise<boolean>): () => void
   onRequestSaveAndClose(handler: () => Promise<boolean>): () => void
   reportDiagnostic(input: {
     source: 'renderer' | 'preview' | 'component'
@@ -158,6 +166,12 @@ export interface DesktopAPI {
 }
 
 export const IPC_CHANNELS = {
+  lessonAuthoring: 'lesson-authoring:operate',
+  lessonDocumentAi: 'lesson-document-ai:operate',
+  flowDocumentRecovery: 'flow-document-recovery:operate',
+  lessonMaterial: 'lesson-material:operate',
+  lessonDocument: 'lesson-document:operate',
+  lesson: 'lesson:operate',
   materials: 'materials:operate',
   localAgent: 'local-agent:operate',
   captureAuthoringObservation: 'local-agent:capture-observation',
@@ -195,6 +209,8 @@ export const IPC_CHANNELS = {
   dirtyState: 'app:dirty-state',
   requestSave: 'app:request-save',
   requestSaveAndClose: 'app:request-save-and-close',
+  requestPreserveAndClose: 'app:request-preserve-and-close',
+  preserveAndCloseResult: 'app:preserve-and-close-result',
   saveAndCloseResult: 'app:save-and-close-result',
   reportDiagnostic: 'diagnostics:report',
   exportDiagnostics: 'diagnostics:export',

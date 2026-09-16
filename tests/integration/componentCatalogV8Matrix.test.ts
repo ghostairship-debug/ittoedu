@@ -248,8 +248,8 @@ catalogDescribe('四组件 Course Project V9 编辑、归档与生命周期矩�
     )
 
     expect(reopened.project.schemaVersion).toBe(9)
-    expect(Object.keys(reopened.project.componentPackages)).toHaveLength(expectedPackageCount)
-    expect(Object.keys(restoredPackages)).toHaveLength(expectedPackageCount)
+    expect(Object.keys(reopened.project.componentPackages).filter(id => id !== 'com.ittoedu.teacher-controller')).toHaveLength(expectedPackageCount)
+    expect(Object.keys(restoredPackages).filter(id => id !== 'com.ittoedu.teacher-controller')).toHaveLength(expectedPackageCount)
     for (const component of packages) {
       const metadata = reopened.project.componentPackages[component.manifest.id]
       expect(metadata).toMatchObject({

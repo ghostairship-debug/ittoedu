@@ -8,7 +8,7 @@ import { build } from 'esbuild'
 import { describeAuthoringToolDiscovery } from '../src/renderer/authoring/tools/authoringToolFacade'
 import { describeGenerationSemanticTools, generationProjectDocumentWireInputSchema } from '../src/shared/generationContract'
 import { courseAgentSkills, courseAgentSkillMarkdown } from '../src/shared/courseAgentSkills'
-import { courseAgentCapabilityQueryHelp, type CourseAgentCapabilityData, type CourseAgentCapabilityEntry } from '../src/shared/courseAgentCapabilities'
+import { courseAgentCapabilityDiskIndex, courseAgentCapabilityQueryHelp, type CourseAgentCapabilityData, type CourseAgentCapabilityEntry } from '../src/shared/courseAgentCapabilities'
 import packageJson from '../package.json'
 import { importComponentPackage } from '../src/renderer/components/importComponentPackage'
 import { BUILT_IN_COMPONENT_CATALOG_SHA256 } from '../src/shared/builtInComponentCatalog'
@@ -310,6 +310,7 @@ export interface AiCapabilityGenerationOptions {
 
 export interface AiCapabilityGenerationResult {
   files: ReadonlyMap<string, string>
+  capabilityBundle: string
   indexBytes: number
   componentCatalogStatus: ComponentCatalogCapabilitySnapshot['status']
 }
@@ -959,13 +960,15 @@ async function addDiscoveryArtifacts(projectRoot: string, files: Map<string, str
   }
   resources.set('query-core.mjs', stripTypeScriptTypes(await fs.readFile(path.join(projectRoot, 'src/shared/courseAgentCapabilities.ts'), 'utf8')).split('\n').map(line => line.trimEnd()).join('\n'))
   const helper = await build({ entryPoints: [path.join(projectRoot, 'scripts/candidate-helper.ts')], bundle: true, write: false,
-    format: 'esm', platform: 'node', target: 'node20', minify: true, legalComments: 'none' })
+    format: 'esm', platform: 'node', target: 'node20', minify: false, legalComments: 'none' })
   resources.set('candidate-helper-core.mjs', helper.outputFiles[0]!.text)
   resources.set('candidate-helper.mjs', '// Run: node candidate-helper.mjs --request <request.json> --input <draft.json> [--check]\n// Draft: {summary,steps,afterCommit?}; IDs and version come from the request.\n// Precheck is not host commit. Keep native cwd; use absolute paths.\nimport "./candidate-helper-core.mjs";\n')
   resources.set('query.mjs', [
     "import {readFile} from 'node:fs/promises';",
+    "import {readFileSync} from 'node:fs';",
     `import {runCourseAgentCapabilityQuery} from ${JSON.stringify("./query-core.mjs")};`,
     "const data=JSON.parse(await readFile(new URL('./discovery-data.json',import.meta.url),'utf8'));",
+    "data.files=new Proxy({}, {get:(_target,name)=>typeof name==='string' && data.resourcePaths.includes(name) ? readFileSync(new URL(name,import.meta.url),'utf8') : undefined});",
     "try {const result=runCourseAgentCapabilityQuery(data,process.argv.slice(2));console.log(typeof result==='string'?result:JSON.stringify(result,null,2));}catch(error){console.error(error.message);process.exitCode=1;}",
   ].join('\n') + '\n')
   entries.sort((a, b) => a.id.localeCompare(b.id, 'en'))
@@ -983,7 +986,8 @@ async function addDiscoveryArtifacts(projectRoot: string, files: Map<string, str
   resources.set('discovery.json', discoveryText)
   const data: CourseAgentCapabilityData = { version: 1, semanticVersion, entries, files: Object.fromEntries(resources) }
   for (const [location, content] of resources) files.set(location, content)
-  files.set('discovery-data.json', canonicalJson(data))
+  files.set('discovery-data.json', courseAgentCapabilityDiskIndex(data))
+  return canonicalJson(data)
 }
 
 export async function generateAiCapabilityArtifacts(
@@ -1717,7 +1721,7 @@ export async function generateAiCapabilityArtifacts(
   }
   assertIndexWithinLimit(index)
   files.set('index.json', canonicalJson(index))
-  await addDiscoveryArtifacts(projectRoot, files, componentCatalogSnapshot)
+  const capabilityBundle = await addDiscoveryArtifacts(projectRoot, files, componentCatalogSnapshot)
 
   const indexedOutput = new Map(files)
   files.set('generation-evidence.json', canonicalJson({
@@ -1762,6 +1766,7 @@ export async function generateAiCapabilityArtifacts(
 
   return {
     files,
+    capabilityBundle,
     indexBytes: Buffer.byteLength(files.get('index.json')!, 'utf8'),
     componentCatalogStatus: componentCatalogSnapshot.status,
   }
@@ -1895,7 +1900,7 @@ async function main(): Promise<void> {
     await checkAiCapabilityArtifacts(options.outputRoot, generated)
     if (options.outputRoot === path.join(options.projectRoot, 'artifacts', 'ai-capabilities')) {
       const bundle = await fs.readFile(path.join(options.projectRoot, 'src/shared/generated/courseAgentCapabilities.json'), 'utf8').catch(() => '')
-      if (bundle !== generated.files.get('discovery-data.json')) throw new Error('打包能力资源过期，请运行 generate:ai-capabilities')
+      if (bundle !== generated.capabilityBundle) throw new Error('打包能力资源过期，请运行 generate:ai-capabilities')
     }
     console.log(
       `AI 能力清单已是最新状态；索引 ${generated.indexBytes} / ${AI_CAPABILITY_INDEX_MAX_BYTES} 字节，组件目录 ${generated.componentCatalogStatus}。`,
@@ -1906,7 +1911,7 @@ async function main(): Promise<void> {
   if (options.outputRoot === path.join(options.projectRoot, 'artifacts', 'ai-capabilities')) {
     const target = path.join(options.projectRoot, 'src/shared/generated/courseAgentCapabilities.json')
     await fs.mkdir(path.dirname(target), { recursive: true })
-    await fs.writeFile(target, generated.files.get('discovery-data.json')!, 'utf8')
+    await fs.writeFile(target, generated.capabilityBundle, 'utf8')
   }
   console.log(
     `已生成 ${generated.files.size} 个 AI 能力文件；索引 ${generated.indexBytes} / ${AI_CAPABILITY_INDEX_MAX_BYTES} 字节，组件目录 ${generated.componentCatalogStatus}。`,

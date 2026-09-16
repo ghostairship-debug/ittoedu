@@ -91,9 +91,9 @@ describe('Course Project Validation DiagnosticTarget V1', () => {
       blocks: [{
         id: 'flow-section',
         type: 'section',
-        title: '诊断小节',
+        title: { inlines: [{ type: 'text', text: '诊断小节' }] },
         collapsedByDefault: false,
-        blocks: [{ id: 'flow-section-note', type: 'paragraph', text: '嵌套正文' }],
+        blocks: [{ id: 'flow-section-note', type: 'paragraph', content: { inlines: [{ type: 'text', text: '嵌套正文' }] } }],
       }],
     })
 
@@ -255,6 +255,7 @@ describe('Course Project Validation DiagnosticTarget V1', () => {
       'component-package-source-missing',
       'component-package-unused',
       'component-thumbnail-missing',
+      'controller-button-id-duplicate',
       'controller-required-for-canvas',
       'controller-scene-target-missing',
       'controller-state-target-missing',

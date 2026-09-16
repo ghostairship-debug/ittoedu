@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest'
+import { z } from 'zod'
 import {
   inputSubmitTriggerSchema,
   interactionRuleSchema,
+  interactionRuleContentSchema,
   parseSceneInteractions,
   sceneInteractionsSchema,
 } from '@/shared/interactionSchema'
@@ -43,6 +45,19 @@ function rule(
 }
 
 describe('interaction schema', () => {
+  it('exposes exact authoring fields while sharing canonical action validation', () => {
+    const { id, ...content } = rule()
+    expect(interactionRuleContentSchema.parse(content)).toEqual(content)
+    expect(interactionRuleContentSchema.safeParse({ id, ...content }).success).toBe(false)
+    const schema = z.toJSONSchema(interactionRuleContentSchema)
+    expect(Object.keys(schema.properties!)).toEqual(['name', 'enabled', 'trigger', 'conditions', 'actions'])
+    expect(schema.additionalProperties).toBe(false)
+    const missingActionId = { ...content, actions: content.actions.map(({ id: _id, ...action }) => action) }
+    expect(interactionRuleContentSchema.safeParse(missingActionId).success).toBe(false)
+    const wrongFirstAction = { ...content, actions: [{ ...content.actions[0], start: 'with-previous' }] }
+    expect(interactionRuleContentSchema.safeParse(wrongFirstAction).success).toBe(false)
+    expect(interactionRuleSchema.safeParse({ id, ...wrongFirstAction }).success).toBe(false)
+  })
   it('accepts strict course-state conditions and a non-terminal typed set action', () => {
     const key = 'k'.repeat(240)
     const candidate = rule(undefined, steps([
@@ -304,4 +319,3 @@ describe('interaction schema', () => {
     }).success).toBe(false)
   })
 })
-

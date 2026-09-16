@@ -10,7 +10,8 @@ import type {
   SlideSceneDocument,
 } from '../courseProjectTypes'
 import {
-  isPublishedInteractionActionSupported,
+  isPublishedInteractionActionStepSupported,
+  publishedPresentationSetUnsupportedReason,
   isPublishedInteractionClickBindable,
   isPublishedInteractionConditionSupported,
   isPublishedInteractionTriggerSupported,
@@ -350,11 +351,12 @@ function checkRules(
 
     rule.actions.forEach((step, actionIndex) => {
       const actionPath = [...rulePath, 'actions', actionIndex, 'action']
-      if (rule.enabled && !isPublishedInteractionActionSupported(step.action.type)) {
+      const playbackScope = scope.scene ? 'scene' : 'global'
+      if (rule.enabled && !isPublishedInteractionActionStepSupported(rule, actionIndex, playbackScope)) {
         drafts.push({
           severity: 'warning',
           code: 'published-interaction-action-unsupported',
-          message: `交互规则“${rule.name ?? rule.id}”使用动作“${step.action.type}”，当前 Published 播放会跳过该动作。`,
+          message: publishedPresentationSetUnsupportedReason(rule, actionIndex, playbackScope) ?? `交互规则“${rule.name ?? rule.id}”使用动作“${step.action.type}”，当前 Published 播放会跳过该动作。`,
           path: actionPath,
         })
       }

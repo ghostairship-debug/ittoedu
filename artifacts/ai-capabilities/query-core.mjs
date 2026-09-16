@@ -29,6 +29,13 @@
 
 
 
+/** On disk, resources already exist as readable files. Do not embed another
+ * escaped copy (including bundled JS) in one oversized search record. */
+export function courseAgentCapabilityDiskIndex(data                           )         {
+  return JSON.stringify({ version: data.version, semanticVersion: data.semanticVersion,
+    entries: data.entries, resourcePaths: Object.keys(data.files).sort() }, null, 2) + '\n'
+}
+
 
 
 

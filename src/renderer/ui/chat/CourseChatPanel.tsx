@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { localAgentCapabilitiesSchema, type LocalAgentEvent, type LocalAgentId, type LocalAgentRecord } from '../../../shared/localAgentContract'
-import { MAX_GENERATION_TASK_DURATION_MS, readGenerationFailure, type GenerationRequest } from '../../../shared/generationContract'
+import { DEFAULT_GENERATION_TASK_DURATION_MS, GENERATION_TASK_BUDGET_MINUTES, MAX_GENERATION_TASK_DURATION_MS, readGenerationFailure, type GenerationRequest } from '../../../shared/generationContract'
 import type { MaterialRecordV1 } from '../../../shared/materialContract'
 import type { CourseProjectDocument } from '../../../shared/courseProjectTypes'
 import type { DynamicBehaviorObservation } from '../../../shared/dynamicBehaviorObservation'
@@ -49,7 +49,7 @@ export function resolveChatIntent(text: string, selected: 'discuss' | 'plan' | '
   if (selected === 'edit' && /先(?:问|询问)(?:我|用户)?[^\n]{0,48}(?:等(?:我|用户)?(?:回答|回复|答复)|(?:我|用户)?(?:回答|回复|答复)后)[^\n]{0,24}(?:再)?(?:修改|改动|动手)/.test(text)) return 'discuss'
   return selected
 }
-export function CourseChatPanel({ projectId, projectPath, onClose }: { projectId: string; projectPath: string | null; onClose(): void }) {
+export function CourseChatPanel({ projectId, projectPath, onClose, lessonWorkspace, embedded = false, initialHistory = [] }: { projectId: string; projectPath: string | null; onClose(): void; lessonWorkspace?: import('../../../shared/workspaceIdentity').LessonAgentWorkspace; embedded?: boolean; initialHistory?: LocalAgentEvent[] }) {
   const currentDocument = useEditorStore(selectActiveCourseProjectDocument), authoringSession = useEditorStore(state => state.courseAuthoringSession)
   // A manual scope belongs to this workspace, not to a particular selection.
   // Clearing/changing selection must not silently widen an explicit selection scope.
@@ -67,7 +67,9 @@ export function CourseChatPanel({ projectId, projectPath, onClose }: { projectId
     setConfigurationSaving(saving)
   }, [])
   const [intent, setIntent] = useState<'discuss' | 'plan' | 'edit'>('edit'), [applyPolicy, setApplyPolicy] = useState<'auto' | 'preview'>('auto')
-  const [inputKind, setInputKind] = useState<'supplement' | 'correct'>('supplement'), [wholeCourse, setWholeCourse] = useState(false)
+  const [inputKind, setInputKind] = useState<'supplement' | 'correct'>('correct'), [wholeCourse, setWholeCourse] = useState(false)
+  const [budgetMinutes, setBudgetMinutes] = useState(DEFAULT_GENERATION_TASK_DURATION_MS / 60000)
+  const [extendingBudget, setExtendingBudget] = useState(false)
   const [teachingPlan, setTeachingPlan] = useState(''), [presentationScript, setPresentationScript] = useState('')
   const [planConfirmed, setPlanConfirmed] = useState(false), [scriptConfirmed, setScriptConfirmed] = useState(false)
   const [instruction, setInstruction] = useState('')
@@ -76,7 +78,7 @@ export function CourseChatPanel({ projectId, projectPath, onClose }: { projectId
     catch (cause) { return { scope, error: message(cause) } }
   }, [instruction, scope, wholeCourse, scopeExplicit])
   const [sessions, setSessions] = useState<LocalAgentRecord[]>([]), [sessionId, setSessionId] = useState('')
-  const [events, setEvents] = useState<LocalAgentEvent[]>([])
+  const [events, setEvents] = useState<LocalAgentEvent[]>(initialHistory)
   const [legacyInstruction, setLegacyInstruction] = useState('')
   const conversationRecord = useRef<LocalAgentRecord | null>(null)
   const [materials, setMaterials] = useState<MaterialRecordV1[]>([]), [materialIds, setMaterialIds] = useState<string[]>([])
@@ -89,7 +91,17 @@ export function CourseChatPanel({ projectId, projectPath, onClose }: { projectId
   const generation = useRef(0), scroll = useRef<HTMLDivElement | null>(null), followReply = useRef(true)
   const preparation = useRef<Preparation | null>(null)
   const activeRequest = useRef<string | undefined>(undefined), behaviorEvidence = useRef<DynamicBehaviorObservation[]>([])
-  const revision = currentDocument?.revision, busy = view.busy || preparing, api = window.desktopAPI
+  const revision = currentDocument?.revision, busy = view.busy || preparing
+  const api = useMemo(() => {
+    const desktop = window.desktopAPI
+    if (!desktop || !lessonWorkspace) return desktop
+    return { ...desktop, localAgent: (request: import('../../../shared/localAgentContract').LocalAgentRequest) => {
+      if (request.operation === 'list') return desktop.localAgent({ operation: 'lesson-list', workspace: lessonWorkspace })
+      if (request.operation === 'read') return desktop.localAgent({ operation: 'lesson-read', workspace: lessonWorkspace, sessionId: request.sessionId, after: request.after })
+      if (request.operation === 'delete') return desktop.localAgent({ operation: 'lesson-delete', workspace: lessonWorkspace, sessionId: request.sessionId })
+      return desktop.localAgent('projectId' in request && request.operation !== 'capabilities' && request.operation !== 'configure' ? { ...request, lessonWorkspace } : request)
+    } }
+  }, [lessonWorkspace])
   const owner = useMemo(() => ({ projectId, projectPath: projectPath ?? '' }), [projectId, projectPath])
   const [resources, setResources] = useState<{ owner: typeof owner; api: typeof api;
     bridge: ReturnType<typeof createCourseChatObservation>; controller: GenerationTaskController } | null>(null)
@@ -133,7 +145,8 @@ export function CourseChatPanel({ projectId, projectPath, onClose }: { projectId
     })
     setResources({ owner, api, bridge, controller })
     void api.localAgent({ operation: 'list', ...owner }).then(result => { if (live) setSessions(result.records ?? []) }).catch(reason => { if (live) setError(message(reason)) })
-    void api.materials({ operation: 'search', ...owner, query: '' }).then(result => { if (live) setMaterials(result) }).catch(reason => { if (live) setError(message(reason)) })
+    if (lessonWorkspace) { setMaterials([]); setMaterialIds([]) }
+    else void api.materials({ operation: 'search', ...owner, query: '' }).then(result => { if (live) setMaterials(result) }).catch(reason => { if (live) setError(message(reason)) })
     return () => {
       live = false; generation.current++
       preparation.current?.abort.abort(); preparation.current = null
@@ -176,7 +189,7 @@ export function CourseChatPanel({ projectId, projectPath, onClose }: { projectId
   function beginPreparation(): Preparation | null {
     if (resolvedReference.error) { setError(resolvedReference.error); return null }
     const token = ++generation.current, startedAt = Date.now()
-    const execution = { version: 1 as const, startedAt, deadlineAt: startedAt + MAX_GENERATION_TASK_DURATION_MS }
+    const execution = { version: 1 as const, startedAt, deadlineAt: startedAt + budgetMinutes * 60000 }
     preparation.current?.abort.abort()
     bridge?.invalidate()
     let target: CourseChatTarget
@@ -216,7 +229,19 @@ export function CourseChatPanel({ projectId, projectPath, onClose }: { projectId
     const record = (await api.localAgent({ operation: 'read', ...owner, sessionId: id, after: 0 })).records?.[0]
     // Historical V1 entries use Main's read-only excerpt path; a new native record
     // may resume only an identity actually confirmed before Stop/failure.
-    return record && (record.externalSessionId || !record.task) ? id : undefined
+    return record && !('kind' in record.workspace) && (record.externalSessionId || !record.task) ? id : undefined
+  }
+  async function extendBudget() {
+    const task = controller?.current.record?.task, request = controller?.current.request
+    if (!controller || !task || !request || extendingBudget) return
+    const token = generation.current
+    setExtendingBudget(true)
+    try {
+      await controller.input({ version: 1, kind: 'extend-budget', minutes: 20, inputId: crypto.randomUUID(),
+        taskId: task.taskId, epoch: task.epoch, workspace: request.workspace, turnId: task.turnId }, { preservePreview: true })
+      if (token === generation.current) setNotice('本次任务预算已增加 20 分钟')
+    } catch (cause) { if (token === generation.current) setError(message(cause)) }
+    finally { setExtendingBudget(false) }
   }
   async function send() {
     if (configurationSavingRef.current) return
@@ -299,11 +324,16 @@ export function CourseChatPanel({ projectId, projectPath, onClose }: { projectId
       const materialResults = await prepareStage(current, () => Promise.all(materialIds.map(id => api.materials({ operation: 'read', ...owner, id }))))
       const selectedMaterials = materialResults.map(records => { if (!records[0]) throw new Error('引用材料已删除，请重新选择'); return records[0] })
       const catalog = await prepareStage(current, () => api.loadComponentCatalog())
-      if (requestedIntent === 'edit' && wholeCourse && (!planConfirmed || !scriptConfirmed || !teachingPlan.trim() || !presentationScript.trim())) throw new Error('整课生成前，请分别审阅并确认当前教学策划和呈现脚本')
+      let confirmedDocuments = wholeCourse ? { teachingPlan, presentationScript } : undefined
+      if (wholeCourse && lessonWorkspace) {
+        const prepared = await prepareStage(current, () => api.localAgent({ operation: 'lesson-prepare-generation', workspace: lessonWorkspace }))
+        if (!prepared.lessonGeneration) throw new Error('当前课例文档尚未准备完成，请重新检查四阶段文件')
+        confirmedDocuments = prepared.lessonGeneration.confirmedDocuments
+      } else if (requestedIntent === 'edit' && wholeCourse && (!planConfirmed || !scriptConfirmed || !teachingPlan.trim() || !presentationScript.trim())) throw new Error('整课生成前，请分别审阅并确认当前教学策划和呈现脚本')
       const request = await prepareStage(current, () => bridge.capture({ workspace, execution: current.execution,
         target: current.target, scope: current.scope, instruction: nextInstruction, intent: requestedIntent, applyPolicy,
         purpose: wholeCourse ? 'whole-course' : current.scope === 'selection' ? 'local-edit' : 'single-page', expectedResult: wholeCourse && requestedIntent === 'edit' ? 'candidate' : 'auto',
-        confirmedDocuments: wholeCourse ? { teachingPlan, presentationScript } : undefined, materials: selectedMaterials, catalogPackages: catalog.packages }))
+        confirmedDocuments, materials: selectedMaterials, catalogPackages: catalog.packages }))
       const resumable = await prepareStage(current, () => confirmedResume(sessionId))
       setInstruction(''); finishPreparation(current)
       await controller.start(request, adapter, resumable, instruction.trim())
@@ -359,9 +389,12 @@ export function CourseChatPanel({ projectId, projectPath, onClose }: { projectId
   })).values()]
   const activities = (view.busy ? events : []).flatMap(event => { const text = readableActivity(event); return text ? [{ id: event.sequence, text }] : [] })
     .filter((activity, index, all) => activity.text !== all[index + 1]?.text).slice(-3)
-  const taskDeadline = Math.min(view.record?.task?.deadlineAt ?? Infinity, view.request?.execution?.deadlineAt ?? Infinity)
+  const taskDeadline = view.record?.task?.deadlineAt ?? view.request?.execution?.deadlineAt ?? Infinity
   const deadline = preparationExecution?.deadlineAt ?? taskDeadline
   const remaining = Number.isFinite(deadline) ? Math.max(0, Math.ceil((deadline - now) / 60000)) : null
+  const taskStartedAt = view.record?.task?.startedAt ?? view.request?.execution?.startedAt
+  const canExtendBudget = view.phase === 'running' && remaining !== null && remaining > 0 && taskStartedAt !== undefined
+    && taskDeadline + 20 * 60000 <= taskStartedAt + MAX_GENERATION_TASK_DURATION_MS
   const tokenUsage = latestLocalAgentTokenUsage(events)
   const selectedConversation = sessions.find(record => record.id === sessionId)
   const legacyRequests = selectedConversation ? sessions.filter(record => sameChatConversation(record, selectedConversation))
@@ -371,8 +404,8 @@ export function CourseChatPanel({ projectId, projectPath, onClose }: { projectId
   const actualResultLabel = actualResult ? ({ checked: '已准备好，等待应用', committed: '已应用课件修改', unchanged: '已核对，无需修改',
     rejected: '本阶段未应用', stale: '本阶段目标已变化，未应用', undone: '已撤销本次修改' })[actualResult.status] : ''
   const tokenCount = (value: number | null | undefined) => value == null ? '未知' : value.toLocaleString()
-  return <aside className="course-chat" aria-label="CLI 创作助手" data-flow-selection-preserving-target="true">
-    <header><strong>创作助手 · 内部试用</strong><button onClick={onClose}>关闭</button></header>
+  return <aside className={`course-chat${embedded ? ' course-chat--embedded' : ''}`} aria-label="CLI 创作助手" data-flow-selection-preserving-target="true">
+    <header><strong>创作助手</strong>{!embedded && <button onClick={onClose}>关闭</button>}</header>
     {!projectPath ? <p>请先保存工程，再开始对话。</p> : <>
       <div className="chat-controls"><label>CLI<select aria-label="CLI" value={adapter} disabled={busy || !!sessionId} onChange={event => setAdapter(event.target.value as LocalAgentId)}><option value="codex">Codex</option><option value="claude">Claude</option><option value="opencode">OpenCode</option></select></label>
         <label>会话<select aria-label="会话" value={sessionId} disabled={busy} onChange={event => void selectSession(event.target.value)}><option value="">新对话</option>{sessions.map((record, index) => <option key={record.id} value={record.id}>{record.adapter} · 对话 {index + 1} · {statusLabels[record.task?.status ?? record.status]}</option>)}{sessionId && !sessions.some(record => record.id === sessionId) && <option value={sessionId}>当前对话</option>}</select></label></div>
@@ -383,6 +416,7 @@ export function CourseChatPanel({ projectId, projectPath, onClose }: { projectId
         {questions.map(question => <NativeAgentQuestion key={question.questionId} question={question} onAnswer={async input => { if (!controller) throw new Error('当前任务已关闭'); await controller.input(input) }} />)}
         {!!activities.length && <ol aria-label="任务活动" className="chat-activity">{activities.map(item => <li key={item.id}>{item.text}</li>)}</ol>}
         <p role="status">{notice}{busy && remaining !== null ? ` · 本任务剩余约 ${remaining} 分钟` : ''}</p>{error && <p role="alert">{readableChatError(error)}</p>}
+        {canExtendBudget && <button type="button" disabled={extendingBudget} onClick={() => void extendBudget()}>{extendingBudget ? '正在延长预算…' : '增加20分钟'}</button>}
         {view.canRetryFeedback && <button onClick={() => void controller?.retryFeedback().catch(cause => setError(message(cause)))}>重试保存结果</button>}
         {tokenUsage && <details className="chat-usage"><summary>用量</summary><small aria-label="原生用量">本次输入 {tokenCount(tokenUsage.last?.inputTokens)} / 输出 {tokenCount(tokenUsage.last?.outputTokens)} token；原生累计输入 {tokenCount(tokenUsage.total?.inputTokens)} / 输出 {tokenCount(tokenUsage.total?.outputTokens)}，缓存输入 {tokenCount(tokenUsage.total?.cachedInputTokens)}，推理输出 {tokenCount(tokenUsage.total?.reasoningOutputTokens)}</small></details>}
         {view.preview && view.request && <section aria-label="候选变更预览"><h3>{view.preview.summary}</h3><GenerationCandidatePreview prepared={view.preview} request={view.request} />
@@ -394,18 +428,22 @@ export function CourseChatPanel({ projectId, projectPath, onClose }: { projectId
         }}>撤销最近一次 AI 修改</button>}
       </div>
       <form onSubmit={event => { event.preventDefault(); void send() }}>
+        <details className="chat-task-settings"><summary>任务设置 · {intent === 'edit' ? '编辑' : intent === 'plan' ? '计划' : '讨论'} · {busy && frozenReference ? frozenReference.name : referenceName}{!busy ? ` · ${budgetMinutes} 分钟` : ''}</summary>
+        {!busy && <label className="chat-budget">本次时间预算<select aria-label="本次时间预算" value={budgetMinutes} onChange={event => setBudgetMinutes(Number(event.target.value))}>{GENERATION_TASK_BUDGET_MINUTES.map(minutes => <option key={minutes} value={minutes}>{minutes} 分钟</option>)}</select><small>复杂任务可增加预算；到期会停止，已应用的修改保留。</small></label>}
         <div className="chat-controls"><label>意图<select aria-label="意图" disabled={busy} value={intent} onChange={event => setIntent(event.target.value as typeof intent)}><option value="discuss">讨论</option><option value="plan">计划</option><option value="edit">编辑</option></select></label>
           {intent === 'edit' && <label>应用方式<select aria-label="应用方式" disabled={busy} value={applyPolicy} onChange={event => setApplyPolicy(event.target.value as typeof applyPolicy)}><option value="auto">自动应用</option><option value="preview">先看预览</option></select></label>}</div>
         <label>本轮引用<select aria-label="本轮引用" value={busy && frozenReference ? frozenReference.scope : resolvedReference.scope} disabled={busy || wholeCourse} onChange={event => setReference({ identity: referenceIdentity, scope: event.target.value as GenerationReferenceScope, explicit: true })}><option value="page">当前页</option><option value="selection">当前选择</option><option value="course">整课内容</option></select></label>
         {resolvedReference.error && <p role="alert">{resolvedReference.error}</p>}
         <small aria-label="本轮引用摘要">{busy && frozenReference ? frozenReference.name : referenceName}</small>
         <details><summary>从已确认文档生成整课</summary><label><input type="checkbox" disabled={busy} checked={wholeCourse} onChange={event => setWholeCourse(event.target.checked)} />生成包含多个片段的完整课件</label>
-          {wholeCourse && <><label>教学策划 Markdown<textarea value={teachingPlan} disabled={busy} onChange={event => { setTeachingPlan(event.target.value); setPlanConfirmed(false) }} /></label><label><input type="checkbox" disabled={busy || !teachingPlan.trim()} checked={planConfirmed} onChange={event => setPlanConfirmed(event.target.checked)} />已审阅并确认当前教学策划</label>
+          {wholeCourse && lessonWorkspace && <p>将读取当前课例的四阶段文件和材料；文档修改后需要重新确认。</p>}
+          {wholeCourse && !lessonWorkspace && <><label>教学策划 Markdown<textarea value={teachingPlan} disabled={busy} onChange={event => { setTeachingPlan(event.target.value); setPlanConfirmed(false) }} /></label><label><input type="checkbox" disabled={busy || !teachingPlan.trim()} checked={planConfirmed} onChange={event => setPlanConfirmed(event.target.checked)} />已审阅并确认当前教学策划</label>
             <label>呈现脚本 Markdown<textarea value={presentationScript} disabled={busy} onChange={event => { setPresentationScript(event.target.value); setScriptConfirmed(false) }} /></label><label><input type="checkbox" disabled={busy || !presentationScript.trim()} checked={scriptConfirmed} onChange={event => setScriptConfirmed(event.target.checked)} />已审阅并确认当前呈现脚本</label><small>整课生成会引用整课内容；编辑文档后须重新确认。</small></>}
         </details>
         {!!materials.length && <details><summary>引用教学材料（{materialIds.length}）</summary>{materials.map(material => <label key={material.id}><input type="checkbox" checked={materialIds.includes(material.id)} disabled={busy} onChange={event => setMaterialIds(prior => event.target.checked ? [...prior, material.id] : prior.filter(id => id !== material.id))} />{material.title}</label>)}</details>}
+        </details>
         <textarea aria-label="发送给创作助手" value={instruction} onChange={event => setInstruction(event.target.value)} placeholder={busy ? '补充或纠正当前任务…' : '描述要讲解的内容或需要修改的地方…'} rows={3} />
-        {view.busy && <label>输入用途<select aria-label="输入用途" value={inputKind} onChange={event => setInputKind(event.target.value as typeof inputKind)}><option value="supplement">补充要求</option><option value="correct">纠正方向</option></select></label>}
+        {view.busy && <label>输入用途<select aria-label="输入用途" value={inputKind} onChange={event => setInputKind(event.target.value as typeof inputKind)}><option value="correct">立即引导</option><option value="supplement">下一回合补充</option></select><small>{inputKind === 'correct' ? '现在发送；需要时会中断当前回合，带着新要求继续。' : '等待当前回合结束后处理，本次总预算不变。'}</small></label>}
         <button type="submit" disabled={preparing || configurationSaving || !instruction.trim()}>{configurationSaving ? '正在保存配置…' : view.busy ? '发送输入' : '发送'}</button> <button type="button" disabled={!busy} onClick={() => void stop()}>停止</button>
       </form>
     </>}

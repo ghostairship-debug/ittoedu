@@ -1,17 +1,19 @@
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
+import { promises as fs, type PathLike } from 'node:fs'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { CandidateStaging } from '../../src/main/localAgent/candidateStaging'
-import { generationCapabilityDirectory } from '../../src/main/localAgent/capabilityWorkspace'
+import { ensureGenerationCapabilityWorkspace, generationCapabilityDirectory } from '../../src/main/localAgent/capabilityWorkspace'
 import { buildGenerationPrompt, createGenerationProfile, generationInitialRequestForPrompt, generationProfileForPrompt, generationRequestForPrompt } from '../../src/main/localAgent/profile'
 import { generationRequestSchema } from '../../src/shared/generationContract'
 import { GENERATION_RESULT_OPEN, GENERATION_RESULT_CLOSE, readGenerationResult } from '../../src/shared/generationResult'
+import { checkGenerationStaticPrecheck } from '../../src/shared/generationStaticPrecheck'
 import { courseAgentCapabilityCacheKey, queryCourseAgentCapabilities, readCourseAgentCapability, runCourseAgentCapabilityQuery } from '../../src/shared/courseAgentCapabilities'
 import { generationCapabilityContext, generationCapabilityData } from '../../src/renderer/authoring/generation/generationCapabilities'
-import { captureGenerationSnapshot } from '../../src/renderer/authoring/generation/generationSnapshot'
+import { captureGenerationFixture as captureGenerationSnapshot } from '../fixtures/generationSnapshot'
 import { createBlankCourseProject } from '../../src/renderer/project/createCourseProject'
 import { projectEffectiveLayers } from '../../src/renderer/course/effectiveLayerProjection'
 import { attachGenerationBehaviorEvidence } from '../../src/renderer/authoring/generation/generationBehaviorResources'
@@ -22,6 +24,18 @@ import { sceneNodeToCourseLayerItem } from '../../src/shared/courseProjectModel'
 import { componentPackageTool } from '../../src/renderer/authoring/tools/componentPackageTool'
 import { imageTransformInputSchema } from '../../src/shared/imageTransformContract'
 import { withDefaultComponentController } from '../../src/renderer/components/teacherControllerComponent'
+
+const platformDescriptor = Object.getOwnPropertyDescriptor(process, 'platform')!
+afterEach(() => {
+  vi.restoreAllMocks()
+  Object.defineProperty(process, 'platform', platformDescriptor)
+})
+
+const renameLockError = () => Object.assign(new Error('rename failed'), { code: 'EPERM', syscall: 'rename' })
+function stringPath(value: PathLike): string {
+  if (typeof value !== 'string') throw new Error('能力工作区发布必须传入字符串路径')
+  return value
+}
 
 function requestFixture(materialText?: string) {
   const document = createBlankCourseProject({ title: '能力发现' })
@@ -34,6 +48,56 @@ function requestFixture(materialText?: string) {
 }
 
 describe('offline capability workspace', () => {
+  it('retries a fully validated capability tree after a transient Windows rename lock', async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'course-capability-rename-'))
+    try {
+      const root = path.join(directory, 'staging', 'candidates', crypto.randomUUID())
+      const nativeRename = fs.rename.bind(fs), attempts: string[] = []
+      Object.defineProperty(process, 'platform', { value: 'win32' })
+      vi.spyOn(fs, 'rename').mockImplementation(async (temporary, target) => {
+        attempts.push(stringPath(temporary))
+        if (attempts.length < 3) throw renameLockError()
+        await nativeRename(temporary, target)
+      })
+      const capability = await ensureGenerationCapabilityWorkspace(root)
+      expect(attempts).toHaveLength(3)
+      expect(new Set(attempts)).toEqual(new Set([attempts[0]!]))
+      expect(await readFile(path.join(capability, 'discovery.json'), 'utf8')).toContain('semanticVersion')
+    } finally { await rm(directory, { recursive: true, force: true }) }
+  })
+
+  it('propagates a sustained Windows rename lock and removes only its unpublished temporary tree', async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'course-capability-rename-'))
+    try {
+      const root = path.join(directory, 'staging', 'candidates', crypto.randomUUID())
+      const error = renameLockError(), temporary: string[] = []
+      Object.defineProperty(process, 'platform', { value: 'win32' })
+      vi.spyOn(fs, 'rename').mockImplementation(async (source) => {
+        temporary.push(stringPath(source))
+        throw error
+      })
+      await expect(ensureGenerationCapabilityWorkspace(root)).rejects.toBe(error)
+      expect(temporary).toHaveLength(6)
+      expect(new Set(temporary)).toEqual(new Set([temporary[0]!]))
+      await expect(fs.stat(temporary[0]!)).rejects.toMatchObject({ code: 'ENOENT' })
+      await expect(fs.stat(generationCapabilityDirectory(root))).rejects.toMatchObject({ code: 'ENOENT' })
+    } finally { await rm(directory, { recursive: true, force: true }) }
+  })
+
+  it('rejects an existing inconsistent capability namespace without replacing it', async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'course-capability-namespace-'))
+    try {
+      const root = path.join(directory, 'staging', 'candidates', crypto.randomUUID())
+      const capability = generationCapabilityDirectory(root)
+      await mkdir(capability, { recursive: true })
+      await writeFile(path.join(capability, 'discovery.json'), 'different immutable capability data')
+      const rename = vi.spyOn(fs, 'rename')
+      await expect(ensureGenerationCapabilityWorkspace(root)).rejects.toThrow()
+      expect(rename).not.toHaveBeenCalled()
+      expect(await readFile(path.join(capability, 'discovery.json'), 'utf8')).toBe('different immutable capability data')
+    } finally { await rm(directory, { recursive: true, force: true }) }
+  })
+
   it('discovers a compact file transport while keeping the strict document schema available on demand', async () => {
     const directory = await mkdtemp(path.join(os.tmpdir(), 'file-contract-'))
     try {
@@ -69,7 +133,19 @@ describe('offline capability workspace', () => {
       })).stdout)
       expect(prompt).not.toContain(root)
       expect(details.fileAccess).toMatchObject({ root, resources: path.join(root, 'resources'), query: profile.workspace.query, capabilities: profile.workspace.capabilities })
+      // OpenCode's native search rejects a JSON match record above 64 KiB.
+      // A normal helper lookup must not return the entire request on one line.
+      const helperLines = (await readFile(path.join(root, 'request.json'), 'utf8')).split('\n').filter(line => line.includes('candidateHelper'))
+      expect(helperLines).toHaveLength(1)
+      expect(Buffer.byteLength(JSON.stringify({ type: 'match', data: { path: { text: path.join(root, 'request.json') }, lines: { text: helperLines[0] } } })))
+        .toBeLessThan(64 * 1024)
       expect(JSON.parse(await readFile(details.fileAccess.discovery, 'utf8'))).toHaveProperty('tools')
+      const diskIndex = await readFile(path.join(details.fileAccess.capabilities, 'discovery-data.json'), 'utf8')
+      expect(JSON.parse(diskIndex)).not.toHaveProperty('files')
+      expect(JSON.parse(diskIndex).resourcePaths).toContain('tools/native.content.json')
+      expect(Math.max(...diskIndex.split('\n').map(line => Buffer.byteLength(JSON.stringify({ lines: { text: line } }))))).toBeLessThan(64 * 1024)
+      const executable = await readFile(path.join(details.fileAccess.capabilities, 'candidate-helper-core.mjs'), 'utf8')
+      expect(Math.max(...executable.split('\n').map(line => Buffer.byteLength(JSON.stringify({ lines: { text: line } }))))).toBeLessThan(64 * 1024)
       for (const skill of profile.skills) {
         expect(details.fileAccess.skills[skill.name]).toBe(skill.path)
         expect(await readFile(details.fileAccess.skills[skill.name], 'utf8')).not.toHaveLength(0)
@@ -124,7 +200,8 @@ describe('offline capability workspace', () => {
       const wire = JSON.parse(buildGenerationPrompt('codex', request, root).split('\n').at(-1)!)
       const details = JSON.parse(await readFile(path.join(root, wire.requestDetails.path), 'utf8'))
       expect(wire).not.toHaveProperty('destinations')
-      expect(Object.values(wire.destinationAliases)).toEqual(request.destinations)
+      expect(Object.keys(wire.destinationAliases)).toEqual(Object.keys(details.destinationAliases))
+      for (const [alias, summary] of Object.entries(wire.destinationAliases)) expect(details.destinationAliases[alias]).toMatchObject(summary as Record<string, unknown>)
       expect(wire.context.capabilities.cards.map((card: any) => ({ semanticVersion: wire.context.capabilities.semanticVersion, ...card }))).toEqual(details.context.capabilities.cards)
       expect(details.observation).toEqual(request.observation)
       expect(details.context.assets).toEqual((request.context as any).assets)
@@ -288,10 +365,20 @@ describe('offline capability workspace', () => {
     const root = path.resolve('C:/Users/teacher/AppData/Roaming/courseware/local-agent/v2/' + 'a'.repeat(64) + '/34190d74-0ac1-46f0-a8f9-08e6c441c03e/staging/candidates/' + request.requestId)
     for (const adapter of ['codex', 'claude', 'opencode'] as const) {
       const prompt = buildGenerationPrompt(adapter, request, root)
-      expect(Buffer.byteLength(prompt), `${adapter} full prompt`).toBeLessThanOrEqual(12 * 1024)
+      const sizes = Object.fromEntries(Object.entries(generationInitialRequestForPrompt(request))
+        .map(([key, value]) => [key, Buffer.byteLength(JSON.stringify(value) ?? '')]))
+      Object.assign(sizes, Object.fromEntries(Object.entries(generationInitialRequestForPrompt(request).context ?? {})
+        .map(([key, value]) => [`context.${key}`, Buffer.byteLength(JSON.stringify(value) ?? '')])))
+      Object.assign(sizes, Object.fromEntries(Object.entries((generationInitialRequestForPrompt(request).context as any)?.capabilities ?? {})
+        .map(([key, value]) => [`capabilities.${key}`, Buffer.byteLength(JSON.stringify(value) ?? '')])))
+      expect(Buffer.byteLength(prompt), `${adapter} full prompt ${JSON.stringify(sizes)}`).toBeLessThanOrEqual(12 * 1024)
       expect(prompt).not.toContain(Buffer.alloc(100).toString('base64'))
       expect(prompt).toContain('resources/observation/images/0.png')
       const initial = JSON.parse(prompt.split('\n').at(-1)!)
+      expect(initial.context.capabilities.createToolIds).toEqual([...new Set(context.capabilities.createRecommendations.flatMap(entry => entry.entries.map(tool => tool.id)))])
+      expect(initial.context.capabilities).not.toHaveProperty('createRecommendations')
+      expect(initial.requestDetails.fields).toContain('context.capabilities.createRecommendations')
+      expect((generationRequestForPrompt(request).context as any).capabilities.createRecommendations).toEqual(context.capabilities.createRecommendations)
       if (nativeType === 'image') expect(initial.assetAliases).toEqual({ a1: 'red-artwork' })
       else expect(initial).not.toHaveProperty('assetAliases')
       if (adapter !== 'codex') {
@@ -455,8 +542,12 @@ it('QP06 bundled helper writes a valid candidate in an unrelated Chinese path an
     const input = path.join(directory, '草稿.json')
     await writeFile(input, JSON.stringify({ summary: '创建独立图形', steps: [{ id: 'shape', tool: 'native.content', destination: create, input: { operation: 'insert', template: { nativeType: 'shape', shapeType: 'ellipse', style: { fillColor: '#ffff00' } } } }] }))
     const args = [details.fileAccess.candidateHelper, '--request', path.join(root, 'request.json'), '--input', input]
+    const checked = await promisify(execFile)(process.execPath, [...args, '--check'], { cwd: directory, windowsHide: true })
+    expect(JSON.parse(checked.stdout)).toMatchObject({ status: 'prechecked', candidateFile: null, delivery: 'not-delivered',
+      message: expect.stringContaining('交付须去掉 --check 再运行') })
+    await expect(readFile(path.join(root, 'candidate.json'), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
     const result = await promisify(execFile)(process.execPath, args, { cwd: directory, windowsHide: true })
-    expect(JSON.parse(result.stdout)).toMatchObject({ status: 'prechecked', candidateFile: 'candidate.json' })
+    expect(JSON.parse(result.stdout)).toMatchObject({ status: 'ready-for-host', candidateFile: 'candidate.json', delivery: 'ready-for-host' })
     const candidate = JSON.parse(await readFile(path.join(root, 'candidate.json'), 'utf8'))
     expect(candidate).toMatchObject({ version: 1, requestId: request.requestId, steps: [{ id: 'shape' }] })
     await writeFile(input, JSON.stringify({ summary: '错误目标', steps: [{ id: 'bad', tool: 'native.content', destination: create, input: { operation: 'content', content: {} } }] }))
@@ -491,4 +582,27 @@ it('prechecks tool shape and prepares a source patch without copying baseline me
     expect(candidate.steps[0]).not.toHaveProperty('lowerCarrierReason')
     expect(await readFile(path.join(root, source.files['runtime.js'].path), 'utf8')).toBe(original)
   } finally { await rm(directory, { recursive: true, force: true }) }
+})
+
+it('prechecks frozen Component targets and the final changed manifest with the formal shared schema', () => {
+  const { project: document, componentPackages } = withDefaultComponentController(createBlankCourseProject())
+  const request = captureGenerationSnapshot({ document, componentPackages, workspace: { version: 1, projectId: document.id, normalizedPath: '/static-precheck.h5lesson' },
+    sessionToken: { locationId: document.startLocationId, surfaceType: 'slide', revision: document.revision, generation: 1 },
+    projection: projectEffectiveLayers({ project: document, locationId: document.startLocationId, owner: 'global' }),
+    selectedIds: [document.globalLayerItems[0]!.item.layerItemId], scope: 'selection', instruction: '修改控制台', purpose: 'single-page' })
+  const target = request.destinations.find((destination) => destination.kind === 'update' && destination.target.itemId === document.globalLayerItems[0]!.item.layerItemId)!
+  const candidate = (step: any) => ({ version: 1 as const, requestId: request.requestId, candidateId: crypto.randomUUID(), summary: '静态反例', afterCommit: { version: 1 as const, action: 'finish' as const }, steps: [step] })
+  expect(checkGenerationStaticPrecheck(candidate({ id: 'native-on-component', tool: 'native.content', carrier: 'native', destination: target, input: { operation: 'properties', properties: { frame: { x: 10 } } } }), request))
+    .toMatchObject([{ code: 'static-target-carrier-mismatch' }])
+
+  const source = (request.context as any).componentSources[0], manifest = structuredClone(componentPackages[source.packageId]!.manifest) as any
+  manifest.editor = { ...(manifest.editor ?? {}), properties: [...(manifest.editor?.properties ?? []), { key: 'mode', label: '模式', type: 'select', options: ['slide', 'flow'] }] }
+  const invalid = candidate({ id: 'bad-manifest', tool: 'component.package', carrier: 'generated-component', destination: target,
+    input: { operation: 'patch', changedFiles: { 'manifest.json': { encoding: 'utf8', text: JSON.stringify(manifest) } } } })
+  expect(checkGenerationStaticPrecheck(invalid, request)).toMatchObject([{ code: 'component-manifest-invalid' }])
+
+  manifest.editor.properties[manifest.editor.properties.length - 1].options = [{ value: 'slide', label: '演示页' }, { value: 'flow', label: '流式讲义' }]
+  const valid = candidate({ id: 'good-manifest', tool: 'component.package', carrier: 'generated-component', destination: target,
+    input: { operation: 'patch', changedFiles: { 'manifest.json': { encoding: 'utf8', text: JSON.stringify(manifest) } } } })
+  expect(checkGenerationStaticPrecheck(valid, request)).toEqual([])
 })

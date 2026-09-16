@@ -3,8 +3,7 @@ import { flowBlockSchema } from '../../shared/courseProjectSchema'
 import type { FlowTableBlock } from '../../shared/courseProjectTypes'
 import { moveTableItem } from './tableStructure'
 import { tableMergeIssues, tableMergeRegionSchema, type TableMergeRegion } from '../../shared/tableMerge'
-import { decodeFlowTableCell } from '../../shared/courseProjectModel'
-import type { TextRun } from '../../shared/contracts/native-v1'
+import { normalizeDocumentText, type FlowInline } from '../../shared/document/content'
 
 export type FlowTableStructureOperation =
   | { kind: 'merge'; region: TableMergeRegion }
@@ -24,19 +23,17 @@ export function changeFlowTableStructure(source: FlowTableBlock, operation: Flow
       table.merges = [...(table.merges ?? []), region]
       const issues = tableMergeIssues(table)
       if (issues.length) throw new Error(issues[0])
-      let text = ''; const runs: TextRun[] = []
+      const inlines: FlowInline[] = []
       for (const rowId of region.rowIds) for (const columnId of region.columnIds) {
         const row = table.rows.find(row => row.id === rowId)!
-        const cell = decodeFlowTableCell(row.cells[columnId]!)
-        if (cell.text) {
-          if (text) text += '\n'
-          const offset = Array.from(text).length
-          runs.push(...cell.runs.filter(run => Object.keys(run.style).length > 0).map(run => ({ ...run, start: run.start + offset, end: run.end + offset })))
-          text += cell.text
+        const cell = row.cells[columnId]!
+        if (cell.inlines.length) {
+          if (inlines.length) inlines.push({ type: 'text', text: '\n' })
+          inlines.push(...cell.inlines)
         }
-        row.cells[columnId] = ''
+        row.cells[columnId] = { inlines: [] }
       }
-      table.rows.find(row => row.id === region.rowIds[0])!.cells[region.columnIds[0]!] = runs.length ? { text, runs } : text
+      table.rows.find(row => row.id === region.rowIds[0])!.cells[region.columnIds[0]!] = normalizeDocumentText({ inlines })
       break
     }
     case 'split': {
@@ -48,7 +45,7 @@ export function changeFlowTableStructure(source: FlowTableBlock, operation: Flow
     case 'insert-row': {
       const index = operation.afterId ? table.rows.findIndex(row => row.id === operation.afterId) : table.rows.length - 1
       if (operation.afterId && index < 0) throw new Error('表格行已失效')
-      table.rows.splice(index + 1, 0, { id: `row-${idFactory()}`, cells: Object.fromEntries(table.columns.map(column => [column.id, ''])) })
+      table.rows.splice(index + 1, 0, { id: `row-${idFactory()}`, cells: Object.fromEntries(table.columns.map(column => [column.id, { inlines: [] }])) })
       break
     }
     case 'delete-row':
@@ -60,8 +57,8 @@ export function changeFlowTableStructure(source: FlowTableBlock, operation: Flow
       const index = operation.afterId ? table.columns.findIndex(column => column.id === operation.afterId) : table.columns.length - 1
       if (operation.afterId && index < 0) throw new Error('表格列已失效')
       const id = `col-${idFactory()}`
-      table.columns.splice(index + 1, 0, { id, header: '新列' })
-      for (const row of table.rows) row.cells[id] = ''
+      table.columns.splice(index + 1, 0, { id, header: { inlines: [{ type: 'text', text: '新列' }] } })
+      for (const row of table.rows) row.cells[id] = { inlines: [] }
       break
     }
     case 'delete-column':

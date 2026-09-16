@@ -86,6 +86,7 @@ export interface CourseProjectLifecyclePorts<TDraftToken = unknown> {
   reportError(message: string): void
   desktopAvailable(): boolean
   openProjectFile(): Promise<OpenProjectFileResult | null>
+  openWorkspaceProjectFile?(path: string): Promise<OpenProjectFileResult>
   openRecentProjectFile(path: string): Promise<OpenProjectFileResult>
   confirmProjectOpen(confirmationId: string): Promise<void>
   saveProjectFile(input: {
@@ -93,6 +94,12 @@ export interface CourseProjectLifecyclePorts<TDraftToken = unknown> {
     suggestedName: string
     bytes: Uint8Array
   }): Promise<{ path: string } | null>
+  beforeSave?(): Promise<boolean>
+  beforeReplace?(): Promise<boolean>
+  onProjectReplaced?(): void
+  preserveBeforeClose?(): Promise<boolean>
+  subscribePreserveAndCloseRequest?(handler: () => Promise<boolean>): () => void
+  onProjectSaved?(input: { projectId: string; path: string; previousPath: string | null; saveAs: boolean }): Promise<void>
   listRecentProjects(): Promise<RecentProjectEntry[]>
   confirmDiscardChanges(): Promise<'discard' | 'cancel'>
   clearRecoveryProject(): Promise<void>
@@ -121,15 +128,18 @@ export interface CourseProjectLifecycleWatch {
   readonly textEditTrigger: unknown
 }
 
+export interface CourseProjectOperationOptions { readonly isCurrent?: () => boolean }
+export interface CourseProjectReplacementOptions extends CourseProjectOperationOptions { readonly origin?: 'lesson' | 'standalone' }
+
 export interface CourseProjectLifecycleApi {
   readonly recentProjects: RecentProjectEntry[]
   readonly recoveryOffer: RecoveryProjectResult | null
-  newProject(): void
-  newSpatialProject(): void
-  newFlowProject(): void
+  newProject(options?: CourseProjectReplacementOptions): Promise<boolean>
+  newSpatialProject(options?: CourseProjectReplacementOptions): Promise<boolean>
+  newFlowProject(options?: CourseProjectReplacementOptions): Promise<boolean>
   openProject(): void
-  openRecentProject(path: string): void
-  saveProject(saveAs?: boolean): Promise<boolean>
+  openRecentProject(path: string, options?: CourseProjectReplacementOptions): Promise<boolean>
+  saveProject(saveAs?: boolean, options?: CourseProjectOperationOptions): Promise<boolean>
   restoreRecovery(): void
   discardRecovery(): void
 }
@@ -290,6 +300,7 @@ export function useCourseProjectLifecycle<TDraftToken>(
     extra?: { dirty?: boolean; statusMessage?: string },
     started?: CourseProjectLifecycleIdentity,
     epoch?: number,
+    options?: CourseProjectReplacementOptions,
   ): boolean => {
     if (epoch !== undefined && !isCurrentMutation(epoch)) return false
     const current = captureIdentity()
@@ -309,6 +320,7 @@ export function useCourseProjectLifecycle<TDraftToken>(
       dirty: extra?.dirty,
       statusMessage: extra?.statusMessage,
     })
+    if (options?.origin !== 'lesson') portsRef.current.onProjectReplaced?.()
     return true
   }, [])
 
@@ -318,16 +330,19 @@ export function useCourseProjectLifecycle<TDraftToken>(
     extra?: { dirty?: boolean; statusMessage?: string },
     epoch?: number,
     started?: CourseProjectLifecycleIdentity,
+    options?: CourseProjectReplacementOptions,
   ): Promise<boolean> => {
     const target = started ?? captureIdentity()
     const archive = await openDefaultCourseProjectAsync(bytes)
-    return applyCourseArchive(archive, path, extra, target, epoch)
+    if (portsRef.current.beforeReplace && !(await portsRef.current.beforeReplace())) return false
+    return applyCourseArchive(archive, path, extra, target, epoch, options)
   }, [applyCourseArchive])
 
   const ingestOpenedProjectFile = useCallback(async (
     file: OpenProjectFileResult,
     epoch: number,
     started: CourseProjectLifecycleIdentity,
+    options?: CourseProjectReplacementOptions,
   ): Promise<boolean> => {
     const applied = await ingestOpenedCourseBytes(
       file.bytes,
@@ -335,6 +350,7 @@ export function useCourseProjectLifecycle<TDraftToken>(
       undefined,
       epoch,
       started,
+      options,
     )
     if (!applied) return false
     await portsRef.current.confirmProjectOpen(file.confirmationId).catch((error) => {
@@ -343,61 +359,85 @@ export function useCourseProjectLifecycle<TDraftToken>(
     return true
   }, [ingestOpenedCourseBytes])
 
-  const newProject = useCallback(() => {
-    void portsRef.current.runBusy(async () => {
-      if (!(await confirmDiscardIfNeeded())) return
+  const newProject = useCallback(async (options?: CourseProjectReplacementOptions): Promise<boolean> => {
+    const completed = await portsRef.current.runBusy(async () => {
+      if (options?.isCurrent?.() === false) return
+      const confirmed = await confirmDiscardIfNeeded()
+      if (!confirmed || options?.isCurrent?.() === false) return
+      if (portsRef.current.beforeReplace && !(await portsRef.current.beforeReplace())) return
+      if (options?.isCurrent?.() === false || !sameProjectMutationTarget(confirmed, captureIdentity())) return
       const epoch = beginMutation()
       const started = captureIdentity()
       await portsRef.current.clearRecoveryProject().catch((error) => {
         console.error('清理恢复数据失败', error)
       })
       if (
-        !isCurrentMutation(epoch)
+        options?.isCurrent?.() === false
+        || !isCurrentMutation(epoch)
         || !sameProjectMutationTarget(started, captureIdentity())
       ) {
         portsRef.current.commitStatus('工程已发生新的编辑，已取消此次新建操作')
         return
       }
       portsRef.current.createBlankProject()
+      if (options?.origin !== 'lesson') portsRef.current.onProjectReplaced?.()
+      return true
     }, '新建课件失败，请重试。')
+    return completed === true
   }, [confirmDiscardIfNeeded])
 
-  const newSpatialProject = useCallback(() => {
-    void portsRef.current.runBusy(async () => {
-      if (!(await confirmDiscardIfNeeded())) return
+  const newSpatialProject = useCallback(async (options?: CourseProjectReplacementOptions): Promise<boolean> => {
+    const completed = await portsRef.current.runBusy(async () => {
+      if (options?.isCurrent?.() === false) return
+      const confirmed = await confirmDiscardIfNeeded()
+      if (!confirmed || options?.isCurrent?.() === false) return
+      if (portsRef.current.beforeReplace && !(await portsRef.current.beforeReplace())) return
+      if (options?.isCurrent?.() === false || !sameProjectMutationTarget(confirmed, captureIdentity())) return
       const epoch = beginMutation()
       const started = captureIdentity()
       await portsRef.current.clearRecoveryProject().catch((error) => {
         console.error('清理恢复数据失败', error)
       })
       if (
-        !isCurrentMutation(epoch)
+        options?.isCurrent?.() === false
+        || !isCurrentMutation(epoch)
         || !sameProjectMutationTarget(started, captureIdentity())
       ) {
         portsRef.current.commitStatus('工程已发生新的编辑，已取消此次新建操作')
         return
       }
       portsRef.current.createSpatialProject()
+      if (options?.origin !== 'lesson') portsRef.current.onProjectReplaced?.()
+      return true
     }, '新建无限画布课件失败，请重试。')
+    return completed === true
   }, [confirmDiscardIfNeeded])
 
-  const newFlowProject = useCallback(() => {
-    void portsRef.current.runBusy(async () => {
-      if (!(await confirmDiscardIfNeeded())) return
+  const newFlowProject = useCallback(async (options?: CourseProjectReplacementOptions): Promise<boolean> => {
+    const completed = await portsRef.current.runBusy(async () => {
+      if (options?.isCurrent?.() === false) return
+      const confirmed = await confirmDiscardIfNeeded()
+      if (!confirmed || options?.isCurrent?.() === false) return
+      if (portsRef.current.beforeReplace && !(await portsRef.current.beforeReplace())) return
+      if (options?.isCurrent?.() === false || !sameProjectMutationTarget(confirmed, captureIdentity())) return
       const epoch = beginMutation()
       const started = captureIdentity()
       await portsRef.current.clearRecoveryProject().catch((error) => {
         console.error('清理恢复数据失败', error)
       })
       if (
-        !isCurrentMutation(epoch)
+        options?.isCurrent?.() === false
+        || !isCurrentMutation(epoch)
         || !sameProjectMutationTarget(started, captureIdentity())
       ) {
         portsRef.current.commitStatus('工程已发生新的编辑，已取消此次新建操作')
         return
       }
       portsRef.current.createFlowProject()
+      if (options?.origin !== 'lesson') portsRef.current.onProjectReplaced?.()
+      return true
     }, '新建流式讲义课件失败，请重试。')
+    return completed === true
   }, [confirmDiscardIfNeeded])
 
   const openProject = useCallback(() => {
@@ -421,28 +461,33 @@ export function useCourseProjectLifecycle<TDraftToken>(
     }, '打开工程失败。请检查文件是否损坏后重试。')
   }, [confirmDiscardIfNeeded, ingestOpenedProjectFile, refreshRecentProjects])
 
-  const openRecentProject = useCallback((path: string) => {
-    void portsRef.current.runBusy(async () => {
+  const openRecentProject = useCallback(async (path: string, options?: CourseProjectReplacementOptions): Promise<boolean> => {
+    const completed = await portsRef.current.runBusy(async () => {
       if (!(await confirmDiscardIfNeeded())) return
       const epoch = beginMutation()
       const started = captureIdentity()
-      const file = await portsRef.current.openRecentProjectFile(path)
-      const applied = await ingestOpenedProjectFile(file, epoch, started)
+      const file = await (options?.origin === 'lesson' && portsRef.current.openWorkspaceProjectFile ? portsRef.current.openWorkspaceProjectFile(path) : portsRef.current.openRecentProjectFile(path))
+      const applied = await ingestOpenedProjectFile(file, epoch, started, options)
       if (!applied) return
       await portsRef.current.clearRecoveryProject().catch((error) => {
         console.error('清理恢复数据失败', error)
       })
       await refreshRecentProjects()
+      return true
     }, '最近工程打开失败。文件可能已被移动，请使用“打开工程”重新选择。')
+    return completed === true
   }, [confirmDiscardIfNeeded, ingestOpenedProjectFile, refreshRecentProjects])
 
   const saveProject = useCallback(
-    async (saveAs = false) => {
-      if (saveInFlightRef.current) return false
+    async (saveAs = false, options?: CourseProjectOperationOptions) => {
+      if (saveInFlightRef.current || options?.isCurrent?.() === false) return false
       saveInFlightRef.current = true
       let savedCurrentRevision = false
       try {
+        if (portsRef.current.beforeSave && !(await portsRef.current.beforeSave())) return false
+        if (options?.isCurrent?.() === false) return false
         await portsRef.current.runBusy(async () => {
+          if (options?.isCurrent?.() === false) return
           const preparation = portsRef.current.prepareDraft()
           if (!preparation.ok) {
             throw new UserFacingError(
@@ -452,10 +497,11 @@ export function useCourseProjectLifecycle<TDraftToken>(
             )
           }
           const identity = captureIdentity()
-          const currentPath = saveAs ? undefined : (portsRef.current.projectPath() ?? undefined)
+          const previousPath = portsRef.current.projectPath()
+          const currentPath = saveAs ? undefined : (previousPath ?? undefined)
           const archive = courseArchiveDataFromSnapshot(preparation.snapshot)
           const bytes = await saveCourseProjectDocumentAsync(archive)
-          if (!sameProjectIdentity(identity, captureIdentity())) {
+          if (options?.isCurrent?.() === false || !sameProjectIdentity(identity, captureIdentity())) {
             return
           }
           const result = await portsRef.current.saveProjectFile({
@@ -464,13 +510,16 @@ export function useCourseProjectLifecycle<TDraftToken>(
             bytes,
           })
           if (result) {
-            if (!sameProjectIdentity(identity, captureIdentity())) {
+            if (options?.isCurrent?.() === false || !sameProjectIdentity(identity, captureIdentity())) {
               return
             }
             const allChangesSaved = portsRef.current.acknowledgeSaved(
               result.path,
               preparation.token,
             )
+            if (options?.isCurrent?.() === false) return
+            await portsRef.current.onProjectSaved?.({ projectId: identity.projectId, path: result.path, previousPath, saveAs })
+            if (options?.isCurrent?.() === false) return
             if (allChangesSaved) {
               savedCurrentRevision = true
               await portsRef.current.clearRecoveryProject().catch((error) => {
@@ -624,6 +673,14 @@ export function useCourseProjectLifecycle<TDraftToken>(
     if (!portsRef.current.desktopAvailable()) return
     return portsRef.current.subscribeSaveAndCloseRequest(() => saveProject(false))
   }, [saveProject])
+
+  useEffect(() => {
+    if (!portsRef.current.desktopAvailable()) return
+    return portsRef.current.subscribePreserveAndCloseRequest?.(async () => {
+      try { return await (portsRef.current.preserveBeforeClose?.() ?? Promise.resolve(false)) }
+      catch (error) { portsRef.current.reportError(readableError(error, '恢复稿尚未保存，已取消关闭。')); return false }
+    })
+  }, [])
 
   return useMemo(() => ({
     recentProjects,

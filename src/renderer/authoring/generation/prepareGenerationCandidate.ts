@@ -13,6 +13,7 @@ import { AuthoringToolFailure } from '../tools/executeAuthoringTool'
 import { expandGenerationSemanticCandidate } from './expandGenerationSemanticCandidate'
 import { captureBackgroundTargets } from '../tools/backgroundTool'
 import { captureSelectionReplacementScopes } from '../tools/semanticReplacementTool'
+import type { NativeInteractionVerificationInput, NativeInteractionVerificationReport } from './nativeInteractionVerification'
 
 export interface GenerationCommitPort {
   readDocument(): CourseProjectDocument
@@ -20,7 +21,8 @@ export interface GenerationCommitPort {
   readWorkspace(): WorkspaceIdentityV1
   readSessionGeneration(): number
   isRequestCurrent?(request: GenerationRequest): boolean
-  commit(step: EditorTransactionStep): boolean
+  verifyInteractions?(input: NativeInteractionVerificationInput): Promise<NativeInteractionVerificationReport>
+  commit(step: EditorTransactionStep, afterCommit?: GenerationCandidate['afterCommit']): boolean
 }
 
 function failureDiagnostics(error: unknown): GenerationFailure['diagnostics'] {
@@ -129,7 +131,7 @@ function replacementDependencies(candidate: GenerationCandidate) {
 
 /** Private candidate planning uses the existing product facade; the live document is never a scratchpad. */
 export function createGenerationCandidateCoordinator(port: GenerationCommitPort) {
-  const prepared = new Map<string, { request: GenerationRequest; step: EditorTransactionStep | null; receipt: GenerationCommitReceipt }>()
+  const prepared = new Map<string, { request: GenerationRequest; step: EditorTransactionStep | null; receipt: GenerationCommitReceipt; afterCommit?: GenerationCandidate['afterCommit'] }>()
   let epoch = 0
   let controller: AbortController | undefined
   return Object.freeze({
@@ -244,6 +246,29 @@ export function createGenerationCandidateCoordinator(port: GenerationCommitPort)
         } else receipts.set(item.id, receipt)
       }
       if (token !== epoch || !current(request, port)) throw new Error('stale：候选已过期')
+      // Run only the changed Native click rules through their real consumer.
+      // This is their own contract check, not Generated Component/Runtime admission.
+      let interactionChecks: NativeInteractionVerificationReport | undefined
+      try {
+        interactionChecks = await port.verifyInteractions?.({ before: initial, document: state.document, resources: state.resources,
+          signal: abort.signal, deadlineAt: request.execution?.deadlineAt ?? Date.now() + 30_000 })
+      } catch (error) {
+        if (error instanceof AuthoringToolFailure && error.diagnostics.some(value => value.code.startsWith('native-interaction-'))) {
+          const ruleId = error.diagnostics[0]?.path.at(-1)
+          const producer = [...receipts].find(([, value]) => value.affected.some(effect => effect.id === ruleId))?.[0]
+          const source = candidate.steps.find(step => step.id === producer)
+            ?? (candidate.steps.filter(step => step.tool === 'project.document').length === 1 ? candidate.steps.find(step => step.tool === 'project.document') : undefined)
+          // Attribute the aggregate Player check to the rule's producer, never
+          // to an unrelated last colour-edit step. Input changes permit repair;
+          // regenerated host rule ids cannot manufacture a new failure reason.
+          failureContext.stepId = source?.id; failureContext.tool = source?.tool; failureContext.destination = source?.destination
+          throw new AuthoringToolFailure(error.diagnostics.map(value => ({ ...value,
+            message: `${value.message} 位置：${value.path.join('/')}`,
+            path: source ? ['input'] : value.path })))
+        }
+        throw error
+      }
+      if (token !== epoch || !current(request, port)) throw new Error('stale：交互检查后候选已过期')
       const step = plans.length ? createEditorTransactionStep(initial, {
         projectId: initial.id, baseRevision: initial.revision, nextDocument: { ...state.document, revision: initial.revision + 1 },
         resourceChanges: foldResources(plans), selectionHint: plans.at(-1)?.selectionHint,
@@ -255,12 +280,13 @@ export function createGenerationCandidateCoordinator(port: GenerationCommitPort)
         affected: step ? [...receipts.values()].flatMap(value => value.affected) : [],
         resources: { assetIds: step ? [...new Set([...receipts.values()].flatMap(value => value.resources.assetIds))] : [],
           packageIds: step ? [...new Set([...receipts.values()].flatMap(value => value.resources.packageIds))] : [] } })
-      prepared.set(previewId, { request, step, receipt })
+      prepared.set(previewId, { request, step, receipt, afterCommit: candidate.afterCommit })
       return structuredClone({ previewId, candidateId: candidate.candidateId, summary: candidate.summary,
         beforeRevision: initial.revision, afterRevision: step?.nextDocument.revision ?? initial.revision,
         // These are preparation results, not successful live-project commit receipts.
         plannedEffects: [...receipts.values()].flatMap(value => value.affected),
         behaviorEvidence: [...receipts.values()].flatMap(value => value.behaviorEvidence ?? []),
+        ...(interactionChecks ? { interactionChecks } : {}),
         ...describeGenerationChanges(initial, step?.nextDocument ?? initial),
         document: step?.nextDocument ?? initial, resources: state.resources })
       } catch (error) { throw preparationError(error, failureContext, acquiredEvidence) }
@@ -270,7 +296,7 @@ export function createGenerationCandidateCoordinator(port: GenerationCommitPort)
       prepared.delete(previewId)
       if (!entry || !current(entry.request, port)) return { status: 'stale' as const }
       if (!entry.step) return { status: 'unchanged' as const, receipt: structuredClone(entry.receipt) }
-      return port.commit(entry.step) ? { status: 'committed' as const, beforeRevision: entry.step.baseRevision, afterRevision: entry.step.nextDocument.revision, receipt: structuredClone(entry.receipt) }
+      return port.commit(entry.step, entry.afterCommit) ? { status: 'committed' as const, beforeRevision: entry.step.baseRevision, afterRevision: entry.step.nextDocument.revision, receipt: structuredClone(entry.receipt) }
         : { status: 'stale' as const }
     },
   })

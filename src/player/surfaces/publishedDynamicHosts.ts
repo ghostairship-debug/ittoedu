@@ -1140,6 +1140,7 @@ class PublishedInteractionCourseSession extends PublishedCourseSession {
         rules: this.#payload.globalInteractions,
         surface: surfacePort,
         session: this.#interactionSessionPort,
+        scope: 'global',
         ...(reportDiagnostic ? { reportDiagnostic } : {}),
       })
     }

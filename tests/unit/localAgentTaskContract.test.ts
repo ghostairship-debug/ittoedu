@@ -25,11 +25,18 @@ describe('local AI task identity and canonical commit fence', () => {
     expect(text).not.toHaveProperty('phase')
     expect(localAgentEventV2Schema.safeParse({ ...text, phase: 'invented-private-reasoning' }).success).toBe(false)
     const message = localAgentEventV2Schema.parse({ ...base, kind: 'user-message', itemId: 'input-id', purpose: 'supplement', text: '保留背景' })
-    const record = { version: 2, id: f.task.sessionId, adapter: 'codex', workspace: f.task.workspace, externalSessionId: null,
+    const record = { version: 3, id: f.task.sessionId, adapter: 'codex', workspace: f.task.workspace, externalSessionId: null,
       workingDirectoryId: f.task.sessionId, tasks: [f.task], observations: [f.observation], hostResults: [], events: [message] }
     expect(localAgentRecordV2Schema.safeParse(record).success).toBe(true)
     expect(localAgentRecordV2Schema.safeParse({ ...record, events: [{ ...message, taskId: randomUUID() }] }).success).toBe(false)
     expect(localAgentEventV2Schema.safeParse({ ...message, rawStore: {} }).success).toBe(false)
+  })
+  it('accepts explicit lesson discussion identity but rejects lesson edit targets and project receipts', () => {
+    const f = fixture(), workspace = { version: 1, kind: 'lesson', lessonId: randomUUID(), normalizedDirectory: 'c:/lessons/algebra', conversationId: randomUUID() }
+    expect(aiTaskSchema.safeParse({ ...f.task, workspace, intent: 'plan', writeDestinations: [], committedResultIds: [] }).success).toBe(true)
+    expect(aiTaskSchema.safeParse({ ...f.task, workspace, intent: 'edit', writeDestinations: [] }).success).toBe(false)
+    expect(aiProposalSchema.safeParse({ ...f.proposal, workspace }).success).toBe(false)
+    expect(generationRequestSchema.safeParse({ ...f.request, workspace }).success).toBe(false)
   })
   it('preserves canonical nulls and accepts the exact authorized candidate', () => {
     const f = fixture()
@@ -53,7 +60,7 @@ describe('local AI task identity and canonical commit fence', () => {
   })
   it('rejects same project ID at another path, stale epochs and refreshed observations', () => {
     const f = fixture()
-    expect(() => assertAiProposalCurrent(f.task, f.observation, f.request, { ...f.proposal, workspace: { ...f.task.workspace, normalizedPath: 'c:/lessons/copy.h5lesson' } })).toThrow('stale-task')
+    expect(() => assertAiProposalCurrent(f.task, f.observation, f.request, { ...f.proposal, workspace: { ...f.request.workspace, normalizedPath: 'c:/lessons/copy.h5lesson' } })).toThrow('stale-task')
     expect(() => assertAiProposalCurrent({ ...f.task, epoch: 1 }, f.observation, f.request, f.proposal)).toThrow('stale-task')
     expect(() => assertAiProposalCurrent({ ...f.task, observationId: randomUUID() }, f.observation, f.request, f.proposal)).toThrow('stale-observation')
     expect(() => assertAiProposalCurrent(f.task, { ...f.observation, documentRevision: 8 }, f.request, f.proposal)).toThrow('stale-request')
@@ -141,7 +148,7 @@ describe('local AI task identity and canonical commit fence', () => {
   it('round-trips V2 records without treating a native turn end as task completion', () => {
     const f = fixture()
     const event = localAgentEventV2Schema.parse({ version: 2, taskId: f.task.taskId, epoch: 0, workspace: f.task.workspace, sessionId: f.task.sessionId, runId: randomUUID(), nativeTurnId: 'native-1', sequence: 1, time: 0, kind: 'turn-ended', status: 'completed', failure: null })
-    const record = { version: 2, id: f.task.sessionId, adapter: 'codex', workspace: f.task.workspace, externalSessionId: 'native-session', workingDirectoryId: randomUUID(), tasks: [f.task], observations: [f.observation], hostResults: [], events: [event] }
+    const record = { version: 3, id: f.task.sessionId, adapter: 'codex', workspace: f.task.workspace, externalSessionId: 'native-session', workingDirectoryId: randomUUID(), tasks: [f.task], observations: [f.observation], hostResults: [], events: [event] }
     expect(localAgentRecordV2Schema.parse(JSON.parse(JSON.stringify(record))).tasks[0]?.status).toBe('running')
     expect(localAgentRecordV2Schema.safeParse({ ...record, events: [{ ...event, sequence: 2 }] }).success).toBe(false)
     expect(localAgentRecordV2Schema.safeParse({ ...record, events: [{ ...event, taskId: randomUUID() }] }).success).toBe(false)
@@ -157,7 +164,7 @@ import { LocalAgentHarness } from '../../src/main/localAgent/harness'
 import { createWorkspaceIdentity } from '../../src/main/workspaceIdentity'
 
 describe('V2 repository owner wiring', () => {
-  it('persists a new session as V2 and does not rewrite a V1 file', async () => {
+  it('persists only the new record version and never reads or resumes a V1 file', async () => {
     const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'agent-v2-owner-'))
     const workspace = createWorkspaceIdentity('lesson', path.join(directory, 'course.h5lesson'))
     const v1Id = randomUUID()
@@ -177,14 +184,12 @@ describe('V2 repository owner wiring', () => {
       const id = await harness.start(workspace, 'codex', 'hello')
       await expect.poll(() => harness.running).toBe(false)
       const listed = await harness.list(workspace)
-      expect(listed.records.some(record => record.id === v1Id && record.status === 'completed')).toBe(true)
+      expect(listed.records.some(record => record.id === v1Id && record.status === 'completed')).toBe(false)
       expect(JSON.parse(await fs.readFile(path.join(v1Dir, `${v1Id}.json`), 'utf8')).version).toBe(1)
       const v2Path = path.join(new LocalAgentRepository(directory).v2Directory(workspace), `${id}.json`)
-      expect(JSON.parse(await fs.readFile(v2Path, 'utf8')).version).toBe(2)
+      expect(JSON.parse(await fs.readFile(v2Path, 'utf8')).version).toBe(3)
       expect(JSON.parse(await fs.readFile(v2Path, 'utf8')).tasks[0]).toMatchObject({ intent: 'discuss', status: 'completed', committedResultIds: [] })
-      const resumed = await harness.resume(workspace, v1Id, 'continue')
-      await expect.poll(() => harness.running).toBe(false)
-      expect(resumed).not.toBe(v1Id)
+      await expect(harness.resume(workspace, v1Id, 'continue')).rejects.toThrow('会话不存在')
       expect(JSON.parse(await fs.readFile(path.join(v1Dir, `${v1Id}.json`), 'utf8')).version).toBe(1)
     } finally {
       await harness.close()

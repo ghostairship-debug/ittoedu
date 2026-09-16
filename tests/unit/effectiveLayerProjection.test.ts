@@ -226,13 +226,13 @@ function v9ProjectionFixture(): CourseProjectDocument {
         surfaceLayerItems: [],
         layout: { readingWidth: 760, wideContentWidth: 1120 },
         blocks: [
-          { type: 'heading', id: 'flow-h1', level: 1, text: '讲义标题' },
+          { type: 'heading', id: 'flow-h1', level: 1, content: { inlines: [{ type: 'text', text: '讲义标题' }] } },
           {
             type: 'section',
             id: 'flow-section',
-            title: '小节',
+            title: { inlines: [{ type: 'text', text: '小节' }] },
             collapsedByDefault: false,
-            blocks: [{ type: 'paragraph', id: 'flow-p1', text: '普通段落' }],
+            blocks: [{ type: 'paragraph', id: 'flow-p1', content: { inlines: [{ type: 'text', text: '普通段落' }] } }],
           },
         ],
       },
@@ -320,7 +320,7 @@ describe('effective layer projection', () => {
     })
     expect(byId['slide-title']?.frame).toEqual(byId['slide-title']?.item.frame)
     expect(byId['teacher-controller']).toMatchObject({
-      contentSummary: { kind: 'native', nativeType: 'teacher-controller' },
+      contentSummary: { kind: 'component', packageId: 'com.ittoedu.teacher-controller' },
     })
     expect('schemaVersion' in byId['slide-title']!).toBe(false)
     expect(byId['teacher-controller']).toMatchObject({
@@ -391,7 +391,7 @@ describe('effective layer projection', () => {
     const expectedControllerAddress = makeAuthoringAddress({
       projectId: project.id,
       scope: 'global',
-      carrier: 'native',
+      carrier: 'component',
       layerItemId: 'teacher-controller',
       field: 'item',
     })

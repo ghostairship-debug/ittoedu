@@ -14,7 +14,7 @@ export function mergeChatEvents(previous: readonly LocalAgentEvent[], incoming: 
   return [...events.values()].sort((a, b) => a.time - b.time || (a.sessionId === b.sessionId ? a.sequence - b.sequence : 0))
 }
 export function chatRecordTime(record: LocalAgentRecord): number {
-  return record.generationRequest?.execution?.startedAt ?? record.events[0]?.time ?? 0
+  return record.generationRequest?.execution?.startedAt ?? (record.events.length ? Math.min(...record.events.map(event => event.time)) : 0)
 }
 export function latestChatEditRequest(records: readonly LocalAgentRecord[], current: LocalAgentRecord | undefined): GenerationRequest | undefined {
   if (!current) return undefined

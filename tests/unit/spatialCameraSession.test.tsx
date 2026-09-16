@@ -1,3 +1,4 @@
+import { controllerPackages } from '../fixtures/teacherController'
 import { cleanup, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { zoomSpatialSessionCamera } from '@/renderer/course/spatialEditorCommands'
@@ -60,6 +61,7 @@ describe('Spatial camera session and try-run host', () => {
     const host = await mountSpatialLocationTryRun({
       container,
       project: session!.history.present,
+      components: controllerPackages,
       locationId: session!.selection.locationId,
       width: 640,
       height: 360,
