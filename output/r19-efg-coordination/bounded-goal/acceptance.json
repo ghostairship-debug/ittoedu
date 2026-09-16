@@ -1,0 +1,65 @@
+{
+  "packageVersion": 1,
+  "frozenAt": "2026-09-16",
+  "frozenBy": "r19 work package G (pre-run, before any CLI execution)",
+  "note": "本文件在三个通道（Codex/OpenCode/Claude）任何真实运行之前冻结；运行后不得追加或修改验收条件。失败保留为失败，不后补解释。",
+  "fixture": {
+    "copy": "bounded-goal-lesson.h5lesson",
+    "source": "tests/fixtures/architecture-baseline/slide-heavy.h5lesson",
+    "sha256": "a1901e684ab3e0e3754d25086c42cb22d22b73c524e1a5bb29582c4e5fb85d0d",
+    "projectId": "arch-0-slide-heavy",
+    "startRevision": 1
+  },
+  "teacherRequest": "teacher-request.txt（逐字发送；不含内部工具名、协议、候选或提交步骤）",
+  "allowedChanges": [
+    "仅允许改动 slide-scene-intro 场景的呈现状态（slide-state-evidence 中 slide-intro-callout 的填充/边框样式覆盖）",
+    "仅允许在 slide-scene-intro 场景新增或修改互动规则（含实现这些规则所必需的 course-state 声明）",
+    "允许宿主正式事务产生的 revision 递增与元数据更新"
+  ],
+  "preservedContent": [
+    "slide-intro-title 文字内容逐字保持：判别式决定一元二次方程的根",
+    "slide-intro-formula 公式、slide-intro-hero 图片素材与既有 scene.enter 规则（图片淡入 + 旁白播放）不变",
+    "slide-state-base 中 slide-intro-callout 的样式不变：fillColor #dbeafe、borderColor #2563eb",
+    "slide-scene-practice、slide-scene-summary 两个场景的全部内容不变",
+    "教师控制器组件、Runtime 实例、global 层、位置顺序与 startLocationId=slide-location-intro 不变",
+    "slide-state-base 初始状态不变：slide-intro-hero 与 slide-intro-component 隐藏"
+  ],
+  "expectedVisibleResults": [
+    {
+      "id": "R1-initial-view",
+      "check": "Player 从起始位置打开：停留在导入页基础态（location slide-location-intro，state slide-state-base）；slide-intro-hero 与 slide-intro-component 不可见；slide-intro-callout 填充 #dbeafe、边框 #2563eb"
+    },
+    {
+      "id": "R2-state-graphics",
+      "check": "进入证据态后 slide-intro-callout 填充为明确绿色系（绿色分量显著大于红、蓝分量），边框为明确红色系（红色分量显著大于绿、蓝分量）；记录实际色值。两个状态的图形必须可区分，不接受两态图形相同"
+    },
+    {
+      "id": "R3-click-reveal",
+      "check": "在基础态点击 slide-intro-title：slide-intro-hero 与 slide-intro-component 变为可见（切换到 slide-state-evidence）；不接受点击后无可见变化"
+    },
+    {
+      "id": "R4-click-destination",
+      "check": "从基础态直接点击 slide-intro-callout：实际目的地为练习页（location slide-location-practice）。停留在导入页、仅切换呈现状态、或先显示证据态都计失败——step.next 从基础态只会推进到 evidence 步骤，不等于进入练习页"
+    },
+    {
+      "id": "R5-formal-delivery",
+      "check": "存在当前请求对应的宿主 committed 回执且 revision 从 1 递增；prechecked / ready-for-host / 自然语言宣称完成均不算交付。保存并重开工程后 R1–R4 行为保持"
+    }
+  ],
+  "clickDestinations": {
+    "slide-intro-title": {
+      "fromState": "slide-state-base",
+      "expected": "同页切换到 slide-state-evidence（location slide-location-evidence 对应状态），不得离开导入页"
+    },
+    "slide-intro-callout": {
+      "fromState": "slide-state-base",
+      "expected": "location slide-location-practice（练习页第一步）；不得停留在 slide-scene-intro 的任何状态"
+    }
+  },
+  "outOfScope": [
+    "不要求修改练习页、总结页内容",
+    "不要求新增页面、组件或素材",
+    "不要求离线导出；导出检查另行复用既有链路",
+    "三通道独立副本运行；共享 Player/持久化证据按依赖复用，但每个模型制品仍核对其受影响的真实结果"
+  ]
+}
