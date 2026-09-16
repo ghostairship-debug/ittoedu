@@ -29,7 +29,8 @@ import { BACKGROUND_E2E_ENV } from '../../src/main/windowVisibility'
 import { expectBackgroundWindowsIsolated } from './expectBackgroundWindowsIsolated'
 
 const root = resolve(__dirname, '..', '..')
-const outputDir = join(tmpdir(), APP_E2E_TEMP_DIRECTORY_NAME)
+const focusedTextGates = process.env.COURSEWARE_E2E_TEXT_GATES === '1' || process.env.COURSEWARE_E2E_EXPORT_GATES === '1'
+const outputDir = join(tmpdir(), APP_E2E_TEMP_DIRECTORY_NAME, ...(focusedTextGates ? [`text-gates-${process.pid}`] : []))
 const explicitLegacyImportDialogName = ['需要显式导入', '旧版工程'].join('')
 // Independent Playwright CLI processes are not serialized by one another.
 // Keep one profile inside this worker so recovery tests can relaunch against
@@ -98,7 +99,7 @@ const lessonHtmlPath = join(
   'photosynthesis-lesson',
   'photosynthesis-interactive-lesson.html',
 )
-const visualOutputDirectory = join(root, 'output', 'playwright')
+const visualOutputDirectory = join(root, 'output', 'playwright', ...(focusedTextGates ? [`r19-text-gates-${process.pid}`] : []))
 const crossSurfaceEvidenceDirectory = join(
   visualOutputDirectory,
   'v8-cross-surface',
@@ -342,6 +343,7 @@ async function launchEditor(options: {
     env: {
       ...process.env,
       ELECTRON_DISABLE_SECURITY_WARNINGS: 'true',
+      ...(focusedTextGates ? { VITE_DEV_SERVER_URL: '' } : {}),
       [BACKGROUND_E2E_ENV]: requestedBackgroundE2e,
     },
   })
@@ -358,6 +360,16 @@ async function launchEditor(options: {
   page.on('request', (request) => {
     if (/^https?:/i.test(request.url())) externalRequests.push(request.url())
   })
+  if (focusedTextGates) {
+    await page.getByRole('button', { name: '新建独立课件', exact: true }).waitFor()
+    const recovery = page.getByRole('alertdialog', { name: '发现未完成的本地恢复副本' })
+    const hasRecovery = await recovery.waitFor({ state: 'visible', timeout: 1000 }).then(() => true).catch(() => false)
+    if (options.preserveRecoveryPrompt && hasRecovery) {
+      return { app, page, pageErrors, consoleErrors, consoleWarnings, externalRequests }
+    }
+    if (hasRecovery) await recovery.getByRole('button', { name: '丢弃副本' }).click()
+    await page.getByRole('button', { name: '新建独立课件', exact: true }).click()
+  }
   await page.locator('[data-testid="canvas-stage"] canvas').waitFor()
   await expectBackgroundWindowsIsolated(app, requestedBackgroundE2e === '1')
   if (!options.preserveRecoveryPrompt) {
@@ -774,6 +786,8 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
     ]) {
       if (existsSync(file)) rmSync(file)
     }
+    // These named manual gates create their content through UI and need no unrelated fixtures.
+    if (focusedTextGates) return
     const globalManifest = {
       schemaVersion: 4,
       runtimeApiVersion: 4,
@@ -2787,7 +2801,7 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
         await exported.goto(pathToFileURL(htmlPath).toString())
         await expectCanvasPlayerScene(exported, 0)
         await expect(exported.getByTestId('teacher-escape-controls')).toHaveCount(0)
-        await expect(exported.locator('.slide-native-teacher-controller')).toBeVisible()
+        await expect(exported.getByRole('navigation', { name: '教师控制台', exact: true })).toBeVisible()
         const exportedCanvas = exported.locator('.slide-published-adapter')
         const firstPage = await exportedCanvas.screenshot()
         await navigateCanvasPlayerByKeyboard(exported, 'PageDown', 1)
@@ -2818,7 +2832,7 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
         await packaged.goto(pathToFileURL(join(webPackageDirectory, 'index.html')).toString())
         await expectCanvasPlayerScene(packaged, 0)
         await expect(packaged.getByTestId('teacher-escape-controls')).toHaveCount(0)
-        await expect(packaged.locator('.slide-native-teacher-controller')).toBeVisible()
+        await expect(packaged.getByRole('navigation', { name: '教师控制台', exact: true })).toBeVisible()
         await navigateCanvasPlayerByKeyboard(packaged, 'PageDown', 1)
         await navigateCanvasPlayerByKeyboard(packaged, 'PageUp', 0)
         expect(packageRequests).toEqual([])

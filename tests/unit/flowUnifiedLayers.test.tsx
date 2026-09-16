@@ -100,14 +100,14 @@ function courseShell(): Omit<CourseProjectDocument, 'locations' | 'startLocation
 
 function createFlowProject(): CourseProjectDocument {
   const blocks: FlowBlock[] = [
-    { id: 'h1', type: 'heading', level: 1, text: '标题一' },
-    { id: 'p-body', type: 'paragraph', text: '普通段落' },
+    { id: 'h1', type: 'heading', level: 1, content: { inlines: [{ type: 'text', text: '标题一' }] }},
+    { id: 'p-body', type: 'paragraph', content: { inlines: [{ type: 'text', text: '普通段落' }] }},
     {
       id: 'media-inline',
       type: 'media',
       assetId: 'asset-image',
       mediaKind: 'image',
-      caption: '文中图',
+      caption: { inlines: [{ type: 'text', text: '文中图' }] },
       layout: 'content-width',
     },
     {
@@ -117,7 +117,7 @@ function createFlowProject(): CourseProjectDocument {
       props: { title: '文中组件' },
       staticFallbackAssetId: 'asset-fallback',
     },
-    { id: 'h2', type: 'heading', level: 2, text: '标题二' },
+    { id: 'h2', type: 'heading', level: 2, content: { inlines: [{ type: 'text', text: '标题二' }] }},
   ]
   const project: CourseProjectDocument = {
     ...courseShell(),
@@ -159,7 +159,7 @@ describe('Flow unified overlay projection', () => {
     ]))
     expect(projection.documentOwned.every((entry) => entry.membership === 'document-block')).toBe(true)
     expect(projection.documentOwned.every((entry) => entry.inUnifiedLayers === false)).toBe(true)
-    expect(flowBlockLayerMembership({ id: 'p-body', type: 'paragraph', text: '普通段落' }))
+    expect(flowBlockLayerMembership({ id: 'p-body', type: 'paragraph', content: { inlines: [{ type: 'text', text: '普通段落' }] }}))
       .toBe('document-block')
 
     expect(projection.nodesTabIds).not.toContain('h1')

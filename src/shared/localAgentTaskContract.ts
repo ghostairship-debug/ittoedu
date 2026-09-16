@@ -1,7 +1,7 @@
 import { z } from 'zod'
 import { authoringObservationSpatialViewSchema } from './authoringObservation'
 import { aiTaskIdentityFields, aiQuestionSchema, aiInputDeliverySchema, type AiUserInput } from './localAgentInteraction'
-import { workspaceIdentityV1Schema, workspaceIdentityKey } from './workspaceIdentity'
+import { workspaceIdentityV1Schema, aiWorkspaceIdentitySchema, lessonAgentWorkspaceSchema, workspaceIdentityKey } from './workspaceIdentity'
 import { authoringToolDestinationV1Schema } from './authoringToolContract'
 import { generationAfterCommitSchema, generationFailureSchema, generationCandidateSchema, generationCommitReceiptSchema } from './generationContract'
 import {
@@ -65,6 +65,8 @@ export const aiTaskSchema = z.object({
   completion: z.object({ version: z.literal(1), resultId: z.uuid(), outcome: z.enum(['modified', 'unchanged']) }).strict().optional(),
   execution: z.object({
     startedAt: revision, deadlineAt: revision, turnCount: revision,
+    lastActivityAt: revision.optional(),
+    budgetStopReason: z.enum(['resource-budget', 'native-inactivity']).optional(),
     formatRepairs: revision, stagnantCandidates: revision,
     lastChangeKey: z.string().max(160000).nullable(), lastDiagnostic: z.string().max(4000).nullable(),
     timing: aiTaskTimingSchema.optional(),
@@ -72,11 +74,12 @@ export const aiTaskSchema = z.object({
   }).strict().optional(),
   pendingInputs: z.array(z.object({ inputId: z.uuid(), text: z.string().max(20000), kind: z.enum(['correct', 'supplement']) }).strict()).max(100).optional(),
 }).strict().superRefine((task, ctx) => {
+  if ('kind' in task.workspace && task.intent === 'edit') ctx.addIssue({ code: 'custom', message: '课例讨论目标不能提交工程编辑' })
   if (task.intent !== 'edit' && task.writeDestinations.length) ctx.addIssue({ code: 'custom', message: '讨论和计划没有工程写入授权' })
   if (new Set(task.committedResultIds).size !== task.committedResultIds.length) ctx.addIssue({ code: 'custom', message: '重复已提交结果' })
   for (const destination of task.writeDestinations) {
     const target = destination.kind === 'update' ? destination.target : destination.scope
-    if (target.projectId !== task.workspace.projectId) ctx.addIssue({ code: 'custom', message: '写入授权不属于当前工程' })
+    if (('kind' in task.workspace || target.projectId !== task.workspace.projectId)) ctx.addIssue({ code: 'custom', message: '写入授权不属于当前工程' })
   }
   const observationsByRun = new Map<string, string>()
   for (const entry of [...task.execution?.timing?.entries ?? [], ...task.execution?.inputMetrics?.entries ?? []]) {
@@ -115,7 +118,7 @@ export const aiObservationSchema = z.object({
 export type AiObservation = z.infer<typeof aiObservationSchema>
 
 export const aiProposalIdentitySchema = z.object({
-  ...taskIdentity, observationId: z.uuid(), requestId: z.uuid(), candidateId: z.uuid(),
+  ...taskIdentity, workspace: workspaceIdentityV1Schema, observationId: z.uuid(), requestId: z.uuid(), candidateId: z.uuid(),
 }).strict()
 export const aiProposalSchema = aiProposalIdentitySchema.extend({
   version: z.literal(1), candidate: generationCandidateSchema,
@@ -174,14 +177,14 @@ export const localAgentEventV2Schema = z.discriminatedUnion('kind', [
 ]).superRefine((event, ctx) => {
   if (event.kind === 'turn-ended' && ((event.status === 'failed') !== (event.failure !== null))) ctx.addIssue({ code: 'custom', message: '失败回合必须且只能携带failure' })
   const nested = event.kind === 'question' ? event.question : event.kind === 'input-delivery' ? event.delivery : null
-  if (nested && (nested.taskId !== event.taskId || nested.epoch !== event.epoch || nested.workspace.projectId !== event.workspace.projectId || nested.workspace.normalizedPath !== event.workspace.normalizedPath)) ctx.addIssue({ code: 'custom', message: '嵌套事件身份不一致' })
+  if (nested && (nested.taskId !== event.taskId || nested.epoch !== event.epoch || workspaceIdentityKey(nested.workspace) !== workspaceIdentityKey(event.workspace))) ctx.addIssue({ code: 'custom', message: '嵌套事件身份不一致' })
 })
 export type LocalAgentEventV2 = z.infer<typeof localAgentEventV2Schema>
 type WithoutRecordEnvelope<T> = T extends unknown ? Omit<T, 'version' | 'sessionId' | 'sequence' | 'time'> : never
 export type LocalAgentNativeEvent = WithoutRecordEnvelope<LocalAgentEventV2>
 
 export const localAgentRecordV2Schema = z.object({
-  version: z.literal(2), id: z.uuid(), adapter: localAgentIdSchema, workspace: workspaceIdentityV1Schema,
+  version: z.literal(3), id: z.uuid(), adapter: localAgentIdSchema, workspace: aiWorkspaceIdentitySchema, lessonWorkspace: lessonAgentWorkspaceSchema.optional(),
   externalSessionId: identity.nullable(), workingDirectoryId: z.uuid(),
   tasks: z.array(aiTaskSchema).max(1000), observations: z.array(aiObservationSchema).max(1000),
   hostResults: z.array(aiHostResultSchema).max(1000), events: z.array(localAgentEventV2Schema).max(20000),
@@ -189,7 +192,7 @@ export const localAgentRecordV2Schema = z.object({
   const fail = (message: string) => ctx.addIssue({ code: 'custom', message })
   const tasks = new Map(record.tasks.map(task => [task.taskId, task]))
   if (tasks.size !== record.tasks.length) fail('重复任务')
-  const belongs = (value: { workspace: { projectId: string; normalizedPath: string } }) => value.workspace.projectId === record.workspace.projectId && value.workspace.normalizedPath === record.workspace.normalizedPath
+  const belongs = (value: { workspace: AiTask['workspace'] }) => workspaceIdentityKey(value.workspace) === workspaceIdentityKey(record.workspace)
   for (const task of record.tasks) if (!belongs(task) || task.sessionId !== record.id || task.adapter !== record.adapter) fail('任务不属于当前会话')
   for (const [index, event] of record.events.entries()) {
     const task = tasks.get(event.taskId)
@@ -233,6 +236,8 @@ export interface LocalAgentCliAdapterV2 {
   configure(input: z.infer<typeof localAgentConfigurationSchema>): Promise<LocalAgentCapabilities>
   startTurn(input: z.infer<typeof localAgentTurnInputSchema>, observationFiles: ReadonlyMap<string, string>): Promise<{ nativeTurnId: string | null; inputMetrics?: LocalAgentInputMetrics; configuration?: Pick<AiTaskConfigurationRun, 'sent' | 'confirmed'> }>
   input(input: AiUserInput): Promise<z.infer<typeof aiInputDeliverySchema>>
+  /** Interrupt only the native turn; a confirmed terminal permits same-session continuation. */
+  interruptTurn?(): Promise<void>
   events(): AsyncIterable<LocalAgentNativeEvent>
   close(): Promise<void>
   probe?(): Promise<LocalAgentProbe>

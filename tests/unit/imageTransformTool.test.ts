@@ -1,3 +1,4 @@
+import { createArchiveFixture as createCourseProjectArchive } from '../fixtures/teacherController'
 // @vitest-environment node
 import { describe, expect, it, vi } from 'vitest'
 import { readFileSync } from 'node:fs'
@@ -17,8 +18,8 @@ import { courseAuthoringScopeFromLocation, makeLayerItemAuthoringAddress } from 
 import { findFlowBlockRecursive, makeFlowBlockAuthoringAddress } from '@/renderer/course/flowDocumentModel'
 import { resolveEffectiveLayerTarget } from '@/renderer/course/effectiveLayerCommands'
 import { encodeImageTransformPng } from '@/renderer/project/imageTransform'
-import { createCourseProjectArchive, openCourseProjectArchive } from '@/renderer/project/courseProjectArchive'
-import { buildPublishedCourseV2Payload } from '@/renderer/export/course'
+import { openCourseProjectArchive } from '@/renderer/project/courseProjectArchive'
+import { buildPublishedFixture as buildPublishedCourseV2Payload } from '../fixtures/teacherController'
 import type { AuthoringToolDestinationV1 } from '@/shared/authoringToolContract'
 import type { CourseProjectDocument } from '@/shared/courseProjectTypes'
 
@@ -37,7 +38,7 @@ function setup(kind: 'slide' | 'flow' | 'flow-overlay' | 'spatial-2d' = 'slide',
   if (surface.type === 'slide') surface.scenes[0]!.layerItems.push(makeImage('selected-image', 1), makeImage('shared-image', 2))
   else if (surface.type === 'spatial-2d') surface.world.layerItems.push(makeImage('selected-image', 1), makeImage('shared-image', 2))
   else if (kind === 'flow') surface.blocks.push(...['selected-image', 'shared-image'].map(id => ({ id, type: 'media' as const,
-    assetId: 'original', mediaKind: 'image' as const, layout: 'content-width' as const, caption: `保留说明 ${id}` })))
+    assetId: 'original', mediaKind: 'image' as const, layout: 'content-width' as const, caption: { inlines: [{ type: 'text' as const, text: `保留说明 ${id}` }] } })))
   else surface.surfaceLayerItems.push(...['selected-image', 'shared-image'].map((id, index) => ({ item: makeImage(id, index + 1),
     visibility: { mode: 'all' as const, locationIds: [] } })))
   const address = (id: string) => kind === 'flow' ? makeFlowBlockAuthoringAddress({ projectId: project.id, surfaceId: surface.id, blockId: id })

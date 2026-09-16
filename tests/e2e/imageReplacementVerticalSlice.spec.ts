@@ -187,7 +187,7 @@ function attachDiagnostics(page: Page, diagnostics: Diagnostics): void {
   })
 }
 
-async function launchEditor(): Promise<LaunchedEditor> {
+async function launchEditor(standalone = false): Promise<LaunchedEditor> {
   const userDataPath = mkdtempSync(
     join(tmpdir(), `${APP_E2E_TEMP_DIRECTORY_NAME}-vs06-${process.pid}-${launchSequence++}-`),
   )
@@ -222,6 +222,7 @@ async function launchEditor(): Promise<LaunchedEditor> {
     context.on('page', attach)
     const page = await app.firstWindow()
     attach(page)
+    if (standalone) await page.getByRole('button', { name: '新建独立课件', exact: true }).click()
     await page.locator('[data-testid="canvas-stage"] canvas').waitFor()
     await expectBackgroundWindowsIsolated(app, true)
     const recoveryDialog = page.getByRole('alertdialog', {
@@ -814,7 +815,7 @@ test.describe.serial('ARCH-1 VS-06 image replacement desktop regression', () => 
 
   test('Flow-heavy and Mixed/Spatial copies reopen and current-location try-run', async () => {
     test.setTimeout(150_000)
-    const launch = await launchEditor()
+    const launch = await launchEditor(true)
     try {
       await openProject(
         launch.app,

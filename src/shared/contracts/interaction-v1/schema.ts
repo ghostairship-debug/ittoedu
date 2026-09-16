@@ -266,8 +266,7 @@ export const interactionActionStepSchema = z.object({
   action: interactionActionSchema,
 }).strict()
 
-export const interactionRuleSchema: z.ZodType<InteractionRule> = z.object({
-  id: stableIdSchema,
+const interactionRuleContentObject = z.object({
   name: z.string().trim().min(1).max(80).optional(),
   enabled: z.boolean(),
   trigger: interactionTriggerSchema,
@@ -276,7 +275,9 @@ export const interactionRuleSchema: z.ZodType<InteractionRule> = z.object({
   actions: z.array(interactionActionStepSchema)
     .min(1)
     .max(MAX_INTERACTION_ACTIONS),
-}).strict().superRefine((rule, context) => {
+}).strict()
+
+function refineInteractionRule(rule: Omit<InteractionRule, 'id'>, context: z.RefinementCtx) {
   if (rule.actions[0]?.start !== 'after-previous') {
     context.addIssue({
       code: 'custom',
@@ -305,7 +306,14 @@ export const interactionRuleSchema: z.ZodType<InteractionRule> = z.object({
       })
     }
   })
-})
+}
+
+/** Canonical authoring input: the host owns the outer rule identity. */
+export const interactionRuleContentSchema = interactionRuleContentObject.superRefine(refineInteractionRule)
+export const interactionRuleSchema: z.ZodType<InteractionRule> = z.object({
+  id: stableIdSchema,
+  ...interactionRuleContentObject.shape,
+}).strict().superRefine(refineInteractionRule)
 
 function addScopeUniquenessIssues(
   rules: readonly InteractionRule[],

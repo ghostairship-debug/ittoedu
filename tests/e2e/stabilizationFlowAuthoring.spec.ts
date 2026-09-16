@@ -1,8 +1,8 @@
+import { plainDocumentText } from '../../src/shared/document/content'
 import {
   mkdtempSync,
   readFileSync,
   rmSync,
-  statSync,
   writeFileSync,
 } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -139,6 +139,7 @@ async function launchEditor(): Promise<LaunchedEditor> {
     })
     const page = await app.firstWindow()
     attach(page)
+    await page.getByRole('button', { name: '新建独立课件', exact: true }).click()
     await page.locator('[data-testid="canvas-stage"] canvas').waitFor()
     await expectBackgroundWindowsIsolated(app, true)
     const professional = page.getByRole('button', { name: '专业' })
@@ -204,7 +205,7 @@ function prepareWaveCArchive(projectPath: string): void {
     {
       id: 'flow-paragraph',
       type: 'paragraph',
-      text: FORMAT_TEXT,
+      content: { inlines: [{ type: 'text', text: FORMAT_TEXT }] },
     },
     structuredClone(originalFormula),
     structuredClone(originalSection),
@@ -214,7 +215,7 @@ function prepareWaveCArchive(projectPath: string): void {
       assetId: 'clip',
       mediaKind: 'video',
       altText: '待编辑视频',
-      caption: '待编辑题注',
+      caption: { inlines: [{ type: 'text', text: '待编辑题注' }] },
       layout: 'content-width',
     },
     {
@@ -223,7 +224,7 @@ function prepareWaveCArchive(projectPath: string): void {
       assetId: 'flow-image',
       mediaKind: 'image',
       altText: '正文宽图片',
-      caption: '正文宽',
+      caption: { inlines: [{ type: 'text', text: '正文宽' }] },
       layout: 'content-width',
     },
     {
@@ -232,7 +233,7 @@ function prepareWaveCArchive(projectPath: string): void {
       assetId: 'photo',
       mediaKind: 'image',
       altText: '较宽图片',
-      caption: '较宽',
+      caption: { inlines: [{ type: 'text', text: '较宽' }] },
       layout: 'wide',
     },
     {
@@ -241,7 +242,7 @@ function prepareWaveCArchive(projectPath: string): void {
       assetId: 'clip',
       mediaKind: 'video',
       altText: '全宽讲解视频',
-      caption: '全宽',
+      caption: { inlines: [{ type: 'text', text: '全宽' }] },
       layout: 'full-width',
     },
   ]
@@ -287,7 +288,7 @@ function prepareWaveCArchive(projectPath: string): void {
       ...assetSource.assetFiles,
       'clip-replacement': sourceClipBytes,
     },
-    componentFiles: {},
+    componentFiles: { ...flowSource.componentFiles, ...assetSource.componentFiles },
   }, { mtime: '2026-08-25T00:00:00.000Z' }))
 }
 
@@ -308,13 +309,10 @@ function readProject(projectPath: string): CourseProjectDocument {
   return openCourseProjectArchive(new Uint8Array(readFileSync(projectPath))).project
 }
 
-async function saveCurrent(page: Page, projectPath: string): Promise<CourseProjectDocument> {
-  const previousMtime = statSync(projectPath).mtimeMs
+async function saveCurrent(page: Page, projectPath: string, savedMatches: (project: CourseProjectDocument) => boolean): Promise<CourseProjectDocument> {
   const saveButton = page.getByRole('button', { name: '保存（Ctrl+S）' })
-  await page.waitForTimeout(25)
   await saveButton.click()
-  await expect.poll(() => statSync(projectPath).mtimeMs, { timeout: 15_000 })
-    .toBeGreaterThan(previousMtime)
+  await expect.poll(() => savedMatches(readProject(projectPath)), { timeout: 15_000 }).toBe(true)
   await expect(saveButton).toBeEnabled()
   return readProject(projectPath)
 }
@@ -365,7 +363,7 @@ async function selectRealTextRange(
   const start = await flowTextPoint(editor, startOffset, 'start')
   const end = await flowTextPoint(editor, endCharacterOffset, 'end')
   const hitTargets = await page.evaluate((points) => points.map((point) => (
-    document.elementFromPoint(point.x, point.y)?.closest('[data-testid="flow-inline-editor"]') !== null
+    document.elementFromPoint(point.x, point.y)?.closest('[data-testid="flow-block-flow-paragraph"]') !== null
   )), [start, end])
   expect(hitTargets).toEqual([true, true])
   await page.mouse.move(start.x, start.y)
@@ -384,7 +382,7 @@ async function readRealTextSelection(page: Page): Promise<{
   end: number
 }> {
   return page.evaluate(() => {
-    const element = document.querySelector<HTMLElement>('[data-testid="flow-inline-editor"]')
+    const element = document.querySelector<HTMLElement>('[data-testid="flow-block-flow-paragraph"]')
     const selection = document.getSelection()
     const range = selection?.rangeCount ? selection.getRangeAt(0) : null
     const inside = (node: Node | null) => Boolean(
@@ -511,154 +509,76 @@ test('Wave C Flow authoring survives one real Editor and Player session', async 
     await patchProjectDialogs(app, projectPath)
     await page.getByRole('button', { name: '打开工程（Ctrl+O）' }).click()
     await expect(page.getByTestId('flow-workspace')).toBeVisible()
+    await page.locator('summary').filter({ hasText: '正文格式' }).click()
+    await expect(page.getByRole('toolbar', { name: '正文工具' }).first()).toBeVisible()
 
-    await test.step('formula keeps its target through two real clicks and exposes explicit edit', async () => {
-      const block = page.getByTestId('flow-block-flow-formula')
-      const target = page.getByTestId('flow-formula-edit-target-flow-formula')
-      await target.click()
-      await expect(block).toHaveAttribute('aria-selected', 'true')
-      await expect(target).toBeVisible()
-      await expect(page.getByTestId('formula-edit-dialog')).toHaveCount(0)
-
-      await target.click()
-      await expect(page.getByTestId('formula-edit-dialog')).toBeVisible()
-      await page.getByRole('button', { name: '关闭公式编辑' }).click()
-      await expect(page.getByTestId('formula-edit-dialog')).toHaveCount(0)
-
-      await page.getByTestId('flow-formula-edit-flow-formula').click()
-      await expect(page.getByTestId('formula-edit-dialog')).toBeVisible()
-      await page.getByRole('button', { name: '关闭公式编辑' }).click()
-      await expect(page.getByTestId('formula-edit-dialog')).toHaveCount(0)
+    await test.step('formula preserves its semantic target and explicit LaTeX editor', async () => {
+      const formula = page.getByTestId('flow-block-flow-formula')
+      const toolbar = page.getByRole('toolbar', { name: '正文工具' }).first()
+      const identity = await formula.getAttribute('data-formula-id')
+      await formula.click()
+      await expect(formula).toHaveClass(/ProseMirror-selectednode/)
+      await expect(page.getByRole('form', { name: '公式编辑' })).toHaveCount(0)
+      await formula.click()
+      await expect(formula).toHaveAttribute('data-formula-id', identity!)
+      await toolbar.getByRole('button', { name: '公式', exact: true }).click()
+      const dialog = page.getByRole('form', { name: '公式编辑' })
+      await expect(dialog).toBeVisible()
+      expect(await dialog.getByLabel('LaTeX', { exact: true }).inputValue()).toBe(requireBlock(requireFlowSurface(readProject(projectPath)), 'flow-formula', 'formula').latex)
+      await dialog.getByRole('button', { name: '取消', exact: true }).click()
+      await expect(dialog).toHaveCount(0)
+      await expect(formula).toHaveAttribute('data-formula-id', identity!)
     })
 
     await test.step('real range formatting stays local while a page overlay crosses the single body boundary', async () => {
       const formatBaseline = readProject(projectPath)
       const paragraph = page.getByTestId('flow-block-flow-paragraph')
-      await paragraph.dblclick()
-      const editor = page.getByTestId('flow-inline-editor')
+      const editor = page.getByRole('textbox', { name: '正文排版编辑', exact: true }).first()
+      const toolbar = page.getByRole('toolbar', { name: '正文工具' }).first()
+      await paragraph.click()
       await expect(editor).toBeFocused()
-      expect(await selectRealTextRange(page, editor, 2, 3)).toEqual({
-        editorConnected: true,
-        text: '丙丁',
-        collapsed: false,
-        inside: true,
-        start: 2,
-        end: 4,
-      })
-      await expect(page.getByTestId('flow-toolbar-format-scope'))
-        .toHaveAttribute('data-flow-format-mode', 'range')
-      const fontFamily = page.getByTestId('flow-toolbar-font-family')
-      await fontFamily.click()
-      await expect(fontFamily).toBeFocused()
+      const expectedSelection = { editorConnected: true, text: '丙丁', collapsed: false, inside: true, start: 2, end: 4 }
+      expect(await selectRealTextRange(page, paragraph, 2, 3)).toEqual(expectedSelection)
+      const fontFamily = toolbar.getByLabel('字体', { exact: true })
       await fontFamily.selectOption('SimSun')
       await expect(editor).toBeFocused()
-      await expect(editor.locator('span[style*="SimSun"]')).toHaveText(['丙', '丁'])
-      expect(await readRealTextSelection(page)).toEqual({
-        editorConnected: true,
-        text: '丙丁',
-        collapsed: false,
-        inside: true,
-        start: 2,
-        end: 4,
-      })
-      const fontSize = page.getByTestId('flow-toolbar-font-size')
-      await fontSize.click()
-      await expect(fontSize).toBeFocused()
+      expect(await readRealTextSelection(page)).toEqual(expectedSelection)
+      const fontSize = toolbar.getByLabel('字号', { exact: true })
       await fontSize.fill('30')
-      await expect(fontSize).toHaveValue('30')
-      await fontSize.press('Enter')
       await expect(editor).toBeFocused()
-      await expect(editor.locator('span[style*="font-size:30px"]')).toHaveText(['丙', '丁'])
-      expect(await readRealTextSelection(page)).toEqual({
-        editorConnected: true,
-        text: '丙丁',
-        collapsed: false,
-        inside: true,
-        start: 2,
-        end: 4,
-      })
-      const bold = page.getByRole('button', { name: '局部加粗' })
-      await expect(bold).toHaveAttribute('aria-pressed', 'false')
-      await bold.click()
-      await expect(bold).toHaveAttribute('aria-pressed', 'true')
-      await expect(editor.locator(
-        'span[style*="SimSun"][style*="font-size:30px"][style*="font-weight:700"]',
-      )).toHaveText(['丙', '丁'])
-
-      expect(await selectRealTextRange(page, editor, 0, 3)).toEqual({
-        editorConnected: true,
-        text: '甲乙丙丁',
-        collapsed: false,
-        inside: true,
-        start: 0,
-        end: 4,
-      })
-      await expect(page.getByTestId('flow-toolbar-format-scope')).toHaveText('选区 · 混合格式')
-      await expect(page.getByRole('button', { name: '局部加粗' }))
-        .toHaveAttribute('aria-pressed', 'mixed')
-
-      const caretPoint = await flowTextPoint(editor, FORMAT_TEXT.length - 1, 'end')
+      expect(await readRealTextSelection(page)).toEqual(expectedSelection)
+      await expect(toolbar.getByRole('button', { name: '粗体', exact: true })).toHaveAttribute('aria-pressed', 'false')
+      await toolbar.getByRole('button', { name: '粗体', exact: true }).click()
+      await expect(toolbar.getByRole('button', { name: '粗体', exact: true })).toHaveAttribute('aria-pressed', 'true')
+      const selectedStyles = await paragraph.evaluate(readEffectiveTextStyles)
+      expect(selectedStyles.slice(2, 4)).toEqual(['丙', '丁'].map(text => ({ text, fontFamily: 'SimSun', fontSize: '30px', fontWeight: '700' })))
+      expect(selectedStyles.slice(0, 2).every(character => character.fontWeight !== '700')).toBe(true)
+      await editor.press('Home')
+      for (let offset = 0; offset < 4; offset += 1) await editor.press('Shift+ArrowRight')
+      expect(await readRealTextSelection(page)).toEqual({ editorConnected: true, text: '甲乙丙丁', collapsed: false, inside: true, start: 0, end: 4 })
+      await expect(fontFamily).toHaveValue('__mixed')
+      await expect(fontSize).toHaveValue('')
+      await expect(fontSize).toHaveAttribute('placeholder', '混合')
+      await expect(toolbar.getByRole('button', { name: '粗体', exact: true })).toHaveAttribute('aria-pressed', 'mixed')
+      const caretPoint = await flowTextPoint(paragraph, FORMAT_TEXT.length - 1, 'end')
       await page.mouse.click(caretPoint.x, caretPoint.y)
-      await expect(page.getByTestId('flow-toolbar-format-scope'))
-        .toHaveAttribute('data-flow-format-mode', 'caret')
-      expect(await editor.evaluate((element) => {
-        const selection = element.ownerDocument.getSelection()
-        const range = selection?.rangeCount ? selection.getRangeAt(0) : null
-        if (!range || !range.collapsed || !element.contains(range.endContainer)) return -1
-        const prefix = element.ownerDocument.createRange()
-        prefix.selectNodeContents(element)
-        prefix.setEnd(range.endContainer, range.endOffset)
-        return Array.from(prefix.toString()).length
-      })).toBe(FORMAT_TEXT.length)
-
-      await fontFamily.click()
-      await expect(fontFamily).toBeFocused()
+      expect(await readRealTextSelection(page)).toMatchObject({ collapsed: true, start: FORMAT_TEXT.length, end: FORMAT_TEXT.length })
       await fontFamily.selectOption('KaiTi')
-      await expect(editor).toBeFocused()
-      await fontSize.click()
-      await expect(fontSize).toBeFocused()
       await fontSize.fill('32')
-      await fontSize.press('Enter')
+      await expect(fontFamily).toHaveValue('KaiTi')
+      await expect(fontSize).toHaveValue('32')
+      await expect(toolbar.getByRole('button', { name: '粗体', exact: true })).toHaveAttribute('aria-pressed', 'false')
       await expect(editor).toBeFocused()
-      await expect(page.getByTestId('flow-toolbar-format-scope')).toHaveText('插入点 · 待输入样式')
       await editor.pressSequentially('新')
-      await expect(editor).toHaveText(`${FORMAT_TEXT}新`)
-      const pendingRun = editor.locator('span').filter({ hasText: '新' }).last()
-      await expect(pendingRun).toHaveAttribute('style', /font-family:\s*KaiTi/i)
-      await expect(pendingRun).toHaveAttribute('style', /font-size:\s*32px/i)
-
-      await expect(editor).toBeFocused()
-      await editor.evaluate((element) => {
-        ;(window as Window & { __waveCCommitKeys?: unknown[] }).__waveCCommitKeys = []
-        element.addEventListener('keydown', (event) => {
-          const keyboardEvent = event as KeyboardEvent
-          const entry = {
-            key: keyboardEvent.key,
-            ctrlKey: keyboardEvent.ctrlKey,
-            metaKey: keyboardEvent.metaKey,
-            isComposing: keyboardEvent.isComposing,
-          }
-          ;(window as Window & { __waveCCommitKeys?: unknown[] }).__waveCCommitKeys?.push(entry)
-        }, { capture: true })
-      })
-      await editor.press('Control+Enter')
-      expect(await page.evaluate(() => (
-        (window as Window & { __waveCCommitKeys?: unknown[] }).__waveCCommitKeys
-      ))).toContainEqual({
-        key: 'Enter',
-        ctrlKey: true,
-        metaKey: false,
-        isComposing: false,
-      })
-      await expect(editor).toHaveCount(0)
-
-      const undo = page.getByRole('button', { name: '撤销（Ctrl+Z）' })
-      const redo = page.getByRole('button', { name: '重做（Ctrl+Y / Ctrl+Shift+Z）' })
-      const paragraphText = paragraph.locator('[data-flow-idle-rich-text="true"]')
-      await undo.click()
-      await expect(paragraphText).toHaveText(FORMAT_TEXT)
-      await redo.click()
-      await expect(paragraphText).toHaveText(`${FORMAT_TEXT}新`)
+      await expect(paragraph).toHaveText(`${FORMAT_TEXT}新`)
+      await expectPublishedRangeStyles(paragraph)
+      // The shared editor remains continuous; one owner undo reverses just this typing group.
+      await toolbar.getByRole('button', { name: '撤销', exact: true }).click()
+      await expect(paragraph).toHaveText(FORMAT_TEXT)
+      // Owner Undo restores the document session and its initially collapsed format panel.
+      await page.locator('summary').filter({ hasText: '正文格式' }).click()
+      await toolbar.getByRole('button', { name: '重做', exact: true }).click()
+      await expect(paragraph).toHaveText(`${FORMAT_TEXT}新`)
 
       await page.getByRole('tab', { name: '图层' }).click()
       const overlayRegion = page.getByTestId('flow-overlay-layers')
@@ -690,14 +610,19 @@ test('Wave C Flow authoring survives one real Editor and Player session', async 
         .getByTestId('flow-layer-card-wave-c-overlay'))
         .toHaveAttribute('data-flow-body-plane', 'underlay')
 
-      const saved = await saveCurrent(page, projectPath)
+      const saved = await saveCurrent(page, projectPath, project => {
+        const surface = requireFlowSurface(project)
+        return plainDocumentText(requireBlock(surface, 'flow-paragraph', 'paragraph').content) === `${FORMAT_TEXT}新` && surface.surfaceLayerItems[0]?.bodyPlane === 'underlay'
+      })
       const savedParagraph = requireBlock(requireFlowSurface(saved), 'flow-paragraph', 'paragraph')
       expect(requireFlowSurface(saved).surfaceLayerItems[0]?.bodyPlane).toBe('underlay')
       expect(saved.revision).toBeGreaterThan(formatBaseline.revision)
-      expect(savedParagraph.text).toBe(`${FORMAT_TEXT}新`)
-      expect(savedParagraph.runs).toEqual([
-        { start: 2, end: 4, style: { bold: true, fontFamily: 'SimSun', fontSize: 30 } },
-        { start: 8, end: 9, style: { fontFamily: 'KaiTi', fontSize: 32 } },
+      expect(plainDocumentText(savedParagraph.content)).toBe(`${FORMAT_TEXT}新`)
+      expect(savedParagraph.content.inlines).toEqual([
+        { type: 'text', text: '甲乙' },
+        { type: 'text', text: '丙丁', style: { bold: true, fontFamily: 'SimSun', fontSize: 30 } },
+        { type: 'text', text: '戊己庚辛' },
+        { type: 'text', text: '新', style: { fontFamily: 'KaiTi', fontSize: 32 } },
       ])
 
       await page.getByRole('button', { name: '新建课件（Ctrl+N）' }).click()
@@ -705,10 +630,9 @@ test('Wave C Flow authoring survives one real Editor and Player session', async 
       await page.getByRole('button', { name: '打开工程（Ctrl+O）' }).click()
       await expect(page.getByTestId('flow-workspace')).toBeVisible({ timeout: 15_000 })
       const reopenedParagraph = page.getByTestId('flow-block-flow-paragraph')
-      await expect(reopenedParagraph.locator('[data-flow-idle-rich-text="true"]'))
+      await expect(reopenedParagraph)
         .toHaveText(`${FORMAT_TEXT}新`)
-      await expect(reopenedParagraph.locator('span[style*="SimSun"]')).toHaveText(['丙', '丁'])
-      await expect(reopenedParagraph.locator('span[style*="KaiTi"]')).toHaveText('新')
+      await expectPublishedRangeStyles(reopenedParagraph)
 
       const canvasMode = page.getByRole('group', { name: '画布模式' })
       const tryRunButton = canvasMode.getByRole('button', { name: '当前位置试运行', exact: true })
@@ -723,15 +647,17 @@ test('Wave C Flow authoring survives one real Editor and Player session', async 
 
     await test.step('current media fields persist and all three actual rect tiers match Editor and Player', async () => {
       const editBlock = page.getByTestId('flow-block-wave-c-media-edit')
-      await editBlock.click()
+      // The video center belongs to native playback controls; the caption selects its media block.
+      await editBlock.locator('[data-document-slot="caption"]').click()
       await page.getByRole('tab', { name: '属性' }).click()
       await expect(page.getByTestId('flow-media-properties')).toBeVisible()
       const altText = page.getByLabel('替代文本', { exact: true })
       await altText.fill('Wave C 新替代文本')
       await altText.press('Enter')
-      const caption = page.getByLabel('题注', { exact: true })
-      await caption.fill('Wave C 新题注')
-      await caption.press('Enter')
+      const caption = editBlock.locator('[data-document-slot="caption"]')
+      await caption.click()
+      await page.keyboard.press('Home'); await page.keyboard.press('Shift+End')
+      await page.keyboard.insertText('Wave C 新题注')
       await page.getByLabel('版式', { exact: true }).selectOption('wide')
       const wrap = page.getByLabel('文字环绕', { exact: true })
       await wrap.selectOption('right')
@@ -745,8 +671,8 @@ test('Wave C Flow authoring survives one real Editor and Player session', async 
       await expect(editedVideo).toHaveAttribute('aria-label', 'Wave C 新替代文本')
       await expect(editedVideo).toHaveAttribute('controls', '')
       await expect(editedVideo).toHaveAttribute('src', /^blob:/)
-      await expect(editBlock.locator('figcaption')).toHaveText('Wave C 新题注')
-      await expect(editBlock.locator('figure')).toHaveAttribute('data-flow-media-layout', 'wide')
+      await expect(editBlock.locator('[data-document-slot="caption"]')).toHaveText('Wave C 新题注')
+      await expect(editBlock).toHaveAttribute('data-flow-media-layout', 'wide')
       await expect(page.getByTestId('flow-block-wave-c-media-content').locator('img'))
         .toHaveAttribute('src', /^blob:/)
       await expect(page.getByTestId('flow-block-wave-c-media-wide').locator('img'))
@@ -762,13 +688,16 @@ test('Wave C Flow authoring survives one real Editor and Player session', async 
       )
       expectMediaProjection(editorMeasurement)
 
-      const saved = await saveCurrent(page, projectPath)
+      const saved = await saveCurrent(page, projectPath, project => {
+        const media = requireBlock(requireFlowSurface(project), 'wave-c-media-edit', 'media')
+        return media.assetId === 'clip-replacement' && media.altText === 'Wave C 新替代文本' && media.layout === 'wide' && media.wrap === 'none' && plainDocumentText(media.caption!) === 'Wave C 新题注'
+      })
       const savedMedia = requireBlock(requireFlowSurface(saved), 'wave-c-media-edit', 'media')
       expect(savedMedia).toMatchObject({
         assetId: 'clip-replacement',
         mediaKind: 'video',
         altText: 'Wave C 新替代文本',
-        caption: 'Wave C 新题注',
+        caption: { inlines: [{ type: 'text', text: 'Wave C 新题注' }] },
         layout: 'wide',
         wrap: 'none',
       })
@@ -803,6 +732,15 @@ test('Wave C Flow authoring survives one real Editor and Player session', async 
     })
 
     expectCleanDiagnostics(launch)
+  } catch (error) {
+    await page.screenshot({ path: test.info().outputPath('failure.png'), fullPage: true }).catch(() => undefined)
+    await test.info().attach('failure-state', { body: JSON.stringify({
+      alerts: await page.getByRole('alert').allTextContents().catch(() => []),
+      workspace: await page.getByTestId('flow-workspace').evaluate(element => Object.fromEntries(Array.from(element.attributes).map(attribute => [attribute.name, attribute.value]))).catch(() => null),
+      diagnostics: { pageErrors: launch.pageErrors, consoleErrors: launch.consoleErrors, consoleWarnings: launch.consoleWarnings },
+      savedProject: readProject(projectPath),
+    }), contentType: 'application/json' })
+    throw error
   } finally {
     await closeEditor(app, launch.runRoot)
   }

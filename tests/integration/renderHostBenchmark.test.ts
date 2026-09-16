@@ -1,6 +1,7 @@
 // @vitest-environment node
 // 本文件会嵌套执行 vite 打包（esbuild）；jsdom 的 TextEncoder 破坏 esbuild 的
 // Uint8Array invariant，因此必须在 node 环境下运行。
+import { createDefaultTeacherControllerPackage } from '../../src/shared/defaultTeacherControllerComponent'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -306,7 +307,7 @@ describe('render host benchmark fixture', () => {
     ])
     expect(projectV9.startLocationId).toBe('scene_native_nodes_v9')
     expect(projectV9.globalLayerItems).toHaveLength(1)
-    expect(projectV9.globalLayerItems[0]?.item.kind).toBe('native')
+    expect(projectV9.globalLayerItems[0]?.item).toMatchObject({ kind: 'component', role: 'teacher-controller' })
 
     const surface = projectV9.surfaces[0]
     expect(surface?.type).toBe('slide')
@@ -355,7 +356,9 @@ describe('render host benchmark fixture', () => {
     }))
     expect(projectV9.componentPackages[phaserMeterManifest.id]?.version)
       .toBe(RENDER_HOST_BENCHMARK_V9_PHASER_METER_VERSION)
+    const controller = createDefaultTeacherControllerPackage()
     expect(Object.keys(reopened.componentFiles).sort()).toEqual([
+      `${controller.manifest.id}@${controller.manifest.version}`,
       `${tableManifest.id}@${tableManifest.version}`,
       `${phaserMeterManifest.id}@${RENDER_HOST_BENCHMARK_V9_PHASER_METER_VERSION}`,
     ].sort())
@@ -393,7 +396,9 @@ describe('render host benchmark fixture', () => {
       courseId: 'project_render_host_benchmark_v9',
     })
     expect(payload.locations).toHaveLength(5)
+    const controller = createDefaultTeacherControllerPackage()
     expect(Object.keys(payload.components).sort()).toEqual([
+      `${controller.manifest.id}@${controller.manifest.version}`,
       `${tableManifest.id}@${tableManifest.version}`,
       `${phaserMeterManifest.id}@${RENDER_HOST_BENCHMARK_V9_PHASER_METER_VERSION}`,
     ].sort())

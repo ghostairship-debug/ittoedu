@@ -850,20 +850,7 @@ function flowFormulaBlock(): Extract<FlowBlock, { type: 'formula' }> {
     type: 'formula',
     formulaId: 'flow-delta-formula',
     accessibleText: '德尔塔等于 b 的平方减去四 a c',
-    ast: {
-      type: 'row',
-      children: [
-        { type: 'token', value: 'Δ' },
-        { type: 'operator', value: '=' },
-        {
-          type: 'script',
-          base: { type: 'token', value: 'b' },
-          superscript: { type: 'token', value: '2' },
-        },
-        { type: 'operator', value: '−' },
-        { type: 'token', value: '4ac' },
-      ],
-    },
+    latex: "\\Delta =b^{2}-4ac",
   }
 }
 
@@ -876,14 +863,12 @@ function flowHeavyArchive(): CourseProjectArchiveData {
       id: 'flow-heading',
       type: 'heading',
       level: 1,
-      text: '一元二次方程的判别式',
-      runs: [{ start: 0, end: 8, style: { bold: true, color: '#1d4ed8' } }],
+      content: { inlines: [{"type":"text","text":"一元二次方程的判","style":{"bold":true,"color":"#1d4ed8"}},{"type":"text","text":"别式"}] },
     },
     {
       id: 'flow-ime-paragraph',
       type: 'paragraph',
-      text: '中文输入法（IME）验证：春风又绿江南岸，连续编辑不拆分组合文本。',
-      runs: [{ start: 0, end: 6, style: { bold: true, highlightColor: '#fef3c7' } }],
+      content: { inlines: [{"type":"text","text":"中文输入法（","style":{"bold":true,"highlightColor":"#fef3c7"}},{"type":"text","text":"IME）验证：春风又绿江南岸，连续编辑不拆分组合文本。"}] },
       textAlign: 'left',
       lineSpacing: 1.6,
     },
@@ -892,16 +877,16 @@ function flowHeavyArchive(): CourseProjectArchiveData {
       type: 'list',
       ordered: true,
       items: [
-        { id: 'flow-list-item-1', text: '识别 a、b、c' },
-        { id: 'flow-list-item-2', text: '计算 Δ = b² − 4ac' },
-        { id: 'flow-list-item-3', text: '根据符号得出结论' },
+        { id: 'flow-list-item-1', content: { inlines: [{ type: 'text', text: '识别 a、b、c' }] }},
+        { id: 'flow-list-item-2', content: { inlines: [{ type: 'text', text: '计算 Δ = b² − 4ac' }] }},
+        { id: 'flow-list-item-3', content: { inlines: [{ type: 'text', text: '根据符号得出结论' }] } },
       ],
     },
     {
       id: 'flow-quote',
       type: 'quote',
-      text: '数形结合帮助我们解释代数结论。',
-      citation: '课堂小结',
+      content: { inlines: [{ type: 'text', text: '数形结合帮助我们解释代数结论。' }] },
+      citation: { inlines: [{ type: 'text', text: '课堂小结' }] },
     },
     { id: 'flow-divider', type: 'divider' },
     {
@@ -910,34 +895,34 @@ function flowHeavyArchive(): CourseProjectArchiveData {
       assetId: figure,
       mediaKind: 'image',
       altText: '抛物线与 x 轴交点示意图',
-      caption: '判别式与交点数量对应',
+      caption: { inlines: [{ type: 'text', text: '判别式与交点数量对应' }] },
       layout: 'wide',
       wrap: 'none',
     },
     {
       id: 'flow-table',
       type: 'table',
-      caption: '判别式对照表',
+      caption: { inlines: [{ type: 'text', text: '判别式对照表' }] },
       columns: [
-        { id: 'flow-col-condition', header: '条件' },
-        { id: 'flow-col-roots', header: '实数根' },
-        { id: 'flow-col-graph', header: '图像' },
+        { id: 'flow-col-condition', header: { inlines: [{ type: 'text', text: '条件' }] }},
+        { id: 'flow-col-roots', header: { inlines: [{ type: 'text', text: '实数根' }] }},
+        { id: 'flow-col-graph', header: { inlines: [{ type: 'text', text: '图像' }] } },
       ],
       rows: [
         {
           id: 'flow-row-positive',
           cells: {
-            'flow-col-condition': 'Δ > 0',
-            'flow-col-roots': '两个不相等的实数根',
-            'flow-col-graph': '与 x 轴有两个交点',
+            'flow-col-condition': { inlines: [{ type: 'text', text: 'Δ > 0' }] },
+            'flow-col-roots': { inlines: [{ type: 'text', text: '两个不相等的实数根' }] },
+            'flow-col-graph': { inlines: [{ type: 'text', text: '与 x 轴有两个交点' }] },
           },
         },
         {
           id: 'flow-row-zero',
           cells: {
-            'flow-col-condition': 'Δ = 0',
-            'flow-col-roots': { text: '两个相等的实数根', runs: [{ start: 2, end: 4, style: { bold: true } }] },
-            'flow-col-graph': '与 x 轴相切',
+            'flow-col-condition': { inlines: [{ type: 'text', text: 'Δ = 0' }] },
+            'flow-col-roots': { inlines: [{"type":"text","text":"两个"},{"type":"text","text":"相等","style":{"bold":true}},{"type":"text","text":"的实数根"}] },
+            'flow-col-graph': { inlines: [{ type: 'text', text: '与 x 轴相切' }] },
           },
         },
       ],
@@ -953,19 +938,19 @@ function flowHeavyArchive(): CourseProjectArchiveData {
       id: 'flow-callout',
       type: 'callout',
       tone: 'warning',
-      title: '常见错误',
-      body: '不要遗漏 b 的平方，也不要忽略 a 不等于 0 的前提。',
+      title: { inlines: [{ type: 'text', text: '常见错误' }] },
+      body: { inlines: [{ type: 'text', text: '不要遗漏 b 的平方，也不要忽略 a 不等于 0 的前提。' }] },
     },
     {
       id: 'flow-section',
       type: 'section',
-      title: '进阶推导',
+      title: { inlines: [{ type: 'text', text: '进阶推导' }] },
       collapsedByDefault: false,
       blocks: [
         {
           id: 'flow-section-paragraph',
           type: 'paragraph',
-          text: '从求根公式的根号内部可得判别式的来源。',
+          content: { inlines: [{ type: 'text', text: '从求根公式的根号内部可得判别式的来源。' }] },
         },
       ],
     },
@@ -1139,8 +1124,8 @@ function mixedSpatialArchive(): CourseProjectArchiveData {
         surfaceLayerItems: [scoped(flowShared)],
         layout: { readingWidth: 760, wideContentWidth: 1120 },
         blocks: [
-          { id: 'mixed-flow-heading', type: 'heading', level: 1, text: '证据链' },
-          { id: 'mixed-flow-paragraph', type: 'paragraph', text: '先观察图像，再进入空间画布探索节点关系。' },
+          { id: 'mixed-flow-heading', type: 'heading', level: 1, content: { inlines: [{ type: 'text', text: '证据链' }] }},
+          { id: 'mixed-flow-paragraph', type: 'paragraph', content: { inlines: [{ type: 'text', text: '先观察图像，再进入空间画布探索节点关系。' }] }},
           {
             id: 'mixed-flow-media',
             type: 'media',

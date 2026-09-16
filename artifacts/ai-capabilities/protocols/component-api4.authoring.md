@@ -306,6 +306,7 @@ interface ComponentCreateContextBase {
   }
 
   actions: Readonly<{
+    // sceneId 只能是 Slide 场景 ID；Flow / Spatial locationId 不能传入这里。
     goToScene(sceneId: string, targetStateId?: string): boolean
     nextScene(): boolean
     previousScene(): boolean
@@ -425,11 +426,12 @@ function next() {
 
 function branch() {
   if (mode !== 'preview') return
+  // 仅跳到已知的 Slide sceneId；不是 Flow / Spatial locationId。
   ctx.actions.goToScene('scene_summary', 'state_complete')
 }
 ```
 
-动作返回同步 `boolean`：目标不存在、越过首页/末页或当前页无法重入时可能为 `false`。`goToScene()` 的跨 location 请求以及 `nextScene()` / `previousScene()` 会进入顶层 navigation guard；`replayScene()` 是同 location 重播，不经过导航守卫；`restartCourse()` 明确绕过守卫。`goToScene(sceneId, targetStateId?)` 可原子进入目标场景的指定命名状态；省略或状态引用失效时进入目标场景初始状态。同场景调用可只切换状态；若导航守卫把跨 location 请求重定向到另一个场景，原请求的目标状态不会套用到重定向场景。
+动作返回同步 `boolean`：目标不存在、越过首页/末页或当前页无法重入时可能为 `false`。`goToScene(sceneId, targetStateId?)` 的第一个参数只能使用当前课程中列出的 **Slide sceneId**；Flow 或 Spatial 的 `locationId` 不是此 API 的输入，传入会返回 `false`。需要按整课的当前顺序从 Slide 进入 Flow、再进入 Spatial 时，使用 `nextScene()`（反向为 `previousScene()`），不要把 locationId 转给 `goToScene()`。`goToScene()` 的跨 location 请求以及 `nextScene()` / `previousScene()` 会进入顶层 navigation guard；`replayScene()` 是同 location 重播，不经过导航守卫；`restartCourse()` 明确绕过守卫。`goToScene()` 可原子进入目标 Slide 场景的指定命名状态；省略或状态引用失效时进入目标场景初始状态。同场景调用可只切换状态；若导航守卫把跨 location 请求重定向到另一个场景，原请求的目标状态不会套用到重定向场景。
 
 `replayScene()` 重建当前场景作用域；`restartCourse()` 从第一场景开始，并把 `courseState` 重置为工程声明的默认值。当前 global Component 没有可依赖的 session-global 生命周期，不得依赖“重播不重建全局实例”或“只有重开才重建”。
 
@@ -561,7 +563,7 @@ Component 是经过审核的可信扩展，不是普通图片；外部导入只�
 - [ ] 需要代码修改时创建新 ID/版本的工程内可编辑副本，未直接覆盖第三方包；副本变更可撤销并通过 manifest/runtime 校验。
 - [ ] 未重复实现可由 `VideoNode`、声音库/声道、`TeacherControllerNode` 或声明式交互完成的一等能力；自建媒体能响应静音并完整清理。
 - [ ] `scope/events/courseState/presentation` 均按 carrier 做能力检查；通用 DOM 无 `events`、非 Slide 无 `presentation`、restart 恢复声明默认值，命名状态可重挂组件的语义均已验证。
-- [ ] 需要跨场景指定状态时使用 `goToScene(sceneId, targetStateId)`，并验证状态失效回退与导航守卫重定向。
+- [ ] 需要跨 Slide 场景指定状态时使用 `goToScene(sceneId, targetStateId)`，不传入 Flow/Spatial locationId；按整课顺序跨 Surface 使用 `nextScene()`，并验证状态失效回退与导航守卫重定向。
 - [ ] 组件事件可被全局运行时接收，复杂导航规则未塞进组件私有全局变量。
 - [ ] 离线便携单 HTML/网页包不产生外部请求；在线轻量目标只访问工程声明的远程依赖，PDF/PPTX 静态化与捕获降级结果已检查。
 - [ ] 发布物未携带作者态 manifest/编辑器字段或重复 `runtime.js`，同时已明确执行逻辑可恢复、不构成源码保密或 DRM。

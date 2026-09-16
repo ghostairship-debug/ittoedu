@@ -472,7 +472,7 @@ describe('repo-index stable semantic coverage', () => {
     expect(feature('feature:global-layers-controller').carriers).toMatchObject({
       global: 'CourseProjectDocument.globalLayerItems (ScopedLayerItem[])',
       'surface-shared': 'CourseSurfaceDocument.surfaceLayerItems (ScopedLayerItem[])',
-      'teacher-controller': 'One global NativeLayerItem(nativeType=teacher-controller)',
+      'teacher-controller': 'One global ComponentLayerItem(role=teacher-controller)',
     })
   })
 

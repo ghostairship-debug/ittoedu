@@ -30,6 +30,7 @@ import {
 import { isRichTextFlowBlock } from '../course/flowDocumentModel'
 import { readChartText, type ChartTextDraft, type ChartTextField } from './chartTextDraft'
 
+export const FLOW_TEXT_REJECT_SHARED_DOCUMENT = '请在正文编辑器中编辑此内容'
 export const FLOW_TEXT_REJECT_COMPOSING = 'composing'
 export const FLOW_TEXT_REJECT_NOT_EDITABLE = '当前块不能就地编辑文字'
 export const FLOW_TEXT_REJECT_FORMULA_RUNS = '公式请使用公式编辑器'
@@ -137,6 +138,16 @@ const FLOW_SELECTION_FORMAT_KEYS = [
   'highlightColor',
 ] as const satisfies readonly (keyof TextRunStyle)[]
 
+function inlineFormatSample(content: FlowRichText): FlowRichTextDraft {
+  let text = ''; const runs: TextRun[] = []
+  for (const inline of content.inlines) {
+    const start = Array.from(text).length
+    text += inline.type === 'text' ? inline.text : '\ufffc'
+    if (inline.style) runs.push({ start, end: Array.from(text).length, style: inline.style })
+  }
+  return { text, runs }
+}
+
 function unsetFlowSelectionFormatFields(): FlowSelectionFormat['fields'] {
   return {
     fontFamily: { state: 'unset' },
@@ -205,15 +216,16 @@ function deriveFlowSelectionFormatField<K extends keyof FlowSelectionFormat['fie
 export function deriveFlowSelectionFormat(input: {
   readonly block: FlowBlock
   readonly edit?: FlowTextEditSession | null
+  readonly range?: { start: number; end: number } | null
 }): FlowSelectionFormat {
   const activeEdit = input.edit?.blockId === input.block.id ? input.edit : null
   const mode: FlowSelectionFormatMode = activeEdit?.kind === 'rich-text'
     ? activeEdit.range.end > activeEdit.range.start ? 'range' : 'caret'
-    : 'whole-block'
+    : input.range && input.range.end > input.range.start ? 'range' : 'whole-block'
   const content = activeEdit?.kind === 'rich-text'
     ? activeEdit.draft as FlowRichTextDraft
     : isRichTextFlowBlock(input.block)
-      ? { text: input.block.text, runs: input.block.runs ?? [] }
+      ? inlineFormatSample(input.block.content)
       : null
   if (!content) {
     return {
@@ -231,10 +243,10 @@ export function deriveFlowSelectionFormat(input: {
   const length = Array.from(content.text).length
   const start = mode === 'whole-block'
     ? 0
-    : Math.max(0, Math.min(length, activeEdit?.range.start ?? 0))
+    : Math.max(0, Math.min(length, input.range?.start ?? activeEdit?.range.start ?? 0))
   const end = mode === 'whole-block'
     ? length
-    : Math.max(start, Math.min(length, activeEdit?.range.end ?? start))
+    : Math.max(start, Math.min(length, input.range?.end ?? activeEdit?.range.end ?? start))
   const characterStyles = flowCharacterStyles(content.text, content.runs)
   const sampledStyles = mode === 'caret'
     ? [flowCaretStyle(
@@ -302,9 +314,7 @@ export function isFlowFormulaBlock(block: FlowBlock): block is FlowFormulaBlock 
 }
 
 export function cellToRichText(cell: FlowTableCell | undefined): FlowRichText {
-  if (cell === undefined) return { text: '' }
-  if (typeof cell === 'string') return { text: cell }
-  return { text: cell.text, ...(cell.runs ? { runs: cell.runs } : {}) }
+  return cell ? structuredClone(cell) : { inlines: [] }
 }
 
 export function readFlowEditableContent(
@@ -315,56 +325,7 @@ export function readFlowEditableContent(
   field: FlowTextEditSession['field']
   content: FlowRichTextDraft | FlowPlainTextDraft | FlowFormulaDraft
 } | null {
-  if (isFlowFormulaBlock(block)) {
-    return {
-      kind: 'formula',
-      field: 'formula',
-      content: {
-        ast: structuredClone(block.ast),
-        accessibleText: block.accessibleText,
-        source: serializeFormulaAst(block.ast),
-        valid: true,
-        hasSlots: false,
-      },
-    }
-  }
-  if (block.type === 'code') {
-    return { kind: 'plain-string', field: 'code', content: { text: block.code } }
-  }
-  if (block.type === 'callout') {
-    return { kind: 'plain-string', field: 'body', content: { text: block.body } }
-  }
-  if (block.type === 'section') {
-    return { kind: 'plain-string', field: 'title', content: { text: block.title } }
-  }
-  if (block.type === 'list' && nested?.listItemId) {
-    const item = block.items.find((entry) => entry.id === nested.listItemId)
-    if (!item) return null
-    return {
-      kind: 'rich-text',
-      field: 'text',
-      content: { text: item.text, runs: structuredClone(item.runs ?? []) },
-    }
-  }
-  if (block.type === 'table' && nested?.tableRowId && nested.tableColumnId) {
-    if (tableCellSpan(block, nested.tableRowId, nested.tableColumnId).covered) return null
-    const row = block.rows.find((entry) => entry.id === nested.tableRowId)
-    if (!row) return null
-    const rich = cellToRichText(row.cells[nested.tableColumnId])
-    return {
-      kind: 'rich-text',
-      field: 'text',
-      content: { text: rich.text, runs: structuredClone(rich.runs ?? []) },
-    }
-  }
-  if (isRichTextFlowBlock(block)) {
-    return {
-      kind: 'rich-text',
-      field: 'text',
-      content: { text: block.text, runs: structuredClone(block.runs ?? []) },
-    }
-  }
-  return null
+  void block; void nested; return null
 }
 
 export function resolveFlowFormatRange(
@@ -427,70 +388,7 @@ export function beginFlowTextEdit(input: {
   readonly source?: FlowTextEditSource
   readonly range?: FlowTextRange
 }): BeginFlowTextEditResult {
-  const block = locateBlock(input.project, input.selection.surfaceId, input.blockId)
-  if (!block) return { ok: false, reason: FLOW_TEXT_REJECT_NOT_EDITABLE }
-  if (isFlowFormulaBlock(block)) {
-    return { ok: false, reason: FLOW_TEXT_REJECT_FORMULA_RUNS }
-  }
-  const nested = input.range
-    ? {
-      listItemId: input.range.listItemId,
-      tableRowId: input.range.tableRowId,
-      tableColumnId: input.range.tableColumnId,
-    }
-    : undefined
-  const readable = readFlowEditableContent(block, nested)
-  if (!readable || readable.kind === 'formula') {
-    return { ok: false, reason: FLOW_TEXT_REJECT_NOT_EDITABLE }
-  }
-  const length = readable.kind === 'rich-text'
-    ? Array.from((readable.content as FlowRichTextDraft).text).length
-    : Array.from((readable.content as FlowPlainTextDraft).text).length
-  const start = input.range?.start ?? 0
-  const end = input.range?.end ?? start
-  const clamped = {
-    start: Math.max(0, Math.min(length, start)),
-    end: Math.max(0, Math.min(length, end)),
-  }
-  try {
-    const selection = enterFlowTextEditing(input.project, input.selection, {
-      blockId: input.blockId,
-      start: clamped.start,
-      end: clamped.end,
-      ...(nested?.listItemId ? { listItemId: nested.listItemId } : {}),
-      ...(nested?.tableRowId ? { tableRowId: nested.tableRowId } : {}),
-      ...(nested?.tableColumnId ? { tableColumnId: nested.tableColumnId } : {}),
-    })
-    const target = flowBlockTargetFromSelection(input.project, selection)
-    const original = structuredClone(readable.content)
-    return {
-      ok: true,
-      selection,
-      edit: freezeEdit({
-        kind: readable.kind,
-        source: input.source ?? 'paper',
-        blockId: input.blockId,
-        surfaceId: target.surfaceId,
-        parentId: target.parentId,
-        listItemId: nested?.listItemId,
-        tableRowId: nested?.tableRowId,
-        tableColumnId: nested?.tableColumnId,
-        field: readable.field,
-        composing: false,
-        pendingAction: null,
-        pendingStyle: {},
-        revision: input.project.revision,
-        original,
-        draft: structuredClone(original),
-        range: clamped,
-      }),
-    }
-  } catch (error) {
-    return {
-      ok: false,
-      reason: error instanceof Error && error.message.trim() ? error.message : FLOW_TEXT_REJECT_NOT_EDITABLE,
-    }
-  }
+  void input; return { ok: false, reason: FLOW_TEXT_REJECT_SHARED_DOCUMENT }
 }
 
 /**
@@ -565,24 +463,7 @@ export function beginFlowTableFieldEdit(input: {
   readonly field: 'table-caption' | 'table-header'
   readonly columnId?: string
 }): BeginFlowTextEditResult {
-  const block = locateBlock(input.project, input.selection.surfaceId, input.blockId)
-  if (!block || block.type !== 'table') return { ok: false, reason: FLOW_TEXT_REJECT_NOT_EDITABLE }
-  const text = input.field === 'table-caption' ? block.caption ?? '' : block.columns.find(column => column.id === input.columnId)?.header
-  if (text === undefined) return { ok: false, reason: FLOW_TEXT_REJECT_NOT_EDITABLE }
-  const selection = selectFlowEditorBlocks(input.project, input.selection.locationId, [input.blockId])
-  const target = flowBlockTargetFromSelection(input.project, selection)
-  const original: FlowPlainTextDraft = { text }
-  return {
-    ok: true,
-    selection,
-    edit: freezeEdit({
-      kind: 'plain-string', source: 'properties', blockId: input.blockId,
-      surfaceId: target.surfaceId, parentId: target.parentId, tableColumnId: input.columnId,
-      field: input.field, composing: false, pendingAction: null, pendingStyle: {},
-      revision: input.project.revision, original, draft: structuredClone(original),
-      range: { start: 0, end: text.length },
-    }),
-  }
+  void input; return { ok: false, reason: FLOW_TEXT_REJECT_SHARED_DOCUMENT }
 }
 
 export function updateFlowChartTextDraft(edit: FlowTextEditSession, draft: ChartTextDraft, composing: boolean): FlowTextEditSession {
@@ -596,43 +477,11 @@ export function beginFlowFormulaEdit(input: {
   readonly blockId: string
   readonly source?: FlowTextEditSource
 }): BeginFlowTextEditResult {
-  const overlay = input.selection.selectedOverlayIds.includes(input.blockId)
-    ? locateCourseLayer(input.project, input.blockId) : null
-  const block = overlay?.item.kind === 'native' && overlay.item.content.nativeType === 'formula'
-    ? { type: 'formula' as const, ...overlay.item.content.data }
-    : locateBlock(input.project, input.selection.surfaceId, input.blockId)
-  if (!block || block.type !== 'formula') {
-    return { ok: false, reason: FLOW_TEXT_REJECT_NOT_EDITABLE }
-  }
-  const selected = overlay ? input.selection : selectFlowEditorBlocks(input.project, input.selection.locationId, [input.blockId])
-  const target = overlay ? { surfaceId: input.selection.surfaceId, parentId: null } : flowBlockTargetFromSelection(input.project, selected)
-  const original: FlowFormulaDraft = {
-    ast: structuredClone(block.ast),
-    accessibleText: block.accessibleText,
-    source: serializeFormulaAst(block.ast),
-    valid: true,
-    hasSlots: false,
-  }
-  return {
-    ok: true,
-    selection: selected,
-    edit: freezeEdit({
-      kind: 'formula',
-      ...(overlay ? { overlayScope: input.selection.authoringScope } : {}),
-      source: input.source ?? 'paper',
-      blockId: input.blockId,
-      surfaceId: target.surfaceId,
-      parentId: target.parentId,
-      field: 'formula',
-      composing: false,
-      pendingAction: null,
-      pendingStyle: {},
-      revision: input.project.revision,
-      original,
-      draft: structuredClone(original),
-      range: { start: 0, end: 0 },
-    }),
-  }
+  const overlay = input.selection.selectedOverlayIds.includes(input.blockId) ? locateCourseLayer(input.project, input.blockId) : null
+  if (!overlay || overlay.item.kind !== 'native' || overlay.item.content.nativeType !== 'formula') return { ok: false, reason: FLOW_TEXT_REJECT_SHARED_DOCUMENT }
+  const block = overlay.item.content.data
+  const original: FlowFormulaDraft = { ast: structuredClone(block.ast), accessibleText: block.accessibleText, source: serializeFormulaAst(block.ast), valid: true, hasSlots: false }
+  return { ok: true, selection: input.selection, edit: freezeEdit({ kind: 'formula', overlayScope: input.selection.authoringScope, source: input.source ?? 'paper', blockId: input.blockId, surfaceId: input.selection.surfaceId, parentId: null, field: 'formula', composing: false, pendingAction: null, pendingStyle: {}, revision: input.project.revision, original, draft: structuredClone(original), range: { start: 0, end: 0 } }) }
 }
 
 export function updateFlowTextDraft(
@@ -952,36 +801,6 @@ export function flowTextEditSelection(
   })
 }
 
-function writeNestedRichText(
-  document: CourseProjectDocument,
-  edit: FlowTextEditSession,
-  draft: FlowRichTextDraft,
-  options: FlowCommandOptions,
-): FlowCommandResult {
-  return updateFlowEditorBlock(document, {
-    surfaceId: edit.surfaceId,
-    blockId: edit.blockId,
-    parentId: edit.parentId,
-  }, (block) => {
-    if (edit.listItemId && block.type === 'list') {
-      const item = block.items.find((entry) => entry.id === edit.listItemId)
-      if (!item) throw new Error('找不到列表项')
-      item.text = draft.text
-      if (draft.runs.length > 0) item.runs = draft.runs
-      else delete item.runs
-      return
-    }
-    if (edit.tableRowId && edit.tableColumnId && block.type === 'table') {
-      const row = block.rows.find((entry) => entry.id === edit.tableRowId)
-      if (!row) throw new Error('找不到表格行')
-      row.cells[edit.tableColumnId] = draft.runs.length > 0
-        ? { text: draft.text, runs: draft.runs }
-        : draft.text
-      return
-    }
-    throw new Error('当前块不能写入正文')
-  }, options)
-}
 
 export function commitFlowTextEdit(
   document: CourseProjectDocument,
@@ -993,6 +812,7 @@ export function commitFlowTextEdit(
   if ((options.expectedRevision ?? edit.revision) !== document.revision) {
     return failCommand('工程版本已变化，请重新编辑', { nextEdit: edit })
   }
+  if (edit.kind !== 'chart-text' && !(edit.kind === 'formula' && edit.overlayScope)) return failCommand(FLOW_TEXT_REJECT_SHARED_DOCUMENT, { nextEdit: edit })
   if (!isFlowTextDraftDirty(edit)) {
     return identityDocument(document, { nextEdit: null, nextSelection: selection })
   }
@@ -1025,61 +845,9 @@ export function commitFlowTextEdit(
       const result = commitFlowOverlayFormulaAst(document, selected, draft.ast, accessibleText, options)
       return { ...result, nextEdit: result.ok ? null : edit, nextSelection: selected }
     }
-    const result = updateFlowEditorBlock(document, {
-      surfaceId: edit.surfaceId,
-      blockId: edit.blockId,
-      parentId: edit.parentId,
-    }, (block) => {
-      if (block.type !== 'formula') throw new Error(FLOW_TEXT_REJECT_FORMULA_RUNS)
-      block.ast = structuredClone(draft.ast)
-      block.accessibleText = accessibleText
-    }, options)
-    return { ...result, nextEdit: null, nextSelection: selection }
+    return failCommand(FLOW_TEXT_REJECT_SHARED_DOCUMENT, { nextEdit: edit })
   }
-
-  if (edit.kind === 'plain-string') {
-    const text = (edit.draft as FlowPlainTextDraft).text
-    if (edit.field === 'table-caption' || edit.field === 'table-header') {
-      const result = updateFlowEditorBlock(document, { surfaceId: edit.surfaceId, blockId: edit.blockId, parentId: edit.parentId }, block => {
-        if (block.type !== 'table') throw new Error(FLOW_TEXT_REJECT_NOT_EDITABLE)
-        if (edit.field === 'table-caption') block.caption = text
-        else {
-          const column = block.columns.find(column => column.id === edit.tableColumnId)
-          if (!column) throw new Error(FLOW_TEXT_REJECT_NOT_EDITABLE)
-          column.header = text
-        }
-      }, options)
-      return { ...result, nextEdit: null, nextSelection: selection }
-    }
-    if (edit.field === 'title') {
-      const result = updateFlowEditorBlock(document, {
-        surfaceId: edit.surfaceId,
-        blockId: edit.blockId,
-        parentId: edit.parentId,
-      }, (block) => {
-        if (block.type !== 'section') throw new Error(FLOW_TEXT_REJECT_NOT_EDITABLE)
-        block.title = text
-      }, options)
-      return { ...result, nextEdit: null, nextSelection: selection }
-    }
-    const result = executeFlowEditorCommand(document, selection, {
-      name: 'apply-text',
-      text,
-    }, options)
-    return { ...result, nextEdit: null, nextSelection: selection }
-  }
-
-  const draft = edit.draft as FlowRichTextDraft
-  if (edit.listItemId || (edit.tableRowId && edit.tableColumnId)) {
-    const result = writeNestedRichText(document, edit, draft, options)
-    return { ...result, nextEdit: null, nextSelection: selection }
-  }
-  const result = executeFlowEditorCommand(document, selection, {
-    name: 'apply-text',
-    text: draft.text,
-    runs: draft.runs,
-  }, options)
-  return { ...result, nextEdit: null, nextSelection: selection }
+  return failCommand(FLOW_TEXT_REJECT_SHARED_DOCUMENT, { nextEdit: edit })
 }
 
 export function cancelFlowTextEdit(
@@ -1092,9 +860,8 @@ export function cancelFlowTextEdit(
 }
 
 /**
- * Properties tab and the paper toolbar share this function so one selection
- * writes one `text` + `runs` transaction. Do not give Properties a second
- * whole-string draft.
+ * Properties formatting uses the canonical inline-content command.
+ * Body text itself is authored exclusively by the shared document editor.
  */
 export function formatFlowAuthoringTextStyle(input: {
   readonly document: CourseProjectDocument
@@ -1105,96 +872,8 @@ export function formatFlowAuthoringTextStyle(input: {
   readonly now?: string
   readonly expectedRevision?: number
 }): FlowTextCommandResult {
-  const options: FlowCommandOptions = {
-    now: input.now,
-    expectedRevision: input.expectedRevision ?? input.document.revision,
-  }
-  if (input.edit) {
-    if (input.edit.composing) {
-      return failCommand(FLOW_TEXT_REJECT_COMPOSING, { nextEdit: input.edit })
-    }
-    if (input.edit.kind !== 'rich-text') {
-      return failCommand(FLOW_TEXT_REJECT_NOT_EDITABLE, { nextEdit: input.edit })
-    }
-    const nextEdit = applyFlowTextEditRunStyle(input.edit, input.style, input.range)
-    return identityDocument(input.document, {
-      nextEdit,
-      nextSelection: input.selection,
-    })
-  }
-  const block = locateBlock(input.document, input.selection.surfaceId, input.selection.selectedBlockId ?? '')
-  if (!block) return failCommand(FLOW_TEXT_REJECT_NO_SELECTION)
-  if (
-    input.range !== undefined &&
-    input.range !== 'all'
-  ) {
-    let targetText: string | null = null
-    if (block.type === 'list' && input.selection.textRange?.listItemId) {
-      targetText = block.items.find(
-        (entry) => entry.id === input.selection.textRange?.listItemId,
-      )?.text ?? null
-    } else if (
-      block.type === 'table' &&
-      input.selection.textRange?.tableRowId &&
-      input.selection.textRange.tableColumnId
-    ) {
-      const row = block.rows.find(
-        (entry) => entry.id === input.selection.textRange?.tableRowId,
-      )
-      if (row) targetText = cellToRichText(row.cells[input.selection.textRange.tableColumnId]).text
-    } else if (isRichTextFlowBlock(block)) {
-      targetText = block.text
-    }
-    if (targetText !== null) {
-      const resolved = resolveFlowFormatRange(targetText, input.range)
-      if (resolved.end <= resolved.start) {
-        return identityDocument(input.document, {
-          nextEdit: null,
-          nextSelection: input.selection,
-        })
-      }
-    }
-  }
-  if (block.type === 'list' && input.selection.textRange?.listItemId) {
-    const item = block.items.find((entry) => entry.id === input.selection.textRange?.listItemId)
-    if (!item) return failCommand(FLOW_TEXT_REJECT_NOT_EDITABLE)
-    const resolved = resolveFlowFormatRange(item.text, input.range ?? 'all')
-    const runs = applyTextRunStyle(item.text, item.runs ?? [], resolved.start, resolved.end, input.style)
-    const result = updateFlowEditorBlock(input.document, flowBlockTargetFromSelection(input.document, input.selection), (current) => {
-      if (current.type !== 'list') throw new Error(FLOW_TEXT_REJECT_NOT_EDITABLE)
-      const target = current.items.find((entry) => entry.id === item.id)
-      if (!target) throw new Error('找不到列表项')
-      if (runs.length > 0) target.runs = runs
-      else delete target.runs
-    }, options)
-    return { ...result, nextEdit: null }
-  }
-  if (block.type === 'table' && input.selection.textRange?.tableRowId && input.selection.textRange.tableColumnId) {
-    const rowId = input.selection.textRange.tableRowId
-    const columnId = input.selection.textRange.tableColumnId
-    const row = block.rows.find((entry) => entry.id === rowId)
-    if (!row) return failCommand(FLOW_TEXT_REJECT_NOT_EDITABLE)
-    const rich = cellToRichText(row.cells[columnId])
-    const resolved = resolveFlowFormatRange(rich.text, input.range ?? 'all')
-    const runs = applyTextRunStyle(rich.text, rich.runs ?? [], resolved.start, resolved.end, input.style)
-    const result = updateFlowEditorBlock(input.document, flowBlockTargetFromSelection(input.document, input.selection), (current) => {
-      if (current.type !== 'table') throw new Error(FLOW_TEXT_REJECT_NOT_EDITABLE)
-      const targetRow = current.rows.find((entry) => entry.id === rowId)
-      if (!targetRow) throw new Error('找不到表格行')
-      targetRow.cells[columnId] = runs.length > 0 ? { text: rich.text, runs } : rich.text
-    }, options)
-    return { ...result, nextEdit: null }
-  }
-  if (!isRichTextFlowBlock(block)) return failCommand(FLOW_TEXT_REJECT_NOT_EDITABLE)
-  const resolved = resolveFlowFormatRange(
-    block.text,
-    input.range ?? 'all',
-  )
-  const result = executeFlowEditorCommand(input.document, input.selection, {
-    name: 'format',
-    spec: { kind: 'text-style', style: input.style, range: resolved },
-  }, options)
-  return { ...result, nextEdit: null }
+  if (input.edit) return failCommand(FLOW_TEXT_REJECT_SHARED_DOCUMENT)
+  return executeFlowEditorCommand(input.document, input.selection, { name: 'format', spec: { kind: 'text-style', style: input.style, range: input.range ?? 'all' } }, { now: input.now, expectedRevision: input.expectedRevision ?? input.document.revision })
 }
 
 export function formatFlowAuthoringBlock(
@@ -1213,12 +892,7 @@ export function commitFlowFormulaAst(
   accessibleText: string,
   options: FlowCommandOptions = {},
 ): FlowCommandResult {
-  const target = flowBlockTargetFromSelection(document, selection)
-  return updateFlowEditorBlock(document, target, (block) => {
-    if (block.type !== 'formula') throw new Error(FLOW_TEXT_REJECT_FORMULA_RUNS)
-    block.ast = structuredClone(ast)
-    block.accessibleText = accessibleText
-  }, options)
+  void document; void selection; void ast; void accessibleText; void options; return failCommand(FLOW_TEXT_REJECT_SHARED_DOCUMENT)
 }
 
 function rgbToHex(value: string): string | null {

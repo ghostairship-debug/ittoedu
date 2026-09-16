@@ -14,7 +14,7 @@ export function dynamicAdmissionScope(project: CourseProjectDocument, locationId
     return { ...sceneNodeToCourseLayerItem(createTextNode({ text: '' })), layerItemId, label, order, frame, rotation, visible, locked, hitPolicy, playbackInitialVisibility, opacity: 0 }
   }
   const inertBlocks = (blocks: FlowBlock[]): FlowBlock[] => blocks.map(block => block.type === 'section'
-    ? { ...block, blocks: inertBlocks(block.blocks) } : { id: block.id, type: 'paragraph', text: '' })
+    ? { ...block, blocks: inertBlocks(block.blocks) } : { id: block.id, type: 'paragraph', content: { inlines: [] } })
   for (const surface of next.surfaces) {
     if (!activeSurfaces.has(surface.id)) {
       surface.backgroundAssetId = null

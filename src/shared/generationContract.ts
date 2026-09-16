@@ -12,7 +12,10 @@ export const generationInputReferenceSchema = z.object({ $result: z.object({
 const assetResultReferenceSchema = z.object({ $result: generationInputReferenceSchema.shape.$result.extend({ kind: z.literal('asset-id') }) }).strict()
 export const MAX_GENERATION_PROMPT_BYTES = 160_000
 export const MAX_GENERATION_RESOURCE_BYTES = 12 * 1024 * 1024
-export const MAX_GENERATION_TASK_DURATION_MS = 20 * 60 * 1000
+export const DEFAULT_GENERATION_TASK_DURATION_MS = 20 * 60 * 1000
+export const MAX_GENERATION_TASK_DURATION_MS = 120 * 60 * 1000
+export const GENERATION_TASK_BUDGET_MINUTES = [20, 40, 60, 120] as const
+export const GENERATION_NATIVE_INACTIVITY_MS = 20 * 60 * 1000
 export const generationResourceFileSchema = z.object({
   path: z.string().min(1).max(1000).refine(value => !value.includes('\\') && !value.includes(':') && !value.includes('\0')
     && !value.startsWith('/') && !value.split('/').some(part => !part || part === '.' || part === '..'), '需要资源根内相对路径'),
@@ -87,7 +90,7 @@ export const generationRequestSchema = z.object({
   confirmedDocuments: z.object({ teachingPlan: z.string().min(1), presentationScript: z.string().min(1) }).strict().optional(),
   allowedCarriers: z.array(generationCarrierSchema).min(1),
 }).strict().superRefine((request, ctx) => {
-  if (request.execution && (request.execution.deadlineAt <= request.execution.startedAt || request.execution.deadlineAt > request.execution.startedAt + MAX_GENERATION_TASK_DURATION_MS)) ctx.addIssue({ code: 'custom', message: '任务执行期限必须在起点后的20分钟内', path: ['execution'] })
+  if (request.execution && (request.execution.deadlineAt <= request.execution.startedAt || request.execution.deadlineAt > request.execution.startedAt + MAX_GENERATION_TASK_DURATION_MS)) ctx.addIssue({ code: 'custom', message: '任务执行期限必须在起点后的120分钟内', path: ['execution'] })
   const resources = request.resourceFiles ?? []
   if (request.observation && (request.observation.documentRevision !== request.documentRevision || request.observation.sessionGeneration !== request.sessionGeneration)) ctx.addIssue({ code: 'custom', message: '当前画面观察与工程结构版本不一致', path: ['observation'] })
   if (request.applyPolicy === 'auto' && !request.observation) ctx.addIssue({ code: 'custom', message: '自动编辑需要当前真实画面观察', path: ['applyPolicy'] })

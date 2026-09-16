@@ -1,85 +1,29 @@
-import { createPortal } from 'react-dom'
-import { buildFlowRichTextHtml } from '../../shared/flowRichText'
-import { chartCanvasTextPort } from '../authoring/chartCanvasTextBridge'
-import { FLOW_BODY_CSS, FLOW_BODY_PAPER_PADDING, FLOW_BODY_SCROLL_PADDING, flowPaperMaxWidth, resolveFlowBodyWidth, resolveFlowParagraphPresentation } from '../../shared/flowBodyPresentation'
-import { tableCellSpan } from '../../shared/tableMerge'
-import { EditableChartView } from './EditableChartView'
-import { useAssetObjectUrls } from './useAssetObjectUrls'
-import type { ChartTextDraft } from '../authoring/chartTextDraft'
-import {
-  useEffect,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-  type ChangeEvent,
-  type CSSProperties,
-  type KeyboardEvent as ReactKeyboardEvent,
-  type MouseEvent as ReactMouseEvent,
-  type PointerEvent as ReactPointerEvent,
-  type ReactNode,
-} from 'react'
-import type { FormulaAstNode, TextRun } from '../../shared/contracts/native-v1'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { createRoot } from 'react-dom/client'
 import type { AssetMeta } from '../../shared/contracts/media-v1'
 import type { FlowBlock } from '../../shared/courseProjectTypes'
-import {
-  FLOW_MEDIA_INLINE_SIZE_CUSTOM_PROPERTY,
-  FLOW_MEDIA_INLINE_SIZE_REFERENCE,
-  FLOW_MEDIA_QUERY_CONTAINER_TYPE,
-  resolveFlowMediaLayoutProjection,
-} from '../../shared/flowMediaLayout'
-import {
-  assertActiveFlowEditorView,
-  captureFlowEditorAuthoringTarget,
-  type FlowBlockView,
-  type FlowEditorView,
-} from '../course/flowEditorView'
-import type { FlowEditorSelection } from '../course/flowEditorSlice'
-import type {
-  CourseAuthoringSessionToken,
-  CourseAuthoringTarget,
-} from '../authoring/courseAuthoringSession'
-import { STAGE_VIEWPORT_HEIGHT, STAGE_VIEWPORT_WIDTH } from '../authoring/stageViewportTransform'
-import {
-  cellToRichText,
-  clearFlowTextEditRangeStyle,
-  deriveFlowSelectionFormat,
-  extractFlowRichTextFromEditor,
-  finishFlowTextComposition,
-  FLOW_PAPER_TEXT_COLOR,
-  flowFormulaBlockToAuthoringNode,
-  logicalFlowSelectionOffsets,
-  markFlowTextComposing,
-  resolveFlowTextKeyDown,
-  restoreFlowLogicalSelection,
-  toggleFlowTextEditEmphasis,
-  toggleFlowTextEditRunStyle,
-  updateFlowTextDraft,
-  updateFlowChartTextDraft,
-  updateFlowTextRange,
-  type FlowFormulaDraft,
-  type FlowTextEditSession,
-} from '../authoring/flowTextEdit'
-import { FormulaEditDialog } from './FormulaEditDialog'
-import { PublishedFormulaPaint } from './PublishedFormulaPaint'
-import {
-  FLOW_WORKSPACE_HEADER_HEIGHT,
-  FlowBlockContextToolbar,
-  type FlowBlockContextCommand,
-} from './FlowBlockContextToolbar'
-import {
-  findComponentPackageSource,
-  mountPublishedComponent,
-} from '../../player/surfaces/publishedComponentMount'
 import type { ComponentPackageData } from '../../shared/componentTypes'
-import {
-  isFlowSelectionPreservingFocusTarget,
-  useFlowTextAuthoringController,
-  type FlowCurrentSessionCommandPort,
-} from './flow/useFlowTextAuthoringController'
-import { FlowOverlayAuthoringLayer } from './flow/FlowOverlayAuthoringLayer'
+import { documentResourceReferences } from '../../shared/document/resources'
+import { FLOW_BODY_CSS, FLOW_BODY_PAPER_PADDING, FLOW_BODY_SCROLL_PADDING, flowPaperMaxWidth, resolveFlowBodyWidth } from '../../shared/flowBodyPresentation'
 import { measureFlowPaperOrigin } from '../../shared/flowViewportGeometry'
+import { SharedDocumentEditor, type SharedDocumentEditorHandle } from '../document'
+import { createFlowDocumentResourcePort } from '../document/flowDocumentResources'
+import { createDocumentClipboardContext, readDocumentClipboardContext } from '../document/documentClipboardContext'
+import { componentPackageMeta } from '../components/editableComponentPackage'
+import type { DocumentResources } from '../../shared/document/resources'
+import { assertActiveFlowEditorView, captureFlowEditorAuthoringTarget, type FlowEditorView } from '../course/flowEditorView'
+import type { FlowEditorSelection } from '../course/flowEditorSlice'
+import type { CourseAuthoringSessionToken } from '../authoring/courseAuthoringSession'
+import { flowFormulaBlockToAuthoringNode, type FlowFormulaDraft, type FlowTextEditSession } from '../authoring/flowTextEdit'
+import { FlowOverlayAuthoringLayer } from './flow/FlowOverlayAuthoringLayer'
+import { useFlowTextAuthoringController, type FlowCurrentSessionCommandPort } from './flow/useFlowTextAuthoringController'
+import { retainAssetObjectUrls, useAssetObjectUrls } from './useAssetObjectUrls'
+import { EditableChartView } from './EditableChartView'
+import { FormulaEditDialog } from './FormulaEditDialog'
+import { findComponentPackageSource, mountPublishedComponent } from '../../player/surfaces/publishedComponentMount'
 import { authoringObservationDraftToken } from '../authoring/generation/authoringObservation'
+import type { FlowDocumentDraft } from '../store/slices/flowAuthoringSlice'
+import { resolveFlowMediaLayoutProjection, FLOW_MEDIA_INLINE_SIZE_CUSTOM_PROPERTY, FLOW_MEDIA_INLINE_SIZE_REFERENCE } from '../../shared/flowMediaLayout'
 
 export interface FlowWorkspaceProps {
   readonly toolbarContainer?: HTMLElement | null
@@ -88,233 +32,146 @@ export interface FlowWorkspaceProps {
   readonly assets: Readonly<Record<string, AssetMeta>>
   readonly selection: FlowEditorSelection | null
   readonly textEdit: FlowTextEditSession | null
+  readonly documentDraft?: FlowDocumentDraft | null
   readonly previewTextEdit?: FlowTextEditSession | null
   readonly commands: FlowCurrentSessionCommandPort
   readonly readOnly?: boolean
   readonly assetFiles?: Record<string, Uint8Array>
   readonly componentPackages?: Record<string, ComponentPackageData>
 }
-
-export function FlowInlineRichTextEditor({
-  blockId,
-  label,
-  text,
-  runs,
-  preview,
-  restyleToken,
-  range,
-  composing,
-  onDraftChange,
-  onRangeChange,
-  onComposingChange,
-  onCommit,
-  onCancel,
-  onKeyAction,
-}: {
-  readonly blockId: string
-  readonly label: string
-  readonly text: string
-  readonly runs: readonly TextRun[]
-  readonly preview?: { readonly text: string; readonly runs: readonly TextRun[] } | null
-  readonly restyleToken: number
-  readonly range: { start: number; end: number }
-  readonly composing: boolean
-  readonly onDraftChange: (
-    text: string,
-    runs: TextRun[],
-    offsets: { start: number; end: number } | null,
-  ) => void
-  readonly onRangeChange: (offsets: { start: number; end: number }) => void
-  readonly onComposingChange: (composing: boolean) => void
-  readonly onCommit: () => void
-  readonly onCancel: () => void
-  readonly onKeyAction: (event: ReactKeyboardEvent<HTMLElement>) => void
-}) {
-  const editorRef = useRef<HTMLElement>(null)
-  const initializedRef = useRef(false)
-  const composingRef = useRef(composing)
-  const finishedRef = useRef(false)
-  const blurReadyRef = useRef(false)
-  const lastRestyleRef = useRef(-1)
-  const onRangeChangeRef = useRef(onRangeChange)
-  composingRef.current = composing
-  onRangeChangeRef.current = onRangeChange
-
-  const read = (): { text: string; runs: TextRun[] } => editorRef.current
-    ? extractFlowRichTextFromEditor(editorRef.current)
-    : { text, runs: [...runs] }
-
-  useLayoutEffect(() => {
-    const editor = editorRef.current
-    if (!editor) return
-    if (!initializedRef.current || lastRestyleRef.current !== restyleToken) {
-      const html = buildFlowRichTextHtml(text, runs)
-      editor.innerHTML = html || '<br data-flow-empty-placeholder="true">'
-      lastRestyleRef.current = restyleToken
-      initializedRef.current = true
-      restoreFlowLogicalSelection(editor, range.start, range.end)
-    }
-    const timer = window.setTimeout(() => {
-      if (finishedRef.current || !editor.isConnected) return
-      editor.focus({ preventScroll: true })
-      restoreFlowLogicalSelection(editor, range.start, range.end)
-      blurReadyRef.current = true
-    }, 0)
-    return () => window.clearTimeout(timer)
-  }, [restyleToken])
-
+const EMPTY_ASSET_FILES: Record<string, Uint8Array> = {}
+const EMPTY_COMPONENT_PACKAGES: Record<string, ComponentPackageData> = {}
+export function FlowWorkspace({ view, sessionToken, assets, selection, textEdit, documentDraft, commands, readOnly = false, assetFiles = EMPTY_ASSET_FILES, componentPackages = EMPTY_COMPONENT_PACKAGES }: FlowWorkspaceProps) {
+  assertActiveFlowEditorView(view)
+  const paperRef = useRef<HTMLElement>(null)
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const workspaceRef = useRef<HTMLDivElement>(null)
+  const editorRef = useRef<SharedDocumentEditorHandle>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [paperScroll, setPaperScroll] = useState({ top: 0, left: 0 })
+  const [paperOrigin, setPaperOrigin] = useState({ x: 0, y: 0 })
+  const viewKey = `${view.projectId}/${view.surfaceId}`
+  const [panState, setPanState] = useState({ key: viewKey, x: 0, y: 0 })
+  const viewPan = panState.key === viewKey ? panState : { x: 0, y: 0 }
+  const setViewPan = (pan: { x: number; y: number }) => setPanState(current => current.key === viewKey && current.x === pan.x && current.y === pan.y ? current : { key: viewKey, ...pan })
+  const [viewport, setViewport] = useState({ width: 1280, height: 720, nativeChrome: { right: 0, bottom: 0 } })
+  const assetMimeTypes = useMemo(() => Object.fromEntries(Object.entries(assets).map(([id, asset]) => [id, asset.mimeType])), [assets])
+  const assetUrls = useAssetObjectUrls(assetFiles, assetMimeTypes)
+  const current = useRef({ view, sessionToken, commands }); current.current = { view, sessionToken, commands }
+  const bodyWidth = resolveFlowBodyWidth(view.layout, viewport.width - viewport.nativeChrome.right)
+  const objectRevision = useMemo(() => ({ assetUrls, componentPackages, bodyWidth }), [assetUrls, componentPackages, bodyWidth])
+  const controller = useFlowTextAuthoringController({ view, sessionToken, selection, readOnly, textEdit, workspaceRef, commands })
+  const blocks = view.blocks.filter(block => block.parentId === null).map(block => structuredClone(block.block) as FlowBlock)
+  const refs = documentResourceReferences(blocks)
+  const document = { content: { blocks }, resources: { assets: refs.assets.map(assetId => ({ assetId, source: { kind: 'project' as const } })), components: refs.components.map(component => ({ ...component, source: { kind: 'project' as const } })) } }
+  const run = (intent: Parameters<FlowCurrentSessionCommandPort['run']>[1], blockId?: string) => {
+    const value = current.current
+    const receipt = value.commands.run(captureFlowEditorAuthoringTarget({ view: value.view, sessionToken: value.sessionToken, target: blockId ? { kind: 'block', blockId } : { kind: 'surface' } }), intent)
+    if (!receipt.ok) setError(receipt.reason ?? '正文操作未提交')
+    else setError(null)
+    return receipt
+  }
   useEffect(() => {
-    const editor = editorRef.current
-    if (!editor) return
-    const ownerDocument = editor.ownerDocument
-    const syncNativeRange = () => {
-      if (composingRef.current || finishedRef.current) return
-      const offsets = logicalFlowSelectionOffsets(editor)
-      if (offsets) onRangeChangeRef.current(offsets)
+    const selected = new Set(readOnly ? [] : selection?.selectedBlockIds ?? [])
+    for (const figure of paperRef.current?.querySelectorAll<HTMLElement>('figure[data-flow-media-layout]') ?? []) {
+      const block = figure.closest<HTMLElement>('[data-flow-block-id]')
+      const active = Boolean(block && selected.has(block.dataset.flowBlockId!))
+      if (active) figure.dataset.flowMediaSelected = 'true'
+      else delete figure.dataset.flowMediaSelected
+      figure.style.outline = active ? '2px solid #2563eb' : ''
+      figure.style.outlineOffset = active ? '3px' : ''
     }
-    ownerDocument.addEventListener('selectionchange', syncNativeRange)
-    return () => ownerDocument.removeEventListener('selectionchange', syncNativeRange)
-  }, [])
-
-  return (
-    <span style={{ display: 'block', position: 'relative' }}>
-    <span
-      ref={editorRef}
-      className="flow-inline-editor"
-      data-testid="flow-inline-editor"
-      data-flow-inline-editor="true"
-      data-flow-rich-text="true"
-      data-flow-block-id={blockId}
-      aria-label={label}
-      contentEditable
-      suppressContentEditableWarning
-      spellCheck={false}
-      style={{
-        outline: 'none',
-        caretColor: '#1a1d24',
-        display: 'block',
-        width: '100%',
-        minWidth: 0,
-        whiteSpace: 'pre-wrap',
-        overflowWrap: 'anywhere',
-        minHeight: '1lh',
-        userSelect: 'text',
-        WebkitUserSelect: 'text',
-        cursor: 'text',
-        color: FLOW_PAPER_TEXT_COLOR,
-        opacity: preview ? 0 : undefined,
-      }}
-      onPointerDown={(event) => event.stopPropagation()}
-      onClick={(event) => event.stopPropagation()}
-      onDoubleClick={(event) => event.stopPropagation()}
-      onInput={() => {
-        const value = read()
-        const offsets = editorRef.current ? logicalFlowSelectionOffsets(editorRef.current) : null
-        onDraftChange(value.text, value.runs, offsets)
-      }}
-      onCompositionStart={() => {
-        composingRef.current = true
-        onComposingChange(true)
-      }}
-      onCompositionEnd={() => {
-        composingRef.current = false
-        const value = read()
-        const offsets = editorRef.current ? logicalFlowSelectionOffsets(editorRef.current) : null
-        onDraftChange(value.text, value.runs, offsets)
-        onComposingChange(false)
-      }}
-      onBlur={(event) => {
-        if (isFlowSelectionPreservingFocusTarget(event.relatedTarget)) {
-          return
-        }
-        if (!blurReadyRef.current) return
-        onCommit()
-      }}
-      onKeyDown={(event) => {
-        if (composingRef.current || event.nativeEvent.isComposing) return
-        onKeyAction(event)
-        if (event.key === 'Escape') {
-          event.preventDefault()
-          event.stopPropagation()
-          finishedRef.current = true
-          onCancel()
-        } else if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
-          event.preventDefault()
-          event.stopPropagation()
-          finishedRef.current = true
-          onCommit()
-        }
-      }}
-    />
-    {preview && <span aria-hidden="true" data-testid="flow-text-color-preview"
-      style={{ position: 'absolute', inset: 0, pointerEvents: 'none', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}
-      dangerouslySetInnerHTML={{ __html: buildFlowRichTextHtml(preview.text, preview.runs) }} />}
-    </span>
-  )
+  }, [selection, readOnly, view.revision, objectRevision])
+  useLayoutEffect(() => {
+    const node = workspaceRef.current
+    if (!node) return
+    const update = () => {
+      const rect = node.getBoundingClientRect(); const scroll = scrollRef.current
+      if (rect.width > 0 && rect.height > 0) setViewport({ width: rect.width, height: rect.height, nativeChrome: { right: scroll ? Math.max(0, scroll.offsetWidth - scroll.clientWidth) : 0, bottom: scroll ? Math.max(0, scroll.offsetHeight - scroll.clientHeight) : 0 } })
+      if (scroll && paperRef.current) setPaperOrigin(measureFlowPaperOrigin(node, scroll, paperRef.current, 1, viewPan))
+    }
+    update(); const observer = new ResizeObserver(update); observer.observe(node)
+    if (paperRef.current) observer.observe(paperRef.current)
+    return () => observer.disconnect()
+  }, [viewPan.x, viewPan.y])
+  const formulaOverlay = view.overlayLayers.find(layer => layer.selectionId === controller.formulaBlockId)?.item
+  const [toolbarHost, setToolbarHost] = useState<HTMLDivElement | null>(null)
+  const formulaNode = formulaOverlay?.kind === 'native' && formulaOverlay.content.nativeType === 'formula'
+    ? flowFormulaBlockToAuthoringNode({ id: formulaOverlay.layerItemId, ...formulaOverlay.content.data } as Parameters<typeof flowFormulaBlockToAuthoringNode>[0]) : null
+  const formulaDraft = controller.edit?.kind === 'formula' ? controller.edit.draft as FlowFormulaDraft : null
+  return <div ref={workspaceRef} className="flow-workspace" data-testid="flow-workspace" data-flow-not-slide-stage="true"
+    data-flow-project-id={view.projectId} data-flow-surface-id={view.surfaceId} data-flow-location-id={view.locationId} data-flow-active-block-id={view.activeBlockId}
+    data-observation-source="authoring" data-observation-project-id={view.projectId} data-observation-revision={view.revision}
+    data-observation-session-generation={sessionToken.generation} data-observation-surface-id={view.surfaceId} data-observation-location-id={view.locationId}
+    data-observation-state-id="" data-observation-ready="true" data-observation-draft-token={authoringObservationDraftToken(textEdit)}
+    style={{ position: 'relative', width: '100%', height: '100%', overflow: 'hidden', isolation: 'isolate', backgroundColor: view.backgroundColor,
+      backgroundImage: view.backgroundAssetId && assetUrls[view.backgroundAssetId] ? `url(${JSON.stringify(assetUrls[view.backgroundAssetId])})` : undefined, backgroundSize: 'cover', backgroundPosition: 'center' }}>
+    <div ref={setToolbarHost} className="flow-document-format-host" />
+    <FlowOverlayAuthoringLayer view={view} sessionToken={sessionToken} selection={selection} locationId={selection?.locationId ?? view.locationId}
+      readOnly={readOnly} assetUrls={assetUrls} componentPackages={componentPackages} paperScrollTop={paperScroll.top} paperScrollLeft={paperScroll.left}
+      paperOrigin={paperOrigin} overlayViewportSize={viewport} viewPan={viewPan} onViewPanChange={setViewPan} onEditFormula={controller.openFormula}
+      onBeforeGesture={() => editorRef.current?.flush().ready ?? true} commands={commands}>
+      <div ref={scrollRef} className="flow-workspace__scroll flow-media-query-root" data-testid="flow-workspace-scroll" data-flow-media-query-root="true"
+        onClick={event => { if (event.target === event.currentTarget && editorRef.current?.flush().ready) run({ kind: 'clear-selection' }) }}
+        onScroll={event => setPaperScroll({ top: event.currentTarget.scrollTop, left: event.currentTarget.scrollLeft })}
+        style={{ flex: 1, position: 'relative', zIndex: 2, overflow: 'auto', height: '100%', padding: FLOW_BODY_SCROLL_PADDING, containerType: 'inline-size', containerName: 'flow-media-root', transform: `translate(${viewPan.x}px, ${viewPan.y}px)` }}>
+        <article ref={paperRef} className="flow-paper flow-body-content" data-testid="flow-paper" data-flow-reading-width={view.layout.readingWidth}
+          style={{ width: '100%', maxWidth: flowPaperMaxWidth(view.layout), minHeight: '100%', margin: '0 auto', padding: FLOW_BODY_PAPER_PADDING, background: 'transparent', color: '#1f2937' }}>
+          <style>{FLOW_BODY_CSS}</style>
+          <SharedDocumentEditor key={`${view.projectId}/${view.surfaceId}/${sessionToken.generation}`} ref={editorRef} document={document} revision={String(view.revision)} readOnly={readOnly} target="flow" toolbarHost={toolbarHost}
+            objectRevision={objectRevision}
+            clipboardContext={(resources: DocumentResources) => createDocumentClipboardContext(resources, { assets, assetFiles, componentPackages })}
+            clipboardResourcePort={context => {
+              const source = readDocumentClipboardContext(context)
+              return createFlowDocumentResourcePort({
+                target: { id: view.projectId, revision: view.revision, assets: { ...assets }, componentPackages: Object.fromEntries(Object.entries(componentPackages).map(([id, data]) => [id, componentPackageMeta(data)])) },
+                resolveAsset: source.resolveAsset, prepareComponent: ref => source.prepareComponent(ref),
+              })
+            }}
+            sourceDraft={documentDraft?.surfaceId === view.surfaceId ? documentDraft.source : undefined}
+            onChange={(next, operation) => run({ kind: 'replace-document-content', blocks: next.content.blocks, historyGroup: operation.historyGroup, preparedResources: operation.preparedResources }).ok}
+            onDraft={(source, diagnostics) => { if (diagnostics.length) { run({ kind: 'update-document-draft', source, diagnostics, composing: false }); setError('源文尚有错误，当前草稿不能提交到工程') } else run({ kind: 'clear-document-draft' }) }}
+            onCompositionChange={(composing, source) => { if (composing) run({ kind: 'update-document-draft', source, diagnostics: [], composing }); else if (!editorRef.current?.flush().diagnostics.length) run({ kind: 'clear-document-draft' }) }}
+            onUndo={() => run({ kind: 'document-history', direction: 'undo' })} onRedo={() => run({ kind: 'document-history', direction: 'redo' })}
+            onSelection={next => {
+              if (next?.kind === 'object' || next?.kind === 'cells') { const blockId = next.kind === 'object' ? next.blockId : next.tableId; run({ kind: 'select-blocks', blockIds: [blockId], focus: 'block' }, blockId); return }
+              if (next?.kind !== 'text') return
+              const slot = next.head.slot
+              run({ kind: 'select-blocks', blockIds: [next.head.blockId], focus: 'text', textRange: { blockId: next.head.blockId, start: next.anchor.offset, end: next.head.offset,
+                ...(slot.kind === 'item' ? { listItemId: slot.itemId } : {}), ...(slot.kind === 'cell' ? { tableRowId: slot.rowId, tableColumnId: slot.columnId } : {}) } }, next.head.blockId)
+            }}
+            renderObject={(block, host) => {
+              const root = createRoot(host)
+              const releaseUrls = retainAssetObjectUrls(assetUrls)
+              if (block.type === 'media') {
+                const projection = resolveFlowMediaLayoutProjection(block.layout, view.layout)
+                const wrapped = block.wrap === 'left' || block.wrap === 'right'
+                const selected = !readOnly && Boolean(selection?.selectedBlockIds.includes(block.id))
+                const figure = host.parentElement!
+                figure.className = `flow-block-media ${projection.className}`
+                figure.dataset.flowMediaLayout = block.layout; figure.dataset.flowMediaWidthTier = projection.tier
+                if (selected) figure.dataset.flowMediaSelected = 'true'; else delete figure.dataset.flowMediaSelected
+                figure.style.setProperty(FLOW_MEDIA_INLINE_SIZE_CUSTOM_PROPERTY, projection.inlineSize)
+                Object.assign(figure.style, { outline: selected ? '2px solid #2563eb' : '', outlineOffset: selected ? '3px' : '', width: wrapped ? projection.wrappedOuterInlineSize : FLOW_MEDIA_INLINE_SIZE_REFERENCE, maxWidth: wrapped ? '100%' : FLOW_MEDIA_INLINE_SIZE_REFERENCE, inlineSize: wrapped ? projection.wrappedOuterInlineSize : FLOW_MEDIA_INLINE_SIZE_REFERENCE, maxInlineSize: wrapped ? '100%' : FLOW_MEDIA_INLINE_SIZE_REFERENCE, cssFloat: wrapped ? block.wrap : 'none', position: 'relative', left: wrapped ? '' : '50%', transform: wrapped ? '' : 'translateX(-50%)', margin: wrapped ? block.wrap === 'left' ? '0 16px 8px 0' : '0 0 8px 16px' : '0' })
+                root.render(renderFlowPaperMedia(block, assetUrls))
+              }
+              if (block.type === 'component') {
+                if ((block.wrap === 'left' || block.wrap === 'right') && host.parentElement) { host.parentElement.style.cssFloat = block.wrap; host.parentElement.style.width = '48%'; host.parentElement.style.margin = block.wrap === 'left' ? '0 16px 8px 0' : '0 0 8px 16px' }
+                root.render(<FlowComponentBlockView projectId={view.projectId} block={block} readingWidth={bodyWidth} componentPackages={componentPackages} assetUrls={assetUrls} />)
+              }
+              if (block.type === 'chart') root.render(<EditableChartView id={block.id} chart={block.chart} width={bodyWidth} height={block.height}
+                onCommit={readOnly ? undefined : chart => { const receipt = run({ kind: 'patch-block', patch: { chart } }, block.id); return receipt.ok ? null : receipt.reason ?? '图表未提交' }}
+                onHeightCommit={readOnly ? undefined : height => { run({ kind: 'patch-block', patch: { height } }, block.id) }} />)
+              return () => { queueMicrotask(() => { try { root.unmount() } finally { releaseUrls() } }) }
+            }} />
+          {error && <p role="alert">{error}</p>}
+        </article>
+      </div>
+    </FlowOverlayAuthoringLayer>
+    {formulaNode && formulaDraft && <FormulaEditDialog node={formulaNode} draftSource={formulaDraft.source} onDraftChange={controller.updateFormulaDraft}
+      onCompositionChange={controller.setFormulaComposing} onCancel={controller.cancelCurrent} onCommit={controller.commitFormula} />}
+  </div>
 }
-
-function FlowPlainStringEditor({
-  blockId,
-  label,
-  value,
-  multiline,
-  onChange,
-  onComposingChange,
-  onCommit,
-  onCancel,
-}: {
-  blockId: string
-  label: string
-  value: string
-  multiline: boolean
-  onChange: (value: string) => void
-  onComposingChange: (composing: boolean) => void
-  onCommit: () => void
-  onCancel: () => void
-}) {
-  const composingRef = useRef(false)
-  const shared = {
-    className: 'flow-inline-plain-editor',
-    'data-testid': 'flow-inline-plain-editor',
-    'data-flow-block-id': blockId,
-    'aria-label': label,
-    value,
-    autoFocus: true,
-    onPointerDown: (event: ReactPointerEvent<HTMLInputElement | HTMLTextAreaElement>) => event.stopPropagation(),
-    onChange: (event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
-      onChange(event.currentTarget.value)
-    },
-    onCompositionStart: () => {
-      composingRef.current = true
-      onComposingChange(true)
-    },
-    onCompositionEnd: () => {
-      composingRef.current = false
-      onComposingChange(false)
-    },
-    onBlur: () => {
-      if (composingRef.current) return
-      onCommit()
-    },
-    onKeyDown: (event: ReactKeyboardEvent<HTMLInputElement | HTMLTextAreaElement>) => {
-      if (composingRef.current || event.nativeEvent.isComposing) return
-      if (event.key === 'Escape') {
-        event.preventDefault()
-        event.stopPropagation()
-        onCancel()
-      } else if (event.key === 'Enter' && (!multiline || event.ctrlKey || event.metaKey)) {
-        event.preventDefault()
-        event.stopPropagation()
-        onCommit()
-      }
-    },
-  }
-  if (multiline) {
-    return <textarea {...shared} rows={4} />
-  }
-  return <input {...shared} />
-}
-
 function renderFlowPaperMedia(
   block: Extract<FlowBlock, { type: 'media' }>,
   assetUrls: Record<string, string>,
@@ -327,7 +184,7 @@ function renderFlowPaperMedia(
         data-flow-media-kind="image"
         {...(url ? { src: url } : {})}
         alt={block.altText ?? ''}
-        style={{ maxWidth: '100%' }}
+        style={{ maxWidth: '100%', display: 'block' }}
       />
     )
   }
@@ -342,7 +199,7 @@ function renderFlowPaperMedia(
         muted
         playsInline
         preload="metadata"
-        style={{ maxWidth: '100%' }}
+        style={{ maxWidth: '100%', display: 'block' }}
       />
     )
   }
@@ -421,1079 +278,5 @@ function FlowComponentBlockView({
       data-flow-component-version={block.component.version}
       style={{ width: '100%', minHeight: 320, position: 'relative' }}
     />
-  )
-}
-
-
-function isTextTarget(target: EventTarget | null): boolean {
-  if (!(target instanceof HTMLElement)) return false
-  return Boolean(
-    target.closest('[data-flow-rich-text="true"]') ||
-    target.closest('[data-flow-plain-text="true"]') ||
-    target.closest('h1,h2,h3,h4,h5,h6,p,blockquote,li,td,th,code,pre,summary'),
-  )
-}
-
-function isFormulaEditTarget(target: EventTarget | null): boolean {
-  return target instanceof HTMLElement && Boolean(
-    target.closest('[data-flow-formula-edit-target="true"]'),
-  )
-}
-
-function headingTag(level: 1 | 2 | 3 | 4 | 5 | 6): 'h1' | 'h2' | 'h3' | 'h4' | 'h5' | 'h6' {
-  return (`h${level}`) as 'h1' | 'h2' | 'h3' | 'h4' | 'h5' | 'h6'
-}
-
-function flowPaperBlockTypographyStyle(block: FlowBlock): CSSProperties | undefined {
-  if (block.type !== 'heading' && block.type !== 'paragraph' && block.type !== 'quote') return undefined
-  return resolveFlowParagraphPresentation(block)
-}
-
-function blockLabel(block: FlowBlock): string {
-  if (block.type === 'heading') return '编辑标题文本'
-  if (block.type === 'quote') return '编辑引用文本'
-  if (block.type === 'list') return '编辑列表项文本'
-  if (block.type === 'table') return '编辑表格单元格'
-  if (block.type === 'code') return '编辑代码'
-  if (block.type === 'callout') return '编辑提示正文'
-  if (block.type === 'section') return '编辑分节标题'
-  return '编辑段落文本'
-}
-
-const EMPTY_ASSET_FILES: Record<string, Uint8Array> = {}
-
-export function FlowWorkspace({
-  toolbarContainer,
-  view,
-  sessionToken,
-  assets,
-  selection,
-  textEdit,
-  previewTextEdit,
-  commands,
-  readOnly = false,
-  assetFiles = EMPTY_ASSET_FILES,
-  componentPackages = {},
-}: FlowWorkspaceProps) {
-  assertActiveFlowEditorView(view)
-  const paperRef = useRef<HTMLElement>(null)
-  const scrollRef = useRef<HTMLDivElement>(null)
-  const workspaceMeasureRef = useRef<HTMLDivElement>(null)
-  const blockDragTargetRef = useRef<{
-    readonly target: CourseAuthoringTarget
-    readonly expectedEdit: FlowTextEditSession | null
-  } | null>(null)
-  const [localToolbarContainer, setLocalToolbarContainer] = useState<HTMLDivElement | null>(null)
-  const toolbarHost = toolbarContainer === undefined ? localToolbarContainer : toolbarContainer
-  const localHeaderHeight = toolbarContainer === undefined ? FLOW_WORKSPACE_HEADER_HEIGHT : 0
-  const toolbarSelectionRef = useRef<{ start: number; end: number } | null>(null)
-  const [paperScrollTop, setPaperScrollTop] = useState(0)
-  const [paperScrollLeft, setPaperScrollLeft] = useState(0)
-  const [paperOrigin, setPaperOrigin] = useState({ x: 0, y: 0 })
-  const [paperContentWidth, setPaperContentWidth] = useState(0)
-  const viewKey = `${view.projectId}/${view.surfaceId}`
-  const [authoringView, setAuthoringView] = useState({ key: viewKey, pan: { x: 0, y: 0 } })
-  const viewPan = authoringView.key === viewKey ? authoringView.pan : { x: 0, y: 0 }
-  const setViewPan = (pan: { x: number; y: number }) => setAuthoringView(current => current.key === viewKey
-    && current.pan.x === pan.x && current.pan.y === pan.y ? current : { key: viewKey, pan })
-  const [overlayViewportSize, setOverlayViewportSize] = useState({
-    width: STAGE_VIEWPORT_WIDTH,
-    height: STAGE_VIEWPORT_HEIGHT,
-    nativeChrome: { right: 0, bottom: 0 },
-  })
-  const bodyWidth = paperContentWidth || resolveFlowBodyWidth(view.layout, overlayViewportSize.width)
-  const locationId = selection?.locationId ?? view.locationId
-  const assetMimeTypes = useMemo(() => Object.fromEntries(
-    Object.entries(assets).map(([id, asset]) => [id, asset.mimeType]),
-  ), [assets])
-  const assetUrls = useAssetObjectUrls(assetFiles, assetMimeTypes)
-
-  const {
-    edit,
-    editRef,
-    restyleToken,
-    restyleRange,
-    formulaBlockId,
-    setFormulaBlockId,
-    bumpRestyle,
-    adoptEditReceipt,
-    setEditState,
-    commitCurrent,
-    cancelCurrent,
-    enterText,
-    openFormula,
-    updateFormulaDraft,
-    setFormulaComposing,
-    commitFormula,
-    handleHistoryKey,
-  } = useFlowTextAuthoringController({
-    view,
-    sessionToken,
-    selection,
-    readOnly,
-    textEdit,
-    workspaceRef: workspaceMeasureRef,
-    commands,
-  })
-
-  useLayoutEffect(() => {
-    const node = workspaceMeasureRef.current
-    if (!node) return
-    const update = () => {
-      const rect = node.getBoundingClientRect()
-      if (rect.width > 0 && rect.height > 0) {
-        const scroll = scrollRef.current
-        setOverlayViewportSize({ width: rect.width, height: rect.height, nativeChrome: {
-          right: scroll ? Math.max(0, scroll.offsetWidth - scroll.clientWidth) : 0,
-          bottom: scroll ? Math.max(0, scroll.offsetHeight - scroll.clientHeight) : 0,
-        } })
-        if (scrollRef.current && paperRef.current) {
-          if (paperRef.current.clientWidth > 0) setPaperContentWidth(Math.max(0, paperRef.current.clientWidth - 72))
-          setPaperOrigin(measureFlowPaperOrigin(node, scrollRef.current, paperRef.current, 1, viewPan))
-        }
-      }
-    }
-    update()
-    const observer = new ResizeObserver(update)
-    observer.observe(node)
-    if (paperRef.current) observer.observe(paperRef.current)
-    return () => observer.disconnect()
-  }, [viewPan.x, viewPan.y])
-
-  useLayoutEffect(() => {
-    const blockId = selection?.selectedBlockId
-    if (!blockId || !scrollRef.current) return
-    const block = scrollRef.current.querySelector(`[data-flow-block-id="${blockId}"]`)
-    if (!(block instanceof HTMLElement) || typeof block.scrollIntoView !== 'function') return
-    block.scrollIntoView({ block: 'nearest', inline: 'nearest' })
-  }, [selection?.selectedBlockId])
-
-  const targetForBlock = (blockId: string): CourseAuthoringTarget => (
-    captureFlowEditorAuthoringTarget({
-      view,
-      sessionToken,
-      target: { kind: 'block', blockId },
-    })
-  )
-
-  const selectBlock = (blockId: string, event: ReactMouseEvent<HTMLElement>) => {
-    if (readOnly) return
-    event.stopPropagation()
-    if (selection?.authoringScope === 'global') return
-    if (editRef.current && editRef.current.blockId !== blockId) {
-      commitCurrent(false, blockId)
-      return
-    }
-    if (
-      !event.ctrlKey &&
-      !event.metaKey &&
-      !event.shiftKey &&
-      selection?.focus === 'block' &&
-      selection.selectedBlockId === blockId &&
-      isFormulaEditTarget(event.target)
-    ) {
-      openFormula(blockId)
-      return
-    }
-    if (
-      selection?.focus === 'block' &&
-      selection.selectedBlockId === blockId &&
-      isTextTarget(event.target)
-    ) {
-      enterText(blockId, 'click-text')
-      return
-    }
-    const ids = (() => {
-      if (event.ctrlKey || event.metaKey) {
-        const current = selection?.selectedBlockIds ?? []
-        return current.includes(blockId)
-          ? current.filter((id) => id !== blockId)
-          : [...current, blockId]
-      }
-      if (event.shiftKey && selection?.selectedBlockId) {
-        const order = view.blocks.map((entry) => entry.blockId)
-        const from = order.indexOf(selection.selectedBlockId)
-        const to = order.indexOf(blockId)
-        if (from >= 0 && to >= 0) {
-          return order.slice(Math.min(from, to), Math.max(from, to) + 1)
-        }
-      }
-      return [blockId]
-    })()
-    if (ids.length === 0) return
-    commands.run(targetForBlock(blockId), { kind: 'select-blocks', blockIds: ids })
-  }
-
-  const handlePaperClick = (event: ReactMouseEvent<HTMLElement>) => {
-    if (event.target !== event.currentTarget) return
-    if (readOnly) return
-    if (editRef.current) commitCurrent(false)
-    else commands.run(captureFlowEditorAuthoringTarget({ view, sessionToken, target: { kind: 'surface' } }), { kind: 'clear-selection', expectedEdit: null })
-  }
-
-  const handleBlockKeyDown = (blockId: string, event: ReactKeyboardEvent<HTMLElement>) => {
-    if (readOnly || selection?.authoringScope === 'global') return
-    if (editRef.current) return
-    if (event.key === 'Enter') {
-      event.preventDefault()
-      enterText(blockId, 'enter')
-      return
-    }
-    if (event.key === 'Escape') {
-      event.preventDefault()
-      return
-    }
-    if (event.key === 'Delete' || event.key === 'Backspace') {
-      if (!selection) return
-      event.preventDefault()
-      event.stopPropagation()
-      commands.run(targetForBlock(blockId), {
-        kind: 'delete-blocks',
-        blockIds: selection.selectedBlockIds,
-        direction: event.key === 'Backspace' ? 'backward' : 'forward',
-      })
-      return
-    }
-    if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
-      event.preventDefault()
-      const order = view.blocks.map((entry) => entry.blockId)
-      const index = order.indexOf(blockId)
-      const nextIndex = event.key === 'ArrowUp' ? index - 1 : index + 1
-      const nextId = order[nextIndex]
-      if (nextId) {
-        commands.run(targetForBlock(nextId), { kind: 'select-blocks', blockIds: [nextId] })
-      }
-    }
-  }
-
-  const applyToolbarCommand = (command: FlowBlockContextCommand) => {
-    const blockId = selection?.selectedBlockId
-    if (!selection || !blockId) return
-    const target = targetForBlock(blockId)
-    const current = editRef.current
-    const captured = toolbarSelectionRef.current
-    // Native controls can emit a second commit while React replaces or blurs
-    // them (the number input does this after Enter). Keep the pointer-captured
-    // editor range for the whole toolbar interaction so that follow-up event
-    // cannot silently turn a real range operation into a caret operation. The
-    // next toolbar pointer-down always replaces this value with the live DOM
-    // selection.
-    if (current && captured) setEditState(updateFlowTextRange(current, captured))
-    const live = editRef.current
-
-    if (command.type === 'range-style' || command.type === 'range-color' || command.type === 'range-highlight') {
-      if (live && command.type === 'range-style') {
-        const key = command.style.bold !== undefined
-          ? 'bold' as const
-          : command.style.italic !== undefined
-            ? 'italic' as const
-            : command.style.underline !== undefined
-              ? 'underline' as const
-              : command.style.strike !== undefined
-                ? 'strike' as const
-                : null
-        if (key) {
-          const next = toggleFlowTextEditRunStyle(live, key, live.range)
-          setEditState(next)
-          bumpRestyle(next.range)
-          return
-        }
-      }
-      const style = command.type === 'range-style'
-        ? command.style
-        : command.type === 'range-color'
-          ? { color: command.color }
-          : { highlightColor: command.color }
-      const receipt = commands.run(target, {
-        kind: 'format-text-style',
-        style,
-        expectedEdit: live,
-      })
-      if (receipt.ok && receipt.edit) {
-        // The command port writes the Store synchronously, but the hook's
-        // prop/effect mirror is updated after this browser event. Adopt the
-        // receipt now so a native change/blur/click sequence cannot apply its
-        // next style to the preceding draft and discard earlier formatting.
-        adoptEditReceipt(receipt.edit)
-        bumpRestyle(receipt.edit.range)
-      }
-      return
-    }
-    if (command.type === 'range-emphasis' && live) {
-      const next = toggleFlowTextEditEmphasis(live, live.range)
-      setEditState(next)
-      bumpRestyle(next.range)
-      return
-    }
-    if (command.type === 'range-clear' && live) {
-      const next = clearFlowTextEditRangeStyle(live, live.range)
-      setEditState(next)
-      bumpRestyle(next.range)
-      return
-    }
-    if (command.type === 'heading-level') {
-      commands.run(target, {
-        kind: 'format-block',
-        spec: { kind: 'heading-level', level: command.level },
-        expectedEdit: live,
-      })
-      return
-    }
-    if (command.type === 'convert-heading') {
-      commands.run(target, {
-        kind: 'format-block',
-        spec: { kind: 'convert-heading', level: command.level },
-        expectedEdit: live,
-      })
-      return
-    }
-    if (command.type === 'convert-paragraph') {
-      commands.run(target, {
-        kind: 'format-block',
-        spec: { kind: 'convert-paragraph' },
-        expectedEdit: live,
-      })
-      return
-    }
-    if (command.type === 'list-ordered') {
-      commands.run(target, {
-        kind: 'format-block',
-        spec: { kind: 'list-ordered', ordered: command.ordered },
-        expectedEdit: live,
-      })
-      return
-    }
-    if (command.type === 'indent' || command.type === 'outdent') {
-      commands.run(target, {
-        kind: 'execute-editor-command',
-        blockIds: selection.selectedBlockIds,
-        command: { name: command.type },
-        expectedEdit: live,
-      })
-      return
-    }
-    if (command.type === 'move') {
-      commands.run(target, {
-        kind: 'move-block',
-        direction: command.direction,
-        expectedEdit: live,
-      })
-      return
-    }
-    if (command.type === 'delete') {
-      commands.run(target, {
-        kind: 'delete-blocks',
-        blockIds: selection.selectedBlockIds,
-        expectedEdit: live,
-      })
-    }
-  }
-
-  const formulaBlock = formulaBlockId
-    ? view.blocks.find((entry) => entry.blockId === formulaBlockId)?.block
-    : undefined
-  const formulaOverlay = view.overlayLayers.find(layer => layer.selectionId === formulaBlockId)?.item
-  const formulaNode = formulaOverlay?.kind === 'native' && formulaOverlay.content.nativeType === 'formula'
-    ? { ...flowFormulaBlockToAuthoringNode({ id: formulaOverlay.layerItemId, ...formulaOverlay.content.data } as Parameters<typeof flowFormulaBlockToAuthoringNode>[0]), name: formulaOverlay.label }
-    : formulaBlock?.type === 'formula'
-    ? flowFormulaBlockToAuthoringNode({
-        id: formulaBlock.id,
-        formulaId: formulaBlock.formulaId,
-        accessibleText: formulaBlock.accessibleText,
-        ast: formulaBlock.ast as FormulaAstNode,
-      })
-    : null
-  const formulaDraft = edit?.kind === 'formula' && edit.blockId === formulaBlockId
-    ? edit.draft as FlowFormulaDraft
-    : null
-
-  const childrenByParent = new Map<string | null, FlowBlockView[]>()
-  for (const blockView of view.blocks) {
-    const siblings = childrenByParent.get(blockView.parentId)
-    if (siblings) siblings.push(blockView)
-    else childrenByParent.set(blockView.parentId, [blockView])
-  }
-  const flowMediaWidths = {
-    widthMode: view.layout.widthMode,
-    readingWidth: view.layout.readingWidth,
-    wideContentWidth: view.layout.wideContentWidth,
-  }
-
-  const renderBlock = (blockView: FlowBlockView): ReactNode => {
-    const block = blockView.block as FlowBlock
-    const selected = selection?.selectedBlockIds.includes(blockView.blockId) ?? false
-    const editingThis = edit?.blockId === blockView.blockId
-    const showToolbar = blockView.blockId === selection?.selectedBlockId && !readOnly
-    const formulaEditingAvailable = !readOnly && selection?.authoringScope !== 'global'
-    const richDraft = edit?.kind === 'rich-text' && editingThis
-      ? edit.draft as { text: string; runs: TextRun[] }
-      : null
-    const selectionFormat = deriveFlowSelectionFormat({
-      block,
-      edit: editingThis ? edit : null,
-    })
-    const plainDraft = edit?.kind === 'plain-string' && editingThis
-      ? (edit.draft as { text: string }).text
-      : null
-    const mediaProjection = block.type === 'media'
-      ? resolveFlowMediaLayoutProjection(block.layout, flowMediaWidths)
-      : null
-
-    const isWrapLeft = (block.type === 'media' || block.type === 'component') && block.wrap === 'left'
-    const isWrapRight = (block.type === 'media' || block.type === 'component') && block.wrap === 'right'
-    const baseMarginBottom = isWrapLeft || isWrapRight ? 8 : 12
-
-    const frameStyle: CSSProperties = {
-      position: 'relative' as const,
-      outline: selected ? '2px solid #5b9cff' : undefined,
-      boxShadow: selected ? 'inset 4px 0 0 #5b9cff' : undefined,
-      padding: 0,
-      margin: '0 0 12px',
-      ...(isWrapLeft
-        ? {
-            float: 'left',
-            width: mediaProjection?.wrappedOuterInlineSize ?? '48%',
-            margin: '0 16px 8px 0',
-          }
-        : isWrapRight
-          ? {
-              float: 'right',
-              width: mediaProjection?.wrappedOuterInlineSize ?? '48%',
-              margin: '0 0 8px 16px',
-            }
-          : {}),
-      marginBottom: baseMarginBottom,
-    }
-
-    const frameProps = {
-      'data-flow-body-block': block.type,
-      'data-testid': `flow-block-${blockView.blockId}`,
-      'data-flow-block-id': blockView.blockId,
-      'data-flow-location-id': blockView.locationId ?? '',
-      'data-flow-parent-id': blockView.parentId ?? '',
-      'data-flow-block-index': blockView.index,
-      'data-flow-block-parent': blockView.parentId ?? '',
-      'data-flow-authoring-address': blockView.authoringAddress,
-      'data-flow-layer-kind': 'document-block',
-      className: `flow-block flow-block-${block.type}${selected ? ' flow-block--selected' : ''}`,
-      'aria-selected': selected,
-      tabIndex: selected && !editingThis ? 0 : -1,
-      onClick: readOnly ? undefined : (event: ReactMouseEvent<HTMLElement>) => {
-        // Keep chart labels stationary until the double-click opens their editor.
-        if (block.type === 'chart' && event.target instanceof Element && event.target.closest('[data-chart-text],[data-chart-category-id],[data-chart-series-id]')) { event.stopPropagation(); return }
-        selectBlock(blockView.blockId, event)
-      },
-      onDoubleClick: readOnly ? undefined : (event: ReactMouseEvent<HTMLElement>) => {
-        event.stopPropagation()
-        if (block.type === 'formula') {
-          openFormula(blockView.blockId)
-          return
-        }
-        if (block.type === 'list') {
-          const itemId = event.currentTarget.getAttribute('data-flow-active-item') ??
-            (event.target instanceof HTMLElement
-              ? event.target.closest('li')?.getAttribute('data-flow-list-item-id')
-              : null)
-          enterText(blockView.blockId, 'double-click', { listItemId: itemId ?? block.items[0]?.id })
-          return
-        }
-        if (block.type === 'table') {
-          const cell = event.target instanceof HTMLElement ? event.target.closest('td,th') : null
-          enterText(blockView.blockId, 'double-click', {
-            tableRowId: cell?.getAttribute('data-flow-row-id') ?? block.rows[0]?.id,
-            tableColumnId: cell?.getAttribute('data-flow-column-id') ?? block.columns[0]?.id,
-          })
-          return
-        }
-        enterText(blockView.blockId, 'double-click')
-      },
-      onKeyDown: readOnly ? undefined : (event: ReactKeyboardEvent<HTMLElement>) => {
-        handleBlockKeyDown(blockView.blockId, event)
-      },
-      onDragOver: readOnly ? undefined : (event: React.DragEvent<HTMLElement>) => {
-        event.preventDefault()
-      },
-      onDrop: readOnly ? undefined : (event: React.DragEvent<HTMLElement>) => {
-        event.preventDefault()
-        const sourceId = event.dataTransfer.getData('text/flow-block-id')
-        if (!sourceId || sourceId === blockView.blockId) return
-        const drag = blockDragTargetRef.current
-        blockDragTargetRef.current = null
-        if (!drag || drag.target.itemId !== sourceId) return
-        commands.run(drag.target, {
-          kind: 'execute-editor-command',
-          blockIds: [sourceId],
-          expectedEdit: drag.expectedEdit,
-          command: {
-            name: 'move',
-            destination: {
-              parentId: blockView.parentId,
-              index: blockView.index,
-              surfaceId: view.surfaceId,
-            },
-          },
-        })
-      },
-      style: frameStyle,
-    }
-
-    const handleComposingChange = (composing: boolean) => {
-      const current = editRef.current
-      if (!current) return
-      if (composing) {
-        setEditState(markFlowTextComposing(current, true))
-        return
-      }
-      const finished = finishFlowTextComposition(current)
-      setEditState(finished.edit)
-      if (finished.action === 'commit') commitCurrent(true)
-      else if (finished.action === 'cancel') cancelCurrent()
-    }
-
-    const richEditor = (label: string, text: string, runs: readonly TextRun[]) => (
-      <FlowInlineRichTextEditor
-          blockId={blockView.blockId}
-          label={label}
-          text={richDraft?.text ?? text}
-          runs={richDraft?.runs ?? runs}
-          preview={previewTextEdit?.blockId === blockView.blockId && previewTextEdit.kind === 'rich-text'
-            ? previewTextEdit.draft as { text: string; runs: TextRun[] } : null}
-          restyleToken={restyleToken}
-          range={restyleRange ?? edit?.range ?? { start: 0, end: 0 }}
-          composing={edit?.composing ?? false}
-          onDraftChange={(nextText, nextRuns, offsets) => {
-            const current = editRef.current
-            if (!current) return
-            let next = updateFlowTextDraft(current, { text: nextText, runs: nextRuns })
-            if (offsets) next = updateFlowTextRange(next, offsets, { preservePendingStyle: true })
-            setEditState(next)
-            if (Object.keys(next.pendingStyle).length > 0 && !current.composing) {
-              bumpRestyle(next.range)
-            }
-          }}
-          onRangeChange={(offsets) => {
-            const current = editRef.current
-            if (!current) return
-            if (current.range.start === offsets.start && current.range.end === offsets.end) return
-            setEditState(updateFlowTextRange(current, offsets))
-          }}
-          onComposingChange={handleComposingChange}
-          onCommit={() => commitCurrent(true)}
-          onCancel={cancelCurrent}
-          onKeyAction={(event) => {
-            const current = editRef.current
-            if (!current) return
-            resolveFlowTextKeyDown({
-              kind: current.kind,
-              composing: current.composing,
-              isComposingEvent: event.nativeEvent.isComposing,
-              key: event.key,
-              ctrlKey: event.ctrlKey,
-              metaKey: event.metaKey,
-            })
-          }}
-        />
-    )
-
-    const idleRichText = (text: string, runs: readonly TextRun[] = []) => (
-      <span
-        data-flow-idle-rich-text="true"
-        dangerouslySetInnerHTML={{ __html: buildFlowRichTextHtml(text, runs) }}
-      />
-    )
-
-    let body: ReactNode = null
-    switch (block.type) {
-      case 'heading': {
-        const Tag = headingTag(block.level)
-        body = (
-          <Tag data-flow-rich-text="true" style={flowPaperBlockTypographyStyle(block)}>
-            {editingThis && edit?.kind === 'rich-text'
-              ? richEditor(blockLabel(block), block.text, block.runs ?? [])
-              : idleRichText(block.text, block.runs ?? [])}
-          </Tag>
-        )
-        break
-      }
-      case 'paragraph':
-        body = (
-          <p data-flow-rich-text="true" style={flowPaperBlockTypographyStyle(block)}>
-            {editingThis && edit?.kind === 'rich-text'
-              ? richEditor(blockLabel(block), block.text, block.runs ?? [])
-              : idleRichText(block.text, block.runs ?? [])}
-          </p>
-        )
-        break
-      case 'quote':
-        body = (
-          <blockquote data-flow-rich-text="true" style={flowPaperBlockTypographyStyle(block)}>
-            {editingThis && edit?.kind === 'rich-text'
-              ? richEditor(blockLabel(block), block.text, block.runs ?? [])
-              : <p>{idleRichText(block.text, block.runs ?? [])}</p>}
-            {block.citation ? <cite>{block.citation}</cite> : null}
-          </blockquote>
-        )
-        break
-      case 'list': {
-        const items = block.items.map((item) => {
-          const editingItem = editingThis && edit?.listItemId === item.id
-          return (
-            <li
-              key={item.id}
-              data-flow-list-item-id={item.id}
-              data-flow-rich-text="true"
-              onDoubleClick={readOnly ? undefined : (event) => {
-                event.stopPropagation()
-                enterText(blockView.blockId, 'double-click', { listItemId: item.id })
-              }}
-            >
-              {editingItem && edit?.kind === 'rich-text'
-                ? richEditor(blockLabel(block), item.text, item.runs ?? [])
-                : idleRichText(item.text, item.runs ?? [])}
-            </li>
-          )
-        })
-        body = block.ordered ? <ol>{items}</ol> : <ul>{items}</ul>
-        break
-      }
-      case 'divider':
-        body = <hr />
-        break
-      case 'media': {
-        const projection = mediaProjection!
-        const wrapped = isWrapLeft || isWrapRight
-        body = (
-          <figure
-            className={`flow-block-media ${projection.className}`}
-            data-flow-media-layout={block.layout}
-            data-flow-media-width-tier={projection.tier}
-            data-flow-media-inline-size={wrapped
-              ? projection.wrappedInnerInlineSize
-              : projection.inlineSize}
-            {...(selected ? { 'data-flow-media-selected': 'true' } : {})}
-            style={wrapped
-              ? {
-                  width: '100%',
-                  maxWidth: '100%',
-                  inlineSize: projection.wrappedInnerInlineSize,
-                  maxInlineSize: '100%',
-                  marginInline: 'auto',
-                }
-              : {
-                  [FLOW_MEDIA_INLINE_SIZE_CUSTOM_PROPERTY]: projection.inlineSize,
-                  width: FLOW_MEDIA_INLINE_SIZE_REFERENCE,
-                  maxWidth: FLOW_MEDIA_INLINE_SIZE_REFERENCE,
-                  position: 'relative',
-                  left: '50%',
-                  transform: 'translateX(-50%)',
-                  inlineSize: FLOW_MEDIA_INLINE_SIZE_REFERENCE,
-                  maxInlineSize: FLOW_MEDIA_INLINE_SIZE_REFERENCE,
-                  marginInline: 0,
-                } as CSSProperties}
-          >
-            {renderFlowPaperMedia(block, assetUrls)}
-            {block.caption ? <figcaption>{block.caption}</figcaption> : null}
-          </figure>
-        )
-        break
-      }
-      case 'chart':
-        body = <EditableChartView id={block.id} chart={structuredClone(block.chart) as import('../../shared/contracts/native-v1').NativeChartContent} width={Math.max(240, bodyWidth)} height={block.height}
-          onEditStart={event => selectBlock(block.id, event)}
-          canvasTextPort={() => chartCanvasTextPort(targetForBlock(block.id))}
-          textController={readOnly ? undefined : {
-            draft: edit?.kind === 'chart-text' && edit.blockId === block.id ? edit.draft as ChartTextDraft : null,
-            begin: (field, draft) => {
-              const target = targetForBlock(block.id)
-              const receipt = commands.run(target, { kind: 'begin-chart-text-edit', field })
-              if (!receipt.ok || !receipt.edit) return false
-              adoptEditReceipt(receipt.edit, target)
-              setEditState(updateFlowChartTextDraft(receipt.edit, draft, false))
-              return true
-            },
-            update: (draft, composing) => {
-              const current = editRef.current
-              if (current?.kind === 'chart-text' && current.blockId === block.id) {
-                setEditState(updateFlowChartTextDraft(current, draft, composing))
-              }
-            },
-            commit: () => commitCurrent(), cancel: cancelCurrent,
-          }}
-          onCommit={readOnly ? undefined : chart => { const receipt = commands.run(targetForBlock(block.id), { kind: 'patch-block', patch: { chart }, expectedEdit: editRef.current }); return receipt.ok ? null : receipt.reason ?? '图表提交失败' }}
-          onHeightCommit={readOnly ? undefined : height => { commands.run(targetForBlock(block.id), { kind: 'patch-block', patch: { height }, expectedEdit: editRef.current }) }} />
-        break
-      case 'table':
-        body = (
-          <table>
-            {block.caption ? <caption>{block.caption}</caption> : null}
-            <thead>
-              <tr>
-                {block.columns.map((column) => (
-                  <th key={column.id} data-flow-column-id={column.id}>{column.header}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {block.rows.map((row) => (
-                <tr key={row.id} data-flow-row-id={row.id}>
-                  {block.columns.map((column) => {
-                    const span = tableCellSpan(block, row.id, column.id)
-                    if (span.covered) return null
-                    const rich = cellToRichText(row.cells[column.id])
-                    const editingCell = editingThis &&
-                      edit?.tableRowId === row.id &&
-                      edit.tableColumnId === column.id
-                    return (
-                      <td
-                        rowSpan={span.rowSpan}
-                        colSpan={span.columnSpan}
-                        key={column.id}
-                        data-flow-column-id={column.id}
-                        data-flow-row-id={row.id}
-                        data-flow-rich-text="true"
-                        onDoubleClick={readOnly ? undefined : (event) => {
-                          event.stopPropagation()
-                          enterText(blockView.blockId, 'double-click', {
-                            tableRowId: row.id,
-                            tableColumnId: column.id,
-                          })
-                        }}
-                      >
-                        {editingCell && edit?.kind === 'rich-text'
-                          ? richEditor(blockLabel(block), rich.text, rich.runs ?? [])
-                          : idleRichText(rich.text, rich.runs ?? [])}
-                      </td>
-                    )
-                  })}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )
-        break
-      case 'formula':
-        body = (
-          <div
-            data-flow-formula-id={block.formulaId}
-            data-flow-formula-edit-target="true"
-            data-testid={`flow-formula-edit-target-${block.id}`}
-            style={{
-              position: 'relative',
-              minHeight: 96,
-              cursor: formulaEditingAvailable ? 'pointer' : undefined,
-            }}
-          >
-            <PublishedFormulaPaint
-              formulaId={block.formulaId}
-              accessibleText={block.accessibleText}
-              ast={block.ast as FormulaAstNode}
-              style={{ fontSize: 32, color: '#1f2937', align: 'left' }}
-              width={Math.max(160, bodyWidth)}
-              height={96}
-              pointerEvents={formulaEditingAvailable ? 'none' : 'auto'}
-            />
-            {formulaEditingAvailable ? (
-              <button
-                type="button"
-                aria-label="编辑公式"
-                data-testid={`flow-formula-edit-${block.id}`}
-                title="打开公式编辑器"
-                style={{
-                  position: 'absolute',
-                  top: 8,
-                  right: 8,
-                  padding: '4px 10px',
-                  border: '1px solid #cbd5e1',
-                  borderRadius: 6,
-                  background: '#ffffff',
-                  color: '#334155',
-                  cursor: 'pointer',
-                }}
-                onPointerDown={(event) => event.stopPropagation()}
-                onClick={(event) => {
-                  event.stopPropagation()
-                  openFormula(blockView.blockId)
-                }}
-              >
-                编辑公式
-              </button>
-            ) : null}
-          </div>
-        )
-        break
-      case 'code':
-        body = (
-          <pre data-flow-plain-text="true">
-            {editingThis && edit?.field === 'code'
-              ? (
-                  <FlowPlainStringEditor
-                    blockId={blockView.blockId}
-                    label={blockLabel(block)}
-                    value={plainDraft ?? block.code}
-                    multiline
-                    onChange={(value) => {
-                      const current = editRef.current
-                      if (!current) return
-                      setEditState(updateFlowTextDraft(current, { text: value }))
-                    }}
-                    onComposingChange={handleComposingChange}
-                    onCommit={() => commitCurrent(true)}
-                    onCancel={cancelCurrent}
-                  />
-                )
-              : <code {...(block.language ? { 'data-flow-language': block.language } : {})}>{block.code}</code>}
-          </pre>
-        )
-        break
-      case 'callout':
-        body = (
-          <aside data-flow-tone={block.tone} data-flow-plain-text="true">
-            {block.title ? <strong>{block.title}</strong> : null}
-            {editingThis && edit?.field === 'body'
-              ? (
-                  <FlowPlainStringEditor
-                    blockId={blockView.blockId}
-                    label={blockLabel(block)}
-                    value={plainDraft ?? block.body}
-                    multiline
-                    onChange={(value) => {
-                      const current = editRef.current
-                      if (!current) return
-                      setEditState(updateFlowTextDraft(current, { text: value }))
-                    }}
-                    onComposingChange={handleComposingChange}
-                    onCommit={() => commitCurrent(true)}
-                    onCancel={cancelCurrent}
-                  />
-                )
-              : <p>{block.body}</p>}
-          </aside>
-        )
-        break
-      case 'section':
-        body = (
-          <details open={!block.collapsedByDefault}>
-            <summary data-flow-plain-text="true">
-              {editingThis && edit?.field === 'title'
-                ? (
-                    <FlowPlainStringEditor
-                      blockId={blockView.blockId}
-                      label={blockLabel(block)}
-                      value={plainDraft ?? block.title}
-                      multiline={false}
-                      onChange={(value) => {
-                        const current = editRef.current
-                        if (!current) return
-                        setEditState(updateFlowTextDraft(current, { text: value }))
-                      }}
-                      onComposingChange={handleComposingChange}
-                      onCommit={() => commitCurrent(true)}
-                      onCancel={cancelCurrent}
-                    />
-                  )
-                : block.title}
-            </summary>
-            <div className="flow-section-content">
-              {(childrenByParent.get(block.id) ?? []).map((child) => renderBlock(child))}
-            </div>
-          </details>
-        )
-        break
-      case 'component': {
-        body = (
-          <div>
-            <FlowComponentBlockView
-              projectId={view.projectId}
-              block={block}
-              readingWidth={bodyWidth}
-              componentPackages={componentPackages}
-              assetUrls={assetUrls}
-            />
-          </div>
-        )
-        break
-      }
-    }
-
-    return (
-      <div key={blockView.blockId} {...frameProps}>
-        {!readOnly && !edit ? (
-          <button
-            type="button"
-            className="flow-block-drag-handle"
-            data-testid={`flow-block-drag-${blockView.blockId}`}
-            draggable
-            aria-label="拖动排序"
-            style={{
-              position: 'absolute',
-              left: 2,
-              top: 12,
-              width: 12,
-              height: 20,
-              cursor: 'grab',
-              opacity: 0.4,
-              padding: 0,
-              border: 'none',
-              background: 'transparent',
-            }}
-            onDragStart={(event) => {
-              event.dataTransfer.setData('text/flow-block-id', blockView.blockId)
-              event.dataTransfer.effectAllowed = 'move'
-              blockDragTargetRef.current = {
-                target: targetForBlock(blockView.blockId),
-                expectedEdit: editRef.current,
-              }
-            }}
-          />
-        ) : null}
-        {showToolbar && toolbarHost ? createPortal(
-          <FlowBlockContextToolbar
-            block={block}
-            selectionFormat={selectionFormat}
-            onPreserveSelection={() => {
-              const editor = scrollRef.current?.querySelector('[data-testid="flow-inline-editor"]')
-              if (editor instanceof HTMLElement) {
-                toolbarSelectionRef.current = logicalFlowSelectionOffsets(editor)
-              }
-            }}
-            onCommand={applyToolbarCommand}
-          />, toolbarHost, blockView.blockId,
-        ) : null}
-        {body}
-      </div>
-    )
-  }
-
-  const rootBlocks = childrenByParent.get(null) ?? []
-  const surfaceBackground = view.backgroundColor
-  const backgroundImageUrl = view.backgroundAssetId ? assetUrls[view.backgroundAssetId] : undefined
-
-  return (
-    <div style={{ position: 'relative', width: '100%', height: '100%' }}>
-      {toolbarContainer === undefined ? <div
-        ref={setLocalToolbarContainer}
-        data-testid="flow-workspace-toolbar-host"
-        style={{ position: 'absolute', top: 6, left: 8, right: 8, height: FLOW_WORKSPACE_HEADER_HEIGHT - 12, zIndex: 7 }}
-      /> : null}
-      <div
-        ref={workspaceMeasureRef}
-        className="flow-workspace"
-        data-testid="flow-workspace"
-        data-flow-not-slide-stage="true"
-        data-flow-project-id={view.projectId}
-        data-flow-location-id={view.locationId}
-        data-flow-surface-id={view.surfaceId}
-        data-flow-active-block-id={view.activeBlockId}
-        data-observation-source="authoring"
-        data-observation-project-id={view.projectId}
-        data-observation-revision={view.revision}
-        data-observation-session-generation={sessionToken.generation}
-        data-observation-surface-id={view.surfaceId}
-        data-observation-location-id={view.locationId}
-        data-observation-state-id=""
-        data-observation-ready="true"
-        data-observation-draft-token={authoringObservationDraftToken(textEdit)}
-        onKeyDown={handleHistoryKey}
-        style={{
-          position: 'absolute',
-          top: localHeaderHeight,
-          left: 0,
-          display: 'flex',
-          width: '100%',
-          height: `calc(100% - ${localHeaderHeight}px)`,
-          minHeight: 0,
-          overflow: 'hidden',
-          isolation: 'isolate',
-          backgroundColor: surfaceBackground,
-          backgroundImage: backgroundImageUrl ? `url(${JSON.stringify(backgroundImageUrl)})` : undefined,
-          backgroundPosition: 'center',
-          backgroundRepeat: 'no-repeat',
-          backgroundSize: 'cover',
-        }}
-      >
-        <FlowOverlayAuthoringLayer
-          view={view}
-          sessionToken={sessionToken}
-          selection={selection}
-          locationId={locationId}
-          readOnly={readOnly}
-          assetUrls={assetUrls}
-          componentPackages={componentPackages}
-          paperScrollTop={paperScrollTop}
-          paperScrollLeft={paperScrollLeft}
-          paperOrigin={paperOrigin}
-          overlayViewportSize={overlayViewportSize}
-          viewPan={viewPan}
-          onViewPanChange={setViewPan}
-          onEditFormula={openFormula}
-          onBeforeGesture={() => {
-            if (!editRef.current) return true
-            commitCurrent(false)
-            return false
-          }}
-          commands={commands}
-        >
-          <div
-            ref={scrollRef}
-            className="flow-workspace__scroll flow-media-query-root"
-            data-testid="flow-workspace-scroll"
-            data-flow-media-query-root="true"
-            onClick={handlePaperClick}
-            onScroll={(e) => {
-              setPaperScrollTop(e.currentTarget.scrollTop)
-              setPaperScrollLeft(e.currentTarget.scrollLeft)
-            }}
-            style={{
-              flex: 1,
-              position: 'relative',
-              zIndex: 2,
-              overflow: 'auto',
-              height: '100%',
-              padding: FLOW_BODY_SCROLL_PADDING,
-              containerType: FLOW_MEDIA_QUERY_CONTAINER_TYPE,
-              containerName: 'flow-media-root',
-              transform: `translate(${viewPan.x}px, ${viewPan.y}px)`,
-            }}
-          >
-            <article
-              ref={paperRef}
-              className="flow-paper flow-body-content"
-              data-testid="flow-paper"
-              data-flow-reading-width={view.layout.readingWidth}
-              onClick={handlePaperClick}
-              style={{
-                width: '100%',
-                maxWidth: flowPaperMaxWidth(view.layout),
-                minHeight: '100%',
-                margin: '0 auto',
-                padding: FLOW_BODY_PAPER_PADDING,
-                background: 'transparent',
-                color: FLOW_PAPER_TEXT_COLOR,
-                boxShadow: '0 8px 32px rgba(15, 23, 42, 0.08)',
-              }}
-            >
-              <style>{FLOW_BODY_CSS}</style>
-              {rootBlocks.map((blockView) => renderBlock(blockView))}
-              <div style={{ clear: 'both' }} aria-hidden="true" />
-            </article>
-          </div>
-        </FlowOverlayAuthoringLayer>
-        {formulaNode && formulaDraft ? (
-          <FormulaEditDialog
-            node={formulaNode}
-            draftSource={formulaDraft.source}
-            onDraftChange={updateFormulaDraft}
-            onCompositionChange={setFormulaComposing}
-            onCancel={() => {
-              setFormulaBlockId(null)
-              cancelCurrent()
-            }}
-            onCommit={(ast, accessibleText) => {
-              commitFormula(ast, accessibleText)
-            }}
-          />
-        ) : null}
-      </div>
-    </div>
   )
 }

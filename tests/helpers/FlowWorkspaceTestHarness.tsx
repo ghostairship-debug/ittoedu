@@ -86,6 +86,7 @@ function initialState(props: FlowWorkspaceTestHarnessProps): HarnessState {
 }
 
 const PROJECT_INTENTS = new Set<FlowAuthoringIntent['kind']>([
+  'replace-document-content',
   'commit-text-edit',
   'format-text-style',
   'format-block',

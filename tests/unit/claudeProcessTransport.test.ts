@@ -241,7 +241,7 @@ describe('Claude native permissions and questions', () => {
       const wires = (await fs.readFile(path.join(fixture.directory, 'requests.jsonl'), 'utf8')).trim().split('\n').map(line => JSON.parse(line))
       expect(wires.filter(wire => wire.type === 'user')).toHaveLength(1)
       expect(wires.some(wire => JSON.stringify(wire).includes(input.text))).toBe(false)
-      await fixture.adapter.interrupt()
+      await fixture.adapter.interruptTurn()
       while (!(await events.next()).done) { /* consume the actual interrupted result */ }
       expect((await fixture.adapter.input(input)).status).toBe('rejected')
     } finally { await fixture.cleanup() }
@@ -527,7 +527,7 @@ describe('Claude capabilities discovery and model parsing', () => {
       image: 'supported',
       readFile: 'supported',
       question: 'structured',
-      correction: 'turn-boundary',
+      correction: 'interrupt-resume',
       cancel: 'supported',
     })
     expect(caps.current).toEqual({
@@ -602,7 +602,7 @@ describe('Claude capabilities discovery and model parsing', () => {
       expect(caps.models[0]?.resolvedModel).toBe('claude-opus-5[1m]')
       expect(caps.current.model).toBeNull()
       expect(caps.input.question).toBe('structured')
-      expect(caps.input.correction).toBe('turn-boundary')
+      expect(caps.input.correction).toBe('interrupt-resume')
     } finally {
       await fs.rm(directory, { recursive: true, force: true })
     }

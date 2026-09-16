@@ -1,3 +1,4 @@
+import { plainDocumentText } from '../../../shared/document/content'
 import type { CourseLocation, FlowBlock, FlowTableCell } from '../../../shared/courseProjectTypes'
 import type { TextRun, TextRunStyle } from '../../../shared/contracts/native-v1'
 import type {
@@ -85,14 +86,14 @@ export function isFlowRuntimeTocAnchor(
 }
 
 export function flowAnchorTitle(block: FlowBlock): string {
-  if (block.type === 'heading') return block.text.trim() || FLOW_BLANK_HEADING_FALLBACK
-  if (block.type === 'section') return block.title.trim() || FLOW_BLANK_SECTION_FALLBACK
+  if (block.type === 'heading') return plainDocumentText(block.content).trim() || FLOW_BLANK_HEADING_FALLBACK
+  if (block.type === 'section') return plainDocumentText(block.title).trim() || FLOW_BLANK_SECTION_FALLBACK
   return ''
 }
 
 export function flowTableCellText(cell: FlowTableCell | undefined): string {
   if (cell === undefined) return ''
-  return typeof cell === 'string' ? cell : cell.text
+  return plainDocumentText(cell)
 }
 
 export function flowRichTextSegments(text: string, runs?: readonly TextRun[]): FlowRichTextSegment[] {

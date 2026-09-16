@@ -102,18 +102,21 @@ export function projectV2RecordToV1(record: LocalAgentRecordV2, input: LocalAgen
   }
   const task = record.tasks.at(-1)
   const terminal = [...events].reverse().find(event => ['completed', 'failed', 'cancelled'].includes(event.kind))
-  const status = input.live ? 'running' as const
-    : task && ['completed', 'failed', 'cancelled', 'partial'].includes(task.status) ? (task.status === 'partial' ? 'failed' : task.status)
+  // A live transport may still be closing after the task owner has stopped it.
+  const status = task && ['completed', 'failed', 'cancelled', 'partial'].includes(task.status) ? (task.status === 'partial' ? 'failed' : task.status)
+    : input.live ? 'running' as const
     : terminal?.kind === 'failed' || terminal?.kind === 'cancelled' || terminal?.kind === 'completed' ? terminal.kind
     : 'running'
   const latestResult = record.hostResults.at(-1)
   const hostResult = input.hostResult?.status === 'undone' || !latestResult ? input.hostResult : projectAiHostResult(latestResult)
   return localAgentRecordSchema.parse({
-    version: 1, id: record.id, adapter: record.adapter, workspace: record.workspace,
+    version: 1, id: record.id, adapter: record.adapter, workspace: record.workspace, lessonWorkspace: record.lessonWorkspace,
     workingDirectoryId: record.workingDirectoryId, status, events,
     ...(task ? { task: { taskId: task.taskId, epoch: task.epoch, intent: task.intent, applyPolicy: task.applyPolicy,
       status: task.status, turnId: record.events.at(-1)?.nativeTurnId ?? null,
       deadlineAt: task.execution?.deadlineAt ?? null, committedStages: task.committedResultIds.length,
+      ...(task.execution ? { startedAt: task.execution.startedAt, lastActivityAt: task.execution.lastActivityAt,
+        budgetStopReason: task.execution.budgetStopReason } : {}),
       ...(task.completion ? { completion: task.completion } : {}),
       ...(record.hostResults.some(result => result.taskId === task.taskId && result.receiptDelivery === 'pending')
         ? { receiptDelivery: 'pending' as const } : record.hostResults.some(result => result.taskId === task.taskId && result.receiptDelivery === 'delivered')

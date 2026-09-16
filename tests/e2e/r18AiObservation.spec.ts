@@ -1,3 +1,4 @@
+import { plainDocumentText } from '../../src/shared/document/content'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { isAbsolute, join, relative, resolve } from 'node:path'
@@ -99,8 +100,8 @@ function fixtureAt(runRoot: string, surface: Surface): Fixture {
     const heading = page.blocks.find(block => block.type === 'heading')!
     textId = heading.id
     if (heading.type !== 'heading') throw new Error('Missing blank Flow heading')
-    heading.text = `DISK ${surface}`
-    project.locations[0]!.label = heading.text
+    heading.content = { inlines: [{ type: 'text', text: `DISK ${surface}` }] }
+    project.locations[0]!.label = plainDocumentText(heading.content)
   } else {
     const node = createTextNode({ id: textId, text: `DISK ${surface}`,
       x: page.type === 'slide' ? 120 : -220, y: page.type === 'slide' ? 120 : -100,

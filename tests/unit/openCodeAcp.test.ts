@@ -82,7 +82,7 @@ describe('openCodeAcp capabilities discovery', () => {
       image: 'supported',
       readFile: 'supported',
       question: 'text',
-      correction: 'turn-boundary',
+      correction: 'interrupt-resume',
       cancel: 'supported',
     })
   })
@@ -460,6 +460,29 @@ function emitText(bytes) {
       expect((await collect).filter(event => event.kind === 'turn-ended')).toEqual([expect.objectContaining({ status: 'cancelled', failure: null })])
       expect(messages.filter(message => message.method === 'session/cancel')).toHaveLength(1)
     } finally { await adapter.close() }
+  })
+
+  it('interrupts a confirmed native turn and prompts the same session again without accepting an unconfirmed cancellation', async () => {
+    const { adapter, messages } = realOpenCodeAdapter(openCodeNativeProcess({ hangPrompt: true }))
+    try {
+      await adapter.open({ cwd: process.cwd(), externalSessionId: null })
+      for (let i = 0; i < 2; i++) {
+        await adapter.startTurn(nativeOpenCodeTurn(), new Map())
+        const collect = (async () => { const events = []; for await (const event of adapter.events()) events.push(event); return events })()
+        await adapter.interruptTurn()
+        expect((await collect).at(-1)).toMatchObject({ kind: 'turn-ended', status: 'cancelled' })
+      }
+      expect(messages.filter(message => message.method === 'session/new')).toHaveLength(1)
+      expect(messages.filter(message => message.method === 'session/prompt')).toHaveLength(2)
+    } finally { await adapter.close() }
+    vi.restoreAllMocks()
+    const unresponsive = realOpenCodeAdapter(openCodeNativeProcess({ hangPrompt: true, ignoreCancel: true }), { cancelTimeoutMs: 50 })
+    try {
+      await unresponsive.adapter.open({ cwd: process.cwd(), externalSessionId: null })
+      await unresponsive.adapter.startTurn(nativeOpenCodeTurn(), new Map())
+      await expect(unresponsive.adapter.interruptTurn()).rejects.toThrow('未确认回合中断')
+      await expect(unresponsive.adapter.startTurn(nativeOpenCodeTurn(), new Map())).rejects.toThrow('Session not active')
+    } finally { await unresponsive.adapter.close() }
   })
 
   it.each([null, 'saved-native-session'])('applies and confirms the selected model before prompting session %s', async externalSessionId => {

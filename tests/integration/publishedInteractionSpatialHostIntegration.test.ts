@@ -892,7 +892,7 @@ describe('Published Interaction Spatial host integration', () => {
       [component, 'component'],
       [runtime, 'runtime'],
       [video, 'media'],
-      [controller, 'controller'],
+      [controller, 'component'],
     ] as const
     for (const [item, owner] of gestureOwners) {
       expect(renderedSpatialItem(container, item.layerItemId).getAttribute(SPATIAL_GESTURE_OWNER_ATTR))

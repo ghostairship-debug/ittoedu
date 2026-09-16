@@ -69,7 +69,7 @@ describe('S2 deterministic content QA', () => {
   })
   it('locates missing Flow quote citations and leaves ordinary prose unclassified', () => {
     const project = blankProject(), { flow } = addFlowAndSpatial(project)
-    flow.blocks.push({ id: 'quote', type: 'quote', text: '引用正文' }, { id: 'prose', type: 'paragraph', text: '某图约有一百人。可能答案是甲。' })
+    flow.blocks.push({ id: 'quote', type: 'quote', content: { inlines: [{ type: 'text', text: '引用正文' }] } }, { id: 'prose', type: 'paragraph', content: { inlines: [{ type: 'text', text: '某图约有一百人。可能答案是甲。' }] } })
     const findings = collectCourseProjectContentHealth(project)
     expect(findings).toHaveLength(1)
     expect(findings[0]!.code).toBe('content-source-missing')
@@ -133,7 +133,7 @@ function addFlowAndSpatial(project: CourseProjectDocument): {
     type: 'flow',
     surfaceLayerItems: [],
     layout: { readingWidth: 760, wideContentWidth: 1120 },
-    blocks: [{ id: 'flow-block', type: 'paragraph', text: 'Flow 内容' }],
+    blocks: [{ id: 'flow-block', type: 'paragraph', content: { inlines: [{ type: 'text', text: 'Flow 内容' }] } }],
   }
   const spatial: Extract<CourseSurfaceDocument, { type: 'spatial-2d' }> = {
     id: 'spatial-surface',
@@ -459,7 +459,7 @@ describe('V9-native Course Project health', () => {
     flow.blocks.push({
       id: 'component-section',
       type: 'section',
-      title: '组件',
+      title: { inlines: [{ type: 'text', text: '组件' }] },
       collapsedByDefault: false,
       blocks: [{
         id: 'flow-component',
@@ -901,6 +901,7 @@ describe('V9-native Course Project health', () => {
           action: {
             type: 'presentation.set',
             stateId: scene.presentation!.initialStateId,
+            transition: { duration: 200 },
           },
         }],
       },
@@ -1038,7 +1039,10 @@ describe('V9-native Course Project health', () => {
         },
       }],
     }, 3)
-    scene.layerItems.push(selfHidden, unreachable, globallyReachable, controller)
+    scene.layerItems.push(selfHidden, unreachable, globallyReachable)
+    project.globalLayerItems.push({ item: controller, plane: 'overlay', visibility: { mode: 'all', locationIds: [] } })
+    project.componentPackages = { ...project.componentPackages, ...controllerMetadata }
+    project.playback.controls = 'canvas'
     scene.interactions.push(
       {
         id: 'self-reveal',
@@ -1119,12 +1123,24 @@ describe('V9-native Course Project health', () => {
       ],
     }
     project.globalInteractions.push({
-      id: 'partial-global-state',
+      id: 'global-set-without-scene',
       enabled: true,
-      trigger: { type: 'scene.enter' },
+      trigger: { type: 'node.click', nodeId: controller.layerItemId },
       conditions: [],
       actions: [{
-        id: 'set-partial-state',
+        id: 'set-without-scene',
+        start: 'after-previous',
+        delayMs: 0,
+        action: { type: 'presentation.set', stateId: 'state_initial' },
+      }],
+    })
+    project.globalInteractions.push({
+      id: 'global-set-on-enter',
+      enabled: true,
+      trigger: { type: 'scene.enter' },
+      conditions: [{ type: 'scene.in', sceneIds: [scene.id] }],
+      actions: [{
+        id: 'set-on-enter',
         start: 'after-previous',
         delayMs: 0,
         action: { type: 'presentation.set', stateId: 'state_initial' },
@@ -1162,7 +1178,7 @@ describe('V9-native Course Project health', () => {
     })
 
     expect(courseProjectDocumentSchema.safeParse(project).success).toBe(true)
-    const findings = collectCourseProjectHealth(project, EMPTY_FILES)
+    const findings = collectCourseProjectHealth(project, { assetFiles: {}, componentFiles: { [`${controllerPackage.manifest.id}@${controllerPackage.manifest.version}`]: controllerPackage.files } })
     const codes = new Set(findings.map(({ code }) => code))
     expect(codes).toEqual(new Set([
       'controller-state-target-missing',
@@ -1177,7 +1193,15 @@ describe('V9-native Course Project health', () => {
     ]))
     expect(findings.filter(
       ({ code }) => code === 'global-interaction-state-target-partial',
-    )).toHaveLength(1)
+    )).toHaveLength(2) // Both state rules can address the fixture's duplicate scene id.
+    expect(findings.some(({ code, message }) => (
+      code === 'published-interaction-action-unsupported'
+      && message.includes('全局 presentation.set 必须使用 scene.in')
+    ))).toBe(true)
+    expect(findings.some(({ code, message }) => (
+      code === 'published-interaction-action-unsupported'
+      && message.includes('presentation.set 暂不支持 scene.enter')
+    ))).toBe(true)
     expect(findings.some(({ layerItemId }) => (
       layerItemId === globallyReachable.layerItemId
     ))).toBe(false)
@@ -1293,8 +1317,10 @@ describe('V9-native Course Project health', () => {
     }, 0)
     project.globalLayerItems.push({
       item,
+      plane: 'overlay',
       visibility: { mode: 'all', locationIds: [] },
     })
+    project.componentPackages = { ...project.componentPackages, ...controllerMetadata }
 
     expect(courseProjectDocumentSchema.safeParse(project).success).toBe(true)
     expect(collectCourseProjectHealth(project, EMPTY_FILES).map(({ code }) => code)).toContain(

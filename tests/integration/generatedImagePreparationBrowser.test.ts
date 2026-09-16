@@ -7,12 +7,12 @@ import sharp from 'sharp'
 
 let server: ViteDevServer, browser: Browser, page: Page
 beforeAll(async () => {
-  server = await createServer({ configFile: false, appType: 'custom', root: process.cwd(), resolve: { alias: { '@': path.resolve('src') } },
+  server = await createServer({ configFile: false, appType: 'custom', root: process.cwd(), cacheDir: path.resolve('output/.vite-generated-image-browser'), resolve: { alias: { '@': path.resolve('src') } },
     optimizeDeps: { noDiscovery: true, include: ['nanoid', 'zod'] },
-    server: { host: '127.0.0.1', port: 0 }, logLevel: 'error' })
+    server: { host: '127.0.0.1', port: 0, hmr: false, watch: null }, logLevel: 'error' })
   server.middlewares.use('/__image-preparation-test', (_request, response) => {
     response.setHeader('Content-Type', 'text/html')
-    response.end('<!doctype html><title>Image preparation fixture</title><script type="module">import {prepareGeneratedImage} from "/src/renderer/project/prepareGeneratedImage.ts"; window.prepareGeneratedImage = prepareGeneratedImage;</script>')
+    response.end('<!doctype html><title>Image preparation fixture</title><script type="module">import("/src/renderer/project/prepareGeneratedImage.ts").then(module => { window.prepareGeneratedImage = module.prepareGeneratedImage }).catch(error => { window.preparationLoadError = String(error) });</script>')
   })
   await server.listen()
   const address = server.httpServer!.address()
@@ -20,7 +20,8 @@ beforeAll(async () => {
   browser = await chromium.launch({ headless: true })
   page = await browser.newPage()
   await page.goto(`http://127.0.0.1:${address.port}/__image-preparation-test`)
-  await page.waitForFunction(() => typeof Reflect.get(window, 'prepareGeneratedImage') === 'function')
+  await page.waitForFunction(() => typeof Reflect.get(window, 'prepareGeneratedImage') === 'function' || Reflect.get(window, 'preparationLoadError'))
+  expect(await page.evaluate(() => Reflect.get(window, 'preparationLoadError'))).toBeUndefined()
 }, 30_000)
 afterAll(async () => { await browser?.close(); await server?.close() })
 

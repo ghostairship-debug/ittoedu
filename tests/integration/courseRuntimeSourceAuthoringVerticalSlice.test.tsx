@@ -224,7 +224,7 @@ function runtimeFixture(
           id: blockId,
           type: 'heading',
           level: 1,
-          text: 'Runtime source Flow',
+          content: { inlines: [{ type: 'text', text: 'Runtime source Flow' }] },
         }],
       }],
     })

@@ -1,3 +1,5 @@
+import { withDefaultComponentController } from '../../src/renderer/components/teacherControllerComponent'
+import { componentPackagesToArchiveFiles } from '../../src/renderer/components/componentPackageStore'
 import {
   existsSync,
   mkdtempSync,
@@ -29,7 +31,7 @@ import { expectBackgroundWindowsIsolated } from './expectBackgroundWindowsIsolat
 import { createPublishedCanvasRuntimeV2Fixture } from '../fixtures/publishedCanvasRuntimeV2Fixture'
 
 const root = resolve(__dirname, '..', '..')
-const evidenceRoot = join(root, 'output', 'playwright', 'r18-076')
+const evidenceRoot = join(root, 'output', 'playwright', 'r19-spatial-global', new Date().toISOString().replace(/[:.]/g, '-'))
 const projectPath = join(evidenceRoot, 'spatial-global-runtime-authoring.h5lesson')
 const htmlPath = join(evidenceRoot, 'spatial-global-runtime-offline.html')
 const authoringScreenshotPath = join(evidenceRoot, 'spatial-global-runtime-authoring.png')
@@ -191,6 +193,7 @@ async function launchEditor(): Promise<LaunchedEditor> {
     app.context().on('request', (request) => {
       if (/^https?:/i.test(request.url())) diagnostics.externalRequests.push(request.url())
     })
+    await page.getByRole('button', { name: '新建独立课件', exact: true }).click()
     await page.locator('[data-testid="canvas-stage"] canvas').first().waitFor()
     await expectBackgroundWindowsIsolated(app, true)
     const professional = page.getByRole('button', { name: '专业' })
@@ -302,7 +305,7 @@ test('Spatial global API2：真实作者双击编辑、单 carrier 历史往返�
   writeFileSync(projectPath, createCourseProjectArchive({
     project,
     assetFiles: {},
-    componentFiles: {},
+    componentFiles: componentPackagesToArchiveFiles(withDefaultComponentController(project).componentPackages),
   }, { mtime: '2026-09-07T08:00:00.000Z' }))
 
   let launch: LaunchedEditor | undefined
@@ -394,21 +397,22 @@ test('Spatial global API2：真实作者双击编辑、单 carrier 历史往返�
     const runInstance = await runText.elementHandle()
     const beforeSize = await runText.boundingBox()
     if (!runInstance || !beforeSize) throw new Error('Missing Spatial try-run instance')
-    const zoomButton = runHost.getByRole('button', { name: '缩放', exact: true })
+    await page.getByRole('button', { name: '展开教师控制器', exact: true }).click()
+    const zoomButton = page.getByRole('button', { name: '缩放', exact: true })
     await zoomButton.click()
-    const zoomPanel = runHost.getByRole('group', { name: '课件观察缩放' })
+    const zoomPanel = page.getByRole('dialog', { name: '缩放设置', exact: true })
     for (let step = 0; step < 4; step++) await zoomPanel.getByRole('button', { name: '放大', exact: true }).click()
     const enlarged = await runText.boundingBox()
     expect(enlarged!.width / beforeSize.width).toBeCloseTo(2, 1)
     expect(await runText.evaluate((element, before) => element === before, runInstance)).toBe(true)
-    await zoomPanel.getByRole('button', { name: '关闭', exact: true }).click()
+    await zoomPanel.getByRole('button', { name: '关闭面板', exact: true }).click()
     for (const label of ['左右移动视图', '上下移动视图']) {
       const bar = runHost.getByRole('scrollbar', { name: label })
       await bar.focus(); await bar.press('End')
     }
     await zoomButton.click()
-    await zoomPanel.getByRole('button', { name: '恢复视图', exact: true }).click()
-    await zoomPanel.getByRole('button', { name: '关闭', exact: true }).click()
+    await zoomPanel.getByRole('button', { name: '恢复默认视图', exact: true }).click()
+    await zoomPanel.getByRole('button', { name: '关闭面板', exact: true }).click()
     await page.screenshot({ path: join(evidenceRoot, 'spatial-global-runtime-try-run.png'), fullPage: true })
     await page.getByRole('button', { name: '编辑状态', exact: true }).click()
     expect(await saveCurrent(page)).toEqual(saved)
@@ -449,6 +453,9 @@ test('Spatial global API2：真实作者双击编辑、单 carrier 历史往返�
     expect(launch.pageErrors).toEqual([])
     expect(launch.consoleErrors).toEqual([])
     expect(launch.externalRequests).toEqual([])
+  } catch (error) {
+    if (launch) { await launch.page.screenshot({ path: join(evidenceRoot, 'failure.png') }).catch(() => {}); writeFileSync(join(evidenceRoot, 'failure-ui.txt'), await launch.page.locator('body').innerText().catch(() => '')) }
+    throw error
   } finally {
     await browser?.close()
     if (launch) await closeEditor(launch.app, launch.runRoot)

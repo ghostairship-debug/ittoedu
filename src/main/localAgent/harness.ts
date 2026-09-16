@@ -5,12 +5,12 @@ import {
   localAgentCapabilitiesSchema, localAgentFailureSchema, localAgentHostResultSchema,
   type LocalAgentCapabilities, type LocalAgentConfiguration, type LocalAgentHostResult, type LocalAgentId, type LocalAgentRecord,
 } from '../../shared/localAgentContract'
-import { workspaceIdentityKey, type WorkspaceIdentityV1 } from '../../shared/workspaceIdentity'
+import { workspaceIdentityKey, type AiWorkspaceIdentity, type WorkspaceIdentityV1 } from '../../shared/workspaceIdentity'
 import { createLocalAgentCliAdapterV2 } from './adapter'
 import { codexCandidateFileMessage } from './codexAppServer'
 import { localAgentText, visibleLocalAgentText } from '../../shared/localAgentText'
 import { LocalAgentRepository } from './repository'
-import { generationCommitReceiptSchema, generationRequestSchema, MAX_GENERATION_PROMPT_BYTES, MAX_GENERATION_TASK_DURATION_MS, type GenerationCommitReceipt, type GenerationRequest } from '../../shared/generationContract'
+import { generationCommitReceiptSchema, generationRequestSchema, MAX_GENERATION_PROMPT_BYTES, DEFAULT_GENERATION_TASK_DURATION_MS, MAX_GENERATION_TASK_DURATION_MS, GENERATION_NATIVE_INACTIVITY_MS, type GenerationCommitReceipt, type GenerationRequest } from '../../shared/generationContract'
 import { GENERATION_OPEN, GENERATION_CLOSE, generationStagedCandidateMarker, readGenerationResult, type GenerationResult } from '../../shared/generationResult'
 import { CandidateMediaFileError, CandidateStaging } from './candidateStaging'
 import { buildGenerationPrompt, createGenerationProfile, type GenerationPromptPhase } from './profile'
@@ -25,6 +25,7 @@ import { nativeWorkspaceDirectory } from './process'
 import { NativeCapabilityCache } from './capabilityCache'
 import { candidateChangeKey } from './candidateChangeKey'
 import { generationHostFeedback, generationReceiptFeedback } from './generationHostFeedback'
+import { generationRepairInputs } from './generationRepairInputs'
 import { recordAiTaskTiming } from '../../shared/localAgentTiming'
 import { recordAiTaskInputMetrics } from '../../shared/localAgentInputMetrics'
 
@@ -44,6 +45,11 @@ interface ActiveRun {
   cancelled: boolean
   acceptingInputs: boolean
   inputWrites: Set<Promise<void>>
+  interruptRequested?: boolean
+  interruptConfirmed?: boolean
+  budgetChanged?: () => void
+  idleSince?: number
+  budgetWrite?: Promise<void>
 }
 
 function taskMediaIdentity(task: AiTask) {
@@ -72,6 +78,17 @@ function createObservation(task: AiTask, request: GenerationRequest | undefined,
 }
 
 export class LocalAgentHarness {
+  private readonly stoppedSessions = new Set<string>()
+  private readonly idleOperations = new Map<string, Promise<void>>()
+  private async withIdleOwner<T>(id: string, operation: () => Promise<T>): Promise<T> {
+    const previous = this.idleOperations.get(id) ?? Promise.resolve()
+    let release!: () => void
+    const current = new Promise<void>(resolve => { release = resolve })
+    this.idleOperations.set(id, current)
+    await previous
+    try { return await operation() }
+    finally { release(); if (this.idleOperations.get(id) === current) this.idleOperations.delete(id) }
+  }
   private readonly active = new Map<string, ActiveRun>()
   private pendingLaunches = 0
   private readonly launches = new Set<Promise<void>>()
@@ -81,6 +98,7 @@ export class LocalAgentHarness {
   private readonly preparedSessions = new Set<string>()
   // A known live receipt survives an uncertain disk/IPC result. Retrying only writes this exact record.
   private readonly pendingHostResults = new Map<string, SessionOwner>()
+  private readonly deletingScopes = new Set<string>()
   private closing = false
   private readonly storageFailures = new Map<string, { workspace: string; record: LocalAgentRecord }>()
   private readonly cachedCapabilities = new NativeCapabilityCache()
@@ -172,24 +190,38 @@ export class LocalAgentHarness {
     owner.record.externalSessionId = nativeId
     return changed
   }
-  async list(workspace: WorkspaceIdentityV1) {
+  async list(workspace: AiWorkspaceIdentity) {
+    return this.readRecords(workspace)
+  }
+  async read(workspace: AiWorkspaceIdentity, id: string) {
+    return this.readRecords(workspace, id)
+  }
+  private async readRecords(workspace: AiWorkspaceIdentity, requestedId?: string) {
     // Reading records and cleaning older staging areas can yield while a native
     // turn finishes. A session owned by this process during this read is never
     // an abandoned process, even if its active run disappears before the loop.
-    const owned = new Set([...this.active.keys(), ...this.launching, ...this.preparedSessions, ...this.pendingHostResults.keys()])
-    const result = await this.repository.list(workspace)
+    const running = new Set([...this.active.keys(), ...this.launching])
+    const owned = new Set([...running, ...this.preparedSessions, ...this.pendingHostResults.keys()])
+    const result = requestedId !== undefined ? await this.repository.read(workspace, requestedId) : await this.repository.list(workspace)
     const owner = workspaceIdentityKey(workspace)
-    for (const run of this.active.values()) if (workspaceIdentityKey(run.owner.record.workspace) === owner) {
+    const includes = (id: string) => requestedId === undefined || requestedId === id
+    for (const run of this.active.values()) if (includes(run.owner.record.id) && workspaceIdentityKey('kind' in workspace ? run.owner.record.lessonWorkspace ?? run.owner.record.workspace : run.owner.record.workspace) === owner) {
       owned.add(run.owner.record.id)
       result.records = result.records.filter(record => record.id !== run.owner.record.id)
       result.records.push(this.project(run.owner, true))
     }
-    for (const [id, failed] of this.storageFailures) if (failed.workspace === owner) {
+    for (const [id, failed] of this.storageFailures) if (includes(id) && (failed.workspace === owner || failed.record.lessonWorkspace && workspaceIdentityKey(failed.record.lessonWorkspace) === owner)) {
       result.records = result.records.filter(record => record.id !== id)
       result.records.push(failed.record)
       result.damaged.push(`会话 ${id} 未能写入本地存储；当前结果仅保留在本次应用进程中`)
     }
-    for (const [id, pending] of this.pendingHostResults) if (workspaceIdentityKey(pending.record.workspace) === owner) {
+    for (const [id, pending] of this.pendingHostResults) if (includes(id) && workspaceIdentityKey('kind' in workspace ? pending.record.lessonWorkspace ?? pending.record.workspace : pending.record.workspace) === owner) {
+      // Receipt acknowledgement persists during an active feedback turn. Its
+      // storage entry must not replace the current run with an offline projection
+      // whose last event can still be the previous turn's completion. The active
+      // projection above also preserves explicit Stop/partial while closing.
+      const active = this.active.get(id)
+      if (active && workspaceIdentityKey('kind' in workspace ? active.owner.record.lessonWorkspace ?? active.owner.record.workspace : active.owner.record.workspace) === owner) continue
       result.records = result.records.filter(record => record.id !== id)
       result.records.push(this.project(pending, false))
       result.damaged.push(`会话 ${id} 的宿主结果尚未保存；课件中的已应用修改保留，请重试保存回执`)
@@ -208,10 +240,14 @@ export class LocalAgentHarness {
       }
       const awaitingCandidateFiles = this.preparedSessions.has(record.id) && !this.proposals.has(record.id)
         && record.task?.status === 'checking'
-      if (record.generationRequestId && record.status !== 'running' && !this.active.has(record.id) && !awaitingCandidateFiles) {
+      // Feedback preparation persists its new request before active.set. The
+      // projection can still show the prior native turn as completed here.
+      // Neither a launch nor a run owned during this read is abandoned staging.
+      if (record.generationRequestId && record.status !== 'running' && !running.has(record.id)
+        && !this.active.has(record.id) && !this.launching.has(record.id) && !awaitingCandidateFiles) {
         try {
-          const version = await this.repository.isLegacy(workspace, record.id) ? 1 : 2
-          await new CandidateStaging(this.repository.stagingPath(workspace, record.workingDirectoryId ?? record.id, version)).remove(record.generationRequestId)
+          const version = 2
+          await new CandidateStaging(this.repository.stagingPath(record.workspace, record.workingDirectoryId ?? record.id, version)).remove(record.generationRequestId)
           if (record.cleanupIssue) {
             const native = result.v2.find(value => value.id === record.id)
             if (native) await this.persist({ record: native, generationRequest: record.generationRequest, hostResult: record.hostResult })
@@ -221,42 +257,35 @@ export class LocalAgentHarness {
     }
     return { records: result.records, damaged: result.damaged }
   }
-  async start(workspace: WorkspaceIdentityV1, adapter: LocalAgentId, prompt: string): Promise<string> {
+  async start(workspace: AiWorkspaceIdentity, adapter: LocalAgentId, prompt: string, intent: 'discuss' | 'plan' = 'discuss', userMessage?: string): Promise<string> {
     const session = this.createSession(workspace, adapter, prompt, { kind: 'course' }, [])
-    await this.launch(session, prompt, undefined, undefined, prompt)
+    session.record.tasks[0]!.intent = intent
+    await this.launch(session, prompt, undefined, undefined, userMessage ?? prompt)
     return session.record.id
   }
-  async resume(workspace: WorkspaceIdentityV1, id: string, prompt: string): Promise<string> {
+  async resume(workspace: AiWorkspaceIdentity, id: string, prompt: string, userMessage?: string): Promise<string> {
     if (this.active.has(id)) throw new Error('会话正在运行')
     await this.savePendingFeedback(workspace, id)
     const prior = (await this.list(workspace)).records.find(record => record.id === id)
     if (!prior) throw new Error('会话不存在或没有可恢复的外部身份')
-    const legacy = await this.repository.isLegacy(workspace, id)
-    if (legacy) {
-      const excerpt = localAgentText(prior.events)
-      const session = this.createSession(workspace, prior.adapter, prompt, { kind: 'course' }, [])
-      await this.launch(session, excerpt ? `先前对话（只读摘录，不能恢复旧 CLI 会话）：\n${excerpt}\n\n${prompt}` : prompt, undefined, undefined, prompt)
-      return session.record.id
-    }
     if (!prior.externalSessionId) throw new Error('会话不存在或没有可恢复的外部身份')
     const session = this.createSession(workspace, prior.adapter, prompt, { kind: 'course' }, [], prior.workingDirectoryId ?? prior.id)
-    await this.launch(session, prompt, prior.externalSessionId, undefined, prompt)
+    await this.launch(session, prompt, prior.externalSessionId, undefined, userMessage ?? prompt)
     return session.record.id
   }
-  async generate(workspace: WorkspaceIdentityV1, adapter: LocalAgentId, raw: GenerationRequest, resumeSessionId?: string, userMessage?: string): Promise<string> {
+  async generate(workspace: WorkspaceIdentityV1, adapter: LocalAgentId, raw: GenerationRequest, resumeSessionId?: string, userMessage?: string, lessonWorkspace?: Extract<AiWorkspaceIdentity, { kind: 'lesson' }>): Promise<string> {
     const request = generationRequestSchema.parse(raw)
     if (workspaceIdentityKey(workspace) !== workspaceIdentityKey(request.workspace)) throw new Error('生成请求不属于当前工程位置')
     if (resumeSessionId) await this.savePendingFeedback(workspace, resumeSessionId)
     const records = (await this.list(workspace)).records
     if (records.some(record => record.generationRequestId === request.requestId)) throw new Error('每轮生成必须使用新的请求身份')
     const prior = resumeSessionId ? records.find(record => record.id === resumeSessionId) : undefined
-    const legacy = resumeSessionId ? await this.repository.isLegacy(workspace, resumeSessionId) : false
-    if (resumeSessionId && !legacy && (!prior?.externalSessionId || prior.adapter !== adapter || this.active.has(resumeSessionId))) {
+    if (resumeSessionId && (!prior?.externalSessionId || prior.adapter !== adapter || this.active.has(resumeSessionId))) {
       throw new Error('生成会话不可恢复或 adapter 不一致')
     }
     if (request.repair) {
       const original = prior?.generationRequest
-      if (legacy || !original || original.repair || original.requestId !== request.repair.logicalRequestId
+      if (!original || original.repair || original.requestId !== request.repair.logicalRequestId
         || prior?.hostResult?.status !== 'rejected'
         || records.some(record => record.generationRequest?.repair?.logicalRequestId === request.repair!.logicalRequestId)) {
         throw new Error('本轮的唯一一次修复机会已使用或不属于当前会话')
@@ -267,28 +296,28 @@ export class LocalAgentHarness {
     }
     const target = destinationScope(request)
     const readScope = request.purpose === 'whole-course' ? { kind: 'course' as const } : { kind: 'location' as const, surfaceId: target.surfaceId, locationId: target.locationId }
-    const session = this.createSession(workspace, adapter, request.instruction, readScope, request.destinations, !legacy && prior ? prior.workingDirectoryId ?? prior.id : undefined)
+    const session = this.createSession(workspace, adapter, request.instruction, readScope, request.destinations, prior ? prior.workingDirectoryId ?? prior.id : undefined)
+    session.record.lessonWorkspace = lessonWorkspace ?? prior?.lessonWorkspace
     session.generationRequest = request
     const observationId = randomUUID()
     session.record.tasks[0] = aiTaskSchema.parse({
       ...session.record.tasks[0]!, intent: request.intent ?? 'edit', applyPolicy: request.applyPolicy ?? 'preview', observationId,
       writeDestinations: request.intent && request.intent !== 'edit' ? [] : request.destinations,
       ...(request.execution ? { execution: { ...session.record.tasks[0]!.execution!, startedAt: request.execution.startedAt,
-        deadlineAt: Math.min(session.record.tasks[0]!.execution!.deadlineAt, request.execution.deadlineAt) } } : {}),
+        deadlineAt: request.execution.deadlineAt } } : {}),
     })
     if (Date.now() >= session.record.tasks[0]!.execution!.deadlineAt) throw new Error('本任务的执行期限已到，请重新发送以获得新观察')
     await this.persistRequestObservation(session, request, observationId)
     let prompt = this.generationPrompt(adapter, request, path.join(this.repository.stagingPath(workspace, session.record.workingDirectoryId, 2), 'candidates', request.requestId))
-    if (legacy && prior) {
-      const excerpt = localAgentText(prior.events)
-      if (excerpt) prompt = `先前对话（只读摘录，不能恢复旧 CLI 会话）：\n${excerpt}\n\n${prompt}`
-    }
     if (Buffer.byteLength(prompt) > MAX_GENERATION_PROMPT_BYTES) throw new Error('请求上下文超过 CLI 发送预算，请缩小引用范围')
-    await this.launch(session, prompt, !legacy ? prior?.externalSessionId : undefined, request, userMessage ?? request.instruction)
+    await this.launch(session, prompt, prior?.externalSessionId, request, userMessage ?? request.instruction)
     return session.record.id
   }
   /** Continue the same task with a fresh immutable request after an actual host result. */
   async continue(workspace: WorkspaceIdentityV1, id: string, raw: GenerationRequest): Promise<string> {
+    return this.withIdleOwner(id, () => this.continueTask(workspace, id, raw))
+  }
+  private async continueTask(workspace: WorkspaceIdentityV1, id: string, raw: GenerationRequest): Promise<string> {
     if (this.active.has(id) || this.launching.has(id)) throw new Error('任务正在运行')
     // A host-feedback turn must be able to confirm completion. Preserve edit
     // authorization while giving every native adapter the reply-or-edit channel.
@@ -308,7 +337,7 @@ export class LocalAgentHarness {
       || (request.intent ?? 'edit') !== task.intent || (request.applyPolicy ?? 'preview') !== task.applyPolicy) throw new Error('stale：续轮目标或工程基线已改变')
     if (task.execution && (Date.now() >= task.execution.deadlineAt || task.execution.stagnantCandidates >= 2 || task.execution.formatRepairs > 1)) throw new Error('本任务预算已到或连续两轮没有进展，请调整要求后重新发送')
     if (task.execution) request = generationRequestSchema.parse({ ...request, execution: { version: 1,
-      startedAt: task.execution.startedAt, deadlineAt: Math.min(task.execution.deadlineAt, request.execution?.deadlineAt ?? task.execution.deadlineAt) } })
+      startedAt: task.execution.startedAt, deadlineAt: task.execution.deadlineAt } })
     const created = new Set(native.hostResults.filter(item => item.taskId === task.taskId).flatMap(item => item.receipts.flatMap(receipt => receipt.affected.filter(effect => effect.operation === 'created').map(effect => effect.id))))
     const canCreateLocations = task.writeDestinations.some(destination => destination.kind === 'create' && destination.scope.parent.kind === 'course-locations')
     const stable = (destination: GenerationRequest['destinations'][number]) => {
@@ -326,7 +355,20 @@ export class LocalAgentHarness {
       throw new Error('续轮不能扩大原任务写入范围；请新建明确授权的请求')
     }
     const projectedFeedback = generationHostFeedback(request, result, native.hostResults.at(-1) ?? null)
-    request = projectedFeedback.request
+    const cachedProposal = this.proposals.get(id)
+    const repairInputs = generationRepairInputs(projectedFeedback.request, prior, task, native.hostResults.at(-1),
+      cachedProposal?.admission === 'accepted' ? cachedProposal.proposal : undefined)
+    request = repairInputs.request
+    const feedback = `上一阶段已返回宿主正式结果，不是CLI自述；只有committed或unchanged表示已应用或确认无需修改：\n${JSON.stringify(projectedFeedback.result)}\n已记录的宿主结果（拒绝不代表提交）：\n${JSON.stringify(projectedFeedback.hostResult)}\n${projectedFeedback.resourcePath ? `完整宿主反馈文件（相对 workspace.root）：${projectedFeedback.resourcePath}\n` : ''}请结合新的真实观察判断用户目标是否完成；若完成请自然语言答复，不再产生重复修改。尚有可执行的合法步骤才给下一阶段候选；确实受阻时通过答复通道说明未完成及具体缺失条件并结束，不提交空steps、自造操作或用于索取诊断的非法候选。\n${(task.pendingInputs ?? []).map(input => `用户${input.kind === 'correct' ? '纠正' : '补充'}：${input.text}`).join('\n')}`
+    const promptFor = (current: GenerationRequest, guidance = '') => `${feedback}\n${guidance}\n${this.generationPrompt(native.adapter, current, path.join(this.repository.stagingPath(workspace, native.workingDirectoryId, 2), 'candidates', current.requestId), 'host-feedback')}`
+    let prompt = promptFor(request, repairInputs.guidance)
+    if (Buffer.byteLength(prompt) > MAX_GENERATION_PROMPT_BYTES && request !== projectedFeedback.request) {
+      request = projectedFeedback.request
+      prompt = promptFor(request, '组件修复输入超过本轮发送预算，已省略复用；请依据当前观察继续。')
+    }
+    // Even an omission notice must not crowd out an otherwise valid request.
+    if (Buffer.byteLength(prompt) > MAX_GENERATION_PROMPT_BYTES) prompt = promptFor(request)
+    if (Buffer.byteLength(prompt) > MAX_GENERATION_PROMPT_BYTES) throw new Error('续轮上下文超过发送预算')
     const observationId = randomUUID()
     const execution = task.execution ? { ...task.execution, deadlineAt: request.execution!.deadlineAt, turnCount: task.execution.turnCount + 1 } : undefined
     native.tasks[native.tasks.length - 1] = aiTaskSchema.parse({ ...task, status: 'running', observationId,
@@ -335,19 +377,21 @@ export class LocalAgentHarness {
     this.candidateIds.delete(id)
     const owner: SessionOwner = { record: native, generationRequest: request }
     await this.persistRequestObservation(owner, request, observationId)
-    const feedback = `上一阶段已返回宿主正式结果，不是CLI自述；只有committed或unchanged表示已应用或确认无需修改：\n${JSON.stringify(projectedFeedback.result)}\n已记录的宿主结果（拒绝不代表提交）：\n${JSON.stringify(projectedFeedback.hostResult)}\n${projectedFeedback.resourcePath ? `完整宿主反馈文件（相对 workspace.root）：${projectedFeedback.resourcePath}\n` : ''}请结合新的真实观察判断用户目标是否完成；若完成请自然语言答复，不再产生重复修改。尚有可执行的合法步骤才给下一阶段候选；确实受阻时通过答复通道说明未完成及具体缺失条件并结束，不提交空steps、自造操作或用于索取诊断的非法候选。\n${(task.pendingInputs ?? []).map(input => `用户${input.kind === 'correct' ? '纠正' : '补充'}：${input.text}`).join('\n')}`
-    const prompt = `${feedback}\n${this.generationPrompt(native.adapter, request, path.join(this.repository.stagingPath(workspace, native.workingDirectoryId, 2), 'candidates', request.requestId), 'host-feedback')}`
-    if (Buffer.byteLength(prompt) > MAX_GENERATION_PROMPT_BYTES) throw new Error('续轮上下文超过发送预算')
     await this.launch(owner, prompt, native.externalSessionId, request)
     return id
   }
   async candidate(workspace: WorkspaceIdentityV1, id: string) {
+    return this.withIdleOwner(id, () => this.readCandidate(workspace, id))
+  }
+  private async readCandidate(workspace: WorkspaceIdentityV1, id: string) {
     if (this.pendingHostResults.has(id)) throw new Error('宿主实际结果尚未保存，不能重新读取并应用候选；请重试保存回执')
     const record = (await this.list(workspace)).records.find(value => value.id === id)
     if (!record?.generationRequestId) throw new Error('当前工程没有此生成请求')
     if (record.status !== 'completed' || this.active.has(id)) throw new Error('生成运行尚未成功结束')
     let nativeRecord = (await this.repository.list(workspace)).v2.find(value => value.id === id)
     const mediaTask = nativeRecord?.tasks.at(-1)
+    if (mediaTask?.pendingInputs?.length) return { kind: 'incomplete' as const, requestId: record.generationRequestId,
+      finding: '用户在上一回合结束后补充或纠正了要求，旧候选尚未应用；请根据最新输入重新准备' }
     if (nativeRecord && mediaTask?.execution && !this.proposals.has(id)) {
       const staging = new CandidateStaging(this.repository.stagingPath(workspace, nativeRecord.workingDirectoryId, 2))
       // The delivery helper registers only files it successfully copied. Keep
@@ -454,6 +498,9 @@ export class LocalAgentHarness {
     return result
   }
   async hostResult(workspace: WorkspaceIdentityV1, id: string, raw: LocalAgentHostResult, receipt?: GenerationCommitReceipt): Promise<LocalAgentRecord> {
+    return this.withIdleOwner(id, () => this.recordHostResult(workspace, id, raw, receipt))
+  }
+  private async recordHostResult(workspace: WorkspaceIdentityV1, id: string, raw: LocalAgentHostResult, receipt?: GenerationCommitReceipt): Promise<LocalAgentRecord> {
     const result = localAgentHostResultSchema.parse(raw)
     if (this.active.has(id)) throw new Error('宿主结果不属于已结束的当前请求')
     const listed = await this.repository.list(workspace)
@@ -523,7 +570,7 @@ export class LocalAgentHarness {
         : aiTaskSchema.parse({ ...task, status: result.status === 'checked' ? 'awaiting-apply' : 'checking' })
     }
     const updated = native.tasks.at(-1)!
-    if (!existing && updated.execution && ['committed', 'unchanged', 'rejected'].includes(result.status)) {
+    if (!existing && updated.execution && !updated.pendingInputs?.length && ['committed', 'unchanged', 'rejected'].includes(result.status)) {
       const changeKey = proposal ? candidateChangeKey(proposal.proposal.candidate) : null
       const repeated = result.status !== 'committed' && updated.execution.lastChangeKey === changeKey
       native.tasks[native.tasks.length - 1] = aiTaskSchema.parse({ ...updated, execution: { ...updated.execution,
@@ -545,14 +592,20 @@ export class LocalAgentHarness {
     this.storageFailures.delete(id)
     return this.project(owner, false)
   }
-  async input(workspace: WorkspaceIdentityV1, id: string, raw: AiUserInput): Promise<ReturnType<typeof aiInputDeliverySchema.parse>> {
+  async input(workspace: AiWorkspaceIdentity, id: string, raw: AiUserInput): Promise<ReturnType<typeof aiInputDeliverySchema.parse>> {
     const input = aiUserInputSchema.parse(raw)
     const run = this.active.get(id)
+    if (run?.budgetWrite && input.kind !== 'stop') {
+      await run.budgetWrite
+      return this.input(workspace, id, input)
+    }
     if (run && !run.acceptingInputs) {
       await run.done
       return this.input(workspace, id, input)
     }
     if (!run && (input.kind === 'correct' || input.kind === 'supplement')) {
+      const queued = await this.withIdleOwner(id, async () => {
+      if (this.active.has(id)) return null
       const listed = await this.repository.list(workspace)
       const record = listed.v2.find(value => value.id === id)
       const projected = listed.records.find(value => value.id === id)
@@ -567,13 +620,51 @@ export class LocalAgentHarness {
         this.appendUserMessage(record, record.events.at(-1)?.runId ?? randomUUID(), input.inputId, input.text, input.kind)
         await this.persist({ record, generationRequest: projected.generationRequest, hostResult: projected.hostResult })
       }
+      if (this.stoppedSessions.has(id)) throw new Error('输入保存期间任务已停止；不会重新启动或应用旧候选')
       return aiInputDeliverySchema.parse({ taskId: task.taskId, epoch: task.epoch, workspace, inputId: input.inputId, turnId: input.turnId, status: 'queued', reason: '将在候选重新检查的下一原生回合消费' })
+      })
+      return queued ?? this.input(workspace, id, input)
     }
     const task = run?.owner.record.tasks.at(-1)
     if (!run || !task || run.cancelled || workspaceIdentityKey(workspace) !== workspaceIdentityKey(task.workspace)
       || workspaceIdentityKey(input.workspace) !== workspaceIdentityKey(workspace) || input.taskId !== task.taskId || input.epoch !== task.epoch) throw new Error('输入不属于当前运行任务')
     const prior = run.owner.record.events.find(event => event.kind === 'input-delivery' && event.delivery.inputId === input.inputId)
     if (prior?.kind === 'input-delivery') return prior.delivery
+    if (input.kind === 'extend-budget') {
+      if (run.inputWrites.size) { await Promise.all([...run.inputWrites]); return this.input(workspace, id, input) }
+      const execution = task.execution
+      const deadlineAt = execution ? Math.min(execution.deadlineAt + input.minutes * 60_000, execution.startedAt + MAX_GENERATION_TASK_DURATION_MS) : 0
+      const accepted = execution && Date.now() < execution.deadlineAt && deadlineAt > execution.deadlineAt
+      const delivery = aiInputDeliverySchema.parse({ taskId: task.taskId, epoch: task.epoch, workspace, inputId: input.inputId,
+        turnId: run.nativeTurnId, status: accepted ? 'accepted' : 'rejected',
+        ...(accepted ? { deadlineAt } : {}),
+        reason: accepted ? '已按本次明确请求增加执行预算' : '任务已到期或已达到120分钟总预算上限' })
+      let release!: () => void
+      const writing = new Promise<void>(resolve => { release = resolve })
+      run.budgetWrite = writing
+      run.inputWrites.add(writing)
+      try {
+        // Storage acknowledges the proposed budget before the live owner exposes
+        // it. Native event processing waits; Stop and the old deadline do not.
+        const record = structuredClone(run.owner.record)
+        if (accepted) record.tasks[record.tasks.length - 1] = aiTaskSchema.parse({ ...task, execution: { ...execution, deadlineAt } })
+        this.append(record, run.runId, { kind: 'input-delivery', delivery, ...this.identity(record, run.runId) })
+        await this.repository.write(record)
+        if (run.cancelled || run.owner.record.tasks.at(-1)?.epoch !== input.epoch || execution && Date.now() >= execution.deadlineAt) {
+          await this.repository.write(localAgentRecordV2Schema.parse(run.owner.record))
+          return aiInputDeliverySchema.parse({ ...delivery, deadlineAt: undefined, status: 'rejected', reason: '预算保存期间任务已停止或到期' })
+        }
+        if (accepted) {
+          const current = run.owner.record.tasks.at(-1)!
+          run.owner.record.tasks[run.owner.record.tasks.length - 1] = aiTaskSchema.parse({ ...current, execution: { ...current.execution, deadlineAt } })
+          if (run.owner.generationRequest) run.owner.generationRequest = generationRequestSchema.parse({ ...run.owner.generationRequest,
+            execution: { version: 1, startedAt: execution.startedAt, deadlineAt } })
+        }
+        this.append(run.owner.record, run.runId, { kind: 'input-delivery', delivery, ...this.identity(run.owner.record, run.runId) })
+        run.budgetChanged?.()
+        return delivery
+      } finally { run.budgetWrite = undefined; run.inputWrites.delete(writing); release() }
+    }
     if (input.kind === 'stop') {
       await this.cancel(workspace, id)
       return aiInputDeliverySchema.parse({ taskId: input.taskId, epoch: input.epoch, workspace, inputId: input.inputId, turnId: input.turnId, status: 'consumed', reason: null })
@@ -602,13 +693,24 @@ export class LocalAgentHarness {
       run.owner.record.tasks[run.owner.record.tasks.length - 1] = aiTaskSchema.parse({ ...currentTask,
         pendingInputs: [...(currentTask.pendingInputs ?? []).filter(value => value.inputId !== input.inputId), { inputId: input.inputId, kind: input.kind, text: input.text }] })
     } else if (input.kind === 'answer' && delivery.status !== 'rejected') {
-      run.owner.record.tasks[run.owner.record.tasks.length - 1] = aiTaskSchema.parse({ ...task, status: 'running' })
+      run.owner.record.tasks[run.owner.record.tasks.length - 1] = aiTaskSchema.parse({ ...run.owner.record.tasks.at(-1)!, status: 'running' })
+      run.idleSince = Date.now()
     }
     await this.persist(run.owner)
+    run.budgetChanged?.()
+    if (delivery.status === 'queued' && input.kind === 'correct'
+      && run.adapter.interruptTurn && !run.interruptRequested && !run.cancelled) {
+      // Pending intent is durable before interrupting. This is a turn handoff,
+      // never a task Stop, and the consumer waits for the native terminal.
+      run.interruptRequested = true
+      run.interruptConfirmed = false
+      try { await run.adapter.interruptTurn(); run.interruptConfirmed = true }
+      catch (error) { run.interruptRequested = false; throw error }
+    }
     return delivery
     } finally { run.inputWrites.delete(writing); finishWrite() }
   }
-  async cancel(workspace: WorkspaceIdentityV1, id: string): Promise<void> {
+  async cancel(workspace: AiWorkspaceIdentity, id: string): Promise<void> {
     const run = this.active.get(id)
     if (!run) {
       const listed = await this.repository.list(workspace)
@@ -617,6 +719,7 @@ export class LocalAgentHarness {
       const projected = pending ? this.project(pending, false) : listed.records.find(value => value.id === id)
       const task = record?.tasks.at(-1)
       if (!record || !task || !projected || workspaceIdentityKey(record.workspace) !== workspaceIdentityKey(workspace)) throw new Error('当前工程没有此运行会话')
+      this.stoppedSessions.add(id)
       record.tasks[record.tasks.length - 1] = stopAiTask(task)
       await this.persist({ record, generationRequest: projected.generationRequest, hostResult: projected.hostResult })
       this.pendingHostResults.delete(id)
@@ -624,6 +727,7 @@ export class LocalAgentHarness {
       return
     }
     if (workspaceIdentityKey(run.owner.record.workspace) !== workspaceIdentityKey(workspace)) throw new Error('当前工程没有此运行会话')
+    this.stoppedSessions.add(id)
     if (run.cancelled) { await run.done; return }
     const task = run.owner.record.tasks.at(-1)
     if (task) run.owner.record.tasks[run.owner.record.tasks.length - 1] = stopAiTask(task)
@@ -635,26 +739,33 @@ export class LocalAgentHarness {
       finally { await run.done }
     }
   }
-  async delete(workspace: WorkspaceIdentityV1, id?: string): Promise<void> {
-    for (const run of this.active.values()) if (workspaceIdentityKey(run.owner.record.workspace) === workspaceIdentityKey(workspace) && (!id || run.owner.record.id === id)) await this.cancel(workspace, run.owner.record.id)
+  async delete(workspace: AiWorkspaceIdentity, id?: string): Promise<void> {
+    const scope = workspaceIdentityKey(workspace)
+    this.deletingScopes.add(scope)
+    try {
+    await Promise.allSettled([...this.launches])
+    for (const run of this.active.values()) if (workspaceIdentityKey('kind' in workspace ? run.owner.record.lessonWorkspace ?? run.owner.record.workspace : run.owner.record.workspace) === workspaceIdentityKey(workspace) && (!id || run.owner.record.id === id)) await this.cancel(run.owner.record.workspace, run.owner.record.id)
     await this.repository.delete(workspace, id)
     for (const [failedId, failed] of this.storageFailures) if (failed.workspace === workspaceIdentityKey(workspace) && (!id || id === failedId)) this.storageFailures.delete(failedId)
     for (const [pendingId, pending] of this.pendingHostResults) if (workspaceIdentityKey(pending.record.workspace) === workspaceIdentityKey(workspace) && (!id || id === pendingId)) this.pendingHostResults.delete(pendingId)
     if (id) { this.proposals.delete(id); this.candidateIds.delete(id); this.preparedSessions.delete(id) }
+    } finally { this.deletingScopes.delete(scope) }
   }
   async close(): Promise<void> {
     this.closing = true
     await Promise.allSettled([...this.launches])
-    await Promise.all([...this.active.values()].map(run => this.cancel(run.owner.record.workspace, run.owner.record.id)))
+    const stopped = await Promise.allSettled([...this.active.values()].map(run => this.cancel(run.owner.record.workspace, run.owner.record.id)))
+    const failure = stopped.find(result => result.status === 'rejected')
+    if (failure?.status === 'rejected') throw failure.reason
   }
   private project(owner: SessionOwner, live: boolean): LocalAgentRecord {
     const projected = projectV2RecordToV1(owner.record, {
       generationRequest: owner.generationRequest ? requestMetadata(owner.generationRequest) : undefined, hostResult: owner.hostResult, cleanupIssue: owner.cleanupIssue, live,
     })
-    if (!live) return projected
+    if (!live || projected.status !== 'running') return projected
     return { ...projected, status: 'running', events: projected.events.filter(event => !['completed', 'failed', 'cancelled'].includes(event.kind)) }
   }
-  private createSession(workspace: WorkspaceIdentityV1, adapter: LocalAgentId, goal: string, readScope: AiTask['readScope'], writeDestinations: AiTask['writeDestinations'], workingDirectoryId?: string): SessionOwner {
+  private createSession(workspace: AiWorkspaceIdentity, adapter: LocalAgentId, goal: string, readScope: AiTask['readScope'], writeDestinations: AiTask['writeDestinations'], workingDirectoryId?: string): SessionOwner {
     const sessionId = randomUUID()
     const taskId = randomUUID()
     const observationId = writeDestinations.length ? null : randomUUID()
@@ -662,11 +773,11 @@ export class LocalAgentHarness {
       version: 1, taskId, epoch: 0, workspace, sessionId, adapter, goal: goal.slice(0, 20000),
       intent: writeDestinations.length ? 'edit' : 'discuss', applyPolicy: 'preview', readScope, writeDestinations,
       status: 'running', observationId, committedResultIds: [],
-      execution: { startedAt: Date.now(), deadlineAt: Date.now() + MAX_GENERATION_TASK_DURATION_MS, turnCount: 1,
+      execution: { startedAt: Date.now(), deadlineAt: Date.now() + DEFAULT_GENERATION_TASK_DURATION_MS, turnCount: 1,
         formatRepairs: 0, stagnantCandidates: 0, lastChangeKey: null, lastDiagnostic: null }, pendingInputs: [],
     })
     const record = localAgentRecordV2Schema.parse({
-      version: 2, id: sessionId, adapter, workspace, externalSessionId: null, workingDirectoryId: workingDirectoryId ?? sessionId,
+      version: 3, id: sessionId, adapter, workspace, externalSessionId: null, workingDirectoryId: workingDirectoryId ?? sessionId,
       tasks: [task], observations: observationId ? [createObservation(task, undefined, observationId, [])] : [], hostResults: [], events: [],
     })
     return { record }
@@ -703,6 +814,13 @@ export class LocalAgentHarness {
     })
   }
   private async persist(owner: SessionOwner): Promise<void> {
+    // Take the snapshot only after a concurrent explicit budget transaction has
+    // settled. Otherwise an older event flush could overwrite its durable ACK.
+    const budgetWrite = this.active.get(owner.record.id)?.budgetWrite
+    if (budgetWrite) await budgetWrite
+    if (this.stoppedSessions.has(owner.record.id) && owner.record.tasks.at(-1)) {
+      owner.record.tasks[owner.record.tasks.length - 1] = stopAiTask(owner.record.tasks.at(-1)!)
+    }
     const task = owner.record.tasks.at(-1)
     const terminal = task && ['completed', 'failed', 'cancelled', 'partial'].includes(task.status)
     const runId = owner.record.events.at(-1)?.runId
@@ -719,7 +837,7 @@ export class LocalAgentHarness {
     }
     await this.repository.writeDisplay(owner.record.workspace, owner.record.id, { hostResult: owner.hostResult, cleanupIssue: owner.cleanupIssue })
   }
-  private async savePendingFeedback(workspace: WorkspaceIdentityV1, id: string): Promise<void> {
+  private async savePendingFeedback(workspace: AiWorkspaceIdentity, id: string): Promise<void> {
     const pending = this.pendingHostResults.get(id)
     if (!pending) return
     if (workspaceIdentityKey(pending.record.workspace) !== workspaceIdentityKey(workspace)) throw new Error('回执不属于当前工程')
@@ -768,7 +886,8 @@ export class LocalAgentHarness {
     await this.repository.writeObservation(owner.record.workspace, owner.record.workingDirectoryId, observationId, 'generation-request.json', payload)
   }
   private launch(owner: SessionOwner, prompt: string, externalId?: string, request?: GenerationRequest, userMessage?: string): Promise<void> {
-    if (this.closing) return Promise.reject(new Error('会话服务正在关闭'))
+    if (this.stoppedSessions.has(owner.record.id)) return Promise.reject(new Error('任务已停止，不再启动原生回合'))
+    if (this.closing || this.deletingScopes.has(workspaceIdentityKey(owner.record.lessonWorkspace ?? owner.record.workspace))) return Promise.reject(new Error('会话服务正在关闭或删除当前记录'))
     this.launching.add(owner.record.id)
     const pending = this.prepareLaunch(owner, prompt, externalId, request, userMessage)
     this.launches.add(pending)
@@ -789,6 +908,7 @@ export class LocalAgentHarness {
       if (userMessage) this.appendUserMessage(owner.record, run.runId, randomUUID(), userMessage, 'initial')
       this.markTiming(owner.record, owner.record.tasks.at(-1)!, run.runId, 'requestPrepared')
       await this.persist(owner)
+      if (this.stoppedSessions.has(owner.record.id)) throw new Error('任务已停止，不再启动原生回合')
       this.active.set(owner.record.id, run)
       run.done = this.consume(run, prompt, cwd, externalId)
     } catch (error) {
@@ -803,16 +923,32 @@ export class LocalAgentHarness {
     let lastFlush = Date.now()
     const task = owner.record.tasks.at(-1)!
     const files = new Map<string, string>()
+    const nativeText = new Map<string, string>(), nativeToolStates = new Map<string, string>(), nativeUsage = new Map<string, number>()
     let preference: LocalAgentConfiguration | undefined
     let turnPending = task.pendingInputs ?? []
-    const remaining = (task.execution?.deadlineAt ?? Date.now() + MAX_GENERATION_TASK_DURATION_MS) - Date.now()
-    const timeout = setTimeout(() => {
+    let timeout: ReturnType<typeof setTimeout> | undefined
+    let interrupted = false
+    run.idleSince = Date.now()
+    const checkBudget = () => {
+      clearTimeout(timeout)
       if (run.cancelled) return
-      this.append(owner.record, run.runId, { kind: 'turn-ended', status: 'failed', failure: { category: 'limit', message: '本任务的20分钟执行预算已用完；已提交阶段保留' }, ...this.identity(owner.record, run.runId) })
-      owner.record.tasks[owner.record.tasks.length - 1] = aiTaskSchema.parse({ ...stopAiTask(owner.record.tasks.at(-1)!), status: owner.record.tasks.at(-1)!.committedResultIds.length ? 'partial' : 'failed' })
+      const current = owner.record.tasks.at(-1)!, execution = current.execution
+      if (!execution) return
+      const now = Date.now()
+      const idleDeadline = current.status === 'running' && !tools.size
+        ? Math.max(execution.lastActivityAt ?? execution.startedAt, run.idleSince ?? 0) + GENERATION_NATIVE_INACTIVITY_MS : Infinity
+      const reason = now >= execution.deadlineAt ? 'resource-budget' : now >= idleDeadline ? 'native-inactivity' : undefined
+      if (!reason) { timeout = setTimeout(checkBudget, Math.max(1, Math.min(execution.deadlineAt, idleDeadline) - now)); return }
+      this.append(owner.record, run.runId, { kind: 'turn-ended', status: 'failed', failure: { category: 'limit',
+        message: reason === 'resource-budget' ? '本次明确设置的执行预算已用完；已提交阶段保留'
+          : '20分钟未收到原生活动，且没有已知进行中的工具或待回答问题；本任务已结束，已提交阶段保留' }, ...this.identity(owner.record, run.runId) })
+      owner.record.tasks[owner.record.tasks.length - 1] = aiTaskSchema.parse({ ...stopAiTask(current),
+        status: current.committedResultIds.length ? 'partial' : 'failed', execution: { ...execution, budgetStopReason: reason } })
       run.cancelled = true
       void adapter.close().catch(() => {})
-    }, Math.max(1, remaining))
+    }
+    run.budgetChanged = checkBudget
+    checkBudget()
     let configurationConfirmed = true
     const observation = owner.record.observations.find(value => value.observationId === task.observationId)
     if (observation) for (const file of observation.files) files.set(file.fileId, path.join(this.repository.observationPath(owner.record.workspace, owner.record.workingDirectoryId, observation.observationId), file.relativePath))
@@ -825,7 +961,7 @@ export class LocalAgentHarness {
       owner.record.tasks[owner.record.tasks.length - 1] = aiTaskSchema.parse({ ...owner.record.tasks.at(-1)!,
         configurationRuns: [...(owner.record.tasks.at(-1)!.configurationRuns ?? []), { runId: run.runId, requested: preference ?? null }] })
       await this.persist(owner)
-      const nativeCwd = await nativeWorkspaceDirectory(owner.record.workspace.normalizedPath)
+      const nativeCwd = 'kind' in owner.record.workspace ? await fs.realpath(owner.record.workspace.normalizedDirectory) : await nativeWorkspaceDirectory(owner.record.workspace.normalizedPath)
       if (run.cancelled) return
       this.markTiming(owner.record, task, run.runId, 'nativeOpenStarted')
       const opened = await adapter.open({ cwd: nativeCwd, externalSessionId: externalId ?? null,
@@ -847,8 +983,9 @@ export class LocalAgentHarness {
       if (Buffer.byteLength(turnPrompt) > MAX_GENERATION_PROMPT_BYTES) throw new Error('正式回执与请求超过本轮发送预算')
       for (;;) {
       completed = false
+      interrupted = false
       stage = '启动原生回合'
-      if (run.cancelled || Date.now() >= (task.execution?.deadlineAt ?? Infinity)) throw new Error('output-limit')
+      if (run.cancelled || Date.now() >= (owner.record.tasks.at(-1)?.execution?.deadlineAt ?? Infinity)) throw new Error('output-limit')
       this.markTiming(owner.record, task, run.runId, 'turnDispatchStarted')
       const started = await adapter.startTurn({
         taskId: task.taskId, epoch: task.epoch, workspace: task.workspace, runId: run.runId,
@@ -879,9 +1016,31 @@ export class LocalAgentHarness {
         turnPending = []
       }
       for await (const event of adapter.events()) {
+        if (run.budgetWrite) await run.budgetWrite
         if (run.cancelled) break
-        if (event.taskId === task.taskId && event.epoch === task.epoch && event.runId === run.runId
-          && workspaceIdentityKey(event.workspace) === workspaceIdentityKey(task.workspace)) this.markTiming(owner.record, task, run.runId, 'firstNativeEvent')
+        if (event.taskId !== task.taskId || event.epoch !== task.epoch || event.runId !== run.runId
+          || workspaceIdentityKey(event.workspace) !== workspaceIdentityKey(task.workspace)) continue
+        this.markTiming(owner.record, task, run.runId, 'firstNativeEvent')
+        let activity = false
+        if (event.kind === 'text') {
+          const key = `${event.runId}:${event.itemId}:${event.phase}`, before = nativeText.get(key) ?? ''
+          const after = event.operation === 'append' ? before + event.text : event.text
+          activity = after !== before && Boolean(event.text.trim())
+          nativeText.set(key, after)
+        } else if (event.kind === 'tool') {
+          const key = `${event.runId}:${event.itemId}`, before = nativeToolStates.get(key)
+          if (before === event.status) continue
+          nativeToolStates.set(key, event.status); activity = true
+        } else if (event.kind === 'usage') {
+          const values = event.tokenUsage?.total ?? { inputTokens: event.inputTokens, outputTokens: event.outputTokens, cachedInputTokens: event.cachedInputTokens }
+          for (const [key, value] of Object.entries(values)) if (typeof value === 'number' && value > (nativeUsage.get(key) ?? 0)) {
+            nativeUsage.set(key, value); activity = true
+          }
+        } else if (event.kind === 'question') activity = true
+        if (activity) {
+          const current = owner.record.tasks.at(-1)!
+          if (current.execution) current.execution.lastActivityAt = Date.now()
+        }
         if (event.kind === 'text' && event.phase !== 'candidate'
           && !owner.record.tasks.at(-1)?.execution?.timing?.entries.some(entry => entry.runId === run.runId && entry.stage === 'firstVisibleText')) {
           const prior = projectV2RecordToV1({ ...owner.record, events: owner.record.events.filter(value => value.runId === run.runId) })
@@ -904,6 +1063,11 @@ export class LocalAgentHarness {
           await this.rememberCapabilities(nativeCwd, capabilities)
         }
         if (event.kind === 'turn-ended') {
+          if (event.status === 'cancelled' && run.interruptRequested) {
+            interrupted = true
+            tools.clear() // Native cancellation confirms outstanding operations have ended.
+            break
+          }
           if (event.status === 'completed') {
             if (completed) throw new Error('protocol')
             completed = true
@@ -921,6 +1085,7 @@ export class LocalAgentHarness {
         }
         this.append(owner.record, run.runId, event)
         if (event.kind === 'question') owner.record.tasks[owner.record.tasks.length - 1] = aiTaskSchema.parse({ ...owner.record.tasks.at(-1)!, status: 'waiting-input' })
+        checkBudget()
         if (event.kind === 'turn-ended') break
         // A native permission/clarification can suspend the event stream. Its
         // waiting state must be durable without depending on a later event.
@@ -930,13 +1095,15 @@ export class LocalAgentHarness {
       }
       while (run.inputWrites.size && !run.cancelled) await Promise.all([...run.inputWrites])
       const pending = owner.record.tasks.at(-1)?.pendingInputs ?? []
-      if (run.cancelled || !completed || !pending.length) { run.acceptingInputs = false; break }
+      if (run.cancelled || (interrupted && !run.interruptConfirmed) || (!completed && !interrupted) || !pending.length) { run.acceptingInputs = false; break }
       if (tools.size) throw new Error('protocol')
       const current = owner.record.tasks.at(-1)!
       if (current.execution && Date.now() >= current.execution.deadlineAt) throw new Error('output-limit')
-      this.append(owner.record, run.runId, { kind: 'turn-ended', status: 'completed', failure: null, ...this.identity(owner.record, run.runId) })
+      this.append(owner.record, run.runId, { kind: 'turn-ended', status: interrupted ? 'cancelled' : 'completed', failure: null, ...this.identity(owner.record, run.runId) })
       run.runId = randomUUID()
       run.nativeTurnId = null
+      run.interruptRequested = false
+      run.interruptConfirmed = false
       owner.record.tasks[owner.record.tasks.length - 1] = aiTaskSchema.parse({ ...current, status: 'running',
         ...(current.execution ? { execution: { ...current.execution, turnCount: current.execution.turnCount + 1 } } : {}) })
       turnPending = pending
@@ -975,6 +1142,7 @@ export class LocalAgentHarness {
       })
     } finally {
       clearTimeout(timeout)
+      run.budgetChanged = undefined
       const terminal = owner.record.events.at(-1)
       if (!run.cancelled && terminal?.kind === 'turn-ended' && terminal.status !== 'completed') owner.record.tasks[owner.record.tasks.length - 1] = aiTaskSchema.parse({ ...owner.record.tasks.at(-1)!, status: owner.record.tasks.at(-1)!.committedResultIds.length ? 'partial' : terminal.status })
       try { await adapter.close() } catch { /* Terminal failure stays observable even if the child already exited. */ }

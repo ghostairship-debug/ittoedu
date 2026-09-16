@@ -8,7 +8,7 @@ import type {
   RecentProjectEntry,
 } from '@/shared/ipcTypes'
 import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
-import { createCourseProjectArchive } from '@/renderer/project/courseProjectArchive'
+import { createArchiveFixture as createCourseProjectArchive } from '../fixtures/teacherController'
 import {
   selectActiveCourseProjectDocument,
   useEditorStore,

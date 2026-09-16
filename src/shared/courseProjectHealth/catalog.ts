@@ -82,7 +82,7 @@ export const COURSE_PROJECT_HEALTH_FINDING_CATALOG = {
     severity: 'error', status: 'schema-shadowed', gui: false, cli: false, savedReport: false,
   },
   'controller-button-id-duplicate': {
-    severity: 'error', status: 'schema-shadowed', gui: false, cli: false, savedReport: false,
+    severity: 'error', status: 'active', gui: true, cli: true, savedReport: true,
   },
   'controller-required-for-canvas': {
     severity: 'error', status: 'active', gui: true, cli: true, savedReport: true,

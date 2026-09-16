@@ -1,3 +1,4 @@
+import { documentTextSlots, normalizeDocumentText, type FlowInline, type FlowTextContent } from '../../../shared/document/content'
 import type { CourseProjectDocument, FlowBlock, LayerItem } from '../../../shared/courseProjectTypes'
 import type { TextRun } from '../../../shared/contracts/native-v1/types'
 import { applyTextRunStyle, remapTextRuns } from '../../../shared/textRuns'
@@ -77,21 +78,45 @@ function fields(document: CourseProjectDocument, token: CourseAuthoringSessionTo
     } else if (content.nativeType === 'input') add(content.data, 'placeholder', target, owner)
     
   }
-  const blocks = (entries: FlowBlock[], owner: string) => entries.forEach(block => {
-    const target = `正文 (${block.id})`
-    if (block.type === 'heading' || block.type === 'paragraph' || block.type === 'quote') { rich(block, target, owner); if (block.type === 'quote') add(block, 'citation', target, owner) }
-    else if (block.type === 'list') block.items.forEach(item => rich(item, `${target}/${item.id}`, owner))
-    else if (block.type === 'section') { add(block, 'title', target, owner); blocks(block.blocks, owner) }
-    else if (block.type === 'callout') { add(block, 'title', target, owner); add(block, 'body', target, owner) }
-    else if (block.type === 'media') { add(block, 'caption', target, owner); add(block, 'altText', target, owner) }
+  const bodyText = (content: FlowTextContent, target: string, owner: string) => {
+    const groups: Extract<FlowInline, { type: 'text' }>[][] = []
+    let group: Extract<FlowInline, { type: 'text' }>[] = []
+    for (const inline of content.inlines) {
+      if (inline.type === 'text') group.push(inline)
+      else { if (group.length) groups.push(group); group = [] }
+    }
+    if (group.length) groups.push(group)
+    for (const original of groups) {
+      const value = original.map(inline => inline.text).join('')
+      result.push({ id: `${owner}/${target}/text/${result.length}`, target, owner, property: '正文', value,
+        write(next, replacement) {
+          const start = content.inlines.indexOf(original[0]!)
+          if (start < 0) throw new Error('正文目标已变化')
+          let atoms = original.flatMap(inline => Array.from(inline.text).map(text => ({ ...inline, text })))
+          if (replacement) {
+            const matches: number[] = []
+            for (let offset = value.indexOf(replacement.find); offset >= 0; offset = value.indexOf(replacement.find, offset + replacement.find.length)) matches.push(offset)
+            for (const offset of matches.reverse()) {
+              const from = Array.from(value.slice(0, offset)).length, length = Array.from(replacement.find).length
+              const source = atoms[from] ?? original[0]!
+              atoms.splice(from, length, ...Array.from(replacement.replacement).map(text => ({ ...source, text })))
+            }
+          } else atoms = [{ ...original[0]!, text: next }]
+          content.inlines.splice(start, original.length, ...normalizeDocumentText({ inlines: atoms }).inlines)
+        } })
+    }
+    if (content.inlines.length) result.push({ id: `${owner}/${target}/color/${result.length}`, target, owner, property: '全文颜色', color: 'text', value: [...new Set(content.inlines.map(inline => inline.style?.color).filter(Boolean))].join(' / ') || '默认文字色', write(value) { for (const inline of content.inlines) inline.style = { ...inline.style, color: value } } })
+  }
+  const blocks = (items: FlowBlock[], owner: string) => items.forEach(block => {
+    const target = `${block.type} (${block.id})`
+    for (const slot of documentTextSlots(block)) bodyText(slot.content, `${target}/${slot.key}`, owner)
+    if (block.type === 'section') blocks(block.blocks, owner)
+    else if (block.type === 'media') add(block, 'altText', target, owner)
     else if (block.type === 'chart') {
       add(block.chart, 'title', target, owner); style(block.chart.style, target, owner)
       block.chart.categories.forEach(c => add(c, 'label', `${target}/分类${c.id}`, owner))
-      block.chart.series.forEach(s => { add(s, 'name', `${target}/系列${s.id}`, owner); add(s, 'color', `${target}/系列${s.id}`, owner, 'fill') })
-    } else if (block.type === 'table') {
-      add(block, 'caption', target, owner); block.columns.forEach(c => add(c, 'header', `${target}/${c.id}`, owner))
-      block.rows.forEach(r => Object.entries(r.cells).forEach(([id, cell]) => typeof cell === 'string' ? add(r.cells, id, `${target}/${r.id}`, owner) : rich(cell, `${target}/${r.id}/${id}`, owner)))
-    } else unsupported.push(`${owner} · ${target}：${block.type} 不支持本次批量修改`)
+      block.chart.series.forEach(series => { add(series, 'name', `${target}/系列${series.id}`, owner); add(series, 'color', `${target}/系列${series.id}`, owner, 'fill') })
+    } else if (block.type === 'formula' || block.type === 'component' || block.type === 'code') unsupported.push(`${owner} · ${target}：${block.type} 不支持本次批量修改`)
   })
   const background = (object: object, owner: string, request: EffectiveBackgroundRequest) => {
     const effective = resolveEffectiveBackground(request)

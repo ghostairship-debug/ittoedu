@@ -1,3 +1,5 @@
+import type { FlowTextContent } from '../../../shared/document/content'
+import { documentMathOmml } from '../../../shared/document/omml'
 import { describeNativeChart } from '../../../shared/nativeChartView'
 import type { TableCellSpan } from '../../../shared/tableMerge'
 import { strToU8, zipSync } from 'fflate'
@@ -128,8 +130,22 @@ function richRuns(
   )).join('')
 }
 
+function styledMath(latex: string, display: boolean, style?: { color?: string; fontSize?: number }): string {
+  const properties = [style?.color ? `<w:color w:val="${xml(style.color.replace('#', ''))}"/>` : '', style?.fontSize ? `<w:sz w:val="${Math.round(style.fontSize * 1.5)}"/>` : ''].join('')
+  const math = documentMathOmml(latex, display)
+  return properties ? math.replace(/<m:r>(<m:rPr>[\s\S]*?<\/m:rPr>)?/g, (_, mathProperties = '') => `<m:r>${mathProperties}<w:rPr>${properties}</w:rPr>`) : math
+}
+
+function documentRuns(content: FlowTextContent, baseStyle: TextRunStyle = {}): string {
+  return content.inlines.map(inline => {
+    let result = inline.type === 'math' ? styledMath(inline.latex, false, inline.style) : inline.text.split('\n').map(text => run(text, { ...baseStyle, ...(inline.code ? { fontFamily: 'Consolas' } : {}), ...inline.style })).join('<w:r><w:br/></w:r>')
+    if (inline.link) result = `<w:fldSimple w:instr="HYPERLINK &quot;${xml(inline.link.href.replace(/"/g, '%22'))}&quot;">${result}</w:fldSimple>`
+    return result
+  }).join('')
+}
+
 function paragraph(
-  text: string,
+  text: string | FlowTextContent,
   options: {
     style?: string
     bold?: boolean
@@ -149,30 +165,24 @@ function paragraph(
       ? `<w:numPr><w:ilvl w:val="${options.numbering.level ?? 0}"/><w:numId w:val="${options.numbering.id}"/></w:numPr>`
       : '',
   ].join('')
-  return `<w:p>${properties ? `<w:pPr>${properties}</w:pPr>` : ''}${options.leadingContent ?? ''}${richRuns(
-    text,
-    options.runs,
-    { bold: options.bold, italic: options.italic },
-  )}</w:p>`
+  return `<w:p>${properties ? `<w:pPr>${properties}</w:pPr>` : ''}${options.leadingContent ?? ''}${typeof text === 'string' ? richRuns(text, options.runs, { bold: options.bold, italic: options.italic }) : documentRuns(text, { bold: options.bold, italic: options.italic })}</w:p>`
 }
 
-function formulaParagraph(expression: string, leadingContent = ''): string {
-  return leadingContent
-    ? `<w:p>${leadingContent}</w:p><m:oMathPara><m:oMath><m:r><m:t>${xml(expression)}</m:t></m:r></m:oMath></m:oMathPara>`
-    : `<m:oMathPara><m:oMath><m:r><m:t>${xml(expression)}</m:t></m:r></m:oMath></m:oMathPara>`
+function formulaParagraph(latex: string, leadingContent = '', style?: { color?: string; fontSize?: number }): string {
+  return `<w:p>${leadingContent}${styledMath(latex, true, style)}</w:p>`
 }
 
 function tableCell(
-  cell: { readonly text: string; readonly runs: readonly TextRun[]; readonly span?: TableCellSpan },
+  cell: { readonly content: FlowTextContent; readonly span?: TableCellSpan },
   header: boolean,
 ): string {
   if (cell.span && cell.span.columnOffset > 0) return ''
   const merge = cell.span ? `${cell.span.columnSpan > 1 ? `<w:gridSpan w:val="${cell.span.columnSpan}"/>` : ''}${cell.span.rowSpan > 1 ? `<w:vMerge w:val="${cell.span.rowOffset ? 'continue' : 'restart'}"/>` : ''}` : ''
-  return `<w:tc><w:tcPr><w:tcW w:w="0" w:type="auto"/>${merge}<w:tcMar><w:top w:w="90" w:type="dxa"/><w:left w:w="90" w:type="dxa"/><w:bottom w:w="90" w:type="dxa"/><w:right w:w="90" w:type="dxa"/></w:tcMar></w:tcPr><w:p>${richRuns(cell.text, cell.runs, { bold: header })}</w:p></w:tc>`
+  return `<w:tc><w:tcPr><w:tcW w:w="0" w:type="auto"/>${merge}<w:tcMar><w:top w:w="90" w:type="dxa"/><w:left w:w="90" w:type="dxa"/><w:bottom w:w="90" w:type="dxa"/><w:right w:w="90" w:type="dxa"/></w:tcMar></w:tcPr><w:p>${documentRuns(cell.content, { bold: header })}</w:p></w:tc>`
 }
 
 function tableXml(
-  rows: ReadonlyArray<ReadonlyArray<{ readonly text: string; readonly runs: readonly TextRun[]; readonly span?: TableCellSpan }>>,
+  rows: ReadonlyArray<ReadonlyArray<{ readonly content: FlowTextContent; readonly span?: TableCellSpan }>>,
   headerRows: number,
 ): string {
   const width = Math.max(1, ...rows.map((row) => row.length))
@@ -182,7 +192,7 @@ function tableXml(
       rowIndex < headerRows ? '<w:trPr><w:tblHeader/></w:trPr>' : ''
     }${
       Array.from({ length: width }, (_, cellIndex) => tableCell(
-        row[cellIndex] ?? { text: '', runs: [] },
+        row[cellIndex] ?? { content: { inlines: [] } },
         rowIndex < headerRows,
       )).join('')
     }</w:tr>`).join('')
@@ -472,14 +482,14 @@ function renderPrintNode(
       return paragraph(node.text, { style: 'Title', keepNext: true, leadingContent })
     case 'heading':
       context.report.push({ blockId: node.blockId, disposition: 'preserved', detail: `Heading ${node.level}` })
-      return paragraph(node.text, { style: `Heading${node.level}`, keepNext: true, runs: node.runs, leadingContent, presentation: node.paragraph })
+      return paragraph(node.content, { style: `Heading${node.level}`, keepNext: true, leadingContent, presentation: node.paragraph })
     case 'paragraph':
       context.report.push({ blockId: node.blockId, disposition: 'preserved', detail: 'Native paragraph' })
-      return paragraph(node.text, { runs: node.runs, leadingContent, presentation: node.paragraph })
+      return paragraph(node.content, { leadingContent, presentation: node.paragraph })
     case 'quote':
       context.report.push({ blockId: node.blockId, disposition: 'preserved', detail: 'Native quote paragraphs' })
-      return `${paragraph(node.text, { style: 'Quote', italic: true, runs: node.runs, leadingContent, presentation: node.paragraph })}${
-        node.citation ? paragraph(`— ${node.citation}`, { style: 'Quote', presentation: node.paragraph }) : ''
+      return `${paragraph(node.content, { style: 'Quote', italic: true, leadingContent, presentation: node.paragraph })}${
+        node.citation ? paragraph({ inlines: [{ type: 'text', text: '— ' }, ...node.citation.inlines] }, { style: 'Quote', presentation: node.paragraph }) : ''
       }`
     case 'list':
       context.report.push({
@@ -487,9 +497,8 @@ function renderPrintNode(
         disposition: 'preserved',
         detail: node.ordered ? 'Numbered list' : 'Bullet list',
       })
-      return node.items.map((item, index) => paragraph(item.text, {
+      return node.items.map((item, index) => paragraph(item.content, {
         numbering: { id: node.ordered ? 2 : 1 },
-        runs: item.runs,
         leadingContent: index === 0 ? leadingContent : undefined,
       })).join('')
     case 'chart': {
@@ -500,8 +509,8 @@ function renderPrintNode(
       context.report.push({ blockId: node.blockId, disposition: 'fallback', detail: '图表使用静态 PNG 图面，原始数据保留为可编辑 Word 表格' })
       context.warnings.push(`${node.blockId}: 图表为静态图面；数据表可编辑。`)
       const rows = [
-        [{ text: '分类', runs: [] }, ...node.chart.series.map(series => ({ text: series.name, runs: [] }))],
-        ...node.chart.categories.map(category => [{ text: category.label, runs: [] }, ...node.chart.series.map(series => ({ text: String(series.points.find(point => point.categoryId === category.id)!.value), runs: [] }))]),
+        [{ content: { inlines: [{ type: 'text' as const, text: '分类' }] } }, ...node.chart.series.map(series => ({ content: { inlines: [{ type: 'text' as const, text: series.name }] } }))],
+        ...node.chart.categories.map(category => [{ content: { inlines: [{ type: 'text' as const, text: category.label }] } }, ...node.chart.series.map(series => ({ content: { inlines: [{ type: 'text' as const, text: String(series.points.find(point => point.categoryId === category.id)!.value) }] } }))]),
       ]
       return `${leadingContent ? `<w:p>${leadingContent}</w:p>` : ''}${inlineImageDrawing(node.chart.title || '图表', image, context.nextDrawingId++, 656 / node.height, context.chartMaxHeight)}${paragraph('图表数据（可编辑）', { style: 'Caption', keepNext: true })}${tableXml(rows, 1)}${paragraph(describeNativeChart(node.chart), { style: 'Caption' })}`
     }
@@ -509,18 +518,17 @@ function renderPrintNode(
       context.report.push({ blockId: node.blockId, disposition: 'preserved', detail: 'Native Word table' })
       return `${leadingContent ? `<w:p>${leadingContent}</w:p>` : ''}${node.caption ? paragraph(node.caption, { style: 'Caption', keepNext: true }) : ''}${
         tableXml([
-          node.headers.map((text) => ({ text, runs: [] })),
+          node.headers.map((content) => ({ content })),
           ...node.rows,
         ], 1)
       }`
     case 'formula':
-      context.warnings.push(`${node.blockId}: semantic formula exported as an explained OMML text fallback`)
       context.report.push({
         blockId: node.blockId,
-        disposition: 'fallback',
-        detail: 'Semantic formula text with accessible explanation',
+        disposition: 'preserved',
+        detail: 'Structured editable OMML formula',
       })
-      return `${formulaParagraph(node.linear, leadingContent)}${paragraph(`公式说明：${node.accessibleText}`, { style: 'FormulaFallback' })}`
+      return formulaParagraph(node.latex, leadingContent, node.style)
     case 'media': {
       if (node.mediaKind === 'image') {
         const asset = context.resolveAsset(node.assetId)
@@ -543,11 +551,11 @@ function renderPrintNode(
       const reason = `${node.mediaKind} media exported as a descriptive fallback`
       context.warnings.push(`${node.blockId}: ${reason}`)
       context.report.push({ blockId: node.blockId, disposition: 'fallback', detail: reason })
-      return paragraph(`[媒体后备：${node.fallbackLabel}]`, { italic: true, leadingContent })
+      return `${paragraph(`[媒体后备：${node.fallbackLabel}]`, { italic: true, leadingContent })}${node.caption ? paragraph(node.caption, { style: 'Caption' }) : ''}`
     }
     case 'code':
       context.report.push({ blockId: node.blockId, disposition: 'preserved', detail: 'Native monospaced code paragraph' })
-      return paragraph(node.code, { style: 'Code', leadingContent })
+      return paragraph({ inlines: [{ type: 'text', text: node.code, code: true }] }, { style: 'Code', leadingContent })
     case 'callout':
       context.report.push({ blockId: node.blockId, disposition: 'preserved', detail: `Callout style ${node.tone}` })
       return `${node.title ? paragraph(node.title, { style: 'CalloutTitle', bold: true, keepNext: true, leadingContent }) : ''}${

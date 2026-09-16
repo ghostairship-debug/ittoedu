@@ -23,15 +23,57 @@ async function fixture() {
   directories.push(directory)
   const workspace = createWorkspaceIdentity('repository-lock', path.join(directory, '课件.h5lesson'))
   const repository = new LocalAgentRepository(directory), id = randomUUID()
-  const record = localAgentRecordV2Schema.parse({ version: 2, id, adapter: 'opencode', workspace,
+  const record = localAgentRecordV2Schema.parse({ version: 3, id, adapter: 'opencode', workspace,
     externalSessionId: 'before', workingDirectoryId: id, tasks: [], observations: [], hostResults: [], events: [] })
   await repository.write(record)
-  return { repository, record, filename: path.join(repository.v2Directory(workspace), `${id}.json`),
+  return { repository, record, workspace, filename: path.join(repository.v2Directory(workspace), `${id}.json`),
     temporary: path.join(repository.v2Directory(workspace), `${id}.tmp`) }
 }
 const lockError = (code = 'EPERM') => Object.assign(new Error('rename failed'), { code, syscall: 'rename' })
 
 describe('local agent repository bounded atomic replacement', () => {
+  it('reads only the requested lesson record without enumerating history or quarantining an unrelated damaged record', async () => {
+    const f = await fixture()
+    const workspace = { version: 1 as const, kind: 'lesson' as const, lessonId: randomUUID(), normalizedDirectory: f.workspace.normalizedPath, conversationId: randomUUID() }
+    const target = { ...f.record, workspace }
+    await f.repository.write(target)
+    const neighbor = path.join(f.repository.v2Directory(workspace), `${randomUUID()}.json`)
+    await fs.writeFile(neighbor, 'not JSON')
+    const readdir = vi.spyOn(fs, 'readdir'), readFile = vi.spyOn(fs, 'readFile')
+    expect((await f.repository.read(workspace, target.id)).records).toMatchObject([{ id: target.id, workspace }])
+    expect((await f.repository.read(workspace, target.id)).v2).toEqual([target])
+    expect(readdir).not.toHaveBeenCalled()
+    expect(readFile.mock.calls.some(([filename]) => filename === neighbor)).toBe(false)
+    expect(await fs.readFile(neighbor, 'utf8')).toBe('not JSON')
+    const listed = await f.repository.list(workspace)
+    expect(listed.damaged).toEqual([path.basename(neighbor)])
+    expect((await f.repository.read(workspace, target.id)).damaged).toEqual([])
+    expect((await f.repository.read(workspace, path.basename(neighbor, '.json'))).damaged).toEqual([`${path.basename(neighbor)}.damaged`])
+  })
+
+  it('finds a project record stored in its lesson and isolates same UUID records in other scopes', async () => {
+    const f = await fixture()
+    await fs.unlink(f.filename)
+    const lesson = { version: 1 as const, kind: 'lesson' as const, lessonId: randomUUID(), normalizedDirectory: f.workspace.normalizedPath, conversationId: randomUUID() }
+    const target = { ...f.record, lessonWorkspace: lesson }
+    const otherLesson = { ...lesson, lessonId: randomUUID(), conversationId: randomUUID() }
+    const otherProject = { ...f.record.workspace, projectId: 'different-project' }
+    await f.repository.write(target)
+    await f.repository.write({ ...target, workspace: otherProject, lessonWorkspace: otherLesson, externalSessionId: 'other-native' })
+    const neighborId = randomUUID()
+    await f.repository.write({ ...target, id: neighborId })
+    const readFile = vi.spyOn(fs, 'readFile')
+    expect((await f.repository.read(f.record.workspace, target.id)).v2).toEqual([target])
+    expect(readFile.mock.calls.some(([filename]) => String(filename).endsWith(`${neighborId}.json`))).toBe(false)
+    expect((await f.repository.read(lesson, target.id)).v2).toEqual([target])
+    expect((await f.repository.read(otherLesson, target.id)).records).toMatchObject([{ workspace: otherProject, externalSessionId: 'other-native' }])
+    expect((await f.repository.read({ ...lesson, conversationId: randomUUID() }, target.id)).records).toEqual([])
+    expect((await f.repository.read({ ...f.record.workspace, projectId: 'unbound-project' }, target.id)).records).toEqual([])
+    // Even a file placed under the requested directory cannot override its recorded owner.
+    await fs.writeFile(path.join(f.repository.v2Directory(lesson), `${target.id}.json`), JSON.stringify({ ...target, lessonWorkspace: otherLesson }))
+    expect(await f.repository.read(lesson, target.id)).toEqual({ records: [], v2: [], damaged: [] })
+  })
+
   it('retries only a complete temporary record and retains queue ordering', async () => {
     const f = await fixture(), nativeRename = fs.rename.bind(fs), snapshots: string[] = []
     Object.defineProperty(process, 'platform', { value: 'win32' })

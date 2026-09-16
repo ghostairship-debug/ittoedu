@@ -1,3 +1,4 @@
+import { publishedPresentationSetUnsupportedReason } from '../../shared/publishedInteractionSupport'
 import {
   isAudioInteractionAction,
   isNodeMotionAction,
@@ -36,10 +37,13 @@ export interface PublishedInteractionControllerOptions {
   rules: readonly InteractionRule[]
   surface: PublishedInteractionSurfacePort
   session: PublishedInteractionSessionPort
+  /** Course-global rules need a Slide scene guard before presentation.set. */
+  scope?: 'scene' | 'global'
   reportDiagnostic?(diagnostic: PublishedInteractionDiagnostic): void
 }
 
 const SUPPORTED_ACTION_TYPES = new Set<InteractionActionPayload['type']>([
+  'presentation.set',
   'step.next',
   'step.previous',
   'node.enter',
@@ -107,6 +111,7 @@ export class PublishedInteractionController {
   readonly #rules: readonly InteractionRule[]
   readonly #surface: PublishedInteractionSurfacePort
   readonly #session: PublishedInteractionSessionPort
+  readonly #scope: 'scene' | 'global'
   readonly #reportDiagnostic?: (
     diagnostic: PublishedInteractionDiagnostic,
   ) => void
@@ -126,6 +131,7 @@ export class PublishedInteractionController {
     this.#rules = [...options.rules]
     this.#surface = options.surface
     this.#session = options.session
+    this.#scope = options.scope ?? 'scene'
     this.#reportDiagnostic = options.reportDiagnostic
     this.#inspectAndBindRules()
   }
@@ -189,6 +195,19 @@ export class PublishedInteractionController {
   #inspectAndBindRules(): void {
     for (const rule of this.#rules) {
       if (!rule.enabled) continue
+      // Same-location activation retires this controller: only an isolated
+      // final immediate state action is supported, never a silently lost tail.
+      const unsupportedPresentation = rule.actions.flatMap((step, index) => {
+        const reason = publishedPresentationSetUnsupportedReason(rule, index, this.#scope)
+        return reason ? [{ step, reason }] : []
+      })
+      if (unsupportedPresentation.length > 0) {
+        for (const { step, reason } of unsupportedPresentation) this.#diagnose({
+          code: 'unsupported-action', severity: 'warning', message: reason,
+          ruleId: rule.id, stepId: step.id, interactionType: step.action.type,
+        })
+        continue
+      }
       if (
         rule.trigger.type !== 'node.click'
         && rule.trigger.type !== 'scene.enter'
@@ -730,6 +749,16 @@ export class PublishedInteractionController {
         case 'course-state.set':
           this.#session.courseState.set(action.key, action.value)
           return 'completed'
+        case 'presentation.set': {
+          // Reuse the Published scene/state navigation owner used by Runtime
+          // presentation.setState; it validates the state before activation.
+          const current = this.#readCurrentScene(rule, step)
+          if (!current.ok) return 'cancelled'
+          result = current.sceneId === null
+            ? false
+            : await this.#session.goToScene(current.sceneId, action.stateId, signal)
+          break
+        }
         case 'scene.go':
           result = await this.#session.goToScene(
             action.sceneId,

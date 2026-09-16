@@ -150,27 +150,27 @@ function flowSurface(): PublishedFlowSurface {
     title: '运行讲义',
     layout: { readingWidth: 760, wideContentWidth: 1120 },
     blocks: [
-      { id: 'h1', type: 'heading', level: 1, text: '阅读任务' },
-      { id: 'p1', type: 'paragraph', text: '长文正文' },
+      { id: 'h1', type: 'heading', level: 1, content: { inlines: [{ type: 'text', text: '阅读任务' }] }},
+      { id: 'p1', type: 'paragraph', content: { inlines: [{ type: 'text', text: '长文正文' }] }},
       {
         id: 'list-1',
         type: 'list',
         ordered: false,
-        items: [{ id: 'li-1', text: '证据一' }],
+        items: [{ id: 'li-1', content: { inlines: [{ type: 'text', text: '证据一' }] }}],
       },
       {
         id: 'table-1',
         type: 'table',
-        caption: '工厂记录',
-        columns: [{ id: 'col-a', header: '年份' }],
-        rows: [{ id: 'row-1', cells: { 'col-a': { text: '1894' } } }],
+        caption: { inlines: [{ type: 'text', text: '工厂记录' }] },
+        columns: [{ id: 'col-a', header: { inlines: [{ type: 'text', text: '年份' }] }}],
+        rows: [{ id: 'row-1', cells: { 'col-a': { inlines: [{ type: 'text', text: '1894' }] }} }],
       },
       {
         id: 'formula-1',
         type: 'formula',
         formulaId: 'fx',
         accessibleText: 'x',
-        ast: { type: 'token', value: 'x' },
+        latex: "x",
       },
       {
         id: 'media-1',
@@ -180,7 +180,7 @@ function flowSurface(): PublishedFlowSurface {
         altText: '厂区录音',
         layout: 'content-width',
       },
-      { id: 'h2', type: 'heading', level: 2, text: '材料 B' },
+      { id: 'h2', type: 'heading', level: 2, content: { inlines: [{ type: 'text', text: '材料 B' }] }},
     ],
     surfaceLayerItems: [],
   }
@@ -468,7 +468,8 @@ describe('Flow print and DOCX helpers', () => {
     expect(html).toContain('长文正文')
     expect(html).toContain('证据一')
     expect(html).toContain('1894')
-    expect(html).toContain('公式说明：x')
+    expect(html).toContain('aria-label="x"')
+    expect(html).toContain('<math')
     expect(html).toContain('[媒体后备：厂区录音]')
     expect(html).not.toContain('flow-runtime-toc')
     expect(html).not.toContain('打开目录')
@@ -480,7 +481,8 @@ describe('Flow print and DOCX helpers', () => {
     expect(documentXml).toContain('长文正文')
     expect(documentXml).toContain('证据一')
     expect(documentXml).toContain('1894')
-    expect(documentXml).toContain('公式说明：x')
+    expect(documentXml).toContain('<m:oMath>')
+    expect(documentXml).toContain('>x</m:t>')
     expect(documentXml).toContain('[媒体后备：厂区录音]')
     expect(documentXml).not.toContain('flow-runtime-toc')
     expect(documentXml).not.toContain('打开目录')
@@ -863,11 +865,10 @@ describe('FlowSurfaceHost paper scroll and media layout', () => {
     const course = publishedCourse()
     const surf = course.surfaces[0] as PublishedFlowSurface
     surf.blocks = [
-      { id: 'h-top', type: 'heading', level: 1, text: '长文标题' },
+      { id: 'h-top', type: 'heading', level: 1, content: { inlines: [{ type: 'text', text: '长文标题' }] }},
       ...Array.from({ length: 40 }, (_, i) => ({
         id: `p-${i + 1}`,
-        type: 'paragraph' as const,
-        text: `段落内容 ${i + 1}`,
+        type: 'paragraph' as const, content: { inlines: [{ type: 'text' as const, text: `段落内容 ${i + 1}` }] },
       })),
     ]
 
@@ -1008,10 +1009,9 @@ describe('FlowSurfaceHost paper scroll and media layout', () => {
     surf.blocks = [{
       id: 'p-typed',
       type: 'paragraph',
-      text: 'A',
+      content: { inlines: [{"type":"text","text":"A","style":{"fontFamily":"serif","fontSize":20}}] },
       textAlign: 'center',
       lineSpacing: 8,
-      runs: [{ start: 0, end: 1, style: { fontFamily: 'serif', fontSize: 20 } }],
     }]
 
     const { host, container } = await mountHost(course)
@@ -1030,11 +1030,7 @@ describe('FlowSurfaceHost paper scroll and media layout', () => {
     surf.blocks = [{
       id: 'p-font-segments',
       type: 'paragraph',
-      text: '甲乙丙',
-      runs: [
-        { start: 1, end: 2, style: { fontFamily: 'SimSun' } },
-        { start: 2, end: 3, style: { fontSize: 32 } },
-      ],
+      content: { inlines: [{"type":"text","text":"甲"},{"type":"text","text":"乙","style":{"fontFamily":"SimSun"}},{"type":"text","text":"丙","style":{"fontSize":32}}] },
     }]
 
     const { host, container } = await mountHost(course)
@@ -1062,7 +1058,7 @@ describe('FlowSurfaceHost paper scroll and media layout', () => {
     surf.blocks.push({
       id: 'p-after-left',
       type: 'paragraph',
-      text: '绕排后续段落',
+      content: { inlines: [{ type: 'text', text: '绕排后续段落' }] },
     })
     surf.blocks.push({
       id: 'media-wrap-right',
@@ -1143,11 +1139,10 @@ describe('FlowSurfaceHost paper scroll and media layout', () => {
     }
     globalPaperEntry.item.paperSpace = 'paper'
     surf.blocks = [
-      { id: 'h-top', type: 'heading', level: 1, text: '长文标题' },
+      { id: 'h-top', type: 'heading', level: 1, content: { inlines: [{ type: 'text', text: '长文标题' }] }},
       ...Array.from({ length: 40 }, (_, i) => ({
         id: `p-${i + 1}`,
-        type: 'paragraph' as const,
-        text: `段落内容 ${i + 1}`,
+        type: 'paragraph' as const, content: { inlines: [{ type: 'text' as const, text: `段落内容 ${i + 1}` }] },
       })),
     ]
     surf.surfaceLayerItems.push({

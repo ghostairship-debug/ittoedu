@@ -5,7 +5,8 @@ import { controllerGeometryItem, isControllerItem, type PublishedTeacherControll
 import { projectFlowComponentControllerFrame } from '../../../shared/flowViewportGeometry'
 import type { TeacherControllerHostOptions } from '../../teacherControllerHostContract'
 import { createPlaybackContent, playbackGestureOccupied, type PlaybackViewSession } from '../../playbackViewSession'
-import { buildFlowRichTextHtml } from '../../../shared/flowRichText'
+import { renderDocumentText, renderDocumentMath } from '../../../shared/document/render'
+import { plainDocumentText, type FlowTextContent } from '../../../shared/document/content'
 import { buildNativeChartSvg } from '../../../shared/nativeChartSvg'
 import { createFlowViewportGeometry, measureFlowPaperOrigin } from '../../../shared/flowViewportGeometry'
 import { FLOW_BODY_CSS, FLOW_BODY_PAPER_PADDING, FLOW_BODY_SCROLL_PADDING, flowPaperMaxWidth, resolveFlowParagraphPresentation } from '../../../shared/flowBodyPresentation'
@@ -23,7 +24,7 @@ import {
   FLOW_MEDIA_QUERY_CONTAINER_TYPE,
   resolveFlowMediaLayoutProjection,
 } from '../../../shared/flowMediaLayout'
-import { ShapeNode,  TextRun } from '../../../shared/contracts/native-v1'
+import { ShapeNode } from '../../../shared/contracts/native-v1'
 
 
 import { nativeRenderInputFromPublishedItem, paintPublishedNativeRenderInput } from '../native/publishedNativeRendering'
@@ -56,7 +57,6 @@ import {
   findPublishedFlowSurface,
   flowPageStartLocationId,
   flowSurfaceOrder,
-  flowTableCellText,
   resolveFlowLocation,
   resolvePlaybackAssetUrl,
   toFlowPublishedPlayback,
@@ -76,7 +76,7 @@ import {
   type PublishedComponentMountHandle,
   type PublishedComponentPackageSource,
 } from '../publishedComponentMount'
-import { fittedPublishedFormulaSize, paintPublishedFormula } from '../publishedFormula'
+
 import {
   PublishedDomInteractionSurfacePort,
   PublishedInteractionVisibilityState,
@@ -1658,14 +1658,14 @@ function renderBlockDom(
       heading.id = flowRuntimeTocAnchorId(block.id)
       heading.dataset.flowTocAnchor = block.id
       applyFlowBlockTypography(heading, block)
-      appendRichText(heading, block.text, block.runs)
+      appendRichText(heading, block.content)
       parent.appendChild(heading)
       return
     }
     case 'paragraph': {
       const paragraph = assignBlock(dom.createElement('p'))
       applyFlowBlockTypography(paragraph, block)
-      appendRichText(paragraph, block.text, block.runs)
+      appendRichText(paragraph, block.content)
       parent.appendChild(paragraph)
       return
     }
@@ -1673,11 +1673,11 @@ function renderBlockDom(
       const quote = assignBlock(dom.createElement('blockquote'))
       applyFlowBlockTypography(quote, block)
       const paragraph = dom.createElement('p')
-      appendRichText(paragraph, block.text, block.runs)
+      appendRichText(paragraph, block.content)
       quote.appendChild(paragraph)
       if (block.citation) {
         const cite = dom.createElement('cite')
-        cite.textContent = block.citation
+        appendRichText(cite, block.citation)
         quote.appendChild(cite)
       }
       parent.appendChild(quote)
@@ -1688,7 +1688,7 @@ function renderBlockDom(
       for (const item of block.items) {
         const listItem = dom.createElement('li')
         listItem.dataset.flowListItemId = item.id
-        appendRichText(listItem, item.text, item.runs)
+        appendRichText(listItem, item.content)
         list.appendChild(listItem)
       }
       parent.appendChild(list)
@@ -1760,12 +1760,12 @@ function renderBlockDom(
         figure.appendChild(video)
       } else {
         const fallback = dom.createElement('p')
-        fallback.textContent = `[媒体后备：${block.altText ?? block.caption ?? block.assetId}]`
+        fallback.textContent = `[媒体后备：${block.altText ?? (block.caption ? plainDocumentText(block.caption) : block.assetId)}]`
         figure.appendChild(fallback)
       }
       if (block.caption) {
         const caption = dom.createElement('figcaption')
-        caption.textContent = block.caption
+        appendRichText(caption, block.caption)
         figure.appendChild(caption)
       }
       parent.appendChild(figure)
@@ -1787,7 +1787,7 @@ function renderBlockDom(
       const figure = assignBlock(dom.createElement('figure'))
       if (block.caption) {
         const caption = dom.createElement('figcaption')
-        caption.textContent = block.caption
+        appendRichText(caption, block.caption)
         figure.appendChild(caption)
       }
       const table = dom.createElement('table')
@@ -1796,7 +1796,7 @@ function renderBlockDom(
       for (const column of block.columns) {
         const cell = dom.createElement('th')
         cell.dataset.flowColumnId = column.id
-        cell.textContent = column.header
+        appendRichText(cell, column.header)
         headerRow.appendChild(cell)
       }
       thead.appendChild(headerRow)
@@ -1812,7 +1812,7 @@ function renderBlockDom(
           cell.rowSpan = span.rowSpan
           cell.colSpan = span.columnSpan
           const content = row.cells[column.id]
-          appendRichText(cell, flowTableCellText(content), typeof content === 'object' ? content.runs : undefined)
+          appendRichText(cell, content ?? { inlines: [] })
           tr.appendChild(cell)
         }
         tbody.appendChild(tr)
@@ -1825,27 +1825,12 @@ function renderBlockDom(
     case 'formula': {
       const wrap = assignBlock(dom.createElement('div'))
       wrap.dataset.flowFormulaId = block.formulaId
-      const readingWidth = Math.max(160, options.readingWidth ?? 760)
-      const paint = {
-        formulaId: block.formulaId,
-        accessibleText: block.accessibleText,
-        ast: block.ast,
-        style: { fontSize: 32, color: '#1f2937', align: 'left' as const },
-        width: readingWidth,
-        height: 96,
-      }
-      const size = fittedPublishedFormulaSize(paint)
-      wrap.style.width = '100%'
-      wrap.style.height = `${size.height}px`
-      wrap.style.overflow = 'hidden'
-      paintPublishedFormula(wrap, { ...paint, height: size.height })
+      wrap.setAttribute('aria-label', block.accessibleText)
+      wrap.style.overflowX = 'auto'
+      if (block.style?.fontSize) wrap.style.fontSize = `${block.style.fontSize}px`
+      if (block.style?.color) wrap.style.color = block.style.color
+      wrap.innerHTML = renderDocumentMath(block.latex, true)
       parent.appendChild(wrap)
-      observeFlowBlockWidth(wrap, width => {
-        const next = { ...paint, width: Math.max(160, width) }
-        const fitted = fittedPublishedFormulaSize(next)
-        wrap.style.height = `${fitted.height}px`
-        paintPublishedFormula(wrap, { ...next, height: fitted.height })
-      }, options.onLayoutCleanup)
       return
     }
     case 'code': {
@@ -1861,11 +1846,11 @@ function renderBlockDom(
       aside.dataset.flowCalloutTone = block.tone
       if (block.title) {
         const title = dom.createElement('strong')
-        title.textContent = block.title
+        appendRichText(title, block.title)
         aside.appendChild(title)
       }
       const body = dom.createElement('p')
-      body.textContent = block.body
+      appendRichText(body, block.body)
       aside.appendChild(body)
       parent.appendChild(aside)
       return
@@ -1876,7 +1861,7 @@ function renderBlockDom(
       section.id = flowRuntimeTocAnchorId(block.id)
       section.dataset.flowTocAnchor = block.id
       const title = dom.createElement('summary')
-      title.textContent = block.title
+      appendRichText(title, block.title)
       section.appendChild(title)
       const contents = dom.createElement('div')
       contents.className = 'flow-section-content'
@@ -1946,12 +1931,11 @@ function applyFlowBlockTypography(
 
 function appendRichText(
   element: HTMLElement,
-  text: string,
-  runs?: TextRun[],
+  text: FlowTextContent,
 ): void {
   const content = element.ownerDocument.createElement('span')
   content.dataset.flowPublishedRichText = 'true'
-  content.innerHTML = buildFlowRichTextHtml(text, runs)
+  content.innerHTML = renderDocumentText(text)
   element.appendChild(content)
 }
 

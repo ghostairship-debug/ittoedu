@@ -1,6 +1,7 @@
 import path from 'node:path'
 import { createHash } from 'node:crypto'
-import { readFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 import { createServer } from 'vite'
 import { chromium, type Page } from 'playwright'
 import type { CoursewareBuilderV2, CoursewareBuilderV2Options } from '../src/renderer/course/coursewareBuilderV2'
@@ -45,8 +46,27 @@ export function createCoursewareBuilderCatalogPort(editorRoot: string) {
 
 /** Product-owned browser worker keeps CLI dynamic admission on the actual Published hosts. */
 export async function createCoursewareBuilderV2Host(editorRoot: string) {
+  const cacheRoot = path.resolve(tmpdir())
+  const cacheDir = await mkdtemp(path.join(cacheRoot, 'courseware-builder-v2-cache-'))
+  const removeCache = async () => {
+    if (path.dirname(cacheDir) !== cacheRoot || !path.basename(cacheDir).startsWith('courseware-builder-v2-cache-')) {
+      throw new Error('Builder 缓存目录不属于本次临时工作区')
+    }
+    // Vite closes its optimizer before resolving server.close(), but on Windows
+    // the final rename from deps_temp_* can still briefly race cache removal.
+    // Node retries only the documented transient recursive-removal errors and
+    // still rejects every other cleanup failure.
+    await rm(cacheDir, {
+      recursive: true,
+      force: true,
+      ...(process.platform === 'win32' ? { maxRetries: 8, retryDelay: 100 } : {}),
+    })
+  }
   const server = await createServer({ root: editorRoot, configFile: path.join(editorRoot, 'vite.renderer.config.ts'),
-    server: { host: '127.0.0.1', port: 19800, strictPort: false }, logLevel: 'error',
+    cacheDir,
+    // One build owns an immutable worker; watching the whole repository or
+    // sharing renderer optimization cache adds no authoring capability.
+    server: { host: '127.0.0.1', port: 19800, strictPort: false, hmr: false, watch: null }, logLevel: 'error',
     plugins: [{ name: 'courseware-private-builder-page', configureServer(server) {
       // Install before Vite's SPA fallback. The worker loads the real Published
       // modules without also starting the editor UI and its export bundle.
@@ -55,7 +75,7 @@ export async function createCoursewareBuilderV2Host(editorRoot: string) {
         response.end('<!doctype html><html><head><meta charset="utf-8"></head><body></body></html>')
       })
     } }],
-  })
+  }).catch(async error => { await removeCache(); throw error })
   let browser: Awaited<ReturnType<typeof chromium.launch>> | undefined
   try {
     await server.listen()
@@ -71,6 +91,8 @@ export async function createCoursewareBuilderV2Host(editorRoot: string) {
       componentCatalog: catalog.load,
       async createCourseProject(options: CoursewareBuilderV2Options): Promise<RemoteCoursewareBuilderV2> {
         const page = await browser!.newPage()
+        page.on('pageerror', error => process.stderr.write(`Builder worker page: ${error.message}\n`))
+        page.on('requestfailed', request => process.stderr.write(`Builder worker request: ${request.url()} ${request.failure()?.errorText}\n`))
         pages.push(page)
         await page.goto(`http://127.0.0.1:${address.port}/__courseware_builder_v2`)
         await page.exposeFunction('__coursewareBuilderCatalog', catalog.load)
@@ -131,10 +153,10 @@ export async function createCoursewareBuilderV2Host(editorRoot: string) {
         if (!output) throw new Error('Builder V2 必须直接返回工作会话 finish() 的结果')
         return structuredClone(output)
       },
-      async close() { try { await browser!.close() } finally { await server.close() } },
+      async close() { try { await browser!.close() } finally { try { await server.close() } finally { await removeCache() } } },
     }
   } catch (error) {
-    try { await browser?.close() } finally { await server.close() }
+    try { await browser?.close() } finally { try { await server.close() } finally { await removeCache() } }
     throw error
   }
 }
@@ -142,6 +164,8 @@ export async function createCoursewareBuilderV2Host(editorRoot: string) {
 export interface CoursewareCaseBuilderContextV2 {
   apiVersion: 2
   caseDir: string
+  encodeBase64(value: Uint8Array | string): string
+  readAsset(relativePath: string): Promise<Uint8Array>
   documents: { teachingPlan: { path: string; content: string }; presentationScript: { path: string; content: string } }
   capabilityIndex: unknown
   capabilityDiscovery?: unknown

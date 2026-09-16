@@ -32,7 +32,7 @@ it('projects a nested Flow chart color without mutating the document and drops s
   const surface = project.surfaces.find(surface => surface.type === 'flow')!
   const chart = chartContent('bar')
   const original = chart.style.textColor
-  surface.blocks.push({ id: 'preview-section', type: 'section', title: '嵌套', collapsedByDefault: false, blocks: [{ id: 'preview-chart', type: 'chart', chart, height: 320 }] })
+  surface.blocks.push({ id: 'preview-section', type: 'section', title: { inlines: [{ type: 'text', text: '嵌套' }] }, collapsedByDefault: false, blocks: [{ id: 'preview-chart', type: 'chart', chart, height: 320 }] })
   const current = { locationId: project.startLocationId, stateId: null, generation: 3 }
   const preview: BackgroundPreview = { target: { ...current, projectId: project.id, revision: project.revision, owner: 'flow-chart', authoringAddress: 'preview-chart' }, color: '', nativeData: { style: { textColor: '#cc0000' } } }
   const projected = projectWithBackgroundPreview(project, preview, current)
@@ -70,7 +70,7 @@ describe('1.3 chart carriers', () => {
   it.each(['bar', 'line', 'area', 'pie', 'donut'] as const)('keeps %s in nested Flow document order, copies identities, publishes and prints', async type => {
     const project = createBlankFlowCourseProject()
     const surface = project.surfaces.find(surface => surface.type === 'flow')!
-    const section = { id: 'chart-section', type: 'section' as const, title: '图表节', collapsedByDefault: false, blocks: [] }
+    const section = { id: 'chart-section', type: 'section' as const, title: { inlines: [{ type: 'text' as const, text: '图表节' }] }, collapsedByDefault: false, blocks: [] }
     surface.blocks.push(section)
     const insertion = insertFlowEditorBlock(project, { surfaceId: surface.id, parentId: section.id, index: 0, block: { id: 'body-chart', type: 'chart', chart: chartContent(type), height: 400 } })
     expect(insertion.ok).toBe(true)

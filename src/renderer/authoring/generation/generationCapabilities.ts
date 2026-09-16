@@ -4,13 +4,15 @@ import componentTypes from '../../../shared/contracts/component-v4/types.ts?raw'
 import runtimeTypes from '../../../shared/contracts/runtime/types.ts?raw'
 import surfaceRuntimeTypes from '../../../shared/contracts/runtime/surface.ts?raw'
 import generatedCapabilities from '../../../shared/generated/courseAgentCapabilities.json'
-import { readCourseAgentCapability, type CourseAgentCapabilityData } from '../../../shared/courseAgentCapabilities'
+import { queryCourseAgentCapabilities, readCourseAgentCapability, type CourseAgentCapabilityData, type CourseAgentCapabilityQuery } from '../../../shared/courseAgentCapabilities'
+import type { GenerationRequest } from '../../../shared/generationContract'
 import { selectionActionIntents } from './selectionActionTargets'
 
 export const generationCapabilityData = generatedCapabilities as CourseAgentCapabilityData
 
 /** Relevant full schema branches are cheap enough to use without a discovery round trip. */
-export function generationCapabilityContext(pages: readonly unknown[], purpose: string, data = generationCapabilityData, instruction = '') {
+export function generationCapabilityContext(pages: readonly unknown[], purpose: string, data = generationCapabilityData, instruction = '',
+  formal: Pick<GenerationRequest, 'destinations' | 'allowedCarriers'> = { destinations: [], allowedCarriers: [] }) {
   const desired = new Map<string, { id: string; operation?: string; nativeType?: string }>()
   const add = (id: string, operation?: string, nativeType?: string) => desired.set(`${id}:${operation ?? ''}:${nativeType ?? ''}`, { id, operation, nativeType })
   const layerActions = selectionActionIntents(instruction)
@@ -62,6 +64,31 @@ export function generationCapabilityContext(pages: readonly unknown[], purpose: 
   }
   pages.forEach(visit)
   if (purpose !== 'local-edit' || !desired.size) add('native.content', 'insert', 'text')
+  // These are compact discovery results, not a new authorization list. A CLI
+  // must still use one of the formal destinations and read the full card before
+  // it submits a candidate. course-locations creates navigation only; it is
+  // never a content carrier. Native and Recipe remain with their existing
+  // static cards because task:create is a discovery intent, not a strict
+  // assertion that every matching tool creates content.
+  const createRecommendations = new Map<string, {
+    destinationIndexes: number[]
+    query: Required<Pick<CourseAgentCapabilityQuery, 'task' | 'kind' | 'surface' | 'owner' | 'carrier' | 'limit'>>
+    entries: ReturnType<typeof queryCourseAgentCapabilities>['entries']
+  }>()
+  for (const [index, destination] of formal.destinations.entries()) {
+    if (destination.kind !== 'create' || destination.scope.parent.kind === 'course-locations') continue
+    for (const carrier of formal.allowedCarriers) {
+      if (carrier === 'native' || carrier === 'recipe') continue
+      const query = { task: 'create' as const, kind: 'tool' as const,
+        surface: destination.scope.surfaceType, owner: destination.scope.owner, carrier, limit: 3 }
+      const result = queryCourseAgentCapabilities(data, query)
+      if (!result.entries.length) continue
+      const key = JSON.stringify({ ...query, parent: destination.scope.parent.kind })
+      const previous = createRecommendations.get(key)
+      if (previous) previous.destinationIndexes.push(index)
+      else createRecommendations.set(key, { destinationIndexes: [index], query, entries: result.entries })
+    }
+  }
   const cards: ReturnType<typeof readCourseAgentCapability>[] = []
   const deferred: { id: string; operation?: string; nativeType?: string; path: string }[] = []
   for (const { id, ...options } of desired.values()) {
@@ -93,7 +120,8 @@ export function generationCapabilityContext(pages: readonly unknown[], purpose: 
   }
   return { version: 1, semanticVersion: data.semanticVersion, discovery: 'capabilities/discovery.json',
     query: 'capabilities/query.mjs', toolIds: [...new Set([...desired.values()].map(value => value.id))], cards, deferred,
-    instruction: 'cards和toolIds是本任务入口，不是工具白名单；其余能力从discovery/query查询完整卡。图片优先media.apply；失败后允许读取asset.media.import和owner.background等正式基础命令，在同一授权目标内组合候选，复用有效图片，不重复已提交步骤。背景目标取pages.backgrounds，支持范围由正式背景Owner解析。Native content遵循references。路径相对profile.workspace.root。' }
+    createRecommendations: [...createRecommendations.values()],
+    instruction: 'cards和toolIds是本任务入口，不是工具白名单；createRecommendations按当前正式 create destination 与允许 carrier 给出紧凑入口，destinationIndexes 指向本请求 destinations；先读取完整卡再提交候选。其余能力从discovery/query查询完整卡。图片优先media.apply；失败后允许读取asset.media.import和owner.background等正式基础命令，在同一授权目标内组合候选，复用有效图片，不重复已提交步骤。背景目标取pages.backgrounds，支持范围由正式背景Owner解析。Native content遵循references。路径相对profile.workspace.root。' }
 }
 
 /** Shipped contract sources, not a second hand-written API registry. */
@@ -103,5 +131,11 @@ export function generationDynamicCapabilities() {
       registration: 'window.CoursewareComponent.define({id: manifest.id, runtimeApiVersion:4, create(ctx){...return {destroy(){...}}}})。files 包含 manifest.json 和该 manifest.entry 指定的 JS。文本文件优先直接给 {encoding:"utf8",text:"完整文件原文"}，不需要CLI编码；二进制文件用base64字符串。可见文字来自 props.content，更新通过 updateProps。先使用当前工程已有组件；新包必须提供 staticFallbackAssetId。' },
     runtime: { api2: runtimeTypes, api3: surfaceRuntimeTypes,
       registration: 'CoursewareRuntime.define({runtimeApiVersion:3,create(ctx){...return {destroy(){...}}}})。优先 API3 DOM：Slide scene-local、Flow surface-local；Spatial Runtime 当前未支持，使用 Component。API2 只用于已支持的 Slide scene/global。source 是普通 JS 字符串，运行时只能调用当前协议提供的接口。后备图片必须是工程中已存在或前序 asset.media.import 新建的图片；不能伪造 assetId。' },
+    navigation: {
+      goToScene: 'component/runtime 的 goToScene 只接受 Slide sceneId，不得用于 Flow 或 Spatial。',
+      nextPrevious: 'Flow/Spatial 使用 nextScene/previousScene，按 scene 出现顺序并受导航守卫前进/后退。',
+      replayScene: 'replayScene 同当前 location，从当前 scene 第一步重新播放，不受导航守卫限制。',
+      restartCourse: 'restartCourse 绕过导航守卫，并将课程状态重置为声明默认值。',
+    },
   }
 }

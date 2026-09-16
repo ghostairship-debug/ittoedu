@@ -126,18 +126,17 @@ function overlayItem(id: string, order: number, locked = false) {
 
 function createFlowProject(): CourseProjectDocument {
   const blocks: FlowBlock[] = [
-    { id: 'h1', type: 'heading', level: 1, text: '标题一' },
+    { id: 'h1', type: 'heading', level: 1, content: { inlines: [{ type: 'text', text: '标题一' }] }},
     {
       id: 'p-runs',
       type: 'paragraph',
-      text: '加粗段落',
-      runs: [{ start: 0, end: 2, style: { bold: true } }],
+      content: { inlines: [{"type":"text","text":"加粗","style":{"bold":true}},{"type":"text","text":"段落"}] },
     },
     {
       id: 'top-list',
       type: 'list',
       ordered: false,
-      items: [{ id: 'item-1', text: '第一项' }],
+      items: [{ id: 'item-1', content: { inlines: [{ type: 'text', text: '第一项' }] }}],
     },
     {
       id: 'media-1',
@@ -145,25 +144,25 @@ function createFlowProject(): CourseProjectDocument {
       assetId: 'asset-image',
       mediaKind: 'image',
       altText: '示意图',
-      caption: '封面图',
+      caption: { inlines: [{ type: 'text', text: '封面图' }] },
       layout: 'content-width',
     },
     {
       id: 'sec-1',
       type: 'section',
-      title: '第一节',
+      title: { inlines: [{ type: 'text', text: '第一节' }] },
       collapsedByDefault: false,
       blocks: [
-        { id: 'nested-h', type: 'heading', level: 2, text: '小节' },
-        { id: 'nested-a', type: 'paragraph', text: '嵌套段落 A' },
+        { id: 'nested-h', type: 'heading', level: 2, content: { inlines: [{ type: 'text', text: '小节' }] }},
+        { id: 'nested-a', type: 'paragraph', content: { inlines: [{ type: 'text', text: '嵌套段落 A' }] }},
       ],
     },
     {
       id: 'sec-2',
       type: 'section',
-      title: '第二节',
+      title: { inlines: [{ type: 'text', text: '第二节' }] },
       collapsedByDefault: false,
-      blocks: [{ id: 'nested-b', type: 'paragraph', text: '嵌套段落 B' }],
+      blocks: [{ id: 'nested-b', type: 'paragraph', content: { inlines: [{ type: 'text', text: '嵌套段落 B' }] }}],
     },
   ]
   const project: CourseProjectDocument = {
@@ -215,9 +214,9 @@ describe('Flow editor commands', () => {
     expect(heading).toMatchObject({
       type: 'heading',
       level: 1,
-      text: BLANK_FLOW_HEADING_PLACEHOLDER,
+      content: { inlines: [{ type: 'text', text: BLANK_FLOW_HEADING_PLACEHOLDER }] },
     })
-    expect(paragraph).toMatchObject({ type: 'paragraph', text: '' })
+    expect(paragraph).toMatchObject({ type: 'paragraph', content: { inlines: [] }})
     const blank = createBlankFlowSurface({
       id: 'flow-blank',
       title: '空白讲义',
@@ -247,7 +246,7 @@ describe('Flow editor commands', () => {
       surfaceId: 'flow',
       parentId: null,
       index: 1,
-      block: { type: 'paragraph', text: '普通段落' },
+      block: { type: 'paragraph', content: { inlines: [{ type: 'text', text: '普通段落' }] }},
     }, { now: NOW })
     expectHistory(inserted)
     expect(inserted.nextDocument!.revision).toBe(project.revision + 1)
@@ -259,7 +258,7 @@ describe('Flow editor commands', () => {
       surfaceId: 'flow',
       parentId: null,
       index: 0,
-      block: { id: 'anchor-h', type: 'heading', level: 2, text: '目录标题' },
+      block: { id: 'anchor-h', type: 'heading', level: 2, content: { inlines: [{ type: 'text', text: '目录标题' }] }},
     }, { now: NOW, expectedRevision: inserted.nextDocument!.revision })
     expectHistory(heading)
     expect(heading.nextDocument!.locations.some((location) =>
@@ -270,16 +269,14 @@ describe('Flow editor commands', () => {
 
   it('applies committed text + runs without a second draft structure', () => {
     const project = createFlowProject()
-    const result = applyFlowCommittedText(project, target('p-runs'), '加粗段落已改', {
+    const result = applyFlowCommittedText(project, target('p-runs'), { inlines: [{ type: 'text', text: '加粗', style: { bold: true, italic: true } }, { type: 'text', text: '段落已改' }] }, {
       now: NOW,
-      runs: [{ start: 0, end: 2, style: { bold: true, italic: true } }],
     })
     expectHistory(result)
     const paragraph = flowOf(result.nextDocument!).blocks.find((block) => block.id === 'p-runs')
     expect(paragraph).toMatchObject({
       type: 'paragraph',
-      text: '加粗段落已改',
-      runs: [{ start: 0, end: 2, style: { bold: true, italic: true } }],
+      content: { inlines: [{"type":"text","text":"加粗","style":{"bold":true,"italic":true}},{"type":"text","text":"段落已改"}] },
     })
   })
 
@@ -290,8 +287,8 @@ describe('Flow editor commands', () => {
     const afterSplit = flowOf(split.nextDocument!).blocks
     const left = afterSplit.find((block) => block.id === 'p-runs')
     const right = afterSplit[afterSplit.findIndex((block) => block.id === 'p-runs') + 1]
-    expect(left).toMatchObject({ type: 'paragraph', text: '加粗' })
-    expect(right).toMatchObject({ type: 'paragraph', text: '段落' })
+    expect(left).toMatchObject({ type: 'paragraph', content: { inlines: [{ type: 'text', text: '加粗' }] }})
+    expect(right).toMatchObject({ type: 'paragraph', content: { inlines: [{ type: 'text', text: '段落' }] }})
     expect(split.nextDocument!.locations.some((location) =>
       location.kind === 'flow-block' && location.blockId === right!.id,
     )).toBe(false)
@@ -303,7 +300,7 @@ describe('Flow editor commands', () => {
     }, { now: NOW, expectedRevision: split.nextDocument!.revision })
     expectHistory(formatted)
     const styled = flowOf(formatted.nextDocument!).blocks.find((block) => block.id === 'p-runs')
-    expect(styled?.type === 'paragraph' ? styled.runs : undefined).toEqual(
+    expect(styled?.type === 'paragraph' ? styled.content.inlines : undefined).toEqual(
       expect.arrayContaining([expect.objectContaining({ style: expect.objectContaining({ italic: true }) })]),
     )
 
@@ -314,7 +311,7 @@ describe('Flow editor commands', () => {
     )
     expectHistory(merged)
     const restored = flowOf(merged.nextDocument!).blocks.find((block) => block.id === 'p-runs')
-    expect(restored).toMatchObject({ type: 'paragraph', text: '加粗段落' })
+    expect(restored).toMatchObject({ type: 'paragraph', content: { inlines: [{ type: 'text', text: '加粗', style: { bold: true, italic: true } }, { type: 'text', text: '段落' }] } })
   })
 
   it('moves, indents, outdents and reorders with one history each', () => {
@@ -353,7 +350,7 @@ describe('Flow editor commands', () => {
     const textDeleted = executeFlowDelete(project, textSelection, { now: NOW })
     expectHistory(textDeleted)
     const paragraph = flowOf(textDeleted.nextDocument!).blocks.find((block) => block.id === 'p-runs')
-    expect(paragraph).toMatchObject({ type: 'paragraph', text: '段落' })
+    expect(paragraph).toMatchObject({ type: 'paragraph', content: { inlines: [{ type: 'text', text: '段落' }] }})
     expect(flowOf(textDeleted.nextDocument!).blocks.some((block) => block.id === 'p-runs')).toBe(true)
 
     const blockSelection = selectFlowEditorBlock(project, 'h1', 'top-list')
@@ -377,7 +374,7 @@ describe('Flow editor commands', () => {
         surfaceId: 'flow',
         parentId: null,
         index: 0,
-        block: { type: 'paragraph', text: '不应出现' },
+        block: { type: 'paragraph', content: { inlines: [{ type: 'text', text: '不应出现' }] }},
       },
     }, { now: NOW })
     expect(blocked).toMatchObject({ ok: false, reason: FLOW_GLOBAL_STRUCTURE_REASON })
@@ -553,10 +550,10 @@ describe('Flow editor commands', () => {
         surfaceId: 'flow',
         parentId: null,
         index: 0,
-        block: { id: 'stable-block', type: 'paragraph', text: '稳定块' },
+        block: { id: 'stable-block', type: 'paragraph', content: { inlines: [{ type: 'text', text: '稳定块' }] }},
       }, { now: NOW }),
       (doc: CourseProjectDocument) => updateFlowEditorBlock(doc, target('p-runs'), {
-        text: '一次更新',
+        content: { inlines: [{ type: 'text', text: '一次更新' }] },
       }, { now: NOW }),
       (doc: CourseProjectDocument) => duplicateFlowEditorBlock(doc, target('top-list'), { now: NOW }),
     ]
@@ -634,10 +631,10 @@ describe('Flow editor commands', () => {
     }, { now: NOW })
     expectHistory(formatted)
     const paragraph = flowOf(formatted.nextDocument!).blocks.find((block) => block.id === 'p-runs')
-    expect(paragraph?.type === 'paragraph' ? paragraph.runs : undefined).toEqual(
+    expect(paragraph?.type === 'paragraph' ? paragraph.content.inlines : undefined).toEqual(
       expect.arrayContaining([expect.objectContaining({
-        start: 0,
-        end: 2,
+        type: 'text',
+        text: '加粗',
         style: expect.objectContaining({ color: '#ff0000' }),
       })]),
     )
@@ -655,8 +652,7 @@ describe('Flow editor commands', () => {
     expect(converted).toMatchObject({
       id: 'p-runs',
       type: 'quote',
-      text: '加粗段落',
-      runs: [{ start: 0, end: 2, style: { bold: true } }],
+      content: { inlines: [{"type":"text","text":"加粗","style":{"bold":true}},{"type":"text","text":"段落"}] },
     })
   })
 
@@ -695,15 +691,16 @@ describe('Flow editor commands', () => {
       textAlign: 'center',
       lineSpacing: 8,
     })
-    expect(paragraph?.type === 'paragraph' ? paragraph.runs : undefined).toEqual([
-      { start: 0, end: 2, style: { bold: true } },
+    expect(paragraph?.type === 'paragraph' ? paragraph.content.inlines : undefined).toEqual([
+      { type: 'text', text: '加粗', style: { bold: true } },
+      { type: 'text', text: '段落' },
     ])
-    if (paragraph?.type === 'paragraph' && paragraph.runs) {
-      for (const run of paragraph.runs) {
+    if (paragraph?.type === 'paragraph' && paragraph.content.inlines) {
+      for (const run of paragraph.content.inlines) {
         expect((run as unknown as Record<string, unknown>).textAlign).toBeUndefined()
-        expect((run.style as unknown as Record<string, unknown>).textAlign).toBeUndefined()
+        expect(((run.style ?? {}) as unknown as Record<string, unknown>).textAlign).toBeUndefined()
         expect((run as unknown as Record<string, unknown>).lineSpacing).toBeUndefined()
-        expect((run.style as unknown as Record<string, unknown>).lineSpacing).toBeUndefined()
+        expect(((run.style ?? {}) as unknown as Record<string, unknown>).lineSpacing).toBeUndefined()
       }
     }
   })

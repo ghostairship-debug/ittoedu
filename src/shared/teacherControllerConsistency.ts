@@ -6,6 +6,7 @@ import type {
 import { CANVAS_HEIGHT, CANVAS_WIDTH } from './constants'
 import { rotatedRectangleAabb } from './geometry'
 import { isTeacherController } from './teacherControllerRole'
+import { defaultTeacherControllerConfig } from './teacherControllerConfig'
 
 function courseControllerIntersectsCanvas(item: LayerItem): boolean {
   const bounds = rotatedRectangleAabb({
@@ -34,6 +35,10 @@ export function restoreCourseTeacherControllerLayer(entry: ScopedLayerItem): boo
     entry.item.visible = true
     entry.item.playbackInitialVisibility = 'inherit'
     if (entry.item.opacity <= 0) entry.item.opacity = 1
+    const buttons = entry.item.props.buttons
+    if (!Array.isArray(buttons) || !buttons.some(button => button.visible === true)) {
+      entry.item.props.buttons = defaultTeacherControllerConfig().buttons
+    }
     if (!courseControllerIntersectsCanvas(entry.item)) {
       entry.item.frame.x = 20
       entry.item.frame.y = 20

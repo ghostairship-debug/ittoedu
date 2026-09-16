@@ -364,13 +364,12 @@ function mixedSources(): CoursePublishSources {
             id: 'flow-heading',
             type: 'heading',
             level: 1,
-            text: '长文标题',
-            runs: [{ start: 0, end: 4, style: { bold: true } }],
+            content: { inlines: [{"type":"text","text":"长文标题","style":{"bold":true}}] },
           },
           {
             id: 'flow-section',
             type: 'section',
-            title: '插图',
+            title: { inlines: [{ type: 'text', text: '插图' }] },
             collapsedByDefault: false,
             blocks: [{
               id: 'flow-media',
@@ -800,8 +799,7 @@ describe('Published Course V2 producer', () => {
       expect.objectContaining({
         id: 'flow-heading',
         type: 'heading',
-        text: '长文标题',
-        runs: [{ start: 0, end: 4, style: { bold: true } }],
+        content: { inlines: [{"type":"text","text":"长文标题","style":{"bold":true}}] },
       }),
     ]))
     const section = flow.blocks.find((block) => block.type === 'section')

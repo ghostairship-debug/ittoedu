@@ -22,7 +22,7 @@ describe('native usage and machine result projection', () => {
       const events = [20, 40].map((total, index) => ({ version: 2, taskId, epoch: 0, workspace, sessionId: id, runId,
         nativeTurnId: 'same-native-turn', sequence: index + 1, time: index, kind: 'usage',
         inputTokens: 10, outputTokens: 5, cachedInputTokens: 3, tokenUsage: usage(total) }))
-      const record = localAgentRecordV2Schema.parse({ version: 2, id, adapter: 'codex', workspace, externalSessionId: 'thread', workingDirectoryId: id,
+      const record = localAgentRecordV2Schema.parse({ version: 3, id, adapter: 'codex', workspace, externalSessionId: 'thread', workingDirectoryId: id,
         tasks: [{ version: 1, taskId, epoch: 0, workspace, sessionId: id, adapter: 'codex', goal: 'reply', intent: 'discuss', applyPolicy: 'preview',
           readScope: { kind: 'course' }, writeDestinations: [], status: 'completed', observationId: null, committedResultIds: [] }], observations: [], hostResults: [], events })
       const repository = new LocalAgentRepository(directory)

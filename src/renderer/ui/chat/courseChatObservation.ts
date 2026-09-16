@@ -1,5 +1,5 @@
 import type { GenerationCommitReceipt, GenerationRequest } from '../../../shared/generationContract'
-import { generationRequestSchema, MAX_GENERATION_TASK_DURATION_MS } from '../../../shared/generationContract'
+import { generationRequestSchema, DEFAULT_GENERATION_TASK_DURATION_MS, MAX_GENERATION_TASK_DURATION_MS } from '../../../shared/generationContract'
 import { z } from 'zod'
 import type { DesktopAPI } from '../../../shared/ipcTypes'
 import type { DynamicBehaviorObservation } from '../../../shared/dynamicBehaviorObservation'
@@ -52,10 +52,10 @@ export interface CourseChatTarget {
   readonly flowSelection?: FlowEditorSelection
 }
 const stopped = () => new Error('stale：任务已停止或重新开始')
-const expired = () => new Error('本任务的20分钟执行期限已到，请重新发送以继续；准备结果已丢弃')
+const expired = () => new Error('本次设置的执行预算已到，请重新发送以继续；准备结果已丢弃')
 function executionBudget(execution?: Execution): Execution {
   const startedAt = execution?.startedAt ?? Date.now()
-  return { version: 1, startedAt, deadlineAt: Math.min(execution?.deadlineAt ?? Infinity, startedAt + MAX_GENERATION_TASK_DURATION_MS) }
+  return { version: 1, startedAt, deadlineAt: Math.min(execution?.deadlineAt ?? startedAt + DEFAULT_GENERATION_TASK_DURATION_MS, startedAt + MAX_GENERATION_TASK_DURATION_MS) }
 }
 
 /** Initial preparation and observation share the task's absolute deadline. */
@@ -100,7 +100,7 @@ export function createCourseChatObservation(api: DesktopAPI, owner: { projectId:
       throw new Error('stale：工程已关闭、切换或另存为，请重新观察')
     }
     return { document, revision: document.revision, assetFiles: selectMediaAssetFiles(state), componentPackages: state.componentPackages,
-      draft: JSON.stringify([authoringObservationDraftToken(state.v9ContentEdit), authoringObservationDraftToken(state.flowTextEdit),
+      draft: JSON.stringify([authoringObservationDraftToken(state.v9ContentEdit), authoringObservationDraftToken(state.flowTextEdit), authoringObservationDraftToken(state.flowDocumentDraft),
         authoringObservationDraftToken(state.spatialContentEdit), authoringObservationDraftToken(state.previewBackgroundColor),
         readAuthoringObservationDraftState()]) }
   }
@@ -170,7 +170,7 @@ export function createCourseChatObservation(api: DesktopAPI, owner: { projectId:
       const active = session.token.locationId === projection.locationId
       return { document, sessionGeneration: active ? session.token.generation : target?.sessionToken.generation ?? session.token.generation, surfaceId: projection.surfaceId,
         locationId: projection.locationId, stateId: projection.stateId, selectedIds: observingSelection ?? target?.selectedIds ?? session.itemIds,
-        draft: active ? (projection.surfaceType === 'slide' ? state.v9ContentEdit : projection.surfaceType === 'flow' ? state.flowTextEdit : state.spatialContentEdit) : null,
+        draft: active ? (projection.surfaceType === 'slide' ? state.v9ContentEdit : projection.surfaceType === 'flow' ? state.flowDocumentDraft ?? state.flowTextEdit : state.spatialContentEdit) : null,
         spatialCamera: projection.surfaceType === 'spatial-2d' && state.spatialSession?.selection.locationId === projection.locationId
           ? state.spatialSession.sessionCamera : undefined,
         assetFiles: selectMediaAssetFiles(state), componentPackages: state.componentPackages, previewBackgroundColor: active ? state.previewBackgroundColor : null }

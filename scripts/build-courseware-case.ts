@@ -1,3 +1,4 @@
+import { encodeBase64 } from '../src/renderer/export/base64'
 import '../src/renderer/export/bundledFontEmbedSourceNode'
 import { componentPackagesFromArchive } from '../src/renderer/components/componentPackageStore'
 import {
@@ -135,12 +136,12 @@ async function resolveCasePath(
   caseRoot: string,
   value: string,
   label: string,
-  options: { exists: boolean, extensions: readonly string[] },
+  options: { exists: boolean, extensions?: readonly string[] },
 ): Promise<string> {
   requireRelative(value, label)
   const resolved = path.resolve(caseRoot, value)
   if (!isWithin(caseRoot, resolved)) throw new Error(`${label} 逃逸课例目录：${value}`)
-  if (!options.extensions.includes(path.extname(resolved).toLowerCase())) {
+  if (options.extensions && !options.extensions.includes(path.extname(resolved).toLowerCase())) {
     throw new Error(`${label} 必须使用 ${options.extensions.join(' 或 ')} 扩展名：${value}`)
   }
   const anchor = options.exists ? resolved : await existingParent(resolved)
@@ -336,6 +337,7 @@ export async function buildCoursewareCase(
   const context: CoursewareCaseBuilderContext = Object.freeze({
     apiVersion: COURSEWARE_CASE_BUILDER_API_VERSION,
     caseDir: caseRoot,
+    encodeBase64,
     documents: Object.freeze({
       teachingPlan: Object.freeze({ path: teachingPlanPath, content: teachingPlan }),
       presentationScript: Object.freeze({ path: presentationScriptPath, content: presentationScript }),
@@ -350,7 +352,18 @@ export async function buildCoursewareCase(
   if (requestedVersion === 2) {
     const host = await createCoursewareBuilderV2Host(editorRoot)
     try {
-      output = normalizeBuildOutput(host.resolveOutput(await (builder as unknown as CoursewareCaseBuilderV2)({ ...context, apiVersion: 2, api: host.api })))
+      output = normalizeBuildOutput(host.resolveOutput(await (builder as unknown as CoursewareCaseBuilderV2)({
+        ...context,
+        apiVersion: 2,
+        api: host.api,
+        async readAsset(relativePath) {
+          const filename = await resolveCasePath(caseRoot, relativePath, '素材文件', { exists: true })
+          if ((await stat(filename)).size > 32 * 1024 * 1024) throw new Error('素材文件超过 32 MiB 上限')
+          const bytes = await readFile(filename)
+          if (bytes.byteLength > 32 * 1024 * 1024) throw new Error('素材文件超过 32 MiB 上限')
+          return new Uint8Array(bytes)
+        },
+      })))
       output.receipts = (output.receipts ?? []).map(receipt => authoringToolReceiptV1Schema.parse(receipt))
       if (!output.receipts.length) throw new Error('Builder V2 必须返回产品工作会话及每步回执')
     } finally { await host.close() }

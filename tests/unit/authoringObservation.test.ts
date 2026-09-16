@@ -21,7 +21,7 @@ function harness(options: Pick<AuthoringObservationPorts, 'prepareImageResources
   const project = createBlankFlowCourseProject()
   const surface = project.surfaces[0]!
   if (surface.type !== 'flow') throw new Error('Flow fixture required')
-  surface.blocks.push({ id: 'observation-paragraph', type: 'paragraph', text: '已提交的正文' })
+  surface.blocks.push({ id: 'observation-paragraph', type: 'paragraph', content: { inlines: [{ type: 'text', text: '已提交的正文' }] } })
   let state: AuthoringObservationState = { document: project, sessionGeneration: 3, surfaceId: surface.id,
     locationId: project.startLocationId, stateId: null, selectedIds: ['observation-paragraph'], draft: null, assetFiles: {} }
   const root = document.createElement('main')
@@ -200,7 +200,7 @@ describe('current authoring observation', () => {
     const projected = structuredClone(canonical)
     const surface = projected.surfaces[0]!
     if (surface.type !== 'flow') throw new Error('Flow fixture required')
-    surface.blocks.push({ id: 'current-draft', type: 'paragraph', text: draft.text })
+    surface.blocks.push({ id: 'current-draft', type: 'paragraph', content: { inlines: [{ type: 'text', text: draft.text }] } })
     projected.revision += 1 // Some recovery Owners materialize a transient revision.
     h.materialize.mockReturnValue({ ok: true, snapshot: { project: projected } })
     const result = await h.controller.capture({ intent: 'discuss' })

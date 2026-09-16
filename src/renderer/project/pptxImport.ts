@@ -3,10 +3,11 @@ import { sceneNodeToCourseLayerItem } from '../../shared/courseProjectModel'
 import type { LayerItem } from '../../shared/courseProjectTypes'
 import type { ShapeType, ShapeNode, TextRun, TextRunStyle } from '../../shared/contracts/native-v1'
 import { analyzeTextNodeLayout } from '../../shared/textLayout'
-import { createImageNode, createShapeNode, createTextNode } from './nativeNodeFactories'
+import { createImageNode, createShapeNode, createTextNode, createVideoNode } from './nativeNodeFactories'
 import { createImageAssetImport, readImageDimensions } from './assetManager'
 import type { CourseImportedAsset } from './v9AssetAdapter'
 import { pptxPageObjects, expandPptxGroup } from './pptxInheritance'
+import { parsePptxMediaAsset, parsePptxVisibilityEffects } from './pptxMediaImport'
 import { parsePptxTable } from './pptxTableImport'
 import { parsePptxChart } from './pptxChartImport'
 import { parsePptxEquation } from './pptxEquationImport'
@@ -14,8 +15,12 @@ import { parsePptxCustomGeometry, parsePptxGradient, parsePptxBraceGeometry, par
 import { parsePptxColorChanges, renderPptxColorChanges } from './pptxImageEffects'
 import { openPptxPackage, PPTX_IMPORT_LIMITS, PptxImportError, pptxReject, pptxRelationshipId, xmlAll, xmlChildren, xmlFirst, type PptxPackage, type PptxImportIssue } from './pptxPackage'
 
-export interface PptxSlideDraft { title: string; backgroundColor: string; items: LayerItem[]; sourcePage?: number; sharedKeys?: string[] }
-export interface PptxImportDraft { slides: PptxSlideDraft[]; assets: CourseImportedAsset[]; notes: string[]; issues: PptxImportIssue[]; shared?: { key: string; items: LayerItem[] }[] }
+import { nanoid } from 'nanoid'
+import type { InteractionRule } from '../../shared/contracts/interaction-v1/types'
+import type { SoundDefinition } from '../../shared/contracts/media-v1/types'
+
+export interface PptxSlideDraft { title: string; interactions?: InteractionRule[]; backgroundColor: string; items: LayerItem[]; sourcePage?: number; sharedKeys?: string[] }
+export interface PptxImportDraft { slides: PptxSlideDraft[]; sounds?: Record<string, SoundDefinition>; assets: CourseImportedAsset[]; notes: string[]; issues: PptxImportIssue[]; shared?: { key: string; items: LayerItem[] }[] }
 const child = (node: Element, name: string) => xmlChildren(node).find(n => n.localName === name)
 const flag = (node: Element | undefined, name: string) => ['1', 'true'].includes(node?.getAttribute(name) ?? '')
 const numeric = (node: Element | undefined, attr: string, fallback?: number): number => {
@@ -52,6 +57,7 @@ export async function parsePptxImport(bytes: Uint8Array): Promise<PptxImportDraf
   const assetByPath = new Map<string, CourseImportedAsset>()
   const imageOriginals = new Map<string, string>()
   const shared = new Map<string, LayerItem[]>()
+  const sounds: Record<string, SoundDefinition> = {}
   let objectCount = 0
   const report = (error: unknown, page: number, action: string) => {
     const details = error instanceof PptxImportError ? error.issues : [{ type: '解析失败', message: error instanceof Error ? error.message : '无法读取内容' }]
@@ -82,10 +88,12 @@ export async function parsePptxImport(bytes: Uint8Array): Promise<PptxImportDraf
         }
         return `#${rgbValues.map(v => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, '0')).join('')}`
       }
-      for (const name of ['timing', 'transition']) if (xmlAll(slide, name).length) issues.push({ page, type: name === 'timing' ? '动画' : '切换效果', message: '已省略效果，保留可解析的静态内容' })
+      if (xmlAll(slide, 'transition').length) issues.push({ page, type: '切换效果', message: '已省略效果，保留可解析的静态内容' })
       const tree = xmlFirst(slide, 'spTree')
       if (!tree) pptxReject('页面结构', '缺少对象树')
       const items: LayerItem[] = []
+      const interactions: InteractionRule[] = []
+      const sourceItems = new Map<string, LayerItem[]>()
       const sharedKeys: string[] = []
       const failedDiagrams = new Set<string>()
       const diagramItems = new Map<string, LayerItem[]>()
@@ -120,7 +128,7 @@ export async function parsePptxImport(bytes: Uint8Array): Promise<PptxImportDraf
               for (const effect of effects) effect.remove()
             }
           }
-          for (const name of ['AlternateContent', 'oleObj', 'videoFile', 'audioFile', 'pattFill']) if (xmlAll(object, name).length) pptxReject(name, '当前无法转换为可编辑对象')
+          for (const name of ['AlternateContent', 'oleObj', 'pattFill']) if (xmlAll(object, name).length) pptxReject(name, '当前无法转换为可编辑对象')
           const customGeometry = xmlFirst(object, 'custGeom')
           for (const gradient of xmlAll(object, 'gradFill')) if (object.localName !== 'sp' || gradient.parentElement?.localName !== 'spPr') pptxReject('渐变', '当前仅支持形状填充渐变')
           if (customGeometry && object.localName !== 'sp') pptxReject('自由路径', '当前仅支持形状路径')
@@ -142,6 +150,22 @@ export async function parsePptxImport(bytes: Uint8Array): Promise<PptxImportDraf
           if (geometry.width <= 0 || geometry.height <= 0) pptxReject('几何', '对象宽高必须大于零')
           const name = xmlFirst(object, 'cNvPr')?.getAttribute('name') || `对象 ${items.length + 1}`
           const push = (node: Parameters<typeof sceneNodeToCourseLayerItem>[0]) => items.push(sceneNodeToCourseLayerItem(node, items.length))
+          if (object.localName === 'pic' && (xmlFirst(object, 'videoFile') || xmlFirst(object, 'audioFile'))) {
+            const asset = await parsePptxMediaAsset(object, pkg, source.path, assetByPath)
+            if (!asset) pptxReject('媒体', '媒体标记缺失')
+            if (!assets.some(existing => existing.meta.id === asset.meta.id)) assets.push(asset)
+            if (asset.meta.kind === 'audio') {
+              if (sharedKey) pptxReject('共享音频', '母版音频需在源文件中移入具体页面后导入')
+              const soundId = `sound_${nanoid()}`
+              const node = createTextNode({ ...geometry, name, text: '▶ 播放音频', style: { fontSize: 16, overflow: 'shrink' } })
+              push(node)
+              sounds[soundId] = { id: soundId, name, assetId: asset.meta.id, channel: 'sfx', defaultVolume: 1, defaultLoop: false }
+              interactions.push({ id: `rule_${nanoid()}`, name: `${name} 播放`, enabled: true, trigger: { type: 'node.click', nodeId: node.id }, conditions: [], actions: [{ id: `action_${nanoid()}`, start: 'after-previous', delayMs: 0, action: { type: 'audio.play', soundId, lifetime: 'scene', ifPlaying: 'restart' } }] })
+            } else push(createVideoNode({ ...geometry, name, assetId: asset.meta.id, fit: 'contain' }))
+            issues.push({ page, type: '媒体播放', message: `“${objectName}”已转换为可编辑${asset.meta.kind === 'audio' ? '音频点击播放文字' : '视频播放器'}；原自动播放、裁剪时间和时间线效果不保留` })
+            if (sharedKey) { shared.set(sharedKey, items.splice(itemStart)); sharedKeys.push(sharedKey) }
+            continue
+          }
           if (object.localName === 'pic') {
             const mask = xmlFirst(object, 'prstGeom')?.getAttribute('prst')
             if (mask && mask !== 'rect') pptxReject('图片形状蒙版', '请先应用图片蒙版')
@@ -285,6 +309,8 @@ export async function parsePptxImport(bytes: Uint8Array): Promise<PptxImportDraf
           if (source.atomicGroup) failedDiagrams.add(source.atomicGroup)
           report(error, page, `已跳过“${objectName}”`)
         } finally {
+          const sourceId = xmlFirst(object, 'cNvPr')?.getAttribute('id')
+          if (source.path === path && !sharedKey && sourceId) sourceItems.set(sourceId, items.slice(itemStart))
           if (source.atomicGroup) {
             const previous = diagramItems.get(source.atomicGroup) ?? []
             diagramItems.set(source.atomicGroup, previous.concat(sharedKey ? shared.get(sharedKey) ?? [] : items.slice(itemStart)))
@@ -298,6 +324,10 @@ export async function parsePptxImport(bytes: Uint8Array): Promise<PptxImportDraf
         for (const key of diagramShared.get(group) ?? []) { shared.delete(key); const index = sharedKeys.indexOf(key); if (index >= 0) sharedKeys.splice(index, 1) }
         issues.push({ page, type: 'SmartArt', message: '图示含未支持内容，已整体跳过，避免留下缺少节点或连接的图示' })
       }
+      for (const [id, mapped] of sourceItems) sourceItems.set(id, mapped.filter(item => items.includes(item)))
+      const effects = parsePptxVisibilityEffects(slide, sourceItems)
+      if (effects) interactions.push(...effects)
+      else issues.push({ page, type: '动画', message: '复杂或未支持的时间线已省略，保留静态内容；仅独立对象点击显隐可准确映射' })
       items.forEach((item, order) => { item.order = order })
       let backgroundColor = '#ffffff'
       try {
@@ -320,7 +350,7 @@ export async function parsePptxImport(bytes: Uint8Array): Promise<PptxImportDraf
         if (backgroundFill && numeric(xmlFirst(backgroundFill, 'alpha'), 'val', 100000) !== 100000) pptxReject('背景透明度', '仅支持不透明背景')
         backgroundColor = color(backgroundFill, '#ffffff')
       } catch (error) { report(error, page, '背景已替换为白色') }
-      slides.push({ title: xmlFirst(slide, 'cSld')?.getAttribute('name') || `导入第 ${page} 页`, backgroundColor, items, sourcePage: page, sharedKeys })
+      slides.push({ title: xmlFirst(slide, 'cSld')?.getAttribute('name') || `导入第 ${page} 页`, backgroundColor, items, interactions, sourcePage: page, sharedKeys })
     } catch (error) {
       if (error instanceof PptxImportError && error.issues.some(issue => issue.type === '对象数量')) throw error
       report(error, page, '已跳过页面')
@@ -332,9 +362,12 @@ export async function parsePptxImport(bytes: Uint8Array): Promise<PptxImportDraf
   for (const group of shared.values()) for (const item of group) item.order = order++
   for (const slide of slides) slide.items.forEach((item, i) => { item.order = order + i })
   const allItems = [...slides.flatMap(slide => slide.items), ...[...shared.values()].flat()]
-  const usedAssets = new Set(allItems.flatMap(item => item.kind === 'native' && item.content.nativeType === 'image' ? [item.content.data.assetId] : []))
+  const usedAssets = new Set(allItems.flatMap(item => item.kind === 'native' && (item.content.nativeType === 'image' || item.content.nativeType === 'video') ? [item.content.data.assetId] : []))
+  const referencedSounds = new Set(slides.flatMap(slide => (slide.interactions ?? []).flatMap(rule => rule.actions.flatMap(step => step.action.type === 'audio.play' ? [step.action.soundId] : []))))
+  for (const soundId of Object.keys(sounds)) if (!referencedSounds.has(soundId)) delete sounds[soundId]
+  for (const sound of Object.values(sounds)) usedAssets.add(sound.assetId)
   for (const id of [...usedAssets]) { const original = imageOriginals.get(id); if (original) usedAssets.add(original) }
-  return { slides, shared: [...shared].map(([key, items]) => ({ key, items })), assets: assets.filter(asset => usedAssets.has(asset.meta.id)), issues, notes: ['按原比例居中适配课程画布；字体由当前系统解析。', '文字与图形可分别编辑；母版/版式装饰在本演示表面的共享层修改，占位符正文只属于当前页。', '备注和文档属性不进入课程；未支持的复杂对象可在源软件另存图片后补入。'] }
+  return { slides, sounds, shared: [...shared].map(([key, items]) => ({ key, items })), assets: assets.filter(asset => usedAssets.has(asset.meta.id)), issues, notes: ['按原比例居中适配课程画布；字体由当前系统解析。', '文字与图形可分别编辑；母版/版式装饰在本演示表面的共享层修改，占位符正文只属于当前页。', '备注和文档属性不进入课程；未支持的复杂对象可在源软件另存图片后补入。'] }
 }
 
 function parsePptxLine(

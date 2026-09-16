@@ -2,6 +2,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { randomUUID } from 'node:crypto'
 import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
+import { createBlankFlowCourseProject } from '@/renderer/project/createFlowCourseProject'
 import { createShapeNode } from '@/renderer/project/nativeNodeFactories'
 import { sceneNodeToCourseLayerItem } from '@/shared/courseProjectModel'
 import { captureGenerationSnapshot } from '@/renderer/authoring/generation/generationSnapshot'
@@ -12,7 +13,7 @@ import { applyEditorTransactionStep, type EditorTransactionStep } from '@/render
 import { buildPublishedCourseV2Payload } from '@/renderer/export/course'
 import { generationInitialRequestForPrompt } from '@/main/localAgent/profile'
 import type { HistoryResourceState } from '@/renderer/store/courseResourceState'
-import { projectDynamicTargets } from '@/renderer/authoring/tools/projectDocumentTool'
+import { projectDocumentTool, projectDynamicTargets } from '@/renderer/authoring/tools/projectDocumentTool'
 import { readGenerationFailure } from '@/shared/generationContract'
 
 function fixture() {
@@ -98,7 +99,7 @@ describe('CLI project result through the canonical transaction', () => {
       await expect(f.coordinator.prepare(f.request, f.candidate)).rejects.toThrow('actual host rejected')
       expect(admission).toHaveBeenCalledOnce()
       expect(admission.mock.calls[0]![0]).toMatchObject({ operation: 'run', payload: {
-        targets: [{ locationId: f.next.locations[1]!.id, instanceIds: ['new-runtime'] }], assetFiles: { fallback: png },
+        targets: [{ locationId: f.next.locations[1]!.id, instanceIds: ['new-runtime'] }], assetFiles: { fallback: Uint8Array.from(Buffer.from(png, 'base64')) },
       } })
       expect(f.commits).toHaveLength(0); expect(f.read().document).toEqual(f.project)
     } finally { vi.unstubAllGlobals() }
@@ -132,5 +133,53 @@ describe('CLI project result through the canonical transaction', () => {
     }
     await expect(f.coordinator.prepare(f.request, f.candidate)).rejects.toThrow()
     expect(f.commits).toHaveLength(0); expect(f.read().document).toEqual(f.project)
+  })
+
+  it('reports the Flow background color format through the project.document candidate diagnostic', async () => {
+    const f = fixture()
+    const invalid = createBlankFlowCourseProject({ id: f.project.id, includeDefaultController: false, controls: 'none' })
+    invalid.revision = f.project.revision
+    const flow = invalid.surfaces[0]!
+    if (flow.type !== 'flow') throw new Error('Flow')
+    flow.backgroundColor = '#fff'
+    ;(f.candidate.steps[0]!.input.artifact as any).document = invalid
+
+    const error = await f.coordinator.prepare(f.request, f.candidate).catch(value => value)
+    expect(readGenerationFailure(error)).toMatchObject({
+      stepId: 'file-result',
+      diagnostics: [expect.objectContaining({
+        code: 'invalid-input',
+        path: ['input', 'artifact', 'document', 'surfaces', '0', 'backgroundColor'],
+        message: 'Flow backgroundColor must be a six-digit #RRGGBB color (for example, #f8fafc)',
+      })],
+    })
+    expect(f.commits).toHaveLength(0)
+    expect(f.read().document).toEqual(f.project)
+  })
+
+  it('reports order as local to the stored owner list through the project.document candidate diagnostic', async () => {
+    const f = fixture()
+    const surface = f.next.surfaces[0]!
+    if (surface.type !== 'slide') throw new Error('Slide')
+    surface.scenes[0]!.layerItems.push(sceneNodeToCourseLayerItem(createShapeNode('ellipse', {
+      id: 'same-owner-order', style: { fillColor: '#ffff00' }, x: 80, y: 80, width: 100, height: 100,
+    }), 0))
+
+    const error = await f.coordinator.prepare(f.request, f.candidate).catch(value => value)
+    expect(readGenerationFailure(error)).toMatchObject({
+      stepId: 'file-result',
+      diagnostics: [expect.objectContaining({
+        code: 'invalid-input',
+        path: ['input', 'artifact', 'document', 'surfaces', '0', 'scenes', '0', 'layerItems', '1', 'order'],
+        message: 'Layer items in this stored owner list must have strictly increasing order; 0 follows 0',
+      })],
+    })
+    expect(f.commits).toHaveLength(0)
+    expect(f.read().document).toEqual(f.project)
+  })
+
+  it('describes multi-Surface print planning and owner-local order for project.document', () => {
+    expect(projectDocumentTool.description).toContain('新增第二个或更多 Surface 时，document 必须同时提供 mixedPrintPlan')
+    expect(projectDocumentTool.description).toContain('每个已存储的 global/surface/scene/world 图层列表内部按 item.order 严格递增')
   })
 })

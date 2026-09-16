@@ -28,6 +28,16 @@
     }
   },
   "componentPackages": {
+    "com.ittoedu.teacher-controller": {
+      "packageId": "com.ittoedu.teacher-controller",
+      "version": "1.0.0",
+      "name": "教师控制台",
+      "manifestPath": "components/com.ittoedu.teacher-controller@1.0.0/manifest.json",
+      "runtimePath": "components/com.ittoedu.teacher-controller@1.0.0/runtime.js",
+      "thumbnailPath": "components/com.ittoedu.teacher-controller@1.0.0/thumbnail.svg",
+      "contentSha256": "021aebcb5afad79ddda6833a49375117462f689534537bfe8fab492c9b5b0631",
+      "editableCopy": true
+    },
     "com.example.render-host-editable-table": {
       "packageId": "com.example.render-host-editable-table",
       "version": "4.0.0",
@@ -145,12 +155,12 @@
     {
       "item": {
         "layerItemId": "teacher_controller_benchmark_02",
-        "label": "教师控制器",
+        "label": "教师控制台",
         "frame": {
           "mode": "absolute",
-          "x": 80,
+          "x": 200,
           "y": 638,
-          "width": 1120,
+          "width": 880,
           "height": 64
         },
         "order": 1,
@@ -160,98 +170,100 @@
         "opacity": 1,
         "hitPolicy": "auto",
         "playbackInitialVisibility": "inherit",
-        "kind": "native",
-        "content": {
-          "nativeType": "teacher-controller",
-          "data": {
-            "title": "教师控制台",
-            "showSceneProgress": true,
-            "compact": false,
-            "collapsible": true,
-            "defaultCollapsed": true,
-            "buttons": [
-              {
-                "id": "teacher_button_benchmark_03",
-                "action": {
-                  "type": "step.previous"
-                },
-                "label": "上一步",
-                "visible": true
-              },
-              {
-                "id": "teacher_button_benchmark_04",
-                "action": {
-                  "type": "step.next"
-                },
-                "label": "下一步",
-                "visible": true
-              },
-              {
-                "id": "teacher_button_benchmark_05",
-                "action": {
-                  "type": "scene.previous"
-                },
-                "label": "上一场景",
-                "visible": true
-              },
-              {
-                "id": "teacher_button_benchmark_06",
-                "action": {
-                  "type": "scene.next"
-                },
-                "label": "下一场景",
-                "visible": true
-              },
-              {
-                "id": "teacher_button_benchmark_07",
-                "action": {
-                  "type": "scene.open-picker"
-                },
-                "label": "场景目录",
-                "visible": true
-              },
-              {
-                "id": "teacher_button_benchmark_08",
-                "action": {
-                  "type": "scene.replay"
-                },
-                "label": "重播",
-                "visible": true
-              },
-              {
-                "id": "teacher_button_benchmark_09",
-                "action": {
-                  "type": "course.restart"
-                },
-                "label": "重新开始",
-                "visible": false
-              },
-              {
-                "id": "teacher_button_benchmark_10",
-                "action": {
-                  "type": "audio.toggle-mute"
-                },
-                "label": "声音",
-                "visible": true
-              },
-              {
-                "id": "teacher_button_benchmark_11",
-                "action": {
-                  "type": "player.fullscreen.toggle"
-                },
-                "label": "全屏",
-                "visible": true
+        "kind": "component",
+        "role": "teacher-controller",
+        "component": {
+          "packageId": "com.ittoedu.teacher-controller",
+          "version": "1.0.0"
+        },
+        "props": {
+          "title": "教师控制台",
+          "showSceneProgress": true,
+          "compact": false,
+          "collapsible": true,
+          "defaultCollapsed": true,
+          "buttons": [
+            {
+              "id": "previous",
+              "label": "上一步",
+              "visible": true,
+              "action": {
+                "type": "step.previous"
               }
-            ],
-            "style": {
-              "backgroundColor": "#172033",
-              "backgroundOpacity": 0.94,
-              "accentColor": "#e7b85c",
-              "textColor": "#f8fafc",
-              "cornerRadius": 16
             },
-            "includeInStaticExports": false
-          }
+            {
+              "id": "next",
+              "label": "下一步",
+              "visible": true,
+              "action": {
+                "type": "step.next"
+              }
+            },
+            {
+              "id": "previous-scene",
+              "label": "上一场景",
+              "visible": true,
+              "action": {
+                "type": "scene.previous"
+              }
+            },
+            {
+              "id": "next-scene",
+              "label": "下一场景",
+              "visible": true,
+              "action": {
+                "type": "scene.next"
+              }
+            },
+            {
+              "id": "directory",
+              "label": "场景目录",
+              "visible": true,
+              "action": {
+                "type": "scene.open-picker"
+              }
+            },
+            {
+              "id": "replay",
+              "label": "重播",
+              "visible": true,
+              "action": {
+                "type": "scene.replay"
+              }
+            },
+            {
+              "id": "restart",
+              "label": "重新开始",
+              "visible": false,
+              "action": {
+                "type": "course.restart"
+              }
+            },
+            {
+              "id": "audio",
+              "label": "声音",
+              "visible": true,
+              "action": {
+                "type": "audio.toggle-mute"
+              }
+            },
+            {
+              "id": "fullscreen",
+              "label": "全屏",
+              "visible": true,
+              "action": {
+                "type": "player.fullscreen.toggle"
+              }
+            }
+          ],
+          "style": {
+            "backgroundColor": "#172033",
+            "backgroundOpacity": 0.94,
+            "accentColor": "#e7b85c",
+            "textColor": "#f8fafc",
+            "cornerRadius": 16
+          },
+          "includeInStaticExports": false
         }
       },
       "visibility": {

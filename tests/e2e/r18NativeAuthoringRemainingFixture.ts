@@ -1,3 +1,5 @@
+import { requireProjectWorkspace } from './r18NativeAuthoringFixture'
+import { plainDocumentText } from '../../src/shared/document/content'
 import { createControllerFixture } from '../fixtures/teacherController'
 import { existsSync, readFileSync, readdirSync, realpathSync, statSync, writeFileSync } from 'node:fs'
 import { isAbsolute, join, relative, resolve } from 'node:path'
@@ -201,12 +203,12 @@ export async function loadRemainingFlowResume(productRoot: string, source: strin
   const current = readSaved(join(sourceRoot, 'T09-flow.h5lesson'))
   if (!spatialFailure) expect(readSaved(projectPath), 'Continue the already saved Flow result, without restoration or replay').toEqual(current)
   const paragraph = flowParagraph(current.project, REMAINING_IDS.paragraphTwo)
-  expect(paragraph.text.length).toBeLessThan(SECOND_PARAGRAPH.length * .8)
-  expect(paragraph.text).toMatch(/周期/)
-  expect(paragraph.text).toMatch(/往复|计时|时间/)
+  expect(plainDocumentText(paragraph.content).length).toBeLessThan(SECOND_PARAGRAPH.length * .8)
+  expect(plainDocumentText(paragraph.content)).toMatch(/周期/)
+  expect(plainDocumentText(paragraph.content)).toMatch(/往复|计时|时间/)
   // Regression guard for the observed physical error. Full text and image
   // review remains the semantic acceptance evidence.
-  expect(paragraph.text).toMatch(/(?:十次完整往复(?:运动)?|十个周期)[\s\S]{0,60}总时间[\s\S]{0,60}除以\s*(?:十|10)/)
+  expect(plainDocumentText(paragraph.content)).toMatch(/(?:十次完整往复(?:运动)?|十个周期)[\s\S]{0,60}总时间[\s\S]{0,60}除以\s*(?:十|10)/)
   expect(flowParagraph(current.project, REMAINING_IDS.paragraphOne)).toEqual(flowParagraph(applied.project, REMAINING_IDS.paragraphOne))
   expect(flowSurface(current.project).blocks.map(block => block.id)).toEqual(flowSurface(applied.project).blocks.map(block => block.id))
   expect(spatialSurface(current.project)).toEqual(spatialSurface(applied.project))
@@ -230,7 +232,7 @@ export async function loadRemainingFlowResume(productRoot: string, source: strin
     confirmConfiguration(record, selected.cli, selected.model, selected.effort)
     nativeId ??= record.externalSessionId
     expect(record.externalSessionId).toBe(nativeId)
-    expect(record.workspace.normalizedPath).toBe(projectPath.replace(/\\/g, '/').toLowerCase())
+    expect(requireProjectWorkspace(record.workspace).normalizedPath).toBe(projectPath.replace(/\\/g, '/').toLowerCase())
     if (stage === 'T08-plan') { expect(record.tasks.at(-1)?.intent).toBe('plan'); expect(committed(record)).toHaveLength(0) }
     else expect(committed(record).at(-1)?.afterRevision).toBe(archive.project.revision)
     const persisted = historyFiles.find(file => file.path.endsWith(`${record.id}.json`))
@@ -401,10 +403,10 @@ export async function loadRemainingRecoveredFlowResume(productRoot: string, sour
   expect(contained(sourceProfilePath, sourceRecoveryPath)).toBe(true)
   const sourceFlow = readSaved(sourceRecoveryPath)
   const recoveredParagraph = flowParagraph(sourceFlow.project, REMAINING_IDS.paragraphTwo)
-  expect(recoveredParagraph.text.length).toBeLessThan(SECOND_PARAGRAPH.length * .8)
-  expect(recoveredParagraph.text).toMatch(/周期/)
-  expect(recoveredParagraph.text).toMatch(/往复|计时|时间/)
-  expect(recoveredParagraph.text).toMatch(/(?:十次完整往复(?:运动)?|十个周期)[\s\S]{0,60}总时间[\s\S]{0,60}除以\s*(?:十|10)/)
+  expect(plainDocumentText(recoveredParagraph.content).length).toBeLessThan(SECOND_PARAGRAPH.length * .8)
+  expect(plainDocumentText(recoveredParagraph.content)).toMatch(/周期/)
+  expect(plainDocumentText(recoveredParagraph.content)).toMatch(/往复|计时|时间/)
+  expect(plainDocumentText(recoveredParagraph.content)).toMatch(/(?:十次完整往复(?:运动)?|十个周期)[\s\S]{0,60}总时间[\s\S]{0,60}除以\s*(?:十|10)/)
   expect(flowParagraph(sourceFlow.project, REMAINING_IDS.paragraphOne)).toEqual(flowParagraph(applied.project, REMAINING_IDS.paragraphOne))
   expect(flowSurface(sourceFlow.project).blocks.map(block => block.id)).toEqual(flowSurface(applied.project).blocks.map(block => block.id))
   expect(spatialSurface(sourceFlow.project)).toEqual(spatialSurface(applied.project))
@@ -424,7 +426,7 @@ export async function loadRemainingRecoveredFlowResume(productRoot: string, sour
   if (!previousExternalSessionId) throw new Error('The partial OpenCode Flow record has no native session identity')
   for (const record of [t03Record, t08PlanRecord, t08ApplyRecord, partialFlowRecord]) {
     expect(record.externalSessionId).toBe(partialFlowRecord.externalSessionId)
-    expect(record.workspace.normalizedPath).toBe(sourceProjectPath.replace(/\\/g, '/').toLowerCase())
+    expect(requireProjectWorkspace(record.workspace).normalizedPath).toBe(sourceProjectPath.replace(/\\/g, '/').toLowerCase())
   }
   expect(t08PlanRecord.tasks.at(-1)?.intent).toBe('plan')
   expect(committed(t08PlanRecord)).toHaveLength(0)
@@ -437,7 +439,7 @@ export async function loadRemainingRecoveredFlowResume(productRoot: string, sour
   const result = JSON.parse(readFileSync(join(recoveryRoot, 'recovery-result.json'), 'utf8'))
   expect(result).toMatchObject({ version: 1, kind: 'remaining-Flow-recovery', status: 'recovered-saved-reopened-zero-model',
     modelCalls: 0, sourceRevision: applied.project.revision, restoredRevision: sourceFlow.project.revision,
-    paragraph: recoveredParagraph.text, sourceNativeStatus: 'partial', originalNativeHistoryPreserved: true,
+    paragraph: plainDocumentText(recoveredParagraph.content), sourceNativeStatus: 'partial', originalNativeHistoryPreserved: true,
     nativeIdentityContinuity: 'not-claimed-across-save-as', modelCandidateReplayed: false, fixtureRestored: false, ownerAcceptance: false })
   expect(samePath(result.source.runRoot, sourceRoot)).toBe(true)
   expect(samePath(result.source.profilePath, sourceProfilePath)).toBe(true)
@@ -454,7 +456,7 @@ export async function loadRemainingRecoveredFlowResume(productRoot: string, sour
   expect(result.workspaceBoundary).toMatchObject({ workspace: {
     projectId: sourceFlow.project.id, normalizedPath: projectPath.replace(/\\/g, '/').toLowerCase(),
   }, records: [] })
-  expect(result.workspaceBoundary.workspace.normalizedPath).not.toBe(partialFlowRecord.workspace.normalizedPath)
+  expect(requireProjectWorkspace(result.workspaceBoundary.workspace).normalizedPath).not.toBe(requireProjectWorkspace(partialFlowRecord.workspace).normalizedPath)
   const recovered = readSaved(projectPath)
   expect(recovered).toEqual(sourceFlow)
   expect(readSaved(sourceProjectPath)).toEqual(applied)
@@ -542,7 +544,7 @@ export async function loadRemainingPlanContinuation(_productRoot: string, contin
     if (!record) throw new Error('Original Claude record is missing: ' + goal)
     confirmConfiguration(record, selected.cli, selected.model, selected.effort)
     expect(record.externalSessionId).toBe(checkpoint.externalSessionId)
-    expect(record.workspace.normalizedPath).toBe(projectPath.replace(/\\/g, '/').toLowerCase())
+    expect(requireProjectWorkspace(record.workspace).normalizedPath).toBe(projectPath.replace(/\\/g, '/').toLowerCase())
     persistedRecord(sourceHistory, record, 'Original Claude record')
     return record
   }
@@ -698,7 +700,7 @@ export async function loadRemainingPlanContinuation(_productRoot: string, contin
   for (const record of [reviewedRecord, appliedRecord, finalRecord]) {
     confirmConfiguration(record, selected.cli, selected.model, selected.effort)
     expect(record.externalSessionId).toBe(checkpoint.externalSessionId)
-    expect(record.workspace.normalizedPath).toBe(projectPath.replace(/\\/g, '/').toLowerCase())
+    expect(requireProjectWorkspace(record.workspace).normalizedPath).toBe(projectPath.replace(/\\/g, '/').toLowerCase())
   }
   const executionHistory = nativeHistoryFiles(profilePath)
   for (const record of [...sourceRecords, ...clarificationRecords, ...actualRecords, ...reusedT08Records, finalRecord]) {
@@ -728,20 +730,20 @@ export async function loadRemainingPlanContinuation(_productRoot: string, contin
     expect(previousFlowFailure.reason.trim().length).toBeGreaterThan(0)
     const incorrectPrevious = readSaved(join(previousFlowFailureRoot, 'T09-flow.h5lesson'))
     const incorrectParagraph = flowParagraph(incorrectPrevious.project, REMAINING_IDS.paragraphTwo)
-    expect(previousFlowFailure.actualText).toBe(incorrectParagraph.text)
-    expect(incorrectParagraph.text).toContain('经过平衡位置')
-    expect(incorrectParagraph.text).not.toMatch(/(?:十次完整往复(?:运动)?|十个周期)[\s\S]{0,60}总时间[\s\S]{0,60}除以\s*(?:十|10)/)
+    expect(previousFlowFailure.actualText).toBe(plainDocumentText(incorrectParagraph.content))
+    expect(plainDocumentText(incorrectParagraph.content)).toContain('经过平衡位置')
+    expect(plainDocumentText(incorrectParagraph.content)).not.toMatch(/(?:十次完整往复(?:运动)?|十个周期)[\s\S]{0,60}总时间[\s\S]{0,60}除以\s*(?:十|10)/)
     expect(readSaved(join(continuationRoot, 'before-Flow-correction.h5lesson'))).toEqual(incorrectPrevious)
   }
   const current = readSaved(savedPath)
   expect(readSaved(projectPath)).toEqual(current)
   const paragraph = flowParagraph(current.project, REMAINING_IDS.paragraphTwo)
-  expect(paragraph.text.length).toBeLessThan(SECOND_PARAGRAPH.length * .8)
-  expect(paragraph.text).toMatch(/周期/)
-  expect(paragraph.text).toMatch(/往复|计时|时间/)
+  expect(plainDocumentText(paragraph.content).length).toBeLessThan(SECOND_PARAGRAPH.length * .8)
+  expect(plainDocumentText(paragraph.content)).toMatch(/周期/)
+  expect(plainDocumentText(paragraph.content)).toMatch(/往复|计时|时间/)
   // Reject the observed “ten crossings” error without claiming that this
   // narrow assertion replaces the retained human semantic review.
-  expect(paragraph.text).toMatch(/(?:十次完整往复(?:运动)?|十个周期)[\s\S]{0,60}总时间[\s\S]{0,60}除以\s*(?:十|10)/)
+  expect(plainDocumentText(paragraph.content)).toMatch(/(?:十次完整往复(?:运动)?|十个周期)[\s\S]{0,60}总时间[\s\S]{0,60}除以\s*(?:十|10)/)
   expect(flowParagraph(current.project, REMAINING_IDS.paragraphOne)).toEqual(flowParagraph(applied.project, REMAINING_IDS.paragraphOne))
   expect(flowSurface(current.project).blocks.map(block => block.id)).toEqual(flowSurface(applied.project).blocks.map(block => block.id))
   expect(spatialSurface(current.project)).toEqual(spatialSurface(applied.project))
@@ -752,7 +754,7 @@ export async function loadRemainingPlanContinuation(_productRoot: string, contin
     }
     expect(checkpoint.flowSemanticReview).toEqual(flowSemanticReview)
     expect(flowSemanticReview).toMatchObject({ approved: true, pending: false, recordId: finalRecord.id,
-      externalSessionId: finalRecord.externalSessionId, actualText: paragraph.text, savedPath })
+      externalSessionId: finalRecord.externalSessionId, actualText: plainDocumentText(paragraph.content), savedPath })
     expect(typeof flowSemanticReview.reviewer).toBe('string')
     expect(flowSemanticReview.reviewer.trim().length).toBeGreaterThan(0)
     expect(typeof flowSemanticReview.reason).toBe('string')
@@ -910,10 +912,10 @@ export async function loadRemainingAfterT11QueuedCancelledResume(productRoot: st
   expect(JSON.parse(readFileSync(join(root, 'failure-current.project.json'), 'utf8'))).toEqual(current.project)
 
   const paragraph = flowParagraph(flow.project, REMAINING_IDS.paragraphTwo)
-  expect(paragraph.text.length).toBeLessThan(SECOND_PARAGRAPH.length * .8)
-  expect(paragraph.text).toMatch(/周期/)
-  expect(paragraph.text).toMatch(/往复|计时|时间/)
-  expect(paragraph.text).toMatch(/(?:十次完整往复(?:运动)?|十个周期)[\s\S]{0,60}总时间[\s\S]{0,60}除以\s*(?:十|10)/)
+  expect(plainDocumentText(paragraph.content).length).toBeLessThan(SECOND_PARAGRAPH.length * .8)
+  expect(plainDocumentText(paragraph.content)).toMatch(/周期/)
+  expect(plainDocumentText(paragraph.content)).toMatch(/往复|计时|时间/)
+  expect(plainDocumentText(paragraph.content)).toMatch(/(?:十次完整往复(?:运动)?|十个周期)[\s\S]{0,60}总时间[\s\S]{0,60}除以\s*(?:十|10)/)
   expect(spatial.project.revision).toBe(flow.project.revision + 1)
   const camera = JSON.parse(readFileSync(join(root, 'T09-spatial-current-camera.json'), 'utf8'))
   const spatialItem = spatialSurface(spatial.project).world.layerItems.find(item => item.layerItemId === REMAINING_IDS.spatialObject)
@@ -929,7 +931,7 @@ export async function loadRemainingAfterT11QueuedCancelledResume(productRoot: st
   const records = nativeRecordsFromEvidence(join(root, 'failure.native.json'))
   const workspacePath = projectPath.replace(/\\/g, '/').toLowerCase()
   const recordFor = (goal: string, status: string) => {
-    const record = records.find(value => value.workspace.normalizedPath === workspacePath
+    const record = records.find(value => requireProjectWorkspace(value.workspace).normalizedPath === workspacePath
       && value.tasks.at(-1)?.goal === goal && value.tasks.at(-1)?.status === status)
     if (!record) throw new Error(`Missing actual retained native record: ${goal} (${status})`)
     confirmConfiguration(record, selected.cli, selected.model, selected.effort)
@@ -945,7 +947,7 @@ export async function loadRemainingAfterT11QueuedCancelledResume(productRoot: st
   if (!nativeId) throw new Error('The recovered native continuation has no external session identity')
   for (const record of [flowRecord, spatialRecord, repairRecord, questionRecord, answerRecord, queuedRecord]) {
     expect(record.externalSessionId).toBe(nativeId)
-    expect(record.workspace.normalizedPath).toBe(workspacePath)
+    expect(requireProjectWorkspace(record.workspace).normalizedPath).toBe(workspacePath)
   }
   expect(committed(flowRecord).at(-1)?.afterRevision).toBe(flow.project.revision)
   expect(committed(spatialRecord).at(-1)?.afterRevision).toBe(spatial.project.revision)
@@ -1075,10 +1077,10 @@ export async function writeRemainingLesson(projectPath: string): Promise<CourseP
   const project = material.project
   const paper = flowSurface(project), heading = paper.blocks[0]!
   if (heading.type !== 'heading') throw new Error('Formal Flow factory did not create its heading anchor')
-  heading.text = '观察摆锤的运动'
-  paper.blocks = [heading, { id: REMAINING_IDS.paragraphOne, type: 'paragraph', text: FIRST_PARAGRAPH },
-    { id: REMAINING_IDS.paragraphTwo, type: 'paragraph', text: SECOND_PARAGRAPH }]
-  project.locations.find(location => location.id === heading.id)!.label = heading.text
+  heading.content = { inlines: [{ type: 'text', text: '观察摆锤的运动' }] }
+  paper.blocks = [heading, { id: REMAINING_IDS.paragraphOne, type: 'paragraph', content: { inlines: [{ type: 'text', text: FIRST_PARAGRAPH }] } },
+    { id: REMAINING_IDS.paragraphTwo, type: 'paragraph', content: { inlines: [{ type: 'text', text: SECOND_PARAGRAPH }] } }]
+  project.locations.find(location => location.id === heading.id)!.label = plainDocumentText(heading.content)
   const world = spatialSurface(project)
   world.camera.home = { x: 240, y: -120, zoom: .8 }
   Object.assign(world.camera.frames[0]!, world.camera.home, { name: '当前教学镜头' })

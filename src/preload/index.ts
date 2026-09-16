@@ -4,6 +4,12 @@ import type { DesktopAPI } from '../shared/ipcTypes'
 // Sandboxed preloads cannot require local CommonJS modules at runtime. Keep this
 // whitelist self-contained; the shared declaration remains the source of API types.
 const IPC_CHANNELS = {
+  lessonAuthoring: 'lesson-authoring:operate',
+  lessonDocumentAi: 'lesson-document-ai:operate',
+  flowDocumentRecovery: 'flow-document-recovery:operate',
+  lessonMaterial: 'lesson-material:operate',
+  lessonDocument: 'lesson-document:operate',
+  lesson: 'lesson:operate',
   materials: 'materials:operate',
   localAgent: 'local-agent:operate',
   captureAuthoringObservation: 'local-agent:capture-observation',
@@ -41,6 +47,8 @@ const IPC_CHANNELS = {
   dirtyState: 'app:dirty-state',
   requestSave: 'app:request-save',
   requestSaveAndClose: 'app:request-save-and-close',
+  requestPreserveAndClose: 'app:request-preserve-and-close',
+  preserveAndCloseResult: 'app:preserve-and-close-result',
   saveAndCloseResult: 'app:save-and-close-result',
   reportDiagnostic: 'diagnostics:report',
   exportDiagnostics: 'diagnostics:export',
@@ -119,6 +127,33 @@ async function invoke<T>(channel: string, ...args: unknown[]): Promise<T> {
 }
 
 const desktopAPI = Object.freeze<DesktopAPI>({
+  lessonDocumentAi: input => invoke(IPC_CHANNELS.lessonDocumentAi, input),
+  lessonAuthoring: input => invoke(IPC_CHANNELS.lessonAuthoring, input),
+  flowDocumentRecovery: {
+    read: target => invoke(IPC_CHANNELS.flowDocumentRecovery, { operation: 'read', target }),
+    write: record => invoke(IPC_CHANNELS.flowDocumentRecovery, { operation: 'write', record }),
+    clear: target => invoke(IPC_CHANNELS.flowDocumentRecovery, { operation: 'clear', target }),
+  },
+  lessonMaterials: {
+    selectSource: input => invoke(IPC_CHANNELS.lessonMaterial, { operation: 'select', ...input }),
+    importMaterial: (target, input) => invoke(IPC_CHANNELS.lessonMaterial, { operation: 'import', target, input }),
+    list: target => invoke(IPC_CHANNELS.lessonMaterial, { operation: 'list', target }),
+    read: (target, input) => invoke(IPC_CHANNELS.lessonMaterial, { operation: 'read', target, input }),
+  },
+  lessonFiles: {
+    readAiRecords: ref => invoke(IPC_CHANNELS.lessonDocument, { operation: 'read-ai-records', ref }),
+    clearAiRecords: (ref, ids) => invoke(IPC_CHANNELS.lessonDocument, { operation: 'clear-ai-records', ref, ids }),
+    readResource: (ref, relativePath) => invoke(IPC_CHANNELS.lessonDocument, { operation: 'read-resource', ref, relativePath }),
+    invalidateAiEdits: ref => invoke(IPC_CHANNELS.lessonDocument, { operation: 'invalidate', ref }),
+    openDocument: ref => invoke(IPC_CHANNELS.lessonDocument, { operation: 'open', ref }),
+    saveDocument: request => invoke(IPC_CHANNELS.lessonDocument, { operation: 'save', request }),
+    prepareAiEdit: (ref, ranges, epoch) => invoke(IPC_CHANNELS.lessonDocument, { operation: 'prepare', ref, ranges, epoch }),
+    applyAiEdit: request => invoke(IPC_CHANNELS.lessonDocument, { operation: 'apply', request }),
+    revertAiEdit: (record, currentVersion) => invoke(IPC_CHANNELS.lessonDocument, { operation: 'revert', record, currentVersion }),
+    readRecovery: ref => invoke(IPC_CHANNELS.lessonDocument, { operation: 'recovery', ref }),
+    preserveDraft: (ref, source, expectedVersion, attachments) => invoke(IPC_CHANNELS.lessonDocument, { operation: 'preserve', ref, source, expectedVersion, attachments }),
+  },
+  lesson: (input) => invoke(IPC_CHANNELS.lesson, input),
   legacyPpt: (input) => invoke(IPC_CHANNELS.legacyPpt, input),
   localAgent: (input) => invoke(IPC_CHANNELS.localAgent, input),
   captureAuthoringObservation: (input) => invoke(IPC_CHANNELS.captureAuthoringObservation, input),
@@ -187,20 +222,30 @@ const desktopAPI = Object.freeze<DesktopAPI>({
       ipcRenderer.removeListener(IPC_CHANNELS.requestSave, listener)
     }
   },
+  onRequestPreserveAndClose: handler => {
+    if (typeof handler !== 'function') throw new TypeError('关闭前恢复稿处理器必须是函数。')
+    const listener = (_event: Electron.IpcRendererEvent, requestId: unknown) => {
+      if (typeof requestId !== 'string') return
+      void Promise.resolve().then(handler).then(saved => ipcRenderer.send(IPC_CHANNELS.preserveAndCloseResult, requestId, saved === true), () => ipcRenderer.send(IPC_CHANNELS.preserveAndCloseResult, requestId, false))
+    }
+    ipcRenderer.on(IPC_CHANNELS.requestPreserveAndClose, listener)
+    return () => { ipcRenderer.removeListener(IPC_CHANNELS.requestPreserveAndClose, listener) }
+  },
   onRequestSaveAndClose: (handler) => {
     if (typeof handler !== 'function') {
       throw new TypeError('关闭前保存处理器必须是函数。')
     }
 
-    const listener = (): void => {
+    const listener = (_event: Electron.IpcRendererEvent, requestId: unknown): void => {
+      if (typeof requestId !== 'string') return
       void Promise.resolve()
         .then(handler)
         .then((saved) => {
-          ipcRenderer.send(IPC_CHANNELS.saveAndCloseResult, saved === true)
+          ipcRenderer.send(IPC_CHANNELS.saveAndCloseResult, requestId, saved === true)
         })
         .catch((error) => {
           console.error('执行关闭前保存失败', error)
-          ipcRenderer.send(IPC_CHANNELS.saveAndCloseResult, false)
+          ipcRenderer.send(IPC_CHANNELS.saveAndCloseResult, requestId, false)
         })
     }
     ipcRenderer.on(IPC_CHANNELS.requestSaveAndClose, listener)
@@ -213,3 +258,6 @@ const desktopAPI = Object.freeze<DesktopAPI>({
 })
 
 contextBridge.exposeInMainWorld('desktopAPI', desktopAPI)
+if (process.env.COURSEWARE_E2E_BACKGROUND === '1') {
+  contextBridge.exposeInMainWorld('__COURSEWARE_E2E_BACKGROUND__', true)
+}

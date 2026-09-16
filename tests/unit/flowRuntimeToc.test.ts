@@ -19,20 +19,20 @@ function flowSurface(): PublishedFlowSurface {
     title: '工业化与城市',
     layout: { readingWidth: 760, wideContentWidth: 1120 },
     blocks: [
-      { id: 'h1', type: 'heading', level: 1, text: '阅读任务' },
-      { id: 'p1', type: 'paragraph', text: '普通段落不应出现在运行目录' },
+      { id: 'h1', type: 'heading', level: 1, content: { inlines: [{ type: 'text', text: '阅读任务' }] }},
+      { id: 'p1', type: 'paragraph', content: { inlines: [{ type: 'text', text: '普通段落不应出现在运行目录' }] }},
       {
         id: 'sec-a',
         type: 'section',
-        title: '材料 A',
+        title: { inlines: [{ type: 'text', text: '材料 A' }] },
         collapsedByDefault: false,
         blocks: [
-          { id: 'h2', type: 'heading', level: 2, text: '人口与工厂' },
+          { id: 'h2', type: 'heading', level: 2, content: { inlines: [{ type: 'text', text: '人口与工厂' }] }},
           {
             id: 'table-1',
             type: 'table',
-            columns: [{ id: 'c1', header: '项' }],
-            rows: [{ id: 'r1', cells: { c1: '值' } }],
+            columns: [{ id: 'c1', header: { inlines: [{ type: 'text', text: '项' }] }}],
+            rows: [{ id: 'r1', cells: { c1: { inlines: [{ type: 'text', text: '值' }] }} }],
           },
         ],
       },
@@ -40,7 +40,7 @@ function flowSurface(): PublishedFlowSurface {
         id: 'list-1',
         type: 'list',
         ordered: true,
-        items: [{ id: 'li-1', text: '列表项不上目录' }],
+        items: [{ id: 'li-1', content: { inlines: [{ type: 'text', text: '列表项不上目录' }] }}],
       },
     ],
     surfaceLayerItems: [],
@@ -54,8 +54,8 @@ function secondSurface(): PublishedFlowSurface {
     title: '课堂讨论',
     layout: { readingWidth: 760, wideContentWidth: 1120 },
     blocks: [
-      { id: 'h-discuss', type: 'heading', level: 1, text: '讨论题' },
-      { id: 'p-discuss', type: 'paragraph', text: '另一页正文' },
+      { id: 'h-discuss', type: 'heading', level: 1, content: { inlines: [{ type: 'text', text: '讨论题' }] }},
+      { id: 'p-discuss', type: 'paragraph', content: { inlines: [{ type: 'text', text: '另一页正文' }] }},
     ],
     surfaceLayerItems: [],
   }
@@ -123,8 +123,8 @@ describe('Flow runtime TOC model', () => {
 
   it('does not treat quote/formula/media as directory anchors', () => {
     const extra: FlowBlock[] = [
-      { id: 'q1', type: 'quote', text: '引用' },
-      { id: 'f1', type: 'formula', formulaId: 'f1', accessibleText: 'x', ast: { type: 'token', value: 'x' } },
+      { id: 'q1', type: 'quote', content: { inlines: [{ type: 'text', text: '引用' }] }},
+      { id: 'f1', type: 'formula', formulaId: 'f1', accessibleText: 'x', latex: "x"},
       {
         id: 'm1',
         type: 'media',

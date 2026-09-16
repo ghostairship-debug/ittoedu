@@ -484,6 +484,25 @@ export interface SpatialWorldContentFitInput {
   readonly padding?: number
 }
 
+function spatialWorldContentLayers(session: SpatialAuthoringSession) {
+  const view = buildSpatialEditorView({
+    project: session.history.present,
+    locationId: session.selection.locationId,
+    sessionCamera: session.sessionCamera,
+  })
+  return view.layers.filter((layer) => (
+    layer.coordinateSpace === 'world' && layer.effectiveVisible
+  ))
+}
+
+/**
+ * Whether the current Spatial world has visible world-coordinate content.
+ * Global HUD and teacher-controller layers intentionally do not count.
+ */
+export function spatialSessionHasWorldContent(session: SpatialAuthoringSession): boolean {
+  return spatialWorldContentLayers(session).length > 0
+}
+
 /**
  * Session-only AABB fit of world + surface (world-space) items.
  * Not the zoom-bar 「适合窗口」 action. Persist by updating a camera frame afterwards.
@@ -495,15 +514,13 @@ export function spatialSessionCameraFittingWorldContent(
   if (!(input.viewportWidth > 0) || !(input.viewportHeight > 0)) {
     throw new Error('适配视口尺寸必须大于零')
   }
-  const view = buildSpatialEditorView({
-    project: session.history.present,
-    locationId: session.selection.locationId,
-    sessionCamera: session.sessionCamera,
-  })
-  const worldItems = view.layers.filter((layer) =>
-    layer.coordinateSpace === 'world' && layer.effectiveVisible,
-  )
+  const worldItems = spatialWorldContentLayers(session)
   if (worldItems.length === 0) {
+    const view = buildSpatialEditorView({
+      project: session.history.present,
+      locationId: session.selection.locationId,
+      sessionCamera: session.sessionCamera,
+    })
     return copySpatialSessionCamera(spatialSessionCameraFromPose(view.camera.home))
   }
   const minX = Math.min(...worldItems.map((layer) => layer.item.frame.x))

@@ -9,7 +9,6 @@ export type {
   CourseStateScalar,
 } from '../course-state/types'
 import {
-  FormulaAstNode,
   NativeChartContent,
   NativeFormulaContent,
   NativeImageContent,
@@ -18,7 +17,6 @@ import {
   NativeTableContent,
   NativeTextContent,
   NativeVideoContent,
-  TextRun,
 } from '../native-v1/types'
 import type { ProjectDesignTokens } from '../design-v1/types'
 import type { AssetMeta, ProjectMediaSettings } from '../media-v1/types'
@@ -271,129 +269,25 @@ export interface FlowBlockBase {
   id: string
 }
 
-/**
- * Plain-text plus optional V8 `TextRun[]` selection styles.
- * `text` remains the glyph source; `runs` are range styles over that string.
- */
-export interface FlowRichText {
-  text: string
-  runs?: TextRun[]
-}
-
-export type FlowTableCell = string | FlowRichText
-
-export interface FlowListItem extends FlowRichText {
-  id: string
-}
-
-export interface FlowHeadingBlock extends FlowBlockBase, FlowRichText {
-  type: 'heading'
-  level: 1 | 2 | 3 | 4 | 5 | 6
-  textAlign?: 'left' | 'center' | 'right'
-  lineSpacing?: number
-}
-
-export interface FlowParagraphBlock extends FlowBlockBase, FlowRichText {
-  type: 'paragraph'
-  textAlign?: 'left' | 'center' | 'right'
-  lineSpacing?: number
-}
-
-export interface FlowListBlock extends FlowBlockBase {
-  type: 'list'
-  ordered: boolean
-  items: FlowListItem[]
-}
-
-export interface FlowQuoteBlock extends FlowBlockBase, FlowRichText {
-  type: 'quote'
-  citation?: string
-  textAlign?: 'left' | 'center' | 'right'
-  lineSpacing?: number
-}
-
-export interface FlowDividerBlock extends FlowBlockBase {
-  type: 'divider'
-}
-
-export interface FlowMediaBlock extends FlowBlockBase {
-  type: 'media'
-  assetId: string
-  mediaKind: 'image' | 'audio' | 'video'
-  altText?: string
-  caption?: string
-  layout: 'content-width' | 'wide' | 'full-width'
-  wrap?: 'none' | 'left' | 'right'
-}
-
-export interface FlowTableBlock extends FlowBlockBase {
-  type: 'table'
-  caption?: string
-  columns: Array<{ id: string; header: string }>
-  rows: Array<{ id: string; cells: Record<string, FlowTableCell> }>
-  merges?: import('../../tableMerge').TableMergeRegion[]
-}
-
-/** A chart in normal document flow. Width is the paper reading width. */
-export interface FlowChartBlock extends FlowBlockBase {
-  type: 'chart'
-  chart: NativeChartContent
-  /** CSS pixels; scales down with paper width, never an absolute world position. */
-  height: number
-}
-
-export interface FlowFormulaBlock extends FlowBlockBase {
-  type: 'formula'
-  formulaId: string
-  accessibleText: string
-  ast: FormulaAstNode
-}
-
-export interface FlowCodeBlock extends FlowBlockBase {
-  type: 'code'
-  language?: string
-  code: string
-}
-
-export interface FlowCalloutBlock extends FlowBlockBase {
-  type: 'callout'
-  tone: 'note' | 'example' | 'warning' | 'conclusion'
-  title?: string
-  body: string
-}
-
-export interface FlowSectionBlock extends FlowBlockBase {
-  type: 'section'
-  title: string
-  collapsedByDefault: boolean
-  blocks: FlowBlock[]
-}
-
-export interface FlowComponentBlock extends FlowBlockBase {
-  type: 'component'
-  component: {
-    packageId: string
-    version: string
-  }
-  props: Record<string, unknown>
-  staticFallbackAssetId: string
-  wrap?: 'none' | 'left' | 'right'
-}
-
-export type FlowBlock =
-  | FlowHeadingBlock
-  | FlowParagraphBlock
-  | FlowListBlock
-  | FlowQuoteBlock
-  | FlowDividerBlock
-  | FlowMediaBlock
-  | FlowTableBlock
-  | FlowChartBlock
-  | FlowFormulaBlock
-  | FlowCodeBlock
-  | FlowCalloutBlock
-  | FlowSectionBlock
-  | FlowComponentBlock
+import type { DocumentBlock, FlowTextContent } from '../../document/content'
+export type { FlowTextContent, FlowInline } from '../../document/content'
+export type FlowRichText = FlowTextContent
+export type FlowTableCell = FlowTextContent
+export type FlowListItem = { id: string; content: FlowTextContent }
+export type FlowBlock = DocumentBlock
+export type FlowHeadingBlock = Extract<DocumentBlock, { type: 'heading' }>
+export type FlowParagraphBlock = Extract<DocumentBlock, { type: 'paragraph' }>
+export type FlowListBlock = Extract<DocumentBlock, { type: 'list' }>
+export type FlowQuoteBlock = Extract<DocumentBlock, { type: 'quote' }>
+export type FlowDividerBlock = Extract<DocumentBlock, { type: 'divider' }>
+export type FlowMediaBlock = Extract<DocumentBlock, { type: 'media' }>
+export type FlowTableBlock = Extract<DocumentBlock, { type: 'table' }>
+export type FlowChartBlock = Extract<DocumentBlock, { type: 'chart' }>
+export type FlowFormulaBlock = Extract<DocumentBlock, { type: 'formula' }>
+export type FlowCodeBlock = Extract<DocumentBlock, { type: 'code' }>
+export type FlowCalloutBlock = Extract<DocumentBlock, { type: 'callout' }>
+export type FlowSectionBlock = Extract<DocumentBlock, { type: 'section' }>
+export type FlowComponentBlock = Extract<DocumentBlock, { type: 'component' }>
 
 export interface FlowSurfaceDocument extends SurfaceBase {
   type: 'flow'

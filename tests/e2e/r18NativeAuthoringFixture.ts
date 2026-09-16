@@ -133,8 +133,8 @@ function readNativeT01Evidence(productRoot: string, source: string,
   const t01Record = t01Records[0]!
   expect(t01Record.adapter).toBe(selected.adapter)
   expect(t01Record.externalSessionId).toBeTruthy()
-  expect(t01Record.workspace.projectId).toBe(original.project.id)
-  expect(t01Record.workspace.normalizedPath).toBe(projectPath.replace(/\\/g, '/').toLowerCase())
+  expect(requireProjectWorkspace(t01Record.workspace).projectId).toBe(original.project.id)
+  expect(requireProjectWorkspace(t01Record.workspace).normalizedPath).toBe(projectPath.replace(/\\/g, '/').toLowerCase())
   expect(t01Record.tasks.at(-1)?.goal).toBe(NATIVE_PROMPTS.T01)
   expect(t01Record.tasks.at(-1)?.status).toBe('completed')
   expect(t01Record.hostResults).toHaveLength(0)
@@ -778,7 +778,14 @@ function nativePermissionPaths(title: string): string[] {
 }
 
 function sameWorkspace(left: LocalAgentRecordV2['workspace'], right: LocalAgentRecordV2['workspace']): boolean {
-  return left.version === right.version && left.projectId === right.projectId && left.normalizedPath === right.normalizedPath
+  const leftProject = requireProjectWorkspace(left)
+  const rightProject = requireProjectWorkspace(right)
+  return leftProject.version === rightProject.version && leftProject.projectId === rightProject.projectId && leftProject.normalizedPath === rightProject.normalizedPath
+}
+
+export function requireProjectWorkspace(workspace: LocalAgentRecordV2['workspace']) {
+  if (!('projectId' in workspace) || !('normalizedPath' in workspace)) throw new Error('Expected an engineering project workspace for this authoring test')
+  return workspace
 }
 
 function sameNativePath(left: string, right: string): boolean {

@@ -6,6 +6,7 @@ import { prepareComponentPatch } from './candidate-component-patch'
 import { generationRequestSchema } from '../src/shared/generationContract'
 import { parseGenerationCandidate, MAX_GENERATION_RESULT_BYTES } from '../src/shared/generationResult'
 import { checkAuthoringOperationConditions, type AuthoringOperationCondition } from '../src/shared/authoringOperationConditions'
+import { checkGenerationStaticPrecheck } from '../src/shared/generationStaticPrecheck'
 
 /** Bundled with its formal parsers into the versioned capability workspace.
  * No repository, node_modules, service, live document or provider is needed. */
@@ -55,6 +56,7 @@ async function main() {
     if (step.destination.kind === 'create' || step.destination.kind === 'update') diagnostics.push(...checkAuthoringOperationConditions(card.conditions ?? [], step.destination, step.input).map(error => ({ stepId: step.id, ...error })))
     else deferred.push({ stepId: step.id, check: 'created-target', message: '需要宿主前序创建回执' })
   }
+  diagnostics.push(...checkGenerationStaticPrecheck(candidate, request))
   if (diagnostics.length) { console.error(JSON.stringify({ status: 'rejected', diagnostics })); process.exitCode = 1; return }
   if (!args.includes('--check')) {
     const destination = path.join(root, 'candidate.json')
@@ -63,7 +65,11 @@ async function main() {
     await writeFile(temporary, JSON.stringify(candidate), { flag: 'wx', mode: 0o600 })
     await rename(temporary, destination)
   }
-  console.log(JSON.stringify({ status: 'prechecked', requestId: request.requestId, candidateFile: args.includes('--check') ? null : 'candidate.json', deferred,
-    message: '候选结构、工具字段及静态目标条件通过；素材、运行期细化约束、当前版本与动态行为仍需宿主检查，尚未提交。' }))
+  const checkOnly = args.includes('--check')
+  console.log(JSON.stringify(checkOnly
+    ? { status: 'prechecked', requestId: request.requestId, candidateFile: null, delivery: 'not-delivered', deferred,
+      message: '仅预检通过，未生成交付文件，不能声明已交付；交付须去掉 --check 再运行。候选结构、工具字段及静态目标条件通过；素材、运行期细化约束、当前版本与动态行为仍需宿主检查，尚未提交。' }
+    : { status: 'ready-for-host', requestId: request.requestId, candidateFile: 'candidate.json', delivery: 'ready-for-host', deferred,
+      message: '候选已写入当前请求的 candidate.json，可向宿主声明交付；这还不是工程提交。候选结构、工具字段及静态目标条件通过；素材、运行期细化约束、当前版本与动态行为仍需宿主检查，尚未提交。' }))
 }
 main().catch(error => { console.error(JSON.stringify({ status: 'rejected', diagnostics: error.issues ?? [{ code: 'candidate-precheck', path: [], message: error.message }] })); process.exitCode = 1 })

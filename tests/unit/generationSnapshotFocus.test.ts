@@ -1,6 +1,7 @@
+import { captureGenerationFixture as captureGenerationSnapshot } from '../fixtures/generationSnapshot'
 // @vitest-environment node
 import { describe, expect, it } from 'vitest'
-import { captureGenerationSnapshot, type GenerationReferenceScope } from '@/renderer/authoring/generation/generationSnapshot'
+import { type GenerationReferenceScope } from '@/renderer/authoring/generation/generationSnapshot'
 import { generationCapabilityContext } from '@/renderer/authoring/generation/generationCapabilities'
 import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
 import { createBlankFlowCourseProject } from '@/renderer/project/createFlowCourseProject'
@@ -38,7 +39,7 @@ describe('selection focus in whole-page generation snapshots', () => {
     const before = snapshot(document, [], 'page', { [pkg.manifest.id]: pkg })
     const flow = document.surfaces.find(surface => surface.type === 'flow')!
     flow.blocks.push({ type: 'component', id: 'created-sort', component: { packageId: pkg.manifest.id, version: pkg.manifest.version }, props: {}, staticFallbackAssetId: 'fallback' })
-    flow.blocks.push({ type: 'heading', id: 'created-heading', level: 2, text: '观察步骤' })
+    flow.blocks.push({ type: 'heading', id: 'created-heading', level: 2, content: { inlines: [{ type: 'text', text: '观察步骤' }] } })
     document.locations.push({ id: 'created-heading', label: '观察步骤', kind: 'flow-block', blockId: 'created-heading', surfaceId: flow.id })
     document.revision++
     const projection = projectEffectiveLayers({ project: document, locationId: document.startLocationId })
@@ -47,7 +48,7 @@ describe('selection focus in whole-page generation snapshots', () => {
       additionalLocationIds: ['created-heading'],
       sharedComponentSourceAddresses: before.destinations.flatMap(destination => destination.kind === 'update' ? [destination.target.authoringAddress] : []),
       instruction: before.instruction, purpose: before.purpose, componentPackages: { [pkg.manifest.id]: pkg } })
-    const source = (next.context as any).componentSources[0]
+    const source = (next.context as any).componentSources.find((source: { packageId: string }) => source.packageId === pkg.manifest.id)
     expect(source.editTargets.shared).toEqual({ status: 'unavailable', reason: 'outside-original-task-scope' })
     expect(source.editTargets.instance[0].target.itemId).toBe('created-sort')
     expect(next.destinations.some(destination => destination.kind === 'update' && destination.target.itemId === pkg.manifest.id)).toBe(false)
@@ -100,10 +101,37 @@ describe('selection focus in whole-page generation snapshots', () => {
     expect(context.cards[0]!.entry.id).toBe('native.content')
     expect(JSON.stringify(context.cards[0])).toContain('textStyle')
     const flow = generationCapabilityContext([{ surfaceType: 'flow', blocks: [
-      { block: { type: 'paragraph', text: '正文' }, selected: false },
+      { block: { type: 'paragraph', content: { inlines: [{ type: 'text', text: '正文' }] } }, selected: false },
       { block: { type: 'media', mediaKind: 'image', assetId: 'red' }, selected: true },
     ] }], 'local-edit')
     expect(flow.cards[0]!.entry.id).toBe('asset.image.transform')
+  })
+
+  it('recommends formal Slide create entries for allowed extension carriers, never navigation or illegal carrier targets', () => {
+    const document = createBlankCourseProject({ includeDefaultController: false, controls: 'none' })
+    const request = snapshot(document, [], 'page')
+    const recommendations = (request.context as any).capabilities.createRecommendations
+    const find = (carrier: string) => recommendations.find((entry: any) => entry.query.surface === 'slide'
+      && entry.query.owner === 'scene' && entry.query.carrier === carrier)
+    expect(find('generated-component').entries.map((entry: any) => entry.id)).toEqual(['component.insert'])
+    expect(find('runtime').entries.map((entry: any) => entry.id)).toEqual(['runtime.insert'])
+    expect(recommendations.some((entry: any) => entry.destinationIndexes.some((index: number) => {
+      const destination = request.destinations[index]
+      return destination.kind === 'create' && destination.scope.parent.kind === 'course-locations'
+    }))).toBe(false)
+
+    const world = structuredClone(request.destinations.find(destination => destination.kind === 'create' && destination.scope.parent.kind === 'owner')!)
+    if (world.kind !== 'create') throw new Error('Create destination required')
+    world.scope.surfaceType = 'spatial-2d'; world.scope.owner = 'world'
+    const rejected = generationCapabilityContext([], 'whole-course', undefined, '', { destinations: [world], allowedCarriers: ['runtime'] })
+    expect(rejected.createRecommendations).toEqual([])
+    expect(generationCapabilityContext([], 'local-edit', undefined, '', {
+      destinations: request.destinations.filter(destination => destination.kind !== 'create'),
+      allowedCarriers: request.allowedCarriers,
+    }).createRecommendations).toEqual([])
+    expect(generationCapabilityContext([], 'local-edit', undefined, '', {
+      destinations: request.destinations, allowedCarriers: ['native'],
+    }).createRecommendations).toEqual([])
   })
 
   it('offers exact local source targets and an explicitly shared target without forcing complete-file shared revision', () => {

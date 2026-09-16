@@ -1,4 +1,4 @@
-# r19-040-session-persistence-deletion：会话恢复、迁移/损坏隔离、Save As 隔离和范围删除
+# r19-040-session-persistence-deletion：课例对话恢复、损坏隔离、工程另存隔离和范围删除
 
 - Release: 1.9
 - Dependencies: `r18-060-release`, `r16-020-local-session-store`
@@ -7,54 +7,28 @@
 
 ## 结果与现状
 
-应用重启后可查看真实对话、引用、任务和提交结果，并用新观察继续未完成目标；旧记录可迁移，单条损坏不阻塞工程，按会话/工程/全部删除范围准确。
+新课例记录在重启后可查真实对话、引用、任务与提交结果，重新读取当前文件/工程后继续。Owner 明确本次无兼容需求，不迁移旧版本记录；未知版本或损坏仅隔离对应记录，不清空其他内容。
 
-1.8的V2任务/记录和最低旧记录可读是输入，不代表本节点的重启、损坏和删除已经完成。042依赖本节点建立未命名/首次保存身份；本节点先保持已保存工程的projectId + normalizedPath隔离，不自行用空路径模拟draft。
+依据 [课例与文件合同](../../R19_LESSON_DOCUMENT_WORKSPACE_CONTRACT.md)、[工作协议](../../WORKING_PROTOCOL.md)。040 提供可版本化的记录、列表、恢复和删除端口；042消费端口建立真实课例身份，040不等待042整项实现，不自行构造空路径工程。
 
-## 开始前与阅读入口
+## 直接入口与写域
 
-确认依赖的当前有效证据与写锁。上位依据为[产品与创作优化方案](../../AGENT_AUTHORING_LONG_TERM_PLAN.md)、[开发计划](../../AI_ASSISTANT_DELIVERY_PLAN.md)、[架构合同](../../ARCHITECTURE_CONTRACT.md)、[工作协议](../../WORKING_PROTOCOL.md)及[共同实施合同](../1.8/IMPLEMENTATION_CONTRACT.md)，当前协调状态只看[任务板](../../TASK_BOARD.md)。
+- [repository.ts](../../../../src/main/localAgent/repository.ts)、[harness.ts](../../../../src/main/localAgent/harness.ts)、[service.ts](../../../../src/main/localAgent/service.ts)：本地记录、运行与恢复。
+- [localAgentTaskContract.ts](../../../../src/shared/localAgentTaskContract.ts)、[localAgentTaskGuards.ts](../../../../src/shared/localAgentTaskGuards.ts)：任务归属、版本、epoch及receipt。
+- [CourseChatPanel.tsx](../../../../src/renderer/ui/chat/CourseChatPanel.tsx)：只呈现真实记录，不持有第二记录库。
 
-- [repository.ts](../../../../src/main/localAgent/repository.ts)：记录解析、原子写入、列表和损坏隔离。
-- [harness.ts](../../../../src/main/localAgent/harness.ts)、[service.ts](../../../../src/main/localAgent/service.ts)：运行槽、恢复、停止和删除接线。
-- [localAgentTaskContract.ts](../../../../src/shared/localAgentTaskContract.ts)、[localAgentTaskGuards.ts](../../../../src/shared/localAgentTaskGuards.ts)：版本、epoch、终态和receipt边界。
-- [workspaceIdentity.ts](../../../../src/main/workspaceIdentity.ts)、[CourseChatPanel.tsx](../../../../src/renderer/ui/chat/CourseChatPanel.tsx)：工程隔离和恢复/删除投影。
-- [diagnosticLog.test.ts](../../../../tests/unit/diagnosticLog.test.ts)：当前已包含真实Repository/Harness存储、重启、损坏与失败写入测试；不以通用DOM挂载测试替代。
+共享合同与Chat接线由唯一集成人完成；仅使用当批需要的写域。
 
-## 允许写域与旧路径退出
+## 执行与验收
 
-既有本地AI repository/harness恢复、删除和Chat投影；版本迁移在唯一repository完成，Chat不持有另一份可写记录。只迁移应用自己的记录，不写入课件或复制外部CLI历史。持久化合同新增字段时按既有strict版本规则同步合同。
+1. 记录按真实 lessonId/目录与conversationId归属，工程目标独立绑定；消息、引用、原生会话映射、任务及已提交receipt可恢复。新记录使用一个严格版本，不保留旧格式分支。
+2. 重启后 running 标为中断；继续时读取当前文档、附件/确认与工程观察，经adapter核实恢复句柄。已完成不重做，旧候选不自动执行，未知结果先核实。
+3. 单对话/课例记录/全部应用记录删除共用服务；运行中先失效epoch并停止，再清理本范围。不得删除真实课例文件、附件、工程或未保存文档恢复稿，不承诺删除外部CLI历史。
+4. 工程Save As使用新工程身份且不复制原工程会话/候选/trace；首次保存保留课例对话。课例移动按稳定ID重关联本版本记录，复制产生新身份与新对话。
+5. 单条坏JSON/未知版本可隔离；写记录失败不撤销已成功的工程或文档保存，UI报告真实可恢复范围。
 
-## 执行步骤
+## 聚焦验证与交接
 
-1. 持久化当前消息、材料/观察引用、原生会话映射、任务阶段和已提交receipt。进程退出或重启后旧running恢复为可解释的中断状态；终态和已提交结果不能被迟到事件改写。
-2. 按版本迁移并保留必要原始记录；单条坏JSON/不支持版本隔离，其他会话和人工工程打开继续工作。列表显示真实可恢复范围，不能把只读旧历史伪装成可直接续跑。
-3. 继续任务时重新取得当前工程、活动草稿和观察身份，明确未完目标与已完成阶段；外部恢复句柄只有经对应adapter确认有效才使用。旧candidate不自动重放，失败不要求教师清空记录。
-4. 单会话/当前工程/全部应用记录删除复用同一服务。运行中删除先失效epoch并有界停止本任务，再清理本范围资源；完成结果可重新查询核对。
-5. Save As使用新身份且不复制旧会话；原会话仍属于原工程。说明应用记录与外部CLI历史的区别，删除材料缓存不能误删已成为正式课程内容的引用。
+在现有 diagnosticLog、localAgentTaskContract 测试补新归属、终态去重、损坏和删除反例；新身份集成由042验收。真实应用退出/重启、运行中删除、Save As及不同课例隔离；需要真实CLI时只使用Luna。未执行的恢复不能借旧版本测试算通过。
 
-## 验收与可信反例
-
-- 真实退出/重启后消息与已提交结果可查；继续任务使用当前课件，三种删除范围、旧V1记录和Save As隔离正确。
-- 保存记录中途退出、单条损坏、运行时删除、同projectId不同路径、迟到终态及恢复旧candidate，均不能重复提交、误删其他记录或阻塞人工保存。
-
-## 停止条件
-
-迁移失败隔离受影响记录并报告可恢复内容，不清空整个AI库；不能确认外部历史已删除时不得称其删除成功。现有工程保存失败回保存Owner，不以AI重置绕过。
-
-## 聚焦验证
-
-在现有入口补本规格的版本迁移、运行中删除和恢复去重行为；只选直接覆盖改动的检查，未变证据继续有效。
-
-按[开发计划§6.1](../../AI_ASSISTANT_DELIVERY_PLAN.md#61-准备与局部验证)完成一次适用准备后直接运行命名文件。现有E2E只覆盖消息重放/讨论基线；新增重启、迁移和删除行为先随实现加入命名用例，再用精确grep选中，零匹配不算通过，不执行整个stabilizationCoreUsability真实付费矩阵。
-
-```text
-npx --no-install vitest run tests/unit/diagnosticLog.test.ts tests/unit/localAgentTaskContract.test.ts
-npx --no-install playwright test tests/e2e/stabilizationCoreUsability.spec.ts --grep 'S3 默认可见与普通讨论：安全消息、分页事件重放及零工程写入$'
-```
-
-用隔离记录在真实应用完成关闭/重启、Save As和三种范围删除，并损坏一条可丢弃测试会话。自动化只证明所覆盖存储/竞态；真实CLI继续任务证据在本节点取得后由050复用，不在每个下游重跑全部CLI矩阵。
-
-## 回退与交接
-
-交付迁移、删除、恢复及失败路径，明确042可扩展的本地身份和041可消费的只读列表/来源接口。回退只影响应用AI记录，人工保存和课件保持可用。
+交付040窄端口给042/041；应用记录之外无写入权限扩大。当前是路线规格，未开工。

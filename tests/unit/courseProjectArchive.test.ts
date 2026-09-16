@@ -1,4 +1,4 @@
-import { isControllerFixture } from '../fixtures/teacherController'
+import { isControllerFixture, createArchiveFixture } from '../fixtures/teacherController'
 import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -89,7 +89,7 @@ describe('S2 restricted PPTX import atomic archive transaction', () => {
     expect(items[4]).toMatchObject({ content: { data: { shapeType: 'rounded-rectangle', style: { cornerRadius: 25, lineStyle: 'dotted' } } } })
     expect(items[5]).toMatchObject({ content: { data: { shapeType: 'rectangle' } } })
     const project = planPptxImportTransaction(createBlankCourseProject(), draft, '普通映射').nextDocument
-    expect(openCourseProjectArchive(createCourseProjectArchive({ project, assetFiles: {}, componentFiles: {} })).project).toEqual(project)
+    expect(openCourseProjectArchive(createArchiveFixture({ project, assetFiles: {}, componentFiles: {} })).project).toEqual(project)
   })
   it('still reports multi-character justified paragraphs and unknown shape adjustments', async () => {
     const files = unzipSync(pptxCommonMappingFixture())
@@ -726,7 +726,7 @@ describe('createBlankCourseProject', () => {
       controller.item.props.defaultCollapsed = defaultCollapsed
       const revisionBeforeSave = project.revision
 
-      const bytes = createCourseProjectArchive({
+      const bytes = createArchiveFixture({
         project: courseProjectDocumentSchema.parse(project),
         assetFiles: {},
         componentFiles: {},

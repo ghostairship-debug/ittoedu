@@ -37,20 +37,17 @@ function mockFlowPayload(options: {
     {
       id: 'block-p-1',
       type: 'paragraph',
-      text: '正文段落 1 内容',
-      runs: [],
+      content: { inlines: [{"type":"text","text":"正文段落 1 内容"}] },
     },
     {
       id: 'block-p-2',
       type: 'paragraph',
-      text: '正文段落 2 内容',
-      runs: [],
+      content: { inlines: [{"type":"text","text":"正文段落 2 内容"}] },
     },
     {
       id: 'block-p-3',
       type: 'paragraph',
-      text: '正文段落 3 内容',
-      runs: [],
+      content: { inlines: [{"type":"text","text":"正文段落 3 内容"}] },
     },
   ]
 
@@ -123,9 +120,9 @@ function mockFlowPayload(options: {
 describe('flowDocxProjection', () => {
   it('preserves existing paragraph alignment and proportional line spacing in Word', () => {
     const { payload, surfaceId } = mockFlowPayload({ blocks: [
-      { id: 'aligned-title', type: 'heading', level: 2, text: '居中标题', textAlign: 'center', lineSpacing: 8 },
-      { id: 'aligned-body', type: 'paragraph', text: '靠右正文', textAlign: 'right', lineSpacing: 16 },
-      { id: 'aligned-quote', type: 'quote', text: '左对齐引用', textAlign: 'left', lineSpacing: 0 },
+      { id: 'aligned-title', type: 'heading', level: 2, content: { inlines: [{ type: 'text', text: '居中标题' }] }, textAlign: 'center', lineSpacing: 8 },
+      { id: 'aligned-body', type: 'paragraph', content: { inlines: [{ type: 'text', text: '靠右正文' }] }, textAlign: 'right', lineSpacing: 16 },
+      { id: 'aligned-quote', type: 'quote', content: { inlines: [{ type: 'text', text: '左对齐引用' }] }, textAlign: 'left', lineSpacing: 0 },
     ] })
     const output = buildFlowDocx(payload, surfaceId)
     const xml = new DOMParser().parseFromString(strFromU8(unzipSync(output.bytes)['word/document.xml']!), 'application/xml')
@@ -800,7 +797,7 @@ describe('flowDocxProjection', () => {
     const proj2 = buildFlowDocxProjection(p2, s2)
     expect(proj2.footerItems).toHaveLength(1)
     expect(proj2.footerItems[0]!.layerItemId).toBe('ctrl-enabled')
-    expect(proj2.layerReport.find((r) => r.layerItemId === 'ctrl-enabled')?.disposition).toBe('editable-shape')
+    expect(proj2.layerReport.find((r) => r.layerItemId === 'ctrl-enabled')?.disposition).toBe('placeholder')
     expect(proj2.layerReport.find((r) => r.layerItemId === 'ctrl-enabled')?.reasonCode).toBe('global-teacher-controller-footer')
 
     // Build DOCX and assert footer XML presence
@@ -808,7 +805,7 @@ describe('flowDocxProjection', () => {
     const unzipped = unzipSync(docxResult.bytes)
     expect(unzipped['word/footer1.xml']).toBeDefined()
     const footerXml = strFromU8(unzipped['word/footer1.xml']!)
-    expect(footerXml).toContain('教师控制栏')
+    expect(footerXml).toContain('教师控制台（缺少静态后备图片）')
 
     const docXml = strFromU8(unzipped['word/document.xml']!)
     expect(docXml).toContain('<w:footerReference w:type="default"')

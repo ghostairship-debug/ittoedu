@@ -53,8 +53,9 @@ it('shows a selected model as pending until a native configuration event is obse
   fireEvent.change(screen.getByLabelText('模型'), { target: { value: 'chosen' } })
   await waitFor(() => expect(operate).toHaveBeenCalledWith({ operation: 'configure', adapter: 'claude', configuration: { model: 'chosen', effort: 'low' } }))
   expect(await screen.findByText(/所选配置将在下次发送/)).toBeTruthy()
-  expect(screen.queryByText(/已生效：chosen-v1/)).toBeNull()
+  expect(screen.queryByText(/最近原生确认：chosen-v1/)).toBeNull()
   confirmed = true
   view.rerender(<NativeAgentConfiguration adapter="claude" configurationSequence={10} />)
-  expect(await screen.findByText('已生效：chosen-v1 · low')).toBeTruthy()
+  expect(await screen.findByText('最近原生确认：chosen-v1 · low')).toBeTruthy()
+  expect(screen.queryByText(/所选配置将在下次发送/)).toBeNull()
 })

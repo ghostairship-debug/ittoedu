@@ -1,3 +1,4 @@
+import { plainDocumentText, type FlowTextContent } from './document/content'
 import type {
   NativeRenderableBase,
   NativeRenderableNode,
@@ -137,46 +138,22 @@ export function reindexLayerItems<T extends LayerItem>(items: ReadonlyArray<T>):
   return getEffectiveLayerOrder(items).map((item, order) => ({ ...item, order }))
 }
 
-/**
- * Same-version Flow rich-text fallback.
- * `TextRun` is a style range over `text`, not a glyph carrier, so missing
- * `text` cannot be recovered from runs and becomes `''`. Missing `runs` become
- * one empty-style span covering the whole plain string (or `[]` if empty).
- */
-export function normalizeFlowRichText(input: {
-  text?: string
-  runs?: ReadonlyArray<TextRun>
-}): { text: string; runs: TextRun[] } {
-  const text = input.text ?? ''
-  if (!input.runs) {
-    const characterCount = Array.from(text).length
-    return {
-      text,
-      runs: characterCount === 0 ? [] : [{ start: 0, end: characterCount, style: {} }],
-    }
+/** Read-only glyph/style projection for consumers that need plain text. Never a writer. */
+export function normalizeFlowRichText(content: FlowTextContent): { text: string; runs: TextRun[] } {
+  let text = ''
+  const runs: TextRun[] = []
+  for (const inline of content.inlines) {
+    const glyphs = inline.type === 'text' ? inline.text : inline.accessibleText
+    const start = Array.from(text).length
+    text += glyphs
+    const end = Array.from(text).length
+    if (end > start) runs.push({ start, end, style: { ...inline.style } })
   }
-  return { text, runs: structuredClone(input.runs) as TextRun[] }
+  return { text, runs }
 }
-
-export function decodeFlowTableCell(cell: FlowTableCell): { text: string; runs: TextRun[] } {
-  return typeof cell === 'string'
-    ? normalizeFlowRichText({ text: cell })
-    : normalizeFlowRichText(cell)
-}
-
-export function flowPlainTextFallback(content: {
-  text?: string
-  runs?: ReadonlyArray<TextRun>
-}): string {
-  return normalizeFlowRichText(content).text
-}
-
-export function flowRunsFallback(content: {
-  text?: string
-  runs?: ReadonlyArray<TextRun>
-}): TextRun[] {
-  return normalizeFlowRichText(content).runs
-}
+export function decodeFlowTableCell(cell: FlowTableCell): { text: string; runs: TextRun[] } { return normalizeFlowRichText(cell) }
+export function flowPlainTextFallback(content: FlowTextContent): string { return plainDocumentText(content) }
+export function flowRunsFallback(content: FlowTextContent): TextRun[] { return normalizeFlowRichText(content).runs }
 
 const baseNodeKeys = new Set([
   'id',
@@ -497,16 +474,16 @@ export function deriveCourseProjectAuthoringInventory(
             stablePrefix: `surface:${surface.id}/block:${block.id}`,
             jsonPointer: pointer,
           }
-          if ('text' in block && typeof block.text === 'string') {
-            addInventoryEntry(project, inventory, target, 'text', block.type, block.text)
+          if (block.type === 'heading' || block.type === 'paragraph' || block.type === 'quote') {
+            addInventoryEntry(project, inventory, target, 'content', block.type, block.content)
           }
           if (block.type === 'quote' && block.citation !== undefined) {
             addInventoryEntry(project, inventory, target, 'citation', '引用出处', block.citation)
           } else if (block.type === 'list') {
             block.items.forEach((item, itemIndex) => {
               addInventoryEntry(
-                project, inventory, target, `items/${jsonPointerEscape(item.id)}/text`,
-                `列表项：${item.id}`, item.text, undefined, ['items', itemIndex, 'text'],
+                project, inventory, target, `items/${jsonPointerEscape(item.id)}/content`,
+                `列表项：${item.id}`, item.content, undefined, ['items', itemIndex, 'content'],
               )
             })
           } else if (block.type === 'media') {
@@ -514,6 +491,7 @@ export function deriveCourseProjectAuthoringInventory(
             if (block.altText !== undefined) addInventoryEntry(project, inventory, target, 'altText', '替代文本', block.altText)
             if (block.caption !== undefined) addInventoryEntry(project, inventory, target, 'caption', '图注', block.caption)
           } else if (block.type === 'table') {
+            if (block.caption !== undefined) addInventoryEntry(project, inventory, target, 'caption', '表格说明', block.caption)
             block.columns.forEach((column, columnIndex) => {
               addInventoryEntry(
                 project, inventory, target, `columns/${jsonPointerEscape(column.id)}/header`,
@@ -532,7 +510,7 @@ export function deriveCourseProjectAuthoringInventory(
             })
           } else if (block.type === 'formula') {
             addInventoryEntry(project, inventory, target, 'accessibleText', '公式说明', block.accessibleText)
-            addInventoryEntry(project, inventory, target, 'ast', '公式', block.ast, 'formula')
+            addInventoryEntry(project, inventory, target, 'latex', '公式', block.latex, 'formula')
           } else if (block.type === 'code') {
             addInventoryEntry(project, inventory, target, 'code', '代码', block.code)
           } else if (block.type === 'callout') {

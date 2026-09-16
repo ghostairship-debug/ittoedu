@@ -5,6 +5,8 @@ import type { TeacherControllerConfig } from '../../src/shared/teacherController
 import { createTeacherControllerComponentItem } from '../../src/renderer/components/teacherControllerComponent'
 import { createDefaultTeacherControllerPackage } from '../../src/shared/defaultTeacherControllerComponent'
 import { componentPackageMeta } from '../../src/renderer/components/editableComponentPackage'
+import { withDefaultComponentController } from '../../src/renderer/components/teacherControllerComponent'
+import { createCourseProjectArchive } from '../../src/renderer/project/courseProjectArchive'
 export const controllerPackage = createDefaultTeacherControllerPackage()
 export const controllerPackages = { [controllerPackage.manifest.id]: controllerPackage }
 export const controllerMetadata = { [controllerPackage.manifest.id]: componentPackageMeta(controllerPackage, { editableCopy: true }) }
@@ -27,6 +29,12 @@ export function controllerConfig(item: { props: Record<string, unknown> }): Teac
 
 export function buildPublishedFixture(sources: Parameters<typeof buildPublished>[0], options?: Parameters<typeof buildPublished>[1]) {
   return buildPublished({ ...sources, components: { ...controllerPackages, ...sources.components } }, options)
+}
+/** Fixtures that start from a document factory must carry its referenced built-in files. */
+export function createArchiveFixture(input: Parameters<typeof createCourseProjectArchive>[0], options?: Parameters<typeof createCourseProjectArchive>[1]) {
+  const packages = withDefaultComponentController(input.project).componentPackages
+  const componentFiles = Object.fromEntries(Object.values(packages).map(pkg => [`${pkg.manifest.id}@${pkg.manifest.version}`, pkg.files]))
+  return createCourseProjectArchive({ ...input, componentFiles: { ...componentFiles, ...input.componentFiles } }, options)
 }
 export const publishedControllerPackages = buildPublishedFixture({ project: createBlankCourseProject(), assetFiles: {}, components: controllerPackages }).components
 

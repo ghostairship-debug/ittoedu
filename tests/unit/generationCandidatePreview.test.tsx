@@ -1,3 +1,4 @@
+import { controllerPackages } from '../fixtures/teacherController'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { StrictMode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -53,7 +54,7 @@ function fixture(): GenerationCandidatePreviewProps {
   })
   return { request, prepared: { previewId: crypto.randomUUID(), candidateId: 'candidate-1', summary: '图片改色',
     beforeRevision: project.revision, afterRevision: project.revision + 1, plannedEffects: [], behaviorEvidence: [], changes: [], omitted: 0,
-    document: project, resources: { assetFiles: {}, componentPackages: {} } } }
+    document: project, resources: { assetFiles: {}, componentPackages: controllerPackages } } }
 }
 
 beforeEach(() => {
@@ -81,7 +82,7 @@ describe('temporary candidate effect preview', () => {
     expect(probe.sessions[0]!.unsubscribe).toHaveBeenCalledTimes(1)
     // Control case proves the real mount still registers ordinary authoring trial sessions.
     const regular = await mountPublishedCourseTryRun({ container: document.createElement('div'), project: props.prepared.document,
-      assetFiles: {}, components: {} })
+      assetFiles: {}, components: controllerPackages })
     expect(probe.registerObservation).toHaveBeenCalledTimes(1)
     await regular.destroy()
   })

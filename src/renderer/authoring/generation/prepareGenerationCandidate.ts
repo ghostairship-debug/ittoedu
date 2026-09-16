@@ -20,7 +20,7 @@ export interface GenerationCommitPort {
   readWorkspace(): WorkspaceIdentityV1
   readSessionGeneration(): number
   isRequestCurrent?(request: GenerationRequest): boolean
-  commit(step: EditorTransactionStep): boolean
+  commit(step: EditorTransactionStep, afterCommit?: GenerationCandidate['afterCommit']): boolean
 }
 
 function failureDiagnostics(error: unknown): GenerationFailure['diagnostics'] {
@@ -129,7 +129,7 @@ function replacementDependencies(candidate: GenerationCandidate) {
 
 /** Private candidate planning uses the existing product facade; the live document is never a scratchpad. */
 export function createGenerationCandidateCoordinator(port: GenerationCommitPort) {
-  const prepared = new Map<string, { request: GenerationRequest; step: EditorTransactionStep | null; receipt: GenerationCommitReceipt }>()
+  const prepared = new Map<string, { request: GenerationRequest; step: EditorTransactionStep | null; receipt: GenerationCommitReceipt; afterCommit?: GenerationCandidate['afterCommit'] }>()
   let epoch = 0
   let controller: AbortController | undefined
   return Object.freeze({
@@ -255,7 +255,7 @@ export function createGenerationCandidateCoordinator(port: GenerationCommitPort)
         affected: step ? [...receipts.values()].flatMap(value => value.affected) : [],
         resources: { assetIds: step ? [...new Set([...receipts.values()].flatMap(value => value.resources.assetIds))] : [],
           packageIds: step ? [...new Set([...receipts.values()].flatMap(value => value.resources.packageIds))] : [] } })
-      prepared.set(previewId, { request, step, receipt })
+      prepared.set(previewId, { request, step, receipt, afterCommit: candidate.afterCommit })
       return structuredClone({ previewId, candidateId: candidate.candidateId, summary: candidate.summary,
         beforeRevision: initial.revision, afterRevision: step?.nextDocument.revision ?? initial.revision,
         // These are preparation results, not successful live-project commit receipts.
@@ -270,7 +270,7 @@ export function createGenerationCandidateCoordinator(port: GenerationCommitPort)
       prepared.delete(previewId)
       if (!entry || !current(entry.request, port)) return { status: 'stale' as const }
       if (!entry.step) return { status: 'unchanged' as const, receipt: structuredClone(entry.receipt) }
-      return port.commit(entry.step) ? { status: 'committed' as const, beforeRevision: entry.step.baseRevision, afterRevision: entry.step.nextDocument.revision, receipt: structuredClone(entry.receipt) }
+      return port.commit(entry.step, entry.afterCommit) ? { status: 'committed' as const, beforeRevision: entry.step.baseRevision, afterRevision: entry.step.nextDocument.revision, receipt: structuredClone(entry.receipt) }
         : { status: 'stale' as const }
     },
   })

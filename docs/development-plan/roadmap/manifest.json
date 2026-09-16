@@ -2373,7 +2373,7 @@
     {
       "id": "r19-040-session-persistence-deletion",
       "release": "1.9",
-      "title": "会话恢复、迁移/损坏隔离、Save As 隔离和范围删除",
+      "title": "课例对话恢复、损坏隔离、工程另存隔离和范围删除",
       "dependencies": [
         "r18-060-release",
         "r16-020-local-session-store"
@@ -2388,9 +2388,10 @@
     {
       "id": "r19-041-session-navigation",
       "release": "1.9",
-      "title": "交付聊天首页、项目会话导航与极简/专业共用AI工作台",
+      "title": "交付真实工作空间入口、课例导航与整合标签工作台",
       "dependencies": [
-        "r19-040-session-persistence-deletion"
+        "r19-040-session-persistence-deletion",
+        "r19-042-draft-workspace-continuity"
       ],
       "optional": false,
       "writeLocks": [
@@ -2404,7 +2405,7 @@
     {
       "id": "r19-042-draft-workspace-continuity",
       "release": "1.9",
-      "title": "实现未命名工程与首次保存的AI身份连续性",
+      "title": "实现真实工作空间、课例身份与工程保存连续性",
       "dependencies": [
         "r19-040-session-persistence-deletion"
       ],
@@ -2443,7 +2444,8 @@
       "dependencies": [
         "r19-042-draft-workspace-continuity",
         "r19-045-material-context",
-        "r18-104-builder-skill-discovery"
+        "r18-104-builder-skill-discovery",
+        "r19-049-document-file-coauthoring"
       ],
       "optional": false,
       "writeLocks": [
@@ -2461,6 +2463,7 @@
       "title": "实现课程材料结构化读取、分片发现与可追溯引用",
       "dependencies": [
         "r19-040-session-persistence-deletion",
+        "r19-042-draft-workspace-continuity",
         "r15-020-material-tools-citations"
       ],
       "optional": false,
@@ -2469,6 +2472,75 @@
         "contracts-schema",
         "generated-index",
         "workspace-shell"
+      ],
+      "spec": "1.9/README.md"
+    },
+    {
+      "id": "r19-046-shared-document-contract",
+      "release": "1.9",
+      "title": "定义统一正文、源文、数学与双保存接口",
+      "dependencies": [
+        "r18-060-release"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "contracts-schema",
+        "export-docx-print"
+      ],
+      "spec": "1.9/README.md"
+    },
+    {
+      "id": "r19-047-shared-document-editor",
+      "release": "1.9",
+      "title": "实现连续正文与源文共用编辑核心",
+      "dependencies": [
+        "r19-046-shared-document-contract"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "authoring-flow",
+        "workspace-shell"
+      ],
+      "spec": "1.9/README.md"
+    },
+    {
+      "id": "r19-048-flow-document-delivery",
+      "release": "1.9",
+      "title": "交付新Flow正文、保存播放及可编辑Word数学",
+      "dependencies": [
+        "r19-047-shared-document-editor"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "contracts-schema",
+        "generated-index",
+        "store-flow",
+        "authoring-flow",
+        "props-flow",
+        "published-flow",
+        "published-producer",
+        "export-docx-print",
+        "app-save-recovery"
+      ],
+      "spec": "1.9/README.md"
+    },
+    {
+      "id": "r19-049-document-file-coauthoring",
+      "release": "1.9",
+      "title": "交付真实Markdown文件编辑、恢复与AI共编",
+      "dependencies": [
+        "r19-042-draft-workspace-continuity",
+        "r19-041-session-navigation",
+        "r19-047-shared-document-editor"
+      ],
+      "optional": false,
+      "writeLocks": [
+        "contracts-schema",
+        "main-preload",
+        "ai-session",
+        "chat-ui",
+        "workspace-shell",
+        "app-save-recovery"
       ],
       "spec": "1.9/README.md"
     },
@@ -2486,7 +2558,9 @@
         "r19-042-draft-workspace-continuity",
         "r19-043-long-task-context",
         "r19-044-course-creation-workflows",
-        "r19-045-material-context"
+        "r19-045-material-context",
+        "r19-048-flow-document-delivery",
+        "r19-049-document-file-coauthoring"
       ],
       "optional": false,
       "writeLocks": [

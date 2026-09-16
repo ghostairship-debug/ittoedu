@@ -134,8 +134,8 @@ describe('G1 exact selected layer operations use existing domain commands', () =
 function imageFixture(carrier: 'slide-base' | 'slide-state' | 'flow-body' | 'spatial-world') {
   const document = carrier === 'flow-body' ? createBlankFlowCourseProject(options) : carrier === 'spatial-world' ? createBlankSpatialCourseProject(options) : createBlankCourseProject(options)
   const surface = document.surfaces[0]!, stateId = carrier === 'slide-state' ? 'active' : null
-  if (surface.type === 'flow') surface.blocks.push({ id: 'section', type: 'section', title: '说明与插图', collapsedByDefault: false, blocks: [
-    { id: 'anchor', type: 'paragraph', text: '选中说明保留，a≠0。' }, { id: 'tail', type: 'paragraph', text: '原后文保留。' },
+  if (surface.type === 'flow') surface.blocks.push({ id: 'section', type: 'section', title: { inlines: [{ type: 'text', text: '说明与插图' }] }, collapsedByDefault: false, blocks: [
+    { id: 'anchor', type: 'paragraph', content: { inlines: [{ type: 'text', text: '选中说明保留，a≠0。' }] } }, { id: 'tail', type: 'paragraph', content: { inlines: [{ type: 'text', text: '原后文保留。' }] } },
   ] })
   else {
     const item = sceneNodeToCourseLayerItem(createTextNode({ id: 'anchor', text: '选中说明保留，a≠0。', x: 40, y: 70, width: 320, height: 80 }), 10)
@@ -161,7 +161,7 @@ describe('G1 I03 uses one exact image creation after the selected explanation', 
       const section = surface.blocks.find(block => block.id === 'section')!
       if (section.type !== 'section') throw new Error('Section')
       expect(section.blocks.map(block => block.type)).toEqual(['paragraph', 'media', 'paragraph'])
-      expect(section.blocks[0]).toEqual({ id: 'anchor', type: 'paragraph', text: '选中说明保留，a≠0。' })
+      expect(section.blocks[0]).toEqual({ id: 'anchor', type: 'paragraph', content: { inlines: [{ type: 'text', text: '选中说明保留，a≠0。' }] } })
       expect(section.blocks[1]).toMatchObject({ mediaKind: 'image', assetId: expect.any(String) })
       expect(action.destination.scope.parent).toEqual({ kind: 'flow-body', parentBlockId: 'section' })
     } else {
@@ -178,11 +178,11 @@ describe('G1 I03 uses one exact image creation after the selected explanation', 
     const request = snapshot(document, ['anchor'], instruction), h = harness(document)
     expect(request).not.toHaveProperty('selectionActions')
     const text = '选中说明保留，a≠0。\nx²−2x+1=0：a=1，b=-2，c=1；Δ=4−4=0，x=1。'
-    await h.apply(request, [{ id: 'example', tool: 'flow.content', carrier: 'native', destination: update(request, 'anchor'), input: { operation: 'edit', text } }])
+    await h.apply(request, [{ id: 'example', tool: 'flow.content', carrier: 'native', destination: update(request, 'anchor'), input: { operation: 'edit', content: { inlines: [{ type: 'text', text }] } } }])
     const surface = h.read().document.surfaces[0]!
     if (surface.type !== 'flow') throw new Error('Flow')
-    expect(findFlowBlockRecursive(surface.blocks, 'anchor')!.block).toMatchObject({ id: 'anchor', type: 'paragraph', text })
-    expect(findFlowBlockRecursive(surface.blocks, 'tail')!.block).toEqual({ id: 'tail', type: 'paragraph', text: '原后文保留。' })
+    expect(findFlowBlockRecursive(surface.blocks, 'anchor')!.block).toMatchObject({ id: 'anchor', type: 'paragraph', content: { inlines: [{ type: 'text', text }] } })
+    expect(findFlowBlockRecursive(surface.blocks, 'tail')!.block).toEqual({ id: 'tail', type: 'paragraph', content: { inlines: [{ type: 'text', text: '原后文保留。' }] } })
   })
 })
 
@@ -213,10 +213,10 @@ describe('Open creation with canonical ordering and atomic failure checks', () =
         request.destinations = request.destinations.map(destination => JSON.stringify(destination) === original ? action.destination : destination)
       }
       const step: GenerationCandidate['steps'][number] = { id: 'image', tool: mode === 'object' ? 'flow.content' : 'media.apply', carrier: 'native', destination: action.destination, input: mode === 'object'
-        ? { operation: 'insert', block: { type: 'paragraph', text: '未授权新段落' } } : { kind: 'image', source: imageSource, preserveResolution: true } }
+        ? { operation: 'insert', block: { type: 'paragraph', content: { inlines: [{ type: 'text', text: '未授权新段落' }] } } } : { kind: 'image', source: imageSource, preserveResolution: true } }
       const steps: GenerationCandidate['steps'] = [step]
       if (mode === 'twice') steps.push({ ...step, id: 'second' })
-      if (mode === 'anchor-changed') steps.push({ id: 'edit-source', tool: 'flow.content', carrier: 'native', destination: update(request, 'anchor'), input: { operation: 'edit', text: '不应覆盖原说明' } })
+      if (mode === 'anchor-changed') steps.push({ id: 'edit-source', tool: 'flow.content', carrier: 'native', destination: update(request, 'anchor'), input: { operation: 'edit', content: { inlines: [{ type: 'text', text: '不应覆盖原说明' }] } } })
       if (mode === 'unused-import') steps.push({ id: 'unused', tool: 'asset.media.import', carrier: 'native', destination: request.destinations.find(value => value.kind === 'create' && value.scope.owner === 'global')!, input: { kind: 'image', ...imageSource } })
       if (mode !== 'parent') {
         await h.apply(request, steps); expect(h.commits).toHaveLength(1); continue

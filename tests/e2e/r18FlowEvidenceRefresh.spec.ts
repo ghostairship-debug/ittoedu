@@ -1,3 +1,4 @@
+import { plainDocumentText } from '../../src/shared/document/content'
 import { copyFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -91,7 +92,7 @@ test('Flow 1280 docked assistant preserves selection and controller; fresh manua
   expect(flow?.type).toBe('flow'); expect(spatial?.type).toBe('spatial-2d')
   if (!flow || flow.type !== 'flow') throw new Error('Source archive has no formal Flow surface')
   const block = flow.blocks.find(entry => entry.id === 'mixed-flow-paragraph')
-  expect(block?.type === 'paragraph' ? block.text : null).toBe(originalText)
+  expect(block?.type === 'paragraph' ? plainDocumentText(block.content) : null).toBe(originalText)
   copyFileSync(sourcePath, projectPath)
   expect(existsSync(htmlPath)).toBe(false)
   const result: Record<string, unknown> = { status: 'running', sourcePath, projectPath, htmlPath, sourceRevision: original.project.revision, modelCalls: 0 }
@@ -139,7 +140,7 @@ test('Flow 1280 docked assistant preserves selection and controller; fresh manua
     await expect.poll(() => {
       const savedFlow = readSaved().surfaces.find(surface => surface.id === flow.id)
       const savedBlock = savedFlow?.type === 'flow' ? savedFlow.blocks.find(entry => entry.id === block!.id) : null
-      return savedBlock?.type === 'paragraph' ? savedBlock.text : null
+      return savedBlock?.type === 'paragraph' ? plainDocumentText(savedBlock.content) : null
     }).toBe(manualText)
     const saved = readSaved()
     expect(saved.revision).toBe(original.project.revision + 1)

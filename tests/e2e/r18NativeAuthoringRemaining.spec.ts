@@ -1,3 +1,5 @@
+import { requireProjectWorkspace } from './r18NativeAuthoringFixture'
+import { plainDocumentText } from '../../src/shared/document/content'
 import { execFileSync } from 'node:child_process'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
@@ -174,7 +176,7 @@ for (const cli of planned) {
         initialNativeId = (await selectedRecord(run)).externalSessionId ?? undefined
       } else if (resume) {
         expect(await chat(run).getByLabel('会话', { exact: true }).inputValue()).toBe('')
-        expect(nativeRecords(run).some(record => record.workspace.normalizedPath === projectPath.replace(/\\/g, '/').toLowerCase())).toBe(false)
+        expect(nativeRecords(run).some(record => requireProjectWorkspace(record.workspace).normalizedPath === projectPath.replace(/\\/g, '/').toLowerCase())).toBe(false)
       }
       await chat(run).getByLabel('意图', { exact: true }).selectOption('edit')
       await chat(run).getByLabel('应用方式', { exact: true }).selectOption('auto')
@@ -224,20 +226,20 @@ for (const cli of planned) {
         const before = readSaved(projectPath)
         const beforeParagraph = flowParagraph(before.project, REMAINING_IDS.paragraphTwo)
         if (resume?.requiresFreshFlowFeedback) {
-          expect(beforeParagraph.text.length).toBeLessThan(SECOND_PARAGRAPH.length * .8)
-          expect(beforeParagraph.text).toMatch(/周期/)
-          expect(beforeParagraph.text).toMatch(/往复|计时|时间/)
+          expect(plainDocumentText(beforeParagraph.content).length).toBeLessThan(SECOND_PARAGRAPH.length * .8)
+          expect(plainDocumentText(beforeParagraph.content)).toMatch(/周期/)
+          expect(plainDocumentText(beforeParagraph.content)).toMatch(/往复|计时|时间/)
         }
         await sendNatural(run!, 'T09-flow', REMAINING_PROMPTS.T09Flow, turnTimeoutMs)
         const after = await saveStage(run!, 'T09-flow')
         const paragraph = flowParagraph(after.project, REMAINING_IDS.paragraphTwo)
-        if (resume?.requiresFreshFlowFeedback) expect(paragraph.text.length).toBeLessThan(beforeParagraph.text.length)
-        else expect(paragraph.text.length).toBeLessThan(SECOND_PARAGRAPH.length * .8)
-        expect(paragraph.text).toMatch(/周期/)
-        expect(paragraph.text).toMatch(/往复|计时|时间/)
+        if (resume?.requiresFreshFlowFeedback) expect(plainDocumentText(paragraph.content).length).toBeLessThan(plainDocumentText(beforeParagraph.content).length)
+        else expect(plainDocumentText(paragraph.content).length).toBeLessThan(SECOND_PARAGRAPH.length * .8)
+        expect(plainDocumentText(paragraph.content)).toMatch(/周期/)
+        expect(plainDocumentText(paragraph.content)).toMatch(/往复|计时|时间/)
         // This guards the observed replacement of a complete oscillation with
         // a mere crossing; retained visual/full-text review remains required.
-        expect(paragraph.text).toMatch(/(?:十次完整往复(?:运动)?|十个周期)[\s\S]{0,60}总时间[\s\S]{0,60}除以\s*(?:十|10)/)
+        expect(plainDocumentText(paragraph.content)).toMatch(/(?:十次完整往复(?:运动)?|十个周期)[\s\S]{0,60}总时间[\s\S]{0,60}除以\s*(?:十|10)/)
         expect(flowParagraph(after.project, REMAINING_IDS.paragraphOne)).toEqual(flowParagraph(before.project, REMAINING_IDS.paragraphOne))
         expect(flowSurface(after.project).blocks.map(block => block.id)).toEqual(flowSurface(before.project).blocks.map(block => block.id))
         expect(spatialSurface(after.project)).toEqual(spatialSurface(before.project))

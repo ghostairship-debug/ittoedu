@@ -387,13 +387,17 @@ export async function openProjectFile(
   })
   if (result.canceled || result.filePaths.length === 0) return null
 
-  const filePath = result.filePaths[0]
-  const bytes = await readFileWithLimit(
-    filePath,
-    MAX_PROJECT_BYTES,
-    '工程打开失败',
-    'PROJECT_READ_FAILED',
-  )
+  return openSelectedProjectFile(result.filePaths[0])
+}
+
+/** Bounded disk read with no recent-file, observation, or open-confirmation mutation. */
+export async function readProjectFileBytes(filePath: string): Promise<Uint8Array> {
+  return readFileWithLimit(filePath, MAX_PROJECT_BYTES, '工程读取失败', 'PROJECT_READ_FAILED')
+}
+
+/** A user-selected workspace file shares the same archive validation and confirmation owner. */
+export async function openSelectedProjectFile(filePath: string): Promise<OpenProjectFileResult> {
+  const bytes = await readProjectFileBytes(filePath)
   if (!hasZipSignature(bytes)) {
     throw new DesktopOperationError(
       'PROJECT_ARCHIVE_INVALID',
@@ -478,7 +482,7 @@ export async function saveProjectFile(
   if (!targetPath) {
     const result = await dialog.showSaveDialog(window, {
       title: '保存课件工程',
-      defaultPath: sanitizeSuggestedName(input.suggestedName, '.h5lesson'),
+      defaultPath: input.suggestedDirectory ? path.join(input.suggestedDirectory, sanitizeSuggestedName(input.suggestedName, '.h5lesson')) : sanitizeSuggestedName(input.suggestedName, '.h5lesson'),
       filters: [{ name: '课件工程', extensions: ['h5lesson'] }],
       properties: ['showOverwriteConfirmation', 'dontAddToRecent'],
     })

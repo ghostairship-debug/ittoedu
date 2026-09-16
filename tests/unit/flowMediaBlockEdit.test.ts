@@ -1,5 +1,5 @@
 import { createElement } from 'react'
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
 import type { AssetMeta } from '@/shared/contracts/media-v1'
@@ -23,6 +23,9 @@ import {
 } from '@/renderer/course/flowEditorSlice'
 import { useEditorStore } from '@/renderer/store/editorStore'
 import { PropertiesTab } from '@/renderer/ui/PropertiesTab'
+import { SharedDocumentEditor } from '@/renderer/document'
+import { buildFlowEditorView, captureFlowEditorAuthoringTarget } from '@/renderer/course/flowEditorView'
+import { documentResourceReferences } from '@/shared/document/resources'
 
 const NOW = '2026-08-18T14:31:00.000Z'
 const ASSET_FILES: Record<string, Uint8Array> = {
@@ -47,14 +50,14 @@ afterEach(() => {
 
 function createMediaEditProject(): CourseProjectDocument {
   const blocks: FlowBlock[] = [
-    { id: 'h1', type: 'heading', level: 1, text: '媒体编辑' },
+    { id: 'h1', type: 'heading', level: 1, content: { inlines: [{ type: 'text', text: '媒体编辑' }] }},
     {
       id: 'media-image',
       type: 'media',
       assetId: 'asset-image',
       mediaKind: 'image',
       altText: '示意图',
-      caption: '封面图',
+      caption: { inlines: [{ type: 'text', text: '封面图' }] },
       layout: 'content-width',
     },
     {
@@ -63,7 +66,7 @@ function createMediaEditProject(): CourseProjectDocument {
       assetId: 'asset-video',
       mediaKind: 'video',
       altText: '旧视频说明',
-      caption: '旧视频题注',
+      caption: { inlines: [{ type: 'text', text: '旧视频题注' }] },
       layout: 'content-width',
     },
     {
@@ -71,7 +74,7 @@ function createMediaEditProject(): CourseProjectDocument {
       type: 'media',
       assetId: 'asset-audio',
       mediaKind: 'audio',
-      caption: '音频题注',
+      caption: { inlines: [{ type: 'text', text: '音频题注' }] },
       layout: 'content-width',
     },
   ]
@@ -218,6 +221,21 @@ function commitPropertyInput(label: string, value: string): void {
   fireEvent.blur(input)
 }
 
+function SharedBodyHarness() {
+  const session = useEditorStore(state => state.flowSession)
+  const owner = useEditorStore(state => state.courseAuthoringSession)
+  if (!session || !owner) return null
+  const project = session.history.present
+  const surface = project.surfaces.find(item => item.id === session.selection.surfaceId)
+  if (surface?.type !== 'flow') return null
+  const references = documentResourceReferences(surface.blocks)
+  return createElement(SharedDocumentEditor, {
+    document: { content: { blocks: surface.blocks }, resources: { assets: references.assets.map(assetId => ({ assetId, source: { kind: 'project' as const } })), components: [] } },
+    revision: String(project.revision), onDraft() {}, onUndo: () => useEditorStore.getState().undo(), onRedo: () => useEditorStore.getState().redo(),
+    onChange: (next, operation) => useEditorStore.getState().runFlowAuthoringIntent(captureFlowEditorAuthoringTarget({ view: buildFlowEditorView({ project, locationId: session.selection.locationId }), sessionToken: owner.token, target: { kind: 'surface' } }), { kind: 'replace-document-content', blocks: next.content.blocks, historyGroup: operation.historyGroup }).ok,
+  })
+}
+
 describe('Flow media block field and asset replacement commands', () => {
   it('routes a stale Properties delete through the Store boundary without overwriting newer content', () => {
     useEditorStore.getState().loadCourseProject(createMediaEditProject(), null, ASSET_FILES)
@@ -237,7 +255,7 @@ describe('Flow media block field and asset replacement commands', () => {
       useEditorStore.getState().applyFlowCommand(updateFlowEditorBlock(
         flow.history.present,
         flowBlockTargetFromSelection(flow.history.present, videoSelection),
-        { caption: '并发保留的新内容' },
+        { caption: { inlines: [{ type: 'text', text: '并发保留的新内容' }] } },
         { expectedRevision: flow.history.present.revision },
       ))
       documentAfterConcurrentWrite = storeFlowDocument()
@@ -255,16 +273,18 @@ describe('Flow media block field and asset replacement commands', () => {
     expect(useEditorStore.getState().flowSession!.history.past).toBe(historyAfterConcurrentWrite)
     expect(useEditorStore.getState().flowSession!.selection).toBe(selectionAfterConcurrentWrite)
     expect(mediaBlock(storeFlowDocument(), 'media-image')).toBeDefined()
-    expect(mediaBlock(storeFlowDocument(), 'media-video').caption).toBe('并发保留的新内容')
+    expect(mediaBlock(storeFlowDocument(), 'media-video').caption).toEqual({ inlines: [{ type: 'text', text: '并发保留的新内容' }] })
     expect(useEditorStore.getState().errorMessage).toBe(
       COURSE_AUTHORING_TARGET_REJECTION_REASONS['revision-conflict'],
     )
   })
 
-  it('edits and persists current-contract video fields through Store and Properties', () => {
+  it('edits and persists video fields through Properties and its caption through the shared body owner', async () => {
     useEditorStore.getState().loadCourseProject(createMediaEditProject(), null, ASSET_FILES)
     selectStoreMedia('media-video')
     render(createElement(PropertiesTab, { onReplaceImage: () => undefined }))
+
+    render(createElement(SharedBodyHarness))
 
     expect(screen.getByTestId('flow-media-properties')).toHaveTextContent('视频 · lesson.mp4')
     expect(screen.getByLabelText('替代文本')).toHaveValue('旧视频说明')
@@ -276,7 +296,11 @@ describe('Flow media block field and asset replacement commands', () => {
     expect(Array.from(replacement.options, (option) => option.value)).not.toContain('asset-audio')
 
     commitPropertyInput('替代文本', '完整视频说明')
-    commitPropertyInput('题注', '新视频题注')
+    const caption = screen.getByTestId('flow-block-media-video').querySelector<HTMLElement>('[data-document-slot="caption"]')!
+    expect(caption).toHaveTextContent('旧视频题注')
+    caption.textContent = '新视频题注'
+    fireEvent.input(caption)
+    await waitFor(() => expect(mediaBlock(storeFlowDocument(), 'media-video').caption).toEqual({ inlines: [{ type: 'text', text: '新视频题注' }] }))
     fireEvent.change(screen.getByRole('combobox', { name: '版式' }), {
       target: { value: 'full-width' },
     })
@@ -299,7 +323,7 @@ describe('Flow media block field and asset replacement commands', () => {
       assetId: 'asset-video-2',
       mediaKind: 'video',
       altText: '完整视频说明',
-      caption: '新视频题注',
+      caption: { inlines: [{ type: 'text', text: '新视频题注' }] },
       layout: 'full-width',
       wrap: 'right',
     })
@@ -327,7 +351,7 @@ describe('Flow media block field and asset replacement commands', () => {
     expect(video.assetId).toBe('asset-video')
     expect(video).toMatchObject({
       altText: '完整视频说明',
-      caption: '新视频题注',
+      caption: { inlines: [{ type: 'text', text: '新视频题注' }] },
       layout: 'full-width',
       wrap: 'right',
     })
@@ -338,7 +362,7 @@ describe('Flow media block field and asset replacement commands', () => {
     expect(mediaBlock(storeFlowDocument(), 'media-video')).toMatchObject({
       assetId: 'asset-video-2',
       altText: '完整视频说明',
-      caption: '新视频题注',
+      caption: { inlines: [{ type: 'text', text: '新视频题注' }] },
       layout: 'full-width',
       wrap: 'right',
     })
@@ -348,7 +372,8 @@ describe('Flow media block field and asset replacement commands', () => {
     cleanup()
     render(createElement(PropertiesTab, { onReplaceImage: () => undefined }))
     expect(screen.queryByLabelText('替代文本')).toBeNull()
-    expect(screen.getByLabelText('题注')).toHaveValue('音频题注')
+    render(createElement(SharedBodyHarness))
+    expect(screen.getByTestId('flow-block-media-audio').querySelector('[data-document-slot="caption"]')).toHaveTextContent('音频题注')
   })
 
   it('updates alt, caption and layout on the current media block', () => {
@@ -357,12 +382,12 @@ describe('Flow media block field and asset replacement commands', () => {
     const result = updateFlowEditorBlock(
       project,
       flowBlockTargetFromSelection(project, selection),
-      { altText: '新说明', caption: '新题注', layout: 'full-width' },
+      { altText: '新说明', caption: { inlines: [{ type: 'text', text: '新题注' }] }, layout: 'full-width' },
     )
     expect(result.ok).toBe(true)
     const next = mediaBlock(result.nextDocument!)
     expect(next.altText).toBe('新说明')
-    expect(next.caption).toBe('新题注')
+    expect(next.caption).toEqual({ inlines: [{ type: 'text', text: '新题注' }] })
     expect(next.layout).toBe('full-width')
     expect(next.assetId).toBe('asset-image')
   })
@@ -376,7 +401,7 @@ describe('Flow media block field and asset replacement commands', () => {
     const next = mediaBlock(replaced.nextDocument!)
     expect(next.assetId).toBe('asset-image-2')
     expect(next.layout).toBe('content-width')
-    expect(next.caption).toBe('封面图')
+    expect(next.caption).toEqual({ inlines: [{ type: 'text', text: '封面图' }] })
 
     const wrongKind = replaceFlowMediaBlockAsset(replaced.nextDocument!, target, 'asset-audio')
     expect(wrongKind.ok).toBe(false)
@@ -428,7 +453,7 @@ describe('Flow media block field and asset replacement commands', () => {
     expect(result.nextDocument!.assets['asset-from-disk']).toEqual(diskAsset)
     expect(result.nextDocument!.assets['asset-image']).toBeDefined()
     expect(next.altText).toBe('示意图')
-    expect(next.caption).toBe('封面图')
+    expect(next.caption).toEqual({ inlines: [{ type: 'text', text: '封面图' }] })
     expect(next.layout).toBe('content-width')
   })
 

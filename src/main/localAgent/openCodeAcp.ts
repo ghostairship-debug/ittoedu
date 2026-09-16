@@ -1,3 +1,4 @@
+import { workspaceIdentityKey } from '../../shared/workspaceIdentity'
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { StringDecoder } from 'node:string_decoder'
@@ -137,7 +138,7 @@ export function buildOpenCodeCapabilities(cliVersion: string, modelOption?: AcpC
       image: 'supported',
       readFile: 'supported',
       question: 'text',
-      correction: 'turn-boundary',
+      correction: 'interrupt-resume',
       cancel: 'supported',
     },
   })
@@ -428,7 +429,7 @@ export class OpenCodeAcpAdapter implements LocalAgentCliAdapterV2 {
 
   async input(userInput: AiUserInput): Promise<z.infer<typeof aiInputDeliverySchema>> {
     if (!this.currentTurnInput || userInput.taskId !== this.currentTurnInput.taskId || userInput.epoch !== this.currentTurnInput.epoch
-      || userInput.workspace.projectId !== this.currentTurnInput.workspace.projectId || userInput.workspace.normalizedPath !== this.currentTurnInput.workspace.normalizedPath) {
+      || workspaceIdentityKey(userInput.workspace) !== workspaceIdentityKey(this.currentTurnInput.workspace)) {
       return aiInputDeliverySchema.parse({
         taskId: userInput.taskId,
         epoch: userInput.epoch,
@@ -494,7 +495,8 @@ export class OpenCodeAcpAdapter implements LocalAgentCliAdapterV2 {
         inputId: userInput.inputId,
         status: userInput.turnId && userInput.turnId !== String(this.activePromptRequestId) ? 'rejected' : 'queued',
         turnId: userInput.turnId ?? (this.activePromptRequestId === null ? null : String(this.activePromptRequestId)),
-        reason: userInput.turnId && userInput.turnId !== String(this.activePromptRequestId) ? '指定的回合已不是当前活动回合' : 'OpenCode 在下一回合接收补充输入',
+        reason: userInput.turnId && userInput.turnId !== String(this.activePromptRequestId) ? '指定的回合已不是当前活动回合'
+          : userInput.kind === 'correct' ? '正在中断当前回合，将在同一原生会话立即处理新的引导' : '已排队，将在当前回合结束后处理补充',
       })
     }
 
@@ -515,6 +517,11 @@ export class OpenCodeAcpAdapter implements LocalAgentCliAdapterV2 {
     this.cancelRequested = true
     this.cancelling = this.cancelCurrentTurn()
     return this.cancelling
+  }
+
+  async interruptTurn(): Promise<void> {
+    await this.cancel()
+    if (this.closed) throw new Error('OpenCode 未确认回合中断；已停止传输，新的引导仍待处理')
   }
 
   private async cancelCurrentTurn(): Promise<void> {

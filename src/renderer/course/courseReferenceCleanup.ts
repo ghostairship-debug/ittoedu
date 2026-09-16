@@ -1,4 +1,5 @@
 import type { TeacherControllerButton } from '../../shared/teacherControllerConfig'
+import { isTeacherController } from '../../shared/teacherControllerRole'
 import { nanoid } from 'nanoid'
 import type {
   CourseLocation,
@@ -88,7 +89,10 @@ function removeDeletedLocationVisibility(
     )
     if (entry.visibility.locationIds.length > 0) continue
     if (entry.visibility.mode === 'include') {
-      
+      if (isTeacherController(entry.item) && controllerFallbackLocationIds?.length) {
+        entry.visibility.locationIds = [...controllerFallbackLocationIds]
+        continue
+      }
       removedLayerItemIds.add(entry.item.layerItemId)
       entries.splice(index, 1)
     } else entry.visibility = { mode: 'all', locationIds: [] }

@@ -1,3 +1,4 @@
+import { controllerPackage, createArchiveFixture as createCourseProjectArchive } from '../fixtures/teacherController'
 import { buildPublishedFixture as buildPublishedCourseV2Payload } from '../fixtures/teacherController'
 import { beforeEach, describe, expect, it } from 'vitest'
 
@@ -7,7 +8,6 @@ import {
   type SceneEnterRevealSequenceTemplateRequest,
 } from '@/renderer/interactions/interactionTemplates'
 import {
-  createCourseProjectArchive,
   openCourseProjectArchive,
 } from '@/renderer/project/courseProjectArchive'
 import {
@@ -624,7 +624,7 @@ describe('Course interaction authoring Store vertical slice', () => {
     const archive = createCourseProjectArchive({
       project: activeProject(),
       assetFiles: selectMediaAssetFiles(state),
-      componentFiles: {},
+      componentFiles: { [`${controllerPackage.manifest.id}@${controllerPackage.manifest.version}`]: controllerPackage.files },
     }, { mtime: ARCHIVE_TIME })
     const reopened = openCourseProjectArchive(archive)
     expect(reopened.project).toEqual(beforeReadEndpoints)

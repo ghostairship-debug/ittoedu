@@ -2,7 +2,7 @@
   "candidateCarrier": {
     "default": "native"
   },
-  "description": "仅 Slide scene owner；insert 使用 create owner append。rule 遵循 references.ruleWithId，但省略最外层 id（由宿主生成），保留 actions 内部的步骤 id。第一动作 start 必须 after-previous，导航动作必须最后。",
+  "description": "仅 Slide scene owner；insert 使用 create owner append。rule 使用本卡完整输入 Schema，不含最外层 id（由宿主生成），保留 actions 内部的步骤 id。第一动作 start 必须 after-previous，导航动作必须最后。",
   "examples": [
     {
       "bindings": "values 的 rule 来自当前观察、已读资源或用户要求，值须满足本卡 inputSchema；destination 原样复制当前目标。",
@@ -23,11 +23,1104 @@
   "inputSchema": {
     "$defs": {
       "__schema0": {
-        "additionalProperties": {},
-        "propertyNames": {
-          "type": "string"
+        "additionalProperties": false,
+        "properties": {
+          "actions": {
+            "$ref": "#/$defs/__schema15"
+          },
+          "conditions": {
+            "$ref": "#/$defs/__schema7"
+          },
+          "enabled": {
+            "$ref": "#/$defs/__schema2"
+          },
+          "name": {
+            "$ref": "#/$defs/__schema1"
+          },
+          "trigger": {
+            "$ref": "#/$defs/__schema3"
+          }
         },
+        "required": [
+          "enabled",
+          "trigger",
+          "conditions",
+          "actions"
+        ],
         "type": "object"
+      },
+      "__schema1": {
+        "maxLength": 80,
+        "minLength": 1,
+        "type": "string"
+      },
+      "__schema10": {
+        "items": {
+          "$ref": "#/$defs/__schema4"
+        },
+        "maxItems": 256,
+        "minItems": 1,
+        "type": "array"
+      },
+      "__schema11": {
+        "const": "scene.in",
+        "type": "string"
+      },
+      "__schema12": {
+        "items": {
+          "$ref": "#/$defs/__schema4"
+        },
+        "maxItems": 1000,
+        "minItems": 1,
+        "type": "array"
+      },
+      "__schema13": {
+        "maxLength": 240,
+        "minLength": 1,
+        "type": "string"
+      },
+      "__schema14": {
+        "anyOf": [
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "number"
+          },
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "__schema15": {
+        "items": {
+          "$ref": "#/$defs/__schema16"
+        },
+        "maxItems": 32,
+        "minItems": 1,
+        "type": "array"
+      },
+      "__schema16": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "anyOf": [
+              {
+                "oneOf": [
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "stateId": {
+                        "$ref": "#/$defs/__schema4"
+                      },
+                      "transition": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "duration": {
+                            "maximum": 10000,
+                            "minimum": 0,
+                            "type": "number"
+                          },
+                          "ease": {
+                            "maxLength": 80,
+                            "minLength": 1,
+                            "type": "string"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "type": {
+                        "const": "presentation.set",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "stateId"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "sceneId": {
+                        "$ref": "#/$defs/__schema4"
+                      },
+                      "targetStateId": {
+                        "$ref": "#/$defs/__schema4"
+                      },
+                      "type": {
+                        "const": "scene.go",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "sceneId"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "type": {
+                        "const": "step.next",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "type"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "type": {
+                        "const": "step.previous",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "type"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "type": {
+                        "const": "scene.next",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "type"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "type": {
+                        "const": "scene.previous",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "type"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "type": {
+                        "const": "scene.replay",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "type"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "type": {
+                        "const": "course.restart",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "type"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "key": {
+                        "$ref": "#/$defs/__schema13"
+                      },
+                      "type": {
+                        "const": "course-state.set",
+                        "type": "string"
+                      },
+                      "value": {
+                        "$ref": "#/$defs/__schema14"
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "key",
+                      "value"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "fadeInMs": {
+                        "$ref": "#/$defs/__schema17"
+                      },
+                      "ifPlaying": {
+                        "enum": [
+                          "restart",
+                          "continue",
+                          "ignore"
+                        ],
+                        "type": "string"
+                      },
+                      "lifetime": {
+                        "enum": [
+                          "scene",
+                          "course"
+                        ],
+                        "type": "string"
+                      },
+                      "loop": {
+                        "type": "boolean"
+                      },
+                      "soundId": {
+                        "$ref": "#/$defs/__schema4"
+                      },
+                      "type": {
+                        "const": "audio.play",
+                        "type": "string"
+                      },
+                      "volume": {
+                        "maximum": 1,
+                        "minimum": 0,
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "soundId"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "fadeOutMs": {
+                        "$ref": "#/$defs/__schema17"
+                      },
+                      "target": {
+                        "$ref": "#/$defs/__schema18"
+                      },
+                      "type": {
+                        "const": "audio.pause",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "target"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "fadeInMs": {
+                        "$ref": "#/$defs/__schema17"
+                      },
+                      "target": {
+                        "$ref": "#/$defs/__schema18"
+                      },
+                      "type": {
+                        "const": "audio.resume",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "target"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "fadeOutMs": {
+                        "$ref": "#/$defs/__schema17"
+                      },
+                      "target": {
+                        "$ref": "#/$defs/__schema18"
+                      },
+                      "type": {
+                        "const": "audio.stop",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "target"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "target": {
+                        "$ref": "#/$defs/__schema18"
+                      },
+                      "type": {
+                        "const": "audio.toggle-mute",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "target"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "nodeId": {
+                        "$ref": "#/$defs/__schema4"
+                      },
+                      "type": {
+                        "const": "video.play",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "nodeId"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "nodeId": {
+                        "$ref": "#/$defs/__schema4"
+                      },
+                      "type": {
+                        "const": "video.pause",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "nodeId"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "nodeId": {
+                        "$ref": "#/$defs/__schema4"
+                      },
+                      "type": {
+                        "const": "video.restart",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "nodeId"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "nodeId": {
+                        "$ref": "#/$defs/__schema4"
+                      },
+                      "type": {
+                        "const": "video.stop",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "nodeId"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "nodeId": {
+                        "$ref": "#/$defs/__schema4"
+                      },
+                      "type": {
+                        "const": "video.toggle",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "nodeId"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "nodeId": {
+                        "$ref": "#/$defs/__schema4"
+                      },
+                      "seconds": {
+                        "$ref": "#/$defs/__schema6"
+                      },
+                      "type": {
+                        "const": "video.seek",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "nodeId",
+                      "seconds"
+                    ],
+                    "type": "object"
+                  }
+                ]
+              },
+              {
+                "anyOf": [
+                  {
+                    "anyOf": [
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "direction": {
+                            "enum": [
+                              "left",
+                              "right",
+                              "up",
+                              "down"
+                            ],
+                            "type": "string"
+                          },
+                          "durationMs": {
+                            "$ref": "#/$defs/__schema17"
+                          },
+                          "easing": {
+                            "$ref": "#/$defs/__schema19"
+                          },
+                          "effect": {
+                            "const": "slide",
+                            "type": "string"
+                          },
+                          "nodeId": {
+                            "$ref": "#/$defs/__schema4"
+                          },
+                          "type": {
+                            "const": "node.enter",
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "type",
+                          "nodeId",
+                          "durationMs",
+                          "easing",
+                          "effect",
+                          "direction"
+                        ],
+                        "type": "object"
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "durationMs": {
+                            "$ref": "#/$defs/__schema17"
+                          },
+                          "easing": {
+                            "$ref": "#/$defs/__schema19"
+                          },
+                          "effect": {
+                            "enum": [
+                              "none",
+                              "fade",
+                              "scale"
+                            ],
+                            "type": "string"
+                          },
+                          "nodeId": {
+                            "$ref": "#/$defs/__schema4"
+                          },
+                          "type": {
+                            "const": "node.enter",
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "type",
+                          "nodeId",
+                          "durationMs",
+                          "easing",
+                          "effect"
+                        ],
+                        "type": "object"
+                      }
+                    ]
+                  },
+                  {
+                    "anyOf": [
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "direction": {
+                            "enum": [
+                              "left",
+                              "right",
+                              "up",
+                              "down"
+                            ],
+                            "type": "string"
+                          },
+                          "durationMs": {
+                            "$ref": "#/$defs/__schema17"
+                          },
+                          "easing": {
+                            "$ref": "#/$defs/__schema19"
+                          },
+                          "effect": {
+                            "const": "slide",
+                            "type": "string"
+                          },
+                          "nodeId": {
+                            "$ref": "#/$defs/__schema4"
+                          },
+                          "type": {
+                            "const": "node.exit",
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "type",
+                          "nodeId",
+                          "durationMs",
+                          "easing",
+                          "effect",
+                          "direction"
+                        ],
+                        "type": "object"
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "durationMs": {
+                            "$ref": "#/$defs/__schema17"
+                          },
+                          "easing": {
+                            "$ref": "#/$defs/__schema19"
+                          },
+                          "effect": {
+                            "enum": [
+                              "none",
+                              "fade",
+                              "scale"
+                            ],
+                            "type": "string"
+                          },
+                          "nodeId": {
+                            "$ref": "#/$defs/__schema4"
+                          },
+                          "type": {
+                            "const": "node.exit",
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "type",
+                          "nodeId",
+                          "durationMs",
+                          "easing",
+                          "effect"
+                        ],
+                        "type": "object"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          "delayMs": {
+            "$ref": "#/$defs/__schema17"
+          },
+          "id": {
+            "$ref": "#/$defs/__schema4"
+          },
+          "start": {
+            "enum": [
+              "after-previous",
+              "with-previous"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "start",
+          "delayMs",
+          "action"
+        ],
+        "type": "object"
+      },
+      "__schema17": {
+        "maximum": 60000,
+        "minimum": 0,
+        "type": "number"
+      },
+      "__schema18": {
+        "oneOf": [
+          {
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "const": "sound",
+                "type": "string"
+              },
+              "soundId": {
+                "$ref": "#/$defs/__schema4"
+              }
+            },
+            "required": [
+              "kind",
+              "soundId"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "channel": {
+                "enum": [
+                  "music",
+                  "narration",
+                  "sfx",
+                  "ui"
+                ],
+                "type": "string"
+              },
+              "kind": {
+                "const": "channel",
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "channel"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "const": "all",
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind"
+            ],
+            "type": "object"
+          }
+        ]
+      },
+      "__schema19": {
+        "enum": [
+          "linear",
+          "ease-in",
+          "ease-out",
+          "ease-in-out"
+        ],
+        "type": "string"
+      },
+      "__schema2": {
+        "type": "boolean"
+      },
+      "__schema3": {
+        "oneOf": [
+          {
+            "additionalProperties": false,
+            "properties": {
+              "nodeId": {
+                "$ref": "#/$defs/__schema4"
+              },
+              "type": {
+                "const": "node.click",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "nodeId"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "type": {
+                "const": "scene.enter",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "stateId": {
+                "$ref": "#/$defs/__schema4"
+              },
+              "type": {
+                "const": "presentation.enter",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "stateId"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "eventName": {
+                "$ref": "#/$defs/__schema5"
+              },
+              "nodeId": {
+                "$ref": "#/$defs/__schema4"
+              },
+              "type": {
+                "const": "component.event",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "nodeId",
+              "eventName"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "eventName": {
+                "$ref": "#/$defs/__schema5"
+              },
+              "scope": {
+                "enum": [
+                  "scene",
+                  "global"
+                ],
+                "type": "string"
+              },
+              "type": {
+                "const": "runtime.event",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "scope",
+              "eventName"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "soundId": {
+                "$ref": "#/$defs/__schema4"
+              },
+              "type": {
+                "const": "audio.ended",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "soundId"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "nodeId": {
+                "$ref": "#/$defs/__schema4"
+              },
+              "type": {
+                "const": "video.started",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "nodeId"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "nodeId": {
+                "$ref": "#/$defs/__schema4"
+              },
+              "type": {
+                "const": "video.paused",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "nodeId"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "nodeId": {
+                "$ref": "#/$defs/__schema4"
+              },
+              "type": {
+                "const": "video.ended",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "nodeId"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "nodeId": {
+                "$ref": "#/$defs/__schema4"
+              },
+              "seconds": {
+                "$ref": "#/$defs/__schema6"
+              },
+              "type": {
+                "const": "video.time",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "nodeId",
+              "seconds"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "nodeId": {
+                "$ref": "#/$defs/__schema4"
+              },
+              "type": {
+                "const": "node.activated",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "nodeId"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "actionId": {
+                "$ref": "#/$defs/__schema4"
+              },
+              "type": {
+                "const": "animation.completed",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "actionId"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "command": {
+                "enum": [
+                  "next",
+                  "previous"
+                ],
+                "type": "string"
+              },
+              "type": {
+                "const": "presenter.command",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "command"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "nodeId": {
+                "$ref": "#/$defs/__schema4"
+              },
+              "type": {
+                "const": "input.submit",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "nodeId"
+            ],
+            "type": "object"
+          }
+        ]
+      },
+      "__schema4": {
+        "maxLength": 200,
+        "minLength": 1,
+        "type": "string"
+      },
+      "__schema5": {
+        "maxLength": 160,
+        "minLength": 1,
+        "type": "string"
+      },
+      "__schema6": {
+        "maximum": 604800,
+        "minimum": 0,
+        "type": "number"
+      },
+      "__schema7": {
+        "items": {
+          "$ref": "#/$defs/__schema8"
+        },
+        "maxItems": 16,
+        "type": "array"
+      },
+      "__schema8": {
+        "anyOf": [
+          {
+            "additionalProperties": false,
+            "properties": {
+              "stateIds": {
+                "$ref": "#/$defs/__schema10"
+              },
+              "type": {
+                "$ref": "#/$defs/__schema9"
+              }
+            },
+            "required": [
+              "type",
+              "stateIds"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "sceneIds": {
+                "$ref": "#/$defs/__schema12"
+              },
+              "type": {
+                "$ref": "#/$defs/__schema11"
+              }
+            },
+            "required": [
+              "type",
+              "sceneIds"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "exists": {
+                "type": "boolean"
+              },
+              "key": {
+                "$ref": "#/$defs/__schema13"
+              },
+              "type": {
+                "const": "course-state.exists",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "key",
+              "exists"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "key": {
+                "$ref": "#/$defs/__schema13"
+              },
+              "operator": {
+                "enum": [
+                  "eq",
+                  "neq",
+                  "gt",
+                  "gte",
+                  "lt",
+                  "lte"
+                ],
+                "type": "string"
+              },
+              "type": {
+                "const": "course-state.compare",
+                "type": "string"
+              },
+              "value": {
+                "$ref": "#/$defs/__schema14"
+              }
+            },
+            "required": [
+              "type",
+              "key",
+              "operator",
+              "value"
+            ],
+            "type": "object"
+          }
+        ]
+      },
+      "__schema9": {
+        "const": "presentation.in",
+        "type": "string"
       }
     },
     "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -84,1115 +1177,6 @@
   "invocation": "Builder: await session.execute(tool,input,destination)。input 遵循本卡完整 Schema；destination 原样使用当前 observe/createScope 的目标；只以 committed receipt 判定成功。",
   "name": "slide.interaction",
   "recovery": "invalid-input: 按本卡 Schema 修正字段；revision-conflict: 重新 observe 后复制新 target 和源码基线；tool-failed: 读取 diagnostics 修复所指输入/资源/宿主条件，失败不代表已提交。",
-  "references": {
-    "ruleWithId": {
-      "$defs": {
-        "__schema0": {
-          "maxLength": 200,
-          "minLength": 1,
-          "type": "string"
-        },
-        "__schema1": {
-          "maxLength": 80,
-          "minLength": 1,
-          "type": "string"
-        },
-        "__schema10": {
-          "const": "scene.in",
-          "type": "string"
-        },
-        "__schema11": {
-          "items": {
-            "$ref": "#/$defs/__schema0"
-          },
-          "maxItems": 1000,
-          "minItems": 1,
-          "type": "array"
-        },
-        "__schema12": {
-          "maxLength": 240,
-          "minLength": 1,
-          "type": "string"
-        },
-        "__schema13": {
-          "anyOf": [
-            {
-              "type": "boolean"
-            },
-            {
-              "type": "number"
-            },
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "__schema14": {
-          "items": {
-            "$ref": "#/$defs/__schema15"
-          },
-          "maxItems": 32,
-          "minItems": 1,
-          "type": "array"
-        },
-        "__schema15": {
-          "additionalProperties": false,
-          "properties": {
-            "action": {
-              "anyOf": [
-                {
-                  "oneOf": [
-                    {
-                      "additionalProperties": false,
-                      "properties": {
-                        "stateId": {
-                          "$ref": "#/$defs/__schema0"
-                        },
-                        "transition": {
-                          "additionalProperties": false,
-                          "properties": {
-                            "duration": {
-                              "maximum": 10000,
-                              "minimum": 0,
-                              "type": "number"
-                            },
-                            "ease": {
-                              "maxLength": 80,
-                              "minLength": 1,
-                              "type": "string"
-                            }
-                          },
-                          "type": "object"
-                        },
-                        "type": {
-                          "const": "presentation.set",
-                          "type": "string"
-                        }
-                      },
-                      "required": [
-                        "type",
-                        "stateId"
-                      ],
-                      "type": "object"
-                    },
-                    {
-                      "additionalProperties": false,
-                      "properties": {
-                        "sceneId": {
-                          "$ref": "#/$defs/__schema0"
-                        },
-                        "targetStateId": {
-                          "$ref": "#/$defs/__schema0"
-                        },
-                        "type": {
-                          "const": "scene.go",
-                          "type": "string"
-                        }
-                      },
-                      "required": [
-                        "type",
-                        "sceneId"
-                      ],
-                      "type": "object"
-                    },
-                    {
-                      "additionalProperties": false,
-                      "properties": {
-                        "type": {
-                          "const": "step.next",
-                          "type": "string"
-                        }
-                      },
-                      "required": [
-                        "type"
-                      ],
-                      "type": "object"
-                    },
-                    {
-                      "additionalProperties": false,
-                      "properties": {
-                        "type": {
-                          "const": "step.previous",
-                          "type": "string"
-                        }
-                      },
-                      "required": [
-                        "type"
-                      ],
-                      "type": "object"
-                    },
-                    {
-                      "additionalProperties": false,
-                      "properties": {
-                        "type": {
-                          "const": "scene.next",
-                          "type": "string"
-                        }
-                      },
-                      "required": [
-                        "type"
-                      ],
-                      "type": "object"
-                    },
-                    {
-                      "additionalProperties": false,
-                      "properties": {
-                        "type": {
-                          "const": "scene.previous",
-                          "type": "string"
-                        }
-                      },
-                      "required": [
-                        "type"
-                      ],
-                      "type": "object"
-                    },
-                    {
-                      "additionalProperties": false,
-                      "properties": {
-                        "type": {
-                          "const": "scene.replay",
-                          "type": "string"
-                        }
-                      },
-                      "required": [
-                        "type"
-                      ],
-                      "type": "object"
-                    },
-                    {
-                      "additionalProperties": false,
-                      "properties": {
-                        "type": {
-                          "const": "course.restart",
-                          "type": "string"
-                        }
-                      },
-                      "required": [
-                        "type"
-                      ],
-                      "type": "object"
-                    },
-                    {
-                      "additionalProperties": false,
-                      "properties": {
-                        "key": {
-                          "$ref": "#/$defs/__schema12"
-                        },
-                        "type": {
-                          "const": "course-state.set",
-                          "type": "string"
-                        },
-                        "value": {
-                          "$ref": "#/$defs/__schema13"
-                        }
-                      },
-                      "required": [
-                        "type",
-                        "key",
-                        "value"
-                      ],
-                      "type": "object"
-                    },
-                    {
-                      "additionalProperties": false,
-                      "properties": {
-                        "fadeInMs": {
-                          "$ref": "#/$defs/__schema16"
-                        },
-                        "ifPlaying": {
-                          "enum": [
-                            "restart",
-                            "continue",
-                            "ignore"
-                          ],
-                          "type": "string"
-                        },
-                        "lifetime": {
-                          "enum": [
-                            "scene",
-                            "course"
-                          ],
-                          "type": "string"
-                        },
-                        "loop": {
-                          "type": "boolean"
-                        },
-                        "soundId": {
-                          "$ref": "#/$defs/__schema0"
-                        },
-                        "type": {
-                          "const": "audio.play",
-                          "type": "string"
-                        },
-                        "volume": {
-                          "maximum": 1,
-                          "minimum": 0,
-                          "type": "number"
-                        }
-                      },
-                      "required": [
-                        "type",
-                        "soundId"
-                      ],
-                      "type": "object"
-                    },
-                    {
-                      "additionalProperties": false,
-                      "properties": {
-                        "fadeOutMs": {
-                          "$ref": "#/$defs/__schema16"
-                        },
-                        "target": {
-                          "$ref": "#/$defs/__schema17"
-                        },
-                        "type": {
-                          "const": "audio.pause",
-                          "type": "string"
-                        }
-                      },
-                      "required": [
-                        "type",
-                        "target"
-                      ],
-                      "type": "object"
-                    },
-                    {
-                      "additionalProperties": false,
-                      "properties": {
-                        "fadeInMs": {
-                          "$ref": "#/$defs/__schema16"
-                        },
-                        "target": {
-                          "$ref": "#/$defs/__schema17"
-                        },
-                        "type": {
-                          "const": "audio.resume",
-                          "type": "string"
-                        }
-                      },
-                      "required": [
-                        "type",
-                        "target"
-                      ],
-                      "type": "object"
-                    },
-                    {
-                      "additionalProperties": false,
-                      "properties": {
-                        "fadeOutMs": {
-                          "$ref": "#/$defs/__schema16"
-                        },
-                        "target": {
-                          "$ref": "#/$defs/__schema17"
-                        },
-                        "type": {
-                          "const": "audio.stop",
-                          "type": "string"
-                        }
-                      },
-                      "required": [
-                        "type",
-                        "target"
-                      ],
-                      "type": "object"
-                    },
-                    {
-                      "additionalProperties": false,
-                      "properties": {
-                        "target": {
-                          "$ref": "#/$defs/__schema17"
-                        },
-                        "type": {
-                          "const": "audio.toggle-mute",
-                          "type": "string"
-                        }
-                      },
-                      "required": [
-                        "type",
-                        "target"
-                      ],
-                      "type": "object"
-                    },
-                    {
-                      "additionalProperties": false,
-                      "properties": {
-                        "nodeId": {
-                          "$ref": "#/$defs/__schema0"
-                        },
-                        "type": {
-                          "const": "video.play",
-                          "type": "string"
-                        }
-                      },
-                      "required": [
-                        "type",
-                        "nodeId"
-                      ],
-                      "type": "object"
-                    },
-                    {
-                      "additionalProperties": false,
-                      "properties": {
-                        "nodeId": {
-                          "$ref": "#/$defs/__schema0"
-                        },
-                        "type": {
-                          "const": "video.pause",
-                          "type": "string"
-                        }
-                      },
-                      "required": [
-                        "type",
-                        "nodeId"
-                      ],
-                      "type": "object"
-                    },
-                    {
-                      "additionalProperties": false,
-                      "properties": {
-                        "nodeId": {
-                          "$ref": "#/$defs/__schema0"
-                        },
-                        "type": {
-                          "const": "video.restart",
-                          "type": "string"
-                        }
-                      },
-                      "required": [
-                        "type",
-                        "nodeId"
-                      ],
-                      "type": "object"
-                    },
-                    {
-                      "additionalProperties": false,
-                      "properties": {
-                        "nodeId": {
-                          "$ref": "#/$defs/__schema0"
-                        },
-                        "type": {
-                          "const": "video.stop",
-                          "type": "string"
-                        }
-                      },
-                      "required": [
-                        "type",
-                        "nodeId"
-                      ],
-                      "type": "object"
-                    },
-                    {
-                      "additionalProperties": false,
-                      "properties": {
-                        "nodeId": {
-                          "$ref": "#/$defs/__schema0"
-                        },
-                        "type": {
-                          "const": "video.toggle",
-                          "type": "string"
-                        }
-                      },
-                      "required": [
-                        "type",
-                        "nodeId"
-                      ],
-                      "type": "object"
-                    },
-                    {
-                      "additionalProperties": false,
-                      "properties": {
-                        "nodeId": {
-                          "$ref": "#/$defs/__schema0"
-                        },
-                        "seconds": {
-                          "$ref": "#/$defs/__schema5"
-                        },
-                        "type": {
-                          "const": "video.seek",
-                          "type": "string"
-                        }
-                      },
-                      "required": [
-                        "type",
-                        "nodeId",
-                        "seconds"
-                      ],
-                      "type": "object"
-                    }
-                  ]
-                },
-                {
-                  "anyOf": [
-                    {
-                      "anyOf": [
-                        {
-                          "additionalProperties": false,
-                          "properties": {
-                            "direction": {
-                              "enum": [
-                                "left",
-                                "right",
-                                "up",
-                                "down"
-                              ],
-                              "type": "string"
-                            },
-                            "durationMs": {
-                              "$ref": "#/$defs/__schema16"
-                            },
-                            "easing": {
-                              "$ref": "#/$defs/__schema18"
-                            },
-                            "effect": {
-                              "const": "slide",
-                              "type": "string"
-                            },
-                            "nodeId": {
-                              "$ref": "#/$defs/__schema0"
-                            },
-                            "type": {
-                              "const": "node.enter",
-                              "type": "string"
-                            }
-                          },
-                          "required": [
-                            "type",
-                            "nodeId",
-                            "durationMs",
-                            "easing",
-                            "effect",
-                            "direction"
-                          ],
-                          "type": "object"
-                        },
-                        {
-                          "additionalProperties": false,
-                          "properties": {
-                            "durationMs": {
-                              "$ref": "#/$defs/__schema16"
-                            },
-                            "easing": {
-                              "$ref": "#/$defs/__schema18"
-                            },
-                            "effect": {
-                              "enum": [
-                                "none",
-                                "fade",
-                                "scale"
-                              ],
-                              "type": "string"
-                            },
-                            "nodeId": {
-                              "$ref": "#/$defs/__schema0"
-                            },
-                            "type": {
-                              "const": "node.enter",
-                              "type": "string"
-                            }
-                          },
-                          "required": [
-                            "type",
-                            "nodeId",
-                            "durationMs",
-                            "easing",
-                            "effect"
-                          ],
-                          "type": "object"
-                        }
-                      ]
-                    },
-                    {
-                      "anyOf": [
-                        {
-                          "additionalProperties": false,
-                          "properties": {
-                            "direction": {
-                              "enum": [
-                                "left",
-                                "right",
-                                "up",
-                                "down"
-                              ],
-                              "type": "string"
-                            },
-                            "durationMs": {
-                              "$ref": "#/$defs/__schema16"
-                            },
-                            "easing": {
-                              "$ref": "#/$defs/__schema18"
-                            },
-                            "effect": {
-                              "const": "slide",
-                              "type": "string"
-                            },
-                            "nodeId": {
-                              "$ref": "#/$defs/__schema0"
-                            },
-                            "type": {
-                              "const": "node.exit",
-                              "type": "string"
-                            }
-                          },
-                          "required": [
-                            "type",
-                            "nodeId",
-                            "durationMs",
-                            "easing",
-                            "effect",
-                            "direction"
-                          ],
-                          "type": "object"
-                        },
-                        {
-                          "additionalProperties": false,
-                          "properties": {
-                            "durationMs": {
-                              "$ref": "#/$defs/__schema16"
-                            },
-                            "easing": {
-                              "$ref": "#/$defs/__schema18"
-                            },
-                            "effect": {
-                              "enum": [
-                                "none",
-                                "fade",
-                                "scale"
-                              ],
-                              "type": "string"
-                            },
-                            "nodeId": {
-                              "$ref": "#/$defs/__schema0"
-                            },
-                            "type": {
-                              "const": "node.exit",
-                              "type": "string"
-                            }
-                          },
-                          "required": [
-                            "type",
-                            "nodeId",
-                            "durationMs",
-                            "easing",
-                            "effect"
-                          ],
-                          "type": "object"
-                        }
-                      ]
-                    }
-                  ]
-                }
-              ]
-            },
-            "delayMs": {
-              "$ref": "#/$defs/__schema16"
-            },
-            "id": {
-              "$ref": "#/$defs/__schema0"
-            },
-            "start": {
-              "enum": [
-                "after-previous",
-                "with-previous"
-              ],
-              "type": "string"
-            }
-          },
-          "required": [
-            "id",
-            "start",
-            "delayMs",
-            "action"
-          ],
-          "type": "object"
-        },
-        "__schema16": {
-          "maximum": 60000,
-          "minimum": 0,
-          "type": "number"
-        },
-        "__schema17": {
-          "oneOf": [
-            {
-              "additionalProperties": false,
-              "properties": {
-                "kind": {
-                  "const": "sound",
-                  "type": "string"
-                },
-                "soundId": {
-                  "$ref": "#/$defs/__schema0"
-                }
-              },
-              "required": [
-                "kind",
-                "soundId"
-              ],
-              "type": "object"
-            },
-            {
-              "additionalProperties": false,
-              "properties": {
-                "channel": {
-                  "enum": [
-                    "music",
-                    "narration",
-                    "sfx",
-                    "ui"
-                  ],
-                  "type": "string"
-                },
-                "kind": {
-                  "const": "channel",
-                  "type": "string"
-                }
-              },
-              "required": [
-                "kind",
-                "channel"
-              ],
-              "type": "object"
-            },
-            {
-              "additionalProperties": false,
-              "properties": {
-                "kind": {
-                  "const": "all",
-                  "type": "string"
-                }
-              },
-              "required": [
-                "kind"
-              ],
-              "type": "object"
-            }
-          ]
-        },
-        "__schema18": {
-          "enum": [
-            "linear",
-            "ease-in",
-            "ease-out",
-            "ease-in-out"
-          ],
-          "type": "string"
-        },
-        "__schema2": {
-          "type": "boolean"
-        },
-        "__schema3": {
-          "oneOf": [
-            {
-              "additionalProperties": false,
-              "properties": {
-                "nodeId": {
-                  "$ref": "#/$defs/__schema0"
-                },
-                "type": {
-                  "const": "node.click",
-                  "type": "string"
-                }
-              },
-              "required": [
-                "type",
-                "nodeId"
-              ],
-              "type": "object"
-            },
-            {
-              "additionalProperties": false,
-              "properties": {
-                "type": {
-                  "const": "scene.enter",
-                  "type": "string"
-                }
-              },
-              "required": [
-                "type"
-              ],
-              "type": "object"
-            },
-            {
-              "additionalProperties": false,
-              "properties": {
-                "stateId": {
-                  "$ref": "#/$defs/__schema0"
-                },
-                "type": {
-                  "const": "presentation.enter",
-                  "type": "string"
-                }
-              },
-              "required": [
-                "type",
-                "stateId"
-              ],
-              "type": "object"
-            },
-            {
-              "additionalProperties": false,
-              "properties": {
-                "eventName": {
-                  "$ref": "#/$defs/__schema4"
-                },
-                "nodeId": {
-                  "$ref": "#/$defs/__schema0"
-                },
-                "type": {
-                  "const": "component.event",
-                  "type": "string"
-                }
-              },
-              "required": [
-                "type",
-                "nodeId",
-                "eventName"
-              ],
-              "type": "object"
-            },
-            {
-              "additionalProperties": false,
-              "properties": {
-                "eventName": {
-                  "$ref": "#/$defs/__schema4"
-                },
-                "scope": {
-                  "enum": [
-                    "scene",
-                    "global"
-                  ],
-                  "type": "string"
-                },
-                "type": {
-                  "const": "runtime.event",
-                  "type": "string"
-                }
-              },
-              "required": [
-                "type",
-                "scope",
-                "eventName"
-              ],
-              "type": "object"
-            },
-            {
-              "additionalProperties": false,
-              "properties": {
-                "soundId": {
-                  "$ref": "#/$defs/__schema0"
-                },
-                "type": {
-                  "const": "audio.ended",
-                  "type": "string"
-                }
-              },
-              "required": [
-                "type",
-                "soundId"
-              ],
-              "type": "object"
-            },
-            {
-              "additionalProperties": false,
-              "properties": {
-                "nodeId": {
-                  "$ref": "#/$defs/__schema0"
-                },
-                "type": {
-                  "const": "video.started",
-                  "type": "string"
-                }
-              },
-              "required": [
-                "type",
-                "nodeId"
-              ],
-              "type": "object"
-            },
-            {
-              "additionalProperties": false,
-              "properties": {
-                "nodeId": {
-                  "$ref": "#/$defs/__schema0"
-                },
-                "type": {
-                  "const": "video.paused",
-                  "type": "string"
-                }
-              },
-              "required": [
-                "type",
-                "nodeId"
-              ],
-              "type": "object"
-            },
-            {
-              "additionalProperties": false,
-              "properties": {
-                "nodeId": {
-                  "$ref": "#/$defs/__schema0"
-                },
-                "type": {
-                  "const": "video.ended",
-                  "type": "string"
-                }
-              },
-              "required": [
-                "type",
-                "nodeId"
-              ],
-              "type": "object"
-            },
-            {
-              "additionalProperties": false,
-              "properties": {
-                "nodeId": {
-                  "$ref": "#/$defs/__schema0"
-                },
-                "seconds": {
-                  "$ref": "#/$defs/__schema5"
-                },
-                "type": {
-                  "const": "video.time",
-                  "type": "string"
-                }
-              },
-              "required": [
-                "type",
-                "nodeId",
-                "seconds"
-              ],
-              "type": "object"
-            },
-            {
-              "additionalProperties": false,
-              "properties": {
-                "nodeId": {
-                  "$ref": "#/$defs/__schema0"
-                },
-                "type": {
-                  "const": "node.activated",
-                  "type": "string"
-                }
-              },
-              "required": [
-                "type",
-                "nodeId"
-              ],
-              "type": "object"
-            },
-            {
-              "additionalProperties": false,
-              "properties": {
-                "actionId": {
-                  "$ref": "#/$defs/__schema0"
-                },
-                "type": {
-                  "const": "animation.completed",
-                  "type": "string"
-                }
-              },
-              "required": [
-                "type",
-                "actionId"
-              ],
-              "type": "object"
-            },
-            {
-              "additionalProperties": false,
-              "properties": {
-                "command": {
-                  "enum": [
-                    "next",
-                    "previous"
-                  ],
-                  "type": "string"
-                },
-                "type": {
-                  "const": "presenter.command",
-                  "type": "string"
-                }
-              },
-              "required": [
-                "type",
-                "command"
-              ],
-              "type": "object"
-            },
-            {
-              "additionalProperties": false,
-              "properties": {
-                "nodeId": {
-                  "$ref": "#/$defs/__schema0"
-                },
-                "type": {
-                  "const": "input.submit",
-                  "type": "string"
-                }
-              },
-              "required": [
-                "type",
-                "nodeId"
-              ],
-              "type": "object"
-            }
-          ]
-        },
-        "__schema4": {
-          "maxLength": 160,
-          "minLength": 1,
-          "type": "string"
-        },
-        "__schema5": {
-          "maximum": 604800,
-          "minimum": 0,
-          "type": "number"
-        },
-        "__schema6": {
-          "items": {
-            "$ref": "#/$defs/__schema7"
-          },
-          "maxItems": 16,
-          "type": "array"
-        },
-        "__schema7": {
-          "anyOf": [
-            {
-              "additionalProperties": false,
-              "properties": {
-                "stateIds": {
-                  "$ref": "#/$defs/__schema9"
-                },
-                "type": {
-                  "$ref": "#/$defs/__schema8"
-                }
-              },
-              "required": [
-                "type",
-                "stateIds"
-              ],
-              "type": "object"
-            },
-            {
-              "additionalProperties": false,
-              "properties": {
-                "sceneIds": {
-                  "$ref": "#/$defs/__schema11"
-                },
-                "type": {
-                  "$ref": "#/$defs/__schema10"
-                }
-              },
-              "required": [
-                "type",
-                "sceneIds"
-              ],
-              "type": "object"
-            },
-            {
-              "additionalProperties": false,
-              "properties": {
-                "exists": {
-                  "type": "boolean"
-                },
-                "key": {
-                  "$ref": "#/$defs/__schema12"
-                },
-                "type": {
-                  "const": "course-state.exists",
-                  "type": "string"
-                }
-              },
-              "required": [
-                "type",
-                "key",
-                "exists"
-              ],
-              "type": "object"
-            },
-            {
-              "additionalProperties": false,
-              "properties": {
-                "key": {
-                  "$ref": "#/$defs/__schema12"
-                },
-                "operator": {
-                  "enum": [
-                    "eq",
-                    "neq",
-                    "gt",
-                    "gte",
-                    "lt",
-                    "lte"
-                  ],
-                  "type": "string"
-                },
-                "type": {
-                  "const": "course-state.compare",
-                  "type": "string"
-                },
-                "value": {
-                  "$ref": "#/$defs/__schema13"
-                }
-              },
-              "required": [
-                "type",
-                "key",
-                "operator",
-                "value"
-              ],
-              "type": "object"
-            }
-          ]
-        },
-        "__schema8": {
-          "const": "presentation.in",
-          "type": "string"
-        },
-        "__schema9": {
-          "items": {
-            "$ref": "#/$defs/__schema0"
-          },
-          "maxItems": 256,
-          "minItems": 1,
-          "type": "array"
-        }
-      },
-      "$schema": "https://json-schema.org/draft/2020-12/schema",
-      "additionalProperties": false,
-      "properties": {
-        "actions": {
-          "$ref": "#/$defs/__schema14"
-        },
-        "conditions": {
-          "$ref": "#/$defs/__schema6"
-        },
-        "enabled": {
-          "$ref": "#/$defs/__schema2"
-        },
-        "id": {
-          "$ref": "#/$defs/__schema0"
-        },
-        "name": {
-          "$ref": "#/$defs/__schema1"
-        },
-        "trigger": {
-          "$ref": "#/$defs/__schema3"
-        }
-      },
-      "required": [
-        "id",
-        "enabled",
-        "trigger",
-        "conditions",
-        "actions"
-      ],
-      "type": "object"
-    }
-  },
   "support": "conditional-on-input-target-resources-and-host",
   "supportedScopes": [
     "slide:scene"

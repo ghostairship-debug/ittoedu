@@ -1,3 +1,4 @@
+import { createArchiveFixture as createCourseProjectArchive } from '../fixtures/teacherController'
 import { buildPublishedFixture as buildPublishedCourseV2Payload } from '../fixtures/teacherController'
 // @vitest-environment node
 import { readFileSync } from 'node:fs'
@@ -8,7 +9,7 @@ import { componentRegistryKey, componentRuntimeSourceIdentity } from '../../src/
 import { parseComponentPackageFiles } from '../../src/renderer/components/importComponentPackage'
 import { inspectProjectFont } from '../../src/shared/fonts/projectFontFile'
 import { createBlankCourseProject } from '../../src/renderer/project/createCourseProject'
-import { createCourseProjectArchive, openCourseProjectArchive } from '../../src/renderer/project/courseProjectArchive'
+import { openCourseProjectArchive } from '../../src/renderer/project/courseProjectArchive'
 import { planProjectFontImport } from '../../src/renderer/course/projectFontImport'
 import { createEditorTransactionStep, applyEditorTransactionStep } from '../../src/renderer/authoring/editorTransaction'
 import { createProjectFontDeliveryFixture } from '../fixtures/projectFontDelivery'
@@ -38,11 +39,15 @@ describe('project font import transaction', () => {
   it('closes direct Component and Runtime font references and locates missing bytes', async () => {
     const fallback = new Uint8Array(Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6ZAAAAABJRU5ErkJggg==', 'base64'))
     const sources = await createProjectFontDeliveryFixture(bytes, fallback)
+    // Isolate literal font references from the controller's deliberate dynamic asset access.
+    sources.project.globalLayerItems = []
+    delete sources.project.componentPackages['com.ittoedu.teacher-controller']
+    sources.project.playback.controls = 'none'
     const payload = buildPublishedCourseV2Payload(sources)
     const reopened = openCourseProjectArchive(createCourseProjectArchive({ project: sources.project, assetFiles: { ...sources.assetFiles },
       componentFiles: Object.fromEntries(Object.entries(sources.components).map(([id, data]) => [id, data.files])) }))
-    expect(Object.keys(reopened.componentFiles)).toHaveLength(1)
-    const reopenedComponent = parseComponentPackageFiles(Object.values(reopened.componentFiles)[0]!)
+    expect(Object.keys(reopened.componentFiles)).toContain('font-demo@1.0.0')
+    const reopenedComponent = parseComponentPackageFiles(reopened.componentFiles['font-demo@1.0.0']!)
     const registryKey = (projectId: string, data: ComponentPackageData) => componentRegistryKey({ projectId, packageId: data.manifest.id,
       version: data.manifest.version, sourceIdentity: componentRuntimeSourceIdentity(data.runtimeSource), contentIdentity: data.contentSha256! })
     expect(registryKey(reopened.project.id, reopenedComponent)).toBe(registryKey(sources.project.id, sources.components['font-demo']!))

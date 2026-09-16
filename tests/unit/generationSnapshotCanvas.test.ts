@@ -3,7 +3,8 @@ import { promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
-import { captureGenerationSnapshot, type GenerationReferenceScope } from '../../src/renderer/authoring/generation/generationSnapshot'
+import { captureGenerationFixture as captureGenerationSnapshot } from '../fixtures/generationSnapshot'
+import { type GenerationReferenceScope } from '../../src/renderer/authoring/generation/generationSnapshot'
 import { createBlankCourseProject } from '../../src/renderer/project/createCourseProject'
 import { createBlankFlowCourseProject } from '../../src/renderer/project/createFlowCourseProject'
 import { createTextNode } from '../../src/renderer/project/nativeNodeFactories'
@@ -103,7 +104,17 @@ describe('current Slide canvas dimensions in generation snapshots', () => {
       expect(pages(stored.generationRequest!)).toEqual(pages(request))
       expect(pages(candidateRequest)).toEqual(pages(request))
       const wire = JSON.parse(turn.text.split('\n').at(-1)!) as GenerationRequest
-      expect(pages(wire)).toEqual(pages(request))
+      const aliases = (candidateRequest as GenerationRequest & { destinationAliases: Record<string, { kind: string; target?: unknown }> }).destinationAliases
+      const expandedPages = pages(wire).map(page => ({ ...page,
+        backgrounds: (page as any).backgrounds?.map((background: any) => {
+          expect(typeof background.target).toBe('string')
+          const destination = aliases[background.target]!
+          expect(destination.kind).toBe('update')
+          return { ...background, target: destination.target }
+        }),
+      }))
+      expect(expandedPages).toEqual(pages(request))
+      expect(pages(wire).map(page => page.canvas)).toEqual(pages(request).map(page => page.canvas))
       expect(stored.generationRequest!.documentRevision).toBe(request.documentRevision)
     } finally {
       await harness.close()

@@ -124,8 +124,26 @@ export function generationInitialRequestForPrompt(request: GenerationRequest) {
     ? Object.fromEntries(Object.entries(full.destinationAliases).filter(([, d]) => d.kind === 'update' ? focused.has(d.target.authoringAddress)
       : d.scope.locationId === initialContext.focusLocationId && focusedOwners.has(d.scope.ownerKey) && d.scope.parent.kind === 'owner' && d.scope.insertion.kind === 'append'))
     : full.destinationAliases
+  // The initial view names the existing aliases; the staged request remains the
+  // only source of complete revision-bound destinations used by the helper.
+  const targetAliases = new Map(Object.entries(destinationAliases).flatMap(([alias, destination]) =>
+    destination.kind === 'update' ? [[JSON.stringify(destination.target), alias] as const] : []))
+  if (Array.isArray(initialContext.pages)) {
+    initialContext.pages = initialContext.pages.map((page: any) => ({ ...page,
+      ...(Array.isArray(page.backgrounds) ? { backgrounds: page.backgrounds.map((background: any) => ({ ...background,
+        target: targetAliases.get(JSON.stringify(background.target)) ?? background.target,
+      })) } : {}),
+    }))
+  }
+  const initialDestinations = Object.fromEntries(Object.entries(destinationAliases).map(([alias, destination]) => {
+    if (destination.kind === 'update') return [alias, { kind: destination.kind,
+      target: { owner: destination.target.owner, itemId: destination.target.itemId, authoringAddress: destination.target.authoringAddress } }]
+    const { projectId: _projectId, documentRevision: _revision, revisionPolicy: _policy,
+      sessionGeneration: _generation, ownerKey: _ownerKey, ...scope } = destination.scope
+    return [alias, { kind: destination.kind, scope }]
+  }))
   return { ...wire,
-    destinationAliases,
+    destinationAliases: initialDestinations,
     ...(execution ? { deadlineAt: execution.deadlineAt } : {}),
     ...(context ? { context: { ...initialContext, ...(reusable ? { assets: reusable.assets } : {}) } } : {}),
     ...(full.observation ? { observation: observationIdentity } : {}),
@@ -159,9 +177,9 @@ export function buildGenerationPrompt(adapter: LocalAgentId, request: Generation
   const channel = profile.resultChannel
   const terminal = (kind: 'answer' | 'edit') => `${GENERATION_RESULT_OPEN}${JSON.stringify({ version: 1, requestId: request.requestId, kind })}${GENERATION_RESULT_CLOSE}`
   const output = channel === 'session-staging-file'
-    ? `draft.json={summary,steps,afterCommit}。node <fileAccess.candidateHelper> --request <request.json> --input <draft.json>生成candidate.json；预检非提交。勿手抄路径/UUID/base64。候选附${terminal('edit')}；无新候选将kind改为answer。`
+    ? `draft.json={summary,steps,afterCommit}。node <fileAccess.candidateHelper> --request <request.json> --input <draft.json> [--check]生成candidate.json；三态边界：--check通过返回status:prechecked/delivery:not-delivered且未写candidate.json，不算交付；去掉--check写文件后返回status:ready-for-host/delivery:ready-for-host/candidateFile:candidate.json，只是候选但未提交；只有宿主最终回执committed/unchanged才可声称已应用。勿手抄路径/UUID/base64。候选附${terminal('edit')}；无新候选将kind改为answer。`
     : channel === 'app-server-json-schema'
-      ? 'final_answer按outputSchema：编辑kind=edit/reply=null。多步写本轮candidate.json（version=2，step.input对象）并检查；candidate只交{version:1,requestId:本轮ID,candidateFile:"candidate.json"}。小候选直接交candidate，step.input用JSON字符串。答复kind=reply/reply=文本/candidate=null。'
+      ? 'final_answer按outputSchema：编辑kind=edit/reply=null。多步写本轮candidate.json并检查：helper生成的完整version=1保持原样；手写version=2使用本轮destination别名字符串，不写carrier，step.input为对象。不得只改version混用两种步骤格式；预检拒绝后须修正再交付。candidate只交{version:1,requestId:本轮ID,candidateFile:"candidate.json"}。小候选直接交candidate，step.input用JSON字符串。答复kind=reply/reply=文本/candidate=null。'
       : `候选只在最终正文用 ${GENERATION_OPEN}JSON${GENERATION_CLOSE} 交付，写 candidate.json 不算交付。没有新候选（含宿主提交后的完成确认）直接自然语言回复。`
   return [
     publicCourseReplyGuidance,

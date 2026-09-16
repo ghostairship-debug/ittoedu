@@ -149,12 +149,7 @@ describe('buildCoursePrintArtifacts', () => {
     if (surface?.type !== 'flow') throw new Error('expected flow surface')
     const paragraph = surface.blocks.find((block) => block.type === 'paragraph')
     if (paragraph?.type !== 'paragraph') throw new Error('expected flow paragraph')
-    paragraph.text = '甲乙丙丁'
-    paragraph.runs = [{
-      start: 2,
-      end: 4,
-      style: { fontFamily: 'SimSun', fontSize: 30, bold: true },
-    }]
+    paragraph.content = { inlines: [{ type: 'text', text: '甲乙' }, { type: 'text', text: '丙丁', style: { fontFamily: 'SimSun', fontSize: 30, bold: true } }] }
 
     const published = buildPublishedCourseV2Payload({
       project,
@@ -165,14 +160,22 @@ describe('buildCoursePrintArtifacts', () => {
     if (flowSurface?.type !== 'flow') throw new Error('expected published flow surface')
 
     const html = renderFlowPrintBodyHtml(buildFlowPrintPlan(flowSurface))
-    expect(html).toContain('<span style="font-family:SimSun;font-size:30px;font-weight:700">丙丁</span>')
+    const rendered = new DOMParser().parseFromString(html, 'text/html')
+    const styled = Array.from(rendered.querySelectorAll('span')).filter(element => element.textContent && '丙丁'.includes(element.textContent))
+    expect(styled.map(element => element.textContent).join('')).toBe('丙丁')
+    for (const element of styled) {
+      expect(element.style.fontFamily).toBe('SimSun')
+      expect(element.style.fontSize).toBe('30px')
+      expect(element.style.fontWeight).toBe('700')
+    }
 
     const docx = buildFlowDocx(flowSurface)
     const documentXml = strFromU8(unzipSync(docx.bytes)['word/document.xml']!)
     expect(documentXml).toContain('<w:rFonts w:ascii="SimSun" w:eastAsia="SimSun" w:hAnsi="SimSun"/>')
     expect(documentXml).toContain('<w:sz w:val="60"/><w:szCs w:val="60"/>')
     expect(documentXml).toContain('<w:b/>')
-    expect(documentXml).toContain('<w:t>丙丁</w:t>')
+    const word = new DOMParser().parseFromString(documentXml, 'application/xml')
+    expect(Array.from(word.getElementsByTagNameNS('*', 't')).map(element => element.textContent).join('')).toContain('丙丁')
   })
 
   it('builds mixed print/DOCX file list and keeps HUD plus runtime TOC out of files', async () => {

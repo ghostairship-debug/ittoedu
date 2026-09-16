@@ -47,7 +47,7 @@
 不要从空白一次写出整课。Coordinator 先在内部列出（不必给教师第三份合同文件；成功后删掉临时笔记）：
 
 1. 资产：脚本引用了什么；哪些已在材料中；哪些可生成；哪些必须向教师要原件。
-2. 载体映射：每个片段的表面与 Native / 声明式交互 / 组件 / 场景 Runtime。
+2. 逐段核对已确认呈现脚本，列出“片段 → 学生动作 → 可见反馈与恢复 → Surface / owner → carrier / tool”。没有互动的片段明确写静态；已约定互动不得省略或以说明文字替代。对每个实际使用的工具和 Recipe 先读当前完整能力卡的适用域、inputSchema、references 与示例，不能从旧印象补字段。
 3. 执行顺序：为纵切准备的资产 → 最高风险真实片段 → 其余页 → 集成验证。
 4. 资产生成失败或必须改体验时，停下来回编排改脚本，不用占位图把课做完。
 
@@ -55,9 +55,9 @@
 
 权威工程是 `CourseProjectDocument`（`schemaVersion: 9`），不是 Agent Kit 语义 DSL，也不是 Project V8。
 
-课例实现放在 `<case-dir>/implementation/build.ts`，由编辑器仓库的正式外部案例入口加载。新课例导出 `apiVersion = 2`，不得用相对路径、绝对路径或路径别名导入编辑器内部源码。从 `context.api.createCourseProject({ surfaceType, title })` 创建产品管理的浏览器工作会话；用 `observe()` 读取当前 scope 和少量 canonical targets、`activateScope()` 切换位置 / owner / 状态、`createScope()` 获取插入地址、`execute(tool, input, destination)` 提交正式工具调用。上述调用均须 await。每步检查 receipt，失败按 diagnostics 修正该工具输入；最终直接 `return await session.finish()`，不能修改返回文档或拼装输出对象。
+课例实现放在 `<case-dir>/implementation/build.ts`，由编辑器仓库的正式外部案例入口加载。新课例导出 `apiVersion = 2`，不得用相对路径、绝对路径或路径别名导入编辑器内部源码。从 `context.api.createCourseProject({ surfaceType, title })` 创建产品管理的浏览器工作会话；用 `observe()` 读取当前 scope 和少量 canonical targets、`activateScope()` 切换位置 / owner / 状态、`createScope()` 获取插入地址、`execute(tool, input, destination)` 提交正式工具调用。上述调用均须 await。 布局前读取 observe({includeContent:true})：surfaceGeometry 给出当前表面实际画布/排版/镜头事实，items 是原始可编辑内容，effectiveLayout 是当前 owner 对象应用当前状态后的外框、可见性与层序，componentDefinitions 给出对应组件正式尺寸与公开参数。按分页读取所需对象，依据这些事实安排外框并检查边界；组件内部文字与控件仍须真实呈现检查。每步检查 receipt，失败按 diagnostics 修正该工具输入；最终直接 `return await session.finish()`，不能修改返回文档或拼装输出对象。
 
-工具清单由 `session.tools` 提供，输入以能力索引指向的正式工具 Schema 为准。新建 Native / Flow 内容、页面 / 状态 / 互动、Spatial 镜头 / 路径 / 关系、全局设置 / 背景 / 网络、Recipe、资源及 Component / Runtime 都经此 Facade。动态代码候选由产品自动完成 Published 闭包和真实宿主准入；模块不能传入成功标记或替换宿主。可参考仓库 `tests/fixtures/builder-v2-case/build.mjs` 的公开 API 用法。下列 Owner 源码仅用于能力定位，不能成为课例模块的 import。未标版本或 `apiVersion = 1` 的旧课例仍兼容旧工厂 Facade，入口会提示迁移；不再为新课例选择 V1。
+工具清单由 `session.tools` 提供，输入以能力索引指向的正式工具 Schema 为准。新建 Native / Flow 内容、页面 / 状态 / 互动、Spatial 镜头 / 路径 / 关系、全局设置 / 背景 / 网络、Recipe、资源及 Component / Runtime 都经此 Facade。动态代码候选由产品自动完成 Published 闭包和真实宿主准入；模块不能传入成功标记或替换宿主。可参考仓库 `tests/fixtures/builder-v2-case/build.mjs` 的公开 API 用法；该示例共用单 context、encodeBase64、observe/activateScope 与 Flow content.inlines，具体工具输入仍以本轮完整卡为准。下列 Owner 源码仅用于能力定位，不能成为课例模块的 import。未标版本或 `apiVersion = 1` 的旧课例仍兼容旧工厂 Facade，入口会提示迁移；不再为新课例选择 V1。
 
 从任意工作目录调用：
 
@@ -111,7 +111,7 @@ Coordinator 是唯一能写权威 Project 和共享接口的人。小型强耦�
 
 运行 `validate:course-project`，并按 [validation-boundaries.md](validation-boundaries.md) 检查本课实际使用的行为、真实编辑保存重开、CoursePlayer、默认离线 HTML 和要求交付的其它格式。增量修改复用未受影响的证据；只补受影响的行为与必要回归，不因使用 Skill 默认跑全仓测试或所有导出格式。
 
-工程检查通过后，由全新上下文做一次只读体验 QA。自动化最多 `engineering candidate`；具体课例未经真实视觉/互动复核不得称 `art candidate`；`accepted` 必须来自教师明确验收。不得宣称 Editor 1.0 已发布。
+工程检查通过后，逐项回看前述片段映射，确认每个已约定动作、反馈和恢复在产物中都有对应实现；不能以工具回执全部成功代替脚本内容完整。再由全新上下文做一次只读体验 QA。自动化最多 `engineering candidate`；具体课例未经真实视觉/互动复核不得称 `art candidate`；`accepted` 必须来自教师明确验收。不得宣称 Editor 1.0 已发布。
 
 只保留两份教学 Markdown、真实 Project、默认 HTML 及用户要求的交付物。成功后清理 Worker 任务、临时副本、截图和中间报告。
 
@@ -124,3 +124,7 @@ Coordinator 是唯一能写权威 Project 和共享接口的人。小型强耦�
 - 真实 Player、保存重开或交付格式缺少足够证据。
 
 停止时说明最早应返回的阶段和最小缺口，不用下游代码掩盖问题。
+
+### 软件内与外部 Builder V2 共用字节编码
+
+V2 构建函数接收一个 `context` 参数（例如 `async function build({ api, documents, encodeBase64 })`）。用 `context.encodeBase64(value)` 编码字符串或 `Uint8Array`；字符串统一按 UTF-8。软件内模块在现有浏览器窗口执行，没有 `Buffer`、`fs`、`process` 或 `require`，需要读取课例字节时使用产品提供的 `context.readAsset(relativePath)`。不通过 Node 全局或另起构建进程绕过当前窗口。

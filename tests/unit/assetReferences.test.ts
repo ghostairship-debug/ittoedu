@@ -182,15 +182,30 @@ describe('project asset reference graph', () => {
 
     const project = selectActiveCourseProjectDocument(useEditorStore.getState())
     if (!project) throw new Error('Expected a live V9 project')
-    expect(listCourseAssetReferences(project, referenced.id)).toEqual([
+    expect(listCourseAssetReferences(project, referenced.id, { componentPackages: useEditorStore.getState().componentPackages })).toEqual([
       expect.objectContaining({ kind: 'native-image', assetId: referenced.id }),
     ])
-    expect(listCourseAssetReferences(project, unused.id)).toEqual([])
+    expect(listCourseAssetReferences(project, unused.id, { componentPackages: useEditorStore.getState().componentPackages })).toEqual([])
 
     const deleteBlocked = new Set(['referenced', 'unused'].filter((assetId) => (
       !useEditorStore.getState().deleteAsset(assetId)
     )))
     expect(deleteBlocked).toEqual(new Set(['referenced']))
+  })
+
+  it('uses only the declared background image for bundled controller source and retains edited dynamic source conservatively', () => {
+    useEditorStore.getState().createNewProject()
+    const project = structuredClone(selectActiveCourseProjectDocument(useEditorStore.getState())!)
+    const packages = structuredClone(useEditorStore.getState().componentPackages)
+    addAssets(project, 'controller-background', 'unused')
+    const controller = project.globalLayerItems.find(entry => entry.item.kind === 'component' && entry.item.role === 'teacher-controller')!.item
+    if (controller.kind !== 'component') throw new Error('Expected controller')
+    controller.props.backgroundAssetId = 'controller-background'
+    expect(listCourseAssetReferences(project, 'controller-background', { componentPackages: packages })).toEqual(expect.arrayContaining([expect.objectContaining({ kind: 'component-prop' })]))
+    expect(listCourseAssetReferences(project, 'unused', { componentPackages: packages })).toEqual([])
+    const pkg = Object.values(packages).find(value => value.manifest.id === controller.component.packageId)!
+    pkg.runtimeSource += '\nfunction extra(ctx, id) { return ctx.projectAssetUrl(id) }'
+    expect(listCourseAssetReferences(project, 'unused', { componentPackages: packages })).toEqual(expect.arrayContaining([expect.objectContaining({ kind: 'component-runtime-source' })]))
   })
 
   it('protects assets materialized only by a named-state native override', () => {

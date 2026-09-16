@@ -17,8 +17,8 @@ vi.mock('electron', () => ({ session: { fromPartition: () => ({ clearStorageData
     capturePage: vi.fn(async () => ({ toDataURL: () => png, getSize: () => ({ width: 1280, height: 720 }) })),
     executeJavaScript: vi.fn((source: string) => {
       if (source.startsWith('window.__COURSEWARE_ADMISSION_RUN__')) return new Promise((resolve, reject) => { state.resolveRun = resolve; state.rejectRun = reject; state.pending = state.hang ? 0 : 1 })
-      if (source === '({frame:window.__COURSEWARE_ADMISSION_PENDING_FRAME__?.()??null,button:window.__COURSEWARE_ADMISSION_PENDING_BUTTON__?.()??null})') {
-        return Promise.resolve({ frame: state.pending ? { id: state.pending } : null, button: null })
+      if (source === '({frame:window.__COURSEWARE_ADMISSION_PENDING_FRAME__?.()??null,button:window.__COURSEWARE_ADMISSION_PENDING_BUTTON__?.()??null,progress:window.__COURSEWARE_ADMISSION_PROGRESS__?.()??0})') {
+        return Promise.resolve({ frame: state.pending ? { id: state.pending } : null, button: null, progress: 0 })
       }
       if (source.startsWith('window.__COURSEWARE_ADMISSION_ACCEPT_FRAME__')) {
         const match = source.match(/^window\.__COURSEWARE_ADMISSION_ACCEPT_FRAME__\(1,(.*)\)$/)!

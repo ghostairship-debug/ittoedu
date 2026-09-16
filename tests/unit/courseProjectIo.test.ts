@@ -1,8 +1,9 @@
 import { strToU8, zipSync } from 'fflate'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
+import { createArchiveFixture as createCourseProjectArchive } from '../fixtures/teacherController'
+import { parseComponentPackageFiles } from '@/renderer/components/importComponentPackage'
 import {
-  createCourseProjectArchive,
   detectCourseProjectArchiveFormat,
   openCourseProjectArchive,
   openCourseProjectArchiveAsync,
@@ -35,7 +36,10 @@ const FIXTURE_MTIME = '2026-08-28T00:00:00.000Z'
 function componentArchiveData(): CourseProjectArchiveData {
   const fixture = listCourseProjectV9Fixtures().find(({ id }) => id === 'component')
   if (!fixture) throw new Error('component Course Project V9 fixture is missing')
-  return fixture.data
+  return { ...fixture.data, componentFiles: Object.fromEntries(Object.values(fixture.data.componentFiles).map(files => {
+    const { manifest } = parseComponentPackageFiles(files)
+    return [`${manifest.id}@${manifest.version}`, files]
+  })) }
 }
 
 function archiveBytesByKey(files: Record<string, Uint8Array>): Record<string, number[]> {
@@ -114,7 +118,7 @@ describe('default Course Project V9 async open', () => {
     expect(archiveProbe.detectCalls).toBe(0)
     expect(opened).toEqual(expected)
     expect(Object.keys(opened.assetFiles)).toEqual(['quiz-fallback'])
-    expect(Object.keys(opened.componentFiles)).toHaveLength(1)
+    expect(Object.keys(opened.componentFiles).sort()).toEqual(Object.keys(source.componentFiles).sort())
   })
 
   it.each([

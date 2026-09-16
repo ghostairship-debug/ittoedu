@@ -1,6 +1,6 @@
+import { documentBlockSchema, documentContentSchema } from '../../document/content'
 import { z } from 'zod'
 import { teacherControllerRoleIssues } from '../../teacherControllerRole'
-import { tableMergeRegionSchema, tableMergeIssues, tableCellSpan } from '../../tableMerge'
 import { sceneInteractionsSchema } from '../interaction-v1/schema'
 import {
   courseStateConditionSchema,
@@ -8,7 +8,7 @@ import {
 } from '../course-state/schema'
 import { courseStateScalarType } from '../course-state/types'
 export { courseStateDeclarationSchema } from '../course-state/schema'
-import { chartNativeContentObjectSchema, formulaAstSchema, nativeContentSchemaByType, NATIVE_RENDERABLE_BASE_KEYS } from '../native-v1/schema'
+import { nativeContentSchemaByType, NATIVE_RENDERABLE_BASE_KEYS } from '../native-v1/schema'
 import type { NativeRenderInput } from '../native-v1/types'
 import { courseProjectEmbeddedComponentPackageMetaSchema } from '../component-v4/schema'
 import { courseProjectDesignTokensSchema } from '../design-v1/schema'
@@ -35,7 +35,8 @@ import {
 
 const finiteNumber = z.number().finite()
 const unitInterval = finiteNumber.min(0).max(1)
-const colorSchema = z.string().regex(/^#[0-9a-fA-F]{6}$/)
+const hexColorPattern = /^#[0-9a-fA-F]{6}$/
+const colorSchema = z.string().regex(hexColorPattern)
 const stableIdSchema = z.string().trim().min(1).max(240)
 export const backgroundModeSchema = z.enum(BACKGROUND_MODES)
 
@@ -337,7 +338,7 @@ export function addCanonicalLayerOrderIssues(
       context.addIssue({
         code: 'custom',
         path: [index, 'order'],
-        message: `Layer items must be stored in strictly increasing unified order; ${item.order} follows ${previousOrder}`,
+        message: `Layer items in this stored owner list must have strictly increasing order; ${item.order} follows ${previousOrder}`,
       })
     }
     previousOrder = item.order
@@ -574,240 +575,7 @@ export const slideSceneSchema = z.object({
   })
 })
 
-const flowBlockBaseFields = { id: stableIdSchema } as const
-
-/** Same fields as V8 `TextRun` / `TextRunStyle`; types stay in projectTypes. */
-const flowTextRunStyleSchema = z.object({
-  baseline: finiteNumber.min(-1).max(1).optional(),
-  color: colorSchema.optional(),
-  bold: z.boolean().optional(),
-  italic: z.boolean().optional(),
-  underline: z.boolean().optional(),
-  strike: z.boolean().optional(),
-  emphasis: z.boolean().optional(),
-  highlightColor: colorSchema.nullable().optional(),
-  fontFamily: z.string().trim().min(1).max(300).optional(),
-  fontSize: finiteNumber.min(8).max(400).optional(),
-}).strict()
-
-const flowTextRunSchema = z.object({
-  start: z.number().int().nonnegative(),
-  end: z.number().int().nonnegative(),
-  style: flowTextRunStyleSchema,
-}).strict()
-
-const flowTextRunListSchema = z.array(flowTextRunSchema).max(10_000)
-
-function addFlowRunRangeIssues(
-  text: string,
-  runs: Array<{ start: number; end: number }> | undefined,
-  context: z.RefinementCtx,
-  path: Array<string | number>,
-): void {
-  if (!runs) return
-  const characterCount = Array.from(text).length
-  runs.forEach((run, index) => {
-    if (run.end <= run.start || run.end > characterCount) {
-      context.addIssue({
-        code: 'custom',
-        path: [...path, index],
-        message: '富文本范围必须位于文字内容内且结束位置大于开始位置',
-      })
-    }
-  })
-}
-
-const flowRichTextFields = {
-  text: z.string(),
-  runs: flowTextRunListSchema.optional(),
-} as const
-
-const flowTableCellObjectSchema = z.object({
-  text: z.string(),
-  runs: flowTextRunListSchema.optional(),
-}).strict()
-
-const flowTableCellSchema = z.union([z.string(), flowTableCellObjectSchema])
-
-const flowHeadingBlockSchema = z.object({
-  ...flowBlockBaseFields,
-  type: z.literal('heading'),
-  level: z.union([
-    z.literal(1), z.literal(2), z.literal(3), z.literal(4), z.literal(5), z.literal(6),
-  ]),
-  textAlign: z.enum(['left', 'center', 'right']).optional(),
-  lineSpacing: finiteNumber.min(0).max(200).optional(),
-  ...flowRichTextFields,
-}).strict().superRefine((block, context) => {
-  addFlowRunRangeIssues(block.text, block.runs, context, ['runs'])
-})
-
-const flowParagraphBlockSchema = z.object({
-  ...flowBlockBaseFields,
-  type: z.literal('paragraph'),
-  textAlign: z.enum(['left', 'center', 'right']).optional(),
-  lineSpacing: finiteNumber.min(0).max(200).optional(),
-  ...flowRichTextFields,
-}).strict().superRefine((block, context) => {
-  addFlowRunRangeIssues(block.text, block.runs, context, ['runs'])
-})
-
-const flowListBlockSchema = z.object({
-  ...flowBlockBaseFields,
-  type: z.literal('list'),
-  ordered: z.boolean(),
-  items: z.array(z.object({
-    id: stableIdSchema,
-    text: z.string(),
-    runs: flowTextRunListSchema.optional(),
-  }).strict()).min(1).max(10_000),
-}).strict().superRefine((block, context) => {
-  const ids = block.items.map((item) => item.id)
-  if (new Set(ids).size !== ids.length) {
-    context.addIssue({ code: 'custom', path: ['items'], message: 'List item ids must be unique' })
-  }
-  block.items.forEach((item, itemIndex) => {
-    addFlowRunRangeIssues(item.text, item.runs, context, ['items', itemIndex, 'runs'])
-  })
-})
-
-const flowQuoteBlockSchema = z.object({
-  ...flowBlockBaseFields,
-  type: z.literal('quote'),
-  textAlign: z.enum(['left', 'center', 'right']).optional(),
-  lineSpacing: finiteNumber.min(0).max(200).optional(),
-  ...flowRichTextFields,
-  citation: z.string().max(1_000).optional(),
-}).strict().superRefine((block, context) => {
-  addFlowRunRangeIssues(block.text, block.runs, context, ['runs'])
-})
-
-const flowDividerBlockSchema = z.object({
-  ...flowBlockBaseFields,
-  type: z.literal('divider'),
-}).strict()
-
-const flowMediaBlockSchema = z.object({
-  ...flowBlockBaseFields,
-  type: z.literal('media'),
-  assetId: stableIdSchema,
-  mediaKind: z.enum(['image', 'audio', 'video']),
-  altText: z.string().max(4_000).optional(),
-  caption: z.string().max(4_000).optional(),
-  layout: z.enum(['content-width', 'wide', 'full-width']),
-  wrap: z.enum(['none', 'left', 'right']).optional(),
-}).strict()
-
-const flowTableBlockSchema = z.object({
-  merges: z.array(tableMergeRegionSchema).max(10000).optional(),
-  ...flowBlockBaseFields,
-  type: z.literal('table'),
-  caption: z.string().max(4_000).optional(),
-  columns: z.array(z.object({
-    id: stableIdSchema,
-    header: z.string(),
-  }).strict()).min(1).max(256),
-  rows: z.array(z.object({
-    id: stableIdSchema,
-    cells: z.record(z.string(), flowTableCellSchema),
-  }).strict()).max(100_000),
-}).strict().superRefine((block, context) => {
-  for (const message of tableMergeIssues(block)) context.addIssue({ code: 'custom', path: ['merges'], message })
-  for (const row of block.rows) for (const [columnId, cell] of Object.entries(row.cells)) {
-    if ((typeof cell === 'string' ? cell : cell.text) && tableCellSpan(block, row.id, columnId).covered) context.addIssue({ code: 'custom', path: ['merges'], message: '覆盖格正文必须已移入合并锚点' })
-  }
-  const columnIds = block.columns.map((column) => column.id)
-  if (new Set(columnIds).size !== columnIds.length) {
-    context.addIssue({ code: 'custom', path: ['columns'], message: 'Column ids must be unique' })
-  }
-  const rowIds = block.rows.map((row) => row.id)
-  if (new Set(rowIds).size !== rowIds.length) {
-    context.addIssue({ code: 'custom', path: ['rows'], message: 'Row ids must be unique' })
-  }
-  const expected = new Set(columnIds)
-  block.rows.forEach((row, rowIndex) => {
-    const cellIds = Object.keys(row.cells)
-    if (cellIds.length !== expected.size || cellIds.some((id) => !expected.has(id))) {
-      context.addIssue({
-        code: 'custom',
-        path: ['rows', rowIndex, 'cells'],
-        message: 'Every table row must contain exactly one cell for every column',
-      })
-    }
-    for (const [columnId, cell] of Object.entries(row.cells)) {
-      if (typeof cell === 'string') continue
-      addFlowRunRangeIssues(
-        cell.text,
-        cell.runs,
-        context,
-        ['rows', rowIndex, 'cells', columnId, 'runs'],
-      )
-    }
-  })
-})
-
-const flowFormulaBlockSchema = z.object({
-  ...flowBlockBaseFields,
-  type: z.literal('formula'),
-  formulaId: stableIdSchema,
-  accessibleText: z.string().trim().min(1).max(4_000),
-  ast: formulaAstSchema,
-}).strict()
-
-const flowCodeBlockSchema = z.object({
-  ...flowBlockBaseFields,
-  type: z.literal('code'),
-  language: z.string().trim().min(1).max(100).optional(),
-  code: z.string().max(5_000_000),
-}).strict()
-
-const flowCalloutBlockSchema = z.object({
-  ...flowBlockBaseFields,
-  type: z.literal('callout'),
-  tone: z.enum(['note', 'example', 'warning', 'conclusion']),
-  title: z.string().max(500).optional(),
-  body: z.string(),
-}).strict()
-
-const flowComponentBlockSchema = z.object({
-  ...flowBlockBaseFields,
-  type: z.literal('component'),
-  component: componentReferenceSchema,
-  props: z.record(z.string(), z.unknown()),
-  staticFallbackAssetId: stableIdSchema,
-  wrap: z.enum(['none', 'left', 'right']).optional(),
-}).strict()
-
-const flowChartBlockSchema = z.object({
-  ...flowBlockBaseFields,
-  type: z.literal('chart'),
-  chart: chartNativeContentObjectSchema,
-  height: finiteNumber.min(160).max(1600),
-}).strict()
-
-export const flowBlockSchema: z.ZodType<FlowBlock> = z.lazy(() =>
-  z.discriminatedUnion('type', [
-    flowHeadingBlockSchema,
-    flowParagraphBlockSchema,
-    flowListBlockSchema,
-    flowQuoteBlockSchema,
-    flowDividerBlockSchema,
-    flowMediaBlockSchema,
-    flowTableBlockSchema,
-    flowChartBlockSchema,
-    flowFormulaBlockSchema,
-    flowCodeBlockSchema,
-    flowCalloutBlockSchema,
-    z.object({
-      ...flowBlockBaseFields,
-      type: z.literal('section'),
-      title: z.string().trim().min(1).max(500),
-      collapsedByDefault: z.boolean(),
-      blocks: z.array(flowBlockSchema).max(100_000),
-    }).strict(),
-    flowComponentBlockSchema,
-  ]),
-)
+export const flowBlockSchema: z.ZodType<FlowBlock> = documentBlockSchema
 
 export const spatialCameraPoseSchema = z.object({
   x: finiteNumber,
@@ -880,7 +648,9 @@ const flowSurfaceSchema = z.object({
   surfaceLayerItems: flowSurfaceLayerEntryListSchema,
   type: z.literal('flow'),
   backgroundMode: backgroundModeSchema.optional(),
-  backgroundColor: colorSchema.optional(),
+  backgroundColor: z.string().regex(hexColorPattern, {
+    message: 'Flow backgroundColor must be a six-digit #RRGGBB color (for example, #f8fafc)',
+  }).optional(),
   backgroundAssetId: stableIdSchema.nullable().optional(),
   layout: z.object({
     widthMode: z.enum(['fluid', 'reading']).optional(),
@@ -896,21 +666,8 @@ const flowSurfaceSchema = z.object({
       message: 'Wide content width cannot be narrower than reading width',
     })
   }
-  const seen = new Set<string>()
-  const visit = (blocks: FlowBlock[]): void => {
-    blocks.forEach((block) => {
-      if (seen.has(block.id)) {
-        context.addIssue({
-          code: 'custom',
-          path: ['blocks'],
-          message: `Flow block ids must be unique: ${block.id}`,
-        })
-      }
-      seen.add(block.id)
-      if (block.type === 'section') visit(block.blocks)
-    })
-  }
-  visit(surface.blocks)
+  const validated = documentContentSchema.safeParse({ blocks: surface.blocks })
+  if (!validated.success) for (const issue of validated.error.issues) context.addIssue({ ...issue, path: issue.path })
 })
 
 const spatialSurfaceSchema = z.object({

@@ -38,6 +38,7 @@ async function launchProbeEditor() {
     },
   })
   const page = await app.firstWindow()
+  await page.getByRole('button', { name: '新建独立课件', exact: true }).click()
   await page.locator('[data-testid="canvas-stage"] canvas').first().waitFor()
   return { app, page, runRoot, server }
 }

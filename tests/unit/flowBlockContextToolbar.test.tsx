@@ -2,9 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import type { FlowBlock } from '../../src/shared/courseProjectTypes'
 import {
-  applyFlowTextEditRunStyle,
   deriveFlowSelectionFormat,
-  type FlowTextEditSession,
 } from '../../src/renderer/authoring/flowTextEdit'
 import {
   FLOW_BLOCK_CONTEXT_TOOLBAR_CONTROL_HEIGHT,
@@ -21,41 +19,22 @@ describe('FlowBlockContextToolbar', () => {
   const baseBlock: Extract<FlowBlock, { type: 'paragraph' }> = {
     id: 'p-1',
     type: 'paragraph',
-    text: 'Hello World',
-    runs: [{ start: 0, end: 5, style: { bold: true, fontFamily: 'KaiTi', fontSize: 24 } }],
-  }
-
-  function richEdit(range: { start: number; end: number }): FlowTextEditSession {
-    return {
-      kind: 'rich-text',
-      source: 'paper',
-      blockId: 'p-1',
-      surfaceId: 'flow',
-      parentId: null,
-      field: 'text',
-      composing: false,
-      pendingAction: null,
-      pendingStyle: {},
-      revision: 1,
-      original: { text: baseBlock.text, runs: structuredClone(baseBlock.runs ?? []) },
-      draft: { text: baseBlock.text, runs: structuredClone(baseBlock.runs ?? []) },
-      range,
-    }
+    content: { inlines: [{ type: 'text', text: 'Hello', style: { bold: true, fontFamily: 'KaiTi', fontSize: 24 } }, { type: 'text', text: ' World' }] },
   }
 
   function renderToolbar(input: {
     block?: FlowBlock
-    edit?: FlowTextEditSession | null
+    range?: { start: number; end: number } | null
     props?: Partial<FlowBlockContextToolbarProps>
     hostWidth?: number
   } = {}) {
     const block = input.block ?? baseBlock
-    const edit = input.edit === undefined ? richEdit({ start: 0, end: 5 }) : input.edit
+    const range = input.range === undefined ? { start: 0, end: 5 } : input.range
     const onCommand = vi.fn()
     const onPreserveSelection = vi.fn()
     const props: FlowBlockContextToolbarProps = {
       block,
-      selectionFormat: deriveFlowSelectionFormat({ block, edit }),
+      selectionFormat: deriveFlowSelectionFormat({ block, range }),
       onCommand,
       onPreserveSelection,
       ...input.props,
@@ -68,29 +47,24 @@ describe('FlowBlockContextToolbar', () => {
     return { ...result, onCommand, onPreserveSelection }
   }
 
-  it('keeps one fixed primary geometry across caret, uniform range, mixed range, and whole block', () => {
+  it('keeps one fixed primary geometry across uniform range, mixed range, and whole block', () => {
     const wholeBlock: FlowBlock = {
       ...baseBlock,
-      runs: [{
-        start: 0,
-        end: 11,
-        style: { bold: true, fontFamily: 'KaiTi', fontSize: 24 },
-      }],
+      content: { inlines: [{ type: 'text', text: 'Hello World', style: { bold: true, fontFamily: 'KaiTi', fontSize: 24 } }] },
     }
     const cases: Array<{
       block: FlowBlock
-      edit: FlowTextEditSession | null
-      mode: 'caret' | 'range' | 'whole-block'
+      range: { start: number; end: number } | null
+      mode: 'range' | 'whole-block'
       label: string
     }> = [
-      { block: baseBlock, edit: richEdit({ start: 5, end: 5 }), mode: 'caret', label: '插入点' },
-      { block: baseBlock, edit: richEdit({ start: 0, end: 5 }), mode: 'range', label: '选区' },
-      { block: baseBlock, edit: richEdit({ start: 0, end: 11 }), mode: 'range', label: '混合格式' },
-      { edit: null, block: wholeBlock, mode: 'whole-block', label: '整块' },
+      { block: baseBlock, range: { start: 0, end: 5 }, mode: 'range', label: '选区' },
+      { block: baseBlock, range: { start: 0, end: 11 }, mode: 'range', label: '混合格式' },
+      { range: null, block: wholeBlock, mode: 'whole-block', label: '整块' },
     ]
 
     for (const state of cases) {
-      const rendered = renderToolbar({ block: state.block, edit: state.edit })
+      const rendered = renderToolbar({ block: state.block, range: state.range })
       const shell = screen.getByTestId('flow-block-context-toolbar')
       expect(shell).toHaveAttribute('data-flow-toolbar-layout', 'stable-primary')
       expect(shell).toHaveStyle({
@@ -123,7 +97,7 @@ describe('FlowBlockContextToolbar', () => {
   })
 
   it('shows derived mixed and active values instead of reading only the first run', () => {
-    renderToolbar({ edit: richEdit({ start: 0, end: 11 }) })
+    renderToolbar({ range: { start: 0, end: 11 } })
 
     expect(screen.getByTestId('flow-toolbar-font-family')).toHaveAttribute(
       'data-format-state',
@@ -137,7 +111,7 @@ describe('FlowBlockContextToolbar', () => {
     expect(screen.getByTestId('flow-toolbar-format-scope')).toHaveTextContent('混合格式')
 
     cleanup()
-    renderToolbar({ edit: richEdit({ start: 0, end: 5 }) })
+    renderToolbar({ range: { start: 0, end: 5 } })
     expect(screen.getByTestId('flow-toolbar-font-family')).toHaveValue('KaiTi')
     expect(screen.getByTestId('flow-toolbar-font-size')).toHaveValue(24)
     expect(screen.getByRole('button', { name: '局部加粗' })).toHaveAttribute('aria-pressed', 'true')
@@ -179,35 +153,17 @@ describe('FlowBlockContextToolbar', () => {
     expect(onCommand).toHaveBeenCalledTimes(1)
   })
 
-  it('keeps caret formatting session-only until the next inserted text', () => {
-    const caretEdit = richEdit({ start: 5, end: 5 })
-    const { onCommand } = renderToolbar({ edit: caretEdit })
-
-    expect(screen.getByTestId('flow-toolbar-format-scope')).toHaveTextContent('插入点')
-    expect(screen.getByTestId('flow-toolbar-font-family')).toHaveValue('KaiTi')
-    expect(screen.getByTestId('flow-toolbar-font-family')).toBeEnabled()
-    expect(screen.getByTestId('flow-toolbar-font-size')).toHaveValue(24)
-    const bold = screen.getByRole('button', { name: '插入点加粗' })
-    expect(bold).toBeEnabled()
-    fireEvent.click(bold)
-    expect(onCommand).toHaveBeenCalledWith({
-      type: 'range-style',
-      style: { bold: false },
-    })
-    const pending = applyFlowTextEditRunStyle(caretEdit, { italic: true })
-    expect((pending.draft as {
-      runs: unknown[]
-    }).runs).toEqual((caretEdit.draft as { runs: unknown[] }).runs)
-    expect(pending.pendingStyle).toEqual({ italic: true })
-
-    cleanup()
-    const pendingToolbar = renderToolbar({ edit: pending })
-    expect(screen.getByTestId('flow-toolbar-format-scope')).toHaveTextContent('插入点 · 待输入样式')
-    fireEvent.click(screen.getByTestId('flow-toolbar-more'))
-    const clearPending = screen.getByRole('button', { name: '清除待输入格式' })
-    expect(clearPending).toBeEnabled()
-    fireEvent.click(clearPending)
-    expect(pendingToolbar.onCommand).toHaveBeenCalledWith({ type: 'range-clear' })
+  it('derives mixed text and math styles without changing canonical inline content', () => {
+    const block: FlowBlock = { id: 'math-paragraph', type: 'paragraph', content: { inlines: [
+      { type: 'text', text: '公式', style: { color: '#123456', bold: true } },
+      { type: 'math', formulaId: 'm', latex: 'x', accessibleText: 'x', style: { color: '#abcdef' } },
+    ] } }
+    const original = structuredClone(block)
+    const format = deriveFlowSelectionFormat({ block, range: { start: 0, end: 3 } })
+    expect(format.fields.color.state).toBe('mixed')
+    expect(format.fields.bold.state).toBe('mixed')
+    expect(format.end).toBe(3)
+    expect(block).toEqual(original)
   })
 
   it('puts low-frequency formatting and block commands in an absolute discoverable panel', () => {

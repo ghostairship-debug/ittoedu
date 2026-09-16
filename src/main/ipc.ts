@@ -38,6 +38,13 @@ import { assertTrustedIpcSender } from './security'
 import { diagnosticLog, exportDiagnosticReport } from './diagnosticLog'
 import { componentCatalogManager } from './componentCatalogManager'
 import { operateMaterials } from './materialService'
+import { operateLessonDesktop } from './lessonDesktopService'
+import { operateLessonDocumentAi } from './lessonDocumentAiTask'
+import { operateLessonDocument } from './lessonDocumentDesktopService'
+import { operateLessonMaterial } from './lessonMaterialDesktopService'
+import { operateFlowDocumentRecovery } from './flowDocumentRecovery'
+import { operateLessonAuthoringDesktop } from './lessonAuthoringDesktopService'
+import { lessonAuthoringDesktopRequestSchema } from '../shared/lessonAuthoringDesktop'
 import { operateLocalAgent } from './localAgent/service'
 import { operateDynamicAdmission } from './dynamicAdmission'
 import { operateLegacyPpt } from './pptImportService'
@@ -71,6 +78,7 @@ const bytesSchema = z.custom<Uint8Array>(
 
 const saveProjectSchema = z
   .object({
+    suggestedDirectory: z.string().min(1).max(32767).refine(value => path.isAbsolute(value)).optional(),
     path: z.string().min(1).max(32_767).optional(),
     suggestedName: z.string().trim().min(1).max(160),
     bytes: bytesSchema,
@@ -243,6 +251,30 @@ function registerSafeHandler<T>(
 }
 
 export function registerIpcHandlers(context: IpcContext): void {
+  registerSafeHandler(IPC_CHANNELS.lessonDocumentAi, context, {
+    code: 'LESSON_DOCUMENT_AI_FAILED', title: '文档改稿未完成',
+    message: '无法完成当前文档的 AI 修改。', suggestion: '请保留当前稿，查看对话后继续。',
+  }, async (_event, args) => operateLessonDocumentAi(requireSingleArgument(args)))
+  registerSafeHandler(IPC_CHANNELS.lessonAuthoring, context, {
+    code: 'LESSON_AUTHORING_FAILED', title: '创作阶段未完成',
+    message: '当前文档或材料还不能用于下一阶段。', suggestion: '请查看当前稿、材料与确认状态后继续。',
+  }, async (_event, args) => operateLessonAuthoringDesktop(lessonAuthoringDesktopRequestSchema.parse(requireSingleArgument(args))))
+  registerSafeHandler(IPC_CHANNELS.flowDocumentRecovery, context, {
+    code: 'FLOW_DOCUMENT_RECOVERY_FAILED', title: '正文恢复稿未保存',
+    message: '无法保存或读取 Flow 源文恢复稿。', suggestion: '请保留编辑窗口，检查磁盘后重试。',
+  }, async (_event, args) => operateFlowDocumentRecovery(requireSingleArgument(args)))
+  registerSafeHandler(IPC_CHANNELS.lessonMaterial, context, {
+    code: 'LESSON_MATERIAL_FAILED', title: '材料操作未完成',
+    message: '无法读取或保存课例材料。', suggestion: '请检查材料文件和课例目录。',
+  }, async (_event, args) => operateLessonMaterial(requireWindow(context), requireSingleArgument(args)))
+  registerSafeHandler(IPC_CHANNELS.lessonDocument, context, {
+    code: 'LESSON_DOCUMENT_FAILED', title: '文档操作未完成',
+    message: '无法完成课例文档操作。', suggestion: '请保留当前稿并检查文件状态。',
+  }, async (_event, args) => operateLessonDocument(requireSingleArgument(args)))
+  registerSafeHandler(IPC_CHANNELS.lesson, context, {
+    code: 'LESSON_OPERATION_FAILED', title: '课例操作未完成',
+    message: '无法完成工作空间或课例操作。', suggestion: '请检查目录和文件状态后重试。',
+  }, async (_event, args) => operateLessonDesktop(requireWindow(context), requireSingleArgument(args)))
   registerSafeHandler(IPC_CHANNELS.captureAuthoringObservation, context, {
     code: 'OBSERVATION_CAPTURE_FAILED', title: '当前画面尚未同步',
     message: '无法读取当前课件画面。', suggestion: '请等待画面呈现完成后重试。',

@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto'
 import path from 'node:path'
 import generatedCapabilities from '../../shared/generated/courseAgentCapabilities.json'
 import { generationResourceFileSchema } from '../../shared/generationContract'
+import { renamePreparedPath } from './preparedRename'
 
 /** Capability references survive turns, but remain inside this conversation's
  * application-owned staging directory and follow its existing deletion owner. */
@@ -46,7 +47,19 @@ export async function ensureGenerationCapabilityWorkspace(candidateRoot: string)
           if (await fs.realpath(path.dirname(target)) !== path.dirname(target)) throw new Error('能力资源目录不能包含链接')
           await fs.writeFile(target, content, { flag: 'wx', mode: 0o600 })
         }
-        await fs.rename(temporary, directory)
+        // Only an entirely written, realpath-closed capability tree may be
+        // published. A concurrent completed tree is acceptable only when its
+        // immutable semantic contents are exactly the same.
+        await assertCache(temporary)
+        await renamePreparedPath(temporary, directory, async () => {
+          try { await fs.stat(directory) }
+          catch (error) {
+            if ((error as NodeJS.ErrnoException).code === 'ENOENT') return true
+            throw error
+          }
+          await assertCache(directory)
+          return false
+        })
       } finally {
         // The computed temporary path is a direct child of the verified parent.
         if (path.dirname(temporary) !== parent) throw new Error('能力暂存目录越界')

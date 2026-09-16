@@ -1,4 +1,4 @@
-import { buildPublishedFixture as buildPublishedCourseV2Payload } from '../fixtures/teacherController'
+import { buildPublishedFixture as buildPublishedCourseV2Payload, controllerPackages } from '../fixtures/teacherController'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   addCourseFlowPage,
@@ -345,7 +345,7 @@ describe('Published V2 Slide scene Surface Runtime playback', () => {
       container,
       project: fixture,
       assetFiles: {},
-      components: {},
+      components: controllerPackages,
       locationId: targetLocation.id,
     })
     sessions.push(session)

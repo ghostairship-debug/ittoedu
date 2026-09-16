@@ -6,6 +6,21 @@ import { sceneNodeToCourseLayerItem } from '@/shared/courseProjectModel'
 import { useEditorStore } from '@/renderer/store/editorStore'
 import { PropertiesTab } from '@/renderer/ui/PropertiesTab'
 import type { FlowSurfaceDocument } from '@/shared/courseProjectTypes'
+import { SharedDocumentEditor } from '@/renderer/document'
+import { buildFlowEditorView, captureFlowEditorAuthoringTarget } from '@/renderer/course/flowEditorView'
+import { replaceFlowDocumentContent } from '@/renderer/course/flowEditorCommands'
+
+function SharedFormulaBody() {
+  const session = useEditorStore(state => state.flowSession)
+  const owner = useEditorStore(state => state.courseAuthoringSession)
+  if (!session || !owner) return null
+  const project = session.history.present
+  const surface = project.surfaces.find(item => item.id === session.selection.surfaceId)
+  if (surface?.type !== 'flow') return null
+  return <SharedDocumentEditor document={{ content: { blocks: surface.blocks }, resources: { assets: [], components: [] } }} revision={String(project.revision)}
+    onDraft={() => {}} onUndo={() => useEditorStore.getState().undo()} onRedo={() => useEditorStore.getState().redo()}
+    onChange={(next, operation) => useEditorStore.getState().runFlowAuthoringIntent(captureFlowEditorAuthoringTarget({ view: buildFlowEditorView({ project, locationId: session.selection.locationId }), sessionToken: owner.token, target: { kind: 'surface' } }), { kind: 'replace-document-content', blocks: next.content.blocks, historyGroup: operation.historyGroup }).ok} />
+}
 
 function drawingContext(): CanvasRenderingContext2D {
   return {
@@ -38,7 +53,7 @@ describe('FlowFormulaBlockProperties', () => {
     vi.restoreAllMocks()
   })
 
-  it('mounts FormulaAuthoringEditor when formula block is selected and commits changes', () => {
+  it('edits body LaTeX in the shared editor, retaining formula identity and one owner history step', () => {
     const store = useEditorStore.getState()
     store.createNewFlowProject()
     store.addFormulaNode()
@@ -56,26 +71,25 @@ describe('FlowFormulaBlockProperties', () => {
     expect(formulaBlock).toBeDefined()
     if (!formulaBlock) return
 
-    const selection = selectFlowEditorBlocks(doc, flow.selection.locationId, [formulaBlock.id])
+    expect(useEditorStore.getState().applyFlowCommand(replaceFlowDocumentContent(doc, flowSurface.id, [formulaBlock, ...flowSurface.blocks.filter(block => block.id !== formulaBlock.id)])).ok).toBe(true)
+    const current = useEditorStore.getState().flowSession!
+    const selection = selectFlowEditorBlocks(current.history.present, current.selection.locationId, [formulaBlock.id])
     useEditorStore.getState().applyFlowSelection(selection)
 
-    render(<PropertiesTab onReplaceImage={() => undefined} />)
+    render(<><PropertiesTab onReplaceImage={() => undefined} /><SharedFormulaBody /></>)
 
     expect(screen.getByTestId('flow-formula-properties')).toBeDefined()
-    expect(screen.getByTestId('formula-authoring-editor')).toBeDefined()
+    expect(screen.queryByTestId('formula-authoring-editor')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: /^公式$/ }))
 
-    const input = screen.getByRole('textbox', { name: '公式内容（线性输入）' })
+    const input = screen.getByLabelText('LaTeX')
     fireEvent.focus(input)
-    expect(useEditorStore.getState().flowTextEdit).toMatchObject({
-      kind: 'formula',
-      blockId: formulaBlock.id,
-    })
+    expect(useEditorStore.getState().flowTextEdit).toBeNull()
+    const historyBefore = useEditorStore.getState().flowSession!.history.past.length
     const revisionBeforeDraft = useEditorStore.getState().flowSession?.history.present.revision
     fireEvent.change(input, { target: { value: 'a+b' } })
-    expect(useEditorStore.getState().flowTextEdit?.draft).toMatchObject({
-      source: 'a+b',
-      valid: true,
-    })
+    fireEvent.change(screen.getByLabelText('朗读说明'), { target: { value: '' } })
+    expect(input).toHaveValue('a+b')
     expect(useEditorStore.getState().flowSession?.history.present.revision).toBe(revisionBeforeDraft)
 
     const applyButton = screen.getByRole('button', { name: '应用公式' })
@@ -89,10 +103,16 @@ describe('FlowFormulaBlockProperties', () => {
     expect(updatedBlock).toBeDefined()
     expect(updatedBlock?.type).toBe('formula')
     if (updatedBlock && updatedBlock.type === 'formula') {
+      expect(updatedBlock.latex).toBe('a+b')
+      expect(updatedBlock.formulaId).toBe(formulaBlock.formulaId)
       expect(updatedBlock.accessibleText).toContain('a')
       expect(updatedBlock.accessibleText).toContain('b')
     }
     expect(useEditorStore.getState().flowTextEdit).toBeNull()
+    expect(updatedFlow!.history.past).toHaveLength(historyBefore + 1)
+    useEditorStore.getState().undo()
+    const restored = useEditorStore.getState().flowSession!.history.present.surfaces.find(surface => surface.id === flowSurface.id)
+    expect(restored?.type === 'flow' && restored.blocks.find(block => block.id === formulaBlock.id)).toEqual(formulaBlock)
 
     expect(screen.queryByTestId('formula-edit-dialog')).toBeNull()
   })

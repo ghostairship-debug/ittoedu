@@ -1,3 +1,4 @@
+import type { FlowDocumentDraft } from '../../authoring/flowDocumentDraft'
 import { useEffect, useRef, useState, type CSSProperties } from 'react'
 import { MousePointer2, Play } from 'lucide-react'
 import type { ComponentPackageData } from '../../../shared/componentTypes'
@@ -30,6 +31,7 @@ export interface FlowLocationWorkspaceProps {
   readonly sessionToken: CourseAuthoringSessionToken
   readonly assets: Readonly<Record<string, AssetMeta>>
   readonly selection: FlowEditorSelection | null
+  readonly documentDraft?: FlowDocumentDraft | null
   readonly textEdit: FlowTextEditSession | null
   readonly previewTextEdit?: FlowTextEditSession | null
   readonly canvasMode: FlowCanvasMode
@@ -47,6 +49,7 @@ export function FlowLocationWorkspace({
   assets,
   selection,
   textEdit,
+  documentDraft,
   previewTextEdit,
   canvasMode,
   editingScope,
@@ -129,6 +132,7 @@ export function FlowLocationWorkspace({
             assets={assets}
             selection={selection}
             textEdit={textEdit}
+            documentDraft={documentDraft}
             previewTextEdit={previewTextEdit}
             commands={commands}
             assetFiles={assetFiles}

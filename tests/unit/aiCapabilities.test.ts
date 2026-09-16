@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 import { createHash } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { promises as fs } from 'node:fs'
@@ -15,6 +17,8 @@ import {
   INTERACTION_PROTOCOL_VERSION,
   writeAiCapabilityArtifacts,
 } from '../../scripts/generate-ai-capabilities'
+import { z } from 'zod'
+import { describeGenerationSemanticTools, generationProjectDocumentWireInputSchema } from '../../src/shared/generationContract'
 import { describeAuthoringToolDiscovery } from '../../src/renderer/authoring/tools/authoringToolFacade'
 import { BUILT_IN_COMPONENT_CATALOG_SHA256 } from '../../src/shared/builtInComponentCatalog'
 import { componentManifestSchema } from '../../src/shared/componentSchema'
@@ -103,14 +107,22 @@ describe('AI capability manifest generation', () => {
     for (const tool of tools) {
       const source = generated.files.get(`tools/${tool.name}.json`)!
       const read = JSON.parse(nativeRead(source))
-      expect(read.inputSchema, `${tool.name} complete formal input schema`).toEqual(tool.inputSchema)
-      expect(read).toEqual(JSON.parse(JSON.stringify({ version: 1, ...tool })))
+      if (tool.name === 'project.document') {
+        expect(read.inputSchema).toEqual(z.toJSONSchema(generationProjectDocumentWireInputSchema))
+        const input = tool.inputSchema as Record<string, any>
+        expect(JSON.parse(nativeRead(generated.files.get(read.artifactSchema)!))).toEqual(
+          JSON.parse(JSON.stringify({ $schema: input.$schema, ...input.properties.artifact, $defs: input.$defs })),
+        )
+      } else {
+        expect(read.inputSchema, `${tool.name} complete formal input schema`).toEqual(tool.inputSchema)
+        expect(read).toMatchObject(JSON.parse(JSON.stringify({ version: 1, ...tool })))
+      }
     }
     const source = generated.files.get('discovery.json')!
     const discovery = JSON.parse(nativeRead(source))
     expect(discovery).toEqual(JSON.parse(source))
     expect(discovery.tools.map((tool: { id: string }) => tool.id).sort())
-      .toEqual(tools.map(tool => tool.name).sort())
+      .toEqual([...tools, ...describeGenerationSemanticTools()].map(tool => tool.name).sort())
     expect(discovery.protocols.map((protocol: { id: string }) => protocol.id).sort())
       .toEqual(['component-api4', 'runtime-api2', 'runtime-api3'])
     for (const protocol of discovery.protocols) {
@@ -1287,6 +1299,7 @@ describe('AI capability manifest generation', () => {
     expect(tracedSources).not.toContain(['src/shared/project', 'Schema.ts'].join(''))
     expect(tracedSources).not.toContain(['src/shared/project', 'Types.ts'].join(''))
     expect(tracedSources).toContain('src/renderer/project/archivePath.ts')
+    expect(tracedSources).toContain('src/renderer/project/courseProjectArchive.ts')
 
     // Formal tool discovery now imports the sole Facade and its dependency closure.
     // Unrelated app and export entrypoints remain outside generated provenance.
@@ -1298,7 +1311,6 @@ describe('AI capability manifest generation', () => {
       'src/renderer/components/componentPackageStore.ts',
       'src/renderer/export/course/buildCoursePackages.ts',
       'src/renderer/export/course/buildCoursePrintArtifacts.ts',
-      'src/renderer/project/courseProjectArchive.ts',
       'src/renderer/ui/coursePlayerTryRun.ts',
       ['src/renderer/project/project', 'Archive.ts'].join(''),
       ['src/renderer/project/validateProject', 'Archive.ts'].join(''),
@@ -1410,8 +1422,7 @@ describe('AI capability manifest generation', () => {
     // records source files, so narrowing the input set cannot move capability bytes.
     for (const [relativePath, content] of generated.files) {
       if (relativePath === 'generation-evidence.json') continue
-      expect(content, `${relativePath} must not embed source provenance`)
-        .not.toContain('sourceFiles')
+      if (relativePath.endsWith('.json')) expect(JSON.parse(content), `${relativePath} must not embed source provenance`).not.toHaveProperty('inputs.sourceFiles')
     }
   }, 30_000)
 

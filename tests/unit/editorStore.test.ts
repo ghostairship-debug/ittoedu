@@ -1672,7 +1672,8 @@ describe('node operations', () => {
     const store = useEditorStore.getState()
     const bytes = new Uint8Array([1, 2, 3, 4])
     store.importAsset(imageMeta, bytes)
-    expect(store.deleteAsset(imageMeta.id)).toBe(true)
+    const deleted = store.deleteAsset(imageMeta.id)
+    expect(deleted, useEditorStore.getState().errorMessage ?? undefined).toBe(true)
     expect(selectActiveCourseProjectDocument(useEditorStore.getState())!.assets[imageMeta.id]).toBeUndefined()
     expect(mediaFiles()[imageMeta.id]).toBeUndefined()
 

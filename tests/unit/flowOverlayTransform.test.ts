@@ -15,7 +15,7 @@ const NOW = '2026-08-18T12:00:00.000Z'
 
 function flowProject(): CourseProjectDocument {
   const blocks: FlowBlock[] = [
-    { id: 'h1', type: 'heading', level: 1, text: '标题' },
+    { id: 'h1', type: 'heading', level: 1, content: { inlines: [{ type: 'text', text: '标题' }] }},
   ]
   const project: CourseProjectDocument = {
     schemaVersion: COURSE_PROJECT_SCHEMA_VERSION,

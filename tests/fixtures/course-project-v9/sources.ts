@@ -834,20 +834,19 @@ function flowFixture(): CourseProjectArchiveData {
       id: 'flow-heading',
       type: 'heading',
       level: 1,
-      text: '流式讲义',
-      runs: [{ start: 0, end: 4, style: { bold: true } }],
+      content: { inlines: [{ type: 'text', text: '流式讲义', style: { bold: true } }] },
     },
-    { id: 'flow-paragraph', type: 'paragraph', text: '这是一段可编辑正文。' },
+    { id: 'flow-paragraph', type: 'paragraph', content: { inlines: [{ type: 'text', text: '这是一段可编辑正文。' }] } },
     {
       id: 'flow-list',
       type: 'list',
       ordered: true,
       items: [
-        { id: 'flow-item-1', text: '第一项' },
-        { id: 'flow-item-2', text: '第二项' },
+        { id: 'flow-item-1', content: { inlines: [{ type: 'text', text: '第一项' }] } },
+        { id: 'flow-item-2', content: { inlines: [{ type: 'text', text: '第二项' }] } },
       ],
     },
-    { id: 'flow-quote', type: 'quote', text: '引用一句结论。', citation: '课堂讲义' },
+    { id: 'flow-quote', type: 'quote', content: { inlines: [{ type: 'text', text: '引用一句结论。' }] }, citation: { inlines: [{ type: 'text', text: '课堂讲义' }] } },
     { id: 'flow-divider', type: 'divider' },
     {
       id: 'flow-media',
@@ -855,20 +854,20 @@ function flowFixture(): CourseProjectArchiveData {
       assetId: 'flow-image',
       mediaKind: 'image',
       altText: '插图',
-      caption: '示意图',
+      caption: { inlines: [{ type: 'text', text: '示意图' }] },
       layout: 'content-width',
     },
     {
       id: 'flow-table',
       type: 'table',
-      caption: '对照表',
+      caption: { inlines: [{ type: 'text', text: '对照表' }] },
       columns: [
-        { id: 'col-name', header: '名称' },
-        { id: 'col-value', header: '值' },
+        { id: 'col-name', header: { inlines: [{ type: 'text', text: '名称' }] } },
+        { id: 'col-value', header: { inlines: [{ type: 'text', text: '值' }] } },
       ],
       rows: [{
         id: 'row-1',
-        cells: { 'col-name': 'Δ', 'col-value': 'b² − 4ac' },
+        cells: { 'col-name': { inlines: [{ type: 'text', text: 'Δ' }] }, 'col-value': { inlines: [{ type: 'text', text: 'b² − 4ac' }] } },
       }],
     },
     {
@@ -876,35 +875,22 @@ function flowFixture(): CourseProjectArchiveData {
       type: 'formula',
       formulaId: 'formula-delta',
       accessibleText: '德尔塔等于 b 的平方减去四 a c',
-      ast: {
-        type: 'row',
-        children: [
-          { type: 'token', value: 'Δ' },
-          { type: 'operator', value: '=' },
-          {
-            type: 'script',
-            base: { type: 'token', value: 'b' },
-            superscript: { type: 'token', value: '2' },
-          },
-          { type: 'operator', value: '−' },
-          { type: 'token', value: '4ac' },
-        ],
-      },
+      latex: "\\Delta =b^{2}-4ac",
     },
     { id: 'flow-code', type: 'code', language: 'ts', code: 'const delta = b * b - 4 * a * c' },
     {
       id: 'flow-callout',
       type: 'callout',
       tone: 'note',
-      title: '提示',
-      body: '先算判别式再判断根的情况。',
+      title: { inlines: [{ type: 'text', text: '提示' }] },
+      body: { inlines: [{ type: 'text', text: '先算判别式再判断根的情况。' }] },
     },
     {
       id: 'flow-section',
       type: 'section',
-      title: '补充',
+      title: { inlines: [{ type: 'text', text: '补充' }] },
       collapsedByDefault: false,
-      blocks: [{ id: 'flow-section-note', type: 'paragraph', text: '本节可折叠。' }],
+      blocks: [{ id: 'flow-section-note', type: 'paragraph', content: { inlines: [{ type: 'text', text: '本节可折叠。' }] } }],
     },
   ]
   const flowUnderlay = nativeText('flow-underlay-note', 10, '正文下层', {
@@ -1072,8 +1058,8 @@ function mixedFixture(): CourseProjectArchiveData {
         surfaceLayerItems: [],
         layout: { readingWidth: 760, wideContentWidth: 1120 },
         blocks: [
-          { id: 'flow-heading', type: 'heading', level: 1, text: '讲义标题' },
-          { id: 'flow-paragraph', type: 'paragraph', text: '同一工程内的流式页面。' },
+          { id: 'flow-heading', type: 'heading', level: 1, content: { inlines: [{ type: 'text', text: '讲义标题' }] } },
+          { id: 'flow-paragraph', type: 'paragraph', content: { inlines: [{ type: 'text', text: '同一工程内的流式页面。' }] } },
         ],
       },
       {

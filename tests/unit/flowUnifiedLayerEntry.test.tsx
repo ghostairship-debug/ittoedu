@@ -237,6 +237,7 @@ describe('Flow unified layer entry', () => {
     const host = await mountFlowLocationTryRun({
       container,
       project: flowDocument(),
+      components: useEditorStore.getState().componentPackages,
       locationId: useEditorStore.getState().flowSession!.selection.locationId,
     })
     const root = container.querySelector('.flow-surface-host')

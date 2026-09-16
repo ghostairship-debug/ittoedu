@@ -160,8 +160,7 @@ function createMultiSurfaceProject(): CourseProjectDocument {
       {
         id: 'flow-p-1',
         type: 'paragraph',
-        text: '流式讲义正文内容',
-        runs: [],
+        content: { inlines: [{"type":"text","text":"流式讲义正文内容"}] },
       },
     ],
     surfaceLayerItems: [],

@@ -8,7 +8,7 @@ import type { PptxImportDraft } from './pptxImport'
 /** All page and media planning is private. The caller commits this single step. */
 export function planPptxImportTransaction(project: CourseProjectDocument, draft: PptxImportDraft, title: string) {
   if (!draft.slides.length) throw new Error('没有可导入的页面')
-  let next = commitCourseProjectMutation(project, projectDraft => { applyCourseAssetImports(projectDraft.assets, {}, draft.assets) })
+  let next = commitCourseProjectMutation(project, projectDraft => { applyCourseAssetImports(projectDraft.assets, {}, draft.assets); Object.assign(projectDraft.media.audio.sounds, structuredClone(draft.sounds ?? {})) })
   let surfaceId = '', firstLocationId = ''
   const locationsBySharedKey = new Map<string, string[]>()
   for (const [index, slide] of draft.slides.entries()) {
@@ -27,6 +27,7 @@ export function planPptxImportTransaction(project: CourseProjectDocument, draft:
       scene.name = slide.title
       scene.backgroundColor = slide.backgroundColor
       scene.layerItems = structuredClone(slide.items)
+      scene.interactions = structuredClone(slide.interactions ?? [])
       projectDraft.locations.find(l => l.id === location.id)!.label = slide.title
     })
   }

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, cleanup } from '@testing-library/react'
 import { createBlankCourseProject } from '../../src/renderer/project/createCourseProject'
+import { createBlankFlowCourseProject } from '../../src/renderer/project/createFlowCourseProject'
 import { createChartNode, createImageNode, createTextNode } from '../../src/renderer/project/nativeNodeFactories'
 import { sceneNodeToCourseLayerItem } from '../../src/shared/courseProjectModel'
 import { courseProjectDocumentSchema } from '../../src/shared/courseProjectSchema'
@@ -24,6 +25,40 @@ function fixture() {
   return { context, scene, surface }
 }
 describe('design productivity canonical previews', () => {
+  it('replaces across formatted Flow text boundaries in every math-separated segment without changing math identities', () => {
+    const document = createBlankFlowCourseProject()
+    const surface = document.surfaces[0]!
+    if (surface.type !== 'flow') throw new Error('expected flow')
+    const mathA = { type: 'math' as const, formulaId: 'math-a', latex: 'x^{2}', accessibleText: 'x平方' }
+    const mathB = { type: 'math' as const, formulaId: 'math-b', latex: '\\frac{1}{2}', accessibleText: '二分之一' }
+    surface.blocks.push({ id: 'mixed-body', type: 'paragraph', content: { inlines: [
+      { type: 'text', text: '旧', style: { bold: true } }, { type: 'text', text: '文', style: { italic: true } }, mathA,
+      { type: 'text', text: '旧', style: { color: '#123456' } }, { type: 'text', text: '文', style: { underline: true } }, mathB,
+      { type: 'text', text: '旧文', style: { fontSize: 24 } },
+    ] } })
+    const context: ProductivityContext = { document, sessionToken: { locationId: document.startLocationId, surfaceType: 'flow', revision: document.revision, generation: 1 } }
+    const preview = createProductivityPreview(context, { kind: 'text', scope: 'course', find: '旧文', replacement: '新😀' })
+    expect(preview.items).toHaveLength(3)
+    const result = applyProductivityPreview(context, preview, preview.items.map(item => item.id))
+    if (!result.ok || !result.step) throw new Error('expected one transaction')
+    const next = result.step.nextDocument.surfaces[0]!
+    if (next.type !== 'flow') throw new Error('expected flow')
+    const block = next.blocks.find(item => item.id === 'mixed-body')!
+    if (block.type !== 'paragraph') throw new Error('expected paragraph')
+    expect(block.content.inlines.filter(inline => inline.type === 'math')).toEqual([mathA, mathB])
+    const text = block.content.inlines.filter(inline => inline.type === 'text')
+    expect(text.map(inline => inline.text).join('')).toBe('新😀新😀新😀')
+    const grouped: { text: string; style: unknown }[] = []
+    for (const inline of text) {
+      const previous = grouped.at(-1)
+      if (previous && JSON.stringify(previous.style) === JSON.stringify(inline.style)) previous.text += inline.text
+      else grouped.push({ text: inline.text, style: inline.style })
+    }
+    expect(grouped).toEqual([{ text: '新😀', style: { bold: true } }, { text: '新😀', style: { color: '#123456' } }, { text: '新😀', style: { fontSize: 24 } }])
+    expect(result.step.nextDocument.revision).toBe(document.revision + 1)
+    const initial = { document, resources: { assetFiles: {}, componentPackages: {} } }
+    expect(applyEditorTransactionStep(applyEditorTransactionStep(initial, result.step, 'forward'), result.step, 'inverse')).toEqual(initial)
+  })
   it('Remix maps explicit slots to independent editable content and one reversible archive transaction', () => {
     const { context, scene } = fixture()
     const id = scene.layerItems[0]!.layerItemId
@@ -139,7 +174,7 @@ describe('design productivity canonical previews', () => {
     chart.title = '旧图表'
     const layer = sceneNodeToCourseLayerItem(chart, 0)
     if (layer.kind !== 'native' || layer.content.nativeType !== 'chart') throw new Error('chart')
-    context.document.surfaces.push({ id: 'flow', type: 'flow', title: '讲义', surfaceLayerItems: [], layout: { readingWidth: 800, wideContentWidth: 1000 }, blocks: [{ id: 'p', type: 'paragraph', text: '旧正文' }, { id: 'chart', type: 'chart', chart: layer.content.data, height: 320 }, { id: 'code', type: 'code', code: '旧代码' }] })
+    context.document.surfaces.push({ id: 'flow', type: 'flow', title: '讲义', surfaceLayerItems: [], layout: { readingWidth: 800, wideContentWidth: 1000 }, blocks: [{ id: 'p', type: 'paragraph', content: { inlines: [{ type: 'text', text: '旧正文' }] } }, { id: 'chart', type: 'chart', chart: layer.content.data, height: 320 }, { id: 'code', type: 'code', code: '旧代码' }] })
     context.document.mixedPrintPlan = { pageSize: 'A4', orientation: 'portrait', entries: [{ id: 'flow-print', kind: 'flow-document', surfaceId: 'flow' }, { id: 'slide-print', kind: 'slide-scenes', surfaceId: context.document.surfaces[0]!.id, sceneIds: [context.document.locations[0]!.kind === 'slide-scene' ? context.document.locations[0]!.sceneId : ''] }] }
     context.document.locations.push({ id: 'flow-location', kind: 'flow-block', surfaceId: 'flow', blockId: 'p', label: '正文' })
     context.sessionToken = { ...context.sessionToken, locationId: 'flow-location', surfaceType: 'flow' }

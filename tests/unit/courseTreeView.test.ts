@@ -41,8 +41,8 @@ function requireSession<TSession>(
 
 function flowBlocksWithHeadingOnly(): FlowBlock[] {
   return [
-    { id: 'block-h1', type: 'heading', level: 1, text: '第一章' },
-    { id: 'block-paragraph', type: 'paragraph', text: '正文不上树' },
+    { id: 'block-h1', type: 'heading', level: 1, content: { inlines: [{ type: 'text', text: '第一章' }] } },
+    { id: 'block-paragraph', type: 'paragraph', content: { inlines: [{ type: 'text', text: '正文不上树' }] } },
   ]
 }
 

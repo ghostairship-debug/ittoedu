@@ -37,6 +37,14 @@ describe('existing image discovery in the initial prompt', () => {
     const alias = Object.entries(full.assetAliases).find(([, id]) => id === 'asset-0000')![0]
     expect(initial.assetAliases![alias]).toBe('asset-0000')
     expect(initial.requestDetails.assetInventory).toMatchObject({ total: 2, included: 2, partial: false })
+    const page = (initial.context as any).pages[0]
+    for (const background of page.backgrounds) {
+      expect(typeof background.target).toBe('string')
+      expect(full.destinationAliases[background.target]).toMatchObject(initial.destinationAliases[background.target])
+      const destination = full.destinationAliases[background.target]!
+      if (destination.kind !== 'update') throw new Error('Background requires an update target')
+      expect(destination.target.authoringAddress).toContain('field=background')
+    }
     expect(JSON.stringify(request)).toBe(before)
     for (const phase of ['initial', 'host-feedback'] as const) {
       const prompt = buildGenerationPrompt('codex', request, 'c:/candidate', phase)

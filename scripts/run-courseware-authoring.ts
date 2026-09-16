@@ -776,33 +776,19 @@ async function previewScreenshot(
   networkErrors: string[],
 ): Promise<Buffer> {
   const overlay = page.getByTestId('course-preview-overlay')
-  const previewPromise = app.waitForEvent('window')
-  await page.getByRole('button', { name: '全屏 16:9 整课预览' }).click()
-  const mode = await Promise.race([
-    overlay.waitFor({ state: 'visible', timeout: 30_000 }).then(() => 'overlay' as const),
-    previewPromise.then(() => 'window' as const),
-  ])
-  if (mode === 'overlay') {
-    void previewPromise.catch(() => undefined)
-    try {
-      const stage = overlay.locator('.slide-published-adapter')
-      await stage.waitFor({ state: 'visible', timeout: 20_000 })
-      for (let index = 0; index < sceneIndex; index += 1) {
-        await page.getByTestId('course-preview-next').click()
-        await page.waitForTimeout(150)
-      }
-      return await stage.screenshot()
-    } finally {
-      await overlay.getByRole('button', { name: '关闭预览' }).click()
-      await overlay.waitFor({ state: 'hidden' })
-    }
-  }
-  const preview = await previewPromise
+  await page.getByRole('button', { name: '整课预览', exact: true }).click()
+  await overlay.waitFor({ state: 'visible', timeout: 30_000 })
   try {
-    await enforceOffline(preview, networkErrors)
-    return await sceneCanvasScreenshot(preview, sceneIndex)
+    const stage = overlay.locator('.slide-published-adapter')
+    await stage.waitFor({ state: 'visible', timeout: 20_000 })
+    for (let index = 0; index < sceneIndex; index += 1) {
+      await page.getByTestId('course-preview-next').click()
+      await page.waitForTimeout(150)
+    }
+    return await stage.screenshot()
   } finally {
-    await preview.close().catch(() => undefined)
+    await overlay.getByRole('button', { name: '关闭预览' }).click()
+    await overlay.waitFor({ state: 'hidden' })
   }
 }
 
@@ -1040,6 +1026,7 @@ async function execute(options: Options): Promise<AuthoringReceipt> {
     await installElectronOfflineGuard(app)
     const page = await app.firstWindow()
     await enforceOffline(page, errors)
+    await page.getByRole('button', { name: '新建独立课件', exact: true }).click()
     await page.locator('[data-testid="canvas-stage"] canvas').waitFor({ state: 'visible' })
     await openProject(page, app, baselineProject, baselineHtml)
     await patchDialogs(app, {

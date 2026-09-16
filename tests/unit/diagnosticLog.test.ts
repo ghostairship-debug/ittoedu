@@ -240,8 +240,8 @@ describe('local CLI sessions', () => {
     const id = await harness.start(workspace, 'codex', 'hello')
     await expect.poll(async () => (await harness.list(workspace)).records[0]?.status).toBe('completed')
     const saved = (await new LocalAgentRepository(directory).list(workspace)).records[0]!
-    expect(saved.events.map(event => event.kind)).toEqual(['session', 'text', 'usage', 'completed'])
-    expect(saved.events.map(event => event.sequence)).toEqual([1, 2, 3, 4])
+    expect(saved.events.map(event => event.kind)).toEqual(['session', 'user-message', 'text', 'usage', 'completed'])
+    expect(saved.events.map(event => event.sequence)).toEqual([1, 2, 3, 4, 5])
     expect((await harness.list(other)).records).toEqual([])
     const next = await harness.resume(workspace, id, 'continue')
     expect(next).not.toBe(id)

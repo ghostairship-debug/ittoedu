@@ -1,3 +1,4 @@
+import { requireProjectWorkspace } from './r18NativeAuthoringFixture'
 import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { expect, test } from '@playwright/test'
@@ -54,8 +55,8 @@ function loadCheckpoint(slot: keyof typeof slots) {
   const identity = (record: LocalAgentRecordV2) => {
     expect(record.externalSessionId).toBe(t01Record.externalSessionId)
     expect(record.workspace).toEqual(t01Record.workspace)
-    expect(record.workspace.projectId).toBe(current.project.id)
-    expect(record.workspace.normalizedPath).toBe(projectPath.replace(/\\/g, '/').toLowerCase())
+    expect(requireProjectWorkspace(record.workspace).projectId).toBe(current.project.id)
+    expect(requireProjectWorkspace(record.workspace).normalizedPath).toBe(projectPath.replace(/\\/g, '/').toLowerCase())
   }
   let selected: LocalAgentRecordV2
   if (slot === 'A') {

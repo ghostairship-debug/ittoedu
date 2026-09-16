@@ -12,7 +12,7 @@ function fixture() {
   const project = createBlankFlowCourseProject()
   const surface = project.surfaces[0]!
   if (surface.type !== 'flow') throw new Error('Flow fixture required')
-  surface.blocks.push({ id: 'observation-second', type: 'paragraph', text: '第二个真实位置' })
+  surface.blocks.push({ id: 'observation-second', type: 'paragraph', content: { inlines: [{ type: 'text', text: '第二个真实位置' }] } })
   project.locations.push({ id: 'location-observation-second', kind: 'flow-block', surfaceId: surface.id,
     blockId: 'observation-second', label: '第二个位置' })
   return { project, payload: buildPublishedCourseV2Payload({ project, assetFiles: {}, components: {} }) }

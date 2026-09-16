@@ -1,3 +1,4 @@
+import { withDefaultComponentController } from '../src/renderer/components/teacherControllerComponent'
 import { isControllerFixture } from '../tests/fixtures/teacherController'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -467,6 +468,7 @@ export async function buildSampleExampleOutputs(): Promise<GeneratedExampleOutpu
     project,
     assetFiles: {},
     componentFiles: {
+      ...Object.fromEntries(Object.values(withDefaultComponentController(project).componentPackages).map(pkg => [`${pkg.manifest.id}@${pkg.manifest.version}`, pkg.files])),
       [importedComponent.key]: importedComponent.files,
     },
   }, {

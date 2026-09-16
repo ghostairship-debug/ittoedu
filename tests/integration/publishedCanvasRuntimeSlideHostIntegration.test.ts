@@ -1,3 +1,4 @@
+import { controllerPackages } from '../fixtures/teacherController'
 import { buildPublishedFixture as buildPublishedCourseV2Payload } from '../fixtures/teacherController'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -197,7 +198,7 @@ describe('Published V2 Slide scene canvas-runtime API 2 playback', () => {
       container,
       project: fixture.project,
       assetFiles: {},
-      components: {},
+      components: controllerPackages,
       locationId: fixture.slideLocationIds[1]!,
     })
     sessions.push(session)

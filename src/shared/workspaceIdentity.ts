@@ -16,7 +16,13 @@ export const workspaceIdentityV1Schema = z.object({
 
 export type WorkspaceIdentityV1 = z.infer<typeof workspaceIdentityV1Schema>
 
-export function workspaceIdentityKey(identity: WorkspaceIdentityV1): string {
-  const parsed = workspaceIdentityV1Schema.parse(identity)
-  return JSON.stringify([parsed.version, parsed.projectId, parsed.normalizedPath])
+export const lessonAgentWorkspaceSchema = z.object({ version: z.literal(1), kind: z.literal('lesson'), lessonId: z.uuid(),
+  normalizedDirectory: workspaceIdentityV1Schema.shape.normalizedPath, conversationId: z.uuid() }).strict()
+export const aiWorkspaceIdentitySchema = z.union([workspaceIdentityV1Schema, lessonAgentWorkspaceSchema])
+export type LessonAgentWorkspace = z.infer<typeof lessonAgentWorkspaceSchema>
+export type AiWorkspaceIdentity = z.infer<typeof aiWorkspaceIdentitySchema>
+export function workspaceIdentityKey(identity: AiWorkspaceIdentity): string {
+  const parsed = aiWorkspaceIdentitySchema.parse(identity)
+  return 'kind' in parsed ? JSON.stringify(['lesson', parsed.lessonId, parsed.normalizedDirectory, parsed.conversationId])
+    : JSON.stringify([parsed.version, parsed.projectId, parsed.normalizedPath])
 }

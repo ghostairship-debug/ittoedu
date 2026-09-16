@@ -185,7 +185,7 @@ export function captureGenerationSnapshot(input: {
           content: isText ? new TextDecoder('utf-8', { fatal: true }).decode(bytes) : bytesToBase64(bytes) })
         return [path, { path: `resources/${resourcePath}`, bytes: bytes.byteLength, encoding: isText ? 'utf8' : 'base64' }]
       })),
-      editInstruction: 'Public parameter edits use component.configure. Source edits prefer component.package operation patch with basePackageId equal to packageId, exact baseVersion and baseContentIdentity; send only changedFiles and explicit deleteFiles. For one instance use mode:instance and its available editTargets.instance target; an exclusive editable copy retains its package ID, otherwise the host forks and rebinds only that instance. Use mode:shared and editTargets.shared.target only when the user explicitly requests all package instances. Read baseline files as needed and keep manifest ID/version unchanged; the host fills unchanged files and assigns identity/version. Full files operation revise remains available for an explicitly shared full-package revision.' }
+      editInstruction: 'Public parameter edits use component.configure. Source edits prefer component.package operation patch with basePackageId equal to packageId, exact baseVersion and baseContentIdentity; send only changedFiles and explicit deleteFiles. Choose mode:shared with editTargets.shared.target when the user request in natural language explicitly covers every actual use of this package; no package-instance terminology is required. Otherwise use mode:instance with each applicable editTargets.instance target and separately update the source/reference of every affected instance. An exclusive editable copy retains its package ID; otherwise the host forks and rebinds only that instance. component.configure changes public props only; it does not give an unchanged old package new source code. Read baseline files as needed and keep manifest ID/version unchanged; the host fills unchanged files and assigns identity/version. Full files operation revise remains available for an explicitly shared full-package revision.' }
   })
   const componentCatalog = (input.catalogPackages ?? []).filter(entry => entry.sourceTrust !== 'prompt').map(entry => ({ sourceId: entry.sourceId,
     packageId: entry.packageId, version: entry.version, sha256: entry.sha256, name: entry.name, description: entry.description,
@@ -198,18 +198,19 @@ export function captureGenerationSnapshot(input: {
   }
   destinations.sort((a, b) => priority(a) - priority(b))
   resourceFiles.push({ path: 'project/targets.json', encoding: 'utf8', role: 'source', mediaType: 'application/json', content: JSON.stringify({ pages: promptPages }) })
+  const allowedCarriers: GenerationRequest['allowedCarriers'] = ['native', 'recipe', 'existing-component', 'generated-component', 'runtime']
   const request = generationRequestSchema.parse({ version: 1, requestId: crypto.randomUUID(), workspace,
     documentRevision: document.revision, sessionGeneration: sessionToken.generation, purpose: input.purpose,
     expectedResult: input.expectedResult ?? 'candidate', intent: input.intent, applyPolicy: input.applyPolicy, observation: input.observation,
     instruction: input.instruction, destinations, confirmedDocuments: input.confirmedDocuments,
     ...(selectionActions.length ? { selectionActions } : {}),
-    allowedCarriers: ['native', 'recipe', 'existing-component', 'generated-component', 'runtime'],
+    allowedCarriers,
     resourceFiles,
     context: JSON.parse(JSON.stringify({ reference: input.scope, focusLocationId: sessionToken.locationId, modificationScope: 'project',
       projectDocument: 'resources/project/document.json', projectTargets: 'resources/project/targets.json', pages: focusPages, materials: materialReferences,
       ...(input.scope === 'selection' && projection.surfaceType === 'flow' && input.flowSelection
         ? { flowSelection: input.flowSelection } : {}),
-      capabilities: generationCapabilityContext(capabilityPages, input.purpose, undefined, input.instruction),
+      capabilities: generationCapabilityContext(capabilityPages, input.purpose, undefined, input.instruction, { destinations, allowedCarriers }),
       imageDiagnostics: generationImageDiagnostics({ pages: focusPages, assets: document.assets,
         observation: input.observation, resourceFiles: input.observationResourceFiles }),
       assets: document.assets, componentPackages: document.componentPackages, componentSources, runtimeSources,

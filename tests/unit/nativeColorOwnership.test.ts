@@ -1,3 +1,5 @@
+import { withDefaultComponentController } from '@/renderer/components/teacherControllerComponent'
+import { componentPackagesToArchiveFiles } from '@/renderer/components/componentPackageStore'
 import { describe, expect, it } from 'vitest'
 import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
 import { projectWithBackgroundPreview, type BackgroundPreview } from '@/renderer/authoring/backgroundPreview'
@@ -80,7 +82,7 @@ describe('nullable Native highlight commits', () => {
     const result = patchSlideLayerPropertiesAtTarget(session, target, { nativeData: { style: { highlightColor: null } } })
     expect(result.ok, result.reason).toBe(true)
     const next = result.nextSession!.history.present
-    const reopened = openCourseProjectArchive(createCourseProjectArchive({ project: next, assetFiles: {}, componentFiles: {} })).project
+    const reopened = openCourseProjectArchive(createCourseProjectArchive({ project: next, assetFiles: {}, componentFiles: componentPackagesToArchiveFiles(withDefaultComponentController(next).componentPackages) })).project
     const readColor = (state: string | null) => {
       const item = buildSlideEditorView({ project: reopened, locationId, stateId: state }).layers.find(entry => entry.selectionId === node.id)!.item
       if (item.kind !== 'native' || item.content.nativeType !== 'text') throw new Error('Missing text')

@@ -111,6 +111,7 @@ function loadSlideFixture(): void {
     componentPackagesFromArchive(archive.project, archive.componentFiles),
   )
   useEditorStore.getState().activateCourseLocation('slide-location-intro')
+  useEditorStore.getState().setActivePresentationState(null)
   useEditorStore.getState().selectNode('slide-intro-hero')
 }
 

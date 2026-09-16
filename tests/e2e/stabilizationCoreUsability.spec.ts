@@ -1,4 +1,5 @@
-import { isControllerFixture } from '../fixtures/teacherController'
+import { componentPackagesFromArchive } from '../../src/renderer/components/componentPackageStore'
+import { isTeacherController as isControllerFixture } from '../../src/shared/teacherControllerRole'
 import {
   existsSync,
   mkdtempSync,
@@ -17,7 +18,6 @@ import { contentQaFixture } from '../fixtures/contentQa'
 import { createProjectFontDeliveryFixture } from '../fixtures/projectFontDelivery'
 import { buildPublishedCourseStandaloneHtml } from '../../src/renderer/export/course/buildCoursePackages'
 import { runDynamicAdmissionProbe } from './dynamicAdmissionProbe'
-import { runFlowReviewProbe } from './flowReviewProbe'
 import { runLocalCliFailureProbe } from './localCliFailureProbe'
 import { installChatFailureFixture } from './chatFailureFixture'
 import { fractionFallback, fractionComponentInstruction, exerciseFractionComponent, oscillationFallback, oscillationRuntimeInstruction, exerciseOscillationRuntime } from './generatedCarrierProbe'
@@ -104,7 +104,7 @@ async function closeEditor(app: ElectronApplication, runRoot: string): Promise<v
   removeRunRoot(runRoot)
 }
 
-async function launchEditor(developmentUrl = ''): Promise<LaunchedEditor> {
+async function launchEditor(developmentUrl = '', standalone = false): Promise<LaunchedEditor> {
   const runRoot = mkdtempSync(
     join(tmpdir(), `${APP_E2E_TEMP_DIRECTORY_NAME}-wave-a-${process.pid}-`),
   )
@@ -145,6 +145,7 @@ async function launchEditor(developmentUrl = ''): Promise<LaunchedEditor> {
     })
     const page = await app.firstWindow()
     attach(page)
+    if (standalone) await page.getByRole('button', { name: '新建独立课件', exact: true }).click()
     await page.locator('[data-testid="canvas-stage"] canvas').first().waitFor()
     await expectBackgroundWindowsIsolated(app, true)
     const professional = page.getByRole('button', { name: '专业' })
@@ -450,9 +451,9 @@ test('S2 Builder V2：两份 Markdown 生成三 Surface 并在离线 HTML 连续
     await paintedClick(page.getByRole('button', { name: '下一场景', exact: true }))
     const spatialRegion = page.getByRole('region', { name: '分数关系图 空间探索', exact: true })
     await expect(spatialRegion).toBeVisible()
-    await expect(spatialRegion.getByText('场景 4/4 · 步骤 1/2', { exact: true })).toBeVisible()
+    await expect(spatialRegion.getByText('4 / 4 页 · 1 / 2 步', { exact: true })).toBeVisible()
     await paintedClick(spatialRegion.getByRole('button', { name: '下一步', exact: true }))
-    await expect(spatialRegion.getByText('场景 4/4 · 步骤 2/2', { exact: true })).toBeVisible()
+    await expect(spatialRegion.getByText('4 / 4 页 · 2 / 2 步', { exact: true })).toBeVisible()
     await page.screenshot({ path: 'output/r18-short-path/builder-v2-spatial.png' })
     expect(pageErrors).toEqual([])
   } finally {
@@ -470,7 +471,7 @@ test('Flow review: video lifecycle, anchor continuity and overlay visibility', a
     if (!address || typeof address === 'string') throw new Error('Missing fixture server address')
     const page = await browser.newPage()
     await page.goto(`http://127.0.0.1:${address.port}`)
-    const result = await runFlowReviewProbe(page)
+    const result = await (await import('./flowReviewProbe')).runFlowReviewProbe(page)
     const { rotation, ...checks } = result
     for (const [name, passed] of Object.entries(checks)) expect(passed, name).toBe(true)
     expect(rotation).toBe('matrix(0.866025, 0.5, -0.5, 0.866025, 0, 0)')
@@ -1396,7 +1397,7 @@ test('S3 PPTX 自由路径：渐变连续编辑、历史、保存重开和离线
   try {
     const address = server.httpServer!.address()
     if (!address || typeof address === 'string') throw new Error('Missing server address')
-    launch = await launchEditor(`http://127.0.0.1:${address.port}`)
+    launch = await launchEditor(`http://127.0.0.1:${address.port}`, true)
     const { app, page, runRoot } = launch
     const filename = join(runRoot, 'paths.h5lesson')
     await saveAs(app, page, filename)
@@ -1447,7 +1448,7 @@ test('S3 PPTX 自由路径：渐变连续编辑、历史、保存重开和离线
     await expect(bracePath).toHaveAttribute('d', changedBrace!)
     const reopened = openCourseProjectArchive(new Uint8Array(readFileSync(filename)))
     expect(reopened.project).toEqual(edited)
-    const sources = { project: reopened.project, assetFiles: reopened.assetFiles, components: {} }
+    const sources = { project: reopened.project, assetFiles: reopened.assetFiles, components: componentPackagesFromArchive(reopened.project, reopened.componentFiles) }
     const exported = await page.evaluate(async sources => {
       const load = new Function('path', 'return import(path)') as (path: string) => Promise<any>
       const { buildCoursePptx } = await load('/src/renderer/export/course/buildCoursePptx.ts')
@@ -1491,7 +1492,7 @@ test('S3 PPTX 图表：横向切换、真实数据编辑、历史、重开及离
   try {
     const address = server.httpServer!.address()
     if (!address || typeof address === 'string') throw new Error('Missing server address')
-    launch = await launchEditor(`http://127.0.0.1:${address.port}`)
+    launch = await launchEditor(`http://127.0.0.1:${address.port}`, true)
     const { app, page, runRoot } = launch
     const filename = join(runRoot, 'charts.h5lesson')
     await saveAs(app, page, filename)
@@ -1529,7 +1530,7 @@ test('S3 PPTX 图表：横向切换、真实数据编辑、历史、重开及离
     await page.getByRole('button', { name: '打开工程（Ctrl+O）', exact: true }).click()
     const reopened = openCourseProjectArchive(new Uint8Array(readFileSync(filename)))
     expect(reopened.project).toEqual(edited)
-    const sources = { project: reopened.project, assetFiles: reopened.assetFiles, components: {} }
+    const sources = { project: reopened.project, assetFiles: reopened.assetFiles, components: componentPackagesFromArchive(reopened.project, reopened.componentFiles) }
     const exported = await buildCoursePptx(sources)
     expect(exported.bytes.length).toBeGreaterThan(1000)
     const evidence = join(root, 'output/playwright/r17-charts'); mkdirSync(evidence, { recursive: true })
@@ -1576,7 +1577,7 @@ test('S3 PPTX SmartArt：文字与位置编辑、历史、重开和导出', asyn
   try {
     const address = server.httpServer!.address()
     if (!address || typeof address === 'string') throw new Error('Missing server address')
-    launch = await launchEditor(`http://127.0.0.1:${address.port}`)
+    launch = await launchEditor(`http://127.0.0.1:${address.port}`, true)
     const { app, page, runRoot } = launch
     const filename = join(runRoot, 'diagram.h5lesson')
     await saveAs(app, page, filename)
@@ -1606,7 +1607,7 @@ test('S3 PPTX SmartArt：文字与位置编辑、历史、重开和导出', asyn
     await expect(painted).toContainText('比较')
     const reopened = openCourseProjectArchive(new Uint8Array(readFileSync(filename)))
     expect(reopened.project).toEqual(edited)
-    const sources = { project: reopened.project, assetFiles: reopened.assetFiles, components: {} }
+    const sources = { project: reopened.project, assetFiles: reopened.assetFiles, components: componentPackagesFromArchive(reopened.project, reopened.componentFiles) }
     const exported = await page.evaluate(async sources => {
       const load = new Function('path', 'return import(path)') as (path: string) => Promise<any>
       const { buildCoursePptx } = await load('/src/renderer/export/course/buildCoursePptx.ts')
@@ -1649,7 +1650,7 @@ test('S3 PPTX 旧公式：可编辑 AST、历史、保存重开及离线 Player 
   try {
     const address = server.httpServer!.address()
     if (!address || typeof address === 'string') throw new Error('Missing server address')
-    launch = await launchEditor(`http://127.0.0.1:${address.port}`)
+    launch = await launchEditor(`http://127.0.0.1:${address.port}`, true)
     const { app, page, runRoot } = launch
     const filename = join(runRoot, 'equations.h5lesson')
     await saveAs(app, page, filename)
@@ -1681,7 +1682,7 @@ test('S3 PPTX 旧公式：可编辑 AST、历史、保存重开及离线 Player 
     await expect(painted).toHaveAttribute('aria-label', '三分之一')
     const reopened = openCourseProjectArchive(new Uint8Array(readFileSync(filename)))
     expect(reopened.project).toEqual(edited)
-    const sources = { project: reopened.project, assetFiles: reopened.assetFiles, components: {} }
+    const sources = { project: reopened.project, assetFiles: reopened.assetFiles, components: componentPackagesFromArchive(reopened.project, reopened.componentFiles) }
     const exported = await page.evaluate(async sources => {
       const load = new Function('path', 'return import(path)') as (path: string) => Promise<any>
       const { buildCoursePptx } = await load('/src/renderer/export/course/buildCoursePptx.ts')
@@ -2147,7 +2148,7 @@ test('S2 材料库：导入检索、可携带引用和另存为隔离', async ()
 
 test('活动文字草稿：Slide、Spatial、Flow 不失焦保存并可重开', async () => {
   test.setTimeout(120_000)
-  const launch = await launchEditor()
+  const launch = await launchEditor('', true)
   const projectPath = join(launch.runRoot, 'focused-live-drafts.h5lesson')
   const { app, page } = launch
   const slideText = 'Slide 不失焦保存草稿'
@@ -2198,54 +2199,16 @@ test('活动文字草稿：Slide、Spatial、Flow 不失焦保存并可重开', 
     ).toContain(spatialText)
 
     await addSurface(page, 'flow')
-    const paragraph = page.getByTestId('flow-paper').locator('.flow-block-paragraph').first()
-    const diagnoseFlowHit = process.env.COURSEWARE_R18_FLOW_DIAGNOSTICS === '1'
-    const flowHitEvidence: unknown[] = []
-    const captureFlowHit = async (phase: string) => {
-      const geometry = await paragraph.evaluate(element => {
-        const rect = element.getBoundingClientRect()
-        const describe = (node: Element) => ({ tag: node.tagName, class: node.getAttribute('class'),
-          testId: node.getAttribute('data-testid'), label: node.getAttribute('aria-label'),
-          blockId: node.closest('[data-flow-block-id]')?.getAttribute('data-flow-block-id') })
-        const points = [0.05, 0.25, 0.5, 0.75, 0.95].flatMap(fx => [0.15, 0.5, 0.85].map(fy => {
-          const x = rect.x + rect.width * fx, y = rect.y + rect.height * fy
-          const hits = document.elementsFromPoint(x, y)
-          return { fx, fy, x, y, paragraphReceivesPoint: !!hits[0] && element.contains(hits[0]),
-            hits: hits.slice(0, 5).map(describe) }
-        }))
-        return { paragraph: { ...describe(element), rect: rect.toJSON(), text: element.textContent }, points,
-          toolbars: [...document.querySelectorAll<HTMLElement>('[data-testid="flow-block-context-toolbar"], [data-testid="flow-range-toolbar"]')]
-            .map(toolbar => ({ ...describe(toolbar), rect: toolbar.getBoundingClientRect().toJSON(),
-              placement: toolbar.dataset.flowToolbarPlacement, pointerEvents: getComputedStyle(toolbar).pointerEvents })),
-          selectedBlocks: [...document.querySelectorAll('.flow-block[aria-selected="true"]')].map(describe),
-          viewport: { width: innerWidth, height: innerHeight },
-          scroll: [...document.querySelectorAll<HTMLElement>('[data-testid="flow-workspace-scroll"]')].map(node => ({
-            rect: node.getBoundingClientRect().toJSON(), scrollTop: node.scrollTop, scrollLeft: node.scrollLeft,
-            clientWidth: node.clientWidth, offsetWidth: node.offsetWidth })) }
-      })
-      flowHitEvidence.push({ phase, geometry })
-      writeFileSync(test.info().outputPath('flow-paragraph-hit.json'), JSON.stringify(flowHitEvidence, null, 2))
-    }
-    if (diagnoseFlowHit) {
-      await captureFlowHit('before-original-double-click')
-      await page.screenshot({ path: test.info().outputPath('flow-paragraph-hit-ready.png') })
-    }
-    try {
-      await paragraph.dblclick()
-    } catch (error) {
-      if (diagnoseFlowHit) {
-        await captureFlowHit('original-double-click-failed')
-        await page.screenshot({ path: test.info().outputPath('flow-paragraph-hit-failure.png') })
-      }
-      throw error
-    }
-    editor = page.getByTestId('flow-inline-editor')
-    await expect(editor).toBeFocused()
-    await editor.fill(flowText)
-    await expect(editor).toBeFocused()
+    const editorBody = page.getByTestId('flow-paper').locator('.ProseMirror')
+    const paragraph = editorBody.locator('p').first()
+    await paragraph.click()
+    await page.keyboard.press('Home')
+    await page.keyboard.press('Shift+End')
+    await page.keyboard.insertText(flowText)
+    await expect(editorBody).toBeFocused()
     await pressDesktopSaveShortcut(app)
     await expect.poll(
-      () => flowTextContents(readProject(projectPath)),
+      () => readProject(projectPath).surfaces.flatMap(surface => surface.type === 'flow' ? surface.blocks.flatMap(block => block.type === 'paragraph' ? [block.content.inlines.map(inline => inline.type === 'text' ? inline.text : '').join('')] : []) : []),
       { timeout: 15_000 },
     ).toContain(flowText)
 
@@ -2640,7 +2603,7 @@ test('S3 共享组件源码：两文件草稿、嵌套正文目标、真实准�
     const slide = project.surfaces.find(surface => surface.type === 'slide')!, flow = project.surfaces.find(surface => surface.type === 'flow')!, spatial = project.surfaces.find(surface => surface.type === 'spatial-2d')!
     if (slide.type !== 'slide' || flow.type !== 'flow' || spatial.type !== 'spatial-2d') throw new Error('Incomplete Mixed')
     slide.scenes[0]!.layerItems.push(layer('shared-slide', 100, 200))
-    flow.blocks.push({ id: 'shared-section', type: 'section', title: '嵌套组件', collapsedByDefault: false, blocks: [
+    flow.blocks.push({ id: 'shared-section', type: 'section', title: { inlines: [{ type: 'text', text: '嵌套组件' }] }, collapsedByDefault: false, blocks: [
       { id: 'shared-flow', type: 'component', component: { packageId: id, version: '1.0.0' }, props: { label: 'shared-flow' }, staticFallbackAssetId: 'fallback', wrap: 'none' },
     ] })
     spatial.world.layerItems.push(layer('shared-spatial', -160, -75))
@@ -2743,7 +2706,7 @@ test('S3 三表面整合：控制器保全与响应式浮层几何', async () =>
     controller.visibility = { mode: 'include', locationIds: [original.id] }
     const flow = project.surfaces.find(surface => surface.type === 'flow')!
     if (flow.type !== 'flow') throw new Error('Missing Flow')
-    flow.blocks.push(...Array.from({ length: 40 }, (_, i) => ({ id: `geometry-p-${i}`, type: 'paragraph' as const, text: `响应式文档段落 ${i}。窗口改变时重新换行，浮层仍与正文采用同一尺度。`.repeat(3) })))
+    flow.blocks.push(...Array.from({ length: 40 }, (_, i) => ({ id: `geometry-p-${i}`, type: 'paragraph' as const, content: { inlines: [{ type: 'text' as const, text: `响应式文档段落 ${i}。窗口改变时重新换行，浮层仍与正文采用同一尺度。`.repeat(3) }] } })))
     const topItem = sceneNodeToCourseLayerItem(createTextNode({ id: 'geometry-top', text: '顶部浮层 · 原生文字', x: 40, y: 0, width: 300, height: 65, style: { fontSize: 24, color: '#164c96', backgroundColor: '#dbeafe', backgroundOpacity: 1, cornerRadius: 9 } }))
     topItem.order = Math.max(...project.globalLayerItems.map(entry => entry.item.order), 0) + 1
     project.globalLayerItems.push({ item: topItem, plane: 'overlay', visibility: { mode: 'all', locationIds: [] } })
@@ -2847,7 +2810,7 @@ test('S3 Flow 所见即所得：空段、连续换行、选择与保存重开', 
   try {
     const address = server.httpServer!.address()
     if (!address || typeof address === 'string') throw new Error('Missing fixture server address')
-    launch = await launchEditor(`http://127.0.0.1:${address.port}`)
+    launch = await launchEditor(`http://127.0.0.1:${address.port}`, true)
     const { app, page, runRoot } = launch
     const { createBlankCourseProject } = await import('../../src/renderer/project/createCourseProject')
     const { addCourseFlowPage } = await import('../../src/renderer/course/courseLocationCommands')
@@ -2859,18 +2822,22 @@ test('S3 Flow 所见即所得：空段、连续换行、选择与保存重开', 
     const { createChartNode, createChartLayerItem } = await import('../../src/renderer/project/nativeNodeFactories')
     const chart = createChartLayerItem(createChartNode()).content
     if (chart.nativeType !== 'chart') throw new Error('Missing chart')
+    const imageBytes = Buffer.from(await page.evaluate(() => { const canvas = document.createElement('canvas'); canvas.width = 320; canvas.height = 120; const ctx = canvas.getContext('2d')!; ctx.fillStyle = '#2563eb'; ctx.fillRect(0, 0, 320, 120); return canvas.toDataURL('image/png').split(',')[1]! }), 'base64')
+    project.assets['spacing-image'] = { id: 'spacing-image', kind: 'image', filename: 'spacing.png', mimeType: 'image/png', path: 'assets/spacing.png', byteLength: imageBytes.length, width: 320, height: 120 }
     flow.blocks.push(
-      { id: 'spacing-a', type: 'paragraph', text: '第一行\n\n第三行', runs: [] },
-      { id: 'spacing-empty', type: 'paragraph', text: '', runs: [] },
-      { id: 'spacing-next', type: 'paragraph', text: '空段之后仍保留位置', runs: [] },
-      { id: 'spacing-rich', type: 'heading', level: 2, text: '字号与强调\n\n均须一致', runs: [{ start: 0, end: 2, style: { fontSize: 28, bold: false, emphasis: true } }] },
-      { id: 'spacing-quote', type: 'quote', text: '引用第一行\n\n引用第三行', citation: '来源' },
-      { id: 'spacing-list', type: 'list', ordered: true, items: [{ id: 'l1', text: '列表一\n\n保留换行' }, { id: 'l2', text: '列表二' }] },
-      { id: 'spacing-section', type: 'section', title: '小节标题', collapsedByDefault: false, blocks: [{ id: 'section-body', type: 'paragraph', text: '小节正文' }] },
+      { id: 'spacing-a', type: 'paragraph', content: { inlines: [{ type: 'text', text: '第一行\n\n第三行' }] } },
+      { id: 'spacing-empty', type: 'paragraph', content: { inlines: [] } },
+      { id: 'spacing-next', type: 'paragraph', content: { inlines: [{ type: 'text', text: '空段之后仍保留位置' }] } },
+      { id: 'spacing-rich', type: 'heading', level: 2, content: { inlines: [{ type: 'text', text: '字号', style: { fontSize: 28, bold: false, emphasis: true } }, { type: 'text', text: '与强调\n\n均须一致' }] } },
+      { id: 'spacing-quote', type: 'quote', content: { inlines: [{ type: 'text', text: '引用第一行\n\n引用第三行' }] }, citation: { inlines: [{ type: 'text', text: '来源' }] } },
+      { id: 'spacing-list', type: 'list', ordered: true, items: [{ id: 'l1', content: { inlines: [{ type: 'text', text: '列表一\n\n保留换行' }] } }, { id: 'l2', content: { inlines: [{ type: 'text', text: '列表二' }] } }] },
+      { id: 'spacing-section', type: 'section', title: { inlines: [{ type: 'text', text: '小节标题' }] }, collapsedByDefault: false, blocks: [{ id: 'section-body', type: 'paragraph', content: { inlines: [{ type: 'text', text: '小节正文' }] } }] },
       { id: 'spacing-chart', type: 'chart', chart: chart.data, height: 180 },
+      { id: 'spacing-media', type: 'media', assetId: 'spacing-image', mediaKind: 'image', altText: '蓝色示意图', caption: { inlines: [{ type: 'text', text: '可编辑题注' }] }, layout: 'content-width' },
     )
     const filename = join(runRoot, 'flow-spacing.h5lesson')
-    writeFileSync(filename, createCourseProjectArchive({ project, assetFiles: {}, componentFiles: {} }))
+    const { createArchiveFixture } = await import('../fixtures/teacherController')
+    writeFileSync(filename, createArchiveFixture({ project, assetFiles: { 'spacing-image': imageBytes }, componentFiles: {} }))
     await patchProjectDialogs(app, { projectOpen: filename, projectSave: filename })
     await page.getByRole('button', { name: '打开工程（Ctrl+O）', exact: true }).click()
     await openFlow(page)
@@ -2879,13 +2846,25 @@ test('S3 Flow 所见即所得：空段、连续换行、选择与保存重开', 
     const measure = (scope: Locator) => scope.evaluate(element => {
       const rootRect = element.getBoundingClientRect()
       const scale = rootRect.width / (element as HTMLElement).offsetWidth
-      return ['spacing-a', 'spacing-empty', 'spacing-next', 'spacing-rich', 'spacing-quote', 'spacing-list', 'spacing-section', 'spacing-chart'].map(id => {
+      return ['spacing-a', 'spacing-empty', 'spacing-next', 'spacing-rich', 'spacing-quote', 'spacing-list', 'spacing-section', 'spacing-chart', 'spacing-media'].map(id => {
         const block = element.querySelector<HTMLElement>(`[data-flow-block-id="${id}"]`)!
         const rect = block.getBoundingClientRect()
         return { id, x: (rect.x - rootRect.x) / scale, y: (rect.y - rootRect.y) / scale, width: rect.width / scale, height: rect.height / scale }
       })
     })
+    await expect(paper.locator('svg[data-native-chart-id="spacing-chart"]')).toBeVisible()
+    await expect.poll(async () => (await paper.locator('[data-flow-block-id="spacing-chart"]').boundingBox())!.height).toBeCloseTo(180, 0)
+    await expect.poll(() => paper.locator('[data-flow-block-id="spacing-media"] img').evaluate(element => (element as HTMLImageElement).naturalWidth)).toBe(320)
+    await expect(paper.locator('[data-flow-block-id="spacing-media"] figcaption')).toHaveText('可编辑题注')
+    await paper.locator('[data-flow-block-id="spacing-media"] figcaption').click()
+    await page.keyboard.press('Home'); await page.keyboard.press('Shift+End')
+    await page.keyboard.insertText('修改后题注')
+    await paper.locator('[data-flow-block-id="spacing-a"]').click()
+    await expect(paper.locator('[data-flow-block-id="spacing-media"] figcaption')).toHaveText('修改后题注')
+    await page.getByTestId('flow-workspace-scroll').evaluate(element => element.scrollTo(0, 0))
+    await page.evaluate(() => document.fonts.ready)
     const before = await measure(paper)
+    writeFileSync(test.info().outputPath('flow-section-dom.json'), JSON.stringify(await paper.locator('[data-flow-block-id="spacing-section"]').evaluate(element => ({ html: element.outerHTML, children: [...element.children].map(child => ({ tag: child.tagName, display: getComputedStyle(child).display, rect: child.getBoundingClientRect().toJSON() })) })), null, 2))
     const screenBefore = await paper.locator('[data-flow-block-id="spacing-a"]').boundingBox()
     const diagnoseFlowLayout = process.env.COURSEWARE_R18_FLOW_DIAGNOSTICS === '1'
     const flowLayoutEvidence: unknown[] = []
@@ -2930,7 +2909,7 @@ test('S3 Flow 所见即所得：空段、连续换行、选择与保存重开', 
     await chat.getByRole('button', { name: '关闭', exact: true }).click()
     if (diagnoseFlowLayout) await captureFlowLayout(paper, 'editor-after-chat-close')
     await paper.locator('[data-flow-block-id="spacing-a"]').dblclick()
-    await page.getByTestId('flow-inline-editor').fill('第一行\n\n第三行')
+    await expect(paper.locator('.ProseMirror')).toBeFocused()
     await page.getByRole('button', { name: '当前位置试运行', exact: true }).click()
     const runtime = page.locator('.flow-runtime-reading')
     await expect(runtime).toBeVisible()
@@ -2938,7 +2917,9 @@ test('S3 Flow 所见即所得：空段、连续换行、选择与保存重开', 
     const hostBounds = await page.locator('.flow-surface-host').boundingBox()
     const tocBounds = await page.getByTestId('flow-runtime-toc-toggle').boundingBox()
     expect(tocBounds!.x).toBeCloseTo(hostBounds!.x, 0)
+    await expect.poll(() => runtime.locator('[data-flow-block-id="spacing-media"] img').evaluate(element => (element as HTMLImageElement).naturalWidth)).toBe(320)
     const running = await measure(runtime)
+    const runtimeAvailableWidth = await runtime.evaluate(element => element.parentElement!.clientWidth)
     const screenRunning = await runtime.locator('[data-flow-block-id="spacing-a"]').boundingBox()
     if (diagnoseFlowLayout) await captureFlowLayout(runtime, 'current-position-runtime')
     try {
@@ -2960,18 +2941,43 @@ test('S3 Flow 所见即所得：空段、连续换行、选择与保存重开', 
     const saved = await saveCurrent(page, filename)
     await page.getByRole('button', { name: '打开工程（Ctrl+O）', exact: true }).click()
     await openFlow(page)
-    expect(await measure(page.getByTestId('flow-paper'))).toEqual(before)
-    const sources = { project: saved, assetFiles: {}, components: {} }
+    await expect.poll(() => measure(page.getByTestId('flow-paper'))).toEqual(before)
+    const archive = openCourseProjectArchive(new Uint8Array(readFileSync(filename)))
+    const sources = { project: saved, assetFiles: archive.assetFiles, components: componentPackagesFromArchive(saved, archive.componentFiles) }
     const offlineProject = { ...saved, startLocationId: created.activatedLocationId, locations: [...saved.locations.filter(location => location.id === created.activatedLocationId), ...saved.locations.filter(location => location.id !== created.activatedLocationId)] }
     const html = buildPublishedCourseStandaloneHtml({ ...sources, project: offlineProject }, readFileSync(join(root, 'dist-player/player.iife.js'), 'utf8'))
     const htmlPath = join(evidence, 'flow.html'); writeFileSync(htmlPath, html)
-    browser = await chromium.launch({ headless: true })
-    const offline = await browser.newPage({ viewport: { width: 1280, height: 900 } })
-    await offline.goto(pathToFileURL(htmlPath).href)
+    // Subpixel geometry uses the same rendering engine and display environment.
+    // Chromium is checked separately below: browser font metrics can round differently.
+    const offlineWindow = app.waitForEvent('window')
+    await app.evaluate(({ BrowserWindow }, args) => {
+      const window = new BrowserWindow({ show: false, width: args.width, height: 900, useContentSize: true, webPreferences: { nodeIntegration: false, contextIsolation: true } })
+      void window.loadURL(args.url)
+    }, { width: runtimeAvailableWidth, url: pathToFileURL(htmlPath).href })
+    const offline = await offlineWindow
     await expect(offline.locator('.flow-runtime-reading')).toBeVisible()
+    const scrollbarWidth = await offline.locator('.flow-runtime-reading').evaluate(element => innerWidth - element.parentElement!.clientWidth)
+    const offlineHandle = await app.browserWindow(offline)
+    await offline.setViewportSize({ width: runtimeAvailableWidth + scrollbarWidth, height: 900 })
+    await expect.poll(() => offline.locator('.flow-runtime-reading').evaluate(element => element.parentElement!.clientWidth)).toBe(runtimeAvailableWidth)
+    await offline.evaluate(() => document.fonts.ready)
+    await expect.poll(() => offline.locator('[data-flow-block-id="spacing-media"] img').evaluate(element => (element as HTMLImageElement).naturalWidth)).toBe(320)
+    await expect(offline.locator('[data-flow-block-id="spacing-media"] figcaption')).toHaveText('修改后题注')
     const published = await measure(offline.locator('.flow-runtime-reading'))
+    writeFileSync(test.info().outputPath('flow-offline-geometry.json'), JSON.stringify({ before, running, published }, null, 2))
     for (let i = 0; i < before.length; i++) for (const key of ['x', 'y', 'width', 'height'] as const) expect(published[i][key], `offline ${before[i].id}.${key}`).toBeCloseTo(before[i][key], 0)
     await offline.screenshot({ path: join(evidence, 'offline.png') })
+    await offlineHandle.evaluate(window => window.close())
+    browser = await chromium.launch({ headless: true })
+    const browserPage = await browser.newPage({ viewport: { width: runtimeAvailableWidth, height: 900 } })
+    await browserPage.goto(pathToFileURL(htmlPath).href)
+    await browserPage.evaluate(() => document.fonts.ready)
+    await expect(browserPage.locator('[data-flow-block-id="spacing-rich"]')).toHaveText('字号与强调均须一致')
+    await expect(browserPage.locator('[data-flow-block-id="spacing-section"]')).toContainText('小节正文')
+    await expect(browserPage.locator('svg[data-native-chart-id="spacing-chart"]')).toBeVisible()
+    const emphasis = browserPage.locator('[data-flow-block-id="spacing-rich"] span[style]').first()
+    expect(await emphasis.evaluate(element => ({ style: getComputedStyle(element).textEmphasisStyle, position: getComputedStyle(element).textEmphasisPosition }))).toEqual({ style: 'circle', position: 'under' })
+    await browserPage.screenshot({ path: join(evidence, 'offline-chromium.png') })
     writeFileSync(join(evidence, 'geometry.json'), JSON.stringify({ before, running, published }, null, 2))
     expect(launch.pageErrors).toEqual([])
   } finally {

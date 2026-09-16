@@ -53,7 +53,7 @@ describe('Incremental source files enter the existing package transaction', () =
   it('revises an isolated editable instance ten times without growing IDs or package history in the document', async () => {
     const f = fixture()
     expect((await f.run(componentPackageTool, f.patch('instance'), f.destination('instance'))).status).toBe('committed')
-    const isolated = Object.keys(f.read().document.componentPackages).find(id => id !== f.pkg.manifest.id)!
+    const isolated = Object.keys(f.read().document.componentPackages).find(id => !Object.hasOwn(f.project.componentPackages, id))!
     const before = f.read()
     for (let index = 0; index < 10; index++) {
       const pkg = f.read().resources.componentPackages[isolated]!

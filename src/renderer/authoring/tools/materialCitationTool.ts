@@ -12,7 +12,7 @@ export const materialCitationTool: AuthoringToolDefinition<MaterialRecordV1> = {
     const text = materialCitationText(value)
     if (destination.scope.parent.kind === 'flow-body') {
       return flowAuthoringTool.plan({ document, destination,
-        value: flowAuthoringToolInputSchema.parse({ operation: 'insert', block: { type: 'paragraph', text } }) })
+        value: flowAuthoringToolInputSchema.parse({ operation: 'insert', block: { type: 'paragraph', content: { inlines: [{ type: 'text', text }] } } }) })
     }
     return nativeAuthoringTool.plan({ document, destination,
       value: nativeAuthoringToolInputSchema.parse({ operation: 'insert', template: { nativeType: 'text', text, label: value.title } }) })

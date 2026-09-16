@@ -108,7 +108,8 @@ function fixture(outcomes: Array<'candidate' | 'answer' | 'candidate-rejected' |
       await behavior.onInput(input.input)
       response = { enabled: true, inputDelivery: {
         taskId: input.input.taskId, epoch: input.input.epoch, workspace, inputId: input.input.inputId,
-        turnId: input.input.turnId, status: 'queued', reason: 'unit turn boundary',
+        turnId: input.input.turnId, status: input.input.kind === 'extend-budget' ? 'accepted' : 'queued', reason: 'unit turn boundary',
+        ...(input.input.kind === 'extend-budget' ? { deadlineAt: behavior.projectedDeadline } : {}),
       } }
     }
     else if (input.operation === 'cancel') await behavior.onCancel(input.sessionId)
@@ -145,6 +146,45 @@ function fixture(outcomes: Array<'candidate' | 'answer' | 'candidate-rejected' |
 }
 
 describe('GenerationTaskController deadline recovery feedback', () => {
+  it('discards a candidate still preparing when a correction is accepted and continues with a fresh observation without applying it', async () => {
+    const f = fixture(['candidate', 'answer']), preparing = deferred<void>(), prepared = deferred<void>()
+    f.prepare.mockImplementationOnce(async (request, candidate) => {
+      preparing.resolve(); await prepared.promise
+      return f.makePrepared(request, candidate)
+    })
+    const running = f.controller.start(f.request(), 'codex')
+    await preparing.promise
+    await f.controller.input(f.input('correct'))
+    prepared.resolve(); await running
+    expect(f.apply).not.toHaveBeenCalled()
+    expect(f.receipts).toEqual([])
+    expect(f.hostResults()).toMatchObject([{ result: { status: 'rejected', summary: expect.stringContaining('当前候选未应用') } }])
+    expect(f.captureNext).toHaveBeenCalledOnce()
+    expect(f.controller.current.phase).toBe('completed')
+    expect(f.calls.some(call => call.operation === 'cancel')).toBe(false)
+  })
+  it('uses the explicitly extended owner deadline through an already waiting stage and candidate preparation', async () => {
+    vi.useFakeTimers(); vi.setSystemTime(1000)
+    const f = fixture(['candidate', 'answer']), readStarted = deferred<void>(), releaseRead = deferred<void>()
+    let reads = 0
+    f.behavior.projectedDeadline = 1100
+    f.behavior.onRead = async () => { if (++reads === 1) { readStarted.resolve(); await releaseRead.promise } }
+    f.behavior.onInput = async input => { expect(input.kind).toBe('extend-budget'); f.behavior.projectedDeadline = 1100 + 20 * 60_000 }
+    try {
+      const running = f.controller.start({ ...f.request(), execution: { version: 1, startedAt: 1000, deadlineAt: 1100 } }, 'codex')
+      await readStarted.promise
+      const base = f.input()
+      await f.controller.input({ version: 1, taskId: base.taskId, epoch: base.epoch, workspace: base.workspace,
+        inputId: base.inputId, turnId: base.turnId, kind: 'extend-budget', minutes: 20 })
+      await vi.advanceTimersByTimeAsync(101)
+      expect(f.controller.current.busy).toBe(true)
+      releaseRead.resolve(); await running
+      expect(f.controller.current.phase).toBe('completed')
+      expect(f.receipts).toHaveLength(1)
+      expect(f.prepare.mock.calls[0]![0].execution!.deadlineAt).toBe(1100 + 20 * 60_000)
+      expect(f.requests.at(-1)!.execution!.deadlineAt).toBe(1100 + 20 * 60_000)
+    } finally { releaseRead.resolve(); await f.controller.stop(); vi.useRealTimers() }
+  })
   it('preserves the stale recovery reason when content changes during checked-result feedback', async () => {
     vi.useFakeTimers()
     const f = fixture(['candidate']), delayed = deferred<void>()
@@ -421,7 +461,7 @@ describe('GenerationTaskController unit task lifecycle', () => {
       const running = f.controller.start({ ...f.request(), execution: { version: 1, startedAt: 1000, deadlineAt: 1100 } }, 'codex')
       await vi.advanceTimersByTimeAsync(100)
       await running
-      expect(f.controller.current).toMatchObject({ busy: false, phase: 'failed', preview: undefined, error: expect.stringContaining('20分钟') })
+      expect(f.controller.current).toMatchObject({ busy: false, phase: 'failed', preview: undefined, error: expect.stringContaining('执行预算') })
       const committed = boundary === 'capture-next' || boundary === 'receipt-ipc'
       expect(f.apply).toHaveBeenCalledTimes(committed ? 1 : 0)
       if (boundary === 'receipt-ipc') expect(f.controller.current.canRetryFeedback).toBe(true)

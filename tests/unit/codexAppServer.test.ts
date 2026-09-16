@@ -896,7 +896,7 @@ process.stdin.on('end', () => process.exit(0));
 `
 }
 
-function realCodexAdapter(script: string | (() => string), timeouts: { rpcTimeoutMs?: number; cancelTimeoutMs?: number; generationRequest?: GenerationRequest } = {}) {
+function realCodexAdapter(script: string | (() => string), timeouts: { rpcTimeoutMs?: number; cancelTimeoutMs?: number; terminalCheckMs?: number; generationRequest?: GenerationRequest } = {}) {
   const messages: any[] = []
   const children: ChildProcessWithoutNullStreams[] = []
   const launch = processModule.launchAgent
@@ -1371,6 +1371,83 @@ describe('Codex native subprocess failure and configuration boundaries', () => {
     try {
       await expect(adapter.open({ cwd: process.cwd(), externalSessionId: null })).rejects.toThrow('initialize timeout')
       expect((adapter as any).pendingRpc.size).toBe(0)
+    } finally { await adapter.close() }
+  })
+
+  it.each(['idle', 'quiet'] as const)('reconciles a persisted turn_aborted through native turn summaries after %s, without an interrupt request', async trigger => {
+    // Actual rollout evidence uses event_msg.turn_aborted(reason=interrupted).
+    // The app-server represents it as Turn.status=interrupted, not a wire
+    // notification named turn_aborted.
+    const aborted = { turn_id: 'native-turn', reason: 'interrupted' }
+    let script = codexNativeProcess()
+      .replace("    setTimeout(() => send({ method: 'turn/completed', params: { threadId, turn: { id: 'native-turn', status: 'completed' } } }), 5);", '')
+      .replace("  } else if (method === 'thread/read') {", `
+  } else if (method === 'thread/turns/list') {
+    send({ id, result: { data: [{ id: '${aborted.turn_id}', status: '${aborted.reason}', items: [], itemsView: 'summary' }], nextCursor: null } });
+    setTimeout(() => send({ method: 'turn/completed', params: { threadId, turn: { id: 'native-turn', status: 'interrupted', items: [] } } }), 5);
+  } else if (method === 'thread/read') {`)
+    if (trigger === 'idle') script = script.replace(
+      "send({ method: 'turn/started', params: { threadId, turn: { id: 'native-turn' } } });",
+      "send({ method: 'turn/started', params: { threadId, turn: { id: 'native-turn' } } }); setTimeout(() => send({method:'thread/status/changed',params:{threadId,status:{type:'idle'}}}),5);")
+    const { adapter, messages } = realCodexAdapter(script, { terminalCheckMs: trigger === 'idle' ? 1000 : 30 })
+    try {
+      await adapter.open({ cwd: process.cwd(), externalSessionId: null })
+      await adapter.startTurn(nativeCodexTurn(), new Map())
+      const events = []; for await (const event of adapter.events()) events.push(event)
+      expect(events.filter(event => event.kind === 'turn-ended')).toEqual([
+        expect.objectContaining({ nativeTurnId: 'native-turn', status: 'cancelled', failure: null }),
+      ])
+      expect(messages.some(message => message.method === 'turn/interrupt')).toBe(false)
+      expect(messages.filter(message => message.method === 'thread/turns/list').map(message => message.params)).toEqual([
+        { threadId: 'confirmed-native-thread', limit: 1, sortDirection: 'desc', itemsView: 'summary' },
+      ])
+    } finally { await adapter.close() }
+  })
+
+  it('does not end a quiet native turn from idle, a different turn, or an inProgress summary', async () => {
+    const script = 'let probes=0;\n' + codexNativeProcess()
+      .replace("    setTimeout(() => send({ method: 'turn/completed', params: { threadId, turn: { id: 'native-turn', status: 'completed' } } }), 5);", '')
+      .replace("  } else if (method === 'thread/read') {", `
+  } else if (method === 'thread/turns/list') {
+    probes++;
+    send({ id, result: { data: [{ id: probes===1?'another-turn':'native-turn', status: probes===2?'inProgress':'interrupted', items: [] }] } });
+  } else if (method === 'thread/read') {`)
+    const { adapter, messages } = realCodexAdapter(script, { terminalCheckMs: 30 })
+    try {
+      await adapter.open({ cwd: process.cwd(), externalSessionId: null })
+      await adapter.startTurn(nativeCodexTurn(), new Map())
+      const events = []; for await (const event of adapter.events()) events.push(event)
+      expect(messages.filter(message => message.method === 'thread/turns/list')).toHaveLength(3)
+      expect(events.filter(event => event.kind === 'turn-ended')).toHaveLength(1)
+      expect(events.at(-1)).toMatchObject({ status: 'cancelled' })
+    } finally { await adapter.close() }
+  })
+
+  it('ignores a delayed terminal summary from the previous turn after a new turn starts', async () => {
+    let script = 'let turnNumber=0;\n' + codexNativeProcess()
+      .replace("    setTimeout(() => send({ method: 'turn/completed', params: { threadId, turn: { id: 'native-turn', status: 'completed' } } }), 5);", '')
+      .replace("    model = params.model || model; effort = params.effort || effort;", "    turnNumber++; model = params.model || model; effort = params.effort || effort;")
+      .replaceAll("id: 'native-turn'", "id: 'native-turn-' + turnNumber")
+      .replace("  } else if (method === 'thread/read') {", `
+  } else if (method === 'thread/turns/list') {
+    if (turnNumber===1) {
+      send({ method:'turn/completed', params:{threadId,turn:{id:'native-turn-1',status:'completed',items:[]}} });
+      setTimeout(()=>send({id,result:{data:[{id:'native-turn-1',status:'interrupted',items:[]}]}}),60);
+    } else send({id,result:{data:[{id:'native-turn-2',status:'completed',items:[]}]}});
+  } else if (method === 'thread/read') {`)
+    const { adapter } = realCodexAdapter(script, { terminalCheckMs: 30 })
+    try {
+      await adapter.open({ cwd: process.cwd(), externalSessionId: null })
+      await adapter.startTurn(nativeCodexTurn(), new Map())
+      const first = []; for await (const event of adapter.events()) first.push(event)
+      await adapter.startTurn(nativeCodexTurn(), new Map())
+      const second = []; for await (const event of adapter.events()) second.push(event)
+      expect(first.filter(event => event.kind === 'turn-ended')).toEqual([
+        expect.objectContaining({nativeTurnId:'native-turn-1',status:'completed'}),
+      ])
+      expect(second.filter(event => event.kind === 'turn-ended')).toEqual([
+        expect.objectContaining({nativeTurnId:'native-turn-2',status:'completed'}),
+      ])
     } finally { await adapter.close() }
   })
 
