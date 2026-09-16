@@ -415,7 +415,20 @@ export class LocalAgentHarness {
       stable = { requestId: record.generationRequestId, candidateId: randomUUID() }
       this.candidateIds.set(id, stable)
     }
-    let result: GenerationResult = readGenerationResult(localAgentText(currentEvents, { includeCandidates: true }), record.generationRequest ?? { requestId: record.generationRequestId }, { candidateId: stable.candidateId })
+    const currentText = localAgentText(currentEvents, { includeCandidates: true })
+    let result: GenerationResult = readGenerationResult(currentText, record.generationRequest ?? { requestId: record.generationRequestId }, { candidateId: stable.candidateId })
+    // A declared edit delivery whose candidate never materialized is a bounded
+    // recoverable omission, not a protocol failure: name the actual cause, the
+    // expected artifact and the next step. A declaration alone never commits.
+    if (result.kind === 'candidate-format-error' && nativeRecord && !currentText.includes(GENERATION_OPEN)
+      && currentText.includes(generationStagedCandidateMarker(record.generationRequestId))) {
+      const staged = await new CandidateStaging(this.repository.stagingPath(workspace, nativeRecord.workingDirectoryId, 2)).readText(record.generationRequestId)
+        .catch((error: unknown) => { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null; throw error })
+      if (staged === null) {
+        const finding = '已声明本轮交付编辑候选，但当前请求没有实际候选：候选根内没有 candidate.json，正文也没有 courseware-candidate-v1 通道。预检（--check）不写候选，不能据此声明交付。下一步：修正后重新运行交付工具（去掉 --check）把候选写入当前请求根的 candidate.json，或在最终正文给出完整 courseware-candidate-v1 候选，再声明交付；确认无需修改时改用 kind 为 answer 的终结答复。'
+        result = { ...result, finding, ...(result.failure ? { failure: { ...result.failure, diagnostics: [{ code: 'missing-candidate-delivery', message: finding, path: [] }] } } : {}) }
+      }
+    }
     const parsedAt = Date.now()
     const activeTask = nativeRecord?.tasks.at(-1)
     if (result.kind !== 'answer' && activeTask?.intent !== 'edit') throw new Error('本轮为讨论或计划，没有工程修改授权')
@@ -1120,7 +1133,10 @@ export class LocalAgentHarness {
         if (owner.generationRequest && (explicitCandidateFile || createGenerationProfile(owner.record.adapter, owner.generationRequest).capability.candidateFileIngestion)) {
           const candidate = await new CandidateStaging(cwd).readText(owner.generationRequest.requestId)
           if (run.cancelled) return
-          if (explicitCandidateFile && candidate === null) throw new Error('已声明交付候选，但当前请求缺少 candidate.json')
+          // A declared but missing candidate file is a recoverable delivery
+          // omission, not a transport failure: the declaration stays in the
+          // record and candidate reading returns the exact cause, expected
+          // artifact and next step for one bounded native continuation.
           if (candidate !== null) this.append(owner.record, run.runId, {
             kind: 'text', itemId: `candidate-file:${owner.generationRequest.requestId}`, phase: 'candidate', operation: 'replace',
             text: owner.record.adapter === 'codex' ? codexCandidateFileMessage(candidate) : `${GENERATION_OPEN}${candidate}${GENERATION_CLOSE}`, ...this.identity(owner.record, run.runId),

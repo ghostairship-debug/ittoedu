@@ -910,8 +910,15 @@ describe('Codex explicit candidate file delivery', () => {
       await expect.poll(() => harness.running).toBe(false)
       const record = (await repository.list(workspace)).v2[0]!
       if (scenario === 'missing') {
-        expect(record.tasks.at(-1)?.status).toBe('failed')
-        expect(record.events.at(-1)).toMatchObject({ failure: { message: expect.stringContaining('缺少 candidate.json') } })
+        // A declared but missing candidate file is a recoverable omission, not a
+        // terminal protocol failure: the turn completes, the task stays checking
+        // and the diagnosis names the cause, expected artifact and next step.
+        expect(record.tasks.at(-1)?.status).toBe('checking')
+        const missing = await harness.candidate(workspace, id)
+        expect(missing).toMatchObject({ kind: 'candidate-format-error', requestId: request.requestId,
+          finding: expect.stringContaining('candidate.json'),
+          failure: { stage: 'candidate-parse', requestId: request.requestId, diagnostics: [{ code: 'missing-candidate-delivery' }] } })
+        expect(record.events.some(event => event.kind === 'text' && event.itemId?.startsWith('candidate-file:'))).toBe(false)
       } else {
         const result = await harness.candidate(workspace, id)
         expect(result.kind).toBe(scenario === 'valid' || scenario === 'codex-wire' || scenario === 'wire-missing-reason' ? 'candidate' : scenario === 'undeclared' ? 'incomplete' : 'candidate-format-error')
@@ -925,6 +932,59 @@ describe('Codex explicit candidate file delivery', () => {
       expect(record.hostResults).toEqual([])
       expect(record.tasks.at(-1)?.committedResultIds).toEqual([])
       if (scenario === 'undeclared') expect(record.events.some(event => event.kind === 'text' && event.itemId?.startsWith('candidate-file:'))).toBe(false)
+    } finally { await harness.close() }
+  })
+
+  it('recovers a declared-but-missing candidate file through one bounded native continuation', async () => {
+    const { directory, workspace } = await fixture(), repository = new LocalAgentRepository(directory)
+    const adapters: FileNativeAdapter[] = []
+    const harness = new LocalAgentHarness(repository, (_id, request) => {
+      const correction = adapters.length > 0
+      const adapter = new FileNativeAdapter(async root => {
+        if (!correction) return // First turn declares delivery but only prechecks: no candidate.json.
+        const staged = JSON.parse(await fs.readFile(path.join(root, 'request.json'), 'utf8'))
+        await fs.writeFile(path.join(root, 'candidate.json'), JSON.stringify({ version: 2, requestId: staged.requestId,
+          summary: '修正候选交付', afterCommit: { version: 1, action: 'finish' },
+          steps: [{ id: 'title', tool: 'native.content', destination: 'd1', input: { operation: 'edit', text: '修改后' } }] }))
+      })
+      Object.defineProperty(adapter, 'id', { value: 'codex' })
+      const stream = adapter.events.bind(adapter)
+      adapter.events = async function* () {
+        for await (const event of stream()) {
+          if (event.kind === 'text') yield { ...event, phase: 'candidate', text: generationStagedCandidateMarker(request!.requestId) }
+          else if (event.kind === 'configuration') yield { ...event, capabilities: { ...event.capabilities, adapter: 'codex' } }
+          else yield event
+        }
+      }
+      adapters.push(adapter)
+      return adapter
+    })
+    let request = fileCandidateRequest(workspace)
+    try {
+      const id = await harness.generate(workspace, 'codex', request)
+      await expect.poll(() => harness.running).toBe(false)
+      const missing = await harness.candidate(workspace, id)
+      if (missing.kind !== 'candidate-format-error') throw new Error(`Expected a recoverable missing-delivery diagnosis, got ${missing.kind}`)
+      expect(missing.finding).toContain('candidate.json')
+      expect(missing.finding).toContain('--check')
+      expect(missing.failure).toMatchObject({ stage: 'candidate-parse', requestId: request.requestId,
+        diagnostics: [{ code: 'missing-candidate-delivery' }] })
+      const before = (await repository.list(workspace)).v2[0]!
+      expect(before.tasks[0]).toMatchObject({ status: 'checking', committedResultIds: [] })
+      expect(before.events.some(event => event.kind === 'text' && event.itemId?.startsWith('candidate-file:'))).toBe(false)
+      await harness.hostResult(workspace, id, { requestId: request.requestId, status: 'rejected', summary: missing.finding, failure: missing.failure })
+      expect((await repository.list(workspace)).v2[0]!.tasks[0]!.execution!.formatRepairs).toBe(1)
+      request = fileCandidateRequest(workspace)
+      await harness.continue(workspace, id, request)
+      await expect.poll(() => harness.running).toBe(false)
+      const corrected = await harness.candidate(workspace, id)
+      expect(corrected).toMatchObject({ kind: 'candidate', requestId: request.requestId })
+      expect(adapters[1]!.opens[0]!.externalSessionId).toBe(adapters[0]!.nativeIdentity)
+      expect(adapters[1]!.opens[0]!.candidateRoot).not.toBe(adapters[0]!.opens[0]!.candidateRoot)
+      const current = (await repository.list(workspace)).v2[0]!
+      expect(current.tasks[0]!.taskId).toBe(before.tasks[0]!.taskId)
+      expect(current.tasks[0]!.execution).toMatchObject({ turnCount: 2, formatRepairs: 1, deadlineAt: before.tasks[0]!.execution!.deadlineAt })
+      expect(current.hostResults.flatMap(result => result.receipts)).toEqual([])
     } finally { await harness.close() }
   })
 })
