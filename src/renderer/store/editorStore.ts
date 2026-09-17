@@ -483,7 +483,6 @@ export type SpatialGraphSelection =
 
 export type {
   SidebarTab,
-  EditorMode,
   EditingScope,
   CanvasMode,
   TextEditSource,
@@ -493,7 +492,6 @@ export type { SimpleEntranceAnimationConfig } from '../course/v9SlideContentComm
 
 import type {
   SidebarTab,
-  EditorMode,
   EditingScope,
   CanvasMode,
   TextEditSource,
@@ -506,19 +504,6 @@ import type {
   PrepareCourseProjectPersistenceResult,
   CaptureCourseProjectRecoveryResult,
 } from './slices/courseLifecycleSlice'
-
-const EDITOR_MODE_STORAGE_KEY = 'courseware-editor:mode'
-
-function loadEditorMode(): EditorMode {
-  try {
-    return globalThis.localStorage?.getItem(EDITOR_MODE_STORAGE_KEY) === 'professional'
-      ? 'professional'
-      : 'simple'
-  } catch {
-    return 'simple'
-  }
-}
-
 
 import type {
   ImageReplacementCommitResult,
@@ -834,11 +819,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     readFlowSession: () => get().flowSession,
     setFeedback: (feedback) => set(feedback),
     setActiveTab: (tab) => {
-      const simpleHidden = new Set<string>(['components', 'automation', 'developer'])
-      const activeTab = get().editorMode === 'simple' && simpleHidden.has(tab)
-        ? 'elements'
-        : tab
-      set({ activeTab, errorMessage: null })
+      set({ activeTab: tab, errorMessage: null })
     },
     persistTransaction: (step, statusMessage) => kernel.persistTransaction(step, statusMessage),
     persistProject: (project, extra) => {
@@ -1095,7 +1076,6 @@ export const useEditorStore = create<EditorState>((set, get) => {
     read: () => {
       const current = get()
       return {
-        editorMode: current.editorMode,
         activeTab: current.activeTab,
         canvasMode: current.canvasMode,
         statusMessage: current.statusMessage,
@@ -1174,7 +1154,6 @@ export const useEditorStore = create<EditorState>((set, get) => {
       read: () => {
         const current = get()
         return {
-          editorMode: current.editorMode,
           activeTab: current.activeTab,
           canvasMode: current.canvasMode,
           statusMessage: current.statusMessage,
@@ -1254,7 +1233,6 @@ export const useEditorStore = create<EditorState>((set, get) => {
       return selectMediaAssetFiles(get())
     },
     componentPackages: initialBundle.componentPackages,
-    editorMode: loadEditorMode(),
     activeTab: 'elements',
     editingTextNodeId: null,
     slideDrawTool: null,

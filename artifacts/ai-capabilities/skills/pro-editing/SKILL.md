@@ -11,8 +11,6 @@ description: 输入：当前选择、页或整课引用及明确编辑目标
 
 输入：当前选择、页或整课引用及明确编辑目标。最先核对可编辑目标、owner、Surface、state 与 revision；只使用 destinations 中的目标和前序创建结果。局部修改保留其他对象、素材引用与阅读顺序。输出可一次撤销的候选步骤和影响摘要；目标缺失时停下，不能猜测 ID 或换目标。
 
-教师控制台仅使用工程内嵌组件；component.controller restore 用于显式恢复默认源码。参数用 component.configure，纹理/布局/结构用 component.package patch。保持全局唯一 role，不只改颜色冒充深度定制。背景融合仍独立于课件主动观察缩放、平移、Flow 滚动和 Spatial 镜头，但适应窗口与可用区域大小；透明空白穿透，真实控件可点。教师端口见 component-api4 的 sharedTypes.teacherController。
-
 模型负责图像内容、风格和构图，按显示区域与宽高比调用实际可用图像工具，只用正式支持的参数。取得真实图像后优先用media.apply交付，宿主统一解码并优化副本、导入和应用；失败后可在原授权范围内组合正式基础命令。图片通常长边512–1024像素，小插图争取100–300KB，清晰度优先；文字图、大图细节需要原分辨率时明确preserveResolution:true。宿主保留透明度、比例和完整内容，不覆盖原图。生成式重绘必须使用真实原图和可用图像工具，不能伪造像素变换。图片交付用media.apply，input={kind:"image",source:{$candidateFile:"resources/image.png"}}；背景用pages.backgrounds目标和placement:"background"。仅需新图时启动原生生图工具，等待时准备布局。结果只取路径/元数据，以原生图片通道看图；禁重复打印完整工具对象或base64。用request.json的fileAccess.mediaDelivery交付，或直接输出本轮resources；可复用reusableMedia。失败后组合正式基础命令或文件兜底，保留未指定字段与已提交成果。无需手写复制、压缩、编码脚本。
 
 完整构建、视觉、推进、互动与交付方法见 [build-courseware-project](../build-courseware-project/SKILL.md) 及其引用资料。

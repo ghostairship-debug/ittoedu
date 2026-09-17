@@ -628,6 +628,9 @@ export class InteractionEngine {
             ? this.presentation.transitionTo(action.stateId, action.transition)
             : this.presentation.setState(action.stateId)
           break
+        case 'location.go':
+          result = this.hostActions.goToLocation?.(action.locationId) ?? false
+          break
         case 'scene.go':
           result = this.hostActions.goToScene(
             action.sceneId,

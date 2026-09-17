@@ -434,10 +434,28 @@ describe('chat failed preparation evidence', () => {
 })
 
 describe('chat idle send after a stale task', () => {
+  it('keeps the real local repair request in edit despite its rejected quoted approach', async () => {
+    const instruction = String.raw`我已实际播放检查了刚保存的修改，按钮仍不正确：点击总结页“回看探究记录”后停在了“2｜先预测，再操作开关”，没有进入原来的流式探究记录页。失败截图：D:\果铃工作台\output\r19-final-20260917\teacher-review\review-record-return-runs\2026-09-16T23-32-29-611Z-39024\failure.png
+
+请不要再用“先跳实验、再自动推进”的绕行或延时方案。把总结页这一处回看入口换成软件里的普通可编辑跳转按钮，明确指向现有“3｜探究记录：把现象变成证据”流式讲义。按钮文字仍为“回看探究记录”，位置与外观尽量保持原样，点击一次直接到原页面；不能新增或复制记录页，不能改其他已通过内容，也不能保留两个同名入口。
+
+原四框必须仍是同一组，原来的预测、记录和三轮观察都要保留。保持六个位置和四份教学文档不变。
+
+这轮局部修改正式应用后就结束并说明结果，由我在当前软件完成实际点击与保存重开的独立验收；不用另建检查工程或继续寻找别的编辑器环境。`
+    mount()
+    fireEvent.change(screen.getByLabelText('意图'), { target: { value: 'edit' } })
+    await send(instruction, 1)
+    expect(h.starts[0].intent).toBe('edit')
+    expect(h.starts[0].instruction).toBe(instruction)
+  })
   it.each([
     ['plan', '我想让这个标题在课堂投影时更醒目、容易看清，文字内容保持不变。请结合当前页面给出调整方案，先不要修改。', 'plan'],
     ['plan', '不要修改，只和我讨论配色', 'discuss'],
     ['edit', '不要修改，只说明当前标题的情况', 'discuss'],
+    ['edit', '先给出方案，不要修改课件。', 'plan'],
+    ['edit', '先计划，再按我确认的内容修改。', 'plan'],
+    ['edit', '先和我讨论配色。', 'discuss'],
+    ['edit', '先别修改，说明当前标题的情况。', 'discuss'],
   ])('respects selected %s and the read-only request %s', async (selected, instruction, expected) => {
     mount()
     fireEvent.change(screen.getByLabelText('意图'), { target: { value: selected } })

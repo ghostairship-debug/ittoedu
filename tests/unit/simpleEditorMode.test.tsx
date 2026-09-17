@@ -49,7 +49,6 @@ beforeEach(() => {
   localStorage.clear()
   useEditorStore.getState().createNewProject()
   useEditorStore.setState({
-    editorMode: 'simple',
     activeTab: 'elements',
   })
   vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(null)
@@ -60,8 +59,8 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
-describe('simple and professional editor modes', () => {
-  it('uses one categorized element browser and exposes advanced authoring only in professional mode', () => {
+describe('unified editor surface', () => {
+  it('exposes the full categorized element browser and advanced authoring without mode switching', () => {
     const props = {
       onAddImage: vi.fn(),
       onImportImage: vi.fn(),
@@ -73,6 +72,7 @@ describe('simple and professional editor modes', () => {
     }
     useEditorStore.getState().importComponentPackage(createTestComponentPackage())
     const projectBeforeSwitch = selectActiveCourseProjectDocument(useEditorStore.getState())!
+    act(() => useEditorStore.getState().setActiveTab('elements'))
 
     render(<RightSidebar {...props} />)
 
@@ -80,9 +80,9 @@ describe('simple and professional editor modes', () => {
     expect(screen.getByRole('tab', { name: '图层' })).toBeInTheDocument()
     expect(screen.getByRole('tab', { name: '属性' })).toBeInTheDocument()
     expect(screen.queryByRole('tab', { name: '素材' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('tab', { name: '组件' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('tab', { name: '互动与动画' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('tab', { name: '开发' })).not.toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: '组件' })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: '互动与动画' })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: '开发' })).toBeInTheDocument()
     expect(screen.getByRole('tab', { name: '常用' })).toHaveAttribute(
       'aria-selected',
       'true',
@@ -92,7 +92,7 @@ describe('simple and professional editor modes', () => {
     expect(screen.getByRole('tab', { name: '媒体' })).toBeInTheDocument()
     expect(screen.queryByRole('tab', { name: '素材库' })).not.toBeInTheDocument()
     expect(screen.queryByRole('tab', { name: '互动组件' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('tab', { name: '控制与全局' })).not.toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: '控制与全局' })).toBeInTheDocument()
     expect(screen.queryByTestId('components-tab')).not.toBeInTheDocument()
 
     expect(screen.getByTestId('add-text')).toBeInTheDocument()
@@ -114,33 +114,31 @@ describe('simple and professional editor modes', () => {
     expect(screen.getByText('声音库')).toBeInTheDocument()
     expect(screen.getByText('视频素材')).toBeInTheDocument()
     expect(screen.getByText('图片素材')).toBeInTheDocument()
-    expect(screen.queryByText('全局声音设置')).not.toBeInTheDocument()
-
-    act(() => useEditorStore.getState().setEditorMode('professional'))
-
-    expect(screen.getByRole('tab', { name: '互动与动画' })).toBeInTheDocument()
-    expect(screen.getByRole('tab', { name: '开发' })).toBeInTheDocument()
-    expect(screen.getByRole('tab', { name: '组件' })).toBeInTheDocument()
-    expect(screen.queryByRole('tab', { name: '互动组件' })).not.toBeInTheDocument()
-    expect(screen.getByRole('tab', { name: '控制与全局' })).toBeInTheDocument()
     expect(screen.getByText('全局声音设置')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('tab', { name: '控制与全局' }))
+    expect(screen.getByRole('tab', { name: '控制与全局' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    )
+    expect(selectActiveCourseProjectDocument(useEditorStore.getState())!).toBe(projectBeforeSwitch)
+
     fireEvent.click(screen.getByRole('tab', { name: '组件' }))
     expect(screen.getByTestId('components-tab')).toHaveTextContent(
       '模式测试组件',
     )
     expect(selectActiveCourseProjectDocument(useEditorStore.getState())!).toBe(projectBeforeSwitch)
-    expect(localStorage.getItem('courseware-editor:mode')).toBe('professional')
 
     act(() => {
       useEditorStore.getState().setActiveTab('developer')
-      useEditorStore.getState().setEditorMode('simple')
     })
-    expect(useEditorStore.getState().activeTab).toBe('properties')
+    expect(useEditorStore.getState().activeTab).toBe('developer')
     expect(selectActiveCourseProjectDocument(useEditorStore.getState())!).toBe(projectBeforeSwitch)
   })
 
   it('filters element contents without exposing professional-only component results', () => {
     useEditorStore.getState().importComponentPackage(createTestComponentPackage())
+    act(() => useEditorStore.getState().setActiveTab('elements'))
     render(
       <RightSidebar
         onAddImage={vi.fn()}
@@ -174,8 +172,8 @@ describe('simple and professional editor modes', () => {
     render(<PropertiesTab onReplaceImage={vi.fn()} />)
 
     expect(screen.getByRole('heading', { name: '出现动画' })).toBeInTheDocument()
-    expect(screen.queryByText('互动播放初始状态')).not.toBeInTheDocument()
-    expect(screen.queryByRole('heading', { name: '交互' })).not.toBeInTheDocument()
+    expect(screen.getByText('互动播放初始状态')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '交互' })).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: '淡入' }))
 
@@ -241,7 +239,7 @@ describe('simple and professional editor modes', () => {
     })
   })
 
-  it('does not overwrite an advanced entrance rule from simple mode', () => {
+  it('does not overwrite an advanced entrance rule', () => {
     act(() => useEditorStore.getState().addShapeNode('rectangle'))
     const store = useEditorStore.getState()
     const scene = selectActiveScene(store)
@@ -277,7 +275,6 @@ describe('simple and professional editor modes', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '打开专业规则' }))
 
-    expect(useEditorStore.getState().editorMode).toBe('professional')
     expect(useEditorStore.getState().activeTab).toBe('automation')
     expect(selectActiveScene(useEditorStore.getState()).interactions).toHaveLength(1)
     expect(activeHistory().past).toHaveLength(historyBefore)

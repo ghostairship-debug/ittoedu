@@ -15,7 +15,7 @@ import { insertionIndex, resolveAuthoringToolScope } from './authoringToolScope'
 import { AuthoringToolFailure, type AuthoringToolDefinition } from './executeAuthoringTool'
 import { nativeLayerItemPropertiesInputSchema as layerItemPropertiesInputSchema } from './layerItemPropertiesInput'
 import { projectEffectiveLayers } from '../../course/effectiveLayerProjection'
-import { remapTextRuns } from '../../../shared/textRuns'
+import { locateTextRunReplacements, planTextRunRemap } from '../../../shared/textRuns'
 
 const coordinate = z.number().finite()
 const templateBase = { x: coordinate.optional(), y: coordinate.optional(), width: coordinate.positive().optional(), height: coordinate.positive().optional(), label: z.string().optional(), paperSpace: z.enum(['paper', 'viewport']).optional(),
@@ -39,17 +39,26 @@ const formulaEdit = nativeContentInputSchemaByType.formula.pick({ ast: true, acc
 const textStyleEdit = nativeContentInputSchemaByType.text.shape.style.partial().extend({
   emphasis: nativeContentInputSchemaByType.text.shape.style.shape.emphasis.unwrap().optional(),
 }).strict()
+const textReplacement = z.object({
+  original: z.string().min(1),
+  replacement: z.string(),
+  contextBefore: z.string().optional(),
+  contextAfter: z.string().optional(),
+}).strict()
 const legacyEditInputSchema = z.object({ operation: z.literal('edit'), text: z.string().optional(),
+  replacements: z.array(textReplacement).min(1).max(100).optional(),
   image: imageEdit.optional(), formula: formulaEdit.optional(), textStyle: textStyleEdit.optional(),
   properties: layerItemPropertiesInputSchema.optional() }).strict()
-  .refine(value => value.text !== undefined || value.textStyle !== undefined || value.properties !== undefined || value.image !== undefined || value.formula !== undefined, '窄编辑至少提供文字、公式、图片或属性')
+  .refine(value => value.text !== undefined || value.replacements !== undefined || value.textStyle !== undefined || value.properties !== undefined || value.image !== undefined || value.formula !== undefined, '窄编辑至少提供文字、公式、图片或属性')
+  .refine(value => value.text === undefined || value.replacements === undefined, 'text 与 replacements 不能同时提供')
 /** These are real executable branches, so selecting a text card cannot pull
  * formula AST into its reference closure. The legacy edit reader stays intact. */
 export const nativeContentEditSchemas = {
   shape: z.object({ operation: z.literal('edit-shape'), shapeStyle: shapeStyle.optional(), properties: layerItemPropertiesInputSchema.optional() }).strict()
     .refine(value => Object.keys(value.shapeStyle ?? {}).length > 0 || Object.keys(value.properties ?? {}).length > 0, '图形窄编辑至少提供一个样式或属性字段'),
-  text: z.object({ operation: z.literal('edit-text'), text: z.string().optional(), textStyle: textStyleEdit.optional(), properties: layerItemPropertiesInputSchema.optional() }).strict()
-    .refine(value => value.text !== undefined || value.textStyle !== undefined || value.properties !== undefined, '文字窄编辑至少提供文字、样式或属性'),
+  text: z.object({ operation: z.literal('edit-text'), text: z.string().optional(), replacements: z.array(textReplacement).min(1).max(100).optional(), textStyle: textStyleEdit.optional(), properties: layerItemPropertiesInputSchema.optional() }).strict()
+    .refine(value => value.text !== undefined || value.replacements !== undefined || value.textStyle !== undefined || value.properties !== undefined, '文字窄编辑至少提供文字、样式或属性')
+    .refine(value => value.text === undefined || value.replacements === undefined, 'text 与 replacements 不能同时提供'),
   image: z.object({ operation: z.literal('edit-image'), image: imageEdit, properties: layerItemPropertiesInputSchema.optional() }).strict(),
   formula: z.object({ operation: z.literal('edit-formula'), formula: formulaEdit, properties: layerItemPropertiesInputSchema.optional() }).strict(),
 }
@@ -73,7 +82,7 @@ export const nativeAuthoringTool: AuthoringToolDefinition<z.infer<typeof nativeA
     { operations: ['content', 'properties', 'edit', 'edit-text', 'edit-image', 'edit-formula', 'edit-shape', 'delete'], destination: 'update', message: '更新需要 update 目标；要新增对象请使用 insert + template，可与修改步骤组合提交。' },
   ],
   referenceSchemas: nativeContentInputSchemaByType,
-  description: 'Native对象：insert+template使用create parent:owner，提供初始内容/可选style，宿主补默认值；placement.center按当前锚点几何居中。其余操作使用update。edit-text/image/formula/shape只提供变化字段，保留身份、有效状态及未指定字段；旧edit兼容。content需完整同类型内容。Flow文字/正文用flow.content，本工具只创建浮层；paperSpace=paper随稿纸滚动，viewport固定视口，省略保留，非Flow拒绝。图片用media.apply，组件用component.configure，载体替换用selection.replace。',
+  description: 'Native：insert创建，其余update；edit-text优先replacements，重复原文加context，整段text歧义拒绝；保留未指定字段。line缺省水平；端点定向，竖线:[0.5,0]→[0.5,1]。Flow正文及图片/组件替换用专用工具。',
   plan({ document, destination, value: rawValue }) {
     const value = rawValue.operation === 'edit-text' || rawValue.operation === 'edit-image' || rawValue.operation === 'edit-formula'
       ? legacyEditInputSchema.parse({ ...rawValue, operation: 'edit' }) : rawValue
@@ -199,13 +208,21 @@ export const nativeAuthoringTool: AuthoringToolDefinition<z.infer<typeof nativeA
         if (effective?.kind !== 'native' || effective.content.nativeType !== 'shape') throw new Error('图形窄编辑只接受 Native 图形')
         editData = value.shapeStyle ? { style: value.shapeStyle } : undefined
       }
-      if (value.operation === 'edit' && (value.text !== undefined || value.textStyle !== undefined)) {
+      if (value.operation === 'edit' && (value.text !== undefined || value.replacements !== undefined || value.textStyle !== undefined)) {
         if (value.formula || value.image) throw new Error('一次 Native 窄编辑只能修改一种内容类型')
         if (effective?.kind !== 'native' || effective.content.nativeType !== 'text') throw new Error('文字窄编辑只接受 Native 文本；其他字段使用对应内容工具')
         const current = effective.content.data
-        const text = value.text ?? current.text
+        const mapping = value.replacements
+          ? locateTextRunReplacements(current.text, current.runs, value.replacements)
+          : planTextRunRemap(current.text, value.text ?? current.text, current.runs)
+        if (!mapping.ok) throw new AuthoringToolFailure([{
+          code: `native-text-${mapping.code}`,
+          message: mapping.reason,
+          path: ['input', value.replacements ? 'replacements' : 'text'],
+        }])
+        const text = mapping.text
         // Run overrides for explicitly changed whole-text fields must not mask the new style.
-        const runs = remapTextRuns(current.text, text, current.runs).map(run => ({ ...run, style: Object.fromEntries(Object.entries(run.style).filter(([key]) => !value.textStyle || !Object.hasOwn(value.textStyle, key))) })).filter(run => Object.keys(run.style).length > 0)
+        const runs = mapping.runs.map(run => ({ ...run, style: Object.fromEntries(Object.entries(run.style).filter(([key]) => !value.textStyle || !Object.hasOwn(value.textStyle, key))) })).filter(run => Object.keys(run.style).length > 0)
         editData = { text, runs, ...(value.textStyle ? { style: value.textStyle } : {}) }
       }
       if (value.operation === 'edit' && value.image) {

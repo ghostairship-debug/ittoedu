@@ -4,7 +4,9 @@
 
 当前产品决定与路线只看根目录 [开发总纲](COURSEWARE_DEVELOPMENT_PLAN.md)，当前 Ready 工作及其状态只看自动维护的 [任务板](docs/development-plan/TASK_BOARD.md)；技术不变量、执行规则和辅助材料统一从 [开发文档入口](docs/development-plan/README.md) 进入。README 不复制历史路线、卡片数量或瞬时状态。
 
-开发执行只遵循 [工作协议](docs/development-plan/WORKING_PROTOCOL.md)，架构改动按需补读 [架构合同](docs/development-plan/ARCHITECTURE_CONTRACT.md)。当前编辑器内没有可见 AI；自动化最多证明 `engineering candidate`，`accepted` 仍来自产品 Owner 的真实验收。
+开发执行只遵循 [工作协议](docs/development-plan/WORKING_PROTOCOL.md)，架构改动按需补读 [架构合同](docs/development-plan/ARCHITECTURE_CONTRACT.md)。内部构建已开放创作助手与原生 CLI 聊天；入口可见不代表完整教师流程已验收。自动化最多证明 `engineering candidate`，`accepted` 仍来自产品 Owner 的真实验收。
+
+当前开发从 [1.9 前端专项方案](docs/development-plan/R19_FRONTEND_SPECIAL_IMPLEMENTATION_PLAN.md)进入，设计依据为 [V3.1 设计说明](双形态UI设计/00-设计说明.md)。下文能力清单描述现有编辑器；其中简洁／专业模式是待替换的现状，不是新前端要求。长期产品研究不作为本阶段开发清单。
 
 ## 快速开始
 
@@ -34,14 +36,9 @@ npm start
 npm run install:courseware-skills
 ```
 
-安装器只管理 `orchestrate-courseware` 与 `build-courseware-project`。它记录已安装树签名：内容未变时直接跳过，只更新仍与管理记录匹配的副本；用户改过的已管理副本会保留并提示人工处理。未纳入管理记录的同名当前 Skill 会用仓库副本覆盖，以便全局安装始终跟随仓库最新版。旧 `build-project-v8-courseware` 与 `build-project-v7-courseware` 只有在既往由本项目管理且字节仍与安装记录或已知官方版一致时才安全退役；修改过或未管理的旧 Builder 副本仍保留。安装器不会删除或修改 `%USERPROFILE%\.codex\skills` 中的历史副本。Codex 通常会自动发现变更；若列表未刷新，请重启 Codex。这些 Skill 是外部 AI 创作工作流，不会把 AI 能力嵌入 Editor 1.x。
+安装器只管理 `orchestrate-courseware` 与 `build-courseware-project`。它记录已安装树签名：内容未变时直接跳过，只更新仍与管理记录匹配的副本；用户改过的已管理副本会保留并提示人工处理。未纳入管理记录的同名当前 Skill 会用仓库副本覆盖，以便全局安装始终跟随仓库最新版。旧 `build-project-v8-courseware` 与 `build-project-v7-courseware` 只有在既往由本项目管理且字节仍与安装记录或已知官方版一致时才安全退役；修改过或未管理的旧 Builder 副本仍保留。安装器不会删除或修改 `%USERPROFILE%\.codex\skills` 中的历史副本。Codex 通常会自动发现变更；若列表未刷新，请重启 Codex。这些 Skill 提供外部 AI 创作工作流；它们与应用内已接入的原生 CLI 创作助手是不同入口，共用产品合同。
 
-开始修改前建议先建立基线：
-
-```powershell
-npm run typecheck
-npm test
-```
+开始修改前先核对已有有效证据，再按工作协议选择直接相关的检查；不默认重跑全量测试。`npm test` 带 Player 构建前置，具体命令与集成验证安排见当前专项方案。
 
 ## 产品能力
 

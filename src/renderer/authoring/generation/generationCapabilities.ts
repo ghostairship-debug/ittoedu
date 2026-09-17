@@ -19,6 +19,8 @@ export function generationCapabilityContext(pages: readonly unknown[], purpose: 
   const layerActions = selectionActionIntents(instruction)
   if (layerActions.reorder) add('layer.edit', 'reorder')
   if (layerActions.duplicate) add('layer.edit', 'duplicate')
+  if (/对齐|居中|align|center/i.test(instruction)) add('layer.edit', 'align')
+  if (/分布|间距|排列|三列|distribut|spacing/i.test(instruction)) add('layer.edit', 'distribute')
   const shapeTask = /图形|圆|方形|矩形|三角|\b(shape|circle|rectangle|square|triangle)\b/i.test(instruction)
   if (shapeTask) { add('native.content', 'edit-shape'); add('native.content', 'insert', 'shape') }
   // This only prioritizes discovery; it never changes authorization. A requested
@@ -135,7 +137,8 @@ export function generationDynamicCapabilities() {
       registration: 'CoursewareRuntime.define({runtimeApiVersion:3,create(ctx){...return {destroy(){...}}}})。优先 API3 DOM：Slide scene-local、Flow surface-local；Spatial Runtime 当前未支持，使用 Component。API2 只用于已支持的 Slide scene/global。source 是普通 JS 字符串，运行时只能调用当前协议提供的接口。后备图片必须是工程中已存在或前序 asset.media.import 新建的图片；不能伪造 assetId。' },
     navigation: {
       goToScene: 'component/runtime 的 goToScene 只接受 Slide sceneId，不得用于 Flow 或 Spatial。',
-      nextPrevious: 'Flow/Spatial 使用 nextScene/previousScene，按 scene 出现顺序并受导航守卫前进/后退。',
+      goToLocation: '直接跳转已有 Slide/Flow/Spatial 课程位置使用可选 actions.goToLocation(locationId)，Native 按钮使用 location.go 或 go-to-location compose。必须使用当前 locations 中的稳定 ID，受导航守卫约束并保留课程状态。返回 true 只表示接受，完成需观察实际目标。',
+      nextPrevious: '按整课场景顺序跨 Surface 前进/后退使用 nextScene/previousScene；精确到已有位置使用 goToLocation，不用多次跳转或延时绕行。',
       replayScene: 'replayScene 同当前 location，从当前 scene 第一步重新播放，不受导航守卫限制。',
       restartCourse: 'restartCourse 绕过导航守卫，并将课程状态重置为声明默认值。',
     },

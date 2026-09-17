@@ -8,7 +8,7 @@ import { expectBackgroundWindowsIsolated } from './expectBackgroundWindowsIsolat
 
 const root = resolve(__dirname, '../..')
 const evidenceRoot = join(root, 'output/r18-native-text-autoheight')
-const inputArchive = process.env.R18_NATIVE_TEXT_INPUT ?? 'C:/Users/74755/Documents/courseware-r18-worktrees/20260908-development/claude/output/r18-native-authoring/codex-2-2026-09-08T10-49-03-487Z/attempts/after-T04-budget-2026-09-08T11-46-13-815Z/final-reopened.h5lesson'
+const configuredInputArchive = process.env.R18_NATIVE_TEXT_INPUT?.trim()
 const TITLE = '教师手工保留：现在的标题'
 const titleId = 'native-title'
 
@@ -55,6 +55,12 @@ async function selectTitle(page: Page) {
 
 test('Native auto-height: real tool and UI edits preserve text through history, reopen and fresh HTML', async () => {
   test.setTimeout(180_000)
+  test.skip(!configuredInputArchive,
+    '需要通过 R18_NATIVE_TEXT_INPUT 指定既有真实 auto-height T05 制品；默认跳过，不代表通过')
+  if (!configuredInputArchive) return
+  const inputArchive = resolve(configuredInputArchive)
+  expect(existsSync(inputArchive),
+    'R18_NATIVE_TEXT_INPUT 必须指向既有真实 .h5lesson 制品，不能重造替代').toBe(true)
   const runRoot = join(evidenceRoot, `ui-${new Date().toISOString().replace(/[:.]/g, '-')}`)
   mkdirSync(runRoot, { recursive: true })
   const projectPath = join(runRoot, 'working-copy.h5lesson'), htmlPath = join(runRoot, 'fresh-text.html')
@@ -77,6 +83,15 @@ test('Native auto-height: real tool and UI edits preserve text through history, 
     await expectBackgroundWindowsIsolated(app, true)
     const page = await app.firstWindow()
     page.on('pageerror', error => errors.push(error.message))
+    // Enter only the landing page; never replace an already opened editor or recovery draft.
+    const startupMore = page.locator('.lesson-workspace-more > summary')
+    const startupEditor = page.getByRole('button', { name: '打开工程（Ctrl+O）', exact: true })
+    const startupRecovery = page.getByRole('alertdialog', { name: '发现未完成的本地恢复副本', exact: true })
+    await expect.poll(async () => await startupEditor.isVisible() || await startupMore.isVisible() || await startupRecovery.isVisible()).toBe(true)
+    if (!await startupEditor.isVisible() && await startupMore.isVisible() && !await startupRecovery.isVisible()) {
+      await startupMore.click()
+      await page.getByRole('button', { name: '新建独立课件', exact: true }).click()
+    }
     await page.getByTestId('canvas-stage').locator('canvas').first().waitFor()
     await app.evaluate(({ dialog }, paths) => {
       dialog.showOpenDialog = (async () => ({ canceled: false, filePaths: [paths.project] })) as typeof dialog.showOpenDialog

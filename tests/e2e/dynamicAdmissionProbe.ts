@@ -8,11 +8,13 @@ export async function runDynamicAdmissionProbe(page: Page) {
     const { makeAuthoringAddress } = await load('/src/shared/authoringAddress.ts')
     const { applyEditorTransactionStep } = await load('/src/renderer/authoring/editorTransaction.ts')
     const { componentPackageAddress } = await load('/src/renderer/authoring/tools/componentPackageTool.ts')
+    const { withDefaultComponentController } = await load('/src/renderer/components/teacherControllerComponent.ts')
     const font = new Uint8Array(await (await fetch('/node_modules/@fontsource-variable/noto-sans-sc/files/noto-sans-sc-latin-wght-normal.woff2')).arrayBuffer())
     const fallback = Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR4nGP4DwQACfsD/fteaysAAAAASUVORK5CYII='), c => c.charCodeAt(0))
     const sources = await createProjectFontDeliveryFixture(font, fallback)
     let document = sources.project
-    let resources = { assetFiles: sources.assetFiles, componentPackages: sources.components }
+    let resources = { assetFiles: sources.assetFiles,
+      componentPackages: { ...withDefaultComponentController(document).componentPackages, ...sources.components } }
     let commits = 0
     const facade = createAuthoringToolFacade({ readDocument: () => document,
       readResources: () => resources,
@@ -138,7 +140,7 @@ export async function runDynamicAdmissionProbe(page: Page) {
           const before = builder.finish()
           const receipt = await builder.execute('component.package', { operation: 'replace', files: {
             'manifest.json': encode(JSON.stringify({ ...sources.components['font-demo'].manifest, version: '1.0.9' })),
-            'runtime.js': encode(`CoursewareComponent.define({id:"font-demo",runtimeApiVersion:4,create(ctx){${entry.body}}})`),
+            'runtime.js': encode(`CoursewareComponent.define({id:"font-demo",runtimeApiVersion:4,create(ctx){var p=document.createElement("p");p.textContent="lifecycle failure probe";ctx.dom.root.appendChild(p);${entry.body}}})`),
           } }, { kind: 'update', target: { ...wire, itemId: 'font-demo', authoringAddress: componentPackageAddress(before.project.id, 'font-demo') } })
           const after = builder.finish()
           captureFailures.push({ surfaceType, phase: entry.phase, ...summary(receipt),
@@ -157,7 +159,11 @@ export async function runDynamicAdmissionProbe(page: Page) {
         const original = JSON.stringify(output.project)
         const { parseComponentPackageFiles } = await load('/src/renderer/components/importComponentPackage.ts')
         const { admitDynamicCandidate } = await load('/src/renderer/authoring/tools/dynamicCandidateAdmission.ts')
-        await admitDynamicCandidate(output.project, { assetFiles: output.assetFiles, componentPackages: { 'font-demo': parseComponentPackageFiles(output.componentFiles['font-demo']) } },
+        const componentPackages = Object.fromEntries(Object.values(output.componentFiles).map((files: any) => {
+          const data = parseComponentPackageFiles(files)
+          return [data.manifest.id, data]
+        }))
+        await admitDynamicCandidate(output.project, { assetFiles: output.assetFiles, componentPackages },
           [{ locationId: output.project.startLocationId, instanceIds: [item.layerItemId] }])
         distantComponentPreserved = JSON.stringify(output.project) === original
       }

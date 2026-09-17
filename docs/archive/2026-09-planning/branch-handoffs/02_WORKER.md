@@ -45,13 +45,13 @@
 
 1. 绿过的先不用管。`T6_FREEZE_HANDOFF.md` 里已绿的 `check:contracts` 不要重跑，除非本卡改了 `scripts/generate-contracts.ts` 或 `artifacts/contracts/**`。
 2. 优先改红的，并只跑红的单独测试。当前 T6 红项是 `typecheck`。
-3. 本轮例外：任务卡最小验证若写了 `npm run typecheck`（[T1-A](T1_A_MOVE.md)、[T6-tc-tests](T6_TC_TESTS.md)），允许只跑这一条红命令。仍禁止 `npm test` / e2e / desktop。[T1-C](T1_C_AUDIT.md) 不要跑 typecheck。
+3. 本轮例外：任务卡最小验证若写了 `npm run typecheck`（`T1_A_MOVE.md`（历史链接目标未随本归档保留）、`T6_TC_TESTS.md`（历史链接目标未随本归档保留）），允许只跑这一条红命令。仍禁止 `npm test` / e2e / desktop。`T1_C_AUDIT.md`（历史链接目标未随本归档保留） 不要跑 typecheck。
 4. 不要每改一个文件就 typecheck / vitest。每个 commit 收口最多跑一次最小验证。
 5. 不要每次修改后跑 T6 五条命令。整轮五条只留给 T6 红项清完后的一次证明。
 
 发现类型/构建风险（且本卡不允许改那些文件）只写入 HANDOFF。不要为了绿而删测试。
 
-T6 是唯一允许跑 `npm test` / e2e / desktop 的任务，且必须遵守 [T6_FREEZE.md](T6_FREEZE.md) 的「已绿不重跑、只追红项、收口才整轮一次」。
+T6 是唯一允许跑 `npm test` / e2e / desktop 的任务，且必须遵守 `T6_FREEZE.md`（历史链接目标未随本归档保留） 的「已绿不重跑、只追红项、收口才整轮一次」。
 
 ## 4. 产品硬边界（执行中不得违反）
 

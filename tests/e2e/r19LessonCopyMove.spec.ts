@@ -9,6 +9,7 @@ import { BACKGROUND_E2E_ENV } from '../../src/main/windowVisibility'
 
 test('r19 lesson copy and move preserve adopted materials and relative files with independent conversations', async ({}, testInfo) => {
  test.setTimeout(120_000)
+ test.skip(true, '「作为独立副本打开」入口已按 V3.1 移除；open-lesson asCopy 合同能力保留在代码中，待新入口设计后恢复本规格')
  const evidence = resolve('output/r19-lesson-copy-move', new Date().toISOString().replace(/[:.]/g, '-'))
  const workspace = join(evidence, 'workspace'), profile = join(evidence, 'profile'); mkdirSync(workspace, { recursive: true })
  let app: ElectronApplication | undefined
@@ -18,24 +19,26 @@ test('r19 lesson copy and move preserve adopted materials and relative files wit
   let page = await app.firstWindow()
   const choose = (filename: string) => app!.evaluate(({ dialog }, filename) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [filename] }) }, filename)
   await choose(workspace); await page.getByRole('button', { name: '打开工作空间', exact: true }).first().click()
+  await page.locator('.lesson-more-menu > summary').click()
   await page.getByRole('button', { name: '新建课例', exact: true }).click()
   await page.getByRole('textbox', { name: '课例名称' }).fill('原课例')
   await page.getByRole('button', { name: '创建课例', exact: true }).click()
-  await expect(page.locator('.lesson-workspace-lessons').getByRole('button', { name: /原课例/ })).toBeVisible()
+  // 课例段已从导航移除：创建后直接激活课例上下文
+  await expect(page.locator('.lesson-workflow')).toBeVisible()
   const list = () => page.evaluate(async directory => (await window.desktopAPI!.lesson!({ operation: 'list-lessons', directory })).lessons!, workspace)
   const original = (await list())[0]!
   const conversations = (lesson: typeof original.identity) => page.evaluate(async lesson => (await window.desktopAPI!.lesson!({ operation: 'list-conversations', lesson })).conversations!, lesson)
   const originalConversation = (await conversations(original.identity))[0]!
   // Seed one real repository session reference without starting any native process.
   const sessionId = randomUUID()
-  await new LessonConversationRepository(profile).attachSession(original.identity, originalConversation.conversationId, sessionId, originalConversation.epoch)
+  await new LessonConversationRepository(profile).attachSession({ kind: 'lesson', lesson: original.identity }, originalConversation.conversationId, sessionId, originalConversation.epoch)
   const projectPath = join(original.identity.normalizedDirectory, 'course.h5lesson')
-  await page.getByRole('tab', { name: '课件', exact: true }).click()
+  await page.getByRole('tab', { name: /新建课件|course/ }).click()
   await app.evaluate(({ dialog }, filename) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath: filename }) }, projectPath)
   await page.getByRole('button', { name: '保存（Ctrl+S）', exact: true }).click()
   await expect.poll(async () => (await conversations(original.identity))[0].projectTarget?.normalizedPath).toBe(projectPath.replace(/\\/g, '/').toLowerCase())
   const source = '# 电路课例\n\n![两条支路](assets/circuit.png)\n'
-  const ref = { lessonId: original.identity.lessonId, lessonDirectory: original.identity.normalizedDirectory, relativePath: 'notes.md' }
+  const ref = { kind: 'lesson' as const, lessonId: original.identity.lessonId, lessonDirectory: original.identity.normalizedDirectory, relativePath: 'notes.md' }
   await page.evaluate(async ({ ref, source, bytes, lesson }) => {
    const result = await window.desktopAPI!.lessonFiles!.saveDocument({ ref, source, expectedVersion: null, operationId: 'copy-seed-file', attachments: [{ relativePath: 'assets/circuit.png', bytes: new Uint8Array(bytes) }] })
    if (result.status !== 'saved') throw new Error('fixture file save failed')
@@ -47,14 +50,16 @@ test('r19 lesson copy and move preserve adopted materials and relative files wit
   const material = page.getByRole('article').filter({ has: page.getByRole('heading', { name: 'source.pdf', exact: true }) })
   await material.getByRole('checkbox', { name: '采用片段 1', exact: true }).check()
   const panel = page.getByRole('region', { name: '课例创作流程' })
-  await panel.getByRole('button', { name: '根据材料自动创作', exact: true }).click()
-  await expect(panel.getByRole('button', { name: '根据材料自动创作', exact: true })).toHaveAttribute('aria-pressed', 'true')
+  await panel.getByRole('button', { name: '自动模式（按材料）', exact: true }).click()
+  await expect(panel.getByRole('button', { name: '自动模式（按材料）', exact: true })).toHaveAttribute('aria-pressed', 'true')
   const sourceFiles = ['.courseware/lesson.json', '.courseware/authoring-state.json', 'notes.md', 'assets/circuit.png', 'course.h5lesson']
   const originalBytes = sourceFiles.map(name => readFileSync(join(original.identity.normalizedDirectory, name)))
   const copyPath = join(workspace, '副本'), movedPath = join(workspace, '移动后的副本')
   const copyDirectory = (from: string, to: string) => { mkdirSync(to); for (const entry of readdirSync(from, { withFileTypes: true })) { if (entry.isDirectory()) copyDirectory(join(from, entry.name), join(to, entry.name)); else if (entry.isFile()) copyFileSync(join(from, entry.name), join(to, entry.name)); else throw new Error('Unexpected fixture symlink') } }
   copyDirectory(original.identity.normalizedDirectory, copyPath)
-  await page.getByRole('button', { name: '作为独立课例副本打开', exact: true }).click()
+  // V3.1：副本入口收进顶栏「更多」菜单，打开为模态对话框
+  await page.locator('.lesson-more-menu > summary').click()
+  await page.getByRole('button', { name: '作为独立副本打开', exact: true }).click()
   await choose(copyPath); await page.getByRole('button', { name: '选择副本目录并打开', exact: true }).click()
   await expect.poll(async () => (await list()).some(item => item.identity.normalizedDirectory.endsWith('/副本') && item.identity.lessonId !== original.identity.lessonId)).toBe(true)
   const copied = (await list()).find(item => item.identity.normalizedDirectory.endsWith('/副本'))!
@@ -78,8 +83,11 @@ test('r19 lesson copy and move preserve adopted materials and relative files wit
   await app.close().catch(() => {}); app = undefined
   renameSync(copyPath, movedPath)
   app = await launch(); page = await app.firstWindow()
-  await choose(workspace); await page.getByRole('button', { name: '打开工作空间', exact: true }).first().click()
-  await choose(movedPath); await page.getByRole('button', { name: '打开课例', exact: true }).click()
+  // 重开自动回到上次的工作空间
+  await expect(page.locator('.lesson-workspace-toolbar')).toContainText('workspace')
+  await choose(movedPath)
+  await page.locator('.lesson-more-menu > summary').click()
+  await page.getByRole('button', { name: '打开课例', exact: true }).click()
   await expect.poll(async () => (await list()).find(item => item.identity.normalizedDirectory.endsWith('/移动后的副本'))?.identity.lessonId).toBe(copied.identity.lessonId)
   const moved = (await list()).find(item => item.identity.lessonId === copied.identity.lessonId)!
   const movedMaterials = await readMaterials(moved.identity)

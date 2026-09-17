@@ -654,6 +654,15 @@ export async function launchNativeEditor(productRoot: string, runRoot: string, p
     if (resolve(userData).toLowerCase() !== resolve(profilePath).toLowerCase()) throw new Error('The test must use its exact validated profile')
     const run = { app, page, runRoot, workspaceRoot, projectPath, userData, pageErrors, consoleErrors }
     await expectBackgroundWindowsIsolated(app, true)
+    // Enter only the landing page; never replace an already opened editor or recovery draft.
+    const startupMore = page.locator('.lesson-workspace-more > summary')
+    const startupEditor = page.getByRole('button', { name: '打开工程（Ctrl+O）', exact: true })
+    const startupRecovery = page.getByRole('alertdialog', { name: '发现未完成的本地恢复副本', exact: true })
+    await expect.poll(async () => await startupEditor.isVisible() || await startupMore.isVisible() || await startupRecovery.isVisible()).toBe(true)
+    if (!await startupEditor.isVisible() && await startupMore.isVisible() && !await startupRecovery.isVisible()) {
+      await startupMore.click()
+      await page.getByRole('button', { name: '新建独立课件', exact: true }).click()
+    }
     await page.locator('[data-testid="canvas-stage"] canvas').first().waitFor()
     // Only the OS file picker is replaced so this hidden test can choose its own
     // known lesson. Native CLI launch, auth, configuration, tools and IPC are real.
@@ -663,11 +672,20 @@ export async function launchNativeEditor(productRoot: string, runRoot: string, p
     await page.getByRole('button', { name: '打开工程（Ctrl+O）', exact: true }).click()
     const professional = page.getByRole('button', { name: '专业', exact: true })
     if (await professional.getAttribute('aria-pressed') !== 'true') await professional.click()
+    await showEditorPanel(page, '属性与素材')
     await page.getByRole('tab', { name: '图层', exact: true }).click()
     await expect(page.getByTestId(`node-item-${FIXTURE_IDS.image}`)).toHaveCount(1)
     await expectBackgroundWindowsIsolated(app, true)
     return run
   } catch (error) { await app.close().catch(() => {}); throw error }
+}
+
+export async function showEditorPanel(page: Page, name: '页面与图层' | '属性与素材'): Promise<void> {
+  if (!await page.locator('[aria-label="课件编辑面板"]').isVisible()) return
+  const button = page.getByRole('button', { name, exact: true })
+  await expect(button).toBeVisible()
+  if (await button.getAttribute('aria-expanded') !== 'true') await button.click()
+  await expect(button).toHaveAttribute('aria-expanded', 'true')
 }
 
 export async function closeNativeEditor(run: NativeRun): Promise<void> {
@@ -683,9 +701,16 @@ export async function closeNativeEditor(run: NativeRun): Promise<void> {
 }
 
 export async function selectLayer(page: Page, id: string): Promise<void> {
-  await page.getByRole('tab', { name: '图层', exact: true }).click()
-  await page.getByTestId(`node-item-${id}`).locator('.node-name').click()
-  await expect(page.getByRole('tab', { name: '属性', exact: true })).toHaveAttribute('aria-selected', 'true')
+  await showEditorPanel(page, '属性与素材')
+  const layers = page.getByRole('tab', { name: '图层', exact: true })
+  await layers.click()
+  await expect(layers).toHaveAttribute('aria-selected', 'true')
+  const row = page.getByTestId(`node-item-${id}`)
+  await expect(row).toBeVisible()
+  await row.locator('.node-name').click()
+  const properties = page.getByRole('tab', { name: '属性', exact: true })
+  await expect(properties).toHaveAttribute('aria-selected', 'true')
+  await expect(page.getByTestId('properties-tab')).toBeVisible()
 }
 
 export async function saveStage(run: NativeRun, name: string): Promise<CourseProjectArchiveData> {

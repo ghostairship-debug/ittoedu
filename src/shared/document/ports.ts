@@ -14,7 +14,17 @@ export type DocumentSelection = { revision: string } & (
   | { kind: 'cells'; tableId: string; anchor: { rowId: string; columnId: string }; head: { rowId: string; columnId: string } }
 )
 export interface DocumentDiagnostic { message: string; offset: number; endOffset: number; line: number; column: number; path?: PropertyKey[] }
-export interface DocumentFileRef { lessonId: string; lessonDirectory: string; relativePath: string }
+/** F04：课例内文档（lesson）或工作空间真实文件（file，当前为根目录/项目内 MD）。 */
+export type DocumentFileRef =
+  | { kind: 'lesson'; lessonId: string; lessonDirectory: string; relativePath: string }
+  | { kind: 'file'; path: string }
+export function documentRefKey(ref: DocumentFileRef): string {
+  // 课例 ref 保持 F04 前的键格式，教师未保存恢复稿与 AI 记录不因改造失联。
+  return ref.kind === 'lesson' ? JSON.stringify([ref.lessonId, ref.relativePath]) : JSON.stringify(['file', ref.path.replace(/\\/g, '/').toLowerCase()])
+}
+export function documentRefLabel(ref: DocumentFileRef): string {
+  return ref.kind === 'lesson' ? ref.relativePath : (ref.path.replace(/\\/g, '/').split('/').pop() ?? ref.path)
+}
 export interface DocumentFileVersion { contentVersion: string; attachments: { relativePath: string; contentVersion: string }[] }
 export interface OpenDocumentResult { ref: DocumentFileRef; source: string; version: DocumentFileVersion; diagnostics: DocumentDiagnostic[] }
 export type DocumentSaveResult =

@@ -298,6 +298,7 @@ function validateCopiedInteractionReferences(
   knownLayerItemIds: ReadonlySet<string>,
 ): void {
   const scenes = slideScenes(project)
+  const locationIds = new Set(project.locations.map((location) => location.id))
   const soundIds = new Set(Object.keys(project.media.audio.sounds))
   const actionIds = new Set<string>()
   for (const rule of rules) {
@@ -366,6 +367,9 @@ function validateCopiedInteractionReferences(
         throw new Error(`互动声音引用已失效：${action.target.soundId}`)
       }
       if (action.type === 'presentation.set') validateState(action.stateId)
+      if (action.type === 'location.go' && !locationIds.has(action.locationId)) {
+        throw new Error(`互动位置引用已失效：${action.locationId}`)
+      }
       if (action.type === 'scene.go') {
         const targetScene = scenes.get(action.sceneId)
         if (!targetScene) throw new Error(`互动场景引用已失效：${action.sceneId}`)

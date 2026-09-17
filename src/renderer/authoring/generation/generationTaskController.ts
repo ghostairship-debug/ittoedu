@@ -258,6 +258,8 @@ export class GenerationTaskController {
         await requireCandidateIntent()
         this.currentOperation = '保存候选检查结果'
         await this.remember({ requestId: request.requestId, candidateId: prepared.candidateId, status: 'checked', summary: prepared.summary,
+          ...(prepared.semanticChanges ? { semanticChanges: prepared.semanticChanges } : {}),
+          ...(prepared.interactionChecks?.evidence ? { executionEvidence: prepared.interactionChecks.evidence } : {}),
           beforeRevision: prepared.beforeRevision, afterRevision: prepared.afterRevision })
         this.requireCurrent(request, epoch)
         if (request.applyPolicy !== 'auto') {
@@ -285,6 +287,8 @@ export class GenerationTaskController {
         const verificationSummary = checks && (checks.checked.length || checks.skipped.length)
           ? `；已改规则的声明行为点击检查 ${checks.checked.length} 项通过${checks.skipped.length ? `，${checks.skipped.length} 项需对应运行条件下另行观察` : ''}；未改规则及完整任务目标仍需核对` : ''
         result = { requestId: request.requestId, candidateId: prepared.candidateId, status: applied.status, summary: (prepared.summary + verificationSummary).slice(0, 4000),
+          ...(receipt.semanticChanges ? { semanticChanges: receipt.semanticChanges } : {}),
+          ...(receipt.executionEvidence ? { executionEvidence: receipt.executionEvidence } : {}),
           beforeRevision: receipt.beforeRevision, afterRevision: receipt.afterRevision,
           ...(outcome.candidate.afterCommit ? { afterCommit: outcome.candidate.afterCommit } : {}) }
       } catch (error) {

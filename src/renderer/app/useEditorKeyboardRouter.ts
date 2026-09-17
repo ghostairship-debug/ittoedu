@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react'
 import {
-  isEditorInteractiveControlTarget,
-  isEditorTextInputTarget,
+  isEditorInteractiveControlEvent,
+  isEditorTextInputEvent,
   resolveKeyboardDeleteDisposition,
   type KeyboardDeleteSessionSnapshot,
 } from '../course/editorActionRouting'
@@ -12,6 +12,7 @@ import type {
 } from '../course/editorActionTypes'
 
 export interface EditorKeyboardActionPorts {
+  isReadOnly(): boolean
   captureDeleteSnapshot(target: EventTarget | null): KeyboardDeleteSessionSnapshot
   routeEditorAction(
     actionId: EditorActionId,
@@ -42,9 +43,10 @@ export function useEditorKeyboardRouter(ports: EditorKeyboardActionPorts): void 
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.isComposing || isEditorTextInputTarget(event.target)) return
-      const key = event.key.toLowerCase()
       const current = portsRef.current
+      if (current.isReadOnly() || event.defaultPrevented || event.isComposing
+        || isEditorTextInputEvent(event)) return
+      const key = event.key.toLowerCase()
       if ((event.ctrlKey || event.metaKey) && key === 's') {
         event.preventDefault()
         current.saveProject(event.shiftKey)
@@ -87,7 +89,7 @@ export function useEditorKeyboardRouter(ports: EditorKeyboardActionPorts): void 
         event.preventDefault()
         current.deleteSelectedNodes()
       } else if (event.key.startsWith('Arrow')) {
-        if (isEditorInteractiveControlTarget(event.target)) return
+        if (isEditorInteractiveControlEvent(event)) return
         const distance = event.shiftKey ? 10 : 1
         const movement = {
           ArrowLeft: [-distance, 0],

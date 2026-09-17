@@ -234,10 +234,9 @@ describe('专业开发模式', () => {
     )
   })
 
-  it('专业模式显示开发工作流，切回简洁模式时安全返回属性', () => {
+  it('开发工作流常驻，可随时从标签进入', () => {
     useEditorStore.getState().createNewProject()
     useEditorStore.setState({
-      editorMode: 'professional',
       activeTab: 'properties',
     })
     render(
@@ -263,8 +262,6 @@ describe('专业开发模式', () => {
     expect(screen.getByRole('tab', { name: /对象 JSON/ })).toBeInTheDocument()
     expect(screen.getByRole('tab', { name: /规则 JSON/ })).toBeInTheDocument()
     expect(screen.getByRole('tab', { name: /组件代码/ })).toBeInTheDocument()
-    useEditorStore.getState().setEditorMode('simple')
-    expect(useEditorStore.getState().activeTab).toBe('properties')
   })
 
   it('场景运行时源码更新进入正常撤销历史', () => {

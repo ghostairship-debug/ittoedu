@@ -3,21 +3,21 @@
 > CURRENT_PRODUCT: 仓库根目录 / `main`（V9 重建已合入；已提交 HEAD 见 `git rev-parse HEAD`）
 > HISTORICAL_V8_BASELINE: `f27275658c6dfaa12f2ce35cd9368dcdebe99451`（只作历史对照，禁止再从此重建）
 > HISTORICAL_V9_DONOR: `475503498323`（只作供体与失败取证）
-> EXECUTION_PLAN: [`COURSEWARE_DEVELOPMENT_PLAN.md`](COURSEWARE_DEVELOPMENT_PLAN.md) 12.12
-> TASK_PACK: [`docs/tasks/editor-1.0/00_INDEX.md`](docs/tasks/editor-1.0/00_INDEX.md)
-> WORKER_PROTOCOL: [`docs/tasks/editor-1.0/02_WORKER.md`](docs/tasks/editor-1.0/02_WORKER.md)
+> EXECUTION_PLAN: [`COURSEWARE_DEVELOPMENT_PLAN.md`](../../../../COURSEWARE_DEVELOPMENT_PLAN.md) 12.12
+> TASK_PACK: `docs/tasks/editor-1.0/00_INDEX.md`（历史链接目标未随本归档保留）
+> WORKER_PROTOCOL: `docs/tasks/editor-1.0/02_WORKER.md`（历史链接目标未随本归档保留）
 > UPDATED: 2026-08-19
 > PURPOSE: 帮助新 Agent 用最少上下文进入真实代码
 
 本文件是导航，不是源码替代品。若索引与源码、Schema 或可复现证据冲突，以源码事实为准并在同一变更中修正索引。
 
-结构化入口位于 [`repo-index/`](repo-index/README.md)。当前只维护 modules、features 和 tests，不建设全量符号图、依赖图、热点系统或知识图谱服务。
+结构化入口位于 [`repo-index/`](../../../../repo-index/README.md)。当前只维护 modules、features 和 tests，不建设全量符号图、依赖图、热点系统或知识图谱服务。
 
 ## 1. 新 Agent 的最短启动顺序
 
-1. 阅读 [`AGENTS.md`](AGENTS.md)。
-2. 阅读唯一总纲 [`COURSEWARE_DEVELOPMENT_PLAN.md`](COURSEWARE_DEVELOPMENT_PLAN.md) 12.12。领取实现任务的第三方工人先读 [`docs/tasks/editor-1.0/02_WORKER.md`](docs/tasks/editor-1.0/02_WORKER.md)。稳定性：方法 [S0](docs/tasks/editor-1.0/S0_STABILITY_EXPLORATION_PLAN.md)，探索产物 [HANDOFF](docs/tasks/editor-1.0/S0_HANDOFF.md)，改代码方案 [S1](docs/tasks/editor-1.0/S1_STABILITY_CODE_PLAN.md)；确认 S1 前禁止改产品代码。
-3. 领取任务只看 [`docs/tasks/editor-1.0/00_INDEX.md`](docs/tasks/editor-1.0/00_INDEX.md)。旧 `v8-to-v9-rebuild` 任务包已删除。
+1. 阅读 [`AGENTS.md`](../../../../AGENTS.md)。
+2. 阅读唯一总纲 [`COURSEWARE_DEVELOPMENT_PLAN.md`](../../../../COURSEWARE_DEVELOPMENT_PLAN.md) 12.12。领取实现任务的第三方工人先读 `docs/tasks/editor-1.0/02_WORKER.md`（历史任务包已删除）。稳定性：方法 `docs/tasks/editor-1.0/S0_STABILITY_EXPLORATION_PLAN.md`，探索产物 `docs/tasks/editor-1.0/S0_HANDOFF.md`，改代码方案 `docs/tasks/editor-1.0/S1_STABILITY_CODE_PLAN.md`；确认 S1 前禁止改产品代码。
+3. 领取任务只看 `docs/tasks/editor-1.0/00_INDEX.md`（历史任务包已删除）。旧 `v8-to-v9-rebuild` 任务包已删除。
 4. 当前产品就是仓库根目录。历史 worktree 与 `codex/v9-editor-v8-base` 只作供体，不得再当第二套当前版。
 5. `docs/reviews/**`、`docs/INTERNAL_1_0_MILESTONE_0.md` 与旧评估稿只作历史取证，不是当前执行入口。
 6. 运行 `git status --short`，保留所有不属于当前任务的修改和未跟踪文件。
@@ -28,7 +28,7 @@
 
 1. 用户当前明确要求与最近的 `AGENTS.md`。
 2. `src/shared/*Schema.ts`、当前源码和可复现运行证据。
-3. [`COURSEWARE_DEVELOPMENT_PLAN.md`](COURSEWARE_DEVELOPMENT_PLAN.md) 的产品决策和执行路线。
+3. [`COURSEWARE_DEVELOPMENT_PLAN.md`](../../../../COURSEWARE_DEVELOPMENT_PLAN.md) 的产品决策和执行路线。
 4. 本索引及 `repo-index/*.json`。
 5. 历史阶段计划、评估原稿、旧截图、示例构建脚本和 donor 代码。
 
@@ -107,7 +107,7 @@ CourseProjectArchiveData
 | 发布导出 | `src/renderer/export/course/**` | producer、HTML/网页包、PPTX、PDF/DOCX |
 | Builder/能力卡 | `.agents/skills/orchestrate-courseware`, `.agents/skills/build-courseware-project`, `artifacts/ai-capabilities/index.json` | 课件策划、V9 构建、能力发现。仓库没有 `agent-kit/` CLI |
 
-详细机器可读版本见 [`repo-index/modules.json`](repo-index/modules.json)。
+详细机器可读版本见 `../../../../repo-index/modules.json`（历史链接目标未随本归档保留）。
 
 ## 5. 改什么看哪里
 
@@ -154,22 +154,22 @@ CourseProjectArchiveData
 - HTML/网页包无画布外旧导航。
 - 普通教师 UI 不暴露内部协议词和 ID。
 
-功能级不变量见 [`repo-index/features.json`](repo-index/features.json)。
+功能级不变量见 `../../../../repo-index/features.json`（历史链接目标未随本归档保留）。
 
 ## 8. 验证选择
 
-优先查询 [`repo-index/tests.json`](repo-index/tests.json)。通用原则：
+优先查询 `../../../../repo-index/tests.json`（历史链接目标未随本归档保留）。通用原则：
 
 - docs/index：只查链接、JSON、diff。
 - 单函数/组件：只运行任务文档列出的 1–2 个最相关 Vitest 文件。
 - T0–T5：禁止全量 `npm test` / typecheck / e2e / desktop build。
-- 只有 [T6](docs/tasks/editor-1.0/T6_FREEZE.md) 可跑全量命令。不得在未获教师确认时写 `accepted`。
+- 只有 `docs/tasks/editor-1.0/T6_FREEZE.md`（历史任务包已删除）可跑全量命令。不得在未获教师确认时写 `accepted`。
 
 不要因为存在 `npm run verify:full` 就在开发循环运行它；中间类型或构建风险记录到 HANDOFF，由 T6 一次性验证。
 
 ## 9. 高风险文件提示
 
-这些文件职责多、调用链长，修改前先找窄边界。12.11 起它们属于稳定性内核候选，功能卡默认冻结；**S0 仍禁止以稳定性为名立刻重构**，见 [S0](docs/tasks/editor-1.0/S0_STABILITY_EXPLORATION_PLAN.md)：
+这些文件职责多、调用链长，修改前先找窄边界。12.11 起它们属于稳定性内核候选，功能卡默认冻结；**S0 仍禁止以稳定性为名立刻重构**，见 [S0](S0_STABILITY_EXPLORATION_PLAN.md)：
 
 - `src/renderer/App.tsx`
 - `src/renderer/store/editorStore.ts`

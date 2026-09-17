@@ -15,6 +15,7 @@ export class TeacherControllerComponentHost {
   #cleanup: (() => void)[] = []
   #reportError: PublishedComponentMountOptions['reportError']
   #sizeObserver: ResizeObserver | undefined
+  #popupStyles = new WeakMap<HTMLElement, { maxWidth: string; maxHeight: string; x: number; y: number }>()
   constructor(options: TeacherControllerHostOptions, component: PublishedComponentMountOptions) {
     this.#options = options
     this.#authoringId = component.mode === 'edit' ? component.instanceId : undefined
@@ -81,6 +82,13 @@ export class TeacherControllerComponentHost {
       if (surface && typeof ResizeObserver !== 'undefined') {
         this.#sizeObserver = new ResizeObserver(resize)
         this.#sizeObserver.observe(surface)
+      }
+      if (surface && component.mode !== 'edit') {
+        // Embedded controller sources can open their own directory without a
+        // host action. Fit that transient UI after the component renders it.
+        const observer = new MutationObserver(resize)
+        observer.observe(surface, { childList: true, subtree: true })
+        this.#cleanup.push(() => observer.disconnect())
       }
       view.addEventListener('resize', resize)
       this.#cleanup.push(() => { view.removeEventListener('resize', resize); view.cancelAnimationFrame(frame) })
@@ -158,9 +166,44 @@ export class TeacherControllerComponentHost {
       }
     }
     this.rootElement.style.pointerEvents = 'none'
+    if (surface && !this.#authoringId) this.syncPopups(surface)
+  }
+  private syncPopups(surface: HTMLElement): void {
+    const stage = this.#options.getRenderedStageBounds()
+    const canvas = this.#options.canvas
+    const sx = stage.width / canvas.width, sy = stage.height / canvas.height
+    if (!(sx > 0 && sy > 0)) return
+    const document = surface.ownerDocument.documentElement
+    const left = Math.max(0, stage.left ?? 0) + 8
+    const top = Math.max(0, stage.top ?? 0) + 8
+    const right = Math.min(document.clientWidth || Infinity, (stage.left ?? 0) + stage.width) - 8
+    const bottom = Math.min(document.clientHeight || Infinity, (stage.top ?? 0) + stage.height) - 8
+    if (right <= left || bottom <= top) return
+    // Constrain only this controller's semantic popup UI, not course content
+    // or the controller footprint used for collapse, dragging and authoring.
+    for (const popup of surface.querySelectorAll<HTMLElement>('[role="dialog"]')) {
+      let style = this.#popupStyles.get(popup)
+      if (!style) {
+        style = { maxWidth: popup.style.maxWidth, maxHeight: popup.style.maxHeight, x: 0, y: 0 }
+        this.#popupStyles.set(popup, style)
+        this.#sizeObserver?.observe(popup)
+      }
+      const maxWidth = `${(right - left) / sx}px`, maxHeight = `${(bottom - top) / sy}px`
+      popup.style.maxWidth = style.maxWidth ? `min(${style.maxWidth}, ${maxWidth})` : maxWidth
+      popup.style.maxHeight = style.maxHeight ? `min(${style.maxHeight}, ${maxHeight})` : maxHeight
+      popup.style.boxSizing = 'border-box'
+      popup.style.overflow = 'auto'
+      const rect = popup.getBoundingClientRect()
+      const x = rect.left - style.x * sx, y = rect.top - style.y * sy
+      style.x = (Math.max(left, Math.min(x, right - rect.width)) - x) / sx
+      style.y = (Math.max(top, Math.min(y, bottom - rect.height)) - y) / sy
+      popup.style.translate = `${style.x}px ${style.y}px`
+    }
   }
   updateGeometry(node: TeacherControllerRuntimeNode): void {
-    this.#options = { ...this.#options, node }
+    // Flow supplies a live canvas getter. Spreading options snapshots it at
+    // the first layout, so later viewport sizes produce the wrong CSS scale.
+    this.#options.node = node
     this.#handle.resize(node.width, node.height)
     this.#options.onPositionChange?.(node, this.offset)
     this.syncFootprint()

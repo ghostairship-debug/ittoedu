@@ -38,7 +38,15 @@ async function launchProbeEditor() {
     },
   })
   const page = await app.firstWindow()
-  await page.getByRole('button', { name: '新建独立课件', exact: true }).click()
+  // Only enter the landing page; keep an existing editor or recovery draft intact.
+  const startupMore = page.locator('.lesson-workspace-more > summary')
+  const startupEditor = page.getByRole('button', { name: '打开工程（Ctrl+O）', exact: true })
+  const startupRecovery = page.getByRole('alertdialog', { name: '发现未完成的本地恢复副本', exact: true })
+  await expect.poll(async () => await startupEditor.isVisible() || await startupMore.isVisible() || await startupRecovery.isVisible()).toBe(true)
+  if (!await startupEditor.isVisible() && await startupMore.isVisible() && !await startupRecovery.isVisible()) {
+    await startupMore.click()
+    await page.getByRole('button', { name: '新建独立课件', exact: true }).click()
+  }
   await page.locator('[data-testid="canvas-stage"] canvas').first().waitFor()
   return { app, page, runRoot, server }
 }
@@ -88,6 +96,8 @@ test('Flow properties UI commits the chosen nested destination and one undo', as
     const fixture = await installFlowComponentConversionUiFixture(page)
     const professional = page.getByRole('button', { name: '专业', exact: true })
     if (await professional.getAttribute('aria-pressed') !== 'true') await professional.click()
+    const propertiesPanel = page.getByRole('button', { name: '属性与素材', exact: true })
+    if (await propertiesPanel.getAttribute('aria-expanded') !== 'true') await propertiesPanel.click()
     await page.getByRole('tab', { name: '属性', exact: true }).click()
     await expect(page.getByTestId('flow-overlay-component-properties')).toBeVisible()
     await page.getByLabel('正文位置', { exact: true }).selectOption({

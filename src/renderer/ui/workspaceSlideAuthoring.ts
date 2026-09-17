@@ -1,7 +1,7 @@
 import { canEditLayerInScope } from '../../shared/teacherControllerRole'
-import { controllerDisplayFrame } from '../authoring/controllerDisplayBounds'
+import { constrainControllerDisplayFrame, controllerDisplayFrame } from '../authoring/controllerDisplayBounds'
 import type { LayerItem } from '../../shared/courseProjectTypes'
-import { MIN_NODE_SIZE } from '../../shared/constants'
+import { CANVAS_HEIGHT, CANVAS_WIDTH, MIN_NODE_SIZE } from '../../shared/constants'
 import type { NativeLineGeometry } from '../../shared/contracts/native-v1/types'
 import {
   collectLineSnapAxes,
@@ -272,14 +272,16 @@ function angleOf(point: StagePoint, center: StagePoint): number {
 function previewMove(
   gesture: MoveGesture,
   world: StagePoint,
+  backend: SlideAuthoringBackend,
 ): SlideEditorNodeTransform[] {
   const dx = world.x - gesture.startWorld.x
   const dy = world.y - gesture.startWorld.y
-  return gesture.nodes.map((node) => ({
-    ...node,
-    x: node.x + dx,
-    y: node.y + dy,
-  }))
+  const globals = backend.getSession().history.present.globalLayerItems
+  return gesture.nodes.map((node) => {
+    const next = { ...node, x: node.x + dx, y: node.y + dy }
+    const item = globals.find(entry => entry.item.layerItemId === node.nodeId)?.item
+    return item ? constrainControllerDisplayFrame(item, next, { width: CANVAS_WIDTH, height: CANVAS_HEIGHT }) : next
+  })
 }
 
 function nativeLayerLocksAspect(
@@ -667,7 +669,7 @@ export function createSlideWorkspaceAuthoringController(
       return v9Result(backend, options, { linePreview, guides: lineGuides })
     }
     if (gesture.type === 'move') {
-      preview = previewMove(gesture, world)
+      preview = previewMove(gesture, world, backend)
       return v9Result(backend, options, { preview })
     }
     if (gesture.type === 'resize') {
@@ -737,7 +739,7 @@ export function createSlideWorkspaceAuthoringController(
     }
 
     const next = active.type === 'move'
-      ? previewMove(active, world)
+      ? previewMove(active, world, backend)
       : active.type === 'resize'
         ? previewResize(active, world, backend)
         : previewRotate(active, world)

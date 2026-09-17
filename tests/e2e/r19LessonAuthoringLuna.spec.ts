@@ -35,19 +35,26 @@ test('r19 automatic Luna: actual material through four files and same-window Bui
     writeFileSync(join(evidence, 'requested-configuration.json'), JSON.stringify({ configuration, fastAvailable: !!fast, configured }, null, 2))
     await app.evaluate(({ dialog }, filename) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath: filename }) }, join(workspace, '闭合电路自动课例', 'course.h5lesson'))
     await app.evaluate(({ dialog }, workspace) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [workspace] }) }, workspace)
-    await page.getByRole('button', { name: '打开工作空间', exact: true }).first().click()
+    // V3.1：保留 profile 重开自动回到上次工作空间，全新运行才出现「打开工作空间」
+    const openWorkspace = page.getByRole('button', { name: '打开工作空间', exact: true }).first()
+    if (await openWorkspace.waitFor({ state: 'visible', timeout: 5000 }).then(() => true, () => false)) await openWorkspace.click()
+    await expect(page.locator('.lesson-workspace-toolbar')).toBeVisible()
     const existing = await page.evaluate(async directory => (await window.desktopAPI!.lesson!({ operation: 'list-lessons', directory })).lessons!, workspace)
     if (!existing.length) {
-      await page.getByRole('button', { name: '新建课例', exact: true }).click()
-      await page.getByRole('textbox', { name: '课例名称' }).fill('闭合电路自动课例')
-      await page.getByRole('button', { name: '创建课例', exact: true }).click()
+      await page.getByRole('button', { name: '新建课件', exact: true }).click()
+      await page.getByRole('textbox', { name: '课件名称' }).fill('闭合电路自动课例')
+      await page.getByRole('button', { name: '创建课件', exact: true }).click()
+      // 课例段已从导航移除：创建后直接激活课例上下文
+      await expect(page.locator('.lesson-workflow')).toBeVisible()
     }
-    await expect(page.locator('.lesson-workspace-lessons').getByRole('button', { name: /闭合电路自动课例/ })).toBeVisible()
     if (existing.length) {
       const restore = page.getByRole('button', { name: '恢复课件', exact: true })
       await restore.waitFor({ state: 'visible', timeout: 3000 }).catch(() => {})
       if (await restore.isVisible()) await restore.click()
-      await page.locator('.lesson-workspace-lessons').getByRole('button', { name: /闭合电路自动课例/ }).click()
+      // V3.1：课例入口已从「更多」菜单移除，经目录树点选 .h5lesson 恢复课例上下文
+      await page.locator('.lesson-directory-tree').getByRole('button', { name: '闭合电路自动课例', exact: true }).click()
+      await page.locator('.lesson-directory-tree').getByRole('button', { name: 'course.h5lesson', exact: true }).click()
+      await expect(page.locator('.lesson-workflow')).toBeVisible()
     }
     const lesson = await page.evaluate(async directory => (await window.desktopAPI!.lesson!({ operation: 'list-lessons', directory })).lessons![0]!, workspace)
     const conversation = await page.evaluate(async lesson => (await window.desktopAPI!.lesson!({ operation: 'list-conversations', lesson })).conversations![0]!, lesson.identity)
@@ -89,8 +96,8 @@ test('r19 automatic Luna: actual material through four files and same-window Bui
     await page.getByRole('tab', { name: '材料', exact: true }).click()
     await page.getByRole('button', { name: /^添加材料（PDF/ }).click()
     await page.getByRole('article').filter({ has: page.getByRole('heading', { name: '闭合与串联电路教材.docx', exact: true }) }).last().getByRole('checkbox').check()
-    if (await panel.getByRole('button', { name: '根据材料自动创作', exact: true }).getAttribute('aria-pressed') !== 'true') await panel.getByRole('button', { name: '根据材料自动创作', exact: true }).click()
-    await expect(panel.getByRole('button', { name: '根据材料自动创作', exact: true })).toHaveAttribute('aria-pressed', 'true')
+    if (await panel.getByRole('button', { name: '自动模式（按材料）', exact: true }).getAttribute('aria-pressed') !== 'true') await panel.getByRole('button', { name: '自动模式（按材料）', exact: true }).click()
+    await expect(panel.getByRole('button', { name: '自动模式（按材料）', exact: true })).toHaveAttribute('aria-pressed', 'true')
     }
     await panel.getByRole('textbox', { name: '课例创作目标' }).fill('为八年级初学者讲解闭合电路和串联电路，15分钟。基于所选教材，先从电源、导线、灯泡和开关建立电流路径，再对比开关断开与闭合，让学生预测并操作验证灯泡变化，最后解释串联回路的共同通断。需要可读的图示和一个开关互动，教师可以编辑和再次使用。')
     const outputPath = join(lesson.identity.normalizedDirectory, 'course.h5lesson')
@@ -98,7 +105,7 @@ test('r19 automatic Luna: actual material through four files and same-window Bui
     await page.screenshot({ path: join(evidence, 'workspace-before-generation.png') })
     const priorRun = await page.evaluate(async context => window.desktopAPI!.lessonAuthoring!({ operation: 'read', ...context }), { lesson: lesson.identity, conversationId: conversation.conversationId })
     if (process.env.R19_LUNA_REPAIR_CURRENT_DOCUMENTS === '1' && priorRun.view.currentStage === 'build' && priorRun.run?.status === 'ready-to-build' && !priorRun.assembly) await panel.getByRole('button', { name: '按当前稿重新准备原构建', exact: true }).click()
-    if (!priorRun.run || !['running', 'ready-to-build', 'completed'].includes(priorRun.run.status)) await panel.getByRole('button', { name: priorRun.view.currentStage === 'build' ? '构建课件' : '生成当前阶段', exact: true }).click()
+    if (!priorRun.run || !['running', 'ready-to-build', 'completed'].includes(priorRun.run.status)) await panel.getByRole('button', { name: '开始自动创作', exact: true }).click()
     await expect.poll(async () => {
       const result = await page.evaluate(async context => window.desktopAPI!.lessonAuthoring!({ operation: 'read', ...context }), { lesson: lesson.identity, conversationId: conversation.conversationId })
       writeFileSync(join(evidence, 'current-stage.json'), JSON.stringify(result, null, 2))

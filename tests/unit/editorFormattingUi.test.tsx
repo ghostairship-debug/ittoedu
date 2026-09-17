@@ -20,7 +20,6 @@ afterEach(() => {
 
 beforeEach(() => {
   useEditorStore.getState().createNewProject()
-  useEditorStore.setState({ editorMode: 'professional' })
 })
 
 function activeHistory() {

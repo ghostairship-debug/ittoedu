@@ -11,6 +11,4 @@ description: 输入：当前焦点和用户的视觉意图
 
 输入：当前焦点和用户的视觉意图。修改内容、样式、frame 或设计 token，保留未要求修改的身份、教学文字和交互。焦点不限制用户要求的其他对象；快捷工具不足时用原生 CLI 编辑暂存 V9 工作副本，经 project.document 提交实际结果；遵守当前 Schema，不另造字段。
 
-教师控制台仅使用工程内嵌组件；component.controller restore 用于显式恢复默认源码。参数用 component.configure，纹理/布局/结构用 component.package patch。保持全局唯一 role，不只改颜色冒充深度定制。背景融合仍独立于课件主动观察缩放、平移、Flow 滚动和 Spatial 镜头，但适应窗口与可用区域大小；透明空白穿透，真实控件可点。教师端口见 component-api4 的 sharedTypes.teacherController。
-
 完整构建、视觉、推进、互动与交付方法见 [build-courseware-project](../build-courseware-project/SKILL.md) 及其引用资料。

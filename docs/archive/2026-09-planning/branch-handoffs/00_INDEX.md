@@ -1,16 +1,16 @@
 # Editor 1.0 收尾任务包
 
-> 执行入口。总纲：[COURSEWARE_DEVELOPMENT_PLAN.md](../../../COURSEWARE_DEVELOPMENT_PLAN.md) 12.12
+> 执行入口。总纲：[COURSEWARE_DEVELOPMENT_PLAN.md](../../../../COURSEWARE_DEVELOPMENT_PLAN.md) 12.12
 > 共享约束：[01_SHARED.md](01_SHARED.md)
 > 工人协议（第三方模型必读）：[02_WORKER.md](02_WORKER.md)
 > 更新日期：2026-08-19
 > 已锁定：删除 V8 导入，不保留密封导入器。Course Project V9 Schema **软冻结**。
 > **12.12：S1 改代码方案已写出，确认前不要改 `src/**`。** 探索产物：[S0_HANDOFF.md](S0_HANDOFF.md)。方案：[S1_STABILITY_CODE_PLAN.md](S1_STABILITY_CODE_PLAN.md)。
 > **12.11：暂停新的功能补丁。** 方法：[S0_STABILITY_EXPLORATION_PLAN.md](S0_STABILITY_EXPLORATION_PLAN.md)。
-> 12.10：流式讲义「先能读、再近 Word」走车道 G（G0–G3）已合入 `main`。计划见 [G0_FLOW_NEAR_WORD_PLAN.md](G0_FLOW_NEAR_WORD_PLAN.md)。不要重做 F1–F3 / G0–G3 / P1–P8 / Q1–Q8。  
-> 12.9：V9 作者工程 Schema 软冻结（additive 可选字段仍允许；不等于 Editor 1.0 已发布）。流式讲义作者界面走车道 F（F1–F3）。计划见 [F0_FLOW_AUTHORING_PLAN.md](F0_FLOW_AUTHORING_PLAN.md)。不要重做 P1–P8 或 Q1–Q8。  
+> 12.10：流式讲义「先能读、再近 Word」走车道 G（G0–G3）已合入 `main`。计划见 `G0_FLOW_NEAR_WORD_PLAN.md`（历史链接目标未随本归档保留）。不要重做 F1–F3 / G0–G3 / P1–P8 / Q1–Q8。
+> 12.9：V9 作者工程 Schema 软冻结（additive 可选字段仍允许；不等于 Editor 1.0 已发布）。流式讲义作者界面走车道 F（F1–F3）。计划见 `F0_FLOW_AUTHORING_PLAN.md`（历史链接目标未随本归档保留）。不要重做 P1–P8 或 Q1–Q8。
 > 12.8：编排/构建 Skill 与无限画布运行态自由逛。不得宣称 Editor 1.0 已发布。  
-> 12.7：教师回归缺陷走车道 Q（Q1–Q8 已合入 `main`）。定位见 [Q0_DIAGNOSIS.md](Q0_DIAGNOSIS.md)，切分见 [Q0_FIX_PLAN.md](Q0_FIX_PLAN.md)。不要重做 P1–P8 或 Q1–Q8。  
+> 12.7：教师回归缺陷走车道 Q（Q1–Q8 已合入 `main`）。定位见 `Q0_DIAGNOSIS.md`（历史链接目标未随本归档保留），切分见 `Q0_FIX_PLAN.md`（历史链接目标未随本归档保留）。不要重做 P1–P8 或 Q1–Q8。
 > 12.4：剩余任务卡写成逐步算法 + 文件防火墙，供高性价比第三方工人执行；父代理只合入与复检。  
 > 12.3：P8 Flow/Spatial 互动组件；P1/P3/P4 已合入后可领取 P8。  
 > 12.2：车道 P（P1–P7）。合同冻结仍是 T0–T6。
@@ -36,47 +36,47 @@ Course Project V9 已是默认工程真相，作者工程 Schema 已软冻结。
 
 | 任务 | 要点 |
 |---|---|
-| [T0](T0_BASELINE.md) | `tests/fixtures/course-project-v9/*.h5lesson` + round-trip |
-| [T1](T1_SCHEMA.md) **E** | Spatial/Flow 可选 `backgroundColor?` |
-| [T2](T2_REMOVE_V8.md) | 打开只接受 schema 9；无导入 UI |
-| [P1](P1_PLAYBACK_HOSTS.md) | 试运行控制器可拖可点；三表面 video |
-| [P2](P2_TRYRUN_LOCATION.md) | Mixed 跳转保持 `canvasMode === 'run'` |
-| [P3](P3_FLOW_EDIT_MEDIA.md) | Flow 编辑图/视频 blob |
-| [P4](P4_SPATIAL_EDIT_MEDIA.md) | Spatial 选框随转；编辑 video |
-| [P5](P5_CANVAS_BACKGROUND.md) **CSS** | 无限画布默认白 |
-| [P6](P6_COURSE_TREE.md) | 删组、演示页跨组、主按钮文案 |
-| [P7](P7_LAYER_CONTROLLER.md) | 控制器只在「全局」 |
-| [T4](T4_CAPABILITIES.md) | 能力索引 `project: 9`；`validate:course-project` |
-| [P8](P8_FLOW_SPATIAL_COMPONENTS.md) | Flow/Spatial/Slide Published 挂 Component API 4 |
-| [T3](T3_BACKEND.md) | 单一 `slide-authoring`；Flow/Spatial 时 `slideBackend === null` |
-| [T5](T5_READ_MODEL.md) | NodesTab 经 `course/read-model` 取投影；`groupedVisualRows` 未改 |
-| [P5](P5_CANVAS_BACKGROUND.md) **persist** | Spatial/Flow 画布色写入可选字段；编辑与宿主同读；缺省不脏写 |
-| [T1](T1_A0_CONTRACTS_BARRELS.md) **A0** | `src/shared/contracts/**` 只做 re-export |
-| [T1](T1_D_CONTRACTS_GEN.md) **D** | `generate:contracts` / `check:contracts` 快照 |
-| [T6-docs](T6_DOCS.md) | `docs/contracts/` 三份说明 |
-| [T6-scan](T6_SCAN.md) | 禁止项棘轮测试 + 白名单 |
-| [T3-aliases](T3_ALIASES.md) | 去掉 candidate 函数别名；session 字段名未改 |
-| [T6-CI](T6_CI.md) | GitHub Actions 只跑 `check:contracts` |
-| [T1](T1_B1_ADD_DISCRIMINATORS.md) **B1** | 增加 `canvas-runtime` / `surface-runtime`；旧值当时仍合法 |
-| [T6-nav](T6_NAV.md) | 文档导航接到 `docs/contracts/` 与 generate/check:contracts |
-| [T1](T1_B_SWITCH.md) **B** | 生产写入与夹具改为 `canvas-runtime` / `surface-runtime`；旧判别器已删 |
-| [T1](T1_C_AUDIT.md) **C** | 顶层 `.strict()`；未知键测试；`PROJECT_SCHEMA_VERSION` 仍为 8 |
-| [T6-tc-tests](T6_TC_TESTS.md) | 测试与 `validate-project.ts` 对齐 V9 archive / slide-authoring |
-| [T1](T1_A_MOVE.md) **A** | 合同源文件在 `src/shared/contracts/**`；旧路径 re-export；Published Flow/Spatial `backgroundColor?` |
-| [T6](T6_FREEZE.md) | Windows e2e 27/27 合入 `main`；CI 有 contracts/typecheck/test。未视觉复核、未 `accepted` |
+| `T0_BASELINE.md`（历史链接目标未随本归档保留） | `tests/fixtures/course-project-v9/*.h5lesson` + round-trip |
+| `T1_SCHEMA.md`（历史链接目标未随本归档保留） **E** | Spatial/Flow 可选 `backgroundColor?` |
+| `T2_REMOVE_V8.md`（历史链接目标未随本归档保留） | 打开只接受 schema 9；无导入 UI |
+| `P1_PLAYBACK_HOSTS.md`（历史链接目标未随本归档保留） | 试运行控制器可拖可点；三表面 video |
+| `P2_TRYRUN_LOCATION.md`（历史链接目标未随本归档保留） | Mixed 跳转保持 `canvasMode === 'run'` |
+| `P3_FLOW_EDIT_MEDIA.md`（历史链接目标未随本归档保留） | Flow 编辑图/视频 blob |
+| `P4_SPATIAL_EDIT_MEDIA.md`（历史链接目标未随本归档保留） | Spatial 选框随转；编辑 video |
+| `P5_CANVAS_BACKGROUND.md`（历史链接目标未随本归档保留） **CSS** | 无限画布默认白 |
+| `P6_COURSE_TREE.md`（历史链接目标未随本归档保留） | 删组、演示页跨组、主按钮文案 |
+| `P7_LAYER_CONTROLLER.md`（历史链接目标未随本归档保留） | 控制器只在「全局」 |
+| `T4_CAPABILITIES.md`（历史链接目标未随本归档保留） | 能力索引 `project: 9`；`validate:course-project` |
+| `P8_FLOW_SPATIAL_COMPONENTS.md`（历史链接目标未随本归档保留） | Flow/Spatial/Slide Published 挂 Component API 4 |
+| `T3_BACKEND.md`（历史链接目标未随本归档保留） | 单一 `slide-authoring`；Flow/Spatial 时 `slideBackend === null` |
+| `T5_READ_MODEL.md`（历史链接目标未随本归档保留） | NodesTab 经 `course/read-model` 取投影；`groupedVisualRows` 未改 |
+| `P5_CANVAS_BACKGROUND.md`（历史链接目标未随本归档保留） **persist** | Spatial/Flow 画布色写入可选字段；编辑与宿主同读；缺省不脏写 |
+| `T1_A0_CONTRACTS_BARRELS.md`（历史链接目标未随本归档保留） **A0** | `src/shared/contracts/**` 只做 re-export |
+| `T1_D_CONTRACTS_GEN.md`（历史链接目标未随本归档保留） **D** | `generate:contracts` / `check:contracts` 快照 |
+| `T6_DOCS.md`（历史链接目标未随本归档保留） | `docs/contracts/` 三份说明 |
+| `T6_SCAN.md`（历史链接目标未随本归档保留） | 禁止项棘轮测试 + 白名单 |
+| `T3_ALIASES.md`（历史链接目标未随本归档保留） | 去掉 candidate 函数别名；session 字段名未改 |
+| `T6_CI.md`（历史链接目标未随本归档保留） | GitHub Actions 只跑 `check:contracts` |
+| `T1_B1_ADD_DISCRIMINATORS.md`（历史链接目标未随本归档保留） **B1** | 增加 `canvas-runtime` / `surface-runtime`；旧值当时仍合法 |
+| `T6_NAV.md`（历史链接目标未随本归档保留） | 文档导航接到 `docs/contracts/` 与 generate/check:contracts |
+| `T1_B_SWITCH.md`（历史链接目标未随本归档保留） **B** | 生产写入与夹具改为 `canvas-runtime` / `surface-runtime`；旧判别器已删 |
+| `T1_C_AUDIT.md`（历史链接目标未随本归档保留） **C** | 顶层 `.strict()`；未知键测试；`PROJECT_SCHEMA_VERSION` 仍为 8 |
+| `T6_TC_TESTS.md`（历史链接目标未随本归档保留） | 测试与 `validate-project.ts` 对齐 V9 archive / slide-authoring |
+| `T1_A_MOVE.md`（历史链接目标未随本归档保留） **A** | 合同源文件在 `src/shared/contracts/**`；旧路径 re-export；Published Flow/Spatial `backgroundColor?` |
+| `T6_FREEZE.md`（历史链接目标未随本归档保留） | Windows e2e 27/27 合入 `main`；CI 有 contracts/typecheck/test。未视觉复核、未 `accepted` |
 
 **已合入 `main` — 禁止重做 Q1–Q8**
 
 | 任务 | 要点 |
 |---|---|
-| [Q1](Q1_CONTROLLER_INERT.md) | 非 global 点控制器 inert；图层树仅全局列出 |
-| [Q2](Q2_GLOBAL_NATIVE_TRANSFORM.md) | 全局 Native 拖缩放与内容写入 |
-| [Q3](Q3_PUBLISHED_TEXT_RUNS.md) | Slide 试运行 `style + runs` |
-| [Q4](Q4_FLOW_IMAGE_EDIT.md) | 稿纸媒体 alt/caption/layout/库内替换 |
-| [Q5](Q5_SPATIAL_VIDEO.md) | Published URL + HTML `<video>` |
-| [Q6](Q6_ADD_VIDEO_NODE.md) | 工具栏 `addVideoNode` 走真实 session + `asset` |
-| [Q7](Q7_FLOW_FILE_REPLACE.md) | 稿纸媒体可从本地文件替换 |
-| [Q8](Q8_E2E_CONTROLLER_LIST.md) | 默认真场景 e2e 不再断言控制器行 |
+| `Q1_CONTROLLER_INERT.md`（历史链接目标未随本归档保留） | 非 global 点控制器 inert；图层树仅全局列出 |
+| `Q2_GLOBAL_NATIVE_TRANSFORM.md`（历史链接目标未随本归档保留） | 全局 Native 拖缩放与内容写入 |
+| `Q3_PUBLISHED_TEXT_RUNS.md`（历史链接目标未随本归档保留） | Slide 试运行 `style + runs` |
+| `Q4_FLOW_IMAGE_EDIT.md`（历史链接目标未随本归档保留） | 稿纸媒体 alt/caption/layout/库内替换 |
+| `Q5_SPATIAL_VIDEO.md`（历史链接目标未随本归档保留） | Published URL + HTML `<video>` |
+| `Q6_ADD_VIDEO_NODE.md`（历史链接目标未随本归档保留） | 工具栏 `addVideoNode` 走真实 session + `asset` |
+| `Q7_FLOW_FILE_REPLACE.md`（历史链接目标未随本归档保留） | 稿纸媒体可从本地文件替换 |
+| `Q8_E2E_CONTROLLER_LIST.md`（历史链接目标未随本归档保留） | 默认真场景 e2e 不再断言控制器行 |
 
 车道 Q 接线已合入。不要再领取 Q1–Q8。
 
@@ -84,35 +84,35 @@ Course Project V9 已是默认工程真相，作者工程 Schema 已软冻结。
 
 **已合入 `main` — 禁止重做 G0–G3**
 
-计划与切分：[G0_FLOW_NEAR_WORD_PLAN.md](G0_FLOW_NEAR_WORD_PLAN.md)。F 已合入的稿纸 runs / 块类型 / 稿纸公式必须保留。本车道把当时降级砍掉的入口接了回来。
+计划与切分：`G0_FLOW_NEAR_WORD_PLAN.md`（历史链接目标未随本归档保留）。F 已合入的稿纸 runs / 块类型 / 稿纸公式必须保留。本车道把当时降级砍掉的入口接了回来。
 
 | 任务 | 要点 |
 |---|---|
-| [G0A](G0A_SLOT_POINTER.md) | 活动槽 `pointer-events: auto` |
-| [G0B](G0B_PAPER_SCROLL.md) | 试运行稿纸滚/拖；三档宽度 |
-| [G0C](G0C_VIEWPORT_CSS.md) | 试运行/导出 CSS 命中 |
-| [G1A](G1A_BLOCK_DRAG.md) | 稿纸块拖拽排序；编辑态三档宽度 |
-| [G1B](G1B_BLOCK_OVERLAY_CHROME.md) | 上移下移/转浮层/真引用/浮层公式 |
-| [G1C](G1C_LAYER_BODY_ROW.md) | 图层虚拟「正文」行 |
-| [G2A](G2A_ADDITIVE_SCHEMA.md) | G2+G3 additive 合同 |
-| [G1E](G1E_TEXT_EDIT_SYNC.md) | 就地编辑同步属性栏 draft |
-| [G2B](G2B_FLOW_FONT_UI.md) | FontFamilyPicker 接 Flow |
-| [G3B](G3B_WRAP_PAPERSPACE.md) | wrap + paperSpace 跟滚 |
-| [G3C](G3C_WRAP_ACTUALLY_FLOAT.md) | wrap 真绕排（48% 列 + 去掉通栏 wrapper） |
-| [G2C](G2C_TOOLBAR_FONT.md) | 稿纸工具条字体字号 |
-| [G3D](G3D_PAPERSPACE_TESTS.md) | 转浮层 paperSpace 锁测 |
-| [G1H](G1H_BLOCK_STYLE_COMMANDS.md) | wrap/textAlign 命令锁测 |
-| [G2C-TC](G2C_TC_FIXTURES.md) | 工具条单测补全 `FlowTextEditSession` 字段 |
+| `G0A_SLOT_POINTER.md`（历史链接目标未随本归档保留） | 活动槽 `pointer-events: auto` |
+| `G0B_PAPER_SCROLL.md`（历史链接目标未随本归档保留） | 试运行稿纸滚/拖；三档宽度 |
+| `G0C_VIEWPORT_CSS.md`（历史链接目标未随本归档保留） | 试运行/导出 CSS 命中 |
+| `G1A_BLOCK_DRAG.md`（历史链接目标未随本归档保留） | 稿纸块拖拽排序；编辑态三档宽度 |
+| `G1B_BLOCK_OVERLAY_CHROME.md`（历史链接目标未随本归档保留） | 上移下移/转浮层/真引用/浮层公式 |
+| `G1C_LAYER_BODY_ROW.md`（历史链接目标未随本归档保留） | 图层虚拟「正文」行 |
+| `G2A_ADDITIVE_SCHEMA.md`（历史链接目标未随本归档保留） | G2+G3 additive 合同 |
+| `G1E_TEXT_EDIT_SYNC.md`（历史链接目标未随本归档保留） | 就地编辑同步属性栏 draft |
+| `G2B_FLOW_FONT_UI.md`（历史链接目标未随本归档保留） | FontFamilyPicker 接 Flow |
+| `G3B_WRAP_PAPERSPACE.md`（历史链接目标未随本归档保留） | wrap + paperSpace 跟滚 |
+| `G3C_WRAP_ACTUALLY_FLOAT.md`（历史链接目标未随本归档保留） | wrap 真绕排（48% 列 + 去掉通栏 wrapper） |
+| `G2C_TOOLBAR_FONT.md`（历史链接目标未随本归档保留） | 稿纸工具条字体字号 |
+| `G3D_PAPERSPACE_TESTS.md`（历史链接目标未随本归档保留） | 转浮层 paperSpace 锁测 |
+| `G1H_BLOCK_STYLE_COMMANDS.md`（历史链接目标未随本归档保留） | wrap/textAlign 命令锁测 |
+| `G2C_TC_FIXTURES.md`（历史链接目标未随本归档保留） | 工具条单测补全 `FlowTextEditSession` 字段 |
 
 **已合入 `main` — 禁止重做 F1–F3**
 
-计划与切分：[F0_FLOW_AUTHORING_PLAN.md](F0_FLOW_AUTHORING_PLAN.md)。合同不变。相关单测 15 项通过。同批还清了 `main` 上 typecheck 洞与 Q1 遗留单测（控制器仅 global 可命中）。
+计划与切分：`F0_FLOW_AUTHORING_PLAN.md`（历史链接目标未随本归档保留）。合同不变。相关单测 15 项通过。同批还清了 `main` 上 typecheck 洞与 Q1 遗留单测（控制器仅 global 可命中）。
 
 | 任务 | 要点 |
 |---|---|
-| [F1](F1_FLOW_PAPER_RUNS.md) | 稿纸闲置态画 `runs` |
-| [F2](F2_FLOW_BLOCK_TYPE.md) | 属性栏段落/H1–H6；颜色从 runs 读 |
-| [F3](F3_FLOW_FORMULA_PROPS.md) | 属性栏公式编辑器 |
+| `F1_FLOW_PAPER_RUNS.md`（历史链接目标未随本归档保留） | 稿纸闲置态画 `runs` |
+| `F2_FLOW_BLOCK_TYPE.md`（历史链接目标未随本归档保留） | 属性栏段落/H1–H6；颜色从 runs 读 |
+| `F3_FLOW_FORMULA_PROPS.md`（历史链接目标未随本归档保留） | 属性栏公式编辑器 |
 
 **必须等待**
 
@@ -156,7 +156,7 @@ T3 与 T5 均已合入。不要再改 `editorStore` 后端命名，也不要再�
 **红项优先。** T6 工程门禁已合入 `main`。绿过的 `check:contracts` 不要重跑（除非本卡改了 `scripts/generate-contracts.ts` 或 `artifacts/contracts/**`）。不要每次修改后跑 T6 五条命令。
 
 禁止在中间任务运行：`npm test`、`npm run test:e2e`、`npm run build:desktop`、`npm run verify`、`npm run verify:full`。  
-本轮例外：只有 [T1-A](T1_A_MOVE.md)、[T6-tc-tests](T6_TC_TESTS.md) 与 [G2A](G2A_ADDITIVE_SCHEMA.md) 允许 `npm run typecheck`。[T1-C](T1_C_AUDIT.md) 不要跑 typecheck。
+本轮例外：只有 `T1_A_MOVE.md`（历史链接目标未随本归档保留）、`T6_TC_TESTS.md`（历史链接目标未随本归档保留） 与 `G2A_ADDITIVE_SCHEMA.md`（历史链接目标未随本归档保留） 允许 `npm run typecheck`。`T1_C_AUDIT.md`（历史链接目标未随本归档保留） 不要跑 typecheck。
 
 **全量验证只在 T6，且整轮五条只在红项清完后跑一次。**
 

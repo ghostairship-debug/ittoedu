@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { LessonWorkspace, LessonConversation } from '../../../shared/lessonWorkspace'
+import type { ConversationAgentWorkspace } from '../../../shared/workspaceIdentity'
 import type { LocalAgentEvent, LocalAgentId, LocalAgentRecord } from '../../../shared/localAgentContract'
 import { aiQuestionSchema, aiInputDeliverySchema } from '../../../shared/localAgentInteraction'
 import { CourseChatPanel } from './CourseChatPanel'
@@ -20,7 +21,13 @@ export function LessonConversationChat({ lesson, conversation, projectId, projec
   const bound = !!projectPath && conversation.projectTarget?.projectId === projectId && conversation.projectTarget.normalizedPath.replace(/\\/g, '/').toLowerCase() === projectPath.replace(/\\/g, '/').toLowerCase()
   return <LessonDiscussion key={JSON.stringify(workspace)} workspace={workspace} projectId={projectId} projectPath={bound ? projectPath : null} documentTarget={documentTarget} />
 }
-function LessonDiscussion({ workspace, projectId, projectPath, documentTarget }: { workspace: import('../../../shared/workspaceIdentity').LessonAgentWorkspace; projectId: string; projectPath: string | null; documentTarget?: DocumentChatTarget }) {
+/** 工作空间/项目文件夹的普通讨论会话：同一套讨论界面，不带课例文档编辑入口。 */
+export function DirectoryConversationChat({ root, conversation }: { root: string; conversation: LessonConversation }) {
+  const workspace = useMemo(() => ({ version: 1 as const, kind: 'directory' as const,
+    normalizedDirectory: root, conversationId: conversation.conversationId }), [root, conversation.conversationId])
+  return <LessonDiscussion key={JSON.stringify(workspace)} workspace={workspace} projectId="" projectPath={null} />
+}
+function LessonDiscussion({ workspace, projectId, projectPath, documentTarget }: { workspace: ConversationAgentWorkspace; projectId: string; projectPath: string | null; documentTarget?: DocumentChatTarget }) {
   const [adapter, setAdapter] = useState<LocalAgentId>('codex')
   const [inputKind, setInputKind] = useState<'correct' | 'supplement'>('correct')
   const [deliveryNotice, setDeliveryNotice] = useState('')
@@ -86,10 +93,11 @@ function LessonDiscussion({ workspace, projectId, projectPath, documentTarget }:
     const token = generation.current, prompt = instruction.trim()
     setSending(true); setError('')
     try {
-      if (pinnedDocument && !running) {
+      if (pinnedDocument && !running && workspace.kind === 'lesson') {
+        const lessonWorkspace = workspace
         if (!api.lessonDocumentAi) throw new Error('文档修改入口未连接')
         const documentToken = ++documentTaskGeneration.current
-        const controller = new DocumentAiTaskController(api.lessonDocumentAi, workspace, message => {
+        const controller = new DocumentAiTaskController(api.lessonDocumentAi, lessonWorkspace, message => {
           if (documentTaskGeneration.current === documentToken) setDocumentStatus(message)
         })
         documentTask.current = controller
@@ -126,10 +134,9 @@ function LessonDiscussion({ workspace, projectId, projectPath, documentTarget }:
     const parsed = aiQuestionSchema.safeParse(payload.question)
     return parsed.success && !answered.has(parsed.data.questionId) ? [parsed.data] : []
   })
-  if (projectPath && loaded && !running && !pending.current && !sending && !instruction && !documentTarget && !pinnedDocument && !documentStatus) return <CourseChatPanel embedded projectId={projectId} projectPath={projectPath} lessonWorkspace={workspace} initialHistory={events} onClose={() => {}} />
+  if (workspace.kind === 'lesson' && projectPath && loaded && !running && !pending.current && !sending && !instruction && !documentTarget && !pinnedDocument && !documentStatus) return <CourseChatPanel embedded projectId={projectId} projectPath={projectPath} lessonWorkspace={workspace} initialHistory={events} onClose={() => {}} />
   return <aside className="course-chat course-chat--embedded" aria-label="课例创作助手">
-    <header><strong>创作助手</strong><label>CLI <select aria-label="CLI" value={adapter} disabled={!!running || sending} onChange={event => setAdapter(event.target.value as LocalAgentId)}><option value="codex">Codex</option><option value="claude">Claude</option><option value="opencode">OpenCode</option></select></label></header>
-    <NativeAgentConfiguration adapter={adapter} configurationSequence={0} onSavingChange={setConfigurationSaving} />
+    <header><strong>创作助手</strong></header>
     {documentTarget && <button disabled={!!running || sending} onClick={() => setPinnedDocument(documentTarget)}>编辑当前文档</button>}
     {pinnedDocument && <div role="status">本次修改文档：{pinnedDocument.name}（全文）<button disabled={!!running || sending} onClick={() => {
       documentTaskGeneration.current++; documentTask.current = null; documentSession.current = undefined
@@ -166,6 +173,10 @@ function LessonDiscussion({ workspace, projectId, projectPath, documentTarget }:
       } catch (cause) { if (token === generation.current) setError(readableChatError(cause)) }
       finally { if (token === generation.current) setExtendingBudget(false) }
     }}>{extendingBudget ? '正在延长预算…' : '增加20分钟'}</button>}
+    <div className="chat-composer-controls">
+      <label className="chat-cli-picker">CLI <select aria-label="CLI" value={adapter} disabled={!!running || sending} onChange={event => setAdapter(event.target.value as LocalAgentId)}><option value="codex">Codex</option><option value="claude">Claude</option><option value="opencode">OpenCode</option></select></label>
+      <NativeAgentConfiguration adapter={adapter} configurationSequence={0} onSavingChange={setConfigurationSaving} />
+    </div>
     <textarea aria-label="给创作助手的消息" value={instruction} onChange={event => setInstruction(event.target.value)} placeholder="说明教学主题，或一起讨论当前文档…" />
     <div className="chat-send-actions"><button disabled={!loaded || sending || !!pending.current || configurationSaving || !instruction.trim()} onClick={() => void send()}>{running ? '发送输入' : '发送'}</button>
       {(running || pending.current || sending) && <button onClick={() => {

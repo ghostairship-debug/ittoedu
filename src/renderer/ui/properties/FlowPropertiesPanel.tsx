@@ -785,7 +785,8 @@ function FlowOverlayProperties({ context }: { context: FlowPropertiesContext }) 
     <div className="properties-scroll" data-testid="properties-tab">
       <CommonNodeProperties
         node={node}
-        editorMode="simple"
+        showGeometryFields={false}
+        showPlaybackInitialState={false}
         update={update}
       />
       {paperSpaceField && (

@@ -1,4 +1,4 @@
-import { controllerDisplayFrame } from './controllerDisplayBounds'
+import { constrainControllerDisplayFrame, controllerDisplayFrame } from './controllerDisplayBounds'
 import { CANVAS_HEIGHT, CANVAS_WIDTH, MIN_NODE_SIZE } from '../../shared/constants'
 import type { LayerItem } from '../../shared/courseProjectTypes'
 import {
@@ -252,6 +252,13 @@ function previewMove(
   const dx = point.x - start.x
   const dy = point.y - start.y
   return nodes.map((node) => ({ ...node, x: node.x + dx, y: node.y + dy }))
+}
+
+function constrainViewportControllers(nodes: SpatialEditorWorldTransform[], snapshot: SpatialWorldAuthoringSnapshot) {
+  return nodes.map(node => {
+    const item = snapshot.view.layers.find(layer => layer.selectionId === node.layerItemId)?.item
+    return item ? constrainControllerDisplayFrame(item as LayerItem, node, { width: CANVAS_WIDTH, height: CANVAS_HEIGHT }) : node
+  })
 }
 
 function previewResize(
@@ -515,8 +522,8 @@ export function createSpatialWorldTargetAuthoringController(port: SpatialWorldTa
     } else if (gesture.type === 'rotate') {
       preview = previewRotate(gesture.nodes, gesture.center, gesture.startAngle, point)
     }
-    if (gesture.type === 'viewport-move' || gesture.type === 'viewport-resize') {
-      if (preview) preview = preview
+    if (gesture.type === 'viewport-move') {
+      if (preview) preview = constrainViewportControllers(preview, gesture.snapshot)
     }
     return result(viewport)
   }
@@ -569,7 +576,7 @@ export function createSpatialWorldTargetAuthoringController(port: SpatialWorldTa
         return result(viewport)
       }
       const coordinateSpace = active.type.startsWith('viewport') ? 'viewport' : 'world'
-      if (coordinateSpace === 'viewport') next = next
+      if (active.type === 'viewport-move') next = constrainViewportControllers(next, active.snapshot)
       command = port.commands.run(active.targets[0]!, {
         kind: 'transform-layers',
         coordinateSpace,

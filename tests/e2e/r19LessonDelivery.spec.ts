@@ -1,6 +1,6 @@
 import { _electron as electron, chromium, expect, test, type Page, type Locator } from '@playwright/test'
 import { mkdirSync, readFileSync, writeFileSync, existsSync, realpathSync } from 'node:fs'
-import { dirname, join, resolve, relative, isAbsolute, extname } from 'node:path'
+import { basename, dirname, join, resolve, relative, isAbsolute, extname } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { openCourseProjectArchive } from '../../src/renderer/project/courseProjectArchive'
 import { componentPackagesFromArchive } from '../../src/renderer/components/componentPackageStore'
@@ -11,18 +11,52 @@ import { BACKGROUND_E2E_ENV } from '../../src/main/windowVisibility'
  * R19_DELIVERY_PROFILE, R19_DELIVERY_LESSON, R19_DELIVERY_PROJECT are real paths.
  * R19_DELIVERY_EXPECTATIONS is a JSON file reviewed against the current four drafts:
  * {projectId, terms:string[], diagramAssets:[{id,origin:'material'|'generated-from-reviewed-text',basis}], surfaceTypes:string[],
- *  pages:[{locationId, visibleText?, interactions?:[{click, afterSelector?, afterText?}]}]}.
+ *  pages:[{locationId, visibleText?, arrival?:'controller'|'body', interactions?:[
+ *    {click, afterSelector?, afterText?} | {textbox, fill} | {textbox, toHaveValue} |
+ *    {selector, visibility?:'visible'|'hidden', enabled?:boolean, text?:string}
+ *  ]}]}.
  * CSS interaction selectors address the actual produced mechanism, including open
- * component shadow roots. Screenshots still require a visual acceptance review.
+ * component shadow roots. Textbox actions use their accessible names and normal
+ * pointer/keyboard input. Screenshots still require a visual acceptance review.
  */
 function realpathEqual(left: string, right: string) {
   return realpathSync(left).toLowerCase() === realpathSync(right).toLowerCase()
 }
 
+interface DeliveryClickInteraction {
+  click: string
+  afterSelector?: string
+  afterText?: string
+}
+
+interface DeliveryTextboxFillInteraction {
+  textbox: string
+  fill: string
+}
+
+interface DeliveryTextboxValueInteraction {
+  textbox: string
+  toHaveValue: string
+}
+
+interface DeliveryStateInteraction {
+  selector: string
+  visibility?: 'visible' | 'hidden'
+  enabled?: boolean
+  text?: string
+}
+
+type DeliveryInteraction =
+  | DeliveryClickInteraction
+  | DeliveryTextboxFillInteraction
+  | DeliveryTextboxValueInteraction
+  | DeliveryStateInteraction
+
 interface DeliveryPage {
   locationId: string
   visibleText?: string
-  interactions?: Array<{ click: string; afterSelector?: string; afterText?: string }>
+  arrival?: 'controller' | 'body'
+  interactions?: DeliveryInteraction[]
 }
 interface Expectations {
   projectId: string
@@ -35,14 +69,17 @@ interface Expectations {
 test('r19 original saved lesson: resource closure, reopen, both previews and offline delivery', async ({}, testInfo) => {
   const names = ['PROFILE', 'LESSON', 'PROJECT', 'EXPECTATIONS'] as const
   test.skip(names.some(name => !process.env[`R19_DELIVERY_${name}`]), 'Requires the released original profile, saved lesson and reviewed expectations')
-  test.setTimeout(600_000)
+  // All three players exercise the full reviewed student path, including repeated visits.
+  test.setTimeout(1_800_000)
   const paths = Object.fromEntries(names.map(name => [name, realpathSync(process.env[`R19_DELIVERY_${name}`]!)])) as Record<typeof names[number], string>
   const scoped = relative(paths.LESSON, paths.PROJECT)
   expect(scoped && !isAbsolute(scoped) && scoped !== '..' && !scoped.startsWith(`..${process.platform === 'win32' ? '\\' : '/'}`)).toBeTruthy()
   const expected = JSON.parse(readFileSync(paths.EXPECTATIONS, 'utf8')) as Expectations
   expect(expected.projectId).toBeTruthy()
   expect(expected.terms.length).toBeGreaterThan(0)
-  if (process.env.R19_DELIVERY_ONLY_WORKSPACE !== '1') expect(expected.diagramAssets.length).toBeGreaterThan(0)
+  // Native/Component teaching diagrams need no image asset. Every reviewed
+  // image that is actually required is still checked for bytes and placement.
+  expect(Array.isArray(expected.diagramAssets)).toBe(true)
   expect(expected.pages.length).toBeGreaterThan(0)
   const root = resolve(__dirname, '../..')
   const output = join(root, 'output/r19-lesson-delivery', new Date().toISOString().replace(/[:.]/g, '-'))
@@ -53,6 +90,8 @@ test('r19 original saved lesson: resource closure, reopen, both previews and off
   const previewStart = Number(process.env.R19_DELIVERY_PREVIEW_START ?? 0)
   expect(Number.isInteger(previewStart) && previewStart >= 0 && previewStart <= expected.pages.length).toBe(true)
   if (previewStart > 0) {
+    const locationIds = expected.pages.map(entry => entry.locationId)
+    if (new Set(locationIds).size !== locationIds.length) throw new Error('Partial continuation does not support repeated lesson locations; run the reviewed path from the beginning')
     if (!priorEvidence) throw new Error('Partial continuation requires the original passed page evidence')
     const evidencePages = new Set<string>()
     let cursor: string | undefined = priorEvidence
@@ -105,7 +144,47 @@ test('r19 original saved lesson: resource closure, reopen, both previews and off
   let browser: Awaited<ReturnType<typeof chromium.launch>> | undefined
   const page = await app.firstWindow()
   page.on('pageerror', error => errors.push(error.message))
-  async function navigation(host: Locator, entry: DeliveryPage, screen: string, owner: Page) {
+  async function exercisePage(host: Locator, entry: DeliveryPage, screen: string, owner: Page, visitIndex: number) {
+    if (entry.visibleText) await expect(host.getByText(entry.visibleText, { exact: true }).first()).toBeVisible()
+    for (const [index, interaction] of (entry.interactions ?? []).entries()) {
+      if ('click' in interaction) {
+        if (interaction.afterText !== undefined && !interaction.afterSelector) throw new Error(`Interaction ${index + 1} requires afterSelector for its text assertion`)
+        await host.locator(interaction.click).click()
+        if (interaction.afterSelector) {
+          const result = host.locator(interaction.afterSelector)
+          await expect(result).toBeVisible()
+          if (interaction.afterText !== undefined) await expect(result).toHaveText(interaction.afterText)
+        }
+      } else if ('textbox' in interaction) {
+        const textbox = host.getByRole('textbox', { name: interaction.textbox, exact: true })
+        await expect(textbox).toBeVisible()
+        if ('fill' in interaction) {
+          await textbox.click()
+          await owner.keyboard.press('Control+A')
+          await owner.keyboard.press('Backspace')
+          if (interaction.fill) await owner.keyboard.insertText(interaction.fill)
+          await expect(textbox).toHaveValue(interaction.fill)
+        } else {
+          await expect(textbox).toHaveValue(interaction.toHaveValue)
+        }
+      } else {
+        if (interaction.visibility === undefined && interaction.enabled === undefined && interaction.text === undefined) throw new Error(`Interaction ${index + 1} must declare a state assertion`)
+        if (!interaction.selector.trim()) throw new Error(`Interaction ${index + 1} requires a state assertion selector`)
+        if (interaction.visibility !== undefined && interaction.visibility !== 'visible' && interaction.visibility !== 'hidden') throw new Error(`Interaction ${index + 1} has an unknown visibility assertion`)
+        if (interaction.enabled !== undefined && typeof interaction.enabled !== 'boolean') throw new Error(`Interaction ${index + 1} enabled assertion must be boolean`)
+        if (interaction.text !== undefined && typeof interaction.text !== 'string') throw new Error(`Interaction ${index + 1} text assertion must be a string`)
+        const target = host.locator(interaction.selector)
+        if (interaction.visibility === 'visible') await expect(target).toBeVisible()
+        if (interaction.visibility === 'hidden') await expect(target).toBeHidden()
+        if (interaction.enabled === true) await expect(target).toBeEnabled()
+        if (interaction.enabled === false) await expect(target).toBeDisabled()
+        if (interaction.text !== undefined) await expect(target).toHaveText(interaction.text)
+      }
+      await owner.screenshot({ path: join(output, `${screen}-visit-${visitIndex + 1}-location-${project.locations.findIndex(location => location.id === entry.locationId)}-step-${index + 1}.png`), fullPage: true })
+    }
+  }
+  async function navigation(host: Locator, entry: DeliveryPage, screen: string, owner: Page, visitIndex: number) {
+    if (entry.arrival !== undefined && entry.arrival !== 'controller' && entry.arrival !== 'body') throw new Error(`Unknown arrival mode for reviewed visit ${visitIndex + 1}`)
     const location = project.locations.find(value => value.id === entry.locationId)
     if (!location) throw new Error(`Unknown reviewed location ${entry.locationId}`)
     const expand = host.getByRole('button', { name: '展开教师控制器', exact: true })
@@ -114,41 +193,51 @@ test('r19 original saved lesson: resource closure, reopen, both previews and off
     const dialog = host.getByRole('dialog', { name: '场景目录', exact: true })
     const destination = dialog.getByRole('button', { name: location.label, exact: true })
     const alreadyCurrent = await destination.getAttribute('aria-current') === 'page'
-    if (alreadyCurrent) await dialog.getByRole('button', { name: '关闭面板', exact: true }).click()
-    else await destination.click()
+    if (entry.arrival === 'body' && !alreadyCurrent) {
+      await dialog.getByRole('button', { name: '关闭面板', exact: true }).click()
+      throw new Error(`Reviewed body navigation did not arrive at ${location.label}`)
+    }
+    if (alreadyCurrent) {
+      // The current directory already proves a body arrival; do not reopen it
+      // merely to repeat the same unchanged state assertion.
+      await dialog.getByRole('button', { name: '关闭面板', exact: true }).click()
+    } else {
+      await destination.click()
+      await expect(dialog).toHaveCount(0)
+      await host.getByRole('button', { name: directoryLabel, exact: true }).click()
+      await expect(dialog.getByRole('button', { name: location.label, exact: true })).toHaveAttribute('aria-current', 'page')
+      await dialog.getByRole('button', { name: '关闭面板', exact: true }).click()
+    }
     await expect(dialog).toHaveCount(0)
-    // Confirm the selected location using the real controller state after navigation.
-    await host.getByRole('button', { name: directoryLabel, exact: true }).click()
-    await expect(dialog.getByRole('button', { name: location.label, exact: true })).toHaveAttribute('aria-current', 'page')
-    await dialog.getByRole('button', { name: '关闭面板', exact: true }).click()
     const collapseController = host.getByRole('button', { name: '收起教师控制器', exact: true })
     if (await collapseController.isVisible()) await collapseController.click()
-    if (entry.visibleText) await expect(host.getByText(entry.visibleText, { exact: true }).first()).toBeVisible()
-    for (const [index, interaction] of (entry.interactions ?? []).entries()) {
-      if (interaction.afterText !== undefined && !interaction.afterSelector) throw new Error(`Interaction ${index + 1} requires afterSelector for its text assertion`)
-      await host.locator(interaction.click).click()
-      if (interaction.afterSelector) {
-        const result = host.locator(interaction.afterSelector)
-        await expect(result).toBeVisible()
-        if (interaction.afterText !== undefined) await expect(result).toHaveText(interaction.afterText)
-      }
-      await owner.screenshot({ path: join(output, `${screen}-${project.locations.indexOf(location)}-step-${index + 1}.png`), fullPage: true })
-    }
-    await owner.screenshot({ path: join(output, `${screen}-${project.locations.indexOf(location)}.png`), fullPage: true })
+    await exercisePage(host, entry, screen, owner, visitIndex)
+    await owner.screenshot({ path: join(output, `${screen}-visit-${visitIndex + 1}-location-${project.locations.indexOf(location)}.png`), fullPage: true })
   }
   try {
-    await app.evaluate(({ dialog }, workspace) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [workspace] }) }, dirname(paths.LESSON))
-    await page.getByRole('button', { name: '打开工作空间', exact: true }).first().click()
-    const openLesson = page.getByRole('button', { name: '打开课例', exact: true })
-    await expect(openLesson).toBeVisible()
-    await app.evaluate(({ dialog }, lesson) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [lesson] }) }, paths.LESSON)
+    // V3.1：保留 profile 重开自动回到上次工作空间；课例入口已从「更多」菜单移除，经目录树点选 .h5lesson 激活
+    await expect(page.locator('.lesson-workspace-toolbar')).toBeVisible()
     const lessons = await page.evaluate(directory => window.desktopAPI!.lesson!({ operation: 'list-lessons', directory }), dirname(paths.LESSON))
     const lesson = lessons.lessons?.find(value => realpathEqual(value.identity.normalizedDirectory, paths.LESSON))
     if (!lesson?.manifest.coursePath) throw new Error('Original lesson is not bound to a saved project')
     expect(realpathSync(join(paths.LESSON, lesson.manifest.coursePath))).toBe(paths.PROJECT)
-    await openLesson.click()
-    await page.getByRole('tab', { name: /^课件/ }).click()
+    await page.locator('.lesson-directory-tree').getByRole('button', { name: basename(paths.LESSON), exact: true }).click()
+    await page.locator('.lesson-directory-tree').getByRole('button', { name: basename(paths.PROJECT), exact: true }).click()
+    await expect(page.locator('.lesson-workflow')).toBeVisible()
+    await page.getByRole('tab', { name: /course|新建课件/ }).click()
     await expect(page.getByRole('button', { name: '整课预览', exact: true })).toBeVisible()
+    // Save through the actual UI, wait for its acknowledgement, then reopen
+    // the same lesson through its real open command, preserving lesson identity.
+    await app.evaluate(({ dialog }, filename) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath: filename }) }, paths.PROJECT)
+    await page.getByRole('button', { name: '保存（Ctrl+S）', exact: true }).click()
+    await expect(page.locator('.lesson-course-tab .status-bar')).toContainText('已保存到')
+    const saved = openCourseProjectArchive(new Uint8Array(readFileSync(paths.PROJECT)))
+    expect(saved.project).toEqual(project)
+    expect(saved.assetFiles).toEqual(archive.assetFiles)
+    expect(saved.componentFiles).toEqual(archive.componentFiles)
+    await page.locator('.lesson-directory-tree').getByRole('button', { name: basename(paths.PROJECT), exact: true }).click()
+    await expect(page.locator('.lesson-course-tab .status-bar')).toContainText(`已打开“${project.title}”`)
+    await expect(page.getByRole('button', { name: '撤销（Ctrl+Z）', exact: true })).toBeDisabled()
     await page.screenshot({ path: join(output, 'reopened-authoring.png'), fullPage: true })
     // Reuse this original lesson for the real narrow Electron workspace check.
     // Both mode buttons and all tab labels below are current product UI.
@@ -215,7 +304,7 @@ test('r19 original saved lesson: resource closure, reopen, both previews and off
       await tree.getByTitle(title, { exact: true }).click()
     }
     const nav = page.getByRole('navigation', { name: '目录与课例', exact: true })
-    if (!await nav.isVisible()) await page.getByRole('button', { name: '目录与课例', exact: true }).click()
+    await expect(nav).toBeVisible()
     await clickFilePath(paths.LESSON)
     const pieces = docPath.replace(/\\/g, '/').split('/')
     for (let length = 1; length <= pieces.length; length++) await clickFilePath(join(paths.LESSON, ...pieces.slice(0, length)))
@@ -235,13 +324,15 @@ test('r19 original saved lesson: resource closure, reopen, both previews and off
     await page.screenshot({ path: join(output, 'narrow-materials.png'), fullPage: false })
     await tabs.getByRole('tab', { name: /^课件/ }).click()
     await expect(tabs.getByRole('tab', { name: /^课件/ })).toHaveAttribute('aria-selected', 'true')
-    await page.getByRole('button', { name: '目录与课例', exact: true }).click()
-    await expect(nav).toBeHidden()
-    await page.getByRole('button', { name: '目录与课例', exact: true }).click()
-    await expect(nav).toBeVisible()
-    await page.getByRole('button', { name: '对话', exact: true }).click()
-    await expect(page.getByRole('main', { name: '课例对话', exact: true })).toBeHidden()
-    await page.getByRole('button', { name: '对话', exact: true }).click()
+    // Desktop keeps three columns; each navigation section has its own fold control.
+    for (const label of ['资源管理器', '课例与对话']) {
+      const heading = nav.getByRole('button', { name: label, exact: true })
+      await expect(heading).toHaveAttribute('aria-expanded', 'true')
+      await heading.click()
+      await expect(heading).toHaveAttribute('aria-expanded', 'false')
+      await heading.click()
+      await expect(heading).toHaveAttribute('aria-expanded', 'true')
+    }
     await expect(page.getByRole('main', { name: '课例对话', exact: true })).toBeVisible()
     await noOuterOverflow()
     await page.screenshot({ path: join(output, 'narrow-course-navigation.png'), fullPage: false })
@@ -252,15 +343,9 @@ test('r19 original saved lesson: resource closure, reopen, both previews and off
     wideMeasurements = { requestedContentSize: [1440, 900], actualContentBounds: await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.getContentBounds()), innerSize: await page.evaluate(() => [innerWidth, innerHeight]) }
     await noOuterOverflow()
     await page.screenshot({ path: join(output, 'wide-three-columns.png'), fullPage: false })
-    await page.getByRole('button', { name: '目录与课例', exact: true }).click()
-    await page.getByRole('button', { name: '对话', exact: true }).click()
-    await expect(page.getByRole('button', { name: '页面与图层', exact: true })).toBeHidden()
-    await expect(page.getByRole('complementary', { name: '课程结构', exact: true })).toBeVisible()
-    await expect(page.getByRole('complementary', { name: '编辑面板', exact: true })).toBeVisible()
-    await noOuterOverflow()
-    await page.screenshot({ path: join(output, 'wide-editor-panels.png'), fullPage: false })
-    await page.getByRole('button', { name: '目录与课例', exact: true }).click()
-    await page.getByRole('button', { name: '对话', exact: true }).click()
+    await expect(nav).toBeVisible()
+    await expect(page.getByRole('main', { name: '课例对话', exact: true })).toBeVisible()
+    await expect(page.getByRole('region', { name: '课例工作台', exact: true })).toBeVisible()
     await app.evaluate(({ BrowserWindow }, size) => BrowserWindow.getAllWindows()[0]!.setContentSize(size[0]!, size[1]!), originalSize)
 
     }
@@ -275,13 +360,15 @@ test('r19 original saved lesson: resource closure, reopen, both previews and off
     const startType = project.surfaces.find(surface => surface.id === project.locations.find(location => location.id === project.startLocationId)?.surfaceId)!.type
     const trialId = startType === 'spatial-2d' ? 'spatial-try-run-host' : startType === 'flow' ? 'flow-try-run-host' : 'course-try-run-host'
     await expect(page.getByTestId(trialId)).toBeVisible()
+    if (expected.pages[0]?.locationId !== project.startLocationId) throw new Error('Reviewed expectations must start at the reopened start location')
+    for (const [visitIndex, entry] of expected.pages.entries()) await navigation(page.getByTestId(trialId), entry, 'current-location-preview', page, visitIndex)
     await page.screenshot({ path: join(output, 'current-location-preview.png'), fullPage: true })
     await page.getByRole('button', { name: '编辑状态', exact: true }).click()
     await page.getByRole('button', { name: '整课预览', exact: true }).click()
     const preview = page.getByTestId('course-preview-overlay'), host = page.getByTestId('course-preview-host')
     await expect(host).toBeVisible()
-    for (const entry of expected.pages.slice(previewStart)) {
-      await navigation(host, entry, 'whole-preview', page)
+    for (const [offset, entry] of expected.pages.slice(previewStart).entries()) {
+      await navigation(host, entry, 'whole-preview', page, previewStart + offset)
       completed.push(entry.locationId)
       writeFileSync(join(output, 'progress.json'), JSON.stringify({ projectId: project.id, revision: project.revision, expected, wholePreviewCompleted: completed, priorEvidence }, null, 2))
     }
@@ -300,7 +387,7 @@ test('r19 original saved lesson: resource closure, reopen, both previews and off
     offline.on('console', message => { if (message.type() === 'error') errors.push(message.text()) })
     offline.on('request', request => { if (/^https?:/.test(request.url())) external.push(request.url()) })
     await offline.goto(pathToFileURL(html).href)
-    for (const entry of expected.pages) await navigation(offline.locator('body'), entry, 'offline', offline)
+    for (const [visitIndex, entry] of expected.pages.entries()) await navigation(offline.locator('body'), entry, 'offline', offline, visitIndex)
     expect(errors).toEqual([])
     expect(external).toEqual([])
     expect(openCourseProjectArchive(new Uint8Array(readFileSync(paths.PROJECT))).project).toEqual(project)

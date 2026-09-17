@@ -153,6 +153,9 @@ export const COURSE_PROJECT_HEALTH_FINDING_CATALOG = {
   'interaction-scene-reference-missing': {
     severity: 'error', status: 'active', gui: true, cli: true, savedReport: true,
   },
+  'interaction-location-reference-missing': {
+    severity: 'error', status: 'active', gui: true, cli: true, savedReport: true,
+  },
   'interaction-sound-reference-missing': {
     severity: 'error', status: 'schema-shadowed', gui: false, cli: false, savedReport: false,
   },

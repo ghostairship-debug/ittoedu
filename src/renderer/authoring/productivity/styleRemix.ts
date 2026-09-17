@@ -1,6 +1,6 @@
 import type { SlideSceneDocument } from '../../../shared/courseProjectTypes'
 import { analyzeTextNodeLayout } from '../../../shared/textLayout'
-import { remapTextRuns } from '../../../shared/textRuns'
+import { planTextRunRemap } from '../../../shared/textRuns'
 import { commitCourseProjectMutation } from '../../course/courseProjectMutation'
 import { createEditorTransactionStep } from '../editorTransaction'
 import type { ProductivityApplyResult, ProductivityContext } from './index'
@@ -35,7 +35,9 @@ export function previewStyleRemix(context: ProductivityContext, sceneId: string,
     const data = item.content.data
     const replacement = replacements[item.layerItemId]
     let issue = replacement === undefined || !replacement.trim() ? '请填写此槽位' : undefined
-    const layout = analyzeTextNodeLayout({ ...data, text: replacement ?? data.text, runs: remapTextRuns(data.text, replacement ?? data.text, data.runs), type: 'text', id: item.layerItemId, name: item.label, ...item.frame, rotation: item.rotation, opacity: item.opacity, visible: item.visible, locked: item.locked, playbackInitialVisibility: item.playbackInitialVisibility })
+    const mapping = planTextRunRemap(data.text, replacement ?? data.text, data.runs)
+    if (!mapping.ok) issue = mapping.reason
+    const layout = analyzeTextNodeLayout({ ...data, text: mapping.ok ? mapping.text : data.text, runs: mapping.ok ? mapping.runs : data.runs, type: 'text', id: item.layerItemId, name: item.label, ...item.frame, rotation: item.rotation, opacity: item.opacity, visible: item.visible, locked: item.locked, playbackInitialVisibility: item.playbackInitialVisibility })
     // A skeleton keeps its geometry. Even auto-height must fit the original box.
     if (!issue && (layout.overflowsWidth || layout.overflowsHeight)) issue = '文字超出参考文本框，请缩短内容或先扩大参考页文本框'
     slots.push({ id: item.layerItemId, label: item.label, original: data.text, replacement: replacement ?? '', capacity: `${item.frame.width} × ${item.frame.height}，${Number(layout.fontSize.toFixed(2))}px；${layout.measurementMode === 'deterministic-fallback' ? '估算排版' : '字体实测'}，保持原框`, ...(issue ? { issue } : {}) })
@@ -66,8 +68,10 @@ export function applyStyleRemix(context: ProductivityContext, preview: StyleRemi
         const index = source.layerItems.findIndex(item => item.layerItemId === slot.id)
         const item = copy.layerItems[index]!
         if (item.kind !== 'native' || item.content.nativeType !== 'text') throw new Error(`槽位 ${slot.label} 已失效`)
-        item.content.data.runs = remapTextRuns(item.content.data.text, slot.replacement, item.content.data.runs)
-        item.content.data.text = slot.replacement
+        const mapping = planTextRunRemap(item.content.data.text, slot.replacement, item.content.data.runs)
+        if (!mapping.ok) throw new Error(mapping.reason)
+        item.content.data.runs = mapping.runs
+        item.content.data.text = mapping.text
       })
       draft.locations.forEach(location => { if (location.kind === 'slide-scene' && location.sceneId === copy.id) location.label = copy.name })
     })

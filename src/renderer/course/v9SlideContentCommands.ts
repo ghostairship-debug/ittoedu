@@ -2,7 +2,6 @@ import { isTeacherController } from '../../shared/teacherControllerRole'
 import { commitResourceAwareAuthoringHistory } from '../authoring/resourceAwareAuthoringHistory'
 import { nanoid } from 'nanoid'
 import { CANVAS_HEIGHT, CANVAS_WIDTH, MAX_SCENE_NODES } from '../../shared/constants'
-import { rotatedRectangleAabb } from '../../shared/geometry'
 import {
   applyComponentVariant,
   getComponentPropValue,
@@ -43,6 +42,7 @@ import {
   type EffectiveLayerPropertiesPatchAtTarget,
   type EffectiveLayerPropertyUpdate,
 } from './effectiveLayerCommands'
+import { projectEffectiveLayers } from './effectiveLayerProjection'
 import {
   createExternalComponentNode,
   createFormulaNode,
@@ -68,6 +68,7 @@ import {
   duplicateSlideGlobalLayers,
   duplicateSlideSceneLayers,
 } from './v9SlideActionCommands'
+import { planSlideMultiLayerLayoutAtTargets } from './slideMultiLayerLayout'
 import { createInputLayerItem, DEFAULT_INPUT_STYLE, createTextNode as createInputFeedbackText } from '../project/nativeNodeFactories'
 import { buildInputRuleFamily, inspectInputRuleFamily, type InputRuleConfig } from '../interactions/inputRuleFamily'
 import { allocateInputStateKeys } from '../interactions/inputAuthoringState'
@@ -1929,78 +1930,6 @@ function exactSlideMultiLayers(
   return { kind: 'layers', layers }
 }
 
-function slideMultiFramePatches(
-  layers: readonly SlideEditorLayerView[],
-  intent: Extract<SlideMultiLayerPropertiesIntent, { kind: 'align' | 'distribute' }>,
-): Map<string, { readonly x: number; readonly y: number }> {
-  const unlocked = layers.filter((layer) => !layer.item.locked)
-  const minimum = intent.kind === 'distribute' ? 3 : 2
-  if (unlocked.length < minimum) return new Map()
-  const boundsById = new Map(unlocked.map((layer) => [
-    layer.selectionId,
-    rotatedRectangleAabb({
-      x: layer.item.frame.x,
-      y: layer.item.frame.y,
-      width: layer.item.frame.width,
-      height: layer.item.frame.height,
-      rotation: layer.item.rotation,
-    }),
-  ]))
-  if (intent.kind === 'distribute') {
-    const horizontal = intent.axis === 'horizontal'
-    const sorted = [...unlocked].sort((left, right) => {
-      const leftBounds = boundsById.get(left.selectionId)!
-      const rightBounds = boundsById.get(right.selectionId)!
-      return horizontal
-        ? leftBounds.left - rightBounds.left
-        : leftBounds.top - rightBounds.top
-    })
-    const first = boundsById.get(sorted[0]!.selectionId)!
-    const last = boundsById.get(sorted.at(-1)!.selectionId)!
-    const span = horizontal ? last.right - first.left : last.bottom - first.top
-    const totalSize = sorted.reduce((sum, layer) => {
-      const bounds = boundsById.get(layer.selectionId)!
-      return sum + (horizontal ? bounds.width : bounds.height)
-    }, 0)
-    const gap = (span - totalSize) / (sorted.length - 1)
-    let cursor = horizontal ? first.left : first.top
-    const translations = new Map<string, number>()
-    for (const layer of sorted) {
-      const bounds = boundsById.get(layer.selectionId)!
-      const current = horizontal ? bounds.left : bounds.top
-      translations.set(layer.selectionId, cursor - current)
-      cursor += (horizontal ? bounds.width : bounds.height) + gap
-    }
-    return new Map(unlocked.map((layer) => {
-      const delta = translations.get(layer.selectionId) ?? 0
-      return [layer.selectionId, {
-        x: layer.item.frame.x + (horizontal ? delta : 0),
-        y: layer.item.frame.y + (horizontal ? 0 : delta),
-      }]
-    }))
-  }
-  const bounds = [...boundsById.values()]
-  const left = Math.min(...bounds.map((item) => item.left))
-  const right = Math.max(...bounds.map((item) => item.right))
-  const top = Math.min(...bounds.map((item) => item.top))
-  const bottom = Math.max(...bounds.map((item) => item.bottom))
-  return new Map(unlocked.map((layer) => {
-    const visual = boundsById.get(layer.selectionId)!
-    let dx = 0
-    let dy = 0
-    if (intent.mode === 'left') dx = left - visual.left
-    else if (intent.mode === 'center') dx = (left + right) / 2 - visual.centerX
-    else if (intent.mode === 'right') dx = right - visual.right
-    else if (intent.mode === 'top') dy = top - visual.top
-    else if (intent.mode === 'middle') dy = (top + bottom) / 2 - visual.centerY
-    else dy = bottom - visual.bottom
-    return [layer.selectionId, {
-      x: layer.item.frame.x + dx,
-      y: layer.item.frame.y + dy,
-    }]
-  }))
-}
-
 /**
  * Executes one Properties multi-selection gesture against the exact captured
  * Slide selection. Validation happens before planning, and every property
@@ -2051,9 +1980,48 @@ export function commitSlideMultiLayerIntentAtTargets(
         [],
       )
     }
-    const framePatches = input.intent.kind === 'align' || input.intent.kind === 'distribute'
-      ? slideMultiFramePatches(exact.layers, input.intent)
-      : null
+    let framePatches: Map<string, { readonly x: number; readonly y: number }> | null = null
+    if (input.intent.kind === 'align' || input.intent.kind === 'distribute') {
+      const projection = projectEffectiveLayers({
+        project: session.history.present,
+        locationId: session.selection.locationId,
+        stateId: session.selection.stateId,
+        owner: session.scope,
+      })
+      const formalTargets = input.targets.map((target) => {
+        const row = projection.unifiedRows.find((candidate) => (
+          candidate.id === target.layerItemId
+          && candidate.authoringAddress === target.authoringAddress
+          && candidate.owner === session.scope
+        ))
+        return row ? {
+          projectId: session.history.present.id,
+          documentRevision: session.history.present.revision,
+          revisionPolicy: { kind: 'exact' as const },
+          sessionGeneration: session.generation,
+          surfaceType: 'slide' as const,
+          surfaceId: projection.surfaceId,
+          locationId: session.selection.locationId,
+          stateId: session.selection.stateId,
+          owner: session.scope,
+          ownerKey: row.ownerKey,
+          itemId: target.layerItemId,
+          authoringAddress: target.authoringAddress,
+        } : null
+      })
+      if (formalTargets.some((target) => target === null)) {
+        return reject(session, SLIDE_REJECT_WRONG_OWNER)
+      }
+      const framePlan = planSlideMultiLayerLayoutAtTargets(session.history.present, {
+        targets: formalTargets as NonNullable<(typeof formalTargets)[number]>[],
+        intent: input.intent,
+      })
+      if (!framePlan.ok) return reject(session, framePlan.reason)
+      framePatches = new Map(framePlan.patches.map((entry) => [
+        entry.itemId,
+        entry.frame,
+      ]))
+    }
     const updates = exact.layers.flatMap((layer, index) => {
       let patch: EffectiveLayerPropertiesPatchAtTarget | null = null
       if (input.intent.kind === 'set-visible') {

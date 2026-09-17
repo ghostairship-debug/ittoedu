@@ -326,6 +326,8 @@ describe('trusted courseware authoring runner', () => {
       encoding: 'utf8',
       timeout: 180_000,
       env: { ...process.env, COURSEWARE_E2E_BACKGROUND: '1' },
+    }).catch((error: Error & { stdout?: string; stderr?: string }) => {
+      throw new Error(`${error.message}\n${error.stdout ?? ''}\n${error.stderr ?? ''}`, { cause: error })
     })
     expect(JSON.parse(generated.stdout)).toMatchObject({ status: 'passed', errors: [] })
     const receiptPath = path.join(caseRoot, 'evidence', 'authoring-session-report.json')

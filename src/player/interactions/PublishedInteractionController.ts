@@ -24,9 +24,12 @@ import type {
 import { matchesPublishedCourseStateCondition } from '../surfaces/publishedCourseState'
 import { normalizeNumberAnswer, normalizeShortAnswer } from '../../shared/assessmentEvaluators'
 
-type StepOutcome = 'completed' | 'cancelled' | 'terminal'
+import { PublishedInteractionRuns } from './PublishedInteractionSurfacePort'
+
+type StepOutcome = 'completed' | 'cancelled' | 'navigation-terminal' | 'failed' | 'skipped'
 
 interface ActiveRuleRun {
+  readonly runId: number
   readonly token: symbol
   readonly controller: AbortController
   readonly restarted: boolean
@@ -97,6 +100,7 @@ export class PublishedInteractionController {
   readonly #videoTimes = new Map<string, number>()
   readonly #disposers: Array<() => void> = []
   readonly #activeRuns = new Map<string, ActiveRuleRun>()
+  readonly #runs: PublishedInteractionRuns
   #destroyed = false
 
   constructor(options: PublishedInteractionControllerOptions) {
@@ -104,6 +108,7 @@ export class PublishedInteractionController {
     this.#rules = [...options.rules]
     this.#surface = options.surface
     this.#session = options.session
+    this.#runs = options.session.interactionRuns ?? new PublishedInteractionRuns()
     this.#scope = options.scope ?? 'scene'
     this.#reportDiagnostic = options.reportDiagnostic
     this.#inspectAndBindRules()
@@ -112,7 +117,10 @@ export class PublishedInteractionController {
   destroy(): void {
     if (this.#destroyed) return
     this.#destroyed = true
-    for (const run of this.#activeRuns.values()) run.controller.abort()
+    for (const run of this.#activeRuns.values()) {
+      this.#runs.finish(run.runId, 'cancelled', 'controller-destroyed')
+      run.controller.abort()
+    }
     this.#activeRuns.clear()
     for (const dispose of this.#disposers.splice(0).reverse()) {
       try {
@@ -136,15 +144,16 @@ export class PublishedInteractionController {
   }
 
   /** Called only after completed location navigation, never merely after host rebinding. */
-  enterScene(): void {
+  enterScene(parentRunId?: number): void {
     if (this.#destroyed) return
     for (const rule of this.#sceneEnterRules) {
       const sceneConditions = rule.conditions.filter(condition => condition.type === 'scene.in')
       if (sceneConditions.length) {
         const current = this.#readCurrentScene(rule)
-        if (!current.ok || !sceneConditions.every(condition => current.sceneId !== null && condition.sceneIds.includes(current.sceneId))) continue
+        if (!current.ok || !sceneConditions.every(condition => current.sceneId !== null && condition.sceneIds.includes(current.sceneId))) { this.#skipRule(rule, parentRunId); continue }
       }
-      if (this.#matchesCourseStateConditions(rule)) this.#startRule(rule)
+      if (this.#matchesCourseStateConditions(rule)) this.#startRule(rule, parentRunId)
+      else this.#skipRule(rule, parentRunId)
     }
   }
 
@@ -502,52 +511,51 @@ export class PublishedInteractionController {
   #handleNodeClick(nodeId: string): void {
     if (this.#destroyed) return
     const rules = this.#clickRules.get(nodeId) ?? []
-    let currentScene: CurrentSceneResult | undefined
     for (const rule of rules) {
-      const sceneConditions = rule.conditions.filter(
-        (condition) => condition.type === 'scene.in',
-      )
-      if (sceneConditions.length > 0) {
-        currentScene ??= this.#readCurrentScene(rule, undefined, nodeId)
-        if (!currentScene.ok) continue
-        if (!sceneConditions.every((condition) => (
-          currentScene!.sceneId !== null
-          && condition.sceneIds.includes(currentScene!.sceneId)
-        ))) continue
+      const sceneConditions = rule.conditions.filter(condition => condition.type === 'scene.in')
+      if (sceneConditions.length) {
+        const current = this.#readCurrentScene(rule, undefined, nodeId)
+        if (!current.ok || !sceneConditions.every(condition => current.sceneId !== null && condition.sceneIds.includes(current.sceneId))) {
+          this.#skipRule(rule)
+          continue
+        }
       }
-      if (!this.#matchesCourseStateConditions(rule, nodeId)) continue
+      if (!this.#matchesCourseStateConditions(rule, nodeId)) { this.#skipRule(rule); continue }
       this.#startRule(rule)
     }
   }
 
-  #startRule(rule: InteractionRule): void {
+  #skipRule(rule: InteractionRule, parentRunId?: number): void {
+    const id = this.#runs.start({ ruleId: rule.id, surfaceId: this.#surfaceId, trigger: rule.trigger }, new AbortController().signal, parentRunId)
+    this.#runs.finish(id, 'skipped', 'conditions-not-met')
+  }
+
+  #startRule(rule: InteractionRule, parentRunId?: number): void {
     const previous = this.#activeRuns.get(rule.id)
-    previous?.controller.abort()
+    if (previous) {
+      this.#runs.finish(previous.runId, 'cancelled', 'retriggered')
+      previous.controller.abort()
+    }
+    const controller = new AbortController()
     const run: ActiveRuleRun = {
-      token: Symbol(`published-interaction:${rule.id}`),
-      controller: new AbortController(),
+      runId: this.#runs.start({ ruleId: rule.id, surfaceId: this.#surfaceId, trigger: rule.trigger }, controller.signal, parentRunId),
+      token: Symbol(`published-interaction:${rule.id}`), controller,
       restarted: previous !== undefined,
     }
     this.#activeRuns.set(rule.id, run)
-    const execution = this.#executeRule(rule, run).catch((cause: unknown) => {
-      if (run.controller.signal.aborted || this.#destroyed) return
-      this.#diagnose({
-        code: 'execution-failed',
-        severity: 'error',
-        message: `Published 交互规则 ${rule.id} 执行失败`,
-        ruleId: rule.id,
-        cause,
-      })
-    })
-    void execution.then(() => {
-      if (this.#activeRuns.get(rule.id)?.token === run.token) {
-        this.#activeRuns.delete(rule.id)
-      }
+    void this.#executeRule(rule, run).catch((cause: unknown): StepOutcome => {
+      if (run.controller.signal.aborted || this.#destroyed) return 'cancelled'
+      this.#diagnose({ code: 'execution-failed', severity: 'error', message: `Published 交互规则 ${rule.id} 执行失败`, ruleId: rule.id, cause })
+      return 'failed'
+    }).then(outcome => {
+      this.#runs.finish(run.runId, outcome)
+      if (this.#activeRuns.get(rule.id)?.token === run.token) this.#activeRuns.delete(rule.id)
     })
   }
 
-  async #executeRule(rule: InteractionRule, run: ActiveRuleRun): Promise<void> {
+  async #executeRule(rule: InteractionRule, run: ActiveRuleRun): Promise<StepOutcome> {
     const groups: InteractionActionStep[][] = []
+    let skipped = false
     for (const step of rule.actions) {
       if (groups.length === 0 || step.start === 'after-previous') {
         groups.push([step])
@@ -557,16 +565,17 @@ export class PublishedInteractionController {
     }
 
     for (const group of groups) {
-      if (this.#destroyed || run.controller.signal.aborted) return
+      if (this.#destroyed || run.controller.signal.aborted) return 'cancelled'
       const outcomes = await Promise.all(
         group.map((step) => this.#executeStep(rule, step, run)),
       )
-      if (
-        this.#destroyed
-        || run.controller.signal.aborted
-        || outcomes.some((outcome) => outcome !== 'completed')
-      ) return
+      if (outcomes.includes('failed')) return 'failed'
+      if (outcomes.includes('navigation-terminal')) return 'navigation-terminal'
+      if (this.#destroyed || run.controller.signal.aborted) return 'cancelled'
+      if (outcomes.includes('cancelled')) return 'cancelled'
+      skipped ||= outcomes.includes('skipped')
     }
+    return skipped ? 'skipped' : 'completed'
   }
 
   async #executeStep(
@@ -647,13 +656,13 @@ export class PublishedInteractionController {
   ): Promise<StepOutcome> {
     const { action } = step
     const signal = run.controller.signal
-    if (!isPublishedInteractionActionSupported(action.type)) return 'completed'
+    if (!isPublishedInteractionActionSupported(action.type)) return 'skipped'
 
     try {
       let result: boolean | void
       if (isAudioInteractionAction(action)) {
         const execute = this.#session.executeAudioAction
-        if (typeof execute !== 'function') return 'completed'
+        if (typeof execute !== 'function') return 'skipped'
         result = await execute.call(this.#session, action, signal)
         if (this.#destroyed || signal.aborted) return 'cancelled'
         if (result === false) {
@@ -663,13 +672,13 @@ export class PublishedInteractionController {
             step,
             `Published 交互动作 ${action.type} 未执行`,
           )
-          return 'cancelled'
+          return 'failed'
         }
         return 'completed'
       }
       if (isVideoInteractionAction(action)) {
         const execute = this.#surface.executeVideoAction
-        if (typeof execute !== 'function') return 'completed'
+        if (typeof execute !== 'function') return 'skipped'
         result = await execute.call(this.#surface, action, {
           ruleId: rule.id,
           stepId: step.id,
@@ -683,7 +692,7 @@ export class PublishedInteractionController {
             step,
             `Published 交互动作 ${action.type} 未执行`,
           )
-          return 'cancelled'
+          return 'failed'
         }
         return 'completed'
       }
@@ -702,7 +711,7 @@ export class PublishedInteractionController {
             step,
             `Published 交互动作 ${action.type} 未执行`,
           )
-          return 'cancelled'
+          return 'failed'
         }
         return 'completed'
       }
@@ -721,6 +730,9 @@ export class PublishedInteractionController {
             : await this.#session.goToScene(current.sceneId, action.stateId, signal)
           break
         }
+        case 'location.go':
+          result = await this.#session.goToLocation?.(action.locationId, signal) ?? false
+          break
         case 'scene.go':
           result = await this.#session.goToScene(
             action.sceneId,
@@ -750,6 +762,10 @@ export class PublishedInteractionController {
           return 'completed'
       }
 
+      const recorded = this.#runs.read(run.runId)
+      if (recorded?.status === 'navigation-terminal') return 'navigation-terminal'
+      if (recorded?.status === 'failed') return 'failed'
+      if (recorded?.navigation?.settled) return recorded.navigation.matched ? 'navigation-terminal' : 'failed'
       if (this.#destroyed || signal.aborted) return 'cancelled'
       if (result === false) {
         this.#reportActionFailure(
@@ -758,9 +774,12 @@ export class PublishedInteractionController {
           step,
           `Published 交互导航 ${action.type} 未执行`,
         )
-        return 'cancelled'
+        return 'failed'
       }
-      return isTerminalNavigationAction(action) ? 'terminal' : 'completed'
+      if (isTerminalNavigationAction(action) || action.type === 'presentation.set') {
+        return this.#session.interactionRuns ? 'failed' : 'navigation-terminal'
+      }
+      return 'completed'
     } catch (cause) {
       if (this.#destroyed || signal.aborted) return 'cancelled'
       const motion = isNodeMotionAction(action)
@@ -782,7 +801,7 @@ export class PublishedInteractionController {
         `Published 交互动作 ${action.type} 执行失败`,
         cause,
       )
-      return 'cancelled'
+      return 'failed'
     }
   }
 

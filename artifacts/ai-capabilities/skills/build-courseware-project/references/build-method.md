@@ -6,6 +6,10 @@
 
 仓库里**没有** `agent-kit/` CLI。不要运行 `courseware-agent-kit.mjs`，也不要虚构 `scaffold` / `graph` / `assemble` / `rig` / `validate --workspace`。
 
+## 软件内 Builder V2 适用范围
+
+软件内阶段任务只在当前产品窗口使用已注入的 Builder V2 `context`：读取 `api`、`documents`、`readAsset`、`encodeBase64`，通过 `api.createCourseProject` 创建工程，并用 `observe`、`createScope`、`execute`、`finish` 完成一次受宿主管理的构建。模块不导入编辑器内部路径，不使用 `Buffer`、`fs`、`process` 或 `require`；候选模块写入工作台指定的暂存路径，正式工程写入由宿主完成。
+
 ## 1. 冷启动
 
 1. 直接读取 `01-teaching-plan.md`、`02-presentation-script.md` 和其中引用的材料。
@@ -28,6 +32,7 @@
 
 只使用当前存在且适配需求的能力；计划中的能力不能冒充已发布。`surfaces.types` 为 `slide` / `flow` / `spatial-2d`，状态 `available`。Mixed 由同一工程里的 `locations` / `surfaces` 推导，**不要**写 `projectMode`。P8 已合入：三种表面的编辑与 CoursePlayer 试运行都能挂 Component API 4；缺包才静态后备。索引里 catalog 为空只表示本机没有外部组件目录，不表示宿主不能挂工程内嵌包。
 
+<!-- lesson-authoring-shared:carrier:start -->
 ## 3. 载体所有权
 
 对照脚本里的表面与「整页动态 / 局部互动」选择载体。Runtime/Component 的文字必须、普通可替换图片应当公开稳定作者目标。
@@ -38,10 +43,12 @@
 4. **无限画布**：脚本若要求空间漫游，运行态必须同时支持自由逛（会话平移/缩放，不写回工程）和镜头画面/路径巡游。手势与组件、Runtime、视频、教师控制器冲突时，被占用的交互优先。
 5. **课程状态与导航守卫**：跨页的进度门槛（"完成本页练习才能进下一页"）。状态是课程级键值（boolean/number/string/null + 默认值）；守卫只有 `block` 一种效果——拦截并显示作者写的提示，不跳转、不执行代码。守卫只拦跨位置的 go/next/previous；重播不检查；重新开始绕过守卫并把状态重置为默认值；教师控制器操作可绕过（课堂接管是特性，不是缺陷）。Published `node.click` 的声明式窄切片可用 `course-state.exists` / `course-state.compare` 读取状态，并以同步 `course-state.set` 写状态；Runtime/Component 仍可通过 `ctx.courseState` 读写。当前没有判题结果自动分支或自动写状态桥。
 
-脚本里任何「对/错/条件/按学生行为改变走向」的体验，动手前必须映射到三者之一，并可对索引核对：① `interactions.publishedPlayback` 声明的可执行切片；② 课程状态 + 导航守卫（由 `node.click` 的 `course-state.set` 或组件/Runtime 写状态）；③ 组件/Runtime 内部逻辑（为本课新建组件也算）。三者都装不下、或映射会改变教师可感知体验时，停止并返回 `$orchestrate-courseware`。不得写播放器不执行的交互种类交差——`validate:course-project` 的 `published-interaction-*-unsupported` 诊断会当场拒绝。选 ③ 时逻辑进代码，教师改阈值就要再改代码：能用 ② 表达的门槛优先用 ②，并让组件把可调参数公开为可编辑内容。
+脚本里任何「对/错/条件/按学生行为改变走向」的体验，动手前必须映射到三者之一，并可对索引核对：① `interactions.publishedPlayback` 声明的可执行切片；② 课程状态 + 导航守卫（由 `node.click` 的 `course-state.set` 或组件/Runtime 写状态）；③ 组件/Runtime 内部逻辑（为本课新建组件也算）。三者都装不下、或映射会改变教师可感知体验时，停止并返回 `$orchestrate-courseware`。不得写播放器不执行的交互种类交差。选 ③ 时逻辑进代码，教师改阈值就要再改代码：能用 ② 表达的门槛优先用 ②，并让组件把可调参数公开为可编辑内容。
 
 分类与排序必须分开选载体：分类可用“选中项目→选中目标组”的声明式点击/状态路径；需要真实改变可见顺序的排序使用 Component，并公开项目、正确顺序与反馈参数。不要把排序降级成分类，也不要为它私自增加拖放/放置触发器或顺序动作。只有 Capability Index 已声明相应 Recipe 可用时才能直接选用计划中的 `classify-sort-v1`；否则按当前已有 Component 能力实现一次性课件组件。
+<!-- lesson-authoring-shared:carrier:end -->
 
+<!-- lesson-authoring-shared:mapping:start -->
 ## 4. 资产与任务图（动手前）
 
 不要从空白一次写出整课。Coordinator 先在内部列出（不必给教师第三份合同文件；成功后删掉临时笔记）：
@@ -50,6 +57,7 @@
 2. 逐段核对已确认呈现脚本，列出“片段 → 学生动作 → 可见反馈与恢复 → Surface / owner → carrier / tool”。没有互动的片段明确写静态；已约定互动不得省略或以说明文字替代。对每个实际使用的工具和 Recipe 先读当前完整能力卡的适用域、inputSchema、references 与示例，不能从旧印象补字段。
 3. 执行顺序：为纵切准备的资产 → 最高风险真实片段 → 其余页 → 集成验证。
 4. 资产生成失败或必须改体验时，停下来回编排改脚本，不用占位图把课做完。
+<!-- lesson-authoring-shared:mapping:end -->
 
 ## 5. 用产品 API 写工程
 
@@ -89,6 +97,7 @@ Coordinator 是唯一能写权威 Project 和共享接口的人。小型强耦�
 
 每合入一个单元就重跑受影响的最小验证；完成共享层后再做整课集成。动态代码保存在普通模块中；禁止在构建脚本里手写巨型 Runtime/Component 字符串。
 
+<!-- lesson-authoring-shared:editable:start -->
 ## 8. 保持可编辑
 
 合成顺序固定为**全局 Underlay → 当前 Surface 内容 → 全局 Overlay**；全局内容不能与本地内容任意交错。教师控制器是一份全局 Overlay，场景/世界编辑时 inert，不复制进 scene `layerItems`。Flow 正文是语义文档与一个正文合成边界，浮层按正文下方/上方编排；不要把每个段落当普通 z-order 图层。仅在所属平面与载体允许的范围内调整顺序。
@@ -97,9 +106,10 @@ Coordinator 是唯一能写权威 Project 和共享接口的人。小型强耦�
 
 首次构建后保留稳定 project/surface/scene/layerItem/binding ID。教师手工编辑后不得全量重建覆盖。定位目标只用跨保存稳定的 `authoringAddress`，不要用会话 `hitId`。
 
-正式编辑器入口是 `src/renderer/App.tsx`（不要写 `ProductApp`）。1.8 起普通内部生产构建显示创作助手与 CLI 聊天；具体能力仍以当前正式命令和已完成版本门为准。`courseAiHandoff` / `courseAiPatch` 是 internal/reserved、未挂载。不要把不存在的 `npm run current:course-selection` / `npm run patch:course-project` 写成工作流。
-
 增量修改：打开工程、改稳定地址上的字段、保存。revision 冲突或地址失效时重新读取工程，不猜测合并。
+<!-- lesson-authoring-shared:editable:end -->
+
+正式编辑器入口是 `src/renderer/App.tsx`（不要写 `ProductApp`）。1.8 起普通内部生产构建显示创作助手与 CLI 聊天；具体能力仍以当前正式命令和已完成版本门为准。`courseAiHandoff` / `courseAiPatch` 是 internal/reserved、未挂载。不要把不存在的 `npm run current:course-selection` / `npm run patch:course-project` 写成工作流。
 
 新课例用 V2 `session.tools` 中的正式工具；已有工程的 GUI/Store 入口只用于定位真实产品实现，不是外部课例的 API。不要为修订已存在的教师工程调用空白工厂再全量替换。
 
@@ -111,7 +121,9 @@ Coordinator 是唯一能写权威 Project 和共享接口的人。小型强耦�
 
 运行 `validate:course-project`，并按 [validation-boundaries.md](validation-boundaries.md) 检查本课实际使用的行为、真实编辑保存重开、CoursePlayer、默认离线 HTML 和要求交付的其它格式。增量修改复用未受影响的证据；只补受影响的行为与必要回归，不因使用 Skill 默认跑全仓测试或所有导出格式。
 
+<!-- lesson-authoring-shared:experience:start -->
 工程检查通过后，逐项回看前述片段映射，确认每个已约定动作、反馈和恢复在产物中都有对应实现；不能以工具回执全部成功代替脚本内容完整。再由全新上下文做一次只读体验 QA。自动化最多 `engineering candidate`；具体课例未经真实视觉/互动复核不得称 `art candidate`；`accepted` 必须来自教师明确验收。不得宣称 Editor 1.0 已发布。
+<!-- lesson-authoring-shared:experience:end -->
 
 只保留两份教学 Markdown、真实 Project、默认 HTML 及用户要求的交付物。成功后清理 Worker 任务、临时副本、截图和中间报告。
 

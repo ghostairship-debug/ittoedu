@@ -313,6 +313,7 @@ function validateInteractionReferences(
     carrier.referenceLayerItems.map((item) => [item.layerItemId, item]),
   )
   const scenes = slideScenes(project)
+  const locationIds = new Set(project.locations.map((location) => location.id))
   const soundIds = new Set(Object.keys(project.media.audio.sounds))
   const courseStateByKey = new Map(project.courseState.map((state) => [state.key, state]))
   const actionIds = new Set(scopeRules.flatMap((rule) => (
@@ -474,6 +475,12 @@ function validateInteractionReferences(
             `目标 Slide 场景中不存在状态“${action.targetStateId}”。`,
           )
         }
+      }
+      if (action.type === 'location.go' && !locationIds.has(action.locationId)) {
+        return fail(
+          'invalid-rule',
+          `互动规则引用了不存在的课程位置“${action.locationId}”。`,
+        )
       }
     }
   }

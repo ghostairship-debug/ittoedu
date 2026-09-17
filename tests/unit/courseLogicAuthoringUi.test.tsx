@@ -6,7 +6,6 @@ import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
 
 beforeEach(() => {
   useEditorStore.getState().createNewProject()
-  useEditorStore.setState({ editorMode: 'professional' })
 })
 
 afterEach(cleanup)
@@ -92,9 +91,8 @@ describe('professional course logic authoring UI', () => {
     })
   })
 
-  it('简单模式不暴露专业课程逻辑表单', () => {
-    useEditorStore.setState({ editorMode: 'simple' })
+  it('始终暴露课程逻辑表单', () => {
     render(<AutomationTab />)
-    expect(screen.queryByTestId('course-logic-authoring')).not.toBeInTheDocument()
+    expect(screen.getByTestId('course-logic-authoring')).toBeInTheDocument()
   })
 })

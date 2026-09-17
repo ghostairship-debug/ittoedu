@@ -41,7 +41,9 @@ function referenceLabel(document: CourseProjectDocument | null | undefined, loca
 export function isChatStatusInquiry(text: string): boolean { return /^(?:请问|告诉我)?(?:为什么(?:停止了?|停了|失败了?)|现在(?:怎么样了?|什么情况|进展如何)|当前(?:状态|进度)|怎么(?:停了|失败了)|是否(?:完成|成功)|完成了吗)[？?。！!\s]*$/.test(text.trim()) }
 export function resolveChatIntent(text: string, selected: 'discuss' | 'plan' | 'edit') {
   if (isChatStatusInquiry(text)) return 'discuss'
-  if (/先[^。\n]{0,18}(?:计划|方案)|只(?:做|写|出)(?:计划|方案)/.test(text)) return 'plan'
+  // Require a planning directive; a quoted earlier action followed by “方案”
+  // can describe a rejected approach inside an otherwise explicit edit request.
+  if (/先(?:给我|为我|帮我)?(?:做|写|出|给出|制定|整理|更新)?(?:一(?:个|份|下))?(?:计划|方案)|只(?:做|写|出)(?:计划|方案)/.test(text)) return 'plan'
   if (/只(?:和我)?讨论|先(?:和我)?讨论/.test(text)) return 'discuss'
   if (/先别(?:修改|改动|动手)|不要(?:做任何动作|修改|改动|动手)|不(?:修改|改)课件/.test(text)) return selected === 'plan' ? 'plan' : 'discuss'
   // A user can explicitly defer an edit until after they answer a question. This

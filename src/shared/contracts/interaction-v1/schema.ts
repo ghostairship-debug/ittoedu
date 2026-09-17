@@ -183,6 +183,7 @@ const audioActionSchemas = [
 
 const baseActionSchemas = [
   presentationActionSchema,
+  z.object({ type: z.literal('location.go'), locationId: stableIdSchema }).strict(),
   z.object({
     type: z.literal('scene.go'),
     sceneId: stableIdSchema,

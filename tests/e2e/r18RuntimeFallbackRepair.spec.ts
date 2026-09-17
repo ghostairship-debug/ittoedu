@@ -1,7 +1,7 @@
 import { buildPublishedFixture as buildPublishedCourseV2Payload } from '../fixtures/teacherController'
 import { copyFileSync, mkdirSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
-import { _electron as electron, expect, test } from '@playwright/test'
+import { _electron as electron, expect, test, type Page } from '@playwright/test'
 import { createServer, type ViteDevServer } from 'vite'
 import sharp from 'sharp'
 import { BACKGROUND_E2E_ENV } from '../../src/main/windowVisibility'
@@ -10,6 +10,21 @@ import { closeNativeEditor, nativeRecords, readSaved, runtimeItem, saveStage, ty
 import { expectBackgroundWindowsIsolated } from './expectBackgroundWindowsIsolated'
 
 const productRoot = resolve(__dirname, '..', '..')
+
+async function enterStandaloneEditorFromLanding(page: Page): Promise<void> {
+  const landing = page.locator('.lesson-workspace-landing')
+  const editor = page.getByTestId('canvas-stage')
+  await Promise.race([
+    landing.waitFor({ state: 'visible', timeout: 15_000 }),
+    editor.waitFor({ state: 'visible', timeout: 15_000 }),
+  ])
+  if (!await landing.isVisible()) return
+  const more = page.locator('.lesson-workspace-more > summary')
+  if (!await more.isVisible()) return
+  await more.click()
+  const create = page.getByRole('button', { name: '新建独立课件', exact: true })
+  if (await create.isVisible()) await create.click()
+}
 
 test('same Runtime repairs an imported fallback through real admission and one resource transaction', async () => {
   test.skip(!process.env.R18_FALLBACK_SOURCE, 'Explicit existing corrupt-fallback lesson required; no native CLI calls')
@@ -40,6 +55,7 @@ test('same Runtime repairs an imported fallback through real admission and one r
     const page = await app.firstWindow()
     run = { app, page, runRoot, workspaceRoot: runRoot, projectPath, userData, pageErrors: [], consoleErrors: [] }
     page.on('pageerror', error => run!.pageErrors.push(error.message))
+    await enterStandaloneEditorFromLanding(page)
     await expectBackgroundWindowsIsolated(app, true)
     await page.getByTestId('canvas-stage').locator('canvas').first().waitFor()
     await app.evaluate(({ dialog }, path) => {

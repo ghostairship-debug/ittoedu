@@ -67,7 +67,6 @@ export function AutomationTab() {
   const scene = useEditorStore(selectActiveScene)
   const editingNodes = useEditorStore(selectEditingNodes)
   const editingScope = useEditorStore(selectEditingScope)
-  const editorMode = useEditorStore((state) => state.editorMode)
   const selectedNodeId = useEditorStore(selectSelectedNodeId)
   const courseProject = useEditorStore(selectActiveCourseProjectDocument)
   const activeLocationId = useEditorStore(selectActiveCourseLocationId)
@@ -157,12 +156,12 @@ export function AutomationTab() {
     )
   }
 
-  const courseLogicPanel = editorMode === 'professional' ? (
+  const courseLogicPanel = (
     <CourseLogicAuthoringPanel
       project={courseProject}
       onCommand={applyCourseLogicAuthoringCommand}
     />
-  ) : null
+  )
 
   if (authoringView.availability === 'unavailable') {
     return (
@@ -222,6 +221,7 @@ export function AutomationTab() {
     activeStateId: interactionView.activeStateId,
     authoringStates: interactionView.states,
     scenes: interactionView.sceneReferences,
+    locations: interactionView.locationReferences,
     sounds: courseProject.media.audio.sounds,
     courseState: courseProject.courseState,
     ruleWarnings,

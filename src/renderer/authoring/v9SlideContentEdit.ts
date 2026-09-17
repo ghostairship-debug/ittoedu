@@ -1,6 +1,6 @@
 import { commitResourceAwareAuthoringHistory } from './resourceAwareAuthoringHistory'
 import { formulaAstToAccessibleText } from '../../shared/formulaLinear'
-import { applyTextRunStyle, remapTextRuns } from '../../shared/textRuns'
+import { applyTextRunStyle, planTextRunRemap, remapTextRuns } from '../../shared/textRuns'
 import { readChartText, type ChartTextDraft, type ChartTextField } from './chartTextDraft'
 import { readLayerTextField, type LayerTextDraft, type LayerTextField } from './layerTextField'
 import type { ComponentPackageData } from '../../shared/componentTypes'
@@ -446,7 +446,12 @@ export function updateV9SlideContentTextDraft(
 ): V9SlideContentEditSession {
   if (edit.kind !== 'text') return edit
   const previous = edit.draft as V9SlideTextContentDraft
-  const runs = draft.runs ?? remapTextRuns(previous.text, draft.text, previous.runs)
+  let runs = draft.runs
+  if (!runs) {
+    const mapping = planTextRunRemap(previous.text, draft.text, previous.runs)
+    if (!mapping.ok) return edit
+    runs = mapping.runs
+  }
   return freezeEdit({
     ...edit,
     draft: {

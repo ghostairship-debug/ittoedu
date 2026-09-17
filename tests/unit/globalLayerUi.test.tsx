@@ -168,7 +168,6 @@ function installRuntimeDefinitions(
 
 beforeEach(() => {
   useEditorStore.getState().createNewProject()
-  useEditorStore.setState({ editorMode: 'professional' })
 })
 
 afterEach(() => cleanup())
@@ -424,7 +423,6 @@ describe('Project V8 global-layer editor UI', () => {
     useEditorStore.getState().activateCourseLocation(api3Project.startLocationId)
     useEditorStore.getState().selectNode(null)
     useEditorStore.getState().setEditingScope('global')
-    useEditorStore.setState({ editorMode: 'professional' })
     const flowSession = useEditorStore.getState().flowSession
     if (!flowSession) throw new Error('缺少 Flow session')
     useEditorStore.getState().applyFlowSelection(
@@ -526,7 +524,6 @@ describe('Project V8 global-layer editor UI', () => {
       kind: 'path',
       id: 'retained-spatial-path',
     })
-    useEditorStore.setState({ editorMode: 'professional' })
     useEditorStore.getState().selectNode(null)
     expect(selectEditingScope(useEditorStore.getState())).toBe('global')
     expect(useEditorStore.getState()).toMatchObject({

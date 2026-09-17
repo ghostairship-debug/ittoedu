@@ -137,6 +137,8 @@ export interface ComponentHostActions {
   nextStep?(): boolean
   previousStep?(): boolean
   goToScene(sceneId: string, targetStateId?: string): boolean
+  /** Exact authored location across Slide, Flow and Spatial; feature-detect on older hosts. */
+  goToLocation?(locationId: string): boolean
   nextScene(): boolean
   previousScene(): boolean
   replayScene(): boolean

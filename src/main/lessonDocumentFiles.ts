@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import { promises as fs, watch } from 'node:fs'
 import path from 'node:path'
 import { documentRelativePathSchema } from '../shared/document/resources'
-import type { DocumentAiEditRecord, DocumentFilePort, DocumentFileRef, DocumentFileVersion, DocumentSaveRequest, DocumentSaveResult, OpenDocumentResult } from '../shared/document/ports'
+import { documentRefKey, type DocumentAiEditRecord, type DocumentFilePort, type DocumentFileRef, type DocumentFileVersion, type DocumentSaveRequest, type DocumentSaveResult, type OpenDocumentResult } from '../shared/document/ports'
 import { applyDocumentRanges, revertDocumentRanges } from './lessonDocumentCoauthoring'
 import { parseDocumentMarkdown } from '../shared/document/markdown'
 import { resolveFileDocumentImage } from '../shared/document/fileImageReference'
@@ -21,19 +21,28 @@ export function createLessonDocumentFiles(options: LessonDocumentFilesOptions) {
   const invalidatedEpochs = new Map<string, number>()
   const issuedEpochs = new Map<string, number>()
   const generations = new Map<string, number>()
-  const key = (ref: DocumentFileRef) => hash(JSON.stringify([ref.lessonId, ref.relativePath]))
+  const key = (ref: DocumentFileRef) => hash(documentRefKey(ref))
+  const refLabel = (ref: DocumentFileRef) => ref.kind === 'lesson' ? ref.relativePath : (ref.path.split(/[\\/]/).pop() ?? ref.path)
+  const refBaseLabel = (ref: DocumentFileRef) => {
+    const label = ref.kind === 'lesson' ? ref.relativePath : ref.path.replace(/\\/g, '/')
+    return path.posix.dirname(label.split(/[\\/]/).join('/'))
+  }
+  async function rootDir(ref: DocumentFileRef): Promise<string> {
+    return ref.kind === 'lesson' ? await fs.realpath(ref.lessonDirectory) : path.dirname(await fs.realpath(ref.path))
+  }
   const local = (ref: DocumentFileRef, name: string) => path.join(options.recoveryDirectory, key(ref), name)
-  async function atomic(filename: string, bytes: string | Uint8Array, validate?: () => void) {
+  async function atomic(filename: string, bytes: string | Uint8Array, validate?: () => void | Promise<void>) {
     await fs.mkdir(path.dirname(filename), { recursive: true })
     const temporary = `${filename}.${randomUUID()}.tmp`
-    try { await fs.writeFile(temporary, bytes); validate?.(); await fs.rename(temporary, filename) }
+    try { await fs.writeFile(temporary, bytes); await validate?.(); await fs.rename(temporary, filename) }
     finally { await fs.rm(temporary, { force: true }).catch(() => {}) }
   }
-  async function resolve(ref: DocumentFileRef, relativePath = ref.relativePath) {
-    documentRelativePathSchema.parse(relativePath)
+  async function resolve(ref: DocumentFileRef, relativePath?: string) {
+    const relative = relativePath ?? refLabel(ref)
+    documentRelativePathSchema.parse(relative)
     await options.validateTarget(ref)
-    const root = await fs.realpath(ref.lessonDirectory)
-    const target = path.resolve(root, relativePath)
+    const root = await rootDir(ref)
+    const target = path.resolve(root, relative)
     let ancestor = target
     for (;;) {
       try {
@@ -61,7 +70,7 @@ export function createLessonDocumentFiles(options: LessonDocumentFilesOptions) {
     const add = (href: string) => {
       if (/^(https?:|data:|mailto:|#)/i.test(href)) return
       const decoded = decodeURIComponent(href.split(/[?#]/)[0]!)
-      const relative = path.posix.normalize(path.posix.join(path.posix.dirname(ref.relativePath), decoded))
+      const relative = path.posix.normalize(path.posix.join(refBaseLabel(ref), decoded))
       documentRelativePathSchema.parse(relative); refs.add(relative)
     }
     const { Lexer } = await import('marked')
@@ -82,7 +91,7 @@ export function createLessonDocumentFiles(options: LessonDocumentFilesOptions) {
         }
       } catch (error) { if (!(error instanceof SyntaxError)) throw error }
     }
-    const parsed = parseDocumentMarkdown(source, { target: 'file', createId: () => randomUUID(), resolveImage: href => resolveFileDocumentImage(ref.relativePath, href) })
+    const parsed = parseDocumentMarkdown(source, { target: 'file', createId: () => randomUUID(), resolveImage: href => resolveFileDocumentImage(refLabel(ref), href) })
     const diagnostics: OpenDocumentResult['diagnostics'] = [...parsed.diagnostics]
     const attachments: DocumentFileVersion['attachments'] = []
     for (const relativePath of [...refs].sort()) {
@@ -118,14 +127,14 @@ export function createLessonDocumentFiles(options: LessonDocumentFilesOptions) {
     }
     await atomic(local(ref, 'draft.json'), JSON.stringify({ schemaVersion: 1, ref, source, expectedVersion, baseSource, attachments: attachments.map(attachment => ({ ...attachment, bytes: Array.from(attachment.bytes) })) }))
   }
-  async function save(request: DocumentSaveRequest, validate?: () => void): Promise<DocumentSaveResult> {
+  async function save(request: DocumentSaveRequest, validate?: () => void | Promise<void>): Promise<DocumentSaveResult> {
     const { ref, operationId } = request
     const journal = local(ref, `operation-${hash(operationId)}.json`)
     const persist = (record: Recovery) => atomic(journal, JSON.stringify(record, (_key, value) => value instanceof Uint8Array ? [...value] : value))
     try {
       const filename = await resolve(ref)
-      validate?.()
-      if (!ref.relativePath.toLowerCase().endsWith('.md')) throw new Error('文档必须是 Markdown 文件')
+      await validate?.()
+      if (!refLabel(ref).toLowerCase().endsWith('.md')) throw new Error('文档必须是 Markdown 文件')
       let previous: Recovery | undefined
       try { previous = JSON.parse(await fs.readFile(journal, 'utf8')) as Recovery } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error }
       const attachmentIdentity = (items: DocumentSaveRequest['attachments']) => JSON.stringify(items.map(item => ({ path: item.relativePath, digest: hash(new Uint8Array(item.bytes)) })).sort((a, b) => a.path.localeCompare(b.path)))
@@ -202,7 +211,7 @@ export function createLessonDocumentFiles(options: LessonDocumentFilesOptions) {
         const disk = await readOptional(ref), version = JSON.stringify(disk?.version ?? null)
         if (!disposed && last !== version) { last = version; listener(disk ? { type: 'changed', disk } : { type: 'deleted' }) }
       } catch { /* Transient replacement is rechecked on the next watch event. */ } }
-      void resolve(ref).then(() => { if (!disposed) { watcher = watch(ref.lessonDirectory, { recursive: true }, () => { clearTimeout(timer); timer = setTimeout(() => { void refresh() }, 40) }); void refresh() } }).catch(() => {})
+      void rootDir(ref).then(directory => { if (!disposed) { watcher = watch(directory, { recursive: true }, () => { clearTimeout(timer); timer = setTimeout(() => { void refresh() }, 40) }); void refresh() } }).catch(() => {})
       return () => { disposed = true; clearTimeout(timer); watcher?.close() }
     },
     async prepareAiEdit(ref, ranges, epoch) {
@@ -257,10 +266,10 @@ export function createLessonDocumentFiles(options: LessonDocumentFilesOptions) {
     }) },
   }
   const api = { ...port,
-    saveDocumentIfNoRecovery(request: DocumentSaveRequest): Promise<DocumentSaveResult> {
+    saveDocumentIfNoRecovery(request: DocumentSaveRequest, validate?: () => void | Promise<void>): Promise<DocumentSaveResult> {
       return serial(request.ref, async () => {
         if (await api.readRecovery(request.ref)) return { status: 'failed', operationId: request.operationId, message: '当前输出文件有未保存稿或冲突恢复稿，请先处理；候选未写入', recovery: 'saved' }
-        return save(request)
+        return save(request, validate)
       })
     },
     async readAiRecords(ref: DocumentFileRef): Promise<DocumentAiEditRecord[]> {
@@ -272,7 +281,7 @@ export function createLessonDocumentFiles(options: LessonDocumentFilesOptions) {
       const records: DocumentAiEditRecord[] = []
       for (const name of names.filter(name => /^ai-[a-f0-9]+\.json$/.test(name))) {
         const value = JSON.parse(await fs.readFile(path.join(directory, name), 'utf8')) as { record?: DocumentAiEditRecord }
-        if (value.record && value.record.ref.lessonId === ref.lessonId && value.record.ref.relativePath === ref.relativePath && !hidden.has(value.record.id)) records.push({ ...value.record, ref })
+        if (value.record && documentRefKey(value.record.ref) === documentRefKey(ref) && !hidden.has(value.record.id)) records.push({ ...value.record, ref })
       }
       return records
     },

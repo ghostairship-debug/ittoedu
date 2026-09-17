@@ -1,7 +1,7 @@
 # S0 稳定性第一方案：如何探索代码、设计架构、解耦模块
 
 > 状态：**第一方案（方法）**。探索产物见 [S0_HANDOFF.md](S0_HANDOFF.md)。改代码方案见 [S1_STABILITY_CODE_PLAN.md](S1_STABILITY_CODE_PLAN.md)。本文件仍不授权改 `src/**`。
-> 总纲：[COURSEWARE_DEVELOPMENT_PLAN.md](../../../COURSEWARE_DEVELOPMENT_PLAN.md) 12.12
+> 总纲：[COURSEWARE_DEVELOPMENT_PLAN.md](../../../../COURSEWARE_DEVELOPMENT_PLAN.md) 12.12
 > 日期：2026-08-19
 
 本文件回答三件事：
@@ -33,7 +33,7 @@
 
 ### 与 Q0 的分工
 
-[Q0_DIAGNOSIS.md](Q0_DIAGNOSIS.md) 定位的是**当时一批教师可见功能缺陷**的接线原因，并明确「全量会话重挂治理、拆 Store / Workspace」不在那一轮。
+`Q0_DIAGNOSIS.md`（历史链接目标未随本归档保留） 定位的是**当时一批教师可见功能缺陷**的接线原因，并明确「全量会话重挂治理、拆 Store / Workspace」不在那一轮。
 本方案接手 Q0 明确放下的那一层：**会话生命周期、双真相、错误边界、热点碰撞**。Q1–Q8 的行为不得作为本方案的「重做清单」。
 
 ---
@@ -80,7 +80,7 @@ src/main/index.ts
 
 ### 2.2 运行时有两套（有时三套）世界
 
-合同边界见 [EDITOR_1_0_ARCHITECTURE_BOUNDARY.md](../../contracts/EDITOR_1_0_ARCHITECTURE_BOUNDARY.md)，这是对的，必须保持：
+合同边界见 [EDITOR_1_0_ARCHITECTURE_BOUNDARY.md](../../../contracts/EDITOR_1_0_ARCHITECTURE_BOUNDARY.md)，这是对的，必须保持：
 
 - 编辑：Slide → Phaser；Flow / Spatial → 各自 DOM 容器。
 - 试运行 / 整课预览：CoursePlayer + `SlidePublishedAdapter` / `FlowSurfaceHost` / `SpatialSurfaceHost`。

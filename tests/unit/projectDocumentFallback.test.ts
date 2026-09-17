@@ -49,6 +49,46 @@ function fixture() {
 }
 
 describe('CLI project result through the canonical transaction', () => {
+  it('limited closeout preserves unrelated existing errors across rule reordering', async () => {
+    const f = fixture()
+    const oldRule = { id: 'old-error', enabled: true, trigger: { type: 'scene.enter' as const }, conditions: [],
+      actions: [{ id: 'old-action', start: 'after-previous' as const, delayMs: 0, action: { type: 'scene.go' as const, sceneId: 'missing-old-scene' } }] }
+    f.project.globalInteractions.push(oldRule)
+    f.next.globalInteractions.push({ ...structuredClone(oldRule), id: 'valid-rule', actions: [{ ...oldRule.actions[0]!, id: 'valid-action', action: { type: 'scene.go', sceneId: (f.project.surfaces[0] as any).scenes[0].id } }] }, structuredClone(oldRule))
+    const preview = await f.coordinator.prepare(f.request, f.candidate)
+    expect(f.coordinator.apply(preview.previewId).status).toBe('committed')
+    expect(f.commits).toHaveLength(1)
+    expect(f.read().document.globalInteractions[1]).toEqual(oldRule)
+  })
+  it('limited closeout rejects a newly dangling reference after its target is removed', async () => {
+    const f = fixture(), surface = f.project.surfaces[0]!, nextSurface = f.next.surfaces[0]!
+    if (surface.type !== 'slide' || nextSurface.type !== 'slide') throw new Error('Slide')
+    const targetId = surface.scenes[1]!.id
+    const rule = { id: 'existing-return', enabled: true, trigger: { type: 'scene.enter' as const }, conditions: [],
+      actions: [{ id: 'existing-action', start: 'after-previous' as const, delayMs: 0, action: { type: 'scene.go' as const, sceneId: targetId } }] }
+    f.project.globalInteractions.push(rule); f.next.globalInteractions.push(structuredClone(rule))
+    nextSurface.scenes.pop()
+    f.next.locations = f.next.locations.filter(location => location.kind !== 'slide-scene' || location.sceneId !== targetId)
+    const error = await f.coordinator.prepare(f.request, f.candidate).catch(error => error)
+    expect(readGenerationFailure(error)?.diagnostics).toEqual(expect.arrayContaining([expect.objectContaining({ code: 'interaction-scene-reference-missing' })]))
+    expect(f.commits).toHaveLength(0)
+    expect(f.read().document).toEqual(f.project)
+  })
+  it.each(['scene.go', 'location.go'] as const)('rejects an invalid global %s reference before any project.document transaction', async type => {
+    const f = fixture()
+    f.next.globalInteractions.push({ id: 'global-return', enabled: true,
+      trigger: { type: 'node.click', nodeId: 'selected-square' }, conditions: [], actions: [{
+        id: 'return-action', start: 'after-previous', delayMs: 0,
+        action: type === 'scene.go' ? { type, sceneId: 'location_record_flow' } : { type, locationId: 'missing-location' },
+      }],
+    })
+    const error = await f.coordinator.prepare(f.request, f.candidate).catch(error => error)
+    expect(readGenerationFailure(error)).toMatchObject({ diagnostics: [expect.objectContaining({
+      code: type === 'scene.go' ? 'interaction-scene-reference-missing' : 'interaction-location-reference-missing',
+    })] })
+    expect(f.commits).toHaveLength(0)
+    expect(f.read()).toEqual({ document: f.project, resources: { assetFiles: {}, componentPackages: {} } })
+  })
   it('QP08 rejects an old full document after a prepared native edit without overwriting either live state or resources', async () => {
     const f = fixture()
     const destination = f.request.destinations.find(value => value.kind === 'update' && value.target.itemId === 'other-square')!

@@ -703,7 +703,19 @@ async function patchDialogs(
 
 async function clickBaseState(page: Page): Promise<void> {
   const base = page.getByRole('button', { name: '基础场景，所有命名状态的继承源' })
-  if (await base.count()) await base.click()
+  if (await base.count() && await base.getAttribute('aria-pressed') !== 'true') await base.click()
+}
+
+async function showEditorPanel(page: Page, name: '页面与图层' | '属性与素材' | null): Promise<void> {
+  const controls = page.getByLabel('课件编辑面板', { exact: true })
+  if (!await controls.isVisible()) return
+  if (name) {
+    const button = controls.getByRole('button', { name, exact: true })
+    if (await button.getAttribute('aria-expanded') !== 'true') await button.click()
+  } else {
+    const close = controls.getByRole('button', { name: '关闭面板', exact: true })
+    if (await close.isVisible()) await close.click()
+  }
 }
 
 async function openProject(page: Page, app: ElectronApplication, projectPath: string, htmlPath: string): Promise<void> {
@@ -1026,6 +1038,7 @@ async function execute(options: Options): Promise<AuthoringReceipt> {
     await installElectronOfflineGuard(app)
     const page = await app.firstWindow()
     await enforceOffline(page, errors)
+    await page.locator('.lesson-workspace-more > summary').click()
     await page.getByRole('button', { name: '新建独立课件', exact: true }).click()
     await page.locator('[data-testid="canvas-stage"] canvas').waitFor({ state: 'visible' })
     await openProject(page, app, baselineProject, baselineHtml)
@@ -1133,7 +1146,9 @@ async function execute(options: Options): Promise<AuthoringReceipt> {
         )
         await page.getByRole('button', { name: '新建课件（Ctrl+N）' }).click()
         await openProject(page, app, probeProject, beforeHtml)
+        await showEditorPanel(page, '页面与图层')
         await page.getByTestId(`scene-item-${target.sceneId}`).click()
+        await showEditorPanel(page, null)
         await clickBaseState(page)
         await patchDialogs(app, { projectOpen: probeProject, htmlSave: beforeHtml })
         await exportHtml(page, beforeHtml)
@@ -1145,6 +1160,7 @@ async function execute(options: Options): Promise<AuthoringReceipt> {
           bounds.x + ((node.x + node.width / 2) / 1280) * bounds.width,
           bounds.y + ((node.y + node.height / 2) / 720) * bounds.height,
         )
+        await showEditorPanel(page, '属性与素材')
         await page.getByRole('tab', { name: '图层' }).click()
         const selected = page.getByTestId(`node-item-${target.nodeId}`)
         const selectedClass = await selected.getAttribute('class')
@@ -1154,6 +1170,7 @@ async function execute(options: Options): Promise<AuthoringReceipt> {
         receipt.selectedNodeId = target.nodeId
         receipt.canvasSelectionVerified = true
         await selected.locator('.node-name').click()
+        await showEditorPanel(page, '属性与素材')
         await page.getByRole('tab', { name: '属性' }).click()
         const text = page.getByRole('textbox', { name: '文字内容' })
         if (await text.inputValue() !== node.text) throw new Error('selected text does not match Project binding')
@@ -1171,10 +1188,14 @@ async function execute(options: Options): Promise<AuthoringReceipt> {
         receipt.saved = true
         await page.getByRole('button', { name: '新建课件（Ctrl+N）' }).click()
         await openProject(page, app, probeProject, probeHtml)
+        await showEditorPanel(page, '页面与图层')
         await page.getByTestId(`scene-item-${target.sceneId}`).click()
+        await showEditorPanel(page, null)
         await clickBaseState(page)
+        await showEditorPanel(page, '属性与素材')
         await page.getByRole('tab', { name: '图层' }).click()
         await page.getByTestId(`node-item-${target.nodeId}`).locator('.node-name').click()
+        await showEditorPanel(page, '属性与素材')
         await page.getByRole('tab', { name: '属性' }).click()
         if (await page.getByRole('textbox', { name: '文字内容' }).inputValue() !== probe) {
           throw new Error('edited value did not survive Editor reopen')

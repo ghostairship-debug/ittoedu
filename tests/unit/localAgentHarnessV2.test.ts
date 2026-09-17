@@ -17,6 +17,7 @@ import { GENERATION_OPEN, GENERATION_CLOSE, GENERATION_RESULT_OPEN, GENERATION_R
 import { randomUUID } from 'node:crypto'
 import { projectV2RecordToV1 } from '../../src/shared/localAgentProjection'
 import { execFileSync } from 'node:child_process'
+import { localAgentRecordV2Schema } from '../../src/shared/localAgentTaskContract'
 
 const directories: string[] = []
 afterEach(async () => {
@@ -41,6 +42,96 @@ function capabilities(configuration: LocalAgentConfiguration = { model: 'default
     input: { image: 'supported', readFile: 'supported', question: 'structured', correction: 'active-turn', cancel: 'supported' },
   }
 }
+
+// Opt-in regression evidence from a frozen local trace; these inputs never
+// change the source profile or invoke a native CLI/model.
+it.runIf(Boolean(process.env.COURSEWARE_BUDGET_REPLAY_DIRECTORY && process.env.COURSEWARE_BUDGET_REPLAY_NATIVE_RECORD))
+  .each(['new-task', 'host-feedback'] as const)('frozen rev21 budget replay reaches actual startTurn with %s', async phase => {
+    const replayDirectory = process.env.COURSEWARE_BUDGET_REPLAY_DIRECTORY!
+    const completed = JSON.parse(await fs.readFile(path.join(replayDirectory, 'completed-native-record.json'), 'utf8'))
+    const priorList = JSON.parse(await fs.readFile(path.join(replayDirectory, 'prior-session-list.json'), 'utf8'))
+    const native = localAgentRecordV2Schema.parse(JSON.parse(await fs.readFile(process.env.COURSEWARE_BUDGET_REPLAY_NATIVE_RECORD!, 'utf8')))
+    if ('kind' in native.workspace) throw new Error('Frozen replay requires a native course project workspace')
+    const prior = priorList.records.find((record: { id: string }) => record.id === native.id)
+    if (!prior?.generationRequest) throw new Error('Frozen prior request is missing')
+    const metadata = generationRequestSchema.parse(completed.generationRequest)
+    // Session display intentionally omits resource bytes. Restore the exact
+    // persisted observation closure, checking its formal byte lengths.
+    const nativeRoot = path.dirname(path.dirname(process.env.COURSEWARE_BUDGET_REPLAY_NATIVE_RECORD!))
+    const currentNative = localAgentRecordV2Schema.parse(JSON.parse(await fs.readFile(path.join(path.dirname(process.env.COURSEWARE_BUDGET_REPLAY_NATIVE_RECORD!), `${completed.id}.json`), 'utf8')))
+    const observation = currentNative.observations.find(value => value.observationId === currentNative.tasks.at(-1)!.observationId)!
+    let observationRoot: string | undefined
+    for (const folder of await fs.readdir(nativeRoot)) {
+      const candidate = path.join(nativeRoot, folder, currentNative.workingDirectoryId, 'observations', observation.observationId)
+      if (await fs.access(path.join(candidate, 'generation-request.json')).then(() => true, () => false)) { observationRoot = candidate; break }
+    }
+    if (!observationRoot) throw new Error('Frozen observation directory is missing')
+    expect(JSON.parse(await fs.readFile(path.join(observationRoot, 'generation-request.json'), 'utf8'))).toEqual(metadata)
+    const resources = await Promise.all(observation.files.filter(file => file.fileId !== 'generation-request').map(async file => {
+      const bytes = await fs.readFile(path.join(observationRoot!, file.relativePath))
+      expect(bytes.length, file.relativePath).toBe(file.byteLength)
+      const utf8 = bytes.toString('utf8'), encoding = Buffer.from(utf8).equals(bytes) ? 'utf8' as const : 'base64' as const
+      return { path: file.relativePath, encoding, content: encoding === 'utf8' ? utf8 : bytes.toString('base64'), mediaType: file.mediaType, role: file.role }
+    }))
+    const frozen = generationRequestSchema.parse({ ...metadata, resourceFiles: resources })
+    expect(frozen.documentRevision).toBe(21)
+    const request = phase === 'host-feedback' ? { ...frozen, instruction: prior.generationRequest.instruction } : frozen
+    const task = native.tasks.at(-1)!
+    const fixtureAdjustments = phase === 'host-feedback'
+      ? ['restore task.status to feeding-back before failed continuation', 'retain prior task instruction for same-task authorization'] : []
+    if (phase === 'host-feedback') task.status = 'feeding-back'
+    const pending = native.hostResults.filter(result => result.receiptDelivery === 'pending')
+    expect(pending.some(result => result.status === 'committed' && result.afterRevision === 21)).toBe(true)
+    const frozenNow = Math.max(task.execution!.startedAt, frozen.execution!.startedAt) + 1
+    expect(frozenNow).toBeLessThan(task.execution!.deadlineAt)
+    expect(frozenNow).toBeLessThan(frozen.execution!.deadlineAt)
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(frozenNow)
+    const { directory } = await fixture()
+    const repository = new LocalAgentRepository(directory)
+    const ack = deferred<void>(), adapter = new NativeAdapter()
+    adapter.nativeIdentity = native.externalSessionId!
+    const start = adapter.startTurn.bind(adapter)
+    adapter.startTurn = async input => { const accepted = await start(input); await ack.promise; return accepted }
+    const harness = new LocalAgentHarness(repository, () => adapter)
+    try {
+      await repository.write(native)
+      await repository.writeObservation(native.workspace, native.workingDirectoryId, task.observationId!, 'generation-request.json', JSON.stringify(prior.generationRequest))
+      if (phase === 'host-feedback') await harness.continue(native.workspace, native.id, request)
+      else await harness.generate(native.workspace, native.adapter, request, native.id, frozen.instruction)
+      await expect.poll(() => adapter.turns.length, { timeout: 10_000 }).toBe(1)
+      const prompt = adapter.turns[0]!.text
+      const root = adapter.opens[0]!.candidateRoot!
+      const staged = JSON.parse(await fs.readFile(path.join(root, 'request.json'), 'utf8'))
+      const prefix = JSON.parse(prompt.split('\n')[1]!)
+      expect(Buffer.byteLength(prompt, 'utf8')).toBeLessThanOrEqual(MAX_GENERATION_PROMPT_BYTES)
+      expect(adapter.opens[0]!.externalSessionId).toBe(native.externalSessionId)
+      expect(JSON.parse(await fs.readFile(prefix.results[0].fullReceipt, 'utf8')).results).toEqual(pending)
+      expect(staged.requestId).toBe(frozen.requestId)
+      expect(staged.documentRevision).toBe(21)
+      let resourceBytes = 0
+      for (const resource of frozen.resourceFiles ?? []) {
+        const actual = await fs.readFile(path.join(root, 'resources', resource.path))
+        const expected = Buffer.from(resource.content, resource.encoding === 'base64' ? 'base64' : 'utf8')
+        expect(actual.equals(expected), resource.path).toBe(true)
+        resourceBytes += actual.length
+      }
+      if (phase === 'host-feedback') {
+        expect(prompt).toContain('上一阶段已返回宿主正式结果')
+        expect(prompt).toContain('相对修改不得因收到新观察再次累计执行')
+        expect(prompt).toContain('已记录的宿主结果（拒绝不代表提交）')
+      } else expect(prompt).not.toContain('这是同一任务的宿主反馈与目标核对阶段')
+      expect((await repository.list(native.workspace)).v2.find(record => record.id === native.id)!.hostResults.filter(result => result.receiptDelivery === 'pending')).toEqual(pending)
+      const evidence = { phase, fixtureAdjustments, resourceRestoration: 'exact persisted observation bytes; retained manifest roles; lossless utf8 or base64 encoding', frozenNow, requestId: frozen.requestId, revision: 21,
+        originalRequestBytes: Buffer.byteLength(JSON.stringify(frozen), 'utf8'), promptUtf8Bytes: Buffer.byteLength(prompt, 'utf8'), limitBytes: MAX_GENERATION_PROMPT_BYTES,
+        pendingResultIds: pending.map(result => result.resultId), pendingReceiptBytes: Buffer.byteLength(JSON.stringify(pending), 'utf8'),
+        originalResourceCount: frozen.resourceFiles?.length ?? 0, originalResourceBytes: resourceBytes,
+        stagingResourceIndexCount: staged.resourceIndex.length, completePendingReceiptVerified: true, allOriginalResourcesVerified: true }
+      ack.resolve(); await expect.poll(() => harness.running, { timeout: 10_000 }).toBe(false)
+      expect((await repository.list(native.workspace)).v2.find(record => record.id === native.id)!.hostResults.every(result => result.receiptDelivery !== 'pending')).toBe(true)
+      await fs.writeFile(path.join(replayDirectory, `budget-replay-${phase}.json`), JSON.stringify(evidence, null, 2))
+      console.log('Frozen budget replay:', JSON.stringify(evidence))
+    } finally { ack.resolve(); await harness.close(); clock.mockRestore() }
+  }, 30_000)
 class NativeAdapter implements LocalAgentCliAdapterV2 {
   readonly id = 'claude' as const
   confirmedIdentity: string | null = null
@@ -486,6 +577,33 @@ describe('V2 Harness native lifecycle', () => {
     await expect.poll(() => reopened.running).toBe(false)
     expect(second.opens[0]).toMatchObject({ externalSessionId: 'native-confirmed-session', cwd: first.opens[0]!.cwd })
     expect((await reopened.list(workspace)).records.find(record => record.id === resumed)?.status).toBe('completed')
+  })
+
+  it('U08-preserved-native-budget resumes on the original external id without extending execution, and rejects expired or stopped tasks', async () => {
+    const { directory, workspace } = await fixture()
+    const repository = new LocalAgentRepository(directory), first = new NativeAdapter()
+    const harness = new LocalAgentHarness(repository, () => first)
+    const id = await harness.start(workspace, 'claude', '记住预算')
+    await expect.poll(() => harness.running).toBe(false)
+    const before = (await repository.list(workspace)).v2.find(record => record.id === id)!
+    const original = before.tasks.at(-1)!.execution!
+    expect(before.externalSessionId).toBe(first.nativeIdentity)
+
+    const second = new NativeAdapter(), reopened = new LocalAgentHarness(new LocalAgentRepository(directory), () => second)
+    try {
+      const resumed = await reopened.resume(workspace, id, '继续', undefined, true)
+      await expect.poll(() => reopened.running).toBe(false)
+      expect(second.opens[0]).toMatchObject({ externalSessionId: before.externalSessionId })
+      const continued = (await repository.list(workspace)).v2.find(record => record.id === resumed)!
+      expect(continued.tasks.at(-1)!.execution).toMatchObject({ startedAt: original.startedAt, deadlineAt: original.deadlineAt, turnCount: original.turnCount + 1 })
+
+      const expiredNow = vi.spyOn(Date, 'now').mockReturnValue(original.deadlineAt + 1)
+      try { await expect(reopened.resume(workspace, resumed, '预算已到', undefined, true)).rejects.toThrow('原任务预算已到') }
+      finally { expiredNow.mockRestore() }
+
+      await reopened.cancel(workspace, resumed)
+      await expect(reopened.resume(workspace, resumed, '已停止', undefined, true)).rejects.toThrow('阶段已停止')
+    } finally { await reopened.close(); await harness.close() }
   })
 
   it('fails a resumed run when the native process confirms a different session', async () => {
@@ -1319,7 +1437,7 @@ describe('same native task host feedback', () => {
         await harness.hostResult(workspace, id, { requestId: request.requestId, status: 'rejected', summary: result.finding })
         request = { ...request, requestId: randomUUID() }
         if (turn === 0) await harness.continue(workspace, id, request)
-        else await expect(harness.continue(workspace, id, request)).rejects.toThrow('预算已到或连续两轮没有进展')
+        else await expect(harness.continue(workspace, id, request)).rejects.toThrow('候选格式修复后仍不正确，请调整要求后重新发送')
       }
       expect(adapters).toHaveLength(2)
       expect(adapters[1]!.opens[0]!.externalSessionId).toBe(adapters[0]!.nativeIdentity)
@@ -1408,7 +1526,7 @@ describe('same native task host feedback', () => {
         if (corrected.kind !== 'candidate-format-error') throw new Error('Expected another missing candidate diagnosis')
         await harness.hostResult(workspace, id, { requestId: request.requestId, status: 'rejected', summary: corrected.finding, failure: corrected.failure })
         expect((await repository.list(workspace)).v2[0]!.tasks[0]!.execution!.formatRepairs).toBe(2)
-        await expect(harness.continue(workspace, id, generation(workspace))).rejects.toThrow('预算已到或连续两轮没有进展')
+        await expect(harness.continue(workspace, id, generation(workspace))).rejects.toThrow('候选格式修复后仍不正确，请调整要求后重新发送')
         expect(adapters).toHaveLength(2)
       }
     } finally { await harness.close() }
@@ -1528,7 +1646,7 @@ describe('same native task host feedback', () => {
         if (index < 2) { request = generation(workspace); await harness.continue(workspace, id, request) }
       }
       expect((await repository.list(workspace)).v2[0]!.tasks[0]!.execution).toMatchObject({ formatRepairs: 0, stagnantCandidates: 2 })
-      await expect(harness.continue(workspace, id, generation(workspace))).rejects.toThrow('连续两轮没有进展')
+      await expect(harness.continue(workspace, id, generation(workspace))).rejects.toThrow('连续两轮没有进展，请调整要求后重新发送')
     } finally { await harness.close() }
   })
 
@@ -1559,7 +1677,7 @@ describe('same native task host feedback', () => {
       const execution = (await repository.list(workspace)).v2[0]!.tasks[0]!.execution!
       expect(execution).toMatchObject({ formatRepairs: 0, stagnantCandidates: 2 })
       expect(execution.lastReasonKey).toMatch(/^failure-reason-v2:/)
-      await expect(harness.continue(workspace, id, generation(workspace))).rejects.toThrow('连续两轮没有进展')
+      await expect(harness.continue(workspace, id, generation(workspace))).rejects.toThrow('连续两轮没有进展，请调整要求后重新发送')
     } finally { await harness.close() }
   })
 
@@ -1590,7 +1708,7 @@ describe('same native task host feedback', () => {
         if (index < 2) { request = generation(workspace); await harness.continue(workspace, id, request) }
       }
       expect((await repository.list(workspace)).v2[0]!.tasks[0]!.execution!.stagnantCandidates).toBe(2)
-      await expect(harness.continue(workspace, id, generation(workspace))).rejects.toThrow('连续两轮没有进展')
+      await expect(harness.continue(workspace, id, generation(workspace))).rejects.toThrow('连续两轮没有进展，请调整要求后重新发送')
     } finally { await harness.close() }
   })
 
@@ -1822,7 +1940,11 @@ describe('same native task host feedback', () => {
         expect(read.index.changes[0].originalInput).not.toHaveProperty('changedFiles')
       } else {
         expect(entry).toBeUndefined()
-        expect(staged.resourceIndex).toHaveLength(scenario === 'full-resources' ? 1000 : 0)
+        expect(staged.resourceIndex.filter((file: { path: string }) => file.path.startsWith('resources/input/'))).toHaveLength(scenario === 'full-resources' ? 1000 : 0)
+        expect(staged.resourceIndex.filter((file: { path: string }) => !file.path.startsWith('resources/input/')).map((file: { path: string }) => file.path))
+          .toEqual(scenario === 'full-resources' ? [] : ['resources/pending-host-results.json'])
+        const delivered = JSON.parse(prompt.split('\n')[1]!).results[0]
+        expect(JSON.parse(await fs.readFile(delivered.fullReceipt, 'utf8')).results[0].failure).toEqual(failure)
         expect(prompt).toContain('已省略复用')
       }
       const after = (await repository.list(workspace)).v2[0]!
@@ -1915,7 +2037,10 @@ describe('same native task host feedback', () => {
     await expect.poll(() => harness.running).toBe(false)
     expect((await harness.candidate(workspace, id)).kind).toBe('candidate')
     const receipt: GenerationCommitReceipt = { version: 1, workspace, requestId: request.requestId, candidateId: candidates[0]!, status: 'committed',
-      beforeRevision: 1, afterRevision: 2, affected: [{ id: 'title', operation: 'updated', ownerKey: 'scene:page', authoringAddress: 'page/title' }], resources: { assetIds: [], packageIds: [] } }
+      beforeRevision: 1, afterRevision: 2, affected: [{ id: 'title', operation: 'updated', ownerKey: 'scene:page', authoringAddress: 'page/title' }], resources: { assetIds: [], packageIds: [] },
+      semanticChanges: { changes: Array.from({ length: 150 }, (_, index) => ({ path: `pages/${index}/title`, before: 'before '.repeat(35), after: 'after '.repeat(35), kind: 'updated' as const })), omitted: 0,
+        comparison: { status: 'complete' as const, scopes: [{ scope: 'project', status: 'complete' as const }] },
+        truncation: { changeLimit: 1000, valueLengthLimit: 2000, omittedChanges: 0, truncatedValues: 0 } } }
     const result = { requestId: request.requestId, candidateId: candidates[0]!, status: 'committed' as const, beforeRevision: 1, afterRevision: 2, summary: '已提交第一阶段' }
     await harness.hostResult(workspace, id, result, receipt)
     let release!: () => void, persisting = false
@@ -2108,12 +2233,44 @@ describe('short-path durable finish and recovery', () => {
         status: 'committed', beforeRevision: f.receipt.beforeRevision, afterRevision: f.receipt.afterRevision,
         affected: f.receipt.affected.map(({ id, operation, ownerKey }) => ({ id, operation, ownerKey })), resources: [f.receipt.resources] })
       expect(feedback.results[0]).not.toHaveProperty('receipts')
+      const fullReceipt = feedback.results[0].fullReceipt
+      expect(typeof fullReceipt).toBe('string')
+      if (typeof fullReceipt !== 'string') throw new Error('missing full receipt path')
+      expect(path.isAbsolute(fullReceipt)).toBe(true)
+      expect(JSON.parse(await fs.readFile(fullReceipt, 'utf8')).results[0].receipts).toEqual([f.receipt])
       expect((await f.repository.list(f.workspace)).v2.find(record => record.id === f.id)!.hostResults[0]!.receipts).toEqual([f.receipt])
       expect((await f.repository.list(f.workspace)).v2.find(record => record.id === f.id)!.hostResults[0]!.receiptDelivery).toBe('pending')
       ack.resolve(); await expect.poll(() => reopened.running).toBe(false)
       expect((await f.repository.list(f.workspace)).v2.find(record => record.id === f.id)!.hostResults[0]!.receiptDelivery).toBe('delivered')
       expect((await reopened.list(f.workspace)).records.find(record => record.id === id)!.status).toBe('completed')
     } finally { ack.resolve(); await reopened.close(); await f.harness.close() }
+  })
+  it('U08-pending-receipt-budget reaches native start with a compact receipt and a complete staged resource', async () => {
+    const f = await finishFixture()
+    const changes = Array.from({ length: 150 }, (_, index) => ({ path: `pages/${index}/title`, before: 'before '.repeat(35), after: 'after '.repeat(35), kind: 'updated' as const }))
+    const semanticChanges = { changes, omitted: 0,
+      comparison: { status: 'complete' as const, scopes: [{ scope: 'project', status: 'complete' as const }] },
+      truncation: { changeLimit: 1000, valueLengthLimit: 2000, omittedChanges: 0, truncatedValues: 0 } }
+    const receipt = { ...f.receipt, semanticChanges }
+    await f.harness.hostResult(f.workspace, f.id, f.result, receipt)
+    const adapter = new NativeAdapter(); let stagedReceipt: string | undefined
+    const originalStart = adapter.startTurn.bind(adapter)
+    adapter.startTurn = async input => {
+      const root = adapter.opens.at(-1)?.candidateRoot
+      if (root) stagedReceipt = await fs.readFile(path.join(root, 'resources', 'pending-host-results.json'), 'utf8')
+      return originalStart(input)
+    }
+    const reopened = new LocalAgentHarness(new LocalAgentRepository(f.directory), () => adapter)
+    try {
+      await reopened.generate(f.workspace, 'claude', generation(f.workspace, 2), f.id, '继续核对')
+      await expect.poll(() => adapter.turns.length).toBe(1)
+      expect(Buffer.byteLength(adapter.turns[0]!.text, 'utf8')).toBeLessThanOrEqual(MAX_GENERATION_PROMPT_BYTES)
+      expect(adapter.turns[0]!.text).toContain('resources/pending-host-results.json')
+      expect(adapter.turns[0]!.text).toContain('保留已经提交的成果')
+      expect(stagedReceipt).toContain('semanticChanges')
+      expect(stagedReceipt).toContain('before '.repeat(35))
+      await expect.poll(() => reopened.running).toBe(false)
+    } finally { await reopened.close(); await f.harness.close() }
   })
   it('keeps undelivered receipts pending when a resumed native turn rejects start', async () => {
     const f = await finishFixture()

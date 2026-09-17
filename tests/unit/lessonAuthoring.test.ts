@@ -18,7 +18,7 @@ async function fixture() {
  const validate = async () => { await workspace.read(lesson) }
  const files = createLessonDocumentFiles({ recoveryDirectory: path.join(root, 'recovery'), validateTarget: validate })
  const materials = new LessonMaterials(validate), authoring = new LessonAuthoring({ workspace, files, materials })
- const refs = LESSON_AUTHORING_STAGES.map(role => ({ lessonId: lesson.lessonId, lessonDirectory: lesson.normalizedDirectory, relativePath: `${role}.md` }))
+ const refs = LESSON_AUTHORING_STAGES.map(role => ({ kind: 'lesson' as const, lessonId: lesson.lessonId, lessonDirectory: lesson.normalizedDirectory, relativePath: `${role}.md` }))
  for (const [index, ref] of refs.entries()) {
   const saved = await files.saveDocument({ ref, operationId: randomUUID(), expectedVersion: null, source: `# 当前 ${ref.relativePath}`, attachments: [] })
   expect(saved.status).toBe('saved'); await workspace.registerDocument(lesson, LESSON_AUTHORING_STAGES[index]!, ref.relativePath)
@@ -36,7 +36,7 @@ async function material(f: Awaited<ReturnType<typeof fixture>>) {
  return { id: record.id, extractionVersion: record.extractionVersion, fragmentIds: ['body'] }
 }
 describe('lesson authoring current-file gates', () => {
- it('saves invalid raw Markdown with codec diagnostics and rejects confirmation until repaired', async () => {
+ it('U08-current-file-guards saves invalid raw Markdown with codec diagnostics and rejects confirmation until repaired', async () => {
   const f = await fixture(), ref = f.refs[0]!, initial = await f.files.openDocument(ref)
   const invalid = await f.files.saveDocument({ ref, operationId: randomUUID(), expectedVersion: initial.version, source: '- 原稿\n  - 嵌套项目\n', attachments: [] })
   expect(invalid.status).toBe('saved')

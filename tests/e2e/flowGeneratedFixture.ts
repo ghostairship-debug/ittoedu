@@ -1,6 +1,7 @@
 import { readFileSync, writeFileSync } from 'node:fs'
 import { basename, join } from 'node:path'
 import sharp from 'sharp'
+import { controllerPackages } from '../fixtures/teacherController'
 import { createBlankFlowCourseProject } from '../../src/renderer/project/createFlowCourseProject'
 import { createCourseProjectArchive } from '../../src/renderer/project/courseProjectArchive'
 import { createImageAssetImport } from '../../src/renderer/project/assetManager'
@@ -24,7 +25,7 @@ export async function createGeneratedFlowFixture(root: string, directory: string
   const project = createBlankFlowCourseProject({ id: `new-flow-${Date.now()}` })
   project.assets[asset.id] = structuredClone(asset)
   project.componentPackages[pkg.manifest.id] = pkg.metadata
-  let state: EditorTransactionState = { document: project, resources: { assetFiles: { [asset.id]: new Uint8Array(bytes) }, componentPackages: { [pkg.manifest.id]: pkg } } }
+  let state: EditorTransactionState = { document: project, resources: { assetFiles: { [asset.id]: new Uint8Array(bytes) }, componentPackages: { ...controllerPackages, [pkg.manifest.id]: pkg } } }
   const commits: EditorTransactionStep[] = [], receipts: unknown[] = []
   const port = { readDocument: () => state.document, readResources: () => state.resources, validateDestination: () => null,
     commit(step: EditorTransactionStep) { state = applyEditorTransactionStep(state, step, 'forward'); commits.push(step); return true } }
@@ -52,18 +53,20 @@ export async function createGeneratedFlowFixture(root: string, directory: string
   const save = (name: string) => {
     const path = join(directory, `${name}.h5lesson`)
     writeFileSync(path, createCourseProjectArchive({ project: state.document, assetFiles: state.resources.assetFiles,
-      componentFiles: { [`${pkg.manifest.id}@${pkg.manifest.version}`]: pkg.files } }))
+      componentFiles: Object.fromEntries(Object.values(state.resources.componentPackages).map(component => [
+        `${component.manifest.id}@${component.manifest.version}`, component.files,
+      ])) }))
     return path
   }
   if (blank) return { path: save('ai-new-flow'), surfaceId: flow().id, assetId: asset.id, packageId: pkg.manifest.id }
-  await run(flowAuthoringTool, { operation: 'edit', text: '观察、解释与验证' }, update(flow().blocks[0]!.id))
-  await run(flowAuthoringTool, { operation: 'edit', text: '先观察图像，再用自己的话解释现象，最后调整下面的步骤顺序。正文、配图和活动沿文档顺序排列，并随当前窗口自然重排。' }, update(flow().blocks[1]!.id))
+  await run(flowAuthoringTool, { operation: 'edit', content: { inlines: [{ type: 'text', text: '观察、解释与验证' }] } }, update(flow().blocks[0]!.id))
+  await run(flowAuthoringTool, { operation: 'edit', content: { inlines: [{ type: 'text', text: '先观察图像，再用自己的话解释现象，最后调整下面的步骤顺序。正文、配图和活动沿文档顺序排列，并随当前窗口自然重排。' }] } }, update(flow().blocks[1]!.id))
   const shortPath = save('new-flow-short')
   await run(componentInsertTool, { operation: 'existing', packageId: pkg.manifest.id, staticFallbackAssetId: asset.id }, create())
   await run(flowAuthoringTool, { operation: 'insert', block: { type: 'media', mediaKind: 'image', assetId: asset.id,
-    layout: 'content-width', caption: '观察图片中的结构，用证据说明自己的判断。', altText: '用于观察与描述的教学配图' } }, create())
+    layout: 'content-width', caption: { inlines: [{ type: 'text', text: '观察图片中的结构，用证据说明自己的判断。' }] }, altText: '用于观察与描述的教学配图' } }, create())
   for (let index = 0; index < 10; index++) await run(flowAuthoringTool, { operation: 'insert', block: { type: 'paragraph',
-    text: `观察记录 ${index + 1}：${'写出观察到的变化，区分直接看到的事实与依据事实作出的推断。'.repeat(7)}` } }, create())
+    content: { inlines: [{ type: 'text', text: `观察记录 ${index + 1}：${'写出观察到的变化，区分直接看到的事实与依据事实作出的推断。'.repeat(7)}` }] } } }, create())
   // Intentional overlays have separate semantics, fixed before any screenshot.
   const paperId = await run(nativeAuthoringTool, { operation: 'insert', template: { nativeType: 'shape', shapeType: 'rectangle',
     x: 4, y: 32, width: 6, height: 32, paperSpace: 'paper', label: '稿纸旁注标记' } }, create(false))

@@ -11,6 +11,7 @@ import { createGenerationCandidateCoordinator } from '../authoring/generation/pr
 import { verifyNativeInteractions } from '../authoring/generation/nativeInteractionVerification'
 import { generationRequestSchema, type GenerationCommitReceipt, type GenerationRequest } from '../../shared/generationContract'
 import { createSessionToken, updateCourseAuthoringSessionItems } from '../authoring/courseAuthoringSession'
+import { preserveAuthoringSelectionAcrossTransaction } from '../authoring/authoringSelectionContinuity'
 
 function preservesObservationHost(step: EditorTransactionStep, observation: GenerationRequest['observation']): boolean {
   if (!observation) return false
@@ -34,6 +35,17 @@ export function createAuthoringToolActions(ports: {
   let generation: ReturnType<typeof createGenerationCandidateCoordinator> | undefined
   let committingRequestId: string | undefined
   let binding: { requestId: string; currentReason(): string | null; preserveBrowsing(): boolean; committed(receipt: GenerationCommitReceipt): void } | undefined
+  const withSelectionContinuity = (step: EditorTransactionStep) => {
+    const session = ports.kernel.readAuthoringSession()
+    if (!session) return { step, preservesCurrentSelection: false }
+    const scope = ports.readScope()
+    return preserveAuthoringSelectionAcrossTransaction(step, {
+      locationId: session.token.locationId,
+      stateId: scope.stateId,
+      owner: scope.owner,
+      itemIds: session.itemIds,
+    })
+  }
   const commitPort: AuthoringToolCommitPort & Pick<CoursewareBuilderV2Owner, 'readResources'> = {
     readDocument: () => ports.kernel.readDocument(),
     readResources: () => {
@@ -54,7 +66,7 @@ export function createAuthoringToolActions(ports: {
       if (ports.hasContentDraft()) return { code: 'active-content-draft', message: '请先完成当前文字或调色编辑', path: ['destination'] }
       return null
     },
-    commit: (step) => ports.kernel.persistTransaction(step, '已应用创作工具修改'),
+    commit: (step) => ports.kernel.persistTransaction(withSelectionContinuity(step).step, '已应用创作工具修改'),
   }
   const facade = createAuthoringToolFacade(commitPort)
   return {
@@ -117,8 +129,10 @@ export function createAuthoringToolActions(ports: {
           const anchored = binding?.requestId === parsed.requestId
           if (anchored && binding!.currentReason()) return false
           committingRequestId = parsed.requestId
-          try { return ports.kernel.persistTransaction(step, '已应用 AI 候选，可一次撤销', {
-            preserveBrowsing: anchored && (binding!.preserveBrowsing()
+          try {
+            const continuity = withSelectionContinuity(step)
+            return ports.kernel.persistTransaction(continuity.step, '已应用 AI 候选，可一次撤销', {
+            preserveBrowsing: continuity.preservesCurrentSelection && anchored && (binding!.preserveBrowsing()
               || (afterCommit?.action !== 'finish' && preservesObservationHost(step, parsed.observation))),
           }) }
           finally { committingRequestId = undefined }

@@ -5,7 +5,7 @@ import { createServer, type ViteDevServer } from 'vite'
 import sharp from 'sharp'
 import { BACKGROUND_E2E_ENV } from '../../src/main/windowVisibility'
 import { currentHostMotionEvidenceSchema } from '../../src/renderer/authoring/generation/currentHostMotionObservation'
-import { closeNativeEditor, FIXTURE_IDS, writeNativeLesson, type NativeRun } from './r18NativeAuthoringFixture'
+import { closeNativeEditor, FIXTURE_IDS, selectLayer, writeNativeLesson, type NativeRun } from './r18NativeAuthoringFixture'
 import { expectBackgroundWindowsIsolated } from './expectBackgroundWindowsIsolated'
 
 const productRoot = resolve(__dirname, '..', '..')
@@ -59,13 +59,21 @@ test('post-commit motion uses the actual final host for all three frames', async
     run = { app, page, runRoot, workspaceRoot: runRoot, projectPath, userData, pageErrors: [], consoleErrors: [] }
     page.on('pageerror', error => run!.pageErrors.push(error.message))
     await expectBackgroundWindowsIsolated(app, true)
+    // Enter only the landing page; never replace an already opened editor or recovery draft.
+    const startupMore = page.locator('.lesson-workspace-more > summary')
+    const startupEditor = page.getByRole('button', { name: '打开工程（Ctrl+O）', exact: true })
+    const startupRecovery = page.getByRole('alertdialog', { name: '发现未完成的本地恢复副本', exact: true })
+    await expect.poll(async () => await startupEditor.isVisible() || await startupMore.isVisible() || await startupRecovery.isVisible()).toBe(true)
+    if (!await startupEditor.isVisible() && await startupMore.isVisible() && !await startupRecovery.isVisible()) {
+      await startupMore.click()
+      await page.getByRole('button', { name: '新建独立课件', exact: true }).click()
+    }
     await page.getByTestId('canvas-stage').locator('canvas').first().waitFor()
     await app.evaluate(({ dialog }, path) => { dialog.showOpenDialog = (async () => ({ canceled: false, filePaths: [path] })) as typeof dialog.showOpenDialog }, projectPath)
     await page.getByRole('button', { name: '打开工程（Ctrl+O）', exact: true }).click()
     const professional = page.getByRole('button', { name: '专业', exact: true })
     if (await professional.getAttribute('aria-pressed') !== 'true') await professional.click()
-    await page.getByRole('tab', { name: '图层', exact: true }).click()
-    await page.getByTestId(`node-item-${FIXTURE_IDS.square}`).locator('.node-name').click()
+    await selectLayer(page, FIXTURE_IDS.square)
 
     const result = await page.evaluate(async ({ ids, source }) => {
       const load = (path: string) => import(/* @vite-ignore */ path)
@@ -93,7 +101,6 @@ test('post-commit motion uses the actual final host for all three frames', async
           version: 1, requestId: before.requestId, candidateId: crypto.randomUUID(), summary: 'Canonical rolling cube replacement',
           steps: [
             { id: 'runtime', tool: 'runtime.insert', carrier: 'runtime', destination: scope,
-              lowerCarrierReason: 'A real continuously rotating 3D cube requires the Runtime DOM mechanism.',
               input: { label: 'Current formal rotating cube', runtime: { protocol: 'canvas-runtime', runtimeApiVersion: 2, enabled: true,
                 renderMode: 'dom', source, content: { values: {} }, assets: {}, staticFallback: { assetId: ids.asset, coverage: 'scene' } } } },
             { id: 'replace', tool: 'selection.replace', carrier: 'native', destination,

@@ -4,8 +4,9 @@ import { LessonMaterials } from '../lessonMaterials'
 import { lessonDocumentFiles } from '../lessonDocumentDesktopService'
 import { readLessonGenerationContext } from './lessonGenerationContext'
 import { generationRequestSchema, type GenerationRequest } from '../../shared/generationContract'
-import type { LessonIdentity } from '../../shared/lessonWorkspace'
-import { workspaceIdentityKey } from '../../shared/workspaceIdentity'
+import type { ConversationOwner, LessonIdentity } from '../../shared/lessonWorkspace'
+import { conversationOwnerOf, conversationOwnerKey } from '../../shared/lessonWorkspace'
+import { workspaceIdentityKey, type ConversationAgentWorkspace } from '../../shared/workspaceIdentity'
 import { LessonWorkspaceService } from '../lessonWorkspace'
 import { LessonConversationRepository } from './lessonConversationRepository'
 import { app, session } from 'electron'
@@ -52,27 +53,50 @@ async function operate(request: unknown): Promise<LocalAgentResponse> {
     input.projectId && input.projectPath ? createWorkspaceIdentity(input.projectId, input.projectPath) : undefined) }
   if ('workspace' in input) {
     const workspace = input.workspace
-    const lesson = { schemaVersion: 1 as const, lessonId: workspace.lessonId, normalizedDirectory: workspace.normalizedDirectory }
-    const currentLesson = await new LessonWorkspaceService(app.getPath('userData')).read(lesson)
-    const conversations = new LessonConversationRepository(app.getPath('userData'))
-    const conversation = (await conversations.list(lesson)).records.find(record => record.conversationId === workspace.conversationId)
-    if (!conversation) throw new Error('当前课例对话不存在，请重新打开')
+    const conversationRepository = new LessonConversationRepository(app.getPath('userData'))
+    let lesson: LessonIdentity | undefined
+    let conversationOwner: ConversationOwner
+    if (workspace.kind === 'lesson') {
+      lesson = { schemaVersion: 1 as const, lessonId: workspace.lessonId, normalizedDirectory: workspace.normalizedDirectory }
+      conversationOwner = { kind: 'lesson', lesson }
+    } else {
+      conversationOwner = { kind: 'workspace', workspaceRoot: workspace.normalizedDirectory }
+    }
+    const currentLesson = lesson ? await new LessonWorkspaceService(app.getPath('userData')).read(lesson) : undefined
+    const ownerRecords = await conversationRepository.list(conversationOwner)
+    let conversation = ownerRecords.records.find(record => record.conversationId === workspace.conversationId)
+    if (!conversation && workspace.kind === 'directory') {
+      // 目录作用域会话也可能归属项目（workspaceRoot 为工作空间根、projectPath 为项目文件夹），
+      // 仅凭 directory 路径无法反推 workspaceRoot，直接按会话 id 在全部归属中定位真实 owner。
+      const found = (await conversationRepository.listAll()).find(record => record.conversationId === workspace.conversationId)
+      if (found) {
+        conversationOwner = conversationOwnerOf(found)
+        conversation = found
+      }
+    }
+    if (!conversation) throw new Error(workspace.kind === 'lesson' ? '当前课例对话不存在，请重新打开' : '当前工作空间对话不存在，请重新打开')
     switch (input.operation) {
-      case 'lesson-prepare-generation': { const current = await readCurrentLesson(lesson, true); return { enabled: true, lessonGeneration: { confirmedDocuments: current.confirmedDocuments! } } }
+      case 'lesson-prepare-generation': { if (!lesson) throw new Error('创作生成仅在课例会话中可用'); const current = await readCurrentLesson(lesson, true); return { enabled: true, lessonGeneration: { confirmedDocuments: current.confirmedDocuments! } } }
       case 'lesson-start': {
-        const sessionId = await agent.start(workspace, input.adapter, await currentLessonPrompt(currentLesson, input.prompt), input.intent, input.userMessage ?? input.prompt)
-        try { await conversations.attachSession(lesson, workspace.conversationId, sessionId, conversation.epoch) }
+        // F02：课例作用域用课例提示词；目录作用域（工作空间/项目会话）是完整 CLI 套皮，
+        // 教师消息原样交给 CLI，工作目录即会话目录（harness 对 directory 作用域取 realpath(normalizedDirectory)）。
+        if (workspace.kind === 'lesson' && !currentLesson) throw new Error('课例上下文不可用');
+        const prompt = currentLesson ? await currentLessonPrompt(currentLesson, input.prompt) : input.prompt
+        const sessionId = await agent.start(workspace, input.adapter, prompt, input.intent, input.userMessage ?? input.prompt)
+        try { await conversationRepository.attachSession(conversationOwner, workspace.conversationId, sessionId, conversation.epoch) }
         catch (error) { await agent.cancel(workspace, sessionId); throw error }
         return { enabled: true, sessionId }
       }
       case 'lesson-resume': {
         const prior = (await agent.list(workspace)).records.find(record => record.id === input.sessionId)
         if (!prior) throw new Error('当前对话没有这条任务记录')
-        const prompt = await currentLessonPrompt(currentLesson, input.prompt)
+        if (input.preserveTaskBudget && !prior.externalSessionId) throw new Error('当前阶段缺少可续接的原生会话，未启动新任务')
+        if (workspace.kind === 'lesson' && !currentLesson) throw new Error('课例上下文不可用');
+        const prompt = currentLesson ? await currentLessonPrompt(currentLesson, input.prompt) : input.prompt
         const sessionId = 'kind' in prior.workspace && prior.externalSessionId
-          ? await agent.resume(workspace, input.sessionId, prompt, input.userMessage ?? input.prompt)
+          ? await agent.resume(workspace, input.sessionId, prompt, input.userMessage ?? input.prompt, input.preserveTaskBudget)
           : await agent.start(workspace, prior.adapter, prompt, 'discuss', input.userMessage ?? input.prompt)
-        try { await conversations.attachSession(lesson, workspace.conversationId, sessionId, conversation.epoch) }
+        try { await conversationRepository.attachSession(conversationOwner, workspace.conversationId, sessionId, conversation.epoch) }
         catch (error) { await agent.cancel(workspace, sessionId); throw error }
         return { enabled: true, sessionId }
       }
@@ -96,14 +120,14 @@ async function operate(request: unknown): Promise<LocalAgentResponse> {
       let epoch: number | undefined
       if (scope && lesson) {
         await new LessonWorkspaceService(app.getPath('userData')).read(lesson)
-        const conversation = (await conversations.list(lesson)).records.find(record => record.conversationId === scope.conversationId)
+        const conversation = (await conversations.list({ kind: 'lesson', lesson })).records.find(record => record.conversationId === scope.conversationId)
         if (!conversation?.projectTarget || workspaceIdentityKey(conversation.projectTarget) !== workspaceIdentityKey(workspace)) throw new Error('当前对话未绑定此工程，请先完成首次保存绑定或新建另存目标对话')
         if (input.resumeSessionId && !conversation.sessionIds.includes(input.resumeSessionId)) throw new Error('恢复会话不属于当前课例对话')
         epoch = conversation.epoch
       }
       const sessionId = await agent.generate(workspace, input.adapter, lesson ? await refreshLessonRequest(lesson, input.request) : input.request, input.resumeSessionId, input.userMessage, scope)
       if (scope && lesson && epoch !== undefined) {
-        try { await conversations.attachSession(lesson, scope.conversationId, sessionId, epoch) }
+        try { await conversations.attachSession({ kind: 'lesson', lesson }, scope.conversationId, sessionId, epoch) }
         catch (error) { await agent.cancel(workspace, sessionId); throw error }
       }
       return { enabled: true, sessionId }
@@ -144,7 +168,7 @@ async function currentLessonPrompt(lesson: Awaited<ReturnType<LessonWorkspaceSer
 }
 export async function relocateLocalAgentLesson(previous: LessonIdentity, next: LessonIdentity): Promise<void> {
   const conversations = new LessonConversationRepository(app.getPath('userData'))
-  const records = (await conversations.list(previous)).records
+  const records = (await conversations.list({ kind: 'lesson', lesson: previous })).records
   harness ??= new LocalAgentHarness(new LocalAgentRepository(app.getPath('userData')))
   for (const conversation of records) {
     const oldScope = { version: 1 as const, kind: 'lesson' as const, lessonId: previous.lessonId, normalizedDirectory: previous.normalizedDirectory, conversationId: conversation.conversationId }
@@ -153,14 +177,25 @@ export async function relocateLocalAgentLesson(previous: LessonIdentity, next: L
   }
 }
 
-export async function deleteLocalAgentLessonRecords(lesson: LessonIdentity, conversationId?: string): Promise<void> {
+/** 由会话归属构造该会话的 agent 作用域（F01：课例/工作空间/项目共用）。 */
+export function conversationAgentScope(owner: ConversationOwner, conversationId: string): ConversationAgentWorkspace {
+  return owner.kind === 'lesson'
+    ? { version: 1, kind: 'lesson', lessonId: owner.lesson.lessonId, normalizedDirectory: owner.lesson.normalizedDirectory, conversationId }
+    : { version: 1, kind: 'directory', normalizedDirectory: owner.kind === 'workspace' ? owner.workspaceRoot : owner.projectPath, conversationId }
+}
+
+export async function deleteLocalAgentConversationRecords(owner: ConversationOwner, conversationId?: string): Promise<void> {
   harness ??= new LocalAgentHarness(new LocalAgentRepository(app.getPath('userData')))
   const conversations = new LessonConversationRepository(app.getPath('userData'))
-  const records = (await conversations.list(lesson)).records.filter(record => !conversationId || record.conversationId === conversationId)
-  for (const record of records) await conversations.delete(lesson, record.conversationId, async () => {
-    await invalidateLessonRecordOwners({ lesson, conversationId: record.conversationId })
-    await harness!.delete({ version: 1, kind: 'lesson', lessonId: lesson.lessonId, normalizedDirectory: lesson.normalizedDirectory, conversationId: record.conversationId })
+  const records = (await conversations.list(owner)).records.filter(record => !conversationId || record.conversationId === conversationId)
+  for (const record of records) await conversations.delete(owner, record.conversationId, async () => {
+    if (owner.kind === 'lesson') await invalidateLessonRecordOwners({ lesson: owner.lesson, conversationId: record.conversationId })
+    await harness!.delete(conversationAgentScope(owner, record.conversationId))
   })
+}
+/** @deprecated 兼容旧签名；新代码使用 deleteLocalAgentConversationRecords。 */
+export async function deleteLocalAgentLessonRecords(lesson: LessonIdentity, conversationId?: string): Promise<void> {
+  return deleteLocalAgentConversationRecords({ kind: 'lesson', lesson }, conversationId)
 }
 
 function readCurrentLesson(lesson: LessonIdentity, requireBuild: boolean) {
@@ -180,16 +215,16 @@ async function refreshLessonRequest(lesson: LessonIdentity, request: GenerationR
 
 
 /** Rebuilt from authoritative conversation records and human message events on every search. */
-export async function searchLocalAgentLessonConversations(lesson: LessonIdentity, query: string): Promise<{ conversationId: string; excerpt: string }[]> {
+export async function searchLocalAgentConversations(owner: ConversationOwner, query: string): Promise<{ conversationId: string; excerpt: string }[]> {
   assertLocalAgentRecordsAvailable()
   const needle = query.trim().toLocaleLowerCase()
   if (!needle) return []
-  const conversations = (await new LessonConversationRepository(app.getPath('userData')).list(lesson)).records
+  const conversations = (await new LessonConversationRepository(app.getPath('userData')).list(owner)).records
   harness ??= new LocalAgentHarness(new LocalAgentRepository(app.getPath('userData')))
   const matches: { conversationId: string; excerpt: string }[] = []
   for (const conversation of conversations) {
     const texts = [conversation.title]
-    const scope = { version: 1 as const, kind: 'lesson' as const, lessonId: lesson.lessonId, normalizedDirectory: lesson.normalizedDirectory, conversationId: conversation.conversationId }
+    const scope = conversationAgentScope(owner, conversation.conversationId)
     for (const record of (await harness.list(scope)).records) texts.push(...localAgentMessages(record.events).map(message => message.text))
     const text = texts.find(value => value.toLocaleLowerCase().includes(needle))
     if (text !== undefined) {
@@ -198,6 +233,10 @@ export async function searchLocalAgentLessonConversations(lesson: LessonIdentity
     }
   }
   return matches
+}
+/** @deprecated 兼容旧签名；新代码使用 searchLocalAgentConversations。 */
+export async function searchLocalAgentLessonConversations(lesson: LessonIdentity, query: string): Promise<{ conversationId: string; excerpt: string }[]> {
+  return searchLocalAgentConversations({ kind: 'lesson', lesson }, query)
 }
 
 export async function deleteAllLocalAgentApplicationRecords(): Promise<void> {
@@ -214,7 +253,7 @@ export async function deleteAllLocalAgentApplicationRecords(): Promise<void> {
     if (failed?.status === 'rejected') throw failed.reason
     const scopes = await repository.listStoredWorkspaces()
     for (const scope of scopes) await owner.delete(scope)
-    for (const record of await conversations.listAll()) await conversations.delete(record.lesson, record.conversationId, async () => undefined)
+    for (const record of await conversations.listAll()) await conversations.delete(conversationOwnerOf(record), record.conversationId, async () => undefined)
     await repository.deleteAllStoredRecords()
     await conversations.clearAllRecords()
   } finally {

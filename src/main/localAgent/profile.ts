@@ -1,9 +1,12 @@
 import type { LocalAgentId } from '../../shared/localAgentContract'
 import type { AssetMeta } from '../../shared/contracts/media-v1'
-import { generationAssetAliases, generationDestinationAliases, MAX_GENERATION_PROMPT_BYTES, type GenerationRequest } from '../../shared/generationContract'
+import { generationAssetAliases, generationDestinationAliases, generationRequestSchema, MAX_GENERATION_PROMPT_BYTES, type GenerationRequest } from '../../shared/generationContract'
 import path from 'node:path'
 import { courseAgentSkills, candidateMediaFileGuidance, publicCourseReplyGuidance } from '../../shared/courseAgentSkills'
+import { courseAgentTaskGuidance, generationRepairFeedbackGuidance } from '../../shared/courseAgentTaskGuidance'
 import { GENERATION_OPEN, GENERATION_CLOSE, GENERATION_RESULT_OPEN, GENERATION_RESULT_CLOSE } from '../../shared/generationResult'
+import { generationTaskFactsPromptProjection } from '../../shared/generationTaskFactsProjection'
+import { compactGenerationPage } from '../../shared/generationPageProjection'
 import { generationCapabilityDirectory } from './capabilityWorkspace'
 import { candidateMediaDeliveryAccess } from './candidateMediaDelivery'
 
@@ -132,7 +135,7 @@ export function generationInitialRequestForPrompt(request: GenerationRequest) {
     initialContext.capabilities = capabilities
   }
   const { files: _files, ...observationIdentity } = full.observation ?? {}
-  const { destinations: _destinations, execution, assetAliases: fullAssetAliases, ...wire } = full
+  const { destinations: _destinations, execution, assetAliases: fullAssetAliases, taskFacts, ...wire } = full
   const referencedAssetIds = initialReferencedAssetIds(initialContext)
   const reusable = initialReusableImageAssets(request, context ?? {}, fullAssetAliases)
   const assetAliases = { ...Object.fromEntries(Object.entries(fullAssetAliases).filter(([, id]) => referencedAssetIds.has(id))), ...reusable?.aliases }
@@ -161,16 +164,39 @@ export function generationInitialRequestForPrompt(request: GenerationRequest) {
       sessionGeneration: _generation, ownerKey: _ownerKey, ...scope } = destination.scope
     return [alias, { kind: destination.kind, scope }]
   }))
-  return { ...wire,
+  const compactFacts = generationTaskFactsPromptProjection(taskFacts,
+    target => targetAliases.get(JSON.stringify(target)) ?? target)
+  const initial = { ...wire,
+    ...(compactFacts ? { taskFacts: compactFacts } : {}),
     destinationAliases: initialDestinations,
     ...(execution ? { deadlineAt: execution.deadlineAt } : {}),
     ...(context ? { context: { ...initialContext, ...(reusable ? { assets: reusable.assets } : {}) } } : {}),
     ...(full.observation ? { observation: observationIdentity } : {}),
     ...(Object.keys(assetAliases).length ? { assetAliases } : {}),
     resourceIndex: full.resourceIndex.filter(file => !['resources/project/document.json', 'resources/project/targets.json'].includes(file.path)).map(({ encoding: _encoding, ...file }) => file),
-    requestDetails: { path: 'request.json', fields: ['destinationAliases', 'context.assets', 'assetAliases', 'context.runtimeSources', ...(initialContext.navigation ? ['context.navigation'] : []), 'observation.files', 'context.capabilities.applicability', 'context.capabilities.createRecommendations'],
+    requestDetails: { path: 'request.json', fields: ['destinationAliases', 'context.assets', 'assetAliases', 'context.runtimeSources', ...(taskFacts ? ['taskFacts'] : []), ...(initialContext.navigation ? ['context.navigation'] : []), 'observation.files', 'context.capabilities.applicability', 'context.capabilities.createRecommendations'],
       ...(reusable ? { assetInventory: reusable.coverage } : {}) },
   }
+  const bytes = (value: unknown) => Buffer.byteLength(JSON.stringify(value), 'utf8')
+  const pageId = (page: unknown) => page && typeof page === 'object' && !Array.isArray(page)
+    ? Reflect.get(page, 'location') && typeof Reflect.get(page, 'location') === 'object' ? Reflect.get(Reflect.get(page, 'location'), 'id') : undefined : undefined
+  const withPageProjection = (pages: readonly unknown[], mode: 'non-current-summary' | 'all-summary') => {
+    const context = initial.context && typeof initial.context === 'object' && !Array.isArray(initial.context) ? initial.context as Record<string, unknown> : undefined
+    if (!context) return initial
+    return { ...initial, context: { ...context, pages,
+      pageProjection: { version: 1, mode, inlineLocationId: initialContext.focusLocationId, fullPages: 'resources/project/targets.json',
+        omittedLocations: pages.filter(page => { const value = page && typeof page === 'object' && !Array.isArray(page) ? page as Record<string, unknown> : {}; return value.details }).map(page => pageId(page)),
+        instruction: mode === 'non-current-summary'
+          ? '这是同一 course scope 的紧凑观察。当前活动位置内联完整内容；其他位置为导航摘要。需要完整内容时按 locationId 读取 projectTargets，不把摘要当完整观察。'
+          : '这是同一 course scope 的资源化观察。所有位置仅保留导航摘要；需要完整内容时按 locationId 读取 projectTargets，不把摘要当完整观察。' } } }
+  }
+  if (initialContext.reference === 'course' && initialContext.modificationScope === 'project' && bytes(initial) > MAX_GENERATION_PROMPT_BYTES) {
+    const pages = Array.isArray(initialContext.pages) ? initialContext.pages : []
+    const compact = withPageProjection(pages.map(page => pageId(page) === initialContext.focusLocationId ? page : compactGenerationPage(page)), 'non-current-summary')
+    return bytes(compact) <= MAX_GENERATION_PROMPT_BYTES
+      ? compact : withPageProjection(pages.map(compactGenerationPage), 'all-summary')
+  }
+  return initial
 }
 
 /** Native process environment locates the current request without transcribing
@@ -186,7 +212,7 @@ export function generationProfileForPrompt(profile: ReturnType<typeof createGene
 export type GenerationPromptPhase = 'initial' | 'host-feedback'
 
 /** Resource bytes and full capability files stay on demand in both phases. */
-export function buildGenerationPrompt(adapter: LocalAgentId, request: GenerationRequest, candidateRoot: string, phase: GenerationPromptPhase = 'initial'): string {
+function buildGenerationPromptUnchecked(adapter: LocalAgentId, request: GenerationRequest, candidateRoot: string, phase: GenerationPromptPhase): string {
   const profile = createGenerationProfile(adapter, request, undefined, candidateRoot)
   const capabilityContext = request.context && typeof request.context === 'object' && !Array.isArray(request.context)
     ? Reflect.get(request.context, 'capabilities') : undefined
@@ -196,14 +222,14 @@ export function buildGenerationPrompt(adapter: LocalAgentId, request: Generation
   const channel = profile.resultChannel
   const terminal = (kind: 'answer' | 'edit') => `${GENERATION_RESULT_OPEN}${JSON.stringify({ version: 1, requestId: request.requestId, kind })}${GENERATION_RESULT_CLOSE}`
   const output = channel === 'session-staging-file'
-    ? `draft.json={summary,steps,afterCommit}。node <fileAccess.candidateHelper> --request <request.json> --input <draft.json> [--check]生成candidate.json；三态边界：--check通过返回status:prechecked/delivery:not-delivered且未写candidate.json，不算交付；去掉--check写文件后返回status:ready-for-host/delivery:ready-for-host/candidateFile:candidate.json，只是候选但未提交；只有宿主最终回执committed/unchanged才可声称已应用。勿手抄路径/UUID/base64。候选附${terminal('edit')}；无新候选将kind改为answer。`
+    ? `draft.json={summary,steps,afterCommit}。交付只调用一次 node <fileAccess.candidateHelper> --request <request.json> --input <draft.json>；不加--check会预检并写candidate.json，返回status:ready-for-host/delivery:ready-for-host/candidateFile:candidate.json；仅检查才加--check，返回status:prechecked/delivery:not-delivered且不写文件；禁止同一草稿先check再生成。仅宿主committed/unchanged才算应用。勿手抄路径/UUID/base64。候选附${terminal('edit')}；无候选用answer。`
     : channel === 'app-server-json-schema'
       ? 'final_answer按outputSchema：编辑kind=edit/reply=null。多步写本轮candidate.json并检查：helper生成的完整version=1保持原样；手写version=2使用本轮destination别名字符串，不写carrier，step.input为对象。不得只改version混用两种步骤格式；预检拒绝后须修正再交付。candidate只交{version:1,requestId:本轮ID,candidateFile:"candidate.json"}。小候选直接交candidate，step.input用JSON字符串。答复kind=reply/reply=文本/candidate=null。'
       : `候选只在最终正文用 ${GENERATION_OPEN}JSON${GENERATION_CLOSE} 交付，写 candidate.json 不算交付。没有新候选（含宿主提交后的完成确认）直接自然语言回复。`
   return [
     publicCourseReplyGuidance,
     phase === 'host-feedback'
-      ? '这是同一任务的宿主反馈与目标核对阶段，不是重新执行原请求。以正式回执和当前观察核对原目标；已完成则直接答复，只有尚未完成的具体差距才提交下一阶段候选。“再放大一点”等相对修改不得因收到新观察再次累计执行。request.json.reusableArtifacts 可复用上轮文件成果，须核对当前基线后修正。'
+      ? `这是同一任务的宿主反馈与目标核对阶段，不是重新执行原请求。以正式回执和当前观察核对原目标；已完成则直接答复，只有尚未完成的具体差距才提交下一阶段候选。“再放大一点”等相对修改不得因收到新观察再次累计执行。request.json.reusableArtifacts 可复用上轮文件成果，须核对当前基线后修正。${generationRepairFeedbackGuidance}`
       : request.intent === 'plan'
       ? '本轮只读计划：基于当前范围给出可执行方案，不改课件；仅缺少决定核心目标的信息时提问。'
       : request.intent === 'discuss' ? '本轮只读讨论，禁止修改候选。'
@@ -222,12 +248,47 @@ export function buildGenerationPrompt(adapter: LocalAgentId, request: Generation
     ...(request.destinations.some(destination => destination.kind === 'create') ? [
       'Created destination={kind:"created-item",stepId:"s1",index:0}; new page content={kind:"created-scope",stepId:"s1",parent:{kind:"owner"},insertion:{kind:"append"}}; new page background={kind:"created-background",stepId:"s1"}. Flow body parent={kind:"flow-body",parentBlockId:null}. Combine replacement+insertion freely. Images:media.apply; dynamic:read runtime-api2/3 or component-api4.',
     ] : []),
-    '用户要求纹理、布局、动画或按钮行为时，查看相应实际图面/操作证据再宣布完成；仅有 smoke 不证明效果正确。观察后只修具体差距，不为总结续轮。Slide标题居中须textStyle.align=center且frame水平居中。',
+    '用户要求纹理、布局、动画或按钮行为时，查看相应实际图面/操作证据再宣布完成；仅有 smoke 不证明效果正确。观察后只修具体差距，不为总结续轮。',
+    ...courseAgentTaskGuidance(request),
     ...(mayApplyImage ? [candidateMediaFileGuidance] : []),
     ] : ['本轮只读，按当前事实答复，不生成候选。']),
     JSON.stringify({ profile: generationProfileForPrompt(profile) }),
     JSON.stringify(generationInitialRequestForPrompt(request)),
   ].join('\n')
+}
+
+function pageProjectionRequest(request: GenerationRequest, mode: 'non-current-summary' | 'all-summary'): GenerationRequest | undefined {
+  const context = request.context && typeof request.context === 'object' && !Array.isArray(request.context) ? request.context as Record<string, unknown> : undefined
+  if (!context || context.reference !== 'course' || context.modificationScope !== 'project' || !Array.isArray(context.pages)) return undefined
+  const pageId = (page: unknown) => page && typeof page === 'object' && !Array.isArray(page)
+    ? Reflect.get(page, 'location') && typeof Reflect.get(page, 'location') === 'object' ? Reflect.get(Reflect.get(page, 'location'), 'id') : undefined : undefined
+  // Optional summary labels are omitted on the JSON wire. Normalize that
+  // projection before validating it as JSON context, rather than introducing
+  // undefined properties into an otherwise valid frozen request.
+  const pages = context.pages.map(page => mode === 'non-current-summary' && pageId(page) === context.focusLocationId
+    ? page : JSON.parse(JSON.stringify(compactGenerationPage(page))))
+  return generationRequestSchema.parse({ ...request, context: { ...context, pages,
+    pageProjection: { version: 1, mode, inlineLocationId: context.focusLocationId, fullPages: 'resources/project/targets.json',
+      omittedLocations: pages.filter(page => page && typeof page === 'object' && !Array.isArray(page) && Reflect.has(page, 'details')).map(page => pageId(page)),
+      instruction: mode === 'non-current-summary'
+        ? '这是同一 course scope 的紧凑观察。当前活动位置内联完整内容；其他位置为导航摘要。需要完整内容时按 locationId 读取 projectTargets，不把摘要当完整观察。'
+        : '这是同一 course scope 的资源化观察。所有位置仅保留导航摘要；需要完整内容时按 locationId 读取 projectTargets，不把摘要当完整观察。' } } })
+}
+
+/** Measure the fully wrapped native prompt. If fixed guidance plus the final
+ * request projection still exceeds the send budget, compact the course pages
+ * again before returning; the harness remains the final rejection boundary. */
+export function buildGenerationPrompt(adapter: LocalAgentId, request: GenerationRequest, candidateRoot: string, phase: GenerationPromptPhase = 'initial', maxBytes = MAX_GENERATION_PROMPT_BYTES): string {
+  const prompt = buildGenerationPromptUnchecked(adapter, request, candidateRoot, phase)
+  if (Buffer.byteLength(prompt, 'utf8') <= maxBytes) return prompt
+  const nonCurrent = pageProjectionRequest(request, 'non-current-summary')
+  if (nonCurrent) {
+    const projected = buildGenerationPromptUnchecked(adapter, nonCurrent, candidateRoot, phase)
+    if (Buffer.byteLength(projected, 'utf8') <= maxBytes) return projected
+    const allSummary = pageProjectionRequest(request, 'all-summary')
+    if (allSummary) return buildGenerationPromptUnchecked(adapter, allSummary, candidateRoot, phase)
+  }
+  return prompt
 }
 
 export function createGenerationProfile(adapter: LocalAgentId, request: GenerationRequest,

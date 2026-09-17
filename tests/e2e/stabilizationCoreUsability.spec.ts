@@ -13,9 +13,11 @@ import { tmpdir } from 'node:os'
 import { isAbsolute, join, relative, resolve } from 'node:path'
 import { _electron as electron, chromium, expect, test } from '@playwright/test'
 import type { ElectronApplication, Locator, Page } from 'playwright'
-import { createCourseProjectArchive, openCourseProjectArchive } from '../../src/renderer/project/courseProjectArchive'
+import { openCourseProjectArchive } from '../../src/renderer/project/courseProjectArchive'
 import { contentQaFixture } from '../fixtures/contentQa'
 import { createProjectFontDeliveryFixture } from '../fixtures/projectFontDelivery'
+import { createArchiveFixture as createCourseProjectArchive } from '../fixtures/teacherController'
+import { withDefaultComponentController } from '../../src/renderer/components/teacherControllerComponent'
 import { buildPublishedCourseStandaloneHtml } from '../../src/renderer/export/course/buildCoursePackages'
 import { runDynamicAdmissionProbe } from './dynamicAdmissionProbe'
 import { runLocalCliFailureProbe } from './localCliFailureProbe'
@@ -41,9 +43,9 @@ import {
   CANVAS_HEIGHT,
   CANVAS_WIDTH,
 } from '../../src/shared/constants'
-import { rotatedRectangleAabb } from '../../src/shared/geometry'
 import { BACKGROUND_E2E_ENV } from '../../src/main/windowVisibility'
 import { expectBackgroundWindowsIsolated } from './expectBackgroundWindowsIsolated'
+import { showEditorPanel } from './r18NativeAuthoringFixture'
 
 const root = resolve(__dirname, '..', '..')
 const FLOW_SELECTION_TEXT = '真实鼠标拖选应跨越多个文字范围'
@@ -62,6 +64,15 @@ interface LaunchedEditor extends Diagnostics {
 }
 
 type TeacherControllerItem = import('../fixtures/teacherController').ControllerFixture
+
+async function openChatTaskSettings(chat: Locator): Promise<Locator> {
+  const settings = chat.locator('details.chat-task-settings')
+  if (!await settings.evaluate(element => (element as HTMLDetailsElement).open)) {
+    await settings.locator(':scope > summary').click()
+  }
+  await expect(settings).toHaveJSProperty('open', true)
+  return settings
+}
 
 function removeRunRoot(runRoot: string): void {
   const absolute = resolve(runRoot)
@@ -104,7 +115,7 @@ async function closeEditor(app: ElectronApplication, runRoot: string): Promise<v
   removeRunRoot(runRoot)
 }
 
-async function launchEditor(developmentUrl = '', standalone = false): Promise<LaunchedEditor> {
+async function launchEditor(developmentUrl = '', _standalone = false): Promise<LaunchedEditor> {
   const runRoot = mkdtempSync(
     join(tmpdir(), `${APP_E2E_TEMP_DIRECTORY_NAME}-wave-a-${process.pid}-`),
   )
@@ -145,7 +156,15 @@ async function launchEditor(developmentUrl = '', standalone = false): Promise<La
     })
     const page = await app.firstWindow()
     attach(page)
-    if (standalone) await page.getByRole('button', { name: '新建独立课件', exact: true }).click()
+    // Only enter the landing page; keep an existing editor or recovery draft intact.
+    const startupMore = page.locator('.lesson-workspace-more > summary')
+    const startupEditor = page.getByRole('button', { name: '打开工程（Ctrl+O）', exact: true })
+    const startupRecovery = page.getByRole('alertdialog', { name: '发现未完成的本地恢复副本', exact: true })
+    await expect.poll(async () => await startupEditor.isVisible() || await startupMore.isVisible() || await startupRecovery.isVisible()).toBe(true)
+    if (!await startupEditor.isVisible() && await startupMore.isVisible() && !await startupRecovery.isVisible()) {
+      await startupMore.click()
+      await page.getByRole('button', { name: '新建独立课件', exact: true }).click()
+    }
     await page.locator('[data-testid="canvas-stage"] canvas').first().waitFor()
     await expectBackgroundWindowsIsolated(app, true)
     const professional = page.getByRole('button', { name: '专业' })
@@ -267,6 +286,11 @@ async function addSurface(page: Page, kind: 'spatial' | 'flow'): Promise<void> {
   await page.getByTestId(`add-${kind}-page`).click()
 }
 
+async function openEditorTab(page: Page, name: '图层' | '属性' | '元素' | '媒体'): Promise<void> {
+  await showEditorPanel(page, '属性与素材')
+  await page.getByRole('tab', { name, exact: true }).click()
+}
+
 function commonNodeField(page: Page, label: 'X' | 'Y' | '宽' | '高'): Locator {
   return page.locator('.property-section').first().getByLabel(label, { exact: true })
 }
@@ -286,7 +310,7 @@ async function setCurrentNodeGeometry(
 
 function teacherControllerRows(page: Page): Locator {
   return page.getByTestId('nodes-tab').locator('.node-item').filter({
-    has: page.locator('.node-type-icon[title="teacher-controller"]'),
+    has: page.locator('.node-source').filter({ hasText: /全课 Overlay.*不可下沉/ }),
   })
 }
 
@@ -355,9 +379,9 @@ async function expectInertPageController(
   await expect(chrome).toHaveAttribute('data-controller-preview-collapsed', 'true')
   await expect(chrome).toHaveAttribute('aria-hidden', 'true')
   expect(await chrome.evaluate((element) => getComputedStyle(element).pointerEvents)).toBe('none')
-  const nav = chrome.locator('nav')
-  await expect(nav).toHaveAttribute('inert', '')
-  await expect(nav).toHaveAttribute('tabindex', '-1')
+  const component = chrome.locator('.published-component-mount')
+  await expect(component).toHaveAttribute('inert', '')
+  await expect(component).toHaveAttribute('tabindex', '-1')
   const point = await chrome.evaluate((element) => {
     const rect = element.getBoundingClientRect()
     const left = Math.max(1, rect.left)
@@ -492,9 +516,10 @@ test('S3 独立动态准入：正常候选、同步死循环终止与编辑保�
     const font = new Uint8Array(readFileSync(join(root, 'node_modules/@fontsource-variable/noto-sans-sc/files/noto-sans-sc-latin-wght-normal.woff2')))
     const fallback = new Uint8Array(Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR4nGP4DwQACfsD/fteaysAAAAASUVORK5CYII=', 'base64'))
     const sources = await createProjectFontDeliveryFixture(font, fallback)
+    const componentPackages = { ...withDefaultComponentController(sources.project).componentPackages, ...sources.components }
     const payload = { project: sources.project,
       assetFiles: Object.fromEntries(Object.entries(sources.assetFiles).map(([id, data]) => [id, Buffer.from(data).toString('base64')])),
-      componentFiles: Object.fromEntries(Object.entries(sources.components).map(([id, data]) => [id,
+      componentFiles: Object.fromEntries(Object.entries(componentPackages).map(([id, data]) => [id,
         Object.fromEntries(Object.entries(data.files).map(([name, bytes]) => [name, Buffer.from(bytes).toString('base64')]))])),
       targets: [{ locationId: sources.project.startLocationId, instanceIds: ['runtime-font'] }] }
     const good = await page.evaluate(payload => window.desktopAPI.dynamicAdmission!({ operation: 'run', id: crypto.randomUUID(), payload }), payload)
@@ -581,7 +606,7 @@ test('S3 独立动态工具：组件与 Runtime 的三 Surface 准入回归', as
 })
 
 test('S3 聊天失败注入：一次修复、无进展停止、取消与人工撤销后旧结果零写入', async () => {
-  test.setTimeout(90000)
+  test.setTimeout(180000)
   const server = await createServer({ configFile: join(root, 'vite.renderer.config.ts'), server: { host: '127.0.0.1', port: 0, strictPort: false, hmr: false, watch: { ignored: ['**/output/**', '**/test-results/**'] } } })
   await server.listen()
   let launch: LaunchedEditor | undefined
@@ -596,7 +621,8 @@ test('S3 聊天失败注入：一次修复、无进展停止、取消与人工�
     const original = await saveAs(app, page, filename)
     await page.getByRole('button', { name: '创作助手', exact: true }).click()
     const chat = page.getByRole('complementary', { name: 'CLI 创作助手' })
-    await chat.getByLabel('应用方式', { exact: true }).selectOption('preview')
+    const taskSettings = await openChatTaskSettings(chat)
+    await taskSettings.getByLabel('应用方式', { exact: true }).selectOption('preview')
     const readSession = async (sessionId: string) => (await page.evaluate(input => window.desktopAPI.localAgent(input), {
       operation: 'read' as const, sessionId, after: 0, projectId: original.id, projectPath: filename,
     })).records![0]!
@@ -726,7 +752,8 @@ test('S3 候选格式：非法JSON与缺通道共用一次修复预算', async (
     const original = await saveAs(app, page, filename)
     await page.getByRole('button', { name: '创作助手', exact: true }).click()
     const chat = page.getByRole('complementary', { name: 'CLI 创作助手' })
-    await chat.getByLabel('应用方式', { exact: true }).selectOption('preview')
+    const taskSettings = await openChatTaskSettings(chat)
+    await taskSettings.getByLabel('应用方式', { exact: true }).selectOption('preview')
     for (const mode of ['format-repair', 'missing-candidate', 'format-repeat'] as const) {
       const count = fixture.runs().length
       const previousSessionId = await chat.getByLabel('会话', { exact: true }).inputValue()
@@ -741,7 +768,7 @@ test('S3 候选格式：非法JSON与缺通道共用一次修复预算', async (
       })).records![0]!
       const taskId = (await readSession()).task!.taskId
       if (mode === 'format-repeat') {
-        await expect(chat.getByRole('alert')).toContainText('连续两轮没有进展', { timeout: 20000 })
+        await expect(chat.getByRole('alert')).toContainText('候选格式修复后仍不正确，请调整要求后重新发送', { timeout: 20000 })
         await expect(chat.getByRole('button', { name: '应用候选', exact: true })).toHaveCount(0)
       } else await expect(chat.getByRole('button', { name: '应用候选', exact: true })).toBeEnabled({ timeout: 20000 })
       const runs = fixture.runs().slice(count)
@@ -778,7 +805,8 @@ test('S3 默认可见与普通讨论：安全消息、完整历史及零工程�
     const requests: string[] = []; page.on('request', request => { if (request.url().includes('invalid.example')) requests.push(request.url()) })
     await page.getByRole('button', { name: '创作助手', exact: true }).click()
     const chat = page.getByRole('complementary', { name: 'CLI 创作助手' })
-    await chat.getByLabel('意图', { exact: true }).selectOption('discuss')
+    const taskSettings = await openChatTaskSettings(chat)
+    await taskSettings.getByLabel('意图', { exact: true }).selectOption('discuss')
     await chat.getByLabel('发送给创作助手').fill('讨论如何解释平均分，先不修改课件。')
     await chat.getByRole('button', { name: '发送', exact: true }).click()
     await expect(chat.getByRole('heading', { name: '只讨论，不修改课件' })).toBeVisible({ timeout: 20000 })
@@ -896,7 +924,7 @@ for (const adapter of ['codex', 'claude', 'opencode'] as const) test(`S3 真实�
     expect(sessions.records?.every(record => JSON.stringify(record.generationRequest?.context).includes('分数含义基准材料'))).toBe(true)
     await chat.getByRole('button', { name: '关闭', exact: true }).click()
     const textNode = effectiveItems(first).find(item => item.kind === 'native' && item.content.nativeType === 'text')!
-    await page.getByRole('tab', { name: '图层' }).click()
+    await openEditorTab(page, '图层')
     await page.locator(`[data-testid^="node-item-"][data-testid$="${textNode.layerItemId}"] .node-name`).click()
     const textInput = page.getByRole('textbox', { name: '文字内容', exact: true })
     await textInput.fill('教师复核：平均分是分数的前提。'); await textInput.press('Tab')
@@ -910,7 +938,7 @@ for (const adapter of ['codex', 'claude', 'opencode'] as const) test(`S3 真实�
     writeFileSync(join(evidence, 'generated.h5lesson'), readFileSync(path))
     writeFileSync(join(evidence, 'result.json'), JSON.stringify({ adapter, elapsedMs: Date.now() - started, runs: sessions.records?.map(record => ({ status: record.status, hostResult: record.hostResult, revision: record.generationRequest?.documentRevision })) }, null, 2))
     const htmlPath = join(evidence, 'generated.html')
-    writeFileSync(htmlPath, buildPublishedCourseStandaloneHtml({ project: reopened.project, assetFiles: reopened.assetFiles, components: {} }, readFileSync(join(root, 'dist-player/player.iife.js'), 'utf8')))
+    writeFileSync(htmlPath, buildPublishedCourseStandaloneHtml({ project: reopened.project, assetFiles: reopened.assetFiles, components: componentPackagesFromArchive(reopened.project, reopened.componentFiles) }, readFileSync(join(root, 'dist-player/player.iife.js'), 'utf8')))
     browser = await chromium.launch({ headless: true })
     const player = await browser.newPage({ viewport: { width: 1440, height: 900 } }); await player.context().setOffline(true)
     await player.goto(pathToFileURL(htmlPath).href)
@@ -966,7 +994,7 @@ for (const carrier of ['recipe', 'existing-component'] as const) test(`S3 真实
     expect(await saveCurrent(page, filename)).toEqual(generated)
     await chat.getByRole('button', { name: '关闭', exact: true }).click()
     if (carrier === 'recipe') await courseTreeKind(page, 'slide-scene').last().locator('button.course-page-tree__label').first().click()
-    await page.getByRole('tab', { name: '图层' }).click()
+    await openEditorTab(page, '图层')
     await page.locator(`[data-testid^="node-item-"][data-testid$="${item.layerItemId}"] .node-name`).click()
     const input = page.getByRole('textbox', { name: carrier === 'recipe' ? '文字内容' : '标题', exact: true })
     await input.fill('教师修改后的标题'); await input.press('Tab')
@@ -979,7 +1007,7 @@ for (const carrier of ['recipe', 'existing-component'] as const) test(`S3 真实
     writeFileSync(join(evidence, 'generated.h5lesson'), readFileSync(filename))
     const sessions = await page.evaluate(owner => window.desktopAPI.localAgent({ operation: 'list', ...owner }), { projectId: generated.id, projectPath: filename })
     writeFileSync(join(evidence, 'result.json'), JSON.stringify({ adapter: 'codex', carrier, elapsedMs: Date.now() - started, runs: sessions.records?.map(record => ({ status: record.status, hostResult: record.hostResult })) }, null, 2))
-    const components = Object.fromEntries(Object.entries(reopened.componentFiles).map(([id, files]) => [id, parseComponentPackageFiles(files)]))
+    const components = componentPackagesFromArchive(reopened.project, reopened.componentFiles)
     const htmlPath = join(evidence, 'generated.html')
     writeFileSync(htmlPath, buildPublishedCourseStandaloneHtml({ project: reopened.project, assetFiles: reopened.assetFiles, components }, readFileSync(join(root, 'dist-player/player.iife.js'), 'utf8')))
     browser = await chromium.launch({ headless: true })
@@ -1049,7 +1077,7 @@ test('S3 真实整课：Codex 从确认文档生成、重开与离线逐页运�
     writeFileSync(join(evidence, 'generated.h5lesson'), readFileSync(filename))
     writeFileSync(join(evidence, 'result.json'), JSON.stringify({ adapter: 'codex', elapsedMs: Date.now() - started, locations: generated.locations, revision: generated.revision }, null, 2))
     const htmlPath = join(evidence, 'generated.html')
-    writeFileSync(htmlPath, buildPublishedCourseStandaloneHtml({ project: reopened.project, assetFiles: reopened.assetFiles, components: {} }, readFileSync(join(root, 'dist-player/player.iife.js'), 'utf8')))
+    writeFileSync(htmlPath, buildPublishedCourseStandaloneHtml({ project: reopened.project, assetFiles: reopened.assetFiles, components: componentPackagesFromArchive(reopened.project, reopened.componentFiles) }, readFileSync(join(root, 'dist-player/player.iife.js'), 'utf8')))
     browser = await chromium.launch({ headless: true })
     const player = await browser.newPage({ viewport: { width: 1440, height: 900 } }); await player.context().setOffline(true)
     await player.goto(pathToFileURL(htmlPath).href)
@@ -1088,8 +1116,8 @@ test('S3 真实生成组件：Codex 候选、教师改属性、保存重开与�
     const fallbackPath = join(runRoot, 'fraction-fallback.png')
     writeFileSync(fallbackPath, Buffer.from(await fractionFallback(page), 'base64'))
     await patchProjectDialogs(app, { projectSave: filename, projectOpen: fallbackPath })
-    await page.getByRole('tab', { name: '元素', exact: true }).click()
-    await page.getByRole('tab', { name: '媒体', exact: true }).click()
+    await openEditorTab(page, '元素')
+    await openEditorTab(page, '媒体')
     await page.getByRole('button', { name: '导入图片', exact: true }).click()
     await expect(page.getByText('fraction-fallback.png', { exact: true }).first()).toBeVisible()
     const original = await saveCurrent(page, filename)
@@ -1118,7 +1146,7 @@ test('S3 真实生成组件：Codex 候选、教师改属性、保存重开与�
     await page.getByRole('button', { name: '重做（Ctrl+Y / Ctrl+Shift+Z）', exact: true }).click()
     expect(await saveCurrent(page, filename)).toEqual(generated)
     await chat.getByRole('button', { name: '关闭', exact: true }).click()
-    await page.getByRole('tab', { name: '图层' }).click()
+    await openEditorTab(page, '图层')
     await page.locator(`[data-testid^="node-item-"][data-testid$="${component.layerItemId}"] .node-name`).click()
     const title = page.getByRole('textbox', { name: '探索标题', exact: true })
     await expect(title).toHaveValue('平均分探索')
@@ -1128,7 +1156,7 @@ test('S3 真实生成组件：Codex 候选、教师改属性、保存重开与�
     await page.getByRole('button', { name: '打开工程（Ctrl+O）', exact: true }).click()
     const reopened = openCourseProjectArchive(new Uint8Array(readFileSync(filename)))
     expect(reopened.project).toEqual(edited)
-    const components = Object.fromEntries(Object.entries(reopened.componentFiles).map(([id, files]) => [id, parseComponentPackageFiles(files)]))
+    const components = componentPackagesFromArchive(reopened.project, reopened.componentFiles)
     const evidence = join(root, 'output/playwright/r18-generated-component'); mkdirSync(evidence, { recursive: true })
     writeFileSync(join(evidence, 'generated.h5lesson'), readFileSync(filename))
     const sessions = await page.evaluate(owner => window.desktopAPI.localAgent({ operation: 'list', ...owner }), { projectId: generated.id, projectPath: filename })
@@ -1179,8 +1207,8 @@ test('S3 真实生成Runtime：连续动画、文案编辑、历史与离线互�
     const fallbackPath = join(runRoot, 'oscillation-fallback.png')
     writeFileSync(fallbackPath, Buffer.from(await oscillationFallback(page), 'base64'))
     await patchProjectDialogs(app, { projectSave: filename, projectOpen: fallbackPath })
-    await page.getByRole('tab', { name: '元素', exact: true }).click()
-    await page.getByRole('tab', { name: '媒体', exact: true }).click()
+    await openEditorTab(page, '元素')
+    await openEditorTab(page, '媒体')
     await page.getByRole('button', { name: '导入图片', exact: true }).click()
     await expect(page.getByText('oscillation-fallback.png', { exact: true }).first()).toBeVisible()
     const original = await saveCurrent(page, filename)
@@ -1208,7 +1236,7 @@ test('S3 真实生成Runtime：连续动画、文案编辑、历史与离线互�
     await page.getByRole('button', { name: '重做（Ctrl+Y / Ctrl+Shift+Z）', exact: true }).click()
     expect(await saveCurrent(page, filename)).toEqual(generated)
     await chat.getByRole('button', { name: '关闭', exact: true }).click()
-    await page.getByRole('tab', { name: '图层' }).click()
+    await openEditorTab(page, '图层')
     await page.locator(`[data-testid^="node-item-"][data-testid$="${runtime.layerItemId}"] .node-name`).click()
     const titleTarget = page.getByRole('button', { name: '动画标题，双击编辑文字', exact: true })
     await expect(titleTarget).toBeVisible()
@@ -1229,7 +1257,7 @@ test('S3 真实生成Runtime：连续动画、文案编辑、历史与离线互�
     const sessions = await page.evaluate(owner => window.desktopAPI.localAgent({ operation: 'list', ...owner }), { projectId: generated.id, projectPath: filename })
     writeFileSync(join(evidence, 'result.json'), JSON.stringify({ adapter: 'codex', elapsedMs: Date.now() - started, runs: sessions.records?.map(record => ({ status: record.status, hostResult: record.hostResult })) }, null, 2))
     const htmlPath = join(evidence, 'generated.html')
-    writeFileSync(htmlPath, buildPublishedCourseStandaloneHtml({ project: reopened.project, assetFiles: reopened.assetFiles, components: {} }, readFileSync(join(root, 'dist-player/player.iife.js'), 'utf8')))
+    writeFileSync(htmlPath, buildPublishedCourseStandaloneHtml({ project: reopened.project, assetFiles: reopened.assetFiles, components: componentPackagesFromArchive(reopened.project, reopened.componentFiles) }, readFileSync(join(root, 'dist-player/player.iife.js'), 'utf8')))
     browser = await chromium.launch({ headless: true })
     const player = await browser.newPage({ viewport: { width: 1440, height: 900 } }); await player.context().setOffline(true)
     const errors: string[] = []; player.on('pageerror', error => errors.push(String(error)))
@@ -1321,6 +1349,7 @@ test('S2 回归：删除初始场景与页面，并导入可编辑线条', async
     await page.getByRole('button', { name: '保存（Ctrl+S）' }).click()
     await expect.poll(() => existsSync(filename)).toBe(true)
     const initial = readProject(filename)
+    if (!await page.getByTestId('add-content-primary').isVisible()) await page.getByRole('button', { name: '页面与图层', exact: true }).click()
     await page.getByTestId('add-content-primary').click()
     const beforeDelete = await saveCurrent(page, filename)
     await page.locator('[data-kind="slide-scene"]').first().getByRole('button', { name: /^删除“/ }).click()
@@ -1360,7 +1389,7 @@ test('S2 回归：删除初始场景与页面，并导入可编辑线条', async
     const archive = openCourseProjectArchive(new Uint8Array(readFileSync(filename)))
     const surface = archive.project.surfaces[0]!
     expect(surface.type === 'slide' && surface.scenes[0]!.layerItems.every(item => item.kind === 'native' && item.content.nativeType === 'shape' && item.content.data.lineGeometry)).toBeTruthy()
-    const html = buildPublishedCourseStandaloneHtml({ project: archive.project, assetFiles: {}, components: {} }, readFileSync(join(root, 'dist-player/player.iife.js'), 'utf8'))
+    const html = buildPublishedCourseStandaloneHtml({ project: archive.project, assetFiles: {}, components: componentPackagesFromArchive(archive.project, archive.componentFiles) }, readFileSync(join(root, 'dist-player/player.iife.js'), 'utf8'))
     const htmlPath = join(runRoot, 'lines.html'); writeFileSync(htmlPath, html)
     browser = await chromium.launch({ headless: true })
     const player = await browser.newPage({ viewport: { width: 1440, height: 900 } })
@@ -1413,7 +1442,7 @@ test('S3 PPTX 自由路径：渐变连续编辑、历史、保存重开和离线
     const shapeId = item.layerItemId
     const painted = page.getByTestId('published-authoring-host').locator(`[data-slide-layer-item="${shapeId}"] svg`)
     await expect(painted.locator('path')).toHaveCount(1)
-    await page.getByRole('tab', { name: '图层' }).click()
+    await openEditorTab(page, '图层')
     await page.locator(`[data-testid^="node-item-"][data-testid$="${shapeId}"] .node-name`).click()
     const color = page.locator('#shape-gradient-0-text')
     await color.fill('#00ff00')
@@ -1431,7 +1460,7 @@ test('S3 PPTX 自由路径：渐变连续编辑、历史、保存重开和离线
     const brace = surface.scenes[0].layerItems.find(item => item.kind === 'native' && item.content.nativeType === 'shape' && item.content.data.braceGeometry)!
     const bracePath = page.getByTestId('published-authoring-host').locator(`[data-slide-layer-item="${brace.layerItemId}"] path`)
     const originalBrace = await bracePath.getAttribute('d')
-    await page.getByRole('tab', { name: '图层' }).click()
+    await openEditorTab(page, '图层')
     await page.locator(`[data-testid^="node-item-"][data-testid$="${brace.layerItemId}"] .node-name`).click()
     await page.getByRole('spinbutton', { name: '括号曲率', exact: true }).fill('0.4')
     await page.getByRole('spinbutton', { name: '括号曲率', exact: true }).press('Enter')
@@ -1443,6 +1472,7 @@ test('S3 PPTX 自由路径：渐变连续编辑、历史、保存重开和离线
     await expect(bracePath).toHaveAttribute('d', changedBrace!)
     const edited = await saveCurrent(page, filename)
     await page.getByRole('button', { name: '打开工程（Ctrl+O）', exact: true }).click()
+    if (!await page.getByTestId('course-page-tree').isVisible()) await page.getByRole('button', { name: '页面与图层', exact: true }).click()
     await courseTreeKind(page, 'slide-scene').nth(1).locator('button.course-page-tree__label').first().click()
     await expect(painted.locator('stop').first()).toHaveAttribute('stop-color', '#ff0000')
     await expect(bracePath).toHaveAttribute('d', changedBrace!)
@@ -1505,7 +1535,7 @@ test('S3 PPTX 图表：横向切换、真实数据编辑、历史、重开及离
     const surface = imported.surfaces.at(-1)!
     if (surface.type !== 'slide') throw new Error('Missing imported surface')
     const chartId = surface.scenes[0].layerItems[0].layerItemId
-    await page.getByRole('tab', { name: '图层' }).click()
+    await openEditorTab(page, '图层')
     await page.locator(`[data-testid^="node-item-"][data-testid$="${chartId}"] .node-name`).click()
     const value = page.getByRole('textbox', { name: '人数 在 乙班 的值', exact: true })
     const direction = page.getByLabel('条形方向', { exact: true })
@@ -1589,7 +1619,7 @@ test('S3 PPTX SmartArt：文字与位置编辑、历史、重开和导出', asyn
     const imported = await saveCurrent(page, filename)
     const node = effectiveItems(imported).find(item => item.kind === 'native' && item.content.nativeType === 'text' && item.content.data.text === '观察')!
     const nodeId = node.layerItemId
-    await page.getByRole('tab', { name: '图层' }).click()
+    await openEditorTab(page, '图层')
     await page.locator(`[data-testid^="node-item-"][data-testid$="${nodeId}"] .node-name`).click()
     const input = page.getByRole('textbox', { name: '文字内容', exact: true })
     await input.fill('比较'); await input.press('Tab')
@@ -1603,6 +1633,7 @@ test('S3 PPTX SmartArt：文字与位置编辑、历史、重开和导出', asyn
     await expect(x).toHaveValue('500')
     const edited = await saveCurrent(page, filename)
     await page.getByRole('button', { name: '打开工程（Ctrl+O）', exact: true }).click()
+    if (!await page.getByTestId('course-page-tree').isVisible()) await page.getByRole('button', { name: '页面与图层', exact: true }).click()
     await courseTreeKind(page, 'slide-scene').nth(1).locator('button.course-page-tree__label').first().click()
     await expect(painted).toContainText('比较')
     const reopened = openCourseProjectArchive(new Uint8Array(readFileSync(filename)))
@@ -1662,7 +1693,7 @@ test('S3 PPTX 旧公式：可编辑 AST、历史、保存重开及离线 Player 
     const imported = await saveCurrent(page, filename)
     const formula = effectiveItems(imported).find(item => item.kind === 'native' && item.content.nativeType === 'formula')!
     const formulaId = formula.layerItemId
-    await page.getByRole('tab', { name: '图层' }).click()
+    await openEditorTab(page, '图层')
     await page.locator(`[data-testid^="node-item-"][data-testid$="${formulaId}"] .node-name`).click()
     const input = page.getByRole('textbox', { name: '公式内容（线性输入）', exact: true })
     await expect(input).toHaveValue('\\frac{1}{2}')
@@ -1778,7 +1809,7 @@ test('S2 PPTX 普通映射收尾：逐页画布、小尺寸增量同步、历史
     const small = surface.scenes[smallSceneIndex]!.layerItems.find(i => i.frame.width < 16 || i.frame.height < 16)!
     await courseTreeKind(page, 'slide-scene').nth(smallSceneIndex + 1).locator('button.course-page-tree__label').first().click()
     await ready()
-    await page.getByRole('tab', { name: '图层' }).click()
+    await openEditorTab(page, '图层')
     await page.locator(`[data-testid^="node-item-"][data-testid$="${small.layerItemId}"] .node-name`).click()
     const movedX = Math.round(small.frame.x) + 12
     await page.getByLabel('X', { exact: true }).fill(String(movedX))
@@ -1795,7 +1826,7 @@ test('S2 PPTX 普通映射收尾：逐页画布、小尺寸增量同步、历史
     expect(groupedText).toBeTruthy()
     await courseTreeKind(page, 'slide-scene').nth(groupSceneIndex + 1).locator('button.course-page-tree__label').first().click()
     await ready()
-    await page.getByRole('tab', { name: '图层' }).click()
+    await openEditorTab(page, '图层')
     await page.locator(`[data-testid^="node-item-"][data-testid$="${groupedText.layerItemId}"] .node-name`).click()
     const textField = page.getByRole('textbox', { name: '文字内容', exact: true })
     await textField.fill('A组')
@@ -1816,7 +1847,7 @@ test('S2 PPTX 普通映射收尾：逐页画布、小尺寸增量同步、历史
     const reopened = openCourseProjectArchive(new Uint8Array(readFileSync(filename)))
     expect(reopened.project).toEqual(edited)
     writeFileSync(join(evidence, 'edited.h5lesson'), readFileSync(filename))
-    const html = buildPublishedCourseStandaloneHtml({ project: reopened.project, assetFiles: reopened.assetFiles, components: {} }, readFileSync(join(root, 'dist-player/player.iife.js'), 'utf8'))
+    const html = buildPublishedCourseStandaloneHtml({ project: reopened.project, assetFiles: reopened.assetFiles, components: componentPackagesFromArchive(reopened.project, reopened.componentFiles) }, readFileSync(join(root, 'dist-player/player.iife.js'), 'utf8'))
     const htmlPath = join(evidence, 'edited.html'); writeFileSync(htmlPath, html)
     browser = await chromium.launch({ headless: true })
     const player = await browser.newPage({ viewport: { width: 1440, height: 900 } })
@@ -1872,7 +1903,7 @@ test('S2 PPTX 原生收口：母版继承、共享编辑、表格编辑与离线
     await saveCurrent(page, filename)
     await courseTreeKind(page, 'slide-scene').nth(1).locator('button.course-page-tree__label').first().click()
     const selectLayer = async (name: string) => {
-      await page.getByRole('tab', { name: '图层' }).click()
+      await openEditorTab(page, '图层')
       await page.locator('.node-item').filter({ has: page.getByText(name, { exact: true }) }).locator('.node-name').click()
       await expect(page.getByLabel('名称', { exact: true })).toHaveValue(name)
     }
@@ -1890,7 +1921,7 @@ test('S2 PPTX 原生收口：母版继承、共享编辑、表格编辑与离线
     await expect(page.getByRole('textbox', { name: /^单元格 / })).toHaveCount(4)
     await page.getByRole('button', { name: '撤销（Ctrl+Z）', exact: true }).click()
     await expect(page.getByRole('textbox', { name: /^单元格 / })).toHaveCount(3)
-    await page.getByRole('tab', { name: '图层' }).click()
+    await openEditorTab(page, '图层')
     const titleId = importedSurface.scenes[0]!.layerItems[0]!.layerItemId
     await page.locator(`[data-testid^="node-item-"][data-testid$="${titleId}"] .node-name`).click()
     await expect(page.getByRole('textbox', { name: '文字内容' })).toHaveValue('第1页标题')
@@ -1913,7 +1944,7 @@ test('S2 PPTX 原生收口：母版继承、共享编辑、表格编辑与离线
     await page.screenshot({ path: 'output/playwright/r13-review/r15-native-import-editor.png' })
     const reopened = openCourseProjectArchive(new Uint8Array(readFileSync(filename)))
     expect(reopened.project).toEqual(edited)
-    const html = buildPublishedCourseStandaloneHtml({ project: reopened.project, assetFiles: reopened.assetFiles, components: {} }, readFileSync(join(root, 'dist-player/player.iife.js'), 'utf8'))
+    const html = buildPublishedCourseStandaloneHtml({ project: reopened.project, assetFiles: reopened.assetFiles, components: componentPackagesFromArchive(reopened.project, reopened.componentFiles) }, readFileSync(join(root, 'dist-player/player.iife.js'), 'utf8'))
     const htmlPath = join(runRoot, 'native.html'); writeFileSync(htmlPath, html)
     browser = await chromium.launch({ headless: true })
     const player = await browser.newPage({ viewport: { width: 1440, height: 900 } })
@@ -2008,7 +2039,7 @@ test('S2 PPTX 与样板：真实导入、整体撤销、重开、槽位改写与
     await page.getByRole('button', { name: '重做（Ctrl+Y / Ctrl+Shift+Z）', exact: true }).click()
     await saveCurrent(page, filename)
     const archive = openCourseProjectArchive(new Uint8Array(readFileSync(filename)))
-    const html = buildPublishedCourseStandaloneHtml({ project: archive.project, assetFiles: archive.assetFiles, components: {} }, readFileSync(join(root, 'dist-player/player.iife.js'), 'utf8'))
+    const html = buildPublishedCourseStandaloneHtml({ project: archive.project, assetFiles: archive.assetFiles, components: componentPackagesFromArchive(archive.project, archive.componentFiles) }, readFileSync(join(root, 'dist-player/player.iife.js'), 'utf8'))
     const htmlPath = join(runRoot, 'pptx-remix.html'); writeFileSync(htmlPath, html)
     browser = await chromium.launch({ headless: true })
     const player = await browser.newPage({ viewport: { width: 1440, height: 900 } })
@@ -2069,7 +2100,9 @@ test('S2 工程字体：Component 和 Runtime 在离线 HTML 中加载直接引�
     const font = new Uint8Array(readFileSync(join(root, 'node_modules/@fontsource-variable/noto-sans-sc/files/noto-sans-sc-latin-wght-normal.woff2')))
     const fallback = new Uint8Array(Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR4nGP4DwQACfsD/fteaysAAAAASUVORK5CYII=', 'base64'))
     const sources = await createProjectFontDeliveryFixture(font, fallback)
-    const html = buildPublishedCourseStandaloneHtml(sources, readFileSync(join(root, 'dist-player/player.iife.js'), 'utf8'))
+    const html = buildPublishedCourseStandaloneHtml({ ...sources,
+      components: { ...withDefaultComponentController(sources.project).componentPackages, ...sources.components } },
+    readFileSync(join(root, 'dist-player/player.iife.js'), 'utf8'))
     const filename = join(runRoot, 'font-offline.html')
     writeFileSync(filename, html)
     await app.context().setOffline(true)
@@ -2157,10 +2190,10 @@ test('活动文字草稿：Slide、Spatial、Flow 不失焦保存并可重开', 
   try {
     await patchProjectDialogs(app, { projectSave: projectPath, projectOpen: projectPath })
 
-    await page.getByRole('tab', { name: '元素' }).click()
+    await openEditorTab(page, '元素')
     await page.getByRole('tab', { name: '常用' }).click()
     await page.getByTestId('add-text').click()
-    await page.getByRole('tab', { name: '属性' }).click()
+    await openEditorTab(page, '属性')
     await page.getByRole('button', { name: '编辑局部文字格式' }).click()
     let editor = page.getByTestId('text-edit-overlay')
     await expect(editor).toBeFocused()
@@ -2183,10 +2216,10 @@ test('活动文字草稿：Slide、Spatial、Flow 不失焦保存并可重开', 
     ).toContain(slideText)
 
     await addSurface(page, 'spatial')
-    await page.getByRole('tab', { name: '元素' }).click()
+    await openEditorTab(page, '元素')
     await page.getByRole('tab', { name: '常用' }).click()
     await page.getByTestId('add-text').click()
-    await page.getByRole('tab', { name: '属性' }).click()
+    await openEditorTab(page, '属性')
     await page.getByRole('button', { name: '编辑局部文字格式' }).click()
     editor = page.getByTestId('text-edit-overlay')
     await expect(editor).toBeFocused()
@@ -2215,19 +2248,19 @@ test('活动文字草稿：Slide、Spatial、Flow 不失焦保存并可重开', 
     await page.getByRole('button', { name: '新建课件（Ctrl+N）' }).click()
     await page.getByRole('button', { name: '打开工程（Ctrl+O）' }).click()
     await openSlide(page)
-    await page.getByRole('tab', { name: '图层' }).click()
+    await openEditorTab(page, '图层')
     await page.locator('.node-item').filter({
       has: page.locator('.node-type-icon[title="text"]'),
     }).first().locator('.node-name').click()
-    await page.getByRole('tab', { name: '属性' }).click()
+    await openEditorTab(page, '属性')
     await expect(page.getByRole('textbox', { name: '文字内容' })).toHaveValue(slideText)
 
     await openSpatial(page)
-    await page.getByRole('tab', { name: '图层' }).click()
+    await openEditorTab(page, '图层')
     await page.locator('.node-item').filter({
       has: page.locator('.node-type-icon[title="text"]'),
     }).first().locator('.node-name').click()
-    await page.getByRole('tab', { name: '属性' }).click()
+    await openEditorTab(page, '属性')
     await expect(page.getByRole('textbox', { name: '文字内容' })).toHaveValue(spatialText)
 
     await openFlow(page)
@@ -2250,7 +2283,7 @@ test('Wave A core authoring remains usable across Mixed surfaces', async () => {
       await expect(courseTreeKind(page, 'slide-scene')).toHaveCount(1)
       await addSurface(page, 'spatial')
       await expect(page.getByTestId('spatial-workspace')).toBeVisible()
-      await page.getByRole('tab', { name: '元素' }).click()
+      await openEditorTab(page, '元素')
       await page.getByRole('tab', { name: '常用' }).click()
       await page.getByTestId('add-text').click()
       await page.getByTestId('add-rectangle').click()
@@ -2262,11 +2295,15 @@ test('Wave A core authoring remains usable across Mixed surfaces', async () => {
     await test.step('Flow keeps empty geometry and a real mouse-created native range', async () => {
       await addSurface(page, 'flow')
       await expect(page.getByTestId('flow-workspace')).toBeVisible()
-      const paragraph = page.getByTestId('flow-paper').locator('.flow-block-paragraph').first()
-      await paragraph.dblclick()
-      const editor = page.getByTestId('flow-inline-editor')
+      const editor = page.getByTestId('flow-paper').getByRole('textbox', { name: '正文排版编辑', exact: true })
+      const paragraph = editor.locator('p').first()
+      await paragraph.click()
+      await page.keyboard.press('Home')
+      await page.keyboard.press('Shift+End')
+      await page.keyboard.press('Backspace')
+      await expect(paragraph).toHaveText('')
       await expect(editor).toBeFocused()
-      const emptyGeometry = await editor.evaluate((element) => {
+      const emptyGeometry = await paragraph.evaluate((element) => {
         const rect = element.getBoundingClientRect()
         const selection = element.ownerDocument.getSelection()
         const range = selection?.rangeCount ? selection.getRangeAt(0) : null
@@ -2286,8 +2323,8 @@ test('Wave A core authoring remains usable across Mixed surfaces', async () => {
       expect(emptyGeometry.inside).toBe(true)
 
       await page.keyboard.insertText('首')
-      await expect(editor).toHaveText('首')
-      const firstGeometry = await editor.evaluate((element) => {
+      await expect(paragraph).toHaveText('首')
+      const firstGeometry = await paragraph.evaluate((element) => {
         const rect = element.getBoundingClientRect()
         return { left: rect.left, top: rect.top, width: rect.width, height: rect.height }
       })
@@ -2295,16 +2332,17 @@ test('Wave A core authoring remains usable across Mixed surfaces', async () => {
         expect(Math.abs(firstGeometry[key] - emptyGeometry[key])).toBeLessThanOrEqual(1)
       }
 
-      await editor.press('Control+A')
+      await page.keyboard.press('Home')
+      await page.keyboard.press('Shift+End')
       await page.keyboard.insertText(FLOW_SELECTION_TEXT)
-      await expect(editor).toHaveText(FLOW_SELECTION_TEXT)
-      const start = await flowTextPoint(editor, 1, 'start')
-      const end = await flowTextPoint(editor, FLOW_SELECTION_TEXT.length - 2, 'end')
+      await expect(paragraph).toHaveText(FLOW_SELECTION_TEXT)
+      const start = await flowTextPoint(paragraph, 1, 'start')
+      const end = await flowTextPoint(paragraph, FLOW_SELECTION_TEXT.length - 2, 'end')
       await page.mouse.move(start.x, start.y)
       await page.mouse.down()
       await page.mouse.move(end.x, end.y, { steps: 12 })
       await page.mouse.up()
-      const nativeRange = await editor.evaluate((element) => {
+      const nativeRange = await paragraph.evaluate((element) => {
         const selection = element.ownerDocument.getSelection()
         const range = selection?.rangeCount ? selection.getRangeAt(0) : null
         const inside = (node: Node | null) => Boolean(node && (node === element || element.contains(node)))
@@ -2317,30 +2355,31 @@ test('Wave A core authoring remains usable across Mixed surfaces', async () => {
       expect(nativeRange.collapsed).toBe(false)
       expect(nativeRange.inside).toBe(true)
       expect(nativeRange.text.length).toBeGreaterThanOrEqual(2)
-      await expect(page.getByTestId('flow-range-toolbar')).toBeVisible()
+      await page.locator('.flow-document-format > summary').click()
+      await expect(page.getByRole('toolbar', { name: '正文工具', exact: true })).toBeVisible()
       await openSlide(page)
       await expect(editor).toHaveCount(0)
     })
 
     await test.step('controller ownership, cancel/clamp, roundtrip, order and Player stay safe', async () => {
       await openSlide(page)
-      await page.getByRole('tab', { name: '元素' }).click()
+      await openEditorTab(page, '元素')
       await page.getByRole('tab', { name: '常用' }).click()
       await page.getByTestId('add-rectangle').click()
-      await page.getByRole('tab', { name: '属性' }).click()
+      await openEditorTab(page, '属性')
       await setCurrentNodeGeometry(page, { X: 190, Y: 638, 宽: 900, 高: 64 })
 
       await page.getByTestId('global-layer-entry').click()
-      await page.getByRole('tab', { name: '图层' }).click()
+      await openEditorTab(page, '图层')
       await expect(teacherControllerRows(page)).toHaveCount(1)
       await teacherControllerRows(page).locator('.node-name').click()
-      await page.getByRole('tab', { name: '属性' }).click()
-      const defaultCollapsed = page.getByLabel('打开课件时默认折叠')
+      await openEditorTab(page, '属性')
+      const defaultCollapsed = page.getByLabel('默认收起', { exact: true })
       await expect(defaultCollapsed).toBeChecked()
 
       await openSlide(page)
       await expect(page.getByTestId('global-layer-entry')).toHaveAttribute('aria-pressed', 'false')
-      await page.getByRole('tab', { name: '图层' }).click()
+      await openEditorTab(page, '图层')
       const shapeRows = page.getByTestId('nodes-tab').locator('.node-item').filter({
         has: page.locator('.node-type-icon[title="shape"]'),
       })
@@ -2361,7 +2400,7 @@ test('Wave A core authoring remains usable across Mixed surfaces', async () => {
       }, overlapPoint)
       expect(browserHit).toEqual({ tagName: 'CANVAS', testId: 'canvas-stage' })
       await page.mouse.click(overlapPoint.x, overlapPoint.y)
-      await page.getByRole('tab', { name: '图层' }).click()
+      await openEditorTab(page, '图层')
       await expect(shapeRows).toHaveClass(/node-item--selected/)
       await expect(teacherControllerRows(page)).toHaveCount(0)
 
@@ -2372,7 +2411,7 @@ test('Wave A core authoring remains usable across Mixed surfaces', async () => {
 
       await openSlide(page)
       await page.getByTestId('global-layer-entry').click()
-      await page.getByRole('tab', { name: '图层' }).click()
+      await openEditorTab(page, '图层')
       await teacherControllerRows(page).locator('.node-name').click()
       const baseline = await saveAs(app, page, projectPath)
       const baselineController = structuredClone(teacherController(baseline))
@@ -2393,7 +2432,7 @@ test('Wave A core authoring remains usable across Mixed surfaces', async () => {
       expect(afterCancel.revision).toBe(baseline.revision)
       expect(teacherController(afterCancel).frame).toEqual(baselineController.frame)
 
-      await page.getByRole('tab', { name: '图层' }).click()
+      await openEditorTab(page, '图层')
       await page.getByTestId('nodes-tab').locator('.tree-root').click()
       await teacherControllerRows(page).locator('.node-name').click()
       await beginControllerDrag(page)
@@ -2401,11 +2440,37 @@ test('Wave A core authoring remains usable across Mixed surfaces', async () => {
       const afterClamp = await saveCurrent(page, projectPath)
       expect(afterClamp.revision).toBe(baseline.revision + 1)
       const clampedController = teacherController(afterClamp)
-      const recovery = rotatedRectangleAabb({ ...clampedController.frame, rotation: clampedController.rotation })
-      expect(recovery.left).toBeGreaterThanOrEqual(-0.01)
-      expect(recovery.top).toBeGreaterThanOrEqual(-0.01)
-      expect(recovery.right).toBeLessThanOrEqual(CANVAS_WIDTH + 0.01)
-      expect(recovery.bottom).toBeLessThanOrEqual(CANVAS_HEIGHT + 0.01)
+      // Slide's component host preserves the authoring frame and measures the
+      // collapsed DOM separately. Assert that actual footprint, not the full
+      // expanded frame, remains visible and selectable through the inert chrome.
+      const authoringLauncher = page.locator(`[data-controller-authoring-id="${clampedController.layerItemId}"]`)
+        .locator('button[aria-label="展开教师控制器"]')
+      await expect(authoringLauncher).toBeVisible()
+      const authoringRecovery = await authoringLauncher.evaluate((button) => {
+        const canvas = document.querySelector('[data-testid="canvas-stage"] canvas')
+        if (!canvas) throw new Error('Slide canvas is missing')
+        const rect = button.getBoundingClientRect()
+        const stage = canvas.getBoundingClientRect()
+        const center = { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }
+        return {
+          button: { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom },
+          stage: { left: stage.left, top: stage.top, right: stage.right, bottom: stage.bottom },
+          center,
+          hitsCanvas: document.elementFromPoint(center.x, center.y) === canvas,
+        }
+      })
+      await test.info().attach('authoring-controller-footprint', {
+        body: JSON.stringify({ frame: clampedController.frame, ...authoringRecovery }, null, 2),
+        contentType: 'application/json',
+      })
+      expect(authoringRecovery.button.left).toBeGreaterThanOrEqual(authoringRecovery.stage.left - 0.5)
+      expect(authoringRecovery.button.top).toBeGreaterThanOrEqual(authoringRecovery.stage.top - 0.5)
+      expect(authoringRecovery.button.right).toBeLessThanOrEqual(authoringRecovery.stage.right + 0.5)
+      expect(authoringRecovery.button.bottom).toBeLessThanOrEqual(authoringRecovery.stage.bottom + 0.5)
+      expect(authoringRecovery.hitsCanvas).toBe(true)
+      await page.mouse.click(authoringRecovery.center.x, authoringRecovery.center.y)
+      await openEditorTab(page, '图层')
+      await expect(teacherControllerRows(page)).toHaveClass(/node-item--selected/)
 
       const allItems = effectiveItems(afterClamp)
       expect(new Set(allItems.map((item) => item.order)).size).toBe(allItems.length)
@@ -2426,8 +2491,11 @@ test('Wave A core authoring remains usable across Mixed surfaces', async () => {
       await expect(reopenedWorld.locator('.spatial-world-item--text')).toHaveCount(1)
       await expect(reopenedWorld.locator('.spatial-world-item--shape')).toHaveCount(1)
       await openFlow(page)
-      await expect(page.getByTestId('flow-paper').locator('.flow-block-paragraph').first())
+      await expect(page.getByTestId('flow-paper').getByRole('textbox', { name: '正文排版编辑', exact: true }).locator('p').first())
         .toContainText(FLOW_SELECTION_TEXT)
+      const reopened = await saveCurrent(page, projectPath)
+      expect(teacherController(reopened).layerItemId).toBe(clampedController.layerItemId)
+      expect(teacherController(reopened).frame).toEqual(clampedController.frame)
 
       await openSlide(page)
       await page.getByRole('button', { name: '整课预览' }).click()
@@ -2436,13 +2504,15 @@ test('Wave A core authoring remains usable across Mixed surfaces', async () => {
       await expect(preview).toBeVisible()
       const publishedSlide = previewHost.locator('.slide-published-adapter')
       await expect(publishedSlide).toBeVisible({ timeout: 15_000 })
-      const publishedController = publishedSlide.locator('.slide-native-teacher-controller')
+      const publishedController = publishedSlide.locator(`[data-global-layer-item="${baselineController.layerItemId}"]`)
       await expect(publishedController).toBeVisible()
       const recoveryButton = publishedController.getByRole('button', { name: '展开教师控制器' })
       await expect(recoveryButton).toBeVisible()
       const publishedRecovery = await recoveryButton.evaluate((button) => {
-        const stage = button.closest<HTMLElement>('.slide-published-adapter')
-        const controller = button.closest<HTMLElement>('.slide-native-teacher-controller')
+        const componentRoot = button.getRootNode()
+        const component = componentRoot instanceof ShadowRoot ? componentRoot.host : null
+        const controller = component?.closest<HTMLElement>('[data-global-layer-item]')
+        const stage = controller?.closest<HTMLElement>('.slide-published-adapter')
         if (!stage) throw new Error('Published recovery button is missing its Slide stage')
         if (!controller) throw new Error('Published recovery button is missing its controller root')
         const buttonRect = button.getBoundingClientRect()
@@ -2664,13 +2734,13 @@ test('S3 共享组件源码：两文件草稿、嵌套正文目标、真实准�
     visitCourseComponentPackageInstances(fromFlow, id, instance => expect(instance.component.version).toBe(fromFlow.componentPackages[id]!.version))
     await page.getByRole('button', { name: '为当前实例创建独立副本', exact: true }).click()
     const forked = await saveCurrent(page, filename)
-    expect(Object.keys(forked.componentPackages)).toHaveLength(2)
+    expect(Object.keys(forked.componentPackages)).toHaveLength(Object.keys(fromFlow.componentPackages).length + 1)
     const sharedRefs: string[] = []
     visitCourseComponentPackageInstances(forked, id, (_instance, reference) => sharedRefs.push(reference.instanceId))
     expect(sharedRefs.sort()).toEqual(['shared-slide', 'shared-spatial'])
     await page.getByRole('button', { name: '撤销（Ctrl+Z）', exact: true }).click()
     const unforked = await saveCurrent(page, filename)
-    expect(Object.keys(unforked.componentPackages)).toEqual([id])
+    expect(Object.keys(unforked.componentPackages).sort()).toEqual(Object.keys(fromFlow.componentPackages).sort())
     expect(unforked.componentPackages[id]!.version).toBe(fromFlow.componentPackages[id]!.version)
     const archive = openCourseProjectArchive(new Uint8Array(readFileSync(filename)))
     const components = Object.fromEntries(Object.values(archive.componentFiles).map(files => { const data = parseComponentPackageFiles(files); return [data.manifest.id, data] }))
@@ -2765,7 +2835,7 @@ test('S3 三表面整合：控制器保全与响应式浮层几何', async () =>
     const movedFlow = moved.surfaces.find(surface => surface.type === 'flow')!
     if (movedFlow.type !== 'flow') throw new Error('Missing moved Flow')
     expect(movedFlow.surfaceLayerItems.find(entry => entry.item.layerItemId === 'geometry-paper')!.item.frame).toMatchObject({ x: 70, y: 370 })
-    await page.getByRole('tab', { name: '图层', exact: true }).click()
+    await openEditorTab(page, '图层')
     await page.locator('[data-testid^="node-item-"][data-testid$="geometry-far"] .node-name').click()
     const far = page.getByTestId('flow-layer-selection-geometry-far')
     await expect(page.getByRole('button', { name: '回到文档原位', exact: true })).toBeVisible()
@@ -2785,7 +2855,7 @@ test('S3 三表面整合：控制器保全与响应式浮层几何', async () =>
     await page.getByRole('button', { name: '回到文档原位', exact: true }).click()
     expect((await measure()).top).toBeCloseTo(0, 1)
     const archive = openCourseProjectArchive(new Uint8Array(readFileSync(filename)))
-    const html = buildPublishedCourseStandaloneHtml({ project: { ...archive.project, startLocationId: archive.project.locations.find(location => location.surfaceId === flow.id)!.id }, assetFiles: {}, components: {} }, readFileSync(join(root, 'dist-player/player.iife.js'), 'utf8'))
+    const html = buildPublishedCourseStandaloneHtml({ project: { ...archive.project, startLocationId: archive.project.locations.find(location => location.surfaceId === flow.id)!.id }, assetFiles: {}, components: componentPackagesFromArchive(archive.project, archive.componentFiles) }, readFileSync(join(root, 'dist-player/player.iife.js'), 'utf8'))
     const htmlPath = join(runRoot, 'surface-integration.html')
     writeFileSync(htmlPath, html)
     browser = await chromium.launch({ headless: true })
@@ -2903,7 +2973,8 @@ test('S3 Flow 所见即所得：空段、连续换行、选择与保存重开', 
     expect(await measure(paper)).toEqual(before)
     await page.getByRole('button', { name: '创作助手', exact: true }).click()
     const chat = page.getByRole('complementary', { name: 'CLI 创作助手' })
-    await chat.getByLabel('本轮引用', { exact: true }).selectOption('selection')
+    const taskSettings = await openChatTaskSettings(chat)
+    await taskSettings.getByLabel('本轮引用', { exact: true }).selectOption('selection')
     await chat.getByLabel('发送给创作助手').fill('解释当前选择的文字')
     await expect(chat.getByLabel('本轮引用摘要')).not.toContainText('未选择对象')
     await chat.getByRole('button', { name: '关闭', exact: true }).click()

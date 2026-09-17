@@ -103,7 +103,7 @@ export function FlowWorkspace({ view, sessionToken, assets, selection, textEdit,
     data-flow-project-id={view.projectId} data-flow-surface-id={view.surfaceId} data-flow-location-id={view.locationId} data-flow-active-block-id={view.activeBlockId}
     data-observation-source="authoring" data-observation-project-id={view.projectId} data-observation-revision={view.revision}
     data-observation-session-generation={sessionToken.generation} data-observation-surface-id={view.surfaceId} data-observation-location-id={view.locationId}
-    data-observation-state-id="" data-observation-ready="true" data-observation-draft-token={authoringObservationDraftToken(textEdit)}
+    data-observation-state-id="" data-observation-ready="true" data-observation-draft-token={authoringObservationDraftToken(documentDraft ?? textEdit)}
     style={{ position: 'relative', width: '100%', height: '100%', overflow: 'hidden', isolation: 'isolate', backgroundColor: view.backgroundColor,
       backgroundImage: view.backgroundAssetId && assetUrls[view.backgroundAssetId] ? `url(${JSON.stringify(assetUrls[view.backgroundAssetId])})` : undefined, backgroundSize: 'cover', backgroundPosition: 'center' }}>
     <div ref={setToolbarHost} className="flow-document-format-host" />

@@ -24,7 +24,7 @@ import { aiInputDeliverySchema, aiUserInputSchema, type AiUserInput } from '../.
 import { nativeWorkspaceDirectory } from './process'
 import { NativeCapabilityCache } from './capabilityCache'
 import { candidateChangeKey, failureReasonKey } from './candidateChangeKey'
-import { generationHostFeedback, generationReceiptFeedback } from './generationHostFeedback'
+import { generationCompactHostResult, generationHostFeedback, generationHostResultResource, generationPendingReceiptResource, generationPendingReceiptPrompt } from './generationHostFeedback'
 import { generationRepairInputs } from './generationRepairInputs'
 import { recordAiTaskTiming } from '../../shared/localAgentTiming'
 import { recordAiTaskInputMetrics } from '../../shared/localAgentInputMetrics'
@@ -50,6 +50,8 @@ interface ActiveRun {
   budgetChanged?: () => void
   idleSince?: number
   budgetWrite?: Promise<void>
+  promptPhase: GenerationPromptPhase
+  promptFactory?: (availableBytes: number) => string
 }
 
 function taskMediaIdentity(task: AiTask) {
@@ -263,18 +265,26 @@ export class LocalAgentHarness {
     await this.launch(session, prompt, undefined, undefined, userMessage ?? prompt)
     return session.record.id
   }
-  async resume(workspace: AiWorkspaceIdentity, id: string, prompt: string, userMessage?: string): Promise<string> {
+  async resume(workspace: AiWorkspaceIdentity, id: string, prompt: string, userMessage?: string, preserveTaskBudget = false): Promise<string> {
     if (this.active.has(id)) throw new Error('会话正在运行')
     await this.savePendingFeedback(workspace, id)
     const prior = (await this.list(workspace)).records.find(record => record.id === id)
     if (!prior) throw new Error('会话不存在或没有可恢复的外部身份')
     if (!prior.externalSessionId) throw new Error('会话不存在或没有可恢复的外部身份')
     const session = this.createSession(workspace, prior.adapter, prompt, { kind: 'course' }, [], prior.workingDirectoryId ?? prior.id)
+    if (preserveTaskBudget) {
+      const original = (await this.repository.read(workspace, id)).v2.find(record => record.id === id)?.tasks.at(-1)
+      if (!original?.execution || this.stoppedSessions.has(id) || prior.status === 'cancelled' || ['cancelled', 'partial', 'failed'].includes(original.status)
+        || original.execution.budgetStopReason || Date.now() >= original.execution.deadlineAt) throw new Error('当前阶段已停止或原任务预算已到，未续接候选')
+      session.record.tasks[0] = aiTaskSchema.parse({ ...session.record.tasks[0], execution: {
+        ...original.execution, timing: undefined, inputMetrics: undefined, turnCount: original.execution.turnCount + 1,
+      } })
+    }
     await this.launch(session, prompt, prior.externalSessionId, undefined, userMessage ?? prompt)
     return session.record.id
   }
   async generate(workspace: WorkspaceIdentityV1, adapter: LocalAgentId, raw: GenerationRequest, resumeSessionId?: string, userMessage?: string, lessonWorkspace?: Extract<AiWorkspaceIdentity, { kind: 'lesson' }>): Promise<string> {
-    const request = generationRequestSchema.parse(raw)
+    let request = generationRequestSchema.parse(raw)
     if (workspaceIdentityKey(workspace) !== workspaceIdentityKey(request.workspace)) throw new Error('生成请求不属于当前工程位置')
     if (resumeSessionId) await this.savePendingFeedback(workspace, resumeSessionId)
     const records = (await this.list(workspace)).records
@@ -298,6 +308,9 @@ export class LocalAgentHarness {
     const readScope = request.purpose === 'whole-course' ? { kind: 'course' as const } : { kind: 'location' as const, surfaceId: target.surfaceId, locationId: target.locationId }
     const session = this.createSession(workspace, adapter, request.instruction, readScope, request.destinations, prior ? prior.workingDirectoryId ?? prior.id : undefined)
     session.record.lessonWorkspace = lessonWorkspace ?? prior?.lessonWorkspace
+    const pendingSources = await this.pendingReceipts(session, prior?.externalSessionId)
+    const pendingResults = pendingSources.flatMap(source => source.record.hostResults.filter(result => result.receiptDelivery === 'pending'))
+    request = generationPendingReceiptResource(request, pendingResults)
     session.generationRequest = request
     const observationId = randomUUID()
     session.record.tasks[0] = aiTaskSchema.parse({
@@ -335,7 +348,11 @@ export class LocalAgentHarness {
     const expectedRevision = result.status === 'committed' ? result.afterRevision : prior.documentRevision
     if (request.documentRevision !== expectedRevision || request.instruction !== prior.instruction
       || (request.intent ?? 'edit') !== task.intent || (request.applyPolicy ?? 'preview') !== task.applyPolicy) throw new Error('stale：续轮目标或工程基线已改变')
-    if (task.execution && (Date.now() >= task.execution.deadlineAt || task.execution.stagnantCandidates >= 2 || task.execution.formatRepairs > 1)) throw new Error('本任务预算已到或连续两轮没有进展，请调整要求后重新发送')
+    if (task.execution) {
+      if (Date.now() >= task.execution.deadlineAt) throw new Error('本任务的执行期限已到，请重新发送以获得新观察')
+      if (task.execution.formatRepairs > 1) throw new Error('候选格式修复后仍不正确，请调整要求后重新发送')
+      if (task.execution.stagnantCandidates >= 2) throw new Error('连续两轮没有进展，请调整要求后重新发送')
+    }
     if (task.execution) request = generationRequestSchema.parse({ ...request, execution: { version: 1,
       startedAt: task.execution.startedAt, deadlineAt: task.execution.deadlineAt } })
     const created = new Set(native.hostResults.filter(item => item.taskId === task.taskId).flatMap(item => item.receipts.flatMap(receipt => receipt.affected.filter(effect => effect.operation === 'created').map(effect => effect.id))))
@@ -359,25 +376,47 @@ export class LocalAgentHarness {
     const repairInputs = generationRepairInputs(projectedFeedback.request, prior, task, native.hostResults.at(-1),
       cachedProposal?.admission === 'accepted' ? cachedProposal.proposal : undefined)
     request = repairInputs.request
-    const feedback = `上一阶段已返回宿主正式结果，不是CLI自述；只有committed或unchanged表示已应用或确认无需修改：\n${JSON.stringify(projectedFeedback.result)}\n已记录的宿主结果（拒绝不代表提交）：\n${JSON.stringify(projectedFeedback.hostResult)}\n${projectedFeedback.resourcePath ? `完整宿主反馈文件（相对 workspace.root）：${projectedFeedback.resourcePath}\n` : ''}请结合新的真实观察判断用户目标是否完成；若完成请自然语言答复，不再产生重复修改。尚有可执行的合法步骤才给下一阶段候选；确实受阻时通过答复通道说明未完成及具体缺失条件并结束，不提交空steps、自造操作或用于索取诊断的非法候选。\n${(task.pendingInputs ?? []).map(input => `用户${input.kind === 'correct' ? '纠正' : '补充'}：${input.text}`).join('\n')}`
-    const promptFor = (current: GenerationRequest, guidance = '') => `${feedback}\n${guidance}\n${this.generationPrompt(native.adapter, current, path.join(this.repository.stagingPath(workspace, native.workingDirectoryId, 2), 'candidates', current.requestId), 'host-feedback')}`
-    let prompt = promptFor(request, repairInputs.guidance)
-    if (Buffer.byteLength(prompt) > MAX_GENERATION_PROMPT_BYTES && request !== projectedFeedback.request) {
-      request = projectedFeedback.request
-      prompt = promptFor(request, '组件修复输入超过本轮发送预算，已省略复用；请依据当前观察继续。')
+    const pendingSources = await this.pendingReceipts({ record: native, generationRequest: request }, native.externalSessionId)
+    const pendingResults = pendingSources.flatMap(source => source.record.hostResults.filter(value => value.receiptDelivery === 'pending'))
+    request = pendingResults.length ? generationPendingReceiptResource(request, pendingResults)
+      : generationHostResultResource(request, projectedFeedback.result, projectedFeedback.hostResult)
+    const feedbackIntro = '上一阶段已返回宿主正式结果，不是CLI自述；只有committed或unchanged表示已应用或确认无需修改：'
+    const feedbackTail = `${projectedFeedback.resourcePath ? `完整宿主反馈文件（相对 workspace.root）：${projectedFeedback.resourcePath}\n` : ''}${request.resourceFiles?.some(file => file.path === 'pending-host-results.json') ? '完整未送达宿主回执文件（相对 workspace.root）：resources/pending-host-results.json\n' : ''}请结合新的真实观察判断用户目标是否完成；若完成请自然语言答复，不再产生重复修改。尚有可执行的合法步骤才给下一阶段候选；确实受阻时通过答复通道说明未完成及具体缺失条件并结束，不提交空steps、自造操作或用于索取诊断的非法候选。\n${(task.pendingInputs ?? []).map(input => `用户${input.kind === 'correct' ? '纠正' : '补充'}：${input.text}`).join('\n')}`
+    const candidateRoot = path.join(this.repository.stagingPath(workspace, native.workingDirectoryId, 2), 'candidates', request.requestId)
+    const pendingReceiptPath = path.join(candidateRoot, ...(request.resourceFiles?.some(file => file.path === 'pending-host-results.json') ? ['resources'] : []), 'pending-host-results.json')
+    const pendingPromptBytes = Buffer.byteLength(generationPendingReceiptPrompt(native.workspace, pendingResults, pendingReceiptPath), 'utf8')
+    const fullReceiptPath = (current: GenerationRequest) => current.resourceFiles?.some(file => file.path === 'pending-host-results.json') || current.resourceFiles?.some(file => file.path === 'host-result.json')
+      ? `resources/${current.resourceFiles.some(file => file.path === 'pending-host-results.json') ? 'pending-host-results.json' : 'host-result.json'}` : path.join(candidateRoot, pendingResults.length ? 'pending-host-results.json' : 'host-result.json')
+    const feedback = `${feedbackIntro}\n${JSON.stringify(projectedFeedback.result)}\n已记录的宿主结果（拒绝不代表提交）：\n${JSON.stringify(projectedFeedback.hostResult)}\n${feedbackTail}`
+    const compactFeedback = (current: GenerationRequest) => `${feedbackIntro}\n${JSON.stringify(generationCompactHostResult(projectedFeedback.result, fullReceiptPath(current)))}\n已记录的宿主结果（拒绝不代表提交）：\n${JSON.stringify(projectedFeedback.hostResult ? generationCompactHostResult(projectedFeedback.hostResult, fullReceiptPath(current)) : null)}\n${feedbackTail}`
+    const promptFor = (current: GenerationRequest, guidance = '', feedbackText = feedback, availableBytes = MAX_GENERATION_PROMPT_BYTES - pendingPromptBytes) => {
+      const prefix = `${feedbackText}\n${guidance}\n`
+      const root = path.join(this.repository.stagingPath(workspace, native.workingDirectoryId, 2), 'candidates', current.requestId)
+      return `${prefix}${this.generationPrompt(native.adapter, current, root, 'host-feedback', Math.max(0, availableBytes - Buffer.byteLength(prefix, 'utf8')))}`
     }
-    // Even an omission notice must not crowd out an otherwise valid request.
-    if (Buffer.byteLength(prompt) > MAX_GENERATION_PROMPT_BYTES) prompt = promptFor(request)
-    if (Buffer.byteLength(prompt) > MAX_GENERATION_PROMPT_BYTES) throw new Error('续轮上下文超过发送预算')
+    let guidance = repairInputs.guidance ?? ''
+    let prompt = promptFor(request, guidance)
+    if (Buffer.byteLength(prompt) + pendingPromptBytes > MAX_GENERATION_PROMPT_BYTES && request !== projectedFeedback.request) {
+      request = pendingResults.length ? generationPendingReceiptResource(projectedFeedback.request, pendingResults)
+        : generationHostResultResource(projectedFeedback.request, projectedFeedback.result, projectedFeedback.hostResult)
+      guidance = '组件修复输入超过本轮发送预算，已省略复用；请依据当前观察继续。'
+      prompt = promptFor(request, guidance)
+    }
+    const promptFactory = (availableBytes: number) => {
+      const complete = promptFor(request, guidance, feedback, availableBytes)
+      return Buffer.byteLength(complete, 'utf8') <= availableBytes ? complete : promptFor(request, guidance, compactFeedback(request), availableBytes)
+    }
+    prompt = promptFactory(MAX_GENERATION_PROMPT_BYTES - pendingPromptBytes)
+    if (Buffer.byteLength(prompt) + pendingPromptBytes > MAX_GENERATION_PROMPT_BYTES) throw new Error('续轮上下文超过发送预算')
     const observationId = randomUUID()
     const execution = task.execution ? { ...task.execution, deadlineAt: request.execution!.deadlineAt, turnCount: task.execution.turnCount + 1 } : undefined
     native.tasks[native.tasks.length - 1] = aiTaskSchema.parse({ ...task, status: 'running', observationId,
       writeDestinations: task.intent === 'edit' ? request.destinations : [], execution })
     this.proposals.delete(id)
     this.candidateIds.delete(id)
-    const owner: SessionOwner = { record: native, generationRequest: request }
+    const owner: SessionOwner = { record: native, generationRequest: request, hostResult: result }
     await this.persistRequestObservation(owner, request, observationId)
-    await this.launch(owner, prompt, native.externalSessionId, request)
+    await this.launch(owner, prompt, native.externalSessionId, request, undefined, 'host-feedback', promptFactory)
     return id
   }
   async candidate(workspace: WorkspaceIdentityV1, id: string) {
@@ -544,6 +583,8 @@ export class LocalAgentHarness {
     if (existing) {
       if (existing.summary !== result.summary || JSON.stringify(existing.afterCommit) !== JSON.stringify(result.afterCommit)
         || JSON.stringify(existing.failure) !== JSON.stringify(result.failure)
+        || (!applied && (JSON.stringify(existing.semanticChanges) !== JSON.stringify(result.semanticChanges)
+          || JSON.stringify(existing.executionEvidence) !== JSON.stringify(result.executionEvidence)))
         || (applied && JSON.stringify(existing.receipts[0]) !== JSON.stringify(generationCommitReceiptSchema.parse(receipt)))) throw new Error('同一候选的重复回执内容冲突')
       // Even an existing canonical record can have a failed display write. Never skip the retry.
       owner.hostResult = projectAiHostResult(existing)
@@ -558,6 +599,8 @@ export class LocalAgentHarness {
         requestId: result.requestId, candidateId, resultId: randomUUID(), status: result.status,
         beforeRevision: parsedReceipt.beforeRevision, afterRevision: parsedReceipt.afterRevision,
         receipts: [parsedReceipt], summary: result.summary, diagnostics: [],
+        ...(parsedReceipt.semanticChanges ? { semanticChanges: parsedReceipt.semanticChanges } : {}),
+        ...(parsedReceipt.executionEvidence ? { executionEvidence: parsedReceipt.executionEvidence } : {}),
         ...(result.afterCommit ? { afterCommit: result.afterCommit } : {}), receiptDelivery: 'pending',
       })
       // A synchronous live commit may win a race with Stop. Archive that fact without resurrecting the task.
@@ -584,6 +627,8 @@ export class LocalAgentHarness {
       const aiResult = aiHostResultSchema.parse({ version: 1, taskId: task.taskId, epoch: observationEpoch, workspace: task.workspace,
         observationId: task.observationId, requestId: result.requestId, candidateId, resultId: randomUUID(), status: result.status,
         beforeRevision, afterRevision: beforeRevision, receipts: [], summary: result.summary,
+        ...(result.semanticChanges ? { semanticChanges: result.semanticChanges } : {}),
+        ...(result.executionEvidence ? { executionEvidence: result.executionEvidence } : {}),
         diagnostics: result.failure?.diagnostics ?? [], ...(result.failure ? { failure: result.failure } : {}),
         ...(['rejected', 'stale', 'failed'].includes(result.status) ? { receiptDelivery: 'pending' } : {}) })
       native.hostResults.push(aiResult)
@@ -916,15 +961,15 @@ export class LocalAgentHarness {
     owner.record.observations.push(createObservation(owner.record.tasks.at(-1)!, request, observationId, files))
     await this.repository.writeObservation(owner.record.workspace, owner.record.workingDirectoryId, observationId, 'generation-request.json', payload)
   }
-  private launch(owner: SessionOwner, prompt: string, externalId?: string, request?: GenerationRequest, userMessage?: string): Promise<void> {
+  private launch(owner: SessionOwner, prompt: string, externalId?: string, request?: GenerationRequest, userMessage?: string, promptPhase: GenerationPromptPhase = 'initial', promptFactory?: ActiveRun['promptFactory']): Promise<void> {
     if (this.stoppedSessions.has(owner.record.id)) return Promise.reject(new Error('任务已停止，不再启动原生回合'))
     if (this.closing || this.deletingScopes.has(workspaceIdentityKey(owner.record.lessonWorkspace ?? owner.record.workspace))) return Promise.reject(new Error('会话服务正在关闭或删除当前记录'))
     this.launching.add(owner.record.id)
-    const pending = this.prepareLaunch(owner, prompt, externalId, request, userMessage)
+    const pending = this.prepareLaunch(owner, prompt, externalId, request, userMessage, promptPhase, promptFactory)
     this.launches.add(pending)
     return pending.finally(() => { this.launches.delete(pending); this.launching.delete(owner.record.id) })
   }
-  private async prepareLaunch(owner: SessionOwner, prompt: string, externalId?: string, request?: GenerationRequest, userMessage?: string): Promise<void> {
+  private async prepareLaunch(owner: SessionOwner, prompt: string, externalId?: string, request?: GenerationRequest, userMessage?: string, promptPhase: GenerationPromptPhase = 'initial', promptFactory?: ActiveRun['promptFactory']): Promise<void> {
     if (this.active.size + this.pendingLaunches >= 3) throw new Error('最多同时运行三个 CLI 会话')
     this.pendingLaunches++
     let cwd: string | undefined
@@ -934,8 +979,13 @@ export class LocalAgentHarness {
       if (request) {
         const task = owner.record.tasks.at(-1)!
         await new CandidateStaging(cwd).create(request, taskMediaIdentity(task))
+        if (promptPhase === 'host-feedback' && !request.resourceFiles?.some(file => ['pending-host-results.json', 'host-result.json'].includes(file.path))) {
+          await fs.writeFile(path.join(cwd, 'candidates', request.requestId, 'host-result.json'), JSON.stringify({
+            version: 1, source: 'formal-host-result', result: owner.hostResult, hostResult: owner.record.hostResults.at(-1),
+          }), { encoding: 'utf8', mode: 0o600, flag: 'wx' })
+        }
       }
-      const run: ActiveRun = { owner, adapter, done: Promise.resolve(), runId: randomUUID(), nativeTurnId: null, cancelled: false, acceptingInputs: true, inputWrites: new Set() }
+      const run: ActiveRun = { owner, adapter, done: Promise.resolve(), runId: randomUUID(), nativeTurnId: null, cancelled: false, acceptingInputs: true, inputWrites: new Set(), promptPhase, promptFactory }
       if (userMessage) this.appendUserMessage(owner.record, run.runId, randomUUID(), userMessage, 'initial')
       this.markTiming(owner.record, owner.record.tasks.at(-1)!, run.runId, 'requestPrepared')
       await this.persist(owner)
@@ -1009,8 +1059,24 @@ export class LocalAgentHarness {
       if (run.cancelled) return
       let feedbackSources = await this.pendingReceipts(owner, externalId)
       const pendingResults = feedbackSources.flatMap(source => source.record.hostResults.filter(result => result.receiptDelivery === 'pending'))
-      let turnPrompt = pendingResults.length
-        ? `以下是当前工程尚未送达的宿主实际结果。只有 committed / unchanged 表示已应用或确认无需修改；rejected / stale / failed 均未应用该候选。保留已经提交的成果，不重复执行；失败结果用于理解未完成目标和原因。本轮若仅询问状态或停止原因，只作解释，不自动继续编辑。\n${JSON.stringify({ workspace: owner.record.workspace, results: generationReceiptFeedback(pendingResults) })}\n${prompt}` : prompt
+      let pendingReceiptPath: string | undefined
+      if (pendingResults.length) {
+        if (owner.generationRequest?.resourceFiles?.some(file => file.path === 'pending-host-results.json')) {
+          pendingReceiptPath = path.join(cwd, 'candidates', owner.generationRequest.requestId, 'resources', 'pending-host-results.json')
+        } else {
+          pendingReceiptPath = owner.generationRequest
+            ? path.join(cwd, 'candidates', owner.generationRequest.requestId, 'pending-host-results.json')
+            : path.join(cwd, 'pending-host-results', `${task.taskId}-${run.runId}.json`)
+          await fs.mkdir(path.dirname(pendingReceiptPath), { recursive: true })
+          await fs.writeFile(pendingReceiptPath, JSON.stringify({ version: 1, source: 'pending-formal-host-results', results: pendingResults }), { encoding: 'utf8', mode: 0o600, flag: 'wx' })
+        }
+      }
+      const pendingPrefix = generationPendingReceiptPrompt(owner.record.workspace, pendingResults, pendingReceiptPath ?? '')
+      const available = Math.max(0, MAX_GENERATION_PROMPT_BYTES - Buffer.byteLength(pendingPrefix, 'utf8'))
+      const finalPrompt = run.promptFactory ? run.promptFactory(available) : owner.generationRequest && run.promptPhase === 'initial'
+        ? this.generationPrompt(owner.record.adapter, owner.generationRequest, path.join(cwd, 'candidates', owner.generationRequest.requestId), 'initial', available)
+        : prompt
+      let turnPrompt = `${pendingPrefix}${finalPrompt}`
       if (Buffer.byteLength(turnPrompt) > MAX_GENERATION_PROMPT_BYTES) throw new Error('正式回执与请求超过本轮发送预算')
       for (;;) {
       completed = false
@@ -1190,7 +1256,7 @@ export class LocalAgentHarness {
       this.active.delete(owner.record.id)
     }
   }
-  private generationPrompt(adapter: LocalAgentId, request: GenerationRequest, candidateRoot: string, phase: GenerationPromptPhase = 'initial'): string {
-    return buildGenerationPrompt(adapter, request, candidateRoot, phase)
+  private generationPrompt(adapter: LocalAgentId, request: GenerationRequest, candidateRoot: string, phase: GenerationPromptPhase = 'initial', maxBytes = MAX_GENERATION_PROMPT_BYTES): string {
+    return buildGenerationPrompt(adapter, request, candidateRoot, phase, maxBytes)
   }
 }

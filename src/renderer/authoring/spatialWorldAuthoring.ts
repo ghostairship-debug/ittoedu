@@ -2,7 +2,7 @@ import { patchTableCellText } from '../course/tableContentOperations'
 import type { LayerTextDraft } from './layerTextField'
 import { CANVAS_HEIGHT, CANVAS_WIDTH, MIN_NODE_SIZE } from '../../shared/constants'
 import { formulaAstToAccessibleText } from '../../shared/formulaLinear'
-import { applyTextRunStyle, remapTextRuns } from '../../shared/textRuns'
+import { applyTextRunStyle, planTextRunRemap } from '../../shared/textRuns'
 import type {
   NativeLayerItem,
 } from '../../shared/courseProjectTypes'
@@ -1260,7 +1260,12 @@ export function updateSpatialWorldContentTextDraft(
 ): SpatialWorldContentEditSession {
   if (edit.kind !== 'text') return edit
   const previous = edit.draft as V9SlideTextContentDraft
-  const runs = draft.runs ?? remapTextRuns(previous.text, draft.text, previous.runs)
+  let runs = draft.runs
+  if (!runs) {
+    const mapping = planTextRunRemap(previous.text, draft.text, previous.runs)
+    if (!mapping.ok) return edit
+    runs = mapping.runs
+  }
   return freezeEdit({
     ...edit,
     draft: {

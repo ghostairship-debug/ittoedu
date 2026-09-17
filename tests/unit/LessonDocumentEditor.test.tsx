@@ -8,7 +8,7 @@ import type { OpenDocumentResult } from '../../src/shared/document/ports'
 afterEach(cleanup)
 describe('LessonDocumentEditor mounted shared core', () => {
   it('renders retained AI conflict and applies the explicit local choice without losing other teacher edits', async () => {
-    const ref = { lessonId: 'lesson', lessonDirectory: '/lesson', relativePath: 'suggestion.md' }
+    const ref = { kind: 'lesson' as const, lessonId: 'lesson', lessonDirectory: '/lesson', relativePath: 'suggestion.md' }
     let disk: OpenDocumentResult = { ref, source: 'A原稿\nB原稿', version: { contentVersion: 'v1', attachments: [] }, diagnostics: [] }
     const baseline = disk
     const edit = { from: 0, to: 3, before: 'A原稿', after: 'A建议' }
@@ -32,7 +32,7 @@ describe('LessonDocumentEditor mounted shared core', () => {
     await waitFor(() => expect(screen.queryByText('AI 冲突建议')).not.toBeInTheDocument())
   })
   it('opens once through StrictMode replay and releases its watcher on real unmount', async () => {
-    const ref = { lessonId: 'lesson', lessonDirectory: '/lesson', relativePath: 'strict.md' }
+    const ref = { kind: 'lesson' as const, lessonId: 'lesson', lessonDirectory: '/lesson', relativePath: 'strict.md' }
     const stop = vi.fn()
     const port: RecoverableDocumentFilePort = {
       openDocument: vi.fn(async () => ({ ref, source: '严格模式真实正文', version: { contentVersion: 'v1', attachments: [] }, diagnostics: [] })),
@@ -46,7 +46,7 @@ describe('LessonDocumentEditor mounted shared core', () => {
     await waitFor(() => expect(stop).toHaveBeenCalledTimes(1))
   })
   it('renders the real layout editor and preserves both sides of an external conflict', async () => {
-    const ref = { lessonId: 'lesson', lessonDirectory: '/lesson', relativePath: 'plan.md' }
+    const ref = { kind: 'lesson' as const, lessonId: 'lesson', lessonDirectory: '/lesson', relativePath: 'plan.md' }
     const disk: OpenDocumentResult = { ref, source: '原稿', version: { contentVersion: 'v1', attachments: [] }, diagnostics: [] }
     const port: RecoverableDocumentFilePort = {
       openDocument: async () => disk,
@@ -62,7 +62,7 @@ describe('LessonDocumentEditor mounted shared core', () => {
     expect(port.saveDocument).not.toHaveBeenCalled()
   })
   it('presents a local conflict choice and saves both independent changes', async () => {
-    const ref = { lessonId: 'lesson', lessonDirectory: '/lesson', relativePath: 'plan.md' }
+    const ref = { kind: 'lesson' as const, lessonId: 'lesson', lessonDirectory: '/lesson', relativePath: 'plan.md' }
     const disk: OpenDocumentResult = { ref, source: 'A磁盘\nB原始\nC外部', version: { contentVersion: 'v2', attachments: [] }, diagnostics: [] }
     const save = vi.fn<RecoverableDocumentFilePort['saveDocument']>(async request => ({ status: 'saved', operationId: request.operationId, version: { contentVersion: 'v3', attachments: [] } }))
     const port: RecoverableDocumentFilePort = {

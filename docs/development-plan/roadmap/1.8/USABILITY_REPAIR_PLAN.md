@@ -49,9 +49,9 @@ DAG新增r18-085→086→087，r18-060另等087；r18-083已通过范围不作�
 | 标题 | 顶部 147，688×51.20 | 顶部 52，688×51.20 |
 | 共享横幅 | 顶部 225.22，317.63×29.12 | 顶部 44.53，535.13×49.05 |
 
-编辑时标题位于浮层裁剪上界之上。把“Flow 视口共享层”从 y=237.13 拖到 y=148.00 后，其对象 bounding box 确实移动，但落入父层 y=217.28 以上的裁剪区；目标位置 `elementFromPoint` 命中“证据链”正文。见 [拖拽裁剪截图](../../../../output/viewport-diagnosis/flow-drag-clipped.png)。
+编辑时标题位于浮层裁剪上界之上。把“Flow 视口共享层”从 y=237.13 拖到 y=148.00 后，其对象 bounding box 确实移动，但落入父层 y=217.28 以上的裁剪区；目标位置 `elementFromPoint` 命中“证据链”正文。见 `../../../../output/viewport-diagnosis/flow-drag-clipped.png`（历史链接目标未保留）。
 
-同一宿主中的 Flow 编辑与当前位置试运行，标题和横幅的几何在此样例中一致；整课预览的正文标题维持同样尺寸，横幅则增大约 68.5%。问题是正文和浮层不遵循共同的缩放规则，不能把窗口更大解释成所有差异都合理。见 [编辑](../../../../output/viewport-diagnosis/flow-edit.png)、[试运行](../../../../output/viewport-diagnosis/flow-run.png)、[整课预览](../../../../output/viewport-diagnosis/flow-preview.png)。
+同一宿主中的 Flow 编辑与当前位置试运行，标题和横幅的几何在此样例中一致；整课预览的正文标题维持同样尺寸，横幅则增大约 68.5%。问题是正文和浮层不遵循共同的缩放规则，不能把窗口更大解释成所有差异都合理。见 `../../../../output/viewport-diagnosis/flow-edit.png`（历史链接目标未保留）、`../../../../output/viewport-diagnosis/flow-run.png`（历史链接目标未保留）、`../../../../output/viewport-diagnosis/flow-preview.png`（历史链接目标未保留）。
 
 整课预览从课程起点开始，当前位置试运行从当前 location 开始；上述比较已将预览切到同一个 Flow location。首次切入后一个瞬间可读到未适配的原始浮层尺寸，等待布局帧后已缩放，不能将首帧数值写成永久失配。切场/激活后的首帧适配仍纳入 U02 验收。该 fixture 的图片在本次隔离宿主中出现资源加载错误，未将图片结果计入此轮判断。
 

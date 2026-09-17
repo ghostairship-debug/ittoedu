@@ -62,7 +62,6 @@ function drawingContext(): CanvasRenderingContext2D {
 
 beforeEach(() => {
   useEditorStore.getState().createNewProject()
-  useEditorStore.setState({ editorMode: 'professional' })
   vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(
     drawingContext(),
   )
@@ -251,8 +250,7 @@ describe('FormulaNode authoring UI', () => {
     })
   })
 
-  it('keeps raw AST absent from simple authoring mode', () => {
-    useEditorStore.setState({ editorMode: 'simple' })
+  it('keeps raw AST absent from authoring', () => {
     render(<PropertiesTab onReplaceImage={vi.fn()} />)
     expect(screen.getByTestId('formula-authoring-editor')).toBeInTheDocument()
     expect(screen.queryByTestId('formula-id')).not.toBeInTheDocument()

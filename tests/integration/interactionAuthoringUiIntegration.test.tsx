@@ -248,7 +248,6 @@ describe('interaction authoring UI integration', () => {
     nodeId,
   ) => {
     useEditorStore.getState().activateCourseLocation(locationId)
-    useEditorStore.getState().setEditorMode('professional')
     useEditorStore.getState().selectNode(nodeId)
     const before = structuredClone(activeProject())
 
@@ -264,7 +263,6 @@ describe('interaction authoring UI integration', () => {
 
   it('keeps one mounted Flow Properties instance stable while switching local to global', () => {
     useEditorStore.getState().activateCourseLocation(FLOW_LOCATION_ID)
-    useEditorStore.getState().setEditorMode('professional')
     useEditorStore.getState().selectNode('flow-heading')
     render(<PropertiesTab onReplaceImage={() => undefined} />)
     expect(screen.queryByTestId('interaction-properties-unavailable'))
@@ -284,7 +282,6 @@ describe('interaction authoring UI integration', () => {
     SPATIAL_LOCATION_ID,
   ])('gates synthetic global click-rule writes in Properties at %s', (locationId) => {
     useEditorStore.getState().activateCourseLocation(locationId)
-    useEditorStore.getState().setEditorMode('professional')
     useEditorStore.getState().setEditingScope('global')
     useEditorStore.getState().selectNode(GLOBAL_ITEM_ID)
     const before = structuredClone(activeProject())

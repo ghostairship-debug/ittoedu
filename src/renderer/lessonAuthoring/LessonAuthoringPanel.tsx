@@ -60,23 +60,48 @@ export function LessonAuthoringPanel(props: LessonAuthoringPanelProps) {
   useEffect(() => {
     if (result?.run?.status !== 'running' && !result?.repairTicket) return
     let disposed = false
-    const timer = setTimeout(async () => { try { const value = await current.current.operate({ operation: result?.repairTicket ? 'read' : 'poll', ...context() }); if (!disposed) await receive(value) } catch (cause) { if (!disposed) setError((cause as Error).message) } }, 1000)
+    let timer: ReturnType<typeof setTimeout>
+    // F07：单次 poll 失败只提示并重排定时器，绝不静默停轮询（转圈根因修复）。
+    const tick = async () => {
+      try {
+        const value = await current.current.operate({ operation: result?.repairTicket ? 'read' : 'poll', ...context() })
+        if (!disposed) await receive(value)
+      } catch (cause) {
+        if (!disposed) { setError((cause as Error).message); timer = setTimeout(() => void tick(), 2000) }
+      }
+    }
+    timer = setTimeout(() => void tick(), 1000)
     return () => { disposed = true; clearTimeout(timer) }
   }, [result, context, receive])
   const act = async (action: () => Promise<LessonAuthoringDesktopResult>) => { const activeGeneration = generation.current; setBusy(true); setError(''); try { const value = await action(); if (activeGeneration === generation.current) await receive(value) } catch (cause) { if (activeGeneration === generation.current) { setError((cause as Error).message); try { setResult(await props.operate({ operation: 'read', ...context() })) } catch {} } } finally { if (activeGeneration === generation.current) setBusy(false) } }
   const active = result?.run?.status === 'running' || !!result?.repairTicket
   const stage = result?.view.currentStage
   const document = result?.view.documents.find(item => item.role === stage)
+  const mode = result?.view.state.mode
+  const automaticReady = mode === 'automatic' && props.materialSelections.length > 0
+  const startLabel = mode === 'automatic' ? '开始自动创作' : stage === 'build' ? '构建课件' : '生成当前阶段'
+  const startAutomatic = async () => {
+    // F07：自动创作真正发起 start；教学目标留空时按材料自动推进。
+    if (!await props.flushDocuments()) throw new Error('请先保存当前文档')
+    return props.operate({ operation: 'start', ...context(), adapter: props.adapter, instruction: instruction.trim() || '根据已选材料自动完成本课例创作，逐阶段推进并在每阶段产出当前稿。' })
+  }
   return <section className="lesson-authoring-panel" aria-label="课例创作流程" style={{ borderBottom: '1px solid var(--border)', padding: 12, display: 'grid', gap: 8 }}>
     <div style={{ display: 'flex', gap: 8 }}>
-      <button disabled={busy || active} aria-pressed={result?.view.state.mode === 'manual'} onClick={() => void act(() => props.operate({ operation: 'set-mode', ...context(), mode: 'manual', materials: props.materialSelections }))}>手动分阶段</button>
-      <button disabled={busy || active} aria-pressed={result?.view.state.mode === 'automatic'} onClick={() => void act(() => props.operate({ operation: 'set-mode', ...context(), mode: 'automatic', materials: props.materialSelections }))}>根据材料自动创作</button>
+      <button disabled={busy || active} aria-pressed={mode === 'manual'} onClick={() => void act(() => props.operate({ operation: 'set-mode', ...context(), mode: 'manual', materials: props.materialSelections }))}>手动模式</button>
+      <button disabled={busy || active} aria-pressed={mode === 'automatic'} onClick={() => void act(() => props.operate({ operation: 'set-mode', ...context(), mode: 'automatic', materials: props.materialSelections }))}>自动模式（按材料）</button>
     </div>
+    <p className="lesson-authoring-hint" role="status">
+      {mode === 'automatic'
+        ? automaticReady
+          ? `自动模式已就绪：将按已选 ${props.materialSelections.length} 份材料逐阶段创作；在下方补充教学目标更精准，留空则按材料推进。`
+          : '自动模式需要前置条件：先在「材料」页勾选至少一份材料（可只选部分片段）。'
+        : '手动模式：逐阶段生成当前稿，教师确认当前文件后才进入下一阶段。'}
+    </p>
     <div>当前阶段：{stage ? labels[stage] : '读取中'}</div>
     <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>{result?.view.documents.map(item => <button key={item.role} onClick={() => props.openDocument(item.relativePath)}>{labels[item.role]} · {item.status === 'confirmed' ? '已确认' : item.status === 'review' ? '待复核' : '查看当前稿'}</button>)}</div>
     <textarea aria-label="课例创作目标" value={instruction} onChange={event => setInstruction(event.target.value)} placeholder="说明教学主题、学生情况和希望达成的目标" rows={2} />
     <div style={{ display: 'flex', gap: 8 }}>
-      <button disabled={busy || active || !!result?.application || !instruction.trim()} onClick={() => void act(async () => { if (!await props.flushDocuments()) throw new Error('请先保存当前文档'); return props.operate({ operation: 'start', ...context(), adapter: props.adapter, instruction }) })}>{stage === 'build' ? '构建课件' : '生成当前阶段'}</button>
+      <button disabled={busy || active || !!result?.application || (!instruction.trim() && mode !== 'automatic') || (mode === 'automatic' && !automaticReady)} onClick={() => void act(() => mode === 'automatic' ? startAutomatic() : (async () => { if (!await props.flushDocuments()) throw new Error('请先保存当前文档'); return props.operate({ operation: 'start', ...context(), adapter: props.adapter, instruction }) })())}>{startLabel}</button>
       {result?.view.state.mode === 'manual' && document && <button disabled={busy || active} onClick={() => void act(async () => { if (!await props.flushDocuments()) throw new Error('请先保存当前文档'); return props.operate({ operation: 'confirm', ...context(), role: document.role, expectedVersion: document.version }) })}>确认已查看的当前稿</button>}
       {stage && stage !== 'build' && result?.run && props.repairDocument && <button disabled={busy || active || !instruction.trim()} onClick={() => void act(async () => {
         if (!await props.flushDocuments()) throw new Error('请先处理当前文档恢复稿')

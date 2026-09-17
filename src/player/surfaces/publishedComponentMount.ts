@@ -387,6 +387,7 @@ export function createPublishedComponentContextResources(
   const mode = options.mode ?? 'preview'
   const actions = options.actions ?? createPlayerComponentHostActions({
     goToSceneById: () => false,
+    goToLocation: () => false,
     nextScene: () => false,
     previousScene: () => false,
     replayScene: () => false,

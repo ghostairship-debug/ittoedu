@@ -25,6 +25,73 @@ export interface DynamicBehaviorCapturePort {
   clickAt?(point: { x: number; y: number }): Promise<void>
 }
 
+const dynamicFallbackSelector = '.published-component-fallback, [data-runtime-fallback="true"], [data-slide-component-state="fallback"]'
+
+function activeSurfaceRoot(root: HTMLElement, surfaceId: string): HTMLElement {
+  return Array.from(root.querySelectorAll<HTMLElement>('[data-course-surface-slot]'))
+    .find(slot => slot.dataset.courseSurfaceSlot === surfaceId) ?? root
+}
+
+function dynamicCaptureOwner(element: HTMLElement): HTMLElement {
+  const owner = element.parentElement
+  if (!owner) {
+    const instanceId = element.dataset.componentInstanceId ?? element.dataset.runtimeInstanceId ?? 'unknown'
+    throw new Error(`动态候选实例 ${instanceId} 缺少稳定宿主容器`)
+  }
+  return owner
+}
+
+function dynamicFallbackDiagnostics(
+  root: HTMLElement,
+  targetLocationId: string,
+  targetInstanceIds: readonly string[],
+): string {
+  const markers = Array.from(root.querySelectorAll<HTMLElement>(dynamicFallbackSelector))
+  const targetIds = new Set(targetInstanceIds)
+  const describeRect = (element: HTMLElement) => {
+    try {
+      const rect = element.getBoundingClientRect()
+      return { left: rect.left, top: rect.top, width: rect.width, height: rect.height }
+    } catch {
+      return null
+    }
+  }
+  const describe = (element: HTMLElement) => {
+    const slot = element.closest<HTMLElement>('[data-course-surface-slot]')
+    const owner = element.closest<HTMLElement>('[data-location-id], [data-scene-id], [data-surface-id]')
+    const instanceId = element.dataset.componentInstanceId ?? element.dataset.runtimeInstanceId ?? null
+    const style = element.ownerDocument.defaultView?.getComputedStyle(element)
+    return {
+      className: typeof element.className === 'string' ? element.className.slice(0, 160) : '',
+      instanceId,
+      componentId: element.dataset.componentPackageId ?? null,
+      runtimeState: element.dataset.slideRuntimeState ?? element.dataset.flowRuntimeState ?? null,
+      componentState: element.dataset.slideComponentState ?? null,
+      slotSurfaceId: slot?.dataset.courseSurfaceSlot ?? null,
+      ownerSurfaceId: owner?.dataset.surfaceId ?? null,
+      ownerLocationId: owner?.dataset.locationId ?? null,
+      ownerSceneId: owner?.dataset.sceneId ?? null,
+      targetLocationId,
+      isTargetInstance: instanceId !== null && targetIds.has(instanceId),
+      connected: element.isConnected,
+      hidden: element.hidden,
+      ariaHidden: element.getAttribute('aria-hidden'),
+      display: style?.display ?? null,
+      visibility: style?.visibility ?? null,
+      opacity: style?.opacity ?? null,
+      rect: describeRect(element),
+    }
+  }
+  const limit = 12
+  const details = JSON.stringify({
+    targetLocationId,
+    targetInstanceIds,
+    markers: markers.slice(0, limit).map(describe),
+    omitted: Math.max(0, markers.length - limit),
+  })
+  return details.length <= 3500 ? details : `${details.slice(0, 3497)}...`
+}
+
 function sourceIdentities(project: CourseProjectDocument, resources: HistoryResourceState, ids: readonly string[]) {
   const result: Record<string, string> = {}
   const layer = (item: LayerItem) => {
@@ -252,10 +319,11 @@ export async function runDynamicCandidateHostSmoke(project: CourseProjectDocumen
           if (captureInstances) for (const element of mountedElements) {
             const id = instanceId(element)
             if (!id || !instanceIds.includes(id) || captures.some(capture => capture.instanceId === id)) continue
-            const width = Math.round(element.offsetWidth), height = Math.round(element.offsetHeight)
+            const owner = dynamicCaptureOwner(element)
+            const width = Math.round(owner.offsetWidth), height = Math.round(owner.offsetHeight)
             if (width <= 0 || height <= 0 || width > 4096 || height > 4096) throw new Error(`实例 ${id} 的后备图面尺寸超限或不可见`)
-            const dataUrl = await capturePublishedSurfacePng({ root: element, width, height, transparentBackground: true,
-              layers: [{ element, x: 0, y: 0, width, height, rotation: 0, opacity: 1 }] })
+            const dataUrl = await capturePublishedSurfacePng({ root: owner, width, height, transparentBackground: true,
+              layers: [{ element: owner, x: 0, y: 0, width, height, rotation: 0, opacity: 1 }] })
             if (fullAdmission && element.dataset.componentInstanceId && !await componentHasVisibleContent(element, dataUrl)) {
               throw new AuthoringToolFailure([{ code: 'dynamic-component-empty-content',
                 message: `组件 ${id} 的 create 已返回，但实际宿主没有可见内容；请将创建的界面挂入 ctx.dom.root，并在就绪后提供实际绘制内容。`,
@@ -271,13 +339,17 @@ export async function runDynamicCandidateHostSmoke(project: CourseProjectDocumen
             // the mounted instances through the shared product capture barrier.
             await capturePublishedSurfacePng({ root, width: 1280, height: 720,
               layers: mountedElements.filter(element => instanceIds.includes(instanceId(element) ?? '')).map(element => {
-                return { element, x: 0, y: 0, width: Math.max(1, element.clientWidth), height: Math.max(1, element.clientHeight), rotation: 0, opacity: 1 }
+                const owner = dynamicCaptureOwner(element)
+                return { element: owner, x: 0, y: 0, width: Math.max(1, owner.clientWidth), height: Math.max(1, owner.clientHeight), rotation: 0, opacity: 1 }
               }) })
           } else if (fullAdmission) {
             const capture = await mountedSession.player.captureSurface(location.surfaceId, { purpose: 'export', width: 1280, height: 720 })
             if (!capture.ok) throw new Error(`动态候选无法完成真实宿主捕获：${JSON.stringify(capture)}${failures.length ? `；${failures.join('；')}` : ''}`)
           }
-          if (root.querySelector('.published-component-fallback, [data-runtime-fallback="true"], [data-slide-component-state="fallback"]')) throw new Error('动态候选触发了静态后备')
+          const activeRoot = activeSurfaceRoot(root, location.surfaceId)
+          if (activeRoot.querySelector(dynamicFallbackSelector)) {
+            throw new Error(`动态候选触发了静态后备：${dynamicFallbackDiagnostics(activeRoot, locationId, instanceIds)}`)
+          }
           if (failures.length) throw new Error(failures.join('\n'))
           if (options.buttonCheck && instanceIds.includes(options.buttonCheck.instanceId)) {
             // Code has completed the normal admission path. Only this private

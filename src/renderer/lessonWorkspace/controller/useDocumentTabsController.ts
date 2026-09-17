@@ -110,7 +110,7 @@ export function useDocumentTabsController({ documentPort, documentAiOperation, s
       ? current.map(tab => tab.path === path ? { ...tab, dirty } : tab) : current)
   }
   function activeDocumentTarget() {
-    const tab = tabs.find(item => item.path === activeTab && item.kind === 'document')
+    const tab = tabs.find(item => item.path === activeTab && item.kind === 'document' && item.lesson)
     return tab ? { name: tab.name, getEditor: () => documents.current.get(tab.path) ?? null } : undefined
   }
   async function editDocument(filename: string, scope: LessonAgentWorkspace, adapter: LocalAgentId, instruction: string, onApplied?: (ref: DocumentFileRef, version: DocumentFileVersion) => Promise<void>) {

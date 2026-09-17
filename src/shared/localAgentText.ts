@@ -20,7 +20,7 @@ export function readableLocalAgentError(value: unknown): string {
   if (/unauthenticated|401|认证|未登录|token.*expired/i.test(text)) return '创作助手的登录已失效。请重新登录所选 CLI 后继续；本次未提交的修改没有应用。'
   if (/503|service.unavailable|no active.*accounts/i.test(text)) return '当前服务暂时不可用。请稍后重试或继续；已应用的修改会保留。'
   if (/rate.limit|429|额度|限流/i.test(text)) return '当前服务暂时限制了请求。请稍后继续；已应用的修改会保留。'
-  if (/timeout|timed.out|超时|截止|期限/i.test(text)) return '本次处理超时，尚未完成。已应用的修改会保留；可以核对结果后继续。'
+  if (/timeout|timed.out|超时|截止|期限|预算已到/i.test(text)) return '本次处理超时，尚未完成。已应用的修改会保留；可以核对结果后继续。'
   if (/decode|image|图片|资源|素材/i.test(text)) return '本次图片或素材处理未完成。请检查素材是否可读取，或继续让助手尝试其他方法。'
   if (/connect|ECONN|transport|连接|启动失败/i.test(text)) return '与创作助手的连接中断，尚未确认完成。请检查所选 CLI 后重试或继续。'
   if (/permission|denied|授权|拒绝授权/i.test(text)) return '所需操作未获授权，本次处理无法继续。请核对授权要求后重试。'

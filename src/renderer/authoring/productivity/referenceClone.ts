@@ -92,6 +92,9 @@ export function cloneReferencePage(
         locationIds.set(location.id, id)
         draft.locations.splice(draft.locations.findIndex(l => l.id === location.id) + 1, 0, { ...location, id, sceneId: scene.id, label: `${surface.title} · ${scene.name}`, ...(location.stateId ? { stateId: ids.get(location.stateId)! } : {}) })
       })
+      scene.interactions.forEach(rule => rule.actions.forEach(({ action }) => {
+        if (action.type === 'location.go') action.locationId = locationIds.get(action.locationId) ?? action.locationId
+      }))
       // Preserve explicit shared-layer visibility without copying a global controller.
       for (const entry of [...draft.globalLayerItems, ...target.surfaceLayerItems]) {
         if (entry.visibility.mode === 'all') continue

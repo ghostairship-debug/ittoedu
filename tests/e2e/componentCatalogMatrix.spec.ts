@@ -17,6 +17,7 @@ import type {
 } from 'playwright'
 import { unzipSync } from 'fflate'
 import { BACKGROUND_E2E_ENV } from '../../src/main/windowVisibility'
+import { DEFAULT_TEACHER_CONTROLLER_PACKAGE_ID } from '../../src/shared/defaultTeacherControllerComponent'
 import { expectBackgroundWindowsIsolated } from './expectBackgroundWindowsIsolated'
 
 const root = resolve(__dirname, '..', '..')
@@ -360,6 +361,15 @@ async function launchEditor(): Promise<LaunchedEditor> {
   page.on('request', (request) => {
     if (/^https?:/i.test(request.url())) externalRequests.push(request.url())
   })
+  // Enter only the landing page; never replace an already opened editor or recovery draft.
+  const startupMore = page.locator('.lesson-workspace-more > summary')
+  const startupEditor = page.getByRole('button', { name: '打开工程（Ctrl+O）', exact: true })
+  const startupRecovery = page.getByRole('alertdialog', { name: '发现未完成的本地恢复副本', exact: true })
+  await expect.poll(async () => await startupEditor.isVisible() || await startupMore.isVisible() || await startupRecovery.isVisible()).toBe(true)
+  if (!await startupEditor.isVisible() && await startupMore.isVisible() && !await startupRecovery.isVisible()) {
+    await startupMore.click()
+    await page.getByRole('button', { name: '新建独立课件', exact: true }).click()
+  }
   await page.locator('[data-testid="canvas-stage"] canvas').waitFor()
   await expectBackgroundWindowsIsolated(app)
   const professional = page.getByRole('button', { name: '专业' })
@@ -374,6 +384,26 @@ async function launchEditor(): Promise<LaunchedEditor> {
     consoleWarnings,
     externalRequests,
   }
+}
+
+async function showEditorPanel(page: Page, panel: 'structure' | 'properties'): Promise<Locator> {
+  const region = page.getByRole('complementary', {
+    name: panel === 'structure' ? '课程结构' : '编辑面板',
+    exact: true,
+  })
+  if (!await region.isVisible()) {
+    await page.getByRole('button', {
+      name: panel === 'structure' ? '页面与图层' : '属性与素材',
+      exact: true,
+    }).click()
+  }
+  await expect(region).toBeVisible()
+  return region
+}
+
+async function selectEditorTab(page: Page, name: '组件' | '图层' | '属性'): Promise<void> {
+  const panel = await showEditorPanel(page, 'properties')
+  await panel.getByRole('tab', { name, exact: true }).click()
 }
 
 async function closeEditor(app: ElectronApplication): Promise<void> {
@@ -551,7 +581,7 @@ test.describe.serial('Component Catalog V9 四组件全矩阵', () => {
     }
     try {
       await patchDialogs(app, { projectSave: importedRoundtripPath })
-      await page.getByRole('tab', { name: '组件', exact: true }).click()
+      await selectEditorTab(page, '组件')
       await page.getByTestId('open-component-library').click()
       await expect(page.locator('[data-testid^="catalog-component-"]'))
         .toHaveCount(expectedPackageCount)
@@ -584,17 +614,36 @@ test.describe.serial('Component Catalog V9 四组件全矩阵', () => {
       await page.getByRole('button', { name: `添加到画布（${expectedPackageCount}）` }).click()
       await expect(page.getByRole('dialog', { name: '内置组件加入结果' }))
         .toHaveCount(0)
-      await page.getByRole('tab', { name: '组件', exact: true }).click()
+      await selectEditorTab(page, '组件')
+      const expectedProjectPackageIds = [
+        DEFAULT_TEACHER_CONTROLLER_PACKAGE_ID,
+        ...matrixCases.map((entry) => entry.packageId),
+      ].sort()
       await expect(page.locator('[data-testid^="component-package-"]'))
-        .toHaveCount(expectedPackageCount)
+        .toHaveCount(expectedProjectPackageIds.length)
+      await expect(page.getByTestId(`component-package-${DEFAULT_TEACHER_CONTROLLER_PACKAGE_ID}`))
+        .toBeVisible()
 
       // The visible editing renderer is the same Published host used at
       // runtime. The Phaser canvas is only the hit-proxy/selection layer.
-      const editorHost = page.getByTestId('published-authoring-host')
+      const allEditorMounts = page.getByTestId('published-authoring-host')
         .locator(
           '.published-component-mount[data-component-instance-id][data-component-package-id]',
         )
-      await expect(editorHost).toHaveCount(expectedPackageCount)
+      const controllerMount = allEditorMounts.and(page.locator(`[data-component-package-id="${DEFAULT_TEACHER_CONTROLLER_PACKAGE_ID}"]`))
+      const editorHost = allEditorMounts.and(page.locator(
+        `[data-component-package-id]:not([data-component-package-id="${DEFAULT_TEACHER_CONTROLLER_PACKAGE_ID}"])`,
+      ))
+      const expectEditorPackages = async (packageIds: string[], controllerCount: number) => {
+        await expect(controllerMount).toHaveCount(controllerCount)
+        await expect(editorHost).toHaveCount(packageIds.length)
+        await expect(allEditorMounts).toHaveCount(packageIds.length + controllerCount)
+        await expect.poll(() => editorHost.evaluateAll((mounts) => mounts.map((mount) => (
+          mount.getAttribute('data-component-package-id')
+        )).sort())).toEqual([...packageIds].sort())
+      }
+      const importedPackageIds = matrixCases.map((entry) => entry.packageId)
+      await expectEditorPackages(importedPackageIds, 1)
       for (const entry of matrixCases) {
         const projectComponent = page.getByTestId(`component-${entry.packageId}`)
         await expect(projectComponent).toContainText(`v${entry.version}`)
@@ -609,7 +658,7 @@ test.describe.serial('Component Catalog V9 四组件全矩阵', () => {
 
       // 删除、撤销、重做、再次撤销恢复，验证 UI 历史栈和宿主销毁重建。
       // 默认真场景图层树只列场景包行；教师控制器只在全局范围出现。删除只点组件节点。
-      await page.getByRole('tab', { name: '图层' }).click()
+      await selectEditorTab(page, '图层')
       const layerRows = page.locator('.node-item')
       const componentLayerRows = layerRows.filter({
         has: page.locator('.node-type-icon[title="external-component"]'),
@@ -620,16 +669,22 @@ test.describe.serial('Component Catalog V9 四组件全矩阵', () => {
       await expect(layerRows).toHaveCount(expectedPackageCount)
       await expect(componentLayerRows).toHaveCount(expectedPackageCount)
       await expect(teacherControllerRow).toHaveCount(0)
+      const deletedNodeId = (await componentLayerRows.last().getAttribute('data-testid'))?.replace(/^node-item-/, '')
+      const deletedPackageId = await editorHost.and(page.locator(
+        `[data-component-instance-id="${deletedNodeId}"]`,
+      )).getAttribute('data-component-package-id')
+      expect(importedPackageIds).toContain(deletedPackageId)
+      const remainingPackageIds = importedPackageIds.filter((id) => id !== deletedPackageId)
       await componentLayerRows.last().getByTitle('删除节点').click()
-      await expect(editorHost).toHaveCount(expectedPackageCount - 1)
+      await expectEditorPackages(remainingPackageIds, 1)
       await page.getByRole('button', { name: '撤销（Ctrl+Z）' }).click()
-      await expect(editorHost).toHaveCount(expectedPackageCount)
+      await expectEditorPackages(importedPackageIds, 1)
       await page.getByRole('button', {
         name: '重做（Ctrl+Y / Ctrl+Shift+Z）',
       }).click()
-      await expect(editorHost).toHaveCount(expectedPackageCount - 1)
+      await expectEditorPackages(remainingPackageIds, 1)
       await page.getByRole('button', { name: '撤销（Ctrl+Z）' }).click()
-      await expect(editorHost).toHaveCount(expectedPackageCount)
+      await expectEditorPackages(importedPackageIds, 1)
 
       await page.getByRole('button', { name: '保存（Ctrl+S）' }).click()
       await expect.poll(() => existsSync(importedRoundtripPath)).toBe(true)
@@ -639,8 +694,11 @@ test.describe.serial('Component Catalog V9 四组件全矩阵', () => {
       const roundtripProject = JSON.parse(
         new TextDecoder().decode(roundtripArchive['project.json']),
       ) as MatrixProject
-      expect(Object.keys(roundtripProject.componentPackages)).toHaveLength(expectedPackageCount)
+      expect(Object.keys(roundtripProject.componentPackages).sort()).toEqual(expectedProjectPackageIds)
       expect(Object.values(roundtripProject.componentPackages).every((metadata) => (
+        /^[0-9a-f]{64}$/.test(metadata.contentSha256)
+      ))).toBe(true)
+      expect(matrixCases.map((entry) => roundtripProject.componentPackages[entry.packageId]!).every((metadata) => (
         /^[0-9a-f]{64}$/.test(metadata.contentSha256) &&
         Boolean(metadata.sha256) &&
         Boolean(metadata.importedAt) &&
@@ -648,11 +706,13 @@ test.describe.serial('Component Catalog V9 四组件全矩阵', () => {
       ))).toBe(true)
       expect(Object.keys(roundtripArchive).filter((entry) => (
         /^components\/[^/]+\/manifest\.json$/.test(entry)
-      ))).toHaveLength(expectedPackageCount)
+      )).sort()).toEqual(expectedProjectPackageIds.map((packageId) => (
+        `components/${packageId}@${roundtripProject.componentPackages[packageId]!.version}/manifest.json`
+      )).sort())
 
       await patchDialogs(app, { projectOpen: importedRoundtripPath })
       await page.getByRole('button', { name: '打开工程（Ctrl+O）' }).click()
-      await expect(editorHost).toHaveCount(expectedPackageCount)
+      await expectEditorPackages(importedPackageIds, 1)
 
       await patchDialogs(app, {
         projectOpen: matrixLessonPath,
@@ -664,6 +724,7 @@ test.describe.serial('Component Catalog V9 四组件全矩阵', () => {
       await page.getByRole('button', { name: '打开工程（Ctrl+O）' }).click()
       await expect(page.getByRole('alertdialog', { name: explicitLegacyImportDialogName }))
         .toHaveCount(0)
+      await showEditorPanel(page, 'structure')
       const sceneItems = page.locator('[data-testid^="scene-item-"]')
       await expect(sceneItems).toHaveCount(expectedPackageCount)
       for (const entry of matrixCases) {
@@ -673,8 +734,9 @@ test.describe.serial('Component Catalog V9 四组件全矩阵', () => {
       }
 
       for (const entry of matrixCases) {
+        await showEditorPanel(page, 'structure')
         await page.getByTestId(`scene-item-${entry.sceneId}`).click()
-        await expect(editorHost).toHaveCount(1)
+        await expectEditorPackages([entry.packageId], 0)
         for (const label of expectedCanvasTextLabels[entry.packageId] ?? []) {
           await expect(page.getByRole('button', {
             name: `${label}，双击编辑组件文字`,
@@ -688,11 +750,11 @@ test.describe.serial('Component Catalog V9 四组件全矩阵', () => {
           exact: true,
         })
         await expect(editTarget).toBeVisible()
-        await page.getByRole('tab', { name: '图层' }).click()
+        await selectEditorTab(page, '图层')
         await page.getByTestId(`node-item-${entry.nodeId}`)
           .locator('.node-name')
           .click()
-        await page.getByRole('tab', { name: '属性' }).click()
+        await selectEditorTab(page, '属性')
         const textBox = page.getByRole('textbox', {
           name: editCase.label,
           exact: true,
@@ -704,7 +766,7 @@ test.describe.serial('Component Catalog V9 四组件全矩阵', () => {
         entry.baseText = editCase.expectedText
         const visualStyleCase = visualStyleEditCases[entry.packageId]
         if (visualStyleCase) {
-          await page.getByRole('tab', { name: '图层' }).click()
+          await selectEditorTab(page, '图层')
           await page.getByTestId(`node-item-${entry.nodeId}`)
             .locator('.node-name')
             .click()
@@ -719,9 +781,11 @@ test.describe.serial('Component Catalog V9 四组件全矩阵', () => {
             host.shadowRoot?.querySelector<HTMLElement>('.stage')?.dataset.style ?? null
           ))).toBe(visualStyleCase.value)
         }
-        await page.getByRole('button', {
-          name: /矩阵状态覆盖，命名状态/,
-        }).click()
+        // Scene states live above the canvas; either compact sidebar can cover them.
+        const closePanel = page.getByRole('button', { name: '关闭面板', exact: true })
+        if (await closePanel.isVisible()) await closePanel.click()
+        await page.getByRole('region', { name: '场景状态', exact: true })
+          .getByRole('button', { name: /矩阵状态覆盖，命名状态/ }).click()
         await expect.poll(() => shadowText(editorHost))
           .toContain(entry.stateText)
       }

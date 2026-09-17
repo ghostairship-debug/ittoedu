@@ -1,4 +1,5 @@
 import { plainDocumentText } from '../../src/shared/document/content'
+import { serializeDocumentMarkdown } from '../../src/shared/document/markdown'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { isAbsolute, join, relative, resolve } from 'node:path'
@@ -72,6 +73,15 @@ async function launchEditor(): Promise<Launch> {
     })
     await expectBackgroundWindowsIsolated(app, true)
     const page = await app.firstWindow()
+    // Enter only the landing page; never replace an already opened editor or recovery draft.
+    const startupMore = page.locator('.lesson-workspace-more > summary')
+    const startupEditor = page.getByRole('button', { name: '打开工程（Ctrl+O）', exact: true })
+    const startupRecovery = page.getByRole('alertdialog', { name: '发现未完成的本地恢复副本', exact: true })
+    await expect.poll(async () => await startupEditor.isVisible() || await startupMore.isVisible() || await startupRecovery.isVisible()).toBe(true)
+    if (!await startupEditor.isVisible() && await startupMore.isVisible() && !await startupRecovery.isVisible()) {
+      await startupMore.click()
+      await page.getByRole('button', { name: '新建独立课件', exact: true }).click()
+    }
     await page.getByTestId('canvas-stage').locator('canvas').first().waitFor()
     const professional = page.getByRole('button', { name: '专业', exact: true })
     if (await professional.getAttribute('aria-pressed') !== 'true') await professional.click()
@@ -131,31 +141,82 @@ async function readState(page: Page) {
     const state = useEditorStore.getState()
     const document = selectActiveCourseProjectDocument(state)
     const history = state.spatialSession?.history ?? state.flowSession?.history ?? state.slideBackend?.getSession().history
-    return { document, history, draft: state.v9ContentEdit ?? state.flowTextEdit ?? state.spatialContentEdit,
+    return { document, history, draft: state.v9ContentEdit ?? state.flowDocumentDraft ?? state.flowTextEdit ?? state.spatialContentEdit,
+      flowSurfaceId: state.flowSession?.selection.surfaceId ?? null,
       path: state.projectPath, dirty: state.dirty, session: state.courseAuthoringSession }
   })
+}
+
+async function showEditorPanel(page: Page, name: '属性与素材' | null): Promise<void> {
+  const controls = page.getByLabel('课件编辑面板', { exact: true })
+  if (!await controls.isVisible()) return
+  if (name) {
+    const button = controls.getByRole('button', { name, exact: true })
+    if (await button.getAttribute('aria-expanded') !== 'true') await button.click()
+    return
+  }
+  const close = controls.getByRole('button', { name: '关闭面板', exact: true })
+  if (await close.isVisible()) await close.click()
 }
 
 async function openFixture(launch: Launch, fixture: Fixture, saveAs?: string): Promise<void> {
   await patchDialogs(launch.app, { open: fixture.path, saveAs })
   await launch.page.getByRole('button', { name: '打开工程（Ctrl+O）', exact: true }).click()
   await expect.poll(async () => (await readState(launch.page)).document?.id).toBe(fixture.project.id)
+  if (fixture.surface === 'flow') {
+    await expect.poll(async () => (await readState(launch.page)).flowSurfaceId).toBe(fixture.project.surfaces[0]!.id)
+  }
   await expectBackgroundWindowsIsolated(launch.app, true)
 }
 
-async function editText(page: Page, fixture: Fixture, text: string, commit: boolean): Promise<void> {
+async function editText(launch: Launch, fixture: Fixture, text: string, commit: boolean): Promise<void> {
+  const page = launch.page
   if (fixture.surface === 'flow') {
-    await page.getByTestId(`flow-block-${fixture.textId}`).dblclick()
+    if (commit) {
+      const block = page.getByTestId(`flow-block-${fixture.textId}`)
+      await block.selectText()
+      await page.keyboard.insertText(text)
+      await expect(block).toContainText(text)
+      await expect.poll(async () => JSON.stringify((await readState(page)).document)).toContain(text)
+      return
+    }
+    const before = await readState(page)
+    const surface = (before.document as CourseProjectDocument).surfaces.find(candidate => candidate.id === before.flowSurfaceId)
+    if (!surface || surface.type !== 'flow') throw new Error('Expected active Flow surface')
+    const blocks = structuredClone(surface.blocks)
+    const block = blocks.find(candidate => candidate.id === fixture.textId)
+    if (!block || block.type !== 'heading') throw new Error('Expected Flow heading draft target')
+    block.content = { inlines: [{ type: 'text', text }] }
+    const source = serializeDocumentMarkdown({ content: { blocks }, resources: { assets: [], components: [] } }, 'flow')
+    const saveAs = join(launch.runRoot, `flow-memory-${Date.now()}.h5lesson`)
+    await patchDialogs(launch.app, { open: fixture.path, saveAs })
+    await page.evaluate(async record => {
+      const recovery = window.desktopAPI.flowDocumentRecovery
+      if (!recovery) throw new Error('Missing Flow document recovery API')
+      const { revision, source, ...target } = record
+      await recovery.read(target)
+      await recovery.write({ ...target, revision, source, diagnostics: [], composing: false })
+    }, { projectId: before.document.id, projectPath: saveAs, surfaceId: surface.id,
+      epoch: `r18-observation-${Date.now()}`, revision: before.document.revision, source })
+    await page.getByRole('button', { name: '另存为', exact: true }).click()
+    await expect.poll(async () => (await readState(page)).path).toBe(saveAs)
+    await expect.poll(async () => JSON.stringify((await readState(page)).draft)).toContain(text)
+    const format = page.locator('details.flow-document-format')
+    if (await format.getAttribute('open') === null) await format.locator('summary').click()
+    await format.getByRole('button', { name: '源文', exact: true }).click()
+    await expect(page.getByLabel('正文源文编辑')).toContainText(text)
+    return
   } else {
     await page.evaluate(async textId => {
       const load = (path: string) => import(/* @vite-ignore */ path)
       const { useEditorStore } = await load('/src/renderer/store/editorStore.ts')
       useEditorStore.getState().selectNodes([textId])
     }, fixture.textId)
+    await showEditorPanel(page, '属性与素材')
     await page.getByRole('tab', { name: '属性', exact: true }).click()
     await page.getByRole('button', { name: '编辑局部文字格式', exact: true }).click()
   }
-  const editor = page.getByTestId(fixture.surface === 'flow' ? 'flow-inline-editor' : 'text-edit-overlay')
+  const editor = page.getByTestId('text-edit-overlay')
   await expect(editor).toBeVisible()
   await editor.fill(text)
   await expect(editor).toHaveText(text)
@@ -166,6 +227,18 @@ async function editText(page: Page, fixture: Fixture, text: string, commit: bool
   } else {
     await expect.poll(async () => JSON.stringify((await readState(page)).draft)).toContain(text)
   }
+}
+
+async function discardTextDraft(page: Page, surface: Surface): Promise<void> {
+  if (surface !== 'flow') {
+    await page.getByTestId('text-edit-overlay').press('Escape')
+    return
+  }
+  const format = page.locator('details.flow-document-format')
+  if (await format.getAttribute('open') === null) await format.locator('summary').click()
+  await format.getByRole('button', { name: '撤销', exact: true }).click()
+  await expect.poll(async () => (await readState(page)).draft).toBeFalsy()
+  await format.getByRole('button', { name: '排版', exact: true }).click()
 }
 
 async function observationBridge(page: Page) {
@@ -310,10 +383,10 @@ test('real Electron observes each surface memory and active draft without histor
     for (const surface of ['slide', 'flow', 'spatial-2d'] as const) {
       const fixture = fixtureAt(launch.runRoot, surface)
       await openFixture(launch, fixture)
-      await editText(launch.page, fixture, `MEMORY ${surface}`, true)
+      await editText(launch, fixture, `MEMORY ${surface}`, true)
       const committed = await readState(launch.page)
       expect(committed.document.revision).toBe(fixture.project.revision + 1)
-      await editText(launch.page, fixture, `DRAFT ${surface}`, false)
+      await editText(launch, fixture, `DRAFT ${surface}`, false)
       const before = await readState(launch.page)
       expect(before.history).toBeTruthy()
       expect(before.draft).toBeTruthy()
@@ -375,7 +448,7 @@ test('real Electron observes each surface memory and active draft without histor
         await bridge.evaluate(value => value.bridge.dispose())
         await bridge.dispose()
       }
-      await launch.page.getByTestId(surface === 'flow' ? 'flow-inline-editor' : 'text-edit-overlay').press('Escape')
+      await discardTextDraft(launch.page, surface)
       await launch.page.getByRole('button', { name: '保存（Ctrl+S）', exact: true }).click()
       await expect.poll(async () => (await readState(launch.page)).dirty).toBe(false)
     }
@@ -390,7 +463,7 @@ test('real external file change prevents Save and discussion, while manual Save 
     const fixture = fixtureAt(launch.runRoot, 'flow')
     const saveAs = join(launch.runRoot, 'flow-recovered.h5lesson')
     await openFixture(launch, fixture, saveAs)
-    await editText(launch.page, fixture, 'MEMORY TO RECOVER', true)
+    await editText(launch, fixture, 'MEMORY TO RECOVER', true)
     const before = await readState(launch.page)
     const external = structuredClone(fixture.project)
     external.title = 'EXTERNAL DISK VERSION'

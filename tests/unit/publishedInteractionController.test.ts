@@ -9,6 +9,7 @@ import type {
   PublishedNodeMotionContext,
 } from '@/player/interactions/PublishedInteractionSurfacePort'
 import { CourseStateStore } from '@/player/CourseStateStore'
+import { PublishedInteractionRuns } from '@/player/interactions/PublishedInteractionSurfacePort'
 import type {
   InteractionActionPayload,
   InteractionActionStep,
@@ -174,6 +175,81 @@ afterEach(() => {
 })
 
 describe('PublishedInteractionController', () => {
+  it('dispatches exact locations as terminal actions and rejects a missing navigation port', async () => {
+    for (const available of [true, false]) {
+      const host = surfaceHarness()
+      const navigation = sessionHarness()
+      const goToLocation = vi.fn(() => true)
+      const diagnostics: PublishedInteractionDiagnostic[] = []
+      if (available) navigation.session.goToLocation = goToLocation
+      const controller = new PublishedInteractionController({
+        surfaceId: 'slide', surface: host.surface, session: navigation.session,
+        reportDiagnostic: diagnostic => diagnostics.push(diagnostic),
+        rules: [clickRule('exact', 'button', [
+          actionStep('go', { type: 'location.go', locationId: 'flow-anchor' }),
+          actionStep('stale', { type: 'course-state.set', key: 'stale', value: true }),
+        ])],
+      })
+      host.listeners.get('button')?.()
+      await vi.waitFor(() => {
+        if (available) expect(goToLocation).toHaveBeenCalledWith('flow-anchor', expect.any(AbortSignal))
+        else expect(diagnostics.some(diagnostic => diagnostic.code === 'navigation-failed')).toBe(true)
+      })
+      expect(navigation.courseState.get('stale')).toBeUndefined()
+      expect(navigation.goToScene).not.toHaveBeenCalled()
+      controller.destroy()
+    }
+  })
+
+  it('U03-parallel-terminal waits for the parallel group and the following serial action', async () => {
+    vi.useFakeTimers()
+    const runs = new PublishedInteractionRuns()
+    const host = surfaceHarness({ executeNodeMotion: (action) => new Promise(resolve => setTimeout(() => resolve(true), action.durationMs)) })
+    const navigation = sessionHarness()
+    const observed = runs.observe('parallel', 'surface')
+    const controller = new PublishedInteractionController({ surfaceId: 'surface', surface: host.surface,
+      session: { ...navigation.session, interactionRuns: runs }, rules: [clickRule('parallel', 'button', [
+        actionStep('one', { ...motion('node.enter', 'one'), durationMs: 100 }),
+        actionStep('two', { ...motion('node.enter', 'two'), durationMs: 200 }, { start: 'with-previous' }),
+        actionStep('tail', { ...motion('node.enter', 'tail'), durationMs: 50 }),
+      ])] })
+    host.listeners.get('button')!()
+    await vi.advanceTimersByTimeAsync(200)
+    expect(observed.read()[0]?.status).toBe('running')
+    await vi.advanceTimersByTimeAsync(49)
+    expect(observed.read()[0]?.status).toBe('running')
+    await vi.advanceTimersByTimeAsync(1)
+    expect(observed.read()[0]?.status).toBe('completed')
+    // 250ms is the actual critical path; the removed sum-based wait was 350ms.
+    controller.destroy(); observed.close()
+  })
+
+  it('U03-run-identity distinguishes retrigger, destroy, failure, skipped and causal state entry', async () => {
+    vi.useFakeTimers()
+    const runs = new PublishedInteractionRuns(), navigation = sessionHarness()
+    const host = surfaceHarness()
+    const observed = runs.observe('click', 'surface')
+    const options = { surfaceId: 'surface', surface: host.surface, session: { ...navigation.session, interactionRuns: runs } }
+    let controller = new PublishedInteractionController({ ...options, rules: [clickRule('click', 'button', [actionStep('delayed', motion('node.enter', 'one'), { delayMs: 50 })])] })
+    host.listeners.get('button')!(); host.listeners.get('button')!()
+    expect(observed.read().map(run => run.status)).toEqual(['cancelled', 'running'])
+    expect(observed.read()[0]?.reason).toBe('retriggered')
+    controller.destroy()
+    expect(observed.read().map(run => run.status)).toEqual(['cancelled', 'cancelled'])
+    controller = new PublishedInteractionController({ ...options, surface: surfaceHarness({ executeNodeMotion: () => false }).surface,
+      rules: [{ ...clickRule('failure', 'button', [actionStep('bad', motion('node.enter', 'one'))]), trigger: { type: 'scene.enter' } }] })
+    const parent = observed.read()[0]!
+    controller.enterScene(parent.runId)
+    await vi.advanceTimersByTimeAsync(0)
+    const child = observed.read().find(run => run.ruleId === 'failure')!
+    expect(child).toMatchObject({ status: 'failed', parentRunId: parent.runId, chainId: parent.chainId })
+    controller.destroy()
+    controller = new PublishedInteractionController({ ...options, rules: [clickRule('click', 'button', [], [{ type: 'scene.in', sceneIds: ['other'] }])] })
+    host.listeners.get('button')!()
+    expect(observed.read().at(-1)?.status).toBe('skipped')
+    controller.destroy(); observed.close()
+  })
+
   it('uses the current Slide scene for presentation.set and rejects a missing scene', async () => {
     const host = surfaceHarness()
     const navigation = sessionHarness('scene_current')

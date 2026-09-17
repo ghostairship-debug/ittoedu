@@ -284,6 +284,25 @@ function activeSceneId(session: SlideAuthoringSession) {
 }
 
 describe('V9 Slide domain', () => {
+  it('duplicates exact internal location targets while preserving external Flow targets and undo', () => {
+    const project = v9SlideFixture()
+    const scene = slideSurface(project).scenes[0]!
+    scene.interactions = ['location-scene-1', 'location-flow'].map((locationId, index) => ({
+      id: `location-rule-${index}`, enabled: true, trigger: { type: 'node.click', nodeId: 'slide-title' }, conditions: [],
+      actions: [{ id: `location-action-${index}`, start: 'after-previous', delayMs: 0, action: { type: 'location.go', locationId } }],
+    }))
+    const session = openSlideAuthoringSession(project)
+    const next = requireSession(duplicateSlideScene(session, scene.id, { now: NOW }))
+    const copy = slideSurface(next.history.present).scenes.find(candidate => candidate.id === activeSceneId(next))!
+    const location = next.history.present.locations.find(candidate => candidate.kind === 'slide-scene' && candidate.sceneId === copy.id)!
+    expect(location.id).not.toBe(copy.id)
+    expect(copy.interactions.map(rule => rule.actions[0]!.action)).toEqual([
+      { type: 'location.go', locationId: location.id }, { type: 'location.go', locationId: 'location-flow' },
+    ])
+    expect(slideSurface(next.history.present).scenes[0]).toEqual(scene)
+    expect(requireSession(undoSlideAuthoring(next)).history.present).toEqual(session.history.present)
+    expect(courseProjectDocumentSchema.parse(next.history.present)).toEqual(next.history.present)
+  })
   it('opens a proven Course Project V9 document and exposes snapshot/target without hitId', () => {
     const project = v9SlideFixture()
     const session = openSlideAuthoringSession(project)

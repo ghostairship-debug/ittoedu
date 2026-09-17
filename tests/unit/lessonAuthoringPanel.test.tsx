@@ -44,3 +44,19 @@ it('refreshes an asynchronous document repair independently of the previous comp
  await screen.findByText('当前阶段：教学策划', {}, { timeout: 3000 })
  expect(operate.mock.calls.length).toBe(2)
 })
+it('starts a real automatic run with a default instruction when the goal is left empty', async () => {
+ const lesson = { schemaVersion: 1 as const, lessonId: 'lesson', normalizedDirectory: 'c:/lesson' }
+ const state = { schemaVersion: 1 as const, lessonId: 'lesson', mode: 'automatic' as const, epoch: 1, controlEpoch: 0, documents: {}, materials: [{ id: 'material', extractionVersion: 'v', sourceVersion: 's', fragmentIds: ['body'] }] }
+ const empty: LessonAuthoringDesktopResult = { view: { state: { ...state, mode: 'manual' }, currentStage: 'teaching-brief', documents: [], issues: [] } }
+ const running: LessonAuthoringDesktopResult = { view: { state, currentStage: 'teaching-brief', documents: [], issues: [] }, run: { ticketId: 'ticket', stage: 'teaching-brief', sessionId: 'native', status: 'running', message: '已开始' } }
+ const operate = vi.fn(async (request: { operation: string }): Promise<LessonAuthoringDesktopResult> => request.operation === 'set-mode' ? { view: { ...empty.view, state } } : request.operation === 'start' ? running : { view: { state, currentStage: 'teaching-brief', documents: [], issues: [] } })
+ const flushDocuments = vi.fn(async () => true)
+ render(<LessonAuthoringPanel lesson={lesson} conversationId="conversation" adapter="codex" operate={operate} materialSelections={state.materials} flushDocuments={flushDocuments} openDocument={() => {}} assemble={async () => ''} />)
+ fireEvent.click(await screen.findByRole('button', { name: '自动模式（按材料）' }))
+ await screen.findByText(/自动模式已就绪/)
+ fireEvent.click(screen.getByRole('button', { name: '开始自动创作' }))
+ await waitFor(() => expect(operate.mock.calls.some(call => (call as unknown as [{ operation: string }])[0].operation === 'start')).toBe(true))
+ const startCall = operate.mock.calls.map(call => (call as unknown as [{ operation: string; instruction: string }])[0]).find(request => request.operation === 'start')!
+ expect(startCall.instruction.trim().length).toBeGreaterThan(0)
+ expect(flushDocuments).toHaveBeenCalled()
+})

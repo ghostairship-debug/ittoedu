@@ -164,6 +164,8 @@ function addInteractionReferences(
       } else if (action.type === 'scene.go') {
         add('scene', action.sceneId, [...actionPath, 'sceneId'])
         if (action.targetStateId) add('presentation-state', action.targetStateId, [...actionPath, 'targetStateId'])
+      } else if (action.type === 'location.go') {
+        add('location', action.locationId, [...actionPath, 'locationId'])
       } else if ('nodeId' in action) {
         add('layer-item', action.nodeId, [...actionPath, 'nodeId'])
       } else if (action.type === 'audio.play') {

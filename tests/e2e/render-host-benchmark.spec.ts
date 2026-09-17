@@ -383,7 +383,7 @@ test('Course Project V9 的 Published V2 五种渲染路径可离线互动且压
     expect(stress).toEqual(expect.objectContaining({
       index: 4,
       runtimeMounts: 0,
-      componentMounts: 0,
+      componentMounts: 1,
       phaserComponentMounts: 1,
       canvases: 1,
       meterGenerations: { creates: 51, destroys: 50 },

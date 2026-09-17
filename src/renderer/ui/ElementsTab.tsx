@@ -173,13 +173,9 @@ function insertionTitle(
     : `${label}：单击添加${carrier}`
 }
 
-const SIMPLE_ADD_CATEGORIES: Array<{ id: AddCategory; label: string }> = [
+const ADD_CATEGORIES: Array<{ id: AddCategory; label: string }> = [
   { id: 'common', label: '常用' },
   { id: 'media', label: '媒体' },
-]
-
-const PROFESSIONAL_ADD_CATEGORIES: Array<{ id: AddCategory; label: string }> = [
-  ...SIMPLE_ADD_CATEGORIES,
   { id: 'controls', label: '控制与全局' },
 ]
 
@@ -252,7 +248,6 @@ export function ElementsTab({
   const addChartNode = useEditorStore((state) => state.addChartNode)
   const mediaAssets = useEditorStore(selectMediaAssets)
   const audioSettings = useEditorStore(selectAudioSettings)
-  const editorMode = useEditorStore((state) => state.editorMode)
   const editingScope = useEditorStore(selectEditingScope)
   const spatialInsertionScope = useEditorStore<SpatialInsertionScope | null>((state) => (
     state.spatialSession?.scope ?? null
@@ -279,9 +274,7 @@ export function ElementsTab({
   const tableInsertion = insertionCapability(authoringSurface, editingScope, 'table', spatialInsertionScope ?? undefined)
   const chartInsertion = insertionCapability(authoringSurface, editingScope, 'chart', spatialInsertionScope ?? undefined)
   const ensureTeacherController = useEditorStore((state) => state.ensureTeacherController)
-  const categories = editorMode === 'professional'
-    ? PROFESSIONAL_ADD_CATEGORIES
-    : SIMPLE_ADD_CATEGORIES
+  const categories = ADD_CATEGORIES
   const normalizedQuery = searchQuery.trim().toLocaleLowerCase()
   const searching = normalizedQuery.length > 0
   const matchesSearch = (label: string): boolean =>
@@ -321,8 +314,7 @@ export function ElementsTab({
   const showAudio = searching
     ? matchesSearch('声音 音频')
     : activeCategory === 'common'
-  const showController = editorMode === 'professional' &&
-    editingScope === 'global' &&
+  const showController = editingScope === 'global' &&
     (searching
       ? matchesSearch('教师控制器 导航')
       : activeCategory === 'controls')
@@ -340,19 +332,9 @@ export function ElementsTab({
     )
   )
   const showAssets = searching ? assetSearchMatches : activeCategory === 'media'
-  const showControlsEmpty = editorMode === 'professional' &&
-    activeCategory === 'controls' &&
+  const showControlsEmpty = activeCategory === 'controls' &&
     editingScope !== 'global' &&
     !searching
-
-  useEffect(() => {
-    if (
-      editorMode === 'simple' &&
-      activeCategory === 'controls'
-    ) {
-      setActiveCategory('common')
-    }
-  }, [activeCategory, editorMode])
 
   return (
     <div className="elements-scroll" data-testid="elements-tab">
@@ -673,7 +655,7 @@ export function ElementsTab({
             <MediaTab
               embedded
               onImportImage={onImportImage}
-              showAdvancedAudioSettings={editorMode === 'professional'}
+              showAdvancedAudioSettings
               filterQuery={searchQuery}
               onImportAudio={onImportAudio}
               onImportVideo={onImportVideo}

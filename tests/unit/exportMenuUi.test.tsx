@@ -1,5 +1,5 @@
 import { controllerPackages } from '../fixtures/teacherController'
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { RecentProjectEntry } from '@/shared/ipcTypes'
 import { useEditorStore, selectActiveCourseProjectDocument } from '@/renderer/store/editorStore'
@@ -14,7 +14,6 @@ afterEach(cleanup)
 beforeEach(() => {
   localStorage.clear()
   useEditorStore.getState().createNewProject()
-  useEditorStore.setState({ editorMode: 'simple' })
 })
 
 function renderToolbar(
@@ -56,7 +55,7 @@ describe('unified export menu', () => {
     expect(selectActiveCourseProjectDocument(useEditorStore.getState())!.title).toBe('未命名课件')
   })
 
-  it('moves Save As, project health, and recent projects into More in simple mode', () => {
+  it('keeps Save As, project health, and recent projects directly visible', () => {
     const onOpenHealth = vi.fn()
     const onSave = vi.fn()
     const onOpenRecent = vi.fn()
@@ -70,29 +69,22 @@ describe('unified export menu', () => {
       }],
     })
 
-    expect(screen.queryByRole('button', { name: '另存为' })).not.toBeInTheDocument()
-    expect(screen.queryByTitle('打开最近工程')).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', {
-      name: '工程检查：未发现问题',
-    })).not.toBeInTheDocument()
+    expect(screen.queryByTitle('更多工程操作')).not.toBeInTheDocument()
 
-    fireEvent.click(screen.getByTitle('更多工程操作'))
-    fireEvent.click(screen.getByRole('menuitem', { name: /另存为/ }))
+    fireEvent.click(screen.getByRole('button', { name: '另存为' }))
     expect(onSave).toHaveBeenCalledWith(true)
 
-    fireEvent.click(screen.getByTitle('更多工程操作'))
-    fireEvent.click(screen.getByRole('menuitem', {
+    fireEvent.click(screen.getByRole('button', {
       name: '工程检查：未发现问题',
     }))
     expect(onOpenHealth).toHaveBeenCalledOnce()
 
-    fireEvent.click(screen.getByTitle('更多工程操作'))
+    fireEvent.click(screen.getByTitle('打开最近工程'))
     fireEvent.click(screen.getByRole('button', { name: /雨中的苏轼/ }))
     expect(onOpenRecent).toHaveBeenCalledWith('C:\\lessons\\rain.h5lesson')
   })
 
-  it('keeps advanced project controls directly visible in professional mode', () => {
-    act(() => useEditorStore.getState().setEditorMode('professional'))
+  it('keeps advanced project controls directly visible', () => {
     renderToolbar(vi.fn())
 
     expect(screen.queryByTitle('更多工程操作')).not.toBeInTheDocument()
@@ -104,19 +96,6 @@ describe('unified export menu', () => {
     expect(screen.queryByRole('button', {
       name: '导入可信的 .h5component 组件',
     })).not.toBeInTheDocument()
-  })
-
-  it('changes editor density without replacing or mutating the Project document', () => {
-    const projectBefore = selectActiveCourseProjectDocument(useEditorStore.getState())!
-    renderToolbar(vi.fn())
-
-    fireEvent.click(screen.getByRole('button', { name: '专业' }))
-    expect(useEditorStore.getState().editorMode).toBe('professional')
-    expect(selectActiveCourseProjectDocument(useEditorStore.getState())!).toBe(projectBefore)
-
-    fireEvent.click(screen.getByRole('button', { name: '简洁' }))
-    expect(useEditorStore.getState().editorMode).toBe('simple')
-    expect(selectActiveCourseProjectDocument(useEditorStore.getState())!).toBe(projectBefore)
   })
 
   it('offers both explicit single HTML modes, web package, PPTX, PDF, and DOCX', () => {

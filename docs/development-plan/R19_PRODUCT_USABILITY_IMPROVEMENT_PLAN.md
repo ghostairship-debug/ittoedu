@@ -1,6 +1,6 @@
 # 1.9 产品可用性改进：执行能力、交付与工作台
 
-> 2026-09-16 最新 Owner 决定：按[第 7 节](#7-常规任务完整链路与效率收敛)完整收敛常规编辑、阶段文稿及检查反馈，降低重复读取、协议拼装、无效调用和等待成本。首轮表现单独记录，允许原任务内自行修正；不围绕已通过课例无限追加提示或追首次通过。本次授权为更新开发计划，三批尚未实施；下文 A–D、R/E/F/G 的历史依据与实测继续有效。
+> 状态整理（2026-09-17）：本方案第 7 节对应 U01–U10 已完成工程实施，见[执行记录](reviews/2026-09-17-r19-usability-execution.md)；其后有限收尾已完成并停止，见[收尾记录](reviews/2026-09-17-r19-limited-closeout.md)。本文件保留历史设计和证据，不作为当前待办清单。当前开发入口是[前端专项](R19_FRONTEND_SPECIAL_IMPLEMENTATION_PLAN.md)，050/060 仍未完成。下文各日期的“未实施／继续”只指当时状态，不自动重开旧批次。
 
 ## 1. 目标与依据
 
@@ -194,6 +194,8 @@ R 是本批 E/F/G 的共同实现前置，不增加路线节点、模型服务�
 
 ## 7. 常规任务完整链路与效率收敛
 
+> 2026-09-17：下列方案的 U01–U10 已实施并接通，见[工程记录](reviews/2026-09-17-r19-usability-execution.md)。表中旧实现缺口是本批启动依据，不再代表当前源码状态；真实自然教师整链 050/060 与 Owner 签署仍未完成。
+
 ### 7.1 目标、依据与范围
 
 Owner 在[提示与固定步骤审查](reviews/2026-09-16-ai-prompt-workaround-audit.md)及后续方案讨论后，要求把全部解决方案整合进现有开发计划。目标是：模型处理教学内容、创作选择、目标与必要操作参数；软件承担确定性的协议转换、身份与引用、检查、交付和状态管理。普通任务能够正确完成，在原任务内根据具体反馈自行修正，并减少得到正确结果的总时间。这里是现有能力的实施分组，不新增路线节点、第二能力注册表、第二工程真相或模型分类服务。
@@ -238,13 +240,13 @@ Owner 在[提示与固定步骤审查](reviews/2026-09-16-ai-prompt-workaround-a
 
 | 历史反例与直接证据 | 当前事实、取舍与退出证据 |
 |---|---|
-| `compose-node-not-found`：[199.721 秒任务回执历史](../../output/r19-refg-validation/codex-2026-09-16T10-47-49-717Z/host-result-history.json)首条拒绝位于 `s2 / input.trigger.node`，把标题正文当成对象名称；before/after revision 均为 1 | **采纳有条件前移。** [slideInteractionTool.ts](../../src/renderer/authoring/tools/slideInteractionTool.ts) 的 `locationItems` / `resolveNode` 按当前位置实际适用条目，先 ID 后唯一 label 解析；helper 当前未消费这段规则。由该 Owner 提炼冻结事实可调用的同源解析，完整索引且无前序影响时提前给出相同错误码/字段；补合法 ID、唯一名称、重名及前序新建/改名反例，不能复制第二套匹配算法。依赖后续输入投影的部分留在“普通编辑输入至交付”，不强塞 1a |
-| manifest `options` 字符串数组：[旧 DeepSeek 原始记录](../../output/r19-current-teacher-luna/20260915-current-unified/claude-deepseek-repair-2026-09-15T14-46-27-525Z/completed-native-record.json) sequence 312 写入、548 仍报 prechecked，hostResult 随后拒绝 `editor.properties.0.options.0` | **复用已实现，不重建。** 当前静态检查已对 `component.package patch` 的 UTF-8 `manifest.json` 复用正式 `componentManifestSchema`，拒绝字符串 options、接受 `{value,label}`；已有 [命名反例](../../tests/unit/generationCapabilityWorkspace.test.ts) `prechecks frozen Component targets and the final changed manifest with the formal shared schema`。把旧坏输入/修正输入用于该路径的免费回归；未展开文件或其他交付形式保持宿主检查，不把这一分支通过外推为全部清单入口已提前验证 |
-| `goToScene(locationId)`：[旧第二轮](../../output/r19-current-teacher-luna/20260915-current-unified/claude-deepseek-repair-2026-09-15T15-13-31-269Z/completed-native-record.json) sequence 137 与[第三轮](../../output/r19-current-teacher-luna/20260915-current-unified/claude-deepseek-repair-2026-09-15T15-51-10-360Z/completed-native-record.json) sequence 88 的自测均把 `goToScene` mock 为恒真；实际错误为组件源码导航 | **收窄静态承诺。** [Published session](../../src/player/surfaces/publishedDynamicHosts.ts) 的 `#slideLocationForScene` / `#goToScene` 只解析 Slide sceneId，已有 [真实导航反例](../../tests/unit/publishedComponentNavigationContract.test.ts) 验证 Flow locationId 返回 false、guard 生效及 nextScene 跨 Surface。可对正式结构化导航参数和完整冻结索引前移同源检查；拒绝用正则/字符串匹配宣称能判任意 JS 的变量、分支和导航结果。旧源码错误保留真实 Player 反例及准确目标说明，不静默把 locationId 转成 sceneId，不另添全局提示 |
+| `compose-node-not-found`：`../../output/r19-refg-validation/codex-2026-09-16T10-47-49-717Z/host-result-history.json`（历史链接目标未保留）首条拒绝位于 `s2 / input.trigger.node`，把标题正文当成对象名称；before/after revision 均为 1 | **采纳有条件前移。** [slideInteractionTool.ts](../../src/renderer/authoring/tools/slideInteractionTool.ts) 的 `locationItems` / `resolveNode` 按当前位置实际适用条目，先 ID 后唯一 label 解析；helper 当前未消费这段规则。由该 Owner 提炼冻结事实可调用的同源解析，完整索引且无前序影响时提前给出相同错误码/字段；补合法 ID、唯一名称、重名及前序新建/改名反例，不能复制第二套匹配算法。依赖后续输入投影的部分留在“普通编辑输入至交付”，不强塞 1a |
+| manifest `options` 字符串数组：`../../output/r19-current-teacher-luna/20260915-current-unified/claude-deepseek-repair-2026-09-15T14-46-27-525Z/completed-native-record.json`（历史链接目标未保留） sequence 312 写入、548 仍报 prechecked，hostResult 随后拒绝 `editor.properties.0.options.0` | **复用已实现，不重建。** 当前静态检查已对 `component.package patch` 的 UTF-8 `manifest.json` 复用正式 `componentManifestSchema`，拒绝字符串 options、接受 `{value,label}`；已有 [命名反例](../../tests/unit/generationCapabilityWorkspace.test.ts) `prechecks frozen Component targets and the final changed manifest with the formal shared schema`。把旧坏输入/修正输入用于该路径的免费回归；未展开文件或其他交付形式保持宿主检查，不把这一分支通过外推为全部清单入口已提前验证 |
+| `goToScene(locationId)`：`../../output/r19-current-teacher-luna/20260915-current-unified/claude-deepseek-repair-2026-09-15T15-13-31-269Z/completed-native-record.json`（历史链接目标未保留） sequence 137 与`../../output/r19-current-teacher-luna/20260915-current-unified/claude-deepseek-repair-2026-09-15T15-51-10-360Z/completed-native-record.json`（历史链接目标未保留） sequence 88 的自测均把 `goToScene` mock 为恒真；实际错误为组件源码导航 | **收窄静态承诺。** [Published session](../../src/player/surfaces/publishedDynamicHosts.ts) 的 `#slideLocationForScene` / `#goToScene` 只解析 Slide sceneId，已有 [真实导航反例](../../tests/unit/publishedComponentNavigationContract.test.ts) 验证 Flow locationId 返回 false、guard 生效及 nextScene 跨 Surface。可对正式结构化导航参数和完整冻结索引前移同源检查；拒绝用正则/字符串匹配宣称能判任意 JS 的变量、分支和导航结果。旧源码错误保留真实 Player 反例及准确目标说明，不静默把 locationId 转成 sceneId，不另添全局提示 |
 
 上述反例只重放保留输入和真实 consumer，不新增模型任务。第一批须证明可静态确定的错误提前定位且合法修正仍可提交，deferred 明确不代表通过；live 身份、资源闭包、当前版本、动态行为和唯一 canonical 事务仍由正式 Owner 裁决。
 
-**保留导航事实的已知记忆例外。** [原始读记忆证据](../../output/r19-050-navigation/prior-memory-read-evidence.json)记录旧任务 sequence 133 从 CLI 的 `MEMORY.md` 取得“相邻 location 因而 step.next 一次跨页”的错误结论。[generationNavigationContext.ts](../../src/renderer/authoring/generation/generationNavigationContext.ts) 的当前事实及 `profile.ts` 条件式导航摘要可保留“当前事实优先于旧记忆”；这是已有错误输入的定向纠正，产品不修改、屏蔽或管理个人记忆，不削减 CLI 文件能力，也不再把同类句子加到通用 prompt。实际目的地仍以当前规则和真实操作证明。
+**保留导航事实的已知记忆例外。** `../../output/r19-050-navigation/prior-memory-read-evidence.json`（历史链接目标未保留）记录旧任务 sequence 133 从 CLI 的 `MEMORY.md` 取得“相邻 location 因而 step.next 一次跨页”的错误结论。[generationNavigationContext.ts](../../src/renderer/authoring/generation/generationNavigationContext.ts) 的当前事实及 `profile.ts` 条件式导航摘要可保留“当前事实优先于旧记忆”；这是已有错误输入的定向纠正，产品不修改、屏蔽或管理个人记忆，不削减 CLI 文件能力，也不再把同类句子加到通用 prompt。实际目的地仍以当前规则和真实操作证明。
 
 **按需能力的实施条件。** Runtime 若出现可复现的工作副本封装错误或重复准备成本，沿现有 helper 提供“当前源码副本 → 编辑 → 生成 `runtime.source` 候选”，复用实例/基线核对及既有静态、动态准入，保留未指定字段，不另造源码补丁协议。列表若有具体高频组件的增删/重排需求，先为该组件确定显式替换/删除与默认值、实例覆盖、具名状态、答案及引用的共同语义，再连接配置入口和持久化 consumer；不能只加一个 remove 参数，也不能全局更改内容合并规则来通过单例。这两项由真实缺口触发，不成为所有普通编辑的必经步骤或新的版本门。
 
@@ -356,8 +358,8 @@ Owner 在[提示与固定步骤审查](reviews/2026-09-16-ai-prompt-workaround-a
 
 | 原始记录 | 研究工具链 | 读工程 | 写候选 | 验证 | 混合 | 其他/未知 | 合计 / 命令非零退出 |
 |---|---:|---:|---:|---:|---:|---:|---|
-| [52235996…：原电路修改](../../output/r19-050-navigation/codex-2026-09-16T12-25-41-304Z/native-record-52235996-89a9-4c2b-a684-68e96ce95a4d.json) | 15 | 4 | 2 | 3 | 0 | 3 | 27 / 3 |
-| [b91c987c…：普通视觉反馈后的修正](../../output/r19-050-navigation/codex-2026-09-16T12-25-41-304Z/native-record-b91c987c-611f-4dff-9d77-b84996abf979.json) | 14 | 1 | 4 | 2 | 1 | 0 | 22 / 6 |
+| `../../output/r19-050-navigation/codex-2026-09-16T12-25-41-304Z/native-record-52235996-89a9-4c2b-a684-68e96ce95a4d.json`（历史链接目标未保留） | 15 | 4 | 2 | 3 | 0 | 3 | 27 / 3 |
+| `../../output/r19-050-navigation/codex-2026-09-16T12-25-41-304Z/native-record-b91c987c-611f-4dff-9d77-b84996abf979.json`（历史链接目标未保留） | 14 | 1 | 4 | 2 | 1 | 0 | 22 / 6 |
 
 可复核归属使用 tool-result sequence：首项研究为 110/115/120/125/140/157/182/187/192/276/281/286/291/296/311，工程为 132/145/150/171，写候选为 301/321，验证为 306/316/460，其他为 103/105/162；次项研究为 102/111/126/131/136/141/146/164/169/180/185/190/195/200，工程为 151，写候选为 219/231/312/322，验证为 224/317，混合为 95。首项 276–296 五次为 helper 实现研究；316→321、次项 224→231 和 317→322 均是先 check-only 再正常生成，证明重复准备模式存在。460 是 cua.getState 的观察尝试，不能记为实际互动验证通过。
 

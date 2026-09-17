@@ -4,7 +4,7 @@
 
 根据随后对 OpenCode/Claude 路径的复核，[机制方案第 9 节](AI_AUTHORING_MECHANISM_IMPLEMENTATION_PLAN.md#9-2026-09-14-开发批次与新增快速模式)已落地当前 M0–M4/M6 纵切与 Codex 快速模式：完整创建/窄修改、前序结果组合、同源条件、候选帮助程序、准确恢复和结果检查。三家 CLI 的自然图形任务均有首次原生候选及保存重开证据；实现、失败样本与检查范围见[实测记录](reviews/2026-09-14-authoring-mechanism-implementation.md)。本文原有完成状态仍指对应开放修改批次；B2–B4 完整业务族归 1.9，Owner 验收独立。
 
-最新证据边界：OpenCode 首份候选 s1 改色预演通过，s2 用 content/update 操作创建圆形被拒，随后文件候选成功；两次 Claude 都明确指定文件路径。最终两个独立 Native 对象证明原生结果和可编辑性，不证明调用了宿主创建快捷命令。同一初始工程的[快捷隔离验证](../../output/native-editing-repair-20260914/quick-path-verification.json)已通过，但未调用模型，不能替代自然路径首轮验证。
+最新证据边界：OpenCode 首份候选 s1 改色预演通过，s2 用 content/update 操作创建圆形被拒，随后文件候选成功；两次 Claude 都明确指定文件路径。最终两个独立 Native 对象证明原生结果和可编辑性，不证明调用了宿主创建快捷命令。同一初始工程的`../../output/native-editing-repair-20260914/quick-path-verification.json`（历史链接目标未保留）已通过，但未调用模型，不能替代自然路径首轮验证。
 
 ## 2026-09-14 当前增补：开放修改与原生 CLI 兜底
 
@@ -241,6 +241,6 @@ R1 的任务交接与消息事件合同先稳定。随后 AI 目标叶子、Flow
 ## 附：当前调查证据入口
 
 - AI 失败：应用会话 `7b71869d-07eb-4d32-9712-15217b07ad6c`、`cfeab460-1070-4450-87bc-1e829f1f4757`，同一原生会话 `01a09167-eb41-7641-b409-06c95e6c0388`；早期未定因取消为 `2e4a3e06-0751-4bcf-b563-8d1c381a4072`。原始日志留在应用本地，不复制进课件。
-- Flow 真实窗口：[基础诊断](../../output/playwright/user-flow-diagnosis/2026-09-11T17-17-37-893Z/measurements.json)、[窄窗口及同宽对照](../../output/playwright/user-flow-diagnosis/2026-09-11T17-19-29-830Z/measurements.json)。临时同宽 CSS 只用于诊断，不是产品修复。
-- 聊天实录回放：[测量](../../output/playwright/user-chat-diagnosis/2026-09-11T17-32-22-610Z/facts.json)、[画面](../../output/playwright/user-chat-diagnosis/2026-09-11T17-32-22-610Z/chat-top.png)。本次回放只读已有记录，没有再次调用模型。
+- Flow 真实窗口：`../../output/playwright/user-flow-diagnosis/2026-09-11T17-17-37-893Z/measurements.json`（历史链接目标未保留）、`../../output/playwright/user-flow-diagnosis/2026-09-11T17-19-29-830Z/measurements.json`（历史链接目标未保留）。临时同宽 CSS 只用于诊断，不是产品修复。
+- 聊天实录回放：`../../output/playwright/user-chat-diagnosis/2026-09-11T17-32-22-610Z/facts.json`（历史链接目标未保留）、`../../output/playwright/user-chat-diagnosis/2026-09-11T17-32-22-610Z/chat-top.png`（历史链接目标未保留）。本次回放只读已有记录，没有再次调用模型。
 - 源码关键点：[背景目标准备](../../src/renderer/authoring/generation/generationSnapshot.ts)、[任务继续](../../src/renderer/authoring/generation/generationTaskController.ts)、[Flow 编辑](../../src/renderer/ui/FlowWorkspace.tsx)、[表格失焦取消](../../src/renderer/ui/properties/NativeTableProperties.tsx)、[公式弹窗](../../src/renderer/ui/FormulaEditDialog.tsx)、[Flow 播放布局](../../src/player/surfaces/flow/FlowSurfaceHost.ts)、[聊天正文提取](../../src/shared/localAgentText.ts)。

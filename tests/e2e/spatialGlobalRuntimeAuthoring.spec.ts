@@ -193,7 +193,15 @@ async function launchEditor(): Promise<LaunchedEditor> {
     app.context().on('request', (request) => {
       if (/^https?:/i.test(request.url())) diagnostics.externalRequests.push(request.url())
     })
-    await page.getByRole('button', { name: '新建独立课件', exact: true }).click()
+    // Only enter the landing page; keep an existing editor or recovery draft intact.
+    const startupMore = page.locator('.lesson-workspace-more > summary')
+    const startupEditor = page.getByRole('button', { name: '打开工程（Ctrl+O）', exact: true })
+    const startupRecovery = page.getByRole('alertdialog', { name: '发现未完成的本地恢复副本', exact: true })
+    await expect.poll(async () => await startupEditor.isVisible() || await startupMore.isVisible() || await startupRecovery.isVisible()).toBe(true)
+    if (!await startupEditor.isVisible() && await startupMore.isVisible() && !await startupRecovery.isVisible()) {
+      await startupMore.click()
+      await page.getByRole('button', { name: '新建独立课件', exact: true }).click()
+    }
     await page.locator('[data-testid="canvas-stage"] canvas').first().waitFor()
     await expectBackgroundWindowsIsolated(app, true)
     const professional = page.getByRole('button', { name: '专业' })

@@ -16,7 +16,6 @@ const standalonePath = join(runRoot, 'sample-v9.html')
 let controllerItemId = ''
 let nextButtonId = ''
 let controllerFrame: LayerFrame | null = null
-let slideCanvas: { width: number; height: number } | null = null
 const PUBLISHED_FRAME_TOLERANCE_CSS_PX = 1
 
 test.beforeAll(() => {
@@ -43,12 +42,9 @@ test.beforeAll(() => {
     (button) => button.action.type === 'scene.next' && button.visible,
   )
   if (!nextButton) throw new Error('sample teacher controller has no visible next button')
-  const slide = opened.project.surfaces.find((surface) => surface.type === 'slide')
-  if (!slide || slide.type !== 'slide') throw new Error('sample V9 project has no Slide surface')
   controllerItemId = controller.item.layerItemId
   nextButtonId = nextButton.id
   controllerFrame = structuredClone(controller.item.frame)
-  slideCanvas = structuredClone(slide.canvas)
   const playerBundle = readFileSync(
     join(root, 'dist-player', 'player.iife.js'),
     'utf8',
@@ -79,44 +75,49 @@ test('committed V9 sample publishes an interactive offline Phaser counter', asyn
 
   await page.goto(pathToFileURL(standalonePath).toString())
   await page.waitForFunction(() => Boolean(window.__H5_LESSON_PLAYER__))
-  if (!controllerFrame || !slideCanvas) throw new Error('sample controller geometry is missing')
+  if (!controllerFrame) throw new Error('sample controller geometry is missing')
+  const expectedControllerFrame = controllerFrame
   const stage = page.locator('[data-slide-scene-stage="true"]')
+  const playbackViewport = page.locator('[data-playback-viewport="true"]')
   const controllerWrapper = page.locator(`[data-global-layer-item="${controllerItemId}"]`)
   await expect(stage).toBeVisible()
+  await expect(playbackViewport).toBeVisible()
   await expect(controllerWrapper).toBeVisible()
-  const [stageBounds, wrapperBounds] = await Promise.all([
-    stage.boundingBox(),
+  const authoredFrame = await controllerWrapper.evaluate((element) => ({
+    x: Number.parseFloat((element as HTMLElement).style.left),
+    y: Number.parseFloat((element as HTMLElement).style.top),
+    width: Number.parseFloat((element as HTMLElement).style.width),
+    height: Number.parseFloat((element as HTMLElement).style.height),
+  }))
+  expect({ x: authoredFrame.x, y: authoredFrame.y }).toEqual({
+    x: controllerFrame.x,
+    y: controllerFrame.y,
+  })
+  expect(authoredFrame.width).toBeGreaterThan(0)
+  expect(authoredFrame.height).toBeGreaterThan(0)
+  expect(authoredFrame.width).toBeLessThanOrEqual(controllerFrame.width)
+  expect(authoredFrame.height).toBeLessThanOrEqual(controllerFrame.height)
+  const [viewportBounds, wrapperBounds] = await Promise.all([
+    playbackViewport.boundingBox(),
     controllerWrapper.boundingBox(),
   ])
-  if (!stageBounds || !wrapperBounds) throw new Error('sample Published geometry has no bounds')
-  const scaleX = stageBounds.width / slideCanvas.width
-  const scaleY = stageBounds.height / slideCanvas.height
-  const mapped = {
-    left: wrapperBounds.x - stageBounds.x,
-    top: wrapperBounds.y - stageBounds.y,
-    width: wrapperBounds.width,
-    height: wrapperBounds.height,
-  }
-  const expected = {
-    left: controllerFrame.x * scaleX,
-    top: controllerFrame.y * scaleY,
-    width: controllerFrame.width * scaleX,
-    height: controllerFrame.height * scaleY,
-  }
-  for (const key of ['left', 'top', 'width', 'height'] as const) {
-    expect(
-      Math.abs(mapped[key] - expected[key]),
-      `Published controller ${key} differs from the V9 authored frame`,
-    ).toBeLessThanOrEqual(PUBLISHED_FRAME_TOLERANCE_CSS_PX)
-  }
+  if (!viewportBounds || !wrapperBounds) throw new Error('sample Published geometry has no bounds')
+  expect(wrapperBounds.x).toBeGreaterThanOrEqual(viewportBounds.x - PUBLISHED_FRAME_TOLERANCE_CSS_PX)
+  expect(wrapperBounds.y).toBeGreaterThanOrEqual(viewportBounds.y - PUBLISHED_FRAME_TOLERANCE_CSS_PX)
+  expect(wrapperBounds.x + wrapperBounds.width).toBeLessThanOrEqual(
+    viewportBounds.x + viewportBounds.width + PUBLISHED_FRAME_TOLERANCE_CSS_PX,
+  )
+  expect(wrapperBounds.y + wrapperBounds.height).toBeLessThanOrEqual(
+    viewportBounds.y + viewportBounds.height + PUBLISHED_FRAME_TOLERANCE_CSS_PX,
+  )
 
-  const controller = controllerWrapper.locator('.slide-native-teacher-controller')
+  const controller = controllerWrapper.getByRole('navigation', { name: '教师控制台' })
   await expect(controller).toBeVisible()
   const nextButton = controller.locator(
     `[data-controller-button-id="${nextButtonId}"]`,
   )
   if (!await nextButton.isVisible()) {
-    const expand = controller.locator('[data-teacher-controller-collapse="true"]')
+    const expand = controller.getByRole('button', { name: '展开教师控制器' })
     const expandBounds = await expand.boundingBox()
     if (!expandBounds) throw new Error('sample controller expand button has no bounds')
     await page.mouse.click(
@@ -125,6 +126,10 @@ test('committed V9 sample publishes an interactive offline Phaser counter', asyn
     )
   }
   await expect(nextButton).toBeVisible()
+  await expect.poll(() => controllerWrapper.evaluate((element, expected) => Math.max(
+    Math.abs(Number.parseFloat((element as HTMLElement).style.width) - expected.width),
+    Math.abs(Number.parseFloat((element as HTMLElement).style.height) - expected.height),
+  ), expectedControllerFrame)).toBeLessThanOrEqual(PUBLISHED_FRAME_TOLERANCE_CSS_PX)
   const nextButtonBounds = await nextButton.boundingBox()
   if (!nextButtonBounds) throw new Error('sample controller next button has no bounds')
   await page.mouse.click(

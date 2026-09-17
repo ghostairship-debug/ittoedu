@@ -187,7 +187,7 @@ function attachDiagnostics(page: Page, diagnostics: Diagnostics): void {
   })
 }
 
-async function launchEditor(standalone = false): Promise<LaunchedEditor> {
+async function launchEditor(_standalone = false): Promise<LaunchedEditor> {
   const userDataPath = mkdtempSync(
     join(tmpdir(), `${APP_E2E_TEMP_DIRECTORY_NAME}-vs06-${process.pid}-${launchSequence++}-`),
   )
@@ -222,7 +222,15 @@ async function launchEditor(standalone = false): Promise<LaunchedEditor> {
     context.on('page', attach)
     const page = await app.firstWindow()
     attach(page)
-    if (standalone) await page.getByRole('button', { name: '新建独立课件', exact: true }).click()
+    // Only enter the landing page; keep an existing editor or recovery draft intact.
+    const startupMore = page.locator('.lesson-workspace-more > summary')
+    const startupEditor = page.getByRole('button', { name: '打开工程（Ctrl+O）', exact: true })
+    const startupRecovery = page.getByRole('alertdialog', { name: '发现未完成的本地恢复副本', exact: true })
+    await expect.poll(async () => await startupEditor.isVisible() || await startupMore.isVisible() || await startupRecovery.isVisible()).toBe(true)
+    if (!await startupEditor.isVisible() && await startupMore.isVisible() && !await startupRecovery.isVisible()) {
+      await startupMore.click()
+      await page.getByRole('button', { name: '新建独立课件', exact: true }).click()
+    }
     await page.locator('[data-testid="canvas-stage"] canvas').waitFor()
     await expectBackgroundWindowsIsolated(app, true)
     const recoveryDialog = page.getByRole('alertdialog', {
@@ -409,7 +417,18 @@ async function openProject(
 ): Promise<void> {
   await patchDialogs(app, { projectOpen: projectPath })
   await page.getByRole('button', { name: '打开工程（Ctrl+O）' }).click()
+  await showEditorPanel(page, '页面与图层')
   await expect(page.getByTestId(expectedLocationTestId)).toBeVisible({ timeout: 15_000 })
+}
+
+async function showEditorPanel(
+  page: Page,
+  name: '页面与图层' | '属性与素材',
+): Promise<void> {
+  if (!await page.locator('[aria-label="课件编辑面板"]').isVisible()) return
+  const button = page.getByRole('button', { name, exact: true })
+  await expect(button).toBeVisible()
+  if (await button.getAttribute('aria-expanded') !== 'true') await button.click()
 }
 
 async function saveAs(
@@ -427,22 +446,25 @@ async function saveAs(
 }
 
 async function selectSlideImage(page: Page, itemId = 'slide-intro-hero'): Promise<void> {
+  await showEditorPanel(page, '属性与素材')
   await page.getByRole('tab', { name: '图层' }).click()
   const row = page.getByTestId(`node-item-${itemId}`)
   await expect(row).toBeVisible()
   await row.locator('.node-name').click()
-  await page.getByRole('tab', { name: '属性' }).click()
-  await expect(page.getByRole('button', { name: '替换图片' })).toBeVisible()
+  await expect(page.getByTestId('properties-tab')
+    .getByRole('button', { name: '替换图片', exact: true })).toBeVisible()
 }
 
 async function makeBaselineBannerExportable(page: Page): Promise<void> {
+  await showEditorPanel(page, '页面与图层')
   await page.getByRole('button', { name: /全局层（全课）/ }).click()
+  await showEditorPanel(page, '属性与素材')
   await page.getByRole('tab', { name: '图层' }).click()
   const banner = page.getByTestId('node-item-slide-global-banner')
   await expect(banner).toBeVisible()
   await banner.locator('.node-name').click()
-  await page.getByRole('tab', { name: '属性' }).click()
-  const height = page.locator('.property-section').first().getByLabel('高', { exact: true })
+  const height = page.getByTestId('properties-tab').getByLabel('高', { exact: true })
+  await expect(height).toBeVisible()
   await height.fill('80')
   await height.press('Enter')
 }
@@ -564,6 +586,7 @@ test.describe.serial('ARCH-1 VS-06 image replacement desktop regression', () => 
         .toContainText('判别式导入 · 基础态')
       await expect(launch.page.getByTestId('course-page-node-flow-surface')).toHaveCount(0)
 
+      await showEditorPanel(launch.page, '页面与图层')
       await launch.page.getByTestId('scene-item-slide-location-summary').click()
       await selectSlideImage(launch.page, 'slide-summary-hero')
       await releaseDeferredImageDialog(launch.app)
@@ -680,6 +703,7 @@ test.describe.serial('ARCH-1 VS-06 image replacement desktop regression', () => 
       await patchDialogs(launch.app, { projectOpen: redoneCopyPath })
       await launch.page.getByRole('button', { name: '新建课件（Ctrl+N）' }).click()
       await launch.page.getByRole('button', { name: '打开工程（Ctrl+O）' }).click()
+      await showEditorPanel(launch.page, '页面与图层')
       await expect(launch.page.getByTestId('course-page-node-slide-surface'))
         .toBeVisible()
       await launch.page.getByTestId('scene-item-slide-location-summary').click()
@@ -772,15 +796,15 @@ test.describe.serial('ARCH-1 VS-06 image replacement desktop regression', () => 
             .toBe('slide-location-intro')
           // Intro and evidence are two steps in one scene. Scene navigation skips
           // the remaining step; returning enters that scene at its first step.
-          for (const { buttonId, label, locationId } of [
-            { buttonId: 'next', label: '下一场景', locationId: 'slide-location-practice' },
-            { buttonId: 'previous', label: '上一场景', locationId: 'slide-location-intro' },
-            { buttonId: 'playback-step-next', label: '下一步', locationId: 'slide-location-evidence' },
-            { buttonId: 'next', label: '下一场景', locationId: 'slide-location-practice' },
-            { buttonId: 'next', label: '下一场景', locationId: 'slide-location-summary' },
+          for (const { label, locationId } of [
+            { label: '下一场景', locationId: 'slide-location-practice' },
+            { label: '上一场景', locationId: 'slide-location-intro' },
+            { label: '下一步', locationId: 'slide-location-evidence' },
+            { label: '下一场景', locationId: 'slide-location-practice' },
+            { label: '下一场景', locationId: 'slide-location-summary' },
           ]) {
-            const button = page.locator(`[data-controller-button-id="${buttonId}"]`)
-            await expect(button).toHaveText(label, { timeout: 15_000 })
+            const button = page.getByRole('button', { name: label, exact: true })
+            await expect(button).toHaveAccessibleName(label, { timeout: 15_000 })
             await expect(button).toBeEnabled()
             const bounds = await button.boundingBox()
             if (!bounds) throw new Error(`Exported player ${label} button has no bounds`)
@@ -836,6 +860,7 @@ test.describe.serial('ARCH-1 VS-06 image replacement desktop regression', () => 
 
       await patchDialogs(launch.app, { projectOpen: mixedSourcePath })
       await launch.page.getByRole('button', { name: '打开工程（Ctrl+O）' }).click()
+      await showEditorPanel(launch.page, '页面与图层')
       await expect(launch.page.getByTestId('course-page-node-mixed-slide-surface')).toBeVisible()
       await saveAs(launch.app, launch.page, mixedCopyPath, { projectOpen: mixedSourcePath })
       await patchDialogs(launch.app, { projectOpen: mixedCopyPath })

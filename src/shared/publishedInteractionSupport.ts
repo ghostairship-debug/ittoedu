@@ -25,6 +25,7 @@ export const PUBLISHED_INTERACTION_PLAYBACK_SUPPORT = {
     'node.enter',
     'node.exit',
     'scene.go',
+    'location.go',
     'scene.next',
     'scene.previous',
     'scene.replay',
@@ -42,6 +43,7 @@ export const PUBLISHED_INTERACTION_PLAYBACK_SUPPORT = {
   },
   navigationSemantics: {
     sceneGo: 'slide-scene-id-only',
+    locationGo: 'exact-course-location-id-and-guarded-across-surfaces',
     nextPrevious: 'scene-occurrence-order-and-guarded-across-locations',
     replay: 'current-scene-first-step-and-not-guarded',
     restart: 'guard-bypassed-and-course-state-reset-to-declared-defaults',
@@ -63,6 +65,7 @@ export const PUBLISHED_INTERACTION_PLAYBACK_SUPPORT = {
   }>
   navigationSemantics: Readonly<{
     sceneGo: 'slide-scene-id-only'
+    locationGo: 'exact-course-location-id-and-guarded-across-surfaces'
     nextPrevious: 'scene-occurrence-order-and-guarded-across-locations'
     replay: 'current-scene-first-step-and-not-guarded'
     restart: 'guard-bypassed-and-course-state-reset-to-declared-defaults'

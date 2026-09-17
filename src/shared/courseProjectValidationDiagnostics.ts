@@ -380,6 +380,12 @@ export const COURSE_PROJECT_VALIDATION_FINDING_CODE_LEDGER = [
     note: 'Interaction scene.go targets are not cross-checked by the V9 Schema.',
   },
   {
+    code: 'interaction-location-reference-missing',
+    status: 'active',
+    sections: ['projectHealth'],
+    note: 'Like scene.go, location.go target existence is checked by authoring commands and health/preflight.',
+  },
+  {
     code: 'interaction-sound-reference-missing',
     status: 'schema-shadowed',
     sections: ['projectHealth'],

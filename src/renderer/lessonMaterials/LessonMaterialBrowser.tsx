@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { LessonMaterialRead, LessonMaterialRecord, MaterialExtraction } from '../../shared/materialExtraction'
+import type { LessonMaterialSelectResult } from '../../shared/lessonMaterialDesktop'
 import { extractMaterial } from '../project/materialExtraction'
 
 export interface LessonMaterialBrowserProps {
@@ -7,7 +8,7 @@ export interface LessonMaterialBrowserProps {
   targetKey: string
   selections?: { id: string; fragmentIds: string[] }[]
   onSelect?(record: LessonMaterialRecord, fragmentIds: string[]): void
-  selectSource(): Promise<{ title: string; bytes: Uint8Array } | null>
+  selectSource(): Promise<LessonMaterialSelectResult>
   list(): Promise<LessonMaterialRecord[]>
   importMaterial(input: { title: string; original: Uint8Array; extraction: MaterialExtraction }): Promise<LessonMaterialRecord>
   read(input: { id: string; extractionVersion: string; fragmentIds: string[] }): Promise<LessonMaterialRead>
@@ -48,16 +49,22 @@ export function LessonMaterialBrowser(props: LessonMaterialBrowserProps) {
         const token = generation.current
         const currentApi = api.current
         void run(async () => {
-          const source = await currentApi.selectSource()
-          if (!source || token !== generation.current) return
-          const original = source.bytes
-          const extraction = await extractMaterial(original, source.title)
+          const result = await currentApi.selectSource()
           if (token !== generation.current) return
-          await currentApi.importMaterial({ title: source.title, original, extraction })
+          const failures = [...result.failures]
+          for (const source of result.sources) {
+            try {
+              const original = source.bytes
+              const extraction = await extractMaterial(original, source.title)
+              if (token !== generation.current) return
+              await currentApi.importMaterial({ title: source.title, original, extraction })
+            } catch (reason) { failures.push({ title: source.title, message: reason instanceof Error ? reason.message : String(reason) }) }
+          }
+          if (failures.length && token === generation.current) setError(failures.map(failure => `${failure.title}：${failure.message}`).join('；'))
           const next = await currentApi.list()
           if (token === generation.current) setRecords(next)
         })
-      }}>添加材料（PDF / DOCX / PPTX / TXT / MD / CSV）</button>
+      }}>添加材料（PDF / DOCX / PPTX / TXT / MD / CSV，可多选）</button>
     {busy && <p role="status">正在读取材料…</p>}
     {error && <p role="alert">{error}</p>}
     {!records.length && !busy && <p>当前课例尚未添加材料。</p>}

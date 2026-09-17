@@ -15,7 +15,7 @@ async function fixture() {
       case 'choose-workspace': return { directory: '/workspace' }
       case 'list-lessons': return { lessons: [original] }
       case 'list-directory': return { entries: [] }
-      case 'list-conversations': return { conversations: [conversation(request.lesson.lessonId === 'copy' ? copied : original)] }
+      case 'list-conversations': return { conversations: [conversation(request.lesson?.lessonId === 'copy' ? copied : original)] }
       case 'open-lesson': {
         if (!request.asCopy) throw new Error('LESSON_COPY_REQUIRED: 原课例仍存在，请作为副本打开')
         if (outcome === 'cancel') return { cancelled: true }
@@ -34,12 +34,21 @@ async function fixture() {
   return { operation, onActive, onNewProject, setOutcome(value: typeof outcome) { outcome = value } }
 }
 
+function openIndependentCopyDialog() {
+  const summary = screen.getByText('课例操作')
+  const details = summary.closest('details')
+  if (!details?.open) fireEvent.click(summary)
+  fireEvent.click(screen.getByRole('button', { name: '作为独立副本打开' }))
+}
+
 it('offers an explicit independent copy action after duplicate identity rejection and activates only the new conversation', async () => {
   const f = await fixture()
   fireEvent.click(screen.getByRole('button', { name: '打开课例' }))
   await screen.findByText(/原课例仍存在/)
-  fireEvent.click(screen.getByRole('button', { name: '作为独立课例副本打开' }))
-  expect(screen.getByRole('dialog', { name: '作为独立课例副本打开' })).toHaveTextContent('不会继承原课例的会话、候选或执行记录')
+  openIndependentCopyDialog()
+  const copyDialog = screen.getByRole('dialog', { name: '作为独立课例副本打开' })
+  expect(copyDialog).toHaveTextContent('副本会取得新的课例身份和对话')
+  expect(copyDialog).toHaveTextContent('不继承原会话、候选或执行记录')
   fireEvent.click(screen.getByRole('button', { name: '选择副本目录并打开' }))
   await screen.findByText('当前：独立副本')
   expect(f.operation).toHaveBeenCalledWith({ operation: 'open-lesson', asCopy: true })
@@ -50,11 +59,11 @@ it('offers an explicit independent copy action after duplicate identity rejectio
 
 it('cancels the explanation without IPC and cancels the directory picker without replacing the active lesson', async () => {
   const f = await fixture()
-  fireEvent.click(screen.getByRole('button', { name: '作为独立课例副本打开' }))
+  openIndependentCopyDialog()
   fireEvent.click(screen.getByRole('button', { name: '取消' }))
   expect(f.operation.mock.calls.some(([request]) => request.operation === 'open-lesson')).toBe(false)
   f.setOutcome('cancel')
-  fireEvent.click(screen.getByRole('button', { name: '作为独立课例副本打开' }))
+  openIndependentCopyDialog()
   fireEvent.click(screen.getByRole('button', { name: '选择副本目录并打开' }))
   await waitFor(() => expect(f.operation).toHaveBeenCalledWith({ operation: 'open-lesson', asCopy: true }))
   expect(screen.getByText('当前：原课例')).toBeInTheDocument()
@@ -64,7 +73,7 @@ it('cancels the explanation without IPC and cancels the directory picker without
 
 it('keeps the current lesson when the service rejects selecting the original directory as its own copy', async () => {
   const f = await fixture(); f.setOutcome('self')
-  fireEvent.click(screen.getByRole('button', { name: '作为独立课例副本打开' }))
+  openIndependentCopyDialog()
   fireEvent.click(screen.getByRole('button', { name: '选择副本目录并打开' }))
   await screen.findByText('不能把原课例作为自身副本打开')
   expect(screen.getByText('当前：原课例')).toBeInTheDocument()

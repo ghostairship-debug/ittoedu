@@ -14924,10 +14924,99 @@ var courseProjectMediaSettingsSchema = external_exports.object({
   }).strict()
 }).strict();
 
+// src/shared/generationTaskFacts.ts
+var identity3 = external_exports.string().min(1);
+var generationTaskFactsSchema = external_exports.object({
+  version: external_exports.literal(1),
+  projectId: identity3,
+  documentRevision: external_exports.number().int().nonnegative(),
+  sessionGeneration: external_exports.number().int().nonnegative(),
+  source: external_exports.literal("frozen-project"),
+  indexes: external_exports.array(external_exports.object({
+    locationId: identity3,
+    surfaceId: identity3,
+    stateId: identity3.nullable(),
+    scope: external_exports.literal("applicable-location-items"),
+    completeness: external_exports.enum(["complete", "partial"]),
+    items: external_exports.array(external_exports.object({ id: identity3, label: external_exports.string().optional() }).strict())
+  }).strict()),
+  components: external_exports.array(external_exports.object({
+    target: authoringToolTargetWireV1Schema,
+    packageId: identity3,
+    source: external_exports.literal("componentProps"),
+    scope: external_exports.literal("instance"),
+    writable: external_exports.boolean(),
+    reason: external_exports.string(),
+    fields: external_exports.array(external_exports.object({ descriptor: external_exports.json(), value: external_exports.json().optional() }).strict()),
+    contentMerge: external_exports.literal("recursive-index-merge")
+  }).strict()),
+  relations: external_exports.array(external_exports.object({
+    target: authoringToolTargetWireV1Schema,
+    plane: external_exports.string(),
+    frame: external_exports.object({ x: external_exports.number(), y: external_exports.number(), width: external_exports.number(), height: external_exports.number() }).strict(),
+    rotation: external_exports.number(),
+    order: external_exports.number().int(),
+    locked: external_exports.boolean(),
+    label: external_exports.string().optional(),
+    text: external_exports.string().optional()
+  }).strict())
+}).strict();
+
+// src/shared/generationChangeSummary.ts
+var semanticTarget = external_exports.object({
+  entity: external_exports.enum(["project", "surface", "scene", "state", "layer-item", "flow-block", "location", "interaction", "navigation-guard", "course-state", "spatial-path", "spatial-relation", "camera-frame", "semantic-zoom", "print-entry", "design-token", "resource-asset", "resource-package"]),
+  id: external_exports.string(),
+  owner: external_exports.enum(["project", "global", "surface", "scene", "state", "world", "flow", "resource"]),
+  ownerKey: external_exports.string(),
+  impact: external_exports.enum(["instance", "shared"]),
+  name: external_exports.string().optional(),
+  surfaceId: external_exports.string().optional(),
+  locationId: external_exports.string().optional(),
+  stateId: external_exports.string().optional()
+}).strict();
+var generationSemanticChangesSchema = external_exports.object({
+  changes: external_exports.array(external_exports.object({
+    path: external_exports.string(),
+    before: external_exports.string(),
+    after: external_exports.string(),
+    kind: external_exports.enum(["created", "deleted", "updated", "reordered"]),
+    field: external_exports.string().optional(),
+    target: semanticTarget.optional(),
+    truncated: external_exports.object({ before: external_exports.boolean(), after: external_exports.boolean() }).strict().optional()
+  }).strict()),
+  omitted: external_exports.number().int().nonnegative(),
+  comparison: external_exports.object({ status: external_exports.enum(["complete", "partial"]), scopes: external_exports.array(external_exports.object({
+    scope: external_exports.string(),
+    status: external_exports.enum(["complete", "not-provided", "incomparable"]),
+    reason: external_exports.string().optional()
+  }).strict()) }).strict(),
+  truncation: external_exports.object({
+    changeLimit: external_exports.number().int().nonnegative(),
+    valueLengthLimit: external_exports.number().int().nonnegative(),
+    omittedChanges: external_exports.number().int().nonnegative(),
+    truncatedValues: external_exports.number().int().nonnegative()
+  }).strict()
+}).strict();
+
+// src/shared/generationExecutionEvidence.ts
+var position = external_exports.object({ locationId: external_exports.string().nullable(), stateId: external_exports.string().nullable() }).strict();
+var generationExecutionEvidenceSchema = external_exports.array(external_exports.object({
+  source: external_exports.literal("published-player"),
+  ruleId: external_exports.string(),
+  runId: external_exports.number().int(),
+  chainId: external_exports.number().int(),
+  parentRunId: external_exports.number().int().optional(),
+  status: external_exports.enum(["checked", "skipped", "failed"]),
+  runStatus: external_exports.enum(["running", "completed", "navigation-terminal", "cancelled", "failed", "skipped"]),
+  start: position,
+  end: position,
+  reason: external_exports.string().optional()
+}).strict());
+
 // src/shared/generationContract.ts
-var identity3 = external_exports.string().trim().min(1).max(200);
+var identity4 = external_exports.string().trim().min(1).max(200);
 var generationInputReferenceSchema = external_exports.object({ $result: external_exports.object({
-  stepId: identity3,
+  stepId: identity4,
   kind: external_exports.enum(["asset-id", "package-id", "item-id", "location-id"]),
   index: external_exports.number().int().nonnegative().default(0)
 }).strict() }).strict();
@@ -14961,7 +15050,7 @@ var mediaApplyFields = {
 };
 var generationMediaApplyWireInputSchema = external_exports.object({
   ...mediaApplyFields,
-  source: external_exports.union([generationMediaFileReferenceSchema, generationAssetReferenceSchema, external_exports.object({ assetId: external_exports.union([identity3, assetResultReferenceSchema]) }).strict()])
+  source: external_exports.union([generationMediaFileReferenceSchema, generationAssetReferenceSchema, external_exports.object({ assetId: external_exports.union([identity4, assetResultReferenceSchema]) }).strict()])
 }).strict();
 var generationMediaApplyInputSchema = generationMediaApplyWireInputSchema.extend({
   source: external_exports.union([...generationMediaApplyWireInputSchema.shape.source.options, generationMediaApplyFileSourceSchema])
@@ -15000,6 +15089,7 @@ var generationRequestSchema = external_exports.object({
   destinations: external_exports.array(authoringToolDestinationV1Schema).min(1).max(1e3),
   selectionActions: external_exports.array(generationSelectionActionSchema).min(1).max(100).optional(),
   context: external_exports.json(),
+  taskFacts: generationTaskFactsSchema.optional(),
   resourceFiles: external_exports.array(generationResourceFileSchema).max(1e3).optional(),
   observation: authoringObservationInputSchema.optional(),
   confirmedDocuments: external_exports.object({ teachingPlan: external_exports.string().min(1), presentationScript: external_exports.string().min(1) }).strict().optional(),
@@ -15007,6 +15097,7 @@ var generationRequestSchema = external_exports.object({
 }).strict().superRefine((request, ctx) => {
   if (request.execution && (request.execution.deadlineAt <= request.execution.startedAt || request.execution.deadlineAt > request.execution.startedAt + MAX_GENERATION_TASK_DURATION_MS)) ctx.addIssue({ code: "custom", message: "\u4EFB\u52A1\u6267\u884C\u671F\u9650\u5FC5\u987B\u5728\u8D77\u70B9\u540E\u7684120\u5206\u949F\u5185", path: ["execution"] });
   const resources = request.resourceFiles ?? [];
+  if (request.taskFacts && (request.taskFacts.projectId !== request.workspace.projectId || request.taskFacts.documentRevision !== request.documentRevision || request.taskFacts.sessionGeneration !== request.sessionGeneration)) ctx.addIssue({ code: "custom", message: "\u4EFB\u52A1\u4E8B\u5B9E\u4E0E\u51BB\u7ED3\u5DE5\u7A0B\u8EAB\u4EFD\u4E0D\u4E00\u81F4", path: ["taskFacts"] });
   if (request.observation && (request.observation.documentRevision !== request.documentRevision || request.observation.sessionGeneration !== request.sessionGeneration)) ctx.addIssue({ code: "custom", message: "\u5F53\u524D\u753B\u9762\u89C2\u5BDF\u4E0E\u5DE5\u7A0B\u7ED3\u6784\u7248\u672C\u4E0D\u4E00\u81F4", path: ["observation"] });
   if (request.applyPolicy === "auto" && !request.observation) ctx.addIssue({ code: "custom", message: "\u81EA\u52A8\u7F16\u8F91\u9700\u8981\u5F53\u524D\u771F\u5B9E\u753B\u9762\u89C2\u5BDF", path: ["applyPolicy"] });
   if (new Set(resources.map((file2) => file2.path.toLowerCase())).size !== resources.length) ctx.addIssue({ code: "custom", message: "\u91CD\u590D\u8D44\u6E90\u6587\u4EF6\u8DEF\u5F84", path: ["resourceFiles"] });
@@ -15032,11 +15123,11 @@ var generationRequestSchema = external_exports.object({
   });
 });
 var resultDestinationSchema = external_exports.discriminatedUnion("kind", [
-  external_exports.object({ kind: external_exports.literal("created-background"), stepId: identity3 }).strict(),
-  external_exports.object({ kind: external_exports.literal("created-item"), stepId: identity3, index: external_exports.number().int().nonnegative() }).strict(),
+  external_exports.object({ kind: external_exports.literal("created-background"), stepId: identity4 }).strict(),
+  external_exports.object({ kind: external_exports.literal("created-item"), stepId: identity4, index: external_exports.number().int().nonnegative() }).strict(),
   external_exports.object({
     kind: external_exports.literal("created-scope"),
-    stepId: identity3,
+    stepId: identity4,
     parent: authoringToolCreateScopeV1Schema.shape.parent,
     insertion: authoringToolCreateScopeV1Schema.shape.insertion
   }).strict()
@@ -15052,8 +15143,8 @@ var generationCandidateSchema = external_exports.object({
   summary: external_exports.string().trim().min(1).max(2e3),
   afterCommit: generationAfterCommitSchema.optional(),
   steps: external_exports.array(external_exports.object({
-    id: identity3,
-    tool: identity3,
+    id: identity4,
+    tool: identity4,
     carrier: generationCarrierSchema,
     destination: external_exports.union([authoringToolDestinationV1Schema, resultDestinationSchema]),
     input: external_exports.json()
@@ -15083,8 +15174,8 @@ var generationShortCandidateSchema = external_exports.object({
   summary: external_exports.string().trim().min(1).max(2e3),
   afterCommit: generationAfterCommitSchema,
   steps: external_exports.array(external_exports.object({
-    id: identity3,
-    tool: identity3,
+    id: identity4,
+    tool: identity4,
     destination: external_exports.union([external_exports.string().regex(/^d[1-9][0-9]*$/), resultDestinationSchema]),
     input: external_exports.json()
   }).strict()).min(1).max(1e3)
@@ -15149,14 +15240,15 @@ var generationFailureSchema = external_exports.object({
   stage: external_exports.enum(["candidate-parse", "prepare", "dynamic-admission", "commit"]),
   requestId: external_exports.uuid().optional(),
   candidateId: external_exports.uuid().optional(),
-  stepId: identity3.optional(),
-  tool: identity3.optional(),
+  stepId: identity4.optional(),
+  tool: identity4.optional(),
   destination: external_exports.union([authoringToolDestinationV1Schema, resultDestinationSchema]).optional(),
   diagnostics: external_exports.array(generationDiagnosticSchema).min(1),
-  assetIds: external_exports.array(identity3),
-  packageIds: external_exports.array(identity3),
+  assetIds: external_exports.array(identity4),
+  packageIds: external_exports.array(identity4),
   recovery: external_exports.object({ action: external_exports.enum(["repair-candidate", "supply-resource", "use-open-path", "refresh-baseline", "verify-result"]), message: external_exports.string().min(1).max(2e3) }).strict().optional(),
-  behaviorEvidence: authoringToolReceiptV1Schema.shape.behaviorEvidence
+  behaviorEvidence: authoringToolReceiptV1Schema.shape.behaviorEvidence,
+  executionEvidence: generationExecutionEvidenceSchema.optional()
 }).strict();
 var generationCommitReceiptSchema = external_exports.object({
   version: external_exports.literal(1),
@@ -15167,6 +15259,8 @@ var generationCommitReceiptSchema = external_exports.object({
   beforeRevision: external_exports.number().int().nonnegative(),
   afterRevision: external_exports.number().int().nonnegative(),
   affected: authoringToolReceiptV1Schema.shape.affected,
+  semanticChanges: generationSemanticChangesSchema.optional(),
+  executionEvidence: generationExecutionEvidenceSchema.optional(),
   resources: authoringToolReceiptV1Schema.shape.resources
 }).strict().superRefine((receipt, ctx) => {
   if (receipt.afterRevision !== receipt.beforeRevision + (receipt.status === "committed" ? 1 : 0)) ctx.addIssue({ code: "custom", message: "\u6279\u6B21\u56DE\u6267revision\u4E0E\u5B9E\u9645\u4E8B\u52A1\u72B6\u6001\u4E0D\u4E00\u81F4" });
@@ -15555,6 +15649,40 @@ var courseProjectEmbeddedComponentPackageMetaSchema = external_exports.object({
   }
 });
 
+// src/shared/slideInteractionTargetResolver.ts
+function resolveSlideInteractionTarget(input) {
+  const { index, reference, what, path: path3 } = input;
+  if (!index || index.scope !== "applicable-location-items" || index.completeness !== "complete") {
+    return { status: "deferred", message: "\u5F53\u524D\u4F4D\u7F6E\u7D22\u5F15\u4E0D\u5B8C\u6574\uFF0C\u4EA4\u7531\u5BBF\u4E3B\u4F9D\u636E\u5F53\u524D\u5DE5\u7A0B\u89E3\u6790\u76EE\u6807\u3002" };
+  }
+  const byId = index.items.filter((item) => item.id === reference);
+  if (byId.length === 1) return { status: "resolved", itemId: byId[0].id };
+  if (byId.length > 1) {
+    return {
+      status: "error",
+      code: "compose-node-ambiguous",
+      message: `${what}\u201C${reference}\u201D\u5339\u914D\u5230\u591A\u4E2A\u540C\u540D\u56FE\u5C42\uFF0C\u8BF7\u6539\u7528\u56FE\u5C42 id`,
+      path: path3
+    };
+  }
+  const matches = index.items.filter((item) => item.label === reference);
+  if (matches.length === 1) return { status: "resolved", itemId: matches[0].id };
+  if (matches.length > 1) {
+    return {
+      status: "error",
+      code: "compose-node-ambiguous",
+      message: `${what}\u201C${reference}\u201D\u5339\u914D\u5230\u591A\u4E2A\u540C\u540D\u56FE\u5C42\uFF0C\u8BF7\u6539\u7528\u56FE\u5C42 id`,
+      path: path3
+    };
+  }
+  return {
+    status: "error",
+    code: "compose-node-not-found",
+    message: `${what}\u201C${reference}\u201D\u5728\u5F53\u524D\u4F4D\u7F6E\u4E0D\u5B58\u5728\uFF1B\u8BF7\u5148\u521B\u5EFA\u8BE5\u56FE\u5C42\u6216\u4F7F\u7528\u5DF2\u6709\u56FE\u5C42\u7684 id / \u552F\u4E00\u540D\u79F0`,
+    path: path3
+  };
+}
+
 // src/shared/generationStaticPrecheck.ts
 function frozenUpdateTarget(request, destination) {
   if ("stepId" in destination || destination.kind !== "update") return null;
@@ -15584,8 +15712,54 @@ function changedUtf8File(input, filename) {
   const text = Reflect.get(file2, "text");
   return typeof text === "string" ? text : null;
 }
+function destinationScope(destination) {
+  if ("stepId" in destination) return void 0;
+  return destination.kind === "update" ? destination.target : destination.scope;
+}
+function priorStepMayChangeIndex(candidate, stepIndex) {
+  const indexSafeTools = /* @__PURE__ */ new Set(["slide.interaction"]);
+  return candidate.steps.slice(0, stepIndex).some((step) => !indexSafeTools.has(step.tool));
+}
+function interactionNodeReferences(input) {
+  if (!input || typeof input !== "object" || Array.isArray(input) || Reflect.get(input, "operation") !== "compose") return [];
+  const references = [];
+  const trigger = Reflect.get(input, "trigger");
+  if (trigger && typeof trigger === "object" && !Array.isArray(trigger) && (Reflect.get(trigger, "kind") === "click" || Reflect.get(trigger, "kind") === "input-submit") && typeof Reflect.get(trigger, "node") === "string") {
+    references.push({ reference: Reflect.get(trigger, "node"), path: ["input", "trigger", "node"] });
+  }
+  const effects = Reflect.get(input, "effects");
+  if (!Array.isArray(effects)) return references;
+  effects.forEach((effect, effectIndex) => {
+    if (!effect || typeof effect !== "object" || Array.isArray(effect)) return;
+    if (Reflect.get(effect, "kind") !== "show" && Reflect.get(effect, "kind") !== "hide") return;
+    const nodes = Reflect.get(effect, "nodes");
+    if (!Array.isArray(nodes)) return;
+    nodes.forEach((reference, nodeIndex) => {
+      if (typeof reference === "string") references.push({ reference, path: ["input", "effects", effectIndex, "nodes", nodeIndex] });
+    });
+  });
+  return references;
+}
+function checkFrozenSlideInteractionTargets(candidate, request) {
+  const diagnostics = [];
+  candidate.steps.forEach((step, stepIndex) => {
+    if (step.tool !== "slide.interaction") return;
+    const scope = destinationScope(step.destination);
+    if (!scope || scope.surfaceType !== "slide" || scope.owner !== "scene") return;
+    const references = interactionNodeReferences(step.input);
+    if (!references.length) return;
+    const index = request.taskFacts?.indexes.find((value) => value.locationId === scope.locationId && value.surfaceId === scope.surfaceId && value.stateId === null);
+    if ("stepId" in step.destination || !index || index.completeness !== "complete" || priorStepMayChangeIndex(candidate, stepIndex)) return;
+    for (const reference of references) {
+      const resolution = resolveSlideInteractionTarget({ index, reference: reference.reference, what: "\u4E92\u52A8\u76EE\u6807", path: reference.path });
+      if (resolution.status === "error") diagnostics.push({ stepId: step.id, code: resolution.code, path: resolution.path, message: resolution.message });
+    }
+  });
+  return diagnostics;
+}
 function checkGenerationStaticPrecheck(candidate, request) {
   const diagnostics = [];
+  diagnostics.push(...checkFrozenSlideInteractionTargets(candidate, request));
   for (const step of candidate.steps) {
     const frozen = frozenUpdateTarget(request, step.destination);
     if (step.tool === "native.content" && frozen && frozenTargetCarrier(frozen.target.authoringAddress) === "component") {
@@ -15624,7 +15798,7 @@ function checkGenerationStaticPrecheck(candidate, request) {
 async function main() {
   const args = process.argv.slice(2);
   if (args.length === 1 && ["--help", "-h"].includes(args[0])) {
-    console.log("node candidate-helper.mjs --request <request.json> --input <draft.json> [--check]\nComponent: --request <request.json> --component-target d1 --work-dir <candidateRoot>/component-work --init\nThen edit work files; repeat without --init and add --summary <text> [--observe <remaining check>] [--delete <file>] [--check]. Frozen baseline is preserved. Precheck is not host commit.");
+    console.log("node candidate-helper.mjs --request <request.json> --input <draft.json> [--check]\nNormal delivery: call once without --check; the helper validates and writes candidate.json in that call. Use --check only for a no-write precheck. Component: --request <request.json> --component-target d1 --work-dir <candidateRoot>/component-work --init\nThen edit work files; repeat without --init and add --summary <text> [--observe <remaining check>] [--delete <file>] [--check]. Frozen baseline is preserved. Precheck is not host commit.");
     return;
   }
   const option = (name) => {

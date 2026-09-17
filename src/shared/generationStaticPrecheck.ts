@@ -1,5 +1,6 @@
 import { componentManifestSchema } from './contracts/component-v4/schema'
 import type { GenerationCandidate, GenerationRequest } from './generationContract'
+import { resolveSlideInteractionTarget } from './slideInteractionTargetResolver'
 
 export interface GenerationStaticPrecheckDiagnostic {
   stepId: string
@@ -44,6 +45,66 @@ function changedUtf8File(input: unknown, filename: string): string | null {
   return typeof text === 'string' ? text : null
 }
 
+function destinationScope(destination: GenerationCandidate['steps'][number]['destination']) {
+  if ('stepId' in destination) return undefined
+  return destination.kind === 'update' ? destination.target : destination.scope
+}
+
+function priorStepMayChangeIndex(candidate: GenerationCandidate, stepIndex: number): boolean {
+  // Keep an early static decision only when every preceding operation is
+  // provably index-safe. Unknown tools and all index-affecting authoring
+  // mutations defer to
+  // the host, including mutations whose destination appears to be elsewhere:
+  // a global layer can still change the applicable items or their labels here.
+  const indexSafeTools = new Set(['slide.interaction'])
+  return candidate.steps.slice(0, stepIndex).some(step => !indexSafeTools.has(step.tool))
+}
+
+function interactionNodeReferences(input: unknown): { reference: string; path: (string | number)[] }[] {
+  if (!input || typeof input !== 'object' || Array.isArray(input) || Reflect.get(input, 'operation') !== 'compose') return []
+  const references: { reference: string; path: (string | number)[] }[] = []
+  const trigger = Reflect.get(input, 'trigger')
+  if (trigger && typeof trigger === 'object' && !Array.isArray(trigger)
+    && (Reflect.get(trigger, 'kind') === 'click' || Reflect.get(trigger, 'kind') === 'input-submit')
+    && typeof Reflect.get(trigger, 'node') === 'string') {
+    references.push({ reference: Reflect.get(trigger, 'node'), path: ['input', 'trigger', 'node'] })
+  }
+  const effects = Reflect.get(input, 'effects')
+  if (!Array.isArray(effects)) return references
+  effects.forEach((effect, effectIndex) => {
+    if (!effect || typeof effect !== 'object' || Array.isArray(effect)) return
+    if (Reflect.get(effect, 'kind') !== 'show' && Reflect.get(effect, 'kind') !== 'hide') return
+    const nodes = Reflect.get(effect, 'nodes')
+    if (!Array.isArray(nodes)) return
+    nodes.forEach((reference, nodeIndex) => {
+      if (typeof reference === 'string') references.push({ reference, path: ['input', 'effects', effectIndex, 'nodes', nodeIndex] })
+    })
+  })
+  return references
+}
+
+function checkFrozenSlideInteractionTargets(candidate: GenerationCandidate, request: GenerationRequest): GenerationStaticPrecheckDiagnostic[] {
+  const diagnostics: GenerationStaticPrecheckDiagnostic[] = []
+  candidate.steps.forEach((step, stepIndex) => {
+    if (step.tool !== 'slide.interaction') return
+    const scope = destinationScope(step.destination)
+    if (!scope || scope.surfaceType !== 'slide' || scope.owner !== 'scene') return
+    const references = interactionNodeReferences(step.input)
+    if (!references.length) return
+    const index = request.taskFacts?.indexes.find(value => value.locationId === scope.locationId
+      && value.surfaceId === scope.surfaceId && value.stateId === null)
+    // A result destination or a previous mutation means this request needs the
+    // host's current resolver; absence/partial facts are deliberately deferred.
+    if ('stepId' in step.destination || !index || index.completeness !== 'complete'
+      || priorStepMayChangeIndex(candidate, stepIndex)) return
+    for (const reference of references) {
+      const resolution = resolveSlideInteractionTarget({ index, reference: reference.reference, what: '互动目标', path: reference.path })
+      if (resolution.status === 'error') diagnostics.push({ stepId: step.id, code: resolution.code, path: resolution.path, message: resolution.message })
+    }
+  })
+  return diagnostics
+}
+
 /**
  * Free checks whose inputs are completely frozen in this candidate/request.
  * Resource closure, current identity, package admission and runtime behavior stay
@@ -54,6 +115,7 @@ export function checkGenerationStaticPrecheck(
   request: GenerationRequest,
 ): GenerationStaticPrecheckDiagnostic[] {
   const diagnostics: GenerationStaticPrecheckDiagnostic[] = []
+  diagnostics.push(...checkFrozenSlideInteractionTargets(candidate, request))
   for (const step of candidate.steps) {
     const frozen = frozenUpdateTarget(request, step.destination)
     if (step.tool === 'native.content' && frozen && frozenTargetCarrier(frozen.target.authoringAddress) === 'component') {

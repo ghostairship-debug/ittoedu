@@ -11,6 +11,7 @@ import type {
   SlideSurfaceDocument,
 } from '@/shared/courseProjectTypes'
 import type { SoundDefinition } from '@/shared/contracts/media-v1'
+import { v9CourseLocations, type V9InteractionLocationSummary } from '@/renderer/course/slideInteractionView'
 
 export interface InteractionAuthoringNodeOption {
   readonly id: string
@@ -50,6 +51,8 @@ interface InteractionAuthoringViewShared {
   readonly revision: number
   /** Interaction V1 scene references remain Slide scene IDs. */
   readonly sceneReferences: readonly InteractionAuthoringSceneReference[]
+  /** Exact navigation destinations remain Course Project location IDs. */
+  readonly locationReferences: readonly V9InteractionLocationSummary[]
   readonly sounds: readonly InteractionAuthoringSoundOption[]
 }
 
@@ -172,6 +175,7 @@ function sharedView(project: CourseProjectDocument): InteractionAuthoringViewSha
     projectId: project.id,
     revision: project.revision,
     sceneReferences: slideSceneReferences(project),
+    locationReferences: v9CourseLocations(project),
     sounds: soundOptions(project),
   }
 }

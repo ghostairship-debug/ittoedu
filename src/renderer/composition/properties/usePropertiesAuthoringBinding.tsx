@@ -12,7 +12,7 @@ import type { TextNode } from '../../../shared/contracts/native-v1'
 import { resolveEffectiveBackground } from '../../../shared/effectiveBackground'
 import { rotatedRectangleAabb } from '../../../shared/geometry'
 import { renderTextNodeCanvas } from '../../../shared/textLayout'
-import { remapTextRuns } from '../../../shared/textRuns'
+import { applyTextRunEdits, planTextRunRemap } from '../../../shared/textRuns'
 import type { EditorCanvasNodePatch } from '../../phaser/editorCanvasNode'
 import {
   patchEffectiveLayerPropertiesAtTargets,
@@ -355,7 +355,6 @@ export function usePropertiesAuthoringBinding({
   const updateInteractionRuleAtTarget = useEditorStore(
     (state) => state.updateInteractionRuleAtTarget,
   )
-  const setEditorMode = useEditorStore((state) => state.setEditorMode)
   const setActiveTab = useEditorStore((state) => state.setActiveTab)
   const setError = useEditorStore((state) => state.setError)
   const setStatus = useEditorStore((state) => state.setStatus)
@@ -432,12 +431,10 @@ export function usePropertiesAuthoringBinding({
     authoringToken: read.authoringToken,
     runIntent: runSpatialAuthoringIntent,
     reportError,
-    professionalInteraction: read.editorMode === 'professional'
-      ? {
-          editingScopeGlobal: read.editingScope === 'global',
-          onOpenAutomation: () => setActiveTab('automation'),
-        }
-      : null,
+    professionalInteraction: {
+      editingScopeGlobal: read.editingScope === 'global',
+      onOpenAutomation: () => setActiveTab('automation'),
+    },
     setPreviewBackgroundColor: color => previewBackground(color, 'spatial-surface'),
   })
 
@@ -774,11 +771,15 @@ export function usePropertiesAuthoringBinding({
       cancelEdit: () => {
         if (readBoundEdit()) cancelTextEdit()
       },
-      updateDraft: (text) => {
+      updateDraft: (text, editRange) => {
         const edit = readBoundEdit()
         if (!edit) return
         const draft = edit.draft as V9SlideTextContentDraft
-        const runs = remapTextRuns(draft.text, text, draft.runs)
+        const mapping = editRange
+          ? applyTextRunEdits(draft.text, draft.runs, [editRange])
+          : planTextRunRemap(draft.text, text, draft.runs)
+        if (!mapping.ok || mapping.text !== text) return
+        const runs = mapping.runs
         const width = draft.width ?? textNode.width
         const height = draft.height ?? textNode.height
         const draftNode = { ...textNode, text, runs, width, height }
@@ -881,11 +882,15 @@ export function usePropertiesAuthoringBinding({
           composing,
         })
       },
-      updateDraft: (text) => {
+      updateDraft: (text, editRange) => {
         const edit = readBoundEdit()
         if (!edit?.courseTarget) return
         const draft = edit.draft as V9SlideTextContentDraft
-        const runs = remapTextRuns(draft.text, text, draft.runs)
+        const mapping = editRange
+          ? applyTextRunEdits(draft.text, draft.runs, [editRange])
+          : planTextRunRemap(draft.text, text, draft.runs)
+        if (!mapping.ok || mapping.text !== text) return
+        const runs = mapping.runs
         const width = draft.width ?? textNode.width
         const height = draft.height ?? textNode.height
         const draftNode = { ...textNode, text, runs, width, height }
@@ -1167,9 +1172,7 @@ export function usePropertiesAuthoringBinding({
       if (ownerIsLive()) setActiveTab('automation')
     },
     openProfessionalAutomation: () => {
-      if (!ownerIsLive()) return
-      setEditorMode('professional')
-      setActiveTab('automation')
+      if (ownerIsLive()) setActiveTab('automation')
     },
     text: textCommands,
     table: slideTableCommands(),
@@ -1178,8 +1181,7 @@ export function usePropertiesAuthoringBinding({
 
   const sceneInteraction = (): InteractionEditorProps | null => {
     if (
-      read.editorMode !== 'professional'
-      || read.identity.owner !== 'scene'
+      read.identity.owner !== 'scene'
       || read.flow
       || read.spatial
       || !node
@@ -1208,6 +1210,7 @@ export function usePropertiesAuthoringBinding({
       selectedNode: interactionLayerTargetFromItem(selectedRow.item),
       activeStateId: read.identity.stateId,
       scenes: read.slideScenes,
+      locations: read.interactionLocations,
       sounds: read.sounds,
       courseState: read.courseState,
       ruleWarnings: read.interactionWarnings,
@@ -1239,8 +1242,7 @@ export function usePropertiesAuthoringBinding({
 
   const globalInteraction = (): InteractionEditorProps | null => {
     if (
-      read.editorMode !== 'professional'
-      || !read.selectedIsGlobal
+      !read.selectedIsGlobal
       || read.flow
       || read.spatial
       || !node
@@ -1268,6 +1270,7 @@ export function usePropertiesAuthoringBinding({
       sourceRules: read.globalInteractions,
       activeStateId: read.identity.stateId,
       scenes: read.slideScenes,
+      locations: read.interactionLocations,
       sounds: read.sounds,
       courseState: read.courseState,
       onAddRule: (rule) => {
@@ -1332,7 +1335,6 @@ export function usePropertiesAuthoringBinding({
     kind: 'course-global',
     draftBindingKey: null,
     mode: 'empty',
-    editorMode: read.editorMode,
     disabledReason: null,
     empty: {
       globalLayerCount: read.globalSummary.count,
@@ -1351,7 +1353,7 @@ export function usePropertiesAuthoringBinding({
     },
     layer: null,
     selected: null,
-    runtime: read.editorMode === 'professional' ? runtimeContexts.global : null,
+    runtime: runtimeContexts.global,
     interaction: null,
     flowOrSpatial: Boolean(read.flow || read.spatial),
     editingScopeGlobal: read.editingScope === 'global',
@@ -1431,8 +1433,7 @@ export function usePropertiesAuthoringBinding({
             effective: stateEffective,
           }
         : null,
-      editorMode: read.editorMode,
-      runtime: read.editorMode === 'professional' ? runtimeContexts.scene : null,
+      runtime: runtimeContexts.scene,
       commands: {
         updateName: (name) => {
           if (sceneId && requireLiveOwner()) updateScene(sceneId, { name })
@@ -1481,9 +1482,7 @@ export function usePropertiesAuthoringBinding({
           if (ownerIsLive()) setActiveTab('automation')
         },
         openProfessionalAutomation: () => {
-          if (!ownerIsLive()) return
-          setEditorMode('professional')
-          setActiveTab('automation')
+          if (ownerIsLive()) setActiveTab('automation')
         },
       },
       onStale: () => reportError(STALE_PROPERTY_TARGET),
@@ -1517,7 +1516,6 @@ export function usePropertiesAuthoringBinding({
       } : {}),
       draftBindingKey: propertyDraftBindingKey(read, node.id),
       mode: 'selected',
-      editorMode: read.editorMode,
       disabledReason: null,
       empty: null,
       layer: read.globalLayer,
@@ -1544,7 +1542,7 @@ export function usePropertiesAuthoringBinding({
           try { manageTeacherControllerComponent(itemId, operation) }
           catch (error) { reportError(error instanceof Error ? error.message : String(error)) }
         },
-        editControllerSource: () => { setEditorMode('professional'); setActiveTab('developer') },
+        editControllerSource: () => { setActiveTab('developer') },
         // Course background editing lives in the empty (nothing-selected)
         // global view only; a selected node has no use for it.
         updateCourseBackground: () => undefined,
@@ -1554,7 +1552,6 @@ export function usePropertiesAuthoringBinding({
   }
 
   const animation = read.identity.owner === 'scene'
-    && read.editorMode === 'simple'
     && !read.spatial
     && slideTarget
     ? {
@@ -1575,7 +1572,6 @@ export function usePropertiesAuthoringBinding({
         },
         onOpenProfessional: () => {
           if (!sameSlideTarget(readLive(), slideTarget)) return
-          setEditorMode('professional')
           setActiveTab('automation')
         },
       }
@@ -1586,7 +1582,6 @@ export function usePropertiesAuthoringBinding({
     draftBindingKey: propertyDraftBindingKey(read, node.id),
     view: node,
     target: { layerItemId: node.id },
-    editorMode: read.editorMode,
     disabledReason: null,
     contentEditingEnabled: !read.spatial || read.spatial.scope === 'world',
     spatialMode: Boolean(read.spatial),

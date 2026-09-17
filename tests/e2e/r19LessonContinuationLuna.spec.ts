@@ -28,7 +28,7 @@ test('r19 Luna continuation: retained Codex resume then same conversation OpenCo
   const output = testInfo.outputPath('evidence'); mkdirSync(output, { recursive: true })
   const save = (name: string, value: unknown) => writeFileSync(join(output, name), JSON.stringify(value, null, 2))
   const scope = { version: 1 as const, kind: 'lesson' as const, lessonId: input.lessonId, normalizedDirectory: input.lessonDirectory, conversationId: input.conversationId }
-  const ref = { lessonId: input.lessonId, lessonDirectory: input.lessonDirectory, relativePath: input.documentPath }
+  const ref = { kind: 'lesson' as const, lessonId: input.lessonId, lessonDirectory: input.lessonDirectory, relativePath: input.documentPath }
   const projectBefore = readFileSync(input.projectPath)
   const app = await electron.launch({ args: ['.', `--user-data-dir=${input.profile}`], cwd: resolve(__dirname, '../..'), env: { ...process.env, VITE_DEV_SERVER_URL: '', [BACKGROUND_E2E_ENV]: '1' } })
   const page = await app.firstWindow()
@@ -77,11 +77,12 @@ test('r19 Luna continuation: retained Codex resume then same conversation OpenCo
       const configured = await page.evaluate(({ adapter, configuration }) => window.desktopAPI!.localAgent({ operation: 'configure', adapter, configuration }), { adapter, configuration })
       expect(configured.enabled).toBe(true); save(`${adapter}-native-route.json`, { directory, configuration, configured })
     }
-    await app.evaluate(({ dialog }, directory) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [directory] }) }, input.workspaceDirectory)
-    await page.getByRole('button', { name: '打开工作空间', exact: true }).first().click()
-    await app.evaluate(({ dialog }, directory) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [directory] }) }, input.lessonDirectory)
-    await page.getByRole('button', { name: '打开课例', exact: true }).click()
-    await page.getByRole('region', { name: '课例对话导航' }).getByRole('button', { name: conversation.title, exact: true }).and(page.locator('[aria-pressed]')).click()
+    // V3.1：保留 profile 重开自动回到上次工作空间；课例入口已从「更多」菜单移除，经目录树点选 .h5lesson 激活
+    await expect(page.locator('.lesson-workspace-toolbar')).toBeVisible()
+    await page.locator('.lesson-directory-tree').getByRole('button', { name: basename(input.lessonDirectory), exact: true }).click()
+    await page.locator('.lesson-directory-tree').getByRole('button', { name: basename(input.projectPath), exact: true }).click()
+    // V3.1：课例对话导航区已随课例段取消，激活后自动接上最近会话；指定会话选择待新会话切换器落地后恢复
+    await expect(page.locator('.lesson-workflow')).toBeVisible()
     const files = page.locator('.lesson-workspace-files')
     if (!await files.getByRole('button', { name: basename(input.documentPath), exact: true }).isVisible()) await files.getByRole('button', { name: `▸ ${basename(input.lessonDirectory)}`, exact: true }).click()
     await files.getByRole('button', { name: basename(input.documentPath), exact: true }).click()

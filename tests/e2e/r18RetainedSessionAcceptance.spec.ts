@@ -9,6 +9,21 @@ import { readSaved, nativeRecords, type NativeRun } from './r18NativeAuthoringFi
 import { expectBackgroundWindowsIsolated } from './expectBackgroundWindowsIsolated'
 
 const productRoot = resolve(__dirname, '../..')
+
+async function enterStandaloneEditorFromLanding(page: Page): Promise<void> {
+  const landing = page.locator('.lesson-workspace-landing')
+  const editor = page.getByTestId('canvas-stage')
+  await Promise.race([
+    landing.waitFor({ state: 'visible', timeout: 15_000 }),
+    editor.waitFor({ state: 'visible', timeout: 15_000 }),
+  ])
+  if (!await landing.isVisible()) return
+  const more = page.locator('.lesson-workspace-more > summary')
+  if (!await more.isVisible()) return
+  await more.click()
+  const create = page.getByRole('button', { name: '新建独立课件', exact: true })
+  if (await create.isVisible()) await create.click()
+}
 const sourceRoot = resolve(process.env.COURSEWARE_R18_RETAINED_SOURCE_ROOT
   ?? 'C:/Users/74755/Documents/HTML课件编辑器/output/r18-short-path')
 const retained = [
@@ -134,6 +149,7 @@ test('R18 retained three-CLI sessions restore read-only without replay or docume
         app = await electron.launch({ cwd: productRoot, args: ['.', `--user-data-dir=${userData}`],
           env: { ...process.env, VITE_DEV_SERVER_URL: `http://127.0.0.1:${address.port}/`, [BACKGROUND_E2E_ENV]: '1' } })
         page = await app.firstWindow()
+        await enterStandaloneEditorFromLanding(page)
         const pageErrors: string[] = []
         page.on('pageerror', error => pageErrors.push(error.message))
         expect(resolve(await app.evaluate(({ app: native }) => native.getPath('userData'))).toLowerCase()).toBe(userData.toLowerCase())

@@ -35,6 +35,8 @@
 
 **Owner 2026-09-07确认并经r18-085–087实施：场景与步骤分层。** Slide页、Flow讲义与Spatial画布是内容场景；当前场景的明确呈现/讲解/镜头编排是步骤。上/下一步按整课连续序列推进，末步之后到下一场景首步、首步之前到上一场景末步，只有整课首尾停止；上一/下一场景直接跳过场景内部剩余步骤，进入相邻场景起始位置。同画布镜头不得继续被场景按钮逐个推进。目录、计数、键盘/翻页笔、交互和动态导航接口应消费同一导航语义Owner；场景/步骤切换与r18-077观察zoom/pan分离。精确location深链、合法重复进入、导航守卫及当前生命周期按[导航分层工作包](roadmap/1.8/r18-085-navigation-levels.md)明确兼容，不静默重解释既有API或创建第二持久序列。实现与直接证据见[导航结束记录](reviews/1.8-navigation-level-exit.md)；新增动作保持V9/Published strict合同。
 
+2026-09-17 1.9 真实课例收口补齐学生正文的精确跨 Surface 导航：Interaction V1 `location.go { locationId }` 为 strict 末组终结动作，Runtime API 2/3 与 Component API 4 additive 可选 `goToLocation(locationId): boolean`；V9/Published V2 同源使用正式位置身份，不重解释 `scene.go` / `goToScene`。目标位置携带的 Slide 状态或 Flow/Spatial 锚点按现有投影进入，经唯一 Published 导航事务保留守卫、历史、取消与载体租约，保持 courseState。作者态/捕获态/失效载体禁止执行；同步返回值只表示接受。普通按钮不得借教师控制器的强制跳转绕过守卫。位置引用采用与 scene.go 一致的作者校验及健康/预检拒绝层；删除、复制和候选真实点击检查一并消费该动作。
+
 7. Save 从已提交活动文字草稿的 V9 document、asset sidecar 和 component files 构建 archive；关闭脏判定与恢复快照使用同一份含草稿 canonical document。
 8. 保存 single-flight 与"保存期间继续编辑仍为 dirty"行为保留。
 9. RecoveryWriteCoordinator 的 debounce/cancel/snapshot 语义保留。
@@ -191,7 +193,7 @@
 
 - **长期分工（Owner 2026-09-08）**：用户自行安装认证Codex、Claude、OpenCode；保留原生模型循环、文件/终端/网络、用户工具与连接、Skills和子任务。相同账号、配置、工作上下文和授权下，不因GUI包装默认降成只读、工具白名单或关闭终端。GUI承接原生权限请求与用户决定，不静默提权。应用做版本化adapter、会话、观察、候选摄取、回执、界面及自动准入，不预设迁往自建模型循环，不新建应用MCP/通用工具RPC平台；原生CLI已有用户连接仍保留。
 - **阶段与体验**：1.8修当前工程AI基础；1.9以真实工作空间/独立课例为起点，042身份/保存、041整合工作台、045三格式课例材料、046–049共用正文/Flow/Word/文件共编、044双流程共同形成工作流。自动须成功读取实际采用材料，手动分别确认四阶段真实当前文件；构建前核对正文/附件版本，改稿使依赖旧稿的在途候选失效。外部Skill在044实际迁移前保留当前停点。2.0完成全部软件内QA/修复等步骤，长期专项不反向成为1.9前置。
-- **观察与权限分开**：默认提供任务相关的不可变小观察、能力卡和必要材料，目标明确时不发送全量目录/源码。CLI可按原生授权继续查找文件、资料与Skills，观察scope不是OS权限沙箱。Task/Observation/Proposal/HostResult/UserInput由唯一Owner以strict版本合同管理；一个任务可收到多次观察和回执，由CLI决定下一步。极简/专业模式只组织入口，不建立第二工程、任务或历史，也不降低AI能力。
+- **观察与权限分开**：默认提供任务相关的不可变小观察、能力卡和必要材料，目标明确时不发送全量目录/源码。CLI可按原生授权继续查找文件、资料与Skills，观察scope不是OS权限沙箱。Task/Observation/Proposal/HostResult/UserInput由唯一Owner以strict版本合同管理；一个任务可收到多次观察和回执，由CLI决定下一步。2026-09-17 已确认前端目标为工作台／完整原生编辑器两个工作位置，取消编辑器简洁／专业模式；实现按[前端专项](R19_FRONTEND_SPECIAL_IMPLEMENTATION_PLAN.md)推进。位置与布局变化不建立第二工程、任务或历史，也不降低AI能力；该目标不代表旧门控已经从源码移除。
 - **原生接线**：明确可执行文件与参数数组，不拼shell命令。保留或明确选择原生cwd、非秘密配置和运行所需环境；staging不能强制替代全部工作上下文。工具活动、授权、问题、取消、配置确认和错误按实际原生协议接回GUI。CLI管理认证，应用不复制凭据或在诊断输出secret；能力不足须诚实呈现，不伪装成功。
 - **工程唯一写入路径**：编辑器消费strict typed candidate/dynamic manifest，通过结构化stdout/artifact或当前candidate staging返回；宿主重校验canonical target、revision、epoch与资源，经既有canonical commands和单一document/resource transaction提交。2026-09-14 Owner 明确选择/页面仅为输入焦点，不是授权边界；宿主工具是快捷通道。CLI 可编辑本轮冻结 V9 工作副本，经 project.document 正式制品入口回收完整文档及真实资源，复用 V9/归档闭包/动态准入检查和唯一 EditorTransaction；不受快捷命令字段覆盖限制。制品必须保留工程 ID/基线 revision，宿主只递增一次版本；禁止 raw Store 和第二 writer，snapshot 不暴露 live Store。原生文件工具完成不等于工程已应用；外部原生工具改变已打开工程的磁盘文件时，由既有打开/保存Owner处理必要的重载与保存冲突，重新取得工程事实再继续，不能静默覆盖内存或补造History receipt。
 - **短传输与终态（2026-09-09）**：短操作仅是当前request内的strict投影，绑定canonical target/revision/sessionGeneration/epoch，宿主展开后仍经完整candidate和现有Facade/事务；不得引入第二工程协议、自然语言目标猜测；完整文件结果使用上述 project.document 入口，不向 live Store 发 patch。成功后finish须有实际committed或正式unchanged、必要证据和已保存回执，并贯通唯一任务状态/持久化；preview待应用不算完成，unchanged不增revision/Undo。必要observe/continue保留。已提交后记录失败只重试回执，不重提事务；无推理追加按真实原生能力，缺失时下次请求前送入，跨崩溃未知如实核实。绝对任务预算覆盖观察至提交前，等待不隐式延期。详细状态及失败合同见[共同实施合同](roadmap/1.8/IMPLEMENTATION_CONTRACT.md)。
@@ -270,6 +272,6 @@ Slide 保持原生可编辑 PPTX；Flow DOCX 保留可编辑 Word 表格和正�
 
 - 新建项目、追加 Flow 和 Builder 消费同一正式 fluid 默认值；已有缺省 reading 的 Flow 在增补时不迁移。正常标题、正文、图片和局部互动使用正文 block；`native.content` 的 Flow overlay 可显式指定 `paperSpace: paper | viewport`，未指定时保持既有默认值/原值，提交消费 canonical paperSpace command。非 Flow 和教师控制器不接受此定位参数；工程 Schema 不新增分支。
 - 生成 snapshot 提供已解析的 layout 和正文/稿纸/视口语义；当前观察提供实际 CSS px 容器、稿纸、正文宽度及 scroll/观察比例。这些测量是观察事实，不构成第二份布局状态。同一 Flow 的目录锚点共享一个正文 Surface，生成观察按 Surface 收集一次并保持冻结的活动锚点；新增标题后的反馈不复制成新页面目标，不扩大原任务授权。反馈观察新发现组件依赖时，可按需发现真实源码与精确目标并保留已创建实例配置；只改单个实例不得隐式修改共享包，用户明确要求共享源码变更时，通过当前正式目标与包更新 Owner 执行。初始或反馈目标列表本身不构成修改授权上限，执行仍需有效目标、版本和原生授权。Flow 默认正文、控制器使用共享 Noto Sans SC 字体链，HTML 导出收集该隐式字体并通过已有字体 Owner 打包。
-- Flow 控制器由实际视口投影到安全区域底部居中，默认底距12 CSS px；作者 frame 的 x/y 不再直接指定 Flow 初始播放位置，宽度以上限偏好保留。窄窗按按钮行列重排，不整组缩小。编辑展示、生成观察与播放使用同一投影；既有会话保存手动偏移/折叠，自动越界纠偏只作用于显示，不回写工程或手动偏移。观察变换不缩放控制器、不重挂实例。Slide/Spatial 保留自身投影。
+- 2026-09-13 的底部居中、默认底距 12 CSS px 及原生按钮行列重排，属于已退出的 Native 控制器。按 [2026-09-14 组件迁移结果](reviews/2026-09-14-teacher-controller-component.md)，当前 Component API4 教师控制器不套原生按钮行布局：Flow 保留组件作者 frame，按实际视口及共享 chrome 安全预算限宽、限高并纠正越界；自定义组件的控件布局由包内源码负责。编辑展示、生成观察与播放使用同一投影；既有会话保存手动偏移/折叠，自动越界纠偏只作用于显示，不回写工程或手动偏移。观察变换不缩放控制器、不重挂实例。Slide/Spatial 保留自身投影。
 - `PlaybackViewSession` 逐轴从实际 pan range 派生边条显隐，0.5 CSS px 内的数值噪声不产生边条。平移条是按需浮层，不保留18 px正文空槽；隐藏时退出 Tab 和无障碍操作树，释放拖动与 capture。Flow 正文按自身 overflow 滚动，paper 浮层属于正文滚动范围，不再重复计入整课 pan bounds。
 - 边条、原生滚动条避让和控制器读取同一 chrome 派生值；pan 末端可露出被浮层覆盖的有效内容。控制器宽度按最高观察倍率下的 chrome 预算稳定计算，位置按当前可见 chrome 避让，预算不占用正文宽度。正文 scroll 与观察 pan 各自保留单一状态，边条显隐和观察缩放不得触发正文基准宽度重排或清空交互状态。

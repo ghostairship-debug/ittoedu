@@ -22,21 +22,28 @@ export async function operateLessonMaterial(window: BrowserWindow, request: unkn
   }
   switch (input.operation) {
     case 'select': {
-      let filename = input.path
-      if (!filename) {
-        const result = await dialog.showOpenDialog(window, { title: '选择课例材料', properties: ['openFile'], filters: [{ name: '教学材料', extensions: ['pdf', 'docx', 'pptx', 'txt', 'md', 'csv'] }] })
-        if (result.canceled || !result.filePaths[0]) return null
-        filename = result.filePaths[0]
+      let filenames = input.path ? [input.path] : []
+      if (!input.path) {
+        const result = await dialog.showOpenDialog(window, { title: '选择课例材料（可多选）', properties: ['openFile', 'multiSelections'], filters: [{ name: '教学材料', extensions: ['pdf', 'docx', 'pptx', 'txt', 'md', 'csv'] }] })
+        if (result.canceled) return { sources: [], failures: [] }
+        filenames = result.filePaths
       }
-      if (!['.pdf', '.docx', '.pptx', '.txt', '.md', '.csv'].includes(path.extname(filename).toLowerCase())) throw new Error('请选择 PDF、DOCX、PPTX 或文本材料')
-      const file = await fs.open(filename, 'r')
-      try {
-        const stat = await file.stat()
-        if (!stat.isFile() || stat.size > MATERIAL_EXTRACTION_LIMITS.sourceBytes) throw new Error('材料文件不能超过 32 MiB')
-        const bytes = await file.readFile()
-        if (bytes.length > MATERIAL_EXTRACTION_LIMITS.sourceBytes) throw new Error('材料文件在读取时超过容量上限')
-        return { title: path.basename(filename), bytes }
-      } finally { await file.close() }
+      const sources: { title: string; bytes: Uint8Array }[] = [], failures: { title: string; message: string }[] = []
+      for (const filename of filenames) {
+        const title = path.basename(filename)
+        try {
+          if (!['.pdf', '.docx', '.pptx', '.txt', '.md', '.csv'].includes(path.extname(filename).toLowerCase())) throw new Error('请选择 PDF、DOCX、PPTX 或文本材料')
+          const file = await fs.open(filename, 'r')
+          try {
+            const stat = await file.stat()
+            if (!stat.isFile() || stat.size > MATERIAL_EXTRACTION_LIMITS.sourceBytes) throw new Error('材料文件不能超过 32 MiB')
+            const bytes = await file.readFile()
+            if (bytes.length > MATERIAL_EXTRACTION_LIMITS.sourceBytes) throw new Error('材料文件在读取时超过容量上限')
+            sources.push({ title, bytes })
+          } finally { await file.close() }
+        } catch (error) { failures.push({ title, message: error instanceof Error ? error.message : String(error) }) }
+      }
+      return { sources, failures }
     }
     case 'import': return materials.import(input.target, input.input)
     case 'list': return materials.list(input.target)

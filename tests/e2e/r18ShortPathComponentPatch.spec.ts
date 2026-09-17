@@ -8,13 +8,30 @@ import { createBlankCourseProject } from '../../src/renderer/project/createCours
 import { addCourseFlowPage, addCourseSpatialPage } from '../../src/renderer/course/courseLocationCommands'
 import { componentPackageMeta } from '../../src/renderer/components/editableComponentPackage'
 import { parseComponentPackageFiles } from '../../src/renderer/components/importComponentPackage'
-import { createCourseProjectArchive, type CourseProjectArchiveData } from '../../src/renderer/project/courseProjectArchive'
+import { type CourseProjectArchiveData } from '../../src/renderer/project/courseProjectArchive'
 import { componentPackageKey } from '../../src/renderer/project/archivePath'
+import { DEFAULT_TEACHER_CONTROLLER_PACKAGE_ID } from '../../src/shared/defaultTeacherControllerComponent'
 import type { CourseProjectDocument, FlowBlock, LayerItem } from '../../src/shared/courseProjectTypes'
+import { createArchiveFixture } from '../fixtures/teacherController'
 import { closeNativeEditor, nativeRecords, readSaved, saveStage, type NativeRun } from './r18NativeAuthoringFixture'
 import { expectBackgroundWindowsIsolated } from './expectBackgroundWindowsIsolated'
 
 const productRoot = resolve(__dirname, '..', '..')
+
+async function enterStandaloneEditorFromLanding(page: Page): Promise<void> {
+  const landing = page.locator('.lesson-workspace-landing')
+  const editor = page.getByTestId('canvas-stage')
+  await Promise.race([
+    landing.waitFor({ state: 'visible', timeout: 15_000 }),
+    editor.waitFor({ state: 'visible', timeout: 15_000 }),
+  ])
+  if (!await landing.isVisible()) return
+  const more = page.locator('.lesson-workspace-more > summary')
+  if (!await more.isVisible()) return
+  await more.click()
+  const create = page.getByRole('button', { name: '新建独立课件', exact: true })
+  if (await create.isVisible()) await create.click()
+}
 const packageId = 'com.example.short-path-patch'
 const ids = { slide: 'patch-slide', flow: 'patch-flow', spatial: 'patch-spatial' } as const
 type Mode = 'shared' | 'instance'
@@ -66,7 +83,7 @@ async function writeFixture(path: string) {
     blocks: [{ id: ids.flow, type: 'component', component: { packageId, version: '1.0.0' },
       props: { label: ids.flow, preserve: { value: ids.flow } }, staticFallbackAssetId: 'fallback', wrap: 'none' }] })
   spatial.world.layerItems.push(layer(ids.spatial, -160, -75))
-  writeFileSync(path, createCourseProjectArchive({ project, assetFiles: { fallback },
+  writeFileSync(path, createArchiveFixture({ project, assetFiles: { fallback },
     componentFiles: { [componentPackageKey(packageId, data.manifest.version)]: data.files } }))
   return readSaved(path)
 }
@@ -74,7 +91,7 @@ async function writeFixture(path: string) {
 function instances(project: CourseProjectDocument) {
   const result: Record<string, { component: { packageId: string; version: string }; staticFallbackAssetId: string }> = {}
   const layer = (item: LayerItem) => {
-    if (item.kind !== 'component') return
+    if (item.kind !== 'component' || item.component.packageId === DEFAULT_TEACHER_CONTROLLER_PACKAGE_ID) return
     if (!item.staticFallbackAssetId) throw new Error('Fixture component lost its fallback')
     result[item.layerItemId] = item as typeof result[string]
   }
@@ -111,7 +128,9 @@ function expectPatched(saved: CourseProjectArchiveData, original: CourseProjectA
   expect(Object.keys(after).sort()).toEqual(Object.values(ids).sort())
   const changedId = mode === 'shared' ? packageId : after[ids.flow]!.component.packageId
   const affected = mode === 'shared' ? Object.values(ids) : [ids.flow]
-  const expectedPackages = mode === 'shared' ? [packageId] : [packageId, changedId]
+  const expectedPackages = mode === 'shared'
+    ? [DEFAULT_TEACHER_CONTROLLER_PACKAGE_ID, packageId]
+    : [DEFAULT_TEACHER_CONTROLLER_PACKAGE_ID, packageId, changedId]
   expect(Object.keys(saved.componentFiles).sort()).toEqual(expectedPackages
     .map(id => componentPackageKey(id, saved.project.componentPackages[id]!.version)).sort())
   const originalFiles = archivedPackageFiles(original, packageId)
@@ -196,6 +215,7 @@ for (const mode of ['shared', 'instance'] as const) test(`component.package patc
     const page = await app.firstWindow()
     run = { app, page, runRoot, workspaceRoot: runRoot, projectPath, userData, pageErrors: [], consoleErrors: [] }
     page.on('pageerror', error => run!.pageErrors.push(error.message))
+    await enterStandaloneEditorFromLanding(page)
     const admissionWindows = new Set<Page>()
     app.on('window', worker => {
       const observe = () => { if (worker.url().includes('/admission.html')) admissionWindows.add(worker) }
@@ -246,8 +266,7 @@ for (const mode of ['shared', 'instance'] as const) test(`component.package patc
         const prepared = await useEditorStore.getState().prepareGenerationCandidate(request, {
           version: 1, requestId: request.requestId, candidateId: crypto.randomUUID(), summary: 'One-file existing component source patch',
           afterCommit: { version: 1, action: 'observe', reason: 'Verify the changed executable interaction in the actual host.' },
-          steps: [{ id: 'patch', tool: 'component.package', carrier: 'generated-component', destination, input,
-            lowerCarrierReason: 'The requested behavior lives in this existing component source, not public properties.' }],
+          steps: [{ id: 'patch', tool: 'component.package', carrier: 'generated-component', destination, input }],
         })
         const afterPrepare = current()
         const committed = useEditorStore.getState().applyGenerationCandidate(prepared.previewId)

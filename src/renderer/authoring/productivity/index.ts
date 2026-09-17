@@ -1,7 +1,7 @@
 import { documentTextSlots, normalizeDocumentText, type FlowInline, type FlowTextContent } from '../../../shared/document/content'
 import type { CourseProjectDocument, FlowBlock, LayerItem } from '../../../shared/courseProjectTypes'
 import type { TextRun } from '../../../shared/contracts/native-v1/types'
-import { applyTextRunStyle, remapTextRuns } from '../../../shared/textRuns'
+import { applyTextRunEdits, applyTextRunStyle, remapTextRuns, type TextRunEdit } from '../../../shared/textRuns'
 import { resolveEffectiveBackground, type EffectiveBackgroundRequest } from '../../../shared/effectiveBackground'
 import type { CourseAuthoringSessionToken } from '../courseAuthoringSession'
 import { createEditorTransactionStep, type EditorTransactionStep } from '../editorTransaction'
@@ -26,27 +26,16 @@ function fields(document: CourseProjectDocument, token: CourseAuthoringSessionTo
     if (typeof value !== 'string') return
     result.push({ id: `${owner}/${target}/${key}/${result.length}`, target, owner, property: key, value, color, write(next, replacement) {
       if (key === 'text' && Array.isArray(record.runs)) {
-        let current = value; let runs = record.runs as TextRun[]
+        const runs = record.runs as TextRun[]
         if (replacement) {
-          const matches: number[] = []
-          for (let i = value.indexOf(replacement.find); i >= 0; i = value.indexOf(replacement.find, i + replacement.find.length)) matches.push(i)
-          matches.reverse().forEach(index => {
-            const start = Array.from(current.slice(0, index)).length
-            const end = start + Array.from(replacement.find).length
-            const inserted = Array.from(replacement.replacement).length
-            const delta = inserted - (end - start)
-            runs = runs.flatMap(run => {
-              if (run.end <= start) return [run]
-              if (run.start >= end) return [{ ...run, start: run.start + delta, end: run.end + delta }]
-              const parts: TextRun[] = []
-              if (run.start < start) parts.push({ ...run, end: start })
-              if (run.start <= start && run.end > start && inserted) parts.push({ ...run, start, end: start + inserted })
-              if (run.end > end) parts.push({ ...run, start: start + inserted, end: run.end + delta })
-              return parts
-            })
-            current = current.slice(0, index) + replacement.replacement + current.slice(index + replacement.find.length)
-          })
-          record.runs = runs
+          const edits: TextRunEdit[] = []
+          for (let index = value.indexOf(replacement.find); index >= 0; index = value.indexOf(replacement.find, index + replacement.find.length)) {
+            const start = Array.from(value.slice(0, index)).length
+            edits.push({ start, end: start + Array.from(replacement.find).length, original: replacement.find, replacement: replacement.replacement })
+          }
+          const mapped = applyTextRunEdits(value, runs, edits)
+          if (!mapped.ok) throw new Error(mapped.reason)
+          record.runs = mapped.runs
         } else record.runs = remapTextRuns(value, next, runs)
       }
       record[key] = next

@@ -11,7 +11,6 @@ beforeEach(() => {
   useEditorStore.getState().createNewProject()
   useEditorStore.getState().setEditingScope('global')
   useEditorStore.getState().selectNode(null)
-  useEditorStore.setState({ editorMode: 'professional' })
 })
 
 afterEach(() => cleanup())

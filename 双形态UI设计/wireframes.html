@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>IttoEdu 双形态布局示意</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html,body { width:1600px; height:1000px; overflow:hidden; }
+  body {
+    background:#f5f5f4;
+    font-family:Inter,"PingFang SC","Microsoft YaHei",sans-serif;
+    color:#44403c;
+    padding:34px 40px 30px;
+  }
+  .head { display:flex; align-items:flex-end; justify-content:space-between; margin-bottom:22px; }
+  .head h1 { font-size:28px; font-weight:700; color:#292524; letter-spacing:.5px; }
+  .head .sub { font-size:13px; color:#78716c; margin-top:6px; }
+  .legend { display:flex; gap:18px; font-size:12px; color:#57534e; align-items:center; padding-bottom:4px; }
+  .legend .sw { display:inline-block; width:12px; height:12px; border-radius:3px; margin-right:6px; vertical-align:-1px; }
+  .sw-edit { background:rgba(94,140,255,.18); border:1.5px solid #5e8cff; }
+  .sw-ai { background:rgba(56,196,150,.18); border:1.5px solid #38c496; }
+  .sw-frame { background:#e7e5e4; border:1.5px solid #a8a29e; }
+  .grid { display:grid; grid-template-columns: 806px 726px; grid-template-rows: 452px 402px; gap:18px; }
+  .card { background:#ffffff; border:1px solid #e2e0dc; border-radius:12px; padding:16px 20px 14px; }
+  .card h2 { font-size:16px; font-weight:600; color:#292524; display:flex; align-items:center; gap:10px; }
+  .tag { font-size:11px; font-weight:600; padding:2px 8px; border-radius:99px; }
+  .tag-edit { color:#3e6de0; background:rgba(94,140,255,.12); }
+  .tag-ai { color:#1f9271; background:rgba(56,196,150,.12); }
+  .note { font-size:12px; line-height:1.75; color:#78716c; margin-top:10px; }
+  .note b { color:#57534e; font-weight:600; }
+  svg text { font-family:Inter,"PingFang SC","Microsoft YaHei",sans-serif; }
+</style>
+</head>
+<body>
+
+<div class="head">
+  <div>
+    <h1>IttoEdu 双形态布局示意</h1>
+    <div class="sub">两个形态 · 三种视图 ｜ 编辑器形态 · Agent 形态（工作台布局 / 聚焦布局） ｜ 视口 1600×1000</div>
+  </div>
+  <div class="legend">
+    <span><i class="sw sw-edit"></i>手动编辑区（蓝）</span>
+    <span><i class="sw sw-ai"></i>AI 区（青）</span>
+    <span><i class="sw sw-frame"></i>结构与导航</span>
+  </div>
+</div>
+
+<div class="grid">
+
+  <!-- ============ 编辑器形态 ============ -->
+  <div class="card">
+    <h2>编辑器形态 <span class="tag tag-edit">画布为主角</span></h2>
+    <svg viewBox="0 0 762 352" width="766" height="352">
+      <!-- 顶部尺寸标注：顶栏 -->
+      <text x="20" y="18" font-size="11" fill="#78716c">顶栏 48px</text>
+      <line x1="86" y1="14" x2="128" y2="26" stroke="#a8a29e" stroke-width="1"/>
+      <!-- 主体框架：1600x1000 @ 0.40 => 640x400，原点 (122,24)，高改为 300 适配 -->
+      <g>
+        <!-- 顶栏 -->
+        <rect x="122" y="24" width="640" height="20" fill="#e7e5e4" stroke="#8f8a84" stroke-width="1.2"/>
+        <!-- 左栏 224 -->
+        <rect x="122" y="44" width="90" height="264" fill="#fafaf9" stroke="#8f8a84" stroke-width="1.2"/>
+        <text x="167" y="160" font-size="11" fill="#57534e" text-anchor="middle">课程树</text>
+        <!-- 中央画布区 -->
+        <rect x="212" y="44" width="400" height="264" fill="#ffffff" stroke="#8f8a84" stroke-width="1.2"/>
+        <!-- 工具带 40 -->
+        <rect x="212" y="44" width="400" height="17" fill="#e7e5e4" stroke="#8f8a84" stroke-width="1"/>
+        <!-- 画布（手动编辑区，蓝） -->
+        <rect x="252" y="78" width="320" height="180" fill="rgba(94,140,255,.12)" stroke="#5e8cff" stroke-width="1.5" stroke-dasharray="5 3"/>
+        <text x="412" y="164" font-size="12" fill="#3e6de0" text-anchor="middle" font-weight="600">画布（手动编辑区）</text>
+        <text x="412" y="182" font-size="10" fill="#3e6de0" text-anchor="middle">选中框 / 手柄 / 工具 = 蓝</text>
+        <!-- 状态条 96 -->
+        <rect x="212" y="274" width="400" height="34" fill="#fafaf9" stroke="#8f8a84" stroke-width="1"/>
+        <text x="412" y="295" font-size="10" fill="#78716c" text-anchor="middle">命名状态条（缩略图）</text>
+        <!-- 右栏 320 AI 面板（青） -->
+        <rect x="612" y="44" width="128" height="264" fill="rgba(56,196,150,.12)" stroke="#38c496" stroke-width="1.5" stroke-dasharray="5 3"/>
+        <text x="676" y="150" font-size="11" fill="#1f9271" text-anchor="middle" font-weight="600">AI 助手面板</text>
+        <text x="676" y="166" font-size="10" fill="#1f9271" text-anchor="middle">消息 / 候选卡片</text>
+        <!-- 轨道 44 -->
+        <rect x="740" y="44" width="18" height="264" fill="#e7e5e4" stroke="#8f8a84" stroke-width="1"/>
+        <circle cx="749" cy="242" r="3" fill="#38c496"/>
+        <!-- 状态栏 26 -->
+        <rect x="122" y="308" width="640" height="11" fill="#e7e5e4" stroke="#8f8a84" stroke-width="1"/>
+      </g>
+      <!-- 尺寸标注 -->
+      <text x="14" y="60" font-size="11" fill="#78716c">左栏</text>
+      <text x="14" y="73" font-size="11" fill="#78716c" font-weight="600">224px</text>
+      <line x1="58" y1="64" x2="118" y2="64" stroke="#a8a29e" stroke-width="1"/>
+      <text x="226" y="40" font-size="11" fill="#78716c">工具带 40px</text>
+      <text x="470" y="272" font-size="11" fill="#78716c">状态条 96px</text>
+      <text x="614" y="40" font-size="11" fill="#1f9271" font-weight="600">右栏 320px（可拖至 400）</text>
+      <text x="766" y="60" font-size="11" fill="#78716c" text-anchor="end">轨道</text>
+      <text x="766" y="73" font-size="11" fill="#78716c" text-anchor="end" font-weight="600">44px</text>
+      <line x1="744" y1="80" x2="752" y2="66" stroke="#a8a29e" stroke-width="1"/>
+      <text x="14" y="316" font-size="11" fill="#78716c">状态栏 26px</text>
+      <line x1="72" y1="312" x2="118" y2="312" stroke="#a8a29e" stroke-width="1"/>
+    </svg>
+    <div class="note">
+      <b>主角：中央画布。</b>编辑器为体、AI 为翼——右栏轨道化，AI 助手是轨道一等入口（面板 320px）。<br>
+      形态切换在顶栏常驻，切到 Agent 形态时工程、对话与撤销历史连续。
+    </div>
+  </div>
+
+  <!-- ============ Agent 工作台 ============ -->
+  <div class="card">
+    <h2>Agent 形态 · 工作台布局 <span class="tag tag-ai">对话为主角</span></h2>
+    <svg viewBox="0 0 682 352" width="686" height="352">
+      <text x="14" y="18" font-size="11" fill="#78716c">顶栏 48px（含布局切换）</text>
+      <line x1="130" y1="14" x2="104" y2="26" stroke="#a8a29e" stroke-width="1"/>
+      <g>
+        <!-- 顶栏 -->
+        <rect x="98" y="24" width="570" height="20" fill="#e7e5e4" stroke="#8f8a84" stroke-width="1.2"/>
+        <!-- 左栏 264 -->
+        <rect x="98" y="44" width="94" height="276" fill="#fafaf9" stroke="#8f8a84" stroke-width="1.2"/>
+        <text x="145" y="120" font-size="10" fill="#57534e" text-anchor="middle">课例列表</text>
+        <text x="145" y="220" font-size="10" fill="#57534e" text-anchor="middle">资源树</text>
+        <!-- 对话栏 400（青，主轴） -->
+        <rect x="192" y="44" width="142" height="276" fill="rgba(56,196,150,.12)" stroke="#38c496" stroke-width="1.5" stroke-dasharray="5 3"/>
+        <rect x="192" y="44" width="142" height="13" fill="rgba(56,196,150,.25)" stroke="#38c496" stroke-width="1"/>
+        <text x="263" y="54" font-size="9" fill="#1f9271" text-anchor="middle">创作流程 36px</text>
+        <text x="263" y="150" font-size="12" fill="#1f9271" text-anchor="middle" font-weight="600">对话主轴</text>
+        <text x="263" y="166" font-size="10" fill="#1f9271" text-anchor="middle">消息流 · 候选</text>
+        <text x="263" y="300" font-size="9" fill="#1f9271" text-anchor="middle">引用 chips + 输入区</text>
+        <!-- 画布区 -->
+        <rect x="334" y="44" width="334" height="276" fill="#ffffff" stroke="#8f8a84" stroke-width="1.2"/>
+        <rect x="334" y="44" width="334" height="16" fill="#e7e5e4" stroke="#8f8a84" stroke-width="1"/>
+        <text x="501" y="55" font-size="9" fill="#57534e" text-anchor="middle">轻工具条 44px</text>
+        <rect x="334" y="60" width="334" height="30" fill="#fafaf9" stroke="#8f8a84" stroke-width="1"/>
+        <text x="501" y="79" font-size="9" fill="#78716c" text-anchor="middle">场景缩略图条 84px</text>
+        <rect x="334" y="90" width="334" height="14" fill="#f0efed" stroke="#8f8a84" stroke-width="1"/>
+        <text x="342" y="100" font-size="9" fill="#57534e">呈现步骤行 40px</text>
+        <text x="662" y="100" font-size="9" fill="#1f9271" text-anchor="end">✧ 让 AI 调整步骤</text>
+        <rect x="380" y="116" width="240" height="125" fill="rgba(94,140,255,.12)" stroke="#5e8cff" stroke-width="1.5" stroke-dasharray="5 3"/>
+        <text x="500" y="172" font-size="11" fill="#3e6de0" text-anchor="middle" font-weight="600">画布 · 轻编辑（蓝）</text>
+        <text x="500" y="188" font-size="9" fill="#3e6de0" text-anchor="middle">移动/改字/删除/撤销</text>
+      </g>
+      <text x="14" y="66" font-size="11" fill="#78716c">左栏</text>
+      <text x="14" y="79" font-size="11" fill="#78716c" font-weight="600">264px</text>
+      <line x1="56" y1="68" x2="94" y2="68" stroke="#a8a29e" stroke-width="1"/>
+      <text x="206" y="40" font-size="11" fill="#1f9271" font-weight="600">对话栏 400px</text>
+      <text x="340" y="336" font-size="11" fill="#78716c">画布区：吃剩余宽度（最小 480px）</text>
+      <text x="340" y="350" font-size="11" fill="#78716c">无底部状态栏，状态并入对话栏底部</text>
+    </svg>
+    <div class="note">
+      <b>主角：中栏对话。</b>备课阶段——管理课例、引用材料、走四阶段创作流；画布是「看得见的上下文」，只保留轻编辑。<br>
+      顶栏「工作台｜聚焦」一键切换布局，对话与候选状态保留。
+    </div>
+  </div>
+
+  <!-- ============ Agent 聚焦 ============ -->
+  <div class="card">
+    <h2>Agent 形态 · 聚焦布局 <span class="tag tag-ai">画布为主角</span></h2>
+    <svg viewBox="0 0 762 300" width="766" height="300">
+      <g>
+        <!-- 顶栏 -->
+        <rect x="88" y="14" width="640" height="20" fill="#e7e5e4" stroke="#8f8a84" stroke-width="1.2"/>
+        <text x="14" y="28" font-size="11" fill="#78716c">顶栏 48px</text>
+        <line x1="66" y1="24" x2="86" y2="24" stroke="#a8a29e" stroke-width="1"/>
+        <!-- 左缘场景栏 104px -->
+        <rect x="88" y="34" width="37" height="230" fill="#e7e5e4" stroke="#8f8a84" stroke-width="1.2"/>
+        <rect x="92" y="44" width="29" height="17" rx="2" fill="#fff" stroke="#5e8cff" stroke-width="1.5"/>
+        <rect x="92" y="66" width="29" height="17" rx="2" fill="#fff" stroke="#a8a29e" stroke-width="1"/>
+        <rect x="92" y="88" width="29" height="17" rx="2" fill="#fff" stroke="#a8a29e" stroke-width="1"/>
+        <circle cx="121" cy="88" r="4" fill="#38c496"/>
+        <text x="46" y="52" font-size="10" fill="#78716c">场景栏</text>
+        <text x="46" y="64" font-size="10" fill="#78716c" font-weight="600">104px</text>
+        <line x1="66" y1="58" x2="86" y2="52" stroke="#a8a29e" stroke-width="1"/>
+        <!-- 画布满幅 -->
+        <rect x="125" y="34" width="603" height="230" fill="#ffffff" stroke="#8f8a84" stroke-width="1.2"/>
+        <!-- 呼吸边内画布 -->
+        <rect x="150" y="52" width="530" height="190" fill="rgba(94,140,255,.12)" stroke="#5e8cff" stroke-width="1.5" stroke-dasharray="5 3"/>
+        <!-- 选中元素 + 情境工具条 -->
+        <rect x="166" y="78" width="92" height="16" fill="none" stroke="#5e8cff" stroke-width="1.5"/>
+        <rect x="166" y="60" width="150" height="13" rx="6.5" fill="#e7e5e4" stroke="#8f8a84" stroke-width="1"/>
+        <text x="241" y="69" font-size="8" fill="#57534e">改文字 │ ✧让 AI 改这里 │ ⋯</text>
+        <text x="330" y="69" font-size="9" fill="#57534e">情境工具条（选中才出现）</text>
+        <line x1="318" y1="66" x2="326" y2="66" stroke="#a8a29e" stroke-width="1"/>
+        <text x="415" y="140" font-size="12" fill="#3e6de0" text-anchor="middle" font-weight="600">画布最大化 · 32px 呼吸边 · 无选中零控件</text>
+        <text x="415" y="157" font-size="10" fill="#3e6de0" text-anchor="middle">撤销/重做固定在顶栏左侧</text>
+        <!-- 底部中央步进器胶囊 -->
+        <rect x="330" y="218" width="170" height="15" rx="7.5" fill="#e7e5e4" stroke="#8f8a84" stroke-width="1.2"/>
+        <text x="415" y="229" font-size="8.5" fill="#57534e" text-anchor="middle">‹ 基础 │ 揭示光路 │ 标注入射角 ›</text>
+        <text x="415" y="254" font-size="9" fill="#78716c" text-anchor="middle">呈现步骤步进器（悬浮胶囊 · 常驻）</text>
+        <!-- 对话 Dock 64 -->
+        <rect x="88" y="264" width="640" height="26" fill="rgba(56,196,150,.12)" stroke="#38c496" stroke-width="1.5" stroke-dasharray="5 3"/>
+        <rect x="88" y="262" width="640" height="2.5" fill="#38c496"/>
+        <text x="408" y="281" font-size="11" fill="#1f9271" text-anchor="middle" font-weight="600">对话 Dock 收起态 64px（chips + 输入框 + 发送）</text>
+      </g>
+      <text x="14" y="270" font-size="11" fill="#78716c">Dock</text>
+      <text x="14" y="283" font-size="11" fill="#1f9271" font-weight="600">64px</text>
+      <line x1="50" y1="276" x2="84" y2="276" stroke="#a8a29e" stroke-width="1"/>
+      <text x="640" y="48" font-size="9" fill="#78716c">32px 呼吸边</text>
+    </svg>
+    <div class="note">
+      <b>主角：全屏画布。</b>精修阶段——「生成 → 看效果 → 再改」循环；场景栏与步进器是仅有的常驻导航件，编辑控件全部情境化。<br>
+      对话收成底部 Dock，有新候选时 Dock 上沿青色呼吸条 + 半浮出候选卡提示。
+    </div>
+  </div>
+
+  <!-- ============ 切换关系 ============ -->
+  <div class="card">
+    <h2>形态与布局的切换关系</h2>
+    <svg viewBox="0 0 682 236" width="686" height="236">
+      <!-- 编辑器节点 -->
+      <rect x="30" y="30" width="180" height="64" rx="10" fill="rgba(94,140,255,.10)" stroke="#5e8cff" stroke-width="1.5"/>
+      <text x="120" y="58" font-size="13" fill="#3e6de0" text-anchor="middle" font-weight="600">编辑器形态</text>
+      <text x="120" y="78" font-size="10" fill="#57534e" text-anchor="middle">精修主导 · AI 侧栏为翼</text>
+      <!-- Agent 节点 -->
+      <rect x="472" y="30" width="180" height="64" rx="10" fill="rgba(56,196,150,.10)" stroke="#38c496" stroke-width="1.5"/>
+      <text x="562" y="58" font-size="13" fill="#1f9271" text-anchor="middle" font-weight="600">Agent 形态</text>
+      <text x="562" y="78" font-size="10" fill="#57534e" text-anchor="middle">创作主导 · 对话为轴</text>
+      <!-- 双向箭头 -->
+      <line x1="212" y1="62" x2="470" y2="62" stroke="#8f8a84" stroke-width="1.5"/>
+      <path d="M212 62 l10 -5 v10 z" fill="#8f8a84"/>
+      <path d="M470 62 l-10 -5 v10 z" fill="#8f8a84"/>
+      <text x="341" y="52" font-size="11" fill="#57534e" text-anchor="middle">顶栏分段控件 · &lt;150ms 无弹窗</text>
+      <text x="341" y="78" font-size="10" fill="#78716c" text-anchor="middle">工程 / 对话 / 候选 / 撤销历史连续</text>
+      <!-- 子布局 -->
+      <rect x="382" y="140" width="160" height="56" rx="10" fill="#fafaf9" stroke="#8f8a84" stroke-width="1.2"/>
+      <text x="462" y="164" font-size="12" fill="#44403c" text-anchor="middle" font-weight="600">工作台布局</text>
+      <text x="462" y="182" font-size="10" fill="#78716c" text-anchor="middle">备课 · 多课例管理</text>
+      <rect x="562" y="140" width="120" height="56" rx="10" fill="#fafaf9" stroke="#8f8a84" stroke-width="1.2"/>
+      <text x="622" y="164" font-size="12" fill="#44403c" text-anchor="middle" font-weight="600">聚焦布局</text>
+      <text x="622" y="182" font-size="10" fill="#78716c" text-anchor="middle">单课件精修</text>
+      <line x1="562" y1="94" x2="462" y2="138" stroke="#a8a29e" stroke-width="1.2"/>
+      <line x1="562" y1="94" x2="622" y2="138" stroke="#a8a29e" stroke-width="1.2"/>
+      <line x1="542" y1="168" x2="562" y2="168" stroke="#38c496" stroke-width="1.5"/>
+      <path d="M542 168 l8 -4 v8 z" fill="#38c496"/>
+      <path d="M562 168 l-8 -4 v8 z" fill="#38c496"/>
+      <text x="552" y="158" font-size="9" fill="#1f9271" text-anchor="middle">一键切换</text>
+      <text x="36" y="160" font-size="11" fill="#57534e" font-weight="600">语义双色纪律：</text>
+      <text x="36" y="180" font-size="11" fill="#3e6de0">蓝 = 手动编辑（选中框 · 工具 · 主按钮）</text>
+      <text x="36" y="198" font-size="11" fill="#1f9271">青 = AI（对话 · 候选 · 生成状态 · AI 入口）</text>
+      <text x="36" y="216" font-size="10" fill="#78716c">候选生命周期：生成中 → 候选卡片 → 应用 / 放弃 → 可撤销</text>
+    </svg>
+    <div class="note">
+      <b>两个形态、三种视图：</b>形态切换是视图切换而非重新打开工程；Agent 形态内「工作台｜聚焦」是同一形态的两种布局偏好。<br>
+      课例上下文跟随：Agent 形态打开的课例，切回编辑器形态直接落在其课件上。
+    </div>
+  </div>
+
+</div>
+
+</body>
+</html>

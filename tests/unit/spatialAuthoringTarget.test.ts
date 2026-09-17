@@ -12,9 +12,11 @@ import { addSpatialSemanticZoomRuleInSession } from '@/renderer/course/spatialSe
 import { locateCourseLayer } from '@/renderer/course/effectiveLayerCommands'
 import { markSpatialWorldContentComposing } from '@/renderer/authoring/spatialWorldAuthoring'
 import { createSpatialWorldTargetAuthoringController } from '@/renderer/authoring/spatialWorldTargetAuthoring'
+import { controllerDisplayFrame } from '@/renderer/authoring/controllerDisplayBounds'
 import { worldToClient } from '@/renderer/authoring/stageViewportTransform'
 import {
   buildSpatialAuthoringSnapshot,
+  createSpatialViewportOverlayTransform,
   createSpatialWorldViewTransform,
 } from '@/renderer/course/spatialEditorCommands'
 import {
@@ -66,6 +68,42 @@ beforeEach(() => {
 })
 
 describe('Spatial canonical authoring targets', () => {
+  it('constrains a teacher viewport drag by its launcher at fitted Spatial scale and preserves author dimensions', () => {
+    const item = useEditorStore.getState().spatialSession!.history.present.globalLayerItems
+      .find(entry => entry.item.kind === 'component' && entry.item.role === 'teacher-controller')!.item
+    const mount = document.createElement('div')
+    mount.dataset.controllerAuthoringId = item.layerItemId
+    mount.dataset.controllerAuthoringBounds = `${item.frame.width - 52},${item.frame.height - 52},52,52`
+    document.body.append(mount)
+    try {
+      const controller = createSpatialWorldTargetAuthoringController({
+        readSnapshot: () => {
+          const state = useEditorStore.getState(), session = state.spatialSession!
+          return {
+            view: buildSpatialEditorView({ project: session.history.present, locationId: session.selection.locationId, sessionCamera: session.sessionCamera }),
+            selectionIds: session.selection.selectionIds,
+            scope: session.scope,
+            contentEdit: state.spatialContentEdit,
+            worldTarget: captureSpatialTarget({ kind: 'world', field: 'world' }),
+            layerTargets: new Map([[item.layerItemId, captureSpatialTarget({ kind: 'layer', layerItemId: item.layerItemId, field: 'frame' })]]),
+          }
+        },
+        commands: { run: (target, intent) => useEditorStore.getState().runSpatialAuthoringIntent(target, intent) },
+      })
+      const visible = controllerDisplayFrame(item)
+      const center = worldToClient(createSpatialViewportOverlayTransform(VIEWPORT), { x: visible.x + 26, y: visible.y + 26 })
+      expect(controller.pointerDown(center, VIEWPORT).hit?.layerItemId).toBe(item.layerItemId)
+      const moved = controller.pointerMove({ x: -50, y: -50 }, VIEWPORT)
+      expect(moved.preview?.[0]).toMatchObject({ x: 52 - item.frame.width, y: 52 - item.frame.height, width: item.frame.width, height: item.frame.height })
+      expect(controller.pointerUp({ x: -50, y: -50 }, VIEWPORT).command?.ok).toBe(true)
+      const saved = useEditorStore.getState().spatialSession!.history.present.globalLayerItems
+        .find(entry => entry.item.layerItemId === item.layerItemId)!.item
+      expect(controllerDisplayFrame(saved)).toEqual({ x: 0, y: 0, width: 52, height: 52 })
+      expect(saved.frame.width).toBe(item.frame.width)
+      expect(saved.frame.height).toBe(item.frame.height)
+    } finally { mount.remove() }
+  })
+
   it('nudges the selected Spatial layer through the active Surface owner', () => {
     useEditorStore.getState().addTextNode(120, 160)
     const before = useEditorStore.getState().spatialSession!

@@ -23,7 +23,7 @@
       ]
     }
   ],
-  "description": "仅 Slide scene owner。常用“点击/输入提交/翻页 → 显示或隐藏解释、切换呈现状态（图形与文字随状态同步变化）、设置分数、进入下一步或下一场景”用 compose：触发与目标可给图层/状态/场景的 id 或唯一名称，效果按顺序给出，宿主生成一致引用、步骤 id、分组与收尾导航，并在边界明确拒绝 Published 不支持的组合。显隐语义：show/hide 是已挂载节点的入退场动画，不能解除 visible:false；初始动画隐藏使用 playbackInitialVisibility:hidden。若已有目标呈现状态负责显隐，只需 set-state，不要先 show 隐藏节点再切状态。导航语义：next-step 先走完当前页剩余呈现步骤再进入下一场景；next-scene 直接跳过剩余步骤进入下一场景（跨 Slide/Flow/Spatial 位置复用课程顺序）；go-to-scene 精确进入指定 Slide 场景。限制：presentation.enter/presentation.in 当前 Published 播放不执行，因此 compose 不提供 state-enter 触发与 inStates 条件；状态进入类需求用 click/presenter 触发 + 末尾 set-state 效果（当前 Slide 场景、无 transition、独占最后执行组）表达，状态条件用 course-state.compare/course-state.exists，场景限定用 scene.in。需要延迟、动画/媒体触发或完整条件组合时用 insert/replace（本卡完整 rule Schema，不含最外层 id；第一动作 start 必须 after-previous，导航动作必须最后）。",
+  "description": "仅 Slide scene owner。常用“点击/输入提交/翻页 → 显示或隐藏解释、切换呈现状态（图形与文字随状态同步变化）、设置分数、进入下一步或下一场景”用 compose：触发与目标可给图层/状态/场景/课程位置的 id 或唯一名称，效果按顺序给出，宿主生成一致引用、步骤 id、分组与收尾导航，并在边界明确拒绝 Published 不支持的组合。显隐语义：show/hide 是已挂载节点的入退场动画，不能解除 visible:false；初始动画隐藏使用 playbackInitialVisibility:hidden。若已有目标呈现状态负责显隐，只需 set-state，不要先 show 隐藏节点再切状态。导航语义：next-step 先走完当前页剩余呈现步骤再进入下一场景；next-scene 直接跳过剩余步骤进入下一场景（跨 Slide/Flow/Spatial 位置复用课程顺序）；go-to-scene 精确进入指定 Slide 场景；go-to-location 按正式位置 id 精确进入 Slide、Flow 或 Spatial。限制：presentation.enter/presentation.in 当前 Published 播放不执行，因此 compose 不提供 state-enter 触发与 inStates 条件；状态进入类需求用 click/presenter 触发 + 末尾 set-state 效果（当前 Slide 场景、无 transition、独占最后执行组）表达，状态条件用 course-state.compare/course-state.exists，场景限定用 scene.in。需要延迟、动画/媒体触发或完整条件组合时用 insert/replace（本卡完整 rule Schema，不含最外层 id；第一动作 start 必须 after-previous，导航动作必须最后）。",
   "examples": [
     {
       "bindings": "values 的 trigger/effects 来自当前观察、已读资源或用户要求，值须满足本卡 inputSchema；destination 原样复制当前目标。",
@@ -503,6 +503,23 @@
                     "required": [
                       "type",
                       "stateId"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "locationId": {
+                        "$ref": "#/$defs/__schema12"
+                      },
+                      "type": {
+                        "const": "location.go",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "locationId"
                     ],
                     "type": "object"
                   },
@@ -1274,6 +1291,23 @@
             "required": [
               "kind",
               "scene"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "const": "go-to-location",
+                "type": "string"
+              },
+              "location": {
+                "$ref": "#/$defs/__schema0"
+              }
+            },
+            "required": [
+              "kind",
+              "location"
             ],
             "type": "object"
           },

@@ -335,6 +335,8 @@ async function launchEditor(): Promise<LaunchedEditor> {
     })
     const page = await app.firstWindow()
     attach(page)
+    await page.locator('.lesson-workspace-more > summary').click()
+    await page.getByRole('button', { name: '新建独立课件', exact: true }).click()
     await page.locator('[data-testid="canvas-stage"] canvas').waitFor()
     await expectBackgroundWindowsIsolated(app, true)
     const recoveryDialog = page.getByRole('alertdialog', {
@@ -347,6 +349,11 @@ async function launchEditor(): Promise<LaunchedEditor> {
     if (await professional.getAttribute('aria-pressed') !== 'true') {
       await professional.click()
     }
+    const properties = page.getByRole('complementary', { name: '编辑面板', exact: true })
+    if (!await properties.isVisible()) {
+      await page.getByRole('button', { name: '属性与素材', exact: true }).click()
+    }
+    await expect(properties).toBeVisible()
     return { app, context, page, userDataPath, diagnostics }
   } catch (error) {
     if (app) await closeEditor(app, userDataPath).catch(() => undefined)

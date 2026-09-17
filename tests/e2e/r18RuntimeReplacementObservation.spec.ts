@@ -1,13 +1,28 @@
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
-import { _electron as electron, expect, test } from '@playwright/test'
+import { _electron as electron, expect, test, type Page } from '@playwright/test'
 import { createServer, type ViteDevServer } from 'vite'
 import sharp from 'sharp'
 import { BACKGROUND_E2E_ENV } from '../../src/main/windowVisibility'
-import { closeNativeEditor, FIXTURE_IDS, writeNativeLesson, type NativeRun } from './r18NativeAuthoringFixture'
+import { closeNativeEditor, FIXTURE_IDS, selectLayer, writeNativeLesson, type NativeRun } from './r18NativeAuthoringFixture'
 import { expectBackgroundWindowsIsolated } from './expectBackgroundWindowsIsolated'
 
 const productRoot = resolve(__dirname, '..', '..')
+
+async function enterStandaloneEditorFromLanding(page: Page): Promise<void> {
+  const landing = page.locator('.lesson-workspace-landing')
+  const editor = page.getByTestId('canvas-stage')
+  await Promise.race([
+    landing.waitFor({ state: 'visible', timeout: 15_000 }),
+    editor.waitFor({ state: 'visible', timeout: 15_000 }),
+  ])
+  if (!await landing.isVisible()) return
+  const more = page.locator('.lesson-workspace-more > summary')
+  if (!await more.isVisible()) return
+  await more.click()
+  const create = page.getByRole('button', { name: '新建独立课件', exact: true })
+  if (await create.isVisible()) await create.click()
+}
 const runtimeSource = `CoursewareRuntime.define({runtimeApiVersion:2,create(ctx){
   const tile=document.createElement('div');
   tile.setAttribute('aria-label','Runtime replacement ready');
@@ -54,6 +69,7 @@ test('the immediate formal observation reflects a Runtime replacement at its fin
     const page = await app.firstWindow()
     run = { app, page, runRoot, workspaceRoot: runRoot, projectPath, userData, pageErrors: [], consoleErrors: [] }
     page.on('pageerror', error => run!.pageErrors.push(error.message))
+    await enterStandaloneEditorFromLanding(page)
     await expectBackgroundWindowsIsolated(app, true)
     await page.getByTestId('canvas-stage').locator('canvas').first().waitFor()
     await app.evaluate(({ dialog }, path) => {
@@ -62,8 +78,7 @@ test('the immediate formal observation reflects a Runtime replacement at its fin
     await page.getByRole('button', { name: '打开工程（Ctrl+O）', exact: true }).click()
     const professional = page.getByRole('button', { name: '专业', exact: true })
     if (await professional.getAttribute('aria-pressed') !== 'true') await professional.click()
-    await page.getByRole('tab', { name: '图层', exact: true }).click()
-    await page.getByTestId(`node-item-${FIXTURE_IDS.square}`).locator('.node-name').click()
+    await selectLayer(page, FIXTURE_IDS.square)
 
     const result = await page.evaluate(async ({ ids, source }) => {
       const load = (path: string) => import(/* @vite-ignore */ path)
@@ -95,7 +110,6 @@ test('the immediate formal observation reflects a Runtime replacement at its fin
           version: 1, requestId: before.requestId, candidateId: crypto.randomUUID(), summary: 'Canonical Runtime replacement observation',
           steps: [
             { id: 'runtime', tool: 'runtime.insert', carrier: 'runtime', destination: scope,
-              lowerCarrierReason: 'This test verifies the actual Runtime replacement host and its observation lifecycle.',
               input: { label: 'Purple Runtime panel', runtime: { protocol: 'canvas-runtime', runtimeApiVersion: 2, enabled: true,
                 renderMode: 'dom', source, content: { values: {} }, assets: {}, staticFallback: { assetId: ids.asset, coverage: 'scene' } } } },
             { id: 'replace', tool: 'selection.replace', carrier: 'native', destination,

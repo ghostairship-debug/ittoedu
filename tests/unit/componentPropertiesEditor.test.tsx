@@ -18,6 +18,7 @@ import {
   selectActiveScene,
   useEditorStore,
 } from '@/renderer/store/editorStore'
+import { applyTextRunEdits, type TextRunEdit } from '@/shared/textRuns'
 
 function activeHistory() {
   const state = useEditorStore.getState()
@@ -258,7 +259,6 @@ describe('ComponentPropertiesEditor', () => {
 describe('ComponentsTab component presets', () => {
   it('shows presets as independent add choices and applies their props', () => {
     useEditorStore.getState().createNewProject()
-    useEditorStore.setState({ editorMode: 'professional' })
     useEditorStore.getState().importComponentPackage({
       manifest,
       runtimeSource: 'window.CoursewareComponent.define({id:"com.example.editor",runtimeApiVersion:4,create:function(){return{destroy:function(){}}}})',
@@ -287,7 +287,6 @@ describe('ComponentsTab component presets', () => {
 
   it('keeps nested-content presets available for scene component instances', () => {
     useEditorStore.getState().createNewProject()
-    useEditorStore.setState({ editorMode: 'professional' })
     useEditorStore.getState().importComponentPackage({
       manifest: nestedManifest,
       runtimeSource: 'window.CoursewareComponent.define({id:"com.example.editor-nested",runtimeApiVersion:4,create:function(){return{destroy:function(){}}}})',
@@ -447,7 +446,7 @@ describe('target-bound property drafts', () => {
     await Promise.resolve()
     await Promise.resolve()
     expect(onChange).toHaveBeenCalledTimes(1)
-    expect(onChange).toHaveBeenLastCalledWith('中文')
+    expect(onChange).toHaveBeenLastCalledWith('中文', { start: 0, end: 0, original: '', replacement: '中文' })
     expect(onCompositionChange.mock.calls).toEqual([[true], [false]])
     expect(onCommit).toHaveBeenCalledTimes(1)
     expect(onCancel).not.toHaveBeenCalled()
@@ -480,9 +479,74 @@ describe('target-bound property drafts', () => {
     await Promise.resolve()
     await Promise.resolve()
     expect(onChange).toHaveBeenCalledTimes(1)
-    expect(onChange).toHaveBeenLastCalledWith('中文')
+    expect(onChange).toHaveBeenLastCalledWith('中文', { start: 0, end: 0, original: '', replacement: '中文' })
     expect(onCompositionChange.mock.calls).toEqual([[true], [false]])
     expect(onCommit).toHaveBeenCalledTimes(1)
+  })
+
+  it('U01-properties-input captures repeated text, Unicode, IME and undo as exact code-point edits', () => {
+    const runCase = (
+      label: string,
+      value: string,
+      mutate: (input: HTMLTextAreaElement) => void,
+    ): TextRunEdit => {
+      const onChange = vi.fn()
+      const view = render(
+        <PropertyDraftBoundary bindingKey={label} onStale={vi.fn()}>
+          <TextContentTextarea
+            label={label}
+            value={value}
+            onBegin={vi.fn()}
+            onChange={onChange}
+            onCommit={vi.fn()}
+            onCancel={vi.fn()}
+          />
+        </PropertyDraftBoundary>,
+      )
+      const input = screen.getByLabelText(label) as HTMLTextAreaElement
+      fireEvent.focus(input)
+      mutate(input)
+      const edit = onChange.mock.calls.at(-1)?.[1] as TextRunEdit | undefined
+      expect(edit).toBeDefined()
+      view.unmount()
+      return edit!
+    }
+    const beforeInput = (input: HTMLTextAreaElement, inputType: string) => {
+      fireEvent(input, new InputEvent('beforeinput', { bubbles: true, cancelable: true, inputType }))
+    }
+
+    const repeated = runCase('重复定位', '甲甲', (input) => {
+      input.setSelectionRange(0, 1)
+      beforeInput(input, 'deleteByCut')
+      fireEvent.change(input, { target: { value: '甲' } })
+    })
+    expect(repeated).toEqual({ start: 0, end: 1, original: '甲', replacement: '' })
+    const repeatedMapping = applyTextRunEdits('甲甲', [{ start: 0, end: 1, style: { bold: true } }], [repeated])
+    expect(repeatedMapping).toMatchObject({ ok: true, text: '甲', runs: [] })
+
+    const family = '👨‍👩‍👧‍👦'
+    const unicode = runCase('字素定位', `${family}好`, (input) => {
+      input.setSelectionRange(0, family.length)
+      beforeInput(input, 'insertText')
+      fireEvent.change(input, { target: { value: '棒好' } })
+    })
+    expect(unicode).toEqual({ start: 0, end: Array.from(family).length, original: family, replacement: '棒' })
+
+    const ime = runCase('组合输入定位', '甲甲', (input) => {
+      input.setSelectionRange(0, 1)
+      fireEvent.compositionStart(input)
+      fireEvent.change(input, { target: { value: 'z甲' } })
+      fireEvent.change(input, { target: { value: '中甲' } })
+      fireEvent.compositionEnd(input, { data: '中' })
+    })
+    expect(ime).toEqual({ start: 0, end: 1, original: '甲', replacement: '中' })
+
+    const undo = runCase('撤销定位', '甲乙甲', (input) => {
+      input.setSelectionRange(2, 2)
+      beforeInput(input, 'historyUndo')
+      fireEvent.change(input, { target: { value: '甲甲' } })
+    })
+    expect(undo).toEqual({ start: 1, end: 2, original: '乙', replacement: '' })
   })
 
   it('clears a same-value stale text session before the next target begins editing', () => {

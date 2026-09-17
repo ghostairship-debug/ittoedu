@@ -2,7 +2,9 @@ import { z } from 'zod'
 import type { DocumentAiEditRecord, DocumentFilePort, DocumentFileRef, DocumentFileVersion, DocumentSaveRequest } from './document/ports'
 import { lessonRelativePathSchema } from './lessonWorkspace'
 
-const ref = z.object({ lessonId: z.uuid(), lessonDirectory: z.string().min(1).max(32767), relativePath: lessonRelativePathSchema }).strict()
+const lessonRef = z.object({ kind: z.literal('lesson'), lessonId: z.uuid(), lessonDirectory: z.string().min(1).max(32767), relativePath: lessonRelativePathSchema }).strict()
+const fileRef = z.object({ kind: z.literal('file'), path: z.string().min(1).max(32767) }).strict()
+const ref = z.discriminatedUnion('kind', [lessonRef, fileRef])
 const version = z.object({ contentVersion: z.string().min(1), attachments: z.array(z.object({ relativePath: lessonRelativePathSchema, contentVersion: z.string().min(1) }).strict()) }).strict()
 const edit = z.object({ from: z.number().int().nonnegative(), to: z.number().int().nonnegative(), before: z.string(), after: z.string() }).strict().refine(value => value.to >= value.from)
 const record = z.object({ id: z.string().min(1), ref, baseVersion: version, savedVersion: version, applied: z.array(edit) }).strict()

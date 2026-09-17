@@ -14,8 +14,8 @@ test('r19 real manual recovery then native Luna file format repair', async ({}, 
  const app = await electron.launch({ args: ['.', `--user-data-dir=${join(evidence, 'profile')}`], cwd: root, env: { ...process.env, VITE_DEV_SERVER_URL: '', [BACKGROUND_E2E_ENV]: '1' } })
  const page = await app.firstWindow()
  try {
-  await app.evaluate(({ dialog }, directory) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [directory] }) }, workspace)
-  await page.getByRole('button', { name: '打开工作空间', exact: true }).first().click()
+  // V3.1：保留 profile 重开自动回到上次工作空间
+  await expect(page.locator('.lesson-workspace-toolbar')).toBeVisible()
   const emptyRecovery = page.getByRole('button', { name: '丢弃副本', exact: true })
   if (await emptyRecovery.waitFor({ state: 'visible', timeout: 5000 }).then(() => true).catch(() => false)) {
    const filename = join(evidence, 'profile/project-data/recovery.h5lesson')
@@ -27,8 +27,11 @@ test('r19 real manual recovery then native Luna file format repair', async ({}, 
   }
 
   const lesson = await page.evaluate(async directory => (await window.desktopAPI!.lesson!({ operation: 'list-lessons', directory })).lessons![0]!, workspace)
-  await page.locator('.lesson-workspace-lessons').getByRole('button', { name: /并联支路证据推理手动课例/ }).click()
-  const ref = { lessonId: lesson.identity.lessonId, lessonDirectory: lesson.identity.normalizedDirectory, relativePath: 'teaching-brief.md' }
+  // V3.1：课例入口已从「更多」菜单移除，经目录树点选 .h5lesson 恢复课例上下文
+  await page.locator('.lesson-directory-tree').getByRole('button', { name: '并联支路证据推理手动课例', exact: true }).click()
+  await page.locator('.lesson-directory-tree').getByRole('button', { name: 'course.h5lesson', exact: true }).click()
+  await expect(page.locator('.lesson-workflow')).toBeVisible()
+  const ref = { kind: 'lesson' as const, lessonId: lesson.identity.lessonId, lessonDirectory: lesson.identity.normalizedDirectory, relativePath: 'teaching-brief.md' }
   const before = await page.evaluate(async ref => ({ disk: await window.desktopAPI!.lessonFiles!.openDocument(ref), recovery: await window.desktopAPI!.lessonFiles!.readRecovery(ref) }), ref)
   writeFileSync(join(output, 'before.json'), JSON.stringify(before, null, 2))
   await page.locator('.lesson-workspace-files').getByRole('button', { name: /并联支路证据推理手动课例$/ }).click()

@@ -1,8 +1,10 @@
 import { z } from 'zod'
-import { workspaceIdentityV1Schema, aiWorkspaceIdentitySchema, lessonAgentWorkspaceSchema } from './workspaceIdentity'
+import { workspaceIdentityV1Schema, aiWorkspaceIdentitySchema, conversationAgentWorkspaceSchema, lessonAgentWorkspaceSchema } from './workspaceIdentity'
 import { generationAfterCommitSchema, generationFailureSchema, generationCommitReceiptSchema, generationRequestSchema } from './generationContract'
 import { generationResultSchema } from './generationResult'
 import { aiUserInputSchema, aiInputDeliverySchema } from './localAgentInteraction'
+import { generationSemanticChangesSchema } from './generationChangeSummary'
+import { generationExecutionEvidenceSchema } from './generationExecutionEvidence'
 
 export const localAgentIdSchema = z.enum(['codex', 'claude', 'opencode'])
 export type LocalAgentId = z.infer<typeof localAgentIdSchema>
@@ -22,6 +24,8 @@ export const localAgentHostResultSchema = z.object({
   beforeRevision: z.number().int().nonnegative().optional(), afterRevision: z.number().int().nonnegative().optional(),
   candidateId: z.uuid().optional(),
   summary: z.string().max(4000),
+  semanticChanges: generationSemanticChangesSchema.optional(),
+  executionEvidence: generationExecutionEvidenceSchema.optional(),
   afterCommit: generationAfterCommitSchema.optional(), failure: generationFailureSchema.optional(),
   receiptDelivery: z.enum(['pending', 'delivered']).optional(),
 }).strict()
@@ -93,13 +97,13 @@ const owner = { projectId: z.string().min(1).max(200), projectPath: z.string().m
 const optionalOwner = { projectId: owner.projectId.optional(), projectPath: owner.projectPath.optional() }
 export const localAgentRequestSchema = z.discriminatedUnion('operation', [
   z.object({ operation: z.literal('lesson-prepare-generation'), workspace: lessonAgentWorkspaceSchema }).strict(),
-  z.object({ operation: z.literal('lesson-start'), workspace: lessonAgentWorkspaceSchema, adapter: localAgentIdSchema, prompt: z.string().min(1).max(100000), userMessage: z.string().min(1).max(20000).optional(), intent: z.enum(['discuss', 'plan']).default('discuss') }).strict(),
-  z.object({ operation: z.literal('lesson-resume'), workspace: lessonAgentWorkspaceSchema, sessionId: z.uuid(), prompt: z.string().min(1).max(100000), userMessage: z.string().min(1).max(20000).optional() }).strict(),
-  z.object({ operation: z.literal('lesson-list'), workspace: lessonAgentWorkspaceSchema }).strict(),
-  z.object({ operation: z.literal('lesson-read'), workspace: lessonAgentWorkspaceSchema, sessionId: z.uuid(), after: z.number().int().nonnegative().default(0) }).strict(),
-  z.object({ operation: z.literal('lesson-cancel'), workspace: lessonAgentWorkspaceSchema, sessionId: z.uuid() }).strict(),
-  z.object({ operation: z.literal('lesson-delete'), workspace: lessonAgentWorkspaceSchema, sessionId: z.uuid().optional() }).strict(),
-  z.object({ operation: z.literal('lesson-input'), workspace: lessonAgentWorkspaceSchema, sessionId: z.uuid(), input: aiUserInputSchema }).strict(),
+  z.object({ operation: z.literal('lesson-start'), workspace: conversationAgentWorkspaceSchema, adapter: localAgentIdSchema, prompt: z.string().min(1).max(100000), userMessage: z.string().min(1).max(20000).optional(), intent: z.enum(['discuss', 'plan']).default('discuss') }).strict(),
+  z.object({ operation: z.literal('lesson-resume'), workspace: conversationAgentWorkspaceSchema, sessionId: z.uuid(), prompt: z.string().min(1).max(100000), userMessage: z.string().min(1).max(20000).optional(), preserveTaskBudget: z.literal(true).optional() }).strict(),
+  z.object({ operation: z.literal('lesson-list'), workspace: conversationAgentWorkspaceSchema }).strict(),
+  z.object({ operation: z.literal('lesson-read'), workspace: conversationAgentWorkspaceSchema, sessionId: z.uuid(), after: z.number().int().nonnegative().default(0) }).strict(),
+  z.object({ operation: z.literal('lesson-cancel'), workspace: conversationAgentWorkspaceSchema, sessionId: z.uuid() }).strict(),
+  z.object({ operation: z.literal('lesson-delete'), workspace: conversationAgentWorkspaceSchema, sessionId: z.uuid().optional() }).strict(),
+  z.object({ operation: z.literal('lesson-input'), workspace: conversationAgentWorkspaceSchema, sessionId: z.uuid(), input: aiUserInputSchema }).strict(),
 
   z.object({ operation: z.literal('probe'), adapter: localAgentIdSchema }).strict(),
   z.object({ operation: z.literal('capabilities'), adapter: localAgentIdSchema, ...optionalOwner, refresh: z.boolean().optional() }).strict(),

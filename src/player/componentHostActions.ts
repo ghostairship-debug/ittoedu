@@ -4,6 +4,7 @@ export interface PlayerComponentActionTarget {
   nextStep?(): boolean
   previousStep?(): boolean
   goToSceneById(sceneId: string, targetStateId?: string): boolean
+  goToLocation?(locationId: string): boolean
   nextScene(): boolean
   previousScene(): boolean
   replayScene(): boolean
@@ -17,6 +18,7 @@ export function createPlayerComponentHostActions(
   return Object.freeze({
     ...(target.nextStep ? { nextStep: () => target.nextStep!() } : {}),
     ...(target.previousStep ? { previousStep: () => target.previousStep!() } : {}),
+    ...(target.goToLocation ? { goToLocation: (locationId: string) => target.goToLocation!(locationId) } : {}),
     goToScene: (sceneId: string, targetStateId?: string) =>
       target.goToSceneById(sceneId, targetStateId),
     nextScene: () => target.nextScene(),

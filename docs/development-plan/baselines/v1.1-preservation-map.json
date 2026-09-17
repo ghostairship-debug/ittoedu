@@ -145,8 +145,8 @@
       "inputClosure": [
         "src/renderer/course/v9SlideContentCommands.ts",
         "src/shared/formulaRenderer.ts",
-        "src/player/surfaces/slide/publishedNativeRendering.ts",
-        "src/player/surfaces/slide/publishedNativeVideoMount.ts",
+        "src/player/surfaces/native/publishedNativeRendering.ts",
+        "src/player/surfaces/publishedNativeVideoMount.ts",
         "tests/unit/v9SlideContentCommands.test.ts",
         "tests/unit/formulaNode.test.ts",
         "tests/unit/coursePptxExport.test.ts",

@@ -1186,7 +1186,7 @@ describe('ClaudeProcessTransportAdapter', () => {
     }
   })
 
-  it('queues mid-turn edits while rejecting identity mismatch and unmatched questions (D-03, D-05, D-06)', async () => {
+  it('interrupts for mid-turn corrections, queues supplements and rejects identity mismatch and unmatched questions (D-03, D-05, D-06)', async () => {
     const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'claude-input-checks-'))
     const fixture = path.join(directory, 'input-server.cjs')
 
@@ -1280,7 +1280,7 @@ describe('ClaudeProcessTransportAdapter', () => {
       expect(wrongEpochDelivery.status).toBe('rejected')
       expect(wrongEpochDelivery.reason).toContain('任务或 Epoch 不匹配')
 
-      // 4. D-03: Mid-turn correction is queued for the harness turn boundary.
+      // 4. D-03: Mid-turn correction interrupts and continues in the same native session.
       const correctDelivery = await adapter.input({
         version: 1,
         taskId,
@@ -1292,7 +1292,7 @@ describe('ClaudeProcessTransportAdapter', () => {
         text: 'Change direction',
       })
       expect(correctDelivery.status).toBe('queued')
-      expect(correctDelivery.reason).toContain('下一回合消息')
+      expect(correctDelivery.reason).toContain('同一原生会话立即处理新的引导')
 
       // 5. D-03: Mid-turn supplement follows the same queued contract.
       const supplementDelivery = await adapter.input({

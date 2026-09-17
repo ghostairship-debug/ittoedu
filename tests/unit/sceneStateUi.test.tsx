@@ -80,7 +80,6 @@ function videoLayerItem(id: string, name: string): NativeLayerItem {
 
 beforeEach(() => {
   useEditorStore.getState().createNewProject()
-  useEditorStore.setState({ editorMode: 'professional' })
 })
 
 afterEach(() => {

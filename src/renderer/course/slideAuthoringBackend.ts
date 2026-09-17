@@ -1486,6 +1486,11 @@ function mutateDuplicateSlideScene(
       })
     }
     insertAfterLastSlideLocation(draft, surfaceId, duplicateLocations)
+    duplicate.interactions.forEach((rule) => rule.actions.forEach(({ action }) => {
+      if (action.type === 'location.go') {
+        action.locationId = locationIdMap.get(action.locationId) ?? action.locationId
+      }
+    }))
     appendDuplicatedVisibility(draft, locationIdMap)
     appendDuplicatedSceneConditions(draft, sourceSceneId, duplicateId)
     reorderSlideLocationsForSurface(draft, surfaceId)

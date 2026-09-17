@@ -7,7 +7,7 @@ import { lessonBuildFailureSchema, lessonAuthoringDesktopRequestSchema, validate
 import { lessonAuthoringTicketSchema, lessonDocumentVersionSchema, type LessonAuthoringTicket } from '../shared/lessonAuthoring'
 import { lessonIdentityKey, type LessonIdentity } from '../shared/lessonWorkspace'
 import type { LocalAgentRequest, LocalAgentResponse, LocalAgentId } from '../shared/localAgentContract'
-import type { DocumentFileVersion } from '../shared/document/ports'
+import type { DocumentDiagnostic, DocumentFileVersion } from '../shared/document/ports'
 import { LessonAuthoring } from './lessonAuthoring'
 import { LessonWorkspaceService } from './lessonWorkspace'
 import { LessonMaterials } from './lessonMaterials'
@@ -16,6 +16,8 @@ import { operateLocalAgent } from './localAgent/service'
 import { assertProjectFileCurrent } from './projectFileObservation'
 import { lessonBuildTargetSchema, type LessonBuildTarget } from '../shared/lessonAuthoringDesktop'
 import { DesktopOperationError } from './errors'
+import { validateLessonMarkdownSource } from './lessonMarkdownValidation'
+import { buildLessonAuthoringPrompt } from './lessonAuthoringPrompt'
 class LessonBuildRepairError extends DesktopOperationError {
   constructor(message: string) { super('LESSON_BUILD_REPAIR', '无法继续构建修复', message, '请保留当前成果并按提示继续。') }
 }
@@ -60,17 +62,9 @@ export class LessonAuthoringDesktopService {
     finally { await fs.rm(temporary, { force: true }) }
   }
   private scope(lesson: LessonIdentity, conversationId: string) { return { version: 1 as const, kind: 'lesson' as const, lessonId: lesson.lessonId, normalizedDirectory: lesson.normalizedDirectory, conversationId } }
-  private async prompt(lesson: LessonIdentity, run: Run): Promise<string> {
-    const stage = run.ticket.stage
-    const reference = stage === 'teaching-plan' ? '.agents/skills/orchestrate-courseware/references/teaching-design-quality.md'
-      : stage === 'presentation-script' || stage === 'presentation-brief' ? '.agents/skills/orchestrate-courseware/references/interaction-design.md'
-      : stage === 'build' ? '.agents/skills/build-courseware-project/references/build-method.md' : '.agents/skills/orchestrate-courseware/references/main-progression.md'
-    const method = await fs.readFile(path.join(this.deps.editorRoot, reference), 'utf8')
-    const format = stage === 'build' ? '' : await fs.readFile(path.join(this.deps.editorRoot, 'docs/reference/lesson-markdown-validation.md'), 'utf8')
-    const output = stage === 'build'
-      ? '输出受信课例构建 ES module，export const apiVersion = 2，default export async function(context)，从context解构api、documents、readAsset、encodeBase64。模块在当前浏览器窗口执行，无Buffer、fs、process或require；编码字节使用context.encodeBase64(value)，字符串按UTF-8编码。复用现有Builder V2单context参数合同。仅通过api.createCourseProject、observe/createScope/execute/finish使用现有Builder；禁止导入编辑器内部路径、直接操作DOM/Store、调用外部构建命令或另起浏览器。模块不允许import语句；必要资源通过context.readAsset读取。只创建一个工程。'
-      : `输出完整${roleLabels[stage]} Markdown教师正文，不在正文写任务状态、候选/尚未提交说明、内部ID、hash或本轮暂存路径；材料依据使用可读标题与页/片段定位，状态由工作台显示。正文唯一一级标题必须是本阶段教学文稿标题；不要复制下方格式校验参考的标题、使用说明、命令或方法文档标题进入教师稿。只完成本阶段，不越过教师确认或写后续稿。教学必须解释知识获得路径，不可只有题目与答案；呈现稿按片段写教学作用、演示页/流式讲义/无限画布选择及细布局、讲解、操作。`
-    return `教师创作目标：${run.instruction}\n当前任务：${roleLabels[stage]}，模式：${run.ticket.mode === 'automatic' ? '自动，无需逐稿人工确认' : '手动，完成当前稿后停下等待教师确认'}。\n${output}\n读取当前课例真实文件及所选材料：${JSON.stringify(run.ticket.materials)}。本轮只把候选写入这个绝对路径：${run.candidatePath}。不覆盖任何正式教学文档、课件或authoring-state；由宿主重校验当前输入后正式保存。缺少关键事实时使用原生结构化提问；不能猜测教师已确认。不要执行生成工程文件的npm脚本。\n正文格式：${format}\n${stage === 'build' ? '' : `候选写好后必须从产品目录 ${this.deps.editorRoot} 运行 npx --no-install tsx scripts/validate-lesson-markdown.ts "${run.candidatePath}" --baseDir "${lesson.normalizedDirectory}"。只有退出0才结束；失败按诊断在本任务修正当前候选并重新验证，不改写已保存前阶段。`}\n方法（仅采用教学与正式Facade用法；其中外部命令/另起构建宿主的步骤不适用于本次软件内任务）：\n${method}\n本轮最终执行约束：只写上述候选文件。非构建阶段的候选只包含教学正文，首行只能是当前教学文稿标题，严禁把“课例 Markdown 候选校验”或任何工具/参考标题写进正文；校验命令与结果留在对话。构建阶段由当前窗口已有Builder执行模块，禁止运行npm构建脚本、另起浏览器或直接写h5lesson。`
+  private async prompt(lesson: LessonIdentity, run: Run, sessionDiagnostics?: readonly DocumentDiagnostic[]): Promise<string> {
+    return buildLessonAuthoringPrompt({ editorRoot: this.deps.editorRoot, stage: run.ticket.stage, roleLabel: roleLabels[run.ticket.stage], mode: run.ticket.mode,
+      instruction: run.instruction, candidatePath: run.candidatePath, lessonDirectory: lesson.normalizedDirectory, materials: run.ticket.materials, sessionDiagnostics })
   }
   private async begin(lesson: LessonIdentity, conversationId: string, adapter: LocalAgentId, instruction: string): Promise<Run> {
     const view = await this.deps.authoring.read(lesson), stage = view.currentStage
@@ -81,7 +75,7 @@ export class LessonAuthoringDesktopService {
     let expectedVersion: DocumentFileVersion | null = null
     if (stage !== 'build') {
       await this.deps.authoring.assertOutputWritable(lesson, relativePath)
-      try { expectedVersion = (await this.deps.files.openDocument({ lessonId: lesson.lessonId, lessonDirectory: lesson.normalizedDirectory, relativePath })).version }
+      try { expectedVersion = (await this.deps.files.openDocument({ kind: 'lesson' as const, lessonId: lesson.lessonId, lessonDirectory: lesson.normalizedDirectory, relativePath })).version }
       catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error }
     }
     const root = path.join(this.deps.userData, 'lesson-authoring-candidates', 'v1', ticket.id)
@@ -99,7 +93,7 @@ export class LessonAuthoringDesktopService {
     validateLessonBuilderModule(moduleSource)
     const read = async (role: 'teaching-plan' | 'presentation-script') => {
       const baseline = run.ticket.inputs.find(input => input.role === role)!
-      const disk = await this.deps.files.openDocument({ lessonId: lesson.lessonId, lessonDirectory: lesson.normalizedDirectory, relativePath: baseline.relativePath })
+      const disk = await this.deps.files.openDocument({ kind: 'lesson' as const, lessonId: lesson.lessonId, lessonDirectory: lesson.normalizedDirectory, relativePath: baseline.relativePath })
       return { path: path.join(lesson.normalizedDirectory, baseline.relativePath), content: disk.source }
     }
     return { ticket: run.ticket, modulePath: run.candidatePath, moduleSource, ...(run.buildRepair ? { expectedInitialTarget: run.buildRepair.observedTarget } : {}), documents: { teachingPlan: await read('teaching-plan'), presentationScript: await read('presentation-script') } }
@@ -112,6 +106,23 @@ export class LessonAuthoringDesktopService {
     const file = await fs.open(target, 'r')
     try { if ((await file.stat()).size > 1024 * 1024) throw new Error('阶段候选超过1 MiB'); const source = await file.readFile('utf8'); if (!source.trim()) throw new Error('阶段候选为空'); return source }
     finally { await file.close() }
+  }
+  private async resumeInvalidStageCandidate(lesson: LessonIdentity, conversationId: string, run: Run, diagnostics: readonly DocumentDiagnostic[]) {
+    const reply = await this.deps.agent({ operation: 'lesson-resume', workspace: this.scope(lesson, conversationId), sessionId: run.sessionId,
+      prompt: await this.prompt(lesson, run, diagnostics), userMessage: '请根据当前校验诊断修正候选，修好后重新提交当前阶段', preserveTaskBudget: true })
+    if (!reply.sessionId) throw new Error('原生阶段修正任务未启动')
+    run.sessionId = reply.sessionId
+    run.message = '当前候选未写入正式文档，已回原生会话修正格式或附件'
+    await this.save(lesson, conversationId, run)
+  }
+  private async assertStageOutputCurrent(lesson: LessonIdentity, run: Run) {
+    const ref = { kind: 'lesson' as const, lessonId: lesson.lessonId, lessonDirectory: lesson.normalizedDirectory, relativePath: run.relativePath }
+    let current: { version: DocumentFileVersion } | undefined
+    try { current = await this.deps.files.openDocument(ref) }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+    }
+    if (JSON.stringify(current?.version ?? null) !== JSON.stringify(run.expectedVersion)) throw new Error('教师已修改当前稿，候选未覆盖；请处理文档冲突')
   }
   operate(raw: LessonAuthoringDesktopRequest): Promise<LessonAuthoringDesktopResult> {
     const input = lessonAuthoringDesktopRequestSchema.parse(raw), key = this.key(input.lesson, input.conversationId)
@@ -166,7 +177,7 @@ export class LessonAuthoringDesktopService {
     if (input.operation === 'stop') {
       await this.deps.authoring.stop(lesson)
       const current = await this.deps.workspace.read(lesson)
-      await Promise.all(Object.values(current.manifest.documents).map(relativePath => this.deps.files.invalidateAiEdits({ lessonId: lesson.lessonId, lessonDirectory: lesson.normalizedDirectory, relativePath })))
+      await Promise.all(Object.values(current.manifest.documents).map(relativePath => this.deps.files.invalidateAiEdits({ kind: 'lesson' as const, lessonId: lesson.lessonId, lessonDirectory: lesson.normalizedDirectory, relativePath })))
       if (run?.status === 'running') await this.deps.agent({ operation: 'lesson-cancel', workspace: this.scope(lesson, conversationId), sessionId: run.sessionId })
       if (run) { run.status = 'stopped'; run.message = '已停止，已保存文档保留'; await this.save(lesson, conversationId, run) }
     }
@@ -183,13 +194,29 @@ export class LessonAuthoringDesktopService {
             assembly = await this.assembly(lesson, run); run.status = 'ready-to-build'; run.message = run.buildRepair ? '模块修复完成，请继续当前构建' : '构建模块已准备，正在应用到当前工程'
             if (run.buildRepair) assembly = undefined
           } else {
-            const source = await this.readCandidate(run), ref = { lessonId: lesson.lessonId, lessonDirectory: lesson.normalizedDirectory, relativePath: run.relativePath }
+            const source = await this.readCandidate(run)
             await this.deps.authoring.assertOutputWritable(lesson, run.relativePath)
-            const saved = await this.deps.files.saveDocumentIfNoRecovery({ ref, operationId: run.ticket.id, source, expectedVersion: run.expectedVersion, attachments: [] })
-            if (saved.status !== 'saved') throw new Error(saved.status === 'conflict' ? '教师已修改当前稿，候选未覆盖；请处理文档冲突' : saved.message)
-            await this.deps.workspace.registerDocument(lesson, run.ticket.stage, run.relativePath)
-            await this.deps.authoring.completeTask(lesson, run.ticket, saved.version)
-            run.status = 'waiting-confirmation'; run.message = `${roleLabels[run.ticket.stage]}已实际保存，请查看当前文件`
+            await this.assertStageOutputCurrent(lesson, run)
+            const validation = validateLessonMarkdownSource(source, path.join(lesson.normalizedDirectory, run.relativePath), lesson.normalizedDirectory)
+            if (validation.status === 'invalid') {
+              await this.resumeInvalidStageCandidate(lesson, conversationId, run, validation.diagnostics)
+            } else if (validation.status === 'unreadable') {
+              throw new Error(validation.diagnostics[0]?.message ?? '阶段候选或资源目录不可读取')
+            } else {
+              const ref = { kind: 'lesson' as const, lessonId: lesson.lessonId, lessonDirectory: lesson.normalizedDirectory, relativePath: run.relativePath }
+              const stageRun = run
+              const validateBeforeWrite = async () => {
+                const current = await this.deps.authoring.validateTask(lesson, stageRun.ticket)
+                if (!current.allowed) throw new Error(current.issues.join('；'))
+                const latest = validateLessonMarkdownSource(source, path.join(lesson.normalizedDirectory, stageRun.relativePath), lesson.normalizedDirectory)
+                if (latest.status !== 'valid') throw new Error(latest.diagnostics[0]?.message ?? '阶段候选在写入前已失效')
+              }
+              const saved = await this.deps.files.saveDocumentIfNoRecovery({ ref, operationId: run.ticket.id, source, expectedVersion: run.expectedVersion, attachments: [] }, validateBeforeWrite)
+              if (saved.status !== 'saved') throw new Error(saved.status === 'conflict' ? '教师已修改当前稿，候选未覆盖；请处理文档冲突' : saved.message)
+              await this.deps.workspace.registerDocument(lesson, run.ticket.stage, run.relativePath)
+              await this.deps.authoring.completeTask(lesson, run.ticket, saved.version)
+              run.status = 'waiting-confirmation'; run.message = `${roleLabels[run.ticket.stage]}已实际保存，请查看当前文件`
+            }
           }
           await this.save(lesson, conversationId, run)
           if (run.status === 'waiting-confirmation' && run.ticket.mode === 'automatic') run = await this.begin(lesson, conversationId, run.adapter, run.instruction)
@@ -209,7 +236,7 @@ export class LessonAuthoringDesktopService {
       await this.deps.authoring.stop(lesson)
       const current = await this.deps.workspace.read(lesson)
       const relativePath = current.manifest.documents[run.repairTicket.stage as keyof typeof defaultPaths]
-      if (relativePath) await this.deps.files.invalidateAiEdits({ lessonId: lesson.lessonId, lessonDirectory: lesson.normalizedDirectory, relativePath })
+      if (relativePath) await this.deps.files.invalidateAiEdits({ kind: 'lesson' as const, lessonId: lesson.lessonId, lessonDirectory: lesson.normalizedDirectory, relativePath })
       delete run.repairTicket; run.message = '本次文档修复已结束，已保存内容和原构建模块保留'
       await this.save(lesson, conversationId, run)
     }

@@ -81,7 +81,6 @@ function embedded(version: string): ComponentPackageData {
 beforeEach(() => {
   HTMLCanvasElement.prototype.getContext = (() => null) as typeof originalCanvasGetContext
   useEditorStore.getState().createNewProject()
-  useEditorStore.setState({ editorMode: 'professional' })
 })
 
 afterEach(() => {

@@ -2,6 +2,8 @@ import { withDefaultComponentController } from '@/renderer/components/teacherCon
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createBlankFlowCourseProject } from '@/renderer/project/createFlowCourseProject'
 import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
+import { createTextNode } from '@/renderer/project/nativeNodeFactories'
+import { sceneNodeToCourseLayerItem } from '@/shared/courseProjectModel'
 import { createSortComponentPackage } from '@/renderer/recipes/sort-component/package'
 import { buildFlowEditorView } from '@/renderer/course/flowEditorView'
 import { createCourseAuthoringSession, updateCourseAuthoringSessionRevision } from '@/renderer/authoring/courseAuthoringSession'
@@ -88,6 +90,28 @@ describe('chat observation refresh', () => {
     }
     const allowed = new Set(first.destinations.map(stable))
     expect(next.destinations.every(destination => allowed.has(stable(destination)) || destination.kind === 'update' && destination.target.itemId === 'new-heading')).toBe(true)
+    bridge.dispose()
+  })
+
+  it('uses the budgeted course projection on a real captureNext handoff', async () => {
+    const { bridge, input } = fixture(), first = await bridge.capture({ ...input, scope: 'course' })
+    const document = h.state.document, added = createBlankCourseProject({ includeDefaultController: false, controls: 'none' })
+    document.surfaces.push(...added.surfaces)
+    document.locations.push(...added.locations)
+    const slide = added.surfaces.find((surface: any) => surface.type === 'slide') as any
+    slide.scenes[0].layerItems.push(...Array.from({ length: 10 }, (_, index) => sceneNodeToCourseLayerItem(
+      createTextNode({ id: `budget-text-${index}`, text: '反馈观察中的完整正文'.repeat(500) }), index,
+    )))
+    document.revision = 1
+    const receipt = generationCommitReceiptSchema.parse({ version: 1, requestId: first.requestId, candidateId: crypto.randomUUID(), workspace: input.workspace,
+      status: 'committed', beforeRevision: 0, afterRevision: 1, affected: [], resources: { assetIds: [], packageIds: [] } })
+    h.bindings.get(first.requestId)!.committed(receipt)
+    const next = await bridge.captureNext(first, receipt)
+    expect((next.context as any).reference).toBe('course')
+    expect((next.context as any).pageProjection?.mode).toBe('non-current-summary')
+    expect((next.context as any).pages.some((page: any) => page.items)).toBe(true)
+    expect((next.context as any).pages.some((page: any) => page.details?.source === 'resources/project/targets.json')).toBe(true)
+    expect(next.resourceFiles?.some(file => file.path === 'project/targets.json')).toBe(true)
     bridge.dispose()
   })
 

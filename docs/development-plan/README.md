@@ -4,6 +4,8 @@
 
 ## 权威文件
 
+当前接手顺序：**总纲第 5.1 节 → 前端专项方案 → V3.1 设计说明 → 本包涉及的合同与源码**。共享接口先串行固定，再有限并行独立叶子；不需要大集群。旧 U01–U10 已实施，上轮有限收尾已停止，不能从旧文档的将来时重新启动。
+
 | 文件 | 唯一职责 |
 |---|---|
 | [开发总纲](../../COURSEWARE_DEVELOPMENT_PLAN.md) | 当前产品决定、边界、优先路线和成功标准 |
@@ -12,6 +14,19 @@
 | [任务板](TASK_BOARD.md) | 当前 queued / active / blocked 任务摘要；由脚本生成，不可手改 |
 | [任务卡模板](TASK_CARD_TEMPLATE.md) | 仅多执行者、重叠写入、跨会话、交接或阻断时使用的 6 字段模板 |
 | [版本路线](roadmap/README.md) | 1.2→2.0 的当前任务 DAG、启动条件、发布门和未来规格；不保存执行状态 |
+| [1.9 前端专项](R19_FRONTEND_SPECIAL_IMPLEMENTATION_PLAN.md) | 当前教师可用性改造的 F00–F08 分包、写域、执行顺序、交接与验收 |
+| [V3.1 设计说明](../../双形态UI设计/00-设计说明.md) | 已确认产品层级、布局和视觉；静态原型不是能力证据 |
+
+## 1.9 文档分工
+
+| 文档组 | 应如何使用 |
+|---|---|
+| [共用编辑方案](R19_SHARED_DOCUMENT_EDITOR_IMPLEMENTATION_PLAN.md)及正文／文件合同 | 已有能力的实现依据、技术边界与分项证据；旧固定布局和强制课例入口由前端专项替代 |
+| [U01–U10 任务包](R19_PRODUCT_USABILITY_EXECUTION_TASKS.md)、[原可用性方案](R19_PRODUCT_USABILITY_IMPROVEMENT_PLAN.md) | 已实施批次的设计参考，不能当作当前待执行列表 |
+| [U01–U10 记录](reviews/2026-09-17-r19-usability-execution.md)、[有限收尾记录](reviews/2026-09-17-r19-limited-closeout.md) | 复用已有工程证据；不证明前端专项或整个 1.9 已完成 |
+| [1.9 路线与验收规格](roadmap/1.9/README.md) | 前端完成后核对 050/060 剩余必选验收，保留 051 并列能力 |
+| [长期产品研究](../../果铃_AI原生文件与内容工作台_产品方案_V2.0.md) | 后续候选与讨论材料；Office、HTML、插件不能据此进入当前范围 |
+| [历史总纲快照](../archive/2026-09-planning/2026-09-17-development-route-history.md) | 仅追溯多轮讨论，不读作当前任务 |
 
 ## 辅助材料
 

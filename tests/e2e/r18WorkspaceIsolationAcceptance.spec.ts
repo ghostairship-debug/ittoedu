@@ -20,6 +20,21 @@ import { workspaceIdentityKey } from '../../src/shared/workspaceIdentity'
 import { expectBackgroundWindowsIsolated } from './expectBackgroundWindowsIsolated'
 
 const root = resolve(__dirname, '../..')
+
+async function enterStandaloneEditorFromLanding(page: Page): Promise<void> {
+  const landing = page.locator('.lesson-workspace-landing')
+  const editor = page.getByTestId('canvas-stage')
+  await Promise.race([
+    landing.waitFor({ state: 'visible', timeout: 15_000 }),
+    editor.waitFor({ state: 'visible', timeout: 15_000 }),
+  ])
+  if (!await landing.isVisible()) return
+  const more = page.locator('.lesson-workspace-more > summary')
+  if (!await more.isVisible()) return
+  await more.click()
+  const create = page.getByRole('button', { name: '新建独立课件', exact: true })
+  if (await create.isVisible()) await create.click()
+}
 type Owner = { projectId: string; projectPath: string }
 
 /** Seed formal local repositories only; this is not evidence of a native model run. */
@@ -50,7 +65,7 @@ async function seedWorkspace(profile: string, projectPath: string, label: 'A' | 
   })
   const id = randomUUID(), taskId = randomUUID(), observationId = randomUUID(), runId = randomUUID(), time = Date.now()
   const identity = { version: 2 as const, sessionId: id, taskId, epoch: 0, workspace, runId, nativeTurnId: `seeded-turn-${label}` }
-  const record = localAgentRecordV2Schema.parse({ version: 2, id, adapter: 'codex', workspace,
+  const record = localAgentRecordV2Schema.parse({ version: 3, id, adapter: 'codex', workspace,
     externalSessionId: `seeded-native-session-${label}`, workingDirectoryId: id,
     tasks: [{ version: 1, taskId, epoch: 0, workspace, sessionId: id, adapter: 'codex', goal: request.instruction,
       intent: 'edit', applyPolicy: 'preview', readScope: { kind: 'course' }, writeDestinations: [destination],
@@ -84,6 +99,7 @@ async function launch(profile: string) {
   try {
     expect(resolve(await app.evaluate(({ app }) => app.getPath('userData')))).toBe(resolve(profile))
     const page = await app.firstWindow()
+    await enterStandaloneEditorFromLanding(page)
     const pageErrors: string[] = []
     page.on('pageerror', error => pageErrors.push(error.message))
     await page.locator('[data-testid="canvas-stage"] canvas').first().waitFor()
@@ -130,7 +146,11 @@ async function inspectWorkspace(page: Page, owner: Owner, expected: Seed | null,
   if (expected) {
     await chat.getByLabel('会话', { exact: true }).selectOption(expected.id)
     await expect(chat.getByText(expected.marker, { exact: true })).toBeVisible()
-    await chat.getByText('引用教学材料（0）', { exact: true }).click()
+    const settings = chat.locator('.chat-task-settings')
+    if (await settings.getAttribute('open') === null) await settings.locator(':scope > summary').click()
+    if (!await chat.getByLabel(expected.material.title, { exact: true }).isVisible()) {
+      await chat.getByText('引用教学材料（0）', { exact: true }).click()
+    }
     await expect(chat.getByLabel(expected.material.title, { exact: true })).toBeVisible()
   }
   await expect(chat.getByLabel(other.material.title, { exact: true })).toHaveCount(0)

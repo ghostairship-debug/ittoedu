@@ -141,7 +141,8 @@ describe('Mixed cross-surface history continuity', () => {
     useEditorStore.getState().undo()
     expect(activeDocument()).toEqual(document)
     const generation = useEditorStore.getState().courseAuthoringSession!.token.generation
-    const fresh = { ...request, requestId: crypto.randomUUID(), sessionGeneration: generation, destinations: request.destinations.map(destination => destination.kind === 'create'
+    const fresh = { ...request, requestId: crypto.randomUUID(), sessionGeneration: generation,
+      taskFacts: { ...request.taskFacts!, sessionGeneration: generation }, destinations: request.destinations.map(destination => destination.kind === 'create'
       ? { ...destination, scope: { ...destination.scope, sessionGeneration: generation } } : { ...destination, target: { ...destination.target, sessionGeneration: generation } }) }
     const freshCandidate = { ...candidate, requestId: fresh.requestId, steps: candidate.steps.map(step => ({ ...step, destination: step.destination.kind === 'create'
       ? { ...step.destination, scope: { ...step.destination.scope, sessionGeneration: generation } } : step.destination })) }

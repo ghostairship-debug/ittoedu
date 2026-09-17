@@ -23,6 +23,7 @@ export interface LessonWorkspaceShellProps {
   onOpenProject(path: string): Promise<boolean>
   onNewProject(): Promise<boolean>
   renderChat(lesson: LessonWorkspace, conversation: LessonConversation, documentTarget?: DocumentChatTarget): ReactNode
+  renderDirectoryChat?(root: string, conversation: LessonConversation): ReactNode
   renderMaterial?(path: string, lesson: LessonWorkspace | null): ReactNode
   renderMaterials?(lesson: LessonWorkspace): ReactNode
   renderWorkflow?(lesson: LessonWorkspace, conversation: LessonConversation): ReactNode
@@ -69,5 +70,5 @@ export const LessonWorkspaceShell = forwardRef<LessonWorkspaceShellHandle, Lesso
     showProject: workspace.actions.showProject,
   }), [tabs, workspace.actions, workspace.state.lesson])
   return <LessonWorkspaceView state={workspace.state} actions={workspace.actions} operation={props.lessonOperation} documentPort={props.documentPort} tabs={tabs} projectPath={props.projectPath}
-    renderChat={props.renderChat} renderMaterial={props.renderMaterial} renderMaterials={props.renderMaterials} renderWorkflow={props.renderWorkflow}>{props.children}</LessonWorkspaceView>
+    renderChat={props.renderChat} renderDirectoryChat={props.renderDirectoryChat} renderMaterial={props.renderMaterial} renderMaterials={props.renderMaterials} renderWorkflow={props.renderWorkflow}>{props.children}</LessonWorkspaceView>
 })

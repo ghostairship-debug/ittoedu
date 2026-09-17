@@ -9,6 +9,22 @@ import { planAssetFileHistoryChange, type HistoryResourceState } from '../../sto
 import { collectPublishedCourseSourceIssues } from '../../export/course/buildPublishedCourse'
 import { admitDynamicCandidate } from './dynamicCandidateAdmission'
 import type { DynamicBehaviorObservation } from '../../../shared/dynamicBehaviorObservation'
+import { collectCourseProjectInteractionHealth } from '../../../shared/courseProjectHealth/interaction'
+
+// Existing unrelated errors remain diagnostics, not a new edit-wide gate.
+// Stable owner/rule/action ids prevent list reordering from creating new errors.
+function interactionErrorKey(project: CourseProjectDocument, finding: ReturnType<typeof collectCourseProjectInteractionHealth>[number]): string {
+  let value: unknown = project
+  const path = finding.path.map(segment => {
+    const child = value != null && typeof value === 'object' ? (value as Record<string | number, unknown>)[segment] : undefined
+    const identity = typeof segment === 'number' && child && typeof child === 'object'
+      ? (child as { id?: string; layerItemId?: string }).id ?? (child as { layerItemId?: string }).layerItemId
+      : undefined
+    value = child
+    return identity === undefined ? segment : { id: identity }
+  })
+  return JSON.stringify([finding.code, path, finding.message])
+}
 
 const artifact = z.object({
   document: courseProjectDocumentSchema,
@@ -35,6 +51,17 @@ export const projectDocumentTool: AuthoringToolDefinition<{ artifact: z.infer<ty
     const nextResources: HistoryResourceState = { assetFiles, componentPackages }
     validateCourseProjectArchiveData({ project: next, assetFiles,
       componentFiles: Object.fromEntries(Object.entries(componentPackages).map(([id, data]) => [id, data.files])) })
+    const previousInteractionErrors = new Set(collectCourseProjectInteractionHealth(document, {
+      assetFiles: resources.assetFiles,
+      componentFiles: Object.fromEntries(Object.entries(resources.componentPackages).map(([id, data]) => [id, data.files])),
+    }).filter(finding => finding.severity === 'error').map(finding => interactionErrorKey(document, finding)))
+    const interactionErrors = collectCourseProjectInteractionHealth(next, {
+      assetFiles,
+      componentFiles: Object.fromEntries(Object.entries(componentPackages).map(([id, data]) => [id, data.files])),
+    }).filter(finding => finding.severity === 'error' && !previousInteractionErrors.has(interactionErrorKey(next, finding)))
+    if (interactionErrors.length) throw new AuthoringToolFailure(interactionErrors.map(finding => ({
+      code: finding.code, path: ['input', 'artifact', 'document', ...finding.path.map(String)], message: finding.message,
+    })))
     const issues = collectPublishedCourseSourceIssues({ project: next, assetFiles, components: componentPackages })
     if (issues.length) throw new AuthoringToolFailure(issues.map(issue => ({ ...issue, path: issue.path.map(String) })))
     const assetFileChanges = [...new Set([...Object.keys(resources.assetFiles), ...Object.keys(assetFiles)])]

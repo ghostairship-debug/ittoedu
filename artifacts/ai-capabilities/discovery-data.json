@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "semanticVersion": "b7427442ec2d615488ba28eb6ee50c8913df2e31a38cd468841426953fef2773",
+  "semanticVersion": "9291b842a095ef4d9be3c68733ca8d0731c9a8f3da97fa7de2e5e82479f21c06",
   "entries": [
     {
       "id": "asset.font.import",
@@ -305,7 +305,7 @@
           ]
         }
       ],
-      "summary": "插入已有、目录或候选组件。Flow正文使用create parent:flow-body，并且必须提供当前工程真实图片assetId作为staticFallbackAssetId；该字段在Slide等其他载体可省略，不能将输入Schema的optional理解为Flow可省略。优先复用已有组件包与可用后备素材，正文组件自然占位并随内容宽度排版。",
+      "summary": "插入已有、目录或候选组件。目标使用 create；父级条件按目标计算：只有 Flow 正文 parent:flow-body 必须提供当前工程或前序导入的真实图片 staticFallbackAssetId，Slide、Flow 浮层和 Spatial world 不受该 Flow-only 条件约束。Spatial world 可使用 operation:candidate 提交 Component API 4 文件候选；candidate 输入仍须满足本卡完整 Schema。优先复用已有组件包与可用后备素材，正文组件自然占位并随内容宽度排版。",
       "dependencies": []
     },
     {
@@ -604,9 +604,35 @@
             "slide:surface",
             "spatial-2d:surface"
           ]
+        },
+        {
+          "operation": "align",
+          "scopes": [
+            "slide:scene",
+            "slide:global",
+            "flow:surface",
+            "flow:global",
+            "spatial-2d:world",
+            "spatial-2d:global",
+            "slide:surface",
+            "spatial-2d:surface"
+          ]
+        },
+        {
+          "operation": "distribute",
+          "scopes": [
+            "slide:scene",
+            "slide:global",
+            "flow:surface",
+            "flow:global",
+            "spatial-2d:world",
+            "spatial-2d:global",
+            "slide:surface",
+            "spatial-2d:surface"
+          ]
         }
       ],
-      "summary": "精确LayerItem update target的两个窄操作。reorder.position指定front/back或同owner同plane的before/after siblingId；不跨Flow正文、global平面或owner。duplicate只复制该实例一次，placement.side/gap相对当前有效frame放置（右侧间距24用right/24）；原实例及共享资源保留。Slide scene命名态只改变当前状态的呈现。Flow正文不是图层，不接受此工具。selectionActions仅提供焦点操作提示；其他对象使用当前request的精确目标，新建对象使用native.content insert或其他正式创建工具。",
+      "summary": "精确 LayerItem 操作。reorder.position 指定 front/back 或同 owner/plane 的 before/after siblingId；duplicate 的 placement.side/gap 相对当前有效 frame 放置。Slide 多对象布局使用 align 或 distribute：targets 原样复制同一次冻结观察中的正式 update target（对齐至少2个，分布至少3个），destination.target 也必须是其中一个；align.mode 支持 left/center/right/top/middle/bottom，可选 primaryTarget 必须精确属于 targets 并作为视觉包围盒锚点，例如 {operation:\"align\",targets:[targetA,targetB],mode:\"top\",primaryTarget:targetA}；distribute.axis 支持 horizontal/vertical，例如 {operation:\"distribute\",targets:[targetA,targetB,targetC],axis:\"horizontal\"}。全部目标必须同工程版本、Slide location/state、owner 与 plane；旋转按视觉包围盒计算，锁定对象不移动，命名态只写当前状态，一次候选只形成一个正式事务。Flow 正文不是绝对布局图层。selectionActions 仅提供焦点提示，不替代 targets。",
       "dependencies": []
     },
     {
@@ -778,7 +804,7 @@
           ]
         }
       ],
-      "summary": "Native对象：insert+template使用create parent:owner，提供初始内容/可选style，宿主补默认值；placement.center按当前锚点几何居中。其余操作使用update。edit-text/image/formula/shape只提供变化字段，保留身份、有效状态及未指定字段；旧edit兼容。content需完整同类型内容。Flow文字/正文用flow.content，本工具只创建浮层；paperSpace=paper随稿纸滚动，viewport固定视口，省略保留，非Flow拒绝。图片用media.apply，组件用component.configure，载体替换用selection.replace。",
+      "summary": "Native：insert创建，其余update；edit-text优先replacements，重复原文加context，整段text歧义拒绝；保留未指定字段。line缺省水平；端点定向，竖线:[0.5,0]→[0.5,1]。Flow正文及图片/组件替换用专用工具。",
       "dependencies": []
     },
     {
@@ -995,7 +1021,7 @@
         "runtime"
       ],
       "summary": "构建方法与完整质量标准",
-      "keywords": "# 构建方法与完整质量标准 ## 1. 冷启动 ## 2. 发现能力 ## 3. 载体所有权 ## 4. 资产与任务图（动手前） ## 5. 用产品 API 写工程 ## 6. 先做最高风险纵切 ## 7. 增量构建与 Worker ## 8. 保持可编辑 ## 9. 验证与交付 ## 停止条件 ### 软件内与外部 Builder V2 共用字节编码"
+      "keywords": "# 构建方法与完整质量标准 ## 软件内 Builder V2 适用范围 ## 1. 冷启动 ## 2. 发现能力 ## 3. 载体所有权 ## 4. 资产与任务图（动手前） ## 5. 用产品 API 写工程 ## 6. 先做最高风险纵切 ## 7. 增量构建与 Worker ## 8. 保持可编辑 ## 9. 验证与交付 ## 停止条件 ### 软件内与外部 Builder V2 共用字节编码"
     },
     {
       "id": "reference:build-courseware-project/current-capabilities",
@@ -1672,7 +1698,7 @@
           ]
         }
       ],
-      "summary": "仅 Slide scene owner。常用“点击/输入提交/翻页 → 显示或隐藏解释、切换呈现状态（图形与文字随状态同步变化）、设置分数、进入下一步或下一场景”用 compose：触发与目标可给图层/状态/场景的 id 或唯一名称，效果按顺序给出，宿主生成一致引用、步骤 id、分组与收尾导航，并在边界明确拒绝 Published 不支持的组合。显隐语义：show/hide 是已挂载节点的入退场动画，不能解除 visible:false；初始动画隐藏使用 playbackInitialVisibility:hidden。若已有目标呈现状态负责显隐，只需 set-state，不要先 show 隐藏节点再切状态。导航语义：next-step 先走完当前页剩余呈现步骤再进入下一场景；next-scene 直接跳过剩余步骤进入下一场景（跨 Slide/Flow/Spatial 位置复用课程顺序）；go-to-scene 精确进入指定 Slide 场景。限制：presentation.enter/presentation.in 当前 Published 播放不执行，因此 compose 不提供 state-enter 触发与 inStates 条件；状态进入类需求用 click/presenter 触发 + 末尾 set-state 效果（当前 Slide 场景、无 transition、独占最后执行组）表达，状态条件用 course-state.compare/course-state.exists，场景限定用 scene.in。需要延迟、动画/媒体触发或完整条件组合时用 insert/replace（本卡完整 rule Schema，不含最外层 id；第一动作 start 必须 after-previous，导航动作必须最后）。",
+      "summary": "仅 Slide scene owner。常用“点击/输入提交/翻页 → 显示或隐藏解释、切换呈现状态（图形与文字随状态同步变化）、设置分数、进入下一步或下一场景”用 compose：触发与目标可给图层/状态/场景/课程位置的 id 或唯一名称，效果按顺序给出，宿主生成一致引用、步骤 id、分组与收尾导航，并在边界明确拒绝 Published 不支持的组合。显隐语义：show/hide 是已挂载节点的入退场动画，不能解除 visible:false；初始动画隐藏使用 playbackInitialVisibility:hidden。若已有目标呈现状态负责显隐，只需 set-state，不要先 show 隐藏节点再切状态。导航语义：next-step 先走完当前页剩余呈现步骤再进入下一场景；next-scene 直接跳过剩余步骤进入下一场景（跨 Slide/Flow/Spatial 位置复用课程顺序）；go-to-scene 精确进入指定 Slide 场景；go-to-location 按正式位置 id 精确进入 Slide、Flow 或 Spatial。限制：presentation.enter/presentation.in 当前 Published 播放不执行，因此 compose 不提供 state-enter 触发与 inStates 条件；状态进入类需求用 click/presenter 触发 + 末尾 set-state 效果（当前 Slide 场景、无 transition、独占最后执行组）表达，状态条件用 course-state.compare/course-state.exists，场景限定用 scene.in。需要延迟、动画/媒体触发或完整条件组合时用 insert/replace（本卡完整 rule Schema，不含最外层 id；第一动作 start 必须 after-previous，导航动作必须最后）。",
       "dependencies": []
     },
     {

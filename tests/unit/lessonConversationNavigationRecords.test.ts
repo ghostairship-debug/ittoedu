@@ -30,18 +30,18 @@ describe('application conversation navigation records', () => {
   it('branches with a shared target reference and independent empty sessions', async () => {
     const repository = new LessonConversationRepository(fake.userData), identity = lesson()
     const target = { version: 1 as const, projectId: 'project', normalizedPath: 'c:/lessons/example/course.h5lesson' }
-    const parent = await repository.create(identity, '主讨论', target)
-    await repository.attachSession(identity, parent.conversationId, randomUUID(), parent.epoch)
-    const branch = await repository.branch(identity, parent.conversationId)
+    const parent = await repository.create({ kind: 'lesson', lesson: identity }, '主讨论', target)
+    await repository.attachSession({ kind: 'lesson', lesson: identity }, parent.conversationId, randomUUID(), parent.epoch)
+    const branch = await repository.branch({ kind: 'lesson', lesson: identity }, parent.conversationId)
     expect(branch.parentConversationId).toBe(parent.conversationId)
     expect(branch.projectTarget).toEqual(target)
     expect(branch.sessionIds).toEqual([])
     expect(branch.conversationId).not.toBe(parent.conversationId)
-    expect((await repository.list(identity)).records).toHaveLength(2)
+    expect((await repository.list({ kind: 'lesson', lesson: identity })).records).toHaveLength(2)
   })
   it('rebuilds search from real titles and human message events without indexing tool payloads', async () => {
     const identity = lesson(), repository = new LessonConversationRepository(fake.userData)
-    const conversation = await repository.create(identity, '电路讨论')
+    const conversation = await repository.create({ kind: 'lesson', lesson: identity }, '电路讨论')
     fake.events = [{ kind: 'text', payload: { text: '串联电路的电', messageId: 'message', delta: true } }, { kind: 'text', payload: { text: '流处处相等', messageId: 'message', delta: true } }, { kind: 'tool-result', payload: { text: '不应搜索的内部候选' } }]
     fake.events = fake.events.map((event, index) => ({ ...(event as object), sessionId: 'session', sequence: index + 1, time: 0 }))
     const service = await import('../../src/main/localAgent/service')
@@ -53,7 +53,7 @@ describe('application conversation navigation records', () => {
   })
   it('stops owners and invalidates file candidates, removes records, preserves real files/recovery, and permits a fresh session', async () => {
     const identity = lesson(), repository = new LessonConversationRepository(fake.userData)
-    await repository.create(identity)
+    await repository.create({ kind: 'lesson', lesson: identity })
     const folders = ['flow-document-recovery/v1', 'lesson-document-recovery', 'actual-lesson', 'local-agent/preferences/v1']
     for (const folder of folders) { await fs.mkdir(path.join(fake.userData, folder), { recursive: true }); await fs.writeFile(path.join(fake.userData, folder, 'keep'), 'source') }
     await fs.mkdir(path.join(fake.userData, 'local-agent/v3/bad'), { recursive: true })
@@ -72,7 +72,7 @@ describe('application conversation navigation records', () => {
   })
   it('preserves records and releases the gate when candidate invalidation fails', async () => {
     const identity = lesson(), repository = new LessonConversationRepository(fake.userData)
-    await repository.create(identity)
+    await repository.create({ kind: 'lesson', lesson: identity })
     const service = await import('../../src/main/localAgent/service')
     const stop = service.registerLessonRecordsInvalidator(async () => { throw new Error('cannot preserve writer') })
     await expect(service.deleteAllLocalAgentApplicationRecords()).rejects.toThrow('cannot preserve writer')

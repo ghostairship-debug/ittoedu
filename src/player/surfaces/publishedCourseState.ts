@@ -26,6 +26,7 @@ function guardedRuntimeActions(
   return Object.freeze({
     ...(actions.nextStep ? { nextStep: () => active() && actions.nextStep!() } : {}),
     ...(actions.previousStep ? { previousStep: () => active() && actions.previousStep!() } : {}),
+    ...(actions.goToLocation ? { goToLocation: (locationId: string) => active() && actions.goToLocation!(locationId) } : {}),
     goToScene: (sceneId: string, targetStateId?: string) => (
       active() && actions.goToScene(sceneId, targetStateId)
     ),

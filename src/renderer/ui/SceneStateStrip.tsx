@@ -39,8 +39,6 @@ export function SceneStateStrip() {
     return surface.scenes.find((candidate) => candidate.id === snapshot.sceneId) ?? null
   }, [document, snapshot])
   const editingScope = useEditorStore(selectEditingScope)
-  const editorMode = useEditorStore((state) => state.editorMode)
-  const setEditorMode = useEditorStore((state) => state.setEditorMode)
   const activeStateId = useEditorStore(selectActivePresentationStateId)
   const setActiveState = useEditorStore(
     (state) => state.setActivePresentationState,
@@ -115,17 +113,14 @@ export function SceneStateStrip() {
     <section className="scene-state-strip" aria-label="场景状态">
       <header className="scene-state-strip__header">
         <div className="scene-state-strip__title">
-          <strong>{editorMode === 'simple' ? '场景画面' : '场景状态'}</strong>
+          <strong>场景状态</strong>
           <span>
             {activeState
               ? `正在编辑“${activeState.name}”的覆盖值`
-              : editorMode === 'simple'
-                ? '基础画面的修改会同步到继承它的其他画面'
-                : '正在编辑基础；修改会被所有状态继承'}
+              : '正在编辑基础；修改会被所有状态继承'}
           </span>
         </div>
-        {editorMode === 'professional' ? (
-          <div className="scene-state-strip__actions" aria-label="状态操作">
+        <div className="scene-state-strip__actions" aria-label="状态操作">
           <button
             type="button"
             className="state-action"
@@ -194,16 +189,7 @@ export function SceneStateStrip() {
           >
             <Trash2 size={14} /><span>删除</span>
           </button>
-          </div>
-        ) : (
-          <button
-            type="button"
-            className="state-action scene-state-strip__professional-link"
-            onClick={() => setEditorMode('professional')}
-          >
-            管理状态
-          </button>
-        )}
+        </div>
       </header>
 
       <ul className="scene-state-strip__track" aria-label="当前场景状态列表">
@@ -271,7 +257,6 @@ export function SceneStateStrip() {
                 aria-label={`${state.name}，命名状态${isInitial ? '，运行初始状态' : ''}${isThumbnail ? '，场景缩略图状态' : ''}，${overrideSummary}`}
                 onClick={() => setActiveState(state.id)}
                 onDoubleClick={() => {
-                  if (editorMode !== 'professional') return
                   setActiveState(state.id)
                   setEditingStateId(state.id)
                   setDraftName(state.name)
@@ -297,7 +282,7 @@ export function SceneStateStrip() {
         })}
       </ul>
 
-      {editorMode === 'professional' && <ConfirmDialog
+      <ConfirmDialog
         open={pendingAction !== null}
         title={pendingAction === 'delete' ? '删除场景状态？' : '清除当前状态的覆盖？'}
         message={pendingAction === 'delete'
@@ -313,7 +298,7 @@ export function SceneStateStrip() {
           }
           setPendingAction(null)
         }}
-      />}
+      />
     </section>
   )
 }

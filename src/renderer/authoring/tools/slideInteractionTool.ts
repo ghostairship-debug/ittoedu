@@ -29,9 +29,10 @@ import {
 import { composeCourseProjectLocation } from '../../../shared/courseLayerComposition'
 import type { CourseProjectDocument, LayerItem, SlideSceneDocument } from '../../../shared/courseProjectTypes'
 import { slideMotionTargetUnavailable } from '../../../shared/slideInteractionFeasibility'
+import { resolveSlideInteractionTarget } from '../../../shared/slideInteractionTargetResolver'
 
 /** Both destination branches share the canonical location identity. */
-type TargetLocation = { locationId: string; stateId?: string | null }
+type TargetLocation = { locationId: string; surfaceId: string; stateId?: string | null }
 
 const rule = interactionRuleContentSchema
 
@@ -67,6 +68,7 @@ const composeEffectSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('next-scene') }).strict(),
   z.object({ kind: z.literal('previous-scene') }).strict(),
   z.object({ kind: z.literal('go-to-scene'), scene: reference, state: reference.optional() }).strict(),
+  z.object({ kind: z.literal('go-to-location'), location: reference }).strict(),
   z.object({ kind: z.literal('set-course-state'), key: courseStateKeySchema, value: courseStateScalarSchema }).strict(),
 ])
 
@@ -88,11 +90,11 @@ export const slideInteractionToolInputSchema = z.discriminatedUnion('operation',
 
 type ComposeInput = z.infer<typeof composeInputSchema>
 
-function locationItems(document: CourseProjectDocument, target: TargetLocation): LayerItem[] {
+function locationItems(document: CourseProjectDocument, target: TargetLocation) {
   // 只纳入当前位置真实适用的条目：被 visibility 排除当前位置的另一位置专属
   // global/surface 图层不参与当前页重名判定，避免跨位置同名误判。
-  return composeCourseProjectLocation({ project: document, locationId: target.locationId, stateId: null })
-    .entries.filter((entry) => entry.applicable).map((entry) => entry.item)
+  const composition = composeCourseProjectLocation({ project: document, locationId: target.locationId, stateId: null })
+  return { composition, items: composition.entries.filter((entry) => entry.applicable).map((entry) => entry.item) }
 }
 
 function resolutionFailure(code: string, message: string, path: (string | number)[]): never {
@@ -100,12 +102,17 @@ function resolutionFailure(code: string, message: string, path: (string | number
 }
 
 function resolveNode(document: CourseProjectDocument, target: TargetLocation, ref: string, what: string, path: (string | number)[]): LayerItem {
-  const items = locationItems(document, target)
-  const byId = items.filter((item) => item.layerItemId === ref)
-  const matches = byId.length > 0 ? byId : items.filter((item) => item.label === ref)
-  if (matches.length === 1) return matches[0]!
-  if (matches.length > 1) resolutionFailure('compose-node-ambiguous', `${what}“${ref}”匹配到多个同名图层，请改用图层 id`, path)
-  return resolutionFailure('compose-node-not-found', `${what}“${ref}”在当前位置不存在；请先创建该图层或使用已有图层的 id / 唯一名称`, path)
+  const { composition, items } = locationItems(document, target)
+  const resolution = resolveSlideInteractionTarget({
+    index: { locationId: target.locationId, surfaceId: composition.surfaceId, stateId: null,
+      scope: 'applicable-location-items', completeness: 'complete', items: items.map(item => ({ id: item.layerItemId, label: item.label })) },
+    reference: ref, what, path,
+  })
+  if (resolution.status === 'error') return resolutionFailure(resolution.code, resolution.message, resolution.path)
+  if (resolution.status === 'deferred') return resolutionFailure('compose-node-not-found', resolution.message, path)
+  const item = items.find(candidate => candidate.layerItemId === resolution.itemId)
+  if (!item) return resolutionFailure('compose-node-not-found', `${what}“${ref}”在当前位置不存在；请先创建该图层或使用已有图层的 id / 唯一名称`, path)
+  return item
 }
 
 function resolveState(scene: SlideSceneDocument, ref: string, what: string, path: (string | number)[]): string {
@@ -124,6 +131,21 @@ function resolveSlideScene(document: CourseProjectDocument, ref: string): SlideS
   if (matches.length === 1) return matches[0]!
   if (matches.length > 1) throw new Error(`目标场景“${ref}”匹配到多个同名 Slide 场景，请改用场景 id`)
   throw new Error(`目标场景“${ref}”不存在；顺序进入下一场景请使用 next-scene，精确目标只接受已有 Slide 场景`)
+}
+
+function resolveCourseLocation(
+  document: CourseProjectDocument,
+  ref: string,
+): CourseProjectDocument['locations'][number] {
+  const byId = document.locations.filter((location) => location.id === ref)
+  const matches = byId.length > 0
+    ? byId
+    : document.locations.filter((location) => location.label === ref)
+  if (matches.length === 1) return matches[0]!
+  if (matches.length > 1) {
+    throw new Error(`目标课程位置“${ref}”匹配到多个同名位置，请改用位置 id`)
+  }
+  throw new Error(`目标课程位置“${ref}”不存在；精确跨 Surface 跳转只接受已有课程位置的 id 或唯一名称`)
 }
 
 function composeTrigger(document: CourseProjectDocument, target: TargetLocation, scene: SlideSceneDocument, input: ComposeInput['trigger']): InteractionTrigger {
@@ -207,6 +229,11 @@ function composeActions(document: CourseProjectDocument, target: TargetLocation,
         navigation({ type: 'scene.go', sceneId: destination.id, ...(targetStateId ? { targetStateId } : {}) })
         break
       }
+      case 'go-to-location': {
+        const destination = resolveCourseLocation(document, effect.location)
+        navigation({ type: 'location.go', locationId: destination.id })
+        break
+      }
     }
   })
   return actions
@@ -236,7 +263,7 @@ export const slideInteractionTool: AuthoringToolDefinition<z.infer<typeof slideI
     { operations: ['compose', 'insert'], destination: 'create', parents: ['owner'], message: '互动创建使用 create parent:owner append；compose 只需触发与效果，宿主生成完整规则。' },
     { operations: ['replace', 'delete'], destination: 'update', message: 'replace/delete 需要前序互动回执的 update target；新建规则请用 compose 或 insert。' },
   ],
-  description: '仅 Slide scene owner。常用“点击/输入提交/翻页 → 显示或隐藏解释、切换呈现状态（图形与文字随状态同步变化）、设置分数、进入下一步或下一场景”用 compose：触发与目标可给图层/状态/场景的 id 或唯一名称，效果按顺序给出，宿主生成一致引用、步骤 id、分组与收尾导航，并在边界明确拒绝 Published 不支持的组合。显隐语义：show/hide 是已挂载节点的入退场动画，不能解除 visible:false；初始动画隐藏使用 playbackInitialVisibility:hidden。若已有目标呈现状态负责显隐，只需 set-state，不要先 show 隐藏节点再切状态。导航语义：next-step 先走完当前页剩余呈现步骤再进入下一场景；next-scene 直接跳过剩余步骤进入下一场景（跨 Slide/Flow/Spatial 位置复用课程顺序）；go-to-scene 精确进入指定 Slide 场景。限制：presentation.enter/presentation.in 当前 Published 播放不执行，因此 compose 不提供 state-enter 触发与 inStates 条件；状态进入类需求用 click/presenter 触发 + 末尾 set-state 效果（当前 Slide 场景、无 transition、独占最后执行组）表达，状态条件用 course-state.compare/course-state.exists，场景限定用 scene.in。需要延迟、动画/媒体触发或完整条件组合时用 insert/replace（本卡完整 rule Schema，不含最外层 id；第一动作 start 必须 after-previous，导航动作必须最后）。',
+  description: '仅 Slide scene owner。常用“点击/输入提交/翻页 → 显示或隐藏解释、切换呈现状态（图形与文字随状态同步变化）、设置分数、进入下一步或下一场景”用 compose：触发与目标可给图层/状态/场景/课程位置的 id 或唯一名称，效果按顺序给出，宿主生成一致引用、步骤 id、分组与收尾导航，并在边界明确拒绝 Published 不支持的组合。显隐语义：show/hide 是已挂载节点的入退场动画，不能解除 visible:false；初始动画隐藏使用 playbackInitialVisibility:hidden。若已有目标呈现状态负责显隐，只需 set-state，不要先 show 隐藏节点再切状态。导航语义：next-step 先走完当前页剩余呈现步骤再进入下一场景；next-scene 直接跳过剩余步骤进入下一场景（跨 Slide/Flow/Spatial 位置复用课程顺序）；go-to-scene 精确进入指定 Slide 场景；go-to-location 按正式位置 id 精确进入 Slide、Flow 或 Spatial。限制：presentation.enter/presentation.in 当前 Published 播放不执行，因此 compose 不提供 state-enter 触发与 inStates 条件；状态进入类需求用 click/presenter 触发 + 末尾 set-state 效果（当前 Slide 场景、无 transition、独占最后执行组）表达，状态条件用 course-state.compare/course-state.exists，场景限定用 scene.in。需要延迟、动画/媒体触发或完整条件组合时用 insert/replace（本卡完整 rule Schema，不含最外层 id；第一动作 start 必须 after-previous，导航动作必须最后）。',
   plan({ document, destination, value }) {
     const { target, surface, location } = resolveAuthoringToolScope(document, destination)
     if (surface.type !== 'slide' || location.kind !== 'slide-scene' || target.owner !== 'scene') throw new Error('Slide 互动工具需要 scene owner')

@@ -11,7 +11,10 @@ import {
 
 function isWithin(parent: string, child: string): boolean {
   const path = relative(resolve(parent), resolve(child))
-  return path === '' || (path !== '..' && !path.startsWith(`..${sep}`))
+  // On Windows, relative() returns an absolute path when the roots are on
+  // different drives. That path is outside the parent even though it does
+  // not begin with `..`.
+  return path === '' || (!isAbsolute(path) && path !== '..' && !path.startsWith(`..${sep}`))
 }
 
 export function writeContextPackOutput(

@@ -137,6 +137,7 @@ interface RuntimeCreateContextBase {
 
   actions: Readonly<{
     goToScene(sceneId: string, targetStateId?: string): boolean
+    goToLocation?(locationId: string): boolean
     nextScene(): boolean
     previousScene(): boolean
     replayScene(): boolean
@@ -475,6 +476,9 @@ ctx.events.listenerCount(eventName?)
 宿主会在运行时销毁时解除通过当前 `ctx.events` 建立的订阅；仍建议保存 disposer 并在 `destroy()` 中显式调用，使责任清楚。
 
 ## 11. 导航与守卫
+
+精确跳转到已有 Slide、Flow 或 Spatial 课程位置使用可选 `ctx.actions.goToLocation?.(locationId)`；只接受正式 `locations` 的稳定 ID。Native 点击规则使用 strict `{ type: "location.go", locationId }`，属于独占末执行组的终结导航；作者工具提供 `go-to-location`。目标 Slide 使用该位置指定状态或初始状态，Flow/Spatial 使用位置自身锚点。请求沿同一 Published 导航事务、历史及导航守卫执行，保留课程状态；无效目标、当前位置及失效载体返回 `false`，编辑/捕获模式禁止执行。同步 `true` 仅表示请求已接受，不能替代目的位置观察。`goToScene` 继续只接受 Slide sceneId；精确跨表面跳转不得用连续跳页或延时模拟。
+
 
 所有跳转必须使用 `ctx.actions`。`goToScene(sceneId, targetStateId?)` 使用稳定场景 ID，可选原子进入目标场景的指定命名状态，不能用可变页码。省略目标状态或引用失效时进入目标场景 `initialStateId`；同场景调用可直接切换状态。已支持 Published carrier 的 `goToScene`、上一页、下一页、重播和重开 actions 进入同一会话协调路径；authoring 模式中的这些动作全部 inert。Published playback 在创建目标节点、组件和运行时前完成状态物化，不会先闪现初始状态。
 

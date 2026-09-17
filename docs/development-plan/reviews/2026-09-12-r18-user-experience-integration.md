@@ -42,13 +42,13 @@ G2 原始验证脚本在已完成提交/保存恢复后，被离线教师控制�
 
 ## 可复核制品
 
-- [G2 原生记录与保存制品](../../../output/playwright/r18-ux-20260912/background-2026-09-11T18-39-53-963Z/native-records.json)、[离线背景与同宽结果](../../../output/playwright/r18-ux-20260912/offline-2026-09-11T18-53-36-036Z/result.json)。
-- [G3 首次错误素材记录](../../../output/playwright/r18-ux-20260912/native-fallback-2026-09-11T19-04-28-312Z/native-decisions.json)。
-- [G3 最终正确兜底](../../../output/playwright/r18-ux-20260912/native-fallback-2026-09-11T19-22-45-492Z/result.json)、[原生两轮决定](../../../output/playwright/r18-ux-20260912/native-fallback-2026-09-11T19-22-45-492Z/native-decisions.json)。
-- [宽屏行框](../../../output/playwright/r18-ux-20260912/flow-2026-09-11T18-41-35-491Z/measurements.json)、[窄屏行框与最终工程](../../../output/playwright/r18-ux-20260912/flow-2026-09-11T18-42-39-771Z/measurements.json)、[动态 Flow 实际截图](../../../output/r18-089/fluid-2026-09-11T19-01-50-381Z/preview-1440x900.png)。
-- [OpenCode 结果](../../../output/playwright/r18-ux-20260912/opencode-question-2026-09-11T19-00-08-034Z/result.json)、[Claude 冻结目标复核](../../../output/playwright/r18-ux-20260912/claude-question-2026-09-11T18-54-06-222Z/verified-result.json)。
-- [表格真实呈现与重开](../../../output/playwright/r18-ux-20260912/leaf-evidence/g7-table/result.json)、[公式失焦/取消/无效输入](../../../output/playwright/r18-ux-20260912/leaf-evidence/g7-formula/result.json)、[最终 Flow 重开](../../../output/playwright/r18-ux-20260912/leaf-evidence/g8-reopen/result.json)、[DOCX 解析](../../../output/playwright/r18-ux-20260912/leaf-evidence/g9-docx/docx-verification.json)、[三 CLI 完整消息回放](../../../output/playwright/r18-ux-20260912/leaf-evidence/g10-replay/full-record-replay.json)。必要叶子结果已汇合，完整私人原生日志不进入仓库。
-- [真实失败注入链最终记录](../../../output/r18-ux/failure-injection-2026-09-11T19-14-47-658Z/after-eighth-send.json)。新增回归先证明资源事务 Undo 后 CourseAuthoringSession 残留已删除 ID，再修复为后端有效 selection；scene/global 两例和最终 E2E 均通过。
+- `../../../output/playwright/r18-ux-20260912/background-2026-09-11T18-39-53-963Z/native-records.json`（历史链接目标未保留）、`../../../output/playwright/r18-ux-20260912/offline-2026-09-11T18-53-36-036Z/result.json`（历史链接目标未保留）。
+- `../../../output/playwright/r18-ux-20260912/native-fallback-2026-09-11T19-04-28-312Z/native-decisions.json`（历史链接目标未保留）。
+- `../../../output/playwright/r18-ux-20260912/native-fallback-2026-09-11T19-22-45-492Z/result.json`（历史链接目标未保留）、`../../../output/playwright/r18-ux-20260912/native-fallback-2026-09-11T19-22-45-492Z/native-decisions.json`（历史链接目标未保留）。
+- `../../../output/playwright/r18-ux-20260912/flow-2026-09-11T18-41-35-491Z/measurements.json`（历史链接目标未保留）、`../../../output/playwright/r18-ux-20260912/flow-2026-09-11T18-42-39-771Z/measurements.json`（历史链接目标未保留）、`../../../output/r18-089/fluid-2026-09-11T19-01-50-381Z/preview-1440x900.png`（历史链接目标未保留）。
+- `../../../output/playwright/r18-ux-20260912/opencode-question-2026-09-11T19-00-08-034Z/result.json`（历史链接目标未保留）、`../../../output/playwright/r18-ux-20260912/claude-question-2026-09-11T18-54-06-222Z/verified-result.json`（历史链接目标未保留）。
+- `../../../output/playwright/r18-ux-20260912/leaf-evidence/g7-table/result.json`（历史链接目标未保留）、`../../../output/playwright/r18-ux-20260912/leaf-evidence/g7-formula/result.json`（历史链接目标未保留）、`../../../output/playwright/r18-ux-20260912/leaf-evidence/g8-reopen/result.json`（历史链接目标未保留）、`../../../output/playwright/r18-ux-20260912/leaf-evidence/g9-docx/docx-verification.json`（历史链接目标未保留）、`../../../output/playwright/r18-ux-20260912/leaf-evidence/g10-replay/full-record-replay.json`（历史链接目标未保留）。必要叶子结果已汇合，完整私人原生日志不进入仓库。
+- `../../../output/r18-ux/failure-injection-2026-09-11T19-14-47-658Z/after-eighth-send.json`（历史链接目标未保留）。新增回归先证明资源事务 Undo 后 CourseAuthoringSession 残留已删除 ID，再修复为后端有效 selection；scene/global 两例和最终 E2E 均通过。
 - [G1 窄合同](2026-09-12-r18-g1-selection-contract.md)、[真实目标与正式事务用例](../../../tests/unit/generationSelectionActions.test.ts)。独立 Reviewer 核对单次动作消费、父容器、同 owner/plane、命名态及晚步失败零写入，无阻断发现。
 
 Flow 同宽副本显式切换 fluid、将共享横幅改为 paper；横幅原框架 x=40 与正文边距36保持4 px固定关系。为避免原横幅 y=12 与标题重叠，在验收副本插入空首段；这是明确的内容准备，未静默修改原文件或其他 Surface 的共享框架。

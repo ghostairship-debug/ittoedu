@@ -45,6 +45,7 @@ import { NativeColorPreviewContext } from './NativeColorPreview'
 import { SlideInputProperties, type SlideInputPropertiesCommands, type SlideInputPropertiesView } from './SlideInputProperties'
 import { formulaAstToAccessibleText } from '../../../shared/formulaLinear'
 import { isVerticalWritingMode } from '../../../shared/textLayout'
+import type { TextRunEdit } from '../../../shared/textRuns'
 import {
   opacityToTransparencyPercent,
   transparencyPercentToOpacity,
@@ -118,15 +119,13 @@ export type PropertiesItemView =
 
 export type PropertiesPatch = DeepPartial<PropertiesItemView>
 
-export type EditorModeView = 'simple' | 'professional'
-
 export interface SlideNativeTextCommands {
   /** Returns true when the control must rebind after a canonical source transition. */
   readonly beginEdit: (source: 'properties' | 'canvas') => boolean | void
   readonly commitEdit: () => void
   readonly cancelEdit: () => void
   readonly setComposing?: (composing: boolean) => void
-  readonly updateDraft: (text: string) => void
+  readonly updateDraft: (text: string, edit?: TextRunEdit) => void
   readonly toggleStyle: (
     key: 'bold' | 'italic' | 'underline' | 'strike',
     selection: { start: number; end: number },
@@ -145,7 +144,6 @@ export interface SlideNativePropertiesContext {
   readonly draftBindingKey: string
   readonly view: PropertiesItemView
   readonly target: { readonly layerItemId: string }
-  readonly editorMode: EditorModeView
   readonly disabledReason: string | null
   readonly contentEditingEnabled: boolean
   readonly spatialMode: boolean
@@ -183,11 +181,15 @@ export interface SlideNativePropertiesContext {
 
 export function CommonNodeProperties({
   node,
-  editorMode,
+  showGeometryFields = true,
+  showPlaybackInitialState = true,
   update,
 }: {
   node: PropertiesItemView
-  editorMode: EditorModeView
+  /** Flow 节点没有画布几何语义；传 false 可隐藏 X/Y、旋转与透明度字段。 */
+  showGeometryFields?: boolean
+  /** Flow 节点不参与互动播放的初始显隐；传 false 可隐藏该字段。 */
+  showPlaybackInitialState?: boolean
   update(patch: PropertiesPatch): void
 }) {
   const autoSizedText = node.type === 'text' &&
@@ -198,7 +200,7 @@ export function CommonNodeProperties({
     <section className="property-section">
       <h3 className="property-title"><SlidersHorizontal size={14} />通用</h3>
       <BufferedInput label="名称" value={node.name} onCommit={(name) => update({ name })} />
-      {editorMode === 'professional' && <div className="coordinate-grid">
+      {showGeometryFields && <div className="coordinate-grid">
         <BufferedInput label="X" type="number" step={0.1} value={Number(node.x.toFixed(1))} onCommit={(x) => update({ x: Number(x) })} />
         <BufferedInput label="Y" type="number" step={0.1} value={Number(node.y.toFixed(1))} onCommit={(y) => update({ y: Number(y) })} />
       </div>}
@@ -235,7 +237,7 @@ export function CommonNodeProperties({
             : '横排时高度自动适应内容；宽度可直接输入或拖动画布左右边缘调整。'}
         </p>
       )}
-      {editorMode === 'professional' ? <div className="coordinate-grid">
+      {showGeometryFields && <div className="coordinate-grid">
         <BufferedInput label="旋转角度" type="number" min={-36000} max={36000} step={1} value={Number(node.rotation.toFixed(1))} onCommit={(rotation) => update({ rotation: Number(rotation) })} />
         <BufferedInput
           label="透明度 %"
@@ -248,35 +250,13 @@ export function CommonNodeProperties({
             opacity: transparencyPercentToOpacity(Number(transparency)),
           })}
         />
-      </div> : (
-        <>
-          <BufferedInput
-            label="透明度 %"
-            type="number"
-            min={0}
-            max={100}
-            step={1}
-            value={opacityToTransparencyPercent(node.opacity)}
-            onCommit={(transparency) => update({
-              opacity: transparencyPercentToOpacity(Number(transparency)),
-            })}
-          />
-          <details className="simple-advanced-properties">
-            <summary>更多布局设置</summary>
-            <div className="coordinate-grid">
-              <BufferedInput label="X" type="number" step={0.1} value={Number(node.x.toFixed(1))} onCommit={(x) => update({ x: Number(x) })} />
-              <BufferedInput label="Y" type="number" step={0.1} value={Number(node.y.toFixed(1))} onCommit={(y) => update({ y: Number(y) })} />
-              <BufferedInput label="旋转角度" type="number" min={-36000} max={36000} step={1} value={Number(node.rotation.toFixed(1))} onCommit={(rotation) => update({ rotation: Number(rotation) })} />
-            </div>
-          </details>
-        </>
-      )}
+      </div>}
       <ToggleRow label="显示图层" checked={node.visible} onChange={(visible) => update({ visible })} />
       <button type="button" className="secondary-button" style={{ width: '100%' }} onClick={() => update({ locked: !node.locked })}>
         {node.locked ? <Unlock size={14} /> : <Lock size={14} />}
         {node.locked ? '解锁图层' : '锁定图层'}
       </button>
-      {editorMode === 'professional' && <div className="form-field" style={{ marginTop: 12 }}>
+      {showPlaybackInitialState && <div className="form-field" style={{ marginTop: 12 }}>
         <label>互动播放初始状态</label>
         <SelectField<PropertiesItemView['playbackInitialVisibility']>
           label="播放开始时"
@@ -842,7 +822,6 @@ export function SlideNativePropertiesPanel({
 }) {
   const {
     view: node,
-    editorMode,
     commands,
     notices,
     animation,
@@ -869,7 +848,7 @@ export function SlideNativePropertiesPanel({
         notices={notices}
         onClearPresentationOverride={commands.clearPresentationOverride}
       />
-      <CommonNodeProperties node={node} editorMode={editorMode} update={update} />
+      <CommonNodeProperties node={node} update={update} />
       {animation && (
         <SimpleEntranceAnimationEditor
           layerItemId={animation.layerItemId}
@@ -890,7 +869,7 @@ export function SlideNativePropertiesPanel({
         spatialMode={spatialMode}
         videoDiagnostics={videoDiagnostics}
         onReplaceImage={commands.replaceImage}
-        onOpenAutomation={editorMode === 'professional' && !notices.surfaceBaseEditing
+        onOpenAutomation={!notices.surfaceBaseEditing
           ? commands.openAutomation
           : undefined}
         textCommands={commands.text}
@@ -898,8 +877,7 @@ export function SlideNativePropertiesPanel({
         tableCommands={commands.table}
         chartCommands={commands.chart}
       />
-      {editorMode === 'professional' &&
-        flowOrSpatial && (
+      {flowOrSpatial && (
         <FlowSpatialInteractionUnavailableSection
           editingScopeGlobal={editingScopeGlobal}
           onOpenAutomation={commands.openProfessionalAutomation}

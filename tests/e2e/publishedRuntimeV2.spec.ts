@@ -13,6 +13,7 @@ import {
   buildPublishedCourseStandaloneHtml,
   buildPublishedCourseWebPackageFiles,
 } from '../../src/renderer/export/course/buildCoursePackages'
+import { withDefaultComponentController } from '../../src/renderer/components/teacherControllerComponent'
 import { createBlankCourseProject } from '../../src/renderer/project/createCourseProject'
 import { courseProjectDocumentSchema } from '../../src/shared/courseProjectSchema'
 import type { RuntimeLayerItem } from '../../src/shared/courseProjectTypes'
@@ -111,7 +112,7 @@ function writeFixture(): void {
   const sources = {
     project: courseProjectDocumentSchema.parse(next),
     assetFiles: {},
-    components: {},
+    components: withDefaultComponentController(next).componentPackages,
   }
   const playerBundle = readFileSync(join(root, 'dist-player', 'player.iife.js'), 'utf8')
   writeFileSync(

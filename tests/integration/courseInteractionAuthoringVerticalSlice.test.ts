@@ -349,6 +349,63 @@ describe('Course interaction authoring Store vertical slice', () => {
     expect(activeHistory().history).toEqual(beforeNoOpHistory)
   })
 
+  it('commits an exact Flow location jump as one undoable Native click-rule transaction and rejects a missing location without writes', () => {
+    expect(useEditorStore.getState().applyInteractionTemplateAtTarget(
+      localTarget(activeProject()),
+      localTemplate(),
+    )).toMatchObject({ ok: true, status: 'committed' })
+    const before = structuredClone(activeProject())
+    const beforeHistoryDepth = activeHistory().history.past.length
+
+    const committed = useEditorStore.getState().updateInteractionRuleAtTarget(
+      localTarget(activeProject()),
+      LOCAL_RULE_ID,
+      {
+        trigger: { type: 'node.click', nodeId: TITLE_ITEM_ID },
+        actions: [{
+          id: 'action-go-flow',
+          start: 'after-previous',
+          delayMs: 0,
+          action: { type: 'location.go', locationId: FLOW_LOCATION_ID },
+        }],
+      },
+    )
+
+    expect(committed).toMatchObject({ ok: true, status: 'committed' })
+    const after = structuredClone(activeProject())
+    expect(after.revision).toBe(before.revision + 1)
+    expect(activeHistory().history.past).toHaveLength(beforeHistoryDepth + 1)
+    expect(slideScene(after).interactions[0]).toMatchObject({
+      id: LOCAL_RULE_ID,
+      trigger: { type: 'node.click', nodeId: TITLE_ITEM_ID },
+      actions: [{
+        id: 'action-go-flow',
+        start: 'after-previous',
+        action: { type: 'location.go', locationId: FLOW_LOCATION_ID },
+      }],
+    })
+
+    useEditorStore.getState().undo()
+    expect(activeProject()).toEqual(before)
+    useEditorStore.getState().redo()
+    expect(activeProject()).toEqual(after)
+
+    const writeSnapshot = authoritativeWriteSnapshot()
+    expect(useEditorStore.getState().updateInteractionRuleAtTarget(
+      localTarget(activeProject()),
+      LOCAL_RULE_ID,
+      {
+        actions: [{
+          id: 'action-go-missing',
+          start: 'after-previous',
+          delayMs: 0,
+          action: { type: 'location.go', locationId: 'missing-location' },
+        }],
+      },
+    )).toMatchObject({ ok: false, code: 'invalid-rule' })
+    expect(authoritativeWriteSnapshot()).toEqual(writeSnapshot)
+  })
+
   it.each([
     [FLOW_LOCATION_ID, 'flow'] as const,
     [SPATIAL_LOCATION_ID, 'spatial'] as const,

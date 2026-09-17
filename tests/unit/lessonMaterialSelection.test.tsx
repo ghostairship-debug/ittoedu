@@ -25,7 +25,7 @@ it('adopts only selected fragments while viewing unrelated material leaves the s
     const [fragmentIds, setFragmentIds] = useState<string[]>([])
     return <LessonMaterialBrowser targetKey="lesson" selections={[{ id: record.id, fragmentIds }]}
       onSelect={(selectedRecord, selectedFragments) => { select(selectedRecord, selectedFragments); setFragmentIds(selectedFragments) }}
-      selectSource={async () => null} list={async () => [record]} importMaterial={async () => record} read={read} />
+      selectSource={async () => ({ sources: [], failures: [] })} list={async () => [record]} importMaterial={async () => record} read={read} />
   }
   render(<Harness />)
   fireEvent.click(await screen.findByRole('checkbox', { name: '采用片段 1' }))

@@ -15,6 +15,7 @@ import sharp from 'sharp'
 import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate'
 import { createCourseProjectArchive } from '../../src/renderer/project/courseProjectArchive'
 import { createBlankCourseProject } from '../../src/renderer/project/createCourseProject'
+import { createDefaultTeacherControllerPackage } from '../../src/shared/defaultTeacherControllerComponent'
 import { courseProjectDocumentSchema } from '../../src/shared/courseProjectSchema'
 import {
   COURSE_PROJECT_SCHEMA_VERSION,
@@ -196,13 +197,13 @@ function nativeTextContents(project: CourseProjectDocument): string[] {
 
 function teacherControllerLayerRows(page: Page) {
   return page.locator('.node-item').filter({
-    has: page.locator('.node-type-icon[title="teacher-controller"]'),
+    has: page.locator('.node-source').filter({ hasText: '不可下沉' }),
   })
 }
 
 function authoredLayerRows(page: Page) {
   return page.locator('.node-item').filter({
-    hasNot: page.locator('.node-type-icon[title="teacher-controller"]'),
+    hasNot: page.locator('.node-source').filter({ hasText: '不可下沉' }),
   })
 }
 
@@ -214,7 +215,52 @@ function slideSceneTreeNodes(page: Page) {
   return page.locator('.course-page-tree__node[data-kind="slide-scene"]')
 }
 
+async function showEditorPanel(page: Page, panel: 'structure' | 'properties'): Promise<Locator> {
+  const region = page.getByRole('complementary', {
+    name: panel === 'structure' ? '课程结构' : '编辑面板', exact: true,
+  })
+  if (!await region.isVisible()) {
+    // A newly-created standalone course can expose the compact launchers for
+    // one ResizeObserver turn before the full-width workbench settles.
+    await page.evaluate(() => new Promise<void>((resolve) => {
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+    }))
+    if (await region.isVisible()) return region
+    const controls = page.getByLabel('课件编辑面板', { exact: true })
+    if (!await controls.isVisible()) {
+      await expect(region).toBeVisible()
+      return region
+    }
+    const launcher = controls.getByRole('button', {
+      name: panel === 'structure' ? '页面与图层' : '属性与素材', exact: true,
+    })
+    await launcher.click()
+    await expect(launcher).toHaveAttribute('aria-expanded', 'true')
+  }
+  await expect(region).toBeVisible()
+  return region
+}
+
+async function selectEditorTab(page: Page, name: string): Promise<void> {
+  const panel = await showEditorPanel(page, 'properties')
+  await panel.getByRole('tab', { name, exact: true }).click()
+}
+
+async function showEditorCanvas(page: Page): Promise<void> {
+  const close = page.getByLabel('课件编辑面板', { exact: true })
+    .getByRole('button', { name: '关闭面板', exact: true })
+  if (await close.isVisible()) await close.click()
+  await expect(page.getByRole('main', { name: '课件画布' })).toBeVisible()
+}
+
+async function clickSceneStateButton(page: Page, name: string | RegExp): Promise<void> {
+  await showEditorCanvas(page)
+  await page.getByRole('region', { name: '场景状态', exact: true })
+    .getByRole('button', { name, exact: typeof name === 'string' }).click()
+}
+
 async function openCoursePreviewOverlay(page: Page) {
+  await showEditorCanvas(page)
   await page.getByRole('button', { name: '整课预览', exact: true }).click()
   const overlay = page.getByTestId('course-preview-overlay')
   const host = page.getByTestId('course-preview-host')
@@ -251,6 +297,7 @@ function readSavedCourseProjectArchive(filePath: string): {
 }
 
 async function clickCanvasTryRun(page: Page): Promise<void> {
+  await showEditorCanvas(page)
   await page.getByRole('group', { name: '画布模式' })
     .getByRole('button', { name: '当前位置试运行', exact: true })
     .click()
@@ -360,37 +407,44 @@ async function launchEditor(options: {
   page.on('request', (request) => {
     if (/^https?:/i.test(request.url())) externalRequests.push(request.url())
   })
-  if (focusedTextGates) {
-    await page.getByRole('button', { name: '新建独立课件', exact: true }).waitFor()
-    const recovery = page.getByRole('alertdialog', { name: '发现未完成的本地恢复副本' })
-    const hasRecovery = await recovery.waitFor({ state: 'visible', timeout: 1000 }).then(() => true).catch(() => false)
-    if (options.preserveRecoveryPrompt && hasRecovery) {
-      return { app, page, pageErrors, consoleErrors, consoleWarnings, externalRequests }
-    }
-    if (hasRecovery) await recovery.getByRole('button', { name: '丢弃副本' }).click()
+  const startupMore = page.locator('.lesson-workspace-more > summary')
+  const startupEditor = page.getByRole('button', { name: '打开工程（Ctrl+O）', exact: true })
+  const recovery = page.getByRole('alertdialog', { name: '发现未完成的本地恢复副本', exact: true })
+  await expect.poll(async () => await startupEditor.isVisible() || await startupMore.isVisible() || await recovery.isVisible()).toBe(true)
+  const hasRecovery = await recovery.waitFor({ state: 'visible', timeout: focusedTextGates ? 1000 : 800 }).then(() => true).catch(() => false)
+  if (options.preserveRecoveryPrompt && hasRecovery) {
+    return { app, page, pageErrors, consoleErrors, consoleWarnings, externalRequests }
+  }
+  // Keep the existing explicit discard policy for ordinary tests. A preserved
+  // recovery returns above and never takes the new-project path.
+  if (hasRecovery && !options.preserveRecoveryPrompt) {
+    await recovery.getByRole('button', { name: '丢弃副本' }).click()
+    await expect(recovery).toHaveCount(0)
+  }
+  if (!await startupEditor.isVisible() && await startupMore.isVisible() && !await recovery.isVisible()) {
+    await startupMore.click()
     await page.getByRole('button', { name: '新建独立课件', exact: true }).click()
   }
   await page.locator('[data-testid="canvas-stage"] canvas').waitFor()
-  await expectBackgroundWindowsIsolated(app, requestedBackgroundE2e === '1')
-  if (!options.preserveRecoveryPrompt) {
-    const recoveryDialog = page.getByRole('alertdialog', {
-      name: '发现未完成的本地恢复副本',
-    })
-    const recoveryVisible = await recoveryDialog
-      .waitFor({ state: 'visible', timeout: 800 })
-      .then(() => true)
-      .catch(() => false)
-    if (recoveryVisible) {
-      await recoveryDialog.getByRole('button', { name: '丢弃副本' }).click()
-      await expect(recoveryDialog).toHaveCount(0)
+  // Recovery hydration can finish after the landing controls become visible.
+  // Resolve that same explicit policy before the late modal can cover the
+  // editor; preserved recovery tests return without altering the offer.
+  if (await recovery.isVisible()) {
+    if (options.preserveRecoveryPrompt) {
+      return { app, page, pageErrors, consoleErrors, consoleWarnings, externalRequests }
     }
+    await recovery.getByRole('button', { name: '丢弃副本' }).click()
+    await expect(recovery).toHaveCount(0)
   }
+  await expectBackgroundWindowsIsolated(app, requestedBackgroundE2e === '1')
   const modeButton = page.getByRole('button', {
     name: options.mode === 'simple' ? '简洁' : '专业',
   })
   if (await modeButton.getAttribute('aria-pressed') !== 'true') {
     await modeButton.click()
   }
+  await expect(modeButton).toHaveAttribute('aria-pressed', 'true')
+  await showEditorPanel(page, 'properties')
   return {
     app,
     page,
@@ -597,15 +651,15 @@ async function capturePlayerCanvasEvidence(
 }
 
 async function addText(page: Page) {
-  await page.getByRole('tab', { name: '元素' }).click()
-  await page.getByRole('tab', { name: '常用' }).click()
+  await selectEditorTab(page, '元素')
+  await selectEditorTab(page, '常用')
   await page.getByTestId('add-text').click()
   await expect(page.locator('.runtime-preview-loading')).toHaveCount(0)
 }
 
 async function addRectangle(page: Page) {
-  await page.getByRole('tab', { name: '元素' }).click()
-  await page.getByRole('tab', { name: '常用' }).click()
+  await selectEditorTab(page, '元素')
+  await selectEditorTab(page, '常用')
   await page.getByTestId('add-rectangle').click()
 }
 
@@ -637,7 +691,7 @@ async function dragElementToCanvas(
   })
   const elementsTab = page.getByRole('tab', { name: '元素' })
   await expect(elementsTab).toHaveAttribute('aria-selected', 'true')
-  await page.getByRole('tab', { name: '图层' }).click()
+  await selectEditorTab(page, '图层')
   if (await authoredLayerRows(page).count() !== expectedNodeCount) {
     // Chromium/Electron can occasionally finish the pointer gesture without
     // delivering the HTML5 drop event. Replay the same browser-native drag
@@ -675,7 +729,7 @@ async function dragElementToCanvas(
         clientY: canvasBounds.y + (logicalPoint.y / 720) * canvasBounds.height,
       },
     )
-    await page.getByRole('tab', { name: '图层' }).click()
+    await selectEditorTab(page, '图层')
   }
   await expect(authoredLayerRows(page)).toHaveCount(expectedNodeCount)
 }
@@ -688,6 +742,7 @@ async function setCurrentNodeGeometry(
   page: Page,
   geometry: Partial<Record<'X' | 'Y' | '宽' | '高', number>>,
 ): Promise<void> {
+  await selectEditorTab(page, '属性')
   for (const [label, value] of Object.entries(geometry) as Array<
     ['X' | 'Y' | '宽' | '高', number]
   >) {
@@ -698,18 +753,18 @@ async function setCurrentNodeGeometry(
 }
 
 async function renameSelectedNode(page: Page, name: string): Promise<void> {
-  await page.getByRole('tab', { name: '图层' }).click()
+  await selectEditorTab(page, '图层')
   const selectedNode = page.locator('.node-item--selected')
   await selectedNode.locator('.node-name').dblclick()
   const nameInput = selectedNode.locator('.node-name-input')
   await nameInput.fill(name)
   await nameInput.press('Enter')
   await expect(selectedNode.locator('.node-name')).toHaveText(name)
-  await page.getByRole('tab', { name: '属性' }).click()
+  await selectEditorTab(page, '属性')
 }
 
 async function editDefaultText(page: Page, value: string) {
-  await page.getByRole('tab', { name: '属性' }).click()
+  await selectEditorTab(page, '属性')
   await page.getByRole('button', { name: '编辑局部文字格式' }).click()
   const editor = page.getByTestId('text-edit-overlay')
   await editor.waitFor()
@@ -723,7 +778,7 @@ async function editDefaultText(page: Page, value: string) {
 }
 
 async function editDefaultTextWithComposition(page: Page, value: string) {
-  await page.getByRole('tab', { name: '属性' }).click()
+  await selectEditorTab(page, '属性')
   await page.getByRole('button', { name: '编辑局部文字格式' }).click()
   const editor = page.getByTestId('text-edit-overlay')
   await editor.waitFor()
@@ -742,7 +797,7 @@ async function editDefaultTextWithComposition(page: Page, value: string) {
 }
 
 async function importExternalComponentThroughUi(page: Page): Promise<void> {
-  await page.getByRole('tab', { name: '组件', exact: true }).click()
+  await selectEditorTab(page, '组件')
   await page.getByTestId('import-external-components').click()
   await expect(page.getByRole('alertdialog', {
     name: '确认批量导入外部组件',
@@ -754,6 +809,10 @@ async function importExternalComponentThroughUi(page: Page): Promise<void> {
 
 test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
   test.beforeAll(() => {
+    const controllerPackage = createDefaultTeacherControllerPackage()
+    const componentFiles = {
+      [`${controllerPackage.manifest.id}@${controllerPackage.manifest.version}`]: controllerPackage.files,
+    }
     mkdirSync(outputDir, { recursive: true })
     mkdirSync(visualOutputDirectory, { recursive: true })
     rmSync(e2eUserDataPath, { recursive: true, force: true })
@@ -877,7 +936,7 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
       createCourseProjectArchive({
         project: persistedAuthoring,
         assetFiles: { [originalRuntimeAssetId]: originalRuntimeAssetBytes },
-        componentFiles: {},
+        componentFiles,
       }, { mtime: '2026-08-18T12:00:00.000Z' }),
     )
     const publishedHostAcceptanceProject = createBlankCourseProject({
@@ -986,7 +1045,7 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
       createCourseProjectArchive({
         project: courseProjectDocumentSchema.parse(publishedHostAcceptanceProject),
         assetFiles: {},
-        componentFiles: {},
+        componentFiles,
       }, { mtime: '2026-08-18T12:00:00.000Z' }),
     )
     rmSync(webPackageDirectory, { recursive: true, force: true })
@@ -1000,7 +1059,7 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
       await expect(page.getByRole('tab', { name: '元素' })).toBeVisible()
       await expect(page.getByRole('tab', { name: '互动与动画' })).toHaveCount(0)
       await expect(page.getByRole('tab', { name: '开发' })).toHaveCount(0)
-      await page.getByRole('tab', { name: '媒体' }).click()
+      await selectEditorTab(page, '媒体')
       await expect(page.getByTestId('media-tab')).toBeVisible()
       await expect(page.getByTestId('add-image')).toHaveCount(0)
       await expect(page.getByTestId('add-video')).toHaveCount(0)
@@ -1010,7 +1069,7 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
       await expect(page.getByRole('button', { name: '导入视频' })).toBeVisible()
 
       await addText(page)
-      await page.getByRole('tab', { name: '属性' }).click()
+      await selectEditorTab(page, '属性')
       const transparency = page.getByLabel('透明度 %', { exact: true })
       await transparency.fill('50')
       await transparency.press('Enter')
@@ -1084,22 +1143,30 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
     const { app, page, pageErrors, consoleErrors } = await launchEditor()
     try {
       await addText(page)
-      await page.getByRole('tab', { name: '互动与动画' }).click()
+      await selectEditorTab(page, '互动与动画')
       await page.getByRole('button', { name: '使用模板' }).click()
       await expect(page.getByRole('group', { name: '规则 1' })).toBeVisible()
       await page.getByRole('button', { name: '复制规则 1' }).click()
       await expect(page.getByRole('group', { name: '规则 2' })).toBeVisible()
       await page.getByRole('button', { name: '上移规则 2' }).click()
 
-      await page.getByRole('tab', { name: '开发' }).click()
+      await selectEditorTab(page, '开发')
       await expect(page.getByText('工程开发工作台')).toBeVisible()
       await expect(page.getByRole('tab', { name: /^运行时/ })).toBeVisible()
       await expect(page.getByRole('tab', { name: /^对象 JSON/ })).toBeVisible()
       await expect(page.getByRole('tab', { name: /^规则 JSON/ })).toBeVisible()
       await expect(page.getByRole('tab', { name: /^组件代码/ })).toBeVisible()
-      expect(await page.locator('.right-sidebar--developer').evaluate(
+      const developerPanelWidth = await page.locator('.right-sidebar--developer').evaluate(
         (element) => element.getBoundingClientRect().width,
-      )).toBeGreaterThanOrEqual(450)
+      )
+      if (await page.getByRole('button', { name: '属性与素材', exact: true }).isVisible()) {
+        const layoutWidth = await page.locator('.editor-panel-layout').evaluate(
+          (element) => element.getBoundingClientRect().width,
+        )
+        expect(developerPanelWidth).toBeCloseTo(Math.min(312, layoutWidth), 0)
+      } else {
+        expect(developerPanelWidth).toBeGreaterThanOrEqual(450)
+      }
       await page.getByRole('button', { name: '创建运行时模板' }).click()
       const runtimeSource = page.getByRole('textbox', {
         name: '场景运行时源码',
@@ -1114,8 +1181,9 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
         { exact: true },
       )).toBeVisible()
 
+      await showEditorPanel(page, 'structure')
       await slideSceneItems(page).first().click()
-      await page.getByRole('tab', { name: '属性' }).click()
+      await selectEditorTab(page, '属性')
       const runtimeInspector = page.getByTestId('scene-runtime-inspector')
       await expect(runtimeInspector).toBeVisible()
       const enabled = runtimeInspector.getByRole('checkbox', { name: '启用运行时' })
@@ -1126,8 +1194,8 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
       await renderMode.selectOption('hybrid')
       await expect(renderMode).toHaveValue('hybrid')
 
-      await page.getByRole('tab', { name: '开发' }).click()
-      await page.getByRole('tab', { name: '属性' }).click()
+      await selectEditorTab(page, '开发')
+      await selectEditorTab(page, '属性')
       await expect(runtimeInspector.getByRole('checkbox', { name: '启用运行时' }))
         .not.toBeChecked()
       await expect(runtimeInspector.getByRole('combobox', { name: '渲染能力声明' }))
@@ -1142,26 +1210,28 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
   test('当前位置试运行：CoursePlayer 宿主可见且可互动', async () => {
     const { app, page, pageErrors, consoleErrors, externalRequests } = await launchEditor()
     try {
+      await showEditorPanel(page, 'structure')
       await page.getByTestId('global-layer-entry').click()
-      await page.getByRole('tab', { name: '属性' }).click()
+      await selectEditorTab(page, '属性')
       await page.getByLabel('导航控制方式').selectOption('none')
       await page.getByRole('button', { name: '专业' }).click()
-      await page.getByRole('tab', { name: '互动与动画' }).click()
+      await selectEditorTab(page, '互动与动画')
       await expect(
         page.getByRole('heading', { name: '互动与动画' }),
       ).toBeVisible()
+      await showEditorPanel(page, 'structure')
       await page.getByTestId('add-content-primary').click()
       await expect(
         page.locator('[data-testid^="scene-item-"]').filter({ hasText: '场景 2' }),
       ).toHaveAttribute('aria-current', 'page')
       const authoringHost = await expectPublishedAuthoringReady(page)
       const authoringAdapter = authoringHost.locator('.slide-published-adapter')
-      await page.getByRole('button', { name: /初始，命名状态/ }).click()
+      await clickSceneStateButton(page, /初始，命名状态/)
       await expect(authoringAdapter).toHaveAttribute('data-presentation-state-id', /.+/)
       const initialStateId = await authoringAdapter
         .getAttribute('data-presentation-state-id')
       if (!initialStateId) throw new Error('统一编辑宿主未写入正式初始状态')
-      await page.getByRole('button', { name: '新建场景状态' }).click()
+      await clickSceneStateButton(page, '新建场景状态')
       await expect(authoringAdapter).toHaveAttribute('data-presentation-state-id', /.+/)
       const authoredStateId = await authoringAdapter
         .getAttribute('data-presentation-state-id')
@@ -1341,14 +1411,15 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
       await page.getByRole('button', { name: '打开工程（Ctrl+O）' }).click()
       await expectPublishedAuthoringReady(page)
 
+      await showEditorPanel(page, 'structure')
       await page.getByTestId('global-layer-entry').click()
-      await page.getByRole('tab', { name: '图层' }).click()
+      await selectEditorTab(page, '图层')
       const globalBannerRow = page.locator('.node-item').filter({
         hasText: 'global-banner',
       })
       await expect(globalBannerRow).toHaveCount(1)
       await globalBannerRow.locator('.node-name').click()
-      await page.getByRole('tab', { name: '属性' }).click()
+      await selectEditorTab(page, '属性')
       await page.getByLabel('场景可见范围').selectOption('include')
       await page.getByTestId('location-visibility-location-flow').check()
       await expect(page.getByTestId('location-visibility-location-flow'))
@@ -1362,11 +1433,13 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
       const slideNode = page.locator(
         '.course-page-tree__node[data-kind="slide-scene"]',
       ).filter({ hasText: '演示页' })
+      await showEditorPanel(page, 'structure')
       await flowNode.locator('.course-page-tree__label').click()
       await expect(flowNode.locator('.course-page-tree__label'))
         .toHaveAttribute('aria-current', 'page')
       await expect(page.getByTestId('published-authoring-host')).toHaveCount(0)
 
+      await showEditorPanel(page, 'structure')
       await slideNode.locator('.course-page-tree__label').click()
       const returnedHost = await expectPublishedAuthoringReady(page)
       await expect(returnedHost.locator(
@@ -1376,13 +1449,13 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
         '[data-slide-layer-item="slide-title"][data-native-type="text"]',
       )).toBeVisible()
 
-      await page.getByRole('tab', { name: '图层' }).click()
+      await selectEditorTab(page, '图层')
       const slideTitleRow = page.locator('.node-item').filter({
         hasText: 'slide-title',
       })
       await expect(slideTitleRow).toHaveCount(1)
       await slideTitleRow.locator('.node-name').click()
-      await page.getByRole('tab', { name: '属性' }).click()
+      await selectEditorTab(page, '属性')
       const xField = commonNodeField(page, 'X')
       const initialX = Number(await xField.inputValue())
       await xField.fill(String(initialX + 16))
@@ -1415,7 +1488,7 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
       await expect(
         playerFrame.locator('[data-slide-layer-item][data-native-type="text"]'),
       ).not.toHaveCount(0)
-      await page.getByRole('tab', { name: '属性' }).click()
+      await selectEditorTab(page, '属性')
       const initialNodeBounds = {
         x: Number(await commonNodeField(page, 'X').inputValue()),
         y: Number(await commonNodeField(page, 'Y').inputValue()),
@@ -1439,6 +1512,7 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
       }
       await expect(zoom).toHaveText('100%')
       await expect.poll(alignmentError).toBeLessThan(0.75)
+      await showEditorCanvas(page)
       const before = await stage.boundingBox()
       if (!before) throw new Error('统一画布不可见')
       for (let index = 0; index < 5; index += 1) {
@@ -1448,6 +1522,7 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
       await expect.poll(async () => (await stage.boundingBox())?.width ?? 0)
         .toBeCloseTo(before.width * 1.5, 0)
       await expect.poll(alignmentError).toBeLessThan(0.75)
+      await showEditorCanvas(page)
       const viewportBounds = await page.locator('.canvas-viewport').boundingBox()
       const beforePan = await stage.boundingBox()
       if (!viewportBounds || !beforePan) throw new Error('画布平移区域不可见')
@@ -1483,21 +1558,25 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
         y: pannedStage.y + 140 / 720 * pannedStage.height,
       }
       await page.mouse.click(blankPoint.x, blankPoint.y)
-      await page.getByRole('tab', { name: '图层' }).click()
+      await selectEditorTab(page, '图层')
       await expect(page.locator('.node-item--selected')).toHaveCount(0)
+      await showEditorCanvas(page)
       await page.mouse.click(textCenter.x, textCenter.y)
+      await showEditorPanel(page, 'properties')
       await expect(page.getByRole('tab', { name: '属性' })).toHaveAttribute(
         'aria-selected',
         'true',
       )
-      await page.getByRole('tab', { name: '图层' }).click()
+      await selectEditorTab(page, '图层')
       await expect(page.locator('.node-item--selected')).toHaveCount(1)
       await page.waitForTimeout(420)
-      await page.getByRole('tab', { name: '属性' }).click()
+      await selectEditorTab(page, '属性')
+      await showEditorCanvas(page)
       await page.mouse.move(textCenter.x, textCenter.y)
       await page.mouse.down()
       await page.mouse.move(textCenter.x + 60, textCenter.y + 30, { steps: 8 })
       await page.mouse.up()
+      await showEditorPanel(page, 'properties')
       await expect.poll(async () => Number(
         await commonNodeField(page, 'X').inputValue(),
       )).toBeGreaterThan(initialNodeBounds.x + 30)
@@ -1528,8 +1607,10 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
       await page.getByRole('button', { name: '打开工程（Ctrl+O）' }).click()
       await expect(page.getByRole('alertdialog', { name: explicitLegacyImportDialogName }))
         .toHaveCount(0)
+      await showEditorPanel(page, 'structure')
       await page.getByTestId('global-layer-entry').click()
 
+      await showEditorCanvas(page)
       const target = page.getByRole('button', {
         name: '全局标题，双击编辑文字',
       })
@@ -1610,6 +1691,7 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
       }
       await expect(zoom).toHaveText('150%')
       await expect.poll(globalAlignmentError).toBeLessThan(1)
+      await showEditorCanvas(page)
       const viewportBounds = await page.locator('.canvas-viewport').boundingBox()
       const beforePan = await playerFrame.boundingBox()
       if (!viewportBounds || !beforePan) throw new Error('统一画布平移区域不可见')
@@ -1661,6 +1743,7 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
       expect(await initialPublishedHostHandle.evaluate((element) => element.isConnected))
         .toBe(true)
 
+      await showEditorPanel(page, 'structure')
       await page.getByRole('button', {
         name: '打开场景“欢迎”；缩略图使用状态“初始”',
       }).click()
@@ -1684,6 +1767,7 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
         'title',
         sceneTextTarget,
       )).toBeLessThan(1)
+      await showEditorCanvas(page)
       await sceneTextTarget.focus()
       await sceneTextTarget.press('Enter')
       await expect(editor).toBeVisible()
@@ -1760,6 +1844,7 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
       await expect(page.getByRole('alertdialog', { name: explicitLegacyImportDialogName }))
         .toHaveCount(0)
       await expectPublishedAuthoringReady(page)
+      await showEditorPanel(page, 'structure')
       await page.getByTestId('global-layer-entry').click()
       const reopenedGlobalTarget = page.getByRole('button', {
         name: '全局标题，双击编辑文字',
@@ -1767,6 +1852,7 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
       await expect(reopenedGlobalTarget).toBeVisible({ timeout: 15_000 })
       await expect.poll(() => runtimeVisualText('global', 'title'))
         .toBe('全局画布新标题')
+      await showEditorCanvas(page)
       await reopenedGlobalTarget.focus()
       await reopenedGlobalTarget.press('Enter')
       await expect(editor.getByRole('textbox', { name: '全局标题' }))
@@ -1774,6 +1860,7 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
       await editor.getByRole('textbox', { name: '全局标题' }).press('Escape')
       await expect(editor).toHaveCount(0)
 
+      await showEditorPanel(page, 'structure')
       await page.getByRole('button', {
         name: '打开场景“欢迎”；缩略图使用状态“初始”',
       }).click()
@@ -1784,6 +1871,7 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
       await expect(reopenedGlobalTarget).toHaveCount(0)
       await expect.poll(() => runtimeVisualText('scene', 'title'))
         .toBe('场景画布新标题')
+      await showEditorCanvas(page)
       await reopenedSceneTextTarget.focus()
       await reopenedSceneTextTarget.press('Enter')
       await expect(editor.getByRole('textbox', { name: '场景标题' }))
@@ -1804,7 +1892,9 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
   test('流程 1：场景新增、排序与删除', async () => {
     const { app, page, pageErrors, consoleErrors, externalRequests } = await launchEditor()
     try {
+      await showEditorPanel(page, 'structure')
       await page.getByTestId('add-content-primary').click()
+      await showEditorPanel(page, 'structure')
       await page.getByTestId('add-content-primary').click()
       await expect(slideSceneItems(page)).toHaveCount(3)
 
@@ -1845,7 +1935,7 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
         page,
         '中文课件标题\n第二行内容\n第三行用于验证自动高度',
       )
-      await page.getByRole('tab', { name: '属性' }).click()
+      await selectEditorTab(page, '属性')
       await expect(page.locator('.form-textarea')).toHaveValue(
         '中文课件标题\n第二行内容\n第三行用于验证自动高度',
       )
@@ -1869,9 +1959,9 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
 
       await page.getByRole('button', { name: '新建课件（Ctrl+N）' }).click()
       await page.getByRole('button', { name: '打开工程（Ctrl+O）' }).click()
-      await page.getByRole('tab', { name: '图层' }).click()
+      await selectEditorTab(page, '图层')
       await page.locator('.node-name').filter({ hasText: '文本' }).click()
-      await page.getByRole('tab', { name: '属性' }).click()
+      await selectEditorTab(page, '属性')
       await expect(page.locator('.form-textarea')).toHaveValue(
         '中文课件标题\n第二行内容\n第三行用于验证自动高度',
       )
@@ -1893,15 +1983,16 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
         'aria-selected',
         'true',
       )
-      await page.getByRole('tab', { name: '图层' }).click()
+      await selectEditorTab(page, '图层')
       await page.locator('.node-item--selected .node-name').click()
+      await showEditorPanel(page, 'properties')
       await expect(page.getByRole('tab', { name: '属性' })).toHaveAttribute(
         'aria-selected',
         'true',
       )
       await page.getByRole('button', { name: '编辑局部文字格式' }).click()
       const editor = page.getByTestId('text-edit-overlay')
-      const textarea = page.getByRole('textbox', { name: '文字内容' })
+      const textarea = page.getByRole('textbox', { name: '文字内容', includeHidden: true })
       await expect(editor).toBeVisible()
       await editor.fill('画布编辑中的草稿')
       await expect(textarea).toHaveValue('画布编辑中的草稿')
@@ -1914,6 +2005,7 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
       await page.waitForTimeout(150)
       await expect(editor).toHaveText('画布编辑中的草稿')
 
+      await showEditorPanel(page, 'properties')
       await textarea.click()
       await expect(editor).toHaveCount(0)
       await textarea.fill('属性栏最终文字')
@@ -1942,9 +2034,9 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
       ).toContain('KaiTi')
 
       await addRectangle(page)
-      await page.getByRole('tab', { name: '图层' }).click()
+      await selectEditorTab(page, '图层')
       await page.locator('.node-name').filter({ hasText: '文本' }).click()
-      await page.getByRole('tab', { name: '属性' }).click()
+      await selectEditorTab(page, '属性')
       await expect(page.getByRole('textbox', { name: '文字内容' })).toHaveValue(
         '属性栏最终文字',
       )
@@ -1957,6 +2049,7 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
       await editor.press('Control+Enter')
       await expect(editor).toBeVisible()
       await editor.dispatchEvent('compositionend', { data: '中文组合输入' })
+      await showEditorPanel(page, 'properties')
       await textarea.click()
       await expect(editor).toHaveCount(0)
       await expect(page.getByRole('textbox', { name: '文字内容' })).toHaveValue(
@@ -1981,6 +2074,7 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
       await addText(page)
       const canvas = page.locator('[data-testid="canvas-stage"] canvas')
       await page.waitForTimeout(250)
+      await showEditorCanvas(page)
       const bounds = await canvas.boundingBox()
       if (!bounds) throw new Error('编辑画布不可见')
       const textCenter = {
@@ -1990,9 +2084,10 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
 
       // Exercise the real Phaser pointer path instead of opening the editor
       // through the properties-panel shortcut.
+      await showEditorCanvas(page)
       await page.mouse.dblclick(textCenter.x, textCenter.y, { delay: 40 })
       const editor = page.getByTestId('text-edit-overlay')
-      const textarea = page.getByRole('textbox', { name: '文字内容' })
+      const textarea = page.getByRole('textbox', { name: '文字内容', includeHidden: true })
       await expect(editor).toBeVisible()
       await expect(editor).toBeFocused()
       await page.waitForTimeout(120)
@@ -2006,8 +2101,9 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
         path: join(visualOutputDirectory, 'text-double-click-editing.png'),
       })
 
-      // Moving directly into the properties field must commit the canvas
-      // session once, then let the properties field own the next session.
+      // Returning to the properties field through the compact panel must
+      // commit once, then let the properties field own the next session.
+      await showEditorPanel(page, 'properties')
       await textarea.click()
       await expect(editor).toHaveCount(0)
       await expect(textarea).toBeFocused()
@@ -2017,6 +2113,7 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
       await expect(textarea).toHaveValue('画布双击可编辑')
 
       await page.waitForTimeout(450)
+      await showEditorCanvas(page)
       await page.mouse.dblclick(textCenter.x, textCenter.y, { delay: 40 })
       await expect(editor).toBeFocused()
       await editor.press('Control+A')
@@ -2040,7 +2137,7 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
       const canvas = page.locator('[data-testid="canvas-stage"] canvas')
       await addRectangle(page)
       await addText(page)
-      await page.getByRole('tab', { name: '图层' }).click()
+      await selectEditorTab(page, '图层')
       await expect(authoredLayerRows(page)).toHaveCount(2)
       const before = await authoredLayerRows(page).locator('.node-name').allTextContents()
       const canvasBefore = await canvas.screenshot()
@@ -2088,7 +2185,7 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
       await importExternalComponentThroughUi(page)
       await expect(page.getByRole('tab', { name: '属性', exact: true }))
         .toHaveAttribute('aria-selected', 'true')
-      await page.getByRole('tab', { name: '图层' }).click()
+      await selectEditorTab(page, '图层')
       await expect(authoredLayerRows(page)).toHaveCount(1)
       await authoredLayerRows(page).locator('.node-name').click()
       await expect(page.getByRole('tab', { name: '属性' }))
@@ -2104,6 +2201,7 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
       await expect(componentInitialValue).toHaveValue('7')
 
       const editorCanvas = page.locator('[data-testid="canvas-stage"] canvas')
+      await showEditorCanvas(page)
       const editorBounds = await editorCanvas.boundingBox()
       if (!editorBounds) throw new Error('编辑画布不可见')
       const designPoint = (x: number, y: number) => ({
@@ -2191,8 +2289,10 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
       await canvasTextEditor.getByRole('textbox', { name: '组件标题' })
         .press('Enter')
       await expect(canvasTextEditor).toHaveCount(0)
+      await showEditorPanel(page, 'properties')
       await expect(componentTitle).toHaveValue('画布内积分器')
       await expect(componentTarget).toHaveCount(1)
+      await showEditorCanvas(page)
       await componentTarget.focus()
       await componentTarget.press('Enter')
       await expect(canvasTextEditor.getByRole('textbox', { name: '组件标题' }))
@@ -2203,12 +2303,14 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
 
       const dragStart = designPoint(460, 270)
       const dragEnd = designPoint(520, 310)
+      await showEditorCanvas(page)
       await page.mouse.move(dragStart.x, dragStart.y)
       await page.mouse.down()
       await page.waitForTimeout(100)
       await page.mouse.move(dragEnd.x, dragEnd.y, { steps: gestureSteps })
       await page.waitForTimeout(100)
       await page.mouse.up()
+      await showEditorPanel(page, 'properties')
       await page.waitForTimeout(200)
 
       const movedX = Number(await commonNodeField(page, 'X').inputValue())
@@ -2222,12 +2324,14 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
 
       const resizeStart = designPoint(movedX + 480, movedY + 280)
       const resizeEnd = designPoint(movedX + 560, movedY + 327)
+      await showEditorCanvas(page)
       await page.mouse.move(resizeStart.x, resizeStart.y)
       await page.mouse.down()
       await page.waitForTimeout(100)
       await page.mouse.move(resizeEnd.x, resizeEnd.y, { steps: gestureSteps })
       await page.waitForTimeout(100)
       await page.mouse.up()
+      await showEditorPanel(page, 'properties')
       await page.waitForTimeout(200)
       const resizedWidth = Number(await commonNodeField(page, '宽').inputValue())
       const resizedHeight = Number(await commonNodeField(page, '高').inputValue())
@@ -2247,10 +2351,10 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
       await expectPublishedAuthoringReady(page)
       expect(await initialComponentTargetHandle.evaluate((element) => element.isConnected))
         .toBe(false)
-      await page.getByRole('tab', { name: '图层' }).click()
+      await selectEditorTab(page, '图层')
       await expect(authoredLayerRows(page)).toHaveCount(1)
       await authoredLayerRows(page).locator('.node-name').click()
-      await page.getByRole('tab', { name: '属性' }).click()
+      await selectEditorTab(page, '属性')
       await expect(commonNodeField(page, 'X')).toHaveValue(String(movedX))
       await expect(commonNodeField(page, 'Y')).toHaveValue(String(movedY))
       await expect(commonNodeField(page, '宽')).toHaveValue(String(resizedWidth))
@@ -2287,13 +2391,16 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
         projectSave: globalNativeProjectPath,
         projectOpen: globalNativeProjectPath,
       })
+      await showEditorPanel(page, 'structure')
       await page.getByTestId('add-content-primary').click()
+      await showEditorPanel(page, 'structure')
       await page.getByTestId('global-layer-entry').click()
-      await page.getByRole('tab', { name: '元素' }).click()
+      await selectEditorTab(page, '元素')
       await page.getByTestId('add-text').click()
 
       const canvas = page.locator('[data-testid="canvas-stage"] canvas')
       await expect(page.locator('.runtime-preview-loading')).toHaveCount(0)
+      await showEditorCanvas(page)
       const bounds = await canvas.boundingBox()
       if (!bounds) throw new Error('全局层编辑画布不可见')
       await page.mouse.dblclick(
@@ -2302,11 +2409,12 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
         { delay: 40 },
       )
       const editor = page.getByTestId('text-edit-overlay')
-      const textarea = page.getByRole('textbox', { name: '文字内容' })
+      const textarea = page.getByRole('textbox', { name: '文字内容', includeHidden: true })
       await expect(editor).toBeFocused()
       await editor.press('Control+A')
       await page.keyboard.insertText('全课程统一标题')
       await expect(textarea).toHaveValue('全课程统一标题')
+      await showEditorPanel(page, 'properties')
       await textarea.click()
       await expect(editor).toHaveCount(0)
 
@@ -2314,12 +2422,12 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
       await page.getByLabel('场景可见范围').selectOption('include')
       await page.getByLabel('场景 1', { exact: true }).check()
 
-      await page.getByRole('tab', { name: '元素' }).click()
+      await selectEditorTab(page, '元素')
       await page.getByTestId('add-image').click()
       await page.waitForTimeout(500)
       await expect(page.getByRole('tab', { name: '元素' }))
         .toHaveAttribute('aria-selected', 'true')
-      await page.getByRole('tab', { name: '图层' }).click()
+      await selectEditorTab(page, '图层')
       await page.locator('.node-item--selected .node-name').click()
       await expect(page.getByRole('tab', { name: '属性' }))
         .toHaveAttribute('aria-selected', 'true')
@@ -2329,11 +2437,11 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
       await commonNodeField(page, 'Y').press('Enter')
       await commonNodeField(page, '宽').fill('180')
       await commonNodeField(page, '宽').press('Enter')
-      await page.getByRole('tab', { name: '元素' }).click()
+      await selectEditorTab(page, '元素')
       await page.getByTestId('add-shape-rounded-rectangle').click()
       await expect(page.getByRole('tab', { name: '元素' }))
         .toHaveAttribute('aria-selected', 'true')
-      await page.getByRole('tab', { name: '图层' }).click()
+      await selectEditorTab(page, '图层')
       await page.locator('.node-item--selected .node-name').click()
       await expect(page.getByRole('tab', { name: '属性' }))
         .toHaveAttribute('aria-selected', 'true')
@@ -2350,12 +2458,13 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
       await expect.poll(() => existsSync(globalNativeProjectPath)).toBe(true)
       await page.getByRole('button', { name: '新建课件（Ctrl+N）' }).click()
       await page.getByRole('button', { name: '打开工程（Ctrl+O）' }).click()
+      await showEditorPanel(page, 'structure')
       await page.getByTestId('global-layer-entry').click()
-      await page.getByRole('tab', { name: '图层' }).click()
+      await selectEditorTab(page, '图层')
       await expect(page.locator('.node-item')).toHaveCount(4)
       await expect(teacherControllerLayerRows(page)).toHaveCount(1)
       await page.locator('.node-item').filter({ hasText: '文本' }).locator('.node-name').click()
-      await page.getByRole('tab', { name: '属性' }).click()
+      await selectEditorTab(page, '属性')
       await expect(page.getByRole('textbox', { name: '文字内容' })).toHaveValue(
         '全课程统一标题',
       )
@@ -2396,13 +2505,15 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
         projectOpen: globalComponentProjectPath,
         componentOpen: globalComponentPath,
       })
+      await showEditorPanel(page, 'structure')
       await page.getByTestId('add-content-primary').click()
+      await showEditorPanel(page, 'structure')
       await page.getByTestId('global-layer-entry').click()
-      await page.getByRole('tab', { name: '元素' }).click()
+      await selectEditorTab(page, '元素')
       await expect(page.getByTestId('global-elements-notice')).toBeVisible()
       await importExternalComponentThroughUi(page)
 
-      await page.getByRole('tab', { name: '属性' }).click()
+      await selectEditorTab(page, '属性')
       await page.getByLabel('全局标题', { exact: true }).fill('教师全局导航')
       await page.getByLabel('全局标题', { exact: true }).blur()
       await page.getByLabel('下一页文字', { exact: true }).fill('继续学习')
@@ -2430,8 +2541,9 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
       await expect.poll(() => existsSync(globalComponentProjectPath)).toBe(true)
       await page.getByRole('button', { name: '新建课件（Ctrl+N）' }).click()
       await page.getByRole('button', { name: '打开工程（Ctrl+O）' }).click()
+      await showEditorPanel(page, 'structure')
       await page.getByTestId('global-layer-entry').click()
-      await page.getByRole('tab', { name: '图层' }).click()
+      await selectEditorTab(page, '图层')
       await expect(page.locator('.node-item')).toHaveCount(2)
       await expect(teacherControllerLayerRows(page)).toHaveCount(1)
       await page
@@ -2439,7 +2551,7 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
         .filter({ hasText: '全局导航条' })
         .locator('.node-name')
         .click()
-      await page.getByRole('tab', { name: '属性' }).click()
+      await selectEditorTab(page, '属性')
       await expect(page.getByLabel('全局标题', { exact: true })).toHaveValue('教师全局导航')
       await expect(page.getByLabel('下一页文字', { exact: true })).toHaveValue('继续学习')
       await expect(page.getByLabel('buttons / replay', { exact: true })).toHaveValue('重新讲解')
@@ -2560,7 +2672,8 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
     )
 
     const globalComponent = persisted.globalLayerItems.find(
-      (entry) => entry.item.kind === 'component',
+      (entry) => entry.item.kind === 'component' &&
+        entry.item.component.packageId === 'com.example.global-nav',
     )
     if (!globalComponent) {
       throw new Error('Runtime API 2 导出夹具缺少全局组件')
@@ -2658,6 +2771,7 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
     const { app, page, pageErrors, consoleErrors, externalRequests } =
       await launchEditor({ forceBackground: true })
     try {
+      await showEditorPanel(page, 'structure')
       await page.getByTestId('add-content-primary').click()
 
       const { adapter: previewAdapter } = await openCoursePreviewOverlay(page)
@@ -2677,8 +2791,9 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
       await expectBackgroundWindowsIsolated(app, true)
       await closeCoursePreviewOverlay(page)
 
+      await showEditorPanel(page, 'structure')
       await page.getByTestId('global-layer-entry').click()
-      await page.getByRole('tab', { name: '属性' }).click()
+      await selectEditorTab(page, '属性')
       await page.getByLabel('翻页笔推进方式').selectOption('authored-command')
       const authoredPreview = await openCoursePreviewOverlay(page)
       await expect(authoredPreview.adapter).toBeVisible()
@@ -2715,6 +2830,7 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
       })
       await addText(page)
       await editDefaultText(page, '第一页')
+      await showEditorPanel(page, 'structure')
       await page.getByTestId('add-content-primary').click()
       await addText(page)
       await editDefaultText(page, '第二页')
@@ -2877,7 +2993,7 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
         fullPage: true,
       })
 
-      await page.getByRole('tab', { name: '图层' }).click()
+      await selectEditorTab(page, '图层')
       await expect(authoredLayerRows(page)).toHaveCount(2)
       const imageGeometry: Array<{
         x: number
@@ -2898,7 +3014,7 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
           height: Number(await commonNodeField(page, '高').inputValue()),
         })
         if (index === 0) {
-          await page.getByRole('tab', { name: '图层' }).click()
+          await selectEditorTab(page, '图层')
         }
       }
       const [firstImage, secondImage] = imageGeometry
@@ -2910,27 +3026,27 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
       ).toBe(false)
 
       await page.getByRole('button', { name: '撤销（Ctrl+Z）' }).click()
-      await page.getByRole('tab', { name: '图层' }).click()
+      await selectEditorTab(page, '图层')
       await expect(authoredLayerRows(page)).toHaveCount(0)
 
-      await page.getByRole('tab', { name: '元素' }).click()
-      await page.getByRole('tab', { name: '媒体' }).click()
+      await selectEditorTab(page, '元素')
+      await selectEditorTab(page, '媒体')
       await page.getByRole('button', { name: '导入图片' }).click()
       await expect(page.locator('.status-bar')).toContainText(
         '图片批量入库：已完成 2 项',
       )
-      await page.getByRole('tab', { name: '图层' }).click()
+      await selectEditorTab(page, '图层')
       await expect(authoredLayerRows(page)).toHaveCount(0)
 
-      await page.getByRole('tab', { name: '元素' }).click()
-      await page.getByRole('tab', { name: '常用' }).click()
+      await selectEditorTab(page, '元素')
+      await selectEditorTab(page, '常用')
       await page.getByTestId('add-text').click()
       await page.getByTestId('add-text').click()
       await expect(page.getByRole('tab', { name: '元素' })).toHaveAttribute(
         'aria-selected',
         'true',
       )
-      await page.getByRole('tab', { name: '图层' }).click()
+      await selectEditorTab(page, '图层')
       await expect(authoredLayerRows(page)).toHaveCount(2)
       const textPositions: Array<{ x: string; y: string }> = []
       for (let index = 0; index < 2; index += 1) {
@@ -2940,7 +3056,7 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
           y: await commonNodeField(page, 'Y').inputValue(),
         })
         if (index === 0) {
-          await page.getByRole('tab', { name: '图层' }).click()
+          await selectEditorTab(page, '图层')
         }
       }
       expect(textPositions[0]).not.toEqual(textPositions[1])
@@ -2965,16 +3081,18 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
       })
       await page.getByTestId('add-image').click()
       await page.waitForTimeout(500)
-      await page.getByRole('tab', { name: '图层' }).click()
+      await selectEditorTab(page, '图层')
       await expect(authoredLayerRows(page)).toHaveCount(1)
       await authoredLayerRows(page).locator('.node-name').click()
-      await page.getByRole('tab', { name: '属性' }).click()
+      await selectEditorTab(page, '属性')
       await expect(page.getByRole('checkbox', { name: '保持宽高比' })).toBeChecked()
+      const stage = page.getByTestId('canvas-stage')
       const canvas = page.locator('[data-testid="canvas-stage"] canvas')
       const initialX = Number(await commonNodeField(page, 'X').inputValue())
       const initialY = Number(await commonNodeField(page, 'Y').inputValue())
       const initialWidth = Number(await commonNodeField(page, '宽').inputValue())
       const initialHeight = Number(await commonNodeField(page, '高').inputValue())
+      await showEditorCanvas(page)
       const bounds = await canvas.boundingBox()
       if (!bounds) throw new Error('图片画布不可见')
       const eastHandle = {
@@ -2985,11 +3103,12 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
       await page.mouse.down()
       await page.mouse.move(eastHandle.x + 70, eastHandle.y, { steps: 12 })
       await page.mouse.up()
+      await showEditorPanel(page, 'properties')
       await expect.poll(async () => Number(await commonNodeField(page, '宽').inputValue())).toBeGreaterThan(initialWidth)
       const resizedWidth = Number(await commonNodeField(page, '宽').inputValue())
       const resizedHeight = Number(await commonNodeField(page, '高').inputValue())
       expect(resizedWidth / resizedHeight).toBeCloseTo(initialWidth / initialHeight, 2)
-      const before = await canvas.screenshot()
+      const before = await stage.screenshot()
 
       await patchDialogs(app, {
         imageOpen: replacementImagePath,
@@ -2998,7 +3117,7 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
       })
       await page.getByRole('button', { name: '替换图片' }).click()
       await page.waitForTimeout(500)
-      const replaced = await canvas.screenshot()
+      const replaced = await stage.screenshot()
       expect(Buffer.compare(before, replaced)).not.toBe(0)
 
       const imageSection = page.locator('.property-section').filter({ hasText: '图片' })
@@ -3010,7 +3129,7 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
       await page.keyboard.press('Tab')
       await page.waitForTimeout(200)
       expect(
-        await averagePixelDifference(replaced, await canvas.screenshot()),
+        await averagePixelDifference(replaced, await stage.screenshot()),
       ).toBeGreaterThan(0.05)
       await imageSection
         .locator('.form-field')
@@ -3025,8 +3144,9 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
       await page.keyboard.press('Tab')
       await imageSection.getByRole('button', { name: '水平翻转' }).click()
       await page.waitForTimeout(250)
+      const finalEffects = await stage.screenshot()
       expect(
-        await averagePixelDifference(replaced, await canvas.screenshot()),
+        await averagePixelDifference(replaced, finalEffects),
       ).toBeGreaterThan(0.05)
       await page.screenshot({
         path: join(root, 'output', 'playwright', 'editor-v1-image-effects.png'),
@@ -3037,13 +3157,17 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
       await expect.poll(() => existsSync(imageProjectPath)).toBe(true)
       await page.getByRole('button', { name: '新建课件（Ctrl+N）' }).click()
       await page.getByRole('button', { name: '打开工程（Ctrl+O）' }).click()
-      await page.getByRole('tab', { name: '图层' }).click()
+      await selectEditorTab(page, '图层')
       await expect(authoredLayerRows(page)).toHaveCount(1)
       await authoredLayerRows(page).locator('.node-name').click()
-      await page.waitForTimeout(500)
-      const restored = await canvas.screenshot()
-      expect(Buffer.compare(before, restored)).not.toBe(0)
-      await page.getByRole('tab', { name: '属性' }).click()
+      await expect(page.locator('.runtime-preview-loading')).toHaveCount(0)
+      await expect.poll(async () => averagePixelDifference(
+        before,
+        await stage.screenshot(),
+      ), { timeout: 15_000 }).toBeGreaterThan(0.05)
+      const restored = await stage.screenshot()
+      expect(await averagePixelDifference(finalEffects, restored)).toBeLessThan(0.5)
+      await selectEditorTab(page, '属性')
       const restoredImageSection = page.locator('.property-section').filter({ hasText: '图片' })
       await expect(
         restoredImageSection
@@ -3084,8 +3208,8 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
         { testId: 'add-shape-diamond', x: 550, y: 345 },
       ]
       for (const [index, item] of additions.entries()) {
-        await page.getByRole('tab', { name: '元素' }).click()
-        await page.getByRole('tab', { name: '常用' }).click()
+        await selectEditorTab(page, '元素')
+        await selectEditorTab(page, '常用')
         await dragElementToCanvas(
           page,
           item.testId,
@@ -3104,26 +3228,26 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
           modifiers: ['Control'],
         })
       }
-      await page.getByRole('tab', { name: '属性' }).click()
+      await selectEditorTab(page, '属性')
       await expect(page.getByTestId('multi-selection-properties')).toContainText('3')
       await page.getByRole('button', { name: '左对齐' }).click()
 
       const alignedXs: number[] = []
       for (const name of ['右箭头', '左大括号', '菱形']) {
-        await page.getByRole('tab', { name: '图层' }).click()
+        await selectEditorTab(page, '图层')
         await page.locator('.node-name').filter({ hasText: name }).click()
-        await page.getByRole('tab', { name: '属性' }).click()
+        await selectEditorTab(page, '属性')
         alignedXs.push(Number(await commonNodeField(page, 'X').inputValue()))
       }
       expect(new Set(alignedXs.map((value) => value.toFixed(1))).size).toBe(1)
 
-      await page.getByRole('tab', { name: '图层' }).click()
+      await selectEditorTab(page, '图层')
       await page.locator('.node-name').filter({ hasText: '左大括号' }).click()
-      await page.getByRole('tab', { name: '属性' }).click()
+      await selectEditorTab(page, '属性')
       const braceProperties = page.locator('.property-section').filter({ hasText: '图形' })
       await expect(braceProperties.getByText('线条宽度', { exact: true })).toBeVisible()
       await expect(braceProperties.getByText('填充色', { exact: true })).toHaveCount(0)
-      await page.getByRole('tab', { name: '元素' }).click()
+      await selectEditorTab(page, '元素')
       await page.screenshot({
         path: join(root, 'output', 'playwright', 'editor-v1-shapes.png'),
         fullPage: true,
@@ -3148,17 +3272,18 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
         imageOpen: firstImagePath,
         componentOpen: sampleComponentPath,
       })
-      await page.getByRole('tab', { name: '元素' }).click()
-      await page.getByRole('tab', { name: '常用' }).click()
+      await selectEditorTab(page, '元素')
+      await selectEditorTab(page, '常用')
       await page.getByTestId('add-shape-arrow-right').click()
       await addText(page)
-      await page.getByRole('tab', { name: '元素' }).click()
-      await page.getByRole('tab', { name: '常用' }).click()
+      await selectEditorTab(page, '元素')
+      await selectEditorTab(page, '常用')
       await page.getByTestId('add-image').click()
       await page.waitForTimeout(300)
+      await showEditorPanel(page, 'structure')
       await page.getByTestId('add-content-primary').click()
-      await page.getByRole('tab', { name: '元素' }).click()
-      await page.getByRole('tab', { name: '常用' }).click()
+      await selectEditorTab(page, '元素')
+      await selectEditorTab(page, '常用')
       await page.getByTestId('add-shape-brace-pair-horizontal').click()
       await importExternalComponentThroughUi(page)
       await page.waitForTimeout(300)
@@ -3218,7 +3343,7 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
     const { app, page, pageErrors, externalRequests } = await launchEditor()
     try {
       await addText(page)
-      await page.getByRole('tab', { name: '属性' }).click()
+      await selectEditorTab(page, '属性')
       const fontFamily = page.getByLabel('字体', { exact: true })
       await fontFamily.fill('KaiTi')
       await fontFamily.press('Enter')
@@ -3350,10 +3475,11 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
       await renameSelectedNode(page, '局部着重号示例文字')
 
       const beforeFormulaCanvas = await canvas.screenshot()
-      await page.getByRole('tab', { name: '元素' }).click()
-      await page.getByRole('tab', { name: '常用' }).click()
+      await selectEditorTab(page, '元素')
+      await selectEditorTab(page, '常用')
       await page.getByTestId('add-formula').click()
       await expect(page.locator('.runtime-preview-loading')).toHaveCount(0)
+      await showEditorCanvas(page)
       const formulaCanvasBounds = await canvas.boundingBox()
       if (!formulaCanvasBounds) throw new Error('公式编辑画布不可见')
       await page.mouse.dblclick(
@@ -3366,6 +3492,25 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
       const formulaDialogEditor = formulaDialog.getByRole('textbox', {
         name: '公式内容（线性输入）',
       })
+      await expect(formulaDialogEditor).toBeFocused()
+      await formulaDialogEditor.press('Escape')
+      await expect(formulaDialog).toHaveCount(0)
+      await selectEditorTab(page, '图层')
+      await page.locator('.node-name').filter({ hasText: '横排节点级着重号' }).click()
+      await selectEditorTab(page, '属性')
+      await expect(page.getByRole('textbox', { name: '文字内容' }))
+        .toHaveValue('横排节点级着重号')
+      await selectEditorTab(page, '图层')
+      await page.locator('.node-name').filter({ hasText: '公式' }).click()
+      await showEditorCanvas(page)
+      const reopenedFormulaCanvasBounds = await canvas.boundingBox()
+      if (!reopenedFormulaCanvasBounds) throw new Error('取消后的公式画布不可见')
+      await page.mouse.dblclick(
+        reopenedFormulaCanvasBounds.x + reopenedFormulaCanvasBounds.width / 2,
+        reopenedFormulaCanvasBounds.y + reopenedFormulaCanvasBounds.height / 2,
+        { delay: 40 },
+      )
+      await expect(formulaDialog).toBeVisible()
       await expect(formulaDialogEditor).toBeFocused()
       await formulaDialogEditor.fill('\\frac{1}{2} + \\sqrt{x + 1} + x_n^2')
       await expect(formulaDialog.getByTestId('formula-preview').locator('canvas')).toHaveCount(1)
@@ -3380,8 +3525,13 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
       })
       await formulaDialog.getByRole('button', { name: '应用公式' }).click()
       await expect(formulaDialog).toHaveCount(0)
-      await page.getByRole('tab', { name: '属性' }).click()
+      await selectEditorTab(page, '图层')
+      await page.locator('.node-name').filter({ hasText: '公式' }).click()
+      await selectEditorTab(page, '属性')
       await expect(page.getByTestId('formula-properties')).toBeVisible()
+      await expect(page.getByRole('textbox', {
+        name: '公式内容（线性输入）',
+      })).toHaveValue('\\frac{1}{2} + \\sqrt{\\row{x + 1}} + x_{n}^{2}')
       await setCurrentNodeGeometry(page, { X: 300, Y: 430, '宽': 700, '高': 190 })
       const accessibleText = page.getByRole('textbox', { name: '无障碍描述' })
       await accessibleText.fill('二分之一加根号下 x 加一，再加 x 的上标二下标 n')
@@ -3530,11 +3680,11 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
 
       await page.getByRole('button', { name: '新建课件（Ctrl+N）' }).click()
       await page.getByRole('button', { name: '打开工程（Ctrl+O）' }).click()
-      await page.getByRole('tab', { name: '图层' }).click()
+      await selectEditorTab(page, '图层')
       await expect(page.locator('.node-item')).toHaveCount(4)
       await expect(teacherControllerLayerRows(page)).toHaveCount(0)
       await page.locator('.node-name').filter({ hasText: '公式' }).click()
-      await page.getByRole('tab', { name: '属性' }).click()
+      await selectEditorTab(page, '属性')
       await expect(page.getByRole('textbox', { name: '无障碍描述' }))
         .toHaveValue('二分之一加根号下 x 加一，再加 x 的上标二下标 n')
       await expect(page.getByRole('spinbutton', { name: '公式字号' }))
@@ -3765,13 +3915,13 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
       await expect(recoveryDialog).toBeVisible()
       await recoveryDialog.getByRole('button', { name: '恢复课件' }).click()
       await expect(recoveryDialog).toHaveCount(0)
-      await restoredLaunch.page.getByRole('tab', { name: '图层' }).click()
+      await selectEditorTab(restoredLaunch.page, '图层')
       await expect(restoredLaunch.page.locator('.node-item')).toHaveCount(1)
       await expect(teacherControllerLayerRows(restoredLaunch.page)).toHaveCount(0)
       await restoredLaunch.page.locator('.node-item').filter({
         has: restoredLaunch.page.locator('.node-type-icon[title="text"]'),
       }).locator('.node-name').click()
-      await restoredLaunch.page.getByRole('tab', { name: '属性' }).click()
+      await selectEditorTab(restoredLaunch.page, '属性')
       await expect(restoredLaunch.page.locator('.form-textarea')).toHaveValue('自动恢复内容')
       expect(restoredLaunch.pageErrors).toEqual([])
       expect(restoredLaunch.externalRequests).toEqual([])

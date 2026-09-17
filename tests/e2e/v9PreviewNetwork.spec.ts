@@ -286,7 +286,15 @@ test('V9 current/full preview embeds local assets and leases declared origins pe
       },
     })
     const page = await app.firstWindow()
-    await page.getByRole('button', { name: '新建独立课件', exact: true }).click()
+    // Only enter the landing page; keep an existing editor or recovery draft intact.
+    const startupMore = page.locator('.lesson-workspace-more > summary')
+    const startupEditor = page.getByRole('button', { name: '打开工程（Ctrl+O）', exact: true })
+    const startupRecovery = page.getByRole('alertdialog', { name: '发现未完成的本地恢复副本', exact: true })
+    await expect.poll(async () => await startupEditor.isVisible() || await startupMore.isVisible() || await startupRecovery.isVisible()).toBe(true)
+    if (!await startupEditor.isVisible() && await startupMore.isVisible() && !await startupRecovery.isVisible()) {
+      await startupMore.click()
+      await page.getByRole('button', { name: '新建独立课件', exact: true }).click()
+    }
     await page.locator('[data-testid="canvas-stage"] canvas').waitFor()
     const professional = page.getByRole('button', { name: '专业' })
     if (await professional.getAttribute('aria-pressed') !== 'true') await professional.click()
@@ -371,6 +379,8 @@ test('V9 current/full preview embeds local assets and leases declared origins pe
       }, { once: true })
     }, assetA.origin)
     await page.reload({ waitUntil: 'domcontentloaded' })
+    // Reload only needs a visible landing control; it must not create a project.
+    await page.locator('.lesson-workspace-more > summary').click()
     await page.getByRole('button', { name: '新建独立课件', exact: true }).waitFor()
     await expect(page.evaluate(() => window.name)).resolves
       .toBe('old-document-late-invoke-sent')

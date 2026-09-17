@@ -431,7 +431,6 @@ describe('V9 slide product integration on the real V8 UI', () => {
     fireEvent.click(screen.getByTestId('add-text'))
     const nodeId = selectEditingNodes(useEditorStore.getState())[0]!.id
     useEditorStore.getState().selectNode(nodeId)
-    useEditorStore.getState().setEditorMode('simple')
 
     const previews: Array<{ actionType: string }> = []
     const stop = onElementAnimationPreviewRequested((request) => {

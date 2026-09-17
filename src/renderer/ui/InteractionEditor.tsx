@@ -42,6 +42,11 @@ export interface InteractionSceneListItem {
   }
 }
 
+export interface InteractionLocationListItem {
+  readonly id: string
+  readonly label: string
+}
+
 export interface InteractionSceneView {
   readonly id: string
   readonly name: string
@@ -72,7 +77,7 @@ type AutomationRule = InteractionRule & { trigger: AutomationTrigger }
 interface ActionTypeOption {
   value: ActionType
   label: string
-  needs?: 'state' | 'scene' | 'sound' | 'video' | 'node' | 'course-state'
+  needs?: 'state' | 'scene' | 'location' | 'sound' | 'video' | 'node' | 'course-state'
 }
 
 const ACTION_TYPE_OPTIONS: ActionTypeOption[] = [
@@ -80,6 +85,7 @@ const ACTION_TYPE_OPTIONS: ActionTypeOption[] = [
   { value: 'node.exit', label: '元素退出（退场）', needs: 'node' },
   { value: 'presentation.set', label: '切换状态', needs: 'state' },
   { value: 'scene.go', label: '跳转场景', needs: 'scene' },
+  { value: 'location.go', label: '跳转课程位置', needs: 'location' },
   { value: 'step.next', label: '下一步' },
   { value: 'step.previous', label: '上一步' },
   { value: 'scene.next', label: '下一场景' },
@@ -183,6 +189,7 @@ export interface InteractionEditorProps {
   selectedNodeId?: string | null
   activeStateId: string | null
   scenes: ReadonlyArray<InteractionSceneListItem>
+  locations: ReadonlyArray<InteractionLocationListItem>
   sounds: Readonly<Record<string, SoundDefinition>>
   courseState?: readonly CourseStateDeclaration[]
   ruleWarnings?: Readonly<Record<string, readonly string[]>>
@@ -250,6 +257,7 @@ function needsUnavailableTarget(
   counts: {
     states: number
     scenes: number
+    locations: number
     sounds: number
     videos: number
     nodes: number
@@ -259,6 +267,7 @@ function needsUnavailableTarget(
   switch (option.needs) {
     case 'state': return counts.states === 0
     case 'scene': return counts.scenes === 0
+    case 'location': return counts.locations === 0
     case 'sound': return counts.sounds === 0
     case 'video': return counts.videos === 0
     case 'node': return counts.nodes === 0
@@ -272,6 +281,7 @@ function defaultAction(
   targets: {
     stateId?: string
     sceneId?: string
+    locationId?: string
     soundId?: string
     videoId?: string
     nodeId?: string
@@ -299,6 +309,8 @@ function defaultAction(
       return { type, stateId: targets.stateId ?? '' }
     case 'scene.go':
       return { type, sceneId: targets.sceneId ?? '' }
+    case 'location.go':
+      return { type, locationId: targets.locationId ?? '' }
     case 'step.next':
     case 'step.previous':
     case 'scene.next':
@@ -416,6 +428,7 @@ interface RuleDescriptionContext {
   nodes: ReadonlyMap<string, string>
   states: ReadonlyMap<string, string>
   scenes: ReadonlyArray<InteractionSceneListItem>
+  locations: ReadonlyArray<InteractionLocationListItem>
   sounds: ReadonlyMap<string, string>
   animationSteps: ReadonlyMap<string, string>
   courseState: ReadonlyMap<string, CourseStateDeclaration>
@@ -592,6 +605,10 @@ function describeAction(
           ? `的状态“${targetState?.name ?? `缺失状态（${action.targetStateId}）`}”`
           : ''
       }`
+    }
+    case 'location.go': {
+      const target = context.locations.find((location) => location.id === action.locationId)
+      return `跳转到课程位置“${target?.label ?? `缺失位置（${action.locationId}）`}”`
     }
     case 'step.next':
       return '下一步（场景边界自动前进）'
@@ -1326,6 +1343,7 @@ function ActionEditor({
   actionIndex,
   states,
   scenes,
+  locations,
   sounds,
   videos,
   nodes,
@@ -1339,6 +1357,7 @@ function ActionEditor({
   actionIndex: number
   states: ReadonlyArray<{ id: string; name: string }>
   scenes: ReadonlyArray<InteractionSceneListItem>
+  locations: ReadonlyArray<InteractionLocationListItem>
   sounds: SoundDefinition[]
   videos: InteractionLayerTarget[]
   nodes: ReadonlyArray<InteractionLayerTarget>
@@ -1360,12 +1379,14 @@ function ActionEditor({
   }
   const stateIds = new Set(states.map((state) => state.id))
   const sceneIds = new Set(scenes.map((scene) => scene.id))
+  const locationIds = new Set(locations.map((location) => location.id))
   const soundIds = new Set(sounds.map((sound) => sound.id))
   const videoIds = new Set(videos.map((video) => video.id))
   const nodeIds = new Set(nodes.map((node) => node.id))
   const targets = {
     stateId: states[0]?.id,
     sceneId: scenes[0]?.id,
+    locationId: locations[0]?.id,
     soundId: sounds[0]?.id,
     videoId: videos[0]?.id,
     nodeId: nodes[0]?.id,
@@ -1374,6 +1395,7 @@ function ActionEditor({
   const counts = {
     states: states.length,
     scenes: scenes.length,
+    locations: locations.length,
     sounds: sounds.length,
     videos: videos.length,
     nodes: nodes.length,
@@ -1708,6 +1730,26 @@ function ActionEditor({
         </>
       ) : null}
 
+      {action.type === 'location.go' ? (
+        <div className="form-field">
+          <label htmlFor={`${idPrefix}-location`}>目标课程位置</label>
+          <select
+            id={`${idPrefix}-location`}
+            className="form-input"
+            value={action.locationId}
+            onChange={(event) => updateAction({
+              type: 'location.go',
+              locationId: event.currentTarget.value,
+            })}
+          >
+            {missingOption(action.locationId, locationIds, action.locationId)}
+            {locations.map((location) => (
+              <option key={location.id} value={location.id}>{location.label}</option>
+            ))}
+          </select>
+        </div>
+      ) : null}
+
       {action.type === 'audio.play' ? (
         <div className="form-field">
           <label htmlFor={`${idPrefix}-sound`}>声音</label>
@@ -1809,6 +1851,7 @@ export function InteractionEditor({
   sourceRules,
   activeStateId,
   scenes,
+  locations,
   sounds,
   courseState = [],
   onAddRule,
@@ -2022,6 +2065,7 @@ export function InteractionEditor({
                 actionIndex={actionIndex}
                 states={states}
                 scenes={scenes}
+                locations={locations}
                 sounds={soundList}
                 videos={videoNodes}
                 nodes={availableNodes}
@@ -2105,6 +2149,7 @@ export function SceneAutomationEditor({
   activeStateId,
   authoringStates,
   scenes,
+  locations,
   sounds,
   courseState = [],
   ruleWarnings,
@@ -2174,10 +2219,11 @@ export function SceneAutomationEditor({
     nodes: new Map(availableNodes.map((node) => [node.id, node.name])),
     states: new Map(states.map((state) => [state.id, state.name])),
     scenes,
+    locations,
     sounds: new Map(soundList.map((sound) => [sound.id, sound.name])),
     animationSteps: new Map(animationSteps.map((step) => [step.id, step.label])),
     courseState: new Map(courseState.map((state) => [state.key, state])),
-  }), [animationSteps, availableNodes, courseState, scenes, soundList, states])
+  }), [animationSteps, availableNodes, courseState, locations, scenes, soundList, states])
   const [newTriggerType, setNewTriggerType] = useState<AutomationTriggerType>(
     'scene.enter',
   )
@@ -2741,6 +2787,7 @@ export function SceneAutomationEditor({
                   actionIndex={actionIndex}
                   states={states}
                   scenes={scenes}
+                  locations={locations}
                   sounds={soundList}
                   videos={videoNodes}
                   nodes={availableNodes}

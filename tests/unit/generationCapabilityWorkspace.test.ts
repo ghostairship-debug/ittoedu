@@ -533,7 +533,7 @@ describe('offline capability workspace', () => {
 })
 
 
-it('QP06 bundled helper writes a valid candidate in an unrelated Chinese path and rejects an operation-target mismatch', async () => {
+it('U02-default-delivery bundled helper writes a valid candidate in an unrelated Chinese path and rejects an operation-target mismatch', async () => {
   const directory = await mkdtemp(path.join(os.tmpdir(), '候选 helper 无仓库 '))
   try {
     const request = requestFixture(), root = await new CandidateStaging(directory).create(request)

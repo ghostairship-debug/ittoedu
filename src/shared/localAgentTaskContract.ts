@@ -1,4 +1,6 @@
 import { z } from 'zod'
+import { generationSemanticChangesSchema } from './generationChangeSummary'
+import { generationExecutionEvidenceSchema } from './generationExecutionEvidence'
 import { authoringObservationSpatialViewSchema } from './authoringObservation'
 import { aiTaskIdentityFields, aiQuestionSchema, aiInputDeliverySchema, type AiUserInput } from './localAgentInteraction'
 import { workspaceIdentityV1Schema, aiWorkspaceIdentitySchema, lessonAgentWorkspaceSchema, workspaceIdentityKey } from './workspaceIdentity'
@@ -135,6 +137,8 @@ export const aiHostResultSchema = aiProposalIdentitySchema.extend({
   beforeRevision: revision, afterRevision: revision,
   // Only real live-project receipts belong here. Preparation effects are not receipts.
   receipts: z.array(generationCommitReceiptSchema).max(1),
+  semanticChanges: generationSemanticChangesSchema.optional(),
+  executionEvidence: generationExecutionEvidenceSchema.optional(),
   summary: z.string().max(4000),
   diagnostics: z.array(z.object({ code: identity, message: z.string().min(1).max(4000), path: z.array(z.union([z.string(), z.number()])).optional() }).strict()).max(1000),
   afterCommit: generationAfterCommitSchema.optional(), failure: generationFailureSchema.optional(),

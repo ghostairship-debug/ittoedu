@@ -15,14 +15,16 @@ test('manual reviewed current documents apply the repaired native module on an o
  const app = await electron.launch({ args: ['.', `--user-data-dir=${profile}`], cwd: root, env: { ...process.env, VITE_DEV_SERVER_URL: '', [BACKGROUND_E2E_ENV]: '1' } })
  const page = await app.firstWindow()
  try {
-  await app.evaluate(({ dialog }, directory) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [directory] }) }, workspace)
-  await page.getByRole('button', { name: '打开工作空间', exact: true }).first().click()
-  await expect(page.locator('.lesson-workspace-lessons')).toBeVisible()
+  // V3.1：保留 profile 重开自动回到上次工作空间
+  await expect(page.locator('.lesson-workspace-toolbar')).toBeVisible()
+  await expect(page.locator('.lesson-workspace-navigation')).toBeVisible()
   const restore = page.getByRole('button', { name: '恢复课件', exact: true })
   const recoveryVisible = await restore.waitFor({ state: 'visible', timeout: 2000 }).then(() => true, () => false)
   writeFileSync(join(output, 'recovery-observation.json'), JSON.stringify({ recoveryVisible, observedAt: new Date().toISOString() }, null, 2))
   if (recoveryVisible) throw new Error('A real recovery is available; preserve and inspect it before selecting a new target')
-  await page.locator('.lesson-workspace-lessons').getByRole('button', { name: /并联支路证据推理手动课例/ }).click()
+  // V3.1：课例入口已从「更多」菜单移除，经目录树点选 .h5lesson 恢复课例上下文
+  await page.locator('.lesson-directory-tree').getByRole('button', { name: '并联支路证据推理手动课例', exact: true }).click()
+  await page.locator('.lesson-directory-tree').getByRole('button', { name: 'course.h5lesson', exact: true }).click()
   const panel = page.getByRole('region', { name: '课例创作流程' }); await expect(panel).toBeVisible()
   const lesson = await page.evaluate(async directory => (await window.desktopAPI!.lesson!({ operation: 'list-lessons', directory })).lessons!.find(value => value.identity.lessonId === '30965ee9-8925-427d-bfa4-b5fedef5e86a')!, workspace)
   const conversationId = '9f30c84d-b856-467c-962d-ac265297f4ba'

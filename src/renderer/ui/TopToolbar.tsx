@@ -12,7 +12,6 @@ import {
   Pencil,
   Redo2,
   History,
-  MoreHorizontal,
   Save,
   SaveAll,
   ShieldCheck,
@@ -108,10 +107,8 @@ export function TopToolbar({
   const canUndo = useEditorStore(selectCanUndoActiveSurface)
   const canRedo = useEditorStore(selectCanRedoActiveSurface)
   const activeSceneId = useEditorStore(selectActiveSceneId)
-  const editorMode = useEditorStore((state) => state.editorMode)
   const undo = useEditorStore((state) => state.undo)
   const redo = useEditorStore((state) => state.redo)
-  const setEditorMode = useEditorStore((state) => state.setEditorMode)
   const renameProject = useEditorStore((state) => state.renameProject)
   const courseDocument = useEditorStore(selectActiveCourseProjectDocument)
   const slideScenes = useEditorStore(selectSlideSceneList)
@@ -137,25 +134,6 @@ export function TopToolbar({
           <Box size={18} strokeWidth={2.2} />
         </span>
         <span>{APP_NAME}</span>
-      </div>
-
-      <div className="editor-mode-switch" role="group" aria-label="编辑模式">
-        <button
-          type="button"
-          className={editorMode === 'simple' ? 'is-active' : ''}
-          aria-pressed={editorMode === 'simple'}
-          onClick={() => setEditorMode('simple')}
-        >
-          简洁
-        </button>
-        <button
-          type="button"
-          className={editorMode === 'professional' ? 'is-active' : ''}
-          aria-pressed={editorMode === 'professional'}
-          onClick={() => setEditorMode('professional')}
-        >
-          专业
-        </button>
       </div>
 
       <div className="toolbar__group">
@@ -207,7 +185,7 @@ export function TopToolbar({
         {onImportPptx && <ToolButton label="导入 PPT" title="导入 PPT（.pptx）" disabled={busy} onClick={onImportPptx}>
           <FileUp size={18} />
         </ToolButton>}
-        {editorMode === 'professional' && <details className="recent-projects">
+        <details className="recent-projects">
           <summary className="tool-button" title="打开最近工程">
             <History size={18} />
             <span>最近</span>
@@ -232,13 +210,13 @@ export function TopToolbar({
               </button>
             ))}
           </div>
-        </details>}
+        </details>
         <ToolButton label="保存" title="保存（Ctrl+S）" disabled={busy} onClick={() => onSave(false)}>
           <Save size={18} />
         </ToolButton>
-        {editorMode === 'professional' && <ToolButton label="另存为" title="另存为" disabled={busy} onClick={() => onSave(true)}>
+        <ToolButton label="另存为" title="另存为" disabled={busy} onClick={() => onSave(true)}>
           <SaveAll size={18} />
-        </ToolButton>}
+        </ToolButton>
       </div>
 
       <div className="toolbar__separator" />
@@ -279,68 +257,6 @@ export function TopToolbar({
         </div>
       </details>}
 
-      {editorMode === 'simple' && (
-        <details className="toolbar-more-menu">
-          <summary className="tool-button" title="更多工程操作" aria-label="更多工程操作">
-            <MoreHorizontal size={18} />
-            <span>更多</span>
-          </summary>
-          <div className="toolbar-more-menu__panel" role="menu" aria-label="更多工程菜单">
-            <button
-              type="button"
-              role="menuitem"
-              disabled={busy}
-              onClick={(event) => {
-                event.currentTarget.closest('details')?.removeAttribute('open')
-                onSave(true)
-              }}
-            >
-              <SaveAll size={16} />
-              <span><strong>另存为</strong><small>保存一份新的工程副本</small></span>
-            </button>
-            <button
-              type="button"
-              role="menuitem"
-              aria-label={healthSummary.total === 0
-                ? '工程检查：未发现问题'
-                : `工程检查：${healthSummary.error} 个错误，${healthSummary.warning} 个提醒`}
-              disabled={busy}
-              onClick={(event) => {
-                event.currentTarget.closest('details')?.removeAttribute('open')
-                onOpenHealth()
-              }}
-            >
-              <ShieldCheck size={16} />
-              <span>
-                <strong>工程检查</strong>
-                <small>{healthSummary.total === 0
-                  ? '未发现问题'
-                  : `${healthSummary.error} 个错误，${healthSummary.warning} 个提醒`}</small>
-              </span>
-            </button>
-            <div className="toolbar-more-menu__recent">
-              <strong><History size={14} />最近工程</strong>
-              {recentProjects.length === 0 ? (
-                <small>还没有最近工程</small>
-              ) : recentProjects.map((recent) => (
-                <button
-                  type="button"
-                  key={recent.path}
-                  title={recent.path}
-                  onClick={(event) => {
-                    event.currentTarget.closest('details')?.removeAttribute('open')
-                    onOpenRecent(recent.path)
-                  }}
-                >
-                  <span>{recent.name}</span>
-                  <small>{recent.path}</small>
-                </button>
-              ))}
-            </div>
-          </div>
-        </details>
-      )}
-
       <div className="toolbar__spacer" />
 
       <div className="toolbar__project">
@@ -378,7 +294,7 @@ export function TopToolbar({
         </span>
       </div>
 
-      {editorMode === 'professional' && <ToolButton
+      <ToolButton
         label="工程检查"
         title={healthSummary.total === 0
           ? '工程检查：未发现问题'
@@ -394,7 +310,7 @@ export function TopToolbar({
             </small>
           )}
         </span>
-      </ToolButton>}
+      </ToolButton>
 
       <ToolButton
         label="整课预览"

@@ -308,6 +308,7 @@ interface ComponentCreateContextBase {
   actions: Readonly<{
     // sceneId 只能是 Slide 场景 ID；Flow / Spatial locationId 不能传入这里。
     goToScene(sceneId: string, targetStateId?: string): boolean
+    goToLocation?(locationId: string): boolean
     nextScene(): boolean
     previousScene(): boolean
     replayScene(): boolean
@@ -430,6 +431,9 @@ function branch() {
   ctx.actions.goToScene('scene_summary', 'state_complete')
 }
 ```
+
+
+精确跳转到已有 Slide、Flow 或 Spatial 课程位置使用可选 `ctx.actions.goToLocation?.(locationId)`；只接受正式 `locations` 的稳定 ID。Native 点击规则使用 strict `{ type: "location.go", locationId }`，属于独占末执行组的终结导航；作者工具提供 `go-to-location`。目标 Slide 使用该位置指定状态或初始状态，Flow/Spatial 使用位置自身锚点。请求沿同一 Published 导航事务、历史及导航守卫执行，保留课程状态；无效目标、当前位置及失效载体返回 `false`，编辑/捕获模式禁止执行。同步 `true` 仅表示请求已接受，不能替代目的位置观察。`goToScene` 继续只接受 Slide sceneId；精确跨表面跳转不得用连续跳页或延时模拟。
 
 动作返回同步 `boolean`：目标不存在、越过首页/末页或当前页无法重入时可能为 `false`。`goToScene(sceneId, targetStateId?)` 的第一个参数只能使用当前课程中列出的 **Slide sceneId**；Flow 或 Spatial 的 `locationId` 不是此 API 的输入，传入会返回 `false`。需要按整课的当前顺序从 Slide 进入 Flow、再进入 Spatial 时，使用 `nextScene()`（反向为 `previousScene()`），不要把 locationId 转给 `goToScene()`。`goToScene()` 的跨 location 请求以及 `nextScene()` / `previousScene()` 会进入顶层 navigation guard；`replayScene()` 是同 location 重播，不经过导航守卫；`restartCourse()` 明确绕过守卫。`goToScene()` 可原子进入目标 Slide 场景的指定命名状态；省略或状态引用失效时进入目标场景初始状态。同场景调用可只切换状态；若导航守卫把跨 location 请求重定向到另一个场景，原请求的目标状态不会套用到重定向场景。
 

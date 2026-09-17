@@ -30,6 +30,8 @@ import { FlowLocationWorkspace, type FlowLocationWorkspaceProps } from '@/render
 import { FLOW_WORKSPACE_HEADER_HEIGHT } from '@/renderer/ui/FlowBlockContextToolbar'
 import { PlaybackViewSession } from '@/player/playbackViewSession'
 import { useEditorStore } from '@/renderer/store/editorStore'
+import { authoringObservationDraftToken } from '@/renderer/authoring/generation/authoringObservation'
+import type { FlowDocumentDraft } from '@/renderer/authoring/flowDocumentDraft'
 import {
   extractFlowRichTextFromEditor,
   updateFlowTextDraft,
@@ -313,6 +315,30 @@ describe('FlowWorkspace paper', () => {
         commands={{ run: () => ({ ok: false, historyEntry: false }) }}
       />,
     )).toThrow(FLOW_SESSIONLESS_ERROR)
+  })
+
+  it('binds the authoring observation identity to the rendered document source draft', () => {
+    const project = createFlowProject()
+    const draft: FlowDocumentDraft = {
+      surfaceId: 'flow', revision: project.revision, source: '# 尚未提交的有效正文\n', diagnostics: [], composing: false,
+    }
+    render(
+      <ProductFlowWorkspace
+        view={buildFlowEditorView({ project, locationId: 'h1' })}
+        sessionToken={{ locationId: 'h1', surfaceType: 'flow', revision: project.revision, generation: 1 }}
+        assets={project.assets}
+        selection={null}
+        documentDraft={draft}
+        textEdit={null}
+        commands={{ run: () => ({ ok: false, historyEntry: false }) }}
+      />,
+    )
+
+    expect(screen.getByTestId('flow-workspace')).toHaveAttribute(
+      'data-observation-draft-token',
+      String(authoringObservationDraftToken(draft)),
+    )
+    expect(screen.getByRole('textbox', { name: '正文源文编辑' })).toHaveTextContent('尚未提交的有效正文')
   })
 
   it('paints idle paragraph runs instead of plain text', () => {

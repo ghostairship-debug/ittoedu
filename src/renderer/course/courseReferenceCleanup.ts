@@ -124,6 +124,7 @@ function repairInteractionReferences(
   interactions: InteractionRule[],
   removedSceneIds: ReadonlySet<string>,
   removedLayerItemIds: ReadonlySet<string>,
+  removedLocationIds: ReadonlySet<string>,
 ): InteractionRule[] {
   const removedActionIds = new Set<string>()
   let remaining = interactions.flatMap((rule) => {
@@ -143,6 +144,8 @@ function repairInteractionReferences(
       const action = step.action
       const removed = (
         action.type === 'scene.go' && removedSceneIds.has(action.sceneId)
+      ) || (
+        action.type === 'location.go' && removedLocationIds.has(action.locationId)
       ) || (
         'nodeId' in action && removedLayerItemIds.has(action.nodeId)
       )
@@ -230,11 +233,13 @@ function repairProjectInteractionReferences(
   project: CourseProjectDocument,
   removedSceneIds: ReadonlySet<string>,
   removedLayerItemIds: ReadonlySet<string>,
+  removedLocationIds: ReadonlySet<string>,
 ): void {
   project.globalInteractions = repairInteractionReferences(
     project.globalInteractions,
     removedSceneIds,
     removedLayerItemIds,
+    removedLocationIds,
   )
   project.surfaces.forEach((surface) => {
     if (surface.type !== 'slide') return
@@ -243,6 +248,7 @@ function repairProjectInteractionReferences(
         scene.interactions,
         removedSceneIds,
         removedLayerItemIds,
+        removedLocationIds,
       )
     })
   })
@@ -356,11 +362,16 @@ export function repairRemovedCourseReferences(
     removedLayerItemCandidates,
     remainingLayerItemIds(project),
   )
-  if (removedInteractionSceneIds.size > 0 || removedLayerItemIds.size > 0) {
+  const removedLocationIds = unresolvedIds(
+    removed.removedLocationIds,
+    new Set(project.locations.map((location) => location.id)),
+  )
+  if (removedInteractionSceneIds.size > 0 || removedLayerItemIds.size > 0 || removedLocationIds.size > 0) {
     repairProjectInteractionReferences(
       project,
       removedInteractionSceneIds,
       removedLayerItemIds,
+      removedLocationIds,
     )
   }
   if (removedLayerItemIds.size > 0) {

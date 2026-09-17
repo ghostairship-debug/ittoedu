@@ -54,15 +54,22 @@ test('r19 manual Luna: PDF and PPTX, inspect and confirm each actual stage', asy
     expect(configured.enabled).toBe(true)
     expect(configured.capabilities).toBeTruthy()
     await app.evaluate(({ dialog }, workspace) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [workspace] }) }, workspace)
-    await page.getByRole('button', { name: '打开工作空间', exact: true }).first().click()
+    // V3.1：保留 profile 重开自动回到上次工作空间，全新运行才出现「打开工作空间」
+    const openWorkspace = page.getByRole('button', { name: '打开工作空间', exact: true }).first()
+    if (await openWorkspace.waitFor({ state: 'visible', timeout: 5000 }).then(() => true, () => false)) await openWorkspace.click()
+    await expect(page.locator('.lesson-workspace-toolbar')).toBeVisible()
     if (!existsSync(join(workspace, '并联支路证据推理手动课例', '.courseware', 'lesson.json'))) {
-      await page.getByRole('button', { name: '新建课例', exact: true }).click()
-      await page.getByRole('textbox', { name: '课例名称' }).fill('并联支路证据推理手动课例')
-      await page.getByRole('button', { name: '创建课例', exact: true }).click()
+      await page.getByRole('button', { name: '新建课件', exact: true }).click()
+      await page.getByRole('textbox', { name: '课件名称' }).fill('并联支路证据推理手动课例')
+      await page.getByRole('button', { name: '创建课件', exact: true }).click()
+      // 课例段已从导航移除：创建后直接激活课例上下文
+      await expect(page.locator('.lesson-workflow')).toBeVisible()
+    } else {
+      // V3.1：课例入口已从「更多」菜单移除，经目录树点选 .h5lesson 恢复课例上下文
+      await page.locator('.lesson-directory-tree').getByRole('button', { name: '并联支路证据推理手动课例', exact: true }).click()
+      await page.locator('.lesson-directory-tree').getByRole('button', { name: 'course.h5lesson', exact: true }).click()
+      await expect(page.locator('.lesson-workflow')).toBeVisible()
     }
-    const lessonButton = page.locator('.lesson-workspace-lessons').getByRole('button', { name: /并联支路证据推理手动课例/ })
-    await expect(lessonButton).toBeVisible()
-    await lessonButton.click()
     const lesson = await page.evaluate(async directory => (await window.desktopAPI!.lesson!({ operation: 'list-lessons', directory })).lessons![0]!, workspace)
     const conversation = await page.evaluate(async lesson => (await window.desktopAPI!.lesson!({ operation: 'list-conversations', lesson })).conversations![0]!, lesson.identity)
     const context = { lesson: lesson.identity, conversationId: conversation.conversationId }
@@ -80,8 +87,8 @@ test('r19 manual Luna: PDF and PPTX, inspect and confirm each actual stage', asy
       await article.getByRole('checkbox', { name: '用于本课例创作' }).check()
     }
     const panel = page.getByRole('region', { name: '课例创作流程' })
-    await panel.getByRole('button', { name: '手动分阶段', exact: true }).click()
-    await expect(panel.getByRole('button', { name: '手动分阶段', exact: true })).toHaveAttribute('aria-pressed', 'true')
+    await panel.getByRole('button', { name: '手动模式', exact: true }).click()
+    await expect(panel.getByRole('button', { name: '手动模式', exact: true })).toHaveAttribute('aria-pressed', 'true')
     await expect.poll(async () => (await page.evaluate(context => window.desktopAPI!.lessonAuthoring!({ operation: 'read', ...context }), context)).view.state.materials.length).toBe(2)
     await panel.getByRole('textbox', { name: '课例创作目标' }).fill('八年级已学闭合回路的学生，20分钟探究课。采用课例PDF与PPTX的正文和真实电路图，以并联支路的独立性为新知识：先沿公共节点A、B追踪两条经电源的闭合路径，预测取下L1后L2是否仍亮，再用断开干路开关S的对照解释为什么两灯都灭；比较串联只有一条通路。使用理想电源，只比较亮灭。最后给出L1不亮而L2亮的诊断情境，让学生选择检查位置并用闭合路径证据解释。图必须真实表达两条支路和干路开关，不能把占位色块当电路。每次仅产出当前阶段真实文件，等我查看确认后再进入下一阶段。')
     const roles = ['teaching-brief', 'teaching-plan', 'presentation-brief', 'presentation-script'] as const
@@ -160,7 +167,10 @@ test('r19 manual teacher removes leaked validator headings through the source UI
   const edits: { role: string; before: string; after: string }[] = []
   try {
     await app.evaluate(({ dialog }, workspace) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [workspace] }) }, workspace)
-    await page.getByRole('button', { name: '打开工作空间', exact: true }).first().click()
+    // V3.1：保留 profile 重开自动回到上次工作空间，全新运行才出现「打开工作空间」
+    const openWorkspace = page.getByRole('button', { name: '打开工作空间', exact: true }).first()
+    if (await openWorkspace.waitFor({ state: 'visible', timeout: 5000 }).then(() => true, () => false)) await openWorkspace.click()
+    await expect(page.locator('.lesson-workspace-toolbar')).toBeVisible()
     const restore = page.getByRole('button', { name: '恢复课件', exact: true })
     const hasRecovery = await restore.waitFor({ state: 'visible', timeout: 3000 }).then(() => true, () => false)
     if (hasRecovery) {
@@ -171,7 +181,10 @@ test('r19 manual teacher removes leaked validator headings through the source UI
       await page.getByRole('button', { name: '保存（Ctrl+S）', exact: true }).click()
       await expect.poll(() => existsSync(partialPath)).toBe(true)
     }
-    await page.locator('.lesson-workspace-lessons').getByRole('button', { name: /并联支路证据推理手动课例/ }).click()
+    // V3.1：课例入口已从「更多」菜单移除，经目录树点选 .h5lesson 恢复课例上下文
+    await page.locator('.lesson-directory-tree').getByRole('button', { name: '并联支路证据推理手动课例', exact: true }).click()
+    await page.locator('.lesson-directory-tree').getByRole('button', { name: 'course.h5lesson', exact: true }).click()
+    await expect(page.locator('.lesson-workflow')).toBeVisible()
     const lesson = await page.evaluate(async directory => (await window.desktopAPI!.lesson!({ operation: 'list-lessons', directory })).lessons![0]!, workspace)
     const conversation = await page.evaluate(async lesson => (await window.desktopAPI!.lesson!({ operation: 'list-conversations', lesson })).conversations![0]!, lesson.identity)
     const context = { lesson: lesson.identity, conversationId: conversation.conversationId }

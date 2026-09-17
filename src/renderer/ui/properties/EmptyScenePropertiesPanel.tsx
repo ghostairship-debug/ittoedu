@@ -57,7 +57,6 @@ export interface EmptyScenePropertiesContext {
   readonly slideSurface: EmptySceneSlideSurfaceView | null
   readonly scene: EmptySceneSceneView | null
   readonly state: EmptySceneStateView | null
-  readonly editorMode: 'simple' | 'professional'
   readonly runtime: RuntimePropertiesContext | null
   readonly commands: {
     readonly updateName: (name: string) => void
@@ -200,22 +199,12 @@ export function EmptyScenePropertiesPanel({
             testId="state-background-properties"
           />
         )}
-        {context.editorMode === 'professional' ? (
-          <>
-            <section className="property-section">
-              <h3 className="property-title"><Workflow size={14} />场景规则</h3>
-              <p className="property-hint">当前场景有 {scene?.interactionCount ?? 0} 条规则。规则按“何时发生 → 是否满足条件 → 做什么”组织。</p>
-              <button type="button" className="secondary-button" onClick={context.commands.openAutomation}><Workflow size={14} />打开规则面板</button>
-            </section>
-            {context.runtime && <RuntimePropertiesPanel context={context.runtime} />}
-          </>
-        ) : (scene?.interactionCount ?? 0) > 0 ? (
-          <section className="property-section simple-rule-summary">
-            <h3 className="property-title"><Workflow size={14} />专业互动</h3>
-            <p className="property-hint">此场景已有 {scene?.interactionCount} 条专业规则，播放时会继续生效。</p>
-            <button type="button" className="secondary-button" onClick={context.commands.openProfessionalAutomation}>切换专业模式查看</button>
-          </section>
-        ) : null}
+        <section className="property-section">
+          <h3 className="property-title"><Workflow size={14} />场景规则</h3>
+          <p className="property-hint">当前场景有 {scene?.interactionCount ?? 0} 条规则。规则按“何时发生 → 是否满足条件 → 做什么”组织。</p>
+          <button type="button" className="secondary-button" onClick={context.commands.openAutomation}><Workflow size={14} />打开规则面板</button>
+        </section>
+        {context.runtime && <RuntimePropertiesPanel context={context.runtime} />}
       </div>
     </PropertyDraftBoundary>
   )

@@ -6,12 +6,13 @@ import { createLessonDocumentFiles } from '../../src/main/lessonDocumentFiles'
 import type { DocumentFileRef } from '../../src/shared/document/ports'
 
 describe('lessonDocumentFiles real disk', () => {
-  let directory: string, ref: DocumentFileRef, files: ReturnType<typeof createLessonDocumentFiles>
+  let directory: string, lessonDirectory: string, ref: DocumentFileRef, files: ReturnType<typeof createLessonDocumentFiles>
   beforeEach(async () => {
     directory = await fs.mkdtemp(path.join(os.tmpdir(), 'lesson-doc-'))
-    ref = { lessonId: 'lesson-a', lessonDirectory: path.join(directory, 'lesson'), relativePath: 'plan.md' }
-    await fs.mkdir(ref.lessonDirectory)
-    files = createLessonDocumentFiles({ recoveryDirectory: path.join(directory, 'recovery'), validateTarget: async target => { if (target.lessonId !== 'lesson-a') throw new Error('wrong lesson') } })
+    lessonDirectory = path.join(directory, 'lesson')
+    ref = { kind: 'lesson', lessonId: 'lesson-a', lessonDirectory, relativePath: 'plan.md' }
+    await fs.mkdir(lessonDirectory)
+    files = createLessonDocumentFiles({ recoveryDirectory: path.join(directory, 'recovery'), validateTarget: async target => { if (target.kind !== 'lesson' || target.lessonId !== 'lesson-a') throw new Error('wrong lesson') } })
   })
   afterEach(async () => { await fs.rm(directory, { recursive: true, force: true }) })
   const save = (source: string, expectedVersion: Awaited<ReturnType<typeof files.openDocument>>['version'] | null = null, operationId = source) => files.saveDocument({ ref, source, expectedVersion, operationId, attachments: [] })
@@ -32,6 +33,24 @@ describe('lessonDocumentFiles real disk', () => {
     expect(result.status).toBe('failed')
     expect((await files.openDocument(ref)).source).toBe('磁盘稿')
     expect((await files.readRecovery(ref))?.source).toBe('教师未保存稿')
+  })
+  it('U08-write-guard awaits before rename, keeps a rejected formal draft off disk, and leaves ordinary invalid saves ungated', async () => {
+    await save('原稿')
+    const invalidSource = '```cw-object-v1\n{not-json}\n```\n'
+    const ordinary = await files.saveDocument({ ref, source: invalidSource, expectedVersion: (await files.openDocument(ref)).version, operationId: 'ordinary-invalid', attachments: [] })
+    expect(ordinary.status).toBe('saved')
+    expect((await files.openDocument(ref)).source).toBe(invalidSource)
+
+    const disk = await files.openDocument(ref), calls: string[] = []
+    const guard = async () => {
+      calls.push(`guard-${calls.length + 1}`)
+      if (calls.length === 2) throw new Error('正式稿门禁拒绝')
+    }
+    const rejected = await files.saveDocumentIfNoRecovery({ ref, expectedVersion: disk.version, source: '正式候选稿', operationId: 'guarded-formal', attachments: [] }, guard)
+    expect(rejected).toMatchObject({ status: 'failed', recovery: 'saved' })
+    expect(calls).toEqual(['guard-1', 'guard-2'])
+    expect((await files.openDocument(ref)).source).toBe(invalidSource)
+    expect((await files.readRecovery(ref))?.source).toBe('正式候选稿')
   })
   it('compares pending attachment bytes rather than treating every attachment entry as unsaved', async () => {
     await files.saveDocument({ ref, source: '![图](image.png)', expectedVersion: null, operationId: 'asset-base', attachments: [{ relativePath: 'image.png', bytes: new Uint8Array([1, 2]) }] })
@@ -55,11 +74,11 @@ describe('lessonDocumentFiles real disk', () => {
     expect(result.status).toBe('saved')
     const disk = await files.openDocument(ref)
     expect(disk.version.attachments).toHaveLength(1)
-    await fs.writeFile(path.join(ref.lessonDirectory, 'assets/a.png'), new Uint8Array([3]))
+    await fs.writeFile(path.join(lessonDirectory, 'assets/a.png'), new Uint8Array([3]))
     expect((await save('新稿', disk.version)).status).toBe('conflict')
   })
   it('preserves recoverable source on write failure and confines document paths', async () => {
-    const result = await files.saveDocument({ ref: { ...ref, relativePath: '../outside.md' }, source: '草稿', expectedVersion: null, operationId: 'bad', attachments: [] })
+    const result = await files.saveDocument({ ref: { kind: 'lesson', lessonId: 'lesson-a', lessonDirectory, relativePath: '../outside.md' }, source: '草稿', expectedVersion: null, operationId: 'bad', attachments: [] })
     expect(result).toMatchObject({ status: 'failed', recovery: 'saved' })
     await expect(fs.access(path.join(directory, 'outside.md'))).rejects.toThrow()
   })
@@ -137,7 +156,7 @@ describe('lessonDocumentFiles real disk', () => {
     const version = (await files.openDocument(ref)).version
     const attachments = [{ relativePath: 'assets/a.png', bytes: new Uint8Array([1, 2, 3]) }]
     await files.preserveDraft(ref, '![图](assets/a.png)', version, attachments)
-    await expect(fs.access(path.join(ref.lessonDirectory, 'assets/a.png'))).rejects.toThrow()
+    await expect(fs.access(path.join(lessonDirectory, 'assets/a.png'))).rejects.toThrow()
     const recovered = await files.readRecovery(ref)
     expect(recovered?.baseSource).toBe('原稿')
     expect(recovered?.attachments).toEqual(attachments)

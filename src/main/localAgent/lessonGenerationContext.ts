@@ -12,7 +12,7 @@ export async function readLessonGenerationContext(lesson: LessonIdentity, deps: 
   }
   const documents = []
   for (const item of view.documents) {
-    const disk = await deps.files.openDocument({ lessonId: lesson.lessonId, lessonDirectory: lesson.normalizedDirectory, relativePath: item.relativePath })
+    const disk = await deps.files.openDocument({ kind: 'lesson' as const, lessonId: lesson.lessonId, lessonDirectory: lesson.normalizedDirectory, relativePath: item.relativePath })
     if (JSON.stringify(disk.version) !== JSON.stringify(item.version)) throw new Error('当前教学文件在读取期间改变，请重新确认')
     documents.push({ role: item.role, path: item.relativePath, status: item.status, content: disk.source, version: disk.version })
   }

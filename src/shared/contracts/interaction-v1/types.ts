@@ -39,6 +39,7 @@ export const INTERACTION_ACTION_TYPES = [
   'step.previous',
   'presentation.set',
   'scene.go',
+  'location.go',
   'scene.next',
   'scene.previous',
   'scene.replay',
@@ -216,6 +217,7 @@ export type InteractionActionPayload =
       targetStateId?: string
     }
   | { type: 'scene.next' }
+  | { type: 'location.go'; locationId: string }
   | { type: 'scene.previous' }
   | { type: 'scene.replay' }
   | { type: 'course.restart' }
@@ -262,6 +264,7 @@ export type TerminalNavigationAction = Extract<
       | 'step.next'
       | 'step.previous'
       | 'scene.go'
+      | 'location.go'
       | 'scene.next'
       | 'scene.previous'
       | 'scene.replay'
@@ -273,6 +276,7 @@ const terminalNavigationTypes = new Set<InteractionActionPayload['type']>([
   'step.next',
   'step.previous',
   'scene.go',
+  'location.go',
   'scene.next',
   'scene.previous',
   'scene.replay',

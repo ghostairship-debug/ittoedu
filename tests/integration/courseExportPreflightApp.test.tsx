@@ -158,6 +158,7 @@ vi.mock('../../src/renderer/export/loadPlayerBundle', () => ({
 }))
 
 vi.mock('../../src/renderer/ui/coursePlayerTryRun', () => ({
+  reportTryRunInteractionDiagnostic: vi.fn(),
   attachPublishedCourseStageFit: vi.fn(() => () => undefined),
   mountPublishedCourseTryRun: publishedPreviewProbe.mount,
 }))

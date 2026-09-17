@@ -14,6 +14,7 @@ import type { CourseProjectDocument } from '../../../shared/courseProjectTypes'
 import type { ComponentPackageData } from '../../../shared/componentTypes'
 import { analyzeCourseAssetReferences } from '../../../shared/contracts/course-project-v9/assetReferences'
 import { projectEffectiveLayers } from '../../course/effectiveLayerProjection'
+import { captureGenerationTaskFacts } from './generationTaskFacts'
 import { buildFlowEditorView } from '../../course/flowEditorView'
 import { generationNavigationContext } from './generationNavigationContext'
 import { bytesToBase64 } from '../../export/base64'
@@ -574,6 +575,11 @@ export function createAuthoringObservationController(ports: AuthoringObservation
           unavailableOriginalImages: imageResources.unavailableOriginalImages,
           unavailableDerivedImages,
           ...structure,
+          taskFacts: captureGenerationTaskFacts({ document: structural.snapshot.project,
+            sessionToken: { locationId: host.facts.locationId, surfaceType: structure.surfaceType,
+              revision: structural.snapshot.project.revision, generation: before.sessionGeneration },
+            locationId: host.facts.locationId, stateId: host.facts.stateId,
+            selectedIds: before.selectedIds, scope: 'selection', instruction: '', componentPackages: before.componentPackages }),
           spatialView: host.spatialView,
         })
         const entries: PlannedResource[] = [{

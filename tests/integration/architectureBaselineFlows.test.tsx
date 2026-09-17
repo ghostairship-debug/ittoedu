@@ -114,7 +114,6 @@ describe('ARCH-0 representative functional baseline', () => {
       const report = validateCourseProjectArchiveBytes(input.bytes, input.filename)
       const expectedHealthWarningCodes = id === 'slide-heavy'
         ? new Set([
-            'published-interaction-action-unsupported',
             'text-capacity-overflow',
           ])
         : id === 'mixed-spatial'

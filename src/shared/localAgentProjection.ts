@@ -74,6 +74,8 @@ export function projectAiHostResult(result: AiHostResult): LocalAgentHostResult 
     requestId: result.requestId, candidateId: result.candidateId, summary: result.summary,
     status: result.status === 'failed' ? 'rejected' : result.status,
     beforeRevision: result.beforeRevision, afterRevision: result.afterRevision,
+    ...(result.semanticChanges ? { semanticChanges: result.semanticChanges } : {}),
+    ...(result.executionEvidence ? { executionEvidence: result.executionEvidence } : {}),
     ...(result.afterCommit ? { afterCommit: result.afterCommit } : {}),
     ...(result.failure ? { failure: result.failure } : {}),
     ...(result.receiptDelivery ? { receiptDelivery: result.receiptDelivery } : {}),

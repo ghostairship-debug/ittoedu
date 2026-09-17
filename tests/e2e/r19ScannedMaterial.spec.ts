@@ -17,10 +17,11 @@ test('r19 scanned PDF: real page extraction and selected PNG enables preparation
   const choose = async (filename: string) => app!.evaluate(({ dialog }, filename) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [filename] }) }, filename)
   await choose(workspace)
   await page.getByRole('button', { name: '打开工作空间', exact: true }).first().click()
-  await page.getByRole('button', { name: '新建课例', exact: true }).click()
-  await page.getByRole('textbox', { name: '课例名称' }).fill('扫描电路材料')
-  await page.getByRole('button', { name: '创建课例', exact: true }).click()
-  await expect(page.locator('.lesson-workspace-lessons').getByRole('button', { name: /扫描电路材料/ })).toBeVisible()
+  await page.getByRole('button', { name: '新建课件', exact: true }).click()
+  await page.getByRole('textbox', { name: '课件名称' }).fill('扫描电路材料')
+  await page.getByRole('button', { name: '创建课件', exact: true }).click()
+  // 课例段已从导航移除：创建后直接激活课例上下文
+  await expect(page.locator('.lesson-workflow')).toBeVisible()
   await page.getByRole('tab', { name: '材料', exact: true }).click()
   await choose(source)
   await page.getByRole('button', { name: /^添加材料（PDF/ }).click()
@@ -31,8 +32,8 @@ test('r19 scanned PDF: real page extraction and selected PNG enables preparation
   await expect.poll(() => image.evaluate(node => (node as HTMLImageElement).naturalWidth)).toBeGreaterThan(100)
   await article.getByRole('checkbox', { name: '采用片段 1', exact: true }).check()
   const panel = page.getByRole('region', { name: '课例创作流程' })
-  await panel.getByRole('button', { name: '根据材料自动创作', exact: true }).click()
-  await expect(panel.getByRole('button', { name: '根据材料自动创作', exact: true })).toHaveAttribute('aria-pressed', 'true')
+  await panel.getByRole('button', { name: '自动模式（按材料）', exact: true }).click()
+  await expect(panel.getByRole('button', { name: '自动模式（按材料）', exact: true })).toHaveAttribute('aria-pressed', 'true')
   const proof = await page.evaluate(async directory => {
    const lesson = (await window.desktopAPI!.lesson!({ operation: 'list-lessons', directory })).lessons![0]!
    const conversation = (await window.desktopAPI!.lesson!({ operation: 'list-conversations', lesson: lesson.identity })).conversations![0]!

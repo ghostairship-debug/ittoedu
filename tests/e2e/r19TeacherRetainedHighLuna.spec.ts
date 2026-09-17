@@ -1,6 +1,6 @@
 import { _electron as electron, expect, test } from '@playwright/test'
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
-import { dirname, join, resolve } from 'node:path'
+import { basename, join, resolve } from 'node:path'
 import { BACKGROUND_E2E_ENV } from '../../src/main/windowVisibility'
 import { openCourseProjectArchive } from '../../src/renderer/project/courseProjectArchive'
 import type { LocalAgentRecord } from '../../src/shared/localAgentContract'
@@ -12,16 +12,18 @@ const retainedLunaEffort = process.env.R19_TEACHER_LUNA_EFFORT ?? 'high'
 test(`r19 retained teacher Luna ${retainedLunaEffort} repair: same course and saved reopen`, async () => {
   test.skip((retainedLunaEffort === 'medium' ? process.env.R19_TEACHER_MEDIUM_RUN : process.env.R19_TEACHER_HIGH_RUN) !== '1', 'Explicit retained-course Luna repair only')
   expect(['medium', 'high']).toContain(retainedLunaEffort)
-  test.setTimeout(30 * 60_000)
+  const budgetMinutes = Number(process.env.R19_TEACHER_BUDGET_MINUTES ?? 20)
+  expect([20, 40, 60, 120]).toContain(budgetMinutes)
+  test.setTimeout((budgetMinutes + 10) * 60_000)
   const root = resolve(__dirname, '../..')
-  const base = resolve(root, 'output/r19-current-teacher-luna/20260915-current-unified')
+  const base = resolve(root, process.env.R19_TEACHER_RETAINED_ROOT ?? 'output/r19-current-teacher-luna/20260915-current-unified')
   const output = join(base, `${retainedLunaEffort}-repair-${new Date().toISOString().replace(/[:.]/g, '-')}`); mkdirSync(output, { recursive: true })
   const context = JSON.parse(readFileSync(join(base, 'context.json'), 'utf8')) as { lesson: { schemaVersion: 1; lessonId: string; normalizedDirectory: string }; conversationId: string }
   const workspace = { version: 1 as const, kind: 'lesson' as const, lessonId: context.lesson.lessonId, normalizedDirectory: context.lesson.normalizedDirectory, conversationId: context.conversationId }
   const projectPath = join(context.lesson.normalizedDirectory, 'course.h5lesson')
   const archive = () => openCourseProjectArchive(new Uint8Array(readFileSync(projectPath)))
   const before = archive().project
-  expect(before.id).toBe('project_hoksN3OuOuokYSn5i0Tpm')
+  expect(before.id).toBeTruthy()
   expect(before.revision).toBeGreaterThan(0)
   const documents = ['teaching-brief.md', '01-teaching-plan.md', 'presentation-brief.md', '02-presentation-script.md']
   const originalDocuments = documents.map(name => readFileSync(join(context.lesson.normalizedDirectory, name), 'utf8'))
@@ -50,12 +52,12 @@ test(`r19 retained teacher Luna ${retainedLunaEffort} repair: same course and sa
     expect(opened.lesson!.identity.lessonId).toBe(context.lesson.lessonId)
     const conversation = opened.conversations!.find(value => value.conversationId === context.conversationId)!
     expect(conversation.projectTarget?.projectId).toBe(before.id)
-    await app.evaluate(({ dialog }, path) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] }) }, dirname(context.lesson.normalizedDirectory))
-    await page.getByRole('button', { name: '打开工作空间', exact: true }).first().click()
-    await app.evaluate(({ dialog }, path) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] }) }, context.lesson.normalizedDirectory)
-    await page.getByRole('button', { name: '打开课例', exact: true }).click()
-    await page.getByRole('region', { name: '课例对话导航' }).getByRole('button', { name: conversation.title, exact: true }).and(page.locator('[aria-pressed]')).click()
-    await page.getByRole('tab', { name: /^课件/ }).click()
+    // V3.1：保留 profile 重开自动回到上次工作空间；课例入口已从「更多」菜单移除，经目录树点选 .h5lesson 激活；课例对话导航区已随课例段取消，激活后自动接上最近会话
+    await expect(page.locator('.lesson-workspace-toolbar')).toBeVisible()
+    await page.locator('.lesson-directory-tree').getByRole('button', { name: basename(context.lesson.normalizedDirectory), exact: true }).click()
+    await page.locator('.lesson-directory-tree').getByRole('button', { name: 'course.h5lesson', exact: true }).click()
+    await expect(page.locator('.lesson-workflow')).toBeVisible()
+    await page.getByRole('tab', { name: /course|新建课件/ }).click()
     await expect(page.getByRole('button', { name: '整课预览', exact: true })).toBeVisible()
   }
   try {
@@ -70,8 +72,11 @@ test(`r19 retained teacher Luna ${retainedLunaEffort} repair: same course and sa
     const historyWaitStartedAt = Date.now()
     await expect(chat.getByLabel('会话', { exact: true })).toBeVisible({ timeout: 90_000 })
     evidence('retained-history-ready.json', { waitedMs: Date.now() - historyWaitStartedAt, beforeRevision: before.revision })
-    const latest = [...(prior.records ?? [])].filter(record => record.adapter === 'codex').sort((left, right) => (right.generationRequest?.execution?.startedAt ?? right.events[0]?.time ?? 0) - (left.generationRequest?.execution?.startedAt ?? left.events[0]?.time ?? 0))[0]
+    const latest = process.env.R19_TEACHER_SESSION_ID
+      ? prior.records?.find(record => record.id === process.env.R19_TEACHER_SESSION_ID && record.adapter === 'codex')
+      : [...(prior.records ?? [])].filter(record => record.adapter === 'codex').sort((left, right) => (right.task?.startedAt ?? right.generationRequest?.execution?.startedAt ?? right.events[0]?.time ?? 0) - (left.task?.startedAt ?? left.generationRequest?.execution?.startedAt ?? left.events[0]?.time ?? 0))[0]
     expect(latest, 'Retained conversation must have an existing native session').toBeTruthy()
+    if (!latest) throw new Error('Requested retained native session is unavailable')
     await chat.getByLabel('会话', { exact: true }).selectOption(latest.id)
     await expect(chat.getByLabel('CLI', { exact: true })).toHaveValue('codex')
     evidence('native-resume-boundary.json', { priorSessionId: latest.id, priorExternalSessionId: latest.externalSessionId, priorTaskStatus: latest.task?.status, beforeRevision: before.revision, mode: 'new-task-resume-codex-history' })
@@ -84,6 +89,8 @@ test(`r19 retained teacher Luna ${retainedLunaEffort} repair: same course and sa
     await expect(chat.getByLabel('强度', { exact: true })).toHaveValue(retainedLunaEffort)
     await expect(chat.getByLabel('速度', { exact: true })).toHaveValue(tier!.id)
     evidence('native-route.json', { directory, model: model!.id, effort: retainedLunaEffort, serviceTier: tier!.id, preservedBeforeRevision: before.revision })
+    await chat.locator('.chat-task-settings > summary').click()
+    await chat.getByLabel('本次时间预算', { exact: true }).selectOption(String(budgetMinutes))
     await chat.getByLabel('意图', { exact: true }).selectOption('edit')
     await chat.getByLabel('应用方式', { exact: true }).selectOption('auto')
     await chat.getByLabel('本轮引用', { exact: true }).selectOption('course')
@@ -103,7 +110,7 @@ test(`r19 retained teacher Luna ${retainedLunaEffort} repair: same course and sa
     await expect.poll(async () => {
       const current = await read(activeId!); evidence('current-native-record.json', current)
       return ['completed', 'failed', 'cancelled', 'partial'].includes(current.task?.status ?? current.status)
-    }, { timeout: 22 * 60_000, intervals: [3000] }).toBe(true)
+    }, { timeout: (budgetMinutes + 2) * 60_000, intervals: [3000] }).toBe(true)
     const record = await read(activeId!); evidence('completed-native-record.json', record)
     const confirmed = record.events.find(event => event.kind === 'session' && event.payload && typeof event.payload === 'object' && !Array.isArray(event.payload) && event.payload.status === 'configuration')
     expect(JSON.stringify(confirmed)).toContain('gpt-5.6-luna')

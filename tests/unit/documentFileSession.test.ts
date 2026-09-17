@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { DocumentFileSession, mergeDocumentSources, type RecoverableDocumentFilePort } from '../../src/renderer/documentFiles/documentFileSession'
 import type { OpenDocumentResult } from '../../src/shared/document/ports'
 
-const ref = { lessonId: 'lesson', lessonDirectory: '/lesson', relativePath: 'plan.md' }
+const ref = { kind: 'lesson' as const, lessonId: 'lesson', lessonDirectory: '/lesson', relativePath: 'plan.md' }
 function fixture() {
   let disk: OpenDocumentResult = { ref, source: '原稿', version: { contentVersion: '1', attachments: [] }, diagnostics: [] }
   let notify: Parameters<RecoverableDocumentFilePort['watchDocument']>[1] = () => {}

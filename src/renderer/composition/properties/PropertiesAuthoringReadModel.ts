@@ -21,6 +21,7 @@ import {
   collectV9InteractionRuleWarnings,
   interactionLayerTargetFromItem,
   type InteractionLayerTarget,
+  v9CourseLocations,
   v9SlideScenes,
 } from '../../course/slideInteractionView'
 import { selectRuntimeInspectorAuthoringView } from '../../runtime/runtimeInspectorAuthoringView'
@@ -104,7 +105,6 @@ export interface PropertiesOwnerReadModel {
   readonly authoringToken: CourseAuthoringSessionToken | null
   readonly flow: FlowPropertiesReadModel | null
   readonly spatial: SpatialPropertiesReadModel | null
-  readonly editorMode: 'simple' | 'professional'
   readonly editingScope: 'scene' | 'global'
   readonly propertiesOwner: 'scene' | 'surface' | 'global'
   readonly selectedNodeIds: readonly string[]
@@ -124,6 +124,7 @@ export interface PropertiesOwnerReadModel {
   /** Course-wide background fields; the effective-background chain's root. Always available. */
   readonly course: CourseBackgroundFields
   readonly slideScenes: ReturnType<typeof v9SlideScenes>
+  readonly interactionLocations: ReturnType<typeof v9CourseLocations>
   readonly interactionNodes: readonly InteractionLayerTarget[]
   readonly interactionWarnings: ReturnType<typeof collectV9InteractionRuleWarnings>
   readonly globalInteractions: CourseProjectDocument['globalInteractions']
@@ -359,6 +360,7 @@ export function selectPropertiesAuthoringReadModel(state: EditorState): Properti
     || Boolean(globalEntries.some((entry) => entry.item.layerItemId === selectedView?.id))
     || Boolean(selectedRow?.isTeacherController)
   const slideScenes = project ? v9SlideScenes(project) : []
+  const interactionLocations = project ? v9CourseLocations(project) : []
   const interactionNodes = (projection?.unifiedRows ?? []).map((row) => (
     interactionLayerTargetFromItem(row.item)
   ))
@@ -380,7 +382,6 @@ export function selectPropertiesAuthoringReadModel(state: EditorState): Properti
     authoringToken: state.courseAuthoringSession?.token ?? null,
     flow,
     spatial,
-    editorMode: state.editorMode,
     editingScope: selectEditingScope(state),
     propertiesOwner,
     selectedNodeIds: selectSelectedNodeIds(state),
@@ -417,6 +418,7 @@ export function selectPropertiesAuthoringReadModel(state: EditorState): Properti
       : null,
     course,
     slideScenes,
+    interactionLocations,
     interactionNodes,
     interactionWarnings,
     globalInteractions: project?.globalInteractions ?? [],

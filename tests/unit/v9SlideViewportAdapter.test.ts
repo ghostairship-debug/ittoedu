@@ -44,6 +44,7 @@ import {
   SLIDE_REJECT_WRONG_OWNER,
 } from '@/renderer/course/slideEditorCommands'
 import { updateSlideNativeLayerContent } from '@/renderer/course/v9SlideContentCommands'
+import { constrainControllerDisplayFrame, controllerDisplayFrame } from '@/renderer/authoring/controllerDisplayBounds'
 
 /**
  * V9 candidate fixture. Proves canvas hit / selection / transform / viewport.
@@ -460,6 +461,50 @@ afterEach(() => {
 })
 
 describe('V9 Slide viewport adapter', () => {
+  it('constrains measured teacher footprints without shrinking authored frames or clamping ordinary components', () => {
+    const item = teacherControllerItem()
+    const mount = document.createElement('div')
+    mount.dataset.controllerAuthoringId = item.layerItemId
+    mount.dataset.controllerAuthoringBounds = '848,12,52,52'
+    document.body.append(mount)
+    try {
+      const outside = { ...item.frame, x: -1000, y: -200 }
+      const constrained = constrainControllerDisplayFrame(item, outside, VIEWPORT)
+      expect(constrained).toEqual({ ...outside, x: -848, y: -12 })
+      expect(controllerDisplayFrame(item, constrained)).toEqual({ x: 0, y: 0, width: 52, height: 52 })
+      const flowViewport = { width: 600 - 18, height: 400 - 18 }
+      const bottomRight = constrainControllerDisplayFrame(item, { ...outside, x: 900, y: 900 }, flowViewport)
+      expect(controllerDisplayFrame(item, bottomRight)).toEqual({ x: 530, y: 330, width: 52, height: 52 })
+      expect(bottomRight.width).toBe(item.frame.width)
+      expect(bottomRight.height).toBe(item.frame.height)
+      expect(constrainControllerDisplayFrame({ ...item, role: undefined }, outside, VIEWPORT)).toBe(outside)
+    } finally { mount.remove() }
+  })
+
+  it('keeps a dragged teacher launcher in Slide while preview and commit retain its full authoring dimensions', () => {
+    const backend = injectCandidate()
+    backend.setScope('global')
+    const controller = createController()
+    const mount = document.createElement('div')
+    mount.dataset.controllerAuthoringId = 'teacher-ctrl'
+    mount.dataset.controllerAuthoringBounds = '848,12,52,52'
+    document.body.append(mount)
+    try {
+      const down = controller.pointerDown({ x: 1064, y: 676 }, VIEW)
+      expect(down.kind).toBe('slide-authoring')
+      const moved = controller.pointerMove({ x: -50, y: -50 }, VIEW)
+      if (moved.kind !== 'slide-authoring') throw new Error('expected Slide authoring')
+      expect(moved.preview?.[0]).toMatchObject({ x: -848, y: -12, width: 900, height: 64 })
+      const committed = controller.pointerUp({ x: -50, y: -50 }, VIEW)
+      if (committed.kind !== 'slide-authoring') throw new Error('expected Slide authoring')
+      expect(committed.command?.ok).toBe(true)
+      const saved = selectSlideAuthoringBackend(useEditorStore.getState())!.getSession().history.present.globalLayerItems
+        .find(entry => entry.item.layerItemId === 'teacher-ctrl')!.item
+      expect(saved.frame).toMatchObject({ x: -848, y: -12, width: 900, height: 64 })
+      expect(controllerDisplayFrame(saved)).toEqual({ x: 0, y: 0, width: 52, height: 52 })
+    } finally { mount.remove() }
+  })
+
   it('keeps explicitly injected controllers isolated', () => {
     const first = createSlideAuthoringBackend(openSlideAuthoringSession(v9ViewportFixture()))
     const second = createSlideAuthoringBackend(openSlideAuthoringSession(v9ViewportFixture()))

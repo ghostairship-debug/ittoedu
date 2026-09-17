@@ -1,4 +1,4 @@
-import { applyTextRunStyle, remapTextRuns, toggleTextRunEmphasis } from '../../shared/textRuns'
+import { applyTextRunStyle, planTextRunRemap, toggleTextRunEmphasis } from '../../shared/textRuns'
 import { locateCourseLayer } from '../course/effectiveLayerCommands'
 import { commitFlowOverlayFormulaAst } from '../course/flowSharedAuthoringAdapters'
 import { tableCellSpan } from '../../shared/tableMerge'
@@ -519,9 +519,12 @@ export function updateFlowTextDraft(
   if (!('text' in draft)) return edit
   const previous = edit.draft as FlowRichTextDraft
   const text = draft.text
-  let runs = 'runs' in draft && draft.runs
-    ? draft.runs
-    : remapTextRuns(previous.text, text, previous.runs)
+  let runs = 'runs' in draft ? draft.runs : undefined
+  if (!runs) {
+    const mapping = planTextRunRemap(previous.text, text, previous.runs)
+    if (!mapping.ok) return edit
+    runs = mapping.runs
+  }
   if (text !== previous.text && hasFlowTextStyle(edit.pendingStyle)) {
     const previousLength = Array.from(previous.text).length
     const nextLength = Array.from(text).length

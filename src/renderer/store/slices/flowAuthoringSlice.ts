@@ -7,6 +7,7 @@ import type { ComponentPackageData } from '../../../shared/componentTypes'
 import type { CourseProjectDocument, FlowBlock } from '../../../shared/courseProjectTypes'
 import type { FormulaAstNode } from '../../../shared/contracts/native-v1'
 import type { DocumentDiagnostic } from '../../../shared/document/ports'
+import { parseDocumentMarkdown } from '../../../shared/document/markdown'
 import { flowDocumentDraftSaveBlock, type FlowDocumentDraft } from '../../authoring/flowDocumentDraft'
 export type { FlowDocumentDraft } from '../../authoring/flowDocumentDraft'
 import type { TextRun, TextRunStyle } from '../../../shared/contracts/native-v1'
@@ -685,7 +686,7 @@ export function createFlowAuthoringSlice(
   renameFlowPage(surfaceId: string, title: string): void
   commitDraft(): boolean
   commitDraftForPersistence(): { ok: true } | { ok: false; reason: string }
-  materializeDraft(document: CourseProjectDocument): { readonly ok: true; readonly document: CourseProjectDocument } | { readonly ok: false; readonly reason: string }
+  materializeDraft(document: CourseProjectDocument, purpose?: 'recovery' | 'observation'): { readonly ok: true; readonly document: CourseProjectDocument } | { readonly ok: false; readonly reason: string }
   undo(): void
   redo(): void
   setScope(scope: 'global' | 'scene'): void
@@ -1715,9 +1716,27 @@ export function createFlowAuthoringSlice(
       }
       return { ok: true }
     },
-    materializeDraft(document: CourseProjectDocument): { readonly ok: true; readonly document: CourseProjectDocument } | { readonly ok: false; readonly reason: string } {
+    materializeDraft(document: CourseProjectDocument, purpose: 'recovery' | 'observation' = 'recovery'): { readonly ok: true; readonly document: CourseProjectDocument } | { readonly ok: false; readonly reason: string } {
       const owned = flow.read()
       const session = owned.flowSession
+      const bodyDraft = owned.flowDocumentDraft
+      if (bodyDraft) {
+        const unavailable = (reason: string) => purpose === 'recovery' ? { ok: true as const, document } : { ok: false as const, reason }
+        if (!session) return unavailable('not-flow-session')
+        if (bodyDraft.revision !== document.revision) return unavailable('stale-revision')
+        if (session.selection.surfaceId !== bodyDraft.surfaceId) return unavailable('正文草稿不属于当前 Flow 页面')
+        const surface = document.surfaces.find(candidate => candidate.id === bodyDraft.surfaceId)
+        if (!surface || surface.type !== 'flow') return unavailable('正文草稿目标不是有效 Flow 页面')
+        if (bodyDraft.composing) return unavailable('输入法组合中的正文草稿尚不能物化')
+        const parsed = parseDocumentMarkdown(bodyDraft.source, { target: 'flow', createId: () => crypto.randomUUID() })
+        if (parsed.status === 'invalid') return unavailable(parsed.diagnostics[0]?.message ?? '正文源文无效')
+        const materialized = replaceFlowDocumentContent(document, bodyDraft.surfaceId, parsed.document.content.blocks, {
+          expectedRevision: bodyDraft.revision,
+        })
+        return materialized.ok && materialized.nextDocument
+          ? { ok: true, document: materialized.nextDocument }
+          : { ok: false, reason: materialized.reason ?? '无法物化正文草稿' }
+      }
       const edit = owned.flowTextEdit
       if (!edit || !session || !isFlowTextDraftDirty(edit)) {
         return { ok: true, document }

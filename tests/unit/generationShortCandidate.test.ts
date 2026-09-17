@@ -1,4 +1,8 @@
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+// Equivalent candidates now also carry their actual updatedAt diff in receipts.
+beforeEach(() => { vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date('2026-09-17T00:00:00Z')) })
+afterEach(() => { vi.useRealTimers() })
 import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
 import { createBlankFlowCourseProject } from '@/renderer/project/createFlowCourseProject'
 import { createBlankSpatialCourseProject } from '@/renderer/project/createSpatialCourseProject'

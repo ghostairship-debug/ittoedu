@@ -1,5 +1,6 @@
 import { createDefaultSlidePresentation } from '../../shared/contracts/course-project-v9/presentation'
 import type {
+  CourseLocation,
   CourseProjectDocument,
   LayerItem,
   SlidePresentation,
@@ -24,6 +25,12 @@ export interface V9InteractionSceneSummary {
   readonly id: string
   readonly name: string
   readonly presentation: V9InteractionPresentationSummary
+}
+
+export interface V9InteractionLocationSummary {
+  readonly id: string
+  readonly label: string
+  readonly kind: CourseLocation['kind']
 }
 
 export interface InteractionLayerTarget {
@@ -89,6 +96,17 @@ export function v9SlideScenes(
     }
   }
   return scenes
+}
+
+/** Course-order destinations for exact cross-Surface interaction navigation. */
+export function v9CourseLocations(
+  project: CourseProjectDocument,
+): V9InteractionLocationSummary[] {
+  return project.locations.map((location) => ({
+    id: location.id,
+    label: location.label,
+    kind: location.kind,
+  }))
 }
 
 function nativeTypeOf(item: LayerItem): string {
@@ -244,6 +262,7 @@ export function collectV9InteractionRuleWarnings(
   const warnings: Record<string, string[]> = {}
   const layerIds = knownLayerItemIds(project)
   const sceneIds = knownSceneIds(project)
+  const locationIds = new Set(project.locations.map((location) => location.id))
   const stateIds = knownStateIds(project)
   const courseStateKeys = new Set(project.courseState.map((state) => state.key))
   const soundIds = new Set(Object.keys(project.media.audio.sounds))
@@ -335,6 +354,9 @@ export function collectV9InteractionRuleWarnings(
         if (action.targetStateId && !stateIds.has(action.targetStateId)) {
           pushWarning(warnings, rule.id, '规则仍引用已删除的状态。')
         }
+      }
+      if (action.type === 'location.go' && !locationIds.has(action.locationId)) {
+        pushWarning(warnings, rule.id, '规则仍引用已删除的课程位置。')
       }
     }
   }

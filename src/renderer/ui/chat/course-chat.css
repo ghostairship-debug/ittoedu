@@ -19,7 +19,7 @@
 .course-chat p { white-space: pre-wrap; overflow-wrap: anywhere; }
 .course-chat textarea { width: 100%; resize: vertical; min-height: 80px; margin: 10px 0; }
 .course-chat small { display: block; color: var(--text-muted); }
-.course-chat [role=alert] { color: #fda4af; }
+.course-chat [role=alert] { color: #e5c4c0; }
 .course-chat-launch { position: fixed; right: 22px; bottom: 42px; z-index: 80; padding: 10px 18px; border-radius: 20px; }
 .chat-message { line-height: 1.6; }
 .native-agent-question { padding: 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--app-bg); }
@@ -63,5 +63,9 @@
 .chat-task-settings > summary { cursor: pointer; font-size: 12px; color: var(--text-muted); overflow-wrap: anywhere; padding: 5px 0; }
 .chat-task-settings[open] { max-height: 180px; overflow: auto; }
 .chat-send-actions { display: flex; gap: 8px; align-items: center; flex-shrink: 0; }
+.chat-composer-controls { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; flex-shrink: 0; }
+.chat-composer-controls > label.chat-cli-picker { display: flex; align-items: center; gap: 6px; margin: 0; flex-shrink: 0; }
+.chat-composer-controls .native-agent-configuration { flex: 1; min-width: 0; max-height: none; overflow: visible; }
+.chat-composer-controls .native-agent-configuration > details > summary { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .course-chat button[type=submit], .chat-send-actions > button:first-child { background: var(--accent); color: var(--button-primary-text, #fff); padding: 7px 14px; }
 .course-chat button:disabled { opacity: .5; cursor: default; }

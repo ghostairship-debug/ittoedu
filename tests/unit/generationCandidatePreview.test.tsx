@@ -33,12 +33,19 @@ vi.mock('@/player/surfaces/publishedDynamicHosts', () => ({ createPublishedCours
 
 import { createBlankFlowCourseProject } from '@/renderer/project/createFlowCourseProject'
 import { generationRequestSchema } from '@/shared/generationContract'
+import { generationSemanticChangesSchema } from '@/shared/generationChangeSummary'
 import { GenerationCandidatePreview, type GenerationCandidatePreviewProps } from '@/renderer/ui/chat/GenerationCandidatePreview'
 import { mountPublishedCourseTryRun } from '@/renderer/ui/coursePlayerTryRun'
 
 const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+iKisAAAAASUVORK5CYII='
 function fixture(): GenerationCandidatePreviewProps {
   const project = createBlankFlowCourseProject(), surface = project.surfaces[0]!
+  const semanticChanges = generationSemanticChangesSchema.parse({ changes: [{ path: 'surfaces[id="flow"].blocks[id="title"].content',
+    before: '旧标题', after: '新标题', kind: 'updated', field: 'content', target: { entity: 'flow-block', id: 'title', owner: 'flow',
+      ownerKey: `flow:${surface.id}`, impact: 'instance', surfaceId: surface.id, locationId: 'observed-location' } }], omitted: 0,
+  comparison: { status: 'complete', scopes: [{ scope: 'document', status: 'complete' }, { scope: 'resource-assets', status: 'complete' },
+    { scope: 'resource-packages', status: 'complete' }] },
+  truncation: { changeLimit: 200, valueLengthLimit: 500, omittedChanges: 0, truncatedValues: 0 } })
   project.locations.push({ ...project.locations[0]!, id: 'observed-location', label: '被观察的讲义' })
   const request = generationRequestSchema.parse({ version: 1, requestId: crypto.randomUUID(),
     workspace: { version: 1, projectId: project.id, normalizedPath: 'c:/courses/preview.h5lesson' },
@@ -53,7 +60,8 @@ function fixture(): GenerationCandidatePreviewProps {
     resourceFiles: [{ path: 'observation/current-frame.png', encoding: 'base64', content: png, mediaType: 'image/png', role: 'image' }],
   })
   return { request, prepared: { previewId: crypto.randomUUID(), candidateId: 'candidate-1', summary: '图片改色',
-    beforeRevision: project.revision, afterRevision: project.revision + 1, plannedEffects: [], behaviorEvidence: [], changes: [], omitted: 0,
+    beforeRevision: project.revision, afterRevision: project.revision + 1, plannedEffects: [], behaviorEvidence: [],
+    ...semanticChanges, semanticChanges,
     document: project, resources: { assetFiles: {}, componentPackages: controllerPackages } } }
 }
 
@@ -127,5 +135,42 @@ describe('temporary candidate effect preview', () => {
     render(<GenerationCandidatePreview {...props} />)
     expect(await screen.findByRole('alert')).toHaveTextContent('候选资源未能加载')
     expect(probe.registerObservation).not.toHaveBeenCalled()
+  })
+
+  it('U10-execution-not-goal shows the same bounded changes and preserves checked, skipped, and failed execution facts', async () => {
+    const props = fixture()
+    const semanticChanges = generationSemanticChangesSchema.parse({ ...props.prepared.semanticChanges,
+      changes: props.prepared.semanticChanges.changes.map(change => ({ ...change, truncated: { before: true, after: false } })),
+      omitted: 2, comparison: { status: 'partial', scopes: [
+        { scope: 'document', status: 'complete' },
+        { scope: 'resource-assets', status: 'not-provided', reason: 'resource snapshots were not supplied' },
+      ] }, truncation: { ...props.prepared.semanticChanges.truncation, omittedChanges: 2, truncatedValues: 1 } })
+    props.prepared.semanticChanges = semanticChanges
+    props.prepared.changes = semanticChanges.changes
+    props.prepared.omitted = semanticChanges.omitted
+    props.prepared.comparison = semanticChanges.comparison
+    props.prepared.truncation = semanticChanges.truncation
+    props.prepared.interactionChecks = { checked: ['rule-checked'], skipped: [{ ruleId: 'rule-skipped', reason: '条件未满足' }], evidence: [
+      { source: 'published-player', ruleId: 'rule-checked', runId: 1, chainId: 11, status: 'checked', runStatus: 'completed',
+        start: { locationId: 'page-1', stateId: null }, end: { locationId: 'page-2', stateId: 'answer' } },
+      { source: 'published-player', ruleId: 'rule-skipped', runId: 2, chainId: 12, status: 'skipped', runStatus: 'skipped',
+        start: { locationId: 'page-2', stateId: 'answer' }, end: { locationId: 'page-2', stateId: 'answer' }, reason: '条件未满足' },
+      { source: 'published-player', ruleId: 'rule-failed', runId: 3, chainId: 13, status: 'failed', runStatus: 'failed',
+        start: { locationId: 'page-2', stateId: 'answer' }, end: { locationId: 'page-3', stateId: null }, reason: '目的地不一致' },
+    ] }
+
+    render(<GenerationCandidatePreview {...props} />)
+    expect(screen.getByLabelText('候选实际变更')).toHaveTextContent('比较范围不完整')
+    expect(screen.getByLabelText('候选实际变更')).toHaveTextContent('另有 2 项未列出')
+    expect(screen.getByLabelText('候选实际变更')).toHaveTextContent('当前结果不包含这些条目的完整详情')
+    expect(screen.getByText('显示值已截断；此处不是完整字段内容。')).toBeDefined()
+    const evidence = screen.getByLabelText('候选行为检查记录')
+    expect(evidence).toHaveTextContent('已检查')
+    expect(evidence).toHaveTextContent('已跳过')
+    expect(evidence).toHaveTextContent('检查失败')
+    expect(evidence).toHaveTextContent('page-1 → page-2 / 状态 answer')
+    expect(evidence).toHaveTextContent('来源 Published Player')
+    expect(evidence).toHaveTextContent('不代表教学目标已经通过')
+    expect(screen.queryByText('教学目标已通过')).toBeNull()
   })
 })

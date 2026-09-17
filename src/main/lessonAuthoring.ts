@@ -82,7 +82,7 @@ export class LessonAuthoring {
         if (prior) { delete state.documents[role]; earliestChange = Math.min(earliestChange, index) }
         issues.push(`${role}：尚无实际文档`); continue
       }
-      const ref = { lessonId: lesson.lessonId, lessonDirectory: lesson.normalizedDirectory, relativePath }
+      const ref = { kind: 'lesson' as const, lessonId: lesson.lessonId, lessonDirectory: lesson.normalizedDirectory, relativePath }
       try {
         const disk = await this.options.files.openDocument(ref)
         if (!disk.source.trim()) throw new LessonAuthoringValidationError('当前文档为空')
@@ -190,7 +190,7 @@ export class LessonAuthoring {
     })
   }
   async assertOutputWritable(lesson: LessonIdentity, relativePath: string): Promise<void> {
-    const ref = { lessonId: lesson.lessonId, lessonDirectory: lesson.normalizedDirectory, relativePath }
+    const ref = { kind: 'lesson' as const, lessonId: lesson.lessonId, lessonDirectory: lesson.normalizedDirectory, relativePath }
     if (await this.options.hasPendingDraft?.(ref) || await this.options.files.readRecovery?.(ref)) throw new LessonAuthoringValidationError('当前有未保存稿或冲突恢复稿，请先保存或处理冲突')
   }
   completeTask(lesson: LessonIdentity, input: LessonAuthoringTicket, expectedOutputVersion: DocumentFileVersion): Promise<LessonAuthoringView> {

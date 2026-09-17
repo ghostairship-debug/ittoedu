@@ -1,8 +1,10 @@
 import { z } from 'zod'
 import type { CourseProjectDocument } from '../../../shared/courseProjectTypes'
-import { duplicateEffectiveLayerItem, patchEffectiveLayerPropertiesAtTarget, reorderEffectiveLayerItems, resolveEffectiveLayerTarget } from '../../course/effectiveLayerCommands'
+import { authoringToolTargetWireV1Schema, type AuthoringToolTargetWireV1 } from '../../../shared/authoringToolContract'
+import { duplicateEffectiveLayerItem, patchEffectiveLayerPropertiesAtTarget, patchEffectiveLayerPropertiesAtTargets, reorderEffectiveLayerItems, resolveEffectiveLayerTarget } from '../../course/effectiveLayerCommands'
 import { projectEffectiveLayers } from '../../course/effectiveLayerProjection'
 import { openSlideAuthoringSession, setSlideEditingScope } from '../../course/slideAuthoringBackend'
+import { planSlideMultiLayerLayoutAtTargets } from '../../course/slideMultiLayerLayout'
 import { duplicateSlideSceneLayers, reorderSlideSceneLayers } from '../../course/v9SlideActionCommands'
 import { makeLayerItemAuthoringAddress } from '../courseAuthoringScope'
 import { resolveAuthoringToolScope } from './authoringToolScope'
@@ -19,16 +21,85 @@ export const layerEditInputSchema = z.discriminatedUnion('operation', [
   z.object({ operation: z.literal('duplicate'), placement: z.object({
     side: z.enum(['right', 'left', 'above', 'below']), gap: z.number().finite().min(0),
   }).strict() }).strict(),
+  z.object({
+    operation: z.literal('align'),
+    targets: z.array(authoringToolTargetWireV1Schema).min(2).max(200),
+    mode: z.enum(['left', 'center', 'right', 'top', 'middle', 'bottom']),
+    primaryTarget: authoringToolTargetWireV1Schema.optional(),
+  }).strict(),
+  z.object({
+    operation: z.literal('distribute'),
+    targets: z.array(authoringToolTargetWireV1Schema).min(3).max(200),
+    axis: z.enum(['horizontal', 'vertical']),
+  }).strict(),
 ])
+
+function sameFormalTarget(left: AuthoringToolTargetWireV1, right: AuthoringToolTargetWireV1): boolean {
+  return left.projectId === right.projectId
+    && left.documentRevision === right.documentRevision
+    && left.revisionPolicy.kind === right.revisionPolicy.kind
+    && left.sessionGeneration === right.sessionGeneration
+    && left.surfaceType === right.surfaceType
+    && left.surfaceId === right.surfaceId
+    && left.locationId === right.locationId
+    && left.stateId === right.stateId
+    && left.owner === right.owner
+    && left.ownerKey === right.ownerKey
+    && left.itemId === right.itemId
+    && left.authoringAddress === right.authoringAddress
+}
 
 /** Layer wrappers share the existing commands; scene state semantics stay with
  * Slide, and no tool owns a second copy/order writer. */
 export const layerEditTool: AuthoringToolDefinition<z.infer<typeof layerEditInputSchema>> = {
   name: 'layer.edit', inputSchema: layerEditInputSchema,
-  description: '精确LayerItem update target的两个窄操作。reorder.position指定front/back或同owner同plane的before/after siblingId；不跨Flow正文、global平面或owner。duplicate只复制该实例一次，placement.side/gap相对当前有效frame放置（右侧间距24用right/24）；原实例及共享资源保留。Slide scene命名态只改变当前状态的呈现。Flow正文不是图层，不接受此工具。selectionActions仅提供焦点操作提示；其他对象使用当前request的精确目标，新建对象使用native.content insert或其他正式创建工具。',
+  description: '精确 LayerItem 操作。reorder.position 指定 front/back 或同 owner/plane 的 before/after siblingId；duplicate 的 placement.side/gap 相对当前有效 frame 放置。Slide 多对象布局使用 align 或 distribute：targets 原样复制同一次冻结观察中的正式 update target（对齐至少2个，分布至少3个），destination.target 也必须是其中一个；align.mode 支持 left/center/right/top/middle/bottom，可选 primaryTarget 必须精确属于 targets 并作为视觉包围盒锚点，例如 {operation:"align",targets:[targetA,targetB],mode:"top",primaryTarget:targetA}；distribute.axis 支持 horizontal/vertical，例如 {operation:"distribute",targets:[targetA,targetB,targetC],axis:"horizontal"}。全部目标必须同工程版本、Slide location/state、owner 与 plane；旋转按视觉包围盒计算，锁定对象不移动，命名态只写当前状态，一次候选只形成一个正式事务。Flow 正文不是绝对布局图层。selectionActions 仅提供焦点提示，不替代 targets。',
   plan({ document, destination, value }) {
     if (destination.kind !== 'update') throw new Error('图层动作需要精确 update target')
     const { target, surface, scope } = resolveAuthoringToolScope(document, destination)
+    if (value.operation === 'align' || value.operation === 'distribute') {
+      if (surface.type !== 'slide') throw new Error('成组对齐与分布只支持 Slide 图层')
+      if (!value.targets.some((candidate) => sameFormalTarget(candidate, destination.target))) {
+        throw new Error('成组布局 destination.target 必须精确包含在 targets 中')
+      }
+      const planned = planSlideMultiLayerLayoutAtTargets(document, {
+        targets: value.targets,
+        intent: value.operation === 'align'
+          ? { kind: 'align', mode: value.mode }
+          : { kind: 'distribute', axis: value.axis },
+        ...(value.operation === 'align' && value.primaryTarget
+          ? { primaryTarget: value.primaryTarget }
+          : {}),
+      })
+      if (!planned.ok) throw new Error(planned.reason)
+      const result = patchEffectiveLayerPropertiesAtTargets(
+        document,
+        planned.patches.map(({ target: patchTarget, patch }) => ({ target: patchTarget, patch })),
+        { expectedRevision: document.revision },
+      )
+      if (!result.ok || !result.nextDocument) throw new Error(result.reason)
+      return {
+        transaction: {
+          projectId: document.id,
+          baseRevision: document.revision,
+          nextDocument: result.nextDocument,
+          resourceChanges: {},
+          selectionHint: {
+            kind: 'authoring-tool-selection',
+            locationId: target.locationId,
+            stateId: target.stateId,
+            owner: target.owner,
+            itemIds: value.targets.map((candidate) => candidate.itemId),
+          },
+        },
+        affected: planned.patches.map((patch) => ({
+          id: patch.itemId,
+          operation: 'updated' as const,
+          ownerKey: patch.ownerKey,
+          authoringAddress: patch.authoringAddress,
+        })),
+      }
+    }
     const located = resolveEffectiveLayerTarget(document, destination.target)
     if (located.item.layerItemId !== destination.target.itemId || located.source !== target.owner
       || located.source !== 'global' && (located.surfaceId !== surface.id || located.source === 'scene' && located.sceneId !== scope.sceneId)) {

@@ -13,6 +13,7 @@ import {
   buildPublishedCourseStandaloneHtml,
   buildPublishedCourseWebPackageFiles,
 } from '../../src/renderer/export/course/buildCoursePackages'
+import { withDefaultComponentController } from '../../src/renderer/components/teacherControllerComponent'
 import {
   createPublishedPhaserComponentV2Fixture,
   PUBLISHED_PHASER_COMPONENT_ITEM_ID,
@@ -29,7 +30,10 @@ function writeFixture(): void {
   const sources = {
     project: fixture.project,
     assetFiles: fixture.assetFiles,
-    components: fixture.components,
+    components: {
+      ...withDefaultComponentController(fixture.project).componentPackages,
+      ...fixture.components,
+    },
   }
   const playerBundle = readFileSync(join(root, 'dist-player', 'player.iife.js'), 'utf8')
   writeFileSync(

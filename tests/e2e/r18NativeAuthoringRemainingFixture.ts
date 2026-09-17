@@ -1,6 +1,6 @@
 import { requireProjectWorkspace } from './r18NativeAuthoringFixture'
 import { plainDocumentText } from '../../src/shared/document/content'
-import { createControllerFixture } from '../fixtures/teacherController'
+import { controllerMetadata, controllerPackages, createControllerFixture } from '../fixtures/teacherController'
 import { existsSync, readFileSync, readdirSync, realpathSync, statSync, writeFileSync } from 'node:fs'
 import { isAbsolute, join, relative, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -1096,7 +1096,16 @@ export async function writeRemainingLesson(projectPath: string): Promise<CourseP
   project.playback.controls = 'canvas'
   project.globalLayerItems.push({ item: createControllerFixture({}, 100),
     plane: 'overlay', visibility: { mode: 'all', locationIds: [] } })
-  const data = { ...base, project: courseProjectDocumentSchema.parse(project) }
+  const controllerPackageFiles = Object.fromEntries(Object.entries(controllerPackages).map(([id, pkg]) => [
+    `${id}@${pkg.manifest.version}`,
+    pkg.files,
+  ]))
+  project.componentPackages = { ...project.componentPackages, ...controllerMetadata }
+  const data = {
+    ...base,
+    project: courseProjectDocumentSchema.parse(project),
+    componentFiles: { ...base.componentFiles, ...controllerPackageFiles },
+  }
   writeFileSync(projectPath, createCourseProjectArchive(data))
   return readSaved(projectPath)
 }

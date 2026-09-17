@@ -34,6 +34,7 @@ interface RuleScope {
   path: Array<string | number>
   possibleScenes: SlideSceneDocument[]
   projectScenes: readonly SlideSceneDocument[]
+  projectLocationIds: ReadonlySet<string>
 }
 
 interface IndexedLayerItem {
@@ -158,6 +159,15 @@ function checkAction(
   scope: RuleScope,
   path: Array<string | number>,
 ): void {
+  if (action.type === 'location.go') {
+    if (!scope.projectLocationIds.has(action.locationId)) drafts.push({
+      severity: 'error',
+      code: 'interaction-location-reference-missing',
+      message: `交互规则“${rule.name ?? rule.id}”要跳转到不存在的课程位置“${action.locationId}”。`,
+      path: [...path, 'locationId'],
+    })
+    return
+  }
   if (action.type === 'presentation.set') {
     addStateReferenceFinding(
       drafts,
@@ -558,11 +568,14 @@ export function collectCourseProjectInteractionHealth(
     itemsById.set(item.layerItemId, matches)
   })
   const projectScenes = scenes.map(({ scene }) => scene)
+  const projectLocationIds = new Set(project.locations.map((location) => location.id))
   checkRules(projectScenes, drafts, itemsById, project.globalInteractions, {
+    projectLocationIds,
     path: ['globalInteractions'],
   })
   scenes.forEach(({ scene, path, surfaceIndex, sceneIndex }) => {
     checkRules(projectScenes, drafts, itemsById, scene.interactions, {
+      projectLocationIds,
       scene,
       path: [...path, 'interactions'],
     })

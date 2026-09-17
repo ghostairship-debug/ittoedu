@@ -15,7 +15,7 @@ import { createLessonDocumentFiles } from '../../src/main/lessonDocumentFiles'
 import type { LocalAgentRecord, LocalAgentRequest, LocalAgentResponse } from '../../src/shared/localAgentContract'
 const roots: string[] = []
 afterEach(async () => { for (const root of roots.splice(0)) { if (!path.resolve(root).startsWith(path.resolve(os.tmpdir()) + path.sep)) throw new Error('Unsafe test root'); await fs.rm(root, { recursive: true, force: true }) } })
-async function fixture() {
+async function fixture(options: { invalidFirstCandidate?: boolean } = {}) {
  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'authoring-stage-')); roots.push(root)
  const workspace = new LessonWorkspaceService(root), lesson = (await workspace.create(root, '课例')).identity
  const files = createLessonDocumentFiles({ recoveryDirectory: path.join(root, 'recovery'), validateTarget: async () => { await workspace.read(lesson) } })
@@ -25,7 +25,8 @@ async function fixture() {
   requests.push(input)
   if (input.operation === 'lesson-start' || input.operation === 'lesson-resume') {
    prompts.push(input.prompt); const filename = input.prompt.match(/绝对路径：([^\n]+?)。/)![1]!
-   await fs.writeFile(filename, filename.endsWith('.mjs') ? 'export const apiVersion = 2; export default async function({api}) { const session = await api.createCourseProject({surfaceType:"slide",title:"电路"}); return session.finish(); }' : `# 阶段实际文档 ${prompts.length}\n先解释知识形成，再让学生操作验证。`)
+   const invalid = options.invalidFirstCandidate && input.operation === 'lesson-start' && prompts.length === 1
+   await fs.writeFile(filename, filename.endsWith('.mjs') ? 'export const apiVersion = 2; export default async function({api}) { const session = await api.createCourseProject({surfaceType:"slide",title:"电路"}); return session.finish(); }' : invalid ? '- 上层\n  - 下层\n' : `# 阶段实际文档 ${prompts.length}\n先解释知识形成，再让学生操作验证。`)
    const sessionId = randomUUID(); records.set(sessionId, { version: 1, id: sessionId, adapter: input.operation === 'lesson-start' ? input.adapter : 'codex', workspace: input.workspace, status: 'completed', events: [] })
    return { enabled: true, sessionId }
   }
@@ -106,7 +107,7 @@ it('repairs current stages against prior inputs before reusing unchanged module 
  expect(f.prompts).toHaveLength(5)
  for (const doc of ready.view.documents) {
   const repair = await f.service.operate({ operation: 'begin-document-repair', ...f.context, role: doc.role })
-  const ref = { lessonId: f.lesson.lessonId, lessonDirectory: f.lesson.normalizedDirectory, relativePath: doc.relativePath }
+  const ref = { kind: 'lesson' as const, lessonId: f.lesson.lessonId, lessonDirectory: f.lesson.normalizedDirectory, relativePath: doc.relativePath }
   const disk = await f.files.openDocument(ref)
   const saved = await f.files.saveDocument({ ref, operationId: randomUUID(), source: disk.source + '\n已按当前前置稿复核。', expectedVersion: disk.version, attachments: [] })
   if (saved.status !== 'saved') throw new Error('fixture save failed')
@@ -127,7 +128,7 @@ it('Stop invalidates prepared edits for every registered document', async () => 
  const result = await f.service.operate({ operation: 'poll', ...f.context })
  const invalidate = vi.spyOn(f.files, 'invalidateAiEdits')
  await f.service.operate({ operation: 'stop', ...f.context })
- expect(invalidate).toHaveBeenCalledWith({ lessonId: f.lesson.lessonId, lessonDirectory: f.lesson.normalizedDirectory, relativePath: result.view.documents[0]!.relativePath })
+ expect(invalidate).toHaveBeenCalledWith({ kind: 'lesson', lessonId: f.lesson.lessonId, lessonDirectory: f.lesson.normalizedDirectory, relativePath: result.view.documents[0]!.relativePath })
 })
 
 it('repairs the pinned native module using real diagnostics and guards stopped, late, changed-target and changed-document continuations', async () => {
@@ -171,4 +172,21 @@ it('repairs the pinned native module using real diagnostics and guards stopped, 
  await fs.writeFile(path.join(f.lesson.normalizedDirectory, ref.relativePath), '# 教师新的简报')
  await expect(f.service.operate({ operation: 'continue-application', ...f.context, ticketId: resumed.run!.ticketId, currentTarget: target })).rejects.toThrow()
  expect((await f.service.operate({ operation: 'read', ...f.context })).failure).toEqual(failure)
+})
+
+it('U08-repair-before-write returns format diagnostics to the same native session before saving', async () => {
+ const f = await fixture({ invalidFirstCandidate: true })
+ const started = await f.service.operate({ operation: 'start', ...f.context, adapter: 'codex', instruction: '解释闭合电路' })
+ const first = await f.service.operate({ operation: 'poll', ...f.context })
+ expect(first.run?.status).toBe('running')
+ expect(first.view.documents).toHaveLength(0)
+ const repair = f.requests.at(-1)!
+ expect(repair.operation).toBe('lesson-resume')
+ if (repair.operation !== 'lesson-resume') throw new Error('Expected same native session repair')
+ expect(repair.sessionId).toBe(started.run?.sessionId)
+ expect(repair.preserveTaskBudget).toBe(true)
+ expect(repair.prompt).toContain('嵌套或任务列表')
+ const second = await f.service.operate({ operation: 'poll', ...f.context })
+ expect(second.run?.status).toBe('waiting-confirmation')
+ expect(second.view.documents).toHaveLength(1)
 })

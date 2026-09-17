@@ -7,6 +7,7 @@ import { createBlankCourseProject } from '../../src/renderer/project/createCours
 import { GenerationCandidatePreparationError, generationCandidateSchema, generationCommitReceiptSchema, generationRequestSchema, type GenerationAfterCommit, type GenerationCandidate, type GenerationCommitReceipt, type GenerationFailure, type GenerationRequest } from '../../src/shared/generationContract'
 import { localAgentRequestSchema, localAgentResponseSchema, type LocalAgentRequest, type LocalAgentResponse } from '../../src/shared/localAgentContract'
 import type { AiUserInput } from '../../src/shared/localAgentInteraction'
+import { describeGenerationChanges } from '../../src/renderer/authoring/generation/generationPreview'
 
 type Ports = ConstructorParameters<typeof GenerationTaskController>[0]
 type HostResultCall = Extract<LocalAgentRequest, { operation: 'host-result' }>
@@ -66,9 +67,11 @@ function fixture(outcomes: Array<'candidate' | 'answer' | 'candidate-rejected' |
       steps: [{ id: 'title', tool: 'native.content', carrier: 'native', destination: input.destinations[0], input: { operation: 'update' } }] })
   }
   function makePrepared(input: GenerationRequest, value: GenerationCandidate): GenerationPrepared {
+    const semanticChanges = describeGenerationChanges(document, { ...document, title: value.summary }, {
+      beforeResources: { assetFiles: {}, componentPackages: {} }, afterResources: { assetFiles: {}, componentPackages: {} } })
     const prepared: GenerationPrepared = { previewId: randomUUID(), candidateId: value.candidateId, summary: value.summary,
       beforeRevision: input.documentRevision, afterRevision: input.documentRevision + 1,
-      plannedEffects: [], behaviorEvidence: [], changes: [{ path: 'title', before: document.title, after: value.summary }], omitted: 0,
+      plannedEffects: [], behaviorEvidence: [], ...semanticChanges, semanticChanges,
       document: { ...document, title: value.summary, revision: input.documentRevision + 1 }, resources: { assetFiles: {}, componentPackages: {} } }
     previews.set(prepared.previewId, { request: input, prepared })
     return prepared

@@ -13,7 +13,6 @@ beforeEach(() => {
   useEditorStore.getState().createNewProject()
   useEditorStore.getState().setEditingScope('global')
   useEditorStore.getState().selectNode(null)
-  useEditorStore.setState({ editorMode: 'professional' })
 })
 
 describe('minimal project design tokens', () => {

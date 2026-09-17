@@ -2000,7 +2000,16 @@ export function SlideLocationWorkspace({
     const unsubscribers = [
       handle.bridge.onNodeSelected(({ nodeIds, additive }) => {
         const currentSnapshot = readSnapshot()
+        // The formula dialog is modal. A DOM-native formula double click can
+        // still leave one delayed selection event queued in the underlying
+        // Phaser canvas; accepting it would clear the content edit that the
+        // same gesture just opened.
+        if (currentSnapshot.contentEdit?.kind === 'formula') return
         if (!additive) {
+          if (
+            nodeIds.length === currentSnapshot.selectedNodeIds.length &&
+            nodeIds.every((nodeId, index) => nodeId === currentSnapshot.selectedNodeIds[index])
+          ) return
           ports.selection.selectNodes(nodeIds)
           return
         }
@@ -2055,6 +2064,7 @@ export function SlideLocationWorkspace({
         setActiveComponentTextSession(null)
         setActiveRuntimeTextSession(null)
         ports.selection.selectNode(nodeId)
+        ports.content.beginTextEdit(nodeId, 'canvas')
         setActiveFormulaEditSession({
           projectId: currentSnapshot.projectId,
           scope: currentSnapshot.editingScope,
@@ -2942,19 +2952,28 @@ export function SlideLocationWorkspace({
         <FormulaEditDialog
           key={`${editingFormulaNode.id}:${activePresentationStateId ?? 'base'}`}
           node={editingFormulaNode}
-          onCancel={() => setActiveFormulaEditSession(null)}
+          onCancel={() => {
+            ports.content.cancelTextEdit()
+            setActiveFormulaEditSession(null)
+          }}
           onCommit={(ast, accessibleText) => {
             const currentSnapshot = readSnapshot()
             const backend = currentSnapshot.backend
-            if (backend && currentSnapshot.contentEdit?.kind === 'formula') {
-              const edited = updateV9SlideContentFormulaDraft(currentSnapshot.contentEdit, {
-                ast,
-                accessibleText,
-              })
-              ports.authoring.applySlideCommand(
-                (session) => commitV9SlideContentEdit(session, edited),
-                { clearContentEdit: true },
-              )
+            if (!backend || currentSnapshot.contentEdit?.kind !== 'formula') {
+              ports.canvas.setStatus('公式编辑会话已失效，请取消后重新打开')
+              return
+            }
+            const edited = updateV9SlideContentFormulaDraft(currentSnapshot.contentEdit, {
+              ast,
+              accessibleText,
+            })
+            const result = ports.authoring.applySlideCommand(
+              (session) => commitV9SlideContentEdit(session, edited),
+              { clearContentEdit: true },
+            )
+            if (!result.ok) {
+              ports.canvas.setStatus(result.reason ?? '公式修改未能应用，请重试')
+              return
             }
             setActiveFormulaEditSession(null)
           }}

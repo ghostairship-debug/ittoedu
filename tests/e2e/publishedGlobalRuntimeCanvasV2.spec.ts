@@ -11,6 +11,7 @@ import {
 import { courseProjectDocumentSchema } from '../../src/shared/courseProjectSchema'
 import type { RuntimeLayerItem } from '../../src/shared/courseProjectTypes'
 import { composeCourseProjectLocation } from '../../src/shared/courseLayerComposition'
+import { withDefaultComponentController } from '../../src/renderer/components/teacherControllerComponent'
 import { createPublishedCanvasRuntimeV2Fixture } from '../fixtures/publishedCanvasRuntimeV2Fixture'
 
 const root = resolve(__dirname, '..', '..')
@@ -212,7 +213,7 @@ function writeFixture(): void {
   const sources = {
     project: courseProjectDocumentSchema.parse(project),
     assetFiles: {},
-    components: {},
+    components: withDefaultComponentController(project).componentPackages,
   }
   const initialLocation = sources.project.locations.find(
     (location) => location.surfaceId === fixture.slideSurfaceId,

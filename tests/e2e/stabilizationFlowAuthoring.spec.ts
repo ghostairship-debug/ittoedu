@@ -10,9 +10,9 @@ import { isAbsolute, join, relative, resolve } from 'node:path'
 import { _electron as electron, expect, test } from '@playwright/test'
 import type { ElectronApplication, Locator, Page } from 'playwright'
 import {
-  createCourseProjectArchive,
   openCourseProjectArchive,
 } from '../../src/renderer/project/courseProjectArchive'
+import { createArchiveFixture as createCourseProjectArchive } from '../fixtures/teacherController'
 import type {
   CourseProjectDocument,
   FlowBlock,
@@ -26,6 +26,7 @@ import {
 import { APP_E2E_TEMP_DIRECTORY_NAME } from '../../src/shared/constants'
 import { BACKGROUND_E2E_ENV } from '../../src/main/windowVisibility'
 import { expectBackgroundWindowsIsolated } from './expectBackgroundWindowsIsolated'
+import { showEditorPanel } from './r18NativeAuthoringFixture'
 
 const root = resolve(__dirname, '..', '..')
 const flowFixturePath = join(root, 'tests', 'fixtures', 'course-project-v9', 'flow.h5lesson')
@@ -139,7 +140,15 @@ async function launchEditor(): Promise<LaunchedEditor> {
     })
     const page = await app.firstWindow()
     attach(page)
-    await page.getByRole('button', { name: '新建独立课件', exact: true }).click()
+    // Only enter the landing page; keep an existing editor or recovery draft intact.
+    const startupMore = page.locator('.lesson-workspace-more > summary')
+    const startupEditor = page.getByRole('button', { name: '打开工程（Ctrl+O）', exact: true })
+    const startupRecovery = page.getByRole('alertdialog', { name: '发现未完成的本地恢复副本', exact: true })
+    await expect.poll(async () => await startupEditor.isVisible() || await startupMore.isVisible() || await startupRecovery.isVisible()).toBe(true)
+    if (!await startupEditor.isVisible() && await startupMore.isVisible() && !await startupRecovery.isVisible()) {
+      await startupMore.click()
+      await page.getByRole('button', { name: '新建独立课件', exact: true }).click()
+    }
     await page.locator('[data-testid="canvas-stage"] canvas').waitFor()
     await expectBackgroundWindowsIsolated(app, true)
     const professional = page.getByRole('button', { name: '专业' })
@@ -150,6 +159,11 @@ async function launchEditor(): Promise<LaunchedEditor> {
     else removeRunRoot(runRoot)
     throw error
   }
+}
+
+async function openEditorTab(page: Page, name: '图层' | '属性'): Promise<void> {
+  await showEditorPanel(page, '属性与素材')
+  await page.getByRole('tab', { name, exact: true }).click()
 }
 
 function requireFlowSurface(project: CourseProjectDocument): FlowSurfaceDocument {
@@ -311,9 +325,11 @@ function readProject(projectPath: string): CourseProjectDocument {
 
 async function saveCurrent(page: Page, projectPath: string, savedMatches: (project: CourseProjectDocument) => boolean): Promise<CourseProjectDocument> {
   const saveButton = page.getByRole('button', { name: '保存（Ctrl+S）' })
+  const projectName = page.getByRole('button', { name: '重命名课件', exact: true })
+  await expect(projectName).toContainText('*')
   await saveButton.click()
+  await expect(projectName).not.toContainText('*', { timeout: 15_000 })
   await expect.poll(() => savedMatches(readProject(projectPath)), { timeout: 15_000 }).toBe(true)
-  await expect(saveButton).toBeEnabled()
   return readProject(projectPath)
 }
 
@@ -509,8 +525,10 @@ test('Wave C Flow authoring survives one real Editor and Player session', async 
     await patchProjectDialogs(app, projectPath)
     await page.getByRole('button', { name: '打开工程（Ctrl+O）' }).click()
     await expect(page.getByTestId('flow-workspace')).toBeVisible()
-    await page.locator('summary').filter({ hasText: '正文格式' }).click()
-    await expect(page.getByRole('toolbar', { name: '正文工具' }).first()).toBeVisible()
+    const formatPanel = page.locator('details.flow-document-format')
+    const formatToolbar = page.getByRole('toolbar', { name: '正文工具' }).first()
+    await formatPanel.locator('summary').click()
+    await expect(formatToolbar).toBeVisible()
 
     await test.step('formula preserves its semantic target and explicit LaTeX editor', async () => {
       const formula = page.getByTestId('flow-block-flow-formula')
@@ -534,11 +552,19 @@ test('Wave C Flow authoring survives one real Editor and Player session', async 
       const formatBaseline = readProject(projectPath)
       const paragraph = page.getByTestId('flow-block-flow-paragraph')
       const editor = page.getByRole('textbox', { name: '正文排版编辑', exact: true }).first()
-      const toolbar = page.getByRole('toolbar', { name: '正文工具' }).first()
+      const toolbar = formatToolbar
+      // The format panel is an intentional popover over the paper. Close it to
+      // focus and select real editor text, then reopen it through the normal UI;
+      // the shared editor preserves the DOM selection for toolbar commands.
+      await formatPanel.locator('summary').click()
+      await expect(toolbar).toBeHidden()
       await paragraph.click()
       await expect(editor).toBeFocused()
       const expectedSelection = { editorConnected: true, text: '丙丁', collapsed: false, inside: true, start: 2, end: 4 }
       expect(await selectRealTextRange(page, paragraph, 2, 3)).toEqual(expectedSelection)
+      await formatPanel.locator('summary').click()
+      await expect(toolbar).toBeVisible()
+      expect(await readRealTextSelection(page)).toEqual(expectedSelection)
       const fontFamily = toolbar.getByLabel('字体', { exact: true })
       await fontFamily.selectOption('SimSun')
       await expect(editor).toBeFocused()
@@ -560,8 +586,13 @@ test('Wave C Flow authoring survives one real Editor and Player session', async 
       await expect(fontSize).toHaveValue('')
       await expect(fontSize).toHaveAttribute('placeholder', '混合')
       await expect(toolbar.getByRole('button', { name: '粗体', exact: true })).toHaveAttribute('aria-pressed', 'mixed')
+      await formatPanel.locator('summary').click()
+      await expect(toolbar).toBeHidden()
       const caretPoint = await flowTextPoint(paragraph, FORMAT_TEXT.length - 1, 'end')
       await page.mouse.click(caretPoint.x, caretPoint.y)
+      expect(await readRealTextSelection(page)).toMatchObject({ collapsed: true, start: FORMAT_TEXT.length, end: FORMAT_TEXT.length })
+      await formatPanel.locator('summary').click()
+      await expect(toolbar).toBeVisible()
       expect(await readRealTextSelection(page)).toMatchObject({ collapsed: true, start: FORMAT_TEXT.length, end: FORMAT_TEXT.length })
       await fontFamily.selectOption('KaiTi')
       await fontSize.fill('32')
@@ -576,11 +607,11 @@ test('Wave C Flow authoring survives one real Editor and Player session', async 
       await toolbar.getByRole('button', { name: '撤销', exact: true }).click()
       await expect(paragraph).toHaveText(FORMAT_TEXT)
       // Owner Undo restores the document session and its initially collapsed format panel.
-      await page.locator('summary').filter({ hasText: '正文格式' }).click()
+      await formatPanel.locator('summary').click()
       await toolbar.getByRole('button', { name: '重做', exact: true }).click()
       await expect(paragraph).toHaveText(`${FORMAT_TEXT}新`)
 
-      await page.getByRole('tab', { name: '图层' }).click()
+      await openEditorTab(page, '图层')
       const overlayRegion = page.getByTestId('flow-overlay-layers')
       const bodyBoundary = page.getByTestId('flow-body-boundary')
       await expect(bodyBoundary).toHaveCount(1)
@@ -649,7 +680,7 @@ test('Wave C Flow authoring survives one real Editor and Player session', async 
       const editBlock = page.getByTestId('flow-block-wave-c-media-edit')
       // The video center belongs to native playback controls; the caption selects its media block.
       await editBlock.locator('[data-document-slot="caption"]').click()
-      await page.getByRole('tab', { name: '属性' }).click()
+      await openEditorTab(page, '属性')
       await expect(page.getByTestId('flow-media-properties')).toBeVisible()
       const altText = page.getByLabel('替代文本', { exact: true })
       await altText.fill('Wave C 新替代文本')

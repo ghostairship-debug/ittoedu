@@ -54,7 +54,7 @@
 - 第二、第三轮的公开自测脚本分别在sequence137、88把goToScene模拟为无条件成功。这解释了自测通过与真实按钮失败为何同时发生。此类mock可覆盖局部调用逻辑，不能当生产导航证据；不将其描述为模型蓄意造假。
 - 第四轮pending输入导致重新交付是既有预期行为。事件空窗不能直接归因为模型思考、网络或宿主执行耗时。
 
-完整路径、事件位置、已修对照与未知项见[六轮审计报告](../../../output/r19-cross-run-log-audit/REPORT.md)及[结构化发现](../../../output/r19-cross-run-log-audit/findings.json)。审计未调用模型、测试或GUI。
+完整路径、事件位置、已修对照与未知项见`../../../output/r19-cross-run-log-audit/REPORT.md`（历史链接目标未保留）及`../../../output/r19-cross-run-log-audit/findings.json`（历史链接目标未保留）。审计未调用模型、测试或GUI。
 
 ## 3. 建议的产品改进
 

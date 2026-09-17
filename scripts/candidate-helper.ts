@@ -12,7 +12,7 @@ import { checkGenerationStaticPrecheck } from '../src/shared/generationStaticPre
  * No repository, node_modules, service, live document or provider is needed. */
 async function main() {
   const args = process.argv.slice(2)
-  if (args.length === 1 && ['--help', '-h'].includes(args[0]!)) { console.log('node candidate-helper.mjs --request <request.json> --input <draft.json> [--check]\nComponent: --request <request.json> --component-target d1 --work-dir <candidateRoot>/component-work --init\nThen edit work files; repeat without --init and add --summary <text> [--observe <remaining check>] [--delete <file>] [--check]. Frozen baseline is preserved. Precheck is not host commit.'); return }
+  if (args.length === 1 && ['--help', '-h'].includes(args[0]!)) { console.log('node candidate-helper.mjs --request <request.json> --input <draft.json> [--check]\nNormal delivery: call once without --check; the helper validates and writes candidate.json in that call. Use --check only for a no-write precheck. Component: --request <request.json> --component-target d1 --work-dir <candidateRoot>/component-work --init\nThen edit work files; repeat without --init and add --summary <text> [--observe <remaining check>] [--delete <file>] [--check]. Frozen baseline is preserved. Precheck is not host commit.'); return }
   const option = (name: string) => { const index = args.indexOf(name); return index < 0 ? undefined : args[index + 1] }
   const requestPath = option('--request'), inputPath = option('--input')
   for (let index = 0; index < args.length; index++) {

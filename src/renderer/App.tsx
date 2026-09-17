@@ -147,7 +147,6 @@ export default function App() {
     selectEffectiveLayerProjection(state)?.unifiedRows.find(row => row.selected)?.name ?? selectSelectedNode(state)?.name ?? null)
   const selectedNodeIds = useEditorStore(selectSelectedNodeIds)
   const editingScope = useEditorStore(selectEditingScope)
-  const editorMode = useEditorStore((state) => state.editorMode)
   const activeTab = useEditorStore((state) => state.activeTab)
   const editingItemCount = useEditorStore(state => {
     const projection = selectEffectiveLayerProjection(state)
@@ -371,9 +370,6 @@ export default function App() {
         if (route.locationId) state.activateCourseLocation(route.locationId)
         state.setEditingScope(route.scope)
         if (route.layerItemId) state.selectNode(route.layerItemId)
-        if (route.tab === 'automation' || route.tab === 'components') {
-          state.setEditorMode('professional')
-        }
         state.setActiveTab(route.tab)
         return
       }
@@ -484,6 +480,7 @@ export default function App() {
   })
 
   useEditorKeyboardRouter({
+    isReadOnly: () => courseDelivery.previewOpen || useEditorStore.getState().canvasMode === 'run',
     captureDeleteSnapshot(target) {
       const state = useEditorStore.getState()
       const flow = state.flowSession
@@ -630,11 +627,7 @@ export default function App() {
         onExport={courseDelivery.exportCourse}
       />
       <EditorPanelLayout
-        className={`app-main${
-          editorMode === 'professional' && activeTab === 'developer'
-            ? ' app-main--developer'
-            : ''
-        }`}
+        className={`app-main${activeTab === 'developer' ? ' app-main--developer' : ''}`}
       >
         <ScenePanel />
         <div className="editor-center">

@@ -39,6 +39,7 @@ import { PublishedInteractionController } from '../interactions/PublishedInterac
 import {
   PublishedInteractionVisibilityState,
 } from '../interactions/PublishedDomInteractionSurfacePort'
+import { PublishedInteractionRuns } from '../interactions/PublishedInteractionSurfacePort'
 import type {
   PublishedInteractionSessionPort,
   PublishedInteractionSurfacePort,
@@ -442,6 +443,10 @@ function cancelActiveMotions(port: PublishedInteractionSurfacePort | null): void
 
 /** Mixed try-run / whole-course preview session. Does not write CourseProjectDocument. */
 export class PublishedCourseSession {
+  readonly interactionRuns = new PublishedInteractionRuns(() => {
+    const { locationId, stateId } = this.readObservationState()
+    return { locationId, stateId }
+  })
   readonly player: CoursePlayer
   readonly navigator: MixedCourseNavigator
   readonly #hosts: readonly SurfaceHost[]
@@ -822,6 +827,7 @@ class PublishedInteractionCourseSession extends PublishedCourseSession {
   #terminalNavigationInvalidated = false
   #interactionDestroyStarted = false
   #audioDestroyStarted = false
+  #interactionNavigationRunId: number | undefined
   #navigationGuardBypassTargetId: string | null = null
 
   override readObservationState(): ReturnType<PublishedCourseSession['readObservationState']> {
@@ -854,6 +860,7 @@ class PublishedInteractionCourseSession extends PublishedCourseSession {
     this.#staticCapture = staticCapture
     this.#globalInteractionVisibilityState = globalInteractionVisibilityState
     this.#interactionSessionPort = {
+      interactionRuns: this.interactionRuns,
       courseState: this.#courseState,
       setCourseStateBatch: entries => {
         if (this.#staticCapture || this.#interactionDestroyStarted) throw new Error('课程会话不可写入')
@@ -871,6 +878,7 @@ class PublishedInteractionCourseSession extends PublishedCourseSession {
           if (!this.#interactionDestroyStarted && event?.soundId === soundId) listener()
         },
       ),
+      goToLocation: (locationId, signal) => this.#goToLocation(locationId, signal),
       goToScene: (sceneId, targetStateId, signal) => (
         this.#goToScene(sceneId, targetStateId, signal)
       ),
@@ -934,6 +942,19 @@ class PublishedInteractionCourseSession extends PublishedCourseSession {
       'goToScene',
       this.#goToScene(sceneId, targetStateId, new AbortController().signal),
     )
+    return true
+  }
+
+  requestHostGoToLocation(locationId: string): boolean {
+    if (!this.#canAcceptHostAction()) return false
+    const location = this.#locationById(locationId)
+    if (!location || this.navigator.current?.locationId === location.id) return false
+    if (location.kind === 'slide-scene') {
+      const host = interactionCapableHost(this.#hostsById.get(location.surfaceId))
+      if (!host?.validatePublishedPresentationState?.(location.id, location.stateId)) return false
+    }
+    if (!this.#acceptNavigationTarget(location.id, location.surfaceId)) return false
+    this.#launchHostAction('goToLocation', this.#goToLocation(locationId, new AbortController().signal))
     return true
   }
 
@@ -1017,6 +1038,7 @@ class PublishedInteractionCourseSession extends PublishedCourseSession {
   handleBeforeNavigation(transition?: MixedNavigationTransition): void {
     this.#scenePicker?.close(false)
     if (transition) {
+      this.interactionRuns.beginNavigation(this.#interactionNavigationRunId, transition.current?.locationId, transition.next.locationId)
       this.#audioEvents.emit('scene:leave', { sceneId: transition.current?.locationId })
       locationPreparedHost(this.#hostsById.get(transition.next.surfaceId))
         ?.preparePublishedLocation(transition.next.locationId, transition.forced)
@@ -1058,8 +1080,11 @@ class PublishedInteractionCourseSession extends PublishedCourseSession {
   handleNavigationSettled(state: MixedNavigationState): void {
     if (this.#interactionDestroyStarted || this.navigator.current?.locationId !== state.locationId) return
     this.notifyNavigationChanged()
-    this.#globalInteractionController?.enterScene()
-    this.#localInteractionController?.enterScene()
+    const parentRunId = this.#interactionNavigationRunId
+    this.#interactionNavigationRunId = undefined
+    const matched = this.interactionRuns.settleNavigation(parentRunId, state.locationId, this.readObservationState().stateId)
+    this.#globalInteractionController?.enterScene(matched ? parentRunId : undefined)
+    this.#localInteractionController?.enterScene(matched ? parentRunId : undefined)
   }
 
   override dispatchPresenterCommand(command: PlaybackDirection): boolean {
@@ -1087,6 +1112,7 @@ class PublishedInteractionCourseSession extends PublishedCourseSession {
   override async destroy(): Promise<void> {
     if (!this.#interactionDestroyStarted) {
       this.#interactionDestroyStarted = true
+      this.interactionRuns.cancelAll('session-destroyed')
       this.#destroyInteractionControllers()
       this.#globalInteractionVisibilityState.reset()
     }
@@ -1262,6 +1288,18 @@ class PublishedInteractionCourseSession extends PublishedCourseSession {
     if (!ok) throw new Error(`Unable to observe Published target ${locationId}/${stateId ?? ''}`)
   }
 
+  async #goToLocation(locationId: string, signal: AbortSignal): Promise<boolean> {
+    if (!this.#canAcceptHostAction()) return false
+    const location = this.#locationById(locationId)
+    if (!location || this.navigator.current?.locationId === location.id) return false
+    return this.#navigatePlaybackTarget(
+      { id: location.id, name: location.label, locationId: location.id,
+        ...(location.kind === 'slide-scene' ? { stateId: location.stateId } : {}) },
+      signal,
+      { prepareInitialState: true },
+    )
+  }
+
   async #goToScene(
     sceneId: string,
     targetStateId: string | undefined,
@@ -1316,6 +1354,8 @@ class PublishedInteractionCourseSession extends PublishedCourseSession {
     const prepareState = step.stateId !== undefined || (options.prepareInitialState === true && target.kind === 'slide-scene')
     if (prepareState && (!targetHost?.validatePublishedPresentationState || !targetHost.validatePublishedPresentationState(target.id, step.stateId))) return false
     if (!this.#claimTerminalNavigation(signal)) return false
+    const runId = this.interactionRuns.prepareNavigation(signal, current.locationId, target.id, step.stateId)
+    this.#interactionNavigationRunId = runId
     if (options.bypassGuards) this.#navigationGuardBypassTargetId = target.id
     try {
       await this.navigator.goToLocation(target.id, {
@@ -1330,6 +1370,8 @@ class PublishedInteractionCourseSession extends PublishedCourseSession {
       })
       return true
     } catch (error) {
+      if (runId !== undefined) this.interactionRuns.finish(runId, 'failed', 'navigation-failed')
+      if (this.#interactionNavigationRunId === runId) this.#interactionNavigationRunId = undefined
       targetHost?.cancelPreparedPublishedPresentationState?.(target.id)
       this.#releaseTerminalNavigationClaim()
       throw error
@@ -1352,6 +1394,8 @@ class PublishedInteractionCourseSession extends PublishedCourseSession {
 
   async #restartCourse(signal: AbortSignal): Promise<boolean> {
     if (!this.navigator.current || !this.#claimTerminalNavigation(signal)) return false
+    const runId = this.interactionRuns.prepareNavigation(signal, this.navigator.current.locationId, this.#payload.startLocationId)
+    this.#interactionNavigationRunId = runId
     this.#audioEvents.emit('course:restart')
     this.#navigationGuardBypassTargetId = this.#payload.startLocationId
     this.preparePublishedGlobalRuntimeRestart()
@@ -1361,6 +1405,8 @@ class PublishedInteractionCourseSession extends PublishedCourseSession {
       this.#globalInteractionVisibilityState.reset()
       return true
     } catch (error) {
+      if (runId !== undefined) this.interactionRuns.finish(runId, 'failed', 'navigation-failed')
+      if (this.#interactionNavigationRunId === runId) this.#interactionNavigationRunId = undefined
       this.finishPublishedGlobalRuntimeRestart(false)
       const currentSurfaceId = this.navigator.current?.surfaceId
       if (currentSurfaceId) this.movePublishedGlobalRuntimes(currentSurfaceId)
@@ -1545,6 +1591,7 @@ export function createPublishedCourseSession(
     session?.executeTeacherControllerAction(action) ?? Promise.resolve(undefined)
   )
   const componentActions = createPlayerComponentHostActions({
+    goToLocation: locationId => session?.requestHostGoToLocation(locationId) ?? false,
     goToSceneById: (sceneId, targetStateId) => (
       session?.requestHostGoToScene(sceneId, targetStateId) ?? false
     ),

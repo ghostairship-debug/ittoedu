@@ -38,6 +38,20 @@ const EMPTY_FILES: CourseProjectHealthArchiveFiles = {
 }
 
 describe('S2 deterministic content QA', () => {
+  it('checks exact location.go targets across all surfaces and reports missing locations', () => {
+    const project = blankProject(), { scene } = slide(project)
+    addFlowAndSpatial(project)
+    for (const [index, location] of project.locations.entries()) scene.interactions.push({
+      id: `location-rule-${index}`, enabled: true, trigger: { type: 'scene.enter' }, conditions: [],
+      actions: [{ id: `location-action-${index}`, start: 'after-previous', delayMs: 0, action: { type: 'location.go', locationId: location.id } }],
+    })
+    expect(collectCourseProjectInteractionHealth(project, EMPTY_FILES).filter(f => f.code === 'interaction-location-reference-missing' || f.code === 'published-interaction-action-unsupported')).toEqual([])
+    scene.interactions[0]!.actions[0]!.action = { type: 'location.go', locationId: 'missing-location' }
+    const findings = collectCourseProjectInteractionHealth(project, EMPTY_FILES).filter(f => f.code === 'interaction-location-reference-missing')
+    expect(findings).toHaveLength(1)
+    expect(findings[0]).toMatchObject({ severity: 'error' })
+    expect(findings[0]!.path.at(-1)).toBe('locationId')
+  })
   it('locates four content error families, separates formula layout, and never writes the project', () => {
     const project = blankProject(), { scene } = slide(project)
     const text = (value: string) => sceneNodeToCourseLayerItem(createTextNode({ text: value }), scene.layerItems.length)
@@ -571,7 +585,6 @@ describe('V9-native Course Project health', () => {
       'controller-scene-target-missing',
       'looping-video-ended-unreachable',
       'published-interaction-click-unbindable',
-      'published-interaction-trigger-unsupported',
       'sound-id-mismatch',
       'video-click-interaction-conflict',
     ]))

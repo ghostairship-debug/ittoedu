@@ -18,6 +18,7 @@ export class DocumentAiTaskController {
     const editor = target.getEditor()
     if (!editor || !await editor.flush()) throw new Error('请先保存当前文档并处理冲突')
     const session = editor.session, source = session.getSnapshot().source, epoch = nextDocumentAiEpoch()
+    if (session.ref.kind !== 'lesson') throw new Error('AI 文档修改仅在课例文档中可用')
     this.session = session
     const ranges = [{ from: 0, to: source.length, before: source, after: source }]
     const prepared = await session.prepareAiEdit(ranges, epoch)

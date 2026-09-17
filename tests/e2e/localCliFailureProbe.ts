@@ -44,7 +44,7 @@ function expectedFailure(adapter: Adapter, failure: Failure): { failure: string;
   // IPC reads the V1 display projection of V2 events. Assert that projection
   // together with the precise reason shown to the teacher, not the category alone.
   const authentication = adapter === 'claude' ? 'CLI 认证失效，请重新登录' : 'authentication failed'
-  if (failure === 'authentication-before-initialize') return { failure: 'protocol', payload: { message: `CLI 未完成（打开原生 CLI）：${authentication}` } }
+  if (failure === 'authentication-before-initialize') return { failure: 'protocol', payload: { message: `CLI 未完成（打开原生 CLI）：${adapter === 'codex' ? 'Codex initialize: ' : ''}${authentication}` } }
   if (failure === 'unauthenticated') return { failure: adapter === 'opencode' ? 'launch' : 'unsupported-version', payload: { message: authentication } }
   if (failure === 'crash') return { failure: 'launch', payload: { message: adapter === 'codex' ? 'Codex 进程意外退出 (exit 7)' : `${adapter === 'claude' ? 'Claude' : 'OpenCode'} 进程异常退出 (code: 7)` } }
   if (failure === 'protocol') return { failure: 'protocol', payload: { message: adapter === 'opencode' ? 'Malformed JSON-RPC message' : 'fixture protocol violation' } }

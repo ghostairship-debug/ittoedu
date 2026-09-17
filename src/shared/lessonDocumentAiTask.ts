@@ -3,7 +3,7 @@ import { lessonAgentWorkspaceSchema } from './workspaceIdentity'
 import { lessonRelativePathSchema } from './lessonWorkspace'
 import { localAgentIdSchema } from './localAgentContract'
 import type { DocumentEditRange, DocumentFileVersion } from './document/ports'
-const ref = z.object({ lessonId: z.uuid(), lessonDirectory: z.string().min(1), relativePath: lessonRelativePathSchema }).strict()
+const ref = z.object({ kind: z.literal('lesson'), lessonId: z.uuid(), lessonDirectory: z.string().min(1), relativePath: lessonRelativePathSchema }).strict()
 const version = z.object({ contentVersion: z.string().min(1), attachments: z.array(z.object({ relativePath: lessonRelativePathSchema, contentVersion: z.string().min(1) }).strict()) }).strict()
 export const documentAiRangeSchema = z.object({ from: z.number().int().nonnegative(), to: z.number().int().nonnegative(), before: z.string(), after: z.string() }).strict().refine(range => range.to >= range.from)
 export const documentAiCandidateSchema = z.object({ edits: z.array(documentAiRangeSchema).min(1).max(1000) }).strict()

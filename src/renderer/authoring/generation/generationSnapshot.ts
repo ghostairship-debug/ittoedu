@@ -9,6 +9,9 @@ import { buildFlowEditorView, captureFlowEditorAuthoringTarget } from '../../cou
 import type { FlowEditorSelection } from '../../course/flowEditorSlice'
 import { generationCapabilityContext } from './generationCapabilities'
 import { generationNavigationContext } from './generationNavigationContext'
+import { captureGenerationTaskFacts } from './generationTaskFacts'
+import { generationTaskFactsPromptProjection } from '../../../shared/generationTaskFactsProjection'
+import { compactGenerationPage } from '../../../shared/generationPageProjection'
 import type { ComponentPackageData } from '../../../shared/componentTypes'
 import { componentContentSha256 } from '../../../shared/componentContentIntegrity'
 import { componentPackageAddress } from '../tools/componentPackageTool'
@@ -18,6 +21,31 @@ import { captureBackgroundTargets } from '../tools/backgroundTool'
 import { captureGenerationSelectionActions } from './selectionActionTargets'
 
 export type GenerationReferenceScope = 'selection' | 'page' | 'course'
+
+function previousResultPromptProjection(previousResult: unknown, resourcePath: string): unknown {
+  if (!previousResult || typeof previousResult !== 'object' || Array.isArray(previousResult)) return previousResult
+  const result = previousResult as Record<string, unknown>
+  const affected = Array.isArray(result.affected) ? result.affected.flatMap(value => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return []
+    const effect = value as Record<string, unknown>
+    return [{ id: effect.id, operation: effect.operation, ownerKey: effect.ownerKey }]
+  }) : undefined
+  return {
+    ...(typeof result.version === 'number' ? { version: result.version } : {}),
+    ...(typeof result.requestId === 'string' ? { requestId: result.requestId } : {}),
+    ...(typeof result.candidateId === 'string' ? { candidateId: result.candidateId } : {}),
+    ...(typeof result.status === 'string' ? { status: result.status } : {}),
+    ...(typeof result.beforeRevision === 'number' ? { beforeRevision: result.beforeRevision } : {}),
+    ...(typeof result.afterRevision === 'number' ? { afterRevision: result.afterRevision } : {}),
+    ...(result.workspace ? { workspace: result.workspace } : {}),
+    ...(typeof result.summary === 'string' ? { summary: result.summary } : {}),
+    ...(affected ? { affected } : {}),
+    ...(result.resources ? { resources: result.resources } : {}),
+    fullReceipt: resourcePath,
+    omitted: ['semanticChanges.changes', 'executionEvidence'],
+    instruction: '以上为本轮宿主结果摘要；完整回执（包括语义变更和执行证据）请读取 fullReceipt 指向的资源文件。',
+  }
+}
 
 /** A reference is presentation focus, never an authorization inferred from selection. */
 export function resolveGenerationReferenceScope(input: { instruction: string; scope: GenerationReferenceScope; scopeExplicit?: boolean }): GenerationReferenceScope {
@@ -144,6 +172,7 @@ export function captureGenerationSnapshot(input: {
   }
   const promptPages = pages.map(detachRuntimeSources)
   const focusPages = input.scope === 'course' ? promptPages : promptPages.filter(page => (page as any).location.id === sessionToken.locationId || input.additionalLocationIds?.includes((page as any).location.id))
+  const inlinePages = focusPages
   const capabilityPages = input.scope === 'selection' ? focusPages.map((page: any) => ({ ...page, backgrounds: undefined,
     items: page.items.filter((row: any) => row.selected), blocks: page.blocks.filter((row: any) => row.selected) })) : focusPages
   const componentSources = [...referencedPackages].map(packageId => {
@@ -199,16 +228,25 @@ export function captureGenerationSnapshot(input: {
   }
   destinations.sort((a, b) => priority(a) - priority(b))
   resourceFiles.push({ path: 'project/targets.json', encoding: 'utf8', role: 'source', mediaType: 'application/json', content: JSON.stringify({ pages: promptPages }) })
+  const previousResult = input.previousResult ?? null
+  const previousResultPath = 'project/previous-result.json'
+  if (previousResult !== null) {
+    resourceFiles.push({ path: previousResultPath, encoding: 'utf8', role: 'runtime-evidence', mediaType: 'application/json', content: JSON.stringify(previousResult) })
+  }
   const allowedCarriers: GenerationRequest['allowedCarriers'] = ['native', 'recipe', 'existing-component', 'generated-component', 'runtime']
-  const request = generationRequestSchema.parse({ version: 1, requestId: crypto.randomUUID(), workspace,
+  let request = generationRequestSchema.parse({ version: 1, requestId: crypto.randomUUID(), workspace,
     documentRevision: document.revision, sessionGeneration: sessionToken.generation, purpose: input.purpose,
     expectedResult: input.expectedResult ?? 'candidate', intent: input.intent, applyPolicy: input.applyPolicy, observation: input.observation,
     instruction: input.instruction, destinations, confirmedDocuments: input.confirmedDocuments,
+    taskFacts: captureGenerationTaskFacts({ document, sessionToken, locationId: sessionToken.locationId,
+      stateId: projection.stateId, selectedIds: input.selectedIds, scope: input.scope,
+      instruction: input.instruction, componentPackages: input.componentPackages }),
     ...(selectionActions.length ? { selectionActions } : {}),
     allowedCarriers,
     resourceFiles,
     context: JSON.parse(JSON.stringify({ reference: input.scope, focusLocationId: sessionToken.locationId, modificationScope: 'project',
-      projectDocument: 'resources/project/document.json', projectTargets: 'resources/project/targets.json', pages: focusPages, materials: materialReferences,
+      projectDocument: 'resources/project/document.json', projectTargets: 'resources/project/targets.json', pages: inlinePages,
+      materials: materialReferences,
       navigation: generationNavigationContext(document, sessionToken.locationId, projection.stateId),
       ...(input.scope === 'selection' && projection.surfaceType === 'flow' && input.flowSelection
         ? { flowSelection: input.flowSelection } : {}),
@@ -218,9 +256,29 @@ export function captureGenerationSnapshot(input: {
       assets: document.assets, componentPackages: document.componentPackages, componentSources, runtimeSources,
       componentCatalog: componentCatalog.filter(entry => referencedPackages.has(entry.packageId)),
       componentCatalogFile: { path: 'resources/component-catalog.json', count: componentCatalog.length },
-      previousResult: input.previousResult ?? null })),
+      previousResult: previousResult === null ? null : previousResultPromptProjection(previousResult, `resources/${previousResultPath}`) })),
   })
-  const { resourceFiles: _resources, ...prompt } = request
-  if (new TextEncoder().encode(JSON.stringify(prompt)).byteLength > MAX_GENERATION_PROMPT_BYTES - 16000) throw new Error('引用超过本轮上下文预算，请缩小页面或材料范围')
+  const promptBytes = (value: GenerationRequest) => {
+    // Main's initial prompt projection replaces full destinations with compact
+    // aliases. Keep the renderer preflight focused on inline context; Main's
+    // final prompt is the authoritative send-budget check.
+    const { resourceFiles: _resources, destinations: _destinations, taskFacts, ...rest } = value
+    const projectedTaskFacts = generationTaskFactsPromptProjection(taskFacts)
+    const prompt = projectedTaskFacts ? { ...rest, taskFacts: projectedTaskFacts } : rest
+    return new TextEncoder().encode(JSON.stringify(prompt)).byteLength
+  }
+  const projectionRequest = (pages: unknown[], mode: 'non-current-summary' | 'all-summary') => generationRequestSchema.parse({ ...request,
+    context: JSON.parse(JSON.stringify({ ...(request.context as Record<string, unknown>), pages,
+      pageProjection: { version: 1, mode, inlineLocationId: sessionToken.locationId, fullPages: 'resources/project/targets.json',
+        omittedLocations: pages.filter(page => (page as any).details).map(page => (page as any).details.locationId),
+        instruction: mode === 'non-current-summary'
+          ? '这是同一 course scope 的紧凑观察。当前活动位置内联完整内容；其他位置为导航摘要。需要完整内容时按 locationId 读取 projectTargets，不把摘要当完整观察。'
+          : '这是同一 course scope 的资源化观察。所有位置仅保留导航摘要；需要完整内容时按 locationId 读取 projectTargets，不把摘要当完整观察。' } })),
+  })
+  if (input.scope === 'course' && promptBytes(request) > MAX_GENERATION_PROMPT_BYTES) {
+    request = projectionRequest(promptPages.map(page => (page as any).location?.id === sessionToken.locationId ? page : compactGenerationPage(page)), 'non-current-summary')
+    if (promptBytes(request) > MAX_GENERATION_PROMPT_BYTES) request = projectionRequest(promptPages.map(compactGenerationPage), 'all-summary')
+  }
+  if (promptBytes(request) > MAX_GENERATION_PROMPT_BYTES) throw new Error('引用超过本轮上下文预算，请缩小页面或材料范围')
   return request
 }

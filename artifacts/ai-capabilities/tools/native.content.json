@@ -70,7 +70,7 @@
       ]
     }
   ],
-  "description": "Native对象：insert+template使用create parent:owner，提供初始内容/可选style，宿主补默认值；placement.center按当前锚点几何居中。其余操作使用update。edit-text/image/formula/shape只提供变化字段，保留身份、有效状态及未指定字段；旧edit兼容。content需完整同类型内容。Flow文字/正文用flow.content，本工具只创建浮层；paperSpace=paper随稿纸滚动，viewport固定视口，省略保留，非Flow拒绝。图片用media.apply，组件用component.configure，载体替换用selection.replace。",
+  "description": "Native：insert创建，其余update；edit-text优先replacements，重复原文加context，整段text歧义拒绝；保留未指定字段。line缺省水平；端点定向，竖线:[0.5,0]→[0.5,1]。Flow正文及图片/组件替换用专用工具。",
   "examples": [
     {
       "input": {
@@ -155,6 +155,10 @@
       },
       "nativeType": "shape",
       "operation": "insert"
+    },
+    {
+      "code": "await session.execute(\"native.content\",{operation:\"content\",content:{nativeType:\"shape\",data:{...values.shapeData,lineGeometry:{kind:\"straight\",start:[0.5,0],end:[0.5,1]}}}},destination);",
+      "operation": "content"
     },
     {
       "bindings": "values 的 template 来自当前观察、已读资源或用户要求，值须满足本卡 inputSchema；destination 原样复制当前目标。",
@@ -909,9 +913,40 @@
         "type": "string"
       },
       "__schema54": {
-        "$ref": "#/$defs/__schema55"
+        "items": {
+          "$ref": "#/$defs/__schema55"
+        },
+        "maxItems": 100,
+        "minItems": 1,
+        "type": "array"
       },
       "__schema55": {
+        "additionalProperties": false,
+        "properties": {
+          "contextAfter": {
+            "type": "string"
+          },
+          "contextBefore": {
+            "type": "string"
+          },
+          "original": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "replacement": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "original",
+          "replacement"
+        ],
+        "type": "object"
+      },
+      "__schema56": {
+        "$ref": "#/$defs/__schema57"
+      },
+      "__schema57": {
         "additionalProperties": false,
         "properties": {
           "assetId": {
@@ -932,10 +967,10 @@
         ],
         "type": "object"
       },
-      "__schema56": {
-        "$ref": "#/$defs/__schema57"
+      "__schema58": {
+        "$ref": "#/$defs/__schema59"
       },
-      "__schema57": {
+      "__schema59": {
         "additionalProperties": false,
         "properties": {
           "accessibleText": {
@@ -968,10 +1003,17 @@
         ],
         "type": "object"
       },
-      "__schema58": {
-        "$ref": "#/$defs/__schema59"
+      "__schema6": {
+        "enum": [
+          "paper",
+          "viewport"
+        ],
+        "type": "string"
       },
-      "__schema59": {
+      "__schema60": {
+        "$ref": "#/$defs/__schema61"
+      },
+      "__schema61": {
         "additionalProperties": false,
         "properties": {
           "align": {
@@ -1034,38 +1076,36 @@
         },
         "type": "object"
       },
-      "__schema6": {
-        "enum": [
-          "paper",
-          "viewport"
-        ],
-        "type": "string"
-      },
-      "__schema60": {
+      "__schema62": {
         "$ref": "#/$defs/__schema50"
       },
-      "__schema61": {
+      "__schema63": {
         "const": "edit-text",
         "type": "string"
       },
-      "__schema62": {
-        "type": "string"
-      },
-      "__schema63": {
-        "$ref": "#/$defs/__schema59"
-      },
       "__schema64": {
-        "$ref": "#/$defs/__schema50"
+        "type": "string"
       },
       "__schema65": {
-        "const": "edit-shape",
-        "type": "string"
+        "items": {
+          "$ref": "#/$defs/__schema55"
+        },
+        "maxItems": 100,
+        "minItems": 1,
+        "type": "array"
       },
       "__schema66": {
-        "$ref": "#/$defs/__schema31"
+        "$ref": "#/$defs/__schema61"
       },
       "__schema67": {
         "$ref": "#/$defs/__schema50"
+      },
+      "__schema68": {
+        "const": "edit-shape",
+        "type": "string"
+      },
+      "__schema69": {
+        "$ref": "#/$defs/__schema31"
       },
       "__schema7": {
         "additionalProperties": false,
@@ -1084,6 +1124,9 @@
           "anchorItemId"
         ],
         "type": "object"
+      },
+      "__schema70": {
+        "$ref": "#/$defs/__schema50"
       },
       "__schema8": {
         "minLength": 1,
@@ -1884,22 +1927,25 @@
         "additionalProperties": false,
         "properties": {
           "formula": {
-            "$ref": "#/$defs/__schema56"
+            "$ref": "#/$defs/__schema58"
           },
           "image": {
-            "$ref": "#/$defs/__schema54"
+            "$ref": "#/$defs/__schema56"
           },
           "operation": {
             "$ref": "#/$defs/__schema52"
           },
           "properties": {
-            "$ref": "#/$defs/__schema60"
+            "$ref": "#/$defs/__schema62"
+          },
+          "replacements": {
+            "$ref": "#/$defs/__schema54"
           },
           "text": {
             "$ref": "#/$defs/__schema53"
           },
           "textStyle": {
-            "$ref": "#/$defs/__schema58"
+            "$ref": "#/$defs/__schema60"
           }
         },
         "required": [
@@ -1911,16 +1957,19 @@
         "additionalProperties": false,
         "properties": {
           "operation": {
-            "$ref": "#/$defs/__schema61"
+            "$ref": "#/$defs/__schema63"
           },
           "properties": {
-            "$ref": "#/$defs/__schema64"
+            "$ref": "#/$defs/__schema67"
+          },
+          "replacements": {
+            "$ref": "#/$defs/__schema65"
           },
           "text": {
-            "$ref": "#/$defs/__schema62"
+            "$ref": "#/$defs/__schema64"
           },
           "textStyle": {
-            "$ref": "#/$defs/__schema63"
+            "$ref": "#/$defs/__schema66"
           }
         },
         "required": [
@@ -1932,7 +1981,7 @@
         "additionalProperties": false,
         "properties": {
           "image": {
-            "$ref": "#/$defs/__schema55"
+            "$ref": "#/$defs/__schema57"
           },
           "operation": {
             "const": "edit-image",
@@ -1952,7 +2001,7 @@
         "additionalProperties": false,
         "properties": {
           "formula": {
-            "$ref": "#/$defs/__schema57"
+            "$ref": "#/$defs/__schema59"
           },
           "operation": {
             "const": "edit-formula",
@@ -1972,13 +2021,13 @@
         "additionalProperties": false,
         "properties": {
           "operation": {
-            "$ref": "#/$defs/__schema65"
+            "$ref": "#/$defs/__schema68"
           },
           "properties": {
-            "$ref": "#/$defs/__schema67"
+            "$ref": "#/$defs/__schema70"
           },
           "shapeStyle": {
-            "$ref": "#/$defs/__schema66"
+            "$ref": "#/$defs/__schema69"
           }
         },
         "required": [

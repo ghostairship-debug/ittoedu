@@ -1,4 +1,4 @@
-import { controllerDisplayFrame, useControllerDisplayRevision } from '../../authoring/controllerDisplayBounds'
+import { constrainControllerDisplayFrame, controllerDisplayFrame, useControllerDisplayRevision } from '../../authoring/controllerDisplayBounds'
 import {
   useEffect,
   useLayoutEffect,
@@ -87,11 +87,9 @@ function constrainFlowControllerOverlayFrame(
   if (layer.item.kind === 'component') {
     const insets = playbackControllerInsets(viewportSize.nativeChrome ?? { right: 0, bottom: 0 })
     const projected = projectFlowComponentControllerFrame(frame, viewportSize, insets)
-    const visible = controllerDisplayFrame(layer.item as LayerItem, { ...projected, x: 0, y: 0 })
-    return { ...projected,
-      x: Math.max(-visible.x, Math.min(frame.x, viewportSize.width - insets.right - visible.x - visible.width)),
-      y: Math.max(-visible.y, Math.min(frame.y, viewportSize.height - insets.bottom - visible.y - visible.height)),
-    }
+    return constrainControllerDisplayFrame(layer.item as LayerItem,
+      { ...projected, x: frame.x, y: frame.y },
+      { width: viewportSize.width - insets.right, height: viewportSize.height - insets.bottom })
   }
   return frame
 }

@@ -1,7 +1,7 @@
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { SharedDocumentEditor, type SharedDocumentEditorHandle } from '../document/SharedDocumentEditor'
 import { parseDocumentMarkdown, type MarkdownDocument } from '../../shared/document/markdown'
-import type { DocumentFileRef } from '../../shared/document/ports'
+import { documentRefLabel, type DocumentFileRef } from '../../shared/document/ports'
 import { DocumentFileSession, type RecoverableDocumentFilePort } from './documentFileSession'
 import { mergedDocumentSource, planDocumentSourceMerge, type DocumentConflictHunk } from './documentSourceMerge'
 import './documentFileEditor.css'
@@ -57,7 +57,7 @@ export const LessonDocumentEditor = forwardRef<LessonDocumentEditorHandle, Lesso
   const [clipboard, setClipboard] = useState<FileClipboardContext | null>(null)
   const operationGroup = useRef<string | undefined>(undefined)
   const draftTicket = useRef(0)
-  const resolveImage = (href: string) => resolveFileDocumentImage(documentRef.relativePath, href)
+  const resolveImage = (href: string) => resolveFileDocumentImage(documentRefLabel(documentRef), href)
   const parsedSource = useMemo(() => parseDocumentMarkdown(state.source, { createId: () => crypto.randomUUID(), target: 'file', resolveImage }), [state.source])
   useEffect(() => {
     lifetime.leases++
@@ -99,10 +99,10 @@ export const LessonDocumentEditor = forwardRef<LessonDocumentEditorHandle, Lesso
   }
   useImperativeHandle(ref, () => ({ session, flush, close: async () => (await flush()) && session.close(), preserveAndClose: () => session.preserveAndClose() }))
   const status = state.saving ? '正在保存' : state.conflict ? '存在文件冲突' : state.dirty ? '尚未保存' : '已保存'
-  return <section aria-label={`教学文档 ${documentRef.relativePath}`} onCompositionStartCapture={() => session.setComposing(true)} onCompositionEndCapture={() => { queueMicrotask(() => session.setComposing(false)) }} onKeyDownCapture={event => {
+  return <section aria-label={`教学文档 ${documentRefLabel(documentRef)}`} onCompositionStartCapture={() => session.setComposing(true)} onCompositionEndCapture={() => { queueMicrotask(() => session.setComposing(false)) }} onKeyDownCapture={event => {
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') { event.preventDefault(); void flush() }
   }}>
-    <header><strong>{documentRef.relativePath}</strong> <span role="status">{status}</span> <button type="button" disabled={state.composing || Boolean(state.conflict) || state.recovery} onClick={() => { void flush() }}>保存</button></header>
+    <header><strong>{documentRefLabel(documentRef)}</strong> <span role="status">{status}</span> <button type="button" disabled={state.composing || Boolean(state.conflict) || state.recovery} onClick={() => { void flush() }}>保存</button></header>
     {(error || state.error) && <div role="alert">{error ?? state.error}<button type="button" onClick={() => { void flush() }}>重试保存</button>{onClosed && <button type="button" onClick={() => { void session.preserveAndClose().then(closed => { if (closed) onClosed() }) }}>保留恢复稿后关闭</button>}</div>}
     {state.recovery && <aside role="alert">已找到未保存恢复稿，请比较后继续。{state.conflictHunks.length ? <span>请逐处处理下方冲突。</span> : <button type="button" onClick={() => { void session.resolveConflict('recovery') }}>保留恢复稿并保存</button>}</aside>}
     {state.conflict && <aside role="alert">

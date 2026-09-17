@@ -162,6 +162,49 @@ afterEach(async () => {
 })
 
 describe('slide.interaction compose', () => {
+  it('composes a Native click into an exact Flow location and verifies the real cross-Surface destination', async () => {
+    const before = fixtureProject()
+    const test = harness(before)
+    const sourceScene = before.surfaces.find((surface) => surface.type === 'slide')!.scenes[0]!
+    const sourceLocationId = sceneLocationId(before, sourceScene.id)
+    const target = before.locations.find((location) => location.kind === 'flow-block')
+    if (!target) throw new Error('missing Flow destination')
+
+    const receipt = await test.run(slideInteractionTool, {
+      operation: 'compose',
+      trigger: { kind: 'click', node: 'btn-switch' },
+      effects: [{ kind: 'go-to-location', location: target.label }],
+    }, { kind: 'create', scope: interactionScope(test.document(), sourceLocationId) })
+
+    expect(receipt.status).toBe('committed')
+    const rule = test.document().surfaces.find((surface) => surface.type === 'slide')!
+      .scenes[0]!.interactions[0]!
+    expect(rule.actions).toEqual([
+      expect.objectContaining({
+        start: 'after-previous',
+        action: { type: 'location.go', locationId: target.id },
+      }),
+    ])
+    const report = await verifyNativeInteractions({
+      before,
+      document: test.document(),
+      resources: { assetFiles: {}, componentPackages: controllerPackages },
+      signal: new AbortController().signal,
+      deadlineAt: Date.now() + 30_000,
+    })
+    expect(report.checked).toEqual([rule.id])
+    expect(report.skipped).toEqual([])
+
+    const missing = harness(fixtureProject())
+    const rejected = await missing.run(slideInteractionTool, {
+      operation: 'compose',
+      trigger: { kind: 'click', node: 'btn-switch' },
+      effects: [{ kind: 'go-to-location', location: '不存在的位置' }],
+    }, { kind: 'create', scope: interactionScope(missing.document(), missing.document().startLocationId) })
+    expect(rejected.status).toBe('failed')
+    expect(missing.steps).toHaveLength(0)
+  })
+
   it('rejects unmounted state-hidden motion targets but keeps mounted playback-hidden reveal usable', async () => {
     const project = fixtureProject(), scene = project.surfaces.find(surface => surface.type === 'slide')!.scenes[0]!
     const locationId = sceneLocationId(project, scene.id)
@@ -434,7 +477,7 @@ describe('slide.interaction compose', () => {
 })
 
 describe('slide.interaction compose 能力边界与跨位置同名', () => {
-  it('gives distinct typed causes for progressive target repairs and commits the fully corrected composition', async () => {
+  it('U05-corrected-commit gives distinct typed causes for progressive target repairs and commits the fully corrected composition', async () => {
     const project = fixtureProject(), test = harness(project)
     const destination = { kind: 'create' as const, scope: interactionScope(project, project.startLocationId) }
     const keys: (string | null)[] = [], codes: string[] = []

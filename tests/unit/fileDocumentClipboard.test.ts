@@ -14,7 +14,7 @@ describe('file clipboard resource transaction', () => {
       const lesson = path.join(directory, 'lesson'); await fs.mkdir(path.join(lesson, 'assets'), { recursive: true })
       const image = Uint8Array.from(Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+nkXcAAAAASUVORK5CYII=', 'base64'))
       await fs.writeFile(path.join(lesson, 'assets/original.png'), image)
-      const ref = { lessonId: 'a', lessonDirectory: lesson, relativePath: 'copy.md' }
+      const ref = { kind: 'lesson' as const, lessonId: 'a', lessonDirectory: lesson, relativePath: 'copy.md' }
       const files = createLessonDocumentFiles({ recoveryDirectory: path.join(directory, 'recovery'), validateTarget: async () => {} })
       const resources = { assets: [{ assetId: 'original', source: { kind: 'relative' as const, path: 'assets/original.png' } }], components: [] }
       const context = await readFileClipboardContext(resources, relativePath => files.readResource(ref, relativePath))

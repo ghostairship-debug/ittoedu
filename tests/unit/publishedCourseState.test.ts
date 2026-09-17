@@ -161,4 +161,29 @@ describe('Published course state and navigation guards', () => {
       type: 'clear',
     }))
   })
+
+  it('rejects exact location actions from inactive, replaced, retired and destroyed carriers', () => {
+    const goToLocation = vi.fn(() => true)
+    const actions = {
+      goToLocation, goToScene: () => true, nextScene: () => true,
+      previousScene: () => true, replayScene: () => true, restartCourse: () => true,
+    }
+    const gate = new PublishedCarrierSideEffectGate({ runtimeActions: actions, componentActions: actions })
+    const first = gate.beginGeneration()
+    expect(first.runtimeActions?.goToLocation?.('flow')).toBe(false)
+    gate.activate()
+    expect(first.componentActions?.goToLocation?.('flow')).toBe(true)
+    expect(goToLocation).toHaveBeenCalledExactlyOnceWith('flow')
+    gate.suspend()
+    expect(first.runtimeActions?.goToLocation?.('spatial')).toBe(false)
+    gate.activate()
+    const second = gate.beginGeneration()
+    expect(first.runtimeActions?.goToLocation?.('spatial')).toBe(false)
+    second.retire()
+    expect(second.componentActions?.goToLocation?.('spatial')).toBe(false)
+    const third = gate.beginGeneration()
+    gate.destroy()
+    expect(third.runtimeActions?.goToLocation?.('spatial')).toBe(false)
+    expect(goToLocation).toHaveBeenCalledTimes(1)
+  })
 })

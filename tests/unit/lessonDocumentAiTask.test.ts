@@ -15,7 +15,7 @@ const roots: string[] = []
 afterEach(async () => { for (const root of roots.splice(0)) { if (!path.resolve(root).startsWith(path.resolve(os.tmpdir()) + path.sep)) throw new Error('Unsafe temporary path'); await fs.rm(root, { recursive: true, force: true }) } })
 async function fixture() {
  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'document-ai-')); roots.push(root)
- const lessonId = randomUUID(), ref = { lessonId, lessonDirectory: root, relativePath: 'plan.md' }
+ const lessonId = randomUUID(), ref = { kind: 'lesson' as const, lessonId, lessonDirectory: root, relativePath: 'plan.md' }
  const workspace = { version: 1 as const, kind: 'lesson' as const, lessonId, normalizedDirectory: root.replace(/\\/g, '/').toLowerCase(), conversationId: randomUUID() }
  await fs.writeFile(path.join(root, 'plan.md'), '甲原稿\n乙原稿\n丙原稿')
  const files = createLessonDocumentFiles({ recoveryDirectory: path.join(root, 'recovery'), validateTarget: async () => {} })

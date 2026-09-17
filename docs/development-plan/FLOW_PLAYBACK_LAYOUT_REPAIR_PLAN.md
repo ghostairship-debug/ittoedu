@@ -26,7 +26,7 @@
 
 调查中，同一实际应用窗口的试运行/整课预览 Flow 视口宽976/1556 px，正文宽均688 px；标题相对视口左位置144/434 px，横幅均40 px。预览根节点基础比例为1，容器铺满内容区。正文宽度没有扩大，不能归因于预览被额外缩小。
 
-证据入口：[调查记录](../../output/playwright/flow-preview-diagnosis-20260912/REPORT.md)、[预览截图](../../output/playwright/flow-preview-diagnosis-20260912/preview.png)、[课件事实](../../output/playwright/flow-preview-diagnosis-20260912/fixture-facts.json)。这些是本机调查制品；当前 fixture 的部分 frame 与用户截图并不完全相同，不能称为用户原会话的逐像素复刻。旧样本用于说明失败机制和兼容回归，不再作为改稿对象。上述调查尚未证明所有新生成路径均有缺陷，实施时由正式创建/生成路径的反例决定具体修改点。
+证据入口：`../../output/playwright/flow-preview-diagnosis-20260912/REPORT.md`（历史链接目标未保留）、`../../output/playwright/flow-preview-diagnosis-20260912/preview.png`（历史链接目标未保留）、`../../output/playwright/flow-preview-diagnosis-20260912/fixture-facts.json`（历史链接目标未保留）。这些是本机调查制品；当前 fixture 的部分 frame 与用户截图并不完全相同，不能称为用户原会话的逐像素复刻。旧样本用于说明失败机制和兼容回归，不再作为改稿对象。上述调查尚未证明所有新生成路径均有缺陷，实施时由正式创建/生成路径的反例决定具体修改点。
 
 ## 3. 三项修复
 

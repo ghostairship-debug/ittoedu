@@ -436,6 +436,20 @@ function paintPublishedNativeImage(
   if (!url) return
   const image = wrap.ownerDocument.createElement('img')
   image.alt = ''
+  let protocol: string | undefined
+  try {
+    protocol = new URL(url, wrap.ownerDocument.baseURI).protocol.toLowerCase()
+  } catch {
+    // Leave malformed or non-standard local references to the browser decoder.
+  }
+  if (protocol === 'courseware-editor:' || protocol === 'http:' || protocol === 'https:') {
+    image.crossOrigin = 'anonymous'
+  } else {
+    // file:// packages cannot satisfy a CORS request for their relative assets.
+    // Explicit removal also prevents a reused decoder from carrying a previous
+    // network/custom-scheme request mode into the local source.
+    image.removeAttribute('crossorigin')
+  }
   image.hidden = true
   const pending = wrap.ownerDocument.createElement('canvas')
   pending.width = Math.max(1, Math.round(input.width))

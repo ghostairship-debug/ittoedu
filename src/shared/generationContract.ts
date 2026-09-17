@@ -4,6 +4,9 @@ import { workspaceIdentityV1Schema } from './workspaceIdentity'
 import { authoringObservationInputSchema } from './authoringObservation'
 import { authoringToolCarrier } from './authoringToolCarrier'
 import { courseProjectAssetMetaSchema } from './contracts/media-v1/schema'
+import { generationTaskFactsSchema } from './generationTaskFacts'
+import { generationSemanticChangesSchema } from './generationChangeSummary'
+import { generationExecutionEvidenceSchema } from './generationExecutionEvidence'
 
 const identity = z.string().trim().min(1).max(200)
 export const generationInputReferenceSchema = z.object({ $result: z.object({
@@ -85,6 +88,7 @@ export const generationRequestSchema = z.object({
   destinations: z.array(authoringToolDestinationV1Schema).min(1).max(1000),
   selectionActions: z.array(generationSelectionActionSchema).min(1).max(100).optional(),
   context: z.json(),
+  taskFacts: generationTaskFactsSchema.optional(),
   resourceFiles: z.array(generationResourceFileSchema).max(1000).optional(),
   observation: authoringObservationInputSchema.optional(),
   confirmedDocuments: z.object({ teachingPlan: z.string().min(1), presentationScript: z.string().min(1) }).strict().optional(),
@@ -92,6 +96,7 @@ export const generationRequestSchema = z.object({
 }).strict().superRefine((request, ctx) => {
   if (request.execution && (request.execution.deadlineAt <= request.execution.startedAt || request.execution.deadlineAt > request.execution.startedAt + MAX_GENERATION_TASK_DURATION_MS)) ctx.addIssue({ code: 'custom', message: '任务执行期限必须在起点后的120分钟内', path: ['execution'] })
   const resources = request.resourceFiles ?? []
+  if (request.taskFacts && (request.taskFacts.projectId !== request.workspace.projectId || request.taskFacts.documentRevision !== request.documentRevision || request.taskFacts.sessionGeneration !== request.sessionGeneration)) ctx.addIssue({ code: 'custom', message: '任务事实与冻结工程身份不一致', path: ['taskFacts'] })
   if (request.observation && (request.observation.documentRevision !== request.documentRevision || request.observation.sessionGeneration !== request.sessionGeneration)) ctx.addIssue({ code: 'custom', message: '当前画面观察与工程结构版本不一致', path: ['observation'] })
   if (request.applyPolicy === 'auto' && !request.observation) ctx.addIssue({ code: 'custom', message: '自动编辑需要当前真实画面观察', path: ['applyPolicy'] })
   if (new Set(resources.map(file => file.path.toLowerCase())).size !== resources.length) ctx.addIssue({ code: 'custom', message: '重复资源文件路径', path: ['resourceFiles'] })
@@ -241,6 +246,7 @@ export const generationFailureSchema = z.object({
   assetIds: z.array(identity), packageIds: z.array(identity),
   recovery: z.object({ action: z.enum(['repair-candidate', 'supply-resource', 'use-open-path', 'refresh-baseline', 'verify-result']), message: z.string().min(1).max(2000) }).strict().optional(),
   behaviorEvidence: authoringToolReceiptV1Schema.shape.behaviorEvidence,
+  executionEvidence: generationExecutionEvidenceSchema.optional(),
 }).strict()
 export type GenerationFailure = z.infer<typeof generationFailureSchema>
 
@@ -292,6 +298,8 @@ export const generationCommitReceiptSchema = z.object({
   version: z.literal(1), requestId: z.uuid(), candidateId: z.uuid(), workspace: workspaceIdentityV1Schema,
   status: z.enum(['committed', 'unchanged']), beforeRevision: z.number().int().nonnegative(), afterRevision: z.number().int().nonnegative(),
   affected: authoringToolReceiptV1Schema.shape.affected,
+  semanticChanges: generationSemanticChangesSchema.optional(),
+  executionEvidence: generationExecutionEvidenceSchema.optional(),
   resources: authoringToolReceiptV1Schema.shape.resources,
 }).strict().superRefine((receipt, ctx) => {
   if (receipt.afterRevision !== receipt.beforeRevision + (receipt.status === 'committed' ? 1 : 0)) ctx.addIssue({ code: 'custom', message: '批次回执revision与实际事务状态不一致' })

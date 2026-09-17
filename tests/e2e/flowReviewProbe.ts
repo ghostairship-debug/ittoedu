@@ -1,4 +1,3 @@
-import { isControllerFixture } from '../fixtures/teacherController'
 import type { Page } from 'playwright'
 
 /** Real media and Published host probe; fixtures never touch an open editor project. */
@@ -12,6 +11,9 @@ export async function runFlowReviewProbe(page: Page) {
     const { courseProjectDocumentSchema } = await load('/src/shared/courseProjectSchema.ts')
     const { parseComponentPackageFiles } = await load('/src/renderer/components/importComponentPackage.ts')
     const { componentPackageMeta } = await load('/src/renderer/components/editableComponentPackage.ts')
+    const { withDefaultComponentController } = await load('/src/renderer/components/teacherControllerComponent.ts')
+    const { isTeacherController } = await load('/src/shared/teacherControllerRole.ts')
+    const { queryDeep } = await load('/tests/fixtures/teacherController.ts')
     const { buildPublishedCourseV2Payload } = await load('/src/renderer/export/course/buildPublishedCourse.ts')
     const { createPublishedCourseSession } = await load('/src/player/surfaces/publishedDynamicHosts.ts')
     const canvas = document.createElement('canvas')
@@ -43,7 +45,8 @@ export async function runFlowReviewProbe(page: Page) {
     const firstLocation = project.locations.find((location: any) => location.surfaceId === flow.id)
     const slideLocation = project.locations.find((location: any) => location.kind === 'slide-scene')
     const secondLocationId = 'flow-second-location'
-    flow.blocks.push({ id: 'second-heading', type: 'heading', level: 2, text: '第二个正式课程位置' })
+    flow.blocks.push({ id: 'second-heading', type: 'heading', level: 2,
+      content: { inlines: [{ type: 'text', text: '第二个正式课程位置' }] } })
     project.locations.push({ id: secondLocationId, kind: 'flow-block', surfaceId: flow.id, blockId: 'second-heading', label: '第二位置' })
     project.media.audio.defaultMuted = true
     project.assets.clip = { id: 'clip', kind: 'video', filename: 'clip.webm', path: 'assets/clip.webm', mimeType: 'video/webm', byteLength: videoBytes.length, width: 160, height: 90, duration: 0.65 }
@@ -68,7 +71,8 @@ export async function runFlowReviewProbe(page: Page) {
     flow.surfaceLayerItems.push({ item: sceneNodeToCourseLayerItem(createTextNode({ id: 'rotated-text', text: '旋转 30°', x: 820, y: 500, width: 220, height: 70, rotation: 30 })), visibility: { mode: 'all', locationIds: [] } })
     flow.surfaceLayerItems.forEach((entry: any, index: number) => { entry.item.order = index })
     const parsed = courseProjectDocumentSchema.parse(project)
-    const payload = buildPublishedCourseV2Payload({ project: parsed, assetFiles: { clip: videoBytes, fallback }, components: { [manifest.id]: component } })
+    const payload = buildPublishedCourseV2Payload({ project: parsed, assetFiles: { clip: videoBytes, fallback },
+      components: { ...withDefaultComponentController(parsed).componentPackages, [manifest.id]: component } })
     const root = document.createElement('div')
     root.id = 'flow-review-fixture'
     root.style.cssText = 'position:fixed;inset:0;width:1280px;height:720px;background:white;z-index:999999'
@@ -91,11 +95,14 @@ export async function runFlowReviewProbe(page: Page) {
         onTime()
       })
       const playing = !video.paused
-      const controllerItem = project.globalLayerItems.find((entry: any) => isControllerFixture(entry.item)).item
-      const muteId = controllerItem.content.data.buttons.find((button: any) => button.action.type === 'audio.toggle-mute').id
-      root.querySelector<HTMLElement>('.flow-surface-host [aria-label="展开教师控制器"]')?.click()
-      const mute = root.querySelector<HTMLElement>(`[data-controller-button-id="${muteId}"]`)!
-      if (!mute) throw new Error(JSON.stringify({ muteId, buttons: Array.from(root.querySelectorAll('button')).map(button => ({ id: button.dataset.controllerButtonId, text: button.textContent, label: button.getAttribute('aria-label') })) }))
+      const controllerItem = project.globalLayerItems.find((entry: any) => isTeacherController(entry.item)).item
+      const muteId = controllerItem.props.buttons.find((button: any) => button.action.type === 'audio.toggle-mute').id
+      const controllerFrame = queryDeep(root, `.flow-runtime-teacher-controller-frame[data-layer-item-id="${controllerItem.layerItemId}"]`)
+      if (!controllerFrame) throw new Error(`Missing Flow teacher controller frame ${controllerItem.layerItemId}`)
+      queryDeep(controllerFrame, '[aria-label="展开教师控制器"]')?.click()
+      await Promise.resolve()
+      const mute = queryDeep(controllerFrame, `[data-controller-button-id="${muteId}"]`)
+      if (!mute) throw new Error(`Missing expanded Flow teacher controller button ${muteId}`)
       mute.click()
       await Promise.resolve()
       const controllerUnmuted = !video.muted

@@ -176,7 +176,7 @@ export function createCourseChatObservation(api: DesktopAPI, owner: { projectId:
         assetFiles: selectMediaAssetFiles(state), componentPackages: state.componentPackages, previewBackgroundColor: active ? state.previewBackgroundColor : null }
     },
     prepareForEdit: () => useEditorStore.getState().prepareCourseProjectPersistence(),
-    materializeDraft: () => useEditorStore.getState().captureCourseProjectRecoverySnapshot(),
+    materializeDraft: () => useEditorStore.getState().captureCourseProjectObservationSnapshot(),
     captureImage(rect) {
       if (!api.captureAuthoringObservation) throw new Error('当前宿主无法捕获课件画面，请更新应用后重试')
       return api.captureAuthoringObservation(rect)

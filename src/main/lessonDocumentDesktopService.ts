@@ -1,4 +1,5 @@
 import { app } from 'electron'
+import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import { lessonDocumentRequestSchema } from '../shared/lessonDocumentDesktop'
 import { createLessonDocumentFiles } from './lessonDocumentFiles'
@@ -11,6 +12,11 @@ export function lessonDocumentFiles() {
     const workspaces = new LessonWorkspaceService(app.getPath('userData'))
     files = createLessonDocumentFiles({ recoveryDirectory: path.join(app.getPath('userData'), 'lesson-document-recovery', 'v1'),
       validateTarget: async ref => {
+        if (ref.kind === 'file') {
+          const real = await fs.realpath(ref.path)
+          if (!(await fs.stat(real)).isFile()) throw new Error('文档文件不可用')
+          return
+        }
         const directory = createWorkspaceIdentity(ref.lessonId, ref.lessonDirectory).normalizedPath
         await workspaces.read({ schemaVersion: 1, lessonId: ref.lessonId, normalizedDirectory: directory })
       },

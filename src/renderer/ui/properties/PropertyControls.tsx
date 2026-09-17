@@ -9,6 +9,7 @@ import {
   useState,
 } from 'react'
 import { fontFamilySource, FONT_FAMILY_SOURCE_TAGS, FONT_FAMILY_OPTIONS, orderFontOptionsBySource } from '../../../shared/fonts/fontFamilyCatalog'
+import { captureTextRunInputEdit, type TextRunEdit, type TextRunInputCapture } from '../../../shared/textRuns'
 export { fontFamilySource, FONT_FAMILY_SOURCE_TAGS, FONT_FAMILY_OPTIONS, COMMON_FONT_FAMILIES } from '../../../shared/fonts/fontFamilyCatalog'
 export type { FontFamilySource } from '../../../shared/fonts/fontFamilyCatalog'
 
@@ -473,7 +474,7 @@ export function TextContentTextarea({
   label: string
   value: string
   onBegin(): boolean | void
-  onChange(value: string): void
+  onChange(value: string, edit?: TextRunEdit): void
   onCommit(): void
   onCancel(): void
   onCompositionChange?(composing: boolean): void
@@ -482,6 +483,9 @@ export function TextContentTextarea({
   const currentBindingKey = draftBinding?.key ?? 'unbound-property-draft'
   const [draft, setDraft] = useState(value)
   const [, setSessionEpoch] = useState(0)
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const inputCaptureRef = useRef<TextRunInputCapture | null>(null)
+  const compositionCaptureRef = useRef<TextRunInputCapture | null>(null)
   type Phase = 'idle' | 'editing' | 'composing' | 'blur-pending'
   const currentRef = useRef({
     bindingKey: currentBindingKey,
@@ -510,7 +514,7 @@ export function TextContentTextarea({
     draft: string
     staleNotified: boolean
     onBegin: () => boolean | void
-    onChange: (value: string) => void
+    onChange: (value: string, edit?: TextRunEdit) => void
     onCommit: () => void
     onCancel: () => void
     onCompositionChange?: (composing: boolean) => void
@@ -550,6 +554,8 @@ export function TextContentTextarea({
     session.baseline = current.value
     session.draft = current.value
     session.staleNotified = false
+    inputCaptureRef.current = null
+    compositionCaptureRef.current = null
     copyCurrentHandlers()
     if (draft !== current.value) setDraft(current.value)
   }, [currentBindingKey, onBegin, onCancel, onChange, onCommit, onCompositionChange, value])
@@ -578,6 +584,8 @@ export function TextContentTextarea({
     session.baseline = current.value
     session.draft = current.value
     session.staleNotified = false
+    inputCaptureRef.current = null
+    compositionCaptureRef.current = null
     copyCurrentHandlers()
     setDraft(current.value)
     setSessionEpoch((epoch) => epoch + 1)
@@ -620,6 +628,8 @@ export function TextContentTextarea({
     session.phase = 'idle'
     session.baseline = session.draft
     session.staleNotified = false
+    inputCaptureRef.current = null
+    compositionCaptureRef.current = null
     commit()
   }
 
@@ -645,10 +655,44 @@ export function TextContentTextarea({
     })
   }
 
+  const captureInput = (element: HTMLTextAreaElement, inputType: string): TextRunInputCapture => ({
+    previousText: element.value,
+    selectionStartUtf16: element.selectionStart ?? element.value.length,
+    selectionEndUtf16: element.selectionEnd ?? element.value.length,
+    inputType,
+  })
+
+  const publishChange = (
+    handler: (value: string, edit?: TextRunEdit) => void,
+    next: string,
+    capture: TextRunInputCapture | null,
+  ) => {
+    if (!capture) {
+      handler(next)
+      return
+    }
+    const resolved = captureTextRunInputEdit(capture, next)
+    if (resolved.ok) handler(next, resolved.edit)
+    else handler(next)
+  }
+
+  useLayoutEffect(() => {
+    const textarea = textareaRef.current
+    if (!textarea) return
+    const handleBeforeInput = (event: InputEvent) => {
+      if (rejectStale()) return
+      if (sessionRef.current.phase === 'composing' || sessionRef.current.phase === 'blur-pending') return
+      inputCaptureRef.current = captureInput(textarea, event.inputType)
+    }
+    textarea.addEventListener('beforeinput', handleBeforeInput)
+    return () => textarea.removeEventListener('beforeinput', handleBeforeInput)
+  })
+
   return (
     <div className="form-field">
       <label>{label}</label>
       <textarea
+        ref={textareaRef}
         className="form-textarea"
         aria-label={label}
         value={draft}
@@ -662,12 +706,16 @@ export function TextContentTextarea({
           const session = sessionRef.current
           session.draft = next
           if (session.phase !== 'composing' && session.phase !== 'blur-pending') {
-            session.onChange(next)
+            const capture = inputCaptureRef.current
+            inputCaptureRef.current = null
+            publishChange(session.onChange, next, capture)
           }
         }}
-        onCompositionStart={() => {
+        onCompositionStart={(event) => {
           if (rejectStale()) return
           const session = sessionRef.current
+          compositionCaptureRef.current = captureInput(event.currentTarget, 'insertCompositionText')
+          inputCaptureRef.current = null
           session.phase = 'composing'
           session.onCompositionChange?.(true)
         }}
@@ -680,7 +728,9 @@ export function TextContentTextarea({
           const finalDraft = event.currentTarget.value
           session.draft = finalDraft
           setDraft(finalDraft)
-          session.onChange(finalDraft)
+          const capture = compositionCaptureRef.current
+          compositionCaptureRef.current = null
+          publishChange(session.onChange, finalDraft, capture)
           finishComposition(finalDraft)
         }}
         onBlur={() => {
@@ -709,6 +759,8 @@ export function TextContentTextarea({
               session.phase = 'idle'
               session.draft = baseline
               session.staleNotified = false
+              inputCaptureRef.current = null
+              compositionCaptureRef.current = null
               setDraft(baseline)
               cancel()
             }

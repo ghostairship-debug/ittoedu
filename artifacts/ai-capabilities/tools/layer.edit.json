@@ -2,7 +2,7 @@
   "candidateCarrier": {
     "default": "native"
   },
-  "description": "精确LayerItem update target的两个窄操作。reorder.position指定front/back或同owner同plane的before/after siblingId；不跨Flow正文、global平面或owner。duplicate只复制该实例一次，placement.side/gap相对当前有效frame放置（右侧间距24用right/24）；原实例及共享资源保留。Slide scene命名态只改变当前状态的呈现。Flow正文不是图层，不接受此工具。selectionActions仅提供焦点操作提示；其他对象使用当前request的精确目标，新建对象使用native.content insert或其他正式创建工具。",
+  "description": "精确 LayerItem 操作。reorder.position 指定 front/back 或同 owner/plane 的 before/after siblingId；duplicate 的 placement.side/gap 相对当前有效 frame 放置。Slide 多对象布局使用 align 或 distribute：targets 原样复制同一次冻结观察中的正式 update target（对齐至少2个，分布至少3个），destination.target 也必须是其中一个；align.mode 支持 left/center/right/top/middle/bottom，可选 primaryTarget 必须精确属于 targets 并作为视觉包围盒锚点，例如 {operation:\"align\",targets:[targetA,targetB],mode:\"top\",primaryTarget:targetA}；distribute.axis 支持 horizontal/vertical，例如 {operation:\"distribute\",targets:[targetA,targetB,targetC],axis:\"horizontal\"}。全部目标必须同工程版本、Slide location/state、owner 与 plane；旋转按视觉包围盒计算，锁定对象不移动，命名态只写当前状态，一次候选只形成一个正式事务。Flow 正文不是绝对布局图层。selectionActions 仅提供焦点提示，不替代 targets。",
   "examples": [
     {
       "bindings": "values 的 position 来自当前观察、已读资源或用户要求，值须满足本卡 inputSchema；destination 原样复制当前目标。",
@@ -13,9 +13,114 @@
       "bindings": "values 的 placement 来自当前观察、已读资源或用户要求，值须满足本卡 inputSchema；destination 原样复制当前目标。",
       "code": "const input={\"operation\":\"duplicate\",\"placement\":values[\"placement\"]}; const receipt=await session.execute(\"layer.edit\",input,destination);",
       "operation": "duplicate"
+    },
+    {
+      "bindings": "values 的 targets/mode 来自当前观察、已读资源或用户要求，值须满足本卡 inputSchema；destination 原样复制当前目标。",
+      "code": "const input={\"operation\":\"align\",\"targets\":values[\"targets\"],\"mode\":values[\"mode\"]}; const receipt=await session.execute(\"layer.edit\",input,destination);",
+      "operation": "align"
+    },
+    {
+      "bindings": "values 的 targets/axis 来自当前观察、已读资源或用户要求，值须满足本卡 inputSchema；destination 原样复制当前目标。",
+      "code": "const input={\"operation\":\"distribute\",\"targets\":values[\"targets\"],\"axis\":values[\"axis\"]}; const receipt=await session.execute(\"layer.edit\",input,destination);",
+      "operation": "distribute"
     }
   ],
   "inputSchema": {
+    "$defs": {
+      "__schema0": {
+        "additionalProperties": false,
+        "properties": {
+          "authoringAddress": {
+            "$ref": "#/$defs/__schema1"
+          },
+          "documentRevision": {
+            "$ref": "#/$defs/__schema2"
+          },
+          "itemId": {
+            "$ref": "#/$defs/__schema1"
+          },
+          "locationId": {
+            "$ref": "#/$defs/__schema1"
+          },
+          "owner": {
+            "enum": [
+              "global",
+              "surface",
+              "scene",
+              "world"
+            ],
+            "type": "string"
+          },
+          "ownerKey": {
+            "$ref": "#/$defs/__schema1"
+          },
+          "projectId": {
+            "$ref": "#/$defs/__schema1"
+          },
+          "revisionPolicy": {
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "const": "exact",
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind"
+            ],
+            "type": "object"
+          },
+          "sessionGeneration": {
+            "$ref": "#/$defs/__schema2"
+          },
+          "stateId": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/__schema1"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "surfaceId": {
+            "$ref": "#/$defs/__schema1"
+          },
+          "surfaceType": {
+            "enum": [
+              "slide",
+              "flow",
+              "spatial-2d"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "projectId",
+          "documentRevision",
+          "revisionPolicy",
+          "sessionGeneration",
+          "surfaceType",
+          "surfaceId",
+          "locationId",
+          "stateId",
+          "owner",
+          "ownerKey",
+          "itemId",
+          "authoringAddress"
+        ],
+        "type": "object"
+      },
+      "__schema1": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "__schema2": {
+        "maximum": 9007199254740991,
+        "minimum": 0,
+        "type": "integer"
+      }
+    },
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "oneOf": [
       {
@@ -134,6 +239,73 @@
           "placement"
         ],
         "type": "object"
+      },
+      {
+        "additionalProperties": false,
+        "properties": {
+          "mode": {
+            "enum": [
+              "left",
+              "center",
+              "right",
+              "top",
+              "middle",
+              "bottom"
+            ],
+            "type": "string"
+          },
+          "operation": {
+            "const": "align",
+            "type": "string"
+          },
+          "primaryTarget": {
+            "$ref": "#/$defs/__schema0"
+          },
+          "targets": {
+            "items": {
+              "$ref": "#/$defs/__schema0"
+            },
+            "maxItems": 200,
+            "minItems": 2,
+            "type": "array"
+          }
+        },
+        "required": [
+          "operation",
+          "targets",
+          "mode"
+        ],
+        "type": "object"
+      },
+      {
+        "additionalProperties": false,
+        "properties": {
+          "axis": {
+            "enum": [
+              "horizontal",
+              "vertical"
+            ],
+            "type": "string"
+          },
+          "operation": {
+            "const": "distribute",
+            "type": "string"
+          },
+          "targets": {
+            "items": {
+              "$ref": "#/$defs/__schema0"
+            },
+            "maxItems": 200,
+            "minItems": 3,
+            "type": "array"
+          }
+        },
+        "required": [
+          "operation",
+          "targets",
+          "axis"
+        ],
+        "type": "object"
       }
     ]
   },
@@ -167,6 +339,32 @@
     },
     {
       "operation": "duplicate",
+      "scopes": [
+        "slide:scene",
+        "slide:global",
+        "flow:surface",
+        "flow:global",
+        "spatial-2d:world",
+        "spatial-2d:global",
+        "slide:surface",
+        "spatial-2d:surface"
+      ]
+    },
+    {
+      "operation": "align",
+      "scopes": [
+        "slide:scene",
+        "slide:global",
+        "flow:surface",
+        "flow:global",
+        "spatial-2d:world",
+        "spatial-2d:global",
+        "slide:surface",
+        "spatial-2d:surface"
+      ]
+    },
+    {
+      "operation": "distribute",
       "scopes": [
         "slide:scene",
         "slide:global",

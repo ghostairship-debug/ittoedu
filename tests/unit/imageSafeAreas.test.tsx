@@ -14,7 +14,6 @@ afterEach(cleanup)
 
 beforeEach(() => {
   useEditorStore.getState().createNewProject()
-  useEditorStore.setState({ editorMode: 'professional' })
 })
 
 function addImage(): string {

@@ -63,9 +63,9 @@
 
 ## 可直接查看的结果
 
-- [真实 AI 新课件预览截图](../../../output/r18-089/real-ai-2026-09-12T19-04-12-250Z/ai-preview-1574-clip.png)
-- [窄窗试运行截图](../../../output/r18-089/real-ai-2026-09-12T19-04-12-250Z/ai-trial-1280-clip.png)
-- [实际导出 HTML](../../../output/r18-089/real-ai-2026-09-12T19-04-12-250Z/ai-generated.html)
-- [新建短正文无多余边条](../../../output/r18-089/new-generated-2026-09-12T18-49-14-565Z/short-no-scroll-clip.png)
+- `../../../output/r18-089/real-ai-2026-09-12T19-04-12-250Z/ai-preview-1574-clip.png`（历史链接目标未保留）
+- `../../../output/r18-089/real-ai-2026-09-12T19-04-12-250Z/ai-trial-1280-clip.png`（历史链接目标未保留）
+- `../../../output/r18-089/real-ai-2026-09-12T19-04-12-250Z/ai-generated.html`（历史链接目标未保留）
+- `../../../output/r18-089/new-generated-2026-09-12T18-49-14-565Z/short-no-scroll-clip.png`（历史链接目标未保留）
 
 这些结果保证受支持布局语义在各入口一致，不承诺任意 AI 内容都具有理想构图。短内容的自然空白、固定图片宽度的正常留白、明确 reading 模式和平台原生滚动条宽度差异仍按其语义保留；本轮没有通过额外 fit 或改旧课件隐藏这些差异。

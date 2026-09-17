@@ -78,6 +78,24 @@ export function isEditorInteractiveControlTarget(target: EventTarget | null): bo
   )
 }
 
+/** Shadow DOM retargets window events to the host, not the focused control. */
+export function isEditorTextInputEvent(event: KeyboardEvent): boolean {
+  if (isEditorTextInputTarget(event.target)
+    || event.composedPath().some(isEditorTextInputTarget)) return true
+  const ownerDocument = event.target instanceof Node ? event.target.ownerDocument : null
+  let active: Element | null | undefined = (ownerDocument ?? document).activeElement
+  while (active) {
+    if (isEditorTextInputTarget(active)) return true
+    active = active.shadowRoot?.activeElement
+  }
+  return false
+}
+
+export function isEditorInteractiveControlEvent(event: KeyboardEvent): boolean {
+  return isEditorInteractiveControlTarget(event.target)
+    || event.composedPath().some(isEditorInteractiveControlTarget)
+}
+
 export type KeyboardDeleteDisposition =
   | { readonly action: 'ignore' }
   | { readonly action: 'route'; readonly snapshot: EditorSelectionSnapshot }

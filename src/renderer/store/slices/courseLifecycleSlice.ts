@@ -88,7 +88,7 @@ export type CourseLifecyclePorts = {
   }
   flow: {
     commitDraftForPersistence(): { ok: true } | { ok: false; reason: string }
-    materializeDraft(document: CourseProjectDocument): { readonly ok: true; readonly document: CourseProjectDocument } | { readonly ok: false; readonly reason: string }
+    materializeDraft(document: CourseProjectDocument, purpose?: 'recovery' | 'observation'): { readonly ok: true; readonly document: CourseProjectDocument } | { readonly ok: false; readonly reason: string }
   }
   readResources(): {
     courseAssetSidecar: CourseAssetSidecar | null
@@ -166,10 +166,22 @@ export function createCourseLifecycleSlice(
   ): void
   prepareCourseProjectPersistence(): PrepareCourseProjectPersistenceResult
   captureCourseProjectRecoverySnapshot(): CaptureCourseProjectRecoveryResult
+  captureCourseProjectObservationSnapshot(): CaptureCourseProjectRecoveryResult
   acknowledgeCourseProjectSaved(path: string, token: CourseProjectPersistenceToken): boolean
   reopenArchive(bytes: Uint8Array): boolean
   exportArchive(): Uint8Array | null
 } {
+  const captureDraftSnapshot = (purpose: 'recovery' | 'observation'): CaptureCourseProjectRecoveryResult => {
+    const document = kernel.tryReadDocument()
+    if (!document) return { ok: false, reason: '当前会话没有课程工程' }
+    const slideResult = lifecycle.slide.materializeDraft(document)
+    if (!slideResult.ok) return slideResult
+    const spatialResult = lifecycle.spatial.materializeDraft(slideResult.document)
+    if (!spatialResult.ok) return spatialResult
+    const flowResult = lifecycle.flow.materializeDraft(spatialResult.document, purpose)
+    if (!flowResult.ok) return flowResult
+    return { ok: true, snapshot: snapshotPersistence(flowResult.document, lifecycle.readResources()) }
+  }
   return {
     exportArchive(): Uint8Array | null {
       const document = kernel.tryReadDocument()
@@ -237,18 +249,11 @@ export function createCourseLifecycleSlice(
     },
 
     captureCourseProjectRecoverySnapshot(): CaptureCourseProjectRecoveryResult {
-      const document = kernel.tryReadDocument()
-      if (!document) return { ok: false, reason: '当前会话没有课程工程' }
-      const slideResult = lifecycle.slide.materializeDraft(document)
-      if (!slideResult.ok) return slideResult
-      const spatialResult = lifecycle.spatial.materializeDraft(slideResult.document)
-      if (!spatialResult.ok) return spatialResult
-      const flowResult = lifecycle.flow.materializeDraft(spatialResult.document)
-      if (!flowResult.ok) return flowResult
-      return {
-        ok: true,
-        snapshot: snapshotPersistence(flowResult.document, lifecycle.readResources()),
-      }
+      return captureDraftSnapshot('recovery')
+    },
+
+    captureCourseProjectObservationSnapshot(): CaptureCourseProjectRecoveryResult {
+      return captureDraftSnapshot('observation')
     },
 
     acknowledgeCourseProjectSaved(path: string, token: CourseProjectPersistenceToken): boolean {

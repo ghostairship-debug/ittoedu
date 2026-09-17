@@ -11,7 +11,7 @@
 
 两轮已经联网并实际使用工具，不能把本次失败归为未开 TUN。网络直连复位与系统代理继承是此前另一个真实问题，本次在原生进程启动接线中处理。Claude 通道实际确认的模型为 `deepseek-flash[1M]`，不是 Claude 原厂模型的性能基准。旧日志中拆分的 text 事件不能直接当作聊天重复显示次数。
 
-原始任务摘要和阶段时钟见[原日志审计](../../../output/native-editing-repair-20260914/source-audit.json)，没有用新结果覆盖原样本。
+原始任务摘要和阶段时钟见`../../../output/native-editing-repair-20260914/source-audit.json`（历史链接目标未保留），没有用新结果覆盖原样本。
 
 ## 实现结果
 
@@ -23,7 +23,7 @@
 - **等待可读。** 原生读、搜索、运行工具和准备文件映射为短活动描述；原始协议保留日志。任务结束后移除现在进行时的活动。授权界面保留做决定所需的文件/命令和原生选项含义。
 - **减少额外探查。** 文件入口卡从 103,781 字节变为约 2.9 KB，完整文件制品 Schema 按需读取。文件 Schema 顶层是 `document`，候选顶层 `input.artifact` 只传文件引用。提示保留工程 cwd、使用绝对路径，避免进入过长 staging 目录；不禁用 CLI 工具或 Skills。变化的动态实例及相关布局/资源继续准入，普通原生编辑不重复运行无关动态宿主。
 
-此前 medium/xhigh 显式传参与原生确认、CommonJS 导入初始化顺序、教师控制器缩放按钮随整体收起的修复继续保留。对应历史实测见[延迟与配置修复](../../../output/latency-review-20260913/repair-result.md)。本轮重新构建桌面入口，并通过编译产物加载与三个真实 Electron 任务启动验证。
+此前 medium/xhigh 显式传参与原生确认、CommonJS 导入初始化顺序、教师控制器缩放按钮随整体收起的修复继续保留。对应历史实测见`../../../output/latency-review-20260913/repair-result.md`（历史链接目标未保留）。本轮重新构建桌面入口，并通过编译产物加载与三个真实 Electron 任务启动验证。
 
 ## 原生验证与时间
 
@@ -45,15 +45,15 @@ OpenCode 初版第一轮技术提示为 20,853 字节，续轮 25,603 字节；�
 
 证据：
 
-- [各轮计时与配置汇总](../../../output/native-editing-repair-20260914/verification-audit.json)
-- [OpenCode 正式结果](../../../output/native-editing-repair-20260914/opencode-1789320194083/acceptance.json)
-- [Claude 初版结果](../../../output/native-editing-repair-20260914/claude-1789320829854/acceptance.json)
-- [Claude 精简入口与重开结果](../../../output/native-editing-repair-20260914/claude-1789321890006/acceptance.json)
-- [重开后独立选中圆形的实际画面](../../../output/native-editing-repair-20260914/claude-1789321890006/reopened-target.png)
+- `../../../output/native-editing-repair-20260914/verification-audit.json`（历史链接目标未保留）
+- `../../../output/native-editing-repair-20260914/opencode-1789320194083/acceptance.json`（历史链接目标未保留）
+- `../../../output/native-editing-repair-20260914/claude-1789320829854/acceptance.json`（历史链接目标未保留）
+- `../../../output/native-editing-repair-20260914/claude-1789321890006/acceptance.json`（历史链接目标未保留）
+- `../../../output/native-editing-repair-20260914/claude-1789321890006/reopened-target.png`（历史链接目标未保留）
 
 ## 工程检查
 
-后续路径核查补充：[同一初始工程快捷隔离验证](../../../output/native-editing-repair-20260914/quick-path-verification.json)复现了 s2 错误与零 live 写入，再用 content 修改方形、insert 圆形、content 设置黄色一次提交；保存重开和 Undo/Redo 通过。此验证未调用模型，不计入上表原生轮次、速度或首次准确率。修复后文件结果中圆形为 `kind:native / nativeType:shape / shapeType:ellipse`，宿主负责渲染和编辑；它与最早合并 PNG 的结果不同，也与直接调用创建快捷命令的路径不同。
+后续路径核查补充：`../../../output/native-editing-repair-20260914/quick-path-verification.json`（历史链接目标未保留）复现了 s2 错误与零 live 写入，再用 content 修改方形、insert 圆形、content 设置黄色一次提交；保存重开和 Undo/Redo 通过。此验证未调用模型，不计入上表原生轮次、速度或首次准确率。修复后文件结果中圆形为 `kind:native / nativeType:shape / shapeType:ellipse`，宿主负责渲染和编辑；它与最早合并 PNG 的结果不同，也与直接调用创建快捷命令的路径不同。
 
 | 检查 | 有效结果 / 覆盖 |
 |---|---|
@@ -64,7 +64,7 @@ OpenCode 初版第一轮技术提示为 20,853 字节，续轮 25,603 字节；�
 | 原生接线 | 任务只读一次许可、外部/执行/写入/链接逃逸不自动放行；不同动态代理地址与显式设置优先；代理查询期间 Stop；无候选有界续跑，同一原生会话 |
 | 最终类型与构建 | `npm run typecheck`（renderer/main/e2e）和 `npm run build:desktop` 通过；构建仍有既存大 bundle 提示，不是本次原生任务等待的证据 |
 
-日志保存在[本轮输出目录](../../../output/native-editing-repair-20260914/)。严格解析/回滚由针对性检查证明，实际动态效果准入沿用正式宿主；本轮真实生成用例只新增 Native 图形，不冒充新 Runtime/Component 的真实视觉验收。
+日志保存在`../../../output/native-editing-repair-20260914/`（历史链接目标未保留）。严格解析/回滚由针对性检查证明，实际动态效果准入沿用正式宿主；本轮真实生成用例只新增 Native 图形，不冒充新 Runtime/Component 的真实视觉验收。
 
 ## 迁移与交付边界
 

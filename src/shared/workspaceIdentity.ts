@@ -18,11 +18,20 @@ export type WorkspaceIdentityV1 = z.infer<typeof workspaceIdentityV1Schema>
 
 export const lessonAgentWorkspaceSchema = z.object({ version: z.literal(1), kind: z.literal('lesson'), lessonId: z.uuid(),
   normalizedDirectory: workspaceIdentityV1Schema.shape.normalizedPath, conversationId: z.uuid() }).strict()
-export const aiWorkspaceIdentitySchema = z.union([workspaceIdentityV1Schema, lessonAgentWorkspaceSchema])
+/** F01：工作空间/项目文件夹会话的 agent 作用域；与课例会话同一套 harness，仅身份种类不同。 */
+export const directoryAgentWorkspaceSchema = z.object({ version: z.literal(1), kind: z.literal('directory'),
+  normalizedDirectory: workspaceIdentityV1Schema.shape.normalizedPath, conversationId: z.uuid() }).strict()
+export const conversationAgentWorkspaceSchema = z.discriminatedUnion('kind', [lessonAgentWorkspaceSchema, directoryAgentWorkspaceSchema])
+export const aiWorkspaceIdentitySchema = z.union([workspaceIdentityV1Schema, conversationAgentWorkspaceSchema])
 export type LessonAgentWorkspace = z.infer<typeof lessonAgentWorkspaceSchema>
+export type DirectoryAgentWorkspace = z.infer<typeof directoryAgentWorkspaceSchema>
+export type ConversationAgentWorkspace = z.infer<typeof conversationAgentWorkspaceSchema>
 export type AiWorkspaceIdentity = z.infer<typeof aiWorkspaceIdentitySchema>
 export function workspaceIdentityKey(identity: AiWorkspaceIdentity): string {
   const parsed = aiWorkspaceIdentitySchema.parse(identity)
-  return 'kind' in parsed ? JSON.stringify(['lesson', parsed.lessonId, parsed.normalizedDirectory, parsed.conversationId])
+  return 'kind' in parsed
+    ? (parsed.kind === 'lesson'
+        ? JSON.stringify(['lesson', parsed.lessonId, parsed.normalizedDirectory, parsed.conversationId])
+        : JSON.stringify(['directory', parsed.normalizedDirectory, parsed.conversationId]))
     : JSON.stringify([parsed.version, parsed.projectId, parsed.normalizedPath])
 }

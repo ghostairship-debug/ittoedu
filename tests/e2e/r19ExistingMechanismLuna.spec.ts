@@ -1,6 +1,6 @@
 import { _electron as electron, expect, test } from '@playwright/test'
 import { readFileSync, writeFileSync, mkdirSync, realpathSync, readdirSync } from 'node:fs'
-import { dirname, join, resolve } from 'node:path'
+import { basename, join, resolve } from 'node:path'
 import { z } from 'zod'
 import { lessonAgentWorkspaceSchema } from '../../src/shared/workspaceIdentity'
 import type { LocalAgentRecord } from '../../src/shared/localAgentContract'
@@ -75,14 +75,12 @@ test('r19 existing mechanism Luna: B retry canonical commit, one Undo, Redo and 
     const history = await list()
     evidence('lesson-history-before-open.json', history)
     expect(history.records?.some(record => record.status === 'running' || record.task && !['completed', 'failed', 'cancelled', 'partial'].includes(record.task.status)), 'Original lesson conversation must be idle before UI or model work').toBe(false)
-    await app.evaluate(({ dialog }, path) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] }) }, dirname(input.lessonDirectory))
-    await page.getByRole('button', { name: '打开工作空间', exact: true }).first().click()
-    const open = page.getByRole('button', { name: '打开课例', exact: true })
-    await expect(open).toBeVisible()
-    await app.evaluate(({ dialog }, path) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] }) }, input.lessonDirectory)
-    await open.click()
-    await page.getByRole('region', { name: '课例对话导航' }).getByRole('button', { name: conversation.title, exact: true }).and(page.locator('[aria-pressed]')).click()
-    await page.getByRole('tab', { name: /^课件/ }).click()
+    // V3.1：保留 profile 重开自动回到上次工作空间；课例入口已从「更多」菜单移除，经目录树点选 .h5lesson 激活；课例对话导航区已随课例段取消，激活后自动接上最近会话
+    await expect(page.locator('.lesson-workspace-toolbar')).toBeVisible()
+    await page.locator('.lesson-directory-tree').getByRole('button', { name: basename(input.lessonDirectory), exact: true }).click()
+    await page.locator('.lesson-directory-tree').getByRole('button', { name: basename(input.projectPath), exact: true }).click()
+    await expect(page.locator('.lesson-workflow')).toBeVisible()
+    await page.getByRole('tab', { name: /course|新建课件/ }).click()
     await expect(page.getByRole('button', { name: '整课预览', exact: true })).toBeVisible()
   }
   async function verifyBehavior(retry: boolean, name: string) {

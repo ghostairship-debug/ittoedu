@@ -24,9 +24,9 @@ Shared / Core、本地服务、前端职责保持分离。本次完成有真实�
 
 ### 工程与界面
 
-- 三套 TypeScript：通过，见 [typecheck 日志](../../../output/r19-improvements-typecheck.log)。
-- Main / Renderer 构建：通过，见 [Main](../../../output/r19-improvements-electron-build.log)、[Renderer](../../../output/r19-improvements-renderer-build.log)。既有 Player 制品未受产品源码变更影响；真实 Published consumer 另有下述行为验证。
-- ROOT 聊天检查：3 文件 60 项通过，含选定预算真实请求、权威延期展示、同一纠正消息跨回合送达、拒绝输入保留与现有聊天行为，见 [日志](../../../output/r19-improvements-chat-tests.log)。
+- 三套 TypeScript：通过，见 `../../../output/r19-improvements-typecheck.log`（历史链接目标未保留）。
+- Main / Renderer 构建：通过，见 `../../../output/r19-improvements-electron-build.log`（历史链接目标未保留）、`../../../output/r19-improvements-renderer-build.log`（历史链接目标未保留）。既有 Player 制品未受产品源码变更影响；真实 Published consumer 另有下述行为验证。
+- ROOT 聊天检查：3 文件 60 项通过，含选定预算真实请求、权威延期展示、同一纠正消息跨回合送达、拒绝输入保留与现有聊天行为，见 `../../../output/r19-improvements-chat-tests.log`（历史链接目标未保留）。
 - 工作台：最终 4 项通过，覆盖冲突保留、面板切换不卸载、独立工程入口、异形路径复用。早期 3 文件 12 项 UI 组合通过保留；后续新增回归由同源隔离工作区验证，未无意义重复整套。
 - 静态预检查 28 项、Spatial 26 项通过。Spatial 检查含正式候选事务、保存重开、实际 `SpatialSurfaceHost` 内容边界。
 - 新增真实 Published Component 导航用例 1 项通过：实际挂载组件调用 goToScene(Flow locationId) 返回 false；导航 guard 拒绝时不移动；解锁后 nextScene 从 Slide 到 Flow 再到 Spatial。没有用无条件成功 mock 证明目的地。
@@ -47,7 +47,7 @@ Shared / Core、本地服务、前端职责保持分离。本次完成有真实�
 | Claude → 已核实 DeepSeek | 真实工具运行中纠正，同 external session 两个 run，第二回合返回新要求标记 | 16.96 秒 |
 | OpenCode → Luna Fast | 真实原生取消确认，同 external session 续接，第二回合返回新要求标记 | 22.19 秒 |
 
-完整记录见[原生验证报告](../../../output/r19-native-steering/REPORT.md)。OpenCode 的 ACP resolvedModel 仍为空；免费本机配置/原生目录验证了 Luna Fast → OpenAI provider → gpt-5.6-luna 的实际发送映射，不声称观察远端内部路由。OpenCode 初次报告的 marker 假阴性来自逐条检查 append chunk，已用原保存事件拼接修正，未再调用模型。
+完整记录见`../../../output/r19-native-steering/REPORT.md`（历史链接目标未保留）。OpenCode 的 ACP resolvedModel 仍为空；免费本机配置/原生目录验证了 Luna Fast → OpenAI provider → gpt-5.6-luna 的实际发送映射，不声称观察远端内部路由。OpenCode 初次报告的 marker 假阴性来自逐条检查 append chunk，已用原保存事件拼接修正，未再调用模型。
 
 这两次证明中断与原生续接，任务为讨论模式，零 candidate/host commit。编辑候选不抢先的性质由宿主和 Controller 的免费竞态反例覆盖；不把零候选讨论说成实际课件编辑。Codex steer 未改，复用已有证据，没有重跑三 CLI 全矩阵。
 
@@ -61,7 +61,7 @@ Shared / Core、本地服务、前端职责保持分离。本次完成有真实�
 4. 检查 1440×960 与 760×900 窗口，聊天输入、文档/课件标签可达；窄窗新建独立课件显示真实画布；
 5. 关闭本轮测试 Electron，测试文件保留供审阅。
 
-截图：[原窄窗问题](../../../output/r19-usability-gui/before-narrow.png)、[修复后聊天](../../../output/r19-usability-gui/after-narrow-chat.png)、[窄窗文档](../../../output/r19-usability-gui/after-narrow-document.png)、[最终宽窗](../../../output/r19-usability-gui/final-wide-document.png)、[独立课件](../../../output/r19-usability-gui/final-narrow-standalone.png)。原宽窗截图使用系统设备倍率，修复截图使用显式 CSS viewport，不能据此计算字号改善比例。
+截图：`../../../output/r19-usability-gui/before-narrow.png`（历史链接目标未保留）、`../../../output/r19-usability-gui/after-narrow-chat.png`（历史链接目标未保留）、`../../../output/r19-usability-gui/after-narrow-document.png`（历史链接目标未保留）、`../../../output/r19-usability-gui/final-wide-document.png`（历史链接目标未保留）、`../../../output/r19-usability-gui/final-narrow-standalone.png`（历史链接目标未保留）。原宽窗截图使用系统设备倍率，修复截图使用显式 CSS viewport，不能据此计算字号改善比例。
 
 ## 边界与交接
 

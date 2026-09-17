@@ -13,6 +13,7 @@ import {
   buildPublishedCourseStandaloneHtml,
   buildPublishedCourseWebPackageFiles,
 } from '../../src/renderer/export/course/buildCoursePackages'
+import { withDefaultComponentController } from '../../src/renderer/components/teacherControllerComponent'
 import { createPublishedCanvasRuntimeV2Fixture } from '../fixtures/publishedCanvasRuntimeV2Fixture'
 
 const root = resolve(__dirname, '..', '..')
@@ -159,7 +160,7 @@ function writeFixture(): void {
   const sources = {
     project: fixture.project,
     assetFiles: {},
-    components: {},
+    components: withDefaultComponentController(fixture.project).componentPackages,
   }
   const playerBundle = readFileSync(join(root, 'dist-player', 'player.iife.js'), 'utf8')
   writeFileSync(

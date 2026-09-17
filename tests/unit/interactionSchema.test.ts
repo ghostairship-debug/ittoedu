@@ -45,6 +45,16 @@ function rule(
 }
 
 describe('interaction schema', () => {
+  it('accepts exact location.go only as a strict terminal navigation action', () => {
+    const action = { type: 'location.go', locationId: 'flow-location' } as const
+    const candidate = rule(undefined, steps([action]))
+    expect(interactionRuleSchema.parse(candidate)).toEqual(candidate)
+    expect(isTerminalNavigationAction(action)).toBe(true)
+    for (const invalid of [{ ...action, locationId: '' }, { ...action, targetStateId: 'state' }, { ...action, sceneId: 'scene' }]) {
+      expect(interactionRuleSchema.safeParse({ ...candidate, actions: steps([invalid]) }).success).toBe(false)
+    }
+    expect(interactionRuleSchema.safeParse(rule(undefined, steps([action, { type: 'scene.next' }]))).success).toBe(false)
+  })
   it('exposes exact authoring fields while sharing canonical action validation', () => {
     const { id, ...content } = rule()
     expect(interactionRuleContentSchema.parse(content)).toEqual(content)

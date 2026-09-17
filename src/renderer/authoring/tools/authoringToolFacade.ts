@@ -166,11 +166,15 @@ export function describeAuthoringToolDiscovery() {
       { operation: 'properties', input: { operation: 'properties', properties: { frame: { x: 80, y: 120 } } } },
       { operation: 'insert', nativeType: 'text', input: { operation: 'insert', template: { nativeType: 'text', text: '标题' } } },
       { operation: 'insert', nativeType: 'shape', input: { operation: 'insert', template: { nativeType: 'shape', shapeType: 'ellipse', width: 120, height: 120, style: { fillColor: '#ffff00' } } } },
+      { operation: 'content', code: 'await session.execute("native.content",{operation:"content",content:{nativeType:"shape",data:{...values.shapeData,lineGeometry:{kind:"straight",start:[0.5,0],end:[0.5,1]}}}},destination);' },
       ...schemaExamples.filter((example: any) => example.operation === 'insert'),
       { operation: 'content', bindings: 'content 原样复制当前对象的完整 content，修改所需字段后仍须满足 references[nativeType]。', code: 'const receipt=await session.execute("native.content",{operation:"content",content},{kind:"update",target});' },
       { operation: 'delete', input: { operation: 'delete' } },
     ] : tool.name === 'asset.image.transform' ? [{ bindings: 'sourceAssetId 来自当前选中图片；sourceColor 为观察原图后选定的待替换颜色；target 复制当前图片的 update target。', code: 'const receipt=await session.execute("asset.image.transform",{sourceAssetId,operations:[{kind:"replace-color",sourceColor,targetColor:"#22c55e"}]},{kind:"update",target});' }]
-      : tool.name === 'component.configure' ? [{ input: { properties: { frame: { x: 80, y: 120 } } } }]
+      : tool.name === 'component.insert' ? [
+        { operation: 'candidate', bindings: 'Spatial world 目标使用 create parent:owner；files 来自当前候选 Component API 4 包，staticFallbackAssetId 若由 candidate 输入 Schema 要求则按当前资源绑定。Flow-only 的 parent:flow-body 后备条件不适用于 Spatial world。', code: 'const input={operation:"candidate",files,staticFallbackAssetId}; const receipt=await session.execute("component.insert",input,destination);' },
+        ...schemaExamples,
+      ] : tool.name === 'component.configure' ? [{ input: { properties: { frame: { x: 80, y: 120 } } } }]
         : tool.name === 'owner.background' ? [{ input: { backgroundColor: '#ffffff' } }] : schemaExamples
     for (const example of examples ?? []) if ('input' in example) catalog.find(entry => entry.name === tool.name)!.inputSchema.parse(example.input)
     return { ...tool, supportedScopes: [...supportedScopes], variants,

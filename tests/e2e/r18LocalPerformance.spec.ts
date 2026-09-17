@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { isAbsolute, join, relative, resolve } from 'node:path'
-import { _electron as electron, expect, test, type ElectronApplication } from '@playwright/test'
+import { _electron as electron, expect, test, type ElectronApplication, type Page } from '@playwright/test'
 import { createServer } from 'vite'
 import { createBlankCourseProject } from '../../src/renderer/project/createCourseProject'
 import { createTextNode } from '../../src/renderer/project/nativeNodeFactories'
@@ -15,6 +15,21 @@ import { expectBackgroundWindowsIsolated } from './expectBackgroundWindowsIsolat
 const testRoot = resolve(__dirname, '../..')
 const productRoot = process.env.COURSEWARE_PERFORMANCE_PRODUCT_ROOT || testRoot
 const prefix = 'ittoedu-r18-local-performance-'
+
+async function enterStandaloneEditorFromLanding(page: Page): Promise<void> {
+  const landing = page.locator('.lesson-workspace-landing')
+  const editor = page.getByTestId('canvas-stage')
+  await Promise.race([
+    landing.waitFor({ state: 'visible', timeout: 15_000 }),
+    editor.waitFor({ state: 'visible', timeout: 15_000 }),
+  ])
+  if (!await landing.isVisible()) return
+  const more = page.locator('.lesson-workspace-more > summary')
+  if (!await more.isVisible()) return
+  await more.click()
+  const create = page.getByRole('button', { name: '新建独立课件', exact: true })
+  if (await create.isVisible()) await create.click()
+}
 
 function statistics(values: number[]) {
   const ordered = [...values].sort((a, b) => a - b)
@@ -122,13 +137,17 @@ test('records 30 context changes and 30 native protocol events through the real 
     page.on('console', message => { if (message.type() === 'error') rendererErrors.push(message.text()) })
     try {
       const open = page.getByRole('button', { name: '打开工程（Ctrl+O）', exact: true })
-      await open.waitFor({ timeout: 10_000 }).catch(async error => {
+      await (async () => {
+        await enterStandaloneEditorFromLanding(page)
+        await open.waitFor({ timeout: 10_000 })
+      })().catch(async error => {
         if (!rendererErrors.some(message => message.includes('Outdated Optimize Dep'))) throw error
         // A fresh isolated dependency cache invalidates its initial module URLs.
         // hmr=false disables Vite's automatic reload; finish startup once before
         // collecting any latency sample. Never retry a measured operation.
         console.log('Cold dependency cache stabilized; reloading once before measurement')
         await page.reload({ waitUntil: 'domcontentloaded' })
+        await enterStandaloneEditorFromLanding(page)
         await open.waitFor({ timeout: 15_000 })
       })
     }
@@ -138,7 +157,13 @@ test('records 30 context changes and 30 native protocol events through the real 
     }
     await page.getByRole('button', { name: '打开工程（Ctrl+O）', exact: true }).click()
     await page.getByRole('button', { name: '创作助手', exact: true }).click()
-    await page.getByRole('combobox', { name: '本轮引用', exact: true }).selectOption('selection')
+    const taskSettings = page.locator('details.chat-task-settings')
+    if (!await taskSettings.evaluate(element => (element as HTMLDetailsElement).open)) {
+      await taskSettings.locator(':scope > summary').click()
+    }
+    const reference = taskSettings.getByRole('combobox', { name: '本轮引用', exact: true })
+    await expect(reference).toBeVisible()
+    await reference.selectOption('selection')
     console.log('Real saved fixture and chat panel ready')
     const state = await page.evaluate(async () => {
       const load = (path: string) => import(/* @vite-ignore */ path)

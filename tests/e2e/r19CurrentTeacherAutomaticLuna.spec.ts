@@ -28,6 +28,7 @@ test('r19 current teacher GUI automatic Luna: natural goal and normal repair con
  writeFileSync(materialPath, zipSync(docx))
  const app = await electron.launch({ args: ['.', `--user-data-dir=${join(evidence, 'profile')}`], cwd: root, env: { ...process.env, VITE_DEV_SERVER_URL: '', [BACKGROUND_E2E_ENV]: '1' } })
  const page = await app.firstWindow()
+ page.setDefaultTimeout(30_000)
  try {
   const directory = await page.evaluate(() => window.desktopAPI!.localAgent({ operation: 'capabilities', adapter: 'codex', refresh: true }))
   const luna = directory.capabilities?.models.find(model => /luna/i.test(model.id))
@@ -39,28 +40,43 @@ test('r19 current teacher GUI automatic Luna: natural goal and normal repair con
   writeFileSync(join(evidence, 'actual-native-route.json'), JSON.stringify({ directory, configuration, configured }, null, 2))
   expect(configured.enabled, 'Configured native Luna route must be enabled before starting').toBe(true)
   await app.evaluate(({ dialog }, workspace) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [workspace] }) }, workspace)
-  await page.getByRole('button', { name: '打开工作空间', exact: true }).first().click()
-  await page.getByRole('button', { name: '新建课例', exact: true }).click()
-  await page.getByRole('textbox', { name: '课例名称' }).fill(name)
-  await page.getByRole('button', { name: '创建课例', exact: true }).click()
-  await expect(page.locator('.lesson-workspace-lessons').getByRole('button', { name })).toBeVisible()
+  const resume = process.env.R19_CURRENT_TEACHER_RESUME === '1'
+  // V3.1：保留 profile 重开会自动回到上次工作空间，只有全新运行才需要点「打开工作空间」
+  if (!resume) await page.getByRole('button', { name: '打开工作空间', exact: true }).first().click()
+  await expect(page.locator('.lesson-workspace-toolbar')).toBeVisible()
+  if (!resume) {
+   await page.getByRole('button', { name: '新建课件', exact: true }).click()
+   await page.getByRole('textbox', { name: '课件名称' }).fill(name)
+   await page.getByRole('button', { name: '创建课件', exact: true }).click()
+   // 课例段已从导航移除：创建后直接激活课例上下文
+   await expect(page.locator('.lesson-workflow')).toBeVisible()
+  }
+  if (resume) {
+   // V3.1：课例入口已从「更多」菜单移除，经目录树点选 .h5lesson 恢复课例上下文
+   await page.locator('.lesson-directory-tree').getByRole('button', { name, exact: true }).click()
+   await page.locator('.lesson-directory-tree').getByRole('button', { name: 'course.h5lesson', exact: true }).click()
+   await expect(page.locator('.lesson-workflow')).toBeVisible()
+  }
   const lesson = await page.evaluate(async directory => (await window.desktopAPI!.lesson!({ operation: 'list-lessons', directory })).lessons![0]!, workspace)
   const conversation = await page.evaluate(async lesson => (await window.desktopAPI!.lesson!({ operation: 'list-conversations', lesson })).conversations![0]!, lesson.identity)
   const context = { lesson: lesson.identity, conversationId: conversation.conversationId }
   writeFileSync(join(evidence, 'context.json'), JSON.stringify(context, null, 2))
-  await app.evaluate(({ dialog }, filename) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [filename] }) }, materialPath)
-  await page.getByRole('tab', { name: '材料', exact: true }).click()
-  await page.getByRole('button', { name: /^添加材料（PDF/ }).click()
-  await page.getByRole('article').filter({ has: page.getByRole('heading', { name: '闭合电路图文教材.docx', exact: true }) }).last().getByRole('checkbox', { name: '用于本课例创作（整份材料）', exact: true }).check()
+  if (!resume) {
+   await app.evaluate(({ dialog }, filename) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [filename] }) }, materialPath)
+   await page.getByRole('tab', { name: '材料', exact: true }).click()
+   await page.getByRole('button', { name: /^添加材料（PDF/ }).click()
+   await page.getByRole('article').filter({ has: page.getByRole('heading', { name: '闭合电路图文教材.docx', exact: true }) }).last().getByRole('checkbox', { name: '用于本课例创作（整份材料）', exact: true }).check()
+  }
   const panel = page.getByRole('region', { name: '课例创作流程' })
+  await page.locator('.lesson-workflow-settings > summary').click()
   await page.getByRole('combobox', { name: '创作流程 CLI', exact: true }).selectOption('codex')
-  await panel.getByRole('button', { name: '根据材料自动创作', exact: true }).click()
-  await expect(panel.getByRole('button', { name: '根据材料自动创作', exact: true })).toHaveAttribute('aria-pressed', 'true')
+  if (!resume) await panel.getByRole('button', { name: '自动模式（按材料）', exact: true }).click()
+  await expect(panel.getByRole('button', { name: '自动模式（按材料）', exact: true })).toHaveAttribute('aria-pressed', 'true')
   await panel.getByRole('textbox', { name: '课例创作目标' }).fill(goal)
   const outputPath = join(lesson.identity.normalizedDirectory, 'course.h5lesson')
   await app.evaluate(({ dialog }, filename) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath: filename }) }, outputPath)
   await page.screenshot({ path: join(evidence, 'before-normal-start.png') })
-  await panel.getByRole('button', { name: '生成当前阶段', exact: true }).click()
+  await panel.getByRole('button', { name: '开始自动创作', exact: true }).click()
   // A test-driver instruction chooses only a visible teacher action. It never writes a candidate,
   // injects tool contracts, changes application metadata, or substitutes an extra model loop.
   let previous = '', done = false

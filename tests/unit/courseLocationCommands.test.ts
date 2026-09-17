@@ -13,7 +13,8 @@ import {
   moveCourseSlideScene,
   reorderCourseSurfaces,
 } from '@/renderer/course/courseLocationCommands'
-import { insertFlowEditorBlock } from '@/renderer/course/flowEditorCommands'
+import { deleteFlowEditorBlock, insertFlowEditorBlock } from '@/renderer/course/flowEditorCommands'
+import type { InteractionRule } from '@/shared/interactionTypes'
 import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
 import { createBlankFlowCourseProject } from '@/renderer/project/createFlowCourseProject'
 import { createBlankSpatialCourseProject } from '@/renderer/project/createSpatialCourseProject'
@@ -34,6 +35,47 @@ function slideSceneLocationIds(project: CourseProjectDocument): string[] {
 }
 
 describe('courseLocationCommands', () => {
+  it('cleans exact location navigation and dependent rules after a Flow heading-only deletion', () => {
+    const added = addCourseFlowPage(createBlankCourseProject({ now: NOW }), { now: NOW })
+    if (!added.ok) throw new Error(added.reason)
+    const flow = added.project.surfaces.find(surface => surface.type === 'flow')!
+    if (flow.type !== 'flow') throw new Error('expected flow')
+    const inserted = insertFlowEditorBlock(added.project, {
+      surfaceId: flow.id, parentId: null, index: flow.blocks.length,
+      block: { type: 'heading', level: 1, content: { inlines: [{ type: 'text', text: '可删除记录' }] } },
+    }, { now: NOW })
+    if (!inserted.ok || !inserted.nextDocument) throw new Error('insert failed')
+    const project = inserted.nextDocument
+    const destination = project.locations.filter(location => location.surfaceId === flow.id).at(-1)!
+    if (destination.kind !== 'flow-block') throw new Error('expected heading location')
+    const rules = (prefix: string): InteractionRule[] => [
+      { id: `${prefix}-go`, enabled: true, trigger: { type: 'scene.enter' }, conditions: [], actions: [
+        { id: `${prefix}-go-action`, start: 'after-previous', delayMs: 0, action: { type: 'location.go', locationId: destination.id } },
+      ] },
+      { id: `${prefix}-dependent`, enabled: true, trigger: { type: 'animation.completed', actionId: `${prefix}-go-action` }, conditions: [], actions: [
+        { id: `${prefix}-dependent-action`, start: 'after-previous', delayMs: 0, action: { type: 'scene.next' } },
+      ] },
+      { id: `${prefix}-keep`, enabled: true, trigger: { type: 'scene.enter' }, conditions: [], actions: [
+        { id: `${prefix}-keep-action`, start: 'after-previous', delayMs: 0, action: { type: 'location.go', locationId: project.startLocationId } },
+      ] },
+    ]
+    project.globalInteractions = rules('global')
+    const slide = project.surfaces.find(surface => surface.type === 'slide')!
+    if (slide.type !== 'slide') throw new Error('expected slide')
+    slide.scenes[0]!.interactions = rules('local')
+    const before = structuredClone(project)
+    const result = deleteFlowEditorBlock(project, { surfaceId: flow.id, parentId: null, blockId: destination.blockId }, { now: NOW })
+    if (!result.ok || !result.nextDocument) throw new Error(result.reason ?? 'delete failed')
+    const after = result.nextDocument
+    expect(after.locations.some(location => location.id === destination.id)).toBe(false)
+    expect(after.surfaces.map(surface => surface.id)).toEqual(before.surfaces.map(surface => surface.id))
+    expect(after.globalInteractions).toEqual([before.globalInteractions[2]])
+    const remainingSlide = after.surfaces.find(surface => surface.type === 'slide')!
+    if (remainingSlide.type !== 'slide') throw new Error('expected slide')
+    expect(remainingSlide.scenes[0]!.interactions).toEqual([slide.scenes[0]!.interactions[2]])
+    expect(project).toEqual(before)
+    expect(courseProjectDocumentSchema.parse(after)).toEqual(after)
+  })
   it('keeps old scene locations when addCourseScene runs twice on the same Slide surface', () => {
     let project = createBlankCourseProject({ now: NOW })
     const surfaceId = slideSurfaceId(project)

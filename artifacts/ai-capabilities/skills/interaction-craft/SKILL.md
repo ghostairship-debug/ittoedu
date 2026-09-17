@@ -11,6 +11,4 @@ description: 输入：教学动作与反馈路径
 
 输入：教学动作与反馈路径。简单点击、切换、播放媒体使用 Native 声明式交互；局部复杂互动先匹配组件；整页连续机制才使用 Runtime。每个非终点都需要可发现的正文推进动作、反馈和恢复路径。动态代码必须提供静态后备及素材/依赖/精确 origin 声明，并等待宿主编译、生命周期、捕获和真实运行准入；不能靠截图冒充可运行互动。
 
-教师控制台仅使用工程内嵌组件；component.controller restore 用于显式恢复默认源码。参数用 component.configure，纹理/布局/结构用 component.package patch。保持全局唯一 role，不只改颜色冒充深度定制。背景融合仍独立于课件主动观察缩放、平移、Flow 滚动和 Spatial 镜头，但适应窗口与可用区域大小；透明空白穿透，真实控件可点。教师端口见 component-api4 的 sharedTypes.teacherController。
-
 完整构建、视觉、推进、互动与交付方法见 [build-courseware-project](../build-courseware-project/SKILL.md) 及其引用资料。

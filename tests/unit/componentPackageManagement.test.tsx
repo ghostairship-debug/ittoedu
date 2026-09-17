@@ -153,7 +153,6 @@ function expectFlowBlockUsageReference(surfaceId: string, blockId: string) {
 
 beforeEach(() => {
   useEditorStore.getState().createNewProject()
-  useEditorStore.setState({ editorMode: 'professional' })
   initialPackages = structuredClone(useEditorStore.getState().componentPackages)
   initialMetadata = structuredClone(activeCourseProject().componentPackages)
 })

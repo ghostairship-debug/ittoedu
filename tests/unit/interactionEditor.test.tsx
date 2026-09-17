@@ -211,6 +211,12 @@ const projectScenes = [
   },
 ]
 
+const projectLocations = [
+  { id: 'location-slide', label: '1｜答题页' },
+  { id: 'location-flow', label: '2｜探究记录' },
+  { id: 'location-spatial', label: '3｜空间实验' },
+]
+
 function renderEditor({
   scene = makeScene([]),
   selectedNode = button as InteractionLayerTarget,
@@ -228,6 +234,7 @@ function renderEditor({
       selectedNode={selectedNode}
       activeStateId={activeStateId}
       scenes={projectScenes}
+      locations={projectLocations}
       sounds={sounds}
       courseState={courseState}
       onAddRule={onAddRule}
@@ -268,6 +275,7 @@ function renderAutomationEditor({
       authoringStates={authoringStates}
       selectedNodeId={selectedNodeId}
       scenes={projectScenes}
+      locations={projectLocations}
       sounds={sounds}
       courseState={courseState}
       ruleWarnings={ruleWarnings}
@@ -296,6 +304,27 @@ function renderAutomationEditor({
 }
 
 describe('InteractionEditor', () => {
+  it('authors an exact cross-Surface location jump on an existing Native click rule', () => {
+    const rule = clickRule('exact-location', [{
+      type: 'location.go', locationId: 'location-slide',
+    }])
+    const { onUpdateRule } = renderEditor({ scene: makeScene([rule]) })
+    const group = screen.getByRole('group', { name: '单击规则 1' })
+
+    expect(within(group).getByLabelText('动作类型')).toHaveValue('location.go')
+    expect(within(group).getByLabelText('目标课程位置')).toHaveValue('location-slide')
+
+    fireEvent.change(within(group).getByLabelText('目标课程位置'), {
+      target: { value: 'location-flow' },
+    })
+    expect(onUpdateRule).toHaveBeenLastCalledWith('exact-location', {
+      actions: [actionStep(
+        'exact-location-action-1',
+        { type: 'location.go', locationId: 'location-flow' },
+      )],
+    })
+  })
+
   it('adds an ANDed course-state condition to a click rule', () => {
     const rule = clickRule('course-state-click', [{ type: 'scene.next' }])
     const { onUpdateRule } = renderEditor({ scene: makeScene([rule]) })
@@ -934,6 +963,7 @@ describe('SceneAutomationEditor', () => {
         sourceRules={[existing]}
         activeStateId="question"
         scenes={projectScenes}
+        locations={projectLocations}
         sounds={sounds}
         onApplyRevealSequenceTemplate={vi.fn()}
         onAddRule={onAddRule}

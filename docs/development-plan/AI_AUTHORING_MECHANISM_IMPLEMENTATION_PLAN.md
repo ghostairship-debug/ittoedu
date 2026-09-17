@@ -28,7 +28,7 @@
 | 修复后 Claude `b1f83785` / `4d6aa103`，208.0 / 167.0 秒 | 两次提示均明确指定 CLI 文件兜底；最终为独立原生方形与圆形，最后一轮保存重开并分别选中 | 未测试自然选择快捷路线；通道报告模型为 deepseek-flash[1M]，不能据此比较 Claude 原厂模型能力 |
 | 同一初始工程的快捷隔离验证 | content 修改方形 → insert 圆形 → content 设置黄色；一次事务、两个原生对象、保存重开、Undo/Redo 通过 | 没有调用模型，不计 Agent 首次正确率或真实任务耗时 |
 
-证据入口：[原生修复记录](reviews/2026-09-14-native-editing-repair.md)、[计时与配置](../../output/native-editing-repair-20260914/verification-audit.json)、[Claude 实际输入](../../output/native-editing-repair-20260914/claude-1789321890006/result.input.json)、[快捷隔离结果](../../output/native-editing-repair-20260914/quick-path-verification.json)。原用户任务修改的是图片，新复验夹具修改的是原生形状；两者分别验证，不互相替代。
+证据入口：[原生修复记录](reviews/2026-09-14-native-editing-repair.md)、`../../output/native-editing-repair-20260914/verification-audit.json`（历史链接目标未保留）、`../../output/native-editing-repair-20260914/claude-1789321890006/result.input.json`（历史链接目标未保留）、`../../output/native-editing-repair-20260914/quick-path-verification.json`（历史链接目标未保留）。原用户任务修改的是图片，新复验夹具修改的是原生形状；两者分别验证，不互相替代。
 
 ### 1.3 同源缺口与验证状态
 

@@ -155,7 +155,6 @@ catalogDescribe('四组件 Course Project V9 编辑、归档与生命周期矩�
 
   it('逐包按需嵌入，并覆盖属性编辑、插入删除、撤销重做和状态覆盖', () => {
     useEditorStore.getState().createNewProject()
-    useEditorStore.setState({ editorMode: 'professional' })
 
     for (const [index, component] of packages.entries()) {
       useEditorStore.getState().importComponentPackage(component)

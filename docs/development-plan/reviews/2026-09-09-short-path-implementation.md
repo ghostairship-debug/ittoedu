@@ -58,7 +58,7 @@
 | 共享组件 patch | 正式 Electron 准入、六帧生命周期观察和一次资源事务；Slide、嵌套 Flow、Spatial 三个实例同步，保留未改源码、props 和位置。一次 Undo/Redo、保存重开、三表面真实按钮点击通过，已查看三张互动结果图 |
 | 单实例组件 patch | 仅分出嵌套 Flow 中的目标实例，原共享包和其他实例保留；真实准入、一次 Undo/Redo、保存重开及三表面实际点击通过，已查看修改与未修改实例的结果图 |
 
-原始制品位于 [output/r18-short-path](../../../output/r18-short-path)，[样本汇总](../../../output/r18-short-path/attempts.json)保留各次原始状态、失败、实际配置、回执、原生事件与用量，不合并不同实现重试为提速统计。组件 patch 的独立证据位于 [output/r18-short-path-component-patch](../../../output/r18-short-path-component-patch)。`builder-v2-flow.png` 与 `builder-v2-spatial.png` 已查看；Spatial 第二步为相机聚焦画面，不能将其当作整页排版验收。计时从实际点击发送起，首个确认结果与持久终态分列。真实原生 turn 和 usage 不代表可见全部内部模型请求。
+原始制品位于 `../../../output/r18-short-path`（历史链接目标未保留），`../../../output/r18-short-path/attempts.json`（历史链接目标未保留）保留各次原始状态、失败、实际配置、回执、原生事件与用量，不合并不同实现重试为提速统计。组件 patch 的独立证据位于 `../../../output/r18-short-path-component-patch`（历史链接目标未保留）。`builder-v2-flow.png` 与 `builder-v2-spatial.png` 已查看；Spatial 第二步为相机聚焦画面，不能将其当作整页排版验收。计时从实际点击发送起，首个确认结果与持久终态分列。真实原生 turn 和 usage 不代表可见全部内部模型请求。
 
 ## 完成边界
 

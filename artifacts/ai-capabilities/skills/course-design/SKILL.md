@@ -11,6 +11,4 @@ description: 输入：教学主题和明确引用的材料
 
 输入：教学主题和明确引用的材料。输出：教师可读的教学策划与呈现脚本草案。先建立新知识的讲解、证据或观察路径，再安排练习；新知识不能只在答案反馈中首次出现。信息不足先提出少量关键问题。停点：策划、脚本分别等待教师看过当前版本后确认；不产生工程修改候选。
 
-教师控制台仅使用工程内嵌组件；component.controller restore 用于显式恢复默认源码。参数用 component.configure，纹理/布局/结构用 component.package patch。保持全局唯一 role，不只改颜色冒充深度定制。背景融合仍独立于课件主动观察缩放、平移、Flow 滚动和 Spatial 镜头，但适应窗口与可用区域大小；透明空白穿透，真实控件可点。教师端口见 component-api4 的 sharedTypes.teacherController。
-
 完整策划、信息补全与分别确认方法见 [orchestrate-courseware](../orchestrate-courseware/SKILL.md)。

@@ -40,7 +40,6 @@ import {
   CommonNodeProperties,
   SlideNativeNotices,
   SlideNativeTypeFields,
-  type EditorModeView,
   type PropertiesItemView,
   type PropertiesPatch,
   type SlideNativeNoticesView,
@@ -93,7 +92,6 @@ export interface CourseGlobalPropertiesContext {
   readonly flowPlacement?: { readonly paperSpace: 'paper' | 'viewport'; readonly onChange: (paperSpace: 'paper' | 'viewport') => void }
   readonly draftBindingKey: string | null
   readonly mode: 'empty' | 'selected'
-  readonly editorMode: EditorModeView
   readonly disabledReason: string | null
   readonly empty: CourseGlobalEmptyView | null
   readonly layer: CourseGlobalLayerView | null
@@ -451,7 +449,7 @@ function CourseGlobalEmptyPanel({
 }) {
   const empty = context.empty
   if (!empty) return null
-  const { commands, editorMode, runtime } = context
+  const { commands, runtime } = context
   return (
     <>
       <section className="property-section global-layer-summary">
@@ -520,13 +518,13 @@ function CourseGlobalEmptyPanel({
             : '添加或定位教师控制器'}
         </button>
       </section>
-      {editorMode === 'professional' && empty.designTokens && (
+      {empty.designTokens && (
         <DesignTokensEditor
           value={empty.designTokens}
           onChange={commands.updateDesignTokens}
         />
       )}
-      {editorMode === 'professional' && runtime && (
+      {runtime && (
         <RuntimePropertiesPanel context={runtime} />
       )}
     </>
@@ -591,7 +589,7 @@ export function CourseGlobalPropertiesPanel({
         <details className="property-section controller-property-details">
           <summary>位置与尺寸</summary>
           <p className="property-hint">这里设置展开尺寸。收起后的选框随圆按钮变化。</p>
-          <CommonNodeProperties node={node} editorMode={context.editorMode} update={update} />
+          <CommonNodeProperties node={node} update={update} />
         </details>
         <details className="property-section controller-property-details">
           <summary>显示范围</summary>
@@ -609,7 +607,6 @@ export function CourseGlobalPropertiesPanel({
       />
       <CommonNodeProperties
         node={node}
-        editorMode={context.editorMode}
         update={update}
       />
       {context.flowPlacement && (
@@ -636,8 +633,7 @@ export function CourseGlobalPropertiesPanel({
         tableCommands={null}
         chartCommands={null}
       />
-      {context.editorMode === 'professional' &&
-        context.flowOrSpatial && (
+      {context.flowOrSpatial && (
         <FlowSpatialInteractionUnavailableSection
           editingScopeGlobal={context.editingScopeGlobal}
           onOpenAutomation={context.commands.openProfessionalAutomation}

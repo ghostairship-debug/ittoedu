@@ -101,9 +101,6 @@ function OpenProjectHealthPanel({
     store.setEditingScope(route.scope)
     if (route.layerItemId) store.selectNode(route.layerItemId)
     if (route.blockId) store.selectNode(route.blockId)
-    if (route.tab === 'automation' || route.tab === 'components') {
-      store.setEditorMode('professional')
-    }
     store.setActiveTab(route.tab)
     store.setStatus(`已定位：${diagnostic.message}`)
     onClose()

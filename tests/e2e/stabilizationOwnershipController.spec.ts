@@ -18,10 +18,28 @@ import type {
   SpatialSurfaceDocument,
 } from '../../src/shared/courseProjectTypes'
 import { APP_E2E_TEMP_DIRECTORY_NAME } from '../../src/shared/constants'
+import { projectFlowComponentControllerFrame } from '../../src/shared/flowViewportGeometry'
+import { playbackControllerInsets } from '../../src/shared/playbackViewGeometry'
 import { BACKGROUND_E2E_ENV } from '../../src/main/windowVisibility'
 import { expectBackgroundWindowsIsolated } from './expectBackgroundWindowsIsolated'
+import { showEditorPanel } from './r18NativeAuthoringFixture'
 
 const root = resolve(__dirname, '..', '..')
+
+async function enterStandaloneEditorFromLanding(page: Page): Promise<void> {
+  const landing = page.locator('.lesson-workspace-landing')
+  const editor = page.getByTestId('canvas-stage')
+  await Promise.race([
+    landing.waitFor({ state: 'visible', timeout: 15_000 }),
+    editor.waitFor({ state: 'visible', timeout: 15_000 }),
+  ])
+  if (!await landing.isVisible()) return
+  const more = page.locator('.lesson-workspace-more > summary')
+  if (!await more.isVisible()) return
+  await more.click()
+  const create = page.getByRole('button', { name: '新建独立课件', exact: true })
+  if (await create.isVisible()) await create.click()
+}
 const SPATIAL_MOVE_REASON =
   '空间画布中的全课图层固定在视口，本页和世界图层跟随画布；当前不能跨这两种定位移动。'
 const SPATIAL_MOVE_ALERT = '图层顺序未更新。请在同一分组内重新排序。'
@@ -125,6 +143,7 @@ async function launchEditor(): Promise<LaunchedEditor> {
       if (/^https?:/i.test(request.url())) diagnostics.externalRequests.push(request.url())
     })
     const page = await app.firstWindow()
+    await enterStandaloneEditorFromLanding(page)
     attach(page)
     await page.locator('[data-testid="canvas-stage"] canvas').waitFor()
     await expectBackgroundWindowsIsolated(app, true)
@@ -207,7 +226,7 @@ async function openSpatial(page: Page): Promise<void> {
 
 function teacherControllerRows(page: Page): Locator {
   return page.getByTestId('nodes-tab').locator('.node-item').filter({
-    has: page.locator('.node-type-icon[title="teacher-controller"]'),
+    has: page.locator('.node-source').filter({ hasText: /全课 Overlay.*不可下沉/ }),
   })
 }
 
@@ -215,8 +234,13 @@ function nodeRow(page: Page, layerItemId: string): Locator {
   return page.getByTestId(`node-item-${layerItemId}`)
 }
 
+async function openEditorTab(page: Page, name: '图层' | '属性' | '元素'): Promise<void> {
+  await showEditorPanel(page, '属性与素材')
+  await page.getByRole('tab', { name, exact: true }).click()
+}
+
 async function renameSelectedNode(page: Page, name: string): Promise<void> {
-  await page.getByRole('tab', { name: '图层' }).click()
+  await openEditorTab(page, '图层')
   const selected = page.locator('.node-item--selected')
   await expect(selected).toHaveCount(1)
   await selected.locator('.node-name').dblclick()
@@ -227,7 +251,7 @@ async function renameSelectedNode(page: Page, name: string): Promise<void> {
 }
 
 async function renameLayer(page: Page, layerItemId: string, name: string): Promise<void> {
-  await page.getByRole('tab', { name: '图层' }).click()
+  await openEditorTab(page, '图层')
   const row = nodeRow(page, layerItemId)
   await row.locator('.node-name').dblclick()
   const input = row.locator('.node-name-input')
@@ -237,7 +261,7 @@ async function renameLayer(page: Page, layerItemId: string, name: string): Promi
 }
 
 async function selectLayer(page: Page, layerItemId: string): Promise<void> {
-  await page.getByRole('tab', { name: '图层' }).click()
+  await openEditorTab(page, '图层')
   await nodeRow(page, layerItemId).locator('.node-name').click()
   await expect(page.getByRole('tab', { name: '属性' }))
     .toHaveAttribute('aria-selected', 'true')
@@ -325,12 +349,12 @@ function previewSurface(host: Locator, kind: ControllerKind): Locator {
   return host.locator(selector).first()
 }
 
-function previewControllerFrame(surface: Locator, kind: ControllerKind): Locator {
+function previewControllerFrame(surface: Locator, kind: ControllerKind, controllerId: string): Locator {
   if (kind === 'slide') {
-    return surface.locator('[data-global-layer-item]:has(.slide-native-teacher-controller)').first()
+    return surface.locator(`[data-global-layer-item="${controllerId}"]`)
   }
-  if (kind === 'flow') return surface.getByTestId('flow-runtime-teacher-controller')
-  return surface.locator('.spatial-screen-teacher-controller').first()
+  if (kind === 'flow') return surface.locator(`[data-testid="flow-runtime-teacher-controller"][data-layer-item-id="${controllerId}"]`)
+  return surface.locator(`.spatial-screen-teacher-controller[data-layer-item-id="${controllerId}"]`)
 }
 
 async function navigatePreviewSurface(
@@ -357,6 +381,7 @@ async function expectDesignStage(surface: Locator): Promise<void> {
       responsive: stage.classList.contains('flow-surface-host'),
       layout: { width: stage.clientWidth, height: stage.clientHeight },
       viewport: { width: viewport.clientWidth, height: viewport.clientHeight,
+        renderedWidth: viewportRect.width, renderedHeight: viewportRect.height,
         left: viewportRect.left, top: viewportRect.top },
       rendered: { width: stageRect.width, height: stageRect.height,
         left: stageRect.left, top: stageRect.top },
@@ -368,7 +393,7 @@ async function expectDesignStage(surface: Locator): Promise<void> {
 function expectStageGeometry(geometry: {
   responsive: boolean
   layout: { width: number; height: number }
-  viewport: { width: number; height: number; left: number; top: number }
+  viewport: { width: number; height: number; renderedWidth: number; renderedHeight: number; left: number; top: number }
   rendered: { width: number; height: number; left: number; top: number }
 }): void {
   const { viewport, responsive } = geometry
@@ -380,12 +405,20 @@ function expectStageGeometry(geometry: {
     : { width: 1280, height: 720 }
   expect(geometry.layout).toEqual(layout)
   const scale = responsive ? 1 : Math.min(viewport.width / 1280, viewport.height / 720)
-  const width = layout.width * scale, height = layout.height * scale
+  // Flow resolves 100% against the viewport's subpixel content box, while
+  // clientWidth/clientHeight intentionally expose only integer layout pixels.
+  // Compare rendered rectangles in the same coordinate system; fixed stages
+  // continue to use the product's client-size fit calculation.
+  const width = responsive ? viewport.renderedWidth : layout.width * scale
+  const height = responsive ? viewport.renderedHeight : layout.height * scale
+  const viewportWidth = responsive ? viewport.renderedWidth : viewport.width
+  const viewportHeight = responsive ? viewport.renderedHeight : viewport.height
   const expected = { width, height,
-    left: viewport.left + (viewport.width - width) / 2,
-    top: viewport.top + (viewport.height - height) / 2 }
+    left: viewport.left + (viewportWidth - width) / 2,
+    top: viewport.top + (viewportHeight - height) / 2 }
   for (const key of ['width', 'height', 'left', 'top'] as const) {
-    expect(geometry.rendered[key], `rendered stage ${key}`).toBeCloseTo(expected[key], 2)
+    // Chromium layout coordinates are quantized to 1/64 CSS px.
+    expect(Math.abs(geometry.rendered[key] - expected[key]), `rendered stage ${key}`).toBeLessThanOrEqual(1 / 64 + 1e-6)
   }
 }
 
@@ -397,7 +430,7 @@ async function controllerPosition(frame: Locator): Promise<{ left: number; top: 
 }
 
 async function controllerRoot(frame: Locator): Promise<Locator> {
-  const rootLocator = frame.locator('.slide-native-teacher-controller')
+  const rootLocator = frame.getByRole('navigation', { name: '教师控制台', exact: true })
   await expect(rootLocator).toBeVisible()
   return rootLocator
 }
@@ -413,40 +446,28 @@ async function expectCollapsedFootprint(page: Page, frame: Locator): Promise<voi
   const rootLocator = await controllerRoot(frame)
   const pill = rootLocator.getByRole('button', { name: '展开教师控制器' })
   await expect(pill).toBeVisible()
-  const collapsedProof = await frame.evaluate((element) => {
-    const wrapper = element as HTMLElement
-    const button = wrapper.querySelector<HTMLElement>(
-      '[data-teacher-controller-collapse="true"]',
-    )
-    if (!button) throw new Error('Collapsed controller has no recovery pill')
-    const frameRect = wrapper.getBoundingClientRect()
-    const pillRect = button.getBoundingClientRect()
-    const formerPanel = {
-      x: frameRect.left + Math.max(2, Math.min(frameRect.width * 0.12, frameRect.width - 2)),
-      y: frameRect.top + frameRect.height / 2,
-    }
-    const pillCenter = {
-      x: pillRect.left + pillRect.width / 2,
-      y: pillRect.top + pillRect.height / 2,
-    }
-    const formerHit = wrapper.ownerDocument.elementFromPoint(formerPanel.x, formerPanel.y)
-    const pillHit = wrapper.ownerDocument.elementFromPoint(pillCenter.x, pillCenter.y)
-    return {
-      formerPanel,
-      pillCenter,
-      formerInside: Boolean(formerHit && wrapper.contains(formerHit)),
-      pillInside: Boolean(pillHit && wrapper.contains(pillHit)),
-    }
-  })
-  expect(collapsedProof.formerInside).toBe(false)
-  expect(collapsedProof.pillInside).toBe(true)
-
-  await page.mouse.click(collapsedProof.pillCenter.x, collapsedProof.pillCenter.y)
+  await clickControllerButton(page, pill)
   await expect(rootLocator.getByRole('button', { name: '收起教师控制器' })).toBeVisible()
-  expect(await frame.evaluate((element, point) => {
+  const handle = rootLocator.getByTitle('拖动教师控制台', { exact: true })
+  const panelPoint = await handle.evaluate(element => {
+    const rect = element.getBoundingClientRect()
+    return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }
+  })
+  const hitInside = (point: { x: number; y: number }) => frame.evaluate((element, point) => {
     const hit = element.ownerDocument.elementFromPoint(point.x, point.y)
     return Boolean(hit && element.contains(hit))
-  }, collapsedProof.formerPanel)).toBe(true)
+  }, point)
+  expect(await hitInside(panelPoint)).toBe(true)
+  await collapseController(page, frame)
+  await expect.poll(() => hitInside(panelPoint)).toBe(false)
+  const pillPoint = await pill.evaluate(element => {
+    const rect = element.getBoundingClientRect()
+    return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }
+  })
+  expect(await hitInside(pillPoint)).toBe(true)
+  await page.mouse.click(pillPoint.x, pillPoint.y)
+  await expect(rootLocator.getByRole('button', { name: '收起教师控制器' })).toBeVisible()
+  await expect.poll(() => hitInside(panelPoint)).toBe(true)
 }
 
 async function collapseController(page: Page, frame: Locator): Promise<void> {
@@ -463,8 +484,22 @@ async function moveController(
   key: 'ArrowLeft' | 'ArrowRight',
 ): Promise<{ left: number; top: number }> {
   const rootLocator = await controllerRoot(frame)
-  await rootLocator.focus()
-  await rootLocator.press(`Alt+${key}`)
+  const handle = rootLocator.getByTitle('拖动教师控制台', { exact: true })
+  await expect(handle).toBeVisible()
+  const bounds = (await handle.boundingBox())!
+  const scale = await frame.evaluate(element => element.getBoundingClientRect().width / (element as HTMLElement).offsetWidth)
+  const before = await controllerPosition(frame)
+  const direction = key === 'ArrowLeft' ? -1 : 1
+  const x = bounds.x + bounds.width / 2, y = bounds.y + bounds.height / 2
+  const page = frame.page()
+  await page.mouse.move(x, y)
+  await page.mouse.down()
+  // Cross the component's drag threshold even when normal surface fit is small,
+  // then return to the requested eight logical pixels in the same gesture.
+  await page.mouse.move(x + direction * Math.max(12, 8 * scale), y, { steps: 4 })
+  await page.mouse.move(x + direction * 8 * scale, y, { steps: 2 })
+  await page.mouse.up()
+  await expect.poll(async () => (await controllerPosition(frame)).left).toBe(before.left + direction * 8)
   return controllerPosition(frame)
 }
 
@@ -485,9 +520,8 @@ async function flowLayoutMetrics(surface: Locator): Promise<{
     const controller = element.querySelector<HTMLElement>(
       '[data-testid="flow-runtime-teacher-controller"]',
     )
-    const pill = controller?.querySelector<HTMLElement>(
-      '[data-teacher-controller-collapse="true"]',
-    )
+    const pill = controller?.querySelector<HTMLElement>('.published-component-mount')?.shadowRoot
+      ?.querySelector<HTMLElement>('button[aria-label="展开教师控制器"]')
     const toggle = element.querySelector<HTMLElement>('[data-testid="flow-runtime-toc-toggle"]')
     if (!article || !overlay || !controller || !pill || !toggle) {
       throw new Error('Flow runtime chrome is incomplete')
@@ -574,7 +608,7 @@ async function exerciseFlowTocWithoutDrift(
 }
 
 async function dragLayerRow(page: Page, fromId: string, toId: string): Promise<void> {
-  await page.getByRole('tab', { name: '图层' }).click()
+  await openEditorTab(page, '图层')
   const from = nodeRow(page, fromId)
   const to = nodeRow(page, toId)
   const handle = from.getByRole('button', { name: /调整.+层级/ })
@@ -599,7 +633,7 @@ async function expectWorldLayerRows(
   count: number,
   visibleId?: string,
 ): Promise<void> {
-  await page.getByRole('tab', { name: '图层' }).click()
+  await openEditorTab(page, '图层')
   const group = page.getByTestId('nodes-layer-group-world')
   await expect(group.locator('.node-item')).toHaveCount(count)
   if (visibleId) await expect(nodeRow(page, visibleId)).toBeVisible()
@@ -612,7 +646,7 @@ async function expectOnlySelectedLayer(page: Page, layerItemId: string): Promise
 }
 
 async function visibleWorldLayerIds(page: Page): Promise<string[]> {
-  await page.getByRole('tab', { name: '图层' }).click()
+  await openEditorTab(page, '图层')
   return page.getByTestId('nodes-layer-group-world').locator('.node-item')
     .evaluateAll((rows) => rows.map((row) => (
       (row as HTMLElement).dataset.testid?.replace(/^node-item-/, '') ?? ''
@@ -695,15 +729,20 @@ test('Wave B ownership and controller contracts survive one real Mixed session',
 
       await openSlide(page)
       await page.getByTestId('global-layer-entry').click()
-      await page.getByRole('tab', { name: '元素' }).click()
+      await openEditorTab(page, '元素')
       await page.getByRole('tab', { name: '常用' }).click()
       await page.getByTestId('add-text').click()
       await renameSelectedNode(page, '全局文字标记')
 
-      await page.getByRole('tab', { name: '图层' }).click()
-      await teacherControllerRows(page).locator('.node-name').click()
-      await page.getByRole('tab', { name: '属性' }).click()
-      await expect(page.getByLabel('打开课件时默认折叠')).toBeChecked()
+      await openEditorTab(page, '图层')
+      const controllerRow = teacherControllerRows(page)
+      await expect(controllerRow).toHaveCount(1)
+      await controllerRow.locator('.node-name').click()
+      await expect(page.getByRole('tab', { name: '属性', exact: true }))
+        .toHaveAttribute('aria-selected', 'true')
+      await expect(page.getByLabel('默认收起', { exact: true })).toBeChecked()
+      const buttons = page.locator('details.controller-property-details').filter({ has: page.locator('summary').filter({ hasText: /^按钮与动作$/ }) })
+      if (!await buttons.evaluate(element => (element as HTMLDetailsElement).open)) await buttons.locator('summary').click()
       const restartVisible = page.getByLabel('重新开始显示')
       const beforeRestart = await saveAs(app, page, projectPath)
       globalTextId = requireGlobalText(beforeRestart, '全局文字标记').layerItemId
@@ -727,13 +766,13 @@ test('Wave B ownership and controller contracts survive one real Mixed session',
       await page.getByRole('button', { name: '整课预览' }).click()
       const preview = page.getByTestId('course-preview-overlay')
       const host = page.getByTestId('course-preview-host')
-      await expect(preview).toContainText('Published Course V2 · CoursePlayer · 1280 × 720')
+      await expect(preview.getByRole('heading', { name: '整课预览', exact: true })).toBeVisible()
       await expectBackgroundWindowsIsolated(app, true)
 
       const slide = previewSurface(host, 'slide')
       await expect(slide).toBeVisible()
       await expectDesignStage(slide)
-      const slideFrame = previewControllerFrame(slide, 'slide')
+      const slideFrame = previewControllerFrame(slide, 'slide', controller.layerItemId)
       await expect(controllerPosition(slideFrame)).resolves.toEqual(authored)
       await expectCollapsedFootprint(page, slideFrame)
       expect(await moveController(slideFrame, 'ArrowRight')).toEqual({
@@ -743,24 +782,31 @@ test('Wave B ownership and controller contracts survive one real Mixed session',
 
       const flow = await navigatePreviewSurface(page, host, 'flow')
       await expectDesignStage(flow)
-      const flowFrame = previewControllerFrame(flow, 'flow')
+      const flowGeometry = await flow.evaluate(element => {
+        const scroll = element.querySelector<HTMLElement>('[data-flow-paper-scroll]')!
+        return { viewport: { width: element.clientWidth, height: element.clientHeight },
+          native: { right: scroll.offsetWidth - scroll.clientWidth, bottom: scroll.offsetHeight - scroll.clientHeight } }
+      })
+      const flowFrameGeometry = projectFlowComponentControllerFrame(controller.frame, flowGeometry.viewport, playbackControllerInsets(flowGeometry.native))
+      const flowAuthored = { left: flowFrameGeometry.x, top: flowFrameGeometry.y }
+      const flowFrame = previewControllerFrame(flow, 'flow', controller.layerItemId)
       await expect((await controllerRoot(flowFrame)).getByRole('button', {
         name: '收起教师控制器',
       })).toBeVisible()
-      expect(await controllerPosition(flowFrame)).toEqual(authored)
+      expect(await controllerPosition(flowFrame)).toEqual(flowAuthored)
       await collapseController(page, flowFrame)
       await expectCollapsedFootprint(page, flowFrame)
       await collapseController(page, flowFrame)
       await exerciseFlowTocWithoutDrift(page, flow, flowFrame)
       await moveController(flowFrame, 'ArrowRight')
       expect(await moveController(flowFrame, 'ArrowRight')).toEqual({
-        left: authored.left + 16,
-        top: authored.top,
+        left: flowAuthored.left + 16,
+        top: flowAuthored.top,
       })
 
       const spatial = await navigatePreviewSurface(page, host, 'spatial')
       await expectDesignStage(spatial)
-      const spatialFrame = previewControllerFrame(spatial, 'spatial')
+      const spatialFrame = previewControllerFrame(spatial, 'spatial', controller.layerItemId)
       await expect((await controllerRoot(spatialFrame)).getByRole('button', {
         name: '收起教师控制器',
       })).toBeVisible()
@@ -774,17 +820,17 @@ test('Wave B ownership and controller contracts survive one real Mixed session',
 
       await navigatePreviewSurface(page, host, 'flow', 'previous')
       const revisitedSlide = await navigatePreviewSurface(page, host, 'slide', 'previous')
-      expect(await controllerPosition(previewControllerFrame(revisitedSlide, 'slide'))).toEqual({
+      expect(await controllerPosition(previewControllerFrame(revisitedSlide, 'slide', controller.layerItemId))).toEqual({
         left: authored.left + 8,
         top: authored.top,
       })
       const revisitedFlow = await navigatePreviewSurface(page, host, 'flow')
-      expect(await controllerPosition(previewControllerFrame(revisitedFlow, 'flow'))).toEqual({
-        left: authored.left + 16,
-        top: authored.top,
+      expect(await controllerPosition(previewControllerFrame(revisitedFlow, 'flow', controller.layerItemId))).toEqual({
+        left: flowAuthored.left + 16,
+        top: flowAuthored.top,
       })
       const revisitedSpatial = await navigatePreviewSurface(page, host, 'spatial')
-      const revisitedSpatialFrame = previewControllerFrame(revisitedSpatial, 'spatial')
+      const revisitedSpatialFrame = previewControllerFrame(revisitedSpatial, 'spatial', controller.layerItemId)
       expect(await controllerPosition(revisitedSpatialFrame)).toEqual({
         left: authored.left - 8,
         top: authored.top,
@@ -795,19 +841,19 @@ test('Wave B ownership and controller contracts survive one real Mixed session',
 
       const restartedSlide = previewSurface(host, 'slide')
       await expect(restartedSlide).toBeVisible()
-      const restartedSlideFrame = previewControllerFrame(restartedSlide, 'slide')
+      const restartedSlideFrame = previewControllerFrame(restartedSlide, 'slide', controller.layerItemId)
       await expect((await controllerRoot(restartedSlideFrame)).getByRole('button', {
         name: '展开教师控制器',
       })).toBeVisible()
       expect(await controllerPosition(restartedSlideFrame)).toEqual(authored)
       const restartedFlow = await navigatePreviewSurface(page, host, 'flow')
-      const restartedFlowFrame = previewControllerFrame(restartedFlow, 'flow')
+      const restartedFlowFrame = previewControllerFrame(restartedFlow, 'flow', controller.layerItemId)
       await expect((await controllerRoot(restartedFlowFrame)).getByRole('button', {
         name: '展开教师控制器',
       })).toBeVisible()
-      expect(await controllerPosition(restartedFlowFrame)).toEqual(authored)
+      expect(await controllerPosition(restartedFlowFrame)).toEqual(flowAuthored)
       const restartedSpatial = await navigatePreviewSurface(page, host, 'spatial')
-      const restartedSpatialFrame = previewControllerFrame(restartedSpatial, 'spatial')
+      const restartedSpatialFrame = previewControllerFrame(restartedSpatial, 'spatial', controller.layerItemId)
       await expect((await controllerRoot(restartedSpatialFrame)).getByRole('button', {
         name: '展开教师控制器',
       })).toBeVisible()
@@ -832,7 +878,7 @@ test('Wave B ownership and controller contracts survive one real Mixed session',
     await test.step('Spatial commands preserve canonical owners and reject cross-coordinate drops', async () => {
       await openSpatial(page)
       await page.getByTestId('global-layer-entry').click()
-      await page.getByRole('tab', { name: '元素' }).click()
+      await openEditorTab(page, '元素')
       await page.getByRole('tab', { name: '常用' }).click()
       const disabledGlobalText = page.getByTestId('add-text')
       await expect(disabledGlobalText).toBeDisabled()
@@ -845,17 +891,17 @@ test('Wave B ownership and controller contracts survive one real Mixed session',
       // Surface-owner selection remains covered by its focused dependency; this
       // gate exercises only honest reachable entries rather than seeding symmetry.
       await openSpatial(page)
-      await page.getByRole('tab', { name: '元素' }).click()
+      await openEditorTab(page, '元素')
       await page.getByRole('tab', { name: '常用' }).click()
       await expect(page.getByTestId('add-text')).toBeEnabled()
       await page.getByTestId('add-text').click()
       await renameSelectedNode(page, '世界文字 A')
-      await page.getByRole('tab', { name: '元素' }).click()
+      await openEditorTab(page, '元素')
       await page.getByRole('tab', { name: '常用' }).click()
       await page.getByTestId('add-text').click()
       await renameSelectedNode(page, '世界文字 B')
 
-      await page.getByRole('tab', { name: '图层' }).click()
+      await openEditorTab(page, '图层')
       await expect(page.getByTestId('nodes-layer-group-global-overlay')).toContainText('全局文字标记')
       await expect(page.getByTestId('nodes-layer-group-world')).toContainText('世界文字 A')
       await expect(page.getByTestId('nodes-layer-group-world')).toContainText('世界文字 B')
@@ -918,7 +964,7 @@ test('Wave B ownership and controller contracts survive one real Mixed session',
       await expectOnlySelectedLayer(page, duplicated[0]!.layerItemId)
       await expectOneUndoRedoStep(page, projectPath, afterPaste, afterDuplicate)
 
-      await page.getByRole('tab', { name: '图层' }).click()
+      await openEditorTab(page, '图层')
       await nodeRow(page, globalTextId).getByRole('button', {
         name: '复制“全局文字标记”',
         exact: true,
@@ -937,12 +983,12 @@ test('Wave B ownership and controller contracts survive one real Mixed session',
       expect(globalDuplicate.visibility).toEqual(globalSource.visibility)
       expect(spatialSurface(afterNodesDuplicate).world.layerItems)
         .toEqual(spatialSurface(afterDuplicate).world.layerItems)
-      await page.getByRole('tab', { name: '属性' }).click()
+      await openEditorTab(page, '属性')
       await expect(page.getByTestId('properties-tab')).toBeVisible()
       await expect(page.getByLabel('名称', { exact: true }))
         .toHaveValue(globalDuplicate.item.label)
       await expect(page.getByTestId('global-layer-settings')).toBeVisible()
-      await page.getByRole('tab', { name: '图层' }).click()
+      await openEditorTab(page, '图层')
       await expect(nodeRow(page, globalDuplicate.item.layerItemId)).toBeVisible()
       await expectOnlySelectedLayer(page, globalDuplicate.item.layerItemId)
       await expectOneUndoRedoStep(page, projectPath, afterDuplicate, afterNodesDuplicate)

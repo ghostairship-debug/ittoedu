@@ -72,6 +72,7 @@ export interface PublishedSurfaceRuntimeMountOptions {
 
 const inertActions: Readonly<RuntimeHostActions> = Object.freeze({
   goToScene: () => false,
+  goToLocation: () => false,
   nextScene: () => false,
   previousScene: () => false,
   replayScene: () => false,

@@ -2,26 +2,138 @@ import { generationRequestSchema, type GenerationFailure, type GenerationRequest
 import { dynamicBehaviorEvidenceSchema } from '../../shared/dynamicBehaviorObservation'
 import type { LocalAgentHostResult } from '../../shared/localAgentContract'
 import type { AiHostResult } from '../../shared/localAgentTaskContract'
+import type { AiWorkspaceIdentity } from '../../shared/workspaceIdentity'
+
+type BehaviorEvidenceReference = { path: string; observations: number; semanticVerdict: 'requires-review' }
+type FeedbackFailure = Omit<GenerationFailure, 'behaviorEvidence'> & {
+  behaviorEvidence?: GenerationFailure['behaviorEvidence'] | BehaviorEvidenceReference
+}
+type HostResultProjection = Omit<LocalAgentHostResult, 'failure'> & { failure?: FeedbackFailure }
+type AiHostResultProjection = Omit<AiHostResult, 'failure'> & { failure?: FeedbackFailure }
+
+function compactSemanticChanges(changes: NonNullable<AiHostResult['semanticChanges']>) {
+  return { changeCount: changes.changes.length, omitted: changes.omitted, comparison: changes.comparison, truncation: changes.truncation }
+}
+
+/** Feedback retains receipt identity and status while moving bulky change
+ * values behind the durable request/resource boundary. */
+export function generationCompactHostResult(result: HostResultProjection | AiHostResultProjection, fullReceiptPath?: string) {
+  if (Buffer.byteLength(JSON.stringify(result), 'utf8') <= 8_192) return { ...result, ...(fullReceiptPath ? { fullReceipt: fullReceiptPath } : {}) }
+  const { semanticChanges, executionEvidence, failure, ...rest } = result
+  const diagnostics = 'diagnostics' in result ? result.diagnostics : undefined
+  return { ...rest,
+    ...('receipts' in result ? { receipts: result.receipts.map(({ semanticChanges: changes, ...receipt }) => ({ ...receipt,
+      ...(changes ? { semanticChanges: compactSemanticChanges(changes) } : {}),
+    })) } : {}),
+    ...(semanticChanges ? { semanticChanges: compactSemanticChanges(semanticChanges) } : {}),
+    ...(executionEvidence ? { executionEvidence: { entryCount: executionEvidence.length, statuses: [...new Set(executionEvidence.map(entry => entry.status))] } } : {}),
+    ...(diagnostics?.length ? { diagnostics: { count: diagnostics.length, codes: [...new Set(diagnostics.map(diagnostic => diagnostic.code))] } } : {}),
+    ...(failure ? { failure: { stage: failure.stage, diagnosticCodes: [...new Set(failure.diagnostics.map(diagnostic => diagnostic.code))],
+      ...(Array.isArray(failure.behaviorEvidence) && failure.behaviorEvidence.length ? { behaviorEvidence: { observations: failure.behaviorEvidence.length } } : {}),
+      ...(failure.recovery ? { recovery: failure.recovery } : {}), } } : {}),
+    ...(fullReceiptPath ? { fullReceipt: fullReceiptPath } : {}),
+  }
+}
+
+function fullReceiptFailure(failure: GenerationFailure) {
+  return { ...failure,
+    ...(failure.behaviorEvidence?.length ? { behaviorEvidence: failure.behaviorEvidence.map(observation => ({
+      ...observation, frames: observation.frames.map(({ dataUrl: _dataUrl, ...frame }) => frame),
+      frameDelivery: 'Binary frames remain in the durable task record; edit continuation supplies verified observation resources.',
+    })) } : {}),
+  }
+}
+
+type ReceiptProjection = ReturnType<typeof receiptFeedbackProjection>[number]
+type CompleteReceiptProjection = Omit<ReceiptProjection, 'semanticChanges' | 'executionEvidence' | 'diagnostics' | 'failure'> & {
+  semanticChanges?: AiHostResult['semanticChanges']
+  executionEvidence?: AiHostResult['executionEvidence']
+  diagnostics?: AiHostResult['diagnostics']
+  failure?: ReturnType<typeof fullReceiptFailure>
+}
 
 /** Native history needs the committed facts, not the duplicated persistence
  * envelope. Exact owner + item IDs preserve target identity; the full receipt,
  * including authoring addresses, remains in the local session record. */
-export function generationReceiptFeedback(results: readonly AiHostResult[]) {
+export function generationReceiptFeedback(results: readonly AiHostResult[], options?: { compact?: false; fullReceiptPath?: string }): CompleteReceiptProjection[]
+export function generationReceiptFeedback(results: readonly AiHostResult[], options: { compact: true; fullReceiptPath?: string }): ReceiptProjection[]
+export function generationReceiptFeedback(results: readonly AiHostResult[], options: { compact?: boolean; fullReceiptPath?: string } = {}) {
+  return receiptFeedbackProjection(results, options)
+}
+
+function receiptFeedbackProjection(results: readonly AiHostResult[], options: { compact?: boolean; fullReceiptPath?: string }) {
   return results.map(result => ({
     resultId: result.resultId, requestId: result.requestId, candidateId: result.candidateId,
     status: result.status, beforeRevision: result.beforeRevision, afterRevision: result.afterRevision,
     summary: result.summary,
     affected: result.receipts.flatMap(receipt => receipt.affected.map(({ id, operation, ownerKey }) => ({ id, operation, ownerKey }))),
     resources: result.receipts.map(receipt => receipt.resources),
-    ...(result.diagnostics.length ? { diagnostics: result.diagnostics } : {}),
-    ...(result.failure ? { failure: { ...result.failure,
-      ...(result.failure.behaviorEvidence?.length ? { behaviorEvidence: result.failure.behaviorEvidence.map(observation => ({
-        ...observation, frames: observation.frames.map(({ dataUrl: _dataUrl, ...frame }) => frame),
-        frameDelivery: 'Binary frames remain in the durable task record; edit continuation supplies verified observation resources.',
-      })) } : {}),
-    } } : {}),
+    ...(options.compact ? {
+      ...(result.semanticChanges ? { semanticChanges: {
+        changeCount: result.semanticChanges.changes.length,
+        omitted: result.semanticChanges.omitted,
+        comparison: result.semanticChanges.comparison,
+        truncation: result.semanticChanges.truncation,
+      } } : {}),
+      ...(result.executionEvidence ? { executionEvidence: {
+        entryCount: result.executionEvidence.length,
+        statuses: [...new Set(result.executionEvidence.map(entry => entry.status))],
+      } } : {}),
+      ...(result.diagnostics.length ? { diagnostics: {
+        count: result.diagnostics.length,
+        codes: [...new Set(result.diagnostics.map(diagnostic => diagnostic.code))],
+      } } : {}),
+      ...(result.failure ? { failure: {
+        stage: result.failure.stage,
+        diagnosticCodes: [...new Set(result.failure.diagnostics.map(diagnostic => diagnostic.code))],
+        ...(result.failure.behaviorEvidence?.length ? { behaviorEvidence: { observations: result.failure.behaviorEvidence.length } } : {}),
+        ...(result.failure.recovery ? { recovery: result.failure.recovery } : {}),
+      } } : {}),
+      omitted: ['semanticChanges.changes', 'executionEvidence.entries', 'diagnostics.messages', 'failure.behaviorEvidence.frames'],
+    } : {
+      ...(result.semanticChanges ? { semanticChanges: result.semanticChanges } : {}),
+      ...(result.executionEvidence ? { executionEvidence: result.executionEvidence } : {}),
+      ...(result.diagnostics.length ? { diagnostics: result.diagnostics } : {}),
+      ...(result.failure ? { failure: fullReceiptFailure(result.failure) } : {}),
+    }),
     ...(result.afterCommit ? { afterCommit: result.afterCommit } : {}),
+    ...(options.fullReceiptPath ? { fullReceipt: options.fullReceiptPath } : {}),
   }))
+}
+
+export function generationPendingReceiptPrompt(workspace: AiWorkspaceIdentity, results: readonly AiHostResult[], fullReceiptPath: string): string {
+  if (!results.length) return ''
+  const complete = generationReceiptFeedback(results, { fullReceiptPath })
+  const projected = Buffer.byteLength(JSON.stringify(complete), 'utf8') <= 8_192
+    ? complete : generationReceiptFeedback(results, { compact: true, fullReceiptPath })
+  return `以下是当前工程尚未送达的宿主实际结果。只有 committed / unchanged 表示已应用或确认无需修改；rejected / stale / failed 均未应用该候选。保留已经提交的成果，不重复执行；失败结果用于理解未完成目标和原因。本轮若仅询问状态或停止原因，只作解释，不自动继续编辑。\n${JSON.stringify({ workspace, results: projected })}\n`
+}
+
+/** Keep the complete formal result in the request-scoped resource while the
+ * prompt carries only the status and impact needed to decide the next turn. */
+export function generationPendingReceiptResource(request: GenerationRequest, results: readonly AiHostResult[]): GenerationRequest {
+  if (!results.length) return request
+  const relativePath = 'pending-host-results.json'
+  if (request.resourceFiles?.some(file => file.path === relativePath)) throw new Error('本轮未送达宿主回执资源已经存在')
+  // A full input set remains valid. The harness writes the formal receipt as
+  // an explicitly advertised file beside request.json instead of dropping input.
+  if ((request.resourceFiles?.length ?? 0) >= 1000) return request
+  const content = JSON.stringify({ version: 1, source: 'pending-formal-host-results', results })
+  return generationRequestSchema.parse({ ...request,
+    resourceFiles: [...request.resourceFiles ?? [], { path: relativePath, content, encoding: 'utf8', role: 'structure', mediaType: 'application/json' }],
+  })
+}
+
+/** A continuation may be built after an earlier receipt was acknowledged. Keep
+ * that complete result discoverable in the new request before compacting it. */
+export function generationHostResultResource(request: GenerationRequest, result: HostResultProjection, hostResult: AiHostResultProjection | null): GenerationRequest {
+  const relativePath = 'host-result.json'
+  if (request.resourceFiles?.some(file => file.path === relativePath)) return request
+  if ((request.resourceFiles?.length ?? 0) >= 1000) return request
+  const content = JSON.stringify({ version: 1, source: 'formal-host-result', result, hostResult })
+  return generationRequestSchema.parse({ ...request,
+    resourceFiles: [...request.resourceFiles ?? [], { path: relativePath, content, encoding: 'utf8', role: 'structure', mediaType: 'application/json' }],
+  })
 }
 
 function record(value: unknown): Record<string, unknown> {

@@ -1,14 +1,29 @@
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
-import { _electron as electron, expect, test } from '@playwright/test'
+import { _electron as electron, expect, test, type Page } from '@playwright/test'
 import { createServer, type ViteDevServer } from 'vite'
 import sharp from 'sharp'
 import { BACKGROUND_E2E_ENV } from '../../src/main/windowVisibility'
-import { closeNativeEditor, FIXTURE_IDS, writeNativeLesson, type NativeRun } from './r18NativeAuthoringFixture'
+import { closeNativeEditor, FIXTURE_IDS, selectLayer, writeNativeLesson, type NativeRun } from './r18NativeAuthoringFixture'
 import { expectBackgroundWindowsIsolated } from './expectBackgroundWindowsIsolated'
 
 const productRoot = resolve(__dirname, '..', '..')
 type Rect = { x: number; y: number; width: number; height: number }
+
+async function enterStandaloneEditorFromLanding(page: Page): Promise<void> {
+  const landing = page.locator('.lesson-workspace-landing')
+  const editor = page.getByTestId('canvas-stage')
+  await Promise.race([
+    landing.waitFor({ state: 'visible', timeout: 15_000 }),
+    editor.waitFor({ state: 'visible', timeout: 15_000 }),
+  ])
+  if (!await landing.isVisible()) return
+  const more = page.locator('.lesson-workspace-more > summary')
+  if (!await more.isVisible()) return
+  await more.click()
+  const create = page.getByRole('button', { name: '新建独立课件', exact: true })
+  if (await create.isVisible()) await create.click()
+}
 
 async function pixels(base64: string, oldTitle: Rect) {
   const image = await sharp(Buffer.from(base64, 'base64')).ensureAlpha().raw().toBuffer({ resolveWithObject: true })
@@ -48,6 +63,7 @@ test('the immediate formal observation reflects a Native text, font and frame ed
     const page = await app.firstWindow()
     run = { app, page, runRoot, workspaceRoot: runRoot, projectPath, userData, pageErrors: [], consoleErrors: [] }
     page.on('pageerror', error => run!.pageErrors.push(error.message))
+    await enterStandaloneEditorFromLanding(page)
     await expectBackgroundWindowsIsolated(app, true)
     await page.getByTestId('canvas-stage').locator('canvas').first().waitFor()
     await app.evaluate(({ dialog }, path) => {
@@ -56,8 +72,7 @@ test('the immediate formal observation reflects a Native text, font and frame ed
     await page.getByRole('button', { name: '打开工程（Ctrl+O）', exact: true }).click()
     const professional = page.getByRole('button', { name: '专业', exact: true })
     if (await professional.getAttribute('aria-pressed') !== 'true') await professional.click()
-    await page.getByRole('tab', { name: '图层', exact: true }).click()
-    await page.getByTestId(`node-item-${FIXTURE_IDS.title}`).locator('.node-name').click()
+    await selectLayer(page, FIXTURE_IDS.title)
 
     const result = await page.evaluate(async ({ ids }) => {
       const load = (path: string) => import(/* @vite-ignore */ path)

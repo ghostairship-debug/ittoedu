@@ -103,8 +103,18 @@ describe('design productivity canonical previews', () => {
     for (const target of [scene.id, destination.id]) {
       scene.interactions.push({ id: `go-${target}`, enabled: true, trigger: { type: 'node.click', nodeId: scene.layerItems[0]!.layerItemId }, conditions: [], actions: [{ id: `action-${target}`, start: 'after-previous', delayMs: 0, action: { type: 'scene.go', sceneId: target, targetStateId: 'initial' } }] })
     }
+    const flow = createBlankFlowCourseProject({ includeDefaultController: false, controls: 'none' })
+    context.document.surfaces.push(...flow.surfaces)
+    context.document.locations.push(...flow.locations)
+    context.document.mixedPrintPlan = { pageSize: 'A4', orientation: 'auto', entries: [
+      { id: 'print-slide', kind: 'slide-scenes', surfaceId: surface.id, sceneIds: surface.scenes.map(value => value.id) },
+      { id: 'print-flow', kind: 'flow-document', surfaceId: flow.surfaces[0]!.id },
+    ] }
+    for (const locationId of [context.document.startLocationId, flow.startLocationId]) {
+      scene.interactions.push({ id: `go-location-${locationId}`, enabled: true, trigger: { type: 'node.click', nodeId: scene.layerItems[0]!.layerItemId }, conditions: [], actions: [{ id: `location-action-${locationId}`, start: 'after-previous', delayMs: 0, action: { type: 'location.go', locationId } }] })
+    }
     const before = structuredClone(context.document)
-    expect(courseProjectDocumentSchema.safeParse(before).success).toBe(true)
+    expect(courseProjectDocumentSchema.parse(before)).toEqual(before)
     const result = cloneReferencePage(context, scene.id, {})
     if (!result.ok || !result.step) throw new Error(result.ok ? 'missing clone step' : result.reason)
     const next = result.step.nextDocument.surfaces[0]!
@@ -112,6 +122,9 @@ describe('design productivity canonical previews', () => {
     const clone = next.scenes[1]!
     expect(clone.interactions[0]!.actions[0]!.action).toEqual({ type: 'scene.go', sceneId: clone.id, targetStateId: clone.presentation!.initialStateId })
     expect(clone.interactions[1]!.actions[0]!.action).toEqual({ type: 'scene.go', sceneId: destination.id, targetStateId: 'initial' })
+    const cloneLocation = result.step.nextDocument.locations.find(location => location.kind === 'slide-scene' && location.sceneId === clone.id)!
+    expect(clone.interactions[2]!.actions[0]!.action).toEqual({ type: 'location.go', locationId: cloneLocation.id })
+    expect(clone.interactions[3]!.actions[0]!.action).toEqual({ type: 'location.go', locationId: flow.startLocationId })
     expect(clone.presentation!.initialStateId).not.toBe('initial')
     expect(context.document).toEqual(before)
     expect(collectCourseProjectHealth(result.step.nextDocument, { assetFiles: {}, componentFiles: {} }).filter(finding => finding.code === 'interaction-state-reference-missing')).toEqual([])

@@ -63,9 +63,9 @@
       "Dynamic or packaging reachability is left unknown unless a concrete path or configuration consumer was found.",
       "A retained V8 fixture or primitive is not product authorization to open V8 authoring projects."
     ],
-    "reconciledProductCommit": "261f48bd0afc30b2c19459afee0f481f5a32c683",
+    "reconciledProductCommit": "74a1776bd0592a9e981ef354db3d2616c90c7315",
     "reconciledScope": "1.1 发布后代码评审修复并重生成相关产物后的产品树；confirmed、unknown、target definition、target reference、legacy module 与 schema 8 archive 全部为零。",
-    "reconciledProductTreeDigest": "c9a73c35d92698e6b9e4ec42086914ca13c602dbda6e6147fc9bb12420795845"
+    "reconciledProductTreeDigest": "7383847de1234916325190697c4c0f403ef9c6e378026c865895c34cbc0d9fc0"
   },
   "consumerCategoryDefinitions": {
     "staticImportsOrReferences": "Tracked static imports, calls, Store field reads/writes, or direct symbol references.",

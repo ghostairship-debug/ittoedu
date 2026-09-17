@@ -1,7 +1,7 @@
 import { forwardRef, useMemo, useRef, useImperativeHandle, useState, type ReactNode } from 'react'
 import type { LessonWorkspace, LessonConversation } from '../../shared/lessonWorkspace'
 import { LessonWorkspaceShell, type LessonWorkspaceShellHandle } from '../lessonWorkspace/LessonWorkspaceShell'
-import { LessonConversationChat } from '../ui/chat/LessonConversationChat'
+import { LessonConversationChat, DirectoryConversationChat } from '../ui/chat/LessonConversationChat'
 import { LessonMaterialBrowser } from '../lessonMaterials/LessonMaterialBrowser'
 import { LessonAuthoringPanel } from '../lessonAuthoring/LessonAuthoringPanel'
 import type { LessonAssemblyInput, LessonBuildTarget } from '../../shared/lessonAuthoringDesktop'
@@ -60,6 +60,7 @@ export const LessonWorkspaceHost = forwardRef<LessonWorkspaceShellHandle, Lesson
       }
     }}
     renderChat={(lesson, conversation, documentTarget) => <LessonConversationChat documentTarget={documentTarget} lesson={lesson} conversation={conversation} projectId={props.projectId} projectPath={props.projectPath} />}
+    renderDirectoryChat={(root, conversation) => <DirectoryConversationChat root={root} conversation={conversation} />}
     renderMaterial={(filename, lesson) => material(filename, lesson)} renderMaterials={lesson => material(undefined, lesson)}
     renderWorkflow={(lesson, conversation) => api.lessonAuthoring && <>
       <details className="lesson-workflow-settings"><summary>文档创作助手 · {adapter === 'codex' ? 'Codex' : adapter === 'claude' ? 'Claude' : 'OpenCode'}</summary><label>创作流程 CLI <select aria-label="创作流程 CLI" value={adapter} onChange={event => setAdapter(event.target.value as LocalAgentId)}><option value="codex">Codex</option><option value="claude">Claude</option><option value="opencode">OpenCode</option></select></label></details>
@@ -73,7 +74,7 @@ export const LessonWorkspaceHost = forwardRef<LessonWorkspaceShellHandle, Lesson
           if (!shell.current || !api.lessonAuthoring) throw new Error('课例文档修改入口尚未就绪')
           const workspace = { version: 1 as const, kind: 'lesson' as const, lessonId: lesson.identity.lessonId, normalizedDirectory: lesson.identity.normalizedDirectory, conversationId: conversation.conversationId }
           await shell.current.editDocument(`${lesson.identity.normalizedDirectory}/${relativePath}`, workspace, adapter, instruction, async (ref, expectedVersion) => {
-            if (ref.lessonId !== ticket.lesson.lessonId || ref.relativePath !== relativePath) throw new Error('阶段修改返回了不同文档，当前阶段未继续')
+            if (ref.kind !== 'lesson' || ref.lessonId !== ticket.lesson.lessonId || ref.relativePath !== relativePath) throw new Error('阶段修改返回了不同文档，当前阶段未继续')
             await api.lessonAuthoring!({ operation: 'complete-document-repair', lesson: ticket.lesson, conversationId: conversation.conversationId, ticket, expectedVersion })
           })
         }}

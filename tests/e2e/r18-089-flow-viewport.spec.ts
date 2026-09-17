@@ -1,4 +1,6 @@
 import { plainDocumentText } from '../../src/shared/document/content'
+import { controllerPackages } from '../fixtures/teacherController'
+import { PLAYBACK_VIEW_CHROME_GUTTER, PLAYBACK_VIEW_MAX_ZOOM } from '../../src/shared/playbackViewGeometry'
 import {
   existsSync,
   appendFileSync,
@@ -86,53 +88,125 @@ interface LaunchedEditor {
 }
 
 async function expectIntersecting(target: Locator, clip: Locator): Promise<void> {
-  await expect.poll(async () => {
-    const box = await target.boundingBox()
-    const area = await clip.boundingBox()
-    if (!box || !area) return 0
-    const width = Math.min(box.x + box.width, area.x + area.width) - Math.max(box.x, area.x)
-    const height = Math.min(box.y + box.height, area.y + area.height) - Math.max(box.y, area.y)
-    return Math.min(width, height)
-  }, { timeout: 15_000 }).toBeGreaterThan(8)
+  try {
+    await expect.poll(async () => {
+      const box = await target.boundingBox()
+      const area = await clip.boundingBox()
+      if (!box || !area) return 0
+      const width = Math.min(box.x + box.width, area.x + area.width) - Math.max(box.x, area.x)
+      const height = Math.min(box.y + box.height, area.y + area.height) - Math.max(box.y, area.y)
+      return Math.min(width, height)
+    }, { timeout: 15_000 }).toBeGreaterThan(8)
+  } catch (error) {
+    const geometry = await target.evaluate(element => {
+      const describe = (node: Element) => {
+        const style = getComputedStyle(node)
+        return { tag: node.tagName, class: node.getAttribute('class'),
+          testId: node.getAttribute('data-testid'), rect: node.getBoundingClientRect().toJSON(),
+          dataset: node instanceof HTMLElement ? { ...node.dataset } : null,
+          clientSize: node instanceof HTMLElement ? [node.clientWidth, node.clientHeight] : null,
+          inlineStyle: node.getAttribute('style'),
+          style: { position: style.position, display: style.display, top: style.top,
+            height: style.height, minHeight: style.minHeight, overflow: style.overflow,
+            clipPath: style.clipPath, transform: style.transform, translate: style.translate } }
+      }
+      const ancestors: ReturnType<typeof describe>[] = []
+      let current: Element | null = element
+      while (current) { ancestors.push(describe(current)); current = current.parentElement }
+      const hosts = [...element.querySelectorAll('[data-controller-authoring-id]')]
+      return { ancestors, controllerHosts: hosts.map(host => ({ host: describe(host),
+        surface: host.shadowRoot?.querySelector('[data-component-surface]')
+          ? describe(host.shadowRoot.querySelector('[data-component-surface]')!) : null,
+        children: [...(host.shadowRoot?.querySelector('[data-component-surface]')?.children ?? [])]
+          .filter(child => child.tagName !== 'STYLE').map(describe),
+      })) }
+    }).catch(diagnosticError => ({ diagnosticError: String(diagnosticError) }))
+    await test.info().attach('flow-controller-intersection-geometry', {
+      body: JSON.stringify({ geometry, clip: await clip.boundingBox() }, null, 2),
+      contentType: 'application/json',
+    })
+    throw error
+  }
 }
 
 /** Visibility must survive every clipping ancestor, not merely intersect its panel. */
 async function expectUnclipped(target: Locator): Promise<void> {
   await expect(target).toBeVisible()
-  await expect.poll(() => target.evaluate(element => {
-    const rect = element.getBoundingClientRect()
-    let left = Math.max(0, rect.left), top = Math.max(0, rect.top)
-    let right = Math.min(innerWidth, rect.right), bottom = Math.min(innerHeight, rect.bottom)
-    let ancestor: Element | null = element
-    while (ancestor) {
-      const style = getComputedStyle(ancestor)
-      const bounds = ancestor.getBoundingClientRect()
-      if (ancestor instanceof HTMLElement) {
-        const sx = ancestor.offsetWidth ? bounds.width / ancestor.offsetWidth : 1
-        const sy = ancestor.offsetHeight ? bounds.height / ancestor.offsetHeight : 1
-        if (/hidden|clip|scroll|auto/.test(style.overflowX)) {
-          left = Math.max(left, bounds.left + ancestor.clientLeft * sx)
-          right = Math.min(right, bounds.left + (ancestor.clientLeft + ancestor.clientWidth) * sx)
-        }
-        if (/hidden|clip|scroll|auto/.test(style.overflowY)) {
-          top = Math.max(top, bounds.top + ancestor.clientTop * sy)
-          bottom = Math.min(bottom, bounds.top + (ancestor.clientTop + ancestor.clientHeight) * sy)
-        }
-        const inset = /^inset\(([^)]*?)(?: round [^)]*)?\)$/.exec(style.clipPath)
-        if (inset) {
-          const values = inset[1]!.trim().split(/\s+/).map(value => parseFloat(value))
-          const t = values[0]!, r = values[1] ?? t, b = values[2] ?? t, l = values[3] ?? r
-          left = Math.max(left, bounds.left + l * sx)
-          right = Math.min(right, bounds.right - r * sx)
-          top = Math.max(top, bounds.top + t * sy)
-          bottom = Math.min(bottom, bounds.bottom - b * sy)
-        }
-      }
-      const root = ancestor.getRootNode()
-      ancestor = ancestor.parentElement ?? (root instanceof ShadowRoot ? root.host : null)
+  let intersection: { width: number; height: number; visibleWidth: number; visibleHeight: number; ratio: number } | undefined
+  try {
+    await expect.poll(async () => {
+      // Chromium follows the containing-block chain, including fixed-position
+      // escape from scroll ancestors, shadow roots, transforms and actual clips.
+      intersection = await target.evaluate(element => new Promise<{
+        width: number; height: number; visibleWidth: number; visibleHeight: number; ratio: number
+      }>((resolve, reject) => {
+        const observer = new IntersectionObserver(([entry]) => {
+          if (!entry) return
+          clearTimeout(timeout)
+          observer.disconnect()
+          resolve({ width: entry.boundingClientRect.width, height: entry.boundingClientRect.height,
+            visibleWidth: entry.intersectionRect.width, visibleHeight: entry.intersectionRect.height,
+            ratio: entry.intersectionRatio })
+        }, { root: null, threshold: [0, 1] })
+        const timeout = setTimeout(() => {
+          observer.disconnect()
+          reject(new Error('Chromium did not report the target clipping geometry'))
+        }, 5_000)
+        observer.observe(element)
+      }))
+      return Math.max(intersection.width - intersection.visibleWidth, intersection.height - intersection.visibleHeight)
+    }, { timeout: 15_000 }).toBeLessThan(1)
+    if (process.env.COURSEWARE_E2E_FLOW_PREVIEW_GEOMETRY_ONLY === '1') {
+      await test.info().attach('unclipped-native-intersection', {
+        body: JSON.stringify({ label: await target.getAttribute('aria-label'), intersection }, null, 2),
+        contentType: 'application/json',
+      })
     }
-    return Math.max(rect.width - Math.max(0, right - left), rect.height - Math.max(0, bottom - top))
-  }), { timeout: 15_000 }).toBeLessThan(1)
+  } catch (error) {
+    const geometry = await target.evaluate(element => {
+      const rect = element.getBoundingClientRect()
+      let left = Math.max(0, rect.left), top = Math.max(0, rect.top)
+      let right = Math.min(innerWidth, rect.right), bottom = Math.min(innerHeight, rect.bottom)
+      const ancestors = []
+      let node: Element | null = element
+      while (node) {
+        const style = getComputedStyle(node), bounds = node.getBoundingClientRect()
+        const before = { left, top, right, bottom }
+        const html = node instanceof HTMLElement ? node : null
+        const sx = html?.offsetWidth ? bounds.width / html.offsetWidth : 1
+        const sy = html?.offsetHeight ? bounds.height / html.offsetHeight : 1
+        if (html && /hidden|clip|scroll|auto/.test(style.overflowX)) {
+          left = Math.max(left, bounds.left + html.clientLeft * sx)
+          right = Math.min(right, bounds.left + (html.clientLeft + html.clientWidth) * sx)
+        }
+        if (html && /hidden|clip|scroll|auto/.test(style.overflowY)) {
+          top = Math.max(top, bounds.top + html.clientTop * sy)
+          bottom = Math.min(bottom, bounds.top + (html.clientTop + html.clientHeight) * sy)
+        }
+        ancestors.push({ tag: node.tagName, class: node.getAttribute('class'),
+          label: node.getAttribute('aria-label'), rect: bounds.toJSON(),
+          offsetSize: html ? [html.offsetWidth, html.offsetHeight] : null,
+          clientSize: html ? [html.clientWidth, html.clientHeight] : null,
+          style: { position: style.position, overflowX: style.overflowX, overflowY: style.overflowY,
+            transform: style.transform, filter: style.filter, backdropFilter: style.backdropFilter,
+            perspective: style.perspective, contain: style.contain, willChange: style.willChange,
+            clipPath: style.clipPath }, before, after: { left, top, right, bottom } })
+        const root = node.getRootNode()
+        node = node.parentElement ?? (root instanceof ShadowRoot ? root.host : null)
+      }
+      const hitPoints = [0.5, rect.height / 2, rect.height - 0.5].map(offsetY => {
+        const x = rect.x + rect.width / 2, y = rect.y + offsetY
+        const hit = document.elementFromPoint(x, y)
+        return { x, y, hitsTarget: hit === element || Boolean(hit && element.contains(hit)),
+          hitTag: hit?.tagName, hitClass: hit?.getAttribute('class'), hitLabel: hit?.getAttribute('aria-label') }
+      })
+      return { target: rect.toJSON(), viewport: { width: innerWidth, height: innerHeight }, ancestors, hitPoints }
+    })
+    const path = test.info().outputPath('unclipped-ancestor-geometry.json')
+    writeFileSync(path, JSON.stringify({ ...geometry, nativeIntersection: intersection }, null, 2))
+    await test.info().attach('unclipped-ancestor-geometry', { path, contentType: 'application/json' })
+    throw error
+  }
 }
 
 async function expectStableController(controller: Locator): Promise<void> {
@@ -155,7 +229,23 @@ async function clickCollapse(page: Page, host: Locator, collapsed: boolean): Pro
   const box = (await button.boundingBox())!
   // Controller chrome dispatches pointer gestures through its nav hit region.
   await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2)
-  await expectUnclipped(host.getByRole('button', { name: collapsed ? '展开教师控制器' : '收起教师控制器' }))
+  const launcher = host.getByRole('button', { name: collapsed ? '展开教师控制器' : '收起教师控制器', exact: true })
+  await expectUnclipped(launcher)
+  await expect(launcher).toHaveAttribute('aria-expanded', String(!collapsed))
+  if (collapsed) {
+    await expect(host.getByRole('button', { name: '缩放', exact: true })).toHaveCount(0)
+    await expect(host.getByRole('dialog', { name: '缩放设置', exact: true })).toHaveCount(0)
+  } else {
+    await expectUnclipped(host.getByRole('button', { name: '缩放', exact: true }))
+  }
+}
+
+async function expandController(page: Page, host: Locator): Promise<void> {
+  const expand = host.getByRole('button', { name: '展开教师控制器', exact: true })
+  const collapse = host.getByRole('button', { name: '收起教师控制器', exact: true })
+  await expect.poll(async () => await expand.isVisible() || await collapse.isVisible()).toBe(true)
+  if (await expand.isVisible()) await clickCollapse(page, host, false)
+  await expectUnclipped(collapse)
   await expectUnclipped(host.getByRole('button', { name: '缩放', exact: true }))
 }
 
@@ -186,6 +276,7 @@ async function exercisePlayback(
   resize?: (size: { width: number; height: number }) => Promise<void>,
 ): Promise<void> {
   const controller = host.getByTestId('flow-runtime-teacher-controller')
+  await expandController(page, host)
   const zoom = host.getByRole('button', { name: '缩放', exact: true })
   await expectUnclipped(zoom)
   await expectUnclipped(host.getByRole('button', { name: '收起教师控制器' }))
@@ -208,9 +299,9 @@ async function exercisePlayback(
   const controllerBefore = (await controller.boundingBox())!
 
   await zoom.click()
-  const panel = host.getByRole('group', { name: '课件观察缩放' })
+  const panel = host.getByRole('dialog', { name: '缩放设置', exact: true })
   for (let step = 0; step < 4; step += 1) await panel.getByRole('button', { name: '放大', exact: true }).click()
-  await expect(panel.locator('output')).toHaveText('200%')
+  await expect(panel.locator('.zoom-value')).toHaveText('200%')
   expect(await paper.evaluate(element => element.clientWidth)).toBe(layoutWidth)
   const zoomed = (await controller.boundingBox())!
   // Floating chrome changes the safe anchoring region, not the controller scale.
@@ -228,18 +319,16 @@ async function exercisePlayback(
     await expect(counter).toHaveText('互动计数：1')
     expect(await instance!.evaluate(element => element.isConnected)).toBe(true)
     await expectStableController(controller)
-    // Resize closes only the transient popup; the observation zoom survives.
-    await expect(panel).toHaveCount(0)
-    await zoom.click()
-    await expect(panel.locator('output')).toHaveText('200%')
+    // The component repositions its popup on resize and preserves observation zoom.
+    await expect(panel).toBeVisible()
+    await expect(panel.locator('.zoom-value')).toHaveText('200%')
     await capture(page, host, `${name}-zoom200-resize`)
     await resize(originalSize)
     // Windows can round content sizes by one physical pixel when restoring a DIP size.
     await expect.poll(() => paper.evaluate((element, expected) => Math.abs(element.clientWidth - expected), layoutWidth)).toBeLessThanOrEqual(2)
     await expectStableController(controller)
-    await expect(panel).toHaveCount(0)
-    await zoom.click()
-    await expect(panel.locator('output')).toHaveText('200%')
+    await expect(panel).toBeVisible()
+    await expect(panel.locator('.zoom-value')).toHaveText('200%')
   }
   for (const [label, key] of [['左右移动视图', 'ArrowRight'], ['上下移动视图', 'ArrowDown']] as const) {
     const bar = host.getByRole('scrollbar', { name: label })
@@ -252,9 +341,9 @@ async function exercisePlayback(
   await expect(answer).toHaveValue('保留答案 42')
   expect(await instance!.evaluate(element => element.isConnected)).toBe(true)
   await expect(counter).toHaveText('互动计数：1')
-  await panel.getByRole('button', { name: '恢复视图' }).click()
-  await expect(panel.locator('output')).toHaveText('100%')
-  await panel.getByRole('button', { name: '关闭', exact: true }).click()
+  await panel.getByRole('button', { name: '恢复默认视图', exact: true }).click()
+  await expect(panel.locator('.zoom-value')).toHaveText('100%')
+  await panel.getByRole('button', { name: '关闭面板', exact: true }).click()
   await expectUnclipped(zoom)
   await expectStableController(controller)
   await counter.click()
@@ -293,6 +382,15 @@ async function launchEditor(): Promise<LaunchedEditor> {
     expect(await app.evaluate(({ BrowserWindow }) => (
       BrowserWindow.getAllWindows().some(window => window.isVisible())
     ))).toBe(false)
+    // Enter only the landing page; never replace an already opened editor or recovery draft.
+    const startupMore = page.locator('.lesson-workspace-more > summary')
+    const startupEditor = page.getByRole('button', { name: '打开工程（Ctrl+O）', exact: true })
+    const startupRecovery = page.getByRole('alertdialog', { name: '发现未完成的本地恢复副本', exact: true })
+    await expect.poll(async () => await startupEditor.isVisible() || await startupMore.isVisible() || await startupRecovery.isVisible()).toBe(true)
+    if (!await startupEditor.isVisible() && await startupMore.isVisible() && !await startupRecovery.isVisible()) {
+      await startupMore.click()
+      await page.getByRole('button', { name: '新建独立课件', exact: true }).click()
+    }
     await page.locator('[data-testid="canvas-stage"] canvas').waitFor()
     const recoveryDialog = page.getByRole('alertdialog', {
       name: '发现未完成的本地恢复副本',
@@ -370,6 +468,18 @@ async function patchDialogs(
   }, paths)
 }
 
+async function showEditorPanel(page: Page, name: '页面与图层' | '属性与素材' | null): Promise<void> {
+  const controls = page.getByLabel('课件编辑面板', { exact: true })
+  if (!await controls.isVisible()) return
+  if (name) {
+    const button = controls.getByRole('button', { name, exact: true })
+    if (await button.getAttribute('aria-expanded') !== 'true') await button.click()
+  } else {
+    const close = controls.getByRole('button', { name: '关闭面板', exact: true })
+    if (await close.isVisible()) await close.click()
+  }
+}
+
 async function setContentSize(
   app: ElectronApplication,
   page: Page,
@@ -401,10 +511,12 @@ async function setContentSize(
 async function openMixedFlow(app: ElectronApplication, page: Page): Promise<void> {
   await patchDialogs(app, { projectOpen: mixedCopyPath })
   await page.getByRole('button', { name: '打开工程（Ctrl+O）' }).click()
+  await showEditorPanel(page, '页面与图层')
   await expect(page.getByTestId('course-page-node-mixed-slide-surface')).toBeVisible({
     timeout: 15_000,
   })
   await page.getByTestId('flow-page-mixed-flow-surface').click()
+  await showEditorPanel(page, null)
   await expect(page.getByTestId('flow-workspace')).toBeVisible()
 }
 
@@ -433,20 +545,60 @@ async function capture(
   await clip.screenshot({ path: join(evidenceDirectory, `${name}-clip.png`) }).catch(() => undefined)
 }
 
+async function expectStandaloneWorkbenchFillsWorkspace(page: Page): Promise<void> {
+  await expect(page.getByRole('navigation', { name: '目录与课例', exact: true })).toHaveCount(0)
+  await expect.poll(async () => {
+    const workbench = await page.getByRole('region', { name: '课例工作台', exact: true }).boundingBox()
+    const workspace = await page.locator('.lesson-workspace-columns').boundingBox()
+    if (!workbench || !workspace) return Number.POSITIVE_INFINITY
+    return Math.max(
+      Math.abs(workbench.x - workspace.x), Math.abs(workbench.y - workspace.y),
+      Math.abs(workbench.width - workspace.width), Math.abs(workbench.height - workspace.height),
+    )
+  }).toBeLessThan(1)
+}
+
 async function verifyFlowViewport(widthMode?: 'fluid'): Promise<void> {
   // Hidden Windows Electron can deliver animation frames at 1 Hz. Preserve
   // all eight-frame stability checks while allowing both viewport matrices.
-  test.setTimeout(420_000)
+  test.setTimeout(900_000)
   evidenceDirectory = join(root, 'output', 'r18-089', `${widthMode ?? 'reading'}-${new Date().toISOString().replace(/[:.]/g, '-')}`)
   mixedCopyPath = join(evidenceDirectory, 'mixed-spatial-copy.h5lesson')
   htmlPath = join(evidenceDirectory, 'mixed-spatial.html')
   mkdirSync(evidenceDirectory, { recursive: true })
-  prepareMixedCopy(widthMode)
+  const continuationPath = process.env.COURSEWARE_E2E_FLOW_DELIVERY_CONTINUATION
+  if (continuationPath) {
+    const sources = JSON.parse(readFileSync(continuationPath, 'utf8')) as Record<string, string>
+    const source = sources[widthMode ?? 'reading']
+    if (!source) throw new Error('Delivery continuation requires the exact previously exercised fixture')
+    writeFileSync(mixedCopyPath, readFileSync(source))
+    test.info().annotations.push({ type: 'delivery-continuation', description: `Prior viewport evidence: ${source}` })
+  } else prepareMixedCopy(widthMode)
   const launch = await launchEditor()
   try {
     await openMixedFlow(launch.app, launch.page)
-    for (const size of WINDOWS) {
+    if (process.env.COURSEWARE_E2E_FLOW_PREVIEW_GEOMETRY_ONLY === '1') {
+      // Local failure diagnosis only; this branch does not certify the full viewport lifecycle.
+      test.info().annotations.push({ type: 'diagnostic-only', description: 'WholePreview/200% ancestor geometry' })
+      await setContentSize(launch.app, launch.page, WINDOWS[0])
+      await launch.page.getByRole('button', { name: '整课预览', exact: true }).click()
+      const previewHost = launch.page.getByTestId('course-preview-host')
+      await launch.page.getByTestId('course-preview-overlay').getByTestId('course-preview-next').click()
+      await expect(previewHost.locator('.flow-surface-host')).toBeVisible({ timeout: 15_000 })
+      await expandController(launch.page, previewHost)
+      await previewHost.getByRole('button', { name: '缩放', exact: true }).click()
+      const panel = previewHost.getByRole('dialog', { name: '缩放设置', exact: true })
+      for (let step = 0; step < 4; step++) await panel.getByRole('button', { name: '放大', exact: true }).click()
+      await expect(panel.locator('.zoom-value')).toHaveText('200%')
+      await capture(launch.page, previewHost, 'diagnostic-preview-zoom200')
+      for (const label of ['左右移动视图', '上下移动视图']) {
+        await expectUnclipped(previewHost.getByRole('scrollbar', { name: label, exact: true }))
+      }
+      return
+    }
+    for (const size of continuationPath ? [] : WINDOWS) {
       await setContentSize(launch.app, launch.page, size)
+      await expectStandaloneWorkbenchFillsWorkspace(launch.page)
       await expect(launch.page.getByTestId('flow-workspace')).toBeVisible()
       const editCard = launch.page.getByTestId('flow-layer-card-mixed-global-controller')
       await expectIntersecting(editCard, launch.page.getByTestId('flow-workspace'))
@@ -476,8 +628,12 @@ async function verifyFlowViewport(widthMode?: 'fluid'): Promise<void> {
     const originalProject = openCourseProjectArchive(new Uint8Array(readFileSync(mixedCopyPath))).project
     const originalController = originalProject.globalLayerItems.find(entry => entry.item.layerItemId === 'mixed-global-controller')!.item
     const paragraph = launch.page.getByTestId('flow-paper').locator('[data-flow-block-id="mixed-flow-paragraph"]')
-    await paragraph.dblclick()
-    await launch.page.getByTestId('flow-inline-editor').fill('人工改稿后仍可保存重开。')
+    await expect(launch.page.getByRole('textbox', { name: '正文排版编辑', exact: true })).toBeVisible()
+    await paragraph.click()
+    await launch.page.keyboard.press('Home')
+    await launch.page.keyboard.press('Shift+End')
+    await expect.poll(() => launch.page.evaluate(() => document.getSelection()?.toString())).toBe('先观察图像，再进入空间画布探索节点关系。')
+    await launch.page.keyboard.insertText('人工改稿后仍可保存重开。')
     await launch.page.getByRole('button', { name: '保存（Ctrl+S）', exact: true }).click()
     const savedProject = () => openCourseProjectArchive(new Uint8Array(readFileSync(mixedCopyPath))).project
     await expect.poll(() => {
@@ -534,8 +690,10 @@ test('fluid Flow retains interaction state through resize, scroll and zoom at 12
 async function openGeneratedFlow(app: ElectronApplication, page: Page, path: string, surfaceId: string) {
   await patchDialogs(app, { projectOpen: path })
   await page.getByRole('button', { name: '打开工程（Ctrl+O）' }).click()
+  await showEditorPanel(page, '页面与图层')
   await expect(page.getByTestId(`flow-page-${surfaceId}`)).toBeVisible()
   await page.getByTestId(`flow-page-${surfaceId}`).click()
+  await showEditorPanel(page, null)
   await expect(page.getByTestId('flow-workspace')).toBeVisible()
 }
 
@@ -546,22 +704,27 @@ async function measureGenerated(host: Locator) {
     const article = root.querySelector<HTMLElement>('[data-flow-paper-scroll]')!
     const controller = root.querySelector<HTMLElement>('[data-testid="flow-runtime-teacher-controller"]')!
     const rect = (element: HTMLElement) => { const r = element.getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height } }
-    return { window: { width: innerWidth, height: innerHeight, dpr: devicePixelRatio }, viewport: rect(viewport), paper: rect(paper),
+    return { window: { width: innerWidth, height: innerHeight, dpr: devicePixelRatio }, viewport: rect(viewport), viewportClient: { width: viewport.clientWidth, height: viewport.clientHeight }, paper: rect(paper),
       bodyWidth: paper.clientWidth - 72, scrollWidth: article.clientWidth, scrollHeight: article.clientHeight,
-      scrollMax: article.scrollHeight - article.clientHeight, nativeRight: article.offsetWidth - article.clientWidth,
+      scrollMax: article.scrollHeight - article.clientHeight, nativeRight: article.offsetWidth - article.clientWidth, nativeBottom: article.offsetHeight - article.clientHeight,
       controller: rect(controller), bars: [...root.querySelectorAll<HTMLElement>('[role="scrollbar"]')].map(bar => ({ hidden: bar.hidden, rect: rect(bar) })) }
   })
 }
 
-async function checkNewPlayback(page: Page, host: Locator, name: string, resize?: (size: { width: number; height: number }) => Promise<void>) {
-  if (await host.getByRole('button', { name: '展开教师控制器' }).count()) await clickCollapse(page, host, false)
+async function checkNewPlayback(page: Page, host: Locator, name: string, authoredFrame: { x: number; y: number; width: number; height: number }, resize?: (size: { width: number; height: number }) => Promise<void>) {
+  await expandController(page, host)
   const metrics = await measureGenerated(host)
   writeFileSync(join(evidenceDirectory, `${name}.json`), JSON.stringify(metrics, null, 2))
   expect(metrics.bars.every(bar => bar.hidden)).toBe(true)
   expect(metrics.bodyWidth).toBeCloseTo(metrics.scrollWidth - 104, 0)
-  const safeWidth = metrics.viewport.width - metrics.nativeRight
-  expect(Math.abs(metrics.controller.x - metrics.viewport.x - (safeWidth - metrics.controller.width) / 2)).toBeLessThan(1.5)
-  expect(Math.abs(metrics.viewport.y + metrics.viewport.height - metrics.controller.y - metrics.controller.height - 12)).toBeLessThan(1.5)
+  // Component controllers retain their authored frame, clamped to the stable
+  // observation-chrome budget; the retired Native controller used bottom-center.
+  const safeWidth = metrics.viewportClient.width - metrics.nativeRight * PLAYBACK_VIEW_MAX_ZOOM - PLAYBACK_VIEW_CHROME_GUTTER
+  const safeHeight = metrics.viewportClient.height - metrics.nativeBottom * PLAYBACK_VIEW_MAX_ZOOM - PLAYBACK_VIEW_CHROME_GUTTER
+  expect(metrics.controller.width).toBeCloseTo(Math.min(authoredFrame.width, safeWidth), 0)
+  expect(Math.abs(metrics.controller.x - metrics.viewport.x - Math.max(0, Math.min(authoredFrame.x, safeWidth - metrics.controller.width)))).toBeLessThan(1.5)
+  expect(Math.abs(metrics.controller.y - metrics.viewport.y - Math.max(0, Math.min(authoredFrame.y, safeHeight - metrics.controller.height)))).toBeLessThan(1.5)
+  await expectUnclipped(host.getByRole('button', { name: '缩放', exact: true }))
   await capture(page, host, name)
   const controller = host.getByTestId('flow-runtime-teacher-controller')
   const article = host.getByTestId('flow-runtime-article')
@@ -570,7 +733,14 @@ async function checkNewPlayback(page: Page, host: Locator, name: string, resize?
   await expect(host.locator('.sort .label').first()).toHaveText('1. 第二步')
   const instance = await host.locator('.sort').elementHandle()
   await article.evaluate(element => { element.scrollTop = 0 })
-  await controller.locator('nav').press('Alt+ArrowUp')
+  const dragHandle = controller.getByTitle('拖动教师控制台', { exact: true })
+  await expectUnclipped(dragHandle)
+  const handleBox = (await dragHandle.boundingBox())!
+  await page.mouse.move(handleBox.x + handleBox.width / 2, handleBox.y + handleBox.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(handleBox.x + handleBox.width / 2, handleBox.y + handleBox.height / 2 - 24, { steps: 6 })
+  await page.mouse.up()
+  await expect.poll(async () => (await controller.boundingBox())!.y).toBeLessThan(metrics.controller.y)
   const moved = (await controller.boundingBox())!
   expect(moved.y).toBeLessThan(metrics.controller.y)
   if (resize) {
@@ -581,9 +751,9 @@ async function checkNewPlayback(page: Page, host: Locator, name: string, resize?
   }
   await clickCollapse(page, host, true); await clickCollapse(page, host, false)
   await host.getByRole('button', { name: '缩放', exact: true }).click()
-  const panel = host.getByRole('group', { name: '课件观察缩放' })
+  const panel = host.getByRole('dialog', { name: '缩放设置', exact: true })
   for (let i = 0; i < 4; i++) await panel.getByRole('button', { name: '放大', exact: true }).click()
-  await expect(panel.locator('output')).toHaveText('200%')
+  await expect(panel.locator('.zoom-value')).toHaveText('200%')
   expect(await article.evaluate(element => element.clientWidth)).toBe(metrics.scrollWidth)
   expect((await controller.boundingBox())!.width).toBeCloseTo(metrics.controller.width, 0)
   for (const label of ['左右移动视图', '上下移动视图']) {
@@ -601,9 +771,9 @@ async function checkNewPlayback(page: Page, host: Locator, name: string, resize?
   expect(await instance!.evaluate(element => element.isConnected)).toBe(true)
   await expect(host.locator('.sort .label').first()).toHaveText('1. 第二步')
   await capture(page, host, `${name}-zoom200`)
-  await panel.getByRole('button', { name: '恢复视图' }).click()
+  await panel.getByRole('button', { name: '恢复默认视图', exact: true }).click()
   await expect(host.getByRole('scrollbar')).toHaveCount(0)
-  await panel.getByRole('button', { name: '关闭', exact: true }).click()
+  await panel.getByRole('button', { name: '关闭面板', exact: true }).click()
   await expect(host.locator('.sort .label').first()).toHaveText('1. 第二步')
   // Physical wheel and paper/viewport overlay displacement are independent of pan.
   const paperMarker = host.locator('[data-flow-paper-space="paper"]').first()
@@ -619,14 +789,27 @@ async function checkNewPlayback(page: Page, host: Locator, name: string, resize?
 }
 
 test('new formal Flow content stays consistent through normal entry points without fixture layout repair', async () => {
-  test.setTimeout(300_000)
+  test.setTimeout(900_000)
   evidenceDirectory = join(root, 'output', 'r18-089', `new-generated-${new Date().toISOString().replace(/[:.]/g, '-')}`)
   mkdirSync(evidenceDirectory, { recursive: true })
-  const fixture = await createGeneratedFlowFixture(root, evidenceDirectory)
+  const continuationPath = process.env.COURSEWARE_E2E_FLOW_DELIVERY_CONTINUATION
+  const generatedSource = continuationPath ? (JSON.parse(readFileSync(continuationPath, 'utf8')) as Record<string, string>).generated : undefined
+  const fixture = await (async () => {
+    if (!generatedSource) return createGeneratedFlowFixture(root, evidenceDirectory)
+    const path = join(evidenceDirectory, 'new-flow-generated.h5lesson')
+    writeFileSync(path, readFileSync(generatedSource))
+    const surface = openCourseProjectArchive(new Uint8Array(readFileSync(path))).project.surfaces.find(surface => surface.type === 'flow')
+    if (!surface) throw new Error('Generated continuation requires the previously verified Flow project')
+    test.info().annotations.push({ type: 'delivery-continuation', description: `Prior viewport and save/reopen evidence: ${generatedSource}` })
+    return { path, shortPath: path, surfaceId: surface.id }
+  })()
+  const authoredControllerFrame = openCourseProjectArchive(new Uint8Array(readFileSync(fixture.path))).project.globalLayerItems
+    .find(entry => entry.item.kind === 'component' && entry.item.role === 'teacher-controller')!.item.frame
   htmlPath = join(evidenceDirectory, 'new-generated.html')
   const launch = await launchEditor()
   try {
     await setContentSize(launch.app, launch.page, { width: 1574, height: 983 })
+    if (!generatedSource) {
     await openGeneratedFlow(launch.app, launch.page, fixture.shortPath!, fixture.surfaceId)
     await enterTryRun(launch.page)
     const short = await measureGenerated(launch.page.getByTestId('flow-try-run-host'))
@@ -639,18 +822,19 @@ test('new formal Flow content stays consistent through normal entry points witho
       await setContentSize(launch.app, launch.page, size)
       await capture(launch.page, launch.page.getByTestId('flow-workspace'), `new-edit-${size.width}`)
       await enterTryRun(launch.page)
-      await checkNewPlayback(launch.page, launch.page.getByTestId('flow-try-run-host'), `new-trial-${size.width}`, next => setContentSize(launch.app, launch.page, next))
+      await checkNewPlayback(launch.page, launch.page.getByTestId('flow-try-run-host'), `new-trial-${size.width}`, authoredControllerFrame, next => setContentSize(launch.app, launch.page, next))
       await returnToEdit(launch.page)
       await launch.page.getByRole('button', { name: '整课预览', exact: true }).click()
       const preview = launch.page.getByTestId('course-preview-overlay')
       await expect(preview.locator('.flow-surface-host')).toBeVisible()
-      await checkNewPlayback(launch.page, launch.page.getByTestId('course-preview-host'), `new-preview-${size.width}`)
+      await checkNewPlayback(launch.page, launch.page.getByTestId('course-preview-host'), `new-preview-${size.width}`, authoredControllerFrame)
       await preview.getByRole('button', { name: '关闭预览' }).click()
     }
     const original = openCourseProjectArchive(new Uint8Array(readFileSync(fixture.path))).project
     await launch.page.getByRole('button', { name: '保存（Ctrl+S）', exact: true }).click()
     await openGeneratedFlow(launch.app, launch.page, fixture.path, fixture.surfaceId)
     expect(openCourseProjectArchive(new Uint8Array(readFileSync(fixture.path))).project).toEqual(original)
+    } else await openGeneratedFlow(launch.app, launch.page, fixture.path, fixture.surfaceId)
     await patchDialogs(launch.app, { htmlSave: htmlPath })
     await launch.page.getByTestId('export-menu-trigger').click(); await launch.page.getByTestId('export-single-html').click()
     const preflight = launch.page.getByRole('alertdialog', { name: '单 HTML 导出预检' })
@@ -662,7 +846,7 @@ test('new formal Flow content stays consistent through normal entry points witho
     const page = await browser.newPage({ viewport: { width: 1574, height: 983 } })
     await page.goto(pathToFileURL(htmlPath).href)
     await expect(page.locator('.flow-surface-host')).toBeVisible()
-    await checkNewPlayback(page, page.locator('[data-playback-view]'), 'new-html-1574')
+    await checkNewPlayback(page, page.locator('[data-playback-view]'), 'new-html-1574', authoredControllerFrame)
   } finally { await browser.close() }
 })
 test(process.env.FLOW_AI_VERIFY_EXISTING ? 'preserved real AI Flow verifies playback and HTML with bounded shutdown' : 'real AI generates Flow through the product and retains the result across playback and HTML', async () => {
@@ -725,7 +909,7 @@ test(process.env.FLOW_AI_VERIFY_EXISTING ? 'preserved real AI Flow verifies play
       await capture(page, page.getByTestId('flow-workspace'), `ai-edit-${size.width}`)
       await enterTryRun(page)
       const host = page.getByTestId('flow-try-run-host')
-      if (await host.getByRole('button', { name: '展开教师控制器' }).count()) await clickCollapse(page, host, false)
+      await expandController(page, host)
       const metrics = await measureGenerated(host)
       expect(metrics.bodyWidth).toBeCloseTo(metrics.scrollWidth - 104, 0)
       expect(metrics.bars.every(bar => bar.hidden)).toBe(true)
@@ -735,18 +919,18 @@ test(process.env.FLOW_AI_VERIFY_EXISTING ? 'preserved real AI Flow verifies play
       const changed = await rows.allTextContents(); expect(changed).not.toEqual(before)
       await host.getByTestId('flow-runtime-article').evaluate(element => { element.scrollTop = 0 })
       await host.getByRole('button', { name: '缩放', exact: true }).click()
-      const panel = host.getByRole('group', { name: '课件观察缩放' })
+      const panel = host.getByRole('dialog', { name: '缩放设置', exact: true })
       await panel.getByRole('button', { name: '放大', exact: true }).click()
       expect(await rows.allTextContents()).toEqual(changed)
-      await panel.getByRole('button', { name: '恢复视图' }).click()
-      await panel.getByRole('button', { name: '关闭', exact: true }).click()
+      await panel.getByRole('button', { name: '恢复默认视图', exact: true }).click()
+      await panel.getByRole('button', { name: '关闭面板', exact: true }).click()
       await capture(page, host, `ai-trial-${size.width}`)
       writeFileSync(join(evidenceDirectory, `ai-trial-${size.width}.json`), JSON.stringify(metrics, null, 2))
       await returnToEdit(page)
       await page.getByRole('button', { name: '整课预览', exact: true }).click()
       const preview = page.getByTestId('course-preview-host')
       await expect(preview.locator('.sort')).toBeVisible()
-      if (await preview.getByRole('button', { name: '展开教师控制器' }).count()) await clickCollapse(page, preview, false)
+      await expandController(page, preview)
       const previewMetrics = await measureGenerated(preview)
       expect(previewMetrics.bodyWidth).toBeCloseTo(previewMetrics.scrollWidth - 104, 0)
       expect(previewMetrics.bars.every(bar => bar.hidden)).toBe(true)
@@ -782,7 +966,7 @@ test('Slide and Spatial retain base fit and controller actions with floating obs
   const added = addCourseSpatialPage(base, { title: '空间检查', expectedRevision: base.revision })
   if (!added.ok) throw new Error(added.reason)
   const path = join(evidenceDirectory, 'other-surfaces.html')
-  writeFileSync(path, buildPublishedCourseStandaloneHtml({ project: added.project, assetFiles: {}, components: {} },
+  writeFileSync(path, buildPublishedCourseStandaloneHtml({ project: added.project, assetFiles: {}, components: controllerPackages },
     { playerBundle: readFileSync(join(root, 'dist-player/player.iife.js'), 'utf8') }))
   const browser = await chromium.launch({ headless: true })
   try {
@@ -793,19 +977,20 @@ test('Slide and Spatial retain base fit and controller actions with floating obs
       const host = page.locator('[data-playback-view]')
       await expect(host).toBeVisible()
       await expect(host.getByRole('scrollbar')).toHaveCount(0)
+      await expandController(page, host)
       const zoom = host.getByRole('button', { name: '缩放', exact: true })
       await expectUnclipped(zoom)
       const before = await zoom.boundingBox()
       await zoom.click()
-      const panel = host.getByRole('group', { name: '课件观察缩放' })
+      const panel = host.getByRole('dialog', { name: '缩放设置', exact: true })
       for (let i = 0; i < 4; i++) await panel.getByRole('button', { name: '放大', exact: true }).click()
-      await expect(panel.locator('output')).toHaveText('200%')
+      await expect(panel.locator('.zoom-value')).toHaveText('200%')
       expect((await zoom.boundingBox())!.width).toBeCloseTo(before!.width, 0)
       for (const label of ['左右移动视图', '上下移动视图']) await host.getByRole('scrollbar', { name: label }).press('End')
       await capture(page, host, index ? 'spatial-zoom200' : 'slide-zoom200')
-      await panel.getByRole('button', { name: '恢复视图' }).click()
+      await panel.getByRole('button', { name: '恢复默认视图', exact: true }).click()
       await expect(host.getByRole('scrollbar')).toHaveCount(0)
-      await panel.getByRole('button', { name: '关闭', exact: true }).click()
+      await panel.getByRole('button', { name: '关闭面板', exact: true }).click()
       await expectUnclipped(zoom)
     }
   } finally { await browser.close() }

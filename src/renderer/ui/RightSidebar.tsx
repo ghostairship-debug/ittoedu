@@ -28,13 +28,7 @@ interface RightSidebarProps {
   onUpdateCatalogComponent?(entry: AvailableComponentCatalogPackage): void
 }
 
-const simpleTabs: Array<{ id: SidebarTab; label: string }> = [
-  { id: 'elements', label: '元素' },
-  { id: 'layers', label: '图层' },
-  { id: 'properties', label: '属性' },
-]
-
-const professionalTabs: Array<{ id: SidebarTab; label: string }> = [
+const sidebarTabs: Array<{ id: SidebarTab; label: string }> = [
   { id: 'elements', label: '元素' },
   { id: 'components', label: '组件' },
   { id: 'layers', label: '图层' },
@@ -58,14 +52,13 @@ export function RightSidebar({
   onUpdateCatalogComponent,
 }: RightSidebarProps) {
   const activeTab = useEditorStore((state) => state.activeTab)
-  const editorMode = useEditorStore((state) => state.editorMode)
   const setActiveTab = useEditorStore((state) => state.setActiveTab)
-  const tabs = editorMode === 'professional' ? professionalTabs : simpleTabs
+  const tabs = sidebarTabs
 
   return (
     <aside
       className={`panel right-sidebar${
-        editorMode === 'professional' && activeTab === 'developer'
+        activeTab === 'developer'
           ? ' right-sidebar--developer'
           : ''
       }`}
@@ -101,7 +94,7 @@ export function RightSidebar({
             onImportVideo={onImportVideo}
           />
         )}
-        {activeTab === 'components' && editorMode === 'professional' && (
+        {activeTab === 'components' && (
           <ComponentsTab
             componentCatalog={componentCatalog}
             onImportExternalComponents={onImportExternalComponents}
@@ -115,10 +108,10 @@ export function RightSidebar({
         {activeTab === 'properties' && (
           <PropertiesTab onReplaceImage={onReplaceImage} />
         )}
-        {activeTab === 'automation' && editorMode === 'professional' && (
+        {activeTab === 'automation' && (
           <AutomationTab />
         )}
-        {activeTab === 'developer' && editorMode === 'professional' && (
+        {activeTab === 'developer' && (
           <DeveloperTab />
         )}
       </div>

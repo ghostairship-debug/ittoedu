@@ -42,7 +42,6 @@ let originalFonts: PropertyDescriptor | undefined
 beforeEach(() => {
   originalFonts = Object.getOwnPropertyDescriptor(document, 'fonts')
   useEditorStore.getState().createNewProject()
-  useEditorStore.setState({ editorMode: 'professional' })
 })
 
 afterEach(() => {

@@ -1,6 +1,6 @@
 import { generationCandidateSchema, generationRequestSchema, generationInputReferenceSchema, generationCommitReceiptSchema, GenerationCandidatePreparationError, generationFailureDiagnostics, generationRecovery, type GenerationFailure, type GenerationCandidate, type GenerationRequest, type GenerationCommitReceipt } from '../../../shared/generationContract'
 import { workspaceIdentityKey, type WorkspaceIdentityV1 } from '../../../shared/workspaceIdentity'
-import { authoringToolDestinationV1Schema, type AuthoringToolDestinationV1, type AuthoringToolReceiptV1 } from '../../../shared/authoringToolContract'
+import { authoringToolDestinationV1Schema, authoringToolTargetWireV1Schema, type AuthoringToolDestinationV1, type AuthoringToolReceiptV1 } from '../../../shared/authoringToolContract'
 import type { CourseProjectDocument } from '../../../shared/courseProjectTypes'
 import { createAuthoringToolFacade } from '../tools/authoringToolFacade'
 import { authoringToolCarrier } from '../../../shared/authoringToolCarrier'
@@ -9,6 +9,7 @@ import { courseAuthoringScopeFromLocation } from '../courseAuthoringScope'
 import { applyEditorTransactionStep, createEditorTransactionStep, type EditorTransactionStep } from '../editorTransaction'
 import type { HistoryResourceChanges, HistoryResourceState } from '../../store/courseResourceState'
 import { describeGenerationChanges } from './generationPreview'
+import { generationExecutionEvidenceSchema } from '../../../shared/generationExecutionEvidence'
 import { AuthoringToolFailure } from '../tools/executeAuthoringTool'
 import { expandGenerationSemanticCandidate } from './expandGenerationSemanticCandidate'
 import { captureBackgroundTargets } from '../tools/backgroundTool'
@@ -36,7 +37,9 @@ function preparationError(error: unknown, context: Omit<GenerationFailure, 'vers
   if (error instanceof GenerationCandidatePreparationError) return error
   const failedEvidence = error instanceof AuthoringToolFailure ? error.behaviorEvidence ?? [] : []
   const diagnostics = failureDiagnostics(error)
+  const execution = generationExecutionEvidenceSchema.safeParse(error && typeof error === 'object' ? Reflect.get(error, 'nativeInteractionEvidence') : undefined)
   return new GenerationCandidatePreparationError({ version: 1, ...context, diagnostics, recovery: generationRecovery(diagnostics),
+    ...(execution.success ? { executionEvidence: execution.data } : {}),
     ...(evidence.length || failedEvidence.length ? { behaviorEvidence: [...evidence, ...failedEvidence] } : {}) })
 }
 
@@ -186,7 +189,20 @@ export function createGenerationCandidateCoordinator(port: GenerationCommitPort)
         }
         const destination = expanded && (item.destination.kind === 'create' || item.destination.kind === 'update')
           ? rebase(item.destination) : destinationFor(item, request, state.document, receipts)
-        const input = resolveInput(item.input, receipts)
+        let input = resolveInput(item.input, receipts)
+        if (item.tool === 'layer.edit' && input && typeof input === 'object'
+          && ['align', 'distribute'].includes(String(Reflect.get(input, 'operation')))) {
+          const rebaseLayoutTarget = (raw: unknown) => {
+            const target = authoringToolTargetWireV1Schema.parse(raw)
+            if (!request.destinations.some(destination => destination.kind === 'update'
+              && JSON.stringify(destination.target) === JSON.stringify(target))) throw new Error('成组布局目标不属于本轮冻结工程')
+            return { ...target, documentRevision: state.document.revision }
+          }
+          const targets = Reflect.get(input, 'targets')
+          if (!Array.isArray(targets)) throw new Error('成组布局需要精确目标列表')
+          input = { ...input, targets: targets.map(rebaseLayoutTarget),
+            ...(Reflect.get(input, 'primaryTarget') ? { primaryTarget: rebaseLayoutTarget(Reflect.get(input, 'primaryTarget')) } : {}) }
+        }
         if (replacement) {
           const created = receipts.get(replacement.stepId)?.affected.filter(effect => effect.operation === 'created')[replacement.index]
           if (!created?.authoringAddress || destination.kind !== 'update' || created.ownerKey !== destination.target.ownerKey) throw new Error('替换创建回执不属于原对象 owner')
@@ -262,9 +278,12 @@ export function createGenerationCandidateCoordinator(port: GenerationCommitPort)
           // to an unrelated last colour-edit step. Input changes permit repair;
           // regenerated host rule ids cannot manufacture a new failure reason.
           failureContext.stepId = source?.id; failureContext.tool = source?.tool; failureContext.destination = source?.destination
-          throw new AuthoringToolFailure(error.diagnostics.map(value => ({ ...value,
+          const attributed = new AuthoringToolFailure(error.diagnostics.map(value => ({ ...value,
             message: `${value.message} 位置：${value.path.join('/')}`,
             path: source ? ['input'] : value.path })))
+          const evidence = Reflect.get(error, 'nativeInteractionEvidence')
+          if (evidence) Reflect.set(attributed, 'nativeInteractionEvidence', evidence)
+          throw attributed
         }
         throw error
       }
@@ -274,10 +293,12 @@ export function createGenerationCandidateCoordinator(port: GenerationCommitPort)
         resourceChanges: foldResources(plans), selectionHint: plans.at(-1)?.selectionHint,
       }) : null
       const previewId = crypto.randomUUID()
+      const semanticChanges = describeGenerationChanges(initial, step?.nextDocument ?? initial, { beforeResources: initialResources, afterResources: state.resources })
       // Validate metadata before the live commit, but publish no receipt until that commit succeeds.
       const receipt = generationCommitReceiptSchema.parse({ version: 1, requestId: request.requestId, candidateId: candidate.candidateId,
         workspace: request.workspace, status: step ? 'committed' : 'unchanged', beforeRevision: initial.revision, afterRevision: step?.nextDocument.revision ?? initial.revision,
         affected: step ? [...receipts.values()].flatMap(value => value.affected) : [],
+        semanticChanges, ...(interactionChecks?.evidence ? { executionEvidence: interactionChecks.evidence } : {}),
         resources: { assetIds: step ? [...new Set([...receipts.values()].flatMap(value => value.resources.assetIds))] : [],
           packageIds: step ? [...new Set([...receipts.values()].flatMap(value => value.resources.packageIds))] : [] } })
       prepared.set(previewId, { request, step, receipt, afterCommit: candidate.afterCommit })
@@ -287,7 +308,7 @@ export function createGenerationCandidateCoordinator(port: GenerationCommitPort)
         plannedEffects: [...receipts.values()].flatMap(value => value.affected),
         behaviorEvidence: [...receipts.values()].flatMap(value => value.behaviorEvidence ?? []),
         ...(interactionChecks ? { interactionChecks } : {}),
-        ...describeGenerationChanges(initial, step?.nextDocument ?? initial),
+        ...semanticChanges, semanticChanges,
         document: step?.nextDocument ?? initial, resources: state.resources })
       } catch (error) { throw preparationError(error, failureContext, acquiredEvidence) }
     },

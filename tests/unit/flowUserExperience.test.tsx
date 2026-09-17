@@ -13,7 +13,6 @@ import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
 
 beforeEach(() => {
   useEditorStore.getState().createNewProject()
-  useEditorStore.setState({ editorMode: 'professional' })
   vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(null)
 })
 afterEach(() => { cleanup(); vi.restoreAllMocks() })

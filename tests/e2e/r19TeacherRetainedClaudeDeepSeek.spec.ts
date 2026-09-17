@@ -1,6 +1,6 @@
 import { _electron as electron, expect, test } from '@playwright/test'
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs'
-import { dirname, join, resolve } from 'node:path'
+import { basename, join, resolve } from 'node:path'
 import { createHash } from 'node:crypto'
 import { workspaceIdentityKey } from '../../src/shared/workspaceIdentity'
 import { BACKGROUND_E2E_ENV } from '../../src/main/windowVisibility'
@@ -51,12 +51,12 @@ test('r19 retained teacher Claude DeepSeek repair: same course and saved reopen'
     expect(opened.lesson!.identity.lessonId).toBe(context.lesson.lessonId)
     const conversation = opened.conversations!.find(value => value.conversationId === context.conversationId)!
     expect(conversation.projectTarget?.projectId).toBe(before.id)
-    await app.evaluate(({ dialog }, path) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] }) }, dirname(context.lesson.normalizedDirectory))
-    await page.getByRole('button', { name: '打开工作空间', exact: true }).first().click()
-    await app.evaluate(({ dialog }, path) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] }) }, context.lesson.normalizedDirectory)
-    await page.getByRole('button', { name: '打开课例', exact: true }).click()
-    await page.getByRole('region', { name: '课例对话导航' }).getByRole('button', { name: conversation.title, exact: true }).and(page.locator('[aria-pressed]')).click()
-    await page.getByRole('tab', { name: /^课件/ }).click()
+    // V3.1：保留 profile 重开自动回到上次工作空间；课例入口已从「更多」菜单移除，经目录树点选 .h5lesson 激活；课例对话导航区已随课例段取消，激活后自动接上最近会话
+    await expect(page.locator('.lesson-workspace-toolbar')).toBeVisible()
+    await page.locator('.lesson-directory-tree').getByRole('button', { name: basename(context.lesson.normalizedDirectory), exact: true }).click()
+    await page.locator('.lesson-directory-tree').getByRole('button', { name: 'course.h5lesson', exact: true }).click()
+    await expect(page.locator('.lesson-workflow')).toBeVisible()
+    await page.getByRole('tab', { name: /course|新建课件/ }).click()
     await expect(page.getByRole('button', { name: '整课预览', exact: true })).toBeVisible()
   }
   try {
