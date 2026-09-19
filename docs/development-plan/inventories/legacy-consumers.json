@@ -63,9 +63,9 @@
       "Dynamic or packaging reachability is left unknown unless a concrete path or configuration consumer was found.",
       "A retained V8 fixture or primitive is not product authorization to open V8 authoring projects."
     ],
-    "reconciledProductCommit": "53909bcda648f49d42f0fbb11b3c6c095f899bc7",
-    "reconciledScope": "1.9 第三轮修复后的产品树（53909bcd）；按 ratchet 模式七项实质判据复核：confirmed endpoint、matched confirmed relation、unknown consumer、tokenHits、targetReferenceHits、仍存在的 file-absent 目标、仍有定义的 symbol-absent 目标全部为零，11 条记录的 removed 结论在当前代码下仍成立。",
-    "reconciledProductTreeDigest": "5a8dbc5ff84e34be691186db749220ef2461ec572a425d017c6c4b590324ea30"
+    "reconciledProductCommit": "9c722120e36f4461e9eec3b7b483f02d580248ca",
+    "reconciledScope": "1.9 第三轮修复后的产品树（9c722120，含 P2-4 键盘导航与 P2-5 路径统一）；按 ratchet 模式七项实质判据复核：confirmed endpoint、matched confirmed relation、unknown consumer、tokenHits、targetReferenceHits、仍存在的 file-absent 目标、仍有定义的 symbol-absent 目标全部为零，11 条记录的 removed 结论在当前代码下仍成立。",
+    "reconciledProductTreeDigest": "1dd3b07c85766e36da0c7173562e49a6549d33232608c4fc8cde3176d15b41cd"
   },
   "consumerCategoryDefinitions": {
     "staticImportsOrReferences": "Tracked static imports, calls, Store field reads/writes, or direct symbol references.",
