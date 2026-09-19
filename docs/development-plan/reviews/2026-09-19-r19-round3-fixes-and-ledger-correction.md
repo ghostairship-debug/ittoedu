@@ -72,8 +72,8 @@ HEAD 时工作台被内联宽度锁在 ~600px（仍 < 1000），compact 恒为�
 | **P2-2** | 四个 spec 把截图写进已跟踪的 docs 证据目录，17 张 09-17 原件被覆盖 | 13 张从 `bc2072f7` 逐字节恢复（B1–B4 开发方已还原，共 17/17 复原）；四个 spec 的 `evidence` 默认改为未跟踪的 `output/playwright/frontend-special-evidence`，归档需显式给 `R19_FRONTEND_EVIDENCE_DIR`——**历史证据不会再被重跑覆盖** |
 | **P2-3** | `CourseChatPanel.tsx:441`「当前编辑目标」按钮无 `onClick`，设计说明 §5.1 要求它可点开 | 按钮改为切换「其它目标」details（`aria-expanded` / `aria-controls` 补齐），details 受控并用 `onToggle` 同步用户直接点 summary 的情况。**未删重复摘要**：`本轮引用摘要` 是 5 处以上 e2e 的断言契约，视觉重复的代价小于破坏契约 |
 | **P2-4** | `/` 命令正则 `(?:^|\s)\/([^\s]*)$` 把「参考 /workspace/a.md」当命令查询，弹「没有匹配的命令」挡住输入 | 改为 `^\/([^\s/]*)$`：命令只在输入开头、且 token 内不含路径分隔符（命令 id 与 label 从不含 `/`）。**补回归单测**一条（空格后绝对路径、整条绝对路径都不触发；`/` 仍列全部命令） |
-| **P2-4 余项** | 键盘导航（方向键 / Enter / Esc）、`role="listbox"` 下放 `<button role="option">`、`@` 不递归、IME 期间无守卫 | **未动，登记**。这些是功能补齐而非缺陷修复，快捷键与 aria 语义需产品决策（第一轮评审亦建议"060 前明确降级说明或补齐"），不由开发会话单方面定 |
-| **P2-5** | 路径比较有三套实现 | **未动，登记**（重构类，回归面大于收益） |
+| **P2-4 余项** | 键盘导航（方向键 / Enter / Esc）、aria 语义、IME 期间无守卫 | **Owner 决定「按 VS Code 实现」后完成**，见 §⑧ |
+| **P2-5** | 路径比较有三套实现 | **Owner 决定后完成**，见 §⑧ |
 | 治理-1 | CopyMove 退役依据 | Owner 本轮**已确认为自己的决定** |
 | 治理-2 | Codex 通道曾跑在 `gpt-6-astra` | 开发方已于附八改为显式 Luna·max（`stabilizationCoreUsability.spec.ts:911-919`），本轮复核属实 |
 | 治理-3 | `check:legacy-ready` / `zero` 红 | 本轮执行 reconciliation，见 §⑤ |
@@ -93,7 +93,10 @@ HEAD 时工作台被内联宽度锁在 ~600px（仍 < 1000），compact 恒为�
 | `check:ai-capabilities` / `check:examples` | 绿（索引 16275/16384；11 项 OK） |
 | 非付费子集（`--grep-invert "S3 真实"`） | **24 passed / 0 failed（22.9m）**，见 §⑥ |
 | `editor.spec.ts` 全文件 | **27 passed / 0 failed（21.4m）**，见 §⑥之二 |
-| 未跑 | 任何付费模型；`check:preservation`（会执行 27 条 evidence 命令）；`verify:release` 本体（需打包产物，P1-2 以全仓 locator 清零 + typecheck 做静态确认） |
+| `check:preservation` | **27 个 automated pass**（candidate `05718893`；"Owner 观察未签署：PM-01"属设计内，非失败）。**订正本轮早先的判断**：曾以"会执行 27 条 evidence 命令"为由跳过，但那 26 条去重命令**全部是 `npx vitest run`**，不写证据图、不碰 dist，跳过属过度保守 |
+| 全量 `npm test`（= `vitest run`，不含 e2e） | 三跑对照 1 failed / 1 failed / **440 passed、4257 tests、0 failed**。失败条恒为 `generationCapabilityWorkspace.test.ts:472`（建 36 层目录 + 写 18 万字节 + 启两个 Node 子进程，默认 5s 在 440 文件并发下不够），**单文件复跑 28/28（10.5s）**——坑 5 明列的负载抖动，非产品问题 |
+| P2-4 / P2-5 单测 | `chatComposerMenus` 8 passed（新增 5 条含 IME 守卫）、`workspacePathNormalize` + `courseChatPanel` 合计 68 passed |
+| 未跑 | 任何付费模型——**DoD 第 6 项已于 09-19 10:10 达成 4/4**（codex / claude / opencode / 整课链，见签收包 §⑥ 表与附八~附十；本轮早先误读 §④ 的 R4b 快照而判其未做，已更正）；`verify:release` 本体（需打包产物，P1-2 以全仓 locator 清零 + typecheck 做静态确认） |
 
 每次 e2e 前都重建了 `dist`（附十二吃过"未重建 dist 致 CSS 修复未被验证"的亏，本轮不重复）。
 
@@ -151,3 +154,46 @@ HEAD 时工作台被内联宽度锁在 ~600px（仍 < 1000），compact 恒为�
 3. **`r19CrossPageObservation:12`**（canvas hidden）、**`v9PreviewNetwork:245`**（Ctrl+O 后标题未切换）、**`spatialGlobalRuntimeAuthoring:297`**（`global-layer-entry` 不可见，开发方有界尝试已耗尽）：三条零散漂移未定位。
 4. **付费门控**：`R19_DELIVERY_*` 等变量族仍未跑；IME 人工验收单仍待执行。
 5. **`:780`**：本轮 `file:line` 定位只匹配到 `:678` 一条（Playwright 报 `Running 1 test`），`:780` 未单独复跑。
+
+---
+
+## ⑧ P2-4 键盘导航与 P2-5 路径统一（Owner 决定后执行）
+
+### P2-4：`/`、`@` 候选菜单按 VS Code 对齐
+
+**改前的实况**：`ChatComposerMenus.tsx` 只有 71 行，`role="listbox"` / `role="option"` 其实已经就位，缺的是交互本身——选中项只能用鼠标 `onMouseDown` 触发，没有任何 `onKeyDown`；而且 `.chat-composer-menu` **在全仓没有任何 CSS**，是一排浏览器默认按钮。
+
+**改动**：组件改为 `forwardRef` 暴露 `handleKeyDown(event): boolean`，两个使用点（`CourseChatPanel.tsx:476`、`LessonConversationChat.tsx:195`）的 `<textarea>` 把按键转发给它。行为对齐 VS Code 候选列表：打开即选中首项、`↑`/`↓` 循环、`Enter` 与 `Tab` 接受、`Escape` 只关本次候选（不清输入，继续输入重新打开）、鼠标悬停同步选中项；`aria-activedescendant` 与每项 `id` / `aria-selected` 补齐。CSS 补一段，其中选中态必须自身可见（`[aria-selected=true]`）而不能只靠 `:hover`——键盘导航时鼠标不在菜单上。
+
+**IME 守卫是这次改动的必要组成，不是附带**：改之前 Enter 在聊天输入框没有任何绑定（`<textarea>` 无 `onKeyDown`，发送只在按钮的 `onClick`），所以「组合中按 Enter 误发」在结构上不可能发生；**一旦给 Enter 赋予「接受候选」的语义，这个风险就真实存在了**。因此 `handleKeyDown` 首行即检查 `event.nativeEvent.isComposing || event.keyCode === 229`，组合期间一律不消费按键。这同时关闭了 P2-4 登记的第四个子项。
+
+**连带影响**：IME 人工验收单的第 2 步（组合中回车不误发）由「结构性不可达」**恢复为必验项**——代码里防住了，但要真人确认防住了。
+
+**测试**：`chatComposerMenus.test.tsx` 新增 5 条（循环导航、Enter/Tab 接受并回报按键已消费、@ 插入、**组合期间全部按键不响应**、Escape 不清输入且可重开），连原有 3 条 **8 passed**。
+
+**未做**：`@` 仍只列当前目录、不递归子目录——这是能力范围问题（递归要定深度上限与忽略规则，且会放大 `list-directory` 的开销），与键盘导航无关，仍登记。
+
+### P2-5：三处内联路径比较统一
+
+评审列的四处里 `useDocumentTabsController.ts` 已不存在，实际剩三处内联 `.replace(/\/g,'/').toLowerCase()`（`LessonWorkspaceHost.tsx:67`、`LessonConversationChat.tsx:22`、`:32`）。`shared/workspaceIdentity.ts` 新增 `sameWorkspacePath(left, right)`，内部走 `normalizeWorkspacePath`（**内联版都漏了尾斜杠规则**），空值与不可规范化的输入一律不相等。三处改用它，全仓 `normalizedPath.replace` 清零。`workspacePathNormalize.test.ts` 补一条，锁住「同目录不同写法相等」与「null/空串/含 `\0` 不得意外相等」。
+
+---
+
+## ⑨ DoD 现状（`R19_SIGNOFF_PUSH_BRIEF.md:88` 十条，本轮代码下逐条复核）
+
+| # | 判据 | 状态 | 依据 |
+|---|---|---|---|
+| 1 | 全量 `npm test` 0 failed | 达成 | 本轮第三跑 440 files / 4257 tests / 0 failed；前两跑各 1 条负载抖动，单文件复跑 28/28（见 §④） |
+| 2 | 四条 check 全绿 | 达成 | 含 `check:preservation` 27 automated pass（candidate `05718893`），本轮代码下重跑 |
+| 3 | typecheck 三 0 | 达成 | 每次产品改动后重跑 |
+| 4 | 25 文件修完 + 抽样复跑 | 达成 | R2 既有 |
+| 5 | V05 选择/粘贴与 V10 焦点 | 达成 | 前者实跑、后者明标缺口 |
+| 6 | 三条付费验证留档 | 达成（4/4） | 09-19 10:10（R4j）；**非本轮执行，本轮仅复核** |
+| 7 | **IME 人工验收留档** | **未达** | **唯一剩余项**；验收单见 `2026-09-19-ime-manual-acceptance.md` |
+| 8 | 签收包落盘 | 达成 | 并于本轮追加 §⑩ 勘误 |
+| 9 | 历史记录逐字未改 | **本轮转为达成** | 17/17 PNG 复原，证据目录改为未跟踪的 `output/`，`.md` 历史只追加不改写 |
+| 10 | 未签 accepted / 未打标签 / 未建安装器 | 达成 | `git tag` 无 `v1.9.0*` |
+
+**结论：DoD 十条中九条达成，仅剩第 7 项（IME 人工验收）。** 该项只能由人执行——自动化只能伪造组合事件，与真实输入法的行为不等价（本轮 CDP 探针的限定同此）。
+
+**验收单的范围修订**：原单 6 步。经代码核查，第 3 步（组合中输入 `/` 误弹菜单）在当前实现下不可达——`/` 触发条件已收紧为 `^\/([^\s/]*)$`，先打拼音再打 `/` 得到的 `zf/` 不匹配。第 2 步（组合中 Enter 误发送）在 §⑧ 之前同样不可达（`<textarea>` 无 `onKeyDown`，发送只在按钮 `onClick`），但 **§⑧ 给 Enter 赋予了「接受候选」语义后恢复为必验项**。建议执行范围：第 1 步（中文输入不丢字/重字/错位——受控 `<textarea>` + IME 是真实风险）、第 2 步、第 6 步（发送后清空）。

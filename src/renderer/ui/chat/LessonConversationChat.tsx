@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { LessonWorkspace, LessonConversation } from '../../../shared/lessonWorkspace'
-import { normalizeWorkspacePath, type ConversationAgentWorkspace } from '../../../shared/workspaceIdentity'
+import { normalizeWorkspacePath, sameWorkspacePath, type ConversationAgentWorkspace } from '../../../shared/workspaceIdentity'
 import type { LocalAgentEvent, LocalAgentId, LocalAgentRecord } from '../../../shared/localAgentContract'
 import { aiQuestionSchema, aiInputDeliverySchema } from '../../../shared/localAgentInteraction'
 import { CourseChatPanel } from './CourseChatPanel'
 import { CourseChatTranscript } from './CourseChatTranscript'
 import { NativeAgentConfiguration } from './NativeAgentConfiguration'
-import { ChatComposerMenus, useDirectoryMentions } from './ChatComposerMenus'
+import { ChatComposerMenus, useDirectoryMentions, type ChatComposerMenusHandle } from './ChatComposerMenus'
 import { NativeAgentQuestion } from './NativeAgentQuestion'
 import { readableChatError } from './readableChatStatus'
 import { chatRecordTime, mergeChatEvents } from './courseChatHistory'
@@ -19,7 +19,7 @@ export function LessonConversationChat({ lesson, conversation, projectId, projec
 }) {
   const workspace = useMemo(() => ({ version: 1 as const, kind: 'lesson' as const, lessonId: lesson.identity.lessonId,
     normalizedDirectory: lesson.identity.normalizedDirectory, conversationId: conversation.conversationId }), [lesson.identity.lessonId, lesson.identity.normalizedDirectory, conversation.conversationId])
-  const bound = !!projectPath && conversation.projectTarget?.projectId === projectId && conversation.projectTarget.normalizedPath.replace(/\\/g, '/').toLowerCase() === projectPath.replace(/\\/g, '/').toLowerCase()
+  const bound = !!projectPath && conversation.projectTarget?.projectId === projectId && sameWorkspacePath(conversation.projectTarget.normalizedPath, projectPath)
   return <LessonDiscussion key={JSON.stringify(workspace)} workspace={workspace} projectId={projectId} projectPath={bound ? projectPath : null} documentTarget={documentTarget} />
 }
 /** 工作空间/项目文件夹的普通讨论会话：同一套讨论界面，不带课例文档编辑入口。 */
@@ -29,11 +29,12 @@ export function DirectoryConversationChat({ root, conversation, documentTarget, 
   const workspace = useMemo(() => ({ version: 1 as const, kind: 'directory' as const,
     normalizedDirectory: normalizeWorkspacePath(root), conversationId: conversation.conversationId }), [root, conversation.conversationId])
   const bound = !!projectPath && conversation.projectTarget?.projectId === projectId
-    && conversation.projectTarget.normalizedPath.replace(/\\/g, '/').toLowerCase() === projectPath.replace(/\\/g, '/').toLowerCase()
+    && sameWorkspacePath(conversation.projectTarget.normalizedPath, projectPath)
   return <LessonDiscussion key={JSON.stringify(workspace)} workspace={workspace} projectId={bound ? projectId : ''} projectPath={bound ? projectPath : null} documentTarget={documentTarget} />
 }
 function LessonDiscussion({ workspace, projectId, projectPath, documentTarget }: { workspace: ConversationAgentWorkspace; projectId: string; projectPath: string | null; documentTarget?: DocumentChatTarget }) {
   const mentions = useDirectoryMentions(workspace.normalizedDirectory)
+  const composerMenus = useRef<ChatComposerMenusHandle>(null)
   const [adapter, setAdapter] = useState<LocalAgentId>('codex')
   const [inputKind, setInputKind] = useState<'correct' | 'supplement'>('correct')
   const [deliveryNotice, setDeliveryNotice] = useState('')
@@ -185,13 +186,13 @@ function LessonDiscussion({ workspace, projectId, projectPath, documentTarget }:
       <label className="chat-cli-picker">CLI <select aria-label="CLI" value={adapter} disabled={!!running || sending} onChange={event => setAdapter(event.target.value as LocalAgentId)}><option value="codex">Codex</option><option value="claude">Claude</option><option value="opencode">OpenCode</option></select></label>
       <NativeAgentConfiguration adapter={adapter} configurationSequence={0} onSavingChange={setConfigurationSaving} />
     </div>
-    <ChatComposerMenus value={instruction} onChange={setInstruction}
+    <ChatComposerMenus ref={composerMenus} value={instruction} onChange={setInstruction}
       commands={[{ id: 'stop', label: '停止当前任务', run: () => {
         const sessionId = running?.id ?? pending.current
         if (sessionId) void api?.localAgent({ operation: 'lesson-cancel', workspace, sessionId })
       } }]}
       mentions={mentions} />
-    <textarea aria-label="给创作助手的消息" value={instruction} onChange={event => setInstruction(event.target.value)} placeholder="说明教学主题，或一起讨论当前文档…" />
+    <textarea aria-label="给创作助手的消息" value={instruction} onChange={event => setInstruction(event.target.value)} onKeyDown={event => composerMenus.current?.handleKeyDown(event)} placeholder="说明教学主题，或一起讨论当前文档…" />
     <div className="chat-send-actions"><button disabled={!loaded || sending || !!pending.current || configurationSaving || !instruction.trim()} onClick={() => void send()}>{running ? '发送输入' : '发送'}</button>
       {(running || pending.current || sending) && <button onClick={() => {
         const sessionId = running?.id ?? pending.current, documentToken = documentTaskGeneration.current

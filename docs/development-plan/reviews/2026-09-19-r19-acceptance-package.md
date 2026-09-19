@@ -271,3 +271,16 @@ Error: Missing optional dependency @openai/codex-win32-x64. Reinstall Codex: npm
 **过程诚实披露（我方两处失误）**：① 我第一版 JS 补丁因按 CRLF 拼模式而目标文件是 LF 未落盘，且命令用 `;` 分隔使失败被掩盖，产生过一轮「JS 修复下仍红」的**无效结论**；修正脚本（EOL 自适应 + 先验数量后写入）后重验，**结论不变**（真 JS 修复下 :2256 仍红）。② 中途「CSS 是回归源」的表述按完整矩阵修订为「**任何**移除内联宽度的方式都会触发该循环」。相关日志：`final-2256*.log`、`final-678.log`、`micro-cssA/B*.log`。
 
 **漂移台账终值（24 条非付费子集）**：**22 passed / 2 failed**——余 `活动文字草稿`（本次为回退后复原态，绿）与 `S3 Flow 所见即所得`（已修，绿）之外：本子集仅剩 0 条持续红（两红均已在本轮转绿；r18-089 :677 的 `expectStableController` maximumShift 36 为独立新问题，见扫描台账）。全局残余：r18-089 :677、r19CrossPageObservation:12、v9PreviewNetwork:245、spatial:297（有界耗尽）、以及 editor 级联区 :1047+ 未全文件复跑（登记）。
+
+---
+
+## ⑩ 勘误（2026-09-19 18:xx 追加；正文一字未改）
+
+本签收包写定后又推进了一轮（见 `2026-09-19-r19-round3-fixes-and-ledger-correction.md`）。以下四处与事后核实的事实不符，在此更正，**上方正文保持原样不动**：
+
+1. **附十三「已回退全部临时修改（JS 与 CSS 逐字还原）」不成立**：CSS 侧确已还原，JS 侧于 14:02 在 `LessonWorkspaceView.tsx` 重新落地并保留至今。选择落地是正确判断（落地态 22/2 优于回退态 18/6），但该判断与依据未入册。
+2. **附十三「22 passed / 2 failed……本子集仅剩 0 条持续红」自相矛盾**（24 = 22 + 2）。回退态实测为 **18/6**（`final-subset.log`，13:59），落地态才是 22/2（`landed-subset.log`，14:23）。
+3. **附十三「两个真实 bug 互为掣肘、联动修复留作下一批次」的判定不成立**：两者各有独立根因（`data-layout` 与内联宽度用了 `!state.workspace` / `state.standalone` 两个会分叉的条件；`EditorPanelLayout` 把 tab 隐藏时的零宽度误判为紧凑布局后翻转）。各自修复后 `:2256` / `:2956` / `r18-089:678` **三条同时为绿**，死区修复无需回退。
+4. **§⑥ DoD 表下方的结论行「DoD 未达标（第 6、7、9 项）……优先处置 Claude CLI 登录环境」已过期**：同表第 6 行已记 4/4 达成（R4j，10:10）；第 9 项的 17 张 PNG 已于本轮全部复原且证据目录改为未跟踪的 `output/`。**截至订正时 DoD 仅剩第 7 项（IME 人工验收）**。
+
+另：§②A「editor.spec 级联区未全文件复跑」已关闭——全文件 **27 passed / 0 failed（21.4m）**，26 条 did-not-run 全部为绿，无被级联掩盖的产品回归。

@@ -7,6 +7,7 @@ import { LessonAuthoringPanel } from '../lessonAuthoring/LessonAuthoringPanel'
 import type { LessonAssemblyInput, LessonBuildTarget } from '../../shared/lessonAuthoringDesktop'
 import type { LessonAuthoringMaterialSelection } from '../../shared/lessonAuthoring'
 import type { LocalAgentId } from '../../shared/localAgentContract'
+import { sameWorkspacePath } from '../../shared/workspaceIdentity'
 import { createDesktopDocumentPort } from './lessonDocumentPort'
 
 export interface LessonWorkspaceHostProps {
@@ -64,7 +65,7 @@ export const LessonWorkspaceHost = forwardRef<LessonWorkspaceShellHandle, Lesson
     renderChat={(lesson, conversation, documentTarget) => <LessonConversationChat documentTarget={documentTarget} lesson={lesson} conversation={conversation} projectId={props.projectId} projectPath={props.projectPath} />}
     renderDirectoryChat={(root, conversation, documentTarget) => {
       const bound = !!props.projectPath && conversation.projectTarget?.projectId === props.projectId
-        && conversation.projectTarget.normalizedPath.replace(/\\/g, '/').toLowerCase() === props.projectPath.replace(/\\/g, '/').toLowerCase()
+        && sameWorkspacePath(conversation.projectTarget.normalizedPath, props.projectPath)
       return <DirectoryConversationChat root={root} conversation={conversation} documentTarget={documentTarget}
         projectId={bound ? props.projectId : ''} projectPath={bound ? props.projectPath : null} />
     }}

@@ -14,6 +14,17 @@ export function normalizeWorkspacePath(value: string, platform: NodeJS.Platform 
   return normalized
 }
 
+/**
+ * Host path identity for UI binding checks. Absent or unnormalizable operands never match,
+ * so callers get a boolean instead of repeating `.replace(/\\/g,'/').toLowerCase()` inline —
+ * those inline copies missed the trailing-slash rule above and would drift apart over time.
+ */
+export function sameWorkspacePath(left: string | null | undefined, right: string | null | undefined): boolean {
+  if (!left || !right) return false
+  try { return normalizeWorkspacePath(left) === normalizeWorkspacePath(right) }
+  catch { return false }
+}
+
 /** Shared by local materials and AI sessions; never persisted in a course. */
 export const workspaceIdentityV1Schema = z.object({
   version: z.literal(1),

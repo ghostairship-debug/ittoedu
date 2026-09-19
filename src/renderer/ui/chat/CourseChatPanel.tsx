@@ -16,7 +16,7 @@ import { projectEffectiveLayers } from '../../course/effectiveLayerProjection'
 import { buildFlowEditorView } from '../../course/flowEditorView'
 import { NativeAgentQuestion } from './NativeAgentQuestion'
 import { NativeAgentConfiguration } from './NativeAgentConfiguration'
-import { ChatComposerMenus, useDirectoryMentions } from './ChatComposerMenus'
+import { ChatComposerMenus, useDirectoryMentions, type ChatComposerMenusHandle } from './ChatComposerMenus'
 import { GenerationCandidatePreview } from './GenerationCandidatePreview'
 import { awaitCourseChatStage, createCourseChatObservation, type CourseChatTarget } from './courseChatObservation'
 import { aiQuestionSchema, aiInputDeliverySchema } from '../../../shared/localAgentInteraction'
@@ -79,6 +79,7 @@ export function CourseChatPanel({ projectId, projectPath, onClose, lessonWorkspa
   const [teachingPlan, setTeachingPlan] = useState(''), [presentationScript, setPresentationScript] = useState('')
   const [planConfirmed, setPlanConfirmed] = useState(false), [scriptConfirmed, setScriptConfirmed] = useState(false)
   const [instruction, setInstruction] = useState('')
+  const composerMenus = useRef<ChatComposerMenusHandle>(null)
   const mentionDirectory = projectPath ? projectPath.replace(/[\\/][^\\/]+$/, '') : null
   const mentions = useDirectoryMentions(mentionDirectory)
   const resolvedReference = useMemo(() => {
@@ -464,7 +465,7 @@ export function CourseChatPanel({ projectId, projectPath, onClose, lessonWorkspa
         </details>
         {!!materials.length && <details><summary>引用教学材料（{materialIds.length}）</summary>{materials.map(material => <label key={material.id}><input type="checkbox" checked={materialIds.includes(material.id)} disabled={busy} onChange={event => setMaterialIds(prior => event.target.checked ? [...prior, material.id] : prior.filter(id => id !== material.id))} />{material.title}</label>)}</details>}
         </details>
-        <ChatComposerMenus value={instruction} onChange={setInstruction}
+        <ChatComposerMenus ref={composerMenus} value={instruction} onChange={setInstruction}
           commands={[
             { id: 'discuss', label: '讨论', run: () => setIntent('discuss') },
             { id: 'plan', label: '计划', run: () => setIntent('plan') },
@@ -472,7 +473,7 @@ export function CourseChatPanel({ projectId, projectPath, onClose, lessonWorkspa
             { id: 'stop', label: '停止当前任务', run: () => { void stop() } },
           ]}
           mentions={mentions} />
-        <textarea aria-label="发送给创作助手" value={instruction} onChange={event => setInstruction(event.target.value)} placeholder={busy ? '补充或纠正当前任务…' : '描述要讲解的内容或需要修改的地方…'} rows={3} />
+        <textarea aria-label="发送给创作助手" value={instruction} onChange={event => setInstruction(event.target.value)} onKeyDown={event => composerMenus.current?.handleKeyDown(event)} placeholder={busy ? '补充或纠正当前任务…' : '描述要讲解的内容或需要修改的地方…'} rows={3} />
         {view.busy && <label>输入用途<select aria-label="输入用途" value={inputKind} onChange={event => setInputKind(event.target.value as typeof inputKind)}><option value="correct">立即引导</option><option value="supplement">下一回合补充</option></select><small>{inputKind === 'correct' ? '现在发送；需要时会中断当前回合，带着新要求继续。' : '等待当前回合结束后处理，本次总预算不变。'}</small></label>}
         <button type="submit" disabled={preparing || configurationSaving || !instruction.trim()}>{configurationSaving ? '正在保存配置…' : view.busy ? '发送输入' : '发送'}</button> <button type="button" disabled={!busy} onClick={() => void stop()}>停止</button>
       </form>
