@@ -1,8 +1,8 @@
 # 1.9 共用正文、源文与数学内容合同
 
-日期：2026-09-15。状态：**046 独立合同/codec/数学模块已形成 engineering candidate；正式 V9/Published 根模型与编辑 consumer 尚未切换。** 首批实现和 Word 验证见[实施记录](reviews/2026-09-15-r19-shared-document-contract.md)。Owner 已确认整项纳入 1.9、Word 数学同期交付，并明确“没有兼容需求”。本合同据此采用单一新结构，替代此前旧/新双格式建议；不提供旧工程、旧 Flow 文字/公式结构的读取、转换或双写适配。其他 Surface 当前仍使用的正式能力不因 Flow 改造被删除。
+日期：2026-09-15；状态勘误：2026-09-18。状态：**正文合同、codec、数学模块与正式 V9/Published 根及直接 consumer 已切换为 inlines/LaTeX；分项证据见[共用方案第 4 节](R19_SHARED_DOCUMENT_EDITOR_IMPLEMENTATION_PLAN.md#4-剩余范围与滚动批次)，禁止从零重做。** 无 Word 环境则复用 2026-09-15 证据并保持未新实测。Owner 已确认整项纳入 1.9、Word 数学同期交付，并明确“没有兼容需求”。本合同据此采用单一新结构，替代此前旧/新双格式建议；不提供旧工程、旧 Flow 文字/公式结构的读取、转换或双写适配。其他 Surface 当前仍使用的正式能力不因 Flow 改造被删除。
 
-入口：[实施方案](R19_SHARED_DOCUMENT_EDITOR_IMPLEMENTATION_PLAN.md)、[课例与文件合同](R19_LESSON_DOCUMENT_WORKSPACE_CONTRACT.md)、[架构合同](ARCHITECTURE_CONTRACT.md)。协议名称继续使用 Course Project V9 与 Published V2；本次在对应严格 Schema 中同步改造 Flow 内容，不为这次重构另建 V10、第二工程或第二历史。
+入口：[1.9 完整实施方案](R19_FRONTEND_SPECIAL_IMPLEMENTATION_PLAN.md)、[目录与文件合同](R19_LESSON_DOCUMENT_WORKSPACE_CONTRACT.md)、[架构合同](ARCHITECTURE_CONTRACT.md)。协议名称继续使用 Course Project V9 与 Published V2；本次在对应严格 Schema 中同步改造 Flow 内容，不为这次重构另建 V10、第二工程或第二历史。
 
 ## 1. 唯一正文结构
 

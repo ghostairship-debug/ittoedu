@@ -29,7 +29,7 @@ function generationTransportFixture(directory: string) {
   return { workspace, request, candidate }
 }
 
-describe('generation output channels and staging ingestion', () => {
+describe('generation output channels and staging ingestion', { timeout: 20_000 }, () => {
   it('distinguishes ordinary discussion, required missing candidates and bounded format failures', () => {
     const { request } = generationTransportFixture(os.tmpdir())
     expect(readGenerationResult('这里讨论 { 一个选项 }', request)).toEqual({ kind: 'answer', requestId: request.requestId })

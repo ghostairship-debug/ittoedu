@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "semanticVersion": "9291b842a095ef4d9be3c68733ca8d0731c9a8f3da97fa7de2e5e82479f21c06",
+  "semanticVersion": "3e4dbaf2e955a8aa01b1bd6fb42a947aec3d9a33bfd5be2f5a8400d0ad52527e",
   "entries": [
     {
       "id": "asset.font.import",
@@ -1490,7 +1490,7 @@
         "generated-component",
         "runtime"
       ],
-      "summary": "输入：本轮 confirmedDocuments 中已经分别确认的 teachingPlan 和 presentationScript"
+      "summary": "输入：用户当前任务与已有真实文件"
     },
     {
       "id": "skill:course-design",

@@ -19,6 +19,7 @@ import { unzipSync } from 'fflate'
 import { BACKGROUND_E2E_ENV } from '../../src/main/windowVisibility'
 import { DEFAULT_TEACHER_CONTROLLER_PACKAGE_ID } from '../../src/shared/defaultTeacherControllerComponent'
 import { expectBackgroundWindowsIsolated } from './expectBackgroundWindowsIsolated'
+import { enterIndependentEditor } from './lessonWorkspaceEntry'
 
 const root = resolve(__dirname, '..', '..')
 const catalogRoot = resolve(root, '..', 'courseware-components')
@@ -361,21 +362,9 @@ async function launchEditor(): Promise<LaunchedEditor> {
   page.on('request', (request) => {
     if (/^https?:/i.test(request.url())) externalRequests.push(request.url())
   })
-  // Enter only the landing page; never replace an already opened editor or recovery draft.
-  const startupMore = page.locator('.lesson-workspace-more > summary')
-  const startupEditor = page.getByRole('button', { name: '打开工程（Ctrl+O）', exact: true })
-  const startupRecovery = page.getByRole('alertdialog', { name: '发现未完成的本地恢复副本', exact: true })
-  await expect.poll(async () => await startupEditor.isVisible() || await startupMore.isVisible() || await startupRecovery.isVisible()).toBe(true)
-  if (!await startupEditor.isVisible() && await startupMore.isVisible() && !await startupRecovery.isVisible()) {
-    await startupMore.click()
-    await page.getByRole('button', { name: '新建独立课件', exact: true }).click()
-  }
-  await page.locator('[data-testid="canvas-stage"] canvas').waitFor()
+  // 冷启动只进入独立编辑器面（判据见 tests/e2e/lessonWorkspaceEntry.ts）。
+  await enterIndependentEditor(page)
   await expectBackgroundWindowsIsolated(app)
-  const professional = page.getByRole('button', { name: '专业' })
-  if (await professional.getAttribute('aria-pressed') !== 'true') {
-    await professional.click()
-  }
   return {
     app,
     page,

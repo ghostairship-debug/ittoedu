@@ -105,6 +105,11 @@ export function hardenWebContents(
   })
 }
 
+/** Main renderer may write the system clipboard from a user gesture. All other permissions stay denied. */
+export function isAllowedRendererPermission(permission: string): boolean {
+  return permission === 'clipboard-sanitized-write'
+}
+
 export function configureRestrictedSession(
   electronSession: Session,
   allowedNetworkOrigins: ReadonlySet<string> | ((url: string) => boolean),
@@ -112,9 +117,9 @@ export function configureRestrictedSession(
   if (configuredSessions.has(electronSession)) return
   configuredSessions.add(electronSession)
 
-  electronSession.setPermissionCheckHandler(() => false)
-  electronSession.setPermissionRequestHandler((_contents, _permission, callback) => {
-    callback(false)
+  electronSession.setPermissionCheckHandler((_webContents, permission) => isAllowedRendererPermission(permission))
+  electronSession.setPermissionRequestHandler((_contents, permission, callback) => {
+    callback(isAllowedRendererPermission(permission))
   })
   electronSession.setDevicePermissionHandler(() => false)
   electronSession.setDisplayMediaRequestHandler((_request, callback) => {

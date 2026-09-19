@@ -5,6 +5,8 @@
 - Optional: 否
 - Write locks: `authoring-flow`, `workspace-shell`
 
+日期：2026-09-18 状态勘误。**共用编辑核心已有证据，见[共用方案第 4 节](../../R19_SHARED_DOCUMENT_EDITOR_IMPLEMENTATION_PLAN.md#4-剩余范围与滚动批次)；禁止从零重做。** 只在相关 consumer 变化时补验。实施次序见[主方案](../../R19_FRONTEND_SPECIAL_IMPLEMENTATION_PLAN.md)。
+
 ## 结果与边界
 
 按 [正文合同](../../R19_SHARED_DOCUMENT_CONTENT_CONTRACT.md)实现可脱离课件使用的连续正文核心；Tiptap/ProseMirror负责排版输入，CodeMirror负责源文，KaTeX呈现有限数学。通过两个保存接入口接入不同归属，不把库history或JSON当第二工程真相。

@@ -97,10 +97,10 @@ test('r19 lesson: real PDF DOCX PPTX reading, document conflict and reopen, firs
     const conflict = await page.evaluate(async ({ ref, version }) => window.desktopAPI!.lessonFiles!.saveDocument({ ref, expectedVersion: version, source: '# 串联电路\n\n迟到修订。\n', operationId: 'e2e-conflict', attachments: [] }), { ref, version: opened.version })
     expect(conflict.status).toBe('conflict')
     expect(readFileSync(join(target.rootPath, ref.relativePath), 'utf8')).toContain('外部修订')
-    // 重载前绑定真实 .h5lesson（V3.1：「更多」菜单已删除，重载后经目录树点选 .h5lesson 激活）
     const project = createBlankCourseProject({ title: '串联电路课件', includeDefaultController: false, controls: 'none' })
     const firstPath = join(target.rootPath, 'course.h5lesson')
     writeFileSync(firstPath, createCourseProjectArchive({ project, assetFiles: {}, componentFiles: {} }))
+    // 课例已有工程的重开/另存隔离。从未绑定目录会话出发的 UI 首存见 tests/e2e/r19DirectoryFirstSave.spec.ts。
     await page.evaluate(async input => {
       const result = await window.desktopAPI!.lesson!({ operation: 'bind-project', lesson: input.lessonIdentity, conversationId: input.conversationId, projectId: input.projectId, projectPath: input.projectPath, saveAs: false })
       if (!result.lesson?.manifest.coursePath) throw new Error('bind-project 未写入 coursePath')

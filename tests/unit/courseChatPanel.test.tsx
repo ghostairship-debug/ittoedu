@@ -112,8 +112,8 @@ describe('chat reference defaults and send-time target', () => {
     const confirmedDocuments = { teachingPlan: '# 当前真实策划', presentationScript: '# 当前真实脚本' }
     window.desktopAPI!.localAgent = vi.fn(async input => input.operation === 'lesson-prepare-generation' ? { enabled: true, lessonGeneration: { confirmedDocuments } } : original(input)) as any
     render(<CourseChatPanel projectId="chat-unit" projectPath="C:/chat.h5lesson" lessonWorkspace={{ version: 1, kind: 'lesson', lessonId: '11111111-1111-4111-8111-111111111111', conversationId: '22222222-2222-4222-8222-222222222222', normalizedDirectory: 'c:/lesson' }} onClose={() => {}} />)
-    fireEvent.click(screen.getByLabelText('生成包含多个片段的完整课件'))
-    expect(screen.queryByLabelText('教学策划 Markdown')).toBeNull()
+    fireEvent.click(screen.getByLabelText('用户明确要求先看当前策划/脚本后再生成'))
+    expect(screen.queryByLabelText('当前策划 Markdown')).toBeNull()
     await send('请生成整课', 1)
     expect(h.capture).toHaveBeenCalledWith(expect.objectContaining({ confirmedDocuments, purpose: 'whole-course' }))
     expect(window.desktopAPI!.materials).not.toHaveBeenCalled()
@@ -126,12 +126,39 @@ describe('chat reference defaults and send-time target', () => {
       return original(input)
     }) as any
     render(<CourseChatPanel projectId="chat-unit" projectPath="C:/chat.h5lesson" lessonWorkspace={{ version: 1, kind: 'lesson', lessonId: '11111111-1111-4111-8111-111111111111', conversationId: '22222222-2222-4222-8222-222222222222', normalizedDirectory: 'c:/lesson' }} onClose={() => {}} />)
-    fireEvent.click(screen.getByLabelText('生成包含多个片段的完整课件'))
+    fireEvent.click(screen.getByLabelText('用户明确要求先看当前策划/脚本后再生成'))
     fireEvent.change(screen.getByLabelText('发送给创作助手'), { target: { value: '请生成整课' } })
     fireEvent.submit(screen.getByLabelText('发送给创作助手').closest('form')!)
     await screen.findByText('教学策划已修改，请重新确认')
     expect(screen.getByLabelText('发送给创作助手')).toHaveValue('请生成整课')
     expect(h.capture).not.toHaveBeenCalled(); expect(h.starts).toHaveLength(0)
+  })
+  it('sends an ordinary edit without confirmed four-stage documents', async () => {
+    slideFixture(); mount()
+    expect(screen.getByLabelText('当前编辑目标')).toBeInTheDocument()
+    expect(screen.getByLabelText('用户明确要求先看当前策划/脚本后再生成')).not.toBeChecked()
+    await send('把标题改成实验记录', 1)
+    expect(window.desktopAPI!.localAgent).not.toHaveBeenCalledWith(expect.objectContaining({ operation: 'lesson-prepare-generation' }))
+    expect(h.capture).toHaveBeenCalledWith(expect.objectContaining({ purpose: 'local-edit', scope: 'selection' }))
+    expect(h.capture.mock.calls[0]![0].confirmedDocuments).toBeUndefined()
+  })
+  it('pauses a directory 先审 edit until plan and script are reviewed, then sends whole-course', async () => {
+    slideFixture(); mount()
+    fireEvent.click(screen.getByText('先审当前制品再继续'))
+    fireEvent.click(screen.getByLabelText('用户明确要求先看当前策划/脚本后再生成'))
+    fireEvent.change(screen.getByLabelText('发送给创作助手'), { target: { value: '按当前策划只改标题为审阅闭合电路' } })
+    fireEvent.submit(screen.getByLabelText('发送给创作助手').closest('form')!)
+    await screen.findByText(/审阅并确认当前教学策划和呈现脚本/)
+    expect(h.starts).toHaveLength(0)
+    fireEvent.change(screen.getByLabelText('当前策划 Markdown'), { target: { value: '# 教学策划\n\n一页演示。' } })
+    fireEvent.click(screen.getByLabelText('已审阅当前策划'))
+    fireEvent.change(screen.getByLabelText('当前脚本 Markdown'), { target: { value: '# 呈现脚本\n\n只保留标题。' } })
+    fireEvent.click(screen.getByLabelText('已审阅当前脚本'))
+    await send('按当前策划只改标题为审阅闭合电路', 1)
+    expect(h.capture).toHaveBeenCalledWith(expect.objectContaining({
+      purpose: 'whole-course',
+      confirmedDocuments: { teachingPlan: '# 教学策划\n\n一页演示。', presentationScript: '# 呈现脚本\n\n只保留标题。' },
+    }))
   })
   function slideFixture() {
     const document = createBlankCourseProject({ id: 'chat-unit' }), surface = document.surfaces[0]!

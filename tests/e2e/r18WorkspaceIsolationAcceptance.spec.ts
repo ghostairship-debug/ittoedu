@@ -18,23 +18,10 @@ import { GENERATION_CLOSE, GENERATION_OPEN } from '../../src/shared/generationRe
 import { localAgentRecordV2Schema } from '../../src/shared/localAgentTaskContract'
 import { workspaceIdentityKey } from '../../src/shared/workspaceIdentity'
 import { expectBackgroundWindowsIsolated } from './expectBackgroundWindowsIsolated'
+import { enterIndependentEditor as enterStandaloneEditorFromLanding } from './lessonWorkspaceEntry'
 
 const root = resolve(__dirname, '../..')
 
-async function enterStandaloneEditorFromLanding(page: Page): Promise<void> {
-  const landing = page.locator('.lesson-workspace-landing')
-  const editor = page.getByTestId('canvas-stage')
-  await Promise.race([
-    landing.waitFor({ state: 'visible', timeout: 15_000 }),
-    editor.waitFor({ state: 'visible', timeout: 15_000 }),
-  ])
-  if (!await landing.isVisible()) return
-  const more = page.locator('.lesson-workspace-more > summary')
-  if (!await more.isVisible()) return
-  await more.click()
-  const create = page.getByRole('button', { name: '新建独立课件', exact: true })
-  if (await create.isVisible()) await create.click()
-}
 type Owner = { projectId: string; projectPath: string }
 
 /** Seed formal local repositories only; this is not evidence of a native model run. */
@@ -104,8 +91,6 @@ async function launch(profile: string) {
     page.on('pageerror', error => pageErrors.push(error.message))
     await page.locator('[data-testid="canvas-stage"] canvas').first().waitFor()
     await expectBackgroundWindowsIsolated(app, true)
-    const professional = page.getByRole('button', { name: '专业', exact: true })
-    if (await professional.getAttribute('aria-pressed') !== 'true') await professional.click()
     return { app, page, pageErrors }
   } catch (error) { await app.close(); throw error }
 }

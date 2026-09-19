@@ -5,6 +5,8 @@
 - Optional: 否
 - Write locks: `contracts-schema`, `export-docx-print`
 
+日期：2026-09-18 状态勘误。**已有工程证据见[共用方案第 4 节](../../R19_SHARED_DOCUMENT_EDITOR_IMPLEMENTATION_PLAN.md#4-剩余范围与滚动批次)；禁止从零重做。** 正式根 Schema 与直接 consumer 已切换为 `DocumentBlock` / inlines/LaTeX。本节点只在相关 consumer 或数学/codec 变化时补验；无 Word 环境则复用 2026-09-15 证据并保持“未新实测”。实施次序见[主方案](../../R19_FRONTEND_SPECIAL_IMPLEMENTATION_PLAN.md)。
+
 ## 结果与边界
 
 把 [共用正文合同](../../R19_SHARED_DOCUMENT_CONTENT_CONTRACT.md) 与 [课例/文件接口](../../R19_LESSON_DOCUMENT_WORKSPACE_CONTRACT.md)变成唯一纯类型、严格解析、序列化、数学结构/OMML和可执行样例。Owner无兼容需求，不编写旧Flow text/runs、AST或旧会话转换器。
@@ -32,4 +34,4 @@
 
 向047提供纯内容/选区/codec，向048提供正式根切换目标与数学/导出模块，向049提供文件保存/诊断端口语义。正式consumer切换仍由048单一Owner组织；未执行的验证不计完成。
 
-2026-09-15 首批实现见[实施记录](../../reviews/2026-09-15-r19-shared-document-contract.md)：Shared Domain 合同、codec、结构数学/OMML、双归属端口与 67 项聚焦检查通过；桌面 Word 实际修改、保存、重开及逐页呈现已有证据。当前是独立模块 engineering candidate，正式根模型与真实编辑 consumer 尚未切换。
+2026-09-15 首批实现见[实施记录](../../reviews/2026-09-15-r19-shared-document-contract.md)：Shared Domain 合同、codec、结构数学/OMML、双归属端口与 67 项聚焦检查通过；桌面 Word 实际修改、保存、重开及逐页呈现已有证据。048 已将正式根与直接 consumer 切入同一可运行批次；后续只验证实际变化，不把本句读成尚未切换。

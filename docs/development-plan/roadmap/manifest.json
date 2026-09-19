@@ -2373,7 +2373,7 @@
     {
       "id": "r19-040-session-persistence-deletion",
       "release": "1.9",
-      "title": "课例对话恢复、损坏隔离、工程另存隔离和范围删除",
+      "title": "目录会话恢复、损坏隔离和范围删除",
       "dependencies": [
         "r18-060-release",
         "r16-020-local-session-store"
@@ -2388,7 +2388,7 @@
     {
       "id": "r19-041-session-navigation",
       "release": "1.9",
-      "title": "交付真实工作空间入口、课例导航与整合标签工作台",
+      "title": "目录导航、自然聊天与两种编辑位置",
       "dependencies": [
         "r19-040-session-persistence-deletion",
         "r19-042-draft-workspace-continuity"
@@ -2405,7 +2405,7 @@
     {
       "id": "r19-042-draft-workspace-continuity",
       "release": "1.9",
-      "title": "实现真实工作空间、课例身份与工程保存连续性",
+      "title": "目录归属与文件编辑身份连续性",
       "dependencies": [
         "r19-040-session-persistence-deletion"
       ],
@@ -2422,7 +2422,7 @@
     {
       "id": "r19-043-long-task-context",
       "release": "1.9",
-      "title": "闭合长任务上下文压缩缓存失效与阶段性能诊断",
+      "title": "原生长任务恢复、缓存失效与真实耗时",
       "dependencies": [
         "r19-040-session-persistence-deletion",
         "r19-042-draft-workspace-continuity",
@@ -2440,7 +2440,7 @@
     {
       "id": "r19-044-course-creation-workflows",
       "release": "1.9",
-      "title": "内置自动材料与手动分阶段的整课创作流程",
+      "title": "按任务创作与明确制品审阅",
       "dependencies": [
         "r19-042-draft-workspace-continuity",
         "r19-045-material-context",
@@ -2460,7 +2460,7 @@
     {
       "id": "r19-045-material-context",
       "release": "1.9",
-      "title": "实现课程材料结构化读取、分片发现与可追溯引用",
+      "title": "材料直达、结构化读取与出处",
       "dependencies": [
         "r19-040-session-persistence-deletion",
         "r19-042-draft-workspace-continuity",
@@ -2527,7 +2527,7 @@
     {
       "id": "r19-049-document-file-coauthoring",
       "release": "1.9",
-      "title": "交付真实Markdown文件编辑、恢复与AI共编",
+      "title": "普通Markdown文件编辑、恢复与AI共编",
       "dependencies": [
         "r19-042-draft-workspace-continuity",
         "r19-041-session-navigation",
@@ -2547,7 +2547,7 @@
     {
       "id": "r19-050-internal-dogfood",
       "release": "1.9",
-      "title": "以真实课例验证双流程连续创作与主要耗时优化",
+      "title": "完整教师任务与连续编辑验收",
       "dependencies": [
         "r18-043-context-references",
         "r18-044-tool-timeline",
@@ -2589,7 +2589,7 @@
     {
       "id": "r19-060-release",
       "release": "1.9",
-      "title": "形成 1.9 engineering candidate 并发布 v1.9.0-rc.N 源码标签",
+      "title": "1.9工程候选收口与源码发布交接",
       "dependencies": [
         "r19-050-internal-dogfood",
         "r19-051-pptx-media-effects"

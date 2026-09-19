@@ -3,7 +3,7 @@ import { DocumentAiTaskController } from '../../src/renderer/documentFiles/docum
 import type { LessonDocumentAiAPI, LessonDocumentAiResult } from '../../src/shared/lessonDocumentAiTask'
 import type { LessonDocumentEditorHandle } from '../../src/renderer/documentFiles/LessonDocumentEditor'
 const workspace = { version: 1 as const, kind: 'lesson' as const, lessonId: 'lesson', normalizedDirectory: '/lesson', conversationId: 'chat' }
-const ref = { lessonId: 'lesson', lessonDirectory: '/lesson', relativePath: 'a.md' }
+const ref = { kind: 'lesson' as const, lessonId: 'lesson', lessonDirectory: '/lesson', relativePath: 'a.md' }
 const version = { contentVersion: 'v1', attachments: [] }
 afterEach(() => vi.useRealTimers())
 function fixture() {
@@ -62,6 +62,23 @@ it('reports the pinned file and actual saved version to the stage owner only aft
  expect(onApplied).not.toHaveBeenCalled()
  await vi.advanceTimersByTimeAsync(1000)
  expect(onApplied).toHaveBeenCalledWith(ref, savedVersion)
+})
+it('starts a directory file edit without converting the ref into a lesson', async () => {
+ vi.useFakeTimers()
+ const fileRef = { kind: 'file' as const, path: '/ws/notes.md' }
+ const f = fixture()
+ f.session.ref = fileRef as never
+ const api = vi.fn<LessonDocumentAiAPI>(async request => {
+  if (request.operation === 'start') {
+   expect(request.ref).toEqual(fileRef)
+   expect(request.workspace).toMatchObject({ kind: 'directory' })
+   return { taskId: 'task', sessionId: 'native', status: 'running', message: '运行中' }
+  }
+  return { taskId: 'task', sessionId: 'native', status: 'candidate', message: '候选', apply: { baseVersion: version, epoch: 1, operationId: 'task', edits: [] } }
+ })
+ const workspace = { version: 1 as const, kind: 'directory' as const, normalizedDirectory: '/ws', conversationId: 'chat' }
+ await new DocumentAiTaskController(api, workspace, vi.fn()).start({ name: 'notes.md', getEditor: () => f.editor }, 'codex', '改目录稿')
+ expect(api).toHaveBeenCalledWith(expect.objectContaining({ operation: 'start', ref: fileRef, workspace }))
 })
 it('keeps partial application suggestions without completing the stage repair', async () => {
  vi.useFakeTimers()

@@ -15,6 +15,8 @@ import { promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 
+// 全量并发下 Windows 临时目录清理会出现 EBUSY/ENOTEMPTY 竞态；有界重试（D2 同款）。
+const win32RmRetry = process.platform === 'win32' ? { maxRetries: 8, retryDelay: 100 } : {}
 afterEach(() => {
   vi.restoreAllMocks()
 })
@@ -51,7 +53,7 @@ describe('native V2 factory and read-only historical wire fixtures', () => {
       await stopAgent(target)
       await expect.poll(() => alive(descendant)).toBe(false)
       expect(alive(sibling.pid!)).toBe(true); expect(alive(siblingDescendant)).toBe(true)
-    } finally { await stopAgent(target); await stopAgent(sibling); await fs.rm(directory, { recursive: true, force: true }) }
+    } finally { await stopAgent(target); await stopAgent(sibling); await fs.rm(directory, { recursive: true, force: true, ...win32RmRetry }) }
   })
   it.each(['codex', 'claude', 'opencode'] as const)('%s probes installation and rejects broken native handshakes from a real fixture process', async id => {
     const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'adapter-contract-'))
@@ -88,7 +90,7 @@ describe('native V2 factory and read-only historical wire fixtures', () => {
         } else await expect(opened).rejects.toThrow('output-limit')
         expect(oversized.getExternalSessionId?.()).toBeNull()
       } finally { await oversized.close() }
-    } finally { await adapter.close(); await fs.rm(directory, { recursive: true, force: true }) }
+    } finally { await adapter.close(); await fs.rm(directory, { recursive: true, force: true, ...win32RmRetry }) }
   })
   it.each(['codex', 'claude', 'opencode'] as const)('%s reports missing without starting another executable', async id => {
     const adapter = createLocalAgentCliAdapterV2(id, undefined, async () => null)
@@ -127,7 +129,7 @@ describe('native V2 factory and read-only historical wire fixtures', () => {
       expect(result.code).toBe(0)
       expect(JSON.parse(result.text)).toEqual(args)
       expect(await fs.readdir(directory)).toEqual(['fixture with 空格.cjs'])
-    } finally { await fs.rm(directory, { recursive: true, force: true }) }
+    } finally { await fs.rm(directory, { recursive: true, force: true, ...win32RmRetry }) }
   })
   it('builds a Codex app-server schema without unsupported free-form JSON keywords', () => {
     const requestId = '89e7b74a-2ba4-4f03-ad94-89aef212a776'
@@ -238,7 +240,7 @@ readline.on('line',line=>{const m=JSON.parse(line);
       expect(answers).toEqual(['Reject once', 'Allow once'])
       expect(completed).toBe(true)
       expect(JSON.parse(await fs.readFile(candidatePath, 'utf8'))).toEqual({ version: 1 })
-    } finally { await adapter.close(); await fs.rm(directory, { recursive: true, force: true }) }
+    } finally { await adapter.close(); await fs.rm(directory, { recursive: true, force: true, ...win32RmRetry }) }
   })
 })
 

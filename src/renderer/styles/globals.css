@@ -56,6 +56,14 @@ body {
   user-select: none;
 }
 
+.course-chat,
+.chat-message,
+.chat-user-message,
+.chat-transcript {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
 button,
 input,
 textarea,

@@ -1038,8 +1038,14 @@ async function execute(options: Options): Promise<AuthoringReceipt> {
     await installElectronOfflineGuard(app)
     const page = await app.firstWindow()
     await enforceOffline(page, errors)
-    await page.locator('.lesson-workspace-more > summary').click()
-    await page.getByRole('button', { name: '新建独立课件', exact: true }).click()
+    // 冷启动落在着陆页、内容区默认收起；用 App 级「新建课件（Ctrl+N）」建立空白独立课件并展开工作台。
+    // 「更多 → 新建独立课件」入口已从产品移除（V3.1）；旧按钮走 newProject({origin:'lesson'})，
+    // Ctrl+N 走 newProject()，两者同样落在空白 slide 工程上（随后 openProject 覆写为基线工程）。
+    // App 级键盘路由挂在 React useEffect 里（src/renderer/app/useEditorKeyboardRouter.ts:44-62），
+    // firstWindow() 返回时首帧尚未提交，此刻按键会被静默丢弃（探针实测 App 挂载在 firstWindow 后约 0.7s）；
+    // 先等着陆页 CTA 出现（等价于 App 已提交、路由已挂载）再按键，canvas waitFor 仍是唯一产品态闸门。
+    await page.getByRole('button', { name: '打开工作空间', exact: true }).waitFor({ state: 'visible' })
+    await page.keyboard.press('Control+N')
     await page.locator('[data-testid="canvas-stage"] canvas').waitFor({ state: 'visible' })
     await openProject(page, app, baselineProject, baselineHtml)
     await patchDialogs(app, {

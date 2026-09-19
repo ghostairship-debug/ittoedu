@@ -47,6 +47,7 @@ import {
 import { resolveBundledFontDescriptors } from '../../src/shared/fonts/bundledFontSources'
 import type { BundledFontFamilyDescriptor } from '../../src/shared/fonts/bundledFontManifest'
 import { expectBackgroundWindowsIsolated } from './expectBackgroundWindowsIsolated'
+import { enterIndependentEditor } from './lessonWorkspaceEntry'
 
 const root = resolve(__dirname, '..', '..')
 // One fixed directory rather than one per process: Playwright starts a fresh
@@ -335,19 +336,14 @@ async function launchEditor(): Promise<LaunchedEditor> {
     })
     const page = await app.firstWindow()
     attach(page)
-    await page.locator('.lesson-workspace-more > summary').click()
-    await page.getByRole('button', { name: '新建独立课件', exact: true }).click()
-    await page.locator('[data-testid="canvas-stage"] canvas').waitFor()
+    // 冷启动只进入独立编辑器面（判据见 tests/e2e/lessonWorkspaceEntry.ts）。
+    await enterIndependentEditor(page)
     await expectBackgroundWindowsIsolated(app, true)
     const recoveryDialog = page.getByRole('alertdialog', {
       name: '发现未完成的本地恢复副本',
     })
     if (await recoveryDialog.isVisible().catch(() => false)) {
       await recoveryDialog.getByRole('button', { name: '丢弃副本' }).click()
-    }
-    const professional = page.getByRole('button', { name: '专业' })
-    if (await professional.getAttribute('aria-pressed') !== 'true') {
-      await professional.click()
     }
     const properties = page.getByRole('complementary', { name: '编辑面板', exact: true })
     if (!await properties.isVisible()) {

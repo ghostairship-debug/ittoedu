@@ -92,7 +92,10 @@ test('copies image and cw object through real Flow and Markdown UI, reopens and 
     await expect(fileBody).toContainText('对象正文保持可编辑')
     await expect.poll(() => fileBody.locator('img').first().evaluate((element: HTMLImageElement) => element.naturalWidth)).toBe(48)
     await fileBody.click(); await page.keyboard.press('Control+a'); await page.keyboard.press('Control+c')
-    await page.getByRole('tab', { name: /^课件/ }).click()
+    // V3.1：课件标签显示课件真实名（basename(projectPath) 去 .h5lesson，未绑定时「新建课件」），不再是「课件xxx」
+    const tabs = page.getByRole('tablist', { name: '材料、教学文档与课件', exact: true })
+    await tabs.getByRole('tab', { name: /course|新建课件/ }).click()
+    await expect(tabs.getByRole('tab', { name: /course|新建课件/ })).toHaveAttribute('aria-selected', 'true')
     await flow.getByText('复制终点', { exact: true }).click(); await page.keyboard.press('End')
     await expect.poll(() => page.evaluate(async () => { const load = (path: string): Promise<any> => import(path); const { useEditorStore } = await load('/src/renderer/store/editorStore.ts'); return useEditorStore.getState().flowSession?.selection.textRange })).toMatchObject({ blockId: 'source-end', start: 4, end: 4 })
     await page.keyboard.press('Control+v')

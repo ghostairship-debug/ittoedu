@@ -17,6 +17,7 @@ import { createCourseProjectArchive } from '../../src/renderer/project/coursePro
 import type { CourseProjectDocument } from '../../src/shared/courseProjectTypes'
 import { BACKGROUND_E2E_ENV } from '../../src/main/windowVisibility'
 import { listCourseProjectV9Fixtures } from '../fixtures/course-project-v9/sources'
+import { enterIndependentEditor } from './lessonWorkspaceEntry'
 
 const root = resolve(__dirname, '..', '..')
 const rendererDirectory = join(root, 'dist-renderer')
@@ -286,18 +287,8 @@ test('V9 current/full preview embeds local assets and leases declared origins pe
       },
     })
     const page = await app.firstWindow()
-    // Only enter the landing page; keep an existing editor or recovery draft intact.
-    const startupMore = page.locator('.lesson-workspace-more > summary')
-    const startupEditor = page.getByRole('button', { name: '打开工程（Ctrl+O）', exact: true })
-    const startupRecovery = page.getByRole('alertdialog', { name: '发现未完成的本地恢复副本', exact: true })
-    await expect.poll(async () => await startupEditor.isVisible() || await startupMore.isVisible() || await startupRecovery.isVisible()).toBe(true)
-    if (!await startupEditor.isVisible() && await startupMore.isVisible() && !await startupRecovery.isVisible()) {
-      await startupMore.click()
-      await page.getByRole('button', { name: '新建独立课件', exact: true }).click()
-    }
-    await page.locator('[data-testid="canvas-stage"] canvas').waitFor()
-    const professional = page.getByRole('button', { name: '专业' })
-    if (await professional.getAttribute('aria-pressed') !== 'true') await professional.click()
+    // 冷启动只进入独立编辑器面（判据见 tests/e2e/lessonWorkspaceEntry.ts）。
+    await enterIndependentEditor(page)
 
     await openProject(app, page, projectAPath, 'NET H1 A')
     const projectAPhotoDataUrl = `data:image/png;base64,${Buffer.from(
@@ -379,9 +370,9 @@ test('V9 current/full preview embeds local assets and leases declared origins pe
       }, { once: true })
     }, assetA.origin)
     await page.reload({ waitUntil: 'domcontentloaded' })
-    // Reload only needs a visible landing control; it must not create a project.
-    await page.locator('.lesson-workspace-more > summary').click()
-    await page.getByRole('button', { name: '新建独立课件', exact: true }).waitFor()
+    // Reload only needs a live landing control; it must not create a project.
+    await expect(page.getByRole('button', { name: '打开工作空间', exact: true }).first()).toBeVisible()
+    await expect(page.getByRole('main', { name: '课件画布' })).toHaveCount(0)
     await expect(page.evaluate(() => window.name)).resolves
       .toBe('old-document-late-invoke-sent')
     const assetAAfterReload = assetA.requests.length

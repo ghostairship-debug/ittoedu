@@ -11,7 +11,7 @@ import { LessonWorkspaceService } from './lessonWorkspace'
 import { LessonProjectRegistry } from './lessonProjects'
 import { LessonConversationRepository } from './localAgent/lessonConversationRepository'
 import { createWorkspaceIdentity } from './workspaceIdentity'
-import type { WorkspaceIdentityV1 } from '../shared/workspaceIdentity'
+import { normalizeWorkspacePath, type WorkspaceIdentityV1 } from '../shared/workspaceIdentity'
 import { openSelectedProjectFile } from './fileDialogs'
 import { relocateLocalAgentLesson, deleteLocalAgentConversationRecords, searchLocalAgentConversations, deleteAllLocalAgentApplicationRecords, assertLocalAgentRecordsAvailable } from './localAgent/service'
 
@@ -44,11 +44,8 @@ async function currentLessonProjectTarget(service: LessonWorkspaceService, lesso
 }
 /** F01：解析会话归属。旧请求只有 lesson 字段时按课例归属处理。 */
 function normalizeOwnerRoot(value: string): string {
-  // renderer 可能传入 realpath 原始形态（大写、反斜杠）；归一化为合同要求的规范绝对路径。
   const paths = process.platform === 'win32' ? path.win32 : path.posix
-  let normalized = paths.normalize(value).replace(/\\/g, '/')
-  if (process.platform === 'win32') normalized = normalized.toLowerCase()
-  return normalized
+  return normalizeWorkspacePath(paths.normalize(value))
 }
 function resolveOwner(input: { owner?: ConversationOwner; lesson?: LessonWorkspace['identity'] }): ConversationOwner {
   if (input.owner) {
@@ -123,7 +120,7 @@ export async function operateLessonDesktop(window: BrowserWindow, request: unkno
         if ((error as NodeJS.ErrnoException).code === 'EEXIST') throw new Error('已存在同名文件')
         throw error
       }
-      return { directory: await fs.realpath(target) }
+      return { directory: root }
     }
     case 'open-workspace': return { directory: await openWorkspace(input.directory) }
     case 'list-directory': {
@@ -186,14 +183,22 @@ export async function operateLessonDesktop(window: BrowserWindow, request: unkno
     case 'bind-project': {
       // Validate the files before binding, and resolve conversation ownership before
       // changing the lesson's current project. A rejected target must leave it intact.
-      await workspaces.read(input.lesson)
+      const owner = resolveOwner(input)
       await fs.realpath(input.projectPath)
       const target = createWorkspaceIdentity(input.projectId, input.projectPath)
+      if (owner.kind === 'lesson') {
+        await workspaces.read(owner.lesson)
+        const conversation = input.saveAs
+          ? await conversations.create(owner, '另存工程对话', target)
+          : await conversations.bindFirstProject(owner, input.conversationId, target)
+        const lesson = await workspaces.bindProject(owner.lesson, input.projectPath)
+        return { lesson, conversation }
+      }
+      await assertOwnerAvailable(owner)
       const conversation = input.saveAs
-        ? await conversations.create({ kind: 'lesson', lesson: input.lesson }, '另存工程对话', target)
-        : await conversations.bindFirstProject({ kind: 'lesson', lesson: input.lesson }, input.conversationId, target)
-      const lesson = await workspaces.bindProject(input.lesson, input.projectPath)
-      return { lesson, conversation }
+        ? await conversations.rebindProjectTarget(owner, input.conversationId, target)
+        : await conversations.bindFirstProject(owner, input.conversationId, target)
+      return { conversation }
     }
   }
 }

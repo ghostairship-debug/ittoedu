@@ -6,24 +6,10 @@ import sharp from 'sharp'
 import { BACKGROUND_E2E_ENV } from '../../src/main/windowVisibility'
 import { closeNativeEditor, FIXTURE_IDS, selectLayer, writeNativeLesson, type NativeRun } from './r18NativeAuthoringFixture'
 import { expectBackgroundWindowsIsolated } from './expectBackgroundWindowsIsolated'
+import { enterIndependentEditor as enterStandaloneEditorFromLanding } from './lessonWorkspaceEntry'
 
 const productRoot = resolve(__dirname, '..', '..')
 type Rect = { x: number; y: number; width: number; height: number }
-
-async function enterStandaloneEditorFromLanding(page: Page): Promise<void> {
-  const landing = page.locator('.lesson-workspace-landing')
-  const editor = page.getByTestId('canvas-stage')
-  await Promise.race([
-    landing.waitFor({ state: 'visible', timeout: 15_000 }),
-    editor.waitFor({ state: 'visible', timeout: 15_000 }),
-  ])
-  if (!await landing.isVisible()) return
-  const more = page.locator('.lesson-workspace-more > summary')
-  if (!await more.isVisible()) return
-  await more.click()
-  const create = page.getByRole('button', { name: '新建独立课件', exact: true })
-  if (await create.isVisible()) await create.click()
-}
 
 async function pixels(base64: string, oldTitle: Rect) {
   const image = await sharp(Buffer.from(base64, 'base64')).ensureAlpha().raw().toBuffer({ resolveWithObject: true })
@@ -70,8 +56,6 @@ test('the immediate formal observation reflects a Native text, font and frame ed
       dialog.showOpenDialog = (async () => ({ canceled: false, filePaths: [path] })) as typeof dialog.showOpenDialog
     }, projectPath)
     await page.getByRole('button', { name: '打开工程（Ctrl+O）', exact: true }).click()
-    const professional = page.getByRole('button', { name: '专业', exact: true })
-    if (await professional.getAttribute('aria-pressed') !== 'true') await professional.click()
     await selectLayer(page, FIXTURE_IDS.title)
 
     const result = await page.evaluate(async ({ ids }) => {

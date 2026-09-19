@@ -14758,7 +14758,14 @@ var lessonAgentWorkspaceSchema = external_exports.object({
   normalizedDirectory: workspaceIdentityV1Schema.shape.normalizedPath,
   conversationId: external_exports.uuid()
 }).strict();
-var aiWorkspaceIdentitySchema = external_exports.union([workspaceIdentityV1Schema, lessonAgentWorkspaceSchema]);
+var directoryAgentWorkspaceSchema = external_exports.object({
+  version: external_exports.literal(1),
+  kind: external_exports.literal("directory"),
+  normalizedDirectory: workspaceIdentityV1Schema.shape.normalizedPath,
+  conversationId: external_exports.uuid()
+}).strict();
+var conversationAgentWorkspaceSchema = external_exports.discriminatedUnion("kind", [lessonAgentWorkspaceSchema, directoryAgentWorkspaceSchema]);
+var aiWorkspaceIdentitySchema = external_exports.union([workspaceIdentityV1Schema, conversationAgentWorkspaceSchema]);
 
 // src/shared/authoringObservation.ts
 var revision2 = external_exports.number().int().nonnegative();

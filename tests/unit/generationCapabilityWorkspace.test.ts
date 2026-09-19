@@ -218,7 +218,7 @@ describe('offline capability workspace', () => {
     const request = { ...requestFixture(), expectedResult: 'auto' as const }
     const prompt = buildGenerationPrompt('claude', request, path.resolve('candidate-root'))
     const example = `${GENERATION_RESULT_OPEN}${JSON.stringify({ version: 1, requestId: request.requestId, kind: 'answer' })}${GENERATION_RESULT_CLOSE}`
-    expect(prompt).toContain('将kind改为answer')
+    expect(prompt).toContain('无候选用answer')
     expect(readGenerationResult(`已核对宿主回执，修改完成。${example}`, request)).toEqual({ kind: 'answer', requestId: request.requestId })
     expect(readGenerationResult(example, { ...request, expectedResult: 'candidate' })).toMatchObject({ kind: 'candidate-format-error' })
   })
@@ -446,7 +446,10 @@ describe('offline capability workspace', () => {
     expect(card).toEqual(readCourseAgentCapability(generationCapabilityData, 'native.content', { operation: 'content', nativeType: 'image' }))
     expect(card.content.references.image).toBeDefined()
     expect(Object.keys(card.content.references)).toEqual(['image'])
-    expect(card.content.examples).toEqual([expect.objectContaining({ operation: 'content' })])
+    expect(card.content.examples).toEqual([
+      expect.objectContaining({ operation: 'content' }),
+      expect.objectContaining({ operation: 'content' }),
+    ])
     const query = runCourseAgentCapabilityQuery(generationCapabilityData, ['--query', 'component.package', '--operation', 'patch', '--mode', 'instance', '--owner', 'scene', '--surface', 'slide']) as any
     expect(query.cards[0].content.inputSchema.oneOf[0].properties.mode.const).toBe('instance')
     expect(runCourseAgentCapabilityQuery(generationCapabilityData, [...args, '--summary'])).not.toHaveProperty('cards')

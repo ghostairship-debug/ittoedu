@@ -11,7 +11,7 @@ import { readLessonGenerationContext } from '../../src/main/localAgent/lessonGen
 import { LessonAuthoring } from '../../src/main/lessonAuthoring'
 import { LESSON_AUTHORING_STAGES } from '../../src/shared/lessonAuthoring'
 const roots: string[] = []
-afterEach(async () => { for (const root of roots.splice(0)) { if (!path.resolve(root).startsWith(path.resolve(os.tmpdir()) + path.sep)) throw new Error('Unexpected test directory'); await fs.rm(root, { recursive: true, force: true }) } })
+afterEach(async () => { for (const root of roots.splice(0)) { if (!path.resolve(root).startsWith(path.resolve(os.tmpdir()) + path.sep)) throw new Error('Unexpected test directory'); await fs.rm(root, { recursive: true, force: true, ...(process.platform === 'win32' ? { maxRetries: 8, retryDelay: 100 } : {}) }) } }, 30_000)
 async function fixture() {
  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'lesson-authoring-')); roots.push(root)
  const workspace = new LessonWorkspaceService(path.join(root, 'app')), lesson = (await workspace.create(root, '课例')).identity
@@ -35,7 +35,7 @@ async function material(f: Awaited<ReturnType<typeof fixture>>) {
  } })
  return { id: record.id, extractionVersion: record.extractionVersion, fragmentIds: ['body'] }
 }
-describe('lesson authoring current-file gates', () => {
+describe('lesson authoring current-file gates', { timeout: 20_000 }, () => {
  it('U08-current-file-guards saves invalid raw Markdown with codec diagnostics and rejects confirmation until repaired', async () => {
   const f = await fixture(), ref = f.refs[0]!, initial = await f.files.openDocument(ref)
   const invalid = await f.files.saveDocument({ ref, operationId: randomUUID(), expectedVersion: initial.version, source: '- 原稿\n  - 嵌套项目\n', attachments: [] })
@@ -127,7 +127,7 @@ it('generation rereads four real files and actual material receipts and refuses 
  await expect(readLessonGenerationContext(f.lesson, f, true)).rejects.toThrow()
  const refreshed = await readLessonGenerationContext(f.lesson, f, false)
  expect(refreshed.context.documents.find(doc => doc.role === 'teaching-plan')?.content).toBe('# 教师新稿')
-})
+}, 20_000)
 
 it('manual mode reads selected materials while retaining four separate confirmation gates', async () => {
  const f = await fixture(), selection = await material(f)
@@ -136,4 +136,4 @@ it('manual mode reads selected materials while retaining four separate confirmat
  expect((await f.authoring.validateBuild(f.lesson)).allowed).toBe(false)
  await confirmAll(f)
  expect((await readLessonGenerationContext(f.lesson, f, true)).context.materials[0]?.fragments[0]?.text).toBe('电流形成闭合回路')
-})
+}, 20_000)

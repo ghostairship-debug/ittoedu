@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { workspaceIdentityV1Schema, aiWorkspaceIdentitySchema, conversationAgentWorkspaceSchema, lessonAgentWorkspaceSchema } from './workspaceIdentity'
+import { frozenEditTargetSchema } from './lessonWorkspace'
 import { generationAfterCommitSchema, generationFailureSchema, generationCommitReceiptSchema, generationRequestSchema } from './generationContract'
 import { generationResultSchema } from './generationResult'
 import { aiUserInputSchema, aiInputDeliverySchema } from './localAgentInteraction'
@@ -97,8 +98,8 @@ const owner = { projectId: z.string().min(1).max(200), projectPath: z.string().m
 const optionalOwner = { projectId: owner.projectId.optional(), projectPath: owner.projectPath.optional() }
 export const localAgentRequestSchema = z.discriminatedUnion('operation', [
   z.object({ operation: z.literal('lesson-prepare-generation'), workspace: lessonAgentWorkspaceSchema }).strict(),
-  z.object({ operation: z.literal('lesson-start'), workspace: conversationAgentWorkspaceSchema, adapter: localAgentIdSchema, prompt: z.string().min(1).max(100000), userMessage: z.string().min(1).max(20000).optional(), intent: z.enum(['discuss', 'plan']).default('discuss') }).strict(),
-  z.object({ operation: z.literal('lesson-resume'), workspace: conversationAgentWorkspaceSchema, sessionId: z.uuid(), prompt: z.string().min(1).max(100000), userMessage: z.string().min(1).max(20000).optional(), preserveTaskBudget: z.literal(true).optional() }).strict(),
+  z.object({ operation: z.literal('lesson-start'), workspace: conversationAgentWorkspaceSchema, adapter: localAgentIdSchema, prompt: z.string().min(1).max(100000), userMessage: z.string().min(1).max(20000).optional(), intent: z.enum(['discuss', 'plan']).default('discuss'), frozenTarget: frozenEditTargetSchema.optional() }).strict(),
+  z.object({ operation: z.literal('lesson-resume'), workspace: conversationAgentWorkspaceSchema, sessionId: z.uuid(), prompt: z.string().min(1).max(100000), userMessage: z.string().min(1).max(20000).optional(), preserveTaskBudget: z.literal(true).optional(), frozenTarget: frozenEditTargetSchema.optional() }).strict(),
   z.object({ operation: z.literal('lesson-list'), workspace: conversationAgentWorkspaceSchema }).strict(),
   z.object({ operation: z.literal('lesson-read'), workspace: conversationAgentWorkspaceSchema, sessionId: z.uuid(), after: z.number().int().nonnegative().default(0) }).strict(),
   z.object({ operation: z.literal('lesson-cancel'), workspace: conversationAgentWorkspaceSchema, sessionId: z.uuid() }).strict(),

@@ -14,6 +14,8 @@ import type { AgentExecutable } from '../../src/main/localAgent/process'
 import { localAgentCapabilitiesSchema } from '../../src/shared/localAgentContract'
 import { configureNativeSystemProxy } from '../../src/main/localAgent/nativeProxy'
 
+// 全量并发下 Windows 临时目录清理会出现 EBUSY/ENOTEMPTY 竞态；有界重试（D2 同款）。
+const win32RmRetry = process.platform === 'win32' ? { maxRetries: 8, retryDelay: 100 } : {}
 afterEach(() => {
   vi.restoreAllMocks()
 })
@@ -40,7 +42,7 @@ async function nativeFixture(onRequest: string) {
   const adapter = new ClaudeProcessTransportAdapter(async () => ({ executable: process.execPath, prefix: [fixture] }))
   return { directory, adapter, async cleanup() {
     await adapter.close()
-    await fs.rm(directory, { recursive: true, force: true })
+    await fs.rm(directory, { recursive: true, force: true, ...win32RmRetry })
   } }
 }
 
@@ -85,7 +87,7 @@ describe('Claude initialization failure reasons', () => {
       await expect(adapter.open({ cwd: directory, externalSessionId: null })).rejects.toThrow(message)
     } finally {
       await adapter.close()
-      await fs.rm(directory, { recursive: true, force: true })
+      await fs.rm(directory, { recursive: true, force: true, ...win32RmRetry })
     }
   })
 })
@@ -604,7 +606,7 @@ describe('Claude capabilities discovery and model parsing', () => {
       expect(caps.input.question).toBe('structured')
       expect(caps.input.correction).toBe('interrupt-resume')
     } finally {
-      await fs.rm(directory, { recursive: true, force: true })
+      await fs.rm(directory, { recursive: true, force: true, ...win32RmRetry })
     }
   })
 })
@@ -649,7 +651,7 @@ describe('ClaudeProcessTransportAdapter', () => {
       `)
       expect((await adapter.probe()).status).toBe('ready')
     } finally {
-      await fs.rm(directory, { recursive: true, force: true })
+      await fs.rm(directory, { recursive: true, force: true, ...win32RmRetry })
     }
   })
 
@@ -721,7 +723,7 @@ describe('ClaudeProcessTransportAdapter', () => {
       ])
     } finally {
       await adapter.close()
-      await fs.rm(directory, { recursive: true, force: true })
+      await fs.rm(directory, { recursive: true, force: true, ...win32RmRetry })
     }
   })
 
@@ -997,7 +999,7 @@ describe('ClaudeProcessTransportAdapter', () => {
       expect(end2?.status).toBe('completed')
     } finally {
       await adapter.close()
-      await fs.rm(directory, { recursive: true, force: true })
+      await fs.rm(directory, { recursive: true, force: true, ...win32RmRetry })
     }
   })
 
@@ -1107,7 +1109,7 @@ describe('ClaudeProcessTransportAdapter', () => {
       expect(turnEnded?.failure).toBeNull()
     } finally {
       await adapter.close()
-      await fs.rm(directory, { recursive: true, force: true })
+      await fs.rm(directory, { recursive: true, force: true, ...win32RmRetry })
     }
   })
 
@@ -1182,7 +1184,7 @@ describe('ClaudeProcessTransportAdapter', () => {
       })
     } finally {
       await adapter.close()
-      await fs.rm(directory, { recursive: true, force: true })
+      await fs.rm(directory, { recursive: true, force: true, ...win32RmRetry })
     }
   })
 
@@ -1324,7 +1326,7 @@ describe('ClaudeProcessTransportAdapter', () => {
       expect(unmatchedAnswerDelivery.reason).toContain('未找到匹配的提问或已超时')
     } finally {
       await adapter.close()
-      await fs.rm(directory, { recursive: true, force: true })
+      await fs.rm(directory, { recursive: true, force: true, ...win32RmRetry })
     }
   })
 })

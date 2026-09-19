@@ -1151,7 +1151,7 @@ export class LocalAgentHarness {
         if (this.captureExternalSession(owner, adapter.getExternalSessionId?.(), externalId)) await this.persist(owner)
         if (event.kind === 'configuration') {
           const capabilities = localAgentCapabilitiesSchema.parse(event.capabilities)
-          if (capabilities.adapter !== adapter.id) throw new Error('protocol')
+          if (capabilities.adapter !== adapter.id) throw new Error(`protocol: configuration adapter ${capabilities.adapter} does not match ${adapter.id}`)
           if (preference) this.assertRequestedConfiguration(preference, capabilities)
           configurationConfirmed = !preference || this.configurationMatches(preference, capabilities)
           const current = owner.record.tasks.at(-1)!
@@ -1166,18 +1166,19 @@ export class LocalAgentHarness {
             break
           }
           if (event.status === 'completed') {
-            if (completed) throw new Error('protocol')
+            if (completed) throw new Error('protocol: duplicate turn completion')
             completed = true
             continue
           }
         }
-        if (completed) throw new Error('protocol')
+        // Protocol failures name the violated invariant so a flaky native run stays diagnosable from the record.
+        if (completed) throw new Error(`protocol: ${event.kind} event after turn completion`)
         if (event.kind === 'tool') {
           if (event.status === 'running') {
-            if (tools.has(event.itemId)) throw new Error('protocol')
+            if (tools.has(event.itemId)) throw new Error(`protocol: tool ${event.itemId} reported running twice`)
             tools.add(event.itemId)
           } else if (!tools.delete(event.itemId)) {
-            throw new Error('protocol')
+            throw new Error(`protocol: tool ${event.itemId} reported ${event.status} without a running start`)
           }
         }
         this.append(owner.record, run.runId, event)
@@ -1193,7 +1194,7 @@ export class LocalAgentHarness {
       while (run.inputWrites.size && !run.cancelled) await Promise.all([...run.inputWrites])
       const pending = owner.record.tasks.at(-1)?.pendingInputs ?? []
       if (run.cancelled || (interrupted && !run.interruptConfirmed) || (!completed && !interrupted) || !pending.length) { run.acceptingInputs = false; break }
-      if (tools.size) throw new Error('protocol')
+      if (tools.size) throw new Error(`protocol: tools still running before the next turn: ${[...tools].join(', ')}`)
       const current = owner.record.tasks.at(-1)!
       if (current.execution && Date.now() >= current.execution.deadlineAt) throw new Error('output-limit')
       this.append(owner.record, run.runId, { kind: 'turn-ended', status: interrupted ? 'cancelled' : 'completed', failure: null, ...this.identity(owner.record, run.runId) })
@@ -1210,7 +1211,15 @@ export class LocalAgentHarness {
       await this.persist(owner)
       }
       if (!run.cancelled && !owner.record.events.some(event => event.kind === 'turn-ended' && event.runId === run.runId)) {
-        if (tools.size || !completed || !owner.record.externalSessionId || !configurationConfirmed) throw new Error('protocol')
+        if (tools.size || !completed || !owner.record.externalSessionId || !configurationConfirmed) {
+          const reasons = [
+            tools.size ? `tools still running: ${[...tools].join(', ')}` : '',
+            completed ? '' : 'turn ended without completion',
+            owner.record.externalSessionId ? '' : 'native session id missing',
+            configurationConfirmed ? '' : 'requested configuration not confirmed',
+          ].filter(Boolean)
+          throw new Error(`protocol: ${reasons.join('; ')}`)
+        }
         const explicitCandidateFile = owner.generationRequest && owner.record.adapter === 'codex' && owner.record.events.some(event =>
           event.runId === run.runId && event.kind === 'text' && event.phase === 'candidate'
           && event.text === generationStagedCandidateMarker(owner.generationRequest!.requestId))

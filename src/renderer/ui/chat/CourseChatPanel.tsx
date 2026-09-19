@@ -16,6 +16,7 @@ import { projectEffectiveLayers } from '../../course/effectiveLayerProjection'
 import { buildFlowEditorView } from '../../course/flowEditorView'
 import { NativeAgentQuestion } from './NativeAgentQuestion'
 import { NativeAgentConfiguration } from './NativeAgentConfiguration'
+import { ChatComposerMenus, useDirectoryMentions } from './ChatComposerMenus'
 import { GenerationCandidatePreview } from './GenerationCandidatePreview'
 import { awaitCourseChatStage, createCourseChatObservation, type CourseChatTarget } from './courseChatObservation'
 import { aiQuestionSchema, aiInputDeliverySchema } from '../../../shared/localAgentInteraction'
@@ -75,6 +76,8 @@ export function CourseChatPanel({ projectId, projectPath, onClose, lessonWorkspa
   const [teachingPlan, setTeachingPlan] = useState(''), [presentationScript, setPresentationScript] = useState('')
   const [planConfirmed, setPlanConfirmed] = useState(false), [scriptConfirmed, setScriptConfirmed] = useState(false)
   const [instruction, setInstruction] = useState('')
+  const mentionDirectory = projectPath ? projectPath.replace(/[\\/][^\\/]+$/, '') : null
+  const mentions = useDirectoryMentions(mentionDirectory)
   const resolvedReference = useMemo(() => {
     try { return { scope: resolveGenerationReferenceScope({ instruction, scope: wholeCourse ? 'course' : scope, scopeExplicit }), error: '' } }
     catch (cause) { return { scope, error: message(cause) } }
@@ -329,7 +332,7 @@ export function CourseChatPanel({ projectId, projectPath, onClose, lessonWorkspa
       let confirmedDocuments = wholeCourse ? { teachingPlan, presentationScript } : undefined
       if (wholeCourse && lessonWorkspace) {
         const prepared = await prepareStage(current, () => api.localAgent({ operation: 'lesson-prepare-generation', workspace: lessonWorkspace }))
-        if (!prepared.lessonGeneration) throw new Error('当前课例文档尚未准备完成，请重新检查四阶段文件')
+        if (!prepared.lessonGeneration) throw new Error('当前策划或脚本尚未准备完成，请先审阅当前制品后再继续')
         confirmedDocuments = prepared.lessonGeneration.confirmedDocuments
       } else if (requestedIntent === 'edit' && wholeCourse && (!planConfirmed || !scriptConfirmed || !teachingPlan.trim() || !presentationScript.trim())) throw new Error('整课生成前，请分别审阅并确认当前教学策划和呈现脚本')
       const request = await prepareStage(current, () => bridge.capture({ workspace, execution: current.execution,
@@ -434,16 +437,35 @@ export function CourseChatPanel({ projectId, projectPath, onClose, lessonWorkspa
         {!busy && <label className="chat-budget">本次时间预算<select aria-label="本次时间预算" value={budgetMinutes} onChange={event => setBudgetMinutes(Number(event.target.value))}>{GENERATION_TASK_BUDGET_MINUTES.map(minutes => <option key={minutes} value={minutes}>{minutes} 分钟</option>)}</select><small>复杂任务可增加预算；到期会停止，已应用的修改保留。</small></label>}
         <div className="chat-controls"><label>意图<select aria-label="意图" disabled={busy} value={intent} onChange={event => setIntent(event.target.value as typeof intent)}><option value="discuss">讨论</option><option value="plan">计划</option><option value="edit">编辑</option></select></label>
           {intent === 'edit' && <label>应用方式<select aria-label="应用方式" disabled={busy} value={applyPolicy} onChange={event => setApplyPolicy(event.target.value as typeof applyPolicy)}><option value="auto">自动应用</option><option value="preview">先看预览</option></select></label>}</div>
-        <label>本轮引用<select aria-label="本轮引用" value={busy && frozenReference ? frozenReference.scope : resolvedReference.scope} disabled={busy || wholeCourse} onChange={event => setReference({ identity: referenceIdentity, scope: event.target.value as GenerationReferenceScope, explicit: true })}><option value="page">当前页</option><option value="selection">当前选择</option><option value="course">整课内容</option></select></label>
+        <div className="chat-auto-target">
+          <button type="button" aria-label="当前编辑目标" disabled={busy}>
+            {busy && frozenReference ? frozenReference.name : referenceName}
+          </button>
+          <small aria-label="本轮引用摘要">{busy && frozenReference ? frozenReference.name : referenceName}</small>
+          <details className="chat-target-more"><summary>其它目标</summary>
+            <select aria-label="本轮引用" value={busy && frozenReference ? frozenReference.scope : resolvedReference.scope} disabled={busy || wholeCourse} onChange={event => setReference({ identity: referenceIdentity, scope: event.target.value as GenerationReferenceScope, explicit: true })}>
+              <option value="page">当前页</option>
+              <option value="selection">当前选择</option>
+              <option value="course">整份课件</option>
+            </select>
+          </details>
+        </div>
         {resolvedReference.error && <p role="alert">{resolvedReference.error}</p>}
-        <small aria-label="本轮引用摘要">{busy && frozenReference ? frozenReference.name : referenceName}</small>
-        <details><summary>从已确认文档生成整课</summary><label><input type="checkbox" disabled={busy} checked={wholeCourse} onChange={event => setWholeCourse(event.target.checked)} />生成包含多个片段的完整课件</label>
-          {wholeCourse && lessonWorkspace && <p>将读取当前课例的四阶段文件和材料；文档修改后需要重新确认。</p>}
-          {wholeCourse && !lessonWorkspace && <><label>教学策划 Markdown<textarea value={teachingPlan} disabled={busy} onChange={event => { setTeachingPlan(event.target.value); setPlanConfirmed(false) }} /></label><label><input type="checkbox" disabled={busy || !teachingPlan.trim()} checked={planConfirmed} onChange={event => setPlanConfirmed(event.target.checked)} />已审阅并确认当前教学策划</label>
-            <label>呈现脚本 Markdown<textarea value={presentationScript} disabled={busy} onChange={event => { setPresentationScript(event.target.value); setScriptConfirmed(false) }} /></label><label><input type="checkbox" disabled={busy || !presentationScript.trim()} checked={scriptConfirmed} onChange={event => setScriptConfirmed(event.target.checked)} />已审阅并确认当前呈现脚本</label><small>整课生成会引用整课内容；编辑文档后须重新确认。</small></>}
+        <details><summary>先审当前制品再继续</summary><label><input type="checkbox" aria-label="用户明确要求先看当前策划/脚本后再生成" disabled={busy} checked={wholeCourse} onChange={event => setWholeCourse(event.target.checked)} />用户明确要求先看当前策划/脚本后再生成</label>
+          {wholeCourse && lessonWorkspace && <p>仅在你要求先审真实制品时暂停；不会默认生成四份阶段文稿。</p>}
+          {wholeCourse && !lessonWorkspace && <><label>当前策划 Markdown<textarea aria-label="当前策划 Markdown" value={teachingPlan} disabled={busy} onChange={event => { setTeachingPlan(event.target.value); setPlanConfirmed(false) }} /></label><label><input type="checkbox" aria-label="已审阅当前策划" disabled={busy || !teachingPlan.trim()} checked={planConfirmed} onChange={event => setPlanConfirmed(event.target.checked)} />已审阅当前策划</label>
+            <label>当前脚本 Markdown<textarea aria-label="当前脚本 Markdown" value={presentationScript} disabled={busy} onChange={event => { setPresentationScript(event.target.value); setScriptConfirmed(false) }} /></label><label><input type="checkbox" aria-label="已审阅当前脚本" disabled={busy || !presentationScript.trim()} checked={scriptConfirmed} onChange={event => setScriptConfirmed(event.target.checked)} />已审阅当前脚本</label></>}
         </details>
         {!!materials.length && <details><summary>引用教学材料（{materialIds.length}）</summary>{materials.map(material => <label key={material.id}><input type="checkbox" checked={materialIds.includes(material.id)} disabled={busy} onChange={event => setMaterialIds(prior => event.target.checked ? [...prior, material.id] : prior.filter(id => id !== material.id))} />{material.title}</label>)}</details>}
         </details>
+        <ChatComposerMenus value={instruction} onChange={setInstruction}
+          commands={[
+            { id: 'discuss', label: '讨论', run: () => setIntent('discuss') },
+            { id: 'plan', label: '计划', run: () => setIntent('plan') },
+            { id: 'edit', label: '编辑', run: () => setIntent('edit') },
+            { id: 'stop', label: '停止当前任务', run: () => { void stop() } },
+          ]}
+          mentions={mentions} />
         <textarea aria-label="发送给创作助手" value={instruction} onChange={event => setInstruction(event.target.value)} placeholder={busy ? '补充或纠正当前任务…' : '描述要讲解的内容或需要修改的地方…'} rows={3} />
         {view.busy && <label>输入用途<select aria-label="输入用途" value={inputKind} onChange={event => setInputKind(event.target.value as typeof inputKind)}><option value="correct">立即引导</option><option value="supplement">下一回合补充</option></select><small>{inputKind === 'correct' ? '现在发送；需要时会中断当前回合，带着新要求继续。' : '等待当前回合结束后处理，本次总预算不变。'}</small></label>}
         <button type="submit" disabled={preparing || configurationSaving || !instruction.trim()}>{configurationSaving ? '正在保存配置…' : view.busy ? '发送输入' : '发送'}</button> <button type="button" disabled={!busy} onClick={() => void stop()}>停止</button>

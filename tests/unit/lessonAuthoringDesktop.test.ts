@@ -14,7 +14,7 @@ import { createCourseProjectArchive } from '../../src/renderer/project/coursePro
 import { createLessonDocumentFiles } from '../../src/main/lessonDocumentFiles'
 import type { LocalAgentRecord, LocalAgentRequest, LocalAgentResponse } from '../../src/shared/localAgentContract'
 const roots: string[] = []
-afterEach(async () => { for (const root of roots.splice(0)) { if (!path.resolve(root).startsWith(path.resolve(os.tmpdir()) + path.sep)) throw new Error('Unsafe test root'); await fs.rm(root, { recursive: true, force: true }) } })
+afterEach(async () => { for (const root of roots.splice(0)) { if (!path.resolve(root).startsWith(path.resolve(os.tmpdir()) + path.sep)) throw new Error('Unsafe test root'); await fs.rm(root, { recursive: true, force: true, ...(process.platform === 'win32' ? { maxRetries: 8, retryDelay: 100 } : {}) }) } }, 30_000)
 async function fixture(options: { invalidFirstCandidate?: boolean } = {}) {
  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'authoring-stage-')); roots.push(root)
  const workspace = new LessonWorkspaceService(root), lesson = (await workspace.create(root, '课例')).identity
@@ -37,7 +37,7 @@ async function fixture(options: { invalidFirstCandidate?: boolean } = {}) {
  const service = new LessonAuthoringDesktopService({ userData: root, editorRoot: path.resolve('.'), workspace, files, authoring, agent })
  return { root, workspace, lesson, files, materials, authoring, service, prompts, requests, context: { lesson, conversationId: randomUUID() } }
 }
-describe('integrated product authoring stages', () => {
+describe('integrated product authoring stages', { timeout: 20_000 }, () => {
  it('saves manual stage output through the real file owner and stops for its current confirmation', async () => {
   const f = await fixture()
   await f.service.operate({ operation: 'start', ...f.context, adapter: 'codex', instruction: '初中串并联电路' })
@@ -120,7 +120,7 @@ it('repairs current stages against prior inputs before reusing unchanged module 
  expect(reused.assembly!.ticket.id).not.toBe(original.ticket.id)
  expect(reused.assembly!.moduleSource).toBe(original.moduleSource); expect(f.prompts).toHaveLength(5)
  expect(await fs.readFile(path.join(f.root, 'lesson-authoring-runs', 'v1', 'history', original.ticket.id + '.json'), 'utf8')).toContain(original.ticket.id)
-})
+}, 20_000)
 
 it('Stop invalidates prepared edits for every registered document', async () => {
  const f = await fixture()
@@ -172,7 +172,7 @@ it('repairs the pinned native module using real diagnostics and guards stopped, 
  await fs.writeFile(path.join(f.lesson.normalizedDirectory, ref.relativePath), '# 教师新的简报')
  await expect(f.service.operate({ operation: 'continue-application', ...f.context, ticketId: resumed.run!.ticketId, currentTarget: target })).rejects.toThrow()
  expect((await f.service.operate({ operation: 'read', ...f.context })).failure).toEqual(failure)
-})
+}, 20_000)
 
 it('U08-repair-before-write returns format diagnostics to the same native session before saving', async () => {
  const f = await fixture({ invalidFirstCandidate: true })

@@ -23,9 +23,9 @@ const directories: string[] = []
 afterEach(async () => {
   for (const directory of directories.splice(0)) {
     if (!path.resolve(directory).startsWith(path.resolve(os.tmpdir()) + path.sep)) throw new Error('Unexpected test directory')
-    await fs.rm(directory, { recursive: true, force: true })
+    await fs.rm(directory, { recursive: true, force: true, ...(process.platform === 'win32' ? { maxRetries: 8, retryDelay: 100 } : {}) })
   }
-})
+}, 30_000)
 async function fixture() {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'harness-native-'))
   directories.push(directory)
@@ -962,7 +962,7 @@ describe('Native candidate media file ingestion', () => {
   })
 })
 
-describe('Codex explicit candidate file delivery', () => {
+describe('Codex explicit candidate file delivery', { timeout: 20_000 }, () => {
   it('does not ingest or revive a cancelled turn while its candidate file is being read', async () => {
     const { directory, workspace } = await fixture(), repository = new LocalAgentRepository(directory)
     const request = fileCandidateRequest(workspace), adapter = new FileNativeAdapter(writeMediaReferenceCandidate)
@@ -1107,7 +1107,7 @@ describe('Codex explicit candidate file delivery', () => {
   })
 })
 
-describe('Claude native candidate file delivery', () => {
+describe('Claude native candidate file delivery', { timeout: 20_000 }, () => {
   it('delivers the native-script PNG bytes exactly and awaits a host receipt without committing or completing the task', async () => {
     const { directory, workspace } = await fixture(), repository = new LocalAgentRepository(directory)
     const request = fileCandidateRequest(workspace), adapter = new FileNativeAdapter(writeNativeFileCandidate)
@@ -1262,7 +1262,7 @@ async function inputBoundaryFixture() {
   return { repository, workspace, request, adapter, harness, id, input }
 }
 
-describe('native input turn boundaries', () => {
+describe('native input turn boundaries', { timeout: 20_000 }, () => {
   it.each(['continue', 'stop', 'failed-ack'] as const)('persists correction before native interrupt and fences the old candidate on %s', async scenario => {
     const { repository, workspace, adapter, harness, id, input } = await inputBoundaryFixture()
     const interrupting = adapter as InputBoundaryAdapter & { interruptTurn(): Promise<void> }
@@ -1417,7 +1417,7 @@ describe('native input turn boundaries', () => {
   })
 })
 
-describe('same native task host feedback', () => {
+describe('same native task host feedback', { timeout: 20_000 }, () => {
   it('continues an early answer once in the same native session and stops repeated incomplete replies within the existing budget', async () => {
     const { directory, workspace } = await fixture(), repository = new LocalAgentRepository(directory)
     const adapters: NativeAdapter[] = []

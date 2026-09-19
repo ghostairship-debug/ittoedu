@@ -1,4 +1,4 @@
-# r19-042-draft-workspace-continuity：实现真实工作空间、课例身份与工程保存连续性
+# r19-042-draft-workspace-continuity：目录归属与文件编辑身份连续性
 
 - Release: 1.9
 - Dependencies: `r19-040-session-persistence-deletion`
@@ -6,31 +6,21 @@
 - Write locks: `contracts-schema`, `ai-session`, `app-save-recovery`, `chat-ui`, `main-preload`
 - Gaps: G09
 
-## 结果与边界
+日期：2026-09-18。本文是目标规格，当前实施次序、事实和验收统一见[完整实施方案](../../R19_FRONTEND_SPECIAL_IMPLEMENTATION_PLAN.md)；本轮仅文档重建。
 
-节点ID保留作路线引用，旧“未绑定讨论→draft→首存新会话”设计已被Owner决定替代。按 [课例与文件合同](../../R19_LESSON_DOCUMENT_WORKSPACE_CONTRACT.md)创建真实课例并立即持有稳定身份，材料/文档/对话先于课件存在；首次工程保存只绑定文件与新编辑目标，不重建课例对话。
+## 目标与现状
+工作空间/项目目录独立承载会话，文件打开才形成当前编辑上下文；首次保存不断对话，Save As 隔离工程执行身份。无需 lesson.json、固定四稿或 .h5lesson 才开始。对应 F01，V01/V02/V04。
 
-Owner明确无兼容需求：直接使用新课例记录，不迁移旧draft、旧workspace identity或旧会话格式。不修改V9项目id/revision的工程语义；本地课例标识不等于工程目标。
+## 直接入口与职责
+shared/workspaceIdentity.ts、lessonWorkspace/lessonDesktopContract、localAgentTaskContract；main/lessonWorkspace、lessonDesktopService、localAgent/service 与 renderer 工程打开/保存生命周期。复用040记录、049文件会话；共享 strict Schema、IPC/main/preload/renderer 在同一可运行批次切换，不能只放宽一端。
 
-## 直接入口与写域
+## 执行与退出
+1. 统一 workspaceRoot/projectPath 规范化及目录关系；按真实 scope 设置 cwd 和读取 owner。文件引用、消息目标与目录权限分开，标签不等于 CLI 权限生效。
+2. 发送冻结真实文件/工程身份、范围、revision/磁盘版本和 epoch；焦点改变只影响后续消息，旧候选不能应用到当前新文件。
+3. 真正未保存工程首次保存只绑定文件并失效旧 epoch，观察新目标再接续。取消/失败保持工程、草稿和会话，测试不得提前 bind 后声称首存通过。
+4. Save As 新建工程编辑身份；不复制旧候选、工程专属会话执行句柄/trace/提交历史。目录对话可以继续，但消息仍标注原目标；原历史可查看，新任务重新观察。
+5. 外部目录另存不迁移当前 cwd 或会话归属；改名/移动更新实际文件引用和恢复定位，复制不复制执行记录。目录移动需核实来源并显式重关联，同名/外部副本不能自动合并。
+6. 未知/旧记录不静默解释为新身份；本次无兼容要求不能用于清空真实文件或恢复稿。错误、权限/创建失败须反馈实际结果。
 
-- [workspaceIdentity.ts](../../../../src/shared/workspaceIdentity.ts)、[main/workspaceIdentity.ts](../../../../src/main/workspaceIdentity.ts)：本地身份边界。
-- [ipcTypes.ts](../../../../src/shared/ipcTypes.ts)、[localAgentTaskContract.ts](../../../../src/shared/localAgentTaskContract.ts)：目录/课例窄端口、任务目标及epoch。
-- [useCourseProjectLifecycle.ts](../../../../src/renderer/app/useCourseProjectLifecycle.ts)、[courseProjectLifecycle.ts](../../../../src/renderer/project/courseProjectLifecycle.ts)、[projectPersistence.ts](../../../../src/main/projectPersistence.ts)：保存、关闭、恢复和另存。
-- [repository.ts](../../../../src/main/localAgent/repository.ts)、[harness.ts](../../../../src/main/localAgent/harness.ts)：040端口与课例归属接线。
-
-共享IPC/身份/Chat由唯一Owner写入；045和049消费本节点课例/文件引用，不各自造身份。
-
-## 执行与验收
-
-1. 选工作空间、命名/定位新课例，创建真实目录及lesson.json；普通目录作为课例打开时保留教师文件。同名、权限/创建失败、取消不留下虚假课例。
-2. 课例内四类教学文档、材料目录和当前课件用相对路径；无工程时允许文档/材料创作，不用空字符串或虚构路径绕过工程守卫。
-3. 构建产生唯一工程，首次保存时flush合法草稿、失效旧编辑epoch，成功后绑定文件并以新观察续作。取消/失败保留当前内容；AI记录失败不能撤销成功保存。
-4. Save As新工程身份且不复制原工程会话/候选/CLI句柄。课例外目标独立记录，不写越出课例的相对路径。新课例副本另分配ID，移动本版本课例重关联记录与恢复稿。
-5. 保存中继续编辑仍dirty；Stop、关闭、崩溃与迟到回调不串课例或重复提交。文档文件保存由049负责，工程保存仍归原保存Owner。
-
-## 聚焦验证与交接
-
-在 localAgentTaskContract、useCourseProjectLifecycle、projectPersistence 的实际测试补新转换与失败反例；不保留旧身份迁移测试作为交付义务。共用两个同名不同目录课例验证身份/工程：一个首次保存并继续，一个取消保存仍可编辑，补Save As、移动和重启。文档共编部分由049/050在这些真实课例上接续验证并回链，不要求先完成下游文件编辑器才能交付042身份端口。
-
-040提供记录端口，042向041/045/049/044提供真实课例与工程目标。开始时核对总纲、任务板、工作协议及合同；当前仅路线规格。
+## 验收与交接
+两个同名目录和同名课件隔离；无工程对话/重启；真实首存/取消/失败；目录内外 Save As；文件重命名/移动/复制与保存冲突；发送后换文件/切根/停止和迟到候选。先证明共享归属与版本规则，再用一条连续工作台链证明真实保存/重开。CopyMove 的 skip 不算证据，恢复相关命名用例后才能计完成。

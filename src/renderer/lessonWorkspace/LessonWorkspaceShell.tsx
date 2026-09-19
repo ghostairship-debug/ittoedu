@@ -2,7 +2,7 @@ import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react'
 import type { ReactNode } from 'react'
 import type { LessonDesktopRequest, LessonDesktopResult } from '../../shared/lessonDesktopContract'
 import type { LessonConversation, LessonWorkspace } from '../../shared/lessonWorkspace'
-import type { LessonAgentWorkspace } from '../../shared/workspaceIdentity'
+import type { ConversationAgentWorkspace, LessonAgentWorkspace } from '../../shared/workspaceIdentity'
 import type { LocalAgentId } from '../../shared/localAgentContract'
 import type { LessonDocumentAiAPI } from '../../shared/lessonDocumentAiTask'
 import type { DocumentFileRef, DocumentFileVersion } from '../../shared/document/ports'
@@ -23,22 +23,24 @@ export interface LessonWorkspaceShellProps {
   onOpenProject(path: string): Promise<boolean>
   onNewProject(): Promise<boolean>
   renderChat(lesson: LessonWorkspace, conversation: LessonConversation, documentTarget?: DocumentChatTarget): ReactNode
-  renderDirectoryChat?(root: string, conversation: LessonConversation): ReactNode
+  renderDirectoryChat?(root: string, conversation: LessonConversation, documentTarget?: DocumentChatTarget): ReactNode
   renderMaterial?(path: string, lesson: LessonWorkspace | null): ReactNode
   renderMaterials?(lesson: LessonWorkspace): ReactNode
   renderWorkflow?(lesson: LessonWorkspace, conversation: LessonConversation): ReactNode
   onActiveLesson?(lesson: LessonWorkspace | null, conversation: LessonConversation | null): void
+  onActiveDirectoryConversation?(conversation: LessonConversation | null): void
   onDirtyChange?(dirty: boolean): void
   children: ReactNode
 }
 
 export interface LessonWorkspaceShellHandle {
   stopDocumentEdit(): Promise<void>
-  editDocument(filename: string, scope: LessonAgentWorkspace, adapter: LocalAgentId, instruction: string, onApplied?: (ref: DocumentFileRef, version: DocumentFileVersion) => Promise<void>): Promise<void>
+  editDocument(filename: string, scope: ConversationAgentWorkspace, adapter: LocalAgentId, instruction: string, onApplied?: (ref: DocumentFileRef, version: DocumentFileVersion) => Promise<void>): Promise<void>
   flushAll(): Promise<boolean>
   closeAll(): Promise<boolean>
   preserveAll(): Promise<boolean>
   applyBinding(lesson: LessonWorkspace, conversation: LessonConversation): void
+  applyDirectoryBinding(conversation: LessonConversation): void
   openFile(path: string): Promise<void>
   detachLesson(): void
   showProject(): void
@@ -48,7 +50,7 @@ export interface LessonWorkspaceShellHandle {
 export const LessonWorkspaceShell = forwardRef<LessonWorkspaceShellHandle, LessonWorkspaceShellProps>(function LessonWorkspaceShell(props, ref) {
   const scopeRef = useRef('')
   const tabs = useDocumentTabsController({ documentPort: props.documentPort, documentAiOperation: props.documentAiOperation, scopeRef })
-  const workspace = useLessonWorkspaceController({ lessonOperation: props.lessonOperation, projectPath: props.projectPath, onOpenProject: props.onOpenProject, onNewProject: props.onNewProject, onActiveLesson: props.onActiveLesson, tabs, scopeRef })
+  const workspace = useLessonWorkspaceController({ lessonOperation: props.lessonOperation, projectPath: props.projectPath, onOpenProject: props.onOpenProject, onNewProject: props.onNewProject, onActiveLesson: props.onActiveLesson, onActiveDirectoryConversation: props.onActiveDirectoryConversation, tabs, scopeRef })
   const dirty = tabs.tabs.some(tab => tab.dirty)
   useEffect(() => { props.onDirtyChange?.(dirty) }, [dirty, props.onDirtyChange])
   useImperativeHandle(ref, () => ({
@@ -65,6 +67,7 @@ export const LessonWorkspaceShell = forwardRef<LessonWorkspaceShellHandle, Lesso
     closeAll: tabs.closeAll,
     preserveAll: tabs.preserveAll,
     applyBinding: workspace.actions.applyBinding,
+    applyDirectoryBinding: workspace.actions.applyDirectoryBinding,
     openFile: async path => workspace.actions.openFile({ path, name: path.split(/[\\/]/).pop() ?? path, kind: 'file' }),
     detachLesson: workspace.actions.detachLesson,
     showProject: workspace.actions.showProject,

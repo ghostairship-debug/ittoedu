@@ -28,6 +28,7 @@ import {
 } from '../../src/shared/constants'
 import { BACKGROUND_E2E_ENV } from '../../src/main/windowVisibility'
 import { expectBackgroundWindowsIsolated } from './expectBackgroundWindowsIsolated'
+import { enterIndependentEditor, observeStartupSurface } from './lessonWorkspaceEntry'
 
 const root = resolve(__dirname, '..', '..')
 const focusedTextGates = process.env.COURSEWARE_E2E_TEXT_GATES === '1' || process.env.COURSEWARE_E2E_EXPORT_GATES === '1'
@@ -380,7 +381,6 @@ async function publishedTextMetrics(
 
 async function launchEditor(options: {
   preserveRecoveryPrompt?: boolean
-  mode?: 'simple' | 'professional'
   forceBackground?: boolean
 } = {}): Promise<LaunchedEditor> {
   const requestedBackgroundE2e = options.forceBackground ? '1' : backgroundE2e
@@ -407,10 +407,8 @@ async function launchEditor(options: {
   page.on('request', (request) => {
     if (/^https?:/i.test(request.url())) externalRequests.push(request.url())
   })
-  const startupMore = page.locator('.lesson-workspace-more > summary')
-  const startupEditor = page.getByRole('button', { name: '打开工程（Ctrl+O）', exact: true })
   const recovery = page.getByRole('alertdialog', { name: '发现未完成的本地恢复副本', exact: true })
-  await expect.poll(async () => await startupEditor.isVisible() || await startupMore.isVisible() || await recovery.isVisible()).toBe(true)
+  const startupState = await observeStartupSurface(page)
   const hasRecovery = await recovery.waitFor({ state: 'visible', timeout: focusedTextGates ? 1000 : 800 }).then(() => true).catch(() => false)
   if (options.preserveRecoveryPrompt && hasRecovery) {
     return { app, page, pageErrors, consoleErrors, consoleWarnings, externalRequests }
@@ -421,11 +419,7 @@ async function launchEditor(options: {
     await recovery.getByRole('button', { name: '丢弃副本' }).click()
     await expect(recovery).toHaveCount(0)
   }
-  if (!await startupEditor.isVisible() && await startupMore.isVisible() && !await recovery.isVisible()) {
-    await startupMore.click()
-    await page.getByRole('button', { name: '新建独立课件', exact: true }).click()
-  }
-  await page.locator('[data-testid="canvas-stage"] canvas').waitFor()
+  if (startupState !== 'editor') await enterIndependentEditor(page)
   // Recovery hydration can finish after the landing controls become visible.
   // Resolve that same explicit policy before the late modal can cover the
   // editor; preserved recovery tests return without altering the offer.
@@ -437,13 +431,6 @@ async function launchEditor(options: {
     await expect(recovery).toHaveCount(0)
   }
   await expectBackgroundWindowsIsolated(app, requestedBackgroundE2e === '1')
-  const modeButton = page.getByRole('button', {
-    name: options.mode === 'simple' ? '简洁' : '专业',
-  })
-  if (await modeButton.getAttribute('aria-pressed') !== 'true') {
-    await modeButton.click()
-  }
-  await expect(modeButton).toHaveAttribute('aria-pressed', 'true')
   await showEditorPanel(page, 'properties')
   return {
     app,
@@ -1052,13 +1039,11 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
   })
 
   test('里程碑闭环：简洁模式完成文字、透明度、左起竖排与出现动画试运行', async () => {
-    const { app, page, pageErrors, consoleErrors } = await launchEditor({
-      mode: 'simple',
-    })
+    const { app, page, pageErrors, consoleErrors } = await launchEditor()
     try {
       await expect(page.getByRole('tab', { name: '元素' })).toBeVisible()
-      await expect(page.getByRole('tab', { name: '互动与动画' })).toHaveCount(0)
-      await expect(page.getByRole('tab', { name: '开发' })).toHaveCount(0)
+      await expect(page.getByRole('tab', { name: '互动与动画' })).toBeVisible()
+      await expect(page.getByRole('tab', { name: '开发' })).toBeVisible()
       await selectEditorTab(page, '媒体')
       await expect(page.getByTestId('media-tab')).toBeVisible()
       await expect(page.getByTestId('add-image')).toHaveCount(0)
@@ -1214,7 +1199,6 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
       await page.getByTestId('global-layer-entry').click()
       await selectEditorTab(page, '属性')
       await page.getByLabel('导航控制方式').selectOption('none')
-      await page.getByRole('button', { name: '专业' }).click()
       await selectEditorTab(page, '互动与动画')
       await expect(
         page.getByRole('heading', { name: '互动与动画' }),

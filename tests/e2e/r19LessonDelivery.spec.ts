@@ -261,11 +261,14 @@ test('r19 original saved lesson: resource closure, reopen, both previews and off
         expect(canvas!.width, 'Collapsed panels must leave useful canvas width').toBeGreaterThanOrEqual(300)
       }
     }
-    const mode = page.getByRole('group', { name: '编辑模式', exact: true })
-    const initialMode = await mode.getByRole('button', { pressed: true }).innerText()
-    for (const label of ['简洁', '专业']) {
-      await mode.getByRole('button', { name: label, exact: true }).click()
-      await expect(mode.getByRole('button', { name: label, exact: true })).toHaveAttribute('aria-pressed', 'true')
+    for (const label of ['工作台', '编辑器']) {
+      if (label === '编辑器') {
+        await page.getByRole('button', { name: '在编辑器中打开' }).click()
+        await expect(page.locator('.lesson-workspace-shell')).toHaveAttribute('data-editor-focus', 'true')
+      } else {
+        const back = page.getByRole('button', { name: '返回工作台' })
+        if (await back.isVisible().catch(() => false)) await back.click()
+      }
       await noOuterOverflow()
       const toolbar = page.locator('.lesson-course-tab .toolbar')
       const toolbarBounds = await toolbar.boundingBox()
@@ -280,7 +283,7 @@ test('r19 original saved lesson: resource closure, reopen, both previews and off
         await toggle.click()
         const ownerPanel = page.getByRole('complementary', { name: region, exact: true })
         await expect(ownerPanel).toBeVisible()
-        if (label === '专业' && region === '编辑面板') {
+        if (label === '编辑器' && region === '编辑面板') {
           const selectedTab = await ownerPanel.locator('.sidebar-tab[aria-selected="true"]').innerText()
           await ownerPanel.getByRole('tab', { name: '开发', exact: true }).click()
           await expect(ownerPanel.getByRole('tab', { name: '开发', exact: true })).toHaveAttribute('aria-selected', 'true')
@@ -322,8 +325,8 @@ test('r19 original saved lesson: resource closure, reopen, both previews and off
     await expect(materials.getByRole('article', { name: '材料片段内容', exact: true })).toBeVisible()
     await noOuterOverflow()
     await page.screenshot({ path: join(output, 'narrow-materials.png'), fullPage: false })
-    await tabs.getByRole('tab', { name: /^课件/ }).click()
-    await expect(tabs.getByRole('tab', { name: /^课件/ })).toHaveAttribute('aria-selected', 'true')
+    await tabs.getByRole('tab', { name: /course|新建课件/ }).click()
+    await expect(tabs.getByRole('tab', { name: /course|新建课件/ })).toHaveAttribute('aria-selected', 'true')
     // Desktop keeps three columns; each navigation section has its own fold control.
     for (const label of ['资源管理器', '课例与对话']) {
       const heading = nav.getByRole('button', { name: label, exact: true })
@@ -337,7 +340,8 @@ test('r19 original saved lesson: resource closure, reopen, both previews and off
     await noOuterOverflow()
     await page.screenshot({ path: join(output, 'narrow-course-navigation.png'), fullPage: false })
     expect(readFileSync(join(paths.LESSON, docPath), 'utf8')).toBe(docSource)
-    await mode.getByRole('button', { name: initialMode, exact: true }).click()
+    const backToWorkbench = page.getByRole('button', { name: '返回工作台' })
+    if (await backToWorkbench.isVisible().catch(() => false)) await backToWorkbench.click()
     await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.setContentSize(1440, 900))
     await expect.poll(() => page.evaluate(() => innerWidth)).toBeGreaterThanOrEqual(1400)
     wideMeasurements = { requestedContentSize: [1440, 900], actualContentBounds: await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.getContentBounds()), innerSize: await page.evaluate(() => [innerWidth, innerHeight]) }

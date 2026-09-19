@@ -8,6 +8,7 @@ import { createTextNode } from '../../src/renderer/project/nativeNodeFactories'
 import { sceneNodeToCourseLayerItem } from '../../src/shared/courseProjectModel'
 import { createCourseProjectArchive } from '../../src/renderer/project/courseProjectArchive'
 import { expectBackgroundWindowsIsolated } from './expectBackgroundWindowsIsolated'
+import { enterIndependentEditor as enterStandaloneEditorFromLanding } from './lessonWorkspaceEntry'
 
 // Local delivery baseline only. The deterministic Node subprocess replaces the
 // native executable; Codex transport, Harness, IPC, Store and React UI stay real.
@@ -15,21 +16,6 @@ import { expectBackgroundWindowsIsolated } from './expectBackgroundWindowsIsolat
 const testRoot = resolve(__dirname, '../..')
 const productRoot = process.env.COURSEWARE_PERFORMANCE_PRODUCT_ROOT || testRoot
 const prefix = 'ittoedu-r18-local-performance-'
-
-async function enterStandaloneEditorFromLanding(page: Page): Promise<void> {
-  const landing = page.locator('.lesson-workspace-landing')
-  const editor = page.getByTestId('canvas-stage')
-  await Promise.race([
-    landing.waitFor({ state: 'visible', timeout: 15_000 }),
-    editor.waitFor({ state: 'visible', timeout: 15_000 }),
-  ])
-  if (!await landing.isVisible()) return
-  const more = page.locator('.lesson-workspace-more > summary')
-  if (!await more.isVisible()) return
-  await more.click()
-  const create = page.getByRole('button', { name: '新建独立课件', exact: true })
-  if (await create.isVisible()) await create.click()
-}
 
 function statistics(values: number[]) {
   const ordered = [...values].sort((a, b) => a - b)

@@ -23,23 +23,10 @@ import { playbackControllerInsets } from '../../src/shared/playbackViewGeometry'
 import { BACKGROUND_E2E_ENV } from '../../src/main/windowVisibility'
 import { expectBackgroundWindowsIsolated } from './expectBackgroundWindowsIsolated'
 import { showEditorPanel } from './r18NativeAuthoringFixture'
+import { enterIndependentEditor as enterStandaloneEditorFromLanding } from './lessonWorkspaceEntry'
 
 const root = resolve(__dirname, '..', '..')
 
-async function enterStandaloneEditorFromLanding(page: Page): Promise<void> {
-  const landing = page.locator('.lesson-workspace-landing')
-  const editor = page.getByTestId('canvas-stage')
-  await Promise.race([
-    landing.waitFor({ state: 'visible', timeout: 15_000 }),
-    editor.waitFor({ state: 'visible', timeout: 15_000 }),
-  ])
-  if (!await landing.isVisible()) return
-  const more = page.locator('.lesson-workspace-more > summary')
-  if (!await more.isVisible()) return
-  await more.click()
-  const create = page.getByRole('button', { name: '新建独立课件', exact: true })
-  if (await create.isVisible()) await create.click()
-}
 const SPATIAL_MOVE_REASON =
   '空间画布中的全课图层固定在视口，本页和世界图层跟随画布；当前不能跨这两种定位移动。'
 const SPATIAL_MOVE_ALERT = '图层顺序未更新。请在同一分组内重新排序。'
@@ -147,8 +134,6 @@ async function launchEditor(): Promise<LaunchedEditor> {
     attach(page)
     await page.locator('[data-testid="canvas-stage"] canvas').waitFor()
     await expectBackgroundWindowsIsolated(app, true)
-    const professional = page.getByRole('button', { name: '专业' })
-    if (await professional.getAttribute('aria-pressed') !== 'true') await professional.click()
     return { app, page, runRoot, ...diagnostics }
   } catch (error) {
     if (app) await closeEditor(app, runRoot).catch(() => undefined)
@@ -207,21 +192,48 @@ function courseTreeKind(page: Page, kind: string): Locator {
 }
 
 async function addSurface(page: Page, kind: 'flow' | 'spatial'): Promise<void> {
-  await page.getByTitle('新增其他类型页面').click()
-  await expect(page.getByTestId('add-content-menu')).toBeVisible()
-  await page.getByTestId(`add-${kind}-page`).click()
+  await withCourseTree(page, async () => {
+    await page.getByTitle('新增其他类型页面').click()
+    await expect(page.getByTestId('add-content-menu')).toBeVisible()
+    await page.getByTestId(`add-${kind}-page`).click()
+  })
 }
 
 async function openSlide(page: Page): Promise<void> {
-  await courseTreeKind(page, 'slide-scene').first()
-    .locator('button.course-page-tree__label').first().click()
+  await withCourseTree(page, async () => {
+    await courseTreeKind(page, 'slide-scene').first()
+      .locator('button.course-page-tree__label').first().click()
+  })
   await expect(page.locator('[data-testid="canvas-stage"] canvas')).toBeVisible()
 }
 
 async function openSpatial(page: Page): Promise<void> {
-  await courseTreeKind(page, 'spatial-camera').first()
-    .locator('button.course-page-tree__label').first().click()
+  await withCourseTree(page, async () => {
+    await courseTreeKind(page, 'spatial-camera').first()
+      .locator('button.course-page-tree__label').first().click()
+  })
   await expect(page.getByTestId('spatial-workspace')).toBeVisible()
+}
+
+// 紧凑嵌入式工作台里页面树与属性/素材面板互斥且默认全收起（EditorPanelLayout.tsx:8/:30/:32；
+// 隐藏规则 globals.css:6079）；展开后的结构槽是覆盖画布左 312px 的浮层（globals.css:6089-6091），
+// 所以只在需要页面树时展开、做完立刻关掉再回画布（同 A 簇先例 imageReplacementVerticalSlice.spec.ts:461-472；
+// 本文件 :1041-1044 的真实鼠标平移也要求面板最终是关的）。
+// 已可见则只跑不开：本文件 :716/:865 那类调用方先开过面板时行为不变，不会被误关。
+async function withCourseTree(page: Page, run: () => Promise<void>): Promise<void> {
+  const tree = page.getByTestId('course-page-tree')
+  if (await tree.isVisible()) return run()
+  const controls = page.locator('[aria-label="课件编辑面板"]')
+  const launcher = controls.getByRole('button', { name: '页面与图层', exact: true })
+  await launcher.click()
+  await expect(launcher).toHaveAttribute('aria-expanded', 'true')
+  await expect(tree).toBeVisible()
+  try {
+    await run()
+  } finally {
+    const close = controls.getByRole('button', { name: '关闭面板', exact: true })
+    if (await close.isVisible()) await close.click()
+  }
 }
 
 function teacherControllerRows(page: Page): Locator {
@@ -728,7 +740,9 @@ test('Wave B ownership and controller contracts survive one real Mixed session',
       await expect(courseTreeKind(page, 'spatial-camera')).toHaveCount(1)
 
       await openSlide(page)
-      await page.getByTestId('global-layer-entry').click()
+      await withCourseTree(page, async () => {
+        await page.getByTestId('global-layer-entry').click()
+      })
       await openEditorTab(page, '元素')
       await page.getByRole('tab', { name: '常用' }).click()
       await page.getByTestId('add-text').click()
@@ -877,7 +891,9 @@ test('Wave B ownership and controller contracts survive one real Mixed session',
 
     await test.step('Spatial commands preserve canonical owners and reject cross-coordinate drops', async () => {
       await openSpatial(page)
-      await page.getByTestId('global-layer-entry').click()
+      await withCourseTree(page, async () => {
+        await page.getByTestId('global-layer-entry').click()
+      })
       await openEditorTab(page, '元素')
       await page.getByRole('tab', { name: '常用' }).click()
       const disabledGlobalText = page.getByTestId('add-text')

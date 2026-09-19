@@ -4,8 +4,8 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { BACKGROUND_E2E_ENV } from '../../src/main/windowVisibility'
 
-// F08 路径 B（ bounded 段）：项目文件夹、材料多选导入与采用、自动模式真实启动到 running 后停止。
-// 手动四阶段全量确认由 r19ManualLessonLuna.spec.ts 承载，受单次命令时长限制不在此处重跑。
+// F08 路径 B（bounded 段）：项目文件夹、材料多选导入与采用、自动模式真实启动到 running 后停止。
+// 本规格只证明启动与停止，不把 running 当作完整教师链通过。完整链在 r19-050。
 const root = resolve(__dirname, '../..')
 const evidence = join(root, 'docs/development-plan/reviews/2026-09-17-frontend-special-evidence')
 mkdirSync(evidence, { recursive: true })

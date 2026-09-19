@@ -7,7 +7,7 @@ import { afterEach, expect, it, vi } from 'vitest'
 vi.mock('electron', () => ({ app: {} }))
 vi.mock('../../src/main/localAgent/service', () => ({ operateLocalAgent: vi.fn(), registerLessonRecordsInvalidator: vi.fn() }))
 vi.mock('../../src/main/lessonDocumentDesktopService', () => ({ lessonDocumentFiles: vi.fn() }))
-import { LessonDocumentAiTasks } from '../../src/main/lessonDocumentAiTask'
+import { assertDocumentAiRefMatchesWorkspace, LessonDocumentAiTasks } from '../../src/main/lessonDocumentAiTask'
 import { createLessonDocumentFiles } from '../../src/main/lessonDocumentFiles'
 import { DocumentFileSession } from '../../src/renderer/documentFiles/documentFileSession'
 import type { LocalAgentResponse } from '../../src/shared/localAgentContract'
@@ -104,6 +104,24 @@ it('derives separated canonical ranges from a full replacement and preserves con
   expect(applied.status).toBe('partial')
   expect(await fs.readFile(path.join(f.root, 'plan.md'), 'utf8')).toBe('甲教师稿\n乙AI稿\n丙手改')
  } finally { f.session.dispose() }
+})
+it('accepts a workspace file ref that is not a lesson document', async () => {
+ const root = await fs.mkdtemp(path.join(os.tmpdir(), 'document-file-ai-')); roots.push(root)
+ const file = path.join(root, 'notes.md')
+ await fs.writeFile(file, '目录原稿')
+ const workspace = { version: 1 as const, kind: 'directory' as const, normalizedDirectory: root.replace(/\\/g, '/').toLowerCase(), conversationId: randomUUID() }
+ const ref = { kind: 'file' as const, path: file }
+ assertDocumentAiRefMatchesWorkspace(workspace, ref)
+ await expect(Promise.resolve().then(() => assertDocumentAiRefMatchesWorkspace(workspace, { kind: 'lesson', lessonId: randomUUID(), lessonDirectory: root, relativePath: 'plan.md' }))).rejects.toThrow('目录会话只能修改真实文件')
+ const files = createLessonDocumentFiles({ recoveryDirectory: path.join(root, 'recovery'), validateTarget: async () => {} })
+ const disk = await files.openDocument(ref)
+ const sessionId = randomUUID()
+ const agent = vi.fn(async (request: { operation: string }) => ({ enabled: true, ...(request.operation === 'lesson-start' ? { sessionId } : request.operation === 'lesson-read' ? { records: [{ id: sessionId, status: 'completed' }] } : {}) }) as LocalAgentResponse)
+ const tasks = new LessonDocumentAiTasks({ directory: path.join(root, 'staging'), files, agent })
+ const ranges = [{ from: 0, to: disk.source.length, before: disk.source, after: disk.source }]
+ const run = await tasks.operate({ operation: 'start', workspace, ref, ranges, baseVersion: disk.version, epoch: 1, adapter: 'codex', instruction: '改目录文档' })
+ expect(run.status).toBe('running')
+ expect(agent).toHaveBeenCalledWith(expect.objectContaining({ workspace, intent: 'plan' }))
 })
 it('rejects replacement paths outside the fixed staging file without writing the document', async () => {
  const f = await fixture()

@@ -6,6 +6,7 @@ import { _electron as electron, chromium, expect, test } from '@playwright/test'
 import type { ElectronApplication, Locator, Page } from 'playwright'
 import { openCourseProjectArchive } from '../../src/renderer/project/courseProjectArchive'
 import { expectBackgroundWindowsIsolated } from './expectBackgroundWindowsIsolated'
+import { enterIndependentEditor } from './lessonWorkspaceEntry'
 
 const root = resolve(__dirname, '..', '..')
 const sourcePath = resolve(process.env.COURSEWARE_R18_FLOW_EVIDENCE_FIXTURE ?? join(root, 'output', 'r18-089', 'mixed-spatial-copy.h5lesson'))
@@ -106,19 +107,9 @@ test('Flow 1280 docked assistant preserves selection and controller; fresh manua
     app.context().on('page', target => target.on('pageerror', error => pageErrors.push(error.message)))
     page = await app.firstWindow()
     page.on('pageerror', error => pageErrors.push(error.message))
-    // Enter only the landing page; never replace an already opened editor or recovery draft.
-    const startupMore = page.locator('.lesson-workspace-more > summary')
-    const startupEditor = page.getByRole('button', { name: '打开工程（Ctrl+O）', exact: true })
-    const startupRecovery = page.getByRole('alertdialog', { name: '发现未完成的本地恢复副本', exact: true })
-    await expect.poll(async () => await startupEditor.isVisible() || await startupMore.isVisible() || await startupRecovery.isVisible()).toBe(true)
-    if (!await startupEditor.isVisible() && await startupMore.isVisible() && !await startupRecovery.isVisible()) {
-      await startupMore.click()
-      await page.getByRole('button', { name: '新建独立课件', exact: true }).click()
-    }
-    await page.getByTestId('canvas-stage').locator('canvas').first().waitFor()
+    // 冷启动只进入独立编辑器面（判据见 tests/e2e/lessonWorkspaceEntry.ts）。
+    await enterIndependentEditor(page)
     await expectBackgroundWindowsIsolated(app, true)
-    const professional = page.getByRole('button', { name: '专业', exact: true })
-    if (await professional.getAttribute('aria-pressed') !== 'true') await professional.click()
     await setContentSize(app, page)
     await app.evaluate(({ dialog }, paths) => {
       dialog.showOpenDialog = (async () => ({ canceled: false, filePaths: [paths.projectPath] })) as typeof dialog.showOpenDialog

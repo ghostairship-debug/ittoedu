@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { conversationOwnerOf, type ConversationOwner, type LessonConversation, type LessonProject, type LessonWorkspace } from '../../../shared/lessonWorkspace'
 import type { LessonDesktopRequest, LessonDesktopResult, LessonDirectoryEntry } from '../../../shared/lessonDesktopContract'
+import { normalizeWorkspacePath } from '../../../shared/workspaceIdentity'
 import { lessonProjectPath, selectLessonConversation } from '../lessonConversationSelection'
 import type { DocumentTabsController } from './useDocumentTabsController'
 
@@ -10,6 +11,7 @@ export interface LessonWorkspaceControllerProps {
   onOpenProject(path: string): Promise<boolean>
   onNewProject(): Promise<boolean>
   onActiveLesson?(lesson: LessonWorkspace | null, conversation: LessonConversation | null): void
+  onActiveDirectoryConversation?(conversation: LessonConversation | null): void
   tabs: DocumentTabsController
   scopeRef: { current: string }
 }
@@ -30,7 +32,6 @@ export function useLessonWorkspaceController(props: LessonWorkspaceControllerPro
   const [conversation, setConversation] = useState<LessonConversation | null>(null)
   const [name, setName] = useState('')
   const [creating, setCreating] = useState(false)
-  const [openingCopy, setOpeningCopy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [treeVersion, setTreeVersion] = useState(0)
@@ -46,9 +47,19 @@ export function useLessonWorkspaceController(props: LessonWorkspaceControllerPro
   const [projectFolder, setProjectFolder] = useState<string | null>(null)
   const [projectName, setProjectName] = useState('')
   const [projectNotice, setProjectNotice] = useState<string | null>(null)
-  const current = useRef({ lesson, conversation, lessons })
-  current.current = { lesson, conversation, lessons }
-  props.scopeRef.current = lesson && conversation ? JSON.stringify([lesson.identity.lessonId, normalized(lesson.identity.normalizedDirectory), conversation.conversationId]) : ''
+  const current = useRef({ lesson, conversation, lessons, directoryConversation })
+  current.current = { lesson, conversation, lessons, directoryConversation }
+  props.scopeRef.current = lesson && conversation
+    ? JSON.stringify(['lesson', lesson.identity.lessonId, normalized(lesson.identity.normalizedDirectory), conversation.conversationId])
+    : directoryConversation
+      ? JSON.stringify(['directory', '', normalized((() => {
+          try {
+            const owner = conversationOwnerOf(directoryConversation)
+            return owner.kind === 'project' ? owner.projectPath : owner.kind === 'workspace' ? owner.workspaceRoot : ''
+          } catch { return workspace ?? '' }
+        })()), directoryConversation.conversationId])
+      : ''
+  useEffect(() => { props.onActiveDirectoryConversation?.(directoryConversation) }, [directoryConversation, props.onActiveDirectoryConversation])
 
   useEffect(() => {
     void props.lessonOperation({ operation: 'recent-workspaces' })
@@ -69,7 +80,7 @@ export function useLessonWorkspaceController(props: LessonWorkspaceControllerPro
     if (!(await props.tabs.flushAll())) throw new Error('请先在文档标签处理未保存稿或文件冲突，再切换课例。')
   }
   function detachLesson() {
-    setLesson(null); setConversation(null); setConversations([]); setStandalone(true); setMobilePane('workbench'); setDirectoryConversation(null); props.tabs.setActiveTab('course')
+    setLesson(null); setConversation(null); setConversations([]); setStandalone(true); setMobilePane('workbench'); props.tabs.setActiveTab('course')
     props.onActiveLesson?.(null, null)
   }
   function showProject() {
@@ -89,10 +100,16 @@ export function useLessonWorkspaceController(props: LessonWorkspaceControllerPro
     props.onActiveLesson?.(null, null)
     try {
       const loadedProjects = await loadProjects(result.directory)
-      const available = await loadDirectoryConversations(result.directory, loadedProjects)
-      setActiveDirectory({ kind: 'workspace' })
-      // 打开工作空间时自动接上最近的工作空间会话，保持"重开继续"的连续性。
-      setDirectoryConversation([...available].sort((a, b) => b.updatedAt - a.updatedAt)[0] ?? null)
+      const loaded = await loadDirectoryConversations(result.directory, loadedProjects)
+      const remembered = readRememberedConversation(result.directory)
+      const restored = remembered ? findRememberedConversation(remembered, loaded.workspaceConversations, loadedProjects, loaded.projectConversations) : undefined
+      if (restored) {
+        setDirectoryConversation(restored.conversation)
+        setActiveDirectory(restored.directory)
+      } else {
+        setActiveDirectory({ kind: 'workspace' })
+        setDirectoryConversation([...loaded.workspaceConversations].sort((a, b) => b.updatedAt - a.updatedAt)[0] ?? null)
+      }
     }
     catch (reason) { setError((reason as Error).message) }
   }
@@ -108,7 +125,7 @@ export function useLessonWorkspaceController(props: LessonWorkspaceControllerPro
     return loaded
   }
   /** V3.1：一次载入工作空间会话与每个项目各自的会话，左栏按项目分组同时展示。 */
-  async function loadDirectoryConversations(directory: string, projectList: LessonProject[]): Promise<LessonConversation[]> {
+  async function loadDirectoryConversations(directory: string, projectList: LessonProject[]) {
     const workspaceListing = await props.lessonOperation({ operation: 'list-conversations', owner: directoryOwnerOf({ kind: 'workspace' }, directory) })
     const workspaceConversations = workspaceListing.conversations ?? []
     setDirectoryConversations(workspaceConversations)
@@ -116,8 +133,9 @@ export function useLessonWorkspaceController(props: LessonWorkspaceControllerPro
       const listing = await props.lessonOperation({ operation: 'list-conversations', owner: directoryOwnerOf({ kind: 'project', project }, directory) })
       return [normalized(project.normalizedPath), listing.conversations ?? []] as const
     }))
-    setProjectConversationsState(Object.fromEntries(entries))
-    return workspaceConversations
+    const projectConversations = Object.fromEntries(entries)
+    setProjectConversationsState(projectConversations)
+    return { workspaceConversations, projectConversations }
   }
   /** V3.1：新建项目先弹系统对话框选择文件夹位置（对话框内可直接新建文件夹），再回到内联确认条命名。 */
   async function pickProjectFolder() {
@@ -135,7 +153,7 @@ export function useLessonWorkspaceController(props: LessonWorkspaceControllerPro
     setProjectNotice(null)
   }
   function cancelProjectPick() { setProjectFolder(null); setProjectName(''); setProjectNotice(null) }
-  async function createProject() {
+  async function createLessonProject() {
     const directory = workspace
     if (!directory || !projectName.trim() || !projectFolder) return
     const result = await props.lessonOperation({ operation: 'create-project', directory, name: projectName.trim(), path: projectFolder })
@@ -175,10 +193,24 @@ export function useLessonWorkspaceController(props: LessonWorkspaceControllerPro
     if (owner.kind === 'project') setProjectConversationsState(current => ({ ...current, [normalized(owner.projectPath)]: [...(current[normalized(owner.projectPath)] ?? []), result.conversation!] }))
     else setDirectoryConversations(current => [...current, result.conversation!])
     setDirectoryConversation(result.conversation)
+    if (current.current.lesson) {
+      setLesson(null)
+      setConversation(null)
+      setConversations([])
+      props.onActiveLesson?.(null, null)
+    }
+    rememberConversation(directory, result.conversation.conversationId)
     setMobilePane('chat')
   }
   function selectDirectoryConversation(next: LessonConversation) {
     setDirectoryConversation(next)
+    if (workspace) rememberConversation(workspace, next.conversationId)
+    if (current.current.lesson) {
+      setLesson(null)
+      setConversation(null)
+      setConversations([])
+      props.onActiveLesson?.(null, null)
+    }
     // 选中哪个分组下的会话，"新对话"作用域就跟随哪个分组。
     try {
       const owner = conversationOwnerOf(next)
@@ -212,12 +244,6 @@ export function useLessonWorkspaceController(props: LessonWorkspaceControllerPro
     if (!current.current.lesson) return
     setConversation(next); setDirectoryConversation(null); props.onActiveLesson?.(current.current.lesson, next)
   }
-  async function openLesson(asCopy = false) {
-    const result = await props.lessonOperation({ operation: 'open-lesson', ...(asCopy ? { asCopy: true } : {}) })
-    if (result.cancelled || !result.lesson) return
-    setLessons(currentLessons => [...currentLessons.filter(item => item.identity.lessonId !== result.lesson!.identity.lessonId), result.lesson!])
-    await activate(result.lesson, result.conversation)
-  }
   async function createLesson() {
     if (!selectedDirectory || !name.trim()) return
     const result = await props.lessonOperation({ operation: 'create-lesson', directory: selectedDirectory, name: name.trim() })
@@ -229,7 +255,14 @@ export function useLessonWorkspaceController(props: LessonWorkspaceControllerPro
   async function openFile(entry: LessonDirectoryEntry) {
     await run(async () => {
       if (/\.h5lesson$/i.test(entry.name)) {
-        // 已登记课例：激活其课例上下文（材料/课例对话/自动继续），保持 1.9 连续性。
+        if (current.current.directoryConversation) {
+          await stopAndFlush()
+          if (await props.onOpenProject(entry.path)) {
+            props.tabs.setActiveTab('course')
+            setMobilePane('workbench')
+          }
+          return
+        }
         const known = current.current.lessons.find(item =>
           normalized(item.identity.normalizedDirectory) === normalized(entry.path)
           || (lessonProjectPath(item) ? normalized(lessonProjectPath(item)!) === normalized(entry.path) : false))
@@ -242,9 +275,10 @@ export function useLessonWorkspaceController(props: LessonWorkspaceControllerPro
         }
         return
       }
-      // F04：工作空间内所有 MD（含根目录与项目目录）都在本软件中打开为可编辑文档。
+      // F04：工作空间内所有 MD 都在本软件中打开。目录会话下即使课例残留也走真实文件 ref。
       if (/\.md$/i.test(entry.name)) {
-        props.tabs.openTab({ path: entry.path, name: entry.name, kind: 'document', lesson: current.current.lesson })
+        const lesson = current.current.directoryConversation ? null : current.current.lesson
+        props.tabs.openTab({ path: entry.path, name: entry.name, kind: 'document', lesson })
         setMobilePane('workbench')
         return
       }
@@ -264,12 +298,26 @@ export function useLessonWorkspaceController(props: LessonWorkspaceControllerPro
     setConversations(currentConversations => currentConversations.some(item => item.conversationId === nextConversation.conversationId) ? currentConversations.map(item => item.conversationId === nextConversation.conversationId ? nextConversation : item) : [...currentConversations, nextConversation])
     setLessons(currentLessons => currentLessons.map(item => item.identity.lessonId === nextLesson.identity.lessonId ? nextLesson : item))
   }
+  function applyDirectoryBinding(next: LessonConversation) {
+    const active = current.current.directoryConversation
+    if (!active || active.conversationId !== next.conversationId) return
+    setDirectoryConversation(next)
+    try {
+      const owner = conversationOwnerOf(next)
+      if (owner.kind === 'project') {
+        const key = normalized(owner.projectPath)
+        setProjectConversationsState(currentConversations => ({ ...currentConversations, [key]: (currentConversations[key] ?? []).map(item => item.conversationId === next.conversationId ? next : item) }))
+      } else {
+        setDirectoryConversations(currentConversations => currentConversations.map(item => item.conversationId === next.conversationId ? next : item))
+      }
+    } catch { /* 身份不完整的旧记录只更新当前会话 */ }
+  }
   return {
-    state: { workspace, standalone, recent, selectedDirectory, lessons, lesson, conversations, conversation, name, creating, openingCopy, error, busy, treeVersion, explorerOpen, conversationsOpen, workflowOpen, mobilePane, projects, directoryConversations, projectConversations, directoryConversation, activeDirectory, projectFolder, projectName, projectNotice },
+    state: { workspace, standalone, recent, selectedDirectory, lessons, lesson, conversations, conversation, name, creating, error, busy, treeVersion, explorerOpen, conversationsOpen, workflowOpen, mobilePane, projects, directoryConversations, projectConversations, directoryConversation, activeDirectory, projectFolder, projectName, projectNotice },
     actions: {
-      run, openWorkspace, activate, selectConversation, openLesson, createLesson, openFile, newStandaloneProject, detachLesson, showProject, applyBinding,
-      loadProjects, createProject, removeProject, pickProjectFolder, cancelProjectPick, openDirectoryContext, createDirectoryConversation, selectDirectoryConversation, clearDirectoryContext,
-      setSelectedDirectory, setName, setCreating, setOpeningCopy, refreshTree: () => { if (workspace) { setSelectedDirectory(workspace); setTreeVersion(value => value + 1) } },
+      run, openWorkspace, activate, selectConversation, createLesson, openFile, newStandaloneProject, detachLesson, showProject, applyBinding, applyDirectoryBinding,
+      loadProjects, createLessonProject, removeProject, pickProjectFolder, cancelProjectPick, openDirectoryContext, createDirectoryConversation, selectDirectoryConversation, clearDirectoryContext,
+      setSelectedDirectory, setName, setCreating, refreshTree: () => { if (workspace) { setSelectedDirectory(workspace); setTreeVersion(value => value + 1) } },
       setExplorerOpen, setConversationsOpen, setWorkflowOpen, setMobilePane,
       setConversations, setDirectoryConversations,
       setProjectConversations: (path: string, conversations: LessonConversation[]) => setProjectConversationsState(current => ({ ...current, [normalized(path)]: conversations })),
@@ -279,7 +327,28 @@ export function useLessonWorkspaceController(props: LessonWorkspaceControllerPro
   }
 }
 
-function normalized(value: string) { return value.replace(/\\/g, '/').toLowerCase() }
+function normalized(value: string) { return normalizeWorkspacePath(value) }
+function conversationMemoryKey(root: string) { return `${LAST_WORKSPACE_KEY}:conversation:${normalized(root)}` }
+function rememberConversation(root: string, conversationId: string) {
+  try { localStorage.setItem(conversationMemoryKey(root), conversationId) } catch { /* 隐私模式等场景下无法持久化，忽略 */ }
+}
+function readRememberedConversation(root: string): string | null {
+  try { return localStorage.getItem(conversationMemoryKey(root)) } catch { return null }
+}
+function findRememberedConversation(
+  conversationId: string,
+  workspaceConversations: LessonConversation[],
+  projects: LessonProject[],
+  projectConversations: Record<string, LessonConversation[]>,
+): { conversation: LessonConversation; directory: DirectoryContext } | undefined {
+  const workspaceHit = workspaceConversations.find(item => item.conversationId === conversationId)
+  if (workspaceHit) return { conversation: workspaceHit, directory: { kind: 'workspace' } }
+  for (const project of projects) {
+    const hit = (projectConversations[normalized(project.normalizedPath)] ?? []).find(item => item.conversationId === conversationId)
+    if (hit) return { conversation: hit, directory: { kind: 'project', project } }
+  }
+  return undefined
+}
 function relativeFile(lesson: LessonWorkspace, filename: string) {
   const root = lesson.identity.normalizedDirectory.replace(/[\\/]$/, '')
   return normalized(filename).startsWith(`${normalized(root)}/`) ? filename.replace(/\\/g, '/').slice(root.length + 1) : null

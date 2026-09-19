@@ -16,6 +16,7 @@ import { createBlankSpatialCourseProject } from '../../src/renderer/project/crea
 import { createTextNode } from '../../src/renderer/project/nativeNodeFactories'
 import { createCourseProjectArchive, openCourseProjectArchive } from '../../src/renderer/project/courseProjectArchive'
 import { expectBackgroundWindowsIsolated } from './expectBackgroundWindowsIsolated'
+import { enterIndependentEditor } from './lessonWorkspaceEntry'
 
 // The existing Vite development entry exposes the same modules imported by the UI.
 // Electron Main, IPC capturePage, persisted archives, mounted surfaces and editing
@@ -73,18 +74,8 @@ async function launchEditor(): Promise<Launch> {
     })
     await expectBackgroundWindowsIsolated(app, true)
     const page = await app.firstWindow()
-    // Enter only the landing page; never replace an already opened editor or recovery draft.
-    const startupMore = page.locator('.lesson-workspace-more > summary')
-    const startupEditor = page.getByRole('button', { name: '打开工程（Ctrl+O）', exact: true })
-    const startupRecovery = page.getByRole('alertdialog', { name: '发现未完成的本地恢复副本', exact: true })
-    await expect.poll(async () => await startupEditor.isVisible() || await startupMore.isVisible() || await startupRecovery.isVisible()).toBe(true)
-    if (!await startupEditor.isVisible() && await startupMore.isVisible() && !await startupRecovery.isVisible()) {
-      await startupMore.click()
-      await page.getByRole('button', { name: '新建独立课件', exact: true }).click()
-    }
-    await page.getByTestId('canvas-stage').locator('canvas').first().waitFor()
-    const professional = page.getByRole('button', { name: '专业', exact: true })
-    if (await professional.getAttribute('aria-pressed') !== 'true') await professional.click()
+    // 冷启动只进入独立编辑器面（判据见 tests/e2e/lessonWorkspaceEntry.ts）。
+    await enterIndependentEditor(page)
     return { app, page, runRoot, server }
   } catch (error) {
     if (app) await closeApp(app)

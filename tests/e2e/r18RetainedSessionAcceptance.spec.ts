@@ -7,23 +7,10 @@ import { localAgentMessages } from '../../src/shared/localAgentText'
 import { localAgentRecordV2Schema } from '../../src/shared/localAgentTaskContract'
 import { readSaved, nativeRecords, type NativeRun } from './r18NativeAuthoringFixture'
 import { expectBackgroundWindowsIsolated } from './expectBackgroundWindowsIsolated'
+import { enterIndependentEditor as enterStandaloneEditorFromLanding } from './lessonWorkspaceEntry'
 
 const productRoot = resolve(__dirname, '../..')
 
-async function enterStandaloneEditorFromLanding(page: Page): Promise<void> {
-  const landing = page.locator('.lesson-workspace-landing')
-  const editor = page.getByTestId('canvas-stage')
-  await Promise.race([
-    landing.waitFor({ state: 'visible', timeout: 15_000 }),
-    editor.waitFor({ state: 'visible', timeout: 15_000 }),
-  ])
-  if (!await landing.isVisible()) return
-  const more = page.locator('.lesson-workspace-more > summary')
-  if (!await more.isVisible()) return
-  await more.click()
-  const create = page.getByRole('button', { name: '新建独立课件', exact: true })
-  if (await create.isVisible()) await create.click()
-}
 const sourceRoot = resolve(process.env.COURSEWARE_R18_RETAINED_SOURCE_ROOT
   ?? 'C:/Users/74755/Documents/HTML课件编辑器/output/r18-short-path')
 const retained = [

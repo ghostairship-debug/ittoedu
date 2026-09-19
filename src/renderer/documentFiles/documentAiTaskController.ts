@@ -1,5 +1,5 @@
 import type { LocalAgentId } from '../../shared/localAgentContract'
-import type { LessonAgentWorkspace } from '../../shared/workspaceIdentity'
+import type { ConversationAgentWorkspace } from '../../shared/workspaceIdentity'
 import type { LessonDocumentAiAPI } from '../../shared/lessonDocumentAiTask'
 import type { LessonDocumentEditorHandle } from './LessonDocumentEditor'
 import type { DocumentFileRef, DocumentFileVersion } from '../../shared/document/ports'
@@ -13,12 +13,13 @@ export class DocumentAiTaskController {
   private unregister: (() => void) | undefined
   private session: LessonDocumentEditorHandle['session'] | undefined
   private finished = false
-  constructor(private api: LessonDocumentAiAPI, private workspace: LessonAgentWorkspace, private notify: (message: string) => void) {}
+  constructor(private api: LessonDocumentAiAPI, private workspace: ConversationAgentWorkspace, private notify: (message: string) => void) {}
   async start(target: DocumentChatTarget, adapter: LocalAgentId, instruction: string, onApplied?: (ref: DocumentFileRef, version: DocumentFileVersion) => Promise<void>) {
     const editor = target.getEditor()
     if (!editor || !await editor.flush()) throw new Error('请先保存当前文档并处理冲突')
     const session = editor.session, source = session.getSnapshot().source, epoch = nextDocumentAiEpoch()
-    if (session.ref.kind !== 'lesson') throw new Error('AI 文档修改仅在课例文档中可用')
+    if (this.workspace.kind === 'directory' && session.ref.kind !== 'file') throw new Error('目录会话只能修改真实文件')
+    if (this.workspace.kind === 'lesson' && session.ref.kind !== 'lesson') throw new Error('课例会话只能修改课例文档')
     this.session = session
     const ranges = [{ from: 0, to: source.length, before: source, after: source }]
     const prepared = await session.prepareAiEdit(ranges, epoch)

@@ -60,6 +60,10 @@ require('node:readline').createInterface({input:process.stdin}).on('line', line 
      }
      reply('## 只讨论，不修改课件\n- 平均分是分数的前提。\n<script>window.__unsafeChatExecuted=true</script>\n![remote](https://invalid.example/probe.png)\n[jump](javascript:alert(1))'); return;
    }
+   if (mode === 'code') {
+     const fence = String.fromCharCode(96).repeat(3);
+     reply(['## 平均分讲解要点', '- 先讲平均分的含义。', '- 再讲分子分母。', '', fence, 'const average = sum / count', fence, '', '最后核对结果。'].join('\n')); return;
+   }
    // Keep the native envelope valid: these negative replies exercise the host's
    // existing candidate parser and shared format budget, not a transport crash.
    if (injection === 'invalid-json') { reply('<courseware-candidate-v1>{"invalid": unquoted}</courseware-candidate-v1>'); return; }
@@ -86,7 +90,7 @@ process.stdin.on('end', () => process.exit(0));
     process.env.PATH = root; process.env.APPDATA = root; process.env.USERPROFILE = root
   }, directory)
   return {
-    mode(value: 'repair' | 'no-progress' | 'delayed' | 'discussion' | 'format-repair' | 'format-repeat' | 'missing-candidate') { writeFileSync(join(directory, 'mode.txt'), value) },
+    mode(value: 'repair' | 'no-progress' | 'delayed' | 'discussion' | 'format-repair' | 'format-repeat' | 'missing-candidate' | 'code') { writeFileSync(join(directory, 'mode.txt'), value) },
     runs() { const file = join(directory, 'runs.jsonl'); return existsSync(file) ? readFileSync(file, 'utf8').trim().split('\n').map(line => JSON.parse(line) as {
       requestId: string; revision: number; repair: boolean; previousRequestId: string | null; nativeThreadId: string; nativeTurnId: string;
       mode: string; injection: 'invalid-json' | 'missing-channel' | null; lateAt: number | null;

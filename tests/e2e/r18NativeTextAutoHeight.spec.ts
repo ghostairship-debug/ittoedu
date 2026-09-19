@@ -5,6 +5,7 @@ import { _electron as electron, chromium, expect, test, type ElectronApplication
 import { createServer, type ViteDevServer } from 'vite'
 import { openCourseProjectArchive } from '../../src/renderer/project/courseProjectArchive'
 import { expectBackgroundWindowsIsolated } from './expectBackgroundWindowsIsolated'
+import { enterIndependentEditor } from './lessonWorkspaceEntry'
 
 const root = resolve(__dirname, '../..')
 const evidenceRoot = join(root, 'output/r18-native-text-autoheight')
@@ -83,24 +84,14 @@ test('Native auto-height: real tool and UI edits preserve text through history, 
     await expectBackgroundWindowsIsolated(app, true)
     const page = await app.firstWindow()
     page.on('pageerror', error => errors.push(error.message))
-    // Enter only the landing page; never replace an already opened editor or recovery draft.
-    const startupMore = page.locator('.lesson-workspace-more > summary')
-    const startupEditor = page.getByRole('button', { name: '打开工程（Ctrl+O）', exact: true })
-    const startupRecovery = page.getByRole('alertdialog', { name: '发现未完成的本地恢复副本', exact: true })
-    await expect.poll(async () => await startupEditor.isVisible() || await startupMore.isVisible() || await startupRecovery.isVisible()).toBe(true)
-    if (!await startupEditor.isVisible() && await startupMore.isVisible() && !await startupRecovery.isVisible()) {
-      await startupMore.click()
-      await page.getByRole('button', { name: '新建独立课件', exact: true }).click()
-    }
-    await page.getByTestId('canvas-stage').locator('canvas').first().waitFor()
+    // 冷启动只进入独立编辑器面（判据见 tests/e2e/lessonWorkspaceEntry.ts）。
+    await enterIndependentEditor(page)
     await app.evaluate(({ dialog }, paths) => {
       dialog.showOpenDialog = (async () => ({ canceled: false, filePaths: [paths.project] })) as typeof dialog.showOpenDialog
       dialog.showSaveDialog = (async () => ({ canceled: false, filePath: paths.html })) as typeof dialog.showSaveDialog
     }, { project: projectPath, html: htmlPath })
     await page.getByRole('button', { name: '打开工程（Ctrl+O）', exact: true }).click()
     await expect.poll(async () => (await stateOf(page)).project.id).toBe(input.id)
-    const professional = page.getByRole('button', { name: '专业', exact: true })
-    if (await professional.getAttribute('aria-pressed') !== 'true') await professional.click()
     await selectTitle(page)
     const failedCopy = await stateOf(page)
     expect(failedCopy.item.content.data.style.fontSize).toBe(48)

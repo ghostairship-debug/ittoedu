@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react'
 import type { LocalAgentId } from '../../../shared/localAgentContract'
-import type { LessonAgentWorkspace } from '../../../shared/workspaceIdentity'
+import type { ConversationAgentWorkspace } from '../../../shared/workspaceIdentity'
 import type { LessonDocumentAiAPI } from '../../../shared/lessonDocumentAiTask'
 import type { DocumentFileRef, DocumentFileVersion } from '../../../shared/document/ports'
 import { DocumentAiTaskController, type DocumentChatTarget } from '../../documentFiles/documentAiTaskController'
@@ -32,7 +32,7 @@ export interface DocumentTabsController {
   stopDocumentEdit(): Promise<void>
   stopAllAiEdits(): Promise<void>
   activeDocumentTarget(): DocumentChatTarget | undefined
-  editDocument(filename: string, scope: LessonAgentWorkspace, adapter: LocalAgentId, instruction: string, onApplied?: (ref: DocumentFileRef, version: DocumentFileVersion) => Promise<void>): Promise<void>
+  editDocument(filename: string, scope: ConversationAgentWorkspace, adapter: LocalAgentId, instruction: string, onApplied?: (ref: DocumentFileRef, version: DocumentFileVersion) => Promise<void>): Promise<void>
 }
 
 /** Owns only transient document-tab state and document-session lifecycles. */
@@ -56,12 +56,20 @@ export function useDocumentTabsController({ documentPort, documentAiOperation, s
   }
   async function stopAllAiEdits() {
     await stopDocumentEdit()
-    for (const editor of documents.current.values()) await editor.session.stopAiEdits()
+    // 遍历活 Map 会在 await 期间被 ref 回调删/增同一键而反复回访同一条目：标签里的编辑器 ref 是内联函数，
+    // 每次重渲染 React 都先 detach（delete）再 attach（set），而 session.stopAiEdits 自身的 observe/update
+    // 就会触发重渲染。V02 冲突用例里该循环因此永不收敛，stopAndFlush 根本走不到 flushAll 的守卫。
+    for (const editor of [...documents.current.values()]) await editor.session.stopAiEdits()
   }
   async function flushAll() {
-    for (const [filename, editor] of documents.current) {
+    // 与 stopAllAiEdits 同理：保存期间的重渲染会删/增注册表键，按 await 前的快照遍历，一次调用只判一次。
+    for (const [filename, editor] of [...documents.current]) {
       if (!(await editor.flush())) { setActiveTab(filename); return false }
     }
+    // 标签仍标记未保存、注册表里却没有活编辑器时 flush 无从执行：必须按未保存拒绝切换，
+    // 否则该标签会被静默移除、当前稿丢失（V02 冲突用例 :62 的红点即此分支缺失）。
+    const unregistered = tabs.find(tab => tab.dirty && !documents.current.has(tab.path))
+    if (unregistered) { setActiveTab(unregistered.path); return false }
     return true
   }
   async function disposeDocuments() {
@@ -110,10 +118,10 @@ export function useDocumentTabsController({ documentPort, documentAiOperation, s
       ? current.map(tab => tab.path === path ? { ...tab, dirty } : tab) : current)
   }
   function activeDocumentTarget() {
-    const tab = tabs.find(item => item.path === activeTab && item.kind === 'document' && item.lesson)
+    const tab = tabs.find(item => item.path === activeTab && item.kind === 'document')
     return tab ? { name: tab.name, getEditor: () => documents.current.get(tab.path) ?? null } : undefined
   }
-  async function editDocument(filename: string, scope: LessonAgentWorkspace, adapter: LocalAgentId, instruction: string, onApplied?: (ref: DocumentFileRef, version: DocumentFileVersion) => Promise<void>) {
+  async function editDocument(filename: string, scope: ConversationAgentWorkspace, adapter: LocalAgentId, instruction: string, onApplied?: (ref: DocumentFileRef, version: DocumentFileVersion) => Promise<void>) {
     const repairEpoch = ++documentRepairEpoch.current
     await documentRepair.current?.stop()
     documentRepair.current = null
@@ -128,7 +136,7 @@ export function useDocumentTabsController({ documentPort, documentAiOperation, s
       })
       const timer = setTimeout(() => { unsubscribe(); reject(new Error('当前文件尚未读取完成')) }, 10000)
     })
-    const expectedScope = JSON.stringify([scope.lessonId, normalized(scope.normalizedDirectory), scope.conversationId])
+    const expectedScope = JSON.stringify([scope.kind, scope.kind === 'lesson' ? scope.lessonId : '', normalized(scope.normalizedDirectory), scope.conversationId])
     if (repairEpoch !== documentRepairEpoch.current) throw new Error('文档修复已停止')
     if (scopeRef.current !== expectedScope) throw new Error('课例对话已切换，请在当前课例重新发起修改')
     const controller = new DocumentAiTaskController(documentAiOperation, scope, message => editor.session.setAiMessage(message))

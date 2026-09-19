@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { executeLessonAssembly, observeEmptyLessonBuildTarget, LessonAssemblyError } from './lessonAuthoring/builderIntegration'
 import { LessonWorkspaceHost } from './app/LessonWorkspaceHost'
 import type { LessonWorkspaceShellHandle } from './lessonWorkspace/LessonWorkspaceShell'
-import type { LessonWorkspace, LessonConversation } from '../shared/lessonWorkspace'
+import { conversationOwnerOf, type LessonWorkspace, type LessonConversation } from '../shared/lessonWorkspace'
 import {
   APP_EXECUTABLE_NAME,
   RECOMMENDED_PROJECT_SCENES,
@@ -102,10 +102,16 @@ function captureCourseIdentity() {
 export default function App() {
   const lessonShell = useRef<LessonWorkspaceShellHandle>(null)
   const activeLesson = useRef<{ lesson: LessonWorkspace; conversation: LessonConversation } | null>(null)
+  const activeDirectoryConversation = useRef<LessonConversation | null>(null)
   const [hasLessonConversation, setHasLessonConversation] = useState(false)
+  const [hasDirectoryConversation, setHasDirectoryConversation] = useState(false)
   const onActiveLesson = useCallback((lesson: LessonWorkspace | null, conversation: LessonConversation | null) => {
     activeLesson.current = lesson && conversation ? { lesson, conversation } : null
     setHasLessonConversation(!!activeLesson.current)
+  }, [])
+  const onActiveDirectoryConversation = useCallback((conversation: LessonConversation | null) => {
+    activeDirectoryConversation.current = conversation
+    setHasDirectoryConversation(!!conversation)
   }, [])
   const observeCurrentEmptyLessonProject = useCallback((expectedLesson: LessonWorkspace['identity'], conversationId: string) => {
     const current = activeLesson.current
@@ -292,8 +298,24 @@ export default function App() {
     },
     saveProjectFile: (input) => desktopApi().saveProject({ ...input, suggestedDirectory: activeLesson.current?.lesson.identity.normalizedDirectory }),
     onProjectSaved: async input => {
+      if (!window.desktopAPI?.lesson) return
+      const directoryCurrent = activeDirectoryConversation.current
+      if (directoryCurrent) {
+        const result = await window.desktopAPI.lesson({
+          operation: 'bind-project',
+          owner: conversationOwnerOf(directoryCurrent),
+          conversationId: directoryCurrent.conversationId,
+          projectId: input.projectId,
+          projectPath: input.path,
+          saveAs: input.saveAs && directoryCurrent.projectTarget !== undefined,
+        })
+        if (activeDirectoryConversation.current?.conversationId !== directoryCurrent.conversationId || !result.conversation) return
+        activeDirectoryConversation.current = result.conversation
+        lessonShell.current?.applyDirectoryBinding(result.conversation)
+        return
+      }
       const current = activeLesson.current
-      if (!current || !window.desktopAPI?.lesson) return
+      if (!current) return
       const result = await window.desktopAPI.lesson({ operation: 'bind-project', lesson: current.lesson.identity, conversationId: current.conversation.conversationId,
         projectId: input.projectId, projectPath: input.path, saveAs: input.saveAs && current.conversation.projectTarget !== undefined })
       if (activeLesson.current !== current || !result.lesson || !result.conversation) return
@@ -541,7 +563,7 @@ export default function App() {
   return (
     <ProjectColorPaletteContext.Provider value={projectColors}>
     <LessonWorkspaceHost ref={lessonShell} projectId={activeCourseDocument?.id ?? ''} projectPath={projectPath}
-      onOpenProject={path => courseProjectLifecycle.openRecentProject(path, { origin: 'lesson' })} onNewProject={() => courseProjectLifecycle.newProject({ origin: 'lesson' })} onActiveLesson={onActiveLesson} onDirtyChange={setLessonDirty}
+      onOpenProject={path => courseProjectLifecycle.openRecentProject(path, { origin: 'lesson' })} onNewProject={() => courseProjectLifecycle.newProject({ origin: 'lesson' })} onActiveLesson={onActiveLesson} onActiveDirectoryConversation={onActiveDirectoryConversation} onDirtyChange={setLessonDirty}
       observeEmptyProject={observeCurrentEmptyLessonProject}
       continueProjectEditing={async (lesson, conversationId, expectedProjectId) => {
         const isCurrent = () => {
@@ -658,7 +680,7 @@ export default function App() {
           onAddCatalogComponents={componentLibrary.addCatalogPackages}
           onUpdateCatalogComponent={componentLibrary.requestCatalogUpdate}
         />
-        {!hasLessonConversation && <CourseChatEntry />}
+        {!(hasLessonConversation || hasDirectoryConversation) && <CourseChatEntry />}
       </EditorPanelLayout>
       <footer className="status-bar" aria-live="polite">
         <span className="status-dot" />

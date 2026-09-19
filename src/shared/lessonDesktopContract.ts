@@ -32,7 +32,8 @@ export const lessonDesktopRequestSchema = z.discriminatedUnion('operation', [
   z.object({ operation: z.literal('register-document'), lesson: lessonIdentitySchema, role: lessonDocumentRoleSchema, relativePath: lessonRelativePathSchema }).strict(),
   z.object({ operation: z.literal('create-conversation'), ...ownerRef, title: z.string().min(1).max(200).optional() }).strict()
     .refine(value => value.owner || value.lesson, '缺少会话归属'),
-  z.object({ operation: z.literal('bind-project'), lesson: lessonIdentitySchema, conversationId: z.uuid(), projectId: z.string().min(1), projectPath: directory, saveAs: z.boolean() }).strict(),
+  z.object({ operation: z.literal('bind-project'), owner: conversationOwnerSchema.optional(), lesson: lessonIdentitySchema.optional(), conversationId: z.uuid(), projectId: z.string().min(1), projectPath: directory, saveAs: z.boolean() }).strict()
+    .refine(value => value.owner || value.lesson, '缺少会话归属'),
 ])
 export type LessonDesktopRequest = z.infer<typeof lessonDesktopRequestSchema>
 export interface LessonDirectoryEntry { name: string; path: string; kind: 'directory' | 'file' }

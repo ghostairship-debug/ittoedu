@@ -28,6 +28,7 @@ import { nativeRecords, recordEvidence, sendNatural, type NativeRun } from './r1
 import { createBlankCourseProject } from '../../src/renderer/project/createCourseProject'
 import { addCourseSpatialPage } from '../../src/renderer/course/courseLocationCommands'
 import { buildPublishedCourseStandaloneHtml } from '../../src/renderer/export/course/buildCoursePackages'
+import { enterIndependentEditor } from './lessonWorkspaceEntry'
 
 const root = resolve(__dirname, '..', '..')
 const fixturePath = join(root, 'tests', 'fixtures', 'architecture-baseline', 'mixed-spatial.h5lesson')
@@ -382,25 +383,13 @@ async function launchEditor(): Promise<LaunchedEditor> {
     expect(await app.evaluate(({ BrowserWindow }) => (
       BrowserWindow.getAllWindows().some(window => window.isVisible())
     ))).toBe(false)
-    // Enter only the landing page; never replace an already opened editor or recovery draft.
-    const startupMore = page.locator('.lesson-workspace-more > summary')
-    const startupEditor = page.getByRole('button', { name: '打开工程（Ctrl+O）', exact: true })
-    const startupRecovery = page.getByRole('alertdialog', { name: '发现未完成的本地恢复副本', exact: true })
-    await expect.poll(async () => await startupEditor.isVisible() || await startupMore.isVisible() || await startupRecovery.isVisible()).toBe(true)
-    if (!await startupEditor.isVisible() && await startupMore.isVisible() && !await startupRecovery.isVisible()) {
-      await startupMore.click()
-      await page.getByRole('button', { name: '新建独立课件', exact: true }).click()
-    }
-    await page.locator('[data-testid="canvas-stage"] canvas').waitFor()
+    // 冷启动只进入独立编辑器面（判据见 tests/e2e/lessonWorkspaceEntry.ts）。
+    await enterIndependentEditor(page)
     const recoveryDialog = page.getByRole('alertdialog', {
       name: '发现未完成的本地恢复副本',
     })
     if (await recoveryDialog.isVisible().catch(() => false)) {
       await recoveryDialog.getByRole('button', { name: '丢弃副本' }).click()
-    }
-    const professional = page.getByRole('button', { name: '专业' })
-    if (await professional.getAttribute('aria-pressed') !== 'true') {
-      await professional.click()
     }
     return { app, page, userDataPath }
   } catch (error) {

@@ -52,6 +52,18 @@ describe('S2 deterministic content QA', () => {
     expect(findings[0]).toMatchObject({ severity: 'error' })
     expect(findings[0]!.path.at(-1)).toBe('locationId')
   })
+  it('rejects a Flow location id written into scene.go', () => {
+    const project = blankProject(), { scene } = slide(project)
+    const { flow } = addFlowAndSpatial(project)
+    scene.interactions.push({
+      id: 'flow-id-as-scene', enabled: true, trigger: { type: 'scene.enter' }, conditions: [],
+      actions: [{ id: 'bad-go', start: 'after-previous', delayMs: 0, action: { type: 'scene.go', sceneId: flow.id } }],
+    })
+    const findings = collectCourseProjectInteractionHealth(project, EMPTY_FILES)
+      .filter(item => item.code === 'interaction-scene-reference-missing')
+    expect(findings.length).toBeGreaterThan(0)
+    expect(findings.some(item => item.message.includes(flow.id) && item.severity === 'error')).toBe(true)
+  })
   it('locates four content error families, separates formula layout, and never writes the project', () => {
     const project = blankProject(), { scene } = slide(project)
     const text = (value: string) => sceneNodeToCourseLayerItem(createTextNode({ text: value }), scene.layerItems.length)

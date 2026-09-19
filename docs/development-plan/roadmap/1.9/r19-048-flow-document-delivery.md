@@ -5,6 +5,8 @@
 - Optional: 否
 - Write locks: `contracts-schema`, `generated-index`, `store-flow`, `authoring-flow`, `props-flow`, `published-flow`, `published-producer`, `export-docx-print`, `app-save-recovery`
 
+日期：2026-09-18 状态勘误。**Flow 正文、两预览、HTML 与可编辑 Word 数学已有 Wave C 等分项证据，见[共用方案第 4 节](../../R19_SHARED_DOCUMENT_EDITOR_IMPLEMENTATION_PLAN.md#4-剩余范围与滚动批次)；禁止从零重做。** 只在相关 consumer 变化时补验；无 Word 环境则复用已有证据并保持“未新实测”。实施次序见[主方案](../../R19_FRONTEND_SPECIAL_IMPLEMENTATION_PLAN.md)。
+
 ## 结果与边界
 
 将共用核心接入真实Flow，在一个可运行切换批次中替换V9/Published根定义及全部直接producer/consumer；完成保存恢复、唯一工程History、Player/两种预览、离线HTML和结构化可编辑Word数学。无旧正文/AST兼容模式。

@@ -1,5 +1,12 @@
 import { useCallback, useRef } from 'react'
 
+export type ContentDockEdge = 'left' | 'right' | 'top' | 'bottom'
+
+/** left/top grow when the pointer moves toward positive axes; right/bottom invert. */
+export function contentDockResizeSign(dock: ContentDockEdge): 1 | -1 {
+  return dock === 'right' || dock === 'bottom' ? -1 : 1
+}
+
 interface SplitterProps {
   /** 分隔线可访问名称 */
   label: string

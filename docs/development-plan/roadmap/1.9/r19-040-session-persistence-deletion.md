@@ -1,34 +1,24 @@
-# r19-040-session-persistence-deletion：课例对话恢复、损坏隔离、工程另存隔离和范围删除
+# r19-040-session-persistence-deletion：目录会话恢复、损坏隔离和范围删除
 
 - Release: 1.9
 - Dependencies: `r18-060-release`, `r16-020-local-session-store`
 - Optional: 否
 - Write locks: `chat-ui`, `ai-session`
 
-## 结果与现状
+日期：2026-09-18。本文是目标规格，当前实施次序、事实和验收统一见[完整实施方案](../../R19_FRONTEND_SPECIAL_IMPLEMENTATION_PLAN.md)；本轮仅文档重建。
 
-新课例记录在重启后可查真实对话、引用、任务与提交结果，重新读取当前文件/工程后继续。Owner 明确本次无兼容需求，不迁移旧版本记录；未知版本或损坏仅隔离对应记录，不清空其他内容。
+## 目标与现状
+目录是会话归属，文件是消息级编辑目标；无课件也能恢复指定 conversationId。现有持久化、原生记录和目录分流可复用；全局 ID 命中未校验 owner、指定历史难达与轮询全库扫描仍需关闭。落实主方案 F01/F03，对应 V01/V02/V11。
 
-依据 [课例与文件合同](../../R19_LESSON_DOCUMENT_WORKSPACE_CONTRACT.md)、[工作协议](../../WORKING_PROTOCOL.md)。040 提供可版本化的记录、列表、恢复和删除端口；042消费端口建立真实课例身份，040不等待042整项实现，不自行构造空路径工程。
+## 直接入口与职责
+沿 src/main/localAgent/repository.ts、harness.ts、service.ts、lessonConversationRepository.ts 和 shared/localAgentTaskContract.ts 追踪真实记录；042 提供规范化与编辑身份，041 消费列表和生命周期。具体共享文件由唯一集成人修改，不另建会话仓库。
 
-## 直接入口与写域
+## 执行与退出
+1. 持久记录绑定 workspaceRoot/projectPath/conversationId；start、resume、input、cancel、list、read、rename、archive、delete、恢复都校验同一真实归属。目标文件引用不能代替目录归属。
+2. 指定会话读取直达记录；避免轮询 listAll 全量扫描。历史正文按需加载，但不能以减少数据量为由丢失引用、任务或提交结果。
+3. 恢复先核对任务终态、原生句柄、当前文件和工程版本。已提交结果不重放；旧 running 或提交结果未知先观察，不假完成、不另造循环。
+4. 损坏或未知版本仅隔离对应记录；不实现旧格式迁移，不静默清空目录。归档改变可见性，删除只操作明确范围的应用记录，不删真实文件/附件/恢复稿，也不声称删除原生 CLI 历史。
+5. 首存保持目录会话；Save As 不复制目标专属候选/句柄/trace，原目标历史可读。保持当前目录讨论不是复制原工程会话。
 
-- [repository.ts](../../../../src/main/localAgent/repository.ts)、[harness.ts](../../../../src/main/localAgent/harness.ts)、[service.ts](../../../../src/main/localAgent/service.ts)：本地记录、运行与恢复。
-- [localAgentTaskContract.ts](../../../../src/shared/localAgentTaskContract.ts)、[localAgentTaskGuards.ts](../../../../src/shared/localAgentTaskGuards.ts)：任务归属、版本、epoch及receipt。
-- [CourseChatPanel.tsx](../../../../src/renderer/ui/chat/CourseChatPanel.tsx)：只呈现真实记录，不持有第二记录库。
-
-共享合同与Chat接线由唯一集成人完成；仅使用当批需要的写域。
-
-## 执行与验收
-
-1. 记录按真实 lessonId/目录与conversationId归属，工程目标独立绑定；消息、引用、原生会话映射、任务及已提交receipt可恢复。新记录使用一个严格版本，不保留旧格式分支。
-2. 重启后 running 标为中断；继续时读取当前文档、附件/确认与工程观察，经adapter核实恢复句柄。已完成不重做，旧候选不自动执行，未知结果先核实。
-3. 单对话/课例记录/全部应用记录删除共用服务；运行中先失效epoch并停止，再清理本范围。不得删除真实课例文件、附件、工程或未保存文档恢复稿，不承诺删除外部CLI历史。
-4. 工程Save As使用新工程身份且不复制原工程会话/候选/trace；首次保存保留课例对话。课例移动按稳定ID重关联本版本记录，复制产生新身份与新对话。
-5. 单条坏JSON/未知版本可隔离；写记录失败不撤销已成功的工程或文档保存，UI报告真实可恢复范围。
-
-## 聚焦验证与交接
-
-在现有 diagnosticLog、localAgentTaskContract 测试补新归属、终态去重、损坏和删除反例；新身份集成由042验收。真实应用退出/重启、运行中删除、Save As及不同课例隔离；需要真实CLI时只使用Luna。未执行的恢复不能借旧版本测试算通过。
-
-交付040窄端口给042/041；应用记录之外无写入权限扩大。当前是路线规格，未开工。
+## 验收与交接
+同名不同目录、根目录/项目、多会话指定切换；无 .h5lesson 重启；损坏一条其余可用；运行中切换/删除/停止，迟到结果不误写；保存/另存后历史归属正确。先做 repository/service 确定性检查，再以真实界面验证精确历史与恢复，原生接续与050共用证据。把仍未知的原生恢复差异交给043，不能用 UI 字符串证明恢复成功。

@@ -80,8 +80,10 @@ test('F08 path A: workspace root markdown edit, save, layout adjust, relaunch co
 
     // 布局偏好跨重开保持
     expect(await dockOf(reopened)).toBe('bottom')
-    // 工作空间会话仍在，可继续
+    // 工作空间会话仍在，可继续（分组标题常驻，空会话也过，故再断言行数与选中行）
     await expect(reopened.locator('.lesson-workspace-directory')).toContainText('工作空间会话')
+    await expect(reopened.locator('.lesson-workspace-scope .lesson-session-row')).toHaveCount(1)
+    await expect(reopened.locator('.lesson-workspace-scope .lesson-session-row').first()).toHaveAttribute('aria-pressed', 'true')
     // 根目录 MD 重开后内容正确（真实文件）
     await reopened.getByRole('button', { name: '刷新工作空间根目录' }).click()
     await reopened.locator('.lesson-directory-tree').getByRole('button', { name: '备课笔记.md', exact: true }).click()

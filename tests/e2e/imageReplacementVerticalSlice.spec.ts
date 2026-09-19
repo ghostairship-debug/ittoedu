@@ -20,6 +20,7 @@ import type { CourseProjectDocument } from '../../src/shared/courseProjectTypes'
 import { APP_E2E_TEMP_DIRECTORY_NAME } from '../../src/shared/constants'
 import { BACKGROUND_E2E_ENV } from '../../src/main/windowVisibility'
 import { expectBackgroundWindowsIsolated } from './expectBackgroundWindowsIsolated'
+import { enterIndependentEditor } from './lessonWorkspaceEntry'
 
 const root = resolve(__dirname, '..', '..')
 const fixtureDirectory = join(root, 'tests', 'fixtures', 'architecture-baseline')
@@ -222,26 +223,14 @@ async function launchEditor(_standalone = false): Promise<LaunchedEditor> {
     context.on('page', attach)
     const page = await app.firstWindow()
     attach(page)
-    // Only enter the landing page; keep an existing editor or recovery draft intact.
-    const startupMore = page.locator('.lesson-workspace-more > summary')
-    const startupEditor = page.getByRole('button', { name: '打开工程（Ctrl+O）', exact: true })
-    const startupRecovery = page.getByRole('alertdialog', { name: '发现未完成的本地恢复副本', exact: true })
-    await expect.poll(async () => await startupEditor.isVisible() || await startupMore.isVisible() || await startupRecovery.isVisible()).toBe(true)
-    if (!await startupEditor.isVisible() && await startupMore.isVisible() && !await startupRecovery.isVisible()) {
-      await startupMore.click()
-      await page.getByRole('button', { name: '新建独立课件', exact: true }).click()
-    }
-    await page.locator('[data-testid="canvas-stage"] canvas').waitFor()
+    // 冷启动只进入独立编辑器面（判据见 tests/e2e/lessonWorkspaceEntry.ts）。
+    await enterIndependentEditor(page)
     await expectBackgroundWindowsIsolated(app, true)
     const recoveryDialog = page.getByRole('alertdialog', {
       name: '发现未完成的本地恢复副本',
     })
     if (await recoveryDialog.isVisible().catch(() => false)) {
       await recoveryDialog.getByRole('button', { name: '丢弃副本' }).click()
-    }
-    const professional = page.getByRole('button', { name: '专业' })
-    if (await professional.getAttribute('aria-pressed') !== 'true') {
-      await professional.click()
     }
     return { app, context, page, userDataPath, ...diagnostics }
   } catch (error) {
@@ -470,6 +459,12 @@ async function makeBaselineBannerExportable(page: Page): Promise<void> {
 }
 
 async function enterTryRun(page: Page): Promise<void> {
+  // 紧凑布局下属性面板是覆盖层（top:40px/right:0/z-index:40），其首行 .sidebar-tabs 高 44px
+  // 正好压住画布右上的「画布模式」开关（top:7px/right:9px/z-index:8）；先关闭面板再点，
+  // 同 editor.spec.ts:250-255 showEditorCanvas、r18-089-flow-viewport.spec.ts:460-470 写法。
+  const closePanel = page.locator('[aria-label="课件编辑面板"]')
+    .getByRole('button', { name: '关闭面板', exact: true })
+  if (await closePanel.isVisible()) await closePanel.click()
   const button = page.getByRole('group', { name: '画布模式' })
     .getByRole('button', { name: '当前位置试运行', exact: true })
   await button.click()

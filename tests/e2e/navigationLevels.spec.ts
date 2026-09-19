@@ -4,6 +4,7 @@ import { join, resolve, relative, isAbsolute } from 'node:path'
 import { _electron as electron, expect, test } from '@playwright/test'
 import { createServer } from 'vite'
 import { BACKGROUND_E2E_ENV } from '../../src/main/windowVisibility'
+import { enterIndependentEditor } from './lessonWorkspaceEntry'
 
 test('Mixed scene and step semantics survive archive and current-surface try-run in Electron', async () => {
   test.setTimeout(120_000)
@@ -16,16 +17,8 @@ test('Mixed scene and step semantics survive archive and current-surface try-run
   const app = await electron.launch({ args: ['.', `--user-data-dir=${join(runRoot, 'profile')}`], cwd: root, env: { ...process.env, VITE_DEV_SERVER_URL: `http://127.0.0.1:${address.port}/`, [BACKGROUND_E2E_ENV]: '1', ELECTRON_DISABLE_SECURITY_WARNINGS: 'true' } })
   try {
     const page = await app.firstWindow()
-    // Enter only the landing page; never replace an already opened editor or recovery draft.
-    const startupMore = page.locator('.lesson-workspace-more > summary')
-    const startupEditor = page.getByRole('button', { name: '打开工程（Ctrl+O）', exact: true })
-    const startupRecovery = page.getByRole('alertdialog', { name: '发现未完成的本地恢复副本', exact: true })
-    await expect.poll(async () => await startupEditor.isVisible() || await startupMore.isVisible() || await startupRecovery.isVisible()).toBe(true)
-    if (!await startupEditor.isVisible() && await startupMore.isVisible() && !await startupRecovery.isVisible()) {
-      await startupMore.click()
-      await page.getByRole('button', { name: '新建独立课件', exact: true }).click()
-    }
-    await page.locator('[data-testid="canvas-stage"] canvas').first().waitFor()
+    // 冷启动只进入独立编辑器面（判据见 tests/e2e/lessonWorkspaceEntry.ts）。
+    await enterIndependentEditor(page)
     const result = await page.evaluate(async () => {
       const load = (path: string): Promise<any> => import(path)
       const { createBlankCourseProject } = await load('/src/renderer/project/createCourseProject.ts')

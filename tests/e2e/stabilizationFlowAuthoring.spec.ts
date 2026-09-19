@@ -27,6 +27,7 @@ import { APP_E2E_TEMP_DIRECTORY_NAME } from '../../src/shared/constants'
 import { BACKGROUND_E2E_ENV } from '../../src/main/windowVisibility'
 import { expectBackgroundWindowsIsolated } from './expectBackgroundWindowsIsolated'
 import { showEditorPanel } from './r18NativeAuthoringFixture'
+import { enterIndependentEditor } from './lessonWorkspaceEntry'
 
 const root = resolve(__dirname, '..', '..')
 const flowFixturePath = join(root, 'tests', 'fixtures', 'course-project-v9', 'flow.h5lesson')
@@ -140,19 +141,9 @@ async function launchEditor(): Promise<LaunchedEditor> {
     })
     const page = await app.firstWindow()
     attach(page)
-    // Only enter the landing page; keep an existing editor or recovery draft intact.
-    const startupMore = page.locator('.lesson-workspace-more > summary')
-    const startupEditor = page.getByRole('button', { name: '打开工程（Ctrl+O）', exact: true })
-    const startupRecovery = page.getByRole('alertdialog', { name: '发现未完成的本地恢复副本', exact: true })
-    await expect.poll(async () => await startupEditor.isVisible() || await startupMore.isVisible() || await startupRecovery.isVisible()).toBe(true)
-    if (!await startupEditor.isVisible() && await startupMore.isVisible() && !await startupRecovery.isVisible()) {
-      await startupMore.click()
-      await page.getByRole('button', { name: '新建独立课件', exact: true }).click()
-    }
-    await page.locator('[data-testid="canvas-stage"] canvas').waitFor()
+    // 冷启动只进入独立编辑器面（判据见 tests/e2e/lessonWorkspaceEntry.ts）。
+    await enterIndependentEditor(page)
     await expectBackgroundWindowsIsolated(app, true)
-    const professional = page.getByRole('button', { name: '专业' })
-    if (await professional.getAttribute('aria-pressed') !== 'true') await professional.click()
     return { app, page, runRoot, ...diagnostics }
   } catch (error) {
     if (app) await closeEditor(app, runRoot).catch(() => undefined)
@@ -665,6 +656,11 @@ test('Wave C Flow authoring survives one real Editor and Player session', async 
         .toHaveText(`${FORMAT_TEXT}新`)
       await expectPublishedRangeStyles(reopenedParagraph)
 
+      // 紧凑布局下属性面板覆盖层（top:40px/z-index:40）压住画布右上的「画布模式」开关；
+      // 点击前先关闭面板（同 editor.spec.ts showEditorCanvas / r18-089 showEditorPanel(page,null)）。
+      const closePanel = page.locator('[aria-label="课件编辑面板"]')
+        .getByRole('button', { name: '关闭面板', exact: true })
+      if (await closePanel.isVisible()) await closePanel.click()
       const canvasMode = page.getByRole('group', { name: '画布模式' })
       const tryRunButton = canvasMode.getByRole('button', { name: '当前位置试运行', exact: true })
       await tryRunButton.click()

@@ -1,5 +1,19 @@
 import { z } from 'zod'
 
+/** Host path comparison and persistence share this rule. Trailing slashes are not identity. */
+export function normalizeWorkspacePath(value: string, platform: NodeJS.Platform = typeof process === 'undefined' ? 'win32' : process.platform): string {
+  if (!value || value.includes('\0')) throw new Error('需要规范化的绝对工程路径')
+  let normalized = value.replace(/\\/g, '/')
+  // Drive paths must be lowercase to match workspaceIdentityV1Schema even when the
+  // renderer bundle does not report process.platform === 'win32'.
+  if (platform === 'win32' || /^[a-zA-Z]:/.test(normalized)) normalized = normalized.toLowerCase()
+  if (normalized.length > 1 && normalized.endsWith('/') && !/^[a-z]:\/$/i.test(normalized) && normalized !== '/') {
+    normalized = normalized.replace(/\/+$/, '')
+    if (/^[a-z]:$/i.test(normalized)) normalized += '/'
+  }
+  return normalized
+}
+
 /** Shared by local materials and AI sessions; never persisted in a course. */
 export const workspaceIdentityV1Schema = z.object({
   version: z.literal(1),

@@ -32,7 +32,7 @@ import type {
   LessonFileTab,
 } from "../controller/useDocumentTabsController";
 import { LessonDirectoryTree } from "./LessonDirectoryTree";
-import { WorkbenchSplitter } from "./WorkbenchSplitter";
+import { contentDockResizeSign, WorkbenchSplitter } from "./WorkbenchSplitter";
 import {
   useWorkbenchLayoutPrefs,
   type ContentDock,
@@ -50,7 +50,6 @@ export interface LessonWorkspaceViewProps {
     conversation: LessonConversation | null;
     name: string;
     creating: boolean;
-    openingCopy: boolean;
     error: string | null;
     busy: boolean;
     treeVersion: number;
@@ -78,14 +77,12 @@ export interface LessonWorkspaceViewProps {
       conversation?: LessonConversation,
     ): Promise<void>;
     selectConversation(conversation: LessonConversation): Promise<void>;
-    openLesson(asCopy?: boolean): Promise<void>;
     createLesson(): Promise<void>;
     openFile(entry: LessonDirectoryEntry): Promise<void>;
     newStandaloneProject(): Promise<void>;
     setSelectedDirectory(value: string | null): void;
     setName(value: string): void;
     setCreating(value: boolean): void;
-    setOpeningCopy(value: boolean): void;
     refreshTree(): void;
     setExplorerOpen(value: boolean): void;
     setConversationsOpen(value: boolean): void;
@@ -93,7 +90,7 @@ export interface LessonWorkspaceViewProps {
     setMobilePane(value: "navigation" | "chat" | "workbench"): void;
     setConversations(value: LessonConversation[]): void;
     clearConversation(): void;
-    createProject(): Promise<void>;
+    createLessonProject(): Promise<void>;
     removeProject(project: LessonProject): Promise<void>;
     pickProjectFolder(): Promise<void>;
     cancelProjectPick(): void;
@@ -130,6 +127,7 @@ export interface LessonWorkspaceViewProps {
   renderDirectoryChat?(
     root: string,
     conversation: LessonConversation,
+    documentTarget?: DocumentChatTarget,
   ): ReactNode;
   renderMaterial?(path: string, lesson: LessonWorkspace | null): ReactNode;
   renderMaterials?(lesson: LessonWorkspace): ReactNode;
@@ -175,6 +173,10 @@ export function LessonWorkspaceView(props: LessonWorkspaceViewProps) {
   const [newTabMenuOpen, setNewTabMenuOpen] = useState(false);
   const [newDocName, setNewDocName] = useState("");
   const [editorFocus, setEditorFocus] = useState(false);
+  const [historyQuery, setHistoryQuery] = useState("");
+  const [historyMatches, setHistoryMatches] = useState<
+    { conversationId: string; excerpt: string }[]
+  >([]);
   const savedLayoutRef = useRef<{
     contentDock: ContentDock;
     contentClosed: boolean;
@@ -234,7 +236,7 @@ export function LessonWorkspaceView(props: LessonWorkspaceViewProps) {
     return state.workspace ?? "";
   };
 
-  /** 在编辑器中打开：全屏编辑模式。暂存工作台布局偏好，返回时恢复；DOM 保持挂载。 */
+  /** 在编辑器中打开：全屏编辑模式。只改 CSS 投影，不停靠换向、不卸载对话。 */
   const enterEditor = () => {
     if (editorFocus) return;
     savedLayoutRef.current = {
@@ -243,19 +245,13 @@ export function LessonWorkspaceView(props: LessonWorkspaceViewProps) {
       chatClosed: layout.prefs.chatClosed,
     };
     setEditorFocus(true);
-    layout.setDock("right");
     layout.setContentClosed(false);
-    layout.setChatClosed(true);
   };
   const exitEditor = () => {
     setEditorFocus(false);
     const saved = savedLayoutRef.current;
     savedLayoutRef.current = null;
-    if (saved) {
-      layout.setDock(saved.contentDock);
-      layout.setContentClosed(saved.contentClosed);
-      layout.setChatClosed(saved.chatClosed);
-    }
+    if (saved) layout.setContentClosed(saved.contentClosed);
   };
   /** ＋新建：在工作空间根目录创建 Markdown 文档并直接打开为标签页。 */
   const createMarkdown = async () => {
@@ -292,9 +288,38 @@ export function LessonWorkspaceView(props: LessonWorkspaceViewProps) {
   };
 
   const contentSplitterDrag = (deltaPx: number) => {
-    // 停靠在左：分隔线在内容右侧，向右拖应缩小；停靠在下：分隔线在内容上方（内容在下），向下拖应缩小
-    resizeContentByPx((dock === "left" || dock === "bottom" ? -1 : 1) * deltaPx);
+    resizeContentByPx(contentDockResizeSign(dock) * deltaPx);
   };
+  async function searchHistory() {
+    const query = historyQuery.trim();
+    const root = state.workspace;
+    if (!query || !root) return;
+    const owners: ConversationOwner[] = [
+      { kind: "workspace", workspaceRoot: lower(root) },
+      ...state.projects.map((project) => ({
+        kind: "project" as const,
+        workspaceRoot: lower(root),
+        projectPath: project.normalizedPath,
+      })),
+    ];
+    const found: { conversationId: string; excerpt: string }[] = [];
+    for (const owner of owners) {
+      const result = await props.operation({
+        operation: "search-conversations",
+        owner,
+        query,
+      });
+      found.push(...(result.matches ?? []));
+    }
+    setHistoryMatches(found);
+  }
+  function pickHistory(conversationId: string) {
+    const record = [
+      ...state.directoryConversations,
+      ...Object.values(state.projectConversations).flat(),
+    ].find((item) => item.conversationId === conversationId);
+    if (record) actions.selectDirectoryConversation(record);
+  }
 
   const nav = state.workspace && (
     <nav
@@ -369,6 +394,28 @@ export function LessonWorkspaceView(props: LessonWorkspaceViewProps) {
         {layout.prefs.conversationsOpen && (
           <div className="lesson-pane-body">
             <div className="lesson-session-tools">
+              <label className="lesson-history-search">
+                查找会话
+                <input
+                  aria-label="查找会话"
+                  value={historyQuery}
+                  onChange={(event) => setHistoryQuery(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      void searchHistory();
+                    }
+                  }}
+                  placeholder="按标题或消息查找"
+                />
+              </label>
+              <button
+                type="button"
+                disabled={state.busy || !historyQuery.trim()}
+                onClick={() => void searchHistory()}
+              >
+                查找
+              </button>
               <button
                 type="button"
                 className="lesson-primary-action"
@@ -381,6 +428,20 @@ export function LessonWorkspaceView(props: LessonWorkspaceViewProps) {
                 <SquarePen size={14} aria-hidden="true" />
                 新对话
               </button>
+              {historyMatches.length > 0 && (
+                <ul className="lesson-history-matches" aria-label="会话查找结果">
+                  {historyMatches.map((match) => (
+                    <li key={match.conversationId}>
+                      <button
+                        type="button"
+                        onClick={() => pickHistory(match.conversationId)}
+                      >
+                        {match.excerpt}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
               <button
                 type="button"
                 disabled={state.busy}
@@ -398,7 +459,7 @@ export function LessonWorkspaceView(props: LessonWorkspaceViewProps) {
                 className="lesson-create-form"
                 onSubmit={(event) => {
                   event.preventDefault();
-                  void actions.run(() => actions.createProject());
+                  void actions.run(() => actions.createLessonProject());
                 }}
               >
                 <label>
@@ -641,7 +702,8 @@ export function LessonWorkspaceView(props: LessonWorkspaceViewProps) {
       <div className="lesson-sidebar-bottom">
         <HardDrive size={14} aria-hidden="true" />
         <span>
-          工作空间内完整权限<small>外部默认只读 · 其他操作需授权</small>
+          CLI 工作目录：{state.directoryConversation ? directoryRootOf(state.directoryConversation) : state.workspace ?? '未打开'}
+          <small>权限以各 CLI 原生配置与授权为准，应用未限制工作空间内外</small>
         </span>
       </div>
     </nav>
@@ -652,6 +714,7 @@ export function LessonWorkspaceView(props: LessonWorkspaceViewProps) {
       props.renderDirectoryChat(
         directoryRootOf(state.directoryConversation),
         state.directoryConversation,
+        tabs.activeDocumentTarget(),
       )
     ) : (
       <section className="lesson-chat-empty">
@@ -766,16 +829,26 @@ export function LessonWorkspaceView(props: LessonWorkspaceViewProps) {
       </button>
     </div>
   );
-  const chatPane = layout.prefs.chatClosed ? chatClosedPane : chat;
+  const chatPane = (
+    <>
+      {chat}
+      {layout.prefs.chatClosed ? chatClosedPane : null}
+    </>
+  );
 
   const workbench = (
     <section
       className="lesson-workspace-workbench"
       aria-label="课例工作台"
       style={
-        stacked
-          ? { height: `${layout.prefs.contentHeight}%` }
-          : { width: `${layout.prefs.contentWidth}%` }
+        // standalone 布局里工作台是唯一一列，也隐藏了 splitter 与布局条（无任何尺寸控件），
+        // 内联内容尺寸只会留下死区（r18-089 :678 的 691px 断言即此）；与 editor-focus 的
+        // CSS 复位同义，从源头不再写入。
+        state.standalone
+          ? undefined
+          : stacked
+            ? { height: `${layout.prefs.contentHeight}%` }
+            : { width: `${layout.prefs.contentWidth}%` }
       }
     >
       <div className="workbench-layout-bar">
@@ -945,7 +1018,7 @@ export function LessonWorkspaceView(props: LessonWorkspaceViewProps) {
           className="lesson-file-tab"
         >
           {tab.kind === "document" ? (
-            tab.lesson && relativeFile(tab.lesson, tab.path) ? (
+            !state.directoryConversation && tab.lesson && relativeFile(tab.lesson, tab.path) ? (
               <LessonDocumentEditor
                 ref={(editor) => tabs.registerEditor(tab.path, editor)}
                 documentRef={{
@@ -977,7 +1050,7 @@ export function LessonWorkspaceView(props: LessonWorkspaceViewProps) {
     </section>
   );
 
-  const contentSplitter = contentOpen ? (
+  const contentSplitter = (
     <WorkbenchSplitter
       className="workbench-splitter--before-content"
       label={stacked ? "调整内容区高度" : "调整内容区宽度"}
@@ -985,7 +1058,7 @@ export function LessonWorkspaceView(props: LessonWorkspaceViewProps) {
       value={stacked ? layout.prefs.contentHeight : layout.prefs.contentWidth}
       onResizeDelta={contentSplitterDrag}
     />
-  ) : null;
+  );
 
   const navSplitter = (
     <WorkbenchSplitter
@@ -1055,12 +1128,12 @@ export function LessonWorkspaceView(props: LessonWorkspaceViewProps) {
   columnItems.push({ key: "nav", node: nav });
   if (state.workspace && !layout.prefs.navCollapsed)
     columnItems.push({ key: "nav-splitter", node: navSplitter });
-  if (state.workspace && stacked)
+  if (state.workspace && stacked) {
     columnItems.push({
       key: "stack",
       node: (
         <div className="lesson-workspace-stack">
-          {dock === "top" && contentOpen ? (
+          {dock === "top" ? (
             <>
               {workbench}
               {contentSplitter}
@@ -1069,21 +1142,23 @@ export function LessonWorkspaceView(props: LessonWorkspaceViewProps) {
           ) : (
             <>
               {chatPane}
-              {contentOpen && contentSplitter}
-              {contentOpen && workbench}
+              {contentSplitter}
+              {workbench}
             </>
           )}
         </div>
       ),
     });
-  if (state.workspace && !stacked && dock === "left" && contentOpen) {
-    columnItems.push({ key: "workbench", node: workbench });
-    columnItems.push({ key: "content-splitter", node: contentSplitter });
-  }
-  columnItems.push({ key: "chat", node: chatPane });
-  if (state.workspace && !stacked && dock === "right" && contentOpen) {
-    columnItems.push({ key: "content-splitter", node: contentSplitter });
-    columnItems.push({ key: "workbench", node: workbench });
+  } else {
+    if (state.workspace && dock === "left") {
+      columnItems.push({ key: "workbench", node: workbench });
+      columnItems.push({ key: "content-splitter", node: contentSplitter });
+    }
+    columnItems.push({ key: "chat", node: chatPane });
+    if (state.workspace && dock === "right") {
+      columnItems.push({ key: "content-splitter", node: contentSplitter });
+      columnItems.push({ key: "workbench", node: workbench });
+    }
   }
   if (!state.workspace) columnItems.push({ key: "workbench", node: workbench });
 
@@ -1175,7 +1250,7 @@ export function LessonWorkspaceView(props: LessonWorkspaceViewProps) {
             <div className="lesson-permission-note">
               <strong>工作空间权限</strong>
               <p>
-                范围内：AI 默认拥有完整权限。范围外：默认只读，写入、执行等操作需另行授权。
+                产品目标是工作空间内完整工作、外部默认只读；当前以各 CLI 原生 cwd、配置与授权为准，应用层策略尚未接线。
               </p>
             </div>
           </div>
@@ -1223,7 +1298,7 @@ export function LessonWorkspaceView(props: LessonWorkspaceViewProps) {
               </button>
               <button
                 type="button"
-                onClick={() => layout.setContentClosed(!contentOpen)}
+                onClick={() => layout.toggleContentClosed()}
               >
                 {contentOpen ? "收起" : "展开"}内容区
               </button>
@@ -1297,6 +1372,9 @@ export function LessonWorkspaceView(props: LessonWorkspaceViewProps) {
         data-content-closed={
           state.workspace ? layout.prefs.contentClosed : undefined
         }
+        data-chat-closed={
+          state.workspace ? layout.prefs.chatClosed : undefined
+        }
         data-active-pane={state.workspace ? state.mobilePane : "workbench"}
         hidden={!state.workspace && !state.standalone}
       >
@@ -1361,45 +1439,6 @@ export function LessonWorkspaceView(props: LessonWorkspaceViewProps) {
               </button>
             </div>
           </form>
-        </div>
-      )}
-      {state.openingCopy && (
-        <div
-          className="lesson-modal-backdrop"
-          role="presentation"
-          onClick={() => actions.setOpeningCopy(false)}
-        >
-          <div
-            className="lesson-modal"
-            role="dialog"
-            aria-modal="true"
-            aria-label="作为独立副本打开"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <h3>作为独立副本打开</h3>
-            <p>
-              请选择已复制的课件目录。副本会取得新的课件身份和对话，不继承原会话、候选或执行记录。
-            </p>
-            <div className="lesson-modal-actions">
-              <button
-                type="button"
-                className="lesson-primary-action"
-                disabled={state.busy}
-                onClick={() => {
-                  actions.setOpeningCopy(false);
-                  void actions.run(() => actions.openLesson(true));
-                }}
-              >
-                选择副本目录并打开
-              </button>
-              <button
-                type="button"
-                onClick={() => actions.setOpeningCopy(false)}
-              >
-                取消
-              </button>
-            </div>
-          </div>
         </div>
       )}
     </div>

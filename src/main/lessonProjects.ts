@@ -3,7 +3,7 @@ import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import { z } from 'zod'
 import { lessonProjectSchema, type LessonProject } from '../shared/lessonWorkspace'
-import { workspaceIdentityV1Schema } from '../shared/workspaceIdentity'
+import { normalizeWorkspacePath, workspaceIdentityV1Schema } from '../shared/workspaceIdentity'
 
 const storeSchema = z.object({ version: z.literal(1), items: z.array(lessonProjectSchema).max(500) }).strict()
 
@@ -26,8 +26,7 @@ export class LessonProjectRegistry {
     finally { await fs.rm(temporary, { force: true }) }
   }
   normalizePath(value: string): string {
-    const replaced = value.replace(/\\/g, '/')
-    return process.platform === 'win32' ? replaced.toLowerCase() : replaced
+    return normalizeWorkspacePath(value)
   }
   /** 规范化并校验路径落在工作空间根内。 */
   resolveInside(workspaceRoot: string, target: string): string {

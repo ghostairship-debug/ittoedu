@@ -46,9 +46,21 @@ test('r19 directory conversation: workspace session is a full CLI turn', async (
     await page.screenshot({ path: join(evidence, 'directory-conversation-composer.png') })
 
     // 发送一轮最短真实对话（唯一标记便于判定助手确实回复）
-    await page.getByRole('textbox', { name: '给创作助手的消息' }).fill('只回复两个字：核桃。不要调用任何工具。')
-    await page.getByRole('button', { name: '发送', exact: true }).click()
-    await expect.poll(async () => page.locator('.chat-scroll').innerText(), { timeout: 180_000, intervals: [2_000, 5_000] }).toContain('核桃')
+    const composer = page.getByRole('textbox', { name: '给创作助手的消息' })
+    await composer.fill('只回复两个字：核桃。不要调用任何工具。')
+    const send = page.locator('.course-chat--embedded').getByRole('button', { name: '发送', exact: true })
+    await expect(send).toBeEnabled({ timeout: 30_000 })
+    await send.click()
+    try {
+      await expect.poll(async () => page.evaluate(() => {
+        const messages = [...document.querySelectorAll('.chat-scroll .chat-message')]
+        return messages.some(node => !node.closest('.chat-user-message') && (node.textContent ?? '').includes('核桃'))
+      }), { timeout: 180_000, intervals: [2_000, 5_000] }).toBe(true)
+    } catch (cause) {
+      const alert = await page.getByRole('alert').textContent().catch(() => '')
+      const transcript = await page.locator('.chat-scroll').innerText().catch(() => '')
+      throw new Error(`directory CLI turn produced no assistant 核桃; alert=${alert}; transcript=${transcript}`, { cause })
+    }
     await page.screenshot({ path: join(evidence, 'directory-conversation-reply.png') })
 
     // 记录归属与作用域：目录作用域，cwd=工作空间根（owner 路径需先归一化，与控制器一致）

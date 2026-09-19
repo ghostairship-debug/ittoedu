@@ -11,23 +11,10 @@ import type { GenerationRequest } from '../../src/shared/generationContract'
 import type { RuntimeLayerItem } from '../../src/shared/courseProjectTypes'
 import { closeNativeEditor, FIXTURE_IDS, readSaved, writeNativeLesson, type NativeRun } from './r18NativeAuthoringFixture'
 import { expectBackgroundWindowsIsolated } from './expectBackgroundWindowsIsolated'
+import { enterIndependentEditor as enterStandaloneEditorFromLanding } from './lessonWorkspaceEntry'
 
 const productRoot = resolve(__dirname, '..', '..')
 
-async function enterStandaloneEditorFromLanding(page: Page): Promise<void> {
-  const landing = page.locator('.lesson-workspace-landing')
-  const editor = page.getByTestId('canvas-stage')
-  await Promise.race([
-    landing.waitFor({ state: 'visible', timeout: 15_000 }),
-    editor.waitFor({ state: 'visible', timeout: 15_000 }),
-  ])
-  if (!await landing.isVisible()) return
-  const more = page.locator('.lesson-workspace-more > summary')
-  if (!await more.isVisible()) return
-  await more.click()
-  const create = page.getByRole('button', { name: '新建独立课件', exact: true })
-  if (await create.isVisible()) await create.click()
-}
 const corruptAssetId = 'corrupt-runtime-fallback'
 const runtimeId = 'corrupt-runtime-fallback-host'
 const svgRuntimeId = 'svg-runtime-fallback-host'
@@ -128,8 +115,6 @@ test('a corrupt current Runtime fallback is diagnosed without becoming a native 
     await page.getByTestId('canvas-stage').locator('canvas').first().waitFor()
     await app.evaluate(({ dialog }, path) => { dialog.showOpenDialog = (async () => ({ canceled: false, filePaths: [path] })) as typeof dialog.showOpenDialog }, projectPath)
     await page.getByRole('button', { name: '打开工程（Ctrl+O）', exact: true }).click()
-    const professional = page.getByRole('button', { name: '专业', exact: true })
-    if (await professional.getAttribute('aria-pressed') !== 'true') await professional.click()
     await showEditorPanel(page, '属性与素材')
     await page.getByRole('tab', { name: '图层', exact: true }).click()
     await expect(page.locator('[data-corrupt-observation-runtime="mounted"]').first()).toBeVisible()

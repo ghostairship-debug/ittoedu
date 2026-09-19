@@ -15,6 +15,7 @@ import { workspaceIdentityKey } from '../../src/shared/workspaceIdentity'
 import { BACKGROUND_E2E_ENV } from '../../src/main/windowVisibility'
 import { expectBackgroundWindowsIsolated } from './expectBackgroundWindowsIsolated'
 import { compareCanvasMotion, startCanvasPoseObservation, validateCanvasPoses, type CanvasMotion } from './runtimeCanvasMotionObservation'
+import { enterIndependentEditor } from './lessonWorkspaceEntry'
 
 export const NATIVE_PROMPTS = Object.freeze({
   T01: '这是什么颜色？先别修改。',
@@ -654,24 +655,14 @@ export async function launchNativeEditor(productRoot: string, runRoot: string, p
     if (resolve(userData).toLowerCase() !== resolve(profilePath).toLowerCase()) throw new Error('The test must use its exact validated profile')
     const run = { app, page, runRoot, workspaceRoot, projectPath, userData, pageErrors, consoleErrors }
     await expectBackgroundWindowsIsolated(app, true)
-    // Enter only the landing page; never replace an already opened editor or recovery draft.
-    const startupMore = page.locator('.lesson-workspace-more > summary')
-    const startupEditor = page.getByRole('button', { name: '打开工程（Ctrl+O）', exact: true })
-    const startupRecovery = page.getByRole('alertdialog', { name: '发现未完成的本地恢复副本', exact: true })
-    await expect.poll(async () => await startupEditor.isVisible() || await startupMore.isVisible() || await startupRecovery.isVisible()).toBe(true)
-    if (!await startupEditor.isVisible() && await startupMore.isVisible() && !await startupRecovery.isVisible()) {
-      await startupMore.click()
-      await page.getByRole('button', { name: '新建独立课件', exact: true }).click()
-    }
-    await page.locator('[data-testid="canvas-stage"] canvas').first().waitFor()
+    // 冷启动只进入独立编辑器面（判据见 tests/e2e/lessonWorkspaceEntry.ts）。
+    await enterIndependentEditor(page)
     // Only the OS file picker is replaced so this hidden test can choose its own
     // known lesson. Native CLI launch, auth, configuration, tools and IPC are real.
     await app.evaluate(({ dialog }, file) => {
       dialog.showOpenDialog = (async () => ({ canceled: false, filePaths: [file] })) as typeof dialog.showOpenDialog
     }, projectPath)
     await page.getByRole('button', { name: '打开工程（Ctrl+O）', exact: true }).click()
-    const professional = page.getByRole('button', { name: '专业', exact: true })
-    if (await professional.getAttribute('aria-pressed') !== 'true') await professional.click()
     await showEditorPanel(page, '属性与素材')
     await page.getByRole('tab', { name: '图层', exact: true }).click()
     await expect(page.getByTestId(`node-item-${FIXTURE_IDS.image}`)).toHaveCount(1)

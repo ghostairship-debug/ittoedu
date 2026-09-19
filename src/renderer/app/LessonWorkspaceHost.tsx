@@ -15,6 +15,7 @@ export interface LessonWorkspaceHostProps {
   onOpenProject(path: string): Promise<boolean>
   onNewProject(): Promise<boolean>
   onActiveLesson(lesson: LessonWorkspace | null, conversation: LessonConversation | null): void
+  onActiveDirectoryConversation?(conversation: LessonConversation | null): void
   onDirtyChange?(dirty: boolean): void
   observeEmptyProject(lesson: LessonWorkspace['identity'], conversationId: string): LessonBuildTarget
   continueProjectEditing(lesson: LessonWorkspace['identity'], conversationId: string, expectedProjectId: string): Promise<void>
@@ -32,6 +33,7 @@ export const LessonWorkspaceHost = forwardRef<LessonWorkspaceShellHandle, Lesson
     closeAll: () => shell.current?.closeAll() ?? Promise.resolve(true),
     preserveAll: () => shell.current?.preserveAll() ?? Promise.resolve(true),
     applyBinding: (lesson, conversation) => shell.current?.applyBinding(lesson, conversation),
+    applyDirectoryBinding: conversation => shell.current?.applyDirectoryBinding(conversation),
     openFile: path => shell.current?.openFile(path) ?? Promise.resolve(),
   }), [])
   const [selections, setSelections] = useState<Record<string, LessonAuthoringMaterialSelection[]>>({})
@@ -60,7 +62,12 @@ export const LessonWorkspaceHost = forwardRef<LessonWorkspaceShellHandle, Lesson
       }
     }}
     renderChat={(lesson, conversation, documentTarget) => <LessonConversationChat documentTarget={documentTarget} lesson={lesson} conversation={conversation} projectId={props.projectId} projectPath={props.projectPath} />}
-    renderDirectoryChat={(root, conversation) => <DirectoryConversationChat root={root} conversation={conversation} />}
+    renderDirectoryChat={(root, conversation, documentTarget) => {
+      const bound = !!props.projectPath && conversation.projectTarget?.projectId === props.projectId
+        && conversation.projectTarget.normalizedPath.replace(/\\/g, '/').toLowerCase() === props.projectPath.replace(/\\/g, '/').toLowerCase()
+      return <DirectoryConversationChat root={root} conversation={conversation} documentTarget={documentTarget}
+        projectId={bound ? props.projectId : ''} projectPath={bound ? props.projectPath : null} />
+    }}
     renderMaterial={(filename, lesson) => material(filename, lesson)} renderMaterials={lesson => material(undefined, lesson)}
     renderWorkflow={(lesson, conversation) => api.lessonAuthoring && <>
       <details className="lesson-workflow-settings"><summary>文档创作助手 · {adapter === 'codex' ? 'Codex' : adapter === 'claude' ? 'Claude' : 'OpenCode'}</summary><label>创作流程 CLI <select aria-label="创作流程 CLI" value={adapter} onChange={event => setAdapter(event.target.value as LocalAgentId)}><option value="codex">Codex</option><option value="claude">Claude</option><option value="opencode">OpenCode</option></select></label></details>

@@ -56,20 +56,27 @@
 .lesson-layout-dock>button{text-align:center}
 .lesson-layout-dock>button[aria-pressed=true]{border-color:var(--green,#245b46);background:var(--green-soft,#e8efe9);color:var(--ink,#17221d)}
 
-/* 模态对话框（新建课件 / 作为独立副本打开） */
+/* 模态对话框（新建课件） */
 .lesson-modal-backdrop{position:fixed;inset:0;z-index:20;display:grid;place-items:center;background:rgba(23,34,29,.4)}
 .lesson-modal{width:min(420px,calc(100vw - 48px));display:grid;gap:12px;padding:20px;background:var(--surface,#fffefa);border:1px solid var(--border,#d9d6ce);border-radius:14px;box-shadow:var(--shadow-md,0 10px 30px rgba(23,34,29,.18));color:var(--ink,#17221d)}
 .lesson-modal h3{margin:0;font-size:15px}
 .lesson-modal p{margin:0;font-size:12px;color:var(--ink-muted,#66706a);line-height:1.6;word-break:break-all}
 .lesson-modal-actions{display:flex;gap:8px;justify-content:flex-end}
 
-/* 在编辑器中打开：全屏编辑模式（CSS 隐藏，DOM 保持挂载） */
+/* 在编辑器中打开：全屏内容，同一工作台聊天实例用 CSS 投影到右侧，不另开第二聊天。 */
 .lesson-workspace-shell[data-editor-focus] .lesson-workspace-navigation,
-.lesson-workspace-shell[data-editor-focus] .lesson-workspace-chat,
 .lesson-workspace-shell[data-editor-focus] .workbench-splitter,
-.lesson-workspace-shell[data-editor-focus] .lesson-workspace-pane-switcher{display:none!important}
+.lesson-workspace-shell[data-editor-focus] .lesson-workspace-pane-switcher,
+.lesson-workspace-shell[data-editor-focus] .lesson-workspace-chat--closed{display:none!important}
 .lesson-workspace-shell[data-editor-focus] .lesson-workspace-columns>.lesson-workspace-workbench{flex:1;width:auto!important;height:auto!important;border-left:0}
 .lesson-workspace-shell[data-editor-focus] .lesson-workspace-stack{display:contents}
+.lesson-workspace-shell[data-editor-focus] .lesson-workspace-columns:not([data-chat-closed=true]) .lesson-workspace-chat:not(.lesson-workspace-chat--closed){
+  position:absolute;top:0;right:0;bottom:0;z-index:12;width:min(400px,40%);height:auto!important;display:flex!important;border-left:1px solid var(--border,#d9d6ce)
+}
+/* 编辑器焦点的对话投影（上一条规则）以 z-index:12 铺在整列右端，工作台布局条右对齐的按钮会整块落在它下面：
+   <button title="收起内容区（专注对话）"> 实测拦下「返回工作台」的指针事件，返回入口既看不见也点不到。
+   布局条右端让出投影宽度，返回入口才真正可达。宽度公式必须与上一条规则的 min(400px,40%) 保持一致。 */
+.lesson-workspace-shell[data-editor-focus] .lesson-workspace-columns[data-layout=workspace]:not([data-chat-closed=true]) .workbench-layout-bar{padding-right:calc(min(400px,40%) + 8px)}
 
 .lesson-workspace-error{padding:9px 16px;background:var(--apricot-soft,#f3e1d3);color:#8a4a24;border-bottom:1px solid #e3c3a8}
 .lesson-workspace-landing{max-width:680px;margin:auto;padding:56px 28px;background:var(--surface,#fffefa);border:1px solid var(--border,#d9d6ce);border-radius:16px;box-shadow:var(--shadow-md,0 10px 30px rgba(23,34,29,.08))}
@@ -87,6 +94,8 @@
 .lesson-workspace-columns[data-nav-collapsed=true] .lesson-workspace-navigation{display:none}
 .lesson-workspace-columns[data-content-closed=true] .lesson-workspace-workbench{display:none}
 .lesson-workspace-columns[data-content-closed=true] .workbench-splitter--before-content{display:none}
+.lesson-workspace-columns[data-chat-closed=true] .lesson-workspace-chat:not(.lesson-workspace-chat--closed){display:none}
+.lesson-workspace-shell[data-editor-focus] .lesson-workspace-chat--closed{display:none!important}
 .lesson-workspace-pane-switcher{display:none}
 
 .lesson-workspace-navigation,.lesson-workspace-chat,.lesson-workspace-workbench{min-width:0;min-height:0;background:var(--surface,#fffefa)}
@@ -250,7 +259,7 @@
 .workbench-layout-bar button[aria-pressed=true]{background:var(--green-soft,#dde9e2);color:var(--green-deep,#173e31)}
 .workbench-layout-bar .workbench-open-external{border:1px solid var(--border,#d9d6ce);margin-left:8px}
 .workbench-external-notice{margin:0;padding:4px 10px;font-size:12px;color:var(--apricot,#d88755);background:var(--surface,#fffefa);border-bottom:1px solid var(--border,#d9d6ce)}
-.workbench-nav-reopen{position:absolute;left:0;top:0;bottom:0;z-index:5;width:26px;display:flex;align-items:flex-start;justify-content:center;padding-top:12px;background:var(--surface,#fffefa);border-right:1px solid var(--border,#d9d6ce);border-radius:0;border-width:0 1px 0 0;color:var(--ink-muted,#66706a)}
+.workbench-nav-reopen{flex:0 0 26px;width:26px;align-self:stretch;display:flex;align-items:flex-start;justify-content:center;padding-top:12px;background:var(--surface,#fffefa);border-right:1px solid var(--border,#d9d6ce);border-radius:0;border-width:0 1px 0 0;color:var(--ink-muted,#66706a);z-index:5}
 .workbench-nav-reopen:hover{background:var(--surface-muted,#ece9e1);color:var(--ink,#17221d)}
 
 /* ── 可调分隔线 ───────────────────────────────── */

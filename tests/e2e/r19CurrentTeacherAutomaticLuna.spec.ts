@@ -34,8 +34,8 @@ test('r19 current teacher GUI automatic Luna: natural goal and normal repair con
   const luna = directory.capabilities?.models.find(model => /luna/i.test(model.id))
   expect(luna, 'Actual native catalog must offer Luna').toBeTruthy()
   const fast = luna!.serviceTiers?.find(tier => /fast|priority/i.test(`${tier.id} ${tier.name}`))
-  expect(luna!.effort.kind === 'supported' && luna!.effort.values.includes('medium')).toBe(true)
-  const configuration = { model: luna!.id, effort: 'medium', ...(fast ? { serviceTier: fast.id } : {}) }
+  expect(luna!.effort.kind === 'supported' && luna!.effort.values.includes('max')).toBe(true)
+  const configuration = { model: luna!.id, effort: 'max', ...(fast ? { serviceTier: fast.id } : {}) }
   const configured = await page.evaluate(configuration => window.desktopAPI!.localAgent({ operation: 'configure', adapter: 'codex', configuration }), configuration)
   writeFileSync(join(evidence, 'actual-native-route.json'), JSON.stringify({ directory, configuration, configured }, null, 2))
   expect(configured.enabled, 'Configured native Luna route must be enabled before starting').toBe(true)

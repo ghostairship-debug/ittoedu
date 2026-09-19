@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { LessonWorkspace, LessonConversation } from '../../../shared/lessonWorkspace'
-import type { ConversationAgentWorkspace } from '../../../shared/workspaceIdentity'
+import { normalizeWorkspacePath, type ConversationAgentWorkspace } from '../../../shared/workspaceIdentity'
 import type { LocalAgentEvent, LocalAgentId, LocalAgentRecord } from '../../../shared/localAgentContract'
 import { aiQuestionSchema, aiInputDeliverySchema } from '../../../shared/localAgentInteraction'
 import { CourseChatPanel } from './CourseChatPanel'
 import { CourseChatTranscript } from './CourseChatTranscript'
 import { NativeAgentConfiguration } from './NativeAgentConfiguration'
+import { ChatComposerMenus, useDirectoryMentions } from './ChatComposerMenus'
 import { NativeAgentQuestion } from './NativeAgentQuestion'
 import { readableChatError } from './readableChatStatus'
 import { chatRecordTime, mergeChatEvents } from './courseChatHistory'
@@ -22,12 +23,17 @@ export function LessonConversationChat({ lesson, conversation, projectId, projec
   return <LessonDiscussion key={JSON.stringify(workspace)} workspace={workspace} projectId={projectId} projectPath={bound ? projectPath : null} documentTarget={documentTarget} />
 }
 /** 工作空间/项目文件夹的普通讨论会话：同一套讨论界面，不带课例文档编辑入口。 */
-export function DirectoryConversationChat({ root, conversation }: { root: string; conversation: LessonConversation }) {
+export function DirectoryConversationChat({ root, conversation, documentTarget, projectId = '', projectPath = null }: {
+  root: string; conversation: LessonConversation; documentTarget?: DocumentChatTarget; projectId?: string; projectPath?: string | null
+}) {
   const workspace = useMemo(() => ({ version: 1 as const, kind: 'directory' as const,
-    normalizedDirectory: root, conversationId: conversation.conversationId }), [root, conversation.conversationId])
-  return <LessonDiscussion key={JSON.stringify(workspace)} workspace={workspace} projectId="" projectPath={null} />
+    normalizedDirectory: normalizeWorkspacePath(root), conversationId: conversation.conversationId }), [root, conversation.conversationId])
+  const bound = !!projectPath && conversation.projectTarget?.projectId === projectId
+    && conversation.projectTarget.normalizedPath.replace(/\\/g, '/').toLowerCase() === projectPath.replace(/\\/g, '/').toLowerCase()
+  return <LessonDiscussion key={JSON.stringify(workspace)} workspace={workspace} projectId={bound ? projectId : ''} projectPath={bound ? projectPath : null} documentTarget={documentTarget} />
 }
 function LessonDiscussion({ workspace, projectId, projectPath, documentTarget }: { workspace: ConversationAgentWorkspace; projectId: string; projectPath: string | null; documentTarget?: DocumentChatTarget }) {
+  const mentions = useDirectoryMentions(workspace.normalizedDirectory)
   const [adapter, setAdapter] = useState<LocalAgentId>('codex')
   const [inputKind, setInputKind] = useState<'correct' | 'supplement'>('correct')
   const [deliveryNotice, setDeliveryNotice] = useState('')
@@ -93,11 +99,10 @@ function LessonDiscussion({ workspace, projectId, projectPath, documentTarget }:
     const token = generation.current, prompt = instruction.trim()
     setSending(true); setError('')
     try {
-      if (pinnedDocument && !running && workspace.kind === 'lesson') {
-        const lessonWorkspace = workspace
+      if (pinnedDocument && !running) {
         if (!api.lessonDocumentAi) throw new Error('文档修改入口未连接')
         const documentToken = ++documentTaskGeneration.current
-        const controller = new DocumentAiTaskController(api.lessonDocumentAi, lessonWorkspace, message => {
+        const controller = new DocumentAiTaskController(api.lessonDocumentAi, workspace, message => {
           if (documentTaskGeneration.current === documentToken) setDocumentStatus(message)
         })
         documentTask.current = controller
@@ -112,9 +117,10 @@ function LessonDiscussion({ workspace, projectId, projectPath, documentTarget }:
       }
       else {
         const prior = records.filter(record => record.adapter === adapter).sort((a, b) => chatRecordTime(b) - chatRecordTime(a))[0]
+        const frozenTarget = { kind: 'directory' as const, directory: normalizeWorkspacePath(workspace.normalizedDirectory) }
         const result = await api.localAgent(prior?.externalSessionId
-          ? { operation: 'lesson-resume', workspace, sessionId: prior.id, prompt }
-          : { operation: 'lesson-start', workspace, adapter, prompt, intent: 'discuss' })
+          ? { operation: 'lesson-resume', workspace, sessionId: prior.id, prompt, frozenTarget }
+          : { operation: 'lesson-start', workspace, adapter, prompt, intent: 'discuss', frozenTarget })
         if (!result.sessionId) throw new Error('CLI 尚未建立任务，请重试')
         pending.current = result.sessionId
       }
@@ -134,7 +140,9 @@ function LessonDiscussion({ workspace, projectId, projectPath, documentTarget }:
     const parsed = aiQuestionSchema.safeParse(payload.question)
     return parsed.success && !answered.has(parsed.data.questionId) ? [parsed.data] : []
   })
-  if (workspace.kind === 'lesson' && projectPath && loaded && !running && !pending.current && !sending && !instruction && !documentTarget && !pinnedDocument && !documentStatus) return <CourseChatPanel embedded projectId={projectId} projectPath={projectPath} lessonWorkspace={workspace} initialHistory={events} onClose={() => {}} />
+  if (projectPath && loaded && !running && !pending.current && !sending && !instruction && !documentTarget && !pinnedDocument && !documentStatus) {
+    return <CourseChatPanel embedded projectId={projectId} projectPath={projectPath} lessonWorkspace={workspace.kind === 'lesson' ? workspace : undefined} initialHistory={events} onClose={() => {}} />
+  }
   return <aside className="course-chat course-chat--embedded" aria-label="课例创作助手">
     <header><strong>创作助手</strong></header>
     {documentTarget && <button disabled={!!running || sending} onClick={() => setPinnedDocument(documentTarget)}>编辑当前文档</button>}
@@ -177,6 +185,12 @@ function LessonDiscussion({ workspace, projectId, projectPath, documentTarget }:
       <label className="chat-cli-picker">CLI <select aria-label="CLI" value={adapter} disabled={!!running || sending} onChange={event => setAdapter(event.target.value as LocalAgentId)}><option value="codex">Codex</option><option value="claude">Claude</option><option value="opencode">OpenCode</option></select></label>
       <NativeAgentConfiguration adapter={adapter} configurationSequence={0} onSavingChange={setConfigurationSaving} />
     </div>
+    <ChatComposerMenus value={instruction} onChange={setInstruction}
+      commands={[{ id: 'stop', label: '停止当前任务', run: () => {
+        const sessionId = running?.id ?? pending.current
+        if (sessionId) void api?.localAgent({ operation: 'lesson-cancel', workspace, sessionId })
+      } }]}
+      mentions={mentions} />
     <textarea aria-label="给创作助手的消息" value={instruction} onChange={event => setInstruction(event.target.value)} placeholder="说明教学主题，或一起讨论当前文档…" />
     <div className="chat-send-actions"><button disabled={!loaded || sending || !!pending.current || configurationSaving || !instruction.trim()} onClick={() => void send()}>{running ? '发送输入' : '发送'}</button>
       {(running || pending.current || sending) && <button onClick={() => {

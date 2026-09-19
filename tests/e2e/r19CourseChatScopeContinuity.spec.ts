@@ -73,7 +73,8 @@ test('r19 GUI chat keeps one panel configuration while selection and page reques
       dialog.showOpenDialog = (async () => ({ canceled: false, filePaths: [directory] })) as typeof dialog.showOpenDialog
     }, run)
     await page.getByRole('button', { name: '打开工作空间', exact: true }).first().click()
-    await page.locator('button').filter({ hasText: '聊天范围连续性课例' }).last().click()
+    await page.locator('.lesson-directory-tree').getByRole('button', { name: '聊天范围连续性课例', exact: true }).click()
+    await page.locator('.lesson-directory-tree').getByRole('button', { name: 'chat-scope-v9.h5lesson', exact: true }).first().click()
     await expect(page.getByTestId('canvas-stage')).toBeVisible()
 
     // Confirm a Luna choice from the actual native catalog once, then use that same
@@ -85,17 +86,15 @@ test('r19 GUI chat keeps one panel configuration while selection and page reques
     const configured = await page.evaluate(configuration => window.desktopAPI!.localAgent({ operation: 'configure', adapter: 'codex', configuration }), configuration)
     expect(configured.enabled).toBe(true)
 
+    const stage = page.getByTestId('canvas-stage')
+    const selectedBox = await page.locator('[data-slide-layer-item="scope-selected"]').boundingBox()
+    if (!selectedBox) throw new Error('Selected native text is not on the authoring canvas')
+    await page.mouse.click(selectedBox.x + selectedBox.width / 2, selectedBox.y + selectedBox.height / 2)
+
+    await page.getByRole('button', { name: '创作助手', exact: true }).click()
     const chat = page.getByRole('complementary', { name: 'CLI 创作助手' })
     await expect(chat).toBeVisible()
     await expect(chat.getByRole('combobox', { name: 'CLI', exact: true })).toHaveValue('codex')
-
-    // Select the rendered object through the visible canvas; no Store mutation is used.
-    await page.getByRole('button', { name: '页面与图层', exact: true }).click()
-    await page.getByRole('button', { name: '关闭面板', exact: true }).click()
-    const stage = page.getByTestId('canvas-stage')
-    const bounds = await stage.boundingBox()
-    if (!bounds) throw new Error('Visible canvas stage is unavailable')
-    await page.mouse.click(bounds.x + bounds.width * (390 / 1280), bounds.y + bounds.height * (175 / 720))
     await expect(chat.getByLabel('本轮引用', { exact: true })).toHaveValue('selection')
     await expect(chat.getByLabel('本轮引用摘要')).toContainText('场景 1')
     await chat.getByRole('textbox', { name: '发送给创作助手' }).fill('只调整当前选择对象的标题')
@@ -103,7 +102,10 @@ test('r19 GUI chat keeps one panel configuration while selection and page reques
     await expect(chat.getByRole('alert')).toContainText('桌面功能暂时不可用')
 
     // Clearing via the visible canvas and sending again exercises the normal page scope.
-    await page.mouse.click(bounds.x + bounds.width * 0.94, bounds.y + bounds.height * 0.92)
+    await page.keyboard.press('Escape')
+    const cleared = await stage.boundingBox()
+    if (!cleared) throw new Error('Visible canvas stage is unavailable after the first send')
+    await page.mouse.click(cleared.x + Math.min(24, cleared.width * 0.05), cleared.y + Math.min(24, cleared.height * 0.05))
     await expect(chat.getByLabel('本轮引用', { exact: true })).toHaveValue('page')
     await chat.getByRole('textbox', { name: '发送给创作助手' }).fill('检查当前页的两个对象关系')
     await chat.getByRole('button', { name: '发送', exact: true }).click()
