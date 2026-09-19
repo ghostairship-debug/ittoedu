@@ -523,7 +523,6 @@ async function verifyPortableStartup(): Promise<void> {
 async function verifyUnpackedWorkflows(): Promise<void> {
   const componentRun = await launchPackagedEditor(unpackedExecutable)
   try {
-    await componentRun.page.getByRole('button', { name: '专业' }).click()
     await componentRun.application.evaluate(
       ({ dialog }, componentPath) => {
         dialog.showOpenDialog = async () => ({

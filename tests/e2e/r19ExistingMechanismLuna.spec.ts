@@ -7,6 +7,7 @@ import type { LocalAgentRecord } from '../../src/shared/localAgentContract'
 import { BACKGROUND_E2E_ENV } from '../../src/main/windowVisibility'
 import { openCourseProjectArchive } from '../../src/renderer/project/courseProjectArchive'
 import { componentPackagesFromArchive } from '../../src/renderer/components/componentPackageStore'
+import { selectReferenceScope } from './chatReferenceTarget'
 
 const inputSchema = z.object({ profile: z.string().min(1), lessonDirectory: z.string().min(1),
   lessonWorkspace: lessonAgentWorkspaceSchema,
@@ -159,7 +160,7 @@ test('r19 existing mechanism Luna: B retry canonical commit, one Undo, Redo and 
     evidence('native-route.json', { directory, model: model.id, effort: 'medium', serviceTier: tier.id })
     await chat.getByLabel('意图', { exact: true }).selectOption('edit')
     await chat.getByLabel('应用方式', { exact: true }).selectOption('auto')
-    await chat.getByLabel('本轮引用', { exact: true }).selectOption('page')
+    await selectReferenceScope(chat, 'page')
     const prompt = '请只修改当前课例B“先预测，再拨动开关”的互动，补上脚本里要求的重试功能。正确预测后，在开关操作区增加一个“重新预测”按钮。点击它后，开关回到断开，两道预测选项重新出现，学生需要重新预测正确才能拨动开关；之前已经观察过的记录也重置，所以要再次拨动观察后才能继续到串联。其他片段已完成的学习进度不要清除。保留现在闭合灯亮、断开灯暗的行为，以及现有文字、图示、布局和其他所有内容，不要重新生成课件。';
     evidence('request.json', { prompt, projectId: input.projectId, beforeRevision: before.project.revision, targetId: target.layerItemId })
     await chat.getByLabel('发送给创作助手', { exact: true }).fill(prompt)

@@ -9,6 +9,7 @@ import {
   readSaved, recordEvidence, saveStage, selectLayer, slideItems, titleItem, verifyGreenImage, writeNativeLesson,
   type NativeCli, type NativeRun,
 } from './r18NativeAuthoringFixture'
+import { selectReferenceScope } from './chatReferenceTarget'
 
 const productRoot = resolve(__dirname, '..', '..')
 const adapter = (process.env.COURSEWARE_R18_NATIVE_CLI ?? 'codex') as NativeCli
@@ -41,7 +42,7 @@ async function configure(run: NativeRun, apply: 'auto' | 'preview') {
   await chat.getByLabel('意图', { exact: true }).selectOption('edit')
   await chat.getByLabel('应用方式', { exact: true }).selectOption(apply)
   // Keep the mixed page in the request while focusing the actual UI selection.
-  await chat.getByLabel('本轮引用', { exact: true }).selectOption('page')
+  await selectReferenceScope(chat, 'page')
   return chat
 }
 

@@ -24,6 +24,7 @@ export interface DocumentTabsController {
   closeTab(tab: LessonFileTab): Promise<boolean>
   removeTab(path: string): void
   registerEditor(path: string, editor: LessonDocumentEditorHandle | null): void
+  editorRef(path: string): (editor: LessonDocumentEditorHandle | null) => void
   updateDirty(path: string, dirty: boolean): void
   flushAll(): Promise<boolean>
   preserveAll(): Promise<boolean>
@@ -44,6 +45,7 @@ export function useDocumentTabsController({ documentPort, documentAiOperation, s
   const [tabs, setTabs] = useState<LessonFileTab[]>([])
   const [activeTab, setActiveTab] = useState('course')
   const documents = useRef(new Map<string, LessonDocumentEditorHandle>())
+  const editorRefs = useRef(new Map<string, (editor: LessonDocumentEditorHandle | null) => void>())
   const waitingEditors = useRef(new Map<string, (editor: LessonDocumentEditorHandle) => void>())
   const documentRepair = useRef<DocumentAiTaskController | null>(null)
   const documentRepairEpoch = useRef(0)
@@ -87,7 +89,8 @@ export function useDocumentTabsController({ documentPort, documentAiOperation, s
   }
   async function preserveAll() {
     await stopAllAiEdits()
-    for (const [filename, editor] of documents.current) {
+    // 同 flushAll/stopAllAiEdits：preserveDraft 期间的重渲染会删/增注册表键，必须按 await 前的快照遍历。
+    for (const [filename, editor] of [...documents.current]) {
       if (!(await editor.session.preserveDraft())) { setActiveTab(filename); return false }
     }
     await disposeDocuments()
@@ -112,6 +115,20 @@ export function useDocumentTabsController({ documentPort, documentAiOperation, s
     if (!editor) { documents.current.delete(path); return }
     documents.current.set(path, editor)
     waitingEditors.current.get(path)?.(editor)
+  }
+  /**
+   * 每个 path 一个身份稳定的 ref 回调。内联 `ref={editor => registerEditor(tab.path, editor)}` 每次
+   * 重渲染都是新函数，React 会先用 null 调旧回调（delete）再用实例调新回调（set）——同键被删后重新插入，
+   * 在 Map 的键序里移到末尾，正在 await 中遍历它的循环就会反复回访同一条目（V02 冲突用例的不收敛根因）。
+   * flushAll/stopAllAiEdits/preserveAll 的快照遍历是止血，这里消除抖动本身。
+   */
+  function editorRef(path: string) {
+    let callback = editorRefs.current.get(path)
+    if (!callback) {
+      callback = (editor: LessonDocumentEditorHandle | null) => registerEditor(path, editor)
+      editorRefs.current.set(path, callback)
+    }
+    return callback
   }
   function updateDirty(path: string, dirty: boolean) {
     setTabs(current => current.some(tab => tab.path === path && tab.dirty !== dirty)
@@ -146,7 +163,7 @@ export function useDocumentTabsController({ documentPort, documentAiOperation, s
       await onApplied?.(ref, version)
     })
   }
-  return { tabs, activeTab, setActiveTab, openTab, closeTab, removeTab, registerEditor, updateDirty, flushAll, preserveAll, closeAll, disposeDocuments, stopDocumentEdit, stopAllAiEdits, activeDocumentTarget, editDocument }
+  return { tabs, activeTab, setActiveTab, openTab, closeTab, removeTab, registerEditor, editorRef, updateDirty, flushAll, preserveAll, closeAll, disposeDocuments, stopDocumentEdit, stopAllAiEdits, activeDocumentTarget, editDocument }
 }
 
 function normalized(value: string) { return value.replace(/\\/g, '/').toLowerCase() }

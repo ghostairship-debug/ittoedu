@@ -9,6 +9,7 @@ import {
   recordEvidence, saveStage, selectLayer, slideItems, titleItem, writeNativeLesson, type NativeCli, type NativeRun,
 } from './r18NativeAuthoringFixture'
 import { chat, configureRemainingChat } from './r18NativeAuthoringRemainingFixture'
+import { selectReferenceScope } from './chatReferenceTarget'
 
 const productRoot = resolve(__dirname, '..', '..')
 const adapter = (process.env.COURSEWARE_R18_NATIVE_CLI ?? 'codex') as NativeCli
@@ -173,7 +174,7 @@ test(`R18 short path ${adapter} layout auto: page relationships, preserved conte
     run = await launchNativeEditor(productRoot, runRoot, projectPath)
     await selectLayer(run.page, FIXTURE_IDS.title)
     await configureRemainingChat(run, adapter, model, effort)
-    await chat(run).getByLabel('本轮引用', { exact: true }).selectOption('page')
+    await selectReferenceScope(chat(run), 'page')
     await chat(run).getByLabel('意图', { exact: true }).selectOption('edit')
     await chat(run).getByLabel('应用方式', { exact: true }).selectOption('auto')
     metrics.beforeMounted = await mountedLayout(run, originalTitle)

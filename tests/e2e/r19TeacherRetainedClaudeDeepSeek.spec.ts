@@ -6,6 +6,7 @@ import { workspaceIdentityKey } from '../../src/shared/workspaceIdentity'
 import { BACKGROUND_E2E_ENV } from '../../src/main/windowVisibility'
 import { openCourseProjectArchive } from '../../src/renderer/project/courseProjectArchive'
 import type { LocalAgentRecord } from '../../src/shared/localAgentContract'
+import { selectReferenceScope } from './chatReferenceTarget'
 
 /** One explicitly authorized Claude-channel DeepSeek repair of the retained teacher result.
  * This does not rerun the five-stage producer or imply behavioral acceptance. */
@@ -91,7 +92,7 @@ test('r19 retained teacher Claude DeepSeek repair: same course and saved reopen'
     evidence('native-route.json', { directory, model: model!.id, effort: 'high', serviceTier: null, speed: 'not-exposed-by-native-directory', preservedBeforeRevision: before.revision })
     await chat.getByLabel('意图', { exact: true }).selectOption('edit')
     await chat.getByLabel('应用方式', { exact: true }).selectOption('auto')
-    await chat.getByLabel('本轮引用', { exact: true }).selectOption('course')
+    await selectReferenceScope(chat, 'course')
     await chat.getByLabel('发送给创作助手', { exact: true }).fill(instruction)
     await page.screenshot({ path: join(output, 'before-send.png') })
     await chat.getByRole('button', { name: '发送', exact: true }).click()

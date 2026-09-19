@@ -46,6 +46,7 @@ import {
 import { BACKGROUND_E2E_ENV } from '../../src/main/windowVisibility'
 import { expectBackgroundWindowsIsolated } from './expectBackgroundWindowsIsolated'
 import { showEditorPanel } from './r18NativeAuthoringFixture'
+import { selectReferenceScope } from './chatReferenceTarget'
 
 const root = resolve(__dirname, '..', '..')
 const FLOW_SELECTION_TEXT = '真实鼠标拖选应跨越多个文字范围'
@@ -3055,14 +3056,7 @@ test('S3 Flow 所见即所得：空段、连续换行、选择与保存重开', 
     expect(await measure(paper)).toEqual(before)
     await page.getByRole('button', { name: '创作助手', exact: true }).click()
     const chat = page.getByRole('complementary', { name: 'CLI 创作助手' })
-    const taskSettings = await openChatTaskSettings(chat)
-    // 「本轮引用」位于「其它目标」这层内嵌 details（CourseChatPanel.tsx:445-451 chat-target-more）里；
-    // 只展开外层 chat-task-settings 时内层仍是收起态，select 在 DOM 中可解析但不可见
-    // （Playwright selectOption 需可见）。同 r19TaskDrivenTeacherChain.spec.ts:68-77 choosePageTarget。
-    const targetMore = taskSettings.locator('details.chat-target-more')
-    if (!await targetMore.evaluate(element => (element as HTMLDetailsElement).open)) await targetMore.locator(':scope > summary').click()
-    await expect(targetMore).toHaveJSProperty('open', true)
-    await taskSettings.getByLabel('本轮引用', { exact: true }).selectOption('selection')
+    await selectReferenceScope(chat, 'selection')
     await chat.getByLabel('发送给创作助手').fill('解释当前选择的文字')
     await expect(chat.getByLabel('本轮引用摘要')).not.toContainText('未选择对象')
     await chat.getByRole('button', { name: '关闭', exact: true }).click()

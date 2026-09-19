@@ -4,6 +4,7 @@ import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync 
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { BACKGROUND_E2E_ENV } from '../../src/main/windowVisibility'
+import { openReferenceSelect } from './chatReferenceTarget'
 
 const root = resolve(__dirname, '../..')
 const evidenceRoot = process.env.R19_050_EVIDENCE
@@ -66,12 +67,7 @@ async function configureLuna(page: Page) {
 }
 
 async function choosePageTarget(chat: ReturnType<Page['getByRole']>) {
-  const settings = chat.locator('.chat-task-settings')
-  if (!(await settings.evaluate(element => (element as HTMLDetailsElement).open).catch(() => false))) {
-    await chat.locator('.chat-task-settings > summary').click()
-  }
-  await chat.locator('.chat-target-more > summary').click()
-  const scope = chat.getByLabel('本轮引用', { exact: true })
+  const scope = await openReferenceSelect(chat)
   await scope.selectOption('page')
   await expect(scope).toHaveValue('page')
 }

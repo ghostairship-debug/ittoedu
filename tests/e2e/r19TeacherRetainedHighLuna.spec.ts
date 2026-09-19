@@ -4,6 +4,7 @@ import { basename, join, resolve } from 'node:path'
 import { BACKGROUND_E2E_ENV } from '../../src/main/windowVisibility'
 import { openCourseProjectArchive } from '../../src/renderer/project/courseProjectArchive'
 import type { LocalAgentRecord } from '../../src/shared/localAgentContract'
+import { selectReferenceScope } from './chatReferenceTarget'
 
 const retainedLunaEffort = process.env.R19_TEACHER_LUNA_EFFORT ?? 'high'
 
@@ -93,7 +94,7 @@ test(`r19 retained teacher Luna ${retainedLunaEffort} repair: same course and sa
     await chat.getByLabel('本次时间预算', { exact: true }).selectOption(String(budgetMinutes))
     await chat.getByLabel('意图', { exact: true }).selectOption('edit')
     await chat.getByLabel('应用方式', { exact: true }).selectOption('auto')
-    await chat.getByLabel('本轮引用', { exact: true }).selectOption('course')
+    await selectReferenceScope(chat, 'course')
     await chat.getByLabel('发送给创作助手', { exact: true }).fill(instruction)
     await page.screenshot({ path: join(output, 'before-send.png') })
     await chat.getByRole('button', { name: '发送', exact: true }).click()

@@ -71,6 +71,9 @@ export function CourseChatPanel({ projectId, projectPath, onClose, lessonWorkspa
   }, [])
   const [intent, setIntent] = useState<'discuss' | 'plan' | 'edit'>('edit'), [applyPolicy, setApplyPolicy] = useState<'auto' | 'preview'>('auto')
   const [inputKind, setInputKind] = useState<'supplement' | 'correct'>('correct'), [wholeCourse, setWholeCourse] = useState(false)
+  // 「当前编辑目标」是一个可点开的提示：点它就展开「其它目标」那层 details（设计说明 §5.1）。
+  // details 因此受控，onToggle 把用户直接点 summary 的情况同步回来，两个入口不会失配。
+  const [targetMoreOpen, setTargetMoreOpen] = useState(false)
   const [budgetMinutes, setBudgetMinutes] = useState(DEFAULT_GENERATION_TASK_DURATION_MS / 60000)
   const [extendingBudget, setExtendingBudget] = useState(false)
   const [teachingPlan, setTeachingPlan] = useState(''), [presentationScript, setPresentationScript] = useState('')
@@ -438,11 +441,14 @@ export function CourseChatPanel({ projectId, projectPath, onClose, lessonWorkspa
         <div className="chat-controls"><label>意图<select aria-label="意图" disabled={busy} value={intent} onChange={event => setIntent(event.target.value as typeof intent)}><option value="discuss">讨论</option><option value="plan">计划</option><option value="edit">编辑</option></select></label>
           {intent === 'edit' && <label>应用方式<select aria-label="应用方式" disabled={busy} value={applyPolicy} onChange={event => setApplyPolicy(event.target.value as typeof applyPolicy)}><option value="auto">自动应用</option><option value="preview">先看预览</option></select></label>}</div>
         <div className="chat-auto-target">
-          <button type="button" aria-label="当前编辑目标" disabled={busy}>
+          <button type="button" aria-label="当前编辑目标" disabled={busy}
+            aria-expanded={targetMoreOpen} aria-controls="chat-target-more"
+            onClick={() => setTargetMoreOpen(open => !open)}>
             {busy && frozenReference ? frozenReference.name : referenceName}
           </button>
           <small aria-label="本轮引用摘要">{busy && frozenReference ? frozenReference.name : referenceName}</small>
-          <details className="chat-target-more"><summary>其它目标</summary>
+          <details id="chat-target-more" className="chat-target-more" open={targetMoreOpen}
+            onToggle={event => setTargetMoreOpen((event.currentTarget as HTMLDetailsElement).open)}><summary>其它目标</summary>
             <select aria-label="本轮引用" value={busy && frozenReference ? frozenReference.scope : resolvedReference.scope} disabled={busy || wholeCourse} onChange={event => setReference({ identity: referenceIdentity, scope: event.target.value as GenerationReferenceScope, explicit: true })}>
               <option value="page">当前页</option>
               <option value="selection">当前选择</option>

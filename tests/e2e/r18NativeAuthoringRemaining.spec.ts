@@ -15,6 +15,7 @@ import {
   saveVisualReview, selectedRecord, selectSpatialObject, spatialSurface, verifyButtonClick, verifyFreshRemainingHtml, verifyPublishedControls,
   waitReviewedPreviews, waitUiBoundary, writeRemainingLesson,
 } from './r18NativeAuthoringRemainingFixture'
+import { selectReferenceScope } from './chatReferenceTarget'
 
 const productRoot = resolve(__dirname, '..', '..')
 const gate = process.env.COURSEWARE_R18_REMAINING_GATE ?? ''
@@ -222,7 +223,7 @@ for (const cli of planned) {
         await openSurface(run!, 'flow-page')
         await run!.page.getByTestId(`flow-block-${REMAINING_IDS.paragraphTwo}`).click()
         await expect(run!.page.getByTestId(`flow-block-${REMAINING_IDS.paragraphTwo}`)).toHaveAttribute('aria-selected', 'true')
-        await chat(run!).getByLabel('本轮引用', { exact: true }).selectOption('page')
+        await selectReferenceScope(chat(run!), 'page')
         const before = readSaved(projectPath)
         const beforeParagraph = flowParagraph(before.project, REMAINING_IDS.paragraphTwo)
         if (resume?.requiresFreshFlowFeedback) {
@@ -261,7 +262,7 @@ for (const cli of planned) {
       if (!resume?.spatialCompletedRoot) await test.step('T09 Spatial moves the same object to the real nonzero camera center', async () => {
         await openSurface(run!, 'spatial-camera')
         await selectSpatialObject(run!)
-        await chat(run!).getByLabel('本轮引用', { exact: true }).selectOption('selection')
+        await selectReferenceScope(chat(run!), 'selection')
         const before = readSaved(projectPath), oldSurface = spatialSurface(before.project)
         const paintedCamera = JSON.parse((await run!.page.getByTestId('spatial-world-stage').getAttribute('data-observation-spatial-camera')) ?? 'null') as number[] | null
         if (!paintedCamera || paintedCamera.length !== 3 || paintedCamera.some(value => !Number.isFinite(value))) throw new Error('The actual Spatial painter has no current camera observation')
@@ -283,7 +284,7 @@ for (const cli of planned) {
 
       if (!resume?.t11ProgressRoot) await test.step('T10 first reproduces the actual broken button, then asks the model to diagnose and repair it', async () => {
         await openSurface(run!, 'slide-scene')
-        await chat(run!).getByLabel('本轮引用', { exact: true }).selectOption('selection')
+        await selectReferenceScope(chat(run!), 'selection')
         const before = readSaved(projectPath)
         await verifyButtonClick(run!, 'broken', 'T10-broken', true)
         // Entering trial mode intentionally clears authoring selection. Select
@@ -308,7 +309,7 @@ for (const cli of planned) {
         await run!.page.getByRole('button', { name: '编辑状态', exact: true }).click()
         await run!.page.getByRole('button', { name: '基础场景，所有命名状态的继承源', exact: true }).click()
         await selectLayer(run!.page, FIXTURE_IDS.title)
-        await chat(run!).getByLabel('本轮引用', { exact: true }).selectOption('selection')
+        await selectReferenceScope(chat(run!), 'selection')
         const before = readSaved(projectPath)
         await beginNatural(run!, 'T11-question', REMAINING_PROMPTS.T11Ask)
         let clarification: 'structured' | 'text' | undefined
@@ -346,7 +347,7 @@ for (const cli of planned) {
       })
 
       if (!resume?.t11ProgressRoot || resume.requiresQueuedSupplementCompletion) await test.step('T11 delivers an active supplement and stops a real unfinished turn with no late project writes', async () => {
-        await chat(run!).getByLabel('本轮引用', { exact: true }).selectOption('page')
+        await selectReferenceScope(chat(run!), 'page')
         await beginNatural(run!, 'T11-active', REMAINING_PROMPTS.T11Start)
         await waitUiBoundary(run!, 'T11 native active turn', 60000, async () => {
           const record = await selectedRecord(run!).catch(() => null)
@@ -387,7 +388,7 @@ for (const cli of planned) {
         await run!.page.getByRole('button', { name: '编辑状态', exact: true }).click()
         await run!.page.getByRole('button', { name: '基础场景，所有命名状态的继承源', exact: true }).click()
         await selectLayer(run!.page, FIXTURE_IDS.title)
-        await chat(run!).getByLabel('本轮引用', { exact: true }).selectOption('selection')
+        await selectReferenceScope(chat(run!), 'selection')
         await chat(run!).getByLabel('应用方式', { exact: true }).selectOption('preview')
         const before = readSaved(projectPath)
         await beginNatural(run!, 'T12-preview', REMAINING_PROMPTS.T12Preview)
@@ -436,7 +437,7 @@ for (const cli of planned) {
         await expect(chat(run).locator('.chat-message').last()).toBeVisible()
         await configureRemainingModel(run, model, effort)
         await selectLayer(run.page, FIXTURE_IDS.title)
-        await chat(run).getByLabel('本轮引用', { exact: true }).selectOption('selection')
+        await selectReferenceScope(chat(run), 'selection')
         await chat(run).getByLabel('意图', { exact: true }).selectOption('discuss')
         await sendNatural(run, 'T12-restart-continue', REMAINING_PROMPTS.T12Resume, turnTimeoutMs)
         await expect(chat(run).locator('.chat-scroll > .chat-message').last()).toContainText(MANUAL_AFTER_AI)

@@ -5,6 +5,7 @@ import { FIXTURE_IDS, MANUAL_TITLE, NATIVE_PROMPTS, assertNativeHistoryPreserved
   launchNativeEditor, loadNativeT05Resume, nativeRecords, observeRuntimeTiming, preserveNativeFailure, readSaved,
   recordEvidence, runtimeItem, sampleRuntimeMotion, saveStage, selectLayer, sendNatural, titleItem, waitNativeTurn, type NativeRun } from './r18NativeAuthoringFixture'
 import { validateCanvasPoses, type CanvasMotion } from './runtimeCanvasMotionObservation'
+import { selectReferenceScope } from './chatReferenceTarget'
 
 const sourceRoot = 'C:/Users/74755/Documents/courseware-r18-worktrees/20260908-development/claude/output/r18-native-authoring/opencode-2-2026-09-08T15-54-05-765Z'
 const productRoot = resolve(sourceRoot, '../../..')
@@ -76,7 +77,7 @@ test('OpenCode 2 Canvas paid tail: T06 then T04 T07 save reopen', async ({}, tes
     await expect(model).toBeEnabled({ timeout: 60_000 }); await model.selectOption(selected.model)
     await expect(effort).toBeEnabled(); await effort.selectOption(selected.effort)
     await expect(model).toBeEnabled(); await expect(effort).toBeEnabled()
-    await chat.getByLabel('本轮引用', { exact: true }).selectOption('selection')
+    await selectReferenceScope(chat, 'selection')
     await chat.getByLabel('意图', { exact: true }).selectOption('edit')
     await chat.getByLabel('应用方式', { exact: true }).selectOption('auto')
     const current = async () => {

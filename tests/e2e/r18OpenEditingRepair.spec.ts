@@ -6,6 +6,7 @@ import { createShapeNode } from '../../src/renderer/project/nativeNodeFactories'
 import { sceneNodeToCourseLayerItem } from '../../src/shared/courseProjectModel'
 import { createCourseProjectArchive } from '../../src/renderer/project/courseProjectArchive'
 import { FIXTURE_IDS, launchNativeEditor, closeNativeEditor, selectLayer, saveStage, nativeRecords, sendNatural, writeNativeLesson, imageItem, verifyGreenImage } from './r18NativeAuthoringFixture'
+import { selectReferenceScope } from './chatReferenceTarget'
 
 for (const natural of [false, true]) for (const adapter of (natural ? ['opencode', 'claude', 'codex'] : ['opencode', 'claude']) as ('opencode' | 'claude' | 'codex')[]) test(`${natural ? 'AG01 natural mechanism' : 'open editing repair'}: ${adapter} fresh profile`, async () => {
   test.skip(process.env.COURSEWARE_OPEN_EDITING_REPAIR !== '1', 'Explicit real native CLI check; not ordinary unit coverage')
@@ -40,7 +41,7 @@ for (const natural of [false, true]) for (const adapter of (natural ? ['opencode
       await chat.getByLabel('速度', { exact: true }).selectOption('priority')
       await expect(chat.getByLabel('速度', { exact: true })).toBeEnabled()
     }
-    await chat.getByLabel('本轮引用', { exact: true }).selectOption('selection')
+    await selectReferenceScope(chat, 'selection')
     const instruction = '当前选中的参照方形保持不变。请把另一页“目标页”中的“目标方形”改成纯绿色 #00ff00，并在它正中新增一个直径120的纯黄色 #ffff00 圆形。方形和圆形必须是两个可单独选择编辑的原生图形，保留方形的位置尺寸，其他内容保持不变。'
       + (!natural && adapter === 'claude' ? '这次请走 CLI 文件兜底：编辑本轮冻结 V9 文档副本，通过 project.document 交回实际结果。' : '')
     await sendNatural(run, 'result', instruction, 750_000)
@@ -105,7 +106,7 @@ for (const scenario of ['AG02 image composition', 'AG03 new page media'] as cons
     await expect(chat.getByLabel('模型', { exact: true })).toBeEnabled({ timeout: 60_000 })
     await chat.getByLabel('强度', { exact: true }).selectOption('max')
     await expect(chat.getByLabel('强度', { exact: true })).toBeEnabled({ timeout: 60_000 })
-    await chat.getByLabel('本轮引用', { exact: true }).selectOption('selection')
+    await selectReferenceScope(chat, 'selection')
     const instruction = scenario.startsWith('AG02')
       ? '把选中的红色图片中红色部分改成绿色 #00ff00，保留透明圆角和白色细节；在这张图片正中心新增一个直径120的纯黄色 #ffff00 圆形。图片和圆形必须可以分别选中编辑，不要合成一张图片。保留图片位置尺寸，右下方共享素材参照及其他对象保持不变。'
       : '新增一张名为“素材页”的演示页，把当前选中的红色图片作为新页的背景，完整显示。原页的图片、标题、方形和共享素材参照都保持不变。'

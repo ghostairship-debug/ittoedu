@@ -7,6 +7,7 @@ import type { LocalAgentRecord } from '../../src/shared/localAgentContract'
 import { BACKGROUND_E2E_ENV } from '../../src/main/windowVisibility'
 import { openCourseProjectArchive } from '../../src/renderer/project/courseProjectArchive'
 import { componentPackagesFromArchive } from '../../src/renderer/components/componentPackageStore'
+import { selectReferenceScope } from './chatReferenceTarget'
 
 const inputSchema = z.object({ profile: z.string().min(1), lessonDirectory: z.string().min(1),
   lessonWorkspace: lessonAgentWorkspaceSchema,
@@ -175,7 +176,7 @@ test('r19 manual contrast Luna: readable Spatial controls, canonical save and re
     evidence('native-route.json', { directory, model: model.id, effort: 'medium', serviceTier: tier.id })
     await chat.getByLabel('意图', { exact: true }).selectOption('edit')
     await chat.getByLabel('应用方式', { exact: true }).selectOption('auto')
-    await chat.getByLabel('本轮引用', { exact: true }).selectOption('page')
+    await selectReferenceScope(chat, 'page')
     const prompt = '请只修正当前并联路径观察页面右侧按钮的文字颜色：现在浅蓝底上的白字看不清，请改成清晰的深色文字。还有一个问题：路径示范中途清除后，再选择并确认 L1、L2，确认时都应显示整条完整通路，已经确认的路径不要被清除。请一并修好。保持按钮底色、大小和位置，保留原来的电路图、路径选择与确认、提示反馈、开始预测功能，以及课件其他所有内容，不要重新生成课件。'
     evidence('request.json', { prompt, projectId: input.projectId, beforeRevision: before.project.revision, targetId: target.layerItemId })
     await chat.getByLabel('发送给创作助手', { exact: true }).fill(prompt)

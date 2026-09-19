@@ -9,6 +9,7 @@ import { sceneNodeToCourseLayerItem } from '../../src/shared/courseProjectModel'
 import { createCourseProjectArchive } from '../../src/renderer/project/courseProjectArchive'
 import { expectBackgroundWindowsIsolated } from './expectBackgroundWindowsIsolated'
 import { enterIndependentEditor as enterStandaloneEditorFromLanding } from './lessonWorkspaceEntry'
+import { openReferenceSelect } from './chatReferenceTarget'
 
 // Local delivery baseline only. The deterministic Node subprocess replaces the
 // native executable; Codex transport, Harness, IPC, Store and React UI stay real.
@@ -143,11 +144,9 @@ test('records 30 context changes and 30 native protocol events through the real 
     }
     await page.getByRole('button', { name: '打开工程（Ctrl+O）', exact: true }).click()
     await page.getByRole('button', { name: '创作助手', exact: true }).click()
-    const taskSettings = page.locator('details.chat-task-settings')
-    if (!await taskSettings.evaluate(element => (element as HTMLDetailsElement).open)) {
-      await taskSettings.locator(':scope > summary').click()
-    }
-    const reference = taskSettings.getByRole('combobox', { name: '本轮引用', exact: true })
+    const reference = await openReferenceSelect(
+      page.getByRole('complementary', { name: 'CLI 创作助手' }),
+    )
     await expect(reference).toBeVisible()
     await reference.selectOption('selection')
     console.log('Real saved fixture and chat panel ready')

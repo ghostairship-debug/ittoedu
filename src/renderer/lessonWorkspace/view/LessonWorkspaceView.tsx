@@ -841,14 +841,19 @@ export function LessonWorkspaceView(props: LessonWorkspaceViewProps) {
       className="lesson-workspace-workbench"
       aria-label="课例工作台"
       style={
-        // standalone 布局里工作台是唯一一列，也隐藏了 splitter 与布局条（无任何尺寸控件），
-        // 内联内容尺寸只会留下死区（r18-089 :678 的 691px 断言即此）；与 editor-focus 的
-        // CSS 复位同义，从源头不再写入。
-        state.standalone
-          ? undefined
-          : stacked
+        // 判定必须与下方 .lesson-workspace-columns 的 data-layout 用同一个条件（!state.workspace），
+        // 不能用 state.standalone：detachLesson()/showProject() 只置 standalone 而不清 workspace
+        // （useLessonWorkspaceController.ts:83,87），于是存在 workspace 非空且 standalone 为真的组合——
+        // 那时 data-layout 仍是 workspace（splitter 与布局条都在，列宽必须由内联尺寸定），
+        // 若按 standalone 跳过写入，工作台列宽失控，.lesson-course-tab 会抖过 EditorPanelLayout
+        // 的 1000px 阈值，compact 反复翻转使面板按钮 detach。
+        // data-layout=standalone 时工作台是唯一一列且无任何尺寸控件，内联尺寸只会留下死区
+        // （r18-089 :678 的 691px 断言即此），与 editor-focus 的 CSS 复位同义，从源头不写。
+        state.workspace
+          ? stacked
             ? { height: `${layout.prefs.contentHeight}%` }
             : { width: `${layout.prefs.contentWidth}%` }
+          : undefined
       }
     >
       <div className="workbench-layout-bar">
@@ -1020,7 +1025,7 @@ export function LessonWorkspaceView(props: LessonWorkspaceViewProps) {
           {tab.kind === "document" ? (
             !state.directoryConversation && tab.lesson && relativeFile(tab.lesson, tab.path) ? (
               <LessonDocumentEditor
-                ref={(editor) => tabs.registerEditor(tab.path, editor)}
+                ref={tabs.editorRef(tab.path)}
                 documentRef={{
                   kind: "lesson",
                   lessonId: tab.lesson.identity.lessonId,
@@ -1033,7 +1038,7 @@ export function LessonWorkspaceView(props: LessonWorkspaceViewProps) {
               />
             ) : (
               <LessonDocumentEditor
-                ref={(editor) => tabs.registerEditor(tab.path, editor)}
+                ref={tabs.editorRef(tab.path)}
                 documentRef={{ kind: "file", path: tab.path }}
                 port={props.documentPort}
                 onClosed={() => tabs.removeTab(tab.path)}

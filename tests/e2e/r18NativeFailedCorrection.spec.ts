@@ -8,6 +8,7 @@ import {
   readSaved, recordEvidence, runtimeItem, sampleRuntimeMotion, saveStage, preserveNativeFailure, selectLayer, sendNatural, titleItem,
   type NativeCli, type NativeRun, type NativeT01Resume,
 } from './r18NativeAuthoringFixture'
+import { selectReferenceScope } from './chatReferenceTarget'
 
 const productRoot = resolve(__dirname, '..', '..')
 const source = process.env.COURSEWARE_R18_FAILED_CORRECTION_SOURCE ?? ''
@@ -164,7 +165,7 @@ test('continue the retained failed correction, with optional affected Runtime re
     await expect(selector).toBeEnabled({ timeout: 60000 }); await selector.selectOption(model); await expect(selector).toBeEnabled({ timeout: 60000 })
     const strength = chat.getByLabel('强度', { exact: true })
     await expect(strength).toBeEnabled({ timeout: 60000 }); await strength.selectOption(effort); await expect(strength).toBeEnabled({ timeout: 60000 })
-    await chat.getByLabel('本轮引用', { exact: true }).selectOption('selection')
+    await selectReferenceScope(chat, 'selection')
     manifest.status = 'running'; persist()
     let corrected = runtimeOnly?.corrected ?? manual
     if (!runtimeOnly) {

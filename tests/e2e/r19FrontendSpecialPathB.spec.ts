@@ -7,7 +7,12 @@ import { BACKGROUND_E2E_ENV } from '../../src/main/windowVisibility'
 // F08 路径 B（bounded 段）：项目文件夹、材料多选导入与采用、自动模式真实启动到 running 后停止。
 // 本规格只证明启动与停止，不把 running 当作完整教师链通过。完整链在 r19-050。
 const root = resolve(__dirname, '../..')
-const evidence = join(root, 'docs/development-plan/reviews/2026-09-17-frontend-special-evidence')
+// 证据图默认写未跟踪的 output/：docs 下那份是已跟踪的历史原件，同名 PNG 会被每次重跑逐字节覆盖
+// （2026-09-19 的扫描就这样刷掉了 09-17 的 17 张，只剩 git 里还有旧字节）。要归档某一轮结果时,
+// 用 R19_FRONTEND_EVIDENCE_DIR 显式指向一个带当次日期的新目录，让归档成为有意识的动作。
+const evidence = process.env.R19_FRONTEND_EVIDENCE_DIR
+  ? resolve(process.env.R19_FRONTEND_EVIDENCE_DIR)
+  : join(root, 'output/playwright/frontend-special-evidence')
 mkdirSync(evidence, { recursive: true })
 
 test('F08 path B: project folder, multi-select materials, adoption, real automatic start and stop', async () => {

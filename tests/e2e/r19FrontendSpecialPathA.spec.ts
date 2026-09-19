@@ -6,7 +6,12 @@ import { BACKGROUND_E2E_ENV } from '../../src/main/windowVisibility'
 
 // F08 路径 A：不建项目，从工作空间直接编辑、保存、重开并继续会话（真实应用，无模型调用）。
 const root = resolve(__dirname, '../..')
-const evidence = join(root, 'docs/development-plan/reviews/2026-09-17-frontend-special-evidence')
+// 证据图默认写未跟踪的 output/：docs 下那份是已跟踪的历史原件，同名 PNG 会被每次重跑逐字节覆盖
+// （2026-09-19 的扫描就这样刷掉了 09-17 的 17 张，只剩 git 里还有旧字节）。要归档某一轮结果时,
+// 用 R19_FRONTEND_EVIDENCE_DIR 显式指向一个带当次日期的新目录，让归档成为有意识的动作。
+const evidence = process.env.R19_FRONTEND_EVIDENCE_DIR
+  ? resolve(process.env.R19_FRONTEND_EVIDENCE_DIR)
+  : join(root, 'output/playwright/frontend-special-evidence')
 mkdirSync(evidence, { recursive: true })
 
 async function launch(profile: string): Promise<ElectronApplication> {

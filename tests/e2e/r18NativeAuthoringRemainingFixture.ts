@@ -19,6 +19,7 @@ import { addCourseFlowPage, addCourseSlidePage, addCourseSpatialPage } from '../
 import { createPublishedCanvasRuntimeV2Fixture } from '../fixtures/publishedCanvasRuntimeV2Fixture'
 import { expectBackgroundWindowsIsolated } from './expectBackgroundWindowsIsolated'
 import { FIXTURE_IDS, nativeRecords, readSaved, recordEvidence, saveStage, titleItem, verifyGreenImage, writeNativeLesson, type NativeCli, type NativeRun, type NativeTextItem } from './r18NativeAuthoringFixture'
+import { selectReferenceScope } from './chatReferenceTarget'
 
 export const REMAINING_IDS = Object.freeze({ paragraphOne: 'remaining-flow-first', paragraphTwo: 'remaining-flow-second',
   spatialObject: 'remaining-spatial-object', brokenRuntime: 'remaining-click-runtime' })
@@ -1114,7 +1115,7 @@ export async function configureRemainingChat(run: NativeRun, cli: NativeCli, mod
   await run.page.getByRole('button', { name: '创作助手', exact: true }).click()
   await chat(run).getByLabel('CLI', { exact: true }).selectOption(cli)
   await configureRemainingModel(run, model, effort)
-  await chat(run).getByLabel('本轮引用', { exact: true }).selectOption('selection')
+  await selectReferenceScope(chat(run), 'selection')
 }
 export async function configureRemainingModel(run: NativeRun, model: string, effort: string) {
   const modelControl = chat(run).getByLabel('模型', { exact: true })
@@ -1312,7 +1313,7 @@ export async function importAndReferenceMaterial(run: NativeRun, cli: NativeCli,
   await chat(run).getByLabel('CLI', { exact: true }).selectOption(cli)
   await chat(run).getByLabel('会话', { exact: true }).selectOption(previous.id)
   await configureRemainingModel(run, model, effort)
-  await chat(run).getByLabel('本轮引用', { exact: true }).selectOption('page')
+  await selectReferenceScope(chat(run), 'page')
   await chat(run).getByLabel('意图', { exact: true }).selectOption('edit')
   await chat(run).getByLabel('应用方式', { exact: true }).selectOption('auto')
   await chat(run).getByText('引用教学材料（0）', { exact: true }).click()

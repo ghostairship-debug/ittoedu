@@ -29,6 +29,7 @@ import { createBlankCourseProject } from '../../src/renderer/project/createCours
 import { addCourseSpatialPage } from '../../src/renderer/course/courseLocationCommands'
 import { buildPublishedCourseStandaloneHtml } from '../../src/renderer/export/course/buildCoursePackages'
 import { enterIndependentEditor } from './lessonWorkspaceEntry'
+import { selectReferenceScope } from './chatReferenceTarget'
 
 const root = resolve(__dirname, '..', '..')
 const fixturePath = join(root, 'tests', 'fixtures', 'architecture-baseline', 'mixed-spatial.h5lesson')
@@ -861,7 +862,7 @@ test(process.env.FLOW_AI_VERIFY_EXISTING ? 'preserved real AI Flow verifies play
     await page.getByRole('button', { name: '创作助手', exact: true }).click()
     const chat = page.getByRole('complementary', { name: 'CLI 创作助手' })
     await expect(chat.getByLabel('模型', { exact: true })).toBeEnabled({ timeout: 60_000 })
-    await chat.getByLabel('本轮引用', { exact: true }).selectOption('page')
+    await selectReferenceScope(chat, 'page')
     await chat.getByLabel('意图', { exact: true }).selectOption('edit')
     await chat.getByLabel('应用方式', { exact: true }).selectOption('auto')
     const prompt = '把当前空白流式讲义制作成一页可使用的观察练习，主题是“观察小狗并描述特征”。要有标题、两小段解释、工程内现有配图，以及已有“教学排序”组件制作的观察步骤排序互动。直接完成当前页，保留全局教师控制器；复用现有素材和组件，不生成新图片，不修改组件源码。请直接提交完成结果。'

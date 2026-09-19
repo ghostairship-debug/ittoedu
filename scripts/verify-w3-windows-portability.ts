@@ -412,7 +412,6 @@ async function verifyMovedUnpackedApplication(
       await page.locator('[data-testid^="scene-item-"]').count() === 1,
       '移动工程在复制后的目录版中场景数量错误',
     )
-    await page.getByRole('button', { name: '专业' }).click()
     await page.getByRole('tab', { name: '组件', exact: true }).click()
     await page
       .getByTestId(`component-${portabilityComponentId}`)

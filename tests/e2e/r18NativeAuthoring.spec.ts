@@ -9,6 +9,7 @@ import {
   readSaved, recordEvidence, runtimeItem, sampleRuntimeMotion, saveStage, preserveNativeFailure, selectLayer, sendNatural, slideItems, titleItem,
   verifyGreenImage, writeNativeLesson, type NativeCli, type NativeRun,
 } from './r18NativeAuthoringFixture'
+import { selectReferenceScope } from './chatReferenceTarget'
 
 const productRoot = resolve(__dirname, '..', '..')
 const adapter = (process.env.COURSEWARE_R18_NATIVE_CLI ?? 'codex') as NativeCli
@@ -75,7 +76,7 @@ async function configureNativeModel(run: NativeRun) {
     await effortSelector.selectOption(effort)
     await expect(effortSelector).toBeEnabled()
   } else if (await effortSelector.isEnabled()) await effortSelector.selectOption('')
-  await chat.getByLabel('本轮引用', { exact: true }).selectOption('selection')
+  await selectReferenceScope(chat, 'selection')
   return chat
 }
 async function configureChat(run: NativeRun) {

@@ -28,6 +28,7 @@ import {
   waitNativeTurn,
   type NativeRun,
 } from './r18NativeAuthoringFixture'
+import { selectReferenceScope } from './chatReferenceTarget'
 
 const productRoot = resolve(__dirname, '..', '..')
 const sourceRoot = resolve(productRoot, '../courseware-r18-worktrees/20260908-development/flow/output/r18-native-authoring/opencode-3-2026-09-08T14-14-21-479Z')
@@ -386,7 +387,7 @@ async function configureOpenCode(run: NativeRun) {
   const effortControl = chat.getByLabel('强度', { exact: true })
   await expect(effortControl).toBeEnabled()
   await effortControl.selectOption(effort)
-  await chat.getByLabel('本轮引用', { exact: true }).selectOption('selection')
+  await selectReferenceScope(chat, 'selection')
   await chat.getByLabel('意图', { exact: true }).selectOption('edit')
   await chat.getByLabel('应用方式', { exact: true }).selectOption('auto')
   return chat

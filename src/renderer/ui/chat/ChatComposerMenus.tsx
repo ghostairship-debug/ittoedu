@@ -23,7 +23,10 @@ export function ChatComposerMenus({
   commands: ChatComposerCommand[]
   mentions: ChatMentionItem[]
 }) {
-  const slash = value.match(/(?:^|\s)\/([^\s]*)$/)
+  // 命令只在输入开头触发，且命令 token 不含路径分隔符：旧写法 /(?:^|\s)\/([^\s]*)$/ 把空格后的
+  // POSIX 绝对路径（「参考 /workspace/a.md」）当成命令查询，弹出「没有匹配的命令」挡住输入。
+  // 命令 id 与 label 从不含 /，据此把路径排除在命令语义之外。
+  const slash = value.match(/^\/([^\s/]*)$/)
   const at = value.match(/(?:^|\s)@([^\s]*)$/)
   const slashQuery = slash?.[1]?.toLowerCase() ?? ''
   const atQuery = at?.[1]?.toLowerCase() ?? ''
@@ -43,7 +46,7 @@ export function ChatComposerMenus({
   return <div className="chat-composer-menu" role="listbox" aria-label={slash ? '命令菜单' : '引用菜单'}>
     {commandHits.map(item => <button type="button" key={item.id} role="option" onMouseDown={event => {
       event.preventDefault()
-      onChange(value.replace(/\/[^\s]*$/, ''))
+      onChange('')
       item.run()
     }}>{item.label}</button>)}
     {mentionHits.map(item => <button type="button" key={item.path} role="option" title={item.path} onMouseDown={event => {

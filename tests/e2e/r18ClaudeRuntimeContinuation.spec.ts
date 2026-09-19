@@ -10,6 +10,7 @@ import {
   preserveNativeFailure, readSaved, recordEvidence, runtimeItem, sampleRuntimeMotion, saveStage,
   selectLayer, sendNatural, titleItem, waitNativeTurn, type NativeRun, type NativeT01Resume,
 } from './r18NativeAuthoringFixture'
+import { selectReferenceScope } from './chatReferenceTarget'
 
 // Explicitly bounded to these two actual failed visual results. No fixture restore,
 // archive writer, candidate replay, prefix execution, or automatic paid retry.
@@ -217,7 +218,7 @@ for (const slot of ['A', 'B'] as const) test(`Claude ${slot} actual Runtime cont
     await expect(model).toBeEnabled({ timeout: 60000 }); await expect(model).toHaveValue('sonnet')
     await expect(effort).toBeEnabled({ timeout: 60000 }); await effort.selectOption('low')
     await expect(effort).toBeEnabled({ timeout: 60000 }); await expect(effort).toHaveValue('low')
-    await chat.getByLabel('本轮引用', { exact: true }).selectOption('selection')
+    await selectReferenceScope(chat, 'selection')
     await selectLayer(run.page, runtimeItem(current.project).layerItemId)
     manifest.status = 'running'; delete manifest.nativeTurnsStarted
     manifest.nativeExecutionRequested = true; persist()

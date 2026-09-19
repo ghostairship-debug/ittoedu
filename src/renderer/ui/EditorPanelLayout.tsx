@@ -10,7 +10,13 @@ export function EditorPanelLayout({ children, className = '' }: { children: Reac
   useLayoutEffect(() => {
     const container = root.current?.closest('.lesson-course-tab')
     if (!container) return
-    const update = () => setCompact(container.getBoundingClientRect().width < 1000)
+    // 课件 tab 未激活时 .lesson-course-tab 是 display:none，宽度为 0；把 0 当"窄"会先判成紧凑布局，
+    // 等 tab 显示后 ResizeObserver 再切回宽布局，紧凑控件条随之卸载——用户看到它闪一下，
+    // 正在点它的人（含 e2e）会点到一个正在消失的按钮。宽度为 0 时布局尚未成立，不做判定。
+    const update = () => {
+      const width = container.getBoundingClientRect().width
+      if (width > 0) setCompact(width < 1000)
+    }
     update()
     const observer = new ResizeObserver(update)
     observer.observe(container)
