@@ -92,7 +92,8 @@ HEAD 时工作台被内联宽度锁在 ~600px（仍 < 1000），compact 恒为�
 | `:2256` / `:2956` / `:678` | 逐条实跑转绿（见 §②） |
 | `check:ai-capabilities` / `check:examples` | 绿（索引 16275/16384；11 项 OK） |
 | 非付费子集（`--grep-invert "S3 真实"`） | **24 passed / 0 failed（22.9m）**，见 §⑥ |
-| 未跑 | 任何付费模型；`editor.spec.ts` 全文件（见 §⑦ 残余） |
+| `editor.spec.ts` 全文件 | **27 passed / 0 failed（21.4m）**，见 §⑥之二 |
+| 未跑 | 任何付费模型；`check:preservation`（会执行 27 条 evidence 命令）；`verify:release` 本体（需打包产物，P1-2 以全仓 locator 清零 + typecheck 做静态确认） |
 
 每次 e2e 前都重建了 `dist`（附十二吃过"未重建 dist 致 CSS 修复未被验证"的亏，本轮不重复）。
 
@@ -129,11 +130,24 @@ HEAD 时工作台被内联宽度锁在 ~600px（仍 < 1000），compact 恒为�
 
 ---
 
+## ⑥之二 `editor.spec.ts` 全文件定论（P1-3 关闭）
+
+第一轮评审 §3 P1-3 的关切是：该文件 27 条用例 0 通过（`:1041` 失败 + `test.describe.serial` 于 :797 级联使 26 条 did-not-run），"核心编辑器回归覆盖实际处于失效状态，且未做逐条归因，**不能排除产品回归**"。
+
+本轮全文件复跑（本轮全部产品改动落地之后）：
+
+> **Running 27 tests / 27 passed / 0 failed（21.4m，EXIT:0）**
+
+**结论：那 26 条 did-not-run 全部为绿，不存在被级联掩盖的产品回归。**它们此前从未运行只是因为入口用例失败导致 serial 级联，失败点本身（`:1045/:1046` 的「简洁模式下 tab 不存在」）是 bc2072f7 有意合并简洁/专业模式后的断言过期，已由 A 簇修正。
+
+逐条含此前被点名的用例：`:1126` 专业模式（48.0s）、`:1195` 当前位置试运行（21.8s）、`:1962` 文字编辑事务（含 IME 与撤销，54.0s）、`:2055` 画布双击持续输入与 Escape 取消（25.0s）、`:3861` 未保存课件自动恢复（24.9s）。其中 `:1962` 的 composition 断言通过，为 V05「画布文本侧有 IME 合成用例」提供了本轮实跑证据（**但聊天输入框的 IME 路径仍无自动化，人工验收单仍为必做项**）。
+
+---
+
 ## ⑦ 残余缺口（如实登记）
 
-1. **`editor.spec.ts` 26 条 did-not-run 仍未定论**：A 簇只解锁并验证了 2 条（`cluster-editor.log`：`:1041` 47.1s、`:1126` 1.1m），无全文件复跑日志。
-2. **P2-4 余项与 P2-5**：见 §③，属登记项。
-3. **`r18-089:677`** `expectStableController` maximumShift 36（浮层控制器 playback 位移）：附十二登记的独立新问题，本轮未动。
-4. **`r19CrossPageObservation:12`**（canvas hidden）、**`v9PreviewNetwork:245`**（Ctrl+O 后标题未切换）、**`spatialGlobalRuntimeAuthoring:297`**（`global-layer-entry` 不可见，开发方有界尝试已耗尽）：三条零散漂移未定位。
-5. **付费门控**：`R19_DELIVERY_*` 等变量族仍未跑；IME 人工验收单仍待执行。
-6. **`:780`**：本轮 `file:line` 定位只匹配到 `:678` 一条（Playwright 报 `Running 1 test`），`:780` 未单独复跑。
+1. **P2-4 余项与 P2-5**：见 §③，属登记项（需产品决策）。
+2. **`r18-089:677`** `expectStableController` maximumShift 36（浮层控制器 playback 位移）：附十二登记的独立新问题，本轮未动。
+3. **`r19CrossPageObservation:12`**（canvas hidden）、**`v9PreviewNetwork:245`**（Ctrl+O 后标题未切换）、**`spatialGlobalRuntimeAuthoring:297`**（`global-layer-entry` 不可见，开发方有界尝试已耗尽）：三条零散漂移未定位。
+4. **付费门控**：`R19_DELIVERY_*` 等变量族仍未跑；IME 人工验收单仍待执行。
+5. **`:780`**：本轮 `file:line` 定位只匹配到 `:678` 一条（Playwright 报 `Running 1 test`），`:780` 未单独复跑。
