@@ -305,3 +305,20 @@ Owner 已明确授权在其不在电脑旁时，以 Computer Use 完成原本需
 - 正常发送「你好」后，消息出现，输入框清空，组合态没有残留。
 
 历史正文、旧 DoD 和阶段性失败表不回写；其中与现状冲突者仅由本包 §⑩、Round3 ⑪ 和本节覆盖。最终候选仍需以本节之后的全量自动化、提交身份与 legacy 对账结果为准。
+
+---
+
+## ⑫ 最终门禁、Owner 签收与 RC（2026-09-20）
+
+本节记录 §⑪ 之后完成的最终闭环；历史正文继续只追加、不回写。
+
+| 门禁 | 最终结果 |
+|---|---|
+| TypeScript | `npm run typecheck` 通过（三套配置）。 |
+| 相关单测 | `generationCapabilityWorkspace`、`LessonWorkspaceShell`、`simpleEditorMode`、`developerMode`、`editorActionRouting` 合计 **80 passed / 0 failed**。 |
+| 全量 Vitest | `npm test`：**440 files passed / 4263 passed / 3 skipped / 0 failed**。本轮仅修复两条真实全仓扫描/工作区测试在 5 秒默认调度上限下的偶发超时；其断言和扫描范围未改变。 |
+| 保全矩阵 | `npm run check:preservation`：**27 automated pass**。脚本按设计仍打印「Owner 观察未签署：PM-01」，因为它不读取签收包；PM-01 的真实桌面观察已在 §⑪ 记录，不能由该提示自动替代或否定。 |
+| legacy 对账 | `npm run check:legacy-ready` 与 `npm run check:legacy-zero` 均通过；对账产品提交为 `bcd58c9c`，摘要与当前产品树一致，新增、未知、未匹配、目标定义/引用命中均为 0。 |
+| 真实模型/完整链 | 不因本轮仅测试等待上限与签收文档而重跑。09-19 已留档的 Codex Luna、Claude DeepSeek、OpenCode Luna、整课 Luna 四条成功链仍有效；V07/V10/V11/V12 等历史「部分实跑/复用/未跑」边界保持原样，不伪称全部重新执行。 |
+
+**Owner 签收结论**：在 Owner 明确授权下，1.9 的剩余实机验收、自动化、保全与台账门禁均已闭合；接受为内部源码 RC。此签收提交将标记为 **`v1.9.0-rc.1`**。不创建安装器，也不创建无后缀正式 `v1.9.0` 标签。
