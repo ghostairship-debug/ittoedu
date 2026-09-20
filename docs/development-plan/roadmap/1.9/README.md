@@ -8,6 +8,8 @@
 
 工作台高频轻改与编辑器模式精修共用同一工程、选择、历史、任务；自由停靠与标签变化不重置状态。既有046–048正文/Flow/可编辑Word数学、045三格式原格式消费、049文件共编与051媒体效果全部保留。本版无旧格式迁移；不扩多工程并行编辑、Office内嵌原格式编辑、通用模型平台或长期专项。
 
+1.9 收口后新增的 `1.9.1`–`1.9.4` 是一条增量的上下文编辑纵线，详见[选区上下文编辑与人机共编实施方案](../../R19_1_TO_R20_CONTEXTUAL_AUTHORING_PLAN.md)。它不重新打开已完成的 046–049 正文基础，也不改变 050/060 当前状态；先补选区目标、Markdown 人工上下文编辑、Markdown 选区 AI，再把同一交互接入 Flow，最终由 2.0 汇合生产验收。
+
 U01–U10及各分项已有实现，[历史证据](../../R19_SHARED_DOCUMENT_EDITOR_IMPLEMENTATION_PLAN.md#4-剩余范围与滚动批次)按相关变化复用。046–048、051 核心规格不重写，以各文首状态横幅为准，禁止从零重做。[有限收尾](../../reviews/2026-09-17-r19-limited-closeout.md)与[候选记录](../../reviews/2026-09-17-r19-final-candidate.md)明确050/060及原revision27返回入口尚未闭合；不把新目标记为已实现或重做未受影响成果。
 
 合同：[目录会话与文件](../../R19_LESSON_DOCUMENT_WORKSPACE_CONTRACT.md)、[正文/源文/数学](../../R19_SHARED_DOCUMENT_CONTENT_CONTRACT.md)、[架构](../../ARCHITECTURE_CONTRACT.md)。设计依据：[V3.1及最新交互](../../../../双形态UI设计/00-设计说明.md)；审查决定：[汇总](../../reviews/2026-09-18-r19-workbench-review-and-interaction-summary.md)。早期讨论只保留来源，不覆盖上述最新决定。
