@@ -504,7 +504,10 @@ describe('offline capability workspace', () => {
       expect(path.resolve(profile.workspace.capabilities, projected.context.capabilities.query)).toBe(profile.workspace.query)
       await staging.remove(next.requestId)
     } finally { await rm(directory, { recursive: true, force: true }) }
-  })
+    // 默认 5s 不够：本例建 36 层目录、写 18 万字节、另起两个 Node 子进程跑真实查询，
+    // 在 440 文件全量运行中会随机超时（单独跑整文件 28 条仅 8.5s）。放宽的是等待
+    // 上限，断言一个未改。
+  }, 30_000)
 
   it('isolates capability versions and refuses to overwrite changed same-version files', async () => {
     const directory = await mkdtemp(path.join(os.tmpdir(), 'course-capability-identity-'))

@@ -197,3 +197,48 @@ HEAD 时工作台被内联宽度锁在 ~600px（仍 < 1000），compact 恒为�
 **结论：DoD 十条中九条达成，仅剩第 7 项（IME 人工验收）。** 该项只能由人执行——自动化只能伪造组合事件，与真实输入法的行为不等价（本轮 CDP 探针的限定同此）。
 
 **验收单的范围修订**：原单 6 步。经代码核查，第 3 步（组合中输入 `/` 误弹菜单）在当前实现下不可达——`/` 触发条件已收紧为 `^\/([^\s/]*)$`，先打拼音再打 `/` 得到的 `zf/` 不匹配。第 2 步（组合中 Enter 误发送）在 §⑧ 之前同样不可达（`<textarea>` 无 `onKeyDown`，发送只在按钮 `onClick`），但 **§⑧ 给 Enter 赋予了「接受候选」语义后恢复为必验项**。建议执行范围：第 1 步（中文输入不丢字/重字/错位——受控 `<textarea>` + IME 是真实风险）、第 2 步、第 6 步（发送后清空）。
+
+---
+
+## ⑩ 行号引用失效告示（本轮改动的副作用）
+
+P1-1 的 helper 替换给每个被改文件加了一行 import，其他修复也有增删，**签收包与历次记录里的 `file:line` 引用因此整体偏移**。已核实签收包 §②A 扫描台账（行 31）所列引用在当前代码下的有效性：
+
+| 签收包引用 | 当前是否仍指向同一处 | 说明 |
+|---|---|---|
+| `editor:1041` | ✅ 有效 | 仍是「里程碑闭环：简洁模式…」test 行 |
+| `spatialGlobalRuntimeAuthoring:297` | ✅ 有效 | 仍是 test 行 |
+| `stabilizationFlowAuthoring:509` | ✅ 有效 | 仍是 test 行 |
+| `v9PreviewNetwork:245` | ✅ 有效 | 仍是 test 行 |
+| `r19CrossPageObservation:12` | ✅ 有效 | 该文件本轮未改 |
+| `imageReplacementVerticalSlice:615` | ❌ **已失效** | 净 −5 行；该条记的是失败断言行（在 helper 内），现按内容定位：「当前位置试运行」在 `:469` |
+| `stabilizationOwnershipController:696` | ❌ **已失效** | 净 +16 行；同上，「新增其他类型页面」现在 `:196` |
+| `r18-089-flow-viewport:677 / 678 / 780` | ❌ **全部 +1** | 现为 `:678` / `:679` / `:781`，见下条 |
+
+**由此纠正一条残余登记**：签收包多处（行 249、253、273）把 `r18-089:677` 记为「`expectStableController` maximumShift 36，独立新问题，登记待修」。按旧行号，那条正是现在的 **`:678`（`mixed-global-controller stays reachable…`）——本轮实跑 1 passed (9.2m)**。控制器位移 36px 正是根因 2（`EditorPanelLayout` 零宽度误判导致紧凑↔宽布局翻转）的表现，修根因时一并消失，**不是独立问题，无需单独修**。
+
+### `r18-089-flow-viewport.spec.ts` 全文件非付费用例清零
+
+签收包记该文件曾有三条红（旧 `:677` / `:678` / `:780`），其中后两条「曾在 CSS 修复下转绿」，而那次 CSS 修复随后被回退——故当前状态需实测。本轮结果：
+
+| 当前行号 | 测试 | 结果 |
+|---|---|---|
+| `:678` | mixed-global-controller stays reachable at 1280×720 and 1440×900（旧 `:677`） | **1 passed (9.2m)** |
+| `:679` | fluid Flow retains interaction state through resize, scroll and zoom（旧 `:678`） | **passed** |
+| `:781` | new formal Flow content stays consistent through normal entry points（旧 `:780`） | **passed** |
+| `:952` | Slide and Spatial retain base fit and controller actions with floating observation bars | **passed** |
+
+后三条一次运行 **3 passed (14.8m)**。`:842` 为付费门控（`FLOW_REAL_AI` / `FLOW_AI_VERIFY_EXISTING`）未跑。**该文件四条非付费用例全绿，签收包登记的三条残余漂移全部关闭**——且都由根因修复带出，未针对它们单独改动。
+
+**给后续记录的建议**：引用 e2e 用例时写**测试标题**而非行号；确需行号时同时给出标题，便于偏移后按内容重定位。
+
+---
+
+## ⑪ ⑦节快照勘误（2026-09-20 追加；正文一字未改）
+
+§⑦ 是在 §⑧ 键盘/路径修复、§⑩ 行号核对和后续 Owner 实机观察之前写下的阶段性清单，不能再被当作当前待办总表：
+
+1. **P2-4 余项与 P2-5 已关闭**：P2-4 的 VS Code 式键盘导航、ARIA 和 IME 组合守卫见 §⑧；P2-5 的路径比较已收敛到 `sameWorkspacePath`。两项的聚焦单测已在本轮通过。
+2. **`r18-089` 的旧 `:677`、`:678`、`:780` 残余登记已关闭**：它们因行号整体偏移而被误读；当前对应的四条非付费用例均为绿，依据与精确标题见 §⑩。不得再把 `maximumShift 36` 作为独立未修产品问题。
+3. **付费门控不再是缺口**：签收包随后记录了 Codex Luna、Claude DeepSeek、OpenCode Luna 和整课 Luna 四条真实链路的 4/4 成功；本文件未为追绿重跑它们。
+4. **IME 是当时唯一真实待办**：其真实桌面记录已按验收单和签收包追加。`r19CrossPageObservation`、`v9PreviewNetwork`、`spatialGlobalRuntimeAuthoring` 的历史漂移原文仍保留在 §⑦，但本勘误不把它们伪写为本次重新运行或已获新的覆盖。

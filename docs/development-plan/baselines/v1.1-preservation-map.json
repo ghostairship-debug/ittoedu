@@ -57,17 +57,19 @@
     {
       "id": "PM-01",
       "type": "owner-observation",
-      "observer": "Owner confirms desktop core UI entries remain visible and operable on the 1.1 fixture suite, including new/open/recent, element browser, properties, simple/professional mode, and the professional developer workbench.",
+      "observer": "Owner confirms on a real 1.9 desktop window that workbench workspace/resource/project/session/layout controls and editor-mode new/open, scene/canvas, page/layer, properties/materials, and DeveloperTab entries are visible and operable; the simple/professional split is absent.",
       "fixtureIds": ["slide-heavy", "flow-heavy", "mixed-spatial"],
       "inputClosure": [
         "src/renderer/App.tsx",
         "src/renderer/ui/Workspace.tsx",
         "src/renderer/ui/PropertiesTab.tsx",
+        "src/renderer/lessonWorkspace/view/LessonWorkspaceView.tsx",
+        "tests/unit/LessonWorkspaceShell.test.tsx",
         "tests/unit/simpleEditorMode.test.tsx",
         "tests/unit/developerMode.test.tsx",
         "tests/unit/editorActionRouting.test.ts"
       ],
-      "invalidation": "Desktop shell, Workspace, Properties, simple/professional mode, or developer workbench entry files or their focused tests change."
+      "invalidation": "Desktop shell, workbench, course editor/scene, Properties/DeveloperTab, or their focused tests change."
     },
     {
       "id": "PM-02",
