@@ -6,6 +6,7 @@ import { generationResultSchema } from './generationResult'
 import { aiUserInputSchema, aiInputDeliverySchema } from './localAgentInteraction'
 import { generationSemanticChangesSchema } from './generationChangeSummary'
 import { generationExecutionEvidenceSchema } from './generationExecutionEvidence'
+import { externalAiNoticeStatusSchema } from './externalAiNotice'
 
 export const localAgentIdSchema = z.enum(['codex', 'claude', 'opencode'])
 export type LocalAgentId = z.infer<typeof localAgentIdSchema>
@@ -97,6 +98,7 @@ export type LocalAgentConfiguration = z.infer<typeof localAgentConfigurationSche
 const owner = { projectId: z.string().min(1).max(200), projectPath: z.string().min(1).max(32767), lessonWorkspace: lessonAgentWorkspaceSchema.optional() }
 const optionalOwner = { projectId: owner.projectId.optional(), projectPath: owner.projectPath.optional() }
 export const localAgentRequestSchema = z.discriminatedUnion('operation', [
+  z.object({ operation: z.literal('external-notice'), scope: aiWorkspaceIdentitySchema, confirm: z.literal(true).optional() }).strict(),
   z.object({ operation: z.literal('lesson-prepare-generation'), workspace: lessonAgentWorkspaceSchema }).strict(),
   z.object({ operation: z.literal('lesson-start'), workspace: conversationAgentWorkspaceSchema, adapter: localAgentIdSchema, prompt: z.string().min(1).max(100000), userMessage: z.string().min(1).max(20000).optional(), intent: z.enum(['discuss', 'plan']).default('discuss'), frozenTarget: frozenEditTargetSchema.optional() }).strict(),
   z.object({ operation: z.literal('lesson-resume'), workspace: conversationAgentWorkspaceSchema, sessionId: z.uuid(), prompt: z.string().min(1).max(100000), userMessage: z.string().min(1).max(20000).optional(), preserveTaskBudget: z.literal(true).optional(), frozenTarget: frozenEditTargetSchema.optional() }).strict(),
@@ -137,5 +139,6 @@ export const localAgentResponseSchema = z.object({
   capabilities: localAgentCapabilitiesSchema.optional(),
   inputDelivery: aiInputDeliverySchema.optional(),
   fileStatus: z.object({ status: z.enum(['current', 'changed', 'unavailable']), message: z.string().max(1000) }).strict().optional(),
+  externalNotice: externalAiNoticeStatusSchema.optional(),
 }).strict()
 export type LocalAgentResponse = z.infer<typeof localAgentResponseSchema>

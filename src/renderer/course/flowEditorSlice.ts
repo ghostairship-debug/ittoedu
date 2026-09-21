@@ -1,3 +1,4 @@
+import type { DocumentSelection } from '../../shared/document/ports'
 import { makeAuthoringAddress } from '../../shared/authoringAddress'
 import type {
   CourseProjectDocument,
@@ -54,6 +55,8 @@ export interface FlowEditorSelection {
   readonly selectedBlockId: string | null
   readonly selectedBlockIds: readonly string[]
   readonly selectedOverlayIds: readonly string[]
+  readonly documentSelectionIssue?: string
+  readonly documentSelection?: DocumentSelection
   readonly textRange: FlowTextRange | null
   readonly authoringAddress: string
 }
@@ -160,6 +163,8 @@ function freezeSelection(selection: FlowEditorSelection): FlowEditorSelection {
     selectedBlockIds: Object.freeze([...selection.selectedBlockIds]),
     selectedOverlayIds: Object.freeze([...selection.selectedOverlayIds]),
     textRange: selection.textRange ? Object.freeze({ ...selection.textRange }) : null,
+    ...(selection.documentSelectionIssue ? { documentSelectionIssue: selection.documentSelectionIssue } : {}),
+    ...(selection.documentSelection ? { documentSelection: structuredClone(selection.documentSelection) } : {}),
     authoringAddress: selection.authoringAddress,
   })
 }
@@ -221,6 +226,8 @@ export function selectFlowEditorBlocks(
   options: {
     focus?: Extract<FlowEditorFocusKind, 'block' | 'text'>
     textRange?: FlowTextRange | null
+    documentSelectionIssue?: string
+    documentSelection?: DocumentSelection
   } = {},
 ): FlowEditorSelection {
   const location = requireFlowLocation(project, locationId)
@@ -242,7 +249,7 @@ export function selectFlowEditorBlocks(
   const primary = uniqueIds[uniqueIds.length - 1]!
   const focus = options.focus ?? 'block'
   const textRange = focus === 'text'
-    ? (options.textRange ?? { blockId: primary, start: 0, end: 0 })
+    ? (options.textRange === undefined ? { blockId: primary, start: 0, end: 0 } : options.textRange)
     : null
   return freezeSelection({
     locationId,
@@ -253,6 +260,8 @@ export function selectFlowEditorBlocks(
     selectedBlockIds: uniqueIds,
     selectedOverlayIds: [],
     textRange,
+    ...(options.documentSelectionIssue ? { documentSelectionIssue: options.documentSelectionIssue } : {}),
+    ...(options.documentSelection ? { documentSelection: options.documentSelection } : {}),
     authoringAddress: makeFlowBlockAuthoringAddress({
       projectId: project.id,
       surfaceId: location.surfaceId,

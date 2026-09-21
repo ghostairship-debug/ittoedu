@@ -1,10 +1,12 @@
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { SharedDocumentEditor, type SharedDocumentEditorHandle } from '../document/SharedDocumentEditor'
+import type { ContextualEditTarget, DocumentContextSelection } from '../../shared/document/ports'
 import { parseDocumentMarkdown, type MarkdownDocument } from '../../shared/document/markdown'
 import { documentRefLabel, type DocumentFileRef } from '../../shared/document/ports'
 import { DocumentFileSession, type RecoverableDocumentFilePort } from './documentFileSession'
 import { mergedDocumentSource, planDocumentSourceMerge, type DocumentConflictHunk } from './documentSourceMerge'
 import './documentFileEditor.css'
+import { documentEditPreviews } from './documentEditPreview'
 import { fileClipboardResourcePort, readFileClipboardContext, selectedFileClipboardContext, type FileClipboardContext } from './fileDocumentClipboard'
 import type { FilePreparedDocumentResources } from '../document/fileDocumentResources'
 import type { DocumentBlock } from '../../shared/document/content'
@@ -12,6 +14,7 @@ import { resolveFileDocumentImage } from '../../shared/document/fileImageReferen
 
 export interface LessonDocumentEditorHandle {
   session: DocumentFileSession
+  getContextualEditTarget(): ContextualEditTarget | null
   flush(): Promise<boolean>
   close(): Promise<boolean>
   preserveAndClose(): Promise<boolean>
@@ -21,6 +24,9 @@ export interface LessonDocumentEditorProps {
   port: RecoverableDocumentFilePort
   onDirtyChange?(dirty: boolean): void
   onClosed?(): void
+  onSelectionChange?(target: ContextualEditTarget | null): void
+  onContextualCommand?(instruction: string, target: ContextualEditTarget): void
+  onContextualDismiss?(target: ContextualEditTarget | null): void
 }
 const empty: MarkdownDocument = { content: { blocks: [] }, resources: { assets: [], components: [] } }
 function AiSuggestion({ suggestion, source, session }: { suggestion: ReturnType<DocumentFileSession['getSnapshot']>['aiSuggestions'][number]; source: string; session: DocumentFileSession }) {
@@ -46,12 +52,13 @@ function ConflictHunk({ hunk, index, session }: { hunk: DocumentConflictHunk; in
   </fieldset>
 }
 
-export const LessonDocumentEditor = forwardRef<LessonDocumentEditorHandle, LessonDocumentEditorProps>(function LessonDocumentEditor({ documentRef, port, onDirtyChange, onClosed }, ref) {
+export const LessonDocumentEditor = forwardRef<LessonDocumentEditorHandle, LessonDocumentEditorProps>(function LessonDocumentEditor({ documentRef, port, onDirtyChange, onClosed, onSelectionChange, onContextualCommand, onContextualDismiss }, ref) {
   const identity = JSON.stringify(documentRef)
   const session = useMemo(() => new DocumentFileSession(documentRef, port), [identity, port])
   const lifetime = useMemo(() => ({ leases: 0, opened: false }), [session])
   const state = useSyncExternalStore(session.subscribe, session.getSnapshot)
   const editor = useRef<SharedDocumentEditorHandle>(null)
+  const preview = useRef<HTMLElement>(null)
   const [error, setError] = useState<string | null>(null)
   const [document, setDocument] = useState<MarkdownDocument>(empty)
   const [clipboard, setClipboard] = useState<FileClipboardContext | null>(null)
@@ -71,6 +78,12 @@ export const LessonDocumentEditor = forwardRef<LessonDocumentEditorHandle, Lesso
   }, [session, lifetime])
   useEffect(() => { onDirtyChange?.(state.dirty) }, [state.dirty, onDirtyChange])
   useEffect(() => {
+    if (state.aiCandidate) {
+      preview.current?.scrollIntoView?.({ block: 'nearest' })
+      preview.current?.focus()
+    }
+  }, [state.aiCandidate])
+  useEffect(() => {
     if (parsedSource.status === 'valid') setDocument(parsedSource.document)
   }, [parsedSource])
   const resourceKey = JSON.stringify(document.resources)
@@ -85,6 +98,11 @@ export const LessonDocumentEditor = forwardRef<LessonDocumentEditorHandle, Lesso
     if (current) session.edit(current.source, operationGroup.current)
     return session.flush()
   }
+  function bindTarget(selection: DocumentContextSelection | null): ContextualEditTarget | null {
+    const snapshot = session.getSnapshot()
+    if (!selection || !snapshot.disk || snapshot.source !== selection.source) return null
+    return { ...selection, ref: session.ref, baseVersion: snapshot.disk.version, epoch: session.epoch, scope: 'selection' }
+  }
   function renderObject(block: DocumentBlock, container: HTMLElement) {
     const assetId = block.type === 'media' ? block.assetId : block.type === 'component' ? block.staticFallbackAssetId : null
     const asset = assetId ? clipboard?.assets[assetId] : null
@@ -97,7 +115,7 @@ export const LessonDocumentEditor = forwardRef<LessonDocumentEditorHandle, Lesso
     container.append(element)
     return () => URL.revokeObjectURL(url)
   }
-  useImperativeHandle(ref, () => ({ session, flush, close: async () => (await flush()) && session.close(), preserveAndClose: () => session.preserveAndClose() }))
+  useImperativeHandle(ref, () => ({ session, getContextualEditTarget: () => bindTarget(editor.current?.getContextualEditTarget() ?? null), flush, close: async () => (await flush()) && session.close(), preserveAndClose: () => session.preserveAndClose() }))
   const status = state.saving ? '正在保存' : state.conflict ? '存在文件冲突' : state.dirty ? '尚未保存' : '已保存'
   return <section aria-label={`教学文档 ${documentRefLabel(documentRef)}`} onCompositionStartCapture={() => session.setComposing(true)} onCompositionEndCapture={() => { queueMicrotask(() => session.setComposing(false)) }} onKeyDownCapture={event => {
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') { event.preventDefault(); void flush() }
@@ -112,13 +130,23 @@ export const LessonDocumentEditor = forwardRef<LessonDocumentEditorHandle, Lesso
       <button type="button" onClick={() => { void session.resolveConflict('local') }}>{state.conflict === 'deleted' ? '重新保存当前稿' : '保留当前稿并保存'}</button></>}
     </aside>}
     {state.disk && <div inert={state.conflictHunks.length > 0}><SharedDocumentEditor ref={editor} document={document} revision={state.source} sourceDraft={state.source} target="file" initialMode={parsedSource.status === 'valid' ? 'layout' : 'source'} resolveImage={resolveImage}
+      sourceMap={parsedSource.status === 'valid' ? parsedSource.sourceMap : undefined}
+      contextualCardSuppressed={Boolean(state.aiCandidate)}
       clipboardContext={(resources: MarkdownDocument['resources']) => selectedFileClipboardContext(clipboard, resources)} clipboardResourcePort={fileClipboardResourcePort}
       renderObject={renderObject} objectRevision={clipboard}
       onDraft={source => { const ticket = ++draftTicket.current; queueMicrotask(() => { if (ticket === draftTicket.current) session.edit(source, operationGroup.current) }) }}
-      onChange={(next, operation) => {
-        if (operation.preparedResources) session.prepareAttachments((operation.preparedResources as FilePreparedDocumentResources).attachments)
-        operationGroup.current = operation.historyGroup; setDocument(next); return true
-      }} onUndo={() => session.undo()} onRedo={() => session.redo()} /></div>}
+       onChange={(next, operation) => {
+         if (operation.preparedResources) session.prepareAttachments((operation.preparedResources as FilePreparedDocumentResources).attachments)
+         operationGroup.current = operation.historyGroup; setDocument(next); return true
+       }} onContextualTargetChange={target => onSelectionChange?.(bindTarget(target))}
+       onContextualCommand={onContextualCommand ? (instruction, selection) => { const target = bindTarget(selection); if (!target) throw new Error('内容已改变，请重新选择后再发送。'); onContextualCommand(instruction, target) } : undefined}
+       onContextualDismiss={target => onContextualDismiss?.(bindTarget(target))} onUndo={() => session.undo()} onRedo={() => session.redo()} /></div>}
+    {state.aiCandidate && <aside ref={preview} className="document-ai-preview" aria-label="AI 改动预览" tabIndex={-1}>
+      <strong>AI 改动</strong>
+      {documentEditPreviews(state.aiCandidate.baseSource, state.aiCandidate.request.edits).map((edit, index) => <div className="document-ai-preview__comparison" key={index}><div><span>修改前</span><pre>{edit.before || '（空白）'}</pre></div><div><span>修改后</span><pre>{edit.after || '（删除）'}</pre></div></div>)}
+      <button type="button" onClick={() => { void session.acceptAiCandidate() }}>应用改动</button>
+      <button type="button" onClick={() => { void session.dismissAiCandidate() }}>保留原文</button>
+    </aside>}
     {state.aiSuggestions.map(suggestion => <AiSuggestion key={suggestion.id} suggestion={suggestion} source={state.source} session={session} />)}
     {state.aiMessage && <p role="status">{state.aiMessage}</p>}
     {state.aiRecords.length > 0 && <aside aria-label="AI 改动记录">{state.aiRecords.map(record => <div key={record.id}><span>AI 修改了 {record.applied.length} 处</span><details><summary>查看改动</summary>{record.applied.map((edit, index) => <div key={index}><del>{edit.before}</del><ins>{edit.after}</ins></div>)}</details><button type="button" onClick={() => { void session.revertAiEdit(record) }}>撤回本次 AI 修改</button></div>)}<button type="button" onClick={() => session.clearAiMarkers()}>清除改动标记</button></aside>}

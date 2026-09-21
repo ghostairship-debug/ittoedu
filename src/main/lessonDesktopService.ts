@@ -14,6 +14,7 @@ import { createWorkspaceIdentity } from './workspaceIdentity'
 import { normalizeWorkspacePath, type WorkspaceIdentityV1 } from '../shared/workspaceIdentity'
 import { openSelectedProjectFile } from './fileDialogs'
 import { relocateLocalAgentLesson, deleteLocalAgentConversationRecords, searchLocalAgentConversations, deleteAllLocalAgentApplicationRecords, assertLocalAgentRecordsAvailable } from './localAgent/service'
+import { readLocalAgentRecordUsage } from './localAgent/localAgentRecordUsage'
 
 let workspaces: LessonWorkspaceService | undefined
 let conversations: LessonConversationRepository | undefined
@@ -86,6 +87,7 @@ export async function operateLessonDesktop(window: BrowserWindow, request: unkno
     case 'create-project': return { project: await projects.designate(input.directory, input.name, input.path) }
     case 'remove-project': return { projects: await projects.remove(input.directory, input.path) }
     case 'search-conversations': { const owner = resolveOwner(input); await assertOwnerAvailable(owner); return { matches: await searchLocalAgentConversations(owner, input.query) } }
+    case 'read-application-record-usage': { const owner = resolveOwner(input); await assertOwnerAvailable(owner); return { recordUsage: await readLocalAgentRecordUsage(app.getPath('userData'), owner) } }
     case 'branch-conversation': { const owner = resolveOwner(input); await assertOwnerAvailable(owner); return { conversation: await conversations.branch(owner, input.conversationId) } }
     case 'open-project': {
       const filename = await fs.realpath(input.path)

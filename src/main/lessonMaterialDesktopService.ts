@@ -24,7 +24,7 @@ export async function operateLessonMaterial(window: BrowserWindow, request: unkn
     case 'select': {
       let filenames = input.path ? [input.path] : []
       if (!input.path) {
-        const result = await dialog.showOpenDialog(window, { title: '选择课例材料（可多选）', properties: ['openFile', 'multiSelections'], filters: [{ name: '教学材料', extensions: ['pdf', 'docx', 'pptx', 'txt', 'md', 'csv'] }] })
+        const result = await dialog.showOpenDialog(window, { title: '选择课例材料（可多选）', properties: ['openFile', 'multiSelections'], filters: [{ name: '教学材料', extensions: ['pdf', 'docx', 'pptx', 'txt', 'md', 'csv', 'png', 'jpg', 'jpeg', 'webp'] }] })
         if (result.canceled) return { sources: [], failures: [] }
         filenames = result.filePaths
       }
@@ -32,7 +32,7 @@ export async function operateLessonMaterial(window: BrowserWindow, request: unkn
       for (const filename of filenames) {
         const title = path.basename(filename)
         try {
-          if (!['.pdf', '.docx', '.pptx', '.txt', '.md', '.csv'].includes(path.extname(filename).toLowerCase())) throw new Error('请选择 PDF、DOCX、PPTX 或文本材料')
+          if (!['.pdf', '.docx', '.pptx', '.txt', '.md', '.csv', '.png', '.jpg', '.jpeg', '.webp'].includes(path.extname(filename).toLowerCase())) throw new Error('请选择 PDF、DOCX、PPTX、文本或 PNG / JPEG / WebP 图片材料')
           const file = await fs.open(filename, 'r')
           try {
             const stat = await file.stat()

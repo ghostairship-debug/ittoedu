@@ -1,3 +1,4 @@
+import { flowSelectionContextTarget } from '../../course/flowContextSelection'
 import { generationRequestSchema, MAX_GENERATION_PROMPT_BYTES, type GenerationRequest } from '../../../shared/generationContract'
 import { workspaceIdentityKey, type WorkspaceIdentityV1 } from '../../../shared/workspaceIdentity'
 import type { CourseProjectDocument } from '../../../shared/courseProjectTypes'
@@ -74,6 +75,19 @@ export function captureGenerationSnapshot(input: {
   const { document, workspace, sessionToken, projection } = input
   if (document.id !== workspace.projectId || sessionToken.revision !== document.revision || projection.revision !== document.revision) throw new Error('工程引用已过期')
   for (const material of input.materials ?? []) if (workspaceIdentityKey(material.workspace) !== workspaceIdentityKey(workspace)) throw new Error('不能引用其他工程的材料')
+  const flowSurface = document.surfaces.find(surface => surface.id === projection.surfaceId)
+  let flowContext: ReturnType<typeof flowSelectionContextTarget> = null
+  let flowContextIssue: string | undefined
+  if (input.scope === 'selection' && input.flowSelection && flowSurface?.type === 'flow') {
+    try { flowContext = flowSelectionContextTarget(flowSurface.blocks, document.revision, input.flowSelection) }
+    catch (error) {
+      // A receipt-following observation can inspect the new document, but cannot
+      // renew the old logical offsets as if they were freshly selected.
+      const receipt = input.previousResult as { status?: string; afterRevision?: number } | undefined
+      if (receipt?.status !== 'committed' || receipt.afterRevision !== document.revision) throw error
+      flowContextIssue = error instanceof Error ? error.message : String(error)
+    }
+  }
   const destinations: GenerationRequest['destinations'] = []
   const pages: unknown[] = []
   const referencedPackages = new Set<string>()
@@ -142,7 +156,7 @@ export function captureGenerationSnapshot(input: {
   }
   if (!destinations.length) throw new Error('请选择要引用的对象，或改为引用当前页')
   const selectedTargets = destinations.flatMap(destination => destination.kind === 'update' && destination.target.locationId === sessionToken.locationId && input.selectedIds.includes(destination.target.itemId) ? [destination.target] : [])
-  const selectionActions = input.scope === 'selection' ? captureGenerationSelectionActions(document, selectedTargets, input.instruction) : []
+  const selectionActions = input.scope === 'selection' && !flowContextIssue && flowContext?.kind !== 'text' ? captureGenerationSelectionActions(document, selectedTargets, input.instruction) : []
   for (const action of selectionActions) if (action.operation === 'insert-image-after') destinations.push(action.destination)
   const resourceFiles: NonNullable<GenerationRequest['resourceFiles']> = []
   resourceFiles.push({ path: 'project/document.json', encoding: 'utf8', role: 'source', mediaType: 'application/json', content: JSON.stringify(document) })
@@ -248,6 +262,12 @@ export function captureGenerationSnapshot(input: {
       projectDocument: 'resources/project/document.json', projectTargets: 'resources/project/targets.json', pages: inlinePages,
       materials: materialReferences,
       navigation: generationNavigationContext(document, sessionToken.locationId, projection.stateId),
+      ...(flowContextIssue ? { flowTextEdit: { status: 'stale', message: flowContextIssue, instruction: '原选区在提交后已失效；本轮只核实提交结果，不复用旧范围继续改稿。需要继续局部修改时请重新选择。' } } : {}),
+      ...(flowContext?.kind === 'text' ? { flowTextEdit: {
+        tool: 'flow.content', destination: destinations.find(value => value.kind === 'update' && value.target.surfaceId === projection.surfaceId && value.target.itemId === flowContext.blockId),
+        input: { operation: 'edit', textRange: flowContext.textRange },
+        instruction: '当前为精确正文选区。content.inlines 是替换所选范围的内容，textStyle 仅作用于该范围；保留 textRange 的 slot/start/end，不用整块替换扩大本次修改。offset 按 Unicode 码点计算，行内公式算一个原子。',
+      } } : {}),
       ...(input.scope === 'selection' && projection.surfaceType === 'flow' && input.flowSelection
         ? { flowSelection: input.flowSelection } : {}),
       capabilities: generationCapabilityContext(capabilityPages, input.purpose, undefined, input.instruction, { destinations, allowedCarriers }),

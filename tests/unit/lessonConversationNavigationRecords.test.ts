@@ -5,7 +5,8 @@ import os from 'node:os'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { LessonConversationRepository } from '../../src/main/localAgent/lessonConversationRepository'
-const fake = vi.hoisted(() => ({ userData: '', owners: [] as { closed: boolean }[], events: [] as unknown[] }))
+import type { LocalAgentRepository } from '../../src/main/localAgent/repository'
+const fake = vi.hoisted(() => ({ userData: '', owners: [] as { closed: boolean; repository: unknown }[], events: [] as unknown[] }))
 vi.mock('electron', () => ({ app: { getPath: () => fake.userData }, session: { defaultSession: { resolveProxy: vi.fn() } } }))
 vi.mock('../../src/main/localAgent/harness', () => ({ LocalAgentHarness: class {
   closed = false
@@ -27,6 +28,22 @@ afterEach(async () => { await fs.rm(fake.userData, { recursive: true, force: tru
 const lesson = () => ({ schemaVersion: 1 as const, lessonId: randomUUID(), normalizedDirectory: 'c:/lessons/example' })
 
 describe('application conversation navigation records', () => {
+  it('shares one repository between notice confirmation and the later native harness', async () => {
+    const repositoryModule = await import('../../src/main/localAgent/repository')
+    const noticeRepositories: unknown[] = []
+    vi.spyOn(repositoryModule.LocalAgentRepository.prototype, 'confirmExternalAiNotice').mockImplementation(function (this: LocalAgentRepository) {
+      noticeRepositories.push(this)
+      return Promise.resolve({ version: 1, confirmed: true, confirmedAt: 1 })
+    })
+    const service = await import('../../src/main/localAgent/service')
+    const scope = { version: 1 as const, projectId: 'shared', normalizedPath: 'c:/lessons/shared.h5lesson' }
+    await service.operateLocalAgent({ operation: 'external-notice', scope, confirm: true })
+    await service.operateLocalAgent({ operation: 'start', projectId: scope.projectId, projectPath: scope.normalizedPath, adapter: 'codex', prompt: '讨论' })
+    expect(noticeRepositories).toHaveLength(1)
+    expect(fake.owners).toHaveLength(1)
+    expect(fake.owners[0]!.repository).toBe(noticeRepositories[0])
+  })
+
   it('branches with a shared target reference and independent empty sessions', async () => {
     const repository = new LessonConversationRepository(fake.userData), identity = lesson()
     const target = { version: 1 as const, projectId: 'project', normalizedPath: 'c:/lessons/example/course.h5lesson' }

@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { promises as fs, type PathLike } from 'node:fs'
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -150,6 +150,21 @@ describe('offline capability workspace', () => {
         expect(details.fileAccess.skills[skill.name]).toBe(skill.path)
         expect(await readFile(details.fileAccess.skills[skill.name], 'utf8')).not.toHaveLength(0)
       }
+      for (const name of ['courseware-session', 'orchestrate-courseware', 'build-courseware-project']) {
+        const skillPath = details.fileAccess.skills[name]
+        expect(skillPath).toBe(path.join(profile.workspace.capabilities, 'skills', name, 'SKILL.md'))
+        expect(skillPath).not.toContain('.codex')
+        expect(await readFile(skillPath, 'utf8')).toContain(name === 'courseware-session' ? '不要求教师或当前 CLI 用户另行安装' : '软件内')
+      }
+      for (const name of ['orchestrate-courseware', 'build-courseware-project']) {
+        const sourceRoot = path.join(process.cwd(), '.agents', 'skills', name)
+        expect(await readFile(details.fileAccess.skills[name], 'utf8')).toBe(await readFile(path.join(sourceRoot, 'SKILL.md'), 'utf8'))
+        for (const reference of (await readdir(path.join(sourceRoot, 'references'))).filter(file => file.endsWith('.md'))) {
+          expect(await readFile(path.join(profile.workspace.capabilities, 'skills', name, 'references', reference), 'utf8'))
+            .toBe(await readFile(path.join(sourceRoot, 'references', reference), 'utf8'))
+        }
+      }
+      expect(await readFile(path.join(profile.workspace.capabilities, 'skills', 'build-courseware-project', 'references', 'validation-boundaries.md'), 'utf8')).toContain('自动化最多 `engineering candidate`')
       for (const file of request.resourceFiles!) {
         const reference = details.resourceIndex.find((entry: { path: string }) => entry.path === `resources/${file.path}`)
         expect(path.isAbsolute(reference.localPath)).toBe(true)

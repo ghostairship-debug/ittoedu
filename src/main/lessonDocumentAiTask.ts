@@ -4,6 +4,7 @@ import path from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { documentAiCandidateSchema, documentAiReplacementCandidateSchema, lessonDocumentAiRequestSchema, type LessonDocumentAiRequest, type LessonDocumentAiResult } from '../shared/lessonDocumentAiTask'
 import { documentSourceEdits } from '../shared/document/sourceMerge'
+import { applyDocumentRanges } from './lessonDocumentCoauthoring'
 import type { DocumentFileRef } from '../shared/document/ports'
 import type { ConversationAgentWorkspace } from '../shared/workspaceIdentity'
 import { normalizeWorkspacePath } from '../shared/workspaceIdentity'
@@ -107,8 +108,8 @@ export class LessonDocumentAiTasks {
       const parsed = documentAiCandidateSchema.safeParse(candidate)
       if (!parsed.success) throw new Error('AI 未提供有效的文档修改范围，当前稿未改变。请补充要求后重试。')
       const { edits } = parsed.data
-      const sorted = [...edits].sort((a, b) => a.from - b.from || a.to - b.to)
-      if (sorted.some((edit, index) => run.source.slice(edit.from, edit.to) !== edit.before || !run.input.ranges.some(range => edit.from >= range.from && edit.to <= range.to) || (index > 0 && edit.from < sorted[index - 1]!.to))) throw new Error('候选范围、原文或重叠校验失败')
+      if (edits.some(edit => !run.input.ranges.some(range => edit.from >= range.from && edit.to <= range.to))
+        || applyDocumentRanges(run.source, run.source, edits).conflicts.length) throw new Error('候选范围、原文或重叠校验失败')
       if (run.result.status !== 'running') return run.result
       run.result = { ...run.result, status: 'candidate', message: '建议已生成，正在核对当前稿', apply: { baseVersion: run.input.baseVersion, epoch: run.input.epoch, operationId: run.result.taskId, edits } }
     } catch (error) { if (run.result.status === 'running') run.result = { ...run.result, status: 'failed', message: (error as Error).message } }

@@ -1,3 +1,6 @@
+import { flowContextTextRangeSchema, flowTextSlot } from '../../course/flowContextSelection'
+import { sliceFlowRichText } from '../../course/flowDocumentModel'
+import { documentTextLength, normalizeDocumentText } from '../../../shared/document/content'
 import { nanoid } from 'nanoid'
 import { tableMergeRegionSchema } from '../../../shared/tableMerge'
 import { z } from 'zod'
@@ -39,12 +42,12 @@ const structure = z.discriminatedUnion('kind', [
 export const flowAuthoringToolInputSchema = z.discriminatedUnion('operation', [
   z.object({ operation: z.literal('insert'), block: newBlock }).strict(),
   z.object({ operation: z.literal('replace'), block: flowBlockSchema }).strict(),
-  z.object({ operation: z.literal('edit'), content: documentTextContentSchema.optional(),
+  z.object({ operation: z.literal('edit'), content: documentTextContentSchema.optional(), textRange: flowContextTextRangeSchema.optional(),
     image: z.object({ assetId: z.string().min(1) }).strict().optional(),
     formula: z.object({ latex: z.string().min(1).max(16384).superRefine((latex, ctx) => { try { parseDocumentMath(latex) } catch (error) { ctx.addIssue({ code: 'custom', message: error instanceof Error ? error.message : '公式无效' }) } }), accessibleText: z.string().trim().min(1).max(4_000) }).strict().optional(),
     textStyle: nativeContentInputSchemaByType.text.shape.runs.element.shape.style.optional(),
     textAlign: z.enum(['left', 'center', 'right']).optional(), lineSpacing: z.number().finite().min(0).max(200).optional() }).strict()
-    .refine(value => Object.keys(value).length > 1, '正文窄编辑至少提供一个字段'),
+    .refine(value => Object.keys(value).some(key => key !== 'operation' && key !== 'textRange'), '正文窄编辑至少提供一个字段'),
   z.object({ operation: z.literal('delete') }).strict(),
   z.object({ operation: z.literal('move'), parentId: id.nullable(), index: z.number().int().nonnegative() }).strict(),
   z.object({ operation: z.literal('table-structure'), change: structure }).strict(),
@@ -52,7 +55,7 @@ export const flowAuthoringToolInputSchema = z.discriminatedUnion('operation', [
 
 export const flowAuthoringTool: AuthoringToolDefinition<z.infer<typeof flowAuthoringToolInputSchema>> = {
   name: 'flow.content',
-  description: '新Flow默认fluid，沿实际容器排版；已有Flow保留其layout。普通标题、正文、图片和互动放正文block以自然占位，不用viewport绝对文字替代。insert使用create parent:flow-body，block只省略宿主生成的id。修改标题、段落或引用块优先edit的content.inlines/textStyle/textAlign/lineSpacing；公式用edit.formula的latex和accessibleText，保留formulaId；图片用edit.image.assetId，保留正文布局、说明和块身份。常规图片应用优先media.apply。未指定排版、富文本和元数据保留。replace/delete/move使用Flow block update target；replace必须保留id和类型。完整载体替换使用selection.replace。',
+  description: '新Flow默认fluid，沿实际容器排版；已有Flow保留其layout。普通标题、正文、图片和互动放正文block以自然占位，不用viewport绝对文字替代。insert使用create parent:flow-body，block只省略宿主生成的id。精确正文选区使用edit.textRange={slot,start,end}，slot支持field/content/citation/caption/title/body、item、header、cell，start/end按Unicode码点且公式占1；content.inlines只替换该范围，textStyle只设置该范围。整块修改标题、段落或引用块用edit的content.inlines/textStyle/textAlign/lineSpacing；公式用edit.formula的latex和accessibleText，保留formulaId；图片用edit.image.assetId，保留正文布局、说明和块身份。常规图片应用优先media.apply。未指定排版、富文本和元数据保留。replace/delete/move使用Flow block update target；replace必须保留id和类型。完整载体替换使用selection.replace。',
   inputSchema: flowAuthoringToolInputSchema,
   plan({ document, destination, value }) {
     const { target, surface } = resolveAuthoringToolScope(document, destination)
@@ -86,11 +89,26 @@ export const flowAuthoringTool: AuthoringToolDefinition<z.infer<typeof flowAutho
         if (value.operation === 'edit') {
           const textFields = value.content !== undefined || value.textStyle !== undefined || value.textAlign !== undefined || value.lineSpacing !== undefined
           if ([textFields, value.image !== undefined, value.formula !== undefined].filter(Boolean).length !== 1) throw new Error('一次正文窄编辑只能修改一种内容类型')
-          if (textFields && block.type !== 'heading' && block.type !== 'paragraph' && block.type !== 'quote') throw new Error('正文文字窄编辑只接受标题、段落或引用块')
+          if (textFields && !value.textRange && block.type !== 'heading' && block.type !== 'paragraph' && block.type !== 'quote') throw new Error('正文文字窄编辑只接受标题、段落或引用块')
+          if (value.textRange && (value.image || value.formula || value.textAlign !== undefined || value.lineSpacing !== undefined)) throw new Error('选区窄编辑只接受 content 或 textStyle，不扩大到整块属性')
           if (value.formula && block.type !== 'formula') throw new Error('正文公式窄编辑只接受公式块')
           if (value.image && (block.type !== 'media' || block.mediaKind !== 'image' || document.assets[value.image.assetId]?.kind !== 'image')) throw new Error('正文图片窄编辑需要图片块和有效图片资产')
         }
-        const replacement = value.operation === 'edit' && (block.type === 'heading' || block.type === 'paragraph' || block.type === 'quote')
+        const replacement = value.operation === 'edit' && value.textRange
+          ? (() => {
+            const next = structuredClone(block), slot = flowTextSlot(next, value.textRange.slot), content = slot.get()
+            const { start, end } = value.textRange
+            const length = documentTextLength(content)
+            if (start > end || end > length) throw new Error('正文选区范围已失效')
+            const middle = structuredClone(value.content ?? sliceFlowRichText(content, start, end))
+            if (value.textStyle) for (const inline of middle.inlines) {
+              if (inline.type === 'text') inline.style = { ...inline.style, ...value.textStyle }
+              else inline.style = { ...inline.style, ...(value.textStyle.fontSize !== undefined ? { fontSize: value.textStyle.fontSize } : {}), ...(value.textStyle.color !== undefined ? { color: value.textStyle.color } : {}) }
+            }
+            slot.set(normalizeDocumentText({ inlines: [...sliceFlowRichText(content, 0, start).inlines, ...middle.inlines, ...sliceFlowRichText(content, end, length).inlines] }))
+            return flowBlockSchema.parse(next)
+          })()
+          : value.operation === 'edit' && (block.type === 'heading' || block.type === 'paragraph' || block.type === 'quote')
           ? (() => {
             const content = structuredClone(value.content ?? block.content)
             if (value.textStyle) for (const inline of content.inlines) {

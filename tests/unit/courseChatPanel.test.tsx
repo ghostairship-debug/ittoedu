@@ -12,12 +12,15 @@ import { sceneNodeToCourseLayerItem } from '@/shared/courseProjectModel'
 import { selectFlowEditorBlocks, enterFlowTextEditing } from '@/renderer/course/flowEditorSlice'
 import { captureGenerationSnapshot } from '@/renderer/authoring/generation/generationSnapshot'
 import { projectEffectiveLayers } from '@/renderer/course/effectiveLayerProjection'
+import { requestContextualCourseCommand } from '@/renderer/ui/chat/contextualCourseCommand'
 
 // Exercise the real form/send branching with controller and observation unit ports.
 // No native CLI, screenshot, live project commit or acceptance is claimed here.
 const h = vi.hoisted(() => ({ view: {} as any, onView: undefined as any, capture: vi.fn(), starts: [] as any[], startCalls: [] as any[],
   cumulative: '', terminal: {} as any, current: true, input: vi.fn(), remember: vi.fn(), invalidate: vi.fn(), stop: vi.fn(), store: {} as any,
   controllerPorts: undefined as any, recovery: vi.fn(), captureNext: vi.fn(), freeze: vi.fn(), bridges: [] as any[], controllers: [] as any[] }))
+const notice = vi.hoisted(() => ({ ensure: vi.fn(async () => true), cancel: vi.fn(), review: vi.fn(), dialog: null }))
+vi.mock('@/renderer/ui/chat/useExternalAiNotice', () => ({ useExternalAiNotice: () => notice }))
 vi.mock('@/renderer/store/editorStore', () => ({
   useEditorStore: Object.assign((selector: any) => selector(h.store), { getState: () => h.store }),
   selectActiveCourseProjectDocument: (state: any) => state.document ?? null,
@@ -35,7 +38,7 @@ vi.mock('@/renderer/ui/chat/courseChatObservation', async importOriginal => ({ .
   captureRecovery: h.recovery, freezeTarget: h.freeze, dispose() { bridge.disposed = true }, invalidate: h.invalidate, fileCurrent() {}, captureNext: h.captureNext,
   instructionWithUserInput: (text: string) => `${h.cumulative}\n\n用户最新输入（优先于此前要求）：${text}`,
   rememberUserInput: (text: string) => { h.remember(text); h.cumulative += `\n${text}` },
-  refreshFromUser: async (text: string, intent: string, execution: unknown, target: unknown, scope: unknown) => bridge.capture({ instruction: `${h.cumulative}\n${text}`, intent, execution, target, scope }),
+  refreshFromUser: async (text: string, intent: string, execution: unknown, target: unknown, scope: unknown) => bridge.capture({ workspace: h.view.request.workspace, instruction: `${h.cumulative}\n${text}`, intent, execution, target, scope }),
   }
   h.bridges.push(bridge)
   return bridge
@@ -56,6 +59,7 @@ vi.mock('@/renderer/authoring/generation/generationTaskController', () => ({ Gen
   async stop() { await h.stop() }
 } }))
 beforeEach(() => {
+  notice.ensure.mockResolvedValue(true)
   vi.clearAllMocks(); h.starts = []; h.startCalls = []; h.cumulative = ''; h.terminal = {}; h.current = true; h.store = {}; h.view = {}; h.controllerPorts = undefined; h.bridges = []; h.controllers = []
   h.input.mockResolvedValue({ status: 'accepted' })
   h.stop.mockResolvedValue(undefined)
@@ -89,6 +93,14 @@ async function submitPreparation(text: string) {
 }
 
 describe('chat reference defaults and send-time target', () => {
+  it('keeps the request draft and launches no native task when first-use notice is cancelled', async () => {
+    slideFixture(); mount(); notice.ensure.mockResolvedValueOnce(false)
+    fireEvent.change(screen.getByLabelText('发送给创作助手'), { target: { value: '调整这页的标题' } })
+    fireEvent.submit(screen.getByLabelText('发送给创作助手').closest('form')!)
+    await waitFor(() => expect(notice.ensure).toHaveBeenCalled())
+    expect(h.starts).toHaveLength(0)
+    expect(screen.getByLabelText('发送给创作助手')).toHaveValue('调整这页的标题')
+  })
   it('sends the selected resource budget and displays the authoritative extended deadline', async () => {
     slideFixture(); mount()
     expect(screen.getByLabelText('本次时间预算')).toHaveValue('20')
@@ -169,6 +181,15 @@ describe('chat reference defaults and send-time target', () => {
     return document
   }
   const scope = () => (screen.getByLabelText('本轮引用') as HTMLSelectElement).value
+
+  it('uses a card local target independently of a previous whole-course review choice', async () => {
+    slideFixture(); mount()
+    fireEvent.click(screen.getByLabelText('用户明确要求先看当前策划/脚本后再生成'))
+    await act(async () => requestContextualCourseCommand({ projectId: 'chat-unit', sessionToken: h.store.courseAuthoringSession.token, instruction: '只修改选中内容' }))
+    await waitFor(() => expect(h.starts).toHaveLength(1))
+    expect(h.starts[0]).toMatchObject({ scope: 'selection', purpose: 'local-edit', intent: 'edit' })
+    expect(h.starts[0].confirmedDocuments).toBeUndefined()
+  })
 
   it('blocks sending while model selection is saving and sends once after it succeeds', async () => {
     slideFixture()

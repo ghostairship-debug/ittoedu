@@ -7,10 +7,17 @@ import { localAgentRecordV2Schema, type LocalAgentRecordV2 } from '../../shared/
 import { projectV2RecordToV1 } from '../../shared/localAgentProjection'
 import { generationRequestSchema, type GenerationRequest } from '../../shared/generationContract'
 import { aiObservationFileSchema } from '../../shared/localAgentTaskContract'
-import { workspaceIdentityKey, type AiWorkspaceIdentity } from '../../shared/workspaceIdentity'
+import { aiWorkspaceIdentitySchema, workspaceIdentityKey, type AiWorkspaceIdentity } from '../../shared/workspaceIdentity'
 import { renamePreparedPath } from './preparedRename'
+import {
+  EXTERNAL_AI_NOTICE_VERSION,
+  externalAiNoticeConfirmationSchema,
+  externalAiNoticeStatusSchema,
+  type ExternalAiNoticeStatus,
+} from '../../shared/externalAiNotice'
 
 const GENERATION_REQUEST_FILE = 'generation-request.json'
+const EXTERNAL_AI_NOTICE_FILE = 'external-ai-notice.json'
 
 export class LocalAgentRepository {
   private queue: Promise<unknown> = Promise.resolve()
@@ -53,6 +60,83 @@ export class LocalAgentRepository {
     const pending = this.queue.then(operation, operation)
     this.queue = pending.catch(() => {})
     return pending
+  }
+  storedBytes(scopes?: readonly AiWorkspaceIdentity[]): Promise<number> {
+    const parsedScopes = scopes?.map(scope => aiWorkspaceIdentitySchema.parse(scope))
+    return this.serialize(async () => {
+      const root = path.resolve(this.userData, 'local-agent', 'v3')
+      const targets = parsedScopes === undefined
+        ? [root]
+        : [...new Set(parsedScopes.map(scope => path.resolve(this.v2Directory(scope))))]
+      let total = 0
+      for (const target of targets) {
+        if (target !== root && !target.startsWith(root + path.sep)) throw new Error('Invalid local agent usage root')
+        total += await this.pathBytes(target, root)
+      }
+      return total
+    })
+  }
+  private async pathBytes(target: string, root: string): Promise<number> {
+    const resolved = path.resolve(target)
+    if (resolved !== root && !resolved.startsWith(root + path.sep)) throw new Error('Local agent usage path escaped its root')
+    let stat
+    try { stat = await fs.lstat(resolved) }
+    catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return 0; throw error }
+    if (stat.isSymbolicLink()) return 0
+    if (stat.isFile()) return stat.size
+    if (!stat.isDirectory()) return 0
+    let total = 0
+    const names = await fs.readdir(resolved).catch((error: NodeJS.ErrnoException) => {
+      if (error.code === 'ENOENT') return []
+      throw error
+    })
+    for (const name of names) total += await this.pathBytes(path.join(resolved, name), root)
+    return total
+  }
+  readExternalAiNotice(scope: AiWorkspaceIdentity): Promise<ExternalAiNoticeStatus> {
+    const requested = workspaceIdentityKey(scope)
+    return this.serialize(async () => {
+      try {
+        const filename = path.join(this.v2Directory(scope), EXTERNAL_AI_NOTICE_FILE)
+        const stat = await fs.stat(filename)
+        if (stat.size > 64 * 1024) return externalAiNoticeStatusSchema.parse({ version: EXTERNAL_AI_NOTICE_VERSION, confirmed: false })
+        const confirmation = externalAiNoticeConfirmationSchema.parse(JSON.parse(await fs.readFile(filename, 'utf8')))
+        if (workspaceIdentityKey(confirmation.scope) !== requested) {
+          return externalAiNoticeStatusSchema.parse({ version: EXTERNAL_AI_NOTICE_VERSION, confirmed: false })
+        }
+        return externalAiNoticeStatusSchema.parse({
+          version: EXTERNAL_AI_NOTICE_VERSION,
+          confirmed: true,
+          confirmedAt: confirmation.confirmedAt,
+        })
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT' || error instanceof z.ZodError || error instanceof SyntaxError) {
+          return externalAiNoticeStatusSchema.parse({ version: EXTERNAL_AI_NOTICE_VERSION, confirmed: false })
+        }
+        throw error
+      }
+    })
+  }
+  confirmExternalAiNotice(scope: AiWorkspaceIdentity): Promise<ExternalAiNoticeStatus> {
+    const parsedScope = externalAiNoticeConfirmationSchema.shape.scope.parse(scope)
+    return this.serialize(async () => {
+      const directory = this.v2Directory(parsedScope)
+      await fs.mkdir(directory, { recursive: true })
+      const destination = path.join(directory, EXTERNAL_AI_NOTICE_FILE)
+      const temporary = `${destination}.tmp`
+      const confirmedAt = Date.now()
+      const confirmation = externalAiNoticeConfirmationSchema.parse({
+        schemaVersion: 1,
+        noticeVersion: EXTERNAL_AI_NOTICE_VERSION,
+        scope: parsedScope,
+        confirmedAt,
+      })
+      try {
+        await fs.writeFile(temporary, JSON.stringify(confirmation), { mode: 0o600 })
+        await renamePreparedPath(temporary, destination)
+      } finally { await fs.rm(temporary, { force: true }) }
+      return externalAiNoticeStatusSchema.parse({ version: EXTERNAL_AI_NOTICE_VERSION, confirmed: true, confirmedAt })
+    })
   }
   async staging(workspace: AiWorkspaceIdentity, id: string, version: 1 | 2 = 2): Promise<string> {
     const directory = this.stagingPath(workspace, id, version)

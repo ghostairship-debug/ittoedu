@@ -1,3 +1,4 @@
+import { resolveFlowContextSelection, flowTextSlot } from './flowContextSelection'
 import { documentContentSchema, documentTextLength, normalizeDocumentText, plainDocumentText, type FlowTextContent } from '../../shared/document/content'
 import type { AssetMeta } from '../../shared/contracts/media-v1'
 import type { TextRunStyle } from '../../shared/contracts/native-v1'
@@ -797,6 +798,24 @@ function deleteFlowText(
   direction: 'backward' | 'forward',
   options: FlowCommandOptions,
 ): FlowCommandResult {
+  if (selection.documentSelectionIssue) return failCommand(selection.documentSelectionIssue)
+  if (selection.documentSelection) {
+    try {
+      const surface = flowSurfaceIn(document, selection.surfaceId)
+      const exact = resolveFlowContextSelection(surface.blocks, document.revision, selection.documentSelection, { allowCaret: true })
+      if (exact?.kind !== 'text') return failCommand('没有可删除的正文选区')
+      const found = findFlowBlockRecursive(surface.blocks, exact.blockId)!
+      const block = structuredClone(found.block), slot = flowTextSlot(block, exact.textRange.slot)
+      let { start, end } = exact.textRange
+      if (start === end) {
+        if (direction === 'backward') start = Math.max(0, start - 1)
+        else end = Math.min(documentTextLength(slot.get()), end + 1)
+        if (start === end) return succeedNoop(document, '没有可删除的文字')
+      }
+      slot.set(deleteFlowRichTextRange(slot.get(), start, end))
+      return updateFlowEditorBlock(document, { surfaceId: surface.id, blockId: block.id, parentId: found.parentId }, block, options)
+    } catch (error) { return failCommand(error instanceof Error ? error.message : '正文选区已失效') }
+  }
   if (!selection.selectedBlockId || !selection.textRange) {
     return failCommand('没有可删除的文字')
   }
@@ -957,6 +976,22 @@ export function executeFlowEditorCommand(
   command: FlowEditorCommandRequest,
   options: FlowCommandOptions = {},
 ): FlowCommandResult {
+  if (selection.documentSelectionIssue) return failCommand(selection.documentSelectionIssue)
+  // SharedDocumentEditor owns clipboard/text transforms. A logical range must
+  // never fall through to these legacy whole-block operations.
+  if (selection.documentSelection && selection.documentSelection.kind !== 'object'
+    && ['copy', 'cut', 'split', 'merge', 'move', 'indent', 'outdent'].includes(command.name)) return failCommand('请在正文编辑器中操作所选文字，不扩大到整块。')
+  if (selection.documentSelection && selection.documentSelection.kind !== 'object' && command.name === 'format' && command.spec.kind === 'text-style') {
+    try {
+      const surface = flowSurfaceIn(document, selection.surfaceId)
+      const exact = resolveFlowContextSelection(surface.blocks, document.revision, selection.documentSelection, { allowCaret: true })
+      if (exact?.kind !== 'text') return failCommand('没有可设置格式的正文选区')
+      const found = findFlowBlockRecursive(surface.blocks, exact.blockId)!
+      const block = structuredClone(found.block), slot = flowTextSlot(block, exact.textRange.slot)
+      slot.set(applyStyleToRichText(slot.get(), command.spec.style, exact.textRange))
+      return updateFlowEditorBlock(document, { surfaceId: surface.id, blockId: block.id, parentId: found.parentId }, block, options)
+    } catch (error) { return failCommand(error instanceof Error ? error.message : '正文选区已失效') }
+  }
   if (command.name === 'copy') {
     if (selection.authoringScope === 'global' && selection.focus !== 'overlay') {
       return failCommand(FLOW_GLOBAL_STRUCTURE_REASON)

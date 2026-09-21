@@ -20,6 +20,7 @@ import { createArchiveFixture as createCourseProjectArchive } from '../fixtures/
 import { withDefaultComponentController } from '../../src/renderer/components/teacherControllerComponent'
 import { buildPublishedCourseStandaloneHtml } from '../../src/renderer/export/course/buildCoursePackages'
 import { runDynamicAdmissionProbe } from './dynamicAdmissionProbe'
+import { configureR18AiTestModel } from './helpers/r18AiTestModels'
 import { runLocalCliFailureProbe } from './localCliFailureProbe'
 import { installChatFailureFixture } from './chatFailureFixture'
 import { fractionFallback, fractionComponentInstruction, exerciseFractionComponent, oscillationFallback, oscillationRuntimeInstruction, exerciseOscillationRuntime } from './generatedCarrierProbe'
@@ -908,17 +909,8 @@ for (const adapter of ['codex', 'claude', 'opencode'] as const) test(`S3 真实�
     await library.getByRole('button', { name: '关闭', exact: true }).click()
     await page.getByRole('button', { name: '创作助手', exact: true }).click()
     const chat = page.getByRole('complementary', { name: 'CLI 创作助手' })
-    if (adapter !== 'claude') {
-      // Owner 指令：Luna 一律 max 强度（Fast/priority 若存在）；不得静默沿用机器 config.toml 的默认（gpt-6-astra）。
-      const directory = await page.evaluate(adapter => window.desktopAPI!.localAgent({ operation: 'capabilities', adapter, refresh: true }), adapter)
-      const luna = directory.capabilities?.models.find(model => /luna/i.test(model.id) && /openai/i.test(model.id)) ?? directory.capabilities?.models.find(model => /luna/i.test(model.id))
-      expect(luna, 'Actual native catalog must offer Luna').toBeTruthy()
-      const effort = luna!.effort.kind === 'supported' ? (luna!.effort.values.includes('max') ? 'max' : luna!.effort.default ?? luna!.effort.values[0]!) : null
-      const fast = luna!.serviceTiers?.find(tier => /fast|priority/i.test(`${tier.id} ${tier.name}`))
-      const configured = await page.evaluate(input => window.desktopAPI!.localAgent({ operation: 'configure', adapter: input.adapter, configuration: input.configuration }), { adapter, configuration: { model: luna!.id, effort, ...(fast ? { serviceTier: fast.id } : {}) } })
-      expect(configured.enabled).toBe(true)
-      console.log('S3 route', adapter, JSON.stringify({ id: luna!.id, effort, serviceTier: fast?.id ?? null }))
-    }
+    const route = await configureR18AiTestModel(page, adapter)
+    console.log('S3 route', adapter, JSON.stringify(route))
     const waitCandidate = async () => {
       try {
         await expect.poll(async () => {
@@ -927,7 +919,7 @@ for (const adapter of ['codex', 'claude', 'opencode'] as const) test(`S3 真实�
           return chat.getByRole('button', { name: '应用候选', exact: true }).isEnabled().catch(() => false)
         }, { timeout: 245000 }).toBe(true)
       } catch (error) {
-      const evidence = join(root, `output/playwright/r18-cli-${adapter}`); mkdirSync(evidence, { recursive: true })
+      const evidence = join(root, `output/playwright/r20-native-${adapter}`); mkdirSync(evidence, { recursive: true })
       const records = await page.evaluate(async owner => {
         const listed = await window.desktopAPI.localAgent({ operation: 'list', ...owner })
         return Promise.all((listed.records ?? []).map(async record => {
@@ -955,6 +947,7 @@ for (const adapter of ['codex', 'claude', 'opencode'] as const) test(`S3 真实�
     const started = Date.now()
     await chat.getByLabel('发送给创作助手').fill('在当前空白页只添加一个可编辑 Native 文字对象，文字必须完整使用已引用“分数含义基准材料”的正文，位置 x=100 y=100，宽900高180。不需要调查文件，直接依据提供的工具输入合同返回一个候选。')
     await chat.getByRole('button', { name: '发送', exact: true }).click()
+    await page.getByRole('dialog', { name: '发送前了解外部处理范围', exact: true }).getByRole('button', { name: '确认并继续', exact: true }).click()
     await waitCandidate()
     expect(readProject(path).revision).toBe(0)
     await chat.getByRole('button', { name: '应用候选', exact: true }).click()
@@ -991,9 +984,9 @@ for (const adapter of ['codex', 'claude', 'opencode'] as const) test(`S3 真实�
     await page.getByRole('button', { name: '打开工程（Ctrl+O）', exact: true }).click()
     const reopened = openCourseProjectArchive(new Uint8Array(readFileSync(path)))
     expect(reopened.project).toEqual(first)
-    const evidence = join(root, `output/playwright/r18-cli-${adapter}`); mkdirSync(evidence, { recursive: true })
+    const evidence = join(root, `output/playwright/r20-native-${adapter}`); mkdirSync(evidence, { recursive: true })
     writeFileSync(join(evidence, 'generated.h5lesson'), readFileSync(path))
-    writeFileSync(join(evidence, 'result.json'), JSON.stringify({ adapter, elapsedMs: Date.now() - started, runs: sessions.records?.map(record => ({ status: record.status, hostResult: record.hostResult, revision: record.generationRequest?.documentRevision })) }, null, 2))
+    writeFileSync(join(evidence, 'result.json'), JSON.stringify({ adapter, route, elapsedMs: Date.now() - started, runs: sessions.records?.map(record => ({ status: record.status, hostResult: record.hostResult, revision: record.generationRequest?.documentRevision })) }, null, 2))
     const htmlPath = join(evidence, 'generated.html')
     writeFileSync(htmlPath, buildPublishedCourseStandaloneHtml({ project: reopened.project, assetFiles: reopened.assetFiles, components: componentPackagesFromArchive(reopened.project, reopened.componentFiles) }, readFileSync(join(root, 'dist-player/player.iife.js'), 'utf8')))
     browser = await chromium.launch({ headless: true })

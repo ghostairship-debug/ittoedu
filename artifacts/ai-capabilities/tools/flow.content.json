@@ -2,7 +2,7 @@
   "candidateCarrier": {
     "default": "native"
   },
-  "description": "新Flow默认fluid，沿实际容器排版；已有Flow保留其layout。普通标题、正文、图片和互动放正文block以自然占位，不用viewport绝对文字替代。insert使用create parent:flow-body，block只省略宿主生成的id。修改标题、段落或引用块优先edit的content.inlines/textStyle/textAlign/lineSpacing；公式用edit.formula的latex和accessibleText，保留formulaId；图片用edit.image.assetId，保留正文布局、说明和块身份。常规图片应用优先media.apply。未指定排版、富文本和元数据保留。replace/delete/move使用Flow block update target；replace必须保留id和类型。完整载体替换使用selection.replace。",
+  "description": "新Flow默认fluid，沿实际容器排版；已有Flow保留其layout。普通标题、正文、图片和互动放正文block以自然占位，不用viewport绝对文字替代。insert使用create parent:flow-body，block只省略宿主生成的id。精确正文选区使用edit.textRange={slot,start,end}，slot支持field/content/citation/caption/title/body、item、header、cell，start/end按Unicode码点且公式占1；content.inlines只替换该范围，textStyle只设置该范围。整块修改标题、段落或引用块用edit的content.inlines/textStyle/textAlign/lineSpacing；公式用edit.formula的latex和accessibleText，保留formulaId；图片用edit.image.assetId，保留正文布局、说明和块身份。常规图片应用优先media.apply。未指定排版、富文本和元数据保留。replace/delete/move使用Flow block update target；replace必须保留id和类型。完整载体替换使用selection.replace。",
   "examples": [
     {
       "bindings": "values 的 block 来自当前观察、已读资源或用户要求，值须满足本卡 inputSchema；destination 原样复制当前目标。",
@@ -1189,6 +1189,114 @@
       "__schema40": {
         "additionalProperties": false,
         "properties": {
+          "end": {
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "slot": {
+            "oneOf": [
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "field": {
+                    "enum": [
+                      "content",
+                      "citation",
+                      "caption",
+                      "title",
+                      "body"
+                    ],
+                    "type": "string"
+                  },
+                  "kind": {
+                    "const": "field",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "field"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "itemId": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "kind": {
+                    "const": "item",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "itemId"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "columnId": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "kind": {
+                    "const": "header",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "columnId"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "columnId": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "kind": {
+                    "const": "cell",
+                    "type": "string"
+                  },
+                  "rowId": {
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "rowId",
+                  "columnId"
+                ],
+                "type": "object"
+              }
+            ]
+          },
+          "start": {
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "slot",
+          "start",
+          "end"
+        ],
+        "type": "object"
+      },
+      "__schema41": {
+        "additionalProperties": false,
+        "properties": {
           "assetId": {
             "minLength": 1,
             "type": "string"
@@ -1199,7 +1307,7 @@
         ],
         "type": "object"
       },
-      "__schema41": {
+      "__schema42": {
         "additionalProperties": false,
         "properties": {
           "accessibleText": {
@@ -1219,7 +1327,7 @@
         ],
         "type": "object"
       },
-      "__schema42": {
+      "__schema43": {
         "properties": {
           "baseline": {
             "$ref": "#/$defs/__schema28",
@@ -1269,7 +1377,7 @@
         },
         "type": "object"
       },
-      "__schema43": {
+      "__schema44": {
         "enum": [
           "left",
           "center",
@@ -1277,12 +1385,12 @@
         ],
         "type": "string"
       },
-      "__schema44": {
+      "__schema45": {
         "maximum": 200,
         "minimum": 0,
         "type": "number"
       },
-      "__schema45": {
+      "__schema46": {
         "minLength": 1,
         "type": "string"
       },
@@ -1377,22 +1485,25 @@
             "$ref": "#/$defs/__schema39"
           },
           "formula": {
-            "$ref": "#/$defs/__schema41"
+            "$ref": "#/$defs/__schema42"
           },
           "image": {
-            "$ref": "#/$defs/__schema40"
+            "$ref": "#/$defs/__schema41"
           },
           "lineSpacing": {
-            "$ref": "#/$defs/__schema44"
+            "$ref": "#/$defs/__schema45"
           },
           "operation": {
             "$ref": "#/$defs/__schema38"
           },
           "textAlign": {
-            "$ref": "#/$defs/__schema43"
+            "$ref": "#/$defs/__schema44"
+          },
+          "textRange": {
+            "$ref": "#/$defs/__schema40"
           },
           "textStyle": {
-            "$ref": "#/$defs/__schema42"
+            "$ref": "#/$defs/__schema43"
           }
         },
         "required": [
@@ -1428,7 +1539,7 @@
           "parentId": {
             "anyOf": [
               {
-                "$ref": "#/$defs/__schema45"
+                "$ref": "#/$defs/__schema46"
               },
               {
                 "type": "null"
@@ -1469,14 +1580,14 @@
                 "additionalProperties": false,
                 "properties": {
                   "columnId": {
-                    "$ref": "#/$defs/__schema45"
+                    "$ref": "#/$defs/__schema46"
                   },
                   "kind": {
                     "const": "split",
                     "type": "string"
                   },
                   "rowId": {
-                    "$ref": "#/$defs/__schema45"
+                    "$ref": "#/$defs/__schema46"
                   }
                 },
                 "required": [
@@ -1490,7 +1601,7 @@
                 "additionalProperties": false,
                 "properties": {
                   "afterId": {
-                    "$ref": "#/$defs/__schema45"
+                    "$ref": "#/$defs/__schema46"
                   },
                   "kind": {
                     "const": "insert-row",
@@ -1506,7 +1617,7 @@
                 "additionalProperties": false,
                 "properties": {
                   "afterId": {
-                    "$ref": "#/$defs/__schema45"
+                    "$ref": "#/$defs/__schema46"
                   },
                   "kind": {
                     "const": "insert-column",
@@ -1522,7 +1633,7 @@
                 "additionalProperties": false,
                 "properties": {
                   "id": {
-                    "$ref": "#/$defs/__schema45"
+                    "$ref": "#/$defs/__schema46"
                   },
                   "kind": {
                     "const": "delete-row",
@@ -1539,7 +1650,7 @@
                 "additionalProperties": false,
                 "properties": {
                   "id": {
-                    "$ref": "#/$defs/__schema45"
+                    "$ref": "#/$defs/__schema46"
                   },
                   "kind": {
                     "const": "delete-column",
@@ -1568,7 +1679,7 @@
                     ]
                   },
                   "id": {
-                    "$ref": "#/$defs/__schema45"
+                    "$ref": "#/$defs/__schema46"
                   },
                   "kind": {
                     "const": "move-row",
@@ -1598,7 +1709,7 @@
                     ]
                   },
                   "id": {
-                    "$ref": "#/$defs/__schema45"
+                    "$ref": "#/$defs/__schema46"
                   },
                   "kind": {
                     "const": "move-column",

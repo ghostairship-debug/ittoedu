@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import type { LessonWorkspace, LessonConversation } from '../../../shared/lessonWorkspace'
 import { normalizeWorkspacePath, sameWorkspacePath, type ConversationAgentWorkspace } from '../../../shared/workspaceIdentity'
 import type { LocalAgentEvent, LocalAgentId, LocalAgentRecord } from '../../../shared/localAgentContract'
+import { localAgentCapabilitiesSchema } from '../../../shared/localAgentContract'
 import { aiQuestionSchema, aiInputDeliverySchema } from '../../../shared/localAgentInteraction'
 import { CourseChatPanel } from './CourseChatPanel'
 import { CourseChatTranscript } from './CourseChatTranscript'
@@ -12,6 +13,9 @@ import { readableChatError } from './readableChatStatus'
 import { chatRecordTime, mergeChatEvents } from './courseChatHistory'
 import { DocumentAiTaskController, type DocumentChatTarget } from '../../documentFiles/documentAiTaskController'
 import { MAX_GENERATION_TASK_DURATION_MS } from '../../../shared/generationContract'
+import { contextualTargetOf, describeContextualTarget, freezeDocumentEditTarget, type DocumentEditScope } from './documentContextTarget'
+import type { ContextualEditTarget } from '../../../shared/document/ports'
+import { useExternalAiNotice } from './useExternalAiNotice'
 
 export function LessonConversationChat({ lesson, conversation, projectId, projectPath, documentTarget }: {
   lesson: LessonWorkspace; conversation: LessonConversation; projectId: string; projectPath: string | null
@@ -41,19 +45,45 @@ function LessonDiscussion({ workspace, projectId, projectPath, documentTarget }:
   const [extendingBudget, setExtendingBudget] = useState(false)
   const draftKey = `lesson-chat-draft:${JSON.stringify(workspace)}`
   const [instruction, setInstruction] = useState(() => { try { return localStorage.getItem(draftKey) ?? '' } catch { return '' } }), [error, setError] = useState('')
-  const [pinnedDocument, setPinnedDocument] = useState<DocumentChatTarget>(), [documentStatus, setDocumentStatus] = useState('')
+  const [pinnedDocument, setPinnedDocument] = useState<DocumentChatTarget>(), [documentScope, setDocumentScope] = useState<DocumentEditScope>(), [documentStatus, setDocumentStatus] = useState('')
+  const automaticDocument = !pinnedDocument && contextualTargetOf(documentTarget) ? documentTarget : undefined
   const documentTask = useRef<DocumentAiTaskController | null>(null)
   const documentTaskGeneration = useRef(0), documentSession = useRef<string | undefined>(undefined)
   useEffect(() => { try { if (instruction) localStorage.setItem(draftKey, instruction); else localStorage.removeItem(draftKey) } catch {} }, [draftKey, instruction])
   useEffect(() => () => { documentTaskGeneration.current++; void documentTask.current?.stop().catch(() => {}) }, [])
+  // A target's getEditor callback is intentionally a live lookup and may return
+  // a fresh handle on every render. Compare the stable document label here; the
+  // controller performs the final ref/version check at send time.
+  const documentTargetChanged = Boolean(pinnedDocument && documentTarget && pinnedDocument.getEditor()?.session !== documentTarget.getEditor()?.session)
+  useEffect(() => {
+    if (documentTargetChanged) setDocumentStatus('文档目标已切换，原冻结目标已失效，请重新选择。')
+  }, [documentTargetChanged])
   const [events, setEvents] = useState<LocalAgentEvent[]>([]), [records, setRecords] = useState<LocalAgentRecord[]>([])
+  const [configurationSession, setConfigurationSession] = useState<{ adapter: LocalAgentId; id: string | null }>()
   const [sending, setSending] = useState(false), [configurationSaving, setConfigurationSaving] = useState(false)
   const [loaded, setLoaded] = useState(false)
-  const pending = useRef<string | undefined>(undefined), generation = useRef(0)
+  const pending = useRef<string | undefined>(undefined), generation = useRef(0), sendGeneration = useRef(0)
   const api = window.desktopAPI
+  const externalNotice = useExternalAiNotice(api)
+  const noticeReferences = (prompt: string) => [`会话目录：${workspace.normalizedDirectory}`, ...mentions.filter(item => prompt.includes(`@${item.path}`)).map(item => `消息引用：${item.path}`)]
   const running = records.filter(record => 'kind' in record.workspace && record.status === 'running').sort((a, b) => chatRecordTime(b) - chatRecordTime(a))[0]
+  const latestSession = records.filter(record => record.adapter === adapter)
+    .sort((a, b) => (b.task?.startedAt ?? chatRecordTime(b)) - (a.task?.startedAt ?? chatRecordTime(a)))[0]
+  // A resumed turn has its own local native-session record. While a new start
+  // is unresolved (or failed before returning an ID), never borrow an older confirmation.
+  const awaitingSessionHistory = configurationSession?.adapter === adapter && !records.some(record => record.id === configurationSession.id)
+  const configurationSessionId = awaitingSessionHistory ? configurationSession.id : latestSession?.id
+  const configurationEvent = [...events].reverse().find(event => event.sessionId === configurationSessionId && event.adapter === adapter && event.kind === 'session' && event.payload && typeof event.payload === 'object' && !Array.isArray(event.payload) && event.payload.status === 'configuration')
+  const confirmedCapabilities = localAgentCapabilitiesSchema.safeParse(configurationEvent?.payload && typeof configurationEvent.payload === 'object' && !Array.isArray(configurationEvent.payload) ? configurationEvent.payload.capabilities : undefined)
+  const documentTargetReady = !pinnedDocument || (!!documentScope && !documentTargetChanged)
   const canExtend = !!running?.task?.deadlineAt && !!running.task.startedAt && running.task.deadlineAt > Date.now()
     && running.task.deadlineAt + 20 * 60000 <= running.task.startedAt + MAX_GENERATION_TASK_DURATION_MS
+  useEffect(() => documentTarget?.subscribeCommands?.((prompt, target) => {
+    if (!loaded || running || sending || pending.current || configurationSaving) throw new Error('创作助手正在处理任务，请稍后发送。')
+    setPinnedDocument(documentTarget); setDocumentScope('selection')
+    setInstruction(prompt)
+    void send({ document: documentTarget, prompt, target })
+  }), [documentTarget, loaded, running, sending, configurationSaving])
   useEffect(() => {
     let live = true, timer: ReturnType<typeof setTimeout> | undefined
     const token = ++generation.current
@@ -95,39 +125,76 @@ function LessonDiscussion({ workspace, projectId, projectPath, documentTarget }:
     void refresh()
     return () => { live = false; generation.current++; if (timer) clearTimeout(timer) }
   }, [api, workspace])
-  async function send() {
-    if (!api || !instruction.trim() || sending || configurationSaving) return
-    const token = generation.current, prompt = instruction.trim()
+  async function send(command?: { document: DocumentChatTarget; prompt: string; target: ContextualEditTarget }) {
+    const prompt = command?.prompt.trim() ?? instruction.trim()
+    if (!api || !prompt || sending || configurationSaving) return
+    const token = generation.current
+    const sendToken = ++sendGeneration.current
+    const isCurrentSend = () => token === generation.current && sendToken === sendGeneration.current
+    const editingDocument = command?.document ?? pinnedDocument ?? automaticDocument
+    const editingScope = command ? 'selection' : pinnedDocument ? documentScope : automaticDocument ? 'selection' : undefined
     setSending(true); setError('')
     try {
-      if (pinnedDocument && !running) {
-        if (!api.lessonDocumentAi) throw new Error('文档修改入口未连接')
+      if (editingDocument && !running) {
         const documentToken = ++documentTaskGeneration.current
-        const controller = new DocumentAiTaskController(api.lessonDocumentAi, workspace, message => {
-          if (documentTaskGeneration.current === documentToken) setDocumentStatus(message)
+        if (!editingScope || documentTargetChanged) throw new Error(documentTargetChanged ? '文档目标已变化，请重新选择后再发送' : '请先选择“当前选区”或“全文”')
+        const frozen = command?.target ?? freezeDocumentEditTarget(editingDocument, editingScope)
+        if (!api.lessonDocumentAi) throw new Error('文档修改入口未连接')
+        if (!await externalNotice.ensure({ scope: workspace, adapter, references: [...noticeReferences(prompt), `文档：${editingDocument.name}（全文作为上下文；允许修改：${frozen.label}）`] })) return
+        if (!isCurrentSend() || documentTaskGeneration.current !== documentToken) return
+        await documentTask.current?.stop()
+        if (!isCurrentSend() || documentTaskGeneration.current !== documentToken) return
+        const controller = new DocumentAiTaskController(api.lessonDocumentAi, workspace, (message, state) => {
+          if (documentTaskGeneration.current !== documentToken) return
+          if (state && state !== 'running') { if (pending.current === documentSession.current) pending.current = undefined; documentSession.current = undefined }
+          setDocumentStatus(message)
         })
         documentTask.current = controller
         documentSession.current = undefined
-        const sessionId = await controller.start(pinnedDocument, adapter, prompt)
-        if (documentTaskGeneration.current === documentToken) { documentSession.current = sessionId; pending.current = sessionId }
+        setConfigurationSession({ adapter, id: null })
+        const sessionId = await controller.start({ ...editingDocument, applyPolicy: 'preview' }, adapter, prompt, undefined, frozen)
+        if (documentTaskGeneration.current === documentToken) { documentSession.current = sessionId; pending.current = sessionId; setConfigurationSession({ adapter, id: sessionId ?? null }) }
       } else if (running?.task) {
+        if (!await externalNotice.ensure({ scope: workspace, adapter: running.adapter, references: noticeReferences(prompt) }) || !isCurrentSend()) return
         const result = await api.localAgent({ operation: 'lesson-input', workspace, sessionId: running.id,
           input: { version: 1, kind: inputKind, inputId: crypto.randomUUID(), taskId: running.task.taskId, epoch: running.task.epoch, workspace: running.workspace, turnId: running.task.turnId, text: prompt } })
         if (!result.inputDelivery || result.inputDelivery.status === 'rejected') throw new Error(result.inputDelivery?.reason ?? 'CLI 没有接受输入')
-        if (token === generation.current) setDeliveryNotice(result.inputDelivery.reason ?? (result.inputDelivery.status === 'queued' ? '已接收，将在下一回合处理。' : '已送达当前任务。'))
+        if (isCurrentSend()) setDeliveryNotice(result.inputDelivery.reason ?? (result.inputDelivery.status === 'queued' ? '已接收，将在下一回合处理。' : '已送达当前任务。'))
       }
       else {
         const prior = records.filter(record => record.adapter === adapter).sort((a, b) => chatRecordTime(b) - chatRecordTime(a))[0]
         const frozenTarget = { kind: 'directory' as const, directory: normalizeWorkspacePath(workspace.normalizedDirectory) }
+        if (!await externalNotice.ensure({ scope: workspace, adapter, references: noticeReferences(prompt) }) || !isCurrentSend()) return
+        setConfigurationSession({ adapter, id: null })
         const result = await api.localAgent(prior?.externalSessionId
           ? { operation: 'lesson-resume', workspace, sessionId: prior.id, prompt, frozenTarget }
           : { operation: 'lesson-start', workspace, adapter, prompt, intent: 'discuss', frozenTarget })
         if (!result.sessionId) throw new Error('CLI 尚未建立任务，请重试')
+        if (!isCurrentSend()) { await api.localAgent({ operation: 'lesson-cancel', workspace, sessionId: result.sessionId }); return }
         pending.current = result.sessionId
+        setConfigurationSession({ adapter, id: result.sessionId })
       }
-      if (token === generation.current) setInstruction(current => current.trim() === prompt ? '' : current)
-    } catch (cause) { if (token === generation.current) setError(readableChatError(cause)) }
-    finally { if (token === generation.current) setSending(false) }
+      if (isCurrentSend()) setInstruction(current => current.trim() === prompt ? '' : current)
+    } catch (cause) {
+      if (isCurrentSend()) {
+        const causeMessage = cause && typeof cause === 'object' && 'message' in cause ? String((cause as { message?: unknown }).message ?? '') : ''
+        const direct = /选区|目标|文档|范围|保存期间|内容已改变/.test(causeMessage) ? causeMessage : null
+        setError(direct ?? readableChatError(cause))
+      }
+    }
+    finally { if (isCurrentSend()) setSending(false) }
+  }
+  function stopCurrentTask() {
+    externalNotice.cancel()
+    sendGeneration.current++; documentTaskGeneration.current++
+    const sessionId = running?.id ?? pending.current, documentId = documentSession.current
+    pending.current = undefined; documentSession.current = undefined
+    setSending(false)
+    if (!sessionId || sessionId === documentId) {
+      void documentTask.current?.stop().catch(cause => setError(readableChatError(cause)))
+      setDocumentStatus(documentTask.current ? '文档修改已停止，未应用的建议已丢弃。' : '')
+    }
+    if (sessionId && sessionId !== documentId) void api?.localAgent({ operation: 'lesson-cancel', workspace, sessionId }).catch(cause => setError(readableChatError(cause)))
   }
   const answered = new Set(events.flatMap(event => {
     const payload = event.payload
@@ -145,17 +212,33 @@ function LessonDiscussion({ workspace, projectId, projectPath, documentTarget }:
     return <CourseChatPanel embedded projectId={projectId} projectPath={projectPath} lessonWorkspace={workspace.kind === 'lesson' ? workspace : undefined} initialHistory={events} onClose={() => {}} />
   }
   return <aside className="course-chat course-chat--embedded" aria-label="课例创作助手">
+    {externalNotice.dialog}
     <header><strong>创作助手</strong></header>
-    {documentTarget && <button disabled={!!running || sending} onClick={() => setPinnedDocument(documentTarget)}>编辑当前文档</button>}
-    {pinnedDocument && <div role="status">本次修改文档：{pinnedDocument.name}（全文）<button disabled={!!running || sending} onClick={() => {
-      documentTaskGeneration.current++; documentTask.current = null; documentSession.current = undefined
-      setPinnedDocument(undefined); setDocumentStatus('')
-    }}>移除文档引用</button></div>}
+    {automaticDocument && <p role="status">本次修改：{automaticDocument.name} · {describeContextualTarget(automaticDocument).label}</p>}
+    {documentTarget && <button disabled={!!running || sending} onClick={() => {
+      setPinnedDocument(documentTarget); setDocumentScope(describeContextualTarget(documentTarget).hasSelection ? 'selection' : undefined); setDocumentStatus('')
+    }}>编辑当前文档</button>}
+    {pinnedDocument && <div role="status" aria-label="当前文档编辑目标">
+      <strong>本次修改文档：{pinnedDocument.name}</strong>
+      {documentScope ? (() => {
+        try { const frozen = freezeDocumentEditTarget(pinnedDocument, documentScope); return <span>（{frozen.label}）</span> }
+        catch { return <span>（目标已失效）</span> }
+      })() : <span>（尚未选择范围）</span>}
+      {!documentScope && !documentTargetChanged && <div><p>请选择本次修改范围：</p><button type="button" disabled={!!running || sending} onClick={() => setDocumentScope('document')}>选择全文</button>{Boolean(contextualTargetOf(pinnedDocument)) && <button type="button" disabled={!!running || sending} onClick={() => setDocumentScope('selection')}>选择当前选区</button>}</div>}
+      {documentScope && <button type="button" disabled={!!running || sending} onClick={() => setDocumentScope(undefined)}>切换范围</button>}
+      {documentTargetChanged && <p>当前文档已切换，请移除旧目标后重新选择。</p>}
+      <button disabled={!!running || sending} onClick={() => {
+        void documentTask.current?.stop().catch(cause => setError(readableChatError(cause)))
+        documentTaskGeneration.current++; documentTask.current = null; documentSession.current = undefined
+        setPinnedDocument(undefined); setDocumentScope(undefined); setDocumentStatus('')
+      }}>移除文档引用</button></div>}
     {documentStatus && <p role="status">{documentStatus}</p>}
     <div className="chat-scroll"><CourseChatTranscript events={events} />
       {!events.length && <div className="chat-empty"><strong>从这里开始讨论</strong><p>说明教学主题，或打开右侧文档，选择“编辑当前文档”。</p></div>}
       {questions.map(question => <NativeAgentQuestion key={question.questionId} question={question} onAnswer={async input => {
         if (!api || !running) throw new Error('当前任务已结束')
+        const token = generation.current
+        if (!await externalNotice.ensure({ scope: workspace, adapter: running.adapter, references: noticeReferences('') }) || token !== generation.current) return
         const result = await api.localAgent({ operation: 'lesson-input', workspace, sessionId: running.id, input })
         if (!result.inputDelivery || result.inputDelivery.status === 'rejected') throw new Error(result.inputDelivery?.reason ?? 'CLI 没有接受回答')
       }} />)}
@@ -184,22 +267,14 @@ function LessonDiscussion({ workspace, projectId, projectPath, documentTarget }:
     }}>{extendingBudget ? '正在延长预算…' : '增加20分钟'}</button>}
     <div className="chat-composer-controls">
       <label className="chat-cli-picker">CLI <select aria-label="CLI" value={adapter} disabled={!!running || sending} onChange={event => setAdapter(event.target.value as LocalAgentId)}><option value="codex">Codex</option><option value="claude">Claude</option><option value="opencode">OpenCode</option></select></label>
-      <NativeAgentConfiguration adapter={adapter} configurationSequence={0} onSavingChange={setConfigurationSaving} />
+      <NativeAgentConfiguration adapter={adapter} configurationSequence={configurationEvent?.time ?? 0} onSavingChange={setConfigurationSaving} taskConfiguration={confirmedCapabilities.success ? confirmedCapabilities.data.current : undefined} />
+      <button type="button" onClick={() => externalNotice.review({ scope: workspace, adapter, references: noticeReferences(instruction) })}>外部处理说明</button>
     </div>
     <ChatComposerMenus ref={composerMenus} value={instruction} onChange={setInstruction}
-      commands={[{ id: 'stop', label: '停止当前任务', run: () => {
-        const sessionId = running?.id ?? pending.current
-        if (sessionId) void api?.localAgent({ operation: 'lesson-cancel', workspace, sessionId })
-      } }]}
+      commands={[{ id: 'stop', label: '停止当前任务', run: stopCurrentTask }]}
       mentions={mentions} />
     <textarea aria-label="给创作助手的消息" value={instruction} onChange={event => setInstruction(event.target.value)} onKeyDown={event => composerMenus.current?.handleKeyDown(event)} placeholder="说明教学主题，或一起讨论当前文档…" />
-    <div className="chat-send-actions"><button disabled={!loaded || sending || !!pending.current || configurationSaving || !instruction.trim()} onClick={() => void send()}>{running ? '发送输入' : '发送'}</button>
-      {(running || pending.current || sending) && <button onClick={() => {
-        const sessionId = running?.id ?? pending.current, documentToken = documentTaskGeneration.current
-        if (!sessionId || sessionId === documentSession.current) void documentTask.current?.stop().catch(cause => {
-          if (documentTaskGeneration.current === documentToken) setError(readableChatError(cause))
-        })
-        if (sessionId) void api?.localAgent({ operation: 'lesson-cancel', workspace, sessionId }).catch(cause => setError(readableChatError(cause)))
-      }}>停止</button>}</div>
+    <div className="chat-send-actions"><button disabled={!loaded || sending || !!pending.current || configurationSaving || !instruction.trim() || !documentTargetReady} onClick={() => void send()}>{running ? '发送输入' : '发送'}</button>
+      {(running || pending.current || sending) && <button onClick={stopCurrentTask}>停止</button>}</div>
   </aside>
 }

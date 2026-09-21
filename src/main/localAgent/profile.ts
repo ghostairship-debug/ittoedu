@@ -2,7 +2,7 @@ import type { LocalAgentId } from '../../shared/localAgentContract'
 import type { AssetMeta } from '../../shared/contracts/media-v1'
 import { generationAssetAliases, generationDestinationAliases, generationRequestSchema, MAX_GENERATION_PROMPT_BYTES, type GenerationRequest } from '../../shared/generationContract'
 import path from 'node:path'
-import { courseAgentSkills, candidateMediaFileGuidance, publicCourseReplyGuidance } from '../../shared/courseAgentSkills'
+import { courseAgentAvailableSkills, courseAgentSkillSummary, candidateMediaFileGuidance, publicCourseReplyGuidance } from '../../shared/courseAgentSkills'
 import { courseAgentTaskGuidance, generationRepairFeedbackGuidance } from '../../shared/courseAgentTaskGuidance'
 import { GENERATION_OPEN, GENERATION_CLOSE, GENERATION_RESULT_OPEN, GENERATION_RESULT_CLOSE } from '../../shared/generationResult'
 import { generationTaskFactsPromptProjection } from '../../shared/generationTaskFactsProjection'
@@ -35,7 +35,7 @@ function generationFileAccess(candidateRoot: string) {
     candidateHelper: path.join(capabilities, 'candidate-helper.mjs'),
     mediaDelivery: candidateMediaDeliveryAccess(root),
     discovery: path.join(capabilities, 'discovery.json'), query: path.join(capabilities, 'query.mjs'),
-    skills: Object.fromEntries(courseAgentSkills.map(skill => [skill.name, path.join(capabilities, 'skills', skill.name, 'SKILL.md')])),
+    skills: Object.fromEntries(courseAgentAvailableSkills.map(skill => [skill.name, path.join(capabilities, 'skills', skill.name, 'SKILL.md')])),
   }
 }
 
@@ -235,7 +235,7 @@ function buildGenerationPromptUnchecked(adapter: LocalAgentId, request: Generati
       : request.intent === 'discuss' ? '本轮只读讨论，禁止修改候选。'
       : request.intent === 'edit' || profile.resultContract.mode === 'candidate' ? '修改先用实际能力准备有效候选；禁空steps、虚构操作和诊断候选。' : '本轮可讨论或编辑指定范围，按实际结果回复或交候选。',
     '仅经候选事务修改，禁直写Store/History/工程。需提问时用原生工具等待。',
-    'Keep cwd/permissions. workspace.request is absolute; query/helper: fileAccess.',
+    'Keep cwd/permissions. request is absolute; query/helper=fileAccess.',
     'CLI工具保持开放。asset.image.transform只做卡中像素操作，禁semantic-redraw。',
     output,
     ...(profile.resultContract.mode === 'reply-or-edit' ? ['受阻或无法合法修正则答复未完成；禁诊断候选。'] : []),
@@ -297,8 +297,12 @@ export function createGenerationProfile(adapter: LocalAgentId, request: Generati
   if (!['structured-stdout', 'session-staging-file', 'app-server-json-schema'].includes(resultChannel)) throw new Error('当前 CLI profile 未开放此候选结果通道')
   if (resultChannel === 'session-staging-file' && adapter === 'codex') throw new Error('当前 CLI 不支持会话暂存候选通道')
   if (resultChannel === 'app-server-json-schema' && adapter !== 'codex') throw new Error('当前 CLI 不支持 app-server 结构化候选通道')
-  const names = request.purpose === 'whole-course' ? ['course-build', 'visual-craft', 'interaction-craft']
-    : ['course-design', 'pro-editing', 'qa-repair', 'style-remix', 'visual-craft', 'interaction-craft']
+  // Complete methods are optional resources, not a prerequisite. The profile
+  // still delivers every exact path so a native CLI can consult one only when
+  // the supplied snapshot, target range, and capability contract need it.
+  const names = request.purpose === 'whole-course'
+    ? ['courseware-session', 'orchestrate-courseware', 'build-courseware-project', 'course-build', 'visual-craft', 'interaction-craft']
+    : ['courseware-session', 'orchestrate-courseware', 'build-courseware-project', 'course-design', 'pro-editing', 'qa-repair', 'style-remix', 'visual-craft', 'interaction-craft']
   const root = candidateRoot ? path.resolve(candidateRoot) : `candidates/${request.requestId}`
   const fileAccess = generationFileAccess(root), capabilities = fileAccess.capabilities
   return { version: 1, adapter, candidateVersion: 2, resultChannel,
@@ -311,8 +315,8 @@ export function createGenerationProfile(adapter: LocalAgentId, request: Generati
       query: fileAccess.query, resources: fileAccess.resources },
     capability: { immutableSnapshot: true, nativeAgentLoop: true, liveProjectTools: false,
       candidateFileIngestion: resultChannel === 'session-staging-file' },
-    taskInstruction: '先使用本轮最小快照与完整能力卡，足够时直接生成。技能按任务选择读取；教学策划用 course-design，明确修改用 pro-editing，整课只消费已确认 Markdown。缺少能力、技能方法或源码时读取 request.json 的 fileAccess 与 resourceIndex.localPath，直接使用绝对路径；参数修改无需先读组件源码。原生文件、终端、网络及子任务能力仍由 CLI 提供，课件修改经宿主候选事务提交。',
-    skills: courseAgentSkills.filter(skill => names.includes(skill.name)).map(skill => ({ name: skill.name,
-      summary: skill.body.split('。')[0], path: fileAccess.skills[skill.name]! })),
+    taskInstruction: '先使用本轮最小快照、目标范围与完整能力卡；三者足够时直接生成，不必读取 courseware-session 或其他课件方法。普通 Markdown 的局部改字、改写或选区修订不需要课件方法。只有当前任务确实需要材料理解、教学主线、呈现脚本、构建、课件修改、视觉互动检查或交付方法时，才按需读取 courseware-session、orchestrate-courseware、build-courseware-project 或精确能力卡及其必要引用。软件内自动任务不强制四阶段；用户明确要求先审当前真实制品时才停下。完整方法仅作质量参考，不执行其外部安装、resolve-editor-root 或独立 Builder 命令。缺少能力、技能方法或源码时读取 request.json 的 fileAccess 与 resourceIndex.localPath，直接使用绝对路径；参数修改无需先读组件源码。原生文件、终端、网络及子任务能力仍由 CLI 提供，课件修改经宿主候选事务提交。',
+    skills: courseAgentAvailableSkills.filter(skill => names.includes(skill.name)).map(skill => ({ name: skill.name,
+      summary: courseAgentSkillSummary(skill), path: fileAccess.skills[skill.name]! })),
   }
 }

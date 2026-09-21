@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { readableChatError } from './readableChatStatus'
+import { NativeAgentDiagnostics } from './NativeAgentDiagnostics'
 import type { LocalAgentCapabilities, LocalAgentConfiguration, LocalAgentId } from '../../../shared/localAgentContract'
 
 interface NativeAgentConfigurationProps {
@@ -24,6 +25,7 @@ function NativeAgentConfigurationControls({ adapter, configurationSequence, proj
   const [directoryError, setDirectoryError] = useState('')
   const [configurationError, setConfigurationError] = useState('')
   const [saving, setSaving] = useState(false)
+  const [configurationOpen, setConfigurationOpen] = useState(false)
   const requestEpoch = useRef(0)
   const configurationEpoch = useRef(0)
   const configurationPending = useRef(false)
@@ -105,7 +107,7 @@ function NativeAgentConfigurationControls({ adapter, configurationSequence, proj
           : '模型目录读取失败，请刷新重试。'
           : `已读取 ${capabilities?.models.length ?? 0} 个原生模型。`
   return <section aria-label="CLI 模型配置" aria-busy={loading || saving} className="native-agent-configuration">
-    <details><summary>{selected?.model ? `${selected.model}${selected.effort ? ` · ${selected.effort}` : ' · 默认'}${tierLabel(selected.serviceTier)}` : '模型与强度'} · 配置{pending ? '（待应用）' : ''}</summary>
+    <details onToggle={event => setConfigurationOpen(event.currentTarget.open)}><summary>{selected?.model ? `${selected.model}${selected.effort ? ` · ${selected.effort}` : ' · 默认'}${tierLabel(selected.serviceTier)}` : '模型与强度'} · 配置{pending ? '（待应用）' : ''}</summary>
     <div className="chat-controls">
       <label>模型<select aria-label="模型" value={model ? selected?.model ?? '' : ''} disabled={controlsDisabled}
         onChange={event => {
@@ -144,6 +146,7 @@ function NativeAgentConfigurationControls({ adapter, configurationSequence, proj
     {taskConfiguration?.model && <p role="status">当前任务原生确认：{taskConfiguration.resolvedModel ?? taskConfiguration.model}{taskConfiguration.effort ? ' · ' + taskConfiguration.effort : ''}{tierLabel(taskConfiguration.serviceTier)}</p>}
     {directoryError && <p role="alert">{directoryError}</p>}
     {configurationError && <p role="alert">{configurationError}</p>}
+    {configurationOpen && <NativeAgentDiagnostics adapter={adapter} />}
     </details>
   </section>
 }

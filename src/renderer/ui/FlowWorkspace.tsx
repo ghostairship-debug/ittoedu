@@ -24,6 +24,9 @@ import { findComponentPackageSource, mountPublishedComponent } from '../../playe
 import { authoringObservationDraftToken } from '../authoring/generation/authoringObservation'
 import type { FlowDocumentDraft } from '../store/slices/flowAuthoringSlice'
 import { resolveFlowMediaLayoutProjection, FLOW_MEDIA_INLINE_SIZE_CUSTOM_PROPERTY, FLOW_MEDIA_INLINE_SIZE_REFERENCE } from '../../shared/flowMediaLayout'
+import type { DocumentContextSelection } from '../../shared/document/ports'
+import { flowContextSelectionIntent, resolveFlowContextSelection } from '../course/flowContextSelection'
+import { requestContextualCourseCommand } from './chat/contextualCourseCommand'
 
 export interface FlowWorkspaceProps {
   readonly toolbarContainer?: HTMLElement | null
@@ -70,6 +73,14 @@ export function FlowWorkspace({ view, sessionToken, assets, selection, textEdit,
     if (!receipt.ok) setError(receipt.reason ?? '正文操作未提交')
     else setError(null)
     return receipt
+  }
+  const contextualCommandIssue = (target: DocumentContextSelection): string | null => {
+    try {
+      const currentView = current.current.view
+      if (target.revision !== String(currentView.revision) || target.mode !== 'layout' || !target.selection) throw new Error('请在排版视图重新选择当前内容后发送。')
+      resolveFlowContextSelection(currentView.blocks.filter(block => block.parentId === null).map(block => structuredClone(block.block) as FlowBlock), currentView.revision, target.selection)
+      return null
+    } catch (error) { return error instanceof Error ? error.message : String(error) }
   }
   useEffect(() => {
     const selected = new Set(readOnly ? [] : selection?.selectedBlockIds ?? [])
@@ -133,12 +144,22 @@ export function FlowWorkspace({ view, sessionToken, assets, selection, textEdit,
             onDraft={(source, diagnostics) => { if (diagnostics.length) { run({ kind: 'update-document-draft', source, diagnostics, composing: false }); setError('源文尚有错误，当前草稿不能提交到工程') } else run({ kind: 'clear-document-draft' }) }}
             onCompositionChange={(composing, source) => { if (composing) run({ kind: 'update-document-draft', source, diagnostics: [], composing }); else if (!editorRef.current?.flush().diagnostics.length) run({ kind: 'clear-document-draft' }) }}
             onUndo={() => run({ kind: 'document-history', direction: 'undo' })} onRedo={() => run({ kind: 'document-history', direction: 'redo' })}
+            onContextualTargetChange={target => {
+              if (target?.mode === 'source') {
+                const blockId = current.current.view.activeBlockId
+                if (blockId) run({ kind: 'select-blocks', blockIds: [blockId], focus: 'text', textRange: null, documentSelectionIssue: 'Flow 源文选区暂不支持 AI 局部修改，请切回排版选择内容。' }, blockId)
+              }
+            }}
+            contextualCommandIssue={contextualCommandIssue}
+            onContextualCommand={(instruction, target) => {
+              const issue = contextualCommandIssue(target)
+              if (issue) throw new Error(issue)
+              requestContextualCourseCommand({ instruction, projectId: current.current.view.projectId, sessionToken: current.current.sessionToken, documentSelection: structuredClone(target.selection!) })
+            }}
             onSelection={next => {
-              if (next?.kind === 'object' || next?.kind === 'cells') { const blockId = next.kind === 'object' ? next.blockId : next.tableId; run({ kind: 'select-blocks', blockIds: [blockId], focus: 'block' }, blockId); return }
-              if (next?.kind !== 'text') return
-              const slot = next.head.slot
-              run({ kind: 'select-blocks', blockIds: [next.head.blockId], focus: 'text', textRange: { blockId: next.head.blockId, start: next.anchor.offset, end: next.head.offset,
-                ...(slot.kind === 'item' ? { listItemId: slot.itemId } : {}), ...(slot.kind === 'cell' ? { tableRowId: slot.rowId, tableColumnId: slot.columnId } : {}) } }, next.head.blockId)
+              if (!next) { run({ kind: 'clear-selection' }); return }
+              const intent = flowContextSelectionIntent(next)
+              run(intent, intent.blockIds[0])
             }}
             renderObject={(block, host) => {
               const root = createRoot(host)

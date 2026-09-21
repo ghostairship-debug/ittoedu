@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { readableChatError } from './readableChatStatus'
 import type { z } from 'zod'
 import type { aiQuestionSchema } from '../../../shared/localAgentInteraction'
@@ -17,12 +17,32 @@ export function readablePermissionTitle(title: string): string {
   return title
 }
 const permissionOption = (option: string) => ({ 'Allow once': '仅允许这次', 'Always allow': '按原生规则持续允许', Reject: '拒绝', Allow: '允许' })[option] ?? option
+const announcementStyle = {
+  position: 'absolute' as const,
+  width: 1,
+  height: 1,
+  padding: 0,
+  margin: -1,
+  overflow: 'hidden',
+  clipPath: 'inset(50%)',
+  whiteSpace: 'nowrap' as const,
+  border: 0,
+}
 export function NativeAgentQuestion({ question, onAnswer }: { question: Question; onAnswer(input: AiUserInput): Promise<void> }) {
   const [answers, setAnswers] = useState<Record<string, string[]>>({})
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
+  const [announcement, setAnnouncement] = useState('')
   const permission = question.purpose === 'permission'
+  useEffect(() => {
+    setAnnouncement('')
+    const timer = window.setTimeout(() => setAnnouncement(permission
+      ? '创作助手请求授权，请在对话中查看并选择是否允许。'
+      : '创作助手有一个新问题，请在对话中查看并回答。'), 0)
+    return () => window.clearTimeout(timer)
+  }, [question.questionId, permission])
   return <section className="native-agent-question" aria-label={permission ? 'CLI 授权请求' : 'CLI 提问'}>
+    <p role="status" aria-live="polite" aria-atomic="true" style={announcementStyle}>{announcement}</p>
     <h3>{permission ? 'CLI 请求授权' : '需要你的回答'}</h3>
     <form onSubmit={event => {
       event.preventDefault()

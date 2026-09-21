@@ -197,6 +197,8 @@ export type FlowAuthoringIntent = (
       readonly blockIds: readonly string[]
       readonly focus?: 'block' | 'text'
       readonly textRange?: FlowEditorSelection['textRange']
+      readonly documentSelectionIssue?: string
+      readonly documentSelection?: FlowEditorSelection['documentSelection']
     }
   | { readonly kind: 'select-overlay'; readonly layerItemIds: readonly string[] }
   | {
@@ -368,6 +370,8 @@ function sameFlowEditorSelection(
     && left.authoringScope === right.authoringScope
     && left.focus === right.focus
     && left.selectedBlockId === right.selectedBlockId
+    && left.documentSelectionIssue === right.documentSelectionIssue
+    && JSON.stringify(left.documentSelection) === JSON.stringify(right.documentSelection)
     && sameRange
     && left.authoringAddress === right.authoringAddress
     && left.selectedBlockIds.length === right.selectedBlockIds.length
@@ -613,6 +617,8 @@ function flowBlockSelection(
   options: {
     focus?: 'block' | 'text'
     textRange?: FlowEditorSelection['textRange']
+    documentSelectionIssue?: string
+    documentSelection?: FlowEditorSelection['documentSelection']
   } = {},
 ): FlowEditorSelection {
   return selectFlowEditorBlocks(document, target.locationId, blockIds, options)
@@ -1055,6 +1061,8 @@ export function createFlowAuthoringSlice(
           const selection = flowBlockSelection(document, target, intent.blockIds, {
             ...(intent.focus ? { focus: intent.focus } : {}),
             ...(intent.textRange !== undefined ? { textRange: intent.textRange } : {}),
+            ...(intent.documentSelectionIssue ? { documentSelectionIssue: intent.documentSelectionIssue } : {}),
+            ...(intent.documentSelection ? { documentSelection: intent.documentSelection } : {}),
           })
           return persistIntentResult({
             ok: true,

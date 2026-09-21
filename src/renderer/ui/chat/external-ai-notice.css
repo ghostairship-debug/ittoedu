@@ -1,0 +1,47 @@
+.external-ai-notice__backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgb(8 12 20 / 66%);
+}
+
+.external-ai-notice {
+  width: min(680px, 100%);
+  max-height: min(760px, calc(100vh - 48px));
+  overflow: auto;
+  box-sizing: border-box;
+  padding: 24px;
+  color: var(--text-primary);
+  background: var(--panel-bg);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: 0 20px 60px rgb(0 0 0 / 42%);
+}
+
+.external-ai-notice h2,
+.external-ai-notice h3,
+.external-ai-notice p { margin-top: 0; }
+.external-ai-notice h2 { margin-bottom: 18px; font-size: 22px; }
+.external-ai-notice h3 { margin-bottom: 8px; font-size: 14px; }
+.external-ai-notice__eyebrow { margin-bottom: 6px; color: var(--text-muted); font-size: 12px; }
+.external-ai-notice__body { line-height: 1.65; }
+.external-ai-notice__body section { margin: 18px 0; padding: 14px; background: var(--app-bg); border: 1px solid var(--border); border-radius: 9px; }
+.external-ai-notice__body ul { max-height: 180px; margin: 0; padding-left: 22px; overflow: auto; overflow-wrap: anywhere; }
+.external-ai-notice__empty { margin-bottom: 0; color: var(--text-muted); }
+.external-ai-notice__error { padding: 10px 12px; color: #ffd4ce; background: rgb(130 34 25 / 28%); border-radius: 7px; }
+.external-ai-notice footer { display: flex; justify-content: flex-end; gap: 10px; margin-top: 22px; }
+.external-ai-notice button { padding: 8px 14px; color: var(--text-primary); background: var(--app-bg); border: 1px solid var(--border); border-radius: 6px; }
+.external-ai-notice button:not(:disabled):hover { border-color: var(--accent); }
+.external-ai-notice button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.external-ai-notice button:disabled { opacity: .6; }
+.external-ai-notice button.external-ai-notice__primary { color: var(--button-primary-text, #fff); background: var(--accent); border-color: var(--accent); }
+
+@media (max-width: 640px) {
+  .external-ai-notice__backdrop { padding: 12px; }
+  .external-ai-notice { max-height: calc(100vh - 24px); padding: 18px; }
+  .external-ai-notice footer { flex-direction: column-reverse; }
+  .external-ai-notice button { width: 100%; }
+}

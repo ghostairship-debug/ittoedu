@@ -86,6 +86,8 @@
 .chat-composer-controls > label.chat-cli-picker { display: flex; align-items: center; gap: 6px; margin: 0; flex-shrink: 0; }
 .chat-composer-controls .native-agent-configuration { flex: 1; min-width: 0; max-height: none; overflow: visible; }
 .chat-composer-controls .native-agent-configuration > details > summary { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.native-agent-configuration > details[open] { max-height: min(48vh, 420px); overflow: auto; scrollbar-gutter: stable; }
+.native-agent-configuration > details[open] > summary { position: sticky; top: 0; z-index: 1; background: var(--panel-bg); }
 .course-chat button[type=submit], .chat-send-actions > button:first-child { background: var(--accent); color: var(--button-primary-text, #fff); padding: 7px 14px; }
 .course-chat button:disabled { opacity: .5; cursor: default; }
 

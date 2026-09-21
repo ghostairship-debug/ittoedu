@@ -1,3 +1,4 @@
+import { flowDocumentSelectionSchema, flowSelectionContextTarget } from '../../course/flowContextSelection'
 import type { GenerationCommitReceipt, GenerationRequest } from '../../../shared/generationContract'
 import { generationRequestSchema, DEFAULT_GENERATION_TASK_DURATION_MS, MAX_GENERATION_TASK_DURATION_MS } from '../../../shared/generationContract'
 import { z } from 'zod'
@@ -21,6 +22,7 @@ type Execution = NonNullable<GenerationRequest['execution']>
 const recoveryFlowSelection = z.object({
   locationId: z.string(), surfaceId: z.string(), authoringScope: z.enum(['page', 'global']), focus: z.enum(['idle', 'text', 'block', 'overlay']),
   selectedBlockId: z.string().nullable(), selectedBlockIds: z.array(z.string()), selectedOverlayIds: z.array(z.string()), authoringAddress: z.string(),
+  documentSelection: flowDocumentSelectionSchema.optional(), documentSelectionIssue: z.string().optional(),
   textRange: z.object({ blockId: z.string(), start: z.number().int().nonnegative(), end: z.number().int().nonnegative(),
     listItemId: z.string().optional(), tableRowId: z.string().optional(), tableColumnId: z.string().optional() }).strict().nullable(),
 }).strict()
@@ -220,7 +222,9 @@ export function createCourseChatObservation(api: DesktopAPI, owner: { projectId:
     if (projection.surfaceType !== 'flow') return false
     const current = state.flowSession?.selection, frozen = target.flowSelection
     if (!current || !frozen) return current !== frozen
-    return current.locationId !== frozen.locationId || current.surfaceId !== frozen.surfaceId || current.authoringScope !== frozen.authoringScope
+    return current.documentSelectionIssue !== frozen.documentSelectionIssue
+      || JSON.stringify(current.documentSelection) !== JSON.stringify(frozen.documentSelection)
+      || current.locationId !== frozen.locationId || current.surfaceId !== frozen.surfaceId || current.authoringScope !== frozen.authoringScope
       || current.focus !== frozen.focus || current.selectedBlockId !== frozen.selectedBlockId || current.authoringAddress !== frozen.authoringAddress
       || !sameIds(current.selectedBlockIds, frozen.selectedBlockIds) || !sameIds(current.selectedOverlayIds, frozen.selectedOverlayIds)
       || current.textRange?.blockId !== frozen.textRange?.blockId || current.textRange?.start !== frozen.textRange?.start
@@ -256,6 +260,10 @@ export function createCourseChatObservation(api: DesktopAPI, owner: { projectId:
       if (disposed) throw stopped()
       const current = snapshot(), state = useEditorStore.getState(), session = state.courseAuthoringSession!
       const projection = selectEffectiveLayerProjection(state) ?? projectEffectiveLayers({ project: current.document, locationId: session.token.locationId })
+      if (projection.surfaceType === 'flow' && state.flowSession) {
+        const surface = current.document.surfaces.find(surface => surface.id === projection.surfaceId)
+        if (surface?.type === 'flow') flowSelectionContextTarget(surface.blocks, current.document.revision, state.flowSession.selection)
+      }
       const target: CourseChatTarget = Object.freeze({ anchorId: crypto.randomUUID(), locationId: projection.locationId,
         surfaceId: projection.surfaceId, stateId: projection.stateId, owner: projection.scope.owner,
         selectedIds: Object.freeze([...session.itemIds]), sessionToken: Object.freeze({ ...session.token }),

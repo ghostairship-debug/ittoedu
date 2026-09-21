@@ -4,6 +4,7 @@ import { documentBlockSchema, documentContentSchema, documentTextSlots, document
 import { describeDocumentMath, DocumentMathError, parseDocumentMath } from './math'
 import { documentObjectSchema, emptyDocumentResources, resourcesForBlock, validateDocumentResources, type DocumentResources } from './resources'
 import type { DocumentDiagnostic } from './ports'
+import { mapMarkdownBlock, type MarkdownSourceMap } from './markdownSourceMap'
 
 export interface MarkdownDocument { content: DocumentContent; resources: DocumentResources }
 export interface MarkdownOptions {
@@ -13,7 +14,7 @@ export interface MarkdownOptions {
   resolveImage?: (href: string) => { assetId: string; source: DocumentResources['assets'][number]['source'] }
 }
 export type MarkdownParseResult =
-  | { status: 'valid'; document: MarkdownDocument; source: string; diagnostics: [] }
+  | { status: 'valid'; document: MarkdownDocument; source: string; sourceMap: MarkdownSourceMap; diagnostics: [] }
   | { status: 'invalid'; source: string; diagnostics: DocumentDiagnostic[] }
 class SourceError extends Error { constructor(message: string, readonly fragment: string, readonly absoluteOffset?: number) { super(message) } }
 function error(message: string, fragment: string): never { throw new SourceError(message, fragment) }
@@ -233,16 +234,24 @@ export function parseDocumentMarkdown(source: string, options: MarkdownOptions):
       return { id: attrs.id, source: src.slice(0, match.index) + src.slice(match.index + match[0].length) }
     }
     const blocks: DocumentBlock[] = []
+    const sourceMap: MarkdownSourceMap = { blocks: [] }
     let pending: Record<string, unknown> | undefined
+    let pendingStart: number | undefined
+    let cursor = 0
     const tokens = lexer.lexer(source)
     links = tokens.links
     for (const token of tokens) {
-      location = Math.max(location, source.indexOf(token.raw, location))
+      // Advance every consumed token, including metadata and whitespace. Searching
+      // again can match a visible word inside the preceding identity marker.
+      location = cursor
+      if (source.slice(cursor, cursor + token.raw.length) !== token.raw) error('源文块位置无法对应，请检查格式', token.raw)
+      cursor += token.raw.length
       const t = token as Tokens.Generic
       if (token.type === 'space' || token.type === 'def') continue
       if (token.type === 'cwMeta') {
         if (pending) error('一个块只能有一个元数据标记', token.raw)
         pending = t.attrs as Record<string, unknown>
+        pendingStart = location
         continue
       }
       const meta = pending ?? {}; pending = undefined
@@ -310,13 +319,24 @@ export function parseDocumentMarkdown(source: string, options: MarkdownOptions):
         case 'hr': value = { ...common, type: 'divider' }; break
         default: error(`未知源文块 ${token.type}，原文已保留`, token.raw)
       }
-      blocks.push(documentBlockSchema.parse(value))
+      const block = documentBlockSchema.parse(value)
+      blocks.push(block)
+      sourceMap.blocks.push({ ...mapMarkdownBlock(token, block, location, lexInline), from: pendingStart ?? location })
+      pendingStart = undefined
       location += token.raw.length
     }
     if (pending) error('块标记后缺少内容', '<!--cw:block')
     const content = documentContentSchema.parse({ blocks })
     validateDocumentResources(blocks, resources, options.target)
-    return { status: 'valid', source: originalSource, document: { content, resources }, diagnostics: [] }
+    // Source editors use the original UTF-16 indices, including CRLF pairs.
+    const offsets: number[] = []; let originalOffset = 0
+    for (let i = 0; i < source.length; i++) { offsets.push(originalOffset); if (originalSource[originalOffset] === '\r' && originalSource[originalOffset + 1] === '\n') originalOffset++; originalOffset++ }
+    offsets.push(originalSource.length)
+    for (const block of sourceMap.blocks) {
+      block.from = offsets[block.from]!; block.to = offsets[block.to]!
+      for (const slot of block.slots) for (const unit of slot.units) { unit.from = offsets[unit.from]!; unit.to = offsets[unit.to]! }
+    }
+    return { status: 'valid', source: originalSource, document: { content, resources }, sourceMap, diagnostics: [] }
   } catch (e) {
     const found = e instanceof SourceError ? source.indexOf(e.fragment, Math.min(location, source.length)) : -1
     const normalizedOffset = Math.min(source.length, e instanceof SourceError && e.absoluteOffset !== undefined ? e.absoluteOffset : found >= 0 ? found : location)

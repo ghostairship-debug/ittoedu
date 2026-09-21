@@ -9,7 +9,7 @@ export interface MaterialFragment {
 export interface MaterialExtraction {
   version: 1
   extractorVersion: string
-  format: 'pdf' | 'docx' | 'pptx' | 'text'
+  format: 'pdf' | 'docx' | 'pptx' | 'text' | 'image'
   fragments: MaterialFragment[]
   assets: { id: string; mime: string; bytes: Uint8Array }[]
   gaps: { locator: MaterialFragment['locator']; reason: string; resolution?: { kind: 'read-page-image'; assetId: string } }[]

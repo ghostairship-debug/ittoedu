@@ -64,7 +64,7 @@ export function LessonMaterialBrowser(props: LessonMaterialBrowserProps) {
           const next = await currentApi.list()
           if (token === generation.current) setRecords(next)
         })
-      }}>添加材料（PDF / DOCX / PPTX / TXT / MD / CSV，可多选）</button>
+      }}>添加材料（PDF / DOCX / PPTX / 文本 / 图片，可多选）</button>
     {busy && <p role="status">正在读取材料…</p>}
     {error && <p role="alert">{error}</p>}
     {!records.length && !busy && <p>当前课例尚未添加材料。</p>}

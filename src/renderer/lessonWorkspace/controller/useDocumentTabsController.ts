@@ -2,7 +2,7 @@ import { useRef, useState } from 'react'
 import type { LocalAgentId } from '../../../shared/localAgentContract'
 import type { ConversationAgentWorkspace } from '../../../shared/workspaceIdentity'
 import type { LessonDocumentAiAPI } from '../../../shared/lessonDocumentAiTask'
-import type { DocumentFileRef, DocumentFileVersion } from '../../../shared/document/ports'
+import type { DocumentFileRef, DocumentFileVersion, ContextualEditTarget } from '../../../shared/document/ports'
 import { DocumentAiTaskController, type DocumentChatTarget } from '../../documentFiles/documentAiTaskController'
 import type { LessonDocumentEditorHandle } from '../../documentFiles/LessonDocumentEditor'
 import type { RecoverableDocumentFilePort } from '../../documentFiles/documentFileSession'
@@ -33,6 +33,8 @@ export interface DocumentTabsController {
   stopDocumentEdit(): Promise<void>
   stopAllAiEdits(): Promise<void>
   activeDocumentTarget(): DocumentChatTarget | undefined
+  selectionChanged(path: string): void
+  sendContextualCommand(path: string, instruction: string, target: ContextualEditTarget): void
   editDocument(filename: string, scope: ConversationAgentWorkspace, adapter: LocalAgentId, instruction: string, onApplied?: (ref: DocumentFileRef, version: DocumentFileVersion) => Promise<void>): Promise<void>
 }
 
@@ -49,6 +51,14 @@ export function useDocumentTabsController({ documentPort, documentAiOperation, s
   const waitingEditors = useRef(new Map<string, (editor: LessonDocumentEditorHandle) => void>())
   const documentRepair = useRef<DocumentAiTaskController | null>(null)
   const documentRepairEpoch = useRef(0)
+  const [, updateSelection] = useState(0)
+  const commandListeners = useRef(new Map<string, (instruction: string, target: ContextualEditTarget) => void>())
+  function selectionChanged(path: string) { if (path === activeTab) updateSelection(value => value + 1) }
+  function sendContextualCommand(path: string, instruction: string, target: ContextualEditTarget) {
+    const listener = commandListeners.current.get(path)
+    if (!listener) throw new Error('请先打开当前目录的创作助手，再发送编辑要求。')
+    listener(instruction, target)
+  }
 
   async function stopDocumentEdit() {
     ++documentRepairEpoch.current
@@ -134,9 +144,14 @@ export function useDocumentTabsController({ documentPort, documentAiOperation, s
     setTabs(current => current.some(tab => tab.path === path && tab.dirty !== dirty)
       ? current.map(tab => tab.path === path ? { ...tab, dirty } : tab) : current)
   }
-  function activeDocumentTarget() {
+  function activeDocumentTarget(): DocumentChatTarget | undefined {
     const tab = tabs.find(item => item.path === activeTab && item.kind === 'document')
-    return tab ? { name: tab.name, getEditor: () => documents.current.get(tab.path) ?? null } : undefined
+    return tab ? {
+      name: tab.name,
+      getEditor: () => documents.current.get(tab.path) ?? null,
+      getContextualEditTarget: () => documents.current.get(tab.path)?.getContextualEditTarget() ?? null,
+      subscribeCommands: listener => { commandListeners.current.set(tab.path, listener); return () => { if (commandListeners.current.get(tab.path) === listener) commandListeners.current.delete(tab.path) } },
+    } : undefined
   }
   async function editDocument(filename: string, scope: ConversationAgentWorkspace, adapter: LocalAgentId, instruction: string, onApplied?: (ref: DocumentFileRef, version: DocumentFileVersion) => Promise<void>) {
     const repairEpoch = ++documentRepairEpoch.current
@@ -158,12 +173,12 @@ export function useDocumentTabsController({ documentPort, documentAiOperation, s
     if (scopeRef.current !== expectedScope) throw new Error('课例对话已切换，请在当前课例重新发起修改')
     const controller = new DocumentAiTaskController(documentAiOperation, scope, message => editor.session.setAiMessage(message))
     documentRepair.current = controller
-    await controller.start({ name: filename, getEditor: () => editor }, adapter, instruction, async (ref, version) => {
+    await controller.start({ name: filename, scope: 'document', getEditor: () => editor }, adapter, instruction, async (ref, version) => {
       if (repairEpoch !== documentRepairEpoch.current || scopeRef.current !== expectedScope) throw new Error('课例对话已切换或修复已停止，原阶段任务未继续')
       await onApplied?.(ref, version)
     })
   }
-  return { tabs, activeTab, setActiveTab, openTab, closeTab, removeTab, registerEditor, editorRef, updateDirty, flushAll, preserveAll, closeAll, disposeDocuments, stopDocumentEdit, stopAllAiEdits, activeDocumentTarget, editDocument }
+  return { tabs, activeTab, setActiveTab, openTab, closeTab, removeTab, registerEditor, editorRef, updateDirty, flushAll, preserveAll, closeAll, disposeDocuments, stopDocumentEdit, stopAllAiEdits, activeDocumentTarget, editDocument, selectionChanged, sendContextualCommand }
 }
 
 function normalized(value: string) { return value.replace(/\\/g, '/').toLowerCase() }

@@ -1,12 +1,20 @@
 import { describe, expect, it, vi } from 'vitest'
 import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate'
-import { extractOfficeMaterial } from '../../src/renderer/project/materialExtraction'
+import { extractMaterial, extractOfficeMaterial } from '../../src/renderer/project/materialExtraction'
 import { diagramPng, MATERIAL_TEXT, r19LessonMaterials } from '../fixtures/r19LessonMaterials'
 import { parallelCircuitPng, r19ParallelLessonMaterials } from '../fixtures/r19ParallelLessonMaterials'
 
 vi.mock('pdfjs-dist/build/pdf.worker.min.mjs?url', () => ({ default: '/pdf.worker.min.mjs' }))
 
 describe('Office material picture geometry', () => {
+  it('reads an independent PNG as a visual fragment with its source, without inventing OCR text', async () => {
+    const output = await extractMaterial(diagramPng(), '教材图示.png')
+    expect(output.format).toBe('image')
+    expect(output.fragments).toEqual([{ id: 'fragment-1', kind: 'image', assetId: 'original.png', locator: { part: '教材图示.png', page: 1 } }])
+    expect(output.assets[0]?.bytes).toEqual(diagramPng())
+    const broken = diagramPng().slice(0, 30)
+    await expect(extractMaterial(broken, '坏图.png')).rejects.toThrow()
+  })
   it('extracts the manual lesson parallel-branch evidence and its actual circuit diagram without gaps', () => {
     const fixture = r19ParallelLessonMaterials().find(item => item.format === 'pptx')!
     const output = extractOfficeMaterial(fixture.bytes, 'pptx')

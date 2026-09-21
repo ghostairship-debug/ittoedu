@@ -1,3 +1,4 @@
+import { assertFlowSelectionCandidate } from './flowSelectionCandidate'
 import { generationCandidateSchema, generationRequestSchema, generationInputReferenceSchema, generationCommitReceiptSchema, GenerationCandidatePreparationError, generationFailureDiagnostics, generationRecovery, type GenerationFailure, type GenerationCandidate, type GenerationRequest, type GenerationCommitReceipt } from '../../../shared/generationContract'
 import { workspaceIdentityKey, type WorkspaceIdentityV1 } from '../../../shared/workspaceIdentity'
 import { authoringToolDestinationV1Schema, authoringToolTargetWireV1Schema, type AuthoringToolDestinationV1, type AuthoringToolReceiptV1 } from '../../../shared/authoringToolContract'
@@ -157,6 +158,7 @@ export function createGenerationCandidateCoordinator(port: GenerationCommitPort)
       prepared.clear()
       const initial = structuredClone(port.readDocument())
       const initialResources = structuredClone(port.readResources())
+      assertFlowSelectionCandidate(request, candidate, initial)
       const replacementPlan = replacementDependencies(candidate)
       let state = { document: initial, resources: initialResources }
       const plans: EditorTransactionStep[] = []

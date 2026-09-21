@@ -24,8 +24,16 @@ describe('neutral CLI candidate profiles', () => {
     })
     expect(profiles.every(profile => profile.capability.liveProjectTools === false)).toBe(true)
     expect(courseAgentSkills).toHaveLength(7)
+    expect(profiles[0]?.skills.map(skill => skill.name)).toEqual(expect.arrayContaining([
+      'courseware-session', 'orchestrate-courseware', 'build-courseware-project',
+    ]))
+    expect(profiles[0]?.skills.every(skill => path.isAbsolute(skill.path))).toBe(true)
+    expect(profiles[0]?.taskInstruction).toContain('不必读取 courseware-session')
+    expect(profiles[0]?.taskInstruction).toContain('普通 Markdown 的局部改字、改写或选区修订不需要课件方法')
     const build = createGenerationProfile('codex', { ...request, purpose: 'whole-course' })
-    expect(build.skills.map(skill => skill.name)).toContain('course-build')
+    expect(build.skills.map(skill => skill.name)).toEqual(expect.arrayContaining([
+      'courseware-session', 'orchestrate-courseware', 'build-courseware-project', 'course-build',
+    ]))
     expect(() => createGenerationProfile('claude', request, 'live-mcp')).toThrow('未开放')
     expect(() => createGenerationProfile('codex', request, 'session-staging-file')).toThrow('不支持')
   })

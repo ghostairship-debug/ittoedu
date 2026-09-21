@@ -7,7 +7,7 @@ import { stripTypeScriptTypes } from 'node:module'
 import { build } from 'esbuild'
 import { describeAuthoringToolDiscovery } from '../src/renderer/authoring/tools/authoringToolFacade'
 import { describeGenerationSemanticTools, generationProjectDocumentWireInputSchema } from '../src/shared/generationContract'
-import { courseAgentSkills, courseAgentSkillMarkdown } from '../src/shared/courseAgentSkills'
+import { courseAgentMethodSkills, courseAgentProductSkills, courseAgentSessionSkillMarkdown, courseAgentSkillMarkdown, courseAgentSkillSummary } from '../src/shared/courseAgentSkills'
 import { courseAgentCapabilityDiskIndex, courseAgentCapabilityQueryHelp, type CourseAgentCapabilityData, type CourseAgentCapabilityEntry } from '../src/shared/courseAgentCapabilities'
 import packageJson from '../package.json'
 import { importComponentPackage } from '../src/renderer/components/importComponentPackage'
@@ -940,7 +940,7 @@ async function addDiscoveryArtifacts(projectRoot: string, files: Map<string, str
     entries.push({ id: guideId, kind: 'reference', label: `${protocol.id} 编写指南`, path: guideLocation, scopes: protocol.scopes,
       carriers: protocol.carriers, summary: '正式协议同源的完整Markdown指南，保留自然换行供原生Read按需读取。' })
   }
-  for (const skillName of ['orchestrate-courseware', 'build-courseware-project']) {
+  for (const { name: skillName } of courseAgentMethodSkills) {
     const sourceRoot = path.join(projectRoot, '.agents', 'skills', skillName)
     const sourcePaths = ['SKILL.md', ...(await fs.readdir(path.join(sourceRoot, 'references'))).filter(name => name.endsWith('.md')).map(name => `references/${name}`)]
     for (const sourcePath of sourcePaths) {
@@ -955,10 +955,11 @@ async function addDiscoveryArtifacts(projectRoot: string, files: Map<string, str
       })
     }
   }
-  for (const skill of courseAgentSkills) {
+  for (const skill of courseAgentProductSkills) {
     const location = `skills/${skill.name}/SKILL.md`
-    resources.set(location, courseAgentSkillMarkdown(skill))
-    entries.push({ id: `skill:${skill.name}`, kind: 'skill', label: skill.name, path: location, scopes: allScopes, carriers: allCarriers, summary: skill.body.split('。')[0]! })
+    const text = skill.name === 'courseware-session' ? courseAgentSessionSkillMarkdown() : courseAgentSkillMarkdown(skill)
+    resources.set(location, text)
+    entries.push({ id: `skill:${skill.name}`, kind: 'skill', label: skill.name, path: location, scopes: allScopes, carriers: allCarriers, summary: courseAgentSkillSummary(skill) })
   }
   resources.set('query-core.mjs', stripTypeScriptTypes(await fs.readFile(path.join(projectRoot, 'src/shared/courseAgentCapabilities.ts'), 'utf8')).split('\n').map(line => line.trimEnd()).join('\n'))
   const helper = await build({ entryPoints: [path.join(projectRoot, 'scripts/candidate-helper.ts')], bundle: true, write: false,

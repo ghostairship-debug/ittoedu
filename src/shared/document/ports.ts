@@ -13,6 +13,25 @@ export type DocumentSelection = { revision: string } & (
   | { kind: 'object'; blockId: string }
   | { kind: 'cells'; tableId: string; anchor: { rowId: string; columnId: string }; head: { rowId: string; columnId: string } }
 )
+/** Source offsets are UTF-16 indices; logical text offsets remain code points. */
+export interface DocumentSourceRange { from: number; to: number; before: string }
+/** One observation from the editor, without file ownership or persistence. */
+export interface DocumentContextSelection {
+  mode: 'layout' | 'source'
+  revision: string
+  source: string
+  selection: DocumentSelection | null
+  ranges: DocumentSourceRange[] | null
+  label: string
+  message?: string
+}
+/** A file target frozen for an asynchronous request; never persisted in a project. */
+export interface ContextualEditTarget extends DocumentContextSelection {
+  ref: DocumentFileRef
+  baseVersion: DocumentFileVersion
+  epoch: number
+  scope: 'selection' | 'document'
+}
 export interface DocumentDiagnostic { message: string; offset: number; endOffset: number; line: number; column: number; path?: PropertyKey[] }
 /** F04：课例内文档（lesson）或工作空间真实文件（file，当前为根目录/项目内 MD）。 */
 export type DocumentFileRef =

@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "semanticVersion": "3e4dbaf2e955a8aa01b1bd6fb42a947aec3d9a33bfd5be2f5a8400d0ad52527e",
+  "semanticVersion": "a32849a339d03de1c28a5257ccd2aed4346b17a56ae6f18352470be3b3c3e90b",
   "entries": [
     {
       "id": "asset.font.import",
@@ -557,7 +557,7 @@
           ]
         }
       ],
-      "summary": "新Flow默认fluid，沿实际容器排版；已有Flow保留其layout。普通标题、正文、图片和互动放正文block以自然占位，不用viewport绝对文字替代。insert使用create parent:flow-body，block只省略宿主生成的id。修改标题、段落或引用块优先edit的content.inlines/textStyle/textAlign/lineSpacing；公式用edit.formula的latex和accessibleText，保留formulaId；图片用edit.image.assetId，保留正文布局、说明和块身份。常规图片应用优先media.apply。未指定排版、富文本和元数据保留。replace/delete/move使用Flow block update target；replace必须保留id和类型。完整载体替换使用selection.replace。",
+      "summary": "新Flow默认fluid，沿实际容器排版；已有Flow保留其layout。普通标题、正文、图片和互动放正文block以自然占位，不用viewport绝对文字替代。insert使用create parent:flow-body，block只省略宿主生成的id。精确正文选区使用edit.textRange={slot,start,end}，slot支持field/content/citation/caption/title/body、item、header、cell，start/end按Unicode码点且公式占1；content.inlines只替换该范围，textStyle只设置该范围。整块修改标题、段落或引用块用edit的content.inlines/textStyle/textAlign/lineSpacing；公式用edit.formula的latex和accessibleText，保留formulaId；图片用edit.image.assetId，保留正文布局、说明和块身份。常规图片应用优先media.apply。未指定排版、富文本和元数据保留。replace/delete/move使用Flow block update target；replace必须保留id和类型。完整载体替换使用selection.replace。",
       "dependencies": []
     },
     {
@@ -1517,6 +1517,30 @@
       "summary": "输入：教学主题和明确引用的材料"
     },
     {
+      "id": "skill:courseware-session",
+      "kind": "skill",
+      "label": "courseware-session",
+      "path": "skills/courseware-session/SKILL.md",
+      "scopes": [
+        "slide:scene",
+        "slide:surface",
+        "slide:global",
+        "flow:surface",
+        "flow:global",
+        "spatial-2d:world",
+        "spatial-2d:surface",
+        "spatial-2d:global"
+      ],
+      "carriers": [
+        "native",
+        "recipe",
+        "existing-component",
+        "generated-component",
+        "runtime"
+      ],
+      "summary": "本轮课件会话的可选内置方法入口，按需读取完整方法、质量参考和精确能力卡。"
+    },
+    {
       "id": "skill:interaction-craft",
       "kind": "skill",
       "label": "interaction-craft",
@@ -1893,6 +1917,7 @@
     "skills/build-courseware-project/references/validation-boundaries.md",
     "skills/course-build/SKILL.md",
     "skills/course-design/SKILL.md",
+    "skills/courseware-session/SKILL.md",
     "skills/interaction-craft/SKILL.md",
     "skills/orchestrate-courseware/SKILL.md",
     "skills/orchestrate-courseware/references/interaction-design.md",

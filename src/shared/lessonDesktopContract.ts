@@ -1,6 +1,7 @@
 import type { OpenProjectFileResult } from './ipcTypes'
 import { z } from 'zod'
 import { conversationOwnerSchema, lessonIdentitySchema, lessonDocumentRoleSchema, lessonRelativePathSchema, type LessonWorkspace, type LessonConversation, type LessonProject } from './lessonWorkspace'
+import type { LocalAgentRecordUsage } from './localAgentRecordUsage'
 
 const directory = z.string().min(1).max(32767)
 /** F01：会话归属；缺省时按 lesson 字段（旧合同）处理。 */
@@ -21,6 +22,8 @@ export const lessonDesktopRequestSchema = z.discriminatedUnion('operation', [
   z.object({ operation: z.literal('create-project'), directory, name: z.string().trim().min(1).max(200), path: directory.optional() }).strict(),
   z.object({ operation: z.literal('remove-project'), directory, path: directory }).strict(),
   z.object({ operation: z.literal('search-conversations'), ...ownerRef, query: z.string().trim().min(1).max(500) }).strict()
+    .refine(value => value.owner || value.lesson, '缺少会话归属'),
+  z.object({ operation: z.literal('read-application-record-usage'), ...ownerRef }).strict()
     .refine(value => value.owner || value.lesson, '缺少会话归属'),
   z.object({ operation: z.literal('delete-all-application-records') }).strict(),
   z.object({ operation: z.literal('branch-conversation'), ...ownerRef, conversationId: z.uuid() }).strict()
@@ -50,6 +53,7 @@ export interface LessonDesktopResult {
   conversation?: LessonConversation
   conversations?: LessonConversation[]
   matches?: { conversationId: string; excerpt: string }[]
+  recordUsage?: LocalAgentRecordUsage
   damaged?: string[]
   opened?: boolean
   openError?: string

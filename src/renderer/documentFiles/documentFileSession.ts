@@ -1,7 +1,10 @@
 import type { DocumentAiEditRecord, DocumentEditRange, DocumentFilePort, DocumentFileRef, DocumentFileVersion, OpenDocumentResult } from '../../shared/document/ports'
-import { mergedDocumentSource, planDocumentSourceMerge, type DocumentConflictHunk, type DocumentSourceMerge } from './documentSourceMerge'
+import { documentSourceEdits, mergedDocumentSource, planDocumentSourceMerge, type DocumentConflictHunk, type DocumentSourceMerge, type SourceEdit } from './documentSourceMerge'
 import { documentRelativePathSchema } from '../../shared/document/resources'
 type PendingAttachment = { relativePath: string; bytes: Uint8Array }
+type AiApplyRequest = { baseVersion: DocumentFileVersion; epoch: number; operationId: string; edits: DocumentEditRange[] }
+type DocumentHistoryEntry = { before: string; after: string }
+let sessionEpoch = Date.now()
 
 export interface RecoverableDocumentFilePort extends DocumentFilePort {
   readAiRecords?(ref: DocumentFileRef): Promise<DocumentAiEditRecord[]>
@@ -17,6 +20,7 @@ export interface DocumentFileSessionState {
   aiRecords: DocumentAiEditRecord[]; aiMessage: string | null
   aiSuggestions: { id: string; edit: DocumentEditRange; baseSource: string }[]
   conflictHunks: DocumentConflictHunk[]
+  aiCandidate: { request: AiApplyRequest; source: string; baseSource: string; version: DocumentFileVersion } | null
 }
 /** Nonoverlapping edits on both sides merge; overlapping alternatives stay explicit. */
 export function mergeDocumentSources(base: string, local: string, remote: string): string | null {
@@ -24,10 +28,43 @@ export function mergeDocumentSources(base: string, local: string, remote: string
   return plan.conflicts.length ? null : mergedDocumentSource(plan)
 }
 
+function sourceBeforeAppliedRanges(source: string, edits: DocumentEditRange[]): string | null {
+  let restored = source
+  for (const edit of [...edits].sort((a, b) => b.from - a.from)) {
+    if (restored.slice(edit.from, edit.to) !== edit.after) return null
+    restored = restored.slice(0, edit.from) + edit.before + restored.slice(edit.to)
+  }
+  return restored
+}
+
+function historyEditOverlapsCurrent(edit: SourceEdit, change: SourceEdit) {
+  if (edit.from === edit.to) return change.from <= edit.from && change.to >= edit.from
+  if (change.from === change.to) return change.from > edit.from && change.from < edit.to
+  return change.from < edit.to && change.to > edit.from
+}
+
+/** Apply one history transform to the current draft using the FileOwner range-merge boundary semantics. */
+function mergeHistorySource(base: string, target: string, current: string): string | null {
+  const edits = documentSourceEdits(base, target)
+  const currentEdits = documentSourceEdits(base, current)
+  const located: SourceEdit[] = []
+  for (const edit of edits) {
+    if (currentEdits.some(change => historyEditOverlapsCurrent(edit, change))) return null
+    const from = edit.from + currentEdits.filter(change => change.to <= edit.from).reduce((shift, change) => shift + change.text.length - (change.to - change.from), 0)
+    if (current.slice(from, from + edit.to - edit.from) !== base.slice(edit.from, edit.to)) return null
+    located.push({ from, to: from + edit.to - edit.from, text: edit.text })
+  }
+  let source = current
+  for (const edit of located.sort((a, b) => b.from - a.from)) source = source.slice(0, edit.from) + edit.text + source.slice(edit.to)
+  return source
+}
+
 export class DocumentFileSession {
-  private state: DocumentFileSessionState = { source: '', disk: null, dirty: false, saving: false, composing: false, error: null, conflict: null, recovery: false, aiRecords: [], aiMessage: null, conflictHunks: [], aiSuggestions: [] }
+  readonly epoch = ++sessionEpoch
+  private state: DocumentFileSessionState = { source: '', disk: null, dirty: false, saving: false, composing: false, error: null, conflict: null, recovery: false, aiRecords: [], aiMessage: null, conflictHunks: [], aiSuggestions: [], aiCandidate: null }
   private aiTaskStops = new Set<() => Promise<void>>()
   private aiBaselines = new Map<number, string>()
+  private aiCandidateSettled: (() => void) | undefined
   registerAiTaskStop(stop: () => Promise<void>) { this.aiTaskStops.add(stop); return () => { this.aiTaskStops.delete(stop) } }
   private conflictPlan: DocumentSourceMerge | null = null
   private listeners = new Set<() => void>()
@@ -37,8 +74,8 @@ export class DocumentFileSession {
   private compositionWaiters: (() => void)[] = []
   private disposed = false
   private initialized = false
-  private undoStack: string[] = []
-  private redoStack: string[] = []
+  private undoStack: DocumentHistoryEntry[] = []
+  private redoStack: DocumentHistoryEntry[] = []
   private historyGroup: string | undefined
   private lastEdit = 0
   private pendingAttachments = new Map<string, Uint8Array>()
@@ -48,6 +85,17 @@ export class DocumentFileSession {
   setAiMessage(message: string) { if (!this.disposed) this.update({ aiMessage: message }) }
   subscribe = (listener: () => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener) } }
   private update(patch: Partial<DocumentFileSessionState>) { this.state = { ...this.state, ...patch }; for (const listener of this.listeners) listener() }
+  private clearAiCandidate(message?: string) {
+    const settle = this.aiCandidateSettled
+    this.aiCandidateSettled = undefined
+    if (this.state.aiCandidate || message !== undefined) this.update({ aiCandidate: null, ...(message === undefined ? {} : { aiMessage: message }) })
+    settle?.()
+  }
+  private invalidateCandidateForChange(message: string) {
+    if (!this.state.aiCandidate) return
+    this.clearAiCandidate(message)
+    void this.port.invalidateAiEdits?.(this.ref).catch(error => { if (!this.disposed) this.update({ aiMessage: `旧预览清理失败：${(error as Error).message}` }) })
+  }
   async open() {
     const disk = await this.port.openDocument(this.ref)
     const recovery = await this.port.readRecovery?.(this.ref)
@@ -68,7 +116,10 @@ export class DocumentFileSession {
   edit(source: string, historyGroup?: string) {
     if (!this.initialized || this.disposed || this.state.conflictHunks.length) return
     if (source === this.state.source) return
-    if (!historyGroup || historyGroup !== this.historyGroup || Date.now() - this.lastEdit > 800) this.undoStack.push(this.state.source)
+    this.invalidateCandidateForChange('预览后文档已改变，旧改动未应用，请重新发送。')
+    const grouped = historyGroup && historyGroup === this.historyGroup && Date.now() - this.lastEdit <= 800 && this.undoStack.at(-1)?.after === this.state.source
+    if (grouped) this.undoStack.at(-1)!.after = source
+    else this.undoStack.push({ before: this.state.source, after: source })
     this.historyGroup = historyGroup
     this.lastEdit = Date.now()
     this.redoStack = []
@@ -103,8 +154,9 @@ export class DocumentFileSession {
   }
   private observe(disk: OpenDocumentResult | null) {
     if (this.disposed) return
-    if (!disk) { this.conflictPlan = null; this.update({ conflict: 'deleted', dirty: true, conflictHunks: [] }); return }
+    if (!disk) { this.invalidateCandidateForChange('预览后文件已被删除，旧改动未应用。'); this.conflictPlan = null; this.update({ conflict: 'deleted', dirty: true, conflictHunks: [] }); return }
     if (JSON.stringify(disk.version) === JSON.stringify(this.state.disk?.version)) return
+    this.invalidateCandidateForChange('预览后磁盘文件已改变，旧改动未应用，请重新发送。')
     if (!this.state.dirty || disk.source === this.state.source) {
       this.conflictPlan = null; this.update({ disk, source: disk.source, dirty: this.pendingAttachments.size > 0, conflict: null, conflictHunks: [] }); return
     }
@@ -140,16 +192,22 @@ export class DocumentFileSession {
     return saved && this.state.dirty ? this.flush() : saved
   }
   undo() {
-    const source = this.undoStack.pop()
-    if (source === undefined) return
-    this.redoStack.push(this.state.source); this.historyGroup = undefined
-    this.update({ source, dirty: source !== this.state.disk?.source }); this.schedule()
+    const entry = this.undoStack.pop()
+    if (!entry) return
+    const source = mergeHistorySource(entry.after, entry.before, this.state.source)
+    if (source === null) { this.undoStack.push(entry); this.update({ error: '当前内容与待撤销修改重叠，未覆盖现有文字' }); return }
+    this.invalidateCandidateForChange('撤销后文档已改变，旧预览未应用，请重新发送。')
+    this.redoStack.push(entry); this.historyGroup = undefined
+    this.update({ source, dirty: source !== this.state.disk?.source || this.pendingAttachments.size > 0, error: null }); this.schedule()
   }
   redo() {
-    const source = this.redoStack.pop()
-    if (source === undefined) return
-    this.undoStack.push(this.state.source); this.historyGroup = undefined
-    this.update({ source, dirty: source !== this.state.disk?.source }); this.schedule()
+    const entry = this.redoStack.pop()
+    if (!entry) return
+    const source = mergeHistorySource(entry.before, entry.after, this.state.source)
+    if (source === null) { this.redoStack.push(entry); this.update({ error: '当前内容与待重做修改重叠，未覆盖现有文字' }); return }
+    this.invalidateCandidateForChange('重做后文档已改变，旧预览未应用，请重新发送。')
+    this.undoStack.push(entry); this.historyGroup = undefined
+    this.update({ source, dirty: source !== this.state.disk?.source || this.pendingAttachments.size > 0, error: null }); this.schedule()
   }
   async resolveConflict(choice: 'disk' | 'local' | 'recovery') {
     if (this.state.conflictHunks.length) return
@@ -200,14 +258,37 @@ export class DocumentFileSession {
     if (result.status === 'ready') this.aiBaselines.set(epoch, result.document.source)
     return result
   }
-  async applyAiEdit(request: { baseVersion: DocumentFileVersion; epoch: number; operationId: string; edits: DocumentEditRange[] }) {
+  previewAiEdit(request: AiApplyRequest, onSettled?: () => void) {
+    if (this.disposed || !this.state.disk) throw new Error('文档已经关闭。')
+    this.clearAiCandidate()
+    this.aiCandidateSettled = onSettled
+    this.update({ aiCandidate: { request: structuredClone(request), source: this.state.source, baseSource: this.aiBaselines.get(request.epoch) ?? this.state.source, version: structuredClone(this.state.disk.version) }, aiMessage: 'AI 改动已准备好，请查看后应用。' })
+  }
+  async acceptAiCandidate() {
+    const candidate = this.state.aiCandidate
+    if (!candidate) return
+    if (candidate.source !== this.state.source || JSON.stringify(candidate.version) !== JSON.stringify(this.state.disk?.version)) {
+      this.clearAiCandidate('预览后文档已改变，旧改动未应用，请重新发送。'); await this.invalidatePreparedAiEdits(); return
+    }
+    this.clearAiCandidate()
+    return this.applyAiEdit(candidate.request)
+  }
+  async dismissAiCandidate() { this.clearAiCandidate('已保留当前文档。'); await this.invalidatePreparedAiEdits() }
+  async applyAiEdit(request: AiApplyRequest) {
     if (this.disposed) return { status: 'failed' as const, message: '文档已关闭，旧修改不会应用' }
     if (!(await this.flush())) return { status: 'failed' as const, message: '请先处理当前稿保存或冲突' }
     const result = await this.port.applyAiEdit({ ...request, ref: this.ref })
     if ('conflicts' in result && result.conflicts.length) this.update({ aiSuggestions: [...this.state.aiSuggestions, ...result.conflicts.map((edit, index) => ({ id: `${request.operationId}:${index}`, edit, baseSource: this.aiBaselines.get(request.epoch) ?? this.state.source }))] })
     if (result.status === 'applied' || result.status === 'partial') {
       this.update({ aiRecords: [...this.state.aiRecords.filter(record => record.id !== result.record.id), result.record], aiMessage: result.status === 'partial' ? `已应用可合并修改，${result.conflicts.length} 处冲突保留建议` : 'AI 修改已保存' })
-      this.observe(await this.port.openDocument(this.ref))
+      const saved = await this.port.openDocument(this.ref)
+      this.observe(saved)
+      if (JSON.stringify(saved.version) === JSON.stringify(result.record.savedVersion)) {
+        const aiBefore = sourceBeforeAppliedRanges(saved.source, result.record.applied)
+        if (aiBefore !== null && aiBefore !== saved.source) {
+          this.undoStack.push({ before: aiBefore, after: saved.source }); this.redoStack = []; this.historyGroup = undefined
+        }
+      }
     } else this.update({ aiMessage: result.status === 'failed' ? result.message : `${result.conflicts.length} 处修改与当前稿冲突，未覆盖` })
     return result
   }
@@ -228,12 +309,14 @@ export class DocumentFileSession {
     this.dismissAiSuggestion(id); return true
   }
   async stopAiEdits() {
-    await this.port.invalidateAiEdits?.(this.ref)
-    await Promise.all([...this.aiTaskStops].map(stop => stop()))
+    this.clearAiCandidate()
+    const results = await Promise.allSettled([this.port.invalidateAiEdits?.(this.ref), ...[...this.aiTaskStops].map(stop => stop())])
+    const failure = results.find((result): result is PromiseRejectedResult => result.status === 'rejected')
     if (!this.disposed && this.state.disk) {
       try { this.observe(await this.port.openDocument(this.ref)) } catch { /* Save/close retains the existing draft and reports any write failure. */ }
     }
+    if (failure) throw failure.reason
   }
-  async invalidatePreparedAiEdits() { await this.port.invalidateAiEdits?.(this.ref) }
+  async invalidatePreparedAiEdits() { this.aiBaselines.clear(); this.clearAiCandidate(); await this.port.invalidateAiEdits?.(this.ref) }
   dispose(invalidate = true) { if (this.disposed) return; this.disposed = true; clearTimeout(this.timer); this.stopWatch?.(); if (invalidate) void this.stopAiEdits().catch(() => {}); for (const resolve of this.compositionWaiters.splice(0)) resolve(); this.listeners.clear() }
 }

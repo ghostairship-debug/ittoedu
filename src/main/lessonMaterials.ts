@@ -6,7 +6,7 @@ import { MATERIAL_EXTRACTION_LIMITS as limits, type MaterialExtraction, type Les
 
 const locator = z.object({ part: z.string().min(1).max(32767), page: z.number().int().positive().optional(), paragraph: z.number().int().positive().optional() }).strict()
 const fragment = z.object({ id: z.string().min(1).max(1024), kind: z.enum(['text', 'table', 'image', 'formula']), locator, text: z.string().max(limits.textCharacters).optional(), assetId: z.string().min(1).max(32767).optional() }).strict()
-const format = z.enum(['pdf', 'docx', 'pptx', 'text'])
+const format = z.enum(['pdf', 'docx', 'pptx', 'text', 'image'])
 const gap = z.object({ locator, reason: z.string().min(1).max(4096), resolution: z.object({ kind: z.literal('read-page-image'), assetId: z.string().min(1).max(32767) }).strict().optional() }).strict()
 const extractionSchema = z.object({ version: z.literal(1), extractorVersion: z.string().min(1).max(100), format, fragments: z.array(fragment).min(1).max(100000), assets: z.array(z.object({ id: z.string().min(1).max(32767), mime: z.string().min(1).max(100), bytes: z.instanceof(Uint8Array) }).strict()).max(10000), gaps: z.array(gap).max(100000) }).strict()
 const relative = z.string().min(1).max(32767).refine(value => !value.includes('\\') && !value.includes('\0') && !path.isAbsolute(value) && value.split('/').every(part => part !== '..' && part !== '.' && part !== ''))
@@ -52,7 +52,9 @@ export class LessonMaterials {
       const directory = await this.directory(target)
       const id = randomUUID()
       const temp = path.join(directory, `.pending-${id}`)
-      const sourcePath = `materials/${id}/original.${extraction.format === 'text' ? 'txt' : extraction.format}`
+      const extension = extraction.format === 'image' ? assetExtension(extraction.assets[0]?.mime ?? '') : extraction.format === 'text' ? 'txt' : extraction.format
+      if (extraction.format === 'image' && (extraction.assets.length !== 1 || !['png', 'jpg', 'webp'].includes(extension))) throw new Error('图片材料须包含一份可读取的 PNG、JPEG 或 WebP 原图')
+      const sourcePath = `materials/${id}/original.${extension}`
       const record: LessonMaterialRecord = recordSchema.parse({ version: 1, id, lessonId: target.lessonId, title, createdAt: Date.now(), sourceVersion: hash(input.original), extractionVersion: hash(JSON.stringify({ ...extraction, assets: extraction.assets.map(asset => ({ id: asset.id, mime: asset.mime, version: hash(asset.bytes) })) })), sourcePath, format: extraction.format, extractorVersion: extraction.extractorVersion, fragments: extraction.fragments, assets: extraction.assets.map((asset, index) => ({ id: asset.id, mime: asset.mime, path: `materials/${id}/assets/${index}.${assetExtension(asset.mime)}`, version: hash(asset.bytes) })), gaps: extraction.gaps })
       await fs.mkdir(path.join(temp, 'assets'), { recursive: true })
       try {

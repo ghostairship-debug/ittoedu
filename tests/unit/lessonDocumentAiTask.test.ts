@@ -67,6 +67,16 @@ it('rejects wrong baseline text before file application', async () => {
   expect(await fs.readFile(path.join(f.root, 'plan.md'), 'utf8')).toContain('甲原稿')
  } finally { f.session.dispose() }
 })
+it('rejects duplicate insert positions before preview using the same rule as application', async () => {
+ const f = await fixture()
+ try {
+  await f.candidate([{ from: 1, to: 1, before: '', after: 'A' }, { from: 1, to: 1, before: '', after: 'B' }])
+  const result = await f.tasks.operate({ operation: 'read', workspace: f.workspace, taskId: f.run.taskId })
+  expect(result.status).toBe('failed')
+  expect(result.apply).toBeUndefined()
+  expect(await fs.readFile(path.join(f.root, 'plan.md'), 'utf8')).toBe('甲原稿\n乙原稿\n丙原稿')
+ } finally { f.session.dispose() }
+})
 it('explicitly accepting a merged recovery clears the resolved older draft instead of blocking the stage forever', async () => {
  const f = await fixture()
  try {

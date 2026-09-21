@@ -15,6 +15,7 @@ import { localAgentRequestSchema, localAgentResponseSchema, type LocalAgentRespo
 import { createWorkspaceIdentity } from '../workspaceIdentity'
 import { LocalAgentHarness } from './harness'
 import { LocalAgentRepository } from './repository'
+import { directoryConversationSkillPrompt } from './directoryConversationSkillResources'
 import { projectFileStatus } from '../projectFileObservation'
 import { DesktopOperationError } from '../errors'
 import { ZodError } from 'zod'
@@ -36,6 +37,15 @@ async function invalidateLessonRecordOwners(scope: LessonRecordsInvalidationScop
 let deletingApplicationRecords = false
 export function assertLocalAgentRecordsAvailable(): void { if (deletingApplicationRecords) throw new Error('正在删除应用对话记录，请稍后重试') }
 let harness: LocalAgentHarness | undefined
+let sharedRepository: LocalAgentRepository | undefined
+function localAgentRepository(): LocalAgentRepository {
+  sharedRepository ??= new LocalAgentRepository(app.getPath('userData'))
+  return sharedRepository
+}
+function localAgentHarness(): LocalAgentHarness {
+  harness ??= new LocalAgentHarness(localAgentRepository())
+  return harness
+}
 export async function operateLocalAgent(request: unknown): Promise<LocalAgentResponse> {
   assertLocalAgentRecordsAvailable()
   try { return localAgentResponseSchema.parse(await operate(request)) }
@@ -45,10 +55,16 @@ export async function operateLocalAgent(request: unknown): Promise<LocalAgentRes
   }
 }
 async function operate(request: unknown): Promise<LocalAgentResponse> {
-  configureNativeSystemProxy(url => session.defaultSession.resolveProxy(url))
   const input = localAgentRequestSchema.parse(request)
-  harness ??= new LocalAgentHarness(new LocalAgentRepository(app.getPath('userData')))
-  const agent = harness
+  const repository = localAgentRepository()
+  if (input.operation === 'external-notice') {
+    const externalNotice = input.confirm
+      ? await repository.confirmExternalAiNotice(input.scope)
+      : await repository.readExternalAiNotice(input.scope)
+    return { enabled: true, externalNotice }
+  }
+  configureNativeSystemProxy(url => session.defaultSession.resolveProxy(url))
+  const agent = localAgentHarness()
   if (input.operation === 'probe') return { enabled: true, probe: await agent.probe(input.adapter) }
   if (input.operation === 'capabilities') return { enabled: true, capabilities: await agent.capabilities(input.adapter, { refresh: input.refresh,
     ...(input.projectId && input.projectPath ? { workspace: createWorkspaceIdentity(input.projectId, input.projectPath) } : {}) }) }
@@ -70,7 +86,8 @@ async function operate(request: unknown): Promise<LocalAgentResponse> {
         if (workspace.kind === 'lesson' && !currentLesson) throw new Error('课例上下文不可用');
         const frozen = resolveSendFrozenTarget(normalizeFrozenTarget(input.frozenTarget), conversationOwner)
         assertFrozenTargetMatchesOwner(conversationOwner, frozen)
-        const prompt = currentLesson ? await currentLessonPrompt(currentLesson, input.prompt) : input.prompt
+        const prompt = currentLesson ? await currentLessonPrompt(currentLesson, input.prompt)
+          : await directoryConversationSkillPrompt(app.getPath('userData'), input.prompt)
         const sessionId = await agent.start(workspace, input.adapter, prompt, input.intent, input.userMessage ?? input.prompt)
         try {
           await conversationRepository.attachSession(conversationOwner, workspace.conversationId, sessionId, conversation.epoch)
@@ -86,7 +103,8 @@ async function operate(request: unknown): Promise<LocalAgentResponse> {
         if (workspace.kind === 'lesson' && !currentLesson) throw new Error('课例上下文不可用');
         const frozen = resolveSendFrozenTarget(normalizeFrozenTarget(input.frozenTarget), conversationOwner)
         assertFrozenTargetMatchesOwner(conversationOwner, frozen)
-        const prompt = currentLesson ? await currentLessonPrompt(currentLesson, input.prompt) : input.prompt
+        const prompt = currentLesson ? await currentLessonPrompt(currentLesson, input.prompt)
+          : await directoryConversationSkillPrompt(app.getPath('userData'), input.prompt)
         const sessionId = 'kind' in prior.workspace && prior.externalSessionId
           ? await agent.resume(workspace, input.sessionId, prompt, input.userMessage ?? input.prompt, input.preserveTaskBudget)
           : await agent.start(workspace, prior.adapter, prompt, 'discuss', input.userMessage ?? input.prompt)
@@ -166,7 +184,7 @@ async function currentLessonPrompt(lesson: Awaited<ReturnType<LessonWorkspaceSer
 export async function relocateLocalAgentLesson(previous: LessonIdentity, next: LessonIdentity): Promise<void> {
   const conversations = new LessonConversationRepository(app.getPath('userData'))
   const records = (await conversations.list({ kind: 'lesson', lesson: previous })).records
-  harness ??= new LocalAgentHarness(new LocalAgentRepository(app.getPath('userData')))
+  harness = localAgentHarness()
   for (const conversation of records) {
     const oldScope = { version: 1 as const, kind: 'lesson' as const, lessonId: previous.lessonId, normalizedDirectory: previous.normalizedDirectory, conversationId: conversation.conversationId }
     for (const record of (await harness.list(oldScope)).records) if (record.status === 'running') await harness.cancel(record.workspace, record.id)
@@ -182,7 +200,7 @@ export function conversationAgentScope(owner: ConversationOwner, conversationId:
 }
 
 export async function deleteLocalAgentConversationRecords(owner: ConversationOwner, conversationId?: string): Promise<void> {
-  harness ??= new LocalAgentHarness(new LocalAgentRepository(app.getPath('userData')))
+  harness = localAgentHarness()
   const conversations = new LessonConversationRepository(app.getPath('userData'))
   const records = (await conversations.list(owner)).records.filter(record => !conversationId || record.conversationId === conversationId)
   for (const record of records) await conversations.delete(owner, record.conversationId, async () => {
@@ -218,7 +236,7 @@ export async function searchLocalAgentConversations(owner: ConversationOwner, qu
   const needle = query.trim().toLocaleLowerCase()
   if (!needle) return []
   const conversations = (await new LessonConversationRepository(app.getPath('userData')).list(owner)).records
-  harness ??= new LocalAgentHarness(new LocalAgentRepository(app.getPath('userData')))
+  harness = localAgentHarness()
   const matches: { conversationId: string; excerpt: string }[] = []
   for (const conversation of conversations) {
     const texts = [conversation.title]
@@ -247,10 +265,9 @@ function normalizeFrozenTarget(target: FrozenEditTarget | undefined): FrozenEdit
 export async function deleteAllLocalAgentApplicationRecords(): Promise<void> {
   assertLocalAgentRecordsAvailable()
   deletingApplicationRecords = true
-  const repository = new LocalAgentRepository(app.getPath('userData'))
+  const repository = localAgentRepository()
   const conversations = new LessonConversationRepository(app.getPath('userData'))
-  harness ??= new LocalAgentHarness(repository)
-  const owner = harness
+  const owner = localAgentHarness()
   try {
     // Closing flips the global launch gate before awaiting in-flight work and invalidates running task epochs.
     const stopped = await Promise.allSettled([owner.close(), invalidateLessonRecordOwners({ all: true })])
@@ -263,7 +280,8 @@ export async function deleteAllLocalAgentApplicationRecords(): Promise<void> {
     await conversations.clearAllRecords()
   } finally {
     // Closed native owners and all old candidate maps are never reused after this operation.
-    harness = new LocalAgentHarness(new LocalAgentRepository(app.getPath('userData')))
+    sharedRepository = new LocalAgentRepository(app.getPath('userData'))
+    harness = new LocalAgentHarness(sharedRepository)
     deletingApplicationRecords = false
   }
 }

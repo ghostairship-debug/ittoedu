@@ -21,6 +21,10 @@ import { GenerationCandidatePreview } from './GenerationCandidatePreview'
 import { awaitCourseChatStage, createCourseChatObservation, type CourseChatTarget } from './courseChatObservation'
 import { aiQuestionSchema, aiInputDeliverySchema } from '../../../shared/localAgentInteraction'
 import './course-chat.css'
+import { CONTEXTUAL_COURSE_COMMAND, validateContextualCourseCommand, type ContextualCourseCommand } from './contextualCourseCommand'
+import { useExternalAiNotice } from './useExternalAiNotice'
+import { generationExternalReferences } from './externalAiReferences'
+import { normalizeWorkspacePath } from '../../../shared/workspaceIdentity'
 
 type Preparation = { token: number; execution: NonNullable<GenerationRequest['execution']>; abort: AbortController; target: CourseChatTarget; scope: GenerationReferenceScope }
 const message = readableChatError
@@ -79,6 +83,7 @@ export function CourseChatPanel({ projectId, projectPath, onClose, lessonWorkspa
   const [teachingPlan, setTeachingPlan] = useState(''), [presentationScript, setPresentationScript] = useState('')
   const [planConfirmed, setPlanConfirmed] = useState(false), [scriptConfirmed, setScriptConfirmed] = useState(false)
   const [instruction, setInstruction] = useState('')
+  const instructionRef = useRef(instruction); instructionRef.current = instruction
   const composerMenus = useRef<ChatComposerMenusHandle>(null)
   const mentionDirectory = projectPath ? projectPath.replace(/[\\/][^\\/]+$/, '') : null
   const mentions = useDirectoryMentions(mentionDirectory)
@@ -112,6 +117,9 @@ export function CourseChatPanel({ projectId, projectPath, onClose, lessonWorkspa
     } }
   }, [lessonWorkspace])
   const owner = useMemo(() => ({ projectId, projectPath: projectPath ?? '' }), [projectId, projectPath])
+  const externalNotice = useExternalAiNotice(api)
+  useEffect(() => () => externalNotice.cancel(), [projectId, projectPath, externalNotice.cancel])
+  const confirmExternalRequest = (request: GenerationRequest) => externalNotice.ensure({ scope: request.workspace, adapter, references: generationExternalReferences(request) })
   const [resources, setResources] = useState<{ owner: typeof owner; api: typeof api;
     bridge: ReturnType<typeof createCourseChatObservation>; controller: GenerationTaskController } | null>(null)
   const currentResources = resources?.owner === owner && resources.api === api ? resources : null
@@ -195,8 +203,8 @@ export function CourseChatPanel({ projectId, projectPath, onClose, lessonWorkspa
   useEffect(() => { if (view.preview && revision !== view.preview.beforeRevision) void stop('工程已改变，未应用候选已丢弃') }, [revision, view.preview])
   const referenceName = useMemo(() => referenceLabel(currentDocument, authoringSession?.token.locationId,
     authoringSession?.itemIds ?? [], resolvedReference.scope), [currentDocument, authoringSession, resolvedReference.scope])
-  function beginPreparation(): Preparation | null {
-    if (resolvedReference.error) { setError(resolvedReference.error); return null }
+  function beginPreparation(fromCard = false): Preparation | null {
+    if (!fromCard && resolvedReference.error) { setError(resolvedReference.error); return null }
     const token = ++generation.current, startedAt = Date.now()
     const execution = { version: 1 as const, startedAt, deadlineAt: startedAt + budgetMinutes * 60000 }
     preparation.current?.abort.abort()
@@ -206,7 +214,7 @@ export function CourseChatPanel({ projectId, projectPath, onClose, lessonWorkspa
       if (!bridge) throw new Error('当前任务已关闭')
       target = bridge.freezeTarget()
     } catch (cause) { setError(message(cause)); return null }
-    const current = { token, execution, abort: new AbortController(), target, scope: resolvedReference.scope }
+    const current = { token, execution, abort: new AbortController(), target, scope: fromCard ? 'selection' as const : resolvedReference.scope }
     preparation.current = current
     setFrozenReference({ scope: current.scope, name: referenceLabel(selectActiveCourseProjectDocument(useEditorStore.getState()), target.locationId, target.selectedIds, current.scope) })
     setPreparing(true); setPreparationExecution(execution); setNow(startedAt); setError('')
@@ -225,6 +233,7 @@ export function CourseChatPanel({ projectId, projectPath, onClose, lessonWorkspa
     setPreparing(false); setPreparationExecution(undefined)
   }
   async function stop(reason?: string) {
+    externalNotice.cancel()
     const token = ++generation.current
     preparation.current?.abort.abort(); preparation.current = null
     bridge?.invalidate()
@@ -252,7 +261,26 @@ export function CourseChatPanel({ projectId, projectPath, onClose, lessonWorkspa
     } catch (cause) { if (token === generation.current) setError(message(cause)) }
     finally { setExtendingBudget(false) }
   }
-  async function send() {
+  useEffect(() => {
+    const receive = (event: Event) => {
+      const request = event as CustomEvent<ContextualCourseCommand>
+      if (request.defaultPrevented || request.detail.projectId !== projectId) return
+      request.preventDefault()
+      const command = request.detail, token = useEditorStore.getState().courseAuthoringSession?.token
+      if (JSON.stringify(token) !== JSON.stringify(command.sessionToken)) { command.error = '当前内容或选区已改变，请重新选择。'; return }
+      if (!api || !bridge || !controller || !projectPath) { command.error = '请先保存课件并连接创作助手。'; return }
+      if (busy || preparing || configurationSavingRef.current || preparation.current) { command.error = '创作助手正在处理任务，请稍后发送。'; return }
+      try { validateContextualCourseCommand(command, useEditorStore.getState().flowSession?.selection) }
+      catch (error) { command.error = error instanceof Error ? error.message : String(error); return }
+      setInstruction(command.instruction)
+      void send(command.instruction, true)
+    }
+    window.addEventListener(CONTEXTUAL_COURSE_COMMAND, receive)
+    return () => window.removeEventListener(CONTEXTUAL_COURSE_COMMAND, receive)
+  })
+  async function send(messageOverride?: string, fromCard = false) {
+    const instruction = messageOverride ?? instructionRef.current
+    const isWholeCourse = wholeCourse && !fromCard
     if (configurationSavingRef.current) return
     if (!api || !bridge || !controller || !projectPath || !instruction.trim()) return
     if (preparation.current) return
@@ -262,6 +290,7 @@ export function CourseChatPanel({ projectId, projectPath, onClose, lessonWorkspa
       if (isChatStatusInquiry(instruction)) {
         const token = generation.current
         try {
+          if (!await confirmExternalRequest(request) || token !== generation.current) return
           await controller.input({ version: 1, kind: 'supplement', inputId: crypto.randomUUID(), taskId: task.taskId, epoch: task.epoch,
             workspace: request.workspace, turnId: task.turnId, text: instruction.trim() }, { preservePreview: true })
           if (token === generation.current) {
@@ -281,6 +310,7 @@ export function CourseChatPanel({ projectId, projectPath, onClose, lessonWorkspa
           setNotice('已丢弃旧候选，正在按当前内容和选择重新同步')
           const fresh = await prepareStage(current, () => bridge.refreshFromUser(instruction.trim(), nextIntent, current.execution, current.target, current.scope))
           const resumable = await prepareStage(current, () => confirmedResume(resumeId))
+          if (!await prepareStage(current, () => confirmExternalRequest(fresh))) return
           setInstruction(''); finishPreparation(current)
           await controller.start(fresh, adapter, resumable, instruction.trim())
         } catch (cause) {
@@ -293,6 +323,7 @@ export function CourseChatPanel({ projectId, projectPath, onClose, lessonWorkspa
       }
       const token = generation.current, text = instruction.trim()
       try {
+        if (!await confirmExternalRequest(request) || token !== generation.current) return
         await controller.input({ version: 1, kind: inputKind, inputId: crypto.randomUUID(), taskId: task.taskId, epoch: task.epoch, workspace: request.workspace, turnId: task.turnId, text })
         if (token === generation.current) { bridge.rememberUserInput(text); setInstruction('') }
       }
@@ -302,10 +333,10 @@ export function CourseChatPanel({ projectId, projectPath, onClose, lessonWorkspa
     if (preparing) return
     // A manual edit can end the old turn before the user's correction arrives.
     // Only that unresolved stale task keeps its goal; ordinary idle sends start fresh.
-    const requestedIntent = resolveChatIntent(instruction, intent)
-    const continueStaleTask = requestedIntent === 'edit' && view.phase === 'failed' && view.sessionId === sessionId && !!view.request
+    const requestedIntent = resolveChatIntent(instruction, fromCard ? 'edit' : intent)
+    const continueStaleTask = !fromCard && requestedIntent === 'edit' && view.phase === 'failed' && view.sessionId === sessionId && !!view.request
       && !view.receipt && view.error?.startsWith('stale：') && !bridge.isCurrent(view.request)
-    const explicitlyContinuing = /^(?:请)?继续(?:吧|执行|处理|修改|完成|上次任务|之前的任务)?[。！!\s]*$/.test(instruction.trim())
+    const explicitlyContinuing = !fromCard && /^(?:请)?继续(?:吧|执行|处理|修改|完成|上次任务|之前的任务)?[。！!\s]*$/.test(instruction.trim())
     const selectedRecord = sessions.find(record => record.id === sessionId)
     const latestRequest = view.request ?? selectedRecord?.generationRequest
     const recoveryRequest = explicitlyContinuing ? latestRequest && isChatStatusInquiry(latestRequest.instruction)
@@ -314,7 +345,7 @@ export function CourseChatPanel({ projectId, projectPath, onClose, lessonWorkspa
       setError('旧记录没有可恢复的原编辑目标，请重新说明要继续的任务。'); return
     }
     const nextInstruction = continueStaleTask ? bridge.instructionWithUserInput(instruction.trim()) : instruction.trim()
-    const current = beginPreparation()
+    const current = beginPreparation(fromCard)
     if (!current) return
     setNotice('正在同步当前画面、草稿和引用')
     try {
@@ -324,6 +355,7 @@ export function CourseChatPanel({ projectId, projectPath, onClose, lessonWorkspa
         const locationId = recovered.observation?.locationId ?? current.target.locationId
         setFrozenReference({ scope: recoveredScope, name: referenceLabel(selectActiveCourseProjectDocument(useEditorStore.getState()), locationId, [], recoveredScope) })
         const resumable = await prepareStage(current, () => confirmedResume(sessionId))
+        if (!await prepareStage(current, () => confirmExternalRequest(recovered))) return
         setInstruction(''); finishPreparation(current)
         await controller.start(recovered, adapter, resumable, instruction.trim())
         return
@@ -333,17 +365,18 @@ export function CourseChatPanel({ projectId, projectPath, onClose, lessonWorkspa
       const materialResults = await prepareStage(current, () => Promise.all(materialIds.map(id => api.materials({ operation: 'read', ...owner, id }))))
       const selectedMaterials = materialResults.map(records => { if (!records[0]) throw new Error('引用材料已删除，请重新选择'); return records[0] })
       const catalog = await prepareStage(current, () => api.loadComponentCatalog())
-      let confirmedDocuments = wholeCourse ? { teachingPlan, presentationScript } : undefined
-      if (wholeCourse && lessonWorkspace) {
+      let confirmedDocuments = isWholeCourse ? { teachingPlan, presentationScript } : undefined
+      if (isWholeCourse && lessonWorkspace) {
         const prepared = await prepareStage(current, () => api.localAgent({ operation: 'lesson-prepare-generation', workspace: lessonWorkspace }))
         if (!prepared.lessonGeneration) throw new Error('当前策划或脚本尚未准备完成，请先审阅当前制品后再继续')
         confirmedDocuments = prepared.lessonGeneration.confirmedDocuments
-      } else if (requestedIntent === 'edit' && wholeCourse && (!planConfirmed || !scriptConfirmed || !teachingPlan.trim() || !presentationScript.trim())) throw new Error('整课生成前，请分别审阅并确认当前教学策划和呈现脚本')
+      } else if (requestedIntent === 'edit' && isWholeCourse && (!planConfirmed || !scriptConfirmed || !teachingPlan.trim() || !presentationScript.trim())) throw new Error('整课生成前，请分别审阅并确认当前教学策划和呈现脚本')
       const request = await prepareStage(current, () => bridge.capture({ workspace, execution: current.execution,
         target: current.target, scope: current.scope, instruction: nextInstruction, intent: requestedIntent, applyPolicy,
-        purpose: wholeCourse ? 'whole-course' : current.scope === 'selection' ? 'local-edit' : 'single-page', expectedResult: wholeCourse && requestedIntent === 'edit' ? 'candidate' : 'auto',
+        purpose: isWholeCourse ? 'whole-course' : current.scope === 'selection' ? 'local-edit' : 'single-page', expectedResult: isWholeCourse && requestedIntent === 'edit' ? 'candidate' : 'auto',
         confirmedDocuments, materials: selectedMaterials, catalogPackages: catalog.packages }))
       const resumable = await prepareStage(current, () => confirmedResume(sessionId))
+      if (!await prepareStage(current, () => confirmExternalRequest(request))) return
       setInstruction(''); finishPreparation(current)
       await controller.start(request, adapter, resumable, instruction.trim())
     } catch (cause) {
@@ -354,6 +387,7 @@ export function CourseChatPanel({ projectId, projectPath, onClose, lessonWorkspa
     } finally { finishPreparation(current) }
   }
   async function selectSession(id: string) {
+    externalNotice.cancel()
     const token = ++generation.current
     preparation.current?.abort.abort(); preparation.current = null; bridge?.invalidate()
     setPreparing(false); setPreparationExecution(undefined)
@@ -418,11 +452,18 @@ export function CourseChatPanel({ projectId, projectPath, onClose, lessonWorkspa
     {!projectPath ? <p>请先保存工程，再开始对话。</p> : <>
       <div className="chat-controls"><label>CLI<select aria-label="CLI" value={adapter} disabled={busy || !!sessionId} onChange={event => setAdapter(event.target.value as LocalAgentId)}><option value="codex">Codex</option><option value="claude">Claude</option><option value="opencode">OpenCode</option></select></label>
         <label>会话<select aria-label="会话" value={sessionId} disabled={busy} onChange={event => void selectSession(event.target.value)}><option value="">新对话</option>{sessions.map((record, index) => <option key={record.id} value={record.id}>{record.adapter} · 对话 {index + 1} · {statusLabels[record.task?.status ?? record.status]}</option>)}{sessionId && !sessions.some(record => record.id === sessionId) && <option value={sessionId}>当前对话</option>}</select></label></div>
+      {externalNotice.dialog}
+      <button type="button" onClick={() => externalNotice.review({ scope: { version: 1, projectId, normalizedPath: normalizeWorkspacePath(projectPath) }, adapter, references: view.request ? generationExternalReferences(view.request) : [`工程：${projectPath}；本次引用清单将在发送前列出`] })}>外部处理说明</button>
       <NativeAgentConfiguration key={adapter} adapter={adapter} projectId={projectId} projectPath={projectPath} configurationSequence={configurationSequence} onSavingChange={onConfigurationSaving} taskConfiguration={confirmedCapabilities.success ? confirmedCapabilities.data.current : undefined} />
       <div className="chat-scroll" ref={scroll} onScroll={event => { const element = event.currentTarget; followReply.current = element.scrollHeight - element.scrollTop - element.clientHeight < 60 }}>
         <CourseChatTranscript events={events} legacyInstruction={legacyInstruction} legacyRequests={legacyRequests} />
         {actualResult && <section aria-label="实际应用结果"><strong>{actualResultIsPrevious ? '此前结果 · ' : ''}{actualResultLabel}</strong><SafeChatMessage text={['rejected', 'stale'].includes(actualResult.status) ? readableChatError(actualResult.summary) : actualResult.summary} /></section>}
-        {questions.map(question => <NativeAgentQuestion key={question.questionId} question={question} onAnswer={async input => { if (!controller) throw new Error('当前任务已关闭'); await controller.input(input) }} />)}
+        {questions.map(question => <NativeAgentQuestion key={question.questionId} question={question} onAnswer={async input => {
+          const request = controller?.current.request, token = generation.current
+          if (!controller || !request) throw new Error('当前任务已关闭')
+          if (!await confirmExternalRequest(request) || token !== generation.current) return
+          await controller.input(input)
+        }} />)}
         {!!activities.length && <ol aria-label="任务活动" className="chat-activity">{activities.map(item => <li key={item.id}>{item.text}</li>)}</ol>}
         <p role="status">{notice}{busy && remaining !== null ? ` · 本任务剩余约 ${remaining} 分钟` : ''}</p>{error && <p role="alert">{readableChatError(error)}</p>}
         {canExtendBudget && <button type="button" disabled={extendingBudget} onClick={() => void extendBudget()}>{extendingBudget ? '正在延长预算…' : '增加20分钟'}</button>}

@@ -6,6 +6,7 @@ import { editorPositionToPoint, fromEditorDocument, toEditorDocument } from '../
 import type { DocumentContent } from '../../src/shared/document/content'
 import { emptyDocumentResources } from '../../src/shared/document/resources'
 
+
 const content: DocumentContent = { blocks: [
   { id: 'paragraph', type: 'paragraph', content: { inlines: [
     { type: 'text', text: '中文😀' },
@@ -97,16 +98,4 @@ describe('document selection mapping', () => {
     } finally { cleanup() }
   })
 
-  it.fails('source mode should publish a structured selection through the same contract', () => {
-    // This is an intentional red contract: source mode currently has no source
-    // offset -> DocumentPoint map and silently drops CodeMirror selection changes.
-    expect(false).toBe(true)
-  })
-
-  it.fails('selection targets should be immutable once frozen for an AI request', () => {
-    // The current callback payload is a mutable observation. The contextual
-    // authoring contract requires a frozen target before asynchronous work starts.
-    const selection = { revision: 'revision-1', kind: 'object' as const, blockId: 'paragraph' }
-    expect(Object.isFrozen(selection)).toBe(true)
-  })
 })

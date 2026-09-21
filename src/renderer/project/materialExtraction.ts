@@ -2,6 +2,7 @@ import type { MaterialExtraction, MaterialFragment } from '../../shared/material
 import { MATERIAL_EXTRACTION_LIMITS as limits } from '../../shared/materialExtraction'
 import { openPptxPackage, pptxRelationshipId, xmlAll, xmlChildren, xmlFirst, type PptxPackage } from './pptxPackage'
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
+import { inspectImageTransformSource } from './imageTransform'
 
 function result(format: MaterialExtraction['format']): MaterialExtraction {
   return { version: 1, extractorVersion: 'material-3', format, fragments: [], assets: [], gaps: [] }
@@ -146,6 +147,15 @@ export async function extractMaterial(bytes: Uint8Array, filename: string): Prom
   const extension = filename.split('.').pop()?.toLowerCase()
   if (extension === 'docx' || extension === 'pptx') return extractOfficeMaterial(bytes, extension)
   if (extension === 'pdf') return extractPdfMaterial(bytes)
+  const imageMime = ({ png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp' } as Record<string, string>)[extension ?? '']
+  if (imageMime) {
+    const inspected = await inspectImageTransformSource(bytes, imageMime)
+    if (inspected.status !== 'ready') throw new Error(inspected.message)
+    const out = result('image'), assetId = `original.${extension === 'jpeg' ? 'jpg' : extension}`
+    out.assets.push({ id: assetId, mime: imageMime, bytes: bytes.slice() })
+    add(out, { kind: 'image', locator: { part: filename, page: 1 }, assetId })
+    return verify(out)
+  }
   if (!['txt', 'md', 'csv'].includes(extension ?? '')) throw new Error('不支持此材料格式')
   const out = result('text')
   const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes)

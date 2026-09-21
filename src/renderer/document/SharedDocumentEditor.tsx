@@ -1,24 +1,26 @@
 import { FONT_FAMILY_OPTIONS } from '../../shared/fonts/fontFamilyCatalog'
-import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react'
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState, useMemo, useId, type FormEvent } from 'react'
 import { createPortal } from 'react-dom'
 import { EditorState as SourceState } from '@codemirror/state'
 import { EditorView as SourceView, keymap as sourceKeymap } from '@codemirror/view'
 import { markdown } from '@codemirror/lang-markdown'
 import { foldGutter, foldEffect } from '@codemirror/language'
 import { parseDocumentMarkdown, serializeDocumentMarkdown, type MarkdownDocument, type MarkdownOptions } from '../../shared/document/markdown'
-import type { DocumentDiagnostic, DocumentSelection } from '../../shared/document/ports'
+import type { DocumentDiagnostic, DocumentSelection, DocumentContextSelection } from '../../shared/document/ports'
+import { mapDocumentSelectionToSource, type MarkdownSourceMap } from '../../shared/document/markdownSourceMap'
 import type { TextRunStyle } from '../../shared/contracts/native-v1/types'
 import { createLayoutEditor, type DocumentOperation } from './editorSession'
 import { documentEditorSchema } from './editorSchema'
 import { NodeSelection, Selection, type EditorState } from 'prosemirror-state'
 import { toggleMark, setBlockType } from 'prosemirror-commands'
 import { describeDocumentMath, parseDocumentMath } from '../../shared/document/math'
-import type { DocumentBlock } from '../../shared/document/content'
+import { type DocumentBlock } from '../../shared/document/content'
 import type { DocumentClipboardResourcePort } from './documentClipboard'
 import './sharedDocumentEditor.css'
 import 'katex/dist/katex.min.css'
 
 const FORMAT_FLAGS = ['bold', 'italic', 'underline', 'strike', 'emphasis'] as const
+
 export function readDocumentFormatting(state: EditorState) {
   const samples: TextRunStyle[] = []
   const sample = (marks: typeof state.selection.$from.parent.marks) => samples.push(marks.find(mark => mark.type === documentEditorSchema.marks.style)?.attrs.value ?? {})
@@ -37,6 +39,7 @@ export interface SharedDocumentEditorProps {
   document: MarkdownDocument
   revision: string
   sourceDraft?: string
+  sourceMap?: MarkdownSourceMap
   initialMode?: 'layout' | 'source'
   readOnly?: boolean
   renderObject?(block: DocumentBlock, container: HTMLElement): (() => void) | void
@@ -49,10 +52,18 @@ export interface SharedDocumentEditorProps {
   onDraft(source: string, diagnostics: DocumentDiagnostic[]): void
   onCompositionChange?(composing: boolean, source: string): void
   onSelection?(selection: DocumentSelection | null): void
+  onContextualTargetChange?(target: DocumentContextSelection | null): void
+  onContextualCommand?(instruction: string, target: DocumentContextSelection): void
+  contextualCommandIssue?(target: DocumentContextSelection): string | null
+  contextualCardSuppressed?: boolean
+  onContextualDismiss?(target: DocumentContextSelection | null): void
   onUndo(): void
   onRedo(): void
 }
-export interface SharedDocumentEditorHandle { flush(): { ready: boolean; source: string; diagnostics: DocumentDiagnostic[] } }
+export interface SharedDocumentEditorHandle {
+  flush(): { ready: boolean; source: string; diagnostics: DocumentDiagnostic[] }
+  getContextualEditTarget(): DocumentContextSelection | null
+}
 
 /** The caller owns persistence and undo; neither editor installs a history extension. */
 export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, SharedDocumentEditorProps>(function SharedDocumentEditor(props, ref) {
@@ -62,6 +73,13 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
   const [diagnostics, setDiagnostics] = useState<DocumentDiagnostic[]>([])
   const [mathDraft, setMathDraft] = useState<{ latex: string; accessibleText: string; display: boolean; formulaId: string; from: number; to: number } | null>(null)
   const [linkDraft, setLinkDraft] = useState<string | null>(null)
+  const [contextualTarget, setContextualTarget] = useState<DocumentContextSelection | null>(null)
+  const [contextualCardOpen, setContextualCardOpen] = useState(false)
+  const [contextualInstruction, setContextualInstruction] = useState('')
+  const [commandError, setCommandError] = useState('')
+  const [cardPosition, setCardPosition] = useState({ left: 8, top: 8 })
+  const cardRef = useRef<HTMLElement>(null)
+  const toolbarRef = useRef<HTMLDivElement>(null)
   const draft = useRef(props.sourceDraft ?? serializeDocumentMarkdown(props.document, props.target))
   const layoutHost = useRef<HTMLDivElement>(null)
   const sourceHost = useRef<HTMLDivElement>(null)
@@ -73,7 +91,58 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
   const sourceSelection = useRef<{ anchor: number; head: number } | null>(null)
   const focusAfterSwitch = useRef(false)
   const sourceGroup = useRef({ id: crypto.randomUUID(), time: 0 })
+  const contextualTargetRef = useRef<DocumentContextSelection | null>(null)
+  const inputId = useId()
+  const fallbackMap = useMemo(() => {
+    if (props.sourceMap) return props.sourceMap
+    const result = parseDocumentMarkdown(props.sourceDraft ?? serializeDocumentMarkdown(props.document, props.target), { createId: () => crypto.randomUUID(), target: props.target, resolveImage: props.resolveImage })
+    return result.status === 'valid' ? result.sourceMap : { blocks: [] }
+  }, [props.sourceMap, props.sourceDraft, props.document, props.target])
+  const mapRef = useRef(fallbackMap); mapRef.current = fallbackMap
+  useEffect(() => {
+    if (!contextualTarget) return
+    const position = () => {
+      let point: { left: number; top: number; bottom: number } | null = null
+      try {
+        if (mode === 'layout' && layout.current) point = layout.current.view.coordsAtPos(layout.current.view.state.selection.from)
+        else if (source.current) point = source.current.coordsAtPos(source.current.state.selection.main.from)
+      } catch { /* Detached text during owner replacement has no screen position. */ }
+      const width = cardRef.current?.offsetWidth || 430, height = cardRef.current?.offsetHeight || 155
+      const left = Math.max(8, Math.min(point?.left ?? 8, window.innerWidth - width - 8))
+      const below = (point?.bottom ?? 0) + 8
+      const top = Math.max(8, Math.min(below + height < window.innerHeight ? below : (point?.top ?? 0) - height - 8, window.innerHeight - height - 8))
+      setCardPosition(current => current.left === left && current.top === top ? current : { left, top })
+    }
+    position()
+    window.addEventListener('scroll', position, true); window.addEventListener('resize', position)
+    return () => { window.removeEventListener('scroll', position, true); window.removeEventListener('resize', position) }
+  }, [contextualTarget, mode, contextualCardOpen, commandError])
   const fail = (message: string) => setDiagnostics([{ message, offset: 0, endOffset: 0, line: 1, column: 1 }])
+  function publishContextualTarget(target: DocumentContextSelection | null) {
+    contextualTargetRef.current = target
+    setContextualTarget(target)
+    setContextualCardOpen(Boolean(target))
+    latest.current.onContextualTargetChange?.(target)
+  }
+  function publishLayoutSelection(selection: DocumentSelection | null) {
+    latest.current.onSelection?.(selection)
+    if (!selection) { publishContextualTarget(null); return }
+    if (selection.kind === 'text' && JSON.stringify(selection.anchor.slot) === JSON.stringify(selection.head.slot) && selection.anchor.blockId === selection.head.blockId && selection.anchor.offset === selection.head.offset) { publishContextualTarget(null); return }
+    const mapped = mapDocumentSelectionToSource(draft.current, mapRef.current, selection)
+    const ranges = mapped.status === 'mapped' ? mapped.ranges : null
+    const blockId = selection.kind === 'cells' ? selection.tableId : selection.kind === 'object' ? selection.blockId : selection.head.blockId
+    const block = latest.current.document.content.blocks.find(item => item.id === blockId)
+    const labels: Record<string, string> = { paragraph: '段落', heading: '标题', quote: '引用', list: '列表项', table: '单元格', formula: '公式', media: '媒体', chart: '图表', component: '互动组件', divider: '分隔线' }
+    publishContextualTarget({ selection, ranges, revision: latest.current.revision, mode: 'layout', source: draft.current,
+      label: selection.kind === 'cells' ? '所选单元格' : selection.kind === 'text' && selection.anchor.blockId !== selection.head.blockId ? '所选内容' : labels[block?.type ?? ''] ?? '所选对象',
+      ...(mapped.status === 'unmapped' ? { message: mapped.message } : {}) })
+  }
+  function publishSourceSelection(view: SourceView) {
+    const current = view.state.selection.main
+    const from = Math.min(current.from, current.to), to = Math.max(current.from, current.to)
+    if (from === to || sourceComposing.current) { publishContextualTarget(null); return }
+    publishContextualTarget({ selection: null, ranges: [{ from, to, before: draft.current.slice(from, to) }], revision: latest.current.revision, mode: 'source', source: draft.current, label: '所选源文' })
+  }
   function acceptSource(text: string) {
     draft.current = text
     const current = latest.current
@@ -97,7 +166,7 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
       if (result === false) { const issues = [{ message: '正文未能提交，请修正后重试或丢弃草稿', offset: 0, endOffset: 0, line: 1, column: 1 }]; setDiagnostics(issues); latest.current.onDraft(draft.current, issues); setMode('source') }
       return result
     },
-    selection: (selection: DocumentSelection | null) => latest.current.onSelection?.(selection),
+    selection: publishLayoutSelection,
     undo: () => latest.current.onUndo(), redo: () => latest.current.onRedo(), diagnostic: fail,
   })
   useEffect(() => {
@@ -113,13 +182,17 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
       source.current = new SourceView({ parent: sourceHost.current, state: SourceState.create({ doc: draft.current, extensions: [markdown(), foldGutter(), SourceView.lineWrapping, SourceState.readOnly.of(Boolean(latest.current.readOnly)),
         SourceView.contentAttributes.of({ 'aria-label': '正文源文编辑' }),
         sourceKeymap.of([{ key: 'Mod-z', run: () => { latest.current.onUndo(); return true } }, { key: 'Mod-Shift-z', run: () => { latest.current.onRedo(); return true } }]),
-        SourceView.domEventHandlers({ compositionstart: () => { sourceComposing.current = true }, compositionend: (_event, view) => { sourceComposing.current = false; queueMicrotask(() => { if (source.current === view) acceptSource(view.state.doc.toString()) }) } }),
-        SourceView.updateListener.of(update => { if (update.docChanged) { draft.current = update.state.doc.toString(); if (!sourceComposing.current && !syncingSource.current) acceptSource(draft.current) } }),
+        SourceView.domEventHandlers({ compositionstart: () => { sourceComposing.current = true }, compositionend: (_event, view) => { sourceComposing.current = false; queueMicrotask(() => { if (source.current === view) { acceptSource(view.state.doc.toString()); publishSourceSelection(view) } }) } }),
+        SourceView.updateListener.of(update => {
+          if (update.docChanged) { draft.current = update.state.doc.toString(); if (!sourceComposing.current && !syncingSource.current) acceptSource(draft.current) }
+          if (update.selectionSet && !syncingSource.current) publishSourceSelection(update.view)
+        }),
       ] }) })
       const editor = source.current
       if (sourceSelection.current) editor.dispatch({ selection: { anchor: Math.min(editor.state.doc.length, sourceSelection.current.anchor), head: Math.min(editor.state.doc.length, sourceSelection.current.head) } })
       const folds = [...draft.current.matchAll(/^```cw-object-v1\s*\n[\s\S]*?^```/gm)].map(match => foldEffect.of({ from: match.index! + match[0].indexOf('\n'), to: match.index! + match[0].length - 3 }))
       if (folds.length) source.current.dispatch({ effects: folds })
+      publishSourceSelection(editor)
       setDiagnostics(parseDocumentMarkdown(draft.current, { createId: () => crypto.randomUUID(), target: latest.current.target, resolveImage: latest.current.resolveImage }).diagnostics)
       if (focusAfterSwitch.current) { editor.focus(); focusAfterSwitch.current = false }
       return () => { sourceSelection.current = { anchor: editor.state.selection.main.anchor, head: editor.state.selection.main.head }; editor.destroy(); if (source.current === editor) source.current = null; sourceComposing.current = false }
@@ -139,8 +212,16 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
     const result = parseDocumentMarkdown(text, { createId: () => crypto.randomUUID(), target: props.target, resolveImage: props.resolveImage })
     setDiagnostics(result.diagnostics)
   }, [props.revision, props.sourceDraft])
-  useImperativeHandle(ref, () => ({ flush: () => ({ ready: !sourceComposing.current && (layout.current?.flush() ?? true), source: draft.current, diagnostics }) }), [diagnostics])
+  useEffect(() => {
+    const current = contextualTargetRef.current
+    if (current && current.revision !== props.revision) publishContextualTarget(null)
+  }, [props.revision])
+  useImperativeHandle(ref, () => ({
+    flush: () => ({ ready: !sourceComposing.current && (layout.current?.flush() ?? true), source: draft.current, diagnostics }),
+    getContextualEditTarget: () => contextualTargetRef.current,
+  }), [diagnostics])
   function switchMode() {
+    publishContextualTarget(null)
     if (mode === 'layout') { if (!layout.current?.flush()) return; focusAfterSwitch.current = true; setMode('source') }
     else if (!sourceComposing.current && diagnostics.length === 0) { focusAfterSwitch.current = true; setMode('layout') }
   }
@@ -169,6 +250,32 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
     if (!state) return
     style({ [key]: readDocumentFormatting(state).flags[key] !== true })
   }
+  function applyParagraphType(value: string) {
+    const editor = layout.current
+    if (!editor) return
+    editor.syncDomTextSelection()
+    const type = value === 'paragraph' ? 'paragraph' : 'heading'
+    const node = editor.view.state.selection.$from.parent
+    editor.boundary()
+    setBlockType(documentEditorSchema.nodes[type], { id: node.attrs.id, data: { ...node.attrs.data, type, ...(type === 'paragraph' ? {} : { level: Number(value) }) } })(editor.view.state, editor.view.dispatch)
+    editor.view.focus()
+  }
+  function dismissContextualTarget() {
+    const current = contextualTargetRef.current
+    setContextualInstruction('')
+    publishContextualTarget(null)
+    latest.current.onContextualDismiss?.(current)
+  }
+  function submitContextualCommand(event: FormEvent) {
+    event.preventDefault()
+    const instruction = contextualInstruction.trim(), target = contextualTargetRef.current
+    if (!instruction || !target || contextualIssue(target) || diagnostics.length || !latest.current.onContextualCommand) return
+    try { latest.current.onContextualCommand(instruction, target); setContextualInstruction(''); setCommandError('') }
+    catch (error) { setCommandError(error instanceof Error ? error.message : String(error)) }
+  }
+  function contextualIssue(target: DocumentContextSelection) {
+    return props.contextualCommandIssue ? props.contextualCommandIssue(target) : target.ranges?.length ? null : target.message ?? '请重新选择要修改的内容。'
+  }
   function openMath() {
     const editor = layout.current
     if (!editor) return
@@ -191,7 +298,7 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
       setMathDraft(null); editor.view.focus()
     } catch (error) { fail(error instanceof Error ? error.message : String(error)) }
   }
-  const toolbar = <div className="shared-document-toolbar" onPointerDownCapture={() => layout.current?.syncDomTextSelection()} role="toolbar" aria-label="正文工具">
+  const toolbar = <div ref={toolbarRef} tabIndex={-1} className="shared-document-toolbar" onPointerDownCapture={() => layout.current?.syncDomTextSelection()} role="toolbar" aria-label="正文工具">
       <button type="button" onMouseDown={event => event.preventDefault()} onClick={switchMode}>{mode === 'layout' ? '源文' : '排版'}</button>
       <button type="button" onClick={props.onUndo}>撤销</button><button type="button" onClick={props.onRedo}>重做</button>
       {mode === 'layout' && <>
@@ -205,7 +312,7 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
         <button type="button" onMouseDown={event => event.preventDefault()} onClick={() => { const editor = layout.current; if (editor) toggleMark(documentEditorSchema.marks.code)(editor.view.state, editor.view.dispatch) }}>行内代码</button>
         <button type="button" onMouseDown={event => event.preventDefault()} onClick={() => { const state = layout.current?.view.state; setLinkDraft(state?.selection.$from.marks().find(mark => mark.type === documentEditorSchema.marks.link)?.attrs.href ?? '') }}>链接</button>
         <button type="button" onMouseDown={event => event.preventDefault()} onClick={openMath}>公式</button>
-        <select aria-label="段落类型" defaultValue="paragraph" onChange={event => { const editor = layout.current; if (!editor) return; const type = event.target.value; const node = editor.view.state.selection.$from.parent; editor.boundary(); setBlockType(documentEditorSchema.nodes[type === 'paragraph' ? 'paragraph' : 'heading'], { id: node.attrs.id, data: { ...node.attrs.data, type: type === 'paragraph' ? 'paragraph' : 'heading', ...(type === 'paragraph' ? {} : { level: Number(type) }) } })(editor.view.state, editor.view.dispatch) }}><option value="paragraph">正文</option>{[1,2,3,4,5,6].map(level => <option key={level} value={level}>标题 {level}</option>)}</select>
+        <select aria-label="段落类型" defaultValue="paragraph" onChange={event => applyParagraphType(event.target.value)}><option value="paragraph">正文</option>{[1,2,3,4,5,6].map(level => <option key={level} value={level}>标题 {level}</option>)}</select>
       </>}
       {diagnostics.length > 0 && <button type="button" onClick={() => { draft.current = serializeDocumentMarkdown(props.document, props.target); setDiagnostics([]); props.onDraft(draft.current, []); setMode('layout') }}>丢弃待修草稿</button>}
     </div>
@@ -226,9 +333,23 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
       <button type="submit">应用公式</button><button type="button" onClick={() => setMathDraft(null)}>取消</button>
     </form>}
   </>
-  return <div className={`shared-document-editor${props.target === 'flow' ? ' shared-document-editor--flow' : ''}`} onCompositionStartCapture={() => props.onCompositionChange?.(true, draft.current)} onCompositionEndCapture={() => queueMicrotask(() => props.onCompositionChange?.(false, draft.current))}>
-    {!props.readOnly && (props.toolbarHost ? createPortal(<details className="flow-document-format"><summary onMouseDown={event => event.preventDefault()}>正文格式</summary>{toolbar}{editorForms}</details>, props.toolbarHost) : <>{toolbar}{editorForms}</>)}
-    {mode === 'layout' ? <div ref={layoutHost} /> : <div ref={sourceHost} />}
+  const contextualCard = contextualTarget && !props.readOnly && !props.contextualCardSuppressed && (contextualCardOpen
+    ? <aside ref={cardRef} className="shared-document-contextual-card" style={cardPosition} aria-label="当前编辑目标" onPointerDownCapture={() => layout.current?.syncDomTextSelection()} onKeyDown={event => { if (event.key === 'Escape') { event.preventDefault(); dismissContextualTarget(); layout.current?.view.focus(); source.current?.focus() } }}>
+        <div className="shared-document-contextual-card__header"><strong>{contextualTarget.label}</strong>{contextualTarget.ranges && <span>{contextualTarget.ranges.reduce((count, range) => count + Array.from(range.before).length, 0)} 字</span>}<button type="button" aria-label="关闭当前编辑目标" onClick={dismissContextualTarget}>关闭</button></div>
+        {mode === 'layout' && contextualTarget.selection?.kind !== 'object' && <div className="shared-document-contextual-card__actions" role="group" aria-label="当前选区格式"><button type="button" onClick={() => toggleStyle('bold')} aria-label="当前选区加粗">加粗</button><button type="button" onClick={() => toggleStyle('italic')} aria-label="当前选区斜体">斜体</button>{['段落', '标题'].includes(contextualTarget.label) && <select aria-label="当前段落类型" defaultValue="paragraph" onChange={event => applyParagraphType(event.target.value)}><option value="paragraph">正文</option>{[1, 2, 3, 4, 5, 6].map(level => <option key={level} value={level}>标题 {level}</option>)}</select>}</div>}
+        {props.onContextualCommand && <form className="shared-document-contextual-card__command" onSubmit={submitContextualCommand} onKeyDown={event => { if (event.key === 'Enter' && (event.nativeEvent.isComposing || event.keyCode === 229)) event.preventDefault() }}><label htmlFor={inputId}>AI 指令</label><input id={inputId} value={contextualInstruction} onChange={event => setContextualInstruction(event.target.value)} placeholder="告诉 AI 如何修改这里" autoComplete="off" /><button type="submit" disabled={!contextualInstruction.trim() || Boolean(contextualIssue(contextualTarget)) || diagnostics.length > 0}>发送</button></form>}
+        <button type="button" onClick={() => { setContextualCardOpen(false); const details = toolbarRef.current?.closest('details'); if (details) details.open = true; toolbarRef.current?.scrollIntoView?.({ block: 'nearest' }); toolbarRef.current?.focus() }}>更多格式</button>
+        {commandError && <p role="alert">{commandError}</p>}
+        {contextualIssue(contextualTarget) && <p role="status">{contextualIssue(contextualTarget)}</p>}<button className="shared-document-contextual-card__retain" type="button" onClick={() => setContextualCardOpen(false)}>保留目标</button>
+      </aside>
+    : <div className="shared-document-contextual-target" role="status"><span>已保留目标：{contextualTarget.label}</span><button type="button" onClick={() => setContextualCardOpen(true)}>展开编辑卡</button><button type="button" aria-label="关闭已保留目标" onClick={dismissContextualTarget}>关闭</button></div>)
+  return <div className={`shared-document-editor${props.target === 'flow' ? ' shared-document-editor--flow' : ''}`} onKeyDown={event => {
+    if (event.key === 'Escape' && contextualTarget) { event.preventDefault(); dismissContextualTarget() }
+    if (event.altKey && event.key === 'Enter' && contextualTarget) { event.preventDefault(); setContextualCardOpen(true); requestAnimationFrame(() => cardRef.current?.querySelector<HTMLInputElement>('input')?.focus()) }
+  }} onCompositionStartCapture={() => props.onCompositionChange?.(true, draft.current)} onCompositionEndCapture={() => queueMicrotask(() => props.onCompositionChange?.(false, draft.current))}>
+     {!props.readOnly && (props.toolbarHost ? createPortal(<details className="flow-document-format"><summary onMouseDown={event => event.preventDefault()}>正文格式</summary>{toolbar}{editorForms}</details>, props.toolbarHost) : <>{toolbar}{editorForms}</>)}
+     {contextualCard && createPortal(contextualCard, window.document.body)}
+     {mode === 'layout' ? <div ref={layoutHost} /> : <div ref={sourceHost} />}
     {diagnostics.length > 0 && <ul role="alert">{diagnostics.map((diagnostic, index) => <li key={index}><button type="button" onClick={() => { const editor = source.current; if (!editor) return; const position = Math.min(editor.state.doc.length, diagnostic.offset); editor.dispatch({ selection: { anchor: position }, effects: SourceView.scrollIntoView(position) }); editor.focus() }}>第 {diagnostic.line} 行：{diagnostic.message}</button></li>)}</ul>}
   </div>
 })

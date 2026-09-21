@@ -31,6 +31,7 @@ import type {
   DocumentTabsController,
   LessonFileTab,
 } from "../controller/useDocumentTabsController";
+import { RecordManagement } from "../RecordManagement";
 import { LessonDirectoryTree } from "./LessonDirectoryTree";
 import { contentDockResizeSign, WorkbenchSplitter } from "./WorkbenchSplitter";
 import {
@@ -320,6 +321,12 @@ export function LessonWorkspaceView(props: LessonWorkspaceViewProps) {
     ].find((item) => item.conversationId === conversationId);
     if (record) actions.selectDirectoryConversation(record);
   }
+  function clearAllDirectoryRecords() {
+    actions.setDirectoryConversations([]);
+    for (const project of state.projects)
+      actions.setProjectConversations(lower(project.normalizedPath), []);
+    actions.clearDirectoryContext();
+  }
 
   const nav = state.workspace && (
     <nav
@@ -573,10 +580,10 @@ export function LessonWorkspaceView(props: LessonWorkspaceViewProps) {
                     </div>
                     {open && (
                       <div className="lesson-project-group-body">
-                        {conversations.length === 0 ? (
+                        {conversations.length === 0 && (
                           <p className="lesson-section-note">还没有项目会话</p>
-                        ) : (
-                          <DirectorySessionList
+                        )}
+                        <DirectorySessionList
                             owner={{
                               kind: "project",
                               workspaceRoot: lower(state.workspace!),
@@ -599,11 +606,11 @@ export function LessonWorkspaceView(props: LessonWorkspaceViewProps) {
                               )
                                 actions.clearDirectoryContext();
                             }}
+                            onAllDeleted={clearAllDirectoryRecords}
                             onSelect={(item) =>
                               actions.selectDirectoryConversation(item)
                             }
                           />
-                        )}
                       </div>
                     )}
                   </div>
@@ -658,10 +665,10 @@ export function LessonWorkspaceView(props: LessonWorkspaceViewProps) {
               </div>
               {!collapsedGroups.has("__workspace__") && (
                 <div className="lesson-project-group-body">
-                  {state.directoryConversations.length === 0 ? (
+                  {state.directoryConversations.length === 0 && (
                     <p className="lesson-section-note">还没有工作空间会话</p>
-                  ) : (
-                    <DirectorySessionList
+                  )}
+                  <DirectorySessionList
                       owner={{
                         kind: "workspace",
                         workspaceRoot: lower(state.workspace!),
@@ -679,11 +686,11 @@ export function LessonWorkspaceView(props: LessonWorkspaceViewProps) {
                         )
                           actions.clearDirectoryContext();
                       }}
+                      onAllDeleted={clearAllDirectoryRecords}
                       onSelect={(item) =>
                         actions.selectDirectoryConversation(item)
                       }
                     />
-                  )}
                 </div>
               )}
             </div>
@@ -1035,6 +1042,8 @@ export function LessonWorkspaceView(props: LessonWorkspaceViewProps) {
                 port={props.documentPort}
                 onClosed={() => tabs.removeTab(tab.path)}
                 onDirtyChange={(dirty) => tabs.updateDirty(tab.path, dirty)}
+                onSelectionChange={() => tabs.selectionChanged(tab.path)}
+                onContextualCommand={(instruction, target) => tabs.sendContextualCommand(tab.path, instruction, target)}
               />
             ) : (
               <LessonDocumentEditor
@@ -1043,6 +1052,8 @@ export function LessonWorkspaceView(props: LessonWorkspaceViewProps) {
                 port={props.documentPort}
                 onClosed={() => tabs.removeTab(tab.path)}
                 onDirtyChange={(dirty) => tabs.updateDirty(tab.path, dirty)}
+                onSelectionChange={() => tabs.selectionChanged(tab.path)}
+                onContextualCommand={(instruction, target) => tabs.sendContextualCommand(tab.path, instruction, target)}
               />
             )
           ) : (
@@ -1486,13 +1497,14 @@ function TabButton({
 }
 
 /** V3.1 设计稿样式的目录会话行：图标 + 标题，行内 ⋯ 菜单保留分支/删除能力，不带搜索框。 */
-function DirectorySessionList({
+export function DirectorySessionList({
   owner,
   conversations,
   currentId,
   operation,
   onRecordsChange,
   onDeleted,
+  onAllDeleted,
   onSelect,
 }: {
   owner: ConversationOwner;
@@ -1501,6 +1513,7 @@ function DirectorySessionList({
   operation(request: LessonDesktopRequest): Promise<LessonDesktopResult>;
   onRecordsChange(records: LessonConversation[]): void;
   onDeleted?(ids: string[]): void;
+  onAllDeleted?(): void;
   onSelect(conversation: LessonConversation): void;
 }) {
   const [busy, setBusy] = useState(false);
@@ -1518,8 +1531,17 @@ function DirectorySessionList({
     }
   }
   return (
-    <ul className="lesson-session-rows">
-      {conversations.map((record) => (
+    <RecordManagement
+      owner={owner}
+      conversations={conversations}
+      operation={operation}
+      onRecordsChange={onRecordsChange}
+      onDeleted={onDeleted}
+      onAllDeleted={onAllDeleted}
+    >
+      {(records) => <>
+        <ul className="lesson-session-rows">
+          {conversations.map((record) => (
         <li
           key={record.conversationId}
           data-active={record.conversationId === currentId}
@@ -1527,7 +1549,7 @@ function DirectorySessionList({
           <button
             type="button"
             className="lesson-session-row"
-            disabled={busy}
+            disabled={busy || records.busy}
             aria-pressed={record.conversationId === currentId}
             onClick={() => onSelect(record)}
           >
@@ -1542,7 +1564,7 @@ function DirectorySessionList({
             <summary aria-label={`${record.title}更多操作`}>···</summary>
             <button
               type="button"
-              disabled={busy}
+              disabled={busy || records.busy}
               onClick={() => {
                 void run(async () => {
                   const result = await operation({
@@ -1559,41 +1581,20 @@ function DirectorySessionList({
             </button>
             <button
               type="button"
-              disabled={busy}
+              disabled={busy || records.busy}
               onClick={() => {
-                if (
-                  window.confirm(
-                    `删除“${record.title}”的对话、任务与日志？删除对话不会删除工作空间或项目中的任何文件。`,
-                  )
-                )
-                  void run(async () => {
-                    const result = await operation({
-                      operation: "delete-conversation",
-                      owner,
-                      conversationId: record.conversationId,
-                    });
-                    const records = result.conversations ?? [];
-                    onRecordsChange(records);
-                    onDeleted?.(
-                      conversations
-                        .filter(
-                          (item) =>
-                            !records.some(
-                              (next) =>
-                                next.conversationId === item.conversationId,
-                            ),
-                        )
-                        .map((item) => item.conversationId),
-                    );
-                  });
+                records.requestDelete(record);
               }}
             >
               删除应用记录
             </button>
           </details>
         </li>
-      ))}
-      {error && <li role="alert">{error}</li>}
-    </ul>
+          ))}
+          {error && <li role="alert">{error}</li>}
+        </ul>
+        {records.management}
+      </>}
+    </RecordManagement>
   );
 }
