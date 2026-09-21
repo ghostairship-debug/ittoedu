@@ -152,7 +152,16 @@ export function RecordManagement(props: RecordManagementProps) {
     ? '运行中的任务将停止。课例文件、附件、工程和未保存恢复稿保留；外部 CLI 历史不受影响。'
     : '运行中的任务将停止。删除对话不会删除工作空间或项目中的任何文件；未保存恢复稿保留；外部 CLI 历史不受影响。'
   const management = <>
-    <details className="lesson-conversation-records" onToggle={event => { if (event.currentTarget.open) void readUsage() }}>
+    <details className="lesson-conversation-records" aria-disabled={deleting || undefined} onToggle={event => {
+      // 删除进行中主进程会拒绝一切记录读取（src/main/localAgent/service.ts:37-39 的
+      // assertLocalAgentRecordsAvailable），所以这里直接收回展开请求：否则用户会在删除
+      // 途中看到「正在删除应用对话记录，请稍后重试」这种自造的失败。
+      if (deleting) {
+        event.currentTarget.open = false
+        return
+      }
+      if (event.currentTarget.open) void readUsage()
+    }}>
       <summary>管理对话记录</summary>
       <p>{scopeLabel}：{usageValue(usage?.currentScopeBytes)}</p>
       <p>全应用：{usageValue(usage?.applicationBytes)}</p>

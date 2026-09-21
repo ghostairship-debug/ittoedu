@@ -77,4 +77,40 @@ describe('external AI notice repository', () => {
     await expect(fs.stat(path.join(repository.v2Directory(scope), 'external-ai-notice.json.tmp'))).rejects.toMatchObject({ code: 'ENOENT' })
     await expect(repository.readExternalAiNotice(scope)).resolves.toMatchObject({ confirmed: true })
   })
+
+  it('keys the confirmation by CLI so one confirmed adapter never sends through another', async () => {
+    const { repository, scope } = await fixture()
+    const confirmed = await repository.confirmExternalAiNotice(scope, 'codex')
+    expect(confirmed).toMatchObject({ version: EXTERNAL_AI_NOTICE_VERSION, confirmed: true })
+    expect(await repository.readExternalAiNotice(scope, 'codex')).toEqual(confirmed)
+    expect(await repository.readExternalAiNotice(scope, 'claude')).toEqual({ version: EXTERNAL_AI_NOTICE_VERSION, confirmed: false })
+    expect(await repository.readExternalAiNotice(scope, 'opencode')).toEqual({ version: EXTERNAL_AI_NOTICE_VERSION, confirmed: false })
+    // 适配器无关的旧记录不是任一 CLI 的确认。
+    expect(await repository.readExternalAiNotice(scope)).toEqual({ version: EXTERNAL_AI_NOTICE_VERSION, confirmed: false })
+
+    const stored = JSON.parse(await fs.readFile(path.join(repository.v2Directory(scope), 'external-ai-notice.codex.json'), 'utf8'))
+    expect(stored).toMatchObject({ schemaVersion: 1, noticeVersion: EXTERNAL_AI_NOTICE_VERSION, scope, adapter: 'codex' })
+    await expect(fs.stat(path.join(repository.v2Directory(scope), 'external-ai-notice.claude.json'))).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it('rejects a record whose stored CLI is not the one being asked about', async () => {
+    const { repository, scope } = await fixture()
+    const directory = repository.v2Directory(scope)
+    await fs.mkdir(directory, { recursive: true })
+    await fs.writeFile(path.join(directory, 'external-ai-notice.claude.json'), JSON.stringify({
+      schemaVersion: 1, noticeVersion: EXTERNAL_AI_NOTICE_VERSION, scope, adapter: 'codex', confirmedAt: Date.now(),
+    }))
+    expect(await repository.readExternalAiNotice(scope, 'claude')).toEqual({ version: EXTERNAL_AI_NOTICE_VERSION, confirmed: false })
+    expect(await repository.readExternalAiNotice(scope, 'codex')).toEqual({ version: EXTERNAL_AI_NOTICE_VERSION, confirmed: false })
+  })
+
+  it('keeps concurrent confirmations of different adapters independent', async () => {
+    const { repository, scope } = await fixture()
+    const results = await Promise.all((['codex', 'claude', 'opencode'] as const).map(adapter => repository.confirmExternalAiNotice(scope, adapter)))
+    expect(results.every(result => result.confirmed)).toBe(true)
+    for (const adapter of ['codex', 'claude', 'opencode'] as const) {
+      await expect(repository.readExternalAiNotice(scope, adapter)).resolves.toMatchObject({ confirmed: true })
+      await expect(fs.stat(path.join(repository.v2Directory(scope), `external-ai-notice.${adapter}.json.tmp`))).rejects.toMatchObject({ code: 'ENOENT' })
+    }
+  })
 })

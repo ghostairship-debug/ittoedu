@@ -20,7 +20,7 @@ import { createArchiveFixture as createCourseProjectArchive } from '../fixtures/
 import { withDefaultComponentController } from '../../src/renderer/components/teacherControllerComponent'
 import { buildPublishedCourseStandaloneHtml } from '../../src/renderer/export/course/buildCoursePackages'
 import { runDynamicAdmissionProbe } from './dynamicAdmissionProbe'
-import { configureR18AiTestModel } from './helpers/r18AiTestModels'
+import { configureR18AiTestModel, type R18AiTestAdapter, type R18AiTestRoute } from './helpers/r18AiTestModels'
 import { runLocalCliFailureProbe } from './localCliFailureProbe'
 import { installChatFailureFixture } from './chatFailureFixture'
 import { fractionFallback, fractionComponentInstruction, exerciseFractionComponent, oscillationFallback, oscillationRuntimeInstruction, exerciseOscillationRuntime } from './generatedCarrierProbe'
@@ -74,6 +74,27 @@ async function openChatTaskSettings(chat: Locator): Promise<Locator> {
   }
   await expect(settings).toHaveJSProperty('open', true)
   return settings
+}
+
+// 040 最终门：命名真实用例必须先经既有 helper 固定授权路由（tests/e2e/helpers/r18AiTestModels.ts:57，
+// 非授权路由在 :76/:79/:84 直接 throw），再断言「原生返回的实际路由」，不能只看界面显示别名 label。
+// 模型/强度/服务档的选择逻辑全部复用 configureR18AiTestModel，这里只补断言，不另写一套选择逻辑。
+// - codex：原生目录的 resolvedModel 取原生 model 字段、缺失时回落 id（src/main/localAgent/codexAppServer.ts:196），
+//   授权 id 为 gpt-5.6-luna，故 resolvedModel 必须匹配 /luna/i。
+// - claude：授权通道是实际路由已确认的 DeepSeek，helper 已要求 resolvedModel 匹配 /deepseek/i
+//   （tests/e2e/helpers/r18AiTestModels.ts:38-39、:75-77），此处再按原生返回值断言一次。
+// - opencode：ACP 目录按合同恒不暴露 resolvedModel（src/main/localAgent/openCodeAcp.ts:95/:109/:134 均为 null），
+//   其实际路由身份就是原生 id（helper 已强制 openai/gpt-5.6-luna-fast 或 openai/gpt-5.6-luna），
+//   因此断言原生 id 而不是 label；codex/claude 则必须给出 resolvedModel，缺失即不可信、不退化只看 id。
+function expectAuthorizedR18Route(adapter: R18AiTestAdapter, route: R18AiTestRoute): void {
+  const nativeRoute = route.resolvedModel ?? route.model
+  expect(
+    nativeRoute,
+    `${adapter} 实际原生路由必须落在授权模型内（model=${route.model} resolvedModel=${route.resolvedModel ?? 'null'}）`,
+  ).toMatch(adapter === 'claude' ? /deepseek/i : /luna/i)
+  if (adapter !== 'opencode') {
+    expect(route.resolvedModel, `${adapter} 原生目录必须给出 resolvedModel，不能只看 id`).not.toBeNull()
+  }
 }
 
 function removeRunRoot(runRoot: string): void {
@@ -911,6 +932,8 @@ for (const adapter of ['codex', 'claude', 'opencode'] as const) test(`S3 真实�
     const chat = page.getByRole('complementary', { name: 'CLI 创作助手' })
     const route = await configureR18AiTestModel(page, adapter)
     console.log('S3 route', adapter, JSON.stringify(route))
+    // 只打印不断言等于没有约束：原生返回的实际路由必须落在授权模型内。
+    expectAuthorizedR18Route(adapter, route)
     const waitCandidate = async () => {
       try {
         await expect.poll(async () => {
@@ -1017,6 +1040,10 @@ for (const carrier of ['recipe', 'existing-component'] as const) test(`S3 真实
     const original = await saveAs(app, page, filename)
     await page.getByRole('button', { name: '创作助手', exact: true }).click()
     const chat = page.getByRole('complementary', { name: 'CLI 创作助手' })
+    // 这条用例会真实发送一个付费回合，发送前必须经 helper 固定授权路由并断言原生实际路由：
+    // 只选界面 CLI 时模型/强度取自用户当前配置，可能落在授权之外（本文件 :79-88 的约束）。
+    const route = await configureR18AiTestModel(page, 'codex')
+    expectAuthorizedR18Route('codex', route)
     await chat.getByLabel('CLI', { exact: true }).selectOption('codex')
     await chat.getByLabel('发送给创作助手').fill(carrier === 'recipe'
       ? '请复用现成 concept-v1 概念讲解配方，在当前页之后生成一页。标题“理解平均分”，解释“平均分就是每份同样多。”，例证“把一个整体分成四份，每份同样多才叫平均分。”，视觉槽位说明“观察各份是否同样大”。这个现成结构与需要完全匹配，使用 recipe.apply 一步完成并说明选阶理由，不自行堆砌 Native。只返回候选，不读取文件。'
@@ -1093,6 +1120,8 @@ test('S3 真实整课：Codex 从确认文档生成、重开与离线逐页运�
     const original = await saveAs(app, page, filename)
     await page.getByRole('button', { name: '创作助手', exact: true }).click()
     const chat = page.getByRole('complementary', { name: 'CLI 创作助手' })
+    const route = await configureR18AiTestModel(page, 'codex')
+    expectAuthorizedR18Route('codex', route)
     await chat.getByLabel('CLI', { exact: true }).selectOption('codex')
     await chat.getByText('从已确认文档生成整课', { exact: true }).click()
     await chat.getByLabel('生成包含多个片段的完整课件').check()
@@ -1180,6 +1209,8 @@ test('S3 真实生成组件：Codex 候选、教师改属性、保存重开与�
     await patchProjectDialogs(app, { projectSave: filename, projectOpen: filename })
     await page.getByRole('button', { name: '创作助手', exact: true }).click()
     const chat = page.getByRole('complementary', { name: 'CLI 创作助手' })
+    const route = await configureR18AiTestModel(page, 'codex')
+    expectAuthorizedR18Route('codex', route)
     await chat.getByLabel('CLI', { exact: true }).selectOption('codex')
     await chat.getByLabel('发送给创作助手').fill(fractionComponentInstruction(fallbackAsset.id))
     const started = Date.now()
@@ -1270,6 +1301,8 @@ test('S3 真实生成Runtime：连续动画、文案编辑、历史与离线互�
     await patchProjectDialogs(app, { projectSave: filename, projectOpen: filename })
     await page.getByRole('button', { name: '创作助手', exact: true }).click()
     const chat = page.getByRole('complementary', { name: 'CLI 创作助手' })
+    const route = await configureR18AiTestModel(page, 'codex')
+    expectAuthorizedR18Route('codex', route)
     await chat.getByLabel('CLI', { exact: true }).selectOption('codex')
     await chat.getByLabel('发送给创作助手').fill(oscillationRuntimeInstruction(fallbackAsset.id))
     const started = Date.now()
@@ -2652,6 +2685,8 @@ for (const adapter of ['claude', 'opencode', 'codex'] as const) test(`S3 真实�
     await page.getByRole('button', { name: '打开工程（Ctrl+O）', exact: true }).click()
     await page.getByRole('button', { name: '创作助手', exact: true }).click()
     const chat = page.getByRole('complementary', { name: 'CLI 创作助手' })
+    const route = await configureR18AiTestModel(page, adapter)
+    expectAuthorizedR18Route(adapter, route)
     await chat.getByLabel('CLI', { exact: true }).selectOption(adapter)
     const records = () => page.evaluate(async owner => {
       const response = await window.desktopAPI.localAgent({ operation: 'list', ...owner })

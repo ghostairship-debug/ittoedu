@@ -18,6 +18,18 @@ import {
 
 const GENERATION_REQUEST_FILE = 'generation-request.json'
 const EXTERNAL_AI_NOTICE_FILE = 'external-ai-notice.json'
+/** The confirmed CLI is part of the confirmation key, never inferred: one record per
+ * scope directory *and* adapter file. A teacher who confirmed Codex has not confirmed Claude. */
+function externalAiNoticeFile(adapter: LocalAgentId | undefined): string {
+  return adapter === undefined ? EXTERNAL_AI_NOTICE_FILE : `external-ai-notice.${adapter}.json`
+}
+const externalAiNoticeRecordSchema = z.object({
+  schemaVersion: z.literal(1),
+  noticeVersion: z.literal(EXTERNAL_AI_NOTICE_VERSION),
+  scope: externalAiNoticeConfirmationSchema.shape.scope,
+  adapter: localAgentIdSchema.optional(),
+  confirmedAt: z.number().int().nonnegative(),
+}).strict()
 
 export class LocalAgentRepository {
   private queue: Promise<unknown> = Promise.resolve()
@@ -93,15 +105,16 @@ export class LocalAgentRepository {
     for (const name of names) total += await this.pathBytes(path.join(resolved, name), root)
     return total
   }
-  readExternalAiNotice(scope: AiWorkspaceIdentity): Promise<ExternalAiNoticeStatus> {
+  readExternalAiNotice(scope: AiWorkspaceIdentity, adapter?: LocalAgentId): Promise<ExternalAiNoticeStatus> {
     const requested = workspaceIdentityKey(scope)
+    const requestedAdapter = adapter === undefined ? undefined : localAgentIdSchema.parse(adapter)
     return this.serialize(async () => {
       try {
-        const filename = path.join(this.v2Directory(scope), EXTERNAL_AI_NOTICE_FILE)
+        const filename = path.join(this.v2Directory(scope), externalAiNoticeFile(requestedAdapter))
         const stat = await fs.stat(filename)
         if (stat.size > 64 * 1024) return externalAiNoticeStatusSchema.parse({ version: EXTERNAL_AI_NOTICE_VERSION, confirmed: false })
-        const confirmation = externalAiNoticeConfirmationSchema.parse(JSON.parse(await fs.readFile(filename, 'utf8')))
-        if (workspaceIdentityKey(confirmation.scope) !== requested) {
+        const confirmation = externalAiNoticeRecordSchema.parse(JSON.parse(await fs.readFile(filename, 'utf8')))
+        if (workspaceIdentityKey(confirmation.scope) !== requested || confirmation.adapter !== requestedAdapter) {
           return externalAiNoticeStatusSchema.parse({ version: EXTERNAL_AI_NOTICE_VERSION, confirmed: false })
         }
         return externalAiNoticeStatusSchema.parse({
@@ -117,18 +130,20 @@ export class LocalAgentRepository {
       }
     })
   }
-  confirmExternalAiNotice(scope: AiWorkspaceIdentity): Promise<ExternalAiNoticeStatus> {
+  confirmExternalAiNotice(scope: AiWorkspaceIdentity, adapter?: LocalAgentId): Promise<ExternalAiNoticeStatus> {
     const parsedScope = externalAiNoticeConfirmationSchema.shape.scope.parse(scope)
+    const parsedAdapter = adapter === undefined ? undefined : localAgentIdSchema.parse(adapter)
     return this.serialize(async () => {
       const directory = this.v2Directory(parsedScope)
       await fs.mkdir(directory, { recursive: true })
-      const destination = path.join(directory, EXTERNAL_AI_NOTICE_FILE)
+      const destination = path.join(directory, externalAiNoticeFile(parsedAdapter))
       const temporary = `${destination}.tmp`
       const confirmedAt = Date.now()
-      const confirmation = externalAiNoticeConfirmationSchema.parse({
+      const confirmation = externalAiNoticeRecordSchema.parse({
         schemaVersion: 1,
         noticeVersion: EXTERNAL_AI_NOTICE_VERSION,
         scope: parsedScope,
+        adapter: parsedAdapter,
         confirmedAt,
       })
       try {

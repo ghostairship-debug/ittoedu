@@ -47,7 +47,7 @@ Workspace设置、LocalAgent探测/路径验证与诊断consumer；认证由CLI�
 
 ```text
 npx --no-install vitest run tests/unit/electronLaunchEnvironment.test.ts
-npx --no-install playwright test tests/e2e/stabilizationCoreUsability.spec.ts --grep "S3 默认可见与普通讨论：安全消息、分页事件重放及零工程写入$"
+npx --no-install playwright test tests/e2e/stabilizationCoreUsability.spec.ts --grep "S3 默认可见与普通讨论：安全消息、完整历史及零工程写入$"
 ```
 
 真实Windows环境验证三CLI安装/登录/版本诊断和一次配置确认；不将fixture状态页当本机已登录证据。

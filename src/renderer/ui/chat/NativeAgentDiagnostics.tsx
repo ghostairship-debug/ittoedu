@@ -102,9 +102,11 @@ export function NativeAgentDiagnostics({ adapter }: NativeAgentDiagnosticsProps)
         {state === 'refreshing' ? '刷新中…' : '刷新诊断'}
       </button>
     </div>
-    <p role="status" aria-live="polite">{cliName}：{probeStatusText(state, probe)}</p>
+    {/* 可见状态行不是 live region：它与下方状态段落在同一次提交里从无到有挂载，
+        两者都是 polite 会重复播报同一个状态词。这里显式 aria-live="off" 只保留可见文本。 */}
+    <p aria-live="off">{cliName}：{probeStatusText(state, probe)}</p>
     {probe && <>
-      <p role="status">状态：{status}。{probeGuidance[probe.status]}</p>
+      <p role="status" aria-live="polite">状态：{status}。{probeGuidance[probe.status]}</p>
       <p>版本：{probe.version ?? '未返回版本'}</p>
     </>}
     {error && <p role="alert">{error}</p>}

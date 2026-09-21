@@ -3,7 +3,7 @@ import { LessonAuthoring } from '../lessonAuthoring'
 import { LessonMaterials } from '../lessonMaterials'
 import { lessonDocumentFiles } from '../lessonDocumentDesktopService'
 import { readLessonGenerationContext } from './lessonGenerationContext'
-import { generationRequestSchema, type GenerationRequest } from '../../shared/generationContract'
+import type { GenerationRequest } from '../../shared/generationContract'
 import type { ConversationOwner, FrozenEditTarget, LessonIdentity } from '../../shared/lessonWorkspace'
 import { assertFrozenTargetMatchesOwner, conversationOwnerOf, conversationWorkingDirectory, resolveSendFrozenTarget } from '../../shared/lessonWorkspace'
 import { normalizeWorkspacePath, workspaceIdentityKey, type ConversationAgentWorkspace } from '../../shared/workspaceIdentity'
@@ -11,7 +11,8 @@ import { LessonWorkspaceService } from '../lessonWorkspace'
 import { LessonConversationRepository } from './lessonConversationRepository'
 import { app, session } from 'electron'
 import { configureNativeSystemProxy } from './nativeProxy'
-import { localAgentRequestSchema, localAgentResponseSchema, type LocalAgentResponse } from '../../shared/localAgentContract'
+import { localAgentRequestSchema, localAgentResponseSchema, type ExternalReferencesScope, type LocalAgentResponse } from '../../shared/localAgentContract'
+import { generationExternalReferences, lessonContextReferences, withLessonGenerationContext } from '../../shared/externalAiReferences'
 import { createWorkspaceIdentity } from '../workspaceIdentity'
 import { LocalAgentHarness } from './harness'
 import { LocalAgentRepository } from './repository'
@@ -59,10 +60,12 @@ async function operate(request: unknown): Promise<LocalAgentResponse> {
   const repository = localAgentRepository()
   if (input.operation === 'external-notice') {
     const externalNotice = input.confirm
-      ? await repository.confirmExternalAiNotice(input.scope)
-      : await repository.readExternalAiNotice(input.scope)
+      ? await repository.confirmExternalAiNotice(input.scope, input.adapter)
+      : await repository.readExternalAiNotice(input.scope, input.adapter)
     return { enabled: true, externalNotice }
   }
+  // Read-only and harness-free: the teacher sees the list before anything is sent.
+  if (input.operation === 'external-references') return { enabled: true, externalReferences: await externalReferences(input.scope) }
   configureNativeSystemProxy(url => session.defaultSession.resolveProxy(url))
   const agent = localAgentHarness()
   if (input.operation === 'probe') return { enabled: true, probe: await agent.probe(input.adapter) }
@@ -175,11 +178,14 @@ async function operate(request: unknown): Promise<LocalAgentResponse> {
 export async function closeLocalAgents(): Promise<void> { await harness?.close() }
 export function localAgentsRunning(): boolean { return harness?.running ?? false }
 
-async function currentLessonPrompt(lesson: Awaited<ReturnType<LessonWorkspaceService['read']>>, prompt: string): Promise<string> {
+async function currentLessonTurn(lesson: Awaited<ReturnType<LessonWorkspaceService['read']>>, prompt: string): Promise<{ input: string; context: unknown }> {
   const current = await readCurrentLesson(lesson.identity, false)
   const input = `当前课例真实文件与实际材料读取记录如下；以本轮内容为准，不重放旧候选，不猜测教师已确认。\n${JSON.stringify(current.context)}\n教师请求：\n${prompt}`
   if (Buffer.byteLength(input) > 160000) throw new Error('当前教学文档超过单轮输入预算，请缩小本轮引用范围')
-  return input
+  return { input, context: current.context }
+}
+async function currentLessonPrompt(lesson: Awaited<ReturnType<LessonWorkspaceService['read']>>, prompt: string): Promise<string> {
+  return (await currentLessonTurn(lesson, prompt)).input
 }
 export async function relocateLocalAgentLesson(previous: LessonIdentity, next: LessonIdentity): Promise<void> {
   const conversations = new LessonConversationRepository(app.getPath('userData'))
@@ -222,11 +228,32 @@ function readCurrentLesson(lesson: LessonIdentity, requireBuild: boolean) {
 }
 async function refreshLessonRequest(lesson: LessonIdentity, request: GenerationRequest): Promise<GenerationRequest> {
   const current = await readCurrentLesson(lesson, request.purpose === 'whole-course')
-  return generationRequestSchema.parse({ ...request,
-    context: { ...(request.context && typeof request.context === 'object' && !Array.isArray(request.context) ? request.context : { projectContext: request.context }), currentLesson: current.context },
-    resourceFiles: [...(request.resourceFiles ?? []).filter(file => !file.path.startsWith('lesson-materials/')), ...current.resourceFiles],
-    confirmedDocuments: current.confirmedDocuments,
-  })
+  // The pre-send explanation uses this same expansion, so it describes this payload and no other.
+  //
+  // It is NOT the final payload, though: the harness still appends task-context resources to the
+  // request after this point — `harness.ts:313` and `:381-382` add `pending-host-results.json` /
+  // `host-result.json` (raw `AiHostResult[]`, which may carry base64 PNG frames), `:374` adds
+  // `observation/host-feedback.json`, and `:378` adds `repair/component-changes-<requestId>/…`.
+  // Those never appear in the explanation. Do not claim the explanation is exhaustive; making it
+  // so requires freezing the request after the session exists, inside the harness.
+  return withLessonGenerationContext(request, current)
+}
+
+/** The teacher confirms the explanation, not the renderer's draft: this computes the
+ * list from the same final request the send uses. Never writes anything. */
+async function externalReferences(scope: ExternalReferencesScope): Promise<string[]> {
+  if (scope.kind === 'generation') {
+    const lesson = scope.lessonWorkspace
+      ? { schemaVersion: 1 as const, lessonId: scope.lessonWorkspace.lessonId, normalizedDirectory: scope.lessonWorkspace.normalizedDirectory }
+      : undefined
+    return generationExternalReferences(lesson ? await refreshLessonRequest(lesson, scope.request) : scope.request)
+  }
+  const requested = scope.workspace
+  const { owner } = await new LessonConversationRepository(app.getPath('userData')).requireOwned(requested)
+  if (owner.kind !== 'lesson') return [`会话目录：${requested.normalizedDirectory}`, '应用内置课件方法：随提示词发送的当前版本方法文件']
+  const lesson = await new LessonWorkspaceService(app.getPath('userData')).read(owner.lesson)
+  const { context } = await currentLessonTurn(lesson, scope.prompt)
+  return [`会话目录：${requested.normalizedDirectory}`, ...lessonContextReferences(context)]
 }
 
 

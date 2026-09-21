@@ -36,6 +36,13 @@ import {
   type AsarArtifactEvidence,
   type ExecutableArtifactEvidence,
 } from './releaseArtifactEvidence'
+import {
+  formatReleaseArtifactBoundaryFindings,
+  releaseArtifactBoundaryTargetPath,
+  releaseArtifactBoundaryTargetPaths,
+  scanReleaseArtifactPath,
+  type ReleaseArtifactBoundaryFinding,
+} from './releaseArtifactBoundary'
 
 interface VerificationCheck {
   name: string
@@ -74,32 +81,46 @@ const unpackedAppAsar = path.join(
   'resources',
   'app.asar',
 )
-const sampleProject = path.join(
-  projectRoot,
-  'examples',
-  'sample-project.h5lesson',
+/**
+ * 打包产物边界扫描的目录：`win-unpacked/resources/**`。
+ *
+ * 这是应用自身的负载（app.asar、app.asar.unpacked、electron-builder 生成的
+ * 辅助文件），不含 exe 同级的 Electron/Chromium 运行时文件。实测（2026-09-22）：
+ * 用同一套规则扫 `node_modules/electron/dist` 的 75 个文件（347.3 MB）会在
+ * `electron.exe` 上命中 5 处 `credential.aws-access-key-id` —— Chromium 自带的
+ * AWS 文档示例串，整树无例外扫描会把发布验证误判成失败，而放宽该规则属于削弱
+ * 现有规则。
+ */
+const unpackedResourcesDirectory = path.join(
+  releaseDirectory,
+  'win-unpacked',
+  'resources',
 )
-const sampleComponent = path.join(
-  projectRoot,
-  'examples',
-  'sample-counter.h5component',
-)
+/**
+ * 发布物数据边界的 6 个源码树目标只有一处定义：`scripts/releaseArtifactBoundary.ts`
+ * 的 `RELEASE_ARTIFACT_BOUNDARY_DEFAULT_TARGET_FILES`。这里按 key 取具名绝对路径，
+ * 不再平行重写一份字面清单 —— 两份清单曾各自存在，2026-09-22 实测它们解析到仓库根
+ * 后同序同集合，所以合并为单一来源不改变被扫描的文件。
+ * 漂移守卫见 `tests/unit/releaseArtifactBoundary.test.ts`。
+ */
+const sampleProject = releaseArtifactBoundaryTargetPath('sampleProject', projectRoot)
+const sampleComponent = releaseArtifactBoundaryTargetPath('sampleComponent', projectRoot)
 const renderHostBenchmarkDirectory = path.join(
   projectRoot,
   'examples',
   'render-host-benchmark',
 )
-const renderHostBenchmarkProject = path.join(
-  renderHostBenchmarkDirectory,
-  'render-host-benchmark-v9.h5lesson',
+const renderHostBenchmarkProject = releaseArtifactBoundaryTargetPath(
+  'renderHostBenchmarkProject',
+  projectRoot,
 )
-const renderHostBenchmarkPublished = path.join(
-  renderHostBenchmarkDirectory,
-  'published-v2.json',
+const renderHostBenchmarkPublished = releaseArtifactBoundaryTargetPath(
+  'renderHostBenchmarkPublished',
+  projectRoot,
 )
-const renderHostBenchmarkHtml = path.join(
-  renderHostBenchmarkDirectory,
-  'render-host-benchmark-v2.html',
+const renderHostBenchmarkHtml = releaseArtifactBoundaryTargetPath(
+  'renderHostBenchmarkHtml',
+  projectRoot,
 )
 const renderHostBenchmarkNotices = path.join(
   renderHostBenchmarkDirectory,
@@ -137,6 +158,62 @@ function pass(name: string, detail: string): void {
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message)
+}
+
+/**
+ * AI 消息、trace、凭据与本机个人路径不得进入 `.h5lesson`、Published payload、
+ * 组件包、导出 HTML 与打包产物。
+ *
+ * `docs/development-plan/reviews/2026-09-21-r20-contextual-acceptance.md:85`
+ * 记录该边界此前只有一次人工扫描结论、没有任何自动化检查；这里把它变成
+ * 每次发版验证都会重跑的一步。只读产物，不改写 `examples/`。
+ * 规则集与「非空转」证明见 `scripts/releaseArtifactBoundary.ts` 与
+ * `tests/unit/releaseArtifactBoundary.test.ts`。
+ *
+ * 每个目标按路径形态分派：普通文件走字节扫描，目录走逐文件扫描，`*.asar`
+ * 走逐条目扫描（asar 未压缩，但按原始字节扫会丢掉条目归属与 unpacked 条目）。
+ * 覆盖计数一并打进验证报告，避免「0 命中」掩盖「其实什么都没扫」。
+ */
+async function verifyReleaseArtifactBoundary(
+  name: string,
+  targets: readonly string[],
+): Promise<void> {
+  const findings: ReleaseArtifactBoundaryFinding[] = []
+  let files = 0
+  let archives = 0
+  let entries = 0
+  let bytes = 0
+  for (const target of targets) {
+    assert(existsSync(target), `发布物数据边界扫描目标不存在：${target}`)
+    const result = await scanReleaseArtifactPath(target)
+    findings.push(...result.findings)
+    files += result.coverage.files
+    archives += result.coverage.archives
+    entries += result.coverage.entries
+    bytes += result.coverage.bytes
+    if (result.findings.length > 0) {
+      console.error(
+        formatReleaseArtifactBoundaryFindings([...result.findings], target),
+      )
+      continue
+    }
+    console.log(
+      `OK\t${target}\t应用记录/凭据 0 命中` +
+        `（普通文件 ${result.coverage.files}，asar 归档 ${result.coverage.archives}` +
+        `/条目 ${result.coverage.entries}）`,
+    )
+  }
+  if (findings.length > 0) {
+    throw new Error(
+      formatReleaseArtifactBoundaryFindings(findings, '发布物数据边界'),
+    )
+  }
+  pass(
+    name,
+    `${targets.length} 个产物（普通文件 ${files} 个，asar 归档 ${archives} 个/条目 ${entries} 条，` +
+      `共检查 ${(bytes / 1024 / 1024).toFixed(1)} MB）的` +
+      '应用对话记录、trace、凭据与本机个人路径均为 0 命中',
+  )
 }
 
 function sampleControllerTarget(
@@ -1051,9 +1128,37 @@ async function main(): Promise<void> {
     'Course Project V9、Published Course V2、Runtime API 2 Phaser/Three 与 Component API 4 DOM/Phaser 均通过正式解析器',
   )
 
+  await verifyReleaseArtifactBoundary(
+    '发布物数据边界',
+    releaseArtifactBoundaryTargetPaths(projectRoot),
+  )
+
+  /**
+   * 打包产物数据边界：`win-unpacked/resources/**`。
+   *
+   * app.asar 走逐条目扫描（`getRawHeader` 枚举 → 按 offset/size 取内容 → 同一套
+   * 规则），目录里其余文件走字节扫描。头部损坏、条目越界、unpacked 条目读不出来
+   * 都会抛错，不会静默当成干净。
+   *
+   * portable 单文件刻意不在本步内：electron-builder 的 portable 目标用 NSIS +
+   * `SetCompressor zlib` 打包（`app-builder-lib/out/targets/nsis/NsisTarget.js:267`），
+   * 应用负载在 exe 里是压缩态，对它的原始字节做文本扫描只能看到自解压外壳，
+   * 报「0 命中」等于把没看过的负载判成干净。它由同一份构建产出的
+   * `win-unpacked/resources/app.asar` 条目扫描承担。
+   */
+  assert(
+    unpackedAppAsar.startsWith(`${unpackedResourcesDirectory}${path.sep}`),
+    `app.asar 必须位于 ${unpackedResourcesDirectory} 之内，否则打包产物边界扫不到它`,
+  )
+  await verifyReleaseArtifactBoundary('打包产物数据边界', [
+    unpackedResourcesDirectory,
+  ])
+
   await verifyPortableStartup()
   await verifyUnpackedWorkflows()
   await verifyOfflineHtml(controllerTarget)
+
+  await verifyReleaseArtifactBoundary('导出 HTML 数据边界', [exportedHtml])
 
   await fs.writeFile(
     reportPath,

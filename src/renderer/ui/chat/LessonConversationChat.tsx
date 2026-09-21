@@ -65,7 +65,11 @@ function LessonDiscussion({ workspace, projectId, projectPath, documentTarget }:
   const pending = useRef<string | undefined>(undefined), generation = useRef(0), sendGeneration = useRef(0)
   const api = window.desktopAPI
   const externalNotice = useExternalAiNotice(api)
-  const noticeReferences = (prompt: string) => [`会话目录：${workspace.normalizedDirectory}`, ...mentions.filter(item => prompt.includes(`@${item.path}`)).map(item => `消息引用：${item.path}`)]
+  // Main computes the reference list from the same final request the send uses.
+  // The renderer only contributes facts that list does not cover (message @refs).
+  const noticeInput = (prompt: string, target: LocalAgentId, extra: readonly string[] = []) => ({ scope: workspace, adapter: target,
+    referencesScope: { kind: 'conversation' as const, workspace, prompt: prompt.trim() || '（本轮没有新的教师消息）' },
+    additionalReferences: [...mentions.filter(item => prompt.includes(`@${item.path}`)).map(item => `消息引用：${item.path}`), ...extra] })
   const running = records.filter(record => 'kind' in record.workspace && record.status === 'running').sort((a, b) => chatRecordTime(b) - chatRecordTime(a))[0]
   const latestSession = records.filter(record => record.adapter === adapter)
     .sort((a, b) => (b.task?.startedAt ?? chatRecordTime(b)) - (a.task?.startedAt ?? chatRecordTime(a)))[0]
@@ -140,7 +144,7 @@ function LessonDiscussion({ workspace, projectId, projectPath, documentTarget }:
         if (!editingScope || documentTargetChanged) throw new Error(documentTargetChanged ? '文档目标已变化，请重新选择后再发送' : '请先选择“当前选区”或“全文”')
         const frozen = command?.target ?? freezeDocumentEditTarget(editingDocument, editingScope)
         if (!api.lessonDocumentAi) throw new Error('文档修改入口未连接')
-        if (!await externalNotice.ensure({ scope: workspace, adapter, references: [...noticeReferences(prompt), `文档：${editingDocument.name}（全文作为上下文；允许修改：${frozen.label}）`] })) return
+        if (!await externalNotice.ensure(noticeInput(prompt, adapter, [`文档：${editingDocument.name}（全文作为上下文；允许修改：${frozen.label}）`]))) return
         if (!isCurrentSend() || documentTaskGeneration.current !== documentToken) return
         await documentTask.current?.stop()
         if (!isCurrentSend() || documentTaskGeneration.current !== documentToken) return
@@ -155,7 +159,7 @@ function LessonDiscussion({ workspace, projectId, projectPath, documentTarget }:
         const sessionId = await controller.start({ ...editingDocument, applyPolicy: 'preview' }, adapter, prompt, undefined, frozen)
         if (documentTaskGeneration.current === documentToken) { documentSession.current = sessionId; pending.current = sessionId; setConfigurationSession({ adapter, id: sessionId ?? null }) }
       } else if (running?.task) {
-        if (!await externalNotice.ensure({ scope: workspace, adapter: running.adapter, references: noticeReferences(prompt) }) || !isCurrentSend()) return
+        if (!await externalNotice.ensure(noticeInput(prompt, running.adapter)) || !isCurrentSend()) return
         const result = await api.localAgent({ operation: 'lesson-input', workspace, sessionId: running.id,
           input: { version: 1, kind: inputKind, inputId: crypto.randomUUID(), taskId: running.task.taskId, epoch: running.task.epoch, workspace: running.workspace, turnId: running.task.turnId, text: prompt } })
         if (!result.inputDelivery || result.inputDelivery.status === 'rejected') throw new Error(result.inputDelivery?.reason ?? 'CLI 没有接受输入')
@@ -164,7 +168,7 @@ function LessonDiscussion({ workspace, projectId, projectPath, documentTarget }:
       else {
         const prior = records.filter(record => record.adapter === adapter).sort((a, b) => chatRecordTime(b) - chatRecordTime(a))[0]
         const frozenTarget = { kind: 'directory' as const, directory: normalizeWorkspacePath(workspace.normalizedDirectory) }
-        if (!await externalNotice.ensure({ scope: workspace, adapter, references: noticeReferences(prompt) }) || !isCurrentSend()) return
+        if (!await externalNotice.ensure(noticeInput(prompt, adapter)) || !isCurrentSend()) return
         setConfigurationSession({ adapter, id: null })
         const result = await api.localAgent(prior?.externalSessionId
           ? { operation: 'lesson-resume', workspace, sessionId: prior.id, prompt, frozenTarget }
@@ -238,7 +242,7 @@ function LessonDiscussion({ workspace, projectId, projectPath, documentTarget }:
       {questions.map(question => <NativeAgentQuestion key={question.questionId} question={question} onAnswer={async input => {
         if (!api || !running) throw new Error('当前任务已结束')
         const token = generation.current
-        if (!await externalNotice.ensure({ scope: workspace, adapter: running.adapter, references: noticeReferences('') }) || token !== generation.current) return
+        if (!await externalNotice.ensure(noticeInput('', running.adapter)) || token !== generation.current) return
         const result = await api.localAgent({ operation: 'lesson-input', workspace, sessionId: running.id, input })
         if (!result.inputDelivery || result.inputDelivery.status === 'rejected') throw new Error(result.inputDelivery?.reason ?? 'CLI 没有接受回答')
       }} />)}
@@ -268,7 +272,7 @@ function LessonDiscussion({ workspace, projectId, projectPath, documentTarget }:
     <div className="chat-composer-controls">
       <label className="chat-cli-picker">CLI <select aria-label="CLI" value={adapter} disabled={!!running || sending} onChange={event => setAdapter(event.target.value as LocalAgentId)}><option value="codex">Codex</option><option value="claude">Claude</option><option value="opencode">OpenCode</option></select></label>
       <NativeAgentConfiguration adapter={adapter} configurationSequence={configurationEvent?.time ?? 0} onSavingChange={setConfigurationSaving} taskConfiguration={confirmedCapabilities.success ? confirmedCapabilities.data.current : undefined} />
-      <button type="button" onClick={() => externalNotice.review({ scope: workspace, adapter, references: noticeReferences(instruction) })}>外部处理说明</button>
+      <button type="button" onClick={() => externalNotice.review(noticeInput(instruction, adapter))}>外部处理说明</button>
     </div>
     <ChatComposerMenus ref={composerMenus} value={instruction} onChange={setInstruction}
       commands={[{ id: 'stop', label: '停止当前任务', run: stopCurrentTask }]}

@@ -82,6 +82,25 @@ export function FlowWorkspace({ view, sessionToken, assets, selection, textEdit,
       return null
     } catch (error) { return error instanceof Error ? error.message : String(error) }
   }
+  // `null` reaches `onContextualTargetChange` from several places (SharedDocumentEditor.tsx:143
+  // caret collapse in source mode, :217 revision change, :224 mode switch, :266 dismissal), so a
+  // `null` on its own does not mean the layout editor is coming back. The committed editor decides
+  // the retirement instead: `switchMode` publishes that `null` while the source editor is still
+  // mounted (SharedDocumentEditor.tsx:352 renders one host at a time), so the check runs after the
+  // commit that swaps them. A caret collapsed inside source mode therefore keeps the guard and the
+  // block it points at, and the guard is dropped only once the source editor is really gone.
+  const [sourceRetirement, setSourceRetirement] = useState(0)
+  const sourceEditorMounted = () => Boolean(workspaceRef.current?.querySelector('[aria-label="正文源文编辑"]'))
+  useEffect(() => {
+    if (!selection?.documentSelectionIssue) return
+    if (sourceEditorMounted()) return
+    run({ kind: 'clear-selection' })
+    // `sessionToken.generation` is in the key of the editor below (see `:146`), so bumping it
+    // remounts the editor without ever calling `onContextualTargetChange`: that path retires the
+    // source-mode guard too, and without this dependency the effect would not re-run and the
+    // guard would outlive source mode, refusing every later selection-scope send with a message
+    // about a view the user is no longer in.
+  }, [selection?.documentSelectionIssue, sourceRetirement, sessionToken.generation])
   useEffect(() => {
     const selected = new Set(readOnly ? [] : selection?.selectedBlockIds ?? [])
     for (const figure of paperRef.current?.querySelectorAll<HTMLElement>('figure[data-flow-media-layout]') ?? []) {
@@ -148,7 +167,14 @@ export function FlowWorkspace({ view, sessionToken, assets, selection, textEdit,
               if (target?.mode === 'source') {
                 const blockId = current.current.view.activeBlockId
                 if (blockId) run({ kind: 'select-blocks', blockIds: [blockId], focus: 'text', textRange: null, documentSelectionIssue: 'Flow 源文选区暂不支持 AI 局部修改，请切回排版选择内容。' }, blockId)
+                return
               }
+              // The source-mode guard must not outlive source mode, but it must survive everything
+              // the source editor retires a target for while it is still on screen. Leaving the
+              // issue behind after a real return to layout would refuse the next selection-scope
+              // send with a source-view message the user cannot see; clearing it on a caret
+              // collapse inside source mode would silently widen that send to the whole page.
+              if (selection?.documentSelectionIssue) setSourceRetirement(count => count + 1)
             }}
             contextualCommandIssue={contextualCommandIssue}
             onContextualCommand={(instruction, target) => {

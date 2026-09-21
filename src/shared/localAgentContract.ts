@@ -97,8 +97,19 @@ export type LocalAgentConfiguration = z.infer<typeof localAgentConfigurationSche
 
 const owner = { projectId: z.string().min(1).max(200), projectPath: z.string().min(1).max(32767), lessonWorkspace: lessonAgentWorkspaceSchema.optional() }
 const optionalOwner = { projectId: owner.projectId.optional(), projectPath: owner.projectPath.optional() }
+/** Read-only pre-send explanation. Main answers with the references it will
+ * actually attach, computed from the same final request the send uses. */
+export const externalReferencesScopeSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('generation'), lessonWorkspace: lessonAgentWorkspaceSchema.optional(), request: generationRequestSchema }).strict(),
+  z.object({ kind: z.literal('conversation'), workspace: conversationAgentWorkspaceSchema, prompt: z.string().min(1).max(100000) }).strict(),
+])
+export type ExternalReferencesScope = z.infer<typeof externalReferencesScopeSchema>
 export const localAgentRequestSchema = z.discriminatedUnion('operation', [
-  z.object({ operation: z.literal('external-notice'), scope: aiWorkspaceIdentitySchema, confirm: z.literal(true).optional() }).strict(),
+  // The adapter is part of the confirmation key. It stays optional only for
+  // callers that predate per-CLI confirmation; those keep the adapter-agnostic
+  // record and never see another CLI's confirmation.
+  z.object({ operation: z.literal('external-notice'), scope: aiWorkspaceIdentitySchema, adapter: localAgentIdSchema.optional(), confirm: z.literal(true).optional() }).strict(),
+  z.object({ operation: z.literal('external-references'), scope: externalReferencesScopeSchema }).strict(),
   z.object({ operation: z.literal('lesson-prepare-generation'), workspace: lessonAgentWorkspaceSchema }).strict(),
   z.object({ operation: z.literal('lesson-start'), workspace: conversationAgentWorkspaceSchema, adapter: localAgentIdSchema, prompt: z.string().min(1).max(100000), userMessage: z.string().min(1).max(20000).optional(), intent: z.enum(['discuss', 'plan']).default('discuss'), frozenTarget: frozenEditTargetSchema.optional() }).strict(),
   z.object({ operation: z.literal('lesson-resume'), workspace: conversationAgentWorkspaceSchema, sessionId: z.uuid(), prompt: z.string().min(1).max(100000), userMessage: z.string().min(1).max(20000).optional(), preserveTaskBudget: z.literal(true).optional(), frozenTarget: frozenEditTargetSchema.optional() }).strict(),
@@ -140,5 +151,6 @@ export const localAgentResponseSchema = z.object({
   inputDelivery: aiInputDeliverySchema.optional(),
   fileStatus: z.object({ status: z.enum(['current', 'changed', 'unavailable']), message: z.string().max(1000) }).strict().optional(),
   externalNotice: externalAiNoticeStatusSchema.optional(),
+  externalReferences: z.array(z.string().min(1).max(2000)).max(200).optional(),
 }).strict()
 export type LocalAgentResponse = z.infer<typeof localAgentResponseSchema>

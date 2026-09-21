@@ -51,7 +51,7 @@
     "run-courseware-authoring": "tsx scripts/run-courseware-authoring.ts",
     "build": "npm run check:ai-capabilities && npm run typecheck && npm run test && npm run build:desktop",
     "dist:win": "npm run build && electron-builder --win portable dir --x64",
-    "verify": "npm run check:ai-capabilities && npm run typecheck && npm run test && npm run test:e2e",
+    "verify": "npm run check:ai-capabilities && npm run check:contracts && npm run check:development-roadmap && npm run check:task-board && npm run typecheck && npm run test && npm run test:e2e",
     "refresh:examples": "npm run build:player && npm run refresh:sample-examples && npm run refresh:lesson-demo:fixture && npm run refresh:render-benchmark:fixture",
     "check:examples": "npm run check:sample-examples && npm run check:lesson-demo:fixture && npm run check:render-benchmark:fixture",
     "refresh:sample-examples": "tsx scripts/build-examples.ts --refresh",

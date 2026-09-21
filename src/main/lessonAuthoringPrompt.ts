@@ -5,7 +5,12 @@ import { LESSON_MARKDOWN_SUPPORTED_FORMAT } from './lessonMarkdownValidation'
 
 export type LessonPromptStage = 'teaching-brief' | 'teaching-plan' | 'presentation-brief' | 'presentation-script' | 'build'
 
-const references: Record<LessonPromptStage, string> = {
+/**
+ * 软件内创作流程在运行时经 app.getAppPath() 读取的方法文件。
+ * 这些是仓库相对路径，因此 electron-builder 的 files 清单必须覆盖它们，
+ * 否则打包版的软件内创作提示词会在读取时直接 ENOENT。
+ */
+export const LESSON_AUTHORING_METHOD_PATHS: Record<LessonPromptStage, string> = {
   'teaching-brief': '.agents/skills/orchestrate-courseware/references/main-progression.md',
   'teaching-plan': '.agents/skills/orchestrate-courseware/references/teaching-design-quality.md',
   'presentation-brief': '.agents/skills/orchestrate-courseware/references/interaction-design.md',
@@ -15,7 +20,7 @@ const references: Record<LessonPromptStage, string> = {
 
 /** Read the applicable teaching contract, projecting the Builder-only section for software-internal runs. */
 export async function readLessonAuthoringMethod(editorRoot: string, stage: LessonPromptStage): Promise<string> {
-  const source = await fs.readFile(path.join(editorRoot, references[stage]), 'utf8')
+  const source = await fs.readFile(path.join(editorRoot, LESSON_AUTHORING_METHOD_PATHS[stage]), 'utf8')
   if (stage !== 'build') return source
   const markedSection = (name: string) => {
     const startMarker = `<!-- lesson-authoring-shared:${name}:start -->`

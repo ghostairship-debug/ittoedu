@@ -23,7 +23,6 @@ import { aiQuestionSchema, aiInputDeliverySchema } from '../../../shared/localAg
 import './course-chat.css'
 import { CONTEXTUAL_COURSE_COMMAND, validateContextualCourseCommand, type ContextualCourseCommand } from './contextualCourseCommand'
 import { useExternalAiNotice } from './useExternalAiNotice'
-import { generationExternalReferences } from './externalAiReferences'
 import { normalizeWorkspacePath } from '../../../shared/workspaceIdentity'
 
 type Preparation = { token: number; execution: NonNullable<GenerationRequest['execution']>; abort: AbortController; target: CourseChatTarget; scope: GenerationReferenceScope }
@@ -119,7 +118,10 @@ export function CourseChatPanel({ projectId, projectPath, onClose, lessonWorkspa
   const owner = useMemo(() => ({ projectId, projectPath: projectPath ?? '' }), [projectId, projectPath])
   const externalNotice = useExternalAiNotice(api)
   useEffect(() => () => externalNotice.cancel(), [projectId, projectPath, externalNotice.cancel])
-  const confirmExternalRequest = (request: GenerationRequest) => externalNotice.ensure({ scope: request.workspace, adapter, references: generationExternalReferences(request) })
+  // The pre-send explanation is read from Main with the same lesson scope the send
+  // uses, so it can never describe a payload other than the one actually attached.
+  const confirmExternalRequest = (request: GenerationRequest) => externalNotice.ensure({ scope: request.workspace, adapter,
+    referencesScope: { kind: 'generation', ...(lessonWorkspace ? { lessonWorkspace } : {}), request } })
   const [resources, setResources] = useState<{ owner: typeof owner; api: typeof api;
     bridge: ReturnType<typeof createCourseChatObservation>; controller: GenerationTaskController } | null>(null)
   const currentResources = resources?.owner === owner && resources.api === api ? resources : null
@@ -453,7 +455,8 @@ export function CourseChatPanel({ projectId, projectPath, onClose, lessonWorkspa
       <div className="chat-controls"><label>CLI<select aria-label="CLI" value={adapter} disabled={busy || !!sessionId} onChange={event => setAdapter(event.target.value as LocalAgentId)}><option value="codex">Codex</option><option value="claude">Claude</option><option value="opencode">OpenCode</option></select></label>
         <label>会话<select aria-label="会话" value={sessionId} disabled={busy} onChange={event => void selectSession(event.target.value)}><option value="">新对话</option>{sessions.map((record, index) => <option key={record.id} value={record.id}>{record.adapter} · 对话 {index + 1} · {statusLabels[record.task?.status ?? record.status]}</option>)}{sessionId && !sessions.some(record => record.id === sessionId) && <option value={sessionId}>当前对话</option>}</select></label></div>
       {externalNotice.dialog}
-      <button type="button" onClick={() => externalNotice.review({ scope: { version: 1, projectId, normalizedPath: normalizeWorkspacePath(projectPath) }, adapter, references: view.request ? generationExternalReferences(view.request) : [`工程：${projectPath}；本次引用清单将在发送前列出`] })}>外部处理说明</button>
+      <button type="button" onClick={() => externalNotice.review({ scope: { version: 1, projectId, normalizedPath: normalizeWorkspacePath(projectPath) }, adapter,
+        ...(view.request ? { referencesScope: { kind: 'generation' as const, ...(lessonWorkspace ? { lessonWorkspace } : {}), request: view.request } } : {}) })}>外部处理说明</button>
       <NativeAgentConfiguration key={adapter} adapter={adapter} projectId={projectId} projectPath={projectPath} configurationSequence={configurationSequence} onSavingChange={onConfigurationSaving} taskConfiguration={confirmedCapabilities.success ? confirmedCapabilities.data.current : undefined} />
       <div className="chat-scroll" ref={scroll} onScroll={event => { const element = event.currentTarget; followReply.current = element.scrollHeight - element.scrollTop - element.clientHeight < 60 }}>
         <CourseChatTranscript events={events} legacyInstruction={legacyInstruction} legacyRequests={legacyRequests} />

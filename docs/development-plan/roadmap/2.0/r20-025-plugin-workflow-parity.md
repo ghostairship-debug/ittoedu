@@ -4,13 +4,41 @@
 - Dependencies: `r20-020-public-authoring`, `r20-021-profile-controls`, `r20-022-materials-privacy-controls`
 - Optional: 否
 - Write locks: `chat-ui`, `cli-adapters`, `workspace-shell`
-- Gaps: G01, G02, G03, G04, G05, G06, G07, G08, G09, G10, G11, G12
+- Gaps: G01–G12（定义与当前证据见下方“差距清单（G01–G12）”；原始诊断基线见[缺口记录](../../reviews/1.8-ai-assistant-gap-register.md)）
 
 ## 结果与现状
 
 通过已有有效外部基线与有限新增实测，核对软件中的原生CLI能力和课件成品质量没有因GUI包装下降，并关闭实际差距。Codex/Claude的真实VS Code插件比较保留，OpenCode按自身原生CLI能力比较，不把三家压成最小交集。
 
 外部CLI/插件是开发对照，不进入教师创作路径。2.0的材料、设计、生成、检查修复和导出都须通过软件完成，不能由外部Agent先做成品或追加检查补齐内部流程。官方文档/协议可行性和按钮相似不能代替真实能力与质量结果。
+
+## 差距清单（G01–G12）
+
+本表是 G01–G12 的唯一正式定义：编号沿用[缺口记录](../../reviews/1.8-ai-assistant-gap-register.md) `:17-28` 的 2026-09-07 诊断基线（“缺口与用户影响”列即该表原意），状态按**当前源码与实跑证据**给出。关闭状态只用下列四态，不得含糊：
+
+- **关闭**：缺口要求的行为在本候选上有可复现证据（含真实模型/真实课例部分）。
+- **部分关闭**：宿主侧实现与命名用例已存在，但缺本候选上的真实运行证据，或只在部分适配器/表面成立。
+- **未关闭**：无证据，或已知缺陷仍在。
+- **环境阻塞**：本机不具备所需条件，非工程质量问题。
+
+2026-09-21 本机重跑（`npx --no-install vitest run` 12 个命名文件 `--maxWorkers=1`，8 文件/68 项 + 4 文件/75 项，两次均 exit 0）只覆盖宿主侧；**受 `R20_MARKDOWN_SELECTION_LUNA_RUN`／`R20_FLOW_SELECTION_LUNA_RUN` 门控的真实选区用例在本候选上未运行**，因此本表没有任何一项可以记为“关闭”。
+
+| ID | 缺口与用户影响 | 当前证据 | 状态 |
+| --- | --- | --- | --- |
+| G01 | 图片只提供元数据，AI 看不到当前图像，反过来要求教师提供工程内已有原图 | 观察保留可解码原图字节并以派生 PNG 作为视觉附件（`src/renderer/authoring/generation/observationImageResources.ts:4-26`，含 6 个诊断码）；Codex `input.image:'supported'`（`src/main/localAgent/codexAppServer.ts:240-246`）、Claude 能力表（`src/main/localAgent/claudeProcessTransport.ts:79-99`）；`tests/unit/observationImageResources.test.ts` 4 项、`tests/unit/generationSnapshotImageDiagnostics.test.ts` 4 项、`tests/unit/generationSnapshotCanvas.test.ts` 8 项（含“preserves canvas through strict IPC, actual Main storage, candidate request and codex prompt”）通过 | 部分关闭：宿主侧已实现并有命名用例；真实模型是否据此识别颜色未在本候选运行 |
+| G02 | 图片改色没有从读取、处理、导入到替换的完整路径 | 正式工具 `asset.image.transform` 只替换 update 目标实例、保留未选共享实例与源资产，静态 8 位 PNG／JPEG／WebP、容差 32、最近邻且 ≤16M 像素（`src/renderer/authoring/tools/imageTransformTool.ts:13-15`）；`tests/unit/imageTransform.test.ts` 16 项、`tests/unit/imageTransformTool.test.ts` 14 项（`describe('image transform single-instance resource transaction')`）通过 | 部分关闭：撤销／保存重开／运行／导出的真实流程证据未在本候选取得 |
+| G03 | 选区替换缺少创建目标，无法完成依赖新资源/新载体的修改 | 选区范围提供正式创建目的地（`src/renderer/authoring/generation/generationSnapshot.ts:121-126`），范围解析 fail-closed 且只在 `scope==='selection'` 消费 Flow 选区（同文件 `:81-89`）；`selectionActions` 含 `insert-image-after`（同文件 `:159-160`）；`tests/unit/courseChatObservation.test.ts` 36 项、`tests/unit/generationSnapshotFocus.test.ts` 8 项、`tests/unit/generationSnapshotPreflight.test.ts` 3 项通过 | 部分关闭：真实“选区→创建→单一事务替换”模型链未在本候选运行 |
+| G04 | 模型发现、选择、推理强度没有完整接入 | 三个适配器各自返回真实模型/强度，UI 由能力生成（`src/renderer/ui/chat/NativeAgentConfiguration.tsx`，`tests/unit/nativeAgentConfiguration.test.tsx` 13 项通过）；OpenCode 对图像与强度仍报 `unknown`，且只对当前选中模型暴露 effort（`src/main/localAgent/openCodeAcp.ts:86-145`、`:121-125`） | 部分关闭：Codex／Claude 选项来自实际能力；OpenCode 的 `unknown-auth` 与未报告强度按“未知”显示，缺口要求中的“保留有效选择”未在真实会话复核 |
+| G05 | 可读进度被过滤，原生事件以 JSON 展示，完成与修改成功混淆 | 中文原因映射与可见文本分层（`src/shared/localAgentText.ts:15-31`、`:49-67`、`:70-96`）；`tests/unit/courseChatObservation.test.ts` 36 项覆盖宿主事件到可读消息 | 未关闭：没有本候选上的真实会话证据证明流式正文/摘要/工具进度/失败原因清楚，也没有证据证明“只有提交成功显示已修改”在真实 CLI 上成立 |
+| G06 | 讨论和修改只有内部 auto 分流，用户无明确模式 | 发送时按范围与意图分流 `expectedResult`（`src/renderer/ui/chat/CourseChatPanel.tsx:376`）；命名 E2E `tests/e2e/stabilizationCoreUsability.spec.ts:855`“S3 默认可见与普通讨论：安全消息、完整历史及零工程写入” | 未关闭：该命名用例属 `S3 真实*` 组，本候选未运行；“模式始终可见”的界面证据未取得 |
+| G07 | 能力说明过量且不支持真正按需发现 | 能力按需发现与分片暂存已有实现（`src/main/localAgent/capabilityWorkspace.ts`、`capabilityCache.ts`）；`tests/unit/generationCapabilityWorkspace.test.ts` 28 项通过，含“discovers a compact file transport while keeping the strict document schema available on demand”“reads exact staged image, source, skill and query paths from one request anchor without changing the native cwd”；能力索引 16275 字节（上限 16384，`npm run check:ai-capabilities` exit 0） | 部分关闭：按需读取路径有命名用例；缺口要求的“记录等待各阶段和 token”未落地——计时只有埋点没有消费者（[验收记录](../../reviews/2026-09-21-r20-contextual-acceptance.md) 第三节“020 的标准整课 ≤30 分钟目标未验证”条目） |
+| G08 | 候选格式、范围失败导致多轮完成但零修改 | 只允许一次修复预算且失败零写：`tests/e2e/stabilizationCoreUsability.spec.ts:809`“S3 候选格式：非法JSON与缺通道共用一次修复预算”、`:835` 提示原文；错误原因映射 `src/shared/localAgentText.ts:15-31` | 未关闭：命名用例本候选未运行；原始失败（OpenCode stale／candidateId 缺失或非 UUID）无当前复测 |
+| G09 | 缺乏基于当前视觉/运行结果的编辑自检闭环 | 观察含实际画面与运行状态入口：`observationImageResources.ts`（含 `image-rasterization-failed` 诊断码）、`runtimeDomControlObservation.ts`、`currentHostMotionObservation.ts`；`tests/unit/generationCapabilityWorkspace.test.ts` 中“returns continuous host frames as immutable files with timing and source identity, without claiming semantic success”通过 | 部分关闭：宿主提供画面/运行观察且明确不冒充语义成功；缺口要求的“提交后验证真实目标达成”无真实模型证据 |
+| G10 | 现有测试不能证明自然语言产品能力 | 真实自然语言用例存在但受门控：`tests/e2e/r20MarkdownSelectionAiLuna.spec.ts`、`r20FlowSelectionAiLuna.spec.ts`（`R20_*_LUNA_RUN`）；040 的 9 条命名真实用例中 6 条未固定授权模型路由（[验收记录](../../reviews/2026-09-21-r20-contextual-acceptance.md) 第二节“040 最终门 9 条命名真实用例中 6 条未固定授权模型路由”条目） | 未关闭：本候选未运行任何真实自然语言选区用例；未固定路由的通过也不能证明授权路由 |
+| G11 | Flow 编辑/试运行/预览及教师控制器仍有可见问题，影响 AI 对结果的判断 | `tests/e2e/r18-089-flow-viewport.spec.ts:214-225` 的 `expectStableController` 断言 `maximumShift < 0.5`；旧 `:677 maximumShift 36` 登记已由[第三轮订正](../../reviews/2026-09-19-r19-round3-fixes-and-ledger-correction.md) `:216-242` 关闭（行号偏移误读，当前对应非付费用例为绿） | 未关闭：最近证据属 1.9 候选，本候选未重跑该文件；真实 AI 门 `:841/843` 默认 skip |
+| G12 | 外部Build Skill没有与创作助手共用可查询、可分片的发现机制，冷启动与引用材料读取过重 | 单一能力源同时服务助手与 Builder：`src/shared/courseAgentSkills.ts:37-43` 的 10 个方法经 `src/shared/generated/courseAgentCapabilities.json`（`skills/` 前缀 20 个文件、semanticVersion 为 64 位 sha256）暂存到 `<userData>/local-agent/directory-conversation-skills/<sha256>/`（`src/main/localAgent/directoryConversationSkillResources.ts:14-30`），入口只列绝对路径按需读取；`tests/unit/directoryConversationSkillResources.test.ts` 2 项、`tests/unit/coursewareSkillsContract.test.ts` 7 项通过 | 部分关闭：同源与按需读取已实现；缺口要求的“真实外部课例构建验证”未在本候选运行；`.agents` 运行时读取的 4 个方法文件已进打包清单（`electron-builder.yml`，守卫 `tests/unit/packagedRuntimeBoundary.test.ts`），但打包产物本身未构建验证（[验收记录](../../reviews/2026-09-21-r20-contextual-acceptance.md) 第三节“021 完整方法未迁入”条目订正段、第九节 9.1(a)） |
+
+**本机对照条件与执行状态（2026-09-21 复核订正）**：原写"`code` 在 PATH 上指向 Cursor 3.20.21，已装扩展只有 `anysphere.*` 四个，真实 VS Code 插件对照无法执行"——**该判据不成立**。实测：`where.exe code` 有 4 条，第 3/4 条即真实 VS Code `D:\Users\74755\AppData\Local\Programs\Microsoft VS Code\bin\code(.cmd)`；以绝对路径调用其 CLI，`code --version` → **1.133.0**，`code --list-extensions` → exit 0 且列出 **`anthropic.claude-code`** 与 **`openai.chatgpt`**，即对照所需的**两家插件都已安装**。原判据误把默认 PATH 首项当成"本机唯一的 `code`"，并把 `~\.cursor\extensions` 当成了 VS Code 的扩展目录。**订正后的准确状态：025 对照本轮未执行**（需交互式 GUI 会话与跨多个课例任务的付费模型运行，超出本批范围），**不是缺 VS Code**；两个扩展的**登录状态未知**（`%APPDATA%\Code\User\globalStorage` 下无 anthropic/openai 状态目录，但凭据在加密存储中，不能据此断定未登录）。按"停止条件"一节，此处只记录未完成的对照，**不得把无证据写成通过**。OpenCode 通道探测为 `unknown-auth`（[验收记录](../../reviews/2026-09-21-r20-contextual-acceptance.md) 第三节“040 的 opencode 通道探测为 `unknown-auth`”条目），其登录状态不可确认。
 
 ## 开始前与阅读入口
 

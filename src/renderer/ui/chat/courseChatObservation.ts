@@ -1,4 +1,4 @@
-import { flowDocumentSelectionSchema, flowSelectionContextTarget } from '../../course/flowContextSelection'
+import { flowDocumentSelectionSchema } from '../../course/flowContextSelection'
 import type { GenerationCommitReceipt, GenerationRequest } from '../../../shared/generationContract'
 import { generationRequestSchema, DEFAULT_GENERATION_TASK_DURATION_MS, MAX_GENERATION_TASK_DURATION_MS } from '../../../shared/generationContract'
 import { z } from 'zod'
@@ -260,10 +260,13 @@ export function createCourseChatObservation(api: DesktopAPI, owner: { projectId:
       if (disposed) throw stopped()
       const current = snapshot(), state = useEditorStore.getState(), session = state.courseAuthoringSession!
       const projection = selectEffectiveLayerProjection(state) ?? projectEffectiveLayers({ project: current.document, locationId: session.token.locationId })
-      if (projection.surfaceType === 'flow' && state.flowSession) {
-        const surface = current.document.surfaces.find(surface => surface.id === projection.surfaceId)
-        if (surface?.type === 'flow') flowSelectionContextTarget(surface.blocks, current.document.revision, state.flowSession.selection)
-      }
+      // Freezing must not resolve the Flow selection: the scope that decides whether a
+      // logical selection is required is only known after this call returns
+      // (CourseChatPanel decides it after freezeTarget). Validating here rejected
+      // every whole-course/page send whenever the caret sat in Flow text, and a caret
+      // is the normal resting state after any click in the body. The single
+      // scope-aware validation lives in captureGenerationSnapshot, which consults the
+      // Flow selection only for scope 'selection' and fails closed there.
       const target: CourseChatTarget = Object.freeze({ anchorId: crypto.randomUUID(), locationId: projection.locationId,
         surfaceId: projection.surfaceId, stateId: projection.stateId, owner: projection.scope.owner,
         selectedIds: Object.freeze([...session.itemIds]), sessionToken: Object.freeze({ ...session.token }),

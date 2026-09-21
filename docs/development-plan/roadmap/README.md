@@ -106,7 +106,7 @@ PPTX 人工导入的跨版本增强与发布节点见 [能力增强计划](../PP
 4. 候选节点在自动化与本版目标测试通过后创建 `vX.Y.Z-rc.N`，不签署 accepted；S1–S4 签署点由 Owner 观察合并范围内固定课例的真实视觉和互动后签署 accepted，再创建无后缀 `vX.Y.Z`。
 5. 只在 S1–S4 的同一 accepted 候选把覆盖版本已验收的新行为晋升到 `PRESERVATION_MATRIX.md`，并更新受影响的 `FEATURE_CONSUMER_OWNER_LEDGER` / dependency ratchet；证明没有新增 raw Store consumer、跨 Owner deep import / 运行时依赖环、第二 Store/History/Session/writer 或重复 registry/catalog。未改变的证据按工作协议复用，不建设架构评分或常设治理流程。
 
-四份固定验收清单在对应签署点节点实施时创建：`docs/development-plan/acceptance/S1-authoring.md`、`S2-tools-materials.md`、`S3-ai-core.md`、`S4-ai-product.md`。每份使用“编号步骤 + 预期结果 + 通过/不通过”，当前不预建空文件。
+四份固定验收清单：`docs/development-plan/acceptance/` 下的 [`S1-authoring.md`](../acceptance/S1-authoring.md)、[`S2-tools-and-materials.md`](../acceptance/S2-tools-and-materials.md)、[`S3-ai-core.md`](../acceptance/S3-ai-core.md)、[`S4-ai-product.md`](../acceptance/S4-ai-product.md)。每份使用“编号步骤 + 预期结果 + 通过/不通过”。S1、S2 是已签署记录；S3、S4 是各自签署点的待执行清单，其步骤在签署点按步执行，**创建清单不等于该签署点通过**。
 
 ## v1.1.1 维护基线与后续模块化边界
 

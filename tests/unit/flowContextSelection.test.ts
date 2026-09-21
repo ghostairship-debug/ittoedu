@@ -1,7 +1,14 @@
 import { syncFlowCourseLocations } from '@/renderer/course/flowDocumentModel'
 import { createGenerationCandidateCoordinator } from '@/renderer/authoring/generation/prepareGenerationCandidate'
 import { readGenerationFailure, type GenerationCandidate, type GenerationRequest } from '@/shared/generationContract'
-import { describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { createElement, type ComponentProps } from 'react'
+import { TextSelection } from 'prosemirror-state'
+import { EditorView } from '@codemirror/view'
+import * as editorSession from '@/renderer/document/editorSession'
+import { useEditorStore } from '@/renderer/store/editorStore'
+import { FlowWorkspace } from '@/renderer/ui/FlowWorkspace'
 import { createBlankFlowCourseProject } from '@/renderer/project/createFlowCourseProject'
 import { flowContextSelectionIntent, resolveFlowContextSelection, flowTextSlot } from '@/renderer/course/flowContextSelection'
 import { executeFlowDelete, executeFlowEditorCommand } from '@/renderer/course/flowEditorCommands'
@@ -222,5 +229,97 @@ describe('Flow candidate range enforcement', () => {
     const result = property.nextDocument!.surfaces[0]!
     if (result.type !== 'flow') throw new Error('flow')
     expect(result.blocks.find(block => block.id === 'p')).toMatchObject({ type: 'heading', level: 2, content: text() })
+  })
+})
+
+const SOURCE_SELECTION_ISSUE = 'Flow 源文选区暂不支持 AI 局部修改，请切回排版选择内容。'
+
+/** The real product shell: props come from the single Store, intents go back through it. */
+function FlowWorkspaceStoreHarness() {
+  const session = useEditorStore(state => state.flowSession)
+  const authoringSession = useEditorStore(state => state.courseAuthoringSession)
+  const textEdit = useEditorStore(state => state.flowTextEdit)
+  if (!session || !authoringSession) return null
+  const props: ComponentProps<typeof FlowWorkspace> = {
+    view: buildFlowEditorView({ project: session.history.present, locationId: session.selection.locationId }),
+    sessionToken: authoringSession.token,
+    assets: session.history.present.assets,
+    selection: session.selection,
+    textEdit,
+    commands: { run: (target, intent) => useEditorStore.getState().runFlowAuthoringIntent(target, intent) },
+  }
+  return createElement(FlowWorkspace, props)
+}
+
+/** The scope-aware Flow validation a selection-scope chat send really runs. */
+function liveSelectionRequest(previousResult?: unknown) {
+  const state = useEditorStore.getState()
+  const session = state.flowSession, authoringSession = state.courseAuthoringSession
+  if (!session || !authoringSession) throw new Error('缺少 Flow 会话')
+  const document = session.history.present
+  return captureGenerationFixture({
+    document,
+    sessionToken: { ...authoringSession.token, revision: document.revision },
+    workspace: { version: 1, projectId: document.id, normalizedPath: '/flow.h5lesson' },
+    projection: projectEffectiveLayers({ project: document, locationId: session.selection.locationId }),
+    selectedIds: [...authoringSession.itemIds],
+    flowSelection: session.selection,
+    scope: 'selection',
+    instruction: '把这段改一下',
+    purpose: 'local-edit',
+    ...(previousResult === undefined ? {} : { previousResult }),
+  })
+}
+
+describe('Flow source selection guard lifetime', () => {
+  beforeEach(() => {
+    vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} })
+    useEditorStore.getState().createNewFlowProject()
+  })
+  afterEach(() => {
+    cleanup()
+    vi.restoreAllMocks()
+    vi.unstubAllGlobals()
+    useEditorStore.getState().createNewProject()
+  })
+  function mountAndSelectSourceText() {
+    render(createElement(FlowWorkspaceStoreHarness))
+    fireEvent.click(screen.getByRole('button', { name: '源文' }))
+    const source = EditorView.findFromDOM(screen.getByLabelText('正文源文编辑'))!
+    act(() => { source.dispatch({ selection: { anchor: 1, head: 5 } }) })
+    return source
+  }
+  it('clears the source guard when the editor returns to layout, so a range send is no longer refused', () => {
+    mountAndSelectSourceText()
+    expect(useEditorStore.getState().flowSession!.selection).toMatchObject({ focus: 'text', textRange: null, documentSelectionIssue: SOURCE_SELECTION_ISSUE })
+    expect(() => liveSelectionRequest()).toThrow(SOURCE_SELECTION_ISSUE)
+    fireEvent.click(screen.getByRole('button', { name: '排版' }))
+    const returned = useEditorStore.getState().flowSession!.selection
+    expect(returned.documentSelectionIssue).toBeUndefined()
+    expect(returned).toMatchObject({ focus: 'idle', selectedBlockIds: [], textRange: null })
+    expect(() => liveSelectionRequest()).not.toThrow()
+    expect((liveSelectionRequest().context as any).flowTextEdit).toBeUndefined()
+  })
+  it('keeps the source guard while source mode is still active', () => {
+    const source = mountAndSelectSourceText()
+    act(() => { source.dispatch({ selection: { anchor: 2, head: 6 } }) })
+    expect(useEditorStore.getState().flowSession!.selection.documentSelectionIssue).toBe(SOURCE_SELECTION_ISSUE)
+    expect(() => liveSelectionRequest()).toThrow(SOURCE_SELECTION_ISSUE)
+  })
+  it('freezes a fresh precise layout selection made right after returning from source mode', () => {
+    const factory = vi.spyOn(editorSession, 'createLayoutEditor')
+    mountAndSelectSourceText()
+    fireEvent.click(screen.getByRole('button', { name: '排版' }))
+    const editor = factory.mock.results.at(-1)!.value as ReturnType<typeof editorSession.createLayoutEditor>
+    const doc = editor.view.state.doc
+    let from = -1
+    doc.descendants((node, pos) => { if (from < 0 && node.isText && (node.text ?? '').length > 2) from = pos })
+    expect(from).toBeGreaterThan(0)
+    act(() => { editor.view.dispatch(editor.view.state.tr.setSelection(TextSelection.create(doc, from + 1, from + 3))) })
+    const selected = useEditorStore.getState().flowSession!.selection
+    expect(selected.documentSelectionIssue).toBeUndefined()
+    expect(selected.focus).toBe('text')
+    expect(selected.documentSelection).toMatchObject({ kind: 'text', anchor: { offset: 1 }, head: { offset: 3 } })
+    expect(liveSelectionRequest().context).toMatchObject({ flowTextEdit: { tool: 'flow.content' } })
   })
 })
