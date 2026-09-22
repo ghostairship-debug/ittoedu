@@ -71,7 +71,7 @@ Mixed：同一 `CourseProjectDocument` 内由 `course.navigation` 追加表面�
 ## 仍按不可用处理
 
 - Capability Index 未声明的功能。
-- 外部组件目录缺失时（以 `index.json` 当前 `catalogStatus` 为准，本文不复制该可变值；目录指向 `../courseware-components`）。缺失只表示没有现成目录包可浏览，**不是**禁止为本课新建/导入 `.h5component`，也不是 Flow/Spatial 不能挂组件。
+- 内置组件目录缺失时（以 `index.json` 当前 `catalogStatus` 为准，本文不复制该可变值；目录指向软件仓库内、随应用分发的 `resources/built-in-components`）。缺失只表示没有现成目录包可浏览，**不是**禁止为本课新建/导入 `.h5component`，也不是 Flow/Spatial 不能挂组件。
 - 目录里若恢复实验包，许可/维护人/质量门槛不过就不要当已发布内置库宣传。
 - `courseAiHandoff` / `courseAiPatch` 等 internal/reserved 调用点；内部构建可见 AI 不自动代表能力通过对应版本门。
 - 已删除的旧 Phaser 播放器作为 Mixed/Flow/Spatial 试运行主路径。

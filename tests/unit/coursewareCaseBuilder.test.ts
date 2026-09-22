@@ -124,8 +124,11 @@ describe('external courseware case builder', () => {
     vi.stubEnv('COURSEWARE_COMPONENTS_DIR', catalogRoot)
     const port = createCoursewareBuilderCatalogPort(editorRoot)
     const catalog = await port.load()
-    expect(catalog.sources[0]?.trust).toBe('prompt')
-    await expect(port.read({ sourceId: catalog.sources[0]!.sourceId, packageId: 'invented', version: '1' })).rejects.toThrow('受信')
+    const external = catalog.sources.find(source => source.trust === 'prompt')
+    expect(external).toBeDefined()
+    expect(catalog.sources.some(source => source.trust === 'built-in')).toBe(true)
+    expect(catalog.packages.filter(entry => entry.sourceTrust === 'built-in')).toHaveLength(4)
+    await expect(port.read({ sourceId: external!.sourceId, packageId: 'invented', version: '1' })).rejects.toThrow('受信')
   })
 
   async function createExternalCase(): Promise<string> {

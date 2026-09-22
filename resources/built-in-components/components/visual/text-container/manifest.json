@@ -1,0 +1,185 @@
+{
+  "schemaVersion": 4,
+  "runtimeApiVersion": 4,
+  "renderMode": "dom",
+  "supportedScopes": [
+    "scene",
+    "global"
+  ],
+  "id": "com.ittoedu.visual.text-container",
+  "name": "文字视觉容器",
+  "version": "1.0.0",
+  "description": "统一承载玻璃、便利贴、撕纸和文件夹等文字视觉样式",
+  "entry": "runtime.js",
+  "thumbnail": "thumbnail.svg",
+  "defaultSize": {
+    "width": 860,
+    "height": 480
+  },
+  "minSize": {
+    "width": 280,
+    "height": 160
+  },
+  "preserveAspectRatio": false,
+  "assets": {},
+  "defaultProps": {
+    "content": {
+      "eyebrow": "课堂提示",
+      "title": "标题",
+      "body": "在这里输入内容",
+      "steps": "步骤一\n步骤二"
+    },
+    "visualStyle": "transparent-glass",
+    "showEyebrow": false,
+    "showTitle": true,
+    "showBody": true,
+    "showSteps": false,
+    "padding": 42,
+    "eyebrowSize": 22,
+    "titleSize": 34,
+    "bodySize": 28,
+    "stepSize": 24,
+    "lineHeight": 1.65,
+    "textColor": "#173d2a",
+    "accentColor": "#d95d42",
+    "shadowOpacity": 0.2
+  },
+  "editor": {
+    "properties": [
+      {
+        "key": "visualStyle",
+        "label": "视觉样式",
+        "type": "select",
+        "required": true,
+        "options": [
+          { "value": "transparent-glass", "label": "透明玻璃" },
+          { "value": "frosted-glass", "label": "磨砂玻璃" },
+          { "value": "sticky-note", "label": "便利贴" },
+          { "value": "torn-paper", "label": "撕纸" },
+          { "value": "file-folder", "label": "文件夹" }
+        ]
+      },
+      {
+        "key": "content.eyebrow",
+        "label": "眉题",
+        "type": "text",
+        "maxLength": 100
+      },
+      {
+        "key": "content.title",
+        "label": "标题",
+        "type": "text",
+        "maxLength": 120
+      },
+      {
+        "key": "content.body",
+        "label": "正文",
+        "type": "textarea",
+        "maxLength": 5000
+      },
+      {
+        "key": "content.steps",
+        "label": "步骤",
+        "description": "每行一个步骤。",
+        "type": "textarea",
+        "maxLength": 1000
+      },
+      { "key": "showEyebrow", "label": "显示眉题", "type": "boolean" },
+      { "key": "showTitle", "label": "显示标题", "type": "boolean" },
+      { "key": "showBody", "label": "显示正文", "type": "boolean" },
+      { "key": "showSteps", "label": "显示步骤", "type": "boolean" },
+      {
+        "key": "padding",
+        "label": "内边距",
+        "type": "number",
+        "min": 12,
+        "max": 100,
+        "step": 1,
+        "unit": "px"
+      },
+      {
+        "key": "eyebrowSize",
+        "label": "眉题字号",
+        "type": "number",
+        "min": 22,
+        "max": 48,
+        "step": 1,
+        "unit": "px"
+      },
+      {
+        "key": "titleSize",
+        "label": "标题字号",
+        "type": "number",
+        "min": 22,
+        "max": 80,
+        "step": 1,
+        "unit": "px"
+      },
+      {
+        "key": "bodySize",
+        "label": "正文字号",
+        "type": "number",
+        "min": 22,
+        "max": 72,
+        "step": 1,
+        "unit": "px"
+      },
+      {
+        "key": "stepSize",
+        "label": "步骤字号",
+        "type": "number",
+        "min": 22,
+        "max": 56,
+        "step": 1,
+        "unit": "px"
+      },
+      {
+        "key": "lineHeight",
+        "label": "正文行高",
+        "type": "number",
+        "min": 1.1,
+        "max": 2.5,
+        "step": 0.05
+      },
+      { "key": "textColor", "label": "文字颜色", "type": "color" },
+      { "key": "accentColor", "label": "强调颜色", "type": "color" },
+      {
+        "key": "shadowOpacity",
+        "label": "阴影强度",
+        "type": "number",
+        "min": 0,
+        "max": 0.5,
+        "step": 0.02
+      }
+    ]
+  },
+  "presets": [
+    {
+      "id": "glass",
+      "label": "玻璃信息卡",
+      "props": {
+        "visualStyle": "transparent-glass",
+        "showEyebrow": false,
+        "showSteps": false
+      }
+    },
+    {
+      "id": "note",
+      "label": "便利贴提示",
+      "props": {
+        "visualStyle": "sticky-note",
+        "showEyebrow": true,
+        "showSteps": false
+      }
+    },
+    {
+      "id": "task-folder",
+      "label": "文件夹任务卡",
+      "props": {
+        "visualStyle": "file-folder",
+        "showEyebrow": true,
+        "showSteps": true
+      }
+    }
+  ]
+}

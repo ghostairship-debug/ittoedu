@@ -1,7 +1,6 @@
 // @vitest-environment node
 
 import { createHash } from 'node:crypto'
-import { existsSync } from 'node:fs'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import { unzipSync } from 'fflate'
@@ -20,7 +19,7 @@ import {
 import { z } from 'zod'
 import { describeGenerationSemanticTools, generationProjectDocumentWireInputSchema } from '../../src/shared/generationContract'
 import { describeAuthoringToolDiscovery } from '../../src/renderer/authoring/tools/authoringToolFacade'
-import { BUILT_IN_COMPONENT_CATALOG_SHA256 } from '../../src/shared/builtInComponentCatalog'
+import { BUILT_IN_COMPONENT_CATALOG_DIRECTORY, BUILT_IN_COMPONENT_CATALOG_SHA256 } from '../../src/shared/builtInComponentCatalog'
 import { componentManifestSchema } from '../../src/shared/componentSchema'
 import {
   COMPONENT_RUNTIME_API_VERSION,
@@ -46,9 +45,6 @@ import { PUBLISHED_COURSE_VERSION } from '../../src/shared/publishedCourseTypes'
 import { SURFACE_RUNTIME_API_VERSION } from '../../src/shared/surfaceRuntimeTypes'
 
 const expectedCatalogPackageCount = 4
-const siblingCatalogAvailable = existsSync(
-  path.join(process.cwd(), '..', 'courseware-components', 'catalog.json'),
-)
 const expectedProvenanceEntrypoints = [
   'scripts/generate-ai-capabilities.ts',
   'src/shared/contracts/index.ts',
@@ -571,9 +567,9 @@ describe('AI capability manifest generation', () => {
     expect(catalog.issues[0]?.code).toBe('catalog-unavailable')
   }, 30_000)
 
-  it.skipIf(!siblingCatalogAvailable)('verifies the reviewed sibling catalog packages, manifests, and blockers', async () => {
+  it('verifies the bundled built-in catalog packages, manifests, and blockers', async () => {
     const generated = await generateAiCapabilityArtifacts()
-    const catalogRoot = path.resolve(process.cwd(), '..', 'courseware-components')
+    const catalogRoot = path.resolve(process.cwd(), BUILT_IN_COMPONENT_CATALOG_DIRECTORY)
     const sourceCatalog = JSON.parse(
       await fs.readFile(path.join(catalogRoot, 'catalog.json'), 'utf8'),
     ) as {
@@ -666,8 +662,8 @@ describe('AI capability manifest generation', () => {
     }
   }, 30_000)
 
-  it.skipIf(!siblingCatalogAvailable)('marks a catalog hash mismatch unavailable without hiding package metadata', async () => {
-    const sourceRoot = path.resolve(process.cwd(), '..', 'courseware-components')
+  it('marks a catalog hash mismatch unavailable without hiding package metadata', async () => {
+    const sourceRoot = path.resolve(process.cwd(), BUILT_IN_COMPONENT_CATALOG_DIRECTORY)
     const fixtureRoot = await createTemporaryDirectory('ai-capability-catalog-mismatch')
     try {
       const catalogBytes = await fs.readFile(path.join(sourceRoot, 'catalog.json'))
@@ -726,8 +722,8 @@ describe('AI capability manifest generation', () => {
     }
   }, 30_000)
 
-  it.skipIf(!siblingCatalogAvailable)('marks package bytes with a mismatched catalog hash unavailable', async () => {
-    const sourceRoot = path.resolve(process.cwd(), '..', 'courseware-components')
+  it('marks package bytes with a mismatched catalog hash unavailable', async () => {
+    const sourceRoot = path.resolve(process.cwd(), BUILT_IN_COMPONENT_CATALOG_DIRECTORY)
     const fixtureRoot = await createTemporaryDirectory('ai-capability-package-mismatch')
     try {
       const catalogBytes = await fs.readFile(path.join(sourceRoot, 'catalog.json'))
@@ -888,8 +884,8 @@ describe('AI capability manifest generation', () => {
     }
   }, 30_000)
 
-  it.skipIf(!siblingCatalogAvailable)('keeps every verified manifest version and hash tied to package bytes', async () => {
-    const catalogRoot = path.resolve(process.cwd(), '..', 'courseware-components')
+  it('keeps every verified manifest version and hash tied to package bytes', async () => {
+    const catalogRoot = path.resolve(process.cwd(), BUILT_IN_COMPONENT_CATALOG_DIRECTORY)
     const catalog = JSON.parse(
       await fs.readFile(path.join(catalogRoot, 'catalog.json'), 'utf8'),
     ) as {
@@ -1405,7 +1401,7 @@ describe('AI capability manifest generation', () => {
     expect(limits.sourceOfTruth).toContain('src/shared/constants.ts')
   }, 15_000)
 
-  it.skipIf(!siblingCatalogAvailable)('keeps every committed capability artifact byte-identical outside generation-evidence.json', async () => {
+  it('keeps every committed capability artifact byte-identical outside generation-evidence.json', async () => {
     const generated = await generateAiCapabilityArtifacts()
     const committedRoot = path.join(process.cwd(), 'artifacts', 'ai-capabilities')
     const drifted: string[] = []

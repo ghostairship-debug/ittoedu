@@ -4,6 +4,7 @@ import { readFile, stat } from 'node:fs/promises'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { LESSON_AUTHORING_METHOD_PATHS } from '../../src/main/lessonAuthoringPrompt'
+import { BUILT_IN_COMPONENT_CATALOG_DIRECTORY } from '../../src/shared/builtInComponentCatalog'
 
 const root = path.resolve(__dirname, '..', '..')
 
@@ -106,10 +107,28 @@ describe('packaged runtime file boundary', () => {
   })
 
   it('keeps the file boundary honest about a path that is not packaged', async () => {
-    // 反例：这个路径确实被源码读取（componentCatalogManager.ts:90，位于 app 根之外），
-    // 因此不在 files 白名单内，必须由 uncovered 报出而不是被静默放过。
+    // External directories are not part of the built-in payload.
     const patterns = await readPackagedFilePatterns()
     expect(uncovered(patterns, ['courseware-components/index.json'])).toEqual(['courseware-components/index.json'])
+  })
+
+  it('ships the complete built-in catalog payload without its maintenance files', async () => {
+    const patterns = await readPackagedFilePatterns()
+    const directory = BUILT_IN_COMPONENT_CATALOG_DIRECTORY
+    const catalog = JSON.parse(await readFile(path.join(root, directory, 'catalog.json'), 'utf8')) as {
+      packages: Array<{ packagePath: string; thumbnailPath: string }>
+    }
+    expect(catalog.packages).toHaveLength(4)
+    const payload = [`${directory}/catalog.json`, ...catalog.packages.flatMap(pkg =>
+      [pkg.packagePath, pkg.thumbnailPath].map(file => `${directory}/${file}`))]
+    expect(uncovered(patterns, payload)).toEqual([])
+    for (const file of payload) expect((await stat(path.join(root, file))).size, file).toBeGreaterThan(0)
+    expect([
+      `${directory}/components/visual/text-container/runtime.js`,
+      `${directory}/scripts/build-components.mjs`,
+      `${directory}/verification/matrix-runtime-evidence-20260813.json`,
+      `${directory}/node_modules/fflate/package.json`,
+    ].filter(file => coveredBy(patterns, file))).toEqual([])
   })
 
   it('treats a later negative pattern as an exclusion, the way electron-builder does', () => {

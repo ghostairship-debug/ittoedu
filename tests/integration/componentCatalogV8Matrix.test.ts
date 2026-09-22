@@ -1,4 +1,4 @@
-import { existsSync } from 'node:fs'
+import { BUILT_IN_COMPONENT_CATALOG_DIRECTORY } from '@/shared/builtInComponentCatalog'
 import path from 'node:path'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import type {
@@ -26,11 +26,7 @@ import {
   useEditorStore,
 } from '@/renderer/store/editorStore'
 
-const componentCatalogRoot = process.env.COURSEWARE_COMPONENTS_DIR
-  ? path.resolve(process.env.COURSEWARE_COMPONENTS_DIR)
-  : path.resolve(process.cwd(), '..', 'courseware-components')
-const catalogAvailable = existsSync(path.join(componentCatalogRoot, 'catalog.json'))
-const catalogDescribe = catalogAvailable ? describe : describe.skip
+const componentCatalogRoot = path.resolve(process.cwd(), BUILT_IN_COMPONENT_CATALOG_DIRECTORY)
 const importedAt = '2026-08-11T00:00:00.000Z'
 const expectedPackageCount = 4
 
@@ -138,7 +134,7 @@ async function loadCatalogPackages(): Promise<ImportedComponentPackage[]> {
   }))
 }
 
-catalogDescribe('四组件 Course Project V9 编辑、归档与生命周期矩阵', () => {
+describe('四组件 Course Project V9 编辑、归档与生命周期矩阵', () => {
   let packages: ImportedComponentPackage[] = []
   let originalDecode: typeof HTMLImageElement.prototype.decode | undefined
 

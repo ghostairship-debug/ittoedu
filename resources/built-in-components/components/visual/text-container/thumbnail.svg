@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="430" height="240" viewBox="0 0 430 240">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#d9eee3"/><stop offset="1" stop-color="#f8edc8"/></linearGradient>
+    <filter id="shadow"><feDropShadow dx="0" dy="8" stdDeviation="9" flood-color="#294932" flood-opacity=".2"/></filter>
+  </defs>
+  <rect width="430" height="240" rx="24" fill="url(#bg)"/>
+  <path d="M46 49h239v146H46z" fill="#fff" fill-opacity=".66" stroke="#fff" stroke-width="2" rx="20" filter="url(#shadow)"/>
+  <rect x="68" y="72" width="133" height="14" rx="7" fill="#2f6f4e"/>
+  <rect x="68" y="105" width="190" height="9" rx="4.5" fill="#648673"/>
+  <rect x="68" y="126" width="172" height="9" rx="4.5" fill="#648673" opacity=".76"/>
+  <rect x="68" y="147" width="125" height="9" rx="4.5" fill="#648673" opacity=".56"/>
+  <path d="M310 66h70v60h-70z" fill="#fff0b8" transform="rotate(3 345 96)" filter="url(#shadow)"/>
+  <path d="M305 145h81v54h-81z" fill="#d1a657" filter="url(#shadow)"/>
+  <path d="M311 151h69v42h-69z" fill="#fffdf7"/>
+</svg>

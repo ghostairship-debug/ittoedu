@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 2,
+  "verifiedAt": "2026-08-12T19:45:18.410Z",
+  "attestedAt": "2026-08-13T02:05:00.000Z",
+  "matrix": {
+    "projectSchemaVersion": 8,
+    "componentSchemaVersion": 4,
+    "runtimeApiVersion": 4,
+    "packageCount": 4,
+    "sceneCount": 4,
+    "pressureRounds": 25,
+    "navigationCount": 100,
+    "backgroundWindowIsolation": true
+  },
+  "evidence": {
+    "runtimeEvidencePath": "verification/matrix-runtime-evidence-20260813.json",
+    "runtimeEvidenceSha256": "9a925e0900226e163ee6a506e3ab6fb8b5b01872969a58e837f2ad345fd65f87",
+    "preCatalogSha256": "94341c7c35585f35549bc24b1458ba62e1b5d4d2468e783e2b4dc778ac41a7b7",
+    "postCatalogSha256": "fedf8315a8a1cc636771760be95931b31dba7f6625b62adc8247d7eebf044573"
+  },
+  "verifiedCases": [
+    "component-catalog-v8-matrix:catalog-ui-roundtrip",
+    "component-catalog-v8-matrix:editor-player-thumbnail",
+    "component-catalog-v8-matrix:offline-html-web",
+    "component-catalog-v8-matrix:pdf-pptx-static",
+    "component-catalog-v8-matrix:lifecycle-error-isolation-25x4"
+  ],
+  "catalogMutation": {
+    "packageIdsVersionsAndSha256Unchanged": true,
+    "removedReleaseBlockers": [
+      "current-v8-full-matrix-unverified"
+    ],
+    "retainedQuality": "experimental",
+    "retainedReleaseBlockers": [
+      "license-unverified",
+      "maintainer-unassigned"
+    ]
+  }
+}

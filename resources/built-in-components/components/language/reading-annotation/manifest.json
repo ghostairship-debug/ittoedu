@@ -1,0 +1,152 @@
+{
+  "schemaVersion": 4,
+  "runtimeApiVersion": 4,
+  "renderMode": "dom",
+  "supportedScopes": [
+    "scene"
+  ],
+  "id": "com.ittoedu.language.reading-annotation",
+  "name": "语文朗读标注",
+  "version": "1.1.0",
+  "description": "用可编辑标记文稿呈现重音、统一长停顿和文字上方的连读弧线",
+  "entry": "runtime.js",
+  "thumbnail": "thumbnail.svg",
+  "defaultSize": {
+    "width": 1120,
+    "height": 300
+  },
+  "minSize": {
+    "width": 520,
+    "height": 220
+  },
+  "preserveAspectRatio": false,
+  "assets": {},
+  "defaultProps": {
+    "content": {
+      "ariaLabel": "朗读标注练习",
+      "title": "朗读设计",
+      "markup": "盼望着，盼望着，// 东风来了，春天的脚步 **近了**。\n~小草偷偷地从土里钻出来~，嫩嫩的，绿绿的。",
+      "pauseSymbol": "∧",
+      "legendEmphasis": "重音",
+      "legendPause": "较长停顿",
+      "legendLiaison": "连读"
+    },
+    "fontSize": 42,
+    "titleSize": 24,
+    "legendSize": 24,
+    "lineHeight": 1.85,
+    "padding": 34,
+    "showTitle": true,
+    "showLegend": true,
+    "textColor": "#17324d",
+    "markColor": "#d94f3d",
+    "surface": "#fffdf7",
+    "borderColor": "#c9d9cd"
+  },
+  "editor": {
+    "properties": [
+      {
+        "key": "content.title",
+        "label": "标题",
+        "type": "text",
+        "maxLength": 60
+      },
+      {
+        "key": "content.markup",
+        "label": "朗读标注文稿",
+        "description": "用 **文字** 标重音，用 ~文字~ 标连读，用 // 插入统一的较长停顿符号。",
+        "type": "textarea",
+        "maxLength": 6000
+      },
+      {
+        "key": "content.pauseSymbol",
+        "label": "较长停顿符号",
+        "type": "text",
+        "maxLength": 8
+      },
+      {
+        "key": "content.legendEmphasis",
+        "label": "重音图例",
+        "type": "text",
+        "maxLength": 20
+      },
+      {
+        "key": "content.legendPause",
+        "label": "停顿图例",
+        "type": "text",
+        "maxLength": 20
+      },
+      {
+        "key": "content.legendLiaison",
+        "label": "连读图例",
+        "type": "text",
+        "maxLength": 20
+      },
+      {
+        "key": "fontSize",
+        "label": "正文字号",
+        "type": "number",
+        "min": 22,
+        "max": 96,
+        "step": 1,
+        "unit": "px"
+      },
+      {
+        "key": "lineHeight",
+        "label": "行高",
+        "type": "number",
+        "min": 1.4,
+        "max": 2.6,
+        "step": 0.05
+      },
+      {
+        "key": "legendSize",
+        "label": "图例字号",
+        "type": "number",
+        "min": 22,
+        "max": 52,
+        "step": 1,
+        "unit": "px"
+      },
+      {
+        "key": "padding",
+        "label": "内边距",
+        "type": "number",
+        "min": 12,
+        "max": 80,
+        "step": 1,
+        "unit": "px"
+      },
+      {
+        "key": "showTitle",
+        "label": "显示标题",
+        "type": "boolean"
+      },
+      {
+        "key": "showLegend",
+        "label": "显示图例",
+        "type": "boolean"
+      },
+      {
+        "key": "textColor",
+        "label": "文字颜色",
+        "type": "color"
+      },
+      {
+        "key": "markColor",
+        "label": "标记颜色",
+        "type": "color"
+      },
+      {
+        "key": "surface",
+        "label": "底色",
+        "type": "color"
+      },
+      {
+        "key": "borderColor",
+        "label": "边框颜色",
+        "type": "color"
+      }
+    ]
+  }
+}

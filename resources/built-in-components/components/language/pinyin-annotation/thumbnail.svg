@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="480" height="280" viewBox="0 0 480 280">
+  <defs>
+    <linearGradient id="paper" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#fffef9"/>
+      <stop offset="1" stop-color="#edf6ef"/>
+    </linearGradient>
+    <filter id="shadow" x="-15%" y="-15%" width="130%" height="140%">
+      <feDropShadow dx="0" dy="8" stdDeviation="9" flood-color="#17324d" flood-opacity=".16"/>
+    </filter>
+  </defs>
+  <rect width="480" height="280" rx="28" fill="#dfeae2"/>
+  <rect x="20" y="18" width="440" height="244" rx="22" fill="url(#paper)" stroke="#b8cebd" stroke-width="2" filter="url(#shadow)"/>
+  <text x="48" y="67" fill="#17324d" font-family="Microsoft YaHei, sans-serif" font-size="27" font-weight="700">汉语拼音</text>
+  <g text-anchor="middle">
+    <text x="125" y="129" fill="#d94f3d" font-family="Arial, sans-serif" font-size="22" font-weight="700">lǎng</text>
+    <text x="216" y="129" fill="#d94f3d" font-family="Arial, sans-serif" font-size="22" font-weight="700">rùn</text>
+    <text x="307" y="129" fill="#d94f3d" font-family="Arial, sans-serif" font-size="22" font-weight="700">yùn</text>
+    <text x="398" y="129" fill="#d94f3d" font-family="Arial, sans-serif" font-size="22" font-weight="700">niàng</text>
+    <text x="125" y="190" fill="#17324d" font-family="Microsoft YaHei, sans-serif" font-size="49">朗</text>
+    <text x="216" y="190" fill="#17324d" font-family="Microsoft YaHei, sans-serif" font-size="49">润</text>
+    <text x="307" y="190" fill="#17324d" font-family="Microsoft YaHei, sans-serif" font-size="49">酝</text>
+    <text x="398" y="190" fill="#17324d" font-family="Microsoft YaHei, sans-serif" font-size="49">酿</text>
+  </g>
+</svg>

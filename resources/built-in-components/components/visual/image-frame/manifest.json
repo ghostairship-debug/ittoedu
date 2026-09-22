@@ -1,0 +1,87 @@
+{
+  "schemaVersion": 4,
+  "runtimeApiVersion": 4,
+  "renderMode": "dom",
+  "supportedScopes": [
+    "scene",
+    "global"
+  ],
+  "id": "com.ittoedu.visual.image-frame",
+  "name": "图片装饰容器",
+  "version": "1.0.0",
+  "description": "统一承载笔刷裁切和贴纸白边等图片装饰样式",
+  "entry": "runtime.js",
+  "thumbnail": "thumbnail.svg",
+  "defaultSize": {
+    "width": 760,
+    "height": 520
+  },
+  "minSize": {
+    "width": 180,
+    "height": 140
+  },
+  "preserveAspectRatio": false,
+  "assets": {},
+  "defaultProps": {
+    "content": {
+      "caption": "图片标题",
+      "alt": "装饰图片"
+    },
+    "visualStyle": "brush",
+    "imageAssetId": "",
+    "fit": "cover",
+    "positionX": 50,
+    "positionY": 50,
+    "showCaption": true,
+    "captionSize": 28,
+    "captionColor": "#2f6f4e",
+    "accentColor": "#d95d42",
+    "borderWidth": 12,
+    "borderColor": "#fffdf6",
+    "shadowEnabled": true,
+    "shadowOpacity": 0.22,
+    "shadowDistance": 12
+  },
+  "editor": {
+    "properties": [
+      {
+        "key": "visualStyle",
+        "label": "视觉样式",
+        "type": "select",
+        "required": true,
+        "options": [
+          { "value": "brush", "label": "笔刷" },
+          { "value": "sticker", "label": "贴纸" }
+        ]
+      },
+      { "key": "imageAssetId", "label": "展示图片", "type": "image" },
+      { "key": "content.caption", "label": "图片标题", "type": "text", "maxLength": 100 },
+      { "key": "content.alt", "label": "无障碍说明", "type": "text", "maxLength": 200 },
+      { "key": "showCaption", "label": "显示图片标题", "type": "boolean" },
+      {
+        "key": "fit",
+        "label": "图片适配",
+        "type": "select",
+        "required": true,
+        "options": [
+          { "value": "cover", "label": "裁切铺满" },
+          { "value": "contain", "label": "完整显示" }
+        ]
+      },
+      { "key": "positionX", "label": "图片水平焦点", "type": "number", "min": 0, "max": 100, "step": 1 },
+      { "key": "positionY", "label": "图片垂直焦点", "type": "number", "min": 0, "max": 100, "step": 1 },
+      { "key": "captionSize", "label": "标题字号", "type": "number", "min": 22, "max": 64, "step": 1, "unit": "px" },
+      { "key": "captionColor", "label": "标题颜色", "type": "color" },
+      { "key": "accentColor", "label": "强调颜色", "type": "color" },
+      { "key": "borderWidth", "label": "贴纸白边", "type": "number", "min": 0, "max": 28, "step": 1, "unit": "px" },
+      { "key": "borderColor", "label": "贴纸纸边颜色", "type": "color" },
+      { "key": "shadowEnabled", "label": "显示投影", "type": "boolean" },
+      { "key": "shadowOpacity", "label": "投影强度", "type": "number", "min": 0, "max": 0.5, "step": 0.02 },
+      { "key": "shadowDistance", "label": "投影距离", "type": "number", "min": 0, "max": 30, "step": 1, "unit": "px" }
+    ]
+  },
+  "presets": [
+    { "id": "brush", "label": "笔刷图片", "props": { "visualStyle": "brush", "fit": "cover", "showCaption": true } },
+    { "id": "sticker", "label": "贴纸图片", "props": { "visualStyle": "sticker", "fit": "contain", "showCaption": false } }
+  ]
+}

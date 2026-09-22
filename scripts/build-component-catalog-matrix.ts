@@ -1,3 +1,4 @@
+import { BUILT_IN_COMPONENT_CATALOG_DIRECTORY } from '../src/shared/builtInComponentCatalog'
 import { existsSync, promises as fs } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -34,9 +35,7 @@ import {
 
 const scriptDirectory = path.dirname(fileURLToPath(import.meta.url))
 const projectRoot = path.resolve(scriptDirectory, '..')
-const componentCatalogRoot = process.env.COURSEWARE_COMPONENTS_DIR
-  ? path.resolve(process.env.COURSEWARE_COMPONENTS_DIR)
-  : path.resolve(projectRoot, '..', 'courseware-components')
+const componentCatalogRoot = path.resolve(projectRoot, BUILT_IN_COMPONENT_CATALOG_DIRECTORY)
 const outputRoot = path.join(projectRoot, 'artifacts', 'component-catalog-matrix')
 const playerBundlePath = path.join(projectRoot, 'dist-player', 'player.iife.js')
 const basename = 'component-catalog-v9-matrix'

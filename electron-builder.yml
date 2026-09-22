@@ -10,6 +10,11 @@ files:
   - dist-renderer/**
   - dist-player/**
   - resources/icons/**
+  # Built-in catalog, packages and thumbnails are application resources.
+  # Authoring sources, build tools and historical evidence stay in the repository.
+  - resources/built-in-components/catalog.json
+  - resources/built-in-components/packages/*.h5component
+  - resources/built-in-components/components/**/thumbnail.svg
   # 软件内创作流程在运行时从 app.getAppPath() 读取这 4 个方法文件
   # （src/main/lessonAuthoringPrompt.ts 的 LESSON_AUTHORING_METHOD_PATHS）；
   # 不打包会让打包版的课例创作提示词直接 ENOENT。

@@ -1,5 +1,4 @@
 import path from 'node:path'
-import { createHash } from 'node:crypto'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { createServer } from 'vite'
@@ -10,7 +9,7 @@ import generatedCapabilities from '../src/shared/generated/courseAgentCapabiliti
 import { queryCourseAgentCapabilities, readCourseAgentCapability, type CourseAgentCapabilityData,
   type CourseAgentCapabilityQuery, type CourseAgentCapabilityCardOptions } from '../src/shared/courseAgentCapabilities'
 import { scanComponentCatalogDirectory, readCatalogComponentPackage, type ScannedComponentCatalogSource } from '../src/main/componentCatalogScanner'
-import { trustForManagedCatalogDigest } from '../src/shared/builtInComponentCatalog'
+import { defaultComponentCatalogSources } from '../src/main/componentCatalogSources'
 import type { ComponentCatalogSnapshot } from '../src/shared/componentCatalog'
 
 type AsyncMethod<T> = T extends (...args: infer A) => infer R ? (...args: A) => Promise<Awaited<R>> : never
@@ -24,21 +23,27 @@ export interface CoursewareCaseBuilderApiV2 {
 
 /** Read-only use of the product's catalog scanner and managed digest trust. */
 export function createCoursewareBuilderCatalogPort(editorRoot: string) {
-  const root = process.env.COURSEWARE_COMPONENTS_DIR ? path.resolve(process.env.COURSEWARE_COMPONENTS_DIR) : path.resolve(editorRoot, '..', 'courseware-components')
-  let source: ScannedComponentCatalogSource | undefined
+  const sources = new Map<string, ScannedComponentCatalogSource>()
   const load = async (): Promise<ComponentCatalogSnapshot> => {
-    source = undefined
-    try {
-      const digest = createHash('sha256').update(await readFile(path.join(root, 'catalog.json'))).digest('hex')
-      source = await scanComponentCatalogDirectory(root, trustForManagedCatalogDigest(digest))
-      return { sources: [source.source], packages: source.packages.map(({ thumbnailDataUrl: _thumbnail, ...entry }) => entry), issues: source.issues }
-    } catch (error) {
-      return { sources: [], packages: [], issues: [{ sourceLabel: 'Builder managed component catalog', code: 'catalog-unreadable', message: error instanceof Error ? error.message : String(error) }] }
+    sources.clear()
+    const snapshot: ComponentCatalogSnapshot = { sources: [], packages: [], issues: [] }
+    for (const entry of await defaultComponentCatalogSources(editorRoot)) {
+      try {
+        const source = await scanComponentCatalogDirectory(entry.path, entry.trust)
+        sources.set(source.source.sourceId, source)
+        snapshot.sources.push(source.source)
+        snapshot.packages.push(...source.packages.map(({ thumbnailDataUrl: _thumbnail, ...pkg }) => pkg))
+        snapshot.issues.push(...source.issues)
+      } catch (error) {
+        snapshot.issues.push({ sourceLabel: path.basename(entry.path), code: 'catalog-unreadable', message: error instanceof Error ? error.message : String(error) })
+      }
     }
+    return snapshot
   }
   const read = async (input: { sourceId: string; packageId: string; version: string }) => {
     await load()
-    if (!source || source.source.sourceId !== input.sourceId || source.source.trust === 'prompt') throw new Error('当前 Builder 没有相同受信组件目录，请刷新发现')
+    const source = sources.get(input.sourceId)
+    if (!source || source.source.trust === 'prompt') throw new Error('当前 Builder 没有相同受信组件目录，请刷新发现')
     return readCatalogComponentPackage(source, input.packageId, input.version)
   }
   return Object.freeze({ load, read })

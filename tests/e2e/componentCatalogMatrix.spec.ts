@@ -1,3 +1,4 @@
+import { BUILT_IN_COMPONENT_CATALOG_DIRECTORY } from '../../src/shared/builtInComponentCatalog'
 import { _electron as electron, chromium, expect, test } from '@playwright/test'
 import {
   existsSync,
@@ -22,7 +23,7 @@ import { expectBackgroundWindowsIsolated } from './expectBackgroundWindowsIsolat
 import { enterIndependentEditor } from './lessonWorkspaceEntry'
 
 const root = resolve(__dirname, '..', '..')
-const catalogRoot = resolve(root, '..', 'courseware-components')
+const catalogRoot = resolve(root, BUILT_IN_COMPONENT_CATALOG_DIRECTORY)
 const artifactDirectory = join(root, 'artifacts', 'component-catalog-matrix')
 const outputDirectory = join(root, 'output', 'playwright', 'component-catalog-matrix')
 const matrixLessonPath = join(

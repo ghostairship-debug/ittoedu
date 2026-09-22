@@ -141,7 +141,7 @@
 
 ## 6. 模块级补充边界
 
-- **Components**：Catalog snapshot 不是工程真相；四子域为 Catalog / Packages / Instances / Authoring。
+- **Components**：Catalog snapshot 不是工程真相；四子域为 Catalog / Packages / Instances / Authoring。2026-09-22 Owner 明确：内置组件源码与制品归本软件仓库，目录、包及缩略图随软件分发；开发版和安装版从应用根目录读取同一资源相对路径，不依赖仓库外的组件目录。外部组件与在线组件市场独立于内置资源，外部目录只作为附加来源；加入工程后仍使用已嵌入的精确包。
 - **Runtime/互动**：简洁模板与专业规则必须生成同一种标准 Interaction V1 规则；Automation UI 是界面不是第三套业务模型。
 - **Media**：AssetMeta / sidecar bytes / carrier 三层在一次操作内一致但不混成一个对象；AssetMeta 当前无持久化 `contentHash`，不为跨会话去重新增 V9 字段。
 - **全局层**：有效图层管线为 visibility filter → global Underlay（平面内排序）→ 当前本地合成（Flow 为 surface Underlay → 语义正文 → surface Overlay；Slide / Spatial 保留各自本地 carrier）→ global Overlay（平面内排序）→ rows/canvas/player；跨 owner `order` 不得泄漏成可编辑交错层级。

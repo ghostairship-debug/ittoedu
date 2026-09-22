@@ -11,7 +11,7 @@ import { courseAgentMethodSkills, courseAgentProductSkills, courseAgentSessionSk
 import { courseAgentCapabilityDiskIndex, courseAgentCapabilityQueryHelp, type CourseAgentCapabilityData, type CourseAgentCapabilityEntry } from '../src/shared/courseAgentCapabilities'
 import packageJson from '../package.json'
 import { importComponentPackage } from '../src/renderer/components/importComponentPackage'
-import { BUILT_IN_COMPONENT_CATALOG_SHA256 } from '../src/shared/builtInComponentCatalog'
+import { BUILT_IN_COMPONENT_CATALOG_DIRECTORY, BUILT_IN_COMPONENT_CATALOG_SHA256 } from '../src/shared/builtInComponentCatalog'
 import {
   COMPONENT_CATALOG_VERSION,
   parseComponentCatalog,
@@ -287,7 +287,7 @@ interface ComponentCatalogCapabilitySnapshot {
   snapshotVersion: 1
   status: 'available' | 'degraded' | 'unavailable'
   source: {
-    kind: 'external-component-catalog'
+    kind: 'built-in-component-catalog' | 'external-component-catalog'
     location: string
     expectedCatalogSha256: string
     actualCatalogSha256?: string
@@ -450,9 +450,10 @@ function sameStringSet(left: readonly string[], right: readonly string[]): boole
 async function buildComponentCatalogSnapshot(
   catalogRoot: string,
   location: string,
+  kind: ComponentCatalogCapabilitySnapshot['source']['kind'],
 ): Promise<ComponentCatalogCapabilitySnapshot> {
   const sourceBase = {
-    kind: 'external-component-catalog' as const,
+    kind,
     location,
     expectedCatalogSha256: BUILT_IN_COMPONENT_CATALOG_SHA256,
   }
@@ -468,7 +469,7 @@ async function buildComponentCatalogSnapshot(
       packages: [],
       issues: [{
         code: 'catalog-unavailable',
-        message: '外部组件目录缺失或 catalog.json 不可读，未声明任何可用组件。',
+        message: '组件目录缺失或 catalog.json 不可读，未声明任何可用组件。',
       }],
     }
   }
@@ -998,11 +999,11 @@ export async function generateAiCapabilityArtifacts(
 ): Promise<AiCapabilityGenerationResult> {
   const projectRoot = path.resolve(options.projectRoot ?? defaultProjectRoot)
   const catalogRoot = path.resolve(
-    options.componentCatalogRoot ?? path.join(projectRoot, '..', 'courseware-components'),
+    options.componentCatalogRoot ?? path.join(projectRoot, BUILT_IN_COMPONENT_CATALOG_DIRECTORY),
   )
   const catalogLabel = options.componentCatalogLabel ??
     (options.componentCatalogRoot === undefined
-      ? '../courseware-components'
+      ? BUILT_IN_COMPONENT_CATALOG_DIRECTORY
       : 'external-component-catalog')
 
   const triggerJsonSchema = jsonSchema(interactionTriggerSchema)
@@ -1058,6 +1059,7 @@ export async function generateAiCapabilityArtifacts(
   const componentCatalogSnapshot = await buildComponentCatalogSnapshot(
     catalogRoot,
     catalogLabel,
+    options.componentCatalogRoot === undefined ? 'built-in-component-catalog' : 'external-component-catalog',
   )
 
   const files = new Map<string, string>()

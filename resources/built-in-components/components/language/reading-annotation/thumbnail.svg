@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="480" height="280" viewBox="0 0 480 280">
+  <defs>
+    <linearGradient id="paper" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#fffef9"/>
+      <stop offset="1" stop-color="#edf6ef"/>
+    </linearGradient>
+    <filter id="shadow" x="-15%" y="-15%" width="130%" height="140%">
+      <feDropShadow dx="0" dy="8" stdDeviation="9" flood-color="#17324d" flood-opacity=".16"/>
+    </filter>
+  </defs>
+  <rect width="480" height="280" rx="28" fill="#dfeae2"/>
+  <rect x="20" y="18" width="440" height="244" rx="22" fill="url(#paper)" stroke="#b8cebd" stroke-width="2" filter="url(#shadow)"/>
+  <text x="48" y="68" fill="#17324d" font-family="Microsoft YaHei, sans-serif" font-size="27" font-weight="700">朗读标注</text>
+  <path d="M54 121 Q117 86 180 121" fill="none" stroke="#d94f3d" stroke-width="4" stroke-linecap="round"/>
+  <text x="48" y="158" fill="#17324d" font-family="Microsoft YaHei, sans-serif" font-size="35">春天的脚步近了</text>
+  <g fill="#d94f3d">
+    <circle cx="306" cy="178" r="4"/><circle cx="343" cy="178" r="4"/>
+  </g>
+  <text x="48" y="220" fill="#d94f3d" font-family="Microsoft YaHei, sans-serif" font-size="26" font-weight="700">∧</text>
+  <path d="M126 211 Q168 187 210 211" fill="none" stroke="#d94f3d" stroke-width="4" stroke-linecap="round"/>
+</svg>

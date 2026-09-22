@@ -4,8 +4,8 @@
   "catalogSource": {
     "actualCatalogSha256": "fedf8315a8a1cc636771760be95931b31dba7f6625b62adc8247d7eebf044573",
     "expectedCatalogSha256": "fedf8315a8a1cc636771760be95931b31dba7f6625b62adc8247d7eebf044573",
-    "kind": "external-component-catalog",
-    "location": "../courseware-components",
+    "kind": "built-in-component-catalog",
+    "location": "resources/built-in-components",
     "trusted": true
   },
   "category": "语文标注",

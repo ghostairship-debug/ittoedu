@@ -1,5 +1,4 @@
 import { promises as fs } from 'node:fs'
-import { createHash } from 'node:crypto'
 import path from 'node:path'
 import { app, dialog, type BrowserWindow } from 'electron'
 import { z } from 'zod'
@@ -8,7 +7,7 @@ import type {
   ComponentCatalogSnapshot,
   ComponentCatalogTrust,
 } from '../shared/componentCatalog'
-import { trustForManagedCatalogDigest } from '../shared/builtInComponentCatalog'
+import { defaultComponentCatalogSources } from './componentCatalogSources'
 import {
   ComponentCatalogScanError,
   readCatalogComponentPackage,
@@ -45,14 +44,6 @@ function configuredSourcesPath(): string {
   return path.join(app.getPath('userData'), 'component-catalog-sources.json')
 }
 
-async function pathHasCatalog(rootPath: string): Promise<boolean> {
-  try {
-    return (await fs.stat(path.join(rootPath, 'catalog.json'))).isFile()
-  } catch {
-    return false
-  }
-}
-
 async function readConfiguredSources(): Promise<SourceConfig[]> {
   try {
     const text = await fs.readFile(configuredSourcesPath(), 'utf8')
@@ -73,37 +64,6 @@ async function writeConfiguredSources(sources: SourceConfig[]): Promise<void> {
   )
 }
 
-async function catalogSha256(rootPath: string): Promise<string | null> {
-  try {
-    const bytes = await fs.readFile(path.join(rootPath, 'catalog.json'))
-    return createHash('sha256').update(bytes).digest('hex')
-  } catch {
-    return null
-  }
-}
-
-async function discoverDefaultSources(): Promise<DiscoveredSourceConfig[]> {
-  const candidates = new Set<string>()
-  const configuredByEnvironment = process.env.COURSEWARE_COMPONENTS_DIR
-  if (configuredByEnvironment) candidates.add(path.resolve(configuredByEnvironment))
-
-  candidates.add(path.resolve(app.getAppPath(), '..', 'courseware-components'))
-  candidates.add(path.resolve(process.resourcesPath, 'courseware-components'))
-  candidates.add(path.resolve(path.dirname(process.execPath), 'courseware-components'))
-  candidates.add(path.resolve(path.dirname(process.execPath), '..', 'courseware-components'))
-
-  const discovered: DiscoveredSourceConfig[] = []
-  for (const candidate of candidates) {
-    if (!await pathHasCatalog(candidate)) continue
-    const digest = await catalogSha256(candidate)
-    discovered.push({
-      path: candidate,
-      trust: digest ? trustForManagedCatalogDigest(digest) : 'prompt',
-    })
-  }
-  return discovered
-}
-
 export class ComponentCatalogManager {
   private readonly sources = new Map<string, ScannedComponentCatalogSource>()
 
@@ -119,7 +79,7 @@ export class ComponentCatalogManager {
   async load(): Promise<ComponentCatalogSnapshot> {
     this.sources.clear()
     const configured = await readConfiguredSources()
-    const defaults = await discoverDefaultSources()
+    const defaults = await defaultComponentCatalogSources(app.getAppPath())
     const byPath = new Map<string, DiscoveredSourceConfig>()
     for (const source of defaults) byPath.set(canonicalPath(source.path), source)
     for (const source of configured) {

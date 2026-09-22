@@ -1,0 +1,163 @@
+{
+  "schemaVersion": 4,
+  "runtimeApiVersion": 4,
+  "renderMode": "dom",
+  "supportedScopes": [
+    "scene"
+  ],
+  "id": "com.ittoedu.language.pinyin-annotation",
+  "name": "汉语拼音标注",
+  "version": "1.2.0",
+  "description": "按可编辑的汉字与拼音配对文稿，在汉字上方稳定呈现带声调拼音",
+  "entry": "runtime.js",
+  "thumbnail": "thumbnail.svg",
+  "defaultSize": {
+    "width": 960,
+    "height": 280
+  },
+  "minSize": {
+    "width": 120,
+    "height": 82
+  },
+  "preserveAspectRatio": false,
+  "assets": {},
+  "defaultProps": {
+    "content": {
+      "ariaLabel": "汉语拼音标注",
+      "title": "读准字音",
+      "pairs": "朗|lǎng 润|rùn 酝|yùn 酿|niàng\n应|yìng 和|hè 黄|huáng 晕|yùn",
+      "showAllLabel": "显示拼音",
+      "hideAllLabel": "隐藏拼音"
+    },
+    "hanziSize": 48,
+    "pinyinSize": 24,
+    "lineGap": 28,
+    "unitGap": 4,
+    "padding": 32,
+    "showTitle": true,
+    "showPinyin": true,
+    "showGlobalControls": false,
+    "clickTogglesPinyin": false,
+    "hanziColor": "#17324d",
+    "pinyinColor": "#d94f3d",
+    "surface": "#fffdf7",
+    "borderColor": "#c9d9cd"
+  },
+  "editor": {
+    "properties": [
+      {
+        "key": "content.title",
+        "label": "标题",
+        "type": "text",
+        "maxLength": 60
+      },
+      {
+        "key": "content.pairs",
+        "label": "汉字与拼音",
+        "description": "每个单元写成“汉字|带调拼音”，单元之间用空格分隔；换行会在课件中另起一行。标点可写成“，|”。",
+        "type": "textarea",
+        "maxLength": 6000
+      },
+      {
+        "key": "content.showAllLabel",
+        "label": "显示拼音按钮",
+        "type": "text",
+        "maxLength": 30
+      },
+      {
+        "key": "content.hideAllLabel",
+        "label": "隐藏拼音按钮",
+        "type": "text",
+        "maxLength": 30
+      },
+      {
+        "key": "hanziSize",
+        "label": "汉字字号",
+        "type": "number",
+        "min": 22,
+        "max": 100,
+        "step": 1,
+        "unit": "px"
+      },
+      {
+        "key": "pinyinSize",
+        "label": "拼音字号",
+        "type": "number",
+        "min": 22,
+        "max": 52,
+        "step": 1,
+        "unit": "px"
+      },
+      {
+        "key": "lineGap",
+        "label": "行间距",
+        "type": "number",
+        "min": 0,
+        "max": 80,
+        "step": 1,
+        "unit": "px"
+      },
+      {
+        "key": "unitGap",
+        "label": "字间距",
+        "type": "number",
+        "min": 0,
+        "max": 40,
+        "step": 1,
+        "unit": "px"
+      },
+      {
+        "key": "padding",
+        "label": "内边距",
+        "type": "number",
+        "min": 6,
+        "max": 80,
+        "step": 1,
+        "unit": "px"
+      },
+      {
+        "key": "showTitle",
+        "label": "显示标题",
+        "type": "boolean"
+      },
+      {
+        "key": "showPinyin",
+        "label": "显示拼音",
+        "description": "关闭后保留拼音占位，汉字排版不会跳动。",
+        "type": "boolean"
+      },
+      {
+        "key": "showGlobalControls",
+        "label": "显示全局拼音按钮",
+        "description": "在一个词组组件中显示“显示拼音／隐藏拼音”，控制同页全部拼音组件。",
+        "type": "boolean"
+      },
+      {
+        "key": "clickTogglesPinyin",
+        "label": "点击切换拼音",
+        "description": "播放时点击本组件，可单独显示或隐藏这一词条的拼音。",
+        "type": "boolean"
+      },
+      {
+        "key": "hanziColor",
+        "label": "汉字颜色",
+        "type": "color"
+      },
+      {
+        "key": "pinyinColor",
+        "label": "拼音颜色",
+        "type": "color"
+      },
+      {
+        "key": "surface",
+        "label": "底色",
+        "type": "color"
+      },
+      {
+        "key": "borderColor",
+        "label": "边框颜色",
+        "type": "color"
+      }
+    ]
+  }
+}

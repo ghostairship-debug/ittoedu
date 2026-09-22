@@ -1,0 +1,60 @@
+{
+  "generatedAt": "2026-08-12T19:45:18.410Z",
+  "verified": {
+    "generatedStandaloneHtml": {
+      "maxMounted": 1,
+      "minMounted": 1,
+      "navigationCount": 100,
+      "externalRequests": [],
+      "pageErrors": []
+    },
+    "generatedWebPackage": {
+      "maxMounted": 1,
+      "minMounted": 1,
+      "navigationCount": 4,
+      "externalRequests": [],
+      "pageErrors": []
+    }
+  },
+  "pressure": {
+    "rounds": 25,
+    "sceneCount": 4,
+    "navigationCount": 100,
+    "maxMounted": 1,
+    "minMounted": 1
+  },
+  "backgroundWindowIsolation": true,
+  "packageCount": 4,
+  "preview": {
+    "maxMounted": 1,
+    "minMounted": 1,
+    "navigationCount": 4,
+    "externalRequests": [],
+    "pageErrors": []
+  },
+  "exportedStandalone": {
+    "maxMounted": 1,
+    "minMounted": 1,
+    "navigationCount": 4,
+    "externalRequests": [],
+    "pageErrors": []
+  },
+  "exportedWebPackage": {
+    "maxMounted": 1,
+    "minMounted": 1,
+    "navigationCount": 4,
+    "externalRequests": [],
+    "pageErrors": []
+  },
+  "outputs": {
+    "importedRoundtripPath": "C:\\Users\\74755\\Documents\\HTML课件编辑器\\output\\playwright\\component-catalog-matrix\\catalog-ui-roundtrip.h5lesson",
+    "exportedHtmlPath": "C:\\Users\\74755\\Documents\\HTML课件编辑器\\output\\playwright\\component-catalog-matrix\\catalog-matrix-ui.html",
+    "exportedWebPackagePath": "C:\\Users\\74755\\Documents\\HTML课件编辑器\\output\\playwright\\component-catalog-matrix\\catalog-matrix-ui-web.zip",
+    "exportedPdfPath": "C:\\Users\\74755\\Documents\\HTML课件编辑器\\output\\playwright\\component-catalog-matrix\\catalog-matrix-ui.pdf",
+    "exportedPptxPath": "C:\\Users\\74755\\Documents\\HTML课件编辑器\\output\\playwright\\component-catalog-matrix\\catalog-matrix-ui.pptx"
+  },
+  "staticExports": {
+    "pdfPages": 4,
+    "pptxSlides": 4
+  }
+}

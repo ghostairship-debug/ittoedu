@@ -1,12 +1,11 @@
+import { BUILT_IN_COMPONENT_CATALOG_DIRECTORY } from '../src/shared/builtInComponentCatalog'
 import path from 'node:path'
 import { scanComponentCatalogDirectory, readCatalogComponentPackage } from '../src/main/componentCatalogScanner'
 import { executeComponentRuntime } from '../src/renderer/components/executeComponentRuntime'
 import { importComponentPackage } from '../src/renderer/components/importComponentPackage'
 
 async function main(): Promise<void> {
-  const catalogRoot = process.env.COURSEWARE_COMPONENTS_DIR
-    ? path.resolve(process.env.COURSEWARE_COMPONENTS_DIR)
-    : path.resolve(process.cwd(), '..', 'courseware-components')
+  const catalogRoot = path.resolve(process.cwd(), BUILT_IN_COMPONENT_CATALOG_DIRECTORY)
 
   const catalog = await scanComponentCatalogDirectory(catalogRoot, 'prompt')
   if (catalog.packages.length !== 4) {
@@ -18,7 +17,7 @@ async function main(): Promise<void> {
 
   for (const entry of catalog.packages) {
     if (entry.quality !== 'experimental') {
-      throw new Error(`${entry.packageId} 在完整 V8 验收前不得超过 experimental`)
+      throw new Error(`${entry.packageId} 在完整产品验收前不得超过 experimental`)
     }
     if (entry.license?.status !== 'unknown' || (entry.releaseBlockers?.length ?? 0) === 0) {
       throw new Error(`${entry.packageId} 没有保留许可/发布阻断状态`)
@@ -61,7 +60,7 @@ async function main(): Promise<void> {
     }
   }
 
-  console.log('已验证外部目录中 4 个 experimental Component API 4 包、哈希、作用域与 22 px 字号下限')
+  console.log('已验证随软件分发的内置目录中 4 个 experimental Component API 4 包、哈希、作用域与 22 px 字号下限')
 }
 
 main().catch((error: unknown) => {

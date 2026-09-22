@@ -1,0 +1,197 @@
+{
+  "catalogVersion": 1,
+  "name": "ittoedu Courseware Components · Experimental",
+  "packages": [
+    {
+      "packageId": "com.ittoedu.language.reading-annotation",
+      "version": "1.1.0",
+      "name": "语文朗读标注",
+      "description": "用可编辑标记文稿呈现重音、统一长停顿和文字上方的连读弧线",
+      "subject": [
+        "语文"
+      ],
+      "schoolStage": [],
+      "tags": [
+        "朗读",
+        "重音",
+        "停顿",
+        "连读",
+        "DOM"
+      ],
+      "category": "语文标注",
+      "packagePath": "packages/reading-annotation.h5component",
+      "thumbnailPath": "components/language/reading-annotation/thumbnail.svg",
+      "sha256": "b4b7b1104ff390f675811e4ca7460042b28f00aaa9f40614a4f79e56f00cb82a",
+      "componentSchemaVersion": 4,
+      "runtimeApiVersion": 4,
+      "renderMode": "dom",
+      "supportedScopes": [
+        "scene"
+      ],
+      "quality": "experimental",
+      "maintainer": "unassigned",
+      "verifiedCases": [
+        "component-catalog-v8-matrix:catalog-ui-roundtrip",
+        "component-catalog-v8-matrix:editor-player-thumbnail",
+        "component-catalog-v8-matrix:offline-html-web",
+        "component-catalog-v8-matrix:pdf-pptx-static",
+        "component-catalog-v8-matrix:lifecycle-error-isolation-25x4"
+      ],
+      "verifiedAt": "2026-08-12T16:46:41.614Z",
+      "source": {
+        "kind": "handoff",
+        "reference": "feedback-package:f0cd81e9642be799c7382bc84a46649e9e9d86031de2ceeb91d6c29cdb7c7a688/04/examples/language-annotation-components/reading-annotation"
+      },
+      "license": {
+        "status": "unknown"
+      },
+      "releaseBlockers": [
+        "license-unverified",
+        "maintainer-unassigned"
+      ]
+    },
+    {
+      "packageId": "com.ittoedu.language.pinyin-annotation",
+      "version": "1.2.0",
+      "name": "汉语拼音标注",
+      "description": "按可编辑的汉字与拼音配对文稿，在汉字上方稳定呈现带声调拼音",
+      "subject": [
+        "语文"
+      ],
+      "schoolStage": [],
+      "tags": [
+        "拼音",
+        "多音字",
+        "显隐",
+        "DOM"
+      ],
+      "category": "语文标注",
+      "packagePath": "packages/pinyin-annotation.h5component",
+      "thumbnailPath": "components/language/pinyin-annotation/thumbnail.svg",
+      "sha256": "9c18a0d9ca01bdd9d6c1e9353d46158dff20af5f842c26697c95454fcc6c911d",
+      "componentSchemaVersion": 4,
+      "runtimeApiVersion": 4,
+      "renderMode": "dom",
+      "supportedScopes": [
+        "scene"
+      ],
+      "quality": "experimental",
+      "maintainer": "unassigned",
+      "verifiedCases": [
+        "component-catalog-v8-matrix:catalog-ui-roundtrip",
+        "component-catalog-v8-matrix:editor-player-thumbnail",
+        "component-catalog-v8-matrix:offline-html-web",
+        "component-catalog-v8-matrix:pdf-pptx-static",
+        "component-catalog-v8-matrix:lifecycle-error-isolation-25x4"
+      ],
+      "verifiedAt": "2026-08-12T16:46:41.614Z",
+      "source": {
+        "kind": "handoff",
+        "reference": "feedback-package:f0cd81e9642be799c7382bc84a46649e9e9d86031de2ceeb91d6c29cdb7c7a688/04/examples/language-annotation-components/pinyin-annotation"
+      },
+      "license": {
+        "status": "unknown"
+      },
+      "releaseBlockers": [
+        "license-unverified",
+        "maintainer-unassigned"
+      ]
+    },
+    {
+      "packageId": "com.ittoedu.visual.text-container",
+      "version": "1.0.0",
+      "name": "文字视觉容器",
+      "description": "一个组件切换透明玻璃、磨砂玻璃、便利贴、撕纸和文件夹样式",
+      "subject": [],
+      "schoolStage": [],
+      "tags": [
+        "文字",
+        "容器",
+        "玻璃",
+        "便利贴",
+        "撕纸",
+        "文件夹",
+        "DOM"
+      ],
+      "category": "视觉容器",
+      "packagePath": "packages/text-container.h5component",
+      "thumbnailPath": "components/visual/text-container/thumbnail.svg",
+      "sha256": "f38781f797361dfd5afbda56958b824a5e95156f637befbf75ede57cf1edf7b1",
+      "componentSchemaVersion": 4,
+      "runtimeApiVersion": 4,
+      "renderMode": "dom",
+      "supportedScopes": [
+        "scene",
+        "global"
+      ],
+      "quality": "experimental",
+      "maintainer": "unassigned",
+      "verifiedCases": [
+        "component-catalog-v8-matrix:catalog-ui-roundtrip",
+        "component-catalog-v8-matrix:editor-player-thumbnail",
+        "component-catalog-v8-matrix:offline-html-web",
+        "component-catalog-v8-matrix:pdf-pptx-static",
+        "component-catalog-v8-matrix:lifecycle-error-isolation-25x4"
+      ],
+      "verifiedAt": "2026-08-12T16:46:41.614Z",
+      "source": {
+        "kind": "local",
+        "reference": "components/visual/text-container"
+      },
+      "license": {
+        "status": "unknown"
+      },
+      "releaseBlockers": [
+        "license-unverified",
+        "maintainer-unassigned"
+      ]
+    },
+    {
+      "packageId": "com.ittoedu.visual.image-frame",
+      "version": "1.0.0",
+      "name": "图片装饰容器",
+      "description": "一个组件切换笔刷裁切和贴纸白边样式",
+      "subject": [],
+      "schoolStage": [],
+      "tags": [
+        "图片",
+        "装饰",
+        "笔刷",
+        "贴纸",
+        "DOM"
+      ],
+      "category": "视觉容器",
+      "packagePath": "packages/image-frame.h5component",
+      "thumbnailPath": "components/visual/image-frame/thumbnail.svg",
+      "sha256": "b436247ab0a923643eb50f302c914bb71a2d88cd13ac5c41573638dfb067531a",
+      "componentSchemaVersion": 4,
+      "runtimeApiVersion": 4,
+      "renderMode": "dom",
+      "supportedScopes": [
+        "scene",
+        "global"
+      ],
+      "quality": "experimental",
+      "maintainer": "unassigned",
+      "verifiedCases": [
+        "component-catalog-v8-matrix:catalog-ui-roundtrip",
+        "component-catalog-v8-matrix:editor-player-thumbnail",
+        "component-catalog-v8-matrix:offline-html-web",
+        "component-catalog-v8-matrix:pdf-pptx-static",
+        "component-catalog-v8-matrix:lifecycle-error-isolation-25x4"
+      ],
+      "verifiedAt": "2026-08-12T16:46:41.614Z",
+      "source": {
+        "kind": "local",
+        "reference": "components/visual/image-frame"
+      },
+      "license": {
+        "status": "unknown"
+      },
+      "releaseBlockers": [
+        "license-unverified",
+        "maintainer-unassigned"
+      ]
+    }
+  ]
+}
