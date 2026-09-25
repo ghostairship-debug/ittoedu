@@ -107,8 +107,15 @@ it('S12-T02 keeps concurrent bridges on one unsaved Session and History through 
   expect((await left.request('ping')).status).toBe(404)
   expect((await right.request('ping')).status).toBe(200)
   const reconnected = await connect(leftConnection)
-  const current = await reconnected.request('tools/call', { name: 'read', arguments: {
+  const staleRead = await reconnected.request('tools/call', { name: 'read', arguments: {
     arguments: { target: reconnected.context.documents[0]!.target },
+  } })
+  expect(staleRead.data.result.structuredContent.result).toMatchObject({ kind: 'error', code: 'target-conflict' })
+  const readerConnection = await server.grant({ workspaceId: 'space', conversationId: 'conversation', taskId: 'task-readback',
+    instruction: '冲突后核对当前内容', documents: [{ documentId: created.documentId, writable: [] }] })
+  const reader = await connect(readerConnection)
+  const current = await reader.request('tools/call', { name: 'read', arguments: {
+    arguments: { target: reader.context.documents[0]!.target },
   } })
   expect(current.data.result.structuredContent.result).toMatchObject({ kind: 'read' })
   expect(current.data.result.structuredContent.result.data.text).toContain('LEFT RIGHT')

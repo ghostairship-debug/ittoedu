@@ -22,7 +22,7 @@ import type { ModelEvent, ModelProvider, ModelRequest, ModelSelection } from '..
 
 const roots: string[] = []
 afterEach(async () => {
-  for (const root of roots.splice(0)) await fs.rm(root, { recursive: true, force: true })
+  for (const root of roots.splice(0)) await fs.rm(root, { recursive: true, force: true, maxRetries: 8, retryDelay: 25 })
 })
 async function root() { const value = await fs.mkdtemp(path.join(os.tmpdir(), 'g20-s11-image-')); roots.push(value); return value }
 const connection = { id: 'oauth-fixture', revision: 1, provider: 'openai', protocol: 'chatgpt-responses',
@@ -131,7 +131,8 @@ it('projects original image producer instants onto their own request/tool while 
   const calls: ModelRequest[] = []
   const provider: ModelProvider = { async *stream(input) {
     calls.push(input)
-    if (calls.length === 1) {
+    if (calls.length === 1) yield completed(input, { id: 'load-media', name: 'tools.load', argumentsText: JSON.stringify({ families: ['media'] }) })
+    else if (calls.length === 2) {
       const refs = JSON.parse(String(input.messages[1].content).split('：')[1]) as { target: string }[]
       yield completed(input, { id: 'image-call', name: 'image.generate',
         argumentsText: JSON.stringify({ target: refs[0]!.target, prompt: 'private prompt for engine' }) })
@@ -142,9 +143,10 @@ it('projects original image producer instants onto their own request/tool while 
     documents: [{ documentId: session.documentId, writable: [{ kind: 'document' }] }] }
   const started = await engine.start(start), final = await engine.wait(started.runId)
   expect(final.status, JSON.stringify({ failure: final.failure, tools: final.tools })).toBe('completed')
-  expect(final.tools).toHaveLength(1)
-  expect(final.tools[0]!.result?.kind).toBe('read')
-  const tool = final.tools[0]!, result = tool.result as Extract<typeof tool.result, { kind: 'read' }>
+  expect(final.tools.map(tool => tool.call.name)).toEqual(['tools.load', 'image.generate'])
+  const tool = final.tools.find(item => item.call.name === 'image.generate')!
+  expect(tool.result?.kind).toBe('read')
+  const result = tool.result as Extract<typeof tool.result, { kind: 'read' }>
   expect(result.data).toMatchObject({ status: 'ready', job: expect.stringMatching(/^image-/), timing: expect.any(Array) })
   const jobId = (result.data as { job: string }).job
   const marks = await events.readTiming(start.conversationId, start.taskId)
@@ -155,9 +157,10 @@ it('projects original image producer instants onto their own request/tool while 
     expect(mark).toMatchObject({ requestId: tool.requestId, toolCallId: tool.callId, monotonicMs: original.monotonicMs,
       wallTimeMs: original.wallTimeMs, clockInstanceId: original.clockInstanceId, detail: { jobId } })
   }
-  expect(marks.filter(mark => mark.stage === 'request.finished').map(mark => mark.detail?.outcome)).toEqual(['completed', 'completed'])
-  expect(calls[1]!.messages.some(message => JSON.stringify(message).includes('image.fetch.invoked'))).toBe(false)
-  expect(calls[1]!.messages.some(message => JSON.stringify(message).includes('private-access-token'))).toBe(false)
+  expect(marks.filter(mark => mark.stage === 'request.finished').map(mark => mark.detail?.outcome)).toEqual(['completed', 'completed', 'completed'])
+  const last = calls.at(-1)!
+  expect(last.messages.some(message => JSON.stringify(message).includes('image.fetch.invoked'))).toBe(false)
+  expect(last.messages.some(message => JSON.stringify(message).includes('private-access-token'))).toBe(false)
 })
 
 it('retains image job facts after stop revokes tool authority without applying the image', async () => {
@@ -185,10 +188,14 @@ it('retains image job facts after stop revokes tool authority without applying t
     stop: id => images.stop(id), readResource: id => images.readResource(id),
   } } })
   const events = new ExecutionEventStore({ directory: path.join(directory, 'events') })
+  let requests = 0
   const provider: ModelProvider = { async *stream(input) {
-    const refs = JSON.parse(String(input.messages[1].content).split('：')[1]) as { target: string }[]
-    yield completed(input, { id: 'image-call', name: 'image.generate',
-      argumentsText: JSON.stringify({ target: refs[0]!.target, prompt: 'private prompt for stop' }) })
+    if (++requests === 1) yield completed(input, { id: 'load-media', name: 'tools.load', argumentsText: JSON.stringify({ families: ['media'] }) })
+    else {
+      const refs = JSON.parse(String(input.messages[1].content).split('：')[1]) as { target: string }[]
+      yield completed(input, { id: 'image-call', name: 'image.generate',
+        argumentsText: JSON.stringify({ target: refs[0]!.target, prompt: 'private prompt for stop' }) })
+    }
   } }
   const engine = new ExecutionEngine({ registry, gateway, events, runs: new ExecutionRunStore(path.join(directory, 'runs')),
     provider, readImageTiming: id => images.readTiming(id) })
@@ -200,15 +207,16 @@ it('retains image job facts after stop revokes tool authority without applying t
   expect(stopped?.status).toBe('stopped')
   expect(fetchCalls).toBe(1)
   expect(session.read().revision).toBe(before)
-  expect(stopped?.tools[0]?.result).toMatchObject({ kind: 'error', code: 'run-stopped' })
-  const callId = stopped!.tools[0]!.callId, jobId = `image-${gateway.operationIdentity(started.runId, callId)}`
+  const imageTool = stopped!.tools.find(tool => tool.call.name === 'image.generate')!
+  expect(imageTool.result).toMatchObject({ kind: 'error', code: 'run-stopped' })
+  const callId = imageTool.callId, jobId = `image-${gateway.operationIdentity(started.runId, callId)}`
   const jobFacts = await images.readTiming(jobId)
   expect(jobFacts?.timing?.map(mark => mark.stage)).toContain('image.fetch.invoked')
   const marks = await events.readTiming(input.conversationId, input.taskId)
   const projected = marks.filter(mark => mark.stage.startsWith('image.'))
   expect(projected.map(mark => mark.stage)).toEqual(jobFacts!.timing!.map(mark => mark.stage))
   expect(projected.find(mark => mark.stage === 'image.fetch.invoked')).toMatchObject({
-    requestId: stopped!.tools[0]!.requestId, toolCallId: callId, detail: { jobId },
+    requestId: imageTool.requestId, toolCallId: callId, detail: { jobId },
     monotonicMs: jobFacts!.timing!.find(mark => mark.stage === 'image.fetch.invoked')!.monotonicMs,
   })
   expect(marks.some(mark => mark.stage === 'document.applied')).toBe(false)

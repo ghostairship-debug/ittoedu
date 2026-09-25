@@ -134,7 +134,10 @@ export function checkImportBoundaries(edges: readonly ImportEdge[], files: Reado
   // Transport wrappers receive their tool schema from the Gateway. Their own
   // connection/protocol schemas are separate; only these business-tool entrypoints
   // are forbidden from declaring another domain schema or importing a second catalog.
-  const toolTransports = [engine, mcp,
+  // The 2.0 ExecutionEngine is the unified executor itself, not a transport wrapper:
+  // it consumes the same-source ToolCatalog/AgentFileTools and declares only its own
+  // meta-tool input schema, so it is constrained by the required chain edges above.
+  const toolTransports = [mcp,
     'src/main/workbench/providers/OpenAIChatProvider.ts',
     'src/main/workbench/providers/ChatGPTResponsesProvider.ts']
   for (const from of toolTransports) {

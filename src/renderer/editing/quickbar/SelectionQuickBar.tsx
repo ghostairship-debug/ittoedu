@@ -28,6 +28,8 @@ export interface SelectionQuickBarProps {
   suspended?: boolean
   /** A different selection closes open popovers. */
   selectionKey?: string
+  /** Distance kept above the selection, e.g. to leave a rotation handle reachable. */
+  aboveOffset?: number
   children: ReactNode
 }
 
@@ -36,7 +38,7 @@ export interface SelectionQuickBarProps {
  * next to the selection, never part of layout. Pointer, mouse, touch and key events stop here so the canvas under
  * it does not select, drag or delete anything.
  */
-export function SelectionQuickBar({ anchor, bounds, label, suspended = false, selectionKey, children }: SelectionQuickBarProps) {
+export function SelectionQuickBar({ anchor, bounds, label, suspended = false, selectionKey, aboveOffset, children }: SelectionQuickBarProps) {
   const [open, setOpen] = useState<string | null>(null)
   const [size, setSize] = useState<{ width: number; height: number } | null>(null)
   const container = useRef<HTMLDivElement | null>(null)
@@ -65,10 +67,11 @@ export function SelectionQuickBar({ anchor, bounds, label, suspended = false, se
   }, [open])
   if (!anchor || !bounds) return null
   const measured = size ?? { width: 0, height: 34 }
-  const position = placeQuickBar(anchor, bounds, measured)
-  const spaceAbove = position.top - bounds.top, spaceBelow = bounds.bottom - position.top - measured.height
-  const direction = position.placement === 'above' && spaceAbove >= 160 ? 'up' : spaceBelow >= spaceAbove ? 'down' : 'up'
-  const maxHeight = Math.max(120, (direction === 'up' ? spaceAbove : spaceBelow) - 12)
+  const position = placeQuickBar(anchor, bounds, measured, 8, aboveOffset)
+  // Popovers may leave the selection's editor; only the window limits them.
+  const spaceAbove = position.top - 8, spaceBelow = window.innerHeight - position.top - measured.height - 8
+  const direction = position.placement === 'above' && spaceAbove >= 200 ? 'up' : spaceBelow >= spaceAbove ? 'down' : 'up'
+  const maxHeight = Math.max(160, (direction === 'up' ? spaceAbove : spaceBelow) - 8)
   const hidden = suspended || !size
   return createPortal(<QuickBarContext.Provider value={{ open, setOpen, direction, maxHeight }}>
     <div ref={container} className="selection-quick-bar" data-selection-quick-bar="true" data-placement={position.placement}
