@@ -1,4 +1,5 @@
 import { nanoid } from 'nanoid'
+import { DEFAULT_SLIDE_CANVAS, isValidSlideCanvas, type SlideCanvasSize } from '../../shared/slideCanvas'
 import { componentPackageMeta } from '../../shared/componentPackageMeta'
 import { courseProjectDocumentSchema } from '../../shared/courseProjectSchema'
 import {
@@ -6,7 +7,6 @@ import {
   type CourseProjectDocument,
   type GlobalLayerEntry,
 } from '../../shared/courseProjectTypes'
-import { CANVAS_HEIGHT, CANVAS_WIDTH } from '../../shared/constants'
 import type { ProjectPlaybackSettings } from '../../shared/contracts/playback-v1/types'
 import { createDefaultTeacherControllerPackage } from '../../shared/defaultTeacherControllerComponent'
 import { createTeacherControllerComponentItem } from '../../shared/teacherControllerItem'
@@ -16,6 +16,8 @@ type IdFactory = () => string
 interface BlankCourseProjectBaseOptions {
   id?: string
   title?: string
+  /** Slide canvas for the whole course; defaults to the legacy 1280×720. */
+  canvas?: SlideCanvasSize
   now?: string | Date
   idFactory?: IdFactory
 }
@@ -76,6 +78,8 @@ export function createBlankCourseProject(
   const sceneId = nextId('scene', undefined, idFactory)
   const slideSurfaceId = `slide:${projectId}`
   const title = options.title ?? '未命名课件'
+  const canvas = options.canvas ?? DEFAULT_SLIDE_CANVAS
+  if (!isValidSlideCanvas(canvas)) throw new RangeError('课件画布尺寸无效')
   const controller = includeDefaultController ? createTeacherControllerComponentItem(nextId('teacher_controller', undefined, idFactory)) : null
   if (controller) controller.playbackInitialVisibility = controls === 'canvas' ? 'inherit' : 'hidden'
   const controllerPackage = controller ? createDefaultTeacherControllerPackage() : null
@@ -152,7 +156,7 @@ export function createBlankCourseProject(
       id: slideSurfaceId,
       title,
       type: 'slide',
-      canvas: { width: CANVAS_WIDTH, height: CANVAS_HEIGHT },
+      canvas: { width: canvas.width, height: canvas.height },
       surfaceLayerItems: [],
       scenes: [{
         id: sceneId,

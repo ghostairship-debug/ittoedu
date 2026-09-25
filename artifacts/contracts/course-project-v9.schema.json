@@ -2298,12 +2298,14 @@
                 "type": "object",
                 "properties": {
                   "width": {
-                    "type": "number",
-                    "const": 1280
+                    "type": "integer",
+                    "minimum": 320,
+                    "maximum": 8192
                   },
                   "height": {
-                    "type": "number",
-                    "const": 720
+                    "type": "integer",
+                    "minimum": 320,
+                    "maximum": 8192
                   }
                 },
                 "required": [

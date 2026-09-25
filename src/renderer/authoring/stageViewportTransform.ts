@@ -1,4 +1,5 @@
 import { STAGE_VIEWPORT_WIDTH, STAGE_VIEWPORT_HEIGHT } from '../../shared/stageViewport'
+import { DEFAULT_SLIDE_CANVAS, type SlideCanvasSize } from '../../shared/slideCanvas'
 export { STAGE_VIEWPORT_WIDTH, STAGE_VIEWPORT_HEIGHT } from '../../shared/stageViewport'
 export const STAGE_VIEWPORT_MIN_ZOOM = 0.5
 export const STAGE_VIEWPORT_MAX_ZOOM = 2
@@ -13,7 +14,7 @@ export interface StageRect extends StagePoint {
   height: number
 }
 
-/** Canonical 1280×720 stage in local coordinates, before CSS letterbox. */
+/** Legacy 1280×720 stage in local coordinates, before CSS letterbox. Use `logicalStageViewport(stage)` for the course's canvas. */
 export const LOGICAL_STAGE_VIEWPORT: StageRect = {
   x: 0,
   y: 0,
@@ -21,10 +22,16 @@ export const LOGICAL_STAGE_VIEWPORT: StageRect = {
   height: STAGE_VIEWPORT_HEIGHT,
 }
 
+export function logicalStageViewport(stage: Readonly<SlideCanvasSize> = DEFAULT_SLIDE_CANVAS): StageRect {
+  return { x: 0, y: 0, width: stage.width, height: stage.height }
+}
+
 export interface StageViewportTransformOptions {
   /** The available viewport in CSS pixels, including its client-space origin. */
   viewport: StageRect
-  /** User zoom relative to the fitted 1280 x 720 stage. Values are clamped to 0.5-2. */
+  /** Logical canvas size of the course; defaults to the legacy 1280 x 720. */
+  stage?: Readonly<SlideCanvasSize>
+  /** User zoom relative to the fitted stage. Values are clamped to 0.5-2. */
   zoom?: number
   /** User pan relative to the fitted center, expressed in CSS pixels. */
   pan?: StagePoint
@@ -34,7 +41,9 @@ export interface StageViewportTransform {
   readonly viewport: StageRect
   readonly zoom: number
   readonly pan: StagePoint
-  /** Scale that fits 1280 x 720 inside the viewport before user zoom is applied. */
+  /** Logical canvas size the transform fits. */
+  readonly stage: Readonly<SlideCanvasSize>
+  /** Scale that fits the logical stage inside the viewport before user zoom is applied. */
   readonly fitScale: number
   /** Complete world-to-client scale: fitScale * zoom. */
   readonly scale: number
@@ -88,13 +97,15 @@ export function createStageViewportTransform(
   const viewport = copyViewport(options.viewport)
   const pan = copyPan(options.pan)
   const zoom = clampStageViewportZoom(options.zoom ?? 1)
+  const stage = { width: options.stage?.width ?? STAGE_VIEWPORT_WIDTH, height: options.stage?.height ?? STAGE_VIEWPORT_HEIGHT }
+  if (!(stage.width > 0 && stage.height > 0)) throw new RangeError('stage dimensions must be greater than zero')
   const fitScale = Math.min(
-    viewport.width / STAGE_VIEWPORT_WIDTH,
-    viewport.height / STAGE_VIEWPORT_HEIGHT,
+    viewport.width / stage.width,
+    viewport.height / stage.height,
   )
   const scale = fitScale * zoom
-  const width = STAGE_VIEWPORT_WIDTH * scale
-  const height = STAGE_VIEWPORT_HEIGHT * scale
+  const width = stage.width * scale
+  const height = stage.height * scale
   const stageRect = {
     x: viewport.x + (viewport.width - width) / 2 + pan.x,
     y: viewport.y + (viewport.height - height) / 2 + pan.y,
@@ -106,6 +117,7 @@ export function createStageViewportTransform(
     viewport,
     zoom,
     pan,
+    stage,
     fitScale,
     scale,
     stageRect,
@@ -184,6 +196,7 @@ export function clientDeltaToWorld(
 export function rotatedRectIntersectsStage(
   rect: StageRect,
   rotationDegrees: number,
+  stage: Readonly<SlideCanvasSize> = DEFAULT_SLIDE_CANVAS,
 ): boolean {
   if (
     ![rect.x, rect.y, rect.width, rect.height, rotationDegrees]
@@ -205,8 +218,8 @@ export function rotatedRectIntersectsStage(
 
   return centerX + extentX > 0 &&
     centerY + extentY > 0 &&
-    centerX - extentX < STAGE_VIEWPORT_WIDTH &&
-    centerY - extentY < STAGE_VIEWPORT_HEIGHT
+    centerX - extentX < stage.width &&
+    centerY - extentY < stage.height
 }
 
 export const STAGE_RESIZE_HANDLE_DIRECTIONS = [

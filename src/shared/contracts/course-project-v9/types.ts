@@ -1,4 +1,5 @@
 import type { InteractionRule } from '../interaction-v1/types'
+import type { SlideCanvasSize } from '../../slideCanvas'
 import type {
   CourseStateCondition,
   CourseStateDeclaration,
@@ -257,10 +258,8 @@ export interface SlideSurfaceDocument extends SurfaceBase {
   backgroundMode?: BackgroundMode
   backgroundColor?: string
   backgroundAssetId?: string | null
-  canvas: {
-    width: 1280
-    height: 720
-  }
+  /** One size for every Slide surface in the course; 1280×720 is the legacy default. */
+  canvas: SlideCanvasSize
   scenes: SlideSceneDocument[]
 }
 

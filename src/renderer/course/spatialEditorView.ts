@@ -614,6 +614,8 @@ export function createSpatialWorldViewTransform(
     viewport: view,
     zoom: camera.zoom,
     pan: { x: 0, y: 0 },
+    // Spatial has no finite Slide canvas; its logical stage is the viewport itself.
+    stage: { width: view.width, height: view.height },
     fitScale: 1,
     scale,
     stageRect: {

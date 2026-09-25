@@ -1,3 +1,4 @@
+import type { SlideCanvasSize } from '../../slideCanvas'
 import type {
   BackgroundMode,
   CourseNavigationGuard,
@@ -156,7 +157,7 @@ export interface PublishedSlideSurface extends PublishedSurfaceBase {
   backgroundMode?: BackgroundMode
   backgroundColor?: string
   backgroundAssetId?: string | null
-  canvas: { width: 1280; height: 720 }
+  canvas: SlideCanvasSize
   scenes: PublishedSlideScene[]
 }
 

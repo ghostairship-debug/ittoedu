@@ -1,5 +1,6 @@
 import { documentBlockSchema, documentContentSchema } from '../../document/content'
 import { z } from 'zod'
+import { mismatchedSlideCanvasIndexes, slideCanvasSchema } from '../../slideCanvas'
 import { teacherControllerRoleIssues } from '../../teacherControllerRole'
 import { sceneInteractionsSchema } from '../interaction-v1/schema'
 import {
@@ -626,7 +627,7 @@ const slideSurfaceSchema = z.object({
   backgroundMode: backgroundModeSchema.optional(),
   backgroundColor: colorSchema.optional(),
   backgroundAssetId: stableIdSchema.nullable().optional(),
-  canvas: z.object({ width: z.literal(1280), height: z.literal(720) }).strict(),
+  canvas: slideCanvasSchema,
   scenes: z.array(slideSceneSchema).min(1).max(10_000),
 }).strict().superRefine((surface, context) => {
   surface.surfaceLayerItems.forEach((entry, index) => {
@@ -958,6 +959,7 @@ export const courseProjectDocumentSchema = z.object({
   mixedPrintPlan: mixedPrintPlanSchema.optional(),
 }).strict().superRefine((project, context) => {
   teacherControllerRoleIssues(project).forEach(issue => context.addIssue({ code: 'custom', ...issue }))
+  mismatchedSlideCanvasIndexes(project.surfaces).forEach(index => context.addIssue({ code: 'custom', path: ['surfaces', index, 'canvas'], message: 'All Slide surfaces in a course must share one canvas size' }))
   const assetIds = new Set(Object.keys(project.assets))
   Object.entries(project.assets).forEach(([key, asset]) => {
     if (asset.id !== key) addReferenceIssue(context, ['assets', key, 'id'], 'Asset record key must equal asset.id')

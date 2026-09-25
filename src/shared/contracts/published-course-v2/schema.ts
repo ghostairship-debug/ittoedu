@@ -1,5 +1,6 @@
 import { documentContentSchema } from '../../document/content'
 import { z } from 'zod'
+import { mismatchedSlideCanvasIndexes, slideCanvasSchema } from '../../slideCanvas'
 import { teacherControllerRoleIssues } from '../../teacherControllerRole'
 import {
   addCanonicalLayerOrderIssues,
@@ -340,7 +341,7 @@ const publishedSlideSurfaceSchema = z.object({
   backgroundMode: backgroundModeSchema.optional(),
   backgroundColor: colorSchema.optional(),
   backgroundAssetId: stableIdSchema.nullable().optional(),
-  canvas: z.object({ width: z.literal(1280), height: z.literal(720) }).strict(),
+  canvas: slideCanvasSchema,
   scenes: z.array(publishedSlideSceneSchema).min(1).max(10_000),
 }).strict().superRefine((surface, context) => {
   surface.surfaceLayerItems.forEach((entry, index) => {
@@ -1100,6 +1101,7 @@ export const publishedCourseV2Schema = z.object({
   mixedPrintPlan: mixedPrintPlanSchema.optional(),
 }).strict().superRefine(validatePublishedCourseSemantics).superRefine((payload, context) => {
   teacherControllerRoleIssues(payload).forEach(issue => context.addIssue({ code: 'custom', ...issue }))
+  mismatchedSlideCanvasIndexes(payload.surfaces).forEach(index => context.addIssue({ code: 'custom', path: ['surfaces', index, 'canvas'], message: 'All Slide surfaces in a course must share one canvas size' }))
 })
 
 const _publishedCourseSchemaTypeContract: z.ZodType<PublishedCourseV2Payload> = publishedCourseV2Schema

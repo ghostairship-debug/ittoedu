@@ -48,7 +48,7 @@ export interface SlideEditorView {
   readonly surfaceTitle: string
   readonly sceneId: string
   readonly sceneName: string
-  readonly canvas: { readonly width: 1280; readonly height: 720 }
+  readonly canvas: { readonly width: number; readonly height: number }
   readonly backgroundColor: string
   readonly backgroundAssetId: string | null | undefined
   readonly presentation: SlideEditorPresentationView | null
