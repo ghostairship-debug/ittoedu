@@ -13,6 +13,17 @@ import { copySlideSceneClipboard } from '@/core/tools/slideClipboard'
 import { buildCoursePptx } from '@/renderer/export/course/buildCoursePptx'
 import { collectCourseProjectExportPreflight } from '@/renderer/export/exportPreflight'
 import { unzipSync } from 'fflate'
+import {
+  connectCourseHost,
+  courseContent,
+  redoSettled,
+  settleCourse,
+  undoSettled,
+  type CourseHost,
+} from '../helpers/triage-t2-course'
+
+let host: CourseHost
+let documentId: string
 
 function active() { return selectActiveCourseProjectDocument(useEditorStore.getState())! }
 function inputIn(project = active()) {
@@ -25,23 +36,30 @@ function inputIn(project = active()) {
 }
 
 describe('input authoring delivery', () => {
-  beforeEach(() => useEditorStore.getState().createNewProject())
-  it('creates, saves, undoes and redoes the input, declarations and feedback together', () => {
+  beforeEach(async () => {
+    const connected = await connectCourseHost()
+    host = connected.host
+    documentId = connected.documentId
+  })
+  it('creates, saves, undoes and redoes the input, declarations and feedback together', async () => {
     const before = active()
     useEditorStore.getState().addInputNode()
+    await settleCourse()
     const { item, data, scene } = inputIn()
     expect(data.ruleFamilyRuleIds).toHaveLength(3)
     expect(inspectInputRuleFamily(item.layerItemId, data, scene.interactions).conflict).toBe(false)
     expect(active().courseState).toHaveLength(before.courseState.length + 2)
     const reopened = openCourseProjectArchive(useEditorStore.getState().exportV9SlideCandidateArchive()!)
     expect(inputIn(reopened.project).data).toEqual(data)
-    useEditorStore.getState().undo()
-    expect(active()).toEqual(before)
-    useEditorStore.getState().redo()
+    await undoSettled(host, documentId)
+    // DocumentSession revision only increases; compare authored content without that stamp.
+    expect(courseContent(active())).toEqual(courseContent(before))
+    await redoSettled(host, documentId)
     expect(inputIn().data).toEqual(data)
   })
-  it('copies fresh keys and rule IDs, and conservatively retains declarations when component source is unavailable', () => {
+  it('copies fresh keys and rule IDs, and conservatively retains declarations when component source is unavailable', async () => {
     useEditorStore.getState().addInputNode()
+    await settleCourse()
     const { item, data } = inputIn()
     const session = useEditorStore.getState().slideBackend!.getSession()
     const copied = duplicateSlideSceneLayers(session, [item.layerItemId])
@@ -60,8 +78,9 @@ describe('input authoring delivery', () => {
     expect(removed.nextSession!.history.present.courseState).toEqual(project.courseState)
     expect(inputIn(removed.nextSession!.history.present).scene.layerItems.some(item => item.layerItemId === id)).toBe(false)
   })
-  it('switches to number atomically and rejects stale or invalid answers', () => {
+  it('switches to number atomically and rejects stale or invalid answers', async () => {
     useEditorStore.getState().addInputNode()
+    await settleCourse()
     const session = useEditorStore.getState().slideBackend!.getSession()
     const { item, data, scene } = inputIn()
     const initial = inspectInputRuleFamily(item.layerItemId, data, scene.interactions).config!
@@ -76,8 +95,9 @@ describe('input authoring delivery', () => {
     expect(invalid.ok).toBe(false)
     expect(invalid.nextSession!.history.present).toEqual(session.history.present)
   })
-  it('carries managed feedback with the clipboard and can delete that feedback safely', () => {
+  it('carries managed feedback with the clipboard and can delete that feedback safely', async () => {
     useEditorStore.getState().addInputNode()
+    await settleCourse()
     const { item, scene } = inputIn()
     const session = useEditorStore.getState().slideBackend!.getSession()
     const clipboard = copySlideSceneClipboard(session, [item.layerItemId])
@@ -89,6 +109,7 @@ describe('input authoring delivery', () => {
   })
   it('exports a parseable editable PPTX field and reports the static interaction boundary', async () => {
     useEditorStore.getState().addInputNode()
+    await settleCourse()
     const project = active()
     const resources = { assetFiles: {}, components: controllerPackages }
     const preflight = collectCourseProjectExportPreflight(project, 'pptx', resources)
@@ -102,8 +123,9 @@ describe('input authoring delivery', () => {
     expect(xml).toContain('填写答案')
     expect(xml).toContain('静态填写区')
   })
-  it('allows professional rule deletion and releases the family atomically', () => {
+  it('allows professional rule deletion and releases the family atomically', async () => {
     useEditorStore.getState().addInputNode()
+    await settleCourse()
     const { data } = inputIn()
     const session = useEditorStore.getState().slideBackend!.getSession()
     const removed = deleteSlideSceneInteractionRule(session, data.ruleFamilyRuleIds[0]!)
