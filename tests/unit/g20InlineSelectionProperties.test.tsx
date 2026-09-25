@@ -62,7 +62,10 @@ it('M21 quick bar edits a selected object and a legal multi-selection through ex
   expect(screen.getByRole('button', { name: '无高亮' })).toBeTruthy()
   fireEvent.click(screen.getByRole('button', { name: '更多颜色…' }))
   expect(screen.getByLabelText('自定义颜色')).toBeTruthy()
-  fireEvent.keyDown(bar, { key: 'Escape' })
+  // Focus stays with the selection's owner, so Escape reaches the window: it closes the palette and keeps the selection.
+  fireEvent.keyDown(document.body, { key: 'Escape' })
+  expect(screen.queryByLabelText('自定义颜色')).toBeNull()
+  expect(screen.getByRole('toolbar', { name: '选中对象快捷工具' })).toBeTruthy()
 
   // Locking moves to "⋯"; a locked object is unlocked in place on the bar.
   fireEvent.click(within(bar).getByRole('button', { name: '更多操作' }))

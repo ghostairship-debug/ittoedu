@@ -62,8 +62,18 @@ export function SelectionQuickBar({ anchor, bounds, label, suspended = false, se
       if (event.target instanceof Node && container.current?.contains(event.target)) return
       setOpen(null)
     }
+    // Buttons keep focus on the selection's owner, so Escape arrives at the document rather than the bar.
+    const escape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.isComposing) return
+      event.preventDefault(); event.stopPropagation()
+      setOpen(null)
+    }
     document.addEventListener('pointerdown', outside, true)
-    return () => document.removeEventListener('pointerdown', outside, true)
+    window.addEventListener('keydown', escape, true)
+    return () => {
+      document.removeEventListener('pointerdown', outside, true)
+      window.removeEventListener('keydown', escape, true)
+    }
   }, [open])
   if (!anchor || !bounds) return null
   const measured = size ?? { width: 0, height: 34 }
