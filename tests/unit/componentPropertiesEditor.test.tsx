@@ -22,13 +22,6 @@ import {
 import { applyTextRunEdits, type TextRunEdit } from '@/shared/textRuns'
 import { createTriageT4StoreHost } from '../helpers/triage-t4-store-host'
 
-function activeHistory() {
-  const state = useEditorStore.getState()
-  const backend = state.slideBackend
-  if (!backend) throw new Error('expected active slideBackend')
-  return backend.getSession().history
-}
-
 const manifest: ComponentManifestV4 = {
   schemaVersion: 4,
   runtimeApiVersion: 4,
