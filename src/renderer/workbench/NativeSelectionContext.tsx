@@ -2,11 +2,11 @@ import { AArrowDown, AArrowUp, AlignCenter, AlignLeft, AlignRight, AlignHorizont
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { isStrokeOnlyShapeType } from '../../shared/contracts/native-v1'
 import { useCourseEditorActions } from '../documents/CourseEditorActionsContext'
-import { planLayerOrder, type LayerOrderMove } from '../editing/quickbar/layerOrder'
+import type { LayerOrderMove } from '../editing/quickbar/layerOrder'
+import { selectionObjectCommands } from '../composition/selection/selectionObjectCommands'
 import { rotatedBoundingBox, unionBoxes, visibleBounds, type QuickBarBounds, type QuickBarRect } from '../editing/quickbar/placeQuickBar'
 import { QuickBarAiButton, QuickBarButton, QuickBarColorButton, QuickBarLabel, QuickBarMenu, QuickBarPopoverButton, QuickBarSeparator, SelectionQuickBar, type QuickBarMenuItem } from '../editing/quickbar/SelectionQuickBar'
 import { usePointerGesture } from '../editing/quickbar/usePointerGesture'
-import { selectEffectiveLayerProjection, useEditorStore } from '../store/editorStore'
 import { usePropertiesContext } from '../ui/properties/PropertiesContextAdapter'
 import type { PropertiesContext } from '../ui/properties/PropertiesContext'
 import type { FlowPropertiesContext } from '../ui/properties/FlowPropertiesPanel'
@@ -148,14 +148,8 @@ export function NativeSelectionContext({ documentId, revision, locationId, itemI
         replaceImage: () => replacement.current?.click() }
     }
   }
-  const store = () => useEditorStore.getState()
-  const reorder = (move: LayerOrderMove) => run(() => {
-    const projection = selectEffectiveLayerProjection(store())
-    const order = projection && itemIds.length === 1 ? planLayerOrder(projection.unifiedRows, itemIds[0]!, move) : null
-    if (order) store().reorderNodes(order)
-  }, report)
-  const layerRows = single ? selectEffectiveLayerProjection(store())?.unifiedRows ?? [] : []
-  const canMove = (move: LayerOrderMove) => itemIds.length === 1 && Boolean(planLayerOrder(layerRows, itemIds[0]!, move))
+  const reorder = (move: LayerOrderMove) => run(() => { if (itemIds.length === 1) selectionObjectCommands.reorder(itemIds[0]!, move) }, report)
+  const canMove = (move: LayerOrderMove) => Boolean(single) && itemIds.length === 1 && selectionObjectCommands.canReorder(itemIds[0]!, move)
   // Capture when sending, so the request always names the objects selected now.
   const ai = <QuickBarAiButton targetLabel={itemIds.length > 1 ? `所选 ${itemIds.length} 个对象` : single ? `“${single.view.name}”` : '所选对象'}
     onSubmit={async instruction => {
@@ -170,8 +164,8 @@ export function NativeSelectionContext({ documentId, revision, locationId, itemI
     else if (node.locked) content = <><QuickBarLabel>已锁定</QuickBarLabel><QuickBarButton label="解锁" text="解锁" icon={<Unlock size={14} />} onClick={() => patch({ locked: false })} /><QuickBarSeparator />{ai}</>
     else {
       const items: QuickBarMenuItem[] = [
-        { label: '复制', group: 'edit', onSelect: () => run(() => store().duplicateSelectedNodes(), report) },
-        { label: '删除', group: 'edit', danger: true, onSelect: () => run(() => store().deleteSelectedNodes(), report) },
+        { label: '复制', group: 'edit', onSelect: () => run(selectionObjectCommands.duplicate, report) },
+        { label: '删除', group: 'edit', danger: true, onSelect: () => run(selectionObjectCommands.remove, report) },
         { label: '上移一层', group: 'order', disabled: !canMove('forward'), onSelect: () => reorder('forward') },
         { label: '下移一层', group: 'order', disabled: !canMove('backward'), onSelect: () => reorder('backward') },
         { label: '置于顶层', group: 'order', disabled: !canMove('front'), onSelect: () => reorder('front') },

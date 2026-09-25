@@ -386,7 +386,8 @@ describe('FlowWorkspace paper', () => {
     expect(surfaceOverlay.parentElement).toBe(workspace)
     expect(overlay.parentElement).toBe(workspace)
     expect(selectionPlane.parentElement).toBe(workspace)
-    expect([...workspace.children].filter(child => child !== workspace.querySelector('.flow-document-format-host'))).toEqual([
+    // The zero-size, aria-hidden selection marker is not a layer plane.
+    expect([...workspace.children].filter(child => child !== workspace.querySelector('.flow-document-format-host') && !child.classList.contains('native-selection-context'))).toEqual([
       underlay,
       surfaceUnderlay,
       scroll,
