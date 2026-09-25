@@ -13,6 +13,7 @@ import { nativeContentSchemaByType, NATIVE_RENDERABLE_BASE_KEYS } from '../nativ
 import type { NativeRenderInput } from '../native-v1/types'
 import { courseProjectEmbeddedComponentPackageMetaSchema } from '../component-v4/schema'
 import { courseProjectDesignTokensSchema } from '../design-v1/schema'
+import { lightEditAssetOverridesSchema, lightEditTextOverridesSchema } from '../runtime/lightEdit'
 import {
   courseProjectAssetMetaSchema,
   courseProjectMediaSettingsSchema,
@@ -210,6 +211,8 @@ export const runtimeContentSchema = z.object({
     multiline: z.boolean().optional(),
     maxLength: z.number().int().positive().max(1_000_000).optional(),
   }).strict()).optional(),
+  /** M15: edits of text the Runtime renders itself, matched by original text and region. */
+  overrides: lightEditTextOverridesSchema.optional(),
 }).strict()
 
 export const courseRuntimeDefinitionSchema = z.object({
@@ -270,6 +273,10 @@ const componentLayerItemSchema = z.object({
   component: componentReferenceSchema,
   props: z.record(z.string(), z.unknown()),
   staticFallbackAssetId: stableIdSchema.optional(),
+  /** M15: edits of text the Component renders itself. */
+  textOverrides: lightEditTextOverridesSchema.optional(),
+  /** M15: manifest asset key -> managed project asset shown instead. */
+  assetOverrides: lightEditAssetOverridesSchema.optional(),
 }).strict()
 
 const runtimeLayerItemSchema = z.object({

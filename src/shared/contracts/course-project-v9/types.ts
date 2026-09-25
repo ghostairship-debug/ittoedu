@@ -24,6 +24,7 @@ import type { AssetMeta, ProjectMediaSettings } from '../media-v1/types'
 import type { ProjectPlaybackSettings } from '../playback-v1/types'
 import type { EmbeddedComponentPackageMeta } from '../component-v4/types'
 import type { RuntimeRenderMode } from '../runtime/types'
+import type { LightEditTextOverride } from '../runtime/lightEdit'
 
 export const COURSE_PROJECT_SCHEMA_VERSION = 9 as const
 
@@ -105,6 +106,10 @@ export interface ComponentLayerItem extends LayerItemBase {
   }
   props: Record<string, unknown>
   staticFallbackAssetId?: string
+  /** M15: edits of text the Component renders itself. */
+  textOverrides?: readonly LightEditTextOverride[]
+  /** M15: manifest asset key -> managed project asset shown instead. */
+  assetOverrides?: Record<string, { assetId: string }>
 }
 
 export interface CourseRuntimeContent {
@@ -115,6 +120,8 @@ export interface CourseRuntimeContent {
     multiline?: boolean
     maxLength?: number
   }>
+  /** M15: edits of text the Runtime renders itself, matched by original text and region. */
+  overrides?: readonly LightEditTextOverride[]
 }
 
 /**

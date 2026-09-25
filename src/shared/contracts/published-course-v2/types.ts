@@ -1,4 +1,5 @@
 import type { SlideCanvasSize } from '../../slideCanvas'
+import type { LightEditTextOverride } from '../runtime/lightEdit'
 import type {
   BackgroundMode,
   CourseNavigationGuard,
@@ -73,6 +74,8 @@ export interface PublishedComponentLayerItem extends PublishedLayerItemBase {
   component: { packageId: string; version: string }
   props: Record<string, unknown>
   staticFallbackAssetId?: string
+  textOverrides?: readonly LightEditTextOverride[]
+  assetOverrides?: Record<string, { assetId: string }>
 }
 
 export interface PublishedRuntimeLayerItem extends PublishedLayerItemBase {
@@ -91,6 +94,7 @@ export interface PublishedRuntimeLayerItem extends PublishedLayerItemBase {
         multiline?: boolean
         maxLength?: number
       }>
+      overrides?: readonly LightEditTextOverride[]
     }
     assets: Record<string, { assetId: string }>
     nodeBindings?: Record<string, string>

@@ -26,6 +26,7 @@ import {
 import { courseStateDeclarationSchema } from '../course-state/schema'
 import { courseStateScalarType } from '../course-state/types'
 import { courseProjectDesignTokensSchema } from '../design-v1/schema'
+import { lightEditAssetOverridesSchema, lightEditTextOverridesSchema } from '../runtime/lightEdit'
 import { courseProjectMediaSettingsSchema } from '../media-v1/schema'
 import { nativeContentSchemaByType, NATIVE_RENDERABLE_BASE_KEYS } from '../native-v1/schema'
 import { courseProjectPlaybackSettingsSchema } from '../playback-v1/schema'
@@ -139,6 +140,8 @@ export const publishedLayerItemSchema: z.ZodType<PublishedLayerItem> = z.discrim
     }).strict(),
     props: z.record(z.string(), z.unknown()),
     staticFallbackAssetId: stableIdSchema.optional(),
+    textOverrides: lightEditTextOverridesSchema.optional(),
+    assetOverrides: lightEditAssetOverridesSchema.optional(),
   }).strict(),
   z.object({
     ...publishedLayerBaseFields,

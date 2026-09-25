@@ -1,4 +1,5 @@
 import type * as Phaser from 'phaser'
+import type { LightEditTextOverride } from './lightEdit'
 import type {
   AssessmentEvaluationRequest,
   AssessmentEvaluationResult,
@@ -22,9 +23,11 @@ export interface EditableTextMetadata {
 }
 
 export interface EditableTextContent {
-  /** Every authored, visible string must be stored here. */
+  /** Strings a Runtime reads by key. */
   values: Record<string, string>
   metadata?: Record<string, EditableTextMetadata>
+  /** Host-applied edits of text the Runtime renders itself; never visible to Runtime code. */
+  overrides?: readonly LightEditTextOverride[]
 }
 
 export interface RuntimeAssetBinding {

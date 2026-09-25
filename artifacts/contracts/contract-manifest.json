@@ -7,13 +7,13 @@
       "name": "courseProjectDocumentSchema",
       "file": "course-project-v9.schema.json",
       "sourceOfTruth": "src/shared/contracts/course-project-v9/schema.ts",
-      "sha256": "9facc6d4b64f7bead5345505c1013a51791e69cbdc3ddad3ebc4256a0dbff311"
+      "sha256": "7f02dcca3da65df18488a80b53c60e54589657eb47551c13e0d00a61bb4a9dc1"
     },
     {
       "name": "publishedCourseV2Schema",
       "file": "published-course-v2.schema.json",
       "sourceOfTruth": "src/shared/contracts/published-course-v2/schema.ts",
-      "sha256": "cdce33ced794eb2f3b1f58e60aa1ca6c96a170785bdaf2baaa590ff9fec3c00c"
+      "sha256": "37ccd354122107ccb7e3cd8fb68b89343bdfbe62c2ff2472ed76f96898c45ce4"
     },
     {
       "name": "componentManifestSchema",

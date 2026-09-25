@@ -29,6 +29,26 @@
           }
         ]
       },
+      "__schema10": {
+        "additionalProperties": false,
+        "properties": {
+          "assetId": {
+            "$ref": "#/$defs/__schema8"
+          },
+          "coverage": {
+            "enum": [
+              "surface",
+              "scene"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "assetId",
+          "coverage"
+        ],
+        "type": "object"
+      },
       "__schema2": {
         "type": "boolean"
       },
@@ -75,6 +95,13 @@
             },
             "type": "object"
           },
+          "overrides": {
+            "items": {
+              "$ref": "#/$defs/__schema6"
+            },
+            "maxItems": 2000,
+            "type": "array"
+          },
           "values": {
             "additionalProperties": {
               "type": "string"
@@ -91,11 +118,35 @@
         "type": "object"
       },
       "__schema6": {
+        "additionalProperties": false,
+        "properties": {
+          "original": {
+            "maxLength": 2000,
+            "minLength": 1,
+            "type": "string"
+          },
+          "region": {
+            "maxLength": 500,
+            "minLength": 1,
+            "type": "string"
+          },
+          "text": {
+            "maxLength": 20000,
+            "type": "string"
+          }
+        },
+        "required": [
+          "original",
+          "text"
+        ],
+        "type": "object"
+      },
+      "__schema7": {
         "additionalProperties": {
           "additionalProperties": false,
           "properties": {
             "assetId": {
-              "$ref": "#/$defs/__schema7"
+              "$ref": "#/$defs/__schema8"
             }
           },
           "required": [
@@ -108,38 +159,18 @@
         },
         "type": "object"
       },
-      "__schema7": {
+      "__schema8": {
         "maxLength": 240,
         "minLength": 1,
         "type": "string"
       },
-      "__schema8": {
+      "__schema9": {
         "additionalProperties": {
-          "$ref": "#/$defs/__schema7"
+          "$ref": "#/$defs/__schema8"
         },
         "propertyNames": {
           "type": "string"
         },
-        "type": "object"
-      },
-      "__schema9": {
-        "additionalProperties": false,
-        "properties": {
-          "assetId": {
-            "$ref": "#/$defs/__schema7"
-          },
-          "coverage": {
-            "enum": [
-              "surface",
-              "scene"
-            ],
-            "type": "string"
-          }
-        },
-        "required": [
-          "assetId",
-          "coverage"
-        ],
         "type": "object"
       }
     },
@@ -155,7 +186,7 @@
         "additionalProperties": false,
         "properties": {
           "assets": {
-            "$ref": "#/$defs/__schema6"
+            "$ref": "#/$defs/__schema7"
           },
           "content": {
             "$ref": "#/$defs/__schema5"
@@ -164,7 +195,7 @@
             "$ref": "#/$defs/__schema2"
           },
           "nodeBindings": {
-            "$ref": "#/$defs/__schema8"
+            "$ref": "#/$defs/__schema9"
           },
           "protocol": {
             "$ref": "#/$defs/__schema0"
@@ -179,7 +210,7 @@
             "$ref": "#/$defs/__schema4"
           },
           "staticFallback": {
-            "$ref": "#/$defs/__schema9"
+            "$ref": "#/$defs/__schema10"
           }
         },
         "required": [

@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { RUNTIME_API_VERSION } from '../../constants'
+import { lightEditTextOverridesSchema } from './lightEdit'
 import {
   RUNTIME_RENDER_MODES,
   type RuntimeDocument,
@@ -43,6 +44,7 @@ export const editableTextMetadataSchema = z.object({
 export const editableTextContentSchema = z.object({
   values: z.record(safeRecordKeySchema, z.string()),
   metadata: z.record(safeRecordKeySchema, editableTextMetadataSchema).optional(),
+  overrides: lightEditTextOverridesSchema.optional(),
 }).strict().superRefine((content, context) => {
   const valueKeys = Object.keys(content.values)
   if (valueKeys.length > MAX_RUNTIME_CONTENT_ENTRIES) {

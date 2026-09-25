@@ -1195,6 +1195,56 @@
                     "type": "string",
                     "minLength": 1,
                     "maxLength": 240
+                  },
+                  "textOverrides": {
+                    "maxItems": 2000,
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "original": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 2000
+                        },
+                        "region": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 500
+                        },
+                        "text": {
+                          "type": "string",
+                          "maxLength": 20000
+                        }
+                      },
+                      "required": [
+                        "original",
+                        "text"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "assetOverrides": {
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 200
+                    },
+                    "additionalProperties": {
+                      "type": "object",
+                      "properties": {
+                        "assetId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 240
+                        }
+                      },
+                      "required": [
+                        "assetId"
+                      ],
+                      "additionalProperties": false
+                    }
                   }
                 },
                 "required": [
@@ -1384,6 +1434,34 @@
                                   "maximum": 1000000
                                 }
                               },
+                              "additionalProperties": false
+                            }
+                          },
+                          "overrides": {
+                            "maxItems": 2000,
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "original": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 2000
+                                },
+                                "region": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 500
+                                },
+                                "text": {
+                                  "type": "string",
+                                  "maxLength": 20000
+                                }
+                              },
+                              "required": [
+                                "original",
+                                "text"
+                              ],
                               "additionalProperties": false
                             }
                           }
@@ -1885,6 +1963,56 @@
                               "type": "string",
                               "minLength": 1,
                               "maxLength": 240
+                            },
+                            "textOverrides": {
+                              "maxItems": 2000,
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "original": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 2000
+                                  },
+                                  "region": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 500
+                                  },
+                                  "text": {
+                                    "type": "string",
+                                    "maxLength": 20000
+                                  }
+                                },
+                                "required": [
+                                  "original",
+                                  "text"
+                                ],
+                                "additionalProperties": false
+                              }
+                            },
+                            "assetOverrides": {
+                              "type": "object",
+                              "propertyNames": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 200
+                              },
+                              "additionalProperties": {
+                                "type": "object",
+                                "properties": {
+                                  "assetId": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 240
+                                  }
+                                },
+                                "required": [
+                                  "assetId"
+                                ],
+                                "additionalProperties": false
+                              }
                             }
                           },
                           "required": [
@@ -2074,6 +2202,34 @@
                                             "maximum": 1000000
                                           }
                                         },
+                                        "additionalProperties": false
+                                      }
+                                    },
+                                    "overrides": {
+                                      "maxItems": 2000,
+                                      "type": "array",
+                                      "items": {
+                                        "type": "object",
+                                        "properties": {
+                                          "original": {
+                                            "type": "string",
+                                            "minLength": 1,
+                                            "maxLength": 2000
+                                          },
+                                          "region": {
+                                            "type": "string",
+                                            "minLength": 1,
+                                            "maxLength": 500
+                                          },
+                                          "text": {
+                                            "type": "string",
+                                            "maxLength": 20000
+                                          }
+                                        },
+                                        "required": [
+                                          "original",
+                                          "text"
+                                        ],
                                         "additionalProperties": false
                                       }
                                     }
@@ -2632,6 +2788,56 @@
                                 "type": "string",
                                 "minLength": 1,
                                 "maxLength": 240
+                              },
+                              "textOverrides": {
+                                "maxItems": 2000,
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "original": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 2000
+                                    },
+                                    "region": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 500
+                                    },
+                                    "text": {
+                                      "type": "string",
+                                      "maxLength": 20000
+                                    }
+                                  },
+                                  "required": [
+                                    "original",
+                                    "text"
+                                  ],
+                                  "additionalProperties": false
+                                }
+                              },
+                              "assetOverrides": {
+                                "type": "object",
+                                "propertyNames": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 200
+                                },
+                                "additionalProperties": {
+                                  "type": "object",
+                                  "properties": {
+                                    "assetId": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 240
+                                    }
+                                  },
+                                  "required": [
+                                    "assetId"
+                                  ],
+                                  "additionalProperties": false
+                                }
                               }
                             },
                             "required": [
@@ -2821,6 +3027,34 @@
                                               "maximum": 1000000
                                             }
                                           },
+                                          "additionalProperties": false
+                                        }
+                                      },
+                                      "overrides": {
+                                        "maxItems": 2000,
+                                        "type": "array",
+                                        "items": {
+                                          "type": "object",
+                                          "properties": {
+                                            "original": {
+                                              "type": "string",
+                                              "minLength": 1,
+                                              "maxLength": 2000
+                                            },
+                                            "region": {
+                                              "type": "string",
+                                              "minLength": 1,
+                                              "maxLength": 500
+                                            },
+                                            "text": {
+                                              "type": "string",
+                                              "maxLength": 20000
+                                            }
+                                          },
+                                          "required": [
+                                            "original",
+                                            "text"
+                                          ],
                                           "additionalProperties": false
                                         }
                                       }
@@ -3454,6 +3688,56 @@
                               "type": "string",
                               "minLength": 1,
                               "maxLength": 240
+                            },
+                            "textOverrides": {
+                              "maxItems": 2000,
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "original": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 2000
+                                  },
+                                  "region": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 500
+                                  },
+                                  "text": {
+                                    "type": "string",
+                                    "maxLength": 20000
+                                  }
+                                },
+                                "required": [
+                                  "original",
+                                  "text"
+                                ],
+                                "additionalProperties": false
+                              }
+                            },
+                            "assetOverrides": {
+                              "type": "object",
+                              "propertyNames": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 200
+                              },
+                              "additionalProperties": {
+                                "type": "object",
+                                "properties": {
+                                  "assetId": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 240
+                                  }
+                                },
+                                "required": [
+                                  "assetId"
+                                ],
+                                "additionalProperties": false
+                              }
                             }
                           },
                           "required": [
@@ -3643,6 +3927,34 @@
                                             "maximum": 1000000
                                           }
                                         },
+                                        "additionalProperties": false
+                                      }
+                                    },
+                                    "overrides": {
+                                      "maxItems": 2000,
+                                      "type": "array",
+                                      "items": {
+                                        "type": "object",
+                                        "properties": {
+                                          "original": {
+                                            "type": "string",
+                                            "minLength": 1,
+                                            "maxLength": 2000
+                                          },
+                                          "region": {
+                                            "type": "string",
+                                            "minLength": 1,
+                                            "maxLength": 500
+                                          },
+                                          "text": {
+                                            "type": "string",
+                                            "maxLength": 20000
+                                          }
+                                        },
+                                        "required": [
+                                          "original",
+                                          "text"
+                                        ],
                                         "additionalProperties": false
                                       }
                                     }
@@ -4209,6 +4521,56 @@
                               "type": "string",
                               "minLength": 1,
                               "maxLength": 240
+                            },
+                            "textOverrides": {
+                              "maxItems": 2000,
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "original": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 2000
+                                  },
+                                  "region": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 500
+                                  },
+                                  "text": {
+                                    "type": "string",
+                                    "maxLength": 20000
+                                  }
+                                },
+                                "required": [
+                                  "original",
+                                  "text"
+                                ],
+                                "additionalProperties": false
+                              }
+                            },
+                            "assetOverrides": {
+                              "type": "object",
+                              "propertyNames": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 200
+                              },
+                              "additionalProperties": {
+                                "type": "object",
+                                "properties": {
+                                  "assetId": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 240
+                                  }
+                                },
+                                "required": [
+                                  "assetId"
+                                ],
+                                "additionalProperties": false
+                              }
                             }
                           },
                           "required": [
@@ -4398,6 +4760,34 @@
                                             "maximum": 1000000
                                           }
                                         },
+                                        "additionalProperties": false
+                                      }
+                                    },
+                                    "overrides": {
+                                      "maxItems": 2000,
+                                      "type": "array",
+                                      "items": {
+                                        "type": "object",
+                                        "properties": {
+                                          "original": {
+                                            "type": "string",
+                                            "minLength": 1,
+                                            "maxLength": 2000
+                                          },
+                                          "region": {
+                                            "type": "string",
+                                            "minLength": 1,
+                                            "maxLength": 500
+                                          },
+                                          "text": {
+                                            "type": "string",
+                                            "maxLength": 20000
+                                          }
+                                        },
+                                        "required": [
+                                          "original",
+                                          "text"
+                                        ],
                                         "additionalProperties": false
                                       }
                                     }
@@ -4947,6 +5337,56 @@
                               "type": "string",
                               "minLength": 1,
                               "maxLength": 240
+                            },
+                            "textOverrides": {
+                              "maxItems": 2000,
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "original": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 2000
+                                  },
+                                  "region": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 500
+                                  },
+                                  "text": {
+                                    "type": "string",
+                                    "maxLength": 20000
+                                  }
+                                },
+                                "required": [
+                                  "original",
+                                  "text"
+                                ],
+                                "additionalProperties": false
+                              }
+                            },
+                            "assetOverrides": {
+                              "type": "object",
+                              "propertyNames": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 200
+                              },
+                              "additionalProperties": {
+                                "type": "object",
+                                "properties": {
+                                  "assetId": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 240
+                                  }
+                                },
+                                "required": [
+                                  "assetId"
+                                ],
+                                "additionalProperties": false
+                              }
                             }
                           },
                           "required": [
@@ -5136,6 +5576,34 @@
                                             "maximum": 1000000
                                           }
                                         },
+                                        "additionalProperties": false
+                                      }
+                                    },
+                                    "overrides": {
+                                      "maxItems": 2000,
+                                      "type": "array",
+                                      "items": {
+                                        "type": "object",
+                                        "properties": {
+                                          "original": {
+                                            "type": "string",
+                                            "minLength": 1,
+                                            "maxLength": 2000
+                                          },
+                                          "region": {
+                                            "type": "string",
+                                            "minLength": 1,
+                                            "maxLength": 500
+                                          },
+                                          "text": {
+                                            "type": "string",
+                                            "maxLength": 20000
+                                          }
+                                        },
+                                        "required": [
+                                          "original",
+                                          "text"
+                                        ],
                                         "additionalProperties": false
                                       }
                                     }

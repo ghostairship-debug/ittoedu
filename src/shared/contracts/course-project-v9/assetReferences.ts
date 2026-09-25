@@ -33,6 +33,7 @@ export type CourseAssetReferenceKind =
   | 'runtime-content'
   | 'runtime-source'
   | 'component-fallback'
+  | 'component-asset-override'
   | 'component-prop'
   | 'component-manifest-default'
   | 'component-runtime-source'
@@ -483,6 +484,10 @@ export function analyzeCourseAssetReferences(
       ...location,
       path: [...location.path, 'staticFallbackAssetId'],
     })
+    Object.entries(item.assetOverrides ?? {}).forEach(([key, override]) => add(
+      override.assetId, 'component-asset-override', 'direct',
+      { ...location, path: [...location.path, 'assetOverrides', key, 'assetId'] },
+    ))
     scanComponent(
       item.component,
       item.props,
