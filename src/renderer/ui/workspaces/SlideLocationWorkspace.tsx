@@ -3,7 +3,7 @@ import { NativeSelectionContext } from '../../workbench/NativeSelectionContext'
 import { QUICK_BAR_SELECTOR } from '../../editing/quickbar/usePointerGesture'
 import type { LightEditTextOverride } from '../../../shared/contracts/runtime/lightEdit'
 import { canEditLayerInScope } from '../../../shared/teacherControllerRole'
-import { useControllerDisplayRevision } from '../../authoring/controllerDisplayBounds'
+import { controllerDisplayFrame, useControllerDisplayRevision } from '../../authoring/controllerDisplayBounds'
 import {
   Hand,
   LoaderCircle,
@@ -2957,7 +2957,9 @@ export function SlideLocationWorkspace({
       <NativeSelectionContext documentId={documentId} revision={snapshot.projectRevision} locationId={courseLocationId} itemIds={selectedNodeIds} stateId={activePresentationStateId} sceneItemIds={slideEditorView?.layers.filter(layer => layer.source === 'scene').map(layer => layer.selectionId)} enabled={canvasMode === 'edit'} textEditing={Boolean(editingNode)} bounds={id => {
         const layer = slideEditorView?.layers.find(value => value.selectionId === id), viewport = readCandidateViewport()
         if (!layer || !viewport) return null
-        const transform = createStageViewportTransform(viewport), frame = layer.item.frame
+        // A teacher controller is anchored where it is shown: collapsed, and kept on the page.
+        const transform = createStageViewportTransform(viewport)
+        const frame = isTeacherControllerLayerItem(layer.item) ? controllerDisplayFrame(layer.item, layer.item.frame, slideCanvas) : layer.item.frame
         return { left: transform.stageRect.x + frame.x * transform.scale, top: transform.stageRect.y + frame.y * transform.scale,
           width: frame.width * transform.scale, height: frame.height * transform.scale, rotation: layer.item.rotation }
       }} />

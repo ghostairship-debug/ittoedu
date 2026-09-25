@@ -80,7 +80,7 @@ export function createBlankCourseProject(
   const title = options.title ?? '未命名 H5 演示'
   const canvas = options.canvas ?? DEFAULT_SLIDE_CANVAS
   if (!isValidSlideCanvas(canvas)) throw new RangeError('画布尺寸无效')
-  const controller = includeDefaultController ? createTeacherControllerComponentItem(nextId('teacher_controller', undefined, idFactory)) : null
+  const controller = includeDefaultController ? createTeacherControllerComponentItem(nextId('teacher_controller', undefined, idFactory), canvas) : null
   if (controller) controller.playbackInitialVisibility = controls === 'canvas' ? 'inherit' : 'hidden'
   const controllerPackage = controller ? createDefaultTeacherControllerPackage() : null
   const globalLayerItems: GlobalLayerEntry[] = controller

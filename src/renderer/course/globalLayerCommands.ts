@@ -69,7 +69,7 @@ function applyCoursePlaybackPatch(
   } else if (patch.controls === 'canvas') {
     const controller = findGlobalTeacherController(project)
     if (controller) restoreCourseTeacherControllerLayer(controller, courseSlideCanvas(project))
-    else appendDefaultTeacherController(project)
+    else appendDefaultTeacherController(project, createTeacherControllerComponentItem(`teacher-controller-${nanoid(8)}`, courseSlideCanvas(project)))
   }
 
   if (patch.controls !== undefined) {
@@ -155,7 +155,7 @@ export function restoreDefaultTeacherController(
         synchronizeCourseTeacherControllerControls(draft)
       }, '已恢复教师控制器', options, existing.item.layerItemId)
     }
-    const item = createTeacherControllerComponentItem(`teacher-controller-${nanoid(8)}`)
+    const item = createTeacherControllerComponentItem(`teacher-controller-${nanoid(8)}`, courseSlideCanvas(document))
     const createdId = item.layerItemId
     return runDocumentMutation(document, (draft) => {
       appendDefaultTeacherController(draft, item)

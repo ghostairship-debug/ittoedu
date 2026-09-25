@@ -104,6 +104,44 @@ it('M21 quick bar edits a selected object and a legal multi-selection through ex
   await waitFor(() => expect(screen.queryByRole('toolbar', { name: '选中对象快捷工具' })).toBeNull())
 })
 
+it('M19 teacher controller quick bar collapses, hides and locks the controller in place', async () => {
+  const host = await createCourseStoreHost()
+  await host.open(createBlankCourseProject())
+  const documentId = store().courseDocument.documentId!
+  Object.defineProperty(window, 'desktopAPI', { configurable: true, value: { documents: host.api } })
+  const model = () => {
+    const read = host.registry.get(documentId).read().model
+    if (read.kind !== 'course-v9') throw new Error('course fixture')
+    return read.project
+  }
+  const controllerId = model().globalLayerItems[0]!.item.layerItemId
+  const controller = () => locateCourseLayer(model(), controllerId)?.item
+  function CurrentSelection() {
+    const revision = useEditorStore(state => state.courseDocument.snapshot?.revision ?? 0)
+    const itemIds = useEditorStore(selectSelectedNodeIds)
+    const locationId = useEditorStore(selectActiveCourseLocationId)
+    return <CourseEditorChromeContext.Provider value={{ documentId, mode: 'light', setMode() {} }}>
+      <main><NativeSelectionContext documentId={documentId} revision={revision} locationId={locationId} itemIds={itemIds} enabled bounds={() => ({ left: 200, top: 600, width: 400, height: 40 })} /></main>
+    </CourseEditorChromeContext.Provider>
+  }
+  render(<CurrentSelection />)
+  act(() => store().selectNodes([controllerId]))
+  const bar = await screen.findByRole('toolbar', { name: '选中对象快捷工具' })
+  expect(bar).toHaveTextContent('教师控制台')
+  expect(within(bar).getByRole('button', { name: 'AI 修改' })).toBeTruthy()
+  // The default controller starts collapsed in playback; the bar switches that default both ways.
+  await act(async () => { fireEvent.click(within(bar).getByRole('button', { name: /^展开/ })); await store().drainCourseDocument() })
+  expect(controller()).toMatchObject({ props: { defaultCollapsed: false } })
+  await act(async () => { fireEvent.click(within(screen.getByRole('toolbar', { name: '选中对象快捷工具' })).getByRole('button', { name: /^收起/ })); await store().drainCourseDocument() })
+  expect(controller()).toMatchObject({ props: { collapsible: true, defaultCollapsed: true } })
+  await act(async () => { fireEvent.click(within(screen.getByRole('toolbar', { name: '选中对象快捷工具' })).getByRole('button', { name: '锁定' })); await store().drainCourseDocument() })
+  expect(controller()?.locked).toBe(true)
+  await act(async () => { fireEvent.click(await screen.findByRole('button', { name: '解锁' })); await store().drainCourseDocument() })
+  await act(async () => { fireEvent.click(within(screen.getByRole('toolbar', { name: '选中对象快捷工具' })).getByRole('button', { name: '隐藏' })); await store().drainCourseDocument() })
+  expect(controller()?.visible).toBe(false)
+  expect(screen.getByRole('toolbar', { name: '选中对象快捷工具' })).toHaveTextContent('已隐藏')
+})
+
 it('M21 steps font sizes in readable increments inside the Native limits', () => {
   expect(stepFontSize(16, 1)).toBe(18)
   expect(stepFontSize(40, -1)).toBe(36)

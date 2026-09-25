@@ -1,4 +1,4 @@
-import { AArrowDown, AArrowUp, AlignCenter, AlignLeft, AlignRight, AlignHorizontalJustifyStart, Baseline, Bold, Eye, Highlighter, ImageIcon, Italic, PaintBucket, Pencil, Play, Repeat, Square, Type, Underline, Unlock, VolumeX } from 'lucide-react'
+import { AArrowDown, AArrowUp, AlignCenter, AlignLeft, AlignRight, AlignHorizontalJustifyStart, Baseline, Bold, ChevronsDownUp, ChevronsUpDown, Eye, EyeOff, Highlighter, ImageIcon, Lock, Italic, PaintBucket, Pencil, Play, Repeat, Square, Type, Underline, Unlock, VolumeX } from 'lucide-react'
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { isStrokeOnlyShapeType } from '../../shared/contracts/native-v1'
 import { useCourseEditorActions } from '../documents/CourseEditorActionsContext'
@@ -18,8 +18,10 @@ import { RuntimePageTextList } from './RuntimePageText'
 import './selectionContext.css'
 
 type ObjectProperties = Extract<PropertiesContext, { kind: 'slide-native' | 'multi-selection' }>
+type GlobalProperties = Extract<PropertiesContext, { kind: 'course-global' }>
+type GlobalObjectProperties = GlobalProperties & { readonly selected: NonNullable<GlobalProperties['selected']> }
 /** One selected object, whichever surface owns it. */
-interface SingleObject { view: PropertiesItemView; patch(patch: PropertiesPatch): void; replaceImage?: () => void; editText?: () => void; disabledReason: string | null }
+interface SingleObject { view: PropertiesItemView; patch(patch: PropertiesPatch): void; replaceImage?: () => void; editText?: () => void; disabledReason: string | null; controller?: boolean }
 type Box = QuickBarRect & { rotation?: number }
 
 /** The Store selection and the document selection must identify the same objects. */
@@ -28,6 +30,10 @@ export function matchesObjectProperties(context: PropertiesContext, itemIds: rea
   if (context.kind !== 'multi-selection' || itemIds.length < 2 || context.items.length !== itemIds.length) return false
   const ids = new Set(context.items.map(item => item.id))
   return ids.size === itemIds.length && itemIds.every(id => ids.has(id))
+}
+/** A global-layer object (the teacher controller among them) selected alone. */
+function matchesGlobalObject(context: PropertiesContext, itemIds: readonly string[]): context is GlobalObjectProperties {
+  return context.kind === 'course-global' && context.mode === 'selected' && itemIds.length === 1 && context.selected?.view.id === itemIds[0]
 }
 /** A Flow paper object selected alone, as the properties context reports it. */
 function matchesFlowOverlay(context: PropertiesContext, itemIds: readonly string[]): context is FlowPropertiesContext {
@@ -137,12 +143,18 @@ export function NativeSelectionContext({ documentId, revision, locationId, itemI
   }, [root, pinned, locationId, stateId, sceneIds, ids, bounds])
   const selection = enabled && itemIds.length && matchesObjectProperties(context, itemIds) ? context : null
   const overlay = enabled && matchesFlowOverlay(context, itemIds) ? context : null
+  const global = enabled && !overlay && matchesGlobalObject(context, itemIds) ? context : null
   const report = (message: string) => setNotice(message)
   let single: SingleObject | null = null
   if (selection?.kind === 'slide-native') single = { view: selection.view, disabledReason: selection.disabledReason,
     patch: value => run(() => selection.commands.patch(value), report),
     replaceImage: actions ? () => run(selection.commands.replaceImage, report) : undefined,
     editText: selection.contentEditingEnabled ? () => run(() => selection.commands.text.beginEdit('canvas'), report) : undefined }
+  else if (global) single = { view: global.selected.view, disabledReason: global.disabledReason,
+    patch: value => run(() => global.commands.patch(value), report),
+    replaceImage: actions ? () => run(global.commands.replaceImage, report) : undefined,
+    editText: global.selected.contentEditingEnabled && global.selected.view.type === 'text' ? () => run(() => global.commands.text.beginEdit('canvas'), report) : undefined,
+    controller: Boolean(global.selected.controllerComponent) }
   else if (overlay) {
     const entry = overlay.view.overlayLayers.find(item => item.selectionId === itemIds[0])
     if (entry) {
@@ -167,6 +179,19 @@ export function NativeSelectionContext({ documentId, revision, locationId, itemI
     // A hidden object stays selected until the selection moves on, so it can be shown again in place.
     else if (!node.visible) content = <><QuickBarLabel>已隐藏</QuickBarLabel><QuickBarButton label="显示" text="显示" icon={<Eye size={14} />} onClick={() => patch({ visible: true })} /><QuickBarSeparator />{ai}</>
     else if (node.locked) content = <><QuickBarLabel>已锁定</QuickBarLabel><QuickBarButton label="解锁" text="解锁" icon={<Unlock size={14} />} onClick={() => patch({ locked: false })} /><QuickBarSeparator />{ai}</>
+    else if (single.controller && node.type === 'external-component') {
+      // The teacher controller: whether playback starts it collapsed, and hiding or locking it in place.
+      const collapsed = node.props.collapsible === true && node.props.defaultCollapsed === true
+      content = <>
+        <QuickBarLabel>教师控制台</QuickBarLabel>
+        <QuickBarButton label={collapsed ? '展开（播放时默认展开）' : '收起（播放时默认收起）'} text={collapsed ? '展开' : '收起'}
+          icon={collapsed ? <ChevronsUpDown size={14} /> : <ChevronsDownUp size={14} />}
+          onClick={() => patch({ props: { ...node.props, collapsible: true, defaultCollapsed: !collapsed } })} />
+        <QuickBarButton label="隐藏" text="隐藏" icon={<EyeOff size={14} />} onClick={() => patch({ visible: false })} />
+        <QuickBarButton label="锁定" text="锁定" icon={<Lock size={14} />} onClick={() => patch({ locked: true })} />
+        <QuickBarSeparator />{ai}
+      </>
+    }
     else {
       const items: QuickBarMenuItem[] = [
         { label: '复制', group: 'edit', onSelect: () => run(selectionObjectCommands.duplicate, report) },
