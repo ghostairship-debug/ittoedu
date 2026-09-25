@@ -25,7 +25,7 @@
 }
 
 .execution-assistant__sessions header,
-.execution-assistant__header,
+
 .execution-assistant__title,
 .execution-assistant__heading,
 .execution-assistant__actions,
@@ -57,7 +57,15 @@
 .execution-assistant__home-notice { margin: 0; padding: 8px 14px; color: #805a22; background: #fff5df; font-size: 12px; }
 
 .execution-assistant__main { position: relative; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
-.execution-assistant__header { flex: none; position: relative; z-index: 3; padding: 12px 14px 10px; border-bottom: 1px solid var(--border-color, #d9dfdb); min-width: 0; background: var(--panel-bg, #fffefa); }
+.execution-assistant__header { flex: none; position: relative; z-index: 3; padding: 10px 14px 8px; border-bottom: 1px solid var(--border-color, #d9dfdb); min-width: 0; background: var(--panel-bg, #fffefa); display: flex; flex-direction: column; align-items: stretch; gap: 4px; }
+.execution-assistant__location-bar { display: flex; align-items: center; min-width: 0; }
+.execution-assistant__location { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; min-width: 0; padding: 2px 4px; margin: -2px -4px; border: 0; border-radius: 4px; background: transparent; color: var(--muted-text, #607069); font-size: 11px; line-height: 1.4; cursor: pointer; text-align: left; }
+.execution-assistant__location:hover { background: var(--surface-hover, #edf4f0); color: var(--text-color, #17211d); }
+.execution-assistant__location-path { display: inline-flex; align-items: center; gap: 4px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.execution-assistant__location-icon { flex: none; color: var(--muted-text, #607069); }
+.execution-assistant__location-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.execution-assistant__location-missing { color: var(--danger, #a13c30); }
+.execution-assistant__location-hint { flex: none; font-size: 11px; color: var(--muted-text, #889690); margin-left: 2px; }
 .execution-assistant__heading { flex: 1; min-width: 0; align-items: center; }
 .execution-assistant__title { min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 3px; }
 .execution-assistant__title > span { font-size: 11px; color: var(--muted-text, #607069); }

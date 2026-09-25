@@ -662,3 +662,113 @@ it('puts current and familiar OAuth models first, explains their uses, and short
   expect(within(menu).getByRole('button', { name: /older-4/ })).toBeInTheDocument()
   expect(api.send).not.toHaveBeenCalled()
 })
+
+it('displays conversation home location for folder, file, unhomed, missing, other workspace, and empty session with hint, and dispatches reveal event on click', async () => {
+  const cFolder = {
+    ...conversation('c1', '会话-目录'),
+    home: { kind: 'folder' as const, path: 'Unit/Sub', workspaceId: 'workspace' },
+    messages: [{ messageId: 'm1', role: 'user' as const, text: 'hello', createdAt: 1, attachmentIds: [], runId: 'run' }],
+  }
+  const cFile = {
+    ...conversation('c2', '会话-文件'),
+    home: { kind: 'file' as const, path: 'Unit/a.md', workspaceId: 'workspace' },
+    messages: [{ messageId: 'm2', role: 'user' as const, text: 'hello', createdAt: 1, attachmentIds: [], runId: 'run' }],
+  }
+  const cUnhomed = {
+    ...conversation('c3', '会话-无所属'),
+    messages: [{ messageId: 'm3', role: 'user' as const, text: 'hello', createdAt: 1, attachmentIds: [], runId: 'run' }],
+  }
+  const cMissing = {
+    ...conversation('c4', '会话-已删除'),
+    home: { kind: 'file' as const, path: 'Unit/deleted.md', workspaceId: 'workspace', missing: true as const },
+    messages: [{ messageId: 'm4', role: 'user' as const, text: 'hello', createdAt: 1, attachmentIds: [], runId: 'run' }],
+  }
+  const cOtherWs = {
+    ...conversation('c5', '会话-其他空间'),
+    home: { kind: 'folder' as const, path: 'Shared', workspaceId: 'other-ws' },
+    messages: [{ messageId: 'm5', role: 'user' as const, text: 'hello', createdAt: 1, attachmentIds: [], runId: 'run' }],
+  }
+  const cEmpty = conversation('c6', '会话-空')
+
+  const { api } = executionFixture([cFolder, cFile, cUnhomed, cMissing, cOtherWs, cEmpty])
+  const listener = vi.fn()
+  window.addEventListener('guoling:reveal-in-explorer', listener)
+
+  const { container } = render(<ExecutionAssistant root="C:/workspace" api={api} settingsAPI={settingsFixture(true)}
+    captureDocuments={vi.fn(async () => [])} prepareSend={vi.fn(async () => true)} />)
+
+  // 1. Folder session
+  await screen.findByRole('button', { name: '会话-目录' })
+  let locationBtn = container.querySelector('.execution-assistant__location')!
+  expect(locationBtn).toHaveTextContent('workspace › Unit › Sub')
+  expect(locationBtn.querySelector('.lucide-folder')).toBeInTheDocument()
+  expect(locationBtn.getAttribute('title')).toContain('C:/workspace/Unit/Sub')
+  expect(locationBtn.getAttribute('title')).toContain('所属位置只决定默认引用和新建文件的位置，不限制可修改的范围')
+  expect(locationBtn).not.toHaveTextContent('发送首条消息后固定')
+
+  // Click reveals folder
+  fireEvent.click(locationBtn)
+  expect(listener).toHaveBeenCalledWith(expect.objectContaining({
+    detail: { workspaceId: 'workspace', path: 'Unit/Sub', kind: 'folder' }
+  }))
+
+  // 2. File session
+  listener.mockClear()
+  fireEvent.click(screen.getByRole('button', { name: '会话-文件' }))
+  await waitFor(() => expect(screen.getByRole('button', { name: '会话-文件' })).toHaveAttribute('aria-current', 'page'))
+  locationBtn = container.querySelector('.execution-assistant__location')!
+  expect(locationBtn).toHaveTextContent('workspace › Unit › a.md')
+  expect(locationBtn.querySelector('.lucide-file')).toBeInTheDocument()
+  expect(locationBtn.getAttribute('title')).toContain('C:/workspace/Unit/a.md')
+  fireEvent.click(locationBtn)
+  expect(listener).toHaveBeenCalledWith(expect.objectContaining({
+    detail: { workspaceId: 'workspace', path: 'Unit/a.md', kind: 'file' }
+  }))
+
+  // 3. Unhomed session
+  listener.mockClear()
+  fireEvent.click(screen.getByRole('button', { name: '会话-无所属' }))
+  await waitFor(() => expect(screen.getByRole('button', { name: '会话-无所属' })).toHaveAttribute('aria-current', 'page'))
+  locationBtn = container.querySelector('.execution-assistant__location')!
+  expect(locationBtn).toHaveTextContent('workspace')
+  expect(locationBtn.querySelector('.lucide-folder')).toBeInTheDocument()
+  expect(locationBtn.getAttribute('title')).toContain('C:/workspace')
+  fireEvent.click(locationBtn)
+  expect(listener).toHaveBeenCalledWith(expect.objectContaining({
+    detail: { workspaceId: 'workspace', path: '', kind: 'folder' }
+  }))
+
+  // 4. Missing session
+  listener.mockClear()
+  fireEvent.click(screen.getByRole('button', { name: '会话-已删除' }))
+  await waitFor(() => expect(screen.getByRole('button', { name: '会话-已删除' })).toHaveAttribute('aria-current', 'page'))
+  locationBtn = container.querySelector('.execution-assistant__location')!
+  expect(locationBtn).toHaveTextContent('workspace › Unit › deleted.md')
+  expect(locationBtn).toHaveTextContent('已删除')
+
+  // 5. Other workspace session
+  listener.mockClear()
+  fireEvent.click(screen.getByRole('button', { name: '会话-其他空间' }))
+  await waitFor(() => expect(screen.getByRole('button', { name: '会话-其他空间' })).toHaveAttribute('aria-current', 'page'))
+  locationBtn = container.querySelector('.execution-assistant__location')!
+  expect(locationBtn).toHaveTextContent('其他工作空间')
+  expect(locationBtn).toHaveTextContent('workspace › Shared')
+  fireEvent.click(locationBtn)
+  expect(listener).toHaveBeenCalledWith(expect.objectContaining({
+    detail: { workspaceId: 'other-ws', path: 'Shared', kind: 'folder' }
+  }))
+
+  // 6. Empty session
+  listener.mockClear()
+  fireEvent.click(screen.getByRole('button', { name: '会话-空' }))
+  await waitFor(() => expect(screen.getByRole('button', { name: '会话-空' })).toHaveAttribute('aria-current', 'page'))
+  locationBtn = container.querySelector('.execution-assistant__location')!
+  expect(locationBtn).toHaveTextContent('发送首条消息后固定')
+
+  // Typing a draft removes the hint
+  fireEvent.change(screen.getByRole('textbox', { name: '给创作助手发消息' }), { target: { value: '草稿' } })
+  expect(locationBtn).not.toHaveTextContent('发送首条消息后固定')
+
+  window.removeEventListener('guoling:reveal-in-explorer', listener)
+})
+

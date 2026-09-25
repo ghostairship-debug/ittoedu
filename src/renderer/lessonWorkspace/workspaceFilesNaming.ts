@@ -1,0 +1,62 @@
+import type { WorkspaceListItem } from '../../shared/workbench/workspaceFiles'
+
+export type CreateFileType = 'create-markdown' | 'create-course' | 'create-text' | 'mkdir'
+
+export function computeDefaultName(type: CreateFileType, existingItems: WorkspaceListItem[] = []): string {
+  let base = ''
+  let ext = ''
+  switch (type) {
+    case 'create-markdown':
+      base = '新建 Markdown 文档'
+      ext = '.md'
+      break
+    case 'create-course':
+      base = '新建课件'
+      ext = '.h5lesson'
+      break
+    case 'create-text':
+      base = '新建文本文档'
+      ext = '.txt'
+      break
+    case 'mkdir':
+      base = '新建文件夹'
+      ext = ''
+      break
+  }
+  const existingNames = new Set(existingItems.map(item => item.name.toLowerCase()))
+  let candidate = ext ? `${base}${ext}` : base
+  if (!existingNames.has(candidate.toLowerCase())) {
+    return candidate
+  }
+  let index = 2
+  while (true) {
+    candidate = ext ? `${base} (${index})${ext}` : `${base} (${index})`
+    if (!existingNames.has(candidate.toLowerCase())) {
+      return candidate
+    }
+    index++
+  }
+}
+
+export function normalizeNewFilename(type: CreateFileType, raw: string): string {
+  let filename = raw.trim()
+  if (type === 'create-markdown' && !/\.md$/i.test(filename)) {
+    filename += '.md'
+  }
+  if (type === 'create-course' && !/\.h5lesson$/i.test(filename)) {
+    filename += '.h5lesson'
+  }
+  if (type === 'create-text') {
+    const dot = filename.lastIndexOf('.')
+    if (dot === -1 || dot === filename.length - 1) {
+      filename = (dot === -1 ? filename : filename.slice(0, -1)) + '.txt'
+    }
+  }
+  return filename
+}
+
+export function getStemSelectionRange(name: string): [number, number] {
+  const dot = name.lastIndexOf('.')
+  const end = dot > 0 ? dot : name.length
+  return [0, end]
+}

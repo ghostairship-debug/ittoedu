@@ -2,6 +2,8 @@ import { selectionReference, workbenchSelection, type ContextualEditRequest } fr
 import './selectionContext.css'
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent } from 'react'
 import { createPortal } from 'react-dom'
+import { File, Folder } from 'lucide-react'
+import { dispatchRevealInExplorer } from './revealInExplorer'
 import { homeInScope, type ConversationRecord } from '../../shared/workbench/conversations'
 import { EXECUTION_NO_PROGRESS, MODEL_REQUEST_BUDGET_EXHAUSTED, TOOL_CALL_BUDGET_EXHAUSTED, type ExecutionRunRecord } from '../../shared/workbench/execution'
 import { captureRendererTiming, disclosedExecutionSettings, type ExecutionDesktopAPI, type ExecutionDocumentReference, type ExecutionSendInput, type ExecutionSubmissionMode, type ExecutionSubmissionRecord } from '../../shared/workbench/executionDesktop'
@@ -903,6 +905,36 @@ export function ExecutionAssistant({ root, captureDocuments, prepareSend, api: s
     {filteredConversations.length === 0 && <p className="execution-assistant__session-empty">没有匹配的会话。</p>}
   </aside>
 
+  const isEmptySession = Boolean(
+    active &&
+    active.messages.length === 0 &&
+    !draft &&
+    !active.inputDraft &&
+    attachments.length === 0 &&
+    active.inputAttachments.length === 0 &&
+    (active.attachmentIds?.length ?? 0) === 0 &&
+    active.frozenContextRefs.length === 0 &&
+    active.runIndex.builtinRunIds.length === 0 &&
+    active.runIndex.externalRunIds.length === 0
+  )
+  const workspaceName = root ? (root.replace(/[/\\]+$/, '').split(/[/\\]/).pop() || '工作空间') : '工作空间'
+  const homePath = active?.home?.path ? active.home.path.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '') : ''
+  const pathSegments = homePath ? homePath.split('/') : []
+  const formattedPath = pathSegments.length > 0 ? [workspaceName, ...pathSegments].join(' › ') : workspaceName
+  const isOtherWorkspace = Boolean(active?.home?.workspaceId && active?.workspaceId && active.home.workspaceId !== active.workspaceId)
+  const isMissing = Boolean(active?.home?.missing)
+  const locationKind = active?.home?.kind ?? 'folder'
+  const locationIcon = locationKind === 'file' ? <File size={13} className="execution-assistant__location-icon" /> : <Folder size={13} className="execution-assistant__location-icon" />
+  const fullPath = [root?.replace(/[/\\]+$/, ''), homePath].filter(Boolean).join('/')
+  const locationTitle = `${fullPath ? `${fullPath}\n` : ''}所属位置只决定默认引用和新建文件的位置，不限制可修改的范围`
+  const handleLocationClick = () => {
+    if (!active) return
+    const path = active.home?.path ?? ''
+    const kind = active.home?.kind ?? 'folder'
+    const workspaceId = active.home?.workspaceId ?? active.workspaceId
+    dispatchRevealInExplorer({ workspaceId, path, kind })
+  }
+
   return <section className={`execution-assistant${sessionDock.inWorkspace ? ' execution-assistant--docked' : ''}`} aria-label="创作助手">
     {sessionDock.inWorkspace ? sessionDock.target && createPortal(sessionList, sessionDock.target) : sessionList}
     <div className="execution-assistant__main">
@@ -916,6 +948,19 @@ export function ExecutionAssistant({ root, captureDocuments, prepareSend, api: s
               <button type="button" onClick={() => { moreRef.current!.open = false; void openExternal() }} disabled={!active || busy || !externalAPI}>外部客户端</button>
             </div>
           </details>
+        </div>
+        <div className="execution-assistant__location-bar">
+          <button type="button" className="execution-assistant__location" title={locationTitle} onClick={handleLocationClick}>
+            <span className="execution-assistant__location-path">
+              {locationIcon}
+              <span className="execution-assistant__location-text">
+                {isOtherWorkspace && <span className="execution-assistant__location-prefix">其他工作空间 · </span>}
+                {formattedPath}
+                {isMissing && <span className="execution-assistant__location-missing"> · 已删除</span>}
+              </span>
+            </span>
+            {isEmptySession && <small className="execution-assistant__location-hint">发送首条消息后固定</small>}
+          </button>
         </div>
       </header>
       {error && <p className="execution-assistant__error" role="alert">{error}</p>}

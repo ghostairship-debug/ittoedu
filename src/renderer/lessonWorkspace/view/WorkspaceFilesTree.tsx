@@ -4,6 +4,8 @@ import type { LessonDirectoryEntry } from '../../../shared/lessonDesktopContract
 import type { RegisteredWorkspaceRoot, WorkspaceFilesAPI, WorkspaceFilesRequest, WorkspaceListItem, WorkspaceOperationResult } from '../../../shared/workbench/workspaceFiles'
 import type { SaveDirectoryContext } from '../../../shared/workbench/desktop'
 import './WorkspaceFilesTree.css'
+import { computeDefaultName, normalizeNewFilename, getStemSelectionRange, type CreateFileType } from '../workspaceFilesNaming'
+import { REVEAL_IN_EXPLORER_EVENT, type RevealInExplorerDetail } from '../../workbench/revealInExplorer'
 import { snapshotWorkspaceDrop } from './workspaceDropFiles'
 import { parseWorkspaceEntryDrag, WORKSPACE_ENTRIES_DRAG_TYPE, writeWorkspaceEntryDrag } from '../workspaceMediaDrag'
 
@@ -32,6 +34,7 @@ export function WorkspaceFilesTree({ directory, files, refreshVersion = 0, onFil
   const scopeTicket = useRef(0)
   const saveDirectoryListener = useRef(onSaveDirectoryChange); saveDirectoryListener.current = onSaveDirectoryChange
   const loadTickets = useRef(new Map<string, number>())
+  const pagesRef = useRef(pages); pagesRef.current = pages
   const buttons = useRef(new Map<string, HTMLButtonElement>())
   const createMenu = useRef<HTMLDetailsElement>(null)
   const dialogRef = useRef<HTMLElement>(null), dialogReturnFocus = useRef<HTMLElement | null>(null)
@@ -40,14 +43,14 @@ export function WorkspaceFilesTree({ directory, files, refreshVersion = 0, onFil
   if (root) flatten(root.rootEntryId)
   const selected = rows.filter(row => selection.has(row.entry.entryId)), single = selected.length === 1 ? selected[0].entry : undefined
   const targetDirectory = parentId ?? root?.rootEntryId
-  const load = useCallback(async (id: string, current: RegisteredWorkspaceRoot, generation = epoch.current) => {
+  const load = useCallback(async (id: string, current: RegisteredWorkspaceRoot, generation = epoch.current): Promise<WorkspaceListItem[]> => {
     const ticket = (loadTickets.current.get(id) ?? 0) + 1
     loadTickets.current.set(id, ticket)
     const entries: WorkspaceListItem[] = []; let cursor: string | undefined
     do { const page = await files({ type: 'list', workspaceId: current.workspaceId, directoryEntryId: id, limit: 200, ...(cursor ? { cursor } : {}) }); entries.push(...page.entries); cursor = page.nextCursor } while (cursor)
-    if (generation !== epoch.current || ticket !== loadTickets.current.get(id)) return
+    if (generation !== epoch.current || ticket !== loadTickets.current.get(id)) return entries
     setPages(value => generation !== epoch.current || ticket !== loadTickets.current.get(id) || JSON.stringify(value[id]) === JSON.stringify(entries)
-      ? value : { ...value, [id]: entries })
+      ? value : { ...value, [id]: entries }); pagesRef.current = { ...pagesRef.current, [id]: entries }; return entries
   }, [files])
   useEffect(() => {
     const generation = ++epoch.current
@@ -76,7 +79,19 @@ export function WorkspaceFilesTree({ directory, files, refreshVersion = 0, onFil
   useEffect(() => { if (subscribe) return; const timer = setInterval(() => { void refreshRef.current().catch(() => {}) }, 2500); return () => clearInterval(timer) }, [subscribe])
   const close = () => { setDialog(undefined); setRetry(undefined); setMenu(undefined); setError('') }
   useLayoutEffect(() => {
-    if (dialog) { dialogRef.current?.querySelector<HTMLElement>('input, select, button:not(:disabled)')?.focus(); return }
+    if (dialog) {
+      const input = dialogRef.current?.querySelector<HTMLInputElement>('input[aria-label="文件名称"]')
+      if (input) {
+        input.focus()
+        if (dialog !== 'rename') {
+          const [start, end] = getStemSelectionRange(input.value)
+          input.setSelectionRange(start, end)
+        }
+        return
+      }
+      dialogRef.current?.querySelector<HTMLElement>('input, select, button:not(:disabled)')?.focus()
+      return
+    }
     const previous = dialogReturnFocus.current
     dialogReturnFocus.current = null
     if (previous) requestAnimationFrame(() => {
@@ -114,10 +129,92 @@ export function WorkspaceFilesTree({ directory, files, refreshVersion = 0, onFil
     do { const next = await files({ type: 'list', workspaceId: root.workspaceId, directoryEntryId: id, cursor, limit: 200 }); page.push(...next.entries.filter((entry): entry is Entry => entry.status === 'accessible' && entry.kind === 'directory')); cursor = next.nextCursor } while (cursor)
     setDestinations(value => [...value, ...page.filter(entry => !value.some(item => item.id === entry.entryId)).map(entry => ({ id: entry.entryId, name: entry.name }))])
   }
+  const revealItem = useCallback(async (detail: RevealInExplorerDetail) => {
+    const currentRoot = active.current
+    if (!currentRoot) { setNotice('工作空间未就绪'); return }
+    if (detail.workspaceId && detail.workspaceId !== currentRoot.workspaceId) { setNotice('目标文件位于其他工作空间'); return }
+    const cleanPath = (detail.path ?? '').replace(/\\/g, '/').replace(/^\/+|\/+$/g, '').trim()
+    if (!cleanPath) {
+      ++scopeTicket.current
+      onScope?.(currentRoot.resolvedPath, 'folder', currentRoot.workspaceId)
+      setSelection(new Set()); setParentId(currentRoot.rootEntryId)
+      onSaveDirectoryChange?.({ workspaceId: currentRoot.workspaceId, directoryEntryId: currentRoot.rootEntryId })
+      setMenu(undefined)
+      requestAnimationFrame(() => { document.querySelector<HTMLElement>('.workspace-tree-root')?.scrollIntoView?.({ block: 'nearest' }) })
+      return
+    }
+    const segments = cleanPath.split('/'), generation = epoch.current
+    let currentDirId = currentRoot.rootEntryId
+    const ancestorIds: string[] = []
+    let targetEntry: Entry | undefined
+
+    for (let i = 0; i < segments.length; i++) {
+      const segment = segments[i], isLast = i === segments.length - 1
+      let entries = pagesRef.current[currentDirId]
+      if (!entries || !entries.some(e => e.status === 'accessible' && e.name === segment)) {
+        entries = await load(currentDirId, currentRoot, generation)
+      }
+      if (generation !== epoch.current) return
+      const found = entries?.find((e): e is Entry => e.status === 'accessible' && e.name === segment)
+      if (!found) { setNotice(`未在资源管理器中找到：${cleanPath}`); return }
+      if (isLast) { targetEntry = found }
+      else {
+        if (found.kind !== 'directory') { setNotice(`路径包含非文件夹：${segment}`); return }
+        ancestorIds.push(found.entryId); currentDirId = found.entryId
+      }
+    }
+    if (!targetEntry || generation !== epoch.current) return
+    if (ancestorIds.length > 0) setExpanded(prev => new Set([...prev, ...ancestorIds]))
+    const directoryEntryId = targetEntry.kind === 'directory' ? targetEntry.entryId : currentDirId
+    setParentId(directoryEntryId)
+    onSaveDirectoryChange?.({ workspaceId: currentRoot.workspaceId, directoryEntryId })
+    setSelection(new Set([targetEntry.entryId]))
+    setAnchor(targetEntry.entryId)
+    setMenu(undefined)
+    const ticket = ++scopeTicket.current
+    try {
+      const resolved = await files({ type: 'resolve', workspaceId: currentRoot.workspaceId, entryId: targetEntry.entryId })
+      if (ticket === scopeTicket.current && generation === epoch.current) {
+        onScope?.(resolved.resolvedPath, targetEntry.kind === 'file' ? 'file' : 'folder', currentRoot.workspaceId)
+      }
+    } catch (reason) {
+      if (ticket === scopeTicket.current && generation === epoch.current) setError(message(reason))
+    }
+    const scrollTarget = () => {
+      const element = buttons.current.get(targetEntry!.entryId) ?? document.querySelector<HTMLElement>(`[data-entry-id="${targetEntry!.entryId}"]`)
+      element?.scrollIntoView?.({ block: 'nearest' })
+    }
+    scrollTarget()
+    requestAnimationFrame(scrollTarget)
+  }, [files, load, onScope, onSaveDirectoryChange])
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const custom = event as CustomEvent<RevealInExplorerDetail>
+      if (custom.detail) void revealItem(custom.detail)
+    }
+    window.addEventListener(REVEAL_IN_EXPLORER_EVENT, handler)
+    return () => window.removeEventListener(REVEAL_IN_EXPLORER_EVENT, handler)
+  }, [revealItem])
+
   const begin = async (type: Dialog) => {
     if (type === 'trash') { if (root && selected.length) await run({ type: 'trash', operationId: crypto.randomUUID(), workspaceId: root.workspaceId, entryIds: selected.map(row => row.entry.entryId) }); return }
     dialogReturnFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
-    setMenu(undefined); setDialog(type); setName(type === 'rename' ? single?.name ?? '' : ''); setError(''); setResults(undefined); setRetry(undefined)
+    setMenu(undefined); setError(''); setResults(undefined); setRetry(undefined)
+    if (type === 'rename') {
+      setName(single?.name ?? '')
+      setDialog(type)
+    } else if (type === 'create-markdown' || type === 'create-course' || type === 'create-text' || type === 'mkdir') {
+      const targetDir = targetDirectory
+      let entries = targetDir ? pagesRef.current[targetDir] : undefined
+      if (!entries && targetDir && root) {
+        entries = await load(targetDir, root)
+      }
+      setName(computeDefaultName(type, entries))
+      setDialog(type)
+    } else {
+      setName('')
+      setDialog(type)
+    }
     if ((type === 'copy' || type === 'move') && root) { setDestinations([{ id: root.rootEntryId, name: directory }]); await browse(root.rootEntryId) }
   }
   const run = async (request: WorkspaceFilesRequest) => {
@@ -146,7 +243,18 @@ export function WorkspaceFilesTree({ directory, files, refreshVersion = 0, onFil
       }
       if (request.type === 'move') setClipboard(value => value ? { ...value, ids: value.ids.filter(id => !successes.has(id)) } : value)
       try { await refresh() }
-      finally { if (result.status === 'success') setDialog(undefined) }
+      finally {
+        if (result.status === 'success') {
+          setDialog(undefined)
+          if (request.type === 'create-markdown' || request.type === 'create-course' || request.type === 'create-text') {
+            const item = result.items.find(i => i.status === 'success' && i.targetPath)
+            if (item?.targetPath) {
+              const createdName = item.targetPath.split(/[/\\]/).pop() ?? request.name
+              onFile({ name: createdName, kind: 'file', path: item.targetPath })
+            }
+          }
+        }
+      }
     } catch (reason) { if (generation === epoch.current) setError(message(reason)) }
     finally { lock.current = false; if (generation === epoch.current) setBusy(false) }
   }
@@ -154,9 +262,9 @@ export function WorkspaceFilesTree({ directory, files, refreshVersion = 0, onFil
   const submit = () => {
     if (!root || !dialog) return
     if (dialog === 'mkdir' || dialog.startsWith('create-')) {
-      let filename = name.trim()
-      if (dialog === 'create-markdown' && !/\.md$/i.test(filename)) filename += '.md'
-      if (dialog === 'create-course' && !/\.h5lesson$/i.test(filename)) filename += '.h5lesson'
+      const filename = normalizeNewFilename(dialog as CreateFileType, name)
+
+
       void run({ type: dialog as 'mkdir' | 'create-markdown' | 'create-course' | 'create-text', ...common(), targetDirectoryId: targetDirectory!, name: filename })
     } else if (dialog === 'rename' && single) void run({ type: 'rename', ...common(), sourceEntryId: single.entryId, name: name.trim() })
     else if (dialog === 'copy' || dialog === 'move') void run({ type: dialog, ...common(), sourceEntryIds: selected.map(row => row.entry.entryId), targetDirectoryId: destination ?? root.rootEntryId })
@@ -198,7 +306,7 @@ export function WorkspaceFilesTree({ directory, files, refreshVersion = 0, onFil
   const droppable = (id: string) => ({ onDragOver: (event: DragEvent) => { if (event.dataTransfer.types.includes(WORKSPACE_ENTRIES_DRAG_TYPE) || event.dataTransfer.types.includes('Files')) { event.preventDefault(); event.stopPropagation(); event.dataTransfer.dropEffect = event.dataTransfer.types.includes(WORKSPACE_ENTRIES_DRAG_TYPE) ? 'move' : 'copy'; setDropTarget(id) } }, onDragLeave: (event: DragEvent) => { if (!event.currentTarget.contains(event.relatedTarget as Node)) setDropTarget(undefined) }, onDrop: (event: DragEvent) => { void drop(event, id) } })
   const action = (type: Dialog) => { if (createMenu.current) createMenu.current.open = false; void begin(type).catch(reason => setError(message(reason))) }
   const actions = (context = false) => <>
-    <button type="button" disabled={busy || !root} onClick={() => action('create-markdown')}>新建文档</button><button type="button" disabled={busy || !root} onClick={() => action('create-course')}>新建课件</button><button type="button" disabled={busy || !root} onClick={() => action('create-text')}>新建文本文件</button><button type="button" disabled={busy || !root} onClick={() => action('mkdir')}>新建文件夹</button>
+    <button type="button" disabled={busy || !root} onClick={() => action('create-markdown')}>新建 Markdown 文档</button><button type="button" disabled={busy || !root} onClick={() => action('create-course')}>新建课件</button><button type="button" disabled={busy || !root} onClick={() => action('create-text')}>新建文本文档</button><button type="button" disabled={busy || !root} onClick={() => action('mkdir')}>新建文件夹</button>
     <button type="button" disabled={busy || !single} onClick={() => action('rename')}>重命名</button><button type="button" disabled={busy || !selected.length} onClick={() => copy('copy')}>复制</button><button type="button" disabled={busy || !selected.length} onClick={() => copy('move')}>剪切</button><button type="button" disabled={busy || !clipboard?.ids.length} onClick={paste}>粘贴</button>
     <button type="button" disabled={busy || !selected.length} onClick={() => action('copy')}>复制到…</button><button type="button" disabled={busy || !selected.length} onClick={() => action('move')}>移动到…</button><button type="button" disabled={busy || !selected.length} onClick={() => action('trash')}>移到回收站</button>
     <button type="button" disabled={!selected.length} onClick={() => { void copyPath().catch(reason => setError(message(reason))) }}>复制路径</button><button type="button" disabled={busy || !single} onClick={() => { if (single && root) void run({ type: 'reveal', ...common(), entryId: single.entryId }) }}>在系统中定位</button>
@@ -217,9 +325,9 @@ export function WorkspaceFilesTree({ directory, files, refreshVersion = 0, onFil
       <details ref={createMenu} className="workspace-files-create-menu">
         <summary aria-label="新建文件或文件夹">新建</summary>
         <div className="workspace-files-create-options">
-          <button type="button" disabled={busy || !root} onClick={() => action('create-markdown')}>新建文档</button>
+          <button type="button" disabled={busy || !root} onClick={() => action('create-markdown')}>新建 Markdown 文档</button>
           <button type="button" disabled={busy || !root} onClick={() => action('create-course')}>新建课件</button>
-          <button type="button" disabled={busy || !root} onClick={() => action('create-text')}>新建文本文件</button>
+          <button type="button" disabled={busy || !root} onClick={() => action('create-text')}>新建文本文档</button>
           <button type="button" disabled={busy || !root} onClick={() => action('mkdir')}>新建文件夹</button>
         </div>
       </details>
@@ -233,7 +341,7 @@ export function WorkspaceFilesTree({ directory, files, refreshVersion = 0, onFil
     </div>
     {menu && <><div className="workspace-menu-backdrop" onClick={() => setMenu(undefined)} /><div className="workspace-context-menu" role="menu" aria-label="文件菜单" style={{ left: Math.max(0, menu.x), top: Math.max(0, menu.y) }} onKeyDown={event => { if (event.key === 'Escape') { event.stopPropagation(); setMenu(undefined) } }}>{actions(true)}</div></>}
     {dialog && <section ref={dialogRef} className="workspace-file-dialog" role="dialog" aria-modal="true" aria-label="文件操作" onKeyDown={event => { event.stopPropagation(); if (event.key === 'Escape' && !busy) { event.preventDefault(); close() } else if (event.key === 'Tab') { const controls = [...(dialogRef.current?.querySelectorAll<HTMLElement>('input:not(:disabled), select:not(:disabled), button:not(:disabled)') ?? [])]; const first = controls[0], last = controls.at(-1); if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus() } else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus() } } else if (event.key === 'Enter' && event.target instanceof HTMLInputElement && !event.nativeEvent.isComposing && event.nativeEvent.keyCode !== 229 && !busy && !retry && (dialog === 'rename' || dialog === 'mkdir' || dialog.startsWith('create-')) && name.trim()) { event.preventDefault(); submit() } }}>
-      {(dialog === 'rename' || dialog === 'mkdir' || dialog.startsWith('create-')) && <label>名称<input autoFocus aria-label="文件名称" value={name} onChange={event => setName(event.target.value)} /></label>}
+      {(dialog === 'rename' || dialog === 'mkdir' || dialog.startsWith('create-')) && <label>名称<input autoFocus aria-label="文件名称" value={name} onChange={event => setName(event.target.value)} onFocus={event => { if (dialog !== 'rename') { const [start, end] = getStemSelectionRange(event.currentTarget.value); event.currentTarget.setSelectionRange(start, end) } }} /></label>}
       {(dialog === 'copy' || dialog === 'move') && <><label>目标文件夹<select aria-label="目标文件夹" value={destination} onChange={event => { void browse(event.target.value).catch(reason => setError(message(reason))) }}>{destinations.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label><p>选择文件夹后可继续进入其子目录。</p></>}
       {results?.items.some(item => item.error?.code === 'same-name-conflict') && single && (dialog === 'copy' || dialog === 'move') && <button type="button" disabled={busy} onClick={() => action('rename')}>先重命名当前文件</button>}
       {retry ? <><p>未完成的文档引用本地附件。连同资源复制到目标目录，源素材会保留。已完成项不会重复操作。</p><button type="button" disabled={busy} onClick={() => { if (retry.type === 'move' || retry.type === 'copy') void run({ ...retry, operationId: crypto.randomUUID(), resourcePolicy: 'copy' }) }}>连同资源继续</button></> : <button type="button" disabled={busy || ((dialog === 'rename' || dialog === 'mkdir' || dialog.startsWith('create-')) && !name.trim())} onClick={submit}>确认</button>}
