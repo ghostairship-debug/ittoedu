@@ -23,7 +23,7 @@ afterEach(async () => {
   for (const server of servers.splice(0)) await new Promise<void>(resolve => { server.closeAllConnections(); server.close(() => resolve()) })
   for (const root of roots.splice(0)) {
     if (!path.resolve(root).startsWith(path.resolve(os.tmpdir()) + path.sep)) throw new Error('Unsafe fixture root')
-    await fs.rm(root, { recursive: true, force: true })
+    await fs.rm(root, { recursive: true, force: true, maxRetries: 8, retryDelay: 25 })
   }
 })
 const sha256 = (bytes: Uint8Array | string) => createHash('sha256').update(bytes).digest('hex')
@@ -149,7 +149,7 @@ it('S08-T03 extracts selected text and scanned PDF pages without hiding page gap
   const body = JSON.parse(bodies[0]!) as { messages: { role: string; content: unknown }[] }
   const content = body.messages.at(-1)?.content as { type: string; text?: string; image_url?: { url: string } }[]
   expect(content.map(part => part.type)).toEqual(['text', 'image_url', 'image_url'])
-  expect(content[0]?.text).toBe('Readable second page')
+  expect(content[0]?.text).toBe(`附件名称：${JSON.stringify('text.pdf')}\n附件正文开始\nReadable second page\n附件正文结束`)
   expect(bodies[0]).not.toContain('Readable first page')
   expect(run.initialPayload?.explicitAttachments).toHaveLength(3)
   expect(run.initialPayload?.explicitAttachments.map(item => item.provenance.locator?.page)).toEqual([2, 2, 1])

@@ -383,7 +383,11 @@ describe('G20 canonical model execution loop', () => {
     old.runId = crashRun; old.status = 'running'; old.requests.push({ requestId: 'unknown-request', state: 'sending' })
     old.tools = [{ callId: 'crash-call', providerCallId: 'p-call', requestId: 'before-crash', call, state: 'executing' }]
     await h.runs.save(old)
-    vi.spyOn(fs, 'rename').mockRejectedValueOnce(new Error('checkpoint rename interrupted'))
+    const canonicalRename = fs.rename.bind(fs); let interrupted = false
+    vi.spyOn(fs, 'rename').mockImplementation(async (from, to) => {
+      if (!interrupted && String(to).startsWith(path.join(h.directory, 'runs'))) { interrupted = true; throw new Error('checkpoint rename interrupted') }
+      return canonicalRename(from, to)
+    })
     await expect(h.runs.save({ ...old, version: old.version + 1 })).rejects.toThrow('checkpoint rename interrupted')
     expect((await h.runs.read(crashRun))?.version).toBe(old.version)
     const restored = new DocumentRegistry({ drivers: [h.driver], persistence: h.journal, createId: randomUUID, bindingKey: binding => binding.path })

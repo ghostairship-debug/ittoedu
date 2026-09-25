@@ -57,9 +57,11 @@ it('S07-T01 delivers three same-status increments per built-in and external call
   rerender(<ExecutionTimeline projection={completed} />)
   const updated = screen.getAllByRole('article', { name: '工具执行' })
   expect(updated).toHaveLength(2)
-  expect(within(updated[0]!).getByText('最终快照')).toBeInTheDocument()
-  expect(within(updated[0]!).queryByText('第一段第二段第三段')).toBeNull()
-  expect(within(updated[1]!).getByText('第一段第二段第三段')).toBeInTheDocument()
+  const builtinCard = updated.find(card => within(card).queryByText('外部 MCP · 仅显示实际工具事实') === null)!
+  const externalCard = updated.find(card => within(card).queryByText('外部 MCP · 仅显示实际工具事实') !== null)!
+  expect(within(builtinCard).getByText('最终快照')).toBeInTheDocument()
+  expect(within(builtinCard).queryByText('第一段第二段第三段')).toBeNull()
+  expect(within(externalCard).getByText('第一段第二段第三段')).toBeInTheDocument()
 })
 
 it('S07-T04 shows only supplied parent-child facts, replaces a final snapshot, and does not invent tokens', async () => {

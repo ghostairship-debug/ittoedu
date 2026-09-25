@@ -19,7 +19,7 @@ afterEach(async () => { cleanup(); vi.restoreAllMocks(); for (const close of cle
 const deferred = () => { let resolve!: () => void; const promise = new Promise<void>(done => { resolve = done }); return { promise, resolve } }
 async function fixture() {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'g20-s06-replay-'))
-  cleanups.push(() => rm(directory, { recursive: true, force: true }))
+  cleanups.push(() => rm(directory, { recursive: true, force: true, maxRetries: 8, retryDelay: 25 }))
   const host = new DocumentHostService(path.join(directory, 'documents'))
   const edits = new EditSessionService(host.registry, host.tools)
   const eventsDirectory = path.join(directory, 'events')
