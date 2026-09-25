@@ -280,6 +280,9 @@ describe('Flow media block field and asset replacement commands', () => {
     })
     useEditorStore.setState({ runFlowAuthoringIntent: deleteThroughConcurrentWrite })
     render(createElement(PropertiesTab, { onReplaceImage: () => undefined }))
+    await useEditorStore.getState().drainCourseDocument()
+    const documentId = useEditorStore.getState().courseDocument.documentId!
+    const formalBefore = host.registry.get(documentId).read()
 
     fireEvent.click(screen.getByTestId('flow-delete-media-block'))
 
@@ -292,6 +295,12 @@ describe('Flow media block field and asset replacement commands', () => {
     expect(useEditorStore.getState().errorMessage).toBe(
       COURSE_AUTHORING_TARGET_REJECTION_REASONS['revision-conflict'],
     )
+    // The newer content stands in for a commit that arrived from another actor; the stale delete submits nothing.
+    await useEditorStore.getState().drainCourseDocument()
+    const formalAfter = host.registry.get(documentId).read()
+    expect(formalAfter.undoDepth).toBe(formalBefore.undoDepth)
+    expect(formalAfter.revision).toBe(formalBefore.revision)
+    expect(formalAfter.model.kind === 'course-v9' && mediaBlock(formalAfter.model.project, 'media-image')).toBeTruthy()
   })
 
   it('edits and persists video fields through Properties and its caption through the shared body owner', async () => {
