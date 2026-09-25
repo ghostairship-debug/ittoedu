@@ -1,3 +1,5 @@
+import { AuthoringToolFailure } from '../../../core/tools/AuthoringToolFailure'
+export { AuthoringToolFailure } from '../../../core/tools/AuthoringToolFailure'
 import { checkAuthoringOperationConditions, type AuthoringOperationCondition } from '../../../shared/authoringOperationConditions'
 import type { z } from 'zod'
 import {
@@ -26,26 +28,14 @@ function schemaDiagnostics(issues: readonly z.ZodIssue[], code: string, prefix: 
   })
 }
 
-function diagnosticMessage(diagnostic: Diagnostic): string {
-  if (!diagnostic.path.length) return diagnostic.message
-  const path = diagnostic.path.reduce<string>((result, segment) => {
-    const key = String(segment)
-    return result + (/^[A-Za-z_$][\w$]*$/.test(key) ? `.${key}` : `[${JSON.stringify(segment)}]`)
-  }, '$')
-  return `${path}: ${diagnostic.message}`
-}
-
-export class AuthoringToolFailure extends Error {
-  constructor(readonly diagnostics: Diagnostic[], readonly behaviorEvidence?: AuthoringToolReceiptV1['behaviorEvidence']) { super(diagnostics.map(diagnosticMessage).join('\n')) }
-}
-
 /** The existing Surface transaction adapter owns commit and its single history. */
 export interface AuthoringToolCommitPort {
   readonly signal?: AbortSignal
   readDocument(): CourseProjectDocument
   readResources?(): HistoryResourceState
   validateDestination(destination: AuthoringToolDestinationV1): Diagnostic | null
-  commit(step: EditorTransactionStep): boolean
+  beforeExecute?(): Promise<void>
+  commit(step: EditorTransactionStep): boolean | Promise<boolean>
 }
 
 export interface AuthoringToolDefinition<T> {
@@ -77,6 +67,7 @@ export async function executeAuthoringTool<T>(
   definition: AuthoringToolDefinition<T>,
   port: AuthoringToolCommitPort,
 ): Promise<AuthoringToolReceiptV1> {
+  await port.beforeExecute?.()
   const initial = port.readDocument()
   const parsed = authoringToolRequestV1Schema.safeParse(raw)
   const receipt: AuthoringToolReceiptV1 = {
@@ -135,7 +126,7 @@ export async function executeAuthoringTool<T>(
       diagnostics: plan.diagnostics ?? [],
       ...(plan.behaviorEvidence ? { behaviorEvidence: plan.behaviorEvidence } : {}),
     })
-    if (!port.commit(step)) return reject('stale', [staleDiagnostic])
+    if (!(await port.commit(step))) return reject('stale', [staleDiagnostic])
     return success
   } catch (error) {
     if (error instanceof AuthoringToolFailure) return authoringToolReceiptV1Schema.parse({ ...reject('failed', error.diagnostics), ...(error.behaviorEvidence ? { behaviorEvidence: error.behaviorEvidence } : {}) })

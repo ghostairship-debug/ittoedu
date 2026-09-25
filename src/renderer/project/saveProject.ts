@@ -3,7 +3,7 @@ import {
   createCourseProjectArchive,
   createCourseProjectArchiveAsync,
   type CourseProjectArchiveData,
-} from './courseProjectArchive'
+} from '../../core/drivers/codecs/courseProjectArchive'
 
 export interface SavedProjectArchive {
   project: CourseProjectDocument

@@ -5,7 +5,7 @@ import type { EditorStoreKernel } from '../editorStoreKernel'
 import {
   createCourseProjectArchive,
   openCourseProjectArchive,
-} from '../../project/courseProjectArchive'
+} from '../../../core/drivers/codecs/courseProjectArchive'
 import {
   componentPackagesFromArchive,
   componentPackagesToArchiveFiles,
@@ -15,7 +15,7 @@ import {
   freezeCourseAssetSidecar,
   type CourseAssetSidecar,
 } from '../../project/v9AssetAdapter'
-import { createBlankCourseProject } from '../../project/createCourseProject'
+import { createBlankCourseProject } from '../../../core/course/createCourseProject'
 import {
   courseProjectStartsAsFlow,
   createBlankFlowCourseProject,
@@ -72,6 +72,8 @@ export type CourseLifecycleLoadExtra = {
 }
 
 export type CourseLifecyclePorts = {
+  replace(project: CourseProjectDocument, path: string | null, assetFiles: Record<string, Uint8Array>, componentPackages: Record<string, ComponentPackageData>): Promise<void>
+  readCommitted(): import('../../../shared/workbench/document').DocumentSnapshot
   read(): CourseLifecycleOwnedState
   patch(patch: Partial<CourseLifecycleOwnedState>): void
   applySlide(project: CourseProjectDocument, extra: CourseLifecycleLoadExtra): void
@@ -168,7 +170,7 @@ export function createCourseLifecycleSlice(
   captureCourseProjectRecoverySnapshot(): CaptureCourseProjectRecoveryResult
   captureCourseProjectObservationSnapshot(): CaptureCourseProjectRecoveryResult
   acknowledgeCourseProjectSaved(path: string, token: CourseProjectPersistenceToken): boolean
-  reopenArchive(bytes: Uint8Array): boolean
+  reopenArchive(bytes: Uint8Array): Promise<boolean>
   exportArchive(): Uint8Array | null
 } {
   const captureDraftSnapshot = (purpose: 'recovery' | 'observation'): CaptureCourseProjectRecoveryResult => {
@@ -184,41 +186,17 @@ export function createCourseLifecycleSlice(
   }
   return {
     exportArchive(): Uint8Array | null {
-      const document = kernel.tryReadDocument()
-      if (!document) return null
-      const resources = lifecycle.readResources()
-      return exportCourseProjectArchiveBytes({
-        project: document,
-        assetFiles: (resources.courseAssetSidecar ?? emptyCourseAssetSidecar()).files,
-        componentPackages: resources.componentPackages,
-      })
+      const snapshot = lifecycle.readCommitted()
+      if (snapshot.model.kind !== 'course-v9') return null
+      return createCourseProjectArchive({ project: snapshot.model.project, assetFiles: snapshot.model.resources.assets, componentFiles: snapshot.model.resources.components })
     },
-    reopenArchive(bytes: Uint8Array): boolean {
+    async reopenArchive(bytes: Uint8Array): Promise<boolean> {
       try {
         const archive = openCourseProjectArchiveBytes(bytes)
-        const componentPackages = archive.componentPackages
-        const extra: CourseLifecycleLoadExtra = {
-          sidecar: archive.sidecar,
-          componentPackages,
-          dirty: false,
-          statusMessage: `已打开“${archive.project.title}”`,
-          path: lifecycle.read().projectPath,
-        }
-        if (courseProjectStartsAsSpatial(archive.project)) {
-          lifecycle.applySpatial(archive.project, extra)
-          return true
-        }
-        if (courseProjectStartsAsFlow(archive.project)) {
-          lifecycle.applyFlow(archive.project, extra)
-          return true
-        }
-        lifecycle.applySlide(archive.project, extra)
+        await lifecycle.replace(archive.project, null, archive.sidecar.files, archive.componentPackages)
         return true
       } catch (error) {
-        kernel.setFeedback({
-          errorMessage: error instanceof Error ? error.message : '无法打开课程工程',
-          statusMessage: null,
-        })
+        kernel.setFeedback({ errorMessage: error instanceof Error ? error.message : '无法打开课程工程', statusMessage: null })
         return false
       }
     },
@@ -256,72 +234,25 @@ export function createCourseLifecycleSlice(
       return captureDraftSnapshot('observation')
     },
 
-    acknowledgeCourseProjectSaved(path: string, token: CourseProjectPersistenceToken): boolean {
-      const document = kernel.tryReadDocument()
-      const resources = lifecycle.readResources()
-      const allChangesSaved =
-        document === token.document
-        && resources.courseAssetSidecar === token.sidecar
-        && resources.componentPackages === token.componentPackages
-        && !lifecycle.hasDirtyContentDraft()
-      lifecycle.patch({
-        projectPath: path,
-        dirty: !allChangesSaved,
-      })
-      kernel.setFeedback({
-        statusMessage: allChangesSaved
-          ? `已保存到 ${path}`
-          : '已保存启动保存时的版本；之后的修改尚未保存',
-      })
-      return allChangesSaved
+    acknowledgeCourseProjectSaved(path: string, _token: CourseProjectPersistenceToken): boolean {
+      // A renderer caller cannot acknowledge bytes or clear main-owned dirty state.
+      const snapshot = lifecycle.readCommitted()
+      return snapshot.binding.kind === 'file' && snapshot.binding.path === path && !snapshot.dirty && !lifecycle.hasDirtyContentDraft()
     },
     createNewProject() {
       const bundle = withDefaultComponentController(createBlankCourseProject())
-      lifecycle.applySlide(bundle.project, {
-        componentPackages: bundle.componentPackages,
-        sidecar: emptyCourseAssetSidecar(),
-        path: null,
-        dirty: false,
-        statusMessage: '已创建新课件',
-      })
+      void lifecycle.replace(bundle.project, null, {}, bundle.componentPackages).catch(error => kernel.setFeedback({ errorMessage: String(error) }))
     },
     createNewSpatialProject() {
       const bundle = withDefaultComponentController(createBlankSpatialCourseProject())
-      lifecycle.applySpatial(bundle.project, {
-        componentPackages: bundle.componentPackages,
-        sidecar: emptyCourseAssetSidecar(),
-        path: null,
-        dirty: false,
-        statusMessage: '已创建空白无限画布课件',
-      })
+      void lifecycle.replace(bundle.project, null, {}, bundle.componentPackages).catch(error => kernel.setFeedback({ errorMessage: String(error) }))
     },
     createNewFlowProject() {
       const bundle = withDefaultComponentController(createBlankFlowCourseProject())
-      lifecycle.applyFlow(bundle.project, {
-        componentPackages: bundle.componentPackages,
-        sidecar: emptyCourseAssetSidecar(),
-        path: null,
-        dirty: false,
-        statusMessage: '已创建空白流式讲义课件',
-      })
+      void lifecycle.replace(bundle.project, null, {}, bundle.componentPackages).catch(error => kernel.setFeedback({ errorMessage: String(error) }))
     },
     loadCourseProject(project, path, assetFiles = {}, componentPackages = {}) {
-      const extra: CourseLifecycleLoadExtra = {
-        sidecar: freezeCourseAssetSidecar(assetFiles),
-        path,
-        dirty: false,
-        statusMessage: `已打开“${project.title}”`,
-        componentPackages,
-      }
-      if (courseProjectStartsAsSpatial(project)) {
-        lifecycle.applySpatial(project, extra)
-        return
-      }
-      if (courseProjectStartsAsFlow(project)) {
-        lifecycle.applyFlow(project, extra)
-        return
-      }
-      lifecycle.applySlide(project, extra)
+      void lifecycle.replace(project, path, assetFiles, componentPackages).catch(error => kernel.setFeedback({ errorMessage: String(error) }))
     },
     loadProject(_project, _path, _assetFiles = {}, _componentPackages = {}) {
       throw new Error('V8 工程不能打开或导入。请使用 loadCourseProject 与 Course Project V9。')

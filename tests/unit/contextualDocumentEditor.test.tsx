@@ -1,3 +1,4 @@
+import { attachMarkdownRendererHost } from '../helpers/markdownRendererHost'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { createRef } from 'react'
@@ -15,8 +16,9 @@ function fixture() {
   const port: RecoverableDocumentFilePort = {
     openDocument: async () => disk, watchDocument: () => () => {},
     saveDocument: vi.fn(async request => { disk = { ...disk, source: request.source, version: { contentVersion: crypto.randomUUID(), attachments: [] } }; return { status: 'saved' as const, operationId: request.operationId, version: disk.version } }),
-    prepareAiEdit: vi.fn(), applyAiEdit: vi.fn(), revertAiEdit: vi.fn(),
+    
   }
+  attachMarkdownRendererHost(port, ref)
   return { ref, port, read: () => disk }
 }
 describe('file contextual editing in mounted UI', () => {
@@ -32,7 +34,6 @@ describe('file contextual editing in mounted UI', () => {
     expect(command).toHaveBeenCalledWith('换一个词', expect.objectContaining({ ref: f.ref, source: f.read().source, ranges: [{ from: 6, to: 8, before: '加粗' }] }))
     act(() => editor.view.dispatch(editor.view.state.tr.insertText('新词')))
     await waitFor(() => expect(handle.current?.getContextualEditTarget()).toBeNull())
-    expect(f.port.applyAiEdit).not.toHaveBeenCalled()
   })
   it('CodeMirror reports exact source indices without inventing a logical point', async () => {
     const f = fixture(), handle = createRef<LessonDocumentEditorHandle>()
@@ -52,10 +53,10 @@ describe('file contextual editing in mounted UI', () => {
     fireEvent.click(screen.getByRole('button', { name: '当前选区斜体' }))
     await act(async () => { expect(await handle.current!.flush()).toBe(true) })
     expect(f.read().source).toContain('cw:italic=true')
-    act(() => handle.current!.session.undo())
+    await act(async () => { await handle.current!.session.undo() })
     await act(async () => { expect(await handle.current!.flush()).toBe(true) })
     expect(f.read().source).not.toContain('cw:italic=true')
-    act(() => handle.current!.session.redo())
+    await act(async () => { await handle.current!.session.redo() })
     await act(async () => { await handle.current!.flush() })
     ui.unmount()
     render(<LessonDocumentEditor documentRef={f.ref} port={f.port} />)

@@ -1,0 +1,54 @@
+{
+  "schemaVersion": 1,
+  "recordType": "template_not_a_measurement",
+  "group": null,
+  "inputHash": null,
+  "modelAndEffort": null,
+  "repeat": null,
+  "durationsMs": {
+    "design": null,
+    "layout": null,
+    "assets": null,
+    "assembly": null,
+    "qa": null,
+    "firstVisibleDraft": null,
+    "endToEndUsable": null
+  },
+  "usage": {
+    "inputTokens": null,
+    "outputTokens": null,
+    "modelCalls": null,
+    "assetCost": null,
+    "totalCost": null
+  },
+  "quality": {
+    "factualAndTeachingCorrect": null,
+    "visualUseful": null,
+    "keyObjectsEditable": null,
+    "interactionRuns": null,
+    "secondEditStable": null,
+    "manualReworkMinutes": null,
+    "assistanceMinutes": null
+  },
+  "savedVersions": {
+    "mdBefore": null,
+    "mdAfter": null,
+    "htmlUsed": null,
+    "nativeOutput": null
+  },
+  "issues": [],
+  "evidencePaths": [],
+  "mechanical": {
+    "modelCalls": null,
+    "sourceVersion": null,
+    "resourceVersion": null,
+    "compilerVersion": null,
+    "mappedObjects": null,
+    "unsupportedObjects": null,
+    "reusedSlots": null,
+    "generatedSlots": null,
+    "duplicateCommits": null,
+    "sourceConflicts": null,
+    "canonicalImportVerified": null
+  }
+}

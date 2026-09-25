@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it, vi } from 'vitest'
 import { z } from 'zod'
-import { openCourseProjectArchive } from '@/renderer/project/courseProjectArchive'
+import { openCourseProjectArchive } from '../../src/core/drivers/codecs/courseProjectArchive'
 import { openSlideAuthoringSession } from '@/renderer/course/slideAuthoringBackend'
 import { addSlideTextLayer } from '@/renderer/course/v9SlideContentCommands'
 import { AuthoringToolFailure, executeAuthoringTool, type AuthoringToolDefinition } from '@/renderer/authoring/tools/executeAuthoringTool'

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
+import { createBlankCourseProject } from '@/core/course/createCourseProject'
 import { createGenerationCandidateCoordinator } from '@/renderer/authoring/generation/prepareGenerationCandidate'
 import { generationRequestSchema, readGenerationFailure } from '@/shared/generationContract'
 import { dynamicBehaviorObservationSchema } from '@/shared/dynamicBehaviorObservation'

@@ -87,13 +87,16 @@ describe('parser source spans', () => {
 // The logical text joins two quoted lines with one space, but the source between them is
 // "\n> ". A range covering that break would leave the marker behind as visible body text.
 describe('quote soft line breaks', () => {
-  it('refuses a quote selection that spans a soft line break', () => {
-    expect(map('> 引用中文\n> 下一行\n', 0, 0, 8)).toEqual(unmapped)
-    expect(map('> 引用中文\r\n> 下一行\r\n', 0, 0, 8)).toEqual(unmapped)
-    expect(map('> 引用中文\n> 下一行\n', 0, 0, 5)).toEqual(unmapped)
-    expect(map('> 引用中文\r\n> 下一行\r\n', 0, 0, 5)).toEqual(unmapped)
-    expect(map('> 甲乙\n> 丙丁\n> 戊己\n', 0, 0, 6)).toEqual(unmapped)
-    expect(map('> 甲乙\n> 丙丁\n> 戊己\n', 0, 2, 8)).toEqual(unmapped)
+  it('maps quoted lines separately while preserving their structural line breaks and prefixes', () => {
+    for (const source of ['> 引用中文\n> 下一行\n', '> 引用中文\r\n> 下一行\r\n']) {
+      const result = map(source, 0, 0, 8)
+      expect(result.status).toBe('mapped')
+      if (result.status === 'mapped') {
+        expect(result.ranges.map(range => range.before)).toEqual(['引用中文', '下一行'])
+        const changed = result.ranges.reduceRight((text, range) => text.slice(0, range.from) + '新内容' + text.slice(range.to), source)
+        expect(changed).toBe(source.replace('引用中文', '新内容').replace('下一行', '新内容'))
+      }
+    }
   })
   it('still maps a quote selection inside one line, on either side of the break', () => {
     expect(map('> 引用中文\n> 下一行\n', 0, 0, 4)).toEqual({ status: 'mapped', ranges: [{ from: 2, to: 6, before: '引用中文' }] })
@@ -123,17 +126,16 @@ describe('list slot coverage', () => {
     return { list, ids: list.items.map(item => item.id) }
   }
   const point = (blockId: string, itemId: string, offset: number): DocumentPoint => ({ blockId, slot: { kind: 'item', itemId }, offset, affinity: 'after' })
-  it('refuses a selection whose middle item has no source map', () => {
-    // An escaped-bracket link has no locatable text, so the middle item is the one slot
-    // this fixture leaves without units.
+  it('refuses an actually unmapped middle slot and includes an escaped-bracket link when it is mapped', () => {
     const source = '- 甲\n- [\\[1\\]](https://e.com)\n- 丙\n'
-    const { list, ids } = items(source)
-    expect(fixture(source).sourceMap.blocks[0]!.slots.map(slot => slot.key)).toEqual([`item:${ids[0]}`, `item:${ids[2]}`])
-    expect(select(source, point(list.id, ids[0]!, 0), point(list.id, ids[2]!, 1))).toEqual(unmapped)
-    expect(select(source, point(list.id, ids[2]!, 1), point(list.id, ids[0]!, 0))).toEqual(unmapped)
-    expect(select(source, point(list.id, ids[0]!, 0), point(list.id, ids[1]!, 1))).toEqual(unmapped)
-    expect(select(source, point(list.id, ids[0]!, 0), point(list.id, ids[0]!, 1))).toEqual({ status: 'mapped', ranges: [{ from: 2, to: 3, before: '甲' }] })
-    expect(select(source, point(list.id, ids[2]!, 0), point(list.id, ids[2]!, 1))).toEqual({ status: 'mapped', ranges: [{ from: 31, to: 32, before: '丙' }] })
+    const parsed = fixture(source), { list, ids } = items(source)
+    const selection = { kind: 'text' as const, revision: source, anchor: point(list.id, ids[0]!, 0), head: point(list.id, ids[2]!, 1) }
+    const complete = mapDocumentSelectionToSource(source, parsed.sourceMap, selection)
+    expect(complete.status).toBe('mapped')
+    if (complete.status === 'mapped') expect(complete.ranges.map(range => range.before)).toEqual(['甲', '\\[1\\]', '丙'])
+    parsed.sourceMap.blocks[0].slots.splice(1, 1)
+    expect(mapDocumentSelectionToSource(source, parsed.sourceMap, selection)).toEqual(unmapped)
+    expect(mapDocumentSelectionToSource(source, parsed.sourceMap, { ...selection, anchor: selection.head, head: selection.anchor })).toEqual(unmapped)
   })
   it('refuses a tab-indented item instead of guessing its offsets', () => {
     // marked expands a tab after the marker, which shifts every following offset; the item
@@ -175,24 +177,21 @@ describe('links without markup', () => {
     expect(map('见 [见 https://e.com](https://x.com) 好\n', 0, 0, 3)).toEqual({ status: 'mapped', ranges: [{ from: 0, to: 2, before: '见 ' }, { from: 3, to: 4, before: '见' }] })
     expect(map('见 [**粗**](https://e.com) 好\n', 0, 0, 3)).toEqual({ status: 'mapped', ranges: [{ from: 0, to: 2, before: '见 ' }, { from: 5, to: 6, before: '粗' }] })
   })
-  it('refuses a link whose visible text cannot be located inside its own source', () => {
-    expect(map('见 [\\[1\\]](https://e.com) 好\n', 0, 0, 3)).toEqual(unmapped)
+  it('maps escaped link labels from their raw brackets instead of decoded child tokens', () => {
+    expect(map('见 [\\[1\\]](https://e.com) 好\n', 0, 0, 3)).toMatchObject({ status: 'mapped', ranges: [{ before: '见 ' }, { before: '\\[' }] })
   })
 })
 
 // The body used to be trimmed before mapping, which removed the spaces the document model
 // keeps, so these slots had no map at all even though the source carries their text verbatim.
 describe('block bodies keep their own whitespace', () => {
-  it('maps an indented list continuation inside one line and refuses a selection across its break', () => {
-    // 续行按 column 截断后，它的缩进落在两个区间之间的空洞里：只改写行间换行会把缩进留成
-    // 可见正文（新文本以空格结尾时还会变成硬换行），因此跨该换行的选区整体拒绝。
-    expect(map('- 甲\n  乙\n- 丙\n', 0, 0, 3)).toEqual(unmapped)
+  it('maps both lines of an indented list item without granting its newline or indentation', () => {
+    for (const source of ['- 甲\n  乙\n- 丙\n', '- 甲\r\n  乙\r\n- 丙\r\n']) {
+      expect(map(source, 0, 0, 3)).toMatchObject({ status: 'mapped', ranges: [{ before: '甲' }, { before: '乙' }] })
+    }
     expect(map('- 甲\n  乙\n- 丙\n', 0, 2, 3)).toEqual({ status: 'mapped', ranges: [{ from: 6, to: 7, before: '乙' }] })
-    expect(map('- 甲\r\n  乙\r\n- 丙\r\n', 0, 0, 3)).toEqual(unmapped)
-    expect(map('- 甲\n    乙\n', 0, 0, 3)).toEqual(unmapped)
-    expect(map('- 甲\n  \n  乙\n', 0, 0, 3)).toEqual(unmapped)
   })
-  it('a mapped selection never leaves an uncovered hole between its ranges', () => {
+  it('gaps between ranges contain only the retained structural newline and indentation', () => {
     // 与实现无关的不变量：区间之间只要还剩没被覆盖的源文字，改写相邻区间就会把那段文字
     // 留成可见正文。穷举每个选区的目的不是覆盖实现，而是保证拒绝一切不算通过。
     const sources = ['- 甲\n  乙\n- 丙\n', '- 甲\r\n  乙\r\n- 丙\r\n', '- 甲\n    乙\n', '- 甲\n  \n  乙\n',
@@ -204,7 +203,7 @@ describe('block bodies keep their own whitespace', () => {
         if (result.status !== 'mapped') continue
         mapped++
         const holes = result.ranges.slice(1).filter((range, index) => range.from > result.ranges[index]!.to)
-        expect(holes, `${JSON.stringify(source)} ${from}..${to} → ${JSON.stringify(result.ranges)}`).toEqual([])
+        for (const range of holes) { const previous = result.ranges[result.ranges.indexOf(range) - 1]; expect(source.slice(previous.to, range.from)).toMatch(/^[ \t]*(?:\r?\n[ \t]*)+$/) }
       }
     }
     expect(mapped).toBeGreaterThan(0)
@@ -246,11 +245,11 @@ describe('block bodies keep their own whitespace', () => {
 // Known fail-closed gap: marked unescapes "\|" inside a table cell before lexing it, so the
 // cell's code span no longer matches the source; the cell is dropped, never guessed.
 describe('table cell escapes', () => {
-  it('leaves a cell whose code span contains an escaped pipe unmapped', () => {
+  it('maps the exact escaped pipe span in a code cell', () => {
     const source = '| 甲 | 乙 |\n| --- | --- |\n| `a\\|b` | 丙 |\n'
     const table = fixture(source).document.content.blocks[0]!
     if (table.type !== 'table') throw new Error('expected table')
-    expect(map(source, 0, 0, 3, { kind: 'cell', rowId: table.rows[0]!.id, columnId: table.columns[0]!.id })).toEqual(unmapped)
+    expect(map(source, 0, 0, 3, { kind: 'cell', rowId: table.rows[0]!.id, columnId: table.columns[0]!.id })).toMatchObject({ status: 'mapped', ranges: [{ before: 'a\\|b' }] })
     expect(map(source, 0, 0, 1, { kind: 'cell', rowId: table.rows[0]!.id, columnId: table.columns[1]!.id }))
       .toEqual({ status: 'mapped', ranges: [{ from: 35, to: 36, before: '丙' }] })
   })

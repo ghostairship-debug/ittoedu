@@ -5,10 +5,10 @@ import { beginSpatialWorldTableTextEdit } from '@/renderer/authoring/spatialWorl
 import { beforeEach, describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { importComponentPackage } from '@/renderer/components/importComponentPackage'
+import { importComponentPackage } from '../../src/core/drivers/codecs/importComponentPackage'
 import { readLayerTextField, type LayerTextField } from '@/renderer/authoring/layerTextField'
 import { componentPackagesToArchiveFiles } from '@/renderer/components/componentPackageStore'
-import { findFlowBlockRecursive, flowSurfaceIn } from '@/renderer/course/flowDocumentModel'
+import { findFlowBlockRecursive, flowSurfaceIn } from '@/core/tools/flowDocumentModel'
 import { selectFlowEditorBlocks } from '@/renderer/course/flowEditorSlice'
 import {
   beginFlowChartTextEdit,

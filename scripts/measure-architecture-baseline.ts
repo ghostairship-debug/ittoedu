@@ -18,7 +18,7 @@ import {
   createCourseProjectArchive,
   openCourseProjectArchive,
   type CourseProjectArchiveData,
-} from '../src/renderer/project/courseProjectArchive'
+} from '../src/core/drivers/codecs/courseProjectArchive'
 import {
   openSlideAuthoringSession,
   redoSlideAuthoring,

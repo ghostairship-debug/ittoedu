@@ -15,6 +15,7 @@ import {
 import { selectMediaAssetFiles, useEditorStore } from '../../store/editorStore'
 import { mountPublishedCourseTryRun, reportTryRunInteractionDiagnostic } from '../coursePlayerTryRun'
 import { SpatialLocationWorkspace } from './SpatialLocationWorkspace'
+import type { WorkspaceMediaDropHandler } from '../../lessonWorkspace/workspaceMediaDrop'
 
 type SpatialWorkspaceStore = {
   readonly spatialSession: SpatialAuthoringSession | null
@@ -38,7 +39,8 @@ function selectSpatialGraphSelection(state: SpatialWorkspaceStore) { return stat
 function selectRunSpatialAuthoringIntent(state: SpatialWorkspaceStore) { return state.runSpatialAuthoringIntent }
 function selectSetCanvasMode(state: SpatialWorkspaceStore) { return state.setCanvasMode }
 
-export function SpatialWorkspaceConnector() {
+export function SpatialWorkspaceConnector({ onDropWorkspaceMedia }: { onDropWorkspaceMedia?: WorkspaceMediaDropHandler }) {
+  const documentId = useEditorStore((state) => state.courseDocument.documentId)
   const session = useEditorStore(selectSpatialSession)
   const authoringSession = useEditorStore(selectCourseAuthoringSession)
   const canvasMode = useEditorStore(selectCanvasMode)
@@ -138,6 +140,7 @@ export function SpatialWorkspaceConnector() {
 
   return (
     <SpatialLocationWorkspace
+      documentId={documentId}
       view={view}
       showCameraFrames={session.showCameraFrames}
       targets={targets}
@@ -156,6 +159,7 @@ export function SpatialWorkspaceConnector() {
       commands={commands}
       onCanvasModeChange={setCanvasMode}
       onMountTryRun={onMountTryRun}
+      onDropWorkspaceMedia={onDropWorkspaceMedia}
     />
   )
 }

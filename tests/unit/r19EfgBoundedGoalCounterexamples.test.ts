@@ -33,7 +33,7 @@ import type {
   InteractionRule,
 } from '@/shared/contracts/interaction-v1/types'
 import { publishedPresentationSetUnsupportedReason } from '@/shared/publishedInteractionSupport'
-import { openCourseProjectArchive } from '@/renderer/project/courseProjectArchive'
+import { openCourseProjectArchive } from '../../src/core/drivers/codecs/courseProjectArchive'
 import { componentPackagesFromArchive } from '@/renderer/components/componentPackageStore'
 import { buildPublishedCourseV2Payload } from '@/renderer/export/course/buildPublishedCourse'
 import {

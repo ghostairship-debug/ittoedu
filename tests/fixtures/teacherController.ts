@@ -1,12 +1,12 @@
 import { buildPublishedCourseV2Payload as buildPublished } from '../../src/renderer/export/course/buildPublishedCourse'
-import { createBlankCourseProject } from '../../src/renderer/project/createCourseProject'
+import { createBlankCourseProject } from '../../src/core/course/createCourseProject'
 import type { ComponentLayerItem } from '../../src/shared/courseProjectTypes'
 import type { TeacherControllerConfig } from '../../src/shared/teacherControllerConfig'
-import { createTeacherControllerComponentItem } from '../../src/renderer/components/teacherControllerComponent'
+import { createTeacherControllerComponentItem } from '../../src/shared/teacherControllerItem'
 import { createDefaultTeacherControllerPackage } from '../../src/shared/defaultTeacherControllerComponent'
-import { componentPackageMeta } from '../../src/renderer/components/editableComponentPackage'
+import { componentPackageMeta } from '../../src/shared/componentPackageMeta'
 import { withDefaultComponentController } from '../../src/renderer/components/teacherControllerComponent'
-import { createCourseProjectArchive } from '../../src/renderer/project/courseProjectArchive'
+import { createCourseProjectArchive } from '../../src/core/drivers/codecs/courseProjectArchive'
 export const controllerPackage = createDefaultTeacherControllerPackage()
 export const controllerPackages = { [controllerPackage.manifest.id]: controllerPackage }
 export const controllerMetadata = { [controllerPackage.manifest.id]: componentPackageMeta(controllerPackage, { editableCopy: true }) }

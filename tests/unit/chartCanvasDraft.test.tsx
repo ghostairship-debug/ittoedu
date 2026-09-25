@@ -1,6 +1,6 @@
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
-import { createChartNode, createChartLayerItem } from '@/renderer/project/nativeNodeFactories'
+import { createChartNode, createChartLayerItem } from '@/core/tools/nativeNodeFactories'
 import { ChartProperties } from '@/renderer/ui/properties/ChartProperties'
 import type { ChartCanvasTextPort } from '@/renderer/authoring/chartCanvasTextBridge'
 import type { SlideChartCandidateData } from '@/renderer/course/v9ChartCommands'

@@ -4,8 +4,8 @@ import { tmpdir } from 'node:os'
 import { isAbsolute, join, relative, resolve } from 'node:path'
 import { MATERIAL_TEXT, diagramPng, r19LessonMaterials } from '../fixtures/r19LessonMaterials'
 import { BACKGROUND_E2E_ENV } from '../../src/main/windowVisibility'
-import { createBlankCourseProject } from '../../src/renderer/project/createCourseProject'
-import { createCourseProjectArchive } from '../../src/renderer/project/courseProjectArchive'
+import { createBlankCourseProject } from '../../src/core/course/createCourseProject'
+import { createCourseProjectArchive } from '../../src/core/drivers/codecs/courseProjectArchive'
 
 const root = resolve(__dirname, '../..')
 async function choose(app: ElectronApplication, filename: string, save = false) {
@@ -28,21 +28,19 @@ test('r19 lesson: real PDF DOCX PPTX reading, document conflict and reopen, firs
       env: { ...process.env, VITE_DEV_SERVER_URL: '', ELECTRON_DISABLE_SECURITY_WARNINGS: 'true', [BACKGROUND_E2E_ENV]: '1' } })
     const page = await app.firstWindow()
     await expect(page.getByRole('button', { name: '打开工作空间', exact: true }).first()).toBeVisible()
+    const lesson = await page.evaluate(async directory => {
+      const made = await window.desktopAPI!.lesson!({ operation: 'create-lesson', directory, name: '串联电路' })
+      if (!made.lesson) throw new Error('Lesson fixture creation failed')
+      return made.lesson
+    }, workspace)
+    const fixtureCourse = createBlankCourseProject({ title: '串联电路课件', includeDefaultController: false, controls: 'none' })
+    writeFileSync(join(lesson.identity.normalizedDirectory, 'course.h5lesson'), createCourseProjectArchive({ project: fixtureCourse, assetFiles: {}, componentFiles: {} }))
+    writeFileSync(join(lesson.identity.normalizedDirectory, '.courseware', 'lesson.json'), JSON.stringify({ ...lesson.manifest, coursePath: 'course.h5lesson' }))
     await choose(app, workspace)
     await page.getByRole('button', { name: '打开工作空间', exact: true }).first().click()
-    await page.getByRole('button', { name: '新建课件', exact: true }).click()
-    await page.getByRole('textbox', { name: '课件名称' }).fill('串联电路')
-    await page.getByRole('button', { name: '创建课件', exact: true }).click()
-    // 课例段已从导航移除：创建后直接激活课例上下文（创作流程面板出现）
-    await expect(page.locator('.lesson-workflow')).toBeVisible()
-    const lesson = await page.evaluate(async directory => {
-      const result = await window.desktopAPI!.lesson!({ operation: 'list-lessons', directory })
-      return result.lessons![0]!
-    }, workspace)
+    await page.locator('.lesson-directory-tree').getByRole('button', { name: '串联电路', exact: true }).click()
+    await page.locator('.lesson-directory-tree').getByRole('button', { name: 'course.h5lesson', exact: true }).click()
     expect(lesson.manifest.title).toBe('串联电路')
-    const initial = await page.evaluate(async lesson => (await window.desktopAPI!.lesson!({ operation: 'list-conversations', lesson })).conversations!, lesson.identity)
-    expect(initial).toHaveLength(1)
-    expect(initial[0].projectTarget).toBeUndefined()
     const target = { lessonId: lesson.identity.lessonId, rootPath: lesson.identity.normalizedDirectory }
     await page.getByRole('tab', { name: '材料', exact: true }).click()
     for (const fixture of r19LessonMaterials()) {
@@ -97,14 +95,7 @@ test('r19 lesson: real PDF DOCX PPTX reading, document conflict and reopen, firs
     const conflict = await page.evaluate(async ({ ref, version }) => window.desktopAPI!.lessonFiles!.saveDocument({ ref, expectedVersion: version, source: '# 串联电路\n\n迟到修订。\n', operationId: 'e2e-conflict', attachments: [] }), { ref, version: opened.version })
     expect(conflict.status).toBe('conflict')
     expect(readFileSync(join(target.rootPath, ref.relativePath), 'utf8')).toContain('外部修订')
-    const project = createBlankCourseProject({ title: '串联电路课件', includeDefaultController: false, controls: 'none' })
     const firstPath = join(target.rootPath, 'course.h5lesson')
-    writeFileSync(firstPath, createCourseProjectArchive({ project, assetFiles: {}, componentFiles: {} }))
-    // 课例已有工程的重开/另存隔离。从未绑定目录会话出发的 UI 首存见 tests/e2e/r19DirectoryFirstSave.spec.ts。
-    await page.evaluate(async input => {
-      const result = await window.desktopAPI!.lesson!({ operation: 'bind-project', lesson: input.lessonIdentity, conversationId: input.conversationId, projectId: input.projectId, projectPath: input.projectPath, saveAs: false })
-      if (!result.lesson?.manifest.coursePath) throw new Error('bind-project 未写入 coursePath')
-    }, { lessonIdentity: lesson.identity, conversationId: initial[0].conversationId, projectId: project.id, projectPath: firstPath })
     await page.reload()
     const reopened = await page.evaluate(async ({ directory, ref, target }) => ({
       lesson: await window.desktopAPI!.lesson!({ operation: 'open-lesson', directory }),
@@ -117,25 +108,25 @@ test('r19 lesson: real PDF DOCX PPTX reading, document conflict and reopen, firs
     await expect(page.locator('.lesson-workspace-toolbar')).toContainText('workspace')
     await page.locator('.lesson-directory-tree').getByRole('button', { name: '串联电路', exact: true }).click()
     await page.locator('.lesson-directory-tree').getByRole('button', { name: 'course.h5lesson', exact: true }).click()
-    await expect(page.locator('.lesson-workflow')).toBeVisible()
     await page.getByRole('tab', { name: /新建课件|course/ }).click()
     await choose(app, firstPath, true)
     await page.getByRole('button', { name: '保存（Ctrl+S）', exact: true }).click()
-    const conversations = () => page.evaluate(async lesson => (await window.desktopAPI!.lesson!({ operation: 'list-conversations', lesson })).conversations!, lesson.identity)
-    await expect.poll(async () => (await conversations()).find(item => item.conversationId === initial[0].conversationId)?.projectTarget?.normalizedPath).toBe(firstPath.replace(/\\/g, '/').toLowerCase())
-    const first = await conversations()
-    expect(first).toHaveLength(1)
-    expect(readFileSync(firstPath).subarray(0, 2).toString()).toBe('PK')
+    const canonical = await page.evaluate(async filename => window.desktopAPI!.documents!.open(filename), firstPath)
+    expect(canonical.binding).toMatchObject({ kind: 'file', path: firstPath })
+    expect(canonical.dirty).toBe(false)
+    const conversations = () => page.evaluate(async workspace => (await window.desktopAPI!.execution!.workspace(workspace)).conversations.map(value => value.conversationId), workspace)
+    const originalConversations = await conversations()
+    const originalBytes = readFileSync(firstPath)
+    expect(originalBytes.subarray(0, 2).toString()).toBe('PK')
     const secondPath = join(target.rootPath, 'course-copy.h5lesson')
     await choose(app, secondPath, true)
-    // V3.1：内容区编辑器已按轻量编辑瘦身，原「专业」模式切换移除；另存为直接可用
     await page.getByRole('button', { name: '另存为', exact: true }).click()
-    await expect.poll(async () => (await conversations()).length).toBe(2)
-    const after = await conversations(), copy = after.find(item => item.conversationId !== initial[0].conversationId)!
-    expect(copy.sessionIds).toEqual([])
-    expect(copy.projectTarget?.normalizedPath).toBe(secondPath.replace(/\\/g, '/').toLowerCase())
-    expect(copy.projectTarget).not.toEqual(first[0].projectTarget)
-    expect(after.find(item => item.conversationId === initial[0].conversationId)?.projectTarget).toEqual(first[0].projectTarget)
+    await expect.poll(async () => page.evaluate(async id => (await window.desktopAPI!.documents!.read(id)).binding, canonical.documentId)).toMatchObject({ kind: 'file', path: secondPath })
+    const after = await page.evaluate(async id => window.desktopAPI!.documents!.read(id), canonical.documentId)
+    expect(after.documentId).toBe(canonical.documentId)
+    expect(after.undoDepth).toBe(canonical.undoDepth)
+    expect(await conversations()).toEqual(originalConversations)
+    expect(readFileSync(firstPath)).toEqual(originalBytes)
     expect(readFileSync(secondPath).subarray(0, 2).toString()).toBe('PK')
   } catch (error) {
     const page = app?.windows()[0]

@@ -2,7 +2,7 @@ import { MAX_SCENE_INTERACTIONS, type InteractionRule } from '@/shared/interacti
 import {
   buildSlideEditorView,
   type DeepReadonly,
-} from '@/renderer/course/slideEditorView'
+} from '@/core/tools/slideLayerView'
 import type {
   CourseProjectDocument,
   CourseSurfaceType,

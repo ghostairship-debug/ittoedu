@@ -6,9 +6,9 @@ import {
   type ScopedLayerItem,
 } from '../../shared/courseProjectTypes'
 import { sceneNodeToCourseLayerItem } from '../../shared/courseProjectModel'
-import { createTeacherControllerComponentItem } from '../components/teacherControllerComponent'
+import { createTeacherControllerComponentItem } from '../../shared/teacherControllerItem'
 import { createDefaultTeacherControllerPackage } from '../../shared/defaultTeacherControllerComponent'
-import { componentPackageMeta } from '../components/editableComponentPackage'
+import { componentPackageMeta } from '../../shared/componentPackageMeta'
 import {
   createSlideAuthoringBackend,
   openSlideAuthoringSession,

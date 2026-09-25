@@ -4,8 +4,8 @@ import type { CourseProjectDocument, LayerItem, SlideSceneDocument } from '../..
 import type { InteractionActionPayload, InteractionCondition, InteractionRule } from '../../shared/interactionTypes'
 import { SINGLE_CHOICE_STATE_KEY_PREFIX, SINGLE_CHOICE_STATE_KEY_SUFFIX } from '../../shared/singleChoiceRuleFamily'
 import type { EditorTransactionPlan } from '../authoring/editorTransaction'
-import { commitCourseProjectMutation } from '../course/courseProjectMutation'
-import { createExternalComponentNode, createTextNode } from '../project/nativeNodeFactories'
+import { commitCourseProjectMutation } from '../../core/tools/courseProjectMutation'
+import { createExternalComponentNode, createTextNode } from '../../core/tools/nativeNodeFactories'
 import { RECIPE_CATALOG, type RecipeInput } from './recipeCatalog'
 import { createSortComponentPackage } from './sort-component/package'
 

@@ -1,4 +1,5 @@
 import type { ImportedImageAsset } from '../project/assetManager'
+import type { WorkspaceMediaDropHandler } from '../lessonWorkspace/workspaceMediaDrop'
 import { FlowWorkspaceConnector } from './workspaces/FlowWorkspaceConnector'
 import { SlideWorkspaceConnector } from './workspaces/SlideWorkspaceConnector'
 import { SpatialWorkspaceConnector } from './workspaces/SpatialWorkspaceConnector'
@@ -8,12 +9,14 @@ interface WorkspaceProps {
   onAddImage(x?: number, y?: number): void
   onAddVideo(x?: number, y?: number): void
   onSelectImageAsset(): Promise<ImportedImageAsset | null>
+  onDropWorkspaceMedia?: WorkspaceMediaDropHandler
 }
 
 export function Workspace({
   onAddImage,
   onAddVideo,
   onSelectImageAsset,
+  onDropWorkspaceMedia,
 }: WorkspaceProps) {
   const route = useWorkspaceRoute()
   if (route.kind === 'conflict') {
@@ -23,13 +26,14 @@ export function Workspace({
       </main>
     )
   }
-  if (route.kind === 'flow') return <FlowWorkspaceConnector />
-  if (route.kind === 'spatial') return <SpatialWorkspaceConnector />
+  if (route.kind === 'flow') return <FlowWorkspaceConnector onDropWorkspaceMedia={onDropWorkspaceMedia} />
+  if (route.kind === 'spatial') return <SpatialWorkspaceConnector onDropWorkspaceMedia={onDropWorkspaceMedia} />
   return (
     <SlideWorkspaceConnector
       onAddImage={onAddImage}
       onAddVideo={onAddVideo}
       onSelectImageAsset={onSelectImageAsset}
+      onDropWorkspaceMedia={onDropWorkspaceMedia}
     />
   )
 }

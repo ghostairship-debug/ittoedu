@@ -2,7 +2,7 @@ import { buildPublishedFixture as buildPublishedCourseV2Payload } from '../fixtu
 import { describe, expect, it } from 'vitest'
 import { assetMetaSchema, courseProjectAssetMetaSchema } from '../../src/shared/contracts/media-v1/schema'
 import { publishedCourseV2Schema } from '../../src/shared/publishedCourseSchema'
-import { createBlankCourseProject } from '../../src/renderer/project/createCourseProject'
+import { createBlankCourseProject } from '../../src/core/course/createCourseProject'
 
 
 describe('approved project font asset contract', () => {

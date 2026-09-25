@@ -5,7 +5,7 @@ import {
   exclusiveInactiveSurfaces,
   planActivateCourseLocation,
 } from '../../src/renderer/composition/surfaceRouter'
-import { createBlankCourseProject } from '../../src/renderer/project/createCourseProject'
+import { createBlankCourseProject } from '../../src/core/course/createCourseProject'
 import { buildCourseAuthoringSessionForProject } from '../../src/renderer/authoring/courseAuthoringSession'
 
 describe('surfaceRouter', () => {

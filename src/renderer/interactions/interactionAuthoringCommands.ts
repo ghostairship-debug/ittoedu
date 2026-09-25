@@ -1,5 +1,5 @@
 import type { EditorTransactionPlan } from '@/renderer/authoring/editorTransaction'
-import { buildSlideEditorView } from '@/renderer/course/slideEditorView'
+import { buildSlideEditorView } from '@/core/tools/slideLayerView'
 import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
 import { courseStateScalarType } from '@/shared/contracts/course-state/types'
 import type {

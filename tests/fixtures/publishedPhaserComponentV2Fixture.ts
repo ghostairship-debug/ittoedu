@@ -1,5 +1,5 @@
 import { strToU8, zipSync } from 'fflate'
-import { addCourseFlowPage, addCourseScene } from '../../src/renderer/course/courseLocationCommands'
+import { addCourseFlowPage, addCourseScene } from '../../src/core/tools/courseLocations'
 import {
   openSlideAuthoringSession,
   type SlideAuthoringSession,
@@ -12,8 +12,8 @@ import {
   readSlideComponentLayer,
   upsertSlideInteractionRule,
 } from '../../src/renderer/course/v9SlideContentCommands'
-import { importComponentPackage } from '../../src/renderer/components/importComponentPackage'
-import { createBlankCourseProject } from '../../src/renderer/project/createCourseProject'
+import { importComponentPackage } from '../../src/core/drivers/codecs/importComponentPackage'
+import { createBlankCourseProject } from '../../src/core/course/createCourseProject'
 import { courseProjectDocumentSchema } from '../../src/shared/courseProjectSchema'
 import type { ComponentManifest, ComponentPackageData } from '../../src/shared/componentTypes'
 import type { CourseProjectDocument } from '../../src/shared/courseProjectTypes'

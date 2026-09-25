@@ -21,8 +21,8 @@ import {
   FLOW_MEDIA_INLINE_SIZE_REFERENCE,
   resolveFlowMediaLayoutProjection,
 } from '@/shared/flowMediaLayout'
-import { createTextNode } from '@/renderer/project/nativeNodeFactories'
-import { flowSurfaceIn, syncFlowCourseLocations } from '@/renderer/course/flowDocumentModel'
+import { createTextNode } from '@/core/tools/nativeNodeFactories'
+import { flowSurfaceIn, syncFlowCourseLocations } from '../../src/core/tools/flowDocumentModel'
 import {
   buildFlowEditorView,
   captureFlowEditorAuthoringTarget,

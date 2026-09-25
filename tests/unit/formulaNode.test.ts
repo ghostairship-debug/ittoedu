@@ -2,12 +2,12 @@ import { buildPublishedFixture as buildPublishedCourseV2Payload } from '../fixtu
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { collectCourseProjectExportPreflight } from '@/renderer/export/exportPreflight'
-import { createFormulaNode, type FormulaNodeOptions } from '@/renderer/project/nativeNodeFactories'
-import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
+import { createFormulaNode, type FormulaNodeOptions } from '@/core/tools/nativeNodeFactories'
+import { createBlankCourseProject } from '@/core/course/createCourseProject'
 import {
   createCourseProjectArchive,
   openCourseProjectArchive,
-} from '@/renderer/project/courseProjectArchive'
+} from '../../src/core/drivers/codecs/courseProjectArchive'
 import {
   selectActiveScene,
   useEditorStore,

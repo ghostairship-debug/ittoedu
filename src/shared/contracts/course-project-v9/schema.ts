@@ -618,6 +618,8 @@ const surfaceBaseFields = {
   surfaceLayerItems: scopedLayerItemListSchema,
 } as const
 
+export const courseSurfaceTitleSchema = surfaceBaseFields.title
+
 const slideSurfaceSchema = z.object({
   ...surfaceBaseFields,
   type: z.literal('slide'),

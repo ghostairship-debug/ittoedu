@@ -5,7 +5,7 @@ import { UserFacingError } from '@/shared/errors'
 import {
   importComponentPackage,
   parseComponentPackageFiles,
-} from '@/renderer/components/importComponentPackage'
+} from '../../src/core/drivers/codecs/importComponentPackage'
 import {
   ComponentRegistry,
   executeComponentRuntime,

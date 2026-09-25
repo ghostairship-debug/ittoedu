@@ -1,7 +1,7 @@
 import { Blob as NodeBlob } from 'node:buffer'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { readImageDimensions } from '@/renderer/project/assetManager'
-import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
+import { createBlankCourseProject } from '@/core/course/createCourseProject'
 import { createBlankFlowCourseProject } from '@/renderer/project/createFlowCourseProject'
 import { mediaAssetTool } from '@/renderer/authoring/tools/mediaAssetTool'
 import { executeAuthoringTool } from '@/renderer/authoring/tools/executeAuthoringTool'

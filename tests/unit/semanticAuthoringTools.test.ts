@@ -1,9 +1,9 @@
 import { createArchiveFixture as createCourseProjectArchive } from '../fixtures/teacherController'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
+import { createBlankCourseProject } from '@/core/course/createCourseProject'
 import { createBlankFlowCourseProject } from '@/renderer/project/createFlowCourseProject'
 import { createBlankSpatialCourseProject } from '@/renderer/project/createSpatialCourseProject'
-import { createTextNode, createImageNode, createShapeNode, createFormulaNode, createTableNode, createChartNode } from '@/renderer/project/nativeNodeFactories'
+import { createTextNode, createImageNode, createShapeNode, createFormulaNode, createTableNode, createChartNode } from '@/core/tools/nativeNodeFactories'
 import { sceneNodeToCourseLayerItem } from '@/shared/courseProjectModel'
 import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
 import type { CourseProjectDocument, LayerItem } from '@/shared/courseProjectTypes'
@@ -11,7 +11,7 @@ import type { AuthoringToolDestinationV1, AuthoringToolTargetWireV1 } from '@/sh
 import { courseAuthoringScopeFromLocation, makeLayerItemAuthoringAddress } from '@/renderer/authoring/courseAuthoringScope'
 import { locateCourseLayer } from '@/renderer/course/effectiveLayerCommands'
 import { projectEffectiveLayers } from '@/renderer/course/effectiveLayerProjection'
-import { makeFlowBlockAuthoringAddress } from '@/renderer/course/flowDocumentModel'
+import { makeFlowBlockAuthoringAddress } from '@/core/tools/flowDocumentModel'
 import { nativeAuthoringTool, nativeAuthoringToolInputSchema } from '@/renderer/authoring/tools/nativeAuthoringTool'
 import { flowAuthoringTool } from '@/renderer/authoring/tools/flowAuthoringTool'
 import { componentConfigureTool } from '@/renderer/authoring/tools/componentConfigureTool'
@@ -22,8 +22,8 @@ import { createGenerationCandidateCoordinator } from '@/renderer/authoring/gener
 import { generationRequestSchema, generationCandidateSchema, generationShortCandidateSchema, expandGenerationShortCandidate, generationMediaApplyWireInputSchema, describeGenerationSemanticTools, type GenerationCandidate } from '@/shared/generationContract'
 import { captureGenerationFixture as captureGenerationSnapshot } from '../fixtures/generationSnapshot'
 import { readFileSync } from 'node:fs'
-import { openCourseProjectArchive } from '@/renderer/project/courseProjectArchive'
-import { parseComponentPackageFiles } from '@/renderer/components/importComponentPackage'
+import { openCourseProjectArchive } from '../../src/core/drivers/codecs/courseProjectArchive'
+import { parseComponentPackageFiles } from '../../src/core/drivers/codecs/importComponentPackage'
 import { buildPublishedFixture as buildPublishedCourseV2Payload } from '../fixtures/teacherController'
 import { materializeCourseSlideLayerItems } from '@/shared/courseLayerComposition'
 import type { HistoryResourceState } from '@/renderer/store/courseResourceState'
@@ -224,7 +224,7 @@ describe('B1 media application expands one intention into one existing transacti
     const f = fixture(project, target(project, 'shape'))
     f.candidate.steps.push({ id: 'position', tool: 'native.content', carrier: 'native', destination: { kind: 'created-item', stepId: 'apply', index: 0 }, input: { operation: 'properties', properties: { frame: { x: 123 } } } })
     const prepared = await f.coordinator.prepare(f.request, f.candidate)
-    expect(f.coordinator.apply(prepared.previewId).status).toBe('committed')
+    expect((await f.coordinator.apply(prepared.previewId)).status).toBe('committed')
     const surface = f.test.read().document.surfaces[0]!
     if (surface.type !== 'slide') throw new Error('slide')
     expect(surface.scenes[0]!.layerItems).toContainEqual(expect.objectContaining({ frame: expect.objectContaining({ x: 123 }), content: expect.objectContaining({ nativeType: 'image' }) }))
@@ -257,7 +257,7 @@ describe('B1 media application expands one intention into one existing transacti
     shape.opacity = .6; shape.visible = false; add(project, shape); add(project, text('sibling'))
     const f = fixture(project, target(project, shape.layerItemId)), preview = await f.coordinator.prepare(f.request, f.candidate)
     expect(f.test.commits).toHaveLength(0); expect(f.test.read().document).toEqual(project)
-    expect(f.coordinator.apply(preview.previewId).status).toBe('committed'); expect(f.test.commits).toHaveLength(1)
+    expect((await f.coordinator.apply(preview.previewId)).status).toBe('committed'); expect(f.test.commits).toHaveLength(1)
     expect(locateCourseLayer(f.test.read().document, 'shape')).toBeNull()
     const created = preview.plannedEffects.find(effect => effect.operation === 'created' && effect.ownerKey === target(project, shape.layerItemId).ownerKey)!
     expect(locateCourseLayer(f.test.read().document, created.id)?.item).toMatchObject({ frame: shape.frame, rotation: 27, opacity: .6, order: shape.order, visible: false, content: { nativeType: 'image', data: { fit: 'contain' } } })
@@ -277,7 +277,7 @@ describe('B1 media application expands one intention into one existing transacti
     surface.scenes[0]!.presentation = { initialStateId: 'a', states: [{ id: 'a', name: '讲解', layerItemOverrides: { image: { rotation: 35, nativeData: { cornerRadius: 20 } } } }] }
     const f = fixture(project, target(project, 'image', 'a'), { assetFiles: { shared: bytes }, componentPackages: {} })
     const preview = await f.coordinator.prepare(f.request, f.candidate)
-    expect(f.coordinator.apply(preview.previewId).status).toBe('committed')
+    expect((await f.coordinator.apply(preview.previewId)).status).toBe('committed')
     expect(locateCourseLayer(f.test.read().document, 'image')!.item).toEqual(image)
     const current = projectEffectiveLayers({ project: f.test.read().document, locationId: project.startLocationId, stateId: 'a' }).unifiedRows.find(row => row.id === 'image')!.item
     expect(current).toMatchObject({ layerItemId: 'image', rotation: 35, content: { data: { crop: image.content.data.crop, fit: 'cover', flipX: true, cornerRadius: 20 } } })
@@ -301,7 +301,7 @@ describe('B1 media application expands one intention into one existing transacti
         : { operation, image: { assetId: { $result: { stepId: 'import', kind: 'asset-id', index: 0 } } } } },
     ] })
     const preview = await f.coordinator.prepare(f.request, f.candidate)
-    expect(f.coordinator.apply(preview.previewId).status).toBe('committed'); expect(f.test.commits).toHaveLength(1)
+    expect((await f.coordinator.apply(preview.previewId)).status).toBe('committed'); expect(f.test.commits).toHaveLength(1)
     expect(locateCourseLayer(f.test.read().document, 'image')?.item).toMatchObject({ layerItemId: 'image', frame: image.frame })
     const rejected = fixture(project, target(project, 'image'), { assetFiles: { old: bytes }, componentPackages: {} })
     rejected.candidate.steps = [...f.candidate.steps, { ...f.candidate.steps[0]!, id: 'idle' }]
@@ -315,7 +315,7 @@ describe('B1 media application expands one intention into one existing transacti
     const block = { id: 'image', type: 'media' as const, assetId: 'shared', mediaKind: 'image' as const, layout: 'wide' as const, wrap: 'left' as const, caption: { inlines: [{ type: 'text' as const, text: '保留说明' }] }, altText: '保留替代文字' }
     surface.blocks.push({ id: 'section', type: 'section', title: { inlines: [{ type: 'text', text: '图片段落' }] }, collapsedByDefault: false, blocks: [block] })
     const f = fixture(project, target(project, 'image'), { assetFiles: { shared: bytes }, componentPackages: {} }), preview = await f.coordinator.prepare(f.request, f.candidate)
-    expect(f.coordinator.apply(preview.previewId).status).toBe('committed')
+    expect((await f.coordinator.apply(preview.previewId)).status).toBe('committed')
     const after = f.test.read().document.surfaces[0]!
     if (after.type !== 'flow' || after.blocks.at(-1)?.type !== 'section') throw new Error('section')
     const next = after.blocks.at(-1)!; if (next.type !== 'section') throw new Error('section')
@@ -330,7 +330,7 @@ describe('B1 media application expands one intention into one existing transacti
     const componentPackages = Object.fromEntries(Object.values(opened.componentFiles).map(files => { const pkg = parseComponentPackageFiles(files); return [pkg.manifest.id, pkg] }))
     const f = fixture(project, target(project, 'slide-intro-callout', 'slide-state-base'), { assetFiles: opened.assetFiles, componentPackages })
     const preview = await f.coordinator.prepare(f.request, f.candidate)
-    expect(f.coordinator.apply(preview.previewId).status).toBe('committed'); expect(f.test.commits).toHaveLength(1)
+    expect((await f.coordinator.apply(preview.previewId)).status).toBe('committed'); expect(f.test.commits).toHaveLength(1)
     const afterSurface = f.test.read().document.surfaces[0]!; if (afterSurface.type !== 'slide') throw new Error('slide')
     const scene = afterSurface.scenes.find(scene => scene.id === 'slide-scene-intro')!
     const image = scene.layerItems.find(item => !beforeScene.layerItems.some(old => old.layerItemId === item.layerItemId))!
@@ -373,7 +373,7 @@ describe('B1 media application expands one intention into one existing transacti
     surface.scenes[0]!.presentation = { initialStateId: 'a', states: [{ id: 'a', name: '当前', layerItemOverrides: { shape: { rotation: 25, opacity: .4 } } }, { id: 'b', name: '保留', layerItemOverrides: {} }] }
     surface.scenes[0]!.interactions.push({ id: 'click', enabled: true, trigger: { type: 'node.click', nodeId: 'shape' }, conditions: [{ type: 'presentation.in', stateIds: ['a', 'b'] }], actions: [{ id: 'show', delayMs: 0, start: 'after-previous', action: { type: 'node.exit', nodeId: 'shape', durationMs: 0, effect: 'none', easing: 'linear' } }] })
     const f = fixture(project, target(project, 'shape', 'a')), preview = await f.coordinator.prepare(f.request, f.candidate)
-    expect(f.coordinator.apply(preview.previewId).status).toBe('committed')
+    expect((await f.coordinator.apply(preview.previewId)).status).toBe('committed')
     const current = f.test.read().document.surfaces[0]!; if (current.type !== 'slide') throw new Error('slide')
     const scene = current.scenes[0]!, created = scene.layerItems.find(item => item.layerItemId !== 'shape')!
     expect(created).toMatchObject({ rotation: 25, opacity: .4, visible: false })
@@ -389,7 +389,7 @@ describe('B1 media application expands one intention into one existing transacti
     const destination = f.request.destinations.find(entry => entry.kind === 'create' && entry.scope.owner === 'scene')!
     f.candidate.steps[0] = { ...f.candidate.steps[0]!, destination, input: { kind: 'image', source: { assetId: 'existing' }, fit: 'cover' } }
     const preview = await f.coordinator.prepare(f.request, f.candidate)
-    expect(f.coordinator.apply(preview.previewId).status).toBe('committed')
+    expect((await f.coordinator.apply(preview.previewId)).status).toBe('committed')
     expect(preview.plannedEffects).toHaveLength(1)
     expect(locateCourseLayer(f.test.read().document, preview.plannedEffects[0]!.id)?.item).toMatchObject({ content: { nativeType: 'image', data: { fit: 'cover' } } })
     const g = fixture(project, target(project, 'target'), { assetFiles: { existing: bytes }, componentPackages: {} })
@@ -403,7 +403,7 @@ describe('B1 media application expands one intention into one existing transacti
     g.candidate.requestId = g.request.requestId
     g.candidate.steps[0] = { ...g.candidate.steps[0]!, destination: background, input: { kind: 'image', source, placement: 'background' } }
     const backgroundPreview = await g.coordinator.prepare(g.request, g.candidate)
-    expect(g.coordinator.apply(backgroundPreview.previewId).status).toBe('committed')
+    expect((await g.coordinator.apply(backgroundPreview.previewId)).status).toBe('committed')
     const updated = g.test.read().document.surfaces[0]!
     expect(updated.type === 'slide' && updated.scenes[0]).toMatchObject({ backgroundMode: 'own', backgroundAssetId: expect.any(String), layerItems: surface.scenes[0]!.layerItems })
   })
@@ -424,7 +424,7 @@ describe('B1 media application expands one intention into one existing transacti
       }
       if (mode === 'dangling') {
         const prepared = await f.coordinator.prepare(f.request, f.candidate)
-        expect(f.coordinator.apply(prepared.previewId).status).toBe('committed')
+        expect((await f.coordinator.apply(prepared.previewId)).status).toBe('committed')
         expect(f.test.commits).toHaveLength(1); continue
       }
       await expect(f.coordinator.prepare(f.request, f.candidate)).rejects.toThrow()
@@ -544,7 +544,7 @@ describe('Runtime fallback candidate keeps the imported image and same Runtime i
   it('resolves an imported asset-id into source and fallback with one reversible resource commit', async () => {
     const f = fixture(), preview = await f.coordinator.prepare(f.request, f.candidate)
     expect(f.test.commits).toHaveLength(0); expect(f.test.read()).toEqual({ document: f.project, resources: f.resources })
-    const result = f.coordinator.apply(preview.previewId)
+    const result = (await f.coordinator.apply(preview.previewId))
     expect(result.status).toBe('committed'); expect(f.test.commits).toHaveLength(1)
     const updated = locateCourseLayer(f.test.read().document, f.runtime.layerItemId)!.item
     if (updated.kind !== 'runtime') throw new Error('Runtime identity was lost')
@@ -567,7 +567,7 @@ describe('Runtime fallback candidate keeps the imported image and same Runtime i
       if (mode === 'admission') vi.mocked(admitDynamicCandidate).mockRejectedValueOnce(new Error('Actual fallback admission rejected'))
       if (mode === 'late') {
         const prepared = await f.coordinator.prepare(f.request, f.candidate)
-        f.coordinator.discard(); expect(f.coordinator.apply(prepared.previewId).status).toBe('stale')
+        f.coordinator.discard(); expect((await f.coordinator.apply(prepared.previewId)).status).toBe('stale')
       } else await expect(f.coordinator.prepare(f.request, f.candidate)).rejects.toThrow()
       expect(f.test.commits).toHaveLength(0)
       expect(f.test.read()).toEqual({ document: f.project, resources: f.resources })
@@ -583,7 +583,7 @@ describe('Runtime fallback candidate keeps the imported image and same Runtime i
     }
     if (mode === 'unused-import') {
       const prepared = await f.coordinator.prepare(f.request, f.candidate)
-      expect(f.coordinator.apply(prepared.previewId).status).toBe('committed'); expect(f.test.commits).toHaveLength(1); return
+      expect((await f.coordinator.apply(prepared.previewId)).status).toBe('committed'); expect(f.test.commits).toHaveLength(1); return
     }
     await expect(f.coordinator.prepare(f.request, f.candidate)).rejects.toThrow()
     expect(f.test.commits).toHaveLength(0)
@@ -608,7 +608,7 @@ describe('Replacement candidate keeps create and delete in one existing history 
   it('privately creates, replaces and commits once, then undoes/redoes both', async () => {
     const f = fixture(), preview = await f.coordinator.prepare(f.request, f.candidate)
     expect(f.test.commits).toHaveLength(0); expect(f.test.read().document).toEqual(f.project)
-    expect(f.coordinator.apply(preview.previewId).status).toBe('committed'); expect(f.test.commits).toHaveLength(1)
+    expect((await f.coordinator.apply(preview.previewId)).status).toBe('committed'); expect(f.test.commits).toHaveLength(1)
     expect(locateCourseLayer(f.test.read().document, 'old')).toBeNull()
     expect(applyEditorTransactionStep(f.test.read(), f.test.commits[0]!, 'inverse').document).toEqual(f.project)
   })
@@ -619,7 +619,7 @@ describe('Replacement candidate keeps create and delete in one existing history 
       if (mode === 'dangling') {
         f.candidate.steps.pop()
         const prepared = await f.coordinator.prepare(f.request, f.candidate)
-        expect(f.coordinator.apply(prepared.previewId).status).toBe('committed'); expect(f.test.commits).toHaveLength(1); continue
+        expect((await f.coordinator.apply(prepared.previewId)).status).toBe('committed'); expect(f.test.commits).toHaveLength(1); continue
       }
       if (mode === 'failed-final') f.candidate.steps[1]!.input = { replacementItemId: { $result: { stepId: 'new', kind: 'item-id', index: 4 } } }
       await expect(f.coordinator.prepare(f.request, f.candidate)).rejects.toThrow()
@@ -638,7 +638,7 @@ describe('Replacement candidate keeps create and delete in one existing history 
     f.candidate.steps[1]!.input = { operation: 'insert', template: { nativeType: 'image', assetId: { $result: { stepId: 'asset', kind: 'asset-id', index: 0 } } } }
     const preview = await f.coordinator.prepare(f.request, f.candidate)
     expect(f.test.commits).toHaveLength(0); expect(Object.keys(f.test.read().resources.assetFiles)).toHaveLength(0)
-    expect(f.coordinator.apply(preview.previewId).status).toBe('committed'); expect(f.test.commits).toHaveLength(1)
+    expect((await f.coordinator.apply(preview.previewId)).status).toBe('committed'); expect(f.test.commits).toHaveLength(1)
     expect(Object.keys(f.test.read().resources.assetFiles)).toHaveLength(1)
     const created = f.test.commits[0]!.nextDocument.surfaces[0]!
     if (created.type !== 'slide') throw new Error('Expected Slide')
@@ -664,7 +664,7 @@ describe('Replacement candidate keeps create and delete in one existing history 
     ] }
     const coordinator = createGenerationCandidateCoordinator({ ...test.port, readWorkspace: () => workspace, readSessionGeneration: () => 1 })
     const preview = await coordinator.prepare(request, candidate); expect(test.commits).toHaveLength(0)
-    expect(coordinator.apply(preview.previewId).status).toBe('committed'); expect(test.commits).toHaveLength(1)
+    expect((await coordinator.apply(preview.previewId)).status).toBe('committed'); expect(test.commits).toHaveLength(1)
     const current = test.read().document.surfaces[0]!; if (current.type !== 'flow') throw new Error('Expected Flow')
     const section = current.blocks.find(block => block.id === 'section')!; if (section.type !== 'section') throw new Error('Expected section')
     expect(section.blocks).toHaveLength(1); expect(section.blocks[0]?.type).toBe('component'); expect(section.blocks[0]?.id).not.toBe('nested')
@@ -731,7 +731,7 @@ it('QP01 composes narrow edit and styled insert in one reversible transaction on
     { id: 'insert', tool: 'native.content', carrier: 'native', destination: create, input: { operation: 'insert', template: { nativeType: 'shape', shapeType: 'ellipse', width: 120, height: 120, style: { fillColor: '#ffff00' }, placement: { kind: 'center', anchorItemId: 'square' } } } },
   ] })
   expect(test.commits).toHaveLength(0)
-  expect(coordinator.apply(prepared.previewId).status).toBe('committed')
+  expect((await coordinator.apply(prepared.previewId)).status).toBe('committed')
   expect(test.commits).toHaveLength(1)
   const current = projectEffectiveLayers({ project: test.read().document, locationId: document.startLocationId, stateId: 'a' }).unifiedRows
   expect(current.find(row => row.id === 'square')!.item).toMatchObject({ content: { data: { style: { fillColor: '#00ff00' } } } })

@@ -12,7 +12,7 @@ import {
   findFlowBlockRecursive,
   flowSurfaceIn,
   makeFlowBlockAuthoringAddress,
-} from './flowDocumentModel'
+} from '../../core/tools/flowDocumentModel'
 import type { EditorTransactionStep } from '../authoring/editorTransaction'
 import {
   authoringLegacyHistoryEntryCount,

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { createSessionToken } from '@/renderer/authoring/courseAuthoringSession'
-import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
+import { createBlankCourseProject } from '@/core/course/createCourseProject'
 import {
   RUNTIME_INSPECTOR_AUTHORING_FIELDS,
   selectRuntimeInspectorAuthoringView,

@@ -9,7 +9,7 @@ import {
 } from '@/renderer/interactions/interactionTemplates'
 import {
   openCourseProjectArchive,
-} from '@/renderer/project/courseProjectArchive'
+} from '../../src/core/drivers/codecs/courseProjectArchive'
 import {
   selectActiveCourseProjectDocument,
   selectMediaAssetFiles,

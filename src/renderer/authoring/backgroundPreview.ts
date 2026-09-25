@@ -6,7 +6,7 @@ import type { FlowEditorSelection } from '../course/flowEditorSlice'
 import { produce } from 'immer'
 import { chartNativeContentObjectSchema } from '../../shared/contracts/native-v1'
 import { mergeCourseNativeData } from '../../shared/courseProjectSchema'
-import { findFlowBlockRecursive } from '../course/flowDocumentModel'
+import { findFlowBlockRecursive } from '../../core/tools/flowDocumentModel'
 
 export interface BackgroundPreviewTarget {
   readonly projectId: string

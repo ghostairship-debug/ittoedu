@@ -3,7 +3,7 @@ import { inspectProjectFont } from '../../shared/fonts/projectFontFile'
 import type { CourseProjectDocument } from '../../shared/courseProjectTypes'
 import type { EditorTransactionPlan } from '../authoring/editorTransaction'
 import { applyCourseAssetImports } from '../project/v9AssetAdapter'
-import { commitCourseProjectMutation } from './courseProjectMutation'
+import { commitCourseProjectMutation } from '../../core/tools/courseProjectMutation'
 
 export async function planProjectFontImport(document: CourseProjectDocument, filename: string, bytes: Uint8Array): Promise<{ assetId: string; transaction: EditorTransactionPlan }> {
   const format = inspectProjectFont(bytes)

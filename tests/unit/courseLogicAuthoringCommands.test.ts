@@ -3,7 +3,7 @@ import {
   executeCourseLogicAuthoringCommand,
   type CourseLogicAuthoringCommand,
 } from '@/renderer/course/courseLogicAuthoringCommands'
-import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
+import { createBlankCourseProject } from '@/core/course/createCourseProject'
 import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
 import type { CourseProjectDocument } from '@/shared/courseProjectTypes'
 

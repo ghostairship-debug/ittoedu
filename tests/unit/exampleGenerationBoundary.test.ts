@@ -27,11 +27,11 @@ import {
   INTERACTIVE_LESSON_TRACKED_OUTPUT_PATHS,
   parseInteractiveLessonGenerationMode,
 } from '../../scripts/build-interactive-lesson'
-import { openCourseProjectArchive } from '../../src/renderer/project/courseProjectArchive'
+import { openCourseProjectArchive } from '../../src/core/drivers/codecs/courseProjectArchive'
 import {
   parseRenderHostBenchmarkGenerationMode,
 } from '../../scripts/build-render-host-benchmark'
-import { importComponentPackage } from '../../src/renderer/components/importComponentPackage'
+import { importComponentPackage } from '../../src/core/drivers/codecs/importComponentPackage'
 
 const controllerPackage = createDefaultTeacherControllerPackage()
 

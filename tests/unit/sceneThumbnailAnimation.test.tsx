@@ -2,7 +2,7 @@ import { cleanup, render, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ComponentLayerItem } from '../../src/shared/courseProjectTypes'
 import { SceneThumbnail } from '../../src/renderer/ui/SceneThumbnail'
-import { createBlankCourseProject } from '../../src/renderer/project/createCourseProject'
+import { createBlankCourseProject } from '../../src/core/course/createCourseProject'
 import { useEditorStore } from '../../src/renderer/store/editorStore'
 
 beforeEach(() => {

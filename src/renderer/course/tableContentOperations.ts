@@ -1,4 +1,4 @@
-import { reorderTableItems } from './tableStructure'
+import { reorderTableItems } from '../../core/tools/tableStructure'
 import { tableCellSpan, tableMergeIssues, tableMergeRegionSchema, type TableMergeRegion } from '../../shared/tableMerge'
 import { nanoid } from 'nanoid'
 import { tableNativeContentObjectSchema } from '../../shared/contracts/native-v1'

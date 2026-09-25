@@ -88,7 +88,7 @@ function createHarness(): Harness {
     importAssetsAtTarget: vi.fn(() => ({ ok: true })),
     placeImageNodes: vi.fn(() => []),
     placeVideoNodes: vi.fn(() => []),
-    importSounds: vi.fn(),
+    importSounds: vi.fn(() => []),
     commitCandidateMedia: vi.fn(),
     selectImage: vi.fn(async () => null),
     selectImages: vi.fn(async () => ({

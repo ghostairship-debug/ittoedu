@@ -20,7 +20,7 @@ import {
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ShapeType } from '../../shared/contracts/native-v1'
 import { renderShapeCanvas } from '../../shared/canvasShapeRenderer'
-import { createShapeNode } from '../project/nativeNodeFactories'
+import { createShapeNode } from '../../core/tools/nativeNodeFactories'
 import { useEditorStore, selectMediaAssets, selectAudioSettings, selectEditingScope } from '../store/editorStore'
 import type { EditingScope } from '../store/slices/editorShellSlice'
 import { MediaTab } from './MediaTab'

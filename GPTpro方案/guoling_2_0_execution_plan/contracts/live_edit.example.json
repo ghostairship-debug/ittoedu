@@ -1,0 +1,25 @@
+{
+  "design_example_only": true,
+  "model_call": {
+    "name": "text.replace",
+    "target": "selection_1",
+    "input": {
+      "content": "新的正文内容"
+    }
+  },
+  "host_generated_fields": [
+    "operationId",
+    "docId",
+    "sessionEpoch",
+    "readSet",
+    "grantId",
+    "historyGroup"
+  ],
+  "result_example": {
+    "status": "applied",
+    "operationId": "host-op-1",
+    "revision": 8,
+    "persistence": "recoverable"
+  },
+  "meaning": "Applied is not file-saved; host injects authority metadata."
+}

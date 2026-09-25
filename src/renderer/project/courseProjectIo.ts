@@ -6,7 +6,7 @@ import {
   openCourseProjectArchiveAsync,
   type CourseProjectArchiveData,
   type CreateCourseProjectArchiveOptions,
-} from './courseProjectArchive'
+} from '../../core/drivers/codecs/courseProjectArchive'
 
 /**
  * Default product open: only Course Project V9 loads. Other integer versions

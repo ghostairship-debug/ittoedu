@@ -1,6 +1,6 @@
 import { nanoid } from 'nanoid'
 import type { CourseProjectDocument, SlideSceneDocument } from '../../../shared/courseProjectTypes'
-import { commitCourseProjectMutation } from '../../course/courseProjectMutation'
+import { commitCourseProjectMutation } from '../../../core/tools/courseProjectMutation'
 import { createEditorTransactionStep } from '../editorTransaction'
 import type { ProductivityContext, ProductivityApplyResult } from './index'
 import { isSingleChoiceStateKey, SINGLE_CHOICE_STATE_KEY_PREFIX, SINGLE_CHOICE_STATE_KEY_SUFFIX } from '../../../shared/singleChoiceRuleFamily'

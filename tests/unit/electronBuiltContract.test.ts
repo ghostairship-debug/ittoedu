@@ -4,7 +4,7 @@ import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import { expect, it } from 'vitest'
 
-it('loads the emitted Electron task contracts and local-agent service in a fresh CommonJS process', async () => {
+it('loads the emitted canonical document, executor and external MCP modules in a fresh CommonJS process', async () => {
   const root = path.resolve(__dirname, '../..'), outputRoot = path.join(root, 'output')
   await fs.mkdir(outputRoot, { recursive: true })
   const output = await fs.mkdtemp(path.join(outputRoot, 'electron-contract-smoke-'))
@@ -13,14 +13,15 @@ it('loads the emitted Electron task contracts and local-agent service in a fresh
     // output as well, so a late import cannot pass tests and crash Electron.
     execFileSync(process.execPath, [path.join(root, 'node_modules/typescript/bin/tsc'),
       '-p', 'tsconfig.electron.json', '--outDir', output], { cwd: root, windowsHide: true, encoding: 'utf8' })
-    const result = execFileSync(process.execPath, ['-e', `
+    const result = execFileSync(process.execPath, ['-e', String.raw`
       const path = require('node:path'), assert = require('node:assert/strict');
-      const contract = require(path.join(process.argv[1], 'shared/localAgentTaskContract.js'));
-      assert.ok(contract.aiTaskSchema && contract.localAgentRecordV2Schema && contract.localAgentEventV2Schema);
-      assert.equal(contract.aiTaskConfigurationRunSchema.parse({ runId: require('node:crypto').randomUUID(),
-        requested: { model: 'gpt-6-astra', effort: 'medium' },
-        confirmed: { model: 'gpt-6-astra', resolvedModel: 'gpt-6-astra', effort: 'medium' } }).confirmed.effort, 'medium');
-      assert.equal(typeof require(path.join(process.argv[1], 'main/localAgent/harness.js')).LocalAgentHarness, 'function');
+      assert.equal(typeof require(path.join(process.argv[1], 'core/documents/DocumentRegistry.js')).DocumentRegistry, 'function');
+      const driver = require(path.join(process.argv[1], 'core/drivers/MarkdownDriver.js')).createMarkdownDriver();
+      const model = driver.load(new TextEncoder().encode('# 正式正文\r\n'));
+      assert.equal(model.kind, 'markdown');
+      assert.equal(new TextDecoder().decode(driver.serialize(model)), '# 正式正文\r\n');
+      assert.equal(typeof require(path.join(process.argv[1], 'main/workbench/execution/ExecutionEngine.js')).ExecutionEngine, 'function');
+      assert.equal(typeof require(path.join(process.argv[1], 'main/workbench/external/McpDocumentServer.js')).McpDocumentServer, 'function');
       process.stdout.write('electron-contracts-loaded');
     `, output], { cwd: root, windowsHide: true, encoding: 'utf8' })
     expect(result).toBe('electron-contracts-loaded')

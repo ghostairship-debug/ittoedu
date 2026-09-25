@@ -1,7 +1,7 @@
 import type { AuthoringToolDestinationV1, AuthoringToolTargetWireV1 } from '../../../shared/authoringToolContract'
 import type { CourseProjectDocument } from '../../../shared/courseProjectTypes'
 import { type GenerationSelectionAction } from '../../../shared/generationContract'
-import { findFlowBlockRecursive } from '../../course/flowDocumentModel'
+import { findFlowBlockRecursive } from '../../../core/tools/flowDocumentModel'
 import { locateCourseLayer } from '../../course/effectiveLayerCommands'
 import { projectEffectiveLayers } from '../../course/effectiveLayerProjection'
 

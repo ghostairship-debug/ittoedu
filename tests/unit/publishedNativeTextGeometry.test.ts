@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { paintPublishedNativeText } from '../../src/player/surfaces/publishedNativeText'
-import { createTextNode } from '../../src/renderer/project/nativeNodeFactories'
+import { createTextNode } from '../../src/core/tools/nativeNodeFactories'
 import { analyzeTextNodeLayout, layoutHorizontalTextNode, renderTextNodeCanvas } from '../../src/shared/textLayout'
 
 afterEach(() => vi.restoreAllMocks())

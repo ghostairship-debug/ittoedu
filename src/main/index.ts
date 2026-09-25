@@ -3,12 +3,12 @@ import { configureApplicationStorage } from './applicationIdentity'
 import { AppState } from './appState'
 import { createMainWindow } from './createWindow'
 import { registerIpcHandlers, unregisterIpcHandlers } from './ipc'
+import { disposeNativeTextMeasurement } from './workbench/documentHost'
 import {
   installEditorProtocol,
   registerPrivilegedSchemes,
 } from './protocols'
 import { diagnosticLog } from './diagnosticLog'
-import { closeLocalAgents, localAgentsRunning } from './localAgent/service'
 import {
   BACKGROUND_E2E_CHROMIUM_SWITCHES,
   shouldShowApplicationWindows,
@@ -74,6 +74,7 @@ async function openMainWindow(): Promise<void> {
     result.window.once('closed', () => {
       mainWindow = null
       rendererEntryUrl = null
+      disposeNativeTextMeasurement()
     })
   })
 }
@@ -125,16 +126,9 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()
 })
 
-app.on('before-quit', (event) => {
-  if (!localAgentsRunning()) return
-  event.preventDefault()
-  void closeLocalAgents().then(() => { app.quit() }).catch(error => {
-    console.error('停止 CLI 会话失败', error)
-  })
-})
-
 app.on('will-quit', () => {
   removeDiagnosticHandlers?.()
   removeDiagnosticHandlers = null
   unregisterIpcHandlers()
+  disposeNativeTextMeasurement()
 })

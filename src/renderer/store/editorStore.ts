@@ -1,3 +1,7 @@
+import { CourseDocumentBridge, type CourseDocumentConnection } from '../documents/CourseDocumentBridge'
+import { createCoursePlannerBackend, courseViewModel, courseViewPatch } from '../documents/CourseDocumentView'
+import type { DocumentHostAPI } from '../../shared/workbench/desktop'
+import type { DocumentSnapshot } from '../../shared/workbench/document'
 import { commitResourceAwareAuthoringHistory, type ResourceAwareAuthoringHistory } from '../authoring/resourceAwareAuthoringHistory'
 import { create } from 'zustand'
 import { persistCrossSurfaceToolTransaction } from '../composition/courseToolTransaction'
@@ -110,7 +114,7 @@ import {
 import {
   parseComponentPackageFiles,
   validateComponentRuntimeSource,
-} from '../components/importComponentPackage'
+} from '../../core/drivers/codecs/importComponentPackage'
 import {
   componentPackagesFromArchive,
   componentPackagesToArchiveFiles,
@@ -154,24 +158,8 @@ import {
   commitMediaLibraryImportAtTarget,
   createMediaAuthoringActions,
 } from '../media/commitCourseMediaAuthoring'
-import {
-  deleteEffectiveLayerItem,
-  deleteEffectiveLayerItems,
-  duplicateEffectiveLayerItem,
-  findGlobalTeacherController,
-  moveEffectiveLayerOwner,
-  patchEffectiveLayerItem,
-  patchEffectiveLayerItems,
-  reorderEffectiveLayerItems,
-  resolveEffectiveLayerTarget,
-  restoreDefaultTeacherController,
-  setGlobalLayerLocationVisibility,
-  setGlobalLayerVisibleAtLocation,
-  LAYER_REJECT_STALE_REVISION,
-  type EffectiveLayerOwnerDestination,
-  type EffectiveLayerPropertyPatch,
-  type LayerCommandResult,
-} from '../course/effectiveLayerCommands'
+import { deleteEffectiveLayerItem, deleteEffectiveLayerItems, duplicateEffectiveLayerItem, reorderEffectiveLayerItems, resolveEffectiveLayerTarget } from '../../core/tools/layerCommands'
+import { findGlobalTeacherController, moveEffectiveLayerOwner, patchEffectiveLayerItem, patchEffectiveLayerItems, restoreDefaultTeacherController, setGlobalLayerLocationVisibility, setGlobalLayerVisibleAtLocation, LAYER_REJECT_STALE_REVISION, type EffectiveLayerOwnerDestination, type EffectiveLayerPropertyPatch, type LayerCommandResult } from '../course/effectiveLayerCommands'
 import {
   addCourseLibraryMediaToCanvas,
   bindCourseMediaSession,
@@ -244,15 +232,11 @@ import {
   updateSlideSceneInteractionRule,
   type SlideSceneActionId,
 } from '../course/v9SlideActionCommands'
-import type { V9SlideClipboardPayload } from '../course/v9SlideClipboard'
+import type { V9SlideClipboardPayload } from '../../core/tools/slideClipboard'
 import { commitSlideEditorTransactionHistory, commitSlideProjectMutation, selectSlideEditorLayers } from '../course/slideEditorCommands'
-import {
-  allocateCourseLayerOrder,
-  setGlobalLayerScenePlane,
-  sortScopedLayerList,
-  updateCoursePlaybackSettings,
-} from '../course/globalLayerCommands'
-import { createBlankCourseProject } from '../project/createCourseProject'
+import { setGlobalLayerScenePlane } from '../../core/tools/globalLayers'
+import { allocateCourseLayerOrder, sortScopedLayerList, updateCoursePlaybackSettings } from '../course/globalLayerCommands'
+import { createBlankCourseProject } from '../../core/course/createCourseProject'
 import { withDefaultComponentController } from '../components/teacherControllerComponent'
 import {
   courseProjectStartsAsSpatial,
@@ -313,7 +297,7 @@ import {
   moveCourseSlideScene as applyMoveCourseSlideScene,
   reorderCourseSurfaces as applyReorderCourseSurfaces,
   type CourseLocationCommandResult,
-} from '../course/courseLocationCommands'
+} from '../../core/tools/courseLocations'
 import {
   executeCourseLogicAuthoringCommand,
   type CourseLogicAuthoringCommand,
@@ -349,7 +333,7 @@ import {
 } from '../authoring/courseAuthoringSession'
 import { courseProjectDocumentSchema } from '../../shared/courseProjectSchema'
 import { resolveEffectiveGlobalLayerPlanes } from '../../shared/courseLayerComposition'
-import { findFlowBlockRecursive, flowSurfaceIn } from '../course/flowDocumentModel'
+import { findFlowBlockRecursive, flowSurfaceIn } from '../../core/tools/flowDocumentModel'
 import {
   resolveCourseSurfaceBackgroundColor,
   sceneNodeToCourseLayerItem,
@@ -545,6 +529,7 @@ import type { CourseLifecycleOwnedState } from './slices/courseLifecycleSlice'
 export interface EditorRootOwnedState {
   courseAuthoringSession: CourseAuthoringSession | null
   readonly assetFiles: Record<string, Uint8Array>
+  courseDocument: CourseDocumentConnection
 }
 
 export type EditorOwnedState =
@@ -583,6 +568,18 @@ export type EditorState =
   & ReturnType<typeof createDesignProductionActions>
   & ReturnType<typeof createAuthoringToolActions>
   & {
+      connectCourseDocuments(api: DocumentHostAPI): Promise<void>
+      activateCourseDocument(documentId: string): Promise<void>
+      closeCourseDocument(documentId: string): Promise<boolean>
+      createCourseDocument(surface: 'slide' | 'flow' | 'spatial'): Promise<void>
+      openCourseDocument(path: string): Promise<void>
+      drainCourseDocument(): Promise<DocumentSnapshot>
+      drainAllCourseDocuments(): Promise<DocumentSnapshot[]>
+      undoLatestAgentCourseDocument(): Promise<boolean>
+      saveCourseDocument(saveAs?: boolean): Promise<DocumentSnapshot | null>
+      restoreCourseDocument(documentId: string): Promise<void>
+      listCourseRecovery(): Promise<DocumentSnapshot[]>
+      discardCourseRecovery(documentId: string): Promise<void>
       commitSlideCandidateTextRunStyle(input: {
         layerItemId: string
         selectionStart: number
@@ -613,9 +610,11 @@ export function selectHasUnsavedCourseChanges(state: EditorState): boolean {
 }
 
 export const useEditorStore = create<EditorState>((set, get) => {
+  const write = (patch: Record<string, unknown>) => set(courseViewPatch(patch))
+  const documents = new CourseDocumentBridge({ read: get, patch: write })
   const initialBundle = withDefaultComponentController(createBlankCourseProject())
   const initialCourse = initialBundle.project
-  const initialBackend = createSlideAuthoringBackend(openSlideAuthoringSession(initialCourse))
+  const initialBackend = createCoursePlannerBackend(openSlideAuthoringSession(initialCourse))
   const initialSidecar = emptyCourseAssetSidecar()
   const initialSnapshot = initialBackend.getSnapshot()
 
@@ -633,7 +632,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     } = {},
   ) => {
     const snapshot = backend.getSnapshot()
-    set({
+    write({
       ...applyV9BackendState(backend, {
         ...extra,
         currentClipboard: get().slideCandidateClipboard,
@@ -663,7 +662,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
         current.dirty,
         current.courseAuthoringSession,
       ),
-      (patch) => set(patch),
+      (patch) => { documents.submit(patch) },
       result,
       extra,
     )
@@ -687,7 +686,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
         current.dirty,
         current.courseAuthoringSession,
       ),
-      (patch) => set(patch),
+      (patch) => { documents.submit(patch) },
       result,
       extra,
     )
@@ -706,7 +705,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
       resourceHistory?: CourseResourceHistoryContinuation
     } = {},
   ) => {
-    set({
+    write({
       ...applySpatialBackendState(session, extra),
       courseAuthoringSession: buildCourseAuthoringSessionForProject(
         session.history.present,
@@ -733,7 +732,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
         current.dirty,
         current.courseAuthoringSession,
       ),
-      (patch) => set(patch),
+      (patch) => { documents.submit(patch, extra.historyGroup) },
       result,
       extra,
     )
@@ -753,7 +752,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
         hasSlideSession: Boolean(state.slideBackend),
       }
     },
-    setFeedback: (feedback) => set(feedback),
+    setFeedback: (feedback) => write(feedback),
     persistTransaction: (step, statusMessage) => kernel.persistTransaction(step, statusMessage),
     persistSlideCommand: (run, extra) => {
       const backend = selectSlideAuthoringBackend(get())
@@ -786,7 +785,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     readSlideSession: () => selectSlideAuthoringBackend(get())?.getSession() ?? null,
     readSpatialSession: () => get().spatialSession,
     readFlowSession: () => get().flowSession,
-    setFeedback: (feedback) => set(feedback),
+    setFeedback: (feedback) => write(feedback),
     persistTransaction: (step, statusMessage) => kernel.persistTransaction(step, statusMessage),
     persistCandidateResult: (result, extra) => {
       persistCandidateResult(result, extra)
@@ -796,7 +795,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
       persistSpatialResult(result, extra)
     },
     persistFlow: (result, extra) => {
-      persistFlowResult(result, extra)
+      return persistFlowResult(result, extra)
     },
   })
   const componentAuthoringActions = createComponentAuthoringActions({
@@ -817,9 +816,9 @@ export const useEditorStore = create<EditorState>((set, get) => {
     },
     readSpatialSession: () => get().spatialSession,
     readFlowSession: () => get().flowSession,
-    setFeedback: (feedback) => set(feedback),
+    setFeedback: (feedback) => write(feedback),
     setActiveTab: (tab) => {
-      set({ activeTab: tab, errorMessage: null })
+      write({ activeTab: tab, errorMessage: null })
     },
     persistTransaction: (step, statusMessage) => kernel.persistTransaction(step, statusMessage),
     persistProject: (project, extra) => {
@@ -883,7 +882,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
         interactionStateId: selectActivePresentationStateId(state),
       }
     },
-    setFeedback: (feedback) => set(feedback),
+    setFeedback: (feedback) => write(feedback),
     persistTransaction: (step, statusMessage) => kernel.persistTransaction(step, statusMessage),
     persistSlideCommand: (run, extra) => {
       const backend = selectSlideAuthoringBackend(get())
@@ -910,7 +909,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
       resourceHistory?: CourseResourceHistoryContinuation
     } = {},
   ) => {
-    set({
+    write({
       ...applyFlowBackendState(session, extra),
       courseAuthoringSession: buildCourseAuthoringSessionForProject(
         session.history.present,
@@ -924,10 +923,17 @@ export const useEditorStore = create<EditorState>((set, get) => {
   const kernel = createEditorStoreKernel({
     tryReadDocument: () => selectActiveCourseProjectDocument(get()),
     readAuthoringSession: () => get().courseAuthoringSession,
-    writeAuthoringSession: (session) => set({ courseAuthoringSession: session ?? null }),
+    writeAuthoringSession: (session) => write({ courseAuthoringSession: session ?? null }),
     readResources: () => readCourseResourceState(get()),
-    commit: (patch) => set(patch),
+    commit: (patch) => write(patch),
     readDirty: () => get().dirty,
+    waitForCommit: () => documents.acknowledgement(),
+    drain: async () => {
+      const prepared = courseLifecycleSlice.prepareCourseProjectPersistence()
+      if (!prepared.ok) throw new Error(prepared.reason)
+      return documents.drain()
+    },
+    navigateHistory: async direction => { await documents.history(direction) },
     persistDocument: (document, options) => {
       const state = get()
       const active = detectActiveSurface({
@@ -955,13 +961,13 @@ export const useEditorStore = create<EditorState>((set, get) => {
         session: state.courseAuthoringSession, path: state.projectPath,
         readHistory: () => state.spatialSession?.history ?? state.flowSession?.history
           ?? (isSlideAuthoringBackend(state.slideBackend) ? state.slideBackend.getSession().history : null),
-        readResources: () => kernel.readResources(), write: patch => set(patch),
+        readResources: () => kernel.readResources(), write: patch => { documents.submit(patch) },
         preserveBrowsing: policy?.preserveBrowsing,
         reprojectBrowsing: history => {
           if (state.spatialSession) return { spatialSession: { ...state.spatialSession, history } }
           if (state.flowSession) return { flowSession: { ...state.flowSession, history } }
           if (isSlideAuthoringBackend(state.slideBackend)) {
-            const backend = createSlideAuthoringBackend({ ...state.slideBackend.getSession(), history })
+            const backend = createCoursePlannerBackend({ ...state.slideBackend.getSession(), history })
             return { slideBackend: backend, slideCandidateSnapshot: backend.getSnapshot() }
           }
           return null
@@ -998,7 +1004,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
         v9ContentEdit: current.v9ContentEdit,
       }
     },
-    patch: (patch) => set(patch),
+    patch: (patch) => write(patch),
     persist: persistCandidateResult,
     applyBackend: applyV9Backend,
   })
@@ -1014,7 +1020,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     },
     readAuthoringSession: () => get().courseAuthoringSession,
     readAssetSidecar: () => get().courseAssetSidecar,
-    patch: (patch) => set(patch),
+    patch: (patch) => write(patch),
     persist: persistFlowResult,
     applyBackend: applyFlowBackend,
   })
@@ -1030,10 +1036,10 @@ export const useEditorStore = create<EditorState>((set, get) => {
       }
     },
     readAuthoringSession: () => get().courseAuthoringSession,
-    patch: (patch) => set(patch),
+    patch: (patch) => write(patch),
     persist: persistSpatialResult,
     applyBackend: applySpatialBackend,
-    openPropertiesTab: () => set({ activeTab: 'properties' }),
+    openPropertiesTab: () => write({ activeTab: 'properties' }),
   })
   const detectSurface = () => detectActiveSurface({
     spatialLocationId: get().spatialSession?.selection.locationId ?? null,
@@ -1048,13 +1054,16 @@ export const useEditorStore = create<EditorState>((set, get) => {
     ),
   })
   const courseLifecycleSlice = createCourseLifecycleSlice(kernel, {
+    readCommitted: () => documents.readCommitted(),
+    replace: (project, path, assetFiles, componentPackages) => path ? documents.open(path)
+      : documents.create(courseViewModel({ courseAssetSidecar: freezeCourseAssetSidecar(assetFiles), componentPackages }, project), `${project.title}.h5lesson`),
     read: () => {
       const current = get()
       return { projectPath: current.projectPath, dirty: current.dirty }
     },
-    patch: (patch) => set(patch),
+    patch: (patch) => write(patch),
     applySlide: (project, extra) => applyV9Backend(
-      createSlideAuthoringBackend(openSlideAuthoringSession(project)),
+      createCoursePlannerBackend(openSlideAuthoringSession(project)),
       extra,
     ),
     applyFlow: (project, extra) => applyFlowBackend(
@@ -1085,7 +1094,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
         previewBackgroundColor: current.previewBackgroundColor,
       }
     },
-    patch: (patch) => set(patch),
+    patch: (patch) => write(patch),
   })
   const courseStructureSlice = createCourseStructureSlice(kernel, {
     readActiveLocationId: () => selectActiveCourseLocationId(get()),
@@ -1116,7 +1125,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
       },
       persist: persistCandidateResult,
       applyBackend: applyV9Backend,
-      patch: (patch) => set(patch),
+      patch: (patch) => write(patch),
       ...slideAuthoringSlice,
     },
     flow: {
@@ -1131,7 +1140,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
       },
       persist: persistFlowResult,
       applyBackend: applyFlowBackend,
-      patch: (patch) => set(patch),
+      patch: (patch) => write(patch),
       ...flowAuthoringSlice,
     },
     spatial: {
@@ -1147,7 +1156,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
       persist: persistSpatialResult,
       applyBackend: applySpatialBackend,
       runAuthoringIntent: spatialAuthoringSlice.runSpatialAuthoringIntent,
-      patch: (patch) => set(patch),
+      patch: (patch) => write(patch),
       ...spatialAuthoringSlice,
     },
     shell: {
@@ -1163,14 +1172,14 @@ export const useEditorStore = create<EditorState>((set, get) => {
           previewBackgroundColor: current.previewBackgroundColor,
         }
       },
-      patch: (patch) => set(patch),
+      patch: (patch) => write(patch),
     },
     lifecycle: {
       read: () => {
         const current = get()
         return { projectPath: current.projectPath, dirty: current.dirty }
       },
-      patch: (patch) => set(patch),
+      patch: (patch) => write(patch),
       prepareCourseProjectPersistence: () => courseLifecycleSlice.prepareCourseProjectPersistence(),
       captureCourseProjectRecoverySnapshot: () => courseLifecycleSlice.captureCourseProjectRecoverySnapshot(),
       acknowledgeCourseProjectSaved: (path, token) => courseLifecycleSlice.acknowledgeCourseProjectSaved(path, token),
@@ -1275,6 +1284,51 @@ export const useEditorStore = create<EditorState>((set, get) => {
     ...crossSurfaceCommands,
     ...designProductionActions,
     ...authoringToolActions,
+    courseDocument: documents.connection(),
+    connectCourseDocuments: api => documents.connect(api),
+    async activateCourseDocument(id) {
+      try { await documents.activatePrepared(id, () => get().drainCourseDocument()) }
+      catch (error) { write({ errorMessage: error instanceof Error ? error.message : '课件切换失败，当前输入已保留' }); throw error }
+    },
+    async closeCourseDocument(id) {
+      try { await get().drainAllCourseDocuments(); return await documents.close(id) }
+      catch (error) { write({ errorMessage: error instanceof Error ? error.message : '课件未关闭，当前输入已保留' }); return false }
+    },
+    openCourseDocument: path => documents.open(path),
+    restoreCourseDocument: id => documents.restore(id),
+    listCourseRecovery: () => documents.recoverable(),
+    discardCourseRecovery: id => documents.discardRecovery(id),
+    async drainCourseDocument() {
+      const prepared = courseLifecycleSlice.prepareCourseProjectPersistence()
+      if (!prepared.ok) throw new Error(prepared.reason)
+      return documents.drain()
+    },
+    drainAllCourseDocuments: () => documents.drainAll(() => {
+      const prepared = courseLifecycleSlice.prepareCourseProjectPersistence()
+      if (!prepared.ok) throw new Error(prepared.reason)
+    }),
+    async undoLatestAgentCourseDocument() {
+      const target = documents.captureLatestAgentUndoTarget()
+      await get().drainCourseDocument()
+      return documents.undoLatestAgent(target)
+    },
+    async saveCourseDocument(saveAs) {
+      const prepared = courseLifecycleSlice.prepareCourseProjectPersistence()
+      if (!prepared.ok) throw new Error(prepared.reason)
+      return documents.save(saveAs)
+    },
+    async createCourseDocument(surface) {
+      const factory = surface === 'slide' ? createBlankCourseProject : surface === 'flow' ? createBlankFlowCourseProject : createBlankSpatialCourseProject
+      const bundle = withDefaultComponentController(factory())
+      await documents.create(courseViewModel({ courseAssetSidecar: emptyCourseAssetSidecar(), componentPackages: bundle.componentPackages }, bundle.project), `${bundle.project.title}.h5lesson`)
+    },
+    createNewProject() { void get().createCourseDocument('slide').catch(error => write({ errorMessage: String(error) })) },
+    createNewFlowProject() { void get().createCourseDocument('flow').catch(error => write({ errorMessage: String(error) })) },
+    createNewSpatialProject() { void get().createCourseDocument('spatial').catch(error => write({ errorMessage: String(error) })) },
+    loadCourseProject(project, path, assetFiles = {}, componentPackages = {}) {
+      const load = path ? documents.open(path) : documents.create(courseViewModel({ courseAssetSidecar: freezeCourseAssetSidecar(assetFiles), componentPackages }, project), `${project.title}.h5lesson`)
+      void load.catch(error => write({ errorMessage: String(error) }))
+    },
 
   }
 })
@@ -1364,10 +1418,10 @@ function selectActiveSurfaceHistory(state: EditorState): {
 
 /** Toolbar/history UI reads the active Surface owner, never the count-only Store mirror. */
 export const selectCanUndoActiveSurface = (state: EditorState): boolean =>
-  (selectActiveSurfaceHistory(state)?.past.length ?? 0) > 0
+  (state.courseDocument.snapshot?.undoDepth ?? 0) > 0 && !state.courseDocument.error
 
 export const selectCanRedoActiveSurface = (state: EditorState): boolean =>
-  (selectActiveSurfaceHistory(state)?.future.length ?? 0) > 0
+  (state.courseDocument.snapshot?.redoDepth ?? 0) > 0 && !state.courseDocument.error
 
 export const selectActiveCourseProjectDocument = (state: EditorState) =>
   state.spatialSession?.history.present

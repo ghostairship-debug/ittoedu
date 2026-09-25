@@ -1,4 +1,4 @@
-import { syncFlowCourseLocations } from '@/renderer/course/flowDocumentModel'
+import { syncFlowCourseLocations } from '@/core/tools/flowDocumentModel'
 import { createGenerationCandidateCoordinator } from '@/renderer/authoring/generation/prepareGenerationCandidate'
 import { readGenerationFailure, type GenerationCandidate, type GenerationRequest } from '@/shared/generationContract'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -10,7 +10,8 @@ import * as editorSession from '@/renderer/document/editorSession'
 import { useEditorStore } from '@/renderer/store/editorStore'
 import { FlowWorkspace } from '@/renderer/ui/FlowWorkspace'
 import { createBlankFlowCourseProject } from '@/renderer/project/createFlowCourseProject'
-import { flowContextSelectionIntent, resolveFlowContextSelection, flowTextSlot } from '@/renderer/course/flowContextSelection'
+import { flowContextSelectionIntent } from '@/renderer/course/flowContextSelection'
+import { resolveFlowContextSelection, flowTextSlot } from '@/core/tools/flowTextSlot'
 import { executeFlowDelete, executeFlowEditorCommand } from '@/renderer/course/flowEditorCommands'
 import { selectFlowEditorBlocks } from '@/renderer/course/flowEditorSlice'
 import { buildFlowEditorView, captureFlowEditorAuthoringTarget } from '@/renderer/course/flowEditorView'
@@ -19,7 +20,6 @@ import { executeAuthoringTool } from '@/renderer/authoring/tools/executeAuthorin
 import { applyEditorTransactionStep, type EditorTransactionStep } from '@/renderer/authoring/editorTransaction'
 import { projectEffectiveLayers } from '@/renderer/course/effectiveLayerProjection'
 import { captureGenerationFixture } from '../fixtures/generationSnapshot'
-import { validateContextualCourseCommand } from '@/renderer/ui/chat/contextualCourseCommand'
 import type { DocumentSelection, DocumentSlot } from '@/shared/document/ports'
 import type { DocumentBlock } from '@/shared/document/content'
 
@@ -58,7 +58,6 @@ describe('Flow contextual native target', () => {
       const selected = selectFlowEditorBlocks(f.document, f.document.startLocationId, intent.blockIds, intent)
       expect(selected.documentSelection).toEqual(logical)
       expect(resolveFlowContextSelection(f.surface.blocks, f.document.revision, logical)).toEqual({ kind: 'text', blockId: id, textRange: { slot, start: 1, end: 2 } })
-      expect(() => validateContextualCourseCommand({ instruction: '改这里', projectId: f.document.id, sessionToken: f.sessionToken, documentSelection: logical }, selected)).not.toThrow()
       const request = captureGenerationFixture({ document: f.document, sessionToken: f.sessionToken, workspace: { version: 1, projectId: f.document.id, normalizedPath: '/flow.h5lesson' },
         projection: projectEffectiveLayers({ project: f.document, locationId: f.document.startLocationId }), selectedIds: [id], flowSelection: selected, scope: 'selection', instruction: '删除所选文字', purpose: 'local-edit' })
       expect(request.context).toMatchObject({ flowTextEdit: { tool: 'flow.content', destination: { kind: 'update', target: { itemId: id, documentRevision: f.document.revision } }, input: { operation: 'edit', textRange: { slot, start: 1, end: 2 } } } })
@@ -125,7 +124,6 @@ describe('Flow contextual native target', () => {
     expect(() => captureGenerationFixture({ document: f.document, sessionToken: f.sessionToken, workspace: { version: 1, projectId: f.document.id, normalizedPath: '/flow.h5lesson' },
       projection: projectEffectiveLayers({ project: f.document, locationId: f.document.startLocationId }), selectedIds: ['q'], flowSelection: sourceSelection, scope: 'selection', instruction: '改这里', purpose: 'local-edit' })).toThrow('源文选区不支持')
     const selected = selectFlowEditorBlocks(f.document, f.document.startLocationId, ['q'], flowContextSelectionIntent(logical))
-    expect(() => validateContextualCourseCommand({ projectId: f.document.id, sessionToken: f.sessionToken, instruction: '改这里', documentSelection: { ...logical, head: { ...logical.head, offset: 0 } } }, selected)).toThrow()
   })
 })
 
@@ -176,7 +174,7 @@ describe('Flow candidate range enforcement', () => {
       }
       const preview = await h.coordinator.prepare(h.request, h.candidate([good]))
       expect(h.commits).toHaveLength(0)
-      expect(h.coordinator.apply(preview.previewId).status).toBe('committed')
+      expect((await h.coordinator.apply(preview.previewId)).status).toBe('committed')
       expect(h.commits).toHaveLength(1)
       const expected = structuredClone(before.document)
       const surface = expected.surfaces[0]!
@@ -198,7 +196,7 @@ describe('Flow candidate range enforcement', () => {
       const input = id === 't' ? { operation: 'edit', textRange: { slot: { kind: 'cell', rowId: 'r', columnId: 'c' }, start: 0, end: 3 }, content: text('单格') }
         : { operation: 'edit', formula: { latex: 'y', accessibleText: 'y' } }
       const preview = await h.coordinator.prepare(h.request, h.candidate([{ id: 'edit', carrier: 'native', tool: 'flow.content', destination: destination(h.request, id), input: JSON.parse(JSON.stringify(input)) }]))
-      expect(h.coordinator.apply(preview.previewId).status).toBe('committed')
+      expect((await h.coordinator.apply(preview.previewId)).status).toBe('committed')
       const surface = h.read().document.surfaces[0]!
       if (surface.type !== 'flow') throw new Error('flow')
       expect(surface.blocks.filter(block => block.id !== id)).toEqual(f.surface.blocks.filter(block => block.id !== id))
@@ -213,7 +211,7 @@ describe('Flow candidate range enforcement', () => {
     const h = candidateHarness(f, legacy)
     expect((h.request.context as any).flowTextEdit).toBeUndefined()
     const preview = await h.coordinator.prepare(h.request, h.candidate([{ id: 'edit', carrier: 'native', tool: 'flow.content', destination: destination(h.request, 'p'), input: { operation: 'edit', content: text('正常整段') } }]))
-    expect(h.coordinator.apply(preview.previewId).status).toBe('committed')
+    expect((await h.coordinator.apply(preview.previewId)).status).toBe('committed')
     const logical = f.selection('q', { kind: 'field', field: 'citation' })
     if (logical.kind !== 'text') throw new Error('text')
     logical.head.offset = logical.anchor.offset = 2
@@ -232,7 +230,7 @@ describe('Flow candidate range enforcement', () => {
   })
 })
 
-const SOURCE_SELECTION_ISSUE = 'Flow 源文选区暂不支持 AI 局部修改，请切回排版选择内容。'
+const SOURCE_SELECTION_ISSUE = 'Flow 源文选区暂不支持 AI 局部修改，请切回正文选择内容。'
 
 /** The real product shell: props come from the single Store, intents go back through it. */
 function FlowWorkspaceStoreHarness() {
@@ -282,9 +280,16 @@ describe('Flow source selection guard lifetime', () => {
     vi.unstubAllGlobals()
     useEditorStore.getState().createNewProject()
   })
+  // The mode switch lives in the collapsed “正文格式” panel. jsdom has no native
+  // summary activation, so open the panel directly; the switch itself is a real click.
+  function modeButton(name: '源文' | '正文') {
+    const format = document.querySelector('details.flow-document-format') as HTMLDetailsElement | null
+    if (format && !format.open) act(() => { format.open = true })
+    return screen.getByRole('button', { name })
+  }
   function mountAndSelectSourceText() {
     render(createElement(FlowWorkspaceStoreHarness))
-    fireEvent.click(screen.getByRole('button', { name: '源文' }))
+    fireEvent.click(modeButton('源文'))
     const source = EditorView.findFromDOM(screen.getByLabelText('正文源文编辑'))!
     act(() => { source.dispatch({ selection: { anchor: 1, head: 5 } }) })
     return source
@@ -293,7 +298,7 @@ describe('Flow source selection guard lifetime', () => {
     mountAndSelectSourceText()
     expect(useEditorStore.getState().flowSession!.selection).toMatchObject({ focus: 'text', textRange: null, documentSelectionIssue: SOURCE_SELECTION_ISSUE })
     expect(() => liveSelectionRequest()).toThrow(SOURCE_SELECTION_ISSUE)
-    fireEvent.click(screen.getByRole('button', { name: '排版' }))
+    fireEvent.click(modeButton('正文'))
     const returned = useEditorStore.getState().flowSession!.selection
     expect(returned.documentSelectionIssue).toBeUndefined()
     expect(returned).toMatchObject({ focus: 'idle', selectedBlockIds: [], textRange: null })
@@ -309,7 +314,7 @@ describe('Flow source selection guard lifetime', () => {
   it('freezes a fresh precise layout selection made right after returning from source mode', () => {
     const factory = vi.spyOn(editorSession, 'createLayoutEditor')
     mountAndSelectSourceText()
-    fireEvent.click(screen.getByRole('button', { name: '排版' }))
+    fireEvent.click(modeButton('正文'))
     const editor = factory.mock.results.at(-1)!.value as ReturnType<typeof editorSession.createLayoutEditor>
     const doc = editor.view.state.doc
     let from = -1

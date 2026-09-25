@@ -7,7 +7,7 @@ import {
   type FlowBlock,
 } from '@/shared/courseProjectTypes'
 import { sceneNodeToCourseLayerItem } from '@/shared/courseProjectModel'
-import { createTextNode } from '@/renderer/project/nativeNodeFactories'
+import { createTextNode } from '@/core/tools/nativeNodeFactories'
 import {
   applyFlowCommittedText,
   copyFlowEditorBlocks,
@@ -45,7 +45,7 @@ import {
   undoFlowEditorHistory,
   enterFlowTextEditing,
 } from '@/renderer/course/flowEditorSlice'
-import { syncFlowCourseLocations } from '@/renderer/course/flowDocumentModel'
+import { syncFlowCourseLocations } from '../../src/core/tools/flowDocumentModel'
 
 const NOW = '2026-08-17T09:00:00.000Z'
 

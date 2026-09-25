@@ -79,8 +79,8 @@ test('Flow controller popup follows its real viewport after mounted surface resi
   const bundle = await build({
     stdin: { resolveDir: process.cwd(), contents: `
       import { FlowSurfaceHost } from './src/player/surfaces/flow/FlowSurfaceHost';
-      import { createBlankCourseProject } from './src/renderer/project/createCourseProject';
-      import { addCourseFlowPage } from './src/renderer/course/courseLocationCommands';
+      import { createBlankCourseProject } from './src/core/course/createCourseProject';
+      import { addCourseFlowPage } from '../../src/core/tools/courseLocations';
       import { buildPublishedCourseV2Payload } from './src/renderer/export/course/buildPublishedCourse';
       import { createDefaultTeacherControllerPackage } from './src/shared/defaultTeacherControllerComponent';
       window.mountFlow = async () => {

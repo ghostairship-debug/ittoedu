@@ -2,7 +2,7 @@ import { buildPublishedFixture as buildPublishedCourseV2Payload } from '../fixtu
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { PublishedLayerItem } from '@/shared/publishedCourseTypes'
 
-import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
+import { createBlankCourseProject } from '@/core/course/createCourseProject'
 
 const dynamicHosts = vi.hoisted(() => ({
   createPublishedCourseSession: vi.fn(),

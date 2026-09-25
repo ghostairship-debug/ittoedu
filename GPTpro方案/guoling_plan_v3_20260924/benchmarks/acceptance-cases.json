@@ -1,0 +1,251 @@
+{
+  "schemaVersion": 1,
+  "status": "test_specification_not_executed",
+  "cases": [
+    {
+      "id": "H01",
+      "action": "替换HTML标题",
+      "expected": "保存重开及下游使用新标题；MD不改变",
+      "actual": null,
+      "passed": null
+    },
+    {
+      "id": "H02",
+      "action": "拖动与缩放槽",
+      "expected": "当前HTML坐标尺寸保存，装配一致",
+      "actual": null,
+      "passed": null
+    },
+    {
+      "id": "H03",
+      "action": "删除可选槽",
+      "expected": "下游不按旧MD复建",
+      "actual": null,
+      "passed": null
+    },
+    {
+      "id": "H04",
+      "action": "修改槽需求",
+      "expected": "当前短需求优先，MD补充无冲突背景",
+      "actual": null,
+      "passed": null
+    },
+    {
+      "id": "H05",
+      "action": "中文IME",
+      "expected": "组合结束后完整保存，不固化半成品拼音",
+      "actual": null,
+      "passed": null
+    },
+    {
+      "id": "H06",
+      "action": "保存失败",
+      "expected": "保留内存修改，显示未保存，不伪报成功",
+      "actual": null,
+      "passed": null
+    },
+    {
+      "id": "H07",
+      "action": "旧AI候选",
+      "expected": "版本变化后拒绝静默覆盖",
+      "actual": null,
+      "passed": null
+    },
+    {
+      "id": "H08",
+      "action": "编辑器装饰清理",
+      "expected": "静态草稿保存无选框/手柄/临时宿主脚本；完整模块的原业务脚本不被当装饰误删",
+      "actual": null,
+      "passed": null
+    },
+    {
+      "id": "H09",
+      "action": "素材路径",
+      "expected": "重开与移动打包后可访问，不能只剩Blob URL",
+      "actual": null,
+      "passed": null
+    },
+    {
+      "id": "H10",
+      "action": "锁定对象",
+      "expected": "UI和最终写入检查均生效",
+      "actual": null,
+      "passed": null
+    },
+    {
+      "id": "H11",
+      "action": "上游修改",
+      "expected": "不自动反写/覆盖既有下游",
+      "actual": null,
+      "passed": null
+    },
+    {
+      "id": "H12",
+      "action": "原生稿被人工修改",
+      "expected": "重生成产出新候选/副本，不默默覆盖",
+      "actual": null,
+      "passed": null
+    },
+    {
+      "id": "H13",
+      "action": "事实冲突",
+      "expected": "明确报告，既不按旧MD私自覆盖也不固化已知错误",
+      "actual": null,
+      "passed": null
+    },
+    {
+      "id": "H14",
+      "action": "外部文件改变",
+      "expected": "检测冲突，不能仅凭旧mtime覆盖",
+      "actual": null,
+      "passed": null
+    },
+    {
+      "id": "W01",
+      "action": "恶意网页/导航",
+      "expected": "不能获得草稿文件写桥或Node权限",
+      "actual": null,
+      "passed": null
+    },
+    {
+      "id": "W02",
+      "action": "取消打开/切文件",
+      "expected": "旧文档解析不覆盖新Tab",
+      "actual": null,
+      "passed": null
+    },
+    {
+      "id": "O01",
+      "action": "普通Office首次打开",
+      "expected": "从点击测真实可读时间，不只测工具栏",
+      "actual": null,
+      "passed": null
+    },
+    {
+      "id": "O02",
+      "action": "公式缓存/数值",
+      "expected": "不将缺失缓存或旧结果当重新计算",
+      "actual": null,
+      "passed": null
+    },
+    {
+      "id": "O03",
+      "action": "WebOffice保存",
+      "expected": "套件回执与本地磁盘确认分别验证",
+      "actual": null,
+      "passed": null
+    },
+    {
+      "id": "O04",
+      "action": "同文件双写",
+      "expected": "内嵌编辑会话与外部AI文件工具无静默互覆",
+      "actual": null,
+      "passed": null
+    },
+    {
+      "id": "K01",
+      "action": "固定HTML与已备素材机械装配/保留封装",
+      "expected": "已确定的机械段不重复调用LLM；简单映射或完整模块保留关键内容并按实际声明可编辑，首次适配成本另计；语义稳定性仅在实现变更时聚焦验证",
+      "actual": null,
+      "passed": null
+    },
+    {
+      "id": "K02",
+      "action": "实际装配对象/槽标识冲突",
+      "expected": "只检查本次注册身份，明确冲突且不错误写入；不要求任意模块的所有内部DOM补全标识",
+      "actual": null,
+      "passed": null
+    },
+    {
+      "id": "K03",
+      "action": "缺失仍存在的关键槽成果",
+      "expected": "预检阻断完整交付，不丢槽或用占位/后备图冒充成果",
+      "actual": null,
+      "passed": null
+    },
+    {
+      "id": "K04",
+      "action": "节点转换超出子集与完整模块边界",
+      "expected": "不强制简化设计；能由现有Runtime保留的完整区域不套静态CSS白名单；实际不能承载时说明，原件不静默清洗或截图降级",
+      "actual": null,
+      "passed": null
+    },
+    {
+      "id": "K05",
+      "action": "资源同名改变字节",
+      "expected": "版本包含实际依赖内容，旧候选被拒或重新绑定验证，不只比较mtime",
+      "actual": null,
+      "passed": null
+    },
+    {
+      "id": "K06",
+      "action": "源HTML在最终提交附近修改",
+      "expected": "应用内来源校验与目标提交有真实串行边界；冲突保留候选，不发生check/write竞态静默覆盖",
+      "actual": null,
+      "passed": null
+    },
+    {
+      "id": "K07",
+      "action": "停止后迟到与导入重放",
+      "expected": "停止后无新增正式写入，同一operationId最多一次正式应用和一次对应History",
+      "actual": null,
+      "passed": null
+    },
+    {
+      "id": "K08",
+      "action": "明确复用素材/模板",
+      "expected": "符合版本与参数合同的成果无需再生成；含糊匹配不被自动认定正确",
+      "actual": null,
+      "passed": null
+    },
+    {
+      "id": "K09",
+      "action": "当前执行器激活指定Skill",
+      "expected": "实际加载当前一方Skill及必要参考，不依赖用户级自动安装；普通任务不强制教学阶段",
+      "actual": null,
+      "passed": null
+    },
+    {
+      "id": "K10",
+      "action": "拟新增命令未提供",
+      "expected": "报告工具未接入，不伪造调用或写入回执",
+      "actual": null,
+      "passed": null
+    },
+    {
+      "id": "K11",
+      "action": "只读/局部授权调用装配",
+      "expected": "宿主拒绝越权；Skill文本、data属性和模型参数不能扩大权限",
+      "actual": null,
+      "passed": null
+    },
+    {
+      "id": "K12",
+      "action": "内容/交互保留与槽装饰排除",
+      "expected": "原文/译文、人物和时间关系、关键状态/操作不丢失；静态槽待生成说明不进入成品，完整模块真实内容不当占位删除；按声明保留编辑能力，MD不反写",
+      "actual": null,
+      "passed": null
+    },
+    {
+      "id": "K13",
+      "action": "片段背景标识缺失或重复",
+      "expected": "已有明确局部背景可继续；缺少必要背景才补清，不为装饰标识重跑全稿或按旧MD恢复HTML",
+      "actual": null,
+      "passed": null
+    },
+    {
+      "id": "K14",
+      "action": "当前应用的保真与最小修改闭环",
+      "expected": "真实工程经既有构建/准入/import完成；能定位修改一处文案并手改一个已有参数/外框，保存重开和必要导出保留改动及其余关键行为；已有Undo覆盖可复用，触碰边界才复验；仅嵌入运行或离线构建不能代替",
+      "actual": null,
+      "passed": null
+    },
+    {
+      "id": "K15",
+      "action": "第三方Office编辑所有权",
+      "expected": "同文件只有一个活动writer；不把套件内部Undo镜像成第二套逐键History；无法共编时明确接力",
+      "actual": null,
+      "passed": null
+    }
+  ]
+}

@@ -17,7 +17,7 @@ import {
 import { CSS } from '@dnd-kit/utilities'
 import { FileText, Globe2, GripVertical, Layers3, Plus, Trash2 } from 'lucide-react'
 import { useMemo, useState, type ReactNode } from 'react'
-import { COURSE_LAST_LOCATION_REASON } from '../course/courseLocationCommands'
+import { COURSE_LAST_LOCATION_REASON } from '../../core/tools/courseLocations'
 import { deriveCourseEditorLayout, type CourseEditorLayoutResult } from '../course/courseEditorLayout'
 import {
   buildSpatialEditorView,

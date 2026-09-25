@@ -4,10 +4,10 @@ import {
   addCourseFlowPage,
   addCourseScene,
   addCourseSlidePage,
-} from '@/renderer/course/courseLocationCommands'
+} from '@/core/tools/courseLocations'
 
-import { buildSlideEditorView } from '@/renderer/course/slideEditorView'
-import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
+import { buildSlideEditorView } from '@/core/tools/slideLayerView'
+import { createBlankCourseProject } from '@/core/course/createCourseProject'
 import {
   mountPublishedCourseAuthoring,
   mountPublishedCourseTryRun,

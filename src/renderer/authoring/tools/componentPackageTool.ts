@@ -9,8 +9,8 @@ import type { AuthoringToolDefinition } from './executeAuthoringTool'
 import { componentContentSha256 } from '../../../shared/componentContentIntegrity'
 import { editableComponentPackageId, rewriteComponentDefinitionId } from '../../components/editableComponentPackage'
 import { applyHistoryResourceChanges } from '../../store/courseResourceState'
-import { findFlowBlockRecursive, makeFlowBlockAuthoringAddress } from '../../course/flowDocumentModel'
-import { resolveEffectiveLayerTarget } from '../../course/effectiveLayerCommands'
+import { findFlowBlockRecursive, makeFlowBlockAuthoringAddress } from '../../../core/tools/flowDocumentModel'
+import { resolveEffectiveLayerTarget } from '../../../core/tools/layerCommands'
 import type { DynamicBehaviorObservation } from '../../../shared/dynamicBehaviorObservation'
 
 const schema = z.discriminatedUnion('operation', [

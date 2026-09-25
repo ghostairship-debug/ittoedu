@@ -4,8 +4,8 @@ import type { AssetMeta } from '../../shared/contracts/media-v1/types'
 import { componentManifestSchema, embeddedComponentPackageMetaSchema } from '../../shared/contracts/component-v4/schema'
 import type { ComponentPackageData, EmbeddedComponentPackageMeta } from '../../shared/contracts/component-v4/types'
 import { documentResourcesSchema, type DocumentResources } from '../../shared/document/resources'
-import { componentPackageMeta } from '../components/editableComponentPackage'
-import { parseComponentPackageFiles } from '../components/importComponentPackage'
+import { componentPackageMeta } from '../../shared/componentPackageMeta'
+import { parseComponentPackageFiles } from '../../core/drivers/codecs/importComponentPackage'
 
 const bytesSchema = z.array(z.number().int().min(0).max(255))
 const contextSchema = z.object({

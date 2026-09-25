@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
-import { createTextNode } from '@/renderer/project/nativeNodeFactories'
+import { createBlankCourseProject } from '@/core/course/createCourseProject'
+import { createTextNode } from '@/core/tools/nativeNodeFactories'
 import { selectRuntimeSourceAuthoringView } from '@/renderer/runtime/runtimeSourceAuthoringView'
 import {
   selectActiveCourseLocationId,

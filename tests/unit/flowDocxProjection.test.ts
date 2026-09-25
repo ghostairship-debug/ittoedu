@@ -17,7 +17,7 @@ import {
   rotationToDrawingMlDegree,
 } from '@/renderer/export/course/flowDocxProjection'
 import { buildFlowDocx } from '@/renderer/export/course/flowDocx'
-import { createShapeNode } from '@/renderer/project/nativeNodeFactories'
+import { createShapeNode } from '@/core/tools/nativeNodeFactories'
 
 const ASSET_BYTES = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]) // PNG magic bytes
 

@@ -1,38 +1,24 @@
+import { imageReplacementInputSchema as imageEdit, nativeImageReplacementData } from '../../../core/tools/imageApplication'
+import { nativeTemplateSchema as template, nativeShapeStyleSchema as shapeStyle } from '../../../core/tools/nativeInsertionSchema'
 import { z } from 'zod'
 import { clearFlowEditorSelection } from '../../course/flowEditorSlice'
 import { insertFlowSharedText, insertFlowSharedShape, insertFlowSharedMedia, patchFlowOverlayPaperSpace } from '../../course/flowSharedAuthoringAdapters'
 import { nativeElementContentSchema } from '../../../shared/courseProjectSchema'
 import { nativeContentInputSchemaByType } from '../../../shared/contracts/native-v1/schema'
-import { SHAPE_TYPES } from '../../../shared/contracts/native-v1/types'
 import { openSlideAuthoringSession, setSlideEditingScope } from '../../course/slideAuthoringBackend'
 import { addSlideTextLayer, addSlideFormulaLayer, addSlideShapeLayer, addSlideImageLayer, addSlideVideoLayer, addSlideInputLayer } from '../../course/v9SlideContentCommands'
 import { addSlideChartLayer } from '../../course/v9ChartCommands'
 import { addSlideTableLayer } from '../../course/v9TableCommands'
 import { openSpatialAuthoringSession, addSpatialWorldTextLayer, addSpatialWorldFormulaLayer, addSpatialWorldShapeLayer, addSpatialWorldImageLayer, addSpatialWorldVideoLayer, addSpatialWorldChartLayer, addSpatialWorldTableLayer } from '../../course/spatialEditorCommands'
-import { resolveEffectiveLayerTarget, deleteEffectiveLayerItem, patchEffectiveLayerPropertiesAtTarget, listOwnedLayerItems, reorderEffectiveLayerItems } from '../../course/effectiveLayerCommands'
+import { resolveEffectiveLayerTarget, deleteEffectiveLayerItem, listOwnedLayerItems, reorderEffectiveLayerItems } from '../../../core/tools/layerCommands'
+import { patchEffectiveLayerPropertiesAtTarget } from '../../course/effectiveLayerCommands'
 import { makeLayerItemAuthoringAddress } from '../courseAuthoringScope'
 import { insertionIndex, resolveAuthoringToolScope } from './authoringToolScope'
 import { AuthoringToolFailure, type AuthoringToolDefinition } from './executeAuthoringTool'
-import { nativeLayerItemPropertiesInputSchema as layerItemPropertiesInputSchema } from './layerItemPropertiesInput'
+import { nativeLayerItemPropertiesInputSchema as layerItemPropertiesInputSchema } from '../../../core/tools/toolSchemas'
 import { projectEffectiveLayers } from '../../course/effectiveLayerProjection'
-import { locateTextRunReplacements, planTextRunRemap } from '../../../shared/textRuns'
+import { planNativeTextEdit } from '../../../core/tools/nativeText'
 
-const coordinate = z.number().finite()
-const templateBase = { x: coordinate.optional(), y: coordinate.optional(), width: coordinate.positive().optional(), height: coordinate.positive().optional(), label: z.string().optional(), paperSpace: z.enum(['paper', 'viewport']).optional(),
-  placement: z.object({ kind: z.literal('center'), anchorItemId: z.string().min(1) }).strict().optional() }
-const mediaFields = { assetId: z.string().min(1), width: coordinate.positive().optional(), height: coordinate.positive().optional() }
-const shapeStyle = nativeContentInputSchemaByType.shape.shape.style.partial().strict()
-const template = z.discriminatedUnion('nativeType', [
-  z.object({ ...templateBase, nativeType: z.literal('text'), text: z.string().optional(), style: nativeContentInputSchemaByType.text.shape.style.partial().strict().optional() }).strict(),
-  z.object({ ...templateBase, nativeType: z.literal('formula'), ast: nativeContentInputSchemaByType.formula.shape.ast.optional(), accessibleText: z.string().optional(), style: nativeContentInputSchemaByType.formula.shape.style.partial().strict().optional() }).strict(),
-  z.object({ ...templateBase, nativeType: z.literal('shape'), shapeType: z.enum(SHAPE_TYPES), style: shapeStyle.optional() }).strict(),
-  z.object({ ...templateBase, ...mediaFields, nativeType: z.literal('image'), fit: z.enum(['contain', 'cover', 'stretch']).optional() }).strict(),
-  z.object({ ...templateBase, ...mediaFields, nativeType: z.literal('video') }).strict(),
-  z.object({ ...templateBase, nativeType: z.literal('chart'), ...nativeContentInputSchemaByType.chart.options[0].pick({ title: true, categories: true, series: true }).partial().shape, chartType: z.enum(['bar', 'line', 'area', 'pie', 'donut']).optional(), style: nativeContentInputSchemaByType.chart.options[0].shape.style.extend({ holeSize: nativeContentInputSchemaByType.chart.options[2].shape.style.shape.holeSize.optional() }).partial().strict().optional() }).strict(),
-  z.object({ ...templateBase, nativeType: z.literal('table'), ...z.object(nativeContentInputSchemaByType.table.shape).pick({ columns: true, rows: true, headerRowCount: true, merges: true }).partial().shape, style: nativeContentInputSchemaByType.table.shape.style.partial().strict().optional() }).strict(),
-  z.object({ ...templateBase, nativeType: z.literal('input'), answerType: z.enum(['text', 'number']).optional() }).strict(),
-])
-const imageEdit = z.object({ assetId: z.string().min(1), fit: z.enum(['contain', 'cover', 'stretch']).optional() }).strict()
 const formulaEdit = nativeContentInputSchemaByType.formula.pick({ ast: true, accessibleText: true }).extend({
   style: nativeContentInputSchemaByType.formula.shape.style.partial().strict().optional(),
 }).strict()
@@ -212,23 +198,17 @@ export const nativeAuthoringTool: AuthoringToolDefinition<z.infer<typeof nativeA
         if (value.formula || value.image) throw new Error('一次 Native 窄编辑只能修改一种内容类型')
         if (effective?.kind !== 'native' || effective.content.nativeType !== 'text') throw new Error('文字窄编辑只接受 Native 文本；其他字段使用对应内容工具')
         const current = effective.content.data
-        const mapping = value.replacements
-          ? locateTextRunReplacements(current.text, current.runs, value.replacements)
-          : planTextRunRemap(current.text, value.text ?? current.text, current.runs)
+        const mapping = planNativeTextEdit(current, value)
         if (!mapping.ok) throw new AuthoringToolFailure([{
           code: `native-text-${mapping.code}`,
           message: mapping.reason,
           path: ['input', value.replacements ? 'replacements' : 'text'],
         }])
-        const text = mapping.text
-        // Run overrides for explicitly changed whole-text fields must not mask the new style.
-        const runs = mapping.runs.map(run => ({ ...run, style: Object.fromEntries(Object.entries(run.style).filter(([key]) => !value.textStyle || !Object.hasOwn(value.textStyle, key))) })).filter(run => Object.keys(run.style).length > 0)
-        editData = { text, runs, ...(value.textStyle ? { style: value.textStyle } : {}) }
+        editData = mapping.data
       }
       if (value.operation === 'edit' && value.image) {
-        if (value.formula || effective?.kind !== 'native' || effective.content.nativeType !== 'image') throw new Error('图片窄编辑只接受 Native 图片')
-        if (document.assets[value.image.assetId]?.kind !== 'image') throw new Error('图片引用必须指向当前工程中的真实图片资产')
-        editData = { assetId: value.image.assetId, ...(value.image.fit !== undefined ? { fit: value.image.fit, preserveAspectRatio: value.image.fit !== 'stretch' } : {}) }
+        if (value.formula) throw new Error('图片窄编辑只接受 Native 图片')
+        editData = nativeImageReplacementData(document, effective, value.image)
       }
       if (value.operation === 'edit' && value.formula) {
         if (effective?.kind !== 'native' || effective.content.nativeType !== 'formula') throw new Error('公式窄编辑只接受 Native 公式')

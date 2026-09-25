@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { createTableNode } from '@/renderer/project/nativeNodeFactories'
+import { createTableNode } from '@/core/tools/nativeNodeFactories'
 import { buildNativeTableLayout } from '@/shared/nativeTableLayout'
 
 describe('nativeTableLayout buildNativeTableLayout', () => {

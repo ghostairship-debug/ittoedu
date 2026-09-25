@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
+import { createBlankCourseProject } from '@/core/course/createCourseProject'
 import { createObservationImageResourcePreparer } from '@/renderer/authoring/generation/observationImageResources'
 
 function projectWithImage(assetId: string, mimeType: string, byteLength: number) {

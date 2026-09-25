@@ -2,16 +2,15 @@ import { describe, expect, it, vi } from 'vitest'
 import { captureGenerationSnapshot } from '@/renderer/authoring/generation/generationSnapshot'
 import { createGenerationCandidateCoordinator } from '@/renderer/authoring/generation/prepareGenerationCandidate'
 import { applyEditorTransactionStep, type EditorTransactionStep } from '@/renderer/authoring/editorTransaction'
-import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
+import { createBlankCourseProject } from '@/core/course/createCourseProject'
 import { createBlankFlowCourseProject } from '@/renderer/project/createFlowCourseProject'
 import { createBlankSpatialCourseProject } from '@/renderer/project/createSpatialCourseProject'
-import { createShapeNode, createTextNode } from '@/renderer/project/nativeNodeFactories'
-import { createCourseProjectArchive, openCourseProjectArchive } from '@/renderer/project/courseProjectArchive'
+import { createShapeNode, createTextNode } from '@/core/tools/nativeNodeFactories'
+import { createCourseProjectArchive, openCourseProjectArchive } from '../../src/core/drivers/codecs/courseProjectArchive'
 import { sceneNodeToCourseLayerItem } from '@/shared/courseProjectModel'
 import { projectEffectiveLayers } from '@/renderer/course/effectiveLayerProjection'
 import { locateCourseLayer } from '@/renderer/course/effectiveLayerCommands'
-import { findFlowBlockRecursive } from '@/renderer/course/flowDocumentModel'
-import { generationInitialRequestForPrompt } from '@/main/localAgent/profile'
+import { findFlowBlockRecursive } from '@/core/tools/flowDocumentModel'
 import type { CourseProjectDocument, LayerItem } from '@/shared/courseProjectTypes'
 import type { GenerationCandidate, GenerationRequest } from '@/shared/generationContract'
 import type { HistoryResourceState } from '@/renderer/store/courseResourceState'
@@ -77,7 +76,7 @@ function harness(document: CourseProjectDocument) {
   }, async apply(request: GenerationRequest, steps: GenerationCandidate['steps']) {
     const preview = await coordinator.prepare(request, this.candidate(request, steps))
     expect(commits).toHaveLength(0)
-    expect(coordinator.apply(preview.previewId).status).toBe('committed')
+    expect((await coordinator.apply(preview.previewId)).status).toBe('committed')
     expect(commits).toHaveLength(1)
     const undo = applyEditorTransactionStep(state, commits[0]!, 'inverse')
     expect(undo).toEqual(before)
@@ -153,7 +152,6 @@ describe('G1 I03 uses one exact image creation after the selected explanation', 
     const action = request.selectionActions?.find(action => action.operation === 'insert-image-after')
     if (!action || action.operation !== 'insert-image-after') throw new Error('Missing captured insertion')
     expect(request.destinations).toContainEqual(action.destination)
-    expect(generationInitialRequestForPrompt(request).selectionActions).toEqual(request.selectionActions)
     await h.apply(request, [{ id: 'illustration', tool: 'media.apply', carrier: 'native', destination: action.destination, input: { kind: 'image', source: imageSource, preserveResolution: true } }])
     const after = h.read().document, surface = after.surfaces[0]!
     expect(Object.values(h.read().resources.assetFiles)).toEqual([Uint8Array.from(atob(png), c => c.charCodeAt(0))])

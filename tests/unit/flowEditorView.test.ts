@@ -8,9 +8,9 @@ import {
   type FlowBlock,
 } from '@/shared/courseProjectTypes'
 import { sceneNodeToCourseLayerItem } from '@/shared/courseProjectModel'
-import { createTextNode } from '@/renderer/project/nativeNodeFactories'
+import { createTextNode } from '@/core/tools/nativeNodeFactories'
 import { isFlowDocumentBlockId } from '@/renderer/course/effectiveLayerProjection'
-import { syncFlowCourseLocations } from '@/renderer/course/flowDocumentModel'
+import { syncFlowCourseLocations } from '../../src/core/tools/flowDocumentModel'
 import { isFlowZOrderLayerBlock } from '@/renderer/course/flowEditorSlice'
 import {
   assertActiveFlowEditorView,

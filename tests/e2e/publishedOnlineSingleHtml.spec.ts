@@ -4,7 +4,7 @@ import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { expect, test } from '@playwright/test'
 import { buildPublishedCourseStandaloneHtml } from '../../src/renderer/export/course/buildCoursePackages'
-import { createBlankCourseProject } from '../../src/renderer/project/createCourseProject'
+import { createBlankCourseProject } from '../../src/core/course/createCourseProject'
 import { courseProjectDocumentSchema } from '../../src/shared/courseProjectSchema'
 
 const root = resolve(__dirname, '..', '..')

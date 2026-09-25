@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { createChartNode } from '@/renderer/project/nativeNodeFactories'
+import { createChartNode } from '@/core/tools/nativeNodeFactories'
 import { buildNativeChartSvg } from '@/shared/nativeChartSvg'
 import { changeChartType } from '@/renderer/course/chartContentOperations'
 import {

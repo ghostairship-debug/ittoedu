@@ -9,8 +9,8 @@ import {
   collectCourseSlideLocationVisualPreflightItems,
   SLIDE_VISUAL_PREFLIGHT_CODES,
 } from '@/renderer/export/slideVisualPreflight'
-import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
-import { createTextNode } from '@/renderer/project/nativeNodeFactories'
+import { createBlankCourseProject } from '@/core/course/createCourseProject'
+import { createTextNode } from '@/core/tools/nativeNodeFactories'
 import { composeCourseProjectLocation } from '@/shared/courseLayerComposition'
 import { sceneNodeToCourseLayerItem } from '@/shared/courseProjectModel'
 import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'

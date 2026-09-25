@@ -2,7 +2,7 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { courseProjectDocumentSchema } from '../../src/shared/courseProjectSchema'
 import { imageNodeSchema } from '../../src/shared/contracts/native-v1'
-import { createImageNode } from '../../src/renderer/project/nativeNodeFactories'
+import { createImageNode } from '../../src/core/tools/nativeNodeFactories'
 import { selectActiveScene, useEditorStore,
   selectActiveCourseProjectDocument,
   selectSelectedNodeId,

@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { selectFlowEditorBlocks } from '@/renderer/course/flowEditorSlice'
-import { createFormulaNode } from '@/renderer/project/nativeNodeFactories'
+import { createFormulaNode } from '@/core/tools/nativeNodeFactories'
 import { sceneNodeToCourseLayerItem } from '@/shared/courseProjectModel'
 import { useEditorStore } from '@/renderer/store/editorStore'
 import { PropertiesTab } from '@/renderer/ui/PropertiesTab'

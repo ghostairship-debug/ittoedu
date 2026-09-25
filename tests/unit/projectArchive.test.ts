@@ -2,14 +2,14 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   createRectangleNode,
   createTextNode,
-} from '@/renderer/project/nativeNodeFactories'
+} from '@/core/tools/nativeNodeFactories'
 import { BlobUrlRegistry } from '@/renderer/project/blobUrlRegistry'
 import {
   createImageAssetImport,
   createRuntimeAssetMap,
   fitImageSize,
 } from '@/renderer/project/assetManager'
-import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
+import { createBlankCourseProject } from '@/core/course/createCourseProject'
 
 function v9AssetProject() {
   const project = createBlankCourseProject({

@@ -1,6 +1,6 @@
 import type { AuthoringToolDestinationV1 } from '../../../shared/authoringToolContract'
 import type { CourseProjectDocument } from '../../../shared/courseProjectTypes'
-import { resolveEffectiveLayerTarget } from '../../course/effectiveLayerCommands'
+import { resolveEffectiveLayerTarget } from '../../../core/tools/layerCommands'
 import { makeLayerItemAuthoringAddress } from '../courseAuthoringScope'
 import { resolveAuthoringToolScope } from './authoringToolScope'
 

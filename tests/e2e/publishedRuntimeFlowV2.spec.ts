@@ -10,14 +10,14 @@ import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { expect, test } from '@playwright/test'
-import { addCourseFlowPage } from '../../src/renderer/course/courseLocationCommands'
+import { addCourseFlowPage } from '../../src/core/tools/courseLocations'
 import { selectFlowEditorBlock } from '../../src/renderer/course/flowEditorSlice'
 import { insertFlowSharedRuntime } from '../../src/renderer/course/flowSharedAuthoringAdapters'
 import {
   buildPublishedCourseStandaloneHtml,
   buildPublishedCourseWebPackageFiles,
 } from '../../src/renderer/export/course/buildCoursePackages'
-import { createBlankCourseProject } from '../../src/renderer/project/createCourseProject'
+import { createBlankCourseProject } from '../../src/core/course/createCourseProject'
 import { courseProjectDocumentSchema } from '../../src/shared/courseProjectSchema'
 import type {
   CourseProjectDocument,

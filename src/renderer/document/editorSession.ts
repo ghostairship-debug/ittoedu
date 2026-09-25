@@ -1,3 +1,4 @@
+import type { MarkdownSourceMap } from '../../shared/document/markdownSourceMap'
 import { Plugin, EditorState, NodeSelection, TextSelection, type Transaction } from 'prosemirror-state'
 import { Decoration, DecorationSet, EditorView } from 'prosemirror-view'
 import { baseKeymap, chainCommands, exitCode, splitBlock } from 'prosemirror-commands'
@@ -12,10 +13,11 @@ import type { DocumentBlock } from '../../shared/document/content'
 import { prepareDocumentClipboard, type DocumentClipboardResourcePort } from './documentClipboard'
 import { documentResourceReferences } from '../../shared/document/resources'
 import { resolveFlowParagraphPresentation } from '../../shared/flowBodyPresentation'
+import { previewCaretTransaction } from './editPreviewWidgets'
 
 export interface DocumentOperation { operationId: string; historyGroup: string; source: 'layout' | 'source'; preparedResources?: unknown }
 export interface LayoutEditorOptions {
-  document: MarkdownDocument; revision: string
+  document: MarkdownDocument; revision: string; sourceMap?: MarkdownSourceMap
   change(document: MarkdownDocument, operation: DocumentOperation): boolean | void
   stateChanged?(state: EditorState): void
   selection?(selection: DocumentSelection | null): void
@@ -27,6 +29,8 @@ export interface LayoutEditorOptions {
   objectRevision?: unknown
   clipboardContext?: unknown
   clipboardResourcePort?(context: unknown): DocumentClipboardResourcePort<unknown>
+  projectionPlugins?: Plugin[]
+  projectionClipboard?(view: EditorView, event: ClipboardEvent, cut: boolean): boolean
 }
 export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOptions) {
   let options = initial
@@ -39,7 +43,7 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
   const clipboardType = 'application/x-cw-document-slice'
   const boundary = () => { group = crypto.randomUUID(); lastInput = 0 }
   const view = new EditorView(element, {
-    state: EditorState.create({ doc: toEditorDocument(initial.document.content), plugins: [new Plugin({ view(view) { options.stateChanged?.(view.state); return { update(view) { options.stateChanged?.(view.state) } } } }), keymap({
+    state: EditorState.create({ doc: toEditorDocument(initial.document.content), plugins: [...(initial.projectionPlugins ?? []), new Plugin({ view(view) { options.stateChanged?.(view.state); return { update(view) { options.stateChanged?.(view.state) } } } }), keymap({
       'Mod-z': () => { boundary(); options.undo(); return true },
       'Mod-Shift-z': () => { boundary(); options.redo(); return true },
       'Mod-y': () => { boundary(); options.redo(); return true },
@@ -57,7 +61,7 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
         boundary(); return splitBlock(state, dispatch, currentView)
       },
     }), keymap(baseKeymap), tableEditing()] }),
-    attributes: { role: 'textbox', 'aria-label': '正文排版编辑', 'aria-multiline': 'true' },
+    attributes: { role: 'textbox', 'aria-label': '正文编辑', 'aria-multiline': 'true' },
     editable: () => !options.readOnly,
     decorations: state => {
       const decorations: Decoration[] = []
@@ -67,6 +71,14 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
     nodeViews: {
       object: node => objectView(node, false),
       compound: node => objectView(node, true),
+      ...(initial.presentation !== 'flow' ? { slot: (node: import('prosemirror-model').Node) => {
+        const key = node.attrs.key as string, dom = document.createElement(key.startsWith('item:') ? 'li' : 'div')
+        dom.dataset.documentSlot = key
+        const slot = options.sourceMap?.blocks.flatMap(block => block.slots).find(slot => slot.key === key)
+        if (slot?.depth) dom.style.marginLeft = `${slot.depth * 1.5}em`
+        if (slot?.ordered !== undefined) dom.style.listStyleType = slot.ordered ? 'decimal' : 'disc'
+        return { dom, contentDOM: dom }
+      } } : {}),
       ...(initial.presentation === 'flow' ? {
         paragraph: (node: import('prosemirror-model').Node) => textView(node, 'p'),
         heading: (node: import('prosemirror-model').Node) => textView(node, `h${node.attrs.data.level}`),
@@ -122,10 +134,14 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
       return true
     },
     dispatchTransaction(transaction: Transaction) {
-      const state = view.state.apply(transaction)
+      const applied = view.state.applyTransaction(transaction), state = applied.state
       view.updateState(state)
       if (transaction.docChanged && !composing) publish(transaction.getMeta('preparedResources'))
       else if (transaction.selectionSet && !transaction.docChanged) boundary()
+      // Decoration refreshes and preview-owned caret relocation must not become
+      // manual AI context. Inspect appended transactions too: applyTransaction
+      // can replace an ordinary caret with a synthetic NodeSelection.
+      if (!transaction.selectionSet || transaction.docChanged || applied.transactions.some(item => item.getMeta(previewCaretTransaction))) return
       const anchor = editorPositionToPoint(state.doc, state.selection.anchor)
       const head = editorPositionToPoint(state.doc, state.selection.head)
       if (state.selection instanceof CellSelection) {
@@ -194,6 +210,7 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
     const dom = flowBlockElement(node, tag), contentDOM = richTextHost(); dom.append(contentDOM); return { dom, contentDOM }
   }
   function clipboard(event: ClipboardEvent, cut: boolean): boolean {
+    if (options.projectionClipboard?.(view, event, cut)) return true
     if (!event.clipboardData || view.state.selection.empty) return false
     const slice = view.state.selection.content()
     const cutToken = cut ? crypto.randomUUID() : null
@@ -255,7 +272,17 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
     const changed = JSON.stringify(next.document.content) !== JSON.stringify(options.document.content)
     const refreshObjects = next.objectRevision !== options.objectRevision
     options = next
-    if (changed) { boundary(); view.updateState(EditorState.create({ doc: toEditorDocument(next.document.content), plugins: view.state.plugins })) }
+    if (changed) {
+      boundary()
+      const document = toEditorDocument(next.document.content), from = view.state.doc.content.findDiffStart(document.content)
+      const end = view.state.doc.content.findDiffEnd(document.content)
+      if (from !== null && end) {
+        const overlap = from - Math.min(end.a, end.b)
+        const to = end.a + Math.max(0, overlap), nextTo = end.b + Math.max(0, overlap)
+        const transaction = view.state.tr.replace(from, to, document.slice(from, nextTo)).setMeta('canonicalUpdate', true)
+        view.updateState(view.state.apply(transaction))
+      }
+    }
     if (refreshObjects) view.setProps({ nodeViews: { ...view.props.nodeViews, object: node => objectView(node, false), compound: node => objectView(node, true) } })
   }
   return { view, update, boundary, syncDomTextSelection, flush: () => { if (composing) return false; publish(); boundary(); return true }, destroy: () => view.destroy() }

@@ -1,4 +1,5 @@
 import { ZodError } from 'zod'
+import { diagnosticLog } from './diagnosticLog'
 
 export interface DesktopErrorPayload {
   code: string
@@ -30,12 +31,24 @@ function systemErrorCode(error: unknown): string | undefined {
   return typeof code === 'string' ? code : undefined
 }
 
+/** Diagnostic output must never make IPC error normalization fail (for example, a closed stderr pipe). */
+function recordDesktopError(error: unknown): void {
+  try {
+    void diagnosticLog.append({
+      source: 'main',
+      message: error instanceof Error ? error.message : 'IPC 操作失败',
+      stack: error instanceof Error ? error.stack : undefined,
+      details: { code: systemErrorCode(error) },
+    }).catch(() => undefined)
+  } catch { /* The IPC envelope remains available even when diagnostics cannot be written. */ }
+}
+
 export function normalizeDesktopError(
   error: unknown,
   fallback: DesktopErrorPayload,
 ): DesktopErrorPayload {
   if (error instanceof DesktopOperationError) {
-    console.error(`[${error.code}] ${error.title}`, error)
+    recordDesktopError(error)
     const causeCode = systemErrorCode(error.cause)
     if (causeCode === 'ENOSPC') {
       return {
@@ -66,7 +79,7 @@ export function normalizeDesktopError(
   }
 
   if (error instanceof ZodError) {
-    console.error('[INVALID_ARGUMENT] IPC 参数校验失败', error)
+    recordDesktopError(error)
     return {
       code: 'INVALID_ARGUMENT',
       title: '操作未完成',
@@ -76,7 +89,7 @@ export function normalizeDesktopError(
   }
 
   const code = systemErrorCode(error)
-  console.error(`[${code ?? fallback.code}] ${fallback.title}`, error)
+  recordDesktopError(error)
 
   if (code === 'ENOSPC') {
     return {

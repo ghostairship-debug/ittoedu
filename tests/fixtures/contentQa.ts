@@ -1,5 +1,5 @@
-import { createBlankCourseProject } from '../../src/renderer/project/createCourseProject'
-import { createChartNode, createTextNode } from '../../src/renderer/project/nativeNodeFactories'
+import { createBlankCourseProject } from '../../src/core/course/createCourseProject'
+import { createChartNode, createTextNode } from '../../src/core/tools/nativeNodeFactories'
 import { sceneNodeToCourseLayerItem } from '../../src/shared/courseProjectModel'
 
 export function contentQaFixture() {

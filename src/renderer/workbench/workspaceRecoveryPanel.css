@@ -1,0 +1,18 @@
+.workspace-recovery-panel{position:fixed;z-index:1100;right:18px;bottom:18px;width:min(520px,calc(100vw - 36px));max-height:min(70vh,680px);overflow:auto;padding:16px;background:var(--surface,#fffefa);color:var(--ink,#17221d);border:1px solid var(--border,#d9d6ce);border-radius:12px;box-shadow:0 12px 40px rgba(23,34,29,.18)}
+.workspace-recovery-panel__header{display:flex;align-items:flex-start;gap:12px;justify-content:space-between}
+.workspace-recovery-panel__header-actions{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:6px;flex-shrink:0}
+.workspace-recovery-trigger{position:fixed;z-index:1100;left:18px;bottom:18px}
+.workspace-recovery-trigger button{padding:7px 11px;border:1px solid var(--border,#d9d6ce);border-radius:8px;background:var(--surface,#fffefa);color:var(--ink,#17221d);box-shadow:0 5px 18px rgba(23,34,29,.16);cursor:pointer}
+.workspace-recovery-panel h2{font-size:16px;margin:0 0 6px}
+.workspace-recovery-panel p{margin:0;color:var(--ink-muted,#66706a);font-size:13px;line-height:1.5}
+.workspace-recovery-panel ul{list-style:none;margin:12px 0 0;padding:0;display:grid;gap:8px}
+.workspace-recovery-panel li{padding:10px;border:1px solid var(--border,#d9d6ce);border-radius:8px;display:grid;gap:8px}
+.workspace-recovery-panel li>div:first-child{display:grid;gap:3px;min-width:0}
+.workspace-recovery-panel li strong,.workspace-recovery-panel li small{overflow-wrap:anywhere}
+.workspace-recovery-panel li span,.workspace-recovery-panel li small{color:var(--ink-muted,#66706a);font-size:12px}
+.workspace-recovery-panel li [role=alert]{color:#9d2e24}
+.workspace-recovery-panel__actions,.workspace-recovery-panel__confirm{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.workspace-recovery-panel__confirm span{width:100%;font-size:13px}
+.workspace-recovery-panel button{padding:5px 9px;border:1px solid var(--border,#d9d6ce);border-radius:6px;background:var(--surface,#fffefa);color:inherit;cursor:pointer}
+.workspace-recovery-panel button:first-child:not(:only-child){border-color:var(--green,#245b46)}
+.workspace-recovery-panel button:disabled{opacity:.5;cursor:default}

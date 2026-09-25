@@ -1,7 +1,7 @@
-import type { CourseProjectDocument, ComponentLayerItem } from '../../shared/courseProjectTypes'
+import type { CourseProjectDocument } from '../../shared/courseProjectTypes'
 import type { ComponentPackageData } from '../../shared/componentTypes'
 import { createDefaultTeacherControllerPackage } from '../../shared/defaultTeacherControllerComponent'
-import { componentPackageMeta } from './editableComponentPackage'
+import { componentPackageMeta } from '../../shared/componentPackageMeta'
 import { courseProjectDocumentSchema } from '../../shared/courseProjectSchema'
 import type { EditorTransactionPlan } from '../authoring/editorTransaction'
 import { rewriteComponentDefinitionId } from './editableComponentPackage'
@@ -19,15 +19,6 @@ export function createTeacherControllerTemplate(packageId?: string, version?: st
   pkg.files['runtime.js'] = new TextEncoder().encode(pkg.runtimeSource)
   pkg.files['manifest.json'] = new TextEncoder().encode(JSON.stringify(pkg.manifest, null, 2))
   return { ...pkg, contentSha256: componentContentSha256(pkg.files) }
-}
-
-/** Direct component factory: no intermediate native controller or conversion. */
-export function createTeacherControllerComponentItem(id: string): ComponentLayerItem {
-  const pkg = createDefaultTeacherControllerPackage()
-  return { layerItemId: id, kind: 'component', role: 'teacher-controller', label: '教师控制台',
-    frame: { mode: 'absolute', x: 200, y: 638, width: 880, height: 64 }, rotation: 0, opacity: 1, visible: true, locked: false,
-    playbackInitialVisibility: 'inherit', order: 1, hitPolicy: 'auto',
-    component: { packageId: pkg.manifest.id, version: pkg.manifest.version }, props: structuredClone(pkg.manifest.defaultProps ?? {}) }
 }
 
 /** Bundle the built-in resource referenced by a new document. */

@@ -31,7 +31,7 @@ import {
   isFlowCourseBlockLocation,
   makeFlowBlockAuthoringAddress,
   walkFlowBlocks,
-} from './flowDocumentModel'
+} from '../../core/tools/flowDocumentModel'
 import { isFlowZOrderLayerBlock } from './flowEditorSlice'
 
 export type DeepReadonly<T> =

@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { defaultComponentCatalogSources } from '../../src/main/componentCatalogSources'
 import { scanComponentCatalogDirectory, readCatalogComponentPackage } from '../../src/main/componentCatalogScanner'
 import { BUILT_IN_COMPONENT_CATALOG_DIRECTORY } from '../../src/shared/builtInComponentCatalog'
-import { importComponentPackage } from '../../src/renderer/components/importComponentPackage'
+import { importComponentPackage } from '../../src/core/drivers/codecs/importComponentPackage'
 
 const repositoryRoot = path.resolve(__dirname, '../..')
 const temporaryRoots: string[] = []

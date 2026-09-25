@@ -3,8 +3,8 @@ import type { AuthoringToolDestinationV1, AuthoringToolTargetWireV1 } from '@/sh
 import type { CourseProjectDocument, LayerItem } from '@/shared/courseProjectTypes'
 import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
 import { sceneNodeToCourseLayerItem } from '@/shared/courseProjectModel'
-import { createTextNode } from '@/renderer/project/nativeNodeFactories'
-import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
+import { createTextNode } from '@/core/tools/nativeNodeFactories'
+import { createBlankCourseProject } from '@/core/course/createCourseProject'
 import {
   activateSlidePresentationState,
   makeSlideAuthoringTarget,

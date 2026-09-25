@@ -1,8 +1,10 @@
 import { isControllerFixture } from '../tests/fixtures/teacherController'
+import { extractFile, listPackage, statFile } from '@electron/asar'
 import { _electron as electron, chromium } from '@playwright/test'
 import { prepareElectronLaunchEnvironment } from './electronLaunchEnvironment'
 import { unzipSync } from 'fflate'
 import { execFile, spawn } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import { existsSync, promises as fs } from 'node:fs'
 import net from 'node:net'
 import path from 'node:path'
@@ -13,8 +15,8 @@ import packageJson from '../package.json'
 import {
   importComponentPackage,
   parseComponentPackageFiles,
-} from '../src/renderer/components/importComponentPackage'
-import { openCourseProjectArchive } from '../src/renderer/project/courseProjectArchive'
+} from '../src/core/drivers/codecs/importComponentPackage'
+import { createCourseProjectArchive, openCourseProjectArchive } from '../src/core/drivers/codecs/courseProjectArchive'
 import {
   APP_EXECUTABLE_NAME,
   APP_PRODUCT_NAME,
@@ -81,6 +83,13 @@ const unpackedAppAsar = path.join(
   'resources',
   'app.asar',
 )
+const packagedMixedProject = path.join(
+  projectRoot,
+  'tests',
+  'fixtures',
+  'architecture-baseline',
+  'mixed-spatial.h5lesson',
+)
 /**
  * 打包产物边界扫描的目录：`win-unpacked/resources/**`。
  *
@@ -143,6 +152,10 @@ const screenshotPath = path.join(
   'offline-sample.png',
 )
 const reportPath = path.join(verificationDirectory, 'report.json')
+const focusedM13 = process.argv.includes('--m13-package')
+const focusedM13Exports = process.argv.includes('--m13-exports')
+const focusedM13ReportPath = path.join(projectRoot, 'output', 'g20', 'm13', 'package-report.json')
+const focusedM13ExportsReportPath = path.join(projectRoot, 'output', 'g20', 'm13', 'format-diagnostic.json')
 const unpackedProfileDirectory = path.join(
   verificationDirectory,
   'unpacked-profile',
@@ -357,6 +370,82 @@ async function assertAppAsar(
   }
 }
 
+async function verifyPackagedRuntimeResources(): Promise<void> {
+  const entries = new Set(
+    listPackage(unpackedAppAsar, { isPack: false })
+      .map((entry) => entry.replace(/\\/g, '/').replace(/^\/+/, '')),
+  )
+  const required = [
+    'dist-electron/main/index.js',
+    'dist-electron/main/ipc.js',
+    'dist-electron/main/workbench/execution/ExecutionDesktopService.js',
+    'dist-electron/main/workbench/attachments/AttachmentService.js',
+    'dist-electron/main/workbench/admittedImageResource.js',
+    'dist-electron/preload/index.js',
+    'dist-electron/preload/attachmentExtraction.js',
+    'dist-renderer/index.html',
+    'dist-renderer/attachment-extraction.html',
+    'dist-renderer/native-text-measurement.html',
+    'dist-player/player.iife.js',
+    'resources/icons/icon.png',
+    'resources/built-in-components/catalog.json',
+    'node_modules/sharp/package.json',
+    'node_modules/@img/sharp-win32-x64/package.json',
+  ]
+  const absent = required.filter((entry) => !entries.has(entry))
+  assert(absent.length === 0, `正式包缺少运行时读取的文件：${absent.join(', ')}`)
+  const catalog = JSON.parse(extractFile(unpackedAppAsar,
+    'resources/built-in-components/catalog.json'.split('/').join(path.sep)).toString('utf8')) as {
+    packages?: Array<{ packagePath: string; thumbnailPath: string; sha256: string }>
+  }
+  assert(Array.isArray(catalog.packages) && catalog.packages.length > 0,
+    '正式包内置组件目录为空')
+  for (const component of catalog.packages) {
+    for (const relative of [component.packagePath, component.thumbnailPath]) {
+      assert(typeof relative === 'string' && !path.posix.isAbsolute(relative) &&
+        !relative.split('/').includes('..'), `内置组件目录路径非法：${relative}`)
+      const entry = `resources/built-in-components/${relative}`
+      assert(entries.has(entry), `正式包缺少内置组件关联资源：${entry}`)
+    }
+    const entry = `resources/built-in-components/${component.packagePath}`
+    const bytes = extractFile(unpackedAppAsar, entry.split('/').join(path.sep))
+    assert(createHash('sha256').update(bytes).digest('hex') === component.sha256,
+      `正式包内置组件与目录声明不一致：${entry}`)
+  }
+  for (const entry of [
+    'dist-electron/main/ipc.js',
+    'dist-electron/main/workbench/execution/ExecutionDesktopService.js',
+    'dist-electron/main/workbench/attachments/AttachmentService.js',
+    'dist-electron/preload/index.js',
+  ]) {
+    const compiled = await fs.readFile(path.join(projectRoot, ...entry.split('/')))
+    const packaged = extractFile(unpackedAppAsar, entry.split('/').join(path.sep))
+    assert(Buffer.compare(compiled, packaged) === 0,
+      `正式包与当前构建产物不一致：${entry}`)
+  }
+  const nativeRoot = 'node_modules/@img/sharp-win32-x64/lib/'
+  const nativeFiles = [...entries].filter((entry) => entry.startsWith(nativeRoot) &&
+    (entry.endsWith('.node') || entry.endsWith('.dll')))
+  assert(nativeFiles.some((entry) => entry.endsWith('.node')) &&
+    nativeFiles.filter((entry) => entry.endsWith('.dll')).length >= 2,
+  '正式包缺少 sharp Win64 原生模块或 libvips DLL')
+  for (const entry of nativeFiles) {
+    const metadata = statFile(unpackedAppAsar, entry.split('/').join(path.sep))
+    assert('unpacked' in metadata && metadata.unpacked === true,
+      `sharp 原生依赖未从 asar 解包：${entry}`)
+    const physical = path.join(`${unpackedAppAsar}.unpacked`, ...entry.split('/'))
+    assert((await fs.stat(physical)).isFile(), `sharp 原生依赖实体文件不存在：${physical}`)
+  }
+  const helper = path.join(unpackedResourcesDirectory, 'clipboard-file-list', 'clipboard-file-list.exe')
+  assert((await fs.stat(helper)).isFile(), '正式包缺少剪贴板文件辅助程序')
+  const forbidden = [...entries].filter((entry) => entry.startsWith('.agents/') ||
+    entry.startsWith('output/') || entry.endsWith('editor-root.local.json') ||
+    entry.startsWith('dist-electron/main/localAgent/'))
+  assert(forbidden.length === 0, `正式包混入本机配置或开发资料：${forbidden.join(', ')}`)
+  pass('运行时资源打包',
+    `${required.length} 项编辑器/Player 资源、${catalog.packages.length} 个内置组件及关联图齐全；4 个 M08/S10 关键模块与当前编译产物一致；sharp 原生模块及 ${nativeFiles.filter((entry) => entry.endsWith('.dll')).length} 个 DLL 已解包；无本机配置`)
+}
+
 function systemEdgePath(): string {
   const candidates = [
     process.env['PROGRAMFILES(X86)'],
@@ -452,6 +541,19 @@ async function findPortableEditorPage(browser: Browser): Promise<Page> {
   throw new Error('便携版已启动，但主窗口 Phaser 画布未加载')
 }
 
+async function enterPackagedEditor(page: Page): Promise<void> {
+  const canvas = page.getByRole('main', { name: '课件画布' })
+  if (await canvas.isVisible()) return
+  const emptyContent = page.getByRole('region', { name: '没有打开的文件' })
+  await emptyContent.getByRole('button', { name: '新建课件', exact: true })
+    .click({ timeout: 30_000 })
+  await page.getByRole('button', { name: '深度编辑', exact: true })
+    .click({ timeout: 30_000 })
+  await canvas.waitFor({ state: 'visible', timeout: 30_000 })
+  await page.locator('[data-testid="canvas-stage"] canvas')
+    .waitFor({ state: 'visible', timeout: 30_000 })
+}
+
 async function closeElectronApplication(
   application: ElectronApplication,
 ): Promise<void> {
@@ -506,9 +608,7 @@ async function launchPackagedEditor(
         externalRequests.push(request.url())
       }
     })
-    await page
-      .locator('[data-testid="canvas-stage"] canvas')
-      .waitFor({ timeout: 45_000 })
+    await enterPackagedEditor(page)
     return { application, page, pageErrors, consoleErrors, externalRequests }
   } catch (error) {
     await closeElectronApplication(application)
@@ -557,6 +657,7 @@ async function verifyPortableStartup(): Promise<void> {
       () => stderr.trim(),
     )
     const page = await findPortableEditorPage(browser)
+    await enterPackagedEditor(page)
     const security = await page.evaluate(() => {
       const globals = window as unknown as Record<string, unknown>
       return {
@@ -598,8 +699,38 @@ async function verifyPortableStartup(): Promise<void> {
 }
 
 async function verifyUnpackedWorkflows(): Promise<void> {
+  const mixedArchive = openCourseProjectArchive(
+    Uint8Array.from(await fs.readFile(packagedMixedProject)),
+  )
+  assert(
+    mixedArchive.project.surfaces.map((surface) => surface.type).join(',') ===
+      'slide,flow,spatial-2d',
+    '正式包验收样本必须包含 Slide、Flow、Spatial 三表面',
+  )
+  const imageBytes = Object.values(mixedArchive.assetFiles)[0]
+  assert(imageBytes && imageBytes.byteLength > 0,
+    '正式包验收样本缺少可供图片解码的素材字节')
   const componentRun = await launchPackagedEditor(unpackedExecutable)
   try {
+    const admitted = await componentRun.application.evaluate(async ({ app }, base64) => {
+      const imageModule = process.mainModule?.require(
+        `${app.getAppPath()}/dist-electron/main/workbench/admittedImageResource.js`,
+      )
+      if (!imageModule) throw new Error('正式包主进程没有可用的 CommonJS 模块入口')
+      const result = await imageModule.prepareImageResource({
+        bytes: Uint8Array.from(Buffer.from(base64, 'base64')),
+        mimeType: 'image/png',
+        filename: 'mixed-figure.png',
+      }, () => 'packaged-image-smoke')
+      return { width: result.meta.width, height: result.meta.height,
+        byteLength: result.bytes.byteLength }
+    }, Buffer.from(imageBytes).toString('base64'))
+    assert(admitted.width > 0 && admitted.height > 0 &&
+      admitted.byteLength === imageBytes.byteLength,
+    '正式包中 sharp 未能解码实际课件图片素材')
+    pass('正式包图片解码',
+      `包内主进程 sharp 已实际解码 ${admitted.width}×${admitted.height} PNG`)
+
     await componentRun.application.evaluate(
       ({ dialog }, componentPath) => {
         dialog.showOpenDialog = async () => ({
@@ -611,9 +742,19 @@ async function verifyUnpackedWorkflows(): Promise<void> {
     )
     await componentRun.page.getByRole('tab', { name: '组件', exact: true }).click()
     await componentRun.page.getByTestId('import-external-components').click()
+    await componentRun.page.getByText('已添加 1 个组件到当前画布').waitFor({ timeout: 20_000 })
+    await componentRun.page.getByRole('tab', { name: '组件', exact: true }).click()
     await componentRun.page
-      .locator('[data-testid="component-com.example.sample-counter"]')
+      .getByTestId('component-package-com.example.sample-counter')
       .waitFor({ timeout: 20_000 })
+      .catch(async (error: unknown) => {
+        const visible = await componentRun.page.locator('body').innerText({ timeout: 2_000 }).catch(() => '<body unavailable>')
+        const dialogs = await componentRun.page.getByRole('dialog').allTextContents().catch(() => [])
+        const screenshot = path.join(projectRoot, 'output', 'g20', 'm13', 'component-import-failure.png')
+        await fs.mkdir(path.dirname(screenshot), { recursive: true })
+        await componentRun.page.screenshot({ path: screenshot }).catch(() => undefined)
+        throw new Error(`正式包组件导入后未入列：${String(error)}；URL：${componentRun.page.url()}；页面：${visible.slice(0, 5000)}；对话框：${dialogs.join(' | ')}；控制台：${componentRun.consoleErrors.join(' | ')}；页面错误：${componentRun.pageErrors.join(' | ')}；截图：${screenshot}`)
+      })
 
     await componentRun.page.getByRole('tab', { name: '元素' }).click()
     await componentRun.page.getByRole('tab', { name: '常用' }).click()
@@ -682,11 +823,14 @@ async function verifyUnpackedWorkflows(): Promise<void> {
     await projectRun.page
       .getByRole('button', { name: '打开工程（Ctrl+O）' })
       .click()
-    await projectRun.page
-      .getByRole('button', { name: '重命名课件' })
-      .filter({ hasText: '示例互动课件' })
-      .waitFor({ timeout: 20_000 })
-    const sceneItems = projectRun.page.locator('[data-testid^="scene-item-"]')
+    await projectRun.page.getByRole('tab', { name: path.basename(sampleProject), exact: true })
+      .waitFor({ state: 'visible', timeout: 20_000 })
+    if (await projectRun.page.getByRole('button', { name: '深度编辑', exact: true }).isVisible()) {
+      await projectRun.page.getByRole('button', { name: '深度编辑', exact: true }).click()
+    }
+    await projectRun.page.getByRole('button', { name: '重命名课件' })
+      .filter({ hasText: '示例互动课件' }).waitFor({ timeout: 20_000 })
+    const sceneItems = projectRun.page.locator('[data-testid^="scene-item-"]:visible')
     await sceneItems.first().waitFor({ state: 'visible', timeout: 20_000 })
     const sceneCount = await sceneItems.count()
     assert(sceneCount === 2, `示例工程应有 2 个 Slide 位置，实际为 ${sceneCount}`)
@@ -695,13 +839,15 @@ async function verifyUnpackedWorkflows(): Promise<void> {
       assert(await sceneItem.isVisible(), `示例工程第 ${index + 1} 个 Slide 位置不可见`)
       await sceneItem.click()
       await projectRun.page.waitForFunction((activeIndex) => (
-        document.querySelectorAll('[data-testid^="scene-item-"]')[activeIndex]
+        [...document.querySelectorAll('[data-testid^="scene-item-"]')]
+          .filter((element) => element.getClientRects().length > 0)[activeIndex]
           ?.getAttribute('aria-current') === 'page'
       ), index)
     }
     await sceneItems.first().click()
     await projectRun.page.waitForFunction(() => (
-      document.querySelector('[data-testid^="scene-item-"]')
+      [...document.querySelectorAll('[data-testid^="scene-item-"]')]
+        .find((element) => element.getClientRects().length > 0)
         ?.getAttribute('aria-current') === 'page'
     ))
     pass('示例工程打开', '目录版 GUI 已打开且可切换两个 V9 Slide 位置')
@@ -806,6 +952,202 @@ async function verifyUnpackedWorkflows(): Promise<void> {
   } finally {
     await closeElectronApplication(projectRun.application)
   }
+}
+
+async function verifyMixedSurfacePackagedExports(): Promise<string> {
+  const mixed = openCourseProjectArchive(
+    Uint8Array.from(await fs.readFile(packagedMixedProject)),
+  )
+  assert(mixed.project.surfaces.map((surface) => surface.type).join(',') ===
+    'slide,flow,spatial-2d', '三表面导出样本不完整')
+  const evidenceRoot = path.join(projectRoot, 'output', 'g20', 'm13')
+  await fs.mkdir(evidenceRoot, { recursive: true })
+  // The architecture fixture intentionally exercises a text overflow. Delivery
+  // preflight correctly blocks it; widen only that banner in this isolated
+  // export sample so package verification can reach all six format producers.
+  const banner = mixed.project.globalLayerItems.find((entry) =>
+    entry.item.layerItemId === 'mixed-global-banner')
+  assert(banner, '三表面基线缺少可修正的共享横幅')
+  assert(banner.item.frame.mode === 'absolute', '三表面共享横幅不是绝对定位')
+  banner.item.frame.width = 720
+  banner.item.frame.height = 80
+  const exportReadyProject = path.join(evidenceRoot, 'mixed-export-ready.h5lesson')
+  await fs.writeFile(exportReadyProject, createCourseProjectArchive(mixed))
+  const directory = await fs.mkdtemp(path.join(evidenceRoot, 'packaged-exports-'))
+  const destinations = {
+    offline: path.join(directory, 'mixed-offline.html'),
+    online: path.join(directory, 'mixed-online.html'),
+    web: path.join(directory, 'mixed-web.zip'),
+    pdf: path.join(directory, 'mixed-static.pdf'),
+    pptx: path.join(directory, 'mixed-editable.pptx'),
+    docx: path.join(directory, 'mixed-flow.docx'),
+  }
+  type Format = keyof typeof destinations
+  const packaged = await launchPackagedEditor(unpackedExecutable)
+  try {
+    await packaged.application.evaluate(({ dialog }, args) => {
+      const state = globalThis as typeof globalThis & { __m13ExportFormat?: keyof typeof args.destinations }
+      dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [args.project] })
+      dialog.showSaveDialog = async () => {
+        const format = state.__m13ExportFormat
+        if (!format) throw new Error('M13 导出目标尚未固定')
+        return { canceled: false, filePath: args.destinations[format] }
+      }
+    }, { project: exportReadyProject, destinations })
+    await packaged.page.getByRole('button', { name: '打开工程（Ctrl+O）' }).click()
+    await packaged.page.getByRole('tab', { name: path.basename(exportReadyProject), exact: true })
+      .waitFor({ state: 'visible', timeout: 20_000 })
+    if (await packaged.page.getByRole('button', { name: '深度编辑', exact: true }).isVisible()) {
+      await packaged.page.getByRole('button', { name: '深度编辑', exact: true }).click()
+    }
+    await packaged.page.getByRole('button', { name: '重命名课件' })
+      .filter({ hasText: mixed.project.title }).waitFor({ timeout: 20_000 })
+    await packaged.page.getByTestId('export-menu-trigger').click()
+    assert(await packaged.page.getByTestId('export-docx').isEnabled(),
+      '三表面工程中的 Flow DOCX 导出入口未启用')
+    await packaged.page.getByTestId('export-menu-trigger').click()
+
+    const formats: Array<{ key: Format; testId: string; preflight?: string }> = [
+      { key: 'offline', testId: 'export-single-html', preflight: '单 HTML 导出预检' },
+      { key: 'online', testId: 'export-single-html-online', preflight: '单 HTML 导出预检' },
+      { key: 'web', testId: 'export-web-package', preflight: '网页包 导出预检' },
+      { key: 'pdf', testId: 'export-pdf', preflight: 'PDF 导出预检' },
+      { key: 'pptx', testId: 'export-pptx', preflight: 'PPTX 导出预检' },
+      { key: 'docx', testId: 'export-docx' },
+    ]
+    for (const format of formats) {
+      await packaged.application.evaluate(({}, key) => {
+        ;(globalThis as typeof globalThis & { __m13ExportFormat?: string }).__m13ExportFormat = key
+      }, format.key)
+      await packaged.page.getByTestId('export-menu-trigger').click()
+      await packaged.page.getByTestId(format.testId).click()
+      if (format.preflight) {
+        await packaged.page.getByRole('alertdialog', { name: format.preflight })
+          .getByRole('button', { name: '继续导出' }).click({ timeout: 5_000 })
+          .catch(async (error: unknown) => {
+            const body = await packaged.page.locator('body').innerText({ timeout: 2_000 }).catch(() => '<body unavailable>')
+            const dialogs = await packaged.page.getByRole('alertdialog').allTextContents().catch(() => [])
+            throw new Error(`${format.key} 导出预检未出现：${String(error)}；当前对话框：${dialogs.join(' | ')}；页面：${body.slice(0, 5000)}；页面错误：${packaged.pageErrors.join(' | ')}；控制台：${packaged.consoleErrors.join(' | ')}`)
+          })
+      }
+      const deadline = Date.now() + 90_000
+      while (!existsSync(destinations[format.key]) && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 100))
+      }
+      assert(existsSync(destinations[format.key]),
+        `正式包未生成 ${format.key} 导出文件`)
+      assert((await fs.stat(destinations[format.key])).size > 100,
+        `正式包的 ${format.key} 导出文件异常小`)
+    }
+    assert(packaged.pageErrors.length === 0, packaged.pageErrors.join('\n'))
+    assert(packaged.consoleErrors.length === 0, packaged.consoleErrors.join('\n'))
+    assert(packaged.externalRequests.length === 0,
+      `三表面正式包导出产生了网络请求：${packaged.externalRequests.join(', ')}`)
+  } finally {
+    await closeElectronApplication(packaged.application)
+  }
+
+  const offline = await fs.readFile(destinations.offline, 'utf8')
+  const online = await fs.readFile(destinations.online, 'utf8')
+  assert(offline.startsWith('<!doctype html>') && online.startsWith('<!doctype html>'),
+    '单 HTML 导出未生成完整文档')
+  assertNoRemoteUrlReferences(offline, '三表面离线单 HTML')
+  const assetFiles = Object.values(mixed.assetFiles)
+  assert(assetFiles.every((bytes) => offline.includes(Buffer.from(bytes).toString('base64'))),
+    '离线单 HTML 未保留三表面工程的图片素材字节')
+  const webArchive = unzipSync(Uint8Array.from(await fs.readFile(destinations.web)))
+  for (const required of ['index.html', 'course-data.js',
+    'player/player.iife.js', 'player/player.css']) {
+    assert(webArchive[required]?.byteLength, `网页包缺少 ${required}`)
+  }
+  assert(Object.keys(webArchive).filter((entry) => entry.startsWith('assets/')).length >=
+    assetFiles.length, '网页包未保留三表面工程的图片素材')
+  const webRoot = path.join(directory, 'web-unpacked')
+  for (const [entry, bytes] of Object.entries(webArchive)) {
+    const target = path.resolve(webRoot, ...entry.split('/'))
+    assert(target.startsWith(`${webRoot}${path.sep}`), `网页包路径越界：${entry}`)
+    await fs.mkdir(path.dirname(target), { recursive: true })
+    await fs.writeFile(target, bytes)
+  }
+  const pdf = await fs.readFile(destinations.pdf)
+  assert(pdf.subarray(0, 5).toString() === '%PDF-', '混合表面 PDF 文件签名错误')
+  const pptx = unzipSync(Uint8Array.from(await fs.readFile(destinations.pptx)))
+  const slideEntries = Object.keys(pptx).filter((entry) =>
+    /^ppt\/slides\/slide\d+\.xml$/.test(entry))
+  const mappedPptxLocations = mixed.project.locations.filter((location) =>
+    location.kind !== 'flow-block')
+  assert(slideEntries.length === mappedPptxLocations.length,
+    `PPTX 应只生成 Slide/Spatial 的 ${mappedPptxLocations.length} 页，实际 ${slideEntries.length} 页；Flow 走单独 DOCX 导出`)
+  const docx = unzipSync(Uint8Array.from(await fs.readFile(destinations.docx)))
+  assert(docx['word/document.xml']?.byteLength,
+    'DOCX 未包含可编辑的 Flow 正文 XML')
+
+  const browser = await chromium.launch({ executablePath: systemEdgePath(), headless: true })
+  const visualEvidence: Array<{ format: string; locationCount: number; loadedImageCount: number }> = []
+  try {
+    for (const [format, filename] of [
+      ['offline-html', destinations.offline],
+      ['online-html', destinations.online],
+      ['web-package', path.join(webRoot, 'index.html')],
+    ] as const) {
+      const page = await browser.newPage({ viewport: { width: 1440, height: 960 } })
+      const errors: string[] = []
+      const externalRequests: string[] = []
+      page.on('pageerror', (error) => errors.push(error.message))
+      page.on('request', (request) => {
+        if (/^(?:https?|wss?):/i.test(request.url())) externalRequests.push(request.url())
+      })
+      try {
+        await page.goto(pathToFileURL(filename).href, { waitUntil: 'load', timeout: 45_000 })
+        await page.waitForFunction(() => Boolean(window.__H5_LESSON_PLAYER__))
+        let loadedImageCount = 0
+        for (let index = 0; index < mixed.project.locations.length; index += 1) {
+          assert(await page.evaluate((target) =>
+            window.__H5_LESSON_PLAYER__?.goToScene(target), index),
+          `${format} 无法切到第 ${index + 1} 个位置`)
+          await page.waitForFunction((target) =>
+            window.__H5_LESSON_PLAYER__?.getCurrentSceneIndex() === target, index)
+          assert(await page.locator('#course-root').count() === 1 &&
+            await page.locator('.course-player-error').count() === 0,
+          `${format} 第 ${index + 1} 个位置未正常显示`)
+          loadedImageCount += await page.evaluate(() => [...document.images]
+            .filter((image) => image.complete && image.naturalWidth > 0).length)
+          await page.screenshot({ path: path.join(directory, `${format}-${index + 1}.png`) })
+        }
+        assert(errors.length === 0 && externalRequests.length === 0,
+          `${format} 独立打开出现错误或外部请求：${[...errors, ...externalRequests].join('; ')}`)
+        assert(loadedImageCount > 0, `${format} 未加载任何真实图片素材`)
+        visualEvidence.push({ format, locationCount: mixed.project.locations.length,
+          loadedImageCount })
+      } finally {
+        await page.close()
+      }
+    }
+  } finally {
+    await browser.close()
+  }
+  await fs.writeFile(path.join(directory, 'report.json'), JSON.stringify({
+    package: unpackedExecutable,
+    source: exportReadyProject,
+    derivedFrom: packagedMixedProject,
+    fixtureAdjustment: 'mixed-global-banner absolute frame widened from 480×44 to 720×80 to pass real text-overflow export preflight',
+    originalFixturePreflight: 'The unmodified architecture fixture was rejected by the packaged GUI: text-content-overflow error and project-health:text-capacity-overflow warning for mixed-global-banner.',
+    formats: destinations,
+    surfaces: mixed.project.surfaces.map((surface) => surface.type),
+    locations: mixed.project.locations.length,
+    assets: assetFiles.length,
+    pptxSlides: slideEntries.length,
+    formatLimits: {
+      pptx: 'PPTX maps the Slide page and two Spatial camera frames; Spatial frames are static snapshots, Flow is intentionally skipped and exported separately as DOCX.',
+      docx: 'DOCX exports the Flow surface only.',
+      onlineHtml: 'This fixture has no remote asset URLs, so online-lightweight remote retention is not exercised.',
+    },
+    visualEvidence,
+    limitation: 'PDF/PPTX/DOCX signatures and package XML checked; third-party document readers remain a separate check.',
+  }, null, 2))
+  pass('三表面正式包导出',
+    `六种可见导出入口生成文件；三种网页交付独立离线打开并遍历 ${mixed.project.locations.length} 个位置；证据 ${directory}`)
+  return directory
 }
 
 async function verifyOfflineHtml(
@@ -920,6 +1262,30 @@ async function verifyOfflineHtml(
   }
 }
 
+async function verifyM13Package(): Promise<void> {
+  await fs.mkdir(verificationDirectory, { recursive: true })
+  await fs.mkdir(path.dirname(focusedM13ReportPath), { recursive: true })
+  console.log('开始验证 M13 正式包与三表面导出…')
+  assert(APP_VERSION === packageJson.version, '正式包源码版本不一致')
+  const [portableArtifact, unpackedArtifact, appAsarArtifact] = await Promise.all([
+    assertWindowsExecutable(portableExecutable, 'Portable.exe', packageJson.version),
+    assertWindowsExecutable(unpackedExecutable, 'win-unpacked exe', packageJson.version),
+    assertAppAsar(unpackedAppAsar, packageJson.name, packageJson.version),
+  ])
+  await verifyPackagedRuntimeResources()
+  await verifyPortableStartup()
+  await verifyUnpackedWorkflows()
+  const mixedExportEvidence = await verifyMixedSurfacePackagedExports()
+  await fs.writeFile(focusedM13ReportPath, `${JSON.stringify({
+    verifiedAt: new Date().toISOString(),
+    status: 'passed',
+    checks,
+    boundary: 'M13 checks packaged file paths and app runtime resources. The broad releaseArtifactBoundary scan is a separate release gate and is not counted here.',
+    artifacts: { portableArtifact, unpackedArtifact, appAsarArtifact, mixedExportEvidence },
+  }, null, 2)}\n`, 'utf8')
+  console.log(`M13 正式包验证通过，共 ${checks.length} 项；报告：${focusedM13ReportPath}`)
+}
+
 async function main(): Promise<void> {
   await fs.mkdir(verificationDirectory, { recursive: true })
   console.log('开始验证 Windows 发布产物…')
@@ -945,6 +1311,7 @@ async function main(): Promise<void> {
     packageJson.name,
     packageJson.version,
   )
+  await verifyPackagedRuntimeResources()
   pass(
     '发布产物版本一致性',
     `Portable.exe、win-unpacked exe 与 app.asar 均来自 ${packageJson.name}@${packageJson.version}`,
@@ -1156,6 +1523,7 @@ async function main(): Promise<void> {
 
   await verifyPortableStartup()
   await verifyUnpackedWorkflows()
+  const mixedExportEvidence = await verifyMixedSurfacePackagedExports()
   await verifyOfflineHtml(controllerTarget)
 
   await verifyReleaseArtifactBoundary('导出 HTML 数据边界', [exportedHtml])
@@ -1180,6 +1548,7 @@ async function main(): Promise<void> {
           exportedHtml,
           exportedPdf,
           exportedPptx,
+          mixedExportEvidence,
           screenshotPath,
         },
       },
@@ -1192,11 +1561,17 @@ async function main(): Promise<void> {
   console.log(`验证报告：${reportPath}`)
 }
 
-main().catch(async (error: unknown) => {
+;(focusedM13 ? verifyM13Package() : focusedM13Exports
+  ? verifyMixedSurfacePackagedExports().then(async (evidence) => {
+    await fs.writeFile(focusedM13ExportsReportPath, `${JSON.stringify({ status: 'passed', evidence }, null, 2)}\n`)
+  }) : main()).catch(async (error: unknown) => {
+  const failureReportPath = focusedM13 ? focusedM13ReportPath : focusedM13Exports
+    ? focusedM13ExportsReportPath : reportPath
   await fs.mkdir(verificationDirectory, { recursive: true }).catch(() => undefined)
+  await fs.mkdir(path.dirname(failureReportPath), { recursive: true }).catch(() => undefined)
   await fs
     .writeFile(
-      reportPath,
+      failureReportPath,
       `${JSON.stringify(
         {
           verifiedAt: new Date().toISOString(),

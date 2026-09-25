@@ -8,7 +8,7 @@ import {
   type CurrentCourseAuthoringTargetIdentity,
 } from '@/renderer/authoring/courseAuthoringSession'
 import type { CourseAuthoringOwner } from '@/renderer/authoring/courseAuthoringScope'
-import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
+import { createBlankCourseProject } from '@/core/course/createCourseProject'
 import {
   freezeCourseAssetSidecar,
   type CourseAssetSidecar,

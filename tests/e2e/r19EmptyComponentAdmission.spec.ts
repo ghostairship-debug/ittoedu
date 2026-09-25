@@ -4,11 +4,11 @@ import { _electron as electron, expect, test, type ElectronApplication } from '@
 import { createServer, type ViteDevServer } from 'vite'
 import sharp from 'sharp'
 import { BACKGROUND_E2E_ENV } from '../../src/main/windowVisibility'
-import { createBlankCourseProject } from '../../src/renderer/project/createCourseProject'
-import { parseComponentPackageFiles } from '../../src/renderer/components/importComponentPackage'
-import { componentPackageMeta } from '../../src/renderer/components/editableComponentPackage'
-import { createCourseProjectArchive } from '../../src/renderer/project/courseProjectArchive'
-import { componentPackageKey } from '../../src/renderer/project/archivePath'
+import { createBlankCourseProject } from '../../src/core/course/createCourseProject'
+import { parseComponentPackageFiles } from '../../src/core/drivers/codecs/importComponentPackage'
+import { componentPackageMeta } from '../../src/shared/componentPackageMeta'
+import { createCourseProjectArchive } from '../../src/core/drivers/codecs/courseProjectArchive'
+import { componentPackageKey } from '../../src/core/drivers/codecs/archivePath'
 import { expectBackgroundWindowsIsolated } from './expectBackgroundWindowsIsolated'
 
 const productRoot = resolve(__dirname, '..', '..')
@@ -71,7 +71,7 @@ test('generated Component admission rejects an empty 830x240 host and preserves 
     for (const [kind, body] of Object.entries(cases)) {
       const result = await page.evaluate(async ({ archive, projectPath, packageId, instanceId, changedSource }) => {
         const load = (path: string) => import(/* @vite-ignore */ path)
-        const { openCourseProjectArchive } = await load('/src/renderer/project/courseProjectArchive.ts')
+        const { openCourseProjectArchive } = await load('/src/core/drivers/codecs/courseProjectArchive.ts')
         const { componentPackagesFromArchive } = await load('/src/renderer/components/componentPackageStore.ts')
         const { useEditorStore, selectActiveCourseProjectDocument, selectEffectiveLayerProjection, selectSlideAuthoringBackend } = await load('/src/renderer/store/editorStore.ts')
         const { captureGenerationSnapshot } = await load('/src/renderer/authoring/generation/generationSnapshot.ts')

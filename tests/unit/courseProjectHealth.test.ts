@@ -3,16 +3,16 @@ import { createControllerFixture } from '../fixtures/teacherController'
 import { strToU8 } from 'fflate'
 import { describe, expect, it } from 'vitest'
 import { collectCourseProjectContentHealth } from '@/shared/courseProjectHealth/content'
-import { createTextNode, createFormulaNode, createChartNode } from '@/renderer/project/nativeNodeFactories'
+import { createTextNode, createFormulaNode, createChartNode } from '@/core/tools/nativeNodeFactories'
 import { resolveSchemaValidCourseProjectDiagnosticTarget } from '@/shared/courseProjectValidationDiagnostics'
-import { parseComponentPackageFiles } from '@/renderer/components/importComponentPackage'
-import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
+import { parseComponentPackageFiles } from '../../src/core/drivers/codecs/importComponentPackage'
+import { createBlankCourseProject } from '@/core/course/createCourseProject'
 import {
   createImageNode,
   createRectangleNode,
   
   createVideoNode,
-} from '@/renderer/project/nativeNodeFactories'
+} from '@/core/tools/nativeNodeFactories'
 import {
   COURSE_PROJECT_FORMAT_PREFLIGHT_ADAPTERS,
   COURSE_PROJECT_HEALTH_FINDING_CATALOG,

@@ -1,5 +1,5 @@
 import { nanoid } from 'nanoid'
-import { createChartLayerItem, createChartNode } from './nativeNodeFactories'
+import { createChartLayerItem, createChartNode } from '../../core/tools/nativeNodeFactories'
 import { chartNativeContentSchema } from '../../shared/contracts/native-v1/schema'
 import { openPptxPackage, pptxReject, pptxRelationshipId, xmlAll, xmlChildren, xmlFirst, type PptxPackage, type PptxImportIssue } from './pptxPackage'
 

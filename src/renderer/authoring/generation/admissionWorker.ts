@@ -1,5 +1,5 @@
 import { dynamicAdmissionPayloadSchema, type DynamicInstanceCapture } from '../../../shared/dynamicAdmissionContract'
-import { parseComponentPackageFiles } from '../../components/importComponentPackage'
+import { parseComponentPackageFiles } from '../../../core/drivers/codecs/importComponentPackage'
 import { runDynamicCandidateHostSmoke } from '../tools/dynamicCandidateAdmission'
 import { installBundledFontFaces } from '../../../shared/fonts/installBundledFontFaces'
 import { ensureBundledFonts } from '../../../shared/fonts/ensureBundledFonts'

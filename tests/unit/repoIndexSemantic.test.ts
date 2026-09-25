@@ -302,7 +302,7 @@ describe('repo-index stable semantic coverage', () => {
       'src/renderer/project/v9AssetAdapter.ts',
       'src/renderer/store/history.ts',
       'src/renderer/project/courseProjectIo.ts',
-      'src/renderer/project/courseProjectArchive.ts',
+      'src/core/drivers/codecs/courseProjectArchive.ts',
       'src/shared/contracts/course-project-v9/types.ts',
     ]))
     expect(journey.highSignalTests).toEqual(expect.arrayContaining([

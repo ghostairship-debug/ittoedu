@@ -21,7 +21,7 @@ import { buildCoursePptx } from '@/renderer/export/course/buildCoursePptx'
 import { buildFlowDocx } from '@/renderer/export/course/flowDocx'
 import { renderPublishedSpatialFrameSvg } from '@/player/surfaces/spatial/publishedSpatialStaticRendering'
 import { resolveEffectiveBackground } from '@/shared/effectiveBackground'
-import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
+import { createBlankCourseProject } from '@/core/course/createCourseProject'
 
 const NOW = '2026-09-05T00:00:00.000Z'
 const PNG_BYTES = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10])

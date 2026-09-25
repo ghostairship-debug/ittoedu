@@ -2,7 +2,7 @@ import { nanoid } from 'nanoid'
 import { DEFAULT_COURSE_SURFACE_BACKGROUND_COLOR } from '@/shared/courseProjectModel'
 import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
 import type { CourseProjectDocument } from '@/shared/courseProjectTypes'
-import { createBlankCourseProject, type CreateProjectOptions } from './createCourseProject'
+import { createBlankCourseProject, type CreateProjectOptions } from '../../core/course/createCourseProject'
 
 export function courseProjectStartsAsSpatial(
   project: CourseProjectDocument,

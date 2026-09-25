@@ -1,16 +1,14 @@
 import { describe, expect, it } from 'vitest'
-import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
+import { createBlankCourseProject } from '@/core/course/createCourseProject'
 import { createBlankFlowCourseProject } from '@/renderer/project/createFlowCourseProject'
 import { createBlankSpatialCourseProject } from '@/renderer/project/createSpatialCourseProject'
-import { createTextNode } from '@/renderer/project/nativeNodeFactories'
+import { createTextNode } from '@/core/tools/nativeNodeFactories'
 import { sceneNodeToCourseLayerItem } from '@/shared/courseProjectModel'
 import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
 import type { CourseProjectDocument, NativeLayerItem } from '@/shared/courseProjectTypes'
 import type { TextNode } from '@/shared/contracts/native-v1'
-import {
-  locateCourseLayer, makeEffectiveLayerAuthoringAddress, patchEffectiveLayerPropertiesAtTarget,
-  type EffectiveLayerPropertiesPatchAtTarget,
-} from '@/renderer/course/effectiveLayerCommands'
+import { makeEffectiveLayerAuthoringAddress } from '@/core/tools/layerCommands'
+import { locateCourseLayer, patchEffectiveLayerPropertiesAtTarget, type EffectiveLayerPropertiesPatchAtTarget } from '@/renderer/course/effectiveLayerCommands'
 import { projectEffectiveLayers } from '@/renderer/course/effectiveLayerProjection'
 import { openSlideAuthoringSession } from '@/renderer/course/slideAuthoringBackend'
 import { updateSlideNativeLayerContent } from '@/renderer/course/v9SlideContentCommands'

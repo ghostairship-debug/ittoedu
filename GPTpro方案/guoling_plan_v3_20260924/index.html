@@ -1,0 +1,1953 @@
+<!DOCTYPE html>
+
+<html lang="zh-CN"><head><meta charset="utf-8"/><meta content="width=device-width,initial-scale=1" name="viewport"/><meta content="light" name="color-scheme"/><title>果铃｜产品路线与创作方案 V3.3</title><style>
+:root{--ink:#1d3039;--muted:#64737c;--line:#dce3e6;--paper:#fff;--back:#f3f5f5;--accent:#126f72;--tint:#e8f2f1;--code:#f1f4f6}*{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;color:var(--ink);background:var(--back);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",Arial,sans-serif;font-size:16px;line-height:1.8}.topbar{height:76px;display:flex;align-items:center;gap:20px;border-bottom:1px solid var(--line);background:#fff;position:fixed;left:0;right:0;top:0;z-index:20;padding:0 30px}.brand{font-size:19px;letter-spacing:3px;font-weight:750;white-space:nowrap}.brand b{display:inline-block;width:11px;height:25px;background:var(--accent);margin-right:12px;vertical-align:-4px;border-radius:3px}.top-title{font-size:14px;color:var(--muted);flex:1}.pill{background:var(--tint);color:var(--accent);font-size:12px;padding:4px 12px;border-radius:20px;white-space:nowrap}.print,.menu-toggle{border:1px solid var(--line);background:white;padding:7px 13px;border-radius:7px;color:var(--ink);cursor:pointer}.menu-toggle{display:none}.sidebar{position:fixed;top:76px;bottom:0;left:0;width:284px;padding:22px 16px 35px 22px;overflow:auto;border-right:1px solid var(--line);background:#f8faf9;z-index:15}.search-box{display:flex;gap:6px}.search-box input{width:100%;min-width:0;padding:11px 12px;border:1px solid #cbd6da;border-radius:8px;background:#fff;font:inherit;font-size:14px}.search-hint{color:var(--muted);font-size:11px;margin:7px 0 14px}.nav-group{font-size:11px;letter-spacing:2px;color:var(--muted);font-weight:650;margin:25px 11px 8px}.nav-link{border:none;width:100%;background:transparent;display:flex;text-align:left;gap:11px;align-items:baseline;font:inherit;font-size:13px;padding:9px 10px;border-radius:7px;margin:2px 0;color:#42535e;cursor:pointer;line-height:1.5}.nav-link span{font-size:11px;color:#85939b;width:18px;flex-shrink:0}.nav-link:hover{background:#edf2f1}.nav-link.active{background:var(--tint);color:#115c60;font-weight:650}.nav-link.active span{color:var(--accent)}main{margin-left:284px;padding:110px 40px 70px;max-width:1620px}.hero{max-width:1030px;margin:0 auto 25px;padding:27px 34px 26px;border:1px solid var(--line);background:linear-gradient(115deg,#fff,#eff6f4);border-radius:14px}.eyebrow{color:var(--accent);font-size:11px;letter-spacing:2.7px;font-weight:750}.hero h1{font-size:30px;line-height:1.4;margin:10px 0}.hero p{font-size:14px;color:#5c6d75;margin:8px 0 15px;max-width:830px}.hero-meta{display:flex;flex-wrap:wrap;gap:9px}.hero-meta span{font-size:11px;border:1px solid #cfdedc;padding:4px 10px;border-radius:5px;background:#ffffffab}.doc,.search-results{max-width:1030px;margin:0 auto;background:#fff;border:1px solid var(--line);border-radius:14px;padding:38px 42px 56px;box-shadow:0 5px 22px #21323a04}.doc[hidden],.search-results[hidden]{display:none}.doc-path{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:11px;overflow-wrap:anywhere;color:#7e8b93;margin-bottom:18px}.doc h1{font-size:29px;line-height:1.45;margin:0 0 22px;letter-spacing:-.5px}.doc h2{font-size:23px;line-height:1.45;margin:40px 0 16px;padding-top:6px;border-top:1px solid #edf1f2}.doc h3{font-size:18px;line-height:1.5;margin:26px 0 12px}.doc p{margin:13px 0}.doc strong{color:#123f48}.doc ul,.doc ol{padding-left:24px}.doc li{padding-left:2px;margin:7px 0}.doc a[id]{scroll-margin-top:110px}.doc a{color:var(--accent);text-decoration:underline;text-decoration-color:#b6cfce;text-underline-offset:3px;overflow-wrap:anywhere}.doc blockquote{border-left:3px solid var(--accent);padding:10px 18px;margin:20px 0;background:#f3f8f7;color:#315761}.table-wrap{overflow-x:auto;margin:18px 0 26px;border:1px solid var(--line);border-radius:8px}table{border-collapse:collapse;width:100%;font-size:13px;line-height:1.7}th,td{text-align:left;padding:12px 13px;border-bottom:1px solid var(--line);vertical-align:top;min-width:115px}th{background:#edf3f3;color:#26515a;font-weight:650;white-space:normal}tr:last-child td{border-bottom:0}tbody tr:nth-child(even){background:#fbfcfc}pre{overflow:auto;background:var(--code);border:1px solid #e1e7ea;border-radius:8px;padding:18px 20px;line-height:1.7;font-size:12px}code{font-family:ui-monospace,SFMono-Regular,Consolas,"Microsoft YaHei",monospace;font-size:.9em;background:#f0f4f5;border-radius:4px;padding:2px 5px}pre code{padding:0;background:none;font-size:inherit}.source-ref{font-size:10px;background:#edf5f4;padding:2px 4px;border-radius:4px;white-space:nowrap;margin:0 1px;text-decoration:none!important}.search-results h1{font-size:27px;margin:0 0 20px}.hit{display:block;border:1px solid var(--line);background:#fff;text-align:left;width:100%;padding:15px 18px;margin:12px 0;border-radius:8px;font:inherit;cursor:pointer}.hit:hover{border-color:#7bacac;background:#f6fafa}.hit b{display:block;font-size:16px;color:var(--accent)}.hit span{display:block;color:#677880;font-size:13px;line-height:1.7;margin-top:5px}.footnote{max-width:1030px;margin:18px auto;color:#71828b;font-size:11px}.sample-header{font-size:13px;color:#61757f}#example-scale{position:relative;width:100%;overflow:hidden;border:1px solid var(--line);border-radius:8px;background:#eef1f3}#example-frame{width:1350px;height:1590px;border:0;display:block;transform-origin:0 0}.active-chapter{color:#526671;font-size:12px}.mobile-shade{display:none}button:focus-visible,input:focus-visible,a:focus-visible{outline:3px solid #80bfc1;outline-offset:3px}@media(min-width:1500px){main{padding-left:65px;padding-right:65px}}@media(max-width:1000px){.sidebar{width:250px;padding-left:14px}main{margin-left:250px;padding:101px 22px 45px}.doc,.search-results{padding:28px 25px 40px}.hero{padding:22px 25px}.hero h1{font-size:26px}.topbar{padding:0 20px;gap:15px}.top-title{font-size:12px}}@media(max-width:700px){.topbar{height:64px;padding:0 14px;gap:12px}.brand{font-size:16px;letter-spacing:1.5px}.brand b{width:8px;height:20px;margin-right:8px}.top-title,.pill{display:none}.menu-toggle{display:block;margin-left:auto}.print{font-size:11px;padding:6px 9px}.sidebar{top:64px;transform:translateX(-100%);transition:transform .15s;width:285px;box-shadow:10px 0 35px #1c334027}.sidebar.open{transform:translateX(0)}main{margin:0;padding:83px 12px 35px}.hero{padding:21px 19px;margin-bottom:15px}.hero h1{font-size:25px}.hero p{font-size:13px}.hero-meta{gap:6px}.doc,.search-results{padding:25px 19px 38px;border-radius:11px}.doc h1{font-size:24px}.doc h2{font-size:20px;margin-top:30px}.doc h3{font-size:17px}.doc p,.doc li{font-size:15px;line-height:1.9}.table-wrap{margin:15px -4px 24px}td,th{font-size:12px;min-width:110px;padding:10px}.mobile-shade.show{display:block;position:fixed;inset:64px 0 0;background:#1d30394d;z-index:14}.footnote{padding:0 8px}pre{font-size:11px;padding:13px}}@media print{.topbar,.sidebar,.hero,.footnote,.search-results,.mobile-shade{display:none!important}main{margin:0;padding:0}.doc{border:0;border-radius:0;padding:0;max-width:none;box-shadow:none}.doc[hidden]{display:none}.table-wrap{overflow:visible}table{font-size:10px}th,td{min-width:0;padding:5px}pre{white-space:pre-wrap;overflow-wrap:anywhere}h2,h3{break-after:avoid}tr{break-inside:avoid}a{color:inherit!important}}
+</style></head><body>
+<header class="topbar"><div class="brand"><b></b>GUOLING</div><div class="top-title">产品路线与创作方案 · 架构复审修订</div><span class="pill">V3.3 · 2026-09-24</span><button aria-label="打开目录" class="menu-toggle">目录</button><button class="print">打印当前章</button></header>
+<aside class="sidebar"><div class="search-box"><input aria-label="搜索方案" id="search" placeholder="搜索正文、Skill 或候选" type="search"/></div><div class="search-hint">离线可读 · 无外部脚本与字体依赖</div><div class="nav-group">主要方案</div><button class="nav-link active" data-target="guide"><span>01</span>阅读指南</button><button class="nav-link" data-target="roadmap"><span>02</span>方向与阶段路线</button><button class="nav-link" data-target="tasks"><span>03</span>2.0开发顺序与完成边界</button><button class="nav-link" data-target="pipeline"><span>04</span>创作流水线与 Skill</button><button class="nav-link" data-target="html-edit"><span>05</span>HTML 轻编辑与保存</button><button class="nav-link" data-target="office"><span>06</span>Office 多方案评估</button><button class="nav-link" data-target="office-test"><span>07</span>Office 测试与性能</button><button class="nav-link" data-target="browser"><span>08</span>浏览器与多格式</button><button class="nav-link" data-target="licenses"><span>09</span>插件、自有能力与许可</button><button class="nav-link" data-target="validation"><span>10</span>教育与用户验证</button><button class="nav-link" data-target="handoff"><span>11</span>Agent 交接提示词</button><button class="nav-link" data-target="sources"><span>12</span>来源与待核实项</button><button class="nav-link" data-target="review"><span>＋</span>架构复审与本轮修订</button><button class="nav-link" data-target="mechanical"><span>＋</span>Skill 机械命令与接线</button><button class="nav-link" data-target="runtime-flow"><span>+</span>Runtime自动轻编辑与Flow承载</button><div class="nav-group">Skill 与约定</div><button class="nav-link" data-target="skill-course"><span>13</span>课程设计 Skill</button><button class="nav-link" data-target="skill-layout"><span>14</span>布局草稿 Skill</button><button class="nav-link" data-target="skill-slot"><span>15</span>局部生产 Skill</button><button class="nav-link" data-target="shell-contract"><span>16</span>带槽 HTML 薄约定</button><div class="nav-group">样例与模板</div><button class="nav-link" data-target="example-guide"><span>17</span>样例使用说明</button><button class="nav-link" data-target="example-plan"><span>18</span>样例：教学策划</button><button class="nav-link" data-target="example-script"><span>19</span>样例：呈现脚本</button><button class="nav-link" data-target="benchmark-guide"><span>20</span>测试模板说明</button><button class="nav-link" data-target="preview"><span>21</span>HTML 框架预览</button></aside><div class="mobile-shade"></div>
+<main><section class="hero"><div class="eyebrow">PRODUCT &amp; ENGINEERING PLAN</div><h1>保留完整作品，补齐运行态轻编辑。</h1><p>先收口现有验收，再于2.0完成Runtime图文自动轻编辑、HTML整体机械导入、Flow整页承载与原生文本框。框架HTML完成后才读编辑器能力；仅更新本方案，不改任务登记。</p><div class="hero-meta"><span>2.0完成必要增量</span><span>保留3份薄Skill</span><span>任务与验收登记不改</span><span>Office路线保持开放</span></div></section><article class="doc" data-doc="guide" id="doc-guide"><div class="doc-path">00_阅读指南.md</div><h1 id="runtime">果铃工作台：高保真创作、Runtime轻编辑与多格式工作空间</h1>
+<p><strong>方案版次：V3.3｜2026-09-25｜Runtime/HTML/Flow增量纳入2.0｜Office选型保持开放｜仅更新本方案包</strong></p>
+<h2 id="_1">本轮修订先读</h2>
+<p><a href="#tasks">02_近期开发任务与验收.md</a>规定2.0开发顺序和完成边界；<a href="#runtime-flow">14_Runtime自动轻编辑与Flow承载.md</a>汇总运行状态、自动图文发现、持久化与Flow接线；<a href="#pipeline">03</a>规定框架HTML之后的独立呈现策略；<a href="#mechanical">13</a>细化机械执行。</p>
+<p>本次只改 <code>guoling_plan_v3_20260924</code> 内的方案、Skill草案和阅读器/清单。<strong>不修改另一执行包、任务卡、task_registry、正式验收登记、根目录方案、AGENTS或产品代码。</strong> 本包35条历史基准定义和所有测试结果也保持原样；新增完成标准写在方案正文，不另建任务台账。</p>
+<p>更新前活动文件备份：<code>_history/V3_2_before_runtime_flow_20260925.zip</code>。历史备份不作为当前实施入口。</p>
+<h2 id="20">2.0规划的调整</h2>
+<p>先收口正在进行的原范围验收并固定稳定基线，再完成：Runtime运行到哪编辑到哪、常见文字/图片自动发现、HTML整体机械保真导入、Flow页面Runtime/原生文本框，以及后置呈现策略与机械Skill闭环；这些不再笼统推迟到2.x。<strong>这是本方案的阶段调整，不是把未完成任务改成已完成，也不是重新登记Codex任务。</strong></p>
+<p>保留现有架构和成熟功能。Runtime轻编辑以DOM/Phaser常见对象及Three已知表示为范围；不承诺任意Canvas像素、任意JS现场或所有网页都可自动深编。对象发现与稳定内容身份分开处理，避免运行中的同一气泡被错当成同一句内容。</p>
+<p>HTML默认整体保留，不先拆Native；原生化是后续有明确收益才做的优化。Flow保留Word式正文，同时支持页面Runtime和paper-space自由原生图层；“插入文字”改为“插入文本框”，正文输入与段落操作仍留在Document体系。</p>
+<h2 id="_2">创作主线</h2>
+<p><strong>教学策划 → 理想呈现脚本 → 高质量框架HTML → 后置呈现策略 → 必要素材/模块生产 → 机械装配 → 果铃工程 → 轻编辑与保存。</strong></p>
+<p>框架HTML完成前不读取编辑器能力、Schema或静态转换白名单。后置策略才选择Slide/Flow/Spatial及Native/Runtime/Component，并明确素材来源；复用三份薄Skill，不增加Agent群。已有完整HTML可直接机械导入，跳过无需执行的模型环节。</p>
+<p>当前HTML人改内容用于后续实现，MD只补未表达的教学背景；工程生成后工程是当前作品，不建立MD、HTML与工程双向同步。独立HTML编辑和工程导入共用编辑能力，保存目的地分别清楚。</p>
+<h2 id="_3">已确定的边界</h2>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>项目</th>
+<th>处理原则</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>2.0主线</td>
+<td>原验收收口后完成Runtime/HTML/Flow/呈现策略增量，再最终收口</td>
+</tr>
+<tr>
+<td>表现力</td>
+<td>保住完整布局、数据与交互；不以Native/Runtime占比衡量质量</td>
+</tr>
+<tr>
+<td>Runtime编辑</td>
+<td>软件自动发现常见图文；绑定优先、正式内容覆盖兜底，仍只有一个writer/History</td>
+</tr>
+<tr>
+<td>Flow</td>
+<td>连续Document正文＋页面Runtime＋paper-space原生图文，不推翻现有正文模型</td>
+</tr>
+<tr>
+<td>原生文本框</td>
+<td>插入按钮/AI工具语义区分自由文本框和正文段落，不删除正文能力</td>
+</tr>
+<tr>
+<td>机械执行</td>
+<td>资源、封装、装配与提交由共享工具完成；不让LLM反复重写已有作品</td>
+</tr>
+<tr>
+<td>验证</td>
+<td>少量代表路径、按变化选测；不逐保存截图、重复全量检查或新增质量网关</td>
+</tr>
+<tr>
+<td>后续</td>
+<td>HTML机械拆Native、任意Slides尺寸、Office全接入、发行工程不作本轮前置</td>
+</tr>
+</tbody>
+</table></div>
+<h2 id="_4">文件导航</h2>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>阅读目的</th>
+<th>文件</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>产品与版本路线</td>
+<td><code>01_产品方向与分阶段路线.md</code></td>
+</tr>
+<tr>
+<td>2.0顺序与完成边界</td>
+<td><code>02_近期开发任务与验收.md</code></td>
+</tr>
+<tr>
+<td>教学/HTML/后置策略/生产分工</td>
+<td><code>03_创作流水线与Skill设计.md</code></td>
+</tr>
+<tr>
+<td>HTML整体导入与保存</td>
+<td><code>04_HTML轻编辑与自动保存.md</code></td>
+</tr>
+<tr>
+<td>Office开放候选与实测方法</td>
+<td><code>05_Office多方案评估.md</code>、<code>06_Office验证计划与性能基线.md</code></td>
+</tr>
+<tr>
+<td>浏览器与其他文件</td>
+<td><code>07_浏览器与多格式工作空间.md</code></td>
+</tr>
+<tr>
+<td>插件、自有能力与许可</td>
+<td><code>08_插件化_自有能力与许可.md</code></td>
+</tr>
+<tr>
+<td>教育与用户验证</td>
+<td><code>09_教育切入与用户验证.md</code></td>
+</tr>
+<tr>
+<td>后续实施交接</td>
+<td><code>10_Agent实施交接提示词.md</code></td>
+</tr>
+<tr>
+<td>来源、历史审查和局部优化</td>
+<td><code>11_来源与待核实项.md</code>、<code>12_架构复审与本轮修订.md</code></td>
+</tr>
+<tr>
+<td>机械工具、Skill加载与提交</td>
+<td><code>13_Skill机械命令与执行合同.md</code></td>
+</tr>
+<tr>
+<td>Runtime自动轻编辑、状态与Flow技术边界</td>
+<td><code>14_Runtime自动轻编辑与Flow承载.md</code></td>
+</tr>
+<tr>
+<td>未安装的方法草案</td>
+<td><code>skills/</code></td>
+</tr>
+<tr>
+<td>静态输入夹具与历史基准模板</td>
+<td><code>examples/</code>、<code>benchmarks/</code></td>
+</tr>
+<tr>
+<td>离线可搜索阅读页</td>
+<td><code>index.html</code></td>
+</tr>
+</tbody>
+</table></div>
+<h2 id="_5">使用与证据边界</h2>
+<p>开发Agent只读当前工作需要的章节，不把整包当系统提示。真正实现前核对相关现行代码，不据旧审查行号直接改代码。方案本身不自动授予产品修改、安装、付费调用或任务登记权限。</p>
+<p>本轮依据为Owner连续产品决定、当前方案正文及本会话先前对Runtime/Flow/Spatial代码的定向阅读；未重跑听力样例、启动果铃、测试自动编辑/导入或重新实测第三方方案。12区分历史源码事实、旧V7案例与规划推论。源码中有字段不等于运行/编辑已接通。</p>
+<p>Office研究与来源编号沿用原包，未在本轮刷新商务/许可/第三方状态；实际选型时再核验。所有Skill、工具与新增能力仍是方案，不伪称实现或验收通过。</p></article><article class="doc" data-doc="roadmap" hidden="" id="doc-roadmap"><div class="doc-path">01_产品方向与分阶段路线.md</div><h1 id="_1">产品方向与分阶段路线</h1>
+<h2 id="1">1. 从教育内容进入，保留通用工作空间的演化能力</h2>
+<p>近期产品承诺：教师把现有材料交给果铃，能得到教学逻辑完整、视觉表达有效、可运行且可继续修改的内容；人能直接调整，AI能在明确目标内继续修改，保存重开后仍可用。</p>
+<p>教育是用户和内容入口，不是底层架构的永久边界。未来扩展先选择相邻任务：培训、讲解、研究展示、可视化报告和内容制作。每个扩展都需证明现有能力可以低增量支持，不能把“最终适用于所有电脑工作”拆成今天的所有研发任务。</p>
+<p>近期自有价值主要来自四件事：有实际教学质量的设计；可运行的原生/混合内容；人和AI可以可靠接力；作品与材料在工作区内持续积累。普通浏览与Office兼容服务于这个闭环。</p>
+<h2 id="2">2. 四条研发线，只有一条产品主线</h2>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>研发线</th>
+<th>作用</th>
+<th>资源原则</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>原生/Runtime创作与轻编辑</td>
+<td>直接决定作品是否值得使用</td>
+<td>当前主线</td>
+</tr>
+<tr>
+<td>工作空间与打开能力</td>
+<td>减少在其他软件之间来回切换</td>
+<td>分批建设薄能力</td>
+</tr>
+<tr>
+<td>Office 候选验证</td>
+<td>降低选型不确定性</td>
+<td>有限实验，不阻断主线</td>
+</tr>
+<tr>
+<td>插件/自研扩深</td>
+<td>在真实需求下扩展上限</td>
+<td>达到触发条件再做</td>
+</tr>
+</tbody>
+</table></div>
+<p>建议同时只保留一个主要交付目标、一个边界清楚的小实验。不是因为不能并发调用 Agent，而是避免同一人承担多套未稳定系统的验收与维护。</p>
+<h2 id="3">3. 分阶段路线</h2>
+<h3 id="a20">阶段 A：2.0既有范围收口</h3>
+<p>先完成正在进行的原范围验收，修掉实际保存、取消、锁定、资源或主链阻断，固定可回退基线。不借本轮方案重验已经稳定的全部底座，也不改现行任务/验收状态。原范围通过不能自动覆盖下一阶段的新能力。</p>
+<h3 id="b20">阶段 B：2.0创作能力增量与最终收口</h3>
+<p>本阶段明确属于2.0，不再作为2.0后的可选试点。依次打通Runtime当前状态图文轻编辑与常见对象自动发现、HTML整体机械保真导入、Flow页面正文承载/原生文本框、所需三表面接线，以及框架HTML之后的专门呈现策略和机械Skill生产链。详细顺序与停止条件见02、技术边界见14。</p>
+<p>保留复杂区域的完整实现，默认全Runtime导入；Native继续承担独立图文和已有高价值深编，不扩一套万能节点语言。DOM/Phaser常见图文和Three实际可访问的已知表示分层支持，不将全部Canvas自动可编列为承诺。HTML编辑与Runtime编辑共用命中/UI，持久化都进入现有正式会话。</p>
+<p>教学与框架HTML设计不先读编辑器能力，后置呈现策略才选择承载；保留三份薄Skill，机械步骤由程序执行。已有成品可跳过模型策略直接导入。不把“增加一个专门职责”扩成多Agent审查流水线。</p>
+<p><strong>出阶段证据：</strong> 听力后续状态可改、常见无expose引擎图文可改、长网页Flow/原生文本框可用，并有一个新建作品闭环；修改能保存重开与必要HTML导出，关键视觉/交互不退化。选测复用既有证据，不建全组合矩阵。安装包/便携版、Office全接入、机械拆原生与Slides任意尺寸不作前置。</p>
+<h3 id="c">阶段 C：文件与网页成为自然的工作区内容</h3>
+<p>建设普通网页浏览、本地HTML、PDF、图片、文本和媒体的打开；加入收集素材、选区交给AI和当前文件状态。通用网页应有独立会话与权限，不能复用主界面文件写权限。Electron官方对远程内容嵌入与安全边界有具体要求。<a href="#sources/S01">S01</a><a href="#sources/S02">S02</a></p>
+<p>2.0的HTML导入/轻编辑只依赖安全本地渲染宿主，不需要等待本阶段完整浏览器地址栏、登录和下载管理。但可以共用Tab、缩放、文件生命周期等代码。</p>
+<p><strong>出阶段证据：</strong> 老师能把真实材料放进工作区并快速查阅；打开过程中主界面不被长时间阻塞；本地修改不会误写远程页面或其他文件。</p>
+<h3 id="doffice">阶段 D：图片轻编辑与Office能力试接</h3>
+<p>图片裁剪/替换先连接素材生产链。Office保持候选池：直接渲染、完整WebOffice、本地文档引擎＋Web UI、WASM运行时、按格式组合，都可以试；评估顺序不等于最终产品方案。</p>
+<p>若现成WebOffice已经同时满足打开速度、手动编辑和许可要求，可以直接获得二者；不强制先做一套只读查看器。若轻量查看器明显满足当前需求，也可以先采用它，但不能把预览DOM可改等同于可保存回Office源文件。</p>
+<p><strong>出阶段证据：</strong> 对同一组真实文件有可复查的冷/热启动、首屏、编辑、保存和显示偏差记录；候选淘汰有证据，而非依据“纯前端一定快”或“套件一定重”。</p>
+<h3 id="e">阶段 E：教师工作空间、复用与付费验证</h3>
+<p>把已好用的课程、素材、组件和制作方法变成复用资产，测量第二次、第三次真实任务。补最常见的检索、项目归档、素材复用和分享，不提前建设企业级协同、组织权限和插件商城。</p>
+<p><strong>出阶段证据：</strong> 一批用户不依赖创始人代做也能完成作品，持续复用并愿意为节省的工作量付费；证据可以很小，但必须真实。</p>
+<h3 id="f">阶段 F：更多格式、插件与自有深编</h3>
+<p>当用户真实任务因某格式缺失而中断，或某Provider的费用、API、稳定性持续成为瓶颈，再补该格式。一种格式可以先查看、再有AI定向修改、再有限手改，也可以通过套件一次获得多种能力；不是统一的强制阶梯。</p>
+<p>公共插件SDK从已运行的适配器提炼。自有编辑扩深优先围绕已反复出现的高价值动作，不立项重造完整Office、通用分页引擎或全公式引擎。</p>
+<h2 id="4">4. 功能分工与当前态度</h2>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>能力</th>
+<th>自有/复用方向</th>
+<th>当前动作</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>教学设计、脚本、原生互动表达</td>
+<td>自有方法与内容资产</td>
+<td>加强</td>
+</tr>
+<tr>
+<td>原生对象编辑、锁定与提交</td>
+<td>自有交互及稳定状态</td>
+<td>先稳定</td>
+</tr>
+<tr>
+<td>HTML导入与图文轻编辑</td>
+<td>受管文档宿主＋Runtime共享编辑</td>
+<td>2.0完成整体导入与保存</td>
+</tr>
+<tr>
+<td>浏览器/PDF/媒体</td>
+<td>复用成熟底层</td>
+<td>有界接入</td>
+</tr>
+<tr>
+<td>Office显示与编辑</td>
+<td>多路线开放</td>
+<td>先测，不定型</td>
+</tr>
+<tr>
+<td>图片处理</td>
+<td>复用处理库与有限UI</td>
+<td>接到素材链</td>
+</tr>
+<tr>
+<td>通用Computer Use</td>
+<td>后台验证先行</td>
+<td>不独立扩成平台</td>
+</tr>
+<tr>
+<td>操作日志偏好学习</td>
+<td>不是当前关键路径</td>
+<td>暂缓</td>
+</tr>
+<tr>
+<td>自研Office内核</td>
+<td>需团队与明确需求</td>
+<td>暂缓</td>
+</tr>
+<tr>
+<td>插件市场/复杂生态治理</td>
+<td>需第三方开发者</td>
+<td>暂缓</td>
+</tr>
+</tbody>
+</table></div>
+<h2 id="5">5. 何时增加投入，何时停止扩张</h2>
+<p>增加投入的依据是用户实际任务、重复使用、可靠性和单位成功成本，不是支持格式数或框架层数。技术实验在约定的小范围没有改善时，应回退、改用现成方案或暂缓，不通过扩大架构来延长实验。</p>
+<p>长期可拥有更深的编辑系统，但近期不以融资/收购的推测来决定技术深度。融资准备围绕可重复产品表现、用户返回、付费和清晰的技术资产归属展开，详见用户验证文档。</p>
+<h2 id="6-v33">6. V3.3保留的架构边界</h2>
+<p>保留现有统一执行器、同源工具、DocumentSession及成熟课件能力。OJ/OE等局部优化与新功能按实际热点穿插，不另设“完美架构”阶段。HTML以源文接入，Office内部模型和细粒度History按Provider能力保留，宿主维护唯一活动writer与保存边界。教育方法可选，不把通用Agent固化成教师专用任务机。质量保障是已有交付的要求，不新增常驻检查层；MCP供外部Agent调用果铃，果铃调用外部Agent仍按CLI薄runner方向，不恢复三CLI深度适配。</p></article><article class="doc" data-doc="tasks" hidden="" id="doc-tasks"><div class="doc-path">02_近期开发任务与验收.md</div><h1 id="20">2.0开发顺序与完成边界</h1>
+<p><strong>V3.3｜2026-09-25｜只修订本方案包，不修改任务登记或验收状态。</strong> 按Owner本轮决定，Runtime当前状态轻编辑、常见图文自动发现、HTML机械式保真导入、Flow网页承载/原生文本框、后置呈现策略及机械Skill闭环纳入2.0阶段完成范围；不再笼统推迟到2.x。</p>
+<h2 id="1-20">1. 先收口当前基线，再完成2.0能力增量</h2>
+<p>Owner报告现有Codex验收剩3项。先完成正在进行的旧范围验收并固定可回退基线，再改Runtime/Flow相关链路；不一边验收旧实现一边改它的运行内核。若旧范围最后一项本身是总范围核对，保留它对旧范围的结论，新增能力完成后再做最终范围核对，不形成循环依赖，也不据旧范围通过宣称本轮新增能力完成。</p>
+<p>本包描述开发建议与完成标准，不直接新增、重排、关闭S/M任务，不写task_registry、正式acceptance_cases、TASK_BOARD或任何现有任务卡。后续实施由实际开发会话按授权接续。保留现有DocumentSession、单writer/History、Gateway、执行器、资源、构建、MCP入站与CLI薄runner方向；不重构已经稳定的底座。</p>
+<h2 id="2">2. 建议实施顺序</h2>
+<p>以下是方案中的工作顺序，不是新的任务编号或固定多Agent流水线。运行入口、目标身份、保存必须由同一集成人协调；明确非重叠的界面文案和Skill草案可并行。</p>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>顺序</th>
+<th>本轮交付</th>
+<th>到此即可结束</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>现有验收收口</td>
+<td>完成旧范围剩余工作，保留构建/差异与可回退点</td>
+<td>不重复全仓审查；未通过项如实留存，不为新方案篡改旧证据</td>
+</tr>
+<tr>
+<td>当前状态编辑与自动图文目标</td>
+<td>在已有Runtime宿主/选择/提交链上，先贯通DOM与Phaser常见文字、图片，覆盖场景和组件；Three做已知可访问表示</td>
+<td>运行到后续状态→进入编辑仍在这里→修改文字/换图→恢复运行；保存重开后修改仍在，跨句/重复对象不串改。详见14</td>
+</tr>
+<tr>
+<td>HTML整体机械导入与共享轻编辑</td>
+<td>本地HTML及其受支持依赖由程序封装，默认全Runtime；DOM编辑复用上一层，静态HTML可直接保存源文，动态HTML明确持久化方式</td>
+<td>用已有HTML真实导入、改字换图、保存重开和HTML导出；无LLM重设计或强制拆原生。首次对照定位问题，不建评分系统</td>
+</tr>
+<tr>
+<td>Flow整页承载与自由图层</td>
+<td>将现有Flow Surface Runtime补为真实编辑/运行的页面正文承载，处理内容高度、滚动与坐标；Flow“插入文字”改为原生文本框</td>
+<td>长网页能滚到末尾、编辑不跳回初态；插入文本框/图片/箭头随paper滚动，正文仍可正常输入与回车，保存重开成立</td>
+</tr>
+<tr>
+<td>三表面接线与呈现策略/Skill</td>
+<td>补本轮所需Slide/Flow/Spatial Runtime运行与编辑缺口；在框架HTML完成后，单独决定载体，再接现有素材/装配工具</td>
+<td>空间画布中相机移动不破坏命中；一个新建教学作品从文稿/HTML到工程与局部修改闭合；教学/HTML设计阶段未提前加载编辑器能力</td>
+</tr>
+<tr>
+<td>2.0最终收口</td>
+<td>合并上述结果，仅复验受影响行为和新增承诺</td>
+<td>关键内容/行为不缩水，编辑能持久化，支持与限制清楚；不以安装包或Office全接入作为完成前置</td>
+</tr>
+</tbody>
+</table></div>
+<p>HTML包装器可在Runtime编辑接口稳定后并行实现；Flow的整页占位/高度设计应在导入样例时一起确认，不把长网页留到最后才发现放不下。三表面只补这些能力用到的挂载、状态、坐标与保存，不顺带重造完整局部Interaction系统。</p>
+<h2 id="3-20">3. 2.0承诺的具体边界</h2>
+<p><strong>必须交付：</strong> 支持对象的文字替换与图片替换；运行到哪编辑到哪的会话内操作；DOM和Phaser常见图文自动发现，不要求AI逐个expose；Three已有可访问的Sprite图片/DOM文字等已知模式；场景与组件复用编辑机制；HTML整体保真导入；Flow网页正文承载和原生文本框；后置呈现策略及机械装配。未支持对象保留显示，不伪装可编辑。</p>
+<p><strong>不扩大为：</strong> 任意JS现场序列化、所有Canvas像素逆向、烘焙文字识别、任意React状态到源码反编译、通用DOM自由拖排、任意HTML全原生转换、Three任意材质/几何深编、三表面全部特性完全等同。已有原生拖拽、参数或富文本能力保留，不以本轮轻编辑边界为由删除。</p>
+<p>Slides任意尺寸值得后续参数化，但当前1280×720假设涉及命中/导出/编辑边界，本轮通过Flow承载长网页，不把全局画布尺寸重构加为前置。原生拆分是后续可选优化，不是HTML导入或2.0完成的必要条件。</p>
+<h2 id="4">4. 足够的代表性验证，不建立全组合矩阵</h2>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>代表路径</th>
+<th>只验证关键差异</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>听力HTML</td>
+<td>原HTML与机械导入结果的少量关键画面/操作；切到后续句改原文/译文和图片，保存重开/导出；尤其确认同一气泡复用于不同句时不串改</td>
+</tr>
+<tr>
+<td>无expose的引擎样例</td>
+<td>一个小型Phaser场景及组件，文字/图片自动出现为可编辑目标；容器变换与对象重建后匹配正确；Three只对实际支持的表示补最小例子</td>
+</tr>
+<tr>
+<td>长网页与Flow</td>
+<td>至少超过一屏的真实流式HTML，改字后高度变化；末尾可达，原生文本框随paper滚动，切编辑/运行不漂移。含sticky/视口依赖时核对选定承载方案</td>
+</tr>
+<tr>
+<td>新建教学作品</td>
+<td>教学与呈现稿→框架HTML→后置载体决策→必要素材/模块→机械装配→局部改动；不是仅特配已有听力页</td>
+</tr>
+</tbody>
+</table></div>
+<p>多种行为可由同一份样例覆盖，不展开成引擎×表面×状态的全乘积。保存、撤销、锁定、资源与取消已有测试直接引用；只有改到该边界才补相应回归。失败定位后修相关路径，不要求全部历史测试在每个小批次重跑。</p>
+<p>原听力文件来自本轮会话，V7工程只是失败参考，不用它代表当前V9。原文件不在本包；后续从已授权位置取得，不制作相似文件冒充。F-CURRENT三方诊断只在确需归因时补一次，默认直接比较原HTML与导入结果，不强制每次再花模型额度生成第三份。原HTML自身缺陷另记，不把复制缺陷算保真。</p>
+<h2 id="5">5. 日常执行的轻量边界</h2>
+<p>机械导入/资源搬运/装配不调用LLM；新教学内容、新素材和必要新代码才由模型负责。已有成品直接导入可跳过教学、框架生成及模型载体决策；已有代码已检查且未改变时复用结果。</p>
+<p>权限、来源/目标版本、取消、资源引用、正式提交与保存反馈沿用当前入口。正常改字不触发全工程扫描、全资源hash、重编译、截图或视觉Agent。截图/人工对照只在首次接入、相关渲染变化或怀疑退化时使用。关键交互丢失和误保存必须修，像素细差不构成无限重试理由。</p>
+<p>本包benchmarks中的35条历史定义保留原样，不增加ID、不写测试结果、不当本轮正式任务台账。新增能力的完成判据以本页和14为准，由后续实现按实际差异选择已有测试或补最小检查，而非再建一套验证平台。</p>
+<h2 id="6">6. 其他路线和停止条件</h2>
+<p>Office多方案研究与普通文件打开保留，不借本轮扩张Office内核、插件市场、完整浏览器或发行工程。若出现Journal增长或高频事件延迟，复用12中的OJ/OE做局部优化；不先建设完美架构。</p>
+<p>未取得稳定内容身份，就不能用“发现了对象”冒充“修改可持久化”；先缩小该类对象支持范围或补确定的绑定，不引入语义猜测/多Agent复审。现有成熟原生节点不删，不设置Runtime占比KPI；根据完整作品质量、修改收益及维护成本选择表示。</p>
+<p>最终报告区分文档检查、产品实现、实际测试和Owner接受。本轮只更新方案，不提前声称上述能力已完成。</p></article><article class="doc" data-doc="pipeline" hidden="" id="doc-pipeline"><div class="doc-path">03_创作流水线与Skill设计.md</div><h1 id="skill">创作流水线与Skill设计</h1>
+<p><strong>V3.3｜2.0阶段方案。</strong> 教学与框架HTML先独立设计，完成后才读取编辑器能力、决定实现载体。保留三份薄Skill和现有执行器，增加的是职责明确的后置决策，不是Agent群或新的工作流平台。</p>
+<h2 id="1">1. 单向创作链</h2>
+<pre><code class="language-text">教学需求/材料
+  → 教学策划MD
+  → 理想呈现脚本MD
+  → 高质量框架HTML（真实文案与必要素材/互动槽）
+  → 专门的呈现策略环节（此时首次读取果铃能力）
+  → 必要素材/Runtime/组件生产
+  → 程序封装装配
+  → 果铃工程 → 人工轻改/AI局部修改 → 保存
+</code></pre>
+<p>文稿只在任务需要时生成；已有稿可沿用。框架HTML可以表达理想布局与交互意图，不必在策略前把所有素材和机制全部做成成品，也不能为可转换性先删掉想要的效果。策略阶段保留已经完成的完整实现，未实现部分再按实际能力补齐。</p>
+<p>已有HTML直接走确定性整体导入；没有需要权衡的拆分/生成时，跳过模型策略、教学稿与框架生成。用户明确要求局部原生化或需要改造时，再调用后置策略。日常改字换图不重走生产链。</p>
+<h2 id="2">2. 设计阶段的信息边界</h2>
+<p>教学设计只读目标、学习者、材料、时长和教学背景；呈现脚本写真实上屏文字/公式、讲稿、关键状态、教师/学生动作与素材目的。框架HTML设计继续以表达质量为目标，可用自然的Web布局，不提前读Native/Runtime限制、节点Schema、Builder、静态映射白名单或能力索引。</p>
+<p>宿主按阶段加载上下文；不能先给模型全套编辑器能力，再让它“假装没看过”。优先复用现有按需加载/阶段输入机制，必要时用独立设计调用隔离已污染的上下文，不新建执行器。设计可以读通用文件/HTML知识、已给素材和用户约束；轻量片段标识由程序补足，不把机器合同前置为教学设计条件。</p>
+<p>精确数学关系和公式要使用可核对的表达，不让生图替代推导。录播可视化、教师控制与学生答题分别设计，不固定页数、动画比例或互动数量。</p>
+<h2 id="3-html">3. 呈现策略：独立职责，紧接框架HTML</h2>
+<p>输入是当前HTML、必要呈现说明、用户实际编辑需求，以及精简且真实的果铃能力摘要。输出是少量区域及承载选择，保留在当前任务上下文即可；不要求教师维护新JSON，不生成评分报告或固定复审轮。</p>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>决策</th>
+<th>内容</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>空间组织</td>
+<td>演示页→Slide；连续网页/讲义→Flow；空间关系与镜头→Spatial。这是后置实现选择，不反过来限制教学</td>
+</tr>
+<tr>
+<td>内容实现</td>
+<td>独立且有编辑收益的对象可Native；共享布局/状态的完整区域优先Runtime或现有Component</td>
+</tr>
+<tr>
+<td>素材来源</td>
+<td>复用或生成的图片/音视频/图解，并明确放在哪个Native或Runtime区域；素材不是与载体互斥的第三种宿主</td>
+</tr>
+<tr>
+<td>实际缺口</td>
+<td>缺素材、当前宿主未支持或需要最小适配，明确到区域；不因无法原生化而重画整页</td>
+</tr>
+</tbody>
+</table></div>
+<p>通常一小段区域表即可，理由只在有权衡处写一句。不要为了表示规划固定多次模型调用；已有整页HTML默认整体Runtime可由程序选择。策略后才把具体Schema/API按所选实现加载给生产阶段。</p>
+<h2 id="4">4. 原生化不是交付前提</h2>
+<p>原生对象是编辑成本低、适合独立操作的路径，不是所有内容的唯一表达语言。复杂听力界面的图片、气泡、译文、列表和播放进度共享逻辑，应优先留在一个模块内。不要仅为了“可编辑”拆成多个互不协调的布局主体。</p>
+<p>HTML机械导入首版默认全Runtime，包括长网页的Flow正文承载；原生图文可另行叠加。后续只在保真和收益明确时做机械拆分，不以转换率、节点数量或固定Runtime比率作为质量指标。已有成熟原生能力保留。</p>
+<p>Runtime常见图文由宿主自动发现，AI无需逐个写expose。生成实现仍保留可读内容数据，已有稳定ID继续使用，特殊自绘对象可走现有显式接口。自动发现、内容身份、持久化的边界见14，不用提示词枚举补全来冒充软件能力。</p>
+<h2 id="5-skill">5. 三份薄Skill如何分工</h2>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>Skill草案</th>
+<th>负责什么</th>
+<th>何时加载能力</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>guoling-course-design</td>
+<td>教学策划与理想呈现脚本</td>
+<td>不读编辑器能力</td>
+</tr>
+<tr>
+<td>guoling-layout-shell</td>
+<td>真实框架HTML/完整Web呈现</td>
+<td>框架完成前不读编辑器能力或shell-contract</td>
+</tr>
+<tr>
+<td>guoling-slot-build</td>
+<td>先执行后置呈现策略，再按区域生产、复用与交付机械装配</td>
+<td>先短能力摘要，选择后只读必要Schema/API</td>
+</tr>
+</tbody>
+</table></div>
+<p>第三份Skill的策略部分与生产部分职责分开；不是让教学模型顺手决定实现，也无需为策略再建一个独立Agent、权限体系或常驻服务。已有HTML机械导入不必激活三份Skill。</p>
+<p>现有安装版Skill或根提示若仍含“Runtime少放文字”“稳定图文必须原生”等旧规则，后续获得实现授权时与实际新入口同步调整；本轮只改本包草案，不改已安装Skill或根AGENTS。</p>
+<h2 id="6">6. 机械职责与素材</h2>
+<p>程序负责读取当前来源、资源提取/登记、确定的ID/引用、HTML包装、已支持的原生构造和正式导入；模型负责教学、视觉、新内容及必要编程。沿用13的三个拟新增工具名，已知步骤直接调用内部函数，不请LLM每次重新抄坐标或编封装脚本。</p>
+<p>有槽时使用当前HTML的brief、尺寸、局部风格与必要MD片段；删掉的槽不复建。完整模块已有素材/数据时一起保留，无槽跳过准备。不增加每个Skill自己的保存、重试、验证或runner。</p>
+<p>精确图解使用可核对的SVG/图形/代码；装饰插图可走已授权图像Provider。没有某类实际生产能力就说明，不用静态后备冒充互动、不创建假视频。</p>
+<h2 id="7">7. 当前来源、修改与保存</h2>
+<p>HTML内已确定或人改的文案、布局和槽以当前HTML为准，MD只补尚未表达的教学背景。工程生成后工程是当前作品，原HTML/MD保留作来源；不建自动双向同步，不根据文件时间把旧稿覆回。事实冲突单列，不把“下游优先”当作事实正确性保证。</p>
+<p>Runtime修改进入同一正式工程/文件会话，撤销、保存与导出读取一致内容。独立HTML轻编辑与工程Runtime复用命中/UI，但保存目的地分别清楚。普通编辑直接提交；新动态内容仍走既有受控构建/准入。</p>
+<h2 id="8">8. 交付检查</h2>
+<p>开发期比较已有HTML与导入结果，检查关键内容、操作和实际修改保存；再用一个新建作品确认流程成立。依赖未变时复用既有结果，小改不截图全工程、不固定三路生成、不增加审美Agent或质量网关。编译、应用、保存和用户接受是不同事实，按实际结果报告。</p></article><article class="doc" data-doc="html-edit" hidden="" id="doc-html-edit"><div class="doc-path">04_HTML轻编辑与自动保存.md</div><h1 id="html">HTML高保真导入、轻编辑与保存</h1>
+<p><strong>V3.3｜纳入2.0阶段。</strong> 首版机械式整体Runtime导入，不先拆原生节点；HTML与Runtime共用图文发现/编辑能力，来源保存和工程保存分别接现有文档服务。技术细节见14，实施顺序见02。</p>
+<h2 id="1">1. 两个明确入口</h2>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>入口</th>
+<th>正式内容归属</th>
+<th>用户得到什么</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>打开/轻编辑HTML</td>
+<td>当前HTML文件会话及受管资源</td>
+<td>可运行受支持HTML，改字/换图并可靠保存或明确另存</td>
+</tr>
+<tr>
+<td>导入为果铃工程</td>
+<td>工程内完整HTML/Runtime、资源与修改数据</td>
+<td>保留原作品，可在Slide/Flow/Spatial适合的空间中运行、轻编辑并叠加原生对象</td>
+</tr>
+</tbody>
+</table></div>
+<p>第二个入口不强迫修改原HTML；工程修改不自动反写上游MD/HTML。第一种入口不能只改临时DOM后显示已保存；不能把另存工程说成已经写回原HTML。两者共享编辑能力而非强行统一文件格式。</p>
+<h2 id="2">2. 确定性的导入路径</h2>
+<pre><code class="language-text">读取已授权HTML和实际依赖
+ → 保留原文档/CSS/脚本/数据
+ → 提取或登记受支持资源，处理基址和必要打包
+ → 确定性包装为受管HTML/Runtime内容
+ → 既有必要准入与正式导入
+ → 同一DocumentSession、History、资源和保存
+</code></pre>
+<p>已有完整HTML默认跳过模型规划，保留原实现；用户要求重排、拆分或新增素材时才用后置策略。机械步骤不调用LLM，不把“照着网页重写一遍”算作导入。</p>
+<p>先支持自包含HTML和依赖可收集的本地页面；缺失资源、需要服务器后端/登录态或未授权远程依赖时明确限制，不假装任意网站都能离线搬走。不为支持外部网页偷偷放开文件、凭据、远程脚本或OS能力。</p>
+<p>原生化是可选后续优化。固定演示页可进Slide，流式长网页优先Flow页面Runtime，空间内容进入Spatial模块；不把所有HTML强塞1280×720，不要求先全面参数化Slides。</p>
+<h2 id="3">3. 保真首先是保留浏览器语义</h2>
+<p>当前Runtime需define/create生命周期，且受管DOM根不等于完整document。不能把HTML塞入runtime.source，也不能仅把body.innerHTML复制到Shadow DOM就宣称高保真；脚本、head/CSS、相对路径、字体、viewport与滚动依赖都需在受管包装中保留。</p>
+<p>优先复用现有隔离预览/内容宿主和资源服务；需要完整HTML文档环境时在该路径补窄document承载，不另造浏览器内核。源码尺寸限制不能通过把大型HTML/base64全部内联进runtime.source绕过，正文与依赖按现有归档/构建扩展点管理。</p>
+<p>Shadow DOM主要隔离样式，不是任意代码的安全沙箱。导入内容不能获得Node、原始IPC或Provider Secret。沿当前信任与准入规则处理代码，不为本轮扩成通用OS沙箱工程。</p>
+<h2 id="4">4. 共用的轻编辑能力</h2>
+<p>文字替换与图片替换是本轮核心；DOM、Phaser、Three已知模式按14逐步接通。无expose的常见图文也应能被软件发现；动态对象身份不明确时保留显示并标明限制，不把临时命中ID直接持久化。</p>
+<p>原生层既有移动/缩放/样式继续可用；已有受控HTML草稿外框编辑不删，但任意网页自由拖排不是这轮前置。HTML内部图片换资源默认保留现有布局/裁切规则，不意外改形状，不更换其他共享引用。</p>
+<p>公式、烘焙图文、复杂富文本和表单值不以普通textContent替换处理。先复用已有明确编辑入口，否则只读/AI源码修改；不得破坏子DOM、事件或业务判定后仍报告成功。</p>
+<h2 id="5">5. 保存方式与自动保存</h2>
+<p>静态HTML在能准确定位源文时修改对应内容，保留doctype、head、样式与未改区域；只清理宿主编辑手柄/临时桥，不删除原业务脚本。无法可靠回写的脚本生成内容，使用14中的正式数据绑定或窄内容覆盖，导出时带入必要恢复逻辑。持久数据由文件或工程会话管理，不用localStorage/当前DOM快照替代。</p>
+<p>正文输入在IME结束和有界编辑确认后提交，图片替换/手势结束后提交，一次用户动作接一次撤销；保存沿现有队列/失败反馈。只有磁盘写入回执成功才显示已保存。切Tab/关闭处理未完成提交，但不引入第二保存器、逐指针事件全量History或独立layout.overrides文件。</p>
+<p>来源、目标身份/版本、权限与取消沿用既有协调。冲突保留用户稿，不静默覆写；原资源与新引用可由现有资源系统追踪，不每次保存重新hash整个工作区。准入与安全在实际改变处验证一次，不每个Skill重复跑。</p>
+<h2 id="6-flow">6. Flow长网页与叠加对象</h2>
+<p>将Flow现有Surface Runtime补为页面主内容，不只当绝对定位浮层。页内实际占位撑开滚动范围，编辑态也运行真实内容；正文文档模式继续保留。高度测量通常只更新布局缓存，不连续写frame.height和撤销栈。</p>
+<p>普通纵向HTML优先Flow统一滚动；强viewport/sticky/window-scroll依赖页面保持原文档视口语义，包装中明确主滚动所有者，并对齐外层命中/批注。不能把整页iframe拉成scrollHeight当万能方案。第一版自由图文按清楚的设计宽度布置，不承诺响应式重排后自动附着原段落。</p>
+<p>Flow“插入文字”改为创建paper-space原生文本框；段落输入、回车与标题仍走当前Document正文。新增图片/箭头等复用已有原生层；不将网页原有全部文字拆成自由文本框。详见14。</p>
+<h2 id="7">7. 和框架设计、素材生产的关系</h2>
+<p>框架HTML完成前不读取编辑器能力或静态原生转换白名单；后置呈现策略才决定Surface、载体和素材。HTML可先带真实文案与必要槽，不要求提前把互动全部做完。当前HTML人工修改优先，MD补教学背景；删槽不复建。</p>
+<p>shell.inspect/slot.prepare/shell.assemble是13中的拟新增薄工具，不代表已实现。完整页面无槽可直接封装；局部新内容按实际需要生产，保存与导入共用已有正式链。</p>
+<h2 id="8">8. 一次完成验证，日常按变化检查</h2>
+<p>使用听力案例和一个长网页：看少量关键状态/操作，修改后保存重开并导出HTML验证。没有必要给每次导入运行三次模型、像素级差分或视觉评分。原HTML自身缺陷与导入退化分开记录。</p>
+<p>网页在线依赖不等于离线失败后可静默删掉；动态行为不能靠静态截图冒充。PDF/PPTX的动态内容保持既有明确后备/报告，不把互动无损变为Office当2.0承诺。普通互联网浏览器、Office选型与任意HTML机械拆原生仍单独后置。</p></article><article class="doc" data-doc="office" hidden="" id="doc-office"><div class="doc-path">05_Office多方案评估.md</div><h1 id="office">Office 多方案评估：保留路线，不预定赢家</h1>
+<p><strong>结论状态：未选型。</strong> 本文区分官方已公开能力、工程推断和需要实测的项目。没有任何候选已在果铃中完成性能或文件兼容验收。候选顺序不代表推荐排名。</p>
+<h2 id="1">1. 目标与边界</h2>
+<p>Office在近期承担：打开已有材料、阅读、必要的选区上下文、按需手动编辑或AI修改、保存回用户能够继续使用的文件。它服务于教育工作空间，不要求果铃重造完整办公软件。</p>
+<p>优先要求：普通本地文件快速可读、主界面不被阻塞、内容大致正确、版式可接受；不能用错误数值、漏页、丢图表来换“快”。可以接受部分字体、分页和装饰细节差异，但要有边界提示。</p>
+<p>允许一次接入现成编辑器，同时解决查看与手改；也允许先用只读渲染库。<strong>不规定“先只读后编辑”，也不规定“所有文件都要加载完整WebOffice”。</strong></p>
+<h2 id="2">2. 五条可行路线</h2>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>路线</th>
+<th>数据和引擎在哪里</th>
+<th>潜在收益〔工程判断〕</th>
+<th>必须验证的代价</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>A 直接解析＋浏览器查看</td>
+<td>本地解析Office并渲染为HTML/SVG/网格</td>
+<td>无需上传，UI可贴合果铃，可能首屏较快</td>
+<td>解析/渲染覆盖、长任务、字体；不自带源格式编辑</td>
+</tr>
+<tr>
+<td>B 成套WebOffice服务</td>
+<td>文件服务＋文档服务＋网页编辑器</td>
+<td>查看、手改、保存与对象API一起获得</td>
+<td>上传/取文件、会话、网络、计费和保存回调</td>
+</tr>
+<tr>
+<td>C 本地引擎＋Web UI</td>
+<td>原生文档引擎本地运行，Web承载界面</td>
+<td>免文档上传，复用较完整引擎</td>
+<td>SDK可拆性、构建、体积、平台、发行许可</td>
+</tr>
+<tr>
+<td>D 浏览器WASM套件</td>
+<td>引擎与文件主要在客户端</td>
+<td>可本地运行、JS桥接控制</td>
+<td>初装、WASM初始化、线程/内存、持久化与输入体验</td>
+</tr>
+<tr>
+<td>E 原生编辑框架＋格式桥</td>
+<td>自有/第三方对象模型，加Office文件交换</td>
+<td>更易控制选择和命令，可逐渐做深</td>
+<td>格式桥并不免费；兼容、重算、写回仍是独立工程</td>
+</tr>
+</tbody>
+</table></div>
+<p>F是可选组合：轻查看器＋按需编辑Provider。只有实际证明组合改善打开体验且维护成本可接受时采用；不默认常驻两套引擎、解析两遍、展示两种不同布局。</p>
+<p>PDF转换只作为异常文件、打印或对照验证的可选路径，不作为默认打开前置。LibreOffice支持无界面转换，但这不意味着必须每次打开都进行一次完整导出。<a href="#sources/S36">S36</a></p>
+<h2 id="3">3. 总体候选矩阵</h2>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>候选</th>
+<th>主要范围</th>
+<th>本地首次打开</th>
+<th>原格式手动编辑</th>
+<th>面向AI的接口线索</th>
+<th>当前必须核实</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>docx-preview</td>
+<td>DOCX查看</td>
+<td>可本地</td>
+<td>不提供完整写回</td>
+<td>解析对象/DOM，内部API可能变化</td>
+<td>分页、公式、浮动布局、长文件</td>
+</tr>
+<tr>
+<td>pptx-renderer</td>
+<td>PPTX查看</td>
+<td>可本地</td>
+<td>不是完整PPTX编辑器</td>
+<td>可访问文档模型与节点</td>
+<td>中文字体、母版、复杂对象、生命周期</td>
+</tr>
+<tr>
+<td>SheetJS CE＋网格</td>
+<td>XLSX等数据查看</td>
+<td>可本地</td>
+<td>数据读写与保真手编是两件事</td>
+<td>工作表/单元格/公式数据</td>
+<td>样式、图表、重算、写回保留</td>
+</tr>
+<tr>
+<td>WPS WebOffice</td>
+<td>成套Office查看/编辑</td>
+<td>标准云路线上需服务可取文件</td>
+<td>有</td>
+<td>文字/表格/演示对象API</td>
+<td>上传/回调、授权、自动化覆盖、保存</td>
+</tr>
+<tr>
+<td>阿里云IMM WebOffice</td>
+<td>成套Office查看/编辑</td>
+<td>典型路线先有OSS对象</td>
+<td>有</td>
+<td>JS SDK；对象粒度逐项确认</td>
+<td>地域、调用计费、API、云本地保存链</td>
+</tr>
+<tr>
+<td>ONLYOFFICE Docs</td>
+<td>成套Office查看/编辑</td>
+<td>由文档服务读取文件</td>
+<td>有</td>
+<td>Office/插件API；外部Automation单独许可</td>
+<td>部署、发行许可、自动化层、初始化</td>
+</tr>
+<tr>
+<td>Collabora Online</td>
+<td>成套Web Office</td>
+<td>服务端可取得文件</td>
+<td>有</td>
+<td>WOPI/PostMessage；覆盖需实测</td>
+<td>网络、托管、UNO子集、当前SDK</td>
+</tr>
+<tr>
+<td>Collabora Office桌面路线</td>
+<td>本地Office＋Web UI</td>
+<td>官方产品支持本地引擎</td>
+<td>官方桌面产品有</td>
+<td>需确认可复用的嵌入接口</td>
+<td>能否拆成组件、不是现成Electron SDK</td>
+</tr>
+<tr>
+<td>ZetaOffice＋zetajs</td>
+<td>本地浏览器Office</td>
+<td>WASM运行时就绪后本地处理</td>
+<td>套件能力，须逐格式验证</td>
+<td>JavaScript/UNO</td>
+<td>冷启动、内存、中文输入、打包与许可</td>
+</tr>
+<tr>
+<td>Univer＋文件交换</td>
+<td>可控编辑框架，表格尤需评估</td>
+<td>官方交换链有转换后端</td>
+<td>取决于组件和交换路线</td>
+<td>Facade/命令、插件接口</td>
+<td>OSS/Pro边界、转换覆盖、版本配对</td>
+</tr>
+<tr>
+<td>LibreOffice＋UNO桥</td>
+<td>外部/本地编辑与自动化</td>
+<td>本地安装与进程</td>
+<td>外部程序中有</td>
+<td>UNO文档与选区API</td>
+<td>不自动获得果铃内嵌画布、打包与焦点</td>
+</tr>
+</tbody>
+</table></div>
+<p>本表事实依据分别为<a href="#sources/S03">S03</a>—<a href="#sources/S26">S26</a>；“可本地”不代表已测快速，“有API”不代表每个对象都可稳定定位和写回。现阶段不填写虚构的速度分数或保真百分比。</p>
+<h2 id="4">4. 直接渲染候选</h2>
+<h3 id="a1-docxdocx-preview-docxjs">A1. DOCX：docx-preview / docxjs</h3>
+<p><strong>已核实：</strong> 目标是DOCX→HTML；主要稳定入口为renderAsync，内部解析结构可能改变；文档说明没有实现完整实时分页。项目为Apache-2.0。<a href="#sources/S03">S03</a></p>
+<p><strong>可试方案：</strong> 作为隔离查看器使用稳定渲染入口。用户可阅读、搜索/复制受支持文字；是否增加语义选区，在最小查看成功后决定。</p>
+<p><strong>测试重点：</strong> 教案中的编号、表格、中文字体、公式、图片环绕、页眉页脚和长文档。不要为了贴合Word分页无限修补；接受可阅读的连续布局时明确展示模式。</p>
+<p><strong>编辑前景：</strong> 渲染DOM上的文本改动只能证明HTML发生变化，不能称为DOCX已保存。未来补写回须单独验证；内部对象接口变更是维护成本，不能先绑定所有业务逻辑。</p>
+<h3 id="a2-pptxaiden0zpptx-renderer">A2. PPTX：aiden0z/pptx-renderer</h3>
+<p><strong>已核实：</strong> 项目采用解析—模型—渲染分层，HTML/SVG输出，提供可选延迟幻灯片/媒体解析和窗口化显示；自述覆盖范围有边界，动画、完整EMF/WMF等不在完整支持范围。Apache-2.0。<a href="#sources/S04">S04</a></p>
+<p><strong>可试方案：</strong> 选取真实教学PPT，优先比较第一页和切页；只在实际开启并验证后使用lazy/windowed能力。不可把README中的作者本地测试比例当作果铃性能。</p>
+<p><strong>测试重点：</strong> 主题字体、上下标与公式、组合形状、母版对象、图表、嵌入媒体、透明图片和超过常见页数的文件。某些对象可利用包内预览，但包里不保证存在，不能为缺图凭空生成栅格兜底。</p>
+<p><strong>编辑前景：</strong> 模型可寻址有利于后续定位，仍不意味着已有PPTX writer和保真往返。轻编辑若只输出HTML，必须按HTML副本呈现，不伪装为源PPTX编辑。</p>
+<h3 id="a3-xlsxsheetjs-ce">A3. XLSX：SheetJS CE＋虚拟网格</h3>
+<p><strong>已核实：</strong> SheetJS CE重在数据与数字格式；HTML完整文字/单元格CSS样式属于Pro文档范围。表格解析、公式表达式、公式求值、图表和文件保真是不同问题。<a href="#sources/S05">S05</a><a href="#sources/S06">S06</a></p>
+<p><strong>可试方案：</strong> 只在需求偏工作表内容查看时试。显示sheet名称、单元格值、可见范围和必要数字格式。虚拟网格解决DOM量，不能消除读取sharedStrings/styles或完整ZIP的成本。</p>
+<p><strong>测试重点：</strong> 显示值与公式、缓存是否存在、日期与百分比、合并、冻结、隐藏sheet、成绩表中的中文。无重算能力时不得在修改输入后继续展示旧计算结果却不提示。</p>
+<p><strong>编辑前景：</strong> 既可追加数据写入，也可转接编辑框架；但将整个复杂工作簿导出重建可能丢失不支持内容，必须测保存副本，初期不覆盖原件。</p>
+<h2 id="5-weboffice">5. 成套WebOffice服务候选</h2>
+<h3 id="b1-wps-weboffice">B1. WPS WebOffice</h3>
+<p><strong>已核实：</strong> 官方提供网页嵌入、服务回调和文字/表格/演示对象API。标准云接入要求服务能够访问接入方的回调与文件；不能给远程服务一个本地磁盘路径。<a href="#sources/S07">S07</a><a href="#sources/S08">S08</a><a href="#sources/S09">S09</a></p>
+<p><strong>价值假设：</strong> 用现成编辑底层承接人手改，果铃保留模型、工作区和任务层；不需要使用厂商自带AI。是否缩短开发量取决于API覆盖和保存流程，不只看演示可编辑。</p>
+<p><strong>进入测试的工作：</strong> 申请试用与必要接口权限；实现文件身份、鉴权、文档URL/回调；把保存结果落实到当前工作区，处理本地未保存修改。私有化和离线部署作为商务询证，不由云API文档推导为免费可本地嵌入。</p>
+<p><strong>重点未知：</strong> 当前商用价格/计量、可开放的接口与品牌、数据位置、当地网络首次打开、同一文档AI和人工编辑是否争夺选区、保存完成回执能否覆盖本地写盘。</p>
+<h3 id="b2-imm-weboffice">B2. 阿里云 IMM WebOffice</h3>
+<p><strong>已核实：</strong> 典型路径为OSS对象＋同地域IMM＋在线编辑URL，官方提示跨地域/跨境链路可能影响体验；计费含凭证API调用，仍需计算对象存储和网络等成本。<a href="#sources/S10">S10</a><a href="#sources/S11">S11</a></p>
+<p><strong>价值假设：</strong> 对云端已有文件和在线分享场景接入较自然。对于刚从本地目录拖入的大文件，上传耗时必须计入“打开”，不能从上传完成后开始算。</p>
+<p><strong>进入测试的工作：</strong> 云端测试文件、凭证刷新、权限/URL有效期、编辑保存事件、本地副本回收。查询是否可取得满足果铃的元素级API；“可手动编辑”不等于“AI可通过SDK定位任意对象”。</p>
+<p><strong>重点未知：</strong> 当前SDK对象覆盖、编辑并发与会话生命周期、离线时行为、断线后保存、多个凭证刷新对单位用户成本的影响。与其他服务可能共享某些上游技术，不能按接入品牌数当作独立内核数量。</p>
+<h3 id="b3-onlyoffice-docs">B3. ONLYOFFICE Docs</h3>
+<p><strong>已核实：</strong> 文档服务从URL取得文件；编辑器应用加载与文档就绪是不同事件；外部Automation API为Developer额外付费能力。开源社区版有AGPL和厂商品牌/分发说明。<a href="#sources/S12">S12</a><a href="#sources/S13">S13</a><a href="#sources/S14">S14</a><a href="#sources/S15">S15</a></p>
+<p><strong>价值假设：</strong> 作为成套编辑服务，可能减少需要自建的文档UI；可在自己可控的服务环境测试。但自部署不是没有服务器成本，也不等于适合作为每位桌面用户的后台常驻进程。</p>
+<p><strong>进入测试的工作：</strong> 文档服务、文件与保存回调、版本key、身份与签名、文档就绪事件、真实文件的保存重开。需要外部深编时先确定可用接口与商业权限，再估算工作量。</p>
+<p><strong>重点未知：</strong> 实际启动时间、并发内存、部署维护、对未支持对象的保存行为，以及社区/商业版对果铃实际发行方式的可用条件。插件API与外部Automation API分别审核，不概括成“所有自动化都收费”。</p>
+<h3 id="b4-collabora-online">B4. Collabora Online</h3>
+<p><strong>已核实：</strong> 可作为Web Office集成；官方对源码和可执行发行物分别列许可，维护者说明UNO对象与对外状态/消息接口不是同一层。<a href="#sources/S17">S17</a><a href="#sources/S18">S18</a></p>
+<p><strong>价值假设：</strong> 适合有可管理服务器和在线文件的运行环境。持续文档会话与逐次后台导出PDF不是同一种处理链，不能仅因服务端渲染就提前判慢。</p>
+<p><strong>进入测试的工作：</strong> 固定版本、文档服务、WOPI/鉴权与保存、消息来源校验和生命周期。本文未能直接读取当前PostMessage SDK页面（反爬校验），接口粒度必须用当前源码或SDK再次确认，不能照搬历史示例宣称可用。</p>
+<p><strong>重点未知：</strong> 首次可读、网络抖动、选区/命令完成确认、中文输入、重连保存、生产支持条款。不要把“有Send_UNO_Command”解释成浏览器端可以无边界访问全部UNO文档模型。</p>
+<h2 id="6-webofficewasm">6. 本地WebOffice与WASM候选</h2>
+<h3 id="c1-collabora-office">C1. Collabora Office桌面本地架构</h3>
+<p><strong>已核实：</strong> 2026-07-01官方26.04说明介绍了本地文档引擎＋Web界面；Windows采用Win32/WebView2并在进程内运行引擎，其他系统有相应Web承载方式。官方同时说明仍在完善，性能可能变化。<a href="#sources/S16">S16</a></p>
+<p><strong>价值假设：</strong> 该架构证明“现成WebOffice体验＋本地文件处理”有实际产品实现，可能避免默认上传本地文档。</p>
+<p><strong>关键区别：</strong> 一个能运行的桌面产品，不等于一个可直接嵌入Electron的组件SDK。果铃应先确认能否独立托管前端、调用引擎、保存文件和取得目标对象；若需要维护复杂跨端fork，接入成本可能迅速升高。</p>
+<p><strong>重点未知：</strong> 可拆性、运行时边界、构建工具链、更新安全、可执行发行许可、是否要额外捆绑WebView2或第二套浏览器运行时。不能只因本地架构就称为最快。</p>
+<h3 id="d1-zetaofficezetajs">D1. ZetaOffice＋zetajs</h3>
+<p><strong>已核实：</strong> 官方给出客户端WASM运行文档引擎、JavaScript包装器与UNO集成路线。zetajs自身为MIT；底层LibreOffice/ZetaOffice及依赖须分别看许可。官网仍有服务open beta描述，当前构建成熟度需具体核对。<a href="#sources/S19">S19</a><a href="#sources/S20">S20</a><a href="#sources/S21">S21</a><a href="#sources/S22">S22</a></p>
+<p><strong>价值假设：</strong> 适合本地文件、不希望部署文档云服务的实验；可用现成文档模型而不靠屏幕点击控制。</p>
+<p><strong>进入测试的工作：</strong> 固定WASM与JS版本、本地静态资源、运行所需浏览器策略、虚拟文件系统到真实文件的保存、UNO具体目标访问。支持范围必须用实际API验证，不能由“UNO兼容”推导所有应用对象均可顺滑访问。</p>
+<p><strong>重点未知：</strong> 首次安装下载、冷初始化、内存峰值、线程配置、中文输入/剪贴板、多个文件/Tab的实例复用以及异常恢复。按需安装能减首次安装包，但不消除每次运行的初始化代价。</p>
+<h3 id="c2-libreofficeuno">C2. LibreOffice＋UNO 外部/本地桥</h3>
+<p><strong>已核实：</strong> UNO有读取/改变选区和监听选区变化的接口，LibreOffice发行以MPL-2.0为主并包含其他组件许可。<a href="#sources/S22">S22</a><a href="#sources/S23">S23</a></p>
+<p><strong>价值假设：</strong> 提供外部编辑、文档自动化、兼容验证或特定转换。可作为低UI集成深度的候选，不等于其能力都弱；模型接口深度与UI是否嵌入是两个维度。</p>
+<p><strong>重点未知：</strong> 桌面实例与果铃如何关联、现有窗口焦点、文件被占用、保存/退出、平台安装与升级。窗口句柄嵌入不是可移植的万能方案；不满足内嵌画布时清楚标为外部编辑。</p>
+<h2 id="7">7. 可控编辑框架与格式桥</h2>
+<h3 id="e1-univer">E1. Univer＋官方文件交换</h3>
+<p><strong>已核实：</strong> Univer公开编辑框架与商业组件并存；官方Office交换路径涉及服务端转换，文档明确区分浏览器编辑与文件导入导出，当前exchange-node为相关实现。<a href="#sources/S24">S24</a><a href="#sources/S25">S25</a><a href="#sources/S26">S26</a></p>
+<p><strong>价值假设：</strong> 当选择、命令、布局和果铃AI交互深度更重要时，可能比嵌完整套件更可控；不是默认最便宜、最快。</p>
+<p><strong>进入测试的工作：</strong> 固定SDK、Pro与交换服务的版本组合；以需要的文件类型验证导入、编辑、导出。先检查实际包许可，再决定哪些OSS模块能复用。</p>
+<p><strong>重点未知：</strong> 非表格能力成熟度、公式与图表、导入冷启动、转换服务成本、保存未知对象。若改用SheetJS等自建格式桥，属于另一项兼容开发，不是“绕开Pro即可无成本完整导入”。</p>
+<h3 id="e2">E2. 自有有限编辑＋开放解析组件</h3>
+<p>保留为长期可能性：对一类文件的一组常见对象提供原生定位、文字/位置修改，受支持部分尽量定向写回，其余原件保留。优势是深度可控，成本是文件映射、依赖关系、字体、写回和验证。</p>
+<p>近期不将此路线作为“预览器顺手加两个按钮”的小任务。不因查看模型存在就估算已经完成80%；写回、撤销和外部打开正确性必须独立证明。</p>
+<h2 id="8">8. 可以组合，但不默认组合</h2>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>场景</th>
+<th>可保留的配置</th>
+<th>风险</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>本地查看最多、手改较少</td>
+<td>直接渲染＋按需Editor</td>
+<td>两套显示结果、切换状态、重复解析</td>
+</tr>
+<tr>
+<td>云端文件多、经常手改</td>
+<td>单一WebOffice同时查看编辑</td>
+<td>网络/上传、持续费用、云本地副本</td>
+</tr>
+<tr>
+<td>需要离线和套件能力</td>
+<td>本地引擎或WASM</td>
+<td>包体、内存、更新和本地安全</td>
+</tr>
+<tr>
+<td>核心是表格对象交互</td>
+<td>Univer或其他编辑框架＋格式桥</td>
+<td>桥的覆盖、公式重算、二次模型</td>
+</tr>
+<tr>
+<td>预算极紧、文件使用稀少</td>
+<td>基础可读＋外部打开</td>
+<td>体验跳转；不是同画布完整共编</td>
+</tr>
+</tbody>
+</table></div>
+<p>可按格式采用不同方案，但对用户保持清楚的“查看、轻编辑、完整编辑、外部打开”能力标记。无需求前不维护多个同类Provider作为装饰性冗余。</p>
+<h2 id="9">9. 决策规则：现在收集证据，不先收敛技术</h2>
+<p>第一轮：候选均保留，登记文档、版本、许可、部署与免费试用条件。第二轮：选取少量易取得环境的不同路线，用同一批文件测性能和缺失；未测试的候选标“未测”，不算淘汰。第三轮：对满足打开要求的候选，再测元素定位、AI操作、人工接管与保存。</p>
+<p>明确淘汰理由可以是：普通文件经常不可读；保存损坏；许可不能接受；必须公网且用户不授权；冷启动/资源成本超预算；维护成本与当前人力不匹配。不能仅以“需要转换”或“不是纯前端”淘汰——关键是可见的端到端体验。</p>
+<p>本阶段交付：候选登记表、实际样本与测量、具体不支持案例、必要商务询证、可回退试接。<strong>不要求产出唯一最终技术栈。</strong></p>
+<h2 id="10-v31">10. V3.1范围说明</h2>
+<p>本轮保留候选研究，不重新排名或宣称已试接；第三方条款/性能未在本轮逐项刷新。候选池不是开发清单，也不要求全部采购/安装/常驻。当前主线仍是已有基线上的有界能力验证。</p></article><article class="doc" data-doc="office-test" hidden="" id="doc-office-test"><div class="doc-path">06_Office验证计划与性能基线.md</div><h1 id="office">Office 验证计划与性能基线</h1>
+<h2 id="1">1. 先定义“打开”</h2>
+<p>T0是用户点击工作区文件。分别记录：界面响应、真实内容首次可读、视口稳定、可输入编辑、首次保存确认、文件重开成功。空工具栏、加载动画或只显示文件名不算内容已经打开。</p>
+<p>ONLYOFFICE的onAppReady与onDocumentReady恰好说明应用就绪和文档就绪不是同一时刻；其他Provider需自行找到等价信号并人工确认。<a href="#sources/S13">S13</a></p>
+<h2 id="2">2. 六种状态分别测</h2>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>状态</th>
+<th>测量意图</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>首次安装/尚无运行时</td>
+<td>包下载与安装单列，不能隐藏</td>
+</tr>
+<tr>
+<td>冷应用、打开本地新文件</td>
+<td>首次引擎加载、文件读取、解析和排版</td>
+</tr>
+<tr>
+<td>热引擎、打开另一新文件</td>
+<td>不被同文件缓存美化的常用路径</td>
+</tr>
+<tr>
+<td>同文件重开/已缓存</td>
+<td>缓存收益，来源版本一致性</td>
+</tr>
+<tr>
+<td>已打开Tab切回</td>
+<td>是否无谓销毁并重建实例</td>
+</tr>
+<tr>
+<td>云端文件已存在 vs 本地首次上传</td>
+<td>对网络/上传的端到端影响</td>
+</tr>
+</tbody>
+</table></div>
+<p>清楚记录缓存、预热、内存驻留和网络条件。不能把文档上传提前到未授权后台；也不能把预热消耗从产品成本中删除。</p>
+<h2 id="3">3. 初始性能目标〔产品假设，非实测结论〕</h2>
+<p>普通文件以“约1–2秒可读”为优化目标，可暂设常用样本p50≤2秒、p95≤5秒的讨论门槛；切回已经打开的Tab目标≤300毫秒。首次重运行时冷加载、大型或复杂文件单列，不用同一数字掩盖极端值。</p>
+<p>这些数值须在目标设备上确认后才变成发布门槛。速度不达标先定位瓶颈，不立即加第二套查看器。样本不足以支持百分位时只报告每次原始值与中位数/最大值，避免伪精确。</p>
+<p>编辑模式另测可输入时间、打字/拖动响应、保存时间；“查看很快但点编辑再等一分钟”也应暴露。打开与手动输入不得调用LLM。</p>
+<h2 id="4">4. 第一轮样本</h2>
+<p>先用9个授权、脱敏文件：每种DOCX/PPTX/XLSX各取简单、常用、复杂一个。每个冷状态至少做数次独立启动，热状态重复若干次，保留原始记录。此轮用于定位问题，不宣称统计覆盖整个用户群。</p>
+<p>有候选表现可用后，再扩到每种格式约10个文件或真实用户材料。文件大小不是唯一复杂度：形状/表格/字体/公式/媒体数量同样记录。测机器固定，记录CPU、内存、系统、显示缩放、字体、应用与引擎版本；云端记录地域、延迟与吞吐。</p>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>格式</th>
+<th>样本应包含</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>DOCX</td>
+<td>中文教案、标题列表、复杂表格、公式、图片环绕、长讲义、页眉页脚</td>
+</tr>
+<tr>
+<td>PPTX</td>
+<td>教学公式、母版、组合图形、图表、裁剪透明图、备注/媒体边界、大页数</td>
+</tr>
+<tr>
+<td>XLSX</td>
+<td>课表、成绩表、合并/冻结、格式化日期百分比、公式、图表、多sheet、大范围</td>
+</tr>
+</tbody>
+</table></div>
+<p>宏和外部链接不执行；加密文件要求明确授权与正常密码输入；不能因忽略宏而声称保留其行为。浏览器不支持的嵌入媒体和对象需要说明。</p>
+<h2 id="5">5. 显示质量验收：容许差异，不容许误导</h2>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>类别</th>
+<th>例子</th>
+<th>处理</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>可接受偏差</td>
+<td>字体替代、少量行距、装饰效果、分页不同但内容完整</td>
+<td>记录，不阻断基本查看</td>
+</tr>
+<tr>
+<td>任务相关偏差</td>
+<td>图注错位、表格遮挡、公式排版难读、关键形状关系改变</td>
+<td>真实任务判断，需修复或明显提示</td>
+</tr>
+<tr>
+<td>内容错误</td>
+<td>数值错误、漏页、丢图表、公式变成错误关系、静默截断</td>
+<td>不以“高保真预览”通过</td>
+</tr>
+</tbody>
+</table></div>
+<p>指定参考应用版本；同一文件在不同Office产品中可能不同。截图比较只辅助定位，数学关系、公式缓存和表格数据用结构断言/人工抽查。不能用全页视觉相似度掩盖关键区域丢失。</p>
+<h2 id="6-ai">6. 编辑与AI接力测试</h2>
+<p>按能力分开记，不要求只读方案通过编辑测试，也不能把失败算成零性能。</p>
+<ol>
+<li>查看：打开、翻页/切sheet、搜索、缩放。</li>
+<li>选区：获得文字范围、页/shape或sheet/range；验证目标可否在当前版本再次定位。</li>
+<li>手改：文字、形状位置或单元格输入，撤销后正确恢复。</li>
+<li>AI接口：通过受支持命令改明确对象，不靠截图猜测；没有接口则标缺失。</li>
+<li>接力：人→AI→人多轮；检查陈旧选区、跳焦点和未保存版本覆盖。</li>
+<li>保存：保存结果真正落到工作区；重开和外部应用打开后正确。</li>
+</ol>
+<p>开放编辑器时不要同时用另一个文件工具直接改磁盘上的同一Office文件。优先经当前编辑会话命令修改；无此能力就采用保存—修改副本—重新加载的明确接力，不伪装成实时同状态共编。</p>
+<h2 id="7">7. 性能优化清单〔逐项验证，不先全做〕</h2>
+<p>模块按需加载；重用已授权运行时；先显示可见页/工作表；媒体按需解码；长任务移出主UI；取消过时任务；文件版本缓存；Tab预算与LRU；字体提前就绪；不在首屏做全文件缩略图与OCR。</p>
+<p>延迟渲染不等于延迟解析。ZIP中央目录、共享字符串、样式等可能仍需读取；第三方未提供流式/局部解析时，不在方案里假定已经具备。缓存要含内容版本与影响显示的引擎/字体版本。</p>
+<p>预热只能减少使用时等待，仍会占内存和启动资源。先测，再决定一套或多套常驻引擎。并行Office和生成任务要测试是否拖慢前台编辑。</p>
+<h2 id="8">8. 成本与商务询证</h2>
+<p>统一口径：每100次普通打开、每个活跃用户、每个成功保存任务的费用与资源消耗。云端考虑文档取用、凭证刷新、会话、存储与流量；本地考虑包体、内存、更新和技术维护。</p>
+<p>报价询证包括：只读和编辑是否分别计费、外部自动化是否加价、并发定义、离线/本地部署、白标、再分发、源代码义务、技术支持和数据处理地域。价格未知填null，不估成免费。</p>
+<p>原始模板见 <code>benchmarks/office-run.template.json</code>。最终结果同时报告失败率、打开时间、保存正确性与未测项，不用单个综合分掩盖硬缺陷。</p>
+<h2 id="9-v31">9. V3.1轻量执行</h2>
+<p>首次可先围绕一个真实需求格式、少量授权文件筛查硬问题，再对进入候选使用本章完整矩阵。完整矩阵是扩样方案，不是任何试接都要全部通过的前置。复用已有日志、测试脚本与模板，不开发Office评测后台。套件内部Undo归真实编辑会话，宿主验证唯一writer、保存与AI接力，不强制复制细粒度History。</p></article><article class="doc" data-doc="browser" hidden="" id="doc-browser"><div class="doc-path">07_浏览器与多格式工作空间.md</div><h1 id="_1">浏览器与多格式工作空间</h1>
+<h2 id="1-office">1. 浏览器是实际工作能力，不只是Office容器</h2>
+<p>教师需要看网页、收集材料、打开本地HTML和运行交互内容。首版普通浏览包括地址/搜索、前后退、刷新、合理数量的Tab、登录态、下载到工作区、选区/当前页交给AI。书签同步、密码管理、扩展商店和全面浏览器替代先不做。</p>
+<p>Office文件由对应解析器或WebOffice处理；浏览器内核本身不会自动理解所有Office格式。必须区分网页宿主与文档引擎，不把“已经嵌Chromium”作为兼容性完成的证据。</p>
+<h2 id="2">2. 三类内容面</h2>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>类型</th>
+<th>用途</th>
+<th>权限边界</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>本地受控内容</td>
+<td>静态草稿查看/轻改；完整模块保留运行</td>
+<td>草稿由可信宿主保存；模块走已有Runtime隔离，不另建运行内核</td>
+</tr>
+<tr>
+<td>用户互联网网页</td>
+<td>搜索、阅读、网站操作</td>
+<td>独立持久会话；无果铃文件桥；按需授权下载/上传</td>
+</tr>
+<tr>
+<td>后台验证内容</td>
+<td>测试生成组件/HTML</td>
+<td>独立任务会话；无用户登录态；最小网络与文件范围</td>
+</tr>
+</tbody>
+</table></div>
+<p>Electron官方更推荐iframe或WebContentsView等方式，而不推荐webview标签；WebContentsView不在DOM树内，位置、缩放、遮挡和焦点需要协调。<a href="#sources/S01">S01</a></p>
+<p>实现可共享Tab与生命周期管理，但不同表面不必共用同一承载组件。对于本地草稿，可依据当前架构选择隔离iframe或独立内容面；不为读取DOM便利而扩大不可信代码权限。</p>
+<h2 id="3">3. 首版文件能力</h2>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>文件</th>
+<th>查看目标</th>
+<th>编辑目标</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>原生工程</td>
+<td>快速打开、运行互动、保持结构</td>
+<td>核心深编和局部AI修改</td>
+</tr>
+<tr>
+<td>Markdown/文本</td>
+<td>阅读与现有编辑器</td>
+<td>直接改与自动保存/现有保存规则</td>
+</tr>
+<tr>
+<td>框架HTML</td>
+<td>真实布局＋必要槽位</td>
+<td>2.0共用图文轻编辑与可靠保存，已有外框轻改保留</td>
+</tr>
+<tr>
+<td>普通本地HTML</td>
+<td>2.0受支持整页保真承载/机械导入</td>
+<td>常见图文轻编辑；静态源文或动态正式修改可靠保存，限制明确</td>
+</tr>
+<tr>
+<td>PDF</td>
+<td>翻页、缩放、搜索/选择</td>
+<td>批注按需追加，不承诺改原文排版</td>
+</tr>
+<tr>
+<td>图片</td>
+<td>预览、尺寸信息</td>
+<td>裁剪/旋转/替换等有限操作</td>
+</tr>
+<tr>
+<td>音视频</td>
+<td>浏览器支持范围内播放</td>
+<td>首版不做时间线编辑器</td>
+</tr>
+<tr>
+<td>Office</td>
+<td>本包多方案验证</td>
+<td>按Provider能力，不预定只读或完整编辑</td>
+</tr>
+<tr>
+<td>冷门格式</td>
+<td>文件信息、可用Provider或外部打开</td>
+<td>有真实需求再接</td>
+</tr>
+</tbody>
+</table></div>
+<p>PDF.js是PDF显示方案，不能用它证明通用文档编辑能力。图片裁剪UI可以比较Cropper.js，处理过程可复用Sharp；这是组件选择，不是已完成产品能力。<a href="#sources/S30">S30</a><a href="#sources/S31">S31</a><a href="#sources/S32">S32</a></p>
+<h2 id="4">4. 图片能力应贴近素材链</h2>
+<p>默认保留原素材：页面里的裁剪只是该引用的变换；用户明确“编辑原图”才创建可替换原件的文件版本。若同一图片被多处引用，修改前让作用范围清楚。</p>
+<p>优先实现图片替换、裁剪、旋转/翻转、尺寸与必要透明背景处理。AI生图、抠图等另有Provider费用和质量边界，不能用安装图像库代替。精确数学图和公式优先可验证SVG/组件，不把文本公式烘焙进生成图片。</p>
+<h2 id="5">5. 安全与隐私底线</h2>
+<p>远程页面不启用Node权限，不暴露文件读写或任意IPC；主进程校验消息来源、目标文件、导航和权限。Office/HTML均视为不可信输入，控制压缩解包、图片大小、外部关系和下载地址。无授权不执行宏、不访问外部文件链接、不上传教学或学生材料。<a href="#sources/S02">S02</a></p>
+<p>本地服务绑定回环地址并鉴权；云服务不能读取localhost只是正常网络边界，不能通过关闭webSecurity、CSP或建立公开无鉴权隧道来解决。</p>
+<h2 id="6-computer-use">6. Computer Use的位置</h2>
+<p>先服务已有创作验证：加载当前HTML/组件，读取结构/错误，截图并检查可见效果。需要浏览器自动化时优先结构化定位，视觉操作补足Canvas等缺口。</p>
+<p>不把完整桌面控制、虚拟桌面、常驻Agent浏览器与插件商店一起列为2.0前置。后台窗口不天然保证不抢焦点；要在目标平台测试。MCP是给外部Agent调用果铃能力的出口，不代替编辑器实际对象接口。</p>
+<p>用户登录的浏览器与Agent测试会话默认隔离。需要Agent操作有账户的网站时，明确选择会话、目标与写操作权限；不自动把用户Cookie复制给所有任务。</p>
+<h2 id="7-v33">7. V3.3实施约束</h2>
+<p>本地HTML整体导入与图文轻编辑进入2.0，见02/04/14。HTML文件与工程Runtime复用发现/UI，保存目的地各自明确；普通互联网网页保持独立会话和权限，无需等完整浏览器或Office完成。</p>
+<p>Flow以页面Runtime承载长网页，保留Document正文和原生paper-space图文；补实际占位、高度与滚动，不将网页强转Markdown。本轮补三Surface需要的真实Runtime/组件挂载与编辑，不强制统一全部模型。</p>
+<p>通用Agent四档权限按原授权保留，内容页面不能继承Provider秘密或任意文件/OS桥。其他格式继续复用已有底层，不复制保存器或下载器。</p></article><article class="doc" data-doc="licenses" hidden="" id="doc-licenses"><div class="doc-path">08_插件化_自有能力与许可.md</div><h1 id="_1">插件化、自有能力与许可</h1>
+<h2 id="1">1. 插件化主要降低“新增能力必须改整个产品”的成本</h2>
+<p>第三方编辑器仍要接入文件、选区、保存、会话、权限、撤销和错误反馈；只因它叫插件，开发和维护不会消失。按需安装可以减首包与空闲资源，不能自动减少运行时内存或冷启动。</p>
+<p>近期先做内部能力适配，不先做公共市场。通用接口只抽取当前真的需要的：识别文件、打开/关闭、读取就绪状态、能力声明、保存，以及可选选区/执行动作。格式内部保留自己的模型，不统一所有文档AST。</p>
+<h2 id="2">2. 不同集成深度都保留</h2>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>深度</th>
+<th>可用体验</th>
+<th>果铃需要补什么</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>外部程序打开</td>
+<td>基础查看与手改接力</td>
+<td>文件关联、观察保存、返回工作区</td>
+</tr>
+<tr>
+<td>内嵌查看器</td>
+<td>同Tab阅读、可选搜索/选区</td>
+<td>生命周期、语义定位与原件关系</td>
+</tr>
+<tr>
+<td>内嵌WebOffice</td>
+<td>手改、保存、套件UI</td>
+<td>文件/会话、对象API、AI指令到命令</td>
+</tr>
+<tr>
+<td>模型/API深度适配</td>
+<td>稳定选区、局部修改、人AI接力</td>
+<td>当前版本、撤销、写入与返回证据</td>
+</tr>
+<tr>
+<td>选择性自有编辑</td>
+<td>最大程度控制交互</td>
+<td>文件兼容、渲染、写回与长期测试</td>
+</tr>
+</tbody>
+</table></div>
+<p>UI是否嵌入、AI是否有结构接口、许可证如何约束，是三个不同维度。独立进程不必然只有屏幕点击；同一画面也不必然能稳定进行对象级修改。</p>
+<h2 id="3">3. 开源与商业化</h2>
+<p>开源软件可以商业使用。真正要核对的是修改、分发、网络提供、源码提供、品牌、合同和附属资源的条件，不能把“GPL/AGPL”写成“禁止商用”，也不能把“插件/MCP/iframe”写成许可豁免。</p>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>许可/交付形态</th>
+<th>主要关注</th>
+<th>当前处理原则</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>MIT/BSD/Apache类</td>
+<td>版权、许可文本、NOTICE、修改声明及依赖</td>
+<td>可优先评估复用；不等于无条件拿走品牌/字体</td>
+</tr>
+<tr>
+<td>MPL-2.0</td>
+<td>覆盖文件的源代码义务；其他部分可组成Larger Work</td>
+<td>明确修改文件和发行物范围</td>
+</tr>
+<tr>
+<td>LGPL</td>
+<td>库的替换/重链接、修改库源码等版本相关条件</td>
+<td>按链接和打包方式评审</td>
+</tr>
+<tr>
+<td>GPL/AGPL</td>
+<td>是否构成组合/衍生作品、分发与网络条件</td>
+<td>按实际架构审查；不靠包装绕过</td>
+</tr>
+<tr>
+<td>商业SDK/云服务</td>
+<td>调用、并发、自动化、白标、数据与再分发合同</td>
+<td>书面核实，不默认试用等于可发行</td>
+</tr>
+</tbody>
+</table></div>
+<p>Apache正文授予修改与分发等权利并要求相应通知；Mozilla解释MPL的文件级边界；GNU FAQ强调通信语义和组合关系也影响插件判断。这些是许可文本/权利人解释，不是对果铃某个未定架构的法律裁决。<a href="#sources/S33">S33</a><a href="#sources/S34">S34</a><a href="#sources/S35">S35</a></p>
+<p>ONLYOFFICE、Collabora与zetajs/底层Office的具体差异已在Office评估列出；最终锁定版本后再复核实际依赖。公开仓库的单一顶层license不能代替完整软件物料清单。</p>
+<h2 id="4-office">4. 部分开源可以独立于Office选型决定</h2>
+<p>可先开放稳定的组件协议、示例、文件适配接口、MCP工具约定；核心产品与商业服务保留自主选择。没有真实第三方使用者前，不承诺长期兼容全部公共API。</p>
+<p>不为了省一套编辑器授权费立即决定整个果铃开源；也不为了宣称自有就重新编写已经许可清楚、效果稳定的通用基础库。</p>
+<h2 id="5">5. 选择性自研的触发条件</h2>
+<p>实际用户经常需要的操作，被现成Provider反复阻断；API/费用/延迟成了可测瓶颈；团队有维护余力；通过小范围实现能产生明确体验提升。满足后优先做有限对象和有限动作，不一次接管完整Office兼容。</p>
+<p>自有资产可以是教学设计方法、原生互动内容、局部编辑与验证、素材复用、可靠任务提交；无需把所有渲染器都改成自有。</p>
+<h2 id="6">6. 源码研究与重写</h2>
+<p>可以依法研究公开规范、公开API、许可清楚的开源代码和自建行为测试。允许复用的代码保留来源与许可，不必刻意洗成“全部原创”。从GPL/AGPL实现让AI翻译/重排后宣布闭源自有，并不自动形成独立实现；需要相应法律评估与可追溯的开发依据。</p>
+<p>记录：项目和版本、来源地址、许可证、采用/修改部分、依赖、分发方式、源码提供与NOTICE、字体/素材权利、更新责任。多个主体共享代码时先明确归属与授权，不默认创始人重合就自动共有。</p>
+<h2 id="7">7. 插件保存与授权的最低边界</h2>
+<p>插件仅访问明确授权的文件或副本。保存需宿主确认当前版本和文件范围；插件显示“已保存”不等于果铃本地文件已落盘。首次外部修改可保留原件与新副本，后续再按Provider成熟度开放覆盖。</p>
+<p>官方捆绑插件由果铃承担持续安全更新与兼容责任；用户自装服务也不意味着果铃可以承诺其许可合规。正式发行/商务集成前进行针对实际架构的专业法律审核。</p>
+<h2 id="8-writerhistory">8. 单writer不等于所有格式共用逐键History</h2>
+<p>自有HTML沿用DocumentSession管理正式源文和编辑历史；第三方Office可由其自身编辑会话拥有细粒度模型与Undo，果铃协调文件binding、保存、授权、AI操作结果和同文件唯一活动writer。不能为了统一接口另镜像一套细粒度History，也不能在套件编辑时让另一个文件工具静默改磁盘。</p>
+<p>第一种Provider落地时做窄适配即可；没有真实第二个消费者之前，不冻结公共SDK。不同格式/引擎间不承诺跨应用逐键撤销；无法实时对象共编时用明确的保存—副本修改—重载接力。</p></article><article class="doc" data-doc="validation" hidden="" id="doc-validation"><div class="doc-path">09_教育切入与用户验证.md</div><h1 id="_1">教育切入与用户验证</h1>
+<h2 id="1">1. 第一阶段卖真实结果</h2>
+<p>首个承诺是：老师把已有讲义、题目和素材变成可授课、可修改、可运行的内容。核心不是“支持所有文件”，也不是“教用户维护一个技术工作流”。</p>
+<p>初期可以用完成度高的内容和示例吸引用户，但必须区分内容吸引力和软件独立可用性。下载课件很多不代表教师愿意使用编辑器；创始人代做成功也不代表用户自助成功。</p>
+<h2 id="2">2. 内容获客与产品使用连接起来</h2>
+<p>每个演示案例提供可运行成品、可修改工程和清楚的“试着改这一处”入口。演示既要保住关键视觉/教学交互，也要把这处改动保存下来；原生对象数量或仅嵌入HTML都不能代替这两项价值。第一次使用不要求从空白生成整课：老师可先替换例题、调整一个参数或修改讲稿，再尝试新建。</p>
+<p>内容库先聚焦团队熟悉的学科与真实难点，不铺全面教材目录。特别适合展示的任务是普通静态材料难以表达、但互动确有教学作用的片段。不要为秀技术强行加交互，也不要把只有演示需要的录播课做成学生答题系统。</p>
+<h2 id="3">3. 三个验证环节</h2>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>环节</th>
+<th>实验</th>
+<th>观察</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>初次价值</td>
+<td>选少量熟悉教师，让其使用一个已有工程完成具体修改</td>
+<td>是否理解、能否独立完成、返工与耗时</td>
+</tr>
+<tr>
+<td>重复使用</td>
+<td>请其在下一次真实备课继续用，不由创始人全程带做</td>
+<td>是否返回、复用什么、在哪一步离开</td>
+</tr>
+<tr>
+<td>付费与扩展</td>
+<td>对确定的使用价值测试透明价格/套餐</td>
+<td>实际支付、取消原因、单位成功成本</td>
+</tr>
+</tbody>
+</table></div>
+<p>可从5–10名种子教师开始，这是实验规模建议，不是现有用户数。记录每个任务的结果与支持时间，不因样本小而包装百分比增长。</p>
+<h2 id="4">4. 指标必须能连接到价值</h2>
+<p>第一次可用作品时间；最终人工修改时间；作品授课是否成功；保存重开成功率；下一次备课返回；素材/组件复用；每个成功任务的模型/生图/Office成本；创始人协助分钟。</p>
+<p>“打开文件数”“生成页数”“token消耗”“插件数量”只作诊断，不能替代留存、付费或实际节省时间。</p>
+<p>收费可分别试软件订阅、清楚的AI用量额度、内容/模板包与小团队服务；当前不确定价，不用无上限模型/视频/云Office资源补贴来掩盖成本。</p>
+<h2 id="5">5. 从教师工作空间向相邻人群扩展</h2>
+<p>先看用户真实的非授课任务：培训、教研、报告展示、可视化解释等。用同一内容运行时与工作区完成，检验需要新增多少能力。只有需求和复用成立后，再投更广Office编辑或企业功能。</p>
+<p>核心教学质量不能因扩行业而退化成通用文案生成；也不把“教育切入”理解为只做教材内容而不做工具。</p>
+<h2 id="6">6. 融资准备的证据，不是融资概率预测</h2>
+<p>准备真实可演示产品、重复使用案例、任务前后对比、付费记录、单位成功成本、主要技术资产、明确许可证与代码归属。长期说明相邻任务扩展，但不靠“大厂尚未做某按钮”证明价值。</p>
+<p>融资是否成功还取决于团队、市场、条款与投资人判断；本包不提供未核验的行业融资统计、买家兴趣或概率。</p>
+<h2 id="7">7. 教育材料与数据</h2>
+<p>演示与测试优先用自有、授权或可合法使用的材料。教材、试题、字体、图片和视频分别核查来源；不要将真实学生名单、成绩、录音默认送入云模型或WebOffice。产品提供清楚的本地/云端处理提示与删除方式；具体合规要求在真实业务范围确定后另行评估。</p></article><article class="doc" data-doc="handoff" hidden="" id="doc-handoff"><div class="doc-path">10_Agent实施交接提示词.md</div><h1 id="agent">Agent实施交接提示词</h1>
+<p><strong>V3.3｜本包只更新方案，以下供后续获得产品开发授权时使用。</strong> 不将读取方案视为任务登记、改代码或付费测试授权，不修改Codex任务表来替代实际开发。</p>
+<h2 id="a-20">A. 2.0增量实施</h2>
+<pre><code class="language-text">先读本包00、02和14，再按本批范围读取04/13及相关实际consumer。原范围验收先收口、固定可回退点；随后在2.0阶段完成Runtime轻编辑、HTML机械导入、Flow页面承载/原生文本框、所需三表面接线和后置呈现策略。不要推迟整个能力到2.x，也不要重新做全仓重构或安装包发行工程。
+
+复用现有DocumentSession、History、文件/资源、Gateway、执行器与构建/准入。Runtime运行到哪能进入哪里编辑，场景与组件共用图文编辑；DOM/Phaser常见图文由软件发现，Three做实际可访问类型。不再要求AI逐个expose，也不承诺任意canvas/闭包都自动可编。
+
+先解决动态目标身份与持久化：复用已有内容键优先，必要窄覆盖进入正式工程而非第二History。相同气泡显示不同句时不能串改；保存重开/导出必须保留内容，当前状态会话保留不等于任意JS现场序列化。
+
+HTML首版机械整体Runtime导入，不让模型重新设计。复用受管文档环境、资源和正式导入，保留head/CSS/脚本/viewport与滚动。Flow补整页内容占位和编辑态真实挂载，自动高度只改布局缓存，不逐帧写History。强视口依赖网页不能靠拉长iframe假装保真。
+
+Flow“插入文字”改为Native文本框，页面局部默认paper-space；正文输入、段落、标题和Markdown仍保留。不要全局把paragraph替换成文本框，不删除成熟原生节点，不把三表面强行合并为同一模型。
+
+按02少量代表路径验证，引用既有保存/撤销等覆盖；不运行全组合矩阵、逐次截图、像素评分或额外审美Agent。只补已定位缺口，报告真实结果与未支持范围。
+</code></pre>
+<h2 id="b-skill">B. 呈现策略与Skill接线</h2>
+<pre><code class="language-text">读03、13与本批Skill。教学策划、理想呈现脚本、框架HTML完成前都不加载编辑器能力、Schema和静态转换白名单；不能先灌全部限制再提示模型忽略。
+
+框架HTML完成后，独立执行呈现策略职责：读取短能力摘要，按完整区域选择Surface、Native/Runtime/Component和素材来源。该职责放在第三份Skill的生产前半段，不新建Agent群、工作流DSL或审批链。
+
+已有完整HTML默认全Runtime机械导入，可跳过设计/策略调用；有需要才生产新素材/模块。宿主直接执行已确定的提取、资源、包装、组装与提交，沿用shell.inspect/slot.prepare/shell.assemble三个拟新增名称，不假称工具已注册。
+
+后续有实际实现授权时，同步修正安装版方法中“Runtime少放文字”等旧导向；本次方案草案并未修改根AGENTS或安装产物。普通修改不重跑全课程流程。
+</code></pre>
+<h2 id="c">C. 保留的后续边界</h2>
+<p>Office选型、完整互联网浏览器、任意HTML机械拆Native和Slides全局尺寸参数化继续按实际需求排期，不作为本轮2.0增量的前置。保留成熟原生能力、自建执行器、MCP入站及CLI薄runner方向，不恢复三CLI深度适配。</p>
+<h2 id="_1">交付格式</h2>
+<p>本批实际改动 → 受影响检查和结果 → 未测/限制 → 保存与回退事实。方案检查、代码实现、产品测试和Owner接受分开，不把新承诺追溯记作旧任务已经验收。</p></article><article class="doc" data-doc="sources" hidden="" id="doc-sources"><div class="doc-path">11_来源与待核实项.md</div><h1 id="_1">来源与待核实项</h1>
+<p><strong>核验日期：2026-09-24。</strong> 本文件只记录支持技术判断的官方页面/项目来源，不汇总竞品宣传与历史对比。页面抓取可能滞后，版本、报价与合同应在试接/采购时再次确认。</p>
+<h2 id="1">1. 已核验来源</h2>
+<p><a id="S01"></a></p>
+<h3 id="s01-electronweb-embeds">S01 · Electron：Web Embeds</h3>
+<p>嵌入方案、WebContentsView 与 iframe 的区别；官方不推荐 webview 标签。</p>
+<p>官方来源：<a href="https://www.electronjs.org/docs/latest/tutorial/web-embeds">https://www.electronjs.org/docs/latest/tutorial/web-embeds</a></p>
+<p><a id="S02"></a></p>
+<h3 id="s02-electronsecurity">S02 · Electron：Security</h3>
+<p>远程内容隔离、Node 权限、导航与 IPC 校验的官方建议。</p>
+<p>官方来源：<a href="https://www.electronjs.org/docs/latest/tutorial/security">https://www.electronjs.org/docs/latest/tutorial/security</a></p>
+<p><a id="S03"></a></p>
+<h3 id="s03-docx-preview-docxjs">S03 · docx-preview / docxjs 官方仓库</h3>
+<p>DOCX 直接渲染为 HTML；动态分页和内部解析 API 的限制；Apache-2.0。</p>
+<p>官方来源：<a href="https://github.com/VolodymyrBaydalka/docxjs">https://github.com/VolodymyrBaydalka/docxjs</a></p>
+<p><a id="S04"></a></p>
+<h3 id="s04-pptx-renderer">S04 · pptx-renderer 官方仓库</h3>
+<p>PPTX Parse→Model→Render、可选延迟解析与按窗口渲染；覆盖范围有限；Apache-2.0。</p>
+<p>官方来源：<a href="https://github.com/aiden0z/pptx-renderer">https://github.com/aiden0z/pptx-renderer</a></p>
+<p><a id="S05"></a></p>
+<h3 id="s05-sheetjs-cehtml-tables">S05 · SheetJS CE：HTML Tables</h3>
+<p>HTML 表格输出及 CE 的数据/数字格式定位；完整 CSS 文本、单元格样式支持在 Pro。</p>
+<p>官方来源：<a href="https://docs.sheetjs.com/docs/api/utilities/html/">https://docs.sheetjs.com/docs/api/utilities/html/</a></p>
+<p><a id="S06"></a></p>
+<h3 id="s06-sheetjs-ceoverview">S06 · SheetJS CE：Overview</h3>
+<p>表格数据读写与 Pro 能力边界；不能把数据解析等同于完整 Excel。</p>
+<p>官方来源：<a href="https://docs.sheetjs.com/docs/">https://docs.sheetjs.com/docs/</a></p>
+<p><a id="S07"></a></p>
+<h3 id="s07-wps-weboffice">S07 · WPS WebOffice：快速开始</h3>
+<p>网页内嵌初始化与不同文档组件类型。</p>
+<p>官方来源：<a href="https://open.wps.cn/documents/app-integration-dev/docs-center/online-preview-edit/web/quick-start">https://open.wps.cn/documents/app-integration-dev/docs-center/online-preview-edit/web/quick-start</a></p>
+<p><a id="S08"></a></p>
+<h3 id="s08-wps-weboffice">S08 · WPS WebOffice：回调网关</h3>
+<p>标准服务接入的回调网关要求；本地路径不能直接供远程服务读取。</p>
+<p>官方来源：<a href="https://open.wps.cn/documents/app-integration-dev/docs-center/online-preview-edit/callback/gateway">https://open.wps.cn/documents/app-integration-dev/docs-center/online-preview-edit/callback/gateway</a></p>
+<p><a id="S09"></a></p>
+<h3 id="s09-wps-weboffice-api">S09 · WPS WebOffice：客户端 API 总览</h3>
+<p>不同文档的 Selection、Range、形状及相关对象接口目录；不代表每类对象都可无缝共编。</p>
+<p>官方来源：<a href="https://open.wps.cn/documents/app-integration-dev/docs-center/online-preview-edit/client/overview">https://open.wps.cn/documents/app-integration-dev/docs-center/online-preview-edit/client/overview</a></p>
+<p><a id="S10"></a></p>
+<h3 id="s10-ossweboffice">S10 · 阿里云 OSS：WebOffice 在线编辑</h3>
+<p>浏览器内 Office 编辑；OSS、IMM、地域和域名等接入前提。</p>
+<p>官方来源：<a href="https://www.alibabacloud.com/help/zh/oss/user-guide/online-object-editing">https://www.alibabacloud.com/help/zh/oss/user-guide/online-object-editing</a></p>
+<p><a id="S11"></a></p>
+<h3 id="s11-imm">S11 · 阿里云 IMM：计费项</h3>
+<p>在线预览/编辑的 API 调用计量；还需计算对象存储和流量等费用。</p>
+<p>官方来源：<a href="https://help.aliyun.com/en/imm/product-overview/billable-items">https://help.aliyun.com/en/imm/product-overview/billable-items</a></p>
+<p><a id="S12"></a></p>
+<h3 id="s12-onlyofficeopening-file">S12 · ONLYOFFICE：Opening file</h3>
+<p>文档服务从 URL 获取文件的加载链路及原生支持格式说明。</p>
+<p>官方来源：<a href="https://api.onlyoffice.com/docs/docs-api/get-started/how-it-works/opening-file/">https://api.onlyoffice.com/docs/docs-api/get-started/how-it-works/opening-file/</a></p>
+<p><a id="S13"></a></p>
+<h3 id="s13-onlyofficelifecycle-of-opening-editor">S13 · ONLYOFFICE：Lifecycle of opening editor</h3>
+<p>onAppReady 与 onDocumentReady 分离；用于正确测量文档就绪。</p>
+<p>官方来源：<a href="https://api.onlyoffice.com/docs/docs-api/get-started/how-it-works/lifecycle-of-opening-editor/">https://api.onlyoffice.com/docs/docs-api/get-started/how-it-works/lifecycle-of-opening-editor/</a></p>
+<p><a id="S14"></a></p>
+<h3 id="s14-onlyofficeautomation-api">S14 · ONLYOFFICE：Automation API</h3>
+<p>外部文档自动化 API 为 Docs Developer 额外付费功能；不等于所有插件命令都收费。</p>
+<p>官方来源：<a href="https://api.onlyoffice.com/docs/docs-api/usage-api/automation-api/">https://api.onlyoffice.com/docs/docs-api/usage-api/automation-api/</a></p>
+<p><a id="S15"></a></p>
+<h3 id="s15-onlyofficecommunity-licensing-faq">S15 · ONLYOFFICE：Community Licensing FAQ</h3>
+<p>厂商对 AGPL、修改/衍生作品、品牌和商业集成的解释；最终应结合许可证正文与实际架构审核。</p>
+<p>官方来源：<a href="https://helpcenter.onlyoffice.com/docs/faq/docs-community.aspx">https://helpcenter.onlyoffice.com/docs/faq/docs-community.aspx</a></p>
+<p><a id="S16"></a></p>
+<h3 id="s16-collabora-office-2604">S16 · Collabora Office 26.04 官方发布说明</h3>
+<p>2026-07-01；桌面本地引擎与 Web UI 路线，Windows WebView2；官方声明仍处于早期完善阶段。</p>
+<p>官方来源：<a href="https://www.collaboraonline.com/blog/collabora-office-26-04-release/">https://www.collaboraonline.com/blog/collabora-office-26-04-release/</a></p>
+<p><a id="S17"></a></p>
+<h3 id="s17-collabora-online">S17 · Collabora Online：许可条款</h3>
+<p>源码主要 MPL-2.0；官方可执行发行物有附加条款；品牌和随附组件分别核验。</p>
+<p>官方来源：<a href="https://www.collaboraonline.com/terms/collabora-online-mplv2/">https://www.collaboraonline.com/terms/collabora-online-mplv2/</a></p>
+<p><a id="S18"></a></p>
+<h3 id="s18-collabora-uno-postmessage">S18 · Collabora 官方论坛：UNO 与 PostMessage 的边界</h3>
+<p>项目维护者解释 UNO、编辑状态通知与 PostMessage 并非同一接口；仅作接口边界线索，不代替当前 SDK 验证。</p>
+<p>官方来源：<a href="https://forum.collaboraonline.com/t/how-does-the-server-proactively-send-uno-commands-to-the-client/2787">https://forum.collaboraonline.com/t/how-does-the-server-proactively-send-uno-commands-to-the-client/2787</a></p>
+<p><a id="S19"></a></p>
+<h3 id="s19-allotropialaunching-zetajs-for-zetaoffice">S19 · allotropia：Launching ZetaJS for ZetaOffice</h3>
+<p>浏览器客户端 WASM 文档处理与 JavaScript 包装器的官方技术说明。</p>
+<p>官方来源：<a href="https://blog.allotropia.de/2024/11/08/launching-zetaoffice/">https://blog.allotropia.de/2024/11/08/launching-zetaoffice/</a></p>
+<p><a id="S20"></a></p>
+<h3 id="s20-zetaoffice">S20 · ZetaOffice 官方网站</h3>
+<p>Writer/Calc/Impress、UNO 集成及服务 open beta 说明；网页抓取可能滞后，发行状态需再确认。</p>
+<p>官方来源：<a href="https://zetaoffice.net/">https://zetaoffice.net/</a></p>
+<p><a id="S21"></a></p>
+<h3 id="s21-zetajs">S21 · zetajs 官方仓库</h3>
+<p>JS 包装器、UNO 控制和 MIT 许可；MIT 仅代表此包装器。</p>
+<p>官方来源：<a href="https://github.com/allotropia/zetajs">https://github.com/allotropia/zetajs</a></p>
+<p><a id="S22"></a></p>
+<h3 id="s22-libreofficelicenses">S22 · LibreOffice：Licenses</h3>
+<p>MPL-2.0 为主并包含其他许可证；以实际发行包 LICENSE 为准。</p>
+<p>官方来源：<a href="https://www.libreoffice.org/licenses/">https://www.libreoffice.org/licenses/</a></p>
+<p><a id="S23"></a></p>
+<h3 id="s23-libreofficexselectionsupplier">S23 · LibreOffice：XSelectionSupplier</h3>
+<p>选区读取、设定、选区事件的 UNO 接口；不是 Electron 嵌入 SDK。</p>
+<p>官方来源：<a href="https://api.libreoffice.org/docs/idl/ref/interfacecom_1_1sun_1_1star_1_1view_1_1XSelectionSupplier.html">https://api.libreoffice.org/docs/idl/ref/interfacecom_1_1sun_1_1star_1_1view_1_1XSelectionSupplier.html</a></p>
+<p><a id="S24"></a></p>
+<h3 id="s24-univer">S24 · Univer 官方仓库</h3>
+<p>开放编辑基础设施及开源/商业组件的区分；应按实际包审核。</p>
+<p>官方来源：<a href="https://github.com/dream-num/univer">https://github.com/dream-num/univer</a></p>
+<p><a id="S25"></a></p>
+<h3 id="s25-univer-sheetsimport-and-export">S25 · Univer Sheets：Import and export</h3>
+<p>官方文件交换路径需要转换后端，格式边界由当前版本定义。</p>
+<p>官方来源：<a href="https://docs.univer.ai/guides/sheets/features/import-export">https://docs.univer.ai/guides/sheets/features/import-export</a></p>
+<p><a id="S26"></a></p>
+<h3 id="s26-univerfile-exchange-integration">S26 · Univer：File exchange integration</h3>
+<p>当前文档正文为英文，官方说明 exchange-node 服务端转换；与浏览器编辑器是不同部分。</p>
+<p>官方来源：<a href="https://docs.univer.ai/ja-JP/guides/server-integration/import-export">https://docs.univer.ai/ja-JP/guides/server-integration/import-export</a></p>
+<p><a id="S27"></a></p>
+<h3 id="s27-mdncontenteditable">S27 · MDN：contenteditable</h3>
+<p>文本编辑入口与 plaintext-only；不会自动提供文件持久化。</p>
+<p>官方来源：<a href="https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Global_attributes/contenteditable">https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Global_attributes/contenteditable</a></p>
+<p><a id="S28"></a></p>
+<h3 id="s28-moveable">S28 · Moveable 官方仓库</h3>
+<p>拖动/尺寸操作基础库，MIT；保存、撤销、权限须宿主实现。</p>
+<p>官方来源：<a href="https://github.com/daybrush/moveable">https://github.com/daybrush/moveable</a></p>
+<p><a id="S29"></a></p>
+<h3 id="s29-grapesjsstorage-manager">S29 · GrapesJS：Storage Manager</h3>
+<p>以项目数据保存编辑器状态；引入完整编辑框架会增加持久化模型。</p>
+<p>官方来源：<a href="https://grapesjs.com/docs/modules/Storage.html">https://grapesjs.com/docs/modules/Storage.html</a></p>
+<p><a id="S30"></a></p>
+<h3 id="s30-pdfjs">S30 · PDF.js 官方网站</h3>
+<p>PDF 解析与显示；不能推导出完整 PDF 编辑能力。</p>
+<p>官方来源：<a href="https://mozilla.github.io/pdf.js/">https://mozilla.github.io/pdf.js/</a></p>
+<p><a id="S31"></a></p>
+<h3 id="s31-cropperjs">S31 · Cropper.js 官方网站</h3>
+<p>图片裁剪交互组件；非完整图像编辑器。</p>
+<p>官方来源：<a href="https://fengyuanchen.github.io/cropperjs/">https://fengyuanchen.github.io/cropperjs/</a></p>
+<p><a id="S32"></a></p>
+<h3 id="s32-sharpimage-operations">S32 · Sharp：Image operations</h3>
+<p>图片旋转、变换等处理 API；需另建 UI 与文件保存逻辑。</p>
+<p>官方来源：<a href="https://sharp.pixelplumbing.com/api-operation/">https://sharp.pixelplumbing.com/api-operation/</a></p>
+<p><a id="S33"></a></p>
+<h3 id="s33-mozillampl-20-faq">S33 · Mozilla：MPL 2.0 FAQ</h3>
+<p>文件级义务及与其他代码组成 Larger Work 的解释。</p>
+<p>官方来源：<a href="https://www.mozilla.org/en-US/MPL/2.0/FAQ/">https://www.mozilla.org/en-US/MPL/2.0/FAQ/</a></p>
+<p><a id="S34"></a></p>
+<h3 id="s34-gnulicense-faq">S34 · GNU：License FAQ</h3>
+<p>插件、进程通信、组合程序边界由连接方式及语义共同决定；不是仅看进程数。</p>
+<p>官方来源：<a href="https://www.gnu.org/licenses/gpl-faq.en.html">https://www.gnu.org/licenses/gpl-faq.en.html</a></p>
+<p><a id="S35"></a></p>
+<h3 id="s35-apache-license-20">S35 · Apache License 2.0 正文</h3>
+<p>复制、修改、分发授权及许可证/NOTICE/修改声明等条件。</p>
+<p>官方来源：<a href="https://www.apache.org/licenses/LICENSE-2.0">https://www.apache.org/licenses/LICENSE-2.0</a></p>
+<p><a id="S36"></a></p>
+<h3 id="s36-libreoffice">S36 · LibreOffice：启动参数</h3>
+<p>headless/convert-to 等参数；可用于可选转换兜底，不作为默认打开链路。</p>
+<p>官方来源：<a href="https://help.libreoffice.org/latest/en-US/text/shared/guide/start_parameters.html">https://help.libreoffice.org/latest/en-US/text/shared/guide/start_parameters.html</a></p>
+<h2 id="2">2. 本次没有完成的核验</h2>
+<ul>
+<li>没有安装、运行或测速任何Office Provider，没有检查用户真实文件在这些方案中的显示/保存结果。</li>
+<li>原V3没有重新读仓库；V3.1新增定向源码复核，证据及范围见12。它不等于全仓/运行/性能审计；实施前仍核对工作区，不能据旧文件名推断现状。</li>
+<li>Collabora当前PostMessage SDK正文页面返回反爬校验。本包只引用可读的维护者接口说明作为边界线索；当前API和版本需进一步读官方SDK/源码确认。</li>
+<li>WPS商业报价、私有化/离线授权、阿里云实际账单、ONLYOFFICE Developer与自动化权限，均未取得针对果铃的商务确认。</li>
+<li>ZetaOffice官网仍显示open beta，但公开页面可能滞后；不能据此断言所有发行物都停留在同一状态。</li>
+<li>轻量渲染库的源码许可与公开能力已可查，实际安全性、长期维护和完整依赖未完成尽调。</li>
+</ul>
+<h2 id="3">3. 使用建议与事实分离</h2>
+<p>性能目标、实验规模、开发顺序、用户路径与是否自研属于本包的方案建议，不是外部调查事实。产品需求来源为本次会话：快速打开、允许大致版式、MD→HTML→成品单向生产、HTML直接轻改并自动保存、Office多方案保留。</p>
+<p>未沿用未经验证的竞品内部渲染推断、特定收购意向、融资数量、某项功能独占性或“已有预览等于完成80%编辑”的估计。新方案是否有效，以具体代码、真实任务和测试结果为准。</p>
+<h2 id="4-v31">4. V3.1补充来源与核验边界</h2>
+<p>本轮新增Skill及浏览器测量相关原始资料；原Office研究保留，未重新执行候选、刷新商务报价或逐项复核所有第三方状态。具体技术组合是设计建议，不是这些来源对果铃可用性的证明。</p>
+<p><a id="S37"></a></p>
+<h3 id="s37-agent-skills">S37 · Agent Skills：格式规范</h3>
+<p>SKILL.md与可选scripts/references/assets；渐进加载和相对路径。</p>
+<p>官方来源：<a href="https://agentskills.io/specification">https://agentskills.io/specification</a></p>
+<p><a id="S38"></a></p>
+<h3 id="s38-agent-skills">S38 · Agent Skills：宿主接入</h3>
+<p>宿主发现、加载、激活与上下文保留，不是文件存在即接通。</p>
+<p>官方来源：<a href="https://agentskills.io/client-implementation/adding-skills-support">https://agentskills.io/client-implementation/adding-skills-support</a></p>
+<p><a id="S39"></a></p>
+<h3 id="s39-anthropicagent-skills">S39 · Anthropic：Agent Skills工程方法</h3>
+<p>方法、资源与可执行代码配合；机械步骤可由程序复用。</p>
+<p>官方来源：<a href="https://www.anthropic.com/engineering/equipping-agents-for-the-real-world-with-agent-skills">https://www.anthropic.com/engineering/equipping-agents-for-the-real-world-with-agent-skills</a></p>
+<p><a id="S40"></a></p>
+<h3 id="s40-mdnfontfacesetready">S40 · MDN：FontFaceSet.ready</h3>
+<p>等待字体加载及相关布局；不代替缺失字体识别。</p>
+<p>官方来源：<a href="https://developer.mozilla.org/en-US/docs/Web/API/FontFaceSet/ready">https://developer.mozilla.org/en-US/docs/Web/API/FontFaceSet/ready</a></p>
+<p><a id="S41"></a></p>
+<h3 id="s41-mdngetboundingclientrect">S41 · MDN：getBoundingClientRect</h3>
+<p>视口坐标、边框盒与滚动；需要归一化到实际页面坐标。</p>
+<p>官方来源：<a href="https://developer.mozilla.org/en-US/docs/Web/API/Element/getBoundingClientRect">https://developer.mozilla.org/en-US/docs/Web/API/Element/getBoundingClientRect</a></p>
+<h2 id="5-v32">5. V3.2案例来源（非新增互联网调研）</h2>
+<p>本版新增依据为用户在2026-09-25本轮会话提供的听力HTML、V7工程，以及上一轮 <code>guoling_case_evidence.md</code> 拆包/最小宿主记录，摘要和限制见12第9节。本轮未重新运行原文件或当前果铃，未查询当时生成提示词/日志，也没有证明当前版本存在同样全部问题。</p>
+<p>02的三方对照、13的保留模块与最小编辑连接是规划建议，不是已完成产品能力。41个公开来源与Office研究沿用V3.1，不因本版日期更新就视为重新核验；未更新第三方版本、报价或许可结论。原始案例仍需从授权附件取得，缺文件时保持未测。</p>
+<h2 id="v33">V3.3来源与本轮范围</h2>
+<p>新增内容依据Owner连续确认的Runtime当前状态编辑、自动图文发现、HTML机械导入、Flow页面承载、原生文本框和后置呈现策略，以及本会话先前对Runtime/Flow/Spatial源码的定向阅读。具体证据范围见12第10节。</p>
+<p>本轮只更新指定方案包，未运行产品、安装引擎、调用模型或刷新Office/第三方状态。14中的身份、覆盖、滚动和共享编辑是待实现建议，不是普遍可行的实测结论。原基准JSON、测试结果和任务/验收登记未修改。</p></article><article class="doc" data-doc="review" hidden="" id="doc-review"><div class="doc-path">12_架构复审与本轮修订.md</div><h1 id="v33-runtimeflow">V3.3 架构复审、Runtime与Flow方案修订</h1>
+<p><strong>本版日期：2026-09-25｜只修订指定方案包。V3.1/V3.2证据保留，新增第10节记录本会话Runtime/Flow定向阅读与Owner决定；不是全仓重审。</strong></p>
+<h2 id="1">1. 总体判断</h2>
+<p>保留V3.1“不先全仓重构”的判断。此次案例要求修正内容生产与验收的假设：有限原生映射不是所有内容的默认终点；不以工程可导入替代创作质量，也不以整页能嵌入替代实际可编辑。旧样本不能证明当前底座上限，具体限制先用一个当前版本案例定位。</p>
+<p>本版保留教育切入、通用 Agent、单向创作、HTML 轻编辑、原生/混合作品及开放 Office 候选。教育方法是可选能力，不将所有办公任务强制套入教学策划和多阶段流程。</p>
+<p>当前收敛是：<strong>沿用已建立的内核；简单内容可靠映射，完整区域保留实现；让程序接管搬运封装，只补实际编辑缺口。</strong> 不新增保真服务、评分平台、逐保存截图、通用CSS转换器或更多Agent角色。</p>
+<h2 id="2-v31">2. 历史源码证据范围（V3.1，未在本轮刷新）</h2>
+<p>2026-09-24的V3.1曾完整阅读方案、Skill、样例与验收定义，并定向复核文档/文件、工具、执行器、构建与Skill入口。开始采集时 <code>src</code> 下有 879 个文件；这只是文件快照，不表示逐行审完或运行验收通过。运行中的 Codex 可能继续改变工作区，实施前复核受影响路径。</p>
+<p>V3.1没有运行果铃、模型请求、npm安装、构建、产品测试、Office实验或性能/内存测量；本次V3.2同样没有新增上述实测，仅读取当前方案与上一轮案例记录。方案目录之外的产品实现、已安装 Skill、任务状态、验收结果和 Git 提交不由本轮改变。文档可执行性检查不等于产品通过。</p>
+<p>以下源码引用均相对 <code>D:\果铃工作台</code>，行号为采集时位置；文件变化后以符号和实际调用为准。</p>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>证据</th>
+<th>当前事实</th>
+<th>规划后果</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>src/main/workbench/DocumentHostService.ts:42–49,73–86,100–104</code></td>
+<td>Registry、Gateway、文件协调共用；正式文档只识别 Markdown/V9</td>
+<td>保留内核；HTML 是一个待开发的窄文档适配，不是改扩展名即可完成</td>
+</tr>
+<tr>
+<td><code>src/shared/workbench/document.ts:5–24,61–103</code></td>
+<td>文档类型/命令为显式联合，Driver 与持久化已有合同</td>
+<td>新 HTML 在现有合同扩一支；不建通用 AST、第二 History 或平行 FileService</td>
+</tr>
+<tr>
+<td><code>src/main/workbench/execution/ExecutionEngine.ts:185–195,412</code></td>
+<td>内置循环从同源工具形成能力，使用通用任务上下文</td>
+<td>三个新 Skill 需要真实加载/选择接线，不能只复制 Markdown 文件</td>
+</tr>
+<tr>
+<td><code>src/shared/courseAgentSkills.ts:3–12,25–32,49–57</code></td>
+<td>有旧 CLI/候选方法资源；本轮静态扫描未发现 src 内该模块的导入方</td>
+<td>可借鉴教学方法，不能照搬旧 CLI 生命周期和普通编辑候选政策，也不能据此称新 Skill 已接通</td>
+</tr>
+<tr>
+<td><code>.agents/skills/build-courseware-project/SKILL.md:13–35</code></td>
+<td>旧外部 Skill 已有定位、能力查询和真实 Builder 命令</td>
+<td>项目并非从未机械化；复用已存在的能力，不为三个 Skill 各复制一套脚本</td>
+</tr>
+<tr>
+<td><code>src/core/tools/ToolCatalog.ts:175–217</code></td>
+<td>原生文字、媒体、批量等工具已存在；部分 component/runtime 操作仍列待迁移</td>
+<td>不能杜撰现成 <code>component.insert</code> Gateway 工具；动态路径沿用受控构建/准入</td>
+</tr>
+<tr>
+<td><code>src/core/tools/HostToolServices.ts:40–59,178–203</code></td>
+<td>build.create 需整份 V9 授权；check 不等于 import；import 校验目标后进入 Session</td>
+<td>装配是准备成果，正式提交仍走现有入口；源 HTML 的版本保护需要明确补上</td>
+</tr>
+<tr>
+<td><code>src/main/workbench/build/ControlledBuildService.ts:188–211,258–282</code></td>
+<td>构建基线绑定 V9，拥有真实动态准入</td>
+<td>不是现成“任意独立文件构建服务”；不能为泛化素材任务伪造课件文档</td>
+</tr>
+<tr>
+<td><code>scripts/build-courseware-case.ts:282–405</code></td>
+<td>外部离线课例 Builder、打包与输出写入路径存在</td>
+<td>可复用领域构建能力；不能用该独立 CLI 旁路覆盖已打开的正式文档</td>
+</tr>
+<tr>
+<td><code>果铃2.0收敛方案.md</code> 第8、10节</td>
+<td>安装包、便携版和干净机器发行验证已延期</td>
+<td>取消本包以“发布构建”为近期开发门；正式对外发行时另验</td>
+</tr>
+</tbody>
+</table></div>
+<h2 id="3">3. 需要修正的过度设计风险</h2>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>风险</th>
+<th>处理</th>
+<th>不做什么</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>把现行验收与所有长期格式绑定</td>
+<td>原范围先收口，Owner要求的Runtime/HTML/Flow增量仍在2.0完成，Office另排</td>
+<td>不修改任务/验收状态，不追溯把新能力记为已通过</td>
+</tr>
+<tr>
+<td>先限制所有设计，再追求原生映射</td>
+<td>真实听力案例一次诊断；简单对象有限映射，完整区域保留实现</td>
+<td>不先做完整HTML编辑器或任意网页转换器，不主动删内容来适应子集</td>
+</tr>
+<tr>
+<td>每个 Skill 自己写保存、hash、重试、装配代码</td>
+<td>共享少量宿主确定性函数，必要时暴露薄工具</td>
+<td>不建设 Skill 自己的执行器、队列和权限系统</td>
+</tr>
+<tr>
+<td>“复用 DocumentSession”被理解为所有格式变成 V9</td>
+<td>HTML 保留源文；Office Provider 保留真实内部模型与编辑会话</td>
+<td>不统一所有 AST，也不镜像第三方每次键入到第二撤销栈</td>
+</tr>
+<tr>
+<td>人工 HTML、模型、外部文件工具各自写盘</td>
+<td>接入已有文档/文件协调；补同一来源的保存与提交版本检查</td>
+<td>不靠前端独立 writeFile 或先 check 后无锁 write</td>
+</tr>
+<tr>
+<td>工程优化扩成新主线</td>
+<td>Journal/事件列独立窄任务，热点按需处理</td>
+<td>不为了减行数拆大文件、删组件、清空测试/索引</td>
+</tr>
+<tr>
+<td>候选池变成多个常驻 Office 和评测后台</td>
+<td>保留研究文档，本轮只做一个有具体问题的实验</td>
+<td>不安装全候选，不先开发公共插件 SDK/市场</td>
+</tr>
+</tbody>
+</table></div>
+<h2 id="4-2026-09-24">4. 2026-09-24审查意见的保留安排</h2>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>项目</th>
+<th>当前证据与实际成本</th>
+<th>本版动作、时点与验证</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>文档 Journal</td>
+<td><code>documentJournal.ts:73–112,403–423</code>：完整状态序列化，追加前扫描旧日志；历史保存完整 before/after</td>
+<td>OJ：先测代表性连续编辑，再去除正常追加的重复全扫并安全整理检查点；必须保留撤销、回执、停止和崩溃恢复。接入高频自动保存时重点验证，不改成新的存储平台</td>
+</tr>
+<tr>
+<td>流式事件</td>
+<td><code>ExecutionEventStore.ts:230–283</code> 已有 batchAppend；<code>ExecutionEngine.ts:264,795–797,1046</code> 仍见逐事件等待</td>
+<td>OE：有界合批展示事件，关键回执/结束前冲刷；不把批量预灌长列表等同真实流压测，不削弱正式文档持久化</td>
+</tr>
+<tr>
+<td>默认 Skill 安装</td>
+<td><code>package.json:10–11</code> 的 prestart 指向用户级安装</td>
+<td>OS：适合顺手解耦默认启动；保留显式安装器及其保护逻辑。不是新 Skill 接入的基础设施前置</td>
+</tr>
+<tr>
+<td>任务缓存</td>
+<td>HostToolCoordinator、BuildService 等仍持有任务/基线 Map</td>
+<td>OM：先观察长会话/重复任务；确认持续积累后释放可重建的大内容，保留查询回执、继续任务及停止屏障。不能断言已经实测泄漏</td>
+</tr>
+<tr>
+<td>V9 投影桥、大工作区文件、表面命令样板</td>
+<td>是维护/热路径候选，不证明总体架构不合理</td>
+<td>接触真实热点再改。不放进本轮 HTML/Skill 的必要依赖</td>
+</tr>
+<tr>
+<td>旧测试与工具</td>
+<td>年代、行数、目录名不是无用证据</td>
+<td>删除测试须核对独特行为及替代覆盖；repo-index 保持可选；不重新做治理平台</td>
+</tr>
+</tbody>
+</table></div>
+<p>OJ/OE 不要求全部完成才开始下一阶段。若本批实测出现相关卡顿、保存增长或事件延迟，就与该批一起解决；否则作为独立优化排入近期。任何已复现数据丢失、停止后写入、串写或虚报保存，仍优先修复。</p>
+<h2 id="5-v3320">5. V3.3的2.0路径</h2>
+<p><strong>原验收收口 → 当前状态Runtime轻编辑/常见图文自动发现 → HTML机械整体导入 → Flow整页承载和原生文本框 → 所需三表面接线、后置呈现策略与Skill → 2.0最终收口。</strong> 顺序与范围见02，技术边界见14。</p>
+<p>V3.2不将新增链路纳入2.0的版本安排，被Owner本轮要求取代；不是回头修改旧任务状态。静态原生映射保留为可选后续能力，不成为导入前置。教学与框架HTML先设计，编辑器能力在后置策略才加载。</p>
+<p>保留执行器、文档内核、成熟原生能力和构建/准入。受支持HTML机械封装不允许每份都让LLM重写；自动发现与内容身份/保存分开，不因容易扫描DOM而承诺任意动态内容可持久修改。</p>
+<h2 id="6-skill">6. Skill与验证的收敛</h2>
+<p>13沿用三个拟新增工具和共享函数，删减重复检查要求；没有实现、安装或注册新命令。相邻纯函数可在同一模块，宿主可直接调用，生产模型只读当前薄Skill及必要参考。</p>
+<p>保留35条待执行用例，按改动选择；已有保存、权限、撤销测试可引用。保真对照在首次接入或相关回归时看两三个状态与一条操作链，日常任务不固定跑三路生成、全工程扫描或额外审美Agent。</p>
+<p>安全、来源/目标版本、取消和保存事实仍由现有宿主保障，减少的是重复工作，不是删除这些底线。轻微像素差别为提醒，明确内容/关键行为丢失不能冒充成功。</p>
+<h2 id="7">7. 未来扩展不被堵住</h2>
+<p>新格式复用真实共性：身份、文件绑定、授权、任务、成果回执与保存协调。自有 HTML 可以沿用 DocumentSession 正式内容和 History；第三方 Office 的细粒度撤销可由其编辑引擎拥有，果铃协调唯一活动 writer、保存边界和 AI 操作结果。不承诺所有编辑器共享一个跨格式逐键 Undo。</p>
+<p>独立文件成果、通用代码任务、薄 runner、公共插件体系在真实需求进入时再扩展；当前 V9 build 合同不应为它们重写，但也不能被宣传为已经支持。首发课程内容是用例，不是给通用 Agent 加永久教育限制。</p>
+<h2 id="8">8. 本轮修改边界和回退</h2>
+<p>V3.3仅更新指定方案目录中的叙述、Skill草案、阅读器与清单，新增14集中记录技术边界。35条历史基准定义、全部测试结果、数学样例与Office候选保持原样。更新前31个活动文件备份：<code>_history/V3_2_before_runtime_flow_20260925.zip</code>；更早备份保留。</p>
+<p>不修改根AGENTS、根目录收敛稿、另一执行包、task_registry/acceptance_cases、TASK_BOARD/任务卡、已安装Skill、源码、依赖或Git。后续实施再按实际授权接通产品，不把方案文件出现当作任务已登记或已实现。</p>
+<h2 id="9">9. 本次听力案例依据与推论边界</h2>
+<p>来源是用户本轮上传的 <code>Starter-Unit-1-Hello-standalone.html</code>、<code>Starter-Unit-1-Hello-listening(1).h5lesson</code>，及上一轮生成的 <code>guoling_case_evidence.md</code>。本节转述该对照记录，未在本轮重跑。原始两个文件仍在会话附件，本方案包不附教材图片/音频，不将它们默认为可公开分发资源。</p>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>上一轮记录支持的观察</th>
+<th>此次规划后果</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>三张图片和音频与HTML对应素材字节一致</td>
+<td>优先查构图与迁移，不把问题归因于素材质量</td>
+</tr>
+<tr>
+<td>V7工程已有DOM Runtime，但句子数据删了中文、人物/气泡定位关系</td>
+<td>DOM存在不等于实际生产保真；封装要保留完整数据与行为，不扩大低层Schema来补被主动删掉的内容</td>
+</tr>
+<tr>
+<td>原HTML的图片放大裁切、角色气泡、原文/译文显隐、进度条等在工程内未被完整保留</td>
+<td>关键教学表达与操作必须一起对照，不仅核验文件合法、节点数量或一张初始截图</td>
+</tr>
+<tr>
+<td>内容播放区与全局教师控制器声明区域重叠</td>
+<td>当前宿主还需看实际层级/点击；先调整该作品配置，不删除成熟功能或建设通用冲突系统</td>
+</tr>
+<tr>
+<td>Runtime只有整体segments内容字段，未显式登记逐句目标</td>
+<td>先核对当前已有编辑入口，补少量稳定字段定位；不宣称现有模块完全不能编辑，也不新建任意DOM编辑器</td>
+</tr>
+</tbody>
+</table></div>
+<p>上一轮只在浏览器与最小Runtime宿主测试，未启动真实V7 Player，也未检查当前版本。原HTML自然连续播放的跨对话同步本身也有缺口。故不能推出“最新Schema导致全部退化”“原HTML完全正确”“调提示词就够”或“必须重构底座”。</p>
+<p>本版据此改变的是开发默认策略与一次代表性验收：保真承载、持久编辑、真实新建生成分开验证，按失败层补最小实现；架构主线、成熟功能和近期通用方向保留。</p>
+<h2 id="10-v33">10. V3.3补充：本会话定向阅读与规划修正</h2>
+<p>以下来自本会话先前直接读取的本地代码，不是本次写文档时重新运行产品所得；行号为当时位置，实施以符号和当前consumer为准，不用V3.1旧commit冒充这些工作区证据。</p>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>读取位置</th>
+<th>支持的事实</th>
+<th>本版处理</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>src/player/RuntimeAuthoringTargetRegistry.ts:40–43,292–380</code>；<code>RuntimeHost.ts:364–380</code></td>
+<td>DOM目标限于显式data-courseware键并检查content/assets；作者桥还需声明启用</td>
+<td>补软件自动发现，保留已有稳定键/显式登记</td>
+</tr>
+<tr>
+<td><code>src/player/RuntimeRegistry.ts:57–93</code>；<code>RuntimeHost.ts:253–309</code></td>
+<td>source需同步define/create；DOM挂在受管Shadow root</td>
+<td>普通HTML需要确定性document包装，不能直接塞source或只搬body</td>
+</tr>
+<tr>
+<td><code>src/renderer/ui/workspaces/FlowLocationWorkspace.tsx:69–90</code>；<code>SpatialLocationWorkspace.tsx:468–493</code></td>
+<td>离开run会清理试运行host</td>
+<td>当前状态编辑需保留受管实例或明确业务状态，不只是UI开关</td>
+</tr>
+<tr>
+<td><code>src/shared/contracts/course-project-v9/types.ts:247–307</code>；<code>src/shared/document/content.ts:16–35</code>；<code>FlowWorkspace.tsx</code></td>
+<td>Slide固定1280×720；Flow正文仍为DocumentBlock/SharedDocumentEditor</td>
+<td>保留正文；插入按钮改为Native文本框，不重新迁移正文模型</td>
+</tr>
+<tr>
+<td><code>src/player/surfaces/flow/FlowSurfaceHost.ts:932–1025,1336–1409</code></td>
+<td>Flow surface-local API3 DOM能播放，走绝对浮层与paper坐标换算</td>
+<td>补主内容占位/高度/编辑挂载；paperSpace本身不等于撑开滚动范围</td>
+</tr>
+<tr>
+<td><code>src/renderer/ui/flow/FlowOverlayAuthoringLayer.tsx:190–216</code></td>
+<td>Native/Component有具体绘制，Runtime走标签后备</td>
+<td>不能凭播放态存在就宣称Flow编辑态接通</td>
+</tr>
+<tr>
+<td><code>SpatialLocationWorkspace.tsx:1085–1136</code>；<code>spatial/SpatialGlobalRuntimeAuthoring.tsx:55–70</code></td>
+<td>world循环只处理native/component，独立Runtime作者桥仅覆盖特定global API2</td>
+<td>按实际需要补world/页面carrier，不把全局桥当全部支持</td>
+</tr>
+<tr>
+<td><code>stageViewportTransform.ts:1–115</code>；<code>RuntimeAuthoringTargetRegistry.ts:245–319</code></td>
+<td>几何和目标仍有1280×720归一化假设</td>
+<td>修相关Flow/world路径，不以全局尺寸参数化阻塞导入</td>
+</tr>
+</tbody>
+</table></div>
+<p>本版不沿用早先过强推断：自动发现不会遗漏、简单DOM Patch可改任意状态、ResizeObserver每次写frame.height即可。改用14中的有限对象支持、稳定数据身份/窄覆盖、视图缓存高度和明确滚动所有者。</p>
+<p>Owner决定：HTML首版可全Runtime；Flow保留Document正文并支持页面Runtime与自由图层；插入文字改原生文本框；框架HTML完成后才读编辑器能力；必要增量在2.0完成。旧代码导向不能否定这些决定，但本轮不修改其实现。</p></article><article class="doc" data-doc="mechanical" hidden="" id="doc-mechanical"><div class="doc-path">13_Skill机械命令与执行合同.md</div><h1 id="skill">Skill机械命令与执行合同</h1>
+<p><strong>V3.3｜2026-09-25｜2.0阶段方案，尚未实现或安装。</strong> 保留三份薄Skill和三个拟新增工具名称，不增加执行器、质量服务或任务台账。状态/持久化细节统一见14，不在每份Skill复制协议。</p>
+<h2 id="1">1. 既有宿主与机械职责</h2>
+<p>复用DocumentSession、文件协调、ToolCatalog/Gateway、ExecutionEngine、资源、图像与受控构建/导入。读取源文件、确定依赖、资源登记、ID/引用、HTML包装、构造工程与提交由程序完成；教学、呈现、新素材和必要新代码由模型完成。</p>
+<p>Agent Skills的方法、资源与可选scripts可配合确定性工具，但文件存在不等于宿主已加载或工具已接通。<a href="#sources/S37">S37</a><a href="#sources/S38">S38</a><a href="#sources/S39">S39</a> 生产模型只读当前方法与必要参考；已知机械步骤宿主直接调用函数，不为每个函数建Service或独立CLI。</p>
+<h2 id="2-skill">2. 三份Skill与后置策略</h2>
+<p>course-design负责教学和理想呈现稿；layout-shell负责框架HTML。<strong>这两步不读取编辑器能力、Schema、Builder或shell-contract。</strong> 框架HTML完成后才进入专门的呈现策略，作为slot-build的第一个明确子步骤，读取精简能力摘要并选择载体；随后只加载所选实现需要的API。</p>
+<p>策略输出少量区域、Surface、Native/Runtime/Component选择及素材需求，不要求新配置文件、评分或另一个Agent复审。工具权限仍由原宿主管理，阶段输入过滤不成为新的权限系统。已有完整HTML默认全Runtime机械导入，跳过无必要的设计/策略调用。</p>
+<p>旧提示中的“Runtime少放文字”“稳定图文必须原生”和设计阶段前置能力说明，在后续实际接入时同步修正；本轮不改根AGENTS或安装版Skill。自生成Runtime的可读数据和已有稳定键保留，但不再要求AI逐个登记文字图片，自动发现由宿主完成。</p>
+<h2 id="3">3. 已有能力和待补缺口</h2>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>能力</th>
+<th>处理</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>正式文档/文件、授权、取消和History</td>
+<td>复用已有入口，不另建writer、版本或回滚系统</td>
+</tr>
+<tr>
+<td>原生、资源、批量与图像工具</td>
+<td>读取真实目录，不凭本文假设命令已经注册</td>
+</tr>
+<tr>
+<td>build.create/check/import</td>
+<td>延续真实授权和目标基线，check不等于import，import不等于保存</td>
+</tr>
+<tr>
+<td>Runtime/Component目标</td>
+<td>先复用现有字段/props/登记与选择；补自动发现和当前状态保留，不复制另一编辑器</td>
+</tr>
+<tr>
+<td>完整HTML承载</td>
+<td>复用隔离内容宿主，补确定性document包装、依赖和保存；不能把HTML直接当Runtime source</td>
+</tr>
+<tr>
+<td>Flow页面Runtime/原生文本框</td>
+<td>复用surfaceLayerItems、paperSpace和Document正文，补真实编辑挂载、滚动占位及按钮语义</td>
+</tr>
+<tr>
+<td>三个拟新增工具</td>
+<td>shell.inspect、slot.prepare、shell.assemble；仍未注册，内部函数可先用，不强制三次工具往返</td>
+</tr>
+</tbody>
+</table></div>
+<h2 id="4-runtime">4. 一个装配入口，整体Runtime优先</h2>
+<p>2.0默认已有HTML整体保留：CSS、数据、脚本、文档结构和资源关系不由LLM重写。独立图文有收益时可沿已有工厂构造Native；任意HTML机械拆Native不作为本轮前置。原静态子集仅是后续转换器参考，不限制框架设计或Runtime表现力。</p>
+<p>素材是Runtime或Native使用的资源，不是必须单独生成一种宿主。用户已删除槽、不需新素材或已有完整模块时直接跳过准备。页面可以整体运行，也可与独立原生文本框/批注共存，不碎片化拆开共享状态的气泡、图片和播放器。</p>
+<h2 id="5">5. 三个拟新增工具的最小责任</h2>
+<h3 id="shellinspect">shell.inspect：读取当前来源</h3>
+<p>沿用输入<code>{source, pages?}</code>，source是已授权文件/模块引用。正式输入采用当前会话已确认版本；磁盘尚未保存时可用受管当前快照，不静默读旧盘稿。宿主冻结本次所需内容/依赖，不要求先把所有文件保存成功才能编辑未保存文档。</p>
+<p>已有HTML路径只需识别文档/资源、主要viewport/滚动需求和明显不支持项；不扫描全部DOM生成原生映射，不要求用户补data-gl标签。测量只在需要布局时等相关字体/图片，不扫全字体库；字体ready和视口坐标的原有边界继续适用。<a href="#sources/S40">S40</a><a href="#sources/S41">S41</a></p>
+<p>返回沿用<code>{snapshot, status, pages, slots, issues}</code>，无槽可为空。自动图文目标属于运行中的编辑能力，不把首次导入静态扫描当作全部动态对象清单。可保真承载但不能原生化不是失败；实际资源/安全/宿主缺口如实说明。</p>
+<h3 id="slotprepare">slot.prepare：准备尚缺的局部输入</h3>
+<p>沿用<code>{snapshot, slots?}</code>。当前HTML的brief、尺寸及已确认策略优先，MD仅补未表达背景。明确可复用资源由程序复用；需要语义判断时由当前生产模型处理，不另建相似素材匹配平台。</p>
+<p>按槽返回ready、needs-generation、needs-context或unsupported及真实资源/任务引用。无槽或成品直接跳过；只有新素材才调用真实已授权Provider，不用占位图/静态后备冒充交互完成。</p>
+<h3 id="shellassemble">shell.assemble：确定性封装候选</h3>
+<p>沿用<code>{snapshot, job, fills?}</code>。读取已确认区域策略或整体Runtime默认值，调用既有构建能力；完整HTML保留浏览器语义，资源按支持格式归档，必要JS打包复用受控构建。不让LLM逐页重写project.json、复制坐标和封装代码。</p>
+<p>返回沿用<code>{job, status, mappedObjects, editableTextObjects, filledSlots, issues}</code>；原生对象数量只作诊断，不代表质量或总可编辑性。必要能力说明放已有结果字段，不加全局评分系统。新动态代码按既有准入检查，未改变的结果复用；静态来源无需重复编译。</p>
+<p>工具只准备候选，不另增shell.import。首次实现包装器可能需要开发编程；投入使用后的受支持HTML导入必须机械执行，不能以“首次适配”名义每份网页都让模型重写。超出支持范围明确失败或保留原文件，不静默简化。</p>
+<h2 id="6">6. 正式导入与保存</h2>
+<p>新工程通过真实目标、已有build任务、暂存候选与现有必要准入进入build.import/Session，再沿现有保存。未保存新文档、来源版本与目标锁定按当前正式合同处理，不用临时副本冒充已打开文档，不让离线Builder直接覆盖正式文件。</p>
+<p>独立HTML轻编辑使用对应窄文件Driver/会话；工程导入后工程拥有当前HTML/Runtime内容。原HTML、MD不自动回写。来源授权/目标版本/取消只在现有提交协调区间核对，不在三个工具各复制全量hash和全工程测试。</p>
+<h2 id="7">7. 编辑连接：自动发现＋同一正式写入</h2>
+<p>按照14复用现有RuntimeAuthoring/Component目标、资源和提交。DOM与Phaser常见图文自动发现，Three仅做当前可访问的已知类型；场景和组件通过薄宿主适配共用编辑。稳定目标绑定优先，没有时允许工程内窄覆盖，禁止第二History或独立覆盖文件。</p>
+<p>句子复用同一DOM/引擎对象时，要关联真实内容身份，不仅匹配对象路径或当前位置。需要重建/重排后无法明确对应时保留修改并说明失效，不语义猜配。操作提交和重开/导出读取同一内容，不能只改屏幕。</p>
+<p>Flow插入文本框通过已有Native工厂建立paper-space对象，正文paragraph/heading操作仍保留。只调整对应UI/工具意图路由，不全局替换正文命令或恢复旧格式兼容分支。</p>
+<h2 id="8">8. 运行成本与检查</h2>
+<p>文字完整输入/IME结束、图片替换或几何手势结束后提交；对象测量、滚动、相机和自动内容高度在视图缓存中处理，不连续写历史和磁盘。不逐帧全量枚举、不全局注入拦截器、不用MutationObserver与框架无限争写。</p>
+<p>同一成果不在inspect、prepare、assemble和每份Skill重复检查。权限、取消、版本冲突、资源与保存是必要边界，沿用现有机制；外部编辑仍由原文件观察/冲突处理，不承诺OS全局锁定。</p>
+<h2 id="9-20">9. 2.0完成标准</h2>
+<p>按02和14完成少量真实路径：保真HTML、后续状态图文修改、无expose引擎内容、Flow长网页/原生文本框、新建课程的后置策略与机械装配。测试仅覆盖本次差异，保存/撤销/安全原证据可复用。</p>
+<p>本包35条基准JSON保持原样；不据新方案新增任务登记或伪填通过。产品代码和运行验证由后续实现会话完成，文档存在、工具名称或Schema字段本身都不是接通证据。</p></article><article class="doc" data-doc="runtime-flow" hidden="" id="doc-runtime-flow"><div class="doc-path">14_Runtime自动轻编辑与Flow承载.md</div><h1 id="runtimeflow">Runtime自动轻编辑与Flow承载</h1>
+<p><strong>V3.3｜2.0阶段能力方案｜2026-09-25。</strong> 本章汇总本轮产品决定与实现建议，不表示已接通；不修改仓库任务、验收登记或业务代码。代码事实来自本会话先前的定向阅读，位置见12；实现前核对相关现行consumer，不据历史行号直接改代码。</p>
+<h2 id="1">1. 目标：保住完整表达，再提供轻编辑</h2>
+<p>用户运行到想改的画面，选择“编辑当前状态”，仍停留在这个画面；点文字或图片，修改后保存，并可继续运行。常见图文由软件发现，不要求AI逐对象登记。场景Runtime与组件Runtime共享目标发现、选择UI、资源选择及正式提交，宿主差异只在挂载、坐标、内容持有者和生命周期。</p>
+<p>原生节点仍用于独立自由对象和成熟深编；复杂联动区域保留Runtime/Component。不设置原生或Runtime占比，不删除无明显负担的成熟节点。</p>
+<h2 id="2">2. 自动发现不等于自动获得稳定编辑身份</h2>
+<p>按当前Runtime根和现有引擎对象图局部枚举，只在进入编辑、目标变化或必要重建时刷新；不要扫描整窗、逐帧重建全部目标。可先按点击命中发现，再列出当前可支持图文。</p>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>表示</th>
+<th>2.0最小自动范围</th>
+<th>不冒充可编辑的情况</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>DOM</td>
+<td>可见非空文本叶节点、普通img；对可访问开放根递归，复用当前几何映射</td>
+<td>script/style、输入状态、伪元素生成字、闭合Shadow或跨域内部、无法稳定定位的复用节点</td>
+</tr>
+<tr>
+<td>Phaser</td>
+<td>当前Runtime所有权范围内的Text/BitmapText、Image，以及可独立换纹理的常见Sprite；递归Container</td>
+<td>Graphics/RenderTexture中的烘焙图文、粒子、自定义shader；不把动画图集任意换图当安全支持</td>
+</tr>
+<tr>
+<td>Three</td>
+<td>实际宿主能取得的Sprite图片、CSS2D/DOM文字；仓库已有明确文字对象时针对该类型适配</td>
+<td>CanvasTexture里的文字、任意TextGeometry、压成贴图的字、多材质/UV/自定义shader的语义逆推</td>
+</tr>
+</tbody>
+</table></div>
+<p>普通CSS单背景图、SVG image可在已有路径低成本支持时接入；复杂背景/矢量图不作为全部通过的前置。Three场景被封在不可访问闭包、独立库实例或跨域frame内时不能凭canvas自动取得对象图；先复用现有创建/挂载入口取得根，必要时由捆绑包装器登记一次根，不要求AI逐一expose文字图片，也不全局劫持所有引擎构造器。</p>
+<p>引擎资源所有权要明确：替换一个Sprite/图片不能改变共享纹理的其他实例；沿现有资源系统创建实例所需的新引用。Phaser容器/相机和Three相机的命中要转到当前宿主坐标，不能一律按1280×720裁掉长页面或世界空间内容。</p>
+<h2 id="3">3. 持久化：绑定优先，窄覆盖兜底</h2>
+<p>先复用现有content.values、assets、组件props及命令，把自动找到的对象连到已有正式内容；能自动关联既有稳定键时无需再建覆盖。保留旧显式登记作为可靠补充，但不再是常见图文的唯一入口。</p>
+<p>没有数据绑定时，允许宿主生成小型内容覆盖记录，记录在该Runtime/组件所属的正式工程数据中，仍只有原DocumentSession、一次修改事务和原History；不是独立patch文件、第二文档或新服务。若现有合同无合适字段，只扩实际需要的少量持久字段并同批接通读写/导出，不把额外数据偷塞进无关字段、不重做全Schema。</p>
+<p>覆盖至少要区分所属模块、内容版本、目标与属性。优先既有稳定ID或可重复生成的对象键；DOM路径/对象序号只作为同版本候选，再核对类型、原值和局部结构。自动生成随机ID、内存地址、Phaser对象创建序号及Three uuid本身都不能证明重开后身份稳定。React的内部key也不能被当作必然可读的DOM ID。</p>
+<p><strong>动态复用必须单独处理：</strong> 同一个气泡/Phaser.Text可能先显示第一句再显示第二句。只记对象路径会把第二句错误覆盖为第一句。优先绑定真实句子数据键；缺少绑定时只能在原始内容/当前状态特征能唯一确认时应用。重复原文、多实例或动态重建无法区分时，明确该项暂不可持久修改，不模糊猜配、不对所有相同字符串全局替换。</p>
+<p>DOM重渲染后的覆盖只作用于受影响目标，有自写抑制和相等判断，避免MutationObserver循环；优先框架/引擎已有内容更新点，Phaser/Three也避免遍历整场景强行每帧覆盖。大改源码导致旧目标失效时保留用户修改并提示重新定位，禁止悄悄写到新对象；2.0不做语义rebase系统。</p>
+<p>纯显示文字替换不自动改变题目判定、音频、无障碍标签或业务数据。界面区分“显示覆盖”和“数据绑定修改”；同一数据有多个视图时优先数据路径。不能用改了气泡DOM来宣称整句教学内容均已修改。</p>
+<h2 id="4">4. 当前状态的运行/编辑切换</h2>
+<p>现有试运行与编辑可能各自挂载并销毁宿主。实现要沿当前宿主增加窄模式切换：保留正在运行的实例，暂停其受管动画/媒体与输入，叠加编辑命中层，再恢复同一实例。不以截图替代可操作对象。</p>
+<p>暂停优先使用现有Phaser场景时间/动画、媒体和Runtime生命周期。禁止为暂停一个组件而停掉整课共用引擎；异步回调和独立时钟不能仅靠隐藏DOM就认为已暂停。宿主可管理的对象在编辑中保持稳定；不受管脚本需实际适配或明确限制，不承诺冻结任意Promise、网络和JS堆。</p>
+<p>必须重挂载的具体Runtime，只恢复可明确表达的业务位置（例如当前句/步骤与播放位置）；不设计通用状态序列化。内容修改在保存重开后保留，但2.0不要求重启应用自动恢复任意播放瞬间。相机、滚动、选择和测量结果属于会话视图，不每次写内容历史。</p>
+<h2 id="5-htmlruntime">5. HTML与Runtime共享编辑，不等于共享全部保存策略</h2>
+<p>机械导入应保留完整文档语义和资源，不让LLM重新设计。现有Runtime source需define/create且挂在受管根内，普通HTML不等于可直接粘贴的Runtime源码。优先复用已有隔离内容宿主与构建/归档；由确定性包装器保留doctype/head/CSS/脚本/资源基址和必要浏览器环境，按实际需要采用独立document，而非硬搬body进Shadow DOM。</p>
+<p>自动发现/选择/改字换图可复用。静态HTML可把定位明确的修改写回源文；脚本驱动HTML需保存原脚本和正式修改数据，并由受管加载路径恢复。导出HTML也必须带入必要内容覆盖/恢复逻辑，不只在果铃内看得见。不能直接序列化运行后DOM来代替原脚本和状态来源，也不能只存浏览器缓存。</p>
+<p>独立HTML编辑和导入工程是两种保存目的地：前者由该HTML的正式文件会话保存，后者由工程拥有当前Runtime源与修改；导入后不双向同步原HTML/MD。原文件覆盖按用户已有授权，默认保留导入来源。详见04。</p>
+<h2 id="6-flow">6. Flow：正文承载加自由图层，不另造一种编辑器</h2>
+<p>现有DocumentBlock/SharedDocumentEditor继续承载连续正文；现有surfaceLayerItems承载Native、Component、Runtime，复用bodyPlane及paperSpace。Flow的“场景Runtime”指该Flow页面拥有的Runtime，不新增Slide scene数据模型。</p>
+<p>对导入网页，让一个页面Runtime承载整页正文；对普通讲义继续使用Document正文。两种正文实现可以按页面选用，首版不强求同页来回无损互转或每段HTML自动拆块。可在二者上方添加现有原生文本、图片、形状和局部组件，必要下层内容复用既有underlay，不造重复图层系统。</p>
+<h3 id="_1">正文高度与滚动</h3>
+<p>当前绝对定位surface浮层即使设置paperSpace，也不必然撑开文档滚动高度。补页内主内容挂载和实际占位，使页面Runtime的内容高度进入paper滚动范围；无Document正文时不显示空标题/占位讲义，不为通过旧锚点约束插入可见假正文，必要导航沿已有位置规则作最小适配。</p>
+<p>受控的普通纵向内容可在固定可用宽度下测量内容高度，用ResizeObserver等更新布局缓存与占位。不要在每次高度变化时写frame.height、revision、History和自动保存；只有用户明确改设计尺寸才成为内容操作。测量需考虑字体/图片就绪，避免容器高度反过来驱动100%高度造成反馈循环。</p>
+<p>整页HTML依赖window滚动、100vh、sticky或媒体查询时，“iframe高度直接设成scrollHeight”可能改变原语义。按源网页选择：普通可重排正文由Flow paper统一滚动；强视口依赖网页保持自身viewport/滚动，在Flow中复用其滚动位置来对齐外层对象。每次只明确一个主要滚动所有者，不暴露两层互相争抢的主滚动条。先满足实际导入样例，无法兼容时明确限制，不逐网页猜改脚本。</p>
+<h3 id="_2">原生文本框</h3>
+<p>Flow工具栏原“插入文字”改为“插入文本框”，创建现有Native Text LayerItem，页面局部默认paperSpace=paper；显式全局编辑仍遵守viewport/全局语义。复用现有工厂、属性、拖拽、锁定、资源、撤销与AI寻址，不新建TextNode类型。</p>
+<p>正文输入、回车、段落/标题插入继续走Document操作。工具目录和提示需区分“在第三段后插入解释”与“在右边放一个提示文本框”；不能全局把paragraph命令改为Native而破坏正文编辑，也不为旧的误导按钮另建兼容层。</p>
+<p>paper-space仅保证跟随页面滚动，不自动锚定响应式HTML的某一段。第一版自由批注按明确设计宽度放置，改变网页宽度造成重排时允许提示/手调；不承诺跨任意断点自动贴住原DOM，也不做通用排版约束求解器。</p>
+<h2 id="7">7. 三表面的最小共同能力</h2>
+<p>Slide保留有限画布与既有状态，Flow负责连续内容/滚动，Spatial负责world/camera。本轮确保用到的Runtime/Component在三者中真实挂载、目标可命中、修改可保存；不将Schema允许等同于编辑与播放都接通。</p>
+<p>先前源码显示Spatial world Runtime与Flow编辑态有接线缺口，应按实际所需carrier补齐；不得只实现全局Runtime就声称world/scene/组件全部支持。Spatial中的HTML是一个有外框的网页模块，不因为它放在无限画布上就自动获得HTML节点级空间关系编辑。</p>
+<h2 id="8">8. 完成标准与工作量判断</h2>
+<p>这不是仅添加两个按钮的小改，也不是必须重构整个编辑器。能复用既有宿主时，发现/命中部分较直接；主要风险是状态保留、动态目标身份、资源替换范围和持久化。DOM、Phaser和Three分层验证，不再无依据地承诺“绝大多数都自动可改”或固定覆盖百分比。</p>
+<p>按02完成代表性闭环即可：听力后续句、无expose的Phaser场景/组件、Three实际支持模式、Flow长网页与文本框、新建课程流程。已有保存/权限/撤销结果按受影响范围复用，不新增质量平台、通用编辑ABI、额外Agent群或每次生成全量检查。</p></article><article class="doc" data-doc="skill-course" hidden="" id="doc-skill-course"><div class="doc-path">skills/guoling-course-design/SKILL.md</div><h1 id="_1">教学与理想呈现</h1>
+<p>只读用户目标、学习者、必要材料、时长和当前文稿。此阶段不读取果铃节点Schema、Runtime限制、Builder、能力索引或静态转换白名单；框架HTML也完成后才进入后置呈现策略。</p>
+<p>教学策划说明先备知识、目标、依据、认识形成路径、难点、例题/证据、时间与理解检查。呈现脚本写真实上屏文字/公式、讲稿、初始视觉、关键状态、教师或学生操作和素材目的，不决定Native/Runtime实现。</p>
+<p>录播可视化、教师控制、学生答题分别考虑，不固定页数/动画比例，不为秀技术加互动。保留材料口径，不编造来源或确认，精确数学关系不用生图模型猜测。</p>
+<p>保存、片段标识与机械引用由宿主负责，不自行编写搬运、hash、权限或检查脚本。简单任务不凑齐两份文稿；已有HTML只需编辑/导入时跳过教学设计。</p>
+<p>用户明确要求审稿时在对应稿完成后等待，否则按原授权推进，不新增强制多阶段确认。后续HTML人改内容优先，MD只补未表达教学背景，不反写或覆盖下游。文稿完成不等于产品工程已经应用/验收。</p></article><article class="doc" data-doc="skill-layout" hidden="" id="doc-skill-layout"><div class="doc-path">skills/guoling-layout-shell/SKILL.md</div><h1 id="html">框架HTML设计</h1>
+<p>读取当前文稿、已有HTML、用户目标和必要素材。<strong>框架HTML完成前不读取果铃能力索引、Schema、Builder、Runtime限制或shared/shell-contract.md。</strong> 先把理想呈现做清楚，之后由专门呈现策略决定工程化载体。</p>
+<p>使用真实上屏文案和有效视觉布局，必要素材/互动可以用有目的的槽表达；不是灰盒，也不要求在策略前完成所有动态机制。使用适合设计的普通HTML/CSS布局，不为了将来能拆原生而简化样式、删除数据或缩减教学。</p>
+<p>已完成HTML优先保留，不逆写MD、补齐编辑器标签或重画简化版。当前HTML中的人改文案、布局与槽优先，MD只补未表达背景；冲突单列，不无授权恢复旧稿。</p>
+<p>保存和机械标识补足由宿主负责，本阶段不调用要求加载编辑器能力的工程装配步骤，不让模型维护第二份布局源。HTML就绪后交第三份Skill的后置呈现策略，之后才读取相应实现合同。</p>
+<p>只核对本次设计的明显缺字/遮挡和用户要求，不固定调用审美Agent或生成三份对照；实际导入与可编辑性由后续宿主验证。交付真实HTML与未完成素材/机制说明，不宣称工程已应用。</p></article><article class="doc" data-doc="skill-slot" hidden="" id="doc-skill-slot"><div class="doc-path">skills/guoling-slot-build/SKILL.md</div><h1 id="_1">后置呈现策略与局部生产</h1>
+<h2 id="_2">先决条件</h2>
+<p>已有当前框架HTML或完整HTML后才进入本方法。教学/HTML设计阶段不预读编辑器能力；当前方法才按需读取精简能力摘要。已有成品只需导入时默认全Runtime，跳过不必要的模型策略和素材生产。</p>
+<h2 id="_3">专门的呈现策略</h2>
+<p>按完整区域选择Slide/Flow/Spatial，以及Native、Runtime或现有Component；素材另说明复用/生成与放置位置。输出短区域表即可，不要求另建JSON、评分或多Agent审核。独立对象确有编辑收益时才用Native，共享布局/状态的完整区域优先保留，不为原生率拆碎。</p>
+<p>这是框架完成后的独立职责，不回头限制教学，也不让它重设计已有作品。选择后才读取必要API/Schema；shared/shell-contract只用于可选静态映射，不作为全部HTML的规则。</p>
+<h2 id="_4">按需生产</h2>
+<p>读取当前区域尺寸、brief、局部教学背景与真实工具合同。删除槽不复建，无槽跳过slot.prepare；明确素材/模板可复用时由程序处理，只有新内容/素材或必要适配才编程/调用模型。图片走已授权Provider，精确图解用可核对的SVG/图形/代码，缺能力不造假文件。</p>
+<p>HTML已有CSS、数据、译文、人物/时间关系及交互一起保留；机械导入不得再次由模型重写。常见图文由软件自动发现，生成时保留可读数据与已有稳定键，不逐项手写expose清单；特殊自绘限制如实说明。</p>
+<h2 id="_5">机械交付</h2>
+<p>在受管候选区返回真实成果，由宿主共享函数处理资源、引用、HTML包装和工程组装；沿既有build/import/Session/save，不自行覆盖正式工程或反写MD。shell.inspect、slot.prepare、shell.assemble仅在实际注册后使用，无任务的步骤跳过。</p>
+<p>按改动复用既有准入，不每份Skill重跑全工程、截图或三路生成。图文能命中不等于能保存，动态复用对象、资源替换范围与持久化按14的真实能力检查；结果、限制和未测分开报告。</p></article><article class="doc" data-doc="shell-contract" hidden="" id="doc-shell-contract"><div class="doc-path">skills/shared/shell-contract.md</div><h1 id="html">带槽HTML：静态原生映射子集</h1>
+<p><strong>V3.3｜可选后续原生映射参考，不是2.0整体Runtime导入的前置。框架HTML完成前不加载本文件；不是设计模型的表达限制。</strong> 本文仅约束“静态区域→原生节点”的窄路径，不是全部创作/模块的CSS白名单。已有完整HTML与复杂交互区域优先保留实现，使用现有Runtime/Component实际支持的能力；不为符合本子集而简化作品。</p>
+<h2 id="_1">页面、身份与可编辑范围</h2>
+<p>首轮 <code>.gl-page</code> 使用固定 1280×720 CSS 像素，页面 <code>position:relative</code>；这是演示页试点，不限制既有 Flow/Spatial。页面宽高与能力由宿主校验，画布缩放不写进对象。</p>
+<p>仅本静态映射路径的页面和被装配对象需要唯一 <code>data-gl-id</code>。页面直属对象显式标记 <code>data-gl-role="text|shape|slot"</code>；slot 的 kind 决定素材用途。首轮不递归编译任意嵌套容器。普通布局包装/草稿说明要明确不进入最终作品，不能无声明地漏掉正文。</p>
+<p><code>data-gl-edit="text move resize"</code> 只声明操作子集；<code>data-gl-locked="true"</code> 表示显式锁定。宿主决定实际能力和提交权限，属性不授予文件访问。首次无脚本、无内容编辑器时这些属性不会自行生效。</p>
+<h2 id="_2">支持矩阵</h2>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>对象/属性</th>
+<th>首轮规则</th>
+<th>超出时</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>text</td>
+<td>页面直属纯文本或 br；固定外框，字号、字重、颜色、对齐、行高、内边距、明确字体</td>
+<td>富文本跨度/复杂排版报 unsupported，不静默打平</td>
+</tr>
+<tr>
+<td>shape</td>
+<td>简单纯色色块/矩形；位置、大小、填充及已经验证的基础边框</td>
+<td>渐变、阴影、滤镜、复杂路径暂不承诺</td>
+</tr>
+<tr>
+<td>slot:image/background</td>
+<td>已准备图片资源填槽；明确 contain/cover，背景与内容作用域不同</td>
+<td>缺资源或无法解释 fit 报错，不凭空生成</td>
+</tr>
+<tr>
+<td>slot:diagram</td>
+<td>已验证 SVG 图片或原生图形模板；SVG 作为图片时明确内部非原生深编</td>
+<td>不把整页或公式正文烘焙进图</td>
+</tr>
+<tr>
+<td>slot:interactive</td>
+<td>引用实际组件成果，按外框装配并走已有真实准入</td>
+<td>不把占位文字/静态后备当互动完成</td>
+</tr>
+<tr>
+<td>slot:video</td>
+<td>保留语汇；后续存在实际媒体/生成路径后再启用</td>
+<td>首轮可报告 unsupported，不强制实现</td>
+</tr>
+<tr>
+<td>公式</td>
+<td>Unicode 简单式可按原样文字保留；复杂式须明确源码并走已支持公式路径</td>
+<td>不从渲染 DOM 逆猜 LaTeX，不毁掉现有原生公式能力</td>
+</tr>
+<tr>
+<td>几何与层级</td>
+<td>absolute 的 left/top/width/height 为有限 px；页面直属 DOM 顺序为层顺序；文字允许内部换行</td>
+<td>transform、百分比布局、calc、Flex/Grid、伪元素、动画、混合层叠先不编译</td>
+</tr>
+</tbody>
+</table></div>
+<p>样式可用静态class，提取按实际规则/计算值。字体替代与换行在首次接入或相关改动时核对；不每次保存重测字体。支持集不足时保留完整区域或明确宿主限制，不强迫把有价值的设计改简单，不偷偷截图。表中“不编译”不等于现有模块不能渲染。</p>
+<p>页面背景可以成为原生场景背景；页面用于预览的外边距/边框和槽的虚线、说明、待生成字样不进入作品。slot 内部文字仅作占位说明，不再提取为独立正文。</p>
+<h2 id="_3">槽与背景定位</h2>
+<pre><code class="language-html">&lt;section class="gl-page" data-gl-id="page-1" data-gl-fragment="gap"&gt;
+  &lt;div data-gl-id="area-demo" data-gl-role="slot"
+       data-gl-slot="area-demo" data-gl-kind="interactive"
+       data-gl-brief="教师补齐单位缺角，显示边长；支持重播；x&gt;0"
+       data-gl-edit="move resize"
+       style="position:absolute;left:590px;top:92px;width:610px;height:430px"&gt;
+    &lt;p&gt;互动组件待生成&lt;/p&gt;
+  &lt;/div&gt;
+&lt;/section&gt;
+</code></pre>
+<p>kind 仅使用 image / diagram / video / interactive / background；“词表中有”不等于生产/装配能力已经实现。<code>data-gl-slot</code> 与本元素 id 一致，避免两套身份。需要扩类型时先有真实 consumer。</p>
+<p><code>data-gl-required="false"</code> 表示可选素材；默认关键槽只约束仍存在的槽，不允许装配时静默丢失。用户明确删除槽后不再生产或从旧 MD 恢复，即使之前标为关键。</p>
+<p>页面可用 <code>data-gl-fragment="gap"</code> 对应呈现 MD 的 <code>&lt;!-- gl-fragment: gap --&gt;</code>，仅提取该片段背景；不映射行号、不双向同步。标识失效但任务已提供明确局部背景时可继续；否则补清必要内容，不盲配或为补标识重跑全课。两份 MD 仍是可读文稿，不要求另建大型 JSON。</p>
+<h2 id="_4">保存、提取与装配</h2>
+<p>当前 HTML 是布局/文字/现存槽的正式来源；DOM 是编辑投影，来源版本和正式写入归宿主。手势/完整输入确认后自动保存，IME 未结束不冻结半成品。选框、手柄、临时 contenteditable、宿主桥和临时脚本不能进入文件。</p>
+<p>引用资源使用授权的可搬迁路径或现有受控协议；Blob URL 不作持久引用。在本静态映射路径，脚本、on*属性、未授权远程依赖、运行期DOM重建不进入直接提取范围。完整模块保留业务脚本，仍走现有安全隔离/准入；不能把其脚本当编辑装饰清除，也不因此给内容文件权限。</p>
+<p>槽清单、对象坐标表、snapshot、fills 是程序派生的任务数据，不是教师维护的第二份源。装配必须使用当前受支持模型；data 属性不能绕过严格 V9 合同。</p>
+<h2 id="_5">完整模块与自动轻编辑</h2>
+<p>已有完整HTML不必补齐本页标识，也不创建全部DOM到原生的映射表。组件沿现有模型保留源码/数据与资源，宿主自动发现常见图文，优先连到已有正式内容键；必要窄覆盖仍由同一工程会话持有。动态目标身份与Flow页面承载见14，不要求作者逐项补expose。</p>
+<p>模块内未开放字段仍保留，不能为方便映射删译文、人物关系或播放状态。关键内容/交互对照在开发期代表案例中做，不能将本约定变成逐生成审美审核、全量hash或通用可视化编译标准。</p></article><article class="doc" data-doc="example-guide" hidden="" id="doc-example-guide"><div class="doc-path">examples/README.md</div><h1 id="_1">样例说明与手动验收</h1>
+<p>这是一组原创6分钟教学片段的管线夹具：两份MD加两页静态HTML框架。HTML含真实文案与三个槽（互动、可选图片、精确图解），没有生成最终素材，也没有内置编辑器或模拟自动保存。</p>
+<p>用浏览器直接打开可查看设计；其中的data属性由未来果铃宿主识别。本文件不要求全局安装字体或任何网络资源。示例用固定1280×720测试，浏览器窄屏需缩放；正式工作台应提供适合窗口的画布缩放。</p>
+<h2 id="html">静态映射/HTML编辑实现时的选测流程</h2>
+<ol>
+<li>在宿主中打开 <code>layout-shell.html</code>，将第一页标题改为“缺的这一块，面积是多少？”，移动并缩放互动槽。</li>
+<li>等实际文件自动保存，关闭并重开。确认修改保留，MD文件内容/hash未变。</li>
+<li>删除可选图片槽，保存。槽提取应只返回 <code>area-demo</code> 与 <code>equivalence-diagram</code>。</li>
+<li>下游使用新标题、新尺寸和现存槽，MD只补充必要教学/互动说明。</li>
+<li>生成并装配后继续手改原生工程，再尝试重新生成；不得默默覆盖已修改原生工程或反向更新MD/HTML。</li>
+</ol>
+<p>样例不是已实现功能的演示。自动保存、文字编辑、拖动、尺寸调整、素材生产、原生装配都需要宿主实施与实测。本包只提供它们的约定、输入样例和验收。</p>
+<h2 id="v33">V3.3中的用途</h2>
+<p>已补显式text/shape/slot角色和两个MD片段标识，并去掉首轮尚未约定的文字字距。它仍是两页静态输入，不是成品或产品实现。它仅验证简单静态区域映射与草稿轻编辑，不作为所有内容必须被简化的标准。2.0优先验证真实听力HTML整体导入、Runtime图文轻编辑及Flow长网页；本夹具仅在实现对应静态功能时选用，机械拆原生不再是前置。</p>
+<p>机械检查应忽略槽的虚线/待生成说明，保留真实正文与色块；HTML源与MD片段只单向关联背景。未提供新宿主时不能在普通浏览器中测试自动保存、拖动或正式导入。本轮未重新执行此样例的可视排版验收。</p>
+<p>V3.3未改两份样例MD和HTML。已有data属性是历史静态转换夹具的一部分，不意味着新框架HTML设计要提前读编辑器能力；新流程按03，框架完成后才由后置策略/程序处理实现标识。</p></article><article class="doc" data-doc="example-plan" hidden="" id="doc-example-plan"><div class="doc-path">examples/01-teaching-plan.md</div><h1 id="_1">从缺角看完全平方：教学策划</h1>
+<h2 id="_2">使用范围</h2>
+<p>这是一个约6分钟的教师演示片段，用于验证果铃创作管线，不是完整课程。学生已学过面积和乘法公式；演示由教师控制，不要求学生操作软件。</p>
+<h2 id="_3">理解目标</h2>
+<p>学生能够说明：为什么在 <code>x²＋2x</code> 后面补一个1会出现完全平方；为什么原式也可以写成 <code>(x＋1)²－1</code>。学生应理解补的是哪块面积，而不只记住等式。</p>
+<h2 id="_4">教学主线</h2>
+<p>先观察边长x的正方形和两条宽1的长方形，发现围成大正方形时少了一个单位正方形。补上缺角，得到边长x＋1的大正方形。再撤去缺角，把“补齐”解释为“加1再减1”，回到原式。</p>
+<p>几何演示取x＞0，保证长度有意义；随后用代数展开说明恒等式对任意实数x都成立。不能把图形条件误当作代数结论的定义域。</p>
+<h2 id="_5">时间与检查</h2>
+<p>0–3分钟：观察缺角、判断面积、教师点击补齐。
+3–5分钟：撤去缺角，建立两种等价表达。
+5–6分钟：取x＝3，核对9＋6＝16－1，并解释不是“凭空加了1”。</p>
+<p>结束提问：“如果只把式子写成(x＋1)²，错在哪里？”预期回答是多算了缺角的1，需要减回去。</p>
+<h2 id="_6">表达与素材</h2>
+<p>一段有重播的面积拼合互动；一幅“补1、再减1”的结构图。额外的抽象装饰插图仅用于演示可选图片槽，可完全删除，不影响教学。所有面积、边长和公式必须可验证，不能依赖生成图猜文字。</p></article><article class="doc" data-doc="example-script" hidden="" id="doc-example-script"><div class="doc-path">examples/02-presentation-script.md</div><h1 id="_1">从缺角看完全平方：呈现脚本</h1>
+<!-- gl-fragment: gap -->
+<h2 id="1">片段一：这个缺角，为什么恰好是1？</h2>
+<h3 id="_2">上屏内容</h3>
+<p>标题：这个缺角，为什么恰好是1？
+说明：先看一块x²，再接上两块x。
+公式：x²＋2x＋1＝(x＋1)²
+角标：面积演示取x＞0。</p>
+<h3 id="_3">讲解稿</h3>
+<p>“中间这块正方形边长是x，所以面积是x²。右边接一条宽1、长x的长方形，上边再接一条同样的长方形。现在总面积是x²＋2x。看外轮廓，它很接近一个边长x＋1的正方形，但右上角缺了一块。这块缺角横向是1，纵向也是1，所以缺的面积恰好是1。把它补上，总面积就是(x＋1)²。”</p>
+<h3 id="_4">初始画面与状态</h3>
+<p>左侧真实文字与公式，右侧面积拼合槽。初态显示x²正方形及两块x×1长方形，单位缺角仅用轮廓表示。教师点击“补齐”，缺角显现并标注1，外侧同时出现x＋1的边长。点击“重播”回到初态。可固定x＝3；本片段不需要参数滑块。</p>
+<h3 id="_5">素材需求</h3>
+<p><strong>面积拼合演示</strong>：interactive。严格表达x²、x、x和1四部分，颜色区分但不依赖颜色单独识别。标签清楚，拖动外框尺寸后仍可读。最少两个状态和两个教师按钮；不加入答题、得分和无关动画。</p>
+<p><strong>可选抽象装饰</strong>：image。简单纸片拼合意象，不含文字和公式，不表现精确数学关系，风格克制。用户可删除此槽；删后不补回。</p>
+<h3 id="_6">验收</h3>
+<p>点击补齐出现且只出现单位缺角；总边长标注正确；重播有效；课堂展示字号清楚。未完成互动不能以静态成图代替并宣称成功。</p>
+<!-- gl-fragment: subtract -->
+<h2 id="_7">片段二：补上，再减回去</h2>
+<h3 id="_8">上屏内容</h3>
+<p>标题：补上，再减回去
+公式：x²＋2x＝(x＋1)²－1
+检查：x＝3时，9＋6＝16－1＝15。
+结论：补齐是为了看结构，减1是为了保持原式不变。</p>
+<h3 id="_9">讲解稿</h3>
+<p>“我们刚才补上了1，才得到完整正方形。但现在要表示的是原来的x²＋2x，所以得把多补的1减回去。取x＝3验证：原来是9加6，等于15；补齐后是16，减掉1还是15。图形只画正长度，代数展开却告诉我们，这个恒等式对所有实数x都成立。”</p>
+<h3 id="_10">视觉与素材</h3>
+<p>左侧两种表达的结构图，右侧保留真实结论文字。<strong>加一减一结构图</strong>：diagram。图中标明原式→加1补齐→减1回到原式；精确文字使用SVG或可编辑图形，不使用生图模型绘制公式。可静态，无额外交互要求。</p>
+<h3 id="_11">验收</h3>
+<p>上屏与讲解一致，没有把x＞0错误地限定到最终代数恒等式。用户在HTML改变布局或标题后，以HTML当前结果为准；本稿只补充尚未表达的讲解和要求。</p></article><article class="doc" data-doc="benchmark-guide" hidden="" id="doc-benchmark-guide"><div class="doc-path">benchmarks/README.md</div><h1 id="_1">历史测试模板与选测边界</h1>
+<p>本目录为既有基准模板，不是当前Codex任务/验收登记。V3.3保留全部JSON字节、35个历史ID及原测量结果，不新增ID、不填通过状态；原定义用于对应静态/历史范围，不覆盖本轮全部新能力。</p>
+<p>Runtime/HTML/Flow新增完成标准写在02和14，由后续实现根据实际改动选择已有测试或补最小检查；本轮不另建台账。旧模板内要求显式标识的静态映射规则，只适用于那个转换子集，不约束自动图文发现与整体Runtime导入。</p>
+<p>开发期优先用原HTML与机械导入结果、少量关键状态和一次修改保存链；确需归因时才补当前生成结果形成F-HTML/F-CURRENT/F-PRESERVE。不是每次用户生成都跑三组，更不叠加旧教学A/B/C成为六组必测。</p>
+<p>Phaser/Three支持类型、长网页Flow与新建生产链按02的代表路径验证，可以合并样例，不展开引擎×Surface×状态全组合。保存/撤销/权限既有证据可复用，改动该边界才复验。</p>
+<p>时间/费用取已有日志，没有的数据保留null；不为填表造埋点、逐帧录制、像素评分或审美Agent。Office候选/测量模板原样保留，与这轮2.0创作增量不是同一个完成条件。</p></article><article class="doc" data-doc="preview" hidden="" id="doc-preview"><div class="doc-path">examples/layout-shell.html</div><h1>带槽布局草稿</h1><p>原创管线夹具：真实文字与素材槽。此阅读版不实现拖拽或磁盘自动保存，不代表果铃相关功能已完成。</p><p>页面是固定 1280×720 的示例。下方按窗口宽度缩放，复杂组件与图像仍是待生产槽。</p><div id="example-scale"><iframe id="example-frame" sandbox="" srcdoc='&lt;!DOCTYPE html&gt;
+
+&lt;html lang="zh-CN"&gt;
+&lt;head&gt;
+&lt;meta charset="utf-8"/&gt;
+&lt;meta content="width=device-width,initial-scale=1" name="viewport"/&gt;
+&lt;title&gt;布局草稿｜从缺角看完全平方&lt;/title&gt;
+&lt;style&gt;
+*{box-sizing:border-box}body{margin:0;padding:28px;background:#eef1f3;color:#152e37;font-family:Arial,"Microsoft YaHei",sans-serif}
+.gl-page{position:relative;width:1280px;height:720px;margin:0 auto 28px;background:#fffdf8;overflow:hidden;border:1px solid #dce2e2}
+.gl-text{margin:0;line-height:1.38}.gl-slot{border:2px dashed #90adb3;background:#f0f6f5;border-radius:14px;padding:24px;color:#33565e;font-size:22px;line-height:1.5;overflow:hidden}.gl-slot p{margin:0 0 10px}.gl-slot small{font-size:17px;display:block;color:#536b70}.label{font-size:17px;color:#526d74}.formula{font-family:Georgia,"Times New Roman",serif}.footer{font-size:18px;color:#60757a}
+&lt;/style&gt;
+&lt;/head&gt;
+&lt;body&gt;
+&lt;section aria-label="第一页，缺角" class="gl-page" data-gl-fragment="gap" data-gl-id="page-1"&gt;
+&lt;div data-gl-id="p1-band" data-gl-role="shape" style="position:absolute;left:0;top:0;width:18px;height:720px;background:#166d76"&gt;&lt;/div&gt;
+&lt;p class="gl-text label" data-gl-edit="text move resize" data-gl-id="p1-label" data-gl-role="text" style="position:absolute;left:70px;top:42px;width:520px;height:28px"&gt;结构观察 / 01&lt;/p&gt;
+&lt;h1 class="gl-text" data-gl-edit="text move resize" data-gl-id="p1-title" data-gl-role="text" style="position:absolute;left:70px;top:106px;width:460px;height:170px;font-size:48px;font-weight:700"&gt;这个缺角，为什么恰好是1？&lt;/h1&gt;
+&lt;p class="gl-text" data-gl-edit="text move resize" data-gl-id="p1-body" data-gl-role="text" style="position:absolute;left:70px;top:305px;width:445px;height:85px;font-size:27px"&gt;先看一块x²，再接上两块x。&lt;/p&gt;
+&lt;p class="gl-text formula" data-gl-edit="text move resize" data-gl-id="p1-formula" data-gl-role="text" style="position:absolute;left:70px;top:430px;width:455px;height:100px;font-size:32px"&gt;x²＋2x＋1＝(x＋1)²&lt;/p&gt;
+&lt;div class="gl-slot" data-gl-brief="面积拼合演示：教师点击补齐单位缺角，显示边长x+1；支持重播；几何条件x&amp;gt;0" data-gl-edit="move resize" data-gl-id="area-demo" data-gl-kind="interactive" data-gl-role="slot" data-gl-slot="area-demo" style="position:absolute;left:590px;top:92px;width:610px;height:430px"&gt;
+&lt;p&gt;面积拼合演示&lt;/p&gt;&lt;small&gt;互动组件待生成。教师点击“补齐”与“重播”。此处仅是布局框架，不是已完成的互动。&lt;/small&gt;
+&lt;/div&gt;
+&lt;div class="gl-slot" data-gl-brief="可选的纸片拼合抽象装饰；不含文字与数学关系；删除后不补回" data-gl-edit="move resize" data-gl-id="paper-art" data-gl-kind="image" data-gl-required="false" data-gl-role="slot" data-gl-slot="paper-art" style="position:absolute;left:815px;top:550px;width:385px;height:100px;padding:16px;font-size:18px"&gt;&lt;p&gt;可选图片槽&lt;/p&gt;&lt;small&gt;不影响教学，可删除。&lt;/small&gt;&lt;/div&gt;
+&lt;p class="gl-text footer" data-gl-edit="text move resize" data-gl-id="p1-note" data-gl-role="text" style="position:absolute;left:70px;top:630px;width:660px;height:36px"&gt;面积演示取x＞0。素材就绪后由程序装配。&lt;/p&gt;
+&lt;/section&gt;
+&lt;section aria-label="第二页，减回去" class="gl-page" data-gl-fragment="subtract" data-gl-id="page-2"&gt;
+&lt;p class="gl-text label" data-gl-edit="text move resize" data-gl-id="p2-label" data-gl-role="text" style="position:absolute;left:70px;top:42px;width:550px;height:28px"&gt;等价变形 / 02&lt;/p&gt;
+&lt;h1 class="gl-text" data-gl-edit="text move resize" data-gl-id="p2-title" data-gl-role="text" style="position:absolute;left:70px;top:105px;width:1140px;height:78px;font-size:48px"&gt;补上，再减回去&lt;/h1&gt;
+&lt;div class="gl-slot" data-gl-brief="加一减一结构图；原式、补齐、减回；用精确SVG/可编辑文字标注，不生图绘制公式" data-gl-edit="move resize" data-gl-id="equivalence-diagram" data-gl-kind="diagram" data-gl-role="slot" data-gl-slot="equivalence-diagram" style="position:absolute;left:70px;top:225px;width:570px;height:360px"&gt;&lt;p&gt;加一减一结构图&lt;/p&gt;&lt;small&gt;静态图解待生成，精确标注数学关系；无需学生操作。&lt;/small&gt;&lt;/div&gt;
+&lt;p class="gl-text formula" data-gl-edit="text move resize" data-gl-id="p2-formula" data-gl-role="text" style="position:absolute;left:700px;top:245px;width:500px;height:100px;font-size:34px"&gt;x²＋2x＝(x＋1)²－1&lt;/p&gt;
+&lt;p class="gl-text" data-gl-edit="text move resize" data-gl-id="p2-conclusion" data-gl-role="text" style="position:absolute;left:700px;top:375px;width:465px;height:140px;font-size:28px"&gt;补齐是为了看结构，减1是为了保持原式不变。&lt;/p&gt;
+&lt;p class="gl-text" data-gl-edit="text move resize" data-gl-id="p2-check" data-gl-role="text" style="position:absolute;left:70px;top:623px;width:1080px;height:50px;font-size:25px"&gt;x＝3时，9＋6＝16－1＝15。&lt;/p&gt;
+&lt;/section&gt;
+&lt;/body&gt;
+&lt;/html&gt;
+' title="静态HTML框架样例"></iframe></div></article><section class="search-results" hidden="" id="search-results"></section><footer class="footnote">V3.1为方案与静态样例；未修改产品代码、安装Skill或执行Office/性能验收。来源与未测边界见12、13和来源页。</footer></main><script>const docs=[...document.querySelectorAll('.doc')],links=[...document.querySelectorAll('.nav-link')];
+const sidebar=document.querySelector('.sidebar'),shade=document.querySelector('.mobile-shade');
+const data=[{"id": "guide", "label": "01 阅读指南", "title": "果铃工作台：高保真创作、Runtime轻编辑与多格式工作空间", "text": "00_阅读指南.md 果铃工作台：高保真创作、Runtime轻编辑与多格式工作空间 方案版次：V3.3｜2026-09-25｜Runtime/HTML/Flow增量纳入2.0｜Office选型保持开放｜仅更新本方案包 本轮修订先读 02_近期开发任务与验收.md 规定2.0开发顺序和完成边界； 14_Runtime自动轻编辑与Flow承载.md 汇总运行状态、自动图文发现、持久化与Flow接线； 03 规定框架HTML之后的独立呈现策略； 13 细化机械执行。 本次只改 guoling_plan_v3_20260924 内的方案、Skill草案和阅读器/清单。 不修改另一执行包、任务卡、task_registry、正式验收登记、根目录方案、AGENTS或产品代码。 本包35条历史基准定义和所有测试结果也保持原样；新增完成标准写在方案正文，不另建任务台账。 更新前活动文件备份： _history/V3_2_before_runtime_flow_20260925.zip 。历史备份不作为当前实施入口。 2.0规划的调整 先收口正在进行的原范围验收并固定稳定基线，再完成：Runtime运行到哪编辑到哪、常见文字/图片自动发现、HTML整体机械保真导入、Flow页面Runtime/原生文本框，以及后置呈现策略与机械Skill闭环；这些不再笼统推迟到2.x。 这是本方案的阶段调整，不是把未完成任务改成已完成，也不是重新登记Codex任务。 保留现有架构和成熟功能。Runtime轻编辑以DOM/Phaser常见对象及Three已知表示为范围；不承诺任意Canvas像素、任意JS现场或所有网页都可自动深编。对象发现与稳定内容身份分开处理，避免运行中的同一气泡被错当成同一句内容。 HTML默认整体保留，不先拆Native；原生化是后续有明确收益才做的优化。Flow保留Word式正文，同时支持页面Runtime和paper-space自由原生图层；“插入文字”改为“插入文本框”，正文输入与段落操作仍留在Document体系。 创作主线 教学策划 → 理想呈现脚本 → 高质量框架HTML → 后置呈现策略 → 必要素材/模块生产 → 机械装配 → 果铃工程 → 轻编辑与保存。 框架HTML完成前不读取编辑器能力、Schema或静态转换白名单。后置策略才选择Slide/Flow/Spatial及Native/Runtime/Component，并明确素材来源；复用三份薄Skill，不增加Agent群。已有完整HTML可直接机械导入，跳过无需执行的模型环节。 当前HTML人改内容用于后续实现，MD只补未表达的教学背景；工程生成后工程是当前作品，不建立MD、HTML与工程双向同步。独立HTML编辑和工程导入共用编辑能力，保存目的地分别清楚。 已确定的边界 项目 处理原则 2.0主线 原验收收口后完成Runtime/HTML/Flow/呈现策略增量，再最终收口 表现力 保住完整布局、数据与交互；不以Native/Runtime占比衡量质量 Runtime编辑 软件自动发现常见图文；绑定优先、正式内容覆盖兜底，仍只有一个writer/History Flow 连续Document正文＋页面Runtime＋paper-space原生图文，不推翻现有正文模型 原生文本框 插入按钮/AI工具语义区分自由文本框和正文段落，不删除正文能力 机械执行 资源、封装、装配与提交由共享工具完成；不让LLM反复重写已有作品 验证 少量代表路径、按变化选测；不逐保存截图、重复全量检查或新增质量网关 后续 HTML机械拆Native、任意Slides尺寸、Office全接入、发行工程不作本轮前置 文件导航 阅读目的 文件 产品与版本路线 01_产品方向与分阶段路线.md 2.0顺序与完成边界 02_近期开发任务与验收.md 教学/HTML/后置策略/生产分工 03_创作流水线与Skill设计.md HTML整体导入与保存 04_HTML轻编辑与自动保存.md Office开放候选与实测方法 05_Office多方案评估.md 、 06_Office验证计划与性能基线.md 浏览器与其他文件 07_浏览器与多格式工作空间.md 插件、自有能力与许可 08_插件化_自有能力与许可.md 教育与用户验证 09_教育切入与用户验证.md 后续实施交接 10_Agent实施交接提示词.md 来源、历史审查和局部优化 11_来源与待核实项.md 、 12_架构复审与本轮修订.md 机械工具、Skill加载与提交 13_Skill机械命令与执行合同.md Runtime自动轻编辑、状态与Flow技术边界 14_Runtime自动轻编辑与Flow承载.md 未安装的方法草案 skills/ 静态输入夹具与历史基准模板 examples/ 、 benchmarks/ 离线可搜索阅读页 index.html 使用与证据边界 开发Agent只读当前工作需要的章节，不把整包当系统提示。真正实现前核对相关现行代码，不据旧审查行号直接改代码。方案本身不自动授予产品修改、安装、付费调用或任务登记权限。 本轮依据为Owner连续产品决定、当前方案正文及本会话先前对Runtime/Flow/Spatial代码的定向阅读；未重跑听力样例、启动果铃、测试自动编辑/导入或重新实测第三方方案。12区分历史源码事实、旧V7案例与规划推论。源码中有字段不等于运行/编辑已接通。 Office研究与来源编号沿用原包，未在本轮刷新商务/许可/第三方状态；实际选型时再核验。所有Skill、工具与新增能力仍是方案，不伪称实现或验收通过。"}, {"id": "roadmap", "label": "02 方向与阶段路线", "title": "产品方向与分阶段路线", "text": "01_产品方向与分阶段路线.md 产品方向与分阶段路线 1. 从教育内容进入，保留通用工作空间的演化能力 近期产品承诺：教师把现有材料交给果铃，能得到教学逻辑完整、视觉表达有效、可运行且可继续修改的内容；人能直接调整，AI能在明确目标内继续修改，保存重开后仍可用。 教育是用户和内容入口，不是底层架构的永久边界。未来扩展先选择相邻任务：培训、讲解、研究展示、可视化报告和内容制作。每个扩展都需证明现有能力可以低增量支持，不能把“最终适用于所有电脑工作”拆成今天的所有研发任务。 近期自有价值主要来自四件事：有实际教学质量的设计；可运行的原生/混合内容；人和AI可以可靠接力；作品与材料在工作区内持续积累。普通浏览与Office兼容服务于这个闭环。 2. 四条研发线，只有一条产品主线 研发线 作用 资源原则 原生/Runtime创作与轻编辑 直接决定作品是否值得使用 当前主线 工作空间与打开能力 减少在其他软件之间来回切换 分批建设薄能力 Office 候选验证 降低选型不确定性 有限实验，不阻断主线 插件/自研扩深 在真实需求下扩展上限 达到触发条件再做 建议同时只保留一个主要交付目标、一个边界清楚的小实验。不是因为不能并发调用 Agent，而是避免同一人承担多套未稳定系统的验收与维护。 3. 分阶段路线 阶段 A：2.0既有范围收口 先完成正在进行的原范围验收，修掉实际保存、取消、锁定、资源或主链阻断，固定可回退基线。不借本轮方案重验已经稳定的全部底座，也不改现行任务/验收状态。原范围通过不能自动覆盖下一阶段的新能力。 阶段 B：2.0创作能力增量与最终收口 本阶段明确属于2.0，不再作为2.0后的可选试点。依次打通Runtime当前状态图文轻编辑与常见对象自动发现、HTML整体机械保真导入、Flow页面正文承载/原生文本框、所需三表面接线，以及框架HTML之后的专门呈现策略和机械Skill生产链。详细顺序与停止条件见02、技术边界见14。 保留复杂区域的完整实现，默认全Runtime导入；Native继续承担独立图文和已有高价值深编，不扩一套万能节点语言。DOM/Phaser常见图文和Three实际可访问的已知表示分层支持，不将全部Canvas自动可编列为承诺。HTML编辑与Runtime编辑共用命中/UI，持久化都进入现有正式会话。 教学与框架HTML设计不先读编辑器能力，后置呈现策略才选择承载；保留三份薄Skill，机械步骤由程序执行。已有成品可跳过模型策略直接导入。不把“增加一个专门职责”扩成多Agent审查流水线。 出阶段证据： 听力后续状态可改、常见无expose引擎图文可改、长网页Flow/原生文本框可用，并有一个新建作品闭环；修改能保存重开与必要HTML导出，关键视觉/交互不退化。选测复用既有证据，不建全组合矩阵。安装包/便携版、Office全接入、机械拆原生与Slides任意尺寸不作前置。 阶段 C：文件与网页成为自然的工作区内容 建设普通网页浏览、本地HTML、PDF、图片、文本和媒体的打开；加入收集素材、选区交给AI和当前文件状态。通用网页应有独立会话与权限，不能复用主界面文件写权限。Electron官方对远程内容嵌入与安全边界有具体要求。 S01 S02 2.0的HTML导入/轻编辑只依赖安全本地渲染宿主，不需要等待本阶段完整浏览器地址栏、登录和下载管理。但可以共用Tab、缩放、文件生命周期等代码。 出阶段证据： 老师能把真实材料放进工作区并快速查阅；打开过程中主界面不被长时间阻塞；本地修改不会误写远程页面或其他文件。 阶段 D：图片轻编辑与Office能力试接 图片裁剪/替换先连接素材生产链。Office保持候选池：直接渲染、完整WebOffice、本地文档引擎＋Web UI、WASM运行时、按格式组合，都可以试；评估顺序不等于最终产品方案。 若现成WebOffice已经同时满足打开速度、手动编辑和许可要求，可以直接获得二者；不强制先做一套只读查看器。若轻量查看器明显满足当前需求，也可以先采用它，但不能把预览DOM可改等同于可保存回Office源文件。 出阶段证据： 对同一组真实文件有可复查的冷/热启动、首屏、编辑、保存和显示偏差记录；候选淘汰有证据，而非依据“纯前端一定快”或“套件一定重”。 阶段 E：教师工作空间、复用与付费验证 把已好用的课程、素材、组件和制作方法变成复用资产，测量第二次、第三次真实任务。补最常见的检索、项目归档、素材复用和分享，不提前建设企业级协同、组织权限和插件商城。 出阶段证据： 一批用户不依赖创始人代做也能完成作品，持续复用并愿意为节省的工作量付费；证据可以很小，但必须真实。 阶段 F：更多格式、插件与自有深编 当用户真实任务因某格式缺失而中断，或某Provider的费用、API、稳定性持续成为瓶颈，再补该格式。一种格式可以先查看、再有AI定向修改、再有限手改，也可以通过套件一次获得多种能力；不是统一的强制阶梯。 公共插件SDK从已运行的适配器提炼。自有编辑扩深优先围绕已反复出现的高价值动作，不立项重造完整Office、通用分页引擎或全公式引擎。 4. 功能分工与当前态度 能力 自有/复用方向 当前动作 教学设计、脚本、原生互动表达 自有方法与内容资产 加强 原生对象编辑、锁定与提交 自有交互及稳定状态 先稳定 HTML导入与图文轻编辑 受管文档宿主＋Runtime共享编辑 2.0完成整体导入与保存 浏览器/PDF/媒体 复用成熟底层 有界接入 Office显示与编辑 多路线开放 先测，不定型 图片处理 复用处理库与有限UI 接到素材链 通用Computer Use 后台验证先行 不独立扩成平台 操作日志偏好学习 不是当前关键路径 暂缓 自研Office内核 需团队与明确需求 暂缓 插件市场/复杂生态治理 需第三方开发者 暂缓 5. 何时增加投入，何时停止扩张 增加投入的依据是用户实际任务、重复使用、可靠性和单位成功成本，不是支持格式数或框架层数。技术实验在约定的小范围没有改善时，应回退、改用现成方案或暂缓，不通过扩大架构来延长实验。 长期可拥有更深的编辑系统，但近期不以融资/收购的推测来决定技术深度。融资准备围绕可重复产品表现、用户返回、付费和清晰的技术资产归属展开，详见用户验证文档。 6. V3.3保留的架构边界 保留现有统一执行器、同源工具、DocumentSession及成熟课件能力。OJ/OE等局部优化与新功能按实际热点穿插，不另设“完美架构”阶段。HTML以源文接入，Office内部模型和细粒度History按Provider能力保留，宿主维护唯一活动writer与保存边界。教育方法可选，不把通用Agent固化成教师专用任务机。质量保障是已有交付的要求，不新增常驻检查层；MCP供外部Agent调用果铃，果铃调用外部Agent仍按CLI薄runner方向，不恢复三CLI深度适配。"}, {"id": "tasks", "label": "03 2.0开发顺序与完成边界", "title": "2.0开发顺序与完成边界", "text": "02_近期开发任务与验收.md 2.0开发顺序与完成边界 V3.3｜2026-09-25｜只修订本方案包，不修改任务登记或验收状态。 按Owner本轮决定，Runtime当前状态轻编辑、常见图文自动发现、HTML机械式保真导入、Flow网页承载/原生文本框、后置呈现策略及机械Skill闭环纳入2.0阶段完成范围；不再笼统推迟到2.x。 1. 先收口当前基线，再完成2.0能力增量 Owner报告现有Codex验收剩3项。先完成正在进行的旧范围验收并固定可回退基线，再改Runtime/Flow相关链路；不一边验收旧实现一边改它的运行内核。若旧范围最后一项本身是总范围核对，保留它对旧范围的结论，新增能力完成后再做最终范围核对，不形成循环依赖，也不据旧范围通过宣称本轮新增能力完成。 本包描述开发建议与完成标准，不直接新增、重排、关闭S/M任务，不写task_registry、正式acceptance_cases、TASK_BOARD或任何现有任务卡。后续实施由实际开发会话按授权接续。保留现有DocumentSession、单writer/History、Gateway、执行器、资源、构建、MCP入站与CLI薄runner方向；不重构已经稳定的底座。 2. 建议实施顺序 以下是方案中的工作顺序，不是新的任务编号或固定多Agent流水线。运行入口、目标身份、保存必须由同一集成人协调；明确非重叠的界面文案和Skill草案可并行。 顺序 本轮交付 到此即可结束 现有验收收口 完成旧范围剩余工作，保留构建/差异与可回退点 不重复全仓审查；未通过项如实留存，不为新方案篡改旧证据 当前状态编辑与自动图文目标 在已有Runtime宿主/选择/提交链上，先贯通DOM与Phaser常见文字、图片，覆盖场景和组件；Three做已知可访问表示 运行到后续状态→进入编辑仍在这里→修改文字/换图→恢复运行；保存重开后修改仍在，跨句/重复对象不串改。详见14 HTML整体机械导入与共享轻编辑 本地HTML及其受支持依赖由程序封装，默认全Runtime；DOM编辑复用上一层，静态HTML可直接保存源文，动态HTML明确持久化方式 用已有HTML真实导入、改字换图、保存重开和HTML导出；无LLM重设计或强制拆原生。首次对照定位问题，不建评分系统 Flow整页承载与自由图层 将现有Flow Surface Runtime补为真实编辑/运行的页面正文承载，处理内容高度、滚动与坐标；Flow“插入文字”改为原生文本框 长网页能滚到末尾、编辑不跳回初态；插入文本框/图片/箭头随paper滚动，正文仍可正常输入与回车，保存重开成立 三表面接线与呈现策略/Skill 补本轮所需Slide/Flow/Spatial Runtime运行与编辑缺口；在框架HTML完成后，单独决定载体，再接现有素材/装配工具 空间画布中相机移动不破坏命中；一个新建教学作品从文稿/HTML到工程与局部修改闭合；教学/HTML设计阶段未提前加载编辑器能力 2.0最终收口 合并上述结果，仅复验受影响行为和新增承诺 关键内容/行为不缩水，编辑能持久化，支持与限制清楚；不以安装包或Office全接入作为完成前置 HTML包装器可在Runtime编辑接口稳定后并行实现；Flow的整页占位/高度设计应在导入样例时一起确认，不把长网页留到最后才发现放不下。三表面只补这些能力用到的挂载、状态、坐标与保存，不顺带重造完整局部Interaction系统。 3. 2.0承诺的具体边界 必须交付： 支持对象的文字替换与图片替换；运行到哪编辑到哪的会话内操作；DOM和Phaser常见图文自动发现，不要求AI逐个expose；Three已有可访问的Sprite图片/DOM文字等已知模式；场景与组件复用编辑机制；HTML整体保真导入；Flow网页正文承载和原生文本框；后置呈现策略及机械装配。未支持对象保留显示，不伪装可编辑。 不扩大为： 任意JS现场序列化、所有Canvas像素逆向、烘焙文字识别、任意React状态到源码反编译、通用DOM自由拖排、任意HTML全原生转换、Three任意材质/几何深编、三表面全部特性完全等同。已有原生拖拽、参数或富文本能力保留，不以本轮轻编辑边界为由删除。 Slides任意尺寸值得后续参数化，但当前1280×720假设涉及命中/导出/编辑边界，本轮通过Flow承载长网页，不把全局画布尺寸重构加为前置。原生拆分是后续可选优化，不是HTML导入或2.0完成的必要条件。 4. 足够的代表性验证，不建立全组合矩阵 代表路径 只验证关键差异 听力HTML 原HTML与机械导入结果的少量关键画面/操作；切到后续句改原文/译文和图片，保存重开/导出；尤其确认同一气泡复用于不同句时不串改 无expose的引擎样例 一个小型Phaser场景及组件，文字/图片自动出现为可编辑目标；容器变换与对象重建后匹配正确；Three只对实际支持的表示补最小例子 长网页与Flow 至少超过一屏的真实流式HTML，改字后高度变化；末尾可达，原生文本框随paper滚动，切编辑/运行不漂移。含sticky/视口依赖时核对选定承载方案 新建教学作品 教学与呈现稿→框架HTML→后置载体决策→必要素材/模块→机械装配→局部改动；不是仅特配已有听力页 多种行为可由同一份样例覆盖，不展开成引擎×表面×状态的全乘积。保存、撤销、锁定、资源与取消已有测试直接引用；只有改到该边界才补相应回归。失败定位后修相关路径，不要求全部历史测试在每个小批次重跑。 原听力文件来自本轮会话，V7工程只是失败参考，不用它代表当前V9。原文件不在本包；后续从已授权位置取得，不制作相似文件冒充。F-CURRENT三方诊断只在确需归因时补一次，默认直接比较原HTML与导入结果，不强制每次再花模型额度生成第三份。原HTML自身缺陷另记，不把复制缺陷算保真。 5. 日常执行的轻量边界 机械导入/资源搬运/装配不调用LLM；新教学内容、新素材和必要新代码才由模型负责。已有成品直接导入可跳过教学、框架生成及模型载体决策；已有代码已检查且未改变时复用结果。 权限、来源/目标版本、取消、资源引用、正式提交与保存反馈沿用当前入口。正常改字不触发全工程扫描、全资源hash、重编译、截图或视觉Agent。截图/人工对照只在首次接入、相关渲染变化或怀疑退化时使用。关键交互丢失和误保存必须修，像素细差不构成无限重试理由。 本包benchmarks中的35条历史定义保留原样，不增加ID、不写测试结果、不当本轮正式任务台账。新增能力的完成判据以本页和14为准，由后续实现按实际差异选择已有测试或补最小检查，而非再建一套验证平台。 6. 其他路线和停止条件 Office多方案研究与普通文件打开保留，不借本轮扩张Office内核、插件市场、完整浏览器或发行工程。若出现Journal增长或高频事件延迟，复用12中的OJ/OE做局部优化；不先建设完美架构。 未取得稳定内容身份，就不能用“发现了对象”冒充“修改可持久化”；先缩小该类对象支持范围或补确定的绑定，不引入语义猜测/多Agent复审。现有成熟原生节点不删，不设置Runtime占比KPI；根据完整作品质量、修改收益及维护成本选择表示。 最终报告区分文档检查、产品实现、实际测试和Owner接受。本轮只更新方案，不提前声称上述能力已完成。"}, {"id": "pipeline", "label": "04 创作流水线与 Skill", "title": "创作流水线与Skill设计", "text": "03_创作流水线与Skill设计.md 创作流水线与Skill设计 V3.3｜2.0阶段方案。 教学与框架HTML先独立设计，完成后才读取编辑器能力、决定实现载体。保留三份薄Skill和现有执行器，增加的是职责明确的后置决策，不是Agent群或新的工作流平台。 1. 单向创作链 教学需求/材料\n  → 教学策划MD\n  → 理想呈现脚本MD\n  → 高质量框架HTML（真实文案与必要素材/互动槽）\n  → 专门的呈现策略环节（此时首次读取果铃能力）\n  → 必要素材/Runtime/组件生产\n  → 程序封装装配\n  → 果铃工程 → 人工轻改/AI局部修改 → 保存 文稿只在任务需要时生成；已有稿可沿用。框架HTML可以表达理想布局与交互意图，不必在策略前把所有素材和机制全部做成成品，也不能为可转换性先删掉想要的效果。策略阶段保留已经完成的完整实现，未实现部分再按实际能力补齐。 已有HTML直接走确定性整体导入；没有需要权衡的拆分/生成时，跳过模型策略、教学稿与框架生成。用户明确要求局部原生化或需要改造时，再调用后置策略。日常改字换图不重走生产链。 2. 设计阶段的信息边界 教学设计只读目标、学习者、材料、时长和教学背景；呈现脚本写真实上屏文字/公式、讲稿、关键状态、教师/学生动作与素材目的。框架HTML设计继续以表达质量为目标，可用自然的Web布局，不提前读Native/Runtime限制、节点Schema、Builder、静态映射白名单或能力索引。 宿主按阶段加载上下文；不能先给模型全套编辑器能力，再让它“假装没看过”。优先复用现有按需加载/阶段输入机制，必要时用独立设计调用隔离已污染的上下文，不新建执行器。设计可以读通用文件/HTML知识、已给素材和用户约束；轻量片段标识由程序补足，不把机器合同前置为教学设计条件。 精确数学关系和公式要使用可核对的表达，不让生图替代推导。录播可视化、教师控制与学生答题分别设计，不固定页数、动画比例或互动数量。 3. 呈现策略：独立职责，紧接框架HTML 输入是当前HTML、必要呈现说明、用户实际编辑需求，以及精简且真实的果铃能力摘要。输出是少量区域及承载选择，保留在当前任务上下文即可；不要求教师维护新JSON，不生成评分报告或固定复审轮。 决策 内容 空间组织 演示页→Slide；连续网页/讲义→Flow；空间关系与镜头→Spatial。这是后置实现选择，不反过来限制教学 内容实现 独立且有编辑收益的对象可Native；共享布局/状态的完整区域优先Runtime或现有Component 素材来源 复用或生成的图片/音视频/图解，并明确放在哪个Native或Runtime区域；素材不是与载体互斥的第三种宿主 实际缺口 缺素材、当前宿主未支持或需要最小适配，明确到区域；不因无法原生化而重画整页 通常一小段区域表即可，理由只在有权衡处写一句。不要为了表示规划固定多次模型调用；已有整页HTML默认整体Runtime可由程序选择。策略后才把具体Schema/API按所选实现加载给生产阶段。 4. 原生化不是交付前提 原生对象是编辑成本低、适合独立操作的路径，不是所有内容的唯一表达语言。复杂听力界面的图片、气泡、译文、列表和播放进度共享逻辑，应优先留在一个模块内。不要仅为了“可编辑”拆成多个互不协调的布局主体。 HTML机械导入首版默认全Runtime，包括长网页的Flow正文承载；原生图文可另行叠加。后续只在保真和收益明确时做机械拆分，不以转换率、节点数量或固定Runtime比率作为质量指标。已有成熟原生能力保留。 Runtime常见图文由宿主自动发现，AI无需逐个写expose。生成实现仍保留可读内容数据，已有稳定ID继续使用，特殊自绘对象可走现有显式接口。自动发现、内容身份、持久化的边界见14，不用提示词枚举补全来冒充软件能力。 5. 三份薄Skill如何分工 Skill草案 负责什么 何时加载能力 guoling-course-design 教学策划与理想呈现脚本 不读编辑器能力 guoling-layout-shell 真实框架HTML/完整Web呈现 框架完成前不读编辑器能力或shell-contract guoling-slot-build 先执行后置呈现策略，再按区域生产、复用与交付机械装配 先短能力摘要，选择后只读必要Schema/API 第三份Skill的策略部分与生产部分职责分开；不是让教学模型顺手决定实现，也无需为策略再建一个独立Agent、权限体系或常驻服务。已有HTML机械导入不必激活三份Skill。 现有安装版Skill或根提示若仍含“Runtime少放文字”“稳定图文必须原生”等旧规则，后续获得实现授权时与实际新入口同步调整；本轮只改本包草案，不改已安装Skill或根AGENTS。 6. 机械职责与素材 程序负责读取当前来源、资源提取/登记、确定的ID/引用、HTML包装、已支持的原生构造和正式导入；模型负责教学、视觉、新内容及必要编程。沿用13的三个拟新增工具名，已知步骤直接调用内部函数，不请LLM每次重新抄坐标或编封装脚本。 有槽时使用当前HTML的brief、尺寸、局部风格与必要MD片段；删掉的槽不复建。完整模块已有素材/数据时一起保留，无槽跳过准备。不增加每个Skill自己的保存、重试、验证或runner。 精确图解使用可核对的SVG/图形/代码；装饰插图可走已授权图像Provider。没有某类实际生产能力就说明，不用静态后备冒充互动、不创建假视频。 7. 当前来源、修改与保存 HTML内已确定或人改的文案、布局和槽以当前HTML为准，MD只补尚未表达的教学背景。工程生成后工程是当前作品，原HTML/MD保留作来源；不建自动双向同步，不根据文件时间把旧稿覆回。事实冲突单列，不把“下游优先”当作事实正确性保证。 Runtime修改进入同一正式工程/文件会话，撤销、保存与导出读取一致内容。独立HTML轻编辑与工程Runtime复用命中/UI，但保存目的地分别清楚。普通编辑直接提交；新动态内容仍走既有受控构建/准入。 8. 交付检查 开发期比较已有HTML与导入结果，检查关键内容、操作和实际修改保存；再用一个新建作品确认流程成立。依赖未变时复用既有结果，小改不截图全工程、不固定三路生成、不增加审美Agent或质量网关。编译、应用、保存和用户接受是不同事实，按实际结果报告。"}, {"id": "html-edit", "label": "05 HTML 轻编辑与保存", "title": "HTML高保真导入、轻编辑与保存", "text": "04_HTML轻编辑与自动保存.md HTML高保真导入、轻编辑与保存 V3.3｜纳入2.0阶段。 首版机械式整体Runtime导入，不先拆原生节点；HTML与Runtime共用图文发现/编辑能力，来源保存和工程保存分别接现有文档服务。技术细节见14，实施顺序见02。 1. 两个明确入口 入口 正式内容归属 用户得到什么 打开/轻编辑HTML 当前HTML文件会话及受管资源 可运行受支持HTML，改字/换图并可靠保存或明确另存 导入为果铃工程 工程内完整HTML/Runtime、资源与修改数据 保留原作品，可在Slide/Flow/Spatial适合的空间中运行、轻编辑并叠加原生对象 第二个入口不强迫修改原HTML；工程修改不自动反写上游MD/HTML。第一种入口不能只改临时DOM后显示已保存；不能把另存工程说成已经写回原HTML。两者共享编辑能力而非强行统一文件格式。 2. 确定性的导入路径 读取已授权HTML和实际依赖\n → 保留原文档/CSS/脚本/数据\n → 提取或登记受支持资源，处理基址和必要打包\n → 确定性包装为受管HTML/Runtime内容\n → 既有必要准入与正式导入\n → 同一DocumentSession、History、资源和保存 已有完整HTML默认跳过模型规划，保留原实现；用户要求重排、拆分或新增素材时才用后置策略。机械步骤不调用LLM，不把“照着网页重写一遍”算作导入。 先支持自包含HTML和依赖可收集的本地页面；缺失资源、需要服务器后端/登录态或未授权远程依赖时明确限制，不假装任意网站都能离线搬走。不为支持外部网页偷偷放开文件、凭据、远程脚本或OS能力。 原生化是可选后续优化。固定演示页可进Slide，流式长网页优先Flow页面Runtime，空间内容进入Spatial模块；不把所有HTML强塞1280×720，不要求先全面参数化Slides。 3. 保真首先是保留浏览器语义 当前Runtime需define/create生命周期，且受管DOM根不等于完整document。不能把HTML塞入runtime.source，也不能仅把body.innerHTML复制到Shadow DOM就宣称高保真；脚本、head/CSS、相对路径、字体、viewport与滚动依赖都需在受管包装中保留。 优先复用现有隔离预览/内容宿主和资源服务；需要完整HTML文档环境时在该路径补窄document承载，不另造浏览器内核。源码尺寸限制不能通过把大型HTML/base64全部内联进runtime.source绕过，正文与依赖按现有归档/构建扩展点管理。 Shadow DOM主要隔离样式，不是任意代码的安全沙箱。导入内容不能获得Node、原始IPC或Provider Secret。沿当前信任与准入规则处理代码，不为本轮扩成通用OS沙箱工程。 4. 共用的轻编辑能力 文字替换与图片替换是本轮核心；DOM、Phaser、Three已知模式按14逐步接通。无expose的常见图文也应能被软件发现；动态对象身份不明确时保留显示并标明限制，不把临时命中ID直接持久化。 原生层既有移动/缩放/样式继续可用；已有受控HTML草稿外框编辑不删，但任意网页自由拖排不是这轮前置。HTML内部图片换资源默认保留现有布局/裁切规则，不意外改形状，不更换其他共享引用。 公式、烘焙图文、复杂富文本和表单值不以普通textContent替换处理。先复用已有明确编辑入口，否则只读/AI源码修改；不得破坏子DOM、事件或业务判定后仍报告成功。 5. 保存方式与自动保存 静态HTML在能准确定位源文时修改对应内容，保留doctype、head、样式与未改区域；只清理宿主编辑手柄/临时桥，不删除原业务脚本。无法可靠回写的脚本生成内容，使用14中的正式数据绑定或窄内容覆盖，导出时带入必要恢复逻辑。持久数据由文件或工程会话管理，不用localStorage/当前DOM快照替代。 正文输入在IME结束和有界编辑确认后提交，图片替换/手势结束后提交，一次用户动作接一次撤销；保存沿现有队列/失败反馈。只有磁盘写入回执成功才显示已保存。切Tab/关闭处理未完成提交，但不引入第二保存器、逐指针事件全量History或独立layout.overrides文件。 来源、目标身份/版本、权限与取消沿用既有协调。冲突保留用户稿，不静默覆写；原资源与新引用可由现有资源系统追踪，不每次保存重新hash整个工作区。准入与安全在实际改变处验证一次，不每个Skill重复跑。 6. Flow长网页与叠加对象 将Flow现有Surface Runtime补为页面主内容，不只当绝对定位浮层。页内实际占位撑开滚动范围，编辑态也运行真实内容；正文文档模式继续保留。高度测量通常只更新布局缓存，不连续写frame.height和撤销栈。 普通纵向HTML优先Flow统一滚动；强viewport/sticky/window-scroll依赖页面保持原文档视口语义，包装中明确主滚动所有者，并对齐外层命中/批注。不能把整页iframe拉成scrollHeight当万能方案。第一版自由图文按清楚的设计宽度布置，不承诺响应式重排后自动附着原段落。 Flow“插入文字”改为创建paper-space原生文本框；段落输入、回车与标题仍走当前Document正文。新增图片/箭头等复用已有原生层；不将网页原有全部文字拆成自由文本框。详见14。 7. 和框架设计、素材生产的关系 框架HTML完成前不读取编辑器能力或静态原生转换白名单；后置呈现策略才决定Surface、载体和素材。HTML可先带真实文案与必要槽，不要求提前把互动全部做完。当前HTML人工修改优先，MD补教学背景；删槽不复建。 shell.inspect/slot.prepare/shell.assemble是13中的拟新增薄工具，不代表已实现。完整页面无槽可直接封装；局部新内容按实际需要生产，保存与导入共用已有正式链。 8. 一次完成验证，日常按变化检查 使用听力案例和一个长网页：看少量关键状态/操作，修改后保存重开并导出HTML验证。没有必要给每次导入运行三次模型、像素级差分或视觉评分。原HTML自身缺陷与导入退化分开记录。 网页在线依赖不等于离线失败后可静默删掉；动态行为不能靠静态截图冒充。PDF/PPTX的动态内容保持既有明确后备/报告，不把互动无损变为Office当2.0承诺。普通互联网浏览器、Office选型与任意HTML机械拆原生仍单独后置。"}, {"id": "office", "label": "06 Office 多方案评估", "title": "Office 多方案评估：保留路线，不预定赢家", "text": "05_Office多方案评估.md Office 多方案评估：保留路线，不预定赢家 结论状态：未选型。 本文区分官方已公开能力、工程推断和需要实测的项目。没有任何候选已在果铃中完成性能或文件兼容验收。候选顺序不代表推荐排名。 1. 目标与边界 Office在近期承担：打开已有材料、阅读、必要的选区上下文、按需手动编辑或AI修改、保存回用户能够继续使用的文件。它服务于教育工作空间，不要求果铃重造完整办公软件。 优先要求：普通本地文件快速可读、主界面不被阻塞、内容大致正确、版式可接受；不能用错误数值、漏页、丢图表来换“快”。可以接受部分字体、分页和装饰细节差异，但要有边界提示。 允许一次接入现成编辑器，同时解决查看与手改；也允许先用只读渲染库。 不规定“先只读后编辑”，也不规定“所有文件都要加载完整WebOffice”。 2. 五条可行路线 路线 数据和引擎在哪里 潜在收益〔工程判断〕 必须验证的代价 A 直接解析＋浏览器查看 本地解析Office并渲染为HTML/SVG/网格 无需上传，UI可贴合果铃，可能首屏较快 解析/渲染覆盖、长任务、字体；不自带源格式编辑 B 成套WebOffice服务 文件服务＋文档服务＋网页编辑器 查看、手改、保存与对象API一起获得 上传/取文件、会话、网络、计费和保存回调 C 本地引擎＋Web UI 原生文档引擎本地运行，Web承载界面 免文档上传，复用较完整引擎 SDK可拆性、构建、体积、平台、发行许可 D 浏览器WASM套件 引擎与文件主要在客户端 可本地运行、JS桥接控制 初装、WASM初始化、线程/内存、持久化与输入体验 E 原生编辑框架＋格式桥 自有/第三方对象模型，加Office文件交换 更易控制选择和命令，可逐渐做深 格式桥并不免费；兼容、重算、写回仍是独立工程 F是可选组合：轻查看器＋按需编辑Provider。只有实际证明组合改善打开体验且维护成本可接受时采用；不默认常驻两套引擎、解析两遍、展示两种不同布局。 PDF转换只作为异常文件、打印或对照验证的可选路径，不作为默认打开前置。LibreOffice支持无界面转换，但这不意味着必须每次打开都进行一次完整导出。 S36 3. 总体候选矩阵 候选 主要范围 本地首次打开 原格式手动编辑 面向AI的接口线索 当前必须核实 docx-preview DOCX查看 可本地 不提供完整写回 解析对象/DOM，内部API可能变化 分页、公式、浮动布局、长文件 pptx-renderer PPTX查看 可本地 不是完整PPTX编辑器 可访问文档模型与节点 中文字体、母版、复杂对象、生命周期 SheetJS CE＋网格 XLSX等数据查看 可本地 数据读写与保真手编是两件事 工作表/单元格/公式数据 样式、图表、重算、写回保留 WPS WebOffice 成套Office查看/编辑 标准云路线上需服务可取文件 有 文字/表格/演示对象API 上传/回调、授权、自动化覆盖、保存 阿里云IMM WebOffice 成套Office查看/编辑 典型路线先有OSS对象 有 JS SDK；对象粒度逐项确认 地域、调用计费、API、云本地保存链 ONLYOFFICE Docs 成套Office查看/编辑 由文档服务读取文件 有 Office/插件API；外部Automation单独许可 部署、发行许可、自动化层、初始化 Collabora Online 成套Web Office 服务端可取得文件 有 WOPI/PostMessage；覆盖需实测 网络、托管、UNO子集、当前SDK Collabora Office桌面路线 本地Office＋Web UI 官方产品支持本地引擎 官方桌面产品有 需确认可复用的嵌入接口 能否拆成组件、不是现成Electron SDK ZetaOffice＋zetajs 本地浏览器Office WASM运行时就绪后本地处理 套件能力，须逐格式验证 JavaScript/UNO 冷启动、内存、中文输入、打包与许可 Univer＋文件交换 可控编辑框架，表格尤需评估 官方交换链有转换后端 取决于组件和交换路线 Facade/命令、插件接口 OSS/Pro边界、转换覆盖、版本配对 LibreOffice＋UNO桥 外部/本地编辑与自动化 本地安装与进程 外部程序中有 UNO文档与选区API 不自动获得果铃内嵌画布、打包与焦点 本表事实依据分别为 S03 — S26 ；“可本地”不代表已测快速，“有API”不代表每个对象都可稳定定位和写回。现阶段不填写虚构的速度分数或保真百分比。 4. 直接渲染候选 A1. DOCX：docx-preview / docxjs 已核实： 目标是DOCX→HTML；主要稳定入口为renderAsync，内部解析结构可能改变；文档说明没有实现完整实时分页。项目为Apache-2.0。 S03 可试方案： 作为隔离查看器使用稳定渲染入口。用户可阅读、搜索/复制受支持文字；是否增加语义选区，在最小查看成功后决定。 测试重点： 教案中的编号、表格、中文字体、公式、图片环绕、页眉页脚和长文档。不要为了贴合Word分页无限修补；接受可阅读的连续布局时明确展示模式。 编辑前景： 渲染DOM上的文本改动只能证明HTML发生变化，不能称为DOCX已保存。未来补写回须单独验证；内部对象接口变更是维护成本，不能先绑定所有业务逻辑。 A2. PPTX：aiden0z/pptx-renderer 已核实： 项目采用解析—模型—渲染分层，HTML/SVG输出，提供可选延迟幻灯片/媒体解析和窗口化显示；自述覆盖范围有边界，动画、完整EMF/WMF等不在完整支持范围。Apache-2.0。 S04 可试方案： 选取真实教学PPT，优先比较第一页和切页；只在实际开启并验证后使用lazy/windowed能力。不可把README中的作者本地测试比例当作果铃性能。 测试重点： 主题字体、上下标与公式、组合形状、母版对象、图表、嵌入媒体、透明图片和超过常见页数的文件。某些对象可利用包内预览，但包里不保证存在，不能为缺图凭空生成栅格兜底。 编辑前景： 模型可寻址有利于后续定位，仍不意味着已有PPTX writer和保真往返。轻编辑若只输出HTML，必须按HTML副本呈现，不伪装为源PPTX编辑。 A3. XLSX：SheetJS CE＋虚拟网格 已核实： SheetJS CE重在数据与数字格式；HTML完整文字/单元格CSS样式属于Pro文档范围。表格解析、公式表达式、公式求值、图表和文件保真是不同问题。 S05 S06 可试方案： 只在需求偏工作表内容查看时试。显示sheet名称、单元格值、可见范围和必要数字格式。虚拟网格解决DOM量，不能消除读取sharedStrings/styles或完整ZIP的成本。 测试重点： 显示值与公式、缓存是否存在、日期与百分比、合并、冻结、隐藏sheet、成绩表中的中文。无重算能力时不得在修改输入后继续展示旧计算结果却不提示。 编辑前景： 既可追加数据写入，也可转接编辑框架；但将整个复杂工作簿导出重建可能丢失不支持内容，必须测保存副本，初期不覆盖原件。 5. 成套WebOffice服务候选 B1. WPS WebOffice 已核实： 官方提供网页嵌入、服务回调和文字/表格/演示对象API。标准云接入要求服务能够访问接入方的回调与文件；不能给远程服务一个本地磁盘路径。 S07 S08 S09 价值假设： 用现成编辑底层承接人手改，果铃保留模型、工作区和任务层；不需要使用厂商自带AI。是否缩短开发量取决于API覆盖和保存流程，不只看演示可编辑。 进入测试的工作： 申请试用与必要接口权限；实现文件身份、鉴权、文档URL/回调；把保存结果落实到当前工作区，处理本地未保存修改。私有化和离线部署作为商务询证，不由云API文档推导为免费可本地嵌入。 重点未知： 当前商用价格/计量、可开放的接口与品牌、数据位置、当地网络首次打开、同一文档AI和人工编辑是否争夺选区、保存完成回执能否覆盖本地写盘。 B2. 阿里云 IMM WebOffice 已核实： 典型路径为OSS对象＋同地域IMM＋在线编辑URL，官方提示跨地域/跨境链路可能影响体验；计费含凭证API调用，仍需计算对象存储和网络等成本。 S10 S11 价值假设： 对云端已有文件和在线分享场景接入较自然。对于刚从本地目录拖入的大文件，上传耗时必须计入“打开”，不能从上传完成后开始算。 进入测试的工作： 云端测试文件、凭证刷新、权限/URL有效期、编辑保存事件、本地副本回收。查询是否可取得满足果铃的元素级API；“可手动编辑”不等于“AI可通过SDK定位任意对象”。 重点未知： 当前SDK对象覆盖、编辑并发与会话生命周期、离线时行为、断线后保存、多个凭证刷新对单位用户成本的影响。与其他服务可能共享某些上游技术，不能按接入品牌数当作独立内核数量。 B3. ONLYOFFICE Docs 已核实： 文档服务从URL取得文件；编辑器应用加载与文档就绪是不同事件；外部Automation API为Developer额外付费能力。开源社区版有AGPL和厂商品牌/分发说明。 S12 S13 S14 S15 价值假设： 作为成套编辑服务，可能减少需要自建的文档UI；可在自己可控的服务环境测试。但自部署不是没有服务器成本，也不等于适合作为每位桌面用户的后台常驻进程。 进入测试的工作： 文档服务、文件与保存回调、版本key、身份与签名、文档就绪事件、真实文件的保存重开。需要外部深编时先确定可用接口与商业权限，再估算工作量。 重点未知： 实际启动时间、并发内存、部署维护、对未支持对象的保存行为，以及社区/商业版对果铃实际发行方式的可用条件。插件API与外部Automation API分别审核，不概括成“所有自动化都收费”。 B4. Collabora Online 已核实： 可作为Web Office集成；官方对源码和可执行发行物分别列许可，维护者说明UNO对象与对外状态/消息接口不是同一层。 S17 S18 价值假设： 适合有可管理服务器和在线文件的运行环境。持续文档会话与逐次后台导出PDF不是同一种处理链，不能仅因服务端渲染就提前判慢。 进入测试的工作： 固定版本、文档服务、WOPI/鉴权与保存、消息来源校验和生命周期。本文未能直接读取当前PostMessage SDK页面（反爬校验），接口粒度必须用当前源码或SDK再次确认，不能照搬历史示例宣称可用。 重点未知： 首次可读、网络抖动、选区/命令完成确认、中文输入、重连保存、生产支持条款。不要把“有Send_UNO_Command”解释成浏览器端可以无边界访问全部UNO文档模型。 6. 本地WebOffice与WASM候选 C1. Collabora Office桌面本地架构 已核实： 2026-07-01官方26.04说明介绍了本地文档引擎＋Web界面；Windows采用Win32/WebView2并在进程内运行引擎，其他系统有相应Web承载方式。官方同时说明仍在完善，性能可能变化。 S16 价值假设： 该架构证明“现成WebOffice体验＋本地文件处理”有实际产品实现，可能避免默认上传本地文档。 关键区别： 一个能运行的桌面产品，不等于一个可直接嵌入Electron的组件SDK。果铃应先确认能否独立托管前端、调用引擎、保存文件和取得目标对象；若需要维护复杂跨端fork，接入成本可能迅速升高。 重点未知： 可拆性、运行时边界、构建工具链、更新安全、可执行发行许可、是否要额外捆绑WebView2或第二套浏览器运行时。不能只因本地架构就称为最快。 D1. ZetaOffice＋zetajs 已核实： 官方给出客户端WASM运行文档引擎、JavaScript包装器与UNO集成路线。zetajs自身为MIT；底层LibreOffice/ZetaOffice及依赖须分别看许可。官网仍有服务open beta描述，当前构建成熟度需具体核对。 S19 S20 S21 S22 价值假设： 适合本地文件、不希望部署文档云服务的实验；可用现成文档模型而不靠屏幕点击控制。 进入测试的工作： 固定WASM与JS版本、本地静态资源、运行所需浏览器策略、虚拟文件系统到真实文件的保存、UNO具体目标访问。支持范围必须用实际API验证，不能由“UNO兼容”推导所有应用对象均可顺滑访问。 重点未知： 首次安装下载、冷初始化、内存峰值、线程配置、中文输入/剪贴板、多个文件/Tab的实例复用以及异常恢复。按需安装能减首次安装包，但不消除每次运行的初始化代价。 C2. LibreOffice＋UNO 外部/本地桥 已核实： UNO有读取/改变选区和监听选区变化的接口，LibreOffice发行以MPL-2.0为主并包含其他组件许可。 S22 S23 价值假设： 提供外部编辑、文档自动化、兼容验证或特定转换。可作为低UI集成深度的候选，不等于其能力都弱；模型接口深度与UI是否嵌入是两个维度。 重点未知： 桌面实例与果铃如何关联、现有窗口焦点、文件被占用、保存/退出、平台安装与升级。窗口句柄嵌入不是可移植的万能方案；不满足内嵌画布时清楚标为外部编辑。 7. 可控编辑框架与格式桥 E1. Univer＋官方文件交换 已核实： Univer公开编辑框架与商业组件并存；官方Office交换路径涉及服务端转换，文档明确区分浏览器编辑与文件导入导出，当前exchange-node为相关实现。 S24 S25 S26 价值假设： 当选择、命令、布局和果铃AI交互深度更重要时，可能比嵌完整套件更可控；不是默认最便宜、最快。 进入测试的工作： 固定SDK、Pro与交换服务的版本组合；以需要的文件类型验证导入、编辑、导出。先检查实际包许可，再决定哪些OSS模块能复用。 重点未知： 非表格能力成熟度、公式与图表、导入冷启动、转换服务成本、保存未知对象。若改用SheetJS等自建格式桥，属于另一项兼容开发，不是“绕开Pro即可无成本完整导入”。 E2. 自有有限编辑＋开放解析组件 保留为长期可能性：对一类文件的一组常见对象提供原生定位、文字/位置修改，受支持部分尽量定向写回，其余原件保留。优势是深度可控，成本是文件映射、依赖关系、字体、写回和验证。 近期不将此路线作为“预览器顺手加两个按钮”的小任务。不因查看模型存在就估算已经完成80%；写回、撤销和外部打开正确性必须独立证明。 8. 可以组合，但不默认组合 场景 可保留的配置 风险 本地查看最多、手改较少 直接渲染＋按需Editor 两套显示结果、切换状态、重复解析 云端文件多、经常手改 单一WebOffice同时查看编辑 网络/上传、持续费用、云本地副本 需要离线和套件能力 本地引擎或WASM 包体、内存、更新和本地安全 核心是表格对象交互 Univer或其他编辑框架＋格式桥 桥的覆盖、公式重算、二次模型 预算极紧、文件使用稀少 基础可读＋外部打开 体验跳转；不是同画布完整共编 可按格式采用不同方案，但对用户保持清楚的“查看、轻编辑、完整编辑、外部打开”能力标记。无需求前不维护多个同类Provider作为装饰性冗余。 9. 决策规则：现在收集证据，不先收敛技术 第一轮：候选均保留，登记文档、版本、许可、部署与免费试用条件。第二轮：选取少量易取得环境的不同路线，用同一批文件测性能和缺失；未测试的候选标“未测”，不算淘汰。第三轮：对满足打开要求的候选，再测元素定位、AI操作、人工接管与保存。 明确淘汰理由可以是：普通文件经常不可读；保存损坏；许可不能接受；必须公网且用户不授权；冷启动/资源成本超预算；维护成本与当前人力不匹配。不能仅以“需要转换”或“不是纯前端”淘汰——关键是可见的端到端体验。 本阶段交付：候选登记表、实际样本与测量、具体不支持案例、必要商务询证、可回退试接。 不要求产出唯一最终技术栈。 10. V3.1范围说明 本轮保留候选研究，不重新排名或宣称已试接；第三方条款/性能未在本轮逐项刷新。候选池不是开发清单，也不要求全部采购/安装/常驻。当前主线仍是已有基线上的有界能力验证。"}, {"id": "office-test", "label": "07 Office 测试与性能", "title": "Office 验证计划与性能基线", "text": "06_Office验证计划与性能基线.md Office 验证计划与性能基线 1. 先定义“打开” T0是用户点击工作区文件。分别记录：界面响应、真实内容首次可读、视口稳定、可输入编辑、首次保存确认、文件重开成功。空工具栏、加载动画或只显示文件名不算内容已经打开。 ONLYOFFICE的onAppReady与onDocumentReady恰好说明应用就绪和文档就绪不是同一时刻；其他Provider需自行找到等价信号并人工确认。 S13 2. 六种状态分别测 状态 测量意图 首次安装/尚无运行时 包下载与安装单列，不能隐藏 冷应用、打开本地新文件 首次引擎加载、文件读取、解析和排版 热引擎、打开另一新文件 不被同文件缓存美化的常用路径 同文件重开/已缓存 缓存收益，来源版本一致性 已打开Tab切回 是否无谓销毁并重建实例 云端文件已存在 vs 本地首次上传 对网络/上传的端到端影响 清楚记录缓存、预热、内存驻留和网络条件。不能把文档上传提前到未授权后台；也不能把预热消耗从产品成本中删除。 3. 初始性能目标〔产品假设，非实测结论〕 普通文件以“约1–2秒可读”为优化目标，可暂设常用样本p50≤2秒、p95≤5秒的讨论门槛；切回已经打开的Tab目标≤300毫秒。首次重运行时冷加载、大型或复杂文件单列，不用同一数字掩盖极端值。 这些数值须在目标设备上确认后才变成发布门槛。速度不达标先定位瓶颈，不立即加第二套查看器。样本不足以支持百分位时只报告每次原始值与中位数/最大值，避免伪精确。 编辑模式另测可输入时间、打字/拖动响应、保存时间；“查看很快但点编辑再等一分钟”也应暴露。打开与手动输入不得调用LLM。 4. 第一轮样本 先用9个授权、脱敏文件：每种DOCX/PPTX/XLSX各取简单、常用、复杂一个。每个冷状态至少做数次独立启动，热状态重复若干次，保留原始记录。此轮用于定位问题，不宣称统计覆盖整个用户群。 有候选表现可用后，再扩到每种格式约10个文件或真实用户材料。文件大小不是唯一复杂度：形状/表格/字体/公式/媒体数量同样记录。测机器固定，记录CPU、内存、系统、显示缩放、字体、应用与引擎版本；云端记录地域、延迟与吞吐。 格式 样本应包含 DOCX 中文教案、标题列表、复杂表格、公式、图片环绕、长讲义、页眉页脚 PPTX 教学公式、母版、组合图形、图表、裁剪透明图、备注/媒体边界、大页数 XLSX 课表、成绩表、合并/冻结、格式化日期百分比、公式、图表、多sheet、大范围 宏和外部链接不执行；加密文件要求明确授权与正常密码输入；不能因忽略宏而声称保留其行为。浏览器不支持的嵌入媒体和对象需要说明。 5. 显示质量验收：容许差异，不容许误导 类别 例子 处理 可接受偏差 字体替代、少量行距、装饰效果、分页不同但内容完整 记录，不阻断基本查看 任务相关偏差 图注错位、表格遮挡、公式排版难读、关键形状关系改变 真实任务判断，需修复或明显提示 内容错误 数值错误、漏页、丢图表、公式变成错误关系、静默截断 不以“高保真预览”通过 指定参考应用版本；同一文件在不同Office产品中可能不同。截图比较只辅助定位，数学关系、公式缓存和表格数据用结构断言/人工抽查。不能用全页视觉相似度掩盖关键区域丢失。 6. 编辑与AI接力测试 按能力分开记，不要求只读方案通过编辑测试，也不能把失败算成零性能。 查看：打开、翻页/切sheet、搜索、缩放。 选区：获得文字范围、页/shape或sheet/range；验证目标可否在当前版本再次定位。 手改：文字、形状位置或单元格输入，撤销后正确恢复。 AI接口：通过受支持命令改明确对象，不靠截图猜测；没有接口则标缺失。 接力：人→AI→人多轮；检查陈旧选区、跳焦点和未保存版本覆盖。 保存：保存结果真正落到工作区；重开和外部应用打开后正确。 开放编辑器时不要同时用另一个文件工具直接改磁盘上的同一Office文件。优先经当前编辑会话命令修改；无此能力就采用保存—修改副本—重新加载的明确接力，不伪装成实时同状态共编。 7. 性能优化清单〔逐项验证，不先全做〕 模块按需加载；重用已授权运行时；先显示可见页/工作表；媒体按需解码；长任务移出主UI；取消过时任务；文件版本缓存；Tab预算与LRU；字体提前就绪；不在首屏做全文件缩略图与OCR。 延迟渲染不等于延迟解析。ZIP中央目录、共享字符串、样式等可能仍需读取；第三方未提供流式/局部解析时，不在方案里假定已经具备。缓存要含内容版本与影响显示的引擎/字体版本。 预热只能减少使用时等待，仍会占内存和启动资源。先测，再决定一套或多套常驻引擎。并行Office和生成任务要测试是否拖慢前台编辑。 8. 成本与商务询证 统一口径：每100次普通打开、每个活跃用户、每个成功保存任务的费用与资源消耗。云端考虑文档取用、凭证刷新、会话、存储与流量；本地考虑包体、内存、更新和技术维护。 报价询证包括：只读和编辑是否分别计费、外部自动化是否加价、并发定义、离线/本地部署、白标、再分发、源代码义务、技术支持和数据处理地域。价格未知填null，不估成免费。 原始模板见 benchmarks/office-run.template.json 。最终结果同时报告失败率、打开时间、保存正确性与未测项，不用单个综合分掩盖硬缺陷。 9. V3.1轻量执行 首次可先围绕一个真实需求格式、少量授权文件筛查硬问题，再对进入候选使用本章完整矩阵。完整矩阵是扩样方案，不是任何试接都要全部通过的前置。复用已有日志、测试脚本与模板，不开发Office评测后台。套件内部Undo归真实编辑会话，宿主验证唯一writer、保存与AI接力，不强制复制细粒度History。"}, {"id": "browser", "label": "08 浏览器与多格式", "title": "浏览器与多格式工作空间", "text": "07_浏览器与多格式工作空间.md 浏览器与多格式工作空间 1. 浏览器是实际工作能力，不只是Office容器 教师需要看网页、收集材料、打开本地HTML和运行交互内容。首版普通浏览包括地址/搜索、前后退、刷新、合理数量的Tab、登录态、下载到工作区、选区/当前页交给AI。书签同步、密码管理、扩展商店和全面浏览器替代先不做。 Office文件由对应解析器或WebOffice处理；浏览器内核本身不会自动理解所有Office格式。必须区分网页宿主与文档引擎，不把“已经嵌Chromium”作为兼容性完成的证据。 2. 三类内容面 类型 用途 权限边界 本地受控内容 静态草稿查看/轻改；完整模块保留运行 草稿由可信宿主保存；模块走已有Runtime隔离，不另建运行内核 用户互联网网页 搜索、阅读、网站操作 独立持久会话；无果铃文件桥；按需授权下载/上传 后台验证内容 测试生成组件/HTML 独立任务会话；无用户登录态；最小网络与文件范围 Electron官方更推荐iframe或WebContentsView等方式，而不推荐webview标签；WebContentsView不在DOM树内，位置、缩放、遮挡和焦点需要协调。 S01 实现可共享Tab与生命周期管理，但不同表面不必共用同一承载组件。对于本地草稿，可依据当前架构选择隔离iframe或独立内容面；不为读取DOM便利而扩大不可信代码权限。 3. 首版文件能力 文件 查看目标 编辑目标 原生工程 快速打开、运行互动、保持结构 核心深编和局部AI修改 Markdown/文本 阅读与现有编辑器 直接改与自动保存/现有保存规则 框架HTML 真实布局＋必要槽位 2.0共用图文轻编辑与可靠保存，已有外框轻改保留 普通本地HTML 2.0受支持整页保真承载/机械导入 常见图文轻编辑；静态源文或动态正式修改可靠保存，限制明确 PDF 翻页、缩放、搜索/选择 批注按需追加，不承诺改原文排版 图片 预览、尺寸信息 裁剪/旋转/替换等有限操作 音视频 浏览器支持范围内播放 首版不做时间线编辑器 Office 本包多方案验证 按Provider能力，不预定只读或完整编辑 冷门格式 文件信息、可用Provider或外部打开 有真实需求再接 PDF.js是PDF显示方案，不能用它证明通用文档编辑能力。图片裁剪UI可以比较Cropper.js，处理过程可复用Sharp；这是组件选择，不是已完成产品能力。 S30 S31 S32 4. 图片能力应贴近素材链 默认保留原素材：页面里的裁剪只是该引用的变换；用户明确“编辑原图”才创建可替换原件的文件版本。若同一图片被多处引用，修改前让作用范围清楚。 优先实现图片替换、裁剪、旋转/翻转、尺寸与必要透明背景处理。AI生图、抠图等另有Provider费用和质量边界，不能用安装图像库代替。精确数学图和公式优先可验证SVG/组件，不把文本公式烘焙进生成图片。 5. 安全与隐私底线 远程页面不启用Node权限，不暴露文件读写或任意IPC；主进程校验消息来源、目标文件、导航和权限。Office/HTML均视为不可信输入，控制压缩解包、图片大小、外部关系和下载地址。无授权不执行宏、不访问外部文件链接、不上传教学或学生材料。 S02 本地服务绑定回环地址并鉴权；云服务不能读取localhost只是正常网络边界，不能通过关闭webSecurity、CSP或建立公开无鉴权隧道来解决。 6. Computer Use的位置 先服务已有创作验证：加载当前HTML/组件，读取结构/错误，截图并检查可见效果。需要浏览器自动化时优先结构化定位，视觉操作补足Canvas等缺口。 不把完整桌面控制、虚拟桌面、常驻Agent浏览器与插件商店一起列为2.0前置。后台窗口不天然保证不抢焦点；要在目标平台测试。MCP是给外部Agent调用果铃能力的出口，不代替编辑器实际对象接口。 用户登录的浏览器与Agent测试会话默认隔离。需要Agent操作有账户的网站时，明确选择会话、目标与写操作权限；不自动把用户Cookie复制给所有任务。 7. V3.3实施约束 本地HTML整体导入与图文轻编辑进入2.0，见02/04/14。HTML文件与工程Runtime复用发现/UI，保存目的地各自明确；普通互联网网页保持独立会话和权限，无需等完整浏览器或Office完成。 Flow以页面Runtime承载长网页，保留Document正文和原生paper-space图文；补实际占位、高度与滚动，不将网页强转Markdown。本轮补三Surface需要的真实Runtime/组件挂载与编辑，不强制统一全部模型。 通用Agent四档权限按原授权保留，内容页面不能继承Provider秘密或任意文件/OS桥。其他格式继续复用已有底层，不复制保存器或下载器。"}, {"id": "licenses", "label": "09 插件、自有能力与许可", "title": "插件化、自有能力与许可", "text": "08_插件化_自有能力与许可.md 插件化、自有能力与许可 1. 插件化主要降低“新增能力必须改整个产品”的成本 第三方编辑器仍要接入文件、选区、保存、会话、权限、撤销和错误反馈；只因它叫插件，开发和维护不会消失。按需安装可以减首包与空闲资源，不能自动减少运行时内存或冷启动。 近期先做内部能力适配，不先做公共市场。通用接口只抽取当前真的需要的：识别文件、打开/关闭、读取就绪状态、能力声明、保存，以及可选选区/执行动作。格式内部保留自己的模型，不统一所有文档AST。 2. 不同集成深度都保留 深度 可用体验 果铃需要补什么 外部程序打开 基础查看与手改接力 文件关联、观察保存、返回工作区 内嵌查看器 同Tab阅读、可选搜索/选区 生命周期、语义定位与原件关系 内嵌WebOffice 手改、保存、套件UI 文件/会话、对象API、AI指令到命令 模型/API深度适配 稳定选区、局部修改、人AI接力 当前版本、撤销、写入与返回证据 选择性自有编辑 最大程度控制交互 文件兼容、渲染、写回与长期测试 UI是否嵌入、AI是否有结构接口、许可证如何约束，是三个不同维度。独立进程不必然只有屏幕点击；同一画面也不必然能稳定进行对象级修改。 3. 开源与商业化 开源软件可以商业使用。真正要核对的是修改、分发、网络提供、源码提供、品牌、合同和附属资源的条件，不能把“GPL/AGPL”写成“禁止商用”，也不能把“插件/MCP/iframe”写成许可豁免。 许可/交付形态 主要关注 当前处理原则 MIT/BSD/Apache类 版权、许可文本、NOTICE、修改声明及依赖 可优先评估复用；不等于无条件拿走品牌/字体 MPL-2.0 覆盖文件的源代码义务；其他部分可组成Larger Work 明确修改文件和发行物范围 LGPL 库的替换/重链接、修改库源码等版本相关条件 按链接和打包方式评审 GPL/AGPL 是否构成组合/衍生作品、分发与网络条件 按实际架构审查；不靠包装绕过 商业SDK/云服务 调用、并发、自动化、白标、数据与再分发合同 书面核实，不默认试用等于可发行 Apache正文授予修改与分发等权利并要求相应通知；Mozilla解释MPL的文件级边界；GNU FAQ强调通信语义和组合关系也影响插件判断。这些是许可文本/权利人解释，不是对果铃某个未定架构的法律裁决。 S33 S34 S35 ONLYOFFICE、Collabora与zetajs/底层Office的具体差异已在Office评估列出；最终锁定版本后再复核实际依赖。公开仓库的单一顶层license不能代替完整软件物料清单。 4. 部分开源可以独立于Office选型决定 可先开放稳定的组件协议、示例、文件适配接口、MCP工具约定；核心产品与商业服务保留自主选择。没有真实第三方使用者前，不承诺长期兼容全部公共API。 不为了省一套编辑器授权费立即决定整个果铃开源；也不为了宣称自有就重新编写已经许可清楚、效果稳定的通用基础库。 5. 选择性自研的触发条件 实际用户经常需要的操作，被现成Provider反复阻断；API/费用/延迟成了可测瓶颈；团队有维护余力；通过小范围实现能产生明确体验提升。满足后优先做有限对象和有限动作，不一次接管完整Office兼容。 自有资产可以是教学设计方法、原生互动内容、局部编辑与验证、素材复用、可靠任务提交；无需把所有渲染器都改成自有。 6. 源码研究与重写 可以依法研究公开规范、公开API、许可清楚的开源代码和自建行为测试。允许复用的代码保留来源与许可，不必刻意洗成“全部原创”。从GPL/AGPL实现让AI翻译/重排后宣布闭源自有，并不自动形成独立实现；需要相应法律评估与可追溯的开发依据。 记录：项目和版本、来源地址、许可证、采用/修改部分、依赖、分发方式、源码提供与NOTICE、字体/素材权利、更新责任。多个主体共享代码时先明确归属与授权，不默认创始人重合就自动共有。 7. 插件保存与授权的最低边界 插件仅访问明确授权的文件或副本。保存需宿主确认当前版本和文件范围；插件显示“已保存”不等于果铃本地文件已落盘。首次外部修改可保留原件与新副本，后续再按Provider成熟度开放覆盖。 官方捆绑插件由果铃承担持续安全更新与兼容责任；用户自装服务也不意味着果铃可以承诺其许可合规。正式发行/商务集成前进行针对实际架构的专业法律审核。 8. 单writer不等于所有格式共用逐键History 自有HTML沿用DocumentSession管理正式源文和编辑历史；第三方Office可由其自身编辑会话拥有细粒度模型与Undo，果铃协调文件binding、保存、授权、AI操作结果和同文件唯一活动writer。不能为了统一接口另镜像一套细粒度History，也不能在套件编辑时让另一个文件工具静默改磁盘。 第一种Provider落地时做窄适配即可；没有真实第二个消费者之前，不冻结公共SDK。不同格式/引擎间不承诺跨应用逐键撤销；无法实时对象共编时用明确的保存—副本修改—重载接力。"}, {"id": "validation", "label": "10 教育与用户验证", "title": "教育切入与用户验证", "text": "09_教育切入与用户验证.md 教育切入与用户验证 1. 第一阶段卖真实结果 首个承诺是：老师把已有讲义、题目和素材变成可授课、可修改、可运行的内容。核心不是“支持所有文件”，也不是“教用户维护一个技术工作流”。 初期可以用完成度高的内容和示例吸引用户，但必须区分内容吸引力和软件独立可用性。下载课件很多不代表教师愿意使用编辑器；创始人代做成功也不代表用户自助成功。 2. 内容获客与产品使用连接起来 每个演示案例提供可运行成品、可修改工程和清楚的“试着改这一处”入口。演示既要保住关键视觉/教学交互，也要把这处改动保存下来；原生对象数量或仅嵌入HTML都不能代替这两项价值。第一次使用不要求从空白生成整课：老师可先替换例题、调整一个参数或修改讲稿，再尝试新建。 内容库先聚焦团队熟悉的学科与真实难点，不铺全面教材目录。特别适合展示的任务是普通静态材料难以表达、但互动确有教学作用的片段。不要为秀技术强行加交互，也不要把只有演示需要的录播课做成学生答题系统。 3. 三个验证环节 环节 实验 观察 初次价值 选少量熟悉教师，让其使用一个已有工程完成具体修改 是否理解、能否独立完成、返工与耗时 重复使用 请其在下一次真实备课继续用，不由创始人全程带做 是否返回、复用什么、在哪一步离开 付费与扩展 对确定的使用价值测试透明价格/套餐 实际支付、取消原因、单位成功成本 可从5–10名种子教师开始，这是实验规模建议，不是现有用户数。记录每个任务的结果与支持时间，不因样本小而包装百分比增长。 4. 指标必须能连接到价值 第一次可用作品时间；最终人工修改时间；作品授课是否成功；保存重开成功率；下一次备课返回；素材/组件复用；每个成功任务的模型/生图/Office成本；创始人协助分钟。 “打开文件数”“生成页数”“token消耗”“插件数量”只作诊断，不能替代留存、付费或实际节省时间。 收费可分别试软件订阅、清楚的AI用量额度、内容/模板包与小团队服务；当前不确定价，不用无上限模型/视频/云Office资源补贴来掩盖成本。 5. 从教师工作空间向相邻人群扩展 先看用户真实的非授课任务：培训、教研、报告展示、可视化解释等。用同一内容运行时与工作区完成，检验需要新增多少能力。只有需求和复用成立后，再投更广Office编辑或企业功能。 核心教学质量不能因扩行业而退化成通用文案生成；也不把“教育切入”理解为只做教材内容而不做工具。 6. 融资准备的证据，不是融资概率预测 准备真实可演示产品、重复使用案例、任务前后对比、付费记录、单位成功成本、主要技术资产、明确许可证与代码归属。长期说明相邻任务扩展，但不靠“大厂尚未做某按钮”证明价值。 融资是否成功还取决于团队、市场、条款与投资人判断；本包不提供未核验的行业融资统计、买家兴趣或概率。 7. 教育材料与数据 演示与测试优先用自有、授权或可合法使用的材料。教材、试题、字体、图片和视频分别核查来源；不要将真实学生名单、成绩、录音默认送入云模型或WebOffice。产品提供清楚的本地/云端处理提示与删除方式；具体合规要求在真实业务范围确定后另行评估。"}, {"id": "handoff", "label": "11 Agent 交接提示词", "title": "Agent实施交接提示词", "text": "10_Agent实施交接提示词.md Agent实施交接提示词 V3.3｜本包只更新方案，以下供后续获得产品开发授权时使用。 不将读取方案视为任务登记、改代码或付费测试授权，不修改Codex任务表来替代实际开发。 A. 2.0增量实施 先读本包00、02和14，再按本批范围读取04/13及相关实际consumer。原范围验收先收口、固定可回退点；随后在2.0阶段完成Runtime轻编辑、HTML机械导入、Flow页面承载/原生文本框、所需三表面接线和后置呈现策略。不要推迟整个能力到2.x，也不要重新做全仓重构或安装包发行工程。\n\n复用现有DocumentSession、History、文件/资源、Gateway、执行器与构建/准入。Runtime运行到哪能进入哪里编辑，场景与组件共用图文编辑；DOM/Phaser常见图文由软件发现，Three做实际可访问类型。不再要求AI逐个expose，也不承诺任意canvas/闭包都自动可编。\n\n先解决动态目标身份与持久化：复用已有内容键优先，必要窄覆盖进入正式工程而非第二History。相同气泡显示不同句时不能串改；保存重开/导出必须保留内容，当前状态会话保留不等于任意JS现场序列化。\n\nHTML首版机械整体Runtime导入，不让模型重新设计。复用受管文档环境、资源和正式导入，保留head/CSS/脚本/viewport与滚动。Flow补整页内容占位和编辑态真实挂载，自动高度只改布局缓存，不逐帧写History。强视口依赖网页不能靠拉长iframe假装保真。\n\nFlow“插入文字”改为Native文本框，页面局部默认paper-space；正文输入、段落、标题和Markdown仍保留。不要全局把paragraph替换成文本框，不删除成熟原生节点，不把三表面强行合并为同一模型。\n\n按02少量代表路径验证，引用既有保存/撤销等覆盖；不运行全组合矩阵、逐次截图、像素评分或额外审美Agent。只补已定位缺口，报告真实结果与未支持范围。 B. 呈现策略与Skill接线 读03、13与本批Skill。教学策划、理想呈现脚本、框架HTML完成前都不加载编辑器能力、Schema和静态转换白名单；不能先灌全部限制再提示模型忽略。\n\n框架HTML完成后，独立执行呈现策略职责：读取短能力摘要，按完整区域选择Surface、Native/Runtime/Component和素材来源。该职责放在第三份Skill的生产前半段，不新建Agent群、工作流DSL或审批链。\n\n已有完整HTML默认全Runtime机械导入，可跳过设计/策略调用；有需要才生产新素材/模块。宿主直接执行已确定的提取、资源、包装、组装与提交，沿用shell.inspect/slot.prepare/shell.assemble三个拟新增名称，不假称工具已注册。\n\n后续有实际实现授权时，同步修正安装版方法中“Runtime少放文字”等旧导向；本次方案草案并未修改根AGENTS或安装产物。普通修改不重跑全课程流程。 C. 保留的后续边界 Office选型、完整互联网浏览器、任意HTML机械拆Native和Slides全局尺寸参数化继续按实际需求排期，不作为本轮2.0增量的前置。保留成熟原生能力、自建执行器、MCP入站及CLI薄runner方向，不恢复三CLI深度适配。 交付格式 本批实际改动 → 受影响检查和结果 → 未测/限制 → 保存与回退事实。方案检查、代码实现、产品测试和Owner接受分开，不把新承诺追溯记作旧任务已经验收。"}, {"id": "sources", "label": "12 来源与待核实项", "title": "来源与待核实项", "text": "11_来源与待核实项.md 来源与待核实项 核验日期：2026-09-24。 本文件只记录支持技术判断的官方页面/项目来源，不汇总竞品宣传与历史对比。页面抓取可能滞后，版本、报价与合同应在试接/采购时再次确认。 1. 已核验来源 S01 · Electron：Web Embeds 嵌入方案、WebContentsView 与 iframe 的区别；官方不推荐 webview 标签。 官方来源： https://www.electronjs.org/docs/latest/tutorial/web-embeds S02 · Electron：Security 远程内容隔离、Node 权限、导航与 IPC 校验的官方建议。 官方来源： https://www.electronjs.org/docs/latest/tutorial/security S03 · docx-preview / docxjs 官方仓库 DOCX 直接渲染为 HTML；动态分页和内部解析 API 的限制；Apache-2.0。 官方来源： https://github.com/VolodymyrBaydalka/docxjs S04 · pptx-renderer 官方仓库 PPTX Parse→Model→Render、可选延迟解析与按窗口渲染；覆盖范围有限；Apache-2.0。 官方来源： https://github.com/aiden0z/pptx-renderer S05 · SheetJS CE：HTML Tables HTML 表格输出及 CE 的数据/数字格式定位；完整 CSS 文本、单元格样式支持在 Pro。 官方来源： https://docs.sheetjs.com/docs/api/utilities/html/ S06 · SheetJS CE：Overview 表格数据读写与 Pro 能力边界；不能把数据解析等同于完整 Excel。 官方来源： https://docs.sheetjs.com/docs/ S07 · WPS WebOffice：快速开始 网页内嵌初始化与不同文档组件类型。 官方来源： https://open.wps.cn/documents/app-integration-dev/docs-center/online-preview-edit/web/quick-start S08 · WPS WebOffice：回调网关 标准服务接入的回调网关要求；本地路径不能直接供远程服务读取。 官方来源： https://open.wps.cn/documents/app-integration-dev/docs-center/online-preview-edit/callback/gateway S09 · WPS WebOffice：客户端 API 总览 不同文档的 Selection、Range、形状及相关对象接口目录；不代表每类对象都可无缝共编。 官方来源： https://open.wps.cn/documents/app-integration-dev/docs-center/online-preview-edit/client/overview S10 · 阿里云 OSS：WebOffice 在线编辑 浏览器内 Office 编辑；OSS、IMM、地域和域名等接入前提。 官方来源： https://www.alibabacloud.com/help/zh/oss/user-guide/online-object-editing S11 · 阿里云 IMM：计费项 在线预览/编辑的 API 调用计量；还需计算对象存储和流量等费用。 官方来源： https://help.aliyun.com/en/imm/product-overview/billable-items S12 · ONLYOFFICE：Opening file 文档服务从 URL 获取文件的加载链路及原生支持格式说明。 官方来源： https://api.onlyoffice.com/docs/docs-api/get-started/how-it-works/opening-file/ S13 · ONLYOFFICE：Lifecycle of opening editor onAppReady 与 onDocumentReady 分离；用于正确测量文档就绪。 官方来源： https://api.onlyoffice.com/docs/docs-api/get-started/how-it-works/lifecycle-of-opening-editor/ S14 · ONLYOFFICE：Automation API 外部文档自动化 API 为 Docs Developer 额外付费功能；不等于所有插件命令都收费。 官方来源： https://api.onlyoffice.com/docs/docs-api/usage-api/automation-api/ S15 · ONLYOFFICE：Community Licensing FAQ 厂商对 AGPL、修改/衍生作品、品牌和商业集成的解释；最终应结合许可证正文与实际架构审核。 官方来源： https://helpcenter.onlyoffice.com/docs/faq/docs-community.aspx S16 · Collabora Office 26.04 官方发布说明 2026-07-01；桌面本地引擎与 Web UI 路线，Windows WebView2；官方声明仍处于早期完善阶段。 官方来源： https://www.collaboraonline.com/blog/collabora-office-26-04-release/ S17 · Collabora Online：许可条款 源码主要 MPL-2.0；官方可执行发行物有附加条款；品牌和随附组件分别核验。 官方来源： https://www.collaboraonline.com/terms/collabora-online-mplv2/ S18 · Collabora 官方论坛：UNO 与 PostMessage 的边界 项目维护者解释 UNO、编辑状态通知与 PostMessage 并非同一接口；仅作接口边界线索，不代替当前 SDK 验证。 官方来源： https://forum.collaboraonline.com/t/how-does-the-server-proactively-send-uno-commands-to-the-client/2787 S19 · allotropia：Launching ZetaJS for ZetaOffice 浏览器客户端 WASM 文档处理与 JavaScript 包装器的官方技术说明。 官方来源： https://blog.allotropia.de/2024/11/08/launching-zetaoffice/ S20 · ZetaOffice 官方网站 Writer/Calc/Impress、UNO 集成及服务 open beta 说明；网页抓取可能滞后，发行状态需再确认。 官方来源： https://zetaoffice.net/ S21 · zetajs 官方仓库 JS 包装器、UNO 控制和 MIT 许可；MIT 仅代表此包装器。 官方来源： https://github.com/allotropia/zetajs S22 · LibreOffice：Licenses MPL-2.0 为主并包含其他许可证；以实际发行包 LICENSE 为准。 官方来源： https://www.libreoffice.org/licenses/ S23 · LibreOffice：XSelectionSupplier 选区读取、设定、选区事件的 UNO 接口；不是 Electron 嵌入 SDK。 官方来源： https://api.libreoffice.org/docs/idl/ref/interfacecom_1_1sun_1_1star_1_1view_1_1XSelectionSupplier.html S24 · Univer 官方仓库 开放编辑基础设施及开源/商业组件的区分；应按实际包审核。 官方来源： https://github.com/dream-num/univer S25 · Univer Sheets：Import and export 官方文件交换路径需要转换后端，格式边界由当前版本定义。 官方来源： https://docs.univer.ai/guides/sheets/features/import-export S26 · Univer：File exchange integration 当前文档正文为英文，官方说明 exchange-node 服务端转换；与浏览器编辑器是不同部分。 官方来源： https://docs.univer.ai/ja-JP/guides/server-integration/import-export S27 · MDN：contenteditable 文本编辑入口与 plaintext-only；不会自动提供文件持久化。 官方来源： https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Global_attributes/contenteditable S28 · Moveable 官方仓库 拖动/尺寸操作基础库，MIT；保存、撤销、权限须宿主实现。 官方来源： https://github.com/daybrush/moveable S29 · GrapesJS：Storage Manager 以项目数据保存编辑器状态；引入完整编辑框架会增加持久化模型。 官方来源： https://grapesjs.com/docs/modules/Storage.html S30 · PDF.js 官方网站 PDF 解析与显示；不能推导出完整 PDF 编辑能力。 官方来源： https://mozilla.github.io/pdf.js/ S31 · Cropper.js 官方网站 图片裁剪交互组件；非完整图像编辑器。 官方来源： https://fengyuanchen.github.io/cropperjs/ S32 · Sharp：Image operations 图片旋转、变换等处理 API；需另建 UI 与文件保存逻辑。 官方来源： https://sharp.pixelplumbing.com/api-operation/ S33 · Mozilla：MPL 2.0 FAQ 文件级义务及与其他代码组成 Larger Work 的解释。 官方来源： https://www.mozilla.org/en-US/MPL/2.0/FAQ/ S34 · GNU：License FAQ 插件、进程通信、组合程序边界由连接方式及语义共同决定；不是仅看进程数。 官方来源： https://www.gnu.org/licenses/gpl-faq.en.html S35 · Apache License 2.0 正文 复制、修改、分发授权及许可证/NOTICE/修改声明等条件。 官方来源： https://www.apache.org/licenses/LICENSE-2.0 S36 · LibreOffice：启动参数 headless/convert-to 等参数；可用于可选转换兜底，不作为默认打开链路。 官方来源： https://help.libreoffice.org/latest/en-US/text/shared/guide/start_parameters.html 2. 本次没有完成的核验 没有安装、运行或测速任何Office Provider，没有检查用户真实文件在这些方案中的显示/保存结果。 原V3没有重新读仓库；V3.1新增定向源码复核，证据及范围见12。它不等于全仓/运行/性能审计；实施前仍核对工作区，不能据旧文件名推断现状。 Collabora当前PostMessage SDK正文页面返回反爬校验。本包只引用可读的维护者接口说明作为边界线索；当前API和版本需进一步读官方SDK/源码确认。 WPS商业报价、私有化/离线授权、阿里云实际账单、ONLYOFFICE Developer与自动化权限，均未取得针对果铃的商务确认。 ZetaOffice官网仍显示open beta，但公开页面可能滞后；不能据此断言所有发行物都停留在同一状态。 轻量渲染库的源码许可与公开能力已可查，实际安全性、长期维护和完整依赖未完成尽调。 3. 使用建议与事实分离 性能目标、实验规模、开发顺序、用户路径与是否自研属于本包的方案建议，不是外部调查事实。产品需求来源为本次会话：快速打开、允许大致版式、MD→HTML→成品单向生产、HTML直接轻改并自动保存、Office多方案保留。 未沿用未经验证的竞品内部渲染推断、特定收购意向、融资数量、某项功能独占性或“已有预览等于完成80%编辑”的估计。新方案是否有效，以具体代码、真实任务和测试结果为准。 4. V3.1补充来源与核验边界 本轮新增Skill及浏览器测量相关原始资料；原Office研究保留，未重新执行候选、刷新商务报价或逐项复核所有第三方状态。具体技术组合是设计建议，不是这些来源对果铃可用性的证明。 S37 · Agent Skills：格式规范 SKILL.md与可选scripts/references/assets；渐进加载和相对路径。 官方来源： https://agentskills.io/specification S38 · Agent Skills：宿主接入 宿主发现、加载、激活与上下文保留，不是文件存在即接通。 官方来源： https://agentskills.io/client-implementation/adding-skills-support S39 · Anthropic：Agent Skills工程方法 方法、资源与可执行代码配合；机械步骤可由程序复用。 官方来源： https://www.anthropic.com/engineering/equipping-agents-for-the-real-world-with-agent-skills S40 · MDN：FontFaceSet.ready 等待字体加载及相关布局；不代替缺失字体识别。 官方来源： https://developer.mozilla.org/en-US/docs/Web/API/FontFaceSet/ready S41 · MDN：getBoundingClientRect 视口坐标、边框盒与滚动；需要归一化到实际页面坐标。 官方来源： https://developer.mozilla.org/en-US/docs/Web/API/Element/getBoundingClientRect 5. V3.2案例来源（非新增互联网调研） 本版新增依据为用户在2026-09-25本轮会话提供的听力HTML、V7工程，以及上一轮 guoling_case_evidence.md 拆包/最小宿主记录，摘要和限制见12第9节。本轮未重新运行原文件或当前果铃，未查询当时生成提示词/日志，也没有证明当前版本存在同样全部问题。 02的三方对照、13的保留模块与最小编辑连接是规划建议，不是已完成产品能力。41个公开来源与Office研究沿用V3.1，不因本版日期更新就视为重新核验；未更新第三方版本、报价或许可结论。原始案例仍需从授权附件取得，缺文件时保持未测。 V3.3来源与本轮范围 新增内容依据Owner连续确认的Runtime当前状态编辑、自动图文发现、HTML机械导入、Flow页面承载、原生文本框和后置呈现策略，以及本会话先前对Runtime/Flow/Spatial源码的定向阅读。具体证据范围见12第10节。 本轮只更新指定方案包，未运行产品、安装引擎、调用模型或刷新Office/第三方状态。14中的身份、覆盖、滚动和共享编辑是待实现建议，不是普遍可行的实测结论。原基准JSON、测试结果和任务/验收登记未修改。"}, {"id": "review", "label": "＋ 架构复审与本轮修订", "title": "V3.3 架构复审、Runtime与Flow方案修订", "text": "12_架构复审与本轮修订.md V3.3 架构复审、Runtime与Flow方案修订 本版日期：2026-09-25｜只修订指定方案包。V3.1/V3.2证据保留，新增第10节记录本会话Runtime/Flow定向阅读与Owner决定；不是全仓重审。 1. 总体判断 保留V3.1“不先全仓重构”的判断。此次案例要求修正内容生产与验收的假设：有限原生映射不是所有内容的默认终点；不以工程可导入替代创作质量，也不以整页能嵌入替代实际可编辑。旧样本不能证明当前底座上限，具体限制先用一个当前版本案例定位。 本版保留教育切入、通用 Agent、单向创作、HTML 轻编辑、原生/混合作品及开放 Office 候选。教育方法是可选能力，不将所有办公任务强制套入教学策划和多阶段流程。 当前收敛是： 沿用已建立的内核；简单内容可靠映射，完整区域保留实现；让程序接管搬运封装，只补实际编辑缺口。 不新增保真服务、评分平台、逐保存截图、通用CSS转换器或更多Agent角色。 2. 历史源码证据范围（V3.1，未在本轮刷新） 2026-09-24的V3.1曾完整阅读方案、Skill、样例与验收定义，并定向复核文档/文件、工具、执行器、构建与Skill入口。开始采集时 src 下有 879 个文件；这只是文件快照，不表示逐行审完或运行验收通过。运行中的 Codex 可能继续改变工作区，实施前复核受影响路径。 V3.1没有运行果铃、模型请求、npm安装、构建、产品测试、Office实验或性能/内存测量；本次V3.2同样没有新增上述实测，仅读取当前方案与上一轮案例记录。方案目录之外的产品实现、已安装 Skill、任务状态、验收结果和 Git 提交不由本轮改变。文档可执行性检查不等于产品通过。 以下源码引用均相对 D:\\果铃工作台 ，行号为采集时位置；文件变化后以符号和实际调用为准。 证据 当前事实 规划后果 src/main/workbench/DocumentHostService.ts:42–49,73–86,100–104 Registry、Gateway、文件协调共用；正式文档只识别 Markdown/V9 保留内核；HTML 是一个待开发的窄文档适配，不是改扩展名即可完成 src/shared/workbench/document.ts:5–24,61–103 文档类型/命令为显式联合，Driver 与持久化已有合同 新 HTML 在现有合同扩一支；不建通用 AST、第二 History 或平行 FileService src/main/workbench/execution/ExecutionEngine.ts:185–195,412 内置循环从同源工具形成能力，使用通用任务上下文 三个新 Skill 需要真实加载/选择接线，不能只复制 Markdown 文件 src/shared/courseAgentSkills.ts:3–12,25–32,49–57 有旧 CLI/候选方法资源；本轮静态扫描未发现 src 内该模块的导入方 可借鉴教学方法，不能照搬旧 CLI 生命周期和普通编辑候选政策，也不能据此称新 Skill 已接通 .agents/skills/build-courseware-project/SKILL.md:13–35 旧外部 Skill 已有定位、能力查询和真实 Builder 命令 项目并非从未机械化；复用已存在的能力，不为三个 Skill 各复制一套脚本 src/core/tools/ToolCatalog.ts:175–217 原生文字、媒体、批量等工具已存在；部分 component/runtime 操作仍列待迁移 不能杜撰现成 component.insert Gateway 工具；动态路径沿用受控构建/准入 src/core/tools/HostToolServices.ts:40–59,178–203 build.create 需整份 V9 授权；check 不等于 import；import 校验目标后进入 Session 装配是准备成果，正式提交仍走现有入口；源 HTML 的版本保护需要明确补上 src/main/workbench/build/ControlledBuildService.ts:188–211,258–282 构建基线绑定 V9，拥有真实动态准入 不是现成“任意独立文件构建服务”；不能为泛化素材任务伪造课件文档 scripts/build-courseware-case.ts:282–405 外部离线课例 Builder、打包与输出写入路径存在 可复用领域构建能力；不能用该独立 CLI 旁路覆盖已打开的正式文档 果铃2.0收敛方案.md 第8、10节 安装包、便携版和干净机器发行验证已延期 取消本包以“发布构建”为近期开发门；正式对外发行时另验 3. 需要修正的过度设计风险 风险 处理 不做什么 把现行验收与所有长期格式绑定 原范围先收口，Owner要求的Runtime/HTML/Flow增量仍在2.0完成，Office另排 不修改任务/验收状态，不追溯把新能力记为已通过 先限制所有设计，再追求原生映射 真实听力案例一次诊断；简单对象有限映射，完整区域保留实现 不先做完整HTML编辑器或任意网页转换器，不主动删内容来适应子集 每个 Skill 自己写保存、hash、重试、装配代码 共享少量宿主确定性函数，必要时暴露薄工具 不建设 Skill 自己的执行器、队列和权限系统 “复用 DocumentSession”被理解为所有格式变成 V9 HTML 保留源文；Office Provider 保留真实内部模型与编辑会话 不统一所有 AST，也不镜像第三方每次键入到第二撤销栈 人工 HTML、模型、外部文件工具各自写盘 接入已有文档/文件协调；补同一来源的保存与提交版本检查 不靠前端独立 writeFile 或先 check 后无锁 write 工程优化扩成新主线 Journal/事件列独立窄任务，热点按需处理 不为了减行数拆大文件、删组件、清空测试/索引 候选池变成多个常驻 Office 和评测后台 保留研究文档，本轮只做一个有具体问题的实验 不安装全候选，不先开发公共插件 SDK/市场 4. 2026-09-24审查意见的保留安排 项目 当前证据与实际成本 本版动作、时点与验证 文档 Journal documentJournal.ts:73–112,403–423 ：完整状态序列化，追加前扫描旧日志；历史保存完整 before/after OJ：先测代表性连续编辑，再去除正常追加的重复全扫并安全整理检查点；必须保留撤销、回执、停止和崩溃恢复。接入高频自动保存时重点验证，不改成新的存储平台 流式事件 ExecutionEventStore.ts:230–283 已有 batchAppend； ExecutionEngine.ts:264,795–797,1046 仍见逐事件等待 OE：有界合批展示事件，关键回执/结束前冲刷；不把批量预灌长列表等同真实流压测，不削弱正式文档持久化 默认 Skill 安装 package.json:10–11 的 prestart 指向用户级安装 OS：适合顺手解耦默认启动；保留显式安装器及其保护逻辑。不是新 Skill 接入的基础设施前置 任务缓存 HostToolCoordinator、BuildService 等仍持有任务/基线 Map OM：先观察长会话/重复任务；确认持续积累后释放可重建的大内容，保留查询回执、继续任务及停止屏障。不能断言已经实测泄漏 V9 投影桥、大工作区文件、表面命令样板 是维护/热路径候选，不证明总体架构不合理 接触真实热点再改。不放进本轮 HTML/Skill 的必要依赖 旧测试与工具 年代、行数、目录名不是无用证据 删除测试须核对独特行为及替代覆盖；repo-index 保持可选；不重新做治理平台 OJ/OE 不要求全部完成才开始下一阶段。若本批实测出现相关卡顿、保存增长或事件延迟，就与该批一起解决；否则作为独立优化排入近期。任何已复现数据丢失、停止后写入、串写或虚报保存，仍优先修复。 5. V3.3的2.0路径 原验收收口 → 当前状态Runtime轻编辑/常见图文自动发现 → HTML机械整体导入 → Flow整页承载和原生文本框 → 所需三表面接线、后置呈现策略与Skill → 2.0最终收口。 顺序与范围见02，技术边界见14。 V3.2不将新增链路纳入2.0的版本安排，被Owner本轮要求取代；不是回头修改旧任务状态。静态原生映射保留为可选后续能力，不成为导入前置。教学与框架HTML先设计，编辑器能力在后置策略才加载。 保留执行器、文档内核、成熟原生能力和构建/准入。受支持HTML机械封装不允许每份都让LLM重写；自动发现与内容身份/保存分开，不因容易扫描DOM而承诺任意动态内容可持久修改。 6. Skill与验证的收敛 13沿用三个拟新增工具和共享函数，删减重复检查要求；没有实现、安装或注册新命令。相邻纯函数可在同一模块，宿主可直接调用，生产模型只读当前薄Skill及必要参考。 保留35条待执行用例，按改动选择；已有保存、权限、撤销测试可引用。保真对照在首次接入或相关回归时看两三个状态与一条操作链，日常任务不固定跑三路生成、全工程扫描或额外审美Agent。 安全、来源/目标版本、取消和保存事实仍由现有宿主保障，减少的是重复工作，不是删除这些底线。轻微像素差别为提醒，明确内容/关键行为丢失不能冒充成功。 7. 未来扩展不被堵住 新格式复用真实共性：身份、文件绑定、授权、任务、成果回执与保存协调。自有 HTML 可以沿用 DocumentSession 正式内容和 History；第三方 Office 的细粒度撤销可由其编辑引擎拥有，果铃协调唯一活动 writer、保存边界和 AI 操作结果。不承诺所有编辑器共享一个跨格式逐键 Undo。 独立文件成果、通用代码任务、薄 runner、公共插件体系在真实需求进入时再扩展；当前 V9 build 合同不应为它们重写，但也不能被宣传为已经支持。首发课程内容是用例，不是给通用 Agent 加永久教育限制。 8. 本轮修改边界和回退 V3.3仅更新指定方案目录中的叙述、Skill草案、阅读器与清单，新增14集中记录技术边界。35条历史基准定义、全部测试结果、数学样例与Office候选保持原样。更新前31个活动文件备份： _history/V3_2_before_runtime_flow_20260925.zip ；更早备份保留。 不修改根AGENTS、根目录收敛稿、另一执行包、task_registry/acceptance_cases、TASK_BOARD/任务卡、已安装Skill、源码、依赖或Git。后续实施再按实际授权接通产品，不把方案文件出现当作任务已登记或已实现。 9. 本次听力案例依据与推论边界 来源是用户本轮上传的 Starter-Unit-1-Hello-standalone.html 、 Starter-Unit-1-Hello-listening(1).h5lesson ，及上一轮生成的 guoling_case_evidence.md 。本节转述该对照记录，未在本轮重跑。原始两个文件仍在会话附件，本方案包不附教材图片/音频，不将它们默认为可公开分发资源。 上一轮记录支持的观察 此次规划后果 三张图片和音频与HTML对应素材字节一致 优先查构图与迁移，不把问题归因于素材质量 V7工程已有DOM Runtime，但句子数据删了中文、人物/气泡定位关系 DOM存在不等于实际生产保真；封装要保留完整数据与行为，不扩大低层Schema来补被主动删掉的内容 原HTML的图片放大裁切、角色气泡、原文/译文显隐、进度条等在工程内未被完整保留 关键教学表达与操作必须一起对照，不仅核验文件合法、节点数量或一张初始截图 内容播放区与全局教师控制器声明区域重叠 当前宿主还需看实际层级/点击；先调整该作品配置，不删除成熟功能或建设通用冲突系统 Runtime只有整体segments内容字段，未显式登记逐句目标 先核对当前已有编辑入口，补少量稳定字段定位；不宣称现有模块完全不能编辑，也不新建任意DOM编辑器 上一轮只在浏览器与最小Runtime宿主测试，未启动真实V7 Player，也未检查当前版本。原HTML自然连续播放的跨对话同步本身也有缺口。故不能推出“最新Schema导致全部退化”“原HTML完全正确”“调提示词就够”或“必须重构底座”。 本版据此改变的是开发默认策略与一次代表性验收：保真承载、持久编辑、真实新建生成分开验证，按失败层补最小实现；架构主线、成熟功能和近期通用方向保留。 10. V3.3补充：本会话定向阅读与规划修正 以下来自本会话先前直接读取的本地代码，不是本次写文档时重新运行产品所得；行号为当时位置，实施以符号和当前consumer为准，不用V3.1旧commit冒充这些工作区证据。 读取位置 支持的事实 本版处理 src/player/RuntimeAuthoringTargetRegistry.ts:40–43,292–380 ； RuntimeHost.ts:364–380 DOM目标限于显式data-courseware键并检查content/assets；作者桥还需声明启用 补软件自动发现，保留已有稳定键/显式登记 src/player/RuntimeRegistry.ts:57–93 ； RuntimeHost.ts:253–309 source需同步define/create；DOM挂在受管Shadow root 普通HTML需要确定性document包装，不能直接塞source或只搬body src/renderer/ui/workspaces/FlowLocationWorkspace.tsx:69–90 ； SpatialLocationWorkspace.tsx:468–493 离开run会清理试运行host 当前状态编辑需保留受管实例或明确业务状态，不只是UI开关 src/shared/contracts/course-project-v9/types.ts:247–307 ； src/shared/document/content.ts:16–35 ； FlowWorkspace.tsx Slide固定1280×720；Flow正文仍为DocumentBlock/SharedDocumentEditor 保留正文；插入按钮改为Native文本框，不重新迁移正文模型 src/player/surfaces/flow/FlowSurfaceHost.ts:932–1025,1336–1409 Flow surface-local API3 DOM能播放，走绝对浮层与paper坐标换算 补主内容占位/高度/编辑挂载；paperSpace本身不等于撑开滚动范围 src/renderer/ui/flow/FlowOverlayAuthoringLayer.tsx:190–216 Native/Component有具体绘制，Runtime走标签后备 不能凭播放态存在就宣称Flow编辑态接通 SpatialLocationWorkspace.tsx:1085–1136 ； spatial/SpatialGlobalRuntimeAuthoring.tsx:55–70 world循环只处理native/component，独立Runtime作者桥仅覆盖特定global API2 按实际需要补world/页面carrier，不把全局桥当全部支持 stageViewportTransform.ts:1–115 ； RuntimeAuthoringTargetRegistry.ts:245–319 几何和目标仍有1280×720归一化假设 修相关Flow/world路径，不以全局尺寸参数化阻塞导入 本版不沿用早先过强推断：自动发现不会遗漏、简单DOM Patch可改任意状态、ResizeObserver每次写frame.height即可。改用14中的有限对象支持、稳定数据身份/窄覆盖、视图缓存高度和明确滚动所有者。 Owner决定：HTML首版可全Runtime；Flow保留Document正文并支持页面Runtime与自由图层；插入文字改原生文本框；框架HTML完成后才读编辑器能力；必要增量在2.0完成。旧代码导向不能否定这些决定，但本轮不修改其实现。"}, {"id": "mechanical", "label": "＋ Skill 机械命令与接线", "title": "Skill机械命令与执行合同", "text": "13_Skill机械命令与执行合同.md Skill机械命令与执行合同 V3.3｜2026-09-25｜2.0阶段方案，尚未实现或安装。 保留三份薄Skill和三个拟新增工具名称，不增加执行器、质量服务或任务台账。状态/持久化细节统一见14，不在每份Skill复制协议。 1. 既有宿主与机械职责 复用DocumentSession、文件协调、ToolCatalog/Gateway、ExecutionEngine、资源、图像与受控构建/导入。读取源文件、确定依赖、资源登记、ID/引用、HTML包装、构造工程与提交由程序完成；教学、呈现、新素材和必要新代码由模型完成。 Agent Skills的方法、资源与可选scripts可配合确定性工具，但文件存在不等于宿主已加载或工具已接通。 S37 S38 S39 生产模型只读当前方法与必要参考；已知机械步骤宿主直接调用函数，不为每个函数建Service或独立CLI。 2. 三份Skill与后置策略 course-design负责教学和理想呈现稿；layout-shell负责框架HTML。 这两步不读取编辑器能力、Schema、Builder或shell-contract。 框架HTML完成后才进入专门的呈现策略，作为slot-build的第一个明确子步骤，读取精简能力摘要并选择载体；随后只加载所选实现需要的API。 策略输出少量区域、Surface、Native/Runtime/Component选择及素材需求，不要求新配置文件、评分或另一个Agent复审。工具权限仍由原宿主管理，阶段输入过滤不成为新的权限系统。已有完整HTML默认全Runtime机械导入，跳过无必要的设计/策略调用。 旧提示中的“Runtime少放文字”“稳定图文必须原生”和设计阶段前置能力说明，在后续实际接入时同步修正；本轮不改根AGENTS或安装版Skill。自生成Runtime的可读数据和已有稳定键保留，但不再要求AI逐个登记文字图片，自动发现由宿主完成。 3. 已有能力和待补缺口 能力 处理 正式文档/文件、授权、取消和History 复用已有入口，不另建writer、版本或回滚系统 原生、资源、批量与图像工具 读取真实目录，不凭本文假设命令已经注册 build.create/check/import 延续真实授权和目标基线，check不等于import，import不等于保存 Runtime/Component目标 先复用现有字段/props/登记与选择；补自动发现和当前状态保留，不复制另一编辑器 完整HTML承载 复用隔离内容宿主，补确定性document包装、依赖和保存；不能把HTML直接当Runtime source Flow页面Runtime/原生文本框 复用surfaceLayerItems、paperSpace和Document正文，补真实编辑挂载、滚动占位及按钮语义 三个拟新增工具 shell.inspect、slot.prepare、shell.assemble；仍未注册，内部函数可先用，不强制三次工具往返 4. 一个装配入口，整体Runtime优先 2.0默认已有HTML整体保留：CSS、数据、脚本、文档结构和资源关系不由LLM重写。独立图文有收益时可沿已有工厂构造Native；任意HTML机械拆Native不作为本轮前置。原静态子集仅是后续转换器参考，不限制框架设计或Runtime表现力。 素材是Runtime或Native使用的资源，不是必须单独生成一种宿主。用户已删除槽、不需新素材或已有完整模块时直接跳过准备。页面可以整体运行，也可与独立原生文本框/批注共存，不碎片化拆开共享状态的气泡、图片和播放器。 5. 三个拟新增工具的最小责任 shell.inspect：读取当前来源 沿用输入 {source, pages?} ，source是已授权文件/模块引用。正式输入采用当前会话已确认版本；磁盘尚未保存时可用受管当前快照，不静默读旧盘稿。宿主冻结本次所需内容/依赖，不要求先把所有文件保存成功才能编辑未保存文档。 已有HTML路径只需识别文档/资源、主要viewport/滚动需求和明显不支持项；不扫描全部DOM生成原生映射，不要求用户补data-gl标签。测量只在需要布局时等相关字体/图片，不扫全字体库；字体ready和视口坐标的原有边界继续适用。 S40 S41 返回沿用 {snapshot, status, pages, slots, issues} ，无槽可为空。自动图文目标属于运行中的编辑能力，不把首次导入静态扫描当作全部动态对象清单。可保真承载但不能原生化不是失败；实际资源/安全/宿主缺口如实说明。 slot.prepare：准备尚缺的局部输入 沿用 {snapshot, slots?} 。当前HTML的brief、尺寸及已确认策略优先，MD仅补未表达背景。明确可复用资源由程序复用；需要语义判断时由当前生产模型处理，不另建相似素材匹配平台。 按槽返回ready、needs-generation、needs-context或unsupported及真实资源/任务引用。无槽或成品直接跳过；只有新素材才调用真实已授权Provider，不用占位图/静态后备冒充交互完成。 shell.assemble：确定性封装候选 沿用 {snapshot, job, fills?} 。读取已确认区域策略或整体Runtime默认值，调用既有构建能力；完整HTML保留浏览器语义，资源按支持格式归档，必要JS打包复用受控构建。不让LLM逐页重写project.json、复制坐标和封装代码。 返回沿用 {job, status, mappedObjects, editableTextObjects, filledSlots, issues} ；原生对象数量只作诊断，不代表质量或总可编辑性。必要能力说明放已有结果字段，不加全局评分系统。新动态代码按既有准入检查，未改变的结果复用；静态来源无需重复编译。 工具只准备候选，不另增shell.import。首次实现包装器可能需要开发编程；投入使用后的受支持HTML导入必须机械执行，不能以“首次适配”名义每份网页都让模型重写。超出支持范围明确失败或保留原文件，不静默简化。 6. 正式导入与保存 新工程通过真实目标、已有build任务、暂存候选与现有必要准入进入build.import/Session，再沿现有保存。未保存新文档、来源版本与目标锁定按当前正式合同处理，不用临时副本冒充已打开文档，不让离线Builder直接覆盖正式文件。 独立HTML轻编辑使用对应窄文件Driver/会话；工程导入后工程拥有当前HTML/Runtime内容。原HTML、MD不自动回写。来源授权/目标版本/取消只在现有提交协调区间核对，不在三个工具各复制全量hash和全工程测试。 7. 编辑连接：自动发现＋同一正式写入 按照14复用现有RuntimeAuthoring/Component目标、资源和提交。DOM与Phaser常见图文自动发现，Three仅做当前可访问的已知类型；场景和组件通过薄宿主适配共用编辑。稳定目标绑定优先，没有时允许工程内窄覆盖，禁止第二History或独立覆盖文件。 句子复用同一DOM/引擎对象时，要关联真实内容身份，不仅匹配对象路径或当前位置。需要重建/重排后无法明确对应时保留修改并说明失效，不语义猜配。操作提交和重开/导出读取同一内容，不能只改屏幕。 Flow插入文本框通过已有Native工厂建立paper-space对象，正文paragraph/heading操作仍保留。只调整对应UI/工具意图路由，不全局替换正文命令或恢复旧格式兼容分支。 8. 运行成本与检查 文字完整输入/IME结束、图片替换或几何手势结束后提交；对象测量、滚动、相机和自动内容高度在视图缓存中处理，不连续写历史和磁盘。不逐帧全量枚举、不全局注入拦截器、不用MutationObserver与框架无限争写。 同一成果不在inspect、prepare、assemble和每份Skill重复检查。权限、取消、版本冲突、资源与保存是必要边界，沿用现有机制；外部编辑仍由原文件观察/冲突处理，不承诺OS全局锁定。 9. 2.0完成标准 按02和14完成少量真实路径：保真HTML、后续状态图文修改、无expose引擎内容、Flow长网页/原生文本框、新建课程的后置策略与机械装配。测试仅覆盖本次差异，保存/撤销/安全原证据可复用。 本包35条基准JSON保持原样；不据新方案新增任务登记或伪填通过。产品代码和运行验证由后续实现会话完成，文档存在、工具名称或Schema字段本身都不是接通证据。"}, {"id": "runtime-flow", "label": "+ Runtime自动轻编辑与Flow承载", "title": "Runtime自动轻编辑与Flow承载", "text": "14_Runtime自动轻编辑与Flow承载.md Runtime自动轻编辑与Flow承载 V3.3｜2.0阶段能力方案｜2026-09-25。 本章汇总本轮产品决定与实现建议，不表示已接通；不修改仓库任务、验收登记或业务代码。代码事实来自本会话先前的定向阅读，位置见12；实现前核对相关现行consumer，不据历史行号直接改代码。 1. 目标：保住完整表达，再提供轻编辑 用户运行到想改的画面，选择“编辑当前状态”，仍停留在这个画面；点文字或图片，修改后保存，并可继续运行。常见图文由软件发现，不要求AI逐对象登记。场景Runtime与组件Runtime共享目标发现、选择UI、资源选择及正式提交，宿主差异只在挂载、坐标、内容持有者和生命周期。 原生节点仍用于独立自由对象和成熟深编；复杂联动区域保留Runtime/Component。不设置原生或Runtime占比，不删除无明显负担的成熟节点。 2. 自动发现不等于自动获得稳定编辑身份 按当前Runtime根和现有引擎对象图局部枚举，只在进入编辑、目标变化或必要重建时刷新；不要扫描整窗、逐帧重建全部目标。可先按点击命中发现，再列出当前可支持图文。 表示 2.0最小自动范围 不冒充可编辑的情况 DOM 可见非空文本叶节点、普通img；对可访问开放根递归，复用当前几何映射 script/style、输入状态、伪元素生成字、闭合Shadow或跨域内部、无法稳定定位的复用节点 Phaser 当前Runtime所有权范围内的Text/BitmapText、Image，以及可独立换纹理的常见Sprite；递归Container Graphics/RenderTexture中的烘焙图文、粒子、自定义shader；不把动画图集任意换图当安全支持 Three 实际宿主能取得的Sprite图片、CSS2D/DOM文字；仓库已有明确文字对象时针对该类型适配 CanvasTexture里的文字、任意TextGeometry、压成贴图的字、多材质/UV/自定义shader的语义逆推 普通CSS单背景图、SVG image可在已有路径低成本支持时接入；复杂背景/矢量图不作为全部通过的前置。Three场景被封在不可访问闭包、独立库实例或跨域frame内时不能凭canvas自动取得对象图；先复用现有创建/挂载入口取得根，必要时由捆绑包装器登记一次根，不要求AI逐一expose文字图片，也不全局劫持所有引擎构造器。 引擎资源所有权要明确：替换一个Sprite/图片不能改变共享纹理的其他实例；沿现有资源系统创建实例所需的新引用。Phaser容器/相机和Three相机的命中要转到当前宿主坐标，不能一律按1280×720裁掉长页面或世界空间内容。 3. 持久化：绑定优先，窄覆盖兜底 先复用现有content.values、assets、组件props及命令，把自动找到的对象连到已有正式内容；能自动关联既有稳定键时无需再建覆盖。保留旧显式登记作为可靠补充，但不再是常见图文的唯一入口。 没有数据绑定时，允许宿主生成小型内容覆盖记录，记录在该Runtime/组件所属的正式工程数据中，仍只有原DocumentSession、一次修改事务和原History；不是独立patch文件、第二文档或新服务。若现有合同无合适字段，只扩实际需要的少量持久字段并同批接通读写/导出，不把额外数据偷塞进无关字段、不重做全Schema。 覆盖至少要区分所属模块、内容版本、目标与属性。优先既有稳定ID或可重复生成的对象键；DOM路径/对象序号只作为同版本候选，再核对类型、原值和局部结构。自动生成随机ID、内存地址、Phaser对象创建序号及Three uuid本身都不能证明重开后身份稳定。React的内部key也不能被当作必然可读的DOM ID。 动态复用必须单独处理： 同一个气泡/Phaser.Text可能先显示第一句再显示第二句。只记对象路径会把第二句错误覆盖为第一句。优先绑定真实句子数据键；缺少绑定时只能在原始内容/当前状态特征能唯一确认时应用。重复原文、多实例或动态重建无法区分时，明确该项暂不可持久修改，不模糊猜配、不对所有相同字符串全局替换。 DOM重渲染后的覆盖只作用于受影响目标，有自写抑制和相等判断，避免MutationObserver循环；优先框架/引擎已有内容更新点，Phaser/Three也避免遍历整场景强行每帧覆盖。大改源码导致旧目标失效时保留用户修改并提示重新定位，禁止悄悄写到新对象；2.0不做语义rebase系统。 纯显示文字替换不自动改变题目判定、音频、无障碍标签或业务数据。界面区分“显示覆盖”和“数据绑定修改”；同一数据有多个视图时优先数据路径。不能用改了气泡DOM来宣称整句教学内容均已修改。 4. 当前状态的运行/编辑切换 现有试运行与编辑可能各自挂载并销毁宿主。实现要沿当前宿主增加窄模式切换：保留正在运行的实例，暂停其受管动画/媒体与输入，叠加编辑命中层，再恢复同一实例。不以截图替代可操作对象。 暂停优先使用现有Phaser场景时间/动画、媒体和Runtime生命周期。禁止为暂停一个组件而停掉整课共用引擎；异步回调和独立时钟不能仅靠隐藏DOM就认为已暂停。宿主可管理的对象在编辑中保持稳定；不受管脚本需实际适配或明确限制，不承诺冻结任意Promise、网络和JS堆。 必须重挂载的具体Runtime，只恢复可明确表达的业务位置（例如当前句/步骤与播放位置）；不设计通用状态序列化。内容修改在保存重开后保留，但2.0不要求重启应用自动恢复任意播放瞬间。相机、滚动、选择和测量结果属于会话视图，不每次写内容历史。 5. HTML与Runtime共享编辑，不等于共享全部保存策略 机械导入应保留完整文档语义和资源，不让LLM重新设计。现有Runtime source需define/create且挂在受管根内，普通HTML不等于可直接粘贴的Runtime源码。优先复用已有隔离内容宿主与构建/归档；由确定性包装器保留doctype/head/CSS/脚本/资源基址和必要浏览器环境，按实际需要采用独立document，而非硬搬body进Shadow DOM。 自动发现/选择/改字换图可复用。静态HTML可把定位明确的修改写回源文；脚本驱动HTML需保存原脚本和正式修改数据，并由受管加载路径恢复。导出HTML也必须带入必要内容覆盖/恢复逻辑，不只在果铃内看得见。不能直接序列化运行后DOM来代替原脚本和状态来源，也不能只存浏览器缓存。 独立HTML编辑和导入工程是两种保存目的地：前者由该HTML的正式文件会话保存，后者由工程拥有当前Runtime源与修改；导入后不双向同步原HTML/MD。原文件覆盖按用户已有授权，默认保留导入来源。详见04。 6. Flow：正文承载加自由图层，不另造一种编辑器 现有DocumentBlock/SharedDocumentEditor继续承载连续正文；现有surfaceLayerItems承载Native、Component、Runtime，复用bodyPlane及paperSpace。Flow的“场景Runtime”指该Flow页面拥有的Runtime，不新增Slide scene数据模型。 对导入网页，让一个页面Runtime承载整页正文；对普通讲义继续使用Document正文。两种正文实现可以按页面选用，首版不强求同页来回无损互转或每段HTML自动拆块。可在二者上方添加现有原生文本、图片、形状和局部组件，必要下层内容复用既有underlay，不造重复图层系统。 正文高度与滚动 当前绝对定位surface浮层即使设置paperSpace，也不必然撑开文档滚动高度。补页内主内容挂载和实际占位，使页面Runtime的内容高度进入paper滚动范围；无Document正文时不显示空标题/占位讲义，不为通过旧锚点约束插入可见假正文，必要导航沿已有位置规则作最小适配。 受控的普通纵向内容可在固定可用宽度下测量内容高度，用ResizeObserver等更新布局缓存与占位。不要在每次高度变化时写frame.height、revision、History和自动保存；只有用户明确改设计尺寸才成为内容操作。测量需考虑字体/图片就绪，避免容器高度反过来驱动100%高度造成反馈循环。 整页HTML依赖window滚动、100vh、sticky或媒体查询时，“iframe高度直接设成scrollHeight”可能改变原语义。按源网页选择：普通可重排正文由Flow paper统一滚动；强视口依赖网页保持自身viewport/滚动，在Flow中复用其滚动位置来对齐外层对象。每次只明确一个主要滚动所有者，不暴露两层互相争抢的主滚动条。先满足实际导入样例，无法兼容时明确限制，不逐网页猜改脚本。 原生文本框 Flow工具栏原“插入文字”改为“插入文本框”，创建现有Native Text LayerItem，页面局部默认paperSpace=paper；显式全局编辑仍遵守viewport/全局语义。复用现有工厂、属性、拖拽、锁定、资源、撤销与AI寻址，不新建TextNode类型。 正文输入、回车、段落/标题插入继续走Document操作。工具目录和提示需区分“在第三段后插入解释”与“在右边放一个提示文本框”；不能全局把paragraph命令改为Native而破坏正文编辑，也不为旧的误导按钮另建兼容层。 paper-space仅保证跟随页面滚动，不自动锚定响应式HTML的某一段。第一版自由批注按明确设计宽度放置，改变网页宽度造成重排时允许提示/手调；不承诺跨任意断点自动贴住原DOM，也不做通用排版约束求解器。 7. 三表面的最小共同能力 Slide保留有限画布与既有状态，Flow负责连续内容/滚动，Spatial负责world/camera。本轮确保用到的Runtime/Component在三者中真实挂载、目标可命中、修改可保存；不将Schema允许等同于编辑与播放都接通。 先前源码显示Spatial world Runtime与Flow编辑态有接线缺口，应按实际所需carrier补齐；不得只实现全局Runtime就声称world/scene/组件全部支持。Spatial中的HTML是一个有外框的网页模块，不因为它放在无限画布上就自动获得HTML节点级空间关系编辑。 8. 完成标准与工作量判断 这不是仅添加两个按钮的小改，也不是必须重构整个编辑器。能复用既有宿主时，发现/命中部分较直接；主要风险是状态保留、动态目标身份、资源替换范围和持久化。DOM、Phaser和Three分层验证，不再无依据地承诺“绝大多数都自动可改”或固定覆盖百分比。 按02完成代表性闭环即可：听力后续句、无expose的Phaser场景/组件、Three实际支持模式、Flow长网页与文本框、新建课程流程。已有保存/权限/撤销结果按受影响范围复用，不新增质量平台、通用编辑ABI、额外Agent群或每次生成全量检查。"}, {"id": "skill-course", "label": "13 课程设计 Skill", "title": "教学与理想呈现", "text": "skills/guoling-course-design/SKILL.md 教学与理想呈现 只读用户目标、学习者、必要材料、时长和当前文稿。此阶段不读取果铃节点Schema、Runtime限制、Builder、能力索引或静态转换白名单；框架HTML也完成后才进入后置呈现策略。 教学策划说明先备知识、目标、依据、认识形成路径、难点、例题/证据、时间与理解检查。呈现脚本写真实上屏文字/公式、讲稿、初始视觉、关键状态、教师或学生操作和素材目的，不决定Native/Runtime实现。 录播可视化、教师控制、学生答题分别考虑，不固定页数/动画比例，不为秀技术加互动。保留材料口径，不编造来源或确认，精确数学关系不用生图模型猜测。 保存、片段标识与机械引用由宿主负责，不自行编写搬运、hash、权限或检查脚本。简单任务不凑齐两份文稿；已有HTML只需编辑/导入时跳过教学设计。 用户明确要求审稿时在对应稿完成后等待，否则按原授权推进，不新增强制多阶段确认。后续HTML人改内容优先，MD只补未表达教学背景，不反写或覆盖下游。文稿完成不等于产品工程已经应用/验收。"}, {"id": "skill-layout", "label": "14 布局草稿 Skill", "title": "框架HTML设计", "text": "skills/guoling-layout-shell/SKILL.md 框架HTML设计 读取当前文稿、已有HTML、用户目标和必要素材。 框架HTML完成前不读取果铃能力索引、Schema、Builder、Runtime限制或shared/shell-contract.md。 先把理想呈现做清楚，之后由专门呈现策略决定工程化载体。 使用真实上屏文案和有效视觉布局，必要素材/互动可以用有目的的槽表达；不是灰盒，也不要求在策略前完成所有动态机制。使用适合设计的普通HTML/CSS布局，不为了将来能拆原生而简化样式、删除数据或缩减教学。 已完成HTML优先保留，不逆写MD、补齐编辑器标签或重画简化版。当前HTML中的人改文案、布局与槽优先，MD只补未表达背景；冲突单列，不无授权恢复旧稿。 保存和机械标识补足由宿主负责，本阶段不调用要求加载编辑器能力的工程装配步骤，不让模型维护第二份布局源。HTML就绪后交第三份Skill的后置呈现策略，之后才读取相应实现合同。 只核对本次设计的明显缺字/遮挡和用户要求，不固定调用审美Agent或生成三份对照；实际导入与可编辑性由后续宿主验证。交付真实HTML与未完成素材/机制说明，不宣称工程已应用。"}, {"id": "skill-slot", "label": "15 局部生产 Skill", "title": "后置呈现策略与局部生产", "text": "skills/guoling-slot-build/SKILL.md 后置呈现策略与局部生产 先决条件 已有当前框架HTML或完整HTML后才进入本方法。教学/HTML设计阶段不预读编辑器能力；当前方法才按需读取精简能力摘要。已有成品只需导入时默认全Runtime，跳过不必要的模型策略和素材生产。 专门的呈现策略 按完整区域选择Slide/Flow/Spatial，以及Native、Runtime或现有Component；素材另说明复用/生成与放置位置。输出短区域表即可，不要求另建JSON、评分或多Agent审核。独立对象确有编辑收益时才用Native，共享布局/状态的完整区域优先保留，不为原生率拆碎。 这是框架完成后的独立职责，不回头限制教学，也不让它重设计已有作品。选择后才读取必要API/Schema；shared/shell-contract只用于可选静态映射，不作为全部HTML的规则。 按需生产 读取当前区域尺寸、brief、局部教学背景与真实工具合同。删除槽不复建，无槽跳过slot.prepare；明确素材/模板可复用时由程序处理，只有新内容/素材或必要适配才编程/调用模型。图片走已授权Provider，精确图解用可核对的SVG/图形/代码，缺能力不造假文件。 HTML已有CSS、数据、译文、人物/时间关系及交互一起保留；机械导入不得再次由模型重写。常见图文由软件自动发现，生成时保留可读数据与已有稳定键，不逐项手写expose清单；特殊自绘限制如实说明。 机械交付 在受管候选区返回真实成果，由宿主共享函数处理资源、引用、HTML包装和工程组装；沿既有build/import/Session/save，不自行覆盖正式工程或反写MD。shell.inspect、slot.prepare、shell.assemble仅在实际注册后使用，无任务的步骤跳过。 按改动复用既有准入，不每份Skill重跑全工程、截图或三路生成。图文能命中不等于能保存，动态复用对象、资源替换范围与持久化按14的真实能力检查；结果、限制和未测分开报告。"}, {"id": "shell-contract", "label": "16 带槽 HTML 薄约定", "title": "带槽HTML：静态原生映射子集", "text": "skills/shared/shell-contract.md 带槽HTML：静态原生映射子集 V3.3｜可选后续原生映射参考，不是2.0整体Runtime导入的前置。框架HTML完成前不加载本文件；不是设计模型的表达限制。 本文仅约束“静态区域→原生节点”的窄路径，不是全部创作/模块的CSS白名单。已有完整HTML与复杂交互区域优先保留实现，使用现有Runtime/Component实际支持的能力；不为符合本子集而简化作品。 页面、身份与可编辑范围 首轮 .gl-page 使用固定 1280×720 CSS 像素，页面 position:relative ；这是演示页试点，不限制既有 Flow/Spatial。页面宽高与能力由宿主校验，画布缩放不写进对象。 仅本静态映射路径的页面和被装配对象需要唯一 data-gl-id 。页面直属对象显式标记 data-gl-role=\"text|shape|slot\" ；slot 的 kind 决定素材用途。首轮不递归编译任意嵌套容器。普通布局包装/草稿说明要明确不进入最终作品，不能无声明地漏掉正文。 data-gl-edit=\"text move resize\" 只声明操作子集； data-gl-locked=\"true\" 表示显式锁定。宿主决定实际能力和提交权限，属性不授予文件访问。首次无脚本、无内容编辑器时这些属性不会自行生效。 支持矩阵 对象/属性 首轮规则 超出时 text 页面直属纯文本或 br；固定外框，字号、字重、颜色、对齐、行高、内边距、明确字体 富文本跨度/复杂排版报 unsupported，不静默打平 shape 简单纯色色块/矩形；位置、大小、填充及已经验证的基础边框 渐变、阴影、滤镜、复杂路径暂不承诺 slot:image/background 已准备图片资源填槽；明确 contain/cover，背景与内容作用域不同 缺资源或无法解释 fit 报错，不凭空生成 slot:diagram 已验证 SVG 图片或原生图形模板；SVG 作为图片时明确内部非原生深编 不把整页或公式正文烘焙进图 slot:interactive 引用实际组件成果，按外框装配并走已有真实准入 不把占位文字/静态后备当互动完成 slot:video 保留语汇；后续存在实际媒体/生成路径后再启用 首轮可报告 unsupported，不强制实现 公式 Unicode 简单式可按原样文字保留；复杂式须明确源码并走已支持公式路径 不从渲染 DOM 逆猜 LaTeX，不毁掉现有原生公式能力 几何与层级 absolute 的 left/top/width/height 为有限 px；页面直属 DOM 顺序为层顺序；文字允许内部换行 transform、百分比布局、calc、Flex/Grid、伪元素、动画、混合层叠先不编译 样式可用静态class，提取按实际规则/计算值。字体替代与换行在首次接入或相关改动时核对；不每次保存重测字体。支持集不足时保留完整区域或明确宿主限制，不强迫把有价值的设计改简单，不偷偷截图。表中“不编译”不等于现有模块不能渲染。 页面背景可以成为原生场景背景；页面用于预览的外边距/边框和槽的虚线、说明、待生成字样不进入作品。slot 内部文字仅作占位说明，不再提取为独立正文。 槽与背景定位 \u003csection class=\"gl-page\" data-gl-id=\"page-1\" data-gl-fragment=\"gap\">\n  \u003cdiv data-gl-id=\"area-demo\" data-gl-role=\"slot\"\n       data-gl-slot=\"area-demo\" data-gl-kind=\"interactive\"\n       data-gl-brief=\"教师补齐单位缺角，显示边长；支持重播；x>0\"\n       data-gl-edit=\"move resize\"\n       style=\"position:absolute;left:590px;top:92px;width:610px;height:430px\">\n    \u003cp>互动组件待生成\u003c/p>\n  \u003c/div>\n\u003c/section> kind 仅使用 image / diagram / video / interactive / background；“词表中有”不等于生产/装配能力已经实现。 data-gl-slot 与本元素 id 一致，避免两套身份。需要扩类型时先有真实 consumer。 data-gl-required=\"false\" 表示可选素材；默认关键槽只约束仍存在的槽，不允许装配时静默丢失。用户明确删除槽后不再生产或从旧 MD 恢复，即使之前标为关键。 页面可用 data-gl-fragment=\"gap\" 对应呈现 MD 的 \u003c!-- gl-fragment: gap --> ，仅提取该片段背景；不映射行号、不双向同步。标识失效但任务已提供明确局部背景时可继续；否则补清必要内容，不盲配或为补标识重跑全课。两份 MD 仍是可读文稿，不要求另建大型 JSON。 保存、提取与装配 当前 HTML 是布局/文字/现存槽的正式来源；DOM 是编辑投影，来源版本和正式写入归宿主。手势/完整输入确认后自动保存，IME 未结束不冻结半成品。选框、手柄、临时 contenteditable、宿主桥和临时脚本不能进入文件。 引用资源使用授权的可搬迁路径或现有受控协议；Blob URL 不作持久引用。在本静态映射路径，脚本、on*属性、未授权远程依赖、运行期DOM重建不进入直接提取范围。完整模块保留业务脚本，仍走现有安全隔离/准入；不能把其脚本当编辑装饰清除，也不因此给内容文件权限。 槽清单、对象坐标表、snapshot、fills 是程序派生的任务数据，不是教师维护的第二份源。装配必须使用当前受支持模型；data 属性不能绕过严格 V9 合同。 完整模块与自动轻编辑 已有完整HTML不必补齐本页标识，也不创建全部DOM到原生的映射表。组件沿现有模型保留源码/数据与资源，宿主自动发现常见图文，优先连到已有正式内容键；必要窄覆盖仍由同一工程会话持有。动态目标身份与Flow页面承载见14，不要求作者逐项补expose。 模块内未开放字段仍保留，不能为方便映射删译文、人物关系或播放状态。关键内容/交互对照在开发期代表案例中做，不能将本约定变成逐生成审美审核、全量hash或通用可视化编译标准。"}, {"id": "example-guide", "label": "17 样例使用说明", "title": "样例说明与手动验收", "text": "examples/README.md 样例说明与手动验收 这是一组原创6分钟教学片段的管线夹具：两份MD加两页静态HTML框架。HTML含真实文案与三个槽（互动、可选图片、精确图解），没有生成最终素材，也没有内置编辑器或模拟自动保存。 用浏览器直接打开可查看设计；其中的data属性由未来果铃宿主识别。本文件不要求全局安装字体或任何网络资源。示例用固定1280×720测试，浏览器窄屏需缩放；正式工作台应提供适合窗口的画布缩放。 静态映射/HTML编辑实现时的选测流程 在宿主中打开 layout-shell.html ，将第一页标题改为“缺的这一块，面积是多少？”，移动并缩放互动槽。 等实际文件自动保存，关闭并重开。确认修改保留，MD文件内容/hash未变。 删除可选图片槽，保存。槽提取应只返回 area-demo 与 equivalence-diagram 。 下游使用新标题、新尺寸和现存槽，MD只补充必要教学/互动说明。 生成并装配后继续手改原生工程，再尝试重新生成；不得默默覆盖已修改原生工程或反向更新MD/HTML。 样例不是已实现功能的演示。自动保存、文字编辑、拖动、尺寸调整、素材生产、原生装配都需要宿主实施与实测。本包只提供它们的约定、输入样例和验收。 V3.3中的用途 已补显式text/shape/slot角色和两个MD片段标识，并去掉首轮尚未约定的文字字距。它仍是两页静态输入，不是成品或产品实现。它仅验证简单静态区域映射与草稿轻编辑，不作为所有内容必须被简化的标准。2.0优先验证真实听力HTML整体导入、Runtime图文轻编辑及Flow长网页；本夹具仅在实现对应静态功能时选用，机械拆原生不再是前置。 机械检查应忽略槽的虚线/待生成说明，保留真实正文与色块；HTML源与MD片段只单向关联背景。未提供新宿主时不能在普通浏览器中测试自动保存、拖动或正式导入。本轮未重新执行此样例的可视排版验收。 V3.3未改两份样例MD和HTML。已有data属性是历史静态转换夹具的一部分，不意味着新框架HTML设计要提前读编辑器能力；新流程按03，框架完成后才由后置策略/程序处理实现标识。"}, {"id": "example-plan", "label": "18 样例：教学策划", "title": "从缺角看完全平方：教学策划", "text": "examples/01-teaching-plan.md 从缺角看完全平方：教学策划 使用范围 这是一个约6分钟的教师演示片段，用于验证果铃创作管线，不是完整课程。学生已学过面积和乘法公式；演示由教师控制，不要求学生操作软件。 理解目标 学生能够说明：为什么在 x²＋2x 后面补一个1会出现完全平方；为什么原式也可以写成 (x＋1)²－1 。学生应理解补的是哪块面积，而不只记住等式。 教学主线 先观察边长x的正方形和两条宽1的长方形，发现围成大正方形时少了一个单位正方形。补上缺角，得到边长x＋1的大正方形。再撤去缺角，把“补齐”解释为“加1再减1”，回到原式。 几何演示取x＞0，保证长度有意义；随后用代数展开说明恒等式对任意实数x都成立。不能把图形条件误当作代数结论的定义域。 时间与检查 0–3分钟：观察缺角、判断面积、教师点击补齐。\n3–5分钟：撤去缺角，建立两种等价表达。\n5–6分钟：取x＝3，核对9＋6＝16－1，并解释不是“凭空加了1”。 结束提问：“如果只把式子写成(x＋1)²，错在哪里？”预期回答是多算了缺角的1，需要减回去。 表达与素材 一段有重播的面积拼合互动；一幅“补1、再减1”的结构图。额外的抽象装饰插图仅用于演示可选图片槽，可完全删除，不影响教学。所有面积、边长和公式必须可验证，不能依赖生成图猜文字。"}, {"id": "example-script", "label": "19 样例：呈现脚本", "title": "从缺角看完全平方：呈现脚本", "text": "examples/02-presentation-script.md 从缺角看完全平方：呈现脚本 片段一：这个缺角，为什么恰好是1？ 上屏内容 标题：这个缺角，为什么恰好是1？\n说明：先看一块x²，再接上两块x。\n公式：x²＋2x＋1＝(x＋1)²\n角标：面积演示取x＞0。 讲解稿 “中间这块正方形边长是x，所以面积是x²。右边接一条宽1、长x的长方形，上边再接一条同样的长方形。现在总面积是x²＋2x。看外轮廓，它很接近一个边长x＋1的正方形，但右上角缺了一块。这块缺角横向是1，纵向也是1，所以缺的面积恰好是1。把它补上，总面积就是(x＋1)²。” 初始画面与状态 左侧真实文字与公式，右侧面积拼合槽。初态显示x²正方形及两块x×1长方形，单位缺角仅用轮廓表示。教师点击“补齐”，缺角显现并标注1，外侧同时出现x＋1的边长。点击“重播”回到初态。可固定x＝3；本片段不需要参数滑块。 素材需求 面积拼合演示 ：interactive。严格表达x²、x、x和1四部分，颜色区分但不依赖颜色单独识别。标签清楚，拖动外框尺寸后仍可读。最少两个状态和两个教师按钮；不加入答题、得分和无关动画。 可选抽象装饰 ：image。简单纸片拼合意象，不含文字和公式，不表现精确数学关系，风格克制。用户可删除此槽；删后不补回。 验收 点击补齐出现且只出现单位缺角；总边长标注正确；重播有效；课堂展示字号清楚。未完成互动不能以静态成图代替并宣称成功。 片段二：补上，再减回去 上屏内容 标题：补上，再减回去\n公式：x²＋2x＝(x＋1)²－1\n检查：x＝3时，9＋6＝16－1＝15。\n结论：补齐是为了看结构，减1是为了保持原式不变。 讲解稿 “我们刚才补上了1，才得到完整正方形。但现在要表示的是原来的x²＋2x，所以得把多补的1减回去。取x＝3验证：原来是9加6，等于15；补齐后是16，减掉1还是15。图形只画正长度，代数展开却告诉我们，这个恒等式对所有实数x都成立。” 视觉与素材 左侧两种表达的结构图，右侧保留真实结论文字。 加一减一结构图 ：diagram。图中标明原式→加1补齐→减1回到原式；精确文字使用SVG或可编辑图形，不使用生图模型绘制公式。可静态，无额外交互要求。 验收 上屏与讲解一致，没有把x＞0错误地限定到最终代数恒等式。用户在HTML改变布局或标题后，以HTML当前结果为准；本稿只补充尚未表达的讲解和要求。"}, {"id": "benchmark-guide", "label": "20 测试模板说明", "title": "历史测试模板与选测边界", "text": "benchmarks/README.md 历史测试模板与选测边界 本目录为既有基准模板，不是当前Codex任务/验收登记。V3.3保留全部JSON字节、35个历史ID及原测量结果，不新增ID、不填通过状态；原定义用于对应静态/历史范围，不覆盖本轮全部新能力。 Runtime/HTML/Flow新增完成标准写在02和14，由后续实现根据实际改动选择已有测试或补最小检查；本轮不另建台账。旧模板内要求显式标识的静态映射规则，只适用于那个转换子集，不约束自动图文发现与整体Runtime导入。 开发期优先用原HTML与机械导入结果、少量关键状态和一次修改保存链；确需归因时才补当前生成结果形成F-HTML/F-CURRENT/F-PRESERVE。不是每次用户生成都跑三组，更不叠加旧教学A/B/C成为六组必测。 Phaser/Three支持类型、长网页Flow与新建生产链按02的代表路径验证，可以合并样例，不展开引擎×Surface×状态全组合。保存/撤销/权限既有证据可复用，改动该边界才复验。 时间/费用取已有日志，没有的数据保留null；不为填表造埋点、逐帧录制、像素评分或审美Agent。Office候选/测量模板原样保留，与这轮2.0创作增量不是同一个完成条件。"}, {"id": "preview", "label": "21 HTML 框架预览", "title": "带槽布局草稿", "text": "examples/layout-shell.html 带槽布局草稿 原创管线夹具：真实文字与素材槽。此阅读版不实现拖拽或磁盘自动保存，不代表果铃相关功能已完成。 页面是固定 1280×720 的示例。下方按窗口宽度缩放，复杂组件与图像仍是待生产槽。"}];
+function closeMenu(){sidebar.classList.remove('open');shade.classList.remove('show')}
+function resizeExample(){const frame=document.getElementById('example-frame'),wrap=document.getElementById('example-scale');if(frame&&wrap&&wrap.clientWidth){const k=wrap.clientWidth/1350;frame.style.transform='scale('+k+')';wrap.style.height=(1590*k)+'px'}}
+function showDoc(id,anchor){if(!docs.some(d=>d.dataset.doc===id))id='guide';document.getElementById('search-results').hidden=true;for(const d of docs)d.hidden=d.dataset.doc!==id;for(const b of links)b.classList.toggle('active',b.dataset.target===id);closeMenu();if(anchor){requestAnimationFrame(()=>document.getElementById(anchor)?.scrollIntoView({block:'start'}))}else window.scrollTo(0,0);resizeExample()}
+function fromHash(){const [id,anchor]=decodeURIComponent(location.hash.slice(1)||'guide').split('/');showDoc(id,anchor)}
+links.forEach(b=>b.addEventListener('click',()=>{const h='#'+b.dataset.target;if(location.hash===h)showDoc(b.dataset.target);else location.hash=h}));
+window.addEventListener('hashchange',fromHash);window.addEventListener('resize',resizeExample);
+document.querySelector('.menu-toggle').addEventListener('click',()=>{sidebar.classList.toggle('open');shade.classList.toggle('show')});shade.addEventListener('click',closeMenu);
+document.querySelector('.print').addEventListener('click',()=>window.print());
+const input=document.getElementById('search'),results=document.getElementById('search-results');
+input.addEventListener('input',()=>{const q=input.value.trim().toLocaleLowerCase();if(!q){fromHash();return}docs.forEach(d=>d.hidden=true);links.forEach(b=>b.classList.remove('active'));results.replaceChildren();results.hidden=false;const h=document.createElement('h1');h.textContent='搜索结果';results.append(h);const matches=data.filter(d=>d.text.toLocaleLowerCase().includes(q)||d.label.toLocaleLowerCase().includes(q));const p=document.createElement('p');p.textContent=matches.length+' 个章节包含“'+input.value.trim()+'”';results.append(p);for(const r of matches){const b=document.createElement('button');b.className='hit';const title=document.createElement('b');title.textContent=r.label;const snippet=document.createElement('span');const at=Math.max(0,r.text.toLocaleLowerCase().indexOf(q));snippet.textContent=r.text.slice(Math.max(0,at-45),at+145).replace(/\n/g,' ');b.append(title,snippet);b.addEventListener('click',()=>{input.value='';if(location.hash==='#'+r.id)showDoc(r.id);else location.hash=r.id});results.append(b)}});
+fromHash();
+</script></body></html>

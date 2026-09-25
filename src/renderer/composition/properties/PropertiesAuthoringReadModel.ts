@@ -5,14 +5,11 @@ import type {
   SpatialGraphSelection,
 } from '../../authoring/spatialAuthoringIntents'
 import type { SpatialWorldContentEditSession } from '../../authoring/spatialWorldAuthoring'
-import { findGlobalTeacherController } from '../../course/globalLayerCommands'
+import { findGlobalTeacherController } from '../../../core/tools/globalLayers'
 import { buildFlowEditorView, type FlowEditorView } from '../../course/flowEditorView'
 import type { FlowEditorSelection } from '../../course/flowEditorSlice'
 import type { EffectiveLayerProjectionRow } from '../../course/effectiveLayerProjection'
-import {
-  isTeacherControllerLayerItem,
-  readGlobalLayerScenePlane,
-} from '../../course/globalLayerCommands'
+import { isTeacherControllerLayerItem, readGlobalLayerScenePlane } from '../../../core/tools/globalLayers'
 import {
   buildSpatialEditorView,
   type SpatialEditorView,

@@ -19,8 +19,8 @@ import { describe, expect, it } from 'vitest'
 import { sceneNodeToCourseLayerItem } from '@/shared/courseProjectModel'
 import { BUNDLED_TEXT_FONT_FAMILY } from '@/shared/fonts/bundledFontFamilies'
 import { buildPublishedCourseStandaloneHtml } from '@/renderer/export/course/buildCoursePackages'
-import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
-import { createTextNode } from '@/renderer/project/nativeNodeFactories'
+import { createBlankCourseProject } from '@/core/course/createCourseProject'
+import { createTextNode } from '@/core/tools/nativeNodeFactories'
 
 const repoRoot = resolve(__dirname, '..', '..')
 const scriptsDirectory = join(repoRoot, 'scripts')

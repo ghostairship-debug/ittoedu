@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { NativeLayerItem } from '@/shared/courseProjectTypes'
 import type { CapturePublishedSlideOptions } from '@/player/surfaces/publishedCapture'
 
-import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
+import { createBlankCourseProject } from '@/core/course/createCourseProject'
 
 const captureMocks = vi.hoisted(() => ({
   capturePublishedSlidePng: vi.fn(async (_input: CapturePublishedSlideOptions) => (

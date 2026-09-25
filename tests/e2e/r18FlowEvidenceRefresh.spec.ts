@@ -4,7 +4,7 @@ import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { _electron as electron, chromium, expect, test } from '@playwright/test'
 import type { ElectronApplication, Locator, Page } from 'playwright'
-import { openCourseProjectArchive } from '../../src/renderer/project/courseProjectArchive'
+import { openCourseProjectArchive } from '../../src/core/drivers/codecs/courseProjectArchive'
 import { expectBackgroundWindowsIsolated } from './expectBackgroundWindowsIsolated'
 import { enterIndependentEditor } from './lessonWorkspaceEntry'
 
@@ -121,8 +121,7 @@ test('Flow 1280 docked assistant preserves selection and controller; fresh manua
     await page.getByRole('button', { name: '打开工程（Ctrl+O）', exact: true }).click()
     await page.getByTestId('flow-page-mixed-flow-surface').click()
     await expect(page.getByTestId('flow-workspace')).toBeVisible()
-    await page.getByRole('button', { name: '创作助手', exact: true }).click()
-    const chat = page.getByRole('complementary', { name: 'CLI 创作助手' })
+    const chat = page.getByRole('region', { name: '创作助手', exact: true })
     await expect(chat).toBeVisible()
     const paragraph = page.getByTestId('flow-paper').locator('[data-flow-block-id="mixed-flow-paragraph"]')
     await paragraph.click()

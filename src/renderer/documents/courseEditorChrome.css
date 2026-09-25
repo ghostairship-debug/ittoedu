@@ -1,0 +1,34 @@
+.course-editor-frame > [hidden], .course-advanced-chrome[hidden] { display: none !important; }
+.course-editor-frame--deep .toolbar__return-workbench { display: inline-flex; align-items: center; gap: 5px; flex: none; padding: 6px 10px; border: 1px solid var(--border-color, #d8dee6); border-radius: 7px; background: var(--panel-bg, #fff); color: var(--text-primary, #17211d); font-size: 12px; font-weight: 600; white-space: nowrap; }
+.course-editor-frame--deep .toolbar__return-workbench:hover { background: var(--hover-bg, #edf3fa); }
+.course-editor-frame--light { grid-template-rows: auto minmax(0, 1fr) auto; }
+.app-main.editor-panel-layout--light { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
+.app-main.editor-panel-layout--light > .editor-center { grid-column: 1; grid-row: 1; min-width: 0; }
+.editor-panel-layout--light > .editor-panel-slot[hidden] { display: none !important; }
+.course-light-tools { background: var(--panel-bg, #fff); border-bottom: 1px solid var(--border-color, #d8dee6); padding: 7px 10px; }
+.course-light-tools__row, .course-light-tools__selection { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+.course-light-tools__document-actions { display: flex; align-items: center; gap: 6px; margin-left: auto; }
+.course-light-tools__document-actions .workspace-document-status { white-space: nowrap; }
+.course-light-tools__insert { position: relative; }
+.course-light-tools__insert-menu { position: absolute; z-index: 30; top: calc(100% + 5px); left: 0; width: 210px; max-height: min(360px, 70vh); overflow-y: auto; padding: 6px; border: 1px solid var(--border-color, #d8dee6); border-radius: 8px; background: var(--panel-bg, #fff); box-shadow: 0 8px 24px rgb(0 0 0 / 16%); }
+.course-light-tools__insert-menu button { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; width: 100%; padding: 6px 8px; border: 0; border-radius: 5px; background: transparent; text-align: left; }
+.course-light-tools__insert-menu button:hover:not(:disabled), .course-light-tools__insert-menu button:focus-visible { background: var(--hover-bg, #edf3fa); }
+.course-light-tools__insert-menu button:disabled { opacity: .55; cursor: not-allowed; }
+.course-light-tools__insert-menu small { color: var(--muted-text, #66758a); }
+.course-light-tools__insert-menu p { padding: 2px 8px; color: var(--muted-text, #66758a); }
+/* Reserve the row even when empty: a selection report during a pointer drag must not move the editor under the pointer. */
+.course-light-tools__selection { margin-top: 5px; min-height: 30px; }
+.course-light-tools__selection[hidden] { display: none; }
+.course-light-tools button, .course-light-tools select { min-height: 30px; }
+.course-light-tools select { max-width: 260px; }
+.course-light-tools p { margin: 4px 0; font-size: 12px; }
+.course-light-tools .form-field { width: 72px; margin: 0; }
+.course-light-tools .form-field input { width: 100%; min-width: 0; }
+.course-light-tools input[type=color] { width: 30px; height: 26px; vertical-align: middle; }
+.course-light-tools__file { display: inline-flex; gap: 6px; align-items: center; }
+.course-light-tools__file input { max-width: 190px; }
+.course-editor-frame--light .status-bar { font-size: 11px; }
+
+.app-main.editor-panel-layout--light:has(> .course-chat) { grid-template-columns: minmax(0, 1fr); }
+.app-main.editor-panel-layout--light > .course-chat { display: none; }
+.course-light-tools__selection > input[hidden] { display: none; }

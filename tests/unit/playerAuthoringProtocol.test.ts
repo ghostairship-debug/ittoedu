@@ -13,7 +13,7 @@ import {
   createChartNode,
   createRectangleNode,
   createTableNode,
-} from '../../src/renderer/project/nativeNodeFactories'
+} from '../../src/core/tools/nativeNodeFactories'
 
 function command(value: unknown = createRectangleNode({ id: 'node-a' })) {
   return {

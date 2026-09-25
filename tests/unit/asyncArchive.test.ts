@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
+import { createBlankCourseProject } from '@/core/course/createCourseProject'
 import {
   createCourseProjectArchiveAsync,
   openCourseProjectArchiveAsync,
   type CourseProjectArchiveData,
-} from '@/renderer/project/courseProjectArchive'
+} from '../../src/core/drivers/codecs/courseProjectArchive'
 
 function makeLargeArchiveData(byteLength = 12 * 1024 * 1024): CourseProjectArchiveData {
   const project = createBlankCourseProject({ includeDefaultController: false, controls: 'none' })

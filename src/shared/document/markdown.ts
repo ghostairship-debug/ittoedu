@@ -1,14 +1,16 @@
+import { retainMarkdownIdentities, type MarkdownProjection } from './markdownIdentity'
 import { Marked, Lexer, type Token, type Tokens, type TokensList, type TokenizerExtension } from 'marked'
 import { decodeHTMLStrict } from 'entities'
 import { documentBlockSchema, documentContentSchema, documentTextSlots, documentTextStyleSchema, documentMathStyleSchema, normalizeDocumentText, type DocumentBlock, type DocumentContent, type FlowInline, type FlowTextContent } from './content'
 import { describeDocumentMath, DocumentMathError, parseDocumentMath } from './math'
 import { documentObjectSchema, emptyDocumentResources, resourcesForBlock, validateDocumentResources, type DocumentResources } from './resources'
 import type { DocumentDiagnostic } from './ports'
-import { mapMarkdownBlock, type MarkdownSourceMap } from './markdownSourceMap'
+import { projectMarkdownList, mapMarkdownBlock, type MarkdownSourceMap } from './markdownSourceMap'
 
 export interface MarkdownDocument { content: DocumentContent; resources: DocumentResources }
 export interface MarkdownOptions {
   /** Receiver allocates identity; the parser never fixes duplicate explicit IDs. */
+  previous?: MarkdownProjection
   createId: (kind: 'block' | 'item' | 'row' | 'column' | 'formula' | 'asset') => string
   target?: 'flow' | 'file'
   resolveImage?: (href: string) => { assetId: string; source: DocumentResources['assets'][number]['source'] }
@@ -57,7 +59,7 @@ const fence = (body: string, language: string): string => {
   return `${'`'.repeat(n)}${language}\n${body}\n${'`'.repeat(n)}`
 }
 
-function inlineSource(content: FlowTextContent): string {
+export function serializeMarkdownInline(content: FlowTextContent): string {
   return content.inlines.map(atom => {
     let value: string
     if (atom.type === 'math') value = `$${atom.latex}$` + attrsText({ formulaId: atom.formulaId, accessibleText: atom.accessibleText, ...atom.style })
@@ -92,15 +94,15 @@ export function serializeDocumentMarkdown(document: MarkdownDocument, target: 'f
         if (block.type === 'quote' && block.citation) return object(block)
         if (!block.content.inlines.length) return object(block)
         const { content, type, ...meta } = block
-        return `${metadata('block', meta)}\n${type === 'heading' ? '#'.repeat(block.level) + ' ' : type === 'quote' ? '> ' : ''}${inlineSource(content).replace(/\n/g, type === 'quote' ? '\n> ' : '\n')}`
+        return `${metadata('block', meta)}\n${type === 'heading' ? '#'.repeat(block.level) + ' ' : type === 'quote' ? '> ' : ''}${serializeMarkdownInline(content).replace(/\n/g, type === 'quote' ? '\n> ' : '\n')}`
       }
       case 'list':
-        if (block.items.some(i => inlineSource(i.content).includes('\n') || !i.content.inlines.length)) return object(block)
-        return `${metadata('block', { id: block.id })}\n${block.items.map((item, index) => `${block.ordered ? `${index + 1}.` : '-'} ${metadata('item', { id: item.id })}${inlineSource(item.content)}`).join('\n')}`
+        if (block.items.some(i => serializeMarkdownInline(i.content).includes('\n') || !i.content.inlines.length)) return object(block)
+        return `${metadata('block', { id: block.id })}\n${block.items.map((item, index) => `${block.ordered ? `${index + 1}.` : '-'} ${metadata('item', { id: item.id })}${serializeMarkdownInline(item.content)}`).join('\n')}`
       case 'table': {
-        if (block.merges !== undefined || block.caption || block.columns.some(c => /[|\n]/.test(inlineSource(c.header) + c.id)) || block.rows.some(r => /[|\n]/.test(r.id) || Object.values(r.cells).some(c => /[|\n]/.test(inlineSource(c))))) return object(block)
-        const headers = block.columns.map(c => `${inlineSource(c.header)} ${metadata('column', { id: c.id })}`)
-        return `${metadata('block', { id: block.id })}\n| ${headers.join(' | ')} |\n| ${block.columns.map(() => '---').join(' | ')} |\n${block.rows.map(r => `| ${block.columns.map((c, i) => `${i === 0 ? metadata('row', { id: r.id }) : ''}${inlineSource(r.cells[c.id]!)}`).join(' | ')} |`).join('\n')}`
+        if (block.merges !== undefined || block.caption || block.columns.some(c => /[|\n]/.test(serializeMarkdownInline(c.header) + c.id)) || block.rows.some(r => /[|\n]/.test(r.id) || Object.values(r.cells).some(c => /[|\n]/.test(serializeMarkdownInline(c))))) return object(block)
+        const headers = block.columns.map(c => `${serializeMarkdownInline(c.header)} ${metadata('column', { id: c.id })}`)
+        return `${metadata('block', { id: block.id })}\n| ${headers.join(' | ')} |\n| ${block.columns.map(() => '---').join(' | ')} |\n${block.rows.map(r => `| ${block.columns.map((c, i) => `${i === 0 ? metadata('row', { id: r.id }) : ''}${serializeMarkdownInline(r.cells[c.id]!)}`).join(' | ')} |`).join('\n')}`
       }
       case 'formula': { const { type: _type, latex, ...meta } = block; return `${metadata('block', meta)}\n$$\n${latex}\n$$` }
       case 'code': return block.language === 'cw-object-v1' ? object(block) : `${metadata('block', { id: block.id })}\n${fence(block.code, block.language ?? '')}`
@@ -282,9 +284,11 @@ export function parseDocumentMarkdown(source: string, options: MarkdownOptions):
           value = { ...common, type: 'quote', content: text((child[0] as Tokens.Paragraph).text) }; break
         }
         case 'list': {
-          const items = (t.items as Tokens.ListItem[]).map(item => {
+          const list = token as Tokens.List
+          const projected = options.target === 'file' ? projectMarkdownList(list) : null
+          const items = (projected ?? list.items).map(item => {
             const info = idMarker(item.text, 'item')
-            if (item.task || lexer.lexer(info.source).some(c => !['paragraph', 'text', 'space'].includes(c.type))) error('嵌套或任务列表尚不能映射到正式 Flow 列表', item.raw)
+            if (('task' in item && item.task) || lexer.lexer(info.source).some(c => !['paragraph', 'text', 'space'].includes(c.type))) error('此列表结构暂时不能可靠编辑，源文已保留', token.raw)
             return { id: info.id, content: text(info.source) }
           })
           value = { ...common, type: 'list', ordered: t.ordered, items }; break
@@ -334,9 +338,11 @@ export function parseDocumentMarkdown(source: string, options: MarkdownOptions):
     offsets.push(originalSource.length)
     for (const block of sourceMap.blocks) {
       block.from = offsets[block.from]!; block.to = offsets[block.to]!
-      for (const slot of block.slots) for (const unit of slot.units) { unit.from = offsets[unit.from]!; unit.to = offsets[unit.to]! }
+      for (const slot of block.slots) { if (slot.from !== undefined) slot.from = offsets[slot.from]!; if (slot.to !== undefined) slot.to = offsets[slot.to]!; for (const unit of slot.units) { unit.from = offsets[unit.from]!; unit.to = offsets[unit.to]! } }
     }
-    return { status: 'valid', source: originalSource, document: { content, resources }, sourceMap, diagnostics: [] }
+    const result = { status: 'valid' as const, source: originalSource, document: { content, resources }, sourceMap, diagnostics: [] as [] }
+    if (options.previous && options.target === 'file') retainMarkdownIdentities(result, options.previous)
+    return result
   } catch (e) {
     const found = e instanceof SourceError ? source.indexOf(e.fragment, Math.min(location, source.length)) : -1
     const normalizedOffset = Math.min(source.length, e instanceof SourceError && e.absoluteOffset !== undefined ? e.absoluteOffset : found >= 0 ? found : location)

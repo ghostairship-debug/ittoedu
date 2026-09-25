@@ -12,11 +12,11 @@ import type {
   CourseProjectDocument,
   CourseRuntimeDefinition,
 } from '../src/shared/courseProjectTypes'
-import { importComponentPackage } from '../src/renderer/components/importComponentPackage'
+import { importComponentPackage } from '../src/core/drivers/codecs/importComponentPackage'
 // Teaches the export builders where this host's font bytes are. Without it the
 // generated artifacts silently ship without the bundled families they ask for.
 import '../src/renderer/export/bundledFontEmbedSourceNode'
-import { addCourseScene } from '../src/renderer/course/courseLocationCommands'
+import { addCourseScene } from '../src/core/tools/courseLocations'
 import {
   openSlideAuthoringSession,
   type SlideAuthoringSession,
@@ -36,8 +36,8 @@ import {
 import {
   createCourseProjectArchive,
   openCourseProjectArchive,
-} from '../src/renderer/project/courseProjectArchive'
-import { createBlankCourseProject } from '../src/renderer/project/createCourseProject'
+} from '../src/core/drivers/codecs/courseProjectArchive'
+import { createBlankCourseProject } from '../src/core/course/createCourseProject'
 import {
   checkTrackedExampleOutputs,
   createTimezoneStableZipMtime,

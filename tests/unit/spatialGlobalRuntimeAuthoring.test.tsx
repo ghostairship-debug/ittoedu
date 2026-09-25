@@ -98,7 +98,7 @@ import {
   captureSpatialEditorAuthoringTarget,
   spatialEditorStableTargets,
 } from '@/renderer/course/spatialEditorView'
-import { createChartLayerItem, createChartNode } from '@/renderer/project/nativeNodeFactories'
+import { createChartLayerItem, createChartNode } from '@/core/tools/nativeNodeFactories'
 import { createRuntimeAuthoringActions } from '@/renderer/runtime/commitRuntimeAuthoring'
 import { SpatialLocationWorkspace } from '@/renderer/ui/workspaces/SpatialLocationWorkspace'
 import {

@@ -1,13 +1,13 @@
 import { describe, expect, it } from 'vitest'
-import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
-import { createTextNode } from '@/renderer/project/nativeNodeFactories'
+import { createBlankCourseProject } from '@/core/course/createCourseProject'
+import { createTextNode } from '@/core/tools/nativeNodeFactories'
 import { sceneNodeToCourseLayerItem } from '@/shared/courseProjectModel'
 import { makeLayerItemAuthoringAddress } from '@/renderer/authoring/courseAuthoringScope'
 import { projectEffectiveLayers } from '@/renderer/course/effectiveLayerProjection'
 import { nativeAuthoringTool } from '@/renderer/authoring/tools/nativeAuthoringTool'
 import { executeAuthoringTool } from '@/renderer/authoring/tools/executeAuthoringTool'
 import { applyEditorTransactionStep, type EditorTransactionStep } from '@/renderer/authoring/editorTransaction'
-import { createCourseProjectArchive, openCourseProjectArchive } from '@/renderer/project/courseProjectArchive'
+import { createCourseProjectArchive, openCourseProjectArchive } from '../../src/core/drivers/codecs/courseProjectArchive'
 import type { AuthoringToolTargetWireV1 } from '@/shared/authoringToolContract'
 
 describe('Native text edit preservation', () => {

@@ -1,6 +1,20 @@
+import { saveDocumentWithDialog } from './workbench/documentSaveDialog'
+import { installWorkbenchToolServices, workbenchImageService, workbenchImageSelection } from './workbench/workbenchToolServices'
+import { ImageResultsDesktopService } from './workbench/images/ImageResultsDesktopService'
+import { closeDocumentWithDialog } from './workbench/documentCloseDialog'
+import { trashWorkspaceWithDialog } from './workbench/workspaceTrashDialog'
+import { workspaceFilesRequestSchema } from '../shared/workbench/workspaceFiles'
+import { operateExternalMcp, closeExternalMcpService } from './workbench/external/externalDesktopService'
+import { operateExecutionSettings } from './workbench/providers/executionSettingsService'
+import { executionDesktopService } from './workbench/execution/ExecutionDesktopService'
+import { installDocumentSaveEvents } from './workbench/execution/DocumentSaveEvents'
+import { attachmentsDesktopService } from './workbench/attachments/attachmentsDesktopService'
+import { operateWorkspaceFiles, subscribeWorkspaceFilesChanges } from './workbench/workspaceFilesDesktopService'
 import path from 'node:path'
 import type { BrowserWindow, IpcMainInvokeEvent } from 'electron'
-import { dialog, ipcMain } from 'electron'
+import { app, dialog, ipcMain } from 'electron'
+import { documentHost } from './workbench/documentHost'
+import { documentHostRequestSchema } from '../shared/workbench/desktop'
 import { z } from 'zod'
 import {
   IPC_CHANNELS,
@@ -39,13 +53,9 @@ import { diagnosticLog, exportDiagnosticReport } from './diagnosticLog'
 import { componentCatalogManager } from './componentCatalogManager'
 import { operateMaterials } from './materialService'
 import { operateLessonDesktop } from './lessonDesktopService'
-import { operateLessonDocumentAi } from './lessonDocumentAiTask'
 import { operateLessonDocument } from './lessonDocumentDesktopService'
 import { operateLessonMaterial } from './lessonMaterialDesktopService'
 import { operateFlowDocumentRecovery } from './flowDocumentRecovery'
-import { operateLessonAuthoringDesktop } from './lessonAuthoringDesktopService'
-import { lessonAuthoringDesktopRequestSchema } from '../shared/lessonAuthoringDesktop'
-import { operateLocalAgent } from './localAgent/service'
 import { operateDynamicAdmission } from './dynamicAdmission'
 import { operateLegacyPpt } from './pptImportService'
 import {
@@ -250,15 +260,96 @@ function registerSafeHandler<T>(
   )
 }
 
+let stopWorkspaceFileEvents: (() => void) | undefined
+let documentSaveEvents: ReturnType<typeof installDocumentSaveEvents> | undefined
+let imageResults: ImageResultsDesktopService | undefined
+let workspaceFileEventGeneration = 0
 export function registerIpcHandlers(context: IpcContext): void {
-  registerSafeHandler(IPC_CHANNELS.lessonDocumentAi, context, {
-    code: 'LESSON_DOCUMENT_AI_FAILED', title: '文档改稿未完成',
-    message: '无法完成当前文档的 AI 修改。', suggestion: '请保留当前稿，查看对话后继续。',
-  }, async (_event, args) => operateLessonDocumentAi(requireSingleArgument(args)))
-  registerSafeHandler(IPC_CHANNELS.lessonAuthoring, context, {
-    code: 'LESSON_AUTHORING_FAILED', title: '创作阶段未完成',
-    message: '当前文档或材料还不能用于下一阶段。', suggestion: '请查看当前稿、材料与确认状态后继续。',
-  }, async (_event, args) => operateLessonAuthoringDesktop(lessonAuthoringDesktopRequestSchema.parse(requireSingleArgument(args))))
+  installWorkbenchToolServices(context)
+  const generation = ++workspaceFileEventGeneration
+  const imageResultsReady = executionDesktopService().then(execution => {
+    if (generation !== workspaceFileEventGeneration) throw new Error('图片结果服务已关闭')
+    imageResults?.dispose()
+    const service = new ImageResultsDesktopService({
+      directory: path.join(app.getPath('userData'), 'workbench-v2', 'image-actions'),
+      images: workbenchImageService(), documents: documentHost(), execution, selection: workbenchImageSelection,
+      onError: error => diagnosticLog.append({ source: 'main', message: '图片结果状态未能更新', details: { reason: error instanceof Error ? error.message : String(error) } }),
+    })
+    execution.setImageRetention({
+      prepare: input => service.prepareConversationDeletion(input),
+      abort: input => service.abortConversationDeletion(input),
+      collect: () => service.requestCollect(),
+    })
+    service.setEventSink(event => {
+      const window = context.getMainWindow()
+      if (window && !window.isDestroyed()) window.webContents.send(IPC_CHANNELS.imageResultsChanged, event)
+    })
+    imageResults = service
+    return service
+  })
+  void imageResultsReady.catch(error => diagnosticLog.append({ source: 'main', message: '图片结果服务未能启动', details: { reason: error instanceof Error ? error.message : String(error) } }))
+  registerSafeHandler(IPC_CHANNELS.imageResults, context, {
+    code: 'IMAGE_RESULT_FAILED', title: '图片操作未完成', message: '图片操作未完成，请查看具体原因。', suggestion: '已生成的图片和已应用的修改已保留。',
+  }, async (_event, args) => (await imageResultsReady).operate(requireSingleArgument(args)))
+  const saveEventsReady = executionDesktopService().then(service => {
+    if (generation !== workspaceFileEventGeneration) return
+    documentSaveEvents?.dispose()
+    documentSaveEvents = installDocumentSaveEvents({ documents: documentHost(), execution: service,
+      onError: error => diagnosticLog.append({ source: 'main', message: '保存状态记录未能更新', details: { reason: error instanceof Error ? error.message : String(error) } }),
+    })
+  }).catch(error => { diagnosticLog.append({ source: 'main', message: '保存状态订阅未能启动', details: { reason: error instanceof Error ? error.message : String(error) } }) })
+  void subscribeWorkspaceFilesChanges(event => {
+    const window = context.getMainWindow()
+    if (window && !window.isDestroyed()) window.webContents.send(IPC_CHANNELS.workspaceFilesChanged, event)
+  }).then(stop => { if (generation !== workspaceFileEventGeneration) stop(); else stopWorkspaceFileEvents = stop })
+    .catch(error => diagnosticLog.append({ source: 'main', message: '文件变更订阅未能启动', details: { reason: error instanceof Error ? error.message : String(error) } }))
+  registerSafeHandler(IPC_CHANNELS.externalMcp, context, {
+    code: 'EXTERNAL_MCP_FAILED', title: '外部连接操作未完成', message: '外部连接未完成，请查看具体原因。', suggestion: '文档和已应用的修改已保留。',
+  }, async (_event, args) => operateExternalMcp(requireSingleArgument(args)))
+  registerSafeHandler(IPC_CHANNELS.attachments, context, {
+    code: 'ATTACHMENT_FAILED', title: '附件操作未完成', message: '附件未能处理，请查看具体原因。', suggestion: '已有草稿和原件快照已保留。',
+  }, async (event, args) => (await attachmentsDesktopService()).operate(requireSingleArgument(args), requireWindow(context), progress => {
+    if (!event.sender.isDestroyed()) event.sender.send(`${IPC_CHANNELS.attachments}:progress`, progress)
+  }))
+  registerSafeHandler(IPC_CHANNELS.execution, context, {
+    code: 'EXECUTION_FAILED', title: '会话操作未完成', message: '当前任务没有完成，请查看具体原因。', suggestion: '文档中已应用的修改已保留。',
+  }, async (_event, args) => {
+    const service = await executionDesktopService()
+    const input = requireSingleArgument(args)
+    if (input && typeof input === 'object' && (input as { type?: unknown }).type === 'delete-conversation') await imageResultsReady
+    const send = (channel: string, event: unknown) => {
+      const window = context.getMainWindow()
+      if (window && !window.isDestroyed()) window.webContents.send(channel, event)
+    }
+    service.setSinks(event => send(IPC_CHANNELS.executionEvent, event), event => send(IPC_CHANNELS.executionEdit, event))
+    return service.operate(input)
+  })
+  registerSafeHandler(IPC_CHANNELS.executionSettings, context, {
+    code: 'EXECUTION_SETTINGS_FAILED', title: '模型连接设置未完成',
+    message: '连接配置未能保存，请保留当前设置。', suggestion: '请检查连接配置及系统安全存储。',
+  }, async (_event, args) => operateExecutionSettings(requireSingleArgument(args)))
+  const documents = documentHost()
+  documents.setEventSink(event => {
+    const window = context.getMainWindow()
+    if (window && !window.isDestroyed()) window.webContents.send(IPC_CHANNELS.documentEvent, event)
+  })
+  registerSafeHandler(IPC_CHANNELS.workspaceFiles, context, {
+    code: 'WORKSPACE_FILE_OPERATION_FAILED', title: '文件操作未完成',
+    message: '文件操作未完成，请查看每项结果。', suggestion: '请保留原件并检查具体原因。',
+  }, async (_event, args) => {
+    const input = workspaceFilesRequestSchema.parse(requireSingleArgument(args))
+    return input.type === 'trash' ? trashWorkspaceWithDialog(requireWindow(context), documents, input) : operateWorkspaceFiles(input)
+  })
+  registerSafeHandler(IPC_CHANNELS.documents, context, {
+    code: 'DOCUMENT_OPERATION_FAILED', title: '文档操作未完成',
+    message: '当前更改尚未完成，请保留编辑内容。', suggestion: '请查看具体原因后重试或另存。',
+  }, async (_event, args) => {
+    await saveEventsReady
+    const input = documentHostRequestSchema.parse(requireSingleArgument(args))
+    if (input.type === 'close-dialog') return closeDocumentWithDialog(requireWindow(context), documents, input.documentId, input.suggestedDirectory)
+    if (input.type !== 'save-dialog') return documents.operate(input)
+    return saveDocumentWithDialog(requireWindow(context), documents, input.documentId, input.saveAs, input.suggestedDirectory)
+  })
   registerSafeHandler(IPC_CHANNELS.flowDocumentRecovery, context, {
     code: 'FLOW_DOCUMENT_RECOVERY_FAILED', title: '正文恢复稿未保存',
     message: '无法保存或读取 Flow 源文恢复稿。', suggestion: '请保留编辑窗口，检查磁盘后重试。',
@@ -303,10 +394,6 @@ export function registerIpcHandlers(context: IpcContext): void {
     code: 'PPT_RESAVE_FAILED', title: '旧 PPT 转换失败',
     message: '无法转换旧版 PPT。', suggestion: '请使用本机 Microsoft PowerPoint 另存为 PPTX 后导入。',
   }, async (_event, args) => operateLegacyPpt(requireWindow(context), requireSingleArgument(args)))
-  registerSafeHandler(IPC_CHANNELS.localAgent, context, {
-    code: 'LOCAL_AGENT_FAILED', title: '本地 CLI 会话失败',
-    message: '无法完成 CLI 操作。', suggestion: '请检查 CLI 安装和认证；人工编辑仍可继续。',
-  }, async (_event, args) => operateLocalAgent(requireSingleArgument(args)))
   registerSafeHandler(IPC_CHANNELS.materials, context, {
     code: 'MATERIAL_OPERATION_FAILED', title: '材料操作失败',
     message: '无法完成本地材料操作。', suggestion: '请检查工程路径或材料文件后重试。',
@@ -809,6 +896,14 @@ export function registerIpcHandlers(context: IpcContext): void {
 }
 
 export function unregisterIpcHandlers(): void {
+  workspaceFileEventGeneration++
+  stopWorkspaceFileEvents?.(); stopWorkspaceFileEvents = undefined
+  const saves = documentSaveEvents; documentSaveEvents = undefined
+  if (saves) void saves.flush().finally(() => saves.dispose())
+  const images = imageResults; imageResults = undefined
+  if (images) { images.setEventSink(undefined); void images.flush().finally(() => images.dispose()) }
+  void closeExternalMcpService().catch(() => undefined)
+  documentHost().setEventSink(undefined)
   for (const channel of Object.values(IPC_CHANNELS)) {
     if (channel !== IPC_CHANNELS.requestSave) ipcMain.removeHandler(channel)
   }

@@ -1,15 +1,15 @@
 import { withDefaultComponentController } from '@/renderer/components/teacherControllerComponent'
 import { componentPackagesToArchiveFiles } from '@/renderer/components/componentPackageStore'
 import { describe, expect, it } from 'vitest'
-import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
+import { createBlankCourseProject } from '@/core/course/createCourseProject'
 import { projectWithBackgroundPreview, type BackgroundPreview } from '@/renderer/authoring/backgroundPreview'
 import { buildSlideEditorView, openSlideAuthoringSession, makeSlideAuthoringTarget } from '@/renderer/course/slideAuthoringBackend'
 import { patchSlideLayerPropertiesAtTarget } from '@/renderer/course/v9SlideContentCommands'
-import { createTextNode } from '@/renderer/project/nativeNodeFactories'
+import { createTextNode } from '@/core/tools/nativeNodeFactories'
 import { sceneNodeToCourseLayerItem } from '@/shared/courseProjectModel'
 import { mergeCourseNativeData } from '@/shared/contracts/course-project-v9/schema'
 import type { SlideSurfaceDocument } from '@/shared/courseProjectTypes'
-import { createCourseProjectArchive, openCourseProjectArchive } from '@/renderer/project/courseProjectArchive'
+import { createCourseProjectArchive, openCourseProjectArchive } from '../../src/core/drivers/codecs/courseProjectArchive'
 
 function fixture() {
   const project = createBlankCourseProject()

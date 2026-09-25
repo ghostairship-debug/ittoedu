@@ -17,7 +17,7 @@ import type { ElectronApplication, Page } from 'playwright'
 import {
   createCourseProjectArchive,
   openCourseProjectArchive,
-} from '../../src/renderer/project/courseProjectArchive'
+} from '../../src/core/drivers/codecs/courseProjectArchive'
 import { courseProjectDocumentSchema } from '../../src/shared/courseProjectSchema'
 import type {
   CourseProjectDocument,

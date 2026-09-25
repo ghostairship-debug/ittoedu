@@ -16,7 +16,7 @@ import {
 import {
   buildSlideEditorView,
   composeSlideEditorLocation,
-} from '@/renderer/course/slideEditorView'
+} from '@/core/tools/slideLayerView'
 import {
   buildFlowEditorView,
   composeFlowEditorLocation,

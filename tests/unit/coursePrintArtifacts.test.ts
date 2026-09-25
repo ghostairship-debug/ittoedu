@@ -6,7 +6,7 @@ import { sceneNodeToCourseLayerItem } from '@/shared/courseProjectModel'
 import {
   addCourseFlowPage,
   addCourseSpatialPage,
-} from '@/renderer/course/courseLocationCommands'
+} from '@/core/tools/courseLocations'
 import { componentPackagesFromArchive } from '@/renderer/components/componentPackageStore'
 import {  type CoursePublishSources } from '@/renderer/export/course/buildPublishedCourse'
 import {
@@ -24,8 +24,8 @@ import {
 } from '@/renderer/export/course/flowPrintPlan'
 import { adaptCoursePdfProducerFindings } from '@/renderer/export/exportPreflight'
 import { createPublishedCourseV2PrintCaptureSession } from '@/renderer/export/playerCapture'
-import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
-import { createTextNode } from '@/renderer/project/nativeNodeFactories'
+import { createBlankCourseProject } from '@/core/course/createCourseProject'
+import { createTextNode } from '@/core/tools/nativeNodeFactories'
 import { createBlankFlowCourseProject } from '@/renderer/project/createFlowCourseProject'
 import { createBlankSpatialCourseProject } from '@/renderer/project/createSpatialCourseProject'
 import {

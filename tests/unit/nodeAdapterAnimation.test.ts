@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import type * as Phaser from 'phaser'
-import { createShapeNode } from '../../src/renderer/project/nativeNodeFactories'
+import { createShapeNode } from '../../src/core/tools/nativeNodeFactories'
 
 vi.mock('phaser', () => ({
   Geom: {

@@ -4,7 +4,7 @@ import type { TeacherControllerSceneInfo } from '../../player/teacherControllerH
 import {
   teacherControllerHostNode,
 } from '../../player/teacherControllerHostContract'
-import { isTeacherControllerLayerItem } from '../course/globalLayerCommands'
+import { isTeacherControllerLayerItem } from '../../core/tools/globalLayers'
 import { TeacherControllerComponentHost } from '../../player/teacherControllerComponentHost'
 import { controllerGeometryItem } from '../../player/teacherControllerComponentGeometry'
 import type { TeacherControllerHostOptions } from '../../player/teacherControllerHostContract'

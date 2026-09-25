@@ -11,16 +11,16 @@ import { buildCoursePptx } from '@/renderer/export/course/buildCoursePptx'
 import { openPptxPackage, PPTX_IMPORT_LIMITS } from '@/renderer/project/pptxPackage'
 import { applyEditorTransactionStep } from '@/renderer/authoring/editorTransaction'
 import * as assetManager from '@/renderer/project/assetManager'
-import { parseComponentPackageFiles } from '@/renderer/components/importComponentPackage'
-import { createImageNode } from '@/renderer/project/nativeNodeFactories'
-import { createBlankCourseProject, createCourseProject } from '@/renderer/project/createCourseProject'
+import { parseComponentPackageFiles } from '../../src/core/drivers/codecs/importComponentPackage'
+import { createImageNode } from '@/core/tools/nativeNodeFactories'
+import { createBlankCourseProject, createCourseProject } from '@/core/course/createCourseProject'
 import {
   createCourseProjectArchive,
   detectCourseProjectArchiveFormat,
   inspectCourseProjectArchiveIdentity,
   openCourseProjectArchive,
   type CourseProjectArchiveData,
-} from '@/renderer/project/courseProjectArchive'
+} from '../../src/core/drivers/codecs/courseProjectArchive'
 import {
   shouldMarkCourseProjectDirty,
   shouldOfferCourseProjectRecovery,

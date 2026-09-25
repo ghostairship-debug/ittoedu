@@ -4,13 +4,13 @@ import type { Page } from 'playwright'
 export async function runFlowReviewProbe(page: Page) {
   return page.evaluate(async () => {
     const load = (path: string): Promise<any> => import(path)
-    const { createBlankCourseProject } = await load('/src/renderer/project/createCourseProject.ts')
-    const { addCourseFlowPage } = await load('/src/renderer/course/courseLocationCommands.ts')
-    const { createVideoNode, createTextNode } = await load('/src/renderer/project/nativeNodeFactories.ts')
+    const { createBlankCourseProject } = await load('/src/core/course/createCourseProject.ts')
+    const { addCourseFlowPage } = await load('/src/core/tools/courseLocations.ts')
+    const { createVideoNode, createTextNode } = await load('/src/core/tools/nativeNodeFactories.ts')
     const { sceneNodeToCourseLayerItem } = await load('/src/shared/courseProjectModel.ts')
     const { courseProjectDocumentSchema } = await load('/src/shared/courseProjectSchema.ts')
-    const { parseComponentPackageFiles } = await load('/src/renderer/components/importComponentPackage.ts')
-    const { componentPackageMeta } = await load('/src/renderer/components/editableComponentPackage.ts')
+    const { parseComponentPackageFiles } = await load('/src/core/drivers/codecs/importComponentPackage.ts')
+    const { componentPackageMeta } = await load('/src/shared/componentPackageMeta.ts')
     const { withDefaultComponentController } = await load('/src/renderer/components/teacherControllerComponent.ts')
     const { isTeacherController } = await load('/src/shared/teacherControllerRole.ts')
     const { queryDeep } = await load('/tests/fixtures/teacherController.ts')

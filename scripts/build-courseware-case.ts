@@ -13,7 +13,7 @@ import { buildPublishedCourseV2Payload } from '../src/renderer/export/course/bui
 import {
   createCourseProjectArchive,
   openCourseProjectArchive,
-} from '../src/renderer/project/courseProjectArchive'
+} from '../src/core/drivers/codecs/courseProjectArchive'
 import {
   courseProjectValidationExitCode,
   validateCourseProjectArchiveBytes,

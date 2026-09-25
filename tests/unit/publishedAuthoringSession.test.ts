@@ -4,7 +4,7 @@ import {
   type PublishedAuthoringPatchResult,
   type PublishedAuthoringPatchSurface,
 } from '../../src/player/surfaces/publishedAuthoringSession'
-import { createRectangleNode } from '../../src/renderer/project/nativeNodeFactories'
+import { createRectangleNode } from '../../src/core/tools/nativeNodeFactories'
 import {
   PLAYER_AUTHORING_MESSAGE_TYPES,
   PLAYER_AUTHORING_PROTOCOL_VERSION,

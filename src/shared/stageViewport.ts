@@ -1,0 +1,2 @@
+export const STAGE_VIEWPORT_WIDTH = 1280
+export const STAGE_VIEWPORT_HEIGHT = 720

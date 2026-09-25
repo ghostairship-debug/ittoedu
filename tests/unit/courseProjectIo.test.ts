@@ -1,18 +1,18 @@
 import { strToU8, zipSync } from 'fflate'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
+import { createBlankCourseProject } from '@/core/course/createCourseProject'
 import { createArchiveFixture as createCourseProjectArchive } from '../fixtures/teacherController'
-import { parseComponentPackageFiles } from '@/renderer/components/importComponentPackage'
+import { parseComponentPackageFiles } from '../../src/core/drivers/codecs/importComponentPackage'
 import {
   detectCourseProjectArchiveFormat,
   openCourseProjectArchive,
   openCourseProjectArchiveAsync,
-} from '@/renderer/project/courseProjectArchive'
+} from '../../src/core/drivers/codecs/courseProjectArchive'
 import {
   openDefaultCourseProject,
   openDefaultCourseProjectAsync,
 } from '@/renderer/project/courseProjectIo'
-import type { CourseProjectArchiveData } from '@/renderer/project/courseProjectArchive'
+import type { CourseProjectArchiveData } from '../../src/core/drivers/codecs/courseProjectArchive'
 import { saveProject, saveProjectAsync } from '@/renderer/project/saveProject'
 import { listCourseProjectV9Fixtures } from '../fixtures/course-project-v9/sources'
 
@@ -20,8 +20,8 @@ const archiveProbe = vi.hoisted(() => ({
   detectCalls: 0,
 }))
 
-vi.mock('@/renderer/project/courseProjectArchive', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/renderer/project/courseProjectArchive')>()
+vi.mock('@/core/drivers/codecs/courseProjectArchive', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../src/core/drivers/codecs/courseProjectArchive')>()
   return {
     ...actual,
     detectCourseProjectArchiveFormat(bytes: Uint8Array) {

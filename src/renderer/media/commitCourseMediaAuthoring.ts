@@ -1,5 +1,5 @@
 import type { AssetMeta, SoundDefinition } from '../../shared/contracts/media-v1/types'
-import { emptyCourseAssetSidecar, freezeCourseAssetSidecar, type CourseAssetSidecar } from '../project/v9AssetAdapter'
+import { applyCourseAssetImports, emptyCourseAssetSidecar, freezeCourseAssetSidecar, mutableCourseAssetSidecar, type CourseAssetSidecar } from '../project/v9AssetAdapter'
 import {
   addCourseLibraryMediaToCanvas,
   bindCourseMediaSession,
@@ -11,8 +11,13 @@ import {
   updateCourseSound,
   type CourseMediaCommandResult,
 } from '../course/v9MediaAudioCommands'
-import { addSpatialWorldImageLayer, addSpatialWorldVideoLayer } from '../course/spatialEditorCommands'
+import { addSpatialWorldImageLayer, addSpatialWorldVideoLayer, commitSpatialAuthoringHistory, commitSpatialProjectMutation } from '../course/spatialEditorCommands'
+import { succeedSpatialCommand } from '../course/spatialAuthoringHistory'
+import { createCourseSoundDefinition } from '../../core/tools/courseAudio'
 import { insertFlowSharedMedia } from '../course/flowSharedAuthoringAdapters'
+import { insertFlowEditorBlock } from '../course/flowEditorCommands'
+import { selectFlowEditorBlock } from '../course/flowEditorSlice'
+import { findFlowBlockRecursive, flowSurfaceIn } from '../../core/tools/flowDocumentModel'
 import {
   COURSE_AUTHORING_TARGET_REJECTION_REASONS,
   captureCourseAuthoringTarget,
@@ -124,7 +129,7 @@ export type MediaAuthoringPorts = {
   ): void
   persistMedia(result: CourseMediaCommandResult): CourseMediaCommandResult
   persistSpatial(result: SpatialCommandResult, extra?: { statusMessage?: string | null; sidecar?: CourseAssetSidecar }): void
-  persistFlow(result: FlowCommandResult | FlowSharedAuthoringResult, extra?: { statusMessage?: string | null; sidecar?: CourseAssetSidecar }): void
+  persistFlow(result: FlowCommandResult | FlowSharedAuthoringResult, extra?: { statusMessage?: string | null; sidecar?: CourseAssetSidecar }): FlowCommandResult | FlowSharedAuthoringResult
 }
 
 export type ImageAuthoringPorts = MediaAuthoringPorts
@@ -356,6 +361,51 @@ export function createMediaAuthoringActions(ports: ImageAuthoringPorts) {
     return bindCourseMediaSession(session, ports.read().sidecar ?? emptyCourseAssetSidecar())
   }
 
+  const importSpatialSounds = (
+    items: ImportedAssetBatchItem[],
+    sound?: Partial<SoundDefinition>,
+  ): string[] => {
+    const spatial = ports.readSpatialSession()
+    const state = ports.read()
+    const present = spatial?.history.present
+    if (!spatial || !present || !state.document || state.document.id !== present.id
+      || state.document.revision !== present.revision) {
+      ports.setFeedback({ errorMessage: '当前 Spatial 课程工程已改变，请重新选择音频。', statusMessage: null })
+      return []
+    }
+    if (!items.length) return []
+    try {
+      // Use the same asset import and sound-definition rules as Slide, then submit
+      // through Spatial's resource-aware History/DocumentSession adapter.
+      const definitions = items.map(item => createCourseSoundDefinition(item.meta, items.length === 1 ? sound : undefined))
+      const files = mutableCourseAssetSidecar(state.sidecar ?? emptyCourseAssetSidecar())
+      const project = commitSpatialProjectMutation(present, draft => {
+        applyCourseAssetImports(draft.assets, files, items)
+        for (const definition of definitions) draft.media.audio.sounds[definition.id] = definition
+      })
+      const nextSession = {
+        ...spatial,
+        history: commitSpatialAuthoringHistory(spatial.history, project),
+      }
+      ports.persistSpatial(succeedSpatialCommand(nextSession, true), {
+        sidecar: freezeCourseAssetSidecar(files),
+        statusMessage: '已加入声音库供互动播放',
+      })
+      const committed = ports.readSpatialSession()
+      const committedSidecar = ports.read().sidecar
+      if (committed?.history.present.revision !== project.revision
+        || definitions.some(definition => committed.history.present.media.audio.sounds[definition.id]?.assetId !== definition.assetId)
+        || items.some(item => committedSidecar?.files[item.meta.id]?.byteLength !== item.bytes.byteLength)) {
+        ports.setFeedback({ errorMessage: '声音未写入当前 Spatial 课程工程，请重试。', statusMessage: null })
+        return []
+      }
+      return definitions.map(definition => definition.id)
+    } catch (error) {
+      ports.setFeedback({ errorMessage: error instanceof Error ? error.message : '声音导入失败。', statusMessage: null })
+      return []
+    }
+  }
+
   const placeImage = (
     asset: AssetMeta,
     bytes: Uint8Array,
@@ -554,6 +604,107 @@ export function createMediaAuthoringActions(ports: ImageAuthoringPorts) {
       }, { expectedRevision: media.session.history.present.revision }))
       return [...(result.placedLayerItemIds ?? [])]
     },
+    insertFlowAudioNodes(items: ImportedAssetBatchItem[]): {
+      completedCount: number
+      issues: { name: string; message: string }[]
+    } {
+      const issues: { name: string; message: string }[] = []
+      let completedCount = 0
+      for (const item of items) {
+        const flow = ports.readFlowSession()
+        if (!flow || flow.selection.authoringScope !== 'page') {
+          issues.push({ name: item.meta.filename, message: '请切换到 Flow 当前文档页后重新选择音频。' })
+          break
+        }
+        if (item.meta.kind !== 'audio') {
+          issues.push({ name: item.meta.filename, message: '所选资源不是音频。' })
+          break
+        }
+        const present = flow.history.present
+        const sidecar = ports.read().sidecar ?? emptyCourseAssetSidecar()
+        if (present.assets[item.meta.id] && !sidecar.files[item.meta.id]) {
+          issues.push({ name: item.meta.filename, message: '现有音频资源缺少文件，无法插入正文。' })
+          break
+        }
+        const prepared = present.assets[item.meta.id]
+          ? present
+          : { ...present, assets: { ...present.assets, [item.meta.id]: structuredClone(item.meta) } }
+        const planned = insertFlowSharedMedia(prepared, flow.selection, {
+          assetId: item.meta.id,
+          placement: 'document-block',
+        }, { expectedRevision: present.revision })
+        if (!planned.ok || !planned.nextDocument) {
+          issues.push({ name: item.meta.filename, message: planned.reason ?? '无法插入当前正文位置。' })
+          break
+        }
+        const files = present.assets[item.meta.id]
+          ? sidecar.files
+          : { ...sidecar.files, [item.meta.id]: item.bytes.slice() }
+        const committed = ports.persistFlow(planned, {
+          sidecar: freezeCourseAssetSidecar(files),
+          statusMessage: '已插入文中音频',
+        })
+        if (!committed.ok) {
+          issues.push({ name: item.meta.filename, message: committed.reason ?? '当前正文未接受音频插入。' })
+          break
+        }
+        completedCount += 1
+      }
+      if (issues.length > 0 && completedCount + issues.length < items.length) {
+        for (const item of items.slice(completedCount + issues.length)) {
+          issues.push({ name: item.meta.filename, message: '前一项未完成，未继续插入。' })
+        }
+      }
+      return { completedCount, issues }
+    },
+    insertFlowMediaAt(item: ImportedAssetBatchItem, afterBlockId: string | null): {
+      ok: boolean
+      reason?: string
+      blockId?: string
+    } {
+      const flow = ports.readFlowSession()
+      if (!flow || flow.selection.authoringScope !== 'page') {
+        return { ok: false, reason: '请切换到 Flow 当前文档页后重新拖入媒体。' }
+      }
+      const mediaKind = item.meta.kind
+      if (mediaKind !== 'image' && mediaKind !== 'video' && mediaKind !== 'audio') {
+        return { ok: false, reason: '所选文件不是可插入正文的媒体。' }
+      }
+      const present = flow.history.present
+      const surface = flowSurfaceIn(present, flow.selection.surfaceId)
+      const anchor = afterBlockId === null ? null : findFlowBlockRecursive(surface.blocks, afterBlockId)
+      if (afterBlockId !== null && !anchor) return { ok: false, reason: '正文拖放位置已经改变，请重新拖入。' }
+      const sidecar = ports.read().sidecar ?? emptyCourseAssetSidecar()
+      if (present.assets[item.meta.id] && !sidecar.files[item.meta.id]) {
+        return { ok: false, reason: '现有媒体资源缺少文件，无法插入正文。' }
+      }
+      const prepared = present.assets[item.meta.id]
+        ? present
+        : { ...present, assets: { ...present.assets, [item.meta.id]: structuredClone(item.meta) } }
+      const inserted = insertFlowEditorBlock(prepared, {
+        surfaceId: surface.id,
+        parentId: anchor?.parentId ?? null,
+        index: anchor ? anchor.index + 1 : 0,
+        block: { type: 'media', assetId: item.meta.id, mediaKind, layout: 'content-width' },
+      }, { expectedRevision: present.revision })
+      const blockId = inserted.createdBlockIds?.[0]
+      if (!inserted.ok || !inserted.nextDocument || !blockId) {
+        return { ok: false, reason: inserted.reason ?? '无法插入当前正文位置。' }
+      }
+      const files = present.assets[item.meta.id]
+        ? sidecar.files
+        : { ...sidecar.files, [item.meta.id]: item.bytes.slice() }
+      const committed = ports.persistFlow({
+        ...inserted,
+        selection: selectFlowEditorBlock(inserted.nextDocument, flow.selection.locationId, blockId),
+      }, {
+        sidecar: freezeCourseAssetSidecar(files),
+        statusMessage: '已插入文中媒体',
+      })
+      return committed.ok
+        ? { ok: true, blockId }
+        : { ok: false, reason: committed.reason ?? '当前正文未接受媒体插入。' }
+    },
     importAsset(asset: AssetMeta, bytes: Uint8Array) {
       const target = captureCourseProjectRevisionTarget(ports)
       if (!target) return
@@ -567,6 +718,7 @@ export function createMediaAuthoringActions(ports: ImageAuthoringPorts) {
       if (!result.ok) ports.setFeedback({ errorMessage: result.reason, statusMessage: null })
     },
     importSounds(items: ImportedAssetBatchItem[]): string[] {
+      if (ports.readSpatialSession()) return importSpatialSounds(items)
       const media = mediaSession()
       if (!media) return []
       const result = ports.persistMedia(importCourseSounds(media, items.map((item) => ({
@@ -576,6 +728,7 @@ export function createMediaAuthoringActions(ports: ImageAuthoringPorts) {
       return [...(result.soundIds ?? [])]
     },
     importSound(asset: AssetMeta, bytes: Uint8Array, sound?: Partial<SoundDefinition>): string {
+      if (ports.readSpatialSession()) return importSpatialSounds([{ meta: asset, bytes }], sound)[0] ?? ''
       const media = mediaSession()
       if (!media) return ''
       const result = ports.persistMedia(importCourseSounds(media, [{

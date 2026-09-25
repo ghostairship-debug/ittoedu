@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { WebContents } from 'electron'
 import { operateDynamicAdmission } from '@/main/dynamicAdmission'
-import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
+import { createBlankCourseProject } from '@/core/course/createCourseProject'
 import { registerPublishedComponentUpdateProbe, exercisePublishedDynamicUpdates, exercisePublishedDynamicLifecycle } from '@/player/surfaces/publishedDynamicUpdateProbe'
 
 const state = vi.hoisted(() => ({ windows: [] as any[], hang: false, pending: 0, resolveRun: null as null | ((value: unknown) => void), rejectRun: null as null | ((error: Error) => void), clearStorage: vi.fn(async () => {}) }))

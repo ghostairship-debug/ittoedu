@@ -1,4 +1,4 @@
-import { parseComponentPackageFiles } from '../../components/importComponentPackage'
+import { parseComponentPackageFiles } from '../../../core/drivers/codecs/importComponentPackage'
 import runtimeSource from './runtimeSource'
 
 export const SORT_COMPONENT_ID = 'com.ittoedu.teaching.sort-order'

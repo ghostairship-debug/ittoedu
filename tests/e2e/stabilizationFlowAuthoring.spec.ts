@@ -11,7 +11,7 @@ import { _electron as electron, expect, test } from '@playwright/test'
 import type { ElectronApplication, Locator, Page } from 'playwright'
 import {
   openCourseProjectArchive,
-} from '../../src/renderer/project/courseProjectArchive'
+} from '../../src/core/drivers/codecs/courseProjectArchive'
 import { createArchiveFixture as createCourseProjectArchive } from '../fixtures/teacherController'
 import type {
   CourseProjectDocument,

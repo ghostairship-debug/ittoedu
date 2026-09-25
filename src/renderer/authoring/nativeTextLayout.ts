@@ -1,69 +1,11 @@
-import type { TextNode } from '../../shared/contracts/native-v1'
-import type { LayerFrame, LayerItem } from '../../shared/courseProjectTypes'
-import { mergeCourseNativeData } from '../../shared/courseProjectSchema'
-import { analyzeTextNodeLayout, isVerticalWritingMode } from '../../shared/textLayout'
+import { analyzeTextNodeLayout } from '../../shared/textLayout'
+import { nativeTextAutoSizeFrame as planTextFrame, nativeLayerTextAutoSizeFrame as planLayerFrame } from '../../core/tools/nativeTextLayout'
+export type { NativeTextLayoutPatch } from '../../core/tools/nativeTextLayout'
 
-type TextSize = Pick<TextNode, 'width' | 'height'>
-export type NativeTextLayoutPatch = Partial<Pick<TextNode, 'text' | 'runs' | 'width' | 'height'>> & {
-  readonly style?: Partial<TextNode['style']>
+/** The renderer supplies actual canvas/font measurements to the canonical size decision. */
+export function nativeTextAutoSizeFrame(node: Parameters<typeof planTextFrame>[0], patch: Parameters<typeof planTextFrame>[1]) {
+  return planTextFrame(node, patch, analyzeTextNodeLayout)
 }
-
-/** Derive only the automatic axis; an explicit size in this edit remains authoritative. */
-export function nativeTextAutoSizeFrame(
-  node: TextNode,
-  patch: NativeTextLayoutPatch,
-): Partial<TextSize> {
-  if (!['text', 'runs', 'style', 'width', 'height'].some(
-    key => patch[key as keyof NativeTextLayoutPatch] !== undefined,
-  )) return {}
-  const defined = Object.fromEntries(Object.entries(patch).filter(([, value]) => value !== undefined))
-  const next = { ...node, ...defined, style: { ...node.style, ...patch.style } } as TextNode
-  // Reapplying current properties must not materialize a different auto-sized box
-  // (and an undo entry) for an otherwise unchanged authored node.
-  const changed = next.text !== node.text
-    || JSON.stringify(next.runs) !== JSON.stringify(node.runs)
-    || next.width !== node.width || next.height !== node.height
-    || Object.entries(next.style).some(([key, value]) => value !== node.style[key as keyof TextNode['style']])
-  if (!changed) return {}
-  if (next.style.overflow !== 'auto-height') return {}
-  const vertical = isVerticalWritingMode(next.style.writingMode)
-  const axis = vertical ? 'width' : 'height'
-  if (patch[axis] !== undefined) return {}
-  const layout = analyzeTextNodeLayout(next, next.width)
-  return { [axis]: Math.max(16, vertical ? layout.requiredWidth : layout.requiredHeight) }
-}
-
-/** The effective item already includes the current named-state overrides. */
-export function nativeLayerTextAutoSizeFrame(
-  item: LayerItem,
-  patch: {
-    readonly frame?: Partial<Pick<LayerFrame, 'x' | 'y' | 'width' | 'height'>>
-    readonly nativeTextStyle?: Partial<TextNode['style']>
-    readonly nativeData?: Record<string, unknown>
-  },
-): Partial<TextSize> {
-  if (item.kind !== 'native' || item.content.nativeType !== 'text') return {}
-  const data = item.content.data
-  const styled = patch.nativeTextStyle
-    ? mergeCourseNativeData(data, { style: patch.nativeTextStyle })
-    : data
-  const merged = patch.nativeData
-    ? mergeCourseNativeData(styled, patch.nativeData)
-    : styled
-  const nextData = merged as typeof data
-  const node: TextNode = {
-    id: item.layerItemId, name: item.label, type: 'text',
-    x: item.frame.x, y: item.frame.y, width: item.frame.width, height: item.frame.height,
-    rotation: item.rotation, opacity: item.opacity, visible: item.visible, locked: item.locked,
-    playbackInitialVisibility: item.playbackInitialVisibility,
-    ...data,
-  }
-  return nativeTextAutoSizeFrame(node, {
-    ...(patch.nativeData?.text !== undefined ? { text: nextData.text } : {}),
-    ...(patch.nativeData?.runs !== undefined ? { runs: nextData.runs } : {}),
-    ...(patch.nativeTextStyle !== undefined || patch.nativeData?.style !== undefined
-      ? { style: nextData.style } : {}),
-    ...(patch.frame?.width !== undefined ? { width: patch.frame.width } : {}),
-    ...(patch.frame?.height !== undefined ? { height: patch.frame.height } : {}),
-  })
+export function nativeLayerTextAutoSizeFrame(item: Parameters<typeof planLayerFrame>[0], patch: Parameters<typeof planLayerFrame>[1]) {
+  return planLayerFrame(item, patch, analyzeTextNodeLayout)
 }

@@ -4,7 +4,7 @@ import { renderShapeCanvas } from '../../shared/canvasShapeRenderer'
 import { renderFormulaNodeCanvas } from '../../shared/formulaRenderer'
 import { renderImageNodeCanvas } from '../../shared/imageEffects'
 import { renderTextNodeCanvas } from '../../shared/textLayout'
-import { buildSlideEditorView, resolveSlideThumbnailStateId } from '../course/slideEditorView'
+import { buildSlideEditorView, resolveSlideThumbnailStateId } from '../../core/tools/slideLayerView'
 import {
   selectActiveCourseLocationId,
   selectActiveCourseProjectDocument,

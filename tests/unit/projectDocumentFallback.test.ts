@@ -1,17 +1,16 @@
 // @vitest-environment node
 import { describe, expect, it, vi } from 'vitest'
 import { randomUUID } from 'node:crypto'
-import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
+import { createBlankCourseProject } from '@/core/course/createCourseProject'
 import { createBlankFlowCourseProject } from '@/renderer/project/createFlowCourseProject'
-import { createShapeNode } from '@/renderer/project/nativeNodeFactories'
+import { createShapeNode } from '@/core/tools/nativeNodeFactories'
 import { sceneNodeToCourseLayerItem } from '@/shared/courseProjectModel'
 import { captureGenerationSnapshot } from '@/renderer/authoring/generation/generationSnapshot'
 import { createGenerationCandidateCoordinator } from '@/renderer/authoring/generation/prepareGenerationCandidate'
 import { projectEffectiveLayers } from '@/renderer/course/effectiveLayerProjection'
-import { createCourseProjectArchive, openCourseProjectArchive } from '@/renderer/project/courseProjectArchive'
+import { createCourseProjectArchive, openCourseProjectArchive } from '../../src/core/drivers/codecs/courseProjectArchive'
 import { applyEditorTransactionStep, type EditorTransactionStep } from '@/renderer/authoring/editorTransaction'
 import { buildPublishedCourseV2Payload } from '@/renderer/export/course'
-import { generationInitialRequestForPrompt } from '@/main/localAgent/profile'
 import type { HistoryResourceState } from '@/renderer/store/courseResourceState'
 import { projectDocumentTool, projectDynamicTargets } from '@/renderer/authoring/tools/projectDocumentTool'
 import { readGenerationFailure } from '@/shared/generationContract'
@@ -56,7 +55,7 @@ describe('CLI project result through the canonical transaction', () => {
     f.project.globalInteractions.push(oldRule)
     f.next.globalInteractions.push({ ...structuredClone(oldRule), id: 'valid-rule', actions: [{ ...oldRule.actions[0]!, id: 'valid-action', action: { type: 'scene.go', sceneId: (f.project.surfaces[0] as any).scenes[0].id } }] }, structuredClone(oldRule))
     const preview = await f.coordinator.prepare(f.request, f.candidate)
-    expect(f.coordinator.apply(preview.previewId).status).toBe('committed')
+    expect((await f.coordinator.apply(preview.previewId)).status).toBe('committed')
     expect(f.commits).toHaveLength(1)
     expect(f.read().document.globalInteractions[1]).toEqual(oldRule)
   })
@@ -147,11 +146,9 @@ describe('CLI project result through the canonical transaction', () => {
   it('discovers another page while keeping the first prompt focused, and commits two editable objects with save/reopen/undo/redo', async () => {
     const f = fixture()
     expect(f.request.destinations.some(d => d.kind === 'update' && d.target.itemId === 'other-square')).toBe(true)
-    expect((generationInitialRequestForPrompt(f.request).context as any).pages).toHaveLength(1)
-    expect((generationInitialRequestForPrompt(f.request).context as any).pages[0].items).toHaveLength(1)
     const preview = await f.coordinator.prepare(f.request, f.candidate)
     expect(f.commits).toHaveLength(0)
-    expect(f.coordinator.apply(preview.previewId).status).toBe('committed')
+    expect((await f.coordinator.apply(preview.previewId)).status).toBe('committed')
     expect(f.commits).toHaveLength(1)
     expect((f.read().document.surfaces[0] as any).scenes[0]).toEqual((f.project.surfaces[0] as any).scenes[0])
     const reopened = openCourseProjectArchive(createCourseProjectArchive({ project: f.read().document, assetFiles: {}, componentFiles: {} }))
@@ -160,7 +157,7 @@ describe('CLI project result through the canonical transaction', () => {
     expect(() => buildPublishedCourseV2Payload({ project: reopened.project, assetFiles: {}, components: {} })).not.toThrow()
     f.undo(); expect(f.read().document).toEqual(f.project)
     f.redo(); expect(f.read().document).toEqual(reopened.project)
-    expect(f.coordinator.apply(preview.previewId).status).toBe('stale')
+    expect((await f.coordinator.apply(preview.previewId)).status).toBe('stale')
   })
 
   it.each(['foreign-id', 'stale-revision', 'broken-resource', 'unknown-field'])('rejects %s without document or resource writes', async mode => {

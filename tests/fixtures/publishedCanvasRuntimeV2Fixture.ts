@@ -11,8 +11,8 @@ import {
   addCourseFlowPage,
   addCourseScene,
   addCourseSpatialPage,
-} from '../../src/renderer/course/courseLocationCommands'
-import { createBlankCourseProject } from '../../src/renderer/project/createCourseProject'
+} from '../../src/core/tools/courseLocations'
+import { createBlankCourseProject } from '../../src/core/course/createCourseProject'
 import {
   planRuntimePropertyUpdate,
   retargetCourseRuntimeProperty,

@@ -14,13 +14,13 @@ import type {
 import { publishedCourseV2Schema } from '@/shared/publishedCourseSchema'
 import type { AssetMeta } from '@/shared/contracts/media-v1'
 import { decodePublishedCode } from '@/player/decodePublishedExecutableCode'
-import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
+import { createBlankCourseProject } from '@/core/course/createCourseProject'
 import {
   createChartLayerItem,
   createChartNode,
   createTableLayerItem,
   createTableNode,
-} from '@/renderer/project/nativeNodeFactories'
+} from '@/core/tools/nativeNodeFactories'
 import {
   
   collectPublishedCourseAssetIds,
@@ -31,11 +31,11 @@ import {
   type PublishedCourseSourceIssueCode,
 } from '@/renderer/export/course/buildPublishedCourse'
 import { collectCoursePackageExportPreflight } from '@/renderer/export/course/coursePackagePreflight'
-import { parseComponentPackageFiles } from '@/renderer/components/importComponentPackage'
+import { parseComponentPackageFiles } from '../../src/core/drivers/codecs/importComponentPackage'
 import {
   detectCourseProjectArchiveFormat,
   openCourseProjectArchive,
-} from '@/renderer/project/courseProjectArchive'
+} from '../../src/core/drivers/codecs/courseProjectArchive'
 import {
   ARCHITECTURE_BASELINE_FIXTURE_IDS,
   buildArchitectureBaselineFixtureOutputs,

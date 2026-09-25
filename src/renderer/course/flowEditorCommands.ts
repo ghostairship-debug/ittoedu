@@ -1,9 +1,10 @@
-import { resolveFlowContextSelection, flowTextSlot } from './flowContextSelection'
+import { planDeleteFlowBlocks, planMoveFlowBlock, planInsertFlowBlock, planUpdateFlowBlock, planFlowCommittedText, validateFlowInsertIndex as validateIndex, flowBlocksAtParent as blocksAtParent } from '../../core/tools/flowContent'
+import { updateBodySurfaceBackground } from '../../core/tools/courseBackground'
+import { resolveFlowContextSelection, flowTextSlot } from '../../core/tools/flowTextSlot'
 import { documentContentSchema, documentTextLength, normalizeDocumentText, plainDocumentText, type FlowTextContent } from '../../shared/document/content'
 import type { AssetMeta } from '../../shared/contracts/media-v1'
 import type { TextRunStyle } from '../../shared/contracts/native-v1'
 import {
-  BACKGROUND_MODES,
   type BackgroundMode,
   type CourseProjectDocument,
   type FlowBlock,
@@ -13,25 +14,18 @@ import {
   type FlowQuoteBlock,
   type FlowRichText,
 } from '../../shared/courseProjectTypes'
-import {
-  LAYER_REJECT_STALE_REVISION,
-  rejectIfStaleDocument,
-} from './globalLayerCommands'
-import {
-  deleteEffectiveLayerItems,
-  locateCourseLayer,
-  makeEffectiveLayerAuthoringAddress,
-} from './effectiveLayerCommands'
-import { commitCourseProjectMutation } from './courseProjectMutation'
+import { LAYER_REJECT_STALE_REVISION, rejectIfStaleDocument } from '../../core/tools/globalLayers'
+import { deleteEffectiveLayerItems, makeEffectiveLayerAuthoringAddress } from '../../core/tools/layerCommands'
+import { locateCourseLayer } from './effectiveLayerCommands'
+import { commitCourseProjectMutation } from '../../core/tools/courseProjectMutation'
 import {
   controllerTargetIdsForLocations,
   repairRemovedCourseReferences,
-} from './courseReferenceCleanup'
+} from '../../core/tools/courseReferenceCleanup'
 import {
   FLOW_GLOBAL_STRUCTURE_REASON,
   FLOW_LAST_HEADING_REASON,
   FLOW_LAST_LOCATION_REASON,
-  collectFlowBlockIds,
   deleteFlowRichTextRange,
   findFlowBlockRecursive,
   flowSurfaceIn,
@@ -46,7 +40,7 @@ import {
   syncFlowCourseLocations,
   walkFlowBlocks,
   wouldLeaveSurfaceWithoutAnchor,
-} from './flowDocumentModel'
+} from '../../core/tools/flowDocumentModel'
 import {
   classifyFlowDeleteIntent,
   clearFlowEditorSelection,
@@ -188,21 +182,6 @@ function runMutation(
   }
 }
 
-function validateIndex(index: number, length: number): void {
-  if (!Number.isInteger(index) || index < 0 || index > length) {
-    throw new Error('插入位置无效')
-  }
-}
-
-function blocksAtParent(surfaceBlocks: FlowBlock[], parentId: string | null): FlowBlock[] {
-  if (parentId === null) return surfaceBlocks
-  const section = findFlowBlockRecursive(surfaceBlocks, parentId)
-  if (!section || section.block.type !== 'section') {
-    throw new Error(`找不到 Flow 分节：${parentId}`)
-  }
-  return section.block.blocks
-}
-
 function defaultInsertBlock(): FlowEditorBlockInput {
   return { type: 'paragraph', content: { inlines: [] } }
 }
@@ -212,25 +191,7 @@ export function insertFlowEditorBlock(
   input: InsertFlowEditorBlockInput,
   options: FlowCommandOptions = {},
 ): FlowCommandResult {
-  const blocked = staleOrGlobal(document, options)
-  if (blocked) return blocked
-  const nextBlock = { ...input.block, id: stableFlowId('block', input.block.id) } as FlowBlock
-  try {
-    const surface = flowSurfaceIn(document, input.surfaceId)
-    walkFlowBlocks(surface.blocks, (block) => {
-      if (block.id === nextBlock.id) throw new Error(`Flow 块 ID 已存在：${nextBlock.id}`)
-    })
-    validateIndex(input.index, blocksAtParent(surface.blocks, input.parentId).length)
-  } catch (error) {
-    return failCommand(error instanceof Error ? error.message : '无法插入 Flow 块')
-  }
-  return runMutation(document, (draft) => {
-    const draftSurface = flowSurfaceIn(draft, input.surfaceId)
-    const targetBlocks = blocksAtParent(draftSurface.blocks, input.parentId)
-    targetBlocks.splice(input.index, 0, nextBlock)
-    syncFlowCourseLocations(draft, input.surfaceId)
-    return [nextBlock.id]
-  }, '已插入内容块', options)
+  return planInsertFlowBlock(document, input, options)
 }
 
 export function updateFlowEditorBlock(
@@ -239,23 +200,7 @@ export function updateFlowEditorBlock(
   update: ((block: FlowBlock) => void) | object,
   options: FlowCommandOptions = {},
 ): FlowCommandResult {
-  const blocked = staleOrGlobal(document, options)
-  if (blocked) return blocked
-  try {
-    resolveFlowBlock(document, target)
-  } catch (error) {
-    return failCommand(error instanceof Error ? error.message : '无法更新 Flow 块')
-  }
-  return runMutation(document, (draft) => {
-    const found = resolveFlowBlock(draft, target)
-    if (typeof update === 'function') update(found.block)
-    else {
-      const patch = structuredClone(update) as Record<string, unknown>
-      delete patch.id
-      Object.assign(found.block, patch)
-    }
-    syncFlowCourseLocations(draft, target.surfaceId)
-  }, '已更新内容块', options)
+  return planUpdateFlowBlock(document, target, update, options)
 }
 
 export function replaceFlowMediaBlockAsset(
@@ -342,30 +287,7 @@ export function applyFlowCommittedText(
   nextContent: FlowTextContent,
   options: FlowCommandOptions = {},
 ): FlowCommandResult {
-  const blocked = staleOrGlobal(document, options)
-  if (blocked) return blocked
-  try {
-    const found = resolveFlowBlock(document, target)
-    if (!isRichTextFlowBlock(found.block) && found.block.type !== 'callout' && found.block.type !== 'code') {
-      return failCommand('当前块不能写入正文')
-    }
-  } catch (error) {
-    return failCommand(error instanceof Error ? error.message : '无法写入正文')
-  }
-  return runMutation(document, (draft) => {
-    const found = resolveFlowBlock(draft, target)
-    if (found.block.type === 'callout') {
-      found.block.body = structuredClone(nextContent)
-      return
-    }
-    if (found.block.type === 'code') {
-      found.block.code = plainDocumentText(nextContent)
-      return
-    }
-    if (!isRichTextFlowBlock(found.block)) throw new Error('当前块不能写入正文')
-    found.block.content = structuredClone(nextContent)
-    syncFlowCourseLocations(draft, target.surfaceId)
-  }, '已更新文字', options)
+  return planFlowCommittedText(document, target, nextContent, options)
 }
 
 export function deleteFlowEditorBlocks(
@@ -373,64 +295,7 @@ export function deleteFlowEditorBlocks(
   targets: readonly FlowEditorBlockTarget[],
   options: FlowCommandOptions = {},
 ): FlowCommandResult {
-  const blocked = staleOrGlobal(document, options)
-  if (blocked) return blocked
-  if (targets.length === 0) return failCommand('没有可删除的选择')
-  const deletedIdsBySurface = new Map<string, Set<string>>()
-  try {
-    for (const target of targets) {
-      const source = resolveFlowBlock(document, target)
-      const deletedIds = deletedIdsBySurface.get(target.surfaceId) ?? new Set<string>()
-      collectFlowBlockIds(source.block).forEach((id) => deletedIds.add(id))
-      deletedIdsBySurface.set(target.surfaceId, deletedIds)
-    }
-  } catch (error) {
-    return failCommand(error instanceof Error ? error.message : '无法删除 Flow 块')
-  }
-  const removedFlowLocations = document.locations.filter((location) => (
-    location.kind === 'flow-block'
-    && deletedIdsBySurface.get(location.surfaceId)?.has(location.blockId)
-  ))
-  const removedLocationIds = new Set(removedFlowLocations.map((location) => location.id))
-  const removedControllerTargetIds = controllerTargetIdsForLocations(removedFlowLocations)
-  if (
-    document.locations.length > 0 &&
-    document.locations.every((location) => removedLocationIds.has(location.id))
-  ) {
-    return failCommand(FLOW_LAST_LOCATION_REASON)
-  }
-  const bySurface = new Map<string, FlowEditorBlockTarget[]>()
-  for (const target of targets) {
-    const list = bySurface.get(target.surfaceId) ?? []
-    list.push(target)
-    bySurface.set(target.surfaceId, list)
-  }
-  for (const [surfaceId] of bySurface) {
-    const surface = flowSurfaceIn(document, surfaceId)
-    if (wouldLeaveSurfaceWithoutAnchor(surface, deletedIdsBySurface.get(surfaceId)!)) {
-      return failCommand(FLOW_LAST_HEADING_REASON)
-    }
-  }
-  return runMutation(document, (draft) => {
-    for (const [surfaceId, surfaceTargets] of bySurface) {
-      const draftSurface = flowSurfaceIn(draft, surfaceId)
-      const ids = new Set<string>()
-      for (const target of surfaceTargets) {
-        const found = findFlowBlockRecursive(draftSurface.blocks, target.blockId)
-        if (!found || (found.parentId ?? null) !== (target.parentId ?? null)) {
-          throw new Error('所选 Flow 块位置已变化，请重新选择')
-        }
-        collectFlowBlockIds(found.block).forEach((id) => ids.add(id))
-      }
-      draftSurface.blocks = removeBlocksById(draftSurface.blocks, ids)
-      syncFlowCourseLocations(draft, surfaceId)
-    }
-    if (draft.locations.length === 0) throw new Error(FLOW_LAST_LOCATION_REASON)
-    repairRemovedCourseReferences(draft, {
-      removedLocationIds,
-      removedControllerTargetIds,
-    })
-  }, '已删除当前选择', options)
+  return planDeleteFlowBlocks(document, targets, options)
 }
 
 export function deleteFlowEditorBlock(
@@ -503,51 +368,7 @@ export function moveFlowEditorBlock(
   destination: MoveFlowEditorBlockDestination,
   options: FlowCommandOptions = {},
 ): FlowCommandResult {
-  const blocked = staleOrGlobal(document, options)
-  if (blocked) return blocked
-  if (destination.surfaceId !== undefined && destination.surfaceId !== target.surfaceId) {
-    return failCommand('暂不支持跨表面移动 Flow 块')
-  }
-  if (!Number.isInteger(destination.index) || destination.index < 0) {
-    return failCommand('移动位置无效')
-  }
-  try {
-    const source = resolveFlowBlock(document, target)
-    const surface = flowSurfaceIn(document, target.surfaceId)
-    if (destination.parentId !== null) {
-      const destinationSection = findFlowBlockRecursive(surface.blocks, destination.parentId)
-      if (!destinationSection || destinationSection.block.type !== 'section') {
-        throw new Error(`找不到 Flow 分节：${destination.parentId}`)
-      }
-      if (source.block.type === 'section') {
-        let cursor: string | null = destination.parentId
-        while (cursor !== null) {
-          if (cursor === source.block.id) throw new Error('不能将分节移动到自身内部')
-          cursor = findFlowBlockRecursive(surface.blocks, cursor)?.parentId ?? null
-        }
-      }
-    }
-  } catch (error) {
-    return failCommand(error instanceof Error ? error.message : '无法移动 Flow 块')
-  }
-  return runMutation(document, (draft) => {
-    const draftSurface = flowSurfaceIn(draft, target.surfaceId)
-    const from = findFlowBlockRecursive(draftSurface.blocks, target.blockId)
-    if (!from || (from.parentId ?? null) !== (target.parentId ?? null)) {
-      throw new Error('所选 Flow 块位置已变化，请重新选择')
-    }
-    const destinationBlocks = blocksAtParent(draftSurface.blocks, destination.parentId)
-    if (from.blocks === destinationBlocks) {
-      const [moved] = from.blocks.splice(from.index, 1)
-      const clamped = Math.max(0, Math.min(destination.index, destinationBlocks.length))
-      destinationBlocks.splice(clamped, 0, moved!)
-    } else {
-      const [moved] = from.blocks.splice(from.index, 1)
-      const clamped = Math.max(0, Math.min(destination.index, destinationBlocks.length))
-      destinationBlocks.splice(clamped, 0, moved!)
-    }
-    syncFlowCourseLocations(draft, target.surfaceId)
-  }, '已移动内容块', options)
+  return planMoveFlowBlock(document, target, destination, options)
 }
 
 export function indentFlowEditorBlock(
@@ -1104,40 +925,9 @@ export function updateFlowSurfaceBackground(
   patch: FlowSurfaceBackgroundPatch,
   options: FlowCommandOptions = {},
 ): FlowCommandResult {
-  const stale = rejectIfStaleDocument(document, options.expectedRevision)
-  if (stale) return failCommand(stale.reason ?? LAYER_REJECT_STALE_REVISION)
-  if (patch.backgroundMode !== undefined && !BACKGROUND_MODES.includes(patch.backgroundMode)) {
-    return failCommand('背景模式无效')
-  }
-  if (
-    patch.backgroundColor !== undefined
-    && (typeof patch.backgroundColor !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(patch.backgroundColor.trim()))
-  ) {
-    return failCommand('颜色格式无效')
-  }
-  const color = patch.backgroundColor !== undefined
-    ? patch.backgroundColor.trim().toLowerCase()
-    : undefined
-  let surface: ReturnType<typeof flowSurfaceIn>
-  try {
-    surface = flowSurfaceIn(document, surfaceId)
-  } catch (error) {
-    return failCommand(error instanceof Error ? error.message : '无法更新 Flow 页面背景')
-  }
-  const modeChanges = patch.backgroundMode !== undefined
-    && patch.backgroundMode !== (surface.backgroundMode ?? 'own')
-  const colorChanges = color !== undefined && color !== surface.backgroundColor
-  const assetChanges = patch.backgroundAssetId !== undefined
-    && patch.backgroundAssetId !== (surface.backgroundAssetId ?? null)
-  if (!modeChanges && !colorChanges && !assetChanges) {
-    return succeedNoop(document, '背景未变')
-  }
-  return runMutation(document, (draft) => {
-    const target = flowSurfaceIn(draft, surfaceId)
-    if (modeChanges) target.backgroundMode = patch.backgroundMode
-    if (colorChanges) target.backgroundColor = color
-    if (assetChanges) target.backgroundAssetId = patch.backgroundAssetId ?? null
-  }, '已修改稿纸背景', options)
+  const planned = updateBodySurfaceBackground(document, surfaceId, 'flow', patch, options)
+  return planned.ok ? { ok: true, nextDocument: planned.project, historyEntry: planned.historyEntry,
+    reason: planned.historyEntry ? '已修改稿纸背景' : '背景未变' } : failCommand(planned.reason)
 }
 
 export function updateFlowWidthMode(
@@ -1194,4 +984,4 @@ export {
   createBlankFlowPageBlocks,
   createBlankFlowSurface,
   makeFlowBlockAuthoringAddress,
-} from './flowDocumentModel'
+} from '../../core/tools/flowDocumentModel'

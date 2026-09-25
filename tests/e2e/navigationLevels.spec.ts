@@ -21,13 +21,13 @@ test('Mixed scene and step semantics survive archive and current-surface try-run
     await enterIndependentEditor(page)
     const result = await page.evaluate(async () => {
       const load = (path: string): Promise<any> => import(path)
-      const { createBlankCourseProject } = await load('/src/renderer/project/createCourseProject.ts')
+      const { createBlankCourseProject } = await load('/src/core/course/createCourseProject.ts')
       const { createDefaultTeacherControllerPackage } = await load('/src/shared/defaultTeacherControllerComponent.ts')
       const controller = createDefaultTeacherControllerPackage()
       const controllerKey = `${controller.manifest.id}@${controller.manifest.version}`
       const components = { [controllerKey]: controller }
-      const { addCourseFlowPage, addCourseSpatialPage } = await load('/src/renderer/course/courseLocationCommands.ts')
-      const { createCourseProjectArchive, openCourseProjectArchive } = await load('/src/renderer/project/courseProjectArchive.ts')
+      const { addCourseFlowPage, addCourseSpatialPage } = await load('/src/core/tools/courseLocations.ts')
+      const { createCourseProjectArchive, openCourseProjectArchive } = await load('/src/core/drivers/codecs/courseProjectArchive.ts')
       const { buildPublishedCourseV2Payload } = await load('/src/renderer/export/course/buildPublishedCourse.ts')
       const { createPublishedCourseSession } = await load('/src/player/surfaces/publishedDynamicHosts.ts')
       const { mountFlowLocationTryRun } = await load('/src/renderer/ui/flowLocationTryRun.ts')

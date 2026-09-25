@@ -407,12 +407,17 @@ function emitPublishedCourseWebPackageZip(
 
 function emitPublishedCourseWebPackageZipAsync(
   files: Record<string, Uint8Array>,
+  signal?: AbortSignal,
 ): Promise<Uint8Array> {
   return new Promise((resolve, reject) => {
-    zip(files, WEB_PACKAGE_ZIP_OPTIONS, (error, bytes) => {
+    if (signal?.aborted) { reject(signal.reason); return }
+    const abort = () => { terminate(); reject(signal?.reason ?? new Error('导出已取消')) }
+    const terminate = zip(files, WEB_PACKAGE_ZIP_OPTIONS, (error, bytes) => {
+      signal?.removeEventListener('abort', abort)
       if (error) reject(error)
       else resolve(bytes)
     })
+    signal?.addEventListener('abort', abort, { once: true })
   })
 }
 
@@ -441,12 +446,14 @@ export function buildPublishedCourseWebPackage(
 export function buildPublishedCourseWebPackageAsync(
   sources: CoursePublishSources,
   playerBundleOrOptions: string | PublishedCoursePackageOptions,
+  signal?: AbortSignal,
 ): Promise<Uint8Array> {
+  signal?.throwIfAborted()
   const emission = buildWebPackageEmission(
     sources,
     normalizeOptions(playerBundleOrOptions),
   )
-  return emitPublishedCourseWebPackageZipAsync(emission.files)
+  return emitPublishedCourseWebPackageZipAsync(emission.files, signal)
 }
 
 function manifestFromFiles(files: Record<string, Uint8Array>): string[] {

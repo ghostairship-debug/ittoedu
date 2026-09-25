@@ -1,3 +1,7 @@
+import { isSpatialTeacherController, spatialLayerCoordinateSpace } from '../../core/tools/spatialCoordinates'
+export { isSpatialTeacherController, spatialLayerCoordinateSpace } from '../../core/tools/spatialCoordinates'
+import { resolveSpatialSurface } from '../../core/tools/spatialInsertion'
+export { resolveSpatialSurface } from '../../core/tools/spatialInsertion'
 import {
   composeCourseProjectLocation,
   type CourseLayerComposition,
@@ -168,42 +172,8 @@ function deepFreeze<T>(value: T): DeepReadonly<T> {
   return value as DeepReadonly<T>
 }
 
-export function isSpatialTeacherController(item: DeepReadonly<LayerItem> | LayerItem): boolean {
-  return false
-}
-
-export function spatialLayerCoordinateSpace(
-  source: SpatialEditorLayerScope,
-  item: DeepReadonly<LayerItem> | LayerItem,
-): SpatialCoordinateSpace {
-  if (isSpatialTeacherController(item) || source === 'global') return 'viewport'
-  return 'world'
-}
-
 export function isSpatialViewportLayer(layer: SpatialEditorLayerView): boolean {
   return layer.coordinateSpace === 'viewport'
-}
-
-export function resolveSpatialSurface(
-  project: CourseProjectDocument,
-  locationId: string,
-): {
-  location: Extract<CourseProjectDocument['locations'][number], { kind: 'spatial-camera' }>
-  surface: SpatialSurfaceDocument
-  frame: SpatialCameraFrame
-} {
-  const location = project.locations.find((candidate) => candidate.id === locationId)
-  if (!location) throw new Error(`找不到课程位置：${locationId}`)
-  if (location.kind !== 'spatial-camera') {
-    throw new Error(`SpatialEditorView 只接受 Spatial 镜头位置：${locationId}`)
-  }
-  const surface = project.surfaces.find((candidate) => candidate.id === location.surfaceId)
-  if (!surface || surface.type !== 'spatial-2d') {
-    throw new Error(`找不到 Spatial 表面：${location.surfaceId}`)
-  }
-  const frame = surface.camera.frames.find((candidate) => candidate.id === location.cameraFrameId)
-  if (!frame) throw new Error(`找不到 Spatial 镜头帧：${location.cameraFrameId}`)
-  return { location, surface, frame }
 }
 
 export function isSpatialEditorLocationKind(

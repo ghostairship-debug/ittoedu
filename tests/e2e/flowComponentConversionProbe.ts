@@ -8,10 +8,10 @@ export async function runFlowComponentConversionProbe(page: Page) {
   return page.evaluate(async () => {
     const load = (path: string): Promise<any> => import(path)
     const { createBlankFlowCourseProject } = await load('/src/renderer/project/createFlowCourseProject.ts')
-    const { parseComponentPackageFiles } = await load('/src/renderer/components/importComponentPackage.ts')
+    const { parseComponentPackageFiles } = await load('/src/core/drivers/codecs/importComponentPackage.ts')
     const { withDefaultComponentController } = await load('/src/renderer/components/teacherControllerComponent.ts')
     const { componentPackagesToArchiveFiles } = await load('/src/renderer/components/componentPackageStore.ts')
-    const { componentPackageMeta } = await load('/src/renderer/components/editableComponentPackage.ts')
+    const { componentPackageMeta } = await load('/src/shared/componentPackageMeta.ts')
     const { insertFlowSharedComponent, convertFlowComponentBlockToOverlay } = await load('/src/renderer/course/flowSharedAuthoringAdapters.ts')
     const {
       selectFlowEditorBlock,
@@ -26,7 +26,7 @@ export async function runFlowComponentConversionProbe(page: Page) {
     const { prepareFlowOverlayComponentConversion } = await load('/src/renderer/course/flowComponentConversion.ts')
     const { createEditorTransactionStep, applyEditorTransactionStep } = await load('/src/renderer/authoring/editorTransaction.ts')
     const { applyHistoryResourceChanges } = await load('/src/renderer/store/courseResourceState.ts')
-    const { createCourseProjectArchive, openCourseProjectArchive } = await load('/src/renderer/project/courseProjectArchive.ts')
+    const { createCourseProjectArchive, openCourseProjectArchive } = await load('/src/core/drivers/codecs/courseProjectArchive.ts')
     const { buildPublishedCourseV2Payload } = await load('/src/renderer/export/course/buildPublishedCourse.ts')
     const { createPublishedCourseSession } = await load('/src/player/surfaces/publishedDynamicHosts.ts')
     const { buildFlowDocxProjection } = await load('/src/renderer/export/course/flowDocxProjection.ts')
@@ -228,10 +228,10 @@ export async function installFlowComponentConversionUiFixture(page: Page) {
   return page.evaluate(async () => {
     const load = (path: string): Promise<any> => import(path)
     const { createBlankFlowCourseProject } = await load('/src/renderer/project/createFlowCourseProject.ts')
-    const { parseComponentPackageFiles } = await load('/src/renderer/components/importComponentPackage.ts')
+    const { parseComponentPackageFiles } = await load('/src/core/drivers/codecs/importComponentPackage.ts')
     const { withDefaultComponentController } = await load('/src/renderer/components/teacherControllerComponent.ts')
     const { componentPackagesToArchiveFiles } = await load('/src/renderer/components/componentPackageStore.ts')
-    const { componentPackageMeta } = await load('/src/renderer/components/editableComponentPackage.ts')
+    const { componentPackageMeta } = await load('/src/shared/componentPackageMeta.ts')
     const { insertFlowSharedComponent } = await load('/src/renderer/course/flowSharedAuthoringAdapters.ts')
     const { selectFlowEditorBlock, selectFlowOverlay } = await load('/src/renderer/course/flowEditorSlice.ts')
     const { courseProjectDocumentSchema } = await load('/src/shared/courseProjectSchema.ts')

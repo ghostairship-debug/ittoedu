@@ -7,15 +7,14 @@ import { resolveBackgroundTarget, backgroundSupportedScopes } from '@/renderer/a
 import { describeAuthoringToolDiscovery } from '@/renderer/authoring/tools/authoringToolFacade'
 import { createGenerationCandidateCoordinator } from '@/renderer/authoring/generation/prepareGenerationCandidate'
 import { projectEffectiveLayers } from '@/renderer/course/effectiveLayerProjection'
-import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
+import { createBlankCourseProject } from '@/core/course/createCourseProject'
 import { createBlankFlowCourseProject } from '@/renderer/project/createFlowCourseProject'
 import { createBlankSpatialCourseProject } from '@/renderer/project/createSpatialCourseProject'
-import { openCourseProjectArchive } from '@/renderer/project/courseProjectArchive'
+import { openCourseProjectArchive } from '../../src/core/drivers/codecs/courseProjectArchive'
 import { applyEditorTransactionStep, type EditorTransactionStep } from '@/renderer/authoring/editorTransaction'
 import type { CourseProjectDocument } from '@/shared/courseProjectTypes'
 import type { GenerationCandidate, GenerationRequest } from '@/shared/generationContract'
 import type { HistoryResourceState } from '@/renderer/store/courseResourceState'
-import { generationInitialRequestForPrompt } from '@/main/localAgent/profile'
 
 // Unit carrier substitutes the browser decoder only; snapshot, candidate,
 // formal commands, document/resource transaction and archive are real.
@@ -39,7 +38,7 @@ function harness(document: CourseProjectDocument, resources: HistoryResourceStat
     commit(step) { state = applyEditorTransactionStep(state, step, 'forward'); commits.push(step); return true } })
   return { coordinator, commits, read: () => state, async apply(request: GenerationRequest, steps: GenerationCandidate['steps']) {
     const preview = await coordinator.prepare(request, { version: 1, requestId: request.requestId, candidateId: crypto.randomUUID(), summary: '设置背景', steps })
-    expect(coordinator.apply(preview.previewId).status).toBe('committed')
+    expect((await coordinator.apply(preview.previewId)).status).toBe('committed')
   } }
 }
 
@@ -138,7 +137,6 @@ describe('D10 / I05 formal background entry from captured destinations', () => {
     const test = harness(document, { assetFiles: { 'course-image': bytes, 'hidden-image': bytes }, componentPackages: {} })
     const request = snapshot(document, 'page', 'named'), destination = backgrounds(request)[0]!
     // Both saved/hidden and currently visible images are discoverable without another inventory read.
-    expect(Object.values(generationInitialRequestForPrompt(snapshot(document, 'course', 'named')).assetAliases!)).toEqual(expect.arrayContaining(['course-image', 'hidden-image']))
     await test.apply(request, [{ id: 'color', tool: 'owner.background', carrier: 'native', destination, input: { backgroundColor: '#778899' } }])
     let current = snapshot(test.read().document, 'page', 'named')
     expect(resolveBackgroundTarget(test.read().document, backgrounds(current)[0]!).effective).toMatchObject({ color: '#778899', assetId: 'course-image' })
@@ -192,7 +190,7 @@ describe('D10 / I05 formal background entry from captured destinations', () => {
     const preview = await test.coordinator.prepare(request, { version: 1, requestId: request.requestId, candidateId: crypto.randomUUID(), summary: '修改背景', steps: [
       { id: 'background', tool: 'owner.background', carrier: 'native', destination: target, input: { backgroundColor: '#345678' } },
     ] })
-    expect(test.coordinator.apply(preview.previewId).status).toBe('committed')
+    expect((await test.coordinator.apply(preview.previewId)).status).toBe('committed')
     const paragraph = request.destinations.find(value => value.kind === 'update')!
     expect(() => resolveBackgroundTarget(document, paragraph)).toThrow('背景目标 owner 身份不匹配')
     expect(test.commits).toHaveLength(1)

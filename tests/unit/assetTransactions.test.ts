@@ -9,13 +9,13 @@ import type {
   SlideSurfaceDocument,
 } from '@/shared/courseProjectTypes'
 import { componentPackagesFromArchive } from '@/renderer/components/componentPackageStore'
-import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
+import { createBlankCourseProject } from '@/core/course/createCourseProject'
 import {
   createExternalComponentNode,
   createImageNode,
-} from '@/renderer/project/nativeNodeFactories'
+} from '@/core/tools/nativeNodeFactories'
 import { assetBytesSha256 } from '@/renderer/project/assetManager'
-import { openCourseProjectArchive } from '@/renderer/project/courseProjectArchive'
+import { openCourseProjectArchive } from '../../src/core/drivers/codecs/courseProjectArchive'
 import { prepareHashedMediaBatch } from '@/renderer/project/v9AssetAdapter'
 import { allocateCourseLayerOrder } from '@/renderer/course/globalLayerCommands'
 import { sceneNodeToCourseLayerItem } from '@/shared/courseProjectModel'

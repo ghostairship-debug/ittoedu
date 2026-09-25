@@ -1,7 +1,9 @@
+import { layerPositionSchema as position, layerPlacementSchema, layerAlignModeSchema, layerDistributeAxisSchema } from '../../../core/tools/layerEditSchema'
 import { z } from 'zod'
 import type { CourseProjectDocument } from '../../../shared/courseProjectTypes'
 import { authoringToolTargetWireV1Schema, type AuthoringToolTargetWireV1 } from '../../../shared/authoringToolContract'
-import { duplicateEffectiveLayerItem, patchEffectiveLayerPropertiesAtTarget, patchEffectiveLayerPropertiesAtTargets, reorderEffectiveLayerItems, resolveEffectiveLayerTarget } from '../../course/effectiveLayerCommands'
+import { duplicateEffectiveLayerItem, reorderEffectiveLayerItems, resolveEffectiveLayerTarget } from '../../../core/tools/layerCommands'
+import { patchEffectiveLayerPropertiesAtTarget, patchEffectiveLayerPropertiesAtTargets } from '../../course/effectiveLayerCommands'
 import { projectEffectiveLayers } from '../../course/effectiveLayerProjection'
 import { openSlideAuthoringSession, setSlideEditingScope } from '../../course/slideAuthoringBackend'
 import { planSlideMultiLayerLayoutAtTargets } from '../../course/slideMultiLayerLayout'
@@ -10,27 +12,19 @@ import { makeLayerItemAuthoringAddress } from '../courseAuthoringScope'
 import { resolveAuthoringToolScope } from './authoringToolScope'
 import type { AuthoringToolDefinition } from './executeAuthoringTool'
 
-const position = z.discriminatedUnion('kind', [
-  z.object({ kind: z.literal('front') }).strict(),
-  z.object({ kind: z.literal('back') }).strict(),
-  z.object({ kind: z.literal('before'), siblingId: z.string().min(1) }).strict(),
-  z.object({ kind: z.literal('after'), siblingId: z.string().min(1) }).strict(),
-])
 export const layerEditInputSchema = z.discriminatedUnion('operation', [
   z.object({ operation: z.literal('reorder'), position }).strict(),
-  z.object({ operation: z.literal('duplicate'), placement: z.object({
-    side: z.enum(['right', 'left', 'above', 'below']), gap: z.number().finite().min(0),
-  }).strict() }).strict(),
+  z.object({ operation: z.literal('duplicate'), placement: layerPlacementSchema }).strict(),
   z.object({
     operation: z.literal('align'),
     targets: z.array(authoringToolTargetWireV1Schema).min(2).max(200),
-    mode: z.enum(['left', 'center', 'right', 'top', 'middle', 'bottom']),
+    mode: layerAlignModeSchema,
     primaryTarget: authoringToolTargetWireV1Schema.optional(),
   }).strict(),
   z.object({
     operation: z.literal('distribute'),
     targets: z.array(authoringToolTargetWireV1Schema).min(3).max(200),
-    axis: z.enum(['horizontal', 'vertical']),
+    axis: layerDistributeAxisSchema,
   }).strict(),
 ])
 

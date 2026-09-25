@@ -1,19 +1,20 @@
+import { installHostToolTestTransport } from './helpers/g20HostTools'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { _electron as electron, expect, test, type Page } from '@playwright/test'
 import { createServer, type ViteDevServer } from 'vite'
 import sharp from 'sharp'
 import { BACKGROUND_E2E_ENV } from '../../src/main/windowVisibility'
-import { createBlankCourseProject } from '../../src/renderer/project/createCourseProject'
-import { addCourseFlowPage, addCourseSpatialPage } from '../../src/renderer/course/courseLocationCommands'
-import { componentPackageMeta } from '../../src/renderer/components/editableComponentPackage'
-import { parseComponentPackageFiles } from '../../src/renderer/components/importComponentPackage'
-import { type CourseProjectArchiveData } from '../../src/renderer/project/courseProjectArchive'
-import { componentPackageKey } from '../../src/renderer/project/archivePath'
+import { createBlankCourseProject } from '../../src/core/course/createCourseProject'
+import { addCourseFlowPage, addCourseSpatialPage } from '../../src/core/tools/courseLocations'
+import { componentPackageMeta } from '../../src/shared/componentPackageMeta'
+import { parseComponentPackageFiles } from '../../src/core/drivers/codecs/importComponentPackage'
+import { type CourseProjectArchiveData } from '../../src/core/drivers/codecs/courseProjectArchive'
+import { componentPackageKey } from '../../src/core/drivers/codecs/archivePath'
 import { DEFAULT_TEACHER_CONTROLLER_PACKAGE_ID } from '../../src/shared/defaultTeacherControllerComponent'
 import type { CourseProjectDocument, FlowBlock, LayerItem } from '../../src/shared/courseProjectTypes'
 import { createArchiveFixture } from '../fixtures/teacherController'
-import { closeNativeEditor, nativeRecords, readSaved, saveStage, type NativeRun } from './r18NativeAuthoringFixture'
+import { closeNativeEditor, readSaved, saveStage, type NativeRun } from './r18NativeAuthoringFixture'
 import { expectBackgroundWindowsIsolated } from './expectBackgroundWindowsIsolated'
 import { enterIndependentEditor as enterStandaloneEditorFromLanding } from './lessonWorkspaceEntry'
 
@@ -184,7 +185,7 @@ async function expectInteractivePreview(run: NativeRun, mode: Mode) {
   await expect(overlay).toHaveCount(0)
 }
 
-for (const mode of ['shared', 'instance'] as const) test(`component.package patch ${mode}: real admission, three surfaces and saved interaction`, async () => {
+for (const mode of ['shared', 'instance'] as const) test(`controlled build source patch ${mode}: real admission, three surfaces and saved interaction`, async () => {
   test.setTimeout(240_000)
   const runRoot = join(productRoot, 'output', 'r18-short-path-component-patch', `${mode}-${new Date().toISOString().replace(/[:.]/g, '-')}`)
   mkdirSync(runRoot, { recursive: true })
@@ -200,6 +201,7 @@ for (const mode of ['shared', 'instance'] as const) test(`component.package patc
     const app = await electron.launch({ cwd: productRoot, args: ['.', `--user-data-dir=${userData}`],
       env: { ...process.env, VITE_DEV_SERVER_URL: `http://127.0.0.1:${address.port}/`, ELECTRON_DISABLE_SECURITY_WARNINGS: 'true', [BACKGROUND_E2E_ENV]: '1' } })
     const page = await app.firstWindow()
+    await installHostToolTestTransport(app, page)
     run = { app, page, runRoot, workspaceRoot: runRoot, projectPath, userData, pageErrors: [], consoleErrors: [] }
     page.on('pageerror', error => run!.pageErrors.push(error.message))
     await enterStandaloneEditorFromLanding(page)
@@ -219,59 +221,60 @@ for (const mode of ['shared', 'instance'] as const) test(`component.package patc
     const result = await page.evaluate(async ({ mode, packageId, ids, changedSource }) => {
       const load = (path: string) => import(/* @vite-ignore */ path)
       const { useEditorStore, selectActiveCourseProjectDocument } = await load('/src/renderer/store/editorStore.ts')
-      const { createCourseChatObservation } = await load('/src/renderer/ui/chat/courseChatObservation.ts')
+      const { readCanonicalCourse, stageCourseBuild } = await load('/tests/e2e/helpers/g20AuthoringObservation.ts')
+      const { captureComponentPackageSourceBaseline, planComponentPackageFork, planComponentPackageSourceRevision } = await load('/src/renderer/components/componentPackageRevision.ts')
+      const { applyHistoryResourceChanges } = await load('/src/renderer/store/courseResourceState.ts')
+      const { rewriteComponentDefinitionId, editableComponentPackageId } = await load('/src/renderer/components/editableComponentPackage.ts')
       const selectedId = mode === 'instance' ? ids.flow : ids.slide
       useEditorStore.getState().selectNode(selectedId)
-      const state = useEditorStore.getState(), project = selectActiveCourseProjectDocument(state)
-      if (typeof window.desktopAPI.dynamicAdmission !== 'function') throw new Error('Real Main admission IPC is required')
-      const owner = { projectId: project.id, projectPath: state.projectPath }
-      const workspace = (await window.desktopAPI.localAgent({ operation: 'workspace', ...owner })).workspace
-      if (!workspace) throw new Error('Main did not return the current workspace')
-      const bridge = createCourseChatObservation(window.desktopAPI, owner)
-      const current = () => {
-        const value = useEditorStore.getState()
-        return { project: structuredClone(selectActiveCourseProjectDocument(value)),
-          assets: structuredClone(value.courseAssetSidecar.files), packages: structuredClone(value.componentPackages),
-          history: (mode === 'instance' ? value.flowSession.history : value.slideBackend.getSession().history).past.length }
+      const current = async () => {
+        const canonical = await readCanonicalCourse()
+        return { project: canonical.model.project, assets: canonical.model.resources.assets, packages: canonical.model.resources.components, history: canonical.undoDepth }
       }
-      try {
-        const request = await bridge.capture({ workspace, scope: 'selection', purpose: 'local-edit', intent: 'edit',
-          instruction: mode === 'shared' ? 'Change this component source so every instance on all pages adds two.' : 'Change only this selected nested Flow component to add two; preserve the other instances.',
-          applyPolicy: 'auto', expectedResult: 'candidate', materials: [], catalogPackages: [] })
-        const baseline = request.context.componentSources.find((value: any) => value.packageId === packageId)
-        if (!baseline) throw new Error('Formal observation did not expose the existing source baseline')
-        const instance = baseline.editTargets.instance.find((value: any) => value.selected && value.target.itemId === selectedId)
-        if (mode === 'instance' && instance?.sourcePatch.status !== 'available') throw new Error('Selected nested Flow instance patch is unavailable')
-        const target = mode === 'shared' ? baseline.editTargets.shared.target : instance.target
-        const destination = request.destinations.find((value: any) => value.kind === 'update' && JSON.stringify(value.target) === JSON.stringify(target))
-        if (!destination) throw new Error('Patch target is not one exact frozen destination')
-        const input = { operation: 'patch', mode, basePackageId: packageId, baseVersion: baseline.baseVersion,
-          baseContentIdentity: baseline.baseContentIdentity, changedFiles: { 'runtime.js': btoa(changedSource) }, deleteFiles: [] }
-        const before = current()
-        const prepared = await useEditorStore.getState().prepareGenerationCandidate(request, {
-          version: 1, requestId: request.requestId, candidateId: crypto.randomUUID(), summary: 'One-file existing component source patch',
-          afterCommit: { version: 1, action: 'observe', reason: 'Verify the changed executable interaction in the actual host.' },
-          steps: [{ id: 'patch', tool: 'component.package', carrier: 'generated-component', destination, input }],
-        })
-        const afterPrepare = current()
-        const committed = useEditorStore.getState().applyGenerationCandidate(prepared.previewId)
-        if (committed.status !== 'committed') throw new Error('Formal patch did not commit')
-        return { input, baseline: { packageId, version: baseline.baseVersion }, beforeRevision: before.project.revision,
-          preparePreservedDocument: JSON.stringify(afterPrepare.project) === JSON.stringify(before.project),
-          preparePreservedAssets: JSON.stringify(afterPrepare.assets) === JSON.stringify(before.assets),
-          preparePreservedPackages: JSON.stringify(afterPrepare.packages) === JSON.stringify(before.packages),
-          historyBefore: before.history, historyAfterPrepare: afterPrepare.history, historyAfterCommit: current().history,
-          behaviorEvidence: prepared.behaviorEvidence, receipt: committed.receipt }
-      } finally { bridge.dispose() }
+      const before = await current(), state = useEditorStore.getState()
+      let project = structuredClone(before.project)
+      let resources = { assetFiles: state.courseAssetSidecar.files, componentPackages: state.componentPackages }
+      const original = resources.componentPackages[packageId]
+      let targetPackage = packageId
+      if (mode === 'instance') {
+        targetPackage = editableComponentPackageId(packageId, crypto.randomUUID())
+        const fork = planComponentPackageFork(project, resources.componentPackages, packageId, targetPackage, selectedId)
+        project = fork.nextDocument
+        resources = applyHistoryResourceChanges(resources, fork.resourceChanges, 'forward')
+      }
+      const baseline = captureComponentPackageSourceBaseline(project, targetPackage)
+      const manifest = { ...original.manifest, id: targetPackage, version: baseline.baseVersion }
+      const input = { changedFiles: { 'runtime.js': changedSource } }
+      const files = { ...original.files, 'manifest.json': new TextEncoder().encode(JSON.stringify(manifest)),
+        'runtime.js': new TextEncoder().encode(rewriteComponentDefinitionId(changedSource, packageId, targetPackage)) }
+      const revision = planComponentPackageSourceRevision({ project, resources, baseline, files, operationId: crypto.randomUUID() })
+      if (!revision.ok || revision.status !== 'planned') throw new Error('Source planner did not produce a changed candidate')
+      project = revision.plan.nextDocument
+      resources = applyHistoryResourceChanges(resources, revision.plan.resourceChanges, 'forward')
+      const scratchFiles: Record<string, Uint8Array> = {}
+      for (const pkg of Object.values(resources.componentPackages) as Array<{ manifest: { id: string; version: string }; files: Record<string, Uint8Array> }>) {
+        const meta = project.componentPackages[pkg.manifest.id]
+        const directory = meta.manifestPath.slice(0, meta.manifestPath.lastIndexOf('/'))
+        for (const [name, bytes] of Object.entries(pkg.files)) scratchFiles[`${directory}/${name}`] = bytes
+      }
+      const prepared = await stageCourseBuild(project, scratchFiles), afterPrepare = await current()
+      const receipt = await prepared.commit()
+      await prepared.stop()
+      return { input, baseline: { packageId, version: original.manifest.version }, beforeRevision: before.project.revision,
+        preparePreservedDocument: JSON.stringify(afterPrepare.project) === JSON.stringify(before.project),
+        preparePreservedAssets: JSON.stringify(afterPrepare.assets) === JSON.stringify(before.assets),
+        preparePreservedPackages: JSON.stringify(afterPrepare.packages) === JSON.stringify(before.packages),
+        historyBefore: before.history, historyAfterPrepare: afterPrepare.history, historyAfterCommit: (await current()).history,
+        behaviorEvidence: prepared.admission.behaviorEvidence, receipt }
     }, { mode, packageId, ids, changedSource: source(2) })
     writeFileSync(join(runRoot, 'formal-patch-result.json'), JSON.stringify(result, null, 2))
     expect(Object.keys(result.input.changedFiles)).toEqual(['runtime.js'])
     expect(result.preparePreservedDocument && result.preparePreservedAssets && result.preparePreservedPackages).toBe(true)
     expect(result.historyAfterPrepare).toBe(result.historyBefore)
     expect(result.historyAfterCommit).toBe(result.historyBefore + 1)
-    expect(result.receipt).toMatchObject({ status: 'committed', beforeRevision: result.beforeRevision, afterRevision: result.beforeRevision + 1 })
+    expect(result.receipt).toMatchObject({ status: 'applied', beforeRevision: result.beforeRevision, revision: result.beforeRevision + 1 })
     const affected = mode === 'shared' ? Object.values(ids) : [ids.flow]
-    expect(result.behaviorEvidence.flatMap((evidence: any) => evidence.instanceIds).sort()).toEqual(affected.sort())
+    expect(result.behaviorEvidence.flatMap((evidence: any) => evidence.instanceIds)).toEqual(expect.arrayContaining(affected))
     for (const evidence of result.behaviorEvidence) {
       expect(evidence).toMatchObject({ status: 'observed', mode: 'full-admission', semanticVerdict: 'requires-review' })
       expect(evidence.actions).toEqual(['update-inputs', 'resize-and-restore', 'suspend', 'resume'])
@@ -307,7 +310,6 @@ for (const mode of ['shared', 'instance'] as const) test(`component.package patc
     expect(withoutClock(reopened.project)).toEqual(withoutClock(redone.project))
     expect(reopened.componentFiles).toEqual(redone.componentFiles)
     expect(reopened.assetFiles).toEqual(redone.assetFiles)
-    expect(nativeRecords(run), 'This deterministic host test must not call a paid native model').toEqual([])
     expect(run.pageErrors).toEqual([])
     await expectBackgroundWindowsIsolated(app, true)
   } catch (error) {

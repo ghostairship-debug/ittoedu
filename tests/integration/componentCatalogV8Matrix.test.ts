@@ -13,11 +13,11 @@ import { executeComponentRuntime } from '@/renderer/components/executeComponentR
 import {
   importComponentPackage,
   type ImportedComponentPackage,
-} from '@/renderer/components/importComponentPackage'
+} from '../../src/core/drivers/codecs/importComponentPackage'
 import {
   createCourseProjectArchive,
   openCourseProjectArchive,
-} from '@/renderer/project/courseProjectArchive'
+} from '../../src/core/drivers/codecs/courseProjectArchive'
 import {
   selectActiveCourseProjectDocument,
   selectActivePresentationStateId,

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { createTextNode } from '@/renderer/project/nativeNodeFactories'
+import { createTextNode } from '@/core/tools/nativeNodeFactories'
 import { nativeRenderInputFromV9Item } from '@/player/surfaces/native/publishedNativeRendering'
 import { analyzeTextNodeLayout, layoutHorizontalTextNode, renderTextNodeCanvas } from '@/shared/textLayout'
 import * as layoutMeasure from '@/shared/layoutMeasure'

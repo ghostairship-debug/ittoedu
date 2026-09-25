@@ -17,8 +17,8 @@ import type { ComponentManifest } from '@/shared/componentTypes'
 import {
   
   createTextNode,
-} from '@/renderer/project/nativeNodeFactories'
-import { syncFlowCourseLocations } from '@/renderer/course/flowDocumentModel'
+} from '@/core/tools/nativeNodeFactories'
+import { syncFlowCourseLocations } from '../../src/core/tools/flowDocumentModel'
 import {
   enterFlowTextEditing,
   selectFlowEditorBlock,
@@ -67,8 +67,8 @@ import { buildFlowEditorView, captureFlowEditorAuthoringTarget } from '@/rendere
 import { applyEditorTransactionStep, createEditorTransactionStep } from '@/renderer/authoring/editorTransaction'
 import type { HistoryResourceState } from '@/renderer/store/courseResourceState'
 import { useEditorStore } from '@/renderer/store/editorStore'
-import { parseComponentPackageFiles } from '@/renderer/components/importComponentPackage'
-import { componentPackageMeta } from '@/renderer/components/editableComponentPackage'
+import { parseComponentPackageFiles } from '../../src/core/drivers/codecs/importComponentPackage'
+import { componentPackageMeta } from '@/shared/componentPackageMeta'
 import { FlowPropertiesPanel } from '@/renderer/ui/properties/FlowPropertiesPanel'
 import { buildFlowPropertiesOwner } from '@/renderer/ui/properties/FlowPropertiesContextBuilder'
 import {

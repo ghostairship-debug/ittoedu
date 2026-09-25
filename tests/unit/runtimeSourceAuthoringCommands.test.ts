@@ -14,7 +14,7 @@ import {
   ownerKeyFor,
   type CourseAuthoringOwner,
 } from '@/renderer/authoring/courseAuthoringScope'
-import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
+import { createBlankCourseProject } from '@/core/course/createCourseProject'
 import {
   planRuntimeSourceUpdate,
   type PlanRuntimeSourceUpdateInput,

@@ -2,7 +2,7 @@ import { read as readCompoundFile } from 'cfb'
 import { sceneNodeToCourseLayerItem } from '../../shared/courseProjectModel'
 import { formulaAstToAccessibleText } from '../../shared/formulaLinear'
 import { analyzeFormulaNodeLayout } from '../../shared/formulaRenderer'
-import { createFormulaNode } from './nativeNodeFactories'
+import { createFormulaNode } from '../../core/tools/nativeNodeFactories'
 import { parseMtefEquation } from './mtefEquation'
 import { pptxReject, pptxRelationshipId, xmlFirst, type PptxPackage, type PptxImportIssue } from './pptxPackage'
 

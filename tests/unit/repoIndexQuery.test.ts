@@ -319,7 +319,7 @@ describe('repo-index query and Context Pack', () => {
         'artifacts/ai-capabilities/component-catalog.snapshot.json',
         'src/main/componentCatalogManager.ts',
         'src/shared/componentCatalog.ts',
-        'src/renderer/components/importComponentPackage.ts',
+        'src/core/drivers/codecs/importComponentPackage.ts',
         'src/shared/contracts/component-v4/schema.ts',
       ])
       expect(external.candidates[0]?.paths.slice(0, 15)).not.toContain(

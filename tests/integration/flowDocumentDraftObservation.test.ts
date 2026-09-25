@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { buildFlowEditorView, captureFlowEditorAuthoringTarget } from '@/renderer/course/flowEditorView'
-import { flowSurfaceIn } from '@/renderer/course/flowDocumentModel'
+import { flowSurfaceIn } from '../../src/core/tools/flowDocumentModel'
 import { selectActiveCourseProjectDocument, useEditorStore } from '@/renderer/store/editorStore'
 import { plainDocumentText } from '@/shared/document/content'
 import { serializeDocumentMarkdown } from '@/shared/document/markdown'

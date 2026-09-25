@@ -26,6 +26,9 @@ __pycache__/
 *.tsbuildinfo
 *.zip
 
+# Built by `npm run build:clipboard-helper` (part of build:desktop); only Program.cs is source.
+resources/clipboard-file-list/*.exe
+
 .env
 .env.*
 !.env.example

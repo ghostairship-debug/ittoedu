@@ -16,7 +16,7 @@ import type { ComponentInsertionTarget } from '../components/insertComponentPack
 import {
   componentPackageSha256,
   importComponentPackageAsync,
-} from '../components/importComponentPackage'
+} from '../../core/drivers/codecs/importComponentPackage'
 
 export interface ComponentLibraryIdentity {
   readonly projectId: string

@@ -3,7 +3,7 @@ import type {
   NativeLayerItem,
   RuntimeLayerItem,
 } from '@/shared/courseProjectTypes'
-import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
+import { createBlankCourseProject } from '@/core/course/createCourseProject'
 import {
   buildSceneThumbnailComposition,
   hasEnabledRuntime,

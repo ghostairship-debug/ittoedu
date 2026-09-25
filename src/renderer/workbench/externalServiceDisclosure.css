@@ -1,0 +1,5 @@
+.external-service-disclosure-layer { position: fixed; z-index: 1500; inset: 0; display: grid; place-items: center; padding: 16px; background: #10182799; }
+.external-service-disclosure { width: min(560px, 100%); max-height: calc(100vh - 32px); padding: 14px; border: 1px solid var(--border-color, #cbd5e1); border-radius: 8px; background: var(--panel-bg, #fff); box-shadow: 0 12px 32px #0003; color: var(--text-primary, #172033); overflow: auto; font-size: 13px; line-height: 1.6; }
+.external-service-disclosure h3 { margin: 0 0 8px; font-size: 15px; }
+.external-service-disclosure p { margin: 8px 0; }
+.external-service-disclosure > div { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }

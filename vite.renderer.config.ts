@@ -72,7 +72,7 @@ export default defineConfig({
     },
   },
   build: {
-    rollupOptions: { input: { main: resolve(__dirname, 'index.html'), admission: resolve(__dirname, 'admission.html') } },
+    rollupOptions: { input: { main: resolve(__dirname, 'index.html'), admission: resolve(__dirname, 'admission.html'), attachmentExtraction: resolve(__dirname, 'attachment-extraction.html'), nativeTextMeasurement: resolve(__dirname, 'native-text-measurement.html') } },
     outDir: 'dist-renderer',
     emptyOutDir: true,
     sourcemap: true,

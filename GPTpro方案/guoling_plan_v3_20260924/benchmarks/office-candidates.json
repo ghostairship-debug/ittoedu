@@ -1,0 +1,189 @@
+{
+  "schemaVersion": 1,
+  "asOf": "2026-09-24",
+  "selectionStatus": "open",
+  "ordering": "not_a_ranking",
+  "note": "未测候选保持开放；记录事实与测量，不默认部署全部候选。",
+  "candidates": [
+    {
+      "id": "docx-preview",
+      "route": "A",
+      "description": "DOCX直接HTML查看",
+      "deployment": "local-browser",
+      "sources": [
+        "S03"
+      ],
+      "evaluationStatus": "not_tested",
+      "testedVersion": null,
+      "licenseReview": null,
+      "commercialQuote": null,
+      "measurements": null,
+      "blockingIssues": []
+    },
+    {
+      "id": "pptx-renderer",
+      "route": "A",
+      "description": "PPTX直接DOM/SVG查看",
+      "deployment": "local-browser",
+      "sources": [
+        "S04"
+      ],
+      "evaluationStatus": "not_tested",
+      "testedVersion": null,
+      "licenseReview": null,
+      "commercialQuote": null,
+      "measurements": null,
+      "blockingIssues": []
+    },
+    {
+      "id": "sheetjs-grid",
+      "route": "A",
+      "description": "工作表解析与网格查看",
+      "deployment": "local-browser",
+      "sources": [
+        "S05",
+        "S06"
+      ],
+      "evaluationStatus": "not_tested",
+      "testedVersion": null,
+      "licenseReview": null,
+      "commercialQuote": null,
+      "measurements": null,
+      "blockingIssues": []
+    },
+    {
+      "id": "wps-weboffice",
+      "route": "B",
+      "description": "成套WebOffice服务",
+      "deployment": "cloud-or-contracted-deployment",
+      "sources": [
+        "S07",
+        "S08",
+        "S09"
+      ],
+      "evaluationStatus": "not_tested",
+      "testedVersion": null,
+      "licenseReview": null,
+      "commercialQuote": null,
+      "measurements": null,
+      "blockingIssues": []
+    },
+    {
+      "id": "aliyun-imm-weboffice",
+      "route": "B",
+      "description": "OSS+IMM在线编辑",
+      "deployment": "cloud",
+      "sources": [
+        "S10",
+        "S11"
+      ],
+      "evaluationStatus": "not_tested",
+      "testedVersion": null,
+      "licenseReview": null,
+      "commercialQuote": null,
+      "measurements": null,
+      "blockingIssues": []
+    },
+    {
+      "id": "onlyoffice-docs",
+      "route": "B",
+      "description": "文档服务+编辑器",
+      "deployment": "document-server",
+      "sources": [
+        "S12",
+        "S13",
+        "S14",
+        "S15"
+      ],
+      "evaluationStatus": "not_tested",
+      "testedVersion": null,
+      "licenseReview": null,
+      "commercialQuote": null,
+      "measurements": null,
+      "blockingIssues": []
+    },
+    {
+      "id": "collabora-online",
+      "route": "B",
+      "description": "WebOffice服务",
+      "deployment": "document-server",
+      "sources": [
+        "S17",
+        "S18"
+      ],
+      "evaluationStatus": "not_tested",
+      "testedVersion": null,
+      "licenseReview": null,
+      "commercialQuote": null,
+      "measurements": null,
+      "blockingIssues": []
+    },
+    {
+      "id": "collabora-local-webui",
+      "route": "C",
+      "description": "本地文档引擎+Web界面",
+      "deployment": "local-native",
+      "sources": [
+        "S16",
+        "S17"
+      ],
+      "evaluationStatus": "not_tested",
+      "testedVersion": null,
+      "licenseReview": null,
+      "commercialQuote": null,
+      "measurements": null,
+      "blockingIssues": []
+    },
+    {
+      "id": "zetaoffice-zetajs",
+      "route": "D",
+      "description": "浏览器WASM文档引擎",
+      "deployment": "local-wasm",
+      "sources": [
+        "S19",
+        "S20",
+        "S21",
+        "S22"
+      ],
+      "evaluationStatus": "not_tested",
+      "testedVersion": null,
+      "licenseReview": null,
+      "commercialQuote": null,
+      "measurements": null,
+      "blockingIssues": []
+    },
+    {
+      "id": "univer-exchange",
+      "route": "E",
+      "description": "编辑框架+官方文件交换",
+      "deployment": "browser-plus-conversion-backend",
+      "sources": [
+        "S24",
+        "S25",
+        "S26"
+      ],
+      "evaluationStatus": "not_tested",
+      "testedVersion": null,
+      "licenseReview": null,
+      "commercialQuote": null,
+      "measurements": null,
+      "blockingIssues": []
+    },
+    {
+      "id": "libreoffice-uno",
+      "route": "C",
+      "description": "外部本地编辑与UNO桥",
+      "deployment": "local-native-external",
+      "sources": [
+        "S22",
+        "S23"
+      ],
+      "evaluationStatus": "not_tested",
+      "testedVersion": null,
+      "licenseReview": null,
+      "commercialQuote": null,
+      "measurements": null,
+      "blockingIssues": []
+    }
+  ]
+}

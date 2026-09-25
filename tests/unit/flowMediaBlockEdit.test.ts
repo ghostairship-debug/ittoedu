@@ -10,7 +10,7 @@ import {
   type FlowMediaBlock,
 } from '@/shared/courseProjectTypes'
 import { COURSE_AUTHORING_TARGET_REJECTION_REASONS } from '@/renderer/authoring/courseAuthoringSession'
-import { syncFlowCourseLocations } from '@/renderer/course/flowDocumentModel'
+import { syncFlowCourseLocations } from '../../src/core/tools/flowDocumentModel'
 import {
   executeFlowEditorCommand,
   importAndReplaceFlowMediaBlock,

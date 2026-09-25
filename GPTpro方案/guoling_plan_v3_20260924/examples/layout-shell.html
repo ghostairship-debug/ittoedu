@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"/>
+<meta content="width=device-width,initial-scale=1" name="viewport"/>
+<title>布局草稿｜从缺角看完全平方</title>
+<style>
+*{box-sizing:border-box}body{margin:0;padding:28px;background:#eef1f3;color:#152e37;font-family:Arial,"Microsoft YaHei",sans-serif}
+.gl-page{position:relative;width:1280px;height:720px;margin:0 auto 28px;background:#fffdf8;overflow:hidden;border:1px solid #dce2e2}
+.gl-text{margin:0;line-height:1.38}.gl-slot{border:2px dashed #90adb3;background:#f0f6f5;border-radius:14px;padding:24px;color:#33565e;font-size:22px;line-height:1.5;overflow:hidden}.gl-slot p{margin:0 0 10px}.gl-slot small{font-size:17px;display:block;color:#536b70}.label{font-size:17px;color:#526d74}.formula{font-family:Georgia,"Times New Roman",serif}.footer{font-size:18px;color:#60757a}
+</style>
+</head>
+<body>
+<section aria-label="第一页，缺角" class="gl-page" data-gl-fragment="gap" data-gl-id="page-1">
+<div data-gl-id="p1-band" data-gl-role="shape" style="position:absolute;left:0;top:0;width:18px;height:720px;background:#166d76"></div>
+<p class="gl-text label" data-gl-edit="text move resize" data-gl-id="p1-label" data-gl-role="text" style="position:absolute;left:70px;top:42px;width:520px;height:28px">结构观察 / 01</p>
+<h1 class="gl-text" data-gl-edit="text move resize" data-gl-id="p1-title" data-gl-role="text" style="position:absolute;left:70px;top:106px;width:460px;height:170px;font-size:48px;font-weight:700">这个缺角，为什么恰好是1？</h1>
+<p class="gl-text" data-gl-edit="text move resize" data-gl-id="p1-body" data-gl-role="text" style="position:absolute;left:70px;top:305px;width:445px;height:85px;font-size:27px">先看一块x²，再接上两块x。</p>
+<p class="gl-text formula" data-gl-edit="text move resize" data-gl-id="p1-formula" data-gl-role="text" style="position:absolute;left:70px;top:430px;width:455px;height:100px;font-size:32px">x²＋2x＋1＝(x＋1)²</p>
+<div class="gl-slot" data-gl-brief="面积拼合演示：教师点击补齐单位缺角，显示边长x+1；支持重播；几何条件x&gt;0" data-gl-edit="move resize" data-gl-id="area-demo" data-gl-kind="interactive" data-gl-role="slot" data-gl-slot="area-demo" style="position:absolute;left:590px;top:92px;width:610px;height:430px">
+<p>面积拼合演示</p><small>互动组件待生成。教师点击“补齐”与“重播”。此处仅是布局框架，不是已完成的互动。</small>
+</div>
+<div class="gl-slot" data-gl-brief="可选的纸片拼合抽象装饰；不含文字与数学关系；删除后不补回" data-gl-edit="move resize" data-gl-id="paper-art" data-gl-kind="image" data-gl-required="false" data-gl-role="slot" data-gl-slot="paper-art" style="position:absolute;left:815px;top:550px;width:385px;height:100px;padding:16px;font-size:18px"><p>可选图片槽</p><small>不影响教学，可删除。</small></div>
+<p class="gl-text footer" data-gl-edit="text move resize" data-gl-id="p1-note" data-gl-role="text" style="position:absolute;left:70px;top:630px;width:660px;height:36px">面积演示取x＞0。素材就绪后由程序装配。</p>
+</section>
+<section aria-label="第二页，减回去" class="gl-page" data-gl-fragment="subtract" data-gl-id="page-2">
+<p class="gl-text label" data-gl-edit="text move resize" data-gl-id="p2-label" data-gl-role="text" style="position:absolute;left:70px;top:42px;width:550px;height:28px">等价变形 / 02</p>
+<h1 class="gl-text" data-gl-edit="text move resize" data-gl-id="p2-title" data-gl-role="text" style="position:absolute;left:70px;top:105px;width:1140px;height:78px;font-size:48px">补上，再减回去</h1>
+<div class="gl-slot" data-gl-brief="加一减一结构图；原式、补齐、减回；用精确SVG/可编辑文字标注，不生图绘制公式" data-gl-edit="move resize" data-gl-id="equivalence-diagram" data-gl-kind="diagram" data-gl-role="slot" data-gl-slot="equivalence-diagram" style="position:absolute;left:70px;top:225px;width:570px;height:360px"><p>加一减一结构图</p><small>静态图解待生成，精确标注数学关系；无需学生操作。</small></div>
+<p class="gl-text formula" data-gl-edit="text move resize" data-gl-id="p2-formula" data-gl-role="text" style="position:absolute;left:700px;top:245px;width:500px;height:100px;font-size:34px">x²＋2x＝(x＋1)²－1</p>
+<p class="gl-text" data-gl-edit="text move resize" data-gl-id="p2-conclusion" data-gl-role="text" style="position:absolute;left:700px;top:375px;width:465px;height:140px;font-size:28px">补齐是为了看结构，减1是为了保持原式不变。</p>
+<p class="gl-text" data-gl-edit="text move resize" data-gl-id="p2-check" data-gl-role="text" style="position:absolute;left:70px;top:623px;width:1080px;height:50px;font-size:25px">x＝3时，9＋6＝16－1＝15。</p>
+</section>
+</body>
+</html>

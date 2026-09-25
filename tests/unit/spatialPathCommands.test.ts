@@ -16,18 +16,8 @@ import {
   undoSpatialAuthoring,
   type SpatialAuthoringSession,
 } from '@/renderer/course/spatialEditorCommands'
-import {
-  addSpatialPath,
-  addSpatialPathInSession,
-  deleteSpatialPath,
-  deleteSpatialPathInSession,
-  makeSpatialPathAuthoringTarget,
-  resolveSpatialPlaybackSchedule,
-  setSpatialShowCameraFrames,
-  spatialPathAuthoringAddress,
-  updateSpatialPath,
-  updateSpatialPathInSession,
-} from '@/renderer/course/spatialPathCommands'
+import { addSpatialPath, addSpatialPathInSession, deleteSpatialPath, deleteSpatialPathInSession, makeSpatialPathAuthoringTarget, setSpatialShowCameraFrames, updateSpatialPath, updateSpatialPathInSession } from '@/renderer/course/spatialPathCommands'
+import { resolveSpatialPlaybackSchedule, spatialPathAuthoringAddress } from '../../src/core/tools/spatialPath'
 import {
   addSpatialRelation,
   addSpatialRelationInSession,

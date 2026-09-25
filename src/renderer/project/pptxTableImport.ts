@@ -1,5 +1,5 @@
 import { nanoid } from 'nanoid'
-import { createTableLayerItem, createTableNode } from './nativeNodeFactories'
+import { createTableLayerItem, createTableNode } from '../../core/tools/nativeNodeFactories'
 import { pptxReject, xmlAll, xmlChildren, xmlFirst, type PptxImportIssue } from './pptxPackage'
 import type { NativeTableCellStyle, NativeTableStyle } from '../../shared/contracts/native-v1/types'
 import { tableMergeIssues, type TableMergeRegion } from '../../shared/tableMerge'

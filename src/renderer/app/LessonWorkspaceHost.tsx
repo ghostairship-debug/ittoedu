@@ -1,47 +1,53 @@
-import { forwardRef, useMemo, useRef, useImperativeHandle, useState, type ReactNode } from 'react'
-import type { LessonWorkspace, LessonConversation } from '../../shared/lessonWorkspace'
+import { captureDocumentReference, workbenchSelection } from '../workbench/SelectionContextController'
+import type { CourseDocumentsPort } from '../lessonWorkspace/controller/useDocumentTabsController'
+import { forwardRef, useEffect, useMemo, useRef, useImperativeHandle, useState, type ReactNode } from 'react'
+import type { LessonWorkspace } from '../../shared/lessonWorkspace'
 import { LessonWorkspaceShell, type LessonWorkspaceShellHandle } from '../lessonWorkspace/LessonWorkspaceShell'
-import { LessonConversationChat, DirectoryConversationChat } from '../ui/chat/LessonConversationChat'
 import { LessonMaterialBrowser } from '../lessonMaterials/LessonMaterialBrowser'
-import { LessonAuthoringPanel } from '../lessonAuthoring/LessonAuthoringPanel'
-import type { LessonAssemblyInput, LessonBuildTarget } from '../../shared/lessonAuthoringDesktop'
 import type { LessonAuthoringMaterialSelection } from '../../shared/lessonAuthoring'
-import type { LocalAgentId } from '../../shared/localAgentContract'
-import { sameWorkspacePath } from '../../shared/workspaceIdentity'
 import { createDesktopDocumentPort } from './lessonDocumentPort'
+import { ExecutionAssistant } from '../workbench/ExecutionAssistant'
+import { WorkspaceRecoveryPanel } from '../workbench/WorkspaceRecoveryPanel'
+import type { ExecutionDocumentReference } from '../../shared/workbench/executionDesktop'
+import type { DocumentHostAPI, SaveDirectoryContext } from '../../shared/workbench/desktop'
 
 export interface LessonWorkspaceHostProps {
-  projectId: string
+  courseDocuments?: CourseDocumentsPort
   projectPath: string | null
+  captureCourseDocument?(writable: boolean): Promise<ExecutionDocumentReference[]>
+  prepareCourseDocuments?(): Promise<void>
   onOpenProject(path: string): Promise<boolean>
   onNewProject(): Promise<boolean>
-  onActiveLesson(lesson: LessonWorkspace | null, conversation: LessonConversation | null): void
-  onActiveDirectoryConversation?(conversation: LessonConversation | null): void
   onDirtyChange?(dirty: boolean): void
-  observeEmptyProject(lesson: LessonWorkspace['identity'], conversationId: string): LessonBuildTarget
-  continueProjectEditing(lesson: LessonWorkspace['identity'], conversationId: string, expectedProjectId: string): Promise<void>
-  assemble(input: LessonAssemblyInput, conversationId: string): Promise<string>
+  documents?: DocumentHostAPI
+  onSaveDirectoryChange?(directory: SaveDirectoryContext | null): void
   children: ReactNode
 }
 export const LessonWorkspaceHost = forwardRef<LessonWorkspaceShellHandle, LessonWorkspaceHostProps>(function LessonWorkspaceHost(props, ref) {
   const shell = useRef<LessonWorkspaceShellHandle>(null)
   useImperativeHandle(ref, () => ({
-    stopDocumentEdit: async () => { await shell.current?.stopDocumentEdit() },
-    editDocument: async (...args) => { if (!shell.current) throw new Error('课例工作台尚未就绪'); await shell.current.editDocument(...args) },
     showProject: () => shell.current?.showProject(),
     detachLesson: () => shell.current?.detachLesson(),
     flushAll: () => shell.current?.flushAll() ?? Promise.resolve(true),
+    saveActiveDocument: () => shell.current?.saveActiveDocument() ?? Promise.resolve('none'),
     closeAll: () => shell.current?.closeAll() ?? Promise.resolve(true),
     preserveAll: () => shell.current?.preserveAll() ?? Promise.resolve(true),
-    applyBinding: (lesson, conversation) => shell.current?.applyBinding(lesson, conversation),
-    applyDirectoryBinding: conversation => shell.current?.applyDirectoryBinding(conversation),
     openFile: path => shell.current?.openFile(path) ?? Promise.resolve(),
+    focusDocument: id => shell.current?.focusDocument(id) ?? Promise.resolve(),
   }), [])
   const [selections, setSelections] = useState<Record<string, LessonAuthoringMaterialSelection[]>>({})
-  const [adapter, setAdapter] = useState<LocalAgentId>('codex')
   const api = window.desktopAPI
-  const port = useMemo(() => api?.lessonFiles ? createDesktopDocumentPort(api.lessonFiles) : null, [api?.lessonFiles])
-  if (!api?.lesson || !port) return <>{props.children}</>
+  useEffect(() => api?.onRequestFocusDocument?.(id => {
+    void shell.current?.focusDocument(id).catch(error => { void api.reportDiagnostic({ source: 'renderer', message: error instanceof Error ? error.message : '无法定位保留的文档' }) })
+  }), [api])
+  const documents = props.documents ?? api?.documents
+  const port = useMemo(() => api?.lessonFiles && documents ? createDesktopDocumentPort(api.lessonFiles, documents) : null, [api?.lessonFiles, documents])
+  useEffect(() => workbenchSelection.setFallback(async id => {
+    await props.prepareCourseDocuments?.()
+    if (!api?.documents) throw new Error('文档服务尚未就绪')
+    return api.documents.read(id)
+  }), [api?.documents, props.prepareCourseDocuments])
+  if (!api?.lesson || !api.workspaceFiles || !port) return <><p role="alert">工作台服务不可用，请重新打开应用。</p>{props.children}</>
   const material = (sourcePath: string | undefined, lesson: LessonWorkspace | null) => {
     const service = api.lessonMaterials
     if (!lesson || !service) return <p>请先打开课例，再添加或读取材料。</p>
@@ -52,40 +58,22 @@ export const LessonWorkspaceHost = forwardRef<LessonWorkspaceShellHandle, Lesson
       selectSource={() => service.selectSource(sourcePath ? { path: sourcePath } : undefined)}
       list={() => service.list(target)} importMaterial={input => service.importMaterial(target, input)} read={input => service.read(target, input)} />
   }
-  return <LessonWorkspaceShell ref={shell} {...props} lessonOperation={api.lesson} documentPort={port} documentAiOperation={api.lessonDocumentAi}
-    onActiveLesson={(lesson, conversation) => {
-      props.onActiveLesson(lesson, conversation)
-      if (lesson && conversation && api.lessonAuthoring) {
-        const key = lesson.identity.normalizedDirectory + ':' + lesson.identity.lessonId
-        void api.lessonAuthoring({ operation: 'read', lesson: lesson.identity, conversationId: conversation.conversationId }).then(result => {
-          setSelections(current => current[key] !== undefined ? current : { ...current, [key]: result.view.state.materials.map(({ id, extractionVersion, fragmentIds }) => ({ id, extractionVersion, fragmentIds })) })
-        }).catch(() => { /* The workflow panel presents authoritative read errors. */ })
-      }
-    }}
-    renderChat={(lesson, conversation, documentTarget) => <LessonConversationChat documentTarget={documentTarget} lesson={lesson} conversation={conversation} projectId={props.projectId} projectPath={props.projectPath} />}
-    renderDirectoryChat={(root, conversation, documentTarget) => {
-      const bound = !!props.projectPath && conversation.projectTarget?.projectId === props.projectId
-        && sameWorkspacePath(conversation.projectTarget.normalizedPath, props.projectPath)
-      return <DirectoryConversationChat root={root} conversation={conversation} documentTarget={documentTarget}
-        projectId={bound ? props.projectId : ''} projectPath={bound ? props.projectPath : null} />
-    }}
-    renderMaterial={(filename, lesson) => material(filename, lesson)} renderMaterials={lesson => material(undefined, lesson)}
-    renderWorkflow={(lesson, conversation) => api.lessonAuthoring && <>
-      <details className="lesson-workflow-settings"><summary>文档创作助手 · {adapter === 'codex' ? 'Codex' : adapter === 'claude' ? 'Claude' : 'OpenCode'}</summary><label>创作流程 CLI <select aria-label="创作流程 CLI" value={adapter} onChange={event => setAdapter(event.target.value as LocalAgentId)}><option value="codex">Codex</option><option value="claude">Claude</option><option value="opencode">OpenCode</option></select></label></details>
-      <LessonAuthoringPanel observeEmptyProject={() => props.observeEmptyProject(lesson.identity, conversation.conversationId)} lesson={lesson.identity} conversationId={conversation.conversationId} adapter={adapter} operate={api.lessonAuthoring}
-        continueProjectEditing={expectedProjectId => props.continueProjectEditing(lesson.identity, conversation.conversationId, expectedProjectId)}
-        materialSelections={selections[lesson.identity.normalizedDirectory + ':' + lesson.identity.lessonId] ?? []}
-        flushDocuments={() => shell.current?.flushAll() ?? Promise.resolve(true)}
-        openDocument={relativePath => { void shell.current?.openFile(`${lesson.identity.normalizedDirectory}/${relativePath}`) }}
-        cancelDocumentRepair={() => shell.current?.stopDocumentEdit() ?? Promise.resolve()}
-        repairDocument={async (relativePath, instruction, ticket) => {
-          if (!shell.current || !api.lessonAuthoring) throw new Error('课例文档修改入口尚未就绪')
-          const workspace = { version: 1 as const, kind: 'lesson' as const, lessonId: lesson.identity.lessonId, normalizedDirectory: lesson.identity.normalizedDirectory, conversationId: conversation.conversationId }
-          await shell.current.editDocument(`${lesson.identity.normalizedDirectory}/${relativePath}`, workspace, adapter, instruction, async (ref, expectedVersion) => {
-            if (ref.kind !== 'lesson' || ref.lessonId !== ticket.lesson.lessonId || ref.relativePath !== relativePath) throw new Error('阶段修改返回了不同文档，当前阶段未继续')
-            await api.lessonAuthoring!({ operation: 'complete-document-repair', lesson: ticket.lesson, conversationId: conversation.conversationId, ticket, expectedVersion })
-          })
-        }}
-        assemble={input => props.assemble(input, conversation.conversationId)} onProjectReady={() => shell.current?.showProject()} />
-    </>} />
+  return <><LessonWorkspaceShell ref={shell} {...props} lessonOperation={api.lesson} workspaceFiles={api.workspaceFiles} documentPort={port}
+    renderAssistant={(root, documentTarget, isCourse, drainDocuments) => api.execution ? <ExecutionAssistant root={root}
+      onLocateDocument={id => shell.current?.focusDocument(id) ?? Promise.resolve()}
+      prepareSend={async () => { if (!await drainDocuments()) return false; await props.prepareCourseDocuments?.(); return true }}
+      captureDocuments={async writable => {
+        const editor = documentTarget?.getEditor()
+        if (editor) {
+          if (!await editor.session.drain()) throw new Error('当前输入尚未提交，请先完成输入或处理冲突')
+          const documentId = editor.session.documentId
+          if (!documentId) throw new Error('文档会话尚未就绪')
+          const snapshot = await api.documents!.read(documentId)
+          return [captureDocumentReference(snapshot, writable)]
+        }
+        return isCourse ? props.captureCourseDocument?.(writable) ?? [] : []
+      }} /> : <p role="alert">创作助手服务不可用，请重新打开应用。</p>}
+    renderMaterial={(filename, lesson) => material(filename, lesson)} renderMaterials={lesson => material(undefined, lesson)} />
+    <WorkspaceRecoveryPanel api={api.documents!} onRestored={id => shell.current?.focusDocument(id) ?? Promise.reject(new Error('文档视图尚未就绪'))} />
+  </>
 })

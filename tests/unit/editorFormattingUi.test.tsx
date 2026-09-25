@@ -1,6 +1,6 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { createShapeNode, createTextNode } from '@/renderer/project/nativeNodeFactories'
+import { createShapeNode, createTextNode } from '@/core/tools/nativeNodeFactories'
 import {
   selectActiveCourseProjectDocument,
   selectActiveScene,

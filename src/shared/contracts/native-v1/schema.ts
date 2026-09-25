@@ -36,17 +36,8 @@ const textRunStyleSchema = z.object({
   fontSize: finiteNumber.min(8).max(400).optional(),
 })
 
-const textNodeCoreSchema = nativeRenderableBaseSchema.extend({
-  type: z.literal('text'),
-  flipX: z.boolean().optional(),
-  flipY: z.boolean().optional(),
-  text: z.string(),
-  runs: z.array(z.object({
-    start: z.number().int().nonnegative(),
-    end: z.number().int().nonnegative(),
-    style: textRunStyleSchema,
-  })).max(10_000),
-  style: z.object({
+/** Authoritative whole-node text style; public patches derive their field rules from this. */
+export const textNodeStyleSchema = z.object({
     fontFamily: z.string().min(1),
     fontSize: finiteNumber.min(8).max(400),
     color: colorSchema,
@@ -66,7 +57,19 @@ const textNodeCoreSchema = nativeRenderableBaseSchema.extend({
     backgroundColor: colorSchema,
     backgroundOpacity: unitInterval,
     cornerRadius: finiteNumber.min(0).max(500),
-  }),
+  })
+
+const textNodeCoreSchema = nativeRenderableBaseSchema.extend({
+  type: z.literal('text'),
+  flipX: z.boolean().optional(),
+  flipY: z.boolean().optional(),
+  text: z.string(),
+  runs: z.array(z.object({
+    start: z.number().int().nonnegative(),
+    end: z.number().int().nonnegative(),
+    style: textRunStyleSchema,
+  })).max(10_000),
+  style: textNodeStyleSchema,
 }).superRefine((node, context) => {
   const characterCount = Array.from(node.text).length
   for (const [index, run] of node.runs.entries()) {

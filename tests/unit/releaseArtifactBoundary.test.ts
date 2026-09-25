@@ -49,7 +49,7 @@ import { buildPublishedCourseV2Payload } from '@/renderer/export/course/buildPub
 import {
   createCourseProjectArchive,
   openCourseProjectArchive,
-} from '@/renderer/project/courseProjectArchive'
+} from '../../src/core/drivers/codecs/courseProjectArchive'
 import type { CoursePublishSources } from '@/renderer/export/course/buildPublishedCourse'
 
 const PLAYER_BUNDLE = 'window.__COURSE_PLAYER_PLACEHOLDER__=true;'

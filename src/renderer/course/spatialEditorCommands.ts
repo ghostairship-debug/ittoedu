@@ -1,12 +1,14 @@
+import { planSpatialTextInsertion, planSpatialShapeInsertion, planSpatialFormulaInsertion, planSpatialImageInsertion, planSpatialVideoInsertion, planSpatialChartInsertion, planSpatialTableInsertion, requireWorldScope, defaultWorldOrigin, appendWorldLayer, requireSpatialAsset as requireAsset, spatialSurfaceIn, type AddSpatialWorldLayerInput, type AddSpatialWorldTextLayerInput, type AddSpatialWorldShapeLayerInput, type AddSpatialWorldImageLayerInput, type AddSpatialWorldVideoLayerInput } from '../../core/tools/spatialInsertion'
+export { offsetDefaultSpatialInsertion, spatialSurfaceIn, SPATIAL_DEFAULT_INSERTION_COLUMNS, SPATIAL_DEFAULT_INSERTION_OFFSET } from '../../core/tools/spatialInsertion'
+export type { AddSpatialWorldLayerInput, AddSpatialWorldTextLayerInput, AddSpatialWorldShapeLayerInput, AddSpatialWorldImageLayerInput, AddSpatialWorldVideoLayerInput, SpatialInsertionPoint } from '../../core/tools/spatialInsertion'
+import { updateBodySurfaceBackground } from '../../core/tools/courseBackground'
 import { tableNativeContentObjectSchema, chartNativeContentObjectSchema } from '../../shared/contracts/native-v1'
 import type { NativeTableContent, NativeChartContent } from '../../shared/contracts/native-v1'
-import { createTableNode, createTableLayerItem, createChartNode, createChartLayerItem } from '../project/nativeNodeFactories'
 import type { ChartType } from './chartContentOperations'
 import { nanoid } from 'nanoid'
 import { courseProjectDocumentSchema } from '../../shared/courseProjectSchema'
 import { sceneNodeToCourseLayerItem } from '../../shared/courseProjectModel'
 import {
-  BACKGROUND_MODES,
   type BackgroundMode,
   type CourseProjectDocument,
   type CourseRuntimeDefinition,
@@ -16,15 +18,9 @@ import {
   type SpatialSurfaceDocument,
 } from '../../shared/courseProjectTypes'
 import type { AssetMeta } from '../../shared/contracts/media-v1'
-import type { ShapeType } from '../../shared/contracts/native-v1'
 import {
   createExternalComponentNode,
-  createFormulaNode,
-  createImageNode,
-  createShapeNode,
-  createTextNode,
-  createVideoNode,
-} from '../project/nativeNodeFactories'
+} from '../../core/tools/nativeNodeFactories'
 import {
   bumpSpatialGeneration,
   catchSpatialCommand,
@@ -60,8 +56,7 @@ import {
   type SpatialEditorLayerView,
   type SpatialEditorView,
 } from './spatialEditorView'
-import { allocateCourseLayerOrder } from './globalLayerCommands'
-import { repairRemovedCourseReferences } from './courseReferenceCleanup'
+import { repairRemovedCourseReferences } from '../../core/tools/courseReferenceCleanup'
 
 export {
   SPATIAL_REJECT_LOCKED,
@@ -97,29 +92,6 @@ export {
 } from './spatialEditorView'
 
 /** V8 stagger, in world units. Never clamped back to 1280×720. */
-export const SPATIAL_DEFAULT_INSERTION_COLUMNS = 6
-export const SPATIAL_DEFAULT_INSERTION_OFFSET = 20
-const SPATIAL_DEFAULT_INSERTION_SLOTS = SPATIAL_DEFAULT_INSERTION_COLUMNS * 4
-
-export interface SpatialInsertionPoint {
-  readonly x: number
-  readonly y: number
-}
-
-export function offsetDefaultSpatialInsertion<T extends SpatialInsertionPoint>(
-  item: T,
-  existingItemCount: number,
-  hasExplicitPosition: boolean,
-): T {
-  if (hasExplicitPosition) return item
-  const slot = existingItemCount % SPATIAL_DEFAULT_INSERTION_SLOTS
-  return {
-    ...item,
-    x: item.x + (slot % SPATIAL_DEFAULT_INSERTION_COLUMNS) * SPATIAL_DEFAULT_INSERTION_OFFSET,
-    y: item.y + Math.floor(slot / SPATIAL_DEFAULT_INSERTION_COLUMNS) * SPATIAL_DEFAULT_INSERTION_OFFSET,
-  }
-}
-
 export interface SpatialAuthoringSnapshot {
   readonly sessionId: string
   readonly locationId: string
@@ -144,15 +116,6 @@ function firstSpatialLocation(
   const start = project.locations.find((candidate) => candidate.id === project.startLocationId)
   if (start?.kind === 'spatial-camera') return start
   return project.locations.find((candidate) => candidate.kind === 'spatial-camera')
-}
-
-export function spatialSurfaceIn(
-  project: CourseProjectDocument,
-  surfaceId: string,
-): SpatialSurfaceDocument {
-  const surface = project.surfaces.find((candidate) => candidate.id === surfaceId)
-  if (!surface || surface.type !== 'spatial-2d') throw new Error('目标不是 Spatial 表面')
-  return surface
 }
 
 export interface SelectSpatialEditorLayersInput {
@@ -437,48 +400,6 @@ export function redoSpatialAuthoring(
   }
 }
 
-function requireWorldScope(session: SpatialAuthoringSession): void {
-  if (session.scope !== 'world') {
-    throw new SpatialCommandError(SPATIAL_REJECT_WRONG_OWNER, '当前选择不属于当前空间世界')
-  }
-}
-
-function worldItemCount(project: CourseProjectDocument, surfaceId: string): number {
-  return spatialSurfaceIn(project, surfaceId).world.layerItems.length
-}
-
-function defaultWorldOrigin(
-  session: SpatialAuthoringSession,
-  width: number,
-  height: number,
-  x?: number,
-  y?: number,
-): { x: number; y: number } {
-  const hasExplicitPosition = x !== undefined || y !== undefined
-  const camera = session.sessionCamera
-  return offsetDefaultSpatialInsertion({
-    x: x ?? camera.x - width / 2,
-    y: y ?? camera.y - height / 2,
-  }, worldItemCount(session.history.present, session.selection.surfaceId), hasExplicitPosition)
-}
-
-function appendWorldLayer(
-  draft: CourseProjectDocument,
-  surfaceId: string,
-  item: LayerItem,
-): void {
-  const surface = spatialSurfaceIn(draft, surfaceId)
-  if (surface.world.layerItems.some((candidate) => candidate.layerItemId === item.layerItemId)) {
-    throw new Error('世界元素 ID 已存在，请重新生成后重试')
-  }
-  const preferredOrder = surface.world.layerItems.reduce(
-    (highest, candidate) => Math.max(highest, candidate.order),
-    -1,
-  ) + 1
-  item.order = allocateCourseLayerOrder(draft, preferredOrder)
-  surface.world.layerItems.push(item)
-}
-
 function commitAdded(
   session: SpatialAuthoringSession,
   project: CourseProjectDocument,
@@ -493,46 +414,6 @@ function commitAdded(
     history: commitSpatialAuthoringHistory(session.history, project),
     selection,
   }), true)
-}
-
-function requireAsset(
-  project: CourseProjectDocument,
-  assetId: string,
-  kind?: 'image' | 'video',
-): void {
-  const asset = project.assets[assetId]
-  if (!asset) throw new Error(`找不到素材：${assetId}`)
-  if (kind && asset.kind !== kind) {
-    throw new Error(`素材类型必须是${kind === 'image' ? '图片' : '视频'}`)
-  }
-}
-
-export interface AddSpatialWorldLayerInput {
-  readonly id?: string
-  readonly x?: number
-  readonly y?: number
-  readonly label?: string
-}
-
-export interface AddSpatialWorldTextLayerInput extends AddSpatialWorldLayerInput {
-  readonly text?: string
-}
-
-export interface AddSpatialWorldShapeLayerInput extends AddSpatialWorldLayerInput {
-  readonly shapeType?: ShapeType
-}
-
-export interface AddSpatialWorldImageLayerInput extends AddSpatialWorldLayerInput {
-  readonly assetId: string
-  readonly width?: number
-  readonly height?: number
-}
-
-export interface AddSpatialWorldVideoLayerInput extends AddSpatialWorldLayerInput {
-  readonly assetId: string
-  readonly width?: number
-  readonly height?: number
-  readonly asset?: AssetMeta
 }
 
 export interface AddSpatialWorldComponentLayerInput extends AddSpatialWorldLayerInput {
@@ -570,27 +451,9 @@ export function addSpatialWorldTextLayer(
   const stale = rejectSpatialIfStale(session, options.expectedRevision)
   if (stale) return stale
   try {
-    requireWorldScope(session)
-    const width = 400
-    const height = 80
-    const origin = defaultWorldOrigin(session, width, height, input.x, input.y)
-    const node = createTextNode({
-      id: input.id,
-      name: input.label ?? '文本',
-      text: input.text ?? '双击编辑文字',
-      x: origin.x,
-      y: origin.y,
-      width,
-      height,
-    })
-    const item = sceneNodeToCourseLayerItem(node)
-    const project = commitSpatialProjectMutation(session.history.present, (draft) => {
-      appendWorldLayer(draft, session.selection.surfaceId, structuredClone(item))
-    }, options.now)
-    return commitAdded(session, project, node.id)
-  } catch (error) {
-    return catchSpatialCommand(session, error)
-  }
+    const planned = planSpatialTextInsertion(session, input, options.now)
+    return commitAdded(session, planned.project, planned.itemId)
+  } catch (error) { return catchSpatialCommand(session, error) }
 }
 
 export function addSpatialWorldShapeLayer(
@@ -601,27 +464,9 @@ export function addSpatialWorldShapeLayer(
   const stale = rejectSpatialIfStale(session, options.expectedRevision)
   if (stale) return stale
   try {
-    requireWorldScope(session)
-    const shapeType = input.shapeType ?? 'rounded-rectangle'
-    const width = 320
-    const height = 180
-    const origin = defaultWorldOrigin(session, width, height, input.x, input.y)
-    const node = createShapeNode(shapeType, {
-      id: input.id,
-      ...(input.label === undefined ? {} : { name: input.label }),
-      x: origin.x,
-      y: origin.y,
-      width,
-      height,
-    })
-    const item = sceneNodeToCourseLayerItem(node)
-    const project = commitSpatialProjectMutation(session.history.present, (draft) => {
-      appendWorldLayer(draft, session.selection.surfaceId, structuredClone(item))
-    }, options.now)
-    return commitAdded(session, project, node.id)
-  } catch (error) {
-    return catchSpatialCommand(session, error)
-  }
+    const planned = planSpatialShapeInsertion(session, input, options.now)
+    return commitAdded(session, planned.project, planned.itemId)
+  } catch (error) { return catchSpatialCommand(session, error) }
 }
 
 export function addSpatialWorldFormulaLayer(
@@ -632,26 +477,9 @@ export function addSpatialWorldFormulaLayer(
   const stale = rejectSpatialIfStale(session, options.expectedRevision)
   if (stale) return stale
   try {
-    requireWorldScope(session)
-    const width = 420
-    const height = 160
-    const origin = defaultWorldOrigin(session, width, height, input.x, input.y)
-    const node = createFormulaNode({
-      id: input.id,
-      name: input.label ?? '公式',
-      x: origin.x,
-      y: origin.y,
-      width,
-      height,
-    })
-    const item = sceneNodeToCourseLayerItem(node)
-    const project = commitSpatialProjectMutation(session.history.present, (draft) => {
-      appendWorldLayer(draft, session.selection.surfaceId, structuredClone(item))
-    }, options.now)
-    return commitAdded(session, project, node.id)
-  } catch (error) {
-    return catchSpatialCommand(session, error)
-  }
+    const planned = planSpatialFormulaInsertion(session, input, options.now)
+    return commitAdded(session, planned.project, planned.itemId)
+  } catch (error) { return catchSpatialCommand(session, error) }
 }
 
 export function addSpatialWorldImageLayer(
@@ -662,30 +490,9 @@ export function addSpatialWorldImageLayer(
   const stale = rejectSpatialIfStale(session, options.expectedRevision)
   if (stale) return stale
   try {
-    requireWorldScope(session)
-    requireAsset(session.history.present, input.assetId, 'image')
-    const asset = session.history.present.assets[input.assetId]!
-    const sized = createImageNode(input.assetId, asset.width, asset.height, input.x, input.y)
-    const width = input.width ?? sized.width
-    const height = input.height ?? sized.height
-    const origin = defaultWorldOrigin(session, width, height, input.x, input.y)
-    const node = createImageNode({
-      id: input.id,
-      name: input.label ?? '图片',
-      assetId: input.assetId,
-      width,
-      height,
-      x: origin.x,
-      y: origin.y,
-    })
-    const item = sceneNodeToCourseLayerItem(node)
-    const project = commitSpatialProjectMutation(session.history.present, (draft) => {
-      appendWorldLayer(draft, session.selection.surfaceId, structuredClone(item))
-    }, options.now)
-    return commitAdded(session, project, node.id)
-  } catch (error) {
-    return catchSpatialCommand(session, error)
-  }
+    const planned = planSpatialImageInsertion(session, input, options.now)
+    return commitAdded(session, planned.project, planned.itemId)
+  } catch (error) { return catchSpatialCommand(session, error) }
 }
 
 export function addSpatialWorldVideoLayer(
@@ -696,38 +503,9 @@ export function addSpatialWorldVideoLayer(
   const stale = rejectSpatialIfStale(session, options.expectedRevision)
   if (stale) return stale
   try {
-    requireWorldScope(session)
-    const existing = session.history.present.assets[input.assetId]
-    if (!existing) {
-      if (!input.asset) throw new Error(`找不到素材：${input.assetId}`)
-      if (input.asset.kind !== 'video') throw new Error('素材类型必须是视频')
-    } else {
-      requireAsset(session.history.present, input.assetId, 'video')
-    }
-    const asset = existing ?? input.asset!
-    const width = input.width ?? asset.width ?? 640
-    const height = input.height ?? asset.height ?? 360
-    const origin = defaultWorldOrigin(session, width, height, input.x, input.y)
-    const node = createVideoNode({
-      id: input.id,
-      name: input.label ?? '视频',
-      assetId: input.assetId,
-      width,
-      height,
-      x: origin.x,
-      y: origin.y,
-    })
-    const item = sceneNodeToCourseLayerItem(node)
-    const project = commitSpatialProjectMutation(session.history.present, (draft) => {
-      if (!draft.assets[input.assetId] && input.asset) {
-        draft.assets[input.assetId] = structuredClone(input.asset)
-      }
-      appendWorldLayer(draft, session.selection.surfaceId, structuredClone(item))
-    }, options.now)
-    return commitAdded(session, project, node.id)
-  } catch (error) {
-    return catchSpatialCommand(session, error)
-  }
+    const planned = planSpatialVideoInsertion(session, input, options.now)
+    return commitAdded(session, planned.project, planned.itemId)
+  } catch (error) { return catchSpatialCommand(session, error) }
 }
 
 export function addSpatialWorldComponentLayer(
@@ -1196,40 +974,14 @@ export function updateSpatialSurfaceBackground(
 ): SpatialCommandResult {
   const stale = rejectSpatialIfStale(session, options.expectedRevision)
   if (stale) return stale
-  if (patch.backgroundMode !== undefined && !BACKGROUND_MODES.includes(patch.backgroundMode)) {
-    return rejectSpatialCommand(session, 'invalid-background-mode')
-  }
-  if (
-    patch.backgroundColor !== undefined
-    && (typeof patch.backgroundColor !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(patch.backgroundColor.trim()))
-  ) {
-    return rejectSpatialCommand(session, 'invalid-color')
-  }
-  const color = patch.backgroundColor !== undefined
-    ? patch.backgroundColor.trim().toLowerCase()
-    : undefined
   try {
-    const currentSurface = spatialSurfaceIn(session.history.present, session.selection.surfaceId)
-    const modeChanges = patch.backgroundMode !== undefined
-      && patch.backgroundMode !== (currentSurface.backgroundMode ?? 'own')
-    const colorChanges = color !== undefined && color !== currentSurface.backgroundColor
-    const assetChanges = patch.backgroundAssetId !== undefined
-      && patch.backgroundAssetId !== (currentSurface.backgroundAssetId ?? null)
-    if (!modeChanges && !colorChanges && !assetChanges) {
-      return succeedSpatialCommand(session, false)
-    }
-    const project = commitSpatialProjectMutation(session.history.present, (draft) => {
-      const surface = spatialSurfaceIn(draft, session.selection.surfaceId)
-      if (modeChanges) surface.backgroundMode = patch.backgroundMode
-      if (colorChanges) surface.backgroundColor = color
-      if (assetChanges) surface.backgroundAssetId = patch.backgroundAssetId ?? null
-    }, options.now)
+    const planned = updateBodySurfaceBackground(session.history.present, session.selection.surfaceId, 'spatial-2d', patch, options)
+    if (!planned.ok) return rejectSpatialCommand(session, planned.reason)
+    if (!planned.historyEntry) return succeedSpatialCommand(session, false)
     return succeedSpatialCommand(replaceSpatialSession(session, {
-      history: commitSpatialAuthoringHistory(session.history, project),
+      history: commitSpatialAuthoringHistory(session.history, planned.project),
     }), true)
-  } catch (error) {
-    return catchSpatialCommand(session, error)
-  }
+  } catch (error) { return catchSpatialCommand(session, error) }
 }
 
 export function updateSpatialSurfaceBackgroundColor(
@@ -1261,14 +1013,8 @@ export function addSpatialWorldChartLayer(
   const stale = rejectSpatialIfStale(session, options.expectedRevision)
   if (stale) return stale
   try {
-    requireWorldScope(session)
-    const origin = defaultWorldOrigin(session, 560, 360, input.x, input.y)
-    const node = createChartNode({ id: input.id, chartType: input.chartType, x: origin.x, y: origin.y, width: 560, height: 360 })
-    const item = createChartLayerItem(node)
-    const project = commitSpatialProjectMutation(session.history.present, draft => {
-      appendWorldLayer(draft, session.selection.surfaceId, item)
-    }, options.now)
-    return commitAdded(session, project, node.id)
+    const planned = planSpatialChartInsertion(session, input, options.now)
+    return commitAdded(session, planned.project, planned.itemId)
   } catch (error) { return catchSpatialCommand(session, error) }
 }
 
@@ -1302,14 +1048,8 @@ export function addSpatialWorldTableLayer(
   const stale = rejectSpatialIfStale(session, options.expectedRevision)
   if (stale) return stale
   try {
-    requireWorldScope(session)
-    const origin = defaultWorldOrigin(session, 560, 360, input.x, input.y)
-    const node = createTableNode({ id: input.id, x: origin.x, y: origin.y, width: 560, height: 360 })
-    const item = createTableLayerItem(node)
-    const project = commitSpatialProjectMutation(session.history.present, draft => {
-      appendWorldLayer(draft, session.selection.surfaceId, item)
-    }, options.now)
-    return commitAdded(session, project, node.id)
+    const planned = planSpatialTableInsertion(session, input, options.now)
+    return commitAdded(session, planned.project, planned.itemId)
   } catch (error) { return catchSpatialCommand(session, error) }
 }
 

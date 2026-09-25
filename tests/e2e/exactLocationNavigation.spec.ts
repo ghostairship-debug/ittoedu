@@ -18,11 +18,11 @@ test('Published student exact navigation reaches all three surfaces and preserve
     await page.goto(origin)
     const ids = await page.evaluate(async () => {
       const load = (path: string): Promise<any> => import(path)
-      const { createBlankCourseProject } = await load('/src/renderer/project/createCourseProject.ts')
-      const { addCourseFlowPage, addCourseSpatialPage } = await load('/src/renderer/course/courseLocationCommands.ts')
+      const { createBlankCourseProject } = await load('/src/core/course/createCourseProject.ts')
+      const { addCourseFlowPage, addCourseSpatialPage } = await load('/src/core/tools/courseLocations.ts')
       const { buildPublishedCourseV2Payload } = await load('/src/renderer/export/course/buildPublishedCourse.ts')
       const { createPublishedCourseSession } = await load('/src/player/surfaces/publishedDynamicHosts.ts')
-      const { createTextNode } = await load('/src/renderer/project/nativeNodeFactories.ts')
+      const { createTextNode } = await load('/src/core/tools/nativeNodeFactories.ts')
       const { sceneNodeToCourseLayerItem } = await load('/src/shared/courseProjectModel.ts')
       let project = createBlankCourseProject({ title: '精确跨表面导航', includeDefaultController: false, controls: 'none' })
       project = addCourseFlowPage(project, {}).project

@@ -1,3 +1,5 @@
+import { createCourseSoundDefinition, planUpdateCourseSound, planDeleteCourseSound, planUpdateCourseAudioSettings, type CourseAudioSettingsPatch } from '../../core/tools/courseAudio'
+export type { CourseAudioSettingsPatch } from '../../core/tools/courseAudio'
 import { commitResourceAwareAuthoringHistory } from '../authoring/resourceAwareAuthoringHistory'
 import { nanoid } from 'nanoid'
 import { MAX_SCENE_NODES } from '../../shared/constants'
@@ -11,7 +13,6 @@ import type {
   SlideSurfaceDocument,
 } from '../../shared/courseProjectTypes'
 import type {
-  AudioChannel,
   AssetMeta,
   ProjectAudioSettings,
   SoundDefinition,
@@ -29,7 +30,7 @@ import { makeLayerItemAuthoringAddress } from '../authoring/courseAuthoringScope
 import {
   createImageNode,
   createVideoNode,
-} from '../project/nativeNodeFactories'
+} from '../../core/tools/nativeNodeFactories'
 import {
   MEDIA_BATCH_CANVAS_LIMIT,
   layoutMediaBatchFrames,
@@ -51,7 +52,7 @@ import {
   type CourseImportedAsset,
 } from '../project/v9AssetAdapter'
 import { SLIDE_REJECT_LOCKED, SLIDE_REJECT_STALE_REVISION, SLIDE_REJECT_WRONG_OWNER, SlideCommandError, commitSlideProjectMutation, selectSlideEditorLayers, type SlideAuthoringSelection, type SlideAuthoringSessionRef, type SlideCommandOptions, type SlideCommandResult } from './slideEditorCommands'
-import { buildSlideEditorView } from './slideEditorView'
+import { buildSlideEditorView } from '../../core/tools/slideLayerView'
 import {
   addSlideImageLayer,
   addSlideVideoLayer,
@@ -96,14 +97,6 @@ export type {
   CourseImportedAsset,
 } from '../project/v9AssetAdapter'
 
-const AUDIO_CHANNELS: readonly AudioChannel[] = [
-  'music',
-  'narration',
-  'sfx',
-  'ui',
-  'video',
-]
-
 export interface CourseMediaSession {
   readonly session: SlideAuthoringSession
   readonly sidecar: CourseAssetSidecar
@@ -136,13 +129,6 @@ export interface CourseMediaLibraryView {
   readonly unusedAudioAssets: AssetMeta[]
   readonly videoAssets: AssetMeta[]
   readonly imageAssets: AssetMeta[]
-}
-
-export interface CourseAudioSettingsPatch {
-  defaultMuted?: boolean
-  masterVolume?: number
-  channelVolumes?: Partial<Record<AudioChannel, number>>
-  narrationDucking?: Partial<ProjectAudioSettings['narrationDucking']>
 }
 
 export interface CourseMediaFitCropPatch {
@@ -303,10 +289,6 @@ function catchCommand(
   if (error instanceof SlideCommandError) return reject(media, error.reason)
   if (error instanceof Error) return reject(media, error.message)
   return reject(media, '命令失败')
-}
-
-function clampVolume(value: number, fallback: number): number {
-  return Number.isFinite(value) ? Math.max(0, Math.min(1, value)) : fallback
 }
 
 function matchesFilter(filter: string, value: string): boolean {
@@ -1249,25 +1231,9 @@ export function importCourseSounds(
       importedAssetIds = applied.importedAssetIds
       const single = items.length === 1
       for (const item of items) {
-        if (item.meta.kind !== 'audio') {
-          throw new Error(`声音导入失败：${item.meta.filename} 不是音频素材`)
-        }
-        const soundId = `sound_${nanoid()}`
-        const definition: SoundDefinition = {
-          id: soundId,
-          name: (single && options.sound?.name?.trim())
-            || item.meta.filename.replace(/\.[^.]+$/, ''),
-          assetId: item.meta.id,
-          channel: (single && options.sound?.channel) || 'sfx',
-          defaultVolume: single && options.sound?.defaultVolume !== undefined
-            ? options.sound.defaultVolume
-            : 1,
-          defaultLoop: single && options.sound?.defaultLoop !== undefined
-            ? options.sound.defaultLoop
-            : false,
-        }
-        draft.media.audio.sounds[soundId] = definition
-        soundIds.push(soundId)
+        const definition = createCourseSoundDefinition(item.meta, single ? options.sound : undefined)
+        draft.media.audio.sounds[definition.id] = definition
+        soundIds.push(definition.id)
       }
     }, options.now)
     return commitMediaProject(
@@ -1293,58 +1259,14 @@ export function updateCourseSound(
 ): CourseMediaCommandResult {
   const stale = rejectIfStale(media, options.expectedRevision)
   if (stale) return stale
-  const existing = media.session.history.present.media.audio.sounds[soundId]
-  if (!existing) return reject(media, `找不到声音：${soundId}`)
   try {
-    let changed = false
-    const project = commitSlideProjectMutation(media.session.history.present, (draft) => {
-      const sound = draft.media.audio.sounds[soundId]
-      if (!sound) return
-      if (patch.name !== undefined && patch.name.trim() && patch.name.trim() !== sound.name) {
-        sound.name = patch.name.trim()
-        changed = true
-      }
-      if (patch.assetId !== undefined && patch.assetId !== sound.assetId) {
-        if (!draft.assets[patch.assetId] || draft.assets[patch.assetId]?.kind !== 'audio') {
-          throw new Error(`找不到声音素材：${patch.assetId}`)
-        }
-        sound.assetId = patch.assetId
-        changed = true
-      }
-      if (patch.channel !== undefined && patch.channel !== sound.channel) {
-        sound.channel = patch.channel
-        changed = true
-      }
-      if (patch.defaultVolume !== undefined) {
-        const next = clampVolume(patch.defaultVolume, sound.defaultVolume)
-        if (next !== sound.defaultVolume) {
-          sound.defaultVolume = next
-          changed = true
-        }
-      }
-      if (patch.defaultLoop !== undefined && patch.defaultLoop !== sound.defaultLoop) {
-        sound.defaultLoop = patch.defaultLoop
-        changed = true
-      }
-    }, options.now)
-    if (!changed) {
-      return {
-        ok: true,
-        nextSession: freezeSession(media.session),
-        sidecar: media.sidecar,
-        historyEntry: false,
-        selection: media.session.selection,
-      }
+    const project = planUpdateCourseSound(media.session.history.present, soundId, patch, options.now)
+    if (project === media.session.history.present) return {
+      ok: true, nextSession: freezeSession(media.session), sidecar: media.sidecar,
+      historyEntry: false, selection: media.session.selection,
     }
-    return commitMediaProject(
-      media,
-      project,
-      media.sidecar,
-      { selection: media.session.selection },
-    )
-  } catch (error) {
-    return catchCommand(media, error)
-  }
+    return commitMediaProject(media, project, media.sidecar, { selection: media.session.selection })
+  } catch (error) { return catchCommand(media, error) }
 }
 
 export function deleteCourseSound(
@@ -1354,28 +1276,14 @@ export function deleteCourseSound(
 ): CourseMediaCommandResult {
   const stale = rejectIfStale(media, options.expectedRevision)
   if (stale) return stale
-  const sound = media.session.history.present.media.audio.sounds[soundId]
-  if (!sound) return reject(media, `找不到声音：${soundId}`)
-  const references = listCourseSoundReferences(media.session.history.present, soundId)
-  if (references.length > 0) {
-    return reject(
-      media,
-      '该声音仍被交互规则引用。请先删除或改写相关声音动作。',
-    )
-  }
   try {
-    const project = commitSlideProjectMutation(media.session.history.present, (draft) => {
-      delete draft.media.audio.sounds[soundId]
-    }, options.now)
-    return commitMediaProject(
-      media,
-      project,
-      media.sidecar,
-      { selection: media.session.selection },
-    )
-  } catch (error) {
-    return catchCommand(media, error)
-  }
+    const project = planDeleteCourseSound(media.session.history.present, soundId, options.now)
+    if (project === media.session.history.present) return {
+      ok: true, nextSession: freezeSession(media.session), sidecar: media.sidecar,
+      historyEntry: false, selection: media.session.selection,
+    }
+    return commitMediaProject(media, project, media.sidecar, { selection: media.session.selection })
+  } catch (error) { return catchCommand(media, error) }
 }
 
 export function updateCourseAudioSettings(
@@ -1386,75 +1294,13 @@ export function updateCourseAudioSettings(
   const stale = rejectIfStale(media, options.expectedRevision)
   if (stale) return stale
   try {
-    let changed = false
-    const project = commitSlideProjectMutation(media.session.history.present, (draft) => {
-      const audio = draft.media.audio
-      if (patch.defaultMuted !== undefined && patch.defaultMuted !== audio.defaultMuted) {
-        audio.defaultMuted = patch.defaultMuted
-        changed = true
-      }
-      if (patch.masterVolume !== undefined) {
-        const next = clampVolume(patch.masterVolume, audio.masterVolume)
-        if (next !== audio.masterVolume) {
-          audio.masterVolume = next
-          changed = true
-        }
-      }
-      if (patch.channelVolumes) {
-        for (const channel of AUDIO_CHANNELS) {
-          const value = patch.channelVolumes[channel]
-          if (value === undefined) continue
-          const next = clampVolume(value, audio.channelVolumes[channel])
-          if (next !== audio.channelVolumes[channel]) {
-            audio.channelVolumes[channel] = next
-            changed = true
-          }
-        }
-      }
-      if (patch.narrationDucking?.enabled !== undefined
-        && patch.narrationDucking.enabled !== audio.narrationDucking.enabled) {
-        audio.narrationDucking.enabled = patch.narrationDucking.enabled
-        changed = true
-      }
-      if (patch.narrationDucking?.musicVolume !== undefined) {
-        const next = clampVolume(
-          patch.narrationDucking.musicVolume,
-          audio.narrationDucking.musicVolume,
-        )
-        if (next !== audio.narrationDucking.musicVolume) {
-          audio.narrationDucking.musicVolume = next
-          changed = true
-        }
-      }
-      if (
-        patch.narrationDucking?.fadeMs !== undefined
-        && Number.isFinite(patch.narrationDucking.fadeMs)
-      ) {
-        const next = Math.max(0, Math.round(patch.narrationDucking.fadeMs))
-        if (next !== audio.narrationDucking.fadeMs) {
-          audio.narrationDucking.fadeMs = next
-          changed = true
-        }
-      }
-    }, options.now)
-    if (!changed) {
-      return {
-        ok: true,
-        nextSession: freezeSession(media.session),
-        sidecar: media.sidecar,
-        historyEntry: false,
-        selection: media.session.selection,
-      }
+    const project = planUpdateCourseAudioSettings(media.session.history.present, patch, options.now)
+    if (project === media.session.history.present) return {
+      ok: true, nextSession: freezeSession(media.session), sidecar: media.sidecar,
+      historyEntry: false, selection: media.session.selection,
     }
-    return commitMediaProject(
-      media,
-      project,
-      media.sidecar,
-      { selection: media.session.selection },
-    )
-  } catch (error) {
-    return catchCommand(media, error)
-  }
+    return commitMediaProject(media, project, media.sidecar, { selection: media.session.selection })
+  } catch (error) { return catchCommand(media, error) }
 }
 
 export function pruneCourseMediaSidecar(

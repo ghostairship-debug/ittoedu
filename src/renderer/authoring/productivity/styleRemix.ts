@@ -1,7 +1,7 @@
 import type { SlideSceneDocument } from '../../../shared/courseProjectTypes'
 import { analyzeTextNodeLayout } from '../../../shared/textLayout'
 import { planTextRunRemap } from '../../../shared/textRuns'
-import { commitCourseProjectMutation } from '../../course/courseProjectMutation'
+import { commitCourseProjectMutation } from '../../../core/tools/courseProjectMutation'
 import { createEditorTransactionStep } from '../editorTransaction'
 import type { ProductivityApplyResult, ProductivityContext } from './index'
 import { cloneReferencePage } from './referenceClone'

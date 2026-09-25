@@ -25,7 +25,7 @@ import type {
   CourseAuthoringTarget,
 } from '../../authoring/courseAuthoringSession'
 import type { FlowCurrentSessionCommandPort } from './useFlowTextAuthoringController'
-import { isTeacherControllerLayerItem } from '../../course/globalLayerCommands'
+import { isTeacherControllerLayerItem } from '../../../core/tools/globalLayers'
 import { controllerGeometryItem } from '../../../player/teacherControllerComponentGeometry'
 import {
   resizeWorldFrameFromHandle,

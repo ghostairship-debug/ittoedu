@@ -13,8 +13,8 @@ import type { ComponentManifest, ComponentPackageData } from '../../src/shared/c
 import type { CourseProjectDocument } from '../../src/shared/courseProjectTypes'
 import type { DesktopAPI, OpenBinaryFileResult } from '../../src/shared/ipcTypes'
 import { componentPackagesFromArchive } from '../../src/renderer/components/componentPackageStore'
-import { importComponentPackage } from '../../src/renderer/components/importComponentPackage'
-import { openCourseProjectArchive } from '../../src/renderer/project/courseProjectArchive'
+import { importComponentPackage } from '../../src/core/drivers/codecs/importComponentPackage'
+import { openCourseProjectArchive } from '../../src/core/drivers/codecs/courseProjectArchive'
 import {
   selectActiveCourseProjectDocument,
   useEditorStore,
@@ -243,7 +243,6 @@ function componentApi(options: {
   )
   return {
     legacyPpt: vi.fn(async () => null),
-    localAgent: vi.fn(async () => ({ enabled: false })),
     materials: vi.fn(async () => []),
     openProject: vi.fn(async () => null),
     listRecentProjects: vi.fn(async () => []),

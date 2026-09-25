@@ -4,18 +4,18 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { parseComponentPackageFiles } from '@/renderer/components/importComponentPackage'
+import { parseComponentPackageFiles } from '../../src/core/drivers/codecs/importComponentPackage'
 import { collectCourseProjectExportPreflight } from '@/renderer/export/exportPreflight'
-import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
+import { createBlankCourseProject } from '@/core/course/createCourseProject'
 import { createBlankSpatialCourseProject } from '@/renderer/project/createSpatialCourseProject'
 import {
   createCourseProjectArchive,
   type CourseProjectArchiveData,
-} from '@/renderer/project/courseProjectArchive'
+} from '../../src/core/drivers/codecs/courseProjectArchive'
 import {
   createImageNode,
   createRectangleNode,
-} from '@/renderer/project/nativeNodeFactories'
+} from '@/core/tools/nativeNodeFactories'
 import {
   COURSE_PROJECT_REJECTION_INPUTS,
 } from '../fixtures/course-project-v9'

@@ -1,5 +1,5 @@
 import type { CourseProjectDocument } from '@/shared/courseProjectTypes'
-import type { CourseProjectArchiveIdentity } from './courseProjectArchive'
+import type { CourseProjectArchiveIdentity } from '../../core/drivers/codecs/courseProjectArchive'
 
 export type CourseProjectDirtyKind =
   | 'document'

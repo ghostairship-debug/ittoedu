@@ -1,15 +1,15 @@
+import { applyDynamicInstanceCaptures } from '../../core/tools/dynamicCaptureAssets'
 import type { ComponentPackageData } from '../../shared/componentTypes'
 import type { CourseProjectDocument } from '../../shared/courseProjectTypes'
 import { courseProjectDocumentSchema } from '../../shared/courseProjectSchema'
-import { analyzeCourseAssetReferences } from '../../shared/contracts/course-project-v9/assetReferences'
 import { componentContentSha256 } from '../../shared/componentContentIntegrity'
-import type { DynamicInstanceCapture } from '../../shared/dynamicAdmissionContract'
 import type { DynamicBehaviorObservation } from '../../shared/dynamicBehaviorObservation'
-import type { HistoryResourceState, AssetFileHistoryChange } from '../store/courseResourceState'
+import type { HistoryResourceState } from '../store/courseResourceState'
 import { applyHistoryResourceChanges } from '../store/courseResourceState'
 import { admitDynamicCandidate } from '../authoring/tools/dynamicCandidateAdmission'
-import { parseComponentPackageFiles } from './importComponentPackage'
-import { componentPackageMeta, rewriteComponentDefinitionId, validateEditableComponentPackage } from './editableComponentPackage'
+import { parseComponentPackageFiles } from '../../core/drivers/codecs/importComponentPackage'
+import { rewriteComponentDefinitionId, validateEditableComponentPackage } from './editableComponentPackage'
+import { componentPackageMeta } from '../../shared/componentPackageMeta'
 import type { EditorTransactionPlan } from '../authoring/editorTransaction'
 import {
   collectCourseComponentPackageReferences,
@@ -104,19 +104,6 @@ export function componentPackageAdmissionTargets(project: CourseProjectDocument,
   })
 }
 
-/** Capture bytes are checked before either document or resources can be committed. */
-export function componentCaptureAsset(capture: DynamicInstanceCapture, id = `component-capture-${crypto.randomUUID()}`) {
-  const prefix = 'data:image/png;base64,'
-  if (!capture.dataUrl.startsWith(prefix)) throw new Error('组件后备不是PNG图面')
-  const bytes = Uint8Array.from(atob(capture.dataUrl.slice(prefix.length)), char => char.charCodeAt(0))
-  const signature = [137, 80, 78, 71, 13, 10, 26, 10]
-  if (bytes.length < 24 || signature.some((value, i) => bytes[i] !== value)) throw new Error('组件后备PNG内容无效')
-  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
-  if (view.getUint32(16) !== capture.width || view.getUint32(20) !== capture.height) throw new Error('组件后备PNG尺寸不一致')
-  return { bytes, meta: { id, filename: `${id}.png`, path: `assets/${id}.png`, kind: 'image' as const,
-    mimeType: 'image/png', byteLength: bytes.length, width: capture.width, height: capture.height } }
-}
-
 /** Manual and AI edits share the same replacement planner, all-instance admission and resource transaction. */
 export async function prepareComponentPackageSourceRevision(input: Parameters<typeof planComponentPackageSourceRevision>[0], signal?: AbortSignal,
   onBehaviorEvidence?: (evidence: readonly DynamicBehaviorObservation[]) => void): Promise<CourseComponentPackageReplacementPlanResult> {
@@ -133,25 +120,8 @@ export async function prepareComponentPackageRevision(result: CourseComponentPac
   const nextResources = applyHistoryResourceChanges(resources, result.plan.resourceChanges, 'forward')
   const captures = await admitDynamicCandidate(next, nextResources, targets, signal, true, { onBehaviorEvidence })
   if (signal?.aborted) throw new Error('组件源码校验已取消')
-  const document = structuredClone(next)
-  const assetFileChanges: AssetFileHistoryChange[] = []
-  const previousCaptures = new Set<string>()
-  visitCourseComponentPackageInstances(document, packageId, (instance, reference) => {
-    const capture = captures.find(item => item.instanceId === reference.instanceId)
-    if (!capture) throw new Error(`实例 ${reference.instanceId} 缺少真实后备图面`)
-    const asset = componentCaptureAsset(capture)
-    if (instance.staticFallbackAssetId?.startsWith('component-capture-')) previousCaptures.add(instance.staticFallbackAssetId)
-    document.assets[asset.meta.id] = asset.meta
-    instance.staticFallbackAssetId = asset.meta.id
-    assetFileChanges.push({ assetId: asset.meta.id, after: asset.bytes })
-  })
-  const references = analyzeCourseAssetReferences(document, { componentPackages: nextResources.componentPackages })
-  if (!references.missingComponentContexts.length) for (const assetId of previousCaptures) {
-    if (references.graph.has(assetId)) continue
-    delete document.assets[assetId]
-    const before = resources.assetFiles[assetId]
-    if (before) assetFileChanges.push({ assetId, before })
-  }
-  return { ...result, plan: { ...result.plan, nextDocument: courseProjectDocumentSchema.parse(document),
-    resourceChanges: { ...result.plan.resourceChanges, assetFileChanges } } }
+  const applied = applyDynamicInstanceCaptures({ project: next, assetFiles: nextResources.assetFiles,
+    componentPackages: nextResources.componentPackages, targets, captures })
+  return { ...result, plan: { ...result.plan, nextDocument: applied.project,
+    resourceChanges: { ...result.plan.resourceChanges, assetFileChanges: applied.assetFileChanges } } }
 }

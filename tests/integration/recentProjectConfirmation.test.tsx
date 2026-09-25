@@ -7,7 +7,7 @@ import type {
   OpenProjectFileResult,
   RecentProjectEntry,
 } from '@/shared/ipcTypes'
-import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
+import { createBlankCourseProject } from '@/core/course/createCourseProject'
 import { createArchiveFixture as createCourseProjectArchive } from '../fixtures/teacherController'
 import {
   selectActiveCourseProjectDocument,
@@ -98,7 +98,6 @@ function desktopHarness(options: DesktopHarnessOptions = {}): DesktopHarness {
   const listRecentProjects = vi.fn(async () => options.recent ?? [])
   const api: DesktopAPI = {
     legacyPpt: vi.fn(async () => null),
-    localAgent: vi.fn(async () => ({ enabled: false })),
     materials: vi.fn(async () => []),
     openProject,
     listRecentProjects,

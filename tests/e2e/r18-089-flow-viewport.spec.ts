@@ -21,15 +21,13 @@ import { BACKGROUND_E2E_ENV } from '../../src/main/windowVisibility'
 import {
   createCourseProjectArchive,
   openCourseProjectArchive,
-} from '../../src/renderer/project/courseProjectArchive'
-import { parseComponentPackageFiles } from '../../src/renderer/components/importComponentPackage'
+} from '../../src/core/drivers/codecs/courseProjectArchive'
+import { parseComponentPackageFiles } from '../../src/core/drivers/codecs/importComponentPackage'
 import { createGeneratedFlowFixture } from './flowGeneratedFixture'
-import { nativeRecords, recordEvidence, sendNatural, type NativeRun } from './r18NativeAuthoringFixture'
-import { createBlankCourseProject } from '../../src/renderer/project/createCourseProject'
-import { addCourseSpatialPage } from '../../src/renderer/course/courseLocationCommands'
+import { createBlankCourseProject } from '../../src/core/course/createCourseProject'
+import { addCourseSpatialPage } from '../../src/core/tools/courseLocations'
 import { buildPublishedCourseStandaloneHtml } from '../../src/renderer/export/course/buildCoursePackages'
 import { enterIndependentEditor } from './lessonWorkspaceEntry'
-import { selectReferenceScope } from './chatReferenceTarget'
 
 const root = resolve(__dirname, '..', '..')
 const fixturePath = join(root, 'tests', 'fixtures', 'architecture-baseline', 'mixed-spatial.h5lesson')
@@ -838,116 +836,6 @@ test('new formal Flow content stays consistent through normal entry points witho
     await expect(page.locator('.flow-surface-host')).toBeVisible()
     await checkNewPlayback(page, page.locator('[data-playback-view]'), 'new-html-1574', authoredControllerFrame)
   } finally { await browser.close() }
-})
-test(process.env.FLOW_AI_VERIFY_EXISTING ? 'preserved real AI Flow verifies playback and HTML with bounded shutdown' : 'real AI generates Flow through the product and retains the result across playback and HTML', async () => {
-  const preservedRoot = process.env.FLOW_AI_VERIFY_EXISTING
-  test.skip(!preservedRoot && process.env.FLOW_REAL_AI !== '1', 'One explicit real generation run; excluded from deterministic regression')
-  test.setTimeout(840_000)
-  evidenceDirectory = join(root, 'output', 'r18-089', `real-ai-${new Date().toISOString().replace(/[:.]/g, '-')}`)
-  mkdirSync(evidenceDirectory, { recursive: true })
-  const preserved = preservedRoot ? openCourseProjectArchive(new Uint8Array(readFileSync(join(preservedRoot, 'ai-new-flow.h5lesson')))).project : null
-  const fixture = preserved ? { path: join(preservedRoot!, 'ai-new-flow.h5lesson'), surfaceId: preserved.surfaces.find(surface => surface.type === 'flow')!.id }
-    : await createGeneratedFlowFixture(root, evidenceDirectory, true)
-  const launch = await launchEditor()
-  const run: NativeRun = { ...launch, userData: launch.userDataPath, runRoot: evidenceDirectory, workspaceRoot: evidenceDirectory,
-    projectPath: fixture.path, pageErrors: [], consoleErrors: [] }
-  const page = launch.page
-  launch.app.process().stderr?.on('data', chunk => appendFileSync(join(evidenceDirectory, 'electron-stderr.log'), chunk))
-  page.on('pageerror', error => run.pageErrors.push(error.message))
-  page.on('console', message => { if (message.type() === 'error') run.consoleErrors.push(message.text()) })
-  writeFileSync(join(evidenceDirectory, 'profile.json'), JSON.stringify({ userDataPath: launch.userDataPath }))
-  try {
-    await setContentSize(launch.app, page, { width: 1574, height: 983 })
-    await openGeneratedFlow(launch.app, page, fixture.path, fixture.surfaceId)
-    await page.getByRole('button', { name: '创作助手', exact: true }).click()
-    const chat = page.getByRole('complementary', { name: 'CLI 创作助手' })
-    await expect(chat.getByLabel('模型', { exact: true })).toBeEnabled({ timeout: 60_000 })
-    await selectReferenceScope(chat, 'page')
-    await chat.getByLabel('意图', { exact: true }).selectOption('edit')
-    await chat.getByLabel('应用方式', { exact: true }).selectOption('auto')
-    const prompt = '把当前空白流式讲义制作成一页可使用的观察练习，主题是“观察小狗并描述特征”。要有标题、两小段解释、工程内现有配图，以及已有“教学排序”组件制作的观察步骤排序互动。直接完成当前页，保留全局教师控制器；复用现有素材和组件，不生成新图片，不修改组件源码。请直接提交完成结果。'
-    try {
-      if (!preservedRoot) await sendNatural(run, 'flow-first-generation', prompt, 600_000)
-      else writeFileSync(join(evidenceDirectory, 'preserved-generation-source.json'), JSON.stringify({ sourceRoot: preservedRoot, generatedAgain: false, purpose: 'Repeat UI verification after fixing test shutdown; original generation and Undo/Redo evidence stay in the source run.' }))
-    } catch (error) {
-      await recordEvidence(run, 'flow-interrupted')
-      await page.getByRole('button', { name: '保存（Ctrl+S）', exact: true }).click()
-      writeFileSync(join(evidenceDirectory, 'generation-interruption.json'), JSON.stringify({ error: String(error), pageErrors: run.pageErrors, consoleErrors: run.consoleErrors }, null, 2))
-      throw error
-    }
-    await page.getByRole('button', { name: '保存（Ctrl+S）', exact: true }).click()
-    const original = openCourseProjectArchive(new Uint8Array(readFileSync(fixture.path))).project
-    const flow = original.surfaces.find(surface => surface.type === 'flow')!
-    expect(flow.layout.widthMode).toBe('fluid')
-    expect(flow.blocks.some(block => block.type === 'media')).toBe(true)
-    expect(flow.blocks.some(block => block.type === 'component')).toBe(true)
-    expect(flow.blocks.filter(block => block.type === 'paragraph').length).toBeGreaterThanOrEqual(2)
-    const records: ReturnType<typeof nativeRecords> = preservedRoot ? JSON.parse(readFileSync(join(preservedRoot, 'flow-final.native.json'), 'utf8')).records : nativeRecords(run)
-    expect(records.at(-1)!.tasks.at(-1)!.status).toBe('completed')
-    expect(records.flatMap(record => record.hostResults).flatMap(result => result.receipts).some(receipt => receipt.status === 'committed')).toBe(true)
-    writeFileSync(join(evidenceDirectory, 'ai-generated-project.json'), JSON.stringify(original, null, 2))
-    await chat.getByRole('button', { name: '关闭', exact: true }).click()
-    if (!preservedRoot) {
-      await page.getByRole('button', { name: '撤销（Ctrl+Z）', exact: true }).click()
-      await page.getByRole('button', { name: '重做（Ctrl+Y / Ctrl+Shift+Z）', exact: true }).click()
-    }
-    await page.getByRole('button', { name: '保存（Ctrl+S）', exact: true }).click()
-    await openGeneratedFlow(launch.app, page, fixture.path, fixture.surfaceId)
-    expect(openCourseProjectArchive(new Uint8Array(readFileSync(fixture.path))).project).toEqual(original)
-    for (const size of [{ width: 1574, height: 983 }, { width: 1280, height: 720 }]) {
-      await setContentSize(launch.app, page, size)
-      await capture(page, page.getByTestId('flow-workspace'), `ai-edit-${size.width}`)
-      await enterTryRun(page)
-      const host = page.getByTestId('flow-try-run-host')
-      await expandController(page, host)
-      const metrics = await measureGenerated(host)
-      expect(metrics.bodyWidth).toBeCloseTo(metrics.scrollWidth - 104, 0)
-      expect(metrics.bars.every(bar => bar.hidden)).toBe(true)
-      await expect(host.locator('.flow-block-media img')).toBeVisible()
-      const rows = host.locator('.sort .label'), before = await rows.allTextContents()
-      await host.getByRole('button', { name: /下移$/ }).first().click()
-      const changed = await rows.allTextContents(); expect(changed).not.toEqual(before)
-      await host.getByTestId('flow-runtime-article').evaluate(element => { element.scrollTop = 0 })
-      await host.getByRole('button', { name: '缩放', exact: true }).click()
-      const panel = host.getByRole('dialog', { name: '缩放设置', exact: true })
-      await panel.getByRole('button', { name: '放大', exact: true }).click()
-      expect(await rows.allTextContents()).toEqual(changed)
-      await panel.getByRole('button', { name: '恢复默认视图', exact: true }).click()
-      await panel.getByRole('button', { name: '关闭面板', exact: true }).click()
-      await capture(page, host, `ai-trial-${size.width}`)
-      writeFileSync(join(evidenceDirectory, `ai-trial-${size.width}.json`), JSON.stringify(metrics, null, 2))
-      await returnToEdit(page)
-      await page.getByRole('button', { name: '整课预览', exact: true }).click()
-      const preview = page.getByTestId('course-preview-host')
-      await expect(preview.locator('.sort')).toBeVisible()
-      await expandController(page, preview)
-      const previewMetrics = await measureGenerated(preview)
-      expect(previewMetrics.bodyWidth).toBeCloseTo(previewMetrics.scrollWidth - 104, 0)
-      expect(previewMetrics.bars.every(bar => bar.hidden)).toBe(true)
-      await capture(page, preview, `ai-preview-${size.width}`)
-      writeFileSync(join(evidenceDirectory, `ai-preview-${size.width}.json`), JSON.stringify(previewMetrics, null, 2))
-      await page.getByRole('button', { name: '关闭预览' }).click()
-    }
-    htmlPath = join(evidenceDirectory, 'ai-generated.html')
-    await patchDialogs(launch.app, { htmlSave: htmlPath })
-    await page.getByTestId('export-menu-trigger').click(); await page.getByTestId('export-single-html').click()
-    const preflight = page.getByRole('alertdialog', { name: '单 HTML 导出预检' })
-    await expect(preflight).toContainText('0 个错误'); await preflight.getByRole('button', { name: '继续导出' }).click()
-    await expect.poll(() => existsSync(htmlPath) ? statSync(htmlPath).size : 0, { timeout: 30_000 }).toBeGreaterThan(1000)
-    const browser = await chromium.launch({ headless: true })
-    try {
-      const html = await browser.newPage({ viewport: { width: 1574, height: 983 } })
-      await html.goto(pathToFileURL(htmlPath).href)
-      await expect(html.locator('.sort')).toBeVisible()
-      await html.getByRole('button', { name: /下移$/ }).first().click()
-      await capture(html, html.locator('[data-playback-view]'), 'ai-html')
-    } finally { await browser.close() }
-    writeFileSync(join(evidenceDirectory, 'ui-checks-passed.json'), JSON.stringify({ generationSource: preservedRoot ?? evidenceDirectory, undoRedo: !preservedRoot, saveReopen: true, trial: true, preview: true, html: true, outputModifiedForTest: false }))
-  } finally {
-    await recordEvidence(run, 'flow-final').catch(() => undefined)
-    await page.screenshot({ path: join(evidenceDirectory, 'last-state.png') }).catch(() => undefined)
-    await closeEditor(launch.app, launch.userDataPath)
-  }
 })
 test('Slide and Spatial retain base fit and controller actions with floating observation bars', async () => {
   evidenceDirectory = join(root, 'output', 'r18-089', `other-surfaces-${new Date().toISOString().replace(/[:.]/g, '-')}`)

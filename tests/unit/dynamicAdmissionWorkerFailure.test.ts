@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
+import { createBlankCourseProject } from '@/core/course/createCourseProject'
 import { dynamicBehaviorObservationSchema } from '@/shared/dynamicBehaviorObservation'
 import { AuthoringToolFailure } from '@/renderer/authoring/tools/executeAuthoringTool'
 

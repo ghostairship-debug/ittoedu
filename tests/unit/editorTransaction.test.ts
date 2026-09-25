@@ -3,14 +3,14 @@ import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import { zipSync, strToU8 } from 'fflate'
 import type { CourseProjectDocument } from '@/shared/courseProjectTypes'
-import { openCourseProjectArchive } from '@/renderer/project/courseProjectArchive'
+import { openCourseProjectArchive } from '../../src/core/drivers/codecs/courseProjectArchive'
 import {
   applyEditorTransactionStep,
   createEditorTransactionStep,
   type EditorTransactionState,
 } from '@/renderer/authoring/editorTransaction'
 import { planAssetFileHistoryChange } from '@/renderer/store/courseResourceState'
-import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
+import { createBlankCourseProject } from '@/core/course/createCourseProject'
 import { courseAuthoringScopeFromLocation } from '@/renderer/authoring/courseAuthoringScope'
 import { createGenerationCandidateCoordinator } from '@/renderer/authoring/generation/prepareGenerationCandidate'
 import { generationRequestSchema, generationCandidateSchema, generationCommitReceiptSchema, MAX_GENERATION_PROMPT_BYTES, type GenerationCandidate } from '@/shared/generationContract'
@@ -78,13 +78,13 @@ describe('CLI generation candidate atomic preparation and commit', () => {
     const preview = await f.coordinator.prepare(f.request, f.candidate)
     expect(preview).not.toHaveProperty('receipt')
     expect(f.commits).toHaveLength(0)
-    const result = f.coordinator.apply(preview.previewId)
+    const result = (await f.coordinator.apply(preview.previewId))
     if (result.status !== 'committed') throw new Error('Expected real transaction commit')
     const receipt = generationCommitReceiptSchema.parse(result.receipt)
     expect(receipt).toMatchObject({ requestId: f.request.requestId, candidateId: f.candidate.candidateId, workspace: f.request.workspace,
       status: 'committed', beforeRevision: f.request.documentRevision, afterRevision: f.read().document.revision })
     expect(receipt.affected).toHaveLength(2)
-    expect(f.coordinator.apply(preview.previewId)).toEqual({ status: 'stale' })
+    expect((await f.coordinator.apply(preview.previewId))).toEqual({ status: 'stale' })
     expect(f.commits).toHaveLength(1)
   })
   it('does not expose prepared receipts when the live commit is rejected', async () => {
@@ -92,7 +92,7 @@ describe('CLI generation candidate atomic preparation and commit', () => {
     const coordinator = createGenerationCandidateCoordinator({ readDocument: () => f.read().document, readResources: () => f.read().resources,
       readWorkspace: () => f.request.workspace, readSessionGeneration: () => f.request.sessionGeneration, commit: () => false })
     const preview = await coordinator.prepare(f.request, f.candidate)
-    expect(coordinator.apply(preview.previewId)).toEqual({ status: 'stale' })
+    expect((await coordinator.apply(preview.previewId))).toEqual({ status: 'stale' })
     expect(f.read()).toEqual(before)
   })
   it('imports an existing trusted catalog package atomically and rejects changed or untrusted catalog content', async () => {
@@ -117,7 +117,7 @@ describe('CLI generation candidate atomic preparation and commit', () => {
       entry.sha256 = 'a'.repeat(64)
       const preview = await f.coordinator.prepare(request, candidate)
       expect(f.read()).toEqual(before)
-      expect(f.coordinator.apply(preview.previewId).status).toBe('committed')
+      expect((await f.coordinator.apply(preview.previewId)).status).toBe('committed')
       expect(f.commits).toHaveLength(1)
       expect(f.read().document.componentPackages[manifest.id]).toBeDefined()
       expect(applyEditorTransactionStep(f.read(), f.commits[0], 'inverse')).toEqual(before)
@@ -147,7 +147,7 @@ describe('CLI generation candidate atomic preparation and commit', () => {
     expect(f.read()).toEqual(before)
     expect(f.commits).toHaveLength(0)
     f.edit()
-    expect(f.coordinator.apply(preview.previewId).status).toBe('stale')
+    expect((await f.coordinator.apply(preview.previewId)).status).toBe('stale')
     expect(f.commits).toHaveLength(0)
   })
   it('builds Flow and Spatial content from earlier creation receipts as a single reversible course transaction', async () => {
@@ -164,7 +164,7 @@ describe('CLI generation candidate atomic preparation and commit', () => {
     ] }
     const preview = await f.coordinator.prepare(request, candidate)
     expect(f.read()).toEqual(original)
-    expect(f.coordinator.apply(preview.previewId).status).toBe('committed')
+    expect((await f.coordinator.apply(preview.previewId)).status).toBe('committed')
     expect(f.read().document.surfaces.map(surface => surface.type)).toEqual(['slide', 'flow', 'spatial-2d'])
     expect(JSON.stringify(f.read().document)).toContain('平均分是各份大小相同。')
     expect(JSON.stringify(f.read().document)).toContain('各份是否同样大？')
@@ -176,7 +176,7 @@ describe('CLI generation candidate atomic preparation and commit', () => {
     f.candidate.steps[1] = { id: 's1', carrier: 'native', tool: 'native.content', destination: { kind: 'created-item', stepId: 's0', index: 0 },
       input: { operation: 'properties', properties: { label: { $result: { stepId: 's0', kind: 'item-id', index: 0 } } } } }
     const preview = await f.coordinator.prepare(f.request, f.candidate)
-    expect(f.coordinator.apply(preview.previewId).status).toBe('committed')
+    expect((await f.coordinator.apply(preview.previewId)).status).toBe('committed')
     const surface = f.read().document.surfaces[0]!
     if (surface.type !== 'slide') throw new Error('wrong fixture')
     expect(surface.scenes[0]!.layerItems[0]!.label).toBe(surface.scenes[0]!.layerItems[0]!.layerItemId)
@@ -194,14 +194,14 @@ describe('CLI generation candidate atomic preparation and commit', () => {
     expect(f.commits).toHaveLength(0)
     expect(preview.plannedEffects).toHaveLength(2)
     preview.document.title = '伪造预览'
-    expect(f.coordinator.apply(preview.previewId).status).toBe('committed')
+    expect((await f.coordinator.apply(preview.previewId)).status).toBe('committed')
     expect(f.read().document.title).toBe(original.document.title)
     expect(f.read().document.revision).toBe(original.document.revision + 1)
     expect(f.commits).toHaveLength(1)
     const surface = f.read().document.surfaces[0]!
     expect(surface.type === 'slide' && surface.scenes[0]!.layerItems).toHaveLength(2)
     expect(applyEditorTransactionStep(f.read(), f.commits[0]!, 'inverse')).toEqual(original)
-    expect(f.coordinator.apply(preview.previewId).status).toBe('stale')
+    expect((await f.coordinator.apply(preview.previewId)).status).toBe('stale')
   })
 
   it('rejects a bad later command with no partial document, resource or history write', async () => {
@@ -216,7 +216,7 @@ describe('CLI generation candidate atomic preparation and commit', () => {
     const f = generationFixture()
     f.candidate.steps[1] = { id: 's1', carrier: 'native', tool: 'native.content', destination: { kind: 'created-item', stepId: 's0', index: 0 }, input: { operation: 'properties', properties: { label: '讲解文字' } } }
     const preview = await f.coordinator.prepare(f.request, f.candidate)
-    expect(f.coordinator.apply(preview.previewId).status).toBe('committed')
+    expect((await f.coordinator.apply(preview.previewId)).status).toBe('committed')
     const surface = f.read().document.surfaces[0]!
     expect(surface.type === 'slide' && surface.scenes[0]!.layerItems[0]!.label).toBe('讲解文字')
   })
@@ -226,7 +226,7 @@ describe('CLI generation candidate atomic preparation and commit', () => {
     const preview = await f.coordinator.prepare(f.request, f.candidate)
     f[operation]()
     const before = structuredClone(f.read())
-    expect(f.coordinator.apply(preview.previewId).status).toBe('stale')
+    expect((await f.coordinator.apply(preview.previewId)).status).toBe('stale')
     expect(f.read()).toEqual(before)
     expect(f.commits).toHaveLength(0)
   })
@@ -236,7 +236,7 @@ describe('CLI generation candidate atomic preparation and commit', () => {
     const pending = f.coordinator.prepare(f.request, f.candidate)
     f.coordinator.discard()
     await expect(pending).rejects.toThrow('stale')
-    expect(f.coordinator.apply('forged').status).toBe('stale')
+    expect((await f.coordinator.apply('forged')).status).toBe('stale')
     expect(f.commits).toHaveLength(0)
   })
 

@@ -1,15 +1,15 @@
+import { planSlideTableInsertion, type AddSlideTableLayerInput } from '../../core/tools/slideStructuredInsertion'
+export type { AddSlideTableLayerInput } from '../../core/tools/slideStructuredInsertion'
+import { slideSceneContext } from '../../core/tools/slideInsertion'
 import { commitResourceAwareAuthoringHistory } from '../authoring/resourceAwareAuthoringHistory'
 import { commitTableLastCellAndAppendRow, TableContentError, patchTableCellText, patchTableStyle, patchTableCellStyle, patchTableRowHeight, patchTableColumnWidth, insertTableRow, deleteTableRow, reorderTableRows, insertTableColumn, deleteTableColumn, reorderTableColumns } from './tableContentOperations'
 import { nanoid } from 'nanoid'
 import { mergeTableCells, splitTableCells } from './tableContentOperations'
 import type { TableMergeRegion } from '../../shared/tableMerge'
-import { MAX_SCENE_NODES } from '../../shared/constants'
 import { tableNativeContentObjectSchema } from '../../shared/contracts/native-v1'
 import type {
   NativeTableCellStyle,
-  NativeTableColumn,
   NativeTableContent,
-  NativeTableRow,
   NativeTableStyle,
 } from '../../shared/contracts/native-v1/types'
 import { mergeCourseNativeData } from '../../shared/courseProjectSchema'
@@ -18,34 +18,12 @@ import type {
   LayerItem,
   LayerItemOverride,
   SlideSceneDocument,
-  SlideSurfaceDocument,
 } from '../../shared/courseProjectTypes'
 import { SLIDE_REJECT_LOCKED, SLIDE_REJECT_STALE_REVISION, SLIDE_REJECT_WRONG_OWNER, SlideCommandError, commitSlideProjectMutation, selectSlideEditorLayers, type SlideAuthoringSelection, type SlideAuthoringSessionRef, type SlideCommandOptions, type SlideCommandResult } from './slideEditorCommands'
-import {
-  allocateCourseLayerOrder,
-} from './globalLayerCommands'
 import type { SlideAuthoringSession } from './slideAuthoringBackend'
 import {
-  createTableLayerItem,
-  createTableNode,
   type IdFactory,
-  type TableNodeOptions,
-} from '../project/nativeNodeFactories'
-import { offsetDefaultSlideInsertion } from './v9SlideContentCommands'
-
-export interface AddSlideTableLayerInput {
-  readonly merges?: TableMergeRegion[]
-  readonly id?: string
-  readonly x?: number
-  readonly y?: number
-  readonly width?: number
-  readonly height?: number
-  readonly columns?: NativeTableColumn[]
-  readonly rows?: NativeTableRow[]
-  readonly headerRowCount?: number
-  readonly style?: Partial<NativeTableStyle>
-  readonly label?: string
-}
+} from '../../core/tools/nativeNodeFactories'
 
 export interface CommitSlideTableLastCellAndAppendRowInput {
   readonly layerItemId: string
@@ -168,89 +146,6 @@ function deleteEmptyOverride(
   if (override && Object.keys(override).length === 0) {
     delete overrides[layerItemId]
   }
-}
-
-function slideSceneContext(
-  project: CourseProjectDocument,
-  session: SlideAuthoringSessionRef,
-): {
-  location: Extract<CourseProjectDocument['locations'][number], { kind: 'slide-scene' }>
-  surface: SlideSurfaceDocument
-  scene: SlideSceneDocument
-} {
-  const location = project.locations.find(
-    (candidate) => candidate.id === session.selection.locationId,
-  )
-  if (!location || location.kind !== 'slide-scene') {
-    throw new SlideCommandError(SLIDE_REJECT_WRONG_OWNER, '当前位置不是幻灯片')
-  }
-  const surface = project.surfaces.find((candidate) => candidate.id === location.surfaceId)
-  if (!surface || surface.type !== 'slide') throw new Error('当前幻灯片已失效')
-  const scene = surface.scenes.find((candidate) => candidate.id === location.sceneId)
-  if (!scene) throw new Error('当前幻灯片已失效')
-  return { location, surface, scene }
-}
-
-function nextSceneLayerOrder(
-  project: CourseProjectDocument,
-  scene: SlideSceneDocument,
-): number {
-  const preferred = Math.max(-1, ...scene.layerItems.map((item) => item.order)) + 1
-  return allocateCourseLayerOrder(project, Math.max(0, preferred))
-}
-
-function appendSceneLayer(
-  project: CourseProjectDocument,
-  scene: SlideSceneDocument,
-  item: LayerItem,
-  stateId: string | null,
-): void {
-  if (scene.layerItems.length >= MAX_SCENE_NODES) {
-    throw new Error(`已达到 ${MAX_SCENE_NODES} 个节点上限`)
-  }
-  if (scene.layerItems.some((candidate) => candidate.layerItemId === item.layerItemId)) {
-    throw new Error(`图层 ID 已存在：${item.layerItemId}`)
-  }
-  item.order = nextSceneLayerOrder(project, scene)
-  if (stateId) {
-    const presentationState = scene.presentation?.states.find(
-      (candidate) => candidate.id === stateId,
-    )
-    if (!presentationState) throw new Error(`找不到命名状态：${stateId}`)
-    item.visible = false
-    presentationState.layerItemOverrides[item.layerItemId] = { visible: true }
-  }
-  scene.layerItems.push(item)
-  scene.layerItems.sort((a, b) => a.order - b.order || a.layerItemId.localeCompare(b.layerItemId))
-}
-
-function nextSurfaceLayerOrder(
-  project: CourseProjectDocument,
-  surface: SlideSurfaceDocument,
-): number {
-  const preferred = Math.max(-1, ...surface.surfaceLayerItems.map((entry) => entry.item.order)) + 1
-  return allocateCourseLayerOrder(project, Math.max(0, preferred))
-}
-
-function appendSurfaceLayer(
-  project: CourseProjectDocument,
-  surface: SlideSurfaceDocument,
-  item: LayerItem,
-): void {
-  if (surface.surfaceLayerItems.length >= MAX_SCENE_NODES) {
-    throw new Error(`已达到 ${MAX_SCENE_NODES} 个节点上限`)
-  }
-  if (surface.surfaceLayerItems.some((entry) => entry.item.layerItemId === item.layerItemId)) {
-    throw new Error(`图层 ID 已存在：${item.layerItemId}`)
-  }
-  item.order = nextSurfaceLayerOrder(project, surface)
-  surface.surfaceLayerItems.push({
-    item,
-    visibility: { mode: 'all', locationIds: [] },
-  })
-  surface.surfaceLayerItems.sort((a, b) =>
-    a.item.order - b.item.order || a.item.layerItemId.localeCompare(b.item.layerItemId),
-  )
 }
 
 function selectAdded(
@@ -451,57 +346,9 @@ export function addSlideTableLayer(
   const stale = rejectIfStale(session, options.expectedRevision)
   if (stale) return stale
   try {
-    if (session.scope !== 'scene' && session.scope !== 'surface') {
-      throw new SlideCommandError(SLIDE_REJECT_WRONG_OWNER, '表格只能在幻灯片场景或本页中使用')
-    }
-    const { surface, scene } = slideSceneContext(session.history.present, session)
-    const existingCount = session.scope === 'surface'
-      ? surface.surfaceLayerItems.length
-      : scene.layerItems.length
-
-    const tableNode = createTableNode({
-      id: input.id,
-      name: input.label ?? '表格',
-      x: input.x,
-      y: input.y,
-      width: input.width,
-      height: input.height,
-      columns: input.columns,
-      rows: input.rows,
-      headerRowCount: input.headerRowCount,
-      merges: input.merges,
-      style: input.style,
-    })
-
-    // Validate against strict table schema
-    tableNativeContentObjectSchema.parse({
-      columns: tableNode.columns,
-      rows: tableNode.rows,
-      headerRowCount: tableNode.headerRowCount,
-      merges: tableNode.merges,
-      style: tableNode.style,
-    })
-
-    const positioned = offsetDefaultSlideInsertion(
-      tableNode,
-      existingCount,
-      input.x !== undefined || input.y !== undefined,
-    )
-    const layerItem = createTableLayerItem(positioned)
-
-    const project = commitSlideProjectMutation(session.history.present, (draft) => {
-      const { surface: draftSurface, scene: draftScene } = slideSceneContext(draft, session)
-      if (session.scope === 'surface') {
-        appendSurfaceLayer(draft, draftSurface, layerItem)
-      } else {
-        appendSceneLayer(draft, draftScene, layerItem, session.selection.stateId)
-      }
-    }, options.now)
-
-    return commitAdded(session, project, layerItem.layerItemId)
-  } catch (error) {
-    return catchCommand(session, error)
-  }
+    const planned = planSlideTableInsertion(session.history.present, session, input, options.now)
+    return commitAdded(session, planned.project, planned.itemId)
+  } catch (error) { return catchCommand(session, error) }
 }
 
 export function patchSlideTableCellText(

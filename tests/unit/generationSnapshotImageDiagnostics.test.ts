@@ -2,12 +2,11 @@
 import { describe, expect, it, vi } from 'vitest'
 import { captureGenerationSnapshot } from '@/renderer/authoring/generation/generationSnapshot'
 import { createGenerationImageSourceInspector } from '@/renderer/authoring/generation/generationImageDiagnostics'
-import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
-import { createImageNode } from '@/renderer/project/nativeNodeFactories'
+import { createBlankCourseProject } from '@/core/course/createCourseProject'
+import { createImageNode } from '@/core/tools/nativeNodeFactories'
 import { projectEffectiveLayers } from '@/renderer/course/effectiveLayerProjection'
 import { sceneNodeToCourseLayerItem } from '@/shared/courseProjectModel'
 import { encodeImageTransformPng } from '@/renderer/project/imageTransform'
-import { buildGenerationPrompt } from '@/main/localAgent/profile'
 import type { GenerationRequest } from '@/shared/generationContract'
 
 function fixture(bytes = encodeImageTransformPng({ width: 1, height: 1, data: new Uint8Array([255, 0, 0, 255]) }), mimeType = 'image/png') {
@@ -51,19 +50,13 @@ function fixture(bytes = encodeImageTransformPng({ width: 1, height: 1, data: ne
 const image = (request: GenerationRequest) => (request.context as any).imageDiagnostics[0]
 
 describe('first-candidate image diagnostics', () => {
-  it('keeps a real attachment failure separate from a successful transform-source decode on the initial wire', async () => {
+  it('keeps a real attachment failure separate from a successful transform-source decode in the captured evidence', async () => {
     const f = fixture(), request = f.capture('failed'), before = structuredClone(request)
     const inspected = await createGenerationImageSourceInspector()(request, f.document.assets, { red: f.bytes })
     expect(request).toEqual(before)
     expect(image(inspected)).toMatchObject({ assetId: 'red', selected: true,
       attachment: { status: 'unavailable', code: 'image-decode-failed' }, transformSource: { status: 'ready', width: 1, height: 1 } })
-    for (const adapter of ['codex', 'claude', 'opencode'] as const) {
-      const prompt = buildGenerationPrompt(adapter, inspected, 'C:/candidate')
-      const wire = JSON.parse(prompt.split('\n').at(-1)!)
-      expect(wire.context.imageDiagnostics).toEqual((inspected.context as any).imageDiagnostics)
-      expect(Buffer.byteLength(prompt)).toBeLessThanOrEqual(12 * 1024)
-      expect(wire.context).not.toHaveProperty('assets')
-    }
+
   })
 
   it('reports a damaged IDAT source despite an existing visual attachment and preserves exact targets', async () => {

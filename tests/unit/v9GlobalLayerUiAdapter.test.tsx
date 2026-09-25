@@ -14,7 +14,7 @@ import {
   type ScopedLayerItem,
 } from '@/shared/courseProjectTypes'
 import { sceneNodeToCourseLayerItem } from '@/shared/courseProjectModel'
-import { createFormulaNode, } from '@/renderer/project/nativeNodeFactories'
+import { createFormulaNode, } from '@/core/tools/nativeNodeFactories'
 import {
   createSlideAuthoringBackend,
   openSlideAuthoringSession,
@@ -24,7 +24,7 @@ import {
   CONTROLLER_MOVE_REASON,
   SPATIAL_CROSS_COORDINATE_MOVE_REASON,
 } from '@/renderer/course/effectiveLayerCommands'
-import { CROSS_GLOBAL_PLANE_REORDER_REASON } from '@/renderer/course/globalLayerCommands'
+import { CROSS_GLOBAL_PLANE_REORDER_REASON } from '@/core/tools/globalLayers'
 import { SLIDE_GLOBAL_CONTROLLER_CLIPBOARD_REASON } from '@/renderer/course/v9SlideActionCommands'
 import {
   rowsForListKind,

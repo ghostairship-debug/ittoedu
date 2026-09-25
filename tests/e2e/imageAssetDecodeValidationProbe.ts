@@ -1,5 +1,5 @@
 import { readImageDimensions } from '../../src/renderer/project/assetManager'
-import { createBlankCourseProject } from '../../src/renderer/project/createCourseProject'
+import { createBlankCourseProject } from '../../src/core/course/createCourseProject'
 import { executeAuthoringTool } from '../../src/renderer/authoring/tools/executeAuthoringTool'
 import { mediaAssetTool } from '../../src/renderer/authoring/tools/mediaAssetTool'
 import { validateDynamicCandidateFallbackAssets } from '../../src/renderer/authoring/tools/dynamicCandidateFallbackAssets'

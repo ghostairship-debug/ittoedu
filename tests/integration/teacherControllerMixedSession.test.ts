@@ -3,9 +3,9 @@ import { buildPublishedFixture as buildPublishedCourseV2Payload } from '../fixtu
 import { isControllerFixture } from '../fixtures/teacherController'
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import type { InteractionRule } from '@/shared/contracts/interaction-v1/types'
-import { addCourseFlowPage, addCourseSpatialPage } from '@/renderer/course/courseLocationCommands'
+import { addCourseFlowPage, addCourseSpatialPage } from '@/core/tools/courseLocations'
 
-import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
+import { createBlankCourseProject } from '@/core/course/createCourseProject'
 import { createPublishedCourseSession, type PublishedCourseSession } from '@/player/surfaces/publishedDynamicHosts'
 import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
 import type { CourseProjectDocument } from '@/shared/courseProjectTypes'

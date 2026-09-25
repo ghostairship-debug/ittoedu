@@ -2,7 +2,7 @@ import { zipSync } from 'fflate'
 import type { AssetMeta } from '../../shared/contracts/media-v1'
 import type { ComponentPackageData } from '../../shared/contracts/component-v4'
 import type { DocumentResources } from '../../shared/document/resources'
-import { importComponentPackage } from '../components/importComponentPackage'
+import { importComponentPackage } from '../../core/drivers/codecs/importComponentPackage'
 import { createFileDocumentResourcePort } from '../document/fileDocumentResources'
 import { createDocumentClipboardContext, readDocumentClipboardContext, selectDocumentClipboardContext, type DocumentClipboardContext } from '../document/documentClipboardContext'
 

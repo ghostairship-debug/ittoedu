@@ -19,6 +19,7 @@ import {
 import { FlowWorkspace } from '../FlowWorkspace'
 import { FLOW_WORKSPACE_HEADER_HEIGHT } from '../FlowBlockContextToolbar'
 import type { FlowCurrentSessionCommandPort } from '../flow/useFlowTextAuthoringController'
+import type { WorkspaceMediaDropHandler } from '../../lessonWorkspace/workspaceMediaDrop'
 
 export type FlowCanvasMode = 'edit' | 'run'
 export type FlowEditingScope = 'scene' | 'global'
@@ -27,6 +28,7 @@ export interface FlowTryRunSession {
 }
 
 export interface FlowLocationWorkspaceProps {
+  readonly documentId?: string | null
   readonly view: FlowEditorView
   readonly sessionToken: CourseAuthoringSessionToken
   readonly assets: Readonly<Record<string, AssetMeta>>
@@ -41,9 +43,11 @@ export interface FlowLocationWorkspaceProps {
   readonly commands: FlowCurrentSessionCommandPort
   readonly onCanvasModeChange: (mode: FlowCanvasMode) => void
   readonly onMountTryRun: (container: HTMLElement) => Promise<FlowTryRunSession>
+  readonly onDropWorkspaceMedia?: WorkspaceMediaDropHandler
 }
 
 export function FlowLocationWorkspace({
+  documentId,
   view,
   sessionToken,
   assets,
@@ -58,6 +62,7 @@ export function FlowLocationWorkspace({
   commands,
   onCanvasModeChange,
   onMountTryRun,
+  onDropWorkspaceMedia,
 }: FlowLocationWorkspaceProps) {
   const [toolbarContainer, setToolbarContainer] = useState<HTMLDivElement | null>(null)
   const tryRunRef = useRef<HTMLDivElement>(null)
@@ -126,6 +131,7 @@ export function FlowLocationWorkspace({
       <div className="canvas-viewport">
         {canvasMode === 'edit' ? (
           <FlowWorkspace
+            documentId={documentId}
             toolbarContainer={toolbarContainer}
             view={view}
             sessionToken={sessionToken}
@@ -137,6 +143,7 @@ export function FlowLocationWorkspace({
             commands={commands}
             assetFiles={assetFiles}
             componentPackages={componentPackages}
+            onDropWorkspaceMedia={onDropWorkspaceMedia}
           />
         ) : null}
         <div

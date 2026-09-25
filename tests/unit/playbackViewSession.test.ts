@@ -4,8 +4,8 @@ import { PLAYBACK_VIEW_CHROME_GUTTER } from '@/shared/playbackViewGeometry'
 import { afterEach, describe, expect, it } from 'vitest'
 import { PlaybackViewSession, playbackGestureOccupied, playbackPanRange } from '@/player/playbackViewSession'
 
-import { addCourseFlowPage } from '@/renderer/course/courseLocationCommands'
-import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
+import { addCourseFlowPage } from '@/core/tools/courseLocations'
+import { createBlankCourseProject } from '@/core/course/createCourseProject'
 import { createPublishedCourseSession } from '@/player/surfaces/publishedDynamicHosts'
 
 

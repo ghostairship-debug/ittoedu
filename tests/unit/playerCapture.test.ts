@@ -8,7 +8,7 @@ import {
   waitForPublishedCourseCaptureReady,
 } from '../../src/renderer/export/playerCapture'
 
-import { createBlankCourseProject } from '../../src/renderer/project/createCourseProject'
+import { createBlankCourseProject } from '../../src/core/course/createCourseProject'
 import { createBlankSpatialCourseProject } from '../../src/renderer/project/createSpatialCourseProject'
 
 afterEach(() => {

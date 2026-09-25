@@ -1,3 +1,4 @@
+import { NativeSelectionContext } from '../../workbench/NativeSelectionContext'
 import { useControllerDisplayRevision } from '../../authoring/controllerDisplayBounds'
 
 import { chartCanvasTextPort } from '../../authoring/chartCanvasTextBridge'
@@ -6,6 +7,9 @@ import { useAssetObjectUrls } from '../useAssetObjectUrls'
 import type { ChartTextDraft } from '../../authoring/chartTextDraft'
 import { Hand, Maximize2, Minus, MousePointer2, Play, Plus } from 'lucide-react'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useWorkspaceMediaSource } from '../../lessonWorkspace/workspaceMediaSourceContext'
+import { deliverWorkspaceMediaDrop, type WorkspaceMediaDropHandler } from '../../lessonWorkspace/workspaceMediaDrop'
+import { WORKSPACE_MEDIA_DRAG_TYPE } from '../../lessonWorkspace/workspaceMediaDrag'
 import type { ComponentPackageData } from '../../../shared/componentTypes'
 
 import type {
@@ -30,10 +34,9 @@ import {
   STAGE_RESIZE_HANDLE_DIRECTIONS,
   STAGE_VIEWPORT_HEIGHT,
   STAGE_VIEWPORT_WIDTH,
-  type StageRect,
   type StageSelectionOverlayGeometry,
 } from '../../authoring/stageViewportTransform'
-import { isTeacherControllerLayerItem } from '../../course/globalLayerCommands'
+import { isTeacherControllerLayerItem } from '../../../core/tools/globalLayers'
 import type { SpatialEditorWorldTransform } from '../../course/spatialEditorCommands'
 import {
   assertActiveSpatialEditorView,
@@ -54,6 +57,9 @@ import { authoringObservationCameraToken, authoringObservationDraftToken } from 
 import { adaptV9SpatialEditorLayers, hitTestV9SpatialLayerItems } from '../../phaser/v9SpatialHitAdapter'
 import { FormulaEditDialog } from '../FormulaEditDialog'
 import { PublishedNativeContent } from '../PublishedNativeContent'
+import { planNativeTextEdit } from '../../../core/tools/nativeText'
+import type { EditSessionSnapshot } from '../../../shared/workbench/editSession'
+import { cancelEditPreview, useEditPreview } from '../../workbench/EditPreviewProjection'
 import {
 } from '../coursePlayerTryRun'
 import {
@@ -72,6 +78,7 @@ import {
 export type SpatialCanvasMode = 'edit' | 'run'
 
 export interface SpatialLocationWorkspaceProps {
+  readonly documentId?: string | null
   readonly view: SpatialEditorView
   readonly showCameraFrames: boolean
   readonly targets: readonly SpatialEditorStableTarget[]
@@ -90,6 +97,7 @@ export interface SpatialLocationWorkspaceProps {
   readonly commands: SpatialAuthoringCommandPort
   readonly onCanvasModeChange: (mode: SpatialCanvasMode) => void
   readonly onMountTryRun: (container: HTMLElement) => Promise<PublishedCourseSession>
+  readonly onDropWorkspaceMedia?: WorkspaceMediaDropHandler
 }
 
 function distanceToSegment(
@@ -172,6 +180,20 @@ function spatialNativePaint(
   return item.kind === 'native'
     ? <PublishedNativeContent item={item} assetUrls={assetUrls} size={size} />
     : item.label || item.kind
+}
+function spatialNativeTextPreview(item: LayerItem, preview: EditSessionSnapshot | null): LayerItem {
+  if (!preview || preview.target.kind !== 'course-object' ||
+    item.kind !== 'native' || item.content.nativeType !== 'text' ||
+    item.layerItemId !== preview.target.itemId) return item
+  const planned = planNativeTextEdit(item.content.data, { text: preview.value })
+  return {
+    ...item,
+    content: { ...item.content, data: {
+      ...item.content.data,
+      text: preview.value,
+      runs: planned.ok ? planned.data.runs : [],
+    } },
+  }
 }
 function SpatialComponentItemContent({
   projectId,
@@ -298,6 +320,7 @@ function SpatialSelectionOverlay({
 }
 
 export function SpatialLocationWorkspace({
+  documentId,
   view,
   showCameraFrames,
   targets,
@@ -316,7 +339,11 @@ export function SpatialLocationWorkspace({
   commands,
   onCanvasModeChange,
   onMountTryRun,
+  onDropWorkspaceMedia,
 }: SpatialLocationWorkspaceProps) {
+  const mediaSource = useWorkspaceMediaSource()
+  const mediaSourceRef = useRef(mediaSource)
+  mediaSourceRef.current = mediaSource
   const workspaceRef = useRef<HTMLDivElement>(null)
   const viewportRef = useRef<HTMLDivElement>(null)
   const stageStackRef = useRef<HTMLDivElement>(null)
@@ -331,6 +358,28 @@ export function SpatialLocationWorkspace({
   const [worldOverlay, setWorldOverlay] = useState<StageSelectionOverlayGeometry | null>(null)
   const [hudOverlay, setHudOverlay] = useState<StageSelectionOverlayGeometry | null>(null)
   const [textCanvas, setTextCanvas] = useState<HTMLCanvasElement | null>(null)
+  const [previewNotice, setPreviewNotice] = useState(false)
+  const [mediaDragOver, setMediaDragOver] = useState(false)
+  const [mediaDropError, setMediaDropError] = useState<string | null>(null)
+  const editPreview = useEditPreview(documentId, project.revision)
+  const activeTextPreview = canvasMode === 'edit' && documentId &&
+    editPreview?.documentId === documentId && editPreview.status !== 'aborted' &&
+    editPreview.sequence >= 0 && editPreview.target.kind === 'course-object' &&
+    editPreview.target.locationId === view.locationId ? editPreview : null
+
+  useEffect(() => { setPreviewNotice(false) }, [activeTextPreview?.editId])
+  useEffect(() => {
+    if (!activeTextPreview || activeTextPreview.status !== 'active') return
+    const onUndo = (event: KeyboardEvent) => {
+      if (!(event.ctrlKey || event.metaKey) || event.shiftKey || event.key.toLowerCase() !== 'z') return
+      if (event.target instanceof Element && event.target.closest('input, textarea, [contenteditable="true"]')) return
+      event.preventDefault()
+      event.stopImmediatePropagation()
+      void cancelEditPreview(activeTextPreview)
+    }
+    window.addEventListener('keydown', onUndo, true)
+    return () => window.removeEventListener('keydown', onUndo, true)
+  }, [activeTextPreview])
 
   const snapshot: SpatialWorldAuthoringSnapshot = {
     view,
@@ -351,43 +400,37 @@ export function SpatialLocationWorkspace({
     commands: { run: (target, intent) => commandsRef.current.run(target, intent) },
   }))
 
+  const measureViewport = useCallback(() => {
+    const node = viewportRef.current
+    if (!node) return
+    const rect = node.getBoundingClientRect()
+    if (rect.width <= 0 || rect.height <= 0) return
+    setViewportSize(current => current.width === rect.width && current.height === rect.height
+      ? current : { width: rect.width, height: rect.height })
+  }, [])
+
+  // The editor can change the available canvas area in the same React commit
+  // as a file or panel switch. Fit the painted stage before the next pointer.
+  useLayoutEffect(() => { measureViewport() })
+
   useLayoutEffect(() => {
     const node = viewportRef.current
     if (!node) return
-    const update = () => {
-      const rect = node.getBoundingClientRect()
-      if (rect.width > 0 && rect.height > 0) {
-        setViewportSize({ width: rect.width, height: rect.height })
-      }
-    }
-    update()
-    const observer = new ResizeObserver(update)
+    const observer = new ResizeObserver(measureViewport)
     observer.observe(node)
     return () => observer.disconnect()
-  }, [])
-
-  const readHoleClientRect = useCallback((): StageRect | null => {
-    const node = viewportRef.current
-    if (!node) return null
-    const rect = node.getBoundingClientRect()
-    if (rect.width <= 0 || rect.height <= 0) return null
-    return {
-      x: rect.left,
-      y: rect.top,
-      width: rect.width,
-      height: rect.height,
-    }
-  }, [])
+  }, [measureViewport])
 
   const readLogicalPointer = useCallback((clientX: number, clientY: number) => {
-    const hole = readHoleClientRect()
-    if (!hole) return null
-    const point = clientToWorld(createStageViewportTransform({ viewport: hole, zoom: 1 }), {
-      x: clientX,
-      y: clientY,
-    })
-    return { x: point.x, y: point.y }
-  }, [readHoleClientRect])
+    // Hit testing must invert the stage that is actually painted. The live
+    // viewport can resize before ResizeObserver commits the next fit scale.
+    const painted = stageStackRef.current?.getBoundingClientRect()
+    if (!painted || painted.width <= 0 || painted.height <= 0) return null
+    return {
+      x: (clientX - painted.left) * STAGE_VIEWPORT_WIDTH / painted.width,
+      y: (clientY - painted.top) * STAGE_VIEWPORT_HEIGHT / painted.height,
+    }
+  }, [])
 
   const liveCamera = previewCamera ?? view.sessionCamera
   const stageTransform = useMemo(() => createStageViewportTransform({
@@ -669,7 +712,7 @@ export function SpatialLocationWorkspace({
             ) : layer.item.kind === 'native' && layer.item.content.nativeType === 'chart' ? (
               renderEditableChart(layer, size)
             ) : (
-              spatialNativePaint(layer.item as LayerItem, assetUrls, size)
+              spatialNativePaint(spatialNativeTextPreview(layer.item as LayerItem, activeTextPreview), assetUrls, size)
             )}
           </div>
         )
@@ -677,12 +720,32 @@ export function SpatialLocationWorkspace({
     </div>
   )
 
+  const readMediaDropPoint = (clientX: number, clientY: number) => {
+    const stage = readLogicalPointer(clientX, clientY)
+    if (!stage || stage.x < 0 || stage.y < 0 || stage.x > STAGE_VIEWPORT_WIDTH || stage.y > STAGE_VIEWPORT_HEIGHT) return null
+    return clientToWorld(createSpatialWorldViewTransform(LOGICAL_STAGE_VIEWPORT, view.sessionCamera), stage)
+  }
+  const dropWorkspaceMedia = (event: React.DragEvent<HTMLDivElement>) => {
+    if (!event.dataTransfer.types.includes(WORKSPACE_MEDIA_DRAG_TYPE) || !onDropWorkspaceMedia) return
+    event.preventDefault(); event.stopPropagation(); setMediaDragOver(false)
+    if (canvasMode !== 'edit' || scope !== 'world') { setMediaDropError('请切换到可编辑的无限画布世界层后拖入媒体'); return }
+    const point = readMediaDropPoint(event.clientX, event.clientY)
+    if (!point) { setMediaDropError('请将媒体拖到无限画布内容区域内'); return }
+    const target = { documentId: documentId ?? null, projectId: view.projectId, revision: project.revision,
+      locationId: view.locationId, surfaceId: view.surfaceId, sessionGeneration: worldTarget.sessionGeneration }
+    const raw = event.dataTransfer.getData(WORKSPACE_MEDIA_DRAG_TYPE)
+    void deliverWorkspaceMediaDrop(raw, mediaSource, { surface: 'spatial', x: point.x, y: point.y }, target, onDropWorkspaceMedia,
+      () => mediaSourceRef.current.directory === mediaSource.directory && mediaSourceRef.current.files === mediaSource.files)
+      .then(result => setMediaDropError(result.ok ? null : result.reason ?? '媒体未插入'))
+  }
+
   return (
     <main
       ref={workspaceRef}
       className={`workspace workspace--${canvasMode} workspace--spatial`}
       data-testid="spatial-workspace"
     >
+      <NativeSelectionContext documentId={documentId} revision={project.revision} locationId={view.locationId} itemIds={selectionIds} enabled={canvasMode === 'edit'} />
       <div className="canvas-mode-switch" role="group" aria-label="画布模式">
         <button
           type="button"
@@ -752,10 +815,18 @@ export function SpatialLocationWorkspace({
           ? `全局层 · ${hudItems.length} 个元素`
           : `${view.surfaceTitle} · ${view.camera.activeFrame.name}`}
       </div>
+      {previewNotice && activeTextPreview && (
+        <div role="status" className="canvas-label">正在生成文字；完成或停止后可编辑此对象。</div>
+      )}
+      {mediaDropError && <div role="alert" className="canvas-label">{mediaDropError}</div>}
       <div
         ref={viewportRef}
         className="canvas-viewport"
         data-testid="spatial-world-stage"
+        data-workspace-media-drop={mediaDragOver || undefined}
+        onDragOver={event => { if (onDropWorkspaceMedia && event.dataTransfer.types.includes(WORKSPACE_MEDIA_DRAG_TYPE)) { event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; setMediaDragOver(canvasMode === 'edit' && scope === 'world' && Boolean(readMediaDropPoint(event.clientX, event.clientY))) } }}
+        onDragLeave={event => { if (!event.currentTarget.contains(event.relatedTarget as Node)) setMediaDragOver(false) }}
+        onDrop={dropWorkspaceMedia}
         data-observation-source={canvasMode === 'edit' ? 'authoring' : undefined}
         data-observation-project-id={project.id}
         data-observation-revision={project.revision}
@@ -768,6 +839,7 @@ export function SpatialLocationWorkspace({
         data-observation-spatial-camera={authoringObservationCameraToken(liveCamera)}
         style={{
           backgroundColor: 'transparent',
+          boxShadow: mediaDragOver ? 'inset 0 0 0 3px #245b46' : undefined,
         }}
         onWheel={(event) => {
           if (canvasMode !== 'edit' || (!event.ctrlKey && !event.metaKey)) return
@@ -799,6 +871,13 @@ export function SpatialLocationWorkspace({
             )),
             { viewport: hudPoint, world },
           )
+          if (activeTextPreview?.target.kind === 'course-object' &&
+            layerHit?.layerItemId === activeTextPreview.target.itemId) {
+            setPreviewNotice(true)
+            event.preventDefault()
+            event.stopPropagation()
+            return
+          }
           if (!layerHit) {
             const graph = hitSpatialGraphAtWorld(view, world, 8 / cameraZoom)
             if (graph) {
@@ -868,6 +947,22 @@ export function SpatialLocationWorkspace({
           if (canvasMode !== 'edit') return
           const stagePoint = readLogicalPointer(event.clientX, event.clientY)
           if (!stagePoint) return
+          if (activeTextPreview?.target.kind === 'course-object') {
+            const world = clientToWorld(createSpatialWorldViewTransform(
+              LOGICAL_STAGE_VIEWPORT, view.sessionCamera,
+            ), stagePoint)
+            const viewport = clientToWorld(createSpatialViewportOverlayTransform(
+              LOGICAL_STAGE_VIEWPORT,
+            ), stagePoint)
+            const hit = hitTestV9SpatialLayerItems(adaptV9SpatialEditorLayers(view.layers), {
+              viewport, world,
+            })
+            if (hit?.layerItemId === activeTextPreview.target.itemId) {
+              setPreviewNotice(true)
+              event.preventDefault()
+              return
+            }
+          }
           authoringRef.current.doubleClick(stagePoint, LOGICAL_STAGE_VIEWPORT)
         }}
       >
@@ -1031,7 +1126,7 @@ export function SpatialLocationWorkspace({
                     ) : layer.item.kind === 'native' && layer.item.content.nativeType === 'chart' ? (
                       renderEditableChart(layer, size)
                     ) : (
-                      spatialNativePaint(layer.item as LayerItem, assetUrls, size)
+                      spatialNativePaint(spatialNativeTextPreview(layer.item as LayerItem, activeTextPreview), assetUrls, size)
                     )}
                   </div>
                 )

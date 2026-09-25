@@ -1,0 +1,16 @@
+.native-selection-context.canvas-mode-switch { top: 52px; left: 12px; right: auto; z-index: 45; box-sizing: border-box; width: min(340px, calc(100vw - 16px)); max-width: none; display: block; overflow-y: auto; overscroll-behavior: contain; padding: 4px; }
+.native-selection-context--idle.canvas-mode-switch { width: 0; height: 0; padding: 0; border: 0; background: transparent; box-shadow: none; backdrop-filter: none; pointer-events: none; }
+.native-selection-context__toolbar { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.native-selection-context__toolbar > span { font-size: 11px; color: var(--text-muted); padding: 0 5px; }
+.native-selection-context__properties { display: grid; gap: 8px; padding: 10px; background: var(--panel, #fff); border: 1px solid #c4b5fd; border-radius: 8px; font-size: 12px; }
+.native-selection-context__properties header { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.native-selection-context__properties .native-selection-context__property-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; }
+.native-selection-context__properties .native-selection-context__property-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+.native-selection-context__properties .form-field { min-width: 0; margin: 0; }
+.native-selection-context__properties .form-field input { width: 100%; min-width: 0; }
+.native-selection-context__properties select { max-width: 155px; }
+.native-selection-context__properties p { margin: 0; }
+.native-selection-context form { display: flex; gap: 6px; flex-wrap: wrap; padding: 8px; background: var(--panel, #fff); border: 1px solid #c4b5fd; border-radius: 8px; }
+.native-selection-context textarea { width: 100%; min-height: 64px; }
+[data-context-pinned="true"] { outline: 2px dashed #8b5cf6 !important; outline-offset: 3px; }
+.execution-selection-chip { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 6px; color: #6d28d9; background: #f5f3ff; }

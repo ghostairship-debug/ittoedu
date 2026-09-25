@@ -1,0 +1,326 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>果铃工作台｜产品最终形态设计方案图稿</title>
+<style>
+:root {
+  --bg: #f5f8fc;
+  --card: #ffffff;
+  --text: #17324d;
+  --muted: #5f748a;
+  --line: #dfe9f3;
+  --accent: #2f8cff;
+  --accent2: #23b7b7;
+  --shadow: 0 10px 30px rgba(19, 60, 98, .08);
+  --radius: 20px;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  color: var(--text);
+  background: linear-gradient(180deg, #eef5fb 0%, #f7fbff 35%, #f6f8fb 100%);
+}
+a { color: var(--accent); text-decoration: none; }
+.hero {
+  padding: 56px 28px 36px;
+}
+.wrap {
+  max-width: 1320px;
+  margin: 0 auto;
+}
+.hero-card {
+  background: rgba(255,255,255,.86);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(255,255,255,.8);
+  border-radius: 28px;
+  padding: 36px;
+  box-shadow: var(--shadow);
+}
+.hero h1 {
+  margin: 0 0 12px;
+  font-size: 42px;
+  line-height: 1.15;
+}
+.hero p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 18px;
+  line-height: 1.8;
+}
+.badges {
+  margin-top: 18px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.badge {
+  background: #eaf4ff;
+  border: 1px solid #d7ebff;
+  color: #2568b3;
+  border-radius: 999px;
+  padding: 8px 14px;
+  font-size: 14px;
+}
+.section {
+  padding: 0 28px 34px;
+}
+.section h2 {
+  margin: 0 0 14px;
+  font-size: 28px;
+}
+.section p.lead {
+  margin: 0 0 24px;
+  color: var(--muted);
+  font-size: 16px;
+  line-height: 1.8;
+}
+.grid {
+  display: grid;
+  grid-template-columns: repeat(12, 1fr);
+  gap: 22px;
+}
+.card {
+  grid-column: span 12;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  overflow: hidden;
+  box-shadow: var(--shadow);
+}
+.card .content {
+  padding: 22px 24px 24px;
+}
+.card h3 {
+  margin: 0 0 8px;
+  font-size: 22px;
+}
+.card p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.8;
+  font-size: 15px;
+}
+.mockup img {
+  width: 100%;
+  display: block;
+  background: #f3f6fa;
+}
+.two-col {
+  display: grid;
+  grid-template-columns: 1.1fr .9fr;
+}
+ul.clean {
+  padding-left: 18px;
+  margin: 10px 0 0;
+  color: var(--muted);
+  line-height: 1.8;
+}
+.cols3 {
+  display:grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 22px;
+}
+.small-card {
+  background:#fff;
+  border:1px solid var(--line);
+  border-radius: 18px;
+  padding: 18px 18px 20px;
+  box-shadow: var(--shadow);
+}
+.small-card h4 {
+  margin: 0 0 10px;
+  font-size: 18px;
+}
+.footer {
+  padding: 24px 28px 60px;
+}
+.footer-box {
+  max-width: 1320px;
+  margin: 0 auto;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  padding: 22px 24px;
+  color: var(--muted);
+  box-shadow: var(--shadow);
+}
+@media (min-width: 960px) {
+  .span-6 { grid-column: span 6; }
+  .span-7 { grid-column: span 7; }
+  .span-5 { grid-column: span 5; }
+}
+@media (max-width: 960px) {
+  .two-col, .cols3 { grid-template-columns: 1fr; }
+  .hero h1 { font-size: 32px; }
+}
+</style>
+</head>
+<body>
+
+<section class="hero">
+  <div class="wrap hero-card">
+    <h1>果铃工作台｜产品最终形态设计方案图稿</h1>
+    <p>本方案以“AI 原生工作台”为核心，呈现果铃工作台的最终产品形态：文件与会话并列、活文档直接编辑、多表面统一共编、附件与任务一体化、AI 过程透明可见。</p>
+    <div class="badges">
+      <span class="badge">AI 原生工作台</span>
+      <span class="badge">会话独立于文件</span>
+      <span class="badge">活文档直接编辑</span>
+      <span class="badge">Markdown / H5 / Flow 统一共编</span>
+      <span class="badge">附件与多模态</span>
+      <span class="badge">任务与成果沉淀</span>
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="wrap">
+    <h2>产品结构总览</h2>
+    <p class="lead">最终形态采用稳定的三栏结构：左侧负责文件与会话，中央负责内容与画布，右侧负责 AI 助手、执行过程与结果。普通用户可以从文件开始，也可以从会话开始。</p>
+    <div class="grid">
+      <div class="card mockup span-7">
+        <img src="images/01_main_workspace.png" alt="主工作台总览" />
+      </div>
+      <div class="card span-5">
+        <div class="content">
+          <h3>主工作台总览</h3>
+          <p>这张主视觉图定义了整个产品的核心布局与气质。左侧是可用的真实文件管理，中间是多标签内容工作区，右侧是 AI 助手与过程面板。用户无需在“项目 / 课例 / 工作空间”等复杂概念中迷路，文件与会话就是最重要的两个一级对象。</p>
+          <ul class="clean">
+            <li>文件与会话并列为一级入口</li>
+            <li>多标签、多表面统一承载在中央工作区</li>
+            <li>右侧 AI 面板提供上下文、过程与输入</li>
+            <li>整体保持轻量、专业、可持续扩展的桌面产品感</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="wrap">
+    <h2>六大核心界面</h2>
+    <p class="lead">下面六张图稿分别覆盖文档编辑、课件编辑、流程画布、首页工作台、AI 任务工作区以及整体主壳层，构成一套完整的最终形态设计语言。</p>
+    <div class="grid">
+      <div class="card span-6 mockup">
+        <img src="images/02_markdown_inline_edit.png" alt="Markdown 正文即时编辑" />
+        <div class="content">
+          <h3>01｜Markdown 正文即时编辑</h3>
+          <p>“正文 / 源文”双模式明确区分可编辑内容与底层格式。AI 修改在正文内原位发生，不再通过外部候选文件再应用，强调即时、可撤销、低打断的写作体验。</p>
+        </div>
+      </div>
+      <div class="card span-6 mockup">
+        <img src="images/03_h5_lesson_canvas.png" alt="H5 课件编辑" />
+        <div class="content">
+          <h3>02｜H5 课件与页面共编</h3>
+          <p>缩略图、主画布与右侧 AI 助手协同工作。用户在当前页面和选区上直接发起修改，AI 过程透明可见，修改尽快作用于当前内容。</p>
+        </div>
+      </div>
+      <div class="card span-6 mockup">
+        <img src="images/04_flow_spatial_canvas.png" alt="Flow Spatial 画布" />
+        <div class="content">
+          <h3>03｜Flow / Spatial 画布编辑</h3>
+          <p>统一的画布式编辑体验，支持节点、区域和局部流程的 AI 优化、扩展和变体生成。用户可以看到推荐动作、相关资源与过程记录。</p>
+        </div>
+      </div>
+      <div class="card span-6 mockup">
+        <img src="images/05_home_file_chat.png" alt="首页与文件会话" />
+        <div class="content">
+          <h3>04｜文件与会话首页</h3>
+          <p>首页承担“入口、概览、启动工作”的职责，而不是上来就进入重型编辑器。文件和会话并列呈现，帮助用户快速进入工作状态。</p>
+        </div>
+      </div>
+      <div class="card span-12 mockup">
+        <img src="images/06_ai_workspace_and_attachments.png" alt="AI 工作区与附件" />
+        <div class="content">
+          <h3>05｜AI 工作区、附件与成果管理</h3>
+          <p>这是任务型 AI 能力的集中呈现：选择模型模式、上传附件、看到任务规划、执行步骤、生成结果和执行记录。它不仅能对话，还能成为成果工作台与多模态中枢。</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="wrap">
+    <h2>信息架构与体验原则</h2>
+    <div class="cols3">
+      <div class="small-card">
+        <h4>一级对象</h4>
+        <p>空间、文件与会话为一级对象。会话独立于文件，但能随时引用文件、页面、选区和附件。</p>
+      </div>
+      <div class="small-card">
+        <h4>AI 的职责</h4>
+        <p>AI 负责理解、设计和内容生成；产品负责上下文交付、直接工具、结果呈现与撤销恢复。</p>
+      </div>
+      <div class="small-card">
+        <h4>编辑原则</h4>
+        <p>普通编辑优先走活文档直接修改路径，复杂工程构建、导入和可执行内容再使用更重的流程。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="wrap">
+    <h2>关键交互流程</h2>
+    <div class="grid">
+      <div class="card span-6">
+        <div class="content">
+          <h3>从会话开始</h3>
+          <ul class="clean">
+            <li>打开会话，输入需求</li>
+            <li>附加图片、文件或引用已有内容</li>
+            <li>AI 生成方案并进入内容区</li>
+            <li>内容可继续人工接手或继续让 AI 修改</li>
+          </ul>
+        </div>
+      </div>
+      <div class="card span-6">
+        <div class="content">
+          <h3>从文件开始</h3>
+          <ul class="clean">
+            <li>打开文档 / 页面 / 画布</li>
+            <li>选择当前目标区域</li>
+            <li>AI 自动获得上下文</li>
+            <li>修改直接作用于当前内容</li>
+          </ul>
+        </div>
+      </div>
+      <div class="card span-6">
+        <div class="content">
+          <h3>正文即时编辑</h3>
+          <ul class="clean">
+            <li>在正文中选中一段文字</li>
+            <li>发送“润色 / 扩写 / 改写”等需求</li>
+            <li>新内容原位出现</li>
+            <li>支持撤销、继续改写和接力创作</li>
+          </ul>
+        </div>
+      </div>
+      <div class="card span-6">
+        <div class="content">
+          <h3>附件与任务</h3>
+          <ul class="clean">
+            <li>点击、粘贴、拖拽即可添加附件</li>
+            <li>发送前有附件预览</li>
+            <li>任务执行过程与产物清晰可见</li>
+            <li>成果可以下载、打开、继续编辑与沉淀</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="footer">
+  <div class="footer-box">
+    本包还包含详细 Markdown 说明文档，请查看：<br />
+    <strong>README.md</strong>、<strong>docs/01_产品总览.md</strong>、<strong>docs/02_信息架构.md</strong>、<strong>docs/03_核心界面说明.md</strong>、<strong>docs/04_关键交互流程.md</strong>、<strong>docs/05_设计原则与实现提示.md</strong>。
+  </div>
+</section>
+
+</body>
+</html>

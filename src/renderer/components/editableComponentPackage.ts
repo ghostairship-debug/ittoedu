@@ -2,46 +2,19 @@ import { collectCourseComponentPackageReferences } from './courseComponentPackag
 import type { ComponentPackageData } from '../../shared/componentTypes'
 import { componentManifestSchema } from '../../shared/componentSchema'
 import { componentSupportsScope } from '../../shared/componentCapabilities'
-import { componentContentSha256 } from '../../shared/componentContentIntegrity'
 import { UserFacingError } from '../../shared/errors'
 import type { EmbeddedComponentPackageMeta } from '../../shared/contracts/component-v4'
 import type { CourseProjectDocument } from '../../shared/courseProjectTypes'
 import {
   parseComponentPackageFiles,
   validateComponentRuntimeSource,
-} from './importComponentPackage'
+} from '../../core/drivers/codecs/importComponentPackage'
 
 export function editableComponentPackageId(
   sourceId: string,
   suffix: string,
 ): string {
   return `${sourceId.split('.editable.')[0]!.slice(0, 100)}.editable.${suffix.toLowerCase().replace(/[^a-z0-9]/g, 'x').slice(0, 64)}`
-}
-
-export function componentPackageMeta(
-  data: ComponentPackageData,
-  authoring?: Pick<
-    EmbeddedComponentPackageMeta,
-    'editableCopy' | 'sourcePackageId'
-  >,
-): EmbeddedComponentPackageMeta {
-  const base = `components/${data.manifest.id}@${data.manifest.version}`
-  return {
-    packageId: data.manifest.id,
-    version: data.manifest.version,
-    name: data.manifest.name,
-    manifestPath: `${base}/manifest.json`,
-    runtimePath: `${base}/${data.manifest.entry}`,
-    contentSha256: data.contentSha256 ?? componentContentSha256(data.files),
-    thumbnailPath: data.manifest.thumbnail
-      ? `${base}/${data.manifest.thumbnail}`
-      : undefined,
-    ...(data.provenance === undefined ? {} : data.provenance),
-    ...(authoring?.editableCopy ? { editableCopy: true } : {}),
-    ...(authoring?.sourcePackageId
-      ? { sourcePackageId: authoring.sourcePackageId }
-      : {}),
-  }
 }
 
 export function rewriteComponentDefinitionId(

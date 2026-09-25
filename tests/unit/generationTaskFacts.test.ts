@@ -1,13 +1,12 @@
 import { describe, it, expect } from 'vitest'
 import { captureGenerationSnapshot } from '@/renderer/authoring/generation/generationSnapshot'
-import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
+import { createBlankCourseProject } from '@/core/course/createCourseProject'
 import { projectEffectiveLayers } from '@/renderer/course/effectiveLayerProjection'
-import { createTextNode } from '@/renderer/project/nativeNodeFactories'
+import { createTextNode } from '@/core/tools/nativeNodeFactories'
 import { sceneNodeToCourseLayerItem } from '@/shared/courseProjectModel'
 import { createSortComponentPackage } from '@/renderer/recipes/sort-component/package'
-import { parseComponentPackageFiles } from '@/renderer/components/importComponentPackage'
+import { parseComponentPackageFiles } from '../../src/core/drivers/codecs/importComponentPackage'
 import { mergeComponentProps, resolveComponentEditorProperties, getComponentPropValue } from '@/shared/componentProps'
-import { generationInitialRequestForPrompt } from '../../src/main/localAgent/profile'
 import { generationTaskFactsPromptProjection } from '@/shared/generationTaskFactsProjection'
 import { generationRequestSchema } from '@/shared/generationContract'
 
@@ -51,22 +50,6 @@ describe('frozen task facts', () => {
     expect(facts.relations[0]!.frame.x).not.toBe(surface.scenes[0]!.layerItems[0]!.frame.x)
     expect(generationRequestSchema.safeParse({ ...request, taskFacts: { ...facts, documentRevision: facts.documentRevision + 1 } }).success).toBe(false)
   })
-  it('U04-public-input keeps simple text input compact and complete facts available on demand', () => {
-    const request = fixture().capture(), initial = generationInitialRequestForPrompt(request)
-    expect(request.taskFacts!.relations).toEqual([])
-    expect(JSON.stringify(initial)).not.toContain('applicable-location-items')
-    expect(Buffer.byteLength(JSON.stringify(initial))).toBeLessThan(12 * 1024)
-    expect(initial.requestDetails.fields).toContain('taskFacts')
-  })
-  it('U05-taskFacts-prompt-projection shares inline and compact rules with Main', () => {
-    const request = fixture('将图文对齐').capture()
-    const facts = request.taskFacts!
-    expect(generationInitialRequestForPrompt(request).taskFacts).toEqual(generationTaskFactsPromptProjection(facts))
-
-    const largeFacts = { ...facts, relations: Array.from({ length: 100 }, () => facts.relations[0]!) }
-    const compact = generationTaskFactsPromptProjection(largeFacts)
-    expect(compact).toMatchObject({ source: facts.source, documentRevision: facts.documentRevision,
-      details: 'request.json taskFacts', scope: 'summary-only', components: facts.components.length, relations: 100 })
-    expect(generationInitialRequestForPrompt({ ...request, taskFacts: largeFacts }).taskFacts).toEqual(compact)
-  })
+  
+  
 })

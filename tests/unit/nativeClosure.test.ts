@@ -2,14 +2,14 @@ import { buildPublishedFixture as buildPublishedCourseV2Payload } from '../fixtu
 import { describe, expect, it } from 'vitest'
 import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
 import { publishedCourseV2Schema } from '@/shared/publishedCourseSchema'
-import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
+import { createBlankCourseProject } from '@/core/course/createCourseProject'
 import {
   createChartLayerItem,
   createChartNode,
   createShapeNode,
   createTableLayerItem,
   createTableNode,
-} from '@/renderer/project/nativeNodeFactories'
+} from '@/core/tools/nativeNodeFactories'
 import { sceneNodeToCourseLayerItem } from '@/shared/courseProjectModel'
 import {
   

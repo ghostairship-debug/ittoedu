@@ -24,7 +24,7 @@ import { commitSlideProjectMutation } from '../course/slideEditorCommands'
 import { addSlideComponentLayer } from '../course/v9SlideContentCommands'
 import { addSpatialWorldComponentLayer } from '../course/spatialEditorCommands'
 import { insertFlowSharedComponent } from '../course/flowSharedAuthoringAdapters'
-import { componentPackageMeta } from './editableComponentPackage'
+import { componentPackageMeta } from '../../shared/componentPackageMeta'
 
 export interface ComponentPackageSourceTarget extends ComponentPackageSourceBaseline {
   readonly projectPath: string | null
@@ -165,7 +165,8 @@ export function commitComponentReplacementAtTarget(
   }
 }
 
-export { componentPackageMeta, editableComponentPackageId } from './editableComponentPackage'
+export { componentPackageMeta } from '../../shared/componentPackageMeta'
+export { editableComponentPackageId } from './editableComponentPackage'
 
 export function createComponentAuthoringActions(ports: ComponentAuthoringPorts) {
   return {

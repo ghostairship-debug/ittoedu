@@ -6,8 +6,8 @@ import type { CourseProjectDocument } from '../../src/shared/courseProjectTypes'
 import {
   addCourseFlowPage,
   addCourseSpatialPage,
-} from '../../src/renderer/course/courseLocationCommands'
-import { createBlankCourseProject } from '../../src/renderer/project/createCourseProject'
+} from '../../src/core/tools/courseLocations'
+import { createBlankCourseProject } from '../../src/core/course/createCourseProject'
 import { createBlankFlowCourseProject } from '../../src/renderer/project/createFlowCourseProject'
 import { useEditorStore } from '../../src/renderer/store/editorStore'
 
@@ -153,7 +153,6 @@ function captureForRequest(request: { width?: number; height?: number }) {
 function appApi(): AppDesktopApi {
   return {
     legacyPpt: vi.fn(async () => null),
-    localAgent: vi.fn(async () => ({ enabled: false })),
     materials: vi.fn(async () => []),
     openProject: vi.fn(async () => null),
     listRecentProjects: vi.fn(async () => []),

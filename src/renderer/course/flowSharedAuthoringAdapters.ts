@@ -1,5 +1,6 @@
+import { appendOverlayItem, nativeMediaOverlay, insertFlowOverlayText, insertFlowOverlayShape } from '../../core/tools/flowNativeInsertion'
 import { plainDocumentText } from '../../shared/document/content'
-import { CANVAS_HEIGHT, CANVAS_WIDTH, MAX_SCENE_NODES, MIN_NODE_SIZE } from '../../shared/constants'
+import { CANVAS_HEIGHT, CANVAS_WIDTH, MIN_NODE_SIZE } from '../../shared/constants'
 import { formulaAstToAccessibleText } from '../../shared/formulaLinear'
 import {
   applyComponentVariant,
@@ -27,19 +28,9 @@ import type {
 } from '../../shared/courseProjectTypes'
 import {
   createExternalComponentNode,
-  createImageNode,
-  createShapeNode,
-  createTextNode,
-  createVideoNode,
-} from '../project/nativeNodeFactories'
-import {
-  locateCourseLayer,
-  makeEffectiveLayerAuthoringAddress,
-  patchEffectiveLayerItem,
-  patchEffectiveLayerPropertiesAtTarget,
-  type EffectiveLayerCommandTarget,
-  type EffectiveLayerPropertiesPatchAtTarget,
-} from './effectiveLayerCommands'
+} from '../../core/tools/nativeNodeFactories'
+import { makeEffectiveLayerAuthoringAddress } from '../../core/tools/layerCommands'
+import { locateCourseLayer, patchEffectiveLayerItem, patchEffectiveLayerPropertiesAtTarget, type EffectiveLayerCommandTarget, type EffectiveLayerPropertiesPatchAtTarget } from './effectiveLayerCommands'
 import {
   FLOW_GLOBAL_STRUCTURE_REASON,
   findFlowBlockRecursive,
@@ -48,7 +39,7 @@ import {
   stableFlowId,
   syncFlowCourseLocations,
   walkFlowBlocks,
-} from './flowDocumentModel'
+} from '../../core/tools/flowDocumentModel'
 import {
   executeFlowDelete,
   insertFlowEditorBlock,
@@ -67,21 +58,8 @@ import {
   projectFlowUnifiedOverlays,
   teacherControllerOverlayPlacement,
 } from './flowOverlayProjection'
-import {
-  allocateCourseLayerOrder,
-  isTeacherControllerLayerItem,
-  LAYER_REJECT_LOCKED,
-  lockedLayerWriteReason,
-  refuseLockedLayerWrite,
-  rejectIfStaleDocument,
-  setGlobalLayerVisibleAtLocation,
-  sortAllCourseLayerLists,
-  validateLocationVisibilitySpec,
-  visibilityAfterTogglingLocation,
-  type LayerCommandOptions,
-  type LayerCommandResult,
-} from './globalLayerCommands'
-import { commitCourseProjectMutation } from './courseProjectMutation'
+import { isTeacherControllerLayerItem, LAYER_REJECT_LOCKED, lockedLayerWriteReason, refuseLockedLayerWrite, rejectIfStaleDocument, setGlobalLayerVisibleAtLocation, validateLocationVisibilitySpec, visibilityAfterTogglingLocation, type LayerCommandOptions, type LayerCommandResult } from '../../core/tools/globalLayers'
+import { commitCourseProjectMutation } from '../../core/tools/courseProjectMutation'
 
 export const FLOW_NO_PAGE_REASON = '请先选择一个流式页面'
 export { FLOW_GLOBAL_STRUCTURE_REASON }
@@ -355,31 +333,6 @@ function overlayDestination(
     : { source: 'surface', surfaceId }
 }
 
-function appendOverlayItem(
-  draft: CourseProjectDocument,
-  destination: { source: 'global' | 'surface'; surfaceId: string },
-  item: LayerItem,
-): void {
-  const ownerCount = destination.source === 'global'
-    ? draft.globalLayerItems.length
-    : flowSurfaceIn(draft, destination.surfaceId).surfaceLayerItems.length
-  if (ownerCount >= MAX_SCENE_NODES) {
-    throw new Error(`已达到 ${MAX_SCENE_NODES} 个节点上限`)
-  }
-  item.order = allocateCourseLayerOrder(draft, item.order)
-  const scoped = { item, visibility: { mode: 'all' as const, locationIds: [] } }
-  if (destination.source === 'global') {
-    draft.globalLayerItems.push({ ...scoped, plane: 'overlay' })
-    sortAllCourseLayerLists(draft)
-    return
-  }
-  flowSurfaceIn(draft, destination.surfaceId).surfaceLayerItems.push({
-    ...scoped,
-    bodyPlane: 'overlay',
-  })
-  sortAllCourseLayerLists(draft)
-}
-
 function mediaKindFromAsset(
   document: CourseProjectDocument,
   assetId: string,
@@ -399,37 +352,6 @@ function requireMediaAsset(
   const mediaKind = mediaKindFromAsset(document, assetId)
   if (!mediaKind) return fail('该素材不能插入 Flow')
   return { ok: true, assetId, mediaKind }
-}
-
-function nativeMediaOverlay(
-  document: CourseProjectDocument,
-  input: { assetId: string; mediaKind: 'image' | 'video'; id?: string; label?: string },
-): NativeLayerItem {
-  const asset = document.assets[input.assetId]!
-  if (input.mediaKind === 'image') {
-    const node = createImageNode({
-      id: stableFlowId('image', input.id),
-      name: input.label ?? asset.filename ?? '图片',
-      assetId: input.assetId,
-      width: asset.width,
-      height: asset.height,
-      x: (CANVAS_WIDTH - (asset.width ?? 320)) / 2,
-      y: (CANVAS_HEIGHT - (asset.height ?? 180)) / 2,
-    })
-    const item = sceneNodeToCourseLayerItem(node) as NativeLayerItem
-    item.paperSpace = 'paper'
-    return item
-  }
-  const node = createVideoNode({
-    id: stableFlowId('video', input.id),
-    name: input.label ?? asset.filename ?? '视频',
-    assetId: input.assetId,
-    width: asset.width ?? 640,
-    height: asset.height ?? 360,
-  })
-  const item = sceneNodeToCourseLayerItem(node) as NativeLayerItem
-  item.paperSpace = 'paper'
-  return item
 }
 
 function runOverlayMutation(
@@ -694,15 +616,7 @@ export function insertFlowSharedShape(
   const page = requireFlowPage(document, selection)
   if (!('surfaceId' in page)) return page
   const destination = overlayDestination(selection, page.surfaceId)
-  const created = runOverlayMutation(document, options, (draft) => {
-    const node = createShapeNode(request.shapeType, {
-      id: stableFlowId('shape', request.id),
-      name: request.label,
-    })
-    const item = sceneNodeToCourseLayerItem(node)
-    appendOverlayItem(draft, destination, item)
-    return [item.layerItemId]
-  }, '已作为页面浮层添加图形')
+  const created = runOverlayMutation(document, options, (draft) => insertFlowOverlayShape(draft, destination, request), '已作为页面浮层添加图形')
   if (!created.ok || !created.nextDocument || !created.createdLayerItemIds?.[0]) return created
   return {
     ...created,
@@ -1557,16 +1471,7 @@ export function insertFlowSharedText(
     }
   }
   const destination = overlayDestination(selection, page.surfaceId)
-  const created = runOverlayMutation(document, options, (draft) => {
-    const node = createTextNode({
-      id: stableFlowId('text', request.id),
-      name: request.label ?? '文本',
-      text: request.text ?? '请输入文本',
-    })
-    const item = sceneNodeToCourseLayerItem(node)
-    appendOverlayItem(draft, destination, item)
-    return [item.layerItemId]
-  }, '已作为页面浮层添加文本')
+  const created = runOverlayMutation(document, options, (draft) => insertFlowOverlayText(draft, destination, request), '已作为页面浮层添加文本')
   if (!created.ok || !created.nextDocument || !created.createdLayerItemIds?.[0]) return created
   return {
     ...created,

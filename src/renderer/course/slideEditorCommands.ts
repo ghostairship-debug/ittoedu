@@ -1,3 +1,5 @@
+import { SlideCommandError } from '../../core/tools/slideInsertion'
+export { SlideCommandError } from '../../core/tools/slideInsertion'
 import { canEditLayerInScope } from '../../shared/teacherControllerRole'
 import { RESOURCE_AWARE_AUTHORING_HISTORY_LIMIT, commitResourceAwareAuthoringHistory, type ResourceAwareAuthoringHistory, type AuthoringHistoryResourceTransition } from '../authoring/resourceAwareAuthoringHistory'
 import type {
@@ -12,8 +14,8 @@ import {
 import {
   type HistoryResourceChanges,
 } from '../store/courseResourceState'
-import { commitCourseProjectMutation as commitSlideProjectMutation } from './courseProjectMutation'
-import { buildSlideEditorView, type SlideEditorLayerScope } from './slideEditorView'
+import { commitCourseProjectMutation as commitSlideProjectMutation } from '../../core/tools/courseProjectMutation'
+import { buildSlideEditorView, type SlideEditorLayerScope } from '../../core/tools/slideLayerView'
 
 export { commitSlideProjectMutation }
 
@@ -70,15 +72,6 @@ export interface SlideAuthoringSessionRef {
   readonly generation: number
 }
 
-export class SlideCommandError extends Error {
-  readonly reason: string
-
-  constructor(reason: string, message?: string) {
-    super(message ?? reason)
-    this.name = 'SlideCommandError'
-    this.reason = reason
-  }
-}
 
 export interface SelectSlideEditorLayersInput {
   readonly project: CourseProjectDocument

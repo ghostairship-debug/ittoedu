@@ -12,7 +12,7 @@ import { courseProjectDocumentSchema } from '../../src/shared/courseProjectSchem
 import type { CourseProjectDocument } from '../../src/shared/courseProjectTypes'
 import { publishedCourseV2Schema } from '../../src/shared/publishedCourseSchema'
 import type { PublishedCourseV2Payload } from '../../src/shared/publishedCourseTypes'
-import { openCourseProjectArchive } from '../../src/renderer/project/courseProjectArchive'
+import { openCourseProjectArchive } from '../../src/core/drivers/codecs/courseProjectArchive'
 import {
   checkRenderHostBenchmarkOutputs,
   RENDER_HOST_BENCHMARK_OUTPUT_PATHS,

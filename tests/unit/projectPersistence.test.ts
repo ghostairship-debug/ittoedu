@@ -38,11 +38,11 @@ import {
   recordRecentProject,
   writeRecoveryProject,
 } from '../../src/main/projectPersistence'
-import { createBlankCourseProject } from '../../src/renderer/project/createCourseProject'
+import { createBlankCourseProject } from '../../src/core/course/createCourseProject'
 import { createArchiveFixture as createCourseProjectArchive } from '../fixtures/teacherController'
 import {
   detectCourseProjectArchiveFormat,
-} from '../../src/renderer/project/courseProjectArchive'
+} from '../../src/core/drivers/codecs/courseProjectArchive'
 
 function makeV9RecoveryArchive(label: string): Uint8Array {
   const project = createBlankCourseProject()

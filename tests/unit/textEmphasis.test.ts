@@ -1,11 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { addPptxTextNode } from '@/renderer/export/pptxTextAndShape'
-import { createTextNode, type TextNodeOptions } from '@/renderer/project/nativeNodeFactories'
-import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
+import { createTextNode, type TextNodeOptions } from '@/core/tools/nativeNodeFactories'
+import { createBlankCourseProject } from '@/core/course/createCourseProject'
 import {
   createCourseProjectArchive,
   openCourseProjectArchive,
-} from '@/renderer/project/courseProjectArchive'
+} from '../../src/core/drivers/codecs/courseProjectArchive'
 import {
   selectActiveScene,
   useEditorStore,

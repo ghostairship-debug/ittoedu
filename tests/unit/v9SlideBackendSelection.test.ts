@@ -6,7 +6,7 @@ import {
   createSlideAuthoringBackend,
   openSlideAuthoringSession,
 } from '@/renderer/course/slideAuthoringBackend'
-import { buildSlideEditorView } from '@/renderer/course/slideEditorView'
+import { buildSlideEditorView } from '@/core/tools/slideLayerView'
 import {
   selectActiveCourseProjectDocument,
   selectSlideAuthoringBackend,

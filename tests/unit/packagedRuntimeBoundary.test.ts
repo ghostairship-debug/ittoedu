@@ -3,7 +3,6 @@
 import { readFile, stat } from 'node:fs/promises'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { LESSON_AUTHORING_METHOD_PATHS } from '../../src/main/lessonAuthoringPrompt'
 import { BUILT_IN_COMPONENT_CATALOG_DIRECTORY } from '../../src/shared/builtInComponentCatalog'
 
 const root = path.resolve(__dirname, '..', '..')
@@ -11,11 +10,10 @@ const root = path.resolve(__dirname, '..', '..')
 /**
  * 打包清单门禁。
  *
- * 背景：软件内创作流程在运行时用 `fs.readFile(path.join(app.getAppPath(), <仓库相对路径>))`
- * 读取方法文件。`electron-builder.yml` 的 `files` 是显式白名单，未列出的路径不会进入
- * app.asar；`scripts/verify-release.ts` 的「发布配套文件」只检查源码仓库里存在这些文件，
- * 不检查打包产物内部，所以缺文件时发布校验仍会通过，直到打包版真正跑创作流程才 ENOENT。
- * 这里把「运行时读取的路径必须被打包清单覆盖」变成可跑断言。
+ * `electron-builder.yml` 的 `files` 是显式白名单；源码树中的资源存在，
+ * 不代表它会进入 app.asar。图标、Renderer 产物及内置组件资源仍由正式
+ * 运行入口读取，必须被打包清单覆盖。已退役嵌入 Agent 的方法文件不属于
+ * 这项运行时合同；外部课件 Skill 继续由独立安装流程提供。
  */
 
 /**
@@ -84,11 +82,9 @@ describe('packaged runtime file boundary', () => {
   it('covers every path the app reads from app.getAppPath() at runtime', async () => {
     const patterns = await readPackagedFilePatterns()
     // 这些路径逐条来自源码中的真实读取点：
-    //   src/main/lessonAuthoringPrompt.ts:18  → LESSON_AUTHORING_METHOD_PATHS
     //   src/main/createWindow.ts:32           → resources/icons/icon.png
     //   src/main/protocols.ts:25              → dist-renderer
     const required = [
-      ...new Set(Object.values(LESSON_AUTHORING_METHOD_PATHS)),
       'resources/icons/icon.png',
       'dist-renderer/index.html',
     ]
@@ -96,15 +92,7 @@ describe('packaged runtime file boundary', () => {
     expect(uncovered(patterns, required)).toEqual([])
   })
 
-  it('ships a non-empty copy of every authoring method file', async () => {
-    const methods = [...new Set(Object.values(LESSON_AUTHORING_METHOD_PATHS))]
-    expect(methods.length).toBeGreaterThan(0)
-    for (const method of methods) {
-      const stats = await stat(path.join(root, ...method.split('/')))
-      expect(stats.isFile(), method).toBe(true)
-      expect(stats.size, method).toBeGreaterThan(0)
-    }
-  })
+  
 
   it('keeps the file boundary honest about a path that is not packaged', async () => {
     // External directories are not part of the built-in payload.
@@ -159,6 +147,5 @@ describe('packaged runtime file boundary', () => {
     ]
     expect(mustNotShip.filter((relativePath) => coveredBy(patterns, relativePath))).toEqual([])
     // 反向控制：运行时读取集必须仍然被覆盖，否则上一条断言会因清单为空而空过。
-    expect(uncovered(patterns, [...new Set(Object.values(LESSON_AUTHORING_METHOD_PATHS))])).toEqual([])
   })
 })

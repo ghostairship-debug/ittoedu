@@ -13,3 +13,23 @@
 .shared-document-form label{display:flex;align-items:center;gap:4px;max-width:100%}
 .shared-document-form input:not([type=checkbox]){min-width:0;max-width:100%}
 .shared-document-contextual-card{position:fixed;z-index:80;box-sizing:border-box;width:min(430px,calc(100vw - 16px));max-height:calc(100vh - 16px);overflow:auto;margin:0;padding:10px;color:#1f2937;background:#ffffff;border:1px solid #93c5fd;border-radius:8px;box-shadow:0 5px 18px #1e3a8a22}.shared-document-contextual-card__header{display:flex;align-items:center;gap:8px;min-width:0;font-size:13px}.shared-document-contextual-card__header strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.shared-document-contextual-card__header span{color:#64748b;font-variant-numeric:tabular-nums;white-space:nowrap}.shared-document-contextual-card__header button{margin-left:auto}.shared-document-contextual-card__actions{display:flex;align-items:center;gap:6px;margin-top:8px}.shared-document-contextual-card__command{display:flex;align-items:center;gap:6px;margin-top:8px}.shared-document-contextual-card__command label{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}.shared-document-contextual-card__command input{min-width:0;flex:1;height:30px;padding:0 8px;border:1px solid #cbd5e1;border-radius:5px}.shared-document-contextual-card__command button,.shared-document-contextual-card__header button,.shared-document-contextual-card__retain,.shared-document-contextual-target button{min-height:30px;padding:4px 9px;border:1px solid #cbd5e1;border-radius:5px;background:#f8fafc;color:#1f2937;cursor:pointer}.shared-document-contextual-card__command button:disabled{cursor:not-allowed;opacity:.5}.shared-document-contextual-card__retain{margin-top:8px;color:#475569}.shared-document-contextual-target{position:fixed;bottom:16px;right:16px;z-index:80;display:flex;align-items:center;gap:8px;width:min(680px,calc(100% - 16px));box-sizing:border-box;margin:8px auto;padding:7px 10px;border:1px solid #cbd5e1;border-radius:7px;background:#f8fafc;color:#475569;font-size:13px}.shared-document-contextual-target span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.shared-document-contextual-target button{margin-left:auto}.shared-document-contextual-target button+button{margin-left:0}@media(max-width:560px){.shared-document-contextual-card__header{align-items:flex-start;flex-wrap:wrap}.shared-document-contextual-card__header button{margin-left:auto}.shared-document-contextual-card__command{flex-wrap:wrap}.shared-document-contextual-card__command input{flex-basis:calc(100% - 80px)}.shared-document-contextual-card__command button{margin-left:auto}}
+.shared-document-contextual-target{right:auto;margin:0;max-width:calc(100vw - 16px);flex-wrap:wrap;overflow:auto}
+.shared-document-contextual-target span{min-width:0;flex:1 1 140px}
+/* The editor plugin owns selection, copy and transaction mapping around this noneditable widget. */
+.document-generation-hidden { display: none !important; }
+.document-generation-preview { white-space: pre-wrap; background: #e8f4ff; border-bottom: 2px solid #438ac8; cursor: progress; }
+.document-generation-preview:focus { outline: 2px solid #438ac8; outline-offset: 2px; }
+.document-generation-status { display: flex; align-items: center; gap: 8px; padding: 6px 10px; color: #31546c; font-size: 12px; background: #f0f7fc; }
+
+.document-context-pin { background: rgba(124, 58, 237, .15); box-shadow: inset 0 -2px #8b5cf6; }
+
+.document-generation-preview--markdown-blocks { display:block; font-weight:normal; font-style:normal; white-space:normal; padding:2px 0; }
+.document-generation-preview--markdown-blocks > :first-child { margin-top:0; }
+.document-generation-preview--markdown-blocks > :last-child { margin-bottom:0; }
+.document-generation-preview--markdown-blocks p,.document-generation-preview--markdown-blocks li { font-size:1em; font-weight:normal; white-space:pre-wrap; }
+.document-generation-preview--markdown-blocks h1 { font-size:2em; }.document-generation-preview--markdown-blocks h2 { font-size:1.5em; }.document-generation-preview--markdown-blocks h3 { font-size:1.17em; }
+.document-generation-preview--markdown-blocks ul,.document-generation-preview--markdown-blocks ol { padding-left:1.5em; }
+.document-generation-preview--markdown-blocks blockquote { margin-left:0; padding-left:1em; border-left:3px solid #b4cfdf; }
+.document-generation-preview--markdown-blocks pre { white-space:pre-wrap; font-size:.9em; }
+.document-generation-preview[data-preview-structure=literal] { white-space:pre-wrap; }
+.document-generation-preview a { pointer-events:none; }

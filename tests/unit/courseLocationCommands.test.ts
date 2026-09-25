@@ -12,13 +12,13 @@ import {
   deleteCourseSurface,
   moveCourseSlideScene,
   reorderCourseSurfaces,
-} from '@/renderer/course/courseLocationCommands'
+} from '@/core/tools/courseLocations'
 import { deleteFlowEditorBlock, insertFlowEditorBlock } from '@/renderer/course/flowEditorCommands'
 import type { InteractionRule } from '@/shared/interactionTypes'
-import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
+import { createBlankCourseProject } from '@/core/course/createCourseProject'
 import { createBlankFlowCourseProject } from '@/renderer/project/createFlowCourseProject'
 import { createBlankSpatialCourseProject } from '@/renderer/project/createSpatialCourseProject'
-import { createTextNode } from '@/renderer/project/nativeNodeFactories'
+import { createTextNode } from '@/core/tools/nativeNodeFactories'
 
 const NOW = '2026-08-17T12:00:00.000Z'
 
@@ -34,7 +34,7 @@ function slideSceneLocationIds(project: CourseProjectDocument): string[] {
   )
 }
 
-describe('courseLocationCommands', () => {
+describe('../../src/core/tools/courseLocations', () => {
   it('cleans exact location navigation and dependent rules after a Flow heading-only deletion', () => {
     const added = addCourseFlowPage(createBlankCourseProject({ now: NOW }), { now: NOW })
     if (!added.ok) throw new Error(added.reason)

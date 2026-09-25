@@ -1,5 +1,5 @@
 import type { CourseProjectDocument, LayerItem, FlowBlock } from '../../../shared/courseProjectTypes'
-import { createTextNode } from '../../project/nativeNodeFactories'
+import { createTextNode } from '../../../core/tools/nativeNodeFactories'
 import { sceneNodeToCourseLayerItem } from '../../../shared/courseProjectModel'
 
 /** Inactive locations retain their catalog, state and object identities, but do

@@ -6,6 +6,7 @@ import { IPC_CHANNELS } from '../../src/shared/ipcTypes'
 const controls = vi.hoisted(() => ({ choice: 1, dirty: true, clearRecovery: vi.fn(async () => undefined) }))
 vi.mock('electron', async () => {
   const { EventEmitter } = await import('node:events')
+  const os = await import('node:os')
   class FakeWindow extends EventEmitter {
     destroyed = false
     webContents = Object.assign(new EventEmitter(), {
@@ -22,7 +23,7 @@ vi.mock('electron', async () => {
       if (!prevented) { this.destroyed = true; this.emit('closed') }
     })
   }
-  return { app: { isPackaged: true, getAppPath: () => process.cwd() }, BrowserWindow: FakeWindow,
+  return { app: { isPackaged: true, getAppPath: () => process.cwd(), getPath: () => (os.tmpdir()) }, BrowserWindow: FakeWindow,
     dialog: { showMessageBoxSync: vi.fn(() => controls.choice) }, ipcMain: new EventEmitter(), session: { defaultSession: {} } }
 })
 vi.mock('../../src/main/security', () => ({ configureRestrictedSession: vi.fn(), hardenWebContents: vi.fn(), isAllowedDocumentUrl: vi.fn(), isAllowedEditorPreviewFrameUrl: vi.fn() }))

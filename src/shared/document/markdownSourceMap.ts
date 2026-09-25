@@ -3,10 +3,9 @@ import { decodeHTMLStrict } from 'entities'
 import { documentTextSlots, type DocumentBlock } from './content'
 import type { DocumentSelection, DocumentSlot, DocumentSourceRange } from './ports'
 
-/** `barrier` marks a unit that carries syntax the visible text cannot reproduce: an edit
- * must never include it, so a selection that would have to is rejected instead. */
+/** `barrier` is a structural line boundary. Its newline/prefix stays outside writable text ranges. */
 interface Unit { from: number; to: number; text: string; barrier?: true }
-interface SlotMap { key: string; units: Unit[] }
+export interface SlotMap { key: string; units: Unit[]; from?: number; to?: number; depth?: number; ordered?: boolean }
 /** `keys` keeps the block's own slot order, including slots this map could not locate, so a
  * selection across an unlocatable slot is still visible to the caller. */
 export interface MarkdownBlockMap { blockId: string; from: number; to: number; keys: string[]; slots: SlotMap[]; table?: { rows: string[]; columns: string[] } }
@@ -72,10 +71,15 @@ function inlineUnits(p: Projection, lex: (source: string) => Token[]): Unit[] {
         // A bare URL or `www` autolink has no markup to skip: marked emits it with the raw
         // equal to its own text, so re-lexing it would repeat itself forever.
         if (!q.text.startsWith('[') && !q.text.startsWith('<')) { result.push(...characters(q, true)); break }
-        const children = (t.tokens as Token[]).map(child => child.raw).join('')
-        const at = q.text.indexOf(children, 1)
-        if (at < 1 || at + children.length > q.text.length) throw new UnmappedSyntax('link text')
-        result.push(...inlineUnits(cut(q, at, at + children.length), lex)); break
+        if (q.text.startsWith('<')) { result.push(...characters(cut(q, 1, q.text.length - 1), true)); break }
+        let depth = 1, end = 1
+        for (; end < q.text.length; end++) {
+          if (q.text[end] === '\\') { end++; continue }
+          if (q.text[end] === '[') depth++
+          if (q.text[end] === ']' && --depth === 0) break
+        }
+        if (depth !== 0) throw new UnmappedSyntax('link text')
+        result.push(...inlineUnits(cut(q, 1, end), lex)); break
       }
       case 'codespan': {
         const n = /^`+/.exec(q.text)![0].length
@@ -137,13 +141,49 @@ function listItemBody(raw: Projection): { projection: Projection; barriers: { fr
   return { projection: slice(raw, ranges), barriers }
 }
 
+export interface MarkdownListProjection { text: string; projection: Projection; barriers: { from: number }[]; depth: number; ordered: boolean }
+/** Markdown's nested list is a read/edit projection; its indentation stays in source, never in the Flow schema. */
+export function projectMarkdownList(token: Tokens.List, offset = 0): MarkdownListProjection[] {
+  const root: Projection = { text: token.raw, positions: Array.from({ length: token.raw.length }, (_, i) => offset + i) }
+  const result: MarkdownListProjection[] = []
+  function visit(list: Tokens.List, source: Projection, depth: number) {
+    let at = 0
+    for (const item of list.items) {
+      while (source.text[at] === '\n') at++
+      if (source.text.slice(at, at + item.raw.length) !== item.raw) throw new UnmappedSyntax('list item span')
+      const itemProjection = cut(source, at, at + item.raw.length); at += item.raw.length
+      const body = listItemBody(itemProjection)
+      if (!body) { result.push({ text: item.text, projection: { text: '', positions: [] }, barriers: [], depth, ordered: list.ordered }); continue }
+      const nested = item.tokens.filter(value => value.type === 'list') as Tokens.List[]
+      if (!nested.length) { result.push({ text: body.projection.text, ...body, depth, ordered: list.ordered }); continue }
+      let nestedAt = 0
+      const spans = nested.map(child => {
+        const start = body.projection.text.indexOf(child.raw.replace(/\n+$/, ''), nestedAt)
+        if (start < nestedAt || body.projection.text.slice(nestedAt, start).trim() && nestedAt > 0) throw new UnmappedSyntax('nested list span')
+        nestedAt = start + child.raw.replace(/\n+$/, '').length
+        return { child, start, end: Math.min(body.projection.text.length, start + child.raw.length) }
+      })
+      if (body.projection.text.slice(nestedAt).trim()) throw new UnmappedSyntax('text after nested list')
+      const own = blockBody(cut(body.projection, 0, spans[0].start))
+      result.push({ text: own.text, projection: own, barriers: body.barriers.filter(b => b.from < (own.positions.at(-1) ?? 0)), depth, ordered: list.ordered })
+      for (const span of spans) {
+        const childSource = cut(body.projection, span.start, span.end)
+        // Marked may retain a final newline consumed by its parent; coordinates of all text remain exact.
+        visit({ ...span.child, raw: childSource.text, items: span.child.items.map((item, index, items) => index === items.length - 1 ? { ...item, raw: item.raw.slice(0, childSource.text.length - (span.child.raw.length - item.raw.length)) } : item) }, childSource, depth + 1)
+      }
+    }
+  }
+  visit(token, root, 0)
+  return result
+}
+
 /** Called by the parser with the exact token and the identities it allocated.
  * No text search is used to infer a block or a selected occurrence. */
 export function mapMarkdownBlock(token: Token, block: DocumentBlock, offset: number, lex: (source: string) => Token[]): MarkdownBlockMap {
   const p: Projection = { text: token.raw, positions: Array.from({ length: token.raw.length }, (_, i) => offset + i) }
   const slots = documentTextSlots(block)
-  const map: MarkdownBlockMap = { blockId: block.id, from: offset, to: offset + token.raw.trimEnd().length, keys: slots.map(slot => slot.key), slots: [] }
-  const add = (key: string, source: Projection, barriers: readonly { from: number }[] = []) => {
+  const map: MarkdownBlockMap = { blockId: block.id, from: offset, to: offset + blockBody(p).text.length, keys: slots.map(slot => slot.key), slots: [] }
+  const add = (key: string, source: Projection, barriers: readonly { from: number }[] = [], table = false, extra: { depth?: number; ordered?: boolean } = {}) => {
     // A token can become a block that carries no such slot (an image-only paragraph becomes
     // a media block); it owns no text here, so there is nothing to map or to fail on.
     const slot = slots.find(slot => slot.key === key)
@@ -155,13 +195,14 @@ export function mapMarkdownBlock(token: Token, block: DocumentBlock, offset: num
       if (error instanceof UnmappedSyntax) return
       throw error
     }
+    if (table) units = units.flatMap((value, index) => value.text === '\\' && units[index + 1]?.text === '|' ? [] : value.text === '|' && units[index - 1]?.text === '\\' ? [{ ...value, from: units[index - 1].from }] : [value])
     if (expected !== units.map(u => u.text).join('')) return
     for (const barrier of barriers) {
       // Replacing the break before a removed marker would leave that marker as visible text.
       const carried = units.filter(u => u.from < barrier.from).at(-1)
       if (carried) carried.barrier = true
     }
-    map.slots.push({ key, units })
+    map.slots.push({ key, units, from: source.positions[0], to: source.positions.length ? source.positions.at(-1)! + 1 : undefined, ...extra })
   }
   if (['paragraph', 'heading', 'text', 'blockquote'].includes(token.type)) {
     let body = blockBody(p)
@@ -178,14 +219,9 @@ export function mapMarkdownBlock(token: Token, block: DocumentBlock, offset: num
       add('content', projection, spans)
     } else add('content', body)
   } else if (token.type === 'list' && block.type === 'list') {
-    let at = 0
-    for (const [index, item] of (token as Tokens.List).items.entries()) {
-      // ListItem.raw includes its own marker and indentation; each token is consumed once.
-      while (p.text[at] === '\n') at++
-      if (p.text.slice(at, at + item.raw.length) !== item.raw) break
-      const body = listItemBody(cut(p, at, at + item.raw.length)); at += item.raw.length
+    for (const [index, item] of projectMarkdownList(token as Tokens.List, offset).entries()) {
       const id = block.items[index]?.id
-      if (body && id !== undefined) add(`item:${id}`, omit(body.projection, /<!--cw:item\s+[\s\S]*?-->/g), body.barriers)
+      if (id !== undefined) add(`item:${id}`, omit(item.projection, /<!--cw:item\s+[\s\S]*?-->/g), item.barriers, false, { depth: item.depth, ordered: item.ordered })
     }
   } else if (token.type === 'table' && block.type === 'table') {
     map.table = { rows: block.rows.map(row => row.id), columns: block.columns.map(column => column.id) }
@@ -200,10 +236,10 @@ export function mapMarkdownBlock(token: Token, block: DocumentBlock, offset: num
       values.push(trim(cut(line, start))); return values
     }
     const headers = cells(lines[0]!)
-    block.columns.forEach((c, i) => { if (headers[i]) add(`column:${c.id}`, trim(omit(headers[i]!, /<!--cw:column\s+[\s\S]*?-->/g))) })
+    block.columns.forEach((c, i) => { if (headers[i]) add(`column:${c.id}`, trim(omit(headers[i]!, /<!--cw:column\s+[\s\S]*?-->/g)), [], true) })
     block.rows.forEach((r, row) => {
       const values = lines[row + 2] ? cells(lines[row + 2]!) : []
-      block.columns.forEach((c, col) => { if (values[col]) add(`cell:${JSON.stringify([r.id, c.id])}`, omit(values[col]!, /<!--cw:row\s+[\s\S]*?-->/g)) })
+      block.columns.forEach((c, col) => { if (values[col]) add(`cell:${JSON.stringify([r.id, c.id])}`, omit(values[col]!, /<!--cw:row\s+[\s\S]*?-->/g), [], true) })
     })
   }
   return map
@@ -253,7 +289,7 @@ export function mapDocumentSelectionToSource(source: string, map: MarkdownSource
   const low = Math.min(a, h), high = Math.max(a, h), units: Unit[] = []
   const firstBlock = map.blocks.findIndex(b => b.blockId === start.blockId), lastBlock = map.blocks.findIndex(b => b.blockId === end.blockId)
   // Intervening objects or unsupported slots must never silently disappear.
-  if (firstBlock !== lastBlock) return fail()
+  if (map.blocks.slice(firstBlock, lastBlock + 1).some(block => !block.keys.length)) return fail()
   for (let i = low; i <= high; i++) {
     const entry = order[i]!, slot = blocks.get(entry.blockId)?.slots.find(s => s.key === entry.key)
     // Text between the selected slots that this map cannot locate may not be skipped over.
@@ -263,8 +299,8 @@ export function mapDocumentSelectionToSource(source: string, map: MarkdownSource
     if (from > 0 && slot.units[from]?.from === slot.units[from - 1]?.from || to < slot.units.length && to > 0 && slot.units[to]?.from === slot.units[to - 1]?.from) return fail()
     const picked = slot.units.slice(from, to)
     // A unit carrying removed syntax (a quote marker) cannot be rewritten by an edit.
-    if (picked.some(u => u.barrier)) return fail()
-    units.push(...picked)
+    // A removed quote/list prefix belongs to structure. Keep its line break and prefix outside every writable range.
+    units.push(...picked.filter(unit => !unit.barrier))
   }
   if (!units.length) return fail()
   return { status: 'mapped', ranges: unitsToRanges(source, units) }

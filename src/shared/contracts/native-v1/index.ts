@@ -57,6 +57,7 @@ export {
   nativeRenderableBaseSchema,
   nativeRenderableNodeSchema,
   textNodeSchema,
+  textNodeStyleSchema,
   formulaNodeSchema,
   imageNodeSchema,
   videoNodeSchema,

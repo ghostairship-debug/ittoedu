@@ -3,13 +3,13 @@ import { copyFileSync, mkdirSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { createServer } from 'vite'
 import { BACKGROUND_E2E_ENV } from '../../src/main/windowVisibility'
-import { createCourseProjectArchive } from '../../src/renderer/project/courseProjectArchive'
+import { createCourseProjectArchive } from '../../src/core/drivers/codecs/courseProjectArchive'
 import { listCourseProjectV9Fixtures } from '../fixtures/course-project-v9/sources'
 
 const root = resolve(__dirname, '../..')
 const evidenceRoot = join(root, 'output/r19-cross-page-observation')
 
-test('r19 real Slide host retains the frozen page while one candidate commits Slide Flow Spatial and captures next observation', async () => {
+test('r19 real Slide host retains the frozen page while one canonical commit updates Slide Flow Spatial and a read preserves History', async () => {
   test.setTimeout(90_000)
   const run = join(evidenceRoot, new Date().toISOString().replace(/[:.]/g, '-'))
   const profile = join(run, 'profile'), fixtureFile = join(run, 'mixed-v9-source.h5lesson')
@@ -27,17 +27,16 @@ test('r19 real Slide host retains the frozen page while one candidate commits Sl
     const page = await app.firstWindow()
     const lesson = await page.evaluate(async directory => {
       const made = await window.desktopAPI!.lesson!({ operation: 'create-lesson', directory, name: '跨页面观察课例' })
-      if (!made.lesson || !made.conversation) throw new Error('Independent cross-page fixture lesson creation failed')
-      return { identity: made.lesson.identity, conversationId: made.conversation.conversationId }
+      if (!made.lesson) throw new Error('Independent cross-page fixture lesson creation failed')
+      return made.lesson
     }, run)
     const projectPath = join(lesson.identity.normalizedDirectory, 'mixed-v9.h5lesson')
     copyFileSync(fixtureFile, projectPath)
-    await page.evaluate(async ({ lesson, projectPath, projectId }) => {
-      await window.desktopAPI!.lesson!({ operation: 'bind-project', lesson: lesson.identity, conversationId: lesson.conversationId, projectId, projectPath, saveAs: false })
-    }, { lesson, projectPath, projectId: fixture.data.project.id })
+    writeFileSync(join(lesson.identity.normalizedDirectory, '.courseware', 'lesson.json'), JSON.stringify({ ...lesson.manifest, coursePath: 'mixed-v9.h5lesson' }))
     await app.evaluate(({ dialog }, directory) => { dialog.showOpenDialog = (async () => ({ canceled: false, filePaths: [directory] })) as typeof dialog.showOpenDialog }, run)
     await page.getByRole('button', { name: '打开工作空间', exact: true }).first().click()
-    await page.locator('button').filter({ hasText: '跨页面观察课例' }).last().click()
+    await page.locator('.lesson-directory-tree').getByRole('button', { name: '跨页面观察课例', exact: true }).click()
+    await page.locator('.lesson-directory-tree').getByRole('button', { name: 'mixed-v9.h5lesson', exact: true }).click()
     await expect(page.getByTestId('canvas-stage')).toBeVisible()
     await page.screenshot({ path: join(run, 'before-slide-authoring.png') })
     const mounted = await page.evaluate(async () => {
@@ -50,60 +49,40 @@ test('r19 real Slide host retains the frozen page while one candidate commits Sl
 
     const result = await page.evaluate(async ({ projectPath }) => {
       const load = (path: string): Promise<any> => import(/* @vite-ignore */ path)
-      const { createCourseChatObservation } = await load('/src/renderer/ui/chat/courseChatObservation.ts')
-      const { selectActiveCourseProjectDocument, selectEffectiveLayerProjection, selectSlideAuthoringBackend, useEditorStore } = await load('/src/renderer/store/editorStore.ts')
-      const state = useEditorStore.getState(), project = selectActiveCourseProjectDocument(state)
-      if (!project) throw new Error('Saved mixed V9 fixture is not mounted')
-      const owner = { projectId: project.id, projectPath }
-      const bridge = createCourseChatObservation(window.desktopAPI!, owner)
-      try {
-        const beforeProjection = selectEffectiveLayerProjection(useEditorStore.getState())
-        const priorHistory = selectSlideAuthoringBackend(useEditorStore.getState())!.getSession().history.past.length
-        const request = await bridge.capture({ workspace: { version: 1, projectId: project.id, normalizedPath: projectPath.toLowerCase().replace(/\\/g, '/') },
-          instruction: '批量更新三种页面后回到原演示页核对', scope: 'course', purpose: 'local-edit', intent: 'edit', applyPolicy: 'auto', expectedResult: 'auto' })
-        const target = (id: string) => {
-          const value = request.destinations.find((entry: any) => entry.kind === 'update' && entry.target.itemId === id)
-          if (!value) throw new Error(`Frozen request missed ${id}`)
-          return value
+      const { selectEffectiveLayerProjection, useEditorStore } = await load('/src/renderer/store/editorStore.ts')
+      const api = window.desktopAPI!.documents!, before = await api.open(projectPath)
+      if (before.model.kind !== 'course-v9') throw new Error('Course expected')
+      const project = structuredClone(before.model.project)
+      for (const surface of project.surfaces) {
+        if (surface.type === 'flow') {
+          const block = surface.blocks.find(value => value.id === 'flow-paragraph')
+          if (!block || block.type !== 'paragraph') throw new Error('Flow paragraph missing')
+          block.content = { inlines: [{ type: 'text', text: '跨页 Flow 已更新' }] }
+        } else {
+          const items = surface.type === 'slide' ? surface.scenes.flatMap(scene => scene.layerItems) : surface.world.layerItems
+          const id = surface.type === 'slide' ? 'slide-title' : 'spatial-label'
+          const item = items.find(value => value.layerItemId === id)
+          if (!item || item.kind !== 'native' || item.content.nativeType !== 'text') throw new Error('Native text missing')
+          item.content.data.text = surface.type === 'slide' ? '跨页 Slide 已更新' : '跨页 Spatial 已更新'
         }
-        const prepared = await useEditorStore.getState().prepareGenerationCandidate(request, {
-          version: 1, requestId: request.requestId, candidateId: crypto.randomUUID(), summary: '跨 Surface 一次候选',
-          afterCommit: { version: 1, action: 'observe', reason: '回到原演示页检查批量结果' },
-          steps: [
-            { id: 'slide', tool: 'native.content', carrier: 'native', destination: target('slide-title'), input: { operation: 'edit', text: '跨页 Slide 已更新' } },
-            { id: 'flow', tool: 'flow.content', carrier: 'native', destination: target('flow-paragraph'), input: { operation: 'edit', content: { inlines: [{ type: 'text', text: '跨页 Flow 已更新' }] } } },
-            { id: 'spatial', tool: 'native.content', carrier: 'native', destination: target('spatial-label'), input: { operation: 'edit', text: '跨页 Spatial 已更新' } },
-          ],
-        })
-        const applied = useEditorStore.getState().applyGenerationCandidate(prepared.previewId)
-        if (applied.status !== 'committed') throw new Error(`Candidate did not commit: ${applied.status}`)
-        const atCommit = selectActiveCourseProjectDocument(useEditorStore.getState())!
-        const projectionAtCommit = selectEffectiveLayerProjection(useEditorStore.getState())
-        const historyAtCommit = selectSlideAuthoringBackend(useEditorStore.getState())!.getSession().history.past.length
-        const next = await bridge.captureNext(request, applied.receipt)
-        const after = selectActiveCourseProjectDocument(useEditorStore.getState())!
-        return {
-          beforeRevision: project.revision, afterRevision: after.revision, receipt: applied.receipt,
-          beforeProjection, projectionAtCommit, projectionAfterCapture: selectEffectiveLayerProjection(useEditorStore.getState()),
-          history: { priorHistory, historyAtCommit, historyAfterCapture: selectSlideAuthoringBackend(useEditorStore.getState())!.getSession().history.past.length },
-          next: { revision: next.documentRevision, observation: next.observation, reference: next.context.reference },
-          text: JSON.stringify(after), unchangedDuringCapture: JSON.stringify(atCommit) === JSON.stringify(after), current: bridge.isCurrent(next),
-        }
-      } finally { bridge.dispose() }
+      }
+      const projectionBefore = selectEffectiveLayerProjection(useEditorStore.getState())
+      const receipt = await api.dispatch({ documentId: before.documentId, epoch: before.epoch, baseRevision: before.revision,
+        operationId: crypto.randomUUID(), actor: 'human', mutation: { type: 'command', command: { type: 'course.replace', project } } })
+      const committed = await api.read(before.documentId)
+      await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
+      const observed = await api.read(before.documentId)
+      return { receipt, before, committed, observed, projectionBefore, projectionAfter: selectEffectiveLayerProjection(useEditorStore.getState()) }
     }, { projectPath: mounted.projectPath })
-    expect(result.receipt.status).toBe('committed')
-    expect(result.afterRevision).toBe(result.beforeRevision + 1)
-    expect(result.history.historyAtCommit).toBe(result.history.priorHistory + 1)
-    expect(result.history.historyAfterCapture).toBe(result.history.historyAtCommit)
-    expect(result.beforeProjection).toMatchObject({ locationId: 'location-slide' })
-    expect(result.projectionAtCommit).toMatchObject({ locationId: 'location-slide' })
-    expect(result.projectionAfterCapture).toMatchObject({ locationId: 'location-slide' })
-    expect(result.next).toMatchObject({ revision: result.afterRevision, reference: 'course', observation: { locationId: 'location-slide', documentRevision: result.afterRevision } })
-    expect(result.text).toContain('跨页 Slide 已更新')
-    expect(result.text).toContain('跨页 Flow 已更新')
-    expect(result.text).toContain('跨页 Spatial 已更新')
-    expect(result.unchangedDuringCapture).toBe(true)
-    expect(result.current).toBe(true)
+    expect(result.receipt.status).toBe('applied')
+    expect(result.committed.revision).toBe(result.before.revision + 1)
+    expect(result.committed.undoDepth).toBe(result.before.undoDepth + 1)
+    expect(result.observed).toEqual(result.committed)
+    expect(result.projectionBefore).toMatchObject({ locationId: 'location-slide' })
+    expect(result.projectionAfter).toMatchObject({ locationId: 'location-slide' })
+    expect(JSON.stringify(result.observed.model)).toContain('跨页 Slide 已更新')
+    expect(JSON.stringify(result.observed.model)).toContain('跨页 Flow 已更新')
+    expect(JSON.stringify(result.observed.model)).toContain('跨页 Spatial 已更新')
     writeFileSync(join(run, 'cross-page-observation.json'), JSON.stringify(result, null, 2))
     await page.screenshot({ path: join(run, 'after-capture-original-slide.png') })
   } finally {

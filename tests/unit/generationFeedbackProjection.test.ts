@@ -2,13 +2,12 @@
 import { describe, expect, it } from 'vitest'
 import { captureGenerationSnapshot } from '@/renderer/authoring/generation/generationSnapshot'
 import { projectEffectiveLayers } from '@/renderer/course/effectiveLayerProjection'
-import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
-import { createTextNode } from '@/renderer/project/nativeNodeFactories'
+import { createBlankCourseProject } from '@/core/course/createCourseProject'
+import { createTextNode } from '@/core/tools/nativeNodeFactories'
 import { sceneNodeToCourseLayerItem } from '@/shared/courseProjectModel'
 import type { GenerationRequest } from '@/shared/generationContract'
 import { MAX_GENERATION_PROMPT_BYTES } from '@/shared/generationContract'
 import { withDefaultComponentController } from '@/renderer/components/teacherControllerComponent'
-import { generationInitialRequestForPrompt, buildGenerationPrompt } from '@/main/localAgent/profile'
 
 function fixture(instruction = '继续核对并完成本课件', textRepeat = 150, previousResultOverride?: Record<string, unknown>) {
   const { project, componentPackages } = withDefaultComponentController(createBlankCourseProject({ includeDefaultController: true }))
@@ -66,20 +65,7 @@ describe('generation feedback page projection', () => {
     expect(context.pages.every((page: any) => page.items === undefined && page.summary)).toBe(true)
   })
 
-  it('keeps the refreshed lesson request and native prompt below the send budget', () => {
-    const { snapshot, previousResult } = fixture()
-    const currentLesson = { lessonId: 'lesson-feedback', directory: '/lessons/feedback', mode: 'authoring', currentStage: 'presentation-script',
-      issues: [], epoch: 3, documents: Array.from({ length: 4 }, (_, index) => ({ role: `doc-${index}`, path: `doc-${index}.md`, status: 'confirmed',
-        content: `lesson-${index}-`.padEnd(14000, 'x'), version: { hash: `v${index}` } })), materials: [] }
-    const refreshed = { ...snapshot, context: { ...(snapshot.context as any), currentLesson } } as GenerationRequest
-    const wire = generationInitialRequestForPrompt(refreshed)
-    expect(wire.context).toMatchObject({ currentLesson, pageProjection: { mode: 'non-current-summary' } })
-    expect(Buffer.byteLength(JSON.stringify(wire), 'utf8')).toBeLessThan(MAX_GENERATION_PROMPT_BYTES)
-    expect(Buffer.byteLength(buildGenerationPrompt('codex', refreshed, 'C:/candidate-root'), 'utf8')).toBeLessThan(MAX_GENERATION_PROMPT_BYTES)
-    expect((refreshed.context as any).previousResult).toMatchObject({ status: 'committed', beforeRevision: 19, afterRevision: 20,
-      fullReceipt: 'resources/project/previous-result.json', omitted: ['semanticChanges.changes', 'executionEvidence'] })
-    expect(JSON.parse(snapshot.resourceFiles!.find(file => file.path === 'project/previous-result.json')!.content)).toEqual(previousResult)
-  })
+  
 
   it('resourceizes a large committed receipt before the rev21 prompt budget check', () => {
     const receipt = { version: 1, requestId: crypto.randomUUID(), candidateId: crypto.randomUUID(), status: 'committed',

@@ -1,3 +1,4 @@
+import { captureFlowSelection, usePinnedSelection, workbenchSelection } from '../workbench/SelectionContextController'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { createRoot } from 'react-dom/client'
 import type { AssetMeta } from '../../shared/contracts/media-v1'
@@ -9,7 +10,7 @@ import { measureFlowPaperOrigin } from '../../shared/flowViewportGeometry'
 import { SharedDocumentEditor, type SharedDocumentEditorHandle } from '../document'
 import { createFlowDocumentResourcePort } from '../document/flowDocumentResources'
 import { createDocumentClipboardContext, readDocumentClipboardContext } from '../document/documentClipboardContext'
-import { componentPackageMeta } from '../components/editableComponentPackage'
+import { componentPackageMeta } from '../../shared/componentPackageMeta'
 import type { DocumentResources } from '../../shared/document/resources'
 import { assertActiveFlowEditorView, captureFlowEditorAuthoringTarget, type FlowEditorView } from '../course/flowEditorView'
 import type { FlowEditorSelection } from '../course/flowEditorSlice'
@@ -25,10 +26,18 @@ import { authoringObservationDraftToken } from '../authoring/generation/authorin
 import type { FlowDocumentDraft } from '../store/slices/flowAuthoringSlice'
 import { resolveFlowMediaLayoutProjection, FLOW_MEDIA_INLINE_SIZE_CUSTOM_PROPERTY, FLOW_MEDIA_INLINE_SIZE_REFERENCE } from '../../shared/flowMediaLayout'
 import type { DocumentContextSelection } from '../../shared/document/ports'
-import { flowContextSelectionIntent, resolveFlowContextSelection } from '../course/flowContextSelection'
-import { requestContextualCourseCommand } from './chat/contextualCourseCommand'
+import { flowContextSelectionIntent } from '../course/flowContextSelection'
+import { resolveFlowContextSelection } from '../../core/tools/flowTextSlot'
+import { cancelEditPreview, useEditPreview } from '../workbench/EditPreviewProjection'
+import { usePropertiesContext } from './properties/PropertiesContextAdapter'
+import { PropertiesPanelRouter } from './properties/PropertiesPanelRouter'
+import { useWorkspaceMediaSource } from '../lessonWorkspace/workspaceMediaSourceContext'
+import { deliverWorkspaceMediaDrop, type WorkspaceMediaDropHandler } from '../lessonWorkspace/workspaceMediaDrop'
+import { WORKSPACE_MEDIA_DRAG_TYPE } from '../lessonWorkspace/workspaceMediaDrag'
+import { flowMediaDropAfterBlock } from './flow/flowMediaDropPosition'
 
 export interface FlowWorkspaceProps {
+  readonly documentId?: string | null
   readonly toolbarContainer?: HTMLElement | null
   readonly view: FlowEditorView
   readonly sessionToken: CourseAuthoringSessionToken
@@ -41,16 +50,94 @@ export interface FlowWorkspaceProps {
   readonly readOnly?: boolean
   readonly assetFiles?: Record<string, Uint8Array>
   readonly componentPackages?: Record<string, ComponentPackageData>
+  readonly onDropWorkspaceMedia?: WorkspaceMediaDropHandler
+}
+export interface FlowBlockFocusRequest {
+  readonly documentId: string
+  readonly surfaceId: string
+  readonly blockId: string
+  readonly revision: number
+}
+const flowBlockFocusListeners = new Set<(request: FlowBlockFocusRequest) => boolean>()
+/** A one-shot view focus request; an unmounted or changed document drops it. */
+export function requestFlowBlockFocus(request: FlowBlockFocusRequest): boolean {
+  let accepted = false
+  for (const listener of flowBlockFocusListeners) accepted = listener(request) || accepted
+  return accepted
 }
 const EMPTY_ASSET_FILES: Record<string, Uint8Array> = {}
 const EMPTY_COMPONENT_PACKAGES: Record<string, ComponentPackageData> = {}
-export function FlowWorkspace({ view, sessionToken, assets, selection, textEdit, documentDraft, commands, readOnly = false, assetFiles = EMPTY_ASSET_FILES, componentPackages = EMPTY_COMPONENT_PACKAGES }: FlowWorkspaceProps) {
+export function FlowWorkspace({ documentId, view, sessionToken, assets, selection, textEdit, documentDraft, commands, readOnly = false, assetFiles = EMPTY_ASSET_FILES, componentPackages = EMPTY_COMPONENT_PACKAGES, onDropWorkspaceMedia }: FlowWorkspaceProps) {
   assertActiveFlowEditorView(view)
+  const mediaSource = useWorkspaceMediaSource()
+  const mediaSourceRef = useRef(mediaSource)
+  mediaSourceRef.current = mediaSource
   const paperRef = useRef<HTMLElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const workspaceRef = useRef<HTMLDivElement>(null)
   const editorRef = useRef<SharedDocumentEditorHandle>(null)
   const [error, setError] = useState<string | null>(null)
+  const [mediaDragOver, setMediaDragOver] = useState(false)
+  const propertyContext = usePropertiesContext({ onReplaceImage: () => setError('请在完整属性面板中替换浮层图片。') })
+  const pendingFocus = useRef<FlowBlockFocusRequest | null>(null)
+  const focusTimer = useRef<number | null>(null)
+  const focusExpiry = useRef<number | null>(null)
+  const focusCurrent = useRef({ documentId, surfaceId: view.surfaceId, revision: view.revision, selectedBlockId: selection?.selectedBlockId, blocks: view.blocks })
+  focusCurrent.current = { documentId, surfaceId: view.surfaceId, revision: view.revision, selectedBlockId: selection?.selectedBlockId, blocks: view.blocks }
+  const focusWhenReady = () => {
+    const request = pendingFocus.current, current = focusCurrent.current
+    if (!request) return
+    if (request.documentId !== current.documentId || request.surfaceId !== current.surfaceId || current.revision > request.revision) {
+      pendingFocus.current = null
+      if (focusExpiry.current !== null) window.clearTimeout(focusExpiry.current)
+      focusExpiry.current = null
+      return
+    }
+    if (current.revision !== request.revision || current.selectedBlockId !== request.blockId) return
+    if (!current.blocks.some(entry => entry.blockId === request.blockId && entry.block.type === 'paragraph')) {
+      pendingFocus.current = null
+      if (focusExpiry.current !== null) window.clearTimeout(focusExpiry.current)
+      focusExpiry.current = null
+      return
+    }
+    pendingFocus.current = null
+    if (focusExpiry.current !== null) window.clearTimeout(focusExpiry.current)
+    focusExpiry.current = null
+    if (focusTimer.current !== null) window.clearTimeout(focusTimer.current)
+    focusTimer.current = window.setTimeout(() => {
+      focusTimer.current = null
+      const live = focusCurrent.current
+      if (live.documentId === request.documentId && live.surfaceId === request.surfaceId && live.revision === request.revision && live.selectedBlockId === request.blockId) editorRef.current?.focusBlock(request.blockId)
+    }, 0)
+  }
+  useEffect(() => {
+    if (!documentId) return
+    const listen = (request: FlowBlockFocusRequest) => {
+      const current = focusCurrent.current
+      if (request.documentId !== documentId || request.surfaceId !== view.surfaceId || request.revision < current.revision) return false
+      pendingFocus.current = request
+      if (focusExpiry.current !== null) window.clearTimeout(focusExpiry.current)
+      focusExpiry.current = window.setTimeout(() => { if (pendingFocus.current === request) pendingFocus.current = null; focusExpiry.current = null }, 1000)
+      focusWhenReady()
+      return true
+    }
+    flowBlockFocusListeners.add(listen)
+    return () => {
+      flowBlockFocusListeners.delete(listen)
+      pendingFocus.current = null
+      if (focusTimer.current !== null) window.clearTimeout(focusTimer.current)
+      focusTimer.current = null
+      if (focusExpiry.current !== null) window.clearTimeout(focusExpiry.current)
+      focusExpiry.current = null
+    }
+  }, [documentId, view.surfaceId])
+  useEffect(() => { focusWhenReady() }, [documentId, view.surfaceId, view.revision, selection?.selectedBlockId])
+  const pinned = usePinnedSelection(documentId)
+  const generation = useEditPreview(documentId, view.revision)
+  const editPreview = useMemo(() => generation && (generation.target.kind === 'flow-block' || generation.target.kind === 'flow-range')
+    && generation.target.surfaceId === view.surfaceId && !readOnly
+    ? { editId: generation.editId, sequence: generation.sequence, target: generation.target, value: generation.value, cancel: () => { void cancelEditPreview(generation).catch(error => setError((error as Error).message)) } }
+    : undefined, [generation, view.surfaceId, readOnly])
   const [paperScroll, setPaperScroll] = useState({ top: 0, left: 0 })
   const [paperOrigin, setPaperOrigin] = useState({ x: 0, y: 0 })
   const viewKey = `${view.projectId}/${view.surfaceId}`
@@ -64,9 +151,11 @@ export function FlowWorkspace({ view, sessionToken, assets, selection, textEdit,
   const bodyWidth = resolveFlowBodyWidth(view.layout, viewport.width - viewport.nativeChrome.right)
   const objectRevision = useMemo(() => ({ assetUrls, componentPackages, bodyWidth }), [assetUrls, componentPackages, bodyWidth])
   const controller = useFlowTextAuthoringController({ view, sessionToken, selection, readOnly, textEdit, workspaceRef, commands })
-  const blocks = view.blocks.filter(block => block.parentId === null).map(block => structuredClone(block.block) as FlowBlock)
-  const refs = documentResourceReferences(blocks)
-  const document = { content: { blocks }, resources: { assets: refs.assets.map(assetId => ({ assetId, source: { kind: 'project' as const } })), components: refs.components.map(component => ({ ...component, source: { kind: 'project' as const } })) } }
+  const document = useMemo(() => {
+    const blocks = view.blocks.filter(block => block.parentId === null).map(block => structuredClone(block.block) as FlowBlock)
+    const refs = documentResourceReferences(blocks)
+    return { content: { blocks }, resources: { assets: refs.assets.map(assetId => ({ assetId, source: { kind: 'project' as const } })), components: refs.components.map(component => ({ ...component, source: { kind: 'project' as const } })) } }
+  }, [view.blocks])
   const run = (intent: Parameters<FlowCurrentSessionCommandPort['run']>[1], blockId?: string) => {
     const value = current.current
     const receipt = value.commands.run(captureFlowEditorAuthoringTarget({ view: value.view, sessionToken: value.sessionToken, target: blockId ? { kind: 'block', blockId } : { kind: 'surface' } }), intent)
@@ -77,7 +166,7 @@ export function FlowWorkspace({ view, sessionToken, assets, selection, textEdit,
   const contextualCommandIssue = (target: DocumentContextSelection): string | null => {
     try {
       const currentView = current.current.view
-      if (target.revision !== String(currentView.revision) || target.mode !== 'layout' || !target.selection) throw new Error('请在排版视图重新选择当前内容后发送。')
+      if (target.revision !== String(currentView.revision) || target.mode !== 'layout' || !target.selection) throw new Error('请在正文中重新选择当前内容后发送。')
       resolveFlowContextSelection(currentView.blocks.filter(block => block.parentId === null).map(block => structuredClone(block.block) as FlowBlock), currentView.revision, target.selection)
       return null
     } catch (error) { return error instanceof Error ? error.message : String(error) }
@@ -129,6 +218,22 @@ export function FlowWorkspace({ view, sessionToken, assets, selection, textEdit,
   const formulaNode = formulaOverlay?.kind === 'native' && formulaOverlay.content.nativeType === 'formula'
     ? flowFormulaBlockToAuthoringNode({ id: formulaOverlay.layerItemId, ...formulaOverlay.content.data } as Parameters<typeof flowFormulaBlockToAuthoringNode>[0]) : null
   const formulaDraft = controller.edit?.kind === 'formula' ? controller.edit.draft as FlowFormulaDraft : null
+  const dropWorkspaceMedia = (event: React.DragEvent<HTMLElement>) => {
+    if (!event.dataTransfer.types.includes(WORKSPACE_MEDIA_DRAG_TYPE) || !onDropWorkspaceMedia) return
+    event.preventDefault(); event.stopPropagation(); setMediaDragOver(false)
+    if (readOnly || !paperRef.current?.querySelector('.ProseMirror')) {
+      setError('请切换到可编辑的 Flow 正文后拖入媒体')
+      return
+    }
+    if (!editorRef.current?.flush().ready) { setError('请先完成当前正文输入，再拖入媒体'); return }
+    const afterBlockId = flowMediaDropAfterBlock(paperRef.current, view.blocks.map(entry => entry.blockId), event.clientY)
+    const target = { documentId: documentId ?? null, projectId: view.projectId, revision: view.revision,
+      locationId: view.locationId, surfaceId: view.surfaceId, sessionGeneration: sessionToken.generation }
+    const raw = event.dataTransfer.getData(WORKSPACE_MEDIA_DRAG_TYPE)
+    void deliverWorkspaceMediaDrop(raw, mediaSource, { surface: 'flow', afterBlockId }, target, onDropWorkspaceMedia,
+      () => mediaSourceRef.current.directory === mediaSource.directory && mediaSourceRef.current.files === mediaSource.files)
+      .then(result => { if (!result.ok) setError(result.reason ?? '媒体未插入') })
+  }
   return <div ref={workspaceRef} className="flow-workspace" data-testid="flow-workspace" data-flow-not-slide-stage="true"
     data-flow-project-id={view.projectId} data-flow-surface-id={view.surfaceId} data-flow-location-id={view.locationId} data-flow-active-block-id={view.activeBlockId}
     data-observation-source="authoring" data-observation-project-id={view.projectId} data-observation-revision={view.revision}
@@ -146,9 +251,14 @@ export function FlowWorkspace({ view, sessionToken, assets, selection, textEdit,
         onScroll={event => setPaperScroll({ top: event.currentTarget.scrollTop, left: event.currentTarget.scrollLeft })}
         style={{ flex: 1, position: 'relative', zIndex: 2, overflow: 'auto', height: '100%', padding: FLOW_BODY_SCROLL_PADDING, containerType: 'inline-size', containerName: 'flow-media-root', transform: `translate(${viewPan.x}px, ${viewPan.y}px)` }}>
         <article ref={paperRef} className="flow-paper flow-body-content" data-testid="flow-paper" data-flow-reading-width={view.layout.readingWidth}
-          style={{ width: '100%', maxWidth: flowPaperMaxWidth(view.layout), minHeight: '100%', margin: '0 auto', padding: FLOW_BODY_PAPER_PADDING, background: 'transparent', color: '#1f2937' }}>
+          data-workspace-media-drop={mediaDragOver || undefined}
+          onDragOverCapture={event => { if (onDropWorkspaceMedia && event.dataTransfer.types.includes(WORKSPACE_MEDIA_DRAG_TYPE)) { event.preventDefault(); event.stopPropagation(); event.dataTransfer.dropEffect = 'copy'; setMediaDragOver(!readOnly && Boolean(paperRef.current?.querySelector('.ProseMirror'))) } }}
+          onDragLeave={event => { if (!event.currentTarget.contains(event.relatedTarget as Node)) setMediaDragOver(false) }}
+          onDropCapture={dropWorkspaceMedia}
+          style={{ width: '100%', maxWidth: flowPaperMaxWidth(view.layout), minHeight: '100%', margin: '0 auto', padding: FLOW_BODY_PAPER_PADDING, background: 'transparent', color: '#1f2937', boxShadow: mediaDragOver ? 'inset 0 0 0 3px #245b46' : undefined }}>
           <style>{FLOW_BODY_CSS}</style>
           <SharedDocumentEditor key={`${view.projectId}/${view.surfaceId}/${sessionToken.generation}`} ref={editorRef} document={document} revision={String(view.revision)} readOnly={readOnly} target="flow" toolbarHost={toolbarHost}
+            editPreview={editPreview}
             objectRevision={objectRevision}
             clipboardContext={(resources: DocumentResources) => createDocumentClipboardContext(resources, { assets, assetFiles, componentPackages })}
             clipboardResourcePort={context => {
@@ -163,10 +273,12 @@ export function FlowWorkspace({ view, sessionToken, assets, selection, textEdit,
             onDraft={(source, diagnostics) => { if (diagnostics.length) { run({ kind: 'update-document-draft', source, diagnostics, composing: false }); setError('源文尚有错误，当前草稿不能提交到工程') } else run({ kind: 'clear-document-draft' }) }}
             onCompositionChange={(composing, source) => { if (composing) run({ kind: 'update-document-draft', source, diagnostics: [], composing }); else if (!editorRef.current?.flush().diagnostics.length) run({ kind: 'clear-document-draft' }) }}
             onUndo={() => run({ kind: 'document-history', direction: 'undo' })} onRedo={() => run({ kind: 'document-history', direction: 'redo' })}
+            pinnedTargets={pinned?.revision === view.revision ? pinned?.targets : undefined}
             onContextualTargetChange={target => {
+              if (documentId) void workbenchSelection.observe(documentId, view.revision, snapshot => target?.mode === 'layout' ? captureFlowSelection(snapshot, view.surfaceId, target) : null)
               if (target?.mode === 'source') {
                 const blockId = current.current.view.activeBlockId
-                if (blockId) run({ kind: 'select-blocks', blockIds: [blockId], focus: 'text', textRange: null, documentSelectionIssue: 'Flow 源文选区暂不支持 AI 局部修改，请切回排版选择内容。' }, blockId)
+                if (blockId) run({ kind: 'select-blocks', blockIds: [blockId], focus: 'text', textRange: null, documentSelectionIssue: 'Flow 源文选区暂不支持 AI 局部修改，请切回正文选择内容。' }, blockId)
                 return
               }
               // The source-mode guard must not outlive source mode, but it must survive everything
@@ -177,10 +289,20 @@ export function FlowWorkspace({ view, sessionToken, assets, selection, textEdit,
               if (selection?.documentSelectionIssue) setSourceRetirement(count => count + 1)
             }}
             contextualCommandIssue={contextualCommandIssue}
-            onContextualCommand={(instruction, target) => {
+            onContextualCommand={async (instruction, target) => {
               const issue = contextualCommandIssue(target)
               if (issue) throw new Error(issue)
-              requestContextualCourseCommand({ instruction, projectId: current.current.view.projectId, sessionToken: current.current.sessionToken, documentSelection: structuredClone(target.selection!) })
+              if (!documentId) throw new Error('文档尚未就绪。')
+              const snapshot = await workbenchSelection.prepare(documentId)
+              await workbenchSelection.request(captureFlowSelection(snapshot, current.current.view.surfaceId, target), instruction)
+            }}
+            renderContextualProperties={target => {
+              if (target.mode !== 'layout' || target.revision !== String(view.revision) || !target.selection || propertyContext.kind !== 'flow-block') return null
+              const selected = target.selection
+              const blockId = selected.kind === 'cells' ? selected.tableId : selected.kind === 'object' ? selected.blockId
+                : selected.anchor.blockId === selected.head.blockId ? selected.anchor.blockId : null
+              if (!blockId || propertyContext.selection.selectedBlockId !== blockId) return null
+              return <PropertiesPanelRouter context={propertyContext} />
             }}
             onSelection={next => {
               if (!next) { run({ kind: 'clear-selection' }); return }

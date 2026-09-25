@@ -1,6 +1,6 @@
 import { TableMergeControls } from './TableMergeControls'
 import type { FlowTableBlock } from '../../../shared/courseProjectTypes'
-import { changeFlowTableStructure, type FlowTableStructureOperation } from '../../course/flowTableContentOperations'
+import { changeFlowTableStructure, type FlowTableStructureOperation } from '../../../core/tools/flowTableContentOperations'
 import type { FlowPropertiesContext } from './FlowPropertiesPanel'
 
 export function FlowTableProperties({ context, table }: { context: FlowPropertiesContext; table: FlowTableBlock }) {

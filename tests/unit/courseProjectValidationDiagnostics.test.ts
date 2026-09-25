@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
-import { createRectangleNode } from '@/renderer/project/nativeNodeFactories'
+import { createBlankCourseProject } from '@/core/course/createCourseProject'
+import { createRectangleNode } from '@/core/tools/nativeNodeFactories'
 import {
   COURSE_PROJECT_DIAGNOSTIC_TARGET_VERSION,
   COURSE_PROJECT_VALIDATION_FATAL_CODES,

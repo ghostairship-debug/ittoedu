@@ -8,15 +8,11 @@ import type {
   FlowBodyLayerPlane,
   LayerItem,
 } from '../../shared/courseProjectTypes'
-import {
-  carrierForLayerItem,
-  isTeacherControllerLayerItem,
-  makeGlobalLayerAuthoringAddress,
-} from './globalLayerCommands'
+import { carrierForLayerItem, isTeacherControllerLayerItem, makeGlobalLayerAuthoringAddress } from '../../core/tools/globalLayers'
 import {
   walkFlowBlocks,
   flowSurfaceIn,
-} from './flowDocumentModel'
+} from '../../core/tools/flowDocumentModel'
 import { isFlowZOrderLayerBlock } from './flowEditorSlice'
 import {
   buildFlowEditorView,

@@ -1,7 +1,7 @@
 import { buildPublishedFixture as buildPublishedCourseV2Payload } from '../fixtures/teacherController'
 import { describe, expect, it } from 'vitest'
 import { z } from 'zod'
-import { addCourseFlowPage } from '@/renderer/course/courseLocationCommands'
+import { addCourseFlowPage } from '@/core/tools/courseLocations'
 import { createCoursewareBuilderV2 } from '@/renderer/course/coursewareBuilderV2'
 import { createBlankFlowCourseProject } from '@/renderer/project/createFlowCourseProject'
 import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'

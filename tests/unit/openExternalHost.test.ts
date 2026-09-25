@@ -12,7 +12,6 @@ vi.mock('electron', () => ({
   shell: { openPath: (filename: string) => state.openPath(filename) },
 }))
 vi.mock('../../src/main/fileDialogs', () => ({ openSelectedProjectFile: vi.fn() }))
-vi.mock('../../src/main/localAgent/service', () => ({ assertLocalAgentRecordsAvailable: vi.fn() }))
 import { operateLessonDesktop } from '../../src/main/lessonDesktopService'
 
 let root: string

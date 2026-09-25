@@ -2,7 +2,7 @@ import { BUILT_IN_COMPONENT_CATALOG_DIRECTORY } from '../src/shared/builtInCompo
 import path from 'node:path'
 import { scanComponentCatalogDirectory, readCatalogComponentPackage } from '../src/main/componentCatalogScanner'
 import { executeComponentRuntime } from '../src/renderer/components/executeComponentRuntime'
-import { importComponentPackage } from '../src/renderer/components/importComponentPackage'
+import { importComponentPackage } from '../src/core/drivers/codecs/importComponentPackage'
 
 async function main(): Promise<void> {
   const catalogRoot = path.resolve(process.cwd(), BUILT_IN_COMPONENT_CATALOG_DIRECTORY)

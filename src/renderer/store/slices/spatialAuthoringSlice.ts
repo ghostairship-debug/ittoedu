@@ -76,19 +76,9 @@ import {
   updateSpatialWorldContentTextDraft,
 } from '../../authoring/spatialWorldAuthoring'
 import type { V9SlideTextContentDraft } from '../../authoring/v9SlideContentEdit'
-import {
-  deleteEffectiveLayerItems,
-  findGlobalTeacherController,
-  locateCourseLayer,
-  moveEffectiveLayerOwner,
-  patchEffectiveLayerItems,
-  reorderEffectiveLayerItems,
-  restoreDefaultTeacherController,
-  setGlobalLayerLocationVisibility,
-  setGlobalLayerVisibleAtLocation,
-  type LayerCommandResult,
-} from '../../course/effectiveLayerCommands'
-import { setGlobalLayerScenePlane } from '../../course/globalLayerCommands'
+import { deleteEffectiveLayerItems, reorderEffectiveLayerItems } from '../../../core/tools/layerCommands'
+import { findGlobalTeacherController, locateCourseLayer, moveEffectiveLayerOwner, patchEffectiveLayerItems, restoreDefaultTeacherController, setGlobalLayerLocationVisibility, setGlobalLayerVisibleAtLocation, type LayerCommandResult } from '../../course/effectiveLayerCommands'
+import { setGlobalLayerScenePlane } from '../../../core/tools/globalLayers'
 import { commitSlideProjectMutation } from '../../course/slideEditorCommands'
 import type { ShapeType, TextRun } from '../../../shared/contracts/native-v1'
 import {
@@ -1519,30 +1509,12 @@ export function createSpatialAuthoringSlice(
       return { ok: true, document: clone }
     },
     undo() {
-      const session = spatial.read().spatialSession
-      if (!session) return
-      const before = session.history.present
-      const resourceTransition = spatialAuthoringUndoResourceTransition(session.history)
-      const result = undoSpatialAuthoring(session)
-      const moved = Boolean(result.ok && result.nextSession && result.nextSession.history.present !== before)
-      spatial.persist(result, {
-        clearContentEdit: true,
-        ...(moved ? resourceTransition ? { resourceTransition } : { sidecarDirection: 'undo' as const } : {}),
-        statusMessage: '已撤销',
-      })
+      spatial.patch({ spatialContentEdit: null, editingTextNodeId: null })
+      void kernel.navigateHistory('undo').catch(error => kernel.setFeedback({ errorMessage: String(error) }))
     },
     redo() {
-      const session = spatial.read().spatialSession
-      if (!session) return
-      const before = session.history.present
-      const resourceTransition = spatialAuthoringRedoResourceTransition(session.history)
-      const result = redoSpatialAuthoring(session)
-      const moved = Boolean(result.ok && result.nextSession && result.nextSession.history.present !== before)
-      spatial.persist(result, {
-        clearContentEdit: true,
-        ...(moved ? resourceTransition ? { resourceTransition } : { sidecarDirection: 'redo' as const } : {}),
-        statusMessage: '已重做',
-      })
+      spatial.patch({ spatialContentEdit: null, editingTextNodeId: null })
+      void kernel.navigateHistory('redo').catch(error => kernel.setFeedback({ errorMessage: String(error) }))
     },
     setScope(scope) {
       const session = spatial.read().spatialSession

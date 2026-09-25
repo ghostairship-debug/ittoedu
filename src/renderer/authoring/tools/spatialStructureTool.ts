@@ -1,29 +1,15 @@
 import { z } from 'zod'
-import { spatialCameraPoseSchema, spatialPathDocumentSchema, spatialRelationDocumentSchema } from '../../../shared/courseProjectSchema'
+import { spatialStructureToolInputSchema } from '../../../core/tools/spatialStructureSchema'
+export { spatialStructureToolInputSchema } from '../../../core/tools/spatialStructureSchema'
 import { openSpatialAuthoringSession, spatialSurfaceIn } from '../../course/spatialEditorCommands'
 import { addSpatialEditorCameraFrame, renameSpatialCameraFrame, updateSpatialCameraFramePose, deleteSpatialCameraFrameInSession, setSpatialCameraHome, reorderSpatialCameraFrames, spatialSessionCameraFittingWorldContent, spatialSessionHasWorldContent } from '../../course/spatialCameraCommands'
 import { STAGE_VIEWPORT_HEIGHT, STAGE_VIEWPORT_WIDTH } from '../../authoring/stageViewportTransform'
-import { addSpatialPath, updateSpatialPath, deleteSpatialPath, spatialPathAuthoringAddress, spatialCameraFrameAuthoringAddress, spatialGraphAuthoringAddress } from '../../course/spatialPathCommands'
-import { addSpatialRelation, updateSpatialRelation, deleteSpatialRelation, spatialRelationAuthoringAddress } from '../../course/spatialRelationCommands'
+import { addSpatialPath, updateSpatialPath, deleteSpatialPath } from '../../course/spatialPathCommands'
+import { spatialPathAuthoringAddress, spatialCameraFrameAuthoringAddress, spatialGraphAuthoringAddress } from '../../../core/tools/spatialPath'
+import { addSpatialRelation, updateSpatialRelation, deleteSpatialRelation } from '../../course/spatialRelationCommands'
+import { spatialRelationAuthoringAddress } from '../../../core/tools/spatialRelation'
 import type { AuthoringToolDefinition } from './executeAuthoringTool'
 import { insertionIndex, resolveAuthoringToolScope } from './authoringToolScope'
-
-const path = spatialPathDocumentSchema.omit({ id: true })
-const relation = spatialRelationDocumentSchema.omit({ id: true })
-const name = z.string().trim().min(1).max(200)
-export const spatialStructureToolInputSchema = z.discriminatedUnion('operation', [
-  z.object({ operation: z.literal('add-camera'), pose: spatialCameraPoseSchema, name: name.optional() }).strict(),
-  z.object({ operation: z.literal('update-camera'), pose: spatialCameraPoseSchema.optional(), name: name.optional() }).strict(),
-  z.object({ operation: z.literal('delete-camera') }).strict(),
-  z.object({ operation: z.literal('set-home'), pose: spatialCameraPoseSchema }).strict(),
-  z.object({ operation: z.literal('fit-world-content') }).strict(),
-  z.object({ operation: z.literal('add-path'), path }).strict(),
-  z.object({ operation: z.literal('update-path'), path: path.partial() }).strict(),
-  z.object({ operation: z.literal('delete-path') }).strict(),
-  z.object({ operation: z.literal('add-relation'), relation }).strict(),
-  z.object({ operation: z.literal('update-relation'), relation: relation.partial() }).strict(),
-  z.object({ operation: z.literal('delete-relation') }).strict(),
-])
 
 export const spatialStructureTool: AuthoringToolDefinition<z.infer<typeof spatialStructureToolInputSchema>> = {
   name: 'spatial.structure', inputSchema: spatialStructureToolInputSchema,

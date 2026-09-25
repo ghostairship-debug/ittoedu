@@ -6,7 +6,7 @@ import { selectSlideToolResult } from '../../authoring/toolSelection'
 import type { CourseProjectDocument } from '../../../shared/courseProjectTypes'
 import type { CourseAssetSidecar } from '../../project/v9AssetAdapter'
 import { emptyCourseAssetSidecar } from '../../project/v9AssetAdapter'
-import { createBlankCourseProject } from '../../project/createCourseProject'
+import { createBlankCourseProject } from '../../../core/course/createCourseProject'
 import {
   createSlideAuthoringBackend,
   openSlideAuthoringSession,
@@ -48,10 +48,10 @@ import {
 import type { CourseMediaCommandResult } from '../../course/v9MediaAudioCommands'
 import type { ShapeType } from '../../../shared/contracts/native-v1'
 import type { NativeLineGeometry } from '../../../shared/contracts/native-v1/types'
-import { createFormulaNode, createShapeNode, createTextNode } from '../../project/nativeNodeFactories'
+import { createFormulaNode, createShapeNode, createTextNode } from '../../../core/tools/nativeNodeFactories'
 import { normalizeNewNodeGeometry, sessionFromLayerResult } from '../v9LayerMutations'
 import type { TextRun } from '../../../shared/contracts/native-v1'
-import type { V9SlideClipboardPayload } from '../../course/v9SlideClipboard'
+import type { V9SlideClipboardPayload } from '../../../core/tools/slideClipboard'
 import {
   isV9SlideContentDraftDirty,
   type V9SlideContentEditSession,
@@ -577,26 +577,12 @@ export function createSlideAuthoringSlice(
       return { ok: true, document: clone }
     },
     undo() {
-      const backend = slide.read().slideBackend
-      if (!isSlideAuthoringBackend(backend)) return
-      const before = backend.getSession().history.present
-      const result = backend.undo()
-      const moved = Boolean(result.ok && result.nextSession && result.nextSession.history.present !== before)
-      slide.persist(result, {
-        clearContentEdit: true,
-        ...(moved && !result.resourceTransition ? { sidecarDirection: 'undo' as const } : {}),
-      })
+      slide.patch({ v9ContentEdit: null })
+      void kernel.navigateHistory('undo').catch(error => kernel.setFeedback({ errorMessage: String(error) }))
     },
     redo() {
-      const backend = slide.read().slideBackend
-      if (!isSlideAuthoringBackend(backend)) return
-      const before = backend.getSession().history.present
-      const result = backend.redo()
-      const moved = Boolean(result.ok && result.nextSession && result.nextSession.history.present !== before)
-      slide.persist(result, {
-        clearContentEdit: true,
-        ...(moved && !result.resourceTransition ? { sidecarDirection: 'redo' as const } : {}),
-      })
+      slide.patch({ v9ContentEdit: null })
+      void kernel.navigateHistory('redo').catch(error => kernel.setFeedback({ errorMessage: String(error) }))
     },
     activateState(stateId) {
       const backend = slide.read().slideBackend

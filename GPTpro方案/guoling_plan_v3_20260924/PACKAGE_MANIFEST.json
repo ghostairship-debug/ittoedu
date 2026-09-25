@@ -1,0 +1,202 @@
+{
+  "package": "guoling-plan-v3.3",
+  "date": "2026-09-25",
+  "revision": "runtime-html-flow-2.0-plan-only",
+  "officeSelection": "open",
+  "productImplemented": false,
+  "skillCommandsImplemented": false,
+  "officeBenchmarked": false,
+  "scope": "plan_package_only",
+  "backup": "_history/V3_2_before_runtime_flow_20260925.zip",
+  "writtenAt": "2026-09-25T13:56:15.871682+08:00",
+  "files": [
+    {
+      "path": "00_阅读指南.md",
+      "bytes": 5760,
+      "sha256": "4ff32d89b53a475558cd4d58cbd8bb9eb5e661b3b038a397fbe840c5344419de"
+    },
+    {
+      "path": "01_产品方向与分阶段路线.md",
+      "bytes": 7775,
+      "sha256": "6b3ee64c912638498c80f739b3a53fd0d9a535fec90a02c1c4d88afc012398ca"
+    },
+    {
+      "path": "02_近期开发任务与验收.md",
+      "bytes": 7925,
+      "sha256": "0e307393db1f62f5f43918fcf15b3b9a2cd83aebd84b5bf017fe8b63e671f0c6"
+    },
+    {
+      "path": "03_创作流水线与Skill设计.md",
+      "bytes": 6948,
+      "sha256": "937be3565f78057dcc776a47152242382486d6de0a995981c37fd2ce5718c4e3"
+    },
+    {
+      "path": "04_HTML轻编辑与自动保存.md",
+      "bytes": 6634,
+      "sha256": "c008ff7cf26b9011253df38d5c51c21b1592e94333aa34d0d9f9326c26d00dd3"
+    },
+    {
+      "path": "05_Office多方案评估.md",
+      "bytes": 17403,
+      "sha256": "ce44b9a6cf3fdd4f5fdaf3eab7b0129d2cfecac80ba8c01b89ca07377aeb3ca7"
+    },
+    {
+      "path": "06_Office验证计划与性能基线.md",
+      "bytes": 6554,
+      "sha256": "140eeeac957218e5f01b339b91e9e919a350a87049306dd37c18681fb083a6bb"
+    },
+    {
+      "path": "07_浏览器与多格式工作空间.md",
+      "bytes": 5102,
+      "sha256": "a11fed91a02004f35704ebda85f25615df0c930b19391cd454e185db1cd08e57"
+    },
+    {
+      "path": "08_插件化_自有能力与许可.md",
+      "bytes": 5597,
+      "sha256": "d11d354dea7221aeaa5df4b4766baad3db138b24bfb0bb807ca454cb33ab67e4"
+    },
+    {
+      "path": "09_教育切入与用户验证.md",
+      "bytes": 3740,
+      "sha256": "6f219f4f4341523b2f343481f90edfd5a44a78452934794fd2207bee8a742ccd"
+    },
+    {
+      "path": "10_Agent实施交接提示词.md",
+      "bytes": 3536,
+      "sha256": "0cadc2c0ce16bfc409013e5051fbd68c312a0eb57a4679f3d937e8852bfb1d24"
+    },
+    {
+      "path": "11_来源与待核实项.md",
+      "bytes": 12641,
+      "sha256": "f85fc6a7437837644a5dd40e02fb56e61f5fa30cfae1c885093e88c2fe8877a6"
+    },
+    {
+      "path": "12_架构复审与本轮修订.md",
+      "bytes": 15227,
+      "sha256": "7145a6bdf11e876bc221ba2ddd0926a62bd8fa3352ea1b47609ef166c05bf23b"
+    },
+    {
+      "path": "13_Skill机械命令与执行合同.md",
+      "bytes": 8455,
+      "sha256": "3f5a37877af59c5fb267f460620b402cbfe884b2f57b2c093617dbabae4c1fad"
+    },
+    {
+      "path": "14_Runtime自动轻编辑与Flow承载.md",
+      "bytes": 11171,
+      "sha256": "0c99a503f1516437ef42421464ad1c49505b7d9ef4024eef1685f447456d6e5d"
+    },
+    {
+      "path": "benchmarks/README.md",
+      "bytes": 1277,
+      "sha256": "e4b001cffe53c6dd63b09dd2f3f14a09393c73012efa6c2523dd54036d6bef13"
+    },
+    {
+      "path": "benchmarks/acceptance-cases.json",
+      "bytes": 7845,
+      "sha256": "ea5a1fd9f3952a6c70e8bd5296e3d0bf58df8e89830c6715b7091f078f4fc2d9"
+    },
+    {
+      "path": "benchmarks/creative-run.template.json",
+      "bytes": 1204,
+      "sha256": "d002d64d1ca6456e3e0adcad086617242e4b0b00c311fee37f83d9fd06783ed8"
+    },
+    {
+      "path": "benchmarks/office-candidates.json",
+      "bytes": 4623,
+      "sha256": "3fef57fad7772832505ce502ba47462b59c3cb1c0b3855db23f2d4435371fea2"
+    },
+    {
+      "path": "benchmarks/office-run.template.json",
+      "bytes": 1508,
+      "sha256": "0953f4a891e715f43bf92642365bb387e9d375667210c171c120ee56d68b5cb7"
+    },
+    {
+      "path": "examples/01-teaching-plan.md",
+      "bytes": 1537,
+      "sha256": "bc2035c8fd02437092a3484c80d4ac938799b5587a050887e5b29dae16348917"
+    },
+    {
+      "path": "examples/02-presentation-script.md",
+      "bytes": 2760,
+      "sha256": "9049c4b155f57f0542fe6f4418ef3baf0db324a8bedc008784a28f1fdd47abc4"
+    },
+    {
+      "path": "examples/README.md",
+      "bytes": 2344,
+      "sha256": "74a855d9ba41d1155148da0519d567c49791a85f84ffb40a76d36c25b0f0bd89"
+    },
+    {
+      "path": "examples/layout-shell.html",
+      "bytes": 4867,
+      "sha256": "9202a1a6a440966d5c9b68f1252d049859685daa62eaf223171eba19b418c22e"
+    },
+    {
+      "path": "index.html",
+      "bytes": 328895,
+      "sha256": "4ceac4ea9b6c6c9102d7610a09dfe98ce12bd1a8c281157f5e2071f1a3b93ede"
+    },
+    {
+      "path": "skills/guoling-course-design/SKILL.md",
+      "bytes": 1476,
+      "sha256": "8ab641d47cea06fc9eb7a28116a61483605d38c64c39a4d5c0403da609dceca8"
+    },
+    {
+      "path": "skills/guoling-layout-shell/SKILL.md",
+      "bytes": 1548,
+      "sha256": "7d43b811ed48ca3cc0e583066bb790f284721a4f9d9946c3340d26ac4a5a6e65"
+    },
+    {
+      "path": "skills/guoling-slot-build/SKILL.md",
+      "bytes": 2343,
+      "sha256": "219784c472fded743fa281bbbcc358ebfd64c4b05ecd740b21fda593fed7e915"
+    },
+    {
+      "path": "skills/shared/shell-contract.md",
+      "bytes": 5985,
+      "sha256": "ecb088d2d629984af8f0a05ca7efde32f3e300be576899dbcacadb8968aac22a"
+    },
+    {
+      "path": "sources.json",
+      "bytes": 15381,
+      "sha256": "a13f7acd52def55da5639e00158c46548cb4b9080b035edbf8b1b1614a93856c"
+    },
+    {
+      "path": "包内检查说明.md",
+      "bytes": 1808,
+      "sha256": "212969d4a6489c29975f46026ef9b05378b67c49027abfe61642c4002d26fda2"
+    }
+  ],
+  "priorArchitectureReviewBaseline": {
+    "head": "071149e2",
+    "includesUncommittedWorktree": true,
+    "sourceFilesAtStart": 879,
+    "sourceChangesObservedDuringReview": 4,
+    "review": "targeted_static_not_runtime",
+    "date": "2026-09-24",
+    "refreshedThisRevision": false
+  },
+  "fidelityReview": {
+    "basis": "current_plan_and_prior_conversation_case_evidence",
+    "currentProductTested": false,
+    "sourceCodeChanged": false,
+    "testDefinitionCount": 35,
+    "newToolNamesAdded": 0
+  },
+  "previousBackup": "_history/V3_1_before_fidelity_20260925.zip",
+  "planUpdate": {
+    "basis": "owner_decisions_and_prior_conversation_targeted_code_reads",
+    "targetRelease": "2.0",
+    "productImplemented": false,
+    "productTested": false,
+    "sourceCodeModified": false,
+    "taskRegistryModified": false,
+    "acceptanceRegistryModified": false,
+    "benchmarkDefinitionsModified": false,
+    "benchmarkDefinitionCount": 35,
+    "skillDraftCount": 3,
+    "newToolNamesAdded": 0,
+    "readerSections": 24,
+    "newDesignDocument": "14_Runtime自动轻编辑与Flow承载.md",
+    "concurrentChangesOutsideWriteScopeObserved": 4
+  }
+}

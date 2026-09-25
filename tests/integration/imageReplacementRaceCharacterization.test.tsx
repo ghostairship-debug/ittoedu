@@ -11,7 +11,7 @@ import {
   createCourseProjectArchive,
   openCourseProjectArchive,
   type CourseProjectArchiveData,
-} from '../../src/renderer/project/courseProjectArchive'
+} from '../../src/core/drivers/codecs/courseProjectArchive'
 
 import { buildPublishedCourseStandaloneHtml } from '../../src/renderer/export/course/buildCoursePackages'
 import {
@@ -165,7 +165,6 @@ function selectedImageApi(
   const selectImageSpy = vi.fn(selectImage)
   return {
     legacyPpt: vi.fn(async () => null),
-    localAgent: vi.fn(async () => ({ enabled: false })),
     materials: vi.fn(async () => []),
     openProject: vi.fn(async () => null),
     listRecentProjects: vi.fn(async () => []),

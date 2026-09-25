@@ -61,17 +61,10 @@ test('the immediate formal observation reflects a Native text, font and frame ed
     const result = await page.evaluate(async ({ ids }) => {
       const load = (path: string) => import(/* @vite-ignore */ path)
       const { useEditorStore, selectActiveCourseProjectDocument } = await load('/src/renderer/store/editorStore.ts')
-      const { createCourseChatObservation } = await load('/src/renderer/ui/chat/courseChatObservation.ts')
+      const { createCurrentObservation, commitCourseCommand, readCanonicalCourse } = await load('/tests/e2e/helpers/g20AuthoringObservation.ts')
       const state = useEditorStore.getState(), project = selectActiveCourseProjectDocument(state)
-      const owner = { projectId: project.id, projectPath: state.projectPath }
-      const workspace = (await window.desktopAPI.localAgent({ operation: 'workspace', ...owner })).workspace
-      if (!workspace) throw new Error('Main did not return the current workspace')
       const captureRects: Rect[] = []
-      const bridge = createCourseChatObservation({ ...window.desktopAPI,
-        captureAuthoringObservation(rect: Rect) {
-          captureRects.push({ ...rect })
-          return window.desktopAPI.captureAuthoringObservation!(rect)
-        } }, owner)
+      const observer = createCurrentObservation(captureRects)
       const items = (value: any) => value.surfaces.flatMap((surface: any) => surface.type === 'slide' ? surface.scenes.flatMap((scene: any) => scene.layerItems) : [])
       const original = items(project).find((item: any) => item.layerItemId === ids.title)
       const rect = (element: Element) => {
@@ -86,30 +79,23 @@ test('the immediate formal observation reflects a Native text, font and frame ed
           slideSize: { width: (slide as HTMLElement).offsetWidth, height: (slide as HTMLElement).offsetHeight } }
       }
       try {
-        const before = await bridge.capture({ workspace, scope: 'selection', purpose: 'local-edit', intent: 'edit',
-          instruction: '把标题改为简谐运动，放大为64号紫色文字，移到新的文本框中并居中。', applyPolicy: 'auto', expectedResult: 'auto', materials: [], catalogPackages: [] })
+        const before = await observer.capture({ intent: 'edit' })
         const beforeRendered = rendered()
-        const destination = before.destinations.find((value: any) => value.kind === 'update' && value.target.itemId === ids.title)
-        if (!destination) throw new Error('Formal observation did not expose the title destination')
-        const prepared = await useEditorStore.getState().prepareGenerationCandidate(before, {
-          version: 1, requestId: before.requestId, candidateId: crypto.randomUUID(), summary: 'Canonical text/font/frame observation',
-          steps: [{ id: 'title', tool: 'native.content', carrier: 'native', destination,
-            input: { operation: 'edit', text: '简谐运动', textStyle: { fontSize: 64, align: 'center', color: '#c026d3' },
-              properties: { frame: { x: 400, y: 150, width: 600, height: 100 } } } }],
-        })
-        const committed = useEditorStore.getState().applyGenerationCandidate(prepared.previewId)
-        if (committed.status !== 'committed') throw new Error('Native text edit did not commit')
-        const atCommit = structuredClone(selectActiveCourseProjectDocument(useEditorStore.getState()))
-        const historyAtCommit = useEditorStore.getState().slideBackend.getSession().history.past.length
+        const locationId = useEditorStore.getState().courseAuthoringSession.token.locationId
+        const receipt = await commitCourseCommand({ type: 'course.object.patch', locationId, itemId: ids.title,
+          patch: { nativeData: { text: '简谐运动' }, nativeTextStyle: { fontSize: 64, align: 'center', color: '#c026d3' },
+            frame: { x: 400, y: 150, width: 600, height: 100 } } })
+        const atCommit = (await readCanonicalCourse()).model.project
+        const historyAtCommit = (await readCanonicalCourse()).undoDepth
         // One normal immediate post-commit capture, without a sleep, pixel poll,
         // second capture, preview transition or substituted image response.
-        const after = await bridge.captureNext(before, committed.receipt)
+        const after = await observer.capture({ intent: 'edit', prepareDrafts: false })
         const current = selectActiveCourseProjectDocument(useEditorStore.getState())
         return { before, after, beforeRendered, afterRendered: rendered(), captureRects, original,
-          updated: items(current).find((item: any) => item.layerItemId === ids.title), receipt: committed.receipt,
-          historyAtCommit, historyAfterObservation: useEditorStore.getState().slideBackend.getSession().history.past.length,
+          updated: items(current).find((item: any) => item.layerItemId === ids.title), receipt,
+          historyAtCommit, historyAfterObservation: (await readCanonicalCourse()).undoDepth,
           documentUnchangedByObservation: JSON.stringify(current) === JSON.stringify(atCommit) }
-      } finally { bridge.dispose() }
+      } finally { observer.dispose() }
     }, { ids: FIXTURE_IDS })
     const frame = (request: typeof result.before) => {
       const file = request.resourceFiles.find((value: any) => value.path === 'observation/current-frame.png')
@@ -146,7 +132,7 @@ test('the immediate formal observation reflects a Native text, font and frame ed
     expect(bounds.bottom).toBeLessThanOrEqual((mounted.y + mounted.height - nextCapture.y) * py)
     expect(Math.abs((bounds.left + bounds.right) / 2 - (mounted.x + mounted.width / 2 - nextCapture.x) * px)).toBeLessThan(8)
     expect(bounds.bottom - bounds.top).toBeGreaterThan(60)
-    expect(result.after.documentRevision).toBe(result.receipt.afterRevision)
+    expect(result.after.observation.documentRevision).toBe(result.receipt.revision)
     expect(result.documentUnchangedByObservation).toBe(true)
     expect(result.historyAfterObservation).toBe(result.historyAtCommit)
     expect(run.pageErrors).toEqual([])

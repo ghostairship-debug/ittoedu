@@ -17,37 +17,11 @@ import {
   type NativeLayerItem,
   type ScopedLayerItem,
 } from '@/shared/courseProjectTypes'
-import {
-  CONTROLLER_MOVE_REASON,
-  CROSS_OWNER_REORDER_REASON,
-  LAYER_REJECT_LOCKED,
-  LAYER_REJECT_STALE_REVISION,
-  SPATIAL_CROSS_COORDINATE_MOVE_REASON,
-  deleteEffectiveLayerItem,
-  duplicateEffectiveLayerItem,
-  listEffectiveLayerCommandItems,
-  locateCourseLayer,
-  makeEffectiveLayerAuthoringAddress,
-  moveEffectiveLayerOwner,
-  patchEffectiveLayerItem,
-  patchEffectiveLayerItems,
-  reorderEffectiveLayerItems,
-} from '@/renderer/course/effectiveLayerCommands'
-import {
-  allocateCourseLayerOrder,
-  CONTROLLER_PLANE_REASON,
-  CROSS_GLOBAL_PLANE_REORDER_REASON,
-  findGlobalTeacherController,
-  isTeacherControllerLayerItem,
-  makeGlobalLayerAuthoringAddress,
-  restoreDefaultTeacherController,
-  readGlobalLayerScenePlane,
-  setGlobalLayerScenePlane,
-  setGlobalLayerLocationVisibility,
-  setGlobalLayerVisibleAtLocation,
-  type EffectiveLayerCommandTarget,
-} from '@/renderer/course/globalLayerCommands'
-import { addCourseSpatialPage } from '@/renderer/course/courseLocationCommands'
+import { deleteEffectiveLayerItem, duplicateEffectiveLayerItem, makeEffectiveLayerAuthoringAddress, reorderEffectiveLayerItems } from '@/core/tools/layerCommands'
+import { CONTROLLER_MOVE_REASON, CROSS_OWNER_REORDER_REASON, LAYER_REJECT_LOCKED, LAYER_REJECT_STALE_REVISION, SPATIAL_CROSS_COORDINATE_MOVE_REASON, listEffectiveLayerCommandItems, locateCourseLayer, moveEffectiveLayerOwner, patchEffectiveLayerItem, patchEffectiveLayerItems } from '@/renderer/course/effectiveLayerCommands'
+import { CONTROLLER_PLANE_REASON, CROSS_GLOBAL_PLANE_REORDER_REASON, findGlobalTeacherController, isTeacherControllerLayerItem, makeGlobalLayerAuthoringAddress, readGlobalLayerScenePlane, setGlobalLayerScenePlane, setGlobalLayerLocationVisibility, setGlobalLayerVisibleAtLocation, type EffectiveLayerCommandTarget } from '@/core/tools/globalLayers'
+import { allocateCourseLayerOrder, restoreDefaultTeacherController } from '@/renderer/course/globalLayerCommands'
+import { addCourseSpatialPage } from '@/core/tools/courseLocations'
 
 /**
  * V9 command fixture. Proves global/effective layer commands.

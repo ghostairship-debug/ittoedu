@@ -3,8 +3,8 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync } from 'nod
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { BACKGROUND_E2E_ENV } from '../../src/main/windowVisibility'
-import { createBlankCourseProject } from '../../src/renderer/project/createCourseProject'
-import { createCourseProjectArchive } from '../../src/renderer/project/courseProjectArchive'
+import { createBlankCourseProject } from '../../src/core/course/createCourseProject'
+import { createCourseProjectArchive } from '../../src/core/drivers/codecs/courseProjectArchive'
 
 // F08 路径 C（bounded 段）：h5lesson 工作台与编辑器连续切换、场景状态管理、撤销重做、保存重开、整课预览真实运行。
 const root = resolve(__dirname, '../..')
@@ -38,22 +38,16 @@ test('F08 path C: h5lesson workbench continuity, scene states, undo/redo, save/r
     await expect(openButton).toBeVisible()
     await openButton.click()
     await expect(page.locator('.lesson-workspace-toolbar')).toContainText('workspace')
-    await page.getByRole('button', { name: '新建课件', exact: true }).click()
-    await page.getByRole('textbox', { name: '课件名称' }).fill('场景状态课')
-    await page.getByRole('button', { name: '创建课件' }).click()
-    // 课例段已从导航移除：创建后直接激活课例上下文（创作流程面板出现）
-    await expect(page.locator('.lesson-workflow')).toBeVisible()
-
-    // 绑定真实 .h5lesson 工程（空白 V9 工程写入课例目录，并经真实 bind-project 操作绑定）
-    const lesson = await page.evaluate(async directory => (await window.desktopAPI!.lesson!({ operation: 'list-lessons', directory })).lessons![0]!, workspace)
-    const conversation = await page.evaluate(async lesson => (await window.desktopAPI!.lesson!({ operation: 'list-conversations', lesson })).conversations![0]!, lesson.identity)
+    // Setup a real existing V9 lesson; opening it does not create an old CLI conversation.
+    const lesson = await page.evaluate(async directory => {
+      const made = await window.desktopAPI!.lesson!({ operation: 'create-lesson', directory, name: '场景状态课' })
+      if (!made.lesson) throw new Error('Lesson fixture creation failed')
+      return made.lesson
+    }, workspace)
     const project = createBlankCourseProject({ title: '场景课课件', includeDefaultController: false, controls: 'none' })
     const projectPath = join(lesson.identity.normalizedDirectory, 'course.h5lesson')
     writeFileSync(projectPath, createCourseProjectArchive({ project, assetFiles: {}, componentFiles: {} }))
-    await page.evaluate(async input => {
-      const result = await window.desktopAPI!.lesson!({ operation: 'bind-project', lesson: input.lessonIdentity, conversationId: input.conversationId, projectId: input.projectId, projectPath: input.projectPath, saveAs: false })
-      if (!result.lesson?.manifest.coursePath) throw new Error('bind-project 未写入 coursePath')
-    }, { lessonIdentity: lesson.identity, conversationId: conversation.conversationId, projectId: project.id, projectPath })
+    writeFileSync(join(lesson.identity.normalizedDirectory, '.courseware', 'lesson.json'), JSON.stringify({ ...lesson.manifest, coursePath: 'course.h5lesson' }))
     await page.reload()
     // 重载后自动回到上次的工作空间（localStorage 记录），无需再选
     await expect(page.locator('.lesson-workspace-toolbar')).toContainText('workspace')
@@ -135,6 +129,7 @@ test('F08 path C: h5lesson workbench continuity, scene states, undo/redo, save/r
   } finally {
     if (app) await app.evaluate(({ BrowserWindow, app: electronApp }) => { BrowserWindow.getAllWindows().forEach(window => window.destroy()); electronApp.exit(0) }).catch(() => {})
     await app?.close().catch(() => {})
+    if (!resolve(directory).startsWith(resolve(tmpdir()) + require('node:path').sep) || !directory.includes('r19-f08-pathC-')) throw new Error('Unsafe test directory')
     rmSync(directory, { recursive: true, force: true })
   }
 })

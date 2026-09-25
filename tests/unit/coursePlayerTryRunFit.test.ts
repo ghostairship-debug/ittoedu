@@ -20,7 +20,7 @@ vi.mock('@/player/surfaces/publishedDynamicHosts', () => ({
 
 import { CANVAS_HEIGHT, CANVAS_WIDTH } from '@/shared/constants'
 
-import { buildSlideEditorView } from '@/renderer/course/slideEditorView'
+import { buildSlideEditorView } from '@/core/tools/slideLayerView'
 import {
   nativeRenderInputFromLayerItem,
   nativeRenderInputFromPublishedItem,

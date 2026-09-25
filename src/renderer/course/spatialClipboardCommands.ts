@@ -1,4 +1,5 @@
-import { rebuildChartItemIds, rebuildTableItemIds } from '../project/nativeNodeFactories'
+import { rebuildTableItemIds } from '../../core/tools/nativeNodeFactories'
+import { rebuildChartItemIds } from '../../core/tools/chartIdentity'
 import { nanoid } from 'nanoid'
 import { MAX_SCENE_NODES } from '../../shared/constants'
 import { resolveEffectiveGlobalLayerPlanes } from '../../shared/courseLayerComposition'
@@ -45,7 +46,7 @@ import {
   spatialSurfaceIn,
 } from './spatialEditorCommands'
 import type { SpatialEditorLayerScope } from './spatialEditorView'
-import { planSpatialGraphAfterWorldCopy } from './spatialRelationCommands'
+import { planSpatialGraphAfterWorldCopy } from '../../core/tools/spatialRelation'
 
 export const SPATIAL_CLIPBOARD_OFFSET = 20
 export const SPATIAL_CLIPBOARD_EMPTY_REASON = '剪贴板为空，无法粘贴'

@@ -110,16 +110,41 @@ export function isAllowedRendererPermission(permission: string): boolean {
   return permission === 'clipboard-sanitized-write'
 }
 
+export type MediaCaptureKind = 'audio' | 'video'
+export interface MediaCaptureRequest { contents: WebContents; mediaTypes: MediaCaptureKind[]; requestingUrl: string }
+
+/**
+ * A camera/microphone request from course content (getUserMedia). Screen capture has its own
+ * handler and stays denied; unknown or empty media types are never treated as a device request.
+ */
+export function mediaCaptureTypes(permission: string, details: unknown): MediaCaptureKind[] | null {
+  if (permission !== 'media' || !details || typeof details !== 'object') return null
+  const requested = (details as { mediaTypes?: unknown }).mediaTypes
+  if (!Array.isArray(requested) || requested.length === 0) return null
+  if (!requested.every(kind => kind === 'audio' || kind === 'video')) return null
+  return [...new Set(requested as MediaCaptureKind[])]
+}
+
+export interface RestrictedSessionOptions {
+  /** Ask the teacher for this one request. Sessions without it (headless admission) deny devices. */
+  requestMediaCapture?: (request: MediaCaptureRequest) => Promise<boolean>
+}
+
 export function configureRestrictedSession(
   electronSession: Session,
   allowedNetworkOrigins: ReadonlySet<string> | ((url: string) => boolean),
+  options: RestrictedSessionOptions = {},
 ): void {
   if (configuredSessions.has(electronSession)) return
   configuredSessions.add(electronSession)
 
+  // Checks stay denied for media: no persistent grant, each getUserMedia call is asked again.
   electronSession.setPermissionCheckHandler((_webContents, permission) => isAllowedRendererPermission(permission))
-  electronSession.setPermissionRequestHandler((_contents, permission, callback) => {
-    callback(isAllowedRendererPermission(permission))
+  electronSession.setPermissionRequestHandler((contents, permission, callback, details) => {
+    const mediaTypes = options.requestMediaCapture ? mediaCaptureTypes(permission, details) : null
+    if (!mediaTypes || !options.requestMediaCapture) { callback(isAllowedRendererPermission(permission)); return }
+    options.requestMediaCapture({ contents, mediaTypes, requestingUrl: String((details as { requestingUrl?: unknown }).requestingUrl ?? '') })
+      .then(allowed => callback(allowed === true), () => callback(false))
   })
   electronSession.setDevicePermissionHandler(() => false)
   electronSession.setDisplayMediaRequestHandler((_request, callback) => {

@@ -1,14 +1,14 @@
 import { buildPublishedFixture as buildPublishedCourseV2Payload } from '../fixtures/teacherController'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { addCourseFlowPage } from '@/renderer/course/courseLocationCommands'
-import { syncFlowCourseLocations } from '@/renderer/course/flowDocumentModel'
+import { addCourseFlowPage } from '@/core/tools/courseLocations'
+import { syncFlowCourseLocations } from '../../src/core/tools/flowDocumentModel'
 import {
   selectFlowEditorBlock,
   selectFlowGlobalScope,
 } from '@/renderer/course/flowEditorSlice'
 import { insertFlowSharedRuntime } from '@/renderer/course/flowSharedAuthoringAdapters'
 
-import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
+import { createBlankCourseProject } from '@/core/course/createCourseProject'
 import { mountFlowLocationTryRun } from '@/renderer/ui/flowLocationTryRun'
 import {
   createPublishedCourseSession,

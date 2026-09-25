@@ -38,7 +38,7 @@ export type DocumentFileRef =
   | { kind: 'lesson'; lessonId: string; lessonDirectory: string; relativePath: string }
   | { kind: 'file'; path: string }
 export function documentRefKey(ref: DocumentFileRef): string {
-  // 课例 ref 保持 F04 前的键格式，教师未保存恢复稿与 AI 记录不因改造失联。
+  // 课例 ref 保持 F04 前的键格式，教师未保存恢复稿不因引用显示改变而失联。
   return ref.kind === 'lesson' ? JSON.stringify([ref.lessonId, ref.relativePath]) : JSON.stringify(['file', ref.path.replace(/\\/g, '/').toLowerCase()])
 }
 export function documentRefLabel(ref: DocumentFileRef): string {
@@ -54,19 +54,10 @@ export interface DocumentSaveRequest {
   ref: DocumentFileRef; expectedVersion: DocumentFileVersion | null; source: string; operationId: string
   attachments: { relativePath: string; bytes: Uint8Array }[]
 }
-export interface DocumentEditRange { from: number; to: number; before: string; after: string }
-export interface DocumentAiEditRecord { id: string; ref: DocumentFileRef; baseVersion: DocumentFileVersion; savedVersion: DocumentFileVersion; applied: DocumentEditRange[] }
-export type DocumentAiApplyResult =
-  | { status: 'applied' | 'partial'; record: DocumentAiEditRecord; conflicts: DocumentEditRange[] }
-  | { status: 'conflict'; conflicts: DocumentEditRange[] }
-  | { status: 'failed'; message: string }
 export interface DocumentFilePort {
   openDocument(ref: DocumentFileRef): Promise<OpenDocumentResult>
   saveDocument(request: DocumentSaveRequest): Promise<DocumentSaveResult>
   watchDocument(ref: DocumentFileRef, listener: (event: { type: 'changed'; disk: OpenDocumentResult } | { type: 'deleted' }) => void): () => void
-  prepareAiEdit(ref: DocumentFileRef, range: DocumentEditRange[], epoch: number): Promise<{ status: 'ready'; document: OpenDocumentResult; epoch: number; ranges: DocumentEditRange[] } | { status: 'failed'; message: string }>
-  applyAiEdit(request: { ref: DocumentFileRef; baseVersion: DocumentFileVersion; epoch: number; operationId: string; edits: DocumentEditRange[] }): Promise<DocumentAiApplyResult>
-  revertAiEdit(record: DocumentAiEditRecord, currentVersion: DocumentFileVersion): Promise<{ reverted: DocumentEditRange[]; unreverted: DocumentEditRange[]; save: DocumentSaveResult }>
 }
 /** Owner implements resource preparation + canonical commit as one History entry.
  * These are ports, not an alternate project store or command implementation.

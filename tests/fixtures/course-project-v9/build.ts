@@ -1,7 +1,7 @@
 import { writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { createCourseProjectArchive } from '../../../src/renderer/project/courseProjectArchive'
+import { createCourseProjectArchive } from '../../../src/core/drivers/codecs/courseProjectArchive'
 import {
   COURSE_PROJECT_V9_FIXTURE_MTIME,
   listCourseProjectV9Fixtures,

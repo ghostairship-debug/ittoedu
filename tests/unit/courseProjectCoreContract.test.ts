@@ -12,7 +12,7 @@ import {
   sceneNodeToCourseLayerItem,
   visitCourseProject,
 } from '@/shared/courseProjectModel'
-import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
+import { createBlankCourseProject } from '@/core/course/createCourseProject'
 import { createBlankFlowCourseProject } from '@/renderer/project/createFlowCourseProject'
 import { createBlankSpatialCourseProject } from '@/renderer/project/createSpatialCourseProject'
 import {
@@ -36,7 +36,7 @@ import type {
   NativeInputContent,
   NativeTableContent,
 } from '@/shared/contracts/native-v1/types'
-import { createRectangleNode, createTableLayerItem, createTableNode } from '@/renderer/project/nativeNodeFactories'
+import { createRectangleNode, createTableLayerItem, createTableNode } from '@/core/tools/nativeNodeFactories'
 
 const NOW = '2026-08-17T00:00:00.000Z'
 

@@ -1,0 +1,43 @@
+{
+  "schema_version": 2,
+  "connection_id": "example-only",
+  "source": "internal-provider-or-external-mcp",
+  "provider": null,
+  "endpoint": null,
+  "runtime_id": null,
+  "runtime_version": null,
+  "client_version": null,
+  "authentication": "api-key-or-oauth",
+  "billing": "metered-or-token-plan-or-subscription-or-prepaid-or-unknown",
+  "credential_reference": null,
+  "model_roles": {
+    "conversation": null,
+    "vision": null,
+    "image_generation": null,
+    "image_editing": null
+  },
+  "capabilities": {
+    "direct_tools": "unknown",
+    "text_stream": "unknown",
+    "image_input": "unknown",
+    "image_generation": "unknown",
+    "image_editing": "unknown",
+    "transparent_background": "unknown",
+    "file_input": "unknown",
+    "reasoning": "unknown",
+    "subtasks": "unknown",
+    "request_status_lookup": "unknown",
+    "cancel": "unknown",
+    "resume": "unknown",
+    "mcp_resources": "unknown",
+    "mcp_operation_ticket": "unknown",
+    "permissions": "unknown"
+  },
+  "usage": {
+    "remaining_quota": null,
+    "reset_at": null,
+    "actual_charge": null
+  },
+  "verified_cases": [],
+  "verification": "not_run"
+}

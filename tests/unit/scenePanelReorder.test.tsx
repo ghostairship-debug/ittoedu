@@ -4,7 +4,7 @@ import {
   addSpatialCameraFrameFromSession,
   reorderSpatialCameraFramesInSession,
 } from '@/renderer/course/spatialCameraCommands'
-import { COURSE_LAST_LOCATION_REASON } from '@/renderer/course/courseLocationCommands'
+import { COURSE_LAST_LOCATION_REASON } from '@/core/tools/courseLocations'
 import { buildCourseTreeView } from '@/renderer/course/courseTreeView'
 import {
   selectActiveCourseProjectDocument,

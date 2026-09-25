@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { AudioManager } from '@/player/AudioManager'
 import { CourseEventBus } from '@/player/CourseEventBus'
-import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
+import { createBlankCourseProject } from '@/core/course/createCourseProject'
 
 class FakeAudioElement extends EventTarget {
   preload = ''

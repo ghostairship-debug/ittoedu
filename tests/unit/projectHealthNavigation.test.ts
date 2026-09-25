@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { createTextNode } from '../../src/renderer/project/nativeNodeFactories'
-import { createBlankCourseProject } from '../../src/renderer/project/createCourseProject'
+import { createTextNode } from '../../src/core/tools/nativeNodeFactories'
+import { createBlankCourseProject } from '../../src/core/course/createCourseProject'
 import { createBlankFlowCourseProject } from '../../src/renderer/project/createFlowCourseProject'
 import { sceneNodeToCourseLayerItem } from '../../src/shared/courseProjectModel'
 import {

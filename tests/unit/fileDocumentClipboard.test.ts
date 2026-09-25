@@ -1,8 +1,9 @@
+// @vitest-environment node
 import { promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { createLessonDocumentFiles } from '../../src/main/lessonDocumentFiles'
+import { createTestLessonDocumentFiles as createLessonDocumentFiles } from '../helpers/markdownDocumentHost'
 import { fileClipboardResourcePort, readFileClipboardContext, selectedFileClipboardContext } from '../../src/renderer/documentFiles/fileDocumentClipboard'
 import { prepareDocumentClipboard } from '../../src/renderer/document/documentClipboard'
 import { parseDocumentMarkdown, serializeDocumentMarkdown } from '../../src/shared/document/markdown'

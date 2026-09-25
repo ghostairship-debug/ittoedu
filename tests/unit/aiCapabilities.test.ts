@@ -532,9 +532,9 @@ describe('AI capability manifest generation', () => {
       execution: 'product-managed-chromium-private-session',
       entrypoints: {
         externalCaseBuilder: 'scripts/build-courseware-case.ts',
-        createCourseProject: 'src/renderer/project/createCourseProject.ts',
-        courseProjectArchive: 'src/renderer/project/courseProjectArchive.ts',
-        importComponentPackage: 'src/renderer/components/importComponentPackage.ts',
+        createCourseProject: 'src/core/course/createCourseProject.ts',
+        courseProjectArchive: 'src/core/drivers/codecs/courseProjectArchive.ts',
+        importComponentPackage: 'src/core/drivers/codecs/importComponentPackage.ts',
         courseProjectSchema: 'src/shared/courseProjectSchema.ts',
       },
       output: 'Course Project V9 .h5lesson and offline HTML inside case-dir',
@@ -1294,8 +1294,8 @@ describe('AI capability manifest generation', () => {
     expect(tracedSources).toContain('src/shared/contracts/published-course-v2/schema.ts')
     expect(tracedSources).not.toContain(['src/shared/project', 'Schema.ts'].join(''))
     expect(tracedSources).not.toContain(['src/shared/project', 'Types.ts'].join(''))
-    expect(tracedSources).toContain('src/renderer/project/archivePath.ts')
-    expect(tracedSources).toContain('src/renderer/project/courseProjectArchive.ts')
+    expect(tracedSources).toContain('src/core/drivers/codecs/archivePath.ts')
+    expect(tracedSources).toContain('src/core/drivers/codecs/courseProjectArchive.ts')
 
     // Formal tool discovery now imports the sole Facade and its dependency closure.
     // Unrelated app and export entrypoints remain outside generated provenance.

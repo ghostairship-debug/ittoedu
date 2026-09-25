@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import type { NativeInputContent } from '../../../shared/contracts/native-v1/types'
 import type { InteractionActionPayload } from '../../../shared/interactionTypes'
-import type { InputRuleConfig, inspectInputRuleFamily } from '../../interactions/inputRuleFamily'
+import type { InputRuleConfig, inspectInputRuleFamily } from '../../../core/tools/inputRuleFamily'
 import type { PropertiesItemBase, PropertiesPatch } from './SlideNativePropertiesPanel'
 import { BufferedInput, RangeField } from './PropertyControls'
 import { NativeColorInput as ColorInput } from './NativeColorPreview'

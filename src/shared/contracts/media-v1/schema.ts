@@ -97,7 +97,7 @@ const courseProjectAudioChannelVolumesSchema = z.object({
   video: unitInterval,
 }).strict()
 
-const courseProjectSoundDefinitionSchema = z.object({
+export const courseProjectSoundDefinitionSchema = z.object({
   id: courseProjectStableIdSchema,
   name: z.string().trim().min(1).max(200),
   assetId: courseProjectStableIdSchema,
@@ -112,13 +112,15 @@ const courseProjectNarrationDuckingSchema = z.object({
   fadeMs: finiteNumber.nonnegative().max(10_000),
 }).strict()
 
+export const courseProjectAudioSettingsSchema = z.object({
+  defaultMuted: z.boolean(),
+  masterVolume: unitInterval,
+  channelVolumes: courseProjectAudioChannelVolumesSchema,
+  sounds: z.record(z.string(), courseProjectSoundDefinitionSchema),
+  narrationDucking: courseProjectNarrationDuckingSchema,
+}).strict()
+
 /** Exact Course Project V9 media settings profile. */
 export const courseProjectMediaSettingsSchema: z.ZodType<ProjectMediaSettings> = z.object({
-  audio: z.object({
-    defaultMuted: z.boolean(),
-    masterVolume: unitInterval,
-    channelVolumes: courseProjectAudioChannelVolumesSchema,
-    sounds: z.record(z.string(), courseProjectSoundDefinitionSchema),
-    narrationDucking: courseProjectNarrationDuckingSchema,
-  }).strict(),
+  audio: courseProjectAudioSettingsSchema,
 }).strict()

@@ -1,17 +1,12 @@
+import { courseNavigationInputSchema } from '../../../core/tools/courseNavigationSchema'
 import { z } from 'zod'
 import { makeAuthoringAddress } from '../../../shared/authoringAddress'
 import { courseAuthoringScopeFromLocation } from '../courseAuthoringScope'
-import { addCourseSlidePage, addCourseFlowPage, addCourseSpatialPage, deleteCourseLocation, renameCourseLocation, reorderCourseSurfaces, type CourseLocationCommandResult } from '../../course/courseLocationCommands'
+import { addCourseSlidePage, addCourseFlowPage, addCourseSpatialPage, deleteCourseLocation, renameCourseLocation, reorderCourseSurfaces, type CourseLocationCommandResult } from '../../../core/tools/courseLocations'
 import { resolveAuthoringToolScope } from './authoringToolScope'
 import type { AuthoringToolDefinition } from './executeAuthoringTool'
 
-const title = z.string().trim().min(1).max(120)
-export const courseNavigationInputSchema = z.discriminatedUnion('operation', [
-  z.object({ operation: z.literal('add-surface'), surfaceType: z.enum(['slide', 'flow', 'spatial-2d']), title: title.optional() }).strict(),
-  z.object({ operation: z.literal('rename-location'), title }).strict(),
-  z.object({ operation: z.literal('delete-location') }).strict(),
-  z.object({ operation: z.literal('reorder-surfaces'), surfaceIds: z.array(z.string().min(1)).min(1) }).strict(),
-])
+export { courseNavigationInputSchema } from '../../../core/tools/courseNavigationSchema'
 export const courseNavigationAddress = (projectId: string, itemId: string) => makeAuthoringAddress({ projectId, scope: 'global', carrier: 'native', layerItemId: itemId, field: 'courseLocations' })
 
 export const courseNavigationTool: AuthoringToolDefinition<z.infer<typeof courseNavigationInputSchema>> = {

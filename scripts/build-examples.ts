@@ -14,7 +14,7 @@ import type { CourseProjectDocument } from '../src/shared/courseProjectTypes'
 import {
   addCourseScene,
   type CourseLocationCommandResult,
-} from '../src/renderer/course/courseLocationCommands'
+} from '../src/core/tools/courseLocations'
 import {
   openSlideAuthoringSession,
   type SlideAuthoringSession,
@@ -28,13 +28,13 @@ import {
 import {
   importComponentPackage,
   parseComponentPackageFiles,
-} from '../src/renderer/components/importComponentPackage'
+} from '../src/core/drivers/codecs/importComponentPackage'
 import { executeComponentRuntime } from '../src/renderer/components/executeComponentRuntime'
 import {
   createCourseProjectArchive,
   openCourseProjectArchive,
-} from '../src/renderer/project/courseProjectArchive'
-import { createBlankCourseProject } from '../src/renderer/project/createCourseProject'
+} from '../src/core/drivers/codecs/courseProjectArchive'
+import { createBlankCourseProject } from '../src/core/course/createCourseProject'
 import {
   checkTrackedExampleOutputs,
   createTimezoneStableZipMtime,

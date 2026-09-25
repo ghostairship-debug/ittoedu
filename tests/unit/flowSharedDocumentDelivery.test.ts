@@ -1,4 +1,4 @@
-import { createCourseProjectArchive, openCourseProjectArchive } from '@/renderer/project/courseProjectArchive'
+import { createCourseProjectArchive, openCourseProjectArchive } from '../../src/core/drivers/codecs/courseProjectArchive'
 import { buildPublishedCourseV2Payload } from '@/renderer/export/course/buildPublishedCourse'
 import { describe, expect, it } from 'vitest'
 import { unzipSync, strFromU8 } from 'fflate'
@@ -9,7 +9,7 @@ import { createBlankFlowCourseProject } from '@/renderer/project/createFlowCours
 import { replaceFlowDocumentContent, splitFlowEditorBlock, mergeFlowEditorBlock } from '@/renderer/course/flowEditorCommands'
 import { createFlowEditorHistory, commitFlowEditorHistory, undoFlowEditorHistory, redoFlowEditorHistory } from '@/renderer/course/flowEditorSlice'
 import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
-import { regenerateFlowIdentities } from '@/renderer/course/flowDocumentModel'
+import { regenerateFlowIdentities } from '../../src/core/tools/flowDocumentModel'
 import { buildFlowDocxFromPlan } from '@/renderer/export/course/flowDocx'
 
 const mixed = (id: string): FlowTextContent => ({ inlines: [

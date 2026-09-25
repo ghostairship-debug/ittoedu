@@ -4,7 +4,7 @@ import { createEditorTransactionStep } from '../authoring/editorTransaction'
 import { addSlideComponentLayer } from '../course/v9SlideContentCommands'
 import { addSpatialWorldComponentLayer } from '../course/spatialEditorCommands'
 import { insertFlowSharedComponent, type FlowComponentInsertRequest } from '../course/flowSharedAuthoringAdapters'
-import { componentPackageMeta } from './editableComponentPackage'
+import { componentPackageMeta } from '../../shared/componentPackageMeta'
 import type { ComponentAuthoringPorts } from './commitComponentPackageAuthoring'
 
 export interface ComponentInsertionTarget {

@@ -18,8 +18,8 @@ import {
   createImageNode,
   createTextNode,
   createVideoNode,
-} from '@/renderer/project/nativeNodeFactories'
-import { syncFlowCourseLocations } from '@/renderer/course/flowDocumentModel'
+} from '@/core/tools/nativeNodeFactories'
+import { syncFlowCourseLocations } from '../../src/core/tools/flowDocumentModel'
 import { buildFlowEditorView } from '@/renderer/course/flowEditorView'
 import {
   replaceFlowMediaBlockAsset,

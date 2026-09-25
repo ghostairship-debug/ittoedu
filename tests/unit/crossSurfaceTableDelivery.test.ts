@@ -6,7 +6,7 @@ import { createBlankSpatialCourseProject } from '@/renderer/project/createSpatia
 import { addSpatialWorldTableLayer, replaceSpatialWorldTable, openSpatialAuthoringSession, undoSpatialAuthoring, setSpatialEditingScope } from '@/renderer/course/spatialEditorCommands'
 import { duplicateSpatialLayers } from '@/renderer/course/spatialClipboardCommands'
 import { insertFlowEditorBlock, duplicateFlowEditorBlock } from '@/renderer/course/flowEditorCommands'
-import { changeFlowTableStructure } from '@/renderer/course/flowTableContentOperations'
+import { changeFlowTableStructure } from '../../src/core/tools/flowTableContentOperations'
 import { patchTableCellText } from '@/renderer/course/tableContentOperations'
 
 import { buildFlowDocx } from '@/renderer/export/course/flowDocx'
@@ -17,9 +17,9 @@ import { collectPublishedPptxSpatialNotices } from '@/renderer/export/course/bui
 import type { FlowTableBlock } from '@/shared/courseProjectTypes'
 import { flowBlockSchema } from '@/shared/courseProjectSchema'
 import { tableNativeContentObjectSchema } from '@/shared/contracts/native-v1'
-import { createTableNode } from '@/renderer/project/nativeNodeFactories'
+import { createTableNode } from '@/core/tools/nativeNodeFactories'
 import { mergeTableCells, splitTableCells, deleteTableRow, insertTableColumn, reorderTableRows } from '@/renderer/course/tableContentOperations'
-import { rebuildTableItemIds } from '@/renderer/project/nativeNodeFactories'
+import { rebuildTableItemIds } from '@/core/tools/nativeNodeFactories'
 import { buildNativeTableLayout } from '@/shared/nativeTableLayout'
 import { paintPublishedNativeTable } from '@/player/surfaces/native/publishedNativeRendering'
 

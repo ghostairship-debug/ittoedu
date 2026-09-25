@@ -4,12 +4,9 @@ import { buildFlowRichTextHtml } from '@/shared/flowRichText'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { insertFlowEditorBlock, updateFlowEditorBlock } from '@/renderer/course/flowEditorCommands'
-import { findFlowBlockRecursive, flowSurfaceIn } from '@/renderer/course/flowDocumentModel'
-import {
-  locateCourseLayer,
-  makeEffectiveLayerAuthoringAddress,
-  patchEffectiveLayerPropertiesAtTargets,
-} from '@/renderer/course/effectiveLayerCommands'
+import { findFlowBlockRecursive, flowSurfaceIn } from '../../src/core/tools/flowDocumentModel'
+import { makeEffectiveLayerAuthoringAddress } from '@/core/tools/layerCommands'
+import { locateCourseLayer, patchEffectiveLayerPropertiesAtTargets } from '@/renderer/course/effectiveLayerCommands'
 import { readFlowSharedOwnership } from '@/renderer/course/flowSharedAuthoringAdapters'
 import {
   buildFlowEditorView,

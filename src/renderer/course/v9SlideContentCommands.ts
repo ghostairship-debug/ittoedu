@@ -1,7 +1,10 @@
+import { requireSlideAsset as requireAsset, planSlideTextInsertion, planSlideFormulaInsertion, planSlideShapeInsertion, planSlideImageInsertion, planSlideVideoInsertion, offsetDefaultSlideInsertion, slideSceneContext, appendOwnedLayer, appendSceneLayer, requireSceneScope, validateSlideLineFrame, validateSlideLineGeometry, type AddSlideTextLayerInput, type AddSlideFormulaLayerInput, type AddSlideShapeLayerInput, type AddSlideImageLayerInput, type AddSlideVideoLayerInput } from '../../core/tools/slideInsertion'
+export { offsetDefaultSlideInsertion, SLIDE_DEFAULT_INSERTION_COLUMNS, SLIDE_DEFAULT_INSERTION_OFFSET } from '../../core/tools/slideInsertion'
+export type { AddSlideTextLayerInput, AddSlideFormulaLayerInput, AddSlideShapeLayerInput, AddSlideImageLayerInput, AddSlideVideoLayerInput, SlideInsertionPoint } from '../../core/tools/slideInsertion'
 import { isTeacherController } from '../../shared/teacherControllerRole'
 import { commitResourceAwareAuthoringHistory } from '../authoring/resourceAwareAuthoringHistory'
 import { nanoid } from 'nanoid'
-import { CANVAS_HEIGHT, CANVAS_WIDTH, MAX_SCENE_NODES } from '../../shared/constants'
+import { CANVAS_HEIGHT, CANVAS_WIDTH } from '../../shared/constants'
 import {
   applyComponentVariant,
   getComponentPropValue,
@@ -20,7 +23,6 @@ import type {
   NativeLayerItem,
   RuntimeLayerItem,
   SlideSceneDocument,
-  SlideSurfaceDocument,
 } from '../../shared/courseProjectTypes'
 import type { ComponentManifest } from '../../shared/componentTypes'
 import { interactionRuleSchema } from '../../shared/interactionSchema'
@@ -31,47 +33,29 @@ import {
   type MotionEffect,
   type NodeMotionAction,
 } from '../../shared/interactionTypes'
-import type { ShapeType } from '../../shared/contracts/native-v1'
-import { nativeLineGeometrySchema } from '../../shared/contracts/native-v1'
 import type { NativeLineGeometry } from '../../shared/contracts/native-v1/types'
-import {
-  patchEffectiveLayerPropertiesAtTarget,
-  patchEffectiveLayerPropertiesAtTargets,
-  patchEffectiveLayerItems,
-  deleteEffectiveLayerItems,
-  type EffectiveLayerPropertiesPatchAtTarget,
-  type EffectiveLayerPropertyUpdate,
-} from './effectiveLayerCommands'
+import { deleteEffectiveLayerItems } from '../../core/tools/layerCommands'
+import { patchEffectiveLayerPropertiesAtTarget, patchEffectiveLayerPropertiesAtTargets, patchEffectiveLayerItems, type EffectiveLayerPropertiesPatchAtTarget, type EffectiveLayerPropertyUpdate } from './effectiveLayerCommands'
 import { projectEffectiveLayers } from './effectiveLayerProjection'
 import {
   createExternalComponentNode,
-  createFormulaNode,
-  createImageNode,
-  createShapeNode,
-  createTextNode,
-  createVideoNode,
-} from '../project/nativeNodeFactories'
+} from '../../core/tools/nativeNodeFactories'
 import { SLIDE_REJECT_LOCKED, SLIDE_REJECT_STALE_REVISION, SLIDE_REJECT_WRONG_OWNER, SlideCommandError, commitSlideProjectMutation, selectSlideEditorLayers, type SlideAuthoringSelection, type SlideAuthoringSessionRef, type SlideCommandOptions, type SlideCommandResult } from './slideEditorCommands'
-import { buildSlideEditorView, type SlideEditorLayerView } from './slideEditorView'
+import { buildSlideEditorView, type SlideEditorLayerView } from '../../core/tools/slideLayerView'
 import {
   makeSlideAuthoringTarget,
   type SlideAuthoringSession,
   type SlideAuthoringTarget,
 } from './slideAuthoringBackend'
-import {
-  allocateCourseLayerOrder,
-  sortScopedLayerList,
-  type LayerCommandResult,
-} from './globalLayerCommands'
+import { type LayerCommandResult } from '../../core/tools/globalLayers'
 import {
   deleteSlideSceneLayers,
   duplicateSlideGlobalLayers,
   duplicateSlideSceneLayers,
 } from './v9SlideActionCommands'
 import { planSlideMultiLayerLayoutAtTargets } from './slideMultiLayerLayout'
-import { createInputLayerItem, DEFAULT_INPUT_STYLE, createTextNode as createInputFeedbackText } from '../project/nativeNodeFactories'
-import { buildInputRuleFamily, inspectInputRuleFamily, type InputRuleConfig } from '../interactions/inputRuleFamily'
-import { allocateInputStateKeys } from '../interactions/inputAuthoringState'
+import { planSlideInputInsertion, planConfigureSlideInput } from '../../core/tools/inputInsertion'
+import { type InputRuleConfig } from '../../core/tools/inputRuleFamily'
 
 export function addSlideInputLayer(
   session: SlideAuthoringSession,
@@ -81,32 +65,7 @@ export function addSlideInputLayer(
   const stale = rejectIfStale(session, options.expectedRevision)
   if (stale) return stale
   try {
-    if (session.scope !== 'scene') throw new Error('填空题只允许添加到演示页场景')
-    const id = input.idFactory ?? nanoid
-    const layerId = `input_${id()}`
-    const answerType = input.answerType ?? 'text'
-    const project = commitSlideProjectMutation(session.history.present, draft => {
-      const { scene } = slideSceneContext(draft, session)
-      const keys = allocateInputStateKeys(draft, answerType, id)
-      const data = { ...keys, answerType, placeholder: '填写答案', ruleFamilyRuleIds: [] as string[], style: { ...DEFAULT_INPUT_STYLE } }
-      const item = createInputLayerItem(data, { ...input, id: layerId })
-      const feedback = (text: string, color: string) => sceneNodeToCourseLayerItem(createInputFeedbackText({
-        id: `text_${id()}`, text, name: text, x: item.frame.x, y: item.frame.y + item.frame.height + 16,
-        width: 480, height: 60, playbackInitialVisibility: 'hidden', style: { color, fontSize: 24 },
-      }))
-      const correct = feedback('回答正确！', '#15803d')
-      const error = feedback('再想一想，请重新作答。', '#b91c1c')
-      const show = (nodeId: string, visible: boolean): import('../../shared/interactionTypes').InteractionActionPayload => ({
-        type: visible ? 'node.enter' : 'node.exit', nodeId, effect: 'none', durationMs: 0, easing: 'linear',
-      })
-      const actions = { correct: [show(error.layerItemId, false), show(correct.layerItemId, true)], error: [show(correct.layerItemId, false), show(error.layerItemId, true)] }
-      const config: InputRuleConfig = answerType === 'text' ? { answerType, answers: ['答案'], ...actions } : { answerType, min: 1, max: 1, ...actions }
-      const family = buildInputRuleFamily(layerId, data, config, id)
-      data.ruleFamilyRuleIds = family.map(rule => rule.id)
-      if (item.content.nativeType === 'input') item.content.data = data
-      for (const layer of [item, correct, error]) appendOwnedLayer(draft, session, layer)
-      scene.interactions.push(...family)
-    }, options.now)
+    const { project, itemId: layerId } = planSlideInputInsertion(session.history.present, session, input, input.idFactory ?? nanoid, options.now)
     return commitAdded(session, project, layerId)
   } catch (error) { return catchCommand(session, error) }
 }
@@ -121,27 +80,7 @@ export function configureSlideInputAtTarget(
   try {
     if (session.scope !== 'scene' || session.generation !== target.generation || session.sessionId !== target.sessionId ||
       makeSlideAuthoringTarget(session, target.layerItemId, 'item').authoringAddress !== target.authoringAddress) throw new Error('输入编辑目标已改变')
-    const project = commitSlideProjectMutation(session.history.present, draft => {
-      const { scene } = slideSceneContext(draft, session)
-      const item = scene.layerItems.find(layer => layer.layerItemId === target.layerItemId)
-      if (!item || item.locked || item.kind !== 'native' || item.content.nativeType !== 'input') throw new Error('输入编辑目标不可用')
-      const data = item.content.data
-      const inspection = inspectInputRuleFamily(item.layerItemId, data, scene.interactions)
-      if (request.mode === 'unmanage') { data.ruleFamilyRuleIds = []; return }
-      if (request.mode === 'apply' && inspection.conflict) throw new Error('判题规则已被手改，请选择保留手改或重建')
-      scene.interactions = scene.interactions.filter(rule => !data.ruleFamilyRuleIds.includes(rule.id))
-      if (request.config.answerType !== data.answerType) {
-        data.answerType = request.config.answerType
-        const declaration = draft.courseState.find(entry => entry.key === data.stateKey)
-        if (!declaration) throw new Error('输入答案状态声明已失效')
-        draft.courseState = draft.courseState.map(entry => entry === declaration
-          ? data.answerType === 'text' ? { key: entry.key, valueType: 'string', defaultValue: '' } : { key: entry.key, valueType: 'number', defaultValue: 0 }
-          : entry)
-      }
-      const rules = buildInputRuleFamily(item.layerItemId, data, request.config, nanoid)
-      data.ruleFamilyRuleIds = rules.map(rule => rule.id)
-      scene.interactions.push(...rules)
-    })
+    const { project } = planConfigureSlideInput(session.history.present, session, target.layerItemId, request, nanoid)
     return commitUpdated(session, project)
   } catch (error) { return catchCommand(session, error) }
 }
@@ -151,29 +90,6 @@ export function configureSlideInputAtTarget(
  * Consecutive default inserts stagger by 20px on a 6-wide grid that wraps
  * every 24 slots. Explicit x/y skips the offset.
  */
-export const SLIDE_DEFAULT_INSERTION_COLUMNS = 6
-export const SLIDE_DEFAULT_INSERTION_OFFSET = 20
-const SLIDE_DEFAULT_INSERTION_SLOTS = SLIDE_DEFAULT_INSERTION_COLUMNS * 4
-
-export interface SlideInsertionPoint {
-  readonly x: number
-  readonly y: number
-}
-
-export function offsetDefaultSlideInsertion<T extends SlideInsertionPoint>(
-  item: T,
-  existingItemCount: number,
-  hasExplicitPosition: boolean,
-): T {
-  if (hasExplicitPosition) return item
-  const slot = existingItemCount % SLIDE_DEFAULT_INSERTION_SLOTS
-  return {
-    ...item,
-    x: item.x + (slot % SLIDE_DEFAULT_INSERTION_COLUMNS) * SLIDE_DEFAULT_INSERTION_OFFSET,
-    y: item.y + Math.floor(slot / SLIDE_DEFAULT_INSERTION_COLUMNS) * SLIDE_DEFAULT_INSERTION_OFFSET,
-  }
-}
-
 export interface SlideSimpleEntranceAnimationConfig {
   effect: Exclude<MotionEffect, 'none'>
   direction?: MotionDirection
@@ -184,55 +100,6 @@ export type SimpleEntranceAnimationConfig = SlideSimpleEntranceAnimationConfig
 
 export interface SlideNativeContentPatch {
   readonly nativeData?: Record<string, unknown>
-  readonly label?: string
-}
-
-export interface AddSlideTextLayerInput {
-  readonly text?: string
-  readonly id?: string
-  readonly x?: number
-  readonly y?: number
-  readonly label?: string
-}
-
-export interface AddSlideFormulaLayerInput {
-  readonly id?: string
-  readonly x?: number
-  readonly y?: number
-  readonly label?: string
-}
-
-export interface AddSlideShapeLayerInput {
-  readonly shapeType: ShapeType
-  readonly id?: string
-  readonly x?: number
-  readonly y?: number
-  readonly label?: string
-  /**
-   * Direct-draw path: one pointerdown→pointerup gesture commits frame and
-   * parameterized geometry together. Both must be present for line tools.
-   */
-  readonly frame?: { readonly x: number; readonly y: number; readonly width: number; readonly height: number }
-  readonly lineGeometry?: NativeLineGeometry
-}
-
-export interface AddSlideImageLayerInput {
-  readonly assetId: string
-  readonly id?: string
-  readonly x?: number
-  readonly y?: number
-  readonly width?: number
-  readonly height?: number
-  readonly label?: string
-}
-
-export interface AddSlideVideoLayerInput {
-  readonly assetId: string
-  readonly id?: string
-  readonly x?: number
-  readonly y?: number
-  readonly width?: number
-  readonly height?: number
   readonly label?: string
 }
 
@@ -345,103 +212,6 @@ function stableId(prefix: string, preferred?: string): string {
   return preferred ?? `${prefix}-${nanoid(10)}`
 }
 
-function slideSceneContext(
-  project: CourseProjectDocument,
-  session: SlideAuthoringSessionRef,
-): {
-  location: Extract<CourseProjectDocument['locations'][number], { kind: 'slide-scene' }>
-  surface: SlideSurfaceDocument
-  scene: SlideSceneDocument
-} {
-  const location = project.locations.find(
-    (candidate) => candidate.id === session.selection.locationId,
-  )
-  if (!location || location.kind !== 'slide-scene') {
-    throw new SlideCommandError(SLIDE_REJECT_WRONG_OWNER, '当前位置不是幻灯片')
-  }
-  const surface = project.surfaces.find((candidate) => candidate.id === location.surfaceId)
-  if (!surface || surface.type !== 'slide') throw new Error('当前幻灯片已失效')
-  const scene = surface.scenes.find((candidate) => candidate.id === location.sceneId)
-  if (!scene) throw new Error('当前幻灯片已失效')
-  return { location, surface, scene }
-}
-
-function requireSceneScope(session: SlideAuthoringSessionRef): void {
-  if (session.scope !== 'scene') {
-    throw new SlideCommandError(SLIDE_REJECT_WRONG_OWNER, '请先切换到场景层')
-  }
-}
-
-function appendGlobalLayer(
-  project: CourseProjectDocument,
-  item: LayerItem,
-): void {
-  if (project.globalLayerItems.some((entry) => entry.item.layerItemId === item.layerItemId)) {
-    throw new Error(`图层 ID 已存在：${item.layerItemId}`)
-  }
-  const preferred = Math.max(-1, ...project.globalLayerItems.map((entry) => entry.item.order)) + 1
-  item.order = allocateCourseLayerOrder(project, Math.max(0, preferred))
-  project.globalLayerItems.push({
-    item,
-    plane: 'overlay',
-    visibility: { mode: 'all', locationIds: [] },
-  })
-  sortScopedLayerList(project.globalLayerItems)
-}
-
-function appendOwnedLayer(
-  project: CourseProjectDocument,
-  session: SlideAuthoringSessionRef,
-  item: LayerItem,
-): void {
-  if (session.scope === 'global') {
-    appendGlobalLayer(project, item)
-    return
-  }
-  requireSceneScope(session)
-  const { scene } = slideSceneContext(project, session)
-  appendSceneLayer(project, scene, structuredClone(item), session.selection.stateId)
-}
-
-function sortSceneLayers(scene: SlideSceneDocument): void {
-  scene.layerItems.sort((left, right) =>
-    left.order - right.order || left.layerItemId.localeCompare(right.layerItemId),
-  )
-}
-
-function nextSceneLayerOrder(
-  project: CourseProjectDocument,
-  scene: SlideSceneDocument,
-): number {
-  const preferred = Math.max(-1, ...scene.layerItems.map((item) => item.order)) + 1
-  return allocateCourseLayerOrder(project, Math.max(0, preferred))
-}
-
-function appendSceneLayer(
-  project: CourseProjectDocument,
-  scene: SlideSceneDocument,
-  item: LayerItem,
-  stateId: string | null,
-): void {
-  if (scene.layerItems.length >= MAX_SCENE_NODES) {
-    throw new Error(`已达到 ${MAX_SCENE_NODES} 个节点上限`)
-  }
-  if (scene.layerItems.some((candidate) => candidate.layerItemId === item.layerItemId)) {
-    throw new Error(`图层 ID 已存在：${item.layerItemId}`)
-  }
-  item.order = nextSceneLayerOrder(project, scene)
-  if (stateId) {
-    const presentationState = scene.presentation?.states.find(
-      (candidate) => candidate.id === stateId,
-    )
-    if (!presentationState) throw new Error(`找不到命名状态：${stateId}`)
-    item.visible = false
-    presentationState.layerItemOverrides[item.layerItemId] = { visible: true }
-  }
-  scene.layerItems.push(item)
-  sortSceneLayers(scene)
-}
-
 function selectAdded(
   session: SlideAuthoringSessionRef,
   project: CourseProjectDocument,
@@ -532,7 +302,7 @@ function requireUnlockedOwnedLayer(
   if (layer.item.locked) {
     throw new SlideCommandError(SLIDE_REJECT_LOCKED, '当前元素已锁定')
   }
-  
+
   return layer
 }
 
@@ -702,16 +472,6 @@ function offsetFrame(
   return { ...frame, x: offset.x, y: offset.y }
 }
 
-function requireAsset(
-  project: CourseProjectDocument,
-  assetId: string,
-  kind?: 'image' | 'video',
-): void {
-  const asset = project.assets[assetId]
-  if (!asset) throw new Error(`找不到素材：${assetId}`)
-  if (kind && asset.kind !== kind) throw new Error(`素材类型必须是${kind === 'image' ? '图片' : '视频'}`)
-}
-
 export function addSlideTextLayer(
   session: SlideAuthoringSession,
   input: AddSlideTextLayerInput = {},
@@ -720,28 +480,9 @@ export function addSlideTextLayer(
   const stale = rejectIfStale(session, options.expectedRevision)
   if (stale) return stale
   try {
-    const existingCount = session.scope === 'global'
-      ? session.history.present.globalLayerItems.length
-      : slideSceneContext(session.history.present, session).scene.layerItems.length
-    const node = offsetDefaultSlideInsertion(
-      createTextNode({
-        id: stableId('text', input.id),
-        name: input.label ?? '文本',
-        text: input.text ?? '双击编辑文字',
-        x: input.x,
-        y: input.y,
-      }),
-      existingCount,
-      input.x !== undefined || input.y !== undefined,
-    )
-    const item = sceneNodeToCourseLayerItem(node)
-    const project = commitSlideProjectMutation(session.history.present, (draft) => {
-      appendOwnedLayer(draft, session, structuredClone(item))
-    }, options.now)
-    return commitAdded(session, project, node.id)
-  } catch (error) {
-    return catchCommand(session, error)
-  }
+    const planned = planSlideTextInsertion(session.history.present, session, input, options.now)
+    return commitAdded(session, planned.project, planned.itemId)
+  } catch (error) { return catchCommand(session, error) }
 }
 
 export function addSlideFormulaLayer(
@@ -752,27 +493,9 @@ export function addSlideFormulaLayer(
   const stale = rejectIfStale(session, options.expectedRevision)
   if (stale) return stale
   try {
-    const existingCount = session.scope === 'global'
-      ? session.history.present.globalLayerItems.length
-      : slideSceneContext(session.history.present, session).scene.layerItems.length
-    const node = offsetDefaultSlideInsertion(
-      createFormulaNode({
-        id: stableId('formula', input.id),
-        name: input.label ?? '公式',
-        x: input.x,
-        y: input.y,
-      }),
-      existingCount,
-      input.x !== undefined || input.y !== undefined,
-    )
-    const item = sceneNodeToCourseLayerItem(node)
-    const project = commitSlideProjectMutation(session.history.present, (draft) => {
-      appendOwnedLayer(draft, session, structuredClone(item))
-    }, options.now)
-    return commitAdded(session, project, node.id)
-  } catch (error) {
-    return catchCommand(session, error)
-  }
+    const planned = planSlideFormulaInsertion(session.history.present, session, input, options.now)
+    return commitAdded(session, planned.project, planned.itemId)
+  } catch (error) { return catchCommand(session, error) }
 }
 
 export function addSlideShapeLayer(
@@ -783,81 +506,9 @@ export function addSlideShapeLayer(
   const stale = rejectIfStale(session, options.expectedRevision)
   if (stale) return stale
   try {
-    const lineGeometry = input.lineGeometry === undefined
-      ? undefined
-      : validateSlideLineGeometry(input.shapeType, input.lineGeometry)
-    if (input.frame !== undefined) {
-      validateSlideLineFrame(input.frame)
-      if (!lineGeometry) {
-        throw new SlideCommandError('invalid-target', '直接绘制的线条必须同时提供几何参数')
-      }
-    }
-    if (lineGeometry && input.frame === undefined) {
-      throw new SlideCommandError('invalid-target', '线条几何必须与绘制框同时提交')
-    }
-    const existingCount = session.scope === 'global'
-      ? session.history.present.globalLayerItems.length
-      : slideSceneContext(session.history.present, session).scene.layerItems.length
-    const node = offsetDefaultSlideInsertion(
-      (() => {
-        const created = createShapeNode(input.shapeType, {
-          id: stableId('shape', input.id),
-          ...(input.label === undefined ? {} : { name: input.label }),
-          x: input.frame?.x ?? input.x,
-          y: input.frame?.y ?? input.y,
-          ...(input.frame ? { width: input.frame.width, height: input.frame.height } : {}),
-        })
-        if (lineGeometry) created.lineGeometry = structuredClone(lineGeometry)
-        return created
-      })(),
-      existingCount,
-      input.frame !== undefined || input.x !== undefined || input.y !== undefined,
-    )
-    const item = sceneNodeToCourseLayerItem(node)
-    const project = commitSlideProjectMutation(session.history.present, (draft) => {
-      appendOwnedLayer(draft, session, structuredClone(item))
-    }, options.now)
-    return commitAdded(session, project, node.id)
-  } catch (error) {
-    return catchCommand(session, error)
-  }
-}
-
-function validateSlideLineFrame(
-  frame: { readonly x: number; readonly y: number; readonly width: number; readonly height: number },
-): void {
-  if (![frame.x, frame.y, frame.width, frame.height].every(Number.isFinite)) {
-    throw new SlideCommandError('invalid-target', '线条绘制框必须是有限数值')
-  }
-  if (frame.width <= 0 || frame.height <= 0) {
-    throw new SlideCommandError('invalid-target', '线条绘制框尺寸必须大于 0')
-  }
-}
-
-function validateSlideLineGeometry(
-  shapeType: ShapeType,
-  lineGeometry: NativeLineGeometry,
-): NativeLineGeometry {
-  if (shapeType !== 'line' && shapeType !== 'elbow-arrow') {
-    throw new SlideCommandError(
-      'invalid-target',
-      `只有直线和折线箭头支持线几何，${shapeType} 不支持`,
-    )
-  }
-  const parsed = nativeLineGeometrySchema.safeParse(lineGeometry)
-  if (!parsed.success) {
-    throw new SlideCommandError(
-      'invalid-target',
-      `线几何无效：${parsed.error.issues[0]?.message ?? '未知原因'}`,
-    )
-  }
-  if (shapeType === 'line' && parsed.data.kind !== 'straight') {
-    throw new SlideCommandError('invalid-target', '直线只支持 straight 类型的线几何')
-  }
-  if (shapeType === 'elbow-arrow' && parsed.data.kind !== 'elbow') {
-    throw new SlideCommandError('invalid-target', '折线箭头只支持 elbow 类型的线几何')
-  }
-  return structuredClone(parsed.data)
+    const planned = planSlideShapeInsertion(session.history.present, session, input, options.now)
+    return commitAdded(session, planned.project, planned.itemId)
+  } catch (error) { return catchCommand(session, error) }
 }
 
 export interface UpdateSlideShapeLineGeometryInput {
@@ -957,34 +608,9 @@ export function addSlideImageLayer(
   const stale = rejectIfStale(session, options.expectedRevision)
   if (stale) return stale
   try {
-    requireSceneScope(session)
-    requireAsset(session.history.present, input.assetId, 'image')
-    const existingCount = session.scope === 'global'
-      ? session.history.present.globalLayerItems.length
-      : slideSceneContext(session.history.present, session).scene.layerItems.length
-    const asset = session.history.present.assets[input.assetId]!
-    const sized = createImageNode(input.assetId, asset.width, asset.height, input.x, input.y)
-    const node = offsetDefaultSlideInsertion(
-      createImageNode({
-        id: stableId('image', input.id),
-        name: input.label ?? '图片',
-        assetId: input.assetId,
-        width: input.width ?? sized.width,
-        height: input.height ?? sized.height,
-        x: input.x,
-        y: input.y,
-      }),
-      existingCount,
-      input.x !== undefined || input.y !== undefined,
-    )
-    const item = sceneNodeToCourseLayerItem(node)
-    const project = commitSlideProjectMutation(session.history.present, (draft) => {
-      appendOwnedLayer(draft, session, structuredClone(item))
-    }, options.now)
-    return commitAdded(session, project, node.id)
-  } catch (error) {
-    return catchCommand(session, error)
-  }
+    const planned = planSlideImageInsertion(session.history.present, session, input, options.now)
+    return commitAdded(session, planned.project, planned.itemId)
+  } catch (error) { return catchCommand(session, error) }
 }
 
 export function addSlideVideoLayer(
@@ -995,32 +621,9 @@ export function addSlideVideoLayer(
   const stale = rejectIfStale(session, options.expectedRevision)
   if (stale) return stale
   try {
-    requireAsset(session.history.present, input.assetId, 'video')
-    const existingCount = session.scope === 'global'
-      ? session.history.present.globalLayerItems.length
-      : slideSceneContext(session.history.present, session).scene.layerItems.length
-    const asset = session.history.present.assets[input.assetId]!
-    const node = offsetDefaultSlideInsertion(
-      createVideoNode({
-        id: stableId('video', input.id),
-        name: input.label ?? '视频',
-        assetId: input.assetId,
-        width: input.width ?? asset.width ?? 640,
-        height: input.height ?? asset.height ?? 360,
-        x: input.x,
-        y: input.y,
-      }),
-      existingCount,
-      input.x !== undefined || input.y !== undefined,
-    )
-    const item = sceneNodeToCourseLayerItem(node)
-    const project = commitSlideProjectMutation(session.history.present, (draft) => {
-      appendOwnedLayer(draft, session, structuredClone(item))
-    }, options.now)
-    return commitAdded(session, project, node.id)
-  } catch (error) {
-    return catchCommand(session, error)
-  }
+    const planned = planSlideVideoInsertion(session.history.present, session, input, options.now)
+    return commitAdded(session, planned.project, planned.itemId)
+  } catch (error) { return catchCommand(session, error) }
 }
 
 export function addSlideComponentLayer(
@@ -1180,7 +783,7 @@ export function updateSlideNativeLayerContent(
     if (layer.item.kind !== 'native') {
       throw new SlideCommandError('invalid-target', '当前选择不是原生图层')
     }
-    
+
     const target = makeSlideAuthoringTarget(session, layerItemId, 'item')
     return slideResultFromLayerCommand(
       session,

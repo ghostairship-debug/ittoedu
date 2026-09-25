@@ -10,7 +10,7 @@ import { collectCourseComponentPackageUsage } from '../../src/renderer/component
 import {
   createCourseProjectArchive,
   openCourseProjectArchive,
-} from '../../src/renderer/project/courseProjectArchive'
+} from '../../src/core/drivers/codecs/courseProjectArchive'
 import {
   selectActiveCourseProjectDocument,
   selectActiveScene,

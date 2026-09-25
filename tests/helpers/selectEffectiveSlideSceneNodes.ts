@@ -1,4 +1,4 @@
-import { buildSlideEditorView } from '@/renderer/course/slideEditorView'
+import { buildSlideEditorView } from '@/core/tools/slideLayerView'
 import { courseLayerItemToEditorCanvasNode } from '@/renderer/store/slideEditorProjection'
 import {
   selectActiveCourseProjectDocument,

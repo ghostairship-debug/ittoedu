@@ -7,9 +7,9 @@ import { publishedCourseV2Schema } from '@/shared/publishedCourseSchema'
 import {
   addCourseFlowPage,
   addCourseSpatialPage,
-} from '@/renderer/course/courseLocationCommands'
-import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
-import { parseComponentPackageFiles } from '@/renderer/components/importComponentPackage'
+} from '@/core/tools/courseLocations'
+import { createBlankCourseProject } from '@/core/course/createCourseProject'
+import { parseComponentPackageFiles } from '../../src/core/drivers/codecs/importComponentPackage'
 import type { CoursePublishSources } from '@/renderer/export/course/buildPublishedCourse'
 
 import { decodePublishedCode } from '@/player/decodePublishedExecutableCode'

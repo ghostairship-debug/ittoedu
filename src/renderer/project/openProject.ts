@@ -7,4 +7,4 @@ export {
   openCourseProjectArchive,
   openCourseProjectArchiveAsync,
   type CourseProjectArchiveData,
-} from './courseProjectArchive'
+} from '../../core/drivers/codecs/courseProjectArchive'

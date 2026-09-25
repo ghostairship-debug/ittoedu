@@ -14,6 +14,7 @@ import {
 import { mountFlowLocationTryRun } from '../flowLocationTryRun'
 import type { FlowCurrentSessionCommandPort } from '../flow/useFlowTextAuthoringController'
 import { FlowLocationWorkspace } from './FlowLocationWorkspace'
+import type { WorkspaceMediaDropHandler } from '../../lessonWorkspace/workspaceMediaDrop'
 
 type FlowWorkspaceStore = {
   readonly flowSession: FlowAuthoringSession | null
@@ -34,7 +35,8 @@ function selectFlowTextEdit(state: FlowWorkspaceStore) { return state.flowTextEd
 function selectRunFlowAuthoringIntent(state: FlowWorkspaceStore) { return state.runFlowAuthoringIntent }
 function selectSetCanvasMode(state: FlowWorkspaceStore) { return state.setCanvasMode }
 
-export function FlowWorkspaceConnector() {
+export function FlowWorkspaceConnector({ onDropWorkspaceMedia }: { onDropWorkspaceMedia?: WorkspaceMediaDropHandler }) {
+  const documentId = useEditorStore(state => state.courseDocument.documentId)
   const session = useEditorStore(selectFlowSession)
   const authoringSession = useEditorStore(selectCourseAuthoringSession)
   const canvasMode = useEditorStore(selectCanvasMode)
@@ -98,6 +100,7 @@ export function FlowWorkspaceConnector() {
 
   return (
     <FlowLocationWorkspace
+      documentId={documentId}
       view={view}
       sessionToken={authoringSession.token}
       assets={session.history.present.assets}
@@ -112,6 +115,7 @@ export function FlowWorkspaceConnector() {
       commands={commands}
       onCanvasModeChange={setCanvasMode}
       onMountTryRun={onMountTryRun}
+      onDropWorkspaceMedia={onDropWorkspaceMedia}
     />
   )
 }

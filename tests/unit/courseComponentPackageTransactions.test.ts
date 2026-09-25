@@ -10,7 +10,7 @@ import {
   type CourseComponentPackageReplacementPlanResult,
   type PlanCourseComponentPackageReplacementInput,
 } from '@/renderer/components/courseComponentPackageTransactions'
-import { componentArchiveRoot } from '@/renderer/project/archivePath'
+import { componentArchiveRoot } from '../../src/core/drivers/codecs/archivePath'
 import { componentContentSha256 } from '@/shared/componentContentIntegrity'
 import type {
   ComponentManifest,

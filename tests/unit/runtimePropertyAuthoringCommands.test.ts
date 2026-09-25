@@ -7,7 +7,7 @@ import {
   createSessionToken,
   type CurrentCourseAuthoringTargetIdentity,
 } from '@/renderer/authoring/courseAuthoringSession'
-import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
+import { createBlankCourseProject } from '@/core/course/createCourseProject'
 import { selectRuntimeInspectorAuthoringView } from '@/renderer/runtime/runtimeInspectorAuthoringView'
 import {
   planRuntimePropertyUpdate,

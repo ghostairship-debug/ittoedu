@@ -23,7 +23,7 @@ import {
 import {
   createTableNode,
   rebuildTableItemIds,
-} from '@/renderer/project/nativeNodeFactories'
+} from '@/core/tools/nativeNodeFactories'
 import {
   addSlideTableLayer,
   commitSlideTableLastCellAndAppendRow,

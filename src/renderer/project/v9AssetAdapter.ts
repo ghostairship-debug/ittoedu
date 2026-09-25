@@ -1,3 +1,4 @@
+export { listCourseSoundReferences } from '../../core/tools/courseAudio'
 import { collectPublishedCourseAssetIds } from '@/renderer/export/course/buildPublishedCourse'
 import {
   assetBytesSha256,
@@ -6,7 +7,6 @@ import {
   courseAssetMetaConflicts,
 } from '@/renderer/project/assetManager'
 import {
-  collectCourseProjectReferences,
   type CourseProjectReference,
 } from '@/shared/contracts/course-project-v9/references'
 import {
@@ -226,14 +226,7 @@ export function listCourseAssetReferences(
   return analyzeCourseAssetReferences(project, options).graph.get(assetId) ?? []
 }
 
-export function listCourseSoundReferences(
-  project: CourseProjectDocument,
-  soundId: string,
-): CourseProjectReference[] {
-  return collectCourseProjectReferences(project).filter(
-    (reference) => reference.kind === 'sound' && reference.id === soundId,
-  )
-}
+
 
 export function describeCourseAssetReference(
   reference: CourseAssetReference | CourseProjectReference,

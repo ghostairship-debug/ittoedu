@@ -25,18 +25,10 @@ import {
   undoSpatialAuthoring,
   type SpatialAuthoringSession,
 } from '@/renderer/course/spatialEditorCommands'
-import {
-  addSpatialPathInSession,
-  deleteSpatialWorldLayersReportingReferences,
-  resolveSpatialPlaybackSchedule,
-  setSpatialShowCameraFrames,
-  summarizeSpatialWorldReferenceCleanup,
-} from '@/renderer/course/spatialPathCommands'
-import {
-  addCopiedSpatialRelationsInSession,
-  addSpatialRelationInSession,
-  planSpatialGraphAfterWorldCopy,
-} from '@/renderer/course/spatialRelationCommands'
+import { addSpatialPathInSession, deleteSpatialWorldLayersReportingReferences, setSpatialShowCameraFrames } from '@/renderer/course/spatialPathCommands'
+import { resolveSpatialPlaybackSchedule, summarizeSpatialWorldReferenceCleanup } from '../../src/core/tools/spatialPath'
+import { addCopiedSpatialRelationsInSession, addSpatialRelationInSession } from '@/renderer/course/spatialRelationCommands'
+import { planSpatialGraphAfterWorldCopy } from '../../src/core/tools/spatialRelation'
 import {
   addSpatialSemanticZoomRuleInSession,
   isSpatialItemSemanticallyVisible,

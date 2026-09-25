@@ -35,7 +35,7 @@ export {
   visualFrontToBackRows,
 } from '../effectiveLayerProjection'
 
-export { composeSlideEditorLocation } from '../slideEditorView'
+export { composeSlideEditorLocation } from '../../../core/tools/slideLayerView'
 export { composeFlowEditorLocation } from '../flowEditorView'
 export { composeSpatialEditorLocation } from '../spatialEditorView'
 

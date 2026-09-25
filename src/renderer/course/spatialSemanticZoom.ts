@@ -14,13 +14,8 @@ import {
   type SpatialCommandResult,
 } from './spatialAuthoringHistory'
 import { spatialSurfaceIn } from './spatialEditorCommands'
-import {
-  commitSpatialGraphHistoryResult,
-  spatialGraphAuthoringAddress,
-  spatialGraphValuesEqual,
-  stableSpatialGraphId,
-  validateSpatialPathLayerItemIds,
-} from './spatialPathCommands'
+import { commitSpatialGraphHistoryResult } from './spatialPathCommands'
+import { spatialGraphAuthoringAddress, spatialGraphValuesEqual, stableSpatialGraphId, validateSpatialPathLayerItemIds } from '../../core/tools/spatialPath'
 
 export interface AddSpatialSemanticZoomRuleInput {
   readonly surfaceId: string

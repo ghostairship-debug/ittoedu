@@ -2,7 +2,7 @@ import { _electron as electron, chromium, expect, test, type Page, type Locator 
 import { mkdirSync, readFileSync, writeFileSync, existsSync, realpathSync } from 'node:fs'
 import { basename, dirname, join, resolve, relative, isAbsolute, extname } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { openCourseProjectArchive } from '../../src/renderer/project/courseProjectArchive'
+import { openCourseProjectArchive } from '../../src/core/drivers/codecs/courseProjectArchive'
 import { componentPackagesFromArchive } from '../../src/renderer/components/componentPackageStore'
 import { analyzeCourseAssetReferences } from '../../src/shared/contracts/course-project-v9/assetReferences'
 import { BACKGROUND_E2E_ENV } from '../../src/main/windowVisibility'

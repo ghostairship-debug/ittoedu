@@ -14,7 +14,7 @@ import {
   buildPublishedCourseWebPackageFiles,
 } from '../../src/renderer/export/course/buildCoursePackages'
 import { withDefaultComponentController } from '../../src/renderer/components/teacherControllerComponent'
-import { createBlankCourseProject } from '../../src/renderer/project/createCourseProject'
+import { createBlankCourseProject } from '../../src/core/course/createCourseProject'
 import { courseProjectDocumentSchema } from '../../src/shared/courseProjectSchema'
 import type { RuntimeLayerItem } from '../../src/shared/courseProjectTypes'
 

@@ -1,0 +1,87 @@
+{
+  "scope": "方案制品检查；不是果铃产品实现或实测报告",
+  "plan_revision": "2.0",
+  "checked_on": "2026-09-23",
+  "package_validation": {
+    "package_validation": "passed",
+    "tasks": 28,
+    "product_cases": 157,
+    "requirements": 29,
+    "reader_articles": 51,
+    "product_tests_executed": false,
+    "errors": []
+  },
+  "validator_regression_checks": {
+    "status": "passed",
+    "script": "tools/selfcheck_plan.py",
+    "command": "python tools/selfcheck_plan.py",
+    "exit_code": 0,
+    "output": "PASS: clean copied package\r\nPASS: B01 schedules S04 before S03\r\nPASS: Removed migration case remains active: S01-T03\r\nPASS: Reader content/render drift: short_term/S02.md\r\nselfcheck_plan: passed (3 rejection checks; repository files untouched)",
+    "checks": [
+      "rejects reversed batch dependencies",
+      "rejects restored retired migration case",
+      "rejects stale offline reader"
+    ],
+    "normal_baseline_and_restored_copy": "passed",
+    "writes_repository_files": false
+  },
+  "typescript_contract_sample": {
+    "status": "passed",
+    "version": "7.0.2",
+    "command": "node node_modules/typescript/bin/tsc --ignoreConfig --strict --noEmit --target ES2022 --module ES2022 GPTpro方案/guoling_2_0_execution_plan/contracts/workbench-contracts.ts",
+    "exit_code": 0,
+    "output": ""
+  },
+  "reader_validation": {
+    "content_and_links": "passed",
+    "javascript_syntax": "passed",
+    "reader_articles": 51,
+    "internal_markdown_links_checked": 69,
+    "root_round_trip": true,
+    "browser_interaction": "not_run",
+    "scope": "Current Markdown render/content and local link existence validated; unchanged reader JavaScript syntax/root round-trip evidence retained from 2026-09-22; no browser, visual or product GUI claim."
+  },
+  "generation": {
+    "idempotence": "passed",
+    "python": "3.13.5",
+    "markdown": "3.8",
+    "evidence_date": "2026-09-22",
+    "reuse_basis": "refresh_plan.py and its dependency versions unchanged; this revision adds a separate selfcheck script, no change to generation rules."
+  },
+  "product_code_modified": false,
+  "product_tests_run": false,
+  "all_product_case_status": "not_run",
+  "screenshots_in_archive": false,
+  "historical_validator_check": {
+    "checked_on": "2026-09-22",
+    "check": "validation result snapshots remain independent",
+    "status": "passed",
+    "scope": "Previous manual evidence retained; not one of the three automated checks run on 2026-09-23."
+  },
+  "repository_entry_checks": {
+    "roadmap": {
+      "command": "npm run check:development-roadmap",
+      "exit_code": 0,
+      "output": "> ittoedu-courseware-editor@1.0.0 check:development-roadmap\n> tsx scripts/check-development-roadmap.ts\n\n开发路线校验通过：176 个节点，22 份规格，归档旧任务映射 98 行；首个并行 frontier：r12-000-native-contract + r12-005-flow-native-authoring-parity。"
+    },
+    "task_board": {
+      "command": "npm run check:task-board",
+      "exit_code": 0,
+      "output": "> ittoedu-courseware-editor@1.0.0 check:task-board\n> tsx scripts/generate-task-board.ts --check\n\n任务板已是最新状态。"
+    }
+  },
+  "key_pattern_check": {
+    "original_pattern": "sk-[A-Za-z0-9]{8,}",
+    "matched_files": 25,
+    "matched_occurrences": 51,
+    "all_matches_inside_task_identifiers": true,
+    "other_matches": 0,
+    "boundary_aware_matches_in_plan_scope": 0,
+    "scope": "Pattern scan only; not a general secret audit; matched credential values were not printed."
+  },
+  "owner_decisions": {
+    "image_api": "pending; not a B05 prerequisite",
+    "gpt_oauth": "first release; current account via formal login; initial image generation route; capability tests not_run",
+    "r20": "authorized retirement after absorption; card removed and task board regenerated"
+  }
+}

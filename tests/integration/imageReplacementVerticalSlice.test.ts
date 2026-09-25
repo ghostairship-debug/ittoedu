@@ -9,7 +9,7 @@ import {
   createCourseProjectArchive,
   openCourseProjectArchive,
   type CourseProjectArchiveData,
-} from '@/renderer/project/courseProjectArchive'
+} from '../../src/core/drivers/codecs/courseProjectArchive'
 import {
   selectActiveCourseProjectDocument,
   selectActivePresentationStateId,

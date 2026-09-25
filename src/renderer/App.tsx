@@ -1,9 +1,10 @@
+import { captureDocumentReference } from './workbench/SelectionContextController'
+import { CourseAdvancedChrome, CourseEditorFrame } from './documents/CourseEditorChromeContext'
+import { CourseLightToolbar } from './documents/CourseLightToolbar'
 import { AlertCircle, LoaderCircle, X } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { executeLessonAssembly, observeEmptyLessonBuildTarget, LessonAssemblyError } from './lessonAuthoring/builderIntegration'
 import { LessonWorkspaceHost } from './app/LessonWorkspaceHost'
 import type { LessonWorkspaceShellHandle } from './lessonWorkspace/LessonWorkspaceShell'
-import { conversationOwnerOf, type LessonWorkspace, type LessonConversation } from '../shared/lessonWorkspace'
 import {
   APP_EXECUTABLE_NAME,
   RECOMMENDED_PROJECT_SCENES,
@@ -16,16 +17,23 @@ import {
 } from '../shared/courseProjectHealth'
 import {
   componentPackagesToArchiveFiles,
+  componentPackagesFromArchive,
 } from './components/componentPackageStore'
 import { emptyCourseAssetSidecar } from './project/v9AssetAdapter'
 import { useComponentLibrary } from './app/useComponentLibrary'
 import { useCourseDelivery } from './app/useCourseDelivery'
+import { courseDeliverySnapshot } from './app/courseDeliverySnapshot'
 import { useCourseProjectLifecycle } from './app/useCourseProjectLifecycle'
 import { useFlowDocumentRecovery } from './app/useFlowDocumentRecovery'
 import { buildFlowEditorView, captureFlowEditorAuthoringTarget } from './course/flowEditorView'
+import { findFlowBlockRecursive, flowSurfaceIn } from '../core/tools/flowDocumentModel'
 import { useEditorKeyboardRouter } from './app/useEditorKeyboardRouter'
 import { useMediaImport } from './app/useMediaImport'
+import type { WorkspaceMediaDropHandler } from './lessonWorkspace/workspaceMediaDrop'
+import type { DocumentHostAPI, SaveDirectoryContext } from '../shared/workbench/desktop'
 import {
+  selectCanUndoActiveSurface,
+  selectCanRedoActiveSurface,
   selectActiveCourseLocationId,
   selectActiveCourseProjectDocument,
   selectActiveScene,
@@ -35,6 +43,7 @@ import {
   selectMediaAssetFiles,
   selectMediaAssets,
   selectSelectedNode,
+  selectSelectedNodeId,
   selectSelectedNodeIds,
   selectSlideAuthoringBackend,
   selectHasUnsavedCourseChanges,
@@ -46,7 +55,8 @@ import { ExportSizeWarningDialog } from './ui/ExportSizeWarningDialog'
 import { ExportPreflightDialog } from './ui/ExportPreflightDialog'
 import { RightSidebar } from './ui/RightSidebar'
 import { ScenePanel } from './ui/ScenePanel'
-import { SceneStateStrip } from './ui/SceneStateStrip'
+import { CourseBottomNavigation } from './ui/BottomSceneNavigator'
+import { requestFlowBlockFocus } from './ui/FlowWorkspace'
 import { TopToolbar } from './ui/TopToolbar'
 import { Workspace } from './ui/Workspace'
 import { ProjectHealthPanel } from './ui/ProjectHealthPanel'
@@ -54,7 +64,6 @@ import { ProjectColorPaletteContext } from './ui/ColorInput'
 import { RecipePanel } from './ui/recipes/RecipePanel'
 import { ProductivityDialog } from './ui/productivity/ProductivityDialog'
 import { MaterialLibraryDialog } from './ui/MaterialLibraryDialog'
-import { CourseChatEntry } from './ui/chat/CourseChatPanel'
 import { EditorPanelLayout } from './ui/EditorPanelLayout'
 import { createMaterialCitationRequest } from './authoring/tools/materialCitationRequest'
 import type { ProductivityContext } from './authoring/productivity'
@@ -101,29 +110,14 @@ function captureCourseIdentity() {
 
 export default function App() {
   const lessonShell = useRef<LessonWorkspaceShellHandle>(null)
-  const activeLesson = useRef<{ lesson: LessonWorkspace; conversation: LessonConversation } | null>(null)
-  const activeDirectoryConversation = useRef<LessonConversation | null>(null)
-  const [hasLessonConversation, setHasLessonConversation] = useState(false)
-  const [hasDirectoryConversation, setHasDirectoryConversation] = useState(false)
-  const onActiveLesson = useCallback((lesson: LessonWorkspace | null, conversation: LessonConversation | null) => {
-    activeLesson.current = lesson && conversation ? { lesson, conversation } : null
-    setHasLessonConversation(!!activeLesson.current)
-  }, [])
-  const onActiveDirectoryConversation = useCallback((conversation: LessonConversation | null) => {
-    activeDirectoryConversation.current = conversation
-    setHasDirectoryConversation(!!conversation)
-  }, [])
-  const observeCurrentEmptyLessonProject = useCallback((expectedLesson: LessonWorkspace['identity'], conversationId: string) => {
-    const current = activeLesson.current
-    if (!current || current.lesson.identity.lessonId !== expectedLesson.lessonId || current.lesson.identity.normalizedDirectory !== expectedLesson.normalizedDirectory || current.conversation.conversationId !== conversationId) throw new Error('当前课例或对话已切换，不能接续原构建')
-    return observeEmptyLessonBuildTarget(useEditorStore.getState().createCoursewareBuilderOwner())
-  }, [])
-  useEffect(() => {
-    const testWindow = window as Window & { __COURSEWARE_E2E_BACKGROUND__?: boolean; __COURSEWARE_E2E_OBSERVE_EMPTY_BUILD__?: typeof observeCurrentEmptyLessonProject }
-    if (!testWindow.__COURSEWARE_E2E_BACKGROUND__) return
-    testWindow.__COURSEWARE_E2E_OBSERVE_EMPTY_BUILD__ = observeCurrentEmptyLessonProject
-    return () => { delete testWindow.__COURSEWARE_E2E_OBSERVE_EMPTY_BUILD__ }
-  }, [observeCurrentEmptyLessonProject])
+  const saveDirectory = useRef<SaveDirectoryContext | null>(null)
+  const rawDocuments = window.desktopAPI?.documents
+  const documentsWithSaveDirectory = useMemo<DocumentHostAPI | null>(() => rawDocuments ? {
+    ...rawDocuments,
+    saveWithDialog: (documentId, saveAs, suggestedDirectory) => rawDocuments.saveWithDialog(documentId, saveAs, suggestedDirectory ?? saveDirectory.current ?? undefined),
+    closeWithDialog: (documentId, suggestedDirectory) => rawDocuments.closeWithDialog(documentId, suggestedDirectory ?? saveDirectory.current ?? undefined),
+  } : null, [rawDocuments])
+  const setSaveDirectory = useCallback((directory: SaveDirectoryContext | null) => { saveDirectory.current = directory }, [])
   const [lessonDirty, setLessonDirty] = useState(false)
   const [busy, setBusy] = useState(false)
   const [projectHealthOpen, setProjectHealthOpen] = useState(false)
@@ -134,6 +128,10 @@ export default function App() {
     if (context) setDesignTool({ kind, context })
   }
 
+  const canUndoCourse = useEditorStore(selectCanUndoActiveSurface)
+  const canRedoCourse = useEditorStore(selectCanRedoActiveSurface)
+  const courseCanvasMode = useEditorStore(state => state.canvasMode)
+  const courseConnection = useEditorStore(state => state.courseDocument)
   const dirty = useEditorStore(selectHasUnsavedCourseChanges)
   const projectPath = useEditorStore((state) => state.projectPath)
   const activeCourseDocument = useEditorStore(selectActiveCourseProjectDocument)
@@ -153,6 +151,8 @@ export default function App() {
     selectEffectiveLayerProjection(state)?.unifiedRows.find(row => row.selected)?.name ?? selectSelectedNode(state)?.name ?? null)
   const selectedNodeIds = useEditorStore(selectSelectedNodeIds)
   const editingScope = useEditorStore(selectEditingScope)
+  const insertSurface = useEditorStore(state => state.spatialSession ? 'spatial' : state.flowSession ? 'flow' : state.slideCandidateSnapshot ? 'slide' : null)
+  const spatialInsertScope = useEditorStore(state => state.spatialSession?.scope ?? null)
   const activeTab = useEditorStore((state) => state.activeTab)
   const editingItemCount = useEditorStore(state => {
     const projection = selectEffectiveLayerProjection(state)
@@ -197,21 +197,22 @@ export default function App() {
   const flowSession = useEditorStore((state) => state.flowSession)
   const loadCourseProject = useEditorStore((state) => state.loadCourseProject)
 
+  const actionTail = useRef<Promise<unknown>>(Promise.resolve())
   const run = useCallback(
-    async <T,>(operation: () => Promise<T>, fallback: string): Promise<T | undefined> => {
-      if (busy) return undefined
-      setBusy(true)
-      setError(null)
-      try {
-        return await operation()
-      } catch (error) {
-        setError(readableError(error, fallback))
-        return undefined
-      } finally {
-        setBusy(false)
-      }
+    <T,>(operation: () => Promise<T>, fallback: string): Promise<T | undefined> => {
+      // Native shortcuts can arrive before an open/import finishes. Keep the request
+      // in order instead of silently dropping it because a React busy flag is set.
+      const result = actionTail.current.then(async () => {
+        setBusy(true)
+        setError(null)
+        try { return await operation() }
+        catch (error) { setError(readableError(error, fallback)); return undefined }
+        finally { setBusy(false) }
+      })
+      actionTail.current = result.then(() => undefined, () => undefined)
+      return result
     },
-    [busy, setError],
+    [setError],
   )
 
   const flowRecoveryPort = useMemo(() => window.desktopAPI?.flowDocumentRecovery ?? null, [])
@@ -249,30 +250,18 @@ export default function App() {
         sessionGeneration: state.courseAuthoringSession?.token.generation ?? 0,
       }
     },
-    prepareDraft: () => useEditorStore.getState().prepareCourseProjectPersistence(),
-    acknowledgeSaved: (path, token) => (
-      useEditorStore.getState().acknowledgeCourseProjectSaved(path, token)
-    ),
-    captureRecoverySnapshot: () => (
-      useEditorStore.getState().captureCourseProjectRecoverySnapshot()
-    ),
-    loadOpenedProject(input) {
-      loadCourseProject(
-        input.project,
-        input.path,
-        input.assetFiles,
-        input.componentPackages,
-      )
-      if (input.dirty || input.statusMessage) {
-        useEditorStore.setState({
-          ...(input.dirty ? { dirty: true } : {}),
-          ...(input.statusMessage ? { statusMessage: input.statusMessage } : {}),
-        })
-      }
+    documents: {
+      ready: () => {
+        const host = documentsWithSaveDirectory
+        if (!host) return Promise.reject(new Error('课程文档服务不可用'))
+        return useEditorStore.getState().connectCourseDocuments(host)
+      },
+      snapshot: () => useEditorStore.getState().courseDocument.snapshot,
+      create: surface => useEditorStore.getState().createCourseDocument(surface),
+      open: path => useEditorStore.getState().openCourseDocument(path),
+      save: saveAs => useEditorStore.getState().saveCourseDocument(saveAs),
+      drain: () => useEditorStore.getState().drainCourseDocument(),
     },
-    createBlankProject: createNewProject,
-    createSpatialProject: createNewSpatialProject,
-    createFlowProject: createNewFlowProject,
     hasUnsavedChanges: () => selectHasUnsavedCourseChanges(useEditorStore.getState()),
     projectPath: () => useEditorStore.getState().projectPath,
     runBusy: run,
@@ -287,41 +276,18 @@ export default function App() {
     },
     openRecentProjectFile: (path) => desktopApi().openRecentProject({ path }),
     confirmProjectOpen: (confirmationId) => desktopApi().confirmProjectOpen({ confirmationId }),
-    beforeReplace: async () => await flowRecovery.flush() && (await lessonShell.current?.flushAll() ?? true),
+    beforeReplace: async () => await flowRecovery.flush(),
     onProjectReplaced: () => lessonShell.current?.detachLesson(),
-    preserveBeforeClose: async () => await flowRecovery.flush() && (await lessonShell.current?.preserveAll() ?? true),
-    subscribePreserveAndCloseRequest: handler => window.desktopAPI?.onRequestPreserveAndClose?.(handler) ?? (() => undefined),
-    beforeSave: async () => {
-      await flowRecovery.flush()
-      const documentsSaved = await (lessonShell.current?.flushAll() ?? Promise.resolve(true))
-      return documentsSaved
+    preserveBeforeClose: async () => {
+      if (!(await flowRecovery.flush()) || !(await lessonShell.current?.preserveAll() ?? true)) return false
+      await useEditorStore.getState().drainAllCourseDocuments()
+      return true
     },
-    saveProjectFile: (input) => desktopApi().saveProject({ ...input, suggestedDirectory: activeLesson.current?.lesson.identity.normalizedDirectory }),
-    onProjectSaved: async input => {
-      if (!window.desktopAPI?.lesson) return
-      const directoryCurrent = activeDirectoryConversation.current
-      if (directoryCurrent) {
-        const result = await window.desktopAPI.lesson({
-          operation: 'bind-project',
-          owner: conversationOwnerOf(directoryCurrent),
-          conversationId: directoryCurrent.conversationId,
-          projectId: input.projectId,
-          projectPath: input.path,
-          saveAs: input.saveAs && directoryCurrent.projectTarget !== undefined,
-        })
-        if (activeDirectoryConversation.current?.conversationId !== directoryCurrent.conversationId || !result.conversation) return
-        activeDirectoryConversation.current = result.conversation
-        lessonShell.current?.applyDirectoryBinding(result.conversation)
-        return
-      }
-      const current = activeLesson.current
-      if (!current) return
-      const result = await window.desktopAPI.lesson({ operation: 'bind-project', lesson: current.lesson.identity, conversationId: current.conversation.conversationId,
-        projectId: input.projectId, projectPath: input.path, saveAs: input.saveAs && current.conversation.projectTarget !== undefined })
-      if (activeLesson.current !== current || !result.lesson || !result.conversation) return
-      activeLesson.current = { lesson: result.lesson, conversation: result.conversation }
-      lessonShell.current?.applyBinding(result.lesson, result.conversation)
-    },
+    subscribePreserveAndCloseRequest: handler => window.desktopAPI?.onRequestPreserveAndClose?.(async () => {
+      const ready = await handler()
+      return { ready, ...(ready && saveDirectory.current ? { suggestedDirectory: saveDirectory.current } : {}) }
+    }) ?? (() => undefined),
+    beforeSave: () => flowRecovery.flush(),
     listRecentProjects: async () => {
       if (!window.desktopAPI) return []
       return window.desktopAPI.listRecentProjects()
@@ -330,23 +296,9 @@ export default function App() {
       if (!(await flowRecovery.flush())) return 'cancel'
       return desktopApi().confirmDiscardChanges()
     },
-    clearRecoveryProject: () => desktopApi().clearRecoveryProject(),
-    writeRecoveryProject: (input) => desktopApi().writeRecoveryProject(input),
-    readRecoveryProject: async () => {
-      if (!window.desktopAPI) return null
-      return window.desktopAPI.readRecoveryProject()
-    },
-    peekProjectArchive: async (path) => {
-      if (typeof window.desktopAPI?.peekProjectArchive !== 'function') return null
-      return window.desktopAPI.peekProjectArchive({ path })
-    },
     setWindowDirtyState: async (nextDirty) => {
       if (!window.desktopAPI) return
       await window.desktopAPI.setDirtyState(nextDirty)
-    },
-    subscribeSaveRequest: (handler) => {
-      if (!window.desktopAPI) return () => undefined
-      return window.desktopAPI.onRequestSave(handler)
     },
     subscribeSaveAndCloseRequest: (handler) => {
       if (!window.desktopAPI) return () => undefined
@@ -365,17 +317,16 @@ export default function App() {
     textEditTrigger: undefined,
   })
 
+  useEffect(() => window.desktopAPI?.onRequestSave(() => {
+    void (async () => {
+      const target = await lessonShell.current?.saveActiveDocument()
+      if (target === 'course') await courseProjectLifecycle.saveProject(false)
+    })().catch(error => setError(error instanceof Error ? error.message : '当前文档保存失败'))
+  }), [courseProjectLifecycle.saveProject, setError])
+
   const courseDelivery = useCourseDelivery({
-    readCanonicalSnapshot() {
-      const state = useEditorStore.getState()
-      const document = selectActiveCourseProjectDocument(state)
-      if (!document) return null
-      return {
-        project: document,
-        assetFiles: selectMediaAssetFiles(state),
-        components: state.componentPackages,
-      }
-    },
+    captureSnapshot: async () => courseDeliverySnapshot(await useEditorStore.getState().drainCourseDocument()),
+    readCanonicalSnapshot: () => courseDeliverySnapshot(useEditorStore.getState().courseDocument.snapshot),
     runBusy: run,
     commitStatus: setStatus,
     reportError: setError,
@@ -421,6 +372,15 @@ export default function App() {
 
   const mediaImport = useMediaImport({
     captureIdentity: captureCourseIdentity,
+    captureDocumentId: () => useEditorStore.getState().courseDocument.documentId,
+    captureSurfaceKind: () => {
+      const state = useEditorStore.getState()
+      return state.spatialSession ? 'spatial' : state.flowSession ? 'flow' : state.slideCandidateSnapshot ? 'slide' : null
+    },
+    captureFlowAudioTarget: () => {
+      const flow = useEditorStore.getState().flowSession
+      return flow?.selection.authoringScope === 'page' ? captureCourseIdentity() : null
+    },
     captureLibraryTarget: () => (
       useEditorStore.getState().captureMediaLibraryImportTarget()
     ),
@@ -455,9 +415,15 @@ export default function App() {
     placeVideoNodes: (items, position) => (
       useEditorStore.getState().addVideoNodes([...items], position)
     ),
-    importSounds: (items) => {
-      useEditorStore.getState().importSounds([...items])
+    placeFlowAudioNodes: async (items) => {
+      const placed = useEditorStore.getState().insertFlowAudioNodes([...items])
+      if (placed.completedCount > 0) await useEditorStore.getState().drainCourseDocument()
+      return placed
     },
+    placeFlowMediaAt: (item, afterBlockId) => (
+      useEditorStore.getState().insertFlowMediaAt(item, afterBlockId)
+    ),
+    importSounds: (items) => useEditorStore.getState().importSounds([...items]),
     commitCandidateMedia(input) {
       useEditorStore.getState().importV9CandidateMedia({
         items: [...input.items],
@@ -475,6 +441,25 @@ export default function App() {
     commitStatus: setStatus,
     reportError: setError,
   })
+
+  const dropWorkspaceMedia: WorkspaceMediaDropHandler = async request => {
+    const placed = await mediaImport.importWorkspaceMedia(request)
+    if (!placed.ok || !placed.assetId) return { ok: false, reason: placed.reason ?? '媒体拖入未完成。' }
+    try {
+      const confirmed = await useEditorStore.getState().drainCourseDocument()
+      if (confirmed.documentId !== request.target.documentId || confirmed.revision <= request.target.revision
+        || confirmed.model.kind !== 'course-v9' || !confirmed.model.project.assets[placed.assetId]) {
+        return { ok: false, reason: '当前文档没有确认这次媒体插入，请检查后重新拖入。' }
+      }
+      if (placed.soundId && confirmed.model.project.media.audio.sounds[placed.soundId]?.assetId !== placed.assetId) {
+        return { ok: false, reason: '当前文档没有确认声音库导入，请检查后重新拖入。' }
+      }
+      if (placed.soundId) setStatus('音频已加入声音库，可供互动播放')
+      return { ok: true }
+    } catch (error) {
+      return { ok: false, reason: error instanceof Error ? error.message : '媒体插入尚未得到文档确认。' }
+    }
+  }
 
   const componentLibrary = useComponentLibrary({
     captureIdentity: captureCourseIdentity,
@@ -562,75 +547,68 @@ export default function App() {
 
   return (
     <ProjectColorPaletteContext.Provider value={projectColors}>
-    <LessonWorkspaceHost ref={lessonShell} projectId={activeCourseDocument?.id ?? ''} projectPath={projectPath}
-      onOpenProject={path => courseProjectLifecycle.openRecentProject(path, { origin: 'lesson' })} onNewProject={() => courseProjectLifecycle.newProject({ origin: 'lesson' })} onActiveLesson={onActiveLesson} onActiveDirectoryConversation={onActiveDirectoryConversation} onDirtyChange={setLessonDirty}
-      observeEmptyProject={observeCurrentEmptyLessonProject}
-      continueProjectEditing={async (lesson, conversationId, expectedProjectId) => {
-        const isCurrent = () => {
-          const active = activeLesson.current
-          return active?.lesson.identity.lessonId === lesson.lessonId
-            && active.lesson.identity.normalizedDirectory === lesson.normalizedDirectory
-            && active.conversation.conversationId === conversationId
-            && useEditorStore.getState().createCoursewareBuilderOwner().readDocument().id === expectedProjectId
-        }
-        if (!isCurrent()) throw new Error('当前课例或课件已切换，请回到原课件继续编辑')
-        if (!await courseProjectLifecycle.saveProject(false, { isCurrent })) throw new Error('保存已取消，当前课件仍保留在画布中')
-        if (!isCurrent()) throw new Error('当前课例或课件已切换，未切换其他课件的编辑入口')
-        lessonShell.current?.showProject()
+    <LessonWorkspaceHost ref={lessonShell} projectPath={projectPath} documents={documentsWithSaveDirectory ?? undefined} onSaveDirectoryChange={setSaveDirectory}
+      courseDocuments={{ documents: courseConnection.documents, activation: courseConnection.activation,
+        activeDocumentId: courseConnection.documentId,
+        activate: id => useEditorStore.getState().activateCourseDocument(id),
+        close: id => useEditorStore.getState().closeCourseDocument(id) }}
+      prepareCourseDocuments={async () => { await useEditorStore.getState().drainAllCourseDocuments() }}
+      captureCourseDocument={async writable => {
+        const snapshot = await useEditorStore.getState().drainCourseDocument()
+        return [captureDocumentReference(snapshot, writable)]
       }}
-      assemble={async (input, conversationId) => {
-        const context = { lesson: input.ticket.lesson, conversationId }
-        const isCurrent = () => {
-          const active = activeLesson.current
-          return active?.lesson.identity.lessonId === context.lesson.lessonId
-            && active.lesson.identity.normalizedDirectory === context.lesson.normalizedDirectory
-            && active.conversation.conversationId === conversationId
+      onOpenProject={path => courseProjectLifecycle.openRecentProject(path, { origin: 'lesson' })} onNewProject={() => courseProjectLifecycle.newProject({ origin: 'lesson' })} onDirtyChange={setLessonDirty}
+>
+    <CourseEditorFrame lightTools={<CourseLightToolbar
+      documentId={courseConnection.documentId}
+      isCurrentDocument={id => useEditorStore.getState().courseDocument.documentId === id}
+      canUndo={canUndoCourse} canRedo={canRedoCourse}
+      canUndoLatestAgent={courseConnection.snapshot?.undoHead?.actor === 'agent'}
+      undo={() => useEditorStore.getState().undo()} redo={() => useEditorStore.getState().redo()}
+      undoLatestAgent={() => { void useEditorStore.getState().undoLatestAgentCourseDocument().catch(error => setError(error instanceof Error ? error.message : '撤销最近 AI 修改失败')) }}
+      save={() => { void courseProjectLifecycle.saveProject(false) }}
+      onReplaceImage={() => { void mediaImport.selectAndImportImage('replace') }}
+      onAddText={() => { void (async () => {
+        const before = useEditorStore.getState()
+        const documentId = before.courseDocument.documentId
+        const revision = selectActiveCourseProjectDocument(before)?.revision
+        const locationId = selectActiveCourseLocationId(before)
+        const priorSelection = selectSelectedNodeId(before)
+        const priorFlowBlock = before.flowSession?.selection.selectedBlockId
+        before.addTextNode()
+        try { await useEditorStore.getState().drainCourseDocument() }
+        catch (error) { setError(error instanceof Error ? error.message : '文字插入尚未确认。'); return }
+        const after = useEditorStore.getState()
+        if (selectActiveCourseLocationId(after) !== locationId) return
+        const flow = after.flowSession
+        const flowBlockId = flow?.selection.selectedBlockId
+        if (documentId && after.courseDocument.documentId === documentId && flow && flowBlockId
+          && flowBlockId !== priorFlowBlock && revision !== undefined
+          && flow.history.present.revision > revision && flow.selection.authoringScope === 'page') {
+          const found = findFlowBlockRecursive(flowSurfaceIn(flow.history.present, flow.selection.surfaceId).blocks, flowBlockId)
+          if (found?.block.type === 'paragraph') {
+            requestFlowBlockFocus({ documentId, surfaceId: flow.selection.surfaceId, blockId: flowBlockId, revision: flow.history.present.revision })
+          }
+          return
         }
-        const assertCurrent = () => { if (!isCurrent()) throw new Error('当前课例或对话已切换，旧构建已停止') }
-        assertCurrent()
-        const operate = desktopApi().lessonAuthoring
-        if (!operate) throw new Error('创作流程服务不可用')
-        return executeLessonAssembly(input, {
-          createCourseProject: async options => {
-            assertCurrent()
-            const replacement = { origin: 'lesson' as const, isCurrent }
-            const created = await (options.surfaceType === 'flow' ? courseProjectLifecycle.newFlowProject(replacement) : options.surfaceType === 'spatial-2d' ? courseProjectLifecycle.newSpatialProject(replacement) : courseProjectLifecycle.newProject(replacement))
-            if (!created) throw new LessonAssemblyError('新建已取消，尚未开始构建', false)
-            assertCurrent()
-            useEditorStore.getState().renameProject(options.title)
-          },
-          owner: () => {
-            const owner = useEditorStore.getState().createCoursewareBuilderOwner()
-            return { ...owner, commit: step => {
-              const committed = owner.commit(step)
-              if (committed) lessonShell.current?.showProject()
-              return committed
-            } }
-          },
-          validate: async ticket => {
-            assertCurrent()
-            const result = await operate({ operation: 'validate', ...context, ticket })
-            assertCurrent()
-            return result.validation ?? { allowed: false, issues: ['无法核实当前教学文件'] }
-          },
-          saveProject: async () => {
-            assertCurrent()
-            if (!await courseProjectLifecycle.saveProject(false, { isCurrent })) throw new Error('课件尚未保存，请继续保存后重试')
-            assertCurrent()
-            const path = useEditorStore.getState().projectPath
-            if (!path) throw new Error('未取得保存后的工程路径')
-            return path
-          },
-          readAsset: async relativePath => {
-            const result = await operate({ operation: 'read-asset', ...context, ticket: input.ticket, relativePath })
-            if (!result.asset) throw new Error('构建素材未读取成功')
-            return result.asset
-          },
-          componentCatalog: () => desktopApi().loadComponentCatalog(),
-        })
-      }}>
-    <div className="app-shell">
-      <TopToolbar
+        const selectedId = selectSelectedNodeId(after)
+        const selected = selectSelectedNode(after)
+        if (documentId && after.courseDocument.documentId === documentId
+          && revision !== undefined && (selectActiveCourseProjectDocument(after)?.revision ?? revision) > revision
+          && selectedId && selectedId !== priorSelection && selected?.id === selectedId && selected.type === 'text'
+          && (after.spatialSession || after.slideCandidateSnapshot)) {
+          after.beginTextEdit(selectedId, 'canvas')
+        }
+      })() }}
+      onAddImage={() => { void mediaImport.selectAndImportImage('add') }}
+      onAddVideo={() => { void mediaImport.selectAndImportVideo('add') }}
+      onAddAudio={() => { void (useEditorStore.getState().flowSession
+        ? mediaImport.selectAndInsertFlowAudio()
+        : mediaImport.selectAndImportAudio()) }}
+      insertSurface={insertSurface} editingScope={editingScope} spatialScope={spatialInsertScope}
+      mode={courseCanvasMode}
+      reportError={setError} />}>
+      <CourseAdvancedChrome><TopToolbar
         busy={busy}
         onNew={courseProjectLifecycle.newProject}
         onNewSpatial={courseProjectLifecycle.newSpatialProject}
@@ -647,13 +625,14 @@ export default function App() {
         onOpenMaterials={() => setMaterialsOpen(true)}
         onPreview={courseDelivery.openPreview}
         onExport={courseDelivery.exportCourse}
-      />
+      /></CourseAdvancedChrome>
       <EditorPanelLayout
         className={`app-main${activeTab === 'developer' ? ' app-main--developer' : ''}`}
       >
         <ScenePanel />
         <div className="editor-center">
           <Workspace
+            onDropWorkspaceMedia={dropWorkspaceMedia}
             onAddImage={(x, y) =>
               void mediaImport.selectAndImportImage('add', { x, y })
             }
@@ -662,7 +641,7 @@ export default function App() {
             }
             onSelectImageAsset={mediaImport.selectImageAsset}
           />
-          {spatialSession || flowSession ? null : <SceneStateStrip />}
+          <CourseBottomNavigation documentId={courseConnection.documentId} />
         </div>
         <RightSidebar
           onAddImage={(x, y) =>
@@ -680,11 +659,12 @@ export default function App() {
           onAddCatalogComponents={componentLibrary.addCatalogPackages}
           onUpdateCatalogComponent={componentLibrary.requestCatalogUpdate}
         />
-        {!(hasLessonConversation || hasDirectoryConversation) && <CourseChatEntry />}
       </EditorPanelLayout>
       <footer className="status-bar" aria-live="polite">
         <span className="status-dot" />
-        <span>{busy ? '正在处理…' : (statusMessage ?? '就绪')}</span>
+        <span>{courseDelivery.exportProgress === 'cancelling' ? '正在清理已取消的导出…' : busy ? '正在处理…' : (statusMessage ?? '就绪')}</span>
+        {courseDelivery.exportProgress === 'generating' && <button type="button" onClick={courseDelivery.cancelExport}>取消导出</button>}
+        {courseDelivery.exportProgress === 'saving' && <span>正在准备保存，可在保存对话框取消</span>}
         <span className="status-bar__spacer" />
         <span>{editingScope === 'global' ? '全局层' : activeScene.name}</span>
         <span>·</span>
@@ -816,15 +796,6 @@ export default function App() {
         onExportWebPackage={courseDelivery.exportLargeHtmlAsWebPackage}
         onContinueSingleHtml={courseDelivery.continueLargeHtml}
       />
-      <ConfirmDialog
-        open={Boolean(courseProjectLifecycle.recoveryOffer)}
-        title="发现未完成的本地恢复副本"
-        message={courseProjectLifecycle.recoveryOffer ? `课件：${courseProjectLifecycle.recoveryOffer.projectName}\n保存时间：${new Date(courseProjectLifecycle.recoveryOffer.savedAt).toLocaleString('zh-CN')}\n\n恢复后请重新保存工程；如果这些修改已经不需要，可以丢弃副本。` : ''}
-        confirmLabel="恢复课件"
-        cancelLabel="丢弃副本"
-        onCancel={courseProjectLifecycle.discardRecovery}
-        onConfirm={courseProjectLifecycle.restoreRecovery}
-      />
       {courseDelivery.previewOpen ? (
         <div
           className="modal-backdrop course-preview-overlay"
@@ -898,7 +869,7 @@ export default function App() {
           </section>
         </div>
       ) : null}
-    </div>
+    </CourseEditorFrame>
     </LessonWorkspaceHost>
     </ProjectColorPaletteContext.Provider>
   )

@@ -29,7 +29,7 @@ import {
   undoSpatialAuthoringHistory,
 } from '@/renderer/course/spatialAuthoringHistory'
 import { commitSlideActionTransaction, commitSlideEditorTransactionHistory, SLIDE_REJECT_STALE_REVISION, SlideCommandError } from '@/renderer/course/slideEditorCommands'
-import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
+import { createBlankCourseProject } from '@/core/course/createCourseProject'
 import { createBlankFlowCourseProject } from '@/renderer/project/createFlowCourseProject'
 import { createBlankSpatialCourseProject } from '@/renderer/project/createSpatialCourseProject'
 import { applyHistoryResourceChanges } from '@/renderer/store/courseResourceState'

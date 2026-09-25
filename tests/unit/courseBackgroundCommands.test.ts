@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import type { AssetMeta } from '@/shared/contracts/media-v1'
 import type { CourseProjectDocument } from '@/shared/courseProjectTypes'
-import { updateCourseBackground } from '@/renderer/course/courseBackgroundCommands'
-import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
+import { updateCourseBackground } from '@/core/tools/courseBackground'
+import { createBlankCourseProject } from '@/core/course/createCourseProject'
 
 const NOW = '2026-09-05T00:00:00.000Z'
 

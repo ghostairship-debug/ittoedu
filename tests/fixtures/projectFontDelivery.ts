@@ -1,7 +1,7 @@
 import type { CoursePublishSources } from '../../src/renderer/export/course/buildPublishedCourse'
-import { createBlankCourseProject } from '../../src/renderer/project/createCourseProject'
-import { parseComponentPackageFiles } from '../../src/renderer/components/importComponentPackage'
-import { componentPackageMeta } from '../../src/renderer/components/editableComponentPackage'
+import { createBlankCourseProject } from '../../src/core/course/createCourseProject'
+import { parseComponentPackageFiles } from '../../src/core/drivers/codecs/importComponentPackage'
+import { componentPackageMeta } from '../../src/shared/componentPackageMeta'
 import { planProjectFontImport } from '../../src/renderer/course/projectFontImport'
 import { courseProjectDocumentSchema } from '../../src/shared/courseProjectSchema'
 

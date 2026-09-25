@@ -1,6 +1,6 @@
 import { createArchiveFixture as createCourseProjectArchive } from '../fixtures/teacherController'
 import { describe, expect, it, vi } from 'vitest'
-import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
+import { createBlankCourseProject } from '@/core/course/createCourseProject'
 import { RECIPE_CATALOG, recipeDefaults, type RecipeId } from '@/renderer/recipes/recipeCatalog'
 import { planRecipe } from '@/renderer/recipes/applyRecipe'
 import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
@@ -9,7 +9,7 @@ import { PublishedInteractionController } from '@/player/interactions/PublishedI
 import { CourseStateStore } from '@/player/CourseStateStore'
 import type { SlideSceneDocument } from '@/shared/courseProjectTypes'
 import { createSortComponentPackage } from '@/renderer/recipes/sort-component/package'
-import { openCourseProjectArchive } from '@/renderer/project/courseProjectArchive'
+import { openCourseProjectArchive } from '../../src/core/drivers/codecs/courseProjectArchive'
 import { inspectSingleChoiceRuleFamilies } from '@/shared/singleChoiceRuleFamily'
 
 function make(id: RecipeId, overrides: Record<string, string> = {}) {

@@ -20,7 +20,7 @@ import {
   detectCourseProjectArchiveFormat,
   openCourseProjectArchive,
   type CourseProjectArchiveData,
-} from '../src/renderer/project/courseProjectArchive'
+} from '../src/core/drivers/codecs/courseProjectArchive'
 import {
   COMPONENT_RUNTIME_API_VERSION,
   COMPONENT_SCHEMA_VERSION,

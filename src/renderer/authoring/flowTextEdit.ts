@@ -27,7 +27,7 @@ import {
   type FlowEditorSelection,
   type FlowTextRange,
 } from '../course/flowEditorSlice'
-import { isRichTextFlowBlock } from '../course/flowDocumentModel'
+import { isRichTextFlowBlock } from '../../core/tools/flowDocumentModel'
 import { readChartText, type ChartTextDraft, type ChartTextField } from './chartTextDraft'
 
 export const FLOW_TEXT_REJECT_SHARED_DOCUMENT = '请在正文编辑器中编辑此内容'

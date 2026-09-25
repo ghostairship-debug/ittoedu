@@ -2,14 +2,14 @@ import { describe, expect, it } from 'vitest'
 import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
 import type { CourseProjectDocument } from '@/shared/courseProjectTypes'
 import { deriveCourseEditorLayout } from '@/renderer/course/courseEditorLayout'
-import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
+import { createBlankCourseProject } from '@/core/course/createCourseProject'
 import { createBlankFlowCourseProject } from '@/renderer/project/createFlowCourseProject'
 import { createBlankSpatialCourseProject } from '@/renderer/project/createSpatialCourseProject'
 import {
   addCourseFlowPage,
   addCourseSlidePage,
   addCourseSpatialPage,
-} from '@/renderer/course/courseLocationCommands'
+} from '@/core/tools/courseLocations'
 
 const NOW = '2026-08-17T12:00:00.000Z'
 

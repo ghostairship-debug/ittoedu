@@ -9,8 +9,8 @@ import {
   type FlowBlock,
 } from '@/shared/courseProjectTypes'
 import { sceneNodeToCourseLayerItem } from '@/shared/courseProjectModel'
-import {  createTextNode } from '@/renderer/project/nativeNodeFactories'
-import { syncFlowCourseLocations } from '@/renderer/course/flowDocumentModel'
+import {  createTextNode } from '@/core/tools/nativeNodeFactories'
+import { syncFlowCourseLocations } from '../../src/core/tools/flowDocumentModel'
 import {
   flowBlockLayerMembership,
   listFlowGlobalAuthoringItems,

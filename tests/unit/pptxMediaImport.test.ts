@@ -5,7 +5,7 @@ import { pptxMediaFixture } from '../fixtures/pptxMedia'
 import { pptxImportFixture } from '../fixtures/pptxImport'
 import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate'
 import { planPptxImportTransaction } from '@/renderer/project/pptxImportTransaction'
-import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
+import { createBlankCourseProject } from '@/core/course/createCourseProject'
 import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
 
 vi.mock('@/renderer/project/assetManager', async importOriginal => ({

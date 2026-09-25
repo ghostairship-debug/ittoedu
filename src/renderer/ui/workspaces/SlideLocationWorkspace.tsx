@@ -1,3 +1,5 @@
+import { resolveSlideSelectionLayer } from '../../workbench/SelectionContextController'
+import { NativeSelectionContext } from '../../workbench/NativeSelectionContext'
 import { canEditLayerInScope } from '../../../shared/teacherControllerRole'
 import { useControllerDisplayRevision } from '../../authoring/controllerDisplayBounds'
 import {
@@ -10,6 +12,9 @@ import {
   Plus,
 } from 'lucide-react'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useWorkspaceMediaSource } from '../../lessonWorkspace/workspaceMediaSourceContext'
+import { deliverWorkspaceMediaDrop, type WorkspaceMediaDropHandler } from '../../lessonWorkspace/workspaceMediaDrop'
+import { WORKSPACE_MEDIA_DRAG_TYPE } from '../../lessonWorkspace/workspaceMediaDrag'
 import type {
   ComponentAuthoringTextTarget,
   ComponentPackageData,
@@ -44,9 +49,11 @@ import {
   type SlideLinePreview,
   type SlideWorkspaceCommandPort,
 } from '../workspaceSlideAuthoring'
-import { buildSlideEditorView, type SlideEditorLayerView, type SlideEditorView } from '../../course/slideEditorView'
+import { buildSlideEditorView, type SlideEditorLayerView, type SlideEditorView } from '../../../core/tools/slideLayerView'
 import { materializeNativeLayerItem } from '../../../shared/courseProjectSchema'
 import { nativeRenderInputFromV9Item } from '../../../player/surfaces/native/publishedNativeRendering'
+import { planNativeTextEdit } from '../../../core/tools/nativeText'
+import { cancelEditPreview, useEditPreview } from '../../workbench/EditPreviewProjection'
 import { TextEditOverlay } from '../TextEditOverlay'
 import { SlideLayerSelectionOverlay } from './SlideLayerSelectionOverlay'
 import { useSlideNativeTextEditor } from './useSlideNativeTextEditor'
@@ -75,7 +82,7 @@ import {
 import type { PublishedCourseSession } from '../../../player/surfaces/publishedDynamicHosts'
 import { courseLayerItemToEditorCanvasNode } from '../../store/slideEditorProjection'
 import type { LayerItem, NativeLayerItem } from '../../../shared/courseProjectTypes'
-import { isTeacherControllerLayerItem } from '../../course/globalLayerCommands'
+import { isTeacherControllerLayerItem } from '../../../core/tools/globalLayers'
 import { runtimeTargetMatchesEditingContext } from '../../authoring/runtimeAuthoringContext'
 import {
   beginComponentTextEditSession,
@@ -262,10 +269,12 @@ export interface SlideWorkspacePorts {
 
 export interface SlideLocationWorkspaceProps {
   readonly snapshot: SlideWorkspaceSnapshot
+  readonly documentId?: string | null
   readonly ports: SlideWorkspacePorts
   readonly onAddImage: (x?: number, y?: number) => void
   readonly onAddVideo: (x?: number, y?: number) => void
   readonly onSelectImageAsset: () => Promise<ImportedImageAsset | null>
+  readonly onDropWorkspaceMedia?: WorkspaceMediaDropHandler
 }
 
 interface FormulaEditSession {
@@ -611,11 +620,17 @@ type CanvasAuthoringHit =
 
 export function SlideLocationWorkspace({
   snapshot,
+  documentId,
   ports,
   onAddImage,
   onAddVideo,
   onSelectImageAsset,
+  onDropWorkspaceMedia,
 }: SlideLocationWorkspaceProps) {
+  const mediaSource = useWorkspaceMediaSource()
+  const mediaSourceRef = useRef(mediaSource)
+  mediaSourceRef.current = mediaSource
+  const [mediaDragOver, setMediaDragOver] = useState(false)
   const {
     view: slideEditorView,
     locationId: courseLocationId,
@@ -676,6 +691,12 @@ export function SlideLocationWorkspace({
   const [previewRetryRevision, setPreviewRetryRevision] = useState(0)
   const [acknowledgedPreviewGeneration, setAcknowledgedPreviewGeneration] =
     useState<object | null>(null)
+  const editPreview = useEditPreview(documentId, snapshot.projectRevision)
+  const activeTextPreview = canvasMode === 'edit' && documentId &&
+    editPreview?.documentId === documentId && editPreview.status !== 'aborted' &&
+    editPreview.sequence >= 0 && editPreview.target.kind === 'course-object' &&
+    editPreview.target.locationId === courseLocationId && resolveSlideSelectionLayer(slideEditorView, editPreview.target) ? editPreview : null
+  const previewPaintedRef = useRef<{ locationId: string; itemId: string; stateId?: string } | null>(null)
   const [runtimeTargets, setRuntimeTargets] =
     useState<ReadonlyArray<Readonly<RuntimeAuthoringTarget>>>([])
   const [componentTargets, setComponentTargets] =
@@ -848,27 +869,34 @@ export function SlideLocationWorkspace({
     setView({ zoom: 1, x: 0, y: 0 })
   }, [])
 
+  const measureStageViewport = useCallback(() => {
+    const viewport = stageViewportRef.current
+    if (!viewport) return
+    const rect = viewport.getBoundingClientRect()
+    if (rect.width <= 0 || rect.height <= 0) return
+    setStageViewportSize((current) => (
+      current.width === rect.width && current.height === rect.height
+        ? current
+        : { width: rect.width, height: rect.height }
+    ))
+  }, [])
+
+  // The workbench can resize the Slide region in the same React commit as an
+  // insert or a toolbar change. Keep the painted stage on the current viewport
+  // dimensions before a pointer is converted back to world coordinates.
+  useLayoutEffect(() => { measureStageViewport() })
+
   useLayoutEffect(() => {
     const viewport = stageViewportRef.current
     if (!viewport) return
-    const update = () => {
-      const rect = viewport.getBoundingClientRect()
-      if (rect.width <= 0 || rect.height <= 0) return
-      setStageViewportSize((current) => (
-        current.width === rect.width && current.height === rect.height
-          ? current
-          : { width: rect.width, height: rect.height }
-      ))
-    }
-    update()
-    const observer = new ResizeObserver(update)
+    const observer = new ResizeObserver(measureStageViewport)
     observer.observe(viewport)
-    window.addEventListener('resize', update)
+    window.addEventListener('resize', measureStageViewport)
     return () => {
       observer.disconnect()
-      window.removeEventListener('resize', update)
+      window.removeEventListener('resize', measureStageViewport)
     }
-  }, [])
+  }, [snapshot.projectId, slideEditorView?.surfaceId, measureStageViewport])
 
   const failPublishedAuthoring = useCallback((token: string, message: string) => {
     if (publishedAuthoringInitRef.current?.token !== token) return
@@ -2268,6 +2296,53 @@ export function SlideLocationWorkspace({
   ])
 
   useEffect(() => {
+    const previous = previewPaintedRef.current
+    const target = activeTextPreview?.target.kind === 'course-object'
+      ? activeTextPreview.target : null
+    const paintCanonical = (itemId: string) => {
+      const layer = slideEditorView?.layers.find((candidate) => candidate.selectionId === itemId)
+      if (!layer || layer.item.kind !== 'native' || layer.item.content.nativeType !== 'text') return
+      const item = layer.item as NativeLayerItem
+      const node = courseLayerItemToEditorCanvasNode(item)
+      if (node) gameRef.current?.bridge.applyNode(node)
+      queueAuthoringNodePatch(layer.source === 'global' ? 'global' : 'scene', nativeRenderInputFromV9Item(item))
+    }
+    if (previous && previous.locationId === courseLocationId &&
+      (!target || previous.itemId !== target.itemId || previous.stateId !== target.stateId)) {
+      paintCanonical(previous.itemId)
+      previewPaintedRef.current = null
+    }
+    if (!target || !slideEditorView || !courseLocationId) return
+    const layer = resolveSlideSelectionLayer(slideEditorView, target)
+    if (!layer || layer.item.kind !== 'native' || layer.item.content.nativeType !== 'text') return
+    const item = structuredClone(layer.item) as NativeLayerItem
+    if (item.content.nativeType !== 'text') return
+    const planned = planNativeTextEdit(item.content.data, { text: activeTextPreview!.value })
+    item.content = { nativeType: 'text', data: {
+      ...item.content.data,
+      text: activeTextPreview!.value,
+      runs: planned.ok ? planned.data.runs : [],
+    } }
+    const node = courseLayerItemToEditorCanvasNode(item)
+    if (node) gameRef.current?.bridge.applyNode(node)
+    queueAuthoringNodePatch(layer.source === 'global' ? 'global' : 'scene', nativeRenderInputFromV9Item(item))
+    previewPaintedRef.current = { locationId: courseLocationId, itemId: target.itemId, ...(target.stateId ? { stateId: target.stateId } : {}) }
+  }, [activeTextPreview, acknowledgedPreviewGeneration, courseLocationId, queueAuthoringNodePatch, slideEditorView])
+
+  useEffect(() => {
+    if (!activeTextPreview || activeTextPreview.status !== 'active') return
+    const onUndo = (event: KeyboardEvent) => {
+      if (!(event.ctrlKey || event.metaKey) || event.shiftKey || event.key.toLowerCase() !== 'z') return
+      if (isEditableKeyboardTarget(event.target)) return
+      event.preventDefault()
+      event.stopImmediatePropagation()
+      void cancelEditPreview(activeTextPreview)
+    }
+    window.addEventListener('keydown', onUndo, true)
+    return () => window.removeEventListener('keydown', onUndo, true)
+  }, [activeTextPreview])
+
+  useEffect(() => {
     gameRef.current?.bridge.selectNodes(needsLayerOverlay ? [] : [...selectedNodeIds])
   }, [selectedNodeIds, needsLayerOverlay])
 
@@ -2288,16 +2363,11 @@ export function SlideLocationWorkspace({
     report: message => ports.canvas.setStatus(message),
   }, `${snapshot.projectId}:${courseLocationId}:${activePresentationStateId}:${publishedAuthoringOwnerScope}:${canvasMode}`)
 
-  const onDrop = (event: React.DragEvent) => {
-    event.preventDefault()
-    if (canvasMode !== 'edit') return
-    const value = event.dataTransfer.getData(
-      'application/x-courseware-element',
-    )
+  const readDropPoint = (clientX: number, clientY: number) => {
     const viewport = stageViewportRef.current
-    if (!value || !viewport) return
+    if (!viewport) return null
     const viewportRect = viewport.getBoundingClientRect()
-    if (viewportRect.width <= 0 || viewportRect.height <= 0) return
+    if (viewportRect.width <= 0 || viewportRect.height <= 0) return null
     const transform = createStageViewportTransform({
       viewport: {
         x: viewportRect.left,
@@ -2310,17 +2380,41 @@ export function SlideLocationWorkspace({
     })
     const rect = transform.stageRect
     if (
-      event.clientX < rect.x ||
-      event.clientX > rect.x + rect.width ||
-      event.clientY < rect.y ||
-      event.clientY > rect.y + rect.height
+      clientX < rect.x ||
+      clientX > rect.x + rect.width ||
+      clientY < rect.y ||
+      clientY > rect.y + rect.height
     ) {
+      return null
+    }
+    return clientToWorld(transform, { x: clientX, y: clientY })
+  }
+
+  const onDrop = (event: React.DragEvent) => {
+    event.preventDefault()
+    if (event.dataTransfer.types.includes(WORKSPACE_MEDIA_DRAG_TYPE)) {
+      event.stopPropagation()
+      setMediaDragOver(false)
+      if (canvasMode !== 'edit' || editingScope !== 'scene' || !courseLocationId || !slideEditorView || !onDropWorkspaceMedia) {
+        ports.canvas.setStatus('请切换到可编辑的场景内容层后拖入媒体')
+        return
+      }
+      const point = readDropPoint(event.clientX, event.clientY)
+      if (!point) { ports.canvas.setStatus('请将媒体拖到课件画布内'); return }
+      const target = { documentId: documentId ?? null, projectId: snapshot.projectId, revision: snapshot.projectRevision,
+        locationId: courseLocationId, surfaceId: slideEditorView.surfaceId, sessionGeneration: snapshot.sessionGeneration }
+      const raw = event.dataTransfer.getData(WORKSPACE_MEDIA_DRAG_TYPE)
+      void deliverWorkspaceMediaDrop(raw, mediaSource, { surface: 'slide', x: point.x, y: point.y }, target, onDropWorkspaceMedia,
+        () => mediaSourceRef.current.directory === mediaSource.directory && mediaSourceRef.current.files === mediaSource.files)
+        .then(result => { if (!result.ok) ports.canvas.setStatus(result.reason ?? '媒体未插入') })
       return
     }
-    const { x, y } = clientToWorld(transform, {
-      x: event.clientX,
-      y: event.clientY,
-    })
+    if (canvasMode !== 'edit') return
+    const value = event.dataTransfer.getData('application/x-courseware-element')
+    if (!value) return
+    const point = readDropPoint(event.clientX, event.clientY)
+    if (!point) return
+    const { x, y } = point
     if (value === 'text') ports.content.addTextNode(x, y)
     else if (value === 'formula') ports.content.addFormulaNode(x, y)
     else if (value === 'rectangle') ports.content.addRectangleNode(x, y)
@@ -2375,6 +2469,12 @@ export function SlideLocationWorkspace({
       style={drawTool ? { cursor: 'crosshair' } : undefined}
       onDragOver={(event) => {
         if (canvasMode !== 'edit') return
+        if (onDropWorkspaceMedia && event.dataTransfer.types.includes(WORKSPACE_MEDIA_DRAG_TYPE)) {
+          event.preventDefault()
+          event.dataTransfer.dropEffect = 'copy'
+          setMediaDragOver(Boolean(readDropPoint(event.clientX, event.clientY)) && editingScope === 'scene')
+          return
+        }
         if (
           event.dataTransfer.types.includes(
             'application/x-courseware-element',
@@ -2384,6 +2484,7 @@ export function SlideLocationWorkspace({
           event.dataTransfer.dropEffect = 'copy'
         }
       }}
+      onDragLeave={event => { if (!event.currentTarget.contains(event.relatedTarget as Node)) setMediaDragOver(false) }}
       onDrop={onDrop}
       onWheel={(event) => {
         if (canvasMode !== 'edit' || (!event.ctrlKey && !event.metaKey)) return
@@ -2391,6 +2492,26 @@ export function SlideLocationWorkspace({
         setZoom(view.zoom + (event.deltaY < 0 ? 0.1 : -0.1))
       }}
       onPointerDownCapture={(event) => {
+        if (canvasMode === 'edit' && event.button === 0 &&
+          activeTextPreview?.target.kind === 'course-object') {
+          const domItemId = event.target instanceof Element
+            ? event.target.closest('[data-layer-item-id]')?.getAttribute('data-layer-item-id')
+            : null
+          const viewport = readCandidateViewport()
+          const world = viewport && clientToWorld(createStageViewportTransform(viewport), {
+            x: event.clientX,
+            y: event.clientY,
+          })
+          const hitItemId = domItemId ?? (world
+            ? hitTestV9SlideLayerItems(listSlideWorkspaceHitTargets(backendRef.current), world)?.layerItemId
+            : null)
+          if (hitItemId === activeTextPreview.target.itemId) {
+            event.preventDefault()
+            event.stopPropagation()
+            ports.canvas.setStatus('正在生成文字；完成或停止后可编辑此对象')
+            return
+          }
+        }
         if (
           canvasMode === 'edit' &&
           (event.button === 1 || (event.button === 0 && spacePressedRef.current))
@@ -2662,6 +2783,20 @@ export function SlideLocationWorkspace({
       }}
       onPointerLeave={() => setHoveredAuthoringTargetId(null)}
       onDoubleClickCapture={(event) => {
+        if (activeTextPreview?.target.kind === 'course-object') {
+          const viewport = readCandidateViewport()
+          const world = viewport && clientToWorld(createStageViewportTransform(viewport), {
+            x: event.clientX,
+            y: event.clientY,
+          })
+          const hit = world && hitTestV9SlideLayerItems(listSlideWorkspaceHitTargets(backendRef.current), world)
+          if (hit?.layerItemId === activeTextPreview.target.itemId) {
+            event.preventDefault()
+            event.stopPropagation()
+            ports.canvas.setStatus('正在生成文字；完成或停止后可编辑此对象')
+            return
+          }
+        }
         if (
           !authoringCanvasInteractive ||
           (event.target instanceof Element &&
@@ -2723,6 +2858,13 @@ export function SlideLocationWorkspace({
         }
       }}
     >
+      <NativeSelectionContext documentId={documentId} revision={snapshot.projectRevision} locationId={courseLocationId} itemIds={selectedNodeIds} stateId={activePresentationStateId} sceneItemIds={slideEditorView?.layers.filter(layer => layer.source === 'scene').map(layer => layer.selectionId)} enabled={canvasMode === 'edit'} bounds={id => {
+        const layer = slideEditorView?.layers.find(value => value.selectionId === id), viewport = readCandidateViewport()
+        if (!layer || !viewport) return null
+        const transform = createStageViewportTransform(viewport), frame = layer.item.frame
+        return { left: transform.stageRect.x + frame.x * transform.scale, top: transform.stageRect.y + frame.y * transform.scale,
+          width: frame.width * transform.scale, height: frame.height * transform.scale, rotation: layer.item.rotation }
+      }} />
       <div className="canvas-mode-switch" role="group" aria-label="画布模式">
         <button
           type="button"
@@ -2790,6 +2932,8 @@ export function SlideLocationWorkspace({
               ?? '状态'}`}
       </div>
       <div ref={stageViewportRef} className="canvas-viewport"
+        data-workspace-media-drop={mediaDragOver || undefined}
+        style={mediaDragOver ? { boxShadow: 'inset 0 0 0 3px #245b46' } : undefined}
         data-observation-source={canvasMode === 'edit' ? 'authoring' : undefined}
         data-observation-project-id={snapshot.projectId}
         data-observation-revision={snapshot.projectRevision}

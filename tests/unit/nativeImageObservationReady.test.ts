@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { createImageNode } from '../../src/renderer/project/nativeNodeFactories'
+import { createImageNode } from '../../src/core/tools/nativeNodeFactories'
 import { paintPublishedNativeRenderInput } from '../../src/player/surfaces/native/publishedNativeRendering'
 import { waitForPublishedObservationReady } from '../../src/player/surfaces/publishedCapture'
 import { renderImageNodeCanvas } from '../../src/shared/imageEffects'

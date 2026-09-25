@@ -16,7 +16,7 @@ import {
   projectEffectiveLayers,
   type EffectiveLayerProjection,
 } from '@/renderer/course/effectiveLayerProjection'
-import { openCourseProjectArchive } from '@/renderer/project/courseProjectArchive'
+import { openCourseProjectArchive } from '../../src/core/drivers/codecs/courseProjectArchive'
 import type { CourseProjectDocument } from '@/shared/courseProjectTypes'
 import {
   authoringToolCreateScopeV1Schema,

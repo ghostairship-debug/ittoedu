@@ -1,7 +1,7 @@
 import { UserFacingError } from '@/shared/errors'
 import type { ComponentDefinitionV4 } from '@/shared/componentTypes'
 import { ComponentRegistry } from './ComponentRegistry'
-import { validateComponentRuntimeSource } from './importComponentPackage'
+import { validateComponentRuntimeSource } from '../../core/drivers/codecs/importComponentPackage'
 
 export interface ExecuteComponentRuntimeOptions {
   registry?: ComponentRegistry

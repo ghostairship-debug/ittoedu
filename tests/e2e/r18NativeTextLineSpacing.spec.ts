@@ -8,7 +8,7 @@ test('Native line geometry keeps legal spacing and rich runs visible in actual C
   const root = resolve(process.env.COURSEWARE_R18_TEXT_GEOMETRY_OUTPUT ?? 'output/r18-native-text-geometry', new Date().toISOString().replace(/[:.]/g, '-'))
   mkdirSync(root, { recursive: true })
   const script = buildSync({ stdin: { contents: `export { paintPublishedNativeText as paint } from './src/player/surfaces/publishedNativeText';
-    export { createTextNode as create } from './src/renderer/project/nativeNodeFactories';
+    export { createTextNode as create } from './src/core/tools/nativeNodeFactories';
     export { analyzeTextNodeLayout as analyze } from './src/shared/textLayout';`, resolveDir: process.cwd() },
     bundle: true, write: false, format: 'iife', globalName: 'NativeTextGeometry', platform: 'browser' }).outputFiles[0]!.text
   const browser = await chromium.launch({ headless: true })

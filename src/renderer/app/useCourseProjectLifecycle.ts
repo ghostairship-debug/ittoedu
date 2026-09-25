@@ -1,28 +1,13 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { DocumentSnapshot } from '../../shared/workbench/document'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { APP_NAME } from '../../shared/constants'
 import type { CourseProjectDocument } from '../../shared/courseProjectTypes'
-import { toUserMessage, UserFacingError } from '../../shared/errors'
 import type { ComponentPackageData } from '../../shared/componentTypes'
 import type {
   OpenProjectFileResult,
   RecentProjectEntry,
   RecoveryProjectResult,
 } from '../../shared/ipcTypes'
-import {
-  componentPackagesFromArchive,
-  componentPackagesToArchiveFiles,
-} from '../components/componentPackageStore'
-import {
-  inspectCourseProjectArchiveIdentity,
-  type CourseProjectArchiveData,
-} from '../project/courseProjectArchive'
-import {
-  openDefaultCourseProjectAsync,
-  saveCourseProjectDocumentAsync,
-} from '../project/courseProjectIo'
-import { shouldOfferCourseProjectRecovery } from '../project/courseProjectLifecycle'
-import { RecoveryWriteCoordinator } from '../project/recoveryWriteCoordinator'
-
 export interface CanonicalCourseProjectSnapshot {
   readonly project: CourseProjectDocument
   readonly assetFiles: Record<string, Uint8Array>
@@ -71,14 +56,22 @@ export interface CourseProjectOpenedLoad {
 }
 
 export interface CourseProjectLifecyclePorts<TDraftToken = unknown> {
+  documents?: {
+    ready(): Promise<void>
+    snapshot(): DocumentSnapshot | null
+    create(surface: 'slide' | 'flow' | 'spatial'): Promise<void>
+    open(path: string): Promise<void>
+    save(saveAs?: boolean): Promise<DocumentSnapshot | null>
+    drain(): Promise<DocumentSnapshot>
+  }
   captureIdentity(): Omit<CourseProjectLifecycleIdentity, 'epoch'>
-  prepareDraft(): CourseProjectDraftPreparation<TDraftToken>
-  acknowledgeSaved(path: string, token: TDraftToken): boolean
-  captureRecoverySnapshot(): CourseProjectRecoveryCapture
-  loadOpenedProject(input: CourseProjectOpenedLoad): void
-  createBlankProject(): void
-  createSpatialProject(): void
-  createFlowProject(): void
+  prepareDraft?(): CourseProjectDraftPreparation<TDraftToken>
+  acknowledgeSaved?(path: string, token: TDraftToken): boolean
+  captureRecoverySnapshot?(): CourseProjectRecoveryCapture
+  loadOpenedProject?(input: CourseProjectOpenedLoad): void
+  createBlankProject?(): void
+  createSpatialProject?(): void
+  createFlowProject?(): void
   hasUnsavedChanges(): boolean
   projectPath(): string | null
   runBusy<T>(operation: () => Promise<T>, fallback: string): Promise<T | undefined>
@@ -89,7 +82,7 @@ export interface CourseProjectLifecyclePorts<TDraftToken = unknown> {
   openWorkspaceProjectFile?(path: string): Promise<OpenProjectFileResult>
   openRecentProjectFile(path: string): Promise<OpenProjectFileResult>
   confirmProjectOpen(confirmationId: string): Promise<void>
-  saveProjectFile(input: {
+  saveProjectFile?(input: {
     path?: string
     suggestedName: string
     bytes: Uint8Array
@@ -97,21 +90,20 @@ export interface CourseProjectLifecyclePorts<TDraftToken = unknown> {
   beforeSave?(): Promise<boolean>
   beforeReplace?(): Promise<boolean>
   onProjectReplaced?(): void
-  preserveBeforeClose?(): Promise<boolean>
+  preserveBeforeClose?(mode?: 'save' | 'preserve'): Promise<boolean>
   subscribePreserveAndCloseRequest?(handler: () => Promise<boolean>): () => void
   onProjectSaved?(input: { projectId: string; path: string; previousPath: string | null; saveAs: boolean }): Promise<void>
   listRecentProjects(): Promise<RecentProjectEntry[]>
   confirmDiscardChanges(): Promise<'discard' | 'cancel'>
-  clearRecoveryProject(): Promise<void>
-  writeRecoveryProject(input: {
+  clearRecoveryProject?(): Promise<void>
+  writeRecoveryProject?(input: {
     projectName: string
     projectPath?: string
     bytes: Uint8Array
   }): Promise<void>
-  readRecoveryProject(): Promise<RecoveryProjectResult | null>
-  peekProjectArchive(path: string): Promise<{ bytes: Uint8Array } | null>
+  readRecoveryProject?(): Promise<RecoveryProjectResult | null>
+  peekProjectArchive?(path: string): Promise<{ bytes: Uint8Array } | null>
   setWindowDirtyState(dirty: boolean): Promise<void>
-  subscribeSaveRequest(handler: () => void): () => void
   subscribeSaveAndCloseRequest(handler: () => Promise<boolean>): () => void
 }
 
@@ -133,576 +125,98 @@ export interface CourseProjectReplacementOptions extends CourseProjectOperationO
 
 export interface CourseProjectLifecycleApi {
   readonly recentProjects: RecentProjectEntry[]
-  readonly recoveryOffer: RecoveryProjectResult | null
   newProject(options?: CourseProjectReplacementOptions): Promise<boolean>
   newSpatialProject(options?: CourseProjectReplacementOptions): Promise<boolean>
   newFlowProject(options?: CourseProjectReplacementOptions): Promise<boolean>
   openProject(): void
   openRecentProject(path: string, options?: CourseProjectReplacementOptions): Promise<boolean>
   saveProject(saveAs?: boolean, options?: CourseProjectOperationOptions): Promise<boolean>
-  restoreRecovery(): void
-  discardRecovery(): void
 }
 
-interface RecoverySnapshot {
-  identity: CourseProjectLifecycleIdentity
-  project: CourseProjectDocument
-  assetFiles: Record<string, Uint8Array>
-  componentPackages: Record<string, ComponentPackageData>
-  projectPath: string | null
-  title: string
-}
-
-function readableError(error: unknown, fallback: string): string {
-  if (error instanceof UserFacingError) {
-    console.error(error)
-    return `${error.title}：${error.message}\n${error.suggestion}`
-  }
-  if (error instanceof Error && error.message.trim()) {
-    console.error(error)
-    return error.message
-  }
-  return toUserMessage(error, fallback)
-}
-
-function sameProjectIdentity(
-  expected: CourseProjectLifecycleIdentity,
-  current: CourseProjectLifecycleIdentity,
-): boolean {
-  return expected.projectId === current.projectId && expected.epoch === current.epoch
-}
-
-function sameProjectMutationTarget(
-  expected: CourseProjectLifecycleIdentity,
-  current: CourseProjectLifecycleIdentity,
-): boolean {
-  return sameProjectIdentity(expected, current)
-    && expected.revision === current.revision
-    && expected.sessionGeneration === current.sessionGeneration
-}
-
-function courseArchiveDataFromSnapshot(
-  snapshot: CanonicalCourseProjectSnapshot,
-): CourseProjectArchiveData {
-  return {
-    project: snapshot.project,
-    assetFiles: snapshot.assetFiles,
-    componentFiles: componentPackagesToArchiveFiles(snapshot.componentPackages),
-  }
-}
-
-function createRecoveryWriteCoordinator(
-  portsRef: { current: CourseProjectLifecyclePorts<unknown> },
-  captureIdentity: () => CourseProjectLifecycleIdentity,
-): RecoveryWriteCoordinator<RecoverySnapshot, Uint8Array> {
-  return new RecoveryWriteCoordinator({
-    delayMs: 1800,
-    async build(snapshot, signal) {
-      return saveCourseProjectDocumentAsync({
-        project: snapshot.project,
-        assetFiles: snapshot.assetFiles,
-        componentFiles: componentPackagesToArchiveFiles(
-          snapshot.componentPackages,
-        ),
-      }, { signal })
-    },
-    async write(bytes, snapshot) {
-      const ports = portsRef.current
-      if (!ports.desktopAvailable()) throw new Error('桌面恢复服务不可用。')
-      if (!sameProjectIdentity(snapshot.identity, captureIdentity())) {
-        throw new DOMException('已取消', 'AbortError')
-      }
-      await ports.writeRecoveryProject({
-        projectName: snapshot.title,
-        projectPath: snapshot.projectPath ?? undefined,
-        bytes,
-      })
-    },
-    onSuccess() {
-      portsRef.current.commitStatus('已自动保存本地恢复副本')
-    },
-    onError(error) {
-      console.error('本地恢复副本更新失败', error)
-      portsRef.current.reportError('自动恢复副本写入失败，请立即手动保存工程。')
-    },
-  })
-}
-
-export function useCourseProjectLifecycle<TDraftToken>(
-  ports: CourseProjectLifecyclePorts<TDraftToken>,
-  watch: CourseProjectLifecycleWatch,
-): CourseProjectLifecycleApi {
-  const portsRef = useRef(ports)
-  portsRef.current = ports
-
+/** Main owns content, file binding, fixed-revision save and durable recovery. */
+export function useCourseProjectLifecycle<TDraftToken>(ports: CourseProjectLifecyclePorts<TDraftToken>, watch: CourseProjectLifecycleWatch): CourseProjectLifecycleApi {
+  const ref = useRef(ports); ref.current = ports
   const [recentProjects, setRecentProjects] = useState<RecentProjectEntry[]>([])
-  const [recoveryOffer, setRecoveryOffer] = useState<RecoveryProjectResult | null>(null)
-  const [recoveryDecisionComplete, setRecoveryDecisionComplete] = useState(false)
-  const saveInFlightRef = useRef(false)
-  const loadEpochRef = useRef(0)
-  const captureIdentity = (): CourseProjectLifecycleIdentity => ({
-    ...portsRef.current.captureIdentity(),
-    epoch: loadEpochRef.current,
-  })
-  const recoveryRevisionRef = useRef(0)
-  const recoveryOfferRef = useRef<RecoveryProjectResult | null>(null)
-  recoveryOfferRef.current = recoveryOffer
-  const recoveryCoordinatorRef = useRef<RecoveryWriteCoordinator<
-    RecoverySnapshot,
-    Uint8Array
-  > | null>(null)
-  if (recoveryCoordinatorRef.current === null && ports.desktopAvailable()) {
-    recoveryCoordinatorRef.current = createRecoveryWriteCoordinator(
-      portsRef as { current: CourseProjectLifecyclePorts<unknown> },
-      captureIdentity,
-    )
+  const saving = useRef(false), replacement = useRef(0)
+  const service = () => { const value = ref.current.documents; if (!value) throw new Error('课程文档服务未接通'); return value }
+  const refresh = useCallback(async () => { try { setRecentProjects(await ref.current.listRecentProjects()) } catch { ref.current.reportError('最近工程列表暂不可读取') } }, [])
+  const same = (before: ReturnType<typeof ports.captureIdentity>) => {
+    const now = ref.current.captureIdentity()
+    return before.projectId === now.projectId && before.revision === now.revision && before.sessionGeneration === now.sessionGeneration
   }
-
-  const beginMutation = (): number => {
-    loadEpochRef.current += 1
-    return loadEpochRef.current
-  }
-
-  const isCurrentMutation = (epoch: number): boolean => loadEpochRef.current === epoch
-
-  const refreshRecentProjects = useCallback(async (): Promise<boolean> => {
-    if (!portsRef.current.desktopAvailable()) return true
+  const replace = useCallback(async (work: () => Promise<void>, options?: CourseProjectReplacementOptions): Promise<boolean> => {
+    const result = await ref.current.runBusy(async () => {
+      await service().ready()
+      if (options?.isCurrent?.() === false) return false
+      const identity = service().snapshot()
+      const sameDocument = () => {
+        const now = service().snapshot()
+        return identity ? now?.documentId === identity.documentId && now.epoch === identity.epoch : !now
+      }
+      if (ref.current.beforeReplace && !(await ref.current.beforeReplace())) return false
+      // Switching views retains the previous main-owned document and its History.
+      // Only unfinished renderer input needs admission; nothing is discarded here.
+      if (!sameDocument() || options?.isCurrent?.() === false) return false
+      if (identity) await service().drain()
+      if (!sameDocument() || options?.isCurrent?.() === false) return false
+      const epoch = ++replacement.current
+      await work()
+      if (epoch !== replacement.current || options?.isCurrent?.() === false) return false
+      if (options?.origin !== 'lesson') ref.current.onProjectReplaced?.()
+      await refresh()
+      return true
+    }, '课件切换失败，当前修改仍保留。')
+    return result === true
+  }, [refresh])
+  const newProject = useCallback((options?: CourseProjectReplacementOptions) => replace(() => service().create('slide'), options), [replace])
+  const newFlowProject = useCallback((options?: CourseProjectReplacementOptions) => replace(() => service().create('flow'), options), [replace])
+  const newSpatialProject = useCallback((options?: CourseProjectReplacementOptions) => replace(() => service().create('spatial'), options), [replace])
+  const openProject = useCallback(() => { void replace(async () => {
+    const identity = ref.current.captureIdentity()
+    const file = await ref.current.openProjectFile()
+    if (!file) return
+    if (!same(identity)) throw new Error('选择文件期间课件已改变，已取消打开')
+    await service().open(file.path)
+    await ref.current.confirmProjectOpen(file.confirmationId)
+  }) }, [replace])
+  const openRecentProject = useCallback((path: string, options?: CourseProjectReplacementOptions) => replace(() => service().open(path), options), [replace])
+  const saveProject = useCallback(async (saveAs = false, options?: CourseProjectOperationOptions): Promise<boolean> => {
+    if (saving.current || options?.isCurrent?.() === false) return false
+    saving.current = true
     try {
-      setRecentProjects(await portsRef.current.listRecentProjects())
-      return true
-    } catch (error) {
-      console.error('更新最近工程列表失败', error)
-      portsRef.current.reportError('最近工程列表暂时无法更新，但不影响当前工程。')
-      return false
-    }
-  }, [])
-
-  const confirmDiscardIfNeeded = useCallback(async (): Promise<
-    CourseProjectLifecycleIdentity | null
-  > => {
-    const started = captureIdentity()
-    if (
-      portsRef.current.hasUnsavedChanges()
-      && (await portsRef.current.confirmDiscardChanges()) !== 'discard'
-    ) {
-      return null
-    }
-    if (!sameProjectMutationTarget(started, captureIdentity())) {
-      portsRef.current.commitStatus('工程已发生新的编辑，已取消此次替换操作')
-      return null
-    }
-    return started
-  }, [])
-
-  const applyCourseArchive = useCallback((
-    archive: CourseProjectArchiveData,
-    path: string | null,
-    extra?: { dirty?: boolean; statusMessage?: string },
-    started?: CourseProjectLifecycleIdentity,
-    epoch?: number,
-    options?: CourseProjectReplacementOptions,
-  ): boolean => {
-    if (epoch !== undefined && !isCurrentMutation(epoch)) return false
-    const current = captureIdentity()
-    if (started && !sameProjectMutationTarget(started, current)) {
-      portsRef.current.commitStatus('工程已发生新的编辑，已取消此次替换操作')
-      return false
-    }
-    const packages = componentPackagesFromArchive(
-      archive.project,
-      archive.componentFiles,
-    )
-    portsRef.current.loadOpenedProject({
-      project: archive.project,
-      path,
-      assetFiles: archive.assetFiles,
-      componentPackages: packages,
-      dirty: extra?.dirty,
-      statusMessage: extra?.statusMessage,
-    })
-    if (options?.origin !== 'lesson') portsRef.current.onProjectReplaced?.()
-    return true
-  }, [])
-
-  const ingestOpenedCourseBytes = useCallback(async (
-    bytes: Uint8Array,
-    path: string | null,
-    extra?: { dirty?: boolean; statusMessage?: string },
-    epoch?: number,
-    started?: CourseProjectLifecycleIdentity,
-    options?: CourseProjectReplacementOptions,
-  ): Promise<boolean> => {
-    const target = started ?? captureIdentity()
-    const archive = await openDefaultCourseProjectAsync(bytes)
-    if (portsRef.current.beforeReplace && !(await portsRef.current.beforeReplace())) return false
-    return applyCourseArchive(archive, path, extra, target, epoch, options)
-  }, [applyCourseArchive])
-
-  const ingestOpenedProjectFile = useCallback(async (
-    file: OpenProjectFileResult,
-    epoch: number,
-    started: CourseProjectLifecycleIdentity,
-    options?: CourseProjectReplacementOptions,
-  ): Promise<boolean> => {
-    const applied = await ingestOpenedCourseBytes(
-      file.bytes,
-      file.path,
-      undefined,
-      epoch,
-      started,
-      options,
-    )
-    if (!applied) return false
-    await portsRef.current.confirmProjectOpen(file.confirmationId).catch((error) => {
-      console.error('确认最近工程失败', error)
-    })
-    return true
-  }, [ingestOpenedCourseBytes])
-
-  const newProject = useCallback(async (options?: CourseProjectReplacementOptions): Promise<boolean> => {
-    const completed = await portsRef.current.runBusy(async () => {
-      if (options?.isCurrent?.() === false) return
-      const confirmed = await confirmDiscardIfNeeded()
-      if (!confirmed || options?.isCurrent?.() === false) return
-      if (portsRef.current.beforeReplace && !(await portsRef.current.beforeReplace())) return
-      if (options?.isCurrent?.() === false || !sameProjectMutationTarget(confirmed, captureIdentity())) return
-      const epoch = beginMutation()
-      const started = captureIdentity()
-      await portsRef.current.clearRecoveryProject().catch((error) => {
-        console.error('清理恢复数据失败', error)
-      })
-      if (
-        options?.isCurrent?.() === false
-        || !isCurrentMutation(epoch)
-        || !sameProjectMutationTarget(started, captureIdentity())
-      ) {
-        portsRef.current.commitStatus('工程已发生新的编辑，已取消此次新建操作')
-        return
-      }
-      portsRef.current.createBlankProject()
-      if (options?.origin !== 'lesson') portsRef.current.onProjectReplaced?.()
-      return true
-    }, '新建课件失败，请重试。')
-    return completed === true
-  }, [confirmDiscardIfNeeded])
-
-  const newSpatialProject = useCallback(async (options?: CourseProjectReplacementOptions): Promise<boolean> => {
-    const completed = await portsRef.current.runBusy(async () => {
-      if (options?.isCurrent?.() === false) return
-      const confirmed = await confirmDiscardIfNeeded()
-      if (!confirmed || options?.isCurrent?.() === false) return
-      if (portsRef.current.beforeReplace && !(await portsRef.current.beforeReplace())) return
-      if (options?.isCurrent?.() === false || !sameProjectMutationTarget(confirmed, captureIdentity())) return
-      const epoch = beginMutation()
-      const started = captureIdentity()
-      await portsRef.current.clearRecoveryProject().catch((error) => {
-        console.error('清理恢复数据失败', error)
-      })
-      if (
-        options?.isCurrent?.() === false
-        || !isCurrentMutation(epoch)
-        || !sameProjectMutationTarget(started, captureIdentity())
-      ) {
-        portsRef.current.commitStatus('工程已发生新的编辑，已取消此次新建操作')
-        return
-      }
-      portsRef.current.createSpatialProject()
-      if (options?.origin !== 'lesson') portsRef.current.onProjectReplaced?.()
-      return true
-    }, '新建无限画布课件失败，请重试。')
-    return completed === true
-  }, [confirmDiscardIfNeeded])
-
-  const newFlowProject = useCallback(async (options?: CourseProjectReplacementOptions): Promise<boolean> => {
-    const completed = await portsRef.current.runBusy(async () => {
-      if (options?.isCurrent?.() === false) return
-      const confirmed = await confirmDiscardIfNeeded()
-      if (!confirmed || options?.isCurrent?.() === false) return
-      if (portsRef.current.beforeReplace && !(await portsRef.current.beforeReplace())) return
-      if (options?.isCurrent?.() === false || !sameProjectMutationTarget(confirmed, captureIdentity())) return
-      const epoch = beginMutation()
-      const started = captureIdentity()
-      await portsRef.current.clearRecoveryProject().catch((error) => {
-        console.error('清理恢复数据失败', error)
-      })
-      if (
-        options?.isCurrent?.() === false
-        || !isCurrentMutation(epoch)
-        || !sameProjectMutationTarget(started, captureIdentity())
-      ) {
-        portsRef.current.commitStatus('工程已发生新的编辑，已取消此次新建操作')
-        return
-      }
-      portsRef.current.createFlowProject()
-      if (options?.origin !== 'lesson') portsRef.current.onProjectReplaced?.()
-      return true
-    }, '新建流式讲义课件失败，请重试。')
-    return completed === true
-  }, [confirmDiscardIfNeeded])
-
-  const openProject = useCallback(() => {
-    void portsRef.current.runBusy(async () => {
-      const confirmed = await confirmDiscardIfNeeded()
-      if (!confirmed) return
-      const file = await portsRef.current.openProjectFile()
-      if (!file) return
-      if (!sameProjectMutationTarget(confirmed, captureIdentity())) {
-        portsRef.current.commitStatus('工程已发生新的编辑，已取消此次打开操作')
-        return
-      }
-      const epoch = beginMutation()
-      const started = captureIdentity()
-      const applied = await ingestOpenedProjectFile(file, epoch, started)
-      if (!applied) return
-      await portsRef.current.clearRecoveryProject().catch((error) => {
-        console.error('清理恢复数据失败', error)
-      })
-      await refreshRecentProjects()
-    }, '打开工程失败。请检查文件是否损坏后重试。')
-  }, [confirmDiscardIfNeeded, ingestOpenedProjectFile, refreshRecentProjects])
-
-  const openRecentProject = useCallback(async (path: string, options?: CourseProjectReplacementOptions): Promise<boolean> => {
-    const completed = await portsRef.current.runBusy(async () => {
-      if (!(await confirmDiscardIfNeeded())) return
-      const epoch = beginMutation()
-      const started = captureIdentity()
-      const file = await (options?.origin === 'lesson' && portsRef.current.openWorkspaceProjectFile ? portsRef.current.openWorkspaceProjectFile(path) : portsRef.current.openRecentProjectFile(path))
-      const applied = await ingestOpenedProjectFile(file, epoch, started, options)
-      if (!applied) return
-      await portsRef.current.clearRecoveryProject().catch((error) => {
-        console.error('清理恢复数据失败', error)
-      })
-      await refreshRecentProjects()
-      return true
-    }, '最近工程打开失败。文件可能已被移动，请使用“打开工程”重新选择。')
-    return completed === true
-  }, [confirmDiscardIfNeeded, ingestOpenedProjectFile, refreshRecentProjects])
-
-  const saveProject = useCallback(
-    async (saveAs = false, options?: CourseProjectOperationOptions) => {
-      if (saveInFlightRef.current || options?.isCurrent?.() === false) return false
-      saveInFlightRef.current = true
-      let savedCurrentRevision = false
-      try {
-        if (portsRef.current.beforeSave && !(await portsRef.current.beforeSave())) return false
+      const result = await ref.current.runBusy(async () => {
+        await service().ready()
+        if (ref.current.beforeSave && !(await ref.current.beforeSave())) return false
         if (options?.isCurrent?.() === false) return false
-        await portsRef.current.runBusy(async () => {
-          if (options?.isCurrent?.() === false) return
-          const preparation = portsRef.current.prepareDraft()
-          if (!preparation.ok) {
-            throw new UserFacingError(
-              '无法保存当前文字草稿',
-              preparation.reason,
-              '请结束输入法组合或重新选择有效文字后再保存。',
-            )
-          }
-          const identity = captureIdentity()
-          const previousPath = portsRef.current.projectPath()
-          const currentPath = saveAs ? undefined : (previousPath ?? undefined)
-          const archive = courseArchiveDataFromSnapshot(preparation.snapshot)
-          const bytes = await saveCourseProjectDocumentAsync(archive)
-          if (options?.isCurrent?.() === false || !sameProjectIdentity(identity, captureIdentity())) {
-            return
-          }
-          const result = await portsRef.current.saveProjectFile({
-            path: currentPath,
-            suggestedName: `${archive.project.title}.h5lesson`,
-            bytes,
-          })
-          if (result) {
-            if (options?.isCurrent?.() === false || !sameProjectIdentity(identity, captureIdentity())) {
-              return
-            }
-            const allChangesSaved = portsRef.current.acknowledgeSaved(
-              result.path,
-              preparation.token,
-            )
-            if (options?.isCurrent?.() === false) return
-            await portsRef.current.onProjectSaved?.({ projectId: identity.projectId, path: result.path, previousPath, saveAs })
-            if (options?.isCurrent?.() === false) return
-            if (allChangesSaved) {
-              savedCurrentRevision = true
-              await portsRef.current.clearRecoveryProject().catch((error) => {
-                console.error('清理恢复数据失败', error)
-              })
-            }
-            await refreshRecentProjects()
-          }
-        }, '保存失败。请检查磁盘空间或另存为其他位置。')
-      } finally {
-        saveInFlightRef.current = false
-      }
-      return savedCurrentRevision
-    },
-    [refreshRecentProjects],
-  )
-
-  const restoreRecovery = useCallback(() => {
-    const offer = recoveryOfferRef.current
-    if (!offer) return
-    void portsRef.current.runBusy(async () => {
-      const epoch = beginMutation()
-      const started = captureIdentity()
-      const applied = await ingestOpenedCourseBytes(
-        offer.bytes,
-        null,
-        {
-          dirty: true,
-          statusMessage: '已恢复未保存的课件，请尽快另存为工程文件',
-        },
-        epoch,
-        started,
-      )
-      if (!applied) return
-      await portsRef.current.clearRecoveryProject()
-      setRecoveryOffer(null)
-      setRecoveryDecisionComplete(true)
-    }, '恢复课件失败。恢复副本可能已经损坏。')
-  }, [ingestOpenedCourseBytes])
-
-  const discardRecovery = useCallback(() => {
-    void portsRef.current.clearRecoveryProject().catch((error) => {
-      portsRef.current.reportError(readableError(error, '恢复副本清理失败。'))
-    }).finally(() => {
-      setRecoveryOffer(null)
-      setRecoveryDecisionComplete(true)
-    })
-  }, [])
-
+        const snapshot = service().snapshot(), previousPath = ref.current.projectPath()
+        const saved = await service().save(saveAs)
+        if (!saved || !snapshot || saved.documentId !== snapshot.documentId || options?.isCurrent?.() === false) return false
+        if (saved.binding.kind !== 'file') return false
+        const current = service().snapshot()
+        if (current?.documentId !== saved.documentId) return false
+        await ref.current.onProjectSaved?.({ projectId: saved.model.kind === 'course-v9' ? saved.model.project.id : '', path: saved.binding.path, previousPath, saveAs })
+        const allSaved = !current.dirty && !ref.current.hasUnsavedChanges()
+        ref.current.commitStatus(allSaved ? `已保存到 ${saved.binding.path}` : '已保存启动保存时的版本；后续修改尚未保存')
+        await refresh()
+        return allSaved
+      }, '保存失败，请检查磁盘或另存为。')
+      return result === true
+    } finally { saving.current = false }
+  }, [refresh])
+  useEffect(() => {
+    if (ref.current.desktopAvailable()) void service().ready().then(async () => {
+      await refresh()
+    }).catch(error => ref.current.reportError(error instanceof Error ? error.message : '文档服务无法连接'))
+  }, [refresh])
   useEffect(() => {
     document.title = `${watch.projectTitle}${watch.dirty ? ' *' : ''} - ${APP_NAME}`
-    if (!portsRef.current.desktopAvailable()) return
-    void portsRef.current.setWindowDirtyState(watch.dirty).catch((error) => {
-      console.error('同步未保存状态失败', error)
-    })
+    if (ref.current.desktopAvailable()) void ref.current.setWindowDirtyState(watch.dirty).catch(() => undefined)
   }, [watch.dirty, watch.projectTitle])
-
-  useEffect(() => {
-    if (!portsRef.current.desktopAvailable()) {
-      setRecoveryDecisionComplete(true)
-      return
-    }
-    let cancelled = false
-    void refreshRecentProjects()
-    void portsRef.current.readRecoveryProject().then(async (recovery) => {
-      if (cancelled) return
-      if (!recovery) {
-        setRecoveryDecisionComplete(true)
-        return
-      }
-      let official = null as ReturnType<typeof inspectCourseProjectArchiveIdentity> | null
-      if (recovery.projectPath) {
-        try {
-          const peeked = await portsRef.current.peekProjectArchive(recovery.projectPath)
-          if (peeked) official = inspectCourseProjectArchiveIdentity(peeked.bytes)
-        } catch {
-          official = null
-        }
-      }
-      if (cancelled) return
-      const offer = shouldOfferCourseProjectRecovery({
-        recovery: inspectCourseProjectArchiveIdentity(recovery.bytes),
-        official,
-      })
-      if (offer === 'offer') {
-        setRecoveryOffer(recovery)
-        return
-      }
-      await portsRef.current.clearRecoveryProject().catch((error) => {
-        console.error('静默清理不可恢复副本失败', error)
-      })
-      if (cancelled) return
-      setRecoveryOffer(null)
-      setRecoveryDecisionComplete(true)
-    }).catch((error) => {
-      if (cancelled) return
-      console.error('读取本地恢复状态失败', error)
-      setRecoveryDecisionComplete(true)
-      portsRef.current.reportError('无法读取本地恢复状态；请在编辑后及时手动保存。')
-    })
-    return () => { cancelled = true }
-  }, [refreshRecentProjects])
-
-  useEffect(() => {
-    const coordinator = recoveryCoordinatorRef.current
-    if (!coordinator) return
-    if (!recoveryDecisionComplete || !watch.dirty) {
-      coordinator.cancel()
-      return
-    }
-    const capture = portsRef.current.captureRecoverySnapshot()
-    if (!capture.ok) {
-      coordinator.cancel()
-      return
-    }
-    const snapshot = capture.snapshot
-    recoveryRevisionRef.current += 1
-    coordinator.schedule(recoveryRevisionRef.current, {
-      identity: captureIdentity(),
-      project: snapshot.project,
-      assetFiles: snapshot.assetFiles,
-      componentPackages: snapshot.componentPackages,
-      projectPath: portsRef.current.projectPath(),
-      title: snapshot.project.title,
-    })
-  }, [
-    recoveryDecisionComplete,
-    watch.componentPackagesTrigger,
-    watch.dirty,
-    watch.documentTrigger,
-    watch.flowDraftTrigger,
-    watch.projectPath,
-    watch.sidecarTrigger,
-    watch.slideDraftTrigger,
-    watch.spatialDraftTrigger,
-    watch.textEditTrigger,
-  ])
-
-  useEffect(() => () => {
-    recoveryCoordinatorRef.current?.dispose()
+  const prepareBeforeClose = useCallback(async (mode: 'save' | 'preserve'): Promise<boolean> => {
+    try { if (service().snapshot()) await service().drain(); return await (ref.current.preserveBeforeClose?.(mode) ?? Promise.resolve(true)) }
+    catch (error) { ref.current.reportError(error instanceof Error ? error.message : '输入未确认，已取消关闭'); return false }
   }, [])
-
-  useEffect(() => {
-    if (!portsRef.current.desktopAvailable()) return
-    return portsRef.current.subscribeSaveRequest(() => {
-      void saveProject(false)
-    })
-  }, [saveProject])
-
-  useEffect(() => {
-    if (!portsRef.current.desktopAvailable()) return
-    return portsRef.current.subscribeSaveAndCloseRequest(() => saveProject(false))
-  }, [saveProject])
-
-  useEffect(() => {
-    if (!portsRef.current.desktopAvailable()) return
-    return portsRef.current.subscribePreserveAndCloseRequest?.(async () => {
-      try { return await (portsRef.current.preserveBeforeClose?.() ?? Promise.resolve(false)) }
-      catch (error) { portsRef.current.reportError(readableError(error, '恢复稿尚未保存，已取消关闭。')); return false }
-    })
-  }, [])
-
-  return useMemo(() => ({
-    recentProjects,
-    recoveryOffer,
-    newProject,
-    newSpatialProject,
-    newFlowProject,
-    openProject,
-    openRecentProject,
-    saveProject,
-    restoreRecovery,
-    discardRecovery,
-  }), [
-    discardRecovery,
-    newFlowProject,
-    newProject,
-    newSpatialProject,
-    openProject,
-    openRecentProject,
-    recentProjects,
-    recoveryOffer,
-    restoreRecovery,
-    saveProject,
-  ])
+  useEffect(() => ref.current.desktopAvailable() ? ref.current.subscribeSaveAndCloseRequest(() => prepareBeforeClose('save')) : undefined, [prepareBeforeClose])
+  useEffect(() => ref.current.desktopAvailable() ? ref.current.subscribePreserveAndCloseRequest?.(() => prepareBeforeClose('preserve')) : undefined, [prepareBeforeClose])
+  return { recentProjects, newProject, newFlowProject, newSpatialProject, openProject, openRecentProject, saveProject }
 }

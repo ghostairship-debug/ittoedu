@@ -1,11 +1,13 @@
+import { createBlankCourseProject } from '../../src/core/course/createCourseProject'
+import { createCourseProjectArchive } from '../../src/core/drivers/codecs/courseProjectArchive'
 import { _electron as electron, expect, test, type ElectronApplication } from '@playwright/test'
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { BACKGROUND_E2E_ENV } from '../../src/main/windowVisibility'
 
-// F08 路径 B（bounded 段）：项目文件夹、材料多选导入与采用、自动模式真实启动到 running 后停止。
-// 本规格只证明启动与停止，不把 running 当作完整教师链通过。完整链在 r19-050。
+// Preserved manual path: project folder, material import and explicit fragment selection.
+// The removed lesson-stage/embedded CLI run is not part of this scenario.
 const root = resolve(__dirname, '../..')
 // 证据图默认写未跟踪的 output/：docs 下那份是已跟踪的历史原件，同名 PNG 会被每次重跑逐字节覆盖
 // （2026-09-19 的扫描就这样刷掉了 09-17 的 17 张，只剩 git 里还有旧字节）。要归档某一轮结果时,
@@ -15,7 +17,7 @@ const evidence = process.env.R19_FRONTEND_EVIDENCE_DIR
   : join(root, 'output/playwright/frontend-special-evidence')
 mkdirSync(evidence, { recursive: true })
 
-test('F08 path B: project folder, multi-select materials, adoption, real automatic start and stop', async () => {
+test('material workspace: project folder, multi-select import and explicit fragment selection', async () => {
   test.setTimeout(280_000)
   const directory = mkdtempSync(join(tmpdir(), 'r19-f08-pathB-'))
   const workspace = join(directory, 'workspace'); mkdirSync(workspace)
@@ -43,12 +45,17 @@ test('F08 path B: project folder, multi-select materials, adoption, real automat
     await expect(page.locator('.lesson-project-group', { hasText: '九年级物理' })).toBeVisible()
     expect(existsSync(join(workspace, '九年级物理'))).toBe(true)
 
-    // 课件 + 材料多选导入（一次对话框选两个真实文件）；课例段已从导航移除，空对话区的「新建课件」直达模态框
-    await page.getByRole('button', { name: '新建课件', exact: true }).click()
-    await page.getByRole('textbox', { name: '课件名称' }).fill('闭合电路')
-    await page.getByRole('button', { name: '创建课件' }).click()
-    // 课例段已从导航移除：创建后直接激活课例上下文（创作流程面板出现）
-    await expect(page.locator('.lesson-workflow')).toBeVisible()
+    const lesson = await page.evaluate(async directory => {
+      const result = await window.desktopAPI!.lesson!({ operation: 'create-lesson', directory, name: '闭合电路' })
+      if (!result.lesson) throw new Error('Lesson fixture missing')
+      return result.lesson
+    }, workspace)
+    const project = createBlankCourseProject({ title: '闭合电路', includeDefaultController: false, controls: 'none' })
+    writeFileSync(join(lesson.identity.normalizedDirectory, 'course.h5lesson'), createCourseProjectArchive({ project, assetFiles: {}, componentFiles: {} }))
+    writeFileSync(join(lesson.identity.normalizedDirectory, '.courseware', 'lesson.json'), JSON.stringify({ ...lesson.manifest, coursePath: 'course.h5lesson' }))
+    await page.reload()
+    await page.locator('.lesson-directory-tree').getByRole('button', { name: '闭合电路', exact: true }).click()
+    await page.locator('.lesson-directory-tree').getByRole('button', { name: 'course.h5lesson', exact: true }).click()
     await page.getByRole('tab', { name: '材料', exact: true }).click()
     await app.evaluate(({ dialog }, input) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: input }) }, [materialA, materialB])
     await page.getByRole('button', { name: /^添加材料（PDF/ }).click()
@@ -61,33 +68,15 @@ test('F08 path B: project folder, multi-select materials, adoption, real automat
     await page.getByRole('article').filter({ has: page.getByRole('heading', { name: '教案乙.md', exact: true }) }).getByRole('checkbox', { name: '采用片段 1' }).check()
     await page.screenshot({ path: join(evidence, 'B2-adopted-selections.png') })
 
-    // 自动模式真实启动：开始自动创作 → running → 停止
-    const panel = page.getByRole('region', { name: '课例创作流程' })
-    await panel.getByRole('button', { name: '自动模式（按材料）', exact: true }).click()
-    await expect(panel.getByText(/自动模式已就绪/)).toBeVisible()
-    await page.getByRole('textbox', { name: '课例创作目标' }).fill('为八年级学生讲闭合电路与串联电路，15 分钟，基于所选材料。')
-    await panel.getByRole('button', { name: '开始自动创作', exact: true }).click()
-    const context = await page.evaluate(async directory => {
-      const lesson = (await window.desktopAPI!.lesson!({ operation: 'list-lessons', directory })).lessons![0]!
-      const conversation = (await window.desktopAPI!.lesson!({ operation: 'list-conversations', lesson: lesson.identity })).conversations![0]!
-      return { lesson: lesson.identity, conversationId: conversation.conversationId }
-    }, workspace)
-    let status = ''
-    for (let attempt = 0; attempt < 60; attempt++) {
-      const current = await page.evaluate(async context => window.desktopAPI!.lessonAuthoring!({ operation: 'read', ...context }), context)
-      status = current.run?.status ?? ''
-      if (status === 'running' || status === 'waiting-confirmation') break
-      if (status === 'failed' || status === 'stopped') throw new Error(`自动启动失败：${current.run?.message}`)
-      await page.waitForTimeout(2000)
-    }
-    expect(['running', 'waiting-confirmation']).toContain(status)
-    await page.screenshot({ path: join(evidence, 'B3-automatic-running.png') })
-    await panel.getByRole('button', { name: '停止', exact: true }).click()
-    await expect.poll(async () => (await page.evaluate(async context => window.desktopAPI!.lessonAuthoring!({ operation: 'read', ...context }), context)).run?.status).toBe('stopped')
-    await page.screenshot({ path: join(evidence, 'B4-automatic-stopped.png') })
+    await expect(page.getByRole('article').filter({ has: page.getByRole('heading', { name: '教材甲.txt', exact: true }) }).getByRole('checkbox', { name: '用于本课例创作（整份材料）' })).toBeChecked()
+    await expect(page.getByRole('article').filter({ has: page.getByRole('heading', { name: '教案乙.md', exact: true }) }).getByRole('checkbox', { name: '采用片段 1' })).toBeChecked()
+    const records = await page.evaluate(async lesson => window.desktopAPI!.lessonMaterials!.list({ lessonId: lesson.identity.lessonId, rootPath: lesson.identity.normalizedDirectory }), lesson)
+    expect(records.map(record => record.title).sort()).toEqual(['教材甲.txt', '教案乙.md'].sort())
+    for (const record of records) expect(readFileSync(join(lesson.identity.normalizedDirectory, record.sourcePath)).length).toBeGreaterThan(0)
   } finally {
     if (app) await app.evaluate(({ BrowserWindow, app: electronApp }) => { BrowserWindow.getAllWindows().forEach(window => window.destroy()); electronApp.exit(0) }).catch(() => {})
     await app?.close().catch(() => {})
+    if (!resolve(directory).startsWith(resolve(tmpdir()) + require('node:path').sep) || !directory.includes('r19-f08-pathB-')) throw new Error('Unsafe test directory')
     rmSync(directory, { recursive: true, force: true })
   }
 })

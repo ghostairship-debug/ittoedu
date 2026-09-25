@@ -1,5 +1,5 @@
-export const STAGE_VIEWPORT_WIDTH = 1280
-export const STAGE_VIEWPORT_HEIGHT = 720
+import { STAGE_VIEWPORT_WIDTH, STAGE_VIEWPORT_HEIGHT } from '../../shared/stageViewport'
+export { STAGE_VIEWPORT_WIDTH, STAGE_VIEWPORT_HEIGHT } from '../../shared/stageViewport'
 export const STAGE_VIEWPORT_MIN_ZOOM = 0.5
 export const STAGE_VIEWPORT_MAX_ZOOM = 2
 

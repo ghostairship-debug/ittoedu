@@ -1,5 +1,6 @@
 import {
   Archive,
+  ArrowLeft,
   Box,
   ChevronDown,
   Eye,
@@ -21,6 +22,7 @@ import { useEffect, useState } from 'react'
 import type { RecentProjectEntry } from '../../shared/ipcTypes'
 import type { CourseProjectHealthSummary } from '../../shared/courseProjectHealth'
 import { APP_NAME } from '../../shared/constants'
+import { useCourseEditorChrome } from '../documents/CourseEditorChromeContext'
 import type { SingleHtmlExportMode } from '../export/course/coursePackagePreflight'
 import {
   selectActiveCourseProjectDocument,
@@ -103,6 +105,7 @@ export function TopToolbar({
   onPreview,
   onExport,
 }: TopToolbarProps) {
+  const editorChrome = useCourseEditorChrome()
   const dirty = useEditorStore(selectHasUnsavedCourseChanges)
   const canUndo = useEditorStore(selectCanUndoActiveSurface)
   const canRedo = useEditorStore(selectCanRedoActiveSurface)
@@ -129,12 +132,14 @@ export function TopToolbar({
 
   return (
     <header className="toolbar" data-testid="top-toolbar">
-      <div className="toolbar__brand" title={APP_NAME}>
-        <span className="toolbar__brand-mark">
-          <Box size={18} strokeWidth={2.2} />
-        </span>
-        <span>{APP_NAME}</span>
-      </div>
+      {editorChrome.workbench && editorChrome.mode === 'deep'
+        ? <button type="button" className="toolbar__return-workbench" onClick={() => editorChrome.setMode('light')}>
+            <ArrowLeft size={16} aria-hidden="true" />返回工作台
+          </button>
+        : <div className="toolbar__brand" title={APP_NAME}>
+            <span className="toolbar__brand-mark"><Box size={18} strokeWidth={2.2} /></span>
+            <span>{APP_NAME}</span>
+          </div>}
 
       <div className="toolbar__group">
         <div className="new-project-split">

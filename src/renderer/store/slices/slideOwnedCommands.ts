@@ -1,5 +1,5 @@
 import { commitResourceAwareAuthoringHistory } from '../../authoring/resourceAwareAuthoringHistory'
-import { updateSlideBackgroundOwner } from '../../course/courseBackgroundCommands'
+import { updateSlideBackgroundOwner } from '../../../core/tools/courseBackground'
 import { synchronizeCourseTeacherControllerControls } from '../../../shared/teacherControllerConsistency'
 import type { ComponentPackageData } from '../../../shared/componentTypes'
 import {
@@ -16,23 +16,15 @@ import {
   emptyCourseAssetSidecar,
   freezeCourseAssetSidecar,
 } from '../../project/v9AssetAdapter'
-import {
-  deleteEffectiveLayerItems,
-  moveEffectiveLayerOwner,
-  patchEffectiveLayerItem,
-  patchEffectiveLayerItems,
-  reorderEffectiveLayerItems,
-  setGlobalLayerLocationVisibility,
-  setGlobalLayerVisibleAtLocation,
-  type EffectiveLayerPropertyPatch,
-} from '../../course/effectiveLayerCommands'
-import { setGlobalLayerScenePlane } from '../../course/globalLayerCommands'
+import { deleteEffectiveLayerItems, reorderEffectiveLayerItems } from '../../../core/tools/layerCommands'
+import { moveEffectiveLayerOwner, patchEffectiveLayerItem, patchEffectiveLayerItems, setGlobalLayerLocationVisibility, setGlobalLayerVisibleAtLocation, type EffectiveLayerPropertyPatch } from '../../course/effectiveLayerCommands'
+import { setGlobalLayerScenePlane } from '../../../core/tools/globalLayers'
 import { buildCandidateEffectiveLayers } from '../../course/activeSurfaceProjection'
 import type { EditorActionId } from '../../course/editorActionTypes'
 import type { EditorFocusKind, EditorSelectionSnapshot } from '../../course/editorActionRouting'
 import {
   copySlideGlobalClipboard,
-} from '../../course/v9SlideClipboard'
+} from '../../../core/tools/slideClipboard'
 import {
   deleteSlideSceneLayers,
   duplicateSlideGlobalLayers,

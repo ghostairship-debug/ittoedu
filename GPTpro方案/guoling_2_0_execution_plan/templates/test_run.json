@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "case_id": "S01-T01",
+  "status": "not_run",
+  "tested_commit": null,
+  "build_hash": null,
+  "date": null,
+  "environment": {
+    "os": null,
+    "app": null,
+    "runtime": null,
+    "model": null,
+    "effort": null,
+    "account_type": null
+  },
+  "commands": [],
+  "counts": {
+    "discovered": null,
+    "run": null,
+    "passed": null,
+    "failed": null,
+    "skipped": null
+  },
+  "evidence_files": [],
+  "failure_category": null,
+  "notes": ""
+}

@@ -9,11 +9,11 @@ import {
   createExternalComponentNode,
   createImageNode,
   createTextNode,
-} from '@/renderer/project/nativeNodeFactories'
+} from '@/core/tools/nativeNodeFactories'
 import {
   detectCourseProjectArchiveFormat,
   openCourseProjectArchive,
-} from '@/renderer/project/courseProjectArchive'
+} from '../../src/core/drivers/codecs/courseProjectArchive'
 import { openDefaultCourseProject } from '@/renderer/project/courseProjectIo'
 import { COURSE_PROJECT_REJECTION_INPUTS } from '../fixtures/course-project-v9'
 import { locateCourseLayer } from '@/renderer/course/effectiveLayerCommands'

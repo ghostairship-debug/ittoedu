@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
+import { createBlankCourseProject } from '@/core/course/createCourseProject'
 import {
   mountPublishedCourseTryRun,
   TRY_RUN_INTERACTION_DIAGNOSTIC_LIMIT,

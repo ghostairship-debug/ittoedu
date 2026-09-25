@@ -6,7 +6,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { DesktopAPI } from '../../src/shared/ipcTypes'
 import type { RuntimeLayerItem } from '../../src/shared/courseProjectTypes'
-import { createBlankCourseProject } from '../../src/renderer/project/createCourseProject'
+import { createBlankCourseProject } from '../../src/core/course/createCourseProject'
 import {
   selectActiveCourseProjectDocument,
   useEditorStore,
@@ -176,7 +176,6 @@ type AppDesktopApi = DesktopAPI & {
 function appApi(): AppDesktopApi {
   return {
     legacyPpt: vi.fn(async () => null),
-    localAgent: vi.fn(async () => ({ enabled: false })),
     materials: vi.fn(async () => []),
     openProject: vi.fn(async () => null),
     listRecentProjects: vi.fn(async () => []),

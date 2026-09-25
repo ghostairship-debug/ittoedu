@@ -17,7 +17,7 @@ import '../src/renderer/export/bundledFontEmbedSourceNode'
 import {
   importComponentPackage,
   parseComponentPackageFiles,
-} from '../src/renderer/components/importComponentPackage'
+} from '../src/core/drivers/codecs/importComponentPackage'
 import {
   buildPublishedCourseStandaloneHtml,
   buildPublishedCourseWebPackage,
@@ -35,8 +35,8 @@ import {
   createCourseProjectArchive,
   openCourseProjectArchive,
   type CourseProjectArchiveData,
-} from '../src/renderer/project/courseProjectArchive'
-import { createBlankCourseProject } from '../src/renderer/project/createCourseProject'
+} from '../src/core/drivers/codecs/courseProjectArchive'
+import { createBlankCourseProject } from '../src/core/course/createCourseProject'
 import type { ComponentPackageData, ComponentManifest } from '../src/shared/componentTypes'
 import { courseProjectDocumentSchema } from '../src/shared/courseProjectSchema'
 import { BACKGROUND_E2E_ENV } from '../src/main/windowVisibility'

@@ -10,7 +10,7 @@ import { describeGenerationSemanticTools, generationProjectDocumentWireInputSche
 import { courseAgentMethodSkills, courseAgentProductSkills, courseAgentSessionSkillMarkdown, courseAgentSkillMarkdown, courseAgentSkillSummary } from '../src/shared/courseAgentSkills'
 import { courseAgentCapabilityDiskIndex, courseAgentCapabilityQueryHelp, type CourseAgentCapabilityData, type CourseAgentCapabilityEntry } from '../src/shared/courseAgentCapabilities'
 import packageJson from '../package.json'
-import { importComponentPackage } from '../src/renderer/components/importComponentPackage'
+import { importComponentPackage } from '../src/core/drivers/codecs/importComponentPackage'
 import { BUILT_IN_COMPONENT_CATALOG_DIRECTORY, BUILT_IN_COMPONENT_CATALOG_SHA256 } from '../src/shared/builtInComponentCatalog'
 import {
   COMPONENT_CATALOG_VERSION,
@@ -1653,9 +1653,9 @@ export async function generateAiCapabilityArtifacts(
       execution: 'product-managed-chromium-private-session',
       entrypoints: {
         externalCaseBuilder: 'scripts/build-courseware-case.ts',
-        createCourseProject: 'src/renderer/project/createCourseProject.ts',
-        courseProjectArchive: 'src/renderer/project/courseProjectArchive.ts',
-        importComponentPackage: 'src/renderer/components/importComponentPackage.ts',
+        createCourseProject: 'src/core/course/createCourseProject.ts',
+        courseProjectArchive: 'src/core/drivers/codecs/courseProjectArchive.ts',
+        importComponentPackage: 'src/core/drivers/codecs/importComponentPackage.ts',
         courseProjectSchema: 'src/shared/courseProjectSchema.ts',
       },
       output: 'Course Project V9 .h5lesson and offline HTML inside case-dir',

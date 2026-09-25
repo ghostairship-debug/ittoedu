@@ -6,7 +6,7 @@ import {
   type SlideSceneDocument,
   type SlideSurfaceDocument,
 } from '@/shared/courseProjectTypes'
-import { createBlankFlowSurface, syncFlowCourseLocations } from '@/renderer/course/flowDocumentModel'
+import { createBlankFlowSurface, syncFlowCourseLocations } from '../../src/core/tools/flowDocumentModel'
 import {
   buildCourseTreeView,
   collectCourseTreeNodeIds,
@@ -21,7 +21,7 @@ import {
 } from '@/renderer/course/slideAuthoringBackend'
 import { addSpatialCameraFrameFromSession } from '@/renderer/course/spatialCameraCommands'
 import { openSpatialAuthoringSession } from '@/renderer/course/spatialEditorCommands'
-import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
+import { createBlankCourseProject } from '@/core/course/createCourseProject'
 import { createBlankFlowCourseProject } from '@/renderer/project/createFlowCourseProject'
 import { createBlankSpatialCourseProject } from '@/renderer/project/createSpatialCourseProject'
 

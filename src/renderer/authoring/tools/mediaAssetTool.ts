@@ -2,7 +2,7 @@ import { z } from 'zod'
 import { makeAuthoringAddress } from '../../../shared/authoringAddress'
 import { createImageAssetImport, createMediaAssetImport, readImageDimensions, readMediaMetadata } from '../../project/assetManager'
 import { applyCourseAssetImports } from '../../project/v9AssetAdapter'
-import { commitCourseProjectMutation } from '../../course/courseProjectMutation'
+import { commitCourseProjectMutation } from '../../../core/tools/courseProjectMutation'
 import { resolveAuthoringToolScope } from './authoringToolScope'
 import type { AuthoringToolDefinition } from './executeAuthoringTool'
 

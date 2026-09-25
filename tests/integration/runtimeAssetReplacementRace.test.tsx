@@ -10,7 +10,7 @@ import type { PlayerAuthoringHostMessage } from '../../src/shared/playerAuthorin
 import type { RuntimeAuthoringTarget } from '../../src/shared/runtimeTypes'
 import type { DesktopAPI } from '../../src/shared/ipcTypes'
 import { componentPackagesFromArchive } from '../../src/renderer/components/componentPackageStore'
-import { openCourseProjectArchive } from '../../src/renderer/project/courseProjectArchive'
+import { openCourseProjectArchive } from '../../src/core/drivers/codecs/courseProjectArchive'
 import type { ImportedImageAsset } from '../../src/renderer/project/assetManager'
 import {
   selectActiveCourseProjectDocument,

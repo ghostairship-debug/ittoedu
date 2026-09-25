@@ -244,7 +244,7 @@ export type CrossSurfaceCommandPorts = {
     prepareCourseProjectPersistence(): PrepareCourseProjectPersistenceResult
     captureCourseProjectRecoverySnapshot(): CaptureCourseProjectRecoveryResult
     acknowledgeCourseProjectSaved(path: string, token: CourseProjectPersistenceToken): boolean
-    reopenArchive(bytes: Uint8Array): boolean
+    reopenArchive(bytes: Uint8Array): Promise<boolean>
     exportArchive(): Uint8Array | null
   }
   readResources(): CourseResourceState

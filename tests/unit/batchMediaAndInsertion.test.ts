@@ -1,11 +1,11 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import type { AssetMeta } from '@/shared/contracts/media-v1'
 import { MAX_SCENE_NODES } from '@/shared/constants'
-import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
+import { createBlankCourseProject } from '@/core/course/createCourseProject'
 import {
   createImageNode,
   createTextNode,
-} from '@/renderer/project/nativeNodeFactories'
+} from '@/core/tools/nativeNodeFactories'
 import { buildAssetContentHashIndex } from '@/renderer/project/assetManager'
 import {
   commitMediaBatchImport,

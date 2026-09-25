@@ -5,16 +5,14 @@ import path from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import { captureGenerationFixture as captureGenerationSnapshot } from '../fixtures/generationSnapshot'
 import { type GenerationReferenceScope } from '../../src/renderer/authoring/generation/generationSnapshot'
-import { createBlankCourseProject } from '../../src/renderer/project/createCourseProject'
+import { createBlankCourseProject } from '../../src/core/course/createCourseProject'
 import { createBlankFlowCourseProject } from '../../src/renderer/project/createFlowCourseProject'
-import { createTextNode } from '../../src/renderer/project/nativeNodeFactories'
+import { createTextNode } from '../../src/core/tools/nativeNodeFactories'
 import { projectEffectiveLayers } from '../../src/renderer/course/effectiveLayerProjection'
 import { sceneNodeToCourseLayerItem } from '../../src/shared/courseProjectModel'
 import { generationRequestSchema, type GenerationRequest } from '../../src/shared/generationContract'
 import { localAgentRequestSchema, localAgentResponseSchema, type LocalAgentCapabilities, type LocalAgentId } from '../../src/shared/localAgentContract'
 import type { LocalAgentCliAdapterV2, LocalAgentNativeEvent } from '../../src/shared/localAgentTaskContract'
-import { LocalAgentHarness } from '../../src/main/localAgent/harness'
-import { LocalAgentRepository } from '../../src/main/localAgent/repository'
 import { createWorkspaceIdentity } from '../../src/main/workspaceIdentity'
 
 type Page = { location: { id: string }; canvas?: { width: number; height: number } }
@@ -66,60 +64,5 @@ describe('current Slide canvas dimensions in generation snapshots', () => {
     expect(pages(generationRequestSchema.parse(old))[0]).not.toHaveProperty('canvas')
   })
 
-  it.each(['codex', 'claude', 'opencode'] as const)('preserves canvas through strict IPC, actual Main storage, candidate request and %s prompt', async adapterId => {
-    // The adapter is a deterministic unit port. Main's public harness, repository,
-    // filesystem staging, strict parsers and prompt producer execute normally.
-    const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'canvas-main-roundtrip-'))
-    const f = fixture(), request = f.capture('course', path.join(directory, 'lesson.h5lesson'))
-    const raw = localAgentRequestSchema.parse({ operation: 'generate', projectId: request.workspace.projectId,
-      projectPath: request.workspace.normalizedPath, adapter: adapterId, request })
-    if (raw.operation !== 'generate') throw new Error('Generate request required')
-    let turn!: Parameters<LocalAgentCliAdapterV2['startTurn']>[0]
-    let candidateRequest!: GenerationRequest
-    const capabilities: LocalAgentCapabilities = { version: 1, adapter: adapterId, cliVersion: 'unit-port',
-      models: [{ id: 'default', resolvedModel: null, label: 'Default', image: 'unknown', effort: { kind: 'unsupported' } }],
-      current: { model: 'default', resolvedModel: null, effort: null },
-      input: { image: 'unknown', readFile: 'supported', question: 'structured', correction: 'turn-boundary', cancel: 'supported' } }
-    const adapter: LocalAgentCliAdapterV2 = {
-      id: adapterId,
-      async open(input) { candidateRequest = JSON.parse(await fs.readFile(path.join(input.candidateRoot!, 'request.json'), 'utf8')); return { externalSessionId: 'unit-native', capabilities } },
-      async configure() { return capabilities },
-      async startTurn(input) { turn = input; return { nativeTurnId: 'unit-turn' } },
-      async input() { throw new Error('Unit test does not send follow-up input') },
-      async *events(): AsyncIterable<LocalAgentNativeEvent> {
-        const identity = { taskId: turn.taskId, epoch: turn.epoch, workspace: turn.workspace, runId: turn.runId, nativeTurnId: 'unit-turn' }
-        yield { ...identity, kind: 'configuration', capabilities }
-        yield { ...identity, kind: 'text', phase: 'body', itemId: 'reply', operation: 'replace', text: '只读尺寸确认' }
-        yield { ...identity, kind: 'turn-ended', status: 'completed', failure: null }
-      },
-      async close() {},
-    }
-    const harness = new LocalAgentHarness(new LocalAgentRepository(directory), () => adapter)
-    try {
-      const id = await harness.generate(request.workspace, adapterId as LocalAgentId, raw.request)
-      await expect.poll(() => harness.running).toBe(false)
-      const reopened = await new LocalAgentRepository(directory).list(request.workspace)
-      const stored = localAgentResponseSchema.parse({ enabled: true, records: reopened.records }).records!.find(record => record.id === id)!
-      expect(stored.status).toBe('completed')
-      expect(pages(stored.generationRequest!)).toEqual(pages(request))
-      expect(pages(candidateRequest)).toEqual(pages(request))
-      const wire = JSON.parse(turn.text.split('\n').at(-1)!) as GenerationRequest
-      const aliases = (candidateRequest as GenerationRequest & { destinationAliases: Record<string, { kind: string; target?: unknown }> }).destinationAliases
-      const expandedPages = pages(wire).map(page => ({ ...page,
-        backgrounds: (page as any).backgrounds?.map((background: any) => {
-          expect(typeof background.target).toBe('string')
-          const destination = aliases[background.target]!
-          expect(destination.kind).toBe('update')
-          return { ...background, target: destination.target }
-        }),
-      }))
-      expect(expandedPages).toEqual(pages(request))
-      expect(pages(wire).map(page => page.canvas)).toEqual(pages(request).map(page => page.canvas))
-      expect(stored.generationRequest!.documentRevision).toBe(request.documentRevision)
-    } finally {
-      await harness.close()
-      if (!path.resolve(directory).startsWith(path.resolve(os.tmpdir()) + path.sep)) throw new Error('Unexpected test directory')
-      await fs.rm(directory, { recursive: true, force: true })
-    }
-  })
+  
 })

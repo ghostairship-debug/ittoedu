@@ -11,9 +11,9 @@ import type {
 import { publishedCourseV2Schema } from '@/shared/publishedCourseSchema'
 import type { PublishedCourseV2Payload } from '@/shared/publishedCourseTypes'
 
-import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
+import { createBlankCourseProject } from '@/core/course/createCourseProject'
 import { createBlankSpatialCourseProject } from '@/renderer/project/createSpatialCourseProject'
-import { createTableLayerItem, createTableNode } from '@/renderer/project/nativeNodeFactories'
+import { createTableLayerItem, createTableNode } from '@/core/tools/nativeNodeFactories'
 import {
   PLAYER_V2_ENTRY_CORRUPT_ERROR,
   PLAYER_V2_ENTRY_UNSUPPORTED_ERROR,

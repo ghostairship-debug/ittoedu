@@ -25,9 +25,9 @@ test('copies image and cw object through real Flow and Markdown UI, reopens and 
       const load = (path: string): Promise<any> => import(path)
       const { createBlankFlowCourseProject } = await load('/src/renderer/project/createFlowCourseProject.ts')
       const { createImageAssetImport } = await load('/src/renderer/project/assetManager.ts')
-      const { createCourseProjectArchive } = await load('/src/renderer/project/courseProjectArchive.ts')
+      const { createCourseProjectArchive } = await load('/src/core/drivers/codecs/courseProjectArchive.ts')
       const made = await window.desktopAPI!.lesson!({ operation: 'create-lesson', directory, name: '跨正文复制课例' })
-      if (!made.lesson || !made.conversation) throw new Error('Fixture lesson creation failed')
+      if (!made.lesson) throw new Error('Fixture lesson creation failed')
       const project = createBlankFlowCourseProject({ id: 'r19-cross-owner', title: '跨正文复制', includeDefaultController: false, controls: 'none' })
       const canvas = document.createElement('canvas'); canvas.width = 48; canvas.height = 32
       const ctx = canvas.getContext('2d')!; ctx.fillStyle = '#2468db'; ctx.fillRect(0, 0, 48, 32); ctx.fillStyle = '#ffdd33'; ctx.fillRect(8, 6, 24, 18)
@@ -40,13 +40,13 @@ test('copies image and cw object through real Flow and Markdown UI, reopens and 
         { id: 'source-image', type: 'media', assetId: asset.meta.id, mediaKind: 'image', altText: '蓝底黄方块', layout: 'content-width' },
         { id: 'source-callout', type: 'callout', tone: 'example', title: { inlines: [{ type: 'text', text: '复制对象标题' }] }, body: { inlines: [{ type: 'text', text: '对象正文保持可编辑' }] } },
         { id: 'source-end', type: 'paragraph', content: { inlines: [{ type: 'text', text: '复制终点' }] } }]
-      return { lesson: made.lesson, conversation: made.conversation, projectId: project.id, archive: Array.from(createCourseProjectArchive({ project, assetFiles: { [asset.meta.id]: asset.bytes }, componentFiles: {} })) as number[] }
+      return { lesson: made.lesson, projectId: project.id, archive: Array.from(createCourseProjectArchive({ project, assetFiles: { [asset.meta.id]: asset.bytes }, componentFiles: {} })) as number[] }
     }, runRoot)
     const directory = fixture.lesson.identity.normalizedDirectory
     await testInfo.attach('retained-lesson-directory', { body: directory, contentType: 'text/plain' })
     const projectPath = join(directory, 'course.h5lesson'), markdownPath = join(directory, 'copy.md')
     writeFileSync(projectPath, Uint8Array.from(fixture.archive)); writeFileSync(markdownPath, '', 'utf8')
-    await page.evaluate(async ({ fixture, projectPath }) => { await window.desktopAPI!.lesson!({ operation: 'bind-project', lesson: fixture.lesson.identity, conversationId: fixture.conversation.conversationId, projectId: fixture.projectId, projectPath, saveAs: false }) }, { fixture, projectPath })
+    writeFileSync(join(directory, '.courseware', 'lesson.json'), JSON.stringify({ ...fixture.lesson.manifest, coursePath: 'course.h5lesson' }))
     await app.evaluate(({ dialog }, directory) => { dialog.showOpenDialog = (async () => ({ canceled: false, filePaths: [directory] })) as typeof dialog.showOpenDialog }, runRoot)
     await page.getByRole('button', { name: '打开工作空间', exact: true }).first().click()
     // V3.1：课例段已从导航移除，点树中的 .h5lesson 直接激活课例上下文

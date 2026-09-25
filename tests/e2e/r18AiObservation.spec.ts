@@ -9,12 +9,12 @@ import { BACKGROUND_E2E_ENV } from '../../src/main/windowVisibility'
 import { APP_E2E_TEMP_DIRECTORY_NAME } from '../../src/shared/constants'
 import { sceneNodeToCourseLayerItem } from '../../src/shared/courseProjectModel'
 import type { CourseProjectDocument } from '../../src/shared/courseProjectTypes'
-import type { GenerationRequest } from '../../src/shared/generationContract'
-import { createBlankCourseProject } from '../../src/renderer/project/createCourseProject'
+import type { CurrentObservation } from './helpers/g20AuthoringObservation'
+import { createBlankCourseProject } from '../../src/core/course/createCourseProject'
 import { createBlankFlowCourseProject } from '../../src/renderer/project/createFlowCourseProject'
 import { createBlankSpatialCourseProject } from '../../src/renderer/project/createSpatialCourseProject'
-import { createTextNode } from '../../src/renderer/project/nativeNodeFactories'
-import { createCourseProjectArchive, openCourseProjectArchive } from '../../src/renderer/project/courseProjectArchive'
+import { createTextNode } from '../../src/core/tools/nativeNodeFactories'
+import { createCourseProjectArchive, openCourseProjectArchive } from '../../src/core/drivers/codecs/courseProjectArchive'
 import { expectBackgroundWindowsIsolated } from './expectBackgroundWindowsIsolated'
 import { enterIndependentEditor } from './lessonWorkspaceEntry'
 
@@ -131,7 +131,9 @@ async function readState(page: Page) {
     const { useEditorStore, selectActiveCourseProjectDocument } = await load('/src/renderer/store/editorStore.ts')
     const state = useEditorStore.getState()
     const document = selectActiveCourseProjectDocument(state)
-    const history = state.spatialSession?.history ?? state.flowSession?.history ?? state.slideBackend?.getSession().history
+    const { readCanonicalCourse } = await load('/tests/e2e/helpers/g20AuthoringObservation.ts')
+    const canonical = await readCanonicalCourse()
+    const history = { undoDepth: canonical.undoDepth, redoDepth: canonical.redoDepth }
     return { document, history, draft: state.v9ContentEdit ?? state.flowDocumentDraft ?? state.flowTextEdit ?? state.spatialContentEdit,
       flowSurfaceId: state.flowSession?.selection.surfaceId ?? null,
       path: state.projectPath, dirty: state.dirty, session: state.courseAuthoringSession }
@@ -232,23 +234,15 @@ async function discardTextDraft(page: Page, surface: Surface): Promise<void> {
   await format.getByRole('button', { name: '排版', exact: true }).click()
 }
 
-async function observationBridge(page: Page) {
+async function observationController(page: Page) {
   return page.evaluateHandle(async () => {
     const load = (path: string) => import(/* @vite-ignore */ path)
-    const { useEditorStore, selectActiveCourseProjectDocument } = await load('/src/renderer/store/editorStore.ts')
-    const { createCourseChatObservation } = await load('/src/renderer/ui/chat/courseChatObservation.ts')
-    const state = useEditorStore.getState()
-    const owner = { projectId: selectActiveCourseProjectDocument(state).id, projectPath: state.projectPath }
-    const workspaceResult = await window.desktopAPI.localAgent({ operation: 'workspace', ...owner })
-    if (!workspaceResult.workspace) throw new Error('The real Main did not return a workspace identity')
-    const bridge = createCourseChatObservation(window.desktopAPI, owner)
-    return { bridge, input: { workspace: workspaceResult.workspace, scope: 'page',
-      instruction: '只讨论当前未提交文字，请根据当前画面与结构说明。', intent: 'discuss',
-      applyPolicy: 'preview', purpose: 'single-page', expectedResult: 'auto', materials: [], catalogPackages: [] } }
+    const { createCurrentObservation } = await load('/tests/e2e/helpers/g20AuthoringObservation.ts')
+    return { observer: createCurrentObservation(), input: { intent: 'discuss' as const } }
   })
 }
 
-async function assertCapturedFrame(app: ElectronApplication, request: GenerationRequest, output: string) {
+async function assertCapturedFrame(app: ElectronApplication, request: CurrentObservation, output: string) {
   const frame = request.resourceFiles?.find(file => file.path === 'observation/current-frame.png')
   expect(frame).toMatchObject({ mediaType: 'image/png', encoding: 'base64', role: 'image' })
   const bytes = Buffer.from(frame!.content, 'base64')
@@ -322,10 +316,10 @@ async function assertAnimatedRuntimeObservation(launch: Launch, evidence: string
     .getByRole('button', { name: '当前位置试运行', exact: true }).click()
   const marker = launch.page.locator('[data-observation-animation="true"]').last()
   await expect(marker).toBeVisible()
-  const bridge = await observationBridge(launch.page)
+  const observerHandle = await observationController(launch.page)
   const before = await readState(launch.page)
   const attempts: unknown[] = []
-  let first: GenerationRequest | undefined
+  let first: CurrentObservation | undefined
   let firstError: unknown
   try {
     // Exactly two observations distinguish initial observer delivery from a
@@ -333,7 +327,7 @@ async function assertAnimatedRuntimeObservation(launch: Launch, evidence: string
     for (let attempt = 0; attempt < 2; attempt += 1) {
       const frameBefore = await marker.getAttribute('data-frame')
       try {
-        const request: GenerationRequest = await bridge.evaluate(value => value.bridge.capture(value.input))
+        const request: CurrentObservation = await observerHandle.evaluate(value => value.observer.capture(value.input))
         const pixels = await assertCapturedFrame(launch.app, request, join(evidence, `runtime-frame-${attempt}.png`))
         attempts.push({ attempt, frameBefore, frameAfter: await marker.getAttribute('data-frame'), observation: request.observation, pixels })
         if (attempt === 0) first = request
@@ -350,8 +344,8 @@ async function assertAnimatedRuntimeObservation(launch: Launch, evidence: string
     expect(first!.observation).toMatchObject({ source: 'trial', documentRevision: fixture.project.revision })
     expect(first!.observation!.runtime).not.toBeNull()
   } finally {
-    await bridge.evaluate(value => value.bridge.dispose())
-    await bridge.dispose()
+    await observerHandle.evaluate(value => value.observer.dispose())
+    await observerHandle.dispose()
   }
 }
 
@@ -379,21 +373,21 @@ test('real Electron observes each surface memory and active draft without histor
       expect(committed.document.revision).toBe(fixture.project.revision + 1)
       await editText(launch, fixture, `DRAFT ${surface}`, false)
       const before = await readState(launch.page)
-      expect(before.history).toBeTruthy()
+      expect(before.history.undoDepth).toBeGreaterThan(0)
       expect(before.draft).toBeTruthy()
       expect(JSON.stringify(before.document)).toContain(`MEMORY ${surface}`)
       expect(JSON.stringify(before.document)).not.toContain(`DRAFT ${surface}`)
-      const bridge = await observationBridge(launch.page)
+      const observerHandle = await observationController(launch.page)
       try {
-        let request: GenerationRequest
+        let request: CurrentObservation
         try {
-          request = await bridge.evaluate(value => value.bridge.capture(value.input))
+          request = await observerHandle.evaluate(value => value.observer.capture(value.input))
         } catch (error) {
           // A second capture is diagnostic only. It never converts a failed first
           // capture into a passing case or retries a CLI action/document command.
           const afterFailure = await readState(launch.page)
-          const second = await bridge.evaluate(async value => {
-            try { return { request: await value.bridge.capture(value.input) } }
+          const second = await observerHandle.evaluate(async value => {
+            try { return { request: await value.observer.capture(value.input) } }
             catch (reason) { return { error: String(reason) } }
           })
           writeFileSync(join(evidence, `${surface}-capture-failure.json`), JSON.stringify({
@@ -422,7 +416,7 @@ test('real Electron observes each surface memory and active draft without histor
             await expect.poll(() => candidate.evaluate(value => value.session.readObservationState().ready)).toBe(true)
             expect(await candidate.evaluate(value => value.container.isConnected)).toBe(true)
             expect(await candidate.evaluate(value => value.revision)).toBe(before.document.revision + 1)
-            const withCandidate: GenerationRequest = await bridge.evaluate(value => value.bridge.capture(value.input))
+            const withCandidate: CurrentObservation = await observerHandle.evaluate(value => value.observer.capture(value.input))
             expect(withCandidate.observation).toMatchObject({ source: 'authoring', runtime: null,
               documentRevision: before.document.revision, surfaceId: request.observation!.surfaceId })
             expect(withCandidate.resourceFiles!.find(file => file.path === 'observation/current-structure.json')!.content)
@@ -436,8 +430,8 @@ test('real Electron observes each surface memory and active draft without histor
         }
         await expectBackgroundWindowsIsolated(launch.app, true)
       } finally {
-        await bridge.evaluate(value => value.bridge.dispose())
-        await bridge.dispose()
+        await observerHandle.evaluate(value => value.observer.dispose())
+        await observerHandle.dispose()
       }
       await discardTextDraft(launch.page, surface)
       await launch.page.getByRole('button', { name: '保存（Ctrl+S）', exact: true }).click()
@@ -447,7 +441,7 @@ test('real Electron observes each surface memory and active draft without histor
   } finally { await closeEditor(launch) }
 })
 
-test('real external file change prevents Save and discussion, while manual Save As preserves the current draft', async () => {
+test('real external file change prevents overwrite, while read-only observation and manual Save As preserve current memory', async () => {
   test.setTimeout(150_000)
   const launch = await launchEditor()
   try {
@@ -460,17 +454,21 @@ test('real external file change prevents Save and discussion, while manual Save 
     external.title = 'EXTERNAL DISK VERSION'
     external.revision += 7
     writeFileSync(fixture.path, createCourseProjectArchive({ project: external, assetFiles: {}, componentFiles: {} }))
-    const fileStatus = () => launch.page.evaluate(async owner => (
-      await window.desktopAPI.localAgent({ operation: 'file-status', ...owner })
-    ).fileStatus?.status, { projectId: fixture.project.id, projectPath: fixture.path })
-    await expect.poll(fileStatus).toBe('changed')
-    const bridge = await observationBridge(launch.page)
+    const fileStatus = () => launch.page.evaluate(async () => {
+      const load = (path: string) => import(/* @vite-ignore */ path)
+      const { readCanonicalCourse } = await load('/tests/e2e/helpers/g20AuthoringObservation.ts')
+      const canonical = await readCanonicalCourse()
+      const api = window.desktopAPI.documents
+      if (!api || canonical.binding.kind !== 'file') throw new Error('No bound document')
+      const observed = await api.observeFile(canonical.documentId)
+      return observed.version !== canonical.binding.version
+    })
+    await expect.poll(fileStatus).toBe(true)
+    const observer = await observationController(launch.page)
     try {
-      await expect(bridge.evaluate(value => value.bridge.capture(value.input))).rejects.toThrow('stale')
-    } finally {
-      await bridge.evaluate(value => value.bridge.dispose())
-      await bridge.dispose()
-    }
+      const captured: CurrentObservation = await observer.evaluate(value => value.observer.capture(value.input))
+      expect(captured.document).toEqual(before.document)
+    } finally { await observer.evaluate(value => value.observer.dispose()); await observer.dispose() }
     expect(await readState(launch.page)).toEqual(before)
     await launch.page.getByRole('button', { name: '保存（Ctrl+S）', exact: true }).click()
     await expect(launch.page.getByRole('alert')).toContainText('磁盘工程已有变化')
@@ -486,15 +484,7 @@ test('real external file change prevents Save and discussion, while manual Save 
     await expect.poll(async () => (await readState(launch.page)).dirty).toBe(false)
     expect(openCourseProjectArchive(readFileSync(saveAs)).project).toEqual(before.document)
     expect(openCourseProjectArchive(readFileSync(fixture.path)).project).toEqual(external)
-    const recovered = await observationBridge(launch.page)
-    try {
-      await recovered.evaluate(value => value.bridge.fileCurrent())
-      const identity = await recovered.evaluate(value => value.input.workspace)
-      expect(JSON.stringify(identity)).toContain('flow-recovered.h5lesson')
-    } finally {
-      await recovered.evaluate(value => value.bridge.dispose())
-      await recovered.dispose()
-    }
+    expect(await fileStatus()).toBe(false)
     await expectBackgroundWindowsIsolated(launch.app, true)
   } finally { await closeEditor(launch) }
 })

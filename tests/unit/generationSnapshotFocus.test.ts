@@ -3,18 +3,17 @@ import { captureGenerationFixture as captureGenerationSnapshot } from '../fixtur
 import { describe, expect, it } from 'vitest'
 import { type GenerationReferenceScope } from '@/renderer/authoring/generation/generationSnapshot'
 import { generationCapabilityContext } from '@/renderer/authoring/generation/generationCapabilities'
-import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
+import { createBlankCourseProject } from '@/core/course/createCourseProject'
 import { createBlankFlowCourseProject } from '@/renderer/project/createFlowCourseProject'
-import { createImageNode, createTextNode } from '@/renderer/project/nativeNodeFactories'
+import { createImageNode, createTextNode } from '@/core/tools/nativeNodeFactories'
 import { createSortComponentPackage } from '@/renderer/recipes/sort-component/package'
-import { parseComponentPackageFiles } from '@/renderer/components/importComponentPackage'
+import { parseComponentPackageFiles } from '../../src/core/drivers/codecs/importComponentPackage'
 import { withDefaultComponentController } from '@/renderer/components/teacherControllerComponent'
 import { projectEffectiveLayers } from '@/renderer/course/effectiveLayerProjection'
 import { sceneNodeToCourseLayerItem } from '@/shared/courseProjectModel'
 import type { ComponentLayerItem, CourseProjectDocument } from '@/shared/courseProjectTypes'
-import { addCourseFlowPage } from '@/renderer/course/courseLocationCommands'
+import { addCourseFlowPage } from '@/core/tools/courseLocations'
 import { generationNavigationContext } from '@/renderer/authoring/generation/generationNavigationContext'
-import { generationInitialRequestForPrompt } from '../../src/main/localAgent/profile'
 
 function snapshot(document: CourseProjectDocument, selectedIds: string[], scope: GenerationReferenceScope = 'page', componentPackages = {}, stateId: string | null = null) {
   const projection = projectEffectiveLayers({ project: document, locationId: document.startLocationId, stateId })
@@ -48,10 +47,6 @@ describe('selection focus in whole-page generation snapshots', () => {
     expect(navigation.states.map((state: any) => state.nextStep.locationId)).toEqual([project.startLocationId, project.startLocationId, flowId])
     expect(navigation.states.every((state: any) => state.nextScene.locationId === flowId)).toBe(true)
     expect(navigation.rules[0]).toMatchObject({ ruleId: 'record-rule', actions: [{ action: { type: 'step.next' } }] })
-    const wire = generationInitialRequestForPrompt(snapshot(project, ['record-button'], 'selection'))
-    expect((wire.context as any).navigation.current).toEqual(navigation.current)
-    expect((wire.context as any).navigation.states).toBeUndefined()
-    expect(wire.requestDetails.fields).toContain('context.navigation')
     const afterOperation = generationNavigationContext(project, project.startLocationId, 'closed')
     expect(afterOperation.current.nextStep?.stateId).toBe('observed')
     expect(afterOperation.current.previousStep?.stateId).toBe('predict')

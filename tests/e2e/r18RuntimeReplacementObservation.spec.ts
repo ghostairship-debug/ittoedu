@@ -1,3 +1,4 @@
+import { installHostToolTestTransport } from './helpers/g20HostTools'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { _electron as electron, expect, test, type Page } from '@playwright/test'
@@ -54,6 +55,7 @@ test('the immediate formal observation reflects a Runtime replacement at its fin
     const app = await electron.launch({ cwd: productRoot, args: ['.', `--user-data-dir=${userData}`],
       env: { ...process.env, VITE_DEV_SERVER_URL: `http://127.0.0.1:${address.port}/`, ELECTRON_DISABLE_SECURITY_WARNINGS: 'true', [BACKGROUND_E2E_ENV]: '1' } })
     const page = await app.firstWindow()
+    await installHostToolTestTransport(app, page)
     run = { app, page, runRoot, workspaceRoot: runRoot, projectPath, userData, pageErrors: [], consoleErrors: [] }
     page.on('pageerror', error => run!.pageErrors.push(error.message))
     await enterStandaloneEditorFromLanding(page)
@@ -68,62 +70,52 @@ test('the immediate formal observation reflects a Runtime replacement at its fin
     const result = await page.evaluate(async ({ ids, source }) => {
       const load = (path: string) => import(/* @vite-ignore */ path)
       const { useEditorStore, selectActiveCourseProjectDocument } = await load('/src/renderer/store/editorStore.ts')
-      const { createCourseChatObservation } = await load('/src/renderer/ui/chat/courseChatObservation.ts')
+      const { createCurrentObservation, readCanonicalCourse, stageCourseBuild } = await load('/tests/e2e/helpers/g20AuthoringObservation.ts')
       const state = useEditorStore.getState(), project = selectActiveCourseProjectDocument(state)
-      const owner = { projectId: project.id, projectPath: state.projectPath }
-      const workspace = (await window.desktopAPI.localAgent({ operation: 'workspace', ...owner })).workspace
-      if (!workspace) throw new Error('Main did not return the current workspace')
       const captureRects: Array<{ x: number; y: number; width: number; height: number }> = []
-      const bridge = createCourseChatObservation({ ...window.desktopAPI,
-        captureAuthoringObservation(rect: { x: number; y: number; width: number; height: number }) {
-          captureRects.push({ ...rect })
-          return window.desktopAPI.captureAuthoringObservation!(rect)
-        } }, owner)
+      const observer = createCurrentObservation(captureRects)
       const items = (document: any) => document.surfaces.flatMap((surface: any) => surface.type === 'slide' ? surface.scenes.flatMap((scene: any) => scene.layerItems) : [])
       const original = items(project).find((item: any) => item.layerItemId === ids.square)
       const rect = (element: Element) => {
         const box = element.getBoundingClientRect()
         return { x: box.x, y: box.y, width: box.width, height: box.height }
       }
+      let stopBuild: (() => Promise<unknown>) | undefined
       try {
-        const before = await bridge.capture({ workspace, scope: 'selection', purpose: 'local-edit', intent: 'edit',
-          instruction: 'Replace the selected blue square with the purple Runtime panel and retain its frame.', applyPolicy: 'auto', expectedResult: 'auto', materials: [], catalogPackages: [] })
-        const destination = before.destinations.find((value: any) => value.kind === 'update' && value.target.itemId === ids.square)
-        const scope = before.destinations.find((value: any) => value.kind === 'create' && value.scope.ownerKey === destination?.target.ownerKey)
-        if (!destination || !scope) throw new Error('Formal observation did not expose replacement destinations')
-        const prepared = await useEditorStore.getState().prepareGenerationCandidate(before, {
-          version: 1, requestId: before.requestId, candidateId: crypto.randomUUID(), summary: 'Canonical Runtime replacement observation',
-          steps: [
-            { id: 'runtime', tool: 'runtime.insert', carrier: 'runtime', destination: scope,
-              input: { label: 'Purple Runtime panel', runtime: { protocol: 'canvas-runtime', runtimeApiVersion: 2, enabled: true,
-                renderMode: 'dom', source, content: { values: {} }, assets: {}, staticFallback: { assetId: ids.asset, coverage: 'scene' } } } },
-            { id: 'replace', tool: 'selection.replace', carrier: 'native', destination,
-              input: { replacementItemId: { $result: { stepId: 'runtime', kind: 'item-id', index: 0 } } } },
-          ],
-        })
-        const committed = useEditorStore.getState().applyGenerationCandidate(prepared.previewId)
-        if (committed.status !== 'committed') throw new Error('Runtime replacement did not commit')
-        const atCommit = structuredClone(selectActiveCourseProjectDocument(useEditorStore.getState()))
-        const historyAtCommit = useEditorStore.getState().slideBackend.getSession().history.past.length
+        const before = await observer.capture({ intent: 'edit' })
+        const candidate = structuredClone(project), replacementId = crypto.randomUUID()
+        for (const surface of candidate.surfaces) if (surface.type === 'slide') for (const scene of surface.scenes) {
+          const index = scene.layerItems.findIndex((item: { layerItemId: string }) => item.layerItemId === ids.square)
+          if (index < 0) continue
+          const { content: _content, kind: _kind, layerItemId: _id, ...preserved } = scene.layerItems[index]
+          scene.layerItems[index] = { ...preserved, kind: 'runtime', layerItemId: replacementId,
+            runtime: { protocol: 'canvas-runtime', runtimeApiVersion: 2, enabled: true, renderMode: 'dom', source,
+              content: { values: {} }, assets: {}, staticFallback: { assetId: ids.asset, coverage: 'scene' } } }
+        }
+        const prepared = await stageCourseBuild(candidate)
+        stopBuild = prepared.stop
+        const receipt = await prepared.commit()
+        const atCommit = (await readCanonicalCourse()).model.project
+        const historyAtCommit = (await readCanonicalCourse()).undoDepth
         // The normal immediate post-commit capture; no sleep, pixel polling,
         // extra capture or preview transition occurs between these operations.
-        const after = await bridge.captureNext(before, committed.receipt, prepared.behaviorEvidence)
+        const after = await observer.capture({ intent: 'edit', prepareDrafts: false, dynamicTargetIds: [replacementId] })
         const current = selectActiveCourseProjectDocument(useEditorStore.getState())
         const replacement = items(current).find((item: any) => item.kind === 'runtime')
         const mounted = document.querySelector(`[data-slide-layer-item="${replacement?.layerItemId}"]`)
         const slide = mounted?.closest('.slide-published-adapter')
         if (!mounted || !slide) throw new Error('The final Runtime has no mounted Published layer')
-        return { before, after, receipt: committed.receipt, originalFrame: original.frame, replacement,
+        return { before, after, receipt, originalFrame: original.frame, replacement,
           originalStillInProject: items(current).some((item: any) => item.layerItemId === ids.square),
           originalStillMounted: !!document.querySelector(`[data-slide-layer-item="${ids.square}"]`),
           mountedRect: rect(mounted), slideRect: rect(slide), captureRects,
           slideSize: { width: (slide as HTMLElement).offsetWidth, height: (slide as HTMLElement).offsetHeight },
           viewport: { width: window.innerWidth, height: window.innerHeight },
-          historyAtCommit, historyAfterObservation: useEditorStore.getState().slideBackend.getSession().history.past.length,
+          historyAtCommit, historyAfterObservation: (await readCanonicalCourse()).undoDepth,
           documentUnchangedByObservation: JSON.stringify(current) === JSON.stringify(atCommit),
-          candidateBehavior: { observations: prepared.behaviorEvidence?.length ?? 0,
-            boundary: 'Per-tool insertion evidence precedes selection.replace and is not final placement or cube semantic evidence.' } }
-      } finally { bridge.dispose() }
+          candidateBehavior: { observations: prepared.admission?.behaviorEvidence?.length ?? 0,
+            boundary: 'Isolated build admission precedes import; final current-host placement and motion are observed separately.' } }
+      } finally { observer.dispose(); await stopBuild?.() }
     }, { ids: FIXTURE_IDS, source: runtimeSource })
     const frame = (request: typeof result.before) => {
       const file = request.resourceFiles.find((value: any) => value.path === 'observation/current-frame.png')
@@ -156,7 +148,7 @@ test('the immediate formal observation reflects a Runtime replacement at its fin
       bottom: (expectedRect.y + expectedRect.height - capture.y) * imageScaleY - 1 }
     expect(pixelEvidence.after.magentaBounds).not.toBeNull()
     for (const key of ['left', 'top', 'right', 'bottom'] as const) expect(Math.abs(pixelEvidence.after.magentaBounds![key] - expectedPixels[key])).toBeLessThan(3)
-    expect(result.after.documentRevision).toBe(result.receipt.afterRevision)
+    expect(result.after.observation.documentRevision).toBe(result.receipt.revision)
     expect(result.documentUnchangedByObservation).toBe(true)
     expect(result.historyAfterObservation).toBe(result.historyAtCommit)
     expect(run.pageErrors).toEqual([])

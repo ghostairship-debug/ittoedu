@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { analyzeVisualDensityState } from '../../src/shared/visualDensity'
-import { createTextNode } from '../../src/renderer/project/nativeNodeFactories'
+import { createTextNode } from '../../src/core/tools/nativeNodeFactories'
 
 const canvas = { width: 1280, height: 720 }
 

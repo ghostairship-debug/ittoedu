@@ -1,8 +1,9 @@
+import { assertImagePlacementFit } from '../../../core/tools/imageApplication'
 import { generationCandidateSchema, generationMediaApplyInputSchema, GenerationCandidatePreparationError, generationFailureDiagnostics, type GenerationCandidate, type GenerationRequest } from '../../../shared/generationContract'
 import type { CourseProjectDocument } from '../../../shared/courseProjectTypes'
 import type { AuthoringToolDestinationV1 } from '../../../shared/authoringToolContract'
 import { projectEffectiveLayers } from '../../course/effectiveLayerProjection'
-import { findFlowBlockRecursive } from '../../course/flowDocumentModel'
+import { findFlowBlockRecursive } from '../../../core/tools/flowDocumentModel'
 import { resolveAuthoringToolScope } from '../tools/authoringToolScope'
 import { captureSelectionReplacementScopes } from '../tools/semanticReplacementTool'
 import { prepareGeneratedImage } from '../../project/prepareGeneratedImage'
@@ -50,7 +51,7 @@ export async function expandGenerationSemanticCandidate(candidate: GenerationCan
       const item = destination.kind === 'update' && !body && !background
         ? projectEffectiveLayers({ project: document, locationId: target.locationId, stateId: target.stateId, owner: target.owner }).unifiedRows.find(row => row.id === destination.target.itemId)?.item : undefined
       const flowBody = Boolean(body) || (destination.kind === 'create' && destination.scope.parent.kind === 'flow-body')
-      if ((background || flowBody) && input.fit && input.fit !== 'contain') throw new Error('当前正文图片与背景保持完整比例，不支持 cover/stretch；请使用 contain 或省略 fit')
+      assertImagePlacementFit(background ? 'background' : flowBody ? 'flow' : 'native', input.fit)
       const backgroundTarget = background ? resolveBackgroundTarget(document, destination) : null
       if (!background && destination.kind === 'update') {
         if (body && (body.type !== 'media' || body.mediaKind !== 'image')) throw new Error('正文图片应用只接受已有图片块；新增插图使用正文 create 目标')

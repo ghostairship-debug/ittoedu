@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { DesktopAPI, SaveBinaryFileResult } from '@/shared/ipcTypes'
 import type { CourseProjectDocument } from '@/shared/courseProjectTypes'
 import { locateCourseLayer } from '@/renderer/course/effectiveLayerCommands'
-import { openCourseProjectArchive } from '@/renderer/project/courseProjectArchive'
+import { openCourseProjectArchive } from '../../src/core/drivers/codecs/courseProjectArchive'
 import {
   selectActiveCourseProjectDocument,
   selectHasUnsavedCourseChanges,
@@ -100,7 +100,6 @@ function desktopHarness(
   const confirmDiscardChanges = vi.fn(async () => 'discard' as const)
   const api: DesktopAPI = {
     legacyPpt: vi.fn(async () => null),
-    localAgent: vi.fn(async () => ({ enabled: false })),
     materials: vi.fn(async () => []),
     openProject: vi.fn(async () => null),
     listRecentProjects: vi.fn(async () => []),

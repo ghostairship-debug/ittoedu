@@ -2,12 +2,12 @@ import { createHash } from 'node:crypto'
 import { strToU8, unzipSync, zipSync } from 'fflate'
 import { describe, expect, it } from 'vitest'
 import { componentContentSha256 } from '@/shared/componentContentIntegrity'
-import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
+import { createBlankCourseProject } from '@/core/course/createCourseProject'
 import {
   createCourseProjectArchive,
   openCourseProjectArchive,
-} from '@/renderer/project/courseProjectArchive'
-import { parseComponentPackageFiles } from '@/renderer/components/importComponentPackage'
+} from '../../src/core/drivers/codecs/courseProjectArchive'
+import { parseComponentPackageFiles } from '../../src/core/drivers/codecs/importComponentPackage'
 import { parseDynamicPackageCandidate } from '@/renderer/authoring/tools/dynamicPackageCandidate'
 
 function packageFiles(runtimeSuffix = ''): Record<string, Uint8Array> {

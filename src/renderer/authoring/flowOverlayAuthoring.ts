@@ -3,14 +3,10 @@ import type {
   CourseProjectDocument,
   LayerItem,
 } from '../../shared/courseProjectTypes'
-import {
-  locateCourseLayer,
-  makeEffectiveLayerAuthoringAddress,
-} from '../course/effectiveLayerCommands'
+import { makeEffectiveLayerAuthoringAddress } from '../../core/tools/layerCommands'
+import { locateCourseLayer } from '../course/effectiveLayerCommands'
 import { isFlowDocumentBlockId } from '../course/effectiveLayerProjection'
-import {
-  isTeacherControllerLayerItem,
-} from '../course/globalLayerCommands'
+import { isTeacherControllerLayerItem } from '../../core/tools/globalLayers'
 import {
   selectFlowGlobalScope,
   selectFlowOverlay,

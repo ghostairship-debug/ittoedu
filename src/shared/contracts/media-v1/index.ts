@@ -12,5 +12,7 @@ export {
   assetMetaSchema,
   courseProjectAssetMetaSchema,
   courseProjectMediaSettingsSchema,
+  courseProjectAudioSettingsSchema,
+  courseProjectSoundDefinitionSchema,
   projectMediaSettingsSchema,
 } from './schema'

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { collectCourseProjectHealth } from '../../src/shared/courseProjectHealth'
-import { createBlankCourseProject } from '../../src/renderer/project/createCourseProject'
+import { createBlankCourseProject } from '../../src/core/course/createCourseProject'
 
 /**
  * V8 `collectProjectHealth` still requires a ProjectDocument. This wave does

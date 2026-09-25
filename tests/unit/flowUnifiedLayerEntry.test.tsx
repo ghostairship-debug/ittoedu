@@ -3,7 +3,7 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { enterFlowTextEditing, selectFlowEditorBlocks } from '@/renderer/course/flowEditorSlice'
 import { FLOW_AUDIO_OVERLAY_REASON } from '@/renderer/course/flowSharedAuthoringAdapters'
-import { flowSurfaceIn } from '@/renderer/course/flowDocumentModel'
+import { flowSurfaceIn } from '../../src/core/tools/flowDocumentModel'
 import {
   selectActiveCourseProjectDocument,
   selectEffectiveLayerProjection,

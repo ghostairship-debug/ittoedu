@@ -59,6 +59,9 @@ export type EditorStoreKernel = {
   setFeedback(feedback: EditorFeedback): void
   markDirty(dirty?: boolean): void
   readDirty(): boolean
+  waitForCommit(): Promise<boolean>
+  drain(): Promise<unknown>
+  navigateHistory(direction: 'undo' | 'redo'): Promise<void>
   persistDocument(document: CourseProjectDocument, options?: { statusMessage?: string | null; historyEntry?: boolean }): boolean
   persistTransaction(step: EditorTransactionStep, statusMessage: string, policy?: CourseTransactionCommitPolicy): boolean
   failSessionless(reason?: string): never
@@ -71,6 +74,9 @@ export type EditorStoreKernelHost = {
   readResources(): CourseResourceState
   commit(patch: Record<string, unknown>): void
   readDirty(): boolean
+  waitForCommit(): Promise<boolean>
+  drain(): Promise<unknown>
+  navigateHistory(direction: 'undo' | 'redo'): Promise<void>
   persistDocument?(document: CourseProjectDocument, options?: { statusMessage?: string | null; historyEntry?: boolean }): boolean
   persistTransaction(step: EditorTransactionStep, statusMessage: string, policy?: CourseTransactionCommitPolicy): boolean
 }
@@ -97,6 +103,9 @@ export function createEditorStoreKernel(host: EditorStoreKernelHost): EditorStor
       host.commit({ dirty })
     },
     readDirty: host.readDirty,
+    waitForCommit: host.waitForCommit,
+    drain: host.drain,
+    navigateHistory: host.navigateHistory,
     persistDocument(document, options) {
       return host.persistDocument ? host.persistDocument(document, options) : false
     },

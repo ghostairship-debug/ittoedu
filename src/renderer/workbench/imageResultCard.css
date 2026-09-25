@@ -1,0 +1,10 @@
+.image-result-card { display: grid; gap: 8px; min-width: 0; padding: 12px; border: 1px solid var(--border-color, #ccd5df); border-radius: 10px; }
+.image-result-card header { display: flex; gap: 10px; flex-wrap: wrap; align-items: baseline; }
+.image-result-card p { margin: 0; overflow-wrap: anywhere; }
+.image-result-card label { display: grid; gap: 4px; }
+.image-result-card select, .image-result-card textarea { max-width: 100%; min-width: 0; }
+.image-result-card__preview { width: 100%; max-height: 360px; object-fit: contain; }
+.image-result-card__placement { min-width: 0; }
+.image-result-card__placement summary { cursor: pointer; overflow-wrap: anywhere; }
+.image-result-card__frame-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: 8px 0; }
+.image-result-card__frame-fields input { box-sizing: border-box; width: 100%; min-width: 0; }

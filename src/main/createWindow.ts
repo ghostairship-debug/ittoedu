@@ -4,6 +4,7 @@ import path from 'node:path'
 import { app, BrowserWindow, dialog, ipcMain, session } from 'electron'
 import { APP_NAME } from '../shared/constants'
 import { IPC_CHANNELS } from '../shared/ipcTypes'
+import { saveDirectoryContextSchema, type SaveDirectoryContext } from '../shared/workbench/desktop'
 import type { AppState } from './appState'
 import {
   configureRestrictedSession,
@@ -11,8 +12,11 @@ import {
   isAllowedDocumentUrl,
   isAllowedEditorPreviewFrameUrl,
 } from './security'
+import { askMediaCapture } from './mediaCapturePrompt'
 import { editorEntryUrl } from './protocols'
-import { clearRecoveryProject } from './projectPersistence'
+import { documentHost } from './workbench/documentHost'
+import { saveDocumentWithDialog } from './workbench/documentSaveDialog'
+import { prepareDocumentWindowClose, type DocumentCloseChoice } from './workbench/documentCloseCoordinator'
 import { mainPreviewNetworkPolicy } from './previewNetworkPolicy'
 import {
   BACKGROUND_E2E_WINDOW_ORIGIN,
@@ -50,43 +54,47 @@ function parseDevelopmentServerUrl(): URL | null {
   return url
 }
 
-function confirmClose(window: BrowserWindow): 'save' | 'discard' | 'cancel' {
+function confirmClose(window: BrowserWindow): DocumentCloseChoice {
   const choice = dialog.showMessageBoxSync(window, {
     type: 'warning',
     title: '保存未完成的修改？',
-    message: '当前课件有尚未保存的修改。',
-    detail: '可以先保存工程、直接关闭并放弃修改，或取消关闭。',
-    buttons: ['保存', '不保存', '取消'],
+    message: '工作台中有尚未保存的文档修改。',
+    detail: '可以保存全部文档后关闭，保留恢复稿并关闭，或取消关闭。',
+    buttons: ['保存全部并关闭', '保留恢复稿并关闭', '取消'],
     defaultId: 0,
     cancelId: 2,
     noLink: true,
   })
   if (choice === 0) return 'save'
-  if (choice === 1) return 'discard'
+  if (choice === 1) return 'preserve'
   return 'cancel'
 }
 
-function requestRendererBeforeClose(window: BrowserWindow, mode: 'save' | 'preserve'): Promise<boolean> {
+function requestRendererBeforeClose(window: BrowserWindow, mode: 'save' | 'preserve'): Promise<{ ready: boolean; suggestedDirectory?: SaveDirectoryContext }> {
   const requestId = randomUUID()
   const resultChannel = mode === 'save' ? IPC_CHANNELS.saveAndCloseResult : IPC_CHANNELS.preserveAndCloseResult
   const requestChannel = mode === 'save' ? IPC_CHANNELS.requestSaveAndClose : IPC_CHANNELS.requestPreserveAndClose
   return new Promise((resolve) => {
     let settled = false
-    const finish = (saved: boolean) => {
+    const finish = (ready: boolean, suggestedDirectory?: SaveDirectoryContext) => {
       if (settled) return
       settled = true
       clearTimeout(timeout)
       ipcMain.removeListener(resultChannel, onResult)
       window.removeListener('closed', onClosed)
-      resolve(saved)
+      resolve({ ready, ...(suggestedDirectory ? { suggestedDirectory } : {}) })
     }
     const onResult = (
       event: Electron.IpcMainEvent,
       receivedRequestId: unknown,
       saved: unknown,
+      directory: unknown,
     ) => {
       if (event.sender !== window.webContents || receivedRequestId !== requestId) return
-      finish(saved === true)
+      if (mode !== 'preserve' || directory === undefined) { finish(saved === true); return }
+      const parsed = saveDirectoryContextSchema.safeParse(directory)
+      if (!parsed.success) { finish(false); return }
+      finish(saved === true, parsed.data)
     }
     const onClosed = () => finish(false)
     const timeout = setTimeout(() => finish(false), 5 * 60_000)
@@ -120,6 +128,7 @@ export async function createMainWindow(
   configureRestrictedSession(
     session.defaultSession,
     (url) => mainPreviewNetworkPolicy.allowsRequest(url),
+    { requestMediaCapture: askMediaCapture },
   )
   const showApplicationWindows = shouldShowApplicationWindows()
 
@@ -206,29 +215,38 @@ export async function createMainWindow(
     event.preventDefault()
     if (closeCheckInFlight) return
     closeCheckInFlight = true
-    void Promise.race([
-      window.webContents.executeJavaScript(
-        'Boolean(window.__COURSEWARE_EDITOR_DIRTY__)',
-        true,
-      ).then(Boolean),
-      new Promise<boolean>((resolve) => setTimeout(() => resolve(true), 1_500)),
-    ]).then(async (rendererDirty) => {
-      const dirty = rendererDirty || appState.isDirty()
-      const decision = dirty ? confirmClose(window) : 'discard'
-      if (decision === 'cancel') return
-      if (!(await requestRendererBeforeClose(window, decision === 'save' ? 'save' : 'preserve'))) {
-        return
-      }
-      if (dirty) {
-        await clearRecoveryProject().catch((error) => {
-          console.error('关闭时清理恢复副本失败', error)
-        })
-      }
+    let closeSaveDirectory: SaveDirectoryContext | undefined
+    void prepareDocumentWindowClose({
+      list: () => documentHost().registry.list(),
+      drain: async () => { await Promise.all(documentHost().registry.list().map(snapshot => documentHost().registry.get(snapshot.documentId).drain())) },
+      rendererDirty: () => Promise.race([
+        window.webContents.executeJavaScript(
+          'Boolean(window.__COURSEWARE_EDITOR_DIRTY__)',
+          true,
+        ).then(Boolean),
+        new Promise<boolean>((resolve) => setTimeout(() => resolve(true), 1_500)),
+      ]).then(rendererDirty => rendererDirty || appState.isDirty()),
+      confirm: () => confirmClose(window),
+      prepareRenderer: async mode => {
+        const prepared = await requestRendererBeforeClose(window, mode)
+        if (mode === 'preserve') closeSaveDirectory = prepared.suggestedDirectory
+        return prepared.ready
+      },
+      save: documentId => saveDocumentWithDialog(window, documentHost(), documentId, false, closeSaveDirectory),
+      onBlocked: documentId => {
+        if (!window.isDestroyed()) { window.webContents.send(IPC_CHANNELS.requestFocusDocument, documentId); window.focus() }
+      },
+    }).then(approved => {
+      if (!approved) return
       appState.setDirty(false)
       closeApproved = true
       if (!window.isDestroyed()) window.close()
     }).catch((error) => {
-      console.error('关闭前读取编辑状态失败', error)
+      console.error('关闭前保存或保全失败', error)
+      if (!window.isDestroyed()) void dialog.showMessageBox(window, {
+        type: 'error', title: '文档尚未保存，窗口保持打开',
+        message: error instanceof Error ? error.message : '无法保存全部文档，请检查当前稿后重试。',
+      })
     }).finally(() => {
       closeCheckInFlight = false
     })

@@ -16,11 +16,11 @@ import {
 import '../src/renderer/export/bundledFontEmbedSourceNode'
 import { buildPublishedCourseStandaloneHtml } from '../src/renderer/export/course/buildCoursePackages'
 import { buildPublishedCourseV2Payload } from '../src/renderer/export/course/buildPublishedCourse'
-import { createBlankCourseProject } from '../src/renderer/project/createCourseProject'
+import { createBlankCourseProject } from '../src/core/course/createCourseProject'
 import {
   createCourseProjectArchive,
   openCourseProjectArchive,
-} from '../src/renderer/project/courseProjectArchive'
+} from '../src/core/drivers/codecs/courseProjectArchive'
 import {
   checkTrackedExampleOutputs,
   createTimezoneStableZipMtime,

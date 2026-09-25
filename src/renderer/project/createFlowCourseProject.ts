@@ -3,14 +3,14 @@ import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
 import type { CourseProjectDocument } from '@/shared/courseProjectTypes'
 import {
   createBlankFlowSurface,
-} from '../course/flowDocumentModel'
+} from '../../core/tools/flowDocumentModel'
 import {
   createFlowEditorHistory,
   selectFlowEditorBlock,
   type FlowEditorHistory,
   type FlowEditorSelection,
 } from '../course/flowEditorSlice'
-import { createBlankCourseProject, type CreateProjectOptions } from './createCourseProject'
+import { createBlankCourseProject, type CreateProjectOptions } from '../../core/course/createCourseProject'
 
 export interface FlowAuthoringSession {
   readonly history: FlowEditorHistory

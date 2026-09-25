@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import { planTeacherControllerComponentEdit } from '../../components/teacherControllerComponent'
-import { resolveEffectiveLayerTarget } from '../../course/effectiveLayerCommands'
+import { resolveEffectiveLayerTarget } from '../../../core/tools/layerCommands'
 import type { AuthoringToolDefinition } from './executeAuthoringTool'
 
 const inputSchema = z.object({ operation: z.literal('restore') }).strict()

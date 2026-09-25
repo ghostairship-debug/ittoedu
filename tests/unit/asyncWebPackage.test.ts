@@ -3,8 +3,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { sceneNodeToCourseLayerItem } from '@/shared/courseProjectModel'
 import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
 import type { PublishedCourseV2Payload } from '@/shared/publishedCourseTypes'
-import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
-import { createVideoNode } from '@/renderer/project/nativeNodeFactories'
+import { createBlankCourseProject } from '@/core/course/createCourseProject'
+import { createVideoNode } from '@/core/tools/nativeNodeFactories'
 import {
   buildPublishedCourseWebPackageAsync,
   buildPublishedCourseWebPackageFiles,

@@ -3,6 +3,8 @@ productName: ittoedu Courseware Editor
 asar: true
 asarUnpack:
   - "**/*.node"
+  # sharp's Win64 native module loads these adjacent libvips DLLs through the OS loader.
+  - "**/node_modules/@img/sharp-win32-x64/lib/*.dll"
 directories:
   output: release
 files:
@@ -15,17 +17,10 @@ files:
   - resources/built-in-components/catalog.json
   - resources/built-in-components/packages/*.h5component
   - resources/built-in-components/components/**/thumbnail.svg
-  # 软件内创作流程在运行时从 app.getAppPath() 读取这 4 个方法文件
-  # （src/main/lessonAuthoringPrompt.ts 的 LESSON_AUTHORING_METHOD_PATHS）；
-  # 不打包会让打包版的课例创作提示词直接 ENOENT。
-  # 只列被读取的文件：整目录 .agents/** 会连带打进被 gitignore 的
-  # editor-root.local.json（内含构建机绝对路径）与仅供外部 Builder 阅读的
-  # 说明文档，既泄漏本机路径又会让发布边界扫描误报。
-  - .agents/skills/orchestrate-courseware/references/main-progression.md
-  - .agents/skills/orchestrate-courseware/references/teaching-design-quality.md
-  - .agents/skills/orchestrate-courseware/references/interaction-design.md
-  - .agents/skills/build-courseware-project/references/build-method.md
   - package.json
+extraResources:
+  - from: resources/clipboard-file-list/clipboard-file-list.exe
+    to: clipboard-file-list/clipboard-file-list.exe
 win:
   icon: resources/icons/icon.ico
   executableName: ittoedu-courseware-editor

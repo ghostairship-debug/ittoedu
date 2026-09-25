@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { courseProjectDocumentSchema } from '../../src/shared/courseProjectSchema'
-import { createBlankCourseProject } from '../../src/renderer/project/createCourseProject'
+import { createBlankCourseProject } from '../../src/core/course/createCourseProject'
 import { useEditorStore,
   selectActiveCourseProjectDocument,
 } from '../../src/renderer/store/editorStore'

@@ -5,10 +5,10 @@ import path from 'node:path'
 import { promises as fs } from 'node:fs'
 import { strToU8, zipSync } from 'fflate'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
+import { createBlankCourseProject } from '@/core/course/createCourseProject'
 import {
   detectCourseProjectArchiveFormat,
-} from '@/renderer/project/courseProjectArchive'
+} from '../../src/core/drivers/codecs/courseProjectArchive'
 import { shouldOfferCourseProjectRecovery } from '@/renderer/project/courseProjectLifecycle'
 import { COURSE_PROJECT_REJECTION_INPUTS } from '../fixtures/course-project-v9'
 import { REBUILD_USER_DATA_DIRECTORY_NAME } from '../../src/main/applicationIdentity'

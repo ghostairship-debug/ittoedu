@@ -50,8 +50,8 @@ test('U06-real-layout commits rebased grouped layout and renders three readable 
     await page.goto(`http://127.0.0.1:${address.port}/u06-probe`)
     const preparation = await page.evaluate(async (imageBase64) => {
       const load = (path: string) => import(/* @vite-ignore */ path)
-      const { createBlankCourseProject } = await load('/src/renderer/project/createCourseProject.ts') as typeof import('../../src/renderer/project/createCourseProject')
-      const { createImageNode, createTextNode } = await load('/src/renderer/project/nativeNodeFactories.ts') as typeof import('../../src/renderer/project/nativeNodeFactories')
+      const { createBlankCourseProject } = await load('/src/core/course/createCourseProject.ts') as typeof import('../../src/core/course/createCourseProject')
+      const { createImageNode, createTextNode } = await load('/src/core/tools/nativeNodeFactories.ts') as typeof import('../../src/core/tools/nativeNodeFactories')
       const { sceneNodeToCourseLayerItem } = await load('/src/shared/courseProjectModel.ts') as typeof import('../../src/shared/courseProjectModel')
       const { courseProjectDocumentSchema } = await load('/src/shared/courseProjectSchema.ts') as typeof import('../../src/shared/courseProjectSchema')
       const { projectEffectiveLayers } = await load('/src/renderer/course/effectiveLayerProjection.ts') as typeof import('../../src/renderer/course/effectiveLayerProjection')
@@ -176,7 +176,7 @@ test('U06-real-layout commits rebased grouped layout and renders three readable 
         },
       })
       const prepared = await coordinator.prepare(request, candidate)
-      const applied = coordinator.apply(prepared.previewId)
+      const applied = await coordinator.apply(prepared.previewId)
       if (applied.status !== 'committed') throw new Error(`Candidate did not commit: ${applied.status}`)
       const reopened = courseProjectDocumentSchema.parse(JSON.parse(JSON.stringify(state.document)))
       const view = projectEffectiveLayers({ project: reopened, locationId: reopened.startLocationId, stateId: 'state_initial' })

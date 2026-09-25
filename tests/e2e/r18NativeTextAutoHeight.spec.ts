@@ -3,7 +3,7 @@ import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { _electron as electron, chromium, expect, test, type ElectronApplication, type Page } from '@playwright/test'
 import { createServer, type ViteDevServer } from 'vite'
-import { openCourseProjectArchive } from '../../src/renderer/project/courseProjectArchive'
+import { openCourseProjectArchive } from '../../src/core/drivers/codecs/courseProjectArchive'
 import { expectBackgroundWindowsIsolated } from './expectBackgroundWindowsIsolated'
 import { enterIndependentEditor } from './lessonWorkspaceEntry'
 

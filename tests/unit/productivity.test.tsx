@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, cleanup } from '@testing-library/react'
-import { createBlankCourseProject } from '../../src/renderer/project/createCourseProject'
+import { createBlankCourseProject } from '../../src/core/course/createCourseProject'
 import { createBlankFlowCourseProject } from '../../src/renderer/project/createFlowCourseProject'
-import { createChartNode, createImageNode, createTextNode } from '../../src/renderer/project/nativeNodeFactories'
+import { createChartNode, createImageNode, createTextNode } from '../../src/core/tools/nativeNodeFactories'
 import { sceneNodeToCourseLayerItem } from '../../src/shared/courseProjectModel'
 import { courseProjectDocumentSchema } from '../../src/shared/courseProjectSchema'
 import { createProductivityPreview, applyProductivityPreview, type ProductivityContext } from '../../src/renderer/authoring/productivity'
@@ -11,7 +11,7 @@ import { previewStyleRemix, applyStyleRemix } from '../../src/renderer/authoring
 import { applyEditorTransactionStep } from '../../src/renderer/authoring/editorTransaction'
 import { ProductivityDialog } from '../../src/renderer/ui/productivity/ProductivityDialog'
 import { collectCourseProjectHealth } from '../../src/shared/courseProjectHealth'
-import { createCourseProjectArchive, openCourseProjectArchive } from '../../src/renderer/project/courseProjectArchive'
+import { createCourseProjectArchive, openCourseProjectArchive } from '../../src/core/drivers/codecs/courseProjectArchive'
 
 function fixture() {
   const document = createBlankCourseProject({ includeDefaultController: false, controls: 'none' })

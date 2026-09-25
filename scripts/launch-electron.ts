@@ -17,6 +17,7 @@
 import { spawn } from 'node:child_process'
 import { createRequire } from 'node:module'
 import { prepareElectronLaunchEnvironment } from './electronLaunchEnvironment'
+import { resolveEngineeringProfileLaunch } from './engineeringProfileLaunch'
 
 prepareElectronLaunchEnvironment()
 
@@ -25,7 +26,18 @@ prepareElectronLaunchEnvironment()
 // surface a main process sees instead.
 const electronBinary = createRequire(import.meta.url)('electron') as unknown as string
 
-const child = spawn(electronBinary, process.argv.slice(2), {
+let launch: ReturnType<typeof resolveEngineeringProfileLaunch>
+try {
+  launch = resolveEngineeringProfileLaunch(process.argv.slice(2))
+} catch (error) {
+  console.error('启动 Electron 失败：', error instanceof Error ? error.message : String(error))
+  process.exit(1)
+}
+if (launch.profile) {
+  console.info(`使用已配置的工程 OAuth 档：${launch.profile}；模型及计费连接沿用该档已有设置。`)
+}
+
+const child = spawn(electronBinary, launch.args, {
   stdio: 'inherit',
   env: process.env,
 })

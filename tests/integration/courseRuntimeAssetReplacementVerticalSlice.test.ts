@@ -9,8 +9,8 @@ import { isSpatialAuthoringTransactionFrame } from '@/renderer/course/spatialAut
 import {
   createCourseProjectArchive,
   openCourseProjectArchive,
-} from '@/renderer/project/courseProjectArchive'
-import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
+} from '../../src/core/drivers/codecs/courseProjectArchive'
+import { createBlankCourseProject } from '@/core/course/createCourseProject'
 import {
   captureCourseRuntimeAssetReplacementTarget,
   type CourseRuntimeAssetReplacementTarget,

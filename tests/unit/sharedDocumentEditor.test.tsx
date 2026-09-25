@@ -74,10 +74,14 @@ describe('sharedDocumentEditor', () => {
       const typed = fromEditorDocument(editor.view.state.doc).blocks[0]
       expect(typed.type === 'paragraph' && typed.content.inlines.at(-1)).toMatchObject({ text: '新', style: { fontFamily: 'KaiTi', fontSize: 32 } })
       // Owner restores the canonical document; editor has no independent Undo history.
+      expect(editor.view.state.selection.anchor).toBe(6)
       rendered.rerender(<SharedDocumentEditor {...props} revision="2" />)
-      expect(family.value).toBe('SimSun')
-      expect((rendered.getByLabelText('字号') as HTMLInputElement).value).toBe('20')
-      expect(rendered.getByRole('button', { name: '粗体' }).getAttribute('aria-pressed')).toBe('true')
+      // The removed character maps the caret to the old tail, instead of rebuilding at the first paragraph.
+      expect(editor.view.state.selection.anchor).toBe(5)
+      expect(fromEditorDocument(editor.view.state.doc)).toEqual(initial.content)
+      expect(family.value).toBe('Arial')
+      expect((rendered.getByLabelText('字号') as HTMLInputElement).value).toBe('30')
+      expect(rendered.getByRole('button', { name: '粗体' }).getAttribute('aria-pressed')).toBe('false')
     } finally { cleanup(); factory.mockRestore() }
   })
   it('captures a clicked DOM caret before toolbar focus changes and preserves subsequent stored marks', () => {
@@ -92,8 +96,8 @@ describe('sharedDocumentEditor', () => {
       act(() => { editor.view.focus(); editor.view.dispatch(editor.view.state.tr.setSelection(TextSelection.create(editor.view.state.doc, 1, 5))) })
       expect(rendered.getByRole('button', { name: '粗体' })).toHaveAttribute('aria-pressed', 'mixed')
       // Browser caret changes before its asynchronous selectionchange reaches PM.
-      const end = editor.view.dom.querySelector('p')!.lastChild!
-      document.getSelection()!.collapse(end, 2)
+      const end = editor.view.domAtPos(5)
+      document.getSelection()!.collapse(end.node, end.offset)
       expect(editor.view.state.selection.empty).toBe(false)
       fireEvent.pointerDown(rendered.getByRole('toolbar'))
       fireEvent.change(rendered.getByLabelText('字体'), { target: { value: 'KaiTi' } })

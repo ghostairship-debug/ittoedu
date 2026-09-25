@@ -4,6 +4,18 @@ import { openPptxPackage, pptxRelationshipId, xmlAll, xmlChildren, xmlFirst, typ
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import { inspectImageTransformSource } from './imageTransform'
 
+export interface MaterialExtractionOptions {
+  pages?: { from: number; to: number }
+  onPageCount?: (total: number) => void
+  onPageImage?: (image: { assetId: string; width: number; height: number; downsampled: boolean }) => void
+}
+function pageRange(total: number, options: MaterialExtractionOptions) {
+  options.onPageCount?.(total)
+  const range = options.pages ?? { from: 1, to: total }
+  if (!Number.isSafeInteger(range.from) || !Number.isSafeInteger(range.to) || range.from < 1 || range.to < range.from || range.to > total) throw new Error(`页范围必须在 1–${total} 内`)
+  return range
+}
+
 function result(format: MaterialExtraction['format']): MaterialExtraction {
   return { version: 1, extractorVersion: 'material-3', format, fragments: [], assets: [], gaps: [] }
 }
@@ -68,11 +80,12 @@ function content(pkg: PptxPackage, root: Element, part: string, out: MaterialExt
   }
   visit(root)
 }
-export function extractOfficeMaterial(bytes: Uint8Array, format: 'docx' | 'pptx'): MaterialExtraction {
+export function extractOfficeMaterial(bytes: Uint8Array, format: 'docx' | 'pptx', options: MaterialExtractionOptions = {}): MaterialExtraction {
   const out = result(format)
   const part = format === 'docx' ? 'word/document.xml' : 'ppt/presentation.xml'
   const pkg = openPptxPackage(bytes, part)
   if (format === 'docx') {
+    if (options.pages) throw new Error('Word XML 没有可靠页边界，不能按页选择；请使用全文或导出 PDF 后选择页范围')
     const body = xmlFirst(pkg.xml(part), 'body')
     if (!body) throw new Error('Word 正文缺失')
     content(pkg, body, part, out)
@@ -83,8 +96,10 @@ export function extractOfficeMaterial(bytes: Uint8Array, format: 'docx' | 'pptx'
   } else {
     const slides = xmlAll(pkg.xml(part), 'sldId')
     if (!slides.length || slides.length > limits.pages) throw new Error('材料幻灯片数量须为 1–100')
+    const range = pageRange(slides.length, options)
     const relationships = pkg.relationships(part)
     slides.forEach((slide, index) => {
+      if (index + 1 < range.from || index + 1 > range.to) return
       const rel = relationships.find(item => item.id === pptxRelationshipId(slide) && item.type.endsWith('/slide'))
       if (!rel || rel.external || !pkg.files[rel.target]) throw new Error(`第 ${index + 1} 页内容缺失`)
       content(pkg, pkg.xml(rel.target).documentElement, rel.target, out, index + 1)
@@ -109,16 +124,17 @@ export function extractOfficeMaterial(bytes: Uint8Array, format: 'docx' | 'pptx'
 }
 
 /** Each PDF page is also rasterized: scanned text, equations and diagrams remain readable. */
-export async function extractPdfMaterial(bytes: Uint8Array): Promise<MaterialExtraction> {
+export async function extractPdfMaterial(bytes: Uint8Array, options: MaterialExtractionOptions = {}): Promise<MaterialExtraction> {
   const pdfjs = await import('pdfjs-dist')
   pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerUrl
-  const loading = pdfjs.getDocument({ data: bytes.slice() })
+  const loading = pdfjs.getDocument({ data: bytes.slice(), useSystemFonts: true })
   const out = result('pdf')
   try {
     const pdf = await loading.promise
     if (pdf.numPages > limits.pages) throw new Error('PDF 材料不能超过 100 页')
+    const range = pageRange(pdf.numPages, options)
     let totalBytes = 0
-    for (let page = 1; page <= pdf.numPages; page++) {
+    for (let page = range.from; page <= range.to; page++) {
       const source = await pdf.getPage(page)
       const locator = { part: 'document.pdf', page }
       const text = (await source.getTextContent()).items.map(item => 'str' in item ? item.str + (item.hasEOL ? '\n' : ' ') : '').join('').trim()
@@ -134,6 +150,7 @@ export async function extractPdfMaterial(bytes: Uint8Array): Promise<MaterialExt
         totalBytes += imageBytes.length
         if (totalBytes > limits.outputBytes) throw new Error('PDF 页面图像超过容量上限')
         const id = `page-${page}.png`
+        options.onPageImage?.({ assetId: id, width: canvas.width, height: canvas.height, downsampled: viewport.scale < 1 })
         out.assets.push({ id, mime: 'image/png', bytes: imageBytes })
         add(out, { kind: 'image', locator, assetId: id })
         if (!text) out.gaps.push({ locator, reason: '本页没有可提取文字；需要实际阅读保存的页面图像', resolution: { kind: 'read-page-image', assetId: id } })

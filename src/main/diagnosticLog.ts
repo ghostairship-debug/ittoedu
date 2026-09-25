@@ -2,14 +2,14 @@ import { promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { app, dialog, type BrowserWindow } from 'electron'
+import { zipSync, strToU8 } from 'fflate'
+import { privateDiagnostic, privateDiagnosticLog } from './diagnosticPrivacy'
 import {
   APP_EXECUTABLE_NAME,
   APP_NAME,
 } from '../shared/constants'
 
 const MAX_LOG_BYTES = 2 * 1024 * 1024
-const MAX_MESSAGE_LENGTH = 8_000
-const MAX_STACK_LENGTH = 24_000
 
 export type DiagnosticSource = 'main' | 'renderer' | 'preview' | 'component'
 
@@ -19,10 +19,6 @@ export interface DiagnosticEntry {
   stack?: string
   details?: Record<string, unknown>
   timestamp?: string
-}
-
-function truncate(value: string, maximum: number): string {
-  return value.length <= maximum ? value : `${value.slice(0, maximum)}\n…已截断`
 }
 
 function errorEntry(source: DiagnosticSource, error: unknown): DiagnosticEntry {
@@ -50,13 +46,7 @@ export class DiagnosticLog {
   }
 
   append(entry: DiagnosticEntry): Promise<void> {
-    const normalized = {
-      timestamp: entry.timestamp ?? new Date().toISOString(),
-      source: entry.source,
-      message: truncate(entry.message, MAX_MESSAGE_LENGTH),
-      ...(entry.stack ? { stack: truncate(entry.stack, MAX_STACK_LENGTH) } : {}),
-      ...(entry.details ? { details: entry.details } : {}),
-    }
+    const normalized = privateDiagnostic(entry)
     this.queue = this.queue
       .catch(() => undefined)
       .then(async () => {
@@ -91,10 +81,11 @@ export class DiagnosticLog {
       `Chrome：${process.versions.chrome ?? 'unknown'}`,
       `Node：${process.versions.node}`,
       '',
-      '以下记录不包含课件素材内容。',
+      '默认报告仅含版本、错误类别、错误代码、位置编号与错误指纹；错误正文、路径、请求和任意附加内容已省略。',
+      '未自动附加用户文档、对话、图片或登录凭据。',
       '',
     ].join('\n')
-    return `${header}${previous}${current}`
+    return `${header}\n${privateDiagnosticLog(previous)}\n${privateDiagnosticLog(current)}\n`
   }
 
   installProcessHandlers(): () => void {
@@ -120,14 +111,35 @@ export const diagnosticLog = new DiagnosticLog(() =>
 export async function exportDiagnosticReport(
   window: BrowserWindow,
 ): Promise<{ path: string } | null> {
+  const consent = await dialog.showMessageBox(window, {
+    type: 'info', title: '导出本地诊断',
+    message: '报告包含应用与系统版本、脱敏错误信息。默认不包含文档正文、对话或图片。',
+    detail: '导出只会保存到你选择的位置，不会自动发送给任何人。若主动附加文档，所选文件的完整内容会进入压缩包，请在分享前自行检查。',
+    buttons: ['继续导出', '取消'], defaultId: 0, cancelId: 1,
+    checkboxLabel: '主动附加我接下来选择的文档（包含正文与素材）', checkboxChecked: false,
+  })
+  if (consent.response !== 0) return null
+  let attachments: string[] = []
+  if (consent.checkboxChecked) {
+    const selected = await dialog.showOpenDialog(window, { title: '主动选择附加到诊断的文档', properties: ['openFile', 'multiSelections'], filters: [{ name: '课件与 Markdown 文档', extensions: ['h5lesson', 'md'] }] })
+    if (selected.canceled || !selected.filePaths.length) return null
+    attachments = selected.filePaths
+    if (attachments.some(file => !['.h5lesson', '.md'].includes(path.extname(file).toLowerCase()))) throw new Error('诊断附件仅支持主动选择的课件与 Markdown 文档。')
+  }
+  const extension = attachments.length ? 'zip' : 'txt'
   const result = await dialog.showSaveDialog(window, {
     title: '导出诊断报告',
     defaultPath: `${APP_EXECUTABLE_NAME}-diagnostics-${new Date()
       .toISOString()
-      .slice(0, 10)}.txt`,
-    filters: [{ name: '文本诊断报告', extensions: ['txt'] }],
+      .slice(0, 10)}.${extension}`,
+    filters: [{ name: attachments.length ? '诊断报告与主动附加的文档' : '文本诊断报告', extensions: [extension] }],
   })
   if (result.canceled || !result.filePath) return null
-  await fs.writeFile(result.filePath, await diagnosticLog.report(), 'utf8')
+  const report = await diagnosticLog.report()
+  if (attachments.length) {
+    const files: Record<string, Uint8Array> = { 'diagnostics.txt': strToU8(report), 'attachments-notice.txt': strToU8('以下文档由用户主动选择附加，包含原始正文和素材。它们不是默认诊断日志，也未自动上传。') }
+    for (const [index, filename] of attachments.entries()) files[`documents/${index + 1}-${path.basename(filename)}`] = await fs.readFile(filename)
+    await fs.writeFile(result.filePath, zipSync(files))
+  } else await fs.writeFile(result.filePath, report, 'utf8')
   return { path: result.filePath }
 }

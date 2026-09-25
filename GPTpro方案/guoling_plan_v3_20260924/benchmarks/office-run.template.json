@@ -1,0 +1,71 @@
+{
+  "schemaVersion": 1,
+  "recordType": "template_not_a_measurement",
+  "candidateId": null,
+  "candidateVersion": null,
+  "date": null,
+  "operator": null,
+  "environment": {
+    "os": null,
+    "cpu": null,
+    "ramGB": null,
+    "displayScale": null,
+    "fontProfile": null,
+    "appVersion": null,
+    "networkRegion": null,
+    "rttMs": null,
+    "throughputMbps": null
+  },
+  "input": {
+    "fileId": null,
+    "format": null,
+    "sha256": null,
+    "bytes": null,
+    "complexityNotes": null,
+    "authorizedAndRedacted": null
+  },
+  "state": {
+    "scenario": null,
+    "runtimePrewarmed": null,
+    "fileAlreadyUploaded": null,
+    "cacheDescription": null
+  },
+  "durationsMs": {
+    "uiResponse": null,
+    "upload": null,
+    "runtimeInit": null,
+    "parse": null,
+    "firstReadable": null,
+    "firstEditable": null,
+    "stableViewport": null,
+    "saveAck": null,
+    "savedFileReopen": null,
+    "tabReturn": null
+  },
+  "resources": {
+    "peakRssMB": null,
+    "idleRssMB": null,
+    "downloadBytes": null,
+    "longTaskMaxMs": null
+  },
+  "checks": {
+    "contentCorrect": null,
+    "layoutAcceptable": null,
+    "missingObjects": null,
+    "selection": null,
+    "manualEditing": null,
+    "aiApiEditing": null,
+    "saveReopen": null,
+    "externalOfficeReopen": null,
+    "cancellation": null
+  },
+  "cost": {
+    "currency": null,
+    "providerApi": null,
+    "storageAndTraffic": null,
+    "licenseAllocation": null
+  },
+  "errors": [],
+  "evidencePaths": [],
+  "notTested": []
+}

@@ -5,7 +5,7 @@ import { applyTextRunEdits, applyTextRunStyle, remapTextRuns, type TextRunEdit }
 import { resolveEffectiveBackground, type EffectiveBackgroundRequest } from '../../../shared/effectiveBackground'
 import type { CourseAuthoringSessionToken } from '../courseAuthoringSession'
 import { createEditorTransactionStep, type EditorTransactionStep } from '../editorTransaction'
-import { commitCourseProjectMutation } from '../../course/courseProjectMutation'
+import { commitCourseProjectMutation } from '../../../core/tools/courseProjectMutation'
 
 export interface ProductivityContext { document: CourseProjectDocument; sessionToken: CourseAuthoringSessionToken }
 export type ProductivityScope = 'page' | 'surface' | 'course'

@@ -21,10 +21,8 @@ import {
   SLIDE_REJECT_STALE_REVISION,
   SLIDE_REJECT_WRONG_OWNER,
 } from '@/renderer/course/slideEditorCommands'
-import {
-  createChartNode,
-  rebuildChartItemIds,
-} from '@/renderer/project/nativeNodeFactories'
+import { createChartNode } from '@/core/tools/nativeNodeFactories'
+import { rebuildChartItemIds } from '../../src/core/tools/chartIdentity'
 import {
   addSlideChartLayer,
   deleteSlideChartCategory,

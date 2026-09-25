@@ -14,6 +14,7 @@ import type {
   SelectedImageResult,
   SelectedMediaResult,
 } from '../shared/ipcTypes'
+import type { WorkspaceMediaFile } from '../shared/workbench/workspaceFiles'
 import {
   DesktopOperationError,
   normalizeDesktopError,
@@ -601,6 +602,24 @@ async function readMediaSelection(
     )
   }
   return { path: filePath, name: path.basename(filePath), mimeType, bytes }
+}
+
+/** Reuses the same byte limits and content checks as the native media picker. */
+export async function readWorkspaceMediaSelection(filePath: string): Promise<Pick<WorkspaceMediaFile, 'name' | 'mimeType' | 'bytes' | 'mediaKind'>> {
+  const extension = path.extname(filePath).toLocaleLowerCase('en-US')
+  if (imageMimeTypes.has(extension)) {
+    const selected = await readImageSelection(filePath)
+    return { name: selected.name, mimeType: selected.mimeType, bytes: selected.bytes, mediaKind: 'image' }
+  }
+  if (audioMimeTypes.has(extension)) {
+    const selected = await readMediaSelection(filePath, 'audio')
+    return { name: selected.name, mimeType: selected.mimeType, bytes: selected.bytes, mediaKind: 'audio' }
+  }
+  if (videoMimeTypes.has(extension)) {
+    const selected = await readMediaSelection(filePath, 'video')
+    return { name: selected.name, mimeType: selected.mimeType, bytes: selected.bytes, mediaKind: 'video' }
+  }
+  throw new DesktopOperationError('MEDIA_TYPE_UNSUPPORTED', '媒体导入失败', '该文件不是受支持的图片、视频或音频。', '请从资源管理器选择受支持的媒体文件。')
 }
 
 async function selectMediaFile(

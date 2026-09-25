@@ -1,3 +1,4 @@
+import { installHostToolTestTransport } from './helpers/g20HostTools'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { _electron as electron, expect, test } from '@playwright/test'
@@ -44,6 +45,7 @@ test('a real image commit is green in the immediately following formal observati
       env: { ...process.env, VITE_DEV_SERVER_URL: `http://127.0.0.1:${address.port}/`,
         ELECTRON_DISABLE_SECURITY_WARNINGS: 'true', [BACKGROUND_E2E_ENV]: '1' } })
     const page = await app.firstWindow()
+    await installHostToolTestTransport(app, page)
     run = { app, page, runRoot, workspaceRoot: runRoot, projectPath, userData, pageErrors: [], consoleErrors: [] }
     page.on('pageerror', error => run!.pageErrors.push(error.message))
     await expectBackgroundWindowsIsolated(app, true)
@@ -58,35 +60,34 @@ test('a real image commit is green in the immediately following formal observati
     const result = await page.evaluate(async ids => {
       const load = (path: string) => import(/* @vite-ignore */ path)
       const { useEditorStore, selectActiveCourseProjectDocument } = await load('/src/renderer/store/editorStore.ts')
-      const { createCourseChatObservation } = await load('/src/renderer/ui/chat/courseChatObservation.ts')
+      const { createCurrentObservation, readCanonicalCourse } = await load('/tests/e2e/helpers/g20AuthoringObservation.ts')
+      const { transformImageAsset } = await load('/src/renderer/project/imageTransform.ts')
       const state = useEditorStore.getState()
       const document = selectActiveCourseProjectDocument(state)
-      const owner = { projectId: document.id, projectPath: state.projectPath }
-      const workspace = (await window.desktopAPI.localAgent({ operation: 'workspace', ...owner })).workspace
-      if (!workspace) throw new Error('Main did not return the current workspace')
-      const bridge = createCourseChatObservation(window.desktopAPI, owner)
+      const observer = createCurrentObservation()
+      const canonical = await readCanonicalCourse(), runId = crypto.randomUUID()
+      const originalBytes = Array.from(canonical.model.resources.assets[ids.asset])
       try {
-        const before = await bridge.capture({ workspace, scope: 'selection', purpose: 'local-edit', intent: 'edit',
-          instruction: '将当前图片的红色改为绿色，保留透明度和白色图案。', applyPolicy: 'auto', expectedResult: 'auto',
-          materials: [], catalogPackages: [] })
-        const destination = before.destinations.find((value: any) => value.kind === 'update' && value.target.itemId === ids.image)
-        if (!destination) throw new Error('Formal observation did not expose the selected image target')
-        const prepared = await useEditorStore.getState().prepareGenerationCandidate(before, {
-          version: 1, requestId: before.requestId, candidateId: crypto.randomUUID(), summary: 'Real canonical image transform',
-          steps: [{ id: 'image', tool: 'asset.image.transform', carrier: 'native', destination,
-            input: { sourceAssetId: ids.asset, operations: [{ kind: 'replace-color', sourceColor: '#ef3333', targetColor: '#22c55e', tolerance: 32 }], alpha: 'preserve', outputFormat: 'png' } }],
-        })
-        const committed = useEditorStore.getState().applyGenerationCandidate(prepared.previewId)
-        if (committed.status !== 'committed') throw new Error('Canonical image transform did not commit')
-        const atCommit = structuredClone(selectActiveCourseProjectDocument(useEditorStore.getState()))
-        const historyAtCommit = useEditorStore.getState().slideBackend.getSession().history.past.length
+        const before = await observer.capture({ intent: 'edit' })
+        const target = await window.g20HostTool({ kind: 'begin', runId, documentId: canonical.documentId,
+          target: { kind: 'course-object', locationId: state.courseAuthoringSession.token.locationId, itemId: ids.image } })
+        if (typeof target !== 'string') throw new Error('No Gateway image target')
+        const transformed = await transformImageAsset(canonical.model.resources.assets[ids.asset], document.assets[ids.asset].mimeType,
+          { sourceAssetId: ids.asset, operations: [{ kind: 'replace-color', sourceColor: '#ef3333', targetColor: '#22c55e', tolerance: 32 }], alpha: 'preserve', outputFormat: 'png' })
+        const resource = await window.g20HostTool({ kind: 'image', runId, documentId: canonical.documentId,
+          bytes: Array.from(transformed.bytes), mimeType: 'image/png', filename: 'transformed.png' })
+        if (typeof resource !== 'string') throw new Error('No decoded resource handle')
+        const committed = await window.g20HostTool({ kind: 'call', runId, call: { name: 'media.apply', input: { target, resource } } })
+        if (!committed || typeof committed === 'string' || committed.kind !== 'document-operation' || committed.result.status !== 'applied') throw new Error(JSON.stringify(committed))
+        const atCommit = (await readCanonicalCourse()).model.project
+        const historyAtCommit = (await readCanonicalCourse()).undoDepth
         // No test sleep, pixel polling or second capture: use the same immediate
-        // captureNext call the normal chat controller makes after its commit.
-        const after = await bridge.captureNext(before, committed.receipt)
-        return { before, after, receipt: committed.receipt, historyAtCommit,
-          historyAfterObservation: useEditorStore.getState().slideBackend.getSession().history.past.length,
+        // production painter readiness barrier after the main-session commit.
+        const after = await observer.capture({ intent: 'edit', prepareDrafts: false })
+        return { before, after, receipt: committed.result, originalBytes, retainedOriginalBytes: Array.from((await readCanonicalCourse()).model.resources.assets[ids.asset]), historyAtCommit,
+          historyAfterObservation: (await readCanonicalCourse()).undoDepth,
           documentUnchangedByObservation: JSON.stringify(atCommit) === JSON.stringify(selectActiveCourseProjectDocument(useEditorStore.getState())) }
-      } finally { bridge.dispose() }
+      } finally { observer.dispose(); await window.g20HostTool({ kind: 'stop', runId }) }
     }, FIXTURE_IDS)
     const file = (request: typeof result.before, path: string) => {
       const value = request.resourceFiles.find((entry: any) => entry.path === path)
@@ -110,7 +111,8 @@ test('a real image commit is green in the immediately following formal observati
     expect(pixels.after.green).toBeGreaterThan(pixels.before.red * 0.95)
     expect(pixels.original.red).toBeLessThan(pixels.original.green * 0.01)
     expect(pixels.original.green).toBeGreaterThan(1000)
-    expect(result.after.documentRevision).toBe(result.receipt.afterRevision)
+    expect(result.after.observation.documentRevision).toBe(result.receipt.revision)
+    expect(result.retainedOriginalBytes).toEqual(result.originalBytes)
     expect(result.documentUnchangedByObservation).toBe(true)
     expect(result.historyAfterObservation).toBe(result.historyAtCommit)
     expect(run.pageErrors).toEqual([])

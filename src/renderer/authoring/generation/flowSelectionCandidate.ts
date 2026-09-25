@@ -1,7 +1,8 @@
 import type { CourseProjectDocument } from '../../../shared/courseProjectTypes'
 import type { GenerationCandidate, GenerationRequest } from '../../../shared/generationContract'
 import type { FlowEditorSelection } from '../../course/flowEditorSlice'
-import { flowContextTextRangeSchema, flowSelectionContextTarget } from '../../course/flowContextSelection'
+import { flowSelectionContextTarget } from '../../course/flowContextSelection'
+import { flowContextTextRangeSchema } from '../../../core/tools/flowTextSlot'
 import { AuthoringToolFailure } from '../tools/executeAuthoringTool'
 
 /** A frozen text range is a mutation boundary, unlike ordinary page/object focus.

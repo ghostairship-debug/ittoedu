@@ -9,7 +9,7 @@ import type {
   CourseProjectDocument,
   CourseStateDeclaration,
 } from '../../shared/courseProjectTypes'
-import { commitCourseProjectMutation } from './courseProjectMutation'
+import { commitCourseProjectMutation } from '../../core/tools/courseProjectMutation'
 
 export type CourseLogicAuthoringFailureCode =
   | 'project-mismatch'

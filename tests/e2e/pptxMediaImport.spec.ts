@@ -5,10 +5,10 @@ import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { pptxMediaFixture } from '../fixtures/pptxMedia'
 import type { PptxImportDraft } from '../../src/renderer/project/pptxImport'
-import { createBlankCourseProject } from '../../src/renderer/project/createCourseProject'
+import { createBlankCourseProject } from '../../src/core/course/createCourseProject'
 import { planPptxImportTransaction } from '../../src/renderer/project/pptxImportTransaction'
 import { applyEditorTransactionStep } from '../../src/renderer/authoring/editorTransaction'
-import { createCourseProjectArchive, openCourseProjectArchive } from '../../src/renderer/project/courseProjectArchive'
+import { createCourseProjectArchive, openCourseProjectArchive } from '../../src/core/drivers/codecs/courseProjectArchive'
 import { buildPublishedCourseStandaloneHtml } from '../../src/renderer/export/course/buildCoursePackages'
 
 for (const kind of ['video', 'audio'] as const) test(`PPTX embedded ${kind} decodes, survives save/reopen, and plays in offline HTML`, async ({ page }, testInfo) => {

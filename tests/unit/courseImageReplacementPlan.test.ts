@@ -12,14 +12,14 @@ import {
   createEditorTransactionStep,
 } from '@/renderer/authoring/editorTransaction'
 import { projectEffectiveLayers } from '@/renderer/course/effectiveLayerProjection'
-import { buildSlideEditorView } from '@/renderer/course/slideEditorView'
+import { buildSlideEditorView } from '@/core/tools/slideLayerView'
 import {
   freezeCourseAssetSidecar,
   planCourseImageReplacement,
   type CourseImageReplacementPlanResult,
   type PlanCourseImageReplacementInput,
 } from '@/renderer/course/v9MediaAudioCommands'
-import { openCourseProjectArchive } from '@/renderer/project/courseProjectArchive'
+import { openCourseProjectArchive } from '../../src/core/drivers/codecs/courseProjectArchive'
 import type { CourseProjectDocument } from '@/shared/courseProjectTypes'
 import type { AssetMeta } from '@/shared/contracts/media-v1'
 

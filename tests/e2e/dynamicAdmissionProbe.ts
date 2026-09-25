@@ -157,7 +157,7 @@ export async function runDynamicAdmissionProbe(page: Page) {
         item.visible = false
         world.semanticZoom = [{ id: 'hide', layerItemIds: [item.layerItemId], minZoom: 0.01, maxZoom: 1000, visible: false }]
         const original = JSON.stringify(output.project)
-        const { parseComponentPackageFiles } = await load('/src/renderer/components/importComponentPackage.ts')
+        const { parseComponentPackageFiles } = await load('/src/core/drivers/codecs/importComponentPackage.ts')
         const { admitDynamicCandidate } = await load('/src/renderer/authoring/tools/dynamicCandidateAdmission.ts')
         const componentPackages = Object.fromEntries(Object.values(output.componentFiles).map((files: any) => {
           const data = parseComponentPackageFiles(files)

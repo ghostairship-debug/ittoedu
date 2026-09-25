@@ -1,3 +1,5 @@
+import { SpatialCommandError } from '../../core/tools/spatialInsertion'
+export { SpatialCommandError } from '../../core/tools/spatialInsertion'
 import type { CourseProjectDocument } from '../../shared/courseProjectTypes'
 import type { EditorTransactionStep } from '../authoring/editorTransaction'
 import {
@@ -15,7 +17,7 @@ import {
   type AuthoringHistoryTransactionFrame,
   type ResourceAwareAuthoringHistoryEntry,
 } from '../authoring/resourceAwareAuthoringHistory'
-import { commitCourseProjectMutation } from './courseProjectMutation'
+import { commitCourseProjectMutation } from '../../core/tools/courseProjectMutation'
 import {
   copySpatialSessionCamera,
   type SpatialEditorLayerScope,
@@ -89,15 +91,6 @@ export interface SpatialCommandResult {
   readonly selection?: SpatialAuthoringSelection
 }
 
-export class SpatialCommandError extends Error {
-  readonly reason: string
-
-  constructor(reason: string, message?: string) {
-    super(message ?? reason)
-    this.name = 'SpatialCommandError'
-    this.reason = reason
-  }
-}
 
 export function createSpatialAuthoringHistory(
   project: CourseProjectDocument,

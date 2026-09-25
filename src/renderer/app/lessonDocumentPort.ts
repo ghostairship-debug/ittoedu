@@ -1,9 +1,10 @@
 import type { LessonDocumentDesktopAPI } from '../../shared/lessonDocumentDesktop'
 import type { DocumentFilePort, OpenDocumentResult } from '../../shared/document/ports'
+import type { DocumentHostAPI } from '../../shared/workbench/desktop'
 
 /** A single in-flight read observes actual files; late replies never replace a closed editor. */
-export function createDesktopDocumentPort(api: LessonDocumentDesktopAPI): LessonDocumentDesktopAPI & DocumentFilePort {
-  return { ...api, watchDocument(ref, listener) {
+export function createDesktopDocumentPort(api: LessonDocumentDesktopAPI, documents: DocumentHostAPI): LessonDocumentDesktopAPI & DocumentFilePort & { documents: DocumentHostAPI } {
+  return { ...api, documents, watchDocument(ref, listener) {
     let closed = false, last: string | undefined, timer: ReturnType<typeof setTimeout> | undefined
     const version = (value: OpenDocumentResult) => JSON.stringify(value.version)
     async function poll() {

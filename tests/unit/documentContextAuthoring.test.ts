@@ -1,8 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
-import { DocumentFileSession, type RecoverableDocumentFilePort } from '../../src/renderer/documentFiles/documentFileSession'
 import { documentSourceEdits } from '../../src/shared/document/sourceMerge'
 import { parseDocumentMarkdown, serializeDocumentMarkdown } from '../../src/shared/document/markdown'
-import type { OpenDocumentResult } from '../../src/shared/document/ports'
 
 const ref = { kind: 'file' as const, path: '/workspace/lesson.md' }
 const inlineFormula = '$x^2$' + '{cw:formulaId="formula" cw:accessibleText="x 的平方"}'
@@ -18,26 +16,6 @@ const source = `<!--cw:block {"id":"paragraph"}-->
 | --- | --- |
 | <!--cw:row {"id":"row-1"}-->甲 | 乙 |
 `
-
-function sessionFixture(initialSource = source) {
-  let disk: OpenDocumentResult = { ref, source: initialSource, version: { contentVersion: 'v1', attachments: [] }, diagnostics: [] }
-  const port: RecoverableDocumentFilePort = {
-    openDocument: vi.fn(async () => disk),
-    watchDocument: () => () => {},
-    saveDocument: vi.fn(async request => {
-      disk = { ...disk, source: request.source, version: { contentVersion: 'saved', attachments: [] } }
-      return { status: 'saved' as const, operationId: request.operationId, version: disk.version }
-    }),
-    prepareAiEdit: vi.fn(async (_ref, ranges, epoch) => ({ status: 'ready' as const, document: disk, ranges, epoch })),
-    applyAiEdit: vi.fn(async request => ({
-      status: 'applied' as const,
-      record: { id: request.operationId, ref, baseVersion: request.baseVersion, savedVersion: { contentVersion: 'ai-saved', attachments: [] }, applied: request.edits },
-      conflicts: [],
-    })),
-    revertAiEdit: vi.fn(),
-  }
-  return { port, session: new DocumentFileSession(ref, port) }
-}
 
 describe('contextual document authoring contracts', () => {
   it('round trips links, inline LaTeX, list identities and table identities through the document model', () => {
@@ -85,34 +63,4 @@ describe('contextual document authoring contracts', () => {
     expect(parsed.document.content.blocks.map(block => block.id)).toEqual(['paragraph', 'list', 'table'])
   })
 
-  it('pins the prepared epoch, base version and exact ranges when applying a document edit', async () => {
-    const { port, session } = sessionFixture()
-    await session.open()
-    const edit = { from: source.indexOf('旧'), to: source.indexOf('旧') + 1, before: '旧', after: '新' }
-    const prepared = await session.prepareAiEdit([edit], 42)
-    expect(prepared).toMatchObject({ status: 'ready', epoch: 42, ranges: [edit] })
-    expect(port.prepareAiEdit).toHaveBeenCalledWith(ref, [edit], 42)
-
-    const result = await session.applyAiEdit({ baseVersion: { contentVersion: 'v1', attachments: [] }, epoch: 42, operationId: 'operation-1', edits: [edit] })
-    expect(result.status).toBe('applied')
-    expect(port.applyAiEdit).toHaveBeenCalledWith(expect.objectContaining({ ref, baseVersion: { contentVersion: 'v1', attachments: [] }, epoch: 42, edits: [edit] }))
-    expect(session.getSnapshot().aiRecords[0]).toMatchObject({ id: 'operation-1', applied: [edit] })
-    session.dispose()
-  })
-
-  it('does not allow a stale prepared baseline to be treated as a current source range', async () => {
-    const { port, session } = sessionFixture('新磁盘稿')
-    await session.open()
-    const prepared = await session.prepareAiEdit([{ from: 0, to: 1, before: '新', after: 'AI' }], 43)
-    expect(prepared.status).toBe('ready')
-    expect(port.prepareAiEdit).toHaveBeenCalledWith(ref, [{ from: 0, to: 1, before: '新', after: 'AI' }], 43)
-    // The port is the canonical stale-version gate; the session must forward
-    // its epoch and version without rewriting a selection into a full document.
-    vi.mocked(port.applyAiEdit).mockResolvedValueOnce({ status: 'conflict', conflicts: [{ from: 0, to: 1, before: '新', after: 'AI' }] })
-    const result = await session.applyAiEdit({ baseVersion: { contentVersion: 'old', attachments: [] }, epoch: 43, operationId: 'stale-operation', edits: [{ from: 0, to: 1, before: '新', after: 'AI' }] })
-    expect(result.status).toBe('conflict')
-    expect(port.applyAiEdit).toHaveBeenCalledWith(expect.objectContaining({ baseVersion: { contentVersion: 'old', attachments: [] }, epoch: 43 }))
-    expect(session.getSnapshot().source).toBe('新磁盘稿')
-    session.dispose()
-  })
 })

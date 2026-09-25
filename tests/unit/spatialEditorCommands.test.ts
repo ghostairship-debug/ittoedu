@@ -50,8 +50,8 @@ import {
   worldLayerItem,
   type SpatialAuthoringSession,
 } from '@/renderer/course/spatialEditorCommands'
-import { addCourseSpatialPage } from '@/renderer/course/courseLocationCommands'
-import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
+import { addCourseSpatialPage } from '@/core/tools/courseLocations'
+import { createBlankCourseProject } from '@/core/course/createCourseProject'
 
 const NOW = '2026-08-17T17:00:00.000Z'
 const SURFACE_ID = 'surface-spatial'

@@ -6,7 +6,7 @@ import {
   pptxRotation,
   pptxTransparency,
 } from '../../src/renderer/export/pptxShared'
-import { createShapeNode } from '../../src/renderer/project/nativeNodeFactories'
+import { createShapeNode } from '../../src/core/tools/nativeNodeFactories'
 
 describe('PowerPoint 对象映射', () => {
   it('换算画布坐标、颜色、透明度和旋转角度', () => {

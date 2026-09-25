@@ -1,6 +1,7 @@
+import { renameCourseSurface } from '../../../core/tools/courseLocations'
 import { missingTeacherControllerTransaction } from '../../components/teacherControllerComponent'
 import { beginFlowTableFieldEdit, updateFlowTextDraft } from '../../authoring/flowTextEdit'
-import { createChartNode, createChartLayerItem } from '../../project/nativeNodeFactories'
+import { createChartNode, createChartLayerItem } from '../../../core/tools/nativeNodeFactories'
 import type { ChartType } from '../../course/chartContentOperations'
 import type { ChartTextField } from '../../authoring/chartTextDraft'
 import type { ComponentPackageData } from '../../../shared/componentTypes'
@@ -54,19 +55,9 @@ import {
   type FlowEditorCommandRequest,
   type FlowSurfaceBackgroundPatch,
 } from '../../course/flowEditorCommands'
-import {
-  findGlobalTeacherController,
-  duplicateEffectiveLayerItem,
-  locateCourseLayer,
-  moveEffectiveLayerOwner,
-  patchEffectiveLayerItem,
-  reorderEffectiveLayerItems,
-  restoreDefaultTeacherController,
-  setGlobalLayerLocationVisibility,
-  setGlobalLayerVisibleAtLocation,
-  type LayerCommandResult,
-} from '../../course/effectiveLayerCommands'
-import { setGlobalLayerScenePlane } from '../../course/globalLayerCommands'
+import { duplicateEffectiveLayerItem, reorderEffectiveLayerItems } from '../../../core/tools/layerCommands'
+import { findGlobalTeacherController, locateCourseLayer, moveEffectiveLayerOwner, patchEffectiveLayerItem, restoreDefaultTeacherController, setGlobalLayerLocationVisibility, setGlobalLayerVisibleAtLocation, type LayerCommandResult } from '../../course/effectiveLayerCommands'
+import { setGlobalLayerScenePlane } from '../../../core/tools/globalLayers'
 import { buildCandidateEffectiveLayers } from '../../course/activeSurfaceProjection'
 import {
   commandTargetForRow,
@@ -105,7 +96,7 @@ import {
   markFlowTextComposing,
   type FlowTextEditSession,
 } from '../../authoring/flowTextEdit'
-import { findFlowBlockRecursive, flowSurfaceIn } from '../../course/flowDocumentModel'
+import { findFlowBlockRecursive, flowSurfaceIn } from '../../../core/tools/flowDocumentModel'
 import { nanoid } from 'nanoid'
 import { LAYER_REJECT_STALE_REVISION } from '../../course/effectiveLayerCommands'
 import { commitSlideProjectMutation } from '../../course/slideEditorCommands'
@@ -637,7 +628,7 @@ function flowOverlaySelection(
   )
 }
 
-function reconcileFlowSelection(
+export function reconcileFlowSelection(
   project: CourseProjectDocument,
   selection: FlowEditorSelection,
 ): FlowEditorSelection {
@@ -928,42 +919,11 @@ export function createFlowAuthoringSlice(
         })
         return
       }
-      const resourceTransition = flowEditorUndoResourceTransition(session.history)
-      const nextHistory = undoFlowEditorHistory(session.history)
-      if (nextHistory === session.history) return
-      flow.persist({
-        ok: true,
-        nextDocument: nextHistory.present,
-        historyEntry: false,
-        selection: reconcileFlowSelection(nextHistory.present, session.selection),
-      }, {
-        replaceHistory: nextHistory,
-        ...(resourceTransition ? { resourceTransition } : { sidecarDirection: 'undo' as const }),
-        clearTextEdit: true,
-        statusMessage: '已撤销',
-      })
-
+      void kernel.navigateHistory('undo').catch(error => kernel.setFeedback({ errorMessage: String(error) }))
     } else {
-      const owned = flow.read()
-      const session = owned.flowSession
-      if (!session) return
-      const edit = owned.flowTextEdit
+      const edit = flow.read().flowTextEdit
       if (edit?.composing || (edit && isFlowTextDraftDirty(edit))) return
-      const resourceTransition = flowEditorRedoResourceTransition(session.history)
-      const nextHistory = redoFlowEditorHistory(session.history)
-      if (nextHistory === session.history) return
-      flow.persist({
-        ok: true,
-        nextDocument: nextHistory.present,
-        historyEntry: false,
-        selection: reconcileFlowSelection(nextHistory.present, session.selection),
-      }, {
-        replaceHistory: nextHistory,
-        ...(resourceTransition ? { resourceTransition } : { sidecarDirection: 'redo' as const }),
-        clearTextEdit: true,
-        statusMessage: '已重做',
-      })
-
+      void kernel.navigateHistory('redo').catch(error => kernel.setFeedback({ errorMessage: String(error) }))
     }
   }
 
@@ -1321,12 +1281,7 @@ export function createFlowAuthoringSlice(
         case 'rename-page': {
           return persistIntentResult({
             ok: true,
-            nextDocument: commitSlideProjectMutation(document, (draft) => {
-              const surface = draft.surfaces.find((candidate) => (
-                candidate.id === target.surfaceId && candidate.type === 'flow'
-              ))
-              if (surface) surface.title = intent.title
-            }),
+            nextDocument: renameCourseSurface(document, target.surfaceId, intent.title),
             historyEntry: true,
             selection: committedSelection ?? session.selection,
           }, { statusMessage: '已重命名页面' })
@@ -1701,10 +1656,7 @@ export function createFlowAuthoringSlice(
       if (!session) return
       flow.persist({
         ok: true,
-        nextDocument: commitSlideProjectMutation(session.history.present, (draft) => {
-          const surface = draft.surfaces.find((candidate) => candidate.id === surfaceId)
-          if (surface) surface.title = title
-        }),
+        nextDocument: renameCourseSurface(session.history.present, surfaceId, title),
         historyEntry: true,
         selection: session.selection,
       }, { statusMessage: '已重命名页面' })

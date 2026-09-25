@@ -18,20 +18,20 @@ import '../src/renderer/export/bundledFontEmbedSourceNode'
 import {
   importComponentPackage,
   type ImportedComponentPackage,
-} from '../src/renderer/components/importComponentPackage'
+} from '../src/core/drivers/codecs/importComponentPackage'
 import {
   buildPublishedCourseStandaloneHtml,
   buildPublishedCourseWebPackage,
 } from '../src/renderer/export/course/buildCoursePackages'
-import { createBlankCourseProject } from '../src/renderer/project/createCourseProject'
+import { createBlankCourseProject } from '../src/core/course/createCourseProject'
 import {
   createExternalComponentNode,
   createTextNode,
-} from '../src/renderer/project/nativeNodeFactories'
+} from '../src/core/tools/nativeNodeFactories'
 import {
   createCourseProjectArchive,
   openCourseProjectArchive,
-} from '../src/renderer/project/courseProjectArchive'
+} from '../src/core/drivers/codecs/courseProjectArchive'
 
 const scriptDirectory = path.dirname(fileURLToPath(import.meta.url))
 const projectRoot = path.resolve(scriptDirectory, '..')

@@ -2,11 +2,11 @@ import { controllerPackages } from '../fixtures/teacherController'
 import { isControllerFixture } from '../fixtures/teacherController'
 import { describe, expect, it, vi } from 'vitest'
 import { collectCourseProjectExportPreflight } from '@/renderer/export/exportPreflight'
-import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
+import { createBlankCourseProject } from '@/core/course/createCourseProject'
 import {
   createImageNode,
   createTextNode,
-} from '@/renderer/project/nativeNodeFactories'
+} from '@/core/tools/nativeNodeFactories'
 import { sceneNodeToCourseLayerItem } from '@/shared/courseProjectModel'
 import type {
   CourseProjectDocument,

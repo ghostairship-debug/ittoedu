@@ -76,13 +76,16 @@ describe('unified editor surface', () => {
 
     render(<RightSidebar {...props} />)
 
-    expect(screen.getByRole('tab', { name: '元素' })).toBeInTheDocument()
+    const elementsRail = screen.getByRole('tab', { name: '元素' })
+    expect(elementsRail).toHaveAttribute('aria-expanded', 'false')
     expect(screen.getByRole('tab', { name: '图层' })).toBeInTheDocument()
     expect(screen.getByRole('tab', { name: '属性' })).toBeInTheDocument()
     expect(screen.queryByRole('tab', { name: '素材' })).not.toBeInTheDocument()
     expect(screen.getByRole('tab', { name: '组件' })).toBeInTheDocument()
     expect(screen.getByRole('tab', { name: '互动与动画' })).toBeInTheDocument()
     expect(screen.getByRole('tab', { name: '开发' })).toBeInTheDocument()
+    fireEvent.click(elementsRail)
+    expect(elementsRail).toHaveAttribute('aria-expanded', 'true')
     expect(screen.getByRole('tab', { name: '常用' })).toHaveAttribute(
       'aria-selected',
       'true',

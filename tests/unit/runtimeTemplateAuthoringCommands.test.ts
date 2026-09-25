@@ -1,4 +1,4 @@
-import { createTextNode } from '@/renderer/project/nativeNodeFactories'
+import { createTextNode } from '@/core/tools/nativeNodeFactories'
 import { sceneNodeToCourseLayerItem } from '@/shared/courseProjectModel'
 import { describe, expect, it } from 'vitest'
 import {
@@ -9,7 +9,7 @@ import {
   createSessionToken,
   type CurrentCourseAuthoringTargetIdentity,
 } from '@/renderer/authoring/courseAuthoringSession'
-import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
+import { createBlankCourseProject } from '@/core/course/createCourseProject'
 import {
   captureCourseRuntimeTemplateCreationTarget,
   planRuntimeTemplateCreation,

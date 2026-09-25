@@ -5,7 +5,7 @@ import { createCoursewareCaseBuilderApi } from '../../src/renderer/course/course
 import { createCoursewareBuilderCatalogPort } from '../../scripts/courseware-builder-v2-host'
 import { queryCourseAgentCapabilities, type CourseAgentCapabilityData } from '../../src/shared/courseAgentCapabilities'
 import generatedCapabilities from '../../src/shared/generated/courseAgentCapabilities.json'
-import { openCourseProjectArchive } from '../../src/renderer/project/courseProjectArchive'
+import { openCourseProjectArchive } from '../../src/core/drivers/codecs/courseProjectArchive'
 import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'

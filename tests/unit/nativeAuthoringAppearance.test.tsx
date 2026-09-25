@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { ColorInput } from '@/renderer/ui/ColorInput'
-import { createChartNode, createTableNode } from '@/renderer/project/nativeNodeFactories'
+import { createChartNode, createTableNode } from '@/core/tools/nativeNodeFactories'
 import { paintPublishedNativeChart, paintPublishedNativeTable } from '@/player/surfaces/native/publishedNativeRendering'
-import { createTextNode } from '@/renderer/project/nativeNodeFactories'
+import { createTextNode } from '@/core/tools/nativeNodeFactories'
 import { paintPublishedNativeText } from '@/player/surfaces/publishedNativeText'
 import { buildNativeChartView } from '@/shared/nativeChartView'
 

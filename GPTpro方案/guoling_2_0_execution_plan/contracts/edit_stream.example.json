@@ -1,0 +1,35 @@
+{
+  "design_example_only": true,
+  "events": [
+    {
+      "type": "edit.begin",
+      "draftId": "draft-1",
+      "sequence": 1
+    },
+    {
+      "type": "edit.delta",
+      "draftId": "draft-1",
+      "sequence": 2,
+      "text": "新"
+    },
+    {
+      "type": "edit.delta",
+      "draftId": "draft-1",
+      "sequence": 3,
+      "text": "的文字"
+    },
+    {
+      "type": "edit.complete",
+      "draftId": "draft-1",
+      "sequence": 4,
+      "finalText": "新的文字"
+    }
+  ],
+  "rules": [
+    "Map to a host-bound document range",
+    "Display actual deltas before complete",
+    "Final snapshot replaces draft buffer, not appends",
+    "One canonical transaction and history group",
+    "Aborted draft is not a completed document operation"
+  ]
+}

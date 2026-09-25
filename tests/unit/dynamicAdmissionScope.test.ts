@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
+import { createBlankCourseProject } from '@/core/course/createCourseProject'
 import { dynamicAdmissionScope } from '@/renderer/authoring/tools/dynamicAdmissionScope'
 import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
 

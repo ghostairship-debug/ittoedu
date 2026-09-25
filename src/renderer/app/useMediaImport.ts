@@ -1,6 +1,7 @@
 import { useCallback, useRef, useState } from 'react'
 import type { CourseAuthoringTarget } from '../authoring/courseAuthoringSession'
 import type { AssetKind, AssetMeta } from '../../shared/contracts/media-v1/types'
+import type { WorkspaceMediaDropRequest } from '../lessonWorkspace/workspaceMediaDrop'
 import { toUserMessage, UserFacingError } from '../../shared/errors'
 import type {
   BatchFileRejection,
@@ -24,6 +25,7 @@ import {
 } from '../project/mediaBatch'
 import {
   dedupeCourseMediaImports,
+  freezeCourseAssetSidecar,
   prepareHashedMediaBatch,
   type CourseAssetSidecar,
   type CourseImportedAsset,
@@ -82,6 +84,11 @@ export interface MediaLibraryCommitResult {
   readonly reason?: string
 }
 
+export interface FlowAudioPlacementResult {
+  readonly completedCount: number
+  readonly issues: readonly MediaImportIssue[]
+}
+
 export interface MediaCandidatePlacement {
   readonly items: readonly MediaImportItem[]
   readonly nativeType?: 'image' | 'video' | 'audio'
@@ -96,6 +103,9 @@ export interface MediaCandidatePlacement {
  */
 export interface MediaImportPorts {
   captureIdentity(): MediaImportIdentity | null
+  captureDocumentId?(): string | null
+  captureSurfaceKind?(): 'slide' | 'flow' | 'spatial' | null
+  captureFlowAudioTarget?(): MediaImportIdentity | null
   captureLibraryTarget(): MediaLibraryTarget | null
   captureImageReplacementTarget(): CourseAuthoringTarget | null
   readMediaLibrarySnapshot(): MediaLibrarySnapshot | null
@@ -117,7 +127,9 @@ export interface MediaImportPorts {
     items: readonly MediaImportItem[],
     position?: { x?: number; y?: number },
   ): string[]
-  importSounds(items: readonly MediaImportItem[]): void
+  placeFlowAudioNodes?(items: readonly MediaImportItem[]): Promise<FlowAudioPlacementResult>
+  placeFlowMediaAt?(item: MediaImportItem, afterBlockId: string | null): { ok: boolean; reason?: string; blockId?: string }
+  importSounds(items: readonly MediaImportItem[]): string[]
   commitCandidateMedia(input: MediaCandidatePlacement): void
   selectImage(): Promise<SelectedImageResult | null>
   selectImages(): Promise<SelectedFileBatch<SelectedImageBatchFile> | null>
@@ -138,6 +150,8 @@ export interface MediaImportApi {
     position?: { x?: number; y?: number },
   ): Promise<void>
   selectAndImportAudio(): Promise<void>
+  selectAndInsertFlowAudio(): Promise<void>
+  importWorkspaceMedia(request: WorkspaceMediaDropRequest): Promise<{ ok: boolean; reason?: string; assetId?: string; soundId?: string }>
   selectImageAsset(): Promise<ImportedImageAsset | null>
   batchOperationSummary: { title: string; summary: string } | null
   clearBatchSummary(): void
@@ -483,6 +497,95 @@ export function useMediaImport(ports: MediaImportPorts): MediaImportApi {
     }, '声音读取失败。请重新选择受支持的声音文件。')
   }, [prepareSelection, reportBatchOutcome, tryInjectCandidateMedia])
 
+  const selectAndInsertFlowAudio = useCallback(async () => {
+    await portsRef.current.runBusy(async () => {
+      const started = portsRef.current.captureFlowAudioTarget?.() ?? null
+      if (!started || !portsRef.current.placeFlowAudioNodes) {
+        throw new UserFacingError(
+          '无法插入音频',
+          '当前不是可编辑的 Flow 文档页。',
+          '请切换到 Flow 当前文档页后再试。',
+        )
+      }
+      const librarySnapshot = portsRef.current.readMediaLibrarySnapshot()
+      const batch = await portsRef.current.selectAudios()
+      if (!batch) return
+      assertFreshIdentity(started, portsRef.current.captureFlowAudioTarget?.() ?? null, '音频插入已取消')
+      const prepared = await prepareSelection(
+        batch.accepted,
+        'audio',
+        async (file) => {
+          const metadata = await readMediaMetadata(file.bytes, file.mimeType, 'audio')
+          const imported = createMediaAssetImport(file, 'audio', metadata)
+          return { meta: imported.meta, bytes: imported.bytes }
+        },
+        librarySnapshot,
+      )
+      assertFreshIdentity(started, portsRef.current.captureFlowAudioTarget?.() ?? null, '音频插入已取消')
+      const placed = prepared.placements.length > 0
+        ? await portsRef.current.placeFlowAudioNodes!(asCommitItems(prepared.placements))
+        : { completedCount: 0, issues: [] }
+      reportBatchOutcome({
+        label: 'Flow 正文音频插入',
+        completedCount: placed.completedCount,
+        duplicateCount: prepared.duplicateCount,
+        issues: [...desktopRejections(batch.rejected), ...prepared.decodeFailures, ...placed.issues],
+      })
+    }, '音频读取失败。请重新选择受支持的声音文件。')
+  }, [prepareSelection, reportBatchOutcome])
+
+  const importWorkspaceMedia = useCallback(async (request: WorkspaceMediaDropRequest): Promise<{ ok: boolean; reason?: string; assetId?: string; soundId?: string }> => {
+    if (request.items.length !== 1) return { ok: false, reason: '请一次拖入一个媒体文件；多文件尚不能作为同一笔插入。' }
+    const file = request.items[0]!
+    const matchesTarget = () => {
+      const current = portsRef.current.captureIdentity()
+      return current?.projectId === request.target.projectId
+        && current.revision === request.target.revision
+        && current.locationId === request.target.locationId
+        && current.surfaceId === request.target.surfaceId
+        && current.sessionGeneration === request.target.sessionGeneration
+        && portsRef.current.captureDocumentId?.() === request.target.documentId
+        && portsRef.current.captureSurfaceKind?.() === request.placement.surface
+    }
+    if (!matchesTarget()) return { ok: false, reason: '文档或插入位置已改变，请重新拖入媒体。' }
+    const started = portsRef.current.captureIdentity()
+    let failure = '媒体拖入未完成，请重新选择目标。'
+    const result = await portsRef.current.runBusy(async () => {
+      try {
+        if (file.bytes.byteLength === 0 || !file.workspaceId || !file.entryId) {
+          throw new Error('工作空间媒体文件无效，请重新从资源树拖入。')
+        }
+        const snapshot = portsRef.current.readMediaLibrarySnapshot()
+        if (!snapshot) throw new Error('当前没有可写入的课程媒体资源。')
+        const imported = file.mediaKind === 'image'
+          ? createImageAssetImport(file, { dimensions: await readImageDimensions(file.bytes, file.mimeType) })
+          : createMediaAssetImport(file, file.mediaKind, await readMediaMetadata(file.bytes, file.mimeType, file.mediaKind))
+        const deduped = await dedupeCourseMediaImports(file.mediaKind, snapshot.assets, freezeCourseAssetSidecar(snapshot.files), [imported])
+        if (!matchesTarget()) throw new Error('文档或插入位置已改变，请重新拖入媒体。')
+        assertFreshIdentity(started, portsRef.current.captureIdentity(), '媒体拖入已取消')
+        const item = asCommitItems(deduped.placements)[0]
+        if (!item) throw new Error('媒体文件没有可插入的内容。')
+        if (request.placement.surface === 'flow') {
+          const placed = portsRef.current.placeFlowMediaAt?.(item, request.placement.afterBlockId)
+          if (!placed?.ok) throw new Error(placed?.reason ?? 'Flow 正文未接受媒体插入。')
+        } else if (file.mediaKind === 'audio') {
+          const soundIds = portsRef.current.importSounds([item])
+          if (soundIds.length !== 1 || !soundIds[0]) throw new Error('当前文档未接受声音库导入。')
+          return { ok: true as const, assetId: item.meta.id, soundId: soundIds[0] }
+        } else if (file.mediaKind === 'image') {
+          if (portsRef.current.placeImageNodes([item], request.placement).length !== 1) throw new Error('当前画布未接受图片插入。')
+        } else if (file.mediaKind === 'video') {
+          if (portsRef.current.placeVideoNodes([item], request.placement).length !== 1) throw new Error('当前画布未接受视频插入。')
+        }
+        return { ok: true as const, assetId: item.meta.id }
+      } catch (error) {
+        failure = error instanceof Error ? error.message : '媒体拖入未完成。'
+        throw error
+      }
+    }, '媒体拖入失败。请重新从资源树拖入。')
+    return result ?? { ok: false, reason: failure }
+  }, [])
+
   const selectAndImportVideo = useCallback(async (
     mode: 'add' | 'library',
     position?: { x?: number; y?: number },
@@ -579,6 +682,8 @@ export function useMediaImport(ports: MediaImportPorts): MediaImportApi {
     selectAndImportImage,
     selectAndImportVideo,
     selectAndImportAudio,
+    selectAndInsertFlowAudio,
+    importWorkspaceMedia,
     selectImageAsset,
     batchOperationSummary,
     clearBatchSummary,

@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { parseComponentPackageFiles } from '../../components/importComponentPackage'
+import { parseComponentPackageFiles } from '../../../core/drivers/codecs/importComponentPackage'
 
 export const dynamicPackageFilesSchema = z.record(z.string().min(1).max(500), z.union([
   z.string().max(24_000_000).regex(/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/),

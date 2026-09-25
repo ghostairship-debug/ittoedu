@@ -11,16 +11,15 @@ import { executeAuthoringTool, type AuthoringToolDefinition } from '@/renderer/a
 import { courseAuthoringScopeFromLocation } from '@/renderer/authoring/courseAuthoringScope'
 import { applyEditorTransactionStep, type EditorTransactionStep } from '@/renderer/authoring/editorTransaction'
 import { commitEditorTransactionToAuthoringHistory, createResourceAwareAuthoringHistory } from '@/renderer/authoring/resourceAwareAuthoringHistory'
-import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
-import { createShapeNode, createTextNode } from '@/renderer/project/nativeNodeFactories'
+import { createBlankCourseProject } from '@/core/course/createCourseProject'
+import { createShapeNode, createTextNode } from '@/core/tools/nativeNodeFactories'
 import { sceneNodeToCourseLayerItem } from '@/shared/courseProjectModel'
-import { addCourseFlowPage, addCourseScene } from '@/renderer/course/courseLocationCommands'
+import { addCourseFlowPage, addCourseScene } from '@/core/tools/courseLocations'
 import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
 import type { CourseProjectDocument, SlideSceneDocument } from '@/shared/courseProjectTypes'
 import type { AuthoringToolCreateScopeV1, AuthoringToolDestinationV1 } from '@/shared/authoringToolContract'
 import type { HistoryResourceState } from '@/renderer/store/courseResourceState'
 import { createPublishedCourseSession, type PublishedCourseSession } from '@/player/surfaces/publishedDynamicHosts'
-import { failureReasonKey } from '../../src/main/localAgent/candidateChangeKey'
 
 const NOW = '2026-08-17T21:00:00.000Z'
 
@@ -260,7 +259,7 @@ describe('slide.interaction compose', () => {
     const { id: _goodId, ...goodRule } = good.surfaces.find(surface => surface.type === 'slide')!.scenes[0]!.interactions[0]!
     const repaired = await coordinator.prepare(request, { ...candidate, candidateId: crypto.randomUUID(), steps: [{ ...candidate.steps[0], input: { operation: 'insert', rule: goodRule } }] })
     expect(repaired.interactionChecks?.checked).toHaveLength(1)
-    expect(coordinator.apply(repaired.previewId).status).toBe('committed')
+    expect((await coordinator.apply(repaired.previewId)).status).toBe('committed')
     expect(commits).toHaveLength(1)
     const styleOnly = structuredClone(bad)
     styleOnly.title = '仅修改标题'
@@ -489,11 +488,9 @@ describe('slide.interaction compose 能力边界与跨位置同名', () => {
         effects: [{ kind: 'show', nodes: [shown] }, { kind: 'set-state', state }] }, destination)
       expect(receipt.status).toBe('failed'); expect(test.steps).toHaveLength(0)
       codes.push(receipt.diagnostics[0]!.code)
-      keys.push(failureReasonKey({ version: 1, stage: 'prepare', tool: 'slide.interaction',
-        diagnostics: receipt.diagnostics, assetIds: [], packageIds: [] }))
+
     }
     expect(codes).toEqual(['compose-node-not-found', 'compose-node-not-found', 'compose-state-not-found'])
-    expect(keys.every(Boolean)).toBe(true); expect(new Set(keys).size).toBe(3)
     const corrected = await test.run(slideInteractionTool, { operation: 'compose', trigger: { kind: 'click', node: 'btn-switch' },
       effects: [{ kind: 'show', nodes: ['explanation'] }, { kind: 'set-state', state: 'state-lit' }] }, destination)
     expect(corrected.status).toBe('committed'); expect(test.steps).toHaveLength(1)

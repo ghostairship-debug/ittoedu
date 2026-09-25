@@ -3,10 +3,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 // Equivalent candidates now also carry their actual updatedAt diff in receipts.
 beforeEach(() => { vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date('2026-09-17T00:00:00Z')) })
 afterEach(() => { vi.useRealTimers() })
-import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
+import { createBlankCourseProject } from '@/core/course/createCourseProject'
 import { createBlankFlowCourseProject } from '@/renderer/project/createFlowCourseProject'
 import { createBlankSpatialCourseProject } from '@/renderer/project/createSpatialCourseProject'
-import { createImageNode, createTextNode } from '@/renderer/project/nativeNodeFactories'
+import { createImageNode, createTextNode } from '@/core/tools/nativeNodeFactories'
 import { encodeImageTransformPng } from '@/renderer/project/imageTransform'
 import { sceneNodeToCourseLayerItem } from '@/shared/courseProjectModel'
 import { courseAuthoringScopeFromLocation, makeLayerItemAuthoringAddress } from '@/renderer/authoring/courseAuthoringScope'
@@ -70,7 +70,7 @@ describe('request-scoped short generation candidates', () => {
     expect(expanded).toEqual(f.full)
     const a = f.create(f.assetFiles), b = f.create(f.assetFiles), before = structuredClone(a.read())
     const pa = await a.coordinator.prepare(f.request, expanded), pb = await b.coordinator.prepare(f.request, f.full)
-    const ra = a.coordinator.apply(pa.previewId), rb = b.coordinator.apply(pb.previewId)
+    const ra = (await a.coordinator.apply(pa.previewId)), rb = (await b.coordinator.apply(pb.previewId))
     expect(ra).toEqual(rb); expect(ra.status).toBe('committed')
     expect({ ...a.read(), document: { ...a.read().document, updatedAt: b.read().document.updatedAt } }).toEqual(b.read())
     expect(locateCourseLayer(a.read().document, 'title')!.item).toMatchObject({ frame: { x: 50, y: 60, width: 360, height: 80 }, content: { data: { assetId: f.nextId } } })
@@ -121,7 +121,7 @@ describe('request-scoped short generation candidates', () => {
     const a = f.create(), b = f.create()
     const before = structuredClone(a.read())
     const pa = await a.coordinator.prepare(f.request, short), pb = await b.coordinator.prepare(f.request, full)
-    const ra = a.coordinator.apply(pa.previewId), rb = b.coordinator.apply(pb.previewId)
+    const ra = (await a.coordinator.apply(pa.previewId)), rb = (await b.coordinator.apply(pb.previewId))
     expect(ra).toEqual(rb); expect(ra.status).toBe('committed')
     expect({ ...a.read(), document: { ...a.read().document, updatedAt: b.read().document.updatedAt } }).toEqual(b.read()); expect(a.commits).toHaveLength(1)
     expect(locateCourseLayer(a.read().document, 'title')!.item).toMatchObject({ frame: { x: 50, y: 60, width: 360, height: 80 }, content: { data: { text: '简谐运动', style: { fontSize: 48, align: 'center', bold: true } } } })
@@ -192,7 +192,7 @@ describe('request-scoped short generation candidates', () => {
       f.short.steps[0],
     ] }
     const prepared = await test.coordinator.prepare(request, expandGenerationShortCandidate(short, request, f.candidateId))
-    expect(test.coordinator.apply(prepared.previewId).status).toBe('committed'); expect(test.commits).toHaveLength(1)
+    expect((await test.coordinator.apply(prepared.previewId)).status).toBe('committed'); expect(test.commits).toHaveLength(1)
     const surface = test.read().document.surfaces[0]!
     if (surface.type !== 'slide') throw new Error('fixture requires Slide')
     const created = surface.scenes[0]!.layerItems.find(item => item.layerItemId !== 'title')!
@@ -218,7 +218,7 @@ describe('request-scoped short generation candidates', () => {
     const f = fixture(), test = f.create(), short = { ...f.short, steps: [{ ...f.short.steps[0], input: { operation: 'edit', text: '原标题', textStyle: { fontSize: 28 } } }] }
     const prepared = await test.coordinator.prepare(f.request, expandGenerationShortCandidate(short, f.request, f.candidateId))
     expect({ ...prepared.document, revision: f.document.revision, updatedAt: f.document.updatedAt }).toEqual(f.document)
-    expect(test.coordinator.apply(prepared.previewId)).toMatchObject({ status: 'unchanged', receipt: { status: 'unchanged', beforeRevision: f.document.revision, afterRevision: f.document.revision, affected: [], resources: { assetIds: [], packageIds: [] } } })
+    expect((await test.coordinator.apply(prepared.previewId))).toMatchObject({ status: 'unchanged', receipt: { status: 'unchanged', beforeRevision: f.document.revision, afterRevision: f.document.revision, affected: [], resources: { assetIds: [], packageIds: [] } } })
     expect(test.commits).toHaveLength(0); expect(test.read().document).toEqual(f.document)
   })
 
@@ -236,7 +236,7 @@ describe('request-scoped short generation candidates', () => {
       const f = fixture(), test = f.create(), request = { ...f.request, execution: { version: 1 as const, startedAt: 1000, deadlineAt: 1100 } }
       const prepared = await test.coordinator.prepare(request, expandGenerationShortCandidate(f.short, request, f.candidateId))
       vi.setSystemTime(1100)
-      expect(test.coordinator.apply(prepared.previewId)).toEqual({ status: 'stale' })
+      expect((await test.coordinator.apply(prepared.previewId))).toEqual({ status: 'stale' })
       expect(test.commits).toHaveLength(0); expect(test.read().document).toEqual(f.document)
     } finally { vi.useRealTimers() }
   })

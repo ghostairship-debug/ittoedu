@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { createShapeNode } from '../../src/renderer/project/nativeNodeFactories'
+import { createShapeNode } from '../../src/core/tools/nativeNodeFactories'
 import { paintPublishedNativeRenderInput } from '../../src/player/surfaces/native/publishedNativeRendering'
 import { parsePptxCustomGeometry, parsePptxGradient } from '../../src/renderer/project/pptxShapeImport'
 import { drawingMlGradientStops } from '../../src/renderer/export/drawingMlShapeGeometry'

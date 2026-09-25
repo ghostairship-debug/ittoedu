@@ -4,8 +4,8 @@ import { fileURLToPath } from 'node:url'
 import sharp from 'sharp'
 import { courseProjectDocumentSchema } from '../../../src/shared/courseProjectSchema'
 import type { CourseProjectDocument, FlowBlock, LayerItem, NativeLayerItem, SlideSurfaceDocument, FlowSurfaceDocument, SpatialSurfaceDocument } from '../../../src/shared/courseProjectTypes'
-import { openCourseProjectArchive, type CourseProjectArchiveData } from '../../../src/renderer/project/courseProjectArchive'
-import { createTableNode, createTableLayerItem, createChartNode, createChartLayerItem, createInputLayerItem, DEFAULT_INPUT_STYLE } from '../../../src/renderer/project/nativeNodeFactories'
+import { openCourseProjectArchive, type CourseProjectArchiveData } from '../../../src/core/drivers/codecs/courseProjectArchive'
+import { createTableNode, createTableLayerItem, createChartNode, createChartLayerItem, createInputLayerItem, DEFAULT_INPUT_STYLE } from '../../../src/core/tools/nativeNodeFactories'
 import { inputId, type CommonTask, type InputRole, type TaskVariant } from './definitions'
 
 const ROOT = dirname(fileURLToPath(import.meta.url))

@@ -27,7 +27,7 @@ import type { AssetMeta } from '../src/shared/contracts/media-v1/types'
 import {
   createCourseProjectArchive,
   type CourseProjectArchiveData,
-} from '../src/renderer/project/courseProjectArchive'
+} from '../src/core/drivers/codecs/courseProjectArchive'
 import { encodeImageTransformPng } from '../src/renderer/project/imageTransform'
 import { createTimezoneStableZipMtime } from './exampleGenerationBoundary'
 

@@ -16,13 +16,13 @@ import {
   type ArchitectureBaselineFixtureId,
 } from '../../scripts/build-architecture-baseline-fixtures'
 import { componentContentSha256 } from '../../src/shared/componentContentIntegrity'
-import { parseComponentPackageFiles } from '../../src/renderer/components/importComponentPackage'
+import { parseComponentPackageFiles } from '../../src/core/drivers/codecs/importComponentPackage'
 import { buildPublishedCourseV2Payload } from '../../src/renderer/export/course'
 import {
   createCourseProjectArchive,
   detectCourseProjectArchiveFormat,
   openCourseProjectArchive,
-} from '../../src/renderer/project/courseProjectArchive'
+} from '../../src/core/drivers/codecs/courseProjectArchive'
 import type { CourseProjectDocument, FlowBlock } from '../../src/shared/courseProjectTypes'
 import { publishedCourseV2Schema } from '../../src/shared/publishedCourseSchema'
 import { validateCourseProjectArchiveBytes } from '../../scripts/validate-project'

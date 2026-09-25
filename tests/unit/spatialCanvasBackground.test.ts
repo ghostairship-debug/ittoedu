@@ -1,4 +1,5 @@
-import { beforeEach, describe, expect, it } from 'vitest'
+// @vitest-environment node
+import { describe, expect, it } from 'vitest'
 import { createBlankSpatialCourseProject } from '@/renderer/project/createSpatialCourseProject'
 import { createBlankFlowCourseProject } from '@/renderer/project/createFlowCourseProject'
 import { resolveCourseSurfaceBackgroundColor } from '@/shared/courseProjectModel'
@@ -19,6 +20,7 @@ import type {
   SpatialSurfaceDocument,
 } from '@/shared/courseProjectTypes'
 import type { AssetMeta } from '@/shared/contracts/media-v1'
+import { createCourseStoreHost } from '../helpers/courseStoreHost'
 
 /** The strict schema requires every referenced asset id to exist; register one first. */
 function withRegisteredAsset(project: CourseProjectDocument, id: string): CourseProjectDocument {
@@ -40,11 +42,8 @@ function withRegisteredAsset(project: CourseProjectDocument, id: string): Course
  * Opening a project does not dirty-write omitted field to '#ffffff' or '#111318'.
  */
 describe('Canvas background persistence & default', () => {
-  beforeEach(() => {
-    useEditorStore.getState().createNewProject()
-  })
-
-  it('omits field by default and resolves to white without dirty-writing', () => {
+  it('omits field by default and resolves to white without dirty-writing', async () => {
+    const host = await createCourseStoreHost()
     const spatialDoc = createBlankSpatialCourseProject({ now: '2026-08-18T14:00:00.000Z' })
     // Simulate an existing/omitted field project
     const spatialDocWithoutBg = {
@@ -60,7 +59,7 @@ describe('Canvas background persistence & default', () => {
     expect(spatialSurface?.backgroundColor).toBeUndefined()
     expect(resolveCourseSurfaceBackgroundColor(spatialSurface?.backgroundColor)).toBe('#ffffff')
 
-    useEditorStore.getState().loadCourseProject(spatialDocWithoutBg as any, null)
+    await host.open(spatialDocWithoutBg as CourseProjectDocument)
     const state = useEditorStore.getState()
     expect(state.spatialSession).not.toBeNull()
     const loadedSpatialSurface = state.spatialSession?.history.present.surfaces.find((s): s is SpatialSurfaceDocument => s.type === 'spatial-2d')
@@ -81,16 +80,17 @@ describe('Canvas background persistence & default', () => {
     expect(flowSurface?.backgroundColor).toBeUndefined()
     expect(resolveCourseSurfaceBackgroundColor(flowSurface?.backgroundColor)).toBe('#ffffff')
 
-    useEditorStore.getState().loadCourseProject(flowDocWithoutBg as any, null)
+    await host.open(flowDocWithoutBg as CourseProjectDocument)
     const flowState = useEditorStore.getState()
     expect(flowState.flowSession).not.toBeNull()
     const loadedFlowSurface = flowState.flowSession?.history.present.surfaces.find((s): s is FlowSurfaceDocument => s.type === 'flow')
     expect(loadedFlowSurface?.backgroundColor).toBeUndefined()
   })
 
-  it('updates Spatial surface background color and persists to document and command result', () => {
+  it('updates Spatial surface background color and persists to document and command result', async () => {
+    const host = await createCourseStoreHost()
     const doc = createBlankSpatialCourseProject({ now: '2026-08-18T14:00:00.000Z' })
-    useEditorStore.getState().loadCourseProject(doc, null)
+    await host.open(doc)
     const session = useEditorStore.getState().spatialSession!
     expect(session).not.toBeNull()
 
@@ -102,6 +102,7 @@ describe('Canvas background persistence & default', () => {
     expect(resolveCourseSurfaceBackgroundColor(updatedSurface?.backgroundColor)).toBe('#223344')
 
     useEditorStore.getState().applySpatialAuthoringSession(result.nextSession!, { historyEntry: true })
+    await useEditorStore.getState().drainCourseDocument()
     const persisted = useEditorStore.getState().spatialSession?.history.present.surfaces.find(
       (s): s is SpatialSurfaceDocument => s.type === 'spatial-2d',
     )
@@ -129,9 +130,10 @@ describe('Canvas background persistence & default', () => {
     expect(invalidResult.ok).toBe(false)
   })
 
-  it('derivedV8ProjectFromSpatial scenes[0].backgroundColor equals the resolved value', () => {
+  it('derivedV8ProjectFromSpatial scenes[0].backgroundColor equals the resolved value', async () => {
+    const host = await createCourseStoreHost()
     const doc = createBlankSpatialCourseProject({ now: '2026-08-18T14:00:00.000Z' })
-    useEditorStore.getState().loadCourseProject(doc, null)
+    await host.open(doc)
     expect(resolveCourseSurfaceBackgroundColor(
       useEditorStore.getState().spatialSession?.history.present.surfaces.find(
         (s): s is SpatialSurfaceDocument => s.type === 'spatial-2d',
@@ -142,6 +144,7 @@ describe('Canvas background persistence & default', () => {
     const result = updateSpatialSurfaceBackgroundColor(session, '#336699')
     expect(result.ok).toBe(true)
     useEditorStore.getState().applySpatialAuthoringSession(result.nextSession!, { historyEntry: true })
+    await useEditorStore.getState().drainCourseDocument()
     expect(useEditorStore.getState().spatialSession?.history.present.surfaces.find(
       (s): s is SpatialSurfaceDocument => s.type === 'spatial-2d',
     )?.backgroundColor).toBe('#336699')
@@ -149,10 +152,6 @@ describe('Canvas background persistence & default', () => {
 })
 
 describe('r12-040 Flow/Spatial background mode and asset patches', () => {
-  beforeEach(() => {
-    useEditorStore.getState().createNewProject()
-  })
-
   it('Flow: switching only backgroundMode is one commit and never clears the dormant color/asset', () => {
     const doc = withRegisteredAsset(
       createBlankFlowCourseProject({ now: '2026-09-05T00:00:00.000Z' }),
@@ -227,12 +226,13 @@ describe('r12-040 Flow/Spatial background mode and asset patches', () => {
     expect(noop.nextDocument).toBe(doc)
   })
 
-  it('Spatial: switching only backgroundMode is one commit and never clears the dormant color/asset', () => {
+  it('Spatial: switching only backgroundMode is one commit and never clears the dormant color/asset', async () => {
+    const host = await createCourseStoreHost()
     const project = withRegisteredAsset(
       createBlankSpatialCourseProject({ now: '2026-09-05T00:00:00.000Z' }),
       'asset_spatial_bg',
     )
-    useEditorStore.getState().loadCourseProject(project, null)
+    await host.open(project)
     const session = useEditorStore.getState().spatialSession!
     const surfaceId = session.selection.surfaceId
 
@@ -255,12 +255,13 @@ describe('r12-040 Flow/Spatial background mode and asset patches', () => {
     expect(inheritedSurface.backgroundAssetId).toBe('asset_spatial_bg')
   })
 
-  it('Spatial: backgroundAssetId accepts a string, an explicit null clear, and rejects an invalid mode', () => {
+  it('Spatial: backgroundAssetId accepts a string, an explicit null clear, and rejects an invalid mode', async () => {
+    const host = await createCourseStoreHost()
     const project = withRegisteredAsset(
       createBlankSpatialCourseProject({ now: '2026-09-05T00:00:00.000Z' }),
       'asset_2',
     )
-    useEditorStore.getState().loadCourseProject(project, null)
+    await host.open(project)
     const session = useEditorStore.getState().spatialSession!
     const surfaceId = session.selection.surfaceId
 
@@ -284,9 +285,10 @@ describe('r12-040 Flow/Spatial background mode and asset patches', () => {
     expect(invalidMode.ok).toBe(false)
   })
 
-  it('Spatial: a patch that changes nothing writes zero history entries', () => {
+  it('Spatial: a patch that changes nothing writes zero history entries', async () => {
+    const host = await createCourseStoreHost()
     const project = createBlankSpatialCourseProject({ now: '2026-09-05T00:00:00.000Z' })
-    useEditorStore.getState().loadCourseProject(project, null)
+    await host.open(project)
     const session = useEditorStore.getState().spatialSession!
     const noop = updateSpatialSurfaceBackground(session, {
       backgroundColor: '#ffffff',
@@ -296,7 +298,7 @@ describe('r12-040 Flow/Spatial background mode and asset patches', () => {
     expect(noop.historyEntry).toBe(false)
   })
 
-  it('Flow/Spatial: a stale expectedRevision writes nothing', () => {
+  it('Flow/Spatial: a stale expectedRevision writes nothing', async () => {
     const flowDoc = createBlankFlowCourseProject({ now: '2026-09-05T00:00:00.000Z' })
     const flowSurface = flowDoc.surfaces.find((s) => s.type === 'flow')!
     const staleFlow = updateFlowSurfaceBackground(flowDoc, flowSurface.id, {
@@ -304,8 +306,9 @@ describe('r12-040 Flow/Spatial background mode and asset patches', () => {
     }, { expectedRevision: flowDoc.revision + 1 })
     expect(staleFlow.ok).toBe(false)
 
+    const host = await createCourseStoreHost()
     const project = createBlankSpatialCourseProject({ now: '2026-09-05T00:00:00.000Z' })
-    useEditorStore.getState().loadCourseProject(project, null)
+    await host.open(project)
     const session = useEditorStore.getState().spatialSession!
     const staleSpatial = updateSpatialSurfaceBackground(session, {
       backgroundColor: '#123456',

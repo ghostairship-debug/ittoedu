@@ -1,17 +1,27 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type { DesktopAPI } from '../shared/ipcTypes'
+import type { AttachmentReadProgress } from '../shared/workbench/attachmentsDesktop'
 
 // Sandboxed preloads cannot require local CommonJS modules at runtime. Keep this
 // whitelist self-contained; the shared declaration remains the source of API types.
 const IPC_CHANNELS = {
-  lessonAuthoring: 'lesson-authoring:operate',
-  lessonDocumentAi: 'lesson-document-ai:operate',
+  imageResults: 'image-results:operate',
+  imageResultsChanged: 'image-results:changed',
+  externalMcp: 'external-mcp:operate',
+  attachments: 'attachments:operate',
+  execution: 'execution:operate',
+  executionEvent: 'execution:event',
+  executionEdit: 'execution:edit',
+  executionSettings: 'execution-settings:operate',
+  workspaceFiles: 'workspace-files:operate',
+  workspaceFilesChanged: 'workspace-files:changed',
+  documents: 'documents:operate',
+  documentEvent: 'documents:event',
   flowDocumentRecovery: 'flow-document-recovery:operate',
   lessonMaterial: 'lesson-material:operate',
   lessonDocument: 'lesson-document:operate',
   lesson: 'lesson:operate',
   materials: 'materials:operate',
-  localAgent: 'local-agent:operate',
   captureAuthoringObservation: 'local-agent:capture-observation',
   dynamicAdmission: 'dynamic-admission:operate',
   legacyPpt: 'ppt:resave-import',
@@ -46,6 +56,7 @@ const IPC_CHANNELS = {
   confirmDiscard: 'app:confirm-discard',
   dirtyState: 'app:dirty-state',
   requestSave: 'app:request-save',
+  requestFocusDocument: 'app:request-focus-document',
   requestSaveAndClose: 'app:request-save-and-close',
   requestPreserveAndClose: 'app:request-preserve-and-close',
   preserveAndCloseResult: 'app:preserve-and-close-result',
@@ -127,8 +138,114 @@ async function invoke<T>(channel: string, ...args: unknown[]): Promise<T> {
 }
 
 const desktopAPI = Object.freeze<DesktopAPI>({
-  lessonDocumentAi: input => invoke(IPC_CHANNELS.lessonDocumentAi, input),
-  lessonAuthoring: input => invoke(IPC_CHANNELS.lessonAuthoring, input),
+  externalMcp: {
+    grant: input => invoke(IPC_CHANNELS.externalMcp, { type: 'grant', ...input }),
+    list: input => invoke(IPC_CHANNELS.externalMcp, { type: 'list', ...input }),
+    revoke: input => invoke(IPC_CHANNELS.externalMcp, { type: 'revoke', ...input }),
+    handoff: input => invoke(IPC_CHANNELS.externalMcp, { type: 'handoff', ...input }),
+  },
+  attachments: {
+    clipboardFiles: input => invoke(IPC_CHANNELS.attachments, { type: 'clipboard-files', ...input }),
+    workspaceFiles: input => invoke(IPC_CHANNELS.attachments, { type: 'workspace-files', ...input }),
+    receiveGranted: input => invoke(IPC_CHANNELS.attachments, { type: 'receive-granted', ...input }),
+    subscribeProgress(listener) {
+      const receive = (_event: Electron.IpcRendererEvent, progress: AttachmentReadProgress) => listener(progress)
+      ipcRenderer.on(`${IPC_CHANNELS.attachments}:progress`, receive)
+      return () => ipcRenderer.removeListener(`${IPC_CHANNELS.attachments}:progress`, receive)
+    },
+    release: authorizationIds => invoke(IPC_CHANNELS.attachments, { type: 'release', authorizationIds }),
+    select: () => invoke(IPC_CHANNELS.attachments, { type: 'select' }),
+    receive: input => invoke(IPC_CHANNELS.attachments, { type: 'receive', ...input }),
+    snapshot: attachmentId => invoke(IPC_CHANNELS.attachments, { type: 'snapshot', attachmentId }),
+    readRepresentation: (attachmentId, representationId) => invoke(IPC_CHANNELS.attachments, { type: 'representation', attachmentId, representationId }),
+    extract: input => invoke(IPC_CHANNELS.attachments, { type: 'extract', ...input }),
+    cancel: requestId => invoke(IPC_CHANNELS.attachments, { type: 'cancel', requestId }),
+  },
+  imageResults: {
+    list: input => invoke(IPC_CHANNELS.imageResults, { type: 'list', ...input }),
+    read: input => invoke(IPC_CHANNELS.imageResults, { type: 'read', ...input }),
+    stop: input => invoke(IPC_CHANNELS.imageResults, { type: 'stop', ...input }),
+    preview: input => invoke(IPC_CHANNELS.imageResults, { type: 'preview', ...input }),
+    apply: input => invoke(IPC_CHANNELS.imageResults, { type: 'apply', ...input }),
+    edit: input => invoke(IPC_CHANNELS.imageResults, { type: 'edit', ...input }),
+    subscribe(listener) {
+      const receive = (_event: Electron.IpcRendererEvent, value: Parameters<typeof listener>[0]) => listener(value)
+      ipcRenderer.on(IPC_CHANNELS.imageResultsChanged, receive)
+      return () => ipcRenderer.removeListener(IPC_CHANNELS.imageResultsChanged, receive)
+    },
+  },
+  execution: {
+    workspace: root => invoke(IPC_CHANNELS.execution, { type: 'workspace', root }),
+    conversations: workspaceId => invoke(IPC_CHANNELS.execution, { type: 'conversations', workspaceId }),
+    createConversation: (workspaceId, title, home) => invoke(IPC_CHANNELS.execution, { type: 'create-conversation', workspaceId, title, ...(home ? { home } : {}) }),
+    setConversationHome: input => invoke(IPC_CHANNELS.execution, { type: 'set-conversation-home', ...input }),
+    conversation: (workspaceId, conversationId) => invoke(IPC_CHANNELS.execution, { type: 'conversation', workspaceId, conversationId }),
+    draft: input => invoke(IPC_CHANNELS.execution, { type: 'draft', ...input }),
+    renameConversation: input => invoke(IPC_CHANNELS.execution, { type: 'rename-conversation', ...input }),
+    deleteConversation: input => invoke(IPC_CHANNELS.execution, { type: 'delete-conversation', ...input }),
+    send: input => invoke(IPC_CHANNELS.execution, { type: 'send', ...input }),
+    timing: input => invoke(IPC_CHANNELS.execution, { type: 'timing', ...input }),
+    submission: input => invoke(IPC_CHANNELS.execution, { type: 'submission', ...input }),
+    submissions: input => invoke(IPC_CHANNELS.execution, { type: 'submissions', ...input }),
+    deleteSubmission: input => invoke(IPC_CHANNELS.execution, { type: 'delete-submission', ...input }),
+    pauseQueue: input => invoke(IPC_CHANNELS.execution, { type: 'pause-queue', ...input }),
+    resumeQueue: input => invoke(IPC_CHANNELS.execution, { type: 'resume-queue', ...input }),
+    run: runId => invoke(IPC_CHANNELS.execution, { type: 'run', runId }),
+    stop: runId => invoke(IPC_CHANNELS.execution, { type: 'stop', runId }),
+    answer: input => invoke(IPC_CHANNELS.execution, { type: 'answer', ...input }),
+    approve: input => invoke(IPC_CHANNELS.execution, { type: 'approve', ...input }),
+    events: (conversationId, after, limit) => invoke(IPC_CHANNELS.execution, { type: 'events', conversationId, after, limit }),
+    searchEvents: input => invoke(IPC_CHANNELS.execution, { type: 'search-events', ...input }),
+    timeline: conversationId => invoke(IPC_CHANNELS.execution, { type: 'timeline', conversationId }),
+    blob: (conversationId, ref) => invoke(IPC_CHANNELS.execution, { type: 'blob', conversationId, ref }),
+    edits: documentId => invoke(IPC_CHANNELS.execution, { type: 'edits', documentId }),
+    subscribe: listener => {
+      const receive = (_event: Electron.IpcRendererEvent, event: import('../shared/workbench/executionEvents').ExecutionEvent) => listener(event)
+      ipcRenderer.on(IPC_CHANNELS.executionEvent, receive)
+      return () => { ipcRenderer.removeListener(IPC_CHANNELS.executionEvent, receive) }
+    },
+    subscribeEdits: listener => {
+      const receive = (_event: Electron.IpcRendererEvent, event: import('../shared/workbench/editSession').EditEvent) => listener(event)
+      ipcRenderer.on(IPC_CHANNELS.executionEdit, receive)
+      return () => { ipcRenderer.removeListener(IPC_CHANNELS.executionEdit, receive) }
+    },
+  },
+  executionSettings: {
+    startOAuthLogin: (id, revision) => invoke(IPC_CHANNELS.executionSettings, { type: 'oauth-login-start', id, revision }),
+    oauthLoginStatus: loginId => invoke(IPC_CHANNELS.executionSettings, { type: 'oauth-login-status', loginId }),
+    cancelOAuthLogin: loginId => invoke(IPC_CHANNELS.executionSettings, { type: 'oauth-login-cancel', loginId }),
+    read: () => invoke(IPC_CHANNELS.executionSettings, { type: 'read' }),
+    saveConnection: input => invoke(IPC_CHANNELS.executionSettings, { type: 'save-connection', input }),
+    saveProfile: input => invoke(IPC_CHANNELS.executionSettings, { type: 'save-profile', input }),
+    revokeConnection: id => invoke(IPC_CHANNELS.executionSettings, { type: 'revoke-connection', id }),
+    discoverModels: (id, revision) => invoke(IPC_CHANNELS.executionSettings, { type: 'discover-models', id, revision }),
+    probeCapabilities: input => invoke(IPC_CHANNELS.executionSettings, { type: 'probe-capabilities', ...input }),
+  },
+  documents: {
+    list: () => invoke(IPC_CHANNELS.documents, { type: 'list' }),
+    bootstrapCourse: () => invoke(IPC_CHANNELS.documents, { type: 'bootstrap-course' }),
+    create: (model, suggestedName) => invoke(IPC_CHANNELS.documents, { type: 'create', model, suggestedName }),
+    open: path => invoke(IPC_CHANNELS.documents, { type: 'open', path }),
+    read: documentId => invoke(IPC_CHANNELS.documents, { type: 'read', documentId }),
+    dispatch: operation => invoke(IPC_CHANNELS.documents, { type: 'dispatch', operation }),
+    lookup: (documentId, operationId) => invoke(IPC_CHANNELS.documents, { type: 'lookup', documentId, operationId }),
+    save: (documentId, path) => invoke(IPC_CHANNELS.documents, { type: 'save', documentId, ...(path ? { path } : {}) }),
+    saveWithDialog: (documentId, saveAs, suggestedDirectory) => invoke(IPC_CHANNELS.documents, { type: 'save-dialog', documentId,
+      ...(saveAs === undefined ? {} : { saveAs }), ...(suggestedDirectory ? { suggestedDirectory } : {}) }),
+    observeFile: documentId => invoke(IPC_CHANNELS.documents, { type: 'observe-file', documentId }),
+    reconcileFile: input => invoke(IPC_CHANNELS.documents, { type: 'reconcile-file', ...input }),
+    close: (documentId, discardDirty) => invoke(IPC_CHANNELS.documents, { type: 'close', documentId, ...(discardDirty === undefined ? {} : { discardDirty }) }),
+    closeWithDialog: (documentId, suggestedDirectory) => invoke(IPC_CHANNELS.documents, { type: 'close-dialog', documentId,
+      ...(suggestedDirectory ? { suggestedDirectory } : {}) }),
+    recoverable: () => invoke(IPC_CHANNELS.documents, { type: 'recoverable' }),
+    restore: documentId => invoke(IPC_CHANNELS.documents, { type: 'restore', documentId }),
+    discardRecovery: documentId => invoke(IPC_CHANNELS.documents, { type: 'discard-recovery', documentId }),
+    subscribe: listener => {
+      const receive = (_event: Electron.IpcRendererEvent, event: import('../shared/workbench/document').DocumentEvent) => listener(event)
+      ipcRenderer.on(IPC_CHANNELS.documentEvent, receive)
+      return () => { ipcRenderer.removeListener(IPC_CHANNELS.documentEvent, receive) }
+    },
+  },
   flowDocumentRecovery: {
     read: target => invoke(IPC_CHANNELS.flowDocumentRecovery, { operation: 'read', target }),
     write: record => invoke(IPC_CHANNELS.flowDocumentRecovery, { operation: 'write', record }),
@@ -141,21 +258,20 @@ const desktopAPI = Object.freeze<DesktopAPI>({
     read: (target, input) => invoke(IPC_CHANNELS.lessonMaterial, { operation: 'read', target, input }),
   },
   lessonFiles: {
-    readAiRecords: ref => invoke(IPC_CHANNELS.lessonDocument, { operation: 'read-ai-records', ref }),
-    clearAiRecords: (ref, ids) => invoke(IPC_CHANNELS.lessonDocument, { operation: 'clear-ai-records', ref, ids }),
     readResource: (ref, relativePath) => invoke(IPC_CHANNELS.lessonDocument, { operation: 'read-resource', ref, relativePath }),
-    invalidateAiEdits: ref => invoke(IPC_CHANNELS.lessonDocument, { operation: 'invalidate', ref }),
     openDocument: ref => invoke(IPC_CHANNELS.lessonDocument, { operation: 'open', ref }),
     saveDocument: request => invoke(IPC_CHANNELS.lessonDocument, { operation: 'save', request }),
-    prepareAiEdit: (ref, ranges, epoch) => invoke(IPC_CHANNELS.lessonDocument, { operation: 'prepare', ref, ranges, epoch }),
-    applyAiEdit: request => invoke(IPC_CHANNELS.lessonDocument, { operation: 'apply', request }),
-    revertAiEdit: (record, currentVersion) => invoke(IPC_CHANNELS.lessonDocument, { operation: 'revert', record, currentVersion }),
     readRecovery: ref => invoke(IPC_CHANNELS.lessonDocument, { operation: 'recovery', ref }),
     preserveDraft: (ref, source, expectedVersion, attachments) => invoke(IPC_CHANNELS.lessonDocument, { operation: 'preserve', ref, source, expectedVersion, attachments }),
   },
+  workspaceFiles: input => invoke(IPC_CHANNELS.workspaceFiles, input),
+  onWorkspaceFilesChanged: listener => {
+    const receive = (_event: Electron.IpcRendererEvent, event: import('../shared/workbench/workspaceFiles').WorkspaceFilesChange) => listener(event)
+    ipcRenderer.on(IPC_CHANNELS.workspaceFilesChanged, receive)
+    return () => { ipcRenderer.removeListener(IPC_CHANNELS.workspaceFilesChanged, receive) }
+  },
   lesson: (input) => invoke(IPC_CHANNELS.lesson, input),
   legacyPpt: (input) => invoke(IPC_CHANNELS.legacyPpt, input),
-  localAgent: (input) => invoke(IPC_CHANNELS.localAgent, input),
   captureAuthoringObservation: (input) => invoke(IPC_CHANNELS.captureAuthoringObservation, input),
   dynamicAdmission: (input) => invoke(IPC_CHANNELS.dynamicAdmission, input),
   materials: (input) => invoke(IPC_CHANNELS.materials, input),
@@ -205,6 +321,11 @@ const desktopAPI = Object.freeze<DesktopAPI>({
   ),
   confirmDiscardChanges: () => invoke(IPC_CHANNELS.confirmDiscard),
   setDirtyState: (dirty) => invoke(IPC_CHANNELS.dirtyState, dirty),
+  onRequestFocusDocument: handler => {
+    const listener = (_event: Electron.IpcRendererEvent, id: unknown) => { if (typeof id === 'string' && id.length > 0 && id.length <= 512) handler(id) }
+    ipcRenderer.on(IPC_CHANNELS.requestFocusDocument, listener)
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.requestFocusDocument, listener)
+  },
   onRequestSave: (handler) => {
     if (typeof handler !== 'function') {
       throw new TypeError('保存请求处理器必须是函数。')
@@ -226,7 +347,11 @@ const desktopAPI = Object.freeze<DesktopAPI>({
     if (typeof handler !== 'function') throw new TypeError('关闭前恢复稿处理器必须是函数。')
     const listener = (_event: Electron.IpcRendererEvent, requestId: unknown) => {
       if (typeof requestId !== 'string') return
-      void Promise.resolve().then(handler).then(saved => ipcRenderer.send(IPC_CHANNELS.preserveAndCloseResult, requestId, saved === true), () => ipcRenderer.send(IPC_CHANNELS.preserveAndCloseResult, requestId, false))
+      void Promise.resolve().then(handler).then(result => {
+        const ready = result === true || typeof result === 'object' && result.ready === true
+        const suggestedDirectory = typeof result === 'object' ? result.suggestedDirectory : undefined
+        ipcRenderer.send(IPC_CHANNELS.preserveAndCloseResult, requestId, ready, suggestedDirectory)
+      }, () => ipcRenderer.send(IPC_CHANNELS.preserveAndCloseResult, requestId, false))
     }
     ipcRenderer.on(IPC_CHANNELS.requestPreserveAndClose, listener)
     return () => { ipcRenderer.removeListener(IPC_CHANNELS.requestPreserveAndClose, listener) }

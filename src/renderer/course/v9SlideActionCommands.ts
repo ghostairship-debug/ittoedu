@@ -1,6 +1,7 @@
+import { planReorderSlideSceneLayers, planDuplicateSlideSceneLayers } from '../../core/tools/slideLayerState'
 import { type ResourceAwareAuthoringHistory, type AuthoringHistoryResourceTransition } from '../authoring/resourceAwareAuthoringHistory'
 import { MAX_SCENE_NODES } from '../../shared/constants'
-import { pruneUnusedInputState } from '../interactions/inputAuthoringState'
+import { pruneUnusedInputState } from '../../core/tools/inputAuthoringState'
 import type { InteractionRule } from '../../shared/interactionTypes'
 import type {
   CourseProjectDocument,
@@ -13,7 +14,7 @@ import { SLIDE_REJECT_LOCKED, SLIDE_REJECT_STALE_REVISION, SLIDE_REJECT_WRONG_OW
 import {
   buildSlideEditorView,
   type SlideEditorLayerView,
-} from './slideEditorView'
+} from '../../core/tools/slideLayerView'
 import {
   addSlideInteractionRule,
   deleteSlideInteractionRule,
@@ -29,9 +30,9 @@ import {
   mutatePasteSlideSceneClipboard,
   sortSlideSceneLayerItems,
   type V9SlideClipboardPayload,
-} from './v9SlideClipboard'
+} from '../../core/tools/slideClipboard'
 import { selectSlideLayers, type SlideAuthoringSession } from './slideAuthoringBackend'
-import { repairRemovedCourseReferences } from './courseReferenceCleanup'
+import { repairRemovedCourseReferences } from '../../core/tools/courseReferenceCleanup'
 
 export type {
   V9SlideClipboardItem,
@@ -40,7 +41,7 @@ export type {
   V9SlideClipboardScope,
   V9SlideGlobalClipboardItem,
   V9SlideGlobalClipboardPayload,
-} from './v9SlideClipboard'
+} from '../../core/tools/slideClipboard'
 export {
   SLIDE_CLIPBOARD_EMPTY_REASON,
   SLIDE_CLIPBOARD_WRONG_OWNER_REASON,
@@ -48,7 +49,7 @@ export {
   SLIDE_SCENE_CLIPBOARD_OFFSET,
   copySlideGlobalClipboard,
   copySlideSceneClipboard,
-} from './v9SlideClipboard'
+} from '../../core/tools/slideClipboard'
 
 /**
  * Shared action IDs for keyboard, context menu and toolbar.
@@ -518,47 +519,9 @@ export function reorderSlideSceneLayers(
   const wrong = requireSceneScope(session)
   if (wrong) return wrong
   try {
-    const currentIds = sceneLayerViews(session).map((layer) => layer.selectionId)
-    if (
-      layerItemIds.length !== currentIds.length ||
-      new Set(layerItemIds).size !== layerItemIds.length ||
-      layerItemIds.some((id) => !currentIds.includes(id))
-    ) {
-      throw new SlideCommandError('invalid-selection', '图层顺序必须包含当前场景的全部元素')
-    }
-    if (sameIds(layerItemIds, currentIds)) return succeed(session, false)
-    const project = commitSlideProjectMutation(session.history.present, (draft) => {
-      const { scene } = activeDraftScene(draft, session)
-      if (session.selection.stateId !== null) {
-        const presentationState = scene.presentation?.states.find(
-          (candidate) => candidate.id === session.selection.stateId,
-        )
-        if (!presentationState) throw new Error('当前命名状态已失效')
-        for (const [id, override] of Object.entries(presentationState.layerItemOverrides)) {
-          delete override.order
-          deleteEmptyOverride(presentationState.layerItemOverrides, id)
-        }
-        const baseIds = [...scene.layerItems]
-          .sort((left, right) => left.order - right.order ||
-            left.layerItemId.localeCompare(right.layerItemId))
-          .map((item) => item.layerItemId)
-        if (sameIds(layerItemIds, baseIds)) delete presentationState.layerItemOrder
-        else presentationState.layerItemOrder = [...layerItemIds]
-        return
-      }
-      const orderSlots = scene.layerItems.map((item) => item.order).sort((left, right) => left - right)
-      const byId = new Map(scene.layerItems.map((item) => [item.layerItemId, item]))
-      layerItemIds.forEach((id, index) => {
-        const item = byId.get(id)
-        if (!item) throw new Error('当前元素已失效')
-        item.order = orderSlots[index]!
-      })
-      sortSlideSceneLayerItems(scene)
-    }, options.now)
-    return commitDocument(session, project)
-  } catch (error) {
-    return catchCommand(session, error)
-  }
+    const project = planReorderSlideSceneLayers(session.history.present, session.selection.locationId, session.selection.stateId, layerItemIds, options.now)
+    return project === session.history.present ? succeed(session, false) : commitDocument(session, project)
+  } catch (error) { return catchCommand(session, error) }
 }
 
 function relativeReorder(
@@ -802,17 +765,9 @@ export function duplicateSlideSceneLayers(
   const wrong = requireSceneScope(session)
   if (wrong) return wrong
   try {
-    if (layerItemIds.length === 0) throw new Error('没有可重复的选择')
-    const layers = resolveSceneLayers(session, layerItemIds)
-    assertWritableLayers(layers, false)
-    if (sceneLayerViews(session).length + layers.length > MAX_SCENE_NODES) {
-      throw new Error(`复制后将超过每场景 ${MAX_SCENE_NODES} 个图层的上限。`)
-    }
-    const clipboard = copySlideSceneClipboard(session, layerItemIds)
-    return pasteSlideSceneLayers(session, clipboard, options)
-  } catch (error) {
-    return catchCommand(session, error)
-  }
+    const plan = planDuplicateSlideSceneLayers(session.history.present, session.selection.locationId, session.selection.stateId, layerItemIds, options.now)
+    return commitDocument(session, plan.nextDocument, selectionAfter(session, plan.nextDocument, plan.createdIds))
+  } catch (error) { return catchCommand(session, error) }
 }
 
 export function duplicateSlideGlobalLayers(

@@ -3,12 +3,12 @@ import type { ComponentPackageData } from '@/shared/componentTypes'
 import type { EmbeddedComponentPackageMeta } from '@/shared/contracts/component-v4/types'
 import type { AssetKind, AssetMeta, RuntimeAssetMap } from '@/shared/contracts/media-v1/types'
 import type { BlobUrlRegistry } from '@/renderer/project/blobUrlRegistry'
-import { componentPackageKey } from '@/renderer/project/archivePath'
+import { componentPackageKey } from '../../core/drivers/codecs/archivePath'
 import {
   importComponentPackage,
   parseComponentPackageFiles,
   type ImportedComponentPackage,
-} from './importComponentPackage'
+} from '../../core/drivers/codecs/importComponentPackage'
 
 function clonePackage(pkg: ImportedComponentPackage): ImportedComponentPackage {
   const files: Record<string, Uint8Array> = Object.create(null) as Record<

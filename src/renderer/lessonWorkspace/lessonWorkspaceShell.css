@@ -30,13 +30,16 @@
 .lesson-workspace-switcher>summary strong{max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#fffefa;font-size:14px;font-weight:600}
 .lesson-workspace-switch-tag{display:inline-flex;align-items:center;gap:3px;padding:2px 7px;border:1px solid rgba(244,241,234,.4);border-radius:999px;font-size:11px;color:#f4f1ea;flex-shrink:0}
 .lesson-workspace-switcher>summary:hover{background:rgba(244,241,234,.12)}
-.lesson-workspace-switcher-popover{position:absolute;left:0;top:calc(100% + 6px);z-index:14;width:300px;display:grid;gap:6px;padding:12px;background:var(--surface,#fffefa);border:1px solid var(--border,#d9d6ce);border-radius:12px;box-shadow:var(--shadow-md,0 10px 30px rgba(23,34,29,.12));color:var(--ink,#17221d);font-size:12px}
+.lesson-workspace-switcher-popover{position:absolute;left:0;top:calc(100% + 6px);z-index:14;width:300px;max-height:calc(100dvh - 140px);box-sizing:border-box;display:flex;flex-direction:column;gap:6px;padding:12px;background:var(--surface,#fffefa);border:1px solid var(--border,#d9d6ce);border-radius:12px;box-shadow:var(--shadow-md,0 10px 30px rgba(23,34,29,.12));color:var(--ink,#17221d);font-size:12px}
 .lesson-workspace-switcher-popover .lesson-eyebrow{margin:0 0 2px}
-.lesson-workspace-switcher-popover>button{display:flex;flex-direction:column;align-items:flex-start;gap:2px;text-align:left;padding:8px 10px;border-radius:8px;border:1px solid transparent;background:transparent;color:var(--ink,#17221d)}
-.lesson-workspace-switcher-popover>button:hover{background:var(--canvas,#f4f1ea)}
-.lesson-workspace-switcher-popover>button[aria-pressed=true]{border-color:var(--green,#245b46);background:var(--green-soft,#e8efe9)}
-.lesson-workspace-switcher-popover>button strong{font-size:13px}
-.lesson-workspace-switcher-popover>button small{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--ink-muted,#66706a)}
+.lesson-workspace-switcher-recent{min-width:0;min-height:0;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain}
+.lesson-workspace-switcher-actions{flex:none;border-top:1px solid var(--border,#d9d6ce);padding-top:6px}
+.lesson-workspace-switcher-recent,.lesson-workspace-switcher-actions{display:grid;gap:6px}
+.lesson-workspace-switcher-recent>button,.lesson-workspace-switcher-actions>button{display:flex;flex-direction:column;align-items:flex-start;gap:2px;min-width:0;width:100%;text-align:left;padding:8px 10px;border-radius:8px;border:1px solid transparent;background:transparent;color:var(--ink,#17221d)}
+.lesson-workspace-switcher-recent>button:hover,.lesson-workspace-switcher-actions>button:hover{background:var(--canvas,#f4f1ea)}
+.lesson-workspace-switcher-recent>button[aria-pressed=true]{border-color:var(--green,#245b46);background:var(--green-soft,#e8efe9)}
+.lesson-workspace-switcher-recent>button strong{font-size:13px}
+.lesson-workspace-switcher-recent>button small{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--ink-muted,#66706a)}
 .lesson-permission-note{margin-top:4px;padding:9px 10px;border-radius:8px;background:var(--canvas,#f4f1ea);border:1px dashed var(--border,#d9d6ce)}
 .lesson-permission-note strong{display:block;margin-bottom:3px;font-size:12px}
 .lesson-permission-note p{margin:0;color:var(--ink-muted,#66706a);line-height:1.55}
@@ -63,21 +66,6 @@
 .lesson-modal p{margin:0;font-size:12px;color:var(--ink-muted,#66706a);line-height:1.6;word-break:break-all}
 .lesson-modal-actions{display:flex;gap:8px;justify-content:flex-end}
 
-/* 在编辑器中打开：全屏内容，同一工作台聊天实例用 CSS 投影到右侧，不另开第二聊天。 */
-.lesson-workspace-shell[data-editor-focus] .lesson-workspace-navigation,
-.lesson-workspace-shell[data-editor-focus] .workbench-splitter,
-.lesson-workspace-shell[data-editor-focus] .lesson-workspace-pane-switcher,
-.lesson-workspace-shell[data-editor-focus] .lesson-workspace-chat--closed{display:none!important}
-.lesson-workspace-shell[data-editor-focus] .lesson-workspace-columns>.lesson-workspace-workbench{flex:1;width:auto!important;height:auto!important;border-left:0}
-.lesson-workspace-shell[data-editor-focus] .lesson-workspace-stack{display:contents}
-.lesson-workspace-shell[data-editor-focus] .lesson-workspace-columns:not([data-chat-closed=true]) .lesson-workspace-chat:not(.lesson-workspace-chat--closed){
-  position:absolute;top:0;right:0;bottom:0;z-index:12;width:min(400px,40%);height:auto!important;display:flex!important;border-left:1px solid var(--border,#d9d6ce)
-}
-/* 编辑器焦点的对话投影（上一条规则）以 z-index:12 铺在整列右端，工作台布局条右对齐的按钮会整块落在它下面：
-   <button title="收起内容区（专注对话）"> 实测拦下「返回工作台」的指针事件，返回入口既看不见也点不到。
-   布局条右端让出投影宽度，返回入口才真正可达。宽度公式必须与上一条规则的 min(400px,40%) 保持一致。 */
-.lesson-workspace-shell[data-editor-focus] .lesson-workspace-columns[data-layout=workspace]:not([data-chat-closed=true]) .workbench-layout-bar{padding-right:calc(min(400px,40%) + 8px)}
-
 .lesson-workspace-error{padding:9px 16px;background:var(--apricot-soft,#f3e1d3);color:#8a4a24;border-bottom:1px solid #e3c3a8}
 .lesson-workspace-landing{max-width:680px;margin:auto;padding:56px 28px;background:var(--surface,#fffefa);border:1px solid var(--border,#d9d6ce);border-radius:16px;box-shadow:var(--shadow-md,0 10px 30px rgba(23,34,29,.08))}
 .lesson-workspace-landing h2,.lesson-chat-empty h2,.lesson-workbench-empty h2{margin:4px 0 10px;font-size:24px;color:var(--ink,#17221d);font-weight:600}
@@ -88,25 +76,32 @@
 .lesson-recent-workspaces h3{font-size:13px;font-weight:600;color:var(--ink-muted,#66706a)}
 .lesson-recent-workspaces button{margin:0 8px 8px 0}
 
-/* ── 主区：自由布局 ───────────────────────────── */
-.lesson-workspace-columns{position:relative;display:flex;flex:1;min-width:0;min-height:0;background:var(--canvas,#f4f1ea)}
-.lesson-workspace-columns[hidden]{display:none!important}
-.lesson-workspace-columns[data-nav-collapsed=true] .lesson-workspace-navigation{display:none}
-.lesson-workspace-columns[data-content-closed=true] .lesson-workspace-workbench{display:none}
-.lesson-workspace-columns[data-content-closed=true] .workbench-splitter--before-content{display:none}
-.lesson-workspace-columns[data-chat-closed=true] .lesson-workspace-chat:not(.lesson-workspace-chat--closed){display:none}
-.lesson-workspace-shell[data-editor-focus] .lesson-workspace-chat--closed{display:none!important}
+/* Stable region parents: visibility and dimensions are view state only. */
+.lesson-workspace-columns{position:relative;display:grid;flex:1;min-width:0;min-height:0;background:var(--canvas,#f4f1ea)}
 .lesson-workspace-pane-switcher{display:none}
-
-.lesson-workspace-navigation,.lesson-workspace-chat,.lesson-workspace-workbench{min-width:0;min-height:0;background:var(--surface,#fffefa)}
-.lesson-workspace-navigation{display:flex;flex-direction:column;border-right:1px solid var(--border,#d9d6ce);flex-shrink:0}
-.lesson-workspace-chat{display:flex;flex-direction:column;overflow:hidden;flex:1;border-right:1px solid var(--border,#d9d6ce)}
-.lesson-workspace-chat:last-child{border-right:0}
-.lesson-workspace-workbench{display:flex;flex-direction:column;overflow:hidden;flex-shrink:0;border-left:1px solid var(--border,#d9d6ce)}
-.lesson-workspace-stack{display:flex;flex-direction:column;flex:1;min-width:0;min-height:0}
-.lesson-workspace-stack .lesson-workspace-chat{border-right:0}
-.lesson-workspace-stack .lesson-workspace-chat[data-fill=true]{flex:1}
-.lesson-workspace-stack .lesson-workspace-workbench{border-left:0}
+.workspace-grid{grid-template-rows:minmax(0,1fr);overflow:hidden}
+.workspace-region{display:flex;min-width:0;min-height:0;overflow:hidden;grid-row:1}
+.workspace-region--resources{grid-column:1}
+.workspace-region--content{grid-column:3}
+.workspace-region--assistant{grid-column:5}
+.workspace-grid-splitter{grid-row:1;min-height:0}
+.workspace-grid-splitter--resources{grid-column:2}
+.workspace-grid-splitter--assistant{grid-column:4}
+.workspace-grid-splitter>.workbench-splitter{height:100%;margin:0}
+.workspace-grid-splitter[hidden]{display:none}
+.workspace-grid[data-editor-focus=false][data-nav-collapsed=true]>.workspace-region--resources,
+.workspace-grid[data-content-closed=true]>.workspace-region--content,
+.workspace-grid[data-editor-focus=false][data-chat-closed=true]>.workspace-region--assistant{display:none}
+.workspace-grid[data-editor-focus=true]>.workspace-region--resources,
+.workspace-grid[data-editor-focus=true]>.workspace-region--assistant{grid-column:1 / -1;position:absolute;top:0;bottom:0;z-index:12;display:none;box-shadow:0 12px 28px rgba(23,34,29,.18)}
+.workspace-grid[data-editor-focus=true]>.workspace-region--resources{left:0;width:min(320px,calc(100% - 72px))}
+.workspace-grid[data-editor-focus=true]>.workspace-region--assistant{right:48px;width:min(400px,calc(100% - 120px))}
+.workspace-grid[data-editor-focus=true][data-pro-panel=resources]>.workspace-region--resources,
+.workspace-grid[data-editor-focus=true][data-pro-panel=conversations]>.workspace-region--resources,
+.workspace-grid[data-editor-focus=true][data-pro-panel=ai]>.workspace-region--assistant{display:flex}
+.lesson-workspace-navigation,.lesson-workspace-chat,.lesson-workspace-workbench{display:flex;flex-direction:column;flex:1;width:100%;min-width:0;min-height:0;overflow:hidden;background:var(--surface,#fffefa)}
+.lesson-workspace-navigation{border-right:1px solid var(--border,#d9d6ce)}
+.lesson-workspace-chat{border-left:1px solid var(--border,#d9d6ce)}
 
 .lesson-workspace-pane{display:flex;flex-direction:column;min-height:0;overflow:hidden}
 .lesson-workspace-pane>header{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 12px;flex-shrink:0}
@@ -119,6 +114,13 @@
 .lesson-section-note{margin:0 12px 6px;color:var(--ink-muted,#66706a);font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
 .lesson-workspace-files{flex:1.05 1 150px;border-bottom:1px solid var(--border,#d9d6ce);overflow:auto}
+.lesson-workspace-navigation>.lesson-workspace-pane[hidden],.lesson-workspace-navigation>.lesson-workspace-section-splitter[hidden]{display:none}
+.lesson-workspace-navigation .lesson-workspace-files{flex:1 1 auto;min-height:0;overflow:hidden}
+.lesson-workspace-navigation .lesson-workspace-sessions{flex:0 1 260px;min-height:160px;max-height:55%;overflow:hidden;border-bottom:0}
+.lesson-workspace-navigation[data-explorer-open=false] .lesson-workspace-sessions{flex:1 1 auto;max-height:none}
+.lesson-workspace-section-splitter{flex:0 0 5px;min-height:5px;background:var(--border,#d9d6ce)}
+.lesson-workspace-section-splitter .workbench-splitter{height:5px;width:100%;margin:0}
+.workbench-session-dock{height:100%;min-height:0;overflow:hidden}
 .lesson-workspace-lessons{flex:.95 1 210px;overflow:auto}
 .lesson-workspace-pane .lesson-pane-body{padding:0 12px 12px;overflow:auto;min-height:0}
 .lesson-directory-switch{display:grid;gap:6px;margin:8px 0}
@@ -236,7 +238,10 @@
 .lesson-chat-empty,.lesson-workbench-empty{margin:auto;max-width:400px;padding:30px;color:var(--ink-muted,#66706a)}
 .lesson-chat-empty h2,.lesson-workbench-empty h2{color:var(--ink,#17221d)}
 
-.lesson-workspace-workbench>[role=tablist]{display:flex;gap:4px;overflow:auto;padding:7px 8px;border-bottom:1px solid var(--border,#d9d6ce);flex-shrink:0;background:var(--canvas,#f4f1ea)}
+.workspace-document-tabs{display:flex;gap:4px;align-items:center;padding:7px 8px;border-bottom:1px solid var(--border,#d9d6ce);flex-shrink:0;background:var(--canvas,#f4f1ea)}
+.workspace-document-tabs[hidden]{display:none!important}
+.workspace-document-tabs>[role=tablist]{display:flex;gap:4px;flex:1;min-width:0;overflow:auto}
+.workspace-document-tabs .lesson-new-tab-popover{left:auto;right:0}
 .lesson-workspace-workbench [role=tab]{position:relative;white-space:nowrap;border-radius:8px;color:var(--ink-muted,#66706a)}
 .lesson-workspace-workbench [role=tab][aria-selected=true]{border-color:var(--green,#245b46);background:var(--surface,#fffefa);color:var(--ink,#17221d);box-shadow:0 1px 3px rgba(23,34,29,.08)}
 .lesson-workspace-workbench [role=tab] small{margin-left:7px}
@@ -275,33 +280,22 @@
 @media(max-width:1180px){.lesson-workspace-identity strong{max-width:150px}}
 
 @media(max-width:860px){
-  .lesson-workspace-toolbar{min-height:unset;padding:9px 12px;align-items:flex-start;flex-wrap:wrap}
-  .lesson-workspace-columns{display:grid;grid-template-columns:1fr;grid-template-rows:42px minmax(0,1fr);gap:0}
-  .lesson-workspace-pane-switcher{display:flex;grid-row:1;grid-column:1;gap:4px;align-items:center;padding:5px 8px;background:var(--green-deep,#173e31);border-bottom:1px solid var(--border,#d9d6ce)}
+  .lesson-workspace-toolbar{min-height:unset;padding:8px;gap:6px;flex-wrap:wrap}
+  .lesson-workspace-switcher>summary strong{max-width:180px}
+  .workspace-grid{grid-template-columns:minmax(0,1fr)!important;grid-template-rows:42px minmax(0,1fr)}
+  .lesson-workspace-pane-switcher{display:flex;grid-row:1;grid-column:1;gap:4px;align-items:center;padding:5px 8px;background:var(--green-deep,#173e31)}
   .lesson-workspace-pane-switcher button{flex:1;padding:5px;border-color:rgba(244,241,234,.28);background:transparent;color:#f4f1ea}
-  .lesson-workspace-pane-switcher button[aria-selected=true]{background:rgba(244,241,234,.16);border-color:rgba(244,241,234,.4)}
-  .lesson-workspace-navigation,.lesson-workspace-chat,.lesson-workspace-workbench,.lesson-workspace-stack{grid-row:2;grid-column:1;min-height:0;border:0}
-  .lesson-workspace-stack{display:flex}
-  .lesson-workspace-columns[data-active-pane=navigation] .lesson-workspace-chat,.lesson-workspace-columns[data-active-pane=navigation] .lesson-workspace-workbench,.lesson-workspace-columns[data-active-pane=navigation] .lesson-workspace-stack,.lesson-workspace-columns[data-active-pane=chat] .lesson-workspace-navigation,.lesson-workspace-columns[data-active-pane=chat] .lesson-workspace-workbench,.lesson-workspace-columns[data-active-pane=workbench] .lesson-workspace-navigation,.lesson-workspace-columns[data-active-pane=workbench] .lesson-workspace-chat{display:none}
-  .lesson-workspace-navigation{display:flex}
-  .workbench-splitter{display:none}
-  .workbench-layout-bar{display:none}
-  .workbench-nav-reopen{display:none}
-  .lesson-workflow [aria-label="课例创作流程"]{max-height:240px}
-  .lesson-file-tab{padding:12px}
+  .lesson-workspace-pane-switcher button[aria-selected=true]{background:rgba(244,241,234,.16)}
+  .workspace-grid>.workspace-region{grid-row:2;grid-column:1;display:none}
+  .workspace-grid[data-active-pane=navigation]>.workspace-region--resources,
+  .workspace-grid[data-active-pane=workbench]>.workspace-region--content,
+  .workspace-grid[data-active-pane=chat]>.workspace-region--assistant{display:flex}
+  .workspace-grid>.workspace-grid-splitter{display:none}
+  .workbench-layout-bar{flex-wrap:wrap}
+  .lesson-file-tab{padding:10px}
 }
-
 @media(max-width:560px){
-  .lesson-workspace-toolbar{gap:8px}
-  .lesson-workspace-identity{width:100%}
   .lesson-workspace-toolbar-actions{width:100%}
   .lesson-workspace-toolbar-actions>button{flex:1}
-  .lesson-workspace-landing{padding:32px 18px}
-  .lesson-workspace-landing h2,.lesson-chat-empty h2,.lesson-workbench-empty h2{font-size:20px}
-  .lesson-workflow>summary small{display:none}
+  .lesson-new-tab-popover{position:fixed;left:12px;right:12px;top:120px}
 }
-
-/* Standalone courseware has no navigation/chat columns or mobile pane-switcher row. */
-.lesson-workspace-columns[data-layout=standalone]{display:grid;grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(0,1fr)}
-.lesson-workspace-columns[data-layout=standalone]>.lesson-workspace-workbench{grid-column:1;grid-row:1;border-left:0}
-.lesson-workspace-columns[data-layout=standalone] .workbench-splitter,.lesson-workspace-columns[data-layout=standalone] .workbench-layout-bar,.lesson-workspace-columns[data-layout=standalone] .workbench-nav-reopen{display:none}

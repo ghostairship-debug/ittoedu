@@ -6,7 +6,7 @@ import {
   zoomSpatialSessionCamera,
 } from '@/renderer/course/spatialEditorCommands'
 import { locateCourseLayer } from '@/renderer/course/effectiveLayerCommands'
-import { openCourseProjectArchive } from '@/renderer/project/courseProjectArchive'
+import { openCourseProjectArchive } from '../../src/core/drivers/codecs/courseProjectArchive'
 import {
   selectActiveCourseProjectDocument,
   selectEffectiveLayerProjection,
@@ -135,7 +135,7 @@ describe('Mixed cross-surface history continuity', () => {
     ] }
     const preview = await state.prepareGenerationCandidate(request, candidate)
     expect(activeDocument()).toEqual(document)
-    expect(useEditorStore.getState().applyGenerationCandidate(preview.previewId).status).toBe('committed')
+    expect((await useEditorStore.getState().applyGenerationCandidate(preview.previewId)).status).toBe('committed')
     expect(JSON.stringify(activeDocument())).toContain('新增 Flow 讲解')
     expect(JSON.stringify(activeDocument())).toContain('新增 Spatial 讲解')
     useEditorStore.getState().undo()
@@ -149,7 +149,7 @@ describe('Mixed cross-surface history continuity', () => {
     const second = await useEditorStore.getState().prepareGenerationCandidate(fresh, freshCandidate)
     useEditorStore.getState().stopGenerationCandidate()
     expect(useEditorStore.getState().courseAuthoringSession!.token.generation).toBe(generation + 1)
-    expect(useEditorStore.getState().applyGenerationCandidate(second.previewId).status).toBe('stale')
+    expect((await useEditorStore.getState().applyGenerationCandidate(second.previewId)).status).toBe('stale')
     expect(activeDocument()).toEqual(document)
   })
   it('keeps one canonical history while every target Surface session stays fresh', () => {

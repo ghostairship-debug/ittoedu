@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { generationRequestSchema, generationSelectionActionSchema } from '@/shared/generationContract'
 import { captureGenerationSnapshot } from '@/renderer/authoring/generation/generationSnapshot'
-import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
-import { createTextNode } from '@/renderer/project/nativeNodeFactories'
+import { createBlankCourseProject } from '@/core/course/createCourseProject'
+import { createTextNode } from '@/core/tools/nativeNodeFactories'
 import { sceneNodeToCourseLayerItem } from '@/shared/courseProjectModel'
 import { projectEffectiveLayers } from '@/renderer/course/effectiveLayerProjection'
 

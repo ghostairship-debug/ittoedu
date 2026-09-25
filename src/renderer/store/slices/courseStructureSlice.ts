@@ -11,11 +11,11 @@ import {
   moveCourseSlideScene as applyMoveCourseSlideScene,
   reorderCourseSurfaces as applyReorderCourseSurfaces,
   type CourseLocationCommandResult,
-} from '../../course/courseLocationCommands'
+} from '../../../core/tools/courseLocations'
 import {
   updateCourseBackground as applyCourseBackgroundUpdate,
   type CourseBackgroundPatch,
-} from '../../course/courseBackgroundCommands'
+} from '../../../core/tools/courseBackground'
 import {
   deriveCourseEditorLayout,
   type CourseEditorDropdownAction,

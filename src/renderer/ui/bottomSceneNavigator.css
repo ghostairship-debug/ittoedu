@@ -1,0 +1,106 @@
+.bottom-scene-nav {
+  height: 126px;
+  min-width: 0;
+  border-top: 1px solid var(--border, #d9d6ce);
+  background: var(--panel-bg, #fffefa);
+}
+.bottom-scene-nav__track {
+  box-sizing: border-box;
+  display: flex;
+  align-items: stretch;
+  gap: 7px;
+  height: 100%;
+  min-width: 0;
+  margin: 0;
+  padding: 7px 10px 8px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  list-style: none;
+  scroll-snap-type: x proximity;
+}
+.bottom-scene-card {
+  box-sizing: border-box;
+  display: flex;
+  flex: 0 0 198px;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+  padding: 5px;
+  border: 1px solid var(--border, #d9d6ce);
+  border-radius: 7px;
+  background: var(--surface, #fff);
+  scroll-snap-align: nearest;
+}
+.bottom-scene-card--active { border-color: var(--green, #245b46); background: var(--green-soft, #e5f1e9); }
+.lesson-workspace-shell .bottom-scene-card__main {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex: 0 0 38px;
+  min-height: 38px;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.lesson-workspace-shell .bottom-scene-card__main:hover { background: transparent; }
+.bottom-scene-card__main .scene-thumbnail {
+  flex: 0 0 52px;
+  width: 52px;
+  height: 30px;
+  border: 1px solid var(--border, #d9d6ce);
+  border-radius: 3px;
+}
+.bottom-scene-card__surface-mark {
+  display: grid;
+  flex: 0 0 40px;
+  width: 40px;
+  height: 31px;
+  place-items: center;
+  border-radius: 4px;
+  background: var(--surface-muted, #ece9e1);
+  font-size: 14px;
+  font-weight: 700;
+}
+.bottom-scene-card__identity { display: flex; flex-direction: column; min-width: 0; gap: 2px; }
+.bottom-scene-card__identity small { color: var(--ink-muted, #66706a); font-size: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bottom-scene-card__identity strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.bottom-scene-card__states, .bottom-scene-card__children {
+  display: flex;
+  flex: 0 0 39px;
+  gap: 3px;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+}
+.lesson-workspace-shell .bottom-scene-card__state, .lesson-workspace-shell .bottom-scene-card__child {
+  flex: 0 0 auto;
+  max-width: 132px;
+  min-height: 24px;
+  overflow: hidden;
+  padding: 2px 6px;
+  border: 1px solid var(--border, #d9d6ce);
+  border-radius: 4px;
+  background: var(--surface, #fff);
+  color: inherit;
+  font-size: 10px;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: none;
+}
+.lesson-workspace-shell .bottom-scene-card__state[aria-pressed=true], .lesson-workspace-shell .bottom-scene-card__child[aria-pressed=true], .lesson-workspace-shell .bottom-scene-card__child[aria-current] {
+  border-color: var(--green, #245b46);
+  background: var(--green, #245b46);
+  color: white;
+}
+.lesson-workspace-shell .bottom-scene-card__child { border-style: dashed; background: var(--surface-muted, #f3f3ef); }
+.bottom-scene-card__main:focus-visible, .bottom-scene-card__state:focus-visible, .bottom-scene-card__child:focus-visible {
+  outline: 2px solid var(--green, #245b46);
+  outline-offset: 1px;
+}

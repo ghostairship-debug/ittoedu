@@ -4,8 +4,9 @@ import { useShallow } from 'zustand/react/shallow'
 import type { ComponentPackageData } from '../../../shared/componentTypes'
 import type { CourseProjectDocument, LayerItem } from '../../../shared/courseProjectTypes'
 import type { ShapeType } from '../../../shared/contracts/native-v1/types'
-import { buildSlideEditorView } from '../../course/slideEditorView'
+import { buildSlideEditorView } from '../../../core/tools/slideLayerView'
 import type { ImportedImageAsset } from '../../project/assetManager'
+import type { WorkspaceMediaDropHandler } from '../../lessonWorkspace/workspaceMediaDrop'
 import type { EditorCanvasNodePatch } from '../../phaser/editorCanvasNode'
 import {
   selectSlideWorkspaceSource,
@@ -38,6 +39,7 @@ interface SlideWorkspaceConnectorProps {
   readonly onAddImage: (x?: number, y?: number) => void
   readonly onAddVideo: (x?: number, y?: number) => void
   readonly onSelectImageAsset: () => Promise<ImportedImageAsset | null>
+  readonly onDropWorkspaceMedia?: WorkspaceMediaDropHandler
 }
 
 function slidePreviewIdentityFromLayer(item: LayerItem): SlidePreviewIdentityNode | null {
@@ -138,6 +140,7 @@ function makePreviewRebuildKey(input: {
 export function SlideWorkspaceConnector({
   onAddImage,
   onAddVideo,
+  onDropWorkspaceMedia,
   onSelectImageAsset,
 }: SlideWorkspaceConnectorProps) {
   const runSlideFieldTextIntent = useEditorStore(state => state.runSlideFieldTextIntent)
@@ -185,6 +188,7 @@ export function SlideWorkspaceConnector({
     drawSlideShapeNode,
   ] = useEditorStore(useShallow(selectSlideWorkspaceSource))
   const previewBackgroundColor = useEditorStore((state) => state.previewBackgroundColor)
+  const documentId = useEditorStore((state) => state.courseDocument.documentId)
   const sessionGeneration = useEditorStore((state) => state.courseAuthoringSession?.token.generation ?? -1)
   const view = useMemo(() => {
     if (!project || !locationId) return null
@@ -393,10 +397,12 @@ export function SlideWorkspaceConnector({
   return (
     <SlideLocationWorkspace
       snapshot={snapshot}
+      documentId={documentId}
       ports={ports}
       onAddImage={onAddImage}
       onAddVideo={onAddVideo}
       onSelectImageAsset={onSelectImageAsset}
+      onDropWorkspaceMedia={onDropWorkspaceMedia}
     />
   )
 }

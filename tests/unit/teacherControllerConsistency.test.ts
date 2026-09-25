@@ -1,6 +1,6 @@
 import { isControllerFixture } from '../fixtures/teacherController'
 import { describe, expect, it } from 'vitest'
-import { createBlankCourseProject } from '../../src/renderer/project/createCourseProject'
+import { createBlankCourseProject } from '../../src/core/course/createCourseProject'
 import type { CourseProjectDocument, GlobalLayerEntry } from '../../src/shared/courseProjectTypes'
 import {
   hasCourseDeliveryVisibleTeacherController,

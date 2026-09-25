@@ -6,7 +6,7 @@ import { createChartPropertiesCommands } from '../../ui/properties/chartProperti
 import type { EffectiveBackgroundOwner } from '../../../shared/effectiveBackground'
 import { connectChartCanvasText } from '../../authoring/chartCanvasTextBridge'
 import { configureSlideInputAtTarget } from '../../course/v9SlideContentCommands'
-import { inspectInputRuleFamily } from '../../interactions/inputRuleFamily'
+import { inspectInputRuleFamily } from '../../../core/tools/inputRuleFamily'
 import { makeAuthoringAddress } from '../../../shared/authoringAddress'
 import type { TextNode } from '../../../shared/contracts/native-v1'
 import { resolveEffectiveBackground } from '../../../shared/effectiveBackground'

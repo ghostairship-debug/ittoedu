@@ -24,7 +24,7 @@ export interface GenerationCommitPort {
   readSessionGeneration(): number
   isRequestCurrent?(request: GenerationRequest): boolean
   verifyInteractions?(input: NativeInteractionVerificationInput): Promise<NativeInteractionVerificationReport>
-  commit(step: EditorTransactionStep, afterCommit?: GenerationCandidate['afterCommit']): boolean
+  commit(step: EditorTransactionStep, afterCommit?: GenerationCandidate['afterCommit']): boolean | Promise<boolean>
 }
 
 function failureDiagnostics(error: unknown): GenerationFailure['diagnostics'] {
@@ -314,12 +314,12 @@ export function createGenerationCandidateCoordinator(port: GenerationCommitPort)
         document: step?.nextDocument ?? initial, resources: state.resources })
       } catch (error) { throw preparationError(error, failureContext, acquiredEvidence) }
     },
-    apply(previewId: string) {
+    async apply(previewId: string) {
       const entry = prepared.get(previewId)
       prepared.delete(previewId)
       if (!entry || !current(entry.request, port)) return { status: 'stale' as const }
       if (!entry.step) return { status: 'unchanged' as const, receipt: structuredClone(entry.receipt) }
-      return port.commit(entry.step, entry.afterCommit) ? { status: 'committed' as const, beforeRevision: entry.step.baseRevision, afterRevision: entry.step.nextDocument.revision, receipt: structuredClone(entry.receipt) }
+      return await port.commit(entry.step, entry.afterCommit) ? { status: 'committed' as const, beforeRevision: entry.step.baseRevision, afterRevision: entry.step.nextDocument.revision, receipt: structuredClone(entry.receipt) }
         : { status: 'stale' as const }
     },
   })

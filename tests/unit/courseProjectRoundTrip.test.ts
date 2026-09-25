@@ -1,6 +1,6 @@
 import { isControllerFixture } from '../fixtures/teacherController'
 import { describe, expect, it } from 'vitest'
-import { parseComponentPackageFiles } from '@/renderer/components/importComponentPackage'
+import { parseComponentPackageFiles } from '../../src/core/drivers/codecs/importComponentPackage'
 import { makeAuthoringAddress } from '@/shared/authoringAddress'
 import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
 import type {
@@ -11,12 +11,12 @@ import type {
 import { resolveCourseSurfaceBackgroundColor, sceneNodeToCourseLayerItem } from '@/shared/courseProjectModel'
 import { publishedCourseV2Schema } from '@/shared/publishedCourseSchema'
 import { buildPublishedCourseV2Payload } from '@/renderer/export/course'
-import { createShapeNode } from '@/renderer/project/nativeNodeFactories'
+import { createShapeNode } from '@/core/tools/nativeNodeFactories'
 import {
   createCourseProjectArchive,
   detectCourseProjectArchiveFormat,
   openCourseProjectArchive,
-} from '@/renderer/project/courseProjectArchive'
+} from '../../src/core/drivers/codecs/courseProjectArchive'
 import {
   COURSE_PROJECT_REJECTION_INPUTS,
   COURSE_PROJECT_REJECTION_KIND,

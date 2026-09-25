@@ -1,3 +1,4 @@
+import { courseAuthoringScopeFromLocation } from '../authoring/courseAuthoringScope'
 import { createAuthoringToolFacade } from '../authoring/tools/authoringToolFacade'
 import { planTeacherControllerComponentEdit } from '../components/teacherControllerComponent'
 import { createEditorTransactionStep, type EditorTransactionStep } from '../authoring/editorTransaction'
@@ -26,7 +27,7 @@ function preservesObservationHost(step: EditorTransactionStep, observation: Gene
 }
 
 export function createAuthoringToolActions(ports: {
-  kernel: Pick<EditorStoreKernel, 'readDocument' | 'readAuthoringSession' | 'writeAuthoringSession' | 'persistTransaction' | 'readResources'>
+  kernel: Pick<EditorStoreKernel, 'readDocument' | 'readAuthoringSession' | 'writeAuthoringSession' | 'persistTransaction' | 'readResources' | 'waitForCommit' | 'drain'>
   readScope(): CourseAuthoringScopeToken
   activateScope(input: { locationId: string; owner?: CourseAuthoringOwner; stateId?: string | null }): void
   hasContentDraft(): boolean
@@ -47,6 +48,7 @@ export function createAuthoringToolActions(ports: {
     })
   }
   const commitPort: AuthoringToolCommitPort & Pick<CoursewareBuilderV2Owner, 'readResources'> = {
+    beforeExecute: async () => { await ports.kernel.drain() },
     readDocument: () => ports.kernel.readDocument(),
     readResources: () => {
       const resources = ports.kernel.readResources()
@@ -54,19 +56,21 @@ export function createAuthoringToolActions(ports: {
     },
     validateDestination(destination) {
       const target = destination.kind === 'update' ? destination.target : destination.scope
-      const session = ports.kernel.readAuthoringSession()
-      if (!session || session.token.generation !== target.sessionGeneration ||
-        session.token.locationId !== target.locationId || session.token.surfaceType !== target.surfaceType) {
-        return { code: 'session-stale', message: '当前作者会话与目标不一致', path: ['destination', 'sessionGeneration'] }
-      }
-      const scope = ports.readScope()
-      if (scope.owner !== target.owner || scope.stateId !== target.stateId) {
-        return { code: 'owner-mismatch', message: '当前 owner / 呈现状态与目标不一致', path: ['destination', 'owner'] }
-      }
+      const project = ports.kernel.readDocument()
+      if (project.id !== target.projectId || project.revision !== target.documentRevision) return { code: 'revision-conflict', message: '目标文档已改变', path: ['destination'] }
+      try {
+        const scope = courseAuthoringScopeFromLocation({ project, locationId: target.locationId, owner: target.owner, stateId: target.stateId })
+        if (scope.surfaceId !== target.surfaceId || scope.ownerKey !== target.ownerKey) return { code: 'owner-mismatch', message: '目标范围与文档不一致', path: ['destination', 'owner'] }
+      } catch { return { code: 'target-missing', message: '目标位置已不存在', path: ['destination'] } }
       if (ports.hasContentDraft()) return { code: 'active-content-draft', message: '请先完成当前文字或调色编辑', path: ['destination'] }
       return null
     },
-    commit: (step) => ports.kernel.persistTransaction(withSelectionContinuity(step).step, '已应用创作工具修改'),
+    commit: async (step) => {
+      const continuity = withSelectionContinuity(step)
+      return ports.kernel.persistTransaction(continuity.step, '已应用创作工具修改', {
+        preserveBrowsing: continuity.preservesCurrentSelection,
+      }) && await ports.kernel.waitForCommit()
+    },
   }
   const facade = createAuthoringToolFacade(commitPort)
   return {
@@ -76,6 +80,7 @@ export function createAuthoringToolActions(ports: {
         if (ports.kernel.readDocument().id !== projectId) throw new Error('Builder 工程已切换，请重新开始构建')
       }
       return Object.freeze({
+        beforeExecute: async () => { await ports.kernel.drain(); ensureCurrent() },
         readDocument() { ensureCurrent(); return commitPort.readDocument() },
         readResources() { ensureCurrent(); return commitPort.readResources() },
         readScope() { ensureCurrent(); return ports.readScope() },
@@ -110,7 +115,7 @@ export function createAuthoringToolActions(ports: {
       if (ports.hasContentDraft()) throw new Error('请先完成当前文字或调色编辑')
       const parsed = generationRequestSchema.parse(request)
       const path = ports.readProjectPath()
-      if (!path) throw new Error('请先保存工程')
+      await ports.kernel.drain()
       generation?.discard()
       generation = createGenerationCandidateCoordinator({
         verifyInteractions: verifyNativeInteractions,
@@ -124,7 +129,7 @@ export function createAuthoringToolActions(ports: {
         isRequestCurrent: request => binding?.requestId === request.requestId
           ? binding!.currentReason() === null
           : ports.kernel.readAuthoringSession()?.token.generation === request.sessionGeneration,
-        commit: (step, afterCommit) => {
+        commit: async (step, afterCommit) => {
           if (ports.hasContentDraft()) return false
           const anchored = binding?.requestId === parsed.requestId
           if (anchored && binding!.currentReason()) return false
@@ -134,7 +139,7 @@ export function createAuthoringToolActions(ports: {
             return ports.kernel.persistTransaction(continuity.step, '已应用 AI 候选，可一次撤销', {
             preserveBrowsing: continuity.preservesCurrentSelection && anchored && (binding!.preserveBrowsing()
               || (afterCommit?.action !== 'finish' && preservesObservationHost(step, parsed.observation))),
-          }) }
+          }) && await ports.kernel.waitForCommit() }
           finally { committingRequestId = undefined }
         },
       })
@@ -148,8 +153,8 @@ export function createAuthoringToolActions(ports: {
         ...session, token: createSessionToken(session.token, session.token.generation + 1),
       }, session.itemIds))
     },
-    applyGenerationCandidate(previewId: string) {
-      const result = generation?.apply(previewId) ?? { status: 'stale' as const }
+    async applyGenerationCandidate(previewId: string) {
+      const result = await generation?.apply(previewId) ?? { status: 'stale' as const }
       if (result.status !== 'stale' && binding?.requestId === result.receipt.requestId) binding.committed(result.receipt)
       return result
     },

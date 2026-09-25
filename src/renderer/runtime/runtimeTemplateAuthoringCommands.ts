@@ -4,12 +4,8 @@ import type {
   CourseAuthoringTargetRejectionCode,
   CurrentCourseAuthoringTargetIdentity,
 } from '@/renderer/authoring/courseAuthoringSession'
-import {
-  allocateCourseLayerOrder,
-  collectCourseLayerItemIds,
-  sortLayerItemList,
-  sortScopedLayerList,
-} from '@/renderer/course/globalLayerCommands'
+import { collectCourseLayerItemIds } from '@/core/tools/globalLayers'
+import { allocateCourseLayerOrder, sortLayerItemList, sortScopedLayerList } from '@/renderer/course/globalLayerCommands'
 import {
   courseProjectDocumentSchema,
   layerItemSchema,

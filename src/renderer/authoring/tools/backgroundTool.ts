@@ -1,7 +1,8 @@
 import { z } from 'zod'
 import { makeAuthoringAddress } from '../../../shared/authoringAddress'
-import { backgroundModeSchema } from '../../../shared/courseProjectSchema'
-import { updateCourseBackground, updateSlideBackgroundOwner } from '../../course/courseBackgroundCommands'
+import { backgroundToolInputSchema } from '../../../core/tools/toolSchemas'
+export { backgroundToolInputSchema }
+import { updateCourseBackground, updateSlideBackgroundOwner } from '../../../core/tools/courseBackground'
 import { updateFlowSurfaceBackground } from '../../course/flowEditorCommands'
 import { openSpatialAuthoringSession, updateSpatialSurfaceBackground } from '../../course/spatialEditorCommands'
 import { resolveAuthoringToolScope } from './authoringToolScope'
@@ -81,11 +82,6 @@ export function resolveBackgroundTarget(document: CourseProjectDocument, destina
   return { ...resolved, target: destination.target }
 }
 
-export const backgroundToolInputSchema = z.object({
-  backgroundMode: backgroundModeSchema.optional(),
-  backgroundColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
-  backgroundAssetId: z.string().min(1).nullable().optional(),
-}).strict()
 
 export const backgroundTool: AuthoringToolDefinition<z.infer<typeof backgroundToolInputSchema>> = {
   name: 'owner.background', inputSchema: backgroundToolInputSchema, description: backgroundDiscovery.description,

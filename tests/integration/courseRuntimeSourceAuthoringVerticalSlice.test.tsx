@@ -11,9 +11,9 @@ import { isSpatialAuthoringTransactionFrame } from '@/renderer/course/spatialAut
 import {
   createCourseProjectArchive,
   openCourseProjectArchive,
-} from '@/renderer/project/courseProjectArchive'
-import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
-import { createTextNode } from '@/renderer/project/nativeNodeFactories'
+} from '../../src/core/drivers/codecs/courseProjectArchive'
+import { createBlankCourseProject } from '@/core/course/createCourseProject'
+import { createTextNode } from '@/core/tools/nativeNodeFactories'
 import {
   COURSE_RUNTIME_SOURCE_AUTHORING_FIELD,
   selectRuntimeSourceAuthoringView,

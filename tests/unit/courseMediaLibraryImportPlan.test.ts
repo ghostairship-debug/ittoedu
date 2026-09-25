@@ -3,7 +3,7 @@ import {
   planCourseMediaLibraryImport,
   type PlanCourseMediaLibraryImportInput,
 } from '@/renderer/media/courseMediaLibraryImport'
-import { createBlankCourseProject } from '@/renderer/project/createCourseProject'
+import { createBlankCourseProject } from '@/core/course/createCourseProject'
 import {
   freezeCourseAssetSidecar,
   type CourseAssetSidecar,

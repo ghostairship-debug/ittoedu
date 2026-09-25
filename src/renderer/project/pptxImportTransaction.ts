@@ -1,6 +1,6 @@
 import type { CourseProjectDocument } from '../../shared/courseProjectTypes'
-import { addCourseScene, addCourseSlidePage } from '../course/courseLocationCommands'
-import { commitCourseProjectMutation } from '../course/courseProjectMutation'
+import { addCourseScene, addCourseSlidePage } from '../../core/tools/courseLocations'
+import { commitCourseProjectMutation } from '../../core/tools/courseProjectMutation'
 import { createEditorTransactionStep } from '../authoring/editorTransaction'
 import { applyCourseAssetImports } from './v9AssetAdapter'
 import type { PptxImportDraft } from './pptxImport'

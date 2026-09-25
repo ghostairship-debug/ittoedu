@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { createBlankFlowCourseProject } from '@/renderer/project/createFlowCourseProject'
-import { createCourseProjectArchive, openCourseProjectArchive } from '@/renderer/project/courseProjectArchive'
+import { createCourseProjectArchive, openCourseProjectArchive } from '../../src/core/drivers/codecs/courseProjectArchive'
 import { createFlowDocumentResourcePort, prepareFlowDocumentResourceTransaction } from '@/renderer/document/flowDocumentResources'
 import { createFileDocumentResourcePort } from '@/renderer/document/fileDocumentResources'
 import { prepareDocumentClipboard } from '@/renderer/document/documentClipboard'

@@ -17,7 +17,7 @@ import type {
   RuntimeLayerItem,
   ScopedLayerItem,
 } from '../../../src/shared/courseProjectTypes'
-import type { CourseProjectArchiveData } from '../../../src/renderer/project/courseProjectArchive'
+import type { CourseProjectArchiveData } from '../../../src/core/drivers/codecs/courseProjectArchive'
 
 export const COURSE_PROJECT_V9_FIXTURE_MTIME = '2026-08-18T12:00:00.000Z'
 

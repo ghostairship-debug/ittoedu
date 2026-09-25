@@ -5,9 +5,7 @@ import { createServer, type ViteDevServer } from 'vite'
 import sharp from 'sharp'
 import { BACKGROUND_E2E_ENV } from '../../src/main/windowVisibility'
 import { showEditorPanel } from './r18NativeAuthoringFixture'
-import { buildGenerationPrompt } from '../../src/main/localAgent/profile'
-import { createCourseProjectArchive } from '../../src/renderer/project/courseProjectArchive'
-import type { GenerationRequest } from '../../src/shared/generationContract'
+import { createCourseProjectArchive } from '../../src/core/drivers/codecs/courseProjectArchive'
 import type { RuntimeLayerItem } from '../../src/shared/courseProjectTypes'
 import { closeNativeEditor, FIXTURE_IDS, readSaved, writeNativeLesson, type NativeRun } from './r18NativeAuthoringFixture'
 import { expectBackgroundWindowsIsolated } from './expectBackgroundWindowsIsolated'
@@ -122,19 +120,15 @@ test('a corrupt current Runtime fallback is diagnosed without becoming a native 
     const result = await page.evaluate(async ({ badAssetId, vectorAssetId, mountedRuntimeId }) => {
       const load = (path: string) => import(/* @vite-ignore */ path)
       const { useEditorStore, selectActiveCourseProjectDocument, selectMediaAssetFiles } = await load('/src/renderer/store/editorStore.ts')
-      const { createCourseChatObservation } = await load('/src/renderer/ui/chat/courseChatObservation.ts')
+      const { createCurrentObservation, readCanonicalCourse } = await load('/tests/e2e/helpers/g20AuthoringObservation.ts')
       const state = useEditorStore.getState(), document = selectActiveCourseProjectDocument(state)
       if (!document || !state.projectPath) throw new Error('The fixture did not open as a saved project')
       state.selectNodes([mountedRuntimeId])
-      const owner = { projectId: document.id, projectPath: state.projectPath }
-      const workspace = (await window.desktopAPI.localAgent({ operation: 'workspace', ...owner })).workspace
-      if (!workspace) throw new Error('Main did not return the current workspace')
       const beforeDocument = JSON.stringify(document)
-      const beforeHistory = state.slideBackend.getSession().history.past.length
-      const bridge = createCourseChatObservation(window.desktopAPI, owner)
+      const beforeHistory = (await readCanonicalCourse()).undoDepth
+      const observer = createCurrentObservation()
       try {
-        const request = await bridge.capture({ workspace, scope: 'selection', purpose: 'local-edit', intent: 'discuss',
-          instruction: '只观察当前 Runtime 和当前图片，不修改工程。', applyPolicy: 'preview', expectedResult: 'auto', materials: [], catalogPackages: [] })
+        const request = await observer.capture({ intent: 'discuss' })
         const structureFile = request.resourceFiles?.find((file: any) => file.path === 'observation/current-structure.json')
         const diagnosticsFile = request.resourceFiles?.find((file: any) => file.path === 'observation/images/original-image-diagnostics.json')
         if (!structureFile || !diagnosticsFile) throw new Error('Missing original-image diagnostic evidence')
@@ -149,7 +143,6 @@ test('a corrupt current Runtime fallback is diagnosed without becoming a native 
         const currentFrame = request.resourceFiles?.find((file: any) => file.path === 'observation/current-frame.png')
         const now = useEditorStore.getState()
         const afterDocument = selectActiveCourseProjectDocument(now)
-        const records = await window.desktopAPI.localAgent({ operation: 'list', ...owner })
         const bytes = selectMediaAssetFiles(now)[badAssetId]
         return {
           observationFiles: request.observation?.files,
@@ -164,35 +157,15 @@ test('a corrupt current Runtime fallback is diagnosed without becoming a native 
           currentFrame: currentFrame ? { path: currentFrame.path, role: currentFrame.role, mediaType: currentFrame.mediaType, byteLength: currentFrame.content.length } : null,
           promptRequest: request,
           documentUnchanged: JSON.stringify(afterDocument) === beforeDocument,
-          historyUnchanged: now.slideBackend.getSession().history.past.length === beforeHistory,
+          historyUnchanged: (await readCanonicalCourse()).undoDepth === beforeHistory,
           badBytesUnchanged: bytes ? btoa(String.fromCharCode(...bytes)) : null,
-          modelRecords: records.records ?? [],
         }
-      } finally { bridge.dispose() }
+      } finally { observer.dispose() }
     }, { badAssetId: corruptAssetId, vectorAssetId: svgAssetId, mountedRuntimeId: runtimeId })
 
-    const { promptRequest, ...observationResult } = result
-    const actualPromptRequest = promptRequest as GenerationRequest
-    const withoutDerivedRequest: GenerationRequest = {
-      ...actualPromptRequest,
-      resourceFiles: actualPromptRequest.resourceFiles?.filter(file => file.path !== observationResult.vectorDerivedResource!.path),
-      observation: actualPromptRequest.observation
-        ? { ...actualPromptRequest.observation, files: actualPromptRequest.observation.files.filter(file => file.relativePath !== observationResult.vectorDerivedResource!.path) }
-        : undefined,
-    }
-    const promptBudget = Object.fromEntries((['codex', 'claude', 'opencode'] as const).map(adapter => {
-      const prompt = buildGenerationPrompt(adapter, actualPromptRequest, join(runRoot, 'prompt-budget-candidate'))
-      const withoutDerived = buildGenerationPrompt(adapter, withoutDerivedRequest, join(runRoot, 'prompt-budget-candidate'))
-      return [adapter, { byteLength: Buffer.byteLength(prompt), includesDerivedResourceIndex: prompt.includes('resources/observation/images/2.png'),
-        includesInlineDerivedBytes: prompt.includes(observationResult.vectorDerivedResource!.content.slice(0, 96)),
-        withoutDerivedByteLength: Buffer.byteLength(withoutDerived), derivedDeltaBytes: Buffer.byteLength(prompt) - Buffer.byteLength(withoutDerived),
-        within12KiB: Buffer.byteLength(prompt) <= 12 * 1024 }]
-    }))
-    for (const adapter of ['codex', 'claude', 'opencode'] as const) {
-      expect(promptBudget[adapter]!.includesDerivedResourceIndex).toBe(true)
-      expect(promptBudget[adapter]!.includesInlineDerivedBytes).toBe(false)
-      expect(promptBudget[adapter]!.derivedDeltaBytes).toBeGreaterThan(0)
-    }
+    const { promptRequest: actualObservation, ...observationResult } = result
+    // Retired: the three embedded CLI prompt encodings are no longer product surfaces.
+    // These assertions retain actual original/derived byte and current-host capture boundaries.
     const originalImageFiles = observationResult.observationFiles.filter((file: any) => file.role === 'image' && file.fileId.startsWith('original-image-'))
     expect(observationResult.unavailableOriginalImages).toMatchObject([{ assetId: corruptAssetId, code: 'image-decode-failed' }])
     expect(observationResult.diagnostics).toMatchObject({ unavailableOriginalImages: [{ assetId: corruptAssetId, code: 'image-decode-failed' }], unavailableDerivedImages: [] })
@@ -216,16 +189,11 @@ test('a corrupt current Runtime fallback is diagnosed without becoming a native 
     expect(observationResult.documentUnchanged).toBe(true)
     expect(observationResult.historyUnchanged).toBe(true)
     expect(observationResult.badBytesUnchanged).toBe(fixtureDamagedBase64)
-    expect(observationResult.modelRecords).toEqual([])
     expect(run.pageErrors).toEqual([])
     expect(readSaved(projectPath).project).toEqual(fixtureProject)
-    writeFileSync(join(runRoot, 'observation-result.json'), JSON.stringify({ ...observationResult, promptRequest: actualPromptRequest,
-      promptBudget, modelCalls: 0, source: 'real Electron Main and Chromium renderer; no native CLI turn' }, null, 2))
+    writeFileSync(join(runRoot, 'observation-result.json'), JSON.stringify({ ...observationResult, observation: actualObservation, modelCalls: 0, source: 'real Electron Main and Chromium renderer; no native CLI turn' }, null, 2))
     await page.screenshot({ path: join(runRoot, 'observation.png') })
     await expectBackgroundWindowsIsolated(app, true)
-    for (const adapter of ['codex', 'claude', 'opencode'] as const) {
-      expect(promptBudget[adapter]!.byteLength, `${adapter} formal full prompt`).toBeLessThanOrEqual(12 * 1024)
-    }
   } catch (error) {
     writeFileSync(join(runRoot, 'failure.txt'), String(error))
     await run?.page.screenshot({ path: join(runRoot, 'failure.png') }).catch(() => {})

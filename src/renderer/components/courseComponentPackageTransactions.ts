@@ -1,5 +1,5 @@
 import type { EditorTransactionPlan } from '@/renderer/authoring/editorTransaction'
-import { componentArchiveRoot } from '@/renderer/project/archivePath'
+import { componentArchiveRoot } from '../../core/drivers/codecs/archivePath'
 import type { ComponentPackageHistoryChange } from '@/renderer/store/courseResourceState'
 import { componentManifestSchema } from '@/shared/componentSchema'
 import type {
@@ -17,7 +17,7 @@ import { z } from 'zod'
 import {
   parseComponentPackageFiles,
   type ImportedComponentPackage,
-} from './importComponentPackage'
+} from '../../core/drivers/codecs/importComponentPackage'
 
 export type CourseComponentPackageCarrier =
   | 'global-layer'
