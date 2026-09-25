@@ -172,8 +172,8 @@ it('keeps keyboard commands scoped to the tree and performs multi-file clipboard
   fireEvent.click(screen.getByRole('button', { name: 'child' })); fireEvent.keyDown(screen.getByRole('button', { name: 'child' }), { key: 'v', ctrlKey: true })
   await waitFor(async () => expect(await fs.readFile(path.join(directory, 'child', 'a.md'), 'utf8')).toBe('A'))
   expect(await fs.readFile(path.join(directory, 'child', 'b.md'), 'utf8')).toBe('B')
-  await waitFor(() => expect(screen.getByRole('button', { name: '新建文本文件' })).not.toBeDisabled())
-  fireEvent.click(screen.getByRole('button', { name: '新建文本文件' }))
+  await waitFor(() => expect(screen.getByRole('button', { name: '新建文本文档' })).not.toBeDisabled())
+  fireEvent.click(screen.getByRole('button', { name: '新建文本文档' }))
   const name = screen.getByLabelText('文件名称'); fireEvent.change(name, { target: { value: 'notes.txt' } })
   for (const key of ['F2', 'Delete']) fireEvent.keyDown(name, { key })
   for (const key of ['c', 'x', 'v']) fireEvent.keyDown(name, { key, ctrlKey: true })
@@ -184,7 +184,7 @@ it('keeps keyboard commands scoped to the tree and performs multi-file clipboard
   await fs.writeFile(path.join(directory, 'external.txt'), 'external')
   await screen.findByRole('button', { name: 'external.txt' })
   expect(screen.getByRole('button', { name: 'child' }).closest('li')).toHaveAttribute('data-open', 'true')
-  await waitFor(() => expect(screen.getByRole('button', { name: '新建文档' })).not.toBeDisabled())
+  await waitFor(() => expect(screen.getByRole('button', { name: '新建 Markdown 文档' })).not.toBeDisabled())
   const chat = screen.getByLabelText('聊天文字')
   for (const key of ['F2', 'Delete']) fireEvent.keyDown(chat, { key })
   for (const key of ['c', 'x', 'v']) fireEvent.keyDown(chat, { key, ctrlKey: true })
@@ -194,11 +194,163 @@ it('keeps keyboard commands scoped to the tree and performs multi-file clipboard
   fireEvent.click(screen.getByRole('button', { name: 'child' })); fireEvent.click(screen.getByRole('button', { name: '新建课件' }))
   fireEvent.change(screen.getByLabelText('文件名称'), { target: { value: 'new-course' } }); fireEvent.click(screen.getByRole('button', { name: '确认' }))
   await waitFor(async () => { const model = await createCourseV9Driver().load(await fs.readFile(path.join(directory, 'child', 'new-course.h5lesson'))); expect(model.kind).toBe('course-v9') })
-  await waitFor(() => expect(screen.getByRole('button', { name: '新建文档' })).not.toBeDisabled())
+  await waitFor(() => expect(screen.getByRole('button', { name: '新建 Markdown 文档' })).not.toBeDisabled())
   const dropped = Object.assign(new File(['payload'], 'photo.png'), { arrayBuffer: async () => new TextEncoder().encode('payload').buffer })
   let reads = 0
   const directoryEntry = { name: 'bundle', isFile: false, isDirectory: true, createReader: () => ({ readEntries: (resolve: (entries: unknown[]) => void) => resolve(reads++ ? [] : [{ name: 'photo.png', isFile: true, isDirectory: false, file: (resolveFile: (file: File) => void) => resolveFile(dropped) }]) }) }
   fireEvent.drop(screen.getByRole('button', { name: '工作空间根目录' }), { dataTransfer: { files: [dropped], items: [{ kind: 'file', webkitGetAsEntry: () => directoryEntry }], types: ['Files'], getData: () => '' } })
   await waitFor(async () => expect(await fs.readFile(path.join(directory, 'bundle', 'photo.png'), 'utf8')).toBe('payload'))
 
+})
+
+it('displays creation menu items in correct order and wording in toolbar and context menu', async () => {
+  const directory = await fixture()
+  await fs.writeFile(path.join(directory, 'item.md'), '')
+  const { host } = createMarkdownTestHost(path.join(directory, 'journal'))
+  const service = new WorkspaceFilesDesktopService(host.files); services.push(service); await service.authorizeRoot(directory)
+  render(<LessonDirectoryTree directory={directory} files={service.operate} operation={async () => ({})} onFile={vi.fn()} onDirectory={vi.fn()} />)
+  const itemBtn = await screen.findByRole('button', { name: 'item.md' })
+  const createMenu = document.querySelector('.workspace-files-create-options')!
+  const toolbarButtons = within(createMenu as HTMLElement).getAllByRole('button').map(b => b.textContent)
+  expect(toolbarButtons.slice(0, 4)).toEqual(['新建 Markdown 文档', '新建课件', '新建文本文档', '新建文件夹'])
+  fireEvent.contextMenu(itemBtn)
+  const contextMenu = screen.getByRole('menu', { name: '文件菜单' })
+  const contextButtons = within(contextMenu).getAllByRole('button').map(b => b.textContent)
+  expect(contextButtons.slice(0, 4)).toEqual(['新建 Markdown 文档', '新建课件', '新建文本文档', '新建文件夹'])
+})
+
+it('prefills default names, numbers collisions with (2) and selects only the main stem on focus', async () => {
+  const directory = await fixture()
+  await fs.writeFile(path.join(directory, 'existing.txt'), '')
+  const { host } = createMarkdownTestHost(path.join(directory, 'journal'))
+  const service = new WorkspaceFilesDesktopService(host.files); services.push(service); await service.authorizeRoot(directory)
+  render(<LessonDirectoryTree directory={directory} files={service.operate} operation={async () => ({})} onFile={vi.fn()} onDirectory={vi.fn()} />)
+  await screen.findByRole('button', { name: 'existing.txt' })
+
+  fireEvent.click(screen.getByRole('button', { name: '新建 Markdown 文档' }))
+  let input = (await screen.findByLabelText('文件名称')) as HTMLInputElement
+  expect(input.value).toBe('新建 Markdown 文档.md')
+  fireEvent.focus(input)
+  expect(input.selectionStart).toBe(0)
+  expect(input.selectionEnd).toBe('新建 Markdown 文档'.length)
+  fireEvent.click(screen.getByRole('button', { name: '取消' }))
+
+  fireEvent.click(screen.getByRole('button', { name: '新建课件' }))
+  input = (await screen.findByLabelText('文件名称')) as HTMLInputElement
+  expect(input.value).toBe('新建课件.h5lesson')
+  fireEvent.focus(input)
+  expect(input.selectionStart).toBe(0)
+  expect(input.selectionEnd).toBe('新建课件'.length)
+  fireEvent.click(screen.getByRole('button', { name: '取消' }))
+
+  fireEvent.click(screen.getByRole('button', { name: '新建文本文档' }))
+  input = (await screen.findByLabelText('文件名称')) as HTMLInputElement
+  expect(input.value).toBe('新建文本文档.txt')
+  fireEvent.focus(input)
+  expect(input.selectionStart).toBe(0)
+  expect(input.selectionEnd).toBe('新建文本文档'.length)
+  fireEvent.click(screen.getByRole('button', { name: '取消' }))
+
+  fireEvent.click(screen.getByRole('button', { name: '新建文件夹' }))
+  input = (await screen.findByLabelText('文件名称')) as HTMLInputElement
+  expect(input.value).toBe('新建文件夹')
+  fireEvent.focus(input)
+  expect(input.selectionStart).toBe(0)
+  expect(input.selectionEnd).toBe('新建文件夹'.length)
+  fireEvent.click(screen.getByRole('button', { name: '取消' }))
+
+  // Renaming behavior unchanged
+  fireEvent.click(screen.getByRole('button', { name: 'existing.txt' }))
+  fireEvent.keyDown(screen.getByRole('button', { name: 'existing.txt' }), { key: 'F2' })
+  const renameInput = (await screen.findByLabelText('文件名称')) as HTMLInputElement
+  expect(renameInput.value).toBe('existing.txt')
+  fireEvent.click(screen.getByRole('button', { name: '取消' }))
+
+  await fs.writeFile(path.join(directory, '新建文本文档.txt'), '')
+  await fs.writeFile(path.join(directory, '新建文本文档 (2).txt'), '')
+  fireEvent.click(screen.getByRole('button', { name: '刷新' }))
+  await screen.findByRole('button', { name: '新建文本文档.txt' })
+  await screen.findByRole('button', { name: '新建文本文档 (2).txt' })
+
+  fireEvent.click(screen.getByRole('button', { name: '新建文本文档' }))
+  input = (await screen.findByLabelText('文件名称')) as HTMLInputElement
+  expect(input.value).toBe('新建文本文档 (3).txt')
+  fireEvent.focus(input)
+  expect(input.selectionStart).toBe(0)
+  expect(input.selectionEnd).toBe('新建文本文档 (3)'.length)
+  fireEvent.click(screen.getByRole('button', { name: '取消' }))
+})
+
+it('auto-appends .txt when missing extension, preserves other extensions, and calls onFile with targetPath on success', async () => {
+  const directory = await fixture()
+  const { host } = createMarkdownTestHost(path.join(directory, 'journal'))
+  const service = new WorkspaceFilesDesktopService(host.files); services.push(service); await service.authorizeRoot(directory)
+  const onFile = vi.fn()
+  render(<LessonDirectoryTree directory={directory} files={service.operate} operation={async () => ({})} onFile={onFile} onDirectory={vi.fn()} />)
+  await screen.findByRole('button', { name: '工作空间根目录' })
+  await waitFor(() => expect(screen.getByRole('button', { name: '新建文本文档' })).not.toBeDisabled())
+
+  fireEvent.click(screen.getByRole('button', { name: '新建文本文档' }))
+  fireEvent.change(await screen.findByLabelText('文件名称'), { target: { value: 'plain' } })
+  fireEvent.click(screen.getByRole('button', { name: '确认' }))
+  await waitFor(() => expect(onFile).toHaveBeenCalledWith({ name: 'plain.txt', kind: 'file', path: path.join(directory, 'plain.txt') }))
+  expect(await fs.readFile(path.join(directory, 'plain.txt'), 'utf8')).toBe('')
+
+  onFile.mockClear()
+  await waitFor(() => expect(screen.getByRole('button', { name: '新建文本文档' })).not.toBeDisabled())
+  fireEvent.click(screen.getByRole('button', { name: '新建文本文档' }))
+  fireEvent.change(await screen.findByLabelText('文件名称'), { target: { value: 'dotted.' } })
+  fireEvent.click(screen.getByRole('button', { name: '确认' }))
+  await waitFor(() => expect(onFile).toHaveBeenCalledWith({ name: 'dotted.txt', kind: 'file', path: path.join(directory, 'dotted.txt') }))
+
+  onFile.mockClear()
+  await waitFor(() => expect(screen.getByRole('button', { name: '新建文本文档' })).not.toBeDisabled())
+  fireEvent.click(screen.getByRole('button', { name: '新建文本文档' }))
+  fireEvent.change(await screen.findByLabelText('文件名称'), { target: { value: 'data.csv' } })
+  fireEvent.click(screen.getByRole('button', { name: '确认' }))
+  await waitFor(() => expect(onFile).toHaveBeenCalledWith({ name: 'data.csv', kind: 'file', path: path.join(directory, 'data.csv') }))
+  expect(await fs.readFile(path.join(directory, 'data.csv'), 'utf8')).toBe('')
+
+  onFile.mockClear()
+  await waitFor(() => expect(screen.getByRole('button', { name: '新建文件夹' })).not.toBeDisabled())
+  fireEvent.click(screen.getByRole('button', { name: '新建文件夹' }))
+  fireEvent.change(await screen.findByLabelText('文件名称'), { target: { value: 'new-dir' } })
+  fireEvent.click(screen.getByRole('button', { name: '确认' }))
+  await waitFor(async () => expect((await fs.stat(path.join(directory, 'new-dir'))).isDirectory()).toBe(true))
+  expect(onFile).not.toHaveBeenCalled()
+})
+
+it('handles guoling:reveal-in-explorer event: expands ancestors, selects item, scrolls into view, and invokes onScope', async () => {
+  const directory = await fixture()
+  const sub = path.join(directory, 'lvl1', 'lvl2')
+  await fs.mkdir(sub, { recursive: true })
+  await fs.writeFile(path.join(sub, 'target.md'), '# Target')
+  const { host } = createMarkdownTestHost(path.join(directory, 'journal'))
+  const service = new WorkspaceFilesDesktopService(host.files); services.push(service); await service.authorizeRoot(directory)
+  const onScope = vi.fn()
+  const scrollMock = vi.fn()
+  window.HTMLElement.prototype.scrollIntoView = scrollMock
+
+  render(<LessonDirectoryTree directory={directory} files={service.operate} operation={async () => ({})} onFile={vi.fn()} onDirectory={vi.fn()} onScope={onScope} />)
+  await screen.findByRole('button', { name: '工作空间根目录' })
+
+  act(() => {
+    window.dispatchEvent(new CustomEvent('guoling:reveal-in-explorer', {
+      detail: { path: 'lvl1/lvl2/target.md', kind: 'file' }
+    }))
+  })
+
+  const targetBtn = await screen.findByRole('button', { name: 'target.md' })
+  await waitFor(() => expect(targetBtn).toHaveAttribute('aria-pressed', 'true'))
+  expect(screen.getByRole('button', { name: 'lvl1' }).closest('li')).toHaveAttribute('data-open', 'true')
+  expect(screen.getByRole('button', { name: 'lvl2' }).closest('li')).toHaveAttribute('data-open', 'true')
+  expect(onScope).toHaveBeenCalledWith(path.join(sub, 'target.md'), 'file', expect.any(String))
+  expect(scrollMock).toHaveBeenCalled()
+
+  act(() => {
+    window.dispatchEvent(new CustomEvent('guoling:reveal-in-explorer', {
+      detail: { path: 'lvl1/lvl2/missing.md', kind: 'file' }
+    }))
+  })
+  await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('未在资源管理器中找到：lvl1/lvl2/missing.md'))
 })
