@@ -4,6 +4,8 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+vi.mock('pdfjs-dist/build/pdf.worker.min.mjs?url', () => ({ default: '/pdf.worker.min.mjs' }))
 import type { DesktopAPI } from '../../src/shared/ipcTypes'
 import type { RuntimeLayerItem } from '../../src/shared/courseProjectTypes'
 import { createBlankCourseProject } from '../../src/core/course/createCourseProject'

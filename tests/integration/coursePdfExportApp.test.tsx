@@ -1,6 +1,8 @@
 import { webcrypto } from 'node:crypto'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+vi.mock('pdfjs-dist/build/pdf.worker.min.mjs?url', () => ({ default: '/pdf.worker.min.mjs' }))
 import type { DesktopAPI } from '../../src/shared/ipcTypes'
 import type { CourseProjectDocument } from '../../src/shared/courseProjectTypes'
 import {

@@ -3,6 +3,8 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+vi.mock('pdfjs-dist/build/pdf.worker.min.mjs?url', () => ({ default: '/pdf.worker.min.mjs' }))
 import type { DesktopAPI, SelectedImageResult } from '../../src/shared/ipcTypes'
 import type { CourseProjectDocument } from '../../src/shared/courseProjectTypes'
 import { courseProjectDocumentSchema } from '../../src/shared/courseProjectSchema'

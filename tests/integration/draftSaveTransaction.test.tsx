@@ -1,5 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+vi.mock('pdfjs-dist/build/pdf.worker.min.mjs?url', () => ({ default: '/pdf.worker.min.mjs' }))
 import type { DesktopAPI, SaveBinaryFileResult } from '@/shared/ipcTypes'
 import type { CourseProjectDocument } from '@/shared/courseProjectTypes'
 import { locateCourseLayer } from '@/renderer/course/effectiveLayerCommands'

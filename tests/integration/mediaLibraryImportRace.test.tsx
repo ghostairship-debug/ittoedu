@@ -2,6 +2,8 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+vi.mock('pdfjs-dist/build/pdf.worker.min.mjs?url', () => ({ default: '/pdf.worker.min.mjs' }))
 import { componentPackagesFromArchive } from '../../src/renderer/components/componentPackageStore'
 import { openCourseProjectArchive } from '../../src/core/drivers/codecs/courseProjectArchive'
 import {
@@ -15,6 +17,15 @@ import type {
   SelectedFileBatch,
   SelectedImageBatchFile,
 } from '../../src/shared/ipcTypes'
+import {
+  bootTriageCourseHost,
+  formalCourse,
+  openAppCourse,
+  settleCourse,
+  waitForAppDocuments,
+  withAppDocuments,
+  type TriageCourseHost,
+} from '../helpers/triage-t7-appHost'
 
 vi.mock('../../src/renderer/ui/Workspace', () => ({
   Workspace: () => <div data-testid="workspace-stub" />,
@@ -172,11 +183,13 @@ function selectedImagesApi(
   }
 }
 
-function loadFixture(): void {
+let host: TriageCourseHost
+
+async function loadFixture(): Promise<void> {
   const source = openCourseProjectArchive(new Uint8Array(readFileSync(FIXTURE_PATH)))
-  useEditorStore.getState().loadCourseProject(
+  await openAppCourse(
+    host,
     source.project,
-    null,
     source.assetFiles,
     componentPackagesFromArchive(source.project, source.componentFiles),
   )
@@ -205,7 +218,8 @@ function resourceSnapshot(): ResourceSnapshot {
   return {
     project: structuredClone(activeProject()),
     files: byteMap(selectMediaAssetFiles(state)),
-    activeHistoryDepth: state.slideBackend.getSession().history.past.length,
+    // History belongs to DocumentSession; the renderer backend is only a projection.
+    activeHistoryDepth: formalCourse(host).undoDepth,
     sidecarPastDepth: state.courseAssetSidecarPast.length,
     sidecarFutureDepth: state.courseAssetSidecarFuture.length,
     componentPastDepth: state.courseComponentPackagesPast.length,
@@ -219,12 +233,15 @@ async function beginLibraryImport(
   const captureTarget = vi.fn(() => originalCaptureMediaLibraryImportTarget())
   useEditorStore.setState({ captureMediaLibraryImportTarget: captureTarget })
   const api = selectedImagesApi(() => result.promise)
-  window.desktopAPI = api
+  window.desktopAPI = withAppDocuments(api, host)
   render(<App />)
+  await waitForAppDocuments()
+  await loadFixture()
+  const projectBeforeDialog = activeProject()
   await waitFor(() => expect(screen.getByTestId('import-image-library')).toBeVisible())
   fireEvent.click(screen.getByTestId('import-image-library'))
   await waitFor(() => expect(api.selectImages).toHaveBeenCalledOnce())
-  return { api, captureTarget }
+  return { api, captureTarget, projectBeforeDialog }
 }
 
 async function resolveDialog<T>(result: Deferred<T>, value: T): Promise<void> {
@@ -234,7 +251,7 @@ async function resolveDialog<T>(result: Deferred<T>, value: T): Promise<void> {
   })
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   useEditorStore.setState({
     captureMediaLibraryImportTarget: originalCaptureMediaLibraryImportTarget,
   })
@@ -255,7 +272,7 @@ beforeEach(() => {
   // jsdom port only; real corrupted-pixel rejection is covered in Chromium.
   vi.stubGlobal('createImageBitmap', async () => ({ width: 2, height: 2, close() {} }))
   vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined)
-  loadFixture()
+  host = await bootTriageCourseHost()
 })
 
 afterEach(() => {
@@ -271,9 +288,8 @@ afterEach(() => {
 
 describe('ARCH-2 App media-library import race', () => {
   it('captures the explicit library target before the dialog and rejects a stale revision without resource writes', async () => {
-    const projectBeforeDialog = activeProject()
     const result = deferred<SelectedFileBatch<SelectedImageBatchFile> | null>()
-    const { api, captureTarget } = await beginLibraryImport(result)
+    const { api, captureTarget, projectBeforeDialog } = await beginLibraryImport(result)
 
     expect(captureTarget).toHaveBeenCalledOnce()
     expect(captureTarget.mock.invocationCallOrder[0])
@@ -285,6 +301,7 @@ describe('ARCH-2 App media-library import race', () => {
     expect(screen.getByTestId('busy-state')).toBeDisabled()
 
     useEditorStore.getState().renameProject('ARCH-2 media import intervening edit')
+    await settleCourse()
     expect(activeProject().revision).toBe(projectBeforeDialog.revision + 1)
     const afterRename = resourceSnapshot()
 
@@ -299,9 +316,9 @@ describe('ARCH-2 App media-library import race', () => {
   })
 
   it('commits a normal two-image library batch as one history frame without full sidecar snapshots', async () => {
-    const before = resourceSnapshot()
     const result = deferred<SelectedFileBatch<SelectedImageBatchFile> | null>()
     await beginLibraryImport(result)
+    const before = resourceSnapshot()
     await resolveDialog(result, IMAGE_BATCH)
     await waitFor(() => expect(screen.getByTestId('busy-state')).not.toBeDisabled())
 

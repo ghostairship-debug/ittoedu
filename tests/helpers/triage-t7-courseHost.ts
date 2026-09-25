@@ -45,6 +45,14 @@ export function formalProject(host: TriageCourseHost, documentId?: string | null
   return snapshot.model.project
 }
 
+/** DocumentSession revision only moves forward, including undo and redo. */
+export function projectBody(project: CourseProjectDocument): CourseProjectDocument {
+  const next = structuredClone(project)
+  next.revision = 0
+  next.updatedAt = ''
+  return next
+}
+
 /** Wait until the optimistic projection has been acknowledged by DocumentSession. */
 export async function settleCourse(): Promise<void> {
   await useEditorStore.getState().drainCourseDocument()
