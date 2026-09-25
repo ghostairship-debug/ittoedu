@@ -159,7 +159,6 @@ export interface DesktopAPI {
   }): Promise<{ path: string } | null>
   setPreviewNetworkPolicy(input: PreviewNetworkPolicyInput): Promise<void>
   releasePreviewNetworkPolicy(input: { leaseId: string }): Promise<void>
-  confirmDiscardChanges(): Promise<'discard' | 'cancel'>
   setDirtyState(dirty: boolean): Promise<void>
   onRequestSave(handler: () => void): () => void
   onRequestFocusDocument?(handler: (documentId: string) => void): () => void
@@ -222,7 +221,6 @@ export const IPC_CHANNELS = {
   previewNetworkDocumentToken: 'preview-network:document-token',
   setPreviewNetworkPolicy: 'preview-network:set',
   releasePreviewNetworkPolicy: 'preview-network:release',
-  confirmDiscard: 'app:confirm-discard',
   dirtyState: 'app:dirty-state',
   requestSave: 'app:request-save',
   requestFocusDocument: 'app:request-focus-document',

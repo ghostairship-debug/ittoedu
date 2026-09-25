@@ -285,7 +285,6 @@ function componentApi(options: {
     exportPdf: vi.fn(async () => null),
     setPreviewNetworkPolicy: vi.fn(async () => undefined),
     releasePreviewNetworkPolicy: vi.fn(async () => undefined),
-    confirmDiscardChanges: vi.fn(async () => 'discard' as const),
     setDirtyState: vi.fn(async () => undefined),
     onRequestSave: vi.fn(() => () => undefined),
     onRequestSaveAndClose: vi.fn(() => () => undefined),

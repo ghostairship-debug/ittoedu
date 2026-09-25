@@ -27,7 +27,6 @@ function createPorts(host: CourseDocumentTestHost, overrides: Partial<CourseProj
     openRecentProjectFile: vi.fn(async () => { throw new Error('Renderer byte loader is retired') }),
     confirmProjectOpen: vi.fn(async () => undefined),
     listRecentProjects: vi.fn(async () => []),
-    confirmDiscardChanges: vi.fn(async () => 'discard' as const),
     setWindowDirtyState: vi.fn(async () => undefined),
     subscribeSaveAndCloseRequest: vi.fn(() => () => undefined),
     onProjectReplaced: vi.fn(),
@@ -52,7 +51,7 @@ describe('useCourseProjectLifecycle main document sessions', () => {
     const host = await createCourseDocumentHost()
     await host.editTitle('old draft')
     const previous = host.read()
-    const { result, ports } = await mount(host, { confirmDiscardChanges: vi.fn(async () => 'cancel' as const) })
+    const { result, ports } = await mount(host)
     await act(async () => { expect(await result.current[method]()).toBe(true) })
     const current = host.read()
     expect(current.documentId).not.toBe(previous.documentId)
@@ -60,7 +59,6 @@ describe('useCourseProjectLifecycle main document sessions', () => {
     expect(current.model).toMatchObject({ project: { locations: [{ kind }] } })
     expect(host.registry.get(previous.documentId).read()).toEqual(previous)
     expect(ports.onProjectReplaced).toHaveBeenCalledOnce()
-    expect(ports.confirmDiscardChanges).not.toHaveBeenCalled()
   })
 
   it('opens the chosen path through main and reselects the same live History for recent opens', async () => {
@@ -70,7 +68,6 @@ describe('useCourseProjectLifecycle main document sessions', () => {
     await host.seedFile('chosen.h5lesson', 'disk course')
     const { result, ports } = await mount(host, {
       openProjectFile: vi.fn(async () => ({ path: 'chosen.h5lesson', name: 'chosen.h5lesson', confirmationId: 'chosen', bytes: new Uint8Array([0]) })),
-      confirmDiscardChanges: vi.fn(async () => 'cancel' as const),
     })
     act(() => result.current.openProject())
     await waitFor(() => expect(ports.confirmProjectOpen).toHaveBeenCalledWith('chosen'))
@@ -82,7 +79,6 @@ describe('useCourseProjectLifecycle main document sessions', () => {
     expect(host.read()).toEqual(existing)
     expect(existing.undoDepth).toBe(1)
     expect(ports.openRecentProjectFile).not.toHaveBeenCalled()
-    expect(ports.confirmDiscardChanges).not.toHaveBeenCalled()
   })
 
   it('leaves the same dirty untitled session and journal intact when Save As is cancelled', async () => {
@@ -151,7 +147,6 @@ describe('useCourseProjectLifecycle main document sessions', () => {
     expect(host.registry.list()).toHaveLength(1)
     expect(ports.onProjectReplaced).not.toHaveBeenCalled()
     expect(ports.reportError).not.toHaveBeenCalled()
-    expect(ports.confirmDiscardChanges).not.toHaveBeenCalled()
   })
 
   it('cancels a late switch when another main document with the same project identity becomes active', async () => {
@@ -173,7 +168,6 @@ describe('useCourseProjectLifecycle main document sessions', () => {
     expect(host.read()).toEqual(latest)
     expect(host.registry.get(original.documentId).read()).toEqual(original)
     expect(host.registry.list()).toHaveLength(2)
-    expect(ports.confirmDiscardChanges).not.toHaveBeenCalled()
   })
 
   it('allows preparation to commit a same-session draft before switching and retains its acknowledged version', async () => {
@@ -201,7 +195,6 @@ describe('useCourseProjectLifecycle main document sessions', () => {
     expect(host.registry.list()).toHaveLength(1)
     expect(ports.reportError).toHaveBeenCalledTimes(2)
     expect(ports.onProjectReplaced).not.toHaveBeenCalled()
-    expect(ports.confirmDiscardChanges).not.toHaveBeenCalled()
   })
 
   it('leaves recovery journals for the unified workspace entry instead of choosing the first course', async () => {

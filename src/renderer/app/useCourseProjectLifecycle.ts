@@ -95,7 +95,6 @@ export interface CourseProjectLifecyclePorts<TDraftToken = unknown> {
   subscribePreserveAndCloseRequest?(handler: () => Promise<boolean>): () => void
   onProjectSaved?(input: { projectId: string; path: string; previousPath: string | null; saveAs: boolean }): Promise<void>
   listRecentProjects(): Promise<RecentProjectEntry[]>
-  confirmDiscardChanges(): Promise<'discard' | 'cancel'>
   clearRecoveryProject?(): Promise<void>
   writeRecoveryProject?(input: {
     projectName: string

@@ -825,31 +825,6 @@ export function registerIpcHandlers(context: IpcContext): void {
   )
 
   registerSafeHandler(
-    IPC_CHANNELS.confirmDiscard,
-    context,
-    {
-      code: 'CONFIRMATION_FAILED',
-      title: '确认操作失败',
-      message: '无法显示未保存修改提示。',
-      suggestion: '请先手动保存工程，然后重试。',
-    },
-    async (_event, args) => {
-      requireNoArguments(args)
-      const result = await dialog.showMessageBox(requireWindow(context), {
-        type: 'warning',
-        title: '放弃未保存的修改？',
-        message: '当前课件有尚未保存的修改。',
-        detail: '继续后这些修改将丢失。此操作无法撤销。',
-        buttons: ['放弃修改', '取消'],
-        defaultId: 1,
-        cancelId: 1,
-        noLink: true,
-      })
-      return result.response === 0 ? ('discard' as const) : ('cancel' as const)
-    },
-  )
-
-  registerSafeHandler(
     IPC_CHANNELS.dirtyState,
     context,
     {

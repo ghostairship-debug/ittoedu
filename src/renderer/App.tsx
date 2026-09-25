@@ -293,10 +293,6 @@ export default function App() {
       if (!window.desktopAPI) return []
       return window.desktopAPI.listRecentProjects()
     },
-    confirmDiscardChanges: async () => {
-      if (!(await flowRecovery.flush())) return 'cancel'
-      return desktopApi().confirmDiscardChanges()
-    },
     setWindowDirtyState: async (nextDirty) => {
       if (!window.desktopAPI) return
       await window.desktopAPI.setDirtyState(nextDirty)

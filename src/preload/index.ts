@@ -53,7 +53,6 @@ const IPC_CHANNELS = {
   previewNetworkDocumentToken: 'preview-network:document-token',
   setPreviewNetworkPolicy: 'preview-network:set',
   releasePreviewNetworkPolicy: 'preview-network:release',
-  confirmDiscard: 'app:confirm-discard',
   dirtyState: 'app:dirty-state',
   requestSave: 'app:request-save',
   requestFocusDocument: 'app:request-focus-document',
@@ -319,7 +318,6 @@ const desktopAPI = Object.freeze<DesktopAPI>({
       documentToken: requirePreviewNetworkDocumentToken(),
     },
   ),
-  confirmDiscardChanges: () => invoke(IPC_CHANNELS.confirmDiscard),
   setDirtyState: (dirty) => invoke(IPC_CHANNELS.dirtyState, dirty),
   onRequestFocusDocument: handler => {
     const listener = (_event: Electron.IpcRendererEvent, id: unknown) => { if (typeof id === 'string' && id.length > 0 && id.length <= 512) handler(id) }

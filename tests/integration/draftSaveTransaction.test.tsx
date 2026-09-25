@@ -94,7 +94,6 @@ interface DesktopHarness {
   readonly api: DesktopAPI
   readonly saveProject: ReturnType<typeof vi.fn>
   readonly clearRecoveryProject: ReturnType<typeof vi.fn>
-  readonly confirmDiscardChanges: ReturnType<typeof vi.fn>
   closeHandler(): (() => Promise<boolean>) | null
 }
 
@@ -112,7 +111,6 @@ function desktopHarness(): DesktopHarness {
   let closeHandler: (() => Promise<boolean>) | null = null
   const saveProject = vi.fn(async () => ({ path: 'unused.h5lesson' }) as SaveBinaryFileResult)
   const clearRecoveryProject = vi.fn(async () => undefined)
-  const confirmDiscardChanges = vi.fn(async () => 'discard' as const)
   const api: DesktopAPI = {
     legacyPpt: vi.fn(async () => null),
     materials: vi.fn(async () => []),
@@ -143,7 +141,6 @@ function desktopHarness(): DesktopHarness {
     exportPdf: vi.fn(async () => null),
     setPreviewNetworkPolicy: vi.fn(async () => undefined),
     releasePreviewNetworkPolicy: vi.fn(async () => undefined),
-    confirmDiscardChanges,
     setDirtyState: vi.fn(async () => undefined),
     onRequestSave: vi.fn(() => () => undefined),
     onRequestSaveAndClose: vi.fn((handler) => {
@@ -153,7 +150,7 @@ function desktopHarness(): DesktopHarness {
     reportDiagnostic: vi.fn(async () => undefined),
     exportDiagnostics: vi.fn(async () => null),
   }
-  return { api, saveProject, clearRecoveryProject, confirmDiscardChanges, closeHandler: () => closeHandler }
+  return { api, saveProject, clearRecoveryProject, closeHandler: () => closeHandler }
 }
 
 interface HostWrite {
@@ -378,7 +375,6 @@ describe('App draft save transaction', () => {
 
   it('retains the previous main-owned document with its active draft when New switches projects', async () => {
     const harness = desktopHarness()
-    harness.confirmDiscardChanges.mockResolvedValue('cancel')
     window.desktopAPI = withAppDocuments(harness.api, host)
     render(<App />)
     await waitForAppDocuments()
@@ -392,7 +388,6 @@ describe('App draft save transaction', () => {
     // 2.0 keeps every main-owned session, so New discards nothing and never asks
     // (`tests/unit/useCourseProjectLifecycle.test.tsx:61`); the admitted draft
     // stays with the document the user was editing.
-    expect(harness.confirmDiscardChanges).not.toHaveBeenCalled()
     expect(textOf(formalProject(host, previous), layerItemId)).toBe('取消新建后仍在')
     expect(formalCourse(host, previous).dirty).toBe(true)
     expect(useEditorStore.getState().v9ContentEdit).toBeNull()
