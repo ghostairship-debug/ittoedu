@@ -1,4 +1,4 @@
-import { AArrowDown, AArrowUp, AlignCenter, AlignLeft, AlignRight, AlignHorizontalJustifyStart, Baseline, Bold, Highlighter, ImageIcon, Italic, PaintBucket, Pencil, Play, Repeat, Square, Underline, Unlock, VolumeX } from 'lucide-react'
+import { AArrowDown, AArrowUp, AlignCenter, AlignLeft, AlignRight, AlignHorizontalJustifyStart, Baseline, Bold, Highlighter, ImageIcon, Italic, PaintBucket, Pencil, Play, Repeat, Square, Type, Underline, Unlock, VolumeX } from 'lucide-react'
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { isStrokeOnlyShapeType } from '../../shared/contracts/native-v1'
 import { useCourseEditorActions } from '../documents/CourseEditorActionsContext'
@@ -14,6 +14,7 @@ import type { PropertiesItemView, PropertiesPatch } from '../ui/properties/Slide
 import { normalizePropertiesPatch, propertiesViewFromLayerItem } from '../ui/properties/propertiesItemView'
 import type { LayerItem } from '../../shared/courseProjectTypes'
 import { captureCourseObjectSelection, matchesCourseObjectState, usePinnedSelection, workbenchSelection } from './SelectionContextController'
+import { RuntimePageTextList } from './RuntimePageText'
 import './selectionContext.css'
 
 type ObjectProperties = Extract<PropertiesContext, { kind: 'slide-native' | 'multi-selection' }>
@@ -177,7 +178,10 @@ export function NativeSelectionContext({ documentId, revision, locationId, itemI
       ]
       content = <>
         <ObjectActions view={node} patch={patch} replaceImage={single.replaceImage} editText={single.editText} />
-        {node.type !== 'table' && node.type !== 'chart' && node.type !== 'input' && node.type !== 'external-component' && node.type !== 'runtime' && <QuickBarSeparator />}
+        {node.type === 'runtime' && <QuickBarPopoverButton label="页面文字" text="页面文字" icon={<Type size={14} />} popoverLabel="页面文字">
+          {() => <RuntimePageTextList itemId={node.id} onError={report} />}
+        </QuickBarPopoverButton>}
+        {node.type !== 'table' && node.type !== 'chart' && node.type !== 'input' && node.type !== 'external-component' && <QuickBarSeparator />}
         {ai}<QuickBarMenu items={items} />
       </>
     }

@@ -301,11 +301,11 @@ export function createRuntimeAuthoringActions(ports: RuntimeAuthoringPorts) {
     if (!row || row.item.kind !== 'runtime' || row.locked) return null
     // M15: host-recognised text is edited as a rule; keyed text keeps its content value.
     const override = session.lightEdit
-      ? { original: session.lightEdit.original, region: session.lightEdit.region }
+      ? { original: session.lightEdit.original, ...(session.lightEdit.region ? { region: session.lightEdit.region } : {}) }
       : undefined
     const initialValue = override
       ? row.item.runtime.content.overrides?.find(rule => (
-        rule.original === override.original && (rule.region ?? null) === override.region
+        rule.original === override.original && (rule.region ?? null) === (override.region ?? null)
       ))?.text ?? override.original
       : Object.hasOwn(row.item.runtime.content.values, session.key)
         ? row.item.runtime.content.values[session.key]

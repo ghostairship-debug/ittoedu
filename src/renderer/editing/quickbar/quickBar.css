@@ -29,3 +29,14 @@
 .selection-quick-bar__ai-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
 .selection-quick-bar__ai-actions button { padding: 4px 12px; }
 .selection-quick-bar__ai-target { color: #66758a; }
+
+/* M15 page-text list inside the quick bar popover: a white panel like the menu and AI card. */
+.selection-quick-bar .runtime-page-text { display: grid; gap: 8px; box-sizing: border-box; white-space: normal; width: min(340px, 80vw); padding: 10px; border: 1px solid #d8dee6; border-radius: 8px; background: #fff; box-shadow: 0 8px 24px rgb(0 0 0 / 18%); color: #17211d; font-size: 12px; }
+.selection-quick-bar .runtime-page-text__hint,
+.selection-quick-bar .runtime-page-text__empty { margin: 0; color: #66758a; }
+.selection-quick-bar .runtime-page-text__list { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.selection-quick-bar .runtime-page-text__row { display: grid; gap: 2px; }
+.selection-quick-bar .runtime-page-text__original { overflow: hidden; color: #66758a; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.selection-quick-bar .runtime-page-text__row input { box-sizing: border-box; width: 100%; padding: 5px 8px; border: 1px solid #c9d2dd; border-radius: 6px; background: #fff; color: #17211d; font: inherit; font-size: 13px; }
+.selection-quick-bar .runtime-page-text__row input:focus { outline: 2px solid #2563eb; outline-offset: 0; }
+.selection-quick-bar .runtime-page-text__row input:disabled { background: #f3f5f8; color: #66758a; }

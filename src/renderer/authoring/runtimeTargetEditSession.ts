@@ -29,8 +29,11 @@ export interface RuntimeTargetEditSession {
   readonly nodeId?: string
   readonly kind: RuntimeAuthoringTarget['kind']
   readonly key: string
-  /** M15: the host-recognised occurrence captured when the edit began. */
-  readonly lightEdit?: Readonly<{ original: string; region: string }>
+  /**
+   * M15: the host-recognised text captured when the edit began. Without a region the
+   * edit applies wherever the Runtime renders that text (the page-text list).
+   */
+  readonly lightEdit?: Readonly<{ original: string; region?: string }>
 }
 
 export type RuntimeTargetEditFailureReason =
