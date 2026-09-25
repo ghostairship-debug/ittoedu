@@ -27,13 +27,18 @@ import {
 
 import { sceneNodeToCourseLayerItem } from '@/shared/courseProjectModel'
 import { allocateCourseLayerOrder } from '@/renderer/course/globalLayerCommands'
+import {
+  connectCourseHost,
+  formalCourse,
+  openCourseOnHost,
+  redoSettled,
+  settleCourse,
+  undoSettled,
+  type CourseHost,
+} from '../helpers/triage-t2-course'
 
-function activeHistory() {
-  const state = useEditorStore.getState()
-  const backend = state.slideBackend
-  if (!backend) throw new Error('expected active slideBackend')
-  return backend.getSession().history
-}
+let host: CourseHost
+let documentId: string
 import { courseLayerItemToEditorCanvasNode } from '@/renderer/store/slideEditorProjection'
 import type { CourseProjectDocument, SlideSurfaceDocument } from '@/shared/courseProjectTypes'
 
@@ -86,8 +91,10 @@ function overlaps(
   return a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top
 }
 
-beforeEach(() => {
-  useEditorStore.getState().createNewProject()
+beforeEach(async () => {
+  const connected = await connectCourseHost()
+  host = connected.host
+  documentId = connected.documentId
   useEditorStore.getState().setActiveTab('elements')
 })
 
@@ -117,21 +124,22 @@ describe('batch media transactions', () => {
     expect([...index.values()][0]!.meta.id).toBe(first.id)
   })
 
-  it('adds a batch in one transaction, keeps the elements tab, and restores bytes on redo', () => {
+  it('adds a batch in one transaction, keeps the elements tab, and restores bytes on redo', async () => {
     const store = useEditorStore.getState()
     const items = [
       { meta: image('asset_a', 1600, 900), bytes: Uint8Array.from([1, 2, 3, 4]) },
       { meta: image('asset_b', 900, 1600), bytes: Uint8Array.from([5, 6, 7, 8]) },
       { meta: image('asset_c', 800, 600), bytes: Uint8Array.from([9, 10, 11, 12]) },
     ]
-    const historyBefore = activeHistory().past.length
+    const depthBefore = formalCourse(host, documentId).undoDepth
 
     const nodeIds = store.addImageNodes(items)
+    await settleCourse()
     let state = useEditorStore.getState()
     let nodes = selectActiveScene(state).nodes
 
     expect(nodeIds).toHaveLength(3)
-    expect(activeHistory().past).toHaveLength(historyBefore + 1)
+    expect(formalCourse(host, documentId).undoDepth).toBe(depthBefore + 1)
     expect(state.activeTab).toBe('elements')
     expect(selectSelectedNodeIds(state)).toEqual(nodeIds)
     expect(Object.keys(selectActiveCourseProjectDocument(state)!.assets)).toEqual([
@@ -151,27 +159,27 @@ describe('batch media transactions', () => {
       }
     }
 
-    store.undo()
+    await undoSettled(host, documentId)
     state = useEditorStore.getState()
     expect(selectActiveScene(state).nodes).toHaveLength(0)
     expect(selectActiveCourseProjectDocument(state)!.assets).toEqual({})
     expect(selectMediaAssetFiles(state)).toEqual({})
 
-    store.redo()
+    await redoSettled(host, documentId)
     state = useEditorStore.getState()
     nodes = selectActiveScene(state).nodes
     expect(nodes).toHaveLength(3)
     expect([...selectMediaAssetFiles(state).asset_a!]).toEqual([1, 2, 3, 4])
   })
 
-  it('adds a global image batch as one history transaction and one undo', () => {
+  it('adds a global image batch as one history transaction and one undo', async () => {
     const store = useEditorStore.getState()
     store.setEditingScope('global')
     const items = [
       { meta: image('global_batch_a', 800, 600), bytes: Uint8Array.from([1, 2, 3, 4]) },
       { meta: image('global_batch_b', 640, 480), bytes: Uint8Array.from([5, 6, 7, 8]) },
     ]
-    const historyBefore = activeHistory().past.length
+    const depthBefore = formalCourse(host, documentId).undoDepth
     const globalCountBefore = selectCandidateGlobalLayerItems(useEditorStore.getState())?.length ?? 0
 
     const result = store.importV9CandidateMedia({
@@ -179,15 +187,16 @@ describe('batch media transactions', () => {
       nativeType: 'image',
       mode: 'add',
     })
+    await settleCourse()
 
     expect(result.ok).toBe(true)
-    expect(activeHistory().past).toHaveLength(historyBefore + 1)
+    expect(formalCourse(host, documentId).undoDepth).toBe(depthBefore + 1)
     expect(selectCandidateGlobalLayerItems(useEditorStore.getState()))
       .toHaveLength(globalCountBefore + 2)
     expect(selectSelectedNodeIds(useEditorStore.getState()))
       .toEqual(result.placedLayerItemIds)
 
-    store.undo()
+    await undoSettled(host, documentId)
     expect(selectCandidateGlobalLayerItems(useEditorStore.getState()))
       .toHaveLength(globalCountBefore)
     expect(selectActiveCourseProjectDocument(useEditorStore.getState())!.assets)
@@ -195,22 +204,23 @@ describe('batch media transactions', () => {
     expect(selectMediaAssetFiles(useEditorStore.getState())).toEqual({})
   })
 
-  it('imports a media-library batch without creating nodes and undoes it once', () => {
+  it('imports a media-library batch without creating nodes and undoes it once', async () => {
     const store = useEditorStore.getState()
     store.importAssets([
       { meta: image('asset_library_a', 800, 600), bytes: Uint8Array.from([1, 1, 1, 1]) },
       { meta: image('asset_library_b', 640, 480), bytes: Uint8Array.from([2, 2, 2, 2]) },
     ])
+    await settleCourse()
 
     expect(selectActiveScene(useEditorStore.getState()).nodes).toHaveLength(0)
     expect(Object.keys(selectActiveCourseProjectDocument(useEditorStore.getState())!.assets)).toHaveLength(2)
-    expect(activeHistory().past).toHaveLength(1)
+    expect(formalCourse(host, documentId).undoDepth).toBe(1)
 
-    store.undo()
+    await undoSettled(host, documentId)
     expect(selectActiveCourseProjectDocument(useEditorStore.getState())!.assets).toEqual({})
     expect(selectMediaAssetFiles(useEditorStore.getState())).toEqual({})
 
-    store.redo()
+    await redoSettled(host, documentId)
     expect(Object.keys(selectActiveCourseProjectDocument(useEditorStore.getState())!.assets)).toEqual([
       'asset_library_a',
       'asset_library_b',
@@ -220,7 +230,7 @@ describe('batch media transactions', () => {
     expect(selectActiveScene(useEditorStore.getState()).nodes).toHaveLength(0)
   })
 
-  it('routes more than twelve valid placements to the library without creating nodes', () => {
+  it('routes more than twelve valid placements to the library without creating nodes', async () => {
     const items = Array.from({ length: MAX_BATCH_CANVAS_ITEMS + 1 }, (_, index) => ({
       meta: image(`asset_overflow_${index}`, 800, 600),
       bytes: Uint8Array.from([index, index, index, index]),
@@ -235,12 +245,13 @@ describe('batch media transactions', () => {
     if (plan.destination === 'library') {
       useEditorStore.getState().importAssets(items)
     }
+    await settleCourse()
 
     const state = useEditorStore.getState()
     expect(selectActiveScene(state).nodes).toHaveLength(0)
     expect(Object.keys(selectActiveCourseProjectDocument(state)!.assets)).toHaveLength(items.length)
     expect(selectSelectedNodeIds(state)).toEqual([])
-    expect(activeHistory().past).toHaveLength(1)
+    expect(formalCourse(host, documentId).undoDepth).toBe(1)
   })
 
 function firstSlideScene(project: CourseProjectDocument) {
@@ -251,14 +262,16 @@ function firstSlideScene(project: CourseProjectDocument) {
   return surface.scenes[0]
 }
 
-  it('falls back to the library instead of reporting false placement near the node limit', () => {
+  it('falls back to the library instead of reporting false placement near the node limit', async () => {
     const project = createBlankCourseProject()
     const scene = firstSlideScene(project)
     scene.layerItems = Array.from({ length: MAX_SCENE_NODES - 1 }, (_, index) => (
       sceneNodeToCourseLayerItem(createTextNode(), index + 1)
     ))
+    const connected = await openCourseOnHost(project)
+    host = connected.host
+    documentId = connected.documentId
     const store = useEditorStore.getState()
-    store.loadCourseProject(project, null)
     store.setActiveTab('elements')
     const items = [
       { meta: image('asset_capacity_a', 800, 600), bytes: Uint8Array.from([1, 1, 1, 1]) },
@@ -278,7 +291,10 @@ function firstSlideScene(project: CourseProjectDocument) {
       importIntoLibrary: (additions) => store.importAssets(additions),
     })
 
+    // The capacity feedback is raised synchronously; the asynchronous library
+    // commit confirmation clears it again, so read it before draining.
     const state = useEditorStore.getState()
+    expect(state.errorMessage).toContain(`${MAX_SCENE_NODES} 个节点上限`)
     expect(result).toMatchObject({
       destination: 'library',
       completedCount: 2,
@@ -286,13 +302,14 @@ function firstSlideScene(project: CourseProjectDocument) {
       libraryFallback: 'scene-capacity',
     })
     expect(selectActiveScene(state).nodes).toHaveLength(MAX_SCENE_NODES - 1)
-    expect(Object.keys(selectActiveCourseProjectDocument(state)!.assets)).toEqual([
+    expect(state.activeTab).toBe('elements')
+    await settleCourse()
+
+    expect(Object.keys(selectActiveCourseProjectDocument(useEditorStore.getState())!.assets)).toEqual([
       'asset_capacity_a',
       'asset_capacity_b',
     ])
-    expect(activeHistory().past).toHaveLength(1)
-    expect(state.errorMessage).toContain(`${MAX_SCENE_NODES} 个节点上限`)
-    expect(state.activeTab).toBe('elements')
+    expect(formalCourse(host, documentId).undoDepth).toBe(1)
   })
 
   it('lays mixed aspect ratios deterministically without overlap', () => {
@@ -337,10 +354,10 @@ describe('continuous insertion context', () => {
     expect(useEditorStore.getState().activeTab).toBe('properties')
   })
 
-  it('keeps the insertion tab when creating a missing teacher controller and opens properties when restoring it', () => {
+  it('keeps the insertion tab when creating a missing teacher controller and opens properties when restoring it', async () => {
     const project = createBlankCourseProject({ includeDefaultController: false, controls: 'none' })
+    await openCourseOnHost(project)
     const store = useEditorStore.getState()
-    store.loadCourseProject(project, null)
     store.setActiveTab('elements')
     store.ensureTeacherController()
 
