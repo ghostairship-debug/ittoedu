@@ -218,7 +218,7 @@
       "targetState": "Package/default-prop services independent of Surface carrier placement.",
       "entrypoints": [
         "src/renderer/components/componentPackageStore.ts",
-        "src/renderer/components/importComponentPackage.ts"
+        "src/core/drivers/codecs/importComponentPackage.ts"
       ],
       "allowedDependencies": [
         "src/shared",

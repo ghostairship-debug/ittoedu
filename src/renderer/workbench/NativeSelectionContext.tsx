@@ -34,6 +34,8 @@ function matchesFlowOverlay(context: PropertiesContext, itemIds: readonly string
 }
 
 const FONT_SIZE_MIN = 8, FONT_SIZE_MAX = 400
+/** Canvas selections draw a rotation handle about 25px above the frame; the bar stays clear of it. */
+const ROTATION_HANDLE_CLEARANCE = 34
 export function stepFontSize(size: number, direction: 1 | -1): number {
   const step = size < 24 ? 2 : size < 72 ? 4 : 8
   return Math.max(FONT_SIZE_MIN, Math.min(FONT_SIZE_MAX, Math.round(size) + direction * step))
@@ -212,7 +214,7 @@ export function NativeSelectionContext({ documentId, revision, locationId, itemI
     }} />}
     {pinnedBoxes.map((box, index) => <span key={index} aria-hidden="true" data-pinned-object="true" className="native-selection-context__pinned"
       style={{ left: box.left, top: box.top, width: box.width, height: box.height, transform: box.rotation ? `rotate(${box.rotation}deg)` : undefined }} />)}
-    {content && <SelectionQuickBar label="选中对象快捷工具" anchor={anchor} bounds={view} suspended={gesture || textEditing} selectionKey={`${documentId}:${locationId}:${stateId}:${ids}`}>
+    {content && <SelectionQuickBar label="选中对象快捷工具" anchor={anchor} bounds={view} suspended={gesture || textEditing} selectionKey={`${documentId}:${locationId}:${stateId}:${ids}`} aboveOffset={ROTATION_HANDLE_CLEARANCE}>
       {content}
       {notice && <span role="alert" className="selection-quick-bar__notice" title={notice}>{notice}</span>}
     </SelectionQuickBar>}

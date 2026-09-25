@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs'
+import { transform } from 'lightningcss'
 import { describe, expect, it } from 'vitest'
 
 // The light toolbar sits in an auto grid row above the editor. Any height change during a selection (for example
@@ -16,5 +17,13 @@ describe('course light toolbar row', () => {
   it('has no selection row left to grow or collapse', () => {
     expect(css).not.toMatch(/course-light-tools__selection/)
     expect(css).not.toMatch(/\.course-light-tools[^{]*\{[^}]*flex-wrap:\s*wrap/)
+  })
+
+  // The production build minifies CSS strictly; jsdom tests never parse it, so a stray brace only failed the build.
+  it('keeps the light editing stylesheets valid for the production minifier', () => {
+    for (const file of ['src/renderer/documents/courseEditorChrome.css', 'src/renderer/editing/quickbar/quickBar.css',
+      'src/renderer/editing/color/colorSwatch.css', 'src/renderer/workbench/selectionContext.css']) {
+      expect(() => transform({ filename: file, code: readFileSync(file), minify: true }), file).not.toThrow()
+    }
   })
 })
