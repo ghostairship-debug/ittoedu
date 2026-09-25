@@ -65,6 +65,9 @@ it('M03 Flow insertion focus request only focuses the new selected paragraph in 
   const mounted = render(createElement(FlowHarness))
   const editor = factory.mock.results.at(-1)!.value as ReturnType<typeof editorSession.createLayoutEditor>
   act(() => store().addTextNode())
+  // Same order as App: the host confirms the insertion before focus is requested,
+  // so the request carries the committed revision rather than the optimistic one.
+  await act(async () => { await store().drainCourseDocument() })
   const session = store().flowSession!
   const blockId = session.selection.selectedBlockId!
   const revision = session.history.present.revision
