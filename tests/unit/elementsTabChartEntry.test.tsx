@@ -7,10 +7,7 @@ import {
 } from '../../src/renderer/store/editorStore'
 import { courseProjectDocumentSchema } from '../../src/shared/courseProjectSchema'
 import { COURSE_PROJECT_SCHEMA_VERSION } from '../../src/shared/courseProjectTypes'
-import {
-  createSlideAuthoringBackend,
-  openSlideAuthoringSession,
-} from '../../src/renderer/course/slideAuthoringBackend'
+import { connectAssignedCourse, openAssignedCourse, settleAssignedCourse } from '../helpers/triage-t5-courseHost'
 
 const NOW = '2026-09-05T00:00:00.000Z'
 
@@ -89,28 +86,16 @@ function v9EmptySlideFixture() {
   })
 }
 
-function injectCandidate() {
-  const backend = createSlideAuthoringBackend(
-    openSlideAuthoringSession(v9EmptySlideFixture()),
-  )
-  useEditorStore.getState().injectV9SlideCandidateBackend(backend)
-  return backend
-}
-
 describe('ElementsTab Chart Entry', () => {
-  beforeEach(() => {
-    injectCandidate()
-    useEditorStore.setState({
-      flowSession: null,
-      spatialSession: null,
-    })
+  beforeEach(async () => {
+    await openAssignedCourse(v9EmptySlideFixture(), { 'asset-photo': new Uint8Array(8) })
   })
 
   afterEach(() => {
     cleanup()
   })
 
-  it('renders single chart button in Slide scene, opens picker on click, and inserts selected chart', () => {
+  it('renders single chart button in Slide scene, opens picker on click, and inserts selected chart', async () => {
     render(<ElementsTab onAddImage={() => undefined} />)
 
     // Single add-chart button exists
@@ -130,6 +115,7 @@ describe('ElementsTab Chart Entry', () => {
 
     // Click bar chart -> inserts node and closes picker
     fireEvent.click(screen.getByTestId('add-chart-bar'))
+    await settleAssignedCourse()
     expect(screen.queryByTestId('chart-picker-panel')).not.toBeInTheDocument()
 
     const doc = selectSlideAuthoringDocument(useEditorStore.getState())
@@ -164,12 +150,14 @@ describe('ElementsTab Chart Entry', () => {
     expect(finalItemCount).toBe(initialItemCount)
   })
 
-  it('offers the chart picker in Flow and creates a real body chart', () => {
-    useEditorStore.getState().createNewFlowProject()
+  it('offers the chart picker in Flow and creates a real body chart', async () => {
+    await connectAssignedCourse('flow')
     render(<ElementsTab onAddImage={() => undefined} />)
     fireEvent.click(screen.getByTestId('add-chart'))
     fireEvent.click(screen.getByTestId('add-chart-bar'))
-    const session = useEditorStore.getState().flowSession!
+    await settleAssignedCourse()
+    const session = useEditorStore.getState().flowSession
+    if (!session) throw new Error('缺少 Flow session')
     const surface = session.history.present.surfaces.find(surface => surface.type === 'flow')!
     expect(surface.blocks).toContainEqual(expect.objectContaining({ type: 'chart', chart: expect.objectContaining({ chartType: 'bar' }) }))
     expect(screen.queryByTestId('add-chart-disabled')).not.toBeInTheDocument()
