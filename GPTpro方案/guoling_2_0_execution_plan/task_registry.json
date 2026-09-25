@@ -1077,7 +1077,7 @@
     },
     {
       "id": "M21",
-      "title": "轻编辑外壳：单行顶栏、统一选中快捷条与常用色板",
+      "title": "轻编辑外壳与第一档：固定顶栏、统一快捷条、右键菜单与常用编辑",
       "phase": "M",
       "release": "2.0",
       "required": true,
@@ -1094,7 +1094,8 @@
         "src/renderer/document/SharedDocumentEditor.tsx",
         "src/renderer/ui/ColorInput.tsx",
         "src/renderer/ui/workspaces/SlideLocationWorkspace.tsx",
-        "src/renderer/documents/useContentEditorMode.ts"
+        "src/renderer/documents/useContentEditorMode.ts",
+        "src/renderer/ui/BottomSceneNavigator.tsx"
       ],
       "sources": [
         "R64",
@@ -1107,7 +1108,35 @@
         "M21-T01",
         "M21-T02",
         "M21-T03",
-        "M21-T04"
+        "M21-T04",
+        "M21-T05",
+        "M21-T06",
+        "M21-T07"
+      ]
+    },
+    {
+      "id": "M22",
+      "title": "轻编辑第二档：常用属性与简单互动",
+      "phase": "M",
+      "release": "2.0",
+      "required": true,
+      "dependencies": [
+        "M21",
+        "M16"
+      ],
+      "document": "mid_term/M22.md",
+      "status": "planned",
+      "existing_code": [
+        "src/renderer/documents/CourseLightToolbar.tsx",
+        "src/renderer/workbench/NativeSelectionContext.tsx"
+      ],
+      "sources": [
+        "R64",
+        "R65"
+      ],
+      "acceptance_ids": [
+        "M22-T01",
+        "M22-T02"
       ]
     },
     {
@@ -1181,7 +1210,9 @@
         "M16-T01",
         "M16-T02",
         "M16-T03",
-        "M16-T04"
+        "M16-T04",
+        "M16-T05",
+        "M16-T06"
       ]
     },
     {
@@ -1218,7 +1249,7 @@
     },
     {
       "id": "M19",
-      "title": "Slide 有限画布尺寸参数化",
+      "title": "有限画布参数化与三视图统一",
       "phase": "M",
       "release": "2.0",
       "required": true,
@@ -1230,7 +1261,10 @@
       "existing_code": [
         "src/shared/constants.ts",
         "src/shared/contracts/course-project-v9/types.ts",
-        "src/renderer/authoring/stageViewportTransform.ts"
+        "src/renderer/authoring/stageViewportTransform.ts",
+        "src/player/playbackViewSession.ts",
+        "src/player/surfaces/publishedStageFit.ts",
+        "src/renderer/ui/coursePlayerTryRun.ts"
       ],
       "sources": [
         "R58",
@@ -1240,7 +1274,10 @@
       "acceptance_ids": [
         "M19-T01",
         "M19-T02",
-        "M19-T03"
+        "M19-T03",
+        "M19-T04",
+        "M19-T05",
+        "M19-T06"
       ]
     },
     {
@@ -1406,12 +1443,12 @@
     },
     {
       "id": "B14",
-      "title": "轻编辑外壳与有限画布",
+      "title": "有限画布、三视图统一与轻编辑第一档",
       "tasks": [
-        "M21",
-        "M19"
+        "M19",
+        "M21"
       ],
-      "exit": "顶栏单行固定，选择不再引起画布跳变；统一选中快捷条与常用色板；只保留右上角“编辑器”入口；Slide 画布尺寸按课件参数化，命中、选框、拖拽与快捷条定位共用同一套换算。"
+      "exit": "M19 先行：Slide 画布尺寸按课件参数化，命中、选框、拖拽与快捷条定位共用同一套换算，编辑、试运行、整课预览与导出共用页面框与适配规则；M21 随后：顶栏单行固定、选择不再引起画布跳变，统一选中快捷条与常用色板，只保留右上角“在编辑器中打开”入口，并分两期补齐右键菜单、页面管理、预览导出与导入 PPT 入口和常用对象编辑。"
     },
     {
       "id": "B15",
@@ -1423,11 +1460,12 @@
     },
     {
       "id": "B16",
-      "title": "Flow 混合画布恢复",
+      "title": "Flow 混合画布与轻编辑第二档",
       "tasks": [
-        "M16"
+        "M16",
+        "M22"
       ],
-      "exit": "Flow 保留 Markdown/文档正文；自由图层默认随段落、可选固定纸面（含背景/水印）；“文本框”插入原生文字；正文可承载页面 Runtime；复用 B14/B15 的快捷条与 AI 卡。"
+      "exit": "Flow 保留 Markdown/文档正文；自由图层默认随段落、可选固定纸面（含背景/水印）；“文本框”插入原生文字；正文可承载页面 Runtime；复用 B14/B15 的快捷条与 AI 卡；M22 在 M16 后补齐轻编辑第二档（透明度、字体、行距、页面背景、对齐到页面、音频与点击跳页）。"
     },
     {
       "id": "B17",
@@ -1446,7 +1484,7 @@
       "exit": "教学设计与理想呈现不读取编辑器能力；理想 HTML 后做一次薄 Representation Planning 并机械执行；在同一次 REL-T11 真实端到端运行中核对，最后由 Owner 做 M14-T05。"
     }
   ],
-  "plan_revision": "2.2",
+  "plan_revision": "2.3",
   "removed_acceptance": [
     {
       "id": "S01-T03",
