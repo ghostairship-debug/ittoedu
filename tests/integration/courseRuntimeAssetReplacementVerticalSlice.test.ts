@@ -1,10 +1,16 @@
 import { buildPublishedFixture as buildPublishedCourseV2Payload } from '../fixtures/teacherController'
-import { isAuthoringHistoryTransactionFrame } from '../../src/renderer/authoring/resourceAwareAuthoringHistory'
 import { beforeEach, describe, expect, it } from 'vitest'
 import type { RuntimeTargetEditSession } from '@/renderer/authoring/runtimeTargetEditSession'
-import { isFlowEditorTransactionFrame } from '@/renderer/course/flowEditorSlice'
-
-import { isSpatialAuthoringTransactionFrame } from '@/renderer/course/spatialAuthoringHistory'
+import {
+  bootTriageCourseHost,
+  formalCourse,
+  projectBody,
+  projectCourse,
+  redoCourse,
+  settleCourse,
+  undoCourse,
+  type TriageCourseHost,
+} from '../helpers/triage-t7-courseHost'
 
 import {
   createCourseProjectArchive,
@@ -336,14 +342,22 @@ function runtimeFixture(
   }
 }
 
-function loadRuntimeFixture(
+let host: TriageCourseHost
+
+/**
+ * 2.0 owns one DocumentSession per document in the Electron main process, so the
+ * fixture is opened through the real document host: the renderer Store only ever
+ * projects the formal document that `projectCourse` creates and commits.
+ */
+async function loadRuntimeFixture(
   kind: FixtureKind,
   options?: Parameters<typeof runtimeFixture>[1],
-): RuntimeStoreFixture {
+): Promise<RuntimeStoreFixture> {
   const source = runtimeFixture(kind, options)
-  useEditorStore.getState().loadCourseProject(source.project, null, source.assetFiles, {})
+  await projectCourse(host, source.project, source.assetFiles, {})
   useEditorStore.getState().activateCourseLocation(source.locationId)
   if (source.owner === 'global') useEditorStore.getState().setEditingScope('global')
+  await settleCourse()
   return source
 }
 
@@ -367,19 +381,27 @@ function activeHistory() {
   throw new Error('Expected an active V9 authoring history')
 }
 
-function activeTransactionAssetIds(): string[] {
-  const active = activeHistory()
-  const frame = active.history.past.at(-1)
-  const isTransaction = active.kind === 'slide'
-    ? Boolean(frame && isAuthoringHistoryTransactionFrame(frame))
-    : active.kind === 'flow'
-      ? Boolean(frame && isFlowEditorTransactionFrame(frame))
-      : Boolean(frame && isSpatialAuthoringTransactionFrame(frame))
-  expect(isTransaction).toBe(true)
-  if (!frame || !('kind' in frame) || frame.kind !== 'editor-transaction') {
-    throw new Error('Expected the newest history entry to be an editor transaction')
-  }
-  return frame.resourceChanges.assetFileChanges?.map((change) => change.assetId) ?? []
+/**
+ * 2.0 renderer history is permanently empty: `CourseDocumentView` builds every
+ * Surface session with `past: []`. The one atomic transaction is therefore read
+ * from the main-owned DocumentSession, whose snapshot exposes the undo depth and
+ * the committed model. "Exactly one new history entry whose asset-file change set
+ * is the replaced asset" becomes "exactly one new undo step whose committed
+ * resource delta is the replaced asset".
+ */
+function formalAssetIds(): string[] {
+  const snapshot = formalCourse(host)
+  if (snapshot.model.kind !== 'course-v9') throw new Error('Expected a course document')
+  return Object.keys(snapshot.model.resources.assets).sort()
+}
+
+function formalAssetIdDelta(before: readonly string[]): string[] {
+  const beforeIds = new Set(before)
+  const afterIds = new Set(formalAssetIds())
+  return [
+    ...[...afterIds].filter((assetId) => !beforeIds.has(assetId)),
+    ...[...beforeIds].filter((assetId) => !afterIds.has(assetId)),
+  ].sort()
 }
 
 function resourceSnapshotDepths() {
@@ -500,6 +522,8 @@ function selectionSnapshot() {
 function authoritativeWriteSnapshot() {
   const state = useEditorStore.getState()
   const active = activeHistory()
+  const formal = formalCourse(host)
+  if (formal.model.kind !== 'course-v9') throw new Error('Expected a course document')
   return {
     project: structuredClone(activeProject()),
     derivedProject: structuredClone(selectActiveCourseProjectDocument(state)!),
@@ -519,10 +543,21 @@ function authoritativeWriteSnapshot() {
     dirty: state.dirty,
     statusMessage: state.statusMessage,
     errorMessage: state.errorMessage,
+    // The only writer/History owner in 2.0 is the main-owned DocumentSession.
+    formalProject: structuredClone(formal.model.project),
+    formalAssets: byteMap(formal.model.resources.assets),
+    formalComponents: Object.fromEntries(
+      Object.entries(formal.model.resources.components)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([packageId, files]) => [packageId, byteMap(files)]),
+    ),
+    formalUndoDepth: formal.undoDepth,
+    formalRedoDepth: formal.redoDepth,
   }
 }
 
-beforeEach(() => {
+beforeEach(async () => {
+  host = await bootTriageCourseHost()
   useEditorStore.getState().createNewProject()
 })
 
@@ -536,16 +571,17 @@ describe('ARCH-2 Runtime asset replacement Store vertical slice', () => {
     ['spatial-surface', 'spatial'] as const,
     ['spatial-world', 'spatial'] as const,
     ['spatial-global', 'spatial'] as const,
-  ])('commits one atomic asset delta for %s through the current %s history', (
+  ])('commits one atomic asset delta for %s through the current %s history', async (
     fixtureKind,
     expectedHistoryKind: ActiveHistoryKind,
   ) => {
-    const source = loadRuntimeFixture(fixtureKind)
+    const source = await loadRuntimeFixture(fixtureKind)
     const target = targetForStore(source)
     const replacement = image(`runtime-${fixtureKind}-replacement`, [11, 12, 13, 14])
     const beforeProject = structuredClone(activeProject())
     const beforeFiles = byteMap(selectMediaAssetFiles(useEditorStore.getState()))
-    const beforeHistoryDepth = activeHistory().history.past.length
+    const beforeHistoryDepth = formalCourse(host).undoDepth
+    const beforeFormalAssetIds = formalAssetIds()
     const beforeSnapshotDepths = resourceSnapshotDepths()
     const beforeSelection = selectionSnapshot()
 
@@ -567,6 +603,7 @@ describe('ARCH-2 Runtime asset replacement Store vertical slice', () => {
         assetDisposition: 'added',
       },
     })
+    await settleCourse()
 
     const committedProject = structuredClone(activeProject())
     const committedFiles = selectMediaAssetFiles(useEditorStore.getState())
@@ -576,13 +613,19 @@ describe('ARCH-2 Runtime asset replacement Store vertical slice', () => {
     expect(committedFiles[replacement.meta.id]).toEqual(replacement.bytes)
     expect(committedProject.assets[OLD_ASSET_ID]).toEqual(beforeProject.assets[OLD_ASSET_ID])
     expect(committedFiles[OLD_ASSET_ID]).toEqual(source.assetFiles[OLD_ASSET_ID])
-    expect(activeHistory().history.past).toHaveLength(beforeHistoryDepth + 1)
-    expect(activeTransactionAssetIds()).toEqual([replacement.meta.id])
+    // 2.0 keeps no renderer history, so the legacy depth stays truthfully empty
+    // while the single new formal undo step carries the atomic asset delta.
+    expect(activeHistory().history.past).toHaveLength(0)
+    expect(formalCourse(host).undoDepth).toBe(beforeHistoryDepth + 1)
+    expect(formalAssetIdDelta(beforeFormalAssetIds)).toEqual([replacement.meta.id])
     expect(resourceSnapshotDepths()).toEqual(beforeSnapshotDepths)
     expect(selectionSnapshot()).toEqual(beforeSelection)
 
-    useEditorStore.getState().undo()
-    expect(activeProject()).toEqual(beforeProject)
+    await undoCourse(host)
+    expect(projectBody(activeProject())).toEqual(projectBody(beforeProject))
+    // Undo is itself a new formal operation, so revision must advance, not rewind.
+    expect(activeProject().revision).toBe(committedProject.revision + 1)
+    expect(formalCourse(host).undoDepth).toBe(beforeHistoryDepth)
     expect(runtimeAssetId(activeProject(), source.itemId)).toBe(OLD_ASSET_ID)
     expect(activeProject().assets[replacement.meta.id]).toBeUndefined()
     expect(selectMediaAssetFiles(useEditorStore.getState())[replacement.meta.id])
@@ -590,8 +633,10 @@ describe('ARCH-2 Runtime asset replacement Store vertical slice', () => {
     expect(byteMap(selectMediaAssetFiles(useEditorStore.getState()))).toEqual(beforeFiles)
     expect(resourceSnapshotDepths()).toEqual(beforeSnapshotDepths)
 
-    useEditorStore.getState().redo()
-    expect(activeProject()).toEqual(committedProject)
+    await redoCourse(host)
+    expect(projectBody(activeProject())).toEqual(projectBody(committedProject))
+    expect(activeProject().revision).toBe(committedProject.revision + 2)
+    expect(formalCourse(host).undoDepth).toBe(beforeHistoryDepth + 1)
     expect(runtimeAssetId(activeProject(), source.itemId)).toBe(replacement.meta.id)
     expect(selectMediaAssetFiles(useEditorStore.getState())[replacement.meta.id])
       .toEqual(replacement.bytes)
@@ -605,8 +650,8 @@ describe('ARCH-2 Runtime asset replacement Store vertical slice', () => {
     'spatial-surface',
     'spatial-world',
     'spatial-global',
-  ] as const)('does not claim a visual Runtime capture target for %s', (fixtureKind) => {
-    const source = loadRuntimeFixture(fixtureKind)
+  ] as const)('does not claim a visual Runtime capture target for %s', async (fixtureKind) => {
+    const source = await loadRuntimeFixture(fixtureKind)
     expect(useEditorStore.getState().captureRuntimeAssetReplacementTarget(
       discoverySession(source),
     )).toBeNull()
@@ -615,8 +660,8 @@ describe('ARCH-2 Runtime asset replacement Store vertical slice', () => {
   it.each([
     'slide-scene',
     'global',
-  ] as const)('maps %s discovery to the canonical first carrier Runtime and ignores host targetId', (fixtureKind) => {
-    const source = loadRuntimeFixture(fixtureKind, { multiple: true })
+  ] as const)('maps %s discovery to the canonical first carrier Runtime and ignores host targetId', async (fixtureKind) => {
+    const source = await loadRuntimeFixture(fixtureKind, { multiple: true })
     if (!source.secondaryItemId) throw new Error('Expected the secondary Runtime')
     const secondaryBefore = structuredClone(runtimeItem(
       activeProject(),
@@ -654,8 +699,8 @@ describe('ARCH-2 Runtime asset replacement Store vertical slice', () => {
     })
   })
 
-  it('allows a state switch while enforcing the effective lock of the captured state', () => {
-    const source = loadRuntimeFixture('slide-scene', {
+  it('allows a state switch while enforcing the effective lock of the captured state', async () => {
+    const source = await loadRuntimeFixture('slide-scene', {
       stateLocks: 'a-unlocked-b-locked',
     })
     useEditorStore.getState().setActivePresentationState('state-a')
@@ -675,9 +720,10 @@ describe('ARCH-2 Runtime asset replacement Store vertical slice', () => {
       replacement.meta,
       replacement.bytes,
     )).toMatchObject({ ok: true, status: 'replaced' })
+    await settleCourse()
     expect(runtimeAssetId(activeProject(), source.itemId)).toBe(replacement.meta.id)
 
-    const lockedSource = loadRuntimeFixture('slide-scene', {
+    const lockedSource = await loadRuntimeFixture('slide-scene', {
       stateLocks: 'a-locked-b-unlocked',
     })
     useEditorStore.getState().setActivePresentationState('state-a')
@@ -686,8 +732,8 @@ describe('ARCH-2 Runtime asset replacement Store vertical slice', () => {
     )).toBeNull()
   })
 
-  it('keeps no-op, conflict, project mismatch, stale revision and item deletion at zero writes', () => {
-    let source = loadRuntimeFixture('slide-scene')
+  it('keeps no-op, conflict, project mismatch, stale revision and item deletion at zero writes', async () => {
+    let source = await loadRuntimeFixture('slide-scene')
     let target = captureProjectedRuntimeTarget(source)
     const oldMeta = structuredClone(activeProject().assets[OLD_ASSET_ID])
     const oldBytes = selectMediaAssetFiles(useEditorStore.getState())[OLD_ASSET_ID]?.slice()
@@ -703,6 +749,7 @@ describe('ARCH-2 Runtime asset replacement Store vertical slice', () => {
       status: 'unchanged',
       feedback: { assetDisposition: 'unchanged' },
     })
+    await settleCourse()
     expect(authoritativeWriteSnapshot()).toEqual(before)
 
     before = authoritativeWriteSnapshot()
@@ -711,6 +758,7 @@ describe('ARCH-2 Runtime asset replacement Store vertical slice', () => {
       { ...oldMeta, filename: 'same-id-conflict.png' },
       oldBytes,
     )).toMatchObject({ ok: false, code: 'asset-conflict' })
+    await settleCourse()
     expect(authoritativeWriteSnapshot()).toEqual(before)
 
     before = authoritativeWriteSnapshot()
@@ -722,9 +770,11 @@ describe('ARCH-2 Runtime asset replacement Store vertical slice', () => {
       },
     }, image('runtime-wrong-project').meta, image('runtime-wrong-project').bytes))
       .toMatchObject({ ok: false, code: 'project-mismatch' })
+    await settleCourse()
     expect(authoritativeWriteSnapshot()).toEqual(before)
 
     useEditorStore.getState().renameProject('Runtime intervening edit')
+    await settleCourse()
     before = authoritativeWriteSnapshot()
     const staleReplacement = image('runtime-stale-revision', [41, 42, 43])
     expect(useEditorStore.getState().replaceRuntimeAssetAtTarget(
@@ -732,12 +782,14 @@ describe('ARCH-2 Runtime asset replacement Store vertical slice', () => {
       staleReplacement.meta,
       staleReplacement.bytes,
     )).toMatchObject({ ok: false, code: 'revision-conflict' })
+    await settleCourse()
     expect(authoritativeWriteSnapshot()).toEqual(before)
 
-    source = loadRuntimeFixture('slide-scene')
+    source = await loadRuntimeFixture('slide-scene')
     useEditorStore.getState().setActivePresentationState(null)
     target = captureProjectedRuntimeTarget(source)
     useEditorStore.getState().deleteNode(source.itemId)
+    await settleCourse()
     expect(() => runtimeItem(activeProject(), source.itemId)).toThrow(/Missing Runtime/)
     before = authoritativeWriteSnapshot()
     const deletedReplacement = image('runtime-deleted-item', [51, 52, 53])
@@ -746,11 +798,12 @@ describe('ARCH-2 Runtime asset replacement Store vertical slice', () => {
       deletedReplacement.meta,
       deletedReplacement.bytes,
     )).toMatchObject({ ok: false, code: 'item-missing' })
+    await settleCourse()
     expect(authoritativeWriteSnapshot()).toEqual(before)
   })
 
-  it('survives archive reopen and keeps Published V2 reads side-effect free', () => {
-    const source = loadRuntimeFixture('spatial-world')
+  it('survives archive reopen and keeps Published V2 reads side-effect free', async () => {
+    const source = await loadRuntimeFixture('spatial-world')
     const target = captureDirectCarrierTarget(source)
     const replacement = image('runtime-archive-replacement', [61, 62, 63, 64])
     expect(useEditorStore.getState().replaceRuntimeAssetAtTarget(
@@ -758,6 +811,7 @@ describe('ARCH-2 Runtime asset replacement Store vertical slice', () => {
       replacement.meta,
       replacement.bytes,
     )).toMatchObject({ ok: true, status: 'replaced' })
+    await settleCourse()
 
     const beforeReadEndpoints = authoritativeWriteSnapshot()
     const archive = createCourseProjectArchive({

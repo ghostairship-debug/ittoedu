@@ -18,6 +18,13 @@ import {
   useEditorStore,
 } from '../../src/renderer/store/editorStore'
 import { readCourseProjectV9FixtureArchive } from '../fixtures/course-project-v9'
+import {
+  bootTriageCourseHost,
+  formalCourse,
+  projectCourse,
+  settleCourse,
+  type TriageCourseHost,
+} from '../helpers/triage-t7-courseHost'
 
 const publishedAuthoringHarness = vi.hoisted(() => ({
   latestRevision: -1,
@@ -163,15 +170,23 @@ function fixture(): {
   }
 }
 
-function loadFixture(): void {
+let host: TriageCourseHost
+
+/**
+ * 2.0 owns one DocumentSession per document in the Electron main process, so the
+ * fixture is opened through the real document host: the renderer Store only ever
+ * projects the formal document that `projectCourse` creates and commits.
+ */
+async function loadFixture(): Promise<void> {
   const source = fixture()
-  useEditorStore.getState().loadCourseProject(
+  await projectCourse(
+    host,
     source.project,
-    null,
     source.assetFiles,
     componentPackagesFromArchive(source.project, source.componentFiles),
   )
   useEditorStore.getState().activateCourseLocation(FIRST_LOCATION_ID)
+  await settleCourse()
 }
 
 function activeProject(): CourseProjectDocument {
@@ -210,7 +225,11 @@ function persistentSnapshot(): PersistentSnapshot {
         [...bytes],
       ]),
     ),
-    activeHistoryDepth: state.slideBackend.getSession().history.past.length,
+    // 2.0 keeps no renderer history: `getSession().history.past` is permanently
+    // empty and the one atomic frame lives in the main-owned DocumentSession.
+    activeHistoryDepth: formalCourse(host).undoDepth,
+    // Legacy compatibility stacks stay truthfully empty; only the formal
+    // document may gain resources.
     sidecarPastDepth: state.courseAssetSidecarPast.length,
     sidecarFutureDepth: state.courseAssetSidecarFuture.length,
   })
@@ -315,7 +334,7 @@ function expectBypassImportUnused(spies: ReturnType<typeof installWriteSpies>) {
   expect(spies.importAsset).not.toHaveBeenCalled()
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   targetMessageRevision = 0
   publishedAuthoringHarness.latestRevision = -1
   publishedAuthoringHarness.onMessage = null
@@ -330,7 +349,8 @@ beforeEach(() => {
     setPreviewNetworkPolicy: vi.fn(async () => undefined),
     releasePreviewNetworkPolicy: vi.fn(async () => undefined),
   } as unknown as DesktopAPI
-  loadFixture()
+  host = await bootTriageCourseHost()
+  await loadFixture()
 })
 
 afterEach(() => {
@@ -350,8 +370,9 @@ describe('ARCH-2 Workspace Runtime asset replacement race', () => {
   it('captures the stable Store target before the deferred picker and rejects an intervening revision without orphan writes', async () => {
     const { selection, spies } = await renderPendingReplacement()
 
-    act(() => {
+    await act(async () => {
       useEditorStore.getState().renameProject('Runtime revision changed while picker is open')
+      await settleCourse()
     })
     await publishRuntimeAssetTarget()
     const afterIntervention = persistentSnapshot()
@@ -375,8 +396,9 @@ describe('ARCH-2 Workspace Runtime asset replacement race', () => {
   it('drops a deferred callback after location change with no metadata, bytes, or history beyond that intervention', async () => {
     const { selection, spies } = await renderPendingReplacement()
 
-    act(() => {
+    await act(async () => {
       useEditorStore.getState().activateCourseLocation(SECOND_LOCATION_ID)
+      await settleCourse()
     })
     const afterIntervention = persistentSnapshot()
     await resolveSelection(selection, REPLACEMENT)
@@ -395,8 +417,9 @@ describe('ARCH-2 Workspace Runtime asset replacement race', () => {
   it('drops a deferred callback after the Runtime item is deleted with no orphan resource or extra history frame', async () => {
     const { selection, spies } = await renderPendingReplacement()
 
-    act(() => {
+    await act(async () => {
       useEditorStore.getState().deleteNode(RUNTIME_ITEM_ID)
+      await settleCourse()
     })
     const afterIntervention = persistentSnapshot()
     expect(runtimeBindingAssetId(afterIntervention.project)).toBeNull()
@@ -422,6 +445,7 @@ describe('ARCH-2 Workspace Runtime asset replacement race', () => {
     await waitFor(() => {
       expect(runtimeBindingAssetId(activeProject())).toBe(REPLACEMENT_ASSET_ID)
     })
+    await settleCourse()
     const after = persistentSnapshot()
     expect(spies.replace).toHaveBeenCalledOnce()
     expect(spies.replace.mock.calls[0]?.[0]).toEqual(
