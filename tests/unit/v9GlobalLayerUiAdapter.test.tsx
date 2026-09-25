@@ -15,11 +15,18 @@ import {
 } from '@/shared/courseProjectTypes'
 import { sceneNodeToCourseLayerItem } from '@/shared/courseProjectModel'
 import { createFormulaNode, } from '@/core/tools/nativeNodeFactories'
-import {
-  createSlideAuthoringBackend,
-  openSlideAuthoringSession,
-} from '@/renderer/course/slideAuthoringBackend'
+import type { ComponentPackageData } from '@/shared/componentTypes'
+import { componentPackageMeta } from '@/shared/componentPackageMeta'
+import { withDefaultComponentController } from '@/renderer/components/teacherControllerComponent'
+import { createBlankSpatialCourseProject } from '@/renderer/project/createSpatialCourseProject'
 import { openSpatialAuthoringSession } from '@/renderer/course/spatialEditorCommands'
+import {
+  assignedUndoDepth,
+  openAssignedCourse,
+  redoAssignedCourse,
+  settleAssignedCourse,
+  undoAssignedCourse,
+} from '../helpers/triage-t5-courseHost'
 import {
   CONTROLLER_MOVE_REASON,
   SPATIAL_CROSS_COORDINATE_MOVE_REASON,
@@ -278,10 +285,55 @@ function storeAuthoringPorts() {
   }
 }
 
-function injectCandidate(project = v9ThreeLocationFixture()) {
-  const backend = createSlideAuthoringBackend(openSlideAuthoringSession(project))
-  useEditorStore.getState().injectV9SlideCandidateBackend(backend)
-  return backend
+/** Open `project` as the real Main-process document; the Store is only a projection. */
+async function injectCandidate(
+  project = v9ThreeLocationFixture(),
+  extraPackages: readonly ComponentPackageData[] = [],
+) {
+  return openAssignedCourse(project, {}, componentPackagesFor(project, extraPackages))
+}
+
+/** Component bytes for a fixture-referenced package: the archive validator demands real files. */
+function componentPackage(
+  id: string,
+  scopes: Array<'scene' | 'global'>,
+): ComponentPackageData {
+  const manifest: ComponentPackageData['manifest'] = {
+    schemaVersion: 4,
+    runtimeApiVersion: 4,
+    supportedScopes: scopes,
+    renderMode: 'phaser',
+    id,
+    name: 'Quiz',
+    version: '4.0.0',
+    entry: 'runtime.js',
+    defaultSize: { width: 600, height: 200 },
+    minSize: { width: 200, height: 80 },
+    preserveAspectRatio: false,
+    assets: {},
+    defaultProps: { prompt: 'canonical component' },
+    editor: { properties: [{ key: 'prompt', label: '题干', type: 'text' }] },
+  }
+  const runtimeSource = `window.CoursewareComponent.define({id:${JSON.stringify(id)},runtimeApiVersion:4,create:function(){return{destroy:function(){}}}})`
+  return {
+    manifest,
+    runtimeSource,
+    files: {
+      'manifest.json': new TextEncoder().encode(JSON.stringify(manifest)),
+      'runtime.js': new TextEncoder().encode(runtimeSource),
+    },
+  }
+}
+
+/** Controller template bytes plus any fixture component packages the project references. */
+function componentPackagesFor(
+  project: CourseProjectDocument,
+  extra: readonly ComponentPackageData[] = [],
+): Record<string, ComponentPackageData> {
+  return {
+    ...withDefaultComponentController(project).componentPackages,
+    ...Object.fromEntries(extra.map((pkg) => [pkg.manifest.id, pkg])),
+  }
 }
 
 function visualRow(
@@ -307,13 +359,16 @@ function visualRow(
   } as EffectiveLayerProjectionRow
 }
 
-function injectSpatialOwnerFixture(): {
+async function injectSpatialOwnerFixture(): Promise<{
   globalId: string
   surfaceId: string
   surfaceItemId: string
   worldItemIds: readonly [string, string]
-} {
-  useEditorStore.getState().createNewSpatialProject()
+}> {
+  await openAssignedCourse(createBlankSpatialCourseProject({
+    includeDefaultController: false,
+    controls: 'none',
+  }))
   const initial = useEditorStore.getState().spatialSession
   if (!initial) throw new Error('expected Spatial session')
   const project = structuredClone(initial.history.present)
@@ -333,6 +388,7 @@ function injectSpatialOwnerFixture(): {
   useEditorStore.getState().applySpatialAuthoringSession(openSpatialAuthoringSession(project, {
     locationId: initial.selection.locationId,
   }))
+  await settleAssignedCourse()
   return { globalId, surfaceId: surface.id, surfaceItemId, worldItemIds }
 }
 
@@ -388,14 +444,12 @@ function controllerFrame() {
   return { ...item.frame, rotation: item.rotation, revision: document!.revision }
 }
 
-beforeEach(() => {
-  useEditorStore.getState().clearV9SlideCandidateBackend()
-  useEditorStore.getState().createNewProject()
+beforeEach(async () => {
+  await openAssignedCourse(v9ThreeLocationFixture())
 })
 
 afterEach(() => {
   cleanup()
-  useEditorStore.getState().clearV9SlideCandidateBackend()
 })
 
 describe('V9 global layer UI adapter on the real V8 Nodes/Properties', () => {
@@ -447,13 +501,13 @@ describe('V9 global layer UI adapter on the real V8 Nodes/Properties', () => {
     expect(document.querySelectorAll('.node-type-icon[title="external-component"]')).toHaveLength(1)
   })
 
-  it('selects and edits a Slide surface row through its own stable owner scope', () => {
+  it('selects and edits a Slide surface row through its own stable owner scope', async () => {
     const project = structuredClone(v9ThreeLocationFixture())
     const surface = project.surfaces.find((candidate) => candidate.id === 'surface-slide')
     if (!surface || surface.type !== 'slide') throw new Error('expected Slide surface')
     const surfaceItemId = 'slide-surface-note'
     surface.surfaceLayerItems.push(scoped(nativeText(surfaceItemId, 30, '表面说明')))
-    injectCandidate(project)
+    await injectCandidate(project)
 
     const before = selectEffectiveLayerProjection(useEditorStore.getState())!
     const row = before.unifiedRows.find((candidate) => candidate.id === surfaceItemId)!
@@ -470,10 +524,11 @@ describe('V9 global layer UI adapter on the real V8 Nodes/Properties', () => {
     if (canvasSelection.kind !== 'slide-authoring') throw new Error('expected V9 canvas')
     expect(canvasSelection.targets?.[0]?.authoringAddress).toBe(address)
 
-    const beforeEdit = selectedBackend.getSession()
+    const beforeUndoDepth = assignedUndoDepth()
     useEditorStore.getState().updateNode(surfaceItemId, { name: '更新后的表面说明' })
+    await settleAssignedCourse()
     const afterEdit = selectSlideAuthoringBackend(useEditorStore.getState())!.getSession()
-    expect(afterEdit.history.past).toHaveLength(beforeEdit.history.past.length + 1)
+    expect(assignedUndoDepth()).toBe(beforeUndoDepth + 1)
     expect(afterEdit.history.present.surfaces.find((candidate) => candidate.id === 'surface-slide'))
       .toMatchObject({
         surfaceLayerItems: [expect.objectContaining({
@@ -484,7 +539,7 @@ describe('V9 global layer UI adapter on the real V8 Nodes/Properties', () => {
         })],
       })
 
-    useEditorStore.getState().undo()
+    await undoAssignedCourse()
     expect(selectSlideAuthoringBackend(useEditorStore.getState())!.getSession().history.present.surfaces
       .find((candidate) => candidate.id === 'surface-slide'))
       .toMatchObject({
@@ -497,7 +552,7 @@ describe('V9 global layer UI adapter on the real V8 Nodes/Properties', () => {
       })
   })
 
-  it('writes a surface row base item under a named state with one undoable commit', () => {
+  it('writes a surface row base item under a named state with one undoable commit', async () => {
     const project = structuredClone(v9ThreeLocationFixture())
     const surface = project.surfaces.find((candidate) => candidate.id === 'surface-slide')
     if (!surface || surface.type !== 'slide') throw new Error('expected Slide surface')
@@ -511,7 +566,7 @@ describe('V9 global layer UI adapter on the real V8 Nodes/Properties', () => {
         { id: 'state-explain', name: '讲解', layerItemOverrides: {} },
       ],
     }
-    injectCandidate(project)
+    await injectCandidate(project)
 
     useEditorStore.getState().setActivePresentationState('state-explain')
     expect(selectSlideAuthoringBackend(useEditorStore.getState())!.getSession().selection.stateId)
@@ -533,7 +588,7 @@ describe('V9 global layer UI adapter on the real V8 Nodes/Properties', () => {
     expect(canvasSelection.targets?.[0]?.authoringAddress).toBe(address)
     expect(selectEffectiveLayerProjection(useEditorStore.getState())!.scope.owner).toBe('surface')
 
-    const beforeEdit = selectedBackend.getSession()
+    const beforeUndoDepth = assignedUndoDepth()
     render(<PropertiesTab onReplaceImage={() => undefined} />)
     expect(screen.queryByText('状态：讲解')).toBeNull()
     expect(screen.getByTestId('slide-surface-base-editing-notice').textContent)
@@ -542,8 +597,9 @@ describe('V9 global layer UI adapter on the real V8 Nodes/Properties', () => {
     const nameInput = screen.getByLabelText('名称')
     fireEvent.change(nameInput, { target: { value: '命名状态下的表面说明' } })
     fireEvent.blur(nameInput)
+    await settleAssignedCourse()
     const afterEdit = selectSlideAuthoringBackend(useEditorStore.getState())!.getSession()
-    expect(afterEdit.history.past).toHaveLength(beforeEdit.history.past.length + 1)
+    expect(assignedUndoDepth()).toBe(beforeUndoDepth + 1)
     const editedSurface = afterEdit.history.present.surfaces
       .find((candidate) => candidate.id === 'surface-slide')
     if (!editedSurface || editedSurface.type !== 'slide') throw new Error('expected Slide surface')
@@ -562,7 +618,7 @@ describe('V9 global layer UI adapter on the real V8 Nodes/Properties', () => {
     expect(afterEdit.history.present.globalLayerItems.map((entry) => entry.item.layerItemId))
       .toEqual(['global-banner', 'teacher-controller-main'])
 
-    useEditorStore.getState().undo()
+    await undoAssignedCourse()
     const undone = selectSlideAuthoringBackend(useEditorStore.getState())!.getSession()
     expect(undone.scope).toBe('surface')
     expect(undone.selection.stateId).toBe('state-explain')
@@ -575,7 +631,7 @@ describe('V9 global layer UI adapter on the real V8 Nodes/Properties', () => {
       frame: expect.objectContaining({ x: 40 }),
     })
 
-    useEditorStore.getState().redo()
+    await redoAssignedCourse()
     const redone = selectSlideAuthoringBackend(useEditorStore.getState())!.getSession()
     const redoneSurface = redone.history.present.surfaces
       .find((candidate) => candidate.id === 'surface-slide')
@@ -590,7 +646,7 @@ describe('V9 global layer UI adapter on the real V8 Nodes/Properties', () => {
     expect(screen.queryByLabelText('场景名称')).toBeNull()
   })
 
-  it('commits visible surface Formula content controls to the base item', () => {
+  it('commits visible surface Formula content controls to the base item', async () => {
     const project = structuredClone(v9ThreeLocationFixture())
     const surface = project.surfaces.find((candidate) => candidate.id === 'surface-slide')
     if (!surface || surface.type !== 'slide') throw new Error('expected Slide surface')
@@ -608,11 +664,11 @@ describe('V9 global layer UI adapter on the real V8 Nodes/Properties', () => {
         { id: 'state-explain', name: '讲解', layerItemOverrides: {} },
       ],
     }
-    injectCandidate(project)
+    await injectCandidate(project)
     useEditorStore.getState().setActivePresentationState('state-explain')
     useEditorStore.getState().selectNode(surfaceItemId)
 
-    const beforeEdit = selectSlideAuthoringBackend(useEditorStore.getState())!.getSession()
+    const beforeUndoDepth = assignedUndoDepth()
     render(<PropertiesTab onReplaceImage={() => undefined} />)
     expect(screen.getByTestId('formula-properties')).toBeTruthy()
     expect(screen.queryByText('状态：讲解')).toBeNull()
@@ -620,9 +676,10 @@ describe('V9 global layer UI adapter on the real V8 Nodes/Properties', () => {
     const accessibleText = screen.getByLabelText('无障碍描述')
     fireEvent.change(accessibleText, { target: { value: '命名状态下更新的共享公式' } })
     fireEvent.blur(accessibleText)
+    await settleAssignedCourse()
 
     const afterEdit = selectSlideAuthoringBackend(useEditorStore.getState())!.getSession()
-    expect(afterEdit.history.past).toHaveLength(beforeEdit.history.past.length + 1)
+    expect(assignedUndoDepth()).toBe(beforeUndoDepth + 1)
     const editedSurface = afterEdit.history.present.surfaces
       .find((candidate) => candidate.id === 'surface-slide')
     if (!editedSurface || editedSurface.type !== 'slide') throw new Error('expected Slide surface')
@@ -637,7 +694,7 @@ describe('V9 global layer UI adapter on the real V8 Nodes/Properties', () => {
       ?.presentation?.states.every((state) => !(surfaceItemId in state.layerItemOverrides)))
       .toBe(true)
 
-    useEditorStore.getState().undo()
+    await undoAssignedCourse()
     const undoneSurface = selectSlideAuthoringBackend(useEditorStore.getState())!
       .getSession().history.present.surfaces
       .find((candidate) => candidate.id === 'surface-slide')
@@ -649,7 +706,7 @@ describe('V9 global layer UI adapter on the real V8 Nodes/Properties', () => {
     }
     expect(undone.content.data.accessibleText).toBe('原始描述')
 
-    useEditorStore.getState().redo()
+    await redoAssignedCourse()
     const redoneSurface = selectSlideAuthoringBackend(useEditorStore.getState())!
       .getSession().history.present.surfaces
       .find((candidate) => candidate.id === 'surface-slide')
@@ -774,8 +831,8 @@ describe('V9 global layer UI adapter on the real V8 Nodes/Properties', () => {
     expect(isRejectedSpatialOwnerDrop('slide', global, world)).toBe(false)
   })
 
-  it('shows the Spatial move boundary, keeps rejected drops at zero writes, and preserves safe history', () => {
-    const { globalId, surfaceId, surfaceItemId, worldItemIds } = injectSpatialOwnerFixture()
+  it('shows the Spatial move boundary, keeps rejected drops at zero writes, and preserves safe history', async () => {
+    const { globalId, surfaceId, surfaceItemId, worldItemIds } = await injectSpatialOwnerFixture()
     render(<NodesTab />)
     expect(screen.getByTestId('spatial-layer-move-note').textContent)
       .toContain(SPATIAL_CROSS_COORDINATE_MOVE_REASON)
@@ -783,32 +840,36 @@ describe('V9 global layer UI adapter on the real V8 Nodes/Properties', () => {
     useEditorStore.getState().selectNode(globalId)
     const beforeGlobalMove = useEditorStore.getState().spatialSession!
     const beforeGlobalDocument = JSON.stringify(beforeGlobalMove.history.present)
+    const beforeGlobalUndo = assignedUndoDepth()
     useEditorStore.getState().moveCandidateLayerOwner(globalId, worldItemIds[0])
     const afterGlobalMove = useEditorStore.getState()
     expect(afterGlobalMove.errorMessage).toBe('操作未完成。请重新选择目标后再试。')
     expect(afterGlobalMove.statusMessage).toBeNull()
-    expect(afterGlobalMove.spatialSession).toBe(beforeGlobalMove)
+    // A rejected drop writes nothing: same content, same selection, no new undo entry.
+    // The Store rebuilds its projection after the error patch, so identity is not the invariant.
     expect(JSON.stringify(afterGlobalMove.spatialSession!.history.present)).toBe(beforeGlobalDocument)
-    expect(afterGlobalMove.spatialSession!.history.past).toHaveLength(beforeGlobalMove.history.past.length)
+    expect(assignedUndoDepth()).toBe(beforeGlobalUndo)
     expect(afterGlobalMove.spatialSession!.selection).toEqual(beforeGlobalMove.selection)
 
     useEditorStore.getState().selectNode(worldItemIds[0])
     const beforeWorldMove = useEditorStore.getState().spatialSession!
+    const beforeWorldUndo = assignedUndoDepth()
     useEditorStore.getState().moveCandidateLayerOwner(worldItemIds[0], globalId)
     const afterWorldMove = useEditorStore.getState()
     expect(afterWorldMove.errorMessage).toBe('操作未完成。请重新选择目标后再试。')
-    expect(afterWorldMove.spatialSession).toBe(beforeWorldMove)
     expect(afterWorldMove.spatialSession!.history.present.revision)
       .toBe(beforeWorldMove.history.present.revision)
-    expect(afterWorldMove.spatialSession!.history.past).toHaveLength(beforeWorldMove.history.past.length)
+    expect(assignedUndoDepth()).toBe(beforeWorldUndo)
     expect(afterWorldMove.spatialSession!.selection).toEqual(beforeWorldMove.selection)
 
     useEditorStore.getState().selectNode(surfaceItemId)
     const beforeSafeMove = useEditorStore.getState().spatialSession!
+    const beforeSafeUndo = assignedUndoDepth()
     useEditorStore.getState().moveCandidateLayerOwner(surfaceItemId, worldItemIds[0])
+    await settleAssignedCourse()
     const afterSafeMove = useEditorStore.getState().spatialSession!
     expect(afterSafeMove.history.present.revision).toBe(beforeSafeMove.history.present.revision + 1)
-    expect(afterSafeMove.history.past).toHaveLength(beforeSafeMove.history.past.length + 1)
+    expect(assignedUndoDepth()).toBe(beforeSafeUndo + 1)
     const movedSurface = afterSafeMove.history.present.surfaces.find(
       (candidate) => candidate.id === surfaceId,
     )
@@ -821,11 +882,13 @@ describe('V9 global layer UI adapter on the real V8 Nodes/Properties', () => {
       .toBe(true)
 
     const beforeReorder = useEditorStore.getState().spatialSession!
+    const beforeReorderUndo = assignedUndoDepth()
     const worldIds = movedSurface.world.layerItems.map((item) => item.layerItemId)
     useEditorStore.getState().reorderNodes([...worldIds].reverse())
+    await settleAssignedCourse()
     const afterReorder = useEditorStore.getState().spatialSession!
     expect(afterReorder.history.present.revision).toBe(beforeReorder.history.present.revision + 1)
-    expect(afterReorder.history.past).toHaveLength(beforeReorder.history.past.length + 1)
+    expect(assignedUndoDepth()).toBe(beforeReorderUndo + 1)
     const reorderedSurface = afterReorder.history.present.surfaces.find(
       (candidate) => candidate.id === surfaceId,
     )
@@ -836,8 +899,8 @@ describe('V9 global layer UI adapter on the real V8 Nodes/Properties', () => {
       .toEqual([...worldIds].reverse())
   })
 
-  it('rejects misplaced teacher-controller copies and leaves the valid global layer unchanged', () => {
-    injectCandidate()
+  it('rejects misplaced teacher-controller copies and leaves the valid global layer unchanged', async () => {
+    await injectCandidate()
     const before = selectSlideAuthoringDocument(useEditorStore.getState())!
     const globalBefore = structuredClone(before.globalLayerItems)
     const parsed = courseProjectDocumentSchema.safeParse(v9WithMisplacedControllerCopies())
@@ -852,34 +915,35 @@ describe('V9 global layer UI adapter on the real V8 Nodes/Properties', () => {
     expect(selectSlideAuthoringDocument(useEditorStore.getState())!.globalLayerItems).toEqual(globalBefore)
   })
 
-  it('reorders inside one owner with one history entry and refuses moving the controller onto a scene', () => {
+  it('reorders inside one owner with one history entry and refuses moving the controller onto a scene', async () => {
     const project = v9ThreeLocationFixture()
     project.globalLayerItems.find(
       (entry) => entry.item.layerItemId === 'global-banner',
     )!.plane = 'overlay'
-    injectCandidate(project)
+    await injectCandidate(project)
     useEditorStore.getState().setEditingScope('global')
     render(<NodesTab />)
-    const before = selectSlideAuthoringBackend(useEditorStore.getState())!.getSession().history.past.length
+    const before = assignedUndoDepth()
     const globals = selectEffectiveLayerProjection(useEditorStore.getState())!
       .unifiedRows
       .filter((row) => row.owner === 'global')
       .map((row) => row.id)
     expect(globals).toEqual(['global-banner', 'teacher-controller-main'])
     useEditorStore.getState().reorderNodes(['teacher-controller-main', 'global-banner'])
+    await settleAssignedCourse()
     const after = selectSlideAuthoringBackend(useEditorStore.getState())!.getSession()
-    expect(after.history.past.length).toBe(before + 1)
+    expect(assignedUndoDepth()).toBe(before + 1)
     expect(after.history.present.globalLayerItems.map((entry) => entry.item.layerItemId))
       .toEqual(['teacher-controller-main', 'global-banner'])
     expect(after.history.present.globalLayerItems.map((entry) => entry.plane))
       .toEqual(['overlay', 'overlay'])
     expect(selectSlideAuthoringDocument(useEditorStore.getState())?.schemaVersion).toBe(9)
 
-    useEditorStore.getState().undo()
+    await undoAssignedCourse()
     expect(selectSlideAuthoringDocument(useEditorStore.getState())?.globalLayerItems
       .map((entry) => entry.item.layerItemId))
       .toEqual(['global-banner', 'teacher-controller-main'])
-    useEditorStore.getState().redo()
+    await redoAssignedCourse()
     expect(selectSlideAuthoringDocument(useEditorStore.getState())?.globalLayerItems
       .map((entry) => entry.item.layerItemId))
       .toEqual(['teacher-controller-main', 'global-banner'])
@@ -895,34 +959,33 @@ describe('V9 global layer UI adapter on the real V8 Nodes/Properties', () => {
     expect(scene.scenes[0]!.layerItems.some((item) => item.layerItemId === 'teacher-controller-main')).toBe(false)
   })
 
-  it('rejects a direct reorder that mixes global Underlay and Overlay with zero history', () => {
-    injectCandidate()
+  it('rejects a direct reorder that mixes global Underlay and Overlay with zero history', async () => {
+    await injectCandidate()
     useEditorStore.getState().setEditingScope('global')
     render(<NodesTab />)
     expect(layerGroupNodeIds('global-overlay')).toEqual(['teacher-controller-main'])
     expect(layerGroupNodeIds('global-underlay')).toEqual(['global-banner'])
     const before = selectSlideAuthoringBackend(useEditorStore.getState())!.getSession()
     const beforeDocument = JSON.stringify(before.history.present)
+    const beforeUndo = assignedUndoDepth()
 
     useEditorStore.getState().reorderNodes(['teacher-controller-main', 'global-banner'])
+    await settleAssignedCourse()
 
     const after = selectSlideAuthoringBackend(useEditorStore.getState())!.getSession()
     expect(useEditorStore.getState().errorMessage).toBe(CROSS_GLOBAL_PLANE_REORDER_REASON)
-    expect(after).toBe(before)
-    expect(after.history.past).toHaveLength(before.history.past.length)
+    // A rejected command writes nothing: same content, no new undo entry. The Store
+    // rebuilds its projection backend, so identity is not the invariant here.
     expect(JSON.stringify(after.history.present)).toBe(beforeDocument)
+    expect(assignedUndoDepth()).toBe(beforeUndo)
   })
 
-  it('preserves effective global planes, visibility, references, and history across clipboard paste', () => {
+  it('preserves effective global planes, visibility, references, and history across clipboard paste', async () => {
     const project = v9ThreeLocationFixture()
-    project.componentPackages['component.quiz'] = {
-      packageId: 'component.quiz',
-      version: '4.0.0',
-      name: 'Quiz',
-      manifestPath: 'components/component.quiz/manifest.json',
-      runtimePath: 'components/component.quiz/runtime.js',
-      contentSha256: '1'.repeat(64),
-    }
+    const quizPackage = componentPackage('component.quiz', ['scene', 'global'])
+    project.componentPackages['component.quiz'] = componentPackageMeta(quizPackage, {
+      editableCopy: true,
+    })
     const legacyUnderlay = project.globalLayerItems.find(
       (entry) => entry.item.layerItemId === 'global-banner',
     )!
@@ -972,7 +1035,7 @@ describe('V9 global layer UI adapter on the real V8 Nodes/Properties', () => {
         }],
       },
     )
-    injectCandidate(courseProjectDocumentSchema.parse(project))
+    await injectCandidate(courseProjectDocumentSchema.parse(project), [quizPackage])
     useEditorStore.getState().setEditingScope('global')
     useEditorStore.getState().selectNodes([
       'global-component',
@@ -980,11 +1043,16 @@ describe('V9 global layer UI adapter on the real V8 Nodes/Properties', () => {
       'global-banner',
     ])
     const beforeCopy = selectSlideAuthoringBackend(useEditorStore.getState())!.getSession()
+    const beforeCopyUndo = assignedUndoDepth()
+    const beforeCopyDocument = JSON.stringify(beforeCopy.history.present)
 
     useEditorStore.getState().copySelectedNodes()
 
     const copiedState = useEditorStore.getState()
-    expect(selectSlideAuthoringBackend(copiedState)!.getSession()).toBe(beforeCopy)
+    // Copy is a view-only command: no document write, no new undo entry.
+    expect(assignedUndoDepth()).toBe(beforeCopyUndo)
+    expect(JSON.stringify(selectSlideAuthoringBackend(copiedState)!.getSession().history.present))
+      .toBe(beforeCopyDocument)
     const clipboard = copiedState.slideCandidateClipboard
     expect(clipboard?.sourceScope).toBe('global')
     if (!clipboard || clipboard.sourceScope !== 'global') {
@@ -1034,13 +1102,14 @@ describe('V9 global layer UI adapter on the real V8 Nodes/Properties', () => {
     expect(useEditorStore.getState().slideCandidateClipboard).toBe(clipboard)
 
     useEditorStore.getState().pasteNodes()
+    await settleAssignedCourse()
 
     const pasted = selectSlideAuthoringBackend(useEditorStore.getState())!.getSession()
     const [pastedComponentId, pastedOverlayId, pastedUnderlayId] = pasted.selection.selectionIds
     expect(pastedComponentId).toBeTruthy()
     expect(pastedOverlayId).toBeTruthy()
     expect(pastedUnderlayId).toBeTruthy()
-    expect(pasted.history.past).toHaveLength(beforeCopy.history.past.length + 1)
+    expect(assignedUndoDepth()).toBe(beforeCopyUndo + 1)
     expect(pasted.history.present.revision).toBe(beforeCopy.history.present.revision + 1)
     expect(pasted.history.present.globalLayerItems.find(
       (entry) => entry.item.layerItemId === 'global-banner',
@@ -1105,19 +1174,20 @@ describe('V9 global layer UI adapter on the real V8 Nodes/Properties', () => {
       trigger: { type: 'animation.completed', actionId: pastedActionId },
     }))
 
-    useEditorStore.getState().undo()
+    await undoAssignedCourse()
     expect(selectSlideAuthoringDocument(useEditorStore.getState())?.globalLayerItems.some(
       (entry) => entry.item.layerItemId === pastedUnderlayId,
     )).toBe(false)
-    useEditorStore.getState().redo()
+    await redoAssignedCourse()
     expect(selectSlideAuthoringDocument(useEditorStore.getState())?.globalLayerItems.find(
       (entry) => entry.item.layerItemId === pastedUnderlayId,
     )?.plane).toBe('underlay')
 
-    const beforeRepeat = selectSlideAuthoringBackend(useEditorStore.getState())!.getSession()
+    const beforeRepeatUndo = assignedUndoDepth()
     useEditorStore.getState().pasteNodes()
+    await settleAssignedCourse()
     const repeated = selectSlideAuthoringBackend(useEditorStore.getState())!.getSession()
-    expect(repeated.history.past).toHaveLength(beforeRepeat.history.past.length + 1)
+    expect(assignedUndoDepth()).toBe(beforeRepeatUndo + 1)
     for (const [index, id] of repeated.selection.selectionIds.entries()) {
       const expectedPlane = index === 1 ? 'overlay' : 'underlay'
       expect(repeated.history.present.globalLayerItems.find(
@@ -1126,7 +1196,7 @@ describe('V9 global layer UI adapter on the real V8 Nodes/Properties', () => {
     }
 
     const reopened = courseProjectDocumentSchema.parse(structuredClone(repeated.history.present))
-    injectCandidate(reopened)
+    await injectCandidate(reopened, [quizPackage])
     const reopenedDocument = selectSlideAuthoringDocument(useEditorStore.getState())!
     expect(reopenedDocument.globalLayerItems.find(
       (entry) => entry.item.layerItemId === pastedUnderlayId,
@@ -1139,32 +1209,33 @@ describe('V9 global layer UI adapter on the real V8 Nodes/Properties', () => {
     )?.plane).toBe('underlay')
   })
 
-  it('routes a visible global row through the effective command while scene scope is active', () => {
+  it('routes a visible global row through the effective command while scene scope is active', async () => {
     const project = v9ThreeLocationFixture()
     project.globalLayerItems.find(
       (entry) => entry.item.layerItemId === 'global-banner',
     )!.plane = 'overlay'
-    injectCandidate(project)
+    await injectCandidate(project)
     render(<NodesTab />)
     expect(selectEditingScope(useEditorStore.getState())).toBe('scene')
     expect(layerGroupNodeIds('global-overlay')).toEqual(['global-banner'])
     expect(screen.queryByTestId('node-item-teacher-controller-main')).toBeNull()
-    const before = selectSlideAuthoringBackend(useEditorStore.getState())!.getSession()
+    const before = assignedUndoDepth()
 
     useEditorStore.getState().reorderNodes(['teacher-controller-main', 'global-banner'])
+    await settleAssignedCourse()
 
     const after = selectSlideAuthoringBackend(useEditorStore.getState())!.getSession()
-    expect(after.history.past).toHaveLength(before.history.past.length + 1)
+    expect(assignedUndoDepth()).toBe(before + 1)
     expect(after.history.present.globalLayerItems.map((entry) => entry.item.layerItemId))
       .toEqual(['teacher-controller-main', 'global-banner'])
-    useEditorStore.getState().undo()
+    await undoAssignedCourse()
     expect(selectSlideAuthoringDocument(useEditorStore.getState())?.globalLayerItems
       .map((entry) => entry.item.layerItemId))
       .toEqual(['global-banner', 'teacher-controller-main'])
   })
 
-  it('writes per-location visibility without changing startLocationId or location order', () => {
-    injectCandidate()
+  it('writes per-location visibility without changing startLocationId or location order', async () => {
+    await injectCandidate()
     useEditorStore.getState().selectNode('teacher-controller-main')
     const before = selectSlideAuthoringDocument(useEditorStore.getState())!
     const order = before.locations.map((location) => location.id)
@@ -1176,6 +1247,7 @@ describe('V9 global layer UI adapter on the real V8 Nodes/Properties', () => {
     })
     fireEvent.click(screen.getByTestId('location-visibility-location-scene-1'))
     fireEvent.click(screen.getByLabelText('当前页显示'))
+    await settleAssignedCourse()
     const after = selectSlideAuthoringDocument(useEditorStore.getState())!
     expect(after.startLocationId).toBe(before.startLocationId)
     expect(after.locations.map((location) => location.id)).toEqual(order)
