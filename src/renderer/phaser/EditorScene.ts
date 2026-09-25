@@ -1,7 +1,6 @@
 import * as Phaser from 'phaser'
 import {
-  CANVAS_HEIGHT,
-  CANVAS_WIDTH,
+
   MIN_NODE_SIZE,
   MIN_VISIBLE_NODE_EDGE,
 } from '../../shared/constants'
@@ -14,6 +13,7 @@ import type {
 import type { EditorPhaserBridge } from './EditorPhaserBridge'
 import { resizeWorldFrameFromHandle } from '../authoring/stageViewportTransform'
 import { lineHandleWorldPoints } from '../authoring/slideLineAuthoring'
+import { DEFAULT_SLIDE_CANVAS } from '../../shared/slideCanvas'
 import { SelectionOverlay, type ResizeDirection } from './SelectionOverlay'
 import { ProxyNodeAdapter } from './adapters/ProxyNodeAdapter'
 import type { AdapterBounds, NodeAdapter } from './adapters/NodeAdapter'
@@ -109,7 +109,10 @@ export class EditorScene extends Phaser.Scene {
     nodes: TransformSnapshot[]
   } | null = null
 
-  constructor(private readonly bridge: EditorPhaserBridge) {
+  constructor(
+    private readonly bridge: EditorPhaserBridge,
+    private readonly stage: { width: number; height: number } = DEFAULT_SLIDE_CANVAS,
+  ) {
     super({ key: 'EditorScene' })
   }
 
@@ -348,12 +351,12 @@ export class EditorScene extends Phaser.Scene {
         dx = Phaser.Math.Clamp(
           dx,
           -this.dragStart.group.right + MIN_VISIBLE_NODE_EDGE,
-          CANVAS_WIDTH - MIN_VISIBLE_NODE_EDGE - this.dragStart.group.left,
+          this.stage.width - MIN_VISIBLE_NODE_EDGE - this.dragStart.group.left,
         )
         dy = Phaser.Math.Clamp(
           dy,
           -this.dragStart.group.bottom + MIN_VISIBLE_NODE_EDGE,
-          CANVAS_HEIGHT - MIN_VISIBLE_NODE_EDGE - this.dragStart.group.top,
+          this.stage.height - MIN_VISIBLE_NODE_EDGE - this.dragStart.group.top,
         )
         const event = pointer.event as MouseEvent
         const snapped = event?.altKey
@@ -390,8 +393,8 @@ export class EditorScene extends Phaser.Scene {
     dy: number,
     excluded: Set<string>,
   ): { dx: number; dy: number; guideX?: number; guideY?: number } {
-    const xTargets = [0, CANVAS_WIDTH / 2, CANVAS_WIDTH]
-    const yTargets = [0, CANVAS_HEIGHT / 2, CANVAS_HEIGHT]
+    const xTargets = [0, this.stage.width / 2, this.stage.width]
+    const yTargets = [0, this.stage.height / 2, this.stage.height]
     for (const adapter of this.adapters.values()) {
       if (excluded.has(adapter.nodeId) || !adapter.getNode().visible) continue
       const bounds = axisBounds(adapter.getBounds())
@@ -428,8 +431,8 @@ export class EditorScene extends Phaser.Scene {
 
   private drawGuides(x?: number, y?: number): void {
     this.guideGraphics.clear().lineStyle(1, 0xff4d9d, 0.95)
-    if (x !== undefined) this.guideGraphics.lineBetween(x, 0, x, CANVAS_HEIGHT)
-    if (y !== undefined) this.guideGraphics.lineBetween(0, y, CANVAS_WIDTH, y)
+    if (x !== undefined) this.guideGraphics.lineBetween(x, 0, x, this.stage.height)
+    if (y !== undefined) this.guideGraphics.lineBetween(0, y, this.stage.width, y)
   }
 
   private configureResize(): void {

@@ -94,6 +94,33 @@ describe('RuntimeAuthoringTargetRegistry', () => {
     registry.destroy()
   })
 
+  it('把登记边界归一化到调用方传入的非 16:9 画布', async () => {
+    const onTargetsChanged = vi.fn()
+    const registry = new RuntimeAuthoringTargetRegistry({
+      scope: 'scene',
+      sceneId: 'scene-portrait',
+      width: 360,
+      height: 640,
+      canvas: { width: 720, height: 1280 },
+      content: { values: { title: '标题' } },
+      assets: {},
+      onTargetsChanged,
+    })
+    registry.register({
+      kind: 'text',
+      key: 'title',
+      getBounds: () => ({ x: 10, y: 20, width: 100, height: 50 }),
+    })
+    await flushTargets()
+    expect(onTargetsChanged.mock.calls.at(-1)?.[0].targets[0].bounds).toEqual({
+      x: 20,
+      y: 40,
+      width: 200,
+      height: 100,
+    })
+    registry.destroy()
+  })
+
   it('扫描两个 DOM 层的显式 data 属性，并在 DOM 变化与销毁时清理快照', async () => {
     const underlay = document.createElement('div')
     const overlay = document.createElement('div')

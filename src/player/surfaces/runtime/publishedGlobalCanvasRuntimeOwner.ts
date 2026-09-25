@@ -2,7 +2,7 @@ import type {
   PublishedCourseV2Payload,
   PublishedRuntimeLayerItem,
 } from '../../../shared/publishedCourseTypes'
-import { CANVAS_HEIGHT, CANVAS_WIDTH } from '../../../shared/constants'
+import { courseSlideCanvas, type SlideCanvasSize } from '../../../shared/slideCanvas'
 import type {
   CourseStateStore as CourseStateStoreContract,
   RuntimeAuthoringBounds,
@@ -92,12 +92,13 @@ function setTargetRuntimeState(
 function mapGlobalRuntimeBoundsToLayer(
   bounds: Readonly<RuntimeAuthoringBounds>,
   item: PublishedRuntimeLayerItem,
+  canvas: SlideCanvasSize,
 ): RuntimeAuthoringBounds {
   const scaled = {
-    x: item.frame.x + bounds.x / CANVAS_WIDTH * item.frame.width,
-    y: item.frame.y + bounds.y / CANVAS_HEIGHT * item.frame.height,
-    width: bounds.width / CANVAS_WIDTH * item.frame.width,
-    height: bounds.height / CANVAS_HEIGHT * item.frame.height,
+    x: item.frame.x + bounds.x / canvas.width * item.frame.width,
+    y: item.frame.y + bounds.y / canvas.height * item.frame.height,
+    width: bounds.width / canvas.width * item.frame.width,
+    height: bounds.height / canvas.height * item.frame.height,
   }
   if (item.rotation === 0) return scaled
 
@@ -127,6 +128,7 @@ function mapGlobalRuntimeBoundsToLayer(
 function mapGlobalRuntimeTargetsToLayer(
   update: Readonly<RuntimeAuthoringTargetUpdate>,
   item: PublishedRuntimeLayerItem,
+  canvas: SlideCanvasSize,
 ): RuntimeAuthoringTargetUpdate {
   return Object.freeze({
     ...update,
@@ -134,7 +136,7 @@ function mapGlobalRuntimeTargetsToLayer(
       Object.freeze({
         ...target,
         nodeId: item.layerItemId,
-        bounds: Object.freeze(mapGlobalRuntimeBoundsToLayer(target.bounds, item)),
+        bounds: Object.freeze(mapGlobalRuntimeBoundsToLayer(target.bounds, item, canvas)),
       })
     ))),
   })
@@ -359,6 +361,7 @@ export class PublishedGlobalCanvasRuntimeOwner {
       runtime: item.runtime,
       width: item.frame.width,
       height: item.frame.height,
+      canvas: courseSlideCanvas(this.#payload),
       visible: false,
       ...(this.#authoring
         ? {
@@ -432,7 +435,7 @@ export class PublishedGlobalCanvasRuntimeOwner {
   ): void {
     const sink = this.#authoring
     if (!sink || this.#destroyed) return
-    const mapped = mapGlobalRuntimeTargetsToLayer(update, item)
+    const mapped = mapGlobalRuntimeTargetsToLayer(update, item, courseSlideCanvas(this.#payload))
     if (mapped.targets.length === 0) {
       this.#authoringTargetsByItemId.delete(item.layerItemId)
     } else {

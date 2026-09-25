@@ -1,5 +1,5 @@
 import * as Phaser from 'phaser'
-import { CANVAS_HEIGHT, CANVAS_WIDTH } from '../../shared/constants'
+import { DEFAULT_SLIDE_CANVAS, type SlideCanvasSize } from '../../shared/slideCanvas'
 import { EditorPhaserBridge } from './EditorPhaserBridge'
 import { EditorScene } from './EditorScene'
 
@@ -10,8 +10,10 @@ export interface EditorGameHandle {
 }
 
 export interface CreateEditorGameOptions {
-  /** The unified 1280x720 stage owns fitting, so Phaser must not measure it. */
+  /** The unified stage owns fitting, so Phaser must not measure it. */
   fixedLogicalSize?: boolean
+  /** Current Slide canvas. Defaults to the legacy 1280×720. */
+  stage?: SlideCanvasSize
 }
 
 export function createEditorGame(
@@ -19,10 +21,11 @@ export function createEditorGame(
   options: CreateEditorGameOptions = {},
 ): EditorGameHandle {
   const bridge = new EditorPhaserBridge()
+  const stage = options.stage ?? DEFAULT_SLIDE_CANVAS
   const game = new Phaser.Game({
     type: Phaser.AUTO,
-    width: CANVAS_WIDTH,
-    height: CANVAS_HEIGHT,
+    width: stage.width,
+    height: stage.height,
     parent,
     backgroundColor: 'rgba(0,0,0,0)',
     transparent: true,
@@ -31,10 +34,10 @@ export function createEditorGame(
       autoCenter: options.fixedLogicalSize
         ? Phaser.Scale.NO_CENTER
         : Phaser.Scale.CENTER_BOTH,
-      width: CANVAS_WIDTH,
-      height: CANVAS_HEIGHT,
+      width: stage.width,
+      height: stage.height,
     },
-    scene: [new EditorScene(bridge)],
+    scene: [new EditorScene(bridge, stage)],
     input: {
       activePointers: 2,
     },

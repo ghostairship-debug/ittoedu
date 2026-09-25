@@ -1,4 +1,4 @@
-import { CANVAS_HEIGHT, CANVAS_WIDTH } from '../../shared/constants'
+import { DEFAULT_SLIDE_CANVAS, type SlideCanvasSize } from '../../shared/slideCanvas'
 import { sceneNodeToCourseLayerItem } from '../../shared/courseProjectModel'
 import type { LayerItem } from '../../shared/courseProjectTypes'
 import type { ShapeType, ShapeNode, TextRun, TextRunStyle } from '../../shared/contracts/native-v1'
@@ -41,14 +41,14 @@ function lineStyle(line: Element | undefined, onSimplified?: () => void): ShapeN
 }
 
 /** Stage editable content and report each omitted object or effect before any project write. */
-export async function parsePptxImport(bytes: Uint8Array): Promise<PptxImportDraft> {
+export async function parsePptxImport(bytes: Uint8Array, canvas: SlideCanvasSize = DEFAULT_SLIDE_CANVAS): Promise<PptxImportDraft> {
   const pkg = openPptxPackage(bytes)
   const main = pkg.xml('ppt/presentation.xml')
   const size = xmlFirst(main, 'sldSz')
   const width = numeric(size, 'cx'), height = numeric(size, 'cy')
   if (width <= 0 || height <= 0) pptxReject('页面尺寸', '页面宽高必须大于零')
-  const scale = Math.min(CANVAS_WIDTH / width, CANVAS_HEIGHT / height)
-  const origin = { x: (CANVAS_WIDTH - width * scale) / 2, y: (CANVAS_HEIGHT - height * scale) / 2 }
+  const scale = Math.min(canvas.width / width, canvas.height / height)
+  const origin = { x: (canvas.width - width * scale) / 2, y: (canvas.height - height * scale) / 2 }
   const slideRefs = xmlAll(main, 'sldId')
   if (!slideRefs.length || slideRefs.length > PPTX_IMPORT_LIMITS.slides) pptxReject('页数', '仅支持 1–100 页')
   const mainRels = pkg.relationships('ppt/presentation.xml')

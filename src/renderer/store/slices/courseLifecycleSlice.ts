@@ -16,6 +16,7 @@ import {
   type CourseAssetSidecar,
 } from '../../project/v9AssetAdapter'
 import { createBlankCourseProject } from '../../../core/course/createCourseProject'
+import type { SlideCanvasSize } from '../../../shared/slideCanvas'
 import {
   courseProjectStartsAsFlow,
   createBlankFlowCourseProject,
@@ -151,7 +152,7 @@ export function createCourseLifecycleSlice(
   kernel: EditorStoreKernel,
   lifecycle: CourseLifecyclePorts,
 ): {
-  createNewProject(): void
+  createNewProject(canvas?: SlideCanvasSize): void
   createNewSpatialProject(): void
   createNewFlowProject(): void
   loadCourseProject(
@@ -239,8 +240,8 @@ export function createCourseLifecycleSlice(
       const snapshot = lifecycle.readCommitted()
       return snapshot.binding.kind === 'file' && snapshot.binding.path === path && !snapshot.dirty && !lifecycle.hasDirtyContentDraft()
     },
-    createNewProject() {
-      const bundle = withDefaultComponentController(createBlankCourseProject())
+    createNewProject(canvas?: SlideCanvasSize) {
+      const bundle = withDefaultComponentController(createBlankCourseProject({ canvas }))
       void lifecycle.replace(bundle.project, null, {}, bundle.componentPackages).catch(error => kernel.setFeedback({ errorMessage: String(error) }))
     },
     createNewSpatialProject() {

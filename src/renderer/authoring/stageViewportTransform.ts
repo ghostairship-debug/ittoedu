@@ -89,7 +89,7 @@ export function clampStageViewportZoom(zoom: number): number {
 
 /**
  * Builds the single affine transform shared by the stage image and authoring overlays.
- * World coordinates always remain in the fixed 1280 x 720 Project coordinate space.
+ * World coordinates stay in the logical stage (`options.stage`, or the legacy 1280×720 default).
  */
 export function createStageViewportTransform(
   options: StageViewportTransformOptions,

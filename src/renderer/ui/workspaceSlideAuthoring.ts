@@ -1,7 +1,8 @@
 import { canEditLayerInScope } from '../../shared/teacherControllerRole'
 import { constrainControllerDisplayFrame, controllerDisplayFrame } from '../authoring/controllerDisplayBounds'
 import type { LayerItem } from '../../shared/courseProjectTypes'
-import { CANVAS_HEIGHT, CANVAS_WIDTH, MIN_NODE_SIZE } from '../../shared/constants'
+import { MIN_NODE_SIZE } from '../../shared/constants'
+import { courseSlideCanvas } from '../../shared/slideCanvas'
 import type { NativeLineGeometry } from '../../shared/contracts/native-v1/types'
 import {
   collectLineSnapAxes,
@@ -280,7 +281,7 @@ function previewMove(
   return gesture.nodes.map((node) => {
     const next = { ...node, x: node.x + dx, y: node.y + dy }
     const item = globals.find(entry => entry.item.layerItemId === node.nodeId)?.item
-    return item ? constrainControllerDisplayFrame(item, next, { width: CANVAS_WIDTH, height: CANVAS_HEIGHT }) : next
+    return item ? constrainControllerDisplayFrame(item, next, courseSlideCanvas(backend.getSession().history.present)) : next
   })
 }
 
@@ -521,7 +522,7 @@ export function createSlideWorkspaceAuthoringController(
     const scale = viewportTransform(options).scale
     const snap = snapLinePoint(
       world,
-      collectLineSnapAxes(layerTargets(backend), active.nodeId),
+      collectLineSnapAxes(layerTargets(backend), active.nodeId, courseSlideCanvas(backend.getSession().history.present)),
       scale,
       pointer.altKey === true,
     )

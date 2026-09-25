@@ -54,6 +54,21 @@ describe('stage viewport transform', () => {
     expect(STAGE_VIEWPORT_MAX_ZOOM).toBe(2)
   })
 
+  it('maps a portrait stage through the same client transform used for hit testing', () => {
+    const stage = { width: 720, height: 1280 }
+    const transform = createStageViewportTransform({
+      viewport: { x: 0, y: 0, width: 360, height: 640 },
+      stage,
+      zoom: 1,
+      pan: { x: 0, y: 0 },
+    })
+    expect(transform.stage).toEqual(stage)
+    expect(transform.fitScale).toBeCloseTo(0.5)
+    expectPointClose(clientToWorld(transform, { x: 180, y: 320 }), { x: 360, y: 640 })
+    expect(rotatedRectIntersectsStage({ x: 800, y: 10, width: 40, height: 40 }, 0, stage)).toBe(false)
+    expect(rotatedRectIntersectsStage({ x: 700, y: 10, width: 40, height: 40 }, 0)).toBe(true)
+  })
+
   it('fits by width and centers vertically in client space', () => {
     const transform = createStageViewportTransform({
       viewport: { x: 100, y: 50, width: 1440, height: 900 },

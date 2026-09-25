@@ -70,6 +70,7 @@ import {
   type StageRect,
   type StageSelectionOverlayGeometry,
 } from '../../authoring/stageViewportTransform'
+import { DEFAULT_SLIDE_CANVAS, type SlideCanvasSize } from '../../../shared/slideCanvas'
 
 import {
   type mountPublishedCourseAuthoring,
@@ -483,6 +484,7 @@ type RuntimePreviewFeedback = {
 function sanitizeRuntimeAuthoringTargets(
   update: PlayerRuntimeAuthoringTargetsMessage['update'],
   hostKey: string,
+  stage: SlideCanvasSize = DEFAULT_SLIDE_CANVAS,
 ): ReadonlyArray<Readonly<RuntimeAuthoringTarget>> {
   if (
     (update.scope !== 'scene' && update.scope !== 'global') ||
@@ -517,8 +519,8 @@ function sanitizeRuntimeAuthoringTargets(
     if (![x, y, width, height].every(Number.isFinite)) continue
     const left = Math.max(0, x)
     const top = Math.max(0, y)
-    const right = Math.min(STAGE_VIEWPORT_WIDTH, x + width)
-    const bottom = Math.min(STAGE_VIEWPORT_HEIGHT, y + height)
+    const right = Math.min(stage.width, x + width)
+    const bottom = Math.min(stage.height, y + height)
     if (right <= left || bottom <= top) continue
     sanitized.push(Object.freeze({
       ...candidate,
@@ -540,6 +542,7 @@ function sanitizeRuntimeAuthoringTargets(
 function sanitizeComponentAuthoringTargets(
   update: PlayerComponentAuthoringTargetsMessage['update'],
   hostKey: string,
+  stage: SlideCanvasSize = DEFAULT_SLIDE_CANVAS,
 ): ReadonlyArray<Readonly<ComponentAuthoringTextTarget>> {
   if (
     (update.scope !== 'scene' && update.scope !== 'global') ||
@@ -583,7 +586,7 @@ function sanitizeComponentAuthoringTargets(
     ) {
       continue
     }
-    if (!rotatedRectIntersectsStage(candidate.bounds, candidate.rotation)) {
+    if (!rotatedRectIntersectsStage(candidate.bounds, candidate.rotation, stage)) {
       continue
     }
     const maxLength = candidate.maxLength
@@ -646,6 +649,7 @@ export function SlideLocationWorkspace({
     sidecarFileIds,
     contentEdit,
   } = snapshot
+  const slideCanvas = slideEditorView?.canvas ?? DEFAULT_SLIDE_CANVAS
   const snapshotRef = useRef(snapshot)
   snapshotRef.current = snapshot
   const readSnapshot = () => snapshotRef.current
@@ -795,8 +799,9 @@ export function SlideLocationWorkspace({
       },
       zoom: view.zoom,
       pan: { x: view.x, y: view.y },
+      stage: slideCanvas,
     }
-  }, [view.x, view.y, view.zoom])
+  }, [slideCanvas, view.x, view.y, view.zoom])
 
   
 
@@ -816,7 +821,8 @@ export function SlideLocationWorkspace({
     },
     zoom: view.zoom,
     pan: { x: view.x, y: view.y },
-  }), [stageViewportSize.height, stageViewportSize.width, view.x, view.y, view.zoom])
+    stage: slideCanvas,
+  }), [slideCanvas, stageViewportSize.height, stageViewportSize.width, view.x, view.y, view.zoom])
   const previewRebuildKey = snapshot.previewRebuildKey
   const previewGeneration = useMemo<object>(() => ({}), [
     canvasMode,
@@ -1329,7 +1335,7 @@ export function SlideLocationWorkspace({
       const hostKey = `${message.update.scope}:${message.update.sceneId ?? ''}`
       runtimeTargetsByHostRef.current.set(
         hostKey,
-        sanitizeRuntimeAuthoringTargets(message.update, hostKey),
+        sanitizeRuntimeAuthoringTargets(message.update, hostKey, slideCanvas),
       )
       setRuntimeTargets([...runtimeTargetsByHostRef.current.values()].flat())
       return
@@ -1344,7 +1350,7 @@ export function SlideLocationWorkspace({
       ].join(':')
       componentTargetsByHostRef.current.set(
         hostKey,
-        sanitizeComponentAuthoringTargets(message.update, hostKey),
+        sanitizeComponentAuthoringTargets(message.update, hostKey, slideCanvas),
       )
       setComponentTargets([...componentTargetsByHostRef.current.values()].flat())
       return
@@ -1362,6 +1368,7 @@ export function SlideLocationWorkspace({
     failPublishedAuthoring,
     flushAuthoringNodePatches,
     previewGeneration,
+    slideCanvas,
     syncCompleteAuthoringSnapshot,
   ])
 
@@ -1960,6 +1967,7 @@ export function SlideLocationWorkspace({
       },
       zoom: view.zoom,
       pan: { x: view.x, y: view.y },
+      stage: slideCanvas,
     })
     const point = clientToWorld(transform, { x: clientX, y: clientY })
     const ordered = [...visibleRuntimeTargets].sort((left, right) => (
@@ -2002,6 +2010,7 @@ export function SlideLocationWorkspace({
     return runtimeTarget ? { kind: 'runtime', target: runtimeTarget } : null
   }, [
     authoringCanvasInteractive,
+    slideCanvas,
     slideEditorView,
     visibleRuntimeTargets,
     view.x,
@@ -2015,6 +2024,7 @@ export function SlideLocationWorkspace({
     if (!host) return
     const handle = createEditorGame(host, {
       fixedLogicalSize: true,
+      stage: slideCanvas,
     })
     gameRef.current = handle
     const findCanvas = () => {
@@ -2110,7 +2120,7 @@ export function SlideLocationWorkspace({
       gameRef.current = null
       setCanvas(null)
     }
-  }, [queueAuthoringNodePatch])
+  }, [queueAuthoringNodePatch, slideCanvas])
 
   useLayoutEffect(() => {
     // Scale.NONE deliberately leaves sizing to the unified stage, but Phaser
@@ -2558,7 +2568,7 @@ export function SlideLocationWorkspace({
           const world = clientToWorld(transform, { x: event.clientX, y: event.clientY })
           const snapped = snapLinePoint(
             world,
-            collectLineSnapAxes(listSlideWorkspaceHitTargets(backendRef.current)),
+            collectLineSnapAxes(listSlideWorkspaceHitTargets(backendRef.current), undefined, slideCanvas),
             transform.scale,
             event.altKey,
           )
@@ -2601,7 +2611,7 @@ export function SlideLocationWorkspace({
               const world = clientToWorld(transform, { x: event.clientX, y: event.clientY })
               const snapped = snapLinePoint(
                 world,
-                collectLineSnapAxes(listSlideWorkspaceHitTargets(backendRef.current)),
+                collectLineSnapAxes(listSlideWorkspaceHitTargets(backendRef.current), undefined, slideCanvas),
                 transform.scale,
                 event.altKey,
               )
@@ -2686,7 +2696,7 @@ export function SlideLocationWorkspace({
             if (rawDistance >= 3) {
               const snapped = snapLinePoint(
                 world,
-                collectLineSnapAxes(listSlideWorkspaceHitTargets(backendRef.current)),
+                collectLineSnapAxes(listSlideWorkspaceHitTargets(backendRef.current), undefined, slideCanvas),
                 transform.scale,
                 event.altKey,
               )
@@ -2924,7 +2934,7 @@ export function SlideLocationWorkspace({
         </div>
       )}
       <div className={`canvas-label${editingScope === 'global' ? ' canvas-label--global' : ''}`}>
-        1280 × 720 · {editingScope === 'global'
+        {slideCanvas.width} × {slideCanvas.height} · {editingScope === 'global'
           ? `全局层 · ${slideEditorView?.layers.filter((layer) => layer.source === 'global').length ?? 0} 个元素`
           : `${slideEditorView?.sceneName ?? ''} · ${activePresentationStateId === null
             ? '基础'
@@ -2950,8 +2960,8 @@ export function SlideLocationWorkspace({
           style={{
             left: stageTransform.stageRect.x,
             top: stageTransform.stageRect.y,
-            width: STAGE_VIEWPORT_WIDTH,
-            height: STAGE_VIEWPORT_HEIGHT,
+            width: slideCanvas.width,
+            height: slideCanvas.height,
             transform: `scale(${stageTransform.scale})`,
             // Geometry must change atomically: the Player, Phaser hit proxies and
             // authoring targets all consume this transform in the same frame.
@@ -3021,9 +3031,9 @@ export function SlideLocationWorkspace({
             <svg
               className="canvas-line-overlay"
               data-testid="canvas-line-overlay"
-              viewBox={`0 0 ${STAGE_VIEWPORT_WIDTH} ${STAGE_VIEWPORT_HEIGHT}`}
-              width={STAGE_VIEWPORT_WIDTH}
-              height={STAGE_VIEWPORT_HEIGHT}
+              viewBox={`0 0 ${slideCanvas.width} ${slideCanvas.height}`}
+              width={slideCanvas.width}
+              height={slideCanvas.height}
               style={{
                 position: 'absolute',
                 left: 0,
@@ -3037,7 +3047,7 @@ export function SlideLocationWorkspace({
                   x1={lineDragGuides?.x ?? drawPreview?.guides?.x ?? 0}
                   y1={0}
                   x2={lineDragGuides?.x ?? drawPreview?.guides?.x ?? 0}
-                  y2={STAGE_VIEWPORT_HEIGHT}
+                  y2={slideCanvas.height}
                   stroke="#ff4d9d"
                   strokeWidth={1}
                 />
@@ -3046,7 +3056,7 @@ export function SlideLocationWorkspace({
                 <line
                   x1={0}
                   y1={lineDragGuides?.y ?? drawPreview?.guides?.y ?? 0}
-                  x2={STAGE_VIEWPORT_WIDTH}
+                  x2={slideCanvas.width}
                   y2={lineDragGuides?.y ?? drawPreview?.guides?.y ?? 0}
                   stroke="#ff4d9d"
                   strokeWidth={1}

@@ -1,6 +1,9 @@
 import type { EditorStoreKernel } from '../editorStoreKernel'
 import type { CourseProjectDocument } from '../../../shared/courseProjectTypes'
 import { MAX_PROJECT_SCENES } from '../../../shared/constants'
+import { courseProjectDocumentSchema } from '../../../shared/courseProjectSchema'
+import { resizeCourseSlideCanvas } from '../../../core/course/resizeSlideCanvas'
+import { courseSlideCanvas, isValidSlideCanvas, sameSlideCanvas, type SlideCanvasSize } from '../../../shared/slideCanvas'
 import {
   addCourseFlowPage,
   addCourseScene,
@@ -172,6 +175,31 @@ export function createCourseStructureSlice(
         return { ok: false, reason: result.reason }
       }
       return persistCourseProjectCommand(result, { statusMessage: '场景已删除' })
+    },
+
+    resizeSlideCanvas(next: SlideCanvasSize): CourseStructureResult {
+      const project = kernel.tryReadDocument()
+      if (!project) return { ok: false, reason: '当前会话没有课程工程' }
+      if (!isValidSlideCanvas(next)) {
+        kernel.setFeedback({ errorMessage: '画布宽高须为 320–8192 的整数', statusMessage: null })
+        return { ok: false, reason: '画布尺寸无效' }
+      }
+      if (sameSlideCanvas(courseSlideCanvas(project), next)) return { ok: true }
+      const resized = resizeCourseSlideCanvas(project, next)
+      const committed = courseProjectDocumentSchema.parse({
+        ...resized,
+        revision: project.revision + 1,
+        updatedAt: new Date().toISOString(),
+      })
+      const saved = kernel.persistDocument(committed, {
+        historyEntry: true,
+        statusMessage: '已修改画布尺寸',
+      })
+      if (!saved) {
+        kernel.setFeedback({ errorMessage: '当前页面不能修改画布尺寸', statusMessage: null })
+        return { ok: false, reason: '当前页面不能修改画布尺寸' }
+      }
+      return { ok: true }
     },
 
     updateCourseBackground(patch: CourseBackgroundPatch): CourseStructureResult {

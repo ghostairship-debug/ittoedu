@@ -1089,9 +1089,12 @@ export class SlidePublishedAdapter implements SurfaceHost, PublishedAuthoringPat
     const root = context.container.ownerDocument.createElement('section')
     root.className = 'slide-published-adapter'
     root.dataset.surfaceId = this.id
+    const canvas = findSlideSurface(this.#payload, this.id).canvas
     root.style.position = 'absolute'
-    root.style.width = '1280px'
-    root.style.height = '720px'
+    root.style.width = `${canvas.width}px`
+    root.style.height = `${canvas.height}px`
+    root.dataset.canvasWidth = String(canvas.width)
+    root.dataset.canvasHeight = String(canvas.height)
     root.style.overflow = 'hidden'
     root.style.transformOrigin = '0 0'
     if (this.#authoring || this.#staticCapture) {
@@ -1244,8 +1247,9 @@ export class SlidePublishedAdapter implements SurfaceHost, PublishedAuthoringPat
       rotation: itemCapture ? 0 : record.item.rotation,
       opacity: itemCapture ? 1 : record.item.opacity,
     }))
-    const width = itemCapture ? ordered[0]!.item.frame.width : 1280
-    const height = itemCapture ? ordered[0]!.item.frame.height : 720
+    const canvas = findSlideSurface(this.#payload, this.id).canvas
+    const width = itemCapture ? ordered[0]!.item.frame.width : canvas.width
+    const height = itemCapture ? ordered[0]!.item.frame.height : canvas.height
     const content = await capturePublishedSlidePng({
       root,
       width,
@@ -1777,8 +1781,8 @@ export class SlidePublishedAdapter implements SurfaceHost, PublishedAuthoringPat
       node,
       container: wrap,
       footprintElement: wrap,
-      canvas: { width: 1280, height: 720 },
-      getRenderedStageBounds: () => stageBoundsFromElement(root, { width: 1280, height: 720 }),
+      canvas: findSlideSurface(this.#payload, this.id).canvas,
+      getRenderedStageBounds: () => stageBoundsFromElement(root, findSlideSurface(this.#payload, this.id).canvas),
       scenes: this.#payload.locations.map((location) => ({
         id: location.id,
         name: location.label,
@@ -2212,6 +2216,7 @@ export class SlidePublishedAdapter implements SurfaceHost, PublishedAuthoringPat
                 runtimeWrap.dataset.slideRuntimeState = 'fallback'
                 runtimeWrap.style.pointerEvents = 'none'
               }
+              const slideCanvas = findSlideSurface(this.#payload, this.id).canvas
               const mountOptions = {
                 instanceId: nextItem.layerItemId,
                 runtime: nextItem.runtime,
@@ -2243,7 +2248,7 @@ export class SlidePublishedAdapter implements SurfaceHost, PublishedAuthoringPat
                           update: Readonly<RuntimeAuthoringTargetUpdate>,
                         ) => {
                           if (!isCurrentMount()) return
-                          const mapped = mapRuntimeAuthoringTargetsToLayer(update, nextItem)
+                          const mapped = mapRuntimeAuthoringTargetsToLayer(update, nextItem, findSlideSurface(this.#payload, this.id).canvas)
                           if (mapped.targets.length > 0) {
                             this.#authoringRuntimeTargets.set(nextItem.layerItemId, {
                               order: nextItem.order,
@@ -2281,6 +2286,7 @@ export class SlidePublishedAdapter implements SurfaceHost, PublishedAuthoringPat
                 ? mountPublishedCanvasRuntime(runtimeWrap, {
                     ...mountOptions,
                     sceneId: scene.id,
+                    canvas: slideCanvas,
                   })
                 : mountPublishedSurfaceRuntime(runtimeWrap, mountOptions)
               if (!handle.ok) markFailure()

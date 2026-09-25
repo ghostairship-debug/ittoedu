@@ -1,4 +1,4 @@
-import { CANVAS_HEIGHT, CANVAS_WIDTH } from '../../../shared/constants'
+import { DEFAULT_SLIDE_CANVAS, type SlideCanvasSize } from '../../../shared/slideCanvas'
 import type { NativeElementContent } from '../../../shared/contracts/course-project-v9/types'
 import {
   isNativeRenderInput,
@@ -274,12 +274,13 @@ export function publishedComponentAuthoringNode(
 function rotatedBounds(
   bounds: RuntimeAuthoringBounds,
   item: PublishedLayerItem,
+  canvas: SlideCanvasSize,
 ): RuntimeAuthoringBounds {
   const scaled = {
-    x: item.frame.x + bounds.x / CANVAS_WIDTH * item.frame.width,
-    y: item.frame.y + bounds.y / CANVAS_HEIGHT * item.frame.height,
-    width: bounds.width / CANVAS_WIDTH * item.frame.width,
-    height: bounds.height / CANVAS_HEIGHT * item.frame.height,
+    x: item.frame.x + bounds.x / canvas.width * item.frame.width,
+    y: item.frame.y + bounds.y / canvas.height * item.frame.height,
+    width: bounds.width / canvas.width * item.frame.width,
+    height: bounds.height / canvas.height * item.frame.height,
   }
   if (item.rotation === 0) return scaled
   const angle = item.rotation * Math.PI / 180
@@ -305,10 +306,11 @@ function rotatedBounds(
   return { x: minX, y: minY, width: maxX - minX, height: maxY - minY }
 }
 
-/** Converts a runtime-local 1280×720 target snapshot into Slide canvas space. */
+/** Converts a runtime-local target snapshot from `canvas` space into the Slide item frame. */
 export function mapRuntimeAuthoringTargetsToLayer(
   update: Readonly<RuntimeAuthoringTargetUpdate>,
   item: PublishedLayerItem,
+  canvas: SlideCanvasSize = DEFAULT_SLIDE_CANVAS,
 ): RuntimeAuthoringTargetUpdate {
   return Object.freeze({
     ...update,
@@ -316,7 +318,7 @@ export function mapRuntimeAuthoringTargetsToLayer(
       Object.freeze({
         ...target,
         nodeId: item.layerItemId,
-        bounds: Object.freeze(rotatedBounds(target.bounds, item)),
+        bounds: Object.freeze(rotatedBounds(target.bounds, item, canvas)),
       })
     ))),
   })

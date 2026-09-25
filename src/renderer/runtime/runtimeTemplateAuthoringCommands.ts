@@ -16,6 +16,7 @@ import type {
   SlideSceneDocument,
 } from '@/shared/courseProjectTypes'
 import { z } from 'zod'
+import { courseSlideCanvas } from '@/shared/slideCanvas'
 
 export const COURSE_RUNTIME_TEMPLATE_SLOT = 'runtime-template' as const
 
@@ -342,12 +343,13 @@ function canonicalRuntimeTemplate(
   itemId: string,
   label: string,
   order: number,
+  canvas: { width: number; height: number },
 ): RuntimeLayerItem {
   return {
     kind: 'runtime',
     layerItemId: itemId,
     label,
-    frame: { mode: 'absolute', x: 0, y: 0, width: 1280, height: 720 },
+    frame: { mode: 'absolute', x: 0, y: 0, width: canvas.width, height: canvas.height },
     order,
     visible: true,
     locked: false,
@@ -424,6 +426,7 @@ export function planRuntimeTemplateCreation(
     input.newItemId,
     input.target.owner === 'global' ? '全局运行时' : '场景运行时',
     order,
+    courseSlideCanvas(input.project),
   )
   const parsedItem = layerItemSchema.safeParse(item)
   if (!parsedItem.success || parsedItem.data.kind !== 'runtime') {

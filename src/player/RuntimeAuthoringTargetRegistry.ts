@@ -1,4 +1,4 @@
-import { CANVAS_HEIGHT, CANVAS_WIDTH } from '../shared/constants'
+import { DEFAULT_SLIDE_CANVAS, type SlideCanvasSize } from '../shared/slideCanvas'
 import type {
   EditableTextContent,
   RuntimeAssetBinding,
@@ -25,6 +25,8 @@ export interface RuntimeAuthoringTargetRegistryOptions {
   sceneId?: string
   width: number
   height: number
+  /** Output space for reported bounds. Callers pass the current slide canvas. */
+  canvas?: SlideCanvasSize
   content: EditableTextContent
   assets: Readonly<Record<string, RuntimeAssetBinding>>
   domRoots?: RuntimeAuthoringDomRoots
@@ -130,6 +132,8 @@ export class RuntimeAuthoringTargetRegistry implements RuntimeAuthoringApi {
   private nextDomElementId = 1
   private width: number
   private height: number
+  private canvasWidth: number
+  private canvasHeight: number
   private revision = 0
   private invalidationQueued = false
   private destroyed = false
@@ -137,6 +141,8 @@ export class RuntimeAuthoringTargetRegistry implements RuntimeAuthoringApi {
   constructor(private readonly options: RuntimeAuthoringTargetRegistryOptions) {
     this.width = options.width
     this.height = options.height
+    this.canvasWidth = options.canvas?.width ?? DEFAULT_SLIDE_CANVAS.width
+    this.canvasHeight = options.canvas?.height ?? DEFAULT_SLIDE_CANVAS.height
 
     if (options.domRoots && typeof MutationObserver !== 'undefined') {
       for (const root of [options.domRoots.underlay, options.domRoots.overlay]) {
@@ -243,8 +249,8 @@ export class RuntimeAuthoringTargetRegistry implements RuntimeAuthoringApi {
   private collectRegisteredTargets(
     layer: RuntimeLayer,
   ): RuntimeAuthoringTarget[] {
-    const scaleX = CANVAS_WIDTH / Math.max(1, this.width)
-    const scaleY = CANVAS_HEIGHT / Math.max(1, this.height)
+    const scaleX = this.canvasWidth / Math.max(1, this.width)
+    const scaleY = this.canvasHeight / Math.max(1, this.height)
     const targets: RuntimeAuthoringTarget[] = []
 
     for (const registration of this.registrations.values()) {
@@ -304,10 +310,10 @@ export class RuntimeAuthoringTargetRegistry implements RuntimeAuthoringApi {
       if (!finitePositiveDomRect(rect)) continue
       const elementId = this.domElementId(element)
       const bounds = {
-        x: ((rect.left - rootRect.left) / rootRect.width) * CANVAS_WIDTH,
-        y: ((rect.top - rootRect.top) / rootRect.height) * CANVAS_HEIGHT,
-        width: (rect.width / rootRect.width) * CANVAS_WIDTH,
-        height: (rect.height / rootRect.height) * CANVAS_HEIGHT,
+        x: ((rect.left - rootRect.left) / rootRect.width) * this.canvasWidth,
+        y: ((rect.top - rootRect.top) / rootRect.height) * this.canvasHeight,
+        width: (rect.width / rootRect.width) * this.canvasWidth,
+        height: (rect.height / rootRect.height) * this.canvasHeight,
       }
 
       const textKey = optionalTrimmed(element.dataset.coursewareEditKey)

@@ -7,6 +7,7 @@ import { createChartNode, createChartLayerItem, createTableNode, createTableLaye
 import { appendSceneLayer, slideSceneContext, offsetDefaultSlideInsertion, SlideCommandError, type SlideInsertionOwner } from './slideInsertion'
 import { allocateCourseLayerOrder } from './layerOrder'
 import { commitCourseProjectMutation } from './courseProjectMutation'
+import { courseSlideCanvas } from '../../shared/slideCanvas'
 export interface AddSlideChartLayerInput {
   readonly id?: string
   readonly x?: number
@@ -85,6 +86,7 @@ export function planSlideChartInsertion(document: CourseProjectDocument, owner: 
       categories: input.categories,
       series: input.series,
       style: input.style,
+      canvas: courseSlideCanvas(document),
     })
 
     // Validate against strict chart schema
@@ -135,6 +137,7 @@ export function planSlideTableInsertion(document: CourseProjectDocument, owner: 
       headerRowCount: input.headerRowCount,
       merges: input.merges,
       style: input.style,
+      canvas: courseSlideCanvas(document),
     })
 
     // Validate against strict table schema

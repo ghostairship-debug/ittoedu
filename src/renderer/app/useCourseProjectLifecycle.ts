@@ -1,6 +1,7 @@
 import type { DocumentSnapshot } from '../../shared/workbench/document'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { APP_NAME } from '../../shared/constants'
+import type { SlideCanvasSize } from '../../shared/slideCanvas'
 import type { CourseProjectDocument } from '../../shared/courseProjectTypes'
 import type { ComponentPackageData } from '../../shared/componentTypes'
 import type {
@@ -59,7 +60,7 @@ export interface CourseProjectLifecyclePorts<TDraftToken = unknown> {
   documents?: {
     ready(): Promise<void>
     snapshot(): DocumentSnapshot | null
-    create(surface: 'slide' | 'flow' | 'spatial'): Promise<void>
+    create(surface: 'slide' | 'flow' | 'spatial', canvas?: SlideCanvasSize): Promise<void>
     open(path: string): Promise<void>
     save(saveAs?: boolean): Promise<DocumentSnapshot | null>
     drain(): Promise<DocumentSnapshot>
@@ -121,7 +122,7 @@ export interface CourseProjectLifecycleWatch {
 }
 
 export interface CourseProjectOperationOptions { readonly isCurrent?: () => boolean }
-export interface CourseProjectReplacementOptions extends CourseProjectOperationOptions { readonly origin?: 'lesson' | 'standalone' }
+export interface CourseProjectReplacementOptions extends CourseProjectOperationOptions { readonly origin?: 'lesson' | 'standalone'; readonly canvas?: SlideCanvasSize }
 
 export interface CourseProjectLifecycleApi {
   readonly recentProjects: RecentProjectEntry[]
@@ -168,7 +169,7 @@ export function useCourseProjectLifecycle<TDraftToken>(ports: CourseProjectLifec
     }, '课件切换失败，当前修改仍保留。')
     return result === true
   }, [refresh])
-  const newProject = useCallback((options?: CourseProjectReplacementOptions) => replace(() => service().create('slide'), options), [replace])
+  const newProject = useCallback((options?: CourseProjectReplacementOptions) => replace(() => service().create('slide', options?.canvas), options), [replace])
   const newFlowProject = useCallback((options?: CourseProjectReplacementOptions) => replace(() => service().create('flow'), options), [replace])
   const newSpatialProject = useCallback((options?: CourseProjectReplacementOptions) => replace(() => service().create('spatial'), options), [replace])
   const openProject = useCallback(() => { void replace(async () => {

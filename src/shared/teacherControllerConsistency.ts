@@ -3,12 +3,12 @@ import type {
   LayerItem,
   ScopedLayerItem,
 } from './courseProjectTypes'
-import { CANVAS_HEIGHT, CANVAS_WIDTH } from './constants'
+import { courseSlideCanvas, DEFAULT_SLIDE_CANVAS, type SlideCanvasSize } from './slideCanvas'
 import { rotatedRectangleAabb } from './geometry'
 import { isTeacherController } from './teacherControllerRole'
 import { defaultTeacherControllerConfig } from './teacherControllerConfig'
 
-function courseControllerIntersectsCanvas(item: LayerItem): boolean {
+function courseControllerIntersectsCanvas(item: LayerItem, canvas: SlideCanvasSize): boolean {
   const bounds = rotatedRectangleAabb({
     x: item.frame.x,
     y: item.frame.y,
@@ -18,8 +18,8 @@ function courseControllerIntersectsCanvas(item: LayerItem): boolean {
   })
   return bounds.right > 0 &&
     bounds.bottom > 0 &&
-    bounds.left < CANVAS_WIDTH &&
-    bounds.top < CANVAS_HEIGHT
+    bounds.left < canvas.width &&
+    bounds.top < canvas.height
 }
 
 export function teacherControllerOwnerIsGlobal(
@@ -29,7 +29,7 @@ export function teacherControllerOwnerIsGlobal(
 }
 
 /** Restores one V9 global controller after an explicit author request. */
-export function restoreCourseTeacherControllerLayer(entry: ScopedLayerItem): boolean {
+export function restoreCourseTeacherControllerLayer(entry: ScopedLayerItem, canvas: SlideCanvasSize = DEFAULT_SLIDE_CANVAS): boolean {
   if (entry.item.kind === 'component' && entry.item.role === 'teacher-controller') {
     entry.visibility = { mode: 'all', locationIds: [] }
     entry.item.visible = true
@@ -39,7 +39,7 @@ export function restoreCourseTeacherControllerLayer(entry: ScopedLayerItem): boo
     if (!Array.isArray(buttons) || !buttons.some(button => button.visible === true)) {
       entry.item.props.buttons = defaultTeacherControllerConfig().buttons
     }
-    if (!courseControllerIntersectsCanvas(entry.item)) {
+    if (!courseControllerIntersectsCanvas(entry.item, canvas)) {
       entry.item.frame.x = 20
       entry.item.frame.y = 20
     }
@@ -51,6 +51,7 @@ export function restoreCourseTeacherControllerLayer(entry: ScopedLayerItem): boo
 export function isCourseDeliveryVisibleTeacherController(
   entry: ScopedLayerItem,
   locationIds: readonly string[],
+  canvas: SlideCanvasSize = DEFAULT_SLIDE_CANVAS,
 ): boolean {
   if (!isTeacherController(entry.item)) return false
   const item = entry.item
@@ -64,21 +65,22 @@ export function isCourseDeliveryVisibleTeacherController(
   return item.visible &&
     item.opacity > 0 &&
     item.playbackInitialVisibility !== 'hidden' &&
-    courseControllerIntersectsCanvas(item) &&
+    courseControllerIntersectsCanvas(item, canvas) &&
     visibleHere
 }
 
 export function hasCourseDeliveryVisibleTeacherController(
-  project: Pick<CourseProjectDocument, 'globalLayerItems' | 'locations'>,
+  project: Pick<CourseProjectDocument, 'globalLayerItems' | 'locations' | 'surfaces'>,
 ): boolean {
   const locationIds = project.locations.map((location) => location.id)
+  const canvas = courseSlideCanvas(project)
   return project.globalLayerItems.some((entry) =>
-    isCourseDeliveryVisibleTeacherController(entry, locationIds),
+    isCourseDeliveryVisibleTeacherController(entry, locationIds, canvas),
   )
 }
 
 export function synchronizeCourseTeacherControllerControls(
-  project: Pick<CourseProjectDocument, 'globalLayerItems' | 'locations' | 'playback'>,
+  project: Pick<CourseProjectDocument, 'globalLayerItems' | 'locations' | 'playback' | 'surfaces'>,
 ): void {
   project.playback.controls = hasCourseDeliveryVisibleTeacherController(project)
     ? 'canvas'

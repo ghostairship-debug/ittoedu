@@ -43,6 +43,7 @@ export interface PublishedCanvasRuntimeMountOptions {
   runtime: PublishedCanvasRuntime
   width: number
   height: number
+  canvas?: import('../../../shared/slideCanvas').SlideCanvasSize
   visible: boolean
   mode?: 'playback' | 'authoring' | 'capture'
   resolveAsset(assetId: string): string | undefined
@@ -411,6 +412,7 @@ export function mountPublishedCanvasRuntime(
           sceneId: authoring?.sceneId ?? options.sceneId,
           width: options.width,
           height: options.height,
+          ...(options.canvas ? { authoringCanvas: options.canvas } : {}),
           environment,
           actions: options.actions ?? inertActions,
           events: options.session.events,

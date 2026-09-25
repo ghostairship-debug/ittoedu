@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { ProductivityContext } from '../../authoring/productivity'
 import type { EditorTransactionStep } from '../../authoring/editorTransaction'
 import { parsePptxImport, type PptxImportDraft } from '../../project/pptxImport'
+import { courseSlideCanvas } from '../../../shared/slideCanvas'
 import { PPTX_IMPORT_LIMITS } from '../../project/pptxPackage'
 import { planPptxImportTransaction } from '../../project/pptxImportTransaction'
 import type { ProductivityDialogProps } from './ProductivityDialog'
@@ -20,7 +21,7 @@ export function PptxImportForm({ getContext, onCommit, onClose }: ProductivityDi
   }
   useEffect(() => () => { sequence.current++; if (legacyActive.current) void window.desktopAPI?.legacyPpt({ operation: 'cancel' }).catch(() => {}) }, [])
   const stage = async (bytes: Uint8Array, filename: string, context: ProductivityContext, request: number) => {
-    const draft = await parsePptxImport(bytes)
+    const draft = await parsePptxImport(bytes, courseSlideCanvas(context.document))
     const name = filename.replace(/\.pptx$/i, '')
     const step = planPptxImportTransaction(context.document, draft, name)
     if (sequence.current === request) setPreview({ context, draft, name, step })

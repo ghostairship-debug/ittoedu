@@ -1,8 +1,8 @@
 import {
-  CANVAS_HEIGHT,
-  CANVAS_WIDTH,
+
   MIN_NODE_SIZE,
 } from '@/shared/constants'
+import { DEFAULT_SLIDE_CANVAS, type SlideCanvasSize } from '@/shared/slideCanvas'
 
 /** Same canvas batch cap as V8 `MAX_BATCH_CANVAS_ITEMS`; MediaTab UI stays on R3-Z. */
 export const MEDIA_BATCH_CANVAS_LIMIT = 12
@@ -97,10 +97,7 @@ export interface MediaBatchFrame {
  */
 export function layoutMediaBatchFrames(
   items: ReadonlyArray<MediaBatchFrameInput>,
-  canvas: { width: number; height: number } = {
-    width: CANVAS_WIDTH,
-    height: CANVAS_HEIGHT,
-  },
+  canvas: SlideCanvasSize = DEFAULT_SLIDE_CANVAS,
 ): MediaBatchFrame[] {
   if (items.length <= 1) {
     return items.map((item) => ({

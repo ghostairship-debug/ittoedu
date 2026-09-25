@@ -8,7 +8,7 @@ import { isTeacherController } from '../../shared/teacherControllerRole'
 
 import type { CourseProjectDocument, ScopedLayerItem } from '../../shared/courseProjectTypes'
 import type { ProjectPlaybackSettings } from '../../shared/contracts/playback-v1'
-import { CANVAS_HEIGHT, CANVAS_WIDTH } from '../../shared/constants'
+import { courseSlideCanvas, type SlideCanvasSize } from '../../shared/slideCanvas'
 
 import { createTeacherControllerTemplate } from '../components/teacherControllerComponent'
 import { createTeacherControllerComponentItem } from '../../shared/teacherControllerItem'
@@ -68,7 +68,7 @@ function applyCoursePlaybackPatch(
     }
   } else if (patch.controls === 'canvas') {
     const controller = findGlobalTeacherController(project)
-    if (controller) restoreCourseTeacherControllerLayer(controller)
+    if (controller) restoreCourseTeacherControllerLayer(controller, courseSlideCanvas(project))
     else appendDefaultTeacherController(project)
   }
 
@@ -112,10 +112,10 @@ interface TeacherControllerRestoreOptions extends LayerCommandOptions {
   readonly preserveAuthoringLock?: boolean
 }
 
-function resetCourseTeacherControllerAuthoringFrame(entry: ScopedLayerItem): void {
+function resetCourseTeacherControllerAuthoringFrame(entry: ScopedLayerItem, canvas: SlideCanvasSize): void {
   if (!isTeacherControllerLayerItem(entry.item)) return
   if (entry.item.kind === 'component') {
-    if (entry.item.frame.x < 0 || entry.item.frame.y < 0 || entry.item.frame.x + entry.item.frame.width > CANVAS_WIDTH || entry.item.frame.y + entry.item.frame.height > CANVAS_HEIGHT) {
+    if (entry.item.frame.x < 0 || entry.item.frame.y < 0 || entry.item.frame.x + entry.item.frame.width > canvas.width || entry.item.frame.y + entry.item.frame.height > canvas.height) {
       entry.item.frame.x = 16; entry.item.frame.y = 16
     }
     return
@@ -138,8 +138,8 @@ export function restoreDefaultTeacherController(
     if (existing) {
       const candidate = structuredClone(existing)
       if (!options.preserveAuthoringLock) candidate.item.locked = false
-      restoreCourseTeacherControllerLayer(candidate)
-      resetCourseTeacherControllerAuthoringFrame(candidate)
+      restoreCourseTeacherControllerLayer(candidate, courseSlideCanvas(document))
+      resetCourseTeacherControllerAuthoringFrame(candidate, courseSlideCanvas(document))
       const unchanged = JSON.stringify(candidate) === JSON.stringify(existing) &&
         document.playback.controls === 'canvas'
       if (unchanged) return succeedLayerNoop(document, '教师控制器已可用')
@@ -149,8 +149,8 @@ export function restoreDefaultTeacherController(
           throw new Error('全课控制器已失效，请重新选择。')
         }
         if (!options.preserveAuthoringLock) entry.item.locked = false
-        restoreCourseTeacherControllerLayer(entry)
-        resetCourseTeacherControllerAuthoringFrame(entry)
+        restoreCourseTeacherControllerLayer(entry, courseSlideCanvas(draft))
+        resetCourseTeacherControllerAuthoringFrame(entry, courseSlideCanvas(draft))
         draft.playback.controls = 'canvas'
         synchronizeCourseTeacherControllerControls(draft)
       }, '已恢复教师控制器', options, existing.item.layerItemId)

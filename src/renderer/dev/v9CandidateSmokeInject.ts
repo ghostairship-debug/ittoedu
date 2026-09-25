@@ -1,4 +1,5 @@
 import { courseProjectDocumentSchema } from '../../shared/courseProjectSchema'
+import { DEFAULT_SLIDE_CANVAS } from '../../shared/slideCanvas'
 import {
   COURSE_PROJECT_SCHEMA_VERSION,
   type CourseProjectDocument,
@@ -150,7 +151,7 @@ function r3CandidateSmokeFixture(): CourseProjectDocument {
       id: 'surface-slide',
       title: '演示',
       type: 'slide',
-      canvas: { width: 1280, height: 720 },
+      canvas: { width: DEFAULT_SLIDE_CANVAS.width, height: DEFAULT_SLIDE_CANVAS.height },
       surfaceLayerItems: [],
       scenes: [
         {

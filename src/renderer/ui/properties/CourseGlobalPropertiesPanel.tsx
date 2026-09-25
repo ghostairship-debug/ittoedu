@@ -17,6 +17,7 @@ import type { LocationVisibility } from '../../../shared/courseProjectTypes'
 import type { AssetMeta } from '../../../shared/contracts/media-v1'
 import type { ComponentManifest } from '../../../shared/componentTypes'
 import type { EffectiveBackground } from '../../../shared/effectiveBackground'
+import { SLIDE_CANVAS_MAX, SLIDE_CANVAS_MIN, SLIDE_CANVAS_PRESETS, slideCanvasSchema, type SlideCanvasSize } from '../../../shared/slideCanvas'
 import { NativeColorInput as ColorInput, NativeColorPreviewContext } from './NativeColorPreview'
 import { ComponentPropertiesEditor } from '../ComponentPropertiesEditor'
 import { DesignTokensEditor } from '../DesignTokensEditor'
@@ -76,6 +77,7 @@ export interface CourseGlobalEmptyView {
     readonly effective: EffectiveBackground
     readonly assets: Readonly<Record<string, AssetMeta>>
   }
+  readonly canvas: SlideCanvasSize
 }
 
 export interface TeacherControllerSceneView {
@@ -119,6 +121,7 @@ export interface CourseGlobalPropertiesContext {
     readonly replaceImage: () => void
     readonly clearPresentationOverride: () => void
     readonly updateCourseBackground: (patch: { backgroundColor?: string; backgroundAssetId?: string | null }) => void
+    readonly resizeSlideCanvas: (canvas: SlideCanvasSize) => void
     readonly previewCourseBackground?: (patch: { backgroundColor?: string | null }) => void
     readonly updatePlayback: (patch: Partial<ProjectPlaybackSettings>) => void
     readonly ensureTeacherController: () => void
@@ -442,6 +445,64 @@ function TeacherControllerProperties({
   )
 }
 
+function SlideCanvasSizeSection({
+  canvas,
+  onApply,
+}: {
+  canvas: SlideCanvasSize
+  onApply: (next: SlideCanvasSize) => void
+}) {
+  const [width, setWidth] = useState(String(canvas.width))
+  const [height, setHeight] = useState(String(canvas.height))
+  const [presetId, setPresetId] = useState('')
+  useEffect(() => {
+    setWidth(String(canvas.width))
+    setHeight(String(canvas.height))
+    setPresetId(SLIDE_CANVAS_PRESETS.find((preset) => preset.width === canvas.width && preset.height === canvas.height)?.id ?? '')
+  }, [canvas.width, canvas.height])
+  const parsedWidth = Number(width)
+  const parsedHeight = Number(height)
+  const parsed = slideCanvasSchema.safeParse({ width: parsedWidth, height: parsedHeight })
+  return (
+    <section className="property-section" data-testid="slide-canvas-size">
+      <h3 className="property-title">画布尺寸</h3>
+      <SelectField<string>
+        label="预设"
+        value={presetId}
+        options={[
+          { value: '', label: '自定义' },
+          ...SLIDE_CANVAS_PRESETS.map((preset) => ({ value: preset.id, label: `${preset.label}（${preset.width}×${preset.height}）` })),
+        ]}
+        onChange={(id) => {
+          setPresetId(id)
+          const preset = SLIDE_CANVAS_PRESETS.find((item) => item.id === id)
+          if (!preset) return
+          setWidth(String(preset.width))
+          setHeight(String(preset.height))
+        }}
+      />
+      <div className="form-field">
+        <label htmlFor="slide-canvas-width">宽度</label>
+        <input id="slide-canvas-width" inputMode="numeric" value={width} onChange={(event) => { setPresetId(''); setWidth(event.target.value) }} />
+      </div>
+      <div className="form-field">
+        <label htmlFor="slide-canvas-height">高度</label>
+        <input id="slide-canvas-height" inputMode="numeric" value={height} onChange={(event) => { setPresetId(''); setHeight(event.target.value) }} />
+      </div>
+      <p className="property-hint">已有内容会按比例缩放。宽高须为 {SLIDE_CANVAS_MIN}–{SLIDE_CANVAS_MAX} 的整数。</p>
+      {!parsed.success && (
+        <p className="property-hint" role="alert" data-testid="slide-canvas-size-error">宽高须为 {SLIDE_CANVAS_MIN}–{SLIDE_CANVAS_MAX} 的整数。</p>
+      )}
+      <button
+        type="button"
+        className="secondary-button"
+        disabled={!parsed.success}
+        onClick={() => { if (parsed.success) onApply(parsed.data) }}
+      >应用</button>
+    </section>
+  )
+}
+
 function CourseGlobalEmptyPanel({
   context,
 }: {
@@ -464,6 +525,7 @@ function CourseGlobalEmptyPanel({
           全局层类似课件母版：文字、图片、图形和组件都可统一布置，并可设置场景可见范围。
         </p>
       </section>
+      <SlideCanvasSizeSection canvas={empty.canvas} onApply={commands.resizeSlideCanvas} />
       <SharedBackgroundProperties
         ownerLabel="课程"
         color={empty.background.color}
