@@ -12,6 +12,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { DocumentRegistry } from '../../src/core/documents/DocumentRegistry'
 import { CourseV9Driver } from '../../src/core/drivers/CourseV9Driver'
 import { MarkdownDriver } from '../../src/core/drivers/MarkdownDriver'
+import { TextDriver } from '../../src/core/drivers/TextDriver'
 import { DocumentToolGateway } from '../../src/core/tools/DocumentToolGateway'
 import type { DocumentModel, DocumentPersistence, DurableDocumentState } from '../../src/shared/workbench/document'
 import type { ToolResult, ToolRunGrant, ToolTarget } from '../../src/shared/workbench/tools'
@@ -19,7 +20,7 @@ import { flowSurfaceIn, resolveFlowBlock, syncFlowCourseLocations } from '../../
 import { flowTextSlot } from '../../src/core/tools/flowTextSlot'
 import { locateCourseLayer } from '../../src/core/drivers/course/layerProperties'
 
-const md = new MarkdownDriver(), course = new CourseV9Driver()
+const md = new MarkdownDriver(), text = new TextDriver(), course = new CourseV9Driver()
 function harness() {
   let sequence = 0
   const states: DurableDocumentState[] = []
@@ -28,8 +29,8 @@ function harness() {
     async append(state) { await beforeAppend?.(); states.push(structuredClone(state)) },
     async save() { throw new Error('not needed') },
   }
-  const registry = new DocumentRegistry({ persistence, drivers: [md, course], createId: () => `id-${++sequence}`, bindingKey: binding => binding.path })
-  const gateway = new DocumentToolGateway(registry, [md, course], () => String(++sequence), { prepareImage: prepareImageResource })
+  const registry = new DocumentRegistry({ persistence, drivers: [md, course, text], createId: () => `id-${++sequence}`, bindingKey: binding => binding.path })
+  const gateway = new DocumentToolGateway(registry, [md, course, text], () => String(++sequence), { prepareImage: prepareImageResource })
   return { registry, gateway, states, persistence, delayAppend(work?: () => Promise<void>) { beforeAppend = work } }
 }
 const markdown = (text: string) => md.load(new TextEncoder().encode(text))
@@ -65,6 +66,14 @@ describe('G20 real Registry/Driver tool gateway', () => {
     expect(a.read().model).toMatchObject({ source: '前文 新文 后文' })
     expect(b.read().model).toMatchObject({ source: 'another tab' })
     expect(a.read().undoDepth).toBe(1)
+    const plain = await registry.create(text.load(new TextEncoder().encode('甲乙丙')), 'plain.txt')
+    await gateway.beginRun({ runId: 'text', actor: 'agent', documents: [{ documentId: plain.documentId, writable: [{ kind: 'document' }] }] })
+    const root = await gateway.issueTarget('text', plain.documentId, { kind: 'document' })
+    expect(await gateway.execute('text', 'read-text', { name: 'read', input: { target: root } })).toMatchObject({ kind: 'read', data: { text: '甲乙丙' } })
+    const range = await gateway.issueTarget('text', plain.documentId, { kind: 'markdown-range', from: 1, to: 2 })
+    expect(status(await gateway.execute('text', 'replace-text', replace(range, '丁')))).toBe('applied')
+    expect(plain.read().model).toMatchObject({ kind: 'text', source: '甲丁丙' })
+    expect(a.read().model).toMatchObject({ source: '前文 新文 后文' })
   })
 
   it('maps a disjoint human edit, detects overlapping edits, and observes queued input', async () => {

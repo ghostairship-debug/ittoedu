@@ -7,7 +7,7 @@ import { stateToolContext, stateChildren } from './presentationStateTools'
 import { layerToolContext } from './layerEditing'
 import { locateRule, locateSceneInteractions } from './slideInteractions'
 import { composeCourseProjectLocation } from '../../shared/courseLayerComposition'
-import type { DocumentModel } from '../../shared/workbench/document'
+import { isSourceDocumentModel, type DocumentModel } from '../../shared/workbench/document'
 import type { ToolTarget } from '../../shared/workbench/tools'
 import { locateCourseLayer } from '../drivers/course/layerProperties'
 import { resolveNativeOwner } from './nativeOwner'
@@ -61,9 +61,9 @@ export function backgroundOwner(model: DocumentModel, target: Extract<ToolTarget
 }
 
 export function readTarget(model: DocumentModel, target: ToolTarget): unknown {
-  if (target.kind === 'document') return model.kind === 'markdown' ? model.source : { title: model.project.title, locations: model.project.locations.map(value => ({ id: value.id, kind: value.kind })) }
+  if (target.kind === 'document') return isSourceDocumentModel(model) ? model.source : { title: model.project.title, locations: model.project.locations.map(value => ({ id: value.id, kind: value.kind })) }
   if (target.kind === 'markdown-range') {
-    if (model.kind !== 'markdown' || !Number.isSafeInteger(target.from) || !Number.isSafeInteger(target.to) || target.from < 0 || target.to < target.from || target.to > model.source.length) throw new Error('正文范围无效')
+    if (!isSourceDocumentModel(model) || !Number.isSafeInteger(target.from) || !Number.isSafeInteger(target.to) || target.from < 0 || target.to < target.from || target.to > model.source.length) throw new Error('正文范围无效')
     return model.source.slice(target.from, target.to)
   }
   if (model.kind !== 'course-v9') throw new Error('目标需要 V9 文档')
@@ -203,7 +203,7 @@ export function mapMarkdownRange(before: string, after: string, range: Extract<T
 
 export function childTargets(model: DocumentModel, target: ToolTarget): { target: ToolTarget; label: string }[] {
   if (target.kind === 'document') {
-    if (model.kind === 'markdown') return [{ target: { kind: 'markdown-range', from: 0, to: model.source.length }, label: '正文' }]
+    if (isSourceDocumentModel(model)) return [{ target: { kind: 'markdown-range', from: 0, to: model.source.length }, label: '正文' }]
     const locations = model.project.locations.map(location => ({ target: { kind: 'course-location' as const, locationId: location.id }, label: location.label }))
     return [...locations.slice(0, 1), { target: { kind: 'course-background', owner: 'course' }, label: '课程背景' }, ...locations.slice(1), ...model.project.surfaces.map(surface => ({ target: { kind: 'course-surface' as const, surfaceId: surface.id }, label: surface.title })), { target: { kind: 'course-audio' }, label: '音频设置与声音库' }, ...Object.values(model.project.assets).map(asset => ({ target: { kind: 'course-asset' as const, assetId: asset.id }, label: asset.filename }))]
   }

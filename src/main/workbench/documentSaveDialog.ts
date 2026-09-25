@@ -16,7 +16,7 @@ export async function saveDocumentWithDialog(
 ): Promise<DocumentSnapshot | null> {
   const current = await documents.registry.get(documentId).drain()
   if (!saveAs && current.binding.kind === 'file') return documents.saveToPath(documentId)
-  const extension = current.model.kind === 'markdown' ? 'md' : 'h5lesson'
+  const extension = current.model.kind === 'markdown' ? 'md' : current.model.kind === 'text' ? 'txt' : 'h5lesson'
   let defaultPath: string
   if (current.binding.kind === 'file') defaultPath = current.binding.path
   else {
@@ -34,7 +34,7 @@ export async function saveDocumentWithDialog(
   const result = await dialog.showSaveDialog(window, {
     title: saveAs ? '另存文档' : '保存文档',
     defaultPath,
-    filters: [{ name: current.model.kind === 'markdown' ? 'Markdown 文档' : '果铃课件', extensions: [extension] }],
+    filters: [{ name: current.model.kind === 'markdown' ? 'Markdown 文档' : current.model.kind === 'text' ? '文本文档' : '果铃课件', extensions: [extension] }],
     properties: ['showOverwriteConfirmation'],
   })
   if (result.canceled || !result.filePath) return null

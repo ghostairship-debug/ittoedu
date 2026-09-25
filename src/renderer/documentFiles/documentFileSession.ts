@@ -1,6 +1,7 @@
 import type { DocumentFilePort, DocumentFileRef, DocumentFileVersion, OpenDocumentResult } from '../../shared/document/ports'
 import type { DocumentFileObservation, DocumentHostAPI } from '../../shared/workbench/desktop'
-import type { DocumentSnapshot } from '../../shared/workbench/document'
+import { isSourceDocumentModel, type DocumentSnapshot } from '../../shared/workbench/document'
+import { TextDriver } from '../../core/drivers/TextDriver'
 import { markdownRefPath, markdownSnapshotDocument } from '../../shared/workbench/markdownFileAdapter'
 import { DocumentProjection } from '../documents/DocumentProjection'
 import { documentSourceEdits, mergedDocumentSource, planDocumentSourceMerge, type DocumentConflictHunk, type DocumentSourceMerge, type SourceEdit } from './documentSourceMerge'
@@ -83,15 +84,17 @@ export class DocumentFileSession {
   private fail(error: unknown) { if (!this.disposed) this.update({ error: error instanceof Error ? error.message : String(error) }) }
   private project = () => {
     const view = this.projection?.read(), current = view?.committed
-    if (this.disposed || !current || current.model.kind !== 'markdown') return
+    if (this.disposed || !current || !isSourceDocumentModel(current.model)) return
     if (current.binding.kind === 'file'
       && markdownRefPath(this.currentRef).replace(/\\/g, '/').toLowerCase() !== current.binding.path.replace(/\\/g, '/').toLowerCase()) {
       this.currentRef = { kind: 'file', path: current.binding.path }
     }
     const shown = view.draft ?? current.model
-    if (shown.kind !== 'markdown') return
+    if (!isSourceDocumentModel(shown)) return
     const keepInput = this.state.composing || Boolean(this.conflictPlan) || this.deferredHistoryInput
-    this.update({ ...(!keepInput ? { source: shown.source } : {}), disk: markdownSnapshotDocument(this.ref, current),
+    const disk = current.model.kind === 'markdown' ? markdownSnapshotDocument(this.ref, current)
+      : { ref: this.ref, source: current.model.source, version: { contentVersion: String(current.revision), attachments: [] }, diagnostics: [] }
+    this.update({ ...(!keepInput ? { source: shown.source } : {}), disk,
       dirty: current.dirty || Boolean(view.pending.length) || this.pendingAttachments.size > 0 || (keepInput && this.state.source !== current.model.source),
       saving: current.saving || Boolean(this.savingAs) || Boolean(this.pending), ...(view.error ? { error: view.error.message } : {}) })
   }
@@ -103,7 +106,7 @@ export class DocumentFileSession {
     const existing = this.existingDocumentId ? await documents.read(this.existingDocumentId) : (await documents.list()).find(matches)
     const recovery = existing ? undefined : (await documents.recoverable()).find(matches)
     const snapshot = existing ?? (recovery ? await documents.restore(recovery.documentId) : await documents.open(filename))
-    const projection = await DocumentProjection.attach(documents, snapshot.documentId)
+    const projection = await DocumentProjection.attach(documents, snapshot.documentId, snapshot.model.kind === 'text' ? new TextDriver() : undefined)
     if (this.disposed) { projection.dispose(); return }
     this.projection = projection
     this.stopProjection = projection.subscribe(this.project)
@@ -112,7 +115,7 @@ export class DocumentFileSession {
     this.update({ recovery: Boolean(recovery) })
     if (snapshot.binding.kind === 'untitled') return
     const observation = await documents.observeFile(snapshot.documentId)
-    this.diskSource = snapshot.binding.kind === 'file' && observation.version === snapshot.binding.version && observation.model?.kind === 'markdown' ? observation.model.source : ''
+    this.diskSource = snapshot.binding.kind === 'file' && observation.version === snapshot.binding.version && observation.model && isSourceDocumentModel(observation.model) ? observation.model.source : ''
     await this.observe(observation)
     this.poll()
   }
@@ -248,7 +251,7 @@ export class DocumentFileSession {
         if (untitled) this.poll()
         this.project()
         const disk = await this.documents.observeFile(this.projection!.documentId)
-        if (disk.model?.kind === 'markdown') this.diskSource = disk.model.source
+        if (disk.model && isSourceDocumentModel(disk.model)) this.diskSource = disk.model.source
         this.observation = disk
         this.schedule()
         return true
@@ -288,7 +291,7 @@ export class DocumentFileSession {
       await this.projection!.drain()
       this.project()
       const disk = await this.documents.observeFile(this.projection!.documentId)
-      if (disk.model?.kind === 'markdown') this.diskSource = disk.model.source
+      if (disk.model && isSourceDocumentModel(disk.model)) this.diskSource = disk.model.source
       this.observation = disk
       return true
     }).catch(error => { this.fail(error); return false }).finally(() => {
@@ -311,14 +314,14 @@ export class DocumentFileSession {
       if (!await this.drain(true)) return
       const projection = this.projection!
       const startingModel = projection.read().committed?.model
-      let baseSource = startingModel?.kind === 'markdown' ? startingModel.source : this.state.source
+      let baseSource = startingModel && isSourceDocumentModel(startingModel) ? startingModel.source : this.state.source
       const result = await projection[action]()
       if ('message' in result) throw new Error(result.message)
       if (this.state.composing) await new Promise<void>(resolve => this.compositionWaiters.push(resolve))
       if (this.disposed) return
       while (this.deferredHistoryInput) {
         const current = projection.read().committed?.model
-        if (current?.kind !== 'markdown') throw new Error('文档格式已改变，在途输入已保留')
+        if (!current || !isSourceDocumentModel(current)) throw new Error('文档格式已改变，在途输入已保留')
         const source = rebaseHistorySource(baseSource, this.state.source, current.source)
         if (source === null) {
           this.historyConflict = true
@@ -345,7 +348,7 @@ export class DocumentFileSession {
     this.observation = observation
     
     if (!observation.model) { this.conflictPlan = null; this.update({ conflict: 'deleted', dirty: true, conflictHunks: [] }); return }
-    if (observation.model.kind !== 'markdown') throw new Error('磁盘文件格式已改变')
+    if (!isSourceDocumentModel(observation.model) || observation.model.kind !== current.model.kind) throw new Error('磁盘文件格式已改变')
     await this.projection.drain()
     if (this.disposed || this.savingAs || generation !== this.watchGeneration) return
     const live = this.projection.read().committed!
@@ -365,7 +368,7 @@ export class DocumentFileSession {
     await this.documents.reconcileFile({ documentId: current.documentId, epoch: current.epoch, baseRevision: current.revision,
       bindingVersion: observation.bindingVersion, version: observation.version, choice, ...(source === undefined ? {} : { source }) })
     this.conflictPlan = null
-    this.diskSource = observation.model?.kind === 'markdown' ? observation.model.source : ''
+    this.diskSource = observation.model && isSourceDocumentModel(observation.model) ? observation.model.source : ''
     this.update({ conflict: null, conflictHunks: [], recovery: false, error: null })
     await this.projection.drain()
     this.project()
@@ -388,7 +391,7 @@ export class DocumentFileSession {
     try {
       if (!this.projection) return false
       const visible = this.projection.read().draft ?? this.projection.read().committed!.model
-      if (visible.kind === 'markdown' && (visible.source !== this.state.source || this.pendingAttachments.size)) await this.submit(this.state.source)
+      if (isSourceDocumentModel(visible) && (visible.source !== this.state.source || (visible.kind === 'markdown' && this.pendingAttachments.size))) await this.submit(this.state.source)
       await this.projection.drain()
       return true
     } catch (error) { this.fail(error); return false }

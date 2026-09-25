@@ -59,8 +59,8 @@ function checkState(state: DurableDocumentState, documentId: string): void {
       !Array.isArray(state.operations) || !Array.isArray(state.stoppedRuns)) throw new Error('恢复日志状态无效')
   const models = [state.model, ...state.past.flatMap(item => [item.before, item.after]), ...state.future.flatMap(item => [item.before, item.after])]
   for (const model of models) {
-    if (!model || !['markdown', 'course-v9'].includes(model.kind) || !model.resources ||
-        (model.kind === 'markdown' && typeof model.source !== 'string')) throw new Error('恢复日志文档无效')
+    if (!model || !['markdown', 'text', 'course-v9'].includes(model.kind) || !model.resources ||
+        ((model.kind === 'markdown' || model.kind === 'text') && typeof model.source !== 'string')) throw new Error('恢复日志文档无效')
     const bytes = [...Object.values(model.resources.assets), ...Object.values(model.resources.components).flatMap(files => Object.values(files))]
     if (bytes.some(value => !(value instanceof Uint8Array))) throw new Error('恢复日志资源无效')
   }
@@ -343,6 +343,7 @@ async function saveFile(input: Parameters<DocumentPersistence['save']>[0],
         }
       }
     }
+    if (input.model.kind === 'text' && !Buffer.from(input.bytes).equals(Buffer.from(input.model.source, 'utf8'))) throw new Error('保存正文与固定文档版本不一致')
     await writeFlushed(temporary, input.bytes)
     await assertCurrent()
     // The complete candidate version includes Markdown's referenced attachments.

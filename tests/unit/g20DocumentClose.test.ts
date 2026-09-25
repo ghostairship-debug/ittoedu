@@ -38,7 +38,9 @@ async function host() {
     return documents.internalAPI.dispatch({ documentId: id, epoch: current.epoch, baseRevision: current.revision,
       operationId: `close-edit-${++sequence}`, actor: 'human', mutation: { type: 'command', command: current.model.kind === 'markdown'
         ? { type: 'markdown.replace', source: text }
-        : { type: 'course.replace', project: { ...current.model.project, title: text } } } })
+        : current.model.kind === 'course-v9'
+          ? { type: 'course.replace', project: { ...current.model.project, title: text } }
+          : (() => { throw new Error('关闭测试只编辑 Markdown 或课件') })() } })
   }
   return { documents, directory, journal, course, coursePath, foreground, foregroundPath, read, edit, drain }
 }

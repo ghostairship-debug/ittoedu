@@ -1,4 +1,4 @@
-import type { DocumentModel, DocumentOperationResult, DocumentEvent } from '../../../shared/workbench/document'
+import { isSourceDocumentModel, type DocumentModel, type DocumentOperationResult, type DocumentEvent } from '../../../shared/workbench/document'
 import type { BeginEditSession, EditEvent, EditSessionSnapshot, EditTarget } from '../../../shared/workbench/editSession'
 import type { ToolTarget } from '../../../shared/workbench/tools'
 import { DocumentRegistry } from '../../../core/documents/DocumentRegistry'
@@ -130,7 +130,7 @@ export class EditSessionService {
     try {
       let target = entry.snapshot.target
       if (target.kind === 'markdown-range') {
-        if (entry.model.kind !== 'markdown' || event.snapshot.model.kind !== 'markdown') throw new Error('正文格式已改变')
+        if (!isSourceDocumentModel(entry.model) || !isSourceDocumentModel(event.snapshot.model)) throw new Error('正文格式已改变')
         target = mapMarkdownRange(entry.model.source, event.snapshot.model.source, target)
       }
       if (targetFootprint(event.snapshot.model, target) !== entry.footprint) throw new Error('生成目标与新的文档修改重叠或已失效')

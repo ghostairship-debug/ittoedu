@@ -24,7 +24,7 @@ import { planNativeInsertion } from './nativeInsertion'
 import type { HostImageInput, PrepareImageResourcePort } from './imageResource'
 import type { ImageAssetResource } from './imageAssetMetadata'
 import { z } from 'zod'
-import type { DocumentDriver, DocumentSnapshot, DocumentModel } from '../../shared/workbench/document'
+import { isSourceDocumentModel, type DocumentDriver, type DocumentSnapshot, type DocumentModel } from '../../shared/workbench/document'
 import type { ModelToolCall, ToolAdvisory, ToolDefinition, ToolGateway, ToolResult, ToolRunGrant, ToolTarget } from '../../shared/workbench/tools'
 import { DocumentRegistry } from '../documents/DocumentRegistry'
 import { documentDigest } from '../documents/documentDigest'
@@ -86,7 +86,7 @@ function writableKinds(model: DocumentModel, writable: readonly ToolTarget[]): T
   for (const target of writable) {
     kinds.add(target.kind)
     if (target.kind === 'document') {
-      if (model.kind === 'markdown') kinds.add('markdown-range')
+      if (isSourceDocumentModel(model)) kinds.add('markdown-range')
       continue
     }
     if (model.kind !== 'course-v9') continue
@@ -255,7 +255,7 @@ export class DocumentToolGateway implements ToolGateway {
         }
         epochs.set(doc.documentId, snapshot.epoch)
         toolScopes.push(this.runScope(snapshot.model, doc.writable))
-        if (snapshot.model.kind === 'markdown') sources.set(doc.documentId, snapshot.model.source)
+        if (isSourceDocumentModel(snapshot.model)) sources.set(doc.documentId, snapshot.model.source)
       }
       if (this.runs.has(grant.runId)) throw new Error('任务编号已存在')
       await this.hostTools.beginRun(grant)
@@ -278,7 +278,7 @@ export class DocumentToolGateway implements ToolGateway {
     run.grant = { ...run.grant, documents: [...run.grant.documents, { documentId, writable: targets }] }
     run.epochs.set(documentId, snapshot.epoch)
     run.toolScopes.push(this.runScope(snapshot.model, targets))
-    if (snapshot.model.kind === 'markdown') run.sources.set(documentId, snapshot.model.source)
+    if (isSourceDocumentModel(snapshot.model)) run.sources.set(documentId, snapshot.model.source)
     run.advertised = undefined
     return writable
   }
@@ -425,7 +425,7 @@ export class DocumentToolGateway implements ToolGateway {
       try {
         const frozen = run.rangeFootprints.get(documentDigest({ documentId: snapshot.documentId, target: allowed }))
         if (frozen && frozen !== targetFootprint(snapshot.model, allowed)) return false
-        const mapped = allowed.kind === 'markdown-range' && snapshot.model.kind === 'markdown'
+        const mapped = allowed.kind === 'markdown-range' && isSourceDocumentModel(snapshot.model)
           ? mapMarkdownRange(run.sources.get(snapshot.documentId)!, snapshot.model.source, allowed) : allowed
         if (target.kind === 'course-background' && snapshot.model.kind === 'course-v9' &&
           (mapped.kind === 'course-location' || mapped.kind === 'course-owner' || mapped.kind === 'course-state')) {
@@ -469,7 +469,7 @@ export class DocumentToolGateway implements ToolGateway {
     const footprint = targetFootprint(snapshot.model, target)
     this.handles.set(id, { runId, documentId: snapshot.documentId, epoch: snapshot.epoch, revision: snapshot.revision,
       target: structuredClone(target), footprint, expectedFootprint: footprint, conflicted: false, writable, readOnly,
-      ...(target.kind === 'markdown-range' && snapshot.model.kind === 'markdown' ? { source: snapshot.model.source } : {}) })
+      ...(target.kind === 'markdown-range' && isSourceDocumentModel(snapshot.model) ? { source: snapshot.model.source } : {}) })
     return id
   }
   private handle(runId: string, id: string): Handle {
@@ -478,7 +478,7 @@ export class DocumentToolGateway implements ToolGateway {
     return handle
   }
   private handleFootprint(handle: Handle, model: DocumentModel): string {
-    const target = handle.target.kind === 'markdown-range' && model.kind === 'markdown'
+    const target = handle.target.kind === 'markdown-range' && isSourceDocumentModel(model)
       ? mapMarkdownRange(handle.source!, model.source, handle.target) : handle.target
     return targetFootprint(model, target)
   }
@@ -512,7 +512,7 @@ export class DocumentToolGateway implements ToolGateway {
     if (handle.conflicted) throw new ToolError('target-conflict', '目标内容已由其他操作改变；旧句柄不可续写，请核对新内容后重新发起任务。')
     let target = handle.target
     try {
-      if (target.kind === 'markdown-range' && snapshot.model.kind === 'markdown') target = mapMarkdownRange(handle.source!, snapshot.model.source, target)
+      if (target.kind === 'markdown-range' && isSourceDocumentModel(snapshot.model)) target = mapMarkdownRange(handle.source!, snapshot.model.source, target)
       if ((verifyFootprint || target.kind === 'flow-range' || target.kind === 'flow-container' && target.index !== undefined)
         && targetFootprint(snapshot.model, target) !== handle.footprint) {
         throw new Error(targetFootprint(snapshot.model, target) === handle.expectedFootprint && handle.expectedFootprint !== handle.footprint
@@ -652,7 +652,7 @@ export class DocumentToolGateway implements ToolGateway {
     for (let i = 0; i < mutations.length; i += 1) {
       let mutation = mutations[i]
       let target = targets[i]
-      if (target.kind === 'markdown-range' && model.kind === 'markdown' && snapshot.model.kind === 'markdown') target = mapMarkdownRange(snapshot.model.source, model.source, target)
+      if (target.kind === 'markdown-range' && isSourceDocumentModel(model) && isSourceDocumentModel(snapshot.model)) target = mapMarkdownRange(snapshot.model.source, model.source, target)
       let mediaAssetId: string | undefined
       if (mutation.name === 'media.apply') {
         if (target.kind !== 'course-object' && target.kind !== 'flow-block' && target.kind !== 'course-background') throw new Error('媒体替换需要已有媒体或正式背景句柄')
@@ -1035,7 +1035,7 @@ export class DocumentToolGateway implements ToolGateway {
       finalTargets.push(target)
     }
     if (run.stopped) throw new ToolError('run-stopped', '任务已停止，修改未提交')
-    const command = model.kind === 'markdown' ? { type: 'markdown.replace' as const, source: model.source, resources: model.resources }
+    const command = isSourceDocumentModel(model) ? { type: 'markdown.replace' as const, source: model.source, resources: model.resources }
       : { type: 'course.replace' as const, project: model.project, resources: model.resources }
     const result = await session.execute({ documentId: snapshot.documentId, epoch: snapshot.epoch, operationId, baseRevision: snapshot.revision,
       actor: run.grant.actor, runId, requestDigest, mutation: { type: 'command', command } })

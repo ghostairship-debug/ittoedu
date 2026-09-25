@@ -38,6 +38,10 @@ describe('general agent file tools', () => {
     expect(created.opened).toMatchObject({ writable: true, kind: 'markdown' })
     expect(await readFile(path.join(h.workspace, 'lesson', 'new.md'), 'utf8')).toBe('')
     expect(h.host.registry.get(created.opened!.documentId).read().binding).toMatchObject({ kind: 'file', path: path.join(h.workspace, 'lesson', 'new.md') })
+    const text = await h.files.execute(h.context, 'file.create', { name: 'notes.txt', kind: 'text' }, 'create-txt')
+    expect(text.opened).toMatchObject({ writable: true, kind: 'text' })
+    expect(await readFile(path.join(h.workspace, 'lesson', 'notes.txt'), 'utf8')).toBe('')
+    expect(h.host.registry.get(text.opened!.documentId).read()).toMatchObject({ model: { kind: 'text', source: '' }, binding: { kind: 'file', path: path.join(h.workspace, 'lesson', 'notes.txt') } })
   })
 
   it('confines workspace permission, permits outside only at full level, and never writes at read-only', async () => {

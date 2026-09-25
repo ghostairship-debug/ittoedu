@@ -22,6 +22,7 @@ const bytes = z.custom<Uint8Array>(value => value instanceof Uint8Array)
 const resources = z.object({ assets: z.record(z.string(), bytes), components: z.record(z.string(), z.record(z.string(), bytes)) }).strict()
 const model = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('markdown'), source: z.string(), resources }).strict(),
+  z.object({ kind: z.literal('text'), source: z.string(), resources }).strict(),
   z.object({ kind: z.literal('course-v9'), project: courseProjectDocumentSchema, resources }).strict(),
 ])
 const command = z.discriminatedUnion('type', [
