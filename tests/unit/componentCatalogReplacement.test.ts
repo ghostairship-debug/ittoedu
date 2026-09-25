@@ -5,6 +5,7 @@ import { componentContentSha256 } from '@/shared/componentContentIntegrity'
 import { useEditorStore,
   selectActiveCourseProjectDocument,
 } from '@/renderer/store/editorStore'
+import { createTriageT4StoreHost } from '../helpers/triage-t4-store-host'
 
 const PACKAGE_ID = 'com.example.catalog-card'
 
@@ -50,13 +51,17 @@ function activeHistory() {
 }
 
 describe('组件目录版本锁定', () => {
-  beforeEach(() => {
-    useEditorStore.getState().createNewProject()
+  let host: Awaited<ReturnType<typeof createTriageT4StoreHost>>
+
+  beforeEach(async () => {
+    host = await createTriageT4StoreHost()
   })
 
-  it('拒绝同一 ID 与版本对应不同哈希的替换，且保持工程不变', () => {
+  it('拒绝同一 ID 与版本对应不同哈希的替换，且保持工程不变', async () => {
     const original = catalogPackage('a'.repeat(64))
+    host.registerPackageData(original)
     useEditorStore.getState().importComponentPackage(original)
+    await useEditorStore.getState().drainCourseDocument()
     const projectBefore = structuredClone(selectActiveCourseProjectDocument(useEditorStore.getState())!)
     const historyBefore = activeHistory().past.length
 
@@ -67,12 +72,18 @@ describe('组件目录版本锁定', () => {
 
     const state = useEditorStore.getState()
     expect(selectActiveCourseProjectDocument(state)!).toEqual(projectBefore)
-    expect(state.componentPackages[PACKAGE_ID]).toBe(original)
+    expect(state.componentPackages[PACKAGE_ID]).toMatchObject({
+      manifest: original.manifest,
+      provenance: original.provenance,
+    })
     expect(activeHistory().past).toHaveLength(historyBefore)
   })
 
-  it('将哈希、导入时间和来源作为不可拆分的 Project V8 元数据保存', () => {
-    useEditorStore.getState().importComponentPackage(catalogPackage('a'.repeat(64)))
+  it('将哈希、导入时间和来源作为不可拆分的 Project V8 元数据保存', async () => {
+    const original = catalogPackage('a'.repeat(64))
+    host.registerPackageData(original)
+    useEditorStore.getState().importComponentPackage(original)
+    await useEditorStore.getState().drainCourseDocument()
     const project = structuredClone(selectActiveCourseProjectDocument(useEditorStore.getState())!)
     expect(courseProjectDocumentSchema.safeParse(project).success).toBe(true)
 
