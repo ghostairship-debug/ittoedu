@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import type { SpatialEditorAuthoringTargetInput } from '@/renderer/course/spatialEditorView'
 import {
@@ -25,6 +25,15 @@ import {
   selectSelectedNodeIds,
   useEditorStore,
 } from '@/renderer/store/editorStore'
+import {
+  activeDocumentId,
+  connectCourseHost,
+  courseContent,
+  formalCourse,
+  settleCourse,
+  undoSettled,
+  type CourseHost,
+} from '../helpers/triage-t2-course'
 
 const VIEWPORT = { x: 0, y: 0, width: 800, height: 450 }
 
@@ -44,27 +53,43 @@ function captureSpatialTarget(input: SpatialEditorAuthoringTargetInput) {
   })
 }
 
+// 2.0: every authoritative submit re-projects the session (fresh references,
+// history reset to an empty cursor), so "nothing changed" must be proven by
+// content. Formal History depth is asserted separately on the document session.
 function expectPersistentStateUnchanged(before: ReturnType<typeof useEditorStore.getState>) {
   const after = useEditorStore.getState()
-  expect(after.spatialSession).toBe(before.spatialSession)
+  expect(courseContent(after.spatialSession!.history.present))
+    .toEqual(courseContent(before.spatialSession!.history.present))
+  expect(after.spatialSession?.selection).toEqual(before.spatialSession?.selection)
+  expect(after.spatialSession?.sessionCamera).toEqual(before.spatialSession?.sessionCamera)
+  expect(after.spatialSession?.scope).toBe(before.spatialSession?.scope)
   expect(after.assetFiles).toBe(before.assetFiles)
-  expect(after.courseAssetSidecar).toBe(before.courseAssetSidecar)
-  expect(after.courseAssetSidecarPast).toBe(before.courseAssetSidecarPast)
-  expect(after.courseAssetSidecarFuture).toBe(before.courseAssetSidecarFuture)
-  expect(after.componentPackages).toBe(before.componentPackages)
-  expect(after.courseComponentPackagesPast).toBe(before.courseComponentPackagesPast)
-  expect(after.courseComponentPackagesFuture).toBe(before.courseComponentPackagesFuture)
-  expect(after.courseAuthoringSession).toBe(before.courseAuthoringSession)
+  expect(after.courseAssetSidecar).toEqual(before.courseAssetSidecar)
+  expect(after.componentPackages).toEqual(before.componentPackages)
+  expect(after.courseAuthoringSession?.token).toEqual(before.courseAuthoringSession?.token)
+  expect(after.courseAuthoringSession?.itemIds).toEqual(before.courseAuthoringSession?.itemIds)
+  // Editing session state is not re-projected: exact identity still applies.
   expect(after.spatialContentEdit).toBe(before.spatialContentEdit)
   expect(after.spatialGraphSelection).toBe(before.spatialGraphSelection)
-  expect(after.spatialSession?.selection.selectionIds).toBe(before.spatialSession?.selection.selectionIds)
-  expect(after.spatialSession?.selection.selectionIds.at(-1) ?? null).toBe(before.spatialSession?.selection.selectionIds.at(-1) ?? null)
   expect(selectActiveSceneId(after)).toBe(selectActiveSceneId(before))
   expect(after.dirty).toBe(before.dirty)
 }
 
-beforeEach(() => {
-  useEditorStore.getState().createNewSpatialProject()
+let host: CourseHost
+let documentId: string
+
+beforeEach(async () => {
+  const connected = await connectCourseHost()
+  host = connected.host
+  await useEditorStore.getState().createCourseDocument('spatial')
+  await settleCourse()
+  documentId = activeDocumentId()
+})
+
+// A draft left open (dirty or composing) would otherwise leak into the next
+// beforeEach: drainCourseDocument commits a dirty draft and throws on a composing one.
+afterEach(() => {
+  useEditorStore.setState({ spatialContentEdit: null, editingTextNodeId: null })
 })
 
 describe('Spatial canonical authoring targets', () => {
@@ -104,8 +129,10 @@ describe('Spatial canonical authoring targets', () => {
     } finally { mount.remove() }
   })
 
-  it('nudges the selected Spatial layer through the active Surface owner', () => {
+  it('nudges the selected Spatial layer through the active Surface owner', async () => {
     useEditorStore.getState().addTextNode(120, 160)
+    await settleCourse()
+    const depthBefore = formalCourse(host, documentId).undoDepth
     const before = useEditorStore.getState().spatialSession!
     const layerItemId = before.selection.selectionIds[0]
     if (!layerItemId) throw new Error('expected selected Spatial text')
@@ -120,13 +147,16 @@ describe('Spatial canonical authoring targets', () => {
       x: original.frame.x + 4,
       y: original.frame.y - 3,
     })
-    expect(after.history.past).toHaveLength(before.history.past.length + 1)
     expect(useEditorStore.getState().errorMessage).toBeNull()
+    await settleCourse()
+    expect(formalCourse(host, documentId).undoDepth).toBe(depthBefore + 1)
   })
 
-  it('rejects a revision-stale property callback with zero document, History, or resource writes', () => {
+  it('rejects a revision-stale property callback with zero document, History, or resource writes', async () => {
     const target = captureSpatialTarget({ kind: 'surface', field: 'backgroundColor' })
     useEditorStore.getState().addTextNode()
+    await settleCourse()
+    const depthBefore = formalCourse(host, documentId).undoDepth
     const before = useEditorStore.getState()
 
     const receipt = useEditorStore.getState().runSpatialAuthoringIntent(target, {
@@ -137,10 +167,13 @@ describe('Spatial canonical authoring targets', () => {
 
     expect(receipt).toMatchObject({ ok: false, historyEntry: false })
     expectPersistentStateUnchanged(before)
+    await settleCourse()
+    expect(formalCourse(host, documentId).undoDepth).toBe(depthBefore)
   })
 
-  it('guards same-revision camera callbacks with the exact session camera', () => {
+  it('guards same-revision camera callbacks with the exact session camera', async () => {
     const target = captureSpatialTarget({ kind: 'world', field: 'session.camera' })
+    const depthBefore = formalCourse(host, documentId).undoDepth
     const initial = useEditorStore.getState().spatialSession!
     const first = useEditorStore.getState().runSpatialAuthoringIntent(target, {
       kind: 'pan-session-camera',
@@ -151,7 +184,7 @@ describe('Spatial canonical authoring targets', () => {
     expect(first).toMatchObject({ ok: true, historyEntry: false })
     const afterPan = useEditorStore.getState()
     expect(afterPan.spatialSession?.sessionCamera).toEqual({ x: 80, y: -30, zoom: 1 })
-    expect(afterPan.spatialSession?.history).toBe(initial.history)
+    expect(afterPan.spatialSession?.history.present).toBe(initial.history.present)
 
     const stale = useEditorStore.getState().runSpatialAuthoringIntent(target, {
       kind: 'zoom-session-camera',
@@ -161,12 +194,16 @@ describe('Spatial canonical authoring targets', () => {
     })
     expect(stale).toMatchObject({ ok: false, historyEntry: false })
     expectPersistentStateUnchanged(afterPan)
+    await settleCourse()
+    expect(formalCourse(host, documentId).undoDepth).toBe(depthBefore)
   })
 
-  it('switches cameras without Project or History writes, synchronizes the Course token, and expires the old target', () => {
+  it('switches cameras without Project or History writes, synchronizes the Course token, and expires the old target', async () => {
     useEditorStore.getState().runSpatialCommand((session) => (
       addSpatialCameraFrameFromSession(session, { name: '远景' })
     ))
+    await settleCourse()
+    const depthBefore = formalCourse(host, documentId).undoDepth
     const initial = useEditorStore.getState()
     const session = initial.spatialSession!
     const surface = session.history.present.surfaces.find((candidate) => (
@@ -208,7 +245,7 @@ describe('Spatial canonical authoring targets', () => {
       revision: tokenBefore.revision,
       generation: tokenBefore.generation + 1,
     })
-    expect(after.spatialSession?.history).toBe(session.history)
+    expect(after.spatialSession?.history.present).toBe(session.history.present)
     expect(after.assetFiles).toBe(initial.assetFiles)
     expect(after.spatialSession?.sessionCamera).toEqual({
       x: frame.x,
@@ -216,12 +253,8 @@ describe('Spatial canonical authoring targets', () => {
       zoom: frame.zoom,
     })
     expect(after.spatialSession ? buildSpatialAuthoringSnapshot(after.spatialSession).activeCameraFrameId : null).toBe(frame.id)
-    expect(after.courseAssetSidecar).toBe(initial.courseAssetSidecar)
-    expect(after.courseAssetSidecarPast).toBe(initial.courseAssetSidecarPast)
-    expect(after.courseAssetSidecarFuture).toBe(initial.courseAssetSidecarFuture)
-    expect(after.componentPackages).toBe(initial.componentPackages)
-    expect(after.courseComponentPackagesPast).toBe(initial.courseComponentPackagesPast)
-    expect(after.courseComponentPackagesFuture).toBe(initial.courseComponentPackagesFuture)
+    expect(after.courseAssetSidecar).toEqual(initial.courseAssetSidecar)
+    expect(after.componentPackages).toEqual(initial.componentPackages)
     expect(after.dirty).toBe(initial.dirty)
 
     const stale = useEditorStore.getState().runSpatialAuthoringIntent(target, {
@@ -230,10 +263,14 @@ describe('Spatial canonical authoring targets', () => {
     })
     expect(stale).toMatchObject({ ok: false, historyEntry: false })
     expectPersistentStateUnchanged(after)
+    await settleCourse()
+    expect(formalCourse(host, documentId).undoDepth).toBe(depthBefore)
   })
 
-  it('rejects a callback bound to an older exact content-edit object', () => {
+  it('rejects a callback bound to an older exact content-edit object', async () => {
     useEditorStore.getState().addTextNode()
+    await settleCourse()
+    const depthBefore = formalCourse(host, documentId).undoDepth
     const session = useEditorStore.getState().spatialSession!
     const layerItemId = session.selection.selectionIds[0]
     if (!layerItemId) throw new Error('expected selected Spatial text')
@@ -272,9 +309,12 @@ describe('Spatial canonical authoring targets', () => {
     expect(stale).toMatchObject({ ok: false, historyEntry: false })
     expect(useEditorStore.getState().spatialContentEdit).toBe(updated.edit)
     expectPersistentStateUnchanged(before)
+    // No settle: the open dirty draft would be committed by drain. The rejection
+    // queued nothing, so the formal depth read is already authoritative.
+    expect(formalCourse(host, documentId).undoDepth).toBe(depthBefore)
   })
 
-  it('keeps path, relation, and semantic targets distinct across valid ID collisions and preserves no-op identity', () => {
+  it('keeps path, relation, and semantic targets distinct across valid ID collisions and preserves no-op identity', async () => {
     useEditorStore.getState().addTextNode()
     const firstId = useEditorStore.getState().spatialSession?.selection.selectionIds[0]
     useEditorStore.getState().addTextNode()
@@ -305,6 +345,8 @@ describe('Spatial canonical authoring targets', () => {
       maxZoom: 2,
       visible: true,
     }))
+    await settleCourse()
+    const depthBefore = formalCourse(host, documentId).undoDepth
 
     const cameraTarget = captureSpatialTarget({
       kind: 'camera-frame',
@@ -357,14 +399,18 @@ describe('Spatial canonical authoring targets', () => {
       expectedContentEdit: null,
     })).toMatchObject({ ok: true, historyEntry: false })
     expectPersistentStateUnchanged(before)
+    await settleCourse()
+    expect(formalCourse(host, documentId).undoDepth).toBe(depthBefore)
   })
 
-  it('rejects beginning a second text edit while a different dirty draft is open', () => {
+  it('rejects beginning a second text edit while a different dirty draft is open', async () => {
     useEditorStore.getState().addTextNode()
     const firstId = useEditorStore.getState().spatialSession?.selection.selectionIds[0]
     useEditorStore.getState().addTextNode()
     const secondId = useEditorStore.getState().spatialSession?.selection.selectionIds[0]
     if (!firstId || !secondId) throw new Error('expected two Spatial text layers')
+    await settleCourse()
+    const depthBefore = formalCourse(host, documentId).undoDepth
     const firstTarget = captureSpatialTarget({ kind: 'layer', layerItemId: firstId, field: 'content.data.text' })
     const secondTarget = captureSpatialTarget({ kind: 'layer', layerItemId: secondId, field: 'content.data.text' })
     const begun = useEditorStore.getState().runSpatialAuthoringIntent(firstTarget, {
@@ -393,10 +439,13 @@ describe('Spatial canonical authoring targets', () => {
     expect(rejected).toMatchObject({ ok: false, historyEntry: false })
     expect(useEditorStore.getState().spatialContentEdit).toBe(updated.edit)
     expectPersistentStateUnchanged(before)
+    expect(formalCourse(host, documentId).undoDepth).toBe(depthBefore)
   })
 
-  it('commits an open text draft and a layer transform as one logical History entry', () => {
+  it('commits an open text draft and a layer transform as one logical History entry', async () => {
     useEditorStore.getState().addTextNode()
+    await settleCourse()
+    const depthBefore = formalCourse(host, documentId).undoDepth
     const initial = useEditorStore.getState()
     const session = initial.spatialSession!
     const layerItemId = session.selection.selectionIds[0]
@@ -444,20 +493,21 @@ describe('Spatial canonical authoring targets', () => {
     expect(result).toMatchObject({ ok: true, historyEntry: true, edit: null })
     const after = useEditorStore.getState()
     expect(after.spatialContentEdit).toBeNull()
-    expect(after.spatialSession?.history.past).toHaveLength(session.history.past.length + 1)
-    expect(after.spatialSession?.history.past.at(-1)).toBe(session.history.present)
     expect(locateCourseLayer(after.spatialSession!.history.present, layerItemId)).toMatchObject({
       item: {
         frame: { x: located.item.frame.x + 40, y: located.item.frame.y + 20 },
         content: { data: { text: '原子草稿' } },
       },
     })
+    await settleCourse()
+    expect(formalCourse(host, documentId).undoDepth).toBe(depthBefore + 1)
 
-    useEditorStore.getState().undo()
-    expect(useEditorStore.getState().spatialSession?.history.present).toBe(session.history.present)
+    await undoSettled(host, documentId)
+    expect(courseContent(useEditorStore.getState().spatialSession!.history.present))
+      .toEqual(courseContent(session.history.present))
   })
 
-  it('commits a dirty text draft and graph selection as one logical History entry', () => {
+  it('commits a dirty text draft and graph selection as one logical History entry', async () => {
     useEditorStore.getState().addTextNode()
     const firstId = useEditorStore.getState().spatialSession?.selection.selectionIds[0]
     useEditorStore.getState().addTextNode()
@@ -469,6 +519,8 @@ describe('Spatial canonical authoring targets', () => {
       name: '草稿切换路径',
       layerItemIds: [firstId, secondId],
     }))
+    await settleCourse()
+    const depthBefore = formalCourse(host, documentId).undoDepth
 
     const worldTarget = captureSpatialTarget({ kind: 'world', field: 'world' })
     const contentTarget = captureSpatialTarget({
@@ -491,8 +543,7 @@ describe('Spatial canonical authoring targets', () => {
       runs: [],
     })
     if (!updated.ok || !updated.edit) throw new Error('expected updated draft')
-    const before = useEditorStore.getState()
-    const beforeSession = before.spatialSession!
+    const beforeSession = useEditorStore.getState().spatialSession!
 
     const result = useEditorStore.getState().runSpatialAuthoringIntent(worldTarget, {
       kind: 'set-graph-selection',
@@ -508,23 +559,24 @@ describe('Spatial canonical authoring targets', () => {
     expect(after.spatialSession?.selection.selectionIds).toEqual([])
     expect(selectSelectedNodeIds(after)).toEqual([])
     expect(selectSelectedNodeId(after)).toBeNull()
-    expect(after.spatialSession?.history.past).toHaveLength(beforeSession.history.past.length + 1)
-    expect(after.spatialSession?.history.past.at(-1)).toBe(beforeSession.history.present)
-    expect(after.courseAssetSidecarPast).toHaveLength(before.courseAssetSidecarPast.length + 1)
-    expect(after.courseComponentPackagesPast).toHaveLength(before.courseComponentPackagesPast.length + 1)
     expect(locateCourseLayer(after.spatialSession!.history.present, firstId)).toMatchObject({
       item: { content: { data: { text: '随图谱选择原子提交的草稿' } } },
     })
+    await settleCourse()
+    expect(formalCourse(host, documentId).undoDepth).toBe(depthBefore + 1)
 
-    useEditorStore.getState().undo()
-    expect(useEditorStore.getState().spatialSession?.history.present).toBe(beforeSession.history.present)
+    await undoSettled(host, documentId)
+    expect(courseContent(useEditorStore.getState().spatialSession!.history.present))
+      .toEqual(courseContent(beforeSession.history.present))
   })
 
-  it('keeps a composing Spatial draft intact when run mode or camera navigation asks to commit it', () => {
+  it('keeps a composing Spatial draft intact when run mode or camera navigation asks to commit it', async () => {
     useEditorStore.getState().runSpatialCommand((session) => (
       addSpatialCameraFrameFromSession(session, { name: '第二镜头' })
     ))
     useEditorStore.getState().addTextNode()
+    await settleCourse()
+    const depthBefore = formalCourse(host, documentId).undoDepth
     const session = useEditorStore.getState().spatialSession!
     const layerItemId = session.selection.selectionIds[0]
     if (!layerItemId) throw new Error('expected selected Spatial text')
@@ -555,10 +607,15 @@ describe('Spatial canonical authoring targets', () => {
     expect(useEditorStore.getState().spatialSession?.selection.locationId)
       .toBe(session.selection.locationId)
     expectPersistentStateUnchanged(beforeNavigation)
+    // No settle: drainCourseDocument throws while a composing draft is open. The
+    // blocked run-mode and navigation requests queued nothing, so the formal
+    // depth read is already authoritative.
+    expect(formalCourse(host, documentId).undoDepth).toBe(depthBefore)
   })
 
-  it('keeps a pointer gesture bound to its pointer-down target after a concurrent revision change', () => {
+  it('keeps a pointer gesture bound to its pointer-down target after a concurrent revision change', async () => {
     useEditorStore.getState().addTextNode()
+    await settleCourse()
     const session = useEditorStore.getState().spatialSession!
     const layerItemId = session.selection.selectionIds[0]
     if (!layerItemId) throw new Error('expected selected Spatial text')
@@ -597,10 +654,14 @@ describe('Spatial canonical authoring targets', () => {
     useEditorStore.getState().runSpatialCommand((current) => (
       addSpatialCameraFrameFromSession(current, { name: '并发新增镜头' })
     ))
+    await settleCourse()
+    const depthBefore = formalCourse(host, documentId).undoDepth
     const beforePointerUp = useEditorStore.getState()
     const result = controller.pointerUp({ x: center.x + 40, y: center.y + 20 }, VIEWPORT)
 
     expect(result.command).toMatchObject({ ok: false, historyEntry: false })
     expectPersistentStateUnchanged(beforePointerUp)
+    await settleCourse()
+    expect(formalCourse(host, documentId).undoDepth).toBe(depthBefore)
   })
 })
