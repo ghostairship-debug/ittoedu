@@ -3,15 +3,16 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { selectActiveCourseProjectDocument, useEditorStore } from '@/renderer/store/editorStore'
 import { AutomationTab } from '@/renderer/ui/AutomationTab'
 import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
+import { connectAssignedCourse, settleAssignedCourse } from '../helpers/triage-t5-courseHost'
 
-beforeEach(() => {
-  useEditorStore.getState().createNewProject()
+beforeEach(async () => {
+  await connectAssignedCourse()
 })
 
 afterEach(cleanup)
 
 describe('professional course logic authoring UI', () => {
-  it('可发现并编辑默认值、位置、all/any、条件和阻止提示', () => {
+  it('可发现并编辑默认值、位置、all/any、条件和阻止提示', async () => {
     render(<AutomationTab />)
 
     const panel = screen.getByTestId('course-logic-authoring')
@@ -31,6 +32,7 @@ describe('professional course logic authoring UI', () => {
     fireEvent.click(within(newState).getByRole('button', {
       name: '保存课程状态 新状态',
     }))
+    await settleAssignedCourse()
 
     let project = selectActiveCourseProjectDocument(useEditorStore.getState())
     expect(project?.courseState).toEqual([
@@ -62,6 +64,7 @@ describe('professional course logic authoring UI', () => {
     fireEvent.click(within(guardEditor).getByRole('button', {
       name: '保存导航守卫 新守卫',
     }))
+    await settleAssignedCourse()
 
     project = selectActiveCourseProjectDocument(useEditorStore.getState())
     if (!project) throw new Error('导航守卫未保存')
@@ -83,6 +86,7 @@ describe('professional course logic authoring UI', () => {
     fireEvent.click(within(stateEditor).getByRole('button', {
       name: '保存课程状态 mastery',
     }))
+    await settleAssignedCourse()
 
     project = selectActiveCourseProjectDocument(useEditorStore.getState())
     expect(project?.courseState[0]?.key).toBe('masteryScore')

@@ -3,10 +3,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ComponentLayerItem } from '../../src/shared/courseProjectTypes'
 import { SceneThumbnail } from '../../src/renderer/ui/SceneThumbnail'
 import { createBlankCourseProject } from '../../src/core/course/createCourseProject'
-import { useEditorStore } from '../../src/renderer/store/editorStore'
+import { createDefaultTeacherControllerPackage } from '../../src/shared/defaultTeacherControllerComponent'
+import { componentPackageMeta } from '../../src/shared/componentPackageMeta'
+import { courseSlideCanvas } from '../../src/shared/slideCanvas'
+import { openAssignedCourse } from '../helpers/triage-t5-courseHost'
 
 beforeEach(() => {
-  useEditorStore.getState().createNewProject()
   vi.stubGlobal('IntersectionObserver', undefined)
 })
 
@@ -56,6 +58,7 @@ describe('scene thumbnail playback visibility semantics', () => {
     const project = createBlankCourseProject({ includeDefaultController: false, controls: 'none' })
     const surface = project.surfaces[0]
     if (!surface || surface.type !== 'slide') throw new Error('expected slide')
+    const controller = createDefaultTeacherControllerPackage()
     const node: ComponentLayerItem = {
       layerItemId: 'animated-thumbnail-node',
       label: 'animated-thumbnail-node',
@@ -68,26 +71,17 @@ describe('scene thumbnail playback visibility semantics', () => {
       hitPolicy: 'auto',
       playbackInitialVisibility: 'hidden',
       kind: 'component',
-      component: { packageId: 'com.example.card', version: '1.0.0' },
+      component: { packageId: controller.manifest.id, version: controller.manifest.version },
       props: {},
     }
     surface.scenes[0]!.layerItems = [node]
-    project.componentPackages = {
-      'com.example.card': {
-        packageId: 'com.example.card',
-        version: '1.0.0',
-        name: 'Card',
-        manifestPath: 'components/com.example.card/manifest.json',
-        runtimePath: 'components/com.example.card/runtime.js',
-        contentSha256: 'a'.repeat(64),
-      },
-    }
-    useEditorStore.getState().loadCourseProject(project, null, {}, {})
+    project.componentPackages = { [controller.manifest.id]: componentPackageMeta(controller) }
+    await openAssignedCourse(project, {}, { [controller.manifest.id]: controller })
 
     render(<SceneThumbnail locationId={project.startLocationId} />)
     await waitFor(() => expect(translate).toHaveBeenCalled())
 
-    const thumbnailScale = 160 / 1280
+    const thumbnailScale = 160 / courseSlideCanvas(project).width
     expect(translate).toHaveBeenCalledWith(
       (node.frame.x + node.frame.width / 2) * thumbnailScale,
       (node.frame.y + node.frame.height / 2) * thumbnailScale,

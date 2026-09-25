@@ -3,6 +3,11 @@ import { assertSafeArchivePath } from './codecs/archivePath'
 
 export const emptyDocumentResources = (): DocumentResources => ({ assets: {}, components: {} })
 
+/** structuredClone across jsdom and Node does not share one Uint8Array prototype. */
+function isUint8ArrayBytes(value: unknown): value is Uint8Array {
+  return value instanceof Uint8Array || Object.prototype.toString.call(value) === '[object Uint8Array]'
+}
+
 function record(value: unknown, label: string): asserts value is Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new TypeError(`${label}必须是资源记录`)
 }
@@ -23,7 +28,7 @@ export function cloneDocumentResources(resources: DocumentResources, relativePat
     paths.add(folded)
   }
   for (const [id, bytes] of Object.entries(resources.assets)) {
-    if (!id.trim() || !(bytes instanceof Uint8Array)) throw new TypeError('素材身份或字节无效')
+    if (!id.trim() || !isUint8ArrayBytes(bytes)) throw new TypeError('素材身份或字节无效')
     if (relativePaths) claimPath(id)
     assets[id] = Uint8Array.from(bytes)
   }
@@ -34,7 +39,7 @@ export function cloneDocumentResources(resources: DocumentResources, relativePat
     const next: Record<string, Uint8Array> = Object.create(null)
     for (const [path, bytes] of Object.entries(files)) {
       assertSafeArchivePath(path, 'component')
-      if (!(bytes instanceof Uint8Array)) throw new TypeError('组件文件不是有效字节')
+      if (!isUint8ArrayBytes(bytes)) throw new TypeError('组件文件不是有效字节')
       if (relativePaths) claimPath(`${id}/${path}`)
       next[path] = Uint8Array.from(bytes)
     }

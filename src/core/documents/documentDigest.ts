@@ -1,10 +1,14 @@
 import { sha256 } from '@noble/hashes/sha256'
 import { bytesToHex } from '@noble/hashes/utils'
 
+function isUint8ArrayBytes(value: unknown): value is Uint8Array {
+  return value instanceof Uint8Array || Object.prototype.toString.call(value) === '[object Uint8Array]'
+}
+
 /** Tagged encoding keeps bytes distinct from user objects and ignores key order. */
 function encode(value: unknown): unknown {
   if (value === null) return ['null']
-  if (value instanceof Uint8Array) return ['bytes', Array.from(value)]
+  if (isUint8ArrayBytes(value)) return ['bytes', Array.from(value)]
   if (Array.isArray(value)) return ['array', value.map(encode)]
   if (typeof value === 'object') {
     return ['object', Object.keys(value).sort().map(key => [key, encode((value as Record<string, unknown>)[key])])]

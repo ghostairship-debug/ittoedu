@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { courseProjectDocumentSchema } from '../../src/shared/courseProjectSchema'
 import { imageNodeSchema } from '../../src/shared/contracts/native-v1'
@@ -9,14 +9,15 @@ import { selectActiveScene, useEditorStore,
   selectSlideSceneList,
 } from '../../src/renderer/store/editorStore'
 import { PropertiesTab } from '../../src/renderer/ui/PropertiesTab'
+import { connectAssignedCourse, settleAssignedCourse, undoAssignedCourse } from '../helpers/triage-t5-courseHost'
 
 afterEach(cleanup)
 
-beforeEach(() => {
-  useEditorStore.getState().createNewProject()
+beforeEach(async () => {
+  await connectAssignedCourse()
 })
 
-function addImage(): string {
+async function addImage(): Promise<string> {
   const store = useEditorStore.getState()
   store.addImageNode({
     id: 'asset-image',
@@ -28,6 +29,7 @@ function addImage(): string {
     width: 320,
     height: 180,
   }, new Uint8Array([1, 2, 3, 4]))
+  await settleAssignedCourse()
   return selectSelectedNodeId(useEditorStore.getState())!
 }
 
@@ -49,11 +51,12 @@ describe('image safe-area metadata', () => {
     expect(imageNodeSchema.safeParse(image)).toMatchObject({ success: false })
   })
 
-  it('adds, edits, removes, and undoes a stable safe area from image properties', () => {
-    const nodeId = addImage()
+  it('adds, edits, removes, and undoes a stable safe area from image properties', async () => {
+    const nodeId = await addImage()
     render(<PropertiesTab onReplaceImage={vi.fn()} />)
 
     fireEvent.click(screen.getByRole('button', { name: '添加安全区' }))
+    await settleAssignedCourse()
     let node = selectActiveScene(useEditorStore.getState()).nodes.find(
       ({ id }) => id === nodeId,
     )
@@ -69,13 +72,14 @@ describe('image safe-area metadata', () => {
     const left = screen.getByRole('slider', { name: '左侧位置' })
     fireEvent.change(left, { target: { value: '15' } })
     fireEvent.pointerUp(left)
+    await settleAssignedCourse()
     node = selectActiveScene(useEditorStore.getState()).nodes.find(
       ({ id }) => id === nodeId,
     )
     if (node?.type !== 'image') throw new Error('Expected image node')
     expect(node.safeAreas?.[0]!.x).toBe(0.15)
 
-    act(() => { useEditorStore.getState().undo() })
+    await undoAssignedCourse()
     node = selectActiveScene(useEditorStore.getState()).nodes.find(
       ({ id }) => id === nodeId,
     )
@@ -83,6 +87,7 @@ describe('image safe-area metadata', () => {
     expect(node.safeAreas?.[0]!.x).toBe(0.1)
 
     fireEvent.click(screen.getByRole('button', { name: '删除安全区 安全区 1' }))
+    await settleAssignedCourse()
     node = selectActiveScene(useEditorStore.getState()).nodes.find(
       ({ id }) => id === nodeId,
     )
@@ -90,8 +95,8 @@ describe('image safe-area metadata', () => {
     expect(node.safeAreas).toEqual([])
   })
 
-  it('does not let the editor exceed the 16-area schema limit', () => {
-    const nodeId = addImage()
+  it('does not let the editor exceed the 16-area schema limit', async () => {
+    const nodeId = await addImage()
     useEditorStore.getState().updateNode(nodeId, {
       safeAreas: Array.from({ length: 16 }, (_, index) => ({
         id: `safe_area_${index}`,
@@ -102,6 +107,7 @@ describe('image safe-area metadata', () => {
         height: 1,
       })),
     })
+    await settleAssignedCourse()
     render(<PropertiesTab onReplaceImage={vi.fn()} />)
 
     const add = screen.getByRole('button', { name: '添加安全区' })
