@@ -51,6 +51,7 @@ function activeHistory() {
  */
 function formalWriteReceipt() {
   const snapshot = formalReceipt()
+  if (snapshot.model.kind !== 'course-v9') throw new Error('expected Course Project V9')
   return {
     revision: snapshot.revision,
     undoDepth: snapshot.undoDepth,
