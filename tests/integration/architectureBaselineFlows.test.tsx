@@ -195,7 +195,7 @@ describe('ARCH-0 representative functional baseline', () => {
         />
       </div>,
     )
-    const editor = screen.getByRole('textbox', { name: '正文排版编辑' })
+    const editor = screen.getByRole('textbox', { name: '正文编辑' })
     await new Promise((resolve) => setTimeout(resolve, 0))
     const composed = '中文输入法（IME）基线：春风又绿江南岸。'
     const paragraph = editor.querySelector('[data-document-id="flow-ime-paragraph"]')
