@@ -298,15 +298,18 @@ export function createRuntimeAuthoringActions(ports: RuntimeAuthoringPorts) {
       && candidate.id === projectedItemId
       && candidate.item.kind === 'runtime'
     ))
-    if (
-      !row
-      || row.item.kind !== 'runtime'
-      || row.locked
-      || !Object.hasOwn(row.item.runtime.content.values, session.key)
-    ) {
-      return null
-    }
-    const initialValue = row.item.runtime.content.values[session.key]
+    if (!row || row.item.kind !== 'runtime' || row.locked) return null
+    // M15: host-recognised text is edited as a rule; keyed text keeps its content value.
+    const override = session.lightEdit
+      ? { original: session.lightEdit.original, region: session.lightEdit.region }
+      : undefined
+    const initialValue = override
+      ? row.item.runtime.content.overrides?.find(rule => (
+        rule.original === override.original && (rule.region ?? null) === override.region
+      ))?.text ?? override.original
+      : Object.hasOwn(row.item.runtime.content.values, session.key)
+        ? row.item.runtime.content.values[session.key]
+        : undefined
     if (typeof initialValue !== 'string') return null
 
     authoringSession = updateCourseAuthoringSessionRevision(
@@ -324,6 +327,7 @@ export function createRuntimeAuthoringActions(ports: RuntimeAuthoringPorts) {
         itemId: row.id,
         contentKey: session.key,
         initialValue,
+        ...(override ? { override } : {}),
       })
     } catch {
       return null

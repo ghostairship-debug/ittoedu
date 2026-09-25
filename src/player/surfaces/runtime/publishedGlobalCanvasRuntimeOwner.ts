@@ -25,6 +25,7 @@ import {
   type PublishedSurfaceRuntimeSession,
 } from './publishedSurfaceRuntimeMount'
 import { setPublishedGlobalCanvasRuntimeState } from './publishedGlobalCanvasRuntimePointer'
+import type { LightEditTextOverride } from '../../../shared/contracts/runtime/lightEdit'
 
 type RuntimeFailurePhase = 'register' | 'create' | 'lifecycle' | 'destroy'
 
@@ -281,6 +282,16 @@ export class PublishedGlobalCanvasRuntimeOwner {
     this.#restartPrepared = false
     this.#sideEffectGate.activate()
     if (currentSurfaceId) this.moveTo(currentSurfaceId)
+  }
+
+  /** M15: light-edit rules apply in place; the global Runtime keeps its state. */
+  applyAuthoringTextOverrides(itemId: string, overrides: readonly LightEditTextOverride[]): boolean {
+    if (!this.#authoring || this.#destroyed) return false
+    const record = this.#records.get(itemId)
+    if (!record || record.failed) return false
+    record.item.runtime.content.overrides = overrides.map(rule => ({ ...rule }))
+    return 'applyAuthoringTextOverrides' in record.handle
+      && record.handle.applyAuthoringTextOverrides(record.item.runtime.content.overrides)
   }
 
   async applyAuthoringContentValue(itemId: string, key: string, value: string): Promise<boolean> {

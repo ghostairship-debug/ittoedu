@@ -918,6 +918,41 @@ export class SlidePublishedAdapter implements SurfaceHost, PublishedAuthoringPat
       return { ok: true, target: patch.target }
     }
 
+    if (patch.kind === 'runtime-text-overrides') {
+      const record = this.#authoringRecord(patch.target.scope, patch.target.nodeId)
+      const captured = this.#captureAuthoringIdentity(patch.target, commandIdentity, patch.target.nodeId)
+      const identity = this.#validateCapturedAuthoringRecord(captured, record)
+      if (!identity.ok) return identity
+      if (!record || record.item.kind !== 'runtime') {
+        return this.#authoringFailure('target-not-found', `当前 Published 宿主中不存在 Runtime“${patch.target.nodeId}”。`)
+      }
+      const overrides = patch.overrides.map(rule => ({ ...rule }))
+      const item: PublishedRuntimeLayerItem = {
+        ...record.item,
+        runtime: { ...record.item.runtime, content: { ...record.item.runtime.content, overrides } },
+      }
+      if (!overrides.length) delete item.runtime.content.overrides
+      // M15: rules apply in place so the Runtime keeps its current state; a carrier
+      // that cannot update (Surface Runtime, failed boot) is rebuilt instead.
+      const handle = record.runtimeHandle
+      if (!(handle && 'applyAuthoringTextOverrides' in handle && handle.applyAuthoringTextOverrides(overrides))) {
+        if (!record.remountRuntime) {
+          return this.#authoringFailure('update-failed', `Runtime“${patch.target.nodeId}”没有可重建的作者实例。`)
+        }
+        try {
+          await record.remountRuntime(item)
+        } catch (error) {
+          const current = this.#validateCapturedAuthoringRecord(captured, record)
+          if (!current.ok) return current
+          throw error
+        }
+      }
+      const current = this.#validateCapturedAuthoringRecord(captured, record)
+      if (!current.ok) return current
+      record.item = item
+      return { ok: true, target: patch.target }
+    }
+
     if (patch.kind === 'runtime-content') {
       const record = this.#authoringRecord(patch.target.scope, patch.target.nodeId)
       const captured = this.#captureAuthoringIdentity(

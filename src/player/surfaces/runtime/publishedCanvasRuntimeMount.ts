@@ -7,6 +7,7 @@ import type {
   RuntimePresentationApi,
 } from '../../../shared/runtimeTypes'
 import type { RuntimeHost, RuntimeMountEnvironment } from '../../RuntimeHost'
+import type { LightEditTextOverride } from '../../../shared/contracts/runtime/lightEdit'
 import type { RuntimeRegistry } from '../../RuntimeRegistry'
 import { decodePublishedCode } from '../../decodePublishedExecutableCode'
 import type {
@@ -25,6 +26,8 @@ export interface PublishedCanvasRuntimeMountHandle {
   readonly ok: boolean
   readonly element: HTMLElement
   applyAuthoringContentValue(key: string, value: string): boolean
+  /** M15: replace the Runtime's light-edit rules without recreating it. */
+  applyAuthoringTextOverrides(overrides: readonly LightEditTextOverride[]): boolean
   waitForReady(): Promise<void>
   waitForObservationReady?(): Promise<void>
   waitForCaptureReady(): Promise<void>
@@ -166,6 +169,7 @@ function failedHandle(
     ok: false,
     element,
     applyAuthoringContentValue: () => false,
+    applyAuthoringTextOverrides: () => false,
     waitForReady: () => Promise.reject(failure),
     waitForCaptureReady: () => Promise.reject(failure),
     restoreAfterCapture() {},
@@ -538,6 +542,14 @@ export function mountPublishedCanvasRuntime(
       options.runtime.content.values[key] = value
       runtime.content.values[key] = value
       return applyPublishedRuntimeAuthoringText(host, key, value)
+    },
+    applyAuthoringTextOverrides(overrides) {
+      if (options.mode !== 'authoring' || destroyed || quarantined || !runtimeHost) return false
+      const next = overrides.map(rule => ({ ...rule }))
+      options.runtime.content.overrides = next
+      runtime.content.overrides = next
+      runtimeHost.setTextOverrides(next)
+      return true
     },
     async waitForReady() {
       if (captureFailure) throw captureFailure

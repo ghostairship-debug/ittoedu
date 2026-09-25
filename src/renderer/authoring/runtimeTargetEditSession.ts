@@ -29,6 +29,8 @@ export interface RuntimeTargetEditSession {
   readonly nodeId?: string
   readonly kind: RuntimeAuthoringTarget['kind']
   readonly key: string
+  /** M15: the host-recognised occurrence captured when the edit began. */
+  readonly lightEdit?: Readonly<{ original: string; region: string }>
 }
 
 export type RuntimeTargetEditFailureReason =
@@ -112,6 +114,9 @@ export function beginRuntimeTargetEditSession(
       ...(target.nodeId === undefined ? {} : { nodeId: target.nodeId }),
       kind: target.kind,
       key: target.key,
+      ...(target.lightEdit
+        ? { lightEdit: Object.freeze({ original: target.lightEdit.original, region: target.lightEdit.region }) }
+        : {}),
     }),
   }
 }

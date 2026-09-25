@@ -682,3 +682,62 @@ describe('planRuntimeContentTextUpdate', () => {
     expect(Object.isFrozen(plan.feedback)).toBe(true)
   })
 })
+
+describe('M15 light-edit rules for text the Runtime renders itself', () => {
+  function overrideTarget(source: RuntimeFixture, override: { original: string; region?: string }, initialValue = override.original) {
+    return captureCourseRuntimeContentTextTarget({
+      sessionToken: source.currentIdentity.sessionToken,
+      projectId: source.project.id,
+      surfaceId: source.currentIdentity.surfaceId,
+      stateId: null,
+      owner: source.currentIdentity.owner,
+      sceneId: source.sceneId,
+      itemId: source.itemId,
+      contentKey: '',
+      initialValue,
+      override,
+    })
+  }
+
+  it.each(['slide-scene', 'global', 'flow-surface'] as const)('writes one rule for %s without touching content values', (kind) => {
+    const source = fixture(kind)
+    const target = overrideTarget(source, { original: '开始答题', region: 'main>button' })
+    const plan = planned(planRuntimeContentTextUpdate(input(source, { target, value: '开始练习' })))
+    const runtime = findRuntime(plan.nextDocument, source.itemId).runtime
+    expect(runtime.content.overrides).toEqual([{ original: '开始答题', region: 'main>button', text: '开始练习' }])
+    expect(runtime.content.values).toEqual(findRuntime(source.project, source.itemId).runtime.content.values)
+    expect(decodeURIComponent(target.courseTarget.authoringAddress)).toContain('runtime/content/overrides/')
+  })
+
+  it('replaces the same original and region, and drops the rule when the text is back to the original', () => {
+    const source = fixture('slide-scene')
+    const first = planned(planRuntimeContentTextUpdate(input(source, { target: overrideTarget(source, { original: '下一题', region: 'div>button' }), value: '继续' })))
+    const edited: RuntimeFixture = {
+      ...source,
+      project: first.nextDocument,
+      currentIdentity: { ...source.currentIdentity, documentRevision: first.nextDocument.revision, sessionToken: { ...source.currentIdentity.sessionToken, revision: first.nextDocument.revision } },
+    }
+    const again = planned(planRuntimeContentTextUpdate(input(edited, { target: overrideTarget(edited, { original: '下一题', region: 'div>button' }, '继续'), value: '下一步' })))
+    expect(findRuntime(again.nextDocument, source.itemId).runtime.content.overrides).toEqual([{ original: '下一题', region: 'div>button', text: '下一步' }])
+    const reverted = planned(planRuntimeContentTextUpdate(input(edited, { target: overrideTarget(edited, { original: '下一题', region: 'div>button' }, '继续'), value: '下一题' })))
+    expect(findRuntime(reverted.nextDocument, source.itemId).runtime.content).not.toHaveProperty('overrides')
+  })
+
+  it('keeps a rule for another region and rejects a stale starting text', () => {
+    const source = fixture('slide-scene')
+    const first = planned(planRuntimeContentTextUpdate(input(source, { target: overrideTarget(source, { original: '提交', region: 'form>button' }), value: '交卷' })))
+    const edited: RuntimeFixture = {
+      ...source,
+      project: first.nextDocument,
+      currentIdentity: { ...source.currentIdentity, documentRevision: first.nextDocument.revision, sessionToken: { ...source.currentIdentity.sessionToken, revision: first.nextDocument.revision } },
+    }
+    const other = planned(planRuntimeContentTextUpdate(input(edited, { target: overrideTarget(edited, { original: '提交' }), value: '确认' })))
+    expect(findRuntime(other.nextDocument, source.itemId).runtime.content.overrides).toEqual([
+      { original: '提交', region: 'form>button', text: '交卷' },
+      { original: '提交', text: '确认' },
+    ])
+    // The captured starting text no longer matches the rule the document holds.
+    expect(planRuntimeContentTextUpdate(input(edited, { target: overrideTarget(edited, { original: '提交', region: 'form>button' }), value: 'x' })))
+      .toMatchObject({ ok: false, code: 'content-changed' })
+  })
+})

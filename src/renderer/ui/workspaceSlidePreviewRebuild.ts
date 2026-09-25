@@ -125,8 +125,10 @@ function runtimeAuthoringStructure(runtime: unknown): unknown {
   }
   const contentRecord = content as Record<string, unknown>
   const values = contentRecord.values
+  // Values and M15 text rules update the live host in place; only their shape rebuilds it.
+  const { overrides: _overrides, ...stableContent } = contentRecord
   const contentStructure = {
-    ...contentRecord,
+    ...stableContent,
     values: typeof values === 'object' && values !== null && !Array.isArray(values)
       ? Object.keys(values).sort()
       : values,

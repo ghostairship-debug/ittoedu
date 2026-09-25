@@ -1494,6 +1494,11 @@ function createPublishedAuthoringCourseSession(
     getAuthoringContext: () => host.getAuthoringContext(),
     getAuthoringGeneration: () => host.getAuthoringGeneration(),
     applyAuthoringPatch: async (context, patch, identity) => {
+      if (patch.kind === 'runtime-text-overrides' && patch.target.scope === 'global') {
+        return globalRuntimeOwner.applyAuthoringTextOverrides(patch.target.nodeId, patch.overrides)
+          ? { ok: true, target: patch.target }
+          : { ok: false, code: 'update-failed', message: '全局 Runtime 作者目标已失效，无法原位更新文字。' }
+      }
       if (patch.kind !== 'runtime-content' || patch.target.scope !== 'global') {
         return host.applyAuthoringPatch(context, patch, identity)
       }

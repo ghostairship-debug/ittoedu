@@ -7,6 +7,7 @@ import {
 import { nodeMotionActionSchema } from './interactionSchema'
 import type { NodeMotionAction } from './interactionTypes'
 import type { RuntimeAuthoringTargetUpdate } from './runtimeTypes'
+import { lightEditTextOverridesSchema, type LightEditTextOverride } from './contracts/runtime/lightEdit'
 
 export interface PlayerAuthoringNativeNode {
   id: string
@@ -69,6 +70,11 @@ export type PlayerAuthoringTarget =
       nodeId: string
       key: string
     }
+  | {
+      kind: 'runtime-text-overrides'
+      scope: PlayerAuthoringScope
+      nodeId: string
+    }
 
 export type PlayerAuthoringPatch =
   | {
@@ -100,6 +106,12 @@ export type PlayerAuthoringPatch =
       kind: 'runtime-content'
       target: Extract<PlayerAuthoringTarget, { kind: 'runtime-content' }>
       value: string
+    }
+  | {
+      /** M15: every light-edit rule of one Runtime, applied in place. */
+      kind: 'runtime-text-overrides'
+      target: Extract<PlayerAuthoringTarget, { kind: 'runtime-text-overrides' }>
+      overrides: readonly LightEditTextOverride[]
     }
 
 export interface PlayerAuthoringPatchCommand {
@@ -226,6 +238,11 @@ const runtimeContentTargetSchema = z.object({
   nodeId: identifier,
   key: identifier,
 }).strict()
+const runtimeTextOverridesTargetSchema = z.object({
+  kind: z.literal('runtime-text-overrides'),
+  scope: z.enum(['scene', 'global']),
+  nodeId: identifier,
+}).strict()
 const targetSchema = z.discriminatedUnion('kind', [
   nativeTargetSchema,
   sceneBackgroundTargetSchema,
@@ -318,6 +335,11 @@ const patchSchema = z.discriminatedUnion('kind', [
     kind: z.literal('runtime-content'),
     target: runtimeContentTargetSchema,
     value: z.string().max(1_000_000),
+  }).strict(),
+  z.object({
+    kind: z.literal('runtime-text-overrides'),
+    target: runtimeTextOverridesTargetSchema,
+    overrides: lightEditTextOverridesSchema,
   }).strict(),
 ])
 

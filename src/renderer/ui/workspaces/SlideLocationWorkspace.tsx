@@ -1,6 +1,7 @@
 import { resolveSlideSelectionLayer } from '../../workbench/SelectionContextController'
 import { NativeSelectionContext } from '../../workbench/NativeSelectionContext'
 import { QUICK_BAR_SELECTOR } from '../../editing/quickbar/usePointerGesture'
+import type { LightEditTextOverride } from '../../../shared/contracts/runtime/lightEdit'
 import { canEditLayerInScope } from '../../../shared/teacherControllerRole'
 import { useControllerDisplayRevision } from '../../authoring/controllerDisplayBounds'
 import {
@@ -130,6 +131,20 @@ import {
 } from './SlideDynamicAuthoringOverlay'
 
 export const SLIDE_SESSIONLESS_ERROR = '没有活动的 Slide 编辑会话，不能从旧工程恢复界面'
+
+type RuntimeOverrideSync = Map<string, { scope: 'scene' | 'global'; nodeId: string; json: string; overrides: readonly LightEditTextOverride[] }>
+
+/** M15: every Runtime's light-edit rules on this location, keyed by authoring scope and item. */
+function runtimeOverrideSync(view: SlideEditorView | null): RuntimeOverrideSync {
+  const sync: RuntimeOverrideSync = new Map()
+  for (const layer of view?.layers ?? []) {
+    if (layer.item.kind !== 'runtime') continue
+    const scope = layer.source === 'global' ? 'global' : 'scene'
+    const overrides = (layer.item.runtime.content.overrides ?? []) as readonly LightEditTextOverride[]
+    sync.set(`${scope}:${layer.item.layerItemId}`, { scope, nodeId: layer.item.layerItemId, json: JSON.stringify(overrides), overrides })
+  }
+  return sync
+}
 
 export type SlidePhaserNode = NonNullable<ReturnType<typeof courseLayerItemToEditorCanvasNode>>
 type AuthoringPatchNode = Extract<PlayerAuthoringPatch, { kind: 'native-node' }>['node']
@@ -673,6 +688,8 @@ export function SlideLocationWorkspace({
   } | null>(null)
   const previousSceneRef = useRef<SlidePhaserDocument | null>(null)
   const previousPublishedStateRef = useRef<PublishedAuthoringSnapshotState | null>(null)
+  /** Rules the Published host already shows; edits, undo and redo patch the difference in place. */
+  const syncedRuntimeOverridesRef = useRef<RuntimeOverrideSync | null>(null)
   const previousComponentPackagesRef = useRef<
     Record<string, ComponentPackageData> | null
   >(null)
@@ -921,6 +938,7 @@ export function SlideLocationWorkspace({
     }
     pendingAuthoringNodesRef.current.clear()
     previousPublishedStateRef.current = null
+    syncedRuntimeOverridesRef.current = null
     runtimeTargetsByHostRef.current.clear()
     componentTargetsByHostRef.current.clear()
     lastAuthoringTargetsRevisionRef.current = -1
@@ -1255,6 +1273,8 @@ export function SlideLocationWorkspace({
     const localSource = localPublishedAuthoringSource(authoringScope)
     const currentState = extractPublishedAuthoringState(view, localSource)
     previousPublishedStateRef.current = structuredClone(currentState)
+    // The host was mounted from this document, so it already shows these rules.
+    syncedRuntimeOverridesRef.current = runtimeOverrideSync(view)
     const patches = publishedAuthoringPatchesFromSlideView(
       view,
       localSource,
@@ -1274,7 +1294,25 @@ export function SlideLocationWorkspace({
     }
     pendingAuthoringNodesRef.current.clear()
     previousPublishedStateRef.current = null
+    syncedRuntimeOverridesRef.current = null
   }, [])
+
+  // M15: Runtime text edits (and their undo/redo) reach the live host as rule
+  // patches, so the Runtime keeps its current state instead of restarting.
+  useEffect(() => {
+    const synced = syncedRuntimeOverridesRef.current
+    if (!synced || canvasMode !== 'edit' || !authoringReadyRef.current) return
+    const current = runtimeOverrideSync(slideEditorView)
+    for (const [key, entry] of current) {
+      if (synced.get(key)?.json === entry.json) continue
+      if (!postAuthoringPatch({
+        kind: 'runtime-text-overrides',
+        target: { kind: 'runtime-text-overrides', scope: entry.scope, nodeId: entry.nodeId },
+        overrides: entry.overrides,
+      })) return
+    }
+    syncedRuntimeOverridesRef.current = current
+  }, [canvasMode, postAuthoringPatch, slideEditorView])
 
   const handlePublishedAuthoringMessage = useCallback((
     message: PlayerAuthoringHostMessage,

@@ -313,3 +313,16 @@ describe('Player authoring protocol', () => {
     })).ok).toBe(false)
   })
 })
+
+it('M15 carries the complete light-edit rules of one Runtime as a strict patch', () => {
+  const patch = (overrides: unknown, target: unknown = { kind: 'runtime-text-overrides', scope: 'scene', nodeId: 'runtime-a' }) => ({
+    ...command(),
+    patch: { kind: 'runtime-text-overrides', target, overrides },
+  })
+  expect(parsePlayerAuthoringPatchCommand(patch([{ original: '开始', region: 'div>button', text: '继续' }])).ok).toBe(true)
+  expect(parsePlayerAuthoringPatchCommand(patch([])).ok).toBe(true)
+  // Rules keep the contract: normalized originals, one per original and region, no extra fields.
+  expect(parsePlayerAuthoringPatchCommand(patch([{ original: ' 开始', text: 'x' }])).ok).toBe(false)
+  expect(parsePlayerAuthoringPatchCommand(patch([{ original: '开始', text: 'a' }, { original: '开始', text: 'b' }])).ok).toBe(false)
+  expect(parsePlayerAuthoringPatchCommand(patch([], { kind: 'runtime-text-overrides', scope: 'scene', nodeId: 'runtime-a', key: 'x' })).ok).toBe(false)
+})

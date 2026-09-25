@@ -13,6 +13,11 @@ import {
   type CourseAuthoringOwner,
 } from '@/renderer/authoring/courseAuthoringScope'
 import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
+import {
+  lightEditOverrideKey,
+  lightEditTextOverrideSchema,
+  type LightEditTextOverride,
+} from '@/shared/contracts/runtime/lightEdit'
 import type {
   CourseProjectDocument,
   CourseSurfaceDocument,
@@ -28,11 +33,20 @@ export type RuntimeContentTextAuthoringCarrier =
   | 'slide-scene'
   | 'spatial-world'
 
+/** Where a M15 light edit of Runtime-rendered text lands: one rule per original and region. */
+export interface RuntimeTextOverrideAddress {
+  readonly original: string
+  readonly region?: string
+}
+
 /** Exact persisted Runtime content field captured when a visible edit begins. */
 export interface CourseRuntimeContentTextTarget {
   readonly courseTarget: CourseAuthoringTarget
+  /** Keyed Runtime text; empty for a light-edit rule. */
   readonly contentKey: string
   readonly initialValue: string
+  /** M15: text the Runtime renders itself, edited as a host-applied rule. */
+  readonly override?: RuntimeTextOverrideAddress
 }
 
 export interface CaptureCourseRuntimeContentTextTargetInput {
@@ -45,6 +59,7 @@ export interface CaptureCourseRuntimeContentTextTargetInput {
   readonly itemId: string
   readonly contentKey: string
   readonly initialValue: string
+  readonly override?: RuntimeTextOverrideAddress
 }
 
 export interface RuntimeContentTextAuthoringSelectionHint {
@@ -212,6 +227,37 @@ function contentKeyIsValid(contentKey: unknown): contentKey is string {
     && !UNSAFE_CONTENT_KEYS.has(contentKey)
 }
 
+function overrideIsValid(override: RuntimeTextOverrideAddress): boolean {
+  return lightEditTextOverrideSchema.safeParse({ ...override, text: '' }).success
+}
+
+/** Field path of one light-edit rule; the rule identity is its original text and region. */
+export function courseRuntimeTextOverrideAuthoringField(override: RuntimeTextOverrideAddress): string {
+  if (!overrideIsValid(override)) throw new TypeError('Runtime 文字修改的原文或区域无效')
+  return `runtime/content/overrides/${jsonPointerEscape(lightEditOverrideKey(override))}`
+}
+
+function targetField(target: Pick<CourseRuntimeContentTextTarget, 'contentKey' | 'override'>): string {
+  return target.override
+    ? courseRuntimeTextOverrideAuthoringField(target.override)
+    : courseRuntimeContentValueAuthoringField(target.contentKey)
+}
+
+/** Replace, add or (when the text is back to the original) drop one rule. */
+function writeTextOverride(
+  content: RuntimeLayerItem['runtime']['content'],
+  override: RuntimeTextOverrideAddress,
+  value: string,
+): void {
+  const key = lightEditOverrideKey(override)
+  const rules: LightEditTextOverride[] = (content.overrides ?? []).filter(rule => lightEditOverrideKey(rule) !== key)
+  if (value !== override.original) {
+    rules.push({ original: override.original, ...(override.region ? { region: override.region } : {}), text: value })
+  }
+  if (rules.length) content.overrides = rules
+  else delete content.overrides
+}
+
 /** Stable field path shared with Runtime host hits and the V9 inventory. */
 export function courseRuntimeContentValueAuthoringField(contentKey: string): string {
   if (!contentKeyIsValid(contentKey)) {
@@ -229,7 +275,7 @@ export function captureCourseRuntimeContentTextTarget(
   if (typeof input.initialValue !== 'string') {
     throw new TypeError('Runtime 文字初始值必须是字符串')
   }
-  const field = courseRuntimeContentValueAuthoringField(input.contentKey)
+  const field = targetField(input)
   const ownerKey = ownerKeyFor(input.owner, input.surfaceId, input.sceneId)
   const authoringAddress = makeLayerItemAuthoringAddress({
     projectId: input.projectId,
@@ -253,6 +299,9 @@ export function captureCourseRuntimeContentTextTarget(
     }),
     contentKey: input.contentKey,
     initialValue: input.initialValue,
+    ...(input.override
+      ? { override: Object.freeze({ original: input.override.original, ...(input.override.region ? { region: input.override.region } : {}) }) }
+      : {}),
   })
 }
 
@@ -347,7 +396,7 @@ function resolveRuntimeContentTextTarget(
     return resolutionFailure('project-mismatch')
   }
   if (
-    !contentKeyIsValid(target.contentKey)
+    (target.override ? !overrideIsValid(target.override) : !contentKeyIsValid(target.contentKey))
     || typeof target.initialValue !== 'string'
   ) {
     return resolutionFailure('invalid-target')
@@ -441,15 +490,22 @@ function resolveRuntimeContentTextTarget(
     sceneId,
     kind: 'runtime',
     layerItemId: candidate.layerItemId,
-    field: courseRuntimeContentValueAuthoringField(target.contentKey),
+    field: targetField(target),
   })
   if (canonicalAddress !== stable.authoringAddress) {
     return resolutionFailure('invalid-target')
   }
-  if (!Object.hasOwn(candidate.runtime.content.values, target.contentKey)) {
-    return resolutionFailure('content-key-missing')
+  let currentValue: string | undefined
+  if (target.override) {
+    const key = lightEditOverrideKey(target.override)
+    currentValue = candidate.runtime.content.overrides?.find(rule => lightEditOverrideKey(rule) === key)?.text
+      ?? target.override.original
+  } else {
+    if (!Object.hasOwn(candidate.runtime.content.values, target.contentKey)) {
+      return resolutionFailure('content-key-missing')
+    }
+    currentValue = candidate.runtime.content.values[target.contentKey]
   }
-  const currentValue = candidate.runtime.content.values[target.contentKey]
   if (typeof currentValue !== 'string') {
     return resolutionFailure('invalid-target')
   }
@@ -581,7 +637,11 @@ export function planRuntimeContentTextUpdate(
   if (!nextResolution.ok) {
     return fail(nextResolution.code, nextResolution.reason)
   }
-  nextResolution.value.item.runtime.content.values[input.target.contentKey] = input.value
+  if (input.target.override) {
+    writeTextOverride(nextResolution.value.item.runtime.content, input.target.override, input.value)
+  } else {
+    nextResolution.value.item.runtime.content.values[input.target.contentKey] = input.value
+  }
   next.revision = input.project.revision + 1
   next.updatedAt = input.now
 
