@@ -10,6 +10,8 @@ afterEach(() => { cleanup(); vi.restoreAllMocks() })
 it('whole-body preview caret and later decoration refresh never become manual context, while real text/object selection still publishes', () => {
   const source = '# 原标题\n\n原正文😀\n', parsed = parseDocumentMarkdown(source, { target: 'file', createId: () => crypto.randomUUID() })
   if (parsed.status !== 'valid') throw new Error('fixture')
+  // JSDOM has no layout; the selection quick bar only appears over a visible editor.
+  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(() => ({ left: 0, top: 0, right: 800, bottom: 600, width: 800, height: 600, x: 0, y: 0, toJSON() {} }))
   const factory = vi.spyOn(session, 'createLayoutEditor'), capture = vi.fn()
   const props = { document: parsed.document, revision: '1', sourceDraft: source, sourceMap: parsed.sourceMap, target: 'file' as const, initialMode: 'layout' as const,
     onChange: () => true, onDraft() {}, onUndo() {}, onRedo() {}, onContextualTargetChange: capture, onContextualCommand: vi.fn() }
@@ -21,13 +23,13 @@ it('whole-body preview caret and later decoration refresh never become manual co
   ui.rerender(<SharedDocumentEditor {...props} editPreview={{ ...preview, value: '# 生成标题\n\n继续生成正文' }} />)
   act(() => editor.view.dispatch(editor.view.state.tr.setMeta(pinnedSelectionKey, [])))
   expect(capture.mock.calls.filter(([target]) => target !== null)).toHaveLength(0)
-  expect(screen.queryByLabelText('当前编辑目标')).toBeNull()
+  expect(screen.queryByRole('toolbar', { name: '选中内容快捷工具' })).toBeNull()
   ui.rerender(<SharedDocumentEditor {...props} />)
   expect(editor.view.state.selection).toBeInstanceOf(TextSelection)
   expect(capture.mock.calls.filter(([target]) => target !== null)).toHaveLength(0)
   act(() => editor.view.dispatch(editor.view.state.tr.setSelection(TextSelection.create(editor.view.state.doc, 1, 3))))
   expect(capture.mock.calls.at(-1)?.[0].selection.kind).toBe('text')
-  expect(screen.getByLabelText('当前编辑目标')).toBeTruthy()
+  expect(screen.getByRole('toolbar', { name: '选中内容快捷工具' })).toBeTruthy()
   act(() => editor.view.dispatch(editor.view.state.tr.setSelection(NodeSelection.create(editor.view.state.doc, 0))))
   expect(capture.mock.calls.at(-1)?.[0].selection.kind).toBe('object')
 })

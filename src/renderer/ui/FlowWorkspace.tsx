@@ -30,7 +30,8 @@ import { flowContextSelectionIntent } from '../course/flowContextSelection'
 import { resolveFlowContextSelection } from '../../core/tools/flowTextSlot'
 import { cancelEditPreview, useEditPreview } from '../workbench/EditPreviewProjection'
 import { usePropertiesContext } from './properties/PropertiesContextAdapter'
-import { PropertiesPanelRouter } from './properties/PropertiesPanelRouter'
+import { FlowBlockQuickActions } from './flow/FlowBlockQuickActions'
+import { NativeSelectionContext } from '../workbench/NativeSelectionContext'
 import { useWorkspaceMediaSource } from '../lessonWorkspace/workspaceMediaSourceContext'
 import { deliverWorkspaceMediaDrop, type WorkspaceMediaDropHandler } from '../lessonWorkspace/workspaceMediaDrop'
 import { WORKSPACE_MEDIA_DRAG_TYPE } from '../lessonWorkspace/workspaceMediaDrag'
@@ -242,6 +243,8 @@ export function FlowWorkspace({ documentId, view, sessionToken, assets, selectio
     style={{ position: 'relative', width: '100%', height: '100%', overflow: 'hidden', isolation: 'isolate', backgroundColor: view.backgroundColor,
       backgroundImage: view.backgroundAssetId && assetUrls[view.backgroundAssetId] ? `url(${JSON.stringify(assetUrls[view.backgroundAssetId])})` : undefined, backgroundSize: 'cover', backgroundPosition: 'center' }}>
     <div ref={setToolbarHost} className="flow-document-format-host" />
+    <NativeSelectionContext documentId={documentId} revision={view.revision} locationId={selection?.locationId ?? view.locationId} itemIds={selection?.selectedOverlayIds ?? []}
+      enabled={!readOnly} ownsDocumentSelection={false} textEditing={Boolean(textEdit)} />
     <FlowOverlayAuthoringLayer view={view} sessionToken={sessionToken} selection={selection} locationId={selection?.locationId ?? view.locationId}
       readOnly={readOnly} assetUrls={assetUrls} componentPackages={componentPackages} paperScrollTop={paperScroll.top} paperScrollLeft={paperScroll.left}
       paperOrigin={paperOrigin} overlayViewportSize={viewport} viewPan={viewPan} onViewPanChange={setViewPan} onEditFormula={controller.openFormula}
@@ -296,13 +299,11 @@ export function FlowWorkspace({ documentId, view, sessionToken, assets, selectio
               const snapshot = await workbenchSelection.prepare(documentId)
               await workbenchSelection.request(captureFlowSelection(snapshot, current.current.view.surfaceId, target), instruction)
             }}
-            renderContextualProperties={target => {
-              if (target.mode !== 'layout' || target.revision !== String(view.revision) || !target.selection || propertyContext.kind !== 'flow-block') return null
-              const selected = target.selection
-              const blockId = selected.kind === 'cells' ? selected.tableId : selected.kind === 'object' ? selected.blockId
-                : selected.anchor.blockId === selected.head.blockId ? selected.anchor.blockId : null
-              if (!blockId || propertyContext.selection.selectedBlockId !== blockId) return null
-              return <PropertiesPanelRouter context={propertyContext} />
+            renderQuickBarActions={target => {
+              if (readOnly || target.mode !== 'layout' || target.revision !== String(view.revision) || target.selection?.kind !== 'object' || propertyContext.kind !== 'flow-block') return null
+              const blockId = target.selection.blockId
+              const block = propertyContext.selection.selectedBlockId === blockId ? view.blocks.find(entry => entry.blockId === blockId)?.block : undefined
+              return block ? <FlowBlockQuickActions block={block} commands={propertyContext.commands} /> : null
             }}
             onSelection={next => {
               if (!next) { run({ kind: 'clear-selection' }); return }

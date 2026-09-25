@@ -2858,7 +2858,7 @@ export function SlideLocationWorkspace({
         }
       }}
     >
-      <NativeSelectionContext documentId={documentId} revision={snapshot.projectRevision} locationId={courseLocationId} itemIds={selectedNodeIds} stateId={activePresentationStateId} sceneItemIds={slideEditorView?.layers.filter(layer => layer.source === 'scene').map(layer => layer.selectionId)} enabled={canvasMode === 'edit'} bounds={id => {
+      <NativeSelectionContext documentId={documentId} revision={snapshot.projectRevision} locationId={courseLocationId} itemIds={selectedNodeIds} stateId={activePresentationStateId} sceneItemIds={slideEditorView?.layers.filter(layer => layer.source === 'scene').map(layer => layer.selectionId)} enabled={canvasMode === 'edit'} textEditing={Boolean(editingNode)} bounds={id => {
         const layer = slideEditorView?.layers.find(value => value.selectionId === id), viewport = readCandidateViewport()
         if (!layer || !viewport) return null
         const transform = createStageViewportTransform(viewport), frame = layer.item.frame

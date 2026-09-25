@@ -745,7 +745,7 @@ export function SpatialLocationWorkspace({
       className={`workspace workspace--${canvasMode} workspace--spatial`}
       data-testid="spatial-workspace"
     >
-      <NativeSelectionContext documentId={documentId} revision={project.revision} locationId={view.locationId} itemIds={selectionIds} enabled={canvasMode === 'edit'} />
+      <NativeSelectionContext documentId={documentId} revision={project.revision} locationId={view.locationId} itemIds={selectionIds} enabled={canvasMode === 'edit'} textEditing={editingNode?.type === 'text'} />
       <div className="canvas-mode-switch" role="group" aria-label="画布模式">
         <button
           type="button"

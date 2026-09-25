@@ -7,8 +7,9 @@ import { CourseAdvancedChrome, CourseEditorChromeContext, CourseEditorFrame } fr
 import { useContentEditorMode } from '../../src/renderer/documents/useContentEditorMode'
 import { CourseLightToolbar } from '../../src/renderer/documents/CourseLightToolbar'
 import { EditorPanelLayout } from '../../src/renderer/ui/EditorPanelLayout'
-import { selectActiveCourseLocationId, selectActiveCourseProjectDocument, selectCanRedoActiveSurface, selectCanUndoActiveSurface, selectSelectedNodeId, useEditorStore } from '../../src/renderer/store/editorStore'
+import { selectActiveCourseLocationId, selectActiveCourseProjectDocument, selectCanRedoActiveSurface, selectCanUndoActiveSurface, selectSelectedNodeId, selectSelectedNodeIds, useEditorStore } from '../../src/renderer/store/editorStore'
 import { locateCourseLayer } from '../../src/core/drivers/course/layerProperties'
+import { NativeSelectionContext } from '../../src/renderer/workbench/NativeSelectionContext'
 
 const store = () => useEditorStore.getState()
 afterEach(() => cleanup())
@@ -16,7 +17,7 @@ function Tools({ documentId, reportError = () => {} }: { documentId: string; rep
   const mode = useEditorStore(state => state.canvasMode)
   return <CourseLightToolbar documentId={documentId} isCurrentDocument={id => store().courseDocument.documentId === id}
     canUndo={selectCanUndoActiveSurface(store())} canRedo={selectCanRedoActiveSurface(store())}
-    undo={() => store().undo()} redo={() => store().redo()} save={() => {}} onReplaceImage={() => {}} onAddImage={() => {}}
+    undo={() => store().undo()} redo={() => store().redo()} save={() => {}} saveAs={() => {}} onReplaceImage={() => {}} onAddImage={() => {}}
     onAddVideo={() => {}} onAddAudio={() => {}} insertSurface="slide" editingScope="scene" spatialScope={null}
     onAddText={() => store().addTextNode()} mode={mode} reportError={reportError} />
 }
@@ -28,6 +29,11 @@ it('M03 keeps the same document, workspace instance, draft, selection and Histor
   const id = store().courseDocument.documentId!, selected = selectSelectedNodeId(store())!, location = selectActiveCourseLocationId(store())
   const mounted = vi.fn(), unmounted = vi.fn()
   function WorkspaceProbe() { const [draft, setDraft] = useState('unfinished input'); useEffect(() => { mounted(); return unmounted }, []); return <input aria-label="retained surface input" value={draft} onChange={event => setDraft(event.target.value)} /> }
+  function SelectionBar() {
+    const itemIds = useEditorStore(selectSelectedNodeIds), locationId = useEditorStore(selectActiveCourseLocationId)
+    const revision = useEditorStore(state => state.courseDocument.snapshot?.revision ?? 0)
+    return <main><NativeSelectionContext documentId={id} revision={revision} locationId={locationId} itemIds={itemIds} enabled bounds={() => ({ left: 200, top: 200, width: 120, height: 40 })} /></main>
+  }
   function View() {
     const [focused, setFocused] = useState(false)
     const chrome = useContentEditorMode(id, focused, () => setFocused(true), () => setFocused(false))
@@ -36,12 +42,15 @@ it('M03 keeps the same document, workspace instance, draft, selection and Histor
       <CourseEditorFrame lightTools={<Tools documentId={id} />}>
         <CourseAdvancedChrome><button>完整编辑工具</button></CourseAdvancedChrome>
         <EditorPanelLayout><aside>高级图层</aside><WorkspaceProbe /><aside>组件源码</aside></EditorPanelLayout>
+        <SelectionBar />
       </CourseEditorFrame>
     </CourseEditorChromeContext.Provider>
   }
   render(<View />)
   expect(screen.queryByRole('button', { name: '完整编辑工具' })).toBeNull()
-  await act(async () => { fireEvent.click(screen.getByRole('button', { name: '加粗' })); await store().drainCourseDocument() })
+  // Selection edits come from the floating quick bar; the light toolbar keeps one fixed row.
+  expect(screen.queryByRole('group', { name: '当前选择操作' })).toBeNull()
+  await act(async () => { fireEvent.click(await screen.findByRole('button', { name: '加粗' })); await store().drainCourseDocument() })
   const revision = h.registry.get(id).read().revision, history = h.registry.get(id).read().undoDepth
   const model = h.registry.get(id).read().model
   if (model.kind !== 'course-v9') throw new Error('fixture')
@@ -49,6 +58,8 @@ it('M03 keeps the same document, workspace instance, draft, selection and Histor
   fireEvent.change(screen.getByLabelText('retained surface input'), { target: { value: 'still composing here' } })
   fireEvent.click(screen.getByRole('button', { name: '切换深度' }))
   expect(screen.getByRole('button', { name: '完整编辑工具' })).toBeVisible()
+  // The editor shows the same quick bar for the retained selection.
+  expect(screen.getByRole('toolbar', { name: '选中对象快捷工具' })).toBeTruthy()
   fireEvent.click(screen.getByRole('button', { name: '切换深度' }))
   expect(screen.getByLabelText('retained surface input')).toHaveValue('still composing here')
   expect(mounted).toHaveBeenCalledTimes(1); expect(unmounted).not.toHaveBeenCalled()

@@ -1,5 +1,5 @@
 import { createElement, type ComponentProps } from 'react'
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { TextSelection } from 'prosemirror-state'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import * as editorSession from '../../src/renderer/document/editorSession'
@@ -41,7 +41,7 @@ afterEach(() => {
   store().createNewProject()
 })
 
-it('M03 Flow contextual card opens the existing properties owner while retaining inline AI', () => {
+it('M21 Flow text selection shows the shared quick bar with formatting and AI, and no properties card', () => {
   expect(store().flowSession).toBeTruthy()
   expect(store().courseAuthoringSession).toBeTruthy()
   const factory = vi.spyOn(editorSession, 'createLayoutEditor')
@@ -50,11 +50,12 @@ it('M03 Flow contextual card opens the existing properties owner while retaining
   const text = editor.view.state.doc.textContent
   expect(text.length).toBeGreaterThan(1)
   act(() => editor.view.dispatch(editor.view.state.tr.setSelection(TextSelection.create(editor.view.state.doc, 1, 2))))
-  const card = screen.getByLabelText('当前编辑目标')
-  expect(card).toHaveTextContent('AI 指令')
-  fireEvent.click(screen.getByRole('button', { name: '属性' }))
-  expect(screen.getByLabelText('正文选中属性')).toHaveTextContent('块结构')
-  expect(card).toHaveTextContent('AI 指令')
+  const bar = screen.getByRole('toolbar', { name: '选中内容快捷工具' })
+  expect(within(bar).getByRole('button', { name: '当前选区加粗' })).toBeTruthy()
+  expect(within(bar).getByRole('button', { name: '当前选区高亮' })).toBeTruthy()
+  expect(within(bar).queryByRole('button', { name: '属性' })).toBeNull()
+  fireEvent.click(within(bar).getByRole('button', { name: 'AI 修改' }))
+  expect(screen.getByLabelText('AI 修改要求')).toBeTruthy()
 })
 
 it('M03 Flow insertion focus request only focuses the new selected paragraph in the mounted document', async () => {

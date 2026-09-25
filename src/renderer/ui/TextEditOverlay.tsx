@@ -1,4 +1,5 @@
-import { Bold, Eraser, Highlighter, Italic, Strikethrough, Underline } from 'lucide-react'
+import { Baseline, Bold, Eraser, Highlighter, Italic, Strikethrough, Underline } from 'lucide-react'
+import { ColorSwatchPanel } from '../editing/color/ColorSwatchPanel'
 import { useLayoutEffect, useRef, useState } from 'react'
 import type { TextNode, TextRun, TextRunStyle } from '../../shared/contracts/native-v1'
 import {
@@ -295,6 +296,7 @@ export function TextEditOverlay({
   const focusTimerRef = useRef<number | null>(null)
   const finishTimerRef = useRef<number | null>(null)
   const toolbarSelectionRef = useRef<{ start: number; end: number } | null>(null)
+  const [palette, setPalette] = useState<'color' | 'highlight' | null>(null)
   const lastIssuedRunsRef = useRef<TextRun[]>(initialNodeRef.current.runs)
   nodeRef.current = node
 
@@ -517,6 +519,14 @@ export function TextEditOverlay({
     const result = read()
     publish(result.text, result.runs)
   }
+  // The selection captured when the palette opened is applied by the pick; closing without a pick drops it.
+  const togglePalette = (kind: 'color' | 'highlight') => {
+    if (palette === kind) { setPalette(null); toolbarSelectionRef.current = null } else setPalette(kind)
+  }
+  const pickColor = (kind: 'color' | 'highlight', color: string | null) => {
+    setPalette(null)
+    command(kind === 'color' ? 'foreColor' : 'hiliteColor', color ?? 'transparent')
+  }
   const toggleSelectionEmphasis = () => {
     const editor = editorRef.current
     if (!editor) return
@@ -553,10 +563,12 @@ export function TextEditOverlay({
         <button type="button" title="上标" aria-label="上标" onClick={() => command('baseline', '0.3')}>X²</button>
         <button type="button" title="恢复基线" aria-label="恢复基线" onClick={() => command('baseline', '0')}>X</button>
         <button type="button" title="局部着重号" aria-label="局部着重号" onClick={toggleSelectionEmphasis}><span aria-hidden="true">•</span></button>
-        <button type="button" title="局部高亮" aria-label="局部高亮" onClick={() => command('hiliteColor', '#fff3a3')}><Highlighter size={14} /></button>
-        <button type="button" title="取消局部高亮" aria-label="取消局部高亮" onClick={() => command('hiliteColor', 'transparent')}><Highlighter size={14} opacity={0.45} /></button>
+        <button type="button" title="局部高亮" aria-label="局部高亮" aria-expanded={palette === 'highlight'} onClick={() => togglePalette('highlight')}><Highlighter size={14} /></button>
         <button type="button" title="清除局部格式" aria-label="清除局部格式" onClick={() => command('removeFormat')}><Eraser size={14} /></button>
-        <label title="局部文字颜色"><input type="color" aria-label="局部文字颜色" defaultValue={node.style.color} onChange={(event) => command('foreColor', event.target.value)} /></label>
+        <button type="button" title="局部文字颜色" aria-label="局部文字颜色" aria-expanded={palette === 'color'} onClick={() => togglePalette('color')}><Baseline size={14} /></button>
+        {palette && <div className="text-edit-toolbar__popover">
+          <ColorSwatchPanel label={palette === 'color' ? '局部文字颜色' : '局部高亮'} variant={palette} value={palette === 'color' ? node.style.color : null} onPick={color => pickColor(palette, color)} />
+        </div>}
       </div>
       <div
         ref={editorRef}

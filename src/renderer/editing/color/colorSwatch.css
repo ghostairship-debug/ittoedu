@@ -1,0 +1,17 @@
+/* Two-class selectors: the panel is also shown inside toolbars whose `... button` rules are more specific than one class. */
+.color-swatch-panel { display: grid; gap: 6px; box-sizing: border-box; width: 198px; padding: 8px; border: 1px solid #d8dee6; border-radius: 8px; background: #fff; box-shadow: 0 8px 24px rgb(0 0 0 / 18%); color: #17211d; font-size: 12px; line-height: 1.4; }
+.color-swatch-panel .color-swatch-panel__grid { display: grid; grid-template-columns: repeat(6, 24px); gap: 6px; }
+.color-swatch-panel .color-swatch { display: block; width: 24px; height: 24px; padding: 0; border: 1px solid rgb(0 0 0 / 18%); border-radius: 5px; cursor: pointer; }
+.color-swatch-panel .color-swatch:hover { transform: scale(1.08); }
+.color-swatch-panel .color-swatch[aria-checked="true"] { outline: 2px solid #2563eb; outline-offset: 1px; }
+.color-swatch-panel .color-swatch-panel__caption { color: #66758a; font-size: 11px; }
+.color-swatch-panel .color-swatch-panel__none,
+.color-swatch-panel .color-swatch-panel__more { justify-self: start; width: auto; height: auto; padding: 3px 8px; border: 1px solid #d8dee6; border-radius: 5px; background: #fff; color: #17211d; font-size: 12px; cursor: pointer; }
+.color-swatch-panel .color-swatch-panel__none:hover,
+.color-swatch-panel .color-swatch-panel__more:hover { background: #edf3fa; }
+.color-swatch-panel .color-swatch-panel__none[aria-pressed="true"] { border-color: #2563eb; }
+.color-swatch-panel .color-swatch-panel__custom { display: flex; align-items: center; gap: 6px; width: auto; height: auto; color: #17211d; background: transparent; cursor: default; }
+.color-swatch-panel .color-swatch-panel__custom input[type="color"] { width: 36px; height: 24px; padding: 0; border: 1px solid #d8dee6; border-radius: 4px; background: transparent; cursor: pointer; }
+/* Palette opened from the canvas text editing toolbar. */
+.text-edit-toolbar .text-edit-toolbar__popover { position: absolute; top: calc(100% + 6px); right: 0; z-index: 1; }
+.palette-button__panel { position: fixed; z-index: 90; }

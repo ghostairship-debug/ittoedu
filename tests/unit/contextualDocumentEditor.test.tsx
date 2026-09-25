@@ -8,8 +8,12 @@ import * as editorSession from '../../src/renderer/document/editorSession'
 import { LessonDocumentEditor, type LessonDocumentEditorHandle } from '../../src/renderer/documentFiles/LessonDocumentEditor'
 import type { RecoverableDocumentFilePort } from '../../src/renderer/documentFiles/documentFileSession'
 import type { OpenDocumentResult } from '../../src/shared/document/ports'
+import { workbenchSelection, type ContextualEditRequest } from '../../src/renderer/workbench/SelectionContextController'
 
 afterEach(() => { cleanup(); vi.restoreAllMocks() })
+// JSDOM has no layout; the selection quick bar only appears over a visible editor.
+const visibleEditor = () => vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(() => ({ left: 0, top: 0, right: 800, bottom: 600,
+  width: 800, height: 600, x: 0, y: 0, toJSON() {} }))
 function fixture() {
   const ref = { kind: 'file' as const, path: '/ws/review.md' }
   let disk: OpenDocumentResult = { ref, source: '第一段 **加粗** 链接\n\n第二段\n', version: { contentVersion: 'v1', attachments: [] }, diagnostics: [] }
@@ -23,15 +27,22 @@ function fixture() {
 }
 describe('file contextual editing in mounted UI', () => {
   it('selects plain Markdown without IDs, invokes a precise AI callback, and clears it after source changes', async () => {
-    const factory = vi.spyOn(editorSession, 'createLayoutEditor'), f = fixture(), handle = createRef<LessonDocumentEditorHandle>(), command = vi.fn()
-    render(<LessonDocumentEditor ref={handle} documentRef={f.ref} port={f.port} onContextualCommand={command} />)
+    visibleEditor()
+    const factory = vi.spyOn(editorSession, 'createLayoutEditor'), f = fixture(), handle = createRef<LessonDocumentEditorHandle>()
+    // The file editor hands a frozen Markdown range to the unified assistant through the selection controller.
+    const requests: ContextualEditRequest[] = []
+    const stop = workbenchSelection.onRequest(request => { requests.push(request) })
+    render(<LessonDocumentEditor ref={handle} documentRef={f.ref} port={f.port} />)
     await screen.findByText('加粗')
     const editor = factory.mock.results.at(-1)!.value as ReturnType<typeof editorSession.createLayoutEditor>
     act(() => editor.view.dispatch(editor.view.state.tr.setSelection(TextSelection.create(editor.view.state.doc, 5, 7))))
     expect(handle.current?.getContextualEditTarget()?.ranges).toEqual([{ from: 6, to: 8, before: '加粗' }])
-    fireEvent.change(screen.getByLabelText('AI 指令'), { target: { value: '换一个词' } })
+    fireEvent.click(screen.getByRole('button', { name: 'AI 修改' }))
+    fireEvent.change(screen.getByLabelText('AI 修改要求'), { target: { value: '换一个词' } })
     fireEvent.click(screen.getByRole('button', { name: /^发送$/ }))
-    expect(command).toHaveBeenCalledWith('换一个词', expect.objectContaining({ ref: f.ref, source: f.read().source, ranges: [{ from: 6, to: 8, before: '加粗' }] }))
+    await waitFor(() => expect(requests).toHaveLength(1))
+    stop()
+    expect(requests[0]).toMatchObject({ instruction: '换一个词', selection: { source: f.read().source, targets: [{ kind: 'markdown-range', from: 6, to: 8 }] } })
     act(() => editor.view.dispatch(editor.view.state.tr.insertText('新词')))
     await waitFor(() => expect(handle.current?.getContextualEditTarget()).toBeNull())
   })
@@ -45,6 +56,7 @@ describe('file contextual editing in mounted UI', () => {
     expect(handle.current?.getContextualEditTarget()).toMatchObject({ mode: 'source', selection: null, ranges: [{ from: 4, to: 10, before: '**加粗**' }] })
   })
   it('manual formatting is one owner history step and survives save and reopen', async () => {
+    visibleEditor()
     const factory = vi.spyOn(editorSession, 'createLayoutEditor'), f = fixture(), handle = createRef<LessonDocumentEditorHandle>()
     const ui = render(<LessonDocumentEditor ref={handle} documentRef={f.ref} port={f.port} />)
     await screen.findByText('加粗')

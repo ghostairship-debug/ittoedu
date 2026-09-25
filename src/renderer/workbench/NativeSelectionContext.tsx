@@ -1,192 +1,226 @@
-import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react'
-import { useCourseEditorChrome } from '../documents/CourseEditorChromeContext'
-import { useEditorStore } from '../store/editorStore'
+import { AArrowDown, AArrowUp, AlignCenter, AlignLeft, AlignRight, AlignHorizontalJustifyStart, Baseline, Bold, Highlighter, ImageIcon, Italic, PaintBucket, Pencil, Play, Repeat, Square, Underline, Unlock, VolumeX } from 'lucide-react'
+import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
+import { isStrokeOnlyShapeType } from '../../shared/contracts/native-v1'
+import { useCourseEditorActions } from '../documents/CourseEditorActionsContext'
+import { planLayerOrder, type LayerOrderMove } from '../editing/quickbar/layerOrder'
+import { rotatedBoundingBox, unionBoxes, visibleBounds, type QuickBarBounds, type QuickBarRect } from '../editing/quickbar/placeQuickBar'
+import { QuickBarAiButton, QuickBarButton, QuickBarColorButton, QuickBarLabel, QuickBarMenu, QuickBarPopoverButton, QuickBarSeparator, SelectionQuickBar, type QuickBarMenuItem } from '../editing/quickbar/SelectionQuickBar'
+import { usePointerGesture } from '../editing/quickbar/usePointerGesture'
+import { selectEffectiveLayerProjection, useEditorStore } from '../store/editorStore'
 import { usePropertiesContext } from '../ui/properties/PropertiesContextAdapter'
 import type { PropertiesContext } from '../ui/properties/PropertiesContext'
-import { BufferedInput, PropertyDraftBoundary, RangeField } from '../ui/properties/PropertyControls'
-import { proEditorRailController } from '../ui/proEditorRailController'
-import { captureCourseObjectSelection, matchesCourseObjectState, usePinnedSelection, workbenchSelection, type SelectionCapture } from './SelectionContextController'
+import type { FlowPropertiesContext } from '../ui/properties/FlowPropertiesPanel'
+import type { PropertiesItemView, PropertiesPatch } from '../ui/properties/SlideNativePropertiesPanel'
+import { normalizePropertiesPatch, propertiesViewFromLayerItem } from '../ui/properties/propertiesItemView'
+import type { LayerItem } from '../../shared/courseProjectTypes'
+import { captureCourseObjectSelection, matchesCourseObjectState, usePinnedSelection, workbenchSelection } from './SelectionContextController'
 import './selectionContext.css'
 
 type ObjectProperties = Extract<PropertiesContext, { kind: 'slide-native' | 'multi-selection' }>
-type Box = { left: number; top: number; width: number; height: number; rotation?: number }
-type Viewport = { left: number; top: number; right: number; bottom: number }
-
-/** Place the whole control within its document canvas, including when neither vertical side fits. */
-export function placeSelectionPopover(anchor: Box, viewport: Viewport, size: { width: number; height: number }, gap = 8) {
-  const leftEdge = viewport.left + gap, topEdge = viewport.top + gap
-  const rightEdge = viewport.right - gap, bottomEdge = viewport.bottom - gap
-  const width = Math.min(size.width, Math.max(0, rightEdge - leftEdge))
-  const height = Math.min(size.height, Math.max(0, bottomEdge - topEdge))
-  const clamp = (value: number, low: number, high: number) => Math.max(low, Math.min(value, Math.max(low, high)))
-  const alignX = () => clamp(anchor.left, leftEdge, rightEdge - width)
-  const alignY = () => clamp(anchor.top, topEdge, bottomEdge - height)
-  const below = anchor.top + anchor.height + gap, above = anchor.top - height - gap
-  const right = anchor.left + anchor.width + gap, left = anchor.left - width - gap
-  if (below + height <= bottomEdge) return { left: alignX(), top: below, maxWidth: width, maxHeight: height }
-  if (above >= topEdge) return { left: alignX(), top: above, maxWidth: width, maxHeight: height }
-  if (right + width <= rightEdge) return { left: right, top: alignY(), maxWidth: width, maxHeight: height }
-  if (left >= leftEdge) return { left, top: alignY(), maxWidth: width, maxHeight: height }
-  const preferBelow = bottomEdge - below >= anchor.top - gap - topEdge
-  return { left: alignX(), top: clamp(preferBelow ? below : above, topEdge, bottomEdge - height), maxWidth: width, maxHeight: height }
-}
+/** One selected object, whichever surface owns it. */
+interface SingleObject { view: PropertiesItemView; patch(patch: PropertiesPatch): void; replaceImage?: () => void; editText?: () => void; disabledReason: string | null }
+type Box = QuickBarRect & { rotation?: number }
 
 /** The Store selection and the document selection must identify the same objects. */
 export function matchesObjectProperties(context: PropertiesContext, itemIds: readonly string[]): context is ObjectProperties {
-  if (context.kind === 'slide-native') return itemIds.length === 1 && context.view.id === itemIds[0] && !context.disabledReason
+  if (context.kind === 'slide-native') return itemIds.length === 1 && context.view.id === itemIds[0]
   if (context.kind !== 'multi-selection' || itemIds.length < 2 || context.items.length !== itemIds.length) return false
   const ids = new Set(context.items.map(item => item.id))
   return ids.size === itemIds.length && itemIds.every(id => ids.has(id))
 }
-
-function ObjectPropertiesCard({ context, onClose, onMore }: { context: ObjectProperties; onClose(): void; onMore(): void }) {
-  if (context.kind === 'multi-selection') {
-    const unlocked = context.items.filter(item => !item.locked).length
-    return <aside className="native-selection-context__properties" aria-label="选中对象属性">
-      <header><strong>已选 {context.items.length} 个对象</strong><button type="button" onClick={onClose}>收起属性</button></header>
-      <div className="native-selection-context__property-actions" role="group" aria-label="多选对齐">
-        {([['left', '左对齐'], ['center', '水平居中'], ['top', '顶对齐'], ['middle', '垂直居中']] as const).map(([mode, label]) =>
-          <button key={mode} type="button" disabled={unlocked < 2} onClick={() => context.commands.align(mode)}>{label}</button>)}
-      </div>
-      <div className="native-selection-context__property-actions" role="group" aria-label="多选图层操作">
-        <button type="button" onClick={() => context.commands.setVisible(true)}>全部显示</button>
-        <button type="button" onClick={() => context.commands.setVisible(false)}>全部隐藏</button>
-        {context.commands.duplicate && <button type="button" onClick={context.commands.duplicate}>复制所选</button>}
-      </div>
-      {context.unavailableReason && <p role="status">{context.unavailableReason}</p>}
-      <button type="button" onClick={onMore}>更多属性</button>
-    </aside>
-  }
-  const node = context.view
-  const patch = context.commands.patch
-  return <aside className="native-selection-context__properties" aria-label="选中对象属性">
-    <header><strong>{node.name}</strong><button type="button" onClick={onClose}>收起属性</button></header>
-    {node.locked ? <p role="status">对象已锁定，请在完整属性中解锁后编辑。</p> : <PropertyDraftBoundary bindingKey={context.draftBindingKey} onStale={() => context.onFeedback({ kind: 'error', message: '选择已改变，请重新输入属性。' })}>
-      {node.type === 'text' && <div className="native-selection-context__property-actions" role="group" aria-label="文字属性">
-        {context.contentEditingEnabled && <button type="button" onClick={() => context.commands.text.beginEdit('canvas')}>编辑文字</button>}
-        <button type="button" aria-pressed={node.style.bold} onClick={() => patch({ style: { bold: !node.style.bold } })}>加粗</button>
-        <button type="button" aria-pressed={node.style.italic} onClick={() => patch({ style: { italic: !node.style.italic } })}>斜体</button>
-        <BufferedInput label="字号" type="number" min={8} max={400} value={node.style.fontSize} onCommit={value => patch({ style: { fontSize: Number(value) } })} />
-      </div>}
-      {(node.type === 'image' || node.type === 'video') && <div className="native-selection-context__property-actions" role="group" aria-label="媒体属性">
-        <label>填充方式 <select aria-label="填充方式" value={node.fit} onChange={event => patch({ fit: event.target.value as typeof node.fit })}>
-          <option value="contain">完整显示</option><option value="cover">填满</option><option value="stretch">拉伸</option>
-        </select></label>
-        {node.type === 'video' && <>
-          <button type="button" aria-pressed={node.autoplay} onClick={() => patch({ autoplay: !node.autoplay })}>自动播放</button>
-          <button type="button" aria-pressed={node.loop} onClick={() => patch({ loop: !node.loop })}>循环播放</button>
-        </>}
-      </div>}
-      {node.type === 'image' && <details aria-label="图片裁剪">
-        <summary>裁剪图片</summary>
-        <RangeField label="左裁剪" value={node.crop.left * 100} min={0} max={(0.98 - node.crop.right) * 100} suffix="%" onChange={left => patch({ crop: { left: left / 100 } })} />
-        <RangeField label="右裁剪" value={node.crop.right * 100} min={0} max={(0.98 - node.crop.left) * 100} suffix="%" onChange={right => patch({ crop: { right: right / 100 } })} />
-        <RangeField label="上裁剪" value={node.crop.top * 100} min={0} max={(0.98 - node.crop.bottom) * 100} suffix="%" onChange={top => patch({ crop: { top: top / 100 } })} />
-        <RangeField label="下裁剪" value={node.crop.bottom * 100} min={0} max={(0.98 - node.crop.top) * 100} suffix="%" onChange={bottom => patch({ crop: { bottom: bottom / 100 } })} />
-        <button type="button" disabled={Object.values(node.crop).every(value => value === 0)} onClick={() => patch({ crop: { left: 0, right: 0, top: 0, bottom: 0 } })}>重置裁剪</button>
-      </details>}
-      <div className="native-selection-context__property-fields" role="group" aria-label="位置和尺寸">
-        <BufferedInput label="X" type="number" value={Math.round(node.x)} onCommit={value => patch({ x: Number(value) })} />
-        <BufferedInput label="Y" type="number" value={Math.round(node.y)} onCommit={value => patch({ y: Number(value) })} />
-        <BufferedInput label="宽" type="number" min={1} value={Math.round(node.width)} onCommit={value => patch({ width: Number(value) })} />
-        <BufferedInput label="高" type="number" min={1} value={Math.round(node.height)} onCommit={value => patch({ height: Number(value) })} />
-      </div>
-    </PropertyDraftBoundary>}
-    <button type="button" onClick={onMore}>更多属性</button>
-  </aside>
+/** A Flow paper object selected alone, as the properties context reports it. */
+function matchesFlowOverlay(context: PropertiesContext, itemIds: readonly string[]): context is FlowPropertiesContext {
+  return context.kind === 'flow-overlay' && itemIds.length === 1 && context.selection.selectedOverlayIds.length === 1 && context.selection.selectedOverlayIds[0] === itemIds[0]
 }
-export function NativeSelectionContext({ documentId, revision, locationId, itemIds, stateId, sceneItemIds = [], enabled, bounds }: {
-  documentId?: string | null; revision: number; locationId?: string | null; itemIds: readonly string[]; stateId?: string | null; sceneItemIds?: readonly string[]; enabled: boolean; bounds?(itemId: string): Box | null
-}) {
-  const host = useRef<HTMLDivElement>(null)
-  const chrome = useCourseEditorChrome()
-  const [instruction, setInstruction] = useState(''), [error, setError] = useState('')
-  const [target, setTarget] = useState<SelectionCapture | null>(null), [open, setOpen] = useState(false)
-  const [propertiesOpen, setPropertiesOpen] = useState(false)
-  const openMore = () => {
-    chrome.setMode('deep')
-    useEditorStore.getState().setActiveTab('properties')
-    proEditorRailController.open('properties')
-    setPropertiesOpen(false)
+
+const FONT_SIZE_MIN = 8, FONT_SIZE_MAX = 400
+export function stepFontSize(size: number, direction: 1 | -1): number {
+  const step = size < 24 ? 2 : size < 72 ? 4 : 8
+  return Math.max(FONT_SIZE_MIN, Math.min(FONT_SIZE_MAX, Math.round(size) + direction * step))
+}
+const ALIGN_ORDER = ['left', 'center', 'right'] as const
+const ALIGN_ICON = { left: <AlignLeft size={14} />, center: <AlignCenter size={14} />, right: <AlignRight size={14} /> }
+const ALIGN_LABEL = { left: '左对齐', center: '居中', right: '右对齐' }
+
+function run(action: () => unknown, onError: (message: string) => void) {
+  try { action() } catch (error) { onError(error instanceof Error ? error.message : String(error)) }
+}
+
+/** Type-specific common actions of one selected object; everything else stays in the editor. */
+function ObjectActions({ view, patch, replaceImage, editText }: { view: PropertiesItemView; patch(patch: PropertiesPatch): void; replaceImage?: () => void; editText?: () => void }) {
+  if (view.type === 'text') {
+    const align = ALIGN_ORDER.includes(view.style.align) ? view.style.align : 'left'
+    const next = ALIGN_ORDER[(ALIGN_ORDER.indexOf(align) + 1) % ALIGN_ORDER.length]!
+    return <>
+      {editText && <QuickBarButton label="编辑文字" icon={<Pencil size={14} />} onClick={editText} />}
+      <QuickBarButton label="加粗" icon={<Bold size={14} />} pressed={view.style.bold} onClick={() => patch({ style: { bold: !view.style.bold } })} />
+      <QuickBarButton label="斜体" icon={<Italic size={14} />} pressed={view.style.italic} onClick={() => patch({ style: { italic: !view.style.italic } })} />
+      <QuickBarButton label="下划线" icon={<Underline size={14} />} pressed={view.style.underline} onClick={() => patch({ style: { underline: !view.style.underline } })} />
+      <QuickBarButton label="减小字号" icon={<AArrowDown size={15} />} disabled={view.style.fontSize <= FONT_SIZE_MIN} onClick={() => patch({ style: { fontSize: stepFontSize(view.style.fontSize, -1) } })} />
+      <QuickBarLabel>{Math.round(view.style.fontSize)}</QuickBarLabel>
+      <QuickBarButton label="增大字号" icon={<AArrowUp size={15} />} disabled={view.style.fontSize >= FONT_SIZE_MAX} onClick={() => patch({ style: { fontSize: stepFontSize(view.style.fontSize, 1) } })} />
+      <QuickBarColorButton label="文字颜色" icon={<Baseline size={14} />} value={view.style.color} onPick={color => { if (color) patch({ style: { color } }) }} />
+      <QuickBarColorButton label="高亮" icon={<Highlighter size={14} />} variant="highlight" value={view.style.highlightColor} onPick={highlightColor => patch({ style: { highlightColor } })} />
+      <QuickBarButton label={`${ALIGN_LABEL[align]}（点按切换为${ALIGN_LABEL[next]}）`} icon={ALIGN_ICON[align]} onClick={() => patch({ style: { align: next } })} />
+    </>
   }
-  const context = usePropertiesContext({ onReplaceImage: openMore })
+  if (view.type === 'formula') return <QuickBarColorButton label="公式颜色" icon={<Baseline size={14} />} value={view.style.color} onPick={color => { if (color) patch({ style: { color } }) }} />
+  if (view.type === 'image') return replaceImage ? <QuickBarButton label="替换图片" text="替换" icon={<ImageIcon size={14} />} onClick={replaceImage} /> : null
+  if (view.type === 'video') return <>
+    <QuickBarButton label="自动播放" icon={<Play size={14} />} pressed={view.autoplay} onClick={() => patch({ autoplay: !view.autoplay })} />
+    <QuickBarButton label="循环播放" icon={<Repeat size={14} />} pressed={view.loop} onClick={() => patch({ loop: !view.loop })} />
+    <QuickBarButton label="静音" icon={<VolumeX size={14} />} pressed={view.muted} onClick={() => patch({ muted: !view.muted })} />
+  </>
+  if (view.type === 'shape') return <>
+    {!isStrokeOnlyShapeType(view.shapeType) && <QuickBarColorButton label="填充颜色" icon={<PaintBucket size={14} />} value={view.style.fillColor} onPick={fillColor => { if (fillColor) patch({ style: { fillColor } }) }} />}
+    <QuickBarColorButton label={isStrokeOnlyShapeType(view.shapeType) ? '线条颜色' : '边框颜色'} icon={<Square size={14} />} value={view.style.borderColor} onPick={borderColor => { if (borderColor) patch({ style: { borderColor } }) }} />
+  </>
+  return null
+}
+
+const MULTI_ALIGN = [['left', '左对齐'], ['center', '水平居中'], ['right', '右对齐'], ['top', '顶对齐'], ['middle', '垂直居中'], ['bottom', '底对齐']] as const
+
+export function NativeSelectionContext({ documentId, revision, locationId, itemIds, stateId, sceneItemIds = [], enabled, bounds, textEditing = false, ownsDocumentSelection = true }: {
+  documentId?: string | null; revision: number; locationId?: string | null; itemIds: readonly string[]; stateId?: string | null; sceneItemIds?: readonly string[]; enabled: boolean
+  bounds?(itemId: string): Box | null
+  /** The text editing toolbar owns the selection while its text is edited. */
+  textEditing?: boolean
+  /** Whether this control reports the document's current selection; Flow's text selection reports its own. */
+  ownsDocumentSelection?: boolean
+}) {
+  const marker = useRef<HTMLSpanElement>(null)
+  const replacement = useRef<HTMLInputElement>(null)
+  const [root, setRoot] = useState<HTMLElement | null>(null)
+  const actions = useCourseEditorActions()
+  const context = usePropertiesContext({ onReplaceImage: () => actions?.replaceImage() })
   useSyncExternalStore(workbenchSelection.subscribe, workbenchSelection.readVersion)
   const pinned = usePinnedSelection(documentId)
-  const [boxes, setBoxes] = useState<Box[]>([])
-  const [anchor, setAnchor] = useState<Box | null>(null)
-  const [viewport, setViewport] = useState<Viewport | null>(null)
-  const [panelSize, setPanelSize] = useState({ width: 340, height: 42 })
+  const gesture = usePointerGesture(root)
+  const [pinnedBoxes, setPinnedBoxes] = useState<Box[]>([])
+  const [anchor, setAnchor] = useState<QuickBarRect | null>(null)
+  const [view, setView] = useState<QuickBarBounds | null>(null)
+  const [notice, setNotice] = useState('')
   const ids = JSON.stringify(itemIds), sceneIds = JSON.stringify(sceneItemIds)
-  useEffect(() => { setPropertiesOpen(false) }, [documentId, locationId, ids, stateId])
+  useLayoutEffect(() => { setRoot(marker.current?.closest('main') ?? null) }, [])
+  useEffect(() => { setNotice('') }, [documentId, locationId, ids, stateId])
   useEffect(() => {
-    if (!documentId) return
+    if (!documentId || !ownsDocumentSelection) return
     void workbenchSelection.observe(documentId, revision, snapshot => enabled && locationId && itemIds.length
       ? captureCourseObjectSelection(snapshot, locationId, itemIds, stateId) : null)
-  }, [documentId, revision, locationId, ids, stateId, enabled])
+  }, [documentId, revision, locationId, ids, stateId, enabled, ownsDocumentSelection])
   useLayoutEffect(() => {
-    const root = host.current?.closest('main')
     if (!root) return
-    const capture = target ?? pinned
-    const selected = capture?.targets.flatMap(t => t.kind === 'course-object' && matchesCourseObjectState(t, locationId, stateId, sceneItemIds.includes(t.itemId)) ? [t.itemId] : []) ?? []
-    const locate = (id: string) => {
+    const selectedPinned = pinned?.targets.flatMap(t => t.kind === 'course-object' && matchesCourseObjectState(t, locationId, stateId, sceneItemIds.includes(t.itemId)) ? [t.itemId] : []) ?? []
+    const locate = (id: string): Box | null => {
       const explicit = bounds?.(id)
+      if (explicit) return explicit
       const element = [...root.querySelectorAll<HTMLElement>('[data-layer-item-id]')].find(element => element.dataset.layerItemId === id)
-      const rect = explicit ?? element?.getBoundingClientRect()
-      return rect ? { left: rect.left, top: rect.top, width: rect.width, height: rect.height, rotation: explicit?.rotation } : null
+      const rect = element?.getBoundingClientRect()
+      return rect ? { left: rect.left, top: rect.top, width: rect.width, height: rect.height } : null
     }
     const paint = () => {
-      const rect = root.getBoundingClientRect()
-      const nextViewport = { left: Math.max(0, rect.left), top: Math.max(0, rect.top),
-        right: Math.min(window.innerWidth, rect.right), bottom: Math.min(window.innerHeight, rect.bottom) }
-      setViewport(previous => JSON.stringify(previous) === JSON.stringify(nextViewport) ? previous : nextViewport)
-      const panel = host.current?.getBoundingClientRect()
-      if (panel && panel.width && panel.height) {
-        const nextSize = { width: panel.width, height: panel.height }
-        setPanelSize(previous => JSON.stringify(previous) === JSON.stringify(nextSize) ? previous : nextSize)
-      }
-      const next = selected.flatMap(id => { const rect = locate(id); return rect ? [rect] : [] })
-      setBoxes(previous => JSON.stringify(previous) === JSON.stringify(next) ? previous : next)
-      const first = itemIds.length ? locate(itemIds[0]!) : null
-      setAnchor(previous => JSON.stringify(previous) === JSON.stringify(first) ? previous : first)
+      const nextView = visibleBounds(root)
+      setView(previous => JSON.stringify(previous) === JSON.stringify(nextView) ? previous : nextView)
+      const nextPinned = selectedPinned.flatMap(id => { const box = locate(id); return box ? [box] : [] })
+      setPinnedBoxes(previous => JSON.stringify(previous) === JSON.stringify(nextPinned) ? previous : nextPinned)
+      const nextAnchor = unionBoxes(itemIds.flatMap(id => { const box = locate(id); return box ? [rotatedBoundingBox(box)] : [] }))
+      setAnchor(previous => JSON.stringify(previous) === JSON.stringify(nextAnchor) ? previous : nextAnchor)
     }
     paint(); window.addEventListener('resize', paint); window.addEventListener('scroll', paint, true)
     const observer = new MutationObserver(paint); observer.observe(root, { childList: true, subtree: true })
     const resized = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(paint)
-    resized?.observe(root); if (host.current) resized?.observe(host.current)
+    resized?.observe(root)
     return () => { observer.disconnect(); resized?.disconnect(); window.removeEventListener('resize', paint); window.removeEventListener('scroll', paint, true) }
-  }, [pinned, target, locationId, stateId, sceneIds, ids, bounds, propertiesOpen, open])
-  const manual = documentId ? workbenchSelection.getManual(documentId) : null
-  const propertiesAvailable = Boolean(enabled && manual?.revision === revision && chrome.documentId === documentId && matchesObjectProperties(context, itemIds))
-  const controlsVisible = Boolean(manual || propertiesOpen && propertiesAvailable || open && target)
-  const position = anchor && viewport ? { position: 'fixed' as const,
-    ...placeSelectionPopover(anchor, viewport, panelSize) } : undefined
-  const availableHeight = viewport ? Math.max(0, viewport.bottom - viewport.top - 16) : undefined
+  }, [root, pinned, locationId, stateId, sceneIds, ids, bounds])
+  const selection = enabled && itemIds.length && matchesObjectProperties(context, itemIds) ? context : null
+  const overlay = enabled && matchesFlowOverlay(context, itemIds) ? context : null
+  const report = (message: string) => setNotice(message)
+  let single: SingleObject | null = null
+  if (selection?.kind === 'slide-native') single = { view: selection.view, disabledReason: selection.disabledReason,
+    patch: value => run(() => selection.commands.patch(value), report),
+    replaceImage: actions ? () => run(selection.commands.replaceImage, report) : undefined,
+    editText: selection.contentEditingEnabled ? () => run(() => selection.commands.text.beginEdit('canvas'), report) : undefined }
+  else if (overlay) {
+    const entry = overlay.view.overlayLayers.find(item => item.selectionId === itemIds[0])
+    if (entry) {
+      const view = propertiesViewFromLayerItem(entry.item as LayerItem)
+      single = { view, disabledReason: null, patch: value => run(() => overlay.commands.patchOverlayProperties(normalizePropertiesPatch(view, value)), report),
+        replaceImage: () => replacement.current?.click() }
+    }
+  }
+  const store = () => useEditorStore.getState()
+  const reorder = (move: LayerOrderMove) => run(() => {
+    const projection = selectEffectiveLayerProjection(store())
+    const order = projection && itemIds.length === 1 ? planLayerOrder(projection.unifiedRows, itemIds[0]!, move) : null
+    if (order) store().reorderNodes(order)
+  }, report)
+  const layerRows = single ? selectEffectiveLayerProjection(store())?.unifiedRows ?? [] : []
+  const canMove = (move: LayerOrderMove) => itemIds.length === 1 && Boolean(planLayerOrder(layerRows, itemIds[0]!, move))
+  // Capture when sending, so the request always names the objects selected now.
+  const ai = <QuickBarAiButton targetLabel={itemIds.length > 1 ? `所选 ${itemIds.length} 个对象` : single ? `“${single.view.name}”` : '所选对象'}
+    onSubmit={async instruction => {
+      if (!documentId || !locationId) throw new Error('文档尚未就绪，请重新选择。')
+      const snapshot = await workbenchSelection.prepare(documentId)
+      await workbenchSelection.request(captureCourseObjectSelection(snapshot, locationId, itemIds, stateId), instruction)
+    }} />
+  let content: ReactNode = null
+  if (single) {
+    const node = single.view, patch = single.patch
+    if (single.disabledReason) content = <><span title={single.disabledReason}><QuickBarLabel>此处不可编辑</QuickBarLabel></span><QuickBarSeparator />{ai}</>
+    else if (node.locked) content = <><QuickBarLabel>已锁定</QuickBarLabel><QuickBarButton label="解锁" text="解锁" icon={<Unlock size={14} />} onClick={() => patch({ locked: false })} /><QuickBarSeparator />{ai}</>
+    else {
+      const items: QuickBarMenuItem[] = [
+        { label: '复制', group: 'edit', onSelect: () => run(() => store().duplicateSelectedNodes(), report) },
+        { label: '删除', group: 'edit', danger: true, onSelect: () => run(() => store().deleteSelectedNodes(), report) },
+        { label: '上移一层', group: 'order', disabled: !canMove('forward'), onSelect: () => reorder('forward') },
+        { label: '下移一层', group: 'order', disabled: !canMove('backward'), onSelect: () => reorder('backward') },
+        { label: '置于顶层', group: 'order', disabled: !canMove('front'), onSelect: () => reorder('front') },
+        { label: '置于底层', group: 'order', disabled: !canMove('back'), onSelect: () => reorder('back') },
+        { label: '锁定', group: 'state', onSelect: () => patch({ locked: true }) },
+        { label: '隐藏', group: 'state', onSelect: () => patch({ visible: false }) },
+      ]
+      content = <>
+        <ObjectActions view={node} patch={patch} replaceImage={single.replaceImage} editText={single.editText} />
+        {node.type !== 'table' && node.type !== 'chart' && node.type !== 'input' && node.type !== 'external-component' && node.type !== 'runtime' && <QuickBarSeparator />}
+        {ai}<QuickBarMenu items={items} />
+      </>
+    }
+  } else if (selection?.kind === 'multi-selection') {
+    const commands = selection.commands
+    const unlocked = selection.items.filter(item => !item.locked).length
+    const items: QuickBarMenuItem[] = [
+      ...(commands.duplicate ? [{ label: '复制所选', group: 'edit', onSelect: () => run(commands.duplicate!, report) }] : []),
+      ...(commands.remove ? [{ label: '删除所选', group: 'edit', danger: true, onSelect: () => run(commands.remove!, report) }] : []),
+      { label: '横向等距分布', group: 'layout', disabled: unlocked < 3, onSelect: () => run(() => commands.distribute('horizontal'), report) },
+      { label: '纵向等距分布', group: 'layout', disabled: unlocked < 3, onSelect: () => run(() => commands.distribute('vertical'), report) },
+      { label: '全部锁定', group: 'state', onSelect: () => run(() => commands.setLocked(true), report) },
+      { label: '全部解锁', group: 'state', onSelect: () => run(() => commands.setLocked(false), report) },
+      { label: '全部隐藏', group: 'state', onSelect: () => run(() => commands.setVisible(false), report) },
+    ]
+    content = <>
+      <QuickBarLabel>已选 {selection.items.length} 项</QuickBarLabel>
+      {selection.unavailableReason ? <span title={selection.unavailableReason}><QuickBarLabel>部分操作不可用</QuickBarLabel></span>
+        : <QuickBarPopoverButton label="对齐" icon={<AlignHorizontalJustifyStart size={14} />} disabled={unlocked < 2} popupRole="menu">
+          {close => <div className="selection-quick-bar__menu" role="menu" aria-label="对齐">
+            {MULTI_ALIGN.map(([mode, label]) => <button key={mode} type="button" role="menuitem" onMouseDown={event => event.preventDefault()}
+              onClick={() => { close(); run(() => commands.align(mode), report) }}>{label}</button>)}
+          </div>}
+        </QuickBarPopoverButton>}
+      <QuickBarSeparator />{ai}<QuickBarMenu items={items} />
+    </>
+  }
   if (!enabled) return null
-  return <div className={`native-selection-context canvas-mode-switch${controlsVisible ? '' : ' native-selection-context--idle'}`} ref={host}
-    style={{ ...position, maxHeight: availableHeight, maxWidth: viewport ? Math.max(0, viewport.right - viewport.left - 16) : undefined }}
-    onPointerDown={event => event.stopPropagation()}
-    // Phaser also listens for compatibility mouse events and touch events on window.
-    // Keep controls above the canvas from selecting the object underneath them.
-    onMouseDown={event => event.stopPropagation()}
-    onMouseUp={event => event.stopPropagation()}
-    onTouchStart={event => event.stopPropagation()}
-    onTouchEnd={event => event.stopPropagation()}
-    onTouchCancel={event => event.stopPropagation()}
-    onClick={event => event.stopPropagation()}
-    onKeyDown={event => { event.stopPropagation(); if (event.key === 'Escape') { setOpen(false); setPropertiesOpen(false) } }}>
-    {boxes.map((box, index) => <div key={index} aria-hidden="true" data-pinned-object="true" style={{ position: 'fixed', pointerEvents: 'none', left: box.left, top: box.top, width: box.width, height: box.height, border: '2px dashed #8b5cf6', transform: box.rotation ? `rotate(${box.rotation}deg)` : undefined }} />)}
-    {manual && <div className="native-selection-context__toolbar" role="toolbar" aria-label="选中对象快捷工具">
-      <span>{itemIds.length > 1 ? `已选 ${itemIds.length} 项` : '已选对象'}</span>
-      {propertiesAvailable && <button type="button" aria-expanded={propertiesOpen} onClick={() => setPropertiesOpen(value => !value)}>属性</button>}
-      <button type="button" onClick={() => { if (!instruction && !target) setTarget(structuredClone(manual)); setOpen(true) }}>AI 修改选中内容</button>
-    </div>}
-    {propertiesOpen && propertiesAvailable && matchesObjectProperties(context, itemIds) && <ObjectPropertiesCard context={context} onClose={() => setPropertiesOpen(false)} onMore={openMore} />}
-    {open && target && <form onSubmit={event => { event.preventDefault(); void workbenchSelection.request(target, instruction).then(() => { setInstruction(''); setTarget(null); setOpen(false); setError('') }).catch(reason => setError(reason.message)) }}>
-      <span>{target.label} · 已固定</span>
-      <textarea aria-label="选中对象的修改要求" value={instruction} onChange={event => setInstruction(event.target.value)} />
-    {manual && <button type="button" onClick={() => setTarget(structuredClone(manual))}>改为当前选择</button>}
-      <button type="button" onClick={() => { setTarget(null); setInstruction(''); setOpen(false) }}>取消引用</button>
-      <button type="submit" disabled={!instruction.trim()}>交给创作助手</button>{error && <p role="alert">{error}</p>}
-    </form>}
-  </div>
+  return <span ref={marker} className="native-selection-context" aria-hidden="true">
+    {overlay && <input ref={replacement} type="file" accept="image/*" hidden tabIndex={-1} aria-label="替换浮层图片文件" onChange={event => {
+      const file = event.target.files?.[0]; event.target.value = ''
+      if (file) void file.arrayBuffer().then(bytes => overlay.commands.importReplacementMedia({ name: file.name, mimeType: file.type, bytes: new Uint8Array(bytes) }))
+        .catch(() => report('图片读取失败'))
+    }} />}
+    {pinnedBoxes.map((box, index) => <span key={index} aria-hidden="true" data-pinned-object="true" className="native-selection-context__pinned"
+      style={{ left: box.left, top: box.top, width: box.width, height: box.height, transform: box.rotation ? `rotate(${box.rotation}deg)` : undefined }} />)}
+    {content && <SelectionQuickBar label="选中对象快捷工具" anchor={anchor} bounds={view} suspended={gesture || textEditing} selectionKey={`${documentId}:${locationId}:${stateId}:${ids}`}>
+      {content}
+      {notice && <span role="alert" className="selection-quick-bar__notice" title={notice}>{notice}</span>}
+    </SelectionQuickBar>}
+  </span>
 }

@@ -1,6 +1,7 @@
 import { captureDocumentReference } from './workbench/SelectionContextController'
 import { CourseAdvancedChrome, CourseEditorFrame } from './documents/CourseEditorChromeContext'
 import { CourseLightToolbar } from './documents/CourseLightToolbar'
+import { CourseEditorActionsContext, type CourseEditorActions } from './documents/CourseEditorActionsContext'
 import { AlertCircle, LoaderCircle, X } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { LessonWorkspaceHost } from './app/LessonWorkspaceHost'
@@ -544,9 +545,14 @@ export default function App() {
       if (result) useEditorStore.getState().setStatus(`诊断报告已导出到 ${result.path}`)
     }, '诊断报告导出失败。请换一个可写目录后重试。')
   }, [run])
+  const mediaImportRef = useRef(mediaImport); mediaImportRef.current = mediaImport
+  const courseEditorActions = useMemo<CourseEditorActions>(() => ({
+    replaceImage: () => { void mediaImportRef.current.selectAndImportImage('replace') },
+  }), [])
 
   return (
     <ProjectColorPaletteContext.Provider value={projectColors}>
+    <CourseEditorActionsContext.Provider value={courseEditorActions}>
     <LessonWorkspaceHost ref={lessonShell} projectPath={projectPath} documents={documentsWithSaveDirectory ?? undefined} onSaveDirectoryChange={setSaveDirectory}
       courseDocuments={{ documents: courseConnection.documents, activation: courseConnection.activation,
         activeDocumentId: courseConnection.documentId,
@@ -567,6 +573,7 @@ export default function App() {
       undo={() => useEditorStore.getState().undo()} redo={() => useEditorStore.getState().redo()}
       undoLatestAgent={() => { void useEditorStore.getState().undoLatestAgentCourseDocument().catch(error => setError(error instanceof Error ? error.message : '撤销最近 AI 修改失败')) }}
       save={() => { void courseProjectLifecycle.saveProject(false) }}
+      saveAs={() => { void courseProjectLifecycle.saveProject(true) }}
       onReplaceImage={() => { void mediaImport.selectAndImportImage('replace') }}
       onAddText={() => { void (async () => {
         const before = useEditorStore.getState()
@@ -871,6 +878,7 @@ export default function App() {
       ) : null}
     </CourseEditorFrame>
     </LessonWorkspaceHost>
+    </CourseEditorActionsContext.Provider>
     </ProjectColorPaletteContext.Provider>
   )
 }

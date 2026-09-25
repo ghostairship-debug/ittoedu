@@ -1,0 +1,31 @@
+/* Same look as .text-edit-toolbar (globals.css): dark bar, 27px icon buttons, floating next to the selection. */
+.selection-quick-bar { position: fixed; z-index: 60; box-sizing: border-box; }
+.selection-quick-bar__row { display: flex; align-items: center; gap: 2px; box-sizing: border-box; height: 34px; padding: 3px; border: 1px solid #4b5361; border-radius: 7px; background: rgba(28, 31, 38, 0.97); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3); color: #d7dce4; font-size: 12px; white-space: nowrap; }
+.selection-quick-bar__anchor { display: inline-flex; }
+.selection-quick-bar .selection-quick-bar__button { display: inline-flex; align-items: center; justify-content: center; gap: 4px; box-sizing: border-box; min-width: 27px; height: 27px; padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--text-secondary, #c9ced6); font: inherit; cursor: pointer; }
+.selection-quick-bar .selection-quick-bar__button--text { padding: 0 7px; }
+.selection-quick-bar .selection-quick-bar__button:hover:not(:disabled) { background: var(--accent-soft, rgba(99, 132, 255, 0.28)); color: #fff; }
+.selection-quick-bar .selection-quick-bar__button[aria-pressed="true"],
+.selection-quick-bar .selection-quick-bar__button[aria-expanded="true"] { background: rgba(255, 255, 255, 0.14); color: #fff; }
+.selection-quick-bar .selection-quick-bar__button:disabled { opacity: 0.45; cursor: default; }
+.selection-quick-bar .selection-quick-bar__button--danger { color: #fca5a5; }
+.selection-quick-bar__separator { flex: none; width: 1px; height: 18px; margin: 0 3px; background: rgba(255, 255, 255, 0.16); }
+.selection-quick-bar__label { padding: 0 6px; color: #aeb5c0; font-size: 11px; }
+.selection-quick-bar__notice { max-width: 220px; overflow: hidden; padding: 0 6px; color: #fca5a5; font-size: 11px; text-overflow: ellipsis; }
+.selection-quick-bar__color-icon { position: relative; display: inline-grid; place-items: center; width: 16px; height: 18px; }
+.selection-quick-bar__color-bar { position: absolute; right: 1px; bottom: 0; left: 1px; height: 3px; border-radius: 1px; box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.25); }
+.selection-quick-bar__popover { position: absolute; left: 0; z-index: 1; overflow: auto; overscroll-behavior: contain; }
+.selection-quick-bar__popover--down { top: calc(100% + 6px); }
+.selection-quick-bar__popover--up { bottom: calc(100% + 6px); }
+.selection-quick-bar__menu { display: grid; min-width: 150px; padding: 4px; border: 1px solid #d8dee6; border-radius: 8px; background: #fff; box-shadow: 0 8px 24px rgb(0 0 0 / 18%); }
+.selection-quick-bar__menu button { padding: 6px 10px; border: 0; border-radius: 5px; background: transparent; color: #17211d; font-size: 12px; text-align: left; cursor: pointer; }
+.selection-quick-bar__menu button:hover:not(:disabled) { background: #edf3fa; }
+.selection-quick-bar__menu button:disabled { opacity: 0.5; cursor: default; }
+.selection-quick-bar__menu .selection-quick-bar__menu-item--group { margin-top: 4px; border-top: 1px solid #e5e9ef; border-radius: 0 0 5px 5px; }
+.selection-quick-bar__menu .selection-quick-bar__menu-item--danger { color: #b42318; }
+.selection-quick-bar__ai { display: grid; gap: 6px; box-sizing: border-box; width: 280px; padding: 10px; border: 1px solid #c4b5fd; border-radius: 8px; background: #fff; box-shadow: 0 8px 24px rgb(0 0 0 / 18%); color: #17211d; font-size: 12px; }
+.selection-quick-bar__ai textarea { box-sizing: border-box; width: 100%; min-height: 64px; resize: vertical; font: inherit; }
+.selection-quick-bar__ai p { margin: 0; }
+.selection-quick-bar__ai-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
+.selection-quick-bar__ai-actions button { padding: 4px 12px; }
+.selection-quick-bar__ai-target { color: #66758a; }

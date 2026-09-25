@@ -4,7 +4,12 @@ import { editorPositionToPoint } from './documentAdapter'
 import type { ExecutionSelectionTarget } from '../../shared/workbench/executionDesktop'
 import { pinnedSelectionKey, pinnedSelectionPlugin, sourcePinnedSelectionEffect, sourcePinnedSelectionField } from './selectionDecorations'
 import { FONT_FAMILY_OPTIONS } from '../../shared/fonts/fontFamilyCatalog'
-import { forwardRef, useEffect, useImperativeHandle, useRef, useState, useMemo, useId, type FormEvent, type ReactNode } from 'react'
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState, useMemo, type ReactNode } from 'react'
+import { Baseline, Bold, Highlighter, Italic, Strikethrough, Underline } from 'lucide-react'
+import { PaletteButton } from '../editing/color/PaletteButton'
+import type { QuickBarBounds, QuickBarRect } from '../editing/quickbar/placeQuickBar'
+import { QuickBarAiButton, QuickBarButton, QuickBarColorButton, QuickBarPopoverButton, QuickBarSeparator, SelectionQuickBar } from '../editing/quickbar/SelectionQuickBar'
+import { usePointerGesture } from '../editing/quickbar/usePointerGesture'
 import { createPortal } from 'react-dom'
 import { EditorState as SourceState } from '@codemirror/state'
 import { EditorView as SourceView, keymap as sourceKeymap } from '@codemirror/view'
@@ -73,7 +78,8 @@ export interface SharedDocumentEditorProps {
   onSelection?(selection: DocumentSelection | null): void
   onContextualTargetChange?(target: DocumentContextSelection | null): void
   onContextualCommand?(instruction: string, target: DocumentContextSelection): void | Promise<void>
-  renderContextualProperties?(target: DocumentContextSelection): ReactNode
+  /** Owner actions on the selection quick bar, such as replacing or moving a Flow image. */
+  renderQuickBarActions?(target: DocumentContextSelection): ReactNode
   pinnedTargets?: readonly ExecutionSelectionTarget[]
   contextualCommandIssue?(target: DocumentContextSelection): string | null
   contextualCardSuppressed?: boolean
@@ -98,17 +104,19 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
   const [mathDraft, setMathDraft] = useState<{ latex: string; accessibleText: string; display: boolean; formulaId: string; from: number; to: number } | null>(null)
   const [linkDraft, setLinkDraft] = useState<string | null>(null)
   const [contextualTarget, setContextualTarget] = useState<DocumentContextSelection | null>(null)
-  const [contextualCardOpen, setContextualCardOpen] = useState(false)
-  const [contextualPropertiesOpen, setContextualPropertiesOpen] = useState(false)
+  /** Each newly published target; the quick bar closes its popovers when it changes. */
+  const [targetGeneration, setTargetGeneration] = useState(0)
+  const [dismissedGeneration, setDismissedGeneration] = useState(-1)
+  const [quickBarPlace, setQuickBarPlace] = useState<{ anchor: QuickBarRect; bounds: QuickBarBounds } | null>(null)
   const [contextualInstruction, setContextualInstruction] = useState('')
   const instructionRef = useRef(''); instructionRef.current = contextualInstruction
   const manualTarget = useRef<DocumentContextSelection | null>(null)
   const [localPin, setLocalPin] = useState<{mode: 'layout' | 'source'; from: number; to: number; revision: string} | null>(null)
   const [commandError, setCommandError] = useState('')
-  const [cardPosition, setCardPosition] = useState<{ left: number; top: number; maxWidth?: number; maxHeight?: number; visibility?: 'hidden' }>({ left: 8, top: 8, visibility: 'hidden' })
-  const [retainedPosition, setRetainedPosition] = useState<{ left: number; bottom: number; width: number; maxHeight: number } | null>(null)
-  const cardRef = useRef<HTMLElement>(null)
-  const editorRoot = useRef<HTMLDivElement>(null)
+  const editorRoot = useRef<HTMLDivElement | null>(null)
+  const [rootElement, setRootElement] = useState<HTMLDivElement | null>(null)
+  const attachRoot = useCallback((element: HTMLDivElement | null) => { editorRoot.current = element; setRootElement(element) }, [])
+  const pointerGesture = usePointerGesture(rootElement)
   const toolbarRef = useRef<HTMLDivElement>(null)
   const draft = useRef(props.sourceDraft ?? serializeDocumentMarkdown(props.document, props.target))
   const layoutHost = useRef<HTMLDivElement>(null)
@@ -122,7 +130,6 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
   const focusAfterSwitch = useRef(false)
   const sourceGroup = useRef({ id: crypto.randomUUID(), time: 0 })
   const contextualTargetRef = useRef<DocumentContextSelection | null>(null)
-  const inputId = useId()
   const suppliedProjection = useMemo<MarkdownProjection>(() => {
     const source = props.sourceDraft ?? serializeDocumentMarkdown(props.document, props.target)
     if (props.sourceMap) return { source, document: props.document, sourceMap: props.sourceMap }
@@ -135,35 +142,36 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
   const fallbackMap = projection.current.sourceMap
   const mapRef = useRef(fallbackMap); mapRef.current = fallbackMap
   const restoreSourceSelection = useRef(false)
+  /** Screen box of the current target: its pinned range when a draft holds it, otherwise the live selection. */
+  function targetRect(): QuickBarRect | null {
+    const pin = localPin && localPin.mode === mode && localPin.revision === latest.current.revision ? localPin : null
+    if (mode === 'layout' && layout.current) {
+      const view = layout.current.view, selection = view.state.selection
+      const from = pin?.from ?? selection.from, to = pin?.to ?? selection.to
+      const node = contextualTargetRef.current?.selection?.kind === 'object' ? view.nodeDOM(from) : null
+      if (node instanceof HTMLElement) { const rect = node.getBoundingClientRect(); return { left: rect.left, top: rect.top, width: rect.width, height: rect.height } }
+      const start = view.coordsAtPos(from), end = view.coordsAtPos(to)
+      return { left: Math.min(start.left, end.left), top: start.top, width: Math.max(1, Math.abs(end.right - start.left)), height: Math.max(1, end.bottom - start.top) }
+    }
+    if (mode === 'source' && source.current) {
+      const selection = source.current.state.selection.main
+      const start = source.current.coordsAtPos(pin?.from ?? selection.from), end = source.current.coordsAtPos(pin?.to ?? selection.to)
+      if (!start || !end) return null
+      return { left: Math.min(start.left, end.left), top: start.top, width: Math.max(1, Math.abs(end.right - start.left)), height: Math.max(1, end.bottom - start.top) }
+    }
+    return null
+  }
   useEffect(() => {
-    if (!contextualTarget) return
+    if (!contextualTarget) { setQuickBarPlace(null); return }
     const position = () => {
-      let point: { left: number; top: number; bottom: number } | null = null
-      try {
-        if (mode === 'layout' && layout.current) point = layout.current.view.coordsAtPos(layout.current.view.state.selection.from)
-        else if (source.current) point = source.current.coordsAtPos(source.current.state.selection.main.from)
-      } catch { /* Detached text during owner replacement has no screen position. */ }
       const editor = editorRoot.current
       if (!editor) return
       const bounds = visibleEditorBounds(editor)
-      const availableWidth = Math.max(0, bounds.right - bounds.left)
-      const availableHeight = Math.max(0, bounds.bottom - bounds.top)
-      if (availableWidth < 1 || availableHeight < 1) {
-        setRetainedPosition(null)
-        setCardPosition(current => current.visibility === 'hidden' ? current : { left: 8, top: 8, visibility: 'hidden' })
-        return
-      }
-      const maxWidth = Math.floor(availableWidth), maxHeight = Math.floor(availableHeight)
-      const width = Math.min(cardRef.current?.offsetWidth || 430, maxWidth)
-      const height = Math.min(cardRef.current?.scrollHeight || 155, maxHeight)
-      const left = Math.max(bounds.left, Math.min(point?.left ?? bounds.left, bounds.right - width))
-      const below = (point?.bottom ?? 0) + 8
-      const top = Math.max(bounds.top, Math.min(below + height <= bounds.bottom ? below : (point?.top ?? bounds.top) - height - 8, bounds.bottom - height))
-      setCardPosition(current => current.left === left && current.top === top && current.maxWidth === maxWidth && current.maxHeight === maxHeight && current.visibility !== 'hidden'
-        ? current : { left, top, maxWidth, maxHeight })
-      const barWidth = Math.min(680, maxWidth)
-      const retained = { left: bounds.right - barWidth, bottom: window.innerHeight - bounds.bottom, width: barWidth, maxHeight }
-      setRetainedPosition(current => current && Object.keys(retained).every(key => current[key as keyof typeof retained] === retained[key as keyof typeof retained]) ? current : retained)
+      if (bounds.right - bounds.left < 1 || bounds.bottom - bounds.top < 1) { setQuickBarPlace(null); return }
+      let anchor: QuickBarRect | null = null
+      try { anchor = targetRect() } catch { /* Detached text during owner replacement has no screen position. */ }
+      const next = { anchor: anchor ?? { left: bounds.left, top: bounds.top, width: 1, height: 1 }, bounds }
+      setQuickBarPlace(current => JSON.stringify(current) === JSON.stringify(next) ? current : next)
     }
     position()
     window.addEventListener('scroll', position, true); window.addEventListener('resize', position)
@@ -173,9 +181,8 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
       observer?.observe(parent)
       mutation?.observe(parent, { attributes: true, attributeFilter: ['style', 'class'] })
     }
-    if (cardRef.current) observer?.observe(cardRef.current)
     return () => { window.removeEventListener('scroll', position, true); window.removeEventListener('resize', position); observer?.disconnect(); mutation?.disconnect() }
-  }, [contextualTarget, mode, contextualCardOpen, contextualPropertiesOpen, commandError])
+  }, [contextualTarget, mode, localPin])
   const fail = (message: string) => setDiagnostics([{ message, offset: 0, endOffset: 0, line: 1, column: 1 }])
   const previewBlocked = () => setCommandError('正在生成的范围暂时只读。请先停止生成，再编辑这一处。')
   const pinPlugin = useMemo(() => pinnedSelectionPlugin(), [])
@@ -191,11 +198,10 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
     } else setLocalPin(null)
     contextualTargetRef.current = target
     setContextualTarget(target)
-    setContextualCardOpen(Boolean(target))
-    setContextualPropertiesOpen(false)
+    setTargetGeneration(value => value + 1)
   }
-  function publishLayoutSelection(selection: DocumentSelection | null) {
-    latest.current.onSelection?.(selection)
+  function publishLayoutSelection(selection: DocumentSelection | null, notifyOwner = true) {
+    if (notifyOwner) latest.current.onSelection?.(selection)
     if (!selection) { publishContextualTarget(null); return }
     if (selection.kind === 'text' && JSON.stringify(selection.anchor.slot) === JSON.stringify(selection.head.slot) && selection.anchor.blockId === selection.head.blockId && selection.anchor.offset === selection.head.offset) { publishContextualTarget(null); return }
     const mapped = mapDocumentSelectionToSource(draft.current, mapRef.current, selection)
@@ -312,7 +318,12 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
   }, [mode, props.editPreview, props.revision, props.document, fallbackMap])
   useEffect(() => {
     const current = contextualTargetRef.current
-    if (current && current.revision !== props.revision) publishContextualTarget(null)
+    if (!current || current.revision === props.revision) return
+    // A committed edit such as formatting keeps the same selection: report it again at the new revision so the
+    // quick bar stays. A pending AI draft still keeps its old target (publishContextualTarget).
+    if (mode === 'layout' && layout.current) { const selection = layout.current.readSelection(); if (selection) { publishLayoutSelection(selection, false); return } }
+    else if (mode === 'source' && source.current) { publishSourceSelection(source.current); return }
+    publishContextualTarget(null)
   }, [props.revision])
   useEffect(() => {
     const pins = (props.pinnedTargets ?? []).filter(target => target.kind !== 'course-object').map(target => ({ editId: 'pinned-selection', target, value: '', cancel() {} }))
@@ -363,13 +374,15 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
     const { state } = editor.view
     const type = documentEditorSchema.marks.style
     const tr = state.tr
+    // A null value ("无高亮") removes the property instead of storing it.
+    const merged = (current: TextRunStyle) => Object.fromEntries(Object.entries({ ...current, ...patch }).filter(([, value]) => value !== null && value !== undefined)) as TextRunStyle
     if (state.selection.empty) {
       const current = (state.storedMarks ?? state.selection.$from.marks()).find(mark => mark.type === type)?.attrs.value ?? {}
-      tr.addStoredMark(type.create({ value: { ...current, ...patch } }))
+      tr.addStoredMark(type.create({ value: merged(current) }))
     } else state.doc.nodesBetween(state.selection.from, state.selection.to, (node, pos) => {
       if (!node.isInline) return
       const current = node.marks.find(mark => mark.type === type)?.attrs.value ?? {}
-      tr.addMark(Math.max(state.selection.from, pos), Math.min(state.selection.to, pos + node.nodeSize), type.create({ value: { ...current, ...patch } }))
+      tr.addMark(Math.max(state.selection.from, pos), Math.min(state.selection.to, pos + node.nodeSize), type.create({ value: merged(current) }))
     })
     editor.view.dispatch(tr)
     editor.view.focus()
@@ -396,12 +409,22 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
     publishContextualTarget(null)
     latest.current.onContextualDismiss?.(current)
   }
-  async function submitContextualCommand(event: FormEvent) {
-    event.preventDefault()
-    const instruction = contextualInstruction.trim(), target = contextualTargetRef.current
-    if (!instruction || !target || contextualIssue(target) || diagnostics.length || !latest.current.onContextualCommand) return
-    try { await latest.current.onContextualCommand(instruction, target); setContextualInstruction(''); setCommandError('') }
-    catch (error) { setCommandError(error instanceof Error ? error.message : String(error)) }
+  /** Hand the instruction over for the held target; a rejection keeps the draft in the quick bar form. */
+  async function sendContextualInstruction(instruction: string) {
+    const target = contextualTargetRef.current
+    if (!target || !latest.current.onContextualCommand) throw new Error('请重新选择要修改的内容。')
+    const issue = contextualIssue(target)
+    if (issue) throw new Error(issue)
+    if (diagnostics.length) throw new Error('源文尚有错误，请先修正或丢弃待修草稿。')
+    await latest.current.onContextualCommand(instruction, target)
+    instructionRef.current = ''; setContextualInstruction(''); setCommandError('')
+  }
+  /** Move a held draft to the latest selection, keeping its text. */
+  function rebindToCurrentSelection() {
+    const next = manualTarget.current, draftText = instructionRef.current
+    instructionRef.current = ''
+    publishContextualTarget(next)
+    instructionRef.current = draftText
   }
   function contextualIssue(target: DocumentContextSelection) {
     if (target.revision !== props.revision) return '选中的内容已改变，请改为当前选择；原指令仍保留。'
@@ -436,8 +459,8 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
         {([['bold', '粗体'], ['italic', '斜体'], ['underline', '下划线'], ['strike', '删除线'], ['emphasis', '着重号']] as const).map(([key, label]) => <button key={key} type="button" onMouseDown={event => event.preventDefault()} aria-pressed={format.flags[key]} onClick={() => toggleStyle(key)}>{label}</button>)}
         <label>字号<input aria-label="字号" type="number" min="8" max="400" value={format.fontSize === 'mixed' ? '' : format.fontSize ?? ''} placeholder={format.fontSize === 'mixed' ? '混合' : '默认'} onChange={event => { const value = Number(event.target.value); if (value >= 8 && value <= 400) style({ fontSize: value }) }} /></label>
         <label>字体<select aria-label="字体" value={format.fontFamily === 'mixed' ? '__mixed' : format.fontFamily ?? ''} onChange={event => { if (event.target.value && event.target.value !== '__mixed') style({ fontFamily: event.target.value }) }}><option value="">默认字体</option>{format.fontFamily === 'mixed' && <option value="__mixed">混合字体</option>}{format.fontFamily && format.fontFamily !== 'mixed' && !FONT_FAMILY_OPTIONS.some(option => option.family === format.fontFamily) && <option value={format.fontFamily}>{format.fontFamily}</option>}{FONT_FAMILY_OPTIONS.map(option => <option key={option.family} value={option.family}>{option.label}</option>)}</select></label>
-        <label>颜色<input type="color" aria-label="文字颜色" defaultValue="#1f2937" onChange={event => style({ color: event.target.value })} /></label>
-        <label>高亮<input type="color" aria-label="高亮颜色" defaultValue="#fff3a3" onChange={event => style({ highlightColor: event.target.value })} /></label>
+        <PaletteButton label="文字颜色" text="颜色" onPick={color => { if (color) style({ color }) }} />
+        <PaletteButton label="高亮颜色" text="高亮" variant="highlight" onPick={highlightColor => style({ highlightColor })} />
         <button type="button" onMouseDown={event => event.preventDefault()} onClick={() => style({ baseline: 0.35 })}>上标</button>
         <button type="button" onMouseDown={event => event.preventDefault()} onClick={() => style({ baseline: -0.25 })}>下标</button>
         <button type="button" onMouseDown={event => event.preventDefault()} onClick={() => { const editor = layout.current; if (editor) toggleMark(documentEditorSchema.marks.code)(editor.view.state, editor.view.dispatch) }}>行内代码</button>
@@ -464,26 +487,38 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
       <button type="submit">应用公式</button><button type="button" onClick={() => setMathDraft(null)}>取消</button>
     </form>}
   </>
-  const contextualProperties = contextualTarget && props.renderContextualProperties?.(contextualTarget)
-  const contextualCard = contextualTarget && !props.readOnly && !props.contextualCardSuppressed && (contextualCardOpen
-    ? <aside ref={cardRef} className="shared-document-contextual-card" style={cardPosition} aria-label="当前编辑目标" onPointerDownCapture={() => layout.current?.syncDomTextSelection()} onKeyDown={event => { if (event.key === 'Escape') { event.preventDefault(); if (contextualPropertiesOpen) setContextualPropertiesOpen(false); else { setContextualCardOpen(false); layout.current?.view.focus(); source.current?.focus() } } }}>
-        <div className="shared-document-contextual-card__header"><strong>{contextualTarget.label}</strong>{contextualTarget.ranges && <span>{contextualTarget.ranges.reduce((count, range) => count + Array.from(range.before).length, 0)} 字</span>}<button type="button" aria-label="关闭当前编辑目标" onClick={dismissContextualTarget}>关闭</button></div>
-        {mode === 'layout' && contextualTarget.selection?.kind !== 'object' && <div className="shared-document-contextual-card__actions" role="group" aria-label="当前选区格式"><button type="button" onClick={() => toggleStyle('bold')} aria-label="当前选区加粗">加粗</button><button type="button" onClick={() => toggleStyle('italic')} aria-label="当前选区斜体">斜体</button>{['段落', '标题'].includes(contextualTarget.label) && <select aria-label="当前段落类型" defaultValue="paragraph" onChange={event => applyParagraphType(event.target.value)}><option value="paragraph">正文</option>{[1, 2, 3, 4, 5, 6].map(level => <option key={level} value={level}>标题 {level}</option>)}</select>}</div>}
-        {props.onContextualCommand && <form className="shared-document-contextual-card__command" onSubmit={submitContextualCommand} onKeyDown={event => { if (event.key === 'Enter' && (event.nativeEvent.isComposing || event.keyCode === 229)) event.preventDefault() }}><label htmlFor={inputId}>AI 指令</label><input id={inputId} value={contextualInstruction} onChange={event => setContextualInstruction(event.target.value)} placeholder="告诉 AI 如何修改这里" autoComplete="off" /><button type="submit" disabled={!contextualInstruction.trim() || Boolean(contextualIssue(contextualTarget)) || diagnostics.length > 0}>发送</button></form>}
-        <button type="button" onClick={() => { const next = manualTarget.current; instructionRef.current = ''; publishContextualTarget(next); instructionRef.current = contextualInstruction }}>改为当前选择</button>
-        <button type="button" onClick={() => { setContextualCardOpen(false); const details = toolbarRef.current?.closest('details'); if (details) details.open = true; toolbarRef.current?.scrollIntoView?.({ block: 'nearest' }); toolbarRef.current?.focus() }}>更多格式</button>
-        {contextualProperties && <button type="button" aria-expanded={contextualPropertiesOpen} onClick={() => setContextualPropertiesOpen(value => !value)}>属性</button>}
-        {contextualProperties && contextualPropertiesOpen && <div aria-label="正文选中属性" style={{ maxHeight: 'min(50vh, 420px)', overflow: 'auto' }}>{contextualProperties}</div>}
-        {commandError && <p role="alert">{commandError}</p>}
-        {contextualIssue(contextualTarget) && <p role="status">{contextualIssue(contextualTarget)}</p>}<button className="shared-document-contextual-card__retain" type="button" onClick={() => setContextualCardOpen(false)}>保留目标</button>
-      </aside>
-    : <div className="shared-document-contextual-target" style={retainedPosition ?? { visibility: 'hidden' }} role="status"><span>已保留目标：{contextualTarget.label}</span><button type="button" onClick={() => setContextualCardOpen(true)}>展开编辑卡</button><button type="button" aria-label="关闭已保留目标" onClick={dismissContextualTarget}>关闭</button></div>)
-  return <div ref={editorRoot} className={`shared-document-editor${props.target === 'flow' ? ' shared-document-editor--flow' : ''}`} onKeyDown={event => {
-    if (event.key === 'Escape' && contextualTarget) { event.preventDefault(); setContextualCardOpen(false) }
-    if (event.altKey && event.key === 'Enter' && contextualTarget) { event.preventDefault(); setContextualCardOpen(true); requestAnimationFrame(() => cardRef.current?.querySelector<HTMLInputElement>('input')?.focus()) }
+  const quickBarIssue = contextualTarget ? contextualIssue(contextualTarget) ?? (diagnostics.length ? '源文尚有错误，请先修正或丢弃待修草稿。' : null) : null
+  const textTools = contextualTarget && mode === 'layout' && contextualTarget.selection && contextualTarget.selection.kind !== 'object'
+  const quickBar = contextualTarget && !props.readOnly && !props.contextualCardSuppressed && quickBarPlace
+    && <SelectionQuickBar anchor={quickBarPlace.anchor} bounds={quickBarPlace.bounds} label="选中内容快捷工具" selectionKey={String(targetGeneration)}
+      suspended={pointerGesture || dismissedGeneration === targetGeneration}>
+      {textTools && <>
+        <QuickBarButton label="当前选区加粗" icon={<Bold size={14} />} pressed={format.flags.bold === true} onClick={() => toggleStyle('bold')} />
+        <QuickBarButton label="当前选区斜体" icon={<Italic size={14} />} pressed={format.flags.italic === true} onClick={() => toggleStyle('italic')} />
+        <QuickBarButton label="当前选区下划线" icon={<Underline size={14} />} pressed={format.flags.underline === true} onClick={() => toggleStyle('underline')} />
+        <QuickBarButton label="当前选区删除线" icon={<Strikethrough size={14} />} pressed={format.flags.strike === true} onClick={() => toggleStyle('strike')} />
+        <QuickBarColorButton label="当前选区文字颜色" icon={<Baseline size={14} />} onPick={color => { if (color) style({ color }) }} />
+        <QuickBarColorButton label="当前选区高亮" icon={<Highlighter size={14} />} variant="highlight" onPick={highlightColor => style({ highlightColor })} />
+        {['段落', '标题'].includes(contextualTarget.label) && <QuickBarPopoverButton label="当前段落类型" text="段落" popupRole="menu">
+          {close => <div className="selection-quick-bar__menu" role="menu" aria-label="当前段落类型">
+            {[['paragraph', '正文'], ...[1, 2, 3, 4, 5, 6].map(level => [String(level), `标题 ${level}`])].map(([value, label]) => <button key={value} type="button" role="menuitem"
+              onMouseDown={event => event.preventDefault()} onClick={() => { close(); applyParagraphType(value!) }}>{label}</button>)}
+          </div>}
+        </QuickBarPopoverButton>}
+        <QuickBarSeparator />
+      </>}
+      {props.renderQuickBarActions?.(contextualTarget)}
+      {props.onContextualCommand && <QuickBarAiButton targetLabel={contextualTarget.label} disabledReason={quickBarIssue}
+        instruction={contextualInstruction} onInstructionChange={value => { instructionRef.current = value; setContextualInstruction(value) }}
+        onSubmit={sendContextualInstruction} onCancel={dismissContextualTarget}
+        footer={manualTarget.current && manualTarget.current !== contextualTarget ? <button type="button" onClick={rebindToCurrentSelection}>改为当前选择</button> : null} />}
+      {commandError && <span role="alert" className="selection-quick-bar__notice" title={commandError}>{commandError}</span>}
+    </SelectionQuickBar>
+  return <div ref={attachRoot} className={`shared-document-editor${props.target === 'flow' ? ' shared-document-editor--flow' : ''}`} onKeyDown={event => {
+    if (event.key === 'Escape' && contextualTarget) { event.preventDefault(); setDismissedGeneration(targetGeneration) }
   }} onCompositionStartCapture={() => props.onCompositionChange?.(true, draft.current)} onCompositionEndCapture={() => queueMicrotask(() => props.onCompositionChange?.(false, draft.current))}>
      {!props.readOnly && (props.toolbarHost ? createPortal(<details className="flow-document-format"><summary onMouseDown={event => event.preventDefault()}>正文格式</summary>{toolbar}{editorForms}</details>, props.toolbarHost) : <>{toolbar}{editorForms}</>)}
-     {contextualCard && createPortal(contextualCard, window.document.body)}
+     {quickBar}
      {props.editPreview && <div className="document-generation-status" role="status">正文正在生成，生成部分尚未保存。<button type="button" onClick={props.editPreview.cancel}>停止生成</button>{commandError && <span role="alert">{commandError}</span>}</div>}
      {mode === 'layout' ? <div ref={layoutHost} /> : <div ref={sourceHost} />}
     {diagnostics.length > 0 && <ul role="alert">{diagnostics.map((diagnostic, index) => <li key={index}><button type="button" onClick={() => { const editor = source.current; if (!editor) return; const position = Math.min(editor.state.doc.length, diagnostic.offset); editor.dispatch({ selection: { anchor: position }, effects: SourceView.scrollIntoView(position) }); editor.focus() }}>第 {diagnostic.line} 行：{diagnostic.message}</button></li>)}</ul>}

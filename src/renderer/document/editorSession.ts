@@ -142,23 +142,26 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
       // manual AI context. Inspect appended transactions too: applyTransaction
       // can replace an ordinary caret with a synthetic NodeSelection.
       if (!transaction.selectionSet || transaction.docChanged || applied.transactions.some(item => item.getMeta(previewCaretTransaction))) return
-      const anchor = editorPositionToPoint(state.doc, state.selection.anchor)
-      const head = editorPositionToPoint(state.doc, state.selection.head)
-      if (state.selection instanceof CellSelection) {
-        const a = state.selection.$anchorCell.nodeAfter?.firstChild?.attrs.key as string | undefined
-        const h = state.selection.$headCell.nodeAfter?.firstChild?.attrs.key as string | undefined
-        if (a?.startsWith('cell:') && h?.startsWith('cell:')) {
-          const [rowId, columnId] = JSON.parse(a.slice(5)); const [headRow, headColumn] = JSON.parse(h.slice(5))
-          let depth = state.selection.$anchorCell.depth
-          while (depth > 0 && !state.selection.$anchorCell.node(depth).attrs.id) depth--
-          options.selection?.({ revision: options.revision, kind: 'cells', tableId: state.selection.$anchorCell.node(depth).attrs.id, anchor: { rowId, columnId }, head: { rowId: headRow, columnId: headColumn } })
-        }
-      } else if (!transaction.docChanged) {
-        if (state.selection instanceof NodeSelection && state.selection.node.attrs.id) options.selection?.({ revision: options.revision, kind: 'object', blockId: state.selection.node.attrs.id })
-        else options.selection?.(anchor && head ? { revision: options.revision, kind: 'text', anchor, head } : null)
-      }
+      const described = describeSelection(state)
+      if (described !== undefined) options.selection?.(described)
     },
   })
+  /** The document selection of `state`; undefined for a cell selection whose cells cannot be identified. */
+  function describeSelection(state: EditorState): DocumentSelection | null | undefined {
+    if (state.selection instanceof CellSelection) {
+      const a = state.selection.$anchorCell.nodeAfter?.firstChild?.attrs.key as string | undefined
+      const h = state.selection.$headCell.nodeAfter?.firstChild?.attrs.key as string | undefined
+      if (!a?.startsWith('cell:') || !h?.startsWith('cell:')) return undefined
+      const [rowId, columnId] = JSON.parse(a.slice(5)); const [headRow, headColumn] = JSON.parse(h.slice(5))
+      let depth = state.selection.$anchorCell.depth
+      while (depth > 0 && !state.selection.$anchorCell.node(depth).attrs.id) depth--
+      return { revision: options.revision, kind: 'cells', tableId: state.selection.$anchorCell.node(depth).attrs.id, anchor: { rowId, columnId }, head: { rowId: headRow, columnId: headColumn } }
+    }
+    if (state.selection instanceof NodeSelection && state.selection.node.attrs.id) return { revision: options.revision, kind: 'object', blockId: state.selection.node.attrs.id }
+    const anchor = editorPositionToPoint(state.doc, state.selection.anchor)
+    const head = editorPositionToPoint(state.doc, state.selection.head)
+    return anchor && head ? { revision: options.revision, kind: 'text', anchor, head } : null
+  }
   async function pastePrepared(payload: { slice: unknown; resources: MarkdownDocument['resources']; context?: unknown }) {
     const targetState = view.state; const revision = options.revision
     let port: DocumentClipboardResourcePort<unknown> | undefined
@@ -285,5 +288,7 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
     }
     if (refreshObjects) view.setProps({ nodeViews: { ...view.props.nodeViews, object: node => objectView(node, false), compound: node => objectView(node, true) } })
   }
-  return { view, update, boundary, syncDomTextSelection, flush: () => { if (composing) return false; publish(); boundary(); return true }, destroy: () => view.destroy() }
+  return { view, update, boundary, syncDomTextSelection, flush: () => { if (composing) return false; publish(); boundary(); return true }, destroy: () => view.destroy(),
+    /** Current selection at the current revision, for re-reporting it after a committed edit such as formatting. */
+    readSelection: () => describeSelection(view.state) ?? null }
 }
