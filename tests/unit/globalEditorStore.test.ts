@@ -26,12 +26,18 @@ import {
 } from '@/renderer/store/editorStore'
 
 import { courseLayerItemToEditorCanvasNode } from '@/renderer/store/slideEditorProjection'
+import {
+  bootCourseStore,
+  formalHistory,
+  redoCourse,
+  replaceCourseProject,
+  settleCourse,
+  undoCourse,
+} from '../helpers/triage-t1-editorDocument'
 
+/** 2.0 的正式历史在主进程 DocumentSession；renderer `history.past` 恒为空。 */
 function activeHistory() {
-  const state = useEditorStore.getState()
-  const backend = state.slideBackend
-  if (!backend) throw new Error('expected active slideBackend')
-  return backend.getSession().history
+  return formalHistory()
 }
 
 function projectedGlobalLayer(state: Parameters<typeof selectCandidateGlobalLayerItems>[0]) {
@@ -51,32 +57,35 @@ function componentPackage(
   id: string,
   supportedScopes: ComponentManifestV4['supportedScopes'],
 ): ComponentPackageData {
-  return {
-    manifest: {
-      schemaVersion: 4,
-      runtimeApiVersion: 4,
-      supportedScopes,
-      renderMode: 'phaser',
-      id,
-      name: id === 'com.example.global' ? '全局控制条' : '场景练习',
-      version: '4.0.0',
-      entry: 'runtime.js',
-      defaultSize: { width: 480, height: 120 },
-      minSize: { width: 160, height: 60 },
-      preserveAspectRatio: false,
-      assets: {},
-      defaultProps: {
-        content: {
-          title: '课程导航',
-          buttons: { replay: '重播', next: '下一页' },
-        },
+  const manifest: ComponentManifestV4 = {
+    schemaVersion: 4,
+    runtimeApiVersion: 4,
+    supportedScopes,
+    renderMode: 'phaser',
+    id,
+    name: id === 'com.example.global' ? '全局控制条' : '场景练习',
+    version: '4.0.0',
+    entry: 'runtime.js',
+    defaultSize: { width: 480, height: 120 },
+    minSize: { width: 160, height: 60 },
+    preserveAspectRatio: false,
+    assets: {},
+    defaultProps: {
+      content: {
+        title: '课程导航',
+        buttons: { replay: '重播', next: '下一页' },
       },
     },
-    runtimeSource:
-      "window.CoursewareComponent.define({id:'placeholder',runtimeApiVersion:4,create:function(){return {destroy:function(){}}}})",
+  }
+  const runtimeSource =
+    "window.CoursewareComponent.define({id:'placeholder',runtimeApiVersion:4,create:function(){return {destroy:function(){}}}})"
+  return {
+    manifest,
+    runtimeSource,
+    // 组件包会写入正式工程，必须是可解析且摘要一致的真实字节。
     files: {
-      'manifest.json': new Uint8Array([1]),
-      'runtime.js': new Uint8Array([2]),
+      'manifest.json': new TextEncoder().encode(JSON.stringify(manifest)),
+      'runtime.js': new TextEncoder().encode(runtimeSource),
     },
   }
 }
@@ -127,7 +136,7 @@ function installRuntimeDefinitions(
   sceneId: string,
   sceneRuntime: CourseRuntimeDefinition,
   globalRuntime: CourseRuntimeDefinition,
-): void {
+): Promise<void> {
   const store = useEditorStore.getState()
   const current = selectActiveCourseProjectDocument(store)
   if (!current) throw new Error('缺少当前 Course Project')
@@ -156,12 +165,7 @@ function installRuntimeDefinitions(
     ),
     visibility: { mode: 'all', locationIds: [] },
   })
-  store.loadCourseProject(
-    project,
-    null,
-    store.assetFiles,
-    store.componentPackages,
-  )
+  return replaceCourseProject(project, store.assetFiles, store.componentPackages)
 }
 
 function captureRuntimeTitleTarget(
@@ -205,12 +209,14 @@ function captureRuntimeTitleTarget(
   })
 }
 
-beforeEach(() => {
-  useEditorStore.getState().createNewProject()
+beforeEach(async () => {
+  await bootCourseStore()
+  await useEditorStore.getState().createCourseDocument('slide')
+  await settleCourse()
 })
 
 describe('Project V8 global-layer editor store', () => {
-  it('在隐藏、关闭与恢复教师控制器时始终维持双向一致', () => {
+  it('在隐藏、关闭与恢复教师控制器时始终维持双向一致', async () => {
     const store = useEditorStore.getState()
     store.setEditingScope('global')
     const controller = projectedGlobalLayer(useEditorStore.getState()).find(
@@ -218,21 +224,25 @@ describe('Project V8 global-layer editor store', () => {
     )!.node
 
     store.updateNode(controller.id, { visible: false })
+    await settleCourse()
     expect(selectActiveCourseProjectDocument(useEditorStore.getState())!.playback.controls).toBe('none')
 
     useEditorStore.getState().ensureTeacherController()
+    await settleCourse()
     let project = selectActiveCourseProjectDocument(useEditorStore.getState())!
     expect(project.playback.controls).toBe('canvas')
     expect(projectedGlobalLayer(useEditorStore.getState()).find((item) => item.node.id === controller.id)?.node)
       .toMatchObject({ visible: true, playbackInitialVisibility: 'inherit' })
 
     useEditorStore.getState().updatePlayback({ controls: 'none' })
+    await settleCourse()
     project = selectActiveCourseProjectDocument(useEditorStore.getState())!
     expect(project.playback.controls).toBe('none')
     expect(projectedGlobalLayer(useEditorStore.getState()).find((item) => item.node.id === controller.id)?.node)
       .toMatchObject({ playbackInitialVisibility: 'hidden' })
 
     useEditorStore.getState().ensureTeacherController()
+    await settleCourse()
     expect(selectActiveCourseProjectDocument(useEditorStore.getState())!.playback.controls).toBe('canvas')
 
     const currentController = projectedGlobalLayer(useEditorStore.getState()).find(
@@ -250,9 +260,11 @@ describe('Project V8 global-layer editor store', () => {
     useEditorStore.getState().updateGlobalLayerSettings(controller.id, {
       layer: 'underlay',
     })
+    await settleCourse()
     expect(selectActiveCourseProjectDocument(useEditorStore.getState())!.playback.controls).toBe('none')
 
     useEditorStore.getState().ensureTeacherController()
+    await settleCourse()
     project = selectActiveCourseProjectDocument(useEditorStore.getState())!
     const repaired = projectedGlobalLayer(useEditorStore.getState()).find(
       (item) => item.node.id === controller.id,
@@ -269,22 +281,26 @@ describe('Project V8 global-layer editor store', () => {
     expect((repaired.node.props as unknown as TeacherControllerConfig).buttons?.some((button) => button.visible)).toBe(true)
   })
 
-  it('accepts only global-capable V4 packages and creates an undoable placement', () => {
+  it('accepts only global-capable V4 packages and creates an undoable placement', async () => {
     const store = useEditorStore.getState()
     const global = componentPackage('com.example.global', ['scene', 'global'])
     const sceneOnly = componentPackage('com.example.scene', ['scene'])
     store.importComponentPackage(global)
+    await settleCourse()
     store.importComponentPackage(sceneOnly)
+    await settleCourse()
     store.setEditingScope('global')
     const initialGlobalCount = projectedGlobalLayer(useEditorStore.getState()).length
 
     store.addExternalComponentNode(sceneOnly.manifest.id)
+    await settleCourse()
     expect(projectedGlobalLayer(useEditorStore.getState())).toHaveLength(
       initialGlobalCount,
     )
     expect(useEditorStore.getState().errorMessage).toContain('未声明支持全局层')
 
     store.addExternalComponentNode(global.manifest.id, 240, 90)
+    await settleCourse()
     const state = useEditorStore.getState()
     const placement = projectedGlobalLayer(state).find(
       (item) => item.node.type === 'external-component' && item.node.component?.packageId !== 'com.ittoedu.teacher-controller',
@@ -301,11 +317,11 @@ describe('Project V8 global-layer editor store', () => {
     })
     expect(selectSelectedNodeId(state)).toBe(placement.node.id)
 
-    store.undo()
+    await undoCourse()
     expect(projectedGlobalLayer(useEditorStore.getState())).toHaveLength(
       initialGlobalCount,
     )
-    store.redo()
+    await redoCourse()
     expect(
       projectedGlobalLayer(useEditorStore.getState()).some(
         (item) => item.node.id === placement.node.id,
@@ -313,14 +329,17 @@ describe('Project V8 global-layer editor store', () => {
     ).toBe(true)
   })
 
-  it('moves, resizes, edits copy, and persists layer and stable scene visibility', () => {
+  it('moves, resizes, edits copy, and persists layer and stable scene visibility', async () => {
     const store = useEditorStore.getState()
     const global = componentPackage('com.example.global', ['global'])
     store.importComponentPackage(global)
+    await settleCourse()
     store.addScene()
+    await settleCourse()
     const sceneIds = selectSlideSceneList(useEditorStore.getState()).map((scene) => scene.id)
     store.setEditingScope('global')
     store.addExternalComponentNode(global.manifest.id)
+    await settleCourse()
     const nodeId = projectedGlobalLayer(useEditorStore.getState()).find(
       (item) => item.node.type === 'external-component' && item.node.component?.packageId !== 'com.ittoedu.teacher-controller',
     )!.node.id
@@ -344,6 +363,7 @@ describe('Project V8 global-layer editor store', () => {
         sceneIds: [sceneIds[1]!, sceneIds[1]!, 'missing-scene'],
       },
     })
+    await settleCourse()
 
     expect(projectedGlobalLayer(useEditorStore.getState()).find(
       (item) => item.node.id === nodeId,
@@ -364,14 +384,14 @@ describe('Project V8 global-layer editor store', () => {
       },
     })
 
-    store.undo()
+    await undoCourse()
     expect(projectedGlobalLayer(useEditorStore.getState()).find(
       (item) => item.node.id === nodeId,
     )).toMatchObject({
       layer: 'underlay',
       visibility: { mode: 'all', sceneIds: [] },
     })
-    store.redo()
+    await redoCourse()
     expect(projectedGlobalLayer(useEditorStore.getState()).find(
       (item) => item.node.id === nodeId,
     )).toMatchObject({
@@ -380,25 +400,29 @@ describe('Project V8 global-layer editor store', () => {
     })
   })
 
-  it('keeps filtered global visibility schema-valid while the UI changes mode', () => {
+  it('keeps filtered global visibility schema-valid while the UI changes mode', async () => {
     const store = useEditorStore.getState()
     store.addScene()
+    await settleCourse()
     const firstSceneId = selectSlideSceneList(useEditorStore.getState())[0]!.id
     store.setEditingScope('global')
     store.addTextNode()
+    await settleCourse()
     const nodeId = projectedGlobalLayer(useEditorStore.getState())[0]!.node.id
 
     store.updateGlobalLayerSettings(nodeId, {
       visibility: { mode: 'include', sceneIds: [] },
     })
+    await settleCourse()
 
     expect(projectedGlobalLayer(useEditorStore.getState())[0]!.visibility)
       .toEqual({ mode: 'include', sceneIds: [firstSceneId] })
   })
 
-  it('canonicalizes include/exclude visibility when its last referenced scene is deleted', () => {
+  it('canonicalizes include/exclude visibility when its last referenced scene is deleted', async () => {
     const store = useEditorStore.getState()
     store.addScene()
+    await settleCourse()
     let [firstScene, secondScene] = selectSlideSceneList(useEditorStore.getState())
     const controllerId = projectedGlobalLayer(useEditorStore.getState()).find(
       (item) => item.node.type === 'external-component' && item.node.component?.packageId === 'com.ittoedu.teacher-controller',
@@ -407,10 +431,12 @@ describe('Project V8 global-layer editor store', () => {
     store.updateGlobalLayerSettings(controllerId, {
       visibility: { mode: 'include', sceneIds: [secondScene!.id] },
     })
+    await settleCourse()
     const controllerBefore = structuredClone(selectCandidateGlobalLayerItems(useEditorStore.getState())!
       .find((entry) => entry.item.layerItemId === controllerId)!)
     const historyLength = activeHistory().past.length
     expect(store.deleteScene(secondScene!.id)).toBe(true)
+    await settleCourse()
     expect(activeHistory().past).toHaveLength(historyLength + 1)
     expect(selectCandidateGlobalLayerItems(useEditorStore.getState())!
       .find((entry) => entry.item.layerItemId === controllerId)?.item).toEqual(controllerBefore.item)
@@ -418,33 +444,39 @@ describe('Project V8 global-layer editor store', () => {
       (item) => item.node.id === controllerId,
     )?.visibility).toEqual({ mode: 'include', sceneIds: [firstScene!.id] })
 
-    store.undo()
+    await undoCourse()
     expect(selectCandidateGlobalLayerItems(useEditorStore.getState())!
       .find((entry) => entry.item.layerItemId === controllerId)).toEqual(controllerBefore)
-    store.redo()
+    await redoCourse()
     expect(projectedGlobalLayer(useEditorStore.getState()).find(
       (item) => item.node.id === controllerId,
     )?.visibility).toEqual({ mode: 'include', sceneIds: [firstScene!.id] })
 
     useEditorStore.getState().addScene()
+    await settleCourse()
     ;[firstScene, secondScene] = selectSlideSceneList(useEditorStore.getState())
     useEditorStore.getState().updateGlobalLayerSettings(controllerId, {
       visibility: { mode: 'exclude', sceneIds: [secondScene!.id] },
     })
+    await settleCourse()
     expect(useEditorStore.getState().deleteScene(secondScene!.id)).toBe(true)
+    await settleCourse()
     expect(projectedGlobalLayer(useEditorStore.getState()).find(
       (item) => item.node.id === controllerId,
     )?.visibility).toEqual({ mode: 'all', sceneIds: [] })
   })
 
-  it('authors native text, image, and shape nodes in the persistent global layer', () => {
+  it('authors native text, image, and shape nodes in the persistent global layer', async () => {
     const store = useEditorStore.getState()
     store.addScene()
+    await settleCourse()
     const secondSceneId = selectSlideSceneList(useEditorStore.getState())[1]!.id
     store.setEditingScope('global')
 
     store.addTextNode(80, 40)
+    await settleCourse()
     store.addShapeNode('rounded-rectangle', 20, 620)
+    await settleCourse()
     store.addImageNode({
       id: 'asset_global_logo',
       filename: 'logo.png',
@@ -455,6 +487,7 @@ describe('Project V8 global-layer editor store', () => {
       width: 160,
       height: 80,
     }, new Uint8Array([1, 2, 3, 4]), 1080, 30)
+    await settleCourse()
 
     let layer = projectedGlobalLayer(useEditorStore.getState())
     expect(layer.map((item) => item.node.type)).toEqual([
@@ -470,10 +503,12 @@ describe('Project V8 global-layer editor store', () => {
     store.beginTextEdit(text.id, 'canvas')
     store.updateTextEditDraft(text.id, '跨场景课程标题', [], 64)
     store.commitTextEdit()
+    await settleCourse()
     store.updateGlobalLayerSettings(text.id, {
       layer: 'underlay',
       visibility: { mode: 'exclude', sceneIds: [secondSceneId] },
     })
+    await settleCourse()
 
     layer = projectedGlobalLayer(useEditorStore.getState())
     expect(layer.find((item) => item.node.id === text.id)).toMatchObject({
@@ -481,22 +516,22 @@ describe('Project V8 global-layer editor store', () => {
       visibility: { mode: 'exclude', sceneIds: [secondSceneId] },
       node: { type: 'text', text: '跨场景课程标题', height: 64 },
     })
-    expect(selectMediaAssetFiles(useEditorStore.getState()).asset_global_logo).toEqual(
-      new Uint8Array([1, 2, 3, 4]),
+    expect(Array.from(selectMediaAssetFiles(useEditorStore.getState()).asset_global_logo!)).toEqual(
+      [1, 2, 3, 4],
     )
 
-    store.undo()
+    await undoCourse()
     expect(projectedGlobalLayer(useEditorStore.getState()).find(
       (item) => item.node.id === text.id,
     )!.layer).toBe('underlay')
   })
 
-  it('edits scene and global runtime content without changing source and supports undo', () => {
+  it('edits scene and global runtime content without changing source and supports undo', async () => {
     const sceneRuntime = runtime('场景标题')
     const globalRuntime = runtime('全局标题')
     const store = useEditorStore.getState()
     const sceneId = selectSlideSceneList(store)[0]!.id
-    installRuntimeDefinitions(sceneId, sceneRuntime, globalRuntime)
+    await installRuntimeDefinitions(sceneId, sceneRuntime, globalRuntime)
     const locationId = selectActiveCourseLocationId(useEditorStore.getState())
     if (!locationId) throw new Error('缺少活动课程位置')
     store.activateCourseLocation(locationId)
@@ -506,12 +541,14 @@ describe('Project V8 global-layer editor store', () => {
       '修改后的场景标题',
     )
     expect(sceneResult).toMatchObject({ ok: true, status: 'updated' })
+    await settleCourse()
     useEditorStore.getState().setEditingScope('global')
     const globalResult = useEditorStore.getState().updateRuntimeContentTextAtTarget(
       captureRuntimeTitleTarget('global', '全局标题'),
       '修改后的全局标题',
     )
     expect(globalResult).toMatchObject({ ok: true, status: 'updated' })
+    await settleCourse()
 
     let project = selectActiveCourseProjectDocument(useEditorStore.getState())!
     const slideRuntime = project.surfaces.flatMap((surface) => (
@@ -529,13 +566,13 @@ describe('Project V8 global-layer editor store', () => {
     })
     expect(globalRuntimeItem.runtime.content.values.title).toBe('修改后的全局标题')
 
-    store.undo()
+    await undoCourse()
     project = selectActiveCourseProjectDocument(useEditorStore.getState())!
     const undoneGlobal = project.globalLayerItems.find((entry) => entry.item.kind === 'runtime')?.item
     if (undoneGlobal?.kind !== 'runtime') throw new Error('expected global runtime')
     expect(undoneGlobal.runtime.content.values.title).toBe('全局标题')
     expect(undoneGlobal.runtime.source).toBe(globalRuntime.source)
-    store.undo()
+    await undoCourse()
     const undoneScene = selectActiveCourseProjectDocument(useEditorStore.getState())
       ?.surfaces.flatMap((surface) => (surface.type === 'slide' ? surface.scenes : []))[0]
       ?.layerItems.find((item) => item.kind === 'runtime')
@@ -543,35 +580,42 @@ describe('Project V8 global-layer editor store', () => {
     expect(undoneScene.runtime.content.values.title).toBe('场景标题')
   })
 
-  it('keeps scene editing isolated when switching to and from the global layer', () => {
+  it('keeps scene editing isolated when switching to and from the global layer', async () => {
     const store = useEditorStore.getState()
     store.addTextNode(50, 60)
+    await settleCourse()
     const sceneNode = selectSlideSceneList(useEditorStore.getState())[0]!.nodes[0]!
     const global = componentPackage('com.example.global', ['scene', 'global'])
     store.importComponentPackage(global)
+    await settleCourse()
 
     store.setEditingScope('global')
     expect(selectSelectedNodeIds(useEditorStore.getState())).toEqual([])
     store.addExternalComponentNode(global.manifest.id)
+    await settleCourse()
     const globalNode = projectedGlobalLayer(useEditorStore.getState()).find(
       (item) => item.node.type === 'external-component' && item.node.component?.packageId !== 'com.ittoedu.teacher-controller',
     )!.node
     store.updateNode(globalNode.id, { x: 900 })
+    await settleCourse()
 
     store.setActiveScene(selectActiveSceneId(useEditorStore.getState()))
+    await settleCourse()
     expect(selectEditingScope(useEditorStore.getState())).toBe('scene')
     expect(selectSlideSceneList(useEditorStore.getState())[0]!.nodes[0]).toEqual(sceneNode)
     store.selectNode(sceneNode.id)
     store.updateNode(sceneNode.id, { x: 120 })
+    await settleCourse()
     expect(projectedGlobalLayer(useEditorStore.getState()).find(
       (item) => item.node.id === globalNode.id,
     )!.node.x).toBe(900)
   })
 
-  it('authors, duplicates, copies, and cleans global node interactions', () => {
+  it('authors, duplicates, copies, and cleans global node interactions', async () => {
     const store = useEditorStore.getState()
     store.setEditingScope('global')
     store.addTextNode(120, 80)
+    await settleCourse()
     const original = projectedGlobalLayer(useEditorStore.getState()).find(
       (item) => item.node.type === 'text',
     )!.node
@@ -588,8 +632,10 @@ describe('Project V8 global-layer editor store', () => {
         action: { type: 'scene.next' },
       }],
     })
+    await settleCourse()
 
     store.duplicateNode(original.id)
+    await settleCourse()
     let state = useEditorStore.getState()
     expect(selectActiveCourseProjectDocument(state)!.globalInteractions).toHaveLength(2)
     const duplicate = projectedGlobalLayer(state).find(
@@ -600,6 +646,7 @@ describe('Project V8 global-layer editor store', () => {
     ))).toBe(true)
 
     store.deleteNode(duplicate.id)
+    await settleCourse()
     state = useEditorStore.getState()
     expect(selectActiveCourseProjectDocument(state)!.globalInteractions).toHaveLength(1)
     expect(selectActiveCourseProjectDocument(state)!.globalInteractions[0]!.trigger).toEqual({
@@ -610,6 +657,7 @@ describe('Project V8 global-layer editor store', () => {
     store.selectNode(original.id)
     store.copySelectedNodes()
     store.pasteNodes()
+    await settleCourse()
     state = useEditorStore.getState()
     const pastedId = selectSelectedNodeId(state)!
     expect(selectActiveCourseProjectDocument(state)!.globalInteractions).toHaveLength(2)
@@ -618,11 +666,13 @@ describe('Project V8 global-layer editor store', () => {
     ))).toBe(true)
   })
 
-  it('keeps scene copies in global scopes and removes deleted controller targets', () => {
+  it('keeps scene copies in global scopes and removes deleted controller targets', async () => {
     const store = useEditorStore.getState()
     store.addScene()
+    await settleCourse()
     const targetSceneId = selectActiveSceneId(useEditorStore.getState())
     store.addPresentationState('目标状态')
+    await settleCourse()
     const targetStateId = selectActivePresentationStateId(useEditorStore.getState())!
     const controller = projectedGlobalLayer(useEditorStore.getState()).find(
       (item) => item.node.type === 'external-component' && item.node.component?.packageId === 'com.ittoedu.teacher-controller',
@@ -653,13 +703,16 @@ describe('Project V8 global-layer editor store', () => {
         action: { type: 'scene.next' },
       }],
     })
+    await settleCourse()
 
     store.duplicateScene(targetSceneId)
+    await settleCourse()
     const copiedSceneId = selectActiveSceneId(useEditorStore.getState())
     expect(selectActiveCourseProjectDocument(useEditorStore.getState())!.globalInteractions[0]?.conditions)
       .toEqual([{ type: 'scene.in', sceneIds: [targetSceneId, copiedSceneId] }])
 
     expect(store.deleteScene(targetSceneId)).toBe(true)
+    await settleCourse()
     const project = selectActiveCourseProjectDocument(useEditorStore.getState())!
     expect(project.globalInteractions[0]?.conditions).toEqual([
       { type: 'scene.in', sceneIds: [copiedSceneId] },
@@ -675,9 +728,10 @@ describe('Project V8 global-layer editor store', () => {
 })
 
 describe('Course Project V9 cross-surface playback controls', () => {
-  it('keeps a locked Slide controller history-free and locked while restoring it', () => {
+  it('keeps a locked Slide controller history-free and locked while restoring it', async () => {
     const store = useEditorStore.getState()
-    store.createNewProject()
+    await store.createCourseDocument('slide')
+    await settleCourse()
     const initial = selectActiveCourseProjectDocument(useEditorStore.getState())
     if (!initial) throw new Error('缺少 Slide Course Project')
     const controller = initial.globalLayerItems.find(
@@ -687,6 +741,7 @@ describe('Course Project V9 cross-surface playback controls', () => {
     const initialPastCount = activeHistory().past.length
 
     useEditorStore.getState().ensureTeacherController()
+    await settleCourse()
 
     let state = useEditorStore.getState()
     expect(activeHistory().past).toHaveLength(initialPastCount)
@@ -694,6 +749,7 @@ describe('Course Project V9 cross-surface playback controls', () => {
     expect(state.statusMessage).toBe('教师控制器已可用')
 
     state.updateNode(controller.item.layerItemId, { locked: true })
+    await settleCourse()
     state = useEditorStore.getState()
     const lockedPastCount = activeHistory().past.length
     expect(selectActiveCourseProjectDocument(state)?.globalLayerItems.find(
@@ -701,6 +757,7 @@ describe('Course Project V9 cross-surface playback controls', () => {
     )?.item.locked).toBe(true)
 
     state.ensureTeacherController()
+    await settleCourse()
     state = useEditorStore.getState()
     expect(activeHistory().past).toHaveLength(lockedPastCount)
     expect(selectActiveCourseProjectDocument(state)?.globalLayerItems.find(
@@ -708,11 +765,13 @@ describe('Course Project V9 cross-surface playback controls', () => {
     )?.item.locked).toBe(true)
 
     state.updatePlayback({ controls: 'none' })
+    await settleCourse()
     state = useEditorStore.getState()
     expect(activeHistory().past).toHaveLength(lockedPastCount + 1)
     expect(selectActiveCourseProjectDocument(state)?.playback.controls).toBe('none')
 
     state.ensureTeacherController()
+    await settleCourse()
     state = useEditorStore.getState()
     expect(activeHistory().past).toHaveLength(lockedPastCount + 2)
     expect(selectActiveCourseProjectDocument(state)?.playback.controls).toBe('canvas')
@@ -721,13 +780,13 @@ describe('Course Project V9 cross-surface playback controls', () => {
     )?.item.locked).toBe(true)
     expect(state.statusMessage).toBe('已恢复教师控制器')
 
-    state.undo()
+    await undoCourse()
     let document = selectActiveCourseProjectDocument(useEditorStore.getState())
     expect(document?.playback.controls).toBe('none')
     expect(document?.globalLayerItems.find(
       (entry) => entry.item.layerItemId === controller.item.layerItemId,
     )?.item.locked).toBe(true)
-    useEditorStore.getState().redo()
+    await redoCourse()
     document = selectActiveCourseProjectDocument(useEditorStore.getState())
     expect(document?.playback.controls).toBe('canvas')
     expect(document?.globalLayerItems.find(
@@ -735,9 +794,10 @@ describe('Course Project V9 cross-surface playback controls', () => {
     )?.item.locked).toBe(true)
   })
 
-  it('restores the Flow global teacher controller in one undoable history step', () => {
+  it('restores the Flow global teacher controller in one undoable history step', async () => {
     const store = useEditorStore.getState()
-    store.createNewFlowProject()
+    await store.createCourseDocument('flow')
+    await settleCourse()
     const initial = selectActiveCourseProjectDocument(useEditorStore.getState())
     if (!initial) throw new Error('缺少 Flow Course Project')
     const hidden = structuredClone(initial)
@@ -747,38 +807,40 @@ describe('Course Project V9 cross-surface playback controls', () => {
     if (!controller) throw new Error('缺少 Flow 教师控制器')
     controller.item.playbackInitialVisibility = 'hidden'
     hidden.playback.controls = 'none'
-    store.loadCourseProject(hidden, null, store.assetFiles, store.componentPackages)
-    const before = useEditorStore.getState().flowSession!.history
+    await replaceCourseProject(hidden, store.assetFiles, store.componentPackages)
+    const before = activeHistory()
 
     useEditorStore.getState().ensureTeacherController()
+    await settleCourse()
 
     let state = useEditorStore.getState()
-    let document = state.flowSession!.history.present
+    let document = selectActiveCourseProjectDocument(state)!
     expect(document.playback.controls).toBe('canvas')
     expect(document.globalLayerItems).toHaveLength(hidden.globalLayerItems.length)
     expect(document.globalLayerItems.find(
       (entry) => isControllerFixture(entry.item),
     )?.item.playbackInitialVisibility).toBe('inherit')
-    expect(state.flowSession!.history.past).toHaveLength(before.past.length + 1)
+    expect(activeHistory().past).toHaveLength(before.past.length + 1)
     expect(state.statusMessage).toBe('已恢复教师控制器')
     expect(state.errorMessage).toBeNull()
 
-    state.undo()
-    document = useEditorStore.getState().flowSession!.history.present
+    await undoCourse()
+    document = selectActiveCourseProjectDocument(useEditorStore.getState())!
     expect(document.playback.controls).toBe('none')
     expect(document.globalLayerItems.find(
       (entry) => isControllerFixture(entry.item),
     )?.item.playbackInitialVisibility).toBe('hidden')
 
-    useEditorStore.getState().redo()
-    document = useEditorStore.getState().flowSession!.history.present
+    await redoCourse()
+    document = selectActiveCourseProjectDocument(useEditorStore.getState())!
     expect(document.playback.controls).toBe('canvas')
   })
 
-  it('updates Flow controls, keyboard and presenter settings in one history step', () => {
+  it('updates Flow controls, keyboard and presenter settings in one history step', async () => {
     const store = useEditorStore.getState()
-    store.createNewFlowProject()
-    const before = useEditorStore.getState().flowSession!.history
+    await store.createCourseDocument('flow')
+    await settleCourse()
+    const before = activeHistory()
     const patch = {
       controls: 'none' as const,
       keyboardNavigation: false,
@@ -790,24 +852,26 @@ describe('Course Project V9 cross-surface playback controls', () => {
     }
 
     useEditorStore.getState().updatePlayback(patch)
+    await settleCourse()
 
     let state = useEditorStore.getState()
-    let document = state.flowSession!.history.present
+    let document = selectActiveCourseProjectDocument(state)!
     expect(document.playback).toEqual(patch)
     expect(document.globalLayerItems.find(
       (entry) => isControllerFixture(entry.item),
     )?.item.playbackInitialVisibility).toBe('hidden')
-    expect(state.flowSession!.history.past).toHaveLength(before.past.length + 1)
+    expect(activeHistory().past).toHaveLength(before.past.length + 1)
     expect(state.statusMessage).toBe('成品控制设置已更新')
     expect(state.errorMessage).toBeNull()
 
     useEditorStore.getState().updatePlayback(patch)
+    await settleCourse()
     state = useEditorStore.getState()
-    expect(state.flowSession!.history.past).toHaveLength(before.past.length + 1)
+    expect(activeHistory().past).toHaveLength(before.past.length + 1)
     expect(state.statusMessage).toBe('成品控制设置未变化')
 
-    state.undo()
-    document = useEditorStore.getState().flowSession!.history.present
+    await undoCourse()
+    document = selectActiveCourseProjectDocument(useEditorStore.getState())!
     expect(document.playback.controls).toBe('canvas')
     expect(document.playback.keyboardNavigation).toBe(true)
     expect(document.playback.presenter).toMatchObject({
@@ -815,14 +879,15 @@ describe('Course Project V9 cross-surface playback controls', () => {
       strategy: 'scene-navigation',
     })
 
-    useEditorStore.getState().redo()
-    expect(useEditorStore.getState().flowSession!.history.present.playback).toEqual(patch)
+    await redoCourse()
+    expect(selectActiveCourseProjectDocument(useEditorStore.getState())!.playback).toEqual(patch)
   })
 
-  it('updates Spatial controls, keyboard and presenter settings in one history step', () => {
+  it('updates Spatial controls, keyboard and presenter settings in one history step', async () => {
     const store = useEditorStore.getState()
-    store.createNewSpatialProject()
-    const before = useEditorStore.getState().spatialSession!.history
+    await store.createCourseDocument('spatial')
+    await settleCourse()
+    const before = activeHistory()
     const patch = {
       controls: 'none' as const,
       keyboardNavigation: false,
@@ -834,23 +899,24 @@ describe('Course Project V9 cross-surface playback controls', () => {
     }
 
     useEditorStore.getState().updatePlayback(patch)
+    await settleCourse()
 
     let state = useEditorStore.getState()
-    let document = state.spatialSession!.history.present
+    let document = selectActiveCourseProjectDocument(state)!
     expect(document.playback).toEqual(patch)
     expect(document.globalLayerItems.find(
       (entry) => isControllerFixture(entry.item),
     )?.item.playbackInitialVisibility).toBe('hidden')
-    expect(state.spatialSession!.history.past).toHaveLength(before.past.length + 1)
+    expect(activeHistory().past).toHaveLength(before.past.length + 1)
     expect(state.statusMessage).toBe('成品控制设置已更新')
     expect(state.errorMessage).toBeNull()
 
-    state.undo()
-    document = useEditorStore.getState().spatialSession!.history.present
+    await undoCourse()
+    document = selectActiveCourseProjectDocument(useEditorStore.getState())!
     expect(document.playback.controls).toBe('canvas')
     expect(document.playback.keyboardNavigation).toBe(true)
 
-    useEditorStore.getState().redo()
-    expect(useEditorStore.getState().spatialSession!.history.present.playback).toEqual(patch)
+    await redoCourse()
+    expect(selectActiveCourseProjectDocument(useEditorStore.getState())!.playback).toEqual(patch)
   })
 })

@@ -1,6 +1,10 @@
 import { expect, vi } from 'vitest'
 import type { DocumentHistoryEntry, DocumentSnapshot } from '../../src/shared/workbench/document'
+import type { ComponentPackageData } from '../../src/shared/componentTypes'
+import type { CourseProjectDocument } from '../../src/shared/courseProjectTypes'
 import { useEditorStore } from '../../src/renderer/store/editorStore'
+import { courseViewModel } from '../../src/renderer/documents/CourseDocumentView'
+import { freezeCourseAssetSidecar } from '../../src/renderer/project/v9AssetAdapter'
 import { createCourseStoreHost } from './courseStoreHost'
 
 export type CourseStoreHost = Awaited<ReturnType<typeof createCourseStoreHost>>
@@ -16,6 +20,26 @@ export async function bootCourseStore(): Promise<CourseStoreHost> {
 export function courseStoreHost(): CourseStoreHost {
   if (!host) throw new Error('course store host is not booted')
   return host
+}
+
+/**
+ * Replaces the active course document with `project`. The renderer `loadCourseProject` action is
+ * fire-and-forget, so create the document on the host and activate it explicitly instead.
+ */
+export async function replaceCourseProject(
+  project: CourseProjectDocument,
+  assetFiles: Record<string, Uint8Array> = {},
+  componentPackages: Record<string, ComponentPackageData> = {},
+): Promise<void> {
+  const created = await courseStoreHost().api.create(
+    courseViewModel({
+      courseAssetSidecar: freezeCourseAssetSidecar(assetFiles),
+      componentPackages,
+    }, project),
+    `${project.title || 'course'}.h5lesson`,
+  )
+  await useEditorStore.getState().activateCourseDocument(created.documentId)
+  await settleCourse()
 }
 
 /**
@@ -39,8 +63,7 @@ export async function settleCourse(): Promise<void> {
 }
 
 /** Formal main-session snapshot. The renderer projection is only a view of it. */
-export function formalSnapshot(): DocumentSnapshot {
-  const id = useEditorStore.getState().courseDocument.documentId
+export function formalSnapshot(): DocumentSnapshot {  const id = useEditorStore.getState().courseDocument.documentId
   if (!id) throw new Error('expected active Surface session')
   return courseStoreHost().registry.get(id).read()
 }
