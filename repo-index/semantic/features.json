@@ -37,7 +37,7 @@
       ],
       "runtimeConsumers": [
         "src/renderer/export/course/buildPublishedCourse.ts",
-        "src/renderer/project/courseProjectArchive.ts"
+        "src/core/drivers/codecs/courseProjectArchive.ts"
       ],
       "tests": [
         "tests/unit/courseProjectCoreContract.test.ts",
@@ -172,7 +172,7 @@
         "src/renderer/project/v9AssetAdapter.ts",
         "src/renderer/store/history.ts",
         "src/renderer/project/courseProjectIo.ts",
-        "src/renderer/project/courseProjectArchive.ts",
+        "src/core/drivers/codecs/courseProjectArchive.ts",
         "src/shared/contracts/course-project-v9/types.ts"
       ],
       "tests": [
@@ -452,11 +452,11 @@
       "canonicalFiles": [
         "src/shared/contracts/component-v4/schema.ts",
         "src/renderer/components/componentPackageStore.ts",
-        "src/renderer/components/importComponentPackage.ts"
+        "src/core/drivers/codecs/importComponentPackage.ts"
       ],
       "entrypoints": [
         "src/renderer/components/componentPackageStore.ts",
-        "src/renderer/components/importComponentPackage.ts"
+        "src/core/drivers/codecs/importComponentPackage.ts"
       ],
       "runtimeConsumers": [
         "src/player/surfaces/publishedComponentMount.ts",
@@ -665,7 +665,7 @@
       ],
       "canonicalFiles": [
         "src/renderer/project/courseProjectIo.ts",
-        "src/renderer/project/courseProjectArchive.ts",
+        "src/core/drivers/codecs/courseProjectArchive.ts",
         "src/renderer/project/recoveryWriteCoordinator.ts",
         "src/main/projectPersistence.ts"
       ],
@@ -960,7 +960,7 @@
         "src/renderer/store/editorStore.ts",
         "src/shared/contracts/runtime/schema.ts",
         "src/shared/contracts/interaction-v1/schema.ts",
-        "src/renderer/components/importComponentPackage.ts",
+        "src/core/drivers/codecs/importComponentPackage.ts",
         "src/renderer/authoring/runtimeTargetEditSession.ts",
         "src/shared/contracts/course-project-v9/schema.ts"
       ],
@@ -1059,7 +1059,7 @@
       "removalPhase": "1.1 legacy modules removed; fail-loud boundary retained",
       "reviewGate": "Legacy inventory remains at zero while V9/V2 rejection tests continue to pass.",
       "highSignalFiles": [
-        "src/renderer/project/courseProjectArchive.ts",
+        "src/core/drivers/codecs/courseProjectArchive.ts",
         "src/renderer/project/courseProjectIo.ts",
         "scripts/verify-release.ts",
         "scripts/build-render-host-benchmark.ts",
@@ -1073,13 +1073,13 @@
         "tests/unit/projectFormatIsolation.test.ts"
       ],
       "canonicalFiles": [
-        "src/renderer/project/courseProjectArchive.ts",
+        "src/core/drivers/codecs/courseProjectArchive.ts",
         "src/renderer/project/courseProjectIo.ts",
         "docs/development-plan/inventories/legacy-consumers.json"
       ],
       "entrypoints": [
         "scripts/verify-release.ts",
-        "src/renderer/project/courseProjectArchive.ts"
+        "src/core/drivers/codecs/courseProjectArchive.ts"
       ],
       "runtimeConsumers": [
         "src/renderer/App.tsx",
