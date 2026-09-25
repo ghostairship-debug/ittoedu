@@ -7,6 +7,7 @@ import type { ContextualEditTarget, DocumentContextSelection } from '../../share
 import { parseDocumentMarkdown, type MarkdownDocument } from '../../shared/document/markdown'
 import { documentRefLabel, type DocumentFileRef } from '../../shared/document/ports'
 import { DocumentFileSession, type RecoverableDocumentFilePort } from './documentFileSession'
+import { PlainTextDocumentEditor, type PlainTextDocumentEditorHandle } from './PlainTextDocumentEditor'
 import { type DocumentConflictHunk } from './documentSourceMerge'
 import './documentFileEditor.css'
 import { fileClipboardResourcePort, readFileClipboardContext, selectedFileClipboardContext, type FileClipboardContext } from './fileDocumentClipboard'
@@ -52,12 +53,13 @@ export const LessonDocumentEditor = forwardRef<LessonDocumentEditorHandle, Lesso
   const lifetime = useMemo(() => ({ leases: 0, opened: false }), [session])
   const state = useSyncExternalStore(session.subscribe, session.getSnapshot)
   const editor = useRef<SharedDocumentEditorHandle>(null)
+  const textEditor = useRef<PlainTextDocumentEditorHandle>(null)
   const [error, setError] = useState<string | null>(null)
   const pinned = usePinnedSelection(session.documentId)
   useEffect(() => {
     if (!session.documentId) return
     return workbenchSelection.register(session.documentId, async () => {
-      const current = editor.current?.flush()
+      const current = (session.committedDocument?.model.kind === 'text' ? textEditor.current : editor.current)?.flush()
       if (current && !current.ready) throw new Error('请先完成当前输入。')
       if (current) session.edit(current.source, operationGroup.current)
       if (!await session.drain() || !session.committedDocument) throw new Error('正文输入尚未确认。')
@@ -80,12 +82,14 @@ export const LessonDocumentEditor = forwardRef<LessonDocumentEditorHandle, Lesso
   const draftTicket = useRef(0)
   const currentRef = session.ref
   const resolveImage = (href: string) => resolveFileDocumentImage(documentRefLabel(currentRef), href)
+  const isText = committed?.model.kind === 'text'
   const parsedSource = useMemo(() => {
+    if (isText) return null
     const parsed = parseDocumentMarkdown(state.source, { createId: () => crypto.randomUUID(), target: 'file', resolveImage, previous: lastProjection.current })
     if (parsed.status === 'valid') lastProjection.current = parsed
     return parsed
-  }, [state.source, currentRef])
-  const document = parsedSource.status === 'valid' ? parsedSource.document : lastProjection.current?.document ?? empty
+  }, [state.source, currentRef, isText])
+  const document = parsedSource?.status === 'valid' ? parsedSource.document : lastProjection.current?.document ?? empty
   useEffect(() => {
     lifetime.leases++
     if (!lifetime.opened) {
@@ -100,18 +104,20 @@ export const LessonDocumentEditor = forwardRef<LessonDocumentEditorHandle, Lesso
 
   const resourceKey = JSON.stringify(document.resources)
   useEffect(() => {
+    if (isText) { setClipboard(null); return }
     let live = true; setClipboard(null)
     void readFileClipboardContext(document.resources, relativePath => session.readResource(relativePath)).then(context => { if (live) setClipboard(context) }).catch(reason => { if (live) setError((reason as Error).message) })
     return () => { live = false }
-  }, [session, resourceKey, state.disk?.version.contentVersion])
+  }, [session, resourceKey, state.disk?.version.contentVersion, isText])
+  function activeDraft() { return (session.committedDocument?.model.kind === 'text' ? textEditor.current : editor.current)?.flush() }
   async function flush() {
-    const current = editor.current?.flush()
+    const current = activeDraft()
     if (current && !current.ready) return false
     if (current) session.edit(current.source, operationGroup.current)
     return session.flush()
   }
   async function saveAs() {
-    const current = editor.current?.flush()
+    const current = activeDraft()
     if (current && !current.ready) return false
     if (current) session.edit(current.source, operationGroup.current)
     return session.saveAs()
@@ -133,8 +139,8 @@ export const LessonDocumentEditor = forwardRef<LessonDocumentEditorHandle, Lesso
     container.append(element)
     return () => URL.revokeObjectURL(url)
   }
-  useImperativeHandle(ref, () => ({ session, getContextualEditTarget: () => bindTarget(editor.current?.getContextualEditTarget() ?? null), flush, saveAs, close: async () => {
-    const current = editor.current?.flush()
+  useImperativeHandle(ref, () => ({ session, getContextualEditTarget: () => isText ? null : bindTarget(editor.current?.getContextualEditTarget() ?? null), flush, saveAs, close: async () => {
+    const current = activeDraft()
     if (current && !current.ready) return false
     if (current) session.edit(current.source, operationGroup.current)
     return session.close()
@@ -152,7 +158,8 @@ export const LessonDocumentEditor = forwardRef<LessonDocumentEditorHandle, Lesso
       {!state.conflictHunks.length && <>{state.conflict !== 'deleted' && <><details><summary>查看磁盘稿</summary><pre>{state.conflict.source}</pre></details><button type="button" onClick={() => { void session.resolveConflict('disk') }}>采用磁盘稿</button></>}
       <button type="button" disabled={state.saving || state.composing || state.conflictHunks.length > 0} onClick={() => { void (state.conflict === 'deleted' ? saveAs() : session.resolveConflict('local')) }}>{state.conflict === 'deleted' ? '另存当前稿' : '保留当前稿并保存'}</button></>}
     </aside>}
-    {committed && <div inert={state.conflictHunks.length > 0}><SharedDocumentEditor ref={editor} document={document} revision={state.source} sourceDraft={state.source} target="file" initialMode={parsedSource.status === 'valid' ? 'layout' : 'source'} resolveImage={resolveImage}
+    {committed?.model.kind === 'text' && <div inert={state.conflictHunks.length > 0}><PlainTextDocumentEditor ref={textEditor} source={state.source} revision={committed.revision} onDraft={source => { const ticket = ++draftTicket.current; queueMicrotask(() => { if (ticket === draftTicket.current) session.edit(source, operationGroup.current) }) }} onUndo={() => session.undo()} onRedo={() => session.redo()} /></div>}
+    {committed && committed.model.kind !== 'text' && parsedSource && <div inert={state.conflictHunks.length > 0}><SharedDocumentEditor ref={editor} document={document} revision={state.source} sourceDraft={state.source} target="file" initialMode={parsedSource.status === 'valid' ? 'layout' : 'source'} resolveImage={resolveImage}
       sourceMap={parsedSource.status === 'valid' ? parsedSource.sourceMap : undefined}
       editPreview={editPreview}
       clipboardContext={(resources: MarkdownDocument['resources']) => selectedFileClipboardContext(clipboard, resources)} clipboardResourcePort={fileClipboardResourcePort}

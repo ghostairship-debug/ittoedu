@@ -152,10 +152,17 @@ export function useLessonWorkspaceController(props: LessonWorkspaceControllerPro
         }
         return
       }
-      // 工作空间内所有 Markdown 均通过同一正式文档会话打开。
-      if (/\.(?:md|markdown)$/i.test(entry.name)) {
+      // 工作空间内所有 Markdown 与 UTF-8 纯文本均通过同一正式文档会话打开。
+      if (/\.(?:md|markdown|txt)$/i.test(entry.name)) {
         const lesson = current.current.lesson
-        await props.tabs.openTab({ path: entry.path, name: entry.name, kind: 'document', lesson })
+        try {
+          await props.tabs.openTab({ path: entry.path, name: entry.name, kind: 'document', lesson })
+        } catch (error) {
+          if (!/\.txt$/i.test(entry.name) || !unsupportedTextEncoding(error)) throw error
+          const result = await props.lessonOperation({ operation: 'open-external', path: entry.path })
+          if (result.opened === false) throw new Error(`无法用系统应用打开 ${entry.name}：${result.openError ?? '没有可用的关联程序'}`)
+          throw new Error(`${entry.name} 不是 UTF-8 编码的文本文件，已用系统程序打开`)
+        }
         setMobilePane('workbench')
         return
       }
@@ -178,6 +185,12 @@ export function useLessonWorkspaceController(props: LessonWorkspaceControllerPro
       setProjectName, setProjectNotice,
     },
   }
+}
+
+function unsupportedTextEncoding(error: unknown): boolean {
+  if (!(error instanceof Error)) return false
+  if (error.name === 'DesktopAPIError:TEXT_ENCODING_UNSUPPORTED') return true
+  return 'code' in error && (error as { code?: unknown }).code === 'TEXT_ENCODING_UNSUPPORTED'
 }
 
 function normalized(value: string) { return normalizeWorkspacePath(value) }

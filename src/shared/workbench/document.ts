@@ -2,7 +2,7 @@ import type { CourseProjectDocument } from '../courseProjectTypes'
 
 /** Document identity is independent of the file's project ID and its path. */
 export type DocumentId = string
-export type DocumentKind = 'markdown' | 'course-v9'
+export type DocumentKind = 'markdown' | 'text' | 'course-v9'
 export type DocumentBinding =
   | { kind: 'untitled'; suggestedName: string }
   | { kind: 'file'; path: string; version: string | null; bindingVersion: number }
@@ -14,8 +14,15 @@ export interface DocumentResources {
 
 export type DocumentModel =
   | { kind: 'markdown'; source: string; resources: DocumentResources }
+  | { kind: 'text'; source: string; resources: DocumentResources }
   | { kind: 'course-v9'; project: CourseProjectDocument; resources: DocumentResources }
 
+/** Markdown 与纯文本共用的源文判断。附件、解析、渲染和排版仍只认 markdown。 */
+export function isSourceDocumentModel(model: DocumentModel): model is Extract<DocumentModel, { kind: 'markdown' | 'text' }> {
+  return model.kind === 'markdown' || model.kind === 'text'
+}
+
+/** markdown.splice / markdown.replace 是 Markdown 与纯文本共用的源文命令。 */
 export type DocumentCommand =
   | { type: 'markdown.splice'; from: number; to: number; text: string; resources?: DocumentResources }
   | { type: 'markdown.replace'; source: string; resources?: DocumentResources }

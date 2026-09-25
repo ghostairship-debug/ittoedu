@@ -119,7 +119,7 @@ export function WorkspaceRecoveryPanel({ api, onRestored }: WorkspaceRecoveryPan
     <ul>{items.map(item => {
       const id = item.snapshot.documentId, name = nameOf(item.snapshot)
       return <li key={id}>
-        <div><strong>{name}</strong><span>{item.snapshot.model.kind === 'course-v9' ? '课件' : 'Markdown 文档'} · {item.restored ? '已恢复，等待打开' : '尚未恢复'}</span>
+        <div><strong>{name}</strong><span>{item.snapshot.model.kind === 'course-v9' ? '课件' : item.snapshot.model.kind === 'text' ? '纯文本文档' : 'Markdown 文档'} · {item.restored ? '已恢复，等待打开' : '尚未恢复'}</span>
           {item.snapshot.binding.kind === 'file' && <small title={item.snapshot.binding.path}>{item.snapshot.binding.path}</small>}</div>
         {item.error && <p role="alert">{item.error}</p>}
         {confirming === id && !item.restored ? <div className="workspace-recovery-panel__confirm">

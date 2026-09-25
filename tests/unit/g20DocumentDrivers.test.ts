@@ -4,11 +4,13 @@ import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { CourseV9Driver } from '../../src/core/drivers/CourseV9Driver'
 import { MarkdownDriver } from '../../src/core/drivers/MarkdownDriver'
+import { TextDriver } from '../../src/core/drivers/TextDriver'
 import { normalizeEffectiveLayerPropertyPatch, writeBasePropertyPatch } from '../../src/core/drivers/course/layerProperties'
 import { layerItemSchema } from '../../src/shared/courseProjectSchema'
 import type { DocumentModel } from '../../src/shared/workbench/document'
 
 const md = new MarkdownDriver()
+const text = new TextDriver()
 const v9 = new CourseV9Driver()
 function fixture(name = 'slide-native'): Extract<DocumentModel, { kind: 'course-v9' }> {
   return v9.load(new Uint8Array(readFileSync(resolve('tests/fixtures/course-project-v9', `${name}.h5lesson`)))) as Extract<DocumentModel, { kind: 'course-v9' }>
@@ -37,6 +39,24 @@ describe('G20 pure document drivers', () => {
     }
     expect(() => md.apply(initial, { type: 'markdown.replace', source: 'ok', resources: { assets: { '../x': new Uint8Array([1]) }, components: {} } })).toThrow()
     expect(() => md.apply(initial, { type: 'markdown.replace', source: 'ok', resources: { assets: { 'images/a.png': attachment, images: attachment }, components: {} } })).toThrow('冲突')
+  })
+
+  it('round-trips plain text bytes, splices source, and rejects resources or invalid UTF-8', () => {
+    const source = '\uFEFF甲乙\r\n丙'
+    const bytes = new TextEncoder().encode(source)
+    expect(Array.from(bytes.slice(0, 3))).toEqual([0xef, 0xbb, 0xbf])
+    expect(bytes.at(-1)).not.toBe(0x0a)
+    const model = text.load(bytes)
+    expect(model).toMatchObject({ kind: 'text', source, resources: { assets: {}, components: {} } })
+    expect(text.serialize(model)).toEqual(bytes)
+    expect(text.apply(model, { type: 'markdown.replace', source: '丁' })).toMatchObject({ kind: 'text', source: '丁', resources: { assets: {}, components: {} } })
+    const spliced = text.apply(model, { type: 'markdown.splice', from: 1, to: 2, text: '戊' })
+    if (spliced.kind !== 'text') throw new Error('text splice')
+    expect(spliced.source).toBe('\uFEFF戊乙\r\n丙')
+    expect(() => text.apply(model, { type: 'markdown.replace', source: 'ok', resources: { assets: { a: new Uint8Array([1]) }, components: {} } })).toThrow('资源')
+    expect(() => text.validate({ kind: 'text', source: 'a', resources: { assets: { a: new Uint8Array([1]) }, components: {} } })).toThrow('资源')
+    expect(() => text.load(new Uint8Array([0xc3, 0x28]))).toThrow(expect.objectContaining({ code: 'TEXT_ENCODING_UNSUPPORTED', message: '不是 UTF-8 编码的文本文件' }))
+    expect(() => text.apply(model, { type: 'markdown.splice', from: 0, to: 0, text: '\uD800' })).toThrow()
   })
 
   it.each(['slide-native', 'component', 'mixed'])('round trips %s through the production strict archive and resource closure', name => {

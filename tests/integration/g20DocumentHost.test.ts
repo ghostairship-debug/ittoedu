@@ -113,6 +113,27 @@ it('G20 external file reconciliation preserves history, validates both versions 
   await expect(fs.stat(filename)).rejects.toMatchObject({ code: 'ENOENT' })
 })
 
+it('G20 plain text opens, saves exact UTF-8 bytes, and refuses a non-UTF-8 file', async () => {
+  const { host, directory } = await setup()
+  const filename = path.join(directory, 'notes.txt')
+  const source = '\uFEFF甲乙\r\n丙'
+  await fs.writeFile(filename, source)
+  const opened = await host.open(filename)
+  expect(opened.model).toMatchObject({ kind: 'text', source, resources: { assets: {}, components: {} } })
+  expect(await edit(host, opened, 'text-1', `${source}丁`)).toMatchObject({ status: 'applied' })
+  const saved = await host.operate({ type: 'save', documentId: opened.documentId }) as DocumentSnapshot
+  expect(saved).toMatchObject({ dirty: false, model: { kind: 'text', source: `${source}丁` } })
+  expect(new Uint8Array(await fs.readFile(filename))).toEqual(new TextEncoder().encode(`${source}丁`))
+  const bad = path.join(directory, 'bad.txt')
+  const bytes = Buffer.from([0xc3, 0x28])
+  await fs.writeFile(bad, bytes)
+  await expect(host.open(bad)).rejects.toMatchObject({ code: 'TEXT_ENCODING_UNSUPPORTED', message: '不是 UTF-8 编码的文本文件' })
+  expect(await fs.readFile(bad)).toEqual(bytes)
+  const other = path.join(directory, 'notes.doc')
+  await fs.writeFile(other, 'x')
+  await expect(host.open(other)).rejects.toThrow('当前支持 Markdown、纯文本（.txt）和 V9 h5lesson 文档')
+})
+
 it('G20 overwrite permission is only supplied by the trusted native dialog path', async () => {
   const { host, directory } = await setup()
   const created = await create(host)

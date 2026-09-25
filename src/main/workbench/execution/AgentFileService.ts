@@ -9,7 +9,7 @@ import { createDefaultTeacherControllerPackage } from '../../../shared/defaultTe
 import { createCourseProjectArchive } from '../../../core/drivers/codecs/courseProjectArchive'
 import { validateWorkspaceEntryName } from '../WorkspaceFiles'
 
-const supported = /\.(?:md|markdown|h5lesson)$/i
+const supported = /\.(?:md|markdown|txt|h5lesson)$/i
 function startDirectory(context: AgentFileContext): { directory: string; fallback: boolean } {
   const home = context.conversationHome
   if (!home) return { directory: context.workspaceRoot, fallback: false }
@@ -39,14 +39,15 @@ export class AgentFileService implements AgentFilePort {
     const stat = await fs.lstat(filename)
     if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('目标不是可访问文件')
     if (context.permission !== 'full' && !isInsideRoot(context.workspaceRoot, filename)) throw new Error('当前权限不允许访问工作空间外文件')
-    if (!supported.test(filename)) throw new Error('当前只支持打开 Markdown 和 V9 课件')
+    if (!supported.test(filename)) throw new Error('当前只支持打开 Markdown、纯文本（.txt）和 V9 课件')
     return filename
   }
   async preflightCreate(context: AgentFileContext, raw: unknown): Promise<{ directory: string; outside: boolean }> {
     const input = agentFileSchemas['file.create'].parse(raw)
     if (context.permission === 'read-only') throw new Error('只读任务不能创建文件')
     validateWorkspaceEntryName(input.name)
-    if (path.extname(input.name).toLowerCase() !== (input.kind === 'markdown' ? '.md' : '.h5lesson')) throw new Error(`文件名与${input.kind}格式不符`)
+    const extension = input.kind === 'markdown' ? '.md' : input.kind === 'text' ? '.txt' : '.h5lesson'
+    if (path.extname(input.name).toLowerCase() !== extension) throw new Error(`文件名与${input.kind}格式不符`)
     const { directory } = await this.directory(context, input.path, true)
     return { directory, outside: !isInsideRoot(context.workspaceRoot, directory) }
   }
@@ -88,13 +89,13 @@ export class AgentFileService implements AgentFilePort {
     if (directory !== preflight.directory) throw new Error('目标文件夹已改变，请重新确认')
     if (preflight.outside && context.permission !== 'full' && context.approvedOutsideDirectory !== directory) throw new Error('工作空间外新建文件需要明确批准')
     const root = await this.host.files.registerRoot(directory)
-    const bytes = input.kind === 'markdown' ? Buffer.from('', 'utf8') : (() => {
+    const bytes = input.kind === 'course-v9' ? (() => {
       const project = createBlankCourseProject({ title: input.name.replace(/\.h5lesson$/i, '') })
       const component = createDefaultTeacherControllerPackage()
       return createCourseProjectArchive({ project, assetFiles: {}, componentFiles: { [`${component.manifest.id}@${component.manifest.version}`]: component.files } })
-    })()
+    })() : Buffer.from('', 'utf8')
     const receipt = await this.host.files.createFile({ operationId, workspaceId: root.workspaceId, targetDirectoryId: root.rootEntryId,
-      name: input.name, format: input.kind, bytes }).catch(error => { throw new AgentFileOutcomeUnknown(error instanceof Error ? error.message : String(error)) })
+      name: input.name, format: input.kind === 'text' ? 'file' : input.kind, bytes }).catch(error => { throw new AgentFileOutcomeUnknown(error instanceof Error ? error.message : String(error)) })
     const created = receipt.items.find(item => item.status === 'success' && item.targetPath)
     if (!created?.targetPath) return { data: { operation: receipt, homeMissingFallback: fallback } }
     const snapshot = await this.host.open(created.targetPath).catch(() => null)

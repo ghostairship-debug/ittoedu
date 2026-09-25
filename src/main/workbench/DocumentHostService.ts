@@ -4,9 +4,11 @@ import path from 'node:path'
 import { DocumentRegistry } from '../../core/documents/DocumentRegistry'
 import type { DocumentSession, DocumentSaveObserver } from '../../core/documents/DocumentSession'
 import { createMarkdownDriver } from '../../core/drivers/MarkdownDriver'
+import { createTextDriver, TextEncodingError } from '../../core/drivers/TextDriver'
 import { createCourseV9Driver } from '../../core/drivers/CourseV9Driver'
 import type { AsyncNativeTextMeasurePort } from '../../core/tools/prepareNativeTextFrame'
-import type { DocumentEvent, DocumentKind, DocumentSnapshot } from '../../shared/workbench/document'
+import { isSourceDocumentModel, type DocumentDriver, type DocumentEvent, type DocumentKind, type DocumentModel, type DocumentSnapshot } from '../../shared/workbench/document'
+import { DesktopOperationError } from '../errors'
 import { documentHostRequestSchema, type DocumentHostRequest, type DocumentHostAPI, type DocumentFileObservation, type ReconcileDocumentFile } from '../../shared/workbench/desktop'
 import { createDocumentJournal, readDocumentFileVersion, readDocumentMarkdownResources } from './documentJournal'
 import { DocumentToolGateway } from '../../core/tools/DocumentToolGateway'
@@ -18,6 +20,14 @@ import { createDefaultTeacherControllerPackage } from '../../shared/defaultTeach
 
 function canonicalKey(filename: string): string {
   return process.platform === 'win32' ? filename.toLowerCase() : filename
+}
+
+async function loadDocumentModel(driver: DocumentDriver, bytes: Uint8Array): Promise<DocumentModel> {
+  try { return await driver.load(bytes) }
+  catch (error) {
+    if (error instanceof TextEncodingError) throw new DesktopOperationError('TEXT_ENCODING_UNSUPPORTED', '无法打开文本', '不是 UTF-8 编码的文本文件', '请将文件转换为 UTF-8 编码后再打开。')
+    throw error
+  }
 }
 
 export type DocumentSaveFact = { saveId: string; documentId: string; epoch: string; documentName: string; time: number } & (
@@ -40,7 +50,7 @@ export class DocumentHostService {
   private bootstrapping?: Promise<DocumentSnapshot>
 
   constructor(directory: string, fileDependencies: Pick<WorkspaceFilesDependencies, 'trashItem' | 'showItemInFolder' | 'fileOperations'> = {}, rendering: { measureNativeTextAsync?: AsyncNativeTextMeasurePort } = {}) {
-    this.drivers = [createMarkdownDriver(), createCourseV9Driver(rendering)]
+    this.drivers = [createMarkdownDriver(), createTextDriver(), createCourseV9Driver(rendering)]
     this.journal = createDocumentJournal({ directory })
     this.registry = new DocumentRegistry({ persistence: this.journal, drivers: this.drivers, createId: randomUUID, bindingKey: binding => canonicalKey(binding.path) })
     this.tools = new DocumentToolGateway(this.registry, this.drivers, randomUUID, { prepareImage: prepareImageResource, ...rendering })
@@ -100,8 +110,9 @@ export class DocumentHostService {
   private kind(filename: string): DocumentKind {
     const extension = path.extname(filename).toLowerCase()
     if (extension === '.md' || extension === '.markdown') return 'markdown'
+    if (extension === '.txt') return 'text'
     if (extension === '.h5lesson') return 'course-v9'
-    throw new Error('当前仅支持 Markdown 和 V9 h5lesson 文档')
+    throw new Error('当前支持 Markdown、纯文本（.txt）和 V9 h5lesson 文档')
   }
 
   open(filename: string): Promise<DocumentSnapshot> { return this.fileCoordinator.withFileAccess(() => this.openFile(filename)) }
@@ -113,7 +124,7 @@ export class DocumentHostService {
     if (version === null) throw new Error('文档已不存在')
     const session = await this.registry.open({ kind: 'file', path: canonical, version, bindingVersion: 1 }, async () => {
       const driver = this.drivers.find(value => value.kind === kind)!
-      const model = await driver.load(new Uint8Array(await fs.readFile(canonical)))
+      const model = await loadDocumentModel(driver, new Uint8Array(await fs.readFile(canonical)))
       if (model.kind === 'markdown') model.resources = await readDocumentMarkdownResources(canonical)
       if (await readDocumentFileVersion(canonical, kind) !== version) throw new Error('读取期间文档已改变，请重新打开')
       driver.validate(model)
@@ -126,7 +137,7 @@ export class DocumentHostService {
     const version = await readDocumentFileVersion(filename, kind)
     if (version === null) return { version, model: null }
     const driver = this.drivers.find(value => value.kind === kind)!
-    const model = await driver.load(new Uint8Array(await fs.readFile(filename)))
+    const model = await loadDocumentModel(driver, new Uint8Array(await fs.readFile(filename)))
     if (model.kind === 'markdown') model.resources = await readDocumentMarkdownResources(filename)
     if (await readDocumentFileVersion(filename, kind) !== version) throw new Error('读取期间文件已改变，请重新比较')
     driver.validate(model)
@@ -152,9 +163,9 @@ export class DocumentHostService {
       }
       const model = structuredClone(current.model)
       if (input.source !== undefined) {
-        if (model.kind !== 'markdown') throw new Error('课件不能使用 Markdown 合并正文')
+        if (!isSourceDocumentModel(model)) throw new Error('课件不能使用 Markdown 合并正文')
         model.source = input.source
-        if (disk.model?.kind === 'markdown') model.resources = {
+        if (model.kind === 'markdown' && disk.model?.kind === 'markdown') model.resources = {
           assets: { ...disk.model.resources.assets, ...model.resources.assets },
           components: { ...disk.model.resources.components, ...model.resources.components },
         }
