@@ -9,7 +9,10 @@ import {
   type FlowBlock,
   type FlowMediaBlock,
 } from '@/shared/courseProjectTypes'
-import { COURSE_AUTHORING_TARGET_REJECTION_REASONS } from '@/renderer/authoring/courseAuthoringSession'
+import {
+  COURSE_AUTHORING_TARGET_REJECTION_REASONS,
+  updateCourseAuthoringSessionRevision,
+} from '@/renderer/authoring/courseAuthoringSession'
 import { syncFlowCourseLocations } from '../../src/core/tools/flowDocumentModel'
 import {
   executeFlowEditorCommand,
@@ -26,6 +29,7 @@ import { PropertiesTab } from '@/renderer/ui/PropertiesTab'
 import { SharedDocumentEditor } from '@/renderer/document'
 import { buildFlowEditorView, captureFlowEditorAuthoringTarget } from '@/renderer/course/flowEditorView'
 import { documentResourceReferences } from '@/shared/document/resources'
+import { createCourseStoreHost } from '../helpers/courseStoreHost'
 
 const NOW = '2026-08-18T14:31:00.000Z'
 const ASSET_FILES: Record<string, Uint8Array> = {
@@ -237,8 +241,9 @@ function SharedBodyHarness() {
 }
 
 describe('Flow media block field and asset replacement commands', () => {
-  it('routes a stale Properties delete through the Store boundary without overwriting newer content', () => {
-    useEditorStore.getState().loadCourseProject(createMediaEditProject(), null, ASSET_FILES)
+  it('routes a stale Properties delete through the Store boundary without overwriting newer content', async () => {
+    const host = await createCourseStoreHost()
+    await host.open(createMediaEditProject())
     selectStoreMedia('media-image')
     let documentAfterConcurrentWrite: CourseProjectDocument | null = null
     let historyAfterConcurrentWrite: readonly unknown[] | null = null
@@ -252,12 +257,22 @@ describe('Flow media block field and asset replacement commands', () => {
         flow.selection.locationId,
         'media-video',
       )
-      useEditorStore.getState().applyFlowCommand(updateFlowEditorBlock(
+      const commandResult = updateFlowEditorBlock(
         flow.history.present,
         flowBlockTargetFromSelection(flow.history.present, videoSelection),
         { caption: { inlines: [{ type: 'text', text: '并发保留的新内容' }] } },
         { expectedRevision: flow.history.present.revision },
-      ))
+      )
+      const nextDoc = commandResult.nextDocument!
+      useEditorStore.setState((state) => ({
+        flowSession: state.flowSession ? {
+          ...state.flowSession,
+          history: { ...state.flowSession.history, present: nextDoc },
+        } : null,
+        courseAuthoringSession: state.courseAuthoringSession
+          ? updateCourseAuthoringSessionRevision(state.courseAuthoringSession, nextDoc.revision)
+          : null,
+      }))
       documentAfterConcurrentWrite = storeFlowDocument()
       historyAfterConcurrentWrite = useEditorStore.getState().flowSession!.history.past
       selectionAfterConcurrentWrite = useEditorStore.getState().flowSession!.selection
@@ -280,7 +295,8 @@ describe('Flow media block field and asset replacement commands', () => {
   })
 
   it('edits and persists video fields through Properties and its caption through the shared body owner', async () => {
-    useEditorStore.getState().loadCourseProject(createMediaEditProject(), null, ASSET_FILES)
+    const host = await createCourseStoreHost()
+    await host.open(createMediaEditProject())
     selectStoreMedia('media-video')
     render(createElement(PropertiesTab, { onReplaceImage: () => undefined }))
 
@@ -312,11 +328,14 @@ describe('Flow media block field and asset replacement commands', () => {
     fireEvent.click(screen.getByTestId('flow-block-move-up'))
     expect(storeFlowBlockOrder()).toEqual(['h1', 'media-video', 'media-image', 'media-audio'])
 
-    const historyBeforeReplacement = useEditorStore.getState().flowSession!.history.past.length
+    await useEditorStore.getState().drainCourseDocument()
+    const documentId = useEditorStore.getState().courseDocument.documentId!
+    const depthBefore = host.registry.get(documentId).read().undoDepth
     fireEvent.change(screen.getByRole('combobox', { name: '替换素材' }), {
       target: { value: 'asset-video-2' },
     })
-    expect(useEditorStore.getState().flowSession!.history.past).toHaveLength(historyBeforeReplacement + 1)
+    await useEditorStore.getState().drainCourseDocument()
+    expect(host.registry.get(documentId).read().undoDepth).toBe(depthBefore + 1)
 
     let video = mediaBlock(storeFlowDocument(), 'media-video')
     expect(video).toMatchObject({
@@ -338,15 +357,15 @@ describe('Flow media block field and asset replacement commands', () => {
       'asset-audio',
       { expectedRevision: liveFlow.history.present.revision },
     )
-    const historyBeforeWrongKind = liveFlow.history.past.length
     expect(useEditorStore.getState().applyFlowCommand(wrongKind).ok).toBe(false)
-    expect(useEditorStore.getState().flowSession!.history.past).toHaveLength(historyBeforeWrongKind)
+    expect(host.registry.get(documentId).read().undoDepth).toBe(depthBefore + 1)
     expect(mediaBlock(storeFlowDocument(), 'media-video')).toEqual(video)
 
     const archive = useEditorStore.getState().exportV9SlideCandidateArchive()
     expect(archive).toBeTruthy()
 
     useEditorStore.getState().undo()
+    await useEditorStore.getState().drainCourseDocument()
     video = mediaBlock(storeFlowDocument(), 'media-video')
     expect(video.assetId).toBe('asset-video')
     expect(video).toMatchObject({
@@ -357,8 +376,8 @@ describe('Flow media block field and asset replacement commands', () => {
     })
     expect(storeFlowBlockOrder()).toEqual(['h1', 'media-video', 'media-image', 'media-audio'])
 
-    useEditorStore.getState().createNewProject()
-    expect(useEditorStore.getState().reopenV9SlideCandidateArchive(archive!)).toBe(true)
+    expect(await useEditorStore.getState().reopenV9SlideCandidateArchive(archive!)).toBe(true)
+    await useEditorStore.getState().drainCourseDocument()
     expect(mediaBlock(storeFlowDocument(), 'media-video')).toMatchObject({
       assetId: 'asset-video-2',
       altText: '完整视频说明',

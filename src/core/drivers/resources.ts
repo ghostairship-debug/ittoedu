@@ -23,7 +23,9 @@ export function cloneDocumentResources(resources: DocumentResources, relativePat
     paths.add(folded)
   }
   for (const [id, bytes] of Object.entries(resources.assets)) {
-    if (!id.trim() || !(bytes instanceof Uint8Array)) throw new TypeError('素材身份或字节无效')
+    if (!id.trim() || !(bytes instanceof Uint8Array || Object.prototype.toString.call(bytes) === '[object Uint8Array]')) {
+      throw new TypeError('素材身份或字节无效')
+    }
     if (relativePaths) claimPath(id)
     assets[id] = Uint8Array.from(bytes)
   }
@@ -34,7 +36,7 @@ export function cloneDocumentResources(resources: DocumentResources, relativePat
     const next: Record<string, Uint8Array> = Object.create(null)
     for (const [path, bytes] of Object.entries(files)) {
       assertSafeArchivePath(path, 'component')
-      if (!(bytes instanceof Uint8Array)) throw new TypeError('组件文件不是有效字节')
+      if (!(bytes instanceof Uint8Array || Object.prototype.toString.call(bytes) === '[object Uint8Array]')) throw new TypeError('组件文件不是有效字节')
       if (relativePaths) claimPath(`${id}/${path}`)
       next[path] = Uint8Array.from(bytes)
     }
