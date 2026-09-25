@@ -1,4 +1,7 @@
+import type * as PhaserTypes from 'phaser'
 import { DEFAULT_SLIDE_CANVAS, type SlideCanvasSize } from '../shared/slideCanvas'
+import type { DomTextOverrides } from './lightEdit/domTextOverrides'
+import type { PhaserTextOverrides } from './lightEdit/phaserTextOverrides'
 import type {
   EditableTextContent,
   RuntimeAssetBinding,
@@ -20,6 +23,24 @@ export type RuntimeAuthoringTargetsChangedHandler = (
   update: Readonly<RuntimeAuthoringTargetUpdate>,
 ) => void
 
+/** M15: what the host recognises on its own, so the Runtime registers nothing. */
+export interface RuntimeLightEditSources {
+  dom?: DomTextOverrides
+  phaser?: PhaserTextOverrides
+  /** Binding key of a rendered image URL when it is one of the Runtime's project assets. */
+  assetKeyForUrl(url: string): string | undefined
+  /** Static Phaser images the Runtime created. */
+  phaserImages?(): Iterable<PhaserTypes.GameObjects.Image>
+  phaserLayerOf?(object: PhaserTypes.GameObjects.GameObject): RuntimeLayer
+}
+
+/** Enough for a page like the listening case (about 70 texts) without flooding the editor. */
+const MAX_AUTO_TARGETS = 400
+
+function autoLabel(text: string): string {
+  return text.length > 24 ? `${text.slice(0, 23)}…` : text
+}
+
 export interface RuntimeAuthoringTargetRegistryOptions {
   scope: RuntimeScope
   sceneId?: string
@@ -30,6 +51,7 @@ export interface RuntimeAuthoringTargetRegistryOptions {
   content: EditableTextContent
   assets: Readonly<Record<string, RuntimeAssetBinding>>
   domRoots?: RuntimeAuthoringDomRoots
+  lightEdit?: RuntimeLightEditSources
   onTargetsChanged: RuntimeAuthoringTargetsChangedHandler
 }
 
@@ -89,6 +111,9 @@ function sameTarget(
     left.maxLength === right.maxLength &&
     left.layer === right.layer &&
     left.source === right.source &&
+    left.lightEdit?.original === right.lightEdit?.original &&
+    left.lightEdit?.region === right.lightEdit?.region &&
+    left.lightEdit?.text === right.lightEdit?.text &&
     sameBounds(left.bounds, right.bounds)
 }
 
@@ -124,7 +149,7 @@ function optionalMaxLength(value: unknown): number | undefined {
  */
 export class RuntimeAuthoringTargetRegistry implements RuntimeAuthoringApi {
   private readonly registrations = new Map<number, StoredRegistration>()
-  private readonly domElementIds = new WeakMap<Element, number>()
+  private readonly domElementIds = new WeakMap<object, number>()
   private readonly mutationObservers: MutationObserver[] = []
   private readonly resizeObserver: ResizeObserver | null
   private previousTargets: ReadonlyArray<Readonly<RuntimeAuthoringTarget>> | null = null
@@ -222,8 +247,10 @@ export class RuntimeAuthoringTargetRegistry implements RuntimeAuthoringApi {
     const targets = Object.freeze([
       ...this.collectDomTargets('underlay'),
       ...this.collectRegisteredTargets('underlay'),
+      ...this.collectAutoTargets('underlay'),
       ...this.collectDomTargets('overlay'),
       ...this.collectRegisteredTargets('overlay'),
+      ...this.collectAutoTargets('overlay'),
     ])
     if (sameTargets(this.previousTargets, targets)) return
     this.publish(targets)
@@ -367,6 +394,113 @@ export class RuntimeAuthoringTargetRegistry implements RuntimeAuthoringApi {
     return targets
   }
 
+  /** Text and images the Runtime renders without registering them (M15). */
+  private collectAutoTargets(layer: RuntimeLayer): RuntimeAuthoringTarget[] {
+    const sources = this.options.lightEdit
+    if (!sources) return []
+    const targets: RuntimeAuthoringTarget[] = []
+    const scope = { scope: this.options.scope, ...(this.options.sceneId ? { sceneId: this.options.sceneId } : {}) }
+    const root = this.options.domRoots?.[layer]
+    const rootRect = root?.getBoundingClientRect()
+    if (root && rootRect && finitePositiveDomRect(rootRect)) {
+      const toCanvas = (rect: DOMRect) => ({
+        x: ((rect.left - rootRect.left) / rootRect.width) * this.canvasWidth,
+        y: ((rect.top - rootRect.top) / rootRect.height) * this.canvasHeight,
+        width: (rect.width / rootRect.width) * this.canvasWidth,
+        height: (rect.height / rootRect.height) * this.canvasHeight,
+      })
+      const range = root.ownerDocument.createRange()
+      for (const sample of sources.dom?.samples() ?? []) {
+        if (targets.length >= MAX_AUTO_TARGETS) break
+        if (sample.root !== root || sample.live) continue
+        // Registered keys keep their own editing path.
+        if (sample.node.parentElement?.closest('[data-courseware-edit-key]')) continue
+        range.selectNodeContents(sample.node)
+        const rect = range.getBoundingClientRect()
+        if (!finitePositiveDomRect(rect)) continue
+        targets.push(this.freezeTarget({
+          targetId: `auto:${this.domElementId(sample.node)}:text`,
+          ...scope,
+          kind: 'text',
+          key: '',
+          label: autoLabel(sample.original),
+          multiline: sample.original.length > 30,
+          layer,
+          source: 'auto',
+          bounds: toCanvas(rect),
+          lightEdit: { original: sample.original, region: sample.region, text: sample.rule?.text ?? sample.original },
+        }))
+      }
+      for (const image of root.querySelectorAll('img')) {
+        if (targets.length >= MAX_AUTO_TARGETS) break
+        if (image.closest('[data-courseware-asset-key]')) continue
+        const key = sources.assetKeyForUrl(image.currentSrc || image.src)
+        if (!key || !this.knownKey('asset', key)) continue
+        const rect = image.getBoundingClientRect()
+        if (!finitePositiveDomRect(rect)) continue
+        targets.push(this.freezeTarget({
+          targetId: `auto:${this.domElementId(image)}:asset`,
+          ...scope,
+          kind: 'asset',
+          key,
+          label: key,
+          layer,
+          source: 'auto',
+          bounds: toCanvas(rect),
+        }))
+      }
+    }
+    const scaleX = this.canvasWidth / Math.max(1, this.width)
+    const scaleY = this.canvasHeight / Math.max(1, this.height)
+    const phaserBounds = (object: { getBounds(): { x: number; y: number; width: number; height: number } }) => {
+      try {
+        const bounds = object.getBounds()
+        return finitePositiveBounds(bounds)
+          ? { x: bounds.x * scaleX, y: bounds.y * scaleY, width: bounds.width * scaleX, height: bounds.height * scaleY }
+          : null
+      } catch { return null }
+    }
+    const layerOf = sources.phaserLayerOf ?? (() => 'overlay' as const)
+    for (const sample of sources.phaser?.samples() ?? []) {
+      if (targets.length >= MAX_AUTO_TARGETS) break
+      if (sample.live || layerOf(sample.text) !== layer) continue
+      const bounds = phaserBounds(sample.text)
+      if (!bounds) continue
+      targets.push(this.freezeTarget({
+        targetId: `auto:${this.domElementId(sample.text)}:text`,
+        ...scope,
+        kind: 'text',
+        key: '',
+        label: autoLabel(sample.original),
+        multiline: sample.original.length > 30,
+        layer,
+        source: 'auto',
+        bounds,
+        lightEdit: { original: sample.original, region: 'phaser', text: sample.rule?.text ?? sample.original },
+      }))
+    }
+    for (const image of sources.phaserImages?.() ?? []) {
+      if (targets.length >= MAX_AUTO_TARGETS) break
+      if (!image.active || !image.visible || layerOf(image) !== layer) continue
+      const source = image.texture?.source?.[0]?.image as { src?: unknown } | undefined
+      const key = typeof source?.src === 'string' ? sources.assetKeyForUrl(source.src) : undefined
+      if (!key || !this.knownKey('asset', key)) continue
+      const bounds = phaserBounds(image)
+      if (!bounds) continue
+      targets.push(this.freezeTarget({
+        targetId: `auto:${this.domElementId(image)}:asset`,
+        ...scope,
+        kind: 'asset',
+        key,
+        label: key,
+        layer,
+        source: 'auto',
+        bounds,
+      }))
+    }
+    return targets
+  }
+
   private knownKey(kind: unknown, key: unknown): key is string {
     if (typeof key !== 'string' || key.trim() !== key || key.length === 0) {
       return false
@@ -380,7 +514,7 @@ export class RuntimeAuthoringTargetRegistry implements RuntimeAuthoringApi {
     return false
   }
 
-  private domElementId(element: Element): number {
+  private domElementId(element: object): number {
     const existing = this.domElementIds.get(element)
     if (existing !== undefined) return existing
     const id = this.nextDomElementId
@@ -393,6 +527,7 @@ export class RuntimeAuthoringTargetRegistry implements RuntimeAuthoringApi {
     return Object.freeze({
       ...target,
       bounds: Object.freeze({ ...target.bounds }),
+      ...(target.lightEdit ? { lightEdit: Object.freeze({ ...target.lightEdit }) } : {}),
     })
   }
 }

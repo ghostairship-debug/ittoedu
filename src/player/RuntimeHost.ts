@@ -18,6 +18,7 @@ import type {
   RuntimeExecutionMode,
   RuntimeHostActions,
   RuntimeInstanceLifecycle,
+  RuntimeLayer,
   RuntimeNavigationGuard,
   RuntimeNodeHandle,
   RuntimeNodeResolver,
@@ -27,6 +28,9 @@ import type {
 } from '../shared/runtimeTypes'
 import { RUNTIME_EVIDENCE_ACTION_KINDS } from '../shared/runtimeTypes'
 import { CourseStateStore } from './CourseStateStore'
+import { DomTextOverrides } from './lightEdit/domTextOverrides'
+import { PhaserTextOverrides } from './lightEdit/phaserTextOverrides'
+import type { LightEditTextOverride } from '../shared/contracts/runtime/lightEdit'
 import type { CourseEventBus } from './CourseEventBus'
 import type { RuntimeRegistry } from './RuntimeRegistry'
 import type { CaptureSurfaceSnapshotter } from './PreparedCanvasSnapshots'
@@ -302,6 +306,23 @@ function createIsolatedDomMount(
   return { host, root }
 }
 
+/** Reverse lookup from a rendered image URL to the Runtime's asset binding key. */
+function runtimeAssetKeyForUrl(
+  assets: Readonly<Record<string, { assetId: string }>>,
+  assetUrl: (assetId: string) => string,
+): (url: string) => string | undefined {
+  let byUrl: Map<string, string> | null = null
+  return (url) => {
+    if (!byUrl) {
+      byUrl = new Map()
+      for (const [key, binding] of Object.entries(assets)) {
+        try { byUrl.set(assetUrl(binding.assetId), key) } catch { /* unresolved assets have no image */ }
+      }
+    }
+    return byUrl.get(url)
+  }
+}
+
 function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
@@ -334,6 +355,10 @@ export class RuntimeHost {
   private readonly guardDisposers = new Set<RuntimeEventDisposer>()
   private readonly capturePromises = new Set<Promise<unknown>>()
   private authoringRegistry: RuntimeAuthoringTargetRegistry | null = null
+  /** M15: host-applied edits of text the Runtime renders itself. */
+  private domText: DomTextOverrides | null = null
+  private phaserText: PhaserTextOverrides | null = null
+  private stopPhaserTextScan: (() => void) | null = null
   private lifecycle: RuntimeInstanceLifecycle | null = null
   private failure: Error | null = null
   private destroyed = false
@@ -363,13 +388,28 @@ export class RuntimeHost {
 
     const { scene } = options.environment.phaser
     const displayListBeforeCreate = new Set(scene.children.list)
+    const overrides = runtime.content.overrides ?? []
+    if (exposesDom) {
+      const roots = this.domRoots()
+      this.domText = new DomTextOverrides([roots.underlay, roots.overlay], overrides, () => this.authoringRegistry?.invalidate())
+    }
+    const TextObject = Phaser.GameObjects?.Text
+    if (exposesPhaser && typeof TextObject === 'function') {
+      this.phaserText = new PhaserTextOverrides(
+        () => this.runtimePhaserObjects(),
+        (object): object is Phaser.GameObjects.Text => object instanceof TextObject,
+        overrides,
+      )
+    }
     try {
       const definition = options.registry.executeRuntime(
         runtime.source,
         options.label,
         runtime.runtimeApiVersion,
       )
-      if (definition.authoringApiVersion === 1 && options.authoring) {
+      // Every Runtime gets host-recognised text and images; only API-1 authoring
+      // Runtimes also see the registration API for their own keyed targets.
+      if (options.authoring) {
         this.authoringRegistry = new RuntimeAuthoringTargetRegistry({
           scope: options.scope,
           sceneId: options.sceneId,
@@ -379,9 +419,17 @@ export class RuntimeHost {
           content: runtime.content,
           assets: runtime.assets,
           ...(exposesDom ? { domRoots: this.domRoots() } : {}),
+          lightEdit: {
+            ...(this.domText ? { dom: this.domText } : {}),
+            ...(this.phaserText ? { phaser: this.phaserText } : {}),
+            assetKeyForUrl: runtimeAssetKeyForUrl(runtime.assets, options.assetUrl),
+            phaserImages: () => this.runtimePhaserImages(),
+            phaserLayerOf: (object) => this.phaserLayerOf(object),
+          },
           onTargetsChanged: options.authoring.onTargetsChanged,
         })
       }
+      const exposeAuthoring = definition.authoringApiVersion === 1 && this.authoringRegistry
       const contentValues = Object.freeze({ ...runtime.content.values })
       const commonContext: RuntimeCreateContextBase = {
         scope: options.scope,
@@ -468,8 +516,8 @@ export class RuntimeHost {
             onActionRecorded?.(snapshot)
           },
         }),
-        ...(this.authoringRegistry
-          ? { authoring: this.authoringRegistry }
+        ...(exposeAuthoring
+          ? { authoring: this.authoringRegistry! }
           : {}),
         emit: (eventName, payload) => {
           options.events.emit('runtime:event', {
@@ -528,6 +576,7 @@ export class RuntimeHost {
           (object) => !displayListBeforeCreate.has(object),
         ),
       )
+      this.startLightEdit(scene)
     } catch (error) {
       this.recordFailure(error)
       console.error(`运行时“${options.label}”启动失败`, error)
@@ -548,6 +597,7 @@ export class RuntimeHost {
       const authoringRegistry = this.authoringRegistry
       this.authoringRegistry = null
       attemptCleanup(() => authoringRegistry?.destroy())
+      attemptCleanup(() => this.destroyLightEdit())
       attemptCleanup(() => this.looseObjects.push(
         ...scene.children.list.filter((object) => !displayListBeforeCreate.has(object)),
       ))
@@ -591,6 +641,18 @@ export class RuntimeHost {
     } catch (error) {
       throw this.recordFailure(error)
     }
+  }
+
+  /** M15: apply edited text rules in place, keeping the Runtime's current state. */
+  setTextOverrides(overrides: readonly LightEditTextOverride[]): void {
+    if (this.destroyed || this.failure) return
+    try {
+      this.domText?.setRules(overrides)
+      this.phaserText?.setRules(overrides)
+    } catch (error) {
+      console.warn(`运行时“${this.options.label}”的文字修改暂不可用`, error)
+    }
+    this.authoringRegistry?.invalidate()
   }
 
   resize(width: number, height: number): void {
@@ -673,6 +735,7 @@ export class RuntimeHost {
     this.lifecycle = null
     attempt(() => this.authoringRegistry?.destroy())
     this.authoringRegistry = null
+    attempt(() => this.destroyLightEdit())
     const guardDisposers = [...this.guardDisposers]
     this.guardDisposers.clear()
     for (const dispose of guardDisposers) attempt(dispose)
@@ -685,6 +748,79 @@ export class RuntimeHost {
     this.overlayDom = null
     this.capturePromises.clear()
     if (firstFailure) throw firstFailure
+  }
+
+  /** Light editing never fails the Runtime: problems only disable the edits. */
+  private startLightEdit(scene: Phaser.Scene): void {
+    try {
+      this.domText?.applyAll()
+      if (!this.phaserText) return
+      this.phaserText.scan()
+      const events = scene.events
+      if (typeof events?.on !== 'function') return
+      let last = -Infinity
+      // Text objects appear as the Runtime runs; a light periodic scan wraps new ones.
+      const onPostUpdate = (time: number) => {
+        if (time - last < 250) return
+        last = time
+        try {
+          if (this.phaserText?.scan()) this.authoringRegistry?.invalidate()
+        } catch (error) {
+          console.warn(`运行时“${this.options.label}”的文字修改暂不可用`, error)
+        }
+      }
+      events.on('postupdate', onPostUpdate)
+      this.stopPhaserTextScan = () => events.off('postupdate', onPostUpdate)
+    } catch (error) {
+      console.warn(`运行时“${this.options.label}”的文字修改暂不可用`, error)
+      this.destroyLightEdit()
+    }
+  }
+
+  private destroyLightEdit(): void {
+    this.stopPhaserTextScan?.()
+    this.stopPhaserTextScan = null
+    this.phaserText?.destroy()
+    this.phaserText = null
+    this.domText?.destroy()
+    this.domText = null
+  }
+
+  /** Game objects this Runtime created: mount descendants plus loose scene objects. */
+  private *runtimePhaserObjects(): Generator<Phaser.GameObjects.GameObject> {
+    const seen = new Set<Phaser.GameObjects.GameObject>()
+    const walk = function* (object: Phaser.GameObjects.GameObject): Generator<Phaser.GameObjects.GameObject> {
+      if (seen.has(object)) return
+      seen.add(object)
+      yield object
+      const list = Reflect.get(object, 'list')
+      if (capturedArrayIsArray(list)) {
+        for (const child of capturedArraySlice(list) as Phaser.GameObjects.GameObject[]) yield* walk(child)
+      }
+    }
+    for (const mount of [this.underlayMount, this.overlayMount]) {
+      if (!mount) continue
+      seen.add(mount)
+      for (const child of capturedArraySlice(mount.list) as Phaser.GameObjects.GameObject[]) yield* walk(child)
+    }
+    for (const object of this.looseObjects) yield* walk(object)
+  }
+
+  private *runtimePhaserImages(): Generator<Phaser.GameObjects.Image> {
+    const ImageObject = Phaser.GameObjects?.Image
+    const SpriteObject = Phaser.GameObjects?.Sprite
+    if (typeof ImageObject !== 'function') return
+    for (const object of this.runtimePhaserObjects()) {
+      // Static images only: sprites animate frames and stay AI-only (M15).
+      if (object instanceof ImageObject && !(typeof SpriteObject === 'function' && object instanceof SpriteObject)) yield object
+    }
+  }
+
+  private phaserLayerOf(object: Phaser.GameObjects.GameObject): RuntimeLayer {
+    for (let parent = object.parentContainer; parent; parent = parent.parentContainer) {
+      if (parent === this.underlayMount) return 'underlay'
+    }
+    return 'overlay'
   }
 
   private destroyPhaserResources(recordFailure: (cause: unknown) => void): void {

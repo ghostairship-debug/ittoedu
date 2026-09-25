@@ -261,7 +261,17 @@ export interface RuntimeAuthoringApi {
   invalidate(): void
 }
 
-export type RuntimeAuthoringTargetSource = 'registered' | 'dom'
+export type RuntimeAuthoringTargetSource = 'registered' | 'dom' | 'auto'
+
+/** M15: an occurrence of text the Runtime renders itself, found by the host (source 'auto'). */
+export interface RuntimeAuthoringLightEditText {
+  /** Rendered text before any edit, normalized. */
+  original: string
+  /** Host-computed region of this occurrence. */
+  region: string
+  /** Text shown now: the matching rule's replacement, or `original`. */
+  text: string
+}
 
 /** A read-only, session-local target snapshot emitted by an authoring host. */
 export interface RuntimeAuthoringTarget {
@@ -281,8 +291,10 @@ export interface RuntimeAuthoringTarget {
   maxLength?: number
   layer: RuntimeLayer
   source: RuntimeAuthoringTargetSource
-  /** Axis-aligned bounds normalized to the canonical 1280 x 720 canvas. */
+  /** Axis-aligned bounds in the course canvas space. */
   bounds: Readonly<RuntimeAuthoringBounds>
+  /** Present on text found by the host: edits become rules instead of content keys. */
+  lightEdit?: Readonly<RuntimeAuthoringLightEditText>
 }
 
 export interface RuntimeAuthoringTargetUpdate {

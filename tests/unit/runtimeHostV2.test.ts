@@ -261,7 +261,7 @@ describe('RuntimeHost API 2', () => {
     registry.dispose()
   })
 
-  it('不向未声明扩展的 Runtime 暴露 authoring，即使宿主有接收器', async () => {
+  it('不向未声明扩展的 Runtime 暴露 authoring；宿主仍自行识别图文（M15）', async () => {
     const onTargetsChanged = vi.fn()
     const { host, registry } = createHost(
       runtime(2, 'dom'),
@@ -271,7 +271,8 @@ describe('RuntimeHost API 2', () => {
     await Promise.resolve()
 
     expect(capturedContext()).not.toHaveProperty('authoring')
-    expect(onTargetsChanged).not.toHaveBeenCalled()
+    // The Runtime registers nothing; the host publishes what it recognises (nothing rendered yet).
+    expect(onTargetsChanged).toHaveBeenCalledWith(expect.objectContaining({ targets: [] }))
 
     host.destroy()
     registry.dispose()
