@@ -894,7 +894,7 @@ button:disabled {
 
 .canvas-label--global {
   border-color: rgba(36, 91, 70, 0.28);
-  color: #173e31;
+  color: #eef5f0;
   background: rgba(23, 62, 49, 0.88);
 }
 
@@ -931,8 +931,9 @@ button:disabled {
 }
 
 .canvas-mode-switch .canvas-mode-switch__active {
-  color: #ffffff;
-  background: rgba(36, 91, 70, 0.22);
+  color: #173e31;
+  background: rgba(36, 91, 70, 0.16);
+  font-weight: 600;
 }
 
 .canvas-view-controls {
