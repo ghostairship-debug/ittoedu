@@ -148,18 +148,22 @@ export class TeacherControllerComponentHost {
     this.rootElement.style.transform = ''
     this.#anchorShift = { x: node.width - width, y: node.height - height }
     this.#shift = { ...this.#anchorShift }
-    if (!this.#authoringId) {
-      const canvas = this.#options.getConstraintCanvas?.() ?? this.#options.canvas
+    const page = this.#authoringId
+      ? this.#options.authoringPage && { x: 0, y: 0, ...this.#options.authoringPage }
+      : this.#options.getConstraintRect?.() ?? { x: 0, y: 0, ...(this.#options.getConstraintCanvas?.() ?? this.#options.canvas) }
+    if (page) {
+      // Off the page (or the visible part of a scrolled page) the controller is shown at its edge.
       const x = node.x + this.offset.dx + this.#shift.x, y = node.y + this.offset.dy + this.#shift.y
-      this.#shift.x += Math.max(0, Math.min(x, canvas.width - width)) - x
-      this.#shift.y += Math.max(0, Math.min(y, canvas.height - height)) - y
+      this.#shift.x += Math.max(page.x, Math.min(x, page.x + page.width - width)) - x
+      this.#shift.y += Math.max(page.y, Math.min(y, page.y + page.height - height)) - y
     }
     const positioned = footprintElement ?? container
     positioned.style.translate = `${this.#shift.x}px ${this.#shift.y}px`
     if (this.#authoringId) {
       const root = this.rootElement
       root.dataset.controllerAuthoringId = this.#authoringId
-      const bounds = [this.#shift.x, this.#shift.y, width, height].map(value => Math.round(value * 1000) / 1000).join(',')
+      // The editor applies the page edge itself, so a proposed drag frame is never shifted twice.
+      const bounds = [this.#anchorShift.x, this.#anchorShift.y, width, height].map(value => Math.round(value * 1000) / 1000).join(',')
       if (root.dataset.controllerAuthoringBounds !== bounds) {
         root.dataset.controllerAuthoringBounds = bounds
         container.ownerDocument.dispatchEvent(new Event('controller-authoring-bounds'))

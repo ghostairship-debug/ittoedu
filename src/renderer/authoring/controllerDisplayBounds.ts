@@ -4,14 +4,21 @@ import { isTeacherController } from '../../shared/teacherControllerRole'
 import { rotatedRectangleAabb } from '../../shared/geometry'
 
 /** Renderer measurement only: never write the collapsed footprint into the project. */
-export function controllerDisplayFrame(item: LayerItem, frame: { x: number; y: number; width: number; height: number } = item.frame) {
+export function controllerDisplayFrame(
+  item: LayerItem,
+  frame: { x: number; y: number; width: number; height: number } = item.frame,
+  /** Slide page: an off-page controller is shown at its edge, as playback shows it (M19). */
+  page?: { width: number; height: number },
+) {
   if (!isTeacherController(item) || typeof document === 'undefined') return frame
   const mount = [...document.querySelectorAll<HTMLElement>('[data-controller-authoring-id]')]
     .find(element => element.dataset.controllerAuthoringId === item.layerItemId && element.isConnected)
-  if (!mount) return frame
-  const values = mount.dataset.controllerAuthoringBounds?.split(',').map(Number)
-  if (!values || values.length !== 4 || !values.every(Number.isFinite)) return frame
-  return { x: frame.x + values[0]!, y: frame.y + values[1]!, width: values[2]!, height: values[3]! }
+  const values = mount?.dataset.controllerAuthoringBounds?.split(',').map(Number)
+  const shown = values && values.length === 4 && values.every(Number.isFinite)
+    ? { x: frame.x + values[0]!, y: frame.y + values[1]!, width: values[2]!, height: values[3]! }
+    : frame
+  if (!page) return shown
+  return { ...shown, x: Math.max(0, Math.min(shown.x, page.width - shown.width)), y: Math.max(0, Math.min(shown.y, page.height - shown.height)) }
 }
 
 /** Constrain a teacher gesture by its visible component footprint. Ordinary

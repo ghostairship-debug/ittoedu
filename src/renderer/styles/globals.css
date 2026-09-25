@@ -988,13 +988,29 @@ button:disabled {
   pointer-events: none;
 }
 
+/* Playback draws its own page frame (M19); the workspace or preview colour shows around the page. */
 .course-try-run-host,
 .course-preview-host {
   position: absolute;
   inset: 0;
   overflow: hidden;
-  background: #ffffff;
+  background: transparent;
   z-index: 5;
+}
+
+.workspace--run .canvas-stage-stack {
+  visibility: hidden;
+}
+
+/* Inside the editor the workspace clips, as it does for the edited page: the page shadow and a zoomed
+   try-run page reach into the margins instead of stopping at the viewport. */
+.course-try-run-host,
+.spatial-try-run-host,
+.course-try-run-host [data-playback-view],
+.course-try-run-host [data-playback-viewport],
+.spatial-try-run-host [data-playback-view],
+.spatial-try-run-host [data-playback-viewport] {
+  overflow: visible !important;
 }
 
 .course-preview-overlay.modal-backdrop {

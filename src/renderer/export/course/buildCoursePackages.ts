@@ -42,10 +42,10 @@ export interface BuildCoursePackagesResult {
 }
 
 export const COURSE_PLAYER_CSS = `
-:root{color-scheme:light;font-family:Inter,"Microsoft YaHei","PingFang SC","Noto Sans SC",sans-serif;background:#f8fafc;color:#172033}
+:root{color-scheme:light;font-family:Inter,"Microsoft YaHei","PingFang SC","Noto Sans SC",sans-serif;background:#ece9e1;color:#172033}
 *{box-sizing:border-box}
 html,body,#course-root{width:100%;height:100%;margin:0}
-body{overflow:hidden;background:#f8fafc}
+body{overflow:hidden;background:#ece9e1}
 .course-shell{width:100%;height:100%}
 .course-stage{position:relative;width:100%;height:100%;min-width:0;min-height:0;overflow:auto}
 .course-surface-host{position:relative;width:100%;min-height:100%}
@@ -256,7 +256,7 @@ function packageIndex(
   <link rel="stylesheet" href="./player/player.css">
 </head>
 <body>
-  <div id="course-root" aria-label="${escapeHtml(payload.title)}"></div>
+  <div id="course-root" data-page-insets="16" aria-label="${escapeHtml(payload.title)}"></div>
   <script defer src="./course-data.js"></script>
   <script defer src="./player/player.iife.js"></script>
 </body>
@@ -286,7 +286,7 @@ function emitPublishedCourseStandaloneHtml(
   <style>${withBundledFontCss(COURSE_PLAYER_CSS, bundledFontDataUrlCss(fonts))}</style>${bundledFontNoticeHtmlComment(fonts)}
 </head>
 <body>
-  <div id="course-root" aria-label="${escapeHtml(payload.title)}"></div>
+  <div id="course-root" data-page-insets="16" aria-label="${escapeHtml(payload.title)}"></div>
   <script>${escapeScript(serializedAssignment(payload))}</script>
   <script>${escapeScript(normalized.playerBundle)}</script>
 </body>

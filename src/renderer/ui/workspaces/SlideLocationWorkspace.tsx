@@ -71,6 +71,7 @@ import {
   STAGE_VIEWPORT_WIDTH,
   type StageRect,
   type StageSelectionOverlayGeometry,
+  stageViewportPanRange,
 } from '../../authoring/stageViewportTransform'
 import { DEFAULT_SLIDE_CANVAS, type SlideCanvasSize } from '../../../shared/slideCanvas'
 
@@ -832,6 +833,7 @@ export function SlideLocationWorkspace({
       zoom: view.zoom,
       pan: { x: view.x, y: view.y },
       stage: slideCanvas,
+      fit: 'page' as const,
     }
   }, [slideCanvas, view.x, view.y, view.zoom])
 
@@ -854,6 +856,7 @@ export function SlideLocationWorkspace({
     zoom: view.zoom,
     pan: { x: view.x, y: view.y },
     stage: slideCanvas,
+    fit: 'page',
   }), [slideCanvas, stageViewportSize.height, stageViewportSize.width, view.x, view.y, view.zoom])
   const previewRebuildKey = snapshot.previewRebuildKey
   const previewGeneration = useMemo<object>(() => ({}), [
@@ -2022,6 +2025,7 @@ export function SlideLocationWorkspace({
       zoom: view.zoom,
       pan: { x: view.x, y: view.y },
       stage: slideCanvas,
+      fit: 'page',
     })
     const point = clientToWorld(transform, { x: clientX, y: clientY })
     const ordered = [...visibleRuntimeTargets].sort((left, right) => (
@@ -2441,6 +2445,8 @@ export function SlideLocationWorkspace({
       },
       zoom: view.zoom,
       pan: { x: view.x, y: view.y },
+      stage: slideCanvas,
+      fit: 'page',
     })
     const rect = transform.stageRect
     if (
@@ -2513,18 +2519,30 @@ export function SlideLocationWorkspace({
     }
   }
 
-  const wheelZoom = useRef({ canvasMode, zoom: view.zoom })
-  wheelZoom.current = { canvasMode, zoom: view.zoom }
+  const wheelZoom = useRef({ canvasMode, view, stageTransform })
+  wheelZoom.current = { canvasMode, view, stageTransform }
   const hasStage = Boolean(snapshot.projectId && slideEditorView)
   useEffect(() => {
     // React attaches wheel listeners as passive; Ctrl+wheel zoom must keep the window itself from zooming.
     const element = workspaceRef.current
     if (!element) return
     const zoomByWheel = (event: WheelEvent) => {
-      const { canvasMode, zoom } = wheelZoom.current
-      if (canvasMode !== 'edit' || (!event.ctrlKey && !event.metaKey)) return
+      const { canvasMode, view, stageTransform } = wheelZoom.current
+      if (canvasMode !== 'edit') return
+      if (event.ctrlKey || event.metaKey) {
+        event.preventDefault()
+        setZoom(view.zoom + (event.deltaY < 0 ? 0.1 : -0.1))
+        return
+      }
+      // A page taller (or, zoomed, wider) than the canvas scrolls with the wheel, as in playback.
+      const range = stageViewportPanRange(stageTransform)
+      const sideways = event.shiftKey && !event.deltaX
+      const dx = sideways ? event.deltaY : event.deltaX, dy = sideways ? 0 : event.deltaY
+      const x = range.x && dx ? Math.max(range.x.min, Math.min(range.x.max, view.x - dx)) : view.x
+      const y = range.y && dy ? Math.max(range.y.min, Math.min(range.y.max, view.y - dy)) : view.y
+      if (x === view.x && y === view.y) return
       event.preventDefault()
-      setZoom(zoom + (event.deltaY < 0 ? 0.1 : -0.1))
+      setView(current => ({ ...current, x, y }))
     }
     element.addEventListener('wheel', zoomByWheel, { passive: false })
     return () => element.removeEventListener('wheel', zoomByWheel)
@@ -3146,6 +3164,7 @@ export function SlideLocationWorkspace({
           ref={courseTryRunRef}
           className="course-try-run-host"
           data-testid="course-try-run-host"
+          data-page-backdrop="transparent"
           hidden={!useCoursePlayerTryRun}
         />
         {tryRunFeedback && useCoursePlayerTryRun ? (

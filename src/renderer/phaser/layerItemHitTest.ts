@@ -74,8 +74,8 @@ function lineStrokeOf(item: LayerItem): LayerItemLineStroke | undefined {
   }
 }
 
-export function layerItemBounds(item: LayerItem): LayerItemHitBounds {
-  return { ...controllerDisplayFrame(item), rotation: item.rotation }
+export function layerItemBounds(item: LayerItem, page?: { width: number; height: number }): LayerItemHitBounds {
+  return { ...controllerDisplayFrame(item, item.frame, page), rotation: item.rotation }
 }
 
 export function layerItemIsHittable(
@@ -100,8 +100,10 @@ export function adaptLayerItemHit(
   item: LayerItem,
   effectiveVisible = item.visible,
   scope: 'scene' | 'surface' | 'global' = 'scene',
+  /** The Slide page, which keeps a teacher controller's hit area where it is shown. */
+  page?: { width: number; height: number },
 ): LayerItemHitTarget {
-  const bounds = layerItemBounds(item)
+  const bounds = layerItemBounds(item, page)
   const hittable = layerItemIsHittable(item, effectiveVisible, scope)
   return {
     layerItemId: item.layerItemId,

@@ -1157,6 +1157,7 @@ export function SpatialLocationWorkspace({
           ref={tryRunRef}
           className="spatial-try-run-host"
           data-testid="spatial-try-run-host"
+          data-page-backdrop="transparent"
           hidden={canvasMode !== 'run'}
         />
       </div>

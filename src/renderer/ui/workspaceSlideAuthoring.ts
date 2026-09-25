@@ -172,6 +172,7 @@ function layerTargets(backend: SlideAuthoringBackend): V9SlideHitTarget[] {
       layer.item as LayerItem,
       layer.effectiveVisible,
       session.scope,
+      courseSlideCanvas(session.history.present),
     )]
   })
 }
@@ -238,7 +239,7 @@ function overlayForSelection(
     const previewNode = previewById.get(id)
     if (previewNode) {
       const item = session.history.present.globalLayerItems.find(entry => entry.item.layerItemId === id)?.item
-      return [{ ...(item ? controllerDisplayFrame(item, previewNode) : previewNode), rotation: previewNode.rotation }]
+      return [{ ...(item ? controllerDisplayFrame(item, previewNode, courseSlideCanvas(session.history.present)) : previewNode), rotation: previewNode.rotation }]
     }
     const hit = hits.get(id)
     if (!hit) return []

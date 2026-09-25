@@ -855,6 +855,7 @@ export default function App() {
                 ref={courseDelivery.bindPreviewHost}
                 className="course-preview-host"
                 data-testid="course-preview-host"
+                data-page-insets="16"
               />
               {courseDelivery.previewFeedback ? (
                 <div

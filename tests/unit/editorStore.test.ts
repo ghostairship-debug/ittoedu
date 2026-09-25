@@ -1888,7 +1888,7 @@ describe('scene presentation states', () => {
       : null).toBe('输入法草稿')
   })
 
-  it('normalizes legacy scenes and enters the authored initial state when run mode starts', async () => {
+  it('normalizes legacy scenes, enters the authored initial state when run mode starts and returns to the master after it', async () => {
     const presentation = activeScene().presentation
     expect(presentation).toBeDefined()
     const initialId = presentation!.initialStateId
@@ -1898,8 +1898,10 @@ describe('scene presentation states', () => {
     useEditorStore.getState().setCanvasMode('run')
     expect(useEditorStore.getState().canvasMode).toBe('run')
     expect(selectActivePresentationStateId(useEditorStore.getState())).toBe(initialId)
+    // Leaving the try-run returns to the state edited before it (M19).
     useEditorStore.getState().setCanvasMode('edit')
-    expect(selectActivePresentationStateId(useEditorStore.getState())).toBe(initialId)
+    expect(selectActivePresentationStateId(useEditorStore.getState())).toBeNull()
+    useEditorStore.getState().setActivePresentationState(initialId)
     useEditorStore.getState().setActivePresentationState(null)
     expect(useEditorStore.getState().canvasMode).toBe('edit')
     expect(selectActivePresentationStateId(useEditorStore.getState())).toBeNull()

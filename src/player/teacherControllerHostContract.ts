@@ -42,6 +42,10 @@ export interface TeacherControllerHostOptions {
   /** Flow projects automatic clamping without persisting it as a teacher drag. */
   onPositionChange?(node: TeacherControllerRuntimeNode, offset: TeacherControllerSessionOffset): void
   getConstraintCanvas?(): { width: number; height: number }
+  /** Playback: the part of the page the controller must stay in, in canvas units (the visible part of a scrolled page). */
+  getConstraintRect?(): { x: number; y: number; width: number; height: number }
+  /** Authoring: an off-page controller is shown at the page edge, as playback shows it (M19). */
+  authoringPage?: { width: number; height: number }
   onAction(action: TeacherControllerAction): void | boolean | Promise<void | boolean>
   onActionError?(action: TeacherControllerAction, error: Error): void
   /** Playback-only gate: false in inspect frames or when controls are none. */
@@ -61,6 +65,32 @@ export function stageBoundsFromElement(
     width: sized ? bounds.width : fallback.width,
     height: sized ? bounds.height : fallback.height,
   }
+}
+/** The part of a page on screen, in its canvas units: the window and every clipping ancestor cut it. */
+export function visiblePageRect(
+  page: HTMLElement,
+  canvas: { width: number; height: number },
+  /** Chrome over the right and bottom edges, such as playback scroll bars, in CSS pixels. */
+  chrome: { right: number; bottom: number } = { right: 0, bottom: 0 },
+): { x: number; y: number; width: number; height: number } {
+  const whole = { x: 0, y: 0, width: canvas.width, height: canvas.height }
+  const view = page.ownerDocument.defaultView
+  const box = page.getBoundingClientRect()
+  if (!view || !(box.width > 1) || !(box.height > 1)) return whole
+  const document = page.ownerDocument.documentElement
+  let left = Math.max(box.left, 0), top = Math.max(box.top, 0)
+  let right = Math.min(box.right, document.clientWidth || box.right), bottom = Math.min(box.bottom, document.clientHeight || box.bottom)
+  for (let element = page.parentElement; element; element = element.parentElement) {
+    const style = view.getComputedStyle(element)
+    if (style.overflowX === 'visible' && style.overflowY === 'visible') continue
+    const clip = element.getBoundingClientRect()
+    left = Math.max(left, clip.left); top = Math.max(top, clip.top)
+    right = Math.min(right, clip.right); bottom = Math.min(bottom, clip.bottom)
+  }
+  right -= chrome.right; bottom -= chrome.bottom
+  if (right <= left || bottom <= top) return whole
+  const sx = box.width / canvas.width, sy = box.height / canvas.height
+  return { x: (left - box.left) / sx, y: (top - box.top) / sy, width: (right - left) / sx, height: (bottom - top) / sy }
 }
 export function teacherControllerHostNode(frame: { x: number; y: number; width: number; height: number }, rotation: number): TeacherControllerRuntimeNode {
   return { ...frame, rotation }

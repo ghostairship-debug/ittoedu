@@ -1,5 +1,6 @@
 import { STAGE_VIEWPORT_WIDTH, STAGE_VIEWPORT_HEIGHT } from '../../shared/stageViewport'
 import { DEFAULT_SLIDE_CANVAS, type SlideCanvasSize } from '../../shared/slideCanvas'
+import { fitPage, NO_PAGE_INSETS, pageFillsWidth } from '../../shared/pageFrame'
 export { STAGE_VIEWPORT_WIDTH, STAGE_VIEWPORT_HEIGHT } from '../../shared/stageViewport'
 export const STAGE_VIEWPORT_MIN_ZOOM = 0.5
 export const STAGE_VIEWPORT_MAX_ZOOM = 2
@@ -35,6 +36,11 @@ export interface StageViewportTransformOptions {
   zoom?: number
   /** User pan relative to the fitted center, expressed in CSS pixels. */
   pan?: StagePoint
+  /**
+   * `page` follows the page rule shared with playback: portrait pages fill the width, top first, and scroll
+   * (M19). The default `contain` always shows the whole stage, as a Spatial camera frame is shown.
+   */
+  fit?: 'page' | 'contain'
 }
 
 export interface StageViewportTransform {
@@ -99,16 +105,17 @@ export function createStageViewportTransform(
   const zoom = clampStageViewportZoom(options.zoom ?? 1)
   const stage = { width: options.stage?.width ?? STAGE_VIEWPORT_WIDTH, height: options.stage?.height ?? STAGE_VIEWPORT_HEIGHT }
   if (!(stage.width > 0 && stage.height > 0)) throw new RangeError('stage dimensions must be greater than zero')
-  const fitScale = Math.min(
-    viewport.width / stage.width,
-    viewport.height / stage.height,
-  )
+  const mode = options.fit ?? 'contain'
+  const fit = fitPage(viewport, stage, NO_PAGE_INSETS, mode)
+  const fitScale = fit.scale
   const scale = fitScale * zoom
   const width = stage.width * scale
   const height = stage.height * scale
+  // Zoom keeps the fitted centre; a page filling the width keeps its top instead.
+  const topAnchored = mode === 'page' && pageFillsWidth(stage)
   const stageRect = {
-    x: viewport.x + (viewport.width - width) / 2 + pan.x,
-    y: viewport.y + (viewport.height - height) / 2 + pan.y,
+    x: viewport.x + fit.left + (stage.width * fitScale - width) / 2 + pan.x,
+    y: viewport.y + fit.top + (topAnchored ? 0 : (stage.height * fitScale - height) / 2) + pan.y,
     width,
     height,
   }
@@ -121,6 +128,22 @@ export function createStageViewportTransform(
     fitScale,
     scale,
     stageRect,
+  }
+}
+
+export interface StagePanRange { readonly min: number; readonly max: number }
+
+/** Pan that scrolls a stage larger than its viewport from edge to edge; null on an axis that fits. */
+export function stageViewportPanRange(transform: StageViewportTransform): { x: StagePanRange | null; y: StagePanRange | null } {
+  const axis = (start: number, size: number, rectStart: number, rectSize: number, pan: number): StagePanRange | null => {
+    if (rectSize <= size + 0.5) return null
+    const base = rectStart - pan
+    return { min: start + size - rectSize - base, max: start - base }
+  }
+  const { viewport, stageRect, pan } = transform
+  return {
+    x: axis(viewport.x, viewport.width, stageRect.x, stageRect.width, pan.x),
+    y: axis(viewport.y, viewport.height, stageRect.y, stageRect.height, pan.y),
   }
 }
 

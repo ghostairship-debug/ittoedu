@@ -1,5 +1,6 @@
 import { PLAYBACK_VIEW_CHROME_GUTTER, PLAYBACK_VIEW_OVERFLOW_EPSILON, PLAYBACK_VIEW_MAX_ZOOM, playbackControllerInsets, type PlaybackChromeGeometry } from '../shared/playbackViewGeometry'
 import { DEFAULT_SLIDE_CANVAS, SLIDE_CANVAS_MAX, SLIDE_CANVAS_MIN, type SlideCanvasSize } from '../shared/slideCanvas'
+import { fitPage, NO_PAGE_INSETS, PAGE_FRAME_BACKDROP, PAGE_FRAME_FULLSCREEN_BACKDROP, pageFrameStyle, parsePageInsets, type PageFrameInsets } from '../shared/pageFrame'
 
 /** Session-only observation of already laid out content. No navigation or document writes. */
 export interface ViewPoint { x: number; y: number }
@@ -25,6 +26,8 @@ export interface PlaybackViewPort {
   subscribe(listener: () => void): () => void
   zoomTo(zoom: number, anchor?: ViewPoint): void
   panTo(pan: ViewPoint): void
+  /** Plain-wheel scrolling of a page larger than the view; false when there is nothing to scroll. */
+  scrollBy?(delta: ViewPoint): boolean
   reset(): void
   openZoomPanel(button: HTMLButtonElement): void
   closeZoomPanel(button: HTMLButtonElement): void
@@ -74,8 +77,9 @@ export function createPlaybackContent(root: HTMLElement): HTMLElement {
 }
 
 function hostStage(host: PlaybackViewHost): SlideCanvasSize {
-  const width = Number(host.root.dataset.canvasWidth)
-  const height = Number(host.root.dataset.canvasHeight)
+  // Slide pages declare their canvas; Spatial declares its camera frame.
+  const width = Number(host.root.dataset.canvasWidth ?? host.root.dataset.spatialViewportWidth)
+  const height = Number(host.root.dataset.canvasHeight ?? host.root.dataset.spatialViewportHeight)
   if (
     Number.isInteger(width) && Number.isInteger(height)
     && width >= SLIDE_CANVAS_MIN && width <= SLIDE_CANVAS_MAX
@@ -97,9 +101,13 @@ export class PlaybackViewSession implements PlaybackViewPort {
   #panel: HTMLElement | null = null
   #panelButton: HTMLButtonElement | null = null
   #anchor: ViewPoint | undefined
+  #insets: PageFrameInsets = NO_PAGE_INSETS
+  #backdrop = PAGE_FRAME_BACKDROP
   #chrome: PlaybackChromeGeometry = { x: false, y: false, native: { right: 0, bottom: 0 }, insets: { right: 0, bottom: 0 }, controllerInsets: playbackControllerInsets({ right: 0, bottom: 0 }) }
   get state(): PlaybackViewState { return structuredClone(this.#state) }
   get chrome(): PlaybackChromeGeometry { return structuredClone(this.#chrome) }
+  /** The element the page is seen through; the teacher controller stays inside its visible part. */
+  get viewportElement(): HTMLElement | null { return this.#viewport }
   subscribe(listener: () => void): () => void { this.#listeners.add(listener); return () => this.#listeners.delete(listener) }
   register(host: PlaybackViewHost): void {
     const previous = this.#hosts.get(host.id)
@@ -120,7 +128,10 @@ export class PlaybackViewSession implements PlaybackViewPort {
     const dom = container.ownerDocument
     const frame = dom.createElement('div')
     frame.dataset.playbackView = 'true'
-    Object.assign(frame.style, { position: 'absolute', inset: '0', overflow: 'clip', isolation: 'isolate' })
+    // The container sets the margins around the page and, inside the editor, lets its workspace show (M19).
+    this.#insets = parsePageInsets(container.dataset.pageInsets)
+    this.#backdrop = container.dataset.pageBackdrop || PAGE_FRAME_BACKDROP
+    Object.assign(frame.style, { position: 'absolute', inset: '0', overflow: 'clip', isolation: 'isolate', background: this.#backdrop })
     const viewport = dom.createElement('div')
     viewport.dataset.playbackViewport = 'true'
     viewport.tabIndex = 0
@@ -132,6 +143,10 @@ export class PlaybackViewSession implements PlaybackViewPort {
     this.#viewport = viewport
     this.#cleanup.push(attachPlaybackGestures(viewport, this))
     this.#cleanup.push(this.#mountBar('x'), this.#mountBar('y'))
+    // Fullscreen shows the page on black without the window margins.
+    const fullscreen = () => { frame.style.background = this.#fullscreen() ? PAGE_FRAME_FULLSCREEN_BACKDROP : this.#backdrop; this.resize() }
+    dom.addEventListener('fullscreenchange', fullscreen)
+    this.#cleanup.push(() => dom.removeEventListener('fullscreenchange', fullscreen))
     if (typeof ResizeObserver === 'function') {
       this.#observer = new ResizeObserver(() => this.resize())
       this.#observer.observe(viewport)
@@ -157,15 +172,27 @@ export class PlaybackViewSession implements PlaybackViewPort {
     for (const host of this.#hosts.values()) this.#fit(host)
     this.refreshBounds()
   }
+  #fullscreen(): boolean {
+    const frame = this.#frame
+    return Boolean(frame && frame.ownerDocument.fullscreenElement === frame)
+  }
+  #pageInsets(): PageFrameInsets { return this.#fullscreen() ? NO_PAGE_INSETS : this.#insets }
   #fit(host: PlaybackViewHost): void {
-    const { width, height } = this.#state.viewport
+    if (host.kind === 'flow') {
+      Object.assign(host.root.style, { position: 'absolute', transformOrigin: '0 0', transform: 'scale(1)', width: '100%', height: '100%',
+        minWidth: '0', minHeight: '0', left: '0px', top: '0px', overflow: 'visible' })
+      host.root.dataset.stageFitScale = '1'
+      return
+    }
     const canvas = hostStage(host)
-    const scale = host.kind === 'flow' ? 1 : Math.min(width / canvas.width, height / canvas.height)
-    Object.assign(host.root.style, { position: 'absolute', transformOrigin: '0 0', transform: `scale(${scale})`,
-      width: host.kind === 'flow' ? '100%' : `${canvas.width}px`, height: host.kind === 'flow' ? '100%' : `${canvas.height}px`, minWidth: '0', minHeight: '0',
-      left: `${host.kind === 'flow' ? 0 : (width - canvas.width * scale) / 2}px`,
-      top: `${host.kind === 'flow' ? 0 : (height - canvas.height * scale) / 2}px`, overflow: 'visible' })
-    host.root.dataset.stageFitScale = String(scale)
+    // A Slide page follows the page rule; a Spatial camera frame is always shown whole.
+    const fit = fitPage(this.#state.viewport, canvas, this.#pageInsets(), host.kind === 'slide' ? 'page' : 'contain')
+    Object.assign(host.root.style, { position: 'absolute', transformOrigin: '0 0', transform: `scale(${fit.scale})`,
+      width: `${canvas.width}px`, height: `${canvas.height}px`, minWidth: '0', minHeight: '0',
+      left: `${fit.left}px`, top: `${fit.top}px`, overflow: 'visible' })
+    host.root.dataset.stageFitScale = String(fit.scale)
+    // The page clips what lies outside it and zooms with the content; the controller beside it is not clipped.
+    Object.assign(host.content.style, { overflow: 'clip', ...pageFrameStyle(fit.scale, !this.#fullscreen()) })
   }
   refreshBounds(): void {
     // Layout/host changes update the DOM matrix before inversely measuring its bounds.
@@ -174,6 +201,14 @@ export class PlaybackViewSession implements PlaybackViewPort {
     // These bars describe the current baseline viewport, never Flow document length or infinite world extent.
     let left = 0, top = 0, right = width, bottom = height
     const host = this.#active ? this.#hosts.get(this.#active) : undefined
+    if (host && host.kind !== 'flow') {
+      // The whole page with its margins can be scrolled into view: a portrait page is taller than the window.
+      const insets = this.#pageInsets(), canvas = hostStage(host), scale = Number(host.root.dataset.stageFitScale) || 1
+      const x = (parseFloat(host.root.style.left) || 0) - insets.left, y = (parseFloat(host.root.style.top) || 0) - insets.top
+      left = Math.min(left, x); top = Math.min(top, y)
+      right = Math.max(right, x + insets.left + canvas.width * scale + insets.right)
+      bottom = Math.max(bottom, y + insets.top + canvas.height * scale + insets.bottom)
+    }
     if (host && this.#viewport) {
       const viewport = this.#viewport.getBoundingClientRect()
       for (const item of host.content.querySelectorAll<HTMLElement>('[data-playback-bounds]')) {
@@ -200,6 +235,16 @@ export class PlaybackViewSession implements PlaybackViewPort {
     const range = playbackPanRange(this.#state)
     this.#state = { ...this.#state, pan: { x: clamp(pan.x, range.x.min, range.x.max), y: clamp(pan.y, range.y.min, range.y.max) } }
     this.#paint()
+  }
+  scrollBy(delta: ViewPoint): boolean {
+    const host = this.#active ? this.#hosts.get(this.#active) : undefined
+    // Flow scrolls its own paper.
+    if (!host || host.kind === 'flow') return false
+    const range = playbackPanRange(this.#state), before = this.#state.pan
+    const next = { x: range.x.max > range.x.min ? before.x - delta.x : before.x, y: range.y.max > range.y.min ? before.y - delta.y : before.y }
+    if (next.x === before.x && next.y === before.y) return false
+    this.panTo(next)
+    return this.#state.pan.x !== before.x || this.#state.pan.y !== before.y
   }
   reset(): void {
     this.#state = { ...this.#state, zoom: 1, pan: { x: 0, y: 0 }, generation: this.#state.generation + 1 }
@@ -378,6 +423,23 @@ export class PlaybackViewSession implements PlaybackViewPort {
   }
 }
 
+/** A scrollable element under the pointer that can still move in the wheel's direction keeps the wheel. */
+function scrollsItself(target: EventTarget | null, root: HTMLElement, deltaX: number, deltaY: number): boolean {
+  const view = root.ownerDocument.defaultView
+  const ElementClass = view?.Element
+  if (!view || !ElementClass || !(target instanceof ElementClass)) return false
+  for (let element: Element | null = target; element && element !== root; element = element.parentElement) {
+    if (!(element instanceof view.HTMLElement)) continue
+    const style = view.getComputedStyle(element)
+    const canY = /(auto|scroll)/.test(style.overflowY) && element.scrollHeight > element.clientHeight
+      && (deltaY < 0 ? element.scrollTop > 0 : deltaY > 0 && element.scrollTop + element.clientHeight < element.scrollHeight)
+    const canX = /(auto|scroll)/.test(style.overflowX) && element.scrollWidth > element.clientWidth
+      && (deltaX < 0 ? element.scrollLeft > 0 : deltaX > 0 && element.scrollLeft + element.clientWidth < element.scrollWidth)
+    if (canY || canX) return true
+  }
+  return false
+}
+
 /** Start-area ownership stays fixed. Dynamic carriers never need to forward events. */
 export function attachPlaybackGestures(root: HTMLElement, view: PlaybackViewPort): () => void {
   const dom = root.ownerDocument
@@ -387,7 +449,16 @@ export function attachPlaybackGestures(root: HTMLElement, view: PlaybackViewPort
   let touch: { distance: number; center: ViewPoint; zoom: number; pan: ViewPoint; generation: number } | null = null
   let lastTouch = -Infinity
   const wheel = (event: WheelEvent) => {
-    if (!event.ctrlKey || playbackGestureOccupied(event.target, root) || touch || Date.now() - lastTouch < 100) return
+    if (!event.ctrlKey) {
+      if (touch || scrollsItself(event.target, root, event.deltaX, event.deltaY)) return
+      const unit = event.deltaMode === 1 ? 40 : event.deltaMode === 2 ? root.clientHeight : 1
+      const sideways = event.shiftKey && !event.deltaX
+      if (view.scrollBy?.({ x: (sideways ? event.deltaY : event.deltaX) * unit, y: sideways ? 0 : event.deltaY * unit })) {
+        event.preventDefault(); event.stopPropagation()
+      }
+      return
+    }
+    if (playbackGestureOccupied(event.target, root) || touch || Date.now() - lastTouch < 100) return
     if (event.deltaY === 0) return
     event.preventDefault(); event.stopPropagation()
     view.zoomTo(view.state.zoom * Math.exp(-event.deltaY * .002), point(event.clientX, event.clientY))
