@@ -9,6 +9,7 @@ import { DocumentHostService } from '../../src/main/workbench/DocumentHostServic
 import { ExecutionDesktopService } from '../../src/main/workbench/execution/ExecutionDesktopService'
 import { ExecutionSettingsStore } from '../../src/main/workbench/providers/ExecutionSettingsStore'
 import { DesktopOperationError, normalizeDesktopError } from '../../src/main/errors'
+import { UserFacingError } from '../../src/shared/errors'
 import { diagnosticLog } from '../../src/main/diagnosticLog'
 import type { ConversationRecord } from '../../src/shared/workbench/conversations'
 
@@ -77,6 +78,9 @@ it('keeps the IPC error envelope when diagnostics fail and stderr is unavailable
   vi.spyOn(diagnosticLog, 'append').mockRejectedValue(new Error('diagnostic disk unavailable'))
   expect(normalizeDesktopError(new DesktopOperationError('fixture', '操作失败', '请重试', '检查设置'), fallback)).toMatchObject({ code: 'fixture' })
   expect(normalizeDesktopError(new Error('unexpected'), fallback)).toEqual(fallback)
+  // A damaged course file says so instead of the operation's generic message.
+  expect(normalizeDesktopError(new UserFacingError('课程工程文件损坏', 'project.json 校验失败。', '请重新选择有效的课程工程。'), fallback))
+    .toEqual({ code: fallback.code, title: '课程工程文件损坏', message: 'project.json 校验失败。', suggestion: '请重新选择有效的课程工程。' })
   vi.spyOn(diagnosticLog, 'append').mockImplementation(() => { throw new Error('diagnostic initialization unavailable') })
   expect(normalizeDesktopError(new Error('unexpected'), fallback)).toEqual(fallback)
 })

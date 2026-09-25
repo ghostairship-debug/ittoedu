@@ -1,4 +1,5 @@
 import { ZodError } from 'zod'
+import { UserFacingError } from '../shared/errors'
 import { diagnosticLog } from './diagnosticLog'
 
 export interface DesktopErrorPayload {
@@ -47,7 +48,9 @@ export function normalizeDesktopError(
   error: unknown,
   fallback: DesktopErrorPayload,
 ): DesktopErrorPayload {
-  if (error instanceof DesktopOperationError) {
+  // Errors written for the teacher (a damaged course file, a missing asset) keep their own words; only unexpected
+  // exceptions fall back to the operation's generic message.
+  if (error instanceof DesktopOperationError || error instanceof UserFacingError) {
     recordDesktopError(error)
     const causeCode = systemErrorCode(error.cause)
     if (causeCode === 'ENOSPC') {
@@ -71,7 +74,7 @@ export function normalizeDesktopError(
       }
     }
     return {
-      code: error.code,
+      code: error instanceof DesktopOperationError ? error.code : fallback.code,
       title: error.title,
       message: error.message,
       suggestion: error.suggestion,
