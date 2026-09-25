@@ -33,14 +33,37 @@ import type { CourseProjectDocument } from '@/shared/courseProjectTypes'
 import { createChartTextDraft } from '@/renderer/authoring/chartTextDraft'
 import { beginSpatialWorldChartTextEdit, updateSpatialWorldChartTextDraft } from '@/renderer/authoring/spatialWorldAuthoring'
 import { makeSlideAuthoringTarget } from '@/renderer/course/slideAuthoringBackend'
+import {
+  bootCourseStore,
+  courseStoreHost,
+  formalHistory,
+  formalSnapshot,
+  redoCourse,
+  settleCourse,
+  undoCourse,
+} from '../helpers/triage-t1-editorDocument'
 
+/**
+ * 2.0 的正式 History 属于主进程 DocumentSession；renderer 只保留当前投影。
+ * 迁移自原 `activeHistory()`，保持“历史深度”断言语义不变。
+ */
 function activeHistory() {
-  const state = useEditorStore.getState()
-  if (state.spatialSession) return state.spatialSession.history
-  if (state.flowSession) return state.flowSession.history
-  const backend = state.slideBackend
-  if (!backend) throw new Error('expected active Surface session')
-  return backend.getSession().history
+  return formalHistory()
+}
+
+/** 真正把当前活动文档写盘，2.0 的保存回执由主进程绑定与 dirty 决定。 */
+async function saveActiveDocument(path: string): Promise<void> {
+  const documentId = useEditorStore.getState().courseDocument.documentId
+  if (!documentId) throw new Error('expected active Surface session')
+  await courseStoreHost().api.save(documentId, path)
+  await settleCourse()
+}
+
+/** “正式文档没有被写入”的等价比较：revision 加文档内容。 */
+function courseSnapshot(): { revision: number; project: CourseProjectDocument } {
+  const snapshot = formalSnapshot()
+  if (snapshot.model.kind !== 'course-v9') throw new Error('expected Course Project V9')
+  return { revision: snapshot.revision, project: snapshot.model.project }
 }
 
 type SurfaceKind = 'slide' | 'spatial' | 'flow'
@@ -70,22 +93,24 @@ function nativeText(document: CourseProjectDocument, layerItemId: string): strin
   return item.content.data.text
 }
 
-function acknowledgeBaseline(path: string): void {
+async function acknowledgeBaseline(path: string): Promise<void> {
   const store = useEditorStore.getState()
   const preparation = store.prepareCourseProjectPersistence()
   if (!preparation.ok) throw new Error(preparation.reason)
-  expect(store.acknowledgeCourseProjectSaved(path, preparation.token)).toBe(true)
+  await saveActiveDocument(path)
+  expect(useEditorStore.getState().acknowledgeCourseProjectSaved(path, preparation.token)).toBe(true)
   expect(useEditorStore.getState().dirty).toBe(false)
 }
 
-function createSlideFixture(): DraftFixture {
-  const store = useEditorStore.getState()
-  store.createNewProject()
-  store.addTextNode()
+async function createSlideFixture(): Promise<DraftFixture> {
+  await useEditorStore.getState().createCourseDocument('slide')
+  await settleCourse()
+  useEditorStore.getState().addTextNode()
+  await settleCourse()
   const targetId = selectSelectedNodeId(useEditorStore.getState())
   if (!targetId) throw new Error('expected selected Slide text')
   const originalText = nativeText(activeDocument(), targetId)
-  acknowledgeBaseline('slide-baseline.h5lesson')
+  await acknowledgeBaseline('slide-baseline.h5lesson')
   const historyBeforeDraft = activeHistory().past.length
   const begin = () => {
     useEditorStore.getState().beginTextEdit(targetId, 'properties')
@@ -116,14 +141,15 @@ function createSlideFixture(): DraftFixture {
   }
 }
 
-function createSpatialFixture(): DraftFixture {
-  const store = useEditorStore.getState()
-  store.createNewSpatialProject()
-  store.addTextNode()
+async function createSpatialFixture(): Promise<DraftFixture> {
+  await useEditorStore.getState().createCourseDocument('spatial')
+  await settleCourse()
+  useEditorStore.getState().addTextNode()
+  await settleCourse()
   const targetId = selectSelectedNodeId(useEditorStore.getState())
   if (!targetId) throw new Error('expected selected Spatial text')
   const originalText = nativeText(activeDocument(), targetId)
-  acknowledgeBaseline('spatial-baseline.h5lesson')
+  await acknowledgeBaseline('spatial-baseline.h5lesson')
   const historyBeforeDraft = activeHistory().past.length
   const begin = () => {
     useEditorStore.getState().beginTextEdit(targetId, 'properties')
@@ -168,17 +194,19 @@ function archiveAndReopen(snapshot: CourseProjectPersistenceSnapshot): CoursePro
   return openDefaultCourseProject(bytes).project
 }
 
-const fixtures: Array<[SurfaceKind, () => DraftFixture]> = [
+const fixtures: Array<[SurfaceKind, () => Promise<DraftFixture>]> = [
   ['slide', createSlideFixture],
   ['spatial', createSpatialFixture],
 ]
 
-beforeEach(() => {
-  useEditorStore.getState().createNewProject()
+beforeEach(async () => {
+  await bootCourseStore()
+  await useEditorStore.getState().createCourseDocument('slide')
+  await settleCourse()
 })
 
 describe('active Course Project text draft persistence', () => {
-  it.each(['table', 'component'] as const)('recovers focused Slide %s text and preserves it in save/reopen and Undo/Redo', kind => {
+  it.each(['table', 'component'] as const)('recovers focused Slide %s text and preserves it in save/reopen and Undo/Redo', async kind => {
     let field: LayerTextField
     if (kind === 'table') useEditorStore.getState().addTableNode()
     else {
@@ -191,6 +219,7 @@ describe('active Course Project text draft persistence', () => {
       if (!insertedId) throw new Error('expected inserted component')
       useEditorStore.getState().selectNode(insertedId)
     }
+    await settleCourse()
     const state = useEditorStore.getState()
     const id = selectSelectedNodeId(state)!
     const item = locateCourseLayer(activeDocument(), id)!.item
@@ -200,9 +229,9 @@ describe('active Course Project text draft persistence', () => {
     const packages = state.componentPackages
     const read = (document: CourseProjectDocument) => readLayerTextField(locateCourseLayer(document, id)!.item, field, packages)
     const original = read(activeDocument())
-    acknowledgeBaseline(`${kind}-text.h5lesson`)
+    await acknowledgeBaseline(`${kind}-text.h5lesson`)
     const before = activeHistory().past.length
-    const target = makeSlideAuthoringTarget(state.slideBackend!.getSession(), id, 'item')
+    const target = makeSlideAuthoringTarget(useEditorStore.getState().slideBackend!.getSession(), id, 'item')
     const begun = state.runSlideFieldTextIntent({ kind: 'begin-field', target, field })
     if (!begun.ok || !begun.edit) throw new Error('expected field edit')
     const updated = state.runSlideFieldTextIntent({ kind: 'update-field', expectedEdit: begun.edit, text: '聚焦时的新内容', composing: false })
@@ -216,22 +245,24 @@ describe('active Course Project text draft persistence', () => {
     const saved = state.prepareCourseProjectPersistence()
     if (!saved.ok) throw new Error(saved.reason)
     expect(read(archiveAndReopen(saved.snapshot))).toBe('聚焦时的新内容')
+    await settleCourse()
     expect(activeHistory().past).toHaveLength(before + 1)
     expect(useEditorStore.getState().v9ContentEdit).toBeNull()
-    useEditorStore.getState().undo()
+    await undoCourse()
     expect(read(activeDocument())).toBe(original)
-    useEditorStore.getState().redo()
+    await redoCourse()
     expect(read(activeDocument())).toBe('聚焦时的新内容')
   })
 
-  it('stores Slide chart drafts through the product action and recovers without live history writes', () => {
+  it('stores Slide chart drafts through the product action and recovers without live history writes', async () => {
     useEditorStore.getState().addChartNode('bar')
+    await settleCourse()
     const state = useEditorStore.getState()
     const session = state.slideBackend!.getSession()
     const id = selectSelectedNodeId(state)!
     const item = locateCourseLayer(activeDocument(), id)!.item
     if (item.kind !== 'native' || item.content.nativeType !== 'chart') throw new Error('expected chart')
-    acknowledgeBaseline('slide-chart.h5lesson')
+    await acknowledgeBaseline('slide-chart.h5lesson')
     const before = activeHistory().past.length
     const field = { kind: 'title' as const }
     const begun = state.runSlideFieldTextIntent({ kind: 'begin-chart', target: makeSlideAuthoringTarget(session, id, 'item'), field })
@@ -250,18 +281,21 @@ describe('active Course Project text draft persistence', () => {
     const saved = state.prepareCourseProjectPersistence()
     if (!saved.ok) throw new Error(saved.reason)
     expect(read(archiveAndReopen(saved.snapshot))).toBe('保存中的标题')
+    await settleCourse()
     expect(activeHistory().past).toHaveLength(before + 1)
     expect(useEditorStore.getState().v9ContentEdit).toBeNull()
   })
 
-  it('recovers Spatial chart text during composition, refuses premature save, and saves once after composition', () => {
-    useEditorStore.getState().createNewSpatialProject()
+  it('recovers Spatial chart text during composition, refuses premature save, and saves once after composition', async () => {
+    await useEditorStore.getState().createCourseDocument('spatial')
+    await settleCourse()
     useEditorStore.getState().addChartNode('bar')
+    await settleCourse()
     const session = useEditorStore.getState().spatialSession!
     const id = selectSelectedNodeId(useEditorStore.getState())!
     const item = locateCourseLayer(activeDocument(), id)!.item
     if (item.kind !== 'native' || item.content.nativeType !== 'chart') throw new Error('expected chart')
-    acknowledgeBaseline('spatial-chart.h5lesson')
+    await acknowledgeBaseline('spatial-chart.h5lesson')
     const before = activeHistory().past.length
     const field = { kind: 'series' as const, id: item.content.data.series[0]!.id }
     const begun = beginSpatialWorldChartTextEdit({ session, layerItemId: id, field })
@@ -285,20 +319,23 @@ describe('active Course Project text draft persistence', () => {
     const saved = useEditorStore.getState().prepareCourseProjectPersistence()
     if (!saved.ok) throw new Error(saved.reason)
     expect(read(archiveAndReopen(saved.snapshot))).toBe(draft.text)
+    await settleCourse()
     expect(activeHistory().past).toHaveLength(before + 1)
     expect(useEditorStore.getState().spatialContentEdit).toBeNull()
-    useEditorStore.getState().undo()
+    await undoCourse()
     expect(read(activeDocument())).toBe(item.content.data.series[0]!.name)
   })
 
-  it('recovers Spatial table text during composition, refuses premature save, and saves once after composition', () => {
-    useEditorStore.getState().createNewSpatialProject()
+  it('recovers Spatial table text during composition, refuses premature save, and saves once after composition', async () => {
+    await useEditorStore.getState().createCourseDocument('spatial')
+    await settleCourse()
     useEditorStore.getState().addTableNode()
+    await settleCourse()
     const session = useEditorStore.getState().spatialSession!
     const id = selectSelectedNodeId(useEditorStore.getState())!
     const item = locateCourseLayer(activeDocument(), id)!.item
     if (item.kind !== 'native' || item.content.nativeType !== 'table') throw new Error('expected table')
-    acknowledgeBaseline('spatial-table.h5lesson')
+    await acknowledgeBaseline('spatial-table.h5lesson')
     const before = activeHistory().past.length
     const cellId = item.content.data.rows[0]!.cells[0]!.id
     const begun = beginSpatialWorldTableTextEdit({ session, layerItemId: id, cellId })
@@ -322,21 +359,24 @@ describe('active Course Project text draft persistence', () => {
     const saved = useEditorStore.getState().prepareCourseProjectPersistence()
     if (!saved.ok) throw new Error(saved.reason)
     expect(read(archiveAndReopen(saved.snapshot))).toBe(draft.text)
+    await settleCourse()
     expect(activeHistory().past).toHaveLength(before + 1)
     expect(useEditorStore.getState().spatialContentEdit).toBeNull()
-    useEditorStore.getState().undo()
+    await undoCourse()
     expect(read(activeDocument())).toBe(item.content.data.rows[0]!.cells[0]!.text)
   })
 
-  it.each(['table-caption', 'table-header'] as const)('saves canonical Flow %s through recovery and archive with one history entry', field => {
-    useEditorStore.getState().createNewFlowProject()
+  it.each(['table-caption', 'table-header'] as const)('saves canonical Flow %s through recovery and archive with one history entry', async field => {
+    await useEditorStore.getState().createCourseDocument('flow')
+    await settleCourse()
     useEditorStore.getState().addTableNode()
+    await settleCourse()
     const session = useEditorStore.getState().flowSession!
     const surface = flowSurfaceIn(session.history.present, session.selection.surfaceId)
     const blocks = structuredClone(surface.blocks)
     const table = blocks.find(block => block.type === 'table')!
     if (table.type !== 'table') throw new Error('expected table')
-    acknowledgeBaseline('flow-table.h5lesson')
+    await acknowledgeBaseline('flow-table.h5lesson')
     const before = activeHistory().past.length
     const content = { inlines: [{ type: 'text' as const, text: '未失焦的表格文字' }] }
     if (field === 'table-caption') table.caption = content
@@ -353,19 +393,22 @@ describe('active Course Project text draft persistence', () => {
     const saved = useEditorStore.getState().prepareCourseProjectPersistence()
     if (!saved.ok) throw new Error(saved.reason)
     expect(read(archiveAndReopen(saved.snapshot))).toBe('未失焦的表格文字')
+    await settleCourse()
     expect(activeHistory().past).toHaveLength(before + 1)
-    useEditorStore.getState().undo()
+    await undoCourse()
     expect(read(activeDocument())).not.toBe('未失焦的表格文字')
   })
 
-  it('recovers a focused Flow chart label and archives it with one history entry', () => {
-    useEditorStore.getState().createNewFlowProject()
+  it('recovers a focused Flow chart label and archives it with one history entry', async () => {
+    await useEditorStore.getState().createCourseDocument('flow')
+    await settleCourse()
     useEditorStore.getState().addChartNode('bar')
+    await settleCourse()
     const session = useEditorStore.getState().flowSession!
     const surface = flowSurfaceIn(session.history.present, session.selection.surfaceId)!
     const block = surface.blocks.find(block => block.type === 'chart')!
     if (block.type !== 'chart') throw new Error('expected chart')
-    acknowledgeBaseline('chart.h5lesson')
+    await acknowledgeBaseline('chart.h5lesson')
     const before = activeHistory().past.length
     const field = { kind: 'category' as const, id: block.chart.categories[0]!.id }
     const begun = beginFlowChartTextEdit({ project: activeDocument(), selection: session.selection, blockId: block.id, field })
@@ -387,17 +430,19 @@ describe('active Course Project text draft persistence', () => {
     if (!saved.ok) throw new Error(saved.reason)
     expect(read(archiveAndReopen(saved.snapshot))).toBe('保持焦点的新分类')
     expect(useEditorStore.getState().flowTextEdit).toBeNull()
+    await settleCourse()
     expect(activeHistory().past).toHaveLength(before + 1)
     useEditorStore.getState().prepareCourseProjectPersistence()
+    await settleCourse()
     expect(activeHistory().past).toHaveLength(before + 1)
-    useEditorStore.getState().undo()
+    await undoCourse()
     expect(read(activeDocument())).toBe(block.chart.categories[0]!.label)
   })
 
   it.each(fixtures)(
     'materializes %s recovery without mutating live history, then commits once before archive save',
-    (_kind, createFixture) => {
-      const fixture = createFixture()
+    async (_kind, createFixture) => {
+      const fixture = await createFixture()
       const nextText = `${fixture.kind} 保存前活动草稿`
       fixture.update(nextText)
 
@@ -418,6 +463,7 @@ describe('active Course Project text draft persistence', () => {
       if (!preparation.ok) throw new Error(preparation.reason)
       expect(fixture.read(preparation.snapshot.project)).toBe(nextText)
       expect(fixture.read(archiveAndReopen(preparation.snapshot))).toBe(nextText)
+      await settleCourse()
       expect(activeHistory().past).toHaveLength(
         fixture.historyBeforeDraft + 1,
       )
@@ -425,10 +471,12 @@ describe('active Course Project text draft persistence', () => {
 
       const secondPreparation = useEditorStore.getState().prepareCourseProjectPersistence()
       expect(secondPreparation.ok).toBe(true)
+      await settleCourse()
       expect(activeHistory().past).toHaveLength(
         fixture.historyBeforeDraft + 1,
       )
 
+      await saveActiveDocument(`${fixture.kind}.h5lesson`)
       expect(
         useEditorStore
           .getState()
@@ -436,18 +484,20 @@ describe('active Course Project text draft persistence', () => {
       ).toBe(true)
       expect(useEditorStore.getState().dirty).toBe(false)
 
-      useEditorStore.getState().undo()
+      await undoCourse()
       expect(fixture.read(activeDocument())).toBe(fixture.originalText)
     },
   )
 
   it.each(fixtures)(
     'does not acknowledge an older %s save after a new draft starts',
-    (_kind, createFixture) => {
-      const fixture = createFixture()
+    async (_kind, createFixture) => {
+      const fixture = await createFixture()
       fixture.update('写盘版本 A')
       const preparation = useEditorStore.getState().prepareCourseProjectPersistence()
       if (!preparation.ok) throw new Error(preparation.reason)
+      // 2.0 的写盘版本由主进程确认；先让“写盘版本 A”确认完成，再开始新草稿。
+      await settleCourse()
 
       fixture.update('写盘期间版本 B')
       const stateBeforeAck = useEditorStore.getState()
@@ -478,8 +528,8 @@ describe('active Course Project text draft persistence', () => {
 
   it.each(fixtures)(
     'saves the latest %s document without a history entry when only a clean edit session went stale',
-    (kind, createFixture) => {
-      const fixture = createFixture()
+    async (kind, createFixture) => {
+      const fixture = await createFixture()
       fixture.begin()
       expect(
         useEditorStore.getState().v9ContentEdit
@@ -503,6 +553,7 @@ describe('active Course Project text draft persistence', () => {
           'Flow clean draft revision',
         )
       }
+      await settleCourse()
       const documentAfterMutation = activeDocument()
       const historyAfterMutation = activeHistory().past.length
       expect(documentAfterMutation.revision).toBeGreaterThan(revisionBeforeMutation)
@@ -515,6 +566,7 @@ describe('active Course Project text draft persistence', () => {
       if (!preparation.ok) throw new Error(preparation.reason)
       expect(preparation.snapshot.project).toBe(documentAfterMutation)
       expect(fixture.read(preparation.snapshot.project)).toBe(fixture.originalText)
+      await settleCourse()
       expect(activeHistory().past).toHaveLength(historyAfterMutation)
       expect(
         useEditorStore.getState().v9ContentEdit
@@ -524,13 +576,14 @@ describe('active Course Project text draft persistence', () => {
     },
   )
 
-  it('keeps a dirty stale Slide draft and refuses to overwrite a newer document', () => {
-    const fixture = createSlideFixture()
+  it('keeps a dirty stale Slide draft and refuses to overwrite a newer document', async () => {
+    const fixture = await createSlideFixture()
     fixture.update('尚未提交的旧版本文字')
     const edit = useEditorStore.getState().v9ContentEdit
     if (!edit) throw new Error('expected Slide edit')
 
     useEditorStore.getState().renameProject('dirty stale document')
+    await settleCourse()
     const historyAfterRename = activeHistory().past.length
     expect(useEditorStore.getState().v9ContentEdit).toBe(edit)
 
@@ -540,8 +593,8 @@ describe('active Course Project text draft persistence', () => {
     expect(useEditorStore.getState().v9ContentEdit).toBe(edit)
   })
 
-  it('refuses to discard a clean Slide edit while IME composition is active', () => {
-    const fixture = createSlideFixture()
+  it('refuses to discard a clean Slide edit while IME composition is active', async () => {
+    const fixture = await createSlideFixture()
     fixture.begin()
     const edit = useEditorStore.getState().v9ContentEdit
     if (!edit) throw new Error('expected Slide edit')
@@ -555,22 +608,28 @@ describe('active Course Project text draft persistence', () => {
     expect(useEditorStore.getState().v9ContentEdit).toBe(composingEdit)
   })
 
-  it('acknowledges a Slide save when only selection changes during disk write', () => {
-    const store = useEditorStore.getState()
-    store.createNewProject()
-    store.addTextNode()
-    store.addRectangleNode()
+  it('acknowledges a Slide save when only selection changes during disk write', async () => {
+    await useEditorStore.getState().createCourseDocument('slide')
+    await settleCourse()
+    useEditorStore.getState().addTextNode()
+    await settleCourse()
+    useEditorStore.getState().addRectangleNode()
+    await settleCourse()
     const [text] = selectSlideSceneList(useEditorStore.getState())[0]?.nodes ?? []
     if (!text) throw new Error('expected Slide nodes')
-    acknowledgeBaseline('selection-baseline.h5lesson')
+    await acknowledgeBaseline('selection-baseline.h5lesson')
 
     const preparation = useEditorStore.getState().prepareCourseProjectPersistence()
     if (!preparation.ok) throw new Error(preparation.reason)
     const packagesAtSave = useEditorStore.getState().componentPackages
+    const documentBeforeSelection = courseSnapshot()
 
     useEditorStore.getState().selectNode(text.id)
 
-    expect(useEditorStore.getState().componentPackages).toBe(packagesAtSave)
+    // 只改选区：renderer 的组件包内容不变，正式文档也没有任何写入。
+    expect(useEditorStore.getState().componentPackages).toEqual(packagesAtSave)
+    expect(courseSnapshot()).toEqual(documentBeforeSelection)
+    await saveActiveDocument('selection-only.h5lesson')
     expect(
       useEditorStore.getState().acknowledgeCourseProjectSaved(
         'selection-only.h5lesson',
@@ -580,12 +639,13 @@ describe('active Course Project text draft persistence', () => {
     expect(selectHasUnsavedCourseChanges(useEditorStore.getState())).toBe(false)
   })
 
-  it('saves canonical Flow content, keeps later source drafts dirty, and groups editing history', () => {
-    useEditorStore.getState().createNewFlowProject()
+  it('saves canonical Flow content, keeps later source drafts dirty, and groups editing history', async () => {
+    await useEditorStore.getState().createCourseDocument('flow')
+    await settleCourse()
     const flow = useEditorStore.getState().flowSession!
     const surface = flowSurfaceIn(flow.history.present, flow.selection.surfaceId)
     const paragraph = surface.blocks.find(block => block.type === 'paragraph')!
-    acknowledgeBaseline('flow.h5lesson')
+    await acknowledgeBaseline('flow.h5lesson')
     const before = activeHistory().past.length
     const update = (text: string) => {
       const blocks = structuredClone(flowSurfaceIn(activeDocument(), surface.id).blocks)
@@ -596,6 +656,7 @@ describe('active Course Project text draft persistence', () => {
     }
     update('版本A')
     update('版本B')
+    await settleCourse()
     expect(activeHistory().past).toHaveLength(before + 1)
     const preparation = useEditorStore.getState().prepareCourseProjectPersistence()
     if (!preparation.ok) throw new Error(preparation.reason)
@@ -608,15 +669,16 @@ describe('active Course Project text draft persistence', () => {
     expect(useEditorStore.getState().prepareCourseProjectPersistence().ok).toBe(false)
     expect(useEditorStore.getState().captureCourseProjectRecoverySnapshot().ok).toBe(true)
     useEditorStore.getState().runFlowAuthoringIntent(target, { kind: 'clear-document-draft' })
-    useEditorStore.getState().undo()
+    await undoCourse()
     const restored = flowSurfaceIn(activeDocument(), surface.id).blocks.find(block => block.id === paragraph.id)!
     expect(restored.type === 'paragraph' && plainDocumentText(restored.content)).toBe('')
   })
 
-  it('preserves a composing Flow source separately and refuses premature save', () => {
-    useEditorStore.getState().createNewFlowProject()
+  it('preserves a composing Flow source separately and refuses premature save', async () => {
+    await useEditorStore.getState().createCourseDocument('flow')
+    await settleCourse()
     const target = currentFlowTarget()
-    const before = activeDocument()
+    const before = structuredClone(activeDocument())
     const draft: FlowDocumentDraft = { surfaceId: target.surfaceId!, revision: target.documentRevision, source: '输入法组合中的文字', diagnostics: [], composing: true }
     useEditorStore.setState({ flowDocumentDraft: draft })
     expect(useEditorStore.getState().prepareCourseProjectPersistence().ok).toBe(false)
@@ -624,12 +686,14 @@ describe('active Course Project text draft persistence', () => {
     expect(selectHasUnsavedCourseChanges(useEditorStore.getState())).toBe(true)
     const recovery = useEditorStore.getState().captureCourseProjectRecoverySnapshot()
     if (!recovery.ok) throw new Error(recovery.reason)
-    expect(recovery.snapshot.project).toBe(before)
+    expect(recovery.snapshot.project).toEqual(before)
   })
 
-  it('saves canonical Flow formula LaTeX through the archive without adding save history', () => {
-    useEditorStore.getState().createNewFlowProject()
+  it('saves canonical Flow formula LaTeX through the archive without adding save history', async () => {
+    await useEditorStore.getState().createCourseDocument('flow')
+    await settleCourse()
     useEditorStore.getState().addFormulaNode()
+    await settleCourse()
     const session = useEditorStore.getState().flowSession!
     const surface = flowSurfaceIn(session.history.present, session.selection.surfaceId)
     const blocks = structuredClone(surface.blocks)
@@ -642,19 +706,25 @@ describe('active Course Project text draft persistence', () => {
     const saved = useEditorStore.getState().prepareCourseProjectPersistence()
     if (!saved.ok) throw new Error(saved.reason)
     expect(flowSurfaceIn(archiveAndReopen(saved.snapshot), surface.id).blocks.find(block => block.id === formula.id)).toMatchObject({ latex: 'a+b', accessibleText: 'a加b' })
+    await settleCourse()
     expect(activeHistory().past).toHaveLength(before + 1)
   })
 
-  it('keeps invalid Flow formula source outside V9 and refuses save without corrupting recovery', () => {
-    useEditorStore.getState().createNewFlowProject()
+  it('keeps invalid Flow formula source outside V9 and refuses save without corrupting recovery', async () => {
+    await useEditorStore.getState().createCourseDocument('flow')
+    await settleCourse()
     const before = useEditorStore.getState()
+    const beforeDocument = structuredClone(activeDocument())
+    const beforeHistoryDepth = activeHistory().past.length
     const target = currentFlowTarget()
     expect(before.runFlowAuthoringIntent(target, { kind: 'update-document-draft', source: '$\\frac{x}$', diagnostics: [{ message: '分母缺失', offset: 0, endOffset: 10, line: 1, column: 1 }], composing: false }).ok).toBe(true)
     const after = useEditorStore.getState()
     expect(selectHasUnsavedCourseChanges(after)).toBe(true)
     expect(after.prepareCourseProjectPersistence().ok).toBe(false)
     expect(after.captureCourseProjectRecoverySnapshot().ok).toBe(true)
-    expect(after.flowSession?.history).toBe(before.flowSession?.history)
+    // 无效公式只留在草稿层：正式文档内容与正式 History 深度都不变。
+    expect(activeDocument()).toEqual(beforeDocument)
+    expect(activeHistory().past).toHaveLength(beforeHistoryDepth)
     expect(after.courseAssetSidecar).toBe(before.courseAssetSidecar)
     expect(after.flowDocumentDraft?.source).toBe('$\\frac{x}$')
   })
