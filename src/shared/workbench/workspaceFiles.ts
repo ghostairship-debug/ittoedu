@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { documentRelativePathSchema } from '../document/resources'
+import { slideCanvasSchema } from '../slideCanvas'
 
 export type WorkspaceEntryKind = 'file' | 'directory'
 export type WorkspaceOperationStatus = 'success' | 'cancelled' | 'partial' | 'failed'
@@ -72,7 +73,7 @@ const mutation = { ...scope, operationId: id }
 export const workspaceFilesRequestSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('root'), directory: z.string().min(1).max(32767) }).strict(),
   z.object({ type: z.literal('watch'), ...scope }).strict(),
-  z.object({ type: z.literal('create-course'), ...mutation, targetDirectoryId: id, name }).strict(),
+  z.object({ type: z.literal('create-course'), ...mutation, targetDirectoryId: id, name, canvas: slideCanvasSchema.optional() }).strict(),
   z.object({ type: z.literal('create-text'), ...mutation, targetDirectoryId: id, name }).strict(),
   z.object({ type: z.literal('import-files'), ...mutation, targetDirectoryId: id, directories: z.array(documentRelativePathSchema).max(256).optional(), files: z.array(z.object({ name: documentRelativePathSchema, bytes: z.instanceof(Uint8Array) }).strict()).max(32).refine(files => files.reduce((total, file) => total + file.bytes.byteLength, 0) <= 64 * 1024 * 1024, '拖入文件总计不能超过 64 MiB') }).strict(),
   z.object({ type: z.literal('list'), ...scope, directoryEntryId: id, cursor: z.string().optional(), limit: z.number().int().min(1).max(200).optional() }).strict(),

@@ -49,6 +49,16 @@ describe('teacher controller delivery consistency', () => {
 })
 
 
+it('uses the course slide canvas when judging whether the controller is on stage', () => {
+  const project = createBlankCourseProject({ canvas: { width: 720, height: 1280 } })
+  const entry = controllerEntry(project)
+  entry.item.frame.x = 720
+  expect(hasCourseDeliveryVisibleTeacherController(project)).toBe(false)
+  entry.item.frame.x = 20
+  entry.item.frame.y = 1100
+  expect(hasCourseDeliveryVisibleTeacherController(project)).toBe(true)
+})
+
 it('keeps a step-only controller usable without rewriting its authored buttons', () => {
   const project = createBlankCourseProject()
   const entry = controllerEntry(project)

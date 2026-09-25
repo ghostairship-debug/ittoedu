@@ -1,4 +1,4 @@
-import { CANVAS_HEIGHT, CANVAS_WIDTH } from '../../shared/constants'
+import { DEFAULT_SLIDE_CANVAS, SLIDE_CANVAS_MAX, SLIDE_CANVAS_MIN, type SlideCanvasSize } from '../../shared/slideCanvas'
 
 export const PUBLISHED_STAGE_SELECTOR = [
   '.slide-published-adapter',
@@ -6,35 +6,40 @@ export const PUBLISHED_STAGE_SELECTOR = [
   '.spatial-surface',
 ].join(', ')
 
-function measureHostSize(container: HTMLElement): { width: number; height: number } {
-  const width = container.clientWidth
-  const height = container.clientHeight
-  return {
-    width: width > 1 ? width : CANVAS_WIDTH,
-    height: height > 1 ? height : CANVAS_HEIGHT,
-  }
+function stageCanvas(stage: HTMLElement): SlideCanvasSize {
+  const width = Number(stage.dataset.canvasWidth)
+  const height = Number(stage.dataset.canvasHeight)
+  if (
+    Number.isInteger(width) && Number.isInteger(height)
+    && width >= SLIDE_CANVAS_MIN && width <= SLIDE_CANVAS_MAX
+    && height >= SLIDE_CANVAS_MIN && height <= SLIDE_CANVAS_MAX
+  ) return { width, height }
+  return { width: DEFAULT_SLIDE_CANVAS.width, height: DEFAULT_SLIDE_CANVAS.height }
 }
 
 /**
- * Letterbox the authored 1280×720 stage into its host. Spatial HUD and
- * teacher controllers are authored in that canvas; sizing the host to the
- * window and keeping those frames would clip them.
+ * Letterbox each authored stage into its host. A stage declares its logical
+ * size with `data-canvas-width` / `data-canvas-height`. Spatial keeps the
+ * legacy design viewport when it does not declare one. Flow is responsive.
  */
 export function fitPublishedCourseStage(container: HTMLElement): void {
-  const { width, height } = measureHostSize(container)
-  const scale = Math.min(width / CANVAS_WIDTH, height / CANVAS_HEIGHT)
-  const left = (width - CANVAS_WIDTH * scale) / 2
-  const top = (height - CANVAS_HEIGHT * scale) / 2
+  const hostWidth = container.clientWidth
+  const hostHeight = container.clientHeight
   for (const stage of container.querySelectorAll<HTMLElement>(PUBLISHED_STAGE_SELECTOR)) {
-    // Flow body and overlays share the responsive document's CSS-pixel layout.
     if (stage.classList.contains('flow-surface-host')) continue
+    const canvas = stageCanvas(stage)
+    const width = hostWidth > 1 ? hostWidth : canvas.width
+    const height = hostHeight > 1 ? hostHeight : canvas.height
+    const scale = Math.min(width / canvas.width, height / canvas.height)
+    const left = (width - canvas.width * scale) / 2
+    const top = (height - canvas.height * scale) / 2
     stage.style.position = 'absolute'
     stage.style.transformOrigin = '0 0'
     stage.style.transform = `scale(${scale})`
     stage.style.left = `${left}px`
     stage.style.top = `${top}px`
-    stage.style.width = `${CANVAS_WIDTH}px`
-    stage.style.height = `${CANVAS_HEIGHT}px`
+    stage.style.width = `${canvas.width}px`
+    stage.style.height = `${canvas.height}px`
     stage.dataset.stageFitScale = String(scale)
   }
 }

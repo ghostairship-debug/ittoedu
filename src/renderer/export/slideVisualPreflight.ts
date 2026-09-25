@@ -205,7 +205,7 @@ function collectNodeItems(input: {
     add({
       severity: 'error',
       code: 'node-fully-outside-canvas',
-      message: `${label}完全位于 1280×720 画布之外。`,
+      message: `${label}完全位于 ${canvas.width}×${canvas.height} 画布之外。`,
       sceneId: context.sceneId,
       ...(context.stateId ? { stateId: context.stateId } : {}),
       nodeId: node.id,

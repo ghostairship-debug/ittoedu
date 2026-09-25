@@ -75,7 +75,8 @@ import {
   commitV9SlideContentEdit,
 } from '../../authoring/v9SlideContentEdit'
 import type { InteractionAuthoringTarget } from '../../interactions/interactionAuthoringCommands'
-import { useEditorStore } from '../../store/editorStore'
+import { selectActiveCourseProjectDocument, useEditorStore } from '../../store/editorStore'
+import { courseSlideCanvas } from '../../../shared/slideCanvas'
 import type { InteractionEditorProps } from '../../ui/InteractionEditor'
 import type { PropertiesContext } from '../../ui/properties/PropertiesContext'
 import {
@@ -338,6 +339,7 @@ export function usePropertiesAuthoringBinding({
   )
   const updatePresentationState = useEditorStore((state) => state.updatePresentationState)
   const updateCourseBackground = useEditorStore((state) => state.updateCourseBackground)
+  const resizeSlideCanvas = useEditorStore((state) => state.resizeSlideCanvas)
   const setPreviewBackgroundColor = useEditorStore((state) => state.setPreviewBackgroundColor)
   const updatePlayback = useEditorStore((state) => state.updatePlayback)
   const updateDesignTokens = useEditorStore((state) => state.updateDesignTokens)
@@ -1319,6 +1321,9 @@ export function usePropertiesAuthoringBinding({
         && requireLiveOwner()
       ) setCandidateGlobalLayerLocationVisibility(nodeId, visibility)
     },
+    resizeSlideCanvas: (canvas: Parameters<typeof resizeSlideCanvas>[0]) => {
+      if (requireLiveOwner()) resizeSlideCanvas(canvas)
+    },
     updateLayerSettings: (
       nodeId: string,
       patch: Parameters<typeof updateGlobalLayerSettings>[1],
@@ -1344,6 +1349,7 @@ export function usePropertiesAuthoringBinding({
       playback: read.globalSummary.playback,
       hasTeacherController: read.globalSummary.hasTeacherController,
       designTokens: read.globalSummary.designTokens,
+      canvas: courseSlideCanvas(selectActiveCourseProjectDocument(useEditorStore.getState()) ?? { surfaces: [] }),
       background: {
         color: read.course.backgroundColor,
         assetId: read.course.backgroundAssetId,

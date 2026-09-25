@@ -1,4 +1,5 @@
 import { PLAYBACK_VIEW_CHROME_GUTTER, PLAYBACK_VIEW_OVERFLOW_EPSILON, PLAYBACK_VIEW_MAX_ZOOM, playbackControllerInsets, type PlaybackChromeGeometry } from '../shared/playbackViewGeometry'
+import { DEFAULT_SLIDE_CANVAS, SLIDE_CANVAS_MAX, SLIDE_CANVAS_MIN, type SlideCanvasSize } from '../shared/slideCanvas'
 
 /** Session-only observation of already laid out content. No navigation or document writes. */
 export interface ViewPoint { x: number; y: number }
@@ -70,6 +71,17 @@ export function createPlaybackContent(root: HTMLElement): HTMLElement {
   Object.assign(content.style, { position: 'absolute', inset: '0', transformOrigin: '0 0', overflow: 'visible' })
   root.appendChild(content)
   return content
+}
+
+function hostStage(host: PlaybackViewHost): SlideCanvasSize {
+  const width = Number(host.root.dataset.canvasWidth)
+  const height = Number(host.root.dataset.canvasHeight)
+  if (
+    Number.isInteger(width) && Number.isInteger(height)
+    && width >= SLIDE_CANVAS_MIN && width <= SLIDE_CANVAS_MAX
+    && height >= SLIDE_CANVAS_MIN && height <= SLIDE_CANVAS_MAX
+  ) return { width, height }
+  return { width: DEFAULT_SLIDE_CANVAS.width, height: DEFAULT_SLIDE_CANVAS.height }
 }
 
 export class PlaybackViewSession implements PlaybackViewPort {
@@ -147,11 +159,12 @@ export class PlaybackViewSession implements PlaybackViewPort {
   }
   #fit(host: PlaybackViewHost): void {
     const { width, height } = this.#state.viewport
-    const scale = host.kind === 'flow' ? 1 : Math.min(width / 1280, height / 720)
+    const canvas = hostStage(host)
+    const scale = host.kind === 'flow' ? 1 : Math.min(width / canvas.width, height / canvas.height)
     Object.assign(host.root.style, { position: 'absolute', transformOrigin: '0 0', transform: `scale(${scale})`,
-      width: host.kind === 'flow' ? '100%' : '1280px', height: host.kind === 'flow' ? '100%' : '720px', minWidth: '0', minHeight: '0',
-      left: `${host.kind === 'flow' ? 0 : (width - 1280 * scale) / 2}px`,
-      top: `${host.kind === 'flow' ? 0 : (height - 720 * scale) / 2}px`, overflow: 'visible' })
+      width: host.kind === 'flow' ? '100%' : `${canvas.width}px`, height: host.kind === 'flow' ? '100%' : `${canvas.height}px`, minWidth: '0', minHeight: '0',
+      left: `${host.kind === 'flow' ? 0 : (width - canvas.width * scale) / 2}px`,
+      top: `${host.kind === 'flow' ? 0 : (height - canvas.height * scale) / 2}px`, overflow: 'visible' })
     host.root.dataset.stageFitScale = String(scale)
   }
   refreshBounds(): void {

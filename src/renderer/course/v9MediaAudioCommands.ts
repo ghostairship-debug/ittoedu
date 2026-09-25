@@ -3,6 +3,7 @@ export type { CourseAudioSettingsPatch } from '../../core/tools/courseAudio'
 import { commitResourceAwareAuthoringHistory } from '../authoring/resourceAwareAuthoringHistory'
 import { nanoid } from 'nanoid'
 import { MAX_SCENE_NODES } from '../../shared/constants'
+import { courseSlideCanvas } from '../../shared/slideCanvas'
 import { mergeCourseNativeData } from '../../shared/courseProjectSchema'
 import { sceneNodeToCourseLayerItem } from '../../shared/courseProjectModel'
 import type {
@@ -825,7 +826,7 @@ function placeMediaItems(
       return node
     })
     const laidOut = items.length > 1
-      ? layoutMediaBatchFrames(nodes).map((frame, index) => ({
+      ? layoutMediaBatchFrames(nodes, courseSlideCanvas(draft)).map((frame, index) => ({
         ...nodes[index]!,
         ...frame,
       }))

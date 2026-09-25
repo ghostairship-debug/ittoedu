@@ -1,11 +1,11 @@
 import { commitResourceAwareAuthoringHistory } from '../authoring/resourceAwareAuthoringHistory'
 import type { ComponentPackageData } from '../../shared/componentTypes'
 import {
-  CANVAS_HEIGHT,
-  CANVAS_WIDTH,
+
   MIN_NODE_SIZE,
   MIN_VISIBLE_NODE_EDGE,
 } from '../../shared/constants'
+import { courseSlideCanvas, DEFAULT_SLIDE_CANVAS, type SlideCanvasSize } from '../../shared/slideCanvas'
 import type {
   CourseProjectDocument,
   GlobalLayerPlane,
@@ -330,6 +330,7 @@ export function normalizeNodeGeometry<T extends EditorCanvasGeometry>(
   next: T,
   patch: EditorCanvasNodePatch,
   components: Readonly<Record<string, ComponentPackageData>>,
+  canvas: SlideCanvasSize = DEFAULT_SLIDE_CANVAS,
 ): T {
   const changedWidth = hasPatchKey(patch, 'width')
   const changedHeight = hasPatchKey(patch, 'height')
@@ -370,11 +371,11 @@ export function normalizeNodeGeometry<T extends EditorCanvasGeometry>(
   }
 
   const x = Math.min(
-    CANVAS_WIDTH - MIN_VISIBLE_NODE_EDGE,
+    canvas.width - MIN_VISIBLE_NODE_EDGE,
     Math.max(-width + MIN_VISIBLE_NODE_EDGE, next.x),
   )
   const y = Math.min(
-    CANVAS_HEIGHT - MIN_VISIBLE_NODE_EDGE,
+    canvas.height - MIN_VISIBLE_NODE_EDGE,
     Math.max(-height + MIN_VISIBLE_NODE_EDGE, next.y),
   )
   return { ...next, x, y, width, height }
@@ -396,13 +397,14 @@ export function applySceneNodePatchToLayerItem(
   item: LayerItem,
   patch: EditorCanvasNodePatch,
   componentPackages: Record<string, ComponentPackageData>,
+  canvas: SlideCanvasSize = DEFAULT_SLIDE_CANVAS,
 ): void {
   if (item.kind === 'runtime') return
   const previous = layerItemGeometry(item)
   applyCanvasPatchFields(item, patch)
   writeLayerItemGeometry(
     item,
-    normalizeNodeGeometry(previous, layerItemGeometry(item), patch, componentPackages),
+    normalizeNodeGeometry(previous, layerItemGeometry(item), patch, componentPackages, canvas),
   )
 }
 
@@ -423,7 +425,7 @@ export function applySceneNodePatchToCourseOverride(
   const state = presentation?.states.find((candidate) => candidate.id === stateId)
   if (!state) return
   const current = applyLayerItemOverride(baseItem, state.layerItemOverrides[nodeId])
-  applySceneNodePatchToLayerItem(current, patch, componentPackages)
+  applySceneNodePatchToLayerItem(current, patch, componentPackages, courseSlideCanvas(draft))
   const nextOverride = deriveLayerItemOverride(baseItem, current)
   if (!nextOverride) {
     delete state.layerItemOverrides[nodeId]

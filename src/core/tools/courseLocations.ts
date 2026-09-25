@@ -1,4 +1,5 @@
 import { courseSurfaceTitleSchema } from '../../shared/courseProjectSchema'
+import { courseSlideCanvas, type SlideCanvasSize } from '../../shared/slideCanvas'
 import { syncStartLocationToFirstLocation } from './courseLocationOrder'
 import { nanoid } from 'nanoid'
 import { DEFAULT_COURSE_SURFACE_BACKGROUND_COLOR } from '../../shared/courseProjectModel'
@@ -276,6 +277,7 @@ function createBlankSlideSurface(input: {
   id: string
   title: string
   sceneId?: string
+  canvas: SlideCanvasSize
 }): {
   surface: SlideSurfaceDocument
   location: Extract<CourseLocation, { kind: 'slide-scene' }>
@@ -294,7 +296,7 @@ function createBlankSlideSurface(input: {
     id: input.id,
     title: input.title,
     type: 'slide',
-    canvas: { width: 1280, height: 720 },
+    canvas: { width: input.canvas.width, height: input.canvas.height },
     surfaceLayerItems: [],
     scenes: [scene],
   }
@@ -534,6 +536,7 @@ export function addCourseSlidePage(
     const created = createBlankSlideSurface({
       id: stableId('surface-slide'),
       title,
+      canvas: courseSlideCanvas(draft),
     })
     draft.surfaces.push(created.surface)
     draft.locations.push(created.location)

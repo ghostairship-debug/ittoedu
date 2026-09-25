@@ -4,7 +4,7 @@ export type { AddSlideTextLayerInput, AddSlideFormulaLayerInput, AddSlideShapeLa
 import { isTeacherController } from '../../shared/teacherControllerRole'
 import { commitResourceAwareAuthoringHistory } from '../authoring/resourceAwareAuthoringHistory'
 import { nanoid } from 'nanoid'
-import { CANVAS_HEIGHT, CANVAS_WIDTH } from '../../shared/constants'
+import { courseSlideCanvas } from '../../shared/slideCanvas'
 import {
   applyComponentVariant,
   getComponentPropValue,
@@ -701,9 +701,10 @@ export function addSlideRuntimeLayer(
     const { scene } = slideSceneContext(session.history.present, session)
     const width = input.width ?? 640
     const height = input.height ?? 360
+    const canvas = courseSlideCanvas(session.history.present)
     const frame = offsetFrame({
-      x: input.x ?? (CANVAS_WIDTH - width) / 2,
-      y: input.y ?? (CANVAS_HEIGHT - height) / 2,
+      x: input.x ?? (canvas.width - width) / 2,
+      y: input.y ?? (canvas.height - height) / 2,
       width,
       height,
     }, scene.layerItems.length, input.x !== undefined || input.y !== undefined)

@@ -1,6 +1,7 @@
 import { commitResourceAwareAuthoringHistory } from '../../authoring/resourceAwareAuthoringHistory'
 import { updateSlideBackgroundOwner } from '../../../core/tools/courseBackground'
 import { synchronizeCourseTeacherControllerControls } from '../../../shared/teacherControllerConsistency'
+import { courseSlideCanvas } from '../../../shared/slideCanvas'
 import type { ComponentPackageData } from '../../../shared/componentTypes'
 import {
   type BackgroundMode,
@@ -630,7 +631,7 @@ export function createSlideOwnedCommands(
           for (const item of patches) {
             const global = draft.globalLayerItems.find(entry => entry.item.layerItemId === item.nodeId)?.item
             if (global) {
-              if (!global.locked || item.patch.locked === false) applySceneNodePatchToLayerItem(global, item.patch, packages)
+              if (!global.locked || item.patch.locked === false) applySceneNodePatchToLayerItem(global, item.patch, packages, courseSlideCanvas(draft))
               continue
             }
             applySceneNodePatchToCourseOverride(
@@ -686,7 +687,7 @@ export function createSlideOwnedCommands(
           for (const item of roundTripPatches) {
             const layer = findMutableCourseLayerItem(draft, item.nodeId)
             if (!layer || (layer.locked && item.patch.locked !== false)) continue
-            applySceneNodePatchToLayerItem(layer, item.patch, packages)
+            applySceneNodePatchToLayerItem(layer, item.patch, packages, courseSlideCanvas(draft))
           }
           synchronizeCourseTeacherControllerControls(draft)
         })

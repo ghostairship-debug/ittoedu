@@ -9,7 +9,7 @@ import {
   type NormalizedLineAuthoring,
 } from '../../shared/nativeLineGeometry'
 import type { NativeLineGeometry } from '../../shared/contracts/native-v1/types'
-import { CANVAS_HEIGHT, CANVAS_WIDTH } from '../../shared/constants'
+import { DEFAULT_SLIDE_CANVAS, type SlideCanvasSize } from '../../shared/slideCanvas'
 import { rotateWorldPoint, type StagePoint, type StageRect } from './stageViewportTransform'
 
 /** Screen-space snap threshold in CSS px; converted with the stage scale. */
@@ -39,9 +39,10 @@ export function collectLineSnapAxes(
     readonly locked: boolean
   }[],
   excludeLayerItemId?: string,
+  stage: SlideCanvasSize = DEFAULT_SLIDE_CANVAS,
 ): LineSnapAxes {
-  const xs: number[] = [0, CANVAS_WIDTH / 2, CANVAS_WIDTH]
-  const ys: number[] = [0, CANVAS_HEIGHT / 2, CANVAS_HEIGHT]
+  const xs: number[] = [0, stage.width / 2, stage.width]
+  const ys: number[] = [0, stage.height / 2, stage.height]
   for (const target of targets) {
     if (target.layerItemId === excludeLayerItemId) continue
     if (!target.hittable || target.locked) continue

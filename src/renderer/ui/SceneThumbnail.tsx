@@ -12,10 +12,9 @@ import {
   useEditorStore,
 } from '../store/editorStore'
 import { buildSceneThumbnailComposition } from './sceneThumbnailComposition'
+import { courseSlideCanvas, DEFAULT_SLIDE_CANVAS } from '../../shared/slideCanvas'
 
-const WIDTH = 160
-const HEIGHT = 90
-const SCALE = WIDTH / 1280
+const THUMB_WIDTH = 160
 
 export function SceneThumbnail(props: {
   locationId?: string
@@ -49,6 +48,9 @@ export function SceneThumbnail(props: {
       stateId: thumbnailStateId,
     })
   }, [document, locationId, thumbnailStateId])
+  const canvasSize = document ? courseSlideCanvas(document) : DEFAULT_SLIDE_CANVAS
+  const thumbHeight = Math.max(1, Math.round(THUMB_WIDTH * canvasSize.height / canvasSize.width))
+  const scale = THUMB_WIDTH / canvasSize.width
   const composition = useMemo(() => {
     if (!document || !locationId || !slideView) return []
     return buildSceneThumbnailComposition({
@@ -85,9 +87,9 @@ export function SceneThumbnail(props: {
     let disposed = false
     const urls: string[] = []
     const draw = async () => {
-      context.clearRect(0, 0, WIDTH, HEIGHT)
+      context.clearRect(0, 0, THUMB_WIDTH, thumbHeight)
       context.fillStyle = slideView?.backgroundColor ?? '#ffffff'
-      context.fillRect(0, 0, WIDTH, HEIGHT)
+      context.fillRect(0, 0, THUMB_WIDTH, thumbHeight)
       const backgroundAssetId = slideView?.backgroundAssetId
       if (backgroundAssetId) {
         const meta = assets[backgroundAssetId]
@@ -103,12 +105,12 @@ export function SceneThumbnail(props: {
           try {
             await image.decode()
             if (disposed) return
-            const sourceWidth = image.naturalWidth || meta.width || WIDTH
-            const sourceHeight = image.naturalHeight || meta.height || HEIGHT
-            const scale = Math.max(WIDTH / sourceWidth, HEIGHT / sourceHeight)
+            const sourceWidth = image.naturalWidth || meta.width || THUMB_WIDTH
+            const sourceHeight = image.naturalHeight || meta.height || thumbHeight
+            const scale = Math.max(THUMB_WIDTH / sourceWidth, thumbHeight / sourceHeight)
             const width = sourceWidth * scale
             const height = sourceHeight * scale
-            context.drawImage(image, (WIDTH - width) / 2, (HEIGHT - height) / 2, width, height)
+            context.drawImage(image, (THUMB_WIDTH - width) / 2, (thumbHeight - height) / 2, width, height)
           } catch {
             // The authored background colour remains a visible fallback.
           }
@@ -136,9 +138,9 @@ export function SceneThumbnail(props: {
             if (fallback.coverage === 'scene') {
               // A full-scene fallback replaces everything below its authored
               // layer; a surface fallback preserves those editable nodes.
-              context.clearRect(0, 0, WIDTH, HEIGHT)
+              context.clearRect(0, 0, THUMB_WIDTH, thumbHeight)
             }
-            context.drawImage(image, 0, 0, WIDTH, HEIGHT)
+            context.drawImage(image, 0, 0, THUMB_WIDTH, thumbHeight)
             context.restore()
           } catch {
             // Missing runtime fallback assets leave the editable thumbnail intact.
@@ -150,39 +152,39 @@ export function SceneThumbnail(props: {
         if (item.kind === 'native') {
           const node = materializeNativeLayerItem(item)
           const renderedText = node.type === 'text'
-            ? renderTextNodeCanvas(node, node.width, SCALE)
+            ? renderTextNodeCanvas(node, node.width, scale)
             : null
           const renderedFormula = node.type === 'formula'
-            ? renderFormulaNodeCanvas(node, node.width, node.height, SCALE)
+            ? renderFormulaNodeCanvas(node, node.width, node.height, scale)
             : null
           const visualWidth = renderedText?.width ?? renderedFormula?.width ?? node.width
           const visualHeight = renderedText?.height ?? renderedFormula?.height ?? node.height
           context.save()
           context.translate(
-            (node.x + visualWidth / 2) * SCALE,
-            (node.y + visualHeight / 2) * SCALE,
+            (node.x + visualWidth / 2) * scale,
+            (node.y + visualHeight / 2) * scale,
           )
           context.rotate((node.rotation * Math.PI) / 180)
           context.globalAlpha = node.opacity
           if (node.type === 'shape') {
-            context.scale(SCALE, SCALE)
+            context.scale(scale, scale)
             context.translate(-node.width / 2, -node.height / 2)
             renderShapeCanvas(context, node)
           } else if (node.type === 'text') {
             context.drawImage(
               renderedText!.canvas,
-              -renderedText!.width * SCALE / 2,
-              -renderedText!.height * SCALE / 2,
-              renderedText!.width * SCALE,
-              renderedText!.height * SCALE,
+              -renderedText!.width * scale / 2,
+              -renderedText!.height * scale / 2,
+              renderedText!.width * scale,
+              renderedText!.height * scale,
             )
           } else if (node.type === 'formula') {
             context.drawImage(
               renderedFormula!.canvas,
-              -renderedFormula!.width * SCALE / 2,
-              -renderedFormula!.height * SCALE / 2,
-              renderedFormula!.width * SCALE,
-              renderedFormula!.height * SCALE,
+              -renderedFormula!.width * scale / 2,
+              -renderedFormula!.height * scale / 2,
+              renderedFormula!.width * scale,
+              renderedFormula!.height * scale,
             )
           } else if (node.type === 'image') {
             const meta = assets[node.assetId]
@@ -202,17 +204,17 @@ export function SceneThumbnail(props: {
                     node,
                     node.width,
                     node.height,
-                    SCALE,
+                    scale,
                   )
-                  context.drawImage(rendered, -node.width * SCALE / 2, -node.height * SCALE / 2, node.width * SCALE, node.height * SCALE)
+                  context.drawImage(rendered, -node.width * scale / 2, -node.height * scale / 2, node.width * scale, node.height * scale)
                 }
               } catch {
                 // Missing thumbnails remain represented by the empty frame.
               }
             }
           } else if (node.type === 'video') {
-            const width = node.width * SCALE
-            const height = node.height * SCALE
+            const width = node.width * scale
+            const height = node.height * scale
             context.fillStyle = '#0b1120'
             context.fillRect(-width / 2, -height / 2, width, height)
             context.fillStyle = '#f8fafc'
@@ -223,8 +225,8 @@ export function SceneThumbnail(props: {
             context.closePath()
             context.fill()
           } else {
-            const width = node.width * SCALE
-            const height = node.height * SCALE
+            const width = node.width * scale
+            const height = node.height * scale
             context.fillStyle = '#f8fafc'
             context.strokeStyle = '#cbd5e1'
             context.lineWidth = 1
@@ -235,16 +237,16 @@ export function SceneThumbnail(props: {
           continue
         }
 
-        const width = item.frame.width * SCALE
-        const height = item.frame.height * SCALE
+        const width = item.frame.width * scale
+        const height = item.frame.height * scale
         const component = item.kind === 'component'
           ? components[item.component.packageId]
           : undefined
         const thumbnailUrl = component?.thumbnailUrl
         context.save()
         context.translate(
-          (item.frame.x + item.frame.width / 2) * SCALE,
-          (item.frame.y + item.frame.height / 2) * SCALE,
+          (item.frame.x + item.frame.width / 2) * scale,
+          (item.frame.y + item.frame.height / 2) * scale,
         )
         context.rotate((item.rotation * Math.PI) / 180)
         context.globalAlpha = item.opacity
@@ -298,7 +300,7 @@ export function SceneThumbnail(props: {
       disposed = true
       urls.forEach((url) => URL.revokeObjectURL(url))
     }
-  }, [assetFiles, assets, components, composition, shouldRender, slideView])
+  }, [assetFiles, assets, components, composition, scale, shouldRender, slideView, thumbHeight])
 
-  return <canvas ref={ref} className="scene-thumbnail" width={WIDTH} height={HEIGHT} aria-hidden="true" />
+  return <canvas ref={ref} className="scene-thumbnail" width={THUMB_WIDTH} height={thumbHeight} aria-hidden="true" />
 }

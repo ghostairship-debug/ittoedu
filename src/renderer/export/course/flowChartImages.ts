@@ -1,6 +1,7 @@
 import type { PublishedCourseV2Payload } from '../../../shared/publishedCourseTypes'
 import { capturePublishedCourseV2Stage } from '../playerCapture'
 import { publishedCourseV2Schema } from '../../../shared/contracts/published-course-v2/schema'
+import { courseSlideCanvas } from '../../../shared/slideCanvas'
 import { buildNativeChartSvg } from '../../../shared/nativeChartSvg'
 import { buildFlowPrintPlan } from './flowPrintPlan'
 import { buildFlowDocx, type FlowDocxAsset, type FlowDocxOptions, type FlowDocxResult } from './flowDocx'
@@ -52,7 +53,7 @@ export async function buildFlowDocxWithCharts(payload: PublishedCourseV2Payload,
       ...payload, mixedPrintPlan: undefined, navigationGuards: [], globalInteractions: [],
       locations: [{ id: location.id, label: location.label, kind: 'slide-scene', surfaceId, sceneId: 'controller-capture' }],
       startLocationId: location.id,
-      surfaces: [{ id: surfaceId, title: surface.title, type: 'slide', canvas: { width: 1280, height: 720 }, surfaceLayerItems: [],
+      surfaces: [{ id: surfaceId, title: surface.title, type: 'slide', canvas: courseSlideCanvas(payload), surfaceLayerItems: [],
         scenes: [{ id: 'controller-capture', name: surface.title, backgroundColor: '#ffffff', layerItems: [], interactions: [] }] }],
       globalLayerItems: [{ ...entry, visibility: { mode: 'all', locationIds: [] }, item: { ...item, frame: { ...item.frame, x: 0, y: 0 }, props: { ...item.props, defaultCollapsed: false } } }],
     })

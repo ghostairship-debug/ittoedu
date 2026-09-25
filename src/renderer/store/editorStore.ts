@@ -26,8 +26,6 @@ import { UserFacingError } from '../../shared/errors'
 import { componentContentSha256 } from '../../shared/componentContentIntegrity'
 import { rotatedRectangleAabb } from '../../shared/geometry'
 import {
-  CANVAS_HEIGHT,
-  CANVAS_WIDTH,
   MAX_PROJECT_SCENES,
   MAX_SCENE_NODES,
   MAX_SCENE_PRESENTATION_STATES,
@@ -571,7 +569,7 @@ export type EditorState =
       connectCourseDocuments(api: DocumentHostAPI): Promise<void>
       activateCourseDocument(documentId: string): Promise<void>
       closeCourseDocument(documentId: string): Promise<boolean>
-      createCourseDocument(surface: 'slide' | 'flow' | 'spatial'): Promise<void>
+      createCourseDocument(surface: 'slide' | 'flow' | 'spatial', canvas?: import('../../shared/slideCanvas').SlideCanvasSize): Promise<void>
       openCourseDocument(path: string): Promise<void>
       drainCourseDocument(): Promise<DocumentSnapshot>
       drainAllCourseDocuments(): Promise<DocumentSnapshot[]>
@@ -1317,12 +1315,12 @@ export const useEditorStore = create<EditorState>((set, get) => {
       if (!prepared.ok) throw new Error(prepared.reason)
       return documents.save(saveAs)
     },
-    async createCourseDocument(surface) {
-      const factory = surface === 'slide' ? createBlankCourseProject : surface === 'flow' ? createBlankFlowCourseProject : createBlankSpatialCourseProject
+    async createCourseDocument(surface, canvas?) {
+      const factory = surface === 'slide' ? () => createBlankCourseProject({ canvas }) : surface === 'flow' ? createBlankFlowCourseProject : createBlankSpatialCourseProject
       const bundle = withDefaultComponentController(factory())
       await documents.create(courseViewModel({ courseAssetSidecar: emptyCourseAssetSidecar(), componentPackages: bundle.componentPackages }, bundle.project), `${bundle.project.title}.h5lesson`)
     },
-    createNewProject() { void get().createCourseDocument('slide').catch(error => write({ errorMessage: String(error) })) },
+    createNewProject(canvas?: import('../../shared/slideCanvas').SlideCanvasSize) { void get().createCourseDocument('slide', canvas).catch(error => write({ errorMessage: String(error) })) },
     createNewFlowProject() { void get().createCourseDocument('flow').catch(error => write({ errorMessage: String(error) })) },
     createNewSpatialProject() { void get().createCourseDocument('spatial').catch(error => write({ errorMessage: String(error) })) },
     loadCourseProject(project, path, assetFiles = {}, componentPackages = {}) {

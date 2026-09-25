@@ -86,6 +86,27 @@ describe('fitPublishedCourseStage', () => {
     expect(flow.style.height).toBe('')
   })
 
+  it('letterboxes a portrait slide independently of the spatial design viewport', () => {
+    const host = document.createElement('div')
+    const slide = document.createElement('section')
+    slide.className = 'slide-published-adapter'
+    slide.dataset.canvasWidth = '720'
+    slide.dataset.canvasHeight = '1280'
+    const spatial = document.createElement('section')
+    spatial.className = 'spatial-surface'
+    host.append(slide, spatial)
+    mockClientSize(host, 1440, 900)
+
+    fitPublishedCourseStage(host)
+
+    const slideScale = Math.min(1440 / 720, 900 / 1280)
+    expect(slide.style.width).toBe('720px')
+    expect(slide.style.height).toBe('1280px')
+    expect(slide.style.transform).toBe(`scale(${slideScale})`)
+    expect(spatial.style.width).toBe(`${CANVAS_WIDTH}px`)
+    expect(spatial.style.height).toBe(`${CANVAS_HEIGHT}px`)
+  })
+
   it('falls back to the design canvas when the host has no layout yet', () => {
     const host = document.createElement('div')
     const adapter = document.createElement('section')

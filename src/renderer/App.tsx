@@ -258,7 +258,7 @@ export default function App() {
         return useEditorStore.getState().connectCourseDocuments(host)
       },
       snapshot: () => useEditorStore.getState().courseDocument.snapshot,
-      create: surface => useEditorStore.getState().createCourseDocument(surface),
+      create: (surface, canvas) => useEditorStore.getState().createCourseDocument(surface, canvas),
       open: path => useEditorStore.getState().openCourseDocument(path),
       save: saveAs => useEditorStore.getState().saveCourseDocument(saveAs),
       drain: () => useEditorStore.getState().drainCourseDocument(),

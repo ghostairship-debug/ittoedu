@@ -163,6 +163,8 @@ export interface RuntimeHostOptions {
   sceneId?: string
   width: number
   height: number
+  /** Slide canvas used as the authoring-target output space. */
+  authoringCanvas?: import('../shared/slideCanvas').SlideCanvasSize
   environment: RuntimeMountEnvironment
   actions: Readonly<RuntimeHostActions>
   events: CourseEventBus
@@ -373,6 +375,7 @@ export class RuntimeHost {
           sceneId: options.sceneId,
           width: options.width,
           height: options.height,
+          ...(options.authoringCanvas ? { canvas: options.authoringCanvas } : {}),
           content: runtime.content,
           assets: runtime.assets,
           ...(exposesDom ? { domRoots: this.domRoots() } : {}),

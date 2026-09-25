@@ -8,6 +8,11 @@ export const APP_PREVIEW_TEMP_DIRECTORY_NAME = `${APP_EXECUTABLE_NAME}-preview`
 export const APP_PDF_TEMP_FILE_PREFIX = 'ittoedu-courseware-pdf-'
 export const APP_E2E_TEMP_DIRECTORY_NAME = `${APP_EXECUTABLE_NAME}-e2e`
 export const APP_VERSION = '1.0.0'
+/**
+ * Legacy 1280×720 project default. Not the current Slide canvas — read
+ * `surface.canvas` or `courseSlideCanvas`. Flow overlay placement and the
+ * Spatial design viewport still use this size as their own default box.
+ */
 export const CANVAS_WIDTH = 1280 as const
 export const CANVAS_HEIGHT = 720 as const
 export const RUNTIME_API_VERSION = 2 as const

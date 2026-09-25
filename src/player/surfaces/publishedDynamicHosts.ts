@@ -12,7 +12,7 @@ import {
   type PlaybackNavigationProgress,
   type PlaybackNavigationViewPort,
 } from '../navigation/coursePlaybackSequence'
-import { CANVAS_HEIGHT, CANVAS_WIDTH } from '../../shared/constants'
+import { DEFAULT_SLIDE_CANVAS } from '../../shared/slideCanvas'
 
 import type { CourseLocation } from '../../shared/courseProjectTypes'
 import type { PublishedCourseSurface, PublishedCourseV2Payload } from '../../shared/publishedCourseTypes'
@@ -82,7 +82,7 @@ import type {
 export type PublishedDynamicHostKind = 'slide' | 'flow' | 'spatial'
 
 export interface CreatePublishedDynamicHostsOptions {
-  /** Ignored for camera/HUD; published stages are always the 1280×720 design canvas. */
+  /** Spatial design viewport only. Slide stages use `surface.canvas`. */
   viewport?: { width: number; height: number }
   resolveAsset?: (assetId: string) => string | undefined
   playbackPathId?: string | null
@@ -245,7 +245,7 @@ function createPublishedSurfaceHostInternal(
     surface.id,
     {
       startLocationId,
-      viewport: { width: CANVAS_WIDTH, height: CANVAS_HEIGHT },
+      viewport: { width: DEFAULT_SLIDE_CANVAS.width, height: DEFAULT_SLIDE_CANVAS.height },
       resolveAsset,
       playbackPathId: options.playbackPathId,
       globalInteractionVisibilityState: options.globalInteractionVisibilityState,

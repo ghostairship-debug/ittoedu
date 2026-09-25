@@ -115,7 +115,7 @@ export class WorkspaceFilesDesktopService {
         const identity = JSON.stringify(input), old = this.preparedCourses.get(input.operationId)
         if (old && old.input !== identity) throw new Error('同一文件操作不能改变参数')
         if (!old) {
-          const project = createBlankCourseProject({ title: input.name.replace(/\.h5lesson$/i, '') })
+          const project = createBlankCourseProject({ title: input.name.replace(/\.h5lesson$/i, ''), canvas: input.canvas })
           const component = createDefaultTeacherControllerPackage()
           this.preparedCourses.set(input.operationId, { input: identity, bytes: createCourseProjectArchive({ project, assetFiles: {}, componentFiles: { [`${component.manifest.id}@${component.manifest.version}`]: component.files } }) })
         }

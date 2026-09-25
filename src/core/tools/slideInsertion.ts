@@ -7,6 +7,7 @@ import type { NativeLineGeometry } from '../../shared/contracts/native-v1/types'
 import { createTextNode, createFormulaNode, createShapeNode, createImageNode, createVideoNode } from './nativeNodeFactories'
 import { allocateCourseLayerOrder, sortScopedLayerList } from './layerOrder'
 import { commitCourseProjectMutation } from './courseProjectMutation'
+import { courseSlideCanvas } from '../../shared/slideCanvas'
 export interface SlideInsertionOwner { scope: string; selection: { locationId: string; stateId: string | null } }
 function stableId(prefix: string, preferred?: string): string { return preferred ?? `${prefix}-${nanoid(10)}` }
 export class SlideCommandError extends Error {
@@ -246,6 +247,7 @@ export function planSlideTextInsertion(document: CourseProjectDocument, owner: S
         text: input.text ?? '双击编辑文字',
         x: input.x,
         y: input.y,
+        canvas: courseSlideCanvas(document),
       }),
       existingCount,
       input.x !== undefined || input.y !== undefined,
@@ -266,6 +268,7 @@ export function planSlideFormulaInsertion(document: CourseProjectDocument, owner
         name: input.label ?? '公式',
         x: input.x,
         y: input.y,
+        canvas: courseSlideCanvas(document),
       }),
       existingCount,
       input.x !== undefined || input.y !== undefined,
@@ -300,6 +303,7 @@ export function planSlideShapeInsertion(document: CourseProjectDocument, owner: 
           x: input.frame?.x ?? input.x,
           y: input.frame?.y ?? input.y,
           ...(input.frame ? { width: input.frame.width, height: input.frame.height } : {}),
+          canvas: courseSlideCanvas(document),
         })
         if (lineGeometry) created.lineGeometry = structuredClone(lineGeometry)
         return created
@@ -330,6 +334,7 @@ export function planSlideImageInsertion(document: CourseProjectDocument, owner: 
         height: input.height ?? sized.height,
         x: input.x,
         y: input.y,
+        canvas: courseSlideCanvas(document),
       }),
       existingCount,
       input.x !== undefined || input.y !== undefined,
@@ -355,6 +360,7 @@ export function planSlideVideoInsertion(document: CourseProjectDocument, owner: 
         height: input.height ?? asset.height ?? 360,
         x: input.x,
         y: input.y,
+        canvas: courseSlideCanvas(document),
       }),
       existingCount,
       input.x !== undefined || input.y !== undefined,

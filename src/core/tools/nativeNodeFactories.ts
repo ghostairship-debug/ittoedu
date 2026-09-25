@@ -1,5 +1,5 @@
 import { nanoid } from 'nanoid'
-import { CANVAS_HEIGHT, CANVAS_WIDTH } from '../../shared/constants'
+import { DEFAULT_SLIDE_CANVAS, type SlideCanvasSize } from '../../shared/slideCanvas'
 import { isStrokeOnlyShapeType } from '../../shared/contracts/native-v1'
 import {
   FormulaAstNode,
@@ -55,18 +55,22 @@ export type TextNodeOptions = Partial<Omit<TextNode, 'id' | 'type' | 'style'>> &
   id?: string
   style?: Partial<TextNode['style']>
   idFactory?: IdFactory
+  /** Used only when x/y are omitted. Defaults to the legacy slide canvas. */
+  canvas?: SlideCanvasSize
 }
 
 export type FormulaNodeOptions = Partial<Omit<FormulaNode, 'id' | 'type' | 'style'>> & {
   id?: string
   style?: Partial<FormulaNode['style']>
   idFactory?: IdFactory
+  canvas?: SlideCanvasSize
 }
 
 type ImageNodeOptions = Partial<Omit<ImageNode, 'id' | 'type' | 'assetId'>> & {
   id?: string
   assetId: string
   idFactory?: IdFactory
+  canvas?: SlideCanvasSize
 }
 
 type VideoNodeOptions = Partial<Omit<VideoNode, 'id' | 'type' | 'assetId' | 'poster'>> & {
@@ -74,12 +78,14 @@ type VideoNodeOptions = Partial<Omit<VideoNode, 'id' | 'type' | 'assetId' | 'pos
   assetId: string
   poster?: Partial<VideoNode['poster']>
   idFactory?: IdFactory
+  canvas?: SlideCanvasSize
 }
 
 type ShapeNodeOptions = Partial<Omit<ShapeNode, 'id' | 'type' | 'style'>> & {
   id?: string
   style?: Partial<ShapeNode['style']>
   idFactory?: IdFactory
+  canvas?: SlideCanvasSize
 }
 
 export type ExternalComponentFactoryNode = Omit<NativeRenderableBase, 'type'> & {
@@ -97,6 +103,7 @@ type ExternalComponentNodeOptions = Partial<
   id?: string
   component: ExternalComponentFactoryNode['component']
   idFactory?: IdFactory
+  canvas?: SlideCanvasSize
 }
 
 function nextId(prefix: string, explicitId: string | undefined, idFactory: IdFactory): string {
@@ -120,8 +127,8 @@ export function createTextNode(
     id: nextId('text', options.id, idFactory),
     name: options.name ?? '文本',
     type: 'text',
-    x: options.x ?? (CANVAS_WIDTH - width) / 2,
-    y: options.y ?? (CANVAS_HEIGHT - height) / 2,
+    x: options.x ?? ((options.canvas ?? DEFAULT_SLIDE_CANVAS).width - width) / 2,
+    y: options.y ?? ((options.canvas ?? DEFAULT_SLIDE_CANVAS).height - height) / 2,
     width,
     height,
     rotation: options.rotation ?? 0,
@@ -193,8 +200,8 @@ export function createFormulaNode(
     id: nodeId,
     name: options.name ?? '公式',
     type: 'formula',
-    x: options.x ?? (CANVAS_WIDTH - width) / 2,
-    y: options.y ?? (CANVAS_HEIGHT - height) / 2,
+    x: options.x ?? ((options.canvas ?? DEFAULT_SLIDE_CANVAS).width - width) / 2,
+    y: options.y ?? ((options.canvas ?? DEFAULT_SLIDE_CANVAS).height - height) / 2,
     width,
     height,
     rotation: options.rotation ?? 0,
@@ -257,8 +264,8 @@ export function createImageNode(
     id: nextId('image', options.id, idFactory),
     name: options.name ?? '图片',
     type: 'image',
-    x: options.x ?? (CANVAS_WIDTH - width) / 2,
-    y: options.y ?? (CANVAS_HEIGHT - height) / 2,
+    x: options.x ?? ((options.canvas ?? DEFAULT_SLIDE_CANVAS).width - width) / 2,
+    y: options.y ?? ((options.canvas ?? DEFAULT_SLIDE_CANVAS).height - height) / 2,
     width,
     height,
     rotation: options.rotation ?? 0,
@@ -288,8 +295,8 @@ export function createVideoNode(options: VideoNodeOptions): VideoNode {
     id: nextId('video', options.id, idFactory),
     name: options.name ?? '视频',
     type: 'video',
-    x: options.x ?? (CANVAS_WIDTH - width) / 2,
-    y: options.y ?? (CANVAS_HEIGHT - height) / 2,
+    x: options.x ?? ((options.canvas ?? DEFAULT_SLIDE_CANVAS).width - width) / 2,
+    y: options.y ?? ((options.canvas ?? DEFAULT_SLIDE_CANVAS).height - height) / 2,
     width,
     height,
     rotation: options.rotation ?? 0,
@@ -336,8 +343,8 @@ export function createShapeNode(
     ...(isLinear && options.lineGeometry ? { lineGeometry: structuredClone(options.lineGeometry) } : {}),
     ...(options.pathGeometry ? { pathGeometry: structuredClone(options.pathGeometry) } : {}),
     ...(options.braceGeometry ? { braceGeometry: structuredClone(options.braceGeometry) } : {}),
-    x: options.x ?? (CANVAS_WIDTH - width) / 2,
-    y: options.y ?? (CANVAS_HEIGHT - height) / 2,
+    x: options.x ?? ((options.canvas ?? DEFAULT_SLIDE_CANVAS).width - width) / 2,
+    y: options.y ?? ((options.canvas ?? DEFAULT_SLIDE_CANVAS).height - height) / 2,
     width,
     height,
     rotation: options.rotation ?? 0,
@@ -439,8 +446,8 @@ export function createExternalComponentNode(
     id: nextId('component', options.id, idFactory),
     name: options.name ?? '互动组件',
     type: 'external-component',
-    x: options.x ?? (CANVAS_WIDTH - width) / 2,
-    y: options.y ?? (CANVAS_HEIGHT - height) / 2,
+    x: options.x ?? ((options.canvas ?? DEFAULT_SLIDE_CANVAS).width - width) / 2,
+    y: options.y ?? ((options.canvas ?? DEFAULT_SLIDE_CANVAS).height - height) / 2,
     width,
     height,
     rotation: options.rotation ?? 0,
@@ -464,6 +471,7 @@ export type TableNodeOptions = Partial<Omit<TableFactoryNode, 'id' | 'type' | 'c
   headerRowCount?: number
   style?: Partial<NativeTableStyle>
   idFactory?: IdFactory
+  canvas?: SlideCanvasSize
 }
 
 export function createTableNode(options: TableNodeOptions = {}): TableFactoryNode {
@@ -513,8 +521,8 @@ export function createTableNode(options: TableNodeOptions = {}): TableFactoryNod
     id: nextId('table', options.id, idFactory),
     name: options.name ?? '表格',
     type: 'table',
-    x: options.x ?? (CANVAS_WIDTH - width) / 2,
-    y: options.y ?? (CANVAS_HEIGHT - height) / 2,
+    x: options.x ?? ((options.canvas ?? DEFAULT_SLIDE_CANVAS).width - width) / 2,
+    y: options.y ?? ((options.canvas ?? DEFAULT_SLIDE_CANVAS).height - height) / 2,
     width,
     height,
     rotation: options.rotation ?? 0,
@@ -615,6 +623,7 @@ export type ChartNodeOptions = Partial<Omit<ChartFactoryNode, 'id' | 'type' | 'c
   series?: NativeChartSeries[]
   style?: Partial<NativeChartContent['style']>
   idFactory?: IdFactory
+  canvas?: SlideCanvasSize
 }
 
 export function createChartNode(options: ChartNodeOptions = {}): ChartFactoryNode {
@@ -710,8 +719,8 @@ export function createChartNode(options: ChartNodeOptions = {}): ChartFactoryNod
     id: nextId('chart', options.id, idFactory),
     name: options.name ?? defaultTitle,
     type: 'chart',
-    x: options.x ?? (CANVAS_WIDTH - width) / 2,
-    y: options.y ?? (CANVAS_HEIGHT - height) / 2,
+    x: options.x ?? ((options.canvas ?? DEFAULT_SLIDE_CANVAS).width - width) / 2,
+    y: options.y ?? ((options.canvas ?? DEFAULT_SLIDE_CANVAS).height - height) / 2,
     width,
     height,
     rotation: options.rotation ?? 0,
