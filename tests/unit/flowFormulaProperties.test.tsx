@@ -40,12 +40,18 @@ function drawingContext(): CanvasRenderingContext2D {
   } as unknown as CanvasRenderingContext2D
 }
 
+import { createCourseStoreHost } from '../helpers/courseStoreHost'
+import { createBlankFlowCourseProject } from '@/renderer/project/createFlowCourseProject'
+
+let storeHost: Awaited<ReturnType<typeof createCourseStoreHost>>
+
 describe('FlowFormulaBlockProperties', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(
       drawingContext(),
     )
-    useEditorStore.getState().createNewProject()
+    storeHost = await createCourseStoreHost()
+    await storeHost.open(createBlankFlowCourseProject({ includeDefaultController: false, controls: 'none' }))
   })
 
   afterEach(() => {
@@ -53,10 +59,10 @@ describe('FlowFormulaBlockProperties', () => {
     vi.restoreAllMocks()
   })
 
-  it('edits body LaTeX in the shared editor, retaining formula identity and one owner history step', () => {
+  it('edits body LaTeX in the shared editor, retaining formula identity and one owner history step', async () => {
     const store = useEditorStore.getState()
-    store.createNewFlowProject()
     store.addFormulaNode()
+    await store.drainCourseDocument()
 
     const flow = useEditorStore.getState().flowSession
     expect(flow).not.toBeNull()
@@ -72,6 +78,7 @@ describe('FlowFormulaBlockProperties', () => {
     if (!formulaBlock) return
 
     expect(useEditorStore.getState().applyFlowCommand(replaceFlowDocumentContent(doc, flowSurface.id, [formulaBlock, ...flowSurface.blocks.filter(block => block.id !== formulaBlock.id)])).ok).toBe(true)
+    await useEditorStore.getState().drainCourseDocument()
     const current = useEditorStore.getState().flowSession!
     const selection = selectFlowEditorBlocks(current.history.present, current.selection.locationId, [formulaBlock.id])
     useEditorStore.getState().applyFlowSelection(selection)
@@ -85,7 +92,8 @@ describe('FlowFormulaBlockProperties', () => {
     const input = screen.getByLabelText('LaTeX')
     fireEvent.focus(input)
     expect(useEditorStore.getState().flowTextEdit).toBeNull()
-    const historyBefore = useEditorStore.getState().flowSession!.history.past.length
+    const documentId = useEditorStore.getState().courseDocument.documentId!
+    const depthBefore = storeHost.registry.get(documentId).read().undoDepth
     const revisionBeforeDraft = useEditorStore.getState().flowSession?.history.present.revision
     fireEvent.change(input, { target: { value: 'a+b' } })
     fireEvent.change(screen.getByLabelText('朗读说明'), { target: { value: '' } })
@@ -94,6 +102,7 @@ describe('FlowFormulaBlockProperties', () => {
 
     const applyButton = screen.getByRole('button', { name: '应用公式' })
     fireEvent.click(applyButton)
+    await useEditorStore.getState().drainCourseDocument()
 
     const updatedFlow = useEditorStore.getState().flowSession
     const updatedDoc = updatedFlow?.history.present
@@ -109,18 +118,16 @@ describe('FlowFormulaBlockProperties', () => {
       expect(updatedBlock.accessibleText).toContain('b')
     }
     expect(useEditorStore.getState().flowTextEdit).toBeNull()
-    expect(updatedFlow!.history.past).toHaveLength(historyBefore + 1)
+    expect(storeHost.registry.get(documentId).read().undoDepth).toBe(depthBefore + 1)
     useEditorStore.getState().undo()
+    await useEditorStore.getState().drainCourseDocument()
     const restored = useEditorStore.getState().flowSession!.history.present.surfaces.find(surface => surface.id === flowSurface.id)
     expect(restored?.type === 'flow' && restored.blocks.find(block => block.id === formulaBlock.id)).toEqual(formulaBlock)
 
     expect(screen.queryByTestId('formula-edit-dialog')).toBeNull()
   })
 
-  it('mounts FormulaAuthoringEditor when overlay formula is selected and commits changes', () => {
-    const store = useEditorStore.getState()
-    store.createNewFlowProject()
-
+  it('mounts FormulaAuthoringEditor when overlay formula is selected and commits changes', async () => {
     const flow = useEditorStore.getState().flowSession
     expect(flow).not.toBeNull()
     if (!flow) return
