@@ -218,11 +218,12 @@ describe('MediaTab', () => {
     const videoNode = selectActiveScene(useEditorStore.getState()).nodes.find(
       (node) => node.type === 'video',
     )
+    // A 1920×1080 video is fitted to the 1280×720 page instead of spilling over it (M19).
     expect(videoNode).toMatchObject({
       type: 'video',
       assetId: videoAsset.id,
-      width: 1920,
-      height: 1080,
+      width: 1280,
+      height: 720,
     })
 
     fireEvent.click(screen.getByLabelText('删除图片“diagram.png”'))
