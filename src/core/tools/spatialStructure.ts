@@ -1,7 +1,7 @@
 import { z } from 'zod'
 import type { CourseProjectDocument } from '../../shared/courseProjectTypes'
 import type { ToolTarget } from '../../shared/workbench/tools'
-import { STAGE_VIEWPORT_WIDTH, STAGE_VIEWPORT_HEIGHT } from '../../shared/stageViewport'
+import { courseSlideCanvas } from '../../shared/slideCanvas'
 import { spatialStructureToolInputSchema, spatialGatewayInputSchema } from './spatialStructureSchema'
 import { spatialSurfaceIn, resolveSpatialSurface } from './spatialInsertion'
 import { locateCourseLayer } from '../drivers/course/layerProperties'
@@ -66,7 +66,8 @@ export function planSpatialStructure(project: CourseProjectDocument, target: Too
     case 'fit-world-content': {
       if (target.kind !== 'course-location') throw new Error('取景需要location')
       if (!spatialHasWorldContent(next, target.locationId)) break
-      const pose = spatialCameraFittingWorldContent(next, target.locationId, { viewportWidth: STAGE_VIEWPORT_WIDTH, viewportHeight: STAGE_VIEWPORT_HEIGHT })
+      const canvas = courseSlideCanvas(next)
+      const pose = spatialCameraFittingWorldContent(next, target.locationId, { viewportWidth: canvas.width, viewportHeight: canvas.height })
       next = setSpatialCameraHome(next, surfaceId, pose)
       next = updateSpatialCameraFramePose(next, surfaceId, frameId!, pose)
       break

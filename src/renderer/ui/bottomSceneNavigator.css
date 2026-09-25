@@ -53,6 +53,9 @@
   height: 30px;
   border: 1px solid var(--border, #d9d6ce);
   border-radius: 3px;
+  /* The whole page at its real ratio; portrait pages leave side bands. */
+  object-fit: contain;
+  background: var(--canvas-workspace, #ece9e1);
 }
 .bottom-scene-card__surface-mark {
   display: grid;

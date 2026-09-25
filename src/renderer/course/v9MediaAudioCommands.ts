@@ -3,7 +3,8 @@ export type { CourseAudioSettingsPatch } from '../../core/tools/courseAudio'
 import { commitResourceAwareAuthoringHistory } from '../authoring/resourceAwareAuthoringHistory'
 import { nanoid } from 'nanoid'
 import { MAX_SCENE_NODES } from '../../shared/constants'
-import { courseSlideCanvas } from '../../shared/slideCanvas'
+import { courseSlideCanvas, type SlideCanvasSize } from '../../shared/slideCanvas'
+import { defaultSlideMediaSize } from '../../core/tools/slideInsertion'
 import { mergeCourseNativeData } from '../../shared/courseProjectSchema'
 import { sceneNodeToCourseLayerItem } from '../../shared/courseProjectModel'
 import type {
@@ -595,30 +596,31 @@ function courseImageReplacementSelectionHint(
 function createMediaNode(
   nativeType: 'image' | 'video',
   asset: AssetMeta,
+  canvas: SlideCanvasSize,
   x?: number,
   y?: number,
   id?: string,
 ) {
   if (nativeType === 'image') {
-    const sized = createImageNode(asset.id, asset.width, asset.height, x, y)
+    const size = defaultSlideMediaSize('image', asset.width, asset.height, canvas)
     return createImageNode({
       id: id ?? `image-${nanoid(10)}`,
       name: '图片',
       assetId: asset.id,
-      width: sized.width,
-      height: sized.height,
+      ...size,
       x,
       y,
+      canvas,
     })
   }
   return createVideoNode({
     id: id ?? `video-${nanoid(10)}`,
     name: '视频',
     assetId: asset.id,
-    width: asset.width ?? 640,
-    height: asset.height ?? 360,
+    ...defaultSlideMediaSize('video', asset.width, asset.height, canvas),
     x,
     y,
+    canvas,
   })
 }
 
@@ -817,6 +819,7 @@ function placeMediaItems(
         createMediaNode(
           nativeType,
           item.meta,
+          courseSlideCanvas(draft),
           single ? x : undefined,
           single ? y : undefined,
         ),

@@ -21,7 +21,8 @@ import { bytesToBase64 } from '../../export/base64'
 import { waitForPublishedObservationReady } from '../../../player/surfaces/publishedCapture'
 import type { BackgroundPreview } from '../backgroundPreview'
 import { MAX_GENERATION_RESOURCE_BYTES } from '../../../shared/generationContract'
-import { LOGICAL_STAGE_VIEWPORT } from '../stageViewportTransform'
+import { logicalStageViewport } from '../stageViewportTransform'
+import { courseSlideCanvas } from '../../../shared/slideCanvas'
 import { observeRuntimeDomControls, type RuntimeDomObservationTarget } from './runtimeDomControlObservation'
 import { collectCurrentHostMotion, currentHostMotionEvidenceSchema } from './currentHostMotionObservation'
 import {
@@ -368,7 +369,7 @@ export function createAuthoringObservationController(ports: AuthoringObservation
         throw new AuthoringObservationUnavailable('当前镜头尚未绘制到 Spatial 画布')
       }
       spatialView = authoringObservationSpatialViewSchema.parse({ camera: state.spatialCamera,
-        viewport: LOGICAL_STAGE_VIEWPORT, coordinateSpace: 'world', cameraAnchor: 'viewport-center', globalCoordinateSpace: 'viewport' })
+        viewport: logicalStageViewport(courseSlideCanvas(state.document)), coordinateSpace: 'world', cameraAnchor: 'viewport-center', globalCoordinateSpace: 'viewport' })
     }
     return { root, source: 'authoring', runtime: null, viewEpoch: authoringDomEpoch, interactionEpoch: authoringInteractionEpoch,
       spatialView,

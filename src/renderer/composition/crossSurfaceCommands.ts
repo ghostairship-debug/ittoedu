@@ -304,6 +304,8 @@ function sameEditorSelectionSnapshot(
 }
 
 export function createCrossSurfaceCommands(ports: CrossSurfaceCommandPorts) {
+  /** The Slide scene and state edited before a try-run; leaving the try-run returns there. */
+  let runEntry: { sceneId: string; stateId: string | null } | null = null
   /** 内核根选区镜像已删除：编辑范围一律从各 Surface 自有 session 派生。 */
   const readSessionEditingScope = (): 'scene' | 'global' => {
     const spatialSession = ports.spatial.read().spatialSession
@@ -359,11 +361,19 @@ export function createCrossSurfaceCommands(ports: CrossSurfaceCommandPorts) {
           if (backend && typeof backend.getSession === 'function') {
             const session = backend.getSession()
             const currentStateId = session.selection.stateId
-            const scene = findCourseSlideScene(session.history.present, backend.getSnapshot().sceneId)
-            const nextStateId =
-              canvasMode === 'run' && currentStateId === null
-                ? scene?.presentation?.initialStateId ?? currentStateId
-                : currentStateId
+            const sceneId = backend.getSnapshot().sceneId
+            const scene = findCourseSlideScene(session.history.present, sceneId)
+            let nextStateId = currentStateId
+            if (canvasMode === 'run') {
+              // A try-run from 母版 starts at the scene's initial state, as playback does.
+              if (ports.shell.read().canvasMode !== 'run') runEntry = { sceneId, stateId: currentStateId }
+              if (currentStateId === null) nextStateId = scene?.presentation?.initialStateId ?? currentStateId
+            } else if (runEntry) {
+              const entry = runEntry
+              runEntry = null
+              const known = entry.stateId === null || Boolean(scene?.presentation?.states.some(state => state.id === entry.stateId))
+              if (entry.sceneId === sceneId && known) nextStateId = entry.stateId
+            }
             if (nextStateId !== session.selection.stateId) {
               ports.slide.activateState(nextStateId)
             }

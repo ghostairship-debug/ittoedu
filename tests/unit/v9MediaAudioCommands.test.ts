@@ -228,6 +228,30 @@ describe('V9 media/audio commands (MediaTab not wired)', () => {
     expect(sceneItems(media)[1]?.frame.x).toBe(firstX + 20)
   })
 
+  it('M19 centres and sizes new media on the course canvas, including a portrait canvas', () => {
+    const portrait = documentShell()
+    const surface = portrait.surfaces[0]!
+    if (surface.type !== 'slide') throw new Error('expected slide')
+    surface.canvas = { width: 720, height: 1280 }
+    let media = requireMedia(importCourseMediaAssets(openCourseMediaSession(portrait), [
+      { meta: imageMeta('asset-photo'), bytes: Uint8Array.from([1, 2, 3, 4]) },
+      { meta: videoMeta('asset-clip'), bytes: Uint8Array.from([5, 6, 7, 8]) },
+    ], { now: NOW }))
+    media = requireMedia(addCourseLibraryMediaToCanvas(media, 'asset-photo', {}, { now: NOW }))
+    const image = sceneItems(media)[0]!.frame
+    expect(image.width).toBeCloseTo(360)
+    expect(image.height).toBeCloseTo(270)
+    expect(image.x + image.width / 2).toBeCloseTo(360)
+    expect(image.y + image.height / 2).toBeCloseTo(640)
+    media = requireMedia(addCourseLibraryMediaToCanvas(media, 'asset-clip', {}, { now: NOW }))
+    const video = sceneItems(media)[1]!.frame
+    // Videos fit the whole canvas; the next default insertion cascades by 20px from the canvas centre.
+    expect(video.width).toBeCloseTo(720)
+    expect(video.height).toBeCloseTo(405)
+    expect(video.x + video.width / 2).toBeCloseTo(360 + 20)
+    expect(video.y + video.height / 2).toBeCloseTo(640)
+  })
+
   it('batch-places with the MediaTab grid, overflows to the library, and supports replace/crop/delete protection', () => {
     let media = openCourseMediaSession(documentShell())
     const batch = [0, 1, 2].map((index) => ({

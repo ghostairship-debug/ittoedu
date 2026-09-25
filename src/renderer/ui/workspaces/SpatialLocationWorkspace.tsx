@@ -30,13 +30,12 @@ import {
 import {
   clientToWorld,
   createStageViewportTransform,
-  LOGICAL_STAGE_VIEWPORT,
+  logicalStageViewport,
   STAGE_RESIZE_HANDLE_DIRECTIONS,
-  STAGE_VIEWPORT_HEIGHT,
-  STAGE_VIEWPORT_WIDTH,
   type StageSelectionOverlayGeometry,
 } from '../../authoring/stageViewportTransform'
 import { isTeacherControllerLayerItem } from '../../../core/tools/globalLayers'
+import { courseSlideCanvas } from '../../../shared/slideCanvas'
 import type { SpatialEditorWorldTransform } from '../../course/spatialEditorCommands'
 import {
   assertActiveSpatialEditorView,
@@ -350,6 +349,9 @@ export function SpatialLocationWorkspace({
   const tryRunRef = useRef<HTMLDivElement>(null)
   const tryRunMountChainRef = useRef(Promise.resolve())
   const textProxyCanvasRef = useRef<HTMLCanvasElement | null>(null)
+  // The camera frame has the course canvas ratio, so a portrait course keeps a portrait camera (M19).
+  const stageCanvas = courseSlideCanvas(project)
+  const stageViewport = useMemo(() => logicalStageViewport(stageCanvas), [stageCanvas.width, stageCanvas.height])
   const hostRef = useRef<PublishedCourseSession | null>(null)
   const pointerActiveRef = useRef(false)
   const [viewportSize, setViewportSize] = useState({ width: 800, height: 450 })
@@ -427,10 +429,10 @@ export function SpatialLocationWorkspace({
     const painted = stageStackRef.current?.getBoundingClientRect()
     if (!painted || painted.width <= 0 || painted.height <= 0) return null
     return {
-      x: (clientX - painted.left) * STAGE_VIEWPORT_WIDTH / painted.width,
-      y: (clientY - painted.top) * STAGE_VIEWPORT_HEIGHT / painted.height,
+      x: (clientX - painted.left) * stageViewport.width / painted.width,
+      y: (clientY - painted.top) * stageViewport.height / painted.height,
     }
-  }, [])
+  }, [stageViewport])
 
   const liveCamera = previewCamera ?? view.sessionCamera
   const stageTransform = useMemo(() => createStageViewportTransform({
@@ -440,15 +442,16 @@ export function SpatialLocationWorkspace({
       width: Math.max(1, viewportSize.width),
       height: Math.max(1, viewportSize.height),
     },
+    stage: stageViewport,
     zoom: 1,
-  }), [viewportSize.height, viewportSize.width])
+  }), [viewportSize.height, viewportSize.width, stageViewport])
   const worldTransform = useMemo(() => createSpatialWorldViewTransform(
-    LOGICAL_STAGE_VIEWPORT,
+    stageViewport,
     liveCamera,
-  ), [liveCamera])
+  ), [liveCamera, stageViewport])
   const hudTransform = useMemo(() => createSpatialViewportOverlayTransform(
-    LOGICAL_STAGE_VIEWPORT,
-  ), [])
+    stageViewport,
+  ), [stageViewport])
 
   const worldItems = view.layers.filter((layer) => layer.coordinateSpace === 'world')
   const hudItems = view.layers.filter((layer) => layer.coordinateSpace === 'viewport')
@@ -469,9 +472,9 @@ export function SpatialLocationWorkspace({
       return
     }
     const authoring = authoringRef.current
-    setWorldOverlay(authoring.overlayGeometry(LOGICAL_STAGE_VIEWPORT))
-    setHudOverlay(authoring.viewportOverlayGeometry(LOGICAL_STAGE_VIEWPORT))
-  }, [canvasMode, scope, view, selectionIds, controllerDisplayRevision])
+    setWorldOverlay(authoring.overlayGeometry(stageViewport))
+    setHudOverlay(authoring.viewportOverlayGeometry(stageViewport))
+  }, [canvasMode, scope, view, selectionIds, controllerDisplayRevision, stageViewport])
 
   useEffect(() => {
     const container = tryRunRef.current
@@ -529,8 +532,8 @@ export function SpatialLocationWorkspace({
 
   const syncOverlays = () => {
     const authoring = authoringRef.current
-    setWorldOverlay(authoring.overlayGeometry(LOGICAL_STAGE_VIEWPORT))
-    setHudOverlay(authoring.viewportOverlayGeometry(LOGICAL_STAGE_VIEWPORT))
+    setWorldOverlay(authoring.overlayGeometry(stageViewport))
+    setHudOverlay(authoring.viewportOverlayGeometry(stageViewport))
   }
 
   const renderEditableChart = (
@@ -633,8 +636,8 @@ export function SpatialLocationWorkspace({
       style={{
         left: hudTransform.stageRect.x,
         top: hudTransform.stageRect.y,
-        width: STAGE_VIEWPORT_WIDTH,
-        height: STAGE_VIEWPORT_HEIGHT,
+        width: stageViewport.width,
+        height: stageViewport.height,
         transform: `scale(${hudTransform.scale})`,
         pointerEvents: 'none',
       }}
@@ -722,8 +725,8 @@ export function SpatialLocationWorkspace({
 
   const readMediaDropPoint = (clientX: number, clientY: number) => {
     const stage = readLogicalPointer(clientX, clientY)
-    if (!stage || stage.x < 0 || stage.y < 0 || stage.x > STAGE_VIEWPORT_WIDTH || stage.y > STAGE_VIEWPORT_HEIGHT) return null
-    return clientToWorld(createSpatialWorldViewTransform(LOGICAL_STAGE_VIEWPORT, view.sessionCamera), stage)
+    if (!stage || stage.x < 0 || stage.y < 0 || stage.x > stageViewport.width || stage.y > stageViewport.height) return null
+    return clientToWorld(createSpatialWorldViewTransform(stageViewport, view.sessionCamera), stage)
   }
   const dropWorkspaceMedia = (event: React.DragEvent<HTMLDivElement>) => {
     if (!event.dataTransfer.types.includes(WORKSPACE_MEDIA_DRAG_TYPE) || !onDropWorkspaceMedia) return
@@ -749,11 +752,11 @@ export function SpatialLocationWorkspace({
       const { canvasMode, cameraZoom } = wheelZoom.current
       if (canvasMode !== 'edit' || (!event.ctrlKey && !event.metaKey)) return
       event.preventDefault()
-      authoringRef.current.zoomSession(cameraZoom + (event.deltaY > 0 ? -0.1 : 0.1), LOGICAL_STAGE_VIEWPORT)
+      authoringRef.current.zoomSession(cameraZoom + (event.deltaY > 0 ? -0.1 : 0.1), stageViewport)
     }
     element.addEventListener('wheel', zoomByWheel, { passive: false })
     return () => element.removeEventListener('wheel', zoomByWheel)
-  }, [])
+  }, [stageViewport])
 
   return (
     <main
@@ -788,7 +791,7 @@ export function SpatialLocationWorkspace({
             onClick={() => {
               authoringRef.current.zoomSession(
                 cameraZoom - 0.1,
-                LOGICAL_STAGE_VIEWPORT,
+                stageViewport,
               )
             }}
           >
@@ -801,7 +804,7 @@ export function SpatialLocationWorkspace({
             onClick={() => {
               authoringRef.current.zoomSession(
                 cameraZoom + 0.1,
-                LOGICAL_STAGE_VIEWPORT,
+                stageViewport,
               )
             }}
           >
@@ -864,13 +867,13 @@ export function SpatialLocationWorkspace({
           const pointer = { ...stagePoint, additive: event.shiftKey }
           const world = clientToWorld(
             createSpatialWorldViewTransform(
-              LOGICAL_STAGE_VIEWPORT,
+              stageViewport,
               view.sessionCamera,
             ),
             pointer,
           )
           const hudPoint = clientToWorld(
-            createSpatialViewportOverlayTransform(LOGICAL_STAGE_VIEWPORT),
+            createSpatialViewportOverlayTransform(stageViewport),
             pointer,
           )
           const layerHit = hitTestV9SpatialLayerItems(
@@ -904,7 +907,7 @@ export function SpatialLocationWorkspace({
           const captureTarget = event.target instanceof Element && event.target.closest('[data-testid="editable-chart-view"]')
             ? event.target : event.currentTarget
           captureTarget.setPointerCapture(event.pointerId)
-          const result = authoringRef.current.pointerDown(pointer, LOGICAL_STAGE_VIEWPORT)
+          const result = authoringRef.current.pointerDown(pointer, stageViewport)
           setPreviewFrames(result.preview ?? null)
           setPreviewCamera(result.previewCamera ?? null)
           syncOverlays()
@@ -916,7 +919,7 @@ export function SpatialLocationWorkspace({
           const result = authoringRef.current.pointerMove({
             ...stagePoint,
             additive: event.shiftKey,
-          }, LOGICAL_STAGE_VIEWPORT)
+          }, stageViewport)
           setPreviewFrames(result.preview ?? null)
           setPreviewCamera(result.previewCamera ?? null)
           syncOverlays()
@@ -929,9 +932,9 @@ export function SpatialLocationWorkspace({
             authoringRef.current.pointerUp({
               ...stagePoint,
               additive: event.shiftKey,
-            }, LOGICAL_STAGE_VIEWPORT)
+            }, stageViewport)
           } else {
-            authoringRef.current.pointerCancel(LOGICAL_STAGE_VIEWPORT)
+            authoringRef.current.pointerCancel(stageViewport)
           }
           setPreviewFrames(null)
           setPreviewCamera(null)
@@ -943,7 +946,7 @@ export function SpatialLocationWorkspace({
         onPointerCancel={(event) => {
           if (!pointerActiveRef.current) return
           pointerActiveRef.current = false
-          authoringRef.current.pointerCancel(LOGICAL_STAGE_VIEWPORT)
+          authoringRef.current.pointerCancel(stageViewport)
           setPreviewFrames(null)
           setPreviewCamera(null)
           syncOverlays()
@@ -957,10 +960,10 @@ export function SpatialLocationWorkspace({
           if (!stagePoint) return
           if (activeTextPreview?.target.kind === 'course-object') {
             const world = clientToWorld(createSpatialWorldViewTransform(
-              LOGICAL_STAGE_VIEWPORT, view.sessionCamera,
+              stageViewport, view.sessionCamera,
             ), stagePoint)
             const viewport = clientToWorld(createSpatialViewportOverlayTransform(
-              LOGICAL_STAGE_VIEWPORT,
+              stageViewport,
             ), stagePoint)
             const hit = hitTestV9SpatialLayerItems(adaptV9SpatialEditorLayers(view.layers), {
               viewport, world,
@@ -971,7 +974,7 @@ export function SpatialLocationWorkspace({
               return
             }
           }
-          authoringRef.current.doubleClick(stagePoint, LOGICAL_STAGE_VIEWPORT)
+          authoringRef.current.doubleClick(stagePoint, stageViewport)
         }}
       >
         <div
@@ -981,8 +984,8 @@ export function SpatialLocationWorkspace({
           style={{
             left: stageTransform.stageRect.x,
             top: stageTransform.stageRect.y,
-            width: STAGE_VIEWPORT_WIDTH,
-            height: STAGE_VIEWPORT_HEIGHT,
+            width: stageViewport.width,
+            height: stageViewport.height,
             transform: `scale(${stageTransform.scale})`,
             transition: 'none',
             backgroundColor: view.backgroundColor,
@@ -1034,8 +1037,8 @@ export function SpatialLocationWorkspace({
                 }}
               />
               {showCameraFrames && view.camera.frames.map((frame) => {
-                const width = STAGE_VIEWPORT_WIDTH / frame.zoom
-                const height = STAGE_VIEWPORT_HEIGHT / frame.zoom
+                const width = stageViewport.width / frame.zoom
+                const height = stageViewport.height / frame.zoom
                 return (
                   <div
                     key={frame.id}

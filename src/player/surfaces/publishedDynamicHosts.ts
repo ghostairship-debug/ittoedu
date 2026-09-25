@@ -12,7 +12,7 @@ import {
   type PlaybackNavigationProgress,
   type PlaybackNavigationViewPort,
 } from '../navigation/coursePlaybackSequence'
-import { DEFAULT_SLIDE_CANVAS } from '../../shared/slideCanvas'
+import { courseSlideCanvas } from '../../shared/slideCanvas'
 
 import type { CourseLocation } from '../../shared/courseProjectTypes'
 import type { PublishedCourseSurface, PublishedCourseV2Payload } from '../../shared/publishedCourseTypes'
@@ -245,7 +245,8 @@ function createPublishedSurfaceHostInternal(
     surface.id,
     {
       startLocationId,
-      viewport: { width: DEFAULT_SLIDE_CANVAS.width, height: DEFAULT_SLIDE_CANVAS.height },
+      // The camera frame has the course canvas ratio (M19).
+      viewport: courseSlideCanvas(payload),
       resolveAsset,
       playbackPathId: options.playbackPathId,
       globalInteractionVisibilityState: options.globalInteractionVisibilityState,

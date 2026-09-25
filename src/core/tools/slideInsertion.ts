@@ -317,6 +317,22 @@ export function planSlideShapeInsertion(document: CourseProjectDocument, owner: 
     }, now)
     return { project, itemId: node.id }
 }
+/**
+ * Default size of new media on the course canvas, keeping its aspect ratio: images fit half the canvas width and
+ * two thirds of its height (640×480 on 1280×720); videos fit the whole canvas.
+ */
+export function defaultSlideMediaSize(
+  kind: 'image' | 'video',
+  width: number | undefined,
+  height: number | undefined,
+  canvas: { readonly width: number; readonly height: number },
+): { width: number; height: number } {
+  const valid = width !== undefined && height !== undefined && Number.isFinite(width) && Number.isFinite(height) && width > 0 && height > 0
+  const source = valid ? { width, height } : kind === 'image' ? { width: 320, height: 180 } : { width: 640, height: 360 }
+  const limit = kind === 'image' ? { width: canvas.width / 2, height: canvas.height * 2 / 3 } : canvas
+  const scale = Math.min(1, limit.width / source.width, limit.height / source.height)
+  return { width: source.width * scale, height: source.height * scale }
+}
 export function planSlideImageInsertion(document: CourseProjectDocument, owner: SlideInsertionOwner, input: AddSlideImageLayerInput, now?: string) {
     requireSceneScope(owner)
     requireSlideAsset(document, input.assetId, 'image')
@@ -324,7 +340,7 @@ export function planSlideImageInsertion(document: CourseProjectDocument, owner: 
       ? document.globalLayerItems.length
       : slideSceneContext(document, owner).scene.layerItems.length
     const asset = document.assets[input.assetId]!
-    const sized = createImageNode(input.assetId, asset.width, asset.height, input.x, input.y)
+    const sized = defaultSlideMediaSize('image', asset.width, asset.height, courseSlideCanvas(document))
     const node = offsetDefaultSlideInsertion(
       createImageNode({
         id: stableId('image', input.id),
@@ -351,13 +367,14 @@ export function planSlideVideoInsertion(document: CourseProjectDocument, owner: 
       ? document.globalLayerItems.length
       : slideSceneContext(document, owner).scene.layerItems.length
     const asset = document.assets[input.assetId]!
+    const sized = defaultSlideMediaSize('video', asset.width, asset.height, courseSlideCanvas(document))
     const node = offsetDefaultSlideInsertion(
       createVideoNode({
         id: stableId('video', input.id),
         name: input.label ?? '视频',
         assetId: input.assetId,
-        width: input.width ?? asset.width ?? 640,
-        height: input.height ?? asset.height ?? 360,
+        width: input.width ?? sized.width,
+        height: input.height ?? sized.height,
         x: input.x,
         y: input.y,
         canvas: courseSlideCanvas(document),

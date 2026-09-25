@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import {
   selectActiveCourseLocationId,
   selectActiveCourseProjectDocument,
+  selectActivePresentationStateId,
   selectSlideAuthoringBackend,
   useEditorStore,
 } from '@/renderer/store/editorStore'
@@ -48,6 +49,19 @@ describe('Mixed try-run location mode', () => {
     useEditorStore.getState().setCanvasMode('edit')
     useEditorStore.getState().activateCourseLocation(flow.id)
     expect(useEditorStore.getState().canvasMode).toBe('edit')
+  })
+
+  it('returns to the state edited before a try-run started from the master', async () => {
+    const before = selectActivePresentationStateId(useEditorStore.getState())
+    useEditorStore.getState().setActivePresentationState(null)
+    await settleCourse()
+    expect(selectActivePresentationStateId(useEditorStore.getState())).toBeNull()
+    useEditorStore.getState().setCanvasMode('run')
+    // The try-run starts at the scene's initial state, as playback does.
+    expect(selectActivePresentationStateId(useEditorStore.getState())).not.toBeNull()
+    useEditorStore.getState().setCanvasMode('edit')
+    expect(selectActivePresentationStateId(useEditorStore.getState())).toBeNull()
+    useEditorStore.getState().setActivePresentationState(before)
   })
 
   it('does not drop try-run when clearing the presentation state', () => {
