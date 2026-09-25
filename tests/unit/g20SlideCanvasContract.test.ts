@@ -61,3 +61,16 @@ describe('M19 Slide canvas contract', () => {
     expect(rotatedRectIntersectsStage(rect, 0, { width: 720, height: 1280 })).toBe(false)
   })
 })
+
+it('M19 lets the editor stage and its Phaser canvas follow the course canvas instead of 1280×720', async () => {
+  const { readFileSync } = await import('node:fs')
+  const css = readFileSync('src/renderer/styles/globals.css', 'utf8')
+  // The stack is sized inline from the course canvas; a fixed px box here stretched the hit and selection layer.
+  for (const selector of ['.canvas-stage', '.canvas-stage canvas']) {
+    const block = css.match(new RegExp(`(?:^|\n)${selector.replace(/[.]/g, '\.')} \{([^}]*)\}`))?.[1]
+    expect(block, selector).toBeDefined()
+    expect(block, selector).not.toMatch(/(?:width|height):\s*\d+px/)
+    expect(block, selector).toMatch(/width:\s*100%/)
+    expect(block, selector).toMatch(/height:\s*100%/)
+  }
+})
