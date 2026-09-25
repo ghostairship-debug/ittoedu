@@ -1,0 +1,755 @@
+import { createHash } from 'node:crypto'
+import { tokenizer, tokTypes } from 'acorn'
+import type {
+  ExtractedResource,
+  ExtractedResourceOrigin,
+  ExtractHtmlResourcesInput,
+  ExtractHtmlResourcesResult,
+  ImportDiagnostic,
+  RemoteReference,
+} from './types'
+
+export type { ExtractedResource, ExtractedResourceOrigin, ExtractHtmlResourcesInput, ExtractHtmlResourcesResult, ImportDiagnostic, RemoteReference }
+
+type Context = ExtractedResourceOrigin['context']
+type Sink = {
+  resources: Map<string, ExtractedResource>
+  remoteReferences: RemoteReference[]
+  diagnostics: ImportDiagnostic[]
+}
+type Flags = { url: boolean; remote: boolean }
+type DataHit = {
+  kind: 'media' | 'non-base64' | 'unsupported' | 'invalid'
+  mime: string
+  bytes?: Uint8Array
+  end: number
+  text: string
+}
+type ParsedAttr = {
+  name: string
+  rawName: string
+  hasValue: boolean
+  quote: '"' | "'" | ''
+  rawValue: string
+  value: string
+  changed: boolean
+  drop: boolean
+}
+type StartTag = { rawName: string; name: string; attrs: ParsedAttr[]; end: number; selfClosing: boolean }
+
+const TOKEN = /[!#$%&'*+.^_`|~0-9A-Za-z-]/
+const MEDIA_TYPES: Record<string, string> = {
+  png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', svg: 'image/svg+xml',
+  ico: 'image/x-icon', bmp: 'image/bmp', avif: 'image/avif', apng: 'image/apng', mp3: 'audio/mpeg', wav: 'audio/wav',
+  ogg: 'audio/ogg', m4a: 'audio/mp4', aac: 'audio/aac', flac: 'audio/flac', weba: 'audio/webm', mp4: 'video/mp4',
+  webm: 'video/webm', ogv: 'video/ogg', mov: 'video/quicktime', m4v: 'video/mp4', woff: 'font/woff', woff2: 'font/woff2',
+  ttf: 'font/ttf', otf: 'font/otf', eot: 'application/vnd.ms-fontobject', css: 'text/css', js: 'text/javascript',
+  mjs: 'text/javascript', json: 'application/json', wasm: 'application/wasm', txt: 'text/plain', html: 'text/html', htm: 'text/html',
+}
+const RAW_TEXT = new Set(['title', 'textarea', 'noscript'])
+
+const clip = (value: string, max = 64) => value.length <= max ? value : value.slice(0, max)
+const copyBytes = (bytes: Uint8Array) => new Uint8Array(bytes)
+const placeholder = (key: string) => `cw-resource:${key}`
+const createSink = (): Sink => ({ resources: new Map(), remoteReferences: [], diagnostics: [] })
+
+function addDiagnostic(sink: Sink, level: ImportDiagnostic['level'], code: string, message: string, reference?: string) {
+  sink.diagnostics.push(reference === undefined ? { level, code, message } : { level, code, message, reference })
+}
+
+function addResource(sink: Sink, bytes: Uint8Array, mediaType: string, origin: ExtractedResourceOrigin): string {
+  const key = createHash('sha256').update(bytes).digest('hex')
+  const existing = sink.resources.get(key)
+  if (existing) existing.origins.push(origin)
+  else sink.resources.set(key, { key, mediaType, bytes: copyBytes(bytes), origins: [origin] })
+  return key
+}
+
+function decodeBase64(payload: string): Uint8Array | null {
+  const compact = payload.replace(/[\t\n\f\r ]/g, '')
+  if (compact.length % 4 === 1 || (compact && !/^[A-Za-z0-9+/]*={0,2}$/.test(compact))) return null
+  const pad = compact.indexOf('=')
+  if (pad !== -1 && (!/^={1,2}$/.test(compact.slice(pad)) || compact.length % 4 !== 0)) return null
+  const buffer = Buffer.from(compact, 'base64')
+  if (buffer.toString('base64').replace(/=+$/, '') !== compact.replace(/=+$/, '')) return null
+  return new Uint8Array(buffer)
+}
+
+function parseDataUri(text: string, index: number, allowWhitespace: boolean): DataHit | null {
+  if (text.slice(index, index + 5).toLowerCase() !== 'data:') return null
+  let j = index + 5
+  const readToken = () => {
+    const start = j
+    while (j < text.length && TOKEN.test(text[j])) j++
+    return text.slice(start, j)
+  }
+  const type = readToken()
+  if (!type) return null
+  if (text[j] === '\\' && text[j + 1] === '/') j += 2
+  else if (text[j] === '/') j++
+  else return null
+  const subtype = readToken()
+  if (!subtype) return null
+  const mime = `${type}/${subtype}`.toLowerCase()
+  let base64 = false
+  while (text[j] === ';') {
+    if (text.slice(j, j + 8).toLowerCase() === ';base64,') { base64 = true; j += 8; break }
+    j++
+    if (!readToken()) return null
+    if (text[j] !== '=') continue
+    j++
+    const quote = text[j]
+    if (quote === '"' || quote === "'") {
+      j++
+      while (j < text.length && text[j] !== quote) j += text[j] === '\\' ? 2 : 1
+      if (text[j] !== quote) return null
+      j++
+    } else if (!readToken()) return null
+  }
+  if (!base64) {
+    if (text[j] !== ',') return null
+    j++
+    while (j < text.length && !/[\t\n\f\r ]/.test(text[j])) j++
+    return { kind: 'non-base64', mime, end: j, text: text.slice(index, j) }
+  }
+  const dataStart = j
+  while (j < text.length) {
+    const ch = text[j]
+    if (/[A-Za-z0-9+/=]/.test(ch) || (allowWhitespace && /[\t\n\f\r ]/.test(ch))) { j++; continue }
+    break
+  }
+  while (j > dataStart && /[\t\n\f\r ]/.test(text[j - 1])) j--
+  const uriText = text.slice(index, j)
+  const bytes = decodeBase64(text.slice(dataStart, j))
+  if (!bytes) return { kind: 'invalid', mime, end: j, text: uriText }
+  if (!/^(image|audio|video|font)\//.test(mime)) return { kind: 'unsupported', mime, end: j, text: uriText }
+  return { kind: 'media', mime, bytes, end: j, text: uriText }
+}
+
+function dataUriReplacement(hit: DataHit, context: Context, sink: Sink): { replacement: string; changed: boolean } {
+  const reference = clip(hit.text)
+  if (hit.kind === 'media' && hit.bytes) {
+    return { replacement: placeholder(addResource(sink, hit.bytes, hit.mime, { kind: 'data-uri', context, reference })), changed: true }
+  }
+  const invalid = hit.kind === 'invalid'
+  addDiagnostic(
+    sink,
+    invalid ? 'error' : 'info',
+    invalid ? 'invalid-base64' : hit.kind === 'unsupported' ? 'unsupported-data-uri-type' : 'non-base64-data-uri',
+    invalid ? 'data URI 的 base64 无法解码，已保留原文' : hit.kind === 'unsupported' ? `未抽取 ${hit.mime} data URI` : '非 base64 data URI 已保留',
+    reference,
+  )
+  return { replacement: hit.text, changed: false }
+}
+
+function decodeEntities(value: string): string {
+  if (!value.includes('&')) return value
+  return value.replace(/&(#x[0-9a-fA-F]+|#\d+|amp|lt|gt|quot|apos);/g, (_entity, body: string) => {
+    if (body === 'amp') return '&'
+    if (body === 'lt') return '<'
+    if (body === 'gt') return '>'
+    if (body === 'quot') return '"'
+    if (body === 'apos') return "'"
+    const code = body.startsWith('#x') ? Number.parseInt(body.slice(2), 16) : Number.parseInt(body.slice(1), 10)
+    return Number.isFinite(code) && code >= 0 && code <= 0x10ffff ? String.fromCodePoint(code) : _entity
+  })
+}
+
+function normalizeKey(key: string): string {
+  const parts: string[] = []
+  for (const part of key.replace(/\\/g, '/').split('/')) {
+    if (!part || part === '.') continue
+    if (part === '..') { if (parts.length === 0) return key.replace(/\\/g, '/'); parts.pop(); continue }
+    parts.push(part)
+  }
+  return parts.join('/')
+}
+
+function siblingMap(files: ReadonlyMap<string, Uint8Array> | undefined): Map<string, Uint8Array> {
+  const map = new Map<string, Uint8Array>()
+  if (!files) return map
+  for (const [key, bytes] of files) {
+    const normalized = normalizeKey(key)
+    if (!map.has(normalized)) map.set(normalized, bytes)
+  }
+  return map
+}
+
+function extensionOf(reference: string): string {
+  const clean = reference.split(/[?#]/, 1)[0] ?? ''
+  const base = clean.split('/').pop() ?? ''
+  const dot = base.lastIndexOf('.')
+  return dot <= 0 ? '' : base.slice(dot + 1).toLowerCase()
+}
+
+function directoryOf(key: string): string {
+  const index = key.lastIndexOf('/')
+  return index === -1 ? '' : key.slice(0, index)
+}
+
+function mediaTypeForPath(key: string): string {
+  return MEDIA_TYPES[extensionOf(key)] ?? 'application/octet-stream'
+}
+
+function resolveRelative(baseDir: string, reference: string): string | null {
+  let raw = reference.trim()
+  if (!raw || raw.startsWith('#') || raw.startsWith('//') || /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(raw)) return null
+  raw = (raw.split('#', 1)[0] ?? '').split('?', 1)[0] ?? ''
+  if (!raw) return null
+  try { raw = decodeURI(raw) } catch { /* 保留无法解码的路径文本 */ }
+  const absolute = raw.startsWith('/') || raw.startsWith('\\')
+  const parts = (absolute ? [] : baseDir ? baseDir.split('/') : []).concat(raw.replace(/\\/g, '/').split('/'))
+  const out: string[] = []
+  for (const part of parts) {
+    if (!part || part === '.') continue
+    if (part === '..') { if (out.length === 0) return null; out.pop(); continue }
+    out.push(part)
+  }
+  return out.join('/')
+}
+
+function rewriteRelative(reference: string, context: Context, baseDir: string, sink: Sink, siblings: Map<string, Uint8Array>): { value: string; changed: boolean } {
+  const key = resolveRelative(baseDir, reference)
+  const bytes = key ? siblings.get(key) : undefined
+  if (!key || !bytes) {
+    addDiagnostic(sink, 'error', 'missing-relative-resource', `找不到相对资源 ${clip(reference, 180)}`, reference)
+    return { value: reference, changed: false }
+  }
+  return {
+    value: placeholder(addResource(sink, bytes, mediaTypeForPath(key), { kind: 'relative', context, reference })),
+    changed: true,
+  }
+}
+
+function rewriteSingleUrl(rawUrl: string, context: Context, baseDir: string, sink: Sink, siblings: Map<string, Uint8Array>, allowWhitespace: boolean): { value: string; changed: boolean } {
+  const lead = rawUrl.match(/^[\t\n\f\r ]*/)?.[0] ?? ''
+  const trail = rawUrl.match(/[\t\n\f\r ]*$/)?.[0] ?? ''
+  const core = rawUrl.slice(lead.length, rawUrl.length - trail.length)
+  if (!core || core.startsWith('#')) return { value: rawUrl, changed: false }
+  if (core.startsWith('//')) { sink.remoteReferences.push({ url: core, context }); return { value: rawUrl, changed: false } }
+  if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(core)) {
+    if (/^https?:/i.test(core)) { sink.remoteReferences.push({ url: core, context }); return { value: rawUrl, changed: false } }
+    if (/^data:/i.test(core)) {
+      const hit = parseDataUri(core, 0, allowWhitespace)
+      if (!hit) return { value: rawUrl, changed: false }
+      const applied = dataUriReplacement(hit, context, sink)
+      if (!applied.changed) return { value: rawUrl, changed: false }
+      return { value: lead + applied.replacement + core.slice(hit.end) + trail, changed: true }
+    }
+    return { value: rawUrl, changed: false }
+  }
+  const relative = rewriteRelative(core, context, baseDir, sink, siblings)
+  return relative.changed ? { value: lead + relative.value + trail, changed: true } : { value: rawUrl, changed: false }
+}
+
+function folded(text: string): string {
+  const lower = text.toLowerCase()
+  return lower.length === text.length ? lower : text
+}
+
+function indexOfUrl(lower: string, from: number): number {
+  let index = from
+  while ((index = lower.indexOf('url', index)) !== -1) {
+    const prev = index > 0 ? lower[index - 1] : ''
+    if (prev && /[a-z0-9_\-%]/.test(prev)) { index += 3; continue }
+    let j = index + 3
+    while (j < lower.length && /[\t\n\f\r ]/.test(lower[j])) j++
+    if (lower[j] === '(') return index
+    index += 3
+  }
+  return -1
+}
+
+function findNext(text: string, lower: string, from: number, flags: Flags): number {
+  let best = -1
+  const consider = (index: number) => { if (index !== -1 && (best === -1 || index < best)) best = index }
+  consider(lower.indexOf('data:', from))
+  if (flags.url) consider(indexOfUrl(lower, from))
+  if (flags.remote) {
+    consider(lower.indexOf('http://', from))
+    consider(lower.indexOf('https://', from))
+    consider(text.indexOf('//', from))
+  }
+  return best
+}
+
+function readUrlCall(text: string, index: number): { inner: string; quote: '"' | "'" | ''; end: number } | null {
+  let j = index + 3
+  while (j < text.length && /[\t\n\f\r ]/.test(text[j])) j++
+  if (text[j] !== '(') return null
+  j++
+  while (j < text.length && /[\t\n\f\r ]/.test(text[j])) j++
+  let quote: '"' | "'" | '' = ''
+  if (text[j] === '"' || text[j] === "'") { quote = text[j] as '"' | "'"; j++ }
+  const innerStart = j
+  if (quote) {
+    while (j < text.length && text[j] !== quote) j += text[j] === '\\' ? 2 : 1
+    const innerEnd = j
+    if (text[j] === quote) j++
+    while (j < text.length && /[\t\n\f\r ]/.test(text[j])) j++
+    if (text[j] === ')') j++
+    return { inner: text.slice(innerStart, innerEnd), quote, end: j }
+  }
+  while (j < text.length && text[j] !== ')' && !/[\t\n\f\r ]/.test(text[j])) j++
+  const innerEnd = j
+  while (j < text.length && /[\t\n\f\r ]/.test(text[j])) j++
+  if (text[j] === ')') j++
+  return { inner: text.slice(innerStart, innerEnd), quote, end: j }
+}
+
+function renderUrl(quote: '"' | "'" | '', value: string): string {
+  if (!quote && /^[^\s"'()\\]+$/.test(value)) return `url(${value})`
+  const used = quote || '"'
+  const escaped = value.replace(/\\/g, '\\\\').replaceAll(used, `\\${used}`)
+  return `url(${used}${escaped}${used})`
+}
+
+function readRemote(text: string, index: number): { url: string; end: number } | null {
+  const prev = index > 0 ? text[index - 1] : ''
+  if (prev && /[A-Za-z0-9:/]/.test(prev)) return null
+  const head = text.slice(index, index + 8).toLowerCase()
+  if (head.startsWith('http://') || head.startsWith('https://')) {
+    let j = index
+    while (j < text.length && !/[\s"'`<>\\)]/.test(text[j])) j++
+    return j > index ? { url: text.slice(index, j), end: j } : null
+  }
+  if (!text.startsWith('//', index)) return null
+  const match = /^\/\/(?:localhost|[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+)(?::\d+)?(?:\/[^\s"'`<>\\)]*)?/i.exec(text.slice(index))
+  return match ? { url: match[0], end: index + match[0].length } : null
+}
+
+function rewriteEmbedded(text: string, context: Context, baseDir: string, sink: Sink, siblings: Map<string, Uint8Array>, flags: Flags, allowWhitespace: boolean): string {
+  if (!/data:|url\s*\(|https?:\/\/|\/\//i.test(text)) return text
+  const lower = folded(text)
+  const parts: string[] = []
+  let cursor = 0
+  let i = 0
+  let changed = false
+  while (i < text.length) {
+    const next = findNext(text, lower, i, flags)
+    if (next < 0) break
+    const head = lower.slice(next, next + 5)
+    if (head === 'data:') {
+      const hit = parseDataUri(text, next, allowWhitespace)
+      if (!hit) { i = next + 5; continue }
+      const applied = dataUriReplacement(hit, context, sink)
+      if (applied.changed) {
+        changed = true
+        parts.push(text.slice(cursor, next), applied.replacement)
+        cursor = hit.end
+      }
+      i = hit.end
+      continue
+    }
+    if (flags.url && lower.startsWith('url', next)) {
+      const call = readUrlCall(text, next)
+      if (!call) { i = next + 3; continue }
+      const inner = rewriteSingleUrl(call.inner, context, baseDir, sink, siblings, Boolean(call.quote))
+      if (inner.changed) {
+        changed = true
+        parts.push(text.slice(cursor, next), renderUrl(call.quote, inner.value.trim()))
+        cursor = call.end
+      }
+      i = call.end > next ? call.end : next + 3
+      continue
+    }
+    const remote = flags.remote ? readRemote(text, next) : null
+    if (remote) {
+      sink.remoteReferences.push({ url: remote.url, context })
+      i = remote.end
+      continue
+    }
+    i = next + 1
+  }
+  if (!changed) return text
+  parts.push(text.slice(cursor))
+  return parts.join('')
+}
+
+function rewriteCss(css: string, baseDir: string, sink: Sink, siblings: Map<string, Uint8Array>): string {
+  const lower = folded(css)
+  const parts: string[] = []
+  let cursor = 0
+  let i = 0
+  let changed = false
+  const nextAt = (from: number) => {
+    let best = -1
+    const consider = (index: number) => { if (index !== -1 && (best === -1 || index < best)) best = index }
+    consider(css.indexOf('/*', from))
+    consider(css.indexOf('"', from))
+    consider(css.indexOf("'", from))
+    consider(indexOfUrl(lower, from))
+    consider(lower.indexOf('data:', from))
+    return best
+  }
+  while (i < css.length) {
+    const next = nextAt(i)
+    if (next < 0) break
+    if (css.startsWith('/*', next)) {
+      const end = css.indexOf('*/', next + 2)
+      i = end === -1 ? css.length : end + 2
+      continue
+    }
+    const quote = css[next]
+    if (quote === '"' || quote === "'") {
+      let j = next + 1
+      while (j < css.length && css[j] !== quote) j += css[j] === '\\' ? 2 : 1
+      const closed = j < css.length
+      if (closed) j++
+      const inner = css.slice(next + 1, closed ? j - 1 : j)
+      const rewritten = rewriteEmbedded(inner, 'css-url', baseDir, sink, siblings, { url: false, remote: false }, false)
+      if (rewritten !== inner) {
+        changed = true
+        parts.push(css.slice(cursor, next), quote + rewritten + (closed ? quote : ''))
+        cursor = j
+      }
+      i = j
+      continue
+    }
+    if (lower.startsWith('url', next)) {
+      const call = readUrlCall(css, next)
+      if (!call) { i = next + 3; continue }
+      const inner = rewriteSingleUrl(call.inner, 'css-url', baseDir, sink, siblings, Boolean(call.quote))
+      if (inner.changed) {
+        changed = true
+        parts.push(css.slice(cursor, next), renderUrl(call.quote, inner.value.trim()))
+        cursor = call.end
+      }
+      i = call.end > next ? call.end : next + 3
+      continue
+    }
+    const hit = parseDataUri(css, next, false)
+    if (!hit) { i = next + 5; continue }
+    const applied = dataUriReplacement(hit, 'css-url', sink)
+    if (applied.changed) {
+      changed = true
+      parts.push(css.slice(cursor, next), applied.replacement)
+      cursor = hit.end
+    }
+    i = hit.end
+  }
+  if (!changed) return css
+  parts.push(css.slice(cursor))
+  return parts.join('')
+}
+
+function rewriteJavaScript(code: string, sourceType: 'script' | 'module', baseDir: string, sink: Sink, siblings: Map<string, Uint8Array>): string {
+  let tokens: Array<{ type: typeof tokTypes.string; start: number; end: number }>
+  try {
+    tokens = [...tokenizer(code, { ecmaVersion: 'latest', sourceType, allowHashBang: true, locations: false })]
+  } catch {
+    addDiagnostic(sink, 'warning', 'script-parse', '脚本无法按 JavaScript 解析，仅替换其中的 data URI')
+    return rewriteEmbedded(code, 'js-string', baseDir, sink, siblings, { url: false, remote: false }, false)
+  }
+  const parts: string[] = []
+  let cursor = 0
+  let changed = false
+  for (const token of tokens) {
+    const quoted = token.type === tokTypes.string
+    const template = token.type === tokTypes.template || token.type === tokTypes.invalidTemplate
+    if (!quoted && !template) continue
+    const raw = code.slice(token.start, token.end)
+    const inner = quoted ? raw.slice(1, -1) : raw
+    const rewritten = rewriteEmbedded(inner, 'js-string', baseDir, sink, siblings, { url: true, remote: true }, false)
+    if (rewritten === inner) continue
+    changed = true
+    parts.push(code.slice(cursor, token.start), quoted ? raw[0] + rewritten + raw[raw.length - 1] : rewritten)
+    cursor = token.end
+  }
+  if (!changed) return code
+  parts.push(code.slice(cursor))
+  return parts.join('')
+}
+
+function neutralizeScriptClose(code: string): string {
+  return code.replace(/<\/script/gi, '<\\/script')
+}
+
+function neutralizeStyleClose(css: string): string {
+  return css.replace(/<\/style/gi, '\\003c/style')
+}
+
+function decodeText(bytes: Uint8Array): string {
+  const text = new TextDecoder('utf-8', { fatal: false }).decode(bytes)
+  return text.charCodeAt(0) === 0xfeff ? text.slice(1) : text
+}
+
+function parseStartTag(html: string, index: number): StartTag | null {
+  if (html[index] !== '<' || html[index + 1] === '/' || html[index + 1] === '!' || html[index + 1] === '?' || !/[A-Za-z]/.test(html[index + 1] ?? '')) return null
+  let j = index + 1
+  const nameStart = j
+  j++
+  while (j < html.length && /[A-Za-z0-9:_-]/.test(html[j])) j++
+  const rawName = html.slice(nameStart, j)
+  const attrs: ParsedAttr[] = []
+  while (j < html.length) {
+    const beforeSpace = j
+    while (j < html.length && /[\t\n\f\r ]/.test(html[j])) j++
+    if (j >= html.length) break
+    if (html[j] === '>') return { rawName, name: rawName.toLowerCase(), attrs, end: j + 1, selfClosing: false }
+    if (html[j] === '/' && html[j + 1] === '>') return { rawName, name: rawName.toLowerCase(), attrs, end: j + 2, selfClosing: true }
+    if (j === beforeSpace) break
+    if (!/[^\s=/>]/.test(html[j] ?? '')) { j++; continue }
+    const rawStart = j
+    while (j < html.length && /[^\s=/>]/.test(html[j])) j++
+    const rawAttr = html.slice(rawStart, j)
+    let hasValue = false
+    let quote: '"' | "'" | '' = ''
+    let rawValue = ''
+    const afterName = j
+    while (j < html.length && /[\t\n\f\r ]/.test(html[j])) j++
+    if (html[j] === '=') {
+      hasValue = true
+      j++
+      while (j < html.length && /[\t\n\f\r ]/.test(html[j])) j++
+      if (html[j] === '"' || html[j] === "'") {
+        quote = html[j] as '"' | "'"
+        j++
+        const valueStart = j
+        while (j < html.length && html[j] !== quote) j++
+        rawValue = html.slice(valueStart, j)
+        if (html[j] === quote) j++
+      } else {
+        const valueStart = j
+        while (j < html.length && !/[\t\n\f\r >]/.test(html[j]) && !(html[j] === '/' && html[j + 1] === '>')) j++
+        rawValue = html.slice(valueStart, j)
+      }
+    } else j = afterName
+    attrs.push({ name: rawAttr.toLowerCase(), rawName: rawAttr, hasValue, quote, rawValue, value: rawValue, changed: false, drop: false })
+  }
+  return { rawName, name: rawName.toLowerCase(), attrs, end: Math.min(j + 1, html.length), selfClosing: false }
+}
+
+function readRaw(html: string, from: number, tag: string): { body: string; closeStart: number; closeEnd: number; closed: boolean } {
+  const match = new RegExp(`</${tag}\\s*>`, 'gi')
+  match.lastIndex = from
+  const found = match.exec(html)
+  if (!found || found.index < from) return { body: html.slice(from), closeStart: html.length, closeEnd: html.length, closed: false }
+  return { body: html.slice(from, found.index), closeStart: found.index, closeEnd: found.index + found[0].length, closed: true }
+}
+
+function escapeAttr(value: string, quote: '"' | "'"): string {
+  const escaped = value.replace(/&/g, '&amp;')
+  return quote === '"' ? escaped.replace(/"/g, '&quot;') : escaped.replace(/'/g, '&apos;')
+}
+
+function rebuildStart(tag: StartTag, selfClosing: boolean): string {
+  let out = `<${tag.rawName}`
+  for (const attribute of tag.attrs) {
+    if (attribute.drop) continue
+    out += ` ${attribute.rawName}`
+    if (!attribute.hasValue && !attribute.changed) continue
+    const quote = attribute.quote || '"'
+    const raw = attribute.changed ? escapeAttr(attribute.value, quote) : attribute.rawValue
+    out += `=${quote}${raw}${quote}`
+  }
+  out += selfClosing ? ' />' : '>'
+  return out
+}
+
+function attributeBy(attrs: ParsedAttr[], name: string): ParsedAttr | undefined {
+  return attrs.find(attribute => attribute.name === name)
+}
+
+function relHas(attrs: ParsedAttr[], token: string): boolean {
+  const rel = attributeBy(attrs, 'rel')
+  return Boolean(rel?.hasValue && decodeEntities(rel.rawValue).toLowerCase().split(/\s+/).includes(token))
+}
+
+function javascriptKind(typeValue: string | null): 'script' | 'module' | 'other' {
+  if (typeValue === null) return 'script'
+  const type = decodeEntities(typeValue).trim().toLowerCase()
+  if (!type || type === 'text/javascript' || type === 'application/javascript' || type === 'text/ecmascript' || type === 'application/ecmascript') return 'script'
+  if (type === 'module') return 'module'
+  return 'other'
+}
+
+function rewriteAttributes(tag: StartTag, baseDir: string, sink: Sink, siblings: Map<string, Uint8Array>, href: boolean) {
+  for (const attribute of tag.attrs) {
+    if (!attribute.hasValue || attribute.drop) continue
+    if (attribute.name === 'src' || attribute.name === 'poster' || (href && attribute.name === 'href')) {
+      const result = rewriteSingleUrl(decodeEntities(attribute.rawValue), 'html-attr', baseDir, sink, siblings, true)
+      if (!result.changed) continue
+      attribute.value = result.value.trim()
+      attribute.changed = true
+    } else if (attribute.name === 'srcset') {
+      const decoded = decodeEntities(attribute.rawValue)
+      const next = rewriteSrcset(decoded, baseDir, sink, siblings)
+      if (next === decoded) continue
+      attribute.value = next
+      attribute.changed = true
+    } else if (attribute.name === 'style') {
+      const decoded = decodeEntities(attribute.rawValue)
+      const next = rewriteCss(decoded, baseDir, sink, siblings)
+      if (next === decoded) continue
+      attribute.value = next
+      attribute.changed = true
+    }
+  }
+}
+
+function rewriteSrcset(value: string, baseDir: string, sink: Sink, siblings: Map<string, Uint8Array>): string {
+  const parts: string[] = []
+  let cursor = 0
+  let i = 0
+  let changed = false
+  while (i < value.length) {
+    while (i < value.length && /[\s,]/.test(value[i])) i++
+    if (i >= value.length) break
+    const urlStart = i
+    const hit = /^data:/i.test(value.slice(i, i + 5)) ? parseDataUri(value, i, false) : null
+    let urlEnd = hit ? hit.end : i
+    if (!hit) while (urlEnd < value.length && !/[\s,]/.test(value[urlEnd])) urlEnd++
+    const result = rewriteSingleUrl(decodeEntities(value.slice(urlStart, urlEnd)), 'srcset', baseDir, sink, siblings, false)
+    if (result.changed) {
+      changed = true
+      parts.push(value.slice(cursor, urlStart), result.value.trim())
+      cursor = urlEnd
+    }
+    i = urlEnd
+    while (i < value.length && value[i] !== ',') i++
+  }
+  if (!changed) return value
+  parts.push(value.slice(cursor))
+  return parts.join('')
+}
+
+function keptStyleAttributes(attrs: ParsedAttr[]): ParsedAttr[] {
+  return attrs.filter(attribute => ['media', 'title', 'id', 'class', 'nonce'].includes(attribute.name)).map(attribute => ({ ...attribute }))
+}
+
+function transformHtml(html: string, sink: Sink, siblings: Map<string, Uint8Array>): string {
+  const parts: string[] = []
+  let i = 0
+  while (i < html.length) {
+    if (html.startsWith('<!--', i)) {
+      const end = html.indexOf('-->', i + 4)
+      const stop = end === -1 ? html.length : end + 3
+      const body = html.slice(i + 4, end === -1 ? html.length : end)
+      const rewritten = rewriteEmbedded(body, 'unknown', '', sink, siblings, { url: false, remote: false }, false)
+      parts.push('<!--', rewritten, end === -1 ? '' : '-->')
+      i = stop
+      continue
+    }
+    if (html.startsWith('<!', i) || html.startsWith('<?', i)) {
+      const end = html.indexOf('>', i)
+      const stop = end === -1 ? html.length : end + 1
+      parts.push(html.slice(i, stop))
+      i = stop
+      continue
+    }
+    if (html.startsWith('</', i)) {
+      const end = html.indexOf('>', i)
+      const stop = end === -1 ? html.length : end + 1
+      parts.push(html.slice(i, stop))
+      i = stop
+      continue
+    }
+    if (html[i] !== '<') {
+      const end = html.indexOf('<', i)
+      const stop = end === -1 ? html.length : end
+      parts.push(rewriteEmbedded(html.slice(i, stop), 'unknown', '', sink, siblings, { url: false, remote: false }, false))
+      i = stop
+      continue
+    }
+    const tagStart = i
+    const tag = parseStartTag(html, i)
+    if (!tag) { parts.push(html[i]); i++; continue }
+    if (RAW_TEXT.has(tag.name)) {
+      const raw = readRaw(html, tag.end, tag.name)
+      if (!raw.closed) addDiagnostic(sink, 'warning', 'unclosed-element', `未闭合的 <${tag.name}>`)
+      parts.push(html.slice(tagStart, tag.end), rewriteEmbedded(raw.body, 'unknown', '', sink, siblings, { url: false, remote: false }, false))
+      if (raw.closed) parts.push(html.slice(raw.closeStart, raw.closeEnd))
+      i = raw.closeEnd
+      continue
+    }
+    if (tag.name === 'style' && !tag.selfClosing) {
+      const raw = readRaw(html, tag.end, 'style')
+      if (!raw.closed) addDiagnostic(sink, 'warning', 'unclosed-element', '未闭合的 <style>')
+      parts.push(html.slice(tagStart, tag.end), rewriteCss(raw.body, '', sink, siblings))
+      if (raw.closed) parts.push(html.slice(raw.closeStart, raw.closeEnd))
+      i = raw.closeEnd
+      continue
+    }
+    if (tag.name === 'link') {
+      const href = attributeBy(tag.attrs, 'href')
+      const stylesheet = relHas(tag.attrs, 'stylesheet')
+      const managed = stylesheet || relHas(tag.attrs, 'icon') || relHas(tag.attrs, 'preload')
+      if (href?.hasValue && stylesheet && extensionOf(decodeEntities(href.rawValue)) === 'css') {
+        const decoded = decodeEntities(href.rawValue).trim()
+        const key = resolveRelative('', decoded)
+        const bytes = key ? siblings.get(key) : undefined
+        if (/^https?:/i.test(decoded) || decoded.startsWith('//')) sink.remoteReferences.push({ url: decoded, context: 'html-attr' })
+        else if (bytes && key) {
+          const css = neutralizeStyleClose(rewriteCss(decodeText(bytes), directoryOf(key), sink, siblings))
+          parts.push(rebuildStart({ rawName: 'style', name: 'style', attrs: keptStyleAttributes(tag.attrs), end: 0, selfClosing: false }, false))
+          parts.push(css, '</style>')
+          i = tag.end
+          continue
+        } else if (!/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(decoded) && !decoded.startsWith('#')) {
+          addDiagnostic(sink, 'error', 'missing-relative-resource', `找不到相对资源 ${clip(decoded, 180)}`, decoded)
+        }
+        if (managed) rewriteAttributes(tag, '', sink, siblings, false)
+        parts.push(tag.attrs.some(attribute => attribute.changed) ? rebuildStart(tag, tag.selfClosing) : html.slice(tagStart, tag.end))
+        i = tag.end
+        continue
+      }
+      if (managed) rewriteAttributes(tag, '', sink, siblings, true)
+      parts.push(tag.attrs.some(attribute => attribute.changed) ? rebuildStart(tag, tag.selfClosing) : html.slice(tagStart, tag.end))
+      i = tag.end
+      continue
+    }
+    if (tag.name === 'script' && !tag.selfClosing) {
+      const src = attributeBy(tag.attrs, 'src')
+      const raw = readRaw(html, tag.end, 'script')
+      if (!raw.closed) addDiagnostic(sink, 'warning', 'unclosed-element', '未闭合的 <script>')
+      let body = raw.body
+      let inlined = false
+      if (src?.hasValue) {
+        const decoded = decodeEntities(src.rawValue).trim()
+        const key = resolveRelative('', decoded)
+        const bytes = key ? siblings.get(key) : undefined
+        if (bytes && key && extensionOf(decoded) === 'js') {
+          const type = attributeBy(tag.attrs, 'type')?.rawValue ?? null
+          const scriptKind = javascriptKind(type)
+          const base = directoryOf(key)
+          const source = decodeText(bytes)
+          body = neutralizeScriptClose(scriptKind === 'other'
+            ? rewriteEmbedded(source, 'js-string', base, sink, siblings, { url: false, remote: false }, false)
+            : rewriteJavaScript(source, scriptKind === 'module' ? 'module' : 'script', base, sink, siblings))
+          src.drop = true
+          inlined = true
+        } else if (bytes && key) {
+          src.value = placeholder(addResource(sink, bytes, mediaTypeForPath(key), { kind: 'relative', context: 'html-attr', reference: decoded }))
+          src.changed = true
+        } else {
+          const result = rewriteSingleUrl(decoded, 'html-attr', '', sink, siblings, true)
+          if (result.changed) { src.value = result.value.trim(); src.changed = true }
+        }
+      }
+      if (!inlined) {
+        const baseKind = javascriptKind(attributeBy(tag.attrs, 'type')?.hasValue ? attributeBy(tag.attrs, 'type')!.rawValue : null)
+        body = baseKind === 'other'
+          ? rewriteEmbedded(body, 'js-string', '', sink, siblings, { url: false, remote: false }, false)
+          : rewriteJavaScript(body, baseKind === 'module' ? 'module' : 'script', '', sink, siblings)
+      }
+      const start = tag.attrs.some(attribute => attribute.changed || attribute.drop) ? rebuildStart(tag, false) : html.slice(tagStart, tag.end)
+      parts.push(start, body)
+      if (raw.closed) parts.push(html.slice(raw.closeStart, raw.closeEnd))
+      i = raw.closeEnd
+      continue
+    }
+    rewriteAttributes(tag, '', sink, siblings, false)
+    parts.push(tag.attrs.some(attribute => attribute.changed || attribute.drop) ? rebuildStart(tag, tag.selfClosing) : html.slice(tagStart, tag.end))
+    i = tag.end
+  }
+  return parts.join('')
+}
+
+/** 把 HTML 中的内嵌资源和同级文件抽成按内容去重的受管资源，不访问网络或磁盘。 */
+export function extractHtmlResources(input: ExtractHtmlResourcesInput): ExtractHtmlResourcesResult {
+  const sink = createSink()
+  const siblings = siblingMap(input.siblingFiles)
+  const html = transformHtml(input.html, sink, siblings)
+  return { html, resources: [...sink.resources.values()], remoteReferences: sink.remoteReferences, diagnostics: sink.diagnostics }
+}
