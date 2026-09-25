@@ -359,7 +359,8 @@ it('M19 creates a course with the Slide canvas size chosen in the creation dialo
   const directory = await fixture()
   const { host } = createMarkdownTestHost(path.join(directory, 'journal'))
   const service = new WorkspaceFilesDesktopService(host.files); services.push(service); await service.authorizeRoot(directory)
-  const operate = vi.fn(service.operate)
+  const requests: WorkspaceFilesRequest[] = []
+  const operate = ((request: WorkspaceFilesRequest) => { requests.push(request); return service.operate(request) }) as WorkspaceFilesAPI
   render(<LessonDirectoryTree directory={directory} files={operate} operation={async () => ({})} onFile={vi.fn()} onDirectory={vi.fn()} />)
   await screen.findByRole('button', { name: '工作空间根目录' })
   await waitFor(() => expect(screen.getByRole('button', { name: '新建课件' })).not.toBeDisabled())
@@ -369,7 +370,7 @@ it('M19 creates a course with the Slide canvas size chosen in the creation dialo
   fireEvent.change(size, { target: { value: 'portrait' } })
   fireEvent.change(screen.getByLabelText('文件名称'), { target: { value: 'tall' } })
   fireEvent.click(screen.getByRole('button', { name: '确认' }))
-  await waitFor(() => expect(operate).toHaveBeenCalledWith(expect.objectContaining({ type: 'create-course', name: 'tall.h5lesson', canvas: { width: 720, height: 1280 } })))
+  await waitFor(() => expect(requests).toContainEqual(expect.objectContaining({ type: 'create-course', name: 'tall.h5lesson', canvas: { width: 720, height: 1280 } })))
   await waitFor(() => fs.access(path.join(directory, 'tall.h5lesson')))
   const archive = await createCourseV9Driver().load(new Uint8Array(await fs.readFile(path.join(directory, 'tall.h5lesson'))))
   if (archive.kind !== 'course-v9') throw new Error('course fixture')
