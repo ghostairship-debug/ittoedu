@@ -12,9 +12,6 @@ function record(value: unknown, label: string): asserts value is Record<string, 
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new TypeError(`${label}必须是资源记录`)
 }
 
-const isUint8Array = (value: unknown): value is Uint8Array =>
-  value instanceof Uint8Array || (ArrayBuffer.isView(value) && Object.prototype.toString.call(value) === '[object Uint8Array]')
-
 /** Resource bytes are owned by the model; external buffers never remain writable aliases. */
 export function cloneDocumentResources(resources: DocumentResources, relativePaths = false): DocumentResources {
   record(resources, 'resources')
