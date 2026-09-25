@@ -45,13 +45,6 @@ function catalogPackage(sha256: string): ComponentPackageData {
   }
 }
 
-function activeHistory() {
-  const state = useEditorStore.getState()
-  const backend = state.slideBackend
-  if (!backend) throw new Error('expected active slideBackend')
-  return backend.getSession().history
-}
-
 describe('组件目录版本锁定', () => {
   let host: Awaited<ReturnType<typeof createTriageT4StoreHost>>
 
@@ -65,8 +58,9 @@ describe('组件目录版本锁定', () => {
     useEditorStore.getState().importComponentPackage(original)
     await useEditorStore.getState().drainCourseDocument()
     const projectBefore = structuredClone(selectActiveCourseProjectDocument(useEditorStore.getState())!)
-    const historyBefore = activeHistory().past.length
-
+    const documentId = useEditorStore.getState().courseDocument.documentId!
+    const undoDepthBefore = host.registry.get(documentId).read().undoDepth
+    expect(undoDepthBefore).toBeGreaterThan(0)
     expect(() => useEditorStore.getState().replaceComponentPackage(
       PACKAGE_ID,
       catalogPackage('b'.repeat(64)),
@@ -83,7 +77,8 @@ describe('组件目录版本锁定', () => {
       contentSha256: original.contentSha256,
     })
     expect(fileBytes(current.files)).toEqual(fileBytes(original.files))
-    expect(activeHistory().past).toHaveLength(historyBefore)
+    // 2.0 的历史在主进程 DocumentSession：被拒绝的替换不产生新的撤销步。
+    expect(host.registry.get(documentId).read().undoDepth).toBe(undoDepthBefore)
   })
 
   it('将哈希、导入时间和来源作为不可拆分的 Project V8 元数据保存', async () => {

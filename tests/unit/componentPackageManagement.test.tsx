@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type {
   ComponentPackageData,
@@ -17,6 +17,9 @@ import {
   useEditorStore,
   selectCandidateGlobalLayerItems,
 } from '../../src/renderer/store/editorStore'
+import { createBlankCourseProject } from '../../src/core/course/createCourseProject'
+import { withDefaultComponentController } from '../../src/renderer/components/teacherControllerComponent'
+import { createTriageT4StoreHost } from '../helpers/triage-t4-store-host'
 
 import { courseLayerItemToEditorCanvasNode } from '@/renderer/store/slideEditorProjection'
 
@@ -32,13 +35,33 @@ function projectedGlobalLayer(state: Parameters<typeof selectCandidateGlobalLaye
   }))
 }
 
-function activeHistory() {
-  const state = useEditorStore.getState()
-  if (state.spatialSession) return state.spatialSession.history
-  if (state.flowSession) return state.flowSession.history
-  const backend = state.slideBackend
-  if (!backend) throw new Error('expected active Surface session')
-  return backend.getSession().history
+/**
+ * 2.0 keeps no renderer History: the projection only carries the current
+ * document, while undo/redo live on the main-process DocumentSession.
+ */
+let host: Awaited<ReturnType<typeof createTriageT4StoreHost>>
+
+function activeDocumentSession() {
+  const documentId = useEditorStore.getState().courseDocument.documentId
+  if (!documentId) throw new Error('expected an active course document')
+  return host.registry.get(documentId)
+}
+
+function undoDepth(): number {
+  return activeDocumentSession().read().undoDepth
+}
+
+async function settle(): Promise<void> {
+  await useEditorStore.getState().drainCourseDocument()
+}
+
+async function navigateHistory(direction: 'undo' | 'redo'): Promise<void> {
+  const before = undoDepth()
+  useEditorStore.getState()[direction]()
+  await waitFor(() => {
+    expect(undoDepth()).not.toBe(before)
+  })
+  await settle()
 }
 
 const PACKAGE_ID = 'com.example.managed'
@@ -99,14 +122,36 @@ function activeCourseProject() {
   return project
 }
 
+/** Byte-level comparison: the host round-trip recreates every package. */
+function expectComponentPackageRecord(
+  actual: Readonly<Record<string, ComponentPackageData>>,
+  expected: Readonly<Record<string, ComponentPackageData>>,
+): void {
+  expect(Object.keys(actual)).toEqual(Object.keys(expected))
+  for (const [packageId, data] of Object.entries(expected)) {
+    expectComponentPackageContents(actual[packageId], data)
+  }
+}
+
+/**
+ * 2.0 的 revision 是主进程文档的单调计数器，undo/redo 恢复内容时会重新盖章；
+ * updatedAt 也随每次提交刷新。两者都不属于“内容是否还原”的差异。
+ */
+function documentContent(project: ReturnType<typeof activeCourseProject>) {
+  const { revision: _revision, updatedAt: _updatedAt, ...content } = project
+  return content
+}
+
 function clickLocateUsage() {
   fireEvent.click(screen.getByLabelText('管理可管理组件'))
   fireEvent.click(managedMenu().getByRole('menuitem', { name: '定位使用位置' }))
 }
 
-function openFlowProjectWithEmbeddedComponentBlock(): { surfaceId: string; blockId: string } {
-  useEditorStore.getState().createNewFlowProject()
+async function openFlowProjectWithEmbeddedComponentBlock(): Promise<{ surfaceId: string; blockId: string }> {
+  await useEditorStore.getState().createCourseDocument('flow')
+  await settle()
   useEditorStore.getState().importComponentPackage(componentPackage('1.0.0'))
+  await settle()
   const exported = useEditorStore.getState().exportV9SlideCandidateArchive()
   if (!exported) throw new Error('Expected a Flow archive export')
   const archive = openCourseProjectArchive(exported)
@@ -131,12 +176,13 @@ function openFlowProjectWithEmbeddedComponentBlock(): { surfaceId: string; block
     props: {},
     staticFallbackAssetId: 'component-fallback',
   })
-  const reopened = useEditorStore.getState().reopenV9SlideCandidateArchive(createCourseProjectArchive({
+  const reopened = await useEditorStore.getState().reopenV9SlideCandidateArchive(createCourseProjectArchive({
     project,
     assetFiles: { ...archive.assetFiles, 'component-fallback': new Uint8Array([1, 2, 3, 4]) },
     componentFiles: archive.componentFiles,
   }))
   if (!reopened) throw new Error('Expected the crafted Flow project to reopen')
+  await settle()
   return { surfaceId: surface.id, blockId }
 }
 
@@ -151,8 +197,10 @@ function expectFlowBlockUsageReference(surfaceId: string, blockId: string) {
   })
 }
 
-beforeEach(() => {
-  useEditorStore.getState().createNewProject()
+beforeEach(async () => {
+  host = await createTriageT4StoreHost()
+  const bundle = withDefaultComponentController(createBlankCourseProject())
+  await host.open(bundle.project, Object.values(bundle.componentPackages))
   initialPackages = structuredClone(useEditorStore.getState().componentPackages)
   initialMetadata = structuredClone(activeCourseProject().componentPackages)
 })
@@ -160,97 +208,107 @@ beforeEach(() => {
 afterEach(() => cleanup())
 
 describe('editorStore component package management', () => {
-  it('imports multiple packages in one undoable transaction', () => {
+  it('imports multiple packages in one undoable transaction', async () => {
     const first = componentPackage('1.0.0')
     const second = componentPackage('1.0.0', ['scene'], 'com.example.second')
 
     useEditorStore.getState().importComponentPackages([first, second])
+    await settle()
     let state = useEditorStore.getState()
     expect(Object.keys(state.componentPackages)).toEqual([
       ...Object.keys(initialPackages), PACKAGE_ID,
       'com.example.second',
     ])
-    expect(activeHistory().past).toHaveLength(1)
+    expect(undoDepth()).toBe(1)
 
-    state.undo()
+    await navigateHistory('undo')
     state = useEditorStore.getState()
-    expect(state.componentPackages).toEqual(initialPackages)
+    expectComponentPackageRecord(state.componentPackages, initialPackages)
     expect(selectActiveCourseProjectDocument(state)!.componentPackages).toEqual(initialMetadata)
 
-    state.redo()
+    await navigateHistory('redo')
     state = useEditorStore.getState()
-    expect(state.componentPackages[PACKAGE_ID]).toBe(first)
-    expect(state.componentPackages['com.example.second']).toBe(second)
+    expectComponentPackageContents(state.componentPackages[PACKAGE_ID], first)
+    expectComponentPackageContents(state.componentPackages['com.example.second'], second)
   })
 
-  it('deletes only unused packages and keeps delete undoable with runtime data', () => {
+  it('deletes only unused packages and keeps delete undoable with runtime data', async () => {
     const store = useEditorStore.getState()
     const imported = componentPackage('1.0.0')
     store.importComponentPackage(imported)
+    await settle()
 
-    expect(store.deleteComponentPackage(PACKAGE_ID)).toBe(true)
+    expect(useEditorStore.getState().deleteComponentPackage(PACKAGE_ID)).toBe(true)
+    await settle()
     let state = useEditorStore.getState()
     expect(selectActiveCourseProjectDocument(state)!.componentPackages[PACKAGE_ID]).toBeUndefined()
     expect(state.componentPackages[PACKAGE_ID]).toBeUndefined()
-    expect(activeHistory().past).toHaveLength(2)
+    expect(undoDepth()).toBe(2)
 
-    state.undo()
+    await navigateHistory('undo')
     state = useEditorStore.getState()
     expect(selectActiveCourseProjectDocument(state)!.componentPackages[PACKAGE_ID]?.version).toBe('1.0.0')
     expectComponentPackageContents(state.componentPackages[PACKAGE_ID], imported)
 
-    state.redo()
+    await navigateHistory('redo')
     state = useEditorStore.getState()
     expect(selectActiveCourseProjectDocument(state)!.componentPackages[PACKAGE_ID]).toBeUndefined()
     expect(state.componentPackages[PACKAGE_ID]).toBeUndefined()
   })
 
-  it('blocks deletion while any scene or global instance still references the package', () => {
+  it('blocks deletion while any scene or global instance still references the package', async () => {
     const store = useEditorStore.getState()
     store.importComponentPackage(componentPackage('1.0.0'))
-    store.addExternalComponentNode(PACKAGE_ID)
-    store.setEditingScope('global')
+    await settle()
     useEditorStore.getState().addExternalComponentNode(PACKAGE_ID)
+    await settle()
+    useEditorStore.getState().setEditingScope('global')
+    await settle()
+    useEditorStore.getState().addExternalComponentNode(PACKAGE_ID)
+    await settle()
     const before = structuredClone(selectActiveCourseProjectDocument(useEditorStore.getState())!)
-    const historyBefore = activeHistory().past.length
+    const historyBefore = undoDepth()
 
     expect(useEditorStore.getState().deleteComponentPackage(PACKAGE_ID)).toBe(false)
     const state = useEditorStore.getState()
     expect(selectActiveCourseProjectDocument(state)!).toEqual(before)
     expect(state.componentPackages[PACKAGE_ID]).toBeDefined()
-    expect(activeHistory().past).toHaveLength(historyBefore)
+    expect(undoDepth()).toBe(historyBefore)
     expect(state.errorMessage).toContain('1 个场景实例和 1 个全局实例')
   })
 
-  it('uses one V9 resource transaction for unreferenced Flow and Spatial package deletion', () => {
+  it('uses one V9 resource transaction for unreferenced Flow and Spatial package deletion', async () => {
     const cases = [
-      ['Flow', () => useEditorStore.getState().createNewFlowProject()],
-      ['Spatial', () => useEditorStore.getState().createNewSpatialProject()],
+      ['Flow', async () => { await useEditorStore.getState().createCourseDocument('flow') }],
+      ['Spatial', async () => { await useEditorStore.getState().createCourseDocument('spatial') }],
     ] as const
 
     for (const [surface, create] of cases) {
-      create()
+      await create()
+      await settle()
       const imported = componentPackage('1.0.0')
       useEditorStore.getState().importComponentPackage(imported)
+      await settle()
       const beforeDocument = structuredClone(activeCourseProject())
-      const historyBefore = activeHistory().past.length
+      const historyBefore = undoDepth()
 
       expect(useEditorStore.getState().deleteComponentPackage(PACKAGE_ID), surface).toBe(true)
+      await settle()
       expect(activeCourseProject().componentPackages[PACKAGE_ID]).toBeUndefined()
       expect(useEditorStore.getState().componentPackages[PACKAGE_ID]).toBeUndefined()
-      expect(activeHistory().past).toHaveLength(historyBefore + 1)
-      const session = surface === 'Flow'
-        ? useEditorStore.getState().flowSession
-        : useEditorStore.getState().spatialSession
-      expect(session?.history.past.at(-1)).toMatchObject({
-        kind: 'editor-transaction',
-        resourceChanges: {
-          componentPackageChanges: [{ packageId: PACKAGE_ID }],
-        },
-      })
+      expect(undoDepth(), surface).toBe(historyBefore + 1)
+      // One history step owns both the project metadata and the package bytes:
+      // a single undo has to restore the archive exactly.
+      const committed = activeDocumentSession().read().model
+      if (committed.kind !== 'course-v9') throw new Error('Expected a Course Project V9 document')
+      expect(committed.project.componentPackages[PACKAGE_ID], surface).toBeUndefined()
+      expect(
+        Object.keys(committed.resources.components).some(key => key.startsWith(`${PACKAGE_ID}@`)),
+        surface,
+      ).toBe(false)
 
-      useEditorStore.getState().undo()
-      expect(activeCourseProject()).toEqual(beforeDocument)
+      await navigateHistory('undo')
+      expect(documentContent(activeCourseProject())).toEqual(documentContent(beforeDocument))
       expectComponentPackageContents(
         useEditorStore.getState().componentPackages[PACKAGE_ID],
         imported,
@@ -259,73 +317,85 @@ describe('editorStore component package management', () => {
       const restoredArchive = useEditorStore.getState().exportV9SlideCandidateArchive()
       expect(restoredArchive).not.toBeNull()
 
-      useEditorStore.getState().redo()
+      await navigateHistory('redo')
       expect(activeCourseProject().componentPackages[PACKAGE_ID]).toBeUndefined()
       expect(useEditorStore.getState().componentPackages[PACKAGE_ID]).toBeUndefined()
 
       const deletedArchive = useEditorStore.getState().exportV9SlideCandidateArchive()
       expect(deletedArchive).not.toBeNull()
-      expect(useEditorStore.getState().reopenV9SlideCandidateArchive(restoredArchive!)).toBe(true)
-      expect(activeCourseProject()).toEqual(beforeDocument)
+      expect(await useEditorStore.getState().reopenV9SlideCandidateArchive(restoredArchive!)).toBe(true)
+      await settle()
+      expect(documentContent(activeCourseProject())).toEqual(documentContent(beforeDocument))
       expectComponentPackageContents(
         useEditorStore.getState().componentPackages[PACKAGE_ID],
         imported,
       )
-      expect(useEditorStore.getState().reopenV9SlideCandidateArchive(deletedArchive!)).toBe(true)
+      expect(await useEditorStore.getState().reopenV9SlideCandidateArchive(deletedArchive!)).toBe(true)
+      await settle()
       expect(activeCourseProject().componentPackages[PACKAGE_ID]).toBeUndefined()
       expect(useEditorStore.getState().componentPackages[PACKAGE_ID]).toBeUndefined()
     }
   })
 
-  it('blocks referenced Flow and Spatial packages without history, document, or success-message writes', () => {
+  it('blocks referenced Flow and Spatial packages without history, document, or success-message writes', async () => {
     const cases = [
-      ['Flow', () => useEditorStore.getState().createNewFlowProject()],
-      ['Spatial', () => useEditorStore.getState().createNewSpatialProject()],
+      ['Flow', async () => { await useEditorStore.getState().createCourseDocument('flow') }],
+      ['Spatial', async () => { await useEditorStore.getState().createCourseDocument('spatial') }],
     ] as const
 
     for (const [surface, create] of cases) {
-      create()
+      await create()
+      await settle()
       useEditorStore.getState().importComponentPackage(componentPackage('1.0.0'))
+      await settle()
       useEditorStore.getState().addExternalComponentNode(PACKAGE_ID)
+      await settle()
       const beforeDocument = structuredClone(activeCourseProject())
       const beforePackages = structuredClone(useEditorStore.getState().componentPackages)
-      const historyBefore = activeHistory().past.length
+      const historyBefore = undoDepth()
 
       expect(useEditorStore.getState().deleteComponentPackage(PACKAGE_ID), surface).toBe(false)
       expect(activeCourseProject()).toEqual(beforeDocument)
-      expect(useEditorStore.getState().componentPackages).toEqual(beforePackages)
-      expect(activeHistory().past).toHaveLength(historyBefore)
+      expectComponentPackageRecord(useEditorStore.getState().componentPackages, beforePackages)
+      expect(undoDepth(), surface).toBe(historyBefore)
       expect(useEditorStore.getState().statusMessage).toBeNull()
       expect(useEditorStore.getState().errorMessage).toContain('1 个场景实例和 0 个全局实例')
     }
   })
 
-  it('replaces every scene/global instance in one undo step and preserves props', () => {
+  it('replaces every scene/global instance in one undo step and preserves props', async () => {
     const store = useEditorStore.getState()
     const first = componentPackage('1.0.0')
     const second = componentPackage('2.0.0')
     store.importComponentPackage(first)
-    store.addExternalComponentNode(PACKAGE_ID)
+    await settle()
+    useEditorStore.getState().addExternalComponentNode(PACKAGE_ID)
+    await settle()
     const sceneNodeId = selectActiveScene(useEditorStore.getState()).nodes
       .find((node) => node.type === 'external-component')!.id
     useEditorStore.getState().updateNode(sceneNodeId, {
       props: { label: '场景自定义', score: 7 },
     })
+    await settle()
     useEditorStore.getState().setEditingScope('global')
+    await settle()
     useEditorStore.getState().addExternalComponentNode(PACKAGE_ID)
+    await settle()
     const globalNodeId = projectedGlobalLayer(useEditorStore.getState())
       .find(({ node }) => node.type === 'external-component' && node.component?.packageId === PACKAGE_ID)!.node.id
     useEditorStore.getState().updateNode(globalNodeId, {
       props: { label: '全局自定义', theme: 'dark' },
     })
-    const historyBefore = activeHistory().past.length
+    await settle()
+    const historyBefore = undoDepth()
 
     useEditorStore.getState().replaceComponentPackage(PACKAGE_ID, second)
+    await settle()
     let state = useEditorStore.getState()
-    expect(activeHistory().past).toHaveLength(historyBefore + 1)
+    expect(undoDepth()).toBe(historyBefore + 1)
     expect(state.activeTab).toBe('components')
     expect(selectActiveCourseProjectDocument(state)!.componentPackages[PACKAGE_ID]?.version).toBe('2.0.0')
-    expect(state.componentPackages[PACKAGE_ID]).toEqual(second)
+    expectComponentPackageContents(state.componentPackages[PACKAGE_ID], second)
     expect(state.componentPackages[PACKAGE_ID]).not.toBe(second)
     expect(selectActiveScene(state).nodes.find((node) => node.id === sceneNodeId))
       .toMatchObject({
@@ -338,10 +408,10 @@ describe('editorStore component package management', () => {
         props: { label: '全局自定义', theme: 'dark' },
       })
 
-    state.undo()
+    await navigateHistory('undo')
     state = useEditorStore.getState()
     expect(selectActiveCourseProjectDocument(state)!.componentPackages[PACKAGE_ID]?.version).toBe('1.0.0')
-    expect(state.componentPackages[PACKAGE_ID]).toEqual(first)
+    expectComponentPackageContents(state.componentPackages[PACKAGE_ID], first)
     expect(state.componentPackages[PACKAGE_ID]).not.toBe(first)
     expect(selectActiveScene(state).nodes.find((node) => node.id === sceneNodeId))
       .toMatchObject({
@@ -349,21 +419,24 @@ describe('editorStore component package management', () => {
         props: { label: '场景自定义', score: 7 },
       })
 
-    state.redo()
+    await navigateHistory('redo')
     state = useEditorStore.getState()
     expect(selectActiveCourseProjectDocument(state)!.componentPackages[PACKAGE_ID]?.version).toBe('2.0.0')
-    expect(state.componentPackages[PACKAGE_ID]).toEqual(second)
+    expectComponentPackageContents(state.componentPackages[PACKAGE_ID], second)
     expect(state.componentPackages[PACKAGE_ID]).not.toBe(second)
   })
 
-  it('rejects a different ID or incompatible scope without changing the project', () => {
+  it('rejects a different ID or incompatible scope without changing the project', async () => {
     const store = useEditorStore.getState()
     const first = componentPackage('1.0.0')
     store.importComponentPackage(first)
-    store.setEditingScope('global')
+    await settle()
+    useEditorStore.getState().setEditingScope('global')
+    await settle()
     useEditorStore.getState().addExternalComponentNode(PACKAGE_ID)
+    await settle()
     const before = structuredClone(selectActiveCourseProjectDocument(useEditorStore.getState())!)
-    const historyBefore = activeHistory().past.length
+    const historyBefore = undoDepth()
 
     expect(() => useEditorStore.getState().replaceComponentPackage(
       PACKAGE_ID,
@@ -376,16 +449,17 @@ describe('editorStore component package management', () => {
 
     const state = useEditorStore.getState()
     expect(selectActiveCourseProjectDocument(state)!).toEqual(before)
-    expect(state.componentPackages[PACKAGE_ID]).toBe(first)
-    expect(activeHistory().past).toHaveLength(historyBefore)
+    expectComponentPackageContents(state.componentPackages[PACKAGE_ID], first)
+    expect(undoDepth()).toBe(historyBefore)
   })
 })
 
 describe('ComponentsTab project component management', () => {
-  it('shows version and usage, blocks referenced deletion, and requests replacement', () => {
-    const store = useEditorStore.getState()
-    store.importComponentPackage(componentPackage('1.0.0'))
-    store.addExternalComponentNode(PACKAGE_ID)
+  it('shows version and usage, blocks referenced deletion, and requests replacement', async () => {
+    useEditorStore.getState().importComponentPackage(componentPackage('1.0.0'))
+    await settle()
+    useEditorStore.getState().addExternalComponentNode(PACKAGE_ID)
+    await settle()
     const onReplaceComponent = vi.fn()
     const originalGetContext = HTMLCanvasElement.prototype.getContext
     HTMLCanvasElement.prototype.getContext = () => null
@@ -409,9 +483,10 @@ describe('ComponentsTab project component management', () => {
     }
   })
 
-  it('deletes an unreferenced package from the management list', () => {
+  it('deletes an unreferenced package from the management list', async () => {
     const imported = componentPackage('1.0.0')
     useEditorStore.getState().importComponentPackage(imported)
+    await settle()
     const originalGetContext = HTMLCanvasElement.prototype.getContext
     HTMLCanvasElement.prototype.getContext = () => null
     try {
@@ -420,18 +495,25 @@ describe('ComponentsTab project component management', () => {
       const deleteButton = managedMenu().getByRole('menuitem', { name: '从工程移除' })
       expect(deleteButton).toBeEnabled()
       fireEvent.click(deleteButton)
-      expect(screen.queryByTestId(`component-package-${PACKAGE_ID}`))
-        .not.toBeInTheDocument()
+      await waitFor(() => {
+        expect(screen.queryByTestId(`component-package-${PACKAGE_ID}`))
+          .not.toBeInTheDocument()
+      })
+      await settle()
       expect(useEditorStore.getState().componentPackages[PACKAGE_ID]).toBeUndefined()
+      expect(undoDepth()).toBe(2)
     } finally {
       HTMLCanvasElement.prototype.getContext = originalGetContext
     }
   })
 
-  it('uses the active Flow V9 document to disable deletion for a floating component', () => {
-    useEditorStore.getState().createNewFlowProject()
+  it('uses the active Flow V9 document to disable deletion for a floating component', async () => {
+    await useEditorStore.getState().createCourseDocument('flow')
+    await settle()
     useEditorStore.getState().importComponentPackage(componentPackage('1.0.0'))
+    await settle()
     useEditorStore.getState().addExternalComponentNode(PACKAGE_ID)
+    await settle()
     const originalGetContext = HTMLCanvasElement.prototype.getContext
     HTMLCanvasElement.prototype.getContext = () => null
     try {
@@ -447,8 +529,8 @@ describe('ComponentsTab project component management', () => {
 })
 
 describe('ComponentsTab locate component usage', () => {
-  it('selects a Flow component block that has no location with the same ID', () => {
-    const { surfaceId, blockId } = openFlowProjectWithEmbeddedComponentBlock()
+  it('selects a Flow component block that has no location with the same ID', async () => {
+    const { surfaceId, blockId } = await openFlowProjectWithEmbeddedComponentBlock()
     expectFlowBlockUsageReference(surfaceId, blockId)
     const targetLocation = activeCourseProject().locations.find((location) => (
       location.kind === 'flow-block' && location.surfaceId === surfaceId
@@ -474,8 +556,8 @@ describe('ComponentsTab locate component usage', () => {
     }
   })
 
-  it('does not bypass a composing location-switch refusal on the same Flow surface', () => {
-    const { surfaceId, blockId } = openFlowProjectWithEmbeddedComponentBlock()
+  it('does not bypass a composing location-switch refusal on the same Flow surface', async () => {
+    const { surfaceId, blockId } = await openFlowProjectWithEmbeddedComponentBlock()
     expectFlowBlockUsageReference(surfaceId, blockId)
     const exported = useEditorStore.getState().exportV9SlideCandidateArchive()
     if (!exported) throw new Error('Expected a Flow archive export')
@@ -494,11 +576,12 @@ describe('ComponentsTab locate component usage', () => {
       blockId: currentBlockId,
     })
     project.startLocationId = currentLocationId
-    expect(useEditorStore.getState().reopenV9SlideCandidateArchive(createCourseProjectArchive({
+    expect(await useEditorStore.getState().reopenV9SlideCandidateArchive(createCourseProjectArchive({
       project,
       assetFiles: archive.assetFiles,
       componentFiles: archive.componentFiles,
     }))).toBe(true)
+    await settle()
     const active = useEditorStore.getState()
     expect(active.flowSession?.selection.locationId).toBe(currentLocationId)
     const composingEdit = {
@@ -518,8 +601,7 @@ describe('ComponentsTab locate component usage', () => {
     }
     useEditorStore.setState({ flowTextEdit: composingEdit })
     const beforeDocument = structuredClone(activeCourseProject())
-    const flowHistoryBefore = useEditorStore.getState().flowSession?.history.past.length
-    if (flowHistoryBefore === undefined) throw new Error('Expected Flow history')
+    const flowHistoryBefore = undoDepth()
     const originalGetContext = HTMLCanvasElement.prototype.getContext
     HTMLCanvasElement.prototype.getContext = () => null
     try {
@@ -533,16 +615,17 @@ describe('ComponentsTab locate component usage', () => {
       expect(state.flowSession?.selection.selectedBlockId).not.toBe(blockId)
       expect(state.flowTextEdit).toBe(composingEdit)
       expect(activeCourseProject()).toEqual(beforeDocument)
-      expect(state.flowSession?.history.past).toHaveLength(flowHistoryBefore)
+      expect(undoDepth()).toBe(flowHistoryBefore)
     } finally {
       HTMLCanvasElement.prototype.getContext = originalGetContext
     }
   })
 
-  it('leaves a stale active Flow surface to select the usage block on its own surface', () => {
-    const { surfaceId, blockId } = openFlowProjectWithEmbeddedComponentBlock()
+  it('leaves a stale active Flow surface to select the usage block on its own surface', async () => {
+    const { surfaceId, blockId } = await openFlowProjectWithEmbeddedComponentBlock()
     expectFlowBlockUsageReference(surfaceId, blockId)
     useEditorStore.getState().addCourseContent('flow-page')
+    await settle()
     const staleSurfaceId = useEditorStore.getState().flowSession?.selection.surfaceId
     expect(staleSurfaceId).toBeDefined()
     expect(staleSurfaceId).not.toBe(surfaceId)
@@ -561,9 +644,10 @@ describe('ComponentsTab locate component usage', () => {
     }
   })
 
-  it('reports an actionable failure without document or history writes when the usage surface has no valid location', () => {
-    const { surfaceId, blockId } = openFlowProjectWithEmbeddedComponentBlock()
+  it('reports an actionable failure without document or history writes when the usage surface has no valid location', async () => {
+    const { surfaceId, blockId } = await openFlowProjectWithEmbeddedComponentBlock()
     useEditorStore.getState().addCourseContent('flow-page')
+    await settle()
     const exported = useEditorStore.getState().exportV9SlideCandidateArchive()
     expect(exported).not.toBeNull()
     const archive = openCourseProjectArchive(exported!)
@@ -576,18 +660,18 @@ describe('ComponentsTab locate component usage', () => {
       location.surfaceId !== surfaceId,
     )
     relocated.startLocationId = fallbackLocation.id
-    expect(useEditorStore.getState().reopenV9SlideCandidateArchive(createCourseProjectArchive({
+    expect(await useEditorStore.getState().reopenV9SlideCandidateArchive(createCourseProjectArchive({
       project: relocated,
       assetFiles: archive.assetFiles,
       componentFiles: archive.componentFiles,
     }))).toBe(true)
+    await settle()
     expectFlowBlockUsageReference(surfaceId, blockId)
     expect(activeCourseProject().locations.some((location) =>
       location.surfaceId === surfaceId,
     )).toBe(false)
     const beforeDocument = structuredClone(activeCourseProject())
-    const flowHistoryBefore = useEditorStore.getState().flowSession?.history.past.length
-    if (flowHistoryBefore === undefined) throw new Error('Expected Flow history')
+    const flowHistoryBefore = undoDepth()
     const originalGetContext = HTMLCanvasElement.prototype.getContext
     HTMLCanvasElement.prototype.getContext = () => null
     try {
@@ -598,7 +682,7 @@ describe('ComponentsTab locate component usage', () => {
       expect(state.errorMessage).toContain('没有可激活的位置')
       expect(state.flowSession?.selection.surfaceId).toBe(fallbackLocation.surfaceId)
       expect(activeCourseProject()).toEqual(beforeDocument)
-      expect(state.flowSession?.history.past).toHaveLength(flowHistoryBefore)
+      expect(undoDepth()).toBe(flowHistoryBefore)
     } finally {
       HTMLCanvasElement.prototype.getContext = originalGetContext
     }
@@ -607,54 +691,58 @@ describe('ComponentsTab locate component usage', () => {
 
 
 describe('add component packages directly to the current canvas', () => {
-  it.each(['slide', 'flow', 'spatial'] as const)('inserts a %s instance and its package in one saveable history step', surface => {
-    if (surface === 'flow') useEditorStore.getState().createNewFlowProject()
-    if (surface === 'spatial') useEditorStore.getState().createNewSpatialProject()
+  it.each(['slide', 'flow', 'spatial'] as const)('inserts a %s instance and its package in one saveable history step', async surface => {
+    if (surface !== 'slide') await useEditorStore.getState().createCourseDocument(surface)
+    await settle()
     const data = componentPackage('1.0.0')
     const before = activeCourseProject()
     const target = useEditorStore.getState().captureComponentInsertionTarget()!
     const result = useEditorStore.getState().insertComponentPackagesAtTarget(target, [data])
     expect(result.ok, result.reason).toBe(true)
     expect(result.layerItemIds).toHaveLength(1)
+    await settle()
     expect(activeCourseProject().revision).toBe(before.revision + 1)
     expect(collectCourseComponentPackageUsage(activeCourseProject(), PACKAGE_ID).references).toHaveLength(1)
     const bytes = useEditorStore.getState().exportV9SlideCandidateArchive()!
     const reopened = openCourseProjectArchive(bytes)
     expect(collectCourseComponentPackageUsage(reopened.project, PACKAGE_ID).references).toHaveLength(1)
-    useEditorStore.getState().undo()
-    expect(activeCourseProject()).toEqual(before)
+    await navigateHistory('undo')
+    expect(documentContent(activeCourseProject())).toEqual(documentContent(before))
     expect(useEditorStore.getState().componentPackages[PACKAGE_ID]).toBeUndefined()
-    useEditorStore.getState().redo()
+    await navigateHistory('redo')
     expect(collectCourseComponentPackageUsage(activeCourseProject(), PACKAGE_ID).references).toHaveLength(1)
     expectComponentPackageContents(useEditorStore.getState().componentPackages[PACKAGE_ID], data)
   })
 
-  it('reuses an embedded package and undoes only the new instance', () => {
+  it('reuses an embedded package and undoes only the new instance', async () => {
     const data = componentPackage('1.0.0')
     for (let i = 0; i < 2; i++) {
       const target = useEditorStore.getState().captureComponentInsertionTarget()!
       expect(useEditorStore.getState().insertComponentPackagesAtTarget(target, [data]).ok).toBe(true)
+      await settle()
     }
     expect(Object.keys(activeCourseProject().componentPackages)).toEqual([...Object.keys(initialMetadata), PACKAGE_ID])
     expect(collectCourseComponentPackageUsage(activeCourseProject(), PACKAGE_ID).references).toHaveLength(2)
-    useEditorStore.getState().undo()
+    await navigateHistory('undo')
     expect(collectCourseComponentPackageUsage(activeCourseProject(), PACKAGE_ID).references).toHaveLength(1)
     expect(useEditorStore.getState().componentPackages[PACKAGE_ID]).toBeDefined()
   })
 
-  it.each(['revision', 'owner', 'project'] as const)('rejects a late addition after a %s change without embedding anything', change => {
+  it.each(['revision', 'owner', 'project'] as const)('rejects a late addition after a %s change without embedding anything', async change => {
     const target = useEditorStore.getState().captureComponentInsertionTarget()!
     if (change === 'revision') useEditorStore.getState().addTextNode()
     if (change === 'owner') useEditorStore.getState().setEditingScope('global')
-    if (change === 'project') useEditorStore.getState().createNewProject()
+    if (change === 'project') await useEditorStore.getState().createCourseDocument('slide')
+    await settle()
     const before = activeCourseProject()
     expect(useEditorStore.getState().insertComponentPackagesAtTarget(target, [componentPackage('1.0.0')]).ok).toBe(false)
     expect(activeCourseProject()).toEqual(before)
-    expect(useEditorStore.getState().componentPackages).toEqual(initialPackages)
+    expectComponentPackageRecord(useEditorStore.getState().componentPackages, initialPackages)
   })
 
-  it('rolls back the whole batch if one component cannot be placed', () => {
+  it('rolls back the whole batch if one component cannot be placed', async () => {
     useEditorStore.getState().setEditingScope('global')
+    await settle()
     const before = activeCourseProject()
     const target = useEditorStore.getState().captureComponentInsertionTarget()!
     const result = useEditorStore.getState().insertComponentPackagesAtTarget(target, [
@@ -662,6 +750,6 @@ describe('add component packages directly to the current canvas', () => {
     ])
     expect(result.ok).toBe(false)
     expect(activeCourseProject()).toEqual(before)
-    expect(useEditorStore.getState().componentPackages).toEqual(initialPackages)
+    expectComponentPackageRecord(useEditorStore.getState().componentPackages, initialPackages)
   })
 })
