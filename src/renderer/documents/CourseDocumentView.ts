@@ -7,7 +7,7 @@ import { openSpatialAuthoringSession, selectSpatialEditorLayers } from '../cours
 import { selectFlowEditorBlock } from '../course/flowEditorSlice'
 import { reconcileFlowSelection } from '../store/slices/flowAuthoringSlice'
 import { freezeCourseAssetSidecar } from '../project/v9AssetAdapter'
-import { buildCourseAuthoringSessionForProject, updateCourseAuthoringSessionRevision } from '../authoring/courseAuthoringSession'
+import { buildCourseAuthoringSessionForProject, updateCourseAuthoringSessionItems, updateCourseAuthoringSessionRevision } from '../authoring/courseAuthoringSession'
 import type { CourseAuthoringSession } from '../authoring/courseAuthoringSession'
 import type { SlideOwnedState } from '../store/slices/slideAuthoringSlice'
 import type { FlowOwnedState } from '../store/slices/flowAuthoringSlice'
@@ -115,7 +115,7 @@ export function projectCourseDocument(model: Extract<DocumentModel, { kind: 'cou
   }
   const session = view.courseAuthoringSession
   patch.courseAuthoringSession = session?.token.locationId === location.id
-    ? { ...updateCourseAuthoringSessionRevision(session, project.revision), itemIds: selected }
+    ? updateCourseAuthoringSessionItems(updateCourseAuthoringSessionRevision(session, project.revision), selected)
     : buildCourseAuthoringSessionForProject(project, location.id, selected)
   return patch
 }

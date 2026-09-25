@@ -10,6 +10,7 @@ import {
 import {
   openCourseProjectArchive,
 } from '../../src/core/drivers/codecs/courseProjectArchive'
+import { componentPackagesFromArchive } from '@/renderer/components/componentPackageStore'
 import {
   selectActiveCourseProjectDocument,
   selectMediaAssetFiles,
@@ -21,6 +22,17 @@ import type {
   SlideSceneDocument,
 } from '@/shared/courseProjectTypes'
 import { listCourseProjectV9Fixtures } from '../fixtures/course-project-v9/sources'
+import {
+  bootTriageCourseHost,
+  formalCourse,
+  formalProject,
+  projectBody,
+  projectCourse,
+  redoCourse,
+  settleCourse,
+  undoCourse,
+  type TriageCourseHost,
+} from '../helpers/triage-t7-courseHost'
 
 const SLIDE_LOCATION_ID = 'location-slide'
 const FLOW_LOCATION_ID = 'location-flow'
@@ -47,8 +59,27 @@ function mixedProject(): CourseProjectDocument {
   return project
 }
 
-function loadMixedProject(): void {
-  useEditorStore.getState().loadCourseProject(mixedProject(), null)
+let host: TriageCourseHost
+
+/**
+ * 2.0 opens every course through the main-owned DocumentSession; the fixture's real
+ * asset and component bytes are the formal resources, not empty placeholders.
+ */
+async function openMixedProject(project: CourseProjectDocument): Promise<void> {
+  const fixture = listCourseProjectV9Fixtures().find(
+    (candidate) => candidate.id === 'mixed',
+  )
+  if (!fixture) throw new Error('Missing mixed Course Project V9 fixture')
+  await projectCourse(
+    host,
+    project,
+    fixture.data.assetFiles,
+    componentPackagesFromArchive(project, fixture.data.componentFiles),
+  )
+}
+
+function loadMixedProject(): Promise<void> {
+  return openMixedProject(mixedProject())
 }
 
 function mixedProjectWithNamedState(): CourseProjectDocument {
@@ -110,6 +141,51 @@ function byteFileSnapshot(files: Record<string, Uint8Array>) {
   )
 }
 
+/**
+ * 2.0 keeps the only authoritative History in the main-owned DocumentSession, so a
+ * renderer frame that used to read `{kind: 'editor-transaction', resourceChanges: {}}`
+ * is now "the document gained exactly one undoable frame and its resources did not move".
+ */
+function formalUndoDepth(): number {
+  return formalCourse(host).undoDepth
+}
+
+function formalHistoryDepths() {
+  const snapshot = formalCourse(host)
+  return { undoDepth: snapshot.undoDepth, redoDepth: snapshot.redoDepth }
+}
+
+function formalResourceSnapshot() {
+  const snapshot = formalCourse(host)
+  if (snapshot.model.kind !== 'course-v9') throw new Error('Expected a course document')
+  return {
+    assets: byteFileSnapshot(snapshot.model.resources.assets),
+    components: Object.fromEntries(
+      Object.entries(snapshot.model.resources.components)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([key, files]) => [key, byteFileSnapshot(files)]),
+    ),
+  }
+}
+
+function expectOneUndoableFrameWithoutResourceChange(before: {
+  undoDepth: number
+  resources: ReturnType<typeof formalResourceSnapshot>
+}): void {
+  const snapshot = formalCourse(host)
+  expect({ undoDepth: snapshot.undoDepth, redoDepth: snapshot.redoDepth })
+    .toEqual({ undoDepth: before.undoDepth + 1, redoDepth: 0 })
+  // The added frame is one human editor transaction, i.e. a single document operation
+  // committed through the editor path — the 2.0 form of `kind: 'editor-transaction'`.
+  expect(snapshot.undoHead?.actor).toBe('human')
+  // …and it carried no resource payload — the 2.0 form of `resourceChanges: {}`.
+  expect(formalResourceSnapshot()).toEqual(before.resources)
+  // 2.0 renders every authoring session from `cursor(project)` — `CourseDocumentView.ts:21`
+  // plus the slide/flow/spatial rebuilds at :25/:44/:79/:85/:93 — so the renderer's `past`
+  // is always empty; the frame above exists only in the main-owned DocumentSession.
+  expect(activeHistory().history.past).toHaveLength(0)
+}
+
 function authoringSessionSnapshot() {
   const state = useEditorStore.getState()
   return {
@@ -128,7 +204,10 @@ function authoritativeWriteSnapshot() {
   return {
     project: structuredClone(activeProject()),
     derivedProject: structuredClone(selectActiveCourseProjectDocument(state)!),
+    formalProject: structuredClone(formalProject(host)),
     activeHistory: structuredClone(activeHistory().history),
+    documentHistory: formalHistoryDepths(),
+    formalResources: formalResourceSnapshot(),
     mediaFiles: byteFileSnapshot(selectMediaAssetFiles(state)),
     componentPackages: structuredClone(state.componentPackages),
     sidecarPast: structuredClone(state.courseAssetSidecarPast),
@@ -210,14 +289,16 @@ function globalTemplate(
   }
 }
 
-beforeEach(() => {
-  loadMixedProject()
+beforeEach(async () => {
+  host = await bootTriageCourseHost()
+  await loadMixedProject()
 })
 
 describe('Course interaction authoring Store vertical slice', () => {
-  it('commits Slide template visibility and rule in one revision and one undoable history frame', () => {
+  it('commits Slide template visibility and rule in one revision and one undoable history frame', async () => {
     const beforeProject = structuredClone(activeProject())
-    const beforeActiveHistoryDepth = activeHistory().history.past.length
+    const beforeUndoDepth = formalUndoDepth()
+    const beforeFormalResources = formalResourceSnapshot()
     const beforeResourceSnapshotDepths = resourceSnapshotDepths()
 
     const result = useEditorStore.getState().applyInteractionTemplateAtTarget(
@@ -236,13 +317,13 @@ describe('Course interaction authoring Store vertical slice', () => {
         locationId: SLIDE_LOCATION_ID,
       },
     })
+    await settleCourse()
     const committedProject = structuredClone(activeProject())
     expect(committedProject.revision).toBe(beforeProject.revision + 1)
     expect(activeHistory().kind).toBe('slide')
-    expect(activeHistory().history.past).toHaveLength(beforeActiveHistoryDepth + 1)
-    expect(activeHistory().history.past.at(-1)).toMatchObject({
-      kind: 'editor-transaction',
-      resourceChanges: {},
+    expectOneUndoableFrameWithoutResourceChange({
+      undoDepth: beforeUndoDepth,
+      resources: beforeFormalResources,
     })
     expect(resourceSnapshotDepths()).toEqual(beforeResourceSnapshotDepths)
     expect(layer(committedProject, TITLE_ITEM_ID).playbackInitialVisibility)
@@ -265,8 +346,9 @@ describe('Course interaction authoring Store vertical slice', () => {
       }),
     ])
 
-    useEditorStore.getState().undo()
-    expect(activeProject()).toEqual(beforeProject)
+    await undoCourse(host)
+    expect(projectBody(activeProject())).toEqual(projectBody(beforeProject))
+    expect(activeProject().revision).toBeGreaterThan(beforeProject.revision)
     expect(layer(activeProject(), TITLE_ITEM_ID).playbackInitialVisibility)
       .toBe('inherit')
     expect(layer(activeProject(), DETAIL_ITEM_ID).playbackInitialVisibility)
@@ -274,8 +356,9 @@ describe('Course interaction authoring Store vertical slice', () => {
     expect(slideScene(activeProject()).interactions).toEqual([])
     expect(resourceSnapshotDepths()).toEqual(beforeResourceSnapshotDepths)
 
-    useEditorStore.getState().redo()
-    expect(activeProject()).toEqual(committedProject)
+    await redoCourse(host)
+    expect(projectBody(activeProject())).toEqual(projectBody(committedProject))
+    expect(activeProject().revision).toBeGreaterThan(committedProject.revision)
     expect(layer(activeProject(), TITLE_ITEM_ID).playbackInitialVisibility)
       .toBe('hidden')
     expect(layer(activeProject(), DETAIL_ITEM_ID).playbackInitialVisibility)
@@ -285,11 +368,12 @@ describe('Course interaction authoring Store vertical slice', () => {
     expect(resourceSnapshotDepths()).toEqual(beforeResourceSnapshotDepths)
   })
 
-  it('professionally updates the same stable rule ID and returns unchanged for a true no-op', () => {
+  it('professionally updates the same stable rule ID and returns unchanged for a true no-op', async () => {
     expect(useEditorStore.getState().applyInteractionTemplateAtTarget(
       localTarget(activeProject()),
       localTemplate(),
     )).toMatchObject({ ok: true, status: 'committed' })
+    await settleCourse()
 
     const createdProject = structuredClone(activeProject())
     const createdRule = slideScene(createdProject).interactions[0]
@@ -300,7 +384,7 @@ describe('Course interaction authoring Store vertical slice', () => {
       throw new Error('Expected the first reveal action')
     }
     firstAction.durationMs = 480
-    const beforeUpdateHistoryDepth = activeHistory().history.past.length
+    const beforeUpdateUndoDepth = formalUndoDepth()
 
     const updated = useEditorStore.getState().updateInteractionRuleAtTarget(
       localTarget(activeProject()),
@@ -317,9 +401,10 @@ describe('Course interaction authoring Store vertical slice', () => {
         ruleId: LOCAL_RULE_ID,
       },
     })
+    await settleCourse()
     const updatedProject = structuredClone(activeProject())
     expect(updatedProject.revision).toBe(createdProject.revision + 1)
-    expect(activeHistory().history.past).toHaveLength(beforeUpdateHistoryDepth + 1)
+    expect(formalUndoDepth()).toBe(beforeUpdateUndoDepth + 1)
     expect(slideScene(updatedProject).interactions).toHaveLength(1)
     expect(slideScene(updatedProject).interactions[0]).toMatchObject({
       id: LOCAL_RULE_ID,
@@ -330,6 +415,7 @@ describe('Course interaction authoring Store vertical slice', () => {
 
     const beforeNoOpProject = structuredClone(activeProject())
     const beforeNoOpHistory = structuredClone(activeHistory().history)
+    const beforeNoOpDocumentHistory = formalHistoryDepths()
     const unchanged = useEditorStore.getState().updateInteractionRuleAtTarget(
       localTarget(activeProject()),
       LOCAL_RULE_ID,
@@ -347,15 +433,17 @@ describe('Course interaction authoring Store vertical slice', () => {
     })
     expect(activeProject()).toEqual(beforeNoOpProject)
     expect(activeHistory().history).toEqual(beforeNoOpHistory)
+    expect(formalHistoryDepths()).toEqual(beforeNoOpDocumentHistory)
   })
 
-  it('commits an exact Flow location jump as one undoable Native click-rule transaction and rejects a missing location without writes', () => {
+  it('commits an exact Flow location jump as one undoable Native click-rule transaction and rejects a missing location without writes', async () => {
     expect(useEditorStore.getState().applyInteractionTemplateAtTarget(
       localTarget(activeProject()),
       localTemplate(),
     )).toMatchObject({ ok: true, status: 'committed' })
+    await settleCourse()
     const before = structuredClone(activeProject())
-    const beforeHistoryDepth = activeHistory().history.past.length
+    const beforeUndoDepth = formalUndoDepth()
 
     const committed = useEditorStore.getState().updateInteractionRuleAtTarget(
       localTarget(activeProject()),
@@ -372,9 +460,10 @@ describe('Course interaction authoring Store vertical slice', () => {
     )
 
     expect(committed).toMatchObject({ ok: true, status: 'committed' })
+    await settleCourse()
     const after = structuredClone(activeProject())
     expect(after.revision).toBe(before.revision + 1)
-    expect(activeHistory().history.past).toHaveLength(beforeHistoryDepth + 1)
+    expect(formalUndoDepth()).toBe(beforeUndoDepth + 1)
     expect(slideScene(after).interactions[0]).toMatchObject({
       id: LOCAL_RULE_ID,
       trigger: { type: 'node.click', nodeId: TITLE_ITEM_ID },
@@ -385,10 +474,12 @@ describe('Course interaction authoring Store vertical slice', () => {
       }],
     })
 
-    useEditorStore.getState().undo()
-    expect(activeProject()).toEqual(before)
-    useEditorStore.getState().redo()
-    expect(activeProject()).toEqual(after)
+    await undoCourse(host)
+    expect(projectBody(activeProject())).toEqual(projectBody(before))
+    expect(activeProject().revision).toBeGreaterThan(before.revision)
+    await redoCourse(host)
+    expect(projectBody(activeProject())).toEqual(projectBody(after))
+    expect(activeProject().revision).toBeGreaterThan(after.revision)
 
     const writeSnapshot = authoritativeWriteSnapshot()
     expect(useEditorStore.getState().updateInteractionRuleAtTarget(
@@ -409,11 +500,12 @@ describe('Course interaction authoring Store vertical slice', () => {
   it.each([
     [FLOW_LOCATION_ID, 'flow'] as const,
     [SPATIAL_LOCATION_ID, 'spatial'] as const,
-  ])('commits, undoes, and redoes a project-global template at %s in the current %s history', (locationId, expectedKind) => {
+  ])('commits, undoes, and redoes a project-global template at %s in the current %s history', async (locationId, expectedKind) => {
     useEditorStore.getState().activateCourseLocation(locationId)
     expect(activeHistory().kind).toBe(expectedKind)
     const beforeProject = structuredClone(activeProject())
-    const beforeActiveHistoryDepth = activeHistory().history.past.length
+    const beforeUndoDepth = formalUndoDepth()
+    const beforeFormalResources = formalResourceSnapshot()
     const beforeResourceSnapshotDepths = resourceSnapshotDepths()
     expect(beforeResourceSnapshotDepths).toEqual({
       sidecarPast: 0,
@@ -438,12 +530,12 @@ describe('Course interaction authoring Store vertical slice', () => {
         targetLayerItemIds: ['global-banner'],
       },
     })
+    await settleCourse()
     expect(activeHistory().kind).toBe(expectedKind)
     expect(activeProject().revision).toBe(beforeProject.revision + 1)
-    expect(activeHistory().history.past).toHaveLength(beforeActiveHistoryDepth + 1)
-    expect(activeHistory().history.past.at(-1)).toMatchObject({
-      kind: 'editor-transaction',
-      resourceChanges: {},
+    expectOneUndoableFrameWithoutResourceChange({
+      undoDepth: beforeUndoDepth,
+      resources: beforeFormalResources,
     })
     expect(activeProject().globalInteractions).toEqual([
       expect.objectContaining({ id: template.ruleId }),
@@ -454,18 +546,20 @@ describe('Course interaction authoring Store vertical slice', () => {
     expect(resourceSnapshotDepths()).toEqual(beforeResourceSnapshotDepths)
 
     const committedProject = structuredClone(activeProject())
-    useEditorStore.getState().undo()
+    await undoCourse(host)
     expect(activeHistory().kind).toBe(expectedKind)
-    expect(activeProject()).toEqual(beforeProject)
+    expect(projectBody(activeProject())).toEqual(projectBody(beforeProject))
+    expect(activeProject().revision).toBeGreaterThan(beforeProject.revision)
     expect(activeProject().globalInteractions).toEqual([])
     expect(layer(activeProject(), 'global-banner').playbackInitialVisibility)
       .toBe('inherit')
     expect(slideScene(activeProject()).interactions).toEqual([])
     expect(resourceSnapshotDepths()).toEqual(beforeResourceSnapshotDepths)
 
-    useEditorStore.getState().redo()
+    await redoCourse(host)
     expect(activeHistory().kind).toBe(expectedKind)
-    expect(activeProject()).toEqual(committedProject)
+    expect(projectBody(activeProject())).toEqual(projectBody(committedProject))
+    expect(activeProject().revision).toBeGreaterThan(committedProject.revision)
     expect(activeProject().globalInteractions).toEqual([
       expect.objectContaining({ id: template.ruleId }),
     ])
@@ -474,8 +568,8 @@ describe('Course interaction authoring Store vertical slice', () => {
     expect(resourceSnapshotDepths()).toEqual(beforeResourceSnapshotDepths)
   })
 
-  it('writes a Slide-context global rule with real scene and named-state conditions without touching the local carrier', () => {
-    useEditorStore.getState().loadCourseProject(mixedProjectWithNamedState(), null)
+  it('writes a Slide-context global rule with real scene and named-state conditions without touching the local carrier', async () => {
+    await openMixedProject(mixedProjectWithNamedState())
     useEditorStore.getState().setActivePresentationState(NAMED_STATE_ID)
     expect(useEditorStore.getState().slideCandidateSnapshot?.stateId)
       .toBe(NAMED_STATE_ID)
@@ -510,6 +604,7 @@ describe('Course interaction authoring Store vertical slice', () => {
         ruleId: template.ruleId,
       },
     })
+    await settleCourse()
     const committedProject = structuredClone(activeProject())
     expect(committedProject.globalInteractions).toEqual([{
       id: template.ruleId,
@@ -544,13 +639,14 @@ describe('Course interaction authoring Store vertical slice', () => {
   it.each([
     [FLOW_LOCATION_ID, 'flow'] as const,
     [SPATIAL_LOCATION_ID, 'spatial'] as const,
-  ])('rejects a local carrier at %s on %s without writing project or current history', (locationId, expectedKind) => {
+  ])('rejects a local carrier at %s on %s without writing project or current history', async (locationId, expectedKind) => {
     useEditorStore.getState().activateCourseLocation(locationId)
     expect(activeHistory().kind).toBe(expectedKind)
 
     const target = localTarget(activeProject(), locationId)
     const beforeTemplateProject = structuredClone(activeProject())
     const beforeTemplateHistory = structuredClone(activeHistory().history)
+    const beforeTemplateDocumentHistory = formalHistoryDepths()
     const beforeTemplateDirty = useEditorStore.getState().dirty
     const templateResult = useEditorStore.getState().applyInteractionTemplateAtTarget(
       target,
@@ -563,10 +659,12 @@ describe('Course interaction authoring Store vertical slice', () => {
     })
     expect(activeProject()).toEqual(beforeTemplateProject)
     expect(activeHistory().history).toEqual(beforeTemplateHistory)
+    expect(formalHistoryDepths()).toEqual(beforeTemplateDocumentHistory)
     expect(useEditorStore.getState().dirty).toBe(beforeTemplateDirty)
 
     const beforeUpdateProject = structuredClone(activeProject())
     const beforeUpdateHistory = structuredClone(activeHistory().history)
+    const beforeUpdateDocumentHistory = formalHistoryDepths()
     const beforeUpdateDirty = useEditorStore.getState().dirty
     const updateResult = useEditorStore.getState().updateInteractionRuleAtTarget(
       target,
@@ -580,12 +678,14 @@ describe('Course interaction authoring Store vertical slice', () => {
     })
     expect(activeProject()).toEqual(beforeUpdateProject)
     expect(activeHistory().history).toEqual(beforeUpdateHistory)
+    expect(formalHistoryDepths()).toEqual(beforeUpdateDocumentHistory)
     expect(useEditorStore.getState().dirty).toBe(beforeUpdateDirty)
   })
 
-  it('rejects stale revisions and switched locations or states without authoritative project, resource, history, session, or dirty writes', () => {
+  it('rejects stale revisions and switched locations or states without authoritative project, resource, history, session, or dirty writes', async () => {
     const staleLocalTarget = localTarget(activeProject())
     useEditorStore.getState().renameProject('Intervening interaction edit')
+    await settleCourse()
     let beforeRejection = authoritativeWriteSnapshot()
 
     const staleResult = useEditorStore.getState().applyInteractionTemplateAtTarget(
@@ -604,6 +704,7 @@ describe('Course interaction authoring Store vertical slice', () => {
       globalTarget(activeProject(), SLIDE_LOCATION_ID),
       globalTemplateRequest,
     )).toMatchObject({ ok: true, status: 'committed' })
+    await settleCourse()
     const capturedGlobalTarget = globalTarget(activeProject(), SLIDE_LOCATION_ID)
     useEditorStore.getState().activateCourseLocation(FLOW_LOCATION_ID)
     expect(activeHistory().kind).toBe('flow')
@@ -638,7 +739,7 @@ describe('Course interaction authoring Store vertical slice', () => {
     })
     expect(authoritativeWriteSnapshot()).toEqual(beforeRejection)
 
-    useEditorStore.getState().loadCourseProject(mixedProjectWithNamedState(), null)
+    await openMixedProject(mixedProjectWithNamedState())
     useEditorStore.getState().setActivePresentationState(NAMED_STATE_ID)
     const capturedStateTarget = globalTarget(
       activeProject(),
@@ -660,21 +761,24 @@ describe('Course interaction authoring Store vertical slice', () => {
     expect(authoritativeWriteSnapshot()).toEqual(beforeRejection)
   })
 
-  it('preserves local and global authoring through archive reopen and Published V2 without mutating authoring state', () => {
+  it('preserves local and global authoring through archive reopen and Published V2 without mutating authoring state', async () => {
     expect(useEditorStore.getState().applyInteractionTemplateAtTarget(
       localTarget(activeProject()),
       localTemplate(),
     )).toMatchObject({ ok: true, status: 'committed' })
+    await settleCourse()
     expect(useEditorStore.getState().updateInteractionRuleAtTarget(
       localTarget(activeProject()),
       LOCAL_RULE_ID,
       { name: '保存后的专业规则' },
     )).toMatchObject({ ok: true, status: 'committed' })
+    await settleCourse()
     const savedGlobalTemplate = globalTemplate('saved')
     expect(useEditorStore.getState().applyInteractionTemplateAtTarget(
       globalTarget(activeProject(), SLIDE_LOCATION_ID),
       savedGlobalTemplate,
     )).toMatchObject({ ok: true, status: 'committed' })
+    await settleCourse()
 
     const beforeReadEndpoints = structuredClone(activeProject())
     const state = useEditorStore.getState()

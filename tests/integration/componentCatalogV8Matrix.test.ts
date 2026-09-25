@@ -25,10 +25,39 @@ import {
   selectMediaAssetFiles,
   useEditorStore,
 } from '@/renderer/store/editorStore'
+import {
+  bootTriageCourseHost,
+  projectCourse,
+  settleCourse,
+  undoCourse,
+  redoCourse,
+  type TriageCourseHost,
+} from '../helpers/triage-t7-courseHost'
 
 const componentCatalogRoot = path.resolve(process.cwd(), BUILT_IN_COMPONENT_CATALOG_DIRECTORY)
 const importedAt = '2026-08-11T00:00:00.000Z'
 const expectedPackageCount = 4
+
+let host: TriageCourseHost
+
+/**
+ * `createNewProject` is the Store's fire-and-forget new-document entry point, so
+ * the new DocumentSession is only authoritative once its activation lands.
+ */
+async function createNewProjectOnHost(): Promise<void> {
+  const previous = useEditorStore.getState().courseDocument.documentId
+  useEditorStore.getState().createNewProject()
+  const deadline = Date.now() + 5000
+  while (Date.now() < deadline) {
+    const documentId = useEditorStore.getState().courseDocument.documentId
+    if (documentId && documentId !== previous) {
+      await settleCourse()
+      return
+    }
+    await new Promise((resolve) => setTimeout(resolve, 5))
+  }
+  throw new Error('createNewProject did not reach the document session')
+}
 
 const expectedCanvasTextKeys: Readonly<Record<string, readonly string[]>> = {
   'com.ittoedu.language.reading-annotation': [
@@ -139,6 +168,7 @@ describe('四组件 Course Project V9 编辑、归档与生命周期矩阵', () 
   let originalDecode: typeof HTMLImageElement.prototype.decode | undefined
 
   beforeAll(async () => {
+    host = await bootTriageCourseHost()
     packages = await loadCatalogPackages()
     originalDecode = HTMLImageElement.prototype.decode
     HTMLImageElement.prototype.decode = () => Promise.resolve()
@@ -149,8 +179,8 @@ describe('四组件 Course Project V9 编辑、归档与生命周期矩阵', () 
     else delete (HTMLImageElement.prototype as { decode?: unknown }).decode
   })
 
-  it('逐包按需嵌入，并覆盖属性编辑、插入删除、撤销重做和状态覆盖', () => {
-    useEditorStore.getState().createNewProject()
+  it('逐包按需嵌入，并覆盖属性编辑、插入删除、撤销重做和状态覆盖', async () => {
+    await createNewProjectOnHost()
 
     for (const [index, component] of packages.entries()) {
       useEditorStore.getState().importComponentPackage(component)
@@ -159,6 +189,7 @@ describe('四组件 Course Project V9 编辑、归档与生命周期矩阵', () 
         40 + index * 8,
         80 + index * 6,
       )
+      await settleCourse()
       let node = activeExternalNodes().find(
         (candidate) => candidate.component.packageId === component.manifest.id,
       )
@@ -170,14 +201,17 @@ describe('四组件 Course Project V9 编辑、归档与生命周期矩阵', () 
         const nextProps = structuredClone(node.props)
         setPath(nextProps, property.key, `基础属性编辑 ${index + 1} · ${component.manifest.name}`)
         useEditorStore.getState().updateNode(node.id, { props: nextProps })
+        await settleCourse()
         node = activeExternalNodes().find((candidate) => candidate.id === node!.id)
         expect(getPath(node!.props, property.key)).toBe(`基础属性编辑 ${index + 1} · ${component.manifest.name}`)
-        useEditorStore.getState().undo()
+        await undoCourse(host)
+        await settleCourse()
         expect(getPath(
           activeExternalNodes().find((candidate) => candidate.id === node!.id)!.props,
           property.key,
         )).toEqual(before)
-        useEditorStore.getState().redo()
+        await redoCourse(host)
+        await settleCourse()
         expect(getPath(
           activeExternalNodes().find((candidate) => candidate.id === node!.id)!.props,
           property.key,
@@ -186,12 +220,16 @@ describe('四组件 Course Project V9 编辑、归档与生命周期矩阵', () 
 
       const nodeId = node!.id
       useEditorStore.getState().deleteNode(nodeId)
+      await settleCourse()
       expect(activeExternalNodes().some((candidate) => candidate.id === nodeId)).toBe(false)
-      useEditorStore.getState().undo()
+      await undoCourse(host)
+      await settleCourse()
       expect(activeExternalNodes().some((candidate) => candidate.id === nodeId)).toBe(true)
-      useEditorStore.getState().redo()
+      await redoCourse(host)
+      await settleCourse()
       expect(activeExternalNodes().some((candidate) => candidate.id === nodeId)).toBe(false)
-      useEditorStore.getState().undo()
+      await undoCourse(host)
+      await settleCourse()
     }
 
     expect(activeExternalNodes()).toHaveLength(expectedPackageCount)
@@ -208,6 +246,7 @@ describe('四组件 Course Project V9 编辑、归档与生命周期矩阵', () 
       setPath(props, property.key, `状态属性编辑 ${index + 1} · ${component.manifest.name}`)
       useEditorStore.getState().updateNode(node.id, { props })
     }
+    await settleCourse()
 
     const scene = selectActiveScene(useEditorStore.getState())
     const effectiveNodes = selectEffectiveSlideSceneNodes(stateId)
@@ -227,7 +266,7 @@ describe('四组件 Course Project V9 编辑、归档与生命周期矩阵', () 
     }
   })
 
-  it('保存重开后保留四个精确包、来源元数据、实例与状态覆盖', () => {
+  it('保存重开后保留四个精确包、来源元数据、实例与状态覆盖', async () => {
     const state = useEditorStore.getState()
     const project = selectActiveCourseProjectDocument(state)
     expect(project, '当前会话必须是 Course Project V9').toBeTruthy()
@@ -262,9 +301,9 @@ describe('四组件 Course Project V9 编辑、归档与生命周期矩阵', () 
     expect(slide?.type === 'slide' ? slide.scenes[0]?.presentation?.states : undefined)
       .toHaveLength(2)
 
-    useEditorStore.getState().loadCourseProject(
+    await projectCourse(
+      host,
       reopened.project,
-      'component-catalog-v9-matrix.h5lesson',
       reopened.assetFiles,
       restoredPackages,
     )

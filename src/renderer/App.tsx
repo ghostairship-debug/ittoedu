@@ -326,7 +326,14 @@ export default function App() {
   }), [courseProjectLifecycle.saveProject, setError])
 
   const courseDelivery = useCourseDelivery({
-    captureSnapshot: async () => courseDeliverySnapshot(await useEditorStore.getState().drainCourseDocument()),
+    // A sessionless workbench (every course document closed) has no publish source;
+    // reporting that as the designed "no publishable document" failure keeps the
+    // internal bridge error out of the user-facing export contract.
+    captureSnapshot: async () => {
+      const state = useEditorStore.getState()
+      if (!state.courseDocument.documentId) return null
+      return courseDeliverySnapshot(await state.drainCourseDocument())
+    },
     readCanonicalSnapshot: () => courseDeliverySnapshot(useEditorStore.getState().courseDocument.snapshot),
     runBusy: run,
     commitStatus: setStatus,

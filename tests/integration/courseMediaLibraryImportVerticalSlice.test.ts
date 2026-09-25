@@ -1,12 +1,8 @@
 import { buildPublishedFixture as buildPublishedCourseV2Payload } from '../fixtures/teacherController'
-import { isAuthoringHistoryTransactionFrame } from '../../src/renderer/authoring/resourceAwareAuthoringHistory'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { componentPackagesFromArchive } from '@/renderer/components/componentPackageStore'
-import { isFlowEditorTransactionFrame } from '@/renderer/course/flowEditorSlice'
-
-import { isSpatialAuthoringTransactionFrame } from '@/renderer/course/spatialAuthoringHistory'
 
 import {
   createCourseProjectArchive,
@@ -26,6 +22,17 @@ import {
 } from '@/renderer/store/editorStore'
 import type { CourseProjectDocument } from '@/shared/courseProjectTypes'
 import type { AssetMeta } from '@/shared/contracts/media-v1'
+import type { DocumentModel } from '@/shared/workbench/document'
+import {
+  bootTriageCourseHost,
+  formalCourse,
+  projectBody,
+  projectCourse,
+  redoCourse,
+  settleCourse,
+  undoCourse,
+  type TriageCourseHost,
+} from '../helpers/triage-t7-courseHost'
 
 const FIXTURE_ROOT = join(
   process.cwd(),
@@ -37,20 +44,30 @@ const FIXED_TIME = '2026-08-24T05:00:00.000Z'
 
 type FixtureId = 'slide-heavy' | 'flow-heavy' | 'mixed-spatial'
 
+let host: TriageCourseHost
+
 function fixture(id: FixtureId): CourseProjectArchiveData {
   return openCourseProjectArchive(new Uint8Array(readFileSync(
     join(FIXTURE_ROOT, `${id}.h5lesson`),
   )))
 }
 
-function loadFixture(id: FixtureId): CourseProjectArchiveData {
+/**
+ * 2.0 起工程内容与素材字节只经主进程 DocumentSession 进入工作台：`projectCourse`
+ * 以正式文档打开工程，`archive.assetFiles` 就是该文档的正式 resources.assets。
+ */
+async function loadFixture(
+  id: FixtureId,
+  assetFiles?: Record<string, Uint8Array>,
+): Promise<CourseProjectArchiveData> {
   const archive = fixture(id)
-  useEditorStore.getState().loadCourseProject(
+  await projectCourse(
+    host,
     archive.project,
-    null,
-    archive.assetFiles,
+    assetFiles ?? archive.assetFiles,
     componentPackagesFromArchive(archive.project, archive.componentFiles),
   )
+  await settleCourse()
   return archive
 }
 
@@ -134,24 +151,38 @@ function activeHistory() {
   throw new Error('Expected an active V9 authoring history')
 }
 
-function transactionAssetIds() {
-  const active = activeHistory()
-  const entry = active.history.past.at(-1)
-  const transaction = active.kind === 'slide'
-    ? Boolean(entry && isAuthoringHistoryTransactionFrame(entry))
-    : active.kind === 'flow'
-      ? Boolean(entry && isFlowEditorTransactionFrame(entry))
-      : Boolean(entry && isSpatialAuthoringTransactionFrame(entry))
-  expect(transaction).toBe(true)
-  if (!entry || !('kind' in entry) || entry.kind !== 'editor-transaction') {
-    throw new Error('Expected an editor transaction history frame')
+function courseResources(model: DocumentModel) {
+  if (model.kind !== 'course-v9') throw new Error('Expected a Course Project V9 document')
+  return model.resources
+}
+
+function sameBytes(left: Uint8Array | undefined, right: Uint8Array | undefined): boolean {
+  if (!left || !right) return left === right
+  if (left.byteLength !== right.byteLength) return false
+  for (let index = 0; index < left.byteLength; index += 1) {
+    if (left[index] !== right[index]) return false
   }
-  return entry.resourceChanges.assetFileChanges?.map((change) => change.assetId) ?? []
+  return true
+}
+
+/**
+ * 2.0 的唯一正式 History 在主进程 DocumentSession：一次编辑事务表现为"恰好一个新的
+ * 历史步"，其资源增量就是该步前后两个 DocumentModel 之间发生变化的素材字节。整份资源
+ * 快照不会产生任何增量，所以这里仍然断言"增量正好是这几个素材 ID"。
+ */
+function transactionAssetIds(before: DocumentModel, after: DocumentModel): string[] {
+  const beforeAssets = courseResources(before).assets
+  const afterAssets = courseResources(after).assets
+  const assetIds = new Set([...Object.keys(beforeAssets), ...Object.keys(afterAssets)])
+  return [...assetIds]
+    .filter((assetId) => !sameBytes(beforeAssets[assetId], afterAssets[assetId]))
+    .sort()
 }
 
 function authoritativeWriteSnapshot() {
   const state = useEditorStore.getState()
   const active = activeHistory()
+  const formal = formalCourse(host)
   return {
     project: structuredClone(activeProject()),
     derivedProject: structuredClone(selectActiveCourseProjectDocument(state)!),
@@ -167,18 +198,27 @@ function authoritativeWriteSnapshot() {
     dirty: state.dirty,
     statusMessage: state.statusMessage,
     errorMessage: state.errorMessage,
+    // 唯一正式 writer 的状态：被拒绝的目标提交不得改动主进程文档一步。
+    formal: {
+      revision: formal.revision,
+      undoDepth: formal.undoDepth,
+      redoDepth: formal.redoDepth,
+      model: structuredClone(formal.model),
+    },
   }
 }
 
-function prepareSurface(id: FixtureId) {
-  loadFixture(id)
+async function prepareSurface(id: FixtureId) {
+  await loadFixture(id)
   if (id === 'slide-heavy') {
     useEditorStore.getState().activateCourseLocation('slide-location-intro')
     useEditorStore.getState().selectNode('slide-intro-title')
+    await settleCourse()
     return useEditorStore.getState().captureMediaLibraryImportTarget()
   }
   if (id === 'flow-heavy') {
     useEditorStore.getState().activateCourseLocation('flow-location-start')
+    await settleCourse()
     return useEditorStore.getState().captureMediaLibraryImportTarget()
   }
 
@@ -188,11 +228,12 @@ function prepareSurface(id: FixtureId) {
   const target = useEditorStore.getState().captureMediaLibraryImportTarget()
   useEditorStore.getState().activateCourseLocation('mixed-location-spatial-detail')
   useEditorStore.getState().selectNode('mixed-spatial-node-a')
+  await settleCourse()
   return target
 }
 
-beforeEach(() => {
-  useEditorStore.getState().createNewProject()
+beforeEach(async () => {
+  host = await bootTriageCourseHost()
 })
 
 describe('ARCH-2 project-scoped media-library import vertical slice', () => {
@@ -200,8 +241,8 @@ describe('ARCH-2 project-scoped media-library import vertical slice', () => {
     ['slide-heavy', 'slide'] as const,
     ['flow-heavy', 'flow'] as const,
     ['mixed-spatial', 'spatial'] as const,
-  ])('commits one two-asset transaction on %s without placement or full resource snapshots', (fixtureId, expectedKind) => {
-    const target = prepareSurface(fixtureId)
+  ])('commits one two-asset transaction on %s without placement or full resource snapshots', async (fixtureId, expectedKind) => {
+    const target = await prepareSurface(fixtureId)
     if (!target) throw new Error('Expected a captured media-library target')
     expect(activeHistory().kind).toBe(expectedKind)
 
@@ -211,7 +252,8 @@ describe('ARCH-2 project-scoped media-library import vertical slice', () => {
     ]
     const beforeProject = structuredClone(activeProject())
     const beforeFiles = byteMap(selectMediaAssetFiles(useEditorStore.getState()))
-    const beforeHistoryDepth = activeHistory().history.past.length
+    const beforeHistoryDepth = formalCourse(host).undoDepth
+    const beforeModel = structuredClone(formalCourse(host).model)
     const beforeResourceDepths = resourceSnapshotDepths()
     const beforeSelection = selectionSnapshot()
     const beforeSession = structuredClone(useEditorStore.getState().courseAuthoringSession)
@@ -227,11 +269,14 @@ describe('ARCH-2 project-scoped media-library import vertical slice', () => {
         addedAssetIds: items.map((item) => item.meta.id),
       },
     })
+    await settleCourse()
 
     const afterProject = structuredClone(activeProject())
     expect(afterProject.revision).toBe(beforeProject.revision + 1)
-    expect(activeHistory().history.past).toHaveLength(beforeHistoryDepth + 1)
-    expect(transactionAssetIds()).toEqual(items.map((item) => item.meta.id))
+    // 一次编辑事务 = 恰好一个新的正式历史步，且该步的素材增量正好是两个导入素材。
+    expect(formalCourse(host).undoDepth).toBe(beforeHistoryDepth + 1)
+    expect(transactionAssetIds(beforeModel, formalCourse(host).model))
+      .toEqual(items.map((item) => item.meta.id).sort())
     expect(resourceSnapshotDepths()).toEqual(beforeResourceDepths)
     expect(selectionSnapshot()).toEqual(beforeSelection)
     const committedSession = useEditorStore.getState().courseAuthoringSession
@@ -249,13 +294,15 @@ describe('ARCH-2 project-scoped media-library import vertical slice', () => {
         .toEqual(item.bytes)
     }
 
-    useEditorStore.getState().undo()
-    expect(activeProject()).toEqual(beforeProject)
+    await undoCourse(host)
+    // 撤销恢复同一份正文；DocumentSession 的 revision 只前进，因此按正文比较并显式断言前进。
+    expect(projectBody(activeProject())).toEqual(projectBody(beforeProject))
+    expect(activeProject().revision).toBeGreaterThan(beforeProject.revision)
     expect(byteMap(selectMediaAssetFiles(useEditorStore.getState()))).toEqual(beforeFiles)
     expect(resourceSnapshotDepths()).toEqual(beforeResourceDepths)
     const undoneSession = useEditorStore.getState().courseAuthoringSession
     if (!undoneSession) throw new Error('Expected the undone authoring session')
-    expect(undoneSession.token.revision).toBe(beforeProject.revision)
+    expect(undoneSession.token.revision).toBe(activeProject().revision)
     expect(undoneSession.token.generation).toBeGreaterThan(
       committedSession.token.generation,
     )
@@ -263,8 +310,9 @@ describe('ARCH-2 project-scoped media-library import vertical slice', () => {
     expect(Object.isFrozen(undoneSession)).toBe(true)
     expect(Object.isFrozen(undoneSession.itemIds)).toBe(true)
 
-    useEditorStore.getState().redo()
-    expect(activeProject()).toEqual(afterProject)
+    await redoCourse(host)
+    expect(projectBody(activeProject())).toEqual(projectBody(afterProject))
+    expect(activeProject().revision).toBeGreaterThan(afterProject.revision)
     for (const item of items) {
       expect(selectMediaAssetFiles(useEditorStore.getState())[item.meta.id])
         .toEqual(item.bytes)
@@ -272,7 +320,7 @@ describe('ARCH-2 project-scoped media-library import vertical slice', () => {
     expect(resourceSnapshotDepths()).toEqual(beforeResourceDepths)
     const redoneSession = useEditorStore.getState().courseAuthoringSession
     if (!redoneSession) throw new Error('Expected the redone authoring session')
-    expect(redoneSession.token.revision).toBe(afterProject.revision)
+    expect(redoneSession.token.revision).toBe(activeProject().revision)
     expect(redoneSession.token.generation).toBeGreaterThan(
       undoneSession.token.generation,
     )
@@ -281,9 +329,10 @@ describe('ARCH-2 project-scoped media-library import vertical slice', () => {
     expect(Object.isFrozen(redoneSession.itemIds)).toBe(true)
   })
 
-  it('rejects stale revision, project mismatch and conflict, while exact reuse is a zero-write no-op', () => {
-    loadFixture('slide-heavy')
+  it('rejects stale revision, project mismatch and conflict, while exact reuse is a zero-write no-op', async () => {
+    await loadFixture('slide-heavy')
     useEditorStore.getState().activateCourseLocation('slide-location-intro')
+    await settleCourse()
 
     const exactId = 'slide-hero'
     const exactMeta = structuredClone(activeProject().assets[exactId])
@@ -321,6 +370,7 @@ describe('ARCH-2 project-scoped media-library import vertical slice', () => {
     expect(authoritativeWriteSnapshot()).toEqual(before)
 
     useEditorStore.getState().renameProject('ARCH-2 intervening edit')
+    await settleCourse()
     before = authoritativeWriteSnapshot()
     expect(useEditorStore.getState().importAssetsAtTarget(
       target,
@@ -329,152 +379,136 @@ describe('ARCH-2 project-scoped media-library import vertical slice', () => {
     expect(authoritativeWriteSnapshot()).toEqual(before)
   })
 
-  it('keeps legacy snapshot stacks aligned around a delta frame', () => {
-    loadFixture('slide-heavy')
+  it('keeps legacy snapshot stacks aligned around a delta frame', async () => {
+    await loadFixture('slide-heavy')
     useEditorStore.getState().activateCourseLocation('slide-location-intro')
+    await settleCourse()
     const originalTitle = activeProject().title
+    // 2.0 起 renderer 不再维护资源快照栈（courseViewPatch / projectCourseDocument 恒清空），
+    // 历史深度只能来自主进程 DocumentSession。两者一起断言：renderer 栈恒为空（delta 帧不落
+    // 整份资源快照），而重命名与 delta 帧各推进恰好一个正式历史步。
+    const emptyResourceDepths = {
+      sidecarPast: 0,
+      sidecarFuture: 0,
+      componentPast: 0,
+      componentFuture: 0,
+    }
+    expect(resourceSnapshotDepths()).toEqual(emptyResourceDepths)
 
     useEditorStore.getState().renameProject('ARCH-2 legacy before delta')
-    expect(resourceSnapshotDepths()).toEqual({
-      sidecarPast: 1,
-      sidecarFuture: 0,
-      componentPast: 1,
-      componentFuture: 0,
-    })
+    await settleCourse()
+    expect(formalCourse(host).undoDepth).toBe(1)
+    expect(resourceSnapshotDepths()).toEqual(emptyResourceDepths)
 
     const target = useEditorStore.getState().captureMediaLibraryImportTarget()
     if (!target) throw new Error('Expected a captured media-library target')
     const imported = image('arch2-legacy-delta-asset', 51)
     expect(useEditorStore.getState().importAssetsAtTarget(target, [imported]))
       .toMatchObject({ ok: true, status: 'imported' })
-    expect(resourceSnapshotDepths()).toEqual({
-      sidecarPast: 1,
-      sidecarFuture: 0,
-      componentPast: 1,
-      componentFuture: 0,
-    })
+    await settleCourse()
+    expect(formalCourse(host).undoDepth).toBe(2)
+    expect(resourceSnapshotDepths()).toEqual(emptyResourceDepths)
 
     useEditorStore.getState().renameProject('ARCH-2 legacy after delta')
-    expect(resourceSnapshotDepths()).toEqual({
-      sidecarPast: 2,
-      sidecarFuture: 0,
-      componentPast: 2,
-      componentFuture: 0,
-    })
+    await settleCourse()
+    expect(formalCourse(host).undoDepth).toBe(3)
+    expect(resourceSnapshotDepths()).toEqual(emptyResourceDepths)
 
-    useEditorStore.getState().undo()
+    await undoCourse(host)
     expect(activeProject().title).toBe('ARCH-2 legacy before delta')
     expect(activeProject().assets[imported.meta.id]).toEqual(imported.meta)
-    expect(resourceSnapshotDepths()).toEqual({
-      sidecarPast: 1,
-      sidecarFuture: 1,
-      componentPast: 1,
-      componentFuture: 1,
-    })
+    expect(formalCourse(host)).toMatchObject({ undoDepth: 2, redoDepth: 1 })
+    expect(resourceSnapshotDepths()).toEqual(emptyResourceDepths)
 
-    useEditorStore.getState().undo()
+    await undoCourse(host)
     expect(activeProject().title).toBe('ARCH-2 legacy before delta')
     expect(activeProject().assets[imported.meta.id]).toBeUndefined()
     expect(selectMediaAssetFiles(useEditorStore.getState())[imported.meta.id]).toBeUndefined()
-    expect(resourceSnapshotDepths()).toEqual({
-      sidecarPast: 1,
-      sidecarFuture: 1,
-      componentPast: 1,
-      componentFuture: 1,
-    })
+    expect(formalCourse(host)).toMatchObject({ undoDepth: 1, redoDepth: 2 })
 
-    useEditorStore.getState().undo()
+    await undoCourse(host)
     expect(activeProject().title).toBe(originalTitle)
-    expect(resourceSnapshotDepths()).toEqual({
-      sidecarPast: 0,
-      sidecarFuture: 2,
-      componentPast: 0,
-      componentFuture: 2,
-    })
+    expect(formalCourse(host)).toMatchObject({ undoDepth: 0, redoDepth: 3 })
+    expect(resourceSnapshotDepths()).toEqual(emptyResourceDepths)
 
-    useEditorStore.getState().redo()
-    useEditorStore.getState().redo()
+    await redoCourse(host)
+    await redoCourse(host)
     expect(activeProject().assets[imported.meta.id]).toEqual(imported.meta)
     expect(selectMediaAssetFiles(useEditorStore.getState())[imported.meta.id])
       .toEqual(imported.bytes)
-    useEditorStore.getState().redo()
+    expect(formalCourse(host)).toMatchObject({ undoDepth: 2, redoDepth: 1 })
+
+    await redoCourse(host)
     expect(activeProject().title).toBe('ARCH-2 legacy after delta')
-    expect(resourceSnapshotDepths()).toEqual({
-      sidecarPast: 2,
-      sidecarFuture: 0,
-      componentPast: 2,
-      componentFuture: 0,
-    })
+    expect(formalCourse(host)).toMatchObject({ undoDepth: 3, redoDepth: 0 })
+    expect(resourceSnapshotDepths()).toEqual(emptyResourceDepths)
   })
 
-  it('applies and reverses a prototype-looking asset ID as an own resource key', () => {
-    loadFixture('slide-heavy')
+  it('applies and reverses a prototype-looking asset ID as an own resource key', async () => {
+    await loadFixture('slide-heavy')
+    await settleCourse()
     const target = useEditorStore.getState().captureMediaLibraryImportTarget()
     if (!target) throw new Error('Expected a captured media-library target')
     const item = image('__proto__', 61)
 
     expect(useEditorStore.getState().importAssetsAtTarget(target, [item]))
       .toMatchObject({ ok: true, status: 'imported' })
+    await settleCourse()
     expect(Object.hasOwn(activeProject().assets, item.meta.id)).toBe(true)
     const committedFiles = selectMediaAssetFiles(useEditorStore.getState())
     expect(Object.hasOwn(committedFiles, item.meta.id)).toBe(true)
     expect(Object.getPrototypeOf(committedFiles)).toBe(Object.prototype)
     expect(committedFiles[item.meta.id]).toEqual(item.bytes)
 
-    useEditorStore.getState().undo()
+    await undoCourse(host)
     expect(Object.hasOwn(activeProject().assets, item.meta.id)).toBe(false)
     expect(Object.hasOwn(
       selectMediaAssetFiles(useEditorStore.getState()),
       item.meta.id,
     )).toBe(false)
 
-    useEditorStore.getState().redo()
+    await redoCourse(host)
     expect(Object.hasOwn(activeProject().assets, item.meta.id)).toBe(true)
     expect(selectMediaAssetFiles(useEditorStore.getState())[item.meta.id])
       .toEqual(item.bytes)
   })
 
-  it('repairs referenced missing bytes, survives archive reopen, and leaves Published reads side-effect free', () => {
+  it('fails closed on a project with missing referenced asset bytes and keeps Published reads side-effect free', async () => {
+    // 2.0 有意删除了 1.x 的"打开损坏工程再修复素材"路径：V9 archive 合同在
+    // DocumentSession.create 之前就拒绝"声明了字节却没有字节"的素材
+    // (src/core/drivers/codecs/courseProjectArchive.ts:354)，诊断账本也把
+    // asset-bytes-missing 标为 archive-shadowed
+    // (src/shared/courseProjectValidationDiagnostics.ts:94-98)。原用例的"修复"意图
+    // 因此改述为失败关闭：坏工程不得被打开，也不得产生任何正式文档写入。
     const source = fixture('slide-heavy')
     const referencedAssetId = 'slide-hero'
-    const referencedMeta = structuredClone(source.project.assets[referencedAssetId])
     const referencedBytes = source.assetFiles[referencedAssetId]?.slice()
-    if (!referencedMeta || !referencedBytes) throw new Error('Fixture asset is incomplete')
+    if (!referencedBytes) throw new Error('Fixture asset is incomplete')
     const filesWithoutReferencedAsset = Object.fromEntries(
       Object.entries(source.assetFiles)
         .filter(([assetId]) => assetId !== referencedAssetId)
         .map(([assetId, bytes]) => [assetId, bytes.slice()]),
     )
-    useEditorStore.getState().loadCourseProject(
-      source.project,
-      null,
-      filesWithoutReferencedAsset,
-      componentPackagesFromArchive(source.project, source.componentFiles),
-    )
-    useEditorStore.getState().activateCourseLocation('slide-location-intro')
-    const target = useEditorStore.getState().captureMediaLibraryImportTarget()
-    if (!target) throw new Error('Expected a captured media-library target')
 
-    expect(selectMediaAssetFiles(useEditorStore.getState())[referencedAssetId]).toBeUndefined()
-    expect(useEditorStore.getState().importAssetsAtTarget(target, [{
-      meta: referencedMeta,
-      bytes: referencedBytes,
-    }])).toMatchObject({
-      ok: true,
-      status: 'imported',
-      feedback: {
-        repairedAssetIds: [referencedAssetId],
-        addedAssetIds: [],
-      },
-    })
-    expect(transactionAssetIds()).toEqual([referencedAssetId])
+    const activeBefore = useEditorStore.getState().courseDocument.documentId
+    await expect(loadFixture('slide-heavy', filesWithoutReferencedAsset))
+      .rejects.toThrow(/素材“slide-hero\.png”缺少二进制内容/)
+    expect(useEditorStore.getState().courseDocument.documentId).toBe(activeBefore)
+
+    const healthy = await loadFixture('slide-heavy')
+    const referencedMeta = healthy.project.assets[referencedAssetId]
+    if (!referencedMeta) throw new Error('Fixture asset is incomplete')
+    useEditorStore.getState().activateCourseLocation('slide-location-intro')
+    await settleCourse()
+    expect(selectMediaAssetFiles(useEditorStore.getState())[referencedAssetId])
+      .toEqual(referencedBytes)
 
     const beforeReadEndpoints = authoritativeWriteSnapshot()
     const state = useEditorStore.getState()
     const archiveBytes = createCourseProjectArchive({
       project: activeProject(),
       assetFiles: selectMediaAssetFiles(state),
-      componentFiles: source.componentFiles,
+      componentFiles: healthy.componentFiles,
     }, { mtime: FIXED_TIME })
     const reopened = openCourseProjectArchive(archiveBytes)
     expect(reopened.project.assets[referencedAssetId]).toEqual(referencedMeta)

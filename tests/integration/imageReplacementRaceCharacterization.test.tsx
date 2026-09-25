@@ -3,6 +3,8 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+vi.mock('pdfjs-dist/build/pdf.worker.min.mjs?url', () => ({ default: '/pdf.worker.min.mjs' }))
 import type { DesktopAPI, SelectedImageResult } from '../../src/shared/ipcTypes'
 import type { CourseProjectDocument } from '../../src/shared/courseProjectTypes'
 import { courseProjectDocumentSchema } from '../../src/shared/courseProjectSchema'
@@ -21,6 +23,15 @@ import {
   selectSelectedNodeId,
   useEditorStore,
 } from '../../src/renderer/store/editorStore'
+import {
+  bootTriageCourseHost,
+  formalCourse,
+  openAppCourse,
+  waitForAppDocuments,
+  withAppDocuments,
+  type TriageCourseHost,
+} from '../helpers/triage-t7-appHost'
+import { redoCourse, undoCourse } from '../helpers/triage-t7-courseHost'
 
 vi.mock('../../src/renderer/ui/Workspace', () => ({
   Workspace: () => <div data-testid="workspace-stub" />,
@@ -215,11 +226,13 @@ function fixtureArchive(): CourseProjectArchiveData {
   }
 }
 
-function loadFixture(): CourseProjectArchiveData {
+let host: TriageCourseHost
+
+async function loadFixture(): Promise<CourseProjectArchiveData> {
   const archive = fixtureArchive()
-  useEditorStore.getState().loadCourseProject(
+  await openAppCourse(
+    host,
     archive.project,
-    null,
     archive.assetFiles,
     componentPackagesFromArchive(archive.project, archive.componentFiles),
   )
@@ -257,7 +270,8 @@ function snapshot(): ReplacementSnapshot {
     imageBAssetId: imageAssetId(project, IMAGE_B),
     assetIds: Object.keys(project.assets).sort(),
     fileIds: Object.keys(selectMediaAssetFiles(state)).sort(),
-    historyDepth: state.slideBackend?.getSession().history.past.length ?? 0,
+    // One history step now lives in DocumentSession; the renderer is a projection.
+    historyDepth: formalCourse(host).undoDepth,
     sidecarPastDepth: state.courseAssetSidecarPast.length,
     errorMessage: state.errorMessage,
   }
@@ -273,20 +287,16 @@ function mutatedItems(
   ]
 }
 
-async function renderAppWithDialog(
-  result: Deferred<SelectedImageResult | null>,
-) {
-  const api = selectedImageApi(() => result.promise)
-  window.desktopAPI = api
-  render(<App />)
-  await waitFor(() => expect(screen.getByTestId('replace-image')).toBeVisible())
-  return api
-}
-
 async function beginReplacement(
   result: Deferred<SelectedImageResult | null>,
 ) {
-  const api = await renderAppWithDialog(result)
+  const api = selectedImageApi(() => result.promise)
+  window.desktopAPI = withAppDocuments(api, host)
+  render(<App />)
+  await waitForAppDocuments()
+  // The App owns the document bridge, so the fixture is opened after it connects.
+  await loadFixture()
+  await waitFor(() => expect(screen.getByTestId('replace-image')).toBeVisible())
   fireEvent.click(screen.getByTestId('replace-image'))
   await waitFor(() => expect(api.selectImage).toHaveBeenCalledOnce())
   return api
@@ -300,10 +310,9 @@ async function resolveDialog<T>(result: Deferred<T>, value: T): Promise<void> {
 }
 
 async function runCrossLocationRace(): Promise<RaceDiagnostic> {
-  loadFixture()
-  const before = snapshot()
   const result = deferred<SelectedImageResult | null>()
   await beginReplacement(result)
+  const before = snapshot()
   useEditorStore.getState().activateCourseLocation(LOCATION_B)
   useEditorStore.getState().selectNode(IMAGE_B)
   await resolveDialog(result, REPLACEMENT_FILE)
@@ -319,7 +328,7 @@ async function runCrossLocationRace(): Promise<RaceDiagnostic> {
   }
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   vi.stubGlobal('ResizeObserver', class {
     observe() {}
     disconnect() {}
@@ -337,7 +346,7 @@ beforeEach(() => {
   // jsdom port only; real corrupted-pixel rejection is covered in Chromium.
   vi.stubGlobal('createImageBitmap', async () => ({ width: 2, height: 2, close() {} }))
   vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined)
-  loadFixture()
+  host = await bootTriageCourseHost()
 })
 
 afterEach(() => {
@@ -351,9 +360,9 @@ afterEach(() => {
 describe('ARCH-1 VS-01 image replacement characterization', () => {
   it('keeps the normal same-target replacement to one history step and round-trips current save/publish/HTML endpoints', async () => {
     const source = fixtureArchive()
-    const before = snapshot()
     const result = deferred<SelectedImageResult | null>()
     await beginReplacement(result)
+    const before = snapshot()
     await resolveDialog(result, REPLACEMENT_FILE)
 
     await waitFor(() => expect(snapshot().imageAAssetId).not.toBe(before.imageAAssetId))
@@ -364,17 +373,17 @@ describe('ARCH-1 VS-01 image replacement characterization', () => {
     expect(after.revision).toBe(before.revision + 1)
     expect(after.assetIds).toContain(replacementAssetId)
     expect(after.fileIds).toContain(replacementAssetId)
-    expect(selectMediaAssetFiles(useEditorStore.getState())[replacementAssetId])
-      .toEqual(REPLACEMENT_BYTES)
+    expect(Array.from(selectMediaAssetFiles(useEditorStore.getState())[replacementAssetId]!))
+      .toEqual(Array.from(REPLACEMENT_BYTES))
 
-    useEditorStore.getState().undo()
+    await undoCourse(host)
     expect(snapshot().imageAAssetId).toBe(before.imageAAssetId)
     expect(snapshot().assetIds).not.toContain(replacementAssetId)
     expect(snapshot().fileIds).not.toContain(replacementAssetId)
-    useEditorStore.getState().redo()
+    await redoCourse(host)
     expect(snapshot().imageAAssetId).toBe(replacementAssetId)
-    expect(selectMediaAssetFiles(useEditorStore.getState())[replacementAssetId])
-      .toEqual(REPLACEMENT_BYTES)
+    expect(Array.from(selectMediaAssetFiles(useEditorStore.getState())[replacementAssetId]!))
+      .toEqual(Array.from(REPLACEMENT_BYTES))
 
     const state = useEditorStore.getState()
     const project = selectActiveCourseProjectDocument(state)
@@ -386,7 +395,7 @@ describe('ARCH-1 VS-01 image replacement characterization', () => {
     }, { mtime: FIXED_TIME })
     const reopened = openCourseProjectArchive(archiveBytes)
     expect(imageAssetId(reopened.project, IMAGE_A)).toBe(replacementAssetId)
-    expect(reopened.assetFiles[replacementAssetId]).toEqual(REPLACEMENT_BYTES)
+    expect(Array.from(reopened.assetFiles[replacementAssetId]!)).toEqual(Array.from(REPLACEMENT_BYTES))
 
     const published = buildPublishedCourseV2Payload({
       project: reopened.project,
@@ -403,9 +412,9 @@ describe('ARCH-1 VS-01 image replacement characterization', () => {
   })
 
   it('treats a cancelled dialog as a no-op with no history, metadata, or bytes', async () => {
-    const before = snapshot()
     const result = deferred<SelectedImageResult | null>()
     await beginReplacement(result)
+    const before = snapshot()
     await resolveDialog(result, null)
     await waitFor(() => expect(screen.getByTestId('new-project')).not.toBeDisabled())
     expect(snapshot()).toEqual(before)
@@ -432,9 +441,9 @@ describe('ARCH-1 VS-01 image replacement characterization', () => {
   })
 
   it('records that project New/Open is UI-unreachable while the image dialog keeps App busy', async () => {
-    const projectId = snapshot().projectId
     const result = deferred<SelectedImageResult | null>()
     await beginReplacement(result)
+    const projectId = snapshot().projectId
     await waitFor(() => expect(screen.getByTestId('new-project')).toBeDisabled())
     expect(screen.getByTestId('open-project')).toBeDisabled()
     fireEvent.click(screen.getByTestId('new-project'))

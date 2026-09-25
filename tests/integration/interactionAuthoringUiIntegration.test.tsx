@@ -1,5 +1,6 @@
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { componentPackagesFromArchive } from '@/renderer/components/componentPackageStore'
 import {
   selectActiveCourseProjectDocument,
   useEditorStore,
@@ -12,6 +13,14 @@ import type {
   SlideSceneDocument,
 } from '@/shared/courseProjectTypes'
 import { listCourseProjectV9Fixtures } from '../fixtures/course-project-v9/sources'
+import {
+  bootTriageCourseHost,
+  formalCourse,
+  formalProject,
+  projectCourse,
+  settleCourse,
+  type TriageCourseHost,
+} from '../helpers/triage-t7-courseHost'
 
 const SLIDE_LOCATION_ID = 'location-slide'
 const FLOW_LOCATION_ID = 'location-flow'
@@ -20,6 +29,8 @@ const SLIDE_SCENE_ID = 'scene-1'
 const ACTIVE_STATE_ID = 'state-question'
 const TITLE_ITEM_ID = 'slide-title'
 const GLOBAL_ITEM_ID = 'global-banner'
+
+let host: TriageCourseHost
 
 function mixedProject(withSlideState = false): CourseProjectDocument {
   const fixture = listCourseProjectV9Fixtures().find(
@@ -50,8 +61,27 @@ function mixedProject(withSlideState = false): CourseProjectDocument {
   return project
 }
 
-function loadMixedProject(withSlideState = false): void {
-  useEditorStore.getState().loadCourseProject(mixedProject(withSlideState), null)
+/**
+ * 2.0 opens every course through the main-owned DocumentSession with the fixture's real
+ * asset and component bytes. The removed `loadCourseProject` shortcut never connected a
+ * document host, so the renderer projection kept the startup blank document.
+ */
+async function openMixedProject(withSlideState = false): Promise<void> {
+  const fixture = listCourseProjectV9Fixtures().find(
+    (candidate) => candidate.id === 'mixed',
+  )
+  if (!fixture) throw new Error('Missing mixed Course Project V9 fixture')
+  const project = mixedProject(withSlideState)
+  await projectCourse(
+    host,
+    project,
+    fixture.data.assetFiles,
+    componentPackagesFromArchive(project, fixture.data.componentFiles),
+  )
+}
+
+function loadMixedProject(withSlideState = false): Promise<void> {
+  return openMixedProject(withSlideState)
 }
 
 function activeProject(): CourseProjectDocument {
@@ -96,7 +126,13 @@ function layer(project: CourseProjectDocument, layerItemId: string): LayerItem {
   return item
 }
 
-function activeHistory() {
+/**
+ * The renderer authoring session is a projection of the main-owned DocumentSession in
+ * 2.0 and its cursor is built as `{ present, past: [], future: [] }`, so it can never
+ * grow. It is kept here as the truthful compatibility check; undo/redo depth and the
+ * shape of the newest frame are read from the formal document instead.
+ */
+function rendererSessionHistory() {
   const state = useEditorStore.getState()
   if (state.spatialSession) return state.spatialSession.history
   if (state.flowSession) return state.flowSession.history
@@ -106,14 +142,58 @@ function activeHistory() {
   throw new Error('Expected an active V9 authoring history')
 }
 
+function formalHistoryDepths(): { undoDepth: number; redoDepth: number } {
+  const snapshot = formalCourse(host)
+  return { undoDepth: snapshot.undoDepth, redoDepth: snapshot.redoDepth }
+}
+
+function byteFileSnapshot(files: Record<string, Uint8Array>) {
+  return Object.fromEntries(
+    Object.entries(files)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([path, bytes]) => [path, Array.from(bytes)]),
+  )
+}
+
+function formalResourceSnapshot() {
+  const snapshot = formalCourse(host)
+  if (snapshot.model.kind !== 'course-v9') throw new Error('Expected a course document')
+  return {
+    assets: byteFileSnapshot(snapshot.model.resources.assets),
+    components: Object.fromEntries(
+      Object.entries(snapshot.model.resources.components)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([key, files]) => [key, byteFileSnapshot(files)]),
+    ),
+  }
+}
+
+/**
+ * The 2.0 form of the removed renderer frame
+ * `{ kind: 'editor-transaction', resourceChanges: {} }`: exactly one new undoable frame,
+ * authored by a human editor transaction, that carried no resource payload.
+ */
+function expectOneUndoableFrameWithoutResourceChange(before: {
+  undoDepth: number
+  redoDepth: number
+  resources: ReturnType<typeof formalResourceSnapshot>
+}): void {
+  const snapshot = formalCourse(host)
+  expect({ undoDepth: snapshot.undoDepth, redoDepth: snapshot.redoDepth })
+    .toEqual({ undoDepth: before.undoDepth + 1, redoDepth: before.redoDepth })
+  expect(snapshot.undoHead?.actor).toBe('human')
+  expect(formalResourceSnapshot()).toEqual(before.resources)
+}
+
 function openGlobalAutomationAt(locationId: string): void {
   useEditorStore.getState().activateCourseLocation(locationId)
   useEditorStore.getState().setEditingScope('global')
   render(<AutomationTab />)
 }
 
-beforeEach(() => {
-  loadMixedProject()
+beforeEach(async () => {
+  host = await bootTriageCourseHost()
+  await loadMixedProject()
 })
 
 afterEach(() => {
@@ -121,21 +201,24 @@ afterEach(() => {
 })
 
 describe('interaction authoring UI integration', () => {
-  it('applies a local Slide template atomically and updates its stable rule once', () => {
+  it('applies a local Slide template atomically and updates its stable rule once', async () => {
     render(<AutomationTab />)
     const beforeTemplateRevision = activeProject().revision
-    const beforeTemplateHistory = activeHistory().past.length
+    const beforeTemplateDepths = formalHistoryDepths()
+    const beforeTemplateResources = formalResourceSnapshot()
+    expect(rendererSessionHistory().past).toHaveLength(0)
 
     fireEvent.click(screen.getByRole('button', { name: '使用模板' }))
+    await settleCourse()
 
     const templatedProject = activeProject()
     const templatedRule = slideScene(templatedProject).interactions[0]
     if (!templatedRule) throw new Error('Expected the UI to create a local rule')
     expect(templatedProject.revision).toBe(beforeTemplateRevision + 1)
-    expect(activeHistory().past).toHaveLength(beforeTemplateHistory + 1)
-    expect(activeHistory().past.at(-1)).toMatchObject({
-      kind: 'editor-transaction',
-      resourceChanges: {},
+    expect(rendererSessionHistory().past).toHaveLength(0)
+    expectOneUndoableFrameWithoutResourceChange({
+      ...beforeTemplateDepths,
+      resources: beforeTemplateResources,
     })
     expect(slideScene(templatedProject).interactions).toHaveLength(1)
     expect(templatedRule).toMatchObject({
@@ -154,14 +237,16 @@ describe('interaction authoring UI integration', () => {
 
     const stableRuleId = templatedRule.id
     const beforeRenameRevision = templatedProject.revision
-    const beforeRenameHistory = activeHistory().past.length
+    const beforeRenameUndoDepth = formalCourse(host).undoDepth
     fireEvent.change(screen.getByLabelText('规则名称'), {
       target: { value: '专业字段改名后的规则' },
     })
+    await settleCourse()
 
     const renamedProject = activeProject()
     expect(renamedProject.revision).toBe(beforeRenameRevision + 1)
-    expect(activeHistory().past).toHaveLength(beforeRenameHistory + 1)
+    expect(rendererSessionHistory().past).toHaveLength(0)
+    expect(formalCourse(host).undoDepth).toBe(beforeRenameUndoDepth + 1)
     expect(slideScene(renamedProject).interactions).toEqual([
       expect.objectContaining({
         id: stableRuleId,
@@ -182,8 +267,8 @@ describe('interaction authoring UI integration', () => {
       .not.toBeInTheDocument()
   })
 
-  it('uses the real Slide scene and presentation state for a global template', () => {
-    loadMixedProject(true)
+  it('uses the real Slide scene and presentation state for a global template', async () => {
+    await loadMixedProject(true)
     useEditorStore.getState().activateCourseLocation(SLIDE_LOCATION_ID)
     useEditorStore.getState().setActivePresentationState(ACTIVE_STATE_ID)
     expect(useEditorStore.getState().slideCandidateSnapshot?.stateId)
@@ -193,6 +278,7 @@ describe('interaction authoring UI integration', () => {
     render(<AutomationTab />)
 
     fireEvent.click(screen.getByRole('button', { name: '使用模板' }))
+    await settleCourse()
 
     expect(activeProject().globalInteractions).toHaveLength(1)
     expect(activeProject().globalInteractions[0]?.conditions).toEqual([
@@ -203,13 +289,14 @@ describe('interaction authoring UI integration', () => {
       .toBe('hidden')
   })
 
-  it('writes a local template into the live named-state override without persisting session state', () => {
-    loadMixedProject(true)
+  it('writes a local template into the live named-state override without persisting session state', async () => {
+    await loadMixedProject(true)
     useEditorStore.getState().activateCourseLocation(SLIDE_LOCATION_ID)
     useEditorStore.getState().setActivePresentationState(ACTIVE_STATE_ID)
     render(<AutomationTab />)
 
     fireEvent.click(screen.getByRole('button', { name: '使用模板' }))
+    await settleCourse()
 
     const project = activeProject()
     const location = slideLocation(project)
@@ -228,10 +315,11 @@ describe('interaction authoring UI integration', () => {
   it.each([
     FLOW_LOCATION_ID,
     SPATIAL_LOCATION_ID,
-  ])('does not invent a scene condition for a global template at %s', (locationId) => {
+  ])('does not invent a scene condition for a global template at %s', async (locationId) => {
     openGlobalAutomationAt(locationId)
 
     fireEvent.click(screen.getByRole('button', { name: '使用模板' }))
+    await settleCourse()
 
     const conditions = activeProject().globalInteractions[0]?.conditions
     expect(conditions).toEqual([])
@@ -250,6 +338,8 @@ describe('interaction authoring UI integration', () => {
     useEditorStore.getState().activateCourseLocation(locationId)
     useEditorStore.getState().selectNode(nodeId)
     const before = structuredClone(activeProject())
+    const beforeFormalProject = structuredClone(formalProject(host))
+    const beforeFormalDepths = formalHistoryDepths()
 
     render(<PropertiesTab onReplaceImage={() => undefined} />)
 
@@ -259,6 +349,8 @@ describe('interaction authoring UI integration', () => {
       expect(screen.getByText(/没有元素级局部 Interaction carrier/)).toBeVisible()
     }
     expect(activeProject()).toEqual(before)
+    expect(formalProject(host)).toEqual(beforeFormalProject)
+    expect(formalHistoryDepths()).toEqual(beforeFormalDepths)
   })
 
   it('keeps one mounted Flow Properties instance stable while switching local to global', () => {
@@ -285,6 +377,8 @@ describe('interaction authoring UI integration', () => {
     useEditorStore.getState().setEditingScope('global')
     useEditorStore.getState().selectNode(GLOBAL_ITEM_ID)
     const before = structuredClone(activeProject())
+    const beforeFormalProject = structuredClone(formalProject(host))
+    const beforeFormalDepths = formalHistoryDepths()
 
     render(<PropertiesTab onReplaceImage={() => undefined} />)
 
@@ -294,6 +388,8 @@ describe('interaction authoring UI integration', () => {
     fireEvent.click(screen.getByRole('button', { name: '打开互动与动画' }))
     expect(useEditorStore.getState().activeTab).toBe('automation')
     expect(activeProject()).toEqual(before)
+    expect(formalProject(host)).toEqual(beforeFormalProject)
+    expect(formalHistoryDepths()).toEqual(beforeFormalDepths)
   })
 
   it.each([

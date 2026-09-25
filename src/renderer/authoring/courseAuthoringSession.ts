@@ -283,6 +283,20 @@ export function updateCourseAuthoringSessionRevision(
   })
 }
 
+/**
+ * Undo/redo invalidates every captured target without changing the authoring
+ * location, surface, revision or item selection. Keeps the frozen value
+ * contract every other producer in this module guarantees.
+ */
+export function bumpCourseAuthoringSessionGeneration(
+  session: CourseAuthoringSession,
+): CourseAuthoringSession {
+  return freezeSession({
+    token: createSessionToken(session.token, session.token.generation + 1),
+    itemIds: session.itemIds,
+  })
+}
+
 export function canSwitchCourseAuthoringLocation(input: {
   readonly composing?: boolean
 }): { readonly ok: true } | { readonly ok: false; readonly reason: string } {

@@ -2,6 +2,7 @@ import type { DocumentHostAPI } from '../../shared/workbench/desktop'
 import type { DocumentModel, DocumentOperationResult, DocumentSnapshot } from '../../shared/workbench/document'
 import { normalizeWorkspacePath } from '../../shared/workspaceIdentity'
 import { CourseV9Driver } from '../../core/drivers/CourseV9Driver'
+import { bumpCourseAuthoringSessionGeneration } from '../authoring/courseAuthoringSession'
 import { DocumentProjection, type DocumentProjectionState } from './DocumentProjection'
 import { courseViewDocument, courseViewModel, courseViewPatch, projectCourseDocument, type CourseDocumentView } from './CourseDocumentView'
 
@@ -239,7 +240,7 @@ export class CourseDocumentBridge {
     const ok = result.status === 'applied' || result.status === 'unchanged'
     if (ok && this.active === projection) {
       const session = this.ports.read().courseAuthoringSession
-      if (session) this.ports.patch({ courseAuthoringSession: { ...session, token: { ...session.token, generation: session.token.generation + 1 } } })
+      if (session) this.ports.patch({ courseAuthoringSession: bumpCourseAuthoringSessionGeneration(session) })
       this.ports.patch({ editingTextNodeId: null, statusMessage: direction === 'undo' ? '已撤销' : '已重做' })
     } else if (!ok && this.active === projection && 'message' in result) {
       this.ports.patch({ errorMessage: result.message, statusMessage: null })

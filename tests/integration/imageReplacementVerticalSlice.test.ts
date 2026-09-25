@@ -2,6 +2,15 @@ import { buildPublishedFixture as buildPublishedCourseV2Payload } from '../fixtu
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { beforeEach, describe, expect, it } from 'vitest'
+import {
+  bootTriageCourseHost,
+  formalCourse,
+  projectCourse,
+  redoCourse,
+  settleCourse,
+  undoCourse,
+  type TriageCourseHost,
+} from '../helpers/triage-t7-courseHost'
 import { componentPackagesFromArchive } from '@/renderer/components/componentPackageStore'
 import { buildPublishedCourseStandaloneHtml } from '@/renderer/export/course/buildCoursePackages'
 
@@ -80,11 +89,13 @@ function fixtureArchive(): CourseProjectArchiveData {
   }
 }
 
-function loadFixture(): CourseProjectArchiveData {
+let host: TriageCourseHost
+
+async function loadFixture(): Promise<CourseProjectArchiveData> {
   const archive = fixtureArchive()
-  useEditorStore.getState().loadCourseProject(
+  await projectCourse(
+    host,
     archive.project,
-    null,
     archive.assetFiles,
     componentPackagesFromArchive(archive.project, archive.componentFiles),
   )
@@ -97,6 +108,14 @@ function activeProject(): CourseProjectDocument {
   const project = selectActiveCourseProjectDocument(useEditorStore.getState())
   if (!project) throw new Error('Missing active Course Project V9')
   return project
+}
+
+/** DocumentSession revision only moves forward, including undo and redo. */
+function projectBody(project: CourseProjectDocument): CourseProjectDocument {
+  const next = structuredClone(project)
+  next.revision = 0
+  next.updatedAt = ''
+  return next
 }
 
 function sceneItem(project: CourseProjectDocument, itemId: string): LayerItem {
@@ -179,12 +198,13 @@ function sidecarDepths() {
   }
 }
 
-beforeEach(() => {
-  loadFixture()
+beforeEach(async () => {
+  host = await bootTriageCourseHost()
+  await loadFixture()
 })
 
 describe('ARCH-1 VS-05 target-based image replacement vertical slice', () => {
-  it('commits captured image A after selecting B and keeps document plus bytes in one undoable step', () => {
+  it('commits captured image A after selecting B and keeps document plus bytes in one undoable step', async () => {
     const source = fixtureArchive()
     const stateAtCapture = useEditorStore.getState()
     const target = stateAtCapture.captureImageReplacementTarget()
@@ -194,7 +214,7 @@ describe('ARCH-1 VS-05 target-based image replacement vertical slice', () => {
     const beforeProject = structuredClone(activeProject())
     const beforeImageAssetId = imageAssetId(beforeProject)
     const beforeSelectionB = structuredClone(sceneItem(beforeProject, SELECTION_B))
-    const beforeHistoryDepth = activeHistory().past.length
+    const beforeHistoryDepth = formalCourse(host).undoDepth
     const beforeSidecarDepths = sidecarDepths()
     const beforeComponentDepths = {
       past: stateAtCapture.courseComponentPackagesPast.length,
@@ -220,6 +240,7 @@ describe('ARCH-1 VS-05 target-based image replacement vertical slice', () => {
         assetDisposition: 'added',
       },
     })
+    await settleCourse()
 
     const after = useEditorStore.getState()
     const afterProject = activeProject()
@@ -230,7 +251,7 @@ describe('ARCH-1 VS-05 target-based image replacement vertical slice', () => {
     expect(sceneItem(afterProject, SELECTION_B)).toEqual(beforeSelectionB)
     expect(afterProject.assets[REPLACEMENT_ASSET_ID]).toEqual(replacementMeta())
     expect(selectMediaAssetFiles(after)[REPLACEMENT_ASSET_ID]).toEqual(REPLACEMENT_BYTES)
-    expect(activeHistory().past).toHaveLength(beforeHistoryDepth + 1)
+    expect(formalCourse(host).undoDepth).toBe(beforeHistoryDepth + 1)
     expect(sidecarDepths()).toEqual(beforeSidecarDepths)
     expect({
       past: after.courseComponentPackagesPast.length,
@@ -241,26 +262,24 @@ describe('ARCH-1 VS-05 target-based image replacement vertical slice', () => {
     if (!afterBackend || afterBackend.kind !== 'slide-authoring') {
       throw new Error('Expected Slide authoring backend')
     }
-    expect(afterBackend.getSession().history.past).toHaveLength(beforeHistoryDepth + 1)
-    expect(afterBackend.getSession().history.past.at(-1)).toMatchObject({
-      kind: 'editor-transaction',
-      resourceChanges: {
-        assetFileChanges: [expect.objectContaining({ assetId: REPLACEMENT_ASSET_ID })],
-      },
-    })
+    const committed = formalCourse(host)
+    if (committed.model.kind !== 'course-v9') throw new Error('Expected a course document')
+    expect([...(committed.model.resources.assets[REPLACEMENT_ASSET_ID] ?? [])]).toEqual([...REPLACEMENT_BYTES])
 
-    after.undo()
+    await undoCourse(host)
     const undone = useEditorStore.getState()
-    expect(activeProject()).toEqual(beforeProject)
+    expect(projectBody(activeProject())).toEqual(projectBody(beforeProject))
+    expect(activeProject().revision).toBeGreaterThan(beforeProject.revision)
     expect(imageAssetId(activeProject())).toBe(beforeImageAssetId)
     expect(activeProject().assets[REPLACEMENT_ASSET_ID]).toBeUndefined()
     expect(selectMediaAssetFiles(undone)[REPLACEMENT_ASSET_ID]).toBeUndefined()
     expect(sidecarDepths()).toEqual(beforeSidecarDepths)
 
-    undone.redo()
+    await redoCourse(host)
     const redone = useEditorStore.getState()
     const redoneProject = activeProject()
-    expect(redoneProject).toEqual(afterProject)
+    expect(projectBody(redoneProject)).toEqual(projectBody(afterProject))
+    expect(redoneProject.revision).toBeGreaterThan(afterProject.revision)
     expect(imageAssetId(redoneProject)).toBe(REPLACEMENT_ASSET_ID)
     expect(selectMediaAssetFiles(redone)[REPLACEMENT_ASSET_ID]).toEqual(REPLACEMENT_BYTES)
     expect(sidecarDepths()).toEqual(beforeSidecarDepths)
@@ -295,11 +314,12 @@ describe('ARCH-1 VS-05 target-based image replacement vertical slice', () => {
     expect(authoritativeSnapshot()).toEqual(beforeReadEndpoints)
   })
 
-  it('rejects an exact-revision-stale target without changing any Store-owned state', () => {
+  it('rejects an exact-revision-stale target without changing any Store-owned state', async () => {
     const target = useEditorStore.getState().captureImageReplacementTarget()
     if (!target) throw new Error('Expected a captured image replacement target')
 
     useEditorStore.getState().renameProject('VS-05 intervening edit')
+    await settleCourse()
     expect(activeProject().revision).toBe(target.documentRevision + 1)
     const beforeRejectedCommit = authoritativeSnapshot()
 
@@ -317,7 +337,7 @@ describe('ARCH-1 VS-05 target-based image replacement vertical slice', () => {
     expect(authoritativeSnapshot()).toEqual(beforeRejectedCommit)
   })
 
-  it('preserves stable rejection codes for owner and named-state drift', () => {
+  it('preserves stable rejection codes for owner and named-state drift', async () => {
     const cases = [
       {
         code: 'owner-mismatch',
@@ -329,7 +349,7 @@ describe('ARCH-1 VS-05 target-based image replacement vertical slice', () => {
       },
     ] as const
     for (const staleCase of cases) {
-      loadFixture()
+      await loadFixture()
       const target = useEditorStore.getState().captureImageReplacementTarget()
       if (!target) throw new Error('Expected a captured image replacement target')
       staleCase.drift()
@@ -344,7 +364,7 @@ describe('ARCH-1 VS-05 target-based image replacement vertical slice', () => {
     }
   })
 
-  it('invalidates an old target when undo returns to the same document revision', () => {
+  it('invalidates an old target when undo returns to the same document revision', async () => {
     const target = useEditorStore.getState().captureImageReplacementTarget()
     if (!target) throw new Error('Expected a captured image replacement target')
     expect(useEditorStore.getState().replaceImageAssetAtTarget(
@@ -352,8 +372,10 @@ describe('ARCH-1 VS-05 target-based image replacement vertical slice', () => {
       replacementMeta(),
       REPLACEMENT_BYTES,
     )).toMatchObject({ ok: true, status: 'replaced' })
-    useEditorStore.getState().undo()
-    expect(activeProject().revision).toBe(target.documentRevision)
+    await settleCourse()
+    await undoCourse(host)
+    expect(activeProject().revision).toBeGreaterThan(target.documentRevision)
+    expect(imageAssetId(activeProject())).not.toBe(REPLACEMENT_ASSET_ID)
     const beforeRejectedCommit = authoritativeSnapshot()
     const result = useEditorStore.getState().replaceImageAssetAtTarget(
       target,
@@ -364,10 +386,12 @@ describe('ARCH-1 VS-05 target-based image replacement vertical slice', () => {
     expect(authoritativeSnapshot()).toEqual(beforeRejectedCommit)
   })
 
-  it('keeps legacy snapshots aligned around a resource frame and clears future on a branch', () => {
+  it('keeps legacy snapshots aligned around a resource frame and clears future on a branch', async () => {
     const originalTitle = activeProject().title
+    const depths = () => ({ past: formalCourse(host).undoDepth, future: formalCourse(host).redoDepth })
     useEditorStore.getState().renameProject('VS-05 legacy step before delta')
-    expect(sidecarDepths()).toEqual({ past: 1, future: 0 })
+    await settleCourse()
+    expect(depths()).toEqual({ past: 1, future: 0 })
     const target = useEditorStore.getState().captureImageReplacementTarget()
     if (!target) throw new Error('Expected a captured image replacement target')
     expect(useEditorStore.getState().replaceImageAssetAtTarget(
@@ -375,37 +399,40 @@ describe('ARCH-1 VS-05 target-based image replacement vertical slice', () => {
       replacementMeta(),
       REPLACEMENT_BYTES,
     )).toMatchObject({ ok: true, status: 'replaced' })
-    expect(sidecarDepths()).toEqual({ past: 1, future: 0 })
+    await settleCourse()
+    expect(depths()).toEqual({ past: 2, future: 0 })
+    expect(sidecarDepths()).toEqual({ past: 0, future: 0 })
 
     useEditorStore.getState().renameProject('VS-05 legacy step after delta')
+    await settleCourse()
     expect(activeProject().title).toBe('VS-05 legacy step after delta')
-    expect(sidecarDepths()).toEqual({ past: 2, future: 0 })
+    expect(depths()).toEqual({ past: 3, future: 0 })
 
-    useEditorStore.getState().undo()
+    await undoCourse(host)
     expect(activeProject().title).toBe('VS-05 legacy step before delta')
     expect(imageAssetId(activeProject())).toBe(REPLACEMENT_ASSET_ID)
-    expect(sidecarDepths()).toEqual({ past: 1, future: 1 })
+    expect(depths()).toEqual({ past: 2, future: 1 })
 
-    useEditorStore.getState().undo()
+    await undoCourse(host)
     expect(activeProject().title).toBe('VS-05 legacy step before delta')
     expect(imageAssetId(activeProject())).not.toBe(REPLACEMENT_ASSET_ID)
     expect(selectMediaAssetFiles(useEditorStore.getState())[REPLACEMENT_ASSET_ID])
       .toBeUndefined()
-    expect(sidecarDepths()).toEqual({ past: 1, future: 1 })
+    expect(depths()).toEqual({ past: 1, future: 2 })
 
-    useEditorStore.getState().redo()
+    await redoCourse(host)
     expect(imageAssetId(activeProject())).toBe(REPLACEMENT_ASSET_ID)
     expect(selectMediaAssetFiles(useEditorStore.getState())[REPLACEMENT_ASSET_ID])
       .toEqual(REPLACEMENT_BYTES)
-    expect(sidecarDepths()).toEqual({ past: 1, future: 1 })
+    expect(depths()).toEqual({ past: 2, future: 1 })
 
-    useEditorStore.getState().redo()
+    await redoCourse(host)
     expect(activeProject().title).toBe('VS-05 legacy step after delta')
-    expect(sidecarDepths()).toEqual({ past: 2, future: 0 })
+    expect(depths()).toEqual({ past: 3, future: 0 })
 
-    useEditorStore.getState().undo()
-    useEditorStore.getState().undo()
-    expect(sidecarDepths()).toEqual({ past: 1, future: 1 })
+    await undoCourse(host)
+    await undoCourse(host)
+    expect(depths()).toEqual({ past: 1, future: 2 })
     useEditorStore.getState().selectNode(IMAGE_A)
     const branchTarget = useEditorStore.getState().captureImageReplacementTarget()
     if (!branchTarget) throw new Error('Expected a branch replacement target')
@@ -416,11 +443,12 @@ describe('ARCH-1 VS-05 target-based image replacement vertical slice', () => {
       branchAsset,
       branchBytes,
     )).toMatchObject({ ok: true, status: 'replaced' })
+    await settleCourse()
     const branched = useEditorStore.getState()
     expect(imageAssetId(activeProject())).toBe(branchAsset.id)
     expect(selectMediaAssetFiles(branched)[branchAsset.id]).toEqual(branchBytes)
-    expect(activeHistory().future).toHaveLength(0)
-    expect(sidecarDepths()).toEqual({ past: 1, future: 0 })
+    expect(formalCourse(host).redoDepth).toBe(0)
+    expect(sidecarDepths()).toEqual({ past: 0, future: 0 })
     expect(branched.courseComponentPackagesFuture).toHaveLength(0)
     expect(activeProject().title).not.toBe(originalTitle)
   })

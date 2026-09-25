@@ -4,6 +4,8 @@ import { join } from 'node:path'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { strToU8, zipSync } from 'fflate'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+vi.mock('pdfjs-dist/build/pdf.worker.min.mjs?url', () => ({ default: '/pdf.worker.min.mjs' }))
 import type {
   AvailableComponentCatalogPackage,
   ComponentCatalogPackageFile,
@@ -23,6 +25,15 @@ import type {
   ComponentPackageReplacementCommitResult,
   ComponentPackageReplacementTarget,
 } from '../../src/renderer/components/commitComponentPackageAuthoring'
+import {
+  bootTriageCourseHost,
+  formalCourse,
+  openAppCourse,
+  settleCourse,
+  waitForAppDocuments,
+  withAppDocuments,
+  type TriageCourseHost,
+} from '../helpers/triage-t7-appHost'
 
 vi.mock('../../src/renderer/ui/Workspace', () => ({
   Workspace: () => <div data-testid="workspace-stub" />,
@@ -178,12 +189,15 @@ interface Deferred<T> {
 interface ReplacementWriteSnapshot {
   readonly project: CourseProjectDocument
   readonly componentPackages: Readonly<Record<string, ComponentPackageData>>
-  readonly activeHistory: unknown
+  readonly undoDepth: number
+  readonly redoDepth: number
   readonly sidecarPast: unknown
   readonly sidecarFuture: unknown
   readonly componentPast: unknown
   readonly componentFuture: unknown
 }
+
+let host: TriageCourseHost
 
 type CaptureSpy = ReturnType<typeof vi.fn<
   (packageId: string) => ComponentPackageReplacementTarget | null
@@ -280,11 +294,11 @@ function componentApi(options: {
   }
 }
 
-function loadFixtureWithComponent(): void {
+async function loadFixtureWithComponent(): Promise<void> {
   const source = openCourseProjectArchive(new Uint8Array(readFileSync(FIXTURE_PATH)))
-  useEditorStore.getState().loadCourseProject(
+  await openAppCourse(
+    host,
     source.project,
-    null,
     source.assetFiles,
     componentPackagesFromArchive(source.project, source.componentFiles),
   )
@@ -298,6 +312,9 @@ function loadFixtureWithComponent(): void {
   })
   useEditorStore.getState().importComponentPackage(initialPackage)
   useEditorStore.getState().addExternalComponentNode(PACKAGE_ID)
+  // Component packages and the instance are formal document writes, so the
+  // replacement target only exists once DocumentSession has accepted them.
+  await settleCourse()
 }
 
 function activeProject(): CourseProjectDocument {
@@ -311,10 +328,13 @@ function writeSnapshot(): ReplacementWriteSnapshot {
   if (state.slideBackend?.kind !== 'slide-authoring') {
     throw new Error('Expected an active Slide authoring backend')
   }
+  const course = formalCourse(host)
   return structuredClone({
     project: activeProject(),
     componentPackages: state.componentPackages,
-    activeHistory: state.slideBackend.getSession().history,
+    // History belongs to DocumentSession; the renderer backend is only a projection.
+    undoDepth: course.undoDepth,
+    redoDepth: course.redoDepth,
     sidecarPast: state.courseAssetSidecarPast,
     sidecarFuture: state.courseAssetSidecarFuture,
     componentPast: state.courseComponentPackagesPast,
@@ -340,8 +360,10 @@ function installTargetSpies(): {
 }
 
 async function renderWithApi(api: DesktopAPI): Promise<void> {
-  window.desktopAPI = api
+  window.desktopAPI = withAppDocuments(api, host)
   render(<App />)
+  await waitForAppDocuments()
+  await loadFixtureWithComponent()
   await waitFor(() => {
     expect(screen.getByTestId('replace-component-manually')).toBeVisible()
     expect(screen.getByTestId('update-component-from-catalog')).toBeVisible()
@@ -355,7 +377,7 @@ async function resolveDeferred<T>(result: Deferred<T>, value: T): Promise<void> 
   })
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   vi.stubGlobal('crypto', webcrypto)
   vi.stubGlobal('ResizeObserver', class {
     observe() {}
@@ -363,7 +385,7 @@ beforeEach(() => {
   })
   vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:arch2-component-race')
   vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined)
-  loadFixtureWithComponent()
+  host = await bootTriageCourseHost()
 })
 
 afterEach(() => {
@@ -400,6 +422,7 @@ describe('ARCH-2 App component-package replacement race', () => {
     expect(screen.getByTestId('busy-state')).toBeDisabled()
 
     useEditorStore.getState().renameProject('ARCH-2 manual replacement intervening edit')
+    await settleCourse()
     const afterRename = writeSnapshot()
     await resolveDeferred(selection, replacementFile())
     await waitFor(() => expect(screen.getByRole('button', { name: '确认替换' })).toBeVisible())
@@ -438,6 +461,7 @@ describe('ARCH-2 App component-package replacement race', () => {
     expect(screen.getByTestId('busy-state')).toBeDisabled()
 
     useEditorStore.getState().renameProject('ARCH-2 catalog update intervening edit')
+    await settleCourse()
     const afterRename = writeSnapshot()
     await resolveDeferred(catalogRead, catalogFile())
 
@@ -465,11 +489,14 @@ describe('ARCH-2 App component-package replacement race', () => {
       expect(activeProject().componentPackages[PACKAGE_ID]?.version)
         .toBe(REPLACEMENT_VERSION)
     })
+    await settleCourse()
     const after = writeSnapshot()
     expect(captureTarget).toHaveBeenCalledOnce()
     expect(replaceAtTarget).toHaveBeenCalledOnce()
     expect(replaceAtTarget.mock.calls[0]?.[0]).toEqual(captureTarget.mock.results[0]?.value)
     expect(after.project.revision).toBe(before.project.revision + 1)
+    expect(after.undoDepth).toBe(before.undoDepth + 1)
+    expect(after.redoDepth).toBe(before.redoDepth)
     expect(after.componentPackages[PACKAGE_ID]?.manifest.version)
       .toBe(REPLACEMENT_VERSION)
     expect(after.sidecarPast).toEqual(before.sidecarPast)

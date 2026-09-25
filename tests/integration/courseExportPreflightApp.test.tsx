@@ -4,19 +4,26 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+vi.mock('pdfjs-dist/build/pdf.worker.min.mjs?url', () => ({ default: '/pdf.worker.min.mjs' }))
 import type { DesktopAPI } from '../../src/shared/ipcTypes'
-import type { RuntimeLayerItem } from '../../src/shared/courseProjectTypes'
+import type { CourseProjectDocument, RuntimeLayerItem } from '../../src/shared/courseProjectTypes'
 import { createBlankCourseProject } from '../../src/core/course/createCourseProject'
+import { useEditorStore } from '../../src/renderer/store/editorStore'
 import {
-  selectActiveCourseProjectDocument,
-  useEditorStore,
-} from '../../src/renderer/store/editorStore'
+  bootTriageCourseHost,
+  createAppProject,
+  formalProject,
+  openAppCourse,
+  settleCourse,
+  waitForAppDocuments,
+  withAppDocuments,
+  type TriageCourseHost,
+} from '../helpers/triage-t7-appHost'
 
 const sizeProbe = vi.hoisted(() => ({ forceWarning: false }))
 
 const fontProbe = vi.hoisted(() => ({ gate: null as Promise<void> | null }))
-
-const publishSourceProbe = vi.hoisted(() => ({ forceUnavailable: false }))
 
 const deliveryProbe = vi.hoisted(() => ({
   publishedStandalone: vi.fn(),
@@ -28,18 +35,6 @@ const publishedPreviewProbe = vi.hoisted(() => ({
     destroy: async () => undefined,
   })),
 }))
-
-vi.mock('../../src/renderer/store/editorStore', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../src/renderer/store/editorStore')>()
-  return {
-    ...actual,
-    selectActiveCourseProjectDocument: (
-      state: Parameters<typeof actual.selectActiveCourseProjectDocument>[0],
-    ) => publishSourceProbe.forceUnavailable
-      ? null
-      : actual.selectActiveCourseProjectDocument(state),
-  }
-})
 
 vi.mock('../../src/renderer/export/course/buildCoursePackages', async (importOriginal) => {
   const actual = await importOriginal<
@@ -213,7 +208,57 @@ function appApi(): AppDesktopApi {
   }
 }
 
-function loadCourseWithMissingBackgroundBytes() {
+let host: TriageCourseHost
+
+/** A course fixture plus the asset bytes that belong to its DocumentSession. */
+type LoadedCourse = {
+  project: CourseProjectDocument
+  assetFiles: Record<string, Uint8Array>
+}
+
+/**
+ * The App owns the document bridge, so a fixture can only be opened after the App
+ * has connected its host; opening first would lose the activation race against
+ * the bootstrap document.
+ */
+async function renderAppWithCourse(
+  course: LoadedCourse,
+  api: AppDesktopApi,
+): Promise<CourseProjectDocument> {
+  window.desktopAPI = withAppDocuments(api, host)
+  render(<App />)
+  await waitForAppDocuments()
+  await openAppCourse(host, course.project, course.assetFiles)
+  return course.project
+}
+
+/**
+ * Close the projected course so the workbench is sessionless again. The export
+ * contract must fail closed with its own unavailability message instead of
+ * leaking the internal bridge error.
+ */
+async function closeActiveCourse(): Promise<void> {
+  const documentId = useEditorStore.getState().courseDocument.documentId
+  if (!documentId) throw new Error('Expected an active course document to close')
+  expect(await useEditorStore.getState().closeCourseDocument(documentId)).toBe(true)
+  expect(useEditorStore.getState().courseDocument.documentId).toBeNull()
+}
+
+/**
+ * `renameProject` is a fire-and-forget Store entry point; the rename is only a
+ * document fact once DocumentSession owns it.
+ */
+async function renameCourse(title: string): Promise<void> {
+  useEditorStore.getState().renameProject(title)
+  const deadline = Date.now() + 5000
+  while (Date.now() < deadline) {
+    if (formalProject(host).title === title) return
+    await new Promise((resolve) => setTimeout(resolve, 5))
+  }
+  throw new Error('renameProject did not reach the document session')
+}
+
+function loadCourseWithMissingBackgroundBytes(): LoadedCourse {
   const project = createBlankCourseProject({
     now: NOW,
     includeDefaultController: false,
@@ -232,25 +277,21 @@ function loadCourseWithMissingBackgroundBytes() {
   const slide = project.surfaces.find((surface) => surface.type === 'slide')
   if (!slide || slide.type !== 'slide') throw new Error('expected slide surface')
   slide.scenes[0]!.backgroundAssetId = 'hero'
-  useEditorStore.getState().loadCourseProject(project, null, {}, {})
-  useEditorStore.getState().activateCourseLocation(project.startLocationId)
-  return project
+  return { project, assetFiles: {} }
 }
 
-function loadBlankCourse() {
+function loadBlankCourse(): LoadedCourse {
   const project = createBlankCourseProject({
     now: NOW,
     includeDefaultController: false,
     controls: 'none',
   })
-  useEditorStore.getState().loadCourseProject(project, null, {}, {})
-  useEditorStore.getState().activateCourseLocation(project.startLocationId)
-  return project
+  return { project, assetFiles: {} }
 }
 
 function loadCourseWithRemoteBackground(
   remoteUrl = 'https://cdn.example.com/course/hero.png?v=2',
-) {
+): LoadedCourse {
   const project = createBlankCourseProject({
     now: NOW,
     includeDefaultController: false,
@@ -272,15 +313,13 @@ function loadCourseWithRemoteBackground(
   const slide = project.surfaces.find((surface) => surface.type === 'slide')
   if (!slide || slide.type !== 'slide') throw new Error('expected slide surface')
   slide.scenes[0]!.backgroundAssetId = 'hero'
-  useEditorStore.getState().loadCourseProject(project, null, { hero: bytes }, {})
-  useEditorStore.getState().activateCourseLocation(project.startLocationId)
-  return project
+  return { project, assetFiles: { hero: bytes } }
 }
 
 function loadCourseWithNetworkRuntime(
   source: string,
   connectOrigins: string[] = [],
-) {
+): LoadedCourse {
   const project = createBlankCourseProject({
     now: NOW,
     includeDefaultController: false,
@@ -312,9 +351,7 @@ function loadCourseWithNetworkRuntime(
     },
   }
   slide.scenes[0]!.layerItems.push(runtime)
-  useEditorStore.getState().loadCourseProject(project, null, {}, {})
-  useEditorStore.getState().activateCourseLocation(project.startLocationId)
-  return project
+  return { project, assetFiles: {} }
 }
 
 function savedReport(api: AppDesktopApi) {
@@ -330,7 +367,23 @@ function savedReport(api: AppDesktopApi) {
   }
 }
 
-beforeEach(() => {
+/**
+ * The App reports export failures through its own `role="alert"` toast. The
+ * workbench shell can also render a host-availability alert, so the query is
+ * scoped to the alert that actually carries the expected message instead of
+ * taking the first alert in the tree.
+ */
+async function findErrorToast(message: string): Promise<HTMLElement> {
+  return await waitFor(() => {
+    const toast = Array.from(document.querySelectorAll<HTMLElement>('[role="alert"]'))
+      .find((element) => element.textContent?.includes(message))
+    if (!toast) throw new Error(`未找到错误提示：${message}`)
+    return toast
+  })
+}
+
+beforeEach(async () => {
+  host = await bootTriageCourseHost()
   vi.stubGlobal('crypto', webcrypto)
   vi.stubGlobal('ResizeObserver', class {
     observe() {}
@@ -338,7 +391,6 @@ beforeEach(() => {
   })
   sizeProbe.forceWarning = false
   fontProbe.gate = null
-  publishSourceProbe.forceUnavailable = false
   deliveryProbe.publishedStandalone.mockClear()
   deliveryProbe.publishedWebPackage.mockClear()
   publishedPreviewProbe.mount.mockClear()
@@ -357,16 +409,18 @@ afterEach(() => {
 
 describe('ARCH-4 V9 HTML/Web export preflight', () => {
   it('exports every Flow surface as a separate DOCX from the product shell', async () => {
-    useEditorStore.getState().createNewFlowProject()
-    useEditorStore.getState().addCourseContent('flow-page')
-    const project = selectActiveCourseProjectDocument(useEditorStore.getState())
-    expect(project?.surfaces.filter((surface) => surface.type === 'flow')).toHaveLength(2)
     const api = appApi()
     api.exportBinary.mockImplementation(async (input: { suggestedName: string }) => ({
       path: `C:/exports/${input.suggestedName}`,
     }))
-    window.desktopAPI = api
+    window.desktopAPI = withAppDocuments(api, host)
     render(<App />)
+    await waitForAppDocuments()
+    await createAppProject('flow')
+    useEditorStore.getState().addCourseContent('flow-page')
+    await settleCourse()
+    const project = formalProject(host)
+    expect(project.surfaces.filter((surface) => surface.type === 'flow')).toHaveLength(2)
 
     fireEvent.click(screen.getByTestId('export-docx'))
 
@@ -389,10 +443,9 @@ describe('ARCH-4 V9 HTML/Web export preflight', () => {
   })
 
   it('opens full preview through the renderer Published V2 session', async () => {
-    const project = loadBlankCourse()
+    const course = loadBlankCourse()
     const api = appApi()
-    window.desktopAPI = api
-    render(<App />)
+    const project = await renderAppWithCourse(course, api)
 
     fireEvent.click(screen.getByTestId('preview-full-course'))
 
@@ -414,15 +467,13 @@ describe('ARCH-4 V9 HTML/Web export preflight', () => {
     button,
     title,
   ) => {
-    loadBlankCourse()
-    publishSourceProbe.forceUnavailable = true
     const api = appApi()
-    window.desktopAPI = api
-    render(<App />)
+    await renderAppWithCourse(loadBlankCourse(), api)
+    await closeActiveCourse()
 
     fireEvent.click(screen.getByTestId(button))
 
-    const alert = await screen.findByRole('alert')
+    const alert = await findErrorToast(title)
     expect(alert).toHaveTextContent(title)
     expect(alert).toHaveTextContent('当前编辑会话没有可发布的 Course Project V9 文档')
     expect(screen.queryByTestId('course-preview-overlay')).not.toBeInTheDocument()
@@ -432,26 +483,43 @@ describe('ARCH-4 V9 HTML/Web export preflight', () => {
     expect(api.exportWebPackage).not.toHaveBeenCalled()
   })
 
+  it('rejects a V9 project that declares an asset without bytes at the archive boundary', async () => {
+    // The preflight `asset-bytes-missing` source issue is unreachable from a
+    // loaded project in 2.0: the V9 archive contract refuses to materialise a
+    // project whose referenced asset has no bytes, and the diagnostics ledger
+    // marks the code `archive-shadowed`
+    // (src/shared/courseProjectValidationDiagnostics.ts:94-98). The finding is
+    // therefore replaced by this fail-closed boundary check.
+    const course = loadCourseWithMissingBackgroundBytes()
+    const api = appApi()
+    window.desktopAPI = withAppDocuments(api, host)
+    render(<App />)
+    await waitForAppDocuments()
+
+    await expect(openAppCourse(host, course.project, course.assetFiles))
+      .rejects.toThrow(/素材“hero\.png”缺少二进制内容/)
+    expect(formalProject(host).assets.hero).toBeUndefined()
+  })
+
   it.each([
-    ['single-html', '单 HTML', 'export-single-html'],
+    ['single-html', '单 HTML', 'export-single-html-online'],
     ['web-package', '网页包', 'export-web-package'],
   ] as const)('uses only V9 preflight for %s and saves schema 9', async (
     target,
     label,
     button,
   ) => {
-    const project = loadCourseWithMissingBackgroundBytes()
+    const course = loadCourseWithNetworkRuntime(`fetch('https://api.undeclared.example.com/v1')`)
     const api = appApi()
-    window.desktopAPI = api
-    render(<App />)
+    const project = await renderAppWithCourse(course, api)
 
     fireEvent.click(screen.getByTestId(button))
 
     expect(await screen.findByRole('alertdialog', {
       name: `${label} 导出预检`,
     })).toBeVisible()
-    expect(screen.getByText('asset-bytes-missing')).toBeVisible()
-    expect(screen.getByText(/hero\.png/)).toBeVisible()
+    expect(screen.getByText('online-connect-origin-undeclared')).toBeVisible()
+    expect(screen.getByText(/https:\/\/api\.undeclared\.example\.com/u)).toBeVisible()
     expect(screen.queryByRole('button', { name: '继续导出' })).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: '去修复' })).toBeVisible()
     expect(api.exportHtml).not.toHaveBeenCalled()
@@ -469,7 +537,7 @@ describe('ARCH-4 V9 HTML/Web export preflight', () => {
       summary: { canExport: false },
     })
     expect(report.items).toContainEqual(expect.objectContaining({
-      code: 'asset-bytes-missing',
+      code: 'online-connect-origin-undeclared',
       severity: 'error',
     }))
   })
@@ -481,29 +549,25 @@ describe('ARCH-4 V9 HTML/Web export preflight', () => {
     button,
     title,
   ) => {
-    loadBlankCourse()
     const api = appApi()
-    window.desktopAPI = api
-    render(<App />)
+    await renderAppWithCourse(loadBlankCourse(), api)
 
     fireEvent.click(screen.getByTestId(button))
     expect(await screen.findByRole('alertdialog')).toBeVisible()
 
-    publishSourceProbe.forceUnavailable = true
+    await closeActiveCourse()
     fireEvent.click(screen.getByRole('button', { name: '继续导出' }))
 
-    const alert = await screen.findByRole('alert')
+    const alert = await findErrorToast(title)
     expect(alert).toHaveTextContent(title)
     expect(api.exportHtml).not.toHaveBeenCalled()
     expect(api.exportWebPackage).not.toHaveBeenCalled()
   })
 
   it('keeps online-lightweight mode through preflight and the large HTML confirmation', async () => {
-    loadCourseWithRemoteBackground()
     const api = appApi()
-    window.desktopAPI = api
     sizeProbe.forceWarning = true
-    render(<App />)
+    await renderAppWithCourse(loadCourseWithRemoteBackground(), api)
 
     fireEvent.click(screen.getByTestId('export-single-html-online'))
 
@@ -531,10 +595,8 @@ describe('ARCH-4 V9 HTML/Web export preflight', () => {
   })
 
   it('exports a Web package only through the Published V2 producer', async () => {
-    loadBlankCourse()
     const api = appApi()
-    window.desktopAPI = api
-    render(<App />)
+    await renderAppWithCourse(loadBlankCourse(), api)
 
     fireEvent.click(screen.getByTestId('export-web-package'))
 
@@ -548,10 +610,8 @@ describe('ARCH-4 V9 HTML/Web export preflight', () => {
   })
 
   it('blocks a wildcard online remote URL before exportHtml is called', async () => {
-    loadCourseWithRemoteBackground('https://*/course/hero.png')
     const api = appApi()
-    window.desktopAPI = api
-    render(<App />)
+    await renderAppWithCourse(loadCourseWithRemoteBackground('https://*/course/hero.png'), api)
 
     fireEvent.click(screen.getByTestId('export-single-html-online'))
 
@@ -566,10 +626,11 @@ describe('ARCH-4 V9 HTML/Web export preflight', () => {
   })
 
   it('blocks online HTML when an actual Runtime origin is undeclared', async () => {
-    loadCourseWithNetworkRuntime(`fetch('https://api.undeclared.example.com/v1')`)
     const api = appApi()
-    window.desktopAPI = api
-    render(<App />)
+    await renderAppWithCourse(
+      loadCourseWithNetworkRuntime(`fetch('https://api.undeclared.example.com/v1')`),
+      api,
+    )
 
     fireEvent.click(screen.getByTestId('export-single-html-online'))
 
@@ -583,10 +644,8 @@ describe('ARCH-4 V9 HTML/Web export preflight', () => {
   })
 
   it('allows an explicit continue for a dynamic Runtime origin warning', async () => {
-    loadCourseWithNetworkRuntime(`fetch(resolveApiEndpoint())`)
     const api = appApi()
-    window.desktopAPI = api
-    render(<App />)
+    await renderAppWithCourse(loadCourseWithNetworkRuntime(`fetch(resolveApiEndpoint())`), api)
 
     fireEvent.click(screen.getByTestId('export-single-html-online'))
 
@@ -601,11 +660,9 @@ describe('ARCH-4 V9 HTML/Web export preflight', () => {
   })
 
   it('re-runs preflight for the web package when a large single HTML is redirected', async () => {
-    loadBlankCourse()
     const api = appApi()
-    window.desktopAPI = api
     sizeProbe.forceWarning = true
-    render(<App />)
+    await renderAppWithCourse(loadBlankCourse(), api)
 
     fireEvent.click(screen.getByTestId('export-single-html'))
     expect(await screen.findByRole('alertdialog', {
@@ -626,14 +683,11 @@ describe('ARCH-4 V9 HTML/Web export preflight', () => {
   })
 
   it('exports the snapshot that passed preflight even if the document changes before emit', async () => {
-    loadBlankCourse()
-    const original = selectActiveCourseProjectDocument(useEditorStore.getState())?.title
-    if (!original) throw new Error('expected an active course title')
     let releaseFonts!: () => void
     fontProbe.gate = new Promise<void>((resolve) => { releaseFonts = resolve })
     const api = appApi()
-    window.desktopAPI = api
-    render(<App />)
+    const project = await renderAppWithCourse(loadBlankCourse(), api)
+    const original = project.title
 
     fireEvent.click(screen.getByTestId('export-single-html'))
     expect(await screen.findByRole('alertdialog', {
@@ -641,8 +695,8 @@ describe('ARCH-4 V9 HTML/Web export preflight', () => {
     })).toBeVisible()
     fireEvent.click(screen.getByRole('button', { name: '继续导出' }))
     await new Promise((resolve) => setTimeout(resolve, 0))
-    act(() => {
-      useEditorStore.getState().renameProject('预检后改名')
+    await act(async () => {
+      await renameCourse('预检后改名')
     })
     releaseFonts()
 
@@ -654,18 +708,16 @@ describe('ARCH-4 V9 HTML/Web export preflight', () => {
   })
 
   it('refuses to locate a preflight finding after the document changed', async () => {
-    loadCourseWithRemoteBackground()
     const api = appApi()
-    window.desktopAPI = api
-    render(<App />)
+    await renderAppWithCourse(loadCourseWithRemoteBackground(), api)
 
     fireEvent.click(screen.getByTestId('export-single-html-online'))
     expect(await screen.findByRole('alertdialog', {
       name: '单 HTML 导出预检',
     })).toBeVisible()
     expect(screen.getByText('online-remote-asset')).toBeVisible()
-    act(() => {
-      useEditorStore.getState().renameProject('定位前改名')
+    await act(async () => {
+      await renameCourse('定位前改名')
     })
     fireEvent.click(screen.getAllByRole('button', { name: '定位' })[0]!)
 

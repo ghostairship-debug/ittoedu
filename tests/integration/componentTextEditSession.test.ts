@@ -1,5 +1,12 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import {
+  bootTriageCourseHost,
+  formalCourse,
+  settleCourse,
+  undoCourse,
+  type TriageCourseHost,
+} from '../helpers/triage-t7-courseHost'
+import {
   beginComponentTextEditSession,
   resolveComponentTextEdit,
   type ComponentTextEditContext,
@@ -17,52 +24,72 @@ import type {
   ComponentAuthoringTextTarget,
   ComponentPackageData,
 } from '@/shared/componentTypes'
+import { componentContentSha256 } from '@/shared/componentContentIntegrity'
 import { getComponentPropValue, mergeComponentProps } from '@/shared/componentProps'
 import { selectEffectiveSlideSceneNodes } from '../helpers/selectEffectiveSlideSceneNodes'
 
-function activeHistory() {
-  const state = useEditorStore.getState()
-  const backend = state.slideBackend
-  if (!backend) throw new Error('expected active slideBackend')
-  return backend.getSession().history
+let host: TriageCourseHost
+
+/**
+ * `createNewProject` is the Store's fire-and-forget new-document entry point, so
+ * the new DocumentSession is only authoritative once its activation lands.
+ */
+async function createNewProjectOnHost(): Promise<void> {
+  const previous = useEditorStore.getState().courseDocument.documentId
+  useEditorStore.getState().createNewProject()
+  const deadline = Date.now() + 5000
+  while (Date.now() < deadline) {
+    const documentId = useEditorStore.getState().courseDocument.documentId
+    if (documentId && documentId !== previous) {
+      await settleCourse()
+      return
+    }
+    await new Promise((resolve) => setTimeout(resolve, 5))
+  }
+  throw new Error('createNewProject did not reach the document session')
 }
 
 const packageId = 'com.example.canvas-copy-session'
 
 function componentPackage(): ComponentPackageData {
-  return {
-    manifest: {
-      schemaVersion: 4,
-      runtimeApiVersion: 4,
-      renderMode: 'hybrid',
-      supportedScopes: ['scene'],
-      id: packageId,
-      name: '画布文字会话',
-      version: '4.0.0',
-      entry: 'runtime.js',
-      defaultSize: { width: 420, height: 180 },
-      minSize: { width: 120, height: 60 },
-      preserveAspectRatio: false,
-      assets: {},
-      defaultProps: {
-        content: { title: '基础标题', body: '基础正文' },
-      },
-      editor: {
-        properties: [
-          { key: 'content.title', label: '标题', type: 'text' },
-          { key: 'content.body', label: '正文', type: 'textarea' },
-        ],
-      },
+  const manifest: ComponentPackageData['manifest'] = {
+    schemaVersion: 4,
+    runtimeApiVersion: 4,
+    renderMode: 'hybrid',
+    supportedScopes: ['scene'],
+    id: packageId,
+    name: '画布文字会话',
+    version: '4.0.0',
+    entry: 'runtime.js',
+    defaultSize: { width: 420, height: 180 },
+    minSize: { width: 120, height: 60 },
+    preserveAspectRatio: false,
+    assets: {},
+    defaultProps: {
+      content: { title: '基础标题', body: '基础正文' },
     },
-    runtimeSource: `window.CoursewareComponent.define({
+    editor: {
+      properties: [
+        { key: 'content.title', label: '标题', type: 'text' },
+        { key: 'content.body', label: '正文', type: 'textarea' },
+      ],
+    },
+  }
+  const runtimeSource = `window.CoursewareComponent.define({
       id:'${packageId}',
       runtimeApiVersion:4,
       create:function(){return{destroy:function(){}}}
-    })`,
-    files: {
-      'manifest.json': new Uint8Array([1]),
-      'runtime.js': new Uint8Array([2]),
-    },
+    })`
+  // DocumentSession saves the real archive, so the embedded package needs real bytes.
+  const files = {
+    'manifest.json': new TextEncoder().encode(JSON.stringify(manifest)),
+    'runtime.js': new TextEncoder().encode(runtimeSource),
+  }
+  return {
+    manifest,
+    runtimeSource,
+    files,
+    contentSha256: componentContentSha256(files),
   }
 }
 
@@ -114,12 +141,13 @@ function titleAtState(stateId: string | null, nodeId: string): unknown {
   )
 }
 
-beforeEach(() => {
-  useEditorStore.getState().createNewProject()
+beforeEach(async () => {
+  host = await bootTriageCourseHost()
+  await createNewProjectOnHost()
 })
 
 describe('component canvas text session with editor store', () => {
-  it('把命名状态中的文字写为该状态 override，且可单步撤销', () => {
+  it('把命名状态中的文字写为该状态 override，且可单步撤销', async () => {
     const store = useEditorStore.getState()
     store.importComponentPackage(componentPackage())
     store.addExternalComponentNode(packageId, 100, 80)
@@ -135,7 +163,8 @@ describe('component canvas text session with editor store', () => {
       currentContext([liveTarget]),
     )
     if (!started.ok) throw new Error('会话未启动')
-    const historyBefore = activeHistory().past.length
+    await settleCourse()
+    const historyBefore = formalCourse(host).undoDepth
 
     const resolved = resolveComponentTextEdit(
       started.session,
@@ -152,9 +181,10 @@ describe('component canvas text session with editor store', () => {
       ?.nodeOverrides[nodeId]).toMatchObject({
         props: { content: { title: '反馈状态标题' } },
       })
-    expect(activeHistory().past).toHaveLength(historyBefore + 1)
+    await settleCourse()
+    expect(formalCourse(host).undoDepth).toBe(historyBefore + 1)
 
-    useEditorStore.getState().undo()
+    await undoCourse(host)
     expect(titleAtState(stateId, nodeId)).toBe('基础标题')
   })
 

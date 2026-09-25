@@ -1,6 +1,8 @@
 import { webcrypto } from 'node:crypto'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+vi.mock('pdfjs-dist/build/pdf.worker.min.mjs?url', () => ({ default: '/pdf.worker.min.mjs' }))
 import type { DesktopAPI } from '../../src/shared/ipcTypes'
 import type { CourseProjectDocument } from '../../src/shared/courseProjectTypes'
 import {
@@ -10,13 +12,18 @@ import {
 import { createBlankCourseProject } from '../../src/core/course/createCourseProject'
 import { createBlankFlowCourseProject } from '../../src/renderer/project/createFlowCourseProject'
 import { useEditorStore } from '../../src/renderer/store/editorStore'
+import {
+  bootTriageCourseHost,
+  openAppCourse,
+  waitForAppDocuments,
+  withAppDocuments,
+  type TriageCourseHost,
+} from '../helpers/triage-t7-appHost'
 
 const printArtifacts = vi.hoisted(() => ({
   calls: vi.fn<(...args: unknown[]) => void>(),
   omitPdfHtml: false,
 }))
-
-const publishSourceProbe = vi.hoisted(() => ({ forceUnavailable: false }))
 
 const sceneRenderers = vi.hoisted(() => ({
   legacy: vi.fn(),
@@ -27,18 +34,6 @@ const v2PrintCapture = vi.hoisted(() => ({
   capturePage: vi.fn(),
   destroy: vi.fn(),
 }))
-
-vi.mock('../../src/renderer/store/editorStore', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../src/renderer/store/editorStore')>()
-  return {
-    ...actual,
-    selectActiveCourseProjectDocument: (
-      state: Parameters<typeof actual.selectActiveCourseProjectDocument>[0],
-    ) => publishSourceProbe.forceUnavailable
-      ? null
-      : actual.selectActiveCourseProjectDocument(state),
-  }
-})
 
 vi.mock(
   '../../src/renderer/export/course/buildCoursePrintArtifacts',
@@ -216,9 +211,31 @@ function mixedCourseProject(): CourseProjectDocument {
   return project
 }
 
-function loadCourse(project: CourseProjectDocument): void {
-  useEditorStore.getState().loadCourseProject(project, null, {}, {})
-  useEditorStore.getState().activateCourseLocation(project.startLocationId)
+/**
+ * The App owns the document bridge, so the course can only be opened after the
+ * App has connected its host; a pre-render projection would lose the navigation
+ * race against the bootstrap document.
+ */
+async function renderAppWithCourse(
+  project: CourseProjectDocument,
+  api: AppDesktopApi,
+): Promise<void> {
+  window.desktopAPI = withAppDocuments(api, host)
+  render(<App />)
+  await waitForAppDocuments()
+  await openAppCourse(host, project)
+}
+
+/**
+ * Close the projected course so the workbench is sessionless again. The export
+ * contract must fail closed with its own unavailability message instead of
+ * leaking the internal bridge error.
+ */
+async function closeActiveCourse(): Promise<void> {
+  const documentId = useEditorStore.getState().courseDocument.documentId
+  if (!documentId) throw new Error('Expected an active course document to close')
+  expect(await useEditorStore.getState().closeCourseDocument(documentId)).toBe(true)
+  expect(useEditorStore.getState().courseDocument.documentId).toBeNull()
 }
 
 async function continuePdfExport(): Promise<void> {
@@ -229,7 +246,10 @@ async function continuePdfExport(): Promise<void> {
   fireEvent.click(within(dialog).getByRole('button', { name: '继续导出' }))
 }
 
-beforeEach(() => {
+let host: TriageCourseHost
+
+beforeEach(async () => {
+  host = await bootTriageCourseHost()
   vi.stubGlobal('crypto', webcrypto)
   vi.stubGlobal('ResizeObserver', class {
     observe() {}
@@ -237,7 +257,6 @@ beforeEach(() => {
   })
   printArtifacts.calls.mockClear()
   printArtifacts.omitPdfHtml = false
-  publishSourceProbe.forceUnavailable = false
   sceneRenderers.legacy.mockReset().mockResolvedValue([TEST_IMAGE])
   v2PrintCapture.capturePage.mockReset().mockImplementation(captureForRequest)
   v2PrintCapture.destroy.mockReset().mockResolvedValue(undefined)
@@ -258,10 +277,8 @@ afterEach(() => {
 describe('ARCH-4 V9 PDF export completeness', () => {
   it('exports complete Published PDF HTML for a Mixed course without V8 raster', async () => {
     const project = mixedCourseProject()
-    loadCourse(project)
     const api = appApi()
-    window.desktopAPI = api
-    render(<App />)
+    await renderAppWithCourse(project, api)
 
     await continuePdfExport()
 
@@ -316,15 +333,12 @@ describe('ARCH-4 V9 PDF export completeness', () => {
       includeDefaultController: false,
       controls: 'none',
     })
-    loadCourse(project)
     printArtifacts.omitPdfHtml = true
     const api = appApi()
-    window.desktopAPI = api
     vi.spyOn(console, 'error').mockImplementation(() => undefined)
-    render(<App />)
+    await renderAppWithCourse(project, api)
 
     await continuePdfExport()
-
     await waitFor(() => {
       expect(useEditorStore.getState().errorMessage).toBe(EXPECTED_COMPLETENESS_ERROR)
     })
@@ -338,17 +352,15 @@ describe('ARCH-4 V9 PDF export completeness', () => {
       includeDefaultController: false,
       controls: 'none',
     })
-    loadCourse(project)
     const api = appApi()
-    window.desktopAPI = api
     vi.spyOn(console, 'error').mockImplementation(() => undefined)
-    render(<App />)
+    await renderAppWithCourse(project, api)
 
     fireEvent.click(screen.getByTestId('export-pdf'))
     const dialog = await screen.findByRole('alertdialog', {
       name: 'PDF 导出预检',
     })
-    publishSourceProbe.forceUnavailable = true
+    await closeActiveCourse()
     fireEvent.click(within(dialog).getByRole('button', { name: '继续导出' }))
 
     await waitFor(() => {
@@ -366,10 +378,8 @@ describe('ARCH-4 V9 PDF export completeness', () => {
       includeDefaultController: false,
       controls: 'none',
     })
-    loadCourse(project)
     const api = appApi()
-    window.desktopAPI = api
-    render(<App />)
+    await renderAppWithCourse(project, api)
 
     await continuePdfExport()
 
@@ -384,7 +394,6 @@ describe('ARCH-4 V9 PDF export completeness', () => {
 
   it('shows a Spatial Published capture cause and writes no partial PDF', async () => {
     const project = mixedCourseProject()
-    loadCourse(project)
     v2PrintCapture.capturePage.mockImplementation((request: {
       width?: number
       height?: number
@@ -395,9 +404,8 @@ describe('ARCH-4 V9 PDF export completeness', () => {
       return captureForRequest(request)
     })
     const api = appApi()
-    window.desktopAPI = api
     vi.spyOn(console, 'error').mockImplementation(() => undefined)
-    render(<App />)
+    await renderAppWithCourse(project, api)
 
     await continuePdfExport()
 
@@ -416,12 +424,10 @@ describe('ARCH-4 V9 PDF export completeness', () => {
       includeDefaultController: false,
       controls: 'none',
     })
-    loadCourse(project)
-    publishSourceProbe.forceUnavailable = true
     const api = appApi()
-    window.desktopAPI = api
     vi.spyOn(console, 'error').mockImplementation(() => undefined)
-    render(<App />)
+    await renderAppWithCourse(project, api)
+    await closeActiveCourse()
 
     fireEvent.click(screen.getByTestId('export-pdf'))
 

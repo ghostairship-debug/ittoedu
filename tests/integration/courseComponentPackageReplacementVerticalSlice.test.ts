@@ -1,5 +1,4 @@
 import { buildPublishedFixture as buildPublishedCourseV2Payload } from '../fixtures/teacherController'
-import { isAuthoringHistoryTransactionFrame } from '../../src/renderer/authoring/resourceAwareAuthoringHistory'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { beforeEach, describe, expect, it } from 'vitest'
@@ -7,9 +6,17 @@ import {
   componentPackagesFromArchive,
   componentPackagesToArchiveFiles,
 } from '@/renderer/components/componentPackageStore'
-import { isFlowEditorTransactionFrame } from '@/renderer/course/flowEditorSlice'
-
-import { isSpatialAuthoringTransactionFrame } from '@/renderer/course/spatialAuthoringHistory'
+import {
+  bootTriageCourseHost,
+  formalCourse,
+  projectBody,
+  projectCourse,
+  redoCourse,
+  settleCourse,
+  undoCourse,
+  type TriageCourseHost,
+} from '../helpers/triage-t7-courseHost'
+import type { DocumentModel } from '@/shared/workbench/document'
 
 import {
   createCourseProjectArchive,
@@ -53,6 +60,8 @@ const REPLACEMENT_VERSION = '4.1.0'
 
 type FixtureId = 'slide-heavy' | 'flow-heavy' | 'mixed-spatial'
 
+let host: TriageCourseHost
+
 function fixture(id: FixtureId): CourseProjectArchiveData {
   return openCourseProjectArchive(new Uint8Array(readFileSync(
     join(FIXTURE_ROOT, `${id}.h5lesson`),
@@ -80,18 +89,19 @@ function nestRepresentativeFlowComponent(
   return courseProjectDocumentSchema.parse(next)
 }
 
-function loadFixture(id: FixtureId): CourseProjectArchiveData {
+async function loadFixture(id: FixtureId): Promise<CourseProjectArchiveData> {
   const archive = fixture(id)
   const project = id === 'flow-heavy'
     ? nestRepresentativeFlowComponent(archive.project)
     : archive.project
   const loaded = { ...archive, project }
-  useEditorStore.getState().loadCourseProject(
+  await projectCourse(
+    host,
     project,
-    null,
     archive.assetFiles,
     componentPackagesFromArchive(project, archive.componentFiles),
   )
+  await settleCourse()
   return loaded
 }
 
@@ -232,23 +242,70 @@ function activeHistory() {
   throw new Error('Expected an active V9 authoring history')
 }
 
-function lastComponentTransactionChange() {
-  const active = activeHistory()
-  const entry = active.history.past.at(-1)
-  const transaction = active.kind === 'slide'
-    ? Boolean(entry && isAuthoringHistoryTransactionFrame(entry))
-    : active.kind === 'flow'
-      ? Boolean(entry && isFlowEditorTransactionFrame(entry))
-      : Boolean(entry && isSpatialAuthoringTransactionFrame(entry))
-  expect(transaction).toBe(true)
-  if (!entry || !('kind' in entry) || entry.kind !== 'editor-transaction') {
-    throw new Error('Expected an editor transaction history frame')
+function sameBytes(left: Uint8Array | undefined, right: Uint8Array | undefined): boolean {
+  if (!left || !right) return left === right
+  if (left.byteLength !== right.byteLength) return false
+  for (let index = 0; index < left.byteLength; index += 1) {
+    if (left[index] !== right[index]) return false
   }
-  expect(entry.resourceChanges.assetFileChanges).toBeUndefined()
-  expect(entry.resourceChanges.componentPackageChanges).toHaveLength(1)
-  const change = entry.resourceChanges.componentPackageChanges?.[0]
-  if (!change) throw new Error('Expected one component package resource delta')
-  return change
+  return true
+}
+
+function sameByteMap(
+  left: Readonly<Record<string, Uint8Array>> | undefined,
+  right: Readonly<Record<string, Uint8Array>> | undefined,
+): boolean {
+  if (!left || !right) return left === right
+  const paths = new Set([...Object.keys(left), ...Object.keys(right)])
+  for (const path of paths) {
+    if (!sameBytes(left[path], right[path])) return false
+  }
+  return true
+}
+
+function courseResources(model: DocumentModel): Extract<DocumentModel, { kind: 'course-v9' }>['resources'] {
+  if (model.kind !== 'course-v9') throw new Error('Expected a Course Project V9 document')
+  return model.resources
+}
+
+/** Formal asset ids whose bytes differ between two committed document models. */
+function changedAssetIds(before: DocumentModel, after: DocumentModel): string[] {
+  const beforeAssets = courseResources(before).assets
+  const afterAssets = courseResources(after).assets
+  return [...new Set([...Object.keys(beforeAssets), ...Object.keys(afterAssets)])]
+    .filter((assetId) => !sameBytes(beforeAssets[assetId], afterAssets[assetId]))
+    .sort()
+}
+
+/** Formal component package keys whose files differ between two committed document models. */
+function changedComponentPackageKeys(before: DocumentModel, after: DocumentModel): string[] {
+  const beforePackages = courseResources(before).components
+  const afterPackages = courseResources(after).components
+  return [...new Set([...Object.keys(beforePackages), ...Object.keys(afterPackages)])]
+    .filter((key) => !sameByteMap(beforePackages[key], afterPackages[key]))
+    .sort()
+}
+
+/** Package ids (key without the version suffix) whose formal files differ. */
+function changedComponentPackageIds(before: DocumentModel, after: DocumentModel): string[] {
+  return [...new Set(changedComponentPackageKeys(before, after).map(
+    (key) => key.slice(0, key.lastIndexOf('@')),
+  ))].sort()
+}
+
+/** Committed archive keys of one package id, e.g. `com.example.card@4.1.0`. */
+function packageKeysFor(model: DocumentModel, packageId = PACKAGE_ID): string[] {
+  return Object.keys(courseResources(model).components)
+    .filter((key) => key.slice(0, key.lastIndexOf('@')) === packageId)
+    .sort()
+}
+
+/** Decode one committed model's component package through the product's own archive reader. */
+function packageSnapshotFromModel(model: DocumentModel, packageId = PACKAGE_ID) {
+  if (model.kind !== 'course-v9') throw new Error('Expected a Course Project V9 document')
+  return packageSnapshot(
+    componentPackagesFromArchive(model.project, model.resources.components)[packageId],
+  )
 }
 
 interface ComponentReferenceSnapshot {
@@ -398,6 +455,7 @@ function expectFrozenCourseSession() {
 function authoritativeWriteSnapshot() {
   const state = useEditorStore.getState()
   const active = activeHistory()
+  const committed = formalCourse(host)
   return {
     project: structuredClone(activeProject()),
     derivedProject: structuredClone(selectActiveCourseProjectDocument(state)!),
@@ -410,6 +468,12 @@ function authoritativeWriteSnapshot() {
     componentFuture: structuredClone(state.courseComponentPackagesFuture),
     selection: selectionSnapshot(),
     courseAuthoringSession: structuredClone(state.courseAuthoringSession),
+    formal: {
+      revision: committed.revision,
+      undoDepth: committed.undoDepth,
+      redoDepth: committed.redoDepth,
+      model: structuredClone(committed.model),
+    },
     dirty: state.dirty,
     activeTab: state.activeTab,
     statusMessage: state.statusMessage,
@@ -417,15 +481,17 @@ function authoritativeWriteSnapshot() {
   }
 }
 
-function prepareSurface(id: FixtureId) {
-  loadFixture(id)
+async function prepareSurface(id: FixtureId) {
+  await loadFixture(id)
   if (id === 'slide-heavy') {
     useEditorStore.getState().activateCourseLocation('slide-location-practice')
     useEditorStore.getState().selectNode('slide-practice-component')
+    await settleCourse()
     return useEditorStore.getState().captureComponentPackageReplacementTarget(PACKAGE_ID)
   }
   if (id === 'flow-heavy') {
     useEditorStore.getState().activateCourseLocation('flow-location-component')
+    await settleCourse()
     return useEditorStore.getState().captureComponentPackageReplacementTarget(PACKAGE_ID)
   }
 
@@ -435,11 +501,12 @@ function prepareSurface(id: FixtureId) {
     .captureComponentPackageReplacementTarget(PACKAGE_ID)
   useEditorStore.getState().activateCourseLocation('mixed-location-spatial-detail')
   useEditorStore.getState().selectNode('mixed-spatial-component')
+  await settleCourse()
   return target
 }
 
-beforeEach(() => {
-  useEditorStore.getState().createNewProject()
+beforeEach(async () => {
+  host = await bootTriageCourseHost()
 })
 
 describe('ARCH-2 Course component package replacement vertical slice', () => {
@@ -447,8 +514,8 @@ describe('ARCH-2 Course component package replacement vertical slice', () => {
     ['slide-heavy', 'slide'] as const,
     ['flow-heavy', 'flow'] as const,
     ['mixed-spatial', 'spatial'] as const,
-  ])('commits one package delta to the current %s Surface history without full snapshots', (fixtureId, expectedKind) => {
-    const target = prepareSurface(fixtureId)
+  ])('commits one package delta to the current %s Surface history without full snapshots', async (fixtureId, expectedKind) => {
+    const target = await prepareSurface(fixtureId)
     if (!target) throw new Error('Expected a captured component replacement target')
     expect(activeHistory().kind).toBe(expectedKind)
 
@@ -467,19 +534,10 @@ describe('ARCH-2 Course component package replacement vertical slice', () => {
       useEditorStore.getState().componentPackages[PACKAGE_ID],
     )
     const beforeSelection = selectionSnapshot()
-    const historySelection = expectedKind === 'spatial'
-      ? {
-          ...beforeSelection,
-          selectedNodeId: null,
-          selectedNodeIds: [],
-          spatial: beforeSelection.spatial
-            ? { ...beforeSelection.spatial, selectionIds: [] }
-            : null,
-        }
-      : beforeSelection
     const beforeSessionShape = sessionStableShape()
     const beforeCourseSession = expectFrozenCourseSession()
-    const beforeHistoryDepth = activeHistory().history.past.length
+    const beforeHistoryDepth = formalCourse(host).undoDepth
+    const beforeModel = structuredClone(formalCourse(host).model)
     const beforeResourceDepths = resourceSnapshotDepths()
     const replacement = replacementPackage(
       useEditorStore.getState().componentPackages[PACKAGE_ID]!,
@@ -502,6 +560,7 @@ describe('ARCH-2 Course component package replacement vertical slice', () => {
     if (!result.ok) throw new Error(result.reason)
     expect(result.feedback.affectedInstances.map((reference) => reference.instanceId).sort())
       .toEqual(beforeReferences.map((reference) => reference.id).sort())
+    await settleCourse()
 
     const afterProject = structuredClone(activeProject())
     const afterReferences = collectComponentReferences(afterProject)
@@ -524,11 +583,20 @@ describe('ARCH-2 Course component package replacement vertical slice', () => {
     })
     expect(packageSnapshot(useEditorStore.getState().componentPackages[PACKAGE_ID]))
       .toEqual(packageSnapshot(replacement))
-    expect(activeHistory().history.past).toHaveLength(beforeHistoryDepth + 1)
-    const change = lastComponentTransactionChange()
-    expect(change.packageId).toBe(PACKAGE_ID)
-    expect(packageSnapshot(change.before)).toEqual(beforePackage)
-    expect(packageSnapshot(change.after)).toEqual(packageSnapshot(replacement))
+    // The formal document session owns the history: exactly one new step, and
+    // that step carries only the component package delta, never asset bytes.
+    const committedSnapshot = formalCourse(host)
+    expect(committedSnapshot.undoDepth).toBe(beforeHistoryDepth + 1)
+    const afterModel = structuredClone(committedSnapshot.model)
+    expect(changedAssetIds(beforeModel, afterModel)).toEqual([])
+    // Exactly one package delta: the baseline key disappears, the replacement key appears.
+    expect(changedComponentPackageKeys(beforeModel, afterModel))
+      .toEqual([`${PACKAGE_ID}@${BASE_VERSION}`, `${PACKAGE_ID}@${REPLACEMENT_VERSION}`].sort())
+    expect(changedComponentPackageIds(beforeModel, afterModel)).toEqual([PACKAGE_ID])
+    expect(packageKeysFor(beforeModel)).toEqual([`${PACKAGE_ID}@${BASE_VERSION}`])
+    expect(packageKeysFor(afterModel)).toEqual([`${PACKAGE_ID}@${REPLACEMENT_VERSION}`])
+    expect(packageSnapshotFromModel(beforeModel)).toEqual(beforePackage)
+    expect(packageSnapshotFromModel(afterModel)).toEqual(packageSnapshot(replacement))
     expect(resourceSnapshotDepths()).toEqual(beforeResourceDepths)
     expect(selectionSnapshot()).toEqual(beforeSelection)
     expect(sessionStableShape()).toEqual(beforeSessionShape)
@@ -536,36 +604,59 @@ describe('ARCH-2 Course component package replacement vertical slice', () => {
     expect(committedSession.token.revision).toBe(afterProject.revision)
     expect(committedSession.token.generation).toBe(beforeCourseSession.token.generation)
 
-    useEditorStore.getState().undo()
-    expect(activeProject()).toEqual(beforeProject)
+    await undoCourse(host)
+    await settleCourse()
+    expect(projectBody(activeProject())).toEqual(projectBody(beforeProject))
     expect(packageSnapshot(useEditorStore.getState().componentPackages[PACKAGE_ID]))
       .toEqual(beforePackage)
+    expect(formalCourse(host).undoDepth).toBe(beforeHistoryDepth)
+    expect(formalCourse(host).redoDepth).toBe(1)
+    // Undo restores content; the document revision keeps moving forward.
+    expect(formalCourse(host).revision).toBeGreaterThan(committedSnapshot.revision)
+    const undoneRevision = formalCourse(host).revision
+    expect(packageSnapshotFromModel(formalCourse(host).model)).toEqual(beforePackage)
     expect(resourceSnapshotDepths()).toEqual(beforeResourceDepths)
-    expect(selectionSnapshot()).toEqual(historySelection)
+    // View state lives outside the document: `CourseDocumentView.selection` is
+    // not part of DocumentModel, and both `spatialAuthoringSlice.undo` and
+    // `CourseDocumentBridge.finishHistory` reset only transient editing state
+    // (`editingTextNodeId`). The renderer therefore reconciles the selection
+    // against the restored project and keeps a selection that is still valid,
+    // instead of reverting it to the session-open snapshot as 1.x did when it
+    // replaced the whole session state.
+    expect(selectionSnapshot()).toEqual(beforeSelection)
+    expect(selectSelectedNodeId(useEditorStore.getState()))
+      .toBe(beforeSelection.selectedNodeId)
     expect(sessionStableShape()).toEqual(beforeSessionShape)
     const undoneSession = expectFrozenCourseSession()
-    expect(undoneSession.token.revision).toBe(beforeProject.revision)
+    expect(undoneSession.token.revision).toBe(formalCourse(host).revision)
     expect(undoneSession.token.generation).toBeGreaterThan(
       committedSession.token.generation,
     )
 
-    useEditorStore.getState().redo()
-    expect(activeProject()).toEqual(afterProject)
+    await redoCourse(host)
+    await settleCourse()
+    expect(projectBody(activeProject())).toEqual(projectBody(afterProject))
     expect(packageSnapshot(useEditorStore.getState().componentPackages[PACKAGE_ID]))
       .toEqual(packageSnapshot(replacement))
+    expect(formalCourse(host).undoDepth).toBe(beforeHistoryDepth + 1)
+    expect(formalCourse(host).redoDepth).toBe(0)
+    expect(formalCourse(host).revision).toBeGreaterThan(undoneRevision)
+    expect(packageSnapshotFromModel(formalCourse(host).model))
+      .toEqual(packageSnapshot(replacement))
     expect(resourceSnapshotDepths()).toEqual(beforeResourceDepths)
-    expect(selectionSnapshot()).toEqual(historySelection)
+    expect(selectionSnapshot()).toEqual(beforeSelection)
     expect(sessionStableShape()).toEqual(beforeSessionShape)
     const redoneSession = expectFrozenCourseSession()
-    expect(redoneSession.token.revision).toBe(afterProject.revision)
+    expect(redoneSession.token.revision).toBe(formalCourse(host).revision)
     expect(redoneSession.token.generation).toBeGreaterThan(
       undoneSession.token.generation,
     )
   })
 
-  it('keeps no-op, incompatible scope, project mismatch and stale revision as zero-write outcomes', () => {
-    loadFixture('slide-heavy')
+  it('keeps no-op, incompatible scope, project mismatch and stale revision as zero-write outcomes', async () => {
+    await loadFixture('slide-heavy')
     useEditorStore.getState().activateCourseLocation('slide-location-practice')
+    await settleCourse()
     const target = useEditorStore.getState()
       .captureComponentPackageReplacementTarget(PACKAGE_ID)
     if (!target) throw new Error('Expected a captured component replacement target')
@@ -585,6 +676,7 @@ describe('ARCH-2 Course component package replacement vertical slice', () => {
         replacementVersion: BASE_VERSION,
       },
     })
+    await settleCourse()
     expect(authoritativeWriteSnapshot()).toEqual(before)
 
     before = authoritativeWriteSnapshot()
@@ -592,6 +684,7 @@ describe('ARCH-2 Course component package replacement vertical slice', () => {
       target,
       replacementPackage(currentPackage, { supportedScopes: ['global'] }),
     )).toMatchObject({ ok: false, code: 'unsupported-scope' })
+    await settleCourse()
     expect(authoritativeWriteSnapshot()).toEqual(before)
 
     before = authoritativeWriteSnapshot()
@@ -602,20 +695,24 @@ describe('ARCH-2 Course component package replacement vertical slice', () => {
       ok: false,
       code: 'project-mismatch',
     })
+    await settleCourse()
     expect(authoritativeWriteSnapshot()).toEqual(before)
 
     useEditorStore.getState().renameProject('ARCH-2 intervening component edit')
+    await settleCourse()
     before = authoritativeWriteSnapshot()
     expect(useEditorStore.getState().replaceComponentPackageAtTarget(
       target,
       replacementPackage(currentPackage),
     )).toMatchObject({ ok: false, code: 'revision-conflict' })
+    await settleCourse()
     expect(authoritativeWriteSnapshot()).toEqual(before)
   })
 
-  it('saves and reopens replacement files, then publishes API 4 without mutating authoring state', () => {
-    loadFixture('flow-heavy')
+  it('saves and reopens replacement files, then publishes API 4 without mutating authoring state', async () => {
+    await loadFixture('flow-heavy')
     useEditorStore.getState().activateCourseLocation('flow-location-component')
+    await settleCourse()
     const target = useEditorStore.getState()
       .captureComponentPackageReplacementTarget(PACKAGE_ID)
     if (!target) throw new Error('Expected a captured component replacement target')
@@ -624,6 +721,7 @@ describe('ARCH-2 Course component package replacement vertical slice', () => {
     )
     expect(useEditorStore.getState().replaceComponentPackageAtTarget(target, replacement))
       .toMatchObject({ ok: true, status: 'replaced' })
+    await settleCourse()
 
     const beforeReadEndpoints = authoritativeWriteSnapshot()
     const state = useEditorStore.getState()

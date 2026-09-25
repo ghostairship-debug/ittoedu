@@ -1,12 +1,20 @@
 import { buildPublishedFixture as buildPublishedCourseV2Payload } from '../fixtures/teacherController'
-import { isAuthoringHistoryTransactionFrame } from '../../src/renderer/authoring/resourceAwareAuthoringHistory'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { decodePublishedCode } from '@/player/decodePublishedExecutableCode'
 import { makeLayerItemAuthoringAddress } from '@/renderer/authoring/courseAuthoringScope'
 import type { CourseAuthoringTarget } from '@/renderer/authoring/courseAuthoringSession'
-import { isFlowEditorTransactionFrame } from '@/renderer/course/flowEditorSlice'
 
-import { isSpatialAuthoringTransactionFrame } from '@/renderer/course/spatialAuthoringHistory'
+import {
+  bootTriageCourseHost,
+  formalCourse,
+  projectBody,
+  projectCourse,
+  redoCourse,
+  settleCourse,
+  undoCourse,
+  type TriageCourseHost,
+} from '../helpers/triage-t7-courseHost'
+import type { DocumentSnapshot } from '@/shared/workbench/document'
 
 import {
   createCourseProjectArchive,
@@ -51,6 +59,8 @@ function projectedGlobalLayer(state: Parameters<typeof selectCandidateGlobalLaye
 const CREATED_AT = '2026-08-24T00:00:00.000Z'
 const ARCHIVE_TIME = '2026-08-24T12:00:00.000Z'
 const TYPE_DECOY_ID = 'runtime-source-native-type-decoy'
+
+let host: TriageCourseHost
 
 type FixtureKind =
   | 'slide-scene'
@@ -288,16 +298,17 @@ function runtimeFixture(
   }
 }
 
-function loadRuntimeFixture(
+async function loadRuntimeFixture(
   kind: FixtureKind,
   options?: Parameters<typeof runtimeFixture>[1],
-): RuntimeSourceFixture {
+): Promise<RuntimeSourceFixture> {
   const fixture = runtimeFixture(kind, options)
-  useEditorStore.getState().loadCourseProject(fixture.project, null, {}, {})
+  await projectCourse(host, fixture.project, {}, {})
   useEditorStore.getState().activateCourseLocation(fixture.locationId)
   if (fixture.owner === 'global') {
     useEditorStore.getState().setEditingScope('global')
   }
+  await settleCourse()
   return fixture
 }
 
@@ -321,19 +332,26 @@ function activeHistory() {
   throw new Error('Expected an active V9 Surface history')
 }
 
-function activeTransactionResourceChanges() {
-  const active = activeHistory()
-  const frame = active.history.past.at(-1)
-  const isTransaction = active.kind === 'slide'
-    ? Boolean(frame && isAuthoringHistoryTransactionFrame(frame))
-    : active.kind === 'flow'
-      ? Boolean(frame && isFlowEditorTransactionFrame(frame))
-      : Boolean(frame && isSpatialAuthoringTransactionFrame(frame))
-  expect(isTransaction).toBe(true)
-  if (!frame || !('kind' in frame) || frame.kind !== 'editor-transaction') {
-    throw new Error('Expected the newest Surface history entry to be an editor transaction')
+/**
+ * 2.0 keeps no renderer history: the newest Surface transaction lives in the
+ * main-owned DocumentSession. "Exactly one current transaction with no resource
+ * changes" is therefore read from the formal document — one new undo step and
+ * byte-identical formal resources.
+ */
+function formalUndoDepth(): number {
+  return formalCourse(host).undoDepth
+}
+
+function formalResources(snapshot: DocumentSnapshot) {
+  if (snapshot.model.kind !== 'course-v9') throw new Error('Expected a course document')
+  return {
+    assets: byteMap(snapshot.model.resources.assets),
+    components: Object.fromEntries(
+      Object.entries(snapshot.model.resources.components)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([packageId, files]) => [packageId, byteMap(files)]),
+    ),
   }
-  return frame.resourceChanges
 }
 
 function compatibilitySnapshotDepths() {
@@ -356,6 +374,7 @@ function byteMap(files: Readonly<Record<string, Uint8Array>>) {
 
 function authoritativeWriteSnapshot() {
   const state = useEditorStore.getState()
+  const snapshot = formalCourse(host)
   return {
     project: structuredClone(activeProject()),
     derivedProject: structuredClone(selectActiveCourseProjectDocument(state)!),
@@ -368,6 +387,10 @@ function authoritativeWriteSnapshot() {
     componentFuture: structuredClone(state.courseComponentPackagesFuture),
     courseAuthoringSession: structuredClone(state.courseAuthoringSession),
     dirty: state.dirty,
+    formalProject: structuredClone(snapshot.model.kind === 'course-v9' ? snapshot.model.project : null),
+    formalResources: formalResources(snapshot),
+    formalUndoDepth: snapshot.undoDepth,
+    formalRedoDepth: snapshot.redoDepth,
   }
 }
 
@@ -425,19 +448,21 @@ function captureRuntimeSourceTarget(
   return view.target
 }
 
-function expectRejectedWithoutAuthoritativeWrite(
+async function expectRejectedWithoutAuthoritativeWrite(
   target: CourseAuthoringTarget,
   source: string,
   code: string,
-): void {
+): Promise<void> {
+  await settleCourse()
   const before = authoritativeWriteSnapshot()
   expect(useEditorStore.getState().updateRuntimeSourceAtTarget(target, source))
     .toMatchObject({ ok: false, code })
+  await settleCourse()
   expect(authoritativeWriteSnapshot()).toEqual(before)
 }
 
-beforeEach(() => {
-  useEditorStore.getState().createNewProject()
+beforeEach(async () => {
+  host = await bootTriageCourseHost()
 })
 
 describe('ARCH-2 canonical Runtime source Store vertical slice', () => {
@@ -448,16 +473,28 @@ describe('ARCH-2 canonical Runtime source Store vertical slice', () => {
     ['flow-global', 'flow'] as const,
     ['spatial-world', 'spatial'] as const,
     ['spatial-global', 'spatial'] as const,
-  ])('commits %s source through exactly one current %s transaction and preserves its Runtime contract', (
+  ])('commits %s source through exactly one current %s transaction and preserves its Runtime contract', async (
     fixtureKind,
     expectedHistoryKind: ActiveHistoryKind,
   ) => {
-    const fixture = loadRuntimeFixture(fixtureKind)
+    const fixture = await loadRuntimeFixture(fixtureKind)
     const target = captureRuntimeSourceTarget(fixture)
     const beforeProject = structuredClone(activeProject())
     const beforeRuntime = structuredClone(runtimeItem(beforeProject, fixture.itemId).runtime)
-    const beforeHistoryDepth = activeHistory().history.past.length
+    const beforeHistoryDepth = formalUndoDepth()
+    const beforeResources = formalResources(formalCourse(host))
     const beforeCompatibilityDepths = compatibilitySnapshotDepths()
+    // 2.0 re-anchored: the renderer store is a projection and keeps no resource
+    // history at all (`CourseDocumentView.ts:46-48,70` resets every sidecar and
+    // component package stack), so the 1.x "stack stays aligned" expectation is
+    // now truthfully "there is no renderer stack"; the formal DocumentSession
+    // owns History instead.
+    expect(beforeCompatibilityDepths).toEqual({
+      sidecarPast: 0,
+      sidecarFuture: 0,
+      componentPast: 0,
+      componentFuture: 0,
+    })
 
     expect(activeHistory().kind).toBe(expectedHistoryKind)
     expect(useEditorStore.getState().updateRuntimeSourceAtTarget(
@@ -474,33 +511,41 @@ describe('ARCH-2 canonical Runtime source Store vertical slice', () => {
       },
     })
 
+    await settleCourse()
     const committedProject = structuredClone(activeProject())
     expect(committedProject.revision).toBe(beforeProject.revision + 1)
     expect(runtimeItem(committedProject, fixture.itemId).runtime).toEqual({
       ...beforeRuntime,
       source: fixture.updatedSource,
     })
-    expect(activeHistory().history.past).toHaveLength(beforeHistoryDepth + 1)
-    expect(activeTransactionResourceChanges()).toEqual({})
+    expect(formalUndoDepth()).toBe(beforeHistoryDepth + 1)
+    expect(formalResources(formalCourse(host))).toEqual(beforeResources)
     expect(compatibilitySnapshotDepths()).toEqual(beforeCompatibilityDepths)
 
-    useEditorStore.getState().undo()
-    expect(activeProject()).toEqual(beforeProject)
+    await undoCourse(host)
+    expect(projectBody(activeProject())).toEqual(projectBody(beforeProject))
+    // Undo is itself a new DocumentSession operation, so the document revision
+    // keeps moving forward while the content returns to the previous body.
+    expect(formalCourse(host).revision).toBeGreaterThan(beforeProject.revision)
+    expect(formalUndoDepth()).toBe(beforeHistoryDepth)
     expect(runtimeItem(activeProject(), fixture.itemId).runtime.source)
       .toBe(fixture.originalSource)
     expect(compatibilitySnapshotDepths()).toEqual(beforeCompatibilityDepths)
 
-    useEditorStore.getState().redo()
-    expect(activeProject()).toEqual(committedProject)
+    await redoCourse(host)
+    expect(projectBody(activeProject())).toEqual(projectBody(committedProject))
+    expect(formalCourse(host).revision).toBeGreaterThan(committedProject.revision)
+    expect(formalUndoDepth()).toBe(beforeHistoryDepth + 1)
     expect(runtimeItem(activeProject(), fixture.itemId).runtime.source)
       .toBe(fixture.updatedSource)
     expect(compatibilitySnapshotDepths()).toEqual(beforeCompatibilityDepths)
   })
 
-  it('keeps same-source, stale, locked, wrong-type, owner, location and revision failures at zero authoritative writes', () => {
-    let fixture = loadRuntimeFixture('slide-scene')
+  it('keeps same-source, stale, locked, wrong-type, owner, location and revision failures at zero authoritative writes', async () => {
+    let fixture = await loadRuntimeFixture('slide-scene')
     let target = captureRuntimeSourceTarget(fixture)
-    let before = authoritativeWriteSnapshot()
+    await settleCourse()
+    const before = authoritativeWriteSnapshot()
     expect(useEditorStore.getState().updateRuntimeSourceAtTarget(
       target,
       fixture.originalSource,
@@ -509,25 +554,26 @@ describe('ARCH-2 canonical Runtime source Store vertical slice', () => {
       status: 'unchanged',
       feedback: { kind: 'runtime-source-unchanged' },
     })
+    await settleCourse()
     expect(authoritativeWriteSnapshot()).toEqual(before)
 
-    expectRejectedWithoutAuthoritativeWrite(
+    await expectRejectedWithoutAuthoritativeWrite(
       { ...target, sessionGeneration: target.sessionGeneration + 1 },
       fixture.updatedSource,
       'session-stale',
     )
 
-    fixture = loadRuntimeFixture('slide-scene', { locked: true })
+    fixture = await loadRuntimeFixture('slide-scene', { locked: true })
     target = captureRuntimeSourceTarget(fixture)
-    expectRejectedWithoutAuthoritativeWrite(
+    await expectRejectedWithoutAuthoritativeWrite(
       target,
       fixture.updatedSource,
       'target-locked',
     )
 
-    fixture = loadRuntimeFixture('slide-scene', { includeTypeDecoy: true })
+    fixture = await loadRuntimeFixture('slide-scene', { includeTypeDecoy: true })
     target = captureRuntimeSourceTarget(fixture)
-    expectRejectedWithoutAuthoritativeWrite({
+    await expectRejectedWithoutAuthoritativeWrite({
       ...target,
       itemId: TYPE_DECOY_ID,
       authoringAddress: makeLayerItemAuthoringAddress({
@@ -541,42 +587,45 @@ describe('ARCH-2 canonical Runtime source Store vertical slice', () => {
       }),
     }, fixture.updatedSource, 'invalid-target')
 
-    fixture = loadRuntimeFixture('slide-scene')
+    fixture = await loadRuntimeFixture('slide-scene')
     target = captureRuntimeSourceTarget(fixture)
     useEditorStore.getState().setEditingScope('global')
-    expectRejectedWithoutAuthoritativeWrite(
+    await expectRejectedWithoutAuthoritativeWrite(
       target,
       fixture.updatedSource,
       'owner-mismatch',
     )
 
-    fixture = loadRuntimeFixture('flow-surface')
+    fixture = await loadRuntimeFixture('flow-surface')
     target = captureRuntimeSourceTarget(fixture)
-    expectRejectedWithoutAuthoritativeWrite(
+    await expectRejectedWithoutAuthoritativeWrite(
       { ...target, locationId: 'runtime-source-other-location' },
       fixture.updatedSource,
       'surface-or-location',
     )
 
-    fixture = loadRuntimeFixture('slide-scene')
+    fixture = await loadRuntimeFixture('slide-scene')
     target = captureRuntimeSourceTarget(fixture)
     useEditorStore.getState().renameProject('Runtime source intervening edit')
-    before = authoritativeWriteSnapshot()
+    await settleCourse()
+    const beforeInterveningEdit = authoritativeWriteSnapshot()
     expect(useEditorStore.getState().updateRuntimeSourceAtTarget(
       target,
       fixture.updatedSource,
     )).toMatchObject({ ok: false, code: 'revision-conflict' })
-    expect(authoritativeWriteSnapshot()).toEqual(before)
+    await settleCourse()
+    expect(authoritativeWriteSnapshot()).toEqual(beforeInterveningEdit)
   })
 
-  it('survives archive reopen and preserves API 3 source metadata in the Published V2 read model', () => {
-    const fixture = loadRuntimeFixture('spatial-world')
+  it('survives archive reopen and preserves API 3 source metadata in the Published V2 read model', async () => {
+    const fixture = await loadRuntimeFixture('spatial-world')
     const target = captureRuntimeSourceTarget(fixture)
     expect(useEditorStore.getState().updateRuntimeSourceAtTarget(
       target,
       fixture.updatedSource,
     )).toMatchObject({ ok: true, status: 'committed' })
 
+    await settleCourse()
     const beforeReadEndpoints = authoritativeWriteSnapshot()
     const archive = createCourseProjectArchive({
       project: activeProject(),
