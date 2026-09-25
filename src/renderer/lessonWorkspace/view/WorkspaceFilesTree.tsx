@@ -5,7 +5,7 @@ import type { RegisteredWorkspaceRoot, WorkspaceFilesAPI, WorkspaceFilesRequest,
 import type { SaveDirectoryContext } from '../../../shared/workbench/desktop'
 import './WorkspaceFilesTree.css'
 import { computeDefaultName, normalizeNewFilename, getStemSelectionRange, type CreateFileType } from '../workspaceFilesNaming'
-import { REVEAL_IN_EXPLORER_EVENT, type RevealInExplorerDetail } from '../../workbench/revealInExplorer'
+import { REVEAL_IN_EXPLORER_EVENT, takePendingReveal, type RevealInExplorerDetail } from '../../workbench/revealInExplorer'
 import { SLIDE_CANVAS_PRESETS } from '../../../shared/slideCanvas'
 import { snapshotWorkspaceDrop } from './workspaceDropFiles'
 import { parseWorkspaceEntryDrag, WORKSPACE_ENTRIES_DRAG_TYPE, writeWorkspaceEntryDrag } from '../workspaceMediaDrag'
@@ -40,6 +40,8 @@ export function WorkspaceFilesTree({ directory, files, refreshVersion = 0, onFil
   const pagesRef = useRef(pages); pagesRef.current = pages
   const buttons = useRef(new Map<string, HTMLButtonElement>())
   const createMenu = useRef<HTMLDetailsElement>(null)
+  // The pane clips its content, so the create options open at a fixed window position.
+  const [createAt, setCreateAt] = useState<{ left: number; top: number }>()
   const dialogRef = useRef<HTMLElement>(null), dialogReturnFocus = useRef<HTMLElement | null>(null)
   const rows: Row[] = []
   const flatten = (id: string) => { for (const entry of pages[id] ?? []) if (entry.status === 'accessible') { rows.push({ entry, parentId: id }); if (entry.kind === 'directory' && expanded.has(entry.entryId)) flatten(entry.entryId) } }
@@ -193,11 +195,17 @@ export function WorkspaceFilesTree({ directory, files, refreshVersion = 0, onFil
   useEffect(() => {
     const handler = (event: Event) => {
       const custom = event as CustomEvent<RevealInExplorerDetail>
-      if (custom.detail) void revealItem(custom.detail)
+      if (custom.detail) { takePendingReveal(); void revealItem(custom.detail) }
     }
     window.addEventListener(REVEAL_IN_EXPLORER_EVENT, handler)
     return () => window.removeEventListener(REVEAL_IN_EXPLORER_EVENT, handler)
   }, [revealItem])
+  // A request made while the explorer was closed is revealed once the workspace root is ready.
+  useEffect(() => {
+    if (!root) return
+    const pending = takePendingReveal()
+    if (pending) void revealItem(pending)
+  }, [root, revealItem])
 
   const begin = async (type: Dialog) => {
     if (type === 'trash') { if (root && selected.length) await run({ type: 'trash', operationId: crypto.randomUUID(), workspaceId: root.workspaceId, entryIds: selected.map(row => row.entry.entryId) }); return }
@@ -308,7 +316,14 @@ export function WorkspaceFilesTree({ directory, files, refreshVersion = 0, onFil
     } catch (reason) { setError(message(reason)) }
   }
   const droppable = (id: string) => ({ onDragOver: (event: DragEvent) => { if (event.dataTransfer.types.includes(WORKSPACE_ENTRIES_DRAG_TYPE) || event.dataTransfer.types.includes('Files')) { event.preventDefault(); event.stopPropagation(); event.dataTransfer.dropEffect = event.dataTransfer.types.includes(WORKSPACE_ENTRIES_DRAG_TYPE) ? 'move' : 'copy'; setDropTarget(id) } }, onDragLeave: (event: DragEvent) => { if (!event.currentTarget.contains(event.relatedTarget as Node)) setDropTarget(undefined) }, onDrop: (event: DragEvent) => { void drop(event, id) } })
-  const action = (type: Dialog) => { if (createMenu.current) createMenu.current.open = false; void begin(type).catch(reason => setError(message(reason))) }
+  const closeCreateMenu = () => { if (createMenu.current) createMenu.current.open = false; setCreateAt(undefined) }
+  useEffect(() => {
+    if (!createAt) return
+    const outside = (event: PointerEvent) => { if (!(event.target instanceof Node && createMenu.current?.contains(event.target))) closeCreateMenu() }
+    document.addEventListener('pointerdown', outside, true)
+    return () => document.removeEventListener('pointerdown', outside, true)
+  }, [createAt])
+  const action = (type: Dialog) => { closeCreateMenu(); void begin(type).catch(reason => setError(message(reason))) }
   const actions = (context = false) => <>
     <button type="button" disabled={busy || !root} onClick={() => action('create-markdown')}>新建 Markdown 文档</button><button type="button" disabled={busy || !root} onClick={() => action('create-course')}>新建 H5 演示</button><button type="button" disabled={busy || !root} onClick={() => action('create-text')}>新建文本文档</button><button type="button" disabled={busy || !root} onClick={() => action('mkdir')}>新建文件夹</button>
     <button type="button" disabled={busy || !single} onClick={() => action('rename')}>重命名</button><button type="button" disabled={busy || !selected.length} onClick={() => copy('copy')}>复制</button><button type="button" disabled={busy || !selected.length} onClick={() => copy('move')}>剪切</button><button type="button" disabled={busy || !clipboard?.ids.length} onClick={paste}>粘贴</button>
@@ -320,15 +335,19 @@ export function WorkspaceFilesTree({ directory, files, refreshVersion = 0, onFil
     <div className="workspace-tree-row" data-drop={dropTarget === entry.entryId} {...(entry.kind === 'directory' ? droppable(entry.entryId) : {})}>
       {entry.kind === 'directory' && <button type="button" className="workspace-tree-toggle" aria-label={`${expanded.has(entry.entryId) ? '折叠' : '展开'} ${entry.name}`} onClick={() => { setExpanded(value => { const next = new Set(value); if (next.has(entry.entryId)) next.delete(entry.entryId); else next.add(entry.entryId); return next }) }}><ChevronRight size={14} /></button>}
       <button type="button" className="lesson-tree-row" data-entry-id={entry.entryId} aria-pressed={selection.has(entry.entryId)} ref={element => { if (element) buttons.current.set(entry.entryId, element); else buttons.current.delete(entry.entryId) }} draggable={!busy} onDragStart={event => { writeWorkspaceEntryDrag(event.dataTransfer, root!.workspaceId, selection.has(entry.entryId) ? selected.map(row => row.entry) : [entry]) }} onClick={event => choose({ entry, parentId: id }, event)} onDoubleClick={() => { void open(entry).catch(reason => setError(message(reason))) }} onContextMenu={event => { event.preventDefault(); if (!selection.has(entry.entryId)) choose({ entry, parentId: id }); setMenu({ x: Math.min(event.clientX, window.innerWidth - 220), y: Math.min(event.clientY, window.innerHeight - 350) }) }}>
-        {entry.kind === 'directory' ? expanded.has(entry.entryId) ? <FolderOpen size={15} /> : <Folder size={15} /> : icon(entry.name)}<span>{entry.name}</span>
+        {entry.kind === 'directory' ? expanded.has(entry.entryId) ? <FolderOpen size={15} /> : <Folder size={15} /> : icon(entry.name)}<span title={entry.name}>{entry.name}</span>
       </button>
     </div>{entry.kind === 'directory' && expanded.has(entry.entryId) && renderEntries(entry.entryId)}
   </li>)}</ul>
   return <div className="workspace-files-tree" aria-busy={busy}>
     <div role="toolbar" aria-label="文件管理" className="workspace-files-primary-actions">
       <details ref={createMenu} className="workspace-files-create-menu">
-        <summary aria-label="新建文件或文件夹">新建</summary>
-        <div className="workspace-files-create-options">
+        <summary aria-label="新建文件或文件夹" onClick={event => {
+          if (createMenu.current?.open) { setCreateAt(undefined); return }
+          const rect = event.currentTarget.getBoundingClientRect()
+          setCreateAt({ left: Math.max(0, Math.min(rect.left, window.innerWidth - 200)), top: rect.bottom + 4 })
+        }}>新建</summary>
+        <div className="workspace-files-create-options" style={createAt}>
           <button type="button" disabled={busy || !root} onClick={() => action('create-markdown')}>新建 Markdown 文档</button>
           <button type="button" disabled={busy || !root} onClick={() => action('create-course')}>新建 H5 演示</button>
           <button type="button" disabled={busy || !root} onClick={() => action('create-text')}>新建文本文档</button>

@@ -1,4 +1,4 @@
-import { AArrowDown, AArrowUp, AlignCenter, AlignLeft, AlignRight, AlignHorizontalJustifyStart, Baseline, Bold, Highlighter, ImageIcon, Italic, PaintBucket, Pencil, Play, Repeat, Square, Type, Underline, Unlock, VolumeX } from 'lucide-react'
+import { AArrowDown, AArrowUp, AlignCenter, AlignLeft, AlignRight, AlignHorizontalJustifyStart, Baseline, Bold, Eye, Highlighter, ImageIcon, Italic, PaintBucket, Pencil, Play, Repeat, Square, Type, Underline, Unlock, VolumeX } from 'lucide-react'
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { isStrokeOnlyShapeType } from '../../shared/contracts/native-v1'
 import { useCourseEditorActions } from '../documents/CourseEditorActionsContext'
@@ -164,6 +164,8 @@ export function NativeSelectionContext({ documentId, revision, locationId, itemI
   if (single) {
     const node = single.view, patch = single.patch
     if (single.disabledReason) content = <><span title={single.disabledReason}><QuickBarLabel>此处不可编辑</QuickBarLabel></span><QuickBarSeparator />{ai}</>
+    // A hidden object stays selected until the selection moves on, so it can be shown again in place.
+    else if (!node.visible) content = <><QuickBarLabel>已隐藏</QuickBarLabel><QuickBarButton label="显示" text="显示" icon={<Eye size={14} />} onClick={() => patch({ visible: true })} /><QuickBarSeparator />{ai}</>
     else if (node.locked) content = <><QuickBarLabel>已锁定</QuickBarLabel><QuickBarButton label="解锁" text="解锁" icon={<Unlock size={14} />} onClick={() => patch({ locked: false })} /><QuickBarSeparator />{ai}</>
     else {
       const items: QuickBarMenuItem[] = [
@@ -188,6 +190,8 @@ export function NativeSelectionContext({ documentId, revision, locationId, itemI
   } else if (selection?.kind === 'multi-selection') {
     const commands = selection.commands
     const unlocked = selection.items.filter(item => !item.locked).length
+    const allHidden = selection.items.every(item => !item.visible)
+    const show = () => run(() => commands.setVisible(true), report)
     const items: QuickBarMenuItem[] = [
       ...(commands.duplicate ? [{ label: '复制所选', group: 'edit', onSelect: () => run(commands.duplicate!, report) }] : []),
       ...(commands.remove ? [{ label: '删除所选', group: 'edit', danger: true, onSelect: () => run(commands.remove!, report) }] : []),
@@ -195,11 +199,13 @@ export function NativeSelectionContext({ documentId, revision, locationId, itemI
       { label: '纵向等距分布', group: 'layout', disabled: unlocked < 3, onSelect: () => run(() => commands.distribute('vertical'), report) },
       { label: '全部锁定', group: 'state', onSelect: () => run(() => commands.setLocked(true), report) },
       { label: '全部解锁', group: 'state', onSelect: () => run(() => commands.setLocked(false), report) },
+      { label: '全部显示', group: 'state', onSelect: show },
       { label: '全部隐藏', group: 'state', onSelect: () => run(() => commands.setVisible(false), report) },
     ]
     content = <>
-      <QuickBarLabel>已选 {selection.items.length} 项</QuickBarLabel>
-      {selection.unavailableReason ? <span title={selection.unavailableReason}><QuickBarLabel>部分操作不可用</QuickBarLabel></span>
+      <QuickBarLabel>已选 {selection.items.length} 项{allHidden ? '（已隐藏）' : ''}</QuickBarLabel>
+      {allHidden ? <QuickBarButton label="全部显示" text="显示" icon={<Eye size={14} />} onClick={show} />
+        : selection.unavailableReason ? <span title={selection.unavailableReason}><QuickBarLabel>部分操作不可用</QuickBarLabel></span>
         : <QuickBarPopoverButton label="对齐" icon={<AlignHorizontalJustifyStart size={14} />} disabled={unlocked < 2} popupRole="menu">
           {close => <div className="selection-quick-bar__menu" role="menu" aria-label="对齐">
             {MULTI_ALIGN.map(([mode, label]) => <button key={mode} type="button" role="menuitem" onMouseDown={event => event.preventDefault()}

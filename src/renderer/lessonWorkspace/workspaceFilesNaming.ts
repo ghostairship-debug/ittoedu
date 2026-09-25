@@ -38,8 +38,13 @@ export function computeDefaultName(type: CreateFileType, existingItems: Workspac
   }
 }
 
+const TYPED_EXTENSION: Partial<Record<CreateFileType, string>> = { 'create-markdown': '.md', 'create-course': '.h5lesson', 'create-text': '.txt' }
+
 export function normalizeNewFilename(type: CreateFileType, raw: string): string {
   let filename = raw.trim()
+  // Only the stem is selected in the name box, so typing a whole name repeats the kept extension ("a.md.md").
+  const typed = TYPED_EXTENSION[type]
+  if (typed) while (filename.toLowerCase().endsWith(typed + typed)) filename = filename.slice(0, -typed.length)
   if (type === 'create-markdown' && !/\.md$/i.test(filename)) {
     filename += '.md'
   }

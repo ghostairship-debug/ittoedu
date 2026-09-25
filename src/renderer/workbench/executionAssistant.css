@@ -21,6 +21,7 @@
   padding: 8px 10px;
   display: grid;
   grid-template-rows: auto auto minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr);
   gap: 6px;
 }
 
@@ -37,6 +38,8 @@
 
 .execution-assistant__sessions header,
 .execution-assistant__heading { justify-content: space-between; }
+.execution-assistant__sessions header strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.execution-assistant__sessions header button { flex: none; white-space: nowrap; }
 .execution-assistant__sessions>input { min-width: 0; width: 100%; box-sizing: border-box; padding: 6px 8px; border: 1px solid var(--border-color, #d9dfdb); border-radius: 7px; }
 .execution-assistant__sessions nav { display: flex; flex-direction: column; gap: 2px; overflow-y: auto; overflow-x: hidden; min-width: 0; min-height: 0; }
 .execution-assistant__session-row { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; min-width: 0; position: relative; }

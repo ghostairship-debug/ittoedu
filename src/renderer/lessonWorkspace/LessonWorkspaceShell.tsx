@@ -5,7 +5,7 @@ import type { LessonDesktopRequest, LessonDesktopResult } from '../../shared/les
 import type { LessonWorkspace } from '../../shared/lessonWorkspace'
 import type { RecoverableDocumentFilePort } from '../documentFiles/documentFileSession'
 import type { SaveDirectoryContext } from '../../shared/workbench/desktop'
-import { useDocumentTabsController, type CourseDocumentsPort, type ActiveDocumentTarget } from './controller/useDocumentTabsController'
+import { useDocumentTabsController, type CourseDocumentsPort, type ActiveDocumentTarget, type LessonFileTab } from './controller/useDocumentTabsController'
 import { useLessonWorkspaceController } from './controller/useLessonWorkspaceController'
 import { LessonWorkspaceView } from './view/LessonWorkspaceView'
 import './lessonWorkspaceShell.css'
@@ -22,6 +22,8 @@ export interface LessonWorkspaceShellProps {
   renderMaterial?(path: string, lesson: LessonWorkspace | null): ReactNode
   renderMaterials?(lesson: LessonWorkspace): ReactNode
   onDirtyChange?(dirty: boolean): void
+  /** The file shown in the content area, which names the window. */
+  onActiveDocumentChange?(active: { kind: LessonFileTab['kind']; name: string } | null): void
   onSaveDirectoryChange?(directory: SaveDirectoryContext | null): void
   children: ReactNode
 }
@@ -49,6 +51,9 @@ export const LessonWorkspaceShell = forwardRef<LessonWorkspaceShellHandle, Lesso
   }, [workspace.state.workspace, props.onSaveDirectoryChange])
   const dirty = tabs.tabs.some(tab => tab.dirty)
   useEffect(() => { props.onDirtyChange?.(dirty) }, [dirty, props.onDirtyChange])
+  const activeTab = tabs.tabs.find(tab => tab.id === tabs.activeTab)
+  const activeKind = activeTab?.kind, activeName = activeTab?.name
+  useEffect(() => { props.onActiveDocumentChange?.(activeKind && activeName ? { kind: activeKind, name: activeName } : null) }, [activeKind, activeName, props.onActiveDocumentChange])
   useImperativeHandle(ref, () => ({
     flushAll: tabs.flushAll,
     saveActiveDocument: tabs.saveActiveDocument,

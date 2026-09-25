@@ -209,7 +209,7 @@ export function useCourseProjectLifecycle<TDraftToken>(ports: CourseProjectLifec
     }).catch(error => ref.current.reportError(error instanceof Error ? error.message : '文档服务无法连接'))
   }, [refresh])
   useEffect(() => {
-    document.title = `${watch.projectTitle}${watch.dirty ? ' *' : ''} - ${APP_NAME}`
+    document.title = watch.projectTitle ? `${watch.projectTitle}${watch.dirty ? ' *' : ''} - ${APP_NAME}` : APP_NAME
     if (ref.current.desktopAvailable()) void ref.current.setWindowDirtyState(watch.dirty).catch(() => undefined)
   }, [watch.dirty, watch.projectTitle])
   const prepareBeforeClose = useCallback(async (mode: 'save' | 'preserve'): Promise<boolean> => {

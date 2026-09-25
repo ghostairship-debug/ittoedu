@@ -4,6 +4,7 @@ import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncEx
 import { createPortal } from 'react-dom'
 import { File, Folder } from 'lucide-react'
 import { dispatchRevealInExplorer } from './revealInExplorer'
+import { useDismissableDetails } from '../ui/useDismissableDetails'
 import { homeInScope, type ConversationRecord } from '../../shared/workbench/conversations'
 import { EXECUTION_NO_PROGRESS, MODEL_REQUEST_BUDGET_EXHAUSTED, TOOL_CALL_BUDGET_EXHAUSTED, type ExecutionRunRecord } from '../../shared/workbench/execution'
 import { captureRendererTiming, disclosedExecutionSettings, type ExecutionDesktopAPI, type ExecutionDocumentReference, type ExecutionSendInput, type ExecutionSubmissionMode, type ExecutionSubmissionRecord } from '../../shared/workbench/executionDesktop'
@@ -154,6 +155,7 @@ export function ExecutionAssistant({ root, captureDocuments, prepareSend, api: s
   const catalogRequested = useRef(new Set<string>())
   const [modelMenuPosition, setModelMenuPosition] = useState({ left: 0, bottom: 0, width: 320 })
   const moreRef = useRef<HTMLDetailsElement>(null)
+  useDismissableDetails(moreRef)
   const plusRef = useRef<HTMLDivElement>(null), permissionRef = useRef<HTMLDivElement>(null), popupRef = useRef<HTMLDivElement>(null)
   const [popupPosition, setPopupPosition] = useState({ left: 8, bottom: 8 })
   const modelButtonRef = useRef<HTMLButtonElement>(null), modelSummaryId = useId()
@@ -882,7 +884,7 @@ export function ExecutionAssistant({ root, captureDocuments, prepareSend, api: s
     (!conversationScope || homeInScope(conversationScope, conversation.home))
     && `${conversation.title || '新会话'} ${conversation.home?.path ?? ''}`.toLocaleLowerCase().includes(sessionSearch.trim().toLocaleLowerCase()))
   const sessionList = <aside className="execution-assistant__sessions" aria-label="会话列表">
-    <header><strong>会话列表{sessionScope ? ` · ${sessionScope.path}` : ''}</strong><button type="button" onClick={() => void create()} disabled={busy || !workspaceId}>新建会话</button></header>
+    <header><strong title={sessionScope ? `会话列表 · ${sessionScope.path}` : undefined}>会话列表{sessionScope ? ` · ${sessionScope.path}` : ''}</strong><button type="button" onClick={() => void create()} disabled={busy || !workspaceId}>新建会话</button></header>
     <input aria-label="搜索会话" value={sessionSearch} onChange={event => { setSessionSearch(event.target.value); setSessionMenuId(null) }} placeholder="搜索会话" />
     <nav aria-label="工作空间会话">{filteredConversations.map(conversation => <div className="execution-assistant__session-row" key={conversation.conversationId}>
       {renamingId === conversation.conversationId ? <form onSubmit={event => { event.preventDefault(); void renameConversationItem(conversation, renameDraft) }}
@@ -933,7 +935,8 @@ export function ExecutionAssistant({ root, captureDocuments, prepareSend, api: s
     const path = active.home?.path ?? ''
     const kind = active.home?.kind ?? 'folder'
     const workspaceId = active.home?.workspaceId ?? active.workspaceId
-    dispatchRevealInExplorer({ workspaceId, path, kind })
+    // Explorer roots get new ids on every run; a home in this session's own space is revealed in the current root.
+    dispatchRevealInExplorer(isOtherWorkspace ? { workspaceId, path, kind } : { path, kind })
   }
 
   return <section className={`execution-assistant${sessionDock.inWorkspace ? ' execution-assistant--docked' : ''}`} aria-label="创作助手">

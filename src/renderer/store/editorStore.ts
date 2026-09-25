@@ -1244,7 +1244,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     editingTextNodeId: null,
     slideDrawTool: null,
     previewBackgroundColor: null,
-    statusMessage: '已创建新 H5 演示',
+    statusMessage: null,
     errorMessage: null,
     slideBackend: initialBackend,
     slideCandidateSnapshot: initialSnapshot,

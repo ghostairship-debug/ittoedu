@@ -2513,6 +2513,23 @@ export function SlideLocationWorkspace({
     }
   }
 
+  const wheelZoom = useRef({ canvasMode, zoom: view.zoom })
+  wheelZoom.current = { canvasMode, zoom: view.zoom }
+  const hasStage = Boolean(snapshot.projectId && slideEditorView)
+  useEffect(() => {
+    // React attaches wheel listeners as passive; Ctrl+wheel zoom must keep the window itself from zooming.
+    const element = workspaceRef.current
+    if (!element) return
+    const zoomByWheel = (event: WheelEvent) => {
+      const { canvasMode, zoom } = wheelZoom.current
+      if (canvasMode !== 'edit' || (!event.ctrlKey && !event.metaKey)) return
+      event.preventDefault()
+      setZoom(zoom + (event.deltaY < 0 ? 0.1 : -0.1))
+    }
+    element.addEventListener('wheel', zoomByWheel, { passive: false })
+    return () => element.removeEventListener('wheel', zoomByWheel)
+  }, [hasStage, setZoom])
+
   if (!snapshot.projectId || !slideEditorView) {
     return (
       <main
@@ -2550,11 +2567,6 @@ export function SlideLocationWorkspace({
       }}
       onDragLeave={event => { if (!event.currentTarget.contains(event.relatedTarget as Node)) setMediaDragOver(false) }}
       onDrop={onDrop}
-      onWheel={(event) => {
-        if (canvasMode !== 'edit' || (!event.ctrlKey && !event.metaKey)) return
-        event.preventDefault()
-        setZoom(view.zoom + (event.deltaY < 0 ? 0.1 : -0.1))
-      }}
       onPointerDownCapture={(event) => {
         // The selection quick bar is portaled but still a React child: its presses must not hit-test the stage below.
         if (event.target instanceof Element && event.target.closest(QUICK_BAR_SELECTOR)) return

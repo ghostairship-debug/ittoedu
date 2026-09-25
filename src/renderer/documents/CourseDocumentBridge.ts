@@ -119,10 +119,12 @@ export class CourseDocumentBridge {
     if (this.active) this.views.set(this.active.documentId, this.ports.read())
     this.stop?.(); this.active = projection
     const previous = this.views.get(documentId)
-    if (previous) this.ports.patch(courseViewPatch(previous as unknown as Record<string, unknown>))
+    // Status and error lines describe what happened to one document; another document starts clear.
+    if (previous) this.ports.patch({ ...courseViewPatch(previous as unknown as Record<string, unknown>), statusMessage: null, errorMessage: null })
     else this.ports.patch({ slideBackend: null, slideCandidateSnapshot: null, flowSession: null, spatialSession: null,
       courseAuthoringSession: null, v9ContentEdit: null, flowTextEdit: null, flowDocumentDraft: null, spatialContentEdit: null,
-      editingTextNodeId: null, spatialClipboard: null, flowClipboard: null, slideCandidateClipboard: null, canvasMode: 'edit' })
+      editingTextNodeId: null, spatialClipboard: null, flowClipboard: null, slideCandidateClipboard: null, canvasMode: 'edit',
+      statusMessage: null, errorMessage: null })
     this.stop = projection.subscribe(this.render)
     this.render()
   }

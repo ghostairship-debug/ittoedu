@@ -76,6 +76,14 @@ it('M21 quick bar edits a selected object and a legal multi-selection through ex
   await act(async () => { fireEvent.click(unlock); await store().drainCourseDocument() })
   expect(item()(first)?.locked).toBe(false)
 
+  // A hidden object keeps its selection, and the bar says so and shows it again in place.
+  fireEvent.click(within(screen.getByRole('toolbar', { name: '选中对象快捷工具' })).getByRole('button', { name: '更多操作' }))
+  await act(async () => { fireEvent.click(screen.getByRole('menuitem', { name: '隐藏' })); await store().drainCourseDocument() })
+  expect(item()(first)?.visible).toBe(false)
+  expect(screen.getByRole('toolbar', { name: '选中对象快捷工具' })).toHaveTextContent('已隐藏')
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: '显示' })); await store().drainCourseDocument() })
+  expect(item()(first)?.visible).toBe(true)
+
   store().addTextNode(); await store().drainCourseDocument()
   const second = selectSelectedNodeId(store())!
   expect(second).not.toBe(first)
@@ -87,6 +95,10 @@ it('M21 quick bar edits a selected object and a legal multi-selection through ex
   expect(depth()).toBe(beforeMulti + 1)
   expect(item()(first)?.visible).toBe(false)
   expect(item()(second)?.visible).toBe(false)
+  await waitFor(() => expect(screen.getByRole('toolbar', { name: '选中对象快捷工具' })).toHaveTextContent('已选 2 项（已隐藏）'))
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: '全部显示' })); await store().drainCourseDocument() })
+  expect(item()(first)?.visible).toBe(true)
+  expect(item()(second)?.visible).toBe(true)
 
   act(() => store().selectNodes([]))
   await waitFor(() => expect(screen.queryByRole('toolbar', { name: '选中对象快捷工具' })).toBeNull())

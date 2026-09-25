@@ -1,8 +1,10 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { ArrowLeftRight, ChevronDown, PanelsTopLeft } from 'lucide-react'
 import type { LessonWorkspaceViewProps } from './lessonWorkspaceViewTypes'
 import type { WorkbenchLayoutController } from './useWorkbenchLayoutPrefs'
 import { proEditorRailController, type ProEditorPanel } from '../../ui/proEditorRailController'
+import { REVEAL_IN_EXPLORER_EVENT } from '../../workbench/revealInExplorer'
+import { useDismissableDetails } from '../../ui/useDismissableDetails'
 const basename = (path: string) => path.replace(/[\\/]$/, '').split(/[\\/]/).pop() || path;
 const lower = (value: string) => value.replace(/\\/g, '/').toLowerCase();
 const join = (directory: string, name: string) => `${directory.replace(/[\\/]$/, '')}/${name}`;
@@ -12,6 +14,8 @@ export function WorkspaceChrome({ props, layout, editorFocus = false, proPanel =
  const { state, actions } = props;
  const [switcherMenuOpen, setSwitcherMenuOpen] = useState(false);
  const [layoutMenuOpen, setLayoutMenuOpen] = useState(false);
+ const switcherMenu = useRef<HTMLDetailsElement>(null), layoutMenu = useRef<HTMLDetailsElement>(null);
+ useDismissableDetails(switcherMenu); useDismissableDetails(layoutMenu);
  const workspaceName = state.workspace ? basename(state.workspace) : '';
  const contentOpen = editorFocus || !layout.prefs.contentClosed;
  const explorerVisible = editorFocus ? proPanel === 'resources' : !layout.prefs.navCollapsed && layout.prefs.explorerOpen;
@@ -20,9 +24,17 @@ export function WorkspaceChrome({ props, layout, editorFocus = false, proPanel =
  const toggleExplorer = () => editorFocus ? proEditorRailController.toggle('resources') : layout.setExplorerOpen(!explorerVisible);
  const toggleConversations = () => editorFocus ? proEditorRailController.toggle('conversations') : layout.setConversationsOpen(!conversationsVisible);
  const toggleAssistant = () => editorFocus ? proEditorRailController.toggle('ai') : layout.toggleChatClosed();
+ const { setExplorerOpen } = layout;
+ useEffect(() => {
+  // Locating a file shows the explorer first; the explorer reveals the file once it is mounted.
+  const show = () => { if (editorFocus) proEditorRailController.open('resources'); else setExplorerOpen(true) };
+  window.addEventListener(REVEAL_IN_EXPLORER_EVENT, show);
+  return () => window.removeEventListener(REVEAL_IN_EXPLORER_EVENT, show);
+ }, [editorFocus, setExplorerOpen]);
  return <>
       <header className="lesson-workspace-toolbar">
         <details
+          ref={switcherMenu}
           className="lesson-workspace-switcher lesson-workspace-more"
           open={switcherMenuOpen}
           onKeyDown={(event) => {
@@ -119,6 +131,7 @@ export function WorkspaceChrome({ props, layout, editorFocus = false, proPanel =
           {!editorFocus && <button type="button" aria-pressed={contentOpen} onClick={() => { layout.toggleContentClosed(); actions.setMobilePane('workbench'); }}>内容</button>}
           <button type="button" aria-pressed={assistantVisible} onClick={() => { toggleAssistant(); actions.setMobilePane('chat'); }}>AI 助手</button>
           <details
+            ref={layoutMenu}
             className="lesson-workspace-more lesson-layout-menu"
             open={layoutMenuOpen}
             onToggle={(event) =>

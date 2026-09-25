@@ -739,6 +739,22 @@ export function SpatialLocationWorkspace({
       .then(result => setMediaDropError(result.ok ? null : result.reason ?? '媒体未插入'))
   }
 
+  const wheelZoom = useRef({ canvasMode, cameraZoom })
+  wheelZoom.current = { canvasMode, cameraZoom }
+  useEffect(() => {
+    // React attaches wheel listeners as passive; Ctrl+wheel zoom must keep the window itself from zooming.
+    const element = viewportRef.current
+    if (!element) return
+    const zoomByWheel = (event: WheelEvent) => {
+      const { canvasMode, cameraZoom } = wheelZoom.current
+      if (canvasMode !== 'edit' || (!event.ctrlKey && !event.metaKey)) return
+      event.preventDefault()
+      authoringRef.current.zoomSession(cameraZoom + (event.deltaY > 0 ? -0.1 : 0.1), LOGICAL_STAGE_VIEWPORT)
+    }
+    element.addEventListener('wheel', zoomByWheel, { passive: false })
+    return () => element.removeEventListener('wheel', zoomByWheel)
+  }, [])
+
   return (
     <main
       ref={workspaceRef}
@@ -840,14 +856,6 @@ export function SpatialLocationWorkspace({
         style={{
           backgroundColor: 'transparent',
           boxShadow: mediaDragOver ? 'inset 0 0 0 3px #245b46' : undefined,
-        }}
-        onWheel={(event) => {
-          if (canvasMode !== 'edit' || (!event.ctrlKey && !event.metaKey)) return
-          event.preventDefault()
-          authoringRef.current.zoomSession(
-            cameraZoom + (event.deltaY > 0 ? -0.1 : 0.1),
-            LOGICAL_STAGE_VIEWPORT,
-          )
         }}
         onPointerDown={(event) => {
           if (canvasMode !== 'edit' || event.button === 2) return

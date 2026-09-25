@@ -120,6 +120,7 @@ export default function App() {
   } : null, [rawDocuments])
   const setSaveDirectory = useCallback((directory: SaveDirectoryContext | null) => { saveDirectory.current = directory }, [])
   const [lessonDirty, setLessonDirty] = useState(false)
+  const [activeWorkspaceDocument, setActiveWorkspaceDocument] = useState<{ kind: string; name: string } | null>(null)
   const [busy, setBusy] = useState(false)
   const [projectHealthOpen, setProjectHealthOpen] = useState(false)
   const [materialsOpen, setMaterialsOpen] = useState(false)
@@ -303,7 +304,7 @@ export default function App() {
     },
   }, {
     dirty: dirty || lessonDirty,
-    projectTitle: activeCourseDocument?.title ?? '',
+    projectTitle: activeWorkspaceDocument?.kind === 'course' ? activeCourseDocument?.title ?? activeWorkspaceDocument.name : activeWorkspaceDocument?.name ?? '',
     projectPath,
     documentTrigger: activeCourseDocument,
     sidecarTrigger: sidecarFiles,
@@ -566,7 +567,7 @@ export default function App() {
         const snapshot = await useEditorStore.getState().drainCourseDocument()
         return [captureDocumentReference(snapshot, writable)]
       }}
-      onOpenProject={path => courseProjectLifecycle.openRecentProject(path, { origin: 'lesson' })} onNewProject={() => courseProjectLifecycle.newProject({ origin: 'lesson' })} onDirtyChange={setLessonDirty}
+      onOpenProject={path => courseProjectLifecycle.openRecentProject(path, { origin: 'lesson' })} onNewProject={() => courseProjectLifecycle.newProject({ origin: 'lesson' })} onDirtyChange={setLessonDirty} onActiveDocumentChange={setActiveWorkspaceDocument}
 >
     <CourseEditorFrame lightTools={<CourseLightToolbar
       documentId={courseConnection.documentId}

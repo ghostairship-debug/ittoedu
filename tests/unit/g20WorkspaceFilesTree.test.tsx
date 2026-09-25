@@ -8,6 +8,7 @@ import { WorkspaceFilesDesktopService } from '../../src/main/workbench/workspace
 import { LessonDirectoryTree } from '../../src/renderer/lessonWorkspace/view/LessonDirectoryTree'
 import { LessonWorkspaceShell, type LessonWorkspaceShellHandle } from '../../src/renderer/lessonWorkspace/LessonWorkspaceShell'
 import { createMarkdownTestHost } from '../helpers/markdownDocumentHost'
+import { dispatchRevealInExplorer } from '../../src/renderer/workbench/revealInExplorer'
 import { createCourseV9Driver } from '../../src/core/drivers/CourseV9Driver'
 import { createLessonDocumentFiles } from '../../src/main/lessonDocumentFiles'
 import type { WorkspaceFilesAPI, WorkspaceFilesRequest, WorkspaceListItem } from '../../src/shared/workbench/workspaceFiles'
@@ -353,6 +354,20 @@ it('handles guoling:reveal-in-explorer event: expands ancestors, selects item, s
     }))
   })
   await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('未在资源管理器中找到：lvl1/lvl2/missing.md'))
+})
+
+it('reveals a location requested while the explorer was closed once it opens', async () => {
+  const directory = await fixture()
+  await fs.mkdir(path.join(directory, 'lvl1'), { recursive: true })
+  await fs.writeFile(path.join(directory, 'lvl1', 'target.md'), '# Target')
+  const { host } = createMarkdownTestHost(path.join(directory, 'journal'))
+  const service = new WorkspaceFilesDesktopService(host.files); services.push(service); await service.authorizeRoot(directory)
+  window.HTMLElement.prototype.scrollIntoView = vi.fn()
+  dispatchRevealInExplorer({ path: 'lvl1/target.md', kind: 'file' })
+  render(<LessonDirectoryTree directory={directory} files={service.operate} operation={async () => ({})} onFile={vi.fn()} onDirectory={vi.fn()} />)
+  const target = await screen.findByRole('button', { name: 'target.md' })
+  await waitFor(() => expect(target).toHaveAttribute('aria-pressed', 'true'))
+  expect(screen.getByRole('button', { name: 'lvl1' }).closest('li')).toHaveAttribute('data-open', 'true')
 })
 
 it('M19 creates a course with the Slide canvas size chosen in the creation dialog', async () => {

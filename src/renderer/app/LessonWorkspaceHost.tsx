@@ -19,6 +19,7 @@ export interface LessonWorkspaceHostProps {
   onOpenProject(path: string): Promise<boolean>
   onNewProject(): Promise<boolean>
   onDirtyChange?(dirty: boolean): void
+  onActiveDocumentChange?(active: { kind: 'document' | 'material' | 'course'; name: string } | null): void
   documents?: DocumentHostAPI
   onSaveDirectoryChange?(directory: SaveDirectoryContext | null): void
   children: ReactNode

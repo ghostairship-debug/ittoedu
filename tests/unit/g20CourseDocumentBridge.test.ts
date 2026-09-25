@@ -153,6 +153,21 @@ describe('G20 default course writer projection', () => {
     expect(state().courseDocument.documents).toHaveLength(1)
   })
 
+  it('does not carry one document\'s status or error line into another', async () => {
+    const h = await host()
+    const one = await h.api.create(fixture(), 'one.h5lesson')
+    const two = await h.api.create(fixture(), 'two.h5lesson')
+    await state().activateCourseDocument(one.documentId)
+    useEditorStore.setState({ statusMessage: '已保存 one', errorMessage: 'one 的错误' })
+    await state().activateCourseDocument(two.documentId)
+    expect(state().statusMessage).toBeNull()
+    expect(state().errorMessage).toBeNull()
+    useEditorStore.setState({ statusMessage: '已保存 two' })
+    await state().activateCourseDocument(one.documentId)
+    expect(state().statusMessage).toBeNull()
+    expect(state().errorMessage).toBeNull()
+  })
+
   it('prepares background course drafts for close, waits for their ACK and restores the foreground', async () => {
     const h = await host()
     state().addTextNode(); await state().drainCourseDocument()

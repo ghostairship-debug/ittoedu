@@ -709,7 +709,7 @@ it('displays conversation home location for folder, file, unhomed, missing, othe
   // Click reveals folder
   fireEvent.click(locationBtn)
   expect(listener).toHaveBeenCalledWith(expect.objectContaining({
-    detail: { workspaceId: 'workspace', path: 'Unit/Sub', kind: 'folder' }
+    detail: { path: 'Unit/Sub', kind: 'folder' }
   }))
 
   // 2. File session
@@ -722,7 +722,7 @@ it('displays conversation home location for folder, file, unhomed, missing, othe
   expect(locationBtn.getAttribute('title')).toContain('C:/workspace/Unit/a.md')
   fireEvent.click(locationBtn)
   expect(listener).toHaveBeenCalledWith(expect.objectContaining({
-    detail: { workspaceId: 'workspace', path: 'Unit/a.md', kind: 'file' }
+    detail: { path: 'Unit/a.md', kind: 'file' }
   }))
 
   // 3. Unhomed session
@@ -735,7 +735,7 @@ it('displays conversation home location for folder, file, unhomed, missing, othe
   expect(locationBtn.getAttribute('title')).toContain('C:/workspace')
   fireEvent.click(locationBtn)
   expect(listener).toHaveBeenCalledWith(expect.objectContaining({
-    detail: { workspaceId: 'workspace', path: '', kind: 'folder' }
+    detail: { path: '', kind: 'folder' }
   }))
 
   // 4. Missing session
