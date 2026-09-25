@@ -35,8 +35,38 @@ import { ScenePanel } from '@/renderer/ui/ScenePanel'
 import { TopToolbar } from '@/renderer/ui/TopToolbar'
 import { FlowWorkspace } from '@/renderer/ui/FlowWorkspace'
 import type { AssetMeta } from '@/shared/contracts/media-v1'
+import { createBlankCourseProject } from '@/core/course/createCourseProject'
+import { createBlankFlowCourseProject } from '@/renderer/project/createFlowCourseProject'
+import { createCourseStoreHost } from '../helpers/courseStoreHost'
 
 const PNG = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10])
+
+let host: Awaited<ReturnType<typeof createCourseStoreHost>>
+
+/** 2.0 keeps content and History in main; the renderer session is a projection. */
+const drain = () => useEditorStore.getState().drainCourseDocument()
+
+function undoDepth() {
+  const documentId = useEditorStore.getState().courseDocument.documentId
+  if (!documentId) throw new Error('expected an active course document')
+  return host.registry.get(documentId).read().undoDepth
+}
+
+async function openFlowProject() {
+  await host.open(createBlankFlowCourseProject())
+}
+
+async function undoAndDrain() {
+  useEditorStore.getState().undo()
+  await drain()
+  await waitFor(() => { expect(useEditorStore.getState().courseDocument.pending).toBe(0) })
+}
+
+async function redoAndDrain() {
+  useEditorStore.getState().redo()
+  await drain()
+  await waitFor(() => { expect(useEditorStore.getState().courseDocument.pending).toBe(0) })
+}
 
 function flowDocument() {
   const document = selectActiveCourseProjectDocument(useEditorStore.getState())
@@ -104,44 +134,45 @@ function FlowMultiPropertiesCapture({
   return null
 }
 
-beforeEach(() => {
-  useEditorStore.getState().createNewProject()
+beforeEach(async () => {
+  host = await createCourseStoreHost()
+  await host.open(createBlankCourseProject())
 })
 
 afterEach(() => {
   cleanup()
   vi.restoreAllMocks()
   vi.unstubAllGlobals()
-  useEditorStore.getState().createNewProject()
 })
 
 describe('Flow product shell wiring', () => {
   it('commits pasted body and asset bytes through one resource history transaction', async () => {
-    useEditorStore.getState().createNewFlowProject()
+    await openFlowProject()
     const initial = flowDocument()
     const port = createFlowDocumentResourcePort({ target: initial, resolveAsset: async () => ({ meta: imageAsset(), bytes: PNG }), prepareComponent: async () => { throw new Error('unexpected component') }, createId: () => 'pasted-body-image' })
     const prepared = await port.prepareResources({ resources: { assets: [{ assetId: imageAsset().id, source: { kind: 'project' } }], components: [] }, targetResources: { assets: [], components: [] } })
     const blocks = [...flowSurface().blocks, { id: 'pasted-media-block', type: 'media' as const, mediaKind: 'image' as const, assetId: 'pasted-body-image', layout: 'content-width' as const }]
     const state = useEditorStore.getState(); const session = state.flowSession!
     const target = captureFlowEditorAuthoringTarget({ view: buildFlowEditorView({ project: initial, locationId: session.selection.locationId }), sessionToken: state.courseAuthoringSession!.token, target: { kind: 'surface' } })
-    const before = session.history.past.length
+    const before = undoDepth()
     const receipt = state.runFlowAuthoringIntent(target, { kind: 'replace-document-content', blocks, historyGroup: 'paste', preparedResources: prepared.prepared })
     expect(receipt.ok, receipt.reason).toBe(true)
+    await drain()
     expect(flowDocument().assets['pasted-body-image']).toBeDefined()
-    expect(useEditorStore.getState().courseAssetSidecar!.files['pasted-body-image']).toEqual(PNG)
-    expect(useEditorStore.getState().flowSession!.history.past.length).toBe(before + 1)
-    useEditorStore.getState().undo()
+    expect(Array.from(useEditorStore.getState().courseAssetSidecar!.files['pasted-body-image']!)).toEqual(Array.from(PNG))
+    expect(undoDepth()).toBe(before + 1)
+    await undoAndDrain()
     expect(flowDocument().assets['pasted-body-image']).toBeUndefined()
     expect(useEditorStore.getState().courseAssetSidecar!.files['pasted-body-image']).toBeUndefined()
     expect(flowSurface().blocks.some(block => block.id === 'pasted-media-block')).toBe(false)
-    useEditorStore.getState().redo()
+    await redoAndDrain()
     expect(flowDocument().assets['pasted-body-image']).toBeDefined()
     expect(flowSurface().blocks.some(block => block.id === 'pasted-media-block')).toBe(true)
   })
-  it('commits continuous body edits to one owner history group and rejects a stale document target', () => {
-    useEditorStore.getState().createNewFlowProject()
+  it('commits continuous body edits to one owner history group and rejects a stale document target', async () => {
+    await openFlowProject()
     const initial = flowDocument()
-    const past = useEditorStore.getState().flowSession!.history.past.length
+    const past = undoDepth()
     const capture = () => {
       const state = useEditorStore.getState(); const session = state.flowSession!
       return captureFlowEditorAuthoringTarget({ view: buildFlowEditorView({ project: session.history.present, locationId: session.selection.locationId }), sessionToken: state.courseAuthoringSession!.token, target: { kind: 'surface' } })
@@ -154,16 +185,18 @@ describe('Flow product shell wiring', () => {
       paragraph.content = { inlines: [{ type: 'text', text }] }
       expect(useEditorStore.getState().runFlowAuthoringIntent(capture(), { kind: 'replace-document-content', blocks, historyGroup: 'body-input' }).ok).toBe(true)
     }
-    expect(useEditorStore.getState().flowSession!.history.past.length).toBe(past + 1)
+    await drain()
+    expect(undoDepth()).toBe(past + 1)
     const present = flowDocument()
     expect(useEditorStore.getState().runFlowAuthoringIntent(stale, { kind: 'replace-document-content', blocks: flowSurface().blocks, historyGroup: 'late' }).ok).toBe(false)
     expect(flowDocument()).toBe(present)
     useEditorStore.getState().runFlowAuthoringIntent(capture(), { kind: 'document-history', direction: 'undo' })
+    await drain()
     const initialFlow = initial.surfaces.find(surface => surface.type === 'flow')
     expect(flowSurface().blocks).toEqual(initialFlow?.type === 'flow' ? initialFlow.blocks : [])
   })
-  it('wires Flow block copy/paste/duplicate and overlay duplication to real history', () => {
-    useEditorStore.getState().createNewFlowProject()
+  it('wires Flow block copy/paste/duplicate and overlay duplication to real history', async () => {
+    await openFlowProject()
     const initial = useEditorStore.getState().flowSession!
     const surface = flowSurfaceIn(initial.history.present, initial.selection.surfaceId)
     const blockId = surface.blocks[0]?.id
@@ -175,23 +208,25 @@ describe('Flow product shell wiring', () => {
     ))
 
     const beforeCopy = useEditorStore.getState().flowSession!
+    const depthBeforeCopy = undoDepth()
     useEditorStore.getState().copySelectedNodes()
     expect(useEditorStore.getState().flowClipboard?.blocks).toHaveLength(1)
     expect(useEditorStore.getState().flowSession?.history.present).toBe(beforeCopy.history.present)
-    expect(useEditorStore.getState().flowSession?.history.past)
-      .toHaveLength(beforeCopy.history.past.length)
+    expect(undoDepth()).toBe(depthBeforeCopy)
 
     useEditorStore.getState().pasteNodes()
+    await drain()
     const afterPaste = useEditorStore.getState().flowSession!
     expect(flowSurfaceIn(afterPaste.history.present, afterPaste.selection.surfaceId).blocks)
       .toHaveLength(surface.blocks.length + 1)
-    expect(afterPaste.history.past).toHaveLength(beforeCopy.history.past.length + 1)
+    expect(undoDepth()).toBe(depthBeforeCopy + 1)
 
-    useEditorStore.getState().undo()
+    await undoAndDrain()
     const afterUndo = useEditorStore.getState().flowSession!
     expect(flowSurfaceIn(afterUndo.history.present, afterUndo.selection.surfaceId).blocks)
       .toHaveLength(surface.blocks.length)
     expect(afterUndo.selection.focus).toBe('idle')
+    const depthAfterUndo = undoDepth()
     useEditorStore.getState().applyFlowSelection(selectFlowEditorBlocks(
       afterUndo.history.present,
       afterUndo.selection.locationId,
@@ -199,31 +234,35 @@ describe('Flow product shell wiring', () => {
     ))
 
     useEditorStore.getState().duplicateSelectedNodes()
+    await drain()
     const afterDuplicate = useEditorStore.getState().flowSession!
     expect(flowSurfaceIn(afterDuplicate.history.present, afterDuplicate.selection.surfaceId).blocks)
       .toHaveLength(surface.blocks.length + 1)
-    expect(afterDuplicate.history.past).toHaveLength(afterUndo.history.past.length + 1)
+    expect(undoDepth()).toBe(depthAfterUndo + 1)
 
     useEditorStore.getState().addRectangleNode()
+    await drain()
     const beforeOverlayDuplicate = useEditorStore.getState().flowSession!
     const overlayCount = flowSurfaceIn(
       beforeOverlayDuplicate.history.present,
       beforeOverlayDuplicate.selection.surfaceId,
     ).surfaceLayerItems.length
+    const depthBeforeOverlayDuplicate = undoDepth()
     useEditorStore.getState().duplicateSelectedNodes()
+    await drain()
     const afterOverlayDuplicate = useEditorStore.getState().flowSession!
     expect(flowSurfaceIn(
       afterOverlayDuplicate.history.present,
       afterOverlayDuplicate.selection.surfaceId,
     ).surfaceLayerItems).toHaveLength(overlayCount + 1)
-    expect(afterOverlayDuplicate.history.past)
-      .toHaveLength(beforeOverlayDuplicate.history.past.length + 1)
+    expect(undoDepth()).toBe(depthBeforeOverlayDuplicate + 1)
   })
 
-  it('routes Flow overlay multi-selection through one exact canonical transaction', () => {
-    useEditorStore.getState().createNewFlowProject()
+  it('routes Flow overlay multi-selection through one exact canonical transaction', async () => {
+    await openFlowProject()
     useEditorStore.getState().addRectangleNode(80, 70)
     useEditorStore.getState().addRectangleNode(360, 210)
+    await drain()
     const inserted = useEditorStore.getState().flowSession
     if (!inserted) throw new Error('expected Flow session')
     const overlayIds = flowSurfaceIn(
@@ -250,6 +289,7 @@ describe('Flow product shell wiring', () => {
       { expectedRevision: inserted.history.present.revision },
     )
     useEditorStore.getState().applyFlowCommand(positionedResult)
+    await drain()
     const positioned = useEditorStore.getState().flowSession!
     expect(overlayIds.map((id) => locateCourseLayer(
       positioned.history.present,
@@ -274,10 +314,12 @@ describe('Flow product shell wiring', () => {
     expect(screen.getByRole('button', { name: '删除所选' })).toBeEnabled()
 
     const beforeAlign = useEditorStore.getState().flowSession!
+    const depthBeforeAlign = undoDepth()
     fireEvent.click(screen.getByRole('button', { name: '左对齐' }))
+    await drain()
     const aligned = useEditorStore.getState().flowSession!
     expect(aligned.history.present.revision).toBe(beforeAlign.history.present.revision + 1)
-    expect(aligned.history.past).toHaveLength(beforeAlign.history.past.length + 1)
+    expect(undoDepth()).toBe(depthBeforeAlign + 1)
     expect(aligned.selection.selectedOverlayIds).toEqual(overlayIds)
     const alignedFrames = overlayIds.map((id) => locateCourseLayer(
       aligned.history.present,
@@ -308,29 +350,33 @@ describe('Flow product shell wiring', () => {
       'page',
     )))
     const beforeHide = useEditorStore.getState().flowSession!
+    const depthBeforeHide = undoDepth()
     fireEvent.click(screen.getByRole('button', { name: '全部隐藏' }))
+    await drain()
     const hidden = useEditorStore.getState().flowSession!
     expect(hidden.history.present.revision).toBe(beforeHide.history.present.revision + 1)
-    expect(hidden.history.past).toHaveLength(beforeHide.history.past.length + 1)
+    expect(undoDepth()).toBe(depthBeforeHide + 1)
     for (const id of overlayIds) {
       expect(locateCourseLayer(hidden.history.present, id)?.item.visible).toBe(false)
     }
 
     const beforeDelete = hidden
+    const depthBeforeDelete = undoDepth()
     fireEvent.click(screen.getByRole('button', { name: '删除所选' }))
+    await drain()
     const deleted = useEditorStore.getState().flowSession!
     expect(deleted.history.present.revision).toBe(beforeDelete.history.present.revision + 1)
-    expect(deleted.history.past).toHaveLength(beforeDelete.history.past.length + 1)
+    expect(undoDepth()).toBe(depthBeforeDelete + 1)
     expect(deleted.selection.selectedOverlayIds).toEqual([])
     for (const id of overlayIds) expect(locateCourseLayer(deleted.history.present, id)).toBeNull()
   })
 
-  it('rejects Delete from stale rendered Flow props without overwriting newer store content', () => {
+  it('rejects Delete from stale rendered Flow props without overwriting newer store content', async () => {
     vi.stubGlobal('ResizeObserver', class {
       observe() {}
       disconnect() {}
     })
-    useEditorStore.getState().createNewFlowProject()
+    await openFlowProject()
     const initial = useEditorStore.getState().flowSession
     if (!initial) throw new Error('expected Flow session')
     const surface = flowSurfaceIn(initial.history.present, initial.selection.surfaceId)
@@ -369,6 +415,7 @@ describe('Flow product shell wiring', () => {
       block: { type: 'paragraph', content: { inlines: [{ type: 'text', text: '新版本内容' }] }},
     }, { expectedRevision: flowDocument().revision })
     useEditorStore.getState().applyFlowCommand(inserted)
+    await drain()
     const beforeDocument = flowDocument()
     const beforeHistory = useEditorStore.getState().flowSession!.history.past
     const beforeSelection = useEditorStore.getState().flowSession!.selection
@@ -386,14 +433,16 @@ describe('Flow product shell wiring', () => {
     ))).toBe(true)
   })
 
-  it('rejects a stale media callback without touching document, history, edit, or resources', () => {
-    useEditorStore.getState().createNewFlowProject()
+  it('rejects a stale media callback without touching document, history, edit, or resources', async () => {
+    await openFlowProject()
     useEditorStore.getState().importAsset(imageAsset(), PNG)
+    await drain()
     const inserted = useEditorStore.getState().insertFlowLibraryMedia(
       imageAsset().id,
       { menuAction: 'insert-document' },
     )
     expect(inserted.ok).toBe(true)
+    await drain()
 
     const insertedSession = useEditorStore.getState().flowSession
     const insertedAuthoring = useEditorStore.getState().courseAuthoringSession
@@ -424,6 +473,7 @@ describe('Flow product shell wiring', () => {
       { content: { inlines: [{ type: 'text', text: '中间版本内容' }] } },
       { expectedRevision: flowDocument().revision },
     ))
+    await drain()
 
     const before = useEditorStore.getState()
     const beforeSession = before.flowSession!
@@ -465,17 +515,18 @@ describe('Flow product shell wiring', () => {
 
 
 
-  it('keeps default new project on Slide and adds a visible blank Flow entry without removing Spatial', () => {
+  it('keeps default new project on Slide and adds a visible blank Flow entry without removing Spatial', async () => {
     expect(flowDocument().surfaces[0]?.type).toBe('slide')
     expect(useEditorStore.getState().flowSession).toBeNull()
     expect(useEditorStore.getState().spatialSession).toBeNull()
 
+    let creating: Promise<void> | undefined
     render(
       <TopToolbar
         busy={false}
         onNew={() => useEditorStore.getState().createNewProject()}
         onNewSpatial={() => useEditorStore.getState().createNewSpatialProject()}
-        onNewFlow={() => useEditorStore.getState().createNewFlowProject()}
+        onNewFlow={() => { creating = useEditorStore.getState().createCourseDocument('flow') }}
         onOpen={() => undefined}
         recentProjects={[]}
         onOpenRecent={() => undefined}
@@ -488,14 +539,16 @@ describe('Flow product shell wiring', () => {
     )
     expect(screen.getByTestId('new-spatial-project')).toBeTruthy()
     fireEvent.click(screen.getByTestId('new-flow-project'))
+    await creating
+    await drain()
     expect(flowDocument().surfaces[0]?.type).toBe('flow')
     expect(useEditorStore.getState().flowSession).not.toBeNull()
     expect(useEditorStore.getState().spatialSession).toBeNull()
     expect(flowDocument().schemaVersion).toBe(9)
   })
 
-  it('shows course tree pages and headings, hides paragraphs, cameras, and slide add-scene', () => {
-    useEditorStore.getState().createNewFlowProject()
+  it('shows course tree pages and headings, hides paragraphs, cameras, and slide add-scene', async () => {
+    await openFlowProject()
     const startRevision = flowDocument().revision
     const flow = useEditorStore.getState().flowSession
     if (!flow) throw new Error('expected flow session')
@@ -508,6 +561,7 @@ describe('Flow product shell wiring', () => {
       blockId: paragraph.id,
       parentId: found?.parentId ?? null,
     }, { content: { inlines: [{ type: 'text', text: '第二段不应出现在课程树' }] } }, { expectedRevision: flow.history.present.revision }))
+    await drain()
 
     render(<ScenePanel />)
     expect(screen.getByText('课程结构')).toBeTruthy()
@@ -530,11 +584,12 @@ describe('Flow product shell wiring', () => {
     expect(startRevision).toBeLessThan(flowDocument().revision + 1)
   })
 
-  it('writes one history revision for paper commands and formats text without a body textarea', () => {
-    useEditorStore.getState().createNewFlowProject()
+  it('writes one history revision for paper commands and formats text without a body textarea', async () => {
+    await openFlowProject()
     const startRevision = flowDocument().revision
     render(<ElementsTab onAddImage={() => undefined} />)
     fireEvent.click(screen.getByTestId('add-text'))
+    await drain()
     expect(useEditorStore.getState().errorMessage).toBeNull()
     expect(flowDocument().revision).toBe(startRevision + 1)
     const createdId = useEditorStore.getState().flowSession?.selection.selectedBlockId
@@ -558,12 +613,13 @@ describe('Flow product shell wiring', () => {
     expect(screen.queryByLabelText('文字内容')).toBeNull()
     expect(screen.queryByText('文字内容')).toBeNull()
     fireEvent.click(screen.getByTestId('flow-format-bold'))
+    await drain()
     const formatted = flowSurface().blocks.find((block) => block.type === 'heading')
     expect(formatted && formatted.type === 'heading' ? formatted.content.inlines.some((run) => run.type === 'text' && run.style?.bold) : false).toBe(true)
   })
 
-  it('keeps no-edit collapsed formatting a no-op and treats omitted range as whole target', () => {
-    useEditorStore.getState().createNewFlowProject()
+  it('keeps no-edit collapsed formatting a no-op and treats omitted range as whole target', async () => {
+    await openFlowProject()
     const flow = useEditorStore.getState().flowSession
     if (!flow) throw new Error('expected flow session')
     const paragraph = flowSurface().blocks.find((block) => block.type === 'paragraph')
@@ -649,11 +705,11 @@ describe('Flow product shell wiring', () => {
 
 
 
-  it('makes Flow entries click-only and names document blocks separately from overlays', () => {
+  it('makes Flow entries click-only and names document blocks separately from overlays', async () => {
     vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(
       () => null as never,
     )
-    useEditorStore.getState().createNewFlowProject()
+    await openFlowProject()
     const onAddImage = vi.fn()
     const onAddVideo = vi.fn()
     render(
@@ -689,10 +745,12 @@ describe('Flow product shell wiring', () => {
 
     const initialBlockCount = flowSurface().blocks.length
     fireEvent.click(screen.getByTestId('add-text'))
+    await drain()
     expect(flowSurface().blocks).toHaveLength(initialBlockCount + 1)
     expect(useEditorStore.getState().flowSession?.selection.selectedBlockId).toBeTruthy()
 
     fireEvent.click(rectangle)
+    await drain()
     const overlayId = useEditorStore.getState().flowSession?.selection.selectedOverlayIds[0]
     expect(overlayId).toBeTruthy()
     expect(readFlowSharedOwnership(flowDocument(), overlayId!)).toBe('viewport-overlay')
@@ -730,6 +788,7 @@ describe('Flow product shell wiring', () => {
     const globalCount = flowDocument().globalLayerItems.length
     const surfaceOverlayCount = flowSurface().surfaceLayerItems.length
     fireEvent.click(globalRectangle)
+    await drain()
     const globalOverlayId = useEditorStore.getState().flowSession?.selection.selectedOverlayIds[0]
     expect(globalOverlayId).toBeTruthy()
     expect(flowDocument().globalLayerItems.some(
@@ -755,22 +814,26 @@ describe('Flow product shell wiring', () => {
 
     const blockCount = flowSurface().blocks.length
     fireEvent.click(screen.getByTestId('add-text'))
+    await drain()
     expect(flowSurface().blocks).toHaveLength(blockCount + 1)
     expect(selectEditingScope(useEditorStore.getState())).toBe('scene')
     act(() => useEditorStore.getState().setEditingScope('global'))
     fireEvent.click(screen.getByTestId('add-formula'))
+    await drain()
     expect(flowSurface().blocks).toHaveLength(blockCount + 2)
     expect(selectEditingScope(useEditorStore.getState())).toBe('global')
     expect(flowDocument().globalLayerItems).toHaveLength(globalCount + 1)
     expect(useEditorStore.getState().errorMessage).toBeNull()
   })
 
-  it('inserts MediaTab images as document blocks and round-trips a V9 archive', () => {
-    useEditorStore.getState().createNewFlowProject()
+  it('inserts MediaTab images as document blocks and round-trips a V9 archive', async () => {
+    await openFlowProject()
     const asset = imageAsset()
     useEditorStore.getState().importAsset(asset, PNG)
+    await drain()
     render(<MediaTab onImportAudio={() => undefined} onImportVideo={() => undefined} />)
     fireEvent.click(screen.getByTestId(`insert-flow-media-${asset.id}`))
+    await drain()
     expect(useEditorStore.getState().errorMessage).toBeNull()
     const mediaBlock = flowSurface().blocks.find((block) => block.type === 'media')
     expect(mediaBlock && mediaBlock.type === 'media' ? mediaBlock.assetId : null).toBe(asset.id)
@@ -782,9 +845,12 @@ describe('Flow product shell wiring', () => {
 
     const bytes = useEditorStore.getState().exportV9SlideCandidateArchive()
     expect(bytes).toBeTruthy()
-    useEditorStore.getState().createNewProject()
+    // `createNewProject` 就是这条命令的 fire-and-forget 包装，这里直接等待它完成。
+    await useEditorStore.getState().createCourseDocument('slide')
+    await drain()
     expect(useEditorStore.getState().flowSession).toBeNull()
-    expect(useEditorStore.getState().reopenV9SlideCandidateArchive(bytes!)).toBe(true)
+    expect(await useEditorStore.getState().reopenV9SlideCandidateArchive(bytes!)).toBe(true)
+    await drain()
     expect(flowDocument().schemaVersion).toBe(9)
     expect(flowDocument().surfaces[0]?.type).toBe('flow')
     expect(flowSurface().blocks.some((block) => block.type === 'media')).toBe(true)
@@ -792,8 +858,8 @@ describe('Flow product shell wiring', () => {
 
 
 
-  it('converts a paragraph to heading level 2 via block type select and updates course tree', () => {
-    useEditorStore.getState().createNewFlowProject()
+  it('converts a paragraph to heading level 2 via block type select and updates course tree', async () => {
+    await openFlowProject()
     const flow = useEditorStore.getState().flowSession
     if (!flow) throw new Error('expected flow session')
     const surface = flowSurface()
@@ -813,6 +879,7 @@ describe('Flow product shell wiring', () => {
     const select = blockTypeContainer.querySelector('select')
     if (!select) throw new Error('expected select inside flow-block-type')
     fireEvent.change(select, { target: { value: '2' } })
+    await drain()
 
     const updated = findFlowBlockRecursive(flowSurface().blocks, paragraph.id)
     expect(updated?.block.type).toBe('heading')
@@ -824,8 +891,8 @@ describe('Flow product shell wiring', () => {
 
 
 
-  it('converts paragraph to quote block via block type dropdown in properties tab', () => {
-    useEditorStore.getState().createNewFlowProject()
+  it('converts paragraph to quote block via block type dropdown in properties tab', async () => {
+    await openFlowProject()
     const paragraph = flowSurface().blocks.find((block) => block.type === 'paragraph')
     expect(paragraph && paragraph.type === 'paragraph').toBe(true)
     const flow = useEditorStore.getState().flowSession
@@ -843,15 +910,17 @@ describe('Flow product shell wiring', () => {
     const select = blockTypeContainer.querySelector('select')
     if (!select) throw new Error('expected select inside flow-block-type')
     fireEvent.change(select, { target: { value: 'quote' } })
+    await drain()
 
     const updated = findFlowBlockRecursive(flowSurface().blocks, paragraph.id)
     expect(updated?.block.type).toBe('quote')
   })
 
-  it('converts media block to viewport-overlay when clicking to-overlay button', () => {
-    useEditorStore.getState().createNewFlowProject()
+  it('converts media block to viewport-overlay when clicking to-overlay button', async () => {
+    await openFlowProject()
     const asset = imageAsset()
     useEditorStore.getState().importAsset(asset, PNG)
+    await drain()
     const flow = useEditorStore.getState().flowSession
     if (!flow) throw new Error('expected flow session')
     useEditorStore.getState().applyFlowCommand(insertFlowEditorBlock(flow.history.present, {
@@ -860,6 +929,7 @@ describe('Flow product shell wiring', () => {
       index: flowSurfaceIn(flow.history.present, flow.selection.surfaceId).blocks.length,
       block: { type: 'media', mediaKind: 'image', assetId: asset.id, layout: 'content-width' },
     }, { expectedRevision: flow.history.present.revision }))
+    await drain()
 
     const mediaBlock = flowSurface().blocks.find((block) => block.type === 'media')
     if (!mediaBlock) throw new Error('expected media block')
@@ -875,6 +945,7 @@ describe('Flow product shell wiring', () => {
     render(<PropertiesTab onReplaceImage={() => undefined} />)
     const toOverlayButton = screen.getByTestId('flow-block-to-overlay')
     fireEvent.click(toOverlayButton)
+    await drain()
 
     const updatedFlow = useEditorStore.getState().flowSession!
     const overlayId = updatedFlow.selection.selectedOverlayIds[0]
@@ -887,11 +958,12 @@ describe('Flow product shell wiring', () => {
     const paperSpace = screen.getByTestId('flow-overlay-paper-space').querySelector('select')
     if (!paperSpace) throw new Error('expected paperSpace select')
     fireEvent.change(paperSpace, { target: { value: 'viewport' } })
+    await drain()
     expect(locateCourseLayer(useEditorStore.getState().flowSession!.history.present, overlayId!)?.item.paperSpace).toBeUndefined()
   })
 
-  it('updates paragraph fontFamily via FontFamilyPicker and fontSize via input', () => {
-    useEditorStore.getState().createNewFlowProject()
+  it('updates paragraph fontFamily via FontFamilyPicker and fontSize via input', async () => {
+    await openFlowProject()
     const surface = flowSurface()
     const paragraph = surface.blocks.find((block) => block.type === 'paragraph')
     if (!paragraph || paragraph.type !== 'paragraph') throw new Error('expected paragraph')
@@ -903,6 +975,7 @@ describe('Flow product shell wiring', () => {
       blockId: paragraph.id,
       parentId: null,
     }, { content: { inlines: [{ type: 'text', text: '测试段落内容' }] } }, { expectedRevision: flow.history.present.revision }))
+    await drain()
 
     useEditorStore.setState({
       flowSession: {
@@ -918,12 +991,14 @@ describe('Flow product shell wiring', () => {
     fireEvent.focus(fontPickerInput)
     fireEvent.change(fontPickerInput, { target: { value: 'KaiTi' } })
     fireEvent.blur(fontPickerInput)
+    await drain()
 
     const fontSizeContainer = screen.getByTestId('flow-font-size')
     const fontSizeInput = fontSizeContainer.querySelector('input')
     if (!fontSizeInput) throw new Error('expected font size input')
     fireEvent.change(fontSizeInput, { target: { value: '24' } })
     fireEvent.blur(fontSizeInput)
+    await drain()
 
     const updated = findFlowBlockRecursive(flowSurface().blocks, paragraph.id)
     expect(updated?.block.type).toBe('paragraph')
@@ -931,8 +1006,8 @@ describe('Flow product shell wiring', () => {
     expect(pBlock.content.inlines.some((run) => run.type === 'text' && run.style?.fontFamily === 'KaiTi' && run.style?.fontSize === 24)).toBe(true)
   })
 
-  it('stores textAlign and lineSpacing on paragraph block (not on runs)', () => {
-    useEditorStore.getState().createNewFlowProject()
+  it('stores textAlign and lineSpacing on paragraph block (not on runs)', async () => {
+    await openFlowProject()
     const surface = flowSurface()
     const paragraph = surface.blocks.find((block) => block.type === 'paragraph')
     if (!paragraph || paragraph.type !== 'paragraph') throw new Error('expected paragraph')
@@ -953,12 +1028,14 @@ describe('Flow product shell wiring', () => {
     const alignSelect = alignContainer.querySelector('select')
     if (!alignSelect) throw new Error('expected align select')
     fireEvent.change(alignSelect, { target: { value: 'center' } })
+    await drain()
 
     const lineSpacingContainer = screen.getByTestId('flow-block-line-spacing')
     const lineSpacingInput = lineSpacingContainer.querySelector('input')
     if (!lineSpacingInput) throw new Error('expected line spacing input')
     fireEvent.change(lineSpacingInput, { target: { value: '16' } })
     fireEvent.blur(lineSpacingInput)
+    await drain()
 
     const updated = findFlowBlockRecursive(flowSurface().blocks, paragraph.id)
     expect(updated?.block.type).toBe('paragraph')
