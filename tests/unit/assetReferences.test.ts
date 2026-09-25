@@ -1,8 +1,10 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+import { strToU8 } from 'fflate'
 import { createBlankCourseProject } from '@/core/course/createCourseProject'
 import { createBlankFlowCourseProject } from '@/renderer/project/createFlowCourseProject'
 import { createBlankSpatialCourseProject } from '@/renderer/project/createSpatialCourseProject'
 import { planCourseMediaLibraryImport } from '@/renderer/media/courseMediaLibraryImport'
+import { parseComponentPackageFiles } from '../../src/core/drivers/codecs/importComponentPackage'
 import type { ComponentPackageData } from '@/shared/componentTypes'
 import type { AssetMeta } from '@/shared/contracts/media-v1/types'
 import type {
@@ -17,6 +19,7 @@ import {
   selectActiveCourseProjectDocument,
   useEditorStore,
 } from '@/renderer/store/editorStore'
+import { connectCourseHost, openCourseOnHost, settleCourse } from '../helpers/triage-t2-course'
 
 function asset(id: string, kind: AssetMeta['kind'] = 'image'): AssetMeta {
   return {
@@ -129,56 +132,60 @@ function componentLayer(packageId: string): ComponentLayerItem {
 }
 
 function componentPackage(packageId: string): ComponentPackageData {
-  return {
-    manifest: {
-      schemaVersion: 4,
-      runtimeApiVersion: 4,
-      id: packageId,
-      name: 'Asset component',
-      version: '4.0.0',
-      entry: 'runtime.js',
-      defaultSize: { width: 320, height: 180 },
-      minSize: { width: 80, height: 45 },
-      preserveAspectRatio: false,
-      supportedScopes: ['scene'],
-      renderMode: 'dom',
-      assets: {},
-      defaultProps: { defaultCover: 'component-default' },
-      editor: {
-        properties: [
-          { key: 'cover', label: 'Cover', type: 'image' },
-          { key: 'defaultCover', label: 'Default cover', type: 'image' },
-        ],
-      },
+  const manifest = {
+    schemaVersion: 4,
+    runtimeApiVersion: 4,
+    id: packageId,
+    name: 'Asset component',
+    version: '4.0.0',
+    entry: 'runtime.js',
+    defaultSize: { width: 320, height: 180 },
+    minSize: { width: 80, height: 45 },
+    preserveAspectRatio: false,
+    supportedScopes: ['scene' as const],
+    renderMode: 'dom' as const,
+    assets: {},
+    defaultProps: { defaultCover: 'component-default' },
+    editor: {
+      properties: [
+        { key: 'cover', label: 'Cover', type: 'image' as const },
+        { key: 'defaultCover', label: 'Default cover', type: 'image' as const },
+      ],
     },
-    runtimeSource: "CoursewareComponent.define({create(ctx){ctx.projectAssetUrl('component-source')}})",
-    files: {},
   }
+  // The document host only ingests packages with real executable bytes.
+  return parseComponentPackageFiles({
+    'manifest.json': strToU8(JSON.stringify(manifest)),
+    'runtime.js': strToU8(
+      "CoursewareComponent.define({create(ctx){ctx.projectAssetUrl('component-source')}})",
+    ),
+  })
 }
 
 function addAssets(project: CourseProjectDocument, ...ids: string[]): void {
   ids.forEach((id) => { project.assets[id] = asset(id) })
 }
 
-function loadProject(
+async function loadProject(
   project: CourseProjectDocument,
   componentPackages: Record<string, ComponentPackageData> = {},
-): void {
+): Promise<void> {
   const files = Object.fromEntries(Object.values(project.assets).map((meta) => [
     meta.id,
     new Uint8Array(meta.byteLength),
   ]))
-  useEditorStore.getState().loadCourseProject(project, null, files, componentPackages)
+  await openCourseOnHost(project, { assetFiles: files, componentPackages })
 }
 
 describe('project asset reference graph', () => {
-  it('keeps V9 deletion aligned with referenced assets', () => {
+  it('keeps V9 deletion aligned with referenced assets', async () => {
     const referenced = asset('referenced')
     const unused = asset('unused')
+    await connectCourseHost()
     const store = useEditorStore.getState()
-    store.createNewProject()
     store.addImageNode(referenced, new Uint8Array(referenced.byteLength))
     store.importAsset(unused, new Uint8Array(unused.byteLength))
+    await settleCourse()
 
     const project = selectActiveCourseProjectDocument(useEditorStore.getState())
     if (!project) throw new Error('Expected a live V9 project')
@@ -193,8 +200,8 @@ describe('project asset reference graph', () => {
     expect(deleteBlocked).toEqual(new Set(['referenced']))
   })
 
-  it('uses only the declared background image for bundled controller source and retains edited dynamic source conservatively', () => {
-    useEditorStore.getState().createNewProject()
+  it('uses only the declared background image for bundled controller source and retains edited dynamic source conservatively', async () => {
+    await connectCourseHost()
     const project = structuredClone(selectActiveCourseProjectDocument(useEditorStore.getState())!)
     const packages = structuredClone(useEditorStore.getState().componentPackages)
     addAssets(project, 'controller-background', 'unused')
@@ -208,7 +215,7 @@ describe('project asset reference graph', () => {
     expect(listCourseAssetReferences(project, 'unused', { componentPackages: packages })).toEqual(expect.arrayContaining([expect.objectContaining({ kind: 'component-runtime-source' })]))
   })
 
-  it('protects assets materialized only by a named-state native override', () => {
+  it('protects assets materialized only by a named-state native override', async () => {
     const project = createBlankCourseProject({ includeDefaultController: false, controls: 'none' })
     addAssets(project, 'base-image', 'state-image')
     const scene = firstSlideScene(project)
@@ -217,13 +224,13 @@ describe('project asset reference graph', () => {
     scene.presentation!.states[0]!.layerItemOverrides[image.layerItemId] = {
       nativeData: { assetId: 'state-image' },
     }
-    loadProject(project)
+    await loadProject(project)
 
     expect(useEditorStore.getState().deleteAsset('state-image')).toBe(false)
     expect(useEditorStore.getState().errorMessage).toContain('nativeData.assetId')
   })
 
-  it('protects a persisted video poster asset regardless of poster capture mode', () => {
+  it('protects a persisted video poster asset regardless of poster capture mode', async () => {
     const project = createBlankCourseProject({ includeDefaultController: false, controls: 'none' })
     addAssets(project, 'video-asset', 'video-poster')
     firstSlideScene(project).layerItems.push(videoLayer(
@@ -231,7 +238,7 @@ describe('project asset reference graph', () => {
       'video-asset',
       'video-poster',
     ))
-    loadProject(project)
+    await loadProject(project)
 
     expect(listCourseAssetReferences(project, 'video-poster')).toContainEqual(
       expect.objectContaining({
@@ -242,7 +249,7 @@ describe('project asset reference graph', () => {
     expect(useEditorStore.getState().deleteAsset('video-poster')).toBe(false)
   })
 
-  it('protects known ids in disabled Runtime content and quoted source', () => {
+  it('protects known ids in disabled Runtime content and quoted source', async () => {
     const project = createBlankCourseProject({ includeDefaultController: false, controls: 'none' })
     addAssets(project, 'runtime-content', 'runtime-source')
     firstSlideScene(project).layerItems.push(runtimeLayer(
@@ -250,7 +257,7 @@ describe('project asset reference graph', () => {
       'runtime-content',
       'runtime-source',
     ))
-    loadProject(project)
+    await loadProject(project)
 
     expect(useEditorStore.getState().deleteAsset('runtime-content')).toBe(false)
     expect(useEditorStore.getState().errorMessage).toContain('content.values')
@@ -258,7 +265,7 @@ describe('project asset reference graph', () => {
     expect(useEditorStore.getState().errorMessage).toContain('source')
   })
 
-  it('protects component props, defaults, state overrides, and runtime source', () => {
+  it('protects component props, defaults, state overrides, and runtime source', async () => {
     const project = createBlankCourseProject({ includeDefaultController: false, controls: 'none' })
     const packageId = 'com.test.asset-closure'
     addAssets(
@@ -268,13 +275,14 @@ describe('project asset reference graph', () => {
       'component-state',
       'component-source',
     )
+    const packages = { [packageId]: componentPackage(packageId) }
     project.componentPackages[packageId] = {
       packageId,
       version: '4.0.0',
       name: 'Asset component',
-      manifestPath: `components/${packageId}/manifest.json`,
-      runtimePath: `components/${packageId}/runtime.js`,
-      contentSha256: '0'.repeat(64),
+      manifestPath: `components/${packageId}@4.0.0/manifest.json`,
+      runtimePath: `components/${packageId}@4.0.0/runtime.js`,
+      contentSha256: packages[packageId]!.contentSha256!,
     }
     const scene = firstSlideScene(project)
     const component = componentLayer(packageId)
@@ -282,14 +290,13 @@ describe('project asset reference graph', () => {
     scene.presentation!.states[0]!.layerItemOverrides[component.layerItemId] = {
       componentProps: { cover: 'component-state' },
     }
-    const packages = { [packageId]: componentPackage(packageId) }
     expect(listCourseAssetReferences(project, 'component-state', {
       componentPackages: packages,
     })).toContainEqual(expect.objectContaining({
       kind: 'component-prop',
       path: expect.arrayContaining(['componentProps', 'cover']),
     }))
-    loadProject(project, packages)
+    await loadProject(project, packages)
 
     for (const id of [
       'component-base',
@@ -301,7 +308,7 @@ describe('project asset reference graph', () => {
     }
   })
 
-  it('fails closed when a V9 component lacks matching executable context', () => {
+  it('fails closed when a V9 component lacks matching executable context', async () => {
     const project = createBlankCourseProject({ includeDefaultController: false, controls: 'none' })
     const packageId = 'com.test.missing-context'
     addAssets(project, 'possibly-referenced')
@@ -316,10 +323,22 @@ describe('project asset reference graph', () => {
     const component = componentLayer(packageId)
     component.props = {}
     firstSlideScene(project).layerItems.push(component)
-    loadProject(project)
 
-    expect(useEditorStore.getState().deleteAsset('possibly-referenced')).toBe(false)
-    expect(useEditorStore.getState().errorMessage).toContain('component')
+    // The document host fails closed at load: a component without executable
+    // bytes can never become the active document (componentPackagesFromArchive).
+    await connectCourseHost()
+    const files = Object.fromEntries(Object.values(project.assets).map((meta) => [
+      meta.id,
+      new Uint8Array(meta.byteLength),
+    ]))
+    useEditorStore.getState().loadCourseProject(project, null, files)
+    await vi.waitFor(() => {
+      if (!useEditorStore.getState().errorMessage?.includes(packageId)) {
+        throw new Error('waiting for rejection')
+      }
+    })
+    expect(useEditorStore.getState().errorMessage).toContain(packageId)
+    expect(selectActiveCourseProjectDocument(useEditorStore.getState())?.id).not.toBe(project.id)
   })
 
   it('preserves existing V9 remote delivery metadata while importing local media', () => {
@@ -350,11 +369,11 @@ describe('project asset reference graph', () => {
     })
   })
 
-  it('protects a Course-wide background asset the same way Scene/State backgrounds are protected', () => {
+  it('protects a Course-wide background asset the same way Scene/State backgrounds are protected', async () => {
     const project = createBlankCourseProject({ includeDefaultController: false, controls: 'none' })
     addAssets(project, 'course-cover')
     project.backgroundAssetId = 'course-cover'
-    loadProject(project)
+    await loadProject(project)
 
     expect(listCourseAssetReferences(project, 'course-cover')).toContainEqual(
       expect.objectContaining({ kind: 'course-background', path: ['backgroundAssetId'] }),
@@ -362,14 +381,14 @@ describe('project asset reference graph', () => {
     expect(useEditorStore.getState().deleteAsset('course-cover')).toBe(false)
   })
 
-  it('protects a Slide surface background asset', () => {
+  it('protects a Slide surface background asset', async () => {
     const project = createBlankCourseProject({ includeDefaultController: false, controls: 'none' })
     addAssets(project, 'surface-cover')
     const surface = project.surfaces[0]
     if (surface?.type !== 'slide') throw new Error('expected slide surface')
     surface.backgroundMode = 'own'
     surface.backgroundAssetId = 'surface-cover'
-    loadProject(project)
+    await loadProject(project)
 
     expect(listCourseAssetReferences(project, 'surface-cover')).toContainEqual(
       expect.objectContaining({ kind: 'slide-surface-background' }),
@@ -377,13 +396,13 @@ describe('project asset reference graph', () => {
     expect(useEditorStore.getState().deleteAsset('surface-cover')).toBe(false)
   })
 
-  it('protects a Flow surface background asset', () => {
+  it('protects a Flow surface background asset', async () => {
     const project = createBlankFlowCourseProject({ includeDefaultController: false, controls: 'none' })
     addAssets(project, 'flow-cover')
     const surface = project.surfaces[0]
     if (surface?.type !== 'flow') throw new Error('expected flow surface')
     surface.backgroundAssetId = 'flow-cover'
-    loadProject(project)
+    await loadProject(project)
 
     expect(listCourseAssetReferences(project, 'flow-cover')).toContainEqual(
       expect.objectContaining({ kind: 'flow-surface-background' }),
@@ -391,13 +410,13 @@ describe('project asset reference graph', () => {
     expect(useEditorStore.getState().deleteAsset('flow-cover')).toBe(false)
   })
 
-  it('protects a Spatial surface background asset', () => {
+  it('protects a Spatial surface background asset', async () => {
     const project = createBlankSpatialCourseProject({ includeDefaultController: false, controls: 'none' })
     addAssets(project, 'spatial-cover')
     const surface = project.surfaces[0]
     if (surface?.type !== 'spatial-2d') throw new Error('expected spatial surface')
     surface.backgroundAssetId = 'spatial-cover'
-    loadProject(project)
+    await loadProject(project)
 
     expect(listCourseAssetReferences(project, 'spatial-cover')).toContainEqual(
       expect.objectContaining({ kind: 'spatial-surface-background' }),
@@ -405,10 +424,10 @@ describe('project asset reference graph', () => {
     expect(useEditorStore.getState().deleteAsset('spatial-cover')).toBe(false)
   })
 
-  it('leaves an unset Course/surface background asset slot unreferenced', () => {
+  it('leaves an unset Course/surface background asset slot unreferenced', async () => {
     const project = createBlankCourseProject({ includeDefaultController: false, controls: 'none' })
     addAssets(project, 'unused-cover')
-    loadProject(project)
+    await loadProject(project)
 
     expect(listCourseAssetReferences(project, 'unused-cover')).toEqual([])
     expect(useEditorStore.getState().deleteAsset('unused-cover')).toBe(true)
