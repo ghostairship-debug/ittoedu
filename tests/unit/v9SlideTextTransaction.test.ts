@@ -48,6 +48,7 @@ import {
   selectSlideAuthoringBackend,
   useEditorStore,
 } from '@/renderer/store/editorStore'
+import { connectCourseHost, openCourseOnHost, settleCourse } from '../helpers/triage-t2-course'
 
 /**
  * Proves V9 Slide text/formula transactions (IME, runs, generation).
@@ -255,9 +256,9 @@ function nativeFormulaData(session: SlideAuthoringSession, layerItemId: string):
 }
 
 describe('V9 Slide text/formula transactions', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     useEditorStore.getState().clearV9SlideCandidateBackend()
-    useEditorStore.getState().createNewProject()
+    await connectCourseHost()
   })
 
   afterEach(() => {
@@ -551,12 +552,8 @@ describe('V9 Slide text/formula transactions', () => {
     expect(nativeTextData(committed, 'global-banner').content.data.text).toBe('全课程统一标题')
   })
 
-  it('keeps the edited text selected after a canvas overlay commit of local runs', () => {
-    const session = openSlideAuthoringSession(v9SlideFixture())
-    expect(session.selection.selectionIds).toEqual([])
-    useEditorStore.getState().injectV9SlideCandidateBackend(
-      createSlideAuthoringBackend(session),
-    )
+  it('keeps the edited text selected after a canvas overlay commit of local runs', async () => {
+    await openCourseOnHost(v9SlideFixture())
     const store = useEditorStore.getState()
     expect(selectSelectedNodeIds(store)).toEqual([])
 
@@ -568,6 +565,7 @@ describe('V9 Slide text/formula transactions', () => {
       80,
     )
     store.commitTextEdit()
+    await settleCourse()
 
     const after = useEditorStore.getState()
     expect(selectSelectedNodeIds(after)).toContain('slide-title')
