@@ -5,11 +5,13 @@ import type {
   ComponentCatalogSnapshot,
 } from '@/shared/componentCatalog'
 import type { ComponentPackageData } from '@/shared/componentTypes'
+import { componentContentSha256 } from '@/shared/componentContentIntegrity'
 import { ComponentsTab } from '@/renderer/ui/ComponentsTab'
 import { useEditorStore,
   selectActiveCourseProjectDocument,
   selectSlideSceneList,
 } from '@/renderer/store/editorStore'
+import { createTriageT4StoreHost } from '../helpers/triage-t4-store-host'
 
 const entry: AvailableComponentCatalogPackage = {
   packageId: 'com.example.catalog-card',
@@ -52,24 +54,31 @@ const catalog: ComponentCatalogSnapshot = {
 const originalCanvasGetContext = HTMLCanvasElement.prototype.getContext
 
 function embedded(version: string): ComponentPackageData {
+  const manifest: ComponentPackageData['manifest'] = {
+    schemaVersion: 4,
+    runtimeApiVersion: 4,
+    renderMode: 'dom',
+    supportedScopes: ['scene'],
+    id: entry.packageId,
+    name: entry.name,
+    version,
+    entry: 'runtime.js',
+    defaultSize: { width: 320, height: 180 },
+    minSize: { width: 160, height: 90 },
+    preserveAspectRatio: false,
+    assets: {},
+    defaultProps: { content: { title: '卡片' } },
+  }
+  const runtimeSource = 'CoursewareComponent.define({ runtimeApiVersion: 4 })'
+  const files = {
+    'manifest.json': new TextEncoder().encode(JSON.stringify(manifest)),
+    'runtime.js': new TextEncoder().encode(runtimeSource),
+  }
   return {
-    manifest: {
-      schemaVersion: 4,
-      runtimeApiVersion: 4,
-      renderMode: 'dom',
-      supportedScopes: ['scene'],
-      id: entry.packageId,
-      name: entry.name,
-      version,
-      entry: 'runtime.js',
-      defaultSize: { width: 320, height: 180 },
-      minSize: { width: 160, height: 90 },
-      preserveAspectRatio: false,
-      assets: {},
-      defaultProps: { content: { title: '卡片' } },
-    },
-    runtimeSource: 'CoursewareComponent.define({ runtimeApiVersion: 4 })',
-    files: {},
+    manifest,
+    runtimeSource,
+    files,
+    contentSha256: componentContentSha256(files),
     provenance: {
       sha256: 'b'.repeat(64),
       importedAt: '2026-08-10T00:00:00.000Z',
@@ -78,9 +87,11 @@ function embedded(version: string): ComponentPackageData {
   }
 }
 
-beforeEach(() => {
+let host: Awaited<ReturnType<typeof createTriageT4StoreHost>>
+
+beforeEach(async () => {
   HTMLCanvasElement.prototype.getContext = (() => null) as typeof originalCanvasGetContext
-  useEditorStore.getState().createNewProject()
+  host = await createTriageT4StoreHost()
 })
 
 afterEach(() => {
@@ -111,8 +122,13 @@ describe('组件目录 UI', () => {
     expect(screen.getByRole('checkbox', { name: '选择目录卡片' })).toBeChecked()
   })
 
-  it('inserts an embedded package repeatedly without invoking catalog trust or reads', () => {
-    useEditorStore.getState().importComponentPackage(embedded('2.0.0'))
+  it('inserts an embedded package repeatedly without invoking catalog trust or reads', async () => {
+    const pkg = embedded('2.0.0')
+    host.registerPackageData(pkg)
+    await act(async () => {
+      useEditorStore.getState().importComponentPackage(pkg)
+      await useEditorStore.getState().drainCourseDocument()
+    })
     const onAddCatalogComponents = vi.fn()
     render(
       <ComponentsTab
@@ -123,6 +139,9 @@ describe('组件目录 UI', () => {
 
     const projectCard = screen.getByTestId(`component-${entry.packageId}`)
     for (let index = 0; index < 10; index += 1) fireEvent.click(projectCard)
+    await act(async () => {
+      await useEditorStore.getState().drainCourseDocument()
+    })
 
     expect(selectSlideSceneList(useEditorStore.getState())[0]!.nodes).toHaveLength(10)
     expect(onAddCatalogComponents).not.toHaveBeenCalled()
@@ -156,8 +175,13 @@ describe('组件目录 UI', () => {
     expect(useEditorStore.getState().componentPackages[entry.packageId]).toBeUndefined()
   })
 
-  it('对已嵌入旧版本只提示更新，不静默替换', () => {
-    useEditorStore.getState().importComponentPackage(embedded('1.0.0'))
+  it('对已嵌入旧版本只提示更新，不静默替换', async () => {
+    const pkg = embedded('1.0.0')
+    host.registerPackageData(pkg)
+    await act(async () => {
+      useEditorStore.getState().importComponentPackage(pkg)
+      await useEditorStore.getState().drainCourseDocument()
+    })
     const onUpdate = vi.fn()
     render(
       <ComponentsTab

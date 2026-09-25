@@ -8,12 +8,17 @@ import { buildPublishedCourseStandaloneHtml } from '@/renderer/export/course/bui
 import type { SingleHtmlExportMode } from '@/renderer/export/course/coursePackagePreflight'
 import { ExportSizeWarningDialog } from '@/renderer/ui/ExportSizeWarningDialog'
 import { TopToolbar, type ExportFormat } from '@/renderer/ui/TopToolbar'
+import { createBlankCourseProject } from '@/core/course/createCourseProject'
+import { createCourseStoreHost } from '../helpers/courseStoreHost'
 
 afterEach(cleanup)
 
-beforeEach(() => {
+let host: Awaited<ReturnType<typeof createCourseStoreHost>>
+
+beforeEach(async () => {
   localStorage.clear()
-  useEditorStore.getState().createNewProject()
+  host = await createCourseStoreHost()
+  await host.open(createBlankCourseProject({ includeDefaultController: false, controls: 'none' }))
 })
 
 function renderToolbar(
@@ -43,15 +48,17 @@ function renderToolbar(
 }
 
 describe('unified export menu', () => {
-  it('renames the project inline and keeps the change undoable', () => {
+  it('renames the project inline and keeps the change undoable', async () => {
     renderToolbar(vi.fn())
     fireEvent.click(screen.getByRole('button', { name: '重命名课件' }))
     const title = screen.getByRole('textbox', { name: '课件名称' })
     fireEvent.change(title, { target: { value: '雨中的苏轼' } })
     fireEvent.blur(title)
+    await useEditorStore.getState().drainCourseDocument()
     expect(selectActiveCourseProjectDocument(useEditorStore.getState())!.title).toBe('雨中的苏轼')
     expect(useEditorStore.getState().dirty).toBe(true)
     useEditorStore.getState().undo()
+    await useEditorStore.getState().drainCourseDocument()
     expect(selectActiveCourseProjectDocument(useEditorStore.getState())!.title).toBe('未命名课件')
   })
 

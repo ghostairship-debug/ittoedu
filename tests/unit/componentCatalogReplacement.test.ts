@@ -5,6 +5,9 @@ import { componentContentSha256 } from '@/shared/componentContentIntegrity'
 import { useEditorStore,
   selectActiveCourseProjectDocument,
 } from '@/renderer/store/editorStore'
+import { createTriageT4StoreHost } from '../helpers/triage-t4-store-host'
+
+const fileBytes = (files: Record<string, Uint8Array>) => Object.fromEntries(Object.entries(files).map(([path, bytes]) => [path, Array.from(bytes)]))
 
 const PACKAGE_ID = 'com.example.catalog-card'
 
@@ -50,13 +53,17 @@ function activeHistory() {
 }
 
 describe('组件目录版本锁定', () => {
-  beforeEach(() => {
-    useEditorStore.getState().createNewProject()
+  let host: Awaited<ReturnType<typeof createTriageT4StoreHost>>
+
+  beforeEach(async () => {
+    host = await createTriageT4StoreHost()
   })
 
-  it('拒绝同一 ID 与版本对应不同哈希的替换，且保持工程不变', () => {
+  it('拒绝同一 ID 与版本对应不同哈希的替换，且保持工程不变', async () => {
     const original = catalogPackage('a'.repeat(64))
+    host.registerPackageData(original)
     useEditorStore.getState().importComponentPackage(original)
+    await useEditorStore.getState().drainCourseDocument()
     const projectBefore = structuredClone(selectActiveCourseProjectDocument(useEditorStore.getState())!)
     const historyBefore = activeHistory().past.length
 
@@ -67,12 +74,23 @@ describe('组件目录版本锁定', () => {
 
     const state = useEditorStore.getState()
     expect(selectActiveCourseProjectDocument(state)!).toEqual(projectBefore)
-    expect(state.componentPackages[PACKAGE_ID]).toBe(original)
+    // The projection adds its archive key and metadata and its bytes come from the host realm.
+    const current = state.componentPackages[PACKAGE_ID]!
+    expect(current).toMatchObject({
+      manifest: original.manifest,
+      provenance: original.provenance,
+      runtimeSource: original.runtimeSource,
+      contentSha256: original.contentSha256,
+    })
+    expect(fileBytes(current.files)).toEqual(fileBytes(original.files))
     expect(activeHistory().past).toHaveLength(historyBefore)
   })
 
-  it('将哈希、导入时间和来源作为不可拆分的 Project V8 元数据保存', () => {
-    useEditorStore.getState().importComponentPackage(catalogPackage('a'.repeat(64)))
+  it('将哈希、导入时间和来源作为不可拆分的 Project V8 元数据保存', async () => {
+    const original = catalogPackage('a'.repeat(64))
+    host.registerPackageData(original)
+    useEditorStore.getState().importComponentPackage(original)
+    await useEditorStore.getState().drainCourseDocument()
     const project = structuredClone(selectActiveCourseProjectDocument(useEditorStore.getState())!)
     expect(courseProjectDocumentSchema.safeParse(project).success).toBe(true)
 
