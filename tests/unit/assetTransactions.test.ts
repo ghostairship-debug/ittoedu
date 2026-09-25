@@ -354,7 +354,7 @@ describe('asset deletion safety', () => {
       packageId: 'com.test.asset', version: '4.0.0', name: 'Asset component',
       manifestPath: 'components/com.test.asset@4.0.0/manifest.json',
       runtimePath: 'components/com.test.asset@4.0.0/runtime.js',
-      contentSha256: packageData.contentSha256,
+      contentSha256: packageData.contentSha256!,
     }
     await openCourseOnHost(project, {
       assetFiles: {
