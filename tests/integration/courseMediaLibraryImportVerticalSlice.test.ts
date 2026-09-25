@@ -444,33 +444,20 @@ describe('ARCH-2 project-scoped media-library import vertical slice', () => {
     expect(resourceSnapshotDepths()).toEqual(emptyResourceDepths)
   })
 
-  it('applies and reverses a prototype-looking asset ID as an own resource key', async () => {
+  it('rejects the reserved __proto__ asset ID with a clear reason and writes nothing', async () => {
     await loadFixture('slide-heavy')
     await settleCourse()
     const target = useEditorStore.getState().captureMediaLibraryImportTarget()
     if (!target) throw new Error('Expected a captured media-library target')
-    const item = image('__proto__', 61)
+    const before = structuredClone(activeProject())
 
-    expect(useEditorStore.getState().importAssetsAtTarget(target, [item]))
-      .toMatchObject({ ok: true, status: 'imported' })
+    const result = useEditorStore.getState().importAssetsAtTarget(target, [image('__proto__', 61)])
+    expect(result).toMatchObject({ ok: false, code: 'invalid-asset' })
+    if (result.ok) throw new Error('expected rejection')
+    expect(result.reason).toContain('保留名称')
     await settleCourse()
-    expect(Object.hasOwn(activeProject().assets, item.meta.id)).toBe(true)
-    const committedFiles = selectMediaAssetFiles(useEditorStore.getState())
-    expect(Object.hasOwn(committedFiles, item.meta.id)).toBe(true)
-    expect(Object.getPrototypeOf(committedFiles)).toBe(Object.prototype)
-    expect(committedFiles[item.meta.id]).toEqual(item.bytes)
-
-    await undoCourse(host)
-    expect(Object.hasOwn(activeProject().assets, item.meta.id)).toBe(false)
-    expect(Object.hasOwn(
-      selectMediaAssetFiles(useEditorStore.getState()),
-      item.meta.id,
-    )).toBe(false)
-
-    await redoCourse(host)
-    expect(Object.hasOwn(activeProject().assets, item.meta.id)).toBe(true)
-    expect(selectMediaAssetFiles(useEditorStore.getState())[item.meta.id])
-      .toEqual(item.bytes)
+    expect(activeProject()).toEqual(before)
+    expect(Object.hasOwn(selectMediaAssetFiles(useEditorStore.getState()), '__proto__')).toBe(false)
   })
 
   it('fails closed on a project with missing referenced asset bytes and keeps Published reads side-effect free', async () => {

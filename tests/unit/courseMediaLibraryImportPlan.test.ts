@@ -299,7 +299,15 @@ describe('planCourseMediaLibraryImport', () => {
     expect([...plannedBytes]).toEqual([89, 144, 233])
   })
 
-  it.each(['toString', '__proto__'])(
+  it('rejects the reserved __proto__ asset ID with a clear reason', () => {
+    const result = planCourseMediaLibraryImport(input(project(), freezeCourseAssetSidecar({}), [asset('__proto__', [1, 2, 3])]))
+
+    expect(result).toMatchObject({ ok: false, code: 'invalid-asset' })
+    if (result.ok) throw new Error('expected rejection')
+    expect(result.reason).toContain('保留名称')
+  })
+
+  it.each(['toString'])(
     'treats inherited Object.prototype key %s as an absent asset ID',
     (assetId) => {
       const document = project()

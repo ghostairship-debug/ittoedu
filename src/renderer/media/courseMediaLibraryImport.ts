@@ -135,6 +135,13 @@ function isUint8Array(value: unknown): value is Uint8Array {
     && Object.prototype.toString.call(value) === '[object Uint8Array]'
 }
 
+/**
+ * V9 asset records are plain JSON objects and schema parsing never keeps a
+ * `__proto__` own key, so such an ID would import and then vanish. Owner
+ * decision 2026-09-26: not supported, rejected up front with a clear reason.
+ */
+const RESERVED_ASSET_IDS: ReadonlySet<string> = new Set(['__proto__'])
+
 function assetInputIsValid(item: CourseImportedAsset): boolean {
   const { meta, bytes } = item
   const positiveOptional = (value: number | undefined): boolean => (
@@ -249,6 +256,9 @@ export function planCourseMediaLibraryImport(
 
   const uniqueItems = new Map<string, { meta: AssetMeta; bytes: Uint8Array }>()
   for (const item of input.items) {
+    if (RESERVED_ASSET_IDS.has(item.meta.id)) {
+      return failure('invalid-asset', `素材 ID“${item.meta.id}”是保留名称，不能使用；请改用其他 ID。`)
+    }
     if (!assetInputIsValid(item)) return failure('invalid-asset')
     const previous = uniqueItems.get(item.meta.id)
     if (previous) {
