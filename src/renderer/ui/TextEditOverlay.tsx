@@ -12,6 +12,8 @@ interface TextEditOverlayProps {
   node: TextNode
   workspace: HTMLElement
   canvas: HTMLElement
+  /** Logical size the node frame is measured in: the course Slide canvas, or the 1280×720 design viewport. */
+  stage?: { width: number; height: number }
   onPreview(text: string, runs: TextRun[]): void
   onCommit(text: string, runs: TextRun[]): void
   onCancel(): void
@@ -279,11 +281,13 @@ export function TextEditOverlay({
   node,
   workspace,
   canvas,
+  stage,
   onPreview,
   onCommit,
   onCancel,
   onCompositionChange,
 }: TextEditOverlayProps) {
+  const stageWidth = stage?.width ?? 1280, stageHeight = stage?.height ?? 720
   const [metrics, setMetrics] = useState<OverlayMetrics | null>(null)
   const editorRef = useRef<HTMLDivElement>(null)
   const initialNodeRef = useRef(node)
@@ -353,8 +357,8 @@ export function TextEditOverlay({
     const update = () => {
       const canvasRect = canvas.getBoundingClientRect()
       const workspaceRect = workspace.getBoundingClientRect()
-      const scaleX = canvasRect.width / 1280
-      const scaleY = canvasRect.height / 720
+      const scaleX = canvasRect.width / stageWidth
+      const scaleY = canvasRect.height / stageHeight
       const fontSize = node.style.fontSize * scaleY
       const next = {
         left: canvasRect.left - workspaceRect.left + node.x * scaleX,
@@ -396,6 +400,8 @@ export function TextEditOverlay({
     }
   }, [
     canvas,
+    stageWidth,
+    stageHeight,
     node.height,
     node.style.fontSize,
     node.style.lineSpacing,

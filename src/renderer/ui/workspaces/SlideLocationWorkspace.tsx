@@ -649,7 +649,11 @@ export function SlideLocationWorkspace({
     sidecarFileIds,
     contentEdit,
   } = snapshot
-  const slideCanvas = slideEditorView?.canvas ?? DEFAULT_SLIDE_CANVAS
+  // The view rebuilds its canvas object on every revision; key the stage by value so the Phaser game, transforms
+  // and callbacks that depend on it are only rebuilt when the course canvas size really changes.
+  const slideCanvasWidth = slideEditorView?.canvas.width ?? DEFAULT_SLIDE_CANVAS.width
+  const slideCanvasHeight = slideEditorView?.canvas.height ?? DEFAULT_SLIDE_CANVAS.height
+  const slideCanvas = useMemo(() => ({ width: slideCanvasWidth, height: slideCanvasHeight }), [slideCanvasWidth, slideCanvasHeight])
   const snapshotRef = useRef(snapshot)
   snapshotRef.current = snapshot
   const readSnapshot = () => snapshotRef.current
@@ -3137,6 +3141,7 @@ export function SlideLocationWorkspace({
         <TextEditOverlay
           key={editingNode.id}
           node={editingNode}
+          stage={slideCanvas}
           workspace={workspaceRef.current}
           canvas={gameHostRef.current ?? canvas!}
           onPreview={(text, runs) => {
