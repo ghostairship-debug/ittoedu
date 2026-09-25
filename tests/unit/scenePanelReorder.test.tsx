@@ -11,6 +11,11 @@ import {
   useEditorStore,
 } from '@/renderer/store/editorStore'
 import { planCourseTreeReorder, ScenePanel } from '@/renderer/ui/ScenePanel'
+import {
+  connectAssignedCourse,
+  settleAssignedCourse,
+  undoAssignedCourse,
+} from '../helpers/triage-t5-courseHost'
 
 function courseDocument() {
   const document = selectActiveCourseProjectDocument(useEditorStore.getState())
@@ -30,23 +35,27 @@ function firstSlideLocationId() {
   return location.id
 }
 
-beforeEach(() => {
-  useEditorStore.getState().createNewProject()
+beforeEach(async () => {
+  await connectAssignedCourse()
 })
 
 afterEach(() => {
   cleanup()
-  useEditorStore.getState().createNewProject()
 })
 
 describe('ScenePanel course tree reorder', () => {
-  it('keeps existing tree testids, page/scene/camera grips, and leaves flow headings unsortable', () => {
+  it('keeps existing tree testids, page/scene/camera grips, and leaves flow headings unsortable', async () => {
     const store = useEditorStore.getState()
     store.addCourseContent('flow-page')
+    await settleAssignedCourse()
     store.addCourseContent('spatial-page')
+    await settleAssignedCourse()
     store.runSpatialCommand((session) => addSpatialCameraFrameFromSession(session, { name: '远景' }))
+    await settleAssignedCourse()
     store.activateCourseLocation(firstSlideLocationId())
+    await settleAssignedCourse()
     store.addCourseContent('scene', { surfaceId: slideSurfaceId() })
+    await settleAssignedCourse()
 
     render(<ScenePanel />)
     expect(screen.getByTestId('course-page-tree')).toBeTruthy()
@@ -91,12 +100,16 @@ describe('ScenePanel course tree reorder', () => {
     )).toBeNull()
   })
 
-  it('rejects cross-parent drops and writes same-parent page/scene reorder into V9 history that undo restores', () => {
+  it('rejects cross-parent drops and writes same-parent page/scene reorder into V9 history that undo restores', async () => {
     const store = useEditorStore.getState()
     store.addCourseContent('flow-page')
+    await settleAssignedCourse()
     store.addCourseContent('spatial-page')
+    await settleAssignedCourse()
     store.activateCourseLocation(firstSlideLocationId())
+    await settleAssignedCourse()
     store.addCourseContent('scene', { surfaceId: slideSurfaceId() })
+    await settleAssignedCourse()
 
     const before = courseDocument()
     const tree = buildCourseTreeView(before)
@@ -122,9 +135,10 @@ describe('ScenePanel course tree reorder', () => {
     if (surfacePlan?.kind !== 'surfaces') throw new Error('expected surface plan')
     const surfaceOrderBefore = before.surfaces.map((surface) => surface.id)
     store.reorderCourseSurfaces(surfacePlan.surfaceIds)
+    await settleAssignedCourse()
     expect(courseDocument().surfaces.map((surface) => surface.id)).toEqual(surfacePlan.surfaceIds)
     expect(courseDocument().revision).toBe(before.revision + 1)
-    store.undo()
+    await undoAssignedCourse()
     expect(courseDocument().surfaces.map((surface) => surface.id)).toEqual(surfaceOrderBefore)
 
     const afterUndo = courseDocument()
@@ -143,18 +157,20 @@ describe('ScenePanel course tree reorder', () => {
     expect(scenePlan.sceneIds).toHaveLength(slide.scenes.length)
     expect(new Set(scenePlan.sceneIds)).toEqual(new Set(slide.scenes.map((scene) => scene.id)))
     store.reorderScenes(scenePlan.sceneIds)
+    await settleAssignedCourse()
     const reorderedSlide = courseDocument().surfaces.find((surface) => surface.type === 'slide')
     if (!reorderedSlide || reorderedSlide.type !== 'slide') throw new Error('expected slide surface')
     expect(reorderedSlide.scenes.map((scene) => scene.id)).toEqual(scenePlan.sceneIds)
-    store.undo()
+    await undoAssignedCourse()
     const restoredSlide = courseDocument().surfaces.find((surface) => surface.type === 'slide')
     if (!restoredSlide || restoredSlide.type !== 'slide') throw new Error('expected slide surface')
     expect(restoredSlide.scenes.map((scene) => scene.id)).toEqual(slide.scenes.map((scene) => scene.id))
   })
 
-  it('deletes a same-page slide scene from the danger button after confirm, and disables the last remaining scene', () => {
+  it('deletes a same-page slide scene from the danger button after confirm, and disables the last remaining scene', async () => {
     const store = useEditorStore.getState()
     store.addCourseContent('scene', { surfaceId: slideSurfaceId() })
+    await settleAssignedCourse()
     render(<ScenePanel />)
 
     const dangerButtons = screen.getAllByRole('button', { name: /删除“/ })
@@ -163,6 +179,7 @@ describe('ScenePanel course tree reorder', () => {
 
     fireEvent.click(dangerButtons[1]!)
     fireEvent.click(screen.getByRole('button', { name: '删除场景' }))
+    await settleAssignedCourse()
 
     const slide = courseDocument().surfaces.find((surface) => surface.type === 'slide')
     if (!slide || slide.type !== 'slide') throw new Error('expected slide surface')
@@ -173,16 +190,18 @@ describe('ScenePanel course tree reorder', () => {
     expect(remaining.getAttribute('title')).toBe(COURSE_LAST_LOCATION_REASON)
   })
 
-  it('lets the original first slide be deleted after mixed pages exist, even if it is the only scene on that page', () => {
+  it('lets the original first slide be deleted after mixed pages exist, even if it is the only scene on that page', async () => {
     const store = useEditorStore.getState()
     const originalSceneId = courseDocument().locations.find(
       (location) => location.kind === 'slide-scene',
     )?.sceneId
     expect(originalSceneId).toBeTruthy()
     store.addCourseContent('flow-page')
+    await settleAssignedCourse()
     store.reorderCourseSurfaces(
       [...courseDocument().surfaces.map((surface) => surface.id)].reverse(),
     )
+    await settleAssignedCourse()
     expect(courseDocument().startLocationId).toBe(courseDocument().locations[0]!.id)
     expect(courseDocument().startLocationId).not.toBe(
       courseDocument().locations.find(
@@ -200,14 +219,17 @@ describe('ScenePanel course tree reorder', () => {
 
     fireEvent.click(deleteOriginal)
     fireEvent.click(screen.getByRole('button', { name: '删除场景' }))
+    await settleAssignedCourse()
     expect(courseDocument().surfaces.some((surface) => surface.type === 'slide')).toBe(false)
     expect(courseDocument().startLocationId).toBe(courseDocument().locations[0]!.id)
   })
 
-  it('maps same-group camera drops onto the existing spatial reorder command and keeps label clicks activating', () => {
+  it('maps same-group camera drops onto the existing spatial reorder command and keeps label clicks activating', async () => {
     const store = useEditorStore.getState()
     store.createNewSpatialProject()
+    await settleAssignedCourse()
     store.runSpatialCommand((session) => addSpatialCameraFrameFromSession(session, { name: '远景' }))
+    await settleAssignedCourse()
     const document = courseDocument()
     const tree = buildCourseTreeView(document)
     const cameras = tree.pages[0]?.children[0]?.children ?? []
@@ -221,32 +243,44 @@ describe('ScenePanel course tree reorder', () => {
     store.runSpatialCommand((session) =>
       reorderSpatialCameraFramesInSession(session, plan.frameId, plan.toIndex),
     )
+    await settleAssignedCourse()
     const reordered = courseDocument()
     const spatial = reordered.surfaces.find((surface) => surface.type === 'spatial-2d')
     if (!spatial || spatial.type !== 'spatial-2d') throw new Error('expected spatial surface')
     expect(spatial.camera.frames[0]?.id).toBe(plan.frameId)
     expect(reordered.revision).toBeGreaterThan(revisionBefore)
-    store.undo()
-    expect(courseDocument().revision).toBe(revisionBefore)
+    await undoAssignedCourse()
+    // 2.0 文档会话的 revision 是单调提交计数（src/core/documents/DocumentSession.ts:182），
+    // 撤销不回退 revision，因此以镜头顺序验证撤销结果。
+    const restored = courseDocument()
+    const restoredSpatial = restored.surfaces.find((surface) => surface.type === 'spatial-2d')
+    if (!restoredSpatial || restoredSpatial.type !== 'spatial-2d') {
+      throw new Error('expected spatial surface')
+    }
+    expect(restoredSpatial.camera.frames[0]?.id).toBe(cameras[0]!.id)
 
     render(<ScenePanel />)
     fireEvent.click(screen.getByTestId(`spatial-camera-${cameras[1]!.id}`))
     expect(useEditorStore.getState().spatialSession?.selection.locationId).toBe(cameras[1]!.locationId)
   })
 
-  it('keeps a delayed camera delete bound to the captured revision', () => {
+  it('keeps a delayed camera delete bound to the captured revision', async () => {
     const store = useEditorStore.getState()
     store.createNewSpatialProject()
+    await settleAssignedCourse()
     store.runSpatialCommand((session) => addSpatialCameraFrameFromSession(session, { name: '远景' }))
+    await settleAssignedCourse()
     render(<ScenePanel />)
 
     fireEvent.click(screen.getByRole('button', { name: '删除镜头 远景' }))
     store.addTextNode()
+    await settleAssignedCourse()
     const beforeConfirm = useEditorStore.getState()
     const frameCount = courseDocument().surfaces.flatMap((surface) => (
       surface.type === 'spatial-2d' ? surface.camera.frames : []
     )).length
     fireEvent.click(screen.getByRole('button', { name: '删除镜头' }))
+    // 确认被拒绝时不应有任何提交，因此不 drain：store 身份必须保持不变。
 
     expect(courseDocument().surfaces.flatMap((surface) => (
       surface.type === 'spatial-2d' ? surface.camera.frames : []
@@ -257,13 +291,16 @@ describe('ScenePanel course tree reorder', () => {
       .toBe(beforeConfirm.courseComponentPackagesPast)
   })
 
-  it('rejects a delayed camera delete when a content draft opens after the dialog', () => {
+  it('rejects a delayed camera delete when a content draft opens after the dialog', async () => {
     const store = useEditorStore.getState()
     store.createNewSpatialProject()
+    await settleAssignedCourse()
     store.addTextNode()
+    await settleAssignedCourse()
     const textId = useEditorStore.getState().spatialSession?.selection.selectionIds[0]
     if (!textId) throw new Error('expected Spatial text layer')
     store.runSpatialCommand((session) => addSpatialCameraFrameFromSession(session, { name: '远景' }))
+    await settleAssignedCourse()
     render(<ScenePanel />)
 
     const revisionAtOpen = courseDocument().revision
@@ -281,6 +318,7 @@ describe('ScenePanel course tree reorder', () => {
     expect(beforeConfirm.spatialContentEdit.draft.text).toBe('弹窗后打开的草稿')
 
     fireEvent.click(screen.getByRole('button', { name: '删除镜头' }))
+    // 确认被拒绝时不应有任何提交，因此不 drain：本地草稿身份必须保持不变。
 
     expect(courseDocument().surfaces.flatMap((surface) => (
       surface.type === 'spatial-2d' ? surface.camera.frames : []
@@ -293,25 +331,30 @@ describe('ScenePanel course tree reorder', () => {
       .toBe(beforeConfirm.courseComponentPackagesPast)
   })
 
-  it('labels flow and spatial primary add actions without 新增页面', () => {
+  it('labels flow and spatial primary add actions without 新增页面', async () => {
     const store = useEditorStore.getState()
     store.createNewFlowProject()
+    await settleAssignedCourse()
     render(<ScenePanel />)
     expect(screen.getByTestId('add-content-primary')).toHaveTextContent('新增流式讲义')
     expect(screen.getByTestId('add-content-primary').textContent).not.toContain('新增页面')
     cleanup()
 
     store.createNewSpatialProject()
+    await settleAssignedCourse()
     render(<ScenePanel />)
     expect(screen.getByTestId('add-content-primary')).toHaveTextContent('新增无限画布')
     expect(screen.getByTestId('add-content-primary').textContent).not.toContain('新增页面')
   })
 
-  it('deletes a whole flow group from the tree and disables deleting the last course location', () => {
+  it('deletes a whole flow group from the tree and disables deleting the last course location', async () => {
     const store = useEditorStore.getState()
     store.addCourseContent('flow-page')
+    await settleAssignedCourse()
     store.addCourseContent('slide-page')
+    await settleAssignedCourse()
     store.addCourseContent('spatial-page')
+    await settleAssignedCourse()
     render(<ScenePanel />)
     const first = courseDocument()
     const flow = first.surfaces.find((surface) => surface.type === 'flow')
@@ -321,18 +364,21 @@ describe('ScenePanel course tree reorder', () => {
 
     fireEvent.click(screen.getByRole('button', { name: `删除页面“${flow.title}”` }))
     fireEvent.click(screen.getByRole('button', { name: '删除页面' }))
+    await settleAssignedCourse()
     expect(courseDocument().surfaces.some((surface) => surface.id === flow.id)).toBe(false)
 
     cleanup()
     render(<ScenePanel />)
     fireEvent.click(screen.getByRole('button', { name: `删除页面“${extraSlide.title}”` }))
     fireEvent.click(screen.getByRole('button', { name: '删除页面' }))
+    await settleAssignedCourse()
     expect(courseDocument().surfaces.some((surface) => surface.id === extraSlide.id)).toBe(false)
 
     cleanup()
     render(<ScenePanel />)
     fireEvent.click(screen.getByRole('button', { name: `删除页面“${spatial.title}”` }))
     fireEvent.click(screen.getByRole('button', { name: '删除页面' }))
+    await settleAssignedCourse()
     expect(courseDocument().surfaces.some((surface) => surface.id === spatial.id)).toBe(false)
 
     cleanup()
@@ -344,9 +390,10 @@ describe('ScenePanel course tree reorder', () => {
     expect(slideDelete.getAttribute('title')).toBe(COURSE_LAST_LOCATION_REASON)
   })
 
-  it('plans migrating a slide scene onto a different slide-page group instead of returning null', () => {
+  it('plans migrating a slide scene onto a different slide-page group instead of returning null', async () => {
     const store = useEditorStore.getState()
     store.addCourseContent('slide-page')
+    await settleAssignedCourse()
     const secondSurface = courseDocument().surfaces.filter((surface) => surface.type === 'slide')[1]
     if (!secondSurface || secondSurface.type !== 'slide') throw new Error('expected second slide page')
     const secondLocation = courseDocument().locations.find((location) =>
@@ -354,7 +401,9 @@ describe('ScenePanel course tree reorder', () => {
     )
     if (!secondLocation) throw new Error('expected second-page scene')
     store.activateCourseLocation(secondLocation.id)
+    await settleAssignedCourse()
     store.addCourseContent('scene', { surfaceId: secondSurface.id })
+    await settleAssignedCourse()
 
     const before = courseDocument()
     const tree = buildCourseTreeView(before)
@@ -392,6 +441,7 @@ describe('ScenePanel course tree reorder', () => {
       ontoScenePlan.targetSurfaceId,
       ontoScenePlan.toIndex,
     )
+    await settleAssignedCourse()
     const after = courseDocument()
     const relocated = after.locations.find((location) => location.id === fromScene.id)
     expect(relocated?.kind === 'slide-scene' && relocated.surfaceId).toBe(ontoPage.surfaceId)
