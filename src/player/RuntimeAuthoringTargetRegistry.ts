@@ -1,6 +1,6 @@
 import type * as PhaserTypes from 'phaser'
 import { DEFAULT_SLIDE_CANVAS, type SlideCanvasSize } from '../shared/slideCanvas'
-import type { DomTextOverrides } from './lightEdit/domTextOverrides'
+import { observerFor, type DomTextOverrides } from './lightEdit/domTextOverrides'
 import type { PhaserTextOverrides } from './lightEdit/phaserTextOverrides'
 import type {
   EditableTextContent,
@@ -169,9 +169,11 @@ export class RuntimeAuthoringTargetRegistry implements RuntimeAuthoringApi {
     this.canvasWidth = options.canvas?.width ?? DEFAULT_SLIDE_CANVAS.width
     this.canvasHeight = options.canvas?.height ?? DEFAULT_SLIDE_CANVAS.height
 
-    if (options.domRoots && typeof MutationObserver !== 'undefined') {
+    if (options.domRoots) {
       for (const root of [options.domRoots.underlay, options.domRoots.overlay]) {
-        const observer = new MutationObserver(() => this.invalidate())
+        const Observer = observerFor(root)
+        if (!Observer) continue
+        const observer = new Observer(() => this.invalidate())
         observer.observe(root, {
           subtree: true,
           childList: true,

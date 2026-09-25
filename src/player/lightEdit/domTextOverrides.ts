@@ -86,6 +86,12 @@ export interface DomTextSample {
  * The Runtime keeps writing its own text; this host rewrites matching nodes after every
  * change and restores the Runtime's text when a rule is removed, so undo stays exact.
  */
+/** The root's own window observer: an observer from another realm rejects the node. */
+export function observerFor(root: Node): typeof MutationObserver | undefined {
+  const view = (root.ownerDocument ?? (root as Document)).defaultView as (Window & typeof globalThis) | null
+  return view?.MutationObserver ?? (typeof MutationObserver === 'undefined' ? undefined : MutationObserver)
+}
+
 export class DomTextOverrides {
   private readonly records = new WeakMap<Text, TextRecord>()
   private readonly observers: MutationObserver[] = []
@@ -98,9 +104,10 @@ export class DomTextOverrides {
     private readonly onChange?: () => void,
   ) {
     this.rules = lightEditRuleMap(rules)
-    if (typeof MutationObserver === 'undefined') return
     for (const root of roots) {
-      const observer = new MutationObserver((mutations) => this.handle(root, mutations))
+      const Observer = observerFor(root)
+      if (!Observer) continue
+      const observer = new Observer((mutations) => this.handle(root, mutations))
       observer.observe(root, { subtree: true, childList: true, characterData: true })
       this.observers.push(observer)
     }

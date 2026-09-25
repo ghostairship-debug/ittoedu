@@ -307,6 +307,16 @@ function createIsolatedDomMount(
 }
 
 /** Reverse lookup from a rendered image URL to the Runtime's asset binding key. */
+/** A Phaser game object class when the loaded Phaser build provides it; test doubles may omit it. */
+function phaserGameObjectClass(name: 'Text' | 'Image' | 'Sprite'): (abstract new (...args: never[]) => unknown) | undefined {
+  try {
+    const value = (Phaser.GameObjects as unknown as Record<string, unknown> | undefined)?.[name]
+    return typeof value === 'function' ? value as abstract new (...args: never[]) => unknown : undefined
+  } catch {
+    return undefined
+  }
+}
+
 function runtimeAssetKeyForUrl(
   assets: Readonly<Record<string, { assetId: string }>>,
   assetUrl: (assetId: string) => string,
@@ -389,17 +399,23 @@ export class RuntimeHost {
     const { scene } = options.environment.phaser
     const displayListBeforeCreate = new Set(scene.children.list)
     const overrides = runtime.content.overrides ?? []
-    if (exposesDom) {
-      const roots = this.domRoots()
-      this.domText = new DomTextOverrides([roots.underlay, roots.overlay], overrides, () => this.authoringRegistry?.invalidate())
-    }
-    const TextObject = Phaser.GameObjects?.Text
-    if (exposesPhaser && typeof TextObject === 'function') {
-      this.phaserText = new PhaserTextOverrides(
-        () => this.runtimePhaserObjects(),
-        (object): object is Phaser.GameObjects.Text => object instanceof TextObject,
-        overrides,
-      )
+    // Light editing never fails the Runtime: an engine that cannot start only disables the edits.
+    try {
+      if (exposesDom) {
+        const roots = this.domRoots()
+        this.domText = new DomTextOverrides([roots.underlay, roots.overlay], overrides, () => this.authoringRegistry?.invalidate())
+      }
+      const TextObject = phaserGameObjectClass('Text')
+      if (exposesPhaser && TextObject) {
+        this.phaserText = new PhaserTextOverrides(
+          () => this.runtimePhaserObjects(),
+          (object): object is Phaser.GameObjects.Text => object instanceof TextObject,
+          overrides,
+        )
+      }
+    } catch (error) {
+      console.warn(`运行时“${this.options.label}”的文字修改暂不可用`, error)
+      this.destroyLightEdit()
     }
     try {
       const definition = options.registry.executeRuntime(
@@ -807,12 +823,12 @@ export class RuntimeHost {
   }
 
   private *runtimePhaserImages(): Generator<Phaser.GameObjects.Image> {
-    const ImageObject = Phaser.GameObjects?.Image
-    const SpriteObject = Phaser.GameObjects?.Sprite
-    if (typeof ImageObject !== 'function') return
+    const ImageObject = phaserGameObjectClass('Image')
+    const SpriteObject = phaserGameObjectClass('Sprite')
+    if (!ImageObject) return
     for (const object of this.runtimePhaserObjects()) {
       // Static images only: sprites animate frames and stay AI-only (M15).
-      if (object instanceof ImageObject && !(typeof SpriteObject === 'function' && object instanceof SpriteObject)) yield object
+      if (object instanceof ImageObject && !(SpriteObject && object instanceof SpriteObject)) yield object as Phaser.GameObjects.Image
     }
   }
 
