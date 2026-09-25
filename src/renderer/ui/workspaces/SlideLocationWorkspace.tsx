@@ -517,7 +517,7 @@ function sanitizeRuntimeAuthoringTargets(
       candidate.sceneId !== update.sceneId ||
       (candidate.kind !== 'text' && candidate.kind !== 'asset') ||
       (candidate.layer !== 'underlay' && candidate.layer !== 'overlay') ||
-      (candidate.source !== 'registered' && candidate.source !== 'dom') ||
+      (candidate.source !== 'registered' && candidate.source !== 'dom' && candidate.source !== 'auto') ||
       typeof candidate.targetId !== 'string' ||
       !candidate.targetId ||
       candidate.targetId.length > 256 ||
@@ -525,11 +525,18 @@ function sanitizeRuntimeAuthoringTargets(
       !candidate.nodeId ||
       candidate.nodeId.length > 256 ||
       typeof candidate.key !== 'string' ||
-      !candidate.key ||
+      // Host-recognised text (M15) has no content key; everything else needs one.
+      (!candidate.key && !(candidate.kind === 'text' && candidate.lightEdit)) ||
       candidate.key.length > 256
     ) {
       continue
     }
+    const lightEdit = candidate.lightEdit
+    if (lightEdit && (
+      typeof lightEdit.original !== 'string' || !lightEdit.original || lightEdit.original.length > 2_000
+      || typeof lightEdit.region !== 'string' || !lightEdit.region || lightEdit.region.length > 500
+      || typeof lightEdit.text !== 'string' || lightEdit.text.length > 20_000
+    )) continue
     if (!candidate.bounds || typeof candidate.bounds !== 'object') continue
     const { x, y, width, height } = candidate.bounds
     if (![x, y, width, height].every(Number.isFinite)) continue
@@ -544,6 +551,9 @@ function sanitizeRuntimeAuthoringTargets(
       ...(typeof candidate.label === 'string'
         ? { label: candidate.label.slice(0, 120) }
         : { label: undefined }),
+      ...(lightEdit
+        ? { lightEdit: Object.freeze({ original: lightEdit.original, region: lightEdit.region, text: lightEdit.text }) }
+        : {}),
       bounds: Object.freeze({
         x: left,
         y: top,
@@ -1912,7 +1922,8 @@ export function SlideLocationWorkspace({
     } else {
       ports.canvas.setStatus('已更新运行时文字；此内容由当前场景的所有状态共享')
     }
-    if (committed.ok && committed.status === 'updated') {
+    // Light-edit rules reach the host through the rule sync; only keyed text is patched here.
+    if (committed.ok && committed.status === 'updated' && !session.courseTarget.override) {
       const target = session.courseTarget.courseTarget
       postAuthoringPatch({
         kind: 'runtime-content',

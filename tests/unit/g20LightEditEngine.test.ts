@@ -128,7 +128,7 @@ it('publishes text and images the Runtime renders without registering, in course
   const targets = onTargetsChanged.mock.lastCall![0].targets
   expect(targets).toEqual([
     expect.objectContaining({
-      kind: 'text', source: 'auto', key: '', label: '听力练习', layer: 'overlay',
+      kind: 'text', source: 'auto', key: '', label: '听力训练', layer: 'overlay',
       bounds: { x: 40, y: 20, width: 160, height: 48 },
       lightEdit: { original: '听力练习', region: 'main>h2', text: '听力训练' },
     }),
