@@ -269,16 +269,20 @@ function liveSelectionRequest(previousResult?: unknown) {
   })
 }
 
+import { createCourseStoreHost } from '../helpers/courseStoreHost'
+
+let storeHost: Awaited<ReturnType<typeof createCourseStoreHost>>
+
 describe('Flow source selection guard lifetime', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} })
-    useEditorStore.getState().createNewFlowProject()
+    storeHost = await createCourseStoreHost()
+    await storeHost.open(createBlankFlowCourseProject({ includeDefaultController: false, controls: 'none' }))
   })
   afterEach(() => {
     cleanup()
     vi.restoreAllMocks()
     vi.unstubAllGlobals()
-    useEditorStore.getState().createNewProject()
   })
   // The mode switch lives in the collapsed “正文格式” panel. jsdom has no native
   // summary activation, so open the panel directly; the switch itself is a real click.
