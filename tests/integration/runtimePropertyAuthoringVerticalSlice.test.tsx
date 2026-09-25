@@ -1,9 +1,18 @@
 import { buildPublishedFixture as buildPublishedCourseV2Payload } from '../fixtures/teacherController'
-import { isAuthoringHistoryTransactionFrame } from '../../src/renderer/authoring/resourceAwareAuthoringHistory'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { decodePublishedCode } from '@/player/decodePublishedExecutableCode'
 
-import { isSpatialAuthoringTransactionFrame } from '@/renderer/course/spatialAuthoringHistory'
+import {
+  bootTriageCourseHost,
+  formalCourse,
+  projectBody,
+  projectCourse,
+  redoCourse,
+  settleCourse,
+  undoCourse,
+  type TriageCourseHost,
+} from '../helpers/triage-t7-courseHost'
+import type { DocumentSnapshot } from '@/shared/workbench/document'
 
 import {
   createCourseProjectArchive,
@@ -47,6 +56,8 @@ function projectedGlobalLayer(state: Parameters<typeof selectCandidateGlobalLaye
 
 const CREATED_AT = '2026-08-24T00:00:00.000Z'
 const ARCHIVE_TIME = '2026-08-24T12:00:00.000Z'
+
+let host: TriageCourseHost
 
 type FixtureKind = 'slide-scene' | 'slide-global' | 'spatial-world'
 type HistoryKind = 'slide' | 'spatial'
@@ -230,14 +241,15 @@ function fixture(
   }
 }
 
-function loadFixture(
+async function loadFixture(
   kind: FixtureKind,
   options?: Parameters<typeof fixture>[1],
-): RuntimePropertyFixture {
+): Promise<RuntimePropertyFixture> {
   const source = fixture(kind, options)
-  useEditorStore.getState().loadCourseProject(source.project, null, {}, {})
+  await projectCourse(host, source.project, {}, {})
   useEditorStore.getState().activateCourseLocation(source.locationId)
   if (source.owner === 'global') useEditorStore.getState().setEditingScope('global')
+  await settleCourse()
   return source
 }
 
@@ -307,17 +319,26 @@ function captureTarget(
   return field === 'enabled' ? view.enabledTarget : view.renderModeTarget
 }
 
-function transactionResourceChanges() {
-  const active = activeHistory()
-  const frame = active.history.past.at(-1)
-  const isTransaction = active.kind === 'slide'
-    ? Boolean(frame && isAuthoringHistoryTransactionFrame(frame))
-    : Boolean(frame && isSpatialAuthoringTransactionFrame(frame))
-  expect(isTransaction).toBe(true)
-  if (!frame || !('kind' in frame) || frame.kind !== 'editor-transaction') {
-    throw new Error('Expected newest Surface history frame to be one editor transaction')
+/**
+ * 2.0 keeps no renderer history: the newest Surface transaction lives in the
+ * main-owned DocumentSession. "Exactly one editor transaction with no resource
+ * changes" is therefore read from the formal document — one new undo step and
+ * byte-identical formal resources.
+ */
+function formalUndoDepth(): number {
+  return formalCourse(host).undoDepth
+}
+
+function formalResources(snapshot: DocumentSnapshot) {
+  if (snapshot.model.kind !== 'course-v9') throw new Error('Expected a course document')
+  return {
+    assets: byteMap(snapshot.model.resources.assets),
+    components: Object.fromEntries(
+      Object.entries(snapshot.model.resources.components)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([packageId, files]) => [packageId, byteMap(files)]),
+    ),
   }
-  return frame.resourceChanges
 }
 
 function byteMap(files: Readonly<Record<string, Uint8Array>>) {
@@ -328,6 +349,7 @@ function byteMap(files: Readonly<Record<string, Uint8Array>>) {
 
 function authoritativeSnapshot() {
   const state = useEditorStore.getState()
+  const snapshot = formalCourse(host)
   return {
     project: structuredClone(activeProject()),
     derivedProject: structuredClone(selectActiveCourseProjectDocument(state)!),
@@ -340,36 +362,43 @@ function authoritativeSnapshot() {
     componentFuture: structuredClone(state.courseComponentPackagesFuture),
     courseAuthoringSession: structuredClone(state.courseAuthoringSession),
     dirty: state.dirty,
+    formalProject: structuredClone(snapshot.model.kind === 'course-v9' ? snapshot.model.project : null),
+    formalResources: formalResources(snapshot),
+    formalUndoDepth: snapshot.undoDepth,
+    formalRedoDepth: snapshot.redoDepth,
   }
 }
 
-function expectRejectedWithoutWrite(
+async function expectRejectedWithoutWrite(
   target: CourseRuntimePropertyTarget,
   update: CourseRuntimePropertyUpdate,
   code: string,
-): void {
+): Promise<void> {
+  await settleCourse()
   const before = authoritativeSnapshot()
   expect(useEditorStore.getState().updateRuntimePropertyAtTarget(target, update))
     .toMatchObject({ ok: false, code })
+  await settleCourse()
   expect(authoritativeSnapshot()).toEqual(before)
 }
 
-beforeEach(() => {
-  useEditorStore.getState().createNewProject()
+beforeEach(async () => {
+  host = await bootTriageCourseHost()
 })
 
 describe('ARCH-2 canonical Runtime property Store vertical slice', () => {
   it.each(PROPERTY_COMMIT_CASES)(
     'commits $fixtureKind $field through one $historyKind transaction and changes only that Runtime scalar',
-    ({ fixtureKind, historyKind, field, value }) => {
-      const source = loadFixture(fixtureKind)
+    async ({ fixtureKind, historyKind, field, value }) => {
+      const source = await loadFixture(fixtureKind)
       const target = captureTarget(source, field)
       const update = field === 'enabled'
         ? { field, value: value as boolean } as const
         : { field, value: value as 'dom' } as const
       const beforeProject = structuredClone(activeProject())
       const beforeItem = structuredClone(runtimeItem(beforeProject, source.itemId))
-      const beforeHistoryDepth = activeHistory().history.past.length
+      const beforeHistoryDepth = formalUndoDepth()
+      const beforeResources = formalResources(formalCourse(host))
 
       expect(activeHistory().kind).toBe(historyKind)
       expect(useEditorStore.getState().updateRuntimePropertyAtTarget(target, update))
@@ -384,6 +413,7 @@ describe('ARCH-2 canonical Runtime property Store vertical slice', () => {
           },
         })
 
+      await settleCourse()
       const committed = structuredClone(activeProject())
       const expectedItem = structuredClone(beforeItem)
       if (field === 'enabled') expectedItem.runtime.enabled = value as boolean
@@ -394,20 +424,21 @@ describe('ARCH-2 canonical Runtime property Store vertical slice', () => {
         visible: beforeItem.visible,
         playbackInitialVisibility: beforeItem.playbackInitialVisibility,
       })
-      expect(activeHistory().history.past).toHaveLength(beforeHistoryDepth + 1)
-      expect(transactionResourceChanges()).toEqual({})
+      expect(formalUndoDepth()).toBe(beforeHistoryDepth + 1)
+      expect(formalResources(formalCourse(host))).toEqual(beforeResources)
 
-      useEditorStore.getState().undo()
-      expect(activeProject()).toEqual(beforeProject)
-      useEditorStore.getState().redo()
-      expect(activeProject()).toEqual(committed)
+      await undoCourse(host)
+      expect(projectBody(activeProject())).toEqual(projectBody(beforeProject))
+      await redoCourse(host)
+      expect(projectBody(activeProject())).toEqual(projectBody(committed))
     },
   )
 
-  it('keeps no-op, stale, locked, scope and API 3 invalid-mode paths at zero authoritative writes', () => {
-    let source = loadFixture('slide-scene')
+  it('keeps no-op, stale, locked, scope and API 3 invalid-mode paths at zero authoritative writes', async () => {
+    let source = await loadFixture('slide-scene')
     let target = captureTarget(source, 'enabled')
-    let before = authoritativeSnapshot()
+    await settleCourse()
+    const before = authoritativeSnapshot()
     expect(useEditorStore.getState().updateRuntimePropertyAtTarget(
       target,
       { field: 'enabled', value: true },
@@ -416,9 +447,10 @@ describe('ARCH-2 canonical Runtime property Store vertical slice', () => {
       status: 'unchanged',
       feedback: { kind: 'runtime-property-unchanged' },
     })
+    await settleCourse()
     expect(authoritativeSnapshot()).toEqual(before)
 
-    expectRejectedWithoutWrite({
+    await expectRejectedWithoutWrite({
       ...target,
       courseTarget: {
         ...target.courseTarget,
@@ -426,34 +458,34 @@ describe('ARCH-2 canonical Runtime property Store vertical slice', () => {
       },
     }, { field: 'enabled', value: false }, 'session-stale')
 
-    source = loadFixture('slide-scene', { locked: true })
+    source = await loadFixture('slide-scene', { locked: true })
     target = captureTarget(source, 'enabled')
-    expectRejectedWithoutWrite(
+    await expectRejectedWithoutWrite(
       target,
       { field: 'enabled', value: false },
       'target-locked',
     )
 
-    source = loadFixture('slide-scene')
+    source = await loadFixture('slide-scene')
     target = captureTarget(source, 'enabled')
     useEditorStore.getState().setEditingScope('global')
-    expectRejectedWithoutWrite(
+    await expectRejectedWithoutWrite(
       target,
       { field: 'enabled', value: false },
       'owner-mismatch',
     )
 
-    source = loadFixture('spatial-world')
+    source = await loadFixture('spatial-world')
     target = captureTarget(source, 'renderMode')
-    expectRejectedWithoutWrite(
+    await expectRejectedWithoutWrite(
       target,
       { field: 'renderMode', value: 'hybrid' },
       'invalid-value',
     )
   })
 
-  it('preserves the committed API 3 property through archive reopen and Published V2 reads', () => {
-    const source = loadFixture('spatial-world')
+  it('preserves the committed API 3 property through archive reopen and Published V2 reads', async () => {
+    const source = await loadFixture('spatial-world')
     const target = captureTarget(source, 'enabled')
     const beforeItem = structuredClone(runtimeItem(activeProject(), source.itemId))
     expect(useEditorStore.getState().updateRuntimePropertyAtTarget(
@@ -461,6 +493,7 @@ describe('ARCH-2 canonical Runtime property Store vertical slice', () => {
       { field: 'enabled', value: true },
     )).toMatchObject({ ok: true, status: 'updated' })
 
+    await settleCourse()
     const expectedItem = structuredClone(beforeItem)
     expectedItem.runtime.enabled = true
     const beforeReads = authoritativeSnapshot()
