@@ -6,6 +6,7 @@ import type { SaveDirectoryContext } from '../../../shared/workbench/desktop'
 import './WorkspaceFilesTree.css'
 import { computeDefaultName, normalizeNewFilename, getStemSelectionRange, type CreateFileType } from '../workspaceFilesNaming'
 import { REVEAL_IN_EXPLORER_EVENT, type RevealInExplorerDetail } from '../../workbench/revealInExplorer'
+import { SLIDE_CANVAS_PRESETS } from '../../../shared/slideCanvas'
 import { snapshotWorkspaceDrop } from './workspaceDropFiles'
 import { parseWorkspaceEntryDrag, WORKSPACE_ENTRIES_DRAG_TYPE, writeWorkspaceEntryDrag } from '../workspaceMediaDrag'
 
@@ -25,6 +26,8 @@ export function WorkspaceFilesTree({ directory, files, refreshVersion = 0, onFil
   const [expanded, setExpanded] = useState(new Set<string>()), [selection, setSelection] = useState(new Set<string>())
   const [anchor, setAnchor] = useState<string>(), [parentId, setParentId] = useState<string>()
   const [dialog, setDialog] = useState<Dialog>(), [name, setName] = useState('')
+  // One Slide canvas size per course, chosen when the course is created (M19).
+  const [canvasPreset, setCanvasPreset] = useState<string>(SLIDE_CANVAS_PRESETS[0]!.id)
   const [destination, setDestination] = useState<string>(), [destinations, setDestinations] = useState<{ id: string; name: string }[]>([])
   const [error, setError] = useState(''), [busy, setBusy] = useState(false), [notice, setNotice] = useState('')
   const [results, setResults] = useState<WorkspaceOperationResult>(), [retry, setRetry] = useState<WorkspaceFilesRequest>()
@@ -210,6 +213,7 @@ export function WorkspaceFilesTree({ directory, files, refreshVersion = 0, onFil
         entries = await load(targetDir, root)
       }
       setName(computeDefaultName(type, entries))
+      if (type === 'create-course') setCanvasPreset(SLIDE_CANVAS_PRESETS[0]!.id)
       setDialog(type)
     } else {
       setName('')
@@ -263,7 +267,9 @@ export function WorkspaceFilesTree({ directory, files, refreshVersion = 0, onFil
     if (!root || !dialog) return
     if (dialog === 'mkdir' || dialog.startsWith('create-')) {
       const filename = normalizeNewFilename(dialog as CreateFileType, name)
-      void run({ type: dialog as 'mkdir' | 'create-markdown' | 'create-course' | 'create-text', ...common(), targetDirectoryId: targetDirectory!, name: filename })
+      const preset = SLIDE_CANVAS_PRESETS.find(item => item.id === canvasPreset) ?? SLIDE_CANVAS_PRESETS[0]!
+      if (dialog === 'create-course') void run({ type: 'create-course', ...common(), targetDirectoryId: targetDirectory!, name: filename, canvas: { width: preset.width, height: preset.height } })
+      else void run({ type: dialog as 'mkdir' | 'create-markdown' | 'create-text', ...common(), targetDirectoryId: targetDirectory!, name: filename })
     } else if (dialog === 'rename' && single) void run({ type: 'rename', ...common(), sourceEntryId: single.entryId, name: name.trim() })
     else if (dialog === 'copy' || dialog === 'move') void run({ type: dialog, ...common(), sourceEntryIds: selected.map(row => row.entry.entryId), targetDirectoryId: destination ?? root.rootEntryId })
     else if (dialog === 'trash') void run({ type: 'trash', ...common(), entryIds: selected.map(row => row.entry.entryId) })
@@ -339,6 +345,9 @@ export function WorkspaceFilesTree({ directory, files, refreshVersion = 0, onFil
     </div>
     {menu && <><div className="workspace-menu-backdrop" onClick={() => setMenu(undefined)} /><div className="workspace-context-menu" role="menu" aria-label="文件菜单" style={{ left: Math.max(0, menu.x), top: Math.max(0, menu.y) }} onKeyDown={event => { if (event.key === 'Escape') { event.stopPropagation(); setMenu(undefined) } }}>{actions(true)}</div></>}
     {dialog && <section ref={dialogRef} className="workspace-file-dialog" role="dialog" aria-modal="true" aria-label="文件操作" onKeyDown={event => { event.stopPropagation(); if (event.key === 'Escape' && !busy) { event.preventDefault(); close() } else if (event.key === 'Tab') { const controls = [...(dialogRef.current?.querySelectorAll<HTMLElement>('input:not(:disabled), select:not(:disabled), button:not(:disabled)') ?? [])]; const first = controls[0], last = controls.at(-1); if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus() } else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus() } } else if (event.key === 'Enter' && event.target instanceof HTMLInputElement && !event.nativeEvent.isComposing && event.nativeEvent.keyCode !== 229 && !busy && !retry && (dialog === 'rename' || dialog === 'mkdir' || dialog.startsWith('create-')) && name.trim()) { event.preventDefault(); submit() } }}>
+      {dialog === 'create-course' && <label>画布尺寸<select aria-label="画布尺寸" value={canvasPreset} onChange={event => setCanvasPreset(event.target.value)}>
+        {SLIDE_CANVAS_PRESETS.map(preset => <option key={preset.id} value={preset.id}>{preset.label}（{preset.width}×{preset.height}）</option>)}
+      </select></label>}
       {(dialog === 'rename' || dialog === 'mkdir' || dialog.startsWith('create-')) && <label>名称<input autoFocus aria-label="文件名称" value={name} onChange={event => setName(event.target.value)} onFocus={event => { if (dialog !== 'rename') { const [start, end] = getStemSelectionRange(event.currentTarget.value); event.currentTarget.setSelectionRange(start, end) } }} /></label>}
       {(dialog === 'copy' || dialog === 'move') && <><label>目标文件夹<select aria-label="目标文件夹" value={destination} onChange={event => { void browse(event.target.value).catch(reason => setError(message(reason))) }}>{destinations.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label><p>选择文件夹后可继续进入其子目录。</p></>}
       {results?.items.some(item => item.error?.code === 'same-name-conflict') && single && (dialog === 'copy' || dialog === 'move') && <button type="button" disabled={busy} onClick={() => action('rename')}>先重命名当前文件</button>}
