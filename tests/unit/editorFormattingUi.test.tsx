@@ -1,6 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createShapeNode, createTextNode } from '@/core/tools/nativeNodeFactories'
+import { createBlankSpatialCourseProject } from '@/renderer/project/createSpatialCourseProject'
 import {
   selectActiveCourseProjectDocument,
   selectActiveScene,
@@ -11,6 +12,13 @@ import { ElementsTab } from '@/renderer/ui/ElementsTab'
 import { PropertiesTab } from '@/renderer/ui/PropertiesTab'
 import { detectFontAvailability } from '@/renderer/ui/properties/PropertyControls'
 import { buildInitialRichTextHtml, TextEditOverlay } from '@/renderer/ui/TextEditOverlay'
+import {
+  assignedUndoDepth,
+  connectAssignedCourse,
+  openAssignedCourse,
+  settleAssignedCourse,
+  undoAssignedCourse,
+} from '../helpers/triage-t5-courseHost'
 
 afterEach(() => {
   cleanup()
@@ -18,16 +26,9 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-beforeEach(() => {
-  useEditorStore.getState().createNewProject()
+beforeEach(async () => {
+  await connectAssignedCourse()
 })
-
-function activeHistory() {
-  const state = useEditorStore.getState()
-  const backend = state.slideBackend
-  if (!backend) throw new Error('expected active slideBackend')
-  return backend.getSession().history
-}
 
 describe('shape editing UI', () => {
   it('creates braces as stroke-only shapes with usable defaults', () => {
@@ -51,23 +52,26 @@ describe('shape editing UI', () => {
     expect(screen.getByText('线条宽度')).toBeInTheDocument()
   })
 
-  it('commits a dragged range control once instead of filling the undo stack', () => {
+  it('commits a dragged range control once instead of filling the undo stack', async () => {
     const store = useEditorStore.getState()
     store.addShapeNode('rectangle')
     render(<PropertiesTab onReplaceImage={() => undefined} />)
     const slider = screen.getByRole('slider', { name: '填充透明度' })
-    const historyBefore = activeHistory().past.length
+    await settleAssignedCourse()
+    const historyBefore = assignedUndoDepth()
 
     fireEvent.change(slider, { target: { value: '65' } })
     fireEvent.change(slider, { target: { value: '35' } })
-    expect(activeHistory().past).toHaveLength(historyBefore)
+    await settleAssignedCourse()
+    expect(assignedUndoDepth()).toBe(historyBefore)
     fireEvent.pointerUp(slider)
+    await settleAssignedCourse()
 
     const shape = selectActiveScene(useEditorStore.getState()).nodes[0]!
     expect(shape.type).toBe('shape')
     if (shape.type !== 'shape') throw new Error('Expected a shape node')
     expect(shape.style?.fillOpacity).toBe(0.65)
-    expect(activeHistory().past).toHaveLength(historyBefore + 1)
+    expect(assignedUndoDepth()).toBe(historyBefore + 1)
   })
 })
 
@@ -130,24 +134,26 @@ describe('basic text property semantics', () => {
       .toBeInTheDocument()
   })
 
-  it('toggles node-level emphasis through the normal undoable property command', () => {
+  it('toggles node-level emphasis through the normal undoable property command', async () => {
     const store = useEditorStore.getState()
     store.addTextNode()
     const nodeId = selectActiveScene(useEditorStore.getState()).nodes[0]!.id
     store.updateNode(nodeId, { style: { overflow: 'fixed' } })
-    const historyBefore = activeHistory().past.length
+    await settleAssignedCourse()
+    const historyBefore = assignedUndoDepth()
 
     render(<PropertiesTab onReplaceImage={() => undefined} />)
     const emphasis = screen.getByRole('checkbox', { name: '文字着重号' })
     expect(emphasis).not.toBeChecked()
     fireEvent.click(emphasis)
+    await settleAssignedCourse()
 
     expect(selectActiveScene(useEditorStore.getState()).nodes[0]).toMatchObject({
       type: 'text',
       style: { emphasis: true },
     })
-    expect(activeHistory().past).toHaveLength(historyBefore + 1)
-    useEditorStore.getState().undo()
+    expect(assignedUndoDepth()).toBe(historyBefore + 1)
+    await undoAssignedCourse()
     expect(selectActiveScene(useEditorStore.getState()).nodes[0]).toMatchObject({
       type: 'text',
       style: { emphasis: false },
@@ -255,11 +261,13 @@ describe('elements panel', () => {
     ).toHaveLength(globalCount + 2)
   })
 
-  it('makes Spatial entries click-only and keeps their clicks on world items', () => {
+  it('makes Spatial entries click-only and keeps their clicks on world items', async () => {
     vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(
       () => null as never,
     )
-    useEditorStore.getState().createNewSpatialProject()
+    await openAssignedCourse(
+      createBlankSpatialCourseProject({ includeDefaultController: false, controls: 'none' }),
+    )
     const onAddImage = vi.fn()
     const onAddVideo = vi.fn()
     render(
@@ -300,6 +308,7 @@ describe('elements panel', () => {
 
     fireEvent.click(screen.getByTestId('add-text'))
     fireEvent.click(screen.getByTestId('add-rectangle'))
+    await settleAssignedCourse()
 
     const nextSession = useEditorStore.getState().spatialSession
     if (!nextSession) throw new Error('expected updated Spatial session')
@@ -403,12 +412,13 @@ describe('elements panel', () => {
 })
 
 describe('rich text editing UI', () => {
-  it('keeps property text changes in one transaction and one undo step', () => {
+  it('keeps property text changes in one transaction and one undo step', async () => {
     const store = useEditorStore.getState()
     store.addTextNode()
     const nodeId = selectActiveScene(useEditorStore.getState()).nodes[0]!.id
     store.updateNode(nodeId, { style: { overflow: 'fixed' } })
-    const historyBefore = activeHistory().past.length
+    await settleAssignedCourse()
+    const historyBefore = assignedUndoDepth()
 
     render(<PropertiesTab onReplaceImage={() => undefined} />)
     const textarea = screen.getByRole('textbox', { name: '文字内容' })
@@ -419,17 +429,21 @@ describe('rich text editing UI', () => {
     expect(selectActiveScene(useEditorStore.getState()).nodes[0]).toMatchObject({
       text: '属性栏最终文字',
     })
-    expect(activeHistory().past).toHaveLength(historyBefore)
+    // Typing only grows the open content-edit draft: nothing is committed and no
+    // write is even queued, so a whole typing session stays one undo step.
+    expect(assignedUndoDepth()).toBe(historyBefore)
+    expect(useEditorStore.getState().courseDocument.pending).toBe(0)
 
     fireEvent.blur(textarea)
-    expect(activeHistory().past).toHaveLength(historyBefore + 1)
-    store.undo()
+    await settleAssignedCourse()
+    expect(assignedUndoDepth()).toBe(historyBefore + 1)
+    await undoAssignedCourse()
     expect(selectActiveScene(useEditorStore.getState()).nodes[0]).toMatchObject({
       text: '双击编辑文字',
     })
   })
 
-  it('remaps existing rich runs when the plain text field is edited', () => {
+  it('remaps existing rich runs when the plain text field is edited', async () => {
     const store = useEditorStore.getState()
     store.addTextNode()
     const node = selectActiveScene(useEditorStore.getState()).nodes[0]!
@@ -444,6 +458,7 @@ describe('rich text editing UI', () => {
     fireEvent.focus(textarea)
     fireEvent.change(textarea, { target: { value: 'BCDE' } })
     fireEvent.blur(textarea)
+    await settleAssignedCourse()
 
     const updated = selectActiveScene(useEditorStore.getState()).nodes[0]!
     expect(updated.type).toBe('text')
@@ -730,7 +745,7 @@ describe('font family picker', () => {
     }
   })
 
-  it('opens the full list without clearing, filters while typing, and accepts custom values', () => {
+  it('opens the full list without clearing, filters while typing, and accepts custom values', async () => {
     const store = useEditorStore.getState()
     store.addTextNode()
     const nodeId = selectActiveScene(useEditorStore.getState()).nodes[0]!.id
@@ -740,7 +755,7 @@ describe('font family picker', () => {
         overflow: 'fixed',
       },
     })
-
+    await settleAssignedCourse()
     render(<PropertiesTab onReplaceImage={() => undefined} />)
     const fontInput = screen.getByRole('combobox', { name: '字体' })
     const preview = screen.getByTestId('font-family-preview')
@@ -771,6 +786,7 @@ describe('font family picker', () => {
 
     fireEvent.change(fontInput, { target: { value: 'My Course Font' } })
     fireEvent.blur(fontInput)
+    await settleAssignedCourse()
     expect(selectActiveScene(useEditorStore.getState()).nodes[0]).toMatchObject({
       style: { fontFamily: 'My Course Font' },
     })
@@ -804,7 +820,7 @@ function slideSceneChartData() {
 }
 
 describe('slide table properties UI', () => {
-  it('commits cell edits on Enter and blur, and appends a row on last-cell Tab', () => {
+  it('commits cell edits on Enter and blur, and appends a row on last-cell Tab', async () => {
     const store = useEditorStore.getState()
     store.addTableNode()
     render(<PropertiesTab onReplaceImage={() => undefined} />)
@@ -819,26 +835,30 @@ describe('slide table properties UI', () => {
     const firstRowId = table.rows[0]!.id
     const firstColumnId = table.columns[0]!.id
     const firstCell = cellInput(firstRowId, firstColumnId)
-    const historyBefore = activeHistory().past.length
+    await settleAssignedCourse()
+    const historyBefore = assignedUndoDepth()
 
     fireEvent.focus(firstCell)
     fireEvent.change(firstCell, { target: { value: '已提交文本' } })
     fireEvent.keyDown(firstCell, { key: 'Enter' })
+    await settleAssignedCourse()
     expect(slideSceneTableData().rows[0]!.cells[0]!.text).toBe('已提交文本')
-    expect(activeHistory().past).toHaveLength(historyBefore + 1)
+    expect(assignedUndoDepth()).toBe(historyBefore + 1)
 
     // The current table owner commits a changed draft on blur, preventing input loss.
     fireEvent.focus(firstCell)
     fireEvent.change(firstCell, { target: { value: '未提交文本' } })
     fireEvent.blur(firstCell)
+    await settleAssignedCourse()
     expect(slideSceneTableData().rows[0]!.cells[0]!.text).toBe('未提交文本')
-    expect(activeHistory().past).toHaveLength(historyBefore + 2)
+    expect(assignedUndoDepth()).toBe(historyBefore + 2)
 
     fireEvent.focus(firstCell)
     fireEvent.change(firstCell, { target: { value: '取消输入' } })
     fireEvent.keyDown(firstCell, { key: 'Escape' })
+    await settleAssignedCourse()
     expect(slideSceneTableData().rows[0]!.cells[0]!.text).toBe('未提交文本')
-    expect(activeHistory().past).toHaveLength(historyBefore + 2)
+    expect(assignedUndoDepth()).toBe(historyBefore + 2)
 
     // Tab past the last cell appends one row in a single history entry and
     // restores focus by stable rowId+columnId, not by stale array index.
@@ -847,16 +867,17 @@ describe('slide table properties UI', () => {
     const lastCell = cellInput(lastRowId, lastColumnId)
     fireEvent.focus(lastCell)
     fireEvent.keyDown(lastCell, { key: 'Tab' })
+    await settleAssignedCourse()
     const grown = slideSceneTableData()
     expect(grown.rows).toHaveLength(table.rows.length + 1)
-    expect(activeHistory().past).toHaveLength(historyBefore + 3)
+    expect(assignedUndoDepth()).toBe(historyBefore + 3)
     const appendedRowId = grown.rows[grown.rows.length - 1]!.id
     const focused = section.querySelector(`[data-cell-key="${appendedRowId}::${firstColumnId}"]`)
     expect(focused).not.toBeNull()
     expect(document.activeElement).toBe(focused)
   })
 
-  it('drives row/column insert, move and delete from the active cell without stale indices', () => {
+  it('drives row/column insert, move and delete from the active cell without stale indices', async () => {
     const store = useEditorStore.getState()
     store.addTableNode()
     render(<PropertiesTab onReplaceImage={() => undefined} />)
@@ -864,28 +885,33 @@ describe('slide table properties UI', () => {
     const table = slideSceneTableData()
     const secondRowId = table.rows[1]!.id
     const firstColumnId = table.columns[0]!.id
-    const historyBefore = activeHistory().past.length
+    await settleAssignedCourse()
+    const historyBefore = assignedUndoDepth()
 
     fireEvent.focus(section.querySelector(`[data-cell-key="${secondRowId}::${firstColumnId}"]`)!)
     fireEvent.click(screen.getByRole('button', { name: '下方插入行' }))
+    await settleAssignedCourse()
     expect(slideSceneTableData().rows).toHaveLength(table.rows.length + 1)
 
     fireEvent.click(screen.getByRole('button', { name: '上移' }))
+    await settleAssignedCourse()
     expect(slideSceneTableData().rows[0]!.id).toBe(secondRowId)
 
     fireEvent.click(screen.getByRole('button', { name: '删除该行' }))
+    await settleAssignedCourse()
     expect(slideSceneTableData().rows).toHaveLength(table.rows.length)
-    expect(activeHistory().past).toHaveLength(historyBefore + 3)
+    expect(assignedUndoDepth()).toBe(historyBefore + 3)
   })
 })
 
 describe('slide chart properties UI', () => {
-  it('validates the data draft per cell and applies it as one history entry', () => {
+  it('validates the data draft per cell and applies it as one history entry', async () => {
     const store = useEditorStore.getState()
     store.addChartNode('bar')
     render(<PropertiesTab onReplaceImage={() => undefined} />)
     const section = screen.getByTestId('chart-properties')
-    const historyBefore = activeHistory().past.length
+    await settleAssignedCourse()
+    const historyBefore = assignedUndoDepth()
 
     // A second draft series with empty values produces per-cell errors and the
     // apply action stays disabled: nothing is written.
@@ -901,15 +927,16 @@ describe('slide chart properties UI', () => {
     const apply = within(section).getByTestId('chart-data-apply')
     expect(apply).toBeEnabled()
     fireEvent.click(apply)
+    await settleAssignedCourse()
 
     const chart = slideSceneChartData()
     expect(chart.series).toHaveLength(2)
     expect(chart.series[1]!.name).toBe('系列 2')
     expect(chart.series[1]!.points.map((point) => point.value)).toEqual([7, 7, 7])
-    expect(activeHistory().past).toHaveLength(historyBefore + 1)
+    expect(assignedUndoDepth()).toBe(historyBefore + 1)
   })
 
-  it('asks which series survives a multi-series pie switch and writes nothing on cancel', () => {
+  it('asks which series survives a multi-series pie switch and writes nothing on cancel', async () => {
     const store = useEditorStore.getState()
     store.addChartNode('bar')
     render(<PropertiesTab onReplaceImage={() => undefined} />)
@@ -923,27 +950,30 @@ describe('slide chart properties UI', () => {
       })
     }
     fireEvent.click(within(section).getByTestId('chart-data-apply'))
+    await settleAssignedCourse()
     expect(slideSceneChartData().series).toHaveLength(2)
-    const historyBefore = activeHistory().past.length
+    const historyBefore = assignedUndoDepth()
 
     const typeSelect = within(section).getByLabelText('图表类型')
     fireEvent.change(typeSelect, { target: { value: 'pie' } })
     const picker = within(section).getByTestId('chart-retained-series-picker')
     fireEvent.click(within(picker).getByRole('button', { name: '取消' }))
+    await settleAssignedCourse()
     expect(within(section).queryByTestId('chart-retained-series-picker')).toBeNull()
     expect(slideSceneChartData().chartType).toBe('bar')
     expect(slideSceneChartData().series).toHaveLength(2)
-    expect(activeHistory().past).toHaveLength(historyBefore)
+    expect(assignedUndoDepth()).toBe(historyBefore)
 
     fireEvent.change(typeSelect, { target: { value: 'pie' } })
     const confirmed = within(section).getByTestId('chart-retained-series-picker')
     fireEvent.click(within(confirmed).getAllByRole('radio')[1]!)
     fireEvent.click(within(confirmed).getByRole('button', { name: '确认切换' }))
+    await settleAssignedCourse()
     const pie = slideSceneChartData()
     expect(pie.chartType).toBe('pie')
     expect(pie.series).toHaveLength(1)
     expect(pie.series[0]!.name).toBe('系列 2')
-    expect(activeHistory().past).toHaveLength(historyBefore + 1)
+    expect(assignedUndoDepth()).toBe(historyBefore + 1)
 
     // Circular charts reject negative values per cell before any commit.
     fireEvent.change(
