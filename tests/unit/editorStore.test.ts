@@ -1,6 +1,8 @@
 import { isControllerFixture } from '../fixtures/teacherController'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { bootCourseStore, courseStoreHost, formalHistory, formalReceipt, redoCourse, settleCourse, undoCourse } from '../helpers/triage-t1-editorDocument'
 import type { ComponentPackageData } from '@/shared/componentTypes'
+import { componentContentSha256 } from '@/shared/componentContentIntegrity'
 import { MAX_PROJECT_SCENES, MAX_SCENE_NODES } from '@/shared/constants'
 import type { AssetMeta } from '@/shared/contracts/media-v1'
 import { sceneNodeToCourseLayerItem } from '@/shared/courseProjectModel'
@@ -40,12 +42,33 @@ import {
 } from '@/renderer/store/editorStore'
 
 function activeHistory() {
-  const state = useEditorStore.getState()
-  if (state.spatialSession) return state.spatialSession.history
-  if (state.flowSession) return state.flowSession.history
-  const backend = state.slideBackend
-  if (!backend) throw new Error('expected active Surface session')
-  return backend.getSession().history
+  return formalHistory()
+}
+
+/**
+ * 2.0 的 renderer 每次 render 都会重建投影对象，所以“这次操作没有写入任何状态”不能用对象同一性
+ * 证明。这里改用正式文档回执（revision、撤销/重做深度、文档内容）加投影内容快照。
+ */
+function formalWriteReceipt() {
+  const snapshot = formalReceipt()
+  return {
+    revision: snapshot.revision,
+    undoDepth: snapshot.undoDepth,
+    redoDepth: snapshot.redoDepth,
+    project: structuredClone(snapshot.model.project),
+  }
+}
+
+function captureWriteState() {
+  return {
+    receipt: formalWriteReceipt(),
+    session: structuredClone(useEditorStore.getState().spatialSession),
+  }
+}
+
+function expectNoWriteSince(before: ReturnType<typeof captureWriteState>): void {
+  expect(formalWriteReceipt()).toEqual(before.receipt)
+  expect(useEditorStore.getState().spatialSession).toEqual(before.session)
 }
 
 const imageMeta: AssetMeta = {
@@ -59,29 +82,37 @@ const imageMeta: AssetMeta = {
   height: 1080,
 }
 
+/**
+ * 2.0 的正式文档保存/校验会重新解析组件包内文件，所以夹具必须给出与 manifest
+ * 一致的真实字节，而不是占位字节。
+ */
 function sampleComponent(): ComponentPackageData {
+  const manifest: ComponentPackageData['manifest'] = {
+    schemaVersion: 4,
+    runtimeApiVersion: 4,
+    id: 'com.example.counter',
+    name: '计数器',
+    version: '4.0.0',
+    entry: 'runtime.js',
+    defaultSize: { width: 480, height: 280 },
+    minSize: { width: 160, height: 100 },
+    preserveAspectRatio: true,
+    assets: {},
+    defaultProps: { initialValue: 3 },
+    supportedScopes: ['scene'],
+    renderMode: 'phaser',
+  }
+  const runtimeSource =
+    "window.CoursewareComponent.define({id:'com.example.counter',runtimeApiVersion:4,create:function(){return {destroy:function(){}}}})"
+  const files = {
+    'manifest.json': new TextEncoder().encode(JSON.stringify(manifest)),
+    'runtime.js': new TextEncoder().encode(runtimeSource),
+  }
   return {
-    manifest: {
-      schemaVersion: 4,
-      runtimeApiVersion: 4,
-      id: 'com.example.counter',
-      name: '计数器',
-      version: '4.0.0',
-      entry: 'runtime.js',
-      defaultSize: { width: 480, height: 280 },
-      minSize: { width: 160, height: 100 },
-      preserveAspectRatio: true,
-      assets: {},
-      defaultProps: { initialValue: 3 },
-      supportedScopes: ['scene'],
-      renderMode: 'phaser',
-    },
-    runtimeSource:
-      "window.CoursewareComponent.define({id:'com.example.counter',runtimeApiVersion:4,create:function(){return {destroy:function(){}}}})",
-    files: {
-      'manifest.json': new Uint8Array([1]),
-      'runtime.js': new Uint8Array([2]),
-    },
+    manifest,
+    runtimeSource,
+    files,
+    contentSha256: componentContentSha256(files),
   }
 }
 
@@ -117,23 +148,29 @@ function mediaFiles() {
   return selectMediaAssetFiles(useEditorStore.getState())
 }
 
-function acknowledgeCurrentSave(path: string) {
+async function acknowledgeCurrentSave(path: string) {
+  await settleCourse()
+  const documentId = useEditorStore.getState().courseDocument.documentId
+  if (!documentId) throw new Error('expected active Surface session')
+  await courseStoreHost().api.save(documentId, path)
+  await settleCourse()
   const preparation = useEditorStore.getState().prepareCourseProjectPersistence()
   expect(preparation.ok).toBe(true)
   if (!preparation.ok) throw new Error(preparation.reason)
   expect(
     useEditorStore.getState().acknowledgeCourseProjectSaved(path, preparation.token),
   ).toBe(true)
+  expect(useEditorStore.getState().dirty).toBe(false)
   return preparation
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   delete (window as Partial<Window>).desktopAPI
-  useEditorStore.getState().createNewProject()
+  await bootCourseStore()
 })
 
 describe('default Course Project V9 persistence', () => {
-  it('creates a schemaVersion 9 document on the V9 authoring backend', () => {
+  it('creates a schemaVersion 9 document on the V9 authoring backend', async () => {
     const state = useEditorStore.getState()
     expect(selectSlideBackendKind(state)).toBe('slide-authoring')
     expect(selectSlideAuthoringDocument(state)?.schemaVersion).toBe(
@@ -144,11 +181,12 @@ describe('default Course Project V9 persistence', () => {
     )
   })
 
-  it('saves a zip that openCourseProjectArchive can reopen', () => {
+  it('saves a zip that openCourseProjectArchive can reopen', async () => {
     const store = useEditorStore.getState()
     store.addTextNode(40, 50)
     const document = selectSlideAuthoringDocument(useEditorStore.getState())
     expect(document?.schemaVersion).toBe(9)
+    await settleCourse()
     const bytes = store.exportV9SlideCandidateArchive()
     expect(bytes).toBeInstanceOf(Uint8Array)
     const opened = openCourseProjectArchive(bytes!)
@@ -157,14 +195,14 @@ describe('default Course Project V9 persistence', () => {
     expect(detectCourseProjectArchiveFormat(bytes!).kind).toBe('v9')
   })
 
-  it('does not silently open a V8 zip as V9', () => {
+  it('does not silently open a V8 zip as V9', async () => {
     const v8Bytes = COURSE_PROJECT_REJECTION_INPUTS['v8-unsupported']
     expect(detectCourseProjectArchiveFormat(v8Bytes).kind).toBe('unsupported')
     expect(() => openCourseProjectArchive(v8Bytes)).toThrow(/格式版本|版本不支持/)
     expect(() => openDefaultCourseProject(v8Bytes)).toThrow(/格式版本|版本不支持/)
   })
 
-  it('keeps the V8 preview and effective layer selection aligned through Slide history and page changes', () => {
+  it('keeps the V8 preview and effective layer selection aligned through Slide history and page changes', async () => {
     const store = useEditorStore.getState()
     const firstSceneId = selectActiveSceneId(store)
 
@@ -176,14 +214,14 @@ describe('default Course Project V9 persistence', () => {
     expect(selectEffectiveLayerProjection(state)?.unifiedRows.map((row) => row.id))
       .toContain(nodeId)
 
-    store.undo()
+    await undoCourse()
     state = useEditorStore.getState()
     expect(selectSlideSceneList(state).find((scene) => scene.id === firstSceneId)?.nodes)
       .not.toContainEqual(expect.objectContaining({ id: nodeId }))
     expect(selectEffectiveLayerProjection(state)?.unifiedRows.map((row) => row.id))
       .not.toContain(nodeId)
 
-    store.redo()
+    await redoCourse()
     state = useEditorStore.getState()
     expect(selectSlideSceneList(state).find((scene) => scene.id === firstSceneId)?.nodes)
       .toContainEqual(expect.objectContaining({ id: nodeId }))
@@ -209,7 +247,7 @@ describe('default Course Project V9 persistence', () => {
 })
 
 describe('Spatial command failure diagnostics', () => {
-  it('keeps a structured reason out of teacher feedback and preserves failed-command state', () => {
+  it('keeps a structured reason out of teacher feedback and preserves failed-command state', async () => {
     const reportDiagnostic = vi.fn(async (
       _input: Parameters<Window['desktopAPI']['reportDiagnostic']>[0],
     ) => undefined)
@@ -217,11 +255,14 @@ describe('Spatial command failure diagnostics', () => {
       configurable: true,
       value: { reportDiagnostic },
     })
-    useEditorStore.getState().createNewSpatialProject()
+    await useEditorStore.getState().createCourseDocument('spatial')
+    await settleCourse()
     const before = useEditorStore.getState()
     const sessionBefore = before.spatialSession
     if (!sessionBefore) throw new Error('expected Spatial session')
     const documentBefore = sessionBefore.history.present
+    const receiptBefore = formalReceipt()
+    const selectionBefore = [...sessionBefore.selection.selectionIds]
     const rawReason = JSON.stringify([
       {
         code: 'invalid_type',
@@ -253,14 +294,13 @@ describe('Spatial command failure diagnostics', () => {
     expect(reportDiagnostic.mock.calls[0]?.[0]?.message).toContain(
       `"revision":${documentBefore.revision}`,
     )
-    expect(after.spatialSession).toBe(sessionBefore)
-    expect(after.spatialSession?.history).toBe(sessionBefore.history)
-    expect(after.spatialSession?.history.present).toBe(documentBefore)
     expect(after.spatialSession?.history.present.revision).toBe(documentBefore.revision)
-    expect(after.spatialSession?.selection).toBe(sessionBefore.selection)
-    expect(after.spatialSession?.selection.selectionIds).toBe(before.spatialSession?.selection.selectionIds)
-    expect(after.spatialSession?.selection.selectionIds.at(-1) ?? null).toBe(before.spatialSession?.selection.selectionIds.at(-1) ?? null)
     expect(after.dirty).toBe(before.dirty)
+    // A failed command never reaches Main: the formal document, history and selection stay untouched.
+    expect(formalReceipt()).toEqual(receiptBefore)
+    expect(after.spatialSession?.history.present).toEqual(documentBefore)
+    expect(selectSelectedNodeIds(after)).toEqual(selectionBefore)
+    expect(selectSelectedNodeIds(after).at(-1) ?? null).toBe(selectionBefore.at(-1) ?? null)
   })
 
   it('maps an ordinary reason even when the local diagnostic write rejects', async () => {
@@ -273,10 +313,13 @@ describe('Spatial command failure diagnostics', () => {
       configurable: true,
       value: { reportDiagnostic },
     })
-    useEditorStore.getState().createNewSpatialProject()
+    await useEditorStore.getState().createCourseDocument('spatial')
+    await settleCourse()
     const before = useEditorStore.getState()
     const sessionBefore = before.spatialSession
     if (!sessionBefore) throw new Error('expected Spatial session')
+    const receiptBefore = formalReceipt()
+    const selectionBefore = [...sessionBefore.selection.selectionIds]
 
     const result = before.runSpatialCommand((session) => ({
       ok: false,
@@ -295,16 +338,14 @@ describe('Spatial command failure diagnostics', () => {
       source: 'renderer',
       stack: 'locked',
     }))
-    expect(after.spatialSession).toBe(sessionBefore)
-    expect(after.spatialSession?.history).toBe(sessionBefore.history)
-    expect(after.spatialSession?.selection).toBe(sessionBefore.selection)
-    expect(after.spatialSession?.selection.selectionIds).toBe(before.spatialSession?.selection.selectionIds)
+    expect(formalReceipt()).toEqual(receiptBefore)
+    expect(selectSelectedNodeIds(after)).toEqual(selectionBefore)
   })
 })
 
 describe('Spatial canonical property updates', () => {
-  it('commits common and whole-node text properties atomically with undo and redo', () => {
-    useEditorStore.getState().createNewSpatialProject()
+  it('commits common and whole-node text properties atomically with undo and redo', async () => {
+    await useEditorStore.getState().createCourseDocument('spatial')
     useEditorStore.getState().addTextNode()
     useEditorStore.getState().addTextNode()
     const nodes = selectEditingNodes(useEditorStore.getState()).filter(
@@ -315,7 +356,9 @@ describe('Spatial canonical property updates', () => {
       throw new Error('expected two Spatial text nodes')
     }
     useEditorStore.getState().selectNodes([first.id, second.id])
+    await settleCourse()
     const before = useEditorStore.getState().spatialSession!
+    const historyBefore = formalHistory().past.length
 
     useEditorStore.getState().updateNodes([
       {
@@ -346,10 +389,11 @@ describe('Spatial canonical property updates', () => {
         },
       },
     ])
+    await settleCourse()
 
     const changed = useEditorStore.getState().spatialSession!
     expect(changed.history.present.revision).toBe(before.history.present.revision + 1)
-    expect(changed.history.past).toHaveLength(before.history.past.length + 1)
+    expect(formalHistory().past).toHaveLength(historyBefore + 1)
     const surface = changed.history.present.surfaces.find(
       (candidate) => candidate.id === changed.selection.surfaceId,
     )
@@ -386,7 +430,7 @@ describe('Spatial canonical property updates', () => {
       },
     })
 
-    useEditorStore.getState().undo()
+    await undoCourse()
     const undone = useEditorStore.getState().spatialSession!
     const undoneSurface = undone.history.present.surfaces.find(
       (candidate) => candidate.id === undone.selection.surfaceId,
@@ -397,7 +441,7 @@ describe('Spatial canonical property updates', () => {
     expect(undoneSurface.world.layerItems.find((item) => item.layerItemId === second.id))
       .toMatchObject({ kind: 'native', content: { nativeType: 'text', data: { style: second.style } } })
 
-    useEditorStore.getState().redo()
+    await redoCourse()
     const redone = useEditorStore.getState().spatialSession!
     expect(redone.history.present.surfaces
       .find((candidate) => candidate.id === redone.selection.surfaceId))
@@ -419,8 +463,8 @@ describe('Spatial canonical property updates', () => {
       })
   })
 
-  it('keeps no-op, locked, and unsupported batches at zero document and history writes', () => {
-    useEditorStore.getState().createNewSpatialProject()
+  it('keeps no-op, locked, and unsupported batches at zero document and history writes', async () => {
+    await useEditorStore.getState().createCourseDocument('spatial')
     useEditorStore.getState().addTextNode()
     useEditorStore.getState().addTextNode()
     const [first, second] = selectEditingNodes(useEditorStore.getState()).filter(
@@ -430,34 +474,39 @@ describe('Spatial canonical property updates', () => {
       throw new Error('expected two Spatial text nodes')
     }
     useEditorStore.getState().selectNodes([first.id, second.id])
+    await settleCourse()
 
-    const beforeNoop = useEditorStore.getState().spatialSession!
+    const receiptBefore = formalReceipt()
+    const selectionBefore = selectSelectedNodeIds(useEditorStore.getState())
     useEditorStore.getState().updateNodes([{
       nodeId: second.id,
       patch: { opacity: second.opacity, style: { bold: Boolean(second.style?.bold) } },
     }])
-    expect(useEditorStore.getState().spatialSession).toBe(beforeNoop)
-    expect(useEditorStore.getState().spatialSession?.history).toBe(beforeNoop.history)
+    await settleCourse()
+    expect(formalReceipt()).toEqual(receiptBefore)
+    expect(selectSelectedNodeIds(useEditorStore.getState())).toEqual(selectionBefore)
 
     useEditorStore.getState().updateNodes([{
       nodeId: second.id,
       patch: { width: second.width, style: { ...second.style } },
     }])
-    expect(useEditorStore.getState().spatialSession).toBe(beforeNoop)
-    expect(useEditorStore.getState().spatialSession?.history.present).toBe(beforeNoop.history.present)
+    await settleCourse()
+    expect(formalReceipt()).toEqual(receiptBefore)
+    expect(selectSelectedNodeIds(useEditorStore.getState())).toEqual(selectionBefore)
 
     useEditorStore.getState().updateNode(first.id, { locked: true })
-    const beforeLocked = useEditorStore.getState().spatialSession!
-    const secondOpacity = beforeLocked.history.present.surfaces
+    await settleCourse()
+    const lockedReceipt = formalReceipt()
+    const secondOpacity = useEditorStore.getState().spatialSession!.history.present.surfaces
       .flatMap((surface) => surface.type === 'spatial-2d' ? surface.world.layerItems : [])
       .find((item) => item.layerItemId === second.id)?.opacity
     useEditorStore.getState().updateNodes([
       { nodeId: first.id, patch: { name: '不应部分写入' } },
       { nodeId: second.id, patch: { opacity: 0.25 } },
     ])
+    await settleCourse()
     const afterLocked = useEditorStore.getState()
-    expect(afterLocked.spatialSession).toBe(beforeLocked)
-    expect(afterLocked.spatialSession?.history).toBe(beforeLocked.history)
+    expect(formalReceipt()).toEqual(lockedReceipt)
     expect(afterLocked.errorMessage).toBe('当前内容已锁定。请先解锁后重试。')
     expect(afterLocked.spatialSession?.history.present.surfaces
       .flatMap((surface) => surface.type === 'spatial-2d' ? surface.world.layerItems : [])
@@ -466,15 +515,16 @@ describe('Spatial canonical property updates', () => {
     useEditorStore.getState().updateNode(second.id, {
       fit: 'cover',
     } as never)
+    await settleCourse()
     const afterUnsupported = useEditorStore.getState()
-    expect(afterUnsupported.spatialSession).toBe(beforeLocked)
+    expect(formalReceipt()).toEqual(lockedReceipt)
     expect(afterUnsupported.errorMessage).toBe(
       '当前元素不支持这项属性，未保存任何更改。',
     )
   })
 
-  it('keeps geometry and presentation properties selection-bound', () => {
-    useEditorStore.getState().createNewSpatialProject()
+  it('keeps geometry and presentation properties selection-bound', async () => {
+    await useEditorStore.getState().createCourseDocument('spatial')
     useEditorStore.getState().addTextNode()
     useEditorStore.getState().addTextNode()
     const [selected, unselected] = selectEditingNodes(useEditorStore.getState()).filter(
@@ -482,16 +532,20 @@ describe('Spatial canonical property updates', () => {
     )
     if (!selected || !unselected) throw new Error('expected two Spatial text nodes')
     useEditorStore.getState().selectNode(selected.id)
+    await settleCourse()
     const before = useEditorStore.getState().spatialSession!
+    const receiptBefore = formalReceipt()
+    const selectionBefore = selectSelectedNodeIds(useEditorStore.getState())
 
     useEditorStore.getState().updateNode(unselected.id, {
       name: '不得借直接行属性绕过选择',
       opacity: 0.25,
     })
+    await settleCourse()
 
     const after = useEditorStore.getState()
-    expect(after.spatialSession).toBe(before)
-    expect(after.spatialSession?.history).toBe(before.history)
+    expect(formalReceipt()).toEqual(receiptBefore)
+    expect(selectSelectedNodeIds(after)).toEqual(selectionBefore)
     expect(after.errorMessage).toBe('所选内容已失效。请重新选择后再试。')
     const located = locateCourseLayer(before.history.present, unselected.id)
     expect(located?.item.label).toBe(unselected.name)
@@ -500,8 +554,8 @@ describe('Spatial canonical property updates', () => {
 })
 
 describe('Spatial canonical clipboard commands', () => {
-  it('copies and pastes one owner batch, then duplicates it with one history entry each', () => {
-    useEditorStore.getState().createNewSpatialProject()
+  it('copies and pastes one owner batch, then duplicates it with one history entry each', async () => {
+    await useEditorStore.getState().createCourseDocument('spatial')
     useEditorStore.getState().addTextNode(40, 60)
     useEditorStore.getState().addTextNode(260, 180)
     const initial = useEditorStore.getState().spatialSession!
@@ -518,6 +572,7 @@ describe('Spatial canonical clipboard commands', () => {
       label: '成对复制',
     }))
     useEditorStore.getState().selectNodes(sourceIds)
+    await settleCourse()
 
     const beforeCopy = useEditorStore.getState()
     const copySession = beforeCopy.spatialSession!
@@ -537,12 +592,14 @@ describe('Spatial canonical clipboard commands', () => {
     expect(copied.spatialClipboard?.items).toHaveLength(2)
 
     const pasteBase = copied.spatialSession!
+    const pasteBaseHistory = activeHistory().past.length
     copied.pasteNodes()
+    await settleCourse()
     const pasted = useEditorStore.getState().spatialSession!
     const pastedIds = [...pasted.selection.selectionIds]
     expect(pastedIds).toHaveLength(2)
     expect(pasted.history.present.revision).toBe(pasteBase.history.present.revision + 1)
-    expect(pasted.history.past).toHaveLength(pasteBase.history.past.length + 1)
+    expect(activeHistory().past).toHaveLength(pasteBaseHistory + 1)
     expect(pasted.scope).toBe('world')
     const pastedSurface = pasted.history.present.surfaces.find(
       (candidate) => candidate.id === pasted.selection.surfaceId,
@@ -576,12 +633,14 @@ describe('Spatial canonical clipboard commands', () => {
     ]))
 
     const duplicateBase = pasted
+    const duplicateBaseHistory = activeHistory().past.length
     useEditorStore.getState().duplicateSelectedNodes()
+    await settleCourse()
     const duplicated = useEditorStore.getState().spatialSession!
     const duplicatedIds = [...duplicated.selection.selectionIds]
     expect(duplicatedIds).toHaveLength(2)
     expect(duplicated.history.present.revision).toBe(duplicateBase.history.present.revision + 1)
-    expect(duplicated.history.past).toHaveLength(duplicateBase.history.past.length + 1)
+    expect(activeHistory().past).toHaveLength(duplicateBaseHistory + 1)
     const duplicatedSurface = duplicated.history.present.surfaces.find(
       (candidate) => candidate.id === duplicated.selection.surfaceId,
     )
@@ -597,18 +656,18 @@ describe('Spatial canonical clipboard commands', () => {
       },
     })
 
-    useEditorStore.getState().undo()
+    await undoCourse()
     const undone = useEditorStore.getState().spatialSession!
     expect(undone.selection.selectionIds).toEqual([])
     expect(duplicatedIds.every((id) => locateCourseLayer(undone.history.present, id) === null)).toBe(true)
-    useEditorStore.getState().redo()
+    await redoCourse()
     const redone = useEditorStore.getState().spatialSession!
     expect(redone.selection.selectionIds).toEqual([])
     expect(duplicatedIds.every((id) => locateCourseLayer(redone.history.present, id) !== null)).toBe(true)
   })
 
-  it('clears the clipboard on a camera location transition and does not revive it on return', () => {
-    useEditorStore.getState().createNewSpatialProject()
+  it('clears the clipboard on a camera location transition and does not revive it on return', async () => {
+    await useEditorStore.getState().createCourseDocument('spatial')
     useEditorStore.getState().addTextNode()
     const sourceId = useEditorStore.getState().spatialSession!.history.present.surfaces
       .flatMap((surface) => surface.type === 'spatial-2d' ? surface.world.layerItems : [])[0]
@@ -645,8 +704,8 @@ describe('Spatial canonical clipboard commands', () => {
     expect(useEditorStore.getState().spatialClipboard).toBeNull()
   })
 
-  it('rejects locked, wrong-owner, removed-source, and empty operations without partial state writes', () => {
-    useEditorStore.getState().createNewSpatialProject()
+  it('rejects locked, wrong-owner, removed-source, and empty operations without partial state writes', async () => {
+    await useEditorStore.getState().createCourseDocument('spatial')
     useEditorStore.getState().addTextNode()
     useEditorStore.getState().addTextNode()
     const items = useEditorStore.getState().spatialSession!.history.present.surfaces
@@ -660,16 +719,15 @@ describe('Spatial canonical clipboard commands', () => {
     expect(validClipboard).not.toBeNull()
 
     useEditorStore.getState().updateNode(first.layerItemId, { locked: true })
+    await settleCourse()
     const beforeLockedPaste = useEditorStore.getState()
+    const beforeLockedPasteState = captureWriteState()
     beforeLockedPaste.pasteNodes()
     const afterLockedPaste = useEditorStore.getState()
-    expect(afterLockedPaste.spatialSession).toBe(beforeLockedPaste.spatialSession)
-    expect(afterLockedPaste.spatialSession?.history).toBe(beforeLockedPaste.spatialSession?.history)
-    expect(afterLockedPaste.spatialSession?.selection).toBe(beforeLockedPaste.spatialSession?.selection)
-    expect(afterLockedPaste.spatialSession?.selection.selectionIds).toBe(beforeLockedPaste.spatialSession?.selection.selectionIds)
+    expectNoWriteSince(beforeLockedPasteState)
     expect(afterLockedPaste.spatialClipboard).toBe(validClipboard)
     expect(afterLockedPaste.errorMessage).toMatch(/锁定/)
-    useEditorStore.getState().undo()
+    await undoCourse()
     expect(locateCourseLayer(
       useEditorStore.getState().spatialSession!.history.present,
       first.layerItemId,
@@ -678,32 +736,28 @@ describe('Spatial canonical clipboard commands', () => {
 
     useEditorStore.getState().selectNode(second.layerItemId)
     useEditorStore.getState().updateNode(second.layerItemId, { locked: true })
+    await settleCourse()
     const beforeLocked = useEditorStore.getState()
+    const beforeLockedState = captureWriteState()
     beforeLocked.copySelectedNodes()
     const afterLockedCopy = useEditorStore.getState()
-    expect(afterLockedCopy.spatialSession).toBe(beforeLocked.spatialSession)
-    expect(afterLockedCopy.spatialSession?.history).toBe(beforeLocked.spatialSession?.history)
-    expect(afterLockedCopy.spatialSession?.selection).toBe(beforeLocked.spatialSession?.selection)
-    expect(afterLockedCopy.spatialSession?.selection.selectionIds).toBe(beforeLocked.spatialSession?.selection.selectionIds)
+    expectNoWriteSince(beforeLockedState)
     expect(afterLockedCopy.spatialClipboard).toBe(validClipboard)
     expect(afterLockedCopy.errorMessage).toMatch(/锁定/)
 
     const beforeLockedDuplicate = useEditorStore.getState()
+    const beforeLockedDuplicateState = captureWriteState()
     beforeLockedDuplicate.duplicateSelectedNodes()
-    const afterLockedDuplicate = useEditorStore.getState()
-    expect(afterLockedDuplicate.spatialSession).toBe(beforeLockedDuplicate.spatialSession)
-    expect(afterLockedDuplicate.spatialSession?.history).toBe(beforeLockedDuplicate.spatialSession?.history)
-    expect(afterLockedDuplicate.spatialSession?.selection.selectionIds).toBe(beforeLockedDuplicate.spatialSession?.selection.selectionIds)
+    expectNoWriteSince(beforeLockedDuplicateState)
 
     useEditorStore.getState().selectNode(first.layerItemId)
     useEditorStore.getState().copySelectedNodes()
     useEditorStore.getState().setEditingScope('global')
     const beforeWrongOwner = useEditorStore.getState()
+    const beforeWrongOwnerState = captureWriteState()
     beforeWrongOwner.pasteNodes()
     const afterWrongOwner = useEditorStore.getState()
-    expect(afterWrongOwner.spatialSession).toBe(beforeWrongOwner.spatialSession)
-    expect(afterWrongOwner.spatialSession?.history).toBe(beforeWrongOwner.spatialSession?.history)
-    expect(afterWrongOwner.spatialSession?.selection.selectionIds).toBe(beforeWrongOwner.spatialSession?.selection.selectionIds)
+    expectNoWriteSince(beforeWrongOwnerState)
     expect(afterWrongOwner.errorMessage).toMatch(/编辑范围/)
 
     const controllerId = beforeWrongOwner.spatialSession?.history.present.globalLayerItems.find(
@@ -711,40 +765,38 @@ describe('Spatial canonical clipboard commands', () => {
     )?.item.layerItemId
     if (!controllerId) throw new Error('expected teacher controller')
     const beforeController = useEditorStore.getState()
+    const beforeControllerState = captureWriteState()
     beforeController.duplicateNode(controllerId)
     const afterController = useEditorStore.getState()
-    expect(afterController.spatialSession).toBe(beforeController.spatialSession)
-    expect(afterController.spatialSession?.history).toBe(beforeController.spatialSession?.history)
-    expect(afterController.spatialSession?.selection.selectionIds).toBe(beforeController.spatialSession?.selection.selectionIds)
+    expectNoWriteSince(beforeControllerState)
     expect(afterController.errorMessage).toMatch(/教师控制器/)
 
     useEditorStore.getState().setEditingScope('scene')
     useEditorStore.getState().selectNode(first.layerItemId)
     useEditorStore.getState().copySelectedNodes()
     useEditorStore.getState().deleteNode(first.layerItemId)
+    await settleCourse()
     const beforeRemoved = useEditorStore.getState()
+    const beforeRemovedState = captureWriteState()
     beforeRemoved.pasteNodes()
     const afterRemoved = useEditorStore.getState()
-    expect(afterRemoved.spatialSession).toBe(beforeRemoved.spatialSession)
-    expect(afterRemoved.spatialSession?.history).toBe(beforeRemoved.spatialSession?.history)
-    expect(afterRemoved.spatialSession?.selection.selectionIds).toBe(beforeRemoved.spatialSession?.selection.selectionIds)
+    expectNoWriteSince(beforeRemovedState)
     expect(afterRemoved.errorMessage).toMatch(/失效/)
 
     useEditorStore.setState({ spatialClipboard: null })
     const beforeEmpty = useEditorStore.getState()
+    const beforeEmptyState = captureWriteState()
     beforeEmpty.pasteNodes()
     const afterEmpty = useEditorStore.getState()
-    expect(afterEmpty.spatialSession).toBe(beforeEmpty.spatialSession)
-    expect(afterEmpty.spatialSession?.history).toBe(beforeEmpty.spatialSession?.history)
-    expect(afterEmpty.spatialSession?.selection.selectionIds).toBe(beforeEmpty.spatialSession?.selection.selectionIds)
+    expectNoWriteSince(beforeEmptyState)
     expect(afterEmpty.errorMessage).toMatch(/剪贴板为空/)
 
-    useEditorStore.getState().createNewProject()
+    await useEditorStore.getState().createCourseDocument('slide')
     expect(useEditorStore.getState().spatialClipboard).toBeNull()
   })
 
-  it('remaps runtime, interaction follower, and relation references across later edits and repeated paste', () => {
-    useEditorStore.getState().createNewSpatialProject()
+  it('remaps runtime, interaction follower, and relation references across later edits and repeated paste', async () => {
+    await useEditorStore.getState().createCourseDocument('spatial')
     useEditorStore.getState().addTextNode(20, 30)
     useEditorStore.getState().addTextNode(500, 300)
     const session = useEditorStore.getState().spatialSession!
@@ -855,12 +907,13 @@ describe('Spatial canonical clipboard commands', () => {
         }],
       },
     )
-    useEditorStore.getState().loadCourseProject(document, null)
+    await courseStoreHost().open(document)
     useEditorStore.getState().selectNodes([triggerItem.layerItemId, runtimeId])
     useEditorStore.getState().copySelectedNodes()
     const capturedRevision = useEditorStore.getState().spatialClipboard?.capturedRevision
 
     useEditorStore.getState().pasteNodes()
+    await settleCourse()
     const firstPaste = useEditorStore.getState().spatialSession!
     const [newTriggerId, newRuntimeId] = firstPaste.selection.selectionIds
     expect(capturedRevision).toBeLessThan(firstPaste.history.present.revision)
@@ -913,9 +966,11 @@ describe('Spatial canonical clipboard commands', () => {
 
     useEditorStore.getState().selectNode(outsideItem.layerItemId)
     useEditorStore.getState().updateNode(outsideItem.layerItemId, { name: '普通后续编辑' })
+    await settleCourse()
     const editedRevision = useEditorStore.getState().spatialSession!.history.present.revision
     expect(editedRevision).toBeGreaterThan(firstPaste.history.present.revision)
     useEditorStore.getState().pasteNodes()
+    await settleCourse()
     const repeated = useEditorStore.getState().spatialSession!
     expect(repeated.history.present.revision).toBe(editedRevision + 1)
     expect(repeated.selection.selectionIds).toHaveLength(2)
@@ -932,16 +987,15 @@ describe('Spatial canonical clipboard commands', () => {
     runtimeClipboardItem.item.runtime.nodeBindings = { missing: 'removed-layer-reference' }
     useEditorStore.setState({ spatialClipboard: danglingClipboard })
     const beforeDangling = useEditorStore.getState()
+    const beforeDanglingState = captureWriteState()
     beforeDangling.pasteNodes()
     const afterDangling = useEditorStore.getState()
-    expect(afterDangling.spatialSession).toBe(beforeDangling.spatialSession)
-    expect(afterDangling.spatialSession?.history).toBe(beforeDangling.spatialSession?.history)
-    expect(afterDangling.spatialSession?.selection.selectionIds).toBe(beforeDangling.spatialSession?.selection.selectionIds)
+    expectNoWriteSince(beforeDanglingState)
     expect(afterDangling.errorMessage).toMatch(/资源|引用/)
   })
 
-  it('rejects an owner at capacity without changing document, history, or selection', () => {
-    useEditorStore.getState().createNewSpatialProject()
+  it('rejects an owner at capacity without changing document, history, or selection', async () => {
+    await useEditorStore.getState().createCourseDocument('spatial')
     useEditorStore.getState().addTextNode()
     const initial = useEditorStore.getState().spatialSession!
     const document = structuredClone(initial.history.present)
@@ -965,21 +1019,20 @@ describe('Spatial canonical clipboard commands', () => {
       order += 1
       surface.world.layerItems.push(item)
     }
-    useEditorStore.getState().loadCourseProject(document, null)
+    await courseStoreHost().open(document)
     useEditorStore.getState().selectNode(source.layerItemId)
+    await settleCourse()
     const before = useEditorStore.getState()
+    const beforeState = captureWriteState()
     before.duplicateSelectedNodes()
     const after = useEditorStore.getState()
-    expect(after.spatialSession).toBe(before.spatialSession)
-    expect(after.spatialSession?.history).toBe(before.spatialSession?.history)
-    expect(after.spatialSession?.selection).toBe(before.spatialSession?.selection)
-    expect(after.spatialSession?.selection.selectionIds).toBe(before.spatialSession?.selection.selectionIds)
+    expectNoWriteSince(beforeState)
     expect(after.errorMessage).toMatch(/上限/)
   })
 })
 
 describe('scene operations', () => {
-  it('adds scenes, switches to the new scene, and records each addition', () => {
+  it('adds scenes, switches to the new scene, and records each addition', async () => {
     const store = useEditorStore.getState()
     store.addScene()
     store.addScene()
@@ -991,11 +1044,12 @@ describe('scene operations', () => {
       '场景 3',
     ])
     expect(selectActiveSceneId(state)).toBe(selectSlideSceneList(state)[2]!.id)
+    await settleCourse()
     expect(activeHistory().past).toHaveLength(2)
     expect(state.dirty).toBe(true)
   })
 
-  it.each(['scene', 'scene-from-flow', 'surface', 'only-scene-on-first-surface'] as const)('deletes the original %s with later content and restores it in one undo', (kind) => {
+  it.each(['scene', 'scene-from-flow', 'surface', 'only-scene-on-first-surface'] as const)('deletes the original %s with later content and restores it in one undo', async (kind) => {
     const store = useEditorStore.getState()
     const initial = selectActiveCourseProjectDocument(store)!
     const firstScene = selectSlideSceneList(store)[0]!.id
@@ -1004,28 +1058,31 @@ describe('scene operations', () => {
     else store.addCourseContent('slide-page')
     if (kind === 'scene-from-flow') store.addCourseContent('flow-page')
     const before = structuredClone(selectActiveCourseProjectDocument(useEditorStore.getState())!)
+    await settleCourse()
     const historyCount = activeHistory().past.length
     if (kind !== 'surface') store.deleteScene(firstScene)
     else store.deleteCourseSurface(firstSurface)
     const after = selectActiveCourseProjectDocument(useEditorStore.getState())!
     expect(after.locations.some(location => location.id === initial.startLocationId), useEditorStore.getState().errorMessage ?? '').toBe(false)
     expect(after.startLocationId).toBe(after.locations[0]!.id)
+    await settleCourse()
     expect(activeHistory().past).toHaveLength(historyCount + 1)
-    store.undo()
+    await undoCourse()
     expect(selectActiveCourseProjectDocument(useEditorStore.getState())!.locations).toEqual(before.locations)
   })
 
-  it('never deletes the final scene and does not create a no-op history entry', () => {
+  it('never deletes the final scene and does not create a no-op history entry', async () => {
     const initial = useEditorStore.getState()
     const onlySceneId = selectSlideSceneList(initial)[0]!.id
 
     expect(initial.deleteScene(onlySceneId)).toBe(false)
     expect(selectSlideSceneList(useEditorStore.getState())).toHaveLength(1)
+    await settleCourse()
     expect(activeHistory().past).toHaveLength(0)
     expect(useEditorStore.getState().dirty).toBe(false)
   })
 
-  it('renames, recolours, reorders, and deletes scenes with undoable commits', () => {
+  it('renames, recolours, reorders, and deletes scenes with undoable commits', async () => {
     const store = useEditorStore.getState()
     const firstId = selectSlideSceneList(store)[0]!.id
     store.addScene()
@@ -1060,9 +1117,10 @@ describe('scene operations', () => {
     expect(selectActiveSceneId(state)).toBe(firstId)
   })
 
-  it('ignores invalid reorder requests without changing history', () => {
+  it('ignores invalid reorder requests without changing history', async () => {
     const store = useEditorStore.getState()
     store.addScene()
+    await settleCourse()
     const historyLength = activeHistory().past.length
     const sceneIds = selectSlideSceneList(useEditorStore.getState()).map((scene) => scene.id)
 
@@ -1070,10 +1128,11 @@ describe('scene operations', () => {
     expect(selectSlideSceneList(useEditorStore.getState()).map((scene) => scene.id)).toEqual(
       sceneIds,
     )
+    await settleCourse()
     expect(activeHistory().past).toHaveLength(historyLength)
   })
 
-  it('keeps a high defensive scene limit without the former 30-scene product cap', () => {
+  it('keeps a high defensive scene limit without the former 30-scene product cap', async () => {
     const store = useEditorStore.getState()
     const document = structuredClone(selectSlideAuthoringDocument(useEditorStore.getState())!)
     const surface = document.surfaces.find((item) => item.type === 'slide')
@@ -1097,7 +1156,7 @@ describe('scene operations', () => {
         sceneId: scene.id,
       })),
     ]
-    store.loadCourseProject(document, null)
+    await courseStoreHost().open(document)
     store.addScene()
 
     const state = useEditorStore.getState()
@@ -1105,12 +1164,13 @@ describe('scene operations', () => {
     expect(state.errorMessage).toContain(`${MAX_PROJECT_SCENES} 个场景上限`)
   })
 
-  it('duplicates a scene with independent scene and node identities', () => {
+  it('duplicates a scene with independent scene and node identities', async () => {
     const store = useEditorStore.getState()
     const sourceId = selectSlideSceneList(store)[0]!.id
     store.addTextNode(80, 90)
     store.addRectangleNode(320, 240)
     const sourceNodes = activeScene().nodes.map((node) => structuredClone(node))
+    await settleCourse()
     const historyBeforeDuplicate = activeHistory().past.length
 
     store.duplicateScene(sourceId)
@@ -1128,6 +1188,7 @@ describe('scene operations', () => {
     )
     expect(selectActiveSceneId(state)).toBe(copy.id)
     expect(selectSelectedNodeIds(state)).toEqual([])
+    await settleCourse()
     expect(activeHistory().past).toHaveLength(historyBeforeDuplicate + 1)
 
     const copiedText = copy.nodes.find((node) => node.type === 'text')
@@ -1140,7 +1201,7 @@ describe('scene operations', () => {
     ).toMatchObject({ text: '双击编辑文字' })
   })
 
-  it('rewrites a duplicated scene self-entry while preserving its valid state target', () => {
+  it('rewrites a duplicated scene self-entry while preserving its valid state target', async () => {
     const store = useEditorStore.getState()
     const sourceSceneId = activeScene().id
     store.addPresentationState('完成')
@@ -1183,7 +1244,7 @@ describe('scene operations', () => {
 })
 
 describe('interaction rule authoring order', () => {
-  it('duplicates with fresh ids, reorders within rule kind, and undoes both', () => {
+  it('duplicates with fresh ids, reorders within rule kind, and undoes both', async () => {
     const store = useEditorStore.getState()
     store.addTextNode()
     const sceneId = activeScene().id
@@ -1228,14 +1289,14 @@ describe('interaction rule authoring order', () => {
       copyId,
       'click',
     ])
-    store.undo()
+    await undoCourse()
     expect(activeScene().interactions.map((rule) => rule.id)).toEqual([
       'first',
       copyId,
       'click',
       'second',
     ])
-    store.undo()
+    await undoCourse()
     expect(activeScene().interactions.map((rule) => rule.id)).toEqual([
       'first',
       'click',
@@ -1245,7 +1306,7 @@ describe('interaction rule authoring order', () => {
 })
 
 describe('animation completion dependency cleanup', () => {
-  it('cascades through second-order completion rules when the source rule is deleted', () => {
+  it('cascades through second-order completion rules when the source rule is deleted', async () => {
     const store = useEditorStore.getState()
     store.addTextNode()
     const sceneId = activeScene().id
@@ -1326,7 +1387,7 @@ describe('animation completion dependency cleanup', () => {
     expect(activeScene().interactions.map((rule) => rule.id)).toEqual([
       'unrelated',
     ])
-    store.undo()
+    await undoCourse()
     expect(activeScene().interactions.map((rule) => rule.id)).toEqual([
       'motion-source',
       'first-dependent',
@@ -1337,7 +1398,7 @@ describe('animation completion dependency cleanup', () => {
 })
 
 describe('node operations', () => {
-  it('adds text, rectangle, and image nodes with their required defaults', () => {
+  it('adds text, rectangle, and image nodes with their required defaults', async () => {
     const store = useEditorStore.getState()
     store.addTextNode(100, 120)
     store.addRectangleNode(220, 240)
@@ -1363,7 +1424,7 @@ describe('node operations', () => {
     expect(selectSelectedNodeId(useEditorStore.getState())).toBe(nodes[2]!.id)
   })
 
-  it('keeps newly dropped nodes at least 20px inside the visible canvas edge', () => {
+  it('keeps newly dropped nodes at least 20px inside the visible canvas edge', async () => {
     const store = useEditorStore.getState()
     store.addRectangleNode(1279, 719)
     store.addTextNode(-900, -900)
@@ -1378,7 +1439,7 @@ describe('node operations', () => {
     })
   })
 
-  it('keeps a high defensive node limit without the former 100-node product cap', () => {
+  it('keeps a high defensive node limit without the former 100-node product cap', async () => {
     const store = useEditorStore.getState()
     const document = structuredClone(selectSlideAuthoringDocument(useEditorStore.getState())!)
     const surface = document.surfaces.find((item) => item.type === 'slide')
@@ -1392,14 +1453,14 @@ describe('node operations', () => {
     scene.layerItems = Array.from({ length: MAX_SCENE_NODES }, (_, index) => (
       sceneNodeToCourseLayerItem(createTextNode(), startOrder + index)
     ))
-    store.loadCourseProject(document, null)
+    await courseStoreHost().open(document)
     store.addRectangleNode()
 
     expect(activeScene().nodes).toHaveLength(MAX_SCENE_NODES)
     expect(useEditorStore.getState().errorMessage).toContain(`${MAX_SCENE_NODES} 个节点上限`)
   })
 
-  it('deletes a selected node and undo restores it', () => {
+  it('deletes a selected node and undo restores it', async () => {
     const store = useEditorStore.getState()
     store.addTextNode()
     const nodeId = activeScene().nodes[0]!.id
@@ -1407,15 +1468,16 @@ describe('node operations', () => {
     expect(activeScene().nodes).toHaveLength(0)
     expect(selectSelectedNodeId(useEditorStore.getState())).toBeNull()
 
-    store.undo()
+    await undoCourse()
     expect(activeScene().nodes).toHaveLength(1)
     expect(activeScene().nodes[0]!.id).toBe(nodeId)
   })
 
-  it('commits a completed drag/resize as exactly one history step', () => {
+  it('commits a completed drag/resize as exactly one history step', async () => {
     const store = useEditorStore.getState()
     store.addRectangleNode()
     const nodeId = activeScene().nodes[0]!.id
+    await settleCourse()
     const historyBeforeCommit = activeHistory().past.length
 
     // Phaser pointermove is view-only; pointerup supplies one final Store patch.
@@ -1426,6 +1488,7 @@ describe('node operations', () => {
       height: 222,
     })
 
+    await settleCourse()
     expect(activeHistory().past).toHaveLength(
       historyBeforeCommit + 1,
     )
@@ -1437,10 +1500,11 @@ describe('node operations', () => {
     })
   })
 
-  it('keeps a live text draft in the project and commits it as exactly one history step', () => {
+  it('keeps a live text draft in the project and commits it as exactly one history step', async () => {
     const store = useEditorStore.getState()
     store.addTextNode()
     const nodeId = activeScene().nodes[0]!.id
+    await settleCourse()
     const historyBeforeCommit = activeHistory().past.length
 
     store.beginTextEdit(nodeId, 'canvas')
@@ -1452,12 +1516,14 @@ describe('node operations', () => {
       text: '中文文本\n第二行',
       height: 120,
     })
+    await settleCourse()
     expect(activeHistory().past).toHaveLength(
       historyBeforeCommit,
     )
 
     store.commitTextEdit()
 
+    await settleCourse()
     expect(activeHistory().past).toHaveLength(
       historyBeforeCommit + 1,
     )
@@ -1466,31 +1532,35 @@ describe('node operations', () => {
       height: 120,
     })
 
-    store.undo()
+    await undoCourse()
     expect(activeScene().nodes[0]).toMatchObject({ text: '双击编辑文字' })
-    store.redo()
+    await redoCourse()
     expect(activeScene().nodes[0]).toMatchObject({ text: '中文文本\n第二行' })
   })
 
-  it('commits a canvas text draft before switching to properties so undo restores the draft', () => {
+  it('commits a canvas text draft before switching to properties so undo restores the draft', async () => {
     const store = useEditorStore.getState()
     store.addTextNode()
     const nodeId = activeScene().nodes[0]!.id
+    await settleCourse()
     const historyBefore = activeHistory().past.length
 
     store.beginTextEdit(nodeId, 'canvas')
     expect(selectSlideWorkspaceSource(useEditorStore.getState())[7]).toBe(nodeId)
     store.updateTextEditDraft(nodeId, '画布编辑中的草稿', [], 80)
     expect(activeScene().nodes[0]).toMatchObject({ text: '画布编辑中的草稿' })
+    await settleCourse()
     expect(activeHistory().past).toHaveLength(historyBefore)
     expect(useEditorStore.getState().v9ContentEdit?.source).toBe('canvas')
 
     store.beginTextEdit(nodeId, 'canvas')
+    await settleCourse()
     expect(activeHistory().past).toHaveLength(historyBefore)
     expect(useEditorStore.getState().v9ContentEdit?.source).toBe('canvas')
     expect(activeScene().nodes[0]).toMatchObject({ text: '画布编辑中的草稿' })
 
     store.beginTextEdit(nodeId, 'properties')
+    await settleCourse()
     expect(activeHistory().past).toHaveLength(historyBefore + 1)
     expect(useEditorStore.getState().v9ContentEdit?.source).toBe('properties')
     expect(useEditorStore.getState().editingTextNodeId).toBeNull()
@@ -1500,13 +1570,14 @@ describe('node operations', () => {
     store.updateTextEditDraft(nodeId, '属性栏最终文字', [], 80)
     store.commitTextEdit()
     expect(activeScene().nodes[0]).toMatchObject({ text: '属性栏最终文字' })
+    await settleCourse()
     expect(activeHistory().past).toHaveLength(historyBefore + 2)
 
-    store.undo()
+    await undoCourse()
     expect(activeScene().nodes[0]).toMatchObject({ text: '画布编辑中的草稿' })
   })
 
-  it('keeps auto-width changes inside the same vertical text transaction', () => {
+  it('keeps auto-width changes inside the same vertical text transaction', async () => {
     const store = useEditorStore.getState()
     store.addTextNode()
     const nodeId = activeScene().nodes[0]!.id
@@ -1514,6 +1585,7 @@ describe('node operations', () => {
       style: { writingMode: 'vertical-lr', overflow: 'auto-height' },
     })
     const originalWidth = activeScene().nodes[0]!.width
+    await settleCourse()
     const historyBeforeCommit = activeHistory().past.length
 
     store.beginTextEdit(nodeId, 'canvas')
@@ -1525,26 +1597,29 @@ describe('node operations', () => {
       width: 128,
       height: 180,
     })
+    await settleCourse()
     expect(activeHistory().past).toHaveLength(
       historyBeforeCommit,
     )
 
     store.commitTextEdit()
+    await settleCourse()
     expect(activeHistory().past).toHaveLength(
       historyBeforeCommit + 1,
     )
-    store.undo()
+    await undoCourse()
     expect(activeScene().nodes[0]).toMatchObject({
       text: '双击编辑文字',
       width: originalWidth,
     })
   })
 
-  it('cancels a text transaction without adding history or leaving the project dirty', () => {
+  it('cancels a text transaction without adding history or leaving the project dirty', async () => {
     const store = useEditorStore.getState()
     store.addTextNode()
     const nodeId = activeScene().nodes[0]!.id
-    acknowledgeCurrentSave('lesson.h5lesson')
+    await acknowledgeCurrentSave('lesson.h5lesson')
+    await settleCourse()
     const historyBefore = activeHistory().past.length
 
     store.beginTextEdit(nodeId, 'properties')
@@ -1556,17 +1631,19 @@ describe('node operations', () => {
       text: '双击编辑文字',
       height: 80,
     })
+    await settleCourse()
     expect(activeHistory().past).toHaveLength(historyBefore)
     expect(useEditorStore.getState().dirty).toBe(false)
   })
 
-  it('deterministically commits text before switching nodes or scenes', () => {
+  it('deterministically commits text before switching nodes or scenes', async () => {
     const store = useEditorStore.getState()
     const firstSceneId = selectActiveSceneId(store)
     store.addTextNode()
     const textId = activeScene().nodes[0]!.id
     store.addRectangleNode()
     const rectangleId = activeScene().nodes[1]!.id
+    await settleCourse()
     const historyBeforeNodeSwitch = activeHistory().past.length
 
     store.selectNode(textId)
@@ -1574,6 +1651,7 @@ describe('node operations', () => {
     store.updateTextEditDraft(textId, '切换后仍保留', [], 80)
     store.selectNode(rectangleId)
 
+    await settleCourse()
     expect(activeHistory().past).toHaveLength(
       historyBeforeNodeSwitch + 1,
     )
@@ -1592,16 +1670,18 @@ describe('node operations', () => {
     ).toMatchObject({ text: '切场景前提交' })
   })
 
-  it('commits the current text draft before save acknowledgement', () => {
+  it('commits the current text draft before save acknowledgement', async () => {
     const store = useEditorStore.getState()
     store.addTextNode()
     const nodeId = activeScene().nodes[0]!.id
-    acknowledgeCurrentSave('before-draft.h5lesson')
+    await acknowledgeCurrentSave('before-draft.h5lesson')
+    await settleCourse()
     const historyBefore = activeHistory().past.length
 
     store.beginTextEdit(nodeId, 'canvas')
     store.updateTextEditDraft(nodeId, '保存时的当前文字', [], 80)
     expect(selectHasUnsavedCourseChanges(useEditorStore.getState())).toBe(true)
+    await settleCourse()
     expect(activeHistory().past).toHaveLength(historyBefore)
 
     const preparation = store.prepareCourseProjectPersistence()
@@ -1609,21 +1689,28 @@ describe('node operations', () => {
     if (!preparation.ok) throw new Error(preparation.reason)
 
     expect(activeScene().nodes[0]).toMatchObject({ text: '保存时的当前文字' })
+    await settleCourse()
     expect(activeHistory().past).toHaveLength(historyBefore + 1)
     expect(useEditorStore.getState().v9ContentEdit).toBeNull()
     expect(useEditorStore.getState().dirty).toBe(true)
 
     const secondPreparation = store.prepareCourseProjectPersistence()
     expect(secondPreparation.ok).toBe(true)
+    await settleCourse()
     expect(activeHistory().past).toHaveLength(historyBefore + 1)
 
+    // 2.0 由主进程持有保存状态：renderer 只有在草稿已提交且主进程真的落盘后才能确认保存。
+    const documentId = useEditorStore.getState().courseDocument.documentId
+    if (!documentId) throw new Error('expected active Surface session')
+    await courseStoreHost().api.save(documentId, 'saved-draft.h5lesson')
+    await settleCourse()
     expect(
       store.acknowledgeCourseProjectSaved('saved-draft.h5lesson', preparation.token),
     ).toBe(true)
     expect(useEditorStore.getState().dirty).toBe(false)
   })
 
-  it('reorders nodes using scene.nodes as the only layer order', () => {
+  it('reorders nodes using scene.nodes as the only layer order', async () => {
     const store = useEditorStore.getState()
     store.addTextNode()
     store.addRectangleNode()
@@ -1634,41 +1721,41 @@ describe('node operations', () => {
       rectangle!.id,
       text!.id,
     ])
-    store.undo()
+    await undoCourse()
     expect(activeScene().nodes.map((node) => node.id)).toEqual([
       text!.id,
       rectangle!.id,
     ])
   })
 
-  it('rolls back and restores a new image node, metadata, and bytes atomically', () => {
+  it('rolls back and restores a new image node, metadata, and bytes atomically', async () => {
     const store = useEditorStore.getState()
     store.addImageNode(imageMeta, new Uint8Array([1, 2, 3, 4]))
-    store.undo()
+    await undoCourse()
 
     expect(activeScene().nodes).toHaveLength(0)
     expect(selectActiveCourseProjectDocument(useEditorStore.getState())!.assets[imageMeta.id]).toBeUndefined()
     expect(mediaFiles()[imageMeta.id]).toBeUndefined()
 
-    store.redo()
+    await redoCourse()
     expect(activeScene().nodes).toHaveLength(1)
     expect(selectActiveCourseProjectDocument(useEditorStore.getState())!.assets[imageMeta.id]).toEqual(imageMeta)
     expect([...mediaFiles()[imageMeta.id]!]).toEqual([1, 2, 3, 4])
   })
 
-  it('undoes a reused asset node without deleting pre-existing bytes', () => {
+  it('undoes a reused asset node without deleting pre-existing bytes', async () => {
     const store = useEditorStore.getState()
     const bytes = new Uint8Array([1, 2, 3, 4])
     store.importAsset(imageMeta, bytes)
     store.addImageNode(imageMeta, bytes)
-    store.undo()
+    await undoCourse()
 
     expect(activeScene().nodes).toHaveLength(0)
     expect(selectActiveCourseProjectDocument(useEditorStore.getState())!.assets[imageMeta.id]).toEqual(imageMeta)
     expect([...mediaFiles()[imageMeta.id]!]).toEqual([...bytes])
   })
 
-  it('deletes an unused asset through history and restores its bytes on undo', () => {
+  it('deletes an unused asset through history and restores its bytes on undo', async () => {
     const store = useEditorStore.getState()
     const bytes = new Uint8Array([1, 2, 3, 4])
     store.importAsset(imageMeta, bytes)
@@ -1677,33 +1764,34 @@ describe('node operations', () => {
     expect(selectActiveCourseProjectDocument(useEditorStore.getState())!.assets[imageMeta.id]).toBeUndefined()
     expect(mediaFiles()[imageMeta.id]).toBeUndefined()
 
-    store.undo()
+    await undoCourse()
     expect(selectActiveCourseProjectDocument(useEditorStore.getState())!.assets[imageMeta.id]).toEqual(imageMeta)
     expect([...mediaFiles()[imageMeta.id]!]).toEqual([...bytes])
-    store.redo()
+    await redoCourse()
     expect(selectActiveCourseProjectDocument(useEditorStore.getState())!.assets[imageMeta.id]).toBeUndefined()
     expect(mediaFiles()[imageMeta.id]).toBeUndefined()
   })
 
-  it('undoes and redoes an asset imported only into the media library', () => {
+  it('undoes and redoes an asset imported only into the media library', async () => {
     const store = useEditorStore.getState()
     const bytes = new Uint8Array([1, 2, 3, 4])
     store.importAsset(imageMeta, bytes)
     expect(selectSlideSceneList(store)[0]!.nodes).toHaveLength(0)
     expect(selectActiveCourseProjectDocument(useEditorStore.getState())!.assets[imageMeta.id]).toEqual(imageMeta)
 
-    store.undo()
+    await undoCourse()
     expect(selectActiveCourseProjectDocument(useEditorStore.getState())!.assets[imageMeta.id]).toBeUndefined()
     expect(mediaFiles()[imageMeta.id]).toBeUndefined()
-    store.redo()
+    await redoCourse()
     expect(selectActiveCourseProjectDocument(useEditorStore.getState())!.assets[imageMeta.id]).toEqual(imageMeta)
     expect([...mediaFiles()[imageMeta.id]!]).toEqual([...bytes])
   })
 
-  it('keeps component import and later node placement as separate undo steps', () => {
+  it('keeps component import and later node placement as separate undo steps', async () => {
     const store = useEditorStore.getState()
     const component = sampleComponent()
     store.importComponentPackage(component)
+    await settleCourse()
     expect(activeHistory().past).toHaveLength(1)
 
     store.addExternalComponentNode(component.manifest.id, 350, 210)
@@ -1721,7 +1809,7 @@ describe('node operations', () => {
       props: { initialValue: 3 },
     })
 
-    store.undo()
+    await undoCourse()
     expect(activeScene().nodes).toHaveLength(0)
     expect(
       selectActiveCourseProjectDocument(useEditorStore.getState())!.componentPackages['com.example.counter'],
@@ -1730,7 +1818,7 @@ describe('node operations', () => {
       useEditorStore.getState().componentPackages['com.example.counter'],
     ).toBeDefined()
 
-    store.undo()
+    await undoCourse()
     expect(
       selectActiveCourseProjectDocument(useEditorStore.getState())!.componentPackages['com.example.counter'],
     ).toBeUndefined()
@@ -1739,7 +1827,7 @@ describe('node operations', () => {
     ).toBeUndefined()
   })
 
-  it('rejects a second version of the same component ID without corrupting references', () => {
+  it('rejects a second version of the same component ID without corrupting references', async () => {
     const store = useEditorStore.getState()
     const first = sampleComponent()
     store.importComponentPackage(first)
@@ -1762,7 +1850,7 @@ describe('node operations', () => {
 })
 
 describe('scene presentation states', () => {
-  it('keeps a composing Slide draft in edit mode until IME composition finishes', () => {
+  it('keeps a composing Slide draft in edit mode until IME composition finishes', async () => {
     const store = useEditorStore.getState()
     store.addTextNode(80, 90)
     const nodeId = activeScene().nodes[0]!.id
@@ -1799,7 +1887,7 @@ describe('scene presentation states', () => {
       : null).toBe('输入法草稿')
   })
 
-  it('normalizes legacy scenes and enters the authored initial state when run mode starts', () => {
+  it('normalizes legacy scenes and enters the authored initial state when run mode starts', async () => {
     const presentation = activeScene().presentation
     expect(presentation).toBeDefined()
     const initialId = presentation!.initialStateId
@@ -1816,12 +1904,13 @@ describe('scene presentation states', () => {
     expect(selectActivePresentationStateId(useEditorStore.getState())).toBeNull()
   })
 
-  it('stores state edits as overrides while keeping the canonical base editable', () => {
+  it('stores state edits as overrides while keeping the canonical base editable', async () => {
     const store = useEditorStore.getState()
     store.addTextNode(80, 90)
     const nodeId = activeScene().nodes[0]!.id
     store.addPresentationState('答错')
     const stateId = selectActivePresentationStateId(useEditorStore.getState())!
+    await settleCourse()
     const historyBeforeEdit = activeHistory().past.length
 
     useEditorStore.getState().updateNode(nodeId, {
@@ -1847,16 +1936,17 @@ describe('scene presentation states', () => {
       text: '请再试一次',
       style: { color: '#ef4444' },
     })
+    await settleCourse()
     expect(activeHistory().past).toHaveLength(historyBeforeEdit + 1)
 
-    useEditorStore.getState().undo()
+    await undoCourse()
     expect(selectEffectiveSlideSceneNodes(stateId)[0]).toMatchObject({
       x: 80,
       text: '双击编辑文字',
     })
   })
 
-  it('never lets base or state property patches rewrite stable node identity', () => {
+  it('never lets base or state property patches rewrite stable node identity', async () => {
     const store = useEditorStore.getState()
     store.addTextNode()
     const nodeId = activeScene().nodes[0]!.id
@@ -1878,7 +1968,7 @@ describe('scene presentation states', () => {
     })
   })
 
-  it('deletes state-owned nodes structurally and hides inherited nodes in a named state', () => {
+  it('deletes state-owned nodes structurally and hides inherited nodes in a named state', async () => {
     const store = useEditorStore.getState()
     store.addTextNode(40, 60)
     const inheritedId = activeScene().nodes[0]!.id
@@ -1917,7 +2007,7 @@ describe('scene presentation states', () => {
       .toHaveLength(0)
   })
 
-  it('keeps a named-state locked row and all edit state unchanged on delete', () => {
+  it('keeps a named-state locked row and all edit state unchanged on delete', async () => {
     const store = useEditorStore.getState()
     store.addTextNode()
     const nodeId = activeScene().nodes[0]!.id
@@ -1925,21 +2015,25 @@ describe('scene presentation states', () => {
     const stateId = selectActivePresentationStateId(useEditorStore.getState())!
     useEditorStore.getState().updateNode(nodeId, { locked: true })
     useEditorStore.getState().selectNode(nodeId)
-    const beforeDocument = selectSlideAuthoringDocument(useEditorStore.getState())
+    await settleCourse()
+    const beforeDocument = structuredClone(selectSlideAuthoringDocument(useEditorStore.getState()))
     const beforeHistory = activeHistory().past
-    const beforeSelection = selectSelectedNodeIds(useEditorStore.getState())
+    const beforeSelection = [...selectSelectedNodeIds(useEditorStore.getState())]
+    const beforeState = captureWriteState()
 
     useEditorStore.getState().deleteNode(nodeId)
 
-    expect(selectSlideAuthoringDocument(useEditorStore.getState())).toBe(beforeDocument)
+    expect(selectSlideAuthoringDocument(useEditorStore.getState())).toEqual(beforeDocument)
+    await settleCourse()
+    expectNoWriteSince(beforeState)
     expect(activeHistory().past).toBe(beforeHistory)
-    expect(selectSelectedNodeIds(useEditorStore.getState())).toBe(beforeSelection)
+    expect([...selectSelectedNodeIds(useEditorStore.getState())]).toEqual(beforeSelection)
     expect(selectEffectiveSlideSceneNodes(stateId).find((node) => node.id === nodeId))
       .toMatchObject({ locked: true })
     expect(useEditorStore.getState().errorMessage).toBe('locked')
   })
 
-  it('rejects a selection snapshot captured in another named state without writing', () => {
+  it('rejects a selection snapshot captured in another named state without writing', async () => {
     const store = useEditorStore.getState()
     store.addTextNode()
     const nodeId = activeScene().nodes[0]!.id
@@ -1954,25 +2048,30 @@ describe('scene presentation states', () => {
     expect(stale.stateId).toBe(stateA)
     useEditorStore.getState().setActivePresentationState(stateB)
     useEditorStore.getState().selectNode(nodeId)
-    const beforeDocument = selectSlideAuthoringDocument(useEditorStore.getState())
+    await settleCourse()
+    const beforeDocument = structuredClone(selectSlideAuthoringDocument(useEditorStore.getState()))
     const beforeHistory = activeHistory().past
-    const beforeSelection = selectSelectedNodeIds(useEditorStore.getState())
+    const beforeSelection = [...selectSelectedNodeIds(useEditorStore.getState())]
+    const beforeState = captureWriteState()
 
     const result = useEditorStore.getState().routeEditorAction('delete', stale)
 
     expect(result).toMatchObject({ ok: false, adapter: 'none' })
-    expect(selectSlideAuthoringDocument(useEditorStore.getState())).toBe(beforeDocument)
+    expect(selectSlideAuthoringDocument(useEditorStore.getState())).toEqual(beforeDocument)
+    await settleCourse()
+    expectNoWriteSince(beforeState)
     expect(activeHistory().past).toBe(beforeHistory)
-    expect(selectSelectedNodeIds(useEditorStore.getState())).toBe(beforeSelection)
+    expect([...selectSelectedNodeIds(useEditorStore.getState())]).toEqual(beforeSelection)
     expect(activeScene().nodes.some((node) => node.id === nodeId)).toBe(true)
   })
 
-  it('commits text editing in a state as one undoable override transaction', () => {
+  it('commits text editing in a state as one undoable override transaction', async () => {
     const store = useEditorStore.getState()
     store.addTextNode()
     const nodeId = activeScene().nodes[0]!.id
     store.addPresentationState('完成')
     const stateId = selectActivePresentationStateId(useEditorStore.getState())!
+    await settleCourse()
     const historyBefore = activeHistory().past.length
 
     useEditorStore.getState().beginTextEdit(nodeId, 'properties')
@@ -1984,19 +2083,20 @@ describe('scene presentation states', () => {
     expect(activeScene().nodes[0]).toMatchObject({ text: '双击编辑文字', height: 80 })
     useEditorStore.getState().commitTextEdit()
 
+    await settleCourse()
     expect(activeHistory().past).toHaveLength(historyBefore + 1)
     expect(selectEffectiveSlideSceneNodes(stateId)[0]).toMatchObject({
       text: '状态文字',
       height: 96,
     })
-    useEditorStore.getState().undo()
+    await undoCourse()
     expect(selectEffectiveSlideSceneNodes(stateId)[0]).toMatchObject({
       text: '双击编辑文字',
       height: 80,
     })
   })
 
-  it('rewrites override node ids when duplicating a scene', () => {
+  it('rewrites override node ids when duplicating a scene', async () => {
     const store = useEditorStore.getState()
     store.addTextNode()
     store.addRectangleNode()
@@ -2020,7 +2120,7 @@ describe('scene presentation states', () => {
     expect(copiedState?.nodeOrder).toEqual([copyBackNodeId, copyNodeId])
   })
 
-  it('keeps state ordering local, undoable, and cleans it when a base node is deleted', () => {
+  it('keeps state ordering local, undoable, and cleans it when a base node is deleted', async () => {
     const store = useEditorStore.getState()
     store.addTextNode()
     store.addRectangleNode()
@@ -2036,10 +2136,10 @@ describe('scene presentation states', () => {
     expect(selectEffectiveSlideSceneNodes(stateId).map((node) => node.id))
       .toEqual(stateOrder)
 
-    useEditorStore.getState().undo()
+    await undoCourse()
     expect(selectEffectiveSlideSceneNodes(stateId).map((node) => node.id))
       .toEqual(baseOrder)
-    useEditorStore.getState().redo()
+    await redoCourse()
     expect(selectEffectiveSlideSceneNodes(stateId).map((node) => node.id))
       .toEqual(stateOrder)
 
@@ -2055,7 +2155,7 @@ describe('scene presentation states', () => {
     )
     expect(presentationState?.nodeOverrides[baseOrder[0]!]).toBeUndefined()
     expect(presentationState?.nodeOrder).toEqual([baseOrder[2], baseOrder[1]])
-    useEditorStore.getState().undo()
+    await undoCourse()
     expect(activeScene().nodes.map((node) => node.id)).toEqual(baseOrder)
     expect(activeScene().presentation?.states.find((state) => state.id === stateId))
       .toMatchObject({
@@ -2064,7 +2164,7 @@ describe('scene presentation states', () => {
       })
   })
 
-  it('falls back to the runtime initial state when the active thumbnail state is deleted', () => {
+  it('falls back to the runtime initial state when the active thumbnail state is deleted', async () => {
     const store = useEditorStore.getState()
     store.addPresentationState('运行初始')
     const initialId = selectActivePresentationStateId(useEditorStore.getState())!
@@ -2080,15 +2180,15 @@ describe('scene presentation states', () => {
       thumbnailStateId: initialId,
     })
 
-    useEditorStore.getState().undo()
+    await undoCourse()
     expect(activeScene().presentation?.states.some((state) => state.id === thumbnailId))
       .toBe(true)
-    useEditorStore.getState().redo()
+    await redoCourse()
     expect(activeScene().presentation?.states.some((state) => state.id === thumbnailId))
       .toBe(false)
   })
 
-  it('falls cross-scene entry rules back to the target initial state when a state is deleted', () => {
+  it('falls cross-scene entry rules back to the target initial state when a state is deleted', async () => {
     const store = useEditorStore.getState()
     const sourceSceneId = activeScene().id
     store.addScene()
@@ -2128,7 +2228,7 @@ describe('scene presentation states', () => {
       },
     })
 
-    store.undo()
+    await undoCourse()
     const restoredRule = selectSlideSceneList(useEditorStore.getState()).find(
       (scene) => scene.id === sourceSceneId,
     )!.interactions[0]!
@@ -2137,7 +2237,7 @@ describe('scene presentation states', () => {
 })
 
 describe('multi-selection operations', () => {
-  it('duplicates each selected node with its own click mappings exactly once', () => {
+  it('duplicates each selected node with its own click mappings exactly once', async () => {
     const store = useEditorStore.getState()
     store.addTextNode()
     store.addRectangleNode()
@@ -2190,14 +2290,14 @@ describe('multi-selection operations', () => {
       (rule) => rule.trigger.type === 'scene.enter',
     )).toHaveLength(1)
 
-    store.undo()
+    await undoCourse()
     expect(activeScene().nodes.map((node) => node.id)).toEqual(sourceIds)
     expect(activeScene().interactions.filter(
       (rule) => rule.trigger.type === 'node.click',
     )).toHaveLength(2)
   })
 
-  it('supports additive toggling and filters invalid or duplicate selection IDs', () => {
+  it('supports additive toggling and filters invalid or duplicate selection IDs', async () => {
     const store = useEditorStore.getState()
     store.addTextNode()
     store.addRectangleNode()
@@ -2227,7 +2327,7 @@ describe('multi-selection operations', () => {
 
   it.each(['left', 'center', 'right', 'top', 'middle', 'bottom'] as const)(
     'aligns the selected nodes to %s in one history step',
-    (mode) => {
+    async (mode) => {
       const store = useEditorStore.getState()
       store.addRectangleNode()
       store.addRectangleNode()
@@ -2239,6 +2339,7 @@ describe('multi-selection operations', () => {
         { nodeId: ids[2]!, patch: { x: 760, y: 430, width: 200, height: 160 } },
       ])
       store.selectNodes(ids)
+      await settleCourse()
       const historyBefore = activeHistory().past.length
 
       store.alignSelection(mode)
@@ -2255,13 +2356,14 @@ describe('multi-selection operations', () => {
       for (const value of alignedValues.slice(1)) {
         expect(value).toBeCloseTo(alignedValues[0]!)
       }
+      await settleCourse()
       expect(activeHistory().past).toHaveLength(historyBefore + 1)
     },
   )
 
   it.each(['horizontal', 'vertical'] as const)(
     'distributes three selected nodes with equal %s gaps',
-    (axis) => {
+    async (axis) => {
       const store = useEditorStore.getState()
       store.addRectangleNode()
       store.addRectangleNode()
@@ -2299,7 +2401,7 @@ describe('multi-selection operations', () => {
 
   it.each(['left', 'center', 'right', 'top', 'middle', 'bottom'] as const)(
     'aligns 45-degree nodes by their visual %s boundary using translation only',
-    (mode) => {
+    async (mode) => {
       const store = useEditorStore.getState()
       store.addRectangleNode()
       store.addRectangleNode()
@@ -2361,7 +2463,7 @@ describe('multi-selection operations', () => {
 
   it.each(['horizontal', 'vertical'] as const)(
     'distributes 45-degree nodes with equal visual %s gaps using translation only',
-    (axis) => {
+    async (axis) => {
       const store = useEditorStore.getState()
       store.addRectangleNode()
       store.addRectangleNode()
@@ -2417,20 +2519,23 @@ describe('multi-selection operations', () => {
     },
   )
 
-  it('copies a multi-selection snapshot and pastes independent unlocked nodes', () => {
+  it('copies a multi-selection snapshot and pastes independent unlocked nodes', async () => {
     const store = useEditorStore.getState()
     store.addTextNode(100, 120)
     store.addRectangleNode(360, 280)
     const [text, shape] = activeScene().nodes
     store.updateNode(text!.id, { locked: true })
     store.selectNodes([text!.id, shape!.id])
+    await settleCourse()
     const historyBeforeCopy = activeHistory().past.length
 
     store.copySelectedNodes()
+    await settleCourse()
     expect(activeHistory().past).toHaveLength(historyBeforeCopy)
     expect(useEditorStore.getState().slideCandidateClipboard?.items).toHaveLength(2)
 
     store.updateNode(text!.id, { x: 600, text: '原节点已修改' })
+    await settleCourse()
     const historyBeforePaste = activeHistory().past.length
     store.pasteNodes()
 
@@ -2457,41 +2562,45 @@ describe('multi-selection operations', () => {
       locked: false,
     })
     expect(new Set(activeScene().nodes.map((node) => node.id)).size).toBe(4)
+    await settleCourse()
     expect(activeHistory().past).toHaveLength(historyBeforePaste + 1)
   })
 })
 
 describe('history semantics', () => {
-  it('records V9 history as capped snapshot steps instead of V8 immer patches', () => {
+  it('records V9 history as capped snapshot steps instead of V8 immer patches', async () => {
     expect(selectSlideBackendKind(useEditorStore.getState())).toBe('slide-authoring')
     const store = useEditorStore.getState()
     const sceneId = selectSlideSceneList(store)[0]!.id
     const originalName = selectSlideSceneList(store)[0]!.name
     store.updateScene(sceneId, { name: '修改后的第一课' })
 
+    await settleCourse()
     const entry = activeHistory().past[0]!
     expect('patches' in entry).toBe(false)
     expect('inversePatches' in entry).toBe(false)
     expect(selectSlideSceneList(useEditorStore.getState())[0]!.name).toBe('修改后的第一课')
-    store.undo()
+    await undoCourse()
     expect(selectSlideSceneList(useEditorStore.getState())[0]!.name).toBe(originalName)
   })
 
-  it('undoes an addition and redo restores it', () => {
+  it('undoes an addition and redo restores it', async () => {
     const store = useEditorStore.getState()
     store.addTextNode()
     const nodeId = activeScene().nodes[0]!.id
 
-    store.undo()
+    await undoCourse()
     expect(activeScene().nodes).toHaveLength(0)
+    await settleCourse()
     expect(activeHistory().future).toHaveLength(1)
 
-    store.redo()
+    await redoCourse()
     expect(activeScene().nodes[0]!.id).toBe(nodeId)
+    await settleCourse()
     expect(activeHistory().future).toHaveLength(0)
   })
 
-  it('limits undo history to 100 V9 entries and clears redo after a new commit', () => {
+  it('keeps each document history step and clears redo after a new commit', async () => {
     const store = useEditorStore.getState()
     const sceneId = selectSlideSceneList(store)[0]!.id
     for (let index = 0; index < 110; index += 1) {
@@ -2499,37 +2608,46 @@ describe('history semantics', () => {
         backgroundColor: `#${index.toString(16).padStart(6, '0')}`,
       })
     }
-    expect(activeHistory().past).toHaveLength(100)
+    await settleCourse()
+    expect(activeHistory().past).toHaveLength(110)
 
-    store.undo()
-    store.undo()
+    await undoCourse()
+    await undoCourse()
+    await settleCourse()
     expect(activeHistory().future).toHaveLength(2)
     store.updateScene(sceneId, { name: '新提交' })
+    await settleCourse()
     expect(activeHistory().future).toHaveLength(0)
-    expect(activeHistory().past).toHaveLength(99)
-  })
+    await settleCourse()
+    expect(activeHistory().past).toHaveLength(109)
+  }, 60_000)
 
-  it('new and opened projects clear history while save keeps it', () => {
+  it('new and opened projects clear history while save keeps it', async () => {
     const store = useEditorStore.getState()
     store.addTextNode()
     const documentToLoad = structuredClone(selectSlideAuthoringDocument(useEditorStore.getState())!)
+    await settleCourse()
     expect(activeHistory().past).toHaveLength(1)
 
-    acknowledgeCurrentSave('C:\\course.h5lesson')
+    await acknowledgeCurrentSave('C:\\course.h5lesson')
+    await settleCourse()
     expect(activeHistory().past).toHaveLength(1)
     expect(useEditorStore.getState().dirty).toBe(false)
 
-    store.loadCourseProject(documentToLoad, 'C:\\course.h5lesson')
+    await courseStoreHost().open(documentToLoad)
+    await settleCourse()
     expect(activeHistory().past).toHaveLength(0)
     store.addRectangleNode()
-    store.createNewProject()
+    await useEditorStore.getState().createCourseDocument('slide')
+    await settleCourse()
     expect(activeHistory().past).toHaveLength(0)
-    expect(useEditorStore.getState().dirty).toBe(false)
+    // 2.0 的保存状态属于主进程：新建工程从未落盘，因此在第一次保存前就是 dirty。
+    expect(useEditorStore.getState().dirty).toBe(true)
   })
 })
 
 describe('factory compatibility', () => {
-  it('supports the Store positional factory forms and protects component props', () => {
+  it('supports the Store positional factory forms and protects component props', async () => {
     const text = createTextNode(12, 34)
     const image = createImageNode('asset_large', 1920, 1080)
     const componentData = sampleComponent()
