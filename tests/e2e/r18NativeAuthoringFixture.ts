@@ -672,7 +672,7 @@ export async function launchNativeEditor(productRoot: string, runRoot: string, p
 }
 
 export async function showEditorPanel(page: Page, name: '页面与图层' | '属性与素材'): Promise<void> {
-  if (!await page.locator('[aria-label="编辑面板"]').isVisible()) return
+  if (!await page.locator('[aria-label="面板切换"]').isVisible()) return
   const button = page.getByRole('button', { name, exact: true })
   await expect(button).toBeVisible()
   if (await button.getAttribute('aria-expanded') !== 'true') await button.click()

@@ -658,7 +658,7 @@ test('Wave C Flow authoring survives one real Editor and Player session', async 
 
       // 紧凑布局下属性面板覆盖层（top:40px/z-index:40）压住画布右上的「画布模式」开关；
       // 点击前先关闭面板（同 editor.spec.ts showEditorCanvas / r18-089 showEditorPanel(page,null)）。
-      const closePanel = page.locator('[aria-label="编辑面板"]')
+      const closePanel = page.locator('[aria-label="面板切换"]')
         .getByRole('button', { name: '关闭面板', exact: true })
       if (await closePanel.isVisible()) await closePanel.click()
       const canvasMode = page.getByRole('group', { name: '画布模式' })

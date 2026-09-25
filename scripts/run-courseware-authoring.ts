@@ -706,8 +706,22 @@ async function clickBaseState(page: Page): Promise<void> {
   if (await base.count() && await base.getAttribute('aria-pressed') !== 'true') await base.click()
 }
 
+/**
+ * Rail tabs toggle: clicking the open tab collapses it, so only click a closed one.
+ * Selecting a layer opens Properties after a short rename guard; let that land first.
+ */
+async function openEditorTab(page: Page, name: '图层' | '属性'): Promise<void> {
+  const tab = page.getByRole('tab', { name, exact: true })
+  const deadline = Date.now() + (name === '属性' ? 1_500 : 0)
+  do {
+    if (await tab.getAttribute('aria-expanded') === 'true') return
+    if (Date.now() < deadline) await page.waitForTimeout(100)
+  } while (Date.now() < deadline)
+  await tab.click()
+}
+
 async function showEditorPanel(page: Page, name: '页面与图层' | '属性与素材' | null): Promise<void> {
-  const controls = page.getByLabel('编辑面板', { exact: true })
+  const controls = page.getByLabel('面板切换', { exact: true })
   if (!await controls.isVisible()) return
   if (name) {
     const button = controls.getByRole('button', { name, exact: true })
@@ -1170,7 +1184,7 @@ async function execute(options: Options): Promise<AuthoringReceipt> {
           bounds.y + ((node.y + node.height / 2) / 720) * bounds.height,
         )
         await showEditorPanel(page, '属性与素材')
-        await page.getByRole('tab', { name: '图层' }).click()
+        await openEditorTab(page, '图层')
         const selected = page.getByTestId(`node-item-${target.nodeId}`)
         const selectedClass = await selected.getAttribute('class')
         if (!selectedClass?.includes('node-item--selected')) {
@@ -1180,7 +1194,7 @@ async function execute(options: Options): Promise<AuthoringReceipt> {
         receipt.canvasSelectionVerified = true
         await selected.locator('.node-name').click()
         await showEditorPanel(page, '属性与素材')
-        await page.getByRole('tab', { name: '属性' }).click()
+        await openEditorTab(page, '属性')
         const text = page.getByRole('textbox', { name: '文字内容' })
         if (await text.inputValue() !== node.text) throw new Error('selected text does not match Project binding')
         await text.fill(probe)
@@ -1202,10 +1216,10 @@ async function execute(options: Options): Promise<AuthoringReceipt> {
         await showEditorPanel(page, null)
         await clickBaseState(page)
         await showEditorPanel(page, '属性与素材')
-        await page.getByRole('tab', { name: '图层' }).click()
+        await openEditorTab(page, '图层')
         await page.getByTestId(`node-item-${target.nodeId}`).locator('.node-name').click()
         await showEditorPanel(page, '属性与素材')
-        await page.getByRole('tab', { name: '属性' }).click()
+        await openEditorTab(page, '属性')
         if (await page.getByRole('textbox', { name: '文字内容' }).inputValue() !== probe) {
           throw new Error('edited value did not survive Editor reopen')
         }

@@ -414,7 +414,7 @@ async function showEditorPanel(
   page: Page,
   name: '页面与图层' | '属性与素材',
 ): Promise<void> {
-  if (!await page.locator('[aria-label="编辑面板"]').isVisible()) return
+  if (!await page.locator('[aria-label="面板切换"]').isVisible()) return
   const button = page.getByRole('button', { name, exact: true })
   await expect(button).toBeVisible()
   if (await button.getAttribute('aria-expanded') !== 'true') await button.click()
@@ -462,7 +462,7 @@ async function enterTryRun(page: Page): Promise<void> {
   // 紧凑布局下属性面板是覆盖层（top:40px/right:0/z-index:40），其首行 .sidebar-tabs 高 44px
   // 正好压住画布右上的「画布模式」开关（top:7px/right:9px/z-index:8）；先关闭面板再点，
   // 同 editor.spec.ts:250-255 showEditorCanvas、r18-089-flow-viewport.spec.ts:460-470 写法。
-  const closePanel = page.locator('[aria-label="编辑面板"]')
+  const closePanel = page.locator('[aria-label="面板切换"]')
     .getByRole('button', { name: '关闭面板', exact: true })
   if (await closePanel.isVisible()) await closePanel.click()
   const button = page.getByRole('group', { name: '画布模式' })

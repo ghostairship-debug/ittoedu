@@ -14,7 +14,7 @@ test('R18 candidate button observation: actual input and before-after evidence p
   const run = await launchNativeEditor(productRoot, directory, projectPath)
   try {
     await selectLayer(run.page, REMAINING_IDS.brokenRuntime)
-    const closePanel = run.page.locator('[aria-label="编辑面板"]').getByRole('button', { name: '关闭面板', exact: true })
+    const closePanel = run.page.locator('[aria-label="面板切换"]').getByRole('button', { name: '关闭面板', exact: true })
     if (await closePanel.isVisible()) await closePanel.click()
     await run.page.getByRole('button', { name: '当前位置试运行', exact: true }).click()
     await expect(run.page.getByText('答案尚未显示', { exact: true })).toBeVisible()

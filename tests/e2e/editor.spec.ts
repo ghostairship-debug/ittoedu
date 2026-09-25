@@ -227,7 +227,7 @@ async function showEditorPanel(page: Page, panel: 'structure' | 'properties'): P
       requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
     }))
     if (await region.isVisible()) return region
-    const controls = page.getByLabel('编辑面板', { exact: true })
+    const controls = page.getByLabel('面板切换', { exact: true })
     if (!await controls.isVisible()) {
       await expect(region).toBeVisible()
       return region
@@ -248,7 +248,7 @@ async function selectEditorTab(page: Page, name: string): Promise<void> {
 }
 
 async function showEditorCanvas(page: Page): Promise<void> {
-  const close = page.getByLabel('编辑面板', { exact: true })
+  const close = page.getByLabel('面板切换', { exact: true })
     .getByRole('button', { name: '关闭面板', exact: true })
   if (await close.isVisible()) await close.click()
   await expect(page.getByRole('main', { name: '画布' })).toBeVisible()

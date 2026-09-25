@@ -272,7 +272,7 @@ function courseTreeKind(page: Page, kind: string): Locator {
 async function withCourseTree(page: Page, run: () => Promise<void>): Promise<void> {
   const tree = page.getByTestId('course-page-tree')
   if (await tree.isVisible()) return run()
-  const controls = page.locator('[aria-label="编辑面板"]')
+  const controls = page.locator('[aria-label="面板切换"]')
   const launcher = controls.getByRole('button', { name: '页面与图层', exact: true })
   await launcher.click()
   await expect(launcher).toHaveAttribute('aria-expanded', 'true')

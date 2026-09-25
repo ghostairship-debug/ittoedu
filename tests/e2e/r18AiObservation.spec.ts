@@ -141,7 +141,7 @@ async function readState(page: Page) {
 }
 
 async function showEditorPanel(page: Page, name: '属性与素材' | null): Promise<void> {
-  const controls = page.getByLabel('编辑面板', { exact: true })
+  const controls = page.getByLabel('面板切换', { exact: true })
   if (!await controls.isVisible()) return
   if (name) {
     const button = controls.getByRole('button', { name, exact: true })
