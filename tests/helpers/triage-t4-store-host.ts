@@ -21,6 +21,7 @@ export async function createTriageT4StoreHost() {
   const listeners = new Set<(event: DocumentEvent) => void>()
   const observed = new Set<string>()
   const componentRegistry = new Map<string, Record<string, Uint8Array>>()
+  const assetRegistry = new Map<string, Uint8Array>()
   let identity = 0
   let fixture = 0
 
@@ -40,6 +41,10 @@ export async function createTriageT4StoreHost() {
     componentRegistry.set(pkg.manifest.id, files)
   }
 
+  const registerAsset = (id: string, bytes: Uint8Array) => {
+    assetRegistry.set(id, bytes)
+  }
+
   const registry = new DocumentRegistry({
     drivers: [driver],
     createId: () => `course-store-t4-${++identity}`,
@@ -57,7 +62,7 @@ export async function createTriageT4StoreHost() {
   const resourcesFor = (project: CourseProjectDocument): DocumentResources => {
     const assets = Object.fromEntries(Object.values(project.assets).map(meta => [
       meta.id,
-      new Uint8Array(meta.byteLength),
+      assetRegistry.get(meta.id) ?? new Uint8Array(meta.byteLength),
     ]))
     const components: DocumentResources['components'] = {}
     const controller = createDefaultTeacherControllerPackage()
@@ -155,9 +160,13 @@ export async function createTriageT4StoreHost() {
     api,
     registry,
     registerPackageData,
-    async open(project: CourseProjectDocument, packages?: ComponentPackageData[]) {
+    registerAsset,
+    async open(project: CourseProjectDocument, packages?: ComponentPackageData[], assets?: Record<string, Uint8Array>) {
       if (packages) {
         for (const pkg of packages) registerPackageData(pkg)
+      }
+      if (assets) {
+        for (const [id, bytes] of Object.entries(assets)) registerAsset(id, bytes)
       }
       const path = `course-store-t4-${++fixture}.h5lesson`
       disk.set(path, driver.serialize(modelFor(project)))
