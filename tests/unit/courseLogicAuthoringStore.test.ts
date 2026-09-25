@@ -34,23 +34,6 @@ describe('course logic authoring store persistence', () => {
     const before = selectActiveCourseProjectDocument(useEditorStore.getState())
     if (!before) throw new Error('作者会话未建立')
 
-    const original = host.api.dispatch.bind(host.api)
-    host.api.dispatch = async (operation) => {
-      const command = operation.mutation.type === 'command' ? operation.mutation.command : null
-      const project = command && command.type === 'course.replace' ? command.project : null
-      console.log('DISPATCH', {
-        documentId: operation.documentId,
-        active: activeDocumentId(),
-        baseRevision: operation.baseRevision,
-        mutation: operation.mutation.type,
-        command: command?.type,
-        revision: project?.revision,
-        courseState: project?.courseState,
-      })
-      const dispatched = await original(operation)
-      console.log('RESULT', dispatched)
-      return dispatched
-    }
     const result = useEditorStore.getState().applyCourseLogicAuthoringCommand({
       kind: 'course-state.add',
       projectId: before.id,
@@ -58,23 +41,7 @@ describe('course logic authoring store persistence', () => {
       declaration: { key: 'attempts', valueType: 'number', defaultValue: 0 },
     })
     expect(result.ok).toBe(true)
-    const immediate = selectActiveCourseProjectDocument(useEditorStore.getState())
-    console.log('IMMEDIATE', {
-      revision: immediate?.revision,
-      courseState: immediate?.courseState,
-      error: useEditorStore.getState().errorMessage,
-      status: useEditorStore.getState().statusMessage,
-      pending: useEditorStore.getState().courseDocument.pending,
-      connected: useEditorStore.getState().courseDocument.connected,
-      docError: useEditorStore.getState().courseDocument.error,
-    })
     await settleCourse()
-    const formal = formalCourse(host, documentId)
-    console.log('FORMAL', {
-      revision: formal.revision,
-      undoDepth: formal.undoDepth,
-      courseState: formal.model.kind === 'course-v9' ? formal.model.project.courseState : formal.model.kind,
-    })
     let current = selectActiveCourseProjectDocument(useEditorStore.getState())
     expect(current?.courseState).toEqual([
       { key: 'attempts', valueType: 'number', defaultValue: 0 },
