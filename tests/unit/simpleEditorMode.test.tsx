@@ -11,43 +11,47 @@ import { selectActiveScene, useEditorStore,
 } from '@/renderer/store/editorStore'
 import { PropertiesTab } from '@/renderer/ui/PropertiesTab'
 import { RightSidebar } from '@/renderer/ui/RightSidebar'
-
-function activeHistory() {
-  const state = useEditorStore.getState()
-  const backend = state.slideBackend
-  if (!backend) throw new Error('expected active slideBackend')
-  return backend.getSession().history
-}
+import {
+  assignedUndoDepth,
+  connectAssignedCourse,
+  settleAssignedCourse,
+  undoAssignedCourse,
+} from '../helpers/triage-t5-courseHost'
 
 const TEST_COMPONENT_ID = 'com.example.mode-test'
 
 function createTestComponentPackage(): ComponentPackageData {
-  return {
-    manifest: {
-      schemaVersion: 4,
-      runtimeApiVersion: 4,
-      supportedScopes: ['scene'],
-      renderMode: 'phaser',
-      id: TEST_COMPONENT_ID,
-      name: '模式测试组件',
-      version: '1.0.0',
-      entry: 'runtime.js',
-      defaultSize: { width: 320, height: 180 },
-      minSize: { width: 120, height: 80 },
-      preserveAspectRatio: false,
-      assets: {},
-      defaultProps: {
-        content: { title: '测试组件' },
-      },
+  const manifest: ComponentPackageData['manifest'] = {
+    schemaVersion: 4,
+    runtimeApiVersion: 4,
+    supportedScopes: ['scene'],
+    renderMode: 'phaser',
+    id: TEST_COMPONENT_ID,
+    name: '模式测试组件',
+    version: '1.0.0',
+    entry: 'runtime.js',
+    defaultSize: { width: 320, height: 180 },
+    minSize: { width: 120, height: 80 },
+    preserveAspectRatio: false,
+    assets: {},
+    defaultProps: {
+      content: { title: '测试组件' },
     },
-    runtimeSource: `window.CoursewareComponent.define({id:${JSON.stringify(TEST_COMPONENT_ID)},runtimeApiVersion:4,create:function(){return{destroy:function(){}}}})`,
-    files: {},
+  }
+  const runtimeSource = `window.CoursewareComponent.define({id:${JSON.stringify(TEST_COMPONENT_ID)},runtimeApiVersion:4,create:function(){return{destroy:function(){}}}})`
+  return {
+    manifest,
+    runtimeSource,
+    files: {
+      'manifest.json': new TextEncoder().encode(JSON.stringify(manifest)),
+      'runtime.js': new TextEncoder().encode(runtimeSource),
+    },
   }
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   localStorage.clear()
-  useEditorStore.getState().createNewProject()
+  await connectAssignedCourse()
   useEditorStore.setState({
     activeTab: 'elements',
   })
@@ -60,7 +64,7 @@ afterEach(() => {
 })
 
 describe('unified editor surface', () => {
-  it('exposes the full categorized element browser and advanced authoring without mode switching', () => {
+  it('exposes the full categorized element browser and advanced authoring without mode switching', async () => {
     const props = {
       onAddImage: vi.fn(),
       onImportImage: vi.fn(),
@@ -71,6 +75,7 @@ describe('unified editor surface', () => {
       onReplaceComponent: vi.fn(),
     }
     useEditorStore.getState().importComponentPackage(createTestComponentPackage())
+    await settleAssignedCourse()
     const projectBeforeSwitch = selectActiveCourseProjectDocument(useEditorStore.getState())!
     act(() => useEditorStore.getState().setActiveTab('elements'))
 
@@ -139,8 +144,9 @@ describe('unified editor surface', () => {
     expect(selectActiveCourseProjectDocument(useEditorStore.getState())!).toBe(projectBeforeSwitch)
   })
 
-  it('filters element contents without exposing professional-only component results', () => {
+  it('filters element contents without exposing professional-only component results', async () => {
     useEditorStore.getState().importComponentPackage(createTestComponentPackage())
+    await settleAssignedCourse()
     act(() => useEditorStore.getState().setActiveTab('elements'))
     render(
       <RightSidebar
@@ -167,10 +173,11 @@ describe('unified editor surface', () => {
     expect(screen.getByTestId('add-text')).toBeInTheDocument()
   })
 
-  it('creates, updates, removes, and restores a complete entrance animation atomically', () => {
+  it('creates, updates, removes, and restores a complete entrance animation atomically', async () => {
     act(() => useEditorStore.getState().addShapeNode('rectangle'))
+    await settleAssignedCourse()
     const nodeId = selectSelectedNodeId(useEditorStore.getState())!
-    const historyBefore = activeHistory().past.length
+    const historyBefore = assignedUndoDepth()
 
     render(<PropertiesTab onReplaceImage={vi.fn()} />)
 
@@ -179,6 +186,7 @@ describe('unified editor surface', () => {
     expect(screen.getByRole('heading', { name: '交互' })).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: '淡入' }))
+    await settleAssignedCourse()
 
     let state = useEditorStore.getState()
     let scene = selectActiveScene(state)
@@ -201,7 +209,7 @@ describe('unified editor surface', () => {
         },
       }],
     })
-    expect(activeHistory().past).toHaveLength(historyBefore + 1)
+    expect(assignedUndoDepth()).toBe(historyBefore + 1)
     expect(collectCourseProjectHealth(selectActiveCourseProjectDocument(state)!, {
       assetFiles: state.courseAssetSidecar?.files ?? {},
       componentFiles: {},
@@ -210,6 +218,7 @@ describe('unified editor surface', () => {
     )).toBe(false)
 
     fireEvent.click(screen.getByRole('button', { name: '缩放' }))
+    await settleAssignedCourse()
 
     state = useEditorStore.getState()
     scene = selectActiveScene(state)
@@ -218,18 +227,19 @@ describe('unified editor surface', () => {
       type: 'node.enter',
       effect: 'scale',
     })
-    expect(activeHistory().past).toHaveLength(historyBefore + 2)
+    expect(assignedUndoDepth()).toBe(historyBefore + 2)
 
     fireEvent.click(screen.getByRole('button', { name: '无' }))
+    await settleAssignedCourse()
 
     state = useEditorStore.getState()
     scene = selectActiveScene(state)
     node = scene.nodes.find((item) => item.id === nodeId)!
     expect(scene.interactions).toHaveLength(0)
     expect(node.playbackInitialVisibility).toBe('inherit')
-    expect(activeHistory().past).toHaveLength(historyBefore + 3)
+    expect(assignedUndoDepth()).toBe(historyBefore + 3)
 
-    act(() => useEditorStore.getState().undo())
+    await undoAssignedCourse()
 
     state = useEditorStore.getState()
     scene = selectActiveScene(state)
@@ -242,8 +252,9 @@ describe('unified editor surface', () => {
     })
   })
 
-  it('does not overwrite an advanced entrance rule', () => {
+  it('does not overwrite an advanced entrance rule', async () => {
     act(() => useEditorStore.getState().addShapeNode('rectangle'))
+    await settleAssignedCourse()
     const store = useEditorStore.getState()
     const scene = selectActiveScene(store)
     const nodeId = selectSelectedNodeId(store)!
@@ -267,7 +278,8 @@ describe('unified editor surface', () => {
         },
       }],
     })
-    const historyBefore = activeHistory().past.length
+    await settleAssignedCourse()
+    const historyBefore = assignedUndoDepth()
 
     render(<PropertiesTab onReplaceImage={vi.fn()} />)
 
@@ -280,11 +292,12 @@ describe('unified editor surface', () => {
 
     expect(useEditorStore.getState().activeTab).toBe('automation')
     expect(selectActiveScene(useEditorStore.getState()).interactions).toHaveLength(1)
-    expect(activeHistory().past).toHaveLength(historyBefore)
+    expect(assignedUndoDepth()).toBe(historyBefore)
   })
 
-  it('does not claim an equivalent-shaped professional node activation rule', () => {
+  it('does not claim an equivalent-shaped professional node activation rule', async () => {
     act(() => useEditorStore.getState().addShapeNode('rectangle'))
+    await settleAssignedCourse()
     const store = useEditorStore.getState()
     const scene = selectActiveScene(store)
     const nodeId = selectSelectedNodeId(store)!
@@ -307,7 +320,8 @@ describe('unified editor surface', () => {
         },
       }],
     })
-    const historyBefore = activeHistory().past.length
+    await settleAssignedCourse()
+    const historyBefore = assignedUndoDepth()
 
     render(<PropertiesTab onReplaceImage={vi.fn()} />)
 
@@ -326,23 +340,27 @@ describe('unified editor surface', () => {
           },
         }],
       })
-    expect(activeHistory().past).toHaveLength(historyBefore)
+    expect(assignedUndoDepth()).toBe(historyBefore)
   })
 
-  it('keeps simple entrance animations isolated between presentation states', () => {
+  it('keeps simple entrance animations isolated between presentation states', async () => {
     const store = useEditorStore.getState()
     store.addShapeNode('rectangle')
+    await settleAssignedCourse()
     const nodeId = selectSelectedNodeId(useEditorStore.getState())!
 
     store.addPresentationState('状态 A')
+    await settleAssignedCourse()
     const stateA = selectActivePresentationStateId(useEditorStore.getState())!
     useEditorStore.getState().setSimpleEntranceAnimation(nodeId, {
       effect: 'fade',
       durationMs: 320,
       delayMs: 0,
     })
+    await settleAssignedCourse()
 
     useEditorStore.getState().addPresentationState('状态 B')
+    await settleAssignedCourse()
     const stateB = selectActivePresentationStateId(useEditorStore.getState())!
     useEditorStore.getState().setSimpleEntranceAnimation(nodeId, {
       effect: 'slide',
@@ -350,6 +368,7 @@ describe('unified editor surface', () => {
       durationMs: 500,
       delayMs: 300,
     })
+    await settleAssignedCourse()
 
     let scene = selectActiveScene(useEditorStore.getState())
     expect(scene.interactions).toHaveLength(2)
@@ -364,6 +383,7 @@ describe('unified editor surface', () => {
 
     useEditorStore.getState().setActivePresentationState(stateA)
     useEditorStore.getState().setSimpleEntranceAnimation(nodeId, null)
+    await settleAssignedCourse()
 
     scene = selectActiveScene(useEditorStore.getState())
     expect(scene.interactions).toHaveLength(1)

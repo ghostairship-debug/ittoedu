@@ -2,6 +2,7 @@ import type { TeacherControllerConfig } from '../../src/shared/teacherController
 import '@testing-library/jest-dom/vitest'
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { createBlankCourseProject } from '../../src/core/course/createCourseProject'
 import type { ComponentPackageData } from '@/shared/componentTypes'
 import type {
   CourseRuntimeDefinition,
@@ -20,12 +21,18 @@ import {
   selectActivePresentationStateId,
   selectActiveSceneId,
   selectEditingScope,
-  selectSlideAuthoringBackend,
   selectSlideAuthoringDocument,
   useEditorStore,
   selectCandidateGlobalLayerItems,
   selectSlideSceneList,
 } from '@/renderer/store/editorStore'
+import {
+  assignedUndoDepth,
+  openAssignedCourse,
+  redoAssignedCourse,
+  settleAssignedCourse,
+  undoAssignedCourse,
+} from '../helpers/triage-t5-courseHost'
 
 import { courseLayerItemToEditorCanvasNode } from '@/renderer/store/slideEditorProjection'
 
@@ -50,35 +57,40 @@ function componentPackage(
   id: string,
   scopes: Array<'scene' | 'global'>,
 ): ComponentPackageData {
-  return {
-    manifest: {
-      schemaVersion: 4,
-      runtimeApiVersion: 4,
-      supportedScopes: scopes,
-      renderMode: 'phaser',
-      id,
-      name: id.endsWith('global') ? '全局导航' : '场景组件',
-      version: '4.0.0',
-      entry: 'runtime.js',
-      defaultSize: { width: 600, height: 100 },
-      minSize: { width: 200, height: 60 },
-      preserveAspectRatio: false,
-      assets: {},
-      defaultProps: {
-        content: {
-          title: '课程导航',
-          buttons: { replay: '重播本页', next: '进入下一页' },
-        },
-      },
-      editor: {
-        properties: [
-          { key: 'content.title', label: '导航标题', type: 'text' },
-          { key: 'content.buttons.next', label: '下一页按钮', type: 'text' },
-        ],
+  const manifest: ComponentPackageData['manifest'] = {
+    schemaVersion: 4,
+    runtimeApiVersion: 4,
+    supportedScopes: scopes,
+    renderMode: 'phaser',
+    id,
+    name: id.endsWith('global') ? '全局导航' : '场景组件',
+    version: '4.0.0',
+    entry: 'runtime.js',
+    defaultSize: { width: 600, height: 100 },
+    minSize: { width: 200, height: 60 },
+    preserveAspectRatio: false,
+    assets: {},
+    defaultProps: {
+      content: {
+        title: '课程导航',
+        buttons: { replay: '重播本页', next: '进入下一页' },
       },
     },
-    runtimeSource: '',
-    files: {},
+    editor: {
+      properties: [
+        { key: 'content.title', label: '导航标题', type: 'text' },
+        { key: 'content.buttons.next', label: '下一页按钮', type: 'text' },
+      ],
+    },
+  }
+  const runtimeSource = `window.CoursewareComponent.define({id:${JSON.stringify(id)},runtimeApiVersion:4,create:function(){return{destroy:function(){}}}})`
+  return {
+    manifest,
+    runtimeSource,
+    files: {
+      'manifest.json': new TextEncoder().encode(JSON.stringify(manifest)),
+      'runtime.js': new TextEncoder().encode(runtimeSource),
+    },
   }
 }
 
@@ -129,7 +141,7 @@ function installRuntimeDefinitions(
   sceneId: string,
   sceneRuntime: CourseRuntimeDefinition,
   globalRuntime: CourseRuntimeDefinition,
-): void {
+): Promise<void> {
   const store = useEditorStore.getState()
   const current = selectActiveCourseProjectDocument(store)
   if (!current) throw new Error('缺少当前 Course Project')
@@ -164,10 +176,11 @@ function installRuntimeDefinitions(
     store.assetFiles,
     store.componentPackages,
   )
+  return settleAssignedCourse()
 }
 
-beforeEach(() => {
-  useEditorStore.getState().createNewProject()
+beforeEach(async () => {
+  await openAssignedCourse(createBlankCourseProject())
 })
 
 afterEach(() => cleanup())
@@ -188,12 +201,14 @@ describe('Project V8 global-layer editor UI', () => {
     expect(selectEditingScope(useEditorStore.getState())).toBe('scene')
   })
 
-  it('shows native elements and only enables global-compatible component packages', () => {
+  it('shows native elements and only enables global-compatible component packages', async () => {
     const globalPackage = componentPackage('com.example.global', ['scene', 'global'])
     const scenePackage = componentPackage('com.example.scene', ['scene'])
     const store = useEditorStore.getState()
     store.importComponentPackage(globalPackage)
+    await settleAssignedCourse()
     store.importComponentPackage(scenePackage)
+    await settleAssignedCourse()
     store.setEditingScope('global')
 
     render(<ElementsTab onAddImage={vi.fn()} />)
@@ -201,6 +216,7 @@ describe('Project V8 global-layer editor UI', () => {
     expect(screen.getByTestId('add-text')).toBeInTheDocument()
     expect(screen.getByTestId('global-elements-notice')).toBeInTheDocument()
     fireEvent.click(screen.getByTestId('add-text'))
+    await settleAssignedCourse()
     cleanup()
 
     render(<ComponentsTab />)
@@ -214,23 +230,27 @@ describe('Project V8 global-layer editor UI', () => {
     fireEvent.click(
       screen.getByTestId(`component-${globalPackage.manifest.id}`),
     )
+    await settleAssignedCourse()
     expect(projectedGlobalLayer(useEditorStore.getState())).toHaveLength(3)
     expect(
       projectedGlobalLayer(useEditorStore.getState()).map((item) => item.node.type),
     ).toEqual(['external-component', 'text', 'external-component'])
   })
 
-  it('edits global placement, every component copy field, and both runtime content tables', () => {
+  it('edits global placement, every component copy field, and both runtime content tables', async () => {
     const globalPackage = componentPackage('com.example.global', ['global'])
     const store = useEditorStore.getState()
     store.importComponentPackage(globalPackage)
+    await settleAssignedCourse()
     store.addScene()
+    await settleAssignedCourse()
     const [firstScene, secondScene] = selectSlideSceneList(useEditorStore.getState())
     const sceneRuntime = runtime('场景运行时标题', '场景原文')
     const globalRuntime = runtime('全局运行时标题', '全局原文')
-    installRuntimeDefinitions(firstScene!.id, sceneRuntime, globalRuntime)
+    await installRuntimeDefinitions(firstScene!.id, sceneRuntime, globalRuntime)
     store.setEditingScope('global')
     useEditorStore.getState().addExternalComponentNode(globalPackage.manifest.id)
+    await settleAssignedCourse()
     const globalNode = projectedGlobalLayer(useEditorStore.getState()).find(
       (item) => item.node.type === 'external-component' && item.node.component?.packageId !== 'com.ittoedu.teacher-controller',
     )!.node
@@ -258,21 +278,26 @@ describe('Project V8 global-layer editor UI', () => {
     fireEvent.change(screen.getByLabelText('场景可见范围'), {
       target: { value: 'include' },
     })
+    await settleAssignedCourse()
     expect(projectedGlobalLayer(useEditorStore.getState()).find(
       (item) => item.node.id === globalNode.id,
     )?.visibility).toEqual({ mode: 'all', sceneIds: [] })
     expect(screen.getByText('选择至少一个场景后，可见范围才会生效。'))
       .toHaveAttribute('role', 'status')
     fireEvent.click(screen.getByLabelText(new RegExp(secondScene!.name)))
+    await settleAssignedCourse()
     fireEvent.change(screen.getByLabelText('导航标题'), {
       target: { value: '教师全局导航' },
     })
+    await settleAssignedCourse()
     fireEvent.change(screen.getByLabelText('下一页按钮'), {
       target: { value: '继续课程' },
     })
+    await settleAssignedCourse()
     fireEvent.change(screen.getByLabelText('buttons / replay'), {
       target: { value: '重新讲解' },
     })
+    await settleAssignedCourse()
 
     const placement = projectedGlobalLayer(useEditorStore.getState()).find(
       (item) => item.node.id === globalNode.id,
@@ -301,6 +326,7 @@ describe('Project V8 global-layer editor UI', () => {
     }
     const visibleBefore = globalRuntimeBefore.visible
     fireEvent.click(screen.getByLabelText('启用运行时'))
+    await settleAssignedCourse()
     const disabledGlobalRuntime = selectActiveCourseProjectDocument(
       useEditorStore.getState(),
     )?.globalLayerItems.find((entry) => entry.item.kind === 'runtime')?.item
@@ -312,6 +338,7 @@ describe('Project V8 global-layer editor UI', () => {
     fireEvent.change(screen.getByLabelText('渲染能力声明'), {
       target: { value: 'hybrid' },
     })
+    await settleAssignedCourse()
     const hybridGlobalRuntime = selectActiveCourseProjectDocument(
       useEditorStore.getState(),
     )?.globalLayerItems.find((entry) => entry.item.kind === 'runtime')?.item
@@ -329,10 +356,12 @@ describe('Project V8 global-layer editor UI', () => {
       target: { value: '全局新标题' },
     })
     fireEvent.blur(screen.getByLabelText('全局运行时标题'))
+    await settleAssignedCourse()
     fireEvent.change(screen.getByLabelText('全局运行时标题操作'), {
       target: { value: '统一开始' },
     })
     fireEvent.blur(screen.getByLabelText('全局运行时标题操作'))
+    await settleAssignedCourse()
     const updatedGlobalRuntime = selectActiveCourseProjectDocument(useEditorStore.getState())
       ?.globalLayerItems.find((entry) => entry.item.kind === 'runtime')?.item
     if (updatedGlobalRuntime?.kind !== 'runtime') throw new Error('缺少全局 Runtime')
@@ -354,15 +383,18 @@ describe('Project V8 global-layer editor UI', () => {
       useEditorStore.getState().activateCourseLocation(firstSceneLocation.id)
       useEditorStore.getState().setEditingScope('scene')
     })
+    await settleAssignedCourse()
     expect(screen.getByTestId('scene-runtime-inspector')).toBeInTheDocument()
     fireEvent.change(screen.getByLabelText('场景运行时标题'), {
       target: { value: '场景新标题' },
     })
     fireEvent.blur(screen.getByLabelText('场景运行时标题'))
+    await settleAssignedCourse()
     fireEvent.change(screen.getByLabelText('场景运行时标题操作'), {
       target: { value: '进入互动' },
     })
     fireEvent.blur(screen.getByLabelText('场景运行时标题操作'))
+    await settleAssignedCourse()
     const updatedSceneRuntime = selectActiveCourseProjectDocument(
       useEditorStore.getState(),
     )?.surfaces.flatMap((surface) => (
@@ -379,9 +411,10 @@ describe('Project V8 global-layer editor UI', () => {
     expect(updatedSceneRuntime.runtime.source).toBe(sceneRuntime.source)
   })
 
-  it('keeps an API 3 global Runtime exact and reachable from a Flow location', () => {
+  it('keeps an API 3 global Runtime exact and reachable from a Flow location', async () => {
     const store = useEditorStore.getState()
     store.createNewFlowProject()
+    await settleAssignedCourse()
     const canonical = selectActiveCourseProjectDocument(useEditorStore.getState())
     if (!canonical) throw new Error('缺少 Flow Course Project')
     const api3Project = structuredClone(canonical)
@@ -419,7 +452,8 @@ describe('Project V8 global-layer editor UI', () => {
     })
     const visibleBefore = true
 
-    useEditorStore.getState().loadCourseProject(api3Project, null, {}, {})
+    useEditorStore.getState().loadCourseProject(api3Project, null, store.assetFiles, store.componentPackages)
+    await settleAssignedCourse()
     useEditorStore.getState().activateCourseLocation(api3Project.startLocationId)
     useEditorStore.getState().selectNode(null)
     useEditorStore.getState().setEditingScope('global')
@@ -448,6 +482,7 @@ describe('Project V8 global-layer editor UI', () => {
     expect(screen.getByLabelText('API 3 全局标题')).toHaveValue('曲面运行时')
 
     fireEvent.click(screen.getByLabelText('启用运行时'))
+    await settleAssignedCourse()
 
     const updated = selectActiveCourseProjectDocument(
       useEditorStore.getState(),
@@ -471,10 +506,14 @@ describe('Project V8 global-layer editor UI', () => {
     })
   })
 
-  it('keeps the global Runtime inspector above a retained Spatial graph selection', () => {
-    useEditorStore.getState().createNewSpatialProject()
+  it('keeps the global Runtime inspector above a retained Spatial graph selection', async () => {
+    const store = useEditorStore.getState()
+    store.createNewSpatialProject()
+    await settleAssignedCourse()
     useEditorStore.getState().addTextNode()
+    await settleAssignedCourse()
     useEditorStore.getState().addTextNode()
+    await settleAssignedCourse()
     const canonical = selectActiveCourseProjectDocument(useEditorStore.getState())
     if (!canonical) throw new Error('缺少 Spatial Course Project')
     const spatialProject = structuredClone(canonical)
@@ -517,7 +556,8 @@ describe('Project V8 global-layer editor UI', () => {
       visibility: { mode: 'all', locationIds: [] },
     })
 
-    useEditorStore.getState().loadCourseProject(spatialProject, null, {}, {})
+    useEditorStore.getState().loadCourseProject(spatialProject, null, store.assetFiles, store.componentPackages)
+    await settleAssignedCourse()
     useEditorStore.getState().activateCourseLocation(spatialProject.startLocationId)
     useEditorStore.getState().setEditingScope('global')
     useEditorStore.getState().setSpatialGraphSelection({
@@ -540,11 +580,13 @@ describe('Project V8 global-layer editor UI', () => {
     expect(screen.getByText('canvas-runtime · API 2')).toBeInTheDocument()
   })
 
-  it('offers a state-free scene directory and keeps fixed scene targets as an advanced action', () => {
+  it('offers a state-free scene directory and keeps fixed scene targets as an advanced action', async () => {
     const store = useEditorStore.getState()
     store.addScene()
+    await settleAssignedCourse()
     const targetSceneId = selectActiveSceneId(useEditorStore.getState())
     store.addPresentationState('反馈')
+    await settleAssignedCourse()
     const targetStateId = selectActivePresentationStateId(useEditorStore.getState())!
     store.setEditingScope('global')
     const controller = projectedGlobalLayer(useEditorStore.getState()).find(
@@ -568,17 +610,22 @@ describe('Project V8 global-layer editor UI', () => {
     )
     expect(defaultCollapsedCheckbox).toBeChecked()
     fireEvent.click(defaultCollapsedCheckbox)
+    await settleAssignedCourse()
     expect(defaultCollapsedCheckbox).not.toBeChecked()
     fireEvent.change(screen.getAllByLabelText('点击动作')[0]!, {
       target: { value: 'scene.go' },
     })
+    await settleAssignedCourse()
     fireEvent.change(screen.getByLabelText('目标场景'), {
       target: { value: targetSceneId },
     })
+    await settleAssignedCourse()
     fireEvent.change(screen.getByLabelText('进入状态'), {
       target: { value: targetStateId },
     })
+    await settleAssignedCourse()
     fireEvent.click(screen.getByRole('button', { name: /添加按钮/ }))
+    await settleAssignedCourse()
 
     const updated = projectedGlobalLayer(useEditorStore.getState()).find(
       (item) => item.node.id === controller.id,
@@ -600,10 +647,11 @@ describe('Project V8 global-layer editor UI', () => {
     expect(new Set(((updated.props as unknown as TeacherControllerConfig).buttons ?? []).map((button) => button.id)).size).toBe((updated.props as unknown as TeacherControllerConfig).buttons?.length)
   })
 
-  it('writes 图层位置 as one undoable global plane without changing authored order', () => {
+  it('writes 图层位置 as one undoable global plane without changing authored order', async () => {
     const store = useEditorStore.getState()
     store.setEditingScope('global')
     store.addTextNode()
+    await settleAssignedCourse()
     const before = selectSlideAuthoringDocument(useEditorStore.getState())!
     const text = before.globalLayerItems.find(
       (entry) => entry.item.kind === 'native' && entry.item.content.nativeType === 'text',
@@ -621,8 +669,7 @@ describe('Project V8 global-layer editor UI', () => {
             : [],
       })),
     })
-    const historyBefore = selectSlideAuthoringBackend(useEditorStore.getState())!
-      .getSession().history.past.length
+    const historyBefore = assignedUndoDepth()
     store.selectNode(text.item.layerItemId)
 
     render(<PropertiesTab onReplaceImage={vi.fn()} />)
@@ -631,6 +678,7 @@ describe('Project V8 global-layer editor UI', () => {
     fireEvent.change(screen.getByLabelText('图层位置'), {
       target: { value: 'underlay' },
     })
+    await settleAssignedCourse()
 
     const after = selectSlideAuthoringDocument(useEditorStore.getState())!
     const updated = after.globalLayerItems.find(
@@ -654,20 +702,20 @@ describe('Project V8 global-layer editor UI', () => {
             : [],
       })),
     })).toBe(beforeOrders)
-    expect(selectSlideAuthoringBackend(useEditorStore.getState())!
-      .getSession().history.past.length).toBe(historyBefore + 1)
+    expect(assignedUndoDepth()).toBe(historyBefore + 1)
 
-    store.undo()
+    await undoAssignedCourse()
     expect(selectSlideAuthoringDocument(useEditorStore.getState())?.globalLayerItems.find(
       (entry) => entry.item.layerItemId === text.item.layerItemId,
     )?.plane).toBe('overlay')
-    store.redo()
+    await redoAssignedCourse()
     expect(selectSlideAuthoringDocument(useEditorStore.getState())?.globalLayerItems.find(
       (entry) => entry.item.layerItemId === text.item.layerItemId,
     )?.plane).toBe('underlay')
     const archive = useEditorStore.getState().exportV9SlideCandidateArchive()
     expect(archive).not.toBeNull()
-    expect(useEditorStore.getState().reopenV9SlideCandidateArchive(archive!)).toBe(true)
+    expect(await useEditorStore.getState().reopenV9SlideCandidateArchive(archive!)).toBe(true)
+    await settleAssignedCourse()
     expect(selectSlideAuthoringDocument(useEditorStore.getState())?.globalLayerItems.find(
       (entry) => entry.item.layerItemId === text.item.layerItemId,
     )?.plane).toBe('underlay')

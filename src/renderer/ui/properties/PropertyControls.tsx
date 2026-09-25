@@ -532,6 +532,13 @@ export function TextContentTextarea({
   })
   const stale = sessionRef.current.phase !== 'idle'
     && sessionRef.current.bindingKey !== currentBindingKey
+  /**
+   * A begin callback that rebinds the edit lease may only reach its canonical
+   * revision once the commit is acknowledged, so the refreshed binding key can
+   * arrive later. While the draft is untouched there is nothing to protect, so
+   * the session adopts that key instead of turning stale.
+   */
+  const adoptBindingRef = useRef(false)
 
   const copyCurrentHandlers = () => {
     const session = sessionRef.current
@@ -547,9 +554,24 @@ export function TextContentTextarea({
     const session = sessionRef.current
     const current = currentRef.current
     if (session.phase !== 'idle') {
-      if (session.bindingKey === current.bindingKey) copyCurrentHandlers()
+      if (session.bindingKey === current.bindingKey) {
+        copyCurrentHandlers()
+        return
+      }
+      const adopting = adoptBindingRef.current && session.draft === session.baseline
+      adoptBindingRef.current = false
+      if (!adopting) return
+      session.bindingKey = current.bindingKey
+      session.baseline = current.value
+      session.draft = current.value
+      session.staleNotified = false
+      inputCaptureRef.current = null
+      compositionCaptureRef.current = null
+      copyCurrentHandlers()
+      setDraft(current.value)
       return
     }
+    adoptBindingRef.current = false
     session.bindingKey = current.bindingKey
     session.baseline = current.value
     session.draft = current.value
@@ -603,6 +625,7 @@ export function TextContentTextarea({
     copyCurrentHandlers()
     setDraft(current.value)
     const rebindAfterBegin = session.onBegin()
+    adoptBindingRef.current = Boolean(rebindAfterBegin)
     if (rebindAfterBegin) {
       queueMicrotask(() => {
         const active = sessionRef.current

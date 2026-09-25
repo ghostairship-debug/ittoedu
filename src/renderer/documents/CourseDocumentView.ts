@@ -1,7 +1,8 @@
 import type { CourseProjectDocument } from '../../shared/courseProjectTypes'
 import type { DocumentModel } from '../../shared/workbench/document'
 import { componentPackagesFromArchive, componentPackagesToArchiveFiles } from '../components/componentPackageStore'
-import { createSlideAuthoringBackend, openSlideAuthoringSession, selectSlideEditorLayers, type SlideAuthoringBackend, type SlideAuthoringSession } from '../course/slideAuthoringBackend'
+import { createSlideAuthoringBackend, makeSlideAuthoringTarget, openSlideAuthoringSession, selectSlideEditorLayers, type SlideAuthoringBackend, type SlideAuthoringSession } from '../course/slideAuthoringBackend'
+import { isV9SlideContentDraftDirty } from '../authoring/v9SlideContentEdit'
 import { openSpatialAuthoringSession, selectSpatialEditorLayers } from '../course/spatialEditorCommands'
 import { selectFlowEditorBlock } from '../course/flowEditorSlice'
 import { reconcileFlowSelection } from '../store/slices/flowAuthoringSlice'
@@ -57,6 +58,25 @@ export function courseViewModel(view: Pick<CourseDocumentView, 'courseAssetSidec
   return { kind: 'course-v9', project, resources: { assets: view.courseAssetSidecar?.files ?? {}, components: componentPackagesToArchiveFiles(view.componentPackages) } }
 }
 
+/**
+ * An untouched content edit lease carries no draft, so it follows the committed
+ * revision instead of turning stale as soon as its own commit is acknowledged.
+ * A dirty or composing draft keeps its captured revision and stays guarded.
+ */
+function rebasedContentEdit(
+  edit: SlideOwnedState['v9ContentEdit'],
+  session: SlideAuthoringSession,
+  revision: number,
+): SlideOwnedState['v9ContentEdit'] {
+  if (!edit || edit.composing || isV9SlideContentDraftDirty(edit)) return edit
+  if (edit.target.sessionId !== session.sessionId || edit.target.revision === revision) return edit
+  try {
+    const current = makeSlideAuthoringTarget(session, edit.target.layerItemId, 'item')
+    if (current.scope !== edit.target.scope) return edit
+  } catch { return edit }
+  return { ...edit, target: { ...edit.target, revision } }
+}
+
 /** Reconcile content without resetting the currently browsed location, camera or editing state. */
 export function projectCourseDocument(model: Extract<DocumentModel, { kind: 'course-v9' }>, view: CourseDocumentView): Record<string, unknown> {
   const project = model.project
@@ -78,6 +98,7 @@ export function projectCourseDocument(model: Extract<DocumentModel, { kind: 'cou
     catch { selection = selectSlideEditorLayers({ project, locationId: location.id, selectionIds: [] }) }
     const backend = createCoursePlannerBackend({ ...fresh, history: cursor(project), selection })
     patch.slideBackend = backend; patch.slideCandidateSnapshot = backend.getSnapshot(); selected = selection.selectionIds
+    patch.v9ContentEdit = rebasedContentEdit(view.v9ContentEdit, fresh, project.revision)
   } else if (location.kind === 'flow-block') {
     const old = view.flowSession
     const fresh = old && old.selection.locationId === location.id ? old : { history: cursor(project), selection: selectFlowEditorBlock(project, location.id, location.blockId) }
