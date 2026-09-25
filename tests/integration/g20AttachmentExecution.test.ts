@@ -1,11 +1,13 @@
 // @vitest-environment node
 import { promises as fs } from 'node:fs'
+import { EventEmitter } from 'node:events'
 import { createHash, randomUUID } from 'node:crypto'
 import { createServer, type Server } from 'node:http'
 import os from 'node:os'
 import path from 'node:path'
 import sharp from 'sharp'
 import { afterEach, describe, expect, it } from 'vitest'
+import type { BrowserWindow } from 'electron'
 import { DocumentHostService } from '../../src/main/workbench/DocumentHostService'
 import { ExecutionDesktopService } from '../../src/main/workbench/execution/ExecutionDesktopService'
 import { ExecutionSettingsStore } from '../../src/main/workbench/providers/ExecutionSettingsStore'
@@ -17,8 +19,11 @@ import type { AttachmentSnapshot } from '../../src/shared/workbench/attachments'
 const directories: string[] = [], servers: Server[] = []
 afterEach(async () => {
   for (const server of servers.splice(0)) await new Promise<void>(resolve => { server.closeAllConnections(); server.close(() => resolve()) })
-  for (const directory of directories.splice(0)) { if (!path.resolve(directory).startsWith(path.resolve(os.tmpdir()) + path.sep)) throw new Error('Unsafe fixture'); await fs.rm(directory, { recursive: true, force: true }) }
+  for (const directory of directories.splice(0)) { if (!path.resolve(directory).startsWith(path.resolve(os.tmpdir()) + path.sep)) throw new Error('Unsafe fixture'); await fs.rm(directory, { recursive: true, force: true, maxRetries: 8, retryDelay: 25 }) }
 })
+function windowFor(id: number): BrowserWindow {
+  return { webContents: Object.assign(new EventEmitter(), { id, isDestroyed: () => false }) } as unknown as BrowserWindow
+}
 async function fixture(baseURL: string) {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'g20-attachment-execution-')); directories.push(directory)
   const documents = new DocumentHostService(path.join(directory, 'documents'))
@@ -98,14 +103,14 @@ describe('attachment draft to canonical execution payload', () => {
 
   it('unifies paste/drop byte intake and preview, rejects raw path authority and removes only draft references', async () => {
     const { directory, service, conversation, identity } = await fixture('http://127.0.0.1:1/v1')
-    const desktop = new AttachmentsDesktopService(path.join(directory, 'attachments'))
+    const desktop = new AttachmentsDesktopService(path.join(directory, 'attachments')), window = windowFor(41)
     const text = Buffer.from('# 同一份正文')
-    const pasted = await desktop.operate({ type: 'receive', name: 'same.md', bytes: text, source: 'paste', mediaType: 'text/markdown' }, undefined as never) as AttachmentSnapshot
-    const dropped = await desktop.operate({ type: 'receive', name: 'same.md', bytes: Buffer.from('# 不同正文'), source: 'drop' }, undefined as never) as AttachmentSnapshot
+    const pasted = await desktop.operate({ type: 'receive', name: 'same.md', bytes: text, source: 'paste', mediaType: 'text/markdown' }, window) as AttachmentSnapshot
+    const dropped = await desktop.operate({ type: 'receive', name: 'same.md', bytes: Buffer.from('# 不同正文'), source: 'drop' }, window) as AttachmentSnapshot
     expect(pasted.digest).not.toBe(dropped.digest)
-    const preview = await desktop.operate({ type: 'representation', attachmentId: pasted.id, representationId: 'original-text' }, undefined as never) as { bytes: Uint8Array }
+    const preview = await desktop.operate({ type: 'representation', attachmentId: pasted.id, representationId: 'original-text' }, window) as { bytes: Uint8Array }
     expect(Buffer.from(preview.bytes)).toEqual(text)
-    await expect(desktop.operate({ type: 'receive', name: 'same.md', bytes: text, source: 'drop', path: 'C:\\private.txt' }, undefined as never)).rejects.toThrow()
+    await expect(desktop.operate({ type: 'receive', name: 'same.md', bytes: text, source: 'drop', path: 'C:\\private.txt' }, window)).rejects.toThrow()
     const drafted = await service.operate({ type: 'draft', ...identity, expectedRevision: conversation.revision, text: '', documents: [], attachments: [{ attachmentId: pasted.id, representationId: 'original-text' }] }) as ConversationRecord
     const removed = await service.operate({ type: 'draft', ...identity, expectedRevision: drafted.revision, text: '', documents: [], attachments: [] }) as ConversationRecord
     expect(removed.inputAttachments).toEqual([])

@@ -6,10 +6,6 @@ import {
   createImageAssetImport,
   createMediaAssetImport,
 } from '@/renderer/project/assetManager'
-import {
-  createSlideAuthoringBackend,
-  openSlideAuthoringSession,
-} from '@/renderer/course/slideAuthoringBackend'
 import { dedupeCourseMediaImports } from '@/renderer/project/v9AssetAdapter'
 import {
   selectAudioSettings,
@@ -20,6 +16,12 @@ import {
   useEditorStore,
 } from '@/renderer/store/editorStore'
 import { MediaTab } from '@/renderer/ui/MediaTab'
+import {
+  connectAssignedCourse,
+  openAssignedCourse,
+  settleAssignedCourse,
+  undoAssignedCourse,
+} from '../helpers/triage-t5-courseHost'
 
 /**
  * Proves R3-Z MediaTab wiring against the R3-CUT default V9 candidate.
@@ -91,32 +93,23 @@ function v9EmptySlideFixture() {
   })
 }
 
-function injectCandidate() {
-  const backend = createSlideAuthoringBackend(
-    openSlideAuthoringSession(v9EmptySlideFixture()),
-  )
-  useEditorStore.getState().injectV9SlideCandidateBackend(backend)
-  return backend
-}
-
-beforeEach(() => {
-  useEditorStore.getState().clearV9SlideCandidateBackend()
-  useEditorStore.getState().createNewProject()
+beforeEach(async () => {
+  await connectAssignedCourse()
 })
 
 afterEach(() => {
   cleanup()
-  useEditorStore.getState().clearV9SlideCandidateBackend()
 })
 
 describe('V9 MediaTab adapter on the real V8 MediaTab', () => {
-  it('defaults MediaTab to the V9 slide authoring backend', () => {
+  it('defaults MediaTab to the V9 slide authoring backend', async () => {
     expect(selectSlideBackendKind(useEditorStore.getState())).toBe('slide-authoring')
     const imported = createImageAssetImport(
       { name: 'v9-photo.png', mimeType: 'image/png', bytes: Uint8Array.from([1, 2, 3, 4]) },
       { dimensions: { width: 8, height: 8 } },
     )
     useEditorStore.getState().importAsset(imported.meta, imported.bytes)
+    await settleAssignedCourse()
     render(
       <MediaTab
         onImportImage={() => undefined}
@@ -130,7 +123,7 @@ describe('V9 MediaTab adapter on the real V8 MediaTab', () => {
   })
 
   it('imports image and sound into the candidate sidecar, places on canvas, undoes sidecar, and round-trips archive', async () => {
-    injectCandidate()
+    await openAssignedCourse(v9EmptySlideFixture())
     const image = createImageAssetImport(
       { name: 'candidate-photo.png', mimeType: 'image/png', bytes: Uint8Array.from([11, 12, 13, 14]) },
       { dimensions: { width: 16, height: 12 } },
@@ -162,6 +155,7 @@ describe('V9 MediaTab adapter on the real V8 MediaTab', () => {
       items: soundDeduped.additions,
       nativeType: 'audio',
     })
+    await settleAssignedCourse()
     expect(importedImage.ok).toBe(true)
     expect(importedSound.ok).toBe(true)
     expect(importedImage.historyEntry).toBe(true)
@@ -186,6 +180,7 @@ describe('V9 MediaTab adapter on the real V8 MediaTab', () => {
     }) as HTMLButtonElement
     expect(add.disabled).toBe(false)
     fireEvent.click(add)
+    await settleAssignedCourse()
 
     const placed = selectSlideAuthoringDocument(useEditorStore.getState())!
     const surface = placed.surfaces[0]
@@ -196,7 +191,7 @@ describe('V9 MediaTab adapter on the real V8 MediaTab', () => {
     expect(selectSlideAuthoringDocument(useEditorStore.getState())?.assets[image.meta.id]).toBeTruthy()
     expect(selectMediaAssetFiles(useEditorStore.getState())[image.meta.id]?.byteLength).toBe(4)
 
-    useEditorStore.getState().undo()
+    await undoAssignedCourse()
     const afterUndoPlace = selectSlideAuthoringDocument(useEditorStore.getState())!
     const undoSurface = afterUndoPlace.surfaces[0]
     if (!undoSurface || undoSurface.type !== 'slide') throw new Error('expected slide')
@@ -207,7 +202,7 @@ describe('V9 MediaTab adapter on the real V8 MediaTab', () => {
 
     const zip = useEditorStore.getState().exportV9SlideCandidateArchive()
     expect(zip).toBeTruthy()
-    const reopened = useEditorStore.getState().reopenV9SlideCandidateArchive(zip!)
+    const reopened = await useEditorStore.getState().reopenV9SlideCandidateArchive(zip!)
     expect(reopened).toBe(true)
     expect(selectMediaAssets(useEditorStore.getState())[image.meta.id]).toBeTruthy()
     expect(selectMediaAssetFiles(useEditorStore.getState())[image.meta.id]?.byteLength).toBe(4)

@@ -44,6 +44,8 @@ import {
   type FlowFormulaDraft,
   type FlowTextEditSession,
 } from '@/renderer/authoring/flowTextEdit'
+import { createCourseStoreHost } from '../helpers/courseStoreHost'
+import { createBlankFlowCourseProject } from '@/renderer/project/createFlowCourseProject'
 import type { FlowCommandResult } from '@/renderer/course/flowEditorCommands'
 import type { FlowEditorSelection } from '@/renderer/course/flowEditorSlice'
 
@@ -262,8 +264,9 @@ describe('FlowWorkspace paper', () => {
     expect(onProjectChange.mock.calls.filter(([result]) => result.historyEntry)).toHaveLength(0)
   })
 
-  it('root Workspace keeps a missing Flow session in the Flow fail-loud shell', () => {
-    useEditorStore.getState().createNewFlowProject()
+  it('root Workspace keeps a missing Flow session in the Flow fail-loud shell', async () => {
+    const host = await createCourseStoreHost()
+    await host.open(createBlankFlowCourseProject({ includeDefaultController: false, controls: 'none' }))
     expect(useEditorStore.getState().courseAuthoringSession?.token.surfaceType).toBe('flow')
     useEditorStore.setState({ flowSession: null })
 
@@ -352,7 +355,7 @@ describe('FlowWorkspace paper', () => {
     const rich = screen.getByTestId('flow-block-p-body')
     expect(rich?.textContent).toBe('阅读任务')
     expect(rich?.innerHTML).toMatch(/font-weight:\s*(bold|700)/)
-    expect(screen.getByRole('textbox', { name: '正文排版编辑' })).toHaveAttribute('contenteditable', 'true')
+    expect(screen.getByRole('textbox', { name: '正文编辑' })).toHaveAttribute('contenteditable', 'true')
   })
 
   it('is a scrolling reading paper, not a 1280×720 slide stage', () => {
@@ -651,7 +654,7 @@ describe('FlowWorkspace paper', () => {
 // ---------------------------------------------------------------------------
 // 源文模式守卫的生命周期：折叠光标不等于离开源文模式
 // ---------------------------------------------------------------------------
-const SOURCE_SELECTION_GUARD = 'Flow 源文选区暂不支持 AI 局部修改，请切回排版选择内容。'
+const SOURCE_SELECTION_GUARD = 'Flow 源文选区暂不支持 AI 局部修改，请切回正文选择内容。'
 
 /** The real product shell: props come from the single Store, intents go back through it. */
 function FlowWorkspaceStoreHarness() {
@@ -694,17 +697,23 @@ function sendRefusal(): string | null {
 }
 
 describe('Flow source-mode guard lifetime', () => {
-  beforeEach(() => {
-    useEditorStore.getState().createNewFlowProject()
+  let storeHost: Awaited<ReturnType<typeof createCourseStoreHost>>
+  beforeEach(async () => {
+    storeHost = await createCourseStoreHost()
+    await storeHost.open(createBlankFlowCourseProject({ includeDefaultController: false, controls: 'none' }))
   })
   afterEach(() => {
     cleanup()
     vi.restoreAllMocks()
-    useEditorStore.getState().createNewProject()
   })
+  function modeButton(name: '源文' | '正文') {
+    const format = document.querySelector('details.flow-document-format') as HTMLDetailsElement | null
+    if (format && !format.open) act(() => { format.open = true })
+    return screen.getByRole('button', { name })
+  }
   function mountAndSelectSourceText() {
     render(createElement(FlowWorkspaceStoreHarness))
-    fireEvent.click(screen.getByRole('button', { name: '源文' }))
+    fireEvent.click(modeButton('源文'))
     const source = EditorView.findFromDOM(screen.getByLabelText('正文源文编辑'))!
     act(() => { source.dispatch({ selection: { anchor: 1, head: 5 } }) })
     return source
@@ -718,7 +727,7 @@ describe('Flow source-mode guard lifetime', () => {
 
     // A collapsed caret retires the target, not the mode: the source editor is still on screen.
     expect(screen.getByLabelText('正文源文编辑')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '排版' })).toBeInTheDocument()
+    expect(modeButton('正文')).toBeInTheDocument()
     const collapsed = useEditorStore.getState().flowSession!.selection
     expect(collapsed.documentSelectionIssue).toBe(SOURCE_SELECTION_GUARD)
     expect(collapsed.focus).toBe('text')
@@ -732,7 +741,7 @@ describe('Flow source-mode guard lifetime', () => {
   it('retires the source guard once the editor really returns to layout', () => {
     const source = mountAndSelectSourceText()
     act(() => { source.dispatch({ selection: { anchor: 3, head: 3 } }) })
-    fireEvent.click(screen.getByRole('button', { name: '排版' }))
+    fireEvent.click(modeButton('正文'))
 
     expect(screen.queryByLabelText('正文源文编辑')).not.toBeInTheDocument()
     const returned = useEditorStore.getState().flowSession!.selection
@@ -741,7 +750,7 @@ describe('Flow source-mode guard lifetime', () => {
     expect(sendRefusal()).toBeNull()
   })
 
-  it('retires the source guard when a Flow history undo bumps the generation and remounts the editor', () => {
+  it('retires the source guard when a Flow history undo bumps the generation and remounts the editor', async () => {
     // 先在排版态做一次真实 Flow 正文编辑：撤销需要一条真实历史，而这次编辑必须发生在
     // 进入源文模式之前——否则 revision 变化会让当前编辑器发布 null 目标，守卫会被提前
     // 退休，就测不到「generation 递增导致重挂载」这条路径了。
@@ -751,7 +760,7 @@ describe('Flow source-mode guard lifetime', () => {
     const paragraph = blocks.find(block => block.type === 'paragraph')
     if (paragraph?.type !== 'paragraph') throw new Error('expected paragraph')
     paragraph.content = { inlines: [{ type: 'text', text: '撤销前的一稿' }] }
-    act(() => {
+    await act(async () => {
       const receipt = useEditorStore.getState().runFlowAuthoringIntent(
         captureFlowEditorAuthoringTarget({
           view: buildFlowEditorView({ project: opened.history.present, locationId: opened.selection.locationId }),
@@ -761,8 +770,10 @@ describe('Flow source-mode guard lifetime', () => {
         { kind: 'replace-document-content', blocks, historyGroup: 'body-input' },
       )
       expect(receipt.ok, receipt.reason).toBe(true)
+      await useEditorStore.getState().drainCourseDocument()
     })
-    expect(useEditorStore.getState().flowSession!.history.past.length).toBe(opened.history.past.length + 1)
+    const documentId = useEditorStore.getState().courseDocument.documentId!
+    expect(storeHost.registry.get(documentId).read().undoDepth).toBe(1)
 
     const source = mountAndSelectSourceText()
     act(() => { source.dispatch({ selection: { anchor: 3, head: 3 } }) })
@@ -771,7 +782,7 @@ describe('Flow source-mode guard lifetime', () => {
     // 源文编辑器里的 Ctrl+Z 走的就是这条真实路径：document-history 撤销带上 sidecarDirection，
     // courseSessionAfterSurfaceHistory 因此把 token.generation 加一。
     const generation = useEditorStore.getState().courseAuthoringSession!.token.generation
-    act(() => {
+    await act(async () => {
       const state = useEditorStore.getState(); const live = state.flowSession!
       state.runFlowAuthoringIntent(
         captureFlowEditorAuthoringTarget({
@@ -781,18 +792,19 @@ describe('Flow source-mode guard lifetime', () => {
         }),
         { kind: 'document-history', direction: 'undo' },
       )
+      await useEditorStore.getState().drainCourseDocument()
     })
 
     // 编辑器由 `key` 里的 generation 决定，generation 递增后 React 直接重建它；重建过程不会
     // 再调用 onContextualTargetChange（新实例的 contextualTargetRef 是空的），所以只有依赖
     // 数组里的 generation 能让退休副作用重跑。少了它，守卫就会留在一个已经不存在的源文
-    // 视图上，之后每次选区发送都被这句「请切回排版」拒掉。
+    // 视图上，之后每次选区发送都被这句「请切回正文」拒掉。
     expect(useEditorStore.getState().courseAuthoringSession!.token.generation).toBe(generation + 1)
     // 实测结论：重挂载后的编辑器回到排版模式（源文 DOM 消失，切换按钮重新显示「源文」），
     // 所以这里的守卫该退；如果哪天它带着 sourceDraft 重挂载回源文模式，守卫留在原处才是对的，
     // 那时这条断言会失败，必须连同上面的理由一起改写。
     expect(screen.queryByLabelText('正文源文编辑')).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '源文' })).toBeInTheDocument()
+    expect(modeButton('源文')).toBeInTheDocument()
     expect(useEditorStore.getState().flowSession!.selection.documentSelectionIssue).toBeUndefined()
     expect(sendRefusal()).toBeNull()
   })
@@ -801,7 +813,7 @@ describe('Flow source-mode guard lifetime', () => {
     const factory = vi.spyOn(editorSession, 'createLayoutEditor')
     const source = mountAndSelectSourceText()
     act(() => { source.dispatch({ selection: { anchor: 3, head: 3 } }) })
-    fireEvent.click(screen.getByRole('button', { name: '排版' }))
+    fireEvent.click(modeButton('正文'))
     const editor = factory.mock.results.at(-1)!.value as ReturnType<typeof editorSession.createLayoutEditor>
     const doc = editor.view.state.doc
     let from = -1

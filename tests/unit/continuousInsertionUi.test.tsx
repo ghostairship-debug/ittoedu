@@ -8,18 +8,20 @@ import {
   useEditorStore,
 } from '@/renderer/store/editorStore'
 import { NodesTab } from '@/renderer/ui/NodesTab'
+import { connectAssignedCourse, settleAssignedCourse } from '../helpers/triage-t5-courseHost'
 
-beforeEach(() => {
-  useEditorStore.getState().createNewProject()
+beforeEach(async () => {
+  await connectAssignedCourse()
 })
 
 afterEach(() => cleanup())
 
 describe('explicit layer selection', () => {
-  it('opens properties when a user clicks a layer after insertion kept the elements tab', () => {
+  it('opens properties when a user clicks a layer after insertion kept the elements tab', async () => {
     const store = useEditorStore.getState()
     store.setActiveTab('elements')
     store.addTextNode()
+    await settleAssignedCourse()
     const node = selectActiveScene(useEditorStore.getState()).nodes[0]!
     expect(useEditorStore.getState().activeTab).toBe('elements')
 
@@ -35,6 +37,7 @@ describe('explicit layer selection', () => {
     const user = userEvent.setup()
     const store = useEditorStore.getState()
     store.addTextNode()
+    await settleAssignedCourse()
     const node = selectActiveScene(useEditorStore.getState()).nodes[0]!
     store.setActiveTab('layers')
     render(<NodesTab />)
@@ -46,10 +49,12 @@ describe('explicit layer selection', () => {
       .toBeInTheDocument()
   })
 
-  it('keeps additive layer selection in the list until properties is explicitly requested', () => {
+  it('keeps additive layer selection in the list until properties is explicitly requested', async () => {
     const store = useEditorStore.getState()
     store.addTextNode()
+    await settleAssignedCourse()
     store.addTextNode()
+    await settleAssignedCourse()
     const nodes = selectActiveScene(useEditorStore.getState()).nodes
     store.setActiveTab('layers')
     render(<NodesTab />)

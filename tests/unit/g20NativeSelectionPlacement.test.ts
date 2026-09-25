@@ -48,3 +48,10 @@ it('M21 anchors rotated and multiple objects by their visible union', () => {
     .toEqual({ left: 10, top: 5, width: 100, height: 55 })
   expect(unionBoxes([])).toBeNull()
 })
+
+it('M21 keeps the bar clear of a rotation handle drawn above a canvas selection', () => {
+  const anchor = { left: 500, top: 400, width: 200, height: 100 }
+  const position = placeQuickBar(anchor, canvas, bar, 8, 34)
+  expect(position).toMatchObject({ placement: 'above', top: 400 - 34 - 34 })
+  expect(placeQuickBar({ ...anchor, top: 150 }, canvas, bar, 8, 34).placement).toBe('below')
+})

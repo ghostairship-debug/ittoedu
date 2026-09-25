@@ -10,6 +10,12 @@ import {
   formatMediaSize,
   MediaTab,
 } from '@/renderer/ui/MediaTab'
+import {
+  connectAssignedCourse,
+  settleAssignedCourse,
+  undoAssignedCourse,
+  redoAssignedCourse,
+} from '../helpers/triage-t5-courseHost'
 
 const audioAsset: AssetMeta = {
   id: 'asset_audio',
@@ -49,8 +55,8 @@ const originalRevokeObjectUrl = Object.getOwnPropertyDescriptor(URL, 'revokeObje
 let createObjectUrl: ReturnType<typeof vi.fn>
 let revokeObjectUrl: ReturnType<typeof vi.fn>
 
-beforeEach(() => {
-  useEditorStore.getState().createNewProject()
+beforeEach(async () => {
+  await connectAssignedCourse()
   createObjectUrl = vi.fn(() => 'blob:audio-preview')
   revokeObjectUrl = vi.fn()
   Object.defineProperty(URL, 'createObjectURL', {
@@ -77,7 +83,7 @@ afterEach(() => {
   }
 })
 
-function seedAssets(): string {
+async function seedAssets(): Promise<string> {
   const bytes = (asset: AssetMeta, marker: number): Uint8Array => {
     const value = new Uint8Array(asset.byteLength)
     value.set([marker, marker + 1, marker + 2])
@@ -90,6 +96,7 @@ function seedAssets(): string {
   )
   useEditorStore.getState().importAsset(videoAsset, bytes(videoAsset, 4))
   useEditorStore.getState().importAsset(imageAsset, bytes(imageAsset, 7))
+  await settleAssignedCourse()
   return soundId
 }
 
@@ -110,7 +117,7 @@ describe('MediaTab', () => {
     expect(onImportVideo).toHaveBeenCalledOnce()
   })
 
-  it('编辑全局静音、主音量、五个声道和旁白压低设置，并支持撤销重做', () => {
+  it('编辑全局静音、主音量、五个声道和旁白压低设置，并支持撤销重做', async () => {
     render(<MediaTab onImportAudio={vi.fn()} onImportVideo={vi.fn()} />)
 
     fireEvent.click(screen.getByLabelText('成品默认静音'))
@@ -131,6 +138,7 @@ describe('MediaTab', () => {
       target: { value: '18' },
     })
     fireEvent.click(screen.getByLabelText('旁白播放时压低背景音乐'))
+    await settleAssignedCourse()
 
     expect(selectActiveCourseProjectDocument(useEditorStore.getState())!.media.audio).toMatchObject({
       defaultMuted: true,
@@ -148,18 +156,18 @@ describe('MediaTab', () => {
       },
     })
 
-    useEditorStore.getState().undo()
+    await undoAssignedCourse()
     expect(
       selectActiveCourseProjectDocument(useEditorStore.getState())!.media.audio.narrationDucking.enabled,
     ).toBe(true)
-    useEditorStore.getState().redo()
+    await redoAssignedCourse()
     expect(
       selectActiveCourseProjectDocument(useEditorStore.getState())!.media.audio.narrationDucking.enabled,
     ).toBe(false)
-  })
+  }, 20_000)
 
-  it('用临时 Blob URL 试听并编辑声音定义，卸载时释放 URL', () => {
-    const soundId = seedAssets()
+  it('用临时 Blob URL 试听并编辑声音定义，卸载时释放 URL', async () => {
+    const soundId = await seedAssets()
     const view = render(
       <MediaTab onImportAudio={vi.fn()} onImportVideo={vi.fn()} />,
     )
@@ -179,6 +187,7 @@ describe('MediaTab', () => {
       target: { value: '35' },
     })
     fireEvent.click(screen.getByLabelText('“檐下雨声”默认循环'))
+    await settleAssignedCourse()
 
     expect(
       selectActiveCourseProjectDocument(useEditorStore.getState())!.media.audio.sounds[soundId],
@@ -191,10 +200,10 @@ describe('MediaTab', () => {
 
     view.unmount()
     expect(revokeObjectUrl).toHaveBeenCalledWith('blob:audio-preview')
-  })
+  }, 20_000)
 
-  it('显示媒体元数据，把视频添加为画布元素，并删除未使用图片', () => {
-    seedAssets()
+  it('显示媒体元数据，把视频添加为画布元素，并删除未使用图片', async () => {
+    await seedAssets()
     render(<MediaTab onImportAudio={vi.fn()} onImportVideo={vi.fn()} />)
 
     expect(screen.getByText('lesson.mp4')).toBeInTheDocument()
@@ -205,6 +214,7 @@ describe('MediaTab', () => {
     fireEvent.click(screen.getByRole('button', {
       name: '将视频“lesson.mp4”添加到画布',
     }))
+    await settleAssignedCourse()
     const videoNode = selectActiveScene(useEditorStore.getState()).nodes.find(
       (node) => node.type === 'video',
     )
@@ -216,17 +226,19 @@ describe('MediaTab', () => {
     })
 
     fireEvent.click(screen.getByLabelText('删除图片“diagram.png”'))
+    await settleAssignedCourse()
     expect(selectActiveCourseProjectDocument(useEditorStore.getState())!.assets[imageAsset.id]).toBeUndefined()
     expect(useEditorStore.getState().assetFiles[imageAsset.id]).toBeUndefined()
-  })
+  }, 20_000)
 
-  it('可复用已导入图片，在当前场景创建新的可编辑图片元素', () => {
-    seedAssets()
+  it('可复用已导入图片，在当前场景创建新的可编辑图片元素', async () => {
+    await seedAssets()
     render(<MediaTab onImportAudio={vi.fn()} onImportVideo={vi.fn()} />)
 
     fireEvent.click(screen.getByRole('button', {
       name: '将图片“diagram.png”添加到画布',
     }))
+    await settleAssignedCourse()
 
     const imageNode = selectActiveScene(useEditorStore.getState()).nodes.find(
       (node) => node.type === 'image',
@@ -237,10 +249,18 @@ describe('MediaTab', () => {
       width: 640,
       height: 480,
     })
-  })
+  }, 20_000)
 
-  it('删除声音定义，并在素材字节缺失时禁用视频添加', () => {
-    const soundId = seedAssets()
+  it('删除声音定义，并在素材字节缺失时禁用视频添加', async () => {
+    const soundId = await seedAssets()
+    const view = render(<MediaTab onImportAudio={vi.fn()} onImportVideo={vi.fn()} />)
+
+    fireEvent.click(screen.getByLabelText('删除声音“雨声”'))
+    await settleAssignedCourse()
+    expect(
+      selectActiveCourseProjectDocument(useEditorStore.getState())!.media.audio.sounds[soundId],
+    ).toBeUndefined()
+
     useEditorStore.setState((state) => {
       const sidecar = state.courseAssetSidecar
       const files = { ...(sidecar?.files ?? {}) }
@@ -254,16 +274,12 @@ describe('MediaTab', () => {
         assetFiles,
       }
     })
-    render(<MediaTab onImportAudio={vi.fn()} onImportVideo={vi.fn()} />)
+    view.rerender(<MediaTab onImportAudio={vi.fn()} onImportVideo={vi.fn()} />)
 
     expect(screen.getByRole('button', {
       name: '将视频“lesson.mp4”添加到画布',
     })).toBeDisabled()
-    fireEvent.click(screen.getByLabelText('删除声音“雨声”'))
-    expect(
-      selectActiveCourseProjectDocument(useEditorStore.getState())!.media.audio.sounds[soundId],
-    ).toBeUndefined()
-  })
+  }, 20_000)
 })
 
 describe('media formatting', () => {

@@ -327,9 +327,13 @@ describe('Read model boundary checks', () => {
     expect(source).not.toMatch(/from ['"][^'"]*\/projectArchive['"]/)
     expect(source).not.toMatch(/from ['"][^'"]*\/projectTypes['"]/)
     expect(source).not.toMatch(/\bProjectDocument\b/)
-    expect(source).toMatch(/openDefaultCourseProjectAsync/)
-    expect(source).toMatch(/saveCourseProjectDocumentAsync/)
-    expect(source).toMatch(/RecoveryWriteCoordinator/)
+    expect(source).not.toMatch(/openDefaultCourseProjectAsync|saveCourseProjectDocumentAsync|RecoveryWriteCoordinator/)
+    expect(source).toMatch(/DocumentSnapshot/)
+    expect(source).toMatch(/service\(\)\.open\(/)
+    expect(source).toMatch(/confirmProjectOpen/)
+    expect(source).toMatch(/service\(\)\.save\(/)
+    expect(source).toMatch(/service\(\)\.drain\(/)
+    expect(source).toMatch(/Main owns content, file binding, fixed-revision save and durable recovery/)
   })
 
   it('App.tsx no longer implements archive build, save single-flight, draft ack, or Recovery effects', () => {

@@ -4,7 +4,7 @@ import { bytesToHex } from '@noble/hashes/utils'
 /** Tagged encoding keeps bytes distinct from user objects and ignores key order. */
 function encode(value: unknown): unknown {
   if (value === null) return ['null']
-  if (value instanceof Uint8Array) return ['bytes', Array.from(value)]
+  if (Object.prototype.toString.call(value) === '[object Uint8Array]') return ['bytes', Array.from(value as Uint8Array)]
   if (Array.isArray(value)) return ['array', value.map(encode)]
   if (typeof value === 'object') {
     return ['object', Object.keys(value).sort().map(key => [key, encode((value as Record<string, unknown>)[key])])]

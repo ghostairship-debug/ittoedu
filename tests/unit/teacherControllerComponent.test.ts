@@ -2,6 +2,8 @@ import { restoreDefaultTeacherController } from '../../src/renderer/course/globa
 import { missingTeacherControllerTransaction } from '../../src/renderer/components/teacherControllerComponent'
 import { collectCourseProjectComponentHealth } from '../../src/shared/courseProjectHealth/component'
 import { describe, it, expect } from 'vitest'
+import { waitFor } from '@testing-library/react'
+import { createCourseStoreHost } from '../helpers/courseStoreHost'
 import { layerItemIsHittable, layerItemBounds } from '../../src/renderer/phaser/layerItemHitTest'
 import { createBlankCourseProject } from '../../src/core/course/createCourseProject'
 import { withDefaultComponentController } from '../../src/renderer/components/teacherControllerComponent'
@@ -112,26 +114,38 @@ describe('embedded teacher controller', () => {
     } finally { await session.destroy(); container.remove() }
     expect(document.querySelector('.published-component-mount')).toBeNull()
   })
-  it.each(['createNewProject', 'createNewFlowProject', 'createNewSpatialProject'] as const)('recovers a deleted controller with its source in one undoable transaction: %s', factory => {
+  it.each([
+    ['createNewProject', 'slide'],
+    ['createNewFlowProject', 'flow'],
+    ['createNewSpatialProject', 'spatial'],
+  ] as const)('recovers a deleted controller with its source in one undoable transaction: %s', async (_factory, surface) => {
+    const host = await createCourseStoreHost()
     const state = () => useEditorStore.getState()
-    state()[factory]()
+    await state().createCourseDocument(surface)
+    await state().drainCourseDocument()
     const initial = selectActiveCourseProjectDocument(state())!
     expect(initial.globalLayerItems[0]!.item).toMatchObject({ kind: 'component', role: 'teacher-controller' })
     const missing = structuredClone(initial)
     missing.globalLayerItems = []; missing.playback.controls = 'none'
-    state().loadCourseProject(missing, null, {}, state().componentPackages)
+    missing.componentPackages = {}
+    await host.open(missing)
     state().ensureTeacherController()
+    await state().drainCourseDocument()
     const recovered = selectActiveCourseProjectDocument(state())!
     const item = recovered.globalLayerItems[0]!.item
     expect(item).toMatchObject({ kind: 'component', role: 'teacher-controller' })
     if (item.kind !== 'component') throw new Error('component')
     expect(state().componentPackages[item.component.packageId]?.runtimeSource).toContain('ctx.teacherController')
     state().undo()
-    expect(selectActiveCourseProjectDocument(state())!.globalLayerItems).toHaveLength(0)
-    expect(state().componentPackages[item.component.packageId]).toBeUndefined()
+    await waitFor(() => {
+      expect(selectActiveCourseProjectDocument(state())!.globalLayerItems).toHaveLength(0)
+      expect(state().componentPackages[item.component.packageId]).toBeUndefined()
+    })
     state().redo()
-    expect(selectActiveCourseProjectDocument(state())!.globalLayerItems[0]!.item).toEqual(item)
-    expect(state().componentPackages[item.component.packageId]).toBeDefined()
+    await waitFor(() => {
+      expect(selectActiveCourseProjectDocument(state())!.globalLayerItems[0]!.item).toEqual(item)
+      expect(state().componentPackages[item.component.packageId]).toBeDefined()
+    })
   })
 
   it('restores source without discarding course configuration and refuses locked edits', () => {

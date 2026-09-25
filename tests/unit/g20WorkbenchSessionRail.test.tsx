@@ -83,7 +83,11 @@ it('hides resource and session sections independently and keeps one assistant mo
   }
   const view = render(<Harness panel={null} />)
   const assistant = screen.getByLabelText('AI composer state')
-  expect(view.container.querySelector('.workspace-grid')).toHaveAttribute('data-chat-closed', 'true')
+  const grid = view.container.querySelector('.workspace-grid')
+  expect(grid).toHaveAttribute('data-editor-focus', 'true')
+  expect(grid).toHaveAttribute('data-pro-panel', '')
+  expect(grid).toHaveAttribute('data-chat-closed', 'false')
+  expect(grid).toHaveStyle({ gridTemplateColumns: '0px 0px minmax(0,1fr) 0px 0px' })
   view.rerender(<Harness panel="ai" />)
   expect(view.container.querySelector('.workspace-grid')).toHaveAttribute('data-pro-panel', 'ai')
   view.rerender(<Harness panel="resources" />)

@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest'
+import { waitFor } from '@testing-library/react'
 import { createBlankCourseProject } from '@/core/course/createCourseProject'
 import { createTextNode } from '@/core/tools/nativeNodeFactories'
 import { selectRuntimeSourceAuthoringView } from '@/renderer/runtime/runtimeSourceAuthoringView'
@@ -16,6 +17,7 @@ import type {
   CourseProjectDocument,
   SlideSceneDocument,
 } from '@/shared/courseProjectTypes'
+import { createTriageT4StoreHost } from '../helpers/triage-t4-store-host'
 
 const NOW = '2026-08-24T04:30:00.000Z'
 const UNRELATED_LAYER_ID = 'unrelated-text'
@@ -24,6 +26,7 @@ const UNRELATED_ASSET_BYTES = Uint8Array.from([7, 4, 7, 5, 5])
 
 let sceneRuntimeId = ''
 let globalRuntimeId = ''
+let host: Awaited<ReturnType<typeof createTriageT4StoreHost>>
 
 function lifecycleProject(): CourseProjectDocument {
   const project = createBlankCourseProject({
@@ -149,17 +152,21 @@ function hasGlobalRuntime(project = currentProject()): boolean {
   )
 }
 
-beforeEach(() => {
-  useEditorStore.getState().loadCourseProject(lifecycleProject(), null, {
+beforeEach(async () => {
+  host = await createTriageT4StoreHost()
+  await host.open(lifecycleProject(), undefined, {
     [UNRELATED_ASSET_ID]: UNRELATED_ASSET_BYTES,
   })
   sceneRuntimeId = createRuntimeTemplate('scene')
+  await useEditorStore.getState().drainCourseDocument()
   globalRuntimeId = createRuntimeTemplate('global')
+  await useEditorStore.getState().drainCourseDocument()
   useEditorStore.getState().setEditingScope('scene')
+  await useEditorStore.getState().drainCourseDocument()
 })
 
 describe('Runtime template lifecycle through unified layer deletion', () => {
-  it('structurally deletes the base scene carrier and restores/reapplies it with undo/redo', () => {
+  it('structurally deletes the base scene carrier and restores/reapplies it with undo/redo', async () => {
     const store = useEditorStore.getState()
     store.setActivePresentationState(null)
     store.setEditingScope('scene')
@@ -167,27 +174,33 @@ describe('Runtime template lifecycle through unified layer deletion', () => {
 
     expect(selectSelectedNodeIds(useEditorStore.getState())).toEqual([sceneRuntimeId])
     store.deleteSelectedNodes()
+    await useEditorStore.getState().drainCourseDocument()
 
     expect(hasSceneRuntime()).toBe(false)
     expect(hasGlobalRuntime()).toBe(true)
     expectUnrelatedStatePreserved()
 
     useEditorStore.getState().undo()
-    expect(hasSceneRuntime()).toBe(true)
-    expect(hasGlobalRuntime()).toBe(true)
-    expectUnrelatedStatePreserved()
+    await waitFor(() => {
+      expect(hasSceneRuntime()).toBe(true)
+      expect(hasGlobalRuntime()).toBe(true)
+      expectUnrelatedStatePreserved()
+    })
 
     useEditorStore.getState().redo()
-    expect(hasSceneRuntime()).toBe(false)
-    expect(hasGlobalRuntime()).toBe(true)
-    expectUnrelatedStatePreserved()
+    await waitFor(() => {
+      expect(hasSceneRuntime()).toBe(false)
+      expect(hasGlobalRuntime()).toBe(true)
+      expectUnrelatedStatePreserved()
+    })
   })
 
-  it('hides an inherited scene carrier in a named state without deleting its base identity', () => {
+  it('hides an inherited scene carrier in a named state without deleting its base identity', async () => {
     const store = useEditorStore.getState()
     store.setActivePresentationState('state_initial')
     store.selectNode(sceneRuntimeId)
     store.deleteSelectedNodes()
+    await useEditorStore.getState().drainCourseDocument()
 
     expect(hasSceneRuntime()).toBe(true)
     expect(currentScene().presentation?.states[0]?.layerItemOverrides[sceneRuntimeId])
@@ -196,19 +209,23 @@ describe('Runtime template lifecycle through unified layer deletion', () => {
     expectUnrelatedStatePreserved()
 
     useEditorStore.getState().undo()
-    expect(hasSceneRuntime()).toBe(true)
-    expect(currentScene().presentation?.states[0]?.layerItemOverrides[sceneRuntimeId])
-      .toBeUndefined()
-    expectUnrelatedStatePreserved()
+    await waitFor(() => {
+      expect(hasSceneRuntime()).toBe(true)
+      expect(currentScene().presentation?.states[0]?.layerItemOverrides[sceneRuntimeId])
+        .toBeUndefined()
+      expectUnrelatedStatePreserved()
+    })
 
     useEditorStore.getState().redo()
-    expect(hasSceneRuntime()).toBe(true)
-    expect(currentScene().presentation?.states[0]?.layerItemOverrides[sceneRuntimeId])
-      .toEqual({ visible: false })
-    expectUnrelatedStatePreserved()
+    await waitFor(() => {
+      expect(hasSceneRuntime()).toBe(true)
+      expect(currentScene().presentation?.states[0]?.layerItemOverrides[sceneRuntimeId])
+        .toEqual({ visible: false })
+      expectUnrelatedStatePreserved()
+    })
   })
 
-  it('structurally deletes the global carrier even while a named scene state is active', () => {
+  it('structurally deletes the global carrier even while a named scene state is active', async () => {
     const store = useEditorStore.getState()
     store.setActivePresentationState('state_initial')
     store.setEditingScope('global')
@@ -218,19 +235,24 @@ describe('Runtime template lifecycle through unified layer deletion', () => {
     expect(selectEditingScope(useEditorStore.getState())).toBe('global')
     expect(selectSelectedNodeIds(useEditorStore.getState())).toEqual([globalRuntimeId])
     store.deleteSelectedNodes()
+    await useEditorStore.getState().drainCourseDocument()
 
     expect(hasGlobalRuntime()).toBe(false)
     expect(hasSceneRuntime()).toBe(true)
     expectUnrelatedStatePreserved()
 
     useEditorStore.getState().undo()
-    expect(hasGlobalRuntime()).toBe(true)
-    expect(hasSceneRuntime()).toBe(true)
-    expectUnrelatedStatePreserved()
+    await waitFor(() => {
+      expect(hasGlobalRuntime()).toBe(true)
+      expect(hasSceneRuntime()).toBe(true)
+      expectUnrelatedStatePreserved()
+    })
 
     useEditorStore.getState().redo()
-    expect(hasGlobalRuntime()).toBe(false)
-    expect(hasSceneRuntime()).toBe(true)
-    expectUnrelatedStatePreserved()
+    await waitFor(() => {
+      expect(hasGlobalRuntime()).toBe(false)
+      expect(hasSceneRuntime()).toBe(true)
+      expectUnrelatedStatePreserved()
+    })
   })
 })
