@@ -858,6 +858,8 @@ export function SlideLocationWorkspace({
     stage: slideCanvas,
     fit: 'page',
   }), [slideCanvas, stageViewportSize.height, stageViewportSize.width, view.x, view.y, view.zoom])
+  // The teacher controller keeps to the visible part of the page; tell it when panning or zooming moves that part (M19).
+  useEffect(() => { window.document.dispatchEvent(new Event('controller-authoring-viewport')) }, [stageTransform])
   const previewRebuildKey = snapshot.previewRebuildKey
   const previewGeneration = useMemo<object>(() => ({}), [
     canvasMode,

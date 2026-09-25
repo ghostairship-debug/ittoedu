@@ -78,6 +78,31 @@ describe('embedded teacher controller', () => {
     host.destroy(); container.remove()
     expect(layerItemBounds(item)).toMatchObject({ x: saved.x, y: saved.y, width: saved.width, height: saved.height })
   })
+  it('keeps the edited controller on the visible part of a scrolled page, as playback does (M19)', async () => {
+    const bundle = withDefaultComponentController(createBlankCourseProject())
+    const item = bundle.project.globalLayerItems[0]!.item
+    if (item.kind !== 'component') throw new Error('component')
+    const pkg = bundle.componentPackages[item.component.packageId]!
+    pkg.runtimeSource = `window.CoursewareComponent.define({id:'${pkg.manifest.id}',runtimeApiVersion:4,create(ctx){ctx.dom.root.style.width='76px';ctx.dom.root.style.height='44px';return {destroy(){}}}})`
+    const container = document.createElement('div'), page = { width: 1280, height: 720 }
+    document.body.append(container)
+    let visible = { x: 0, y: 0, ...page }
+    const host = new TeacherControllerComponentHost({
+      node: teacherControllerHostNode(item.frame, item.rotation),
+      container, canvas: page, getRenderedStageBounds: () => page, authoringPage: page, getConstraintRect: () => visible,
+      scenes: [], getCurrentSceneId: () => null, getStateLabel: () => null, getStatus: () => ({ muted: false, fullscreen: false }),
+      getSession: () => ({ collapsed: true, offset: { dx: 0, dy: 0 } }), onSessionChange() {}, getInteractive: () => false, onAction() {},
+    }, { container, instanceId: item.layerItemId, componentId: pkg.manifest.id, version: pkg.manifest.version, components: bundle.componentPackages, scope: 'global', mode: 'edit', interactive: false, width: item.frame.width, height: item.frame.height })
+    const authored = { x: item.frame.x + item.frame.width - 76, y: item.frame.y + item.frame.height - 44, width: 76, height: 44 }
+    expect(layerItemBounds(item, page)).toMatchObject(authored)
+    // Only the top 400 units of the page are in view: the controller rides the visible bottom edge, like playback.
+    visible = { x: 0, y: 0, width: 1280, height: 400 }
+    document.dispatchEvent(new Event('controller-authoring-viewport'))
+    await new Promise(resolve => requestAnimationFrame(resolve))
+    expect(host.rootElement.dataset.controllerAuthoringPage).toBe('0,0,1280,400')
+    expect(layerItemBounds(item, page)).toMatchObject({ ...authored, y: 400 - 44 })
+    host.destroy(); container.remove()
+  })
   it('allows the global component controller to be selected in scene editing', () => {
     const { project } = withDefaultComponentController(createBlankCourseProject())
     const item = project.globalLayerItems[0]!.item

@@ -503,6 +503,23 @@ describe('FlowWorkspace paper', () => {
     expect(moved?.item.frame).toMatchObject({ x: 320, y: 210, width: 200, height: 80 })
   })
 
+  it('selects an overlay on a plain click without writing the place it is shown at (M19)', () => {
+    const project = createFlowProject()
+    // Shown at the view edge (1080, 640), authored further out: a click must not write the shown place back.
+    project.globalLayerItems.find(entry => entry.item.layerItemId === 'global-overlay')!.item.frame = { mode: 'absolute', x: 1100, y: 700, width: 200, height: 80 }
+    const { onProjectChange, onSelectionChange } = renderPaper(project)
+    vi.spyOn(screen.getByTestId('flow-authoring-layer-overlay'), 'getBoundingClientRect').mockReturnValue({
+      x: 0, y: 0, left: 0, top: 0, right: 1280, bottom: 720, width: 1280, height: 720, toJSON: () => ({}),
+    })
+    const visual = screen.getByTestId('flow-layer-card-global-overlay')
+    Object.assign(visual, { setPointerCapture: vi.fn(), hasPointerCapture: () => true, releasePointerCapture: vi.fn() })
+    fireEvent.pointerDown(visual, { button: 0, pointerId: 3, clientX: 1150, clientY: 670 })
+    fireEvent.pointerMove(visual, { pointerId: 3, clientX: 1151, clientY: 671 })
+    fireEvent.pointerUp(visual, { pointerId: 3, clientX: 1151, clientY: 671 })
+    expect(onSelectionChange).toHaveBeenCalledTimes(1)
+    expect(onProjectChange).not.toHaveBeenCalled()
+  })
+
   it('scrolls paper-space visuals in every physical plane while viewport visuals stay fixed', () => {
     const project = createFlowProject()
     const underlay = project.globalLayerItems.find(

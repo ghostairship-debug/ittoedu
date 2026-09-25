@@ -267,7 +267,13 @@ interface FlowOverlayGesture {
   readonly startLocal: { x: number; y: number }
   readonly startFrame: StageRect
   readonly target: CourseAuthoringTarget
+  /** Set once the pointer travels past the click slop; a plain click selects and writes nothing. */
+  moved: boolean
 }
+
+const FLOW_OVERLAY_DRAG_SLOP = 3
+const pastDragSlop = (gesture: FlowOverlayGesture, local: { x: number; y: number }) =>
+  gesture.moved || Math.hypot(local.x - gesture.startLocal.x, local.y - gesture.startLocal.y) >= FLOW_OVERLAY_DRAG_SLOP
 
 export interface FlowOverlayAuthoringLayerProps {
   readonly view: FlowEditorView
@@ -344,6 +350,9 @@ export function FlowOverlayAuthoringLayer({
       height: Math.max(...bounds.map(rect => rect.y + rect.height)) - y }, overlayViewportSize, viewPan))
   }
   const selectedOverlayKey = selection?.selectedOverlayIds.join('\u0000') ?? ''
+  // Only overlays on the paper can scroll out of view, so only they offer a way back.
+  const selectedPaperOverlay = view.overlayLayers.some(layer => selection?.selectedOverlayIds.includes(layer.selectionId) === true
+    && !isTeacherControllerLayerItem(layer.item) && layer.item.paperSpace === 'paper')
   useLayoutEffect(revealSelection, [selectedOverlayKey, view.projectId, view.surfaceId, overlayViewportSize.width, overlayViewportSize.height])
 
   const overlayLayers = view.overlayLayers.filter((layer) => layer.effectiveVisible)
@@ -428,6 +437,7 @@ export function FlowOverlayAuthoringLayer({
       startLocal: local,
       startFrame,
       target,
+      moved: false,
     }
     event.currentTarget.setPointerCapture(event.pointerId)
   }
@@ -437,6 +447,8 @@ export function FlowOverlayAuthoringLayer({
     const overlay = overlayRef.current
     if (!gesture || !overlay) return
     const local = localForLayer(overlay, event, view.overlayLayers.find(layer => layer.selectionId === gesture.layerItemId))
+    if (!pastDragSlop(gesture, local)) return
+    gesture.moved = true
     const rawNext = gesture.type === 'resize' && gesture.direction
       ? resizeWorldFrameFromHandle(
           gesture.startFrame,
@@ -470,6 +482,7 @@ export function FlowOverlayAuthoringLayer({
       event.currentTarget.releasePointerCapture(event.pointerId)
     }
     const local = localForLayer(overlay, event, view.overlayLayers.find(layer => layer.selectionId === gesture.layerItemId))
+    if (!pastDragSlop(gesture, local)) { setOverlayPreview(null); return }
     const rawNext = gesture.type === 'resize' && gesture.direction
       ? resizeWorldFrameFromHandle(
           gesture.startFrame,
@@ -522,14 +535,12 @@ export function FlowOverlayAuthoringLayer({
   const renderOverlayVisual = (layer: FlowEditorLayerView) => {
     const preview = overlayPreview?.id === layer.selectionId ? overlayPreview.frame : null
     const controller = isTeacherControllerLayerItem(layer.item)
-    const controllerGlobalAuthoring = controller && selection?.authoringScope === 'global'
-    const controllerPagePreview = controller && !controllerGlobalAuthoring
-    const selected = !controllerPagePreview
-      && selection?.selectedOverlayIds.includes(layer.selectionId) === true
+    // The teacher controller is selected and dragged in place on the page too, as in Slide (M19).
+    const selected = selection?.selectedOverlayIds.includes(layer.selectionId) === true
     const underlayVisual = layer.owner === 'global' && layer.globalPlane === 'underlay'
     const passThroughVisual = layer.item.hitPolicy === 'pass-through'
     const inertVisual = underlayVisual || passThroughVisual
-    const interactive = !readOnly && !selected && !controllerPagePreview && !inertVisual
+    const interactive = !readOnly && !selected && !inertVisual
     return (
       <div
         key={layer.selectionId}
@@ -543,10 +554,9 @@ export function FlowOverlayAuthoringLayer({
         data-flow-overlay-order={layer.stackOrder}
         data-flow-overlay-locked={layer.locked ? 'true' : 'false'}
         data-flow-overlay-visible={layer.effectiveVisible ? 'true' : 'false'}
-        data-controller-page-preview={controllerPagePreview || undefined}
         data-flow-global-plane={layer.globalPlane ?? undefined}
         data-flow-body-plane={layer.flowBodyPlane ?? undefined}
-        aria-hidden={controllerPagePreview || inertVisual || undefined}
+        aria-hidden={inertVisual || undefined}
         aria-label={interactive ? layer.item.label || '浮层' : undefined}
         {...(inertVisual ? { inert: true } : {})}
         style={{
@@ -597,10 +607,7 @@ export function FlowOverlayAuthoringLayer({
   }
 
   const renderSelectionChrome = (layer: FlowEditorLayerView) => {
-    const controller = isTeacherControllerLayerItem(layer.item)
-    const controllerPagePreview = controller && selection?.authoringScope !== 'global'
-    const selected = !controllerPagePreview
-      && selection?.selectedOverlayIds.includes(layer.selectionId) === true
+    const selected = selection?.selectedOverlayIds.includes(layer.selectionId) === true
     if (!selected) return null
     const editable = !readOnly && !layer.locked
     return (
@@ -700,8 +707,8 @@ export function FlowOverlayAuthoringLayer({
       >
         {overlayLayers.map(renderSelectionChrome)}
       </div>
-      {(selectedOverlayKey || viewPan.x !== 0 || viewPan.y !== 0) && <div style={{ position: 'absolute', top: 8, right: 8, zIndex: 6, display: 'flex', gap: 6 }}>
-        {selectedOverlayKey && <button type="button" className="secondary-button" onClick={revealSelection}>定位选中内容</button>}
+      {(selectedPaperOverlay || viewPan.x !== 0 || viewPan.y !== 0) && <div style={{ position: 'absolute', top: 8, right: 8, zIndex: 6, display: 'flex', gap: 6 }}>
+        {selectedPaperOverlay && <button type="button" className="secondary-button" onClick={revealSelection}>定位选中内容</button>}
         {(viewPan.x !== 0 || viewPan.y !== 0) && <button type="button" className="secondary-button" onClick={() => onViewPanChange?.({ x: 0, y: 0 })}>回到文档原位</button>}
       </div>}
     </>

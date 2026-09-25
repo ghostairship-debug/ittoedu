@@ -92,6 +92,12 @@ export class TeacherControllerComponentHost {
       }
       view.addEventListener('resize', resize)
       this.#cleanup.push(() => { view.removeEventListener('resize', resize); view.cancelAnimationFrame(frame) })
+      if (this.#authoringId) {
+        // The editor pans and zooms its stage without resizing anything; it says so and the controller re-fits (M19).
+        const document = options.container.ownerDocument
+        document.addEventListener('controller-authoring-viewport', resize)
+        this.#cleanup.push(() => document.removeEventListener('controller-authoring-viewport', resize))
+      }
       resize()
     }
     this.syncFootprint()
@@ -149,7 +155,7 @@ export class TeacherControllerComponentHost {
     this.#anchorShift = { x: node.width - width, y: node.height - height }
     this.#shift = { ...this.#anchorShift }
     const page = this.#authoringId
-      ? this.#options.authoringPage && { x: 0, y: 0, ...this.#options.authoringPage }
+      ? this.#options.getConstraintRect?.() ?? (this.#options.authoringPage && { x: 0, y: 0, ...this.#options.authoringPage })
       : this.#options.getConstraintRect?.() ?? { x: 0, y: 0, ...(this.#options.getConstraintCanvas?.() ?? this.#options.canvas) }
     if (page) {
       // Off the page (or the visible part of a scrolled page) the controller is shown at its edge.
@@ -162,10 +168,15 @@ export class TeacherControllerComponentHost {
     if (this.#authoringId) {
       const root = this.rootElement
       root.dataset.controllerAuthoringId = this.#authoringId
-      // The editor applies the page edge itself, so a proposed drag frame is never shifted twice.
-      const bounds = [this.#anchorShift.x, this.#anchorShift.y, width, height].map(value => Math.round(value * 1000) / 1000).join(',')
-      if (root.dataset.controllerAuthoringBounds !== bounds) {
+      // The editor applies the page edge itself, so a proposed drag frame is never shifted twice; it is told which
+      // part of the page that edge encloses.
+      const round = (value: number) => Math.round(value * 1000) / 1000
+      const bounds = [this.#anchorShift.x, this.#anchorShift.y, width, height].map(round).join(',')
+      const area = page ? [page.x, page.y, page.width, page.height].map(round).join(',') : ''
+      if (root.dataset.controllerAuthoringBounds !== bounds || (root.dataset.controllerAuthoringPage ?? '') !== area) {
         root.dataset.controllerAuthoringBounds = bounds
+        if (area) root.dataset.controllerAuthoringPage = area
+        else delete root.dataset.controllerAuthoringPage
         container.ownerDocument.dispatchEvent(new Event('controller-authoring-bounds'))
       }
     }

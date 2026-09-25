@@ -1,5 +1,5 @@
 import { canEditLayerInScope } from '../../shared/teacherControllerRole'
-import { constrainControllerDisplayFrame, controllerDisplayFrame } from '../authoring/controllerDisplayBounds'
+import { constrainControllerDisplayFrame, controllerAuthoringArea, controllerDisplayFrame, shownControllerFrame } from '../authoring/controllerDisplayBounds'
 import type { LayerItem } from '../../shared/courseProjectTypes'
 import { MIN_NODE_SIZE } from '../../shared/constants'
 import { courseSlideCanvas } from '../../shared/slideCanvas'
@@ -47,6 +47,8 @@ import {
   type V9SlideHitTarget,
 } from '../phaser/v9SlideHitAdapter'
 const MARQUEE_MIN_SIZE = 3
+/** Screen pixels a pointer may wander during a click before it counts as a drag. */
+const MOVE_CLICK_SLOP = 3
 const HANDLE_HIT_RADIUS = 10
 
 export type SlideWorkspaceBackendKind = 'slide-authoring' | 'unavailable'
@@ -282,7 +284,8 @@ function previewMove(
   return gesture.nodes.map((node) => {
     const next = { ...node, x: node.x + dx, y: node.y + dy }
     const item = globals.find(entry => entry.item.layerItemId === node.nodeId)?.item
-    return item ? constrainControllerDisplayFrame(item, next, courseSlideCanvas(backend.getSession().history.present)) : next
+    // A dragged controller is written where it is shown: on the visible part of the page (M19).
+    return item ? constrainControllerDisplayFrame(item, next, controllerAuthoringArea(item, courseSlideCanvas(backend.getSession().history.present))) : next
   })
 }
 
@@ -631,12 +634,17 @@ export function createSlideWorkspaceAuthoringController(
       const live = readBackend() ?? backend
       const nextWritable = writableNativeTransforms(live)
       if (nextWritable.length > 0 && !hit.locked) {
+        const present = live.getSession().history.present
         gesture = {
           type: 'move',
           startWorld: world,
-          nodes: nextWritable,
+          // An off-page controller is moved from the page edge where it is shown, not from where it is stored.
+          nodes: nextWritable.map(node => {
+            const item = present.globalLayerItems.find(entry => entry.item.layerItemId === node.nodeId)?.item
+            return item ? shownControllerFrame(item, node, courseSlideCanvas(present)) : node
+          }),
         }
-        preview = nextWritable.map((node) => ({ ...node }))
+        preview = gesture.nodes.map((node) => ({ ...node }))
       } else {
         gesture = null
         preview = null
@@ -740,6 +748,11 @@ export function createSlideWorkspaceAuthoringController(
       })
     }
 
+    // A plain click selects and writes nothing, even for a controller shown away from where it is stored.
+    if (active.type === 'move' && Math.hypot(world.x - active.startWorld.x, world.y - active.startWorld.y) * viewportTransform(options).scale < MOVE_CLICK_SLOP) {
+      preview = null
+      return v9Result(backend, options, { preview: undefined })
+    }
     const next = active.type === 'move'
       ? previewMove(active, world, backend)
       : active.type === 'resize'

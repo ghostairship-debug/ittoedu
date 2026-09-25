@@ -1819,9 +1819,9 @@ export class SlidePublishedAdapter implements SurfaceHost, PublishedAuthoringPat
       footprintElement: wrap,
       canvas: findSlideSurface(this.#payload, this.id).canvas,
       getRenderedStageBounds: () => stageBoundsFromElement(root, findSlideSurface(this.#payload, this.id).canvas),
-      // The same page edge in the editor and in playback; playback also keeps it on the visible part of a tall page.
+      // The same rule in the editor and in playback: kept on the visible part of the page, at its edge when outside.
       ...(this.#authoring
-        ? { authoringPage: findSlideSurface(this.#payload, this.id).canvas }
+        ? { authoringPage: findSlideSurface(this.#payload, this.id).canvas, getConstraintRect: () => visiblePageRect(root, findSlideSurface(this.#payload, this.id).canvas) }
         : { getConstraintRect: () => visiblePageRect(root, findSlideSurface(this.#payload, this.id).canvas, this.#playbackView?.chrome.insets) }),
       scenes: this.#payload.locations.map((location) => ({
         id: location.id,
