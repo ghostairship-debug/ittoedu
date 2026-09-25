@@ -8,7 +8,7 @@ function isUint8ArrayBytes(value: unknown): value is Uint8Array {
 /** Tagged encoding keeps bytes distinct from user objects and ignores key order. */
 function encode(value: unknown): unknown {
   if (value === null) return ['null']
-  if (isUint8ArrayBytes(value)) return ['bytes', Array.from(value)]
+  if (isUint8ArrayBytes(value)) return ['bytes', bytesToHex(sha256(value))]
   if (Array.isArray(value)) return ['array', value.map(encode)]
   if (typeof value === 'object') {
     return ['object', Object.keys(value).sort().map(key => [key, encode((value as Record<string, unknown>)[key])])]
