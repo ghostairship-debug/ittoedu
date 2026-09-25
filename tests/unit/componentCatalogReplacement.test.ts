@@ -7,6 +7,8 @@ import { useEditorStore,
 } from '@/renderer/store/editorStore'
 import { createTriageT4StoreHost } from '../helpers/triage-t4-store-host'
 
+const fileBytes = (files: Record<string, Uint8Array>) => Object.fromEntries(Object.entries(files).map(([path, bytes]) => [path, Array.from(bytes)]))
+
 const PACKAGE_ID = 'com.example.catalog-card'
 
 function catalogPackage(sha256: string): ComponentPackageData {
@@ -72,10 +74,15 @@ describe('组件目录版本锁定', () => {
 
     const state = useEditorStore.getState()
     expect(selectActiveCourseProjectDocument(state)!).toEqual(projectBefore)
-    expect(state.componentPackages[PACKAGE_ID]).toMatchObject({
+    // The projection adds its archive key and metadata and its bytes come from the host realm.
+    const current = state.componentPackages[PACKAGE_ID]!
+    expect(current).toMatchObject({
       manifest: original.manifest,
       provenance: original.provenance,
+      runtimeSource: original.runtimeSource,
+      contentSha256: original.contentSha256,
     })
+    expect(fileBytes(current.files)).toEqual(fileBytes(original.files))
     expect(activeHistory().past).toHaveLength(historyBefore)
   })
 

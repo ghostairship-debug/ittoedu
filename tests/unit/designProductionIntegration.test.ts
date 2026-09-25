@@ -30,7 +30,7 @@ describe('design production through the active editor transaction', () => {
         revision: expect.any(Number),
         updatedAt: expect.any(String),
       })
-      expect(Object.keys(useEditorStore.getState().componentPackages)).toEqual(Object.keys(initialPackages))
+      expect(structuredClone(useEditorStore.getState().componentPackages)).toEqual(initialPackages)
     })
     useEditorStore.getState().redo()
     await waitFor(() => {

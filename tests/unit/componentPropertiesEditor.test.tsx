@@ -280,8 +280,11 @@ describe('ComponentsTab component presets', () => {
     HTMLCanvasElement.prototype.getContext = () => null
     try {
       render(<ComponentsTab />)
+      const documentId = useEditorStore.getState().courseDocument.documentId!
+      const depthBeforeInsert = host.registry.get(documentId).read().undoDepth
       fireEvent.click(within(screen.getByLabelText('属性组件预设')).getByRole('button', { name: '即用' }))
       await useEditorStore.getState().drainCourseDocument()
+      expect(host.registry.get(documentId).read().undoDepth).toBe(depthBeforeInsert + 1)
 
       const node = selectActiveScene(useEditorStore.getState()).nodes[0]
       expect(node).toMatchObject({
