@@ -1,11 +1,19 @@
 import { buildPublishedFixture as buildPublishedCourseV2Payload } from '../fixtures/teacherController'
-import { isAuthoringHistoryTransactionFrame } from '../../src/renderer/authoring/resourceAwareAuthoringHistory'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { RuntimeTargetEditSession } from '@/renderer/authoring/runtimeTargetEditSession'
-import { isFlowEditorTransactionFrame } from '@/renderer/course/flowEditorSlice'
 
-import { isSpatialAuthoringTransactionFrame } from '@/renderer/course/spatialAuthoringHistory'
+import {
+  bootTriageCourseHost,
+  formalCourse,
+  projectBody,
+  projectCourse,
+  redoCourse,
+  settleCourse,
+  undoCourse,
+  type TriageCourseHost,
+} from '../helpers/triage-t7-courseHost'
+import type { DocumentSnapshot } from '@/shared/workbench/document'
 
 import {
   createCourseProjectArchive,
@@ -151,6 +159,19 @@ const ARCHIVE_TIME = '2026-08-24T12:00:00.000Z'
 const CONTENT_KEY = 'title/~lesson'
 const FALLBACK_ASSET_ID = 'runtime-content-fallback'
 const PREVIEW_TOKEN = '00000000-0000-4000-8000-000000000010'
+
+/**
+ * 2.0 document operations carry a `crypto.randomUUID()` operation id and
+ * DocumentSession refuses to reuse one id for different content, so the fixture
+ * must stay deterministic *and* unique. `PREVIEW_TOKEN` seeds the sequence, which
+ * keeps the first Published preview session token stable.
+ */
+let uuidSequence = Number(PREVIEW_TOKEN.slice(-12))
+function nextRuntimeContentUuid(): `${string}-${string}-${string}-${string}-${string}` {
+  const token = `00000000-0000-4000-8000-${String(uuidSequence).padStart(12, '0')}`
+  uuidSequence += 1
+  return token as `${string}-${string}-${string}-${string}-${string}`
+}
 
 type FixtureKind =
   | 'slide-scene'
@@ -425,19 +446,21 @@ function fixture(
   }
 }
 
-function loadFixture(
+let host: TriageCourseHost
+
+/**
+ * 2.0 replacement for the removed `loadCourseProject` shortcut: the fixture becomes a
+ * real main-owned DocumentSession, and the renderer Store only projects it.
+ */
+async function loadFixture(
   kind: FixtureKind,
   options?: Parameters<typeof fixture>[1],
-): RuntimeContentFixture {
+): Promise<RuntimeContentFixture> {
   const source = fixture(kind, options)
-  useEditorStore.getState().loadCourseProject(
-    source.project,
-    null,
-    source.assetFiles,
-    {},
-  )
+  await projectCourse(host, source.project, source.assetFiles, {})
   useEditorStore.getState().activateCourseLocation(source.locationId)
-  if (source.owner === 'global') useEditorStore.getState().setEditingScope('global')
+  useEditorStore.getState().setEditingScope(source.owner === 'global' ? 'global' : 'scene')
+  await settleCourse()
   return source
 }
 
@@ -553,8 +576,31 @@ function byteMap(files: Readonly<Record<string, Uint8Array>>) {
   )
 }
 
+/**
+ * 2.0 keeps no renderer history: the newest transaction lives in the main-owned
+ * DocumentSession, so `history.past` is permanently empty. "Exactly one editor
+ * transaction, with no resource changes" is therefore read from the formal
+ * document instead — one new undoable step plus byte-identical formal resources.
+ */
+function formalUndoDepth(): number {
+  return formalCourse(host).undoDepth
+}
+
+function formalResources(snapshot: DocumentSnapshot) {
+  if (snapshot.model.kind !== 'course-v9') throw new Error('Expected a course document')
+  return {
+    assets: byteMap(snapshot.model.resources.assets),
+    components: Object.fromEntries(
+      Object.entries(snapshot.model.resources.components)
+        .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
+        .map(([key, files]) => [key, byteMap(files)]),
+    ),
+  }
+}
+
 function authoritativeSnapshot() {
   const state = useEditorStore.getState()
+  const snapshot = formalCourse(host)
   return {
     project: structuredClone(activeProject()),
     derivedProject: structuredClone(selectActiveCourseProjectDocument(state)!),
@@ -564,22 +610,13 @@ function authoritativeSnapshot() {
     packages: structuredClone(state.componentPackages),
     courseSession: structuredClone(state.courseAuthoringSession),
     dirty: state.dirty,
+    formalProject: structuredClone(
+      snapshot.model.kind === 'course-v9' ? snapshot.model.project : null,
+    ),
+    formalResources: formalResources(snapshot),
+    formalUndoDepth: snapshot.undoDepth,
+    formalRedoDepth: snapshot.redoDepth,
   }
-}
-
-function newestTransactionResourceChanges() {
-  const active = activeHistory()
-  const frame = active.history.past.at(-1)
-  const isTransaction = active.kind === 'slide'
-    ? Boolean(frame && isAuthoringHistoryTransactionFrame(frame))
-    : active.kind === 'flow'
-      ? Boolean(frame && isFlowEditorTransactionFrame(frame))
-      : Boolean(frame && isSpatialAuthoringTransactionFrame(frame))
-  expect(isTransaction).toBe(true)
-  if (!frame || !('kind' in frame) || frame.kind !== 'editor-transaction') {
-    throw new Error('Expected current editor transaction')
-  }
-  return frame.resourceChanges
 }
 
 let targetRevision = 0
@@ -593,6 +630,10 @@ async function publishRuntimeTextTarget(input: {
 }): Promise<void> {
   await screen.findByTestId('published-authoring-host')
   await waitFor(() => expect(publishedAuthoringHarness.onMessage).not.toBeNull())
+  // The live host session identity is generated per mount, so publish to the
+  // session that is actually mounted instead of a fixed fixture token.
+  const live = publishedAuthoringHarness.mounts.at(-1)
+  if (!live) throw new Error('Expected a mounted Published authoring host')
   targetRevision = Math.max(
     targetRevision + 1,
     publishedAuthoringHarness.latestRevision + 1,
@@ -615,7 +656,7 @@ async function publishRuntimeTextTarget(input: {
     publishedAuthoringHarness.onMessage?.({
       type: PLAYER_AUTHORING_MESSAGE_TYPES.runtimeTargets,
       protocolVersion: PLAYER_AUTHORING_PROTOCOL_VERSION,
-      sessionId: PREVIEW_TOKEN,
+      sessionId: live.sessionId,
       revision: targetRevision,
       update: {
         revision: targetRevision,
@@ -640,19 +681,20 @@ function installWorkspaceWriteSpies() {
   return { capture, update }
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   targetRevision = 0
   publishedAuthoringHarness.latestRevision = -1
   publishedAuthoringHarness.onMessage = null
   publishedAuthoringHarness.mounts.length = 0
-  vi.spyOn(globalThis.crypto, 'randomUUID').mockReturnValue(PREVIEW_TOKEN)
+  vi.spyOn(globalThis.crypto, 'randomUUID').mockImplementation(nextRuntimeContentUuid)
+  uuidSequence = Number(PREVIEW_TOKEN.slice(-12))
   vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:runtime-content-preview')
   vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined)
   vi.stubGlobal('ResizeObserver', class {
     observe() {}
     disconnect() {}
   })
-  useEditorStore.getState().createNewProject()
+  host = await bootTriageCourseHost()
 })
 
 afterEach(() => {
@@ -676,12 +718,13 @@ describe('ARCH-2 Runtime content text Store vertical slice', () => {
     ['spatial-global', 'spatial'],
   ] as const)(
     'commits %s through one current %s transaction and exactly preserves unrelated fields',
-    (fixtureKind, expectedHistoryKind) => {
-      const source = loadFixture(fixtureKind)
+    async (fixtureKind, expectedHistoryKind) => {
+      const source = await loadFixture(fixtureKind)
       const target = targetForStore(source)
       const beforeProject = structuredClone(activeProject())
       const beforeRuntime = structuredClone(runtimeItem(beforeProject, source.itemId))
-      const beforeHistoryDepth = activeHistory().history.past.length
+      const beforeHistoryDepth = formalUndoDepth()
+      const beforeResources = formalResources(formalCourse(host))
       const beforeCompatibility = compatibilityDepths()
 
       expect(activeHistory().kind).toBe(expectedHistoryKind)
@@ -700,22 +743,25 @@ describe('ARCH-2 Runtime content text Store vertical slice', () => {
         },
       })
 
+      await settleCourse()
       const committed = structuredClone(activeProject())
       const expectedRuntime = structuredClone(beforeRuntime)
       expectedRuntime.runtime.content.values[CONTENT_KEY] = source.nextValue
       expect(runtimeItem(committed, source.itemId)).toEqual(expectedRuntime)
       expect(committed.revision).toBe(beforeProject.revision + 1)
-      expect(activeHistory().history.past).toHaveLength(beforeHistoryDepth + 1)
-      expect(newestTransactionResourceChanges()).toEqual({})
+      expect(formalUndoDepth()).toBe(beforeHistoryDepth + 1)
+      expect(formalResources(formalCourse(host))).toEqual(beforeResources)
       expect(compatibilityDepths()).toEqual(beforeCompatibility)
 
-      useEditorStore.getState().undo()
-      expect(activeProject()).toEqual(beforeProject)
+      await undoCourse(host)
+      expect(projectBody(activeProject())).toEqual(projectBody(beforeProject))
+      expect(activeProject().revision).toBe(committed.revision + 1)
       expect(contentValue(activeProject(), source.itemId)).toBe(source.initialValue)
       expect(compatibilityDepths()).toEqual(beforeCompatibility)
 
-      useEditorStore.getState().redo()
-      expect(activeProject()).toEqual(committed)
+      await redoCourse(host)
+      expect(projectBody(activeProject())).toEqual(projectBody(committed))
+      expect(activeProject().revision).toBe(committed.revision + 2)
       expect(contentValue(activeProject(), source.itemId)).toBe(source.nextValue)
       expect(compatibilityDepths()).toEqual(beforeCompatibility)
     },
@@ -723,8 +769,8 @@ describe('ARCH-2 Runtime content text Store vertical slice', () => {
 
   it.each(['slide-scene', 'slide-global', 'spatial-global'] as const)(
     'captures %s from the projected first Runtime, with host targetId discovery-only',
-    (fixtureKind) => {
-      const source = loadFixture(fixtureKind, { secondRuntime: true })
+    async (fixtureKind) => {
+      const source = await loadFixture(fixtureKind, { secondRuntime: true })
       const target = useEditorStore.getState().captureRuntimeContentTextTarget(
         discoverySession(source, 'runtime:host-token-that-must-not-persist'),
       )
@@ -757,15 +803,15 @@ describe('ARCH-2 Runtime content text Store vertical slice', () => {
     'flow-global',
     'spatial-surface',
     'spatial-world',
-  ] as const)('does not fabricate projected visual capture for %s', (fixtureKind) => {
-    const source = loadFixture(fixtureKind)
+  ] as const)('does not fabricate projected visual capture for %s', async (fixtureKind) => {
+    const source = await loadFixture(fixtureKind)
     expect(useEditorStore.getState().captureRuntimeContentTextTarget(
       discoverySession(source),
     )).toBeNull()
   })
 
-  it('keeps same-value, stale revision, locked and deleted targets at zero authoritative writes', () => {
-    let source = loadFixture('slide-scene')
+  it('keeps same-value, stale revision, locked and deleted targets at zero authoritative writes', async () => {
+    let source = await loadFixture('slide-scene')
     let target = captureProjectedTarget(source)
     let before = authoritativeSnapshot()
 
@@ -773,17 +819,20 @@ describe('ARCH-2 Runtime content text Store vertical slice', () => {
       target,
       source.initialValue,
     )).toMatchObject({ ok: true, status: 'unchanged' })
+    await settleCourse()
     expect(authoritativeSnapshot()).toEqual(before)
 
     useEditorStore.getState().renameProject('Runtime text intervening revision')
+    await settleCourse()
     before = authoritativeSnapshot()
     expect(useEditorStore.getState().updateRuntimeContentTextAtTarget(
       target,
       source.nextValue,
     )).toMatchObject({ ok: false, code: 'revision-conflict' })
+    await settleCourse()
     expect(authoritativeSnapshot()).toEqual(before)
 
-    source = loadFixture('slide-scene', { locked: true })
+    source = await loadFixture('slide-scene', { locked: true })
     expect(useEditorStore.getState().captureRuntimeContentTextTarget(
       discoverySession(source),
     )).toBeNull()
@@ -793,21 +842,24 @@ describe('ARCH-2 Runtime content text Store vertical slice', () => {
       target,
       source.nextValue,
     )).toMatchObject({ ok: false, code: 'target-locked' })
+    await settleCourse()
     expect(authoritativeSnapshot()).toEqual(before)
 
-    source = loadFixture('slide-scene')
+    source = await loadFixture('slide-scene')
     target = captureProjectedTarget(source)
     useEditorStore.getState().deleteNode(source.itemId)
+    await settleCourse()
     before = authoritativeSnapshot()
     expect(useEditorStore.getState().updateRuntimeContentTextAtTarget(
       target,
       source.nextValue,
     )).toMatchObject({ ok: false, code: 'item-missing' })
+    await settleCourse()
     expect(authoritativeSnapshot()).toEqual(before)
   })
 
-  it('preserves an API 3 Runtime through archive reopen and Published V2 reads', () => {
-    const source = loadFixture('spatial-world')
+  it('preserves an API 3 Runtime through archive reopen and Published V2 reads', async () => {
+    const source = await loadFixture('spatial-world')
     const target = captureDirectTarget(source)
     const beforeRuntime = structuredClone(runtimeItem(activeProject(), source.itemId))
     expect(useEditorStore.getState().updateRuntimeContentTextAtTarget(
@@ -815,6 +867,7 @@ describe('ARCH-2 Runtime content text Store vertical slice', () => {
       source.nextValue,
     )).toMatchObject({ ok: true, status: 'updated' })
 
+    await settleCourse()
     const beforeReads = authoritativeSnapshot()
     const archive = createCourseProjectArchive({
       project: activeProject(),
@@ -868,7 +921,7 @@ describe('ARCH-2 Runtime content text Store vertical slice', () => {
 
 describe('ARCH-2 Workspace Runtime content text binding', () => {
   it('serially remounts the Published authoring host across scene, surface and global owners', async () => {
-    const source = loadFixture('slide-surface', { visible: true })
+    const source = await loadFixture('slide-surface', { visible: true })
     const spies = installWorkspaceWriteSpies()
     let uuidSequence = 100
     vi.mocked(globalThis.crypto.randomUUID).mockImplementation(() => {
@@ -997,7 +1050,7 @@ describe('ARCH-2 Workspace Runtime content text binding', () => {
   it.each(['slide-scene', 'slide-global'] as const)(
     'captures %s before opening and commits only through the canonical typed action',
     async (fixtureKind) => {
-      const source = loadFixture(fixtureKind, { visible: true })
+      const source = await loadFixture(fixtureKind, { visible: true })
       const spies = installWorkspaceWriteSpies()
       render(
         <Workspace
@@ -1036,7 +1089,7 @@ describe('ARCH-2 Workspace Runtime content text binding', () => {
   )
 
   it('closes a captured edit when the live host replaces the target and performs zero writes', async () => {
-    const source = loadFixture('slide-scene', { visible: true })
+    const source = await loadFixture('slide-scene', { visible: true })
     const spies = installWorkspaceWriteSpies()
     render(
       <Workspace
