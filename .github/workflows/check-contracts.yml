@@ -18,7 +18,6 @@ jobs:
       contracts: ${{ steps.scope.outputs.contracts }}
       product_tests: ${{ steps.scope.outputs.product_tests }}
       product_full: ${{ steps.scope.outputs.product_full }}
-      repo_tests: ${{ steps.scope.outputs.repo_tests }}
       governance_tests: ${{ steps.scope.outputs.governance_tests }}
       task_board_check: ${{ steps.scope.outputs.task_board_check }}
       capability_check: ${{ steps.scope.outputs.capability_check }}
@@ -54,7 +53,6 @@ jobs:
           contracts=false
           product_tests=false
           product_full=false
-          repo_tests=false
           governance_tests=false
           task_board_check=false
           capability_check=false
@@ -75,7 +73,6 @@ jobs:
               package.json|package-lock.json|tsconfig*.json|vitest.config.ts|tests/setup.ts)
                 product_tests=true
                 product_full=true
-                repo_tests=true
                 governance_tests=true
                 ;;
               scripts/generate-task-board.ts|tests/unit/taskBoardGenerator.test.ts)
@@ -84,9 +81,6 @@ jobs:
               scripts/generate-ai-capabilities.ts|tests/unit/aiCapabilities.test.ts)
                 ;;
               scripts/generate-contracts.ts)
-                ;;
-              repo-index/*|scripts/repo-index/*|scripts/generate-repo-index.ts|scripts/query-repo-index.ts|tests/unit/repoIndex*.test.ts)
-                repo_tests=true
                 ;;
               tests/e2e/*|playwright.config.ts|vite*.ts)
                 ;;
@@ -127,7 +121,6 @@ jobs:
           echo "contracts=$contracts" >> "$GITHUB_OUTPUT"
           echo "product_tests=$product_tests" >> "$GITHUB_OUTPUT"
           echo "product_full=$product_full" >> "$GITHUB_OUTPUT"
-          echo "repo_tests=$repo_tests" >> "$GITHUB_OUTPUT"
           echo "governance_tests=$governance_tests" >> "$GITHUB_OUTPUT"
           echo "task_board_check=$task_board_check" >> "$GITHUB_OUTPUT"
           echo "capability_check=$capability_check" >> "$GITHUB_OUTPUT"
@@ -192,7 +185,7 @@ jobs:
 
   test:
     needs: changes
-    if: needs.changes.outputs.product_tests == 'true' || needs.changes.outputs.repo_tests == 'true' || needs.changes.outputs.governance_tests == 'true' || needs.changes.outputs.capability_check == 'true'
+    if: needs.changes.outputs.product_tests == 'true' || needs.changes.outputs.governance_tests == 'true' || needs.changes.outputs.capability_check == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -221,7 +214,7 @@ jobs:
             git diff --name-only "$BASE_SHA" "$HEAD_SHA" |
               while IFS= read -r file; do
                 case "$file" in
-                  tests/unit/repoIndex*.test.ts|tests/unit/taskBoardGenerator.test.ts|tests/unit/aiCapabilities.test.ts)
+                  tests/unit/taskBoardGenerator.test.ts|tests/unit/aiCapabilities.test.ts)
                     continue
                     ;;
                   tests/e2e/*)
@@ -247,11 +240,8 @@ jobs:
             exit 0
           fi
           npx vitest related "${inputs[@]}" --run --passWithNoTests \
-            --exclude=tests/unit/repoIndex*.test.ts \
             --exclude=tests/unit/taskBoardGenerator.test.ts \
             --exclude=tests/unit/aiCapabilities.test.ts
-      - run: npm run test:repo-index
-        if: needs.changes.outputs.repo_tests == 'true'
       - run: npm run test:governance
         if: needs.changes.outputs.governance_tests == 'true'
       - run: npm run test:capabilities

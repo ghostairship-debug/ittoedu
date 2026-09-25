@@ -17,7 +17,7 @@
 - 开始产品代码实现、缺陷修复或代码评审前，先读[当前收敛方案](果铃2.0收敛方案.md)、[执行任务索引](GPTpro方案/guoling_2_0_execution_plan/03_TASK_INDEX.md)、[任务板](docs/development-plan/TASK_BOARD.md) 和任务涉及的源码、合同与目标测试；路线节点不是协调状态，满足依赖、当前事实与写锁后才按协议实例化，历史阶段名称不得自动恢复任务。
 - 涉及 Schema/持久化、Surface、global/surface 图层、教师控制器、Published/Player、Runtime/Component、网络、导出或稳定身份时，行动前必须补读 [架构合同](docs/development-plan/ARCHITECTURE_CONTRACT.md) 的相关条目。
 - 默认开发闭环、敏感变更、任务协调、写锁、验证停止条件与完成定义只遵循 [工作协议](docs/development-plan/WORKING_PROTOCOL.md)；不先做风险分级，单执行者单会话工作不建卡。当前 queued/active/blocked 协调状态只看任务板。开工前置与真实集成验收分开；稳定窄接口后的独立叶子可并行，由唯一Owner持有共享锁并分配精确非重叠写域。局部检查选择实际命名用例，必要制品按变化只准备一次；不得整文件隐式触发真实CLI矩阵或把排除/零匹配算通过。
-- 当前产品事实以用户明确决定、正式 Schema/合同、源码和可复现结果为准。repo-index 只是可缺省的本地导航缓存，只有确能减少阅读量时才使用，不能阻断实现或覆盖源码事实。
+- 当前产品事实以用户明确决定、正式 Schema/合同、源码和可复现结果为准。
 
 ## 自动加载硬边界
 

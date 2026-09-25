@@ -123,7 +123,6 @@
 | Main/Preload | 文件、窗口、IPC、安全边界 | 作者业务模型 |
 | Authoring Tools / 宿主提交 | 内部版本化工具、canonical target、候选校验、receipt、stale 与事务适配 | 模型规划循环、直接写 Store、绕过产品命令 |
 | AI / CLI Harness | CLI 探测/启动/恢复/取消、标准事件、本地 session 映射、暂存协调 | authoritative project、Provider 凭据、重复实现 CLI 的 Agent loop |
-| Repo Knowledge | 开发索引与 Context Pack | 产品运行时依赖 |
 
 跨域操作不通过模块深层 import 完成，由用例层组合：`validate → Surface placement command → Core transaction → App feedback`；document + 资源字节同时变更必须是一条原子逻辑历史。方向性约束：Core 不 import 具体 Surface/Feature；Player 不依赖 renderer Store；authoring V9 → Published 单向。Composition root 可以 import 各 slice factory；slice、planner 和 Feature use case 不得反向 import composition root、`useEditorStore` 或完整 Store 类型。Feature use case 只接收所需的 target/read/commit/feedback 窄 port。
 
@@ -219,14 +218,13 @@
 
 ## 9. 已知架构陷阱（风险登记摘要）
 
-Flow carrier 被统一层抹平；Core 循环依赖；第二套导航/状态真相并存；stale async 写错目标；history 双写；sidecar 快照内存膨胀；V2 主路径被 fallback 回退；raw Store Facade（把整个 Store re-export 当边界）；Facade 空壳（只搬文件不迁职责）；slice factory 接收完整 `EditorState/get()`；root re-export 全部 actions；多个 slice 各自维护 active document/dirty/history；为结构测试保留无效字符串；repo-index 自过期 / 非确定生成 / dirty 输入漏报。
+Flow carrier 被统一层抹平；Core 循环依赖；第二套导航/状态真相并存；stale async 写错目标；history 双写；sidecar 快照内存膨胀；V2 主路径被 fallback 回退；raw Store Facade（把整个 Store re-export 当边界）；Facade 空壳（只搬文件不迁职责）；slice factory 接收完整 `EditorState/get()`；root re-export 全部 actions；多个 slice 各自维护 active document/dirty/history；为结构测试保留无效字符串。
 
 ## 10. 开发基础设施不变量
 
-- `artifacts/ai-capabilities/`（回答"课件生成能做什么"）与 `repo-index/`（回答"开发修改该读什么"）不得合并为一份真相；两者都不进产品运行时。
-- repo-index 是显式按需生成、可缺省且不 tracked 的本地导航缓存，不是默认 CI 门；生成时仍禁止写入 HEAD、时间戳、用户名或绝对路径，其缓存新鲜度只由 source/semantic/config/tool 四域 hash + schemaVersion + generatorVersion 判定，相同输入连续生成必须逐字节一致。
-- 不引入第二套 TypeScript 编译器或 ts-morph；索引只维持 TS7 `unstable/sync` 薄适配层。
-- 热点文件清单（Editor Store/History、App 保存恢复、Workspace/Properties、Published producer、contracts/Schema、main/preload、generated repo-index）是热点锁的锁对象。文件大小仍不是单独 CI 失败条件，但与跨 Owner writer、依赖环、wrong-owner state、raw Store 扩散或已批准 lane 冲突之一同时出现时，构成主动拆分证据；`editorStore.ts` 已由 Owner 指定为 1.1 必拆热点。
+- `artifacts/ai-capabilities/`（回答"AI 能做什么"）不进产品运行时。2026-09-26 Owner 决定删除开发导航缓存 repo-index，开发定位直接读源码、合同与目标测试。
+- 不引入第二套 TypeScript 编译器或 ts-morph。
+- 热点文件清单（Editor Store/History、App 保存恢复、Workspace/Properties、Published producer、contracts/Schema、main/preload）是热点锁的锁对象。文件大小仍不是单独 CI 失败条件，但与跨 Owner writer、依赖环、wrong-owner state、raw Store 扩散或已批准 lane 冲突之一同时出现时，构成主动拆分证据；`editorStore.ts` 已由 Owner 指定为 1.1 必拆热点。
 - 持续架构治理只保留三类证据：本合同的 Owner/方向、针对真实边界的 dependency ratchet、受影响行为的最近层测试。边界变化时更新现有 `FEATURE_CONSUMER_OWNER_LEDGER` 与直接 ratchet；不建立周期性架构评审会、评分卡、全仓依赖平台或第二份模块台账。
 
 ## 11. 术语要点

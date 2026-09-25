@@ -17,7 +17,6 @@ logs/
 _verify/
 .agents/skills/**/editor-root.local.json
 coverage/
-repo-index/generated/
 __pycache__/
 *.py[cod]
 

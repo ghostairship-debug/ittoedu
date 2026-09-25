@@ -78,7 +78,7 @@
       "fixtureIds": ["slide-heavy", "flow-heavy", "mixed-spatial"],
       "inputClosure": [
         "src/shared/contracts/course-project-v9",
-        "src/renderer/project/courseProjectArchive.ts",
+        "src/core/drivers/codecs/courseProjectArchive.ts",
         "tests/unit/courseProjectCoreContract.test.ts",
         "tests/unit/courseProjectArchive.test.ts",
         "tests/unit/projectFormatIsolation.test.ts"
@@ -411,7 +411,7 @@
       "evidenceCommand": "npx vitest run tests/unit/courseProjectArchive.test.ts tests/unit/courseProjectRoundTrip.test.ts tests/unit/validateProject.test.ts",
       "fixtureIds": ["slide-heavy", "flow-heavy", "mixed-spatial"],
       "inputClosure": [
-        "src/renderer/project/courseProjectArchive.ts",
+        "src/core/drivers/codecs/courseProjectArchive.ts",
         "tests/unit/courseProjectArchive.test.ts",
         "tests/unit/courseProjectRoundTrip.test.ts",
         "tests/unit/validateProject.test.ts"

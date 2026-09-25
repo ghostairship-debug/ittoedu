@@ -21,7 +21,7 @@
 | 单 HTML / 网页包发布输入格式 | [PublishedLesson V1](PUBLISHED_LESSON_V1.md) 与 `src/shared/contracts/published-course-v2/` |
 | 机器发现当前契约 | [`artifacts/ai-capabilities/index.json`](../artifacts/ai-capabilities/index.json)（`protocols.project` 为 9） |
 | 无界面自检课件工程 | `npm run --silent validate:course-project -- <file.h5lesson>`（`validate:project` 为同一入口） |
-| 开发定位 | 默认直接读源码、合同与目标测试；需要缩小上下文时可先显式 `npm run repo:index`，再用 `npm run repo:context -- --feature <名称>`（可选本地缓存） |
+| 开发定位 | 直接读源码、合同与目标测试 |
 
 当前主干只接受 Course Project V9、Published Course V2、Runtime API 2/3 与 Component API 4。`accepted` 只表示产品 Owner 对具体结果的最终确认。编排 Skill 先确认中等策划再写呈现脚本（脚本选定表面）；确认后 Builder 盘点资产并用真实产品 API 写 V9。教师工作流不使用 Hash、审批或 Evidence 清单。
 

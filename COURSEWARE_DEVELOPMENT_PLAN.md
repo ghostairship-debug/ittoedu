@@ -50,7 +50,7 @@ IttoEdu 是受控团队使用的内部生产工具。默认工程、Runtime、Co
 - 作者工程为 Course Project V9；发布为 Published Course V2；兼容 Runtime API 2/3、Component API 4 与 Interaction Protocol V1。
 - V9 软冻结：已有字段、判别器和语义不得静默改写；additive 可选字段必须独立合同提交并保持 `.strict()`。Table、Chart 与 Slide-only input 是 Owner 已批准的三个 strict discriminator 窄例外，不构成任意扩展授权。不导入 V8 `.h5lesson`，不借重构创建 V10。
 - 当前已实现本地 CLI Harness、生成内核、CLI 直连/Skills/基础聊天。按 Owner 2026-09-07 决定，1.8 起普通内部生产构建默认显示创作助手，无需 dogfood 开关；入口开放不代替 S3 实际验收。任何版本节点未真实完成前，`courseAiHandoff` / `courseAiPatch` 等 internal/reserved 接口仍不得宣称为可用能力。
-- `artifacts/ai-capabilities` 是 Builder 的产品契约；repo-index 只是显式、可缺省、可重建且不 tracked 的本地导航缓存，不能覆盖源码事实或成为产品门。
+- `artifacts/ai-capabilities` 是 Builder 的产品契约；开发定位直接读源码、合同与目标测试（repo-index 已于 2026-09-26 删除）。
 - Runtime/Component 是经过审核的可信扩展。外部导入只是分发方式；真实 consumer 需要宿主能力时走稳定宿主接口或同宿主执行语义，不建权限审批平台。
 - 1.7 起，生成的 Runtime/Component 必须先通过自动准入门；通过后可获得当前可信扩展已经正式具备的宿主能力，无需人工代码审核。该信任不会开放 Provider Secret、原始 Electron Main、任意 OS 命令、远程脚本或尚未进入正式合同的接口。
 - 远程资源和 API 按工程的精确 `https` / `wss` origin 声明开放。远程脚本暂不开放；长期 Provider Secret 不得写入工程、Published payload、组件包或导出 HTML。
