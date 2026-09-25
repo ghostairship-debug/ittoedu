@@ -10,6 +10,7 @@ import {
   type CourseLayerComposition,
 } from '../../shared/courseLayerComposition'
 import { resolveCourseSurfaceBackgroundColor } from '../../shared/courseProjectModel'
+import { courseSlideCanvas } from '../../shared/slideCanvas'
 import { resolveEffectiveBackground } from '../../shared/effectiveBackground'
 import type {
   BackgroundMode,
@@ -137,6 +138,8 @@ export interface FlowEditorView {
   readonly outline: readonly FlowOutlineEntry[]
   readonly courseTree: FlowCourseTreePage
   readonly overlayLayers: readonly FlowEditorLayerView[]
+  /** Course canvas that screen-anchored overlays are authored on; the legacy 1280×720 when absent. */
+  readonly canvas?: { readonly width: number; readonly height: number }
 }
 
 export type FlowCourseTreeSource = Pick<
@@ -450,6 +453,7 @@ export function buildFlowEditorView(input: BuildFlowEditorViewInput): FlowEditor
     outline,
     courseTree,
     overlayLayers,
+    canvas: courseSlideCanvas(project),
   })
   assertActiveFlowEditorView(view)
   return view

@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { fitPage, pageFrameStyle, parsePageInsets, WINDOW_PAGE_INSETS } from '@/shared/pageFrame'
 import { createStageViewportTransform, stageViewportPanRange } from '@/renderer/authoring/stageViewportTransform'
 import { PlaybackViewSession } from '@/player/playbackViewSession'
+import { flowViewportOverlayFrameAt, flowViewportOverlayPoint } from '@/shared/flowViewportGeometry'
 
 const LANDSCAPE = { width: 1280, height: 720 }
 const PORTRAIT = { width: 720, height: 1280 }
@@ -46,6 +47,14 @@ describe('M19 one page frame', () => {
       .toEqual(createStageViewportTransform({ viewport, stage: LANDSCAPE }).stageRect)
     expect(stageViewportPanRange(createStageViewportTransform({ viewport, stage: LANDSCAPE, fit: 'page' }))).toEqual({ x: null, y: null })
     expect(createStageViewportTransform({ viewport, stage: PORTRAIT }).stageRect.height).toBe(600)
+  })
+
+  it('keeps a screen-anchored Flow overlay in proportion to the view and inside it', () => {
+    const canvas = { width: 1280, height: 720 }
+    expect(flowViewportOverlayPoint({ x: 640, y: 360, width: 100, height: 40 }, canvas, { width: 640, height: 360 })).toEqual({ x: 320, y: 180 })
+    expect(flowViewportOverlayPoint({ x: 1100, y: 700, width: 200, height: 80 }, canvas, { width: 906, height: 606 })).toEqual({ x: 706, y: 526 })
+    // A drag writes what is shown back on the canvas.
+    expect(flowViewportOverlayFrameAt({ x: 320, y: 180, width: 100, height: 40 }, canvas, { width: 640, height: 360 })).toEqual({ x: 640, y: 360, width: 100, height: 40 })
   })
 
   it('scrolls a portrait page in playback with the plain wheel and keeps Flow to its own paper', () => {

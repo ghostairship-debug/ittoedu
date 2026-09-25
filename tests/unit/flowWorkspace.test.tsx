@@ -429,20 +429,17 @@ describe('FlowWorkspace paper', () => {
     expect(chrome.querySelector('[data-handle]')).not.toBeNull()
   })
 
-  it('reveals selected offscreen overlays and restores the document without changing authored frames/history', () => {
+  it('keeps a selected screen-anchored overlay inside the view without panning or changing its authored frame (M19)', () => {
     const project = createFlowProject()
     project.globalLayerItems.find(entry => entry.item.layerItemId === 'global-overlay')!.item.frame = { mode: 'absolute', x: 1100, y: 700, width: 200, height: 80 }
     const before = structuredClone(project)
     const selection = selectFlowOverlay(project, 'h1', ['global-overlay'], 'global')
     const { onProjectChange } = renderPaper(project, selection)
-    expect(screen.getByTestId('flow-layer-card-global-overlay')).toHaveStyle({ left: '1064px', top: '624px' })
-    expect(screen.getByTestId('flow-workspace-scroll')).toHaveStyle({ transform: 'translate(-36px, -76px)' })
-    expect(onProjectChange).not.toHaveBeenCalled()
-    expect(project).toEqual(before)
-    fireEvent.click(screen.getByRole('button', { name: '回到文档原位' }))
-    expect(screen.getByTestId('flow-layer-card-global-overlay')).toHaveStyle({ left: '1100px', top: '700px' })
+    // Its place scales with the 1280×720 view and it is kept at the edge instead of running off it.
+    expect(screen.getByTestId('flow-layer-card-global-overlay')).toHaveStyle({ left: '1080px', top: '640px' })
     expect(screen.getByTestId('flow-workspace-scroll')).toHaveStyle({ transform: 'translate(0px, 0px)' })
     expect(onProjectChange).not.toHaveBeenCalled()
+    expect(project).toEqual(before)
   })
 
   it('keeps the original pointer gesture alive when selecting an overlay rerenders its chrome', () => {

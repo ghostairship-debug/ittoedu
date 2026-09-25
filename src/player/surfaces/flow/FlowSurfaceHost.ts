@@ -8,7 +8,8 @@ import { createPlaybackContent, playbackGestureOccupied, type PlaybackViewSessio
 import { flowFormulaBlockElement, renderDocumentText } from '../../../shared/document/render'
 import { plainDocumentText, type FlowTextContent } from '../../../shared/document/content'
 import { buildNativeChartSvg } from '../../../shared/nativeChartSvg'
-import { createFlowViewportGeometry, measureFlowPaperOrigin } from '../../../shared/flowViewportGeometry'
+import { createFlowViewportGeometry, flowViewportOverlayPoint, measureFlowPaperOrigin } from '../../../shared/flowViewportGeometry'
+import { courseSlideCanvas, type SlideCanvasSize } from '../../../shared/slideCanvas'
 import { FLOW_BODY_CSS, FLOW_BODY_PAPER_PADDING, FLOW_BODY_SCROLL_PADDING, FLOW_COMPONENT_BLOCK_HEIGHT, flowPaperMaxWidth, resolveFlowParagraphPresentation } from '../../../shared/flowBodyPresentation'
 import { tableCellSpan } from '../../../shared/tableMerge'
 import { resolveCourseSurfaceBackgroundColor } from '../../../shared/courseProjectModel'
@@ -216,9 +217,12 @@ export class FlowSurfaceHost {
   #completedActiveResetLocationId: string | null = null
   #active = false
   #queue: Promise<void> = Promise.resolve()
+  /** Course canvas that screen-anchored overlays are authored on (M19). */
+  #canvas: SlideCanvasSize
 
   constructor(source: FlowPublishedPlaybackSource, options: FlowSurfaceHostOptions = {}) {
     this.#playback = toFlowPublishedPlayback(source)
+    this.#canvas = courseSlideCanvas(source)
     this.#components = ('components' in source && source.components
       ? source.components as Record<string, PublishedComponentPackageSource>
       : undefined) ?? options.components
@@ -485,6 +489,7 @@ export class FlowSurfaceHost {
       this.#invalidateInteractions()
       this.#interactionPort?.resetLocalVisibility()
       this.#playback = nextPlayback
+      this.#canvas = courseSlideCanvas(source)
       this.#components = nextComponents
       this.#surfaceId = nextSurfaceId
       this.#locationId = nextLocationId
@@ -755,6 +760,8 @@ export class FlowSurfaceHost {
       this.#syncPaperOverlayPositions(
         findPublishedFlowSurface(this.#playback, this.#surfaceId),
       )
+      // Overlays re-placed for the new size change what the observation bars may scroll to.
+      this.#options.playbackView?.refreshBounds()
     }
   }
 
@@ -894,12 +901,14 @@ export class FlowSurfaceHost {
     const geometry = this.#flowGeometry()
     for (const entry of entries) {
       if (isControllerItem(entry.item)) continue
-      if (entry.item.paperSpace !== 'paper') continue
       const wrap = this.#layerPlaneForEntry(entry)?.querySelector<HTMLElement>(
         `[data-flow-overlay-item="${entry.item.layerItemId}"]`,
       )
       if (wrap) {
-        const point = geometry.paperToViewport(entry.item.frame)
+        // Paper overlays follow the paper; screen-anchored ones scale their place with the view.
+        const point = entry.item.paperSpace === 'paper'
+          ? geometry.paperToViewport(entry.item.frame)
+          : flowViewportOverlayPoint(entry.item.frame, this.#canvas, geometry.layoutViewportSize)
         wrap.style.left = `${point.x}px`
         wrap.style.top = `${point.y}px`
       }
@@ -986,6 +995,7 @@ export class FlowSurfaceHost {
               }
             : {}),
           geometry,
+          canvas: this.#canvas,
           onMountComponent: (handle) => {
             this.#componentHandles.push(handle)
           },
@@ -1374,6 +1384,7 @@ function renderStaticOverlayItem(
     onMountVideo?: (handle: PublishedNativeVideoHandle) => void
     deferComponentMount?: (mount: () => void) => void
     geometry?: ReturnType<typeof createFlowViewportGeometry>
+    canvas?: { readonly width: number; readonly height: number }
   },
 ): HTMLElement {
   const wrap = dom.createElement('div')
@@ -1386,7 +1397,9 @@ function renderStaticOverlayItem(
   wrap.style.position = 'absolute'
   const point = entry.item.paperSpace === 'paper' && options?.geometry
     ? options.geometry.paperToViewport(entry.item.frame)
-    : entry.item.frame
+    : options?.geometry && options.canvas
+      ? flowViewportOverlayPoint(entry.item.frame, options.canvas, options.geometry.layoutViewportSize)
+      : entry.item.frame
   wrap.style.left = `${point.x}px`
   wrap.style.top = `${point.y}px`
   wrap.style.width = `${entry.item.frame.width}px`

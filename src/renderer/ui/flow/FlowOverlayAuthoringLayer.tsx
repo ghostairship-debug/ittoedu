@@ -9,7 +9,8 @@ import {
   type ReactNode,
 } from 'react'
 import { CANVAS_HEIGHT, CANVAS_WIDTH, MIN_NODE_SIZE } from '../../../shared/constants'
-import { createFlowViewportGeometry, projectFlowComponentControllerFrame, revealFlowSelectionPan, type FlowPoint } from '../../../shared/flowViewportGeometry'
+import { createFlowViewportGeometry, flowViewportOverlayFrameAt, flowViewportOverlayPoint, projectFlowComponentControllerFrame, revealFlowSelectionPan, type FlowPoint } from '../../../shared/flowViewportGeometry'
+import { DEFAULT_SLIDE_CANVAS } from '../../../shared/slideCanvas'
 import { playbackControllerInsets, type PlaybackChromeInsets } from '../../../shared/playbackViewGeometry'
 import { rotatedWorldRectAxisBounds } from '../../authoring/stageViewportTransform'
 import type { LayerItem } from '../../../shared/courseProjectTypes'
@@ -51,6 +52,7 @@ function overlayCardStyle(
   viewPan: FlowPoint,
   viewportSize: { width: number; height: number; nativeChrome?: PlaybackChromeInsets },
   display = false,
+  canvas: { width: number; height: number } = DEFAULT_SLIDE_CANVAS,
 ): CSSProperties {
   const raw = preview ?? layer.item.frame
   const authored = constrainFlowControllerOverlayFrame(layer, raw, viewportSize)
@@ -64,7 +66,7 @@ function overlayCardStyle(
     paperScrollLayout: { x: paperScrollLeft, y: paperScrollTop },
     playbackPanClient: viewPan,
   })
-  const point = isController ? frame : isPaper ? geometry.paperToClient(frame) : geometry.viewportToClient(frame)
+  const point = isController ? frame : isPaper ? geometry.paperToClient(frame) : geometry.viewportToClient(flowViewportOverlayPoint(frame, canvas, viewportSize))
   return {
     position: 'absolute',
     left: point.x,
@@ -76,6 +78,11 @@ function overlayCardStyle(
     zIndex: layer.stackOrder,
     transform: `rotate(${layer.item.rotation}deg)`,
   }
+}
+
+/** Screen-anchored overlays scale their position with the view (M19); paper overlays and the controller do not. */
+function isViewportOverlay(layer: FlowEditorLayerView | undefined): boolean {
+  return Boolean(layer) && !isTeacherControllerLayerItem(layer!.item) && layer!.item.paperSpace !== 'paper'
 }
 
 function constrainFlowControllerOverlayFrame(
@@ -312,6 +319,7 @@ export function FlowOverlayAuthoringLayer({
     paperScrollLayout: { x: paperScrollLeft, y: paperScrollTop },
     playbackPanClient: viewPan,
   })
+  const canvas = view.canvas ?? DEFAULT_SLIDE_CANVAS
   const localForLayer = (overlay: HTMLElement, event: ReactPointerEvent<HTMLElement>, layer?: FlowEditorLayerView) => {
     const point = overlayLocalPoint(overlay, event.clientX, event.clientY, overlayViewportSize)
     if (layer && isTeacherControllerLayerItem(layer.item)) return point
@@ -320,11 +328,13 @@ export function FlowOverlayAuthoringLayer({
 
   const revealSelection = () => {
     if (overlayGestureRef.current) return
+    // Screen-anchored overlays always stay inside the view; only paper overlays can scroll out of it.
     const bounds = view.overlayLayers.filter(layer => layer.effectiveVisible && !isTeacherControllerLayerItem(layer.item)
-      && selection?.selectedOverlayIds.includes(layer.selectionId)).map(layer => {
+      && layer.item.paperSpace === 'paper' && selection?.selectedOverlayIds.includes(layer.selectionId)).map(layer => {
       const rect = rotatedWorldRectAxisBounds(layer.item.frame, layer.item.rotation)
       const origin = { x: rect.left, y: rect.top }
-      const point = layer.item.paperSpace === 'paper' ? geometry.paperToClient(origin) : geometry.viewportToClient(origin)
+      const point = layer.item.paperSpace === 'paper' ? geometry.paperToClient(origin)
+        : geometry.viewportToClient(flowViewportOverlayPoint({ ...origin, width: rect.width, height: rect.height }, canvas, overlayViewportSize))
       return { ...rect, ...point }
     })
     if (!bounds.length) return
@@ -399,7 +409,9 @@ export function FlowOverlayAuthoringLayer({
     const target = selectOverlay(layer)
     if (!target) return
     const local = localForLayer(overlay, event, layer)
-    const projectedFrame = overlayFrameOf(layer)
+    const authoredFrame = overlayFrameOf(layer)
+    // A screen-anchored overlay is dragged where it is shown, then written back to the canvas.
+    const projectedFrame = isViewportOverlay(layer) ? { ...authoredFrame, ...flowViewportOverlayPoint(authoredFrame, canvas, overlayViewportSize) } : authoredFrame
     const componentController = layer.item.kind === 'component' && isTeacherControllerLayerItem(layer.item)
     const startFrame = componentController ? { ...projectedFrame, width: layer.item.frame.width, height: layer.item.frame.height } : projectedFrame
     const handleEl = event.target instanceof HTMLElement
@@ -444,7 +456,8 @@ export function FlowOverlayAuthoringLayer({
       overlayViewportSize,
     )
     const layer = view.overlayLayers.find(layer => layer.selectionId === gesture.layerItemId)
-    const persisted = layer?.item.kind === 'component' && isTeacherControllerLayerItem(layer.item) ? { ...next, width: rawNext.width, height: rawNext.height } : next
+    const persisted = layer?.item.kind === 'component' && isTeacherControllerLayerItem(layer.item) ? { ...next, width: rawNext.width, height: rawNext.height }
+      : isViewportOverlay(layer) ? flowViewportOverlayFrameAt(next, canvas, overlayViewportSize) : next
     setOverlayPreview({ id: gesture.layerItemId, frame: persisted })
   }
 
@@ -477,7 +490,8 @@ export function FlowOverlayAuthoringLayer({
     )
     setOverlayPreview(null)
     const layer = view.overlayLayers.find(layer => layer.selectionId === gesture.layerItemId)
-    const persisted = layer?.item.kind === 'component' && isTeacherControllerLayerItem(layer.item) ? { ...next, width: rawNext.width, height: rawNext.height } : next
+    const persisted = layer?.item.kind === 'component' && isTeacherControllerLayerItem(layer.item) ? { ...next, width: rawNext.width, height: rawNext.height }
+      : isViewportOverlay(layer) ? flowViewportOverlayFrameAt(next, canvas, overlayViewportSize) : next
     commands.run(gesture.target, { kind: 'transform-overlay-frame', frame: persisted })
   }
 
@@ -544,6 +558,8 @@ export function FlowOverlayAuthoringLayer({
             paperScrollLeft,
             viewPan,
             overlayViewportSize,
+            false,
+            canvas,
           ),
           opacity: layer.item.opacity,
           ...(controller ? (() => { const base = overlayFrameOf(layer), visible = controllerDisplayFrame(layer.item as LayerItem, base); return { clipPath: `inset(${visible.y-base.y}px ${base.width-(visible.x-base.x)-visible.width}px ${base.height-(visible.y-base.y)-visible.height}px ${visible.x-base.x}px)` } })() : {}),
@@ -606,6 +622,7 @@ export function FlowOverlayAuthoringLayer({
             viewPan,
             overlayViewportSize,
             true,
+            canvas,
           ),
           pointerEvents: readOnly ? 'none' : 'auto',
           background: 'transparent',

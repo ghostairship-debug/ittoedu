@@ -4,6 +4,20 @@ export interface FlowPoint { readonly x: number; readonly y: number }
 export interface FlowSize { readonly width: number; readonly height: number }
 export interface FlowRect extends FlowPoint, FlowSize {}
 
+/**
+ * Screen-anchored (viewport) Flow overlays keep their place relative to the view (M19): the frame is authored on
+ * the course canvas; on screen its position scales with the view and stays inside it, and its size does not change.
+ */
+export function flowViewportOverlayPoint(frame: FlowRect, canvas: FlowSize, view: FlowSize): FlowPoint {
+  const x = frame.x * view.width / Math.max(1, canvas.width), y = frame.y * view.height / Math.max(1, canvas.height)
+  return { x: Math.max(0, Math.min(x, view.width - frame.width)), y: Math.max(0, Math.min(y, view.height - frame.height)) }
+}
+/** The canvas frame of an overlay shown at `shown`: what a drag writes is the position the teacher sees. */
+export function flowViewportOverlayFrameAt(shown: FlowRect, canvas: FlowSize, view: FlowSize): FlowRect {
+  const x = Math.max(0, Math.min(shown.x, view.width - shown.width)), y = Math.max(0, Math.min(shown.y, view.height - shown.height))
+  return { x: x * canvas.width / Math.max(1, view.width), y: y * canvas.height / Math.max(1, view.height), width: shown.width, height: shown.height }
+}
+
 /** Component layout is authored code: preserve its frame instead of applying native button rows. */
 export function projectFlowComponentControllerFrame(frame: FlowRect, viewport: FlowSize, chrome: PlaybackChromeInsets = { right: 0, bottom: 0 }): FlowRect {
   const available = { width: Math.max(16, viewport.width - chrome.right), height: Math.max(16, viewport.height - chrome.bottom) }
