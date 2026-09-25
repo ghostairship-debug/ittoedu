@@ -59,6 +59,13 @@ async function saveActiveDocument(path: string): Promise<void> {
   await settleCourse()
 }
 
+/** “正式文档没有被写入”的等价比较：revision 加文档内容。 */
+function courseSnapshot(): { revision: number; project: CourseProjectDocument } {
+  const snapshot = formalSnapshot()
+  if (snapshot.model.kind !== 'course-v9') throw new Error('expected Course Project V9')
+  return { revision: snapshot.revision, project: snapshot.model.project }
+}
+
 type SurfaceKind = 'slide' | 'spatial' | 'flow'
 
 interface DraftFixture {
@@ -615,15 +622,13 @@ describe('active Course Project text draft persistence', () => {
     const preparation = useEditorStore.getState().prepareCourseProjectPersistence()
     if (!preparation.ok) throw new Error(preparation.reason)
     const packagesAtSave = useEditorStore.getState().componentPackages
-    const documentBeforeSelection = formalSnapshot()
+    const documentBeforeSelection = courseSnapshot()
 
     useEditorStore.getState().selectNode(text.id)
 
     // 只改选区：renderer 的组件包内容不变，正式文档也没有任何写入。
     expect(useEditorStore.getState().componentPackages).toEqual(packagesAtSave)
-    const documentAfterSelection = formalSnapshot()
-    expect(documentAfterSelection.revision).toBe(documentBeforeSelection.revision)
-    expect(documentAfterSelection.model.project).toEqual(documentBeforeSelection.model.project)
+    expect(courseSnapshot()).toEqual(documentBeforeSelection)
     await saveActiveDocument('selection-only.h5lesson')
     expect(
       useEditorStore.getState().acknowledgeCourseProjectSaved(
