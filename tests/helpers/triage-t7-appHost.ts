@@ -1,9 +1,10 @@
 import { waitFor } from '@testing-library/react'
 import { useEditorStore } from '../../src/renderer/store/editorStore'
 import type { DesktopAPI } from '../../src/shared/ipcTypes'
-import { bootTriageCourseHost, formalCourse, projectCourse, settleCourse, type TriageCourseHost } from './triage-t7-courseHost'
+import { bootTriageCourseHost, formalCourse, formalProject, projectCourse, settleCourse, type TriageCourseHost } from './triage-t7-courseHost'
 import type { ComponentPackageData } from '../../src/shared/componentTypes'
 import type { CourseProjectDocument } from '../../src/shared/courseProjectTypes'
+import type { SlideCanvasSize } from '../../src/shared/slideCanvas'
 
 /** App-level desktop mock that also owns the real per-document DocumentSession host. */
 export function withAppDocuments<T extends Partial<DesktopAPI>>(
@@ -35,5 +36,31 @@ export async function openAppCourse(
   return project
 }
 
-export { bootTriageCourseHost, formalCourse, settleCourse }
+export { bootTriageCourseHost, formalCourse, formalProject, settleCourse }
 export type { TriageCourseHost }
+
+/**
+ * The Store's new-document entry points (`createNewProject` and friends) are
+ * fire-and-forget, so the fresh DocumentSession is only authoritative once its
+ * activation lands on the projection.
+ */
+export async function createAppProject(
+  surface: 'slide' | 'flow' | 'spatial',
+  canvas?: SlideCanvasSize,
+): Promise<string> {
+  const previous = useEditorStore.getState().courseDocument.documentId
+  const state = useEditorStore.getState()
+  if (surface === 'slide') state.createNewProject(canvas)
+  else if (surface === 'flow') state.createNewFlowProject()
+  else state.createNewSpatialProject()
+  const deadline = Date.now() + 5000
+  while (Date.now() < deadline) {
+    const documentId = useEditorStore.getState().courseDocument.documentId
+    if (documentId && documentId !== previous) {
+      await settleCourse()
+      return documentId
+    }
+    await new Promise((resolve) => setTimeout(resolve, 5))
+  }
+  throw new Error(`createNew${surface}Project did not reach the document session`)
+}
