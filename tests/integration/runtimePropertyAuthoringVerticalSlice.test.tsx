@@ -429,8 +429,14 @@ describe('ARCH-2 canonical Runtime property Store vertical slice', () => {
 
       await undoCourse(host)
       expect(projectBody(activeProject())).toEqual(projectBody(beforeProject))
+      // Undo is itself a new DocumentSession operation, so the document revision
+      // keeps moving forward while the content returns to the previous body.
+      expect(formalCourse(host).revision).toBeGreaterThan(beforeProject.revision)
+      expect(formalUndoDepth()).toBe(beforeHistoryDepth)
       await redoCourse(host)
       expect(projectBody(activeProject())).toEqual(projectBody(committed))
+      expect(formalCourse(host).revision).toBeGreaterThan(committed.revision)
+      expect(formalUndoDepth()).toBe(beforeHistoryDepth + 1)
     },
   )
 

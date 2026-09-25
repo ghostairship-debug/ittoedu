@@ -259,6 +259,10 @@ describe('Mixed cross-surface history continuity', () => {
     expect(freshSlide.generation).toBe(0)
     expect(freshSlide.selection.locationId).toBe(SLIDE_LOCATION_ID)
     expect(freshSlide.selection.selectionIds).toEqual([])
+    // 1.x asserted the fresh Slide session shared the Spatial session's history object; in 2.0
+    // the renderer session is only a projection, so the equivalent fact is that switching
+    // location does not add or drop a canonical DocumentSession history step.
+    expect(canonicalDepths()).toEqual(canonicalDepthsBeforeCamera)
     expect(useEditorStore.getState().courseAssetSidecarPast).toEqual(sidecarPastBeforeCamera)
     expect(useEditorStore.getState().courseAssetSidecarFuture).toEqual(sidecarFutureBeforeCamera)
     expect(useEditorStore.getState().courseComponentPackagesPast)

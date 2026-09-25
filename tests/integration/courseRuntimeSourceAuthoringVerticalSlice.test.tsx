@@ -484,6 +484,17 @@ describe('ARCH-2 canonical Runtime source Store vertical slice', () => {
     const beforeHistoryDepth = formalUndoDepth()
     const beforeResources = formalResources(formalCourse(host))
     const beforeCompatibilityDepths = compatibilitySnapshotDepths()
+    // 2.0 re-anchored: the renderer store is a projection and keeps no resource
+    // history at all (`CourseDocumentView.ts:46-48,70` resets every sidecar and
+    // component package stack), so the 1.x "stack stays aligned" expectation is
+    // now truthfully "there is no renderer stack"; the formal DocumentSession
+    // owns History instead.
+    expect(beforeCompatibilityDepths).toEqual({
+      sidecarPast: 0,
+      sidecarFuture: 0,
+      componentPast: 0,
+      componentFuture: 0,
+    })
 
     expect(activeHistory().kind).toBe(expectedHistoryKind)
     expect(useEditorStore.getState().updateRuntimeSourceAtTarget(
@@ -513,12 +524,18 @@ describe('ARCH-2 canonical Runtime source Store vertical slice', () => {
 
     await undoCourse(host)
     expect(projectBody(activeProject())).toEqual(projectBody(beforeProject))
+    // Undo is itself a new DocumentSession operation, so the document revision
+    // keeps moving forward while the content returns to the previous body.
+    expect(formalCourse(host).revision).toBeGreaterThan(beforeProject.revision)
+    expect(formalUndoDepth()).toBe(beforeHistoryDepth)
     expect(runtimeItem(activeProject(), fixture.itemId).runtime.source)
       .toBe(fixture.originalSource)
     expect(compatibilitySnapshotDepths()).toEqual(beforeCompatibilityDepths)
 
     await redoCourse(host)
     expect(projectBody(activeProject())).toEqual(projectBody(committedProject))
+    expect(formalCourse(host).revision).toBeGreaterThan(committedProject.revision)
+    expect(formalUndoDepth()).toBe(beforeHistoryDepth + 1)
     expect(runtimeItem(activeProject(), fixture.itemId).runtime.source)
       .toBe(fixture.updatedSource)
     expect(compatibilitySnapshotDepths()).toEqual(beforeCompatibilityDepths)

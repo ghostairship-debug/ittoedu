@@ -180,6 +180,10 @@ function expectOneUndoableFrameWithoutResourceChange(before: {
   expect(snapshot.undoHead?.actor).toBe('human')
   // …and it carried no resource payload — the 2.0 form of `resourceChanges: {}`.
   expect(formalResourceSnapshot()).toEqual(before.resources)
+  // 2.0 renders every authoring session from `cursor(project)` — `CourseDocumentView.ts:21`
+  // plus the slide/flow/spatial rebuilds at :25/:44/:79/:85/:93 — so the renderer's `past`
+  // is always empty; the frame above exists only in the main-owned DocumentSession.
+  expect(activeHistory().history.past).toHaveLength(0)
 }
 
 function authoringSessionSnapshot() {
