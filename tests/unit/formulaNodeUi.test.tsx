@@ -11,18 +11,18 @@ import {
 import { PropertiesTab } from '@/renderer/ui/PropertiesTab'
 import { FormulaEditDialog } from '@/renderer/ui/FormulaEditDialog'
 import type { FormulaNode } from '@/shared/contracts/native-v1'
+import {
+  connectAssignedCourse,
+  settleAssignedCourse,
+  assignedUndoDepth,
+  undoAssignedCourse,
+  redoAssignedCourse,
+} from '../helpers/triage-t5-courseHost'
 
 function formulaNode(): FormulaNode {
   const node = selectActiveScene(useEditorStore.getState()).nodes[0]
   if (node?.type !== 'formula') throw new Error('Expected FormulaNode')
   return node as FormulaNode
-}
-
-function activeHistory() {
-  const state = useEditorStore.getState()
-  const backend = state.slideBackend
-  if (!backend) throw new Error('expected active slideBackend')
-  return backend.getSession().history
 }
 
 function drawingContext(): CanvasRenderingContext2D {
@@ -43,12 +43,13 @@ function drawingContext(): CanvasRenderingContext2D {
   } as unknown as CanvasRenderingContext2D
 }
 
-beforeEach(() => {
-  useEditorStore.getState().createNewProject()
+beforeEach(async () => {
+  await connectAssignedCourse()
   vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(
     drawingContext(),
   )
   useEditorStore.getState().addFormulaNode()
+  await settleAssignedCourse()
 })
 
 afterEach(() => {
@@ -76,9 +77,9 @@ describe('FormulaNode authoring UI', () => {
     expect(onCancel).not.toHaveBeenCalled()
   })
 
-  it('uses linear input and one history transaction instead of editable AST JSON', () => {
+  it('uses linear input and one history transaction instead of editable AST JSON', async () => {
     const original = structuredClone(formulaNode())
-    const historyBefore = activeHistory().past.length
+    const historyBefore = assignedUndoDepth()
     render(<PropertiesTab onReplaceImage={vi.fn()} />)
 
     expect(screen.queryByTestId('formula-id')).not.toBeInTheDocument()
@@ -96,6 +97,7 @@ describe('FormulaNode authoring UI', () => {
       expect.stringContaining('公式预览'),
     )
     fireEvent.click(screen.getByRole('button', { name: '应用公式' }))
+    await settleAssignedCourse()
 
     const updated = formulaNode()
     expect(updated.ast).toEqual({
@@ -126,16 +128,16 @@ describe('FormulaNode authoring UI', () => {
     })
     expect(updated.formulaId).toBe(original.formulaId)
     expect(updated.accessibleText).toBe(formulaAstToAccessibleText(updated.ast))
-    expect(activeHistory().past).toHaveLength(historyBefore + 1)
+    expect(assignedUndoDepth()).toBe(historyBefore + 1)
     expect(screen.getByText('公式已应用，无障碍描述已同步更新')).toBeInTheDocument()
 
-    useEditorStore.getState().undo()
+    await undoAssignedCourse()
     expect(formulaNode()).toEqual(original)
-    useEditorStore.getState().redo()
+    await redoAssignedCourse()
     expect(formulaNode().ast).toEqual(updated.ast)
   })
 
-  it('keeps a custom accessible description and makes review/restoration explicit', () => {
+  it('keeps a custom accessible description and makes review/restoration explicit', async () => {
     render(<PropertiesTab onReplaceImage={vi.fn()} />)
     const accessible = screen.getByRole('textbox', { name: '无障碍描述' })
     fireEvent.change(accessible, { target: { value: '自定义读法' } })
@@ -147,6 +149,7 @@ describe('FormulaNode authoring UI', () => {
     }) as HTMLInputElement
     fireEvent.change(input, { target: { value: '\\sqrt{x}' } })
     fireEvent.keyDown(input, { key: 'Enter' })
+    await settleAssignedCourse()
     expect(formulaNode()).toMatchObject({
       accessibleText: '自定义读法',
       ast: { type: 'root', radicand: { type: 'token', value: 'x' } },
@@ -154,11 +157,12 @@ describe('FormulaNode authoring UI', () => {
     expect(screen.getByText(/请复核你的自定义无障碍描述/)).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: '恢复自动描述' }))
+    await settleAssignedCourse()
     expect(formulaNode().accessibleText).toBe('x的平方根')
     expect(screen.getByText('随公式自动更新')).toBeInTheDocument()
   })
 
-  it('never commits parse errors or unfinished template slots and clears stale preview', () => {
+  it('never commits parse errors or unfinished template slots and clears stale preview', async () => {
     const original = structuredClone(formulaNode())
     render(<PropertiesTab onReplaceImage={vi.fn()} />)
     const input = screen.getByRole('textbox', {
@@ -172,6 +176,7 @@ describe('FormulaNode authoring UI', () => {
     expect(preview.querySelector('canvas')).toBeNull()
     expect(screen.getByRole('button', { name: '应用公式' })).toBeDisabled()
     fireEvent.keyDown(input, { key: 'Enter' })
+    await settleAssignedCourse()
     expect(formulaNode()).toEqual(original)
 
     fireEvent.change(input, { target: { value: 'a+b' } })
@@ -185,7 +190,7 @@ describe('FormulaNode authoring UI', () => {
 
   it('supports slot navigation and Escape cancellation without touching project history', () => {
     const original = structuredClone(formulaNode())
-    const historyBefore = activeHistory().past.length
+    const historyBefore = assignedUndoDepth()
     render(<PropertiesTab onReplaceImage={vi.fn()} />)
     const input = screen.getByRole('textbox', {
       name: '公式内容（线性输入）',
@@ -202,11 +207,11 @@ describe('FormulaNode authoring UI', () => {
     fireEvent.keyDown(input, { key: 'Escape' })
     expect(input).toHaveValue(serializeFormulaAst(original.ast))
     expect(formulaNode()).toEqual(original)
-    expect(activeHistory().past).toHaveLength(historyBefore)
+    expect(assignedUndoDepth()).toBe(historyBefore)
     expect(screen.getByText('已取消未应用的公式修改')).toBeInTheDocument()
   })
 
-  it('groups a selected expression before applying a script template', () => {
+  it('groups a selected expression before applying a script template', async () => {
     render(<PropertiesTab onReplaceImage={vi.fn()} />)
     const input = screen.getByRole('textbox', {
       name: '公式内容（线性输入）',
@@ -219,6 +224,7 @@ describe('FormulaNode authoring UI', () => {
     expect(input).toHaveValue('{a+b}^{□}')
     fireEvent.change(input, { target: { value: '{a+b}^{2}' } })
     fireEvent.click(screen.getByRole('button', { name: '应用公式' }))
+    await settleAssignedCourse()
     expect(formulaNode().ast).toEqual({
       type: 'script',
       base: {
