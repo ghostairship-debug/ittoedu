@@ -1764,7 +1764,7 @@ export function createFlowAuthoringSlice(
         }),
         historyEntry: true,
         selection: session.selection,
-      }, { statusMessage: `课件已重命名为“${title}”` })
+      }, { statusMessage: `已重命名为“${title}”` })
     },
     addChartNode(chartType) {
       if (!commitDraft()) return
@@ -1976,7 +1976,7 @@ export function createFlowAuthoringSlice(
       }
       if (clipboard.projectId !== session.history.present.id) {
         kernel.setFeedback({
-          errorMessage: 'Flow 剪贴板不属于当前课件，请重新复制。',
+          errorMessage: 'Flow 剪贴板不属于当前 H5 演示，请重新复制。',
           statusMessage: null,
         })
         return

@@ -165,7 +165,7 @@ export function useCourseProjectLifecycle<TDraftToken>(ports: CourseProjectLifec
       if (options?.origin !== 'lesson') ref.current.onProjectReplaced?.()
       await refresh()
       return true
-    }, '课件切换失败，当前修改仍保留。')
+    }, '切换失败，当前修改仍保留。')
     return result === true
   }, [refresh])
   const newProject = useCallback((options?: CourseProjectReplacementOptions) => replace(() => service().create('slide', options?.canvas), options), [replace])
@@ -175,7 +175,7 @@ export function useCourseProjectLifecycle<TDraftToken>(ports: CourseProjectLifec
     const identity = ref.current.captureIdentity()
     const file = await ref.current.openProjectFile()
     if (!file) return
-    if (!same(identity)) throw new Error('选择文件期间课件已改变，已取消打开')
+    if (!same(identity)) throw new Error('选择文件期间文档已改变，已取消打开')
     await service().open(file.path)
     await ref.current.confirmProjectOpen(file.confirmationId)
   }) }, [replace])

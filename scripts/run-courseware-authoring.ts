@@ -702,12 +702,12 @@ async function patchDialogs(
 }
 
 async function clickBaseState(page: Page): Promise<void> {
-  const base = page.getByRole('button', { name: '基础场景，所有命名状态的继承源' })
+  const base = page.getByRole('button', { name: '母版，所有命名状态的继承源' })
   if (await base.count() && await base.getAttribute('aria-pressed') !== 'true') await base.click()
 }
 
 async function showEditorPanel(page: Page, name: '页面与图层' | '属性与素材' | null): Promise<void> {
-  const controls = page.getByLabel('课件编辑面板', { exact: true })
+  const controls = page.getByLabel('编辑面板', { exact: true })
   if (!await controls.isVisible()) return
   if (name) {
     const button = controls.getByRole('button', { name, exact: true })
@@ -1038,15 +1038,18 @@ async function execute(options: Options): Promise<AuthoringReceipt> {
     await installElectronOfflineGuard(app)
     const page = await app.firstWindow()
     await enforceOffline(page, errors)
-    // 冷启动落在着陆页、内容区默认收起；用 App 级「新建课件（Ctrl+N）」建立空白独立课件并展开工作台。
+    // 冷启动落在着陆页、内容区默认收起；用 App 级「新建 H5 演示（Ctrl+N）」建立空白独立课件并展开工作台。
     // 「更多 → 新建独立课件」入口已从产品移除（V3.1）；旧按钮走 newProject({origin:'lesson'})，
     // Ctrl+N 走 newProject()，两者同样落在空白 slide 工程上（随后 openProject 覆写为基线工程）。
     // App 级键盘路由挂在 React useEffect 里（src/renderer/app/useEditorKeyboardRouter.ts:44-62），
     // firstWindow() 返回时首帧尚未提交，此刻按键会被静默丢弃（探针实测 App 挂载在 firstWindow 后约 0.7s）；
     // 先等着陆页 CTA 出现（等价于 App 已提交、路由已挂载）再按键，canvas waitFor 仍是唯一产品态闸门。
-    await page.getByRole('button', { name: '打开工作空间', exact: true }).waitFor({ state: 'visible' })
+    // 2.0 冷启动落在工作台空白页；新建后从右上角唯一入口进入编辑器，打开工程与导出都在编辑器顶栏。
+    await page.getByRole('button', { name: '新建 H5 演示', exact: true }).first().waitFor({ state: 'visible' })
     await page.keyboard.press('Control+N')
     await page.locator('[data-testid="canvas-stage"] canvas').waitFor({ state: 'visible' })
+    await page.getByRole('button', { name: '在编辑器中打开', exact: true }).click()
+    await page.getByRole('button', { name: '打开工程（Ctrl+O）' }).waitFor({ state: 'visible' })
     await openProject(page, app, baselineProject, baselineHtml)
     await patchDialogs(app, {
       projectOpen: baselineProject,
@@ -1150,7 +1153,7 @@ async function execute(options: Options): Promise<AuthoringReceipt> {
           probeProject,
           withInitialState(await readFile(projectPath), target.sceneId, observedStateId),
         )
-        await page.getByRole('button', { name: '新建课件（Ctrl+N）' }).click()
+        await page.getByRole('button', { name: '新建 H5 演示（Ctrl+N）' }).click()
         await openProject(page, app, probeProject, beforeHtml)
         await showEditorPanel(page, '页面与图层')
         await page.getByTestId(`scene-item-${target.sceneId}`).click()
@@ -1192,7 +1195,7 @@ async function execute(options: Options): Promise<AuthoringReceipt> {
         }
         if (outputHash === beforeSaveHash) throw new Error('Editor save did not change the temporary Project bytes')
         receipt.saved = true
-        await page.getByRole('button', { name: '新建课件（Ctrl+N）' }).click()
+        await page.getByRole('button', { name: '新建 H5 演示（Ctrl+N）' }).click()
         await openProject(page, app, probeProject, probeHtml)
         await showEditorPanel(page, '页面与图层')
         await page.getByTestId(`scene-item-${target.sceneId}`).click()

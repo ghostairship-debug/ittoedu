@@ -414,7 +414,7 @@ function informationReleaseFindings(
   const states = scene.presentation?.states.map((state) => ({
     id: state.id as string | undefined,
     name: state.name,
-  })) ?? [{ id: undefined, name: '基础画面' }]
+  })) ?? [{ id: undefined, name: '母版画面' }]
 
   states.forEach((state) => {
     locations.forEach((location) => {

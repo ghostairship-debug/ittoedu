@@ -149,7 +149,7 @@ for (const kind of ['Markdown', 'Flow'] as const) {
         '第四段：保持原样。', humanFifth])
       const undo = kind === 'Markdown'
         ? page.getByRole('region', { name: '教学文档 ' + name, exact: true }).getByRole('button', { name: '撤销', exact: true })
-        : page.getByLabel('课件常用工具', { exact: true }).getByRole('button', { name: '撤销', exact: true })
+        : page.getByLabel('常用工具', { exact: true }).getByRole('button', { name: '撤销', exact: true })
       await undo.click()
       await expect.poll(async () => businessBody(await readSelectionDocument(page, document.documentId))).toEqual(businessBody(human))
       await expect.poll(async () => {

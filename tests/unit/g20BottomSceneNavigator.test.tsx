@@ -120,10 +120,10 @@ it('shows the new rail only in light mode and preserves the professional state s
   const { rerender } = render(<CourseEditorChromeContext.Provider value={{ documentId: id, mode: 'light', setMode: () => {} }}>
     <CourseBottomNavigation documentId={id} />
   </CourseEditorChromeContext.Provider>)
-  expect(screen.getByRole('navigation', { name: '课件场景与页面导航' })).toBeInTheDocument()
+  expect(screen.getByRole('navigation', { name: '场景与页面导航' })).toBeInTheDocument()
   rerender(<CourseEditorChromeContext.Provider value={{ documentId: id, mode: 'deep', setMode: () => {} }}>
     <CourseBottomNavigation documentId={id} />
   </CourseEditorChromeContext.Provider>)
-  expect(screen.queryByRole('navigation', { name: '课件场景与页面导航' })).toBeNull()
+  expect(screen.queryByRole('navigation', { name: '场景与页面导航' })).toBeNull()
   expect(screen.getByRole('region', { name: '场景状态' })).toBeInTheDocument()
 })

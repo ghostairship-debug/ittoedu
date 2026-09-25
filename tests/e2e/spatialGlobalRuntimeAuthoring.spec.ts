@@ -373,7 +373,7 @@ test('Spatial global API2：真实作者双击编辑、单 carrier 历史往返�
     expect(globalRuntime(saved, secondRuntimeId).runtime.content.values.title)
       .toBe(secondInitialTitle)
 
-    await page.getByRole('button', { name: '新建课件（Ctrl+N）' }).click()
+    await page.getByRole('button', { name: '新建 H5 演示（Ctrl+N）' }).click()
     await page.getByRole('button', { name: '打开工程（Ctrl+O）' }).click()
     await selectSpatialGlobalScope(page)
     await expect(authoringRuntimeText(page, firstRuntimeId)).toHaveText(editedTitle, {

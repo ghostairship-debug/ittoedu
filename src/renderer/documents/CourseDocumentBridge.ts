@@ -199,11 +199,11 @@ export class CourseDocumentBridge {
     this.visible.add(projection.documentId)
     const submission = ++this.sequence
     const status = patch.statusMessage
-    this.ports.patch({ ...prepared, ...projectCourseDocument(model, { ...current, ...prepared } as CourseDocumentView), statusMessage: '正在确认课件修改…' })
+    this.ports.patch({ ...prepared, ...projectCourseDocument(model, { ...current, ...prepared } as CourseDocumentView), statusMessage: '正在确认修改…' })
     this.lastSubmission = projection.edit({ type: 'course.replace', project: model.project, resources: model.resources }, { historyGroup })
       .then(result => {
         const ok = result.status === 'applied' || result.status === 'unchanged'
-        if (ok && this.active === projection && submission === this.sequence) this.ports.patch({ errorMessage: null, statusMessage: status ?? '课件修改已确认' })
+        if (ok && this.active === projection && submission === this.sequence) this.ports.patch({ errorMessage: null, statusMessage: status ?? '修改已确认' })
         return ok
       }).catch(error => {
         if (this.active === projection) this.ports.patch({ errorMessage: error instanceof Error ? error.message : '修改未确认，草稿已保留', statusMessage: null })

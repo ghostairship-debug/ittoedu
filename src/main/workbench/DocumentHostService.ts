@@ -163,7 +163,7 @@ export class DocumentHostService {
       }
       const model = structuredClone(current.model)
       if (input.source !== undefined) {
-        if (!isSourceDocumentModel(model)) throw new Error('课件不能使用 Markdown 合并正文')
+        if (!isSourceDocumentModel(model)) throw new Error('H5 演示不能使用 Markdown 合并正文')
         model.source = input.source
         if (model.kind === 'markdown' && disk.model?.kind === 'markdown') model.resources = {
           assets: { ...disk.model.resources.assets, ...model.resources.assets },

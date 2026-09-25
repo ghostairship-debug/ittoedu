@@ -68,9 +68,9 @@ export function ImageResultCard({ api, owner, documents = window.desktopAPI?.doc
   const act = async (work: () => Promise<void>) => { if (busy) return; setBusy(true); setError(''); try { await work() } catch (cause) { setError((cause as Error).message) } finally { setBusy(false) } }
   const refresh = async () => setView(await api.read(owner))
   const capture = async (mode: 'insert' | 'replace'): Promise<ImageApplyCapture> => {
-    if (!documents || !selected) throw new Error('请明确选择要应用图片的课件')
+    if (!documents || !selected) throw new Error('请明确选择要应用图片的 H5 演示')
     const current = await workbenchSelection.prepare(documentId)
-    if (current.model.kind !== 'course-v9') throw new Error('请选择课件文档')
+    if (current.model.kind !== 'course-v9') throw new Error('请选择 H5 演示')
     if (mode === 'replace') {
       const exact = workbenchSelection.getManual(documentId)
       if (!exact || exact.targets.length !== 1 || !['course-object', 'flow-block'].includes(exact.targets[0]!.kind) || exact.epoch !== current.epoch || exact.revision !== current.revision) throw new Error('请在正文中重新选中一个图片对象')
@@ -105,18 +105,18 @@ export function ImageResultCard({ api, owner, documents = window.desktopAPI?.doc
       {view.job.resources.length > 1 && <label>图片<select value={resourceId} onChange={event => setResourceId(event.target.value)}>{view.job.resources.map((resource, index) => <option key={resource.resourceId} value={resource.resourceId}>图片 {index + 1}（{resource.width}×{resource.height}）</option>)}</select></label>}
       <button type="button" disabled={busy} onClick={() => void act(async () => { const ticket = previewGeneration.current, result = await api.preview({ ...owner, resourceId }); if (ticket === previewGeneration.current) setPreview(URL.createObjectURL(new Blob([Uint8Array.from(result.bytes).buffer], { type: result.mimeType }))) })}>预览图片</button>
       {preview && <img className="image-result-card__preview" src={preview} alt="生成的图片预览" />}
-      <label>应用到课件<select value={documentId} onChange={event => { setDocumentId(event.target.value); setLocationId('') }}><option value="">请选择课件</option>{available.map(document => <option key={document.documentId} value={document.documentId}>{document.binding.kind === 'untitled' ? document.binding.suggestedName : document.binding.path.split(/[\\/]/).pop()}</option>)}</select></label>
+      <label>应用到 H5 演示<select value={documentId} onChange={event => { setDocumentId(event.target.value); setLocationId('') }}><option value="">请选择 H5 演示</option>{available.map(document => <option key={document.documentId} value={document.documentId}>{document.binding.kind === 'untitled' ? document.binding.suggestedName : document.binding.path.split(/[\\/]/).pop()}</option>)}</select></label>
       <label>插入位置<select value={locationId} onChange={event => setLocationId(event.target.value)}><option value="">请选择位置</option>{project?.locations.map(location => <option key={location.id} value={location.id}>{location.label || location.id}</option>)}</select></label>
       {surface && resource && <details className="image-result-card__placement">
         <summary>画布位置与尺寸：{frame ? `X ${frame.x} · Y ${frame.y} · ${frame.width}×${frame.height}` : '请填写有效数值'}</summary>
         <div className="image-result-card__frame-fields">
           {([['x', 'X'], ['y', 'Y'], ['width', '宽'], ['height', '高']] as const).map(([key, label]) => <label key={key}>{label}<input type="number" step="any" min={key === 'width' || key === 'height' ? '0.01' : undefined} value={frameValues[key]} onChange={event => setFrameValues(current => ({ ...current, [key]: event.target.value }))} /></label>)}
         </div>
-        <small>按课件坐标设置；插入后也可选中图片继续移动、缩放。</small>
+        <small>按页面坐标设置；插入后也可选中图片继续移动、缩放。</small>
       </details>}
       <div><button type="button" disabled={busy || !documentId || !locationId || !frame || Boolean(retryKind)} onClick={() => void act(() => apply('insert'))}>插入图片</button>
         <button type="button" disabled={busy || !replacement || Boolean(retryKind)} onClick={() => void act(() => apply('replace'))}>替换选中图片</button></div>
-      <small>{replacement ? `替换目标：${replacement.label}` : '替换时请在所选课件中选中一个图片对象。'}</small>
+      <small>{replacement ? `替换目标：${replacement.label}` : '替换时请在所选 H5 演示中选中一个图片对象。'}</small>
       <label>继续编辑图片<textarea value={prompt} onChange={event => setPrompt(event.target.value)} placeholder="描述这张图片需要怎样修改" /></label>
       <small>使用当前图片编辑设置发起新请求；保留原图，不自动应用。</small>
       <button type="button" disabled={busy || !prompt.trim() || Boolean(retryKind)} onClick={() => void act(async () => {

@@ -40,7 +40,7 @@ export const runtimeLightEditCommands = {
     const state = useEditorStore.getState()
     const document = selectActiveCourseProjectDocument(state)
     const projection = selectEffectiveLayerProjection(state)
-    if (!document || !projection) return { ok: false, reason: '当前没有可编辑的课件' }
+    if (!document || !projection) return { ok: false, reason: '当前没有可编辑的 H5 演示' }
     const target = state.captureRuntimeContentTextTarget({
       projectId: document.id,
       scope: selectEditingScope(state),

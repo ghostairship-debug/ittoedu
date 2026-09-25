@@ -21,6 +21,6 @@ export function flowDocumentDraftSaveBlock(draft: FlowDocumentDraft | null | und
   return { ok: false, reason: draft.composing ? '请完成当前中文输入后保存。' : draft.diagnostics[0]?.message || '正文源文尚未应用，请修正后保存；恢复草稿会单独保留。' }
 }
 export function recoverFlowDocumentDraft(record: FlowDocumentRecoveryRecord, target: FlowDocumentRecoveryTarget): FlowDocumentDraft {
-  if (flowRecoveryStorageIdentity(record) !== flowRecoveryStorageIdentity(target) || record.revision !== target.revision) throw new Error('发现其他版本的正文恢复稿，已保留在本机；请先恢复对应版本的课件。')
+  if (flowRecoveryStorageIdentity(record) !== flowRecoveryStorageIdentity(target) || record.revision !== target.revision) throw new Error('发现其他版本的正文恢复稿，已保留在本机；请先恢复对应版本的 H5 演示。')
   return { surfaceId: record.surfaceId, revision: record.revision, source: record.source, diagnostics: structuredClone(record.diagnostics), composing: false }
 }

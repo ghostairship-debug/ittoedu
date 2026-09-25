@@ -21,7 +21,7 @@ test('canonical first-save binds an untitled course without creating or rebindin
     await page.getByRole('button', { name: '打开工作空间', exact: true }).first().click()
     await expect(page.locator('.lesson-workspace-toolbar')).toContainText('workspace')
     await page.getByLabel('新建标签页').click()
-    await page.locator('.lesson-new-tab-popover').getByRole('button', { name: '新建课件', exact: true }).click()
+    await page.locator('.lesson-new-tab-popover').getByRole('button', { name: '新建 H5 演示', exact: true }).click()
     await expect(page.locator('.workspace-document-tabs').getByRole('tab')).toHaveCount(1)
     const before = await page.evaluate(async workspace => ({
       documents: await window.desktopAPI!.documents!.list(),

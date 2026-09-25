@@ -125,7 +125,7 @@ function fields(document: CourseProjectDocument, token: CourseAuthoringSessionTo
       if (scope === 'page' && (location.kind !== 'slide-scene' || scene.id !== location.sceneId)) return
       const sceneOwner = `${owner}/${scene.name}`
       scene.layerItems.forEach(item => layer(item, sceneOwner)); background(scene, sceneOwner, { owner: 'slide-scene', course: document, surface, scene })
-      if (scene.presentation?.states.some(s => Object.keys(s.layerItemOverrides).length)) unsupported.push(`${sceneOwner}：演示状态覆盖值不参与批量修改，可能覆盖基础样式`)
+      if (scene.presentation?.states.some(s => Object.keys(s.layerItemOverrides).length)) unsupported.push(`${sceneOwner}：演示状态覆盖值不参与批量修改，可能覆盖母版样式`)
     })
     else if (surface.type === 'flow') blocks(surface.blocks, owner)
     else surface.world.layerItems.forEach(item => layer(item, owner))

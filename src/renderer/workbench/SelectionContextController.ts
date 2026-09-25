@@ -28,7 +28,7 @@ export function captureSelection(snapshot: DocumentSnapshot, targets: readonly E
 }
 /** The host owner determines whether an object can carry a named scene state. */
 export function captureCourseObjectSelection(snapshot: DocumentSnapshot, locationId: string, itemIds: readonly string[], stateId?: string | null): SelectionCapture {
-  if (snapshot.model.kind !== 'course-v9') throw new Error('当前文档不是课件。')
+  if (snapshot.model.kind !== 'course-v9') throw new Error('当前文档不是 H5 演示。')
   const project = snapshot.model.project
   return captureSelection(snapshot, itemIds.map(itemId => {
     const owner = locateCourseLayer(project, itemId)

@@ -73,7 +73,7 @@ async function clickController(page: Page, host: Locator): Promise<void> {
   await page.mouse.click(expandedBox.x + expandedBox.width / 2, expandedBox.y + expandedBox.height / 2)
   await expectUnclipped(collapse); await expectUnclipped(zoom)
   await zoom.click()
-  const panel = host.getByRole('group', { name: '课件观察缩放' })
+  const panel = host.getByRole('group', { name: '演示观察缩放' })
   await panel.getByRole('button', { name: '放大', exact: true }).click()
   await expect(panel.locator('output')).toHaveText('125%')
   await panel.getByRole('button', { name: '恢复视图', exact: true }).click()

@@ -110,7 +110,7 @@ test('M03-T06 bottom scene cards navigate owned states and mixed surfaces withou
     const documentId = await frame.getAttribute('data-document-id')
     if (!documentId) throw new Error('Course editor did not bind a DocumentSession')
     const before = await readDocument(page, documentId)
-    const nav = frame.getByRole('navigation', { name: '课件场景与页面导航' })
+    const nav = frame.getByRole('navigation', { name: '场景与页面导航' })
     const track = nav.locator('.bottom-scene-nav__track')
     await expect(nav).toBeVisible()
     await expect(nav.locator('.bottom-scene-card')).toHaveCount(10)

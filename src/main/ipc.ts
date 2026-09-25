@@ -368,7 +368,7 @@ export function registerIpcHandlers(context: IpcContext): void {
   }, async (_event, args) => operateLessonDesktop(requireWindow(context), requireSingleArgument(args)))
   registerSafeHandler(IPC_CHANNELS.captureAuthoringObservation, context, {
     code: 'OBSERVATION_CAPTURE_FAILED', title: '当前画面尚未同步',
-    message: '无法读取当前课件画面。', suggestion: '请等待画面呈现完成后重试。',
+    message: '无法读取当前画面。', suggestion: '请等待画面呈现完成后重试。',
   }, async (event, args) => {
     const rect = z.object({ x: z.number().finite().nonnegative(), y: z.number().finite().nonnegative(),
       width: z.number().finite().positive().max(16384), height: z.number().finite().positive().max(16384) }).strict().parse(requireSingleArgument(args))
@@ -404,7 +404,7 @@ export function registerIpcHandlers(context: IpcContext): void {
     {
       code: 'PROJECT_OPEN_FAILED',
       title: '工程打开失败',
-      message: '无法打开所选课件工程。',
+      message: '无法打开所选 H5 演示。',
       suggestion: '请确认文件没有损坏并重试。',
     },
     async (_event, args) => {
@@ -464,7 +464,7 @@ export function registerIpcHandlers(context: IpcContext): void {
     {
       code: 'PROJECT_SAVE_FAILED',
       title: '工程保存失败',
-      message: '无法保存当前课件工程。',
+      message: '无法保存当前 H5 演示。',
       suggestion: '请改存到有足够空间且可写的位置。',
     },
     async (_event, args) => {
@@ -725,7 +725,7 @@ export function registerIpcHandlers(context: IpcContext): void {
     {
       code: 'HTML_EXPORT_FAILED',
       title: 'HTML 导出失败',
-      message: '无法写出课件 HTML。',
+      message: '无法写出 HTML。',
       suggestion: '请改存到有足够空间且可写的位置。',
     },
     async (_event, args) => {
@@ -760,7 +760,7 @@ export function registerIpcHandlers(context: IpcContext): void {
     {
       code: 'WEB_PACKAGE_EXPORT_FAILED',
       title: '网页包导出失败',
-      message: '无法写出网页课件包。',
+      message: '无法写出网页包。',
       suggestion: '请改存到有足够空间且可写的位置。',
     },
     async (_event, args) => {
@@ -794,7 +794,7 @@ export function registerIpcHandlers(context: IpcContext): void {
     {
       code: 'PREVIEW_NETWORK_POLICY_FAILED',
       title: '预览网络配置失败',
-      message: '无法应用当前课件的网络声明。',
+      message: '无法应用当前 H5 演示的网络声明。',
       suggestion: '请检查工程网络声明并重新打开预览。',
     },
     (event, args) => {

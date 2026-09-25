@@ -364,7 +364,7 @@ export function useMediaImport(ports: MediaImportPorts): MediaImportApi {
           throw new UserFacingError(
             '无法导入图片',
             '当前没有可写入的 Course Project。',
-            '请重新打开或新建课件后再试。',
+            '请重新打开或新建 H5 演示后再试。',
           )
         }
         const librarySnapshot = portsRef.current.readMediaLibrarySnapshot()
@@ -597,7 +597,7 @@ export function useMediaImport(ports: MediaImportPorts): MediaImportApi {
         throw new UserFacingError(
           '无法导入视频',
           '当前没有可写入的 Course Project。',
-          '请重新打开或新建课件后再试。',
+          '请重新打开或新建 H5 演示后再试。',
         )
       }
       const librarySnapshot = portsRef.current.readMediaLibrarySnapshot()

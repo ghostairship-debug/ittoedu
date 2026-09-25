@@ -102,7 +102,7 @@ export async function executeLessonAssembly(input: LessonAssemblyInput, ports: L
   assertTarget()
   const projectPath = await ports.saveProject()
   assertTarget()
-  if (!projectPath) throw new Error('保存已取消，当前课件仍可编辑')
+  if (!projectPath) throw new Error('保存已取消，当前 H5 演示仍可编辑')
   await validate()
   assertTarget()
   return projectPath

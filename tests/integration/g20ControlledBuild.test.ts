@@ -61,7 +61,7 @@ describe('controlled scratch builds', () => {
     const artifact = await f.service.artifact('run', f.job.jobId, ready.artifactId!)
     expect(artifact.command).toMatchObject({ type: 'course.replace', project: { title: 'Prepared only', revision: f.project.revision } })
     expect(artifact.target).toEqual(f.job.target)
-    expect(f.baseline.project.title).toBe('未命名课件')
+    expect(f.baseline.project.title).toBe('未命名 H5 演示')
     const recovered = new ControlledBuildService({ directory: path.join(f.root, 'scratch'), admission: { run: f.run } })
     expect(await recovered.artifact('run', f.job.jobId, ready.artifactId!)).toEqual(artifact)
     await f.exec({ type: 'write', path: 'notes.txt', content: 'new source' })

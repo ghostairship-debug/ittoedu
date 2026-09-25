@@ -30,7 +30,7 @@ describe('product identity configuration', () => {
       pdfTempPrefix: APP_PDF_TEMP_FILE_PREFIX,
       e2eTemp: APP_E2E_TEMP_DIRECTORY_NAME,
     }).toEqual({
-      name: '互动课件编辑器',
+      name: '果铃编辑器',
       productName: 'ittoedu Courseware Editor',
       company: 'ittoedu',
       appId: 'com.ittoedu.courseware-editor',

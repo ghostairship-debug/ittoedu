@@ -828,7 +828,7 @@ export class DocumentToolGateway implements ToolGateway {
         if (model.kind !== 'course-v9') throw new Error('呈现状态需要 V9 文档')
         const creating = mutation.name === 'state.create', reordering = mutation.name === 'state.reorder'
         if (creating || reordering) {
-          if (target.kind !== 'course-owner' || target.owner !== 'scene' || target.stateId) throw new Error('创建或排序状态需要场景基础态 owner')
+          if (target.kind !== 'course-owner' || target.owner !== 'scene' || target.stateId) throw new Error('创建或排序状态需要场景母版 owner')
         } else if (target.kind !== 'course-state') throw new Error('该操作需要明确的状态句柄')
         const context = stateToolContext(model.project, target), previousIds = new Set(context.scene.presentation?.states.map(state => state.id) ?? [])
         let project
@@ -847,7 +847,7 @@ export class DocumentToolGateway implements ToolGateway {
           else if (mutation.name === 'state.delete') project = mutateDeleteSlidePresentationState(model.project, context.surface.id, context.scene.id, target.stateId)
           else {
             const owner = layerTargets[i][0]
-            if (owner.kind !== 'course-owner' || owner.owner !== 'scene' || owner.stateId || owner.locationId !== target.locationId) throw new Error('复制状态需要相同场景基础态 owner 写权限')
+            if (owner.kind !== 'course-owner' || owner.owner !== 'scene' || owner.stateId || owner.locationId !== target.locationId) throw new Error('复制状态需要相同场景母版 owner 写权限')
             stateToolContext(model.project, owner)
             project = mutateDuplicateSlidePresentationState(model.project, context.surface.id, context.scene.id, target.stateId)
           }
@@ -869,7 +869,7 @@ export class DocumentToolGateway implements ToolGateway {
         target = replacement
       } else if (mutation.name === 'input.answer') {
         if (model.kind !== 'course-v9' || target.kind !== 'course-object') throw new Error('答案修改需要输入题对象句柄')
-        if (target.stateId) throw new ToolError('unsupported-named-state-answer', '输入题答案属于场景规则，请使用明确的基础态输入题目标')
+        if (target.stateId) throw new ToolError('unsupported-named-state-answer', '输入题答案属于场景规则，请使用明确的母版输入题目标')
         const planned = planInputAnswer(model.project, target.locationId, target.itemId, mutation.input.answer, this.createId)
         model = await driver.apply(model, { type: 'course.replace', project: { ...planned.project, revision: model.project.revision, updatedAt: model.project.updatedAt } })
       } else if (mutation.name === 'interaction.delete') {

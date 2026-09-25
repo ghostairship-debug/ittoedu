@@ -77,7 +77,7 @@ export function WorkspaceContentHost({ props, layout, editorFocus, enterEditor, 
         <p>新建文档或打开文件夹；会话可以独立继续。</p>
         <div className="lesson-chat-empty-actions">
           <button type="button" onClick={() => void actions.run(() => tabs.createMarkdown())}>新建 Markdown</button>
-          <button type="button" onClick={() => void actions.run(actions.newCourse)}>新建课件</button>
+          <button type="button" onClick={() => void actions.run(actions.newCourse)}>新建 H5 演示</button>
           <button type="button" onClick={() => void actions.run(() => actions.openWorkspace())}>打开文件夹</button>
         </div>
       </section>}

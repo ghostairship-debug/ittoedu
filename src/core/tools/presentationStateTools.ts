@@ -5,7 +5,7 @@ import { slideSceneContext } from './slideInsertion'
 /** Name normalization remains in the shared domain planners used by manual editing. */
 export const presentationStateNameSchema = z.string()
 export function stateToolContext(project: CourseProjectDocument, target: ToolTarget) {
-  if (target.kind !== 'course-state' && (target.kind !== 'course-owner' || target.owner !== 'scene' || target.stateId)) throw new Error('状态操作需要明确的状态或场景基础态 owner')
+  if (target.kind !== 'course-state' && (target.kind !== 'course-owner' || target.owner !== 'scene' || target.stateId)) throw new Error('状态操作需要明确的状态或场景母版 owner')
   const context = slideSceneContext(project, { scope: 'scene', selection: { locationId: target.locationId, stateId: target.kind === 'course-state' ? target.stateId : null } })
   const state = target.kind === 'course-state' ? context.scene.presentation?.states.find(state => state.id === target.stateId) : undefined
   if (target.kind === 'course-state' && !state) throw new Error('命名状态不存在或不属于目标场景')

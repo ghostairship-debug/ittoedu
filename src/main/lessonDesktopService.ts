@@ -42,7 +42,7 @@ export async function operateLessonDesktop(window: BrowserWindow, request: unkno
     case 'remove-project': return { projects: await projects.remove(input.directory, input.path) }
     case 'open-project': {
       const filename = await fs.realpath(input.path)
-      if (path.extname(filename).toLowerCase() !== '.h5lesson') throw new Error('请选择课件工程文件')
+      if (path.extname(filename).toLowerCase() !== '.h5lesson') throw new Error('请选择 H5 演示文件（.h5lesson）')
       return { projectFile: await openSelectedProjectFile(filename) }
     }
     case 'recent-workspaces': return { recent: await recentWorkspaces() }

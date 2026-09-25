@@ -108,7 +108,7 @@ test('r19 lesson: real PDF DOCX PPTX reading, document conflict and reopen, firs
     await expect(page.locator('.lesson-workspace-toolbar')).toContainText('workspace')
     await page.locator('.lesson-directory-tree').getByRole('button', { name: '串联电路', exact: true }).click()
     await page.locator('.lesson-directory-tree').getByRole('button', { name: 'course.h5lesson', exact: true }).click()
-    await page.getByRole('tab', { name: /新建课件|course/ }).click()
+    await page.getByRole('tab', { name: /新建 H5 演示|course/ }).click()
     await choose(app, firstPath, true)
     await page.getByRole('button', { name: '保存（Ctrl+S）', exact: true }).click()
     const canonical = await page.evaluate(async filename => window.desktopAPI!.documents!.open(filename), firstPath)

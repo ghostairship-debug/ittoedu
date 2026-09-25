@@ -481,7 +481,7 @@ export function mutateDeleteSlideScene(
     const surface = mutableSlideSurface(draft, surfaceId)
     const sceneIndex = surface.scenes.findIndex((scene) => scene.id === sceneId)
     if (sceneIndex < 0) throw new Error(`找不到 Slide 场景：${sceneId}`)
-    if (surface.scenes.length <= 1) throw new Error('课件至少需要一张幻灯片')
+    if (surface.scenes.length <= 1) throw new Error('至少需要保留一页')
     const removedLocations = draft.locations.filter((location) =>
       location.kind === 'slide-scene' &&
       location.surfaceId === surfaceId &&

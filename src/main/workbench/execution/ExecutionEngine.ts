@@ -126,7 +126,7 @@ function imageRoleRateLimited(tools: readonly ExecutionToolRecord[], name: strin
 const LOAD_TOOLS = 'tools.load'
 const loadToolsSchema = z.object({ families: z.array(z.enum(toolFamilies)).min(1).max(toolFamilies.length) }).strict()
 export const loadToolsDefinition: ModelToolDefinition = { name: LOAD_TOOLS,
-  description: '按需展开当前授权内的课件工具族；只披露能力，不增加权限；可重复调用。',
+  description: '按需展开当前授权内的 H5 演示工具族；只披露能力，不增加权限；可重复调用。',
   inputSchema: z.toJSONSchema(loadToolsSchema) as ModelJsonObject }
 /** A selection travels with the task up to this size; larger ones stay readable through paged `read`. */
 const SELECTION_PREVIEW_CHARS = 4000

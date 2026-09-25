@@ -39,7 +39,7 @@ export class AgentFileService implements AgentFilePort {
     const stat = await fs.lstat(filename)
     if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('目标不是可访问文件')
     if (context.permission !== 'full' && !isInsideRoot(context.workspaceRoot, filename)) throw new Error('当前权限不允许访问工作空间外文件')
-    if (!supported.test(filename)) throw new Error('当前只支持打开 Markdown、纯文本（.txt）和 V9 课件')
+    if (!supported.test(filename)) throw new Error('当前只支持打开 Markdown、纯文本（.txt）和 H5 演示（.h5lesson）')
     return filename
   }
   async preflightCreate(context: AgentFileContext, raw: unknown): Promise<{ directory: string; outside: boolean }> {

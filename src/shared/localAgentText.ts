@@ -16,7 +16,7 @@ export function readableLocalAgentError(value: unknown): string {
   const text = value instanceof Error ? value.message : String(value ?? '')
   if (!text) return ''
   if (/output-limit/i.test(text)) return '原生工具返回内容超过接收限额，本次未完成。已提交的修改会保留；详细限额记录已保存，可继续当前任务。'
-  if (/stale|工程.*改变|目标.*失效/i.test(text)) return '课件或任务已变化，本次未应用的修改已丢弃。请核对当前内容，再发送要求或明确继续。'
+  if (/stale|工程.*改变|目标.*失效/i.test(text)) return '文档或任务已变化，本次未应用的修改已丢弃。请核对当前内容，再发送要求或明确继续。'
   if (/unauthenticated|401|认证|未登录|token.*expired/i.test(text)) return '创作助手的登录已失效。请重新登录所选 CLI 后继续；本次未提交的修改没有应用。'
   if (/503|service.unavailable|no active.*accounts/i.test(text)) return '当前服务暂时不可用。请稍后重试或继续；已应用的修改会保留。'
   if (/rate.limit|429|额度|限流/i.test(text)) return '当前服务暂时限制了请求。请稍后继续；已应用的修改会保留。'

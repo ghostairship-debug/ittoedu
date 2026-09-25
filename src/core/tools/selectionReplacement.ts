@@ -71,7 +71,7 @@ function migrateLayerReferences(document: CourseProjectDocument, before: LayerIt
  * only references whose state domain is explicit may be redirected. */
 function replaceInheritedShapeInState(document: CourseProjectDocument, target: AuthoringToolTargetWireV1, before: LayerItem, after: LayerItem) {
   if (before.kind !== 'native' || before.content.nativeType !== 'shape' || after.kind !== 'native' || after.content.nativeType !== 'image') {
-    incompatible('此对象继承自基础状态或被其他状态使用；该载体转换无法仅修改当前状态，请窄编辑或显式选择基础状态进行完整替换')
+    incompatible('此对象继承自母版或被其他状态使用；该载体转换无法仅修改当前状态，请窄编辑或显式选择母版进行完整替换')
   }
   const surfaceIndex = document.surfaces.findIndex(surface => surface.id === target.surfaceId), surface = document.surfaces[surfaceIndex]!
   if (surface.type !== 'slide' || target.owner !== 'scene') incompatible('命名状态局部换图只适用于 Slide scene 对象')

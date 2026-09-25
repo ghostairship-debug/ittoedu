@@ -6,7 +6,7 @@
 
 文档同步基线：**2026-08-28**。Runtime API 2 仍是当前画布 Runtime/全局 Runtime 的完整作者协议；Published V2 对 API 2 接入 Slide scene-local 与 session-global carrier，并把这些已支持 carrier 的 host actions 接回同一会话。Slide scene-local API 2/3 已接通 `presentation`；全局 API 2 与 Flow surface-local API 3 的 `presentation` 为 inert，当前 Published `nodes` 解析为空，动态 Runtime 导航守卫也为 inert。API 3 playback 只接入 Slide scene-local 与 Flow surface-local DOM。新工程必须写 Course Project `schemaVersion: 9`。旧 Project V1–V8 由产品入口明确拒绝，不再是加载或导入输入。
 
-Course Project V9 JSON 是业务真相，DOM、Phaser 和 Three.js 都只是可替换的呈现/交互实现。Phaser 是当前原生 2D Player/交互代理的内部技术能力，不是产品品牌；产品名为 ittoedu 的“互动课件编辑器”。场景/世界运行时用于整页动画、特效、连续耦合交互、事件协调与瞬态效果，并尽量少放可教文字；它不是组件包，也不用来仿一个局部拖拽控件。专业“开发”面板可以创建最小模板并受控修改工程中的 runtime source，但不会为教学需求自动生成完整实现。题目、答错、答对、完成等稳定视觉应由 presentation / Native 图层承载；简单节点/全局元素点击、状态/场景切换、声音和视频控制应优先由声明式 interactions 承担。稍复杂的局部互动走 Component API 4（可复用或新建）。运行时只承担声明式规则与局部组件都不足以表达的整块机制，并可驱动这些可编辑状态。
+Course Project V9 JSON 是业务真相，DOM、Phaser 和 Three.js 都只是可替换的呈现/交互实现。Phaser 是当前原生 2D Player/交互代理的内部技术能力，不是产品品牌；产品名为“果铃编辑器”。场景/世界运行时用于整页动画、特效、连续耦合交互、事件协调与瞬态效果，并尽量少放可教文字；它不是组件包，也不用来仿一个局部拖拽控件。专业“开发”面板可以创建最小模板并受控修改工程中的 runtime source，但不会为教学需求自动生成完整实现。题目、答错、答对、完成等稳定视觉应由 presentation / Native 图层承载；简单节点/全局元素点击、状态/场景切换、声音和视频控制应优先由声明式 interactions 承担。稍复杂的局部互动走 Component API 4（可复用或新建）。运行时只承担声明式规则与局部组件都不足以表达的整块机制，并可驱动这些可编辑状态。
 
 完整归档可用 `npm run --silent validate:project -- <file.h5lesson>` 无界面检查真实资源、Schema、当前已接线的结构性工程健康结果和四格式预检。Published V2 playback 会按 V9 `courseState` 声明初始化默认值；`node.click` Interaction 可用 `course-state.exists` / `course-state.compare` 读取这份状态，并用 `course-state.set` 同步写入已声明键。跨 location 的 `go` / `next` / `previous` 随后执行顶层声明式 `navigationGuards` 的 `block` 语义；同位置状态切换与 replay 不经过守卫，restart 会绕过守卫并恢复声明默认值。校验命令只验证这些引用与类型，不会真的运行课程状态变化、导航路径、Runtime/Component 源码或真实导出。Runtime/Component 实际网络使用与工程声明一致性、Node 近似布局和真实像素也需另行复核；退出码 0 不能替代真实 Published playback、导出画面与外部请求检查。
 
@@ -24,7 +24,7 @@ Runtime Authoring V1 是 Runtime API 2 上可选、确定性的人工编辑扩�
 
 ## 1. 选择场景运行时还是全局运行时
 
-| 类型 | 典型用途 | 普通翻页 | 重播本页 | 重开课件 |
+| 类型 | 典型用途 | 普通翻页 | 重播本页 | 重开 H5 演示 |
 | --- | --- | --- | --- | --- |
 | `scene.runtime` | 当前场景独有的动画、拖拽、判定、DOM 界面、原生节点绑定 | 销毁 | 销毁并重建 | 销毁并随首场景重建 |
 | `globalRuntime` | 跨场景状态、事件协调、常驻 HUD 或课程级效果 | 保留 | 保留 | 销毁并重建 |
@@ -320,7 +320,7 @@ ctx.dom.overlay.append(button)
 
 ### 6.1 Three.js 与真 3D
 
-编辑器核心和 Player 不内置、导入或全局暴露 Three.js。需要地球、太阳系、立体几何或其他真 3D 时，由运行时作者在构建阶段把 Three.js 与所需 loader 一并打进 `source`，运行时仍声明 `renderMode: 'dom'`，把 `WebGLRenderer.domElement` 挂到 `ctx.dom.underlay` 或 `ctx.dom.overlay`；同时需要 Phaser 时才声明 `hybrid`。这让 3D 能力按课件付费，不增加不使用 3D 的工程核心负担。
+编辑器核心和 Player 不内置、导入或全局暴露 Three.js。需要地球、太阳系、立体几何或其他真 3D 时，由运行时作者在构建阶段把 Three.js 与所需 loader 一并打进 `source`，运行时仍声明 `renderMode: 'dom'`，把 `WebGLRenderer.domElement` 挂到 `ctx.dom.underlay` 或 `ctx.dom.overlay`；同时需要 Phaser 时才声明 `hybrid`。这让 3D 能力只由用到它的 H5 演示承担，不增加不使用 3D 的工程核心负担。
 
 需要作者提供 3D 模型时，默认交付格式使用 GLB（glTF 二进制）；不要依赖 CDN 或运行时网络。当前 Course Project V9 的一等素材类型只有图片、声音和视频，不能把 GLB 伪装成图片后塞入 `RuntimeDocument.assets`：一次性小模型只能在 2 MiB 源码上限内随运行时构建产物离线嵌入，较大或可复用模型应放入 V4 组件包的 manifest asset。若产品需要独立替换/管理模型，必须先正式扩展 Project Schema、归档、编辑器“媒体”管理与导出链路。纹理、网格、动画和解码器必须一并离线打包并在目标设备验证显存与加载时间。改变 `renderMode` 不会自动把 Three.js 场景转换成 Phaser 或 DOM 元素。
 
@@ -433,7 +433,7 @@ interface CourseStateStore {
 ```
 
 - `localState` 属于当前运行时挂载；场景离开、重播或重进后清空；
-- `courseState` 普通翻页和重播时保留，重开课件时恢复 V9 声明的默认值；
+- `courseState` 普通翻页和重播时保留，重开 H5 演示时恢复 V9 声明的默认值；
 - 状态读写会克隆数据，不能保存函数、DOM、Phaser 对象、平台对象或循环引用；
 - 不要把视图对象塞进状态；状态保存业务事实，视图在 `create()` 中从状态重建。
 
@@ -560,7 +560,7 @@ PDF/PPTX 不执行互动、声音或元素入场/退场，也不应用 `playback
 
 DOM 捕获覆盖常规背景与单层 `linear-gradient`、边框、圆角裁剪、文字、图片、input/textarea/select 当前值、slot 分配节点/后备子树和 Canvas/WebGL 冻帧，但不等价于完整浏览器截图引擎。复杂伪元素、滤镜、混合模式、遮罩或多层/特殊 CSS 必须实测 PDF/PPTX；不稳定时改用可捕获 Canvas 表达，或提供由同一内容数据生成的 `staticFallback`。
 
-导出前“工程检查”会检查运行时素材绑定、节点绑定、静态后备、交互引用和跨场景目标，并提供只读信息释放与视觉密度概览；后两者只是可达性近似和启发式分数。选择任一成品格式后还会生成目标专属 Export Preflight，使用 `error/warning/info`：错误阻断，警告与说明可由人确认继续；可定位项携带场景/状态/节点信息，完整报告可保存为 JSON。运行时、预览或组件异常还会写入本地轮转诊断日志，可导出不含课件素材内容的文本报告。工程检查、导出预检和异常诊断日志用途不同，不能互相替代。
+导出前“工程检查”会检查运行时素材绑定、节点绑定、静态后备、交互引用和跨场景目标，并提供只读信息释放与视觉密度概览；后两者只是可达性近似和启发式分数。选择任一成品格式后还会生成目标专属 Export Preflight，使用 `error/warning/info`：错误阻断，警告与说明可由人确认继续；可定位项携带场景/状态/节点信息，完整报告可保存为 JSON。运行时、预览或组件异常还会写入本地轮转诊断日志，可导出不含素材内容的文本报告。工程检查、导出预检和异常诊断日志用途不同，不能互相替代。
 
 ## 14. 错误隔离与清理
 
@@ -622,4 +622,4 @@ Runtime 是经过审核的可信扩展。Slide authoring 与 playback 位于主 
 - [ ] Slide 编辑状态与当前位置试运行使用同文档 Published V2 Slide 宿主和同一 1280×720 视觉边界；authoring 冻结互动、宿主动作、媒体、导航、演示者输入和课程状态写入，direct patch/ACK/target 的 session/revision 语义正确，透明 Phaser 层没有造成位置偏移或重复视觉；Flow / Spatial 专用作者面未被改写。
 - [ ] 自动化 Electron 验证保持主窗口始终隐藏，不调用 `show()` 或抢占桌面；只在显式可视调试命令中显示窗口。
 
-API 2 的原生、Phaser 与内联 Three.js 对照基准见 [`examples/render-host-benchmark/`](../examples/render-host-benchmark/README.md)。其规则压力段执行 25 轮、共 100 次定制场景切换与 25 次末页重播，并检查挂载点、Canvas/WebGL、活动 RAF、控制台异常和外部请求。该基准不替代真实课件的命名呈现状态设计。
+API 2 的原生、Phaser 与内联 Three.js 对照基准见 [`examples/render-host-benchmark/`](../examples/render-host-benchmark/README.md)。其规则压力段执行 25 轮、共 100 次定制场景切换与 25 次末页重播，并检查挂载点、Canvas/WebGL、活动 RAF、控制台异常和外部请求。该基准不替代真实 H5 演示的命名呈现状态设计。

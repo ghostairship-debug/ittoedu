@@ -109,7 +109,7 @@ export function EmptyScenePropertiesPanel({
         <section className={`state-editing-notice${scene?.stateName ? ' state-editing-notice--override' : ''}`}>
           <Layers3 size={15} />
           <div>
-            <strong>{scene?.stateName ? `当前预览：状态“${scene.stateName}”` : '当前预览：基础场景'}</strong>
+            <strong>{scene?.stateName ? `当前预览：状态“${scene.stateName}”` : '当前预览：母版'}</strong>
             <span>下方“背景编辑对象”决定颜色/图片写入哪一层，与当前预览的状态无关。</span>
           </div>
         </section>

@@ -96,7 +96,7 @@ test('S14/M08 local HTTP fixture with real Engine: preview, insert, undo/redo, r
     await expect(originalCard.getByAltText('生成的图片预览')).toBeVisible()
     expect((await read()).revision).toBe(initial.revision)
     expect(imageBodies).toHaveLength(1)
-    await originalCard.getByLabel('应用到课件').selectOption(initial.documentId)
+    await originalCard.getByLabel('应用到 H5 演示').selectOption(initial.documentId)
     await originalCard.getByLabel('插入位置').selectOption(location.id)
     const placement = originalCard.locator('details.image-result-card__placement')
     await expect(placement.locator('summary')).toContainText('画布位置与尺寸')
@@ -133,7 +133,7 @@ test('S14/M08 local HTTP fixture with real Engine: preview, insert, undo/redo, r
     let paintedBounds = await paintedImage.boundingBox()
     if (!paintedBounds) throw new Error('AI image has no painted bounds')
     await page.mouse.click(paintedBounds.x + paintedBounds.width / 2, paintedBounds.y + paintedBounds.height / 2)
-    await editCard.getByLabel('应用到课件').selectOption(initial.documentId)
+    await editCard.getByLabel('应用到 H5 演示').selectOption(initial.documentId)
     await expect(editCard.getByRole('button', { name: '替换选中图片', exact: true })).toBeEnabled()
     await editCard.getByRole('button', { name: '替换选中图片', exact: true }).click()
     await expect.poll(async () => (await read()).undoDepth).toBe(initial.undoDepth + 2)
@@ -167,10 +167,10 @@ test('S14/M08 local HTTP fixture with real Engine: preview, insert, undo/redo, r
     }).toBe(0.01)
     expect((await read()).undoDepth).toBe(beforeProperties.undoDepth + 2)
     const popover = page.locator('.native-selection-context.canvas-mode-switch:visible')
-    const canvas = page.getByRole('main', { name: '课件画布' })
+    const canvas = page.getByRole('main', { name: '画布' })
     const bounds = async () => {
       const [panel, content, toolbar] = await Promise.all([
-        popover.boundingBox(), canvas.boundingBox(), page.getByLabel('课件常用工具').boundingBox(),
+        popover.boundingBox(), canvas.boundingBox(), page.getByLabel('常用工具').boundingBox(),
       ])
       if (!panel || !content || !toolbar) return null
       return { panel, content, toolbar }

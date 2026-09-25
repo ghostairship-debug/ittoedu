@@ -121,10 +121,10 @@ export async function exportDiagnosticReport(
   if (consent.response !== 0) return null
   let attachments: string[] = []
   if (consent.checkboxChecked) {
-    const selected = await dialog.showOpenDialog(window, { title: '主动选择附加到诊断的文档', properties: ['openFile', 'multiSelections'], filters: [{ name: '课件与 Markdown 文档', extensions: ['h5lesson', 'md'] }] })
+    const selected = await dialog.showOpenDialog(window, { title: '主动选择附加到诊断的文档', properties: ['openFile', 'multiSelections'], filters: [{ name: 'H5 演示与 Markdown 文档', extensions: ['h5lesson', 'md'] }] })
     if (selected.canceled || !selected.filePaths.length) return null
     attachments = selected.filePaths
-    if (attachments.some(file => !['.h5lesson', '.md'].includes(path.extname(file).toLowerCase()))) throw new Error('诊断附件仅支持主动选择的课件与 Markdown 文档。')
+    if (attachments.some(file => !['.h5lesson', '.md'].includes(path.extname(file).toLowerCase()))) throw new Error('诊断附件仅支持主动选择的 H5 演示与 Markdown 文档。')
   }
   const extension = attachments.length ? 'zip' : 'txt'
   const result = await dialog.showSaveDialog(window, {

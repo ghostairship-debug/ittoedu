@@ -630,7 +630,7 @@ export function createSlideAuthoringSlice(
           historyEntry: true,
           selection: session.selection,
         }
-      }, { statusMessage: `课件已重命名为“${title}”` })
+      }, { statusMessage: `已重命名为“${title}”` })
     },
     updateScene(sceneId, patch) {
       runCandidateSession((session) => {

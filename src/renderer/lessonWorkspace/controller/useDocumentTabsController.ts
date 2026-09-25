@@ -175,7 +175,7 @@ export function useDocumentTabsController({ documentPort, courseDocuments }: {
     const snapshot = await api.read(documentId)
     if (snapshot.model.kind === 'course-v9') {
       const ticket = ++navigation.current
-      if (!courseRef.current) throw new Error('课件视图尚未连接')
+      if (!courseRef.current) throw new Error('H5 演示视图尚未连接')
       pendingCourse.current = { id: documentId, ticket }
       await courseRef.current.activate(documentId)
       if (ticket === navigation.current) setActive(documentId)

@@ -137,7 +137,7 @@ function isApprovedProjectPath(value: string): boolean {
 }
 
 function sanitizeSuggestedName(value: string, extension: string): string {
-  const fallback = `未命名课件${extension}`
+  const fallback = `未命名 H5 演示${extension}`
   const baseName = path
     .basename(value)
     .replace(/[<>:"/\\|?*\u0000-\u001f]/g, '_')
@@ -382,8 +382,8 @@ export async function openProjectFile(
   window: BrowserWindow,
 ): Promise<OpenProjectFileResult | null> {
   const result = await dialog.showOpenDialog(window, {
-    title: '打开课件工程',
-    filters: [{ name: '课件工程', extensions: ['h5lesson'] }],
+    title: '打开 H5 演示',
+    filters: [{ name: 'H5 演示', extensions: ['h5lesson'] }],
     properties: ['openFile', 'dontAddToRecent'],
   })
   if (result.canceled || result.filePaths.length === 0) return null
@@ -403,7 +403,7 @@ export async function openSelectedProjectFile(filePath: string): Promise<OpenPro
     throw new DesktopOperationError(
       'PROJECT_ARCHIVE_INVALID',
       '工程打开失败',
-      '所选文件不是有效的课件工程，或文件已经损坏。',
+      '所选文件不是有效的 H5 演示，或文件已经损坏。',
       '请重新选择 .h5lesson 文件，或从备份恢复该工程。',
     )
   }
@@ -431,7 +431,7 @@ export async function openRecentProjectFile(
     throw new DesktopOperationError(
       'PROJECT_ARCHIVE_INVALID',
       '最近工程打开失败',
-      '该文件不是有效的课件工程，或文件已经损坏。',
+      '该文件不是有效的 H5 演示，或文件已经损坏。',
       '请从备份恢复该工程，或将它从最近工程列表中移除。',
     )
   }
@@ -453,7 +453,7 @@ export async function saveProjectFile(
     throw new DesktopOperationError(
       'PROJECT_TOO_LARGE',
       '工程保存失败',
-      '课件工程超过 256 MB 保存限制。',
+      'H5 演示超过 256 MB 保存限制。',
       '请删除未使用的大图片或组件资源后重试。',
     )
   }
@@ -482,9 +482,9 @@ export async function saveProjectFile(
 
   if (!targetPath) {
     const result = await dialog.showSaveDialog(window, {
-      title: '保存课件工程',
+      title: '保存 H5 演示',
       defaultPath: input.suggestedDirectory ? path.join(input.suggestedDirectory, sanitizeSuggestedName(input.suggestedName, '.h5lesson')) : sanitizeSuggestedName(input.suggestedName, '.h5lesson'),
-      filters: [{ name: '课件工程', extensions: ['h5lesson'] }],
+      filters: [{ name: 'H5 演示', extensions: ['h5lesson'] }],
       properties: ['showOverwriteConfirmation', 'dontAddToRecent'],
     })
     if (result.canceled || !result.filePath) return null
@@ -497,7 +497,7 @@ export async function saveProjectFile(
     throw new DesktopOperationError(
       'PROJECT_SAVE_FAILED',
       '工程保存失败',
-      '课件工程未能写入所选位置。',
+      'H5 演示未能写入所选位置。',
       '请确认文件未被占用并选择有足够空间的位置后重试。',
       { cause: error },
     )
@@ -708,7 +708,7 @@ export async function selectComponentFile(
 ): Promise<OpenBinaryFileResult | null> {
   const result = await dialog.showOpenDialog(window, {
     title: '导入互动组件',
-    filters: [{ name: '课件互动组件', extensions: ['h5component'] }],
+    filters: [{ name: '互动组件', extensions: ['h5component'] }],
     properties: ['openFile', 'dontAddToRecent'],
   })
   if (result.canceled || result.filePaths.length === 0) return null
@@ -720,7 +720,7 @@ export function selectComponentFiles(
 ): Promise<SelectedFileBatch<OpenBinaryFileResult & BatchFileDigest> | null> {
   return selectFileBatch(window, {
     title: '批量导入互动组件',
-    filters: [{ name: '课件互动组件', extensions: ['h5component'] }],
+    filters: [{ name: '互动组件', extensions: ['h5component'] }],
     maximumTotalBytes: MAX_COMPONENT_BATCH_BYTES,
     totalLimitLabel: '256 MB',
     fallback: {
@@ -748,9 +748,9 @@ export async function writeHtmlFile(
   }
 
   const result = await dialog.showSaveDialog(window, {
-    title: '导出单 HTML 课件',
+    title: '导出单 HTML',
     defaultPath: sanitizeSuggestedName(suggestedName, '.html'),
-    filters: [{ name: 'HTML 课件', extensions: ['html'] }],
+    filters: [{ name: 'HTML 文件', extensions: ['html'] }],
     properties: ['showOverwriteConfirmation', 'dontAddToRecent'],
   })
   if (result.canceled || !result.filePath) return null
@@ -763,7 +763,7 @@ export async function writeHtmlFile(
     throw new DesktopOperationError(
       'HTML_EXPORT_FAILED',
       'HTML 导出失败',
-      '课件未能写入所选位置。',
+      '文件未能写入所选位置。',
       '请确认文件未被占用，并选择有足够空间的位置后重试。',
       { cause: error },
     )
@@ -795,9 +795,9 @@ export async function writeWebPackageFile(
   }
 
   const result = await dialog.showSaveDialog(window, {
-    title: '导出网页课件包',
+    title: '导出网页包',
     defaultPath: sanitizeSuggestedName(suggestedName, '.zip'),
-    filters: [{ name: '网页课件包', extensions: ['zip'] }],
+    filters: [{ name: '网页包', extensions: ['zip'] }],
     properties: ['showOverwriteConfirmation', 'dontAddToRecent'],
   })
   if (result.canceled || !result.filePath) return null
@@ -810,7 +810,7 @@ export async function writeWebPackageFile(
     throw new DesktopOperationError(
       'WEB_PACKAGE_EXPORT_FAILED',
       '网页包导出失败',
-      '网页课件包未能写入所选位置。',
+      '网页包未能写入所选位置。',
       '请确认文件未被占用，并选择有足够空间的位置后重试。',
       { cause: error },
     )

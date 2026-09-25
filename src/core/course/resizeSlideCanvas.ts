@@ -28,7 +28,7 @@ export function resizeCourseSlideCanvas(
   project: CourseProjectDocument,
   next: SlideCanvasSize,
 ): CourseProjectDocument {
-  if (!isValidSlideCanvas(next)) throw new RangeError('课件画布尺寸无效')
+  if (!isValidSlideCanvas(next)) throw new RangeError('画布尺寸无效')
   const slides = project.surfaces.filter((surface): surface is SlideSurfaceDocument => surface.type === 'slide')
   const old = courseSlideCanvas(project)
   if (slides.length === 0 || sameSlideCanvas(old, next)) return project

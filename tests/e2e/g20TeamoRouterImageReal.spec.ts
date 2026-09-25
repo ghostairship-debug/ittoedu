@@ -244,7 +244,7 @@ test('TeamoRouter gpt-image-2: live catalog, one image job, raster preview and s
     expect(visiblePreview.naturalWidth).toBe(resource.width)
     expect(visiblePreview.naturalHeight).toBe(resource.height)
     expect(Buffer.from(visiblePreview.bytes)).toEqual(Buffer.from(preview.bytes))
-    await card.getByLabel('应用到课件').selectOption(initial.documentId)
+    await card.getByLabel('应用到 H5 演示').selectOption(initial.documentId)
     await card.getByLabel('插入位置').selectOption(location.id)
     const placement = card.locator('details.image-result-card__placement')
     await placement.locator('summary').click()

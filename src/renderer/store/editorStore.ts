@@ -1244,7 +1244,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     editingTextNodeId: null,
     slideDrawTool: null,
     previewBackgroundColor: null,
-    statusMessage: '已创建新课件',
+    statusMessage: '已创建新 H5 演示',
     errorMessage: null,
     slideBackend: initialBackend,
     slideCandidateSnapshot: initialSnapshot,
@@ -1286,11 +1286,11 @@ export const useEditorStore = create<EditorState>((set, get) => {
     connectCourseDocuments: api => documents.connect(api),
     async activateCourseDocument(id) {
       try { await documents.activatePrepared(id, () => get().drainCourseDocument()) }
-      catch (error) { write({ errorMessage: error instanceof Error ? error.message : '课件切换失败，当前输入已保留' }); throw error }
+      catch (error) { write({ errorMessage: error instanceof Error ? error.message : '切换失败，当前输入已保留' }); throw error }
     },
     async closeCourseDocument(id) {
       try { await get().drainAllCourseDocuments(); return await documents.close(id) }
-      catch (error) { write({ errorMessage: error instanceof Error ? error.message : '课件未关闭，当前输入已保留' }); return false }
+      catch (error) { write({ errorMessage: error instanceof Error ? error.message : '未能关闭，当前输入已保留' }); return false }
     },
     openCourseDocument: path => documents.open(path),
     restoreCourseDocument: id => documents.restore(id),

@@ -11,7 +11,7 @@ export function computeDefaultName(type: CreateFileType, existingItems: Workspac
       ext = '.md'
       break
     case 'create-course':
-      base = '新建课件'
+      base = '新建 H5 演示'
       ext = '.h5lesson'
       break
     case 'create-text':

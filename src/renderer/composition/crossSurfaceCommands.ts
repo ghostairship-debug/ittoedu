@@ -330,7 +330,7 @@ export function createCrossSurfaceCommands(ports: CrossSurfaceCommandPorts) {
             canvasMode,
             editingTextNodeId: null,
             statusMessage: canvasMode === 'run'
-              ? '正在运行当前课件；切回编辑可直接修改元素'
+              ? '正在试运行；切回编辑可直接修改元素'
               : '已返回无限画布编辑',
           })
           if (canvasMode === 'run') {
@@ -373,7 +373,7 @@ export function createCrossSurfaceCommands(ports: CrossSurfaceCommandPorts) {
             canvasMode,
             editingTextNodeId: null,
             statusMessage: canvasMode === 'run'
-              ? '正在运行当前课件；切回编辑可直接修改元素'
+              ? '正在试运行；切回编辑可直接修改元素'
               : '已返回状态编辑画布',
           })
           if (canvasMode === 'run' && slideSnapshot) {
@@ -643,7 +643,7 @@ export function createCrossSurfaceCommands(ports: CrossSurfaceCommandPorts) {
     renameProject(title: string) {
       const normalized = title.trim().slice(0, 80)
       if (!normalized) {
-        ports.kernel.setFeedback({ errorMessage: '课件名称不能为空。' })
+        ports.kernel.setFeedback({ errorMessage: '名称不能为空。' })
         return
       }
       dispatchActiveSurface(ports.detect(), {

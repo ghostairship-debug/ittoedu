@@ -34,7 +34,7 @@ export async function saveDocumentWithDialog(
   const result = await dialog.showSaveDialog(window, {
     title: saveAs ? '另存文档' : '保存文档',
     defaultPath,
-    filters: [{ name: current.model.kind === 'markdown' ? 'Markdown 文档' : current.model.kind === 'text' ? '文本文档' : '果铃课件', extensions: [extension] }],
+    filters: [{ name: current.model.kind === 'markdown' ? 'Markdown 文档' : current.model.kind === 'text' ? '文本文档' : 'H5 演示', extensions: [extension] }],
     properties: ['showOverwriteConfirmation'],
   })
   if (result.canceled || !result.filePath) return null

@@ -1,4 +1,4 @@
-export const APP_NAME = '互动课件编辑器'
+export const APP_NAME = '果铃编辑器'
 export const APP_PRODUCT_NAME = 'ittoedu Courseware Editor'
 export const APP_COMPANY = 'ittoedu'
 export const APP_ID = 'com.ittoedu.courseware-editor'

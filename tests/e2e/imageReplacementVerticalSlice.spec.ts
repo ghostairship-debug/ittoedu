@@ -414,7 +414,7 @@ async function showEditorPanel(
   page: Page,
   name: '页面与图层' | '属性与素材',
 ): Promise<void> {
-  if (!await page.locator('[aria-label="课件编辑面板"]').isVisible()) return
+  if (!await page.locator('[aria-label="编辑面板"]').isVisible()) return
   const button = page.getByRole('button', { name, exact: true })
   await expect(button).toBeVisible()
   if (await button.getAttribute('aria-expanded') !== 'true') await button.click()
@@ -462,7 +462,7 @@ async function enterTryRun(page: Page): Promise<void> {
   // 紧凑布局下属性面板是覆盖层（top:40px/right:0/z-index:40），其首行 .sidebar-tabs 高 44px
   // 正好压住画布右上的「画布模式」开关（top:7px/right:9px/z-index:8）；先关闭面板再点，
   // 同 editor.spec.ts:250-255 showEditorCanvas、r18-089-flow-viewport.spec.ts:460-470 写法。
-  const closePanel = page.locator('[aria-label="课件编辑面板"]')
+  const closePanel = page.locator('[aria-label="编辑面板"]')
     .getByRole('button', { name: '关闭面板', exact: true })
   if (await closePanel.isVisible()) await closePanel.click()
   const button = page.getByRole('group', { name: '画布模式' })
@@ -565,7 +565,7 @@ test.describe.serial('ARCH-1 VS-06 image replacement desktop regression', () => 
       await armDeferredImageDialog(launch.app, replacementImagePath)
       await launch.page.getByRole('button', { name: '替换图片' }).click()
       await expect.poll(() => deferredImageDialogPhase(launch.app)).toBe('pending')
-      await expect(launch.page.getByRole('button', { name: '新建课件（Ctrl+N）' }))
+      await expect(launch.page.getByRole('button', { name: '新建 H5 演示（Ctrl+N）' }))
         .toBeDisabled()
       await expect(launch.page.getByRole('button', { name: '打开工程（Ctrl+O）' }))
         .toBeDisabled()
@@ -574,10 +574,10 @@ test.describe.serial('ARCH-1 VS-06 image replacement desktop regression', () => 
         fullPage: true,
       })
       await launch.page.keyboard.press('Control+N')
-      await expect(launch.page.getByRole('main', { name: '课件画布' }))
+      await expect(launch.page.getByRole('main', { name: '画布' }))
         .toContainText('判别式导入 · 基础态')
       await launch.page.keyboard.press('Control+O')
-      await expect(launch.page.getByRole('main', { name: '课件画布' }))
+      await expect(launch.page.getByRole('main', { name: '画布' }))
         .toContainText('判别式导入 · 基础态')
       await expect(launch.page.getByTestId('course-page-node-flow-surface')).toHaveCount(0)
 
@@ -696,7 +696,7 @@ test.describe.serial('ARCH-1 VS-06 image replacement desktop regression', () => 
       })
 
       await patchDialogs(launch.app, { projectOpen: redoneCopyPath })
-      await launch.page.getByRole('button', { name: '新建课件（Ctrl+N）' }).click()
+      await launch.page.getByRole('button', { name: '新建 H5 演示（Ctrl+N）' }).click()
       await launch.page.getByRole('button', { name: '打开工程（Ctrl+O）' }).click()
       await showEditorPanel(launch.page, '页面与图层')
       await expect(launch.page.getByTestId('course-page-node-slide-surface'))
@@ -844,7 +844,7 @@ test.describe.serial('ARCH-1 VS-06 image replacement desktop regression', () => 
       )
       await saveAs(launch.app, launch.page, flowCopyPath, { projectOpen: flowSourcePath })
       await patchDialogs(launch.app, { projectOpen: flowCopyPath })
-      await launch.page.getByRole('button', { name: '新建课件（Ctrl+N）' }).click()
+      await launch.page.getByRole('button', { name: '新建 H5 演示（Ctrl+N）' }).click()
       await launch.page.getByRole('button', { name: '打开工程（Ctrl+O）' }).click()
       await enterTryRun(launch.page)
       await expect(launch.page.getByTestId('flow-runtime-article')).toBeVisible()
@@ -859,7 +859,7 @@ test.describe.serial('ARCH-1 VS-06 image replacement desktop regression', () => 
       await expect(launch.page.getByTestId('course-page-node-mixed-slide-surface')).toBeVisible()
       await saveAs(launch.app, launch.page, mixedCopyPath, { projectOpen: mixedSourcePath })
       await patchDialogs(launch.app, { projectOpen: mixedCopyPath })
-      await launch.page.getByRole('button', { name: '新建课件（Ctrl+N）' }).click()
+      await launch.page.getByRole('button', { name: '新建 H5 演示（Ctrl+N）' }).click()
       await launch.page.getByRole('button', { name: '打开工程（Ctrl+O）' }).click()
 
       await launch.page.getByTestId('flow-page-mixed-flow-surface').click()

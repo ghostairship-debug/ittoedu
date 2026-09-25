@@ -139,7 +139,7 @@ describe('projectPersistence', () => {
 
     const mismatched = await readRecoveryProject()
     expect(mismatched).toMatchObject({
-      projectName: '恢复的课件.h5lesson',
+      projectName: '恢复的 H5 演示.h5lesson',
       projectPath: undefined,
     })
     expect([...mismatched!.bytes]).toEqual([...newerValidPackage])

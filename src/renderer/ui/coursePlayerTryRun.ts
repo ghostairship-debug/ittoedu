@@ -166,7 +166,7 @@ export async function mountPublishedCourseTryRun(
       || typeof desktop.releasePreviewNetworkPolicy !== 'function'
     )
   ) {
-    throw new Error('当前宿主无法应用课件预览网络声明。')
+    throw new Error('当前宿主无法应用预览网络声明。')
   }
 
   let leaseApplied = false

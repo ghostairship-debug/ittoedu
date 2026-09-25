@@ -15,7 +15,7 @@ export function WorkspaceDocumentTabs({ props, layout, hidden = false }: { props
 
  return (
       <div className="workspace-document-tabs" hidden={hidden}>
-      <div role="tablist" aria-label="材料、教学文档与课件">
+      <div role="tablist" aria-label="打开的文件">
         {state.lesson && (
           <button
             type="button"
@@ -50,7 +50,7 @@ export function WorkspaceDocumentTabs({ props, layout, hidden = false }: { props
             )
           }
         >
-          <summary aria-label="新建标签页" title="新建文档或课件">
+          <summary aria-label="新建标签页" title="新建文档或 H5 演示">
             ＋
           </summary>
           {newTabMenuOpen && (
@@ -87,7 +87,7 @@ export function WorkspaceDocumentTabs({ props, layout, hidden = false }: { props
                 void actions.run(async () => { await actions.newCourse(); revealContent() });
               }}
             >
-              新建课件
+              新建 H5 演示
             </button>
           </div>
         </details>

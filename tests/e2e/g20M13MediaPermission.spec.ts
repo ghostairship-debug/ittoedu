@@ -100,7 +100,7 @@ test('M13-T03 course Runtime gets camera and microphone only per granted request
     await expect(status).toHaveText('设备已开启：audio+video')
     let calls = await consentCalls(app)
     expect(calls).toHaveLength(1)
-    expect(calls[0]).toMatchObject({ title: '课件请求使用设备', message: '当前课件请求使用摄像头和麦克风。',
+    expect(calls[0]).toMatchObject({ title: 'H5 演示请求使用设备', message: '当前H5 演示请求使用摄像头和麦克风。',
       buttons: ['拒绝', '允许本次使用摄像头和麦克风'], defaultId: 0, cancelId: 0 })
     await panel.getByRole('button', { name: '关闭设备', exact: true }).click()
     await expect(status).toHaveText('设备已关闭')

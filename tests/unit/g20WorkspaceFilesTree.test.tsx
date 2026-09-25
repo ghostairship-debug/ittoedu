@@ -191,7 +191,7 @@ it('keeps keyboard commands scoped to the tree and performs multi-file clipboard
   expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   fireEvent.click(screen.getByRole('button', { name: 'external.txt' })); fireEvent.keyDown(screen.getByRole('button', { name: 'external.txt' }), { key: 'F2' })
   fireEvent.keyDown(screen.getByLabelText('文件名称'), { key: 'Escape' }); expect(await fs.readFile(path.join(directory, 'external.txt'), 'utf8')).toBe('external')
-  fireEvent.click(screen.getByRole('button', { name: 'child' })); fireEvent.click(screen.getByRole('button', { name: '新建课件' }))
+  fireEvent.click(screen.getByRole('button', { name: 'child' })); fireEvent.click(screen.getByRole('button', { name: '新建 H5 演示' }))
   fireEvent.change(screen.getByLabelText('文件名称'), { target: { value: 'new-course' } }); fireEvent.click(screen.getByRole('button', { name: '确认' }))
   await waitFor(async () => { const model = await createCourseV9Driver().load(await fs.readFile(path.join(directory, 'child', 'new-course.h5lesson'))); expect(model.kind).toBe('course-v9') })
   await waitFor(() => expect(screen.getByRole('button', { name: '新建 Markdown 文档' })).not.toBeDisabled())
@@ -212,11 +212,11 @@ it('displays creation menu items in correct order and wording in toolbar and con
   const itemBtn = await screen.findByRole('button', { name: 'item.md' })
   const createMenu = document.querySelector('.workspace-files-create-options')!
   const toolbarButtons = within(createMenu as HTMLElement).getAllByRole('button').map(b => b.textContent)
-  expect(toolbarButtons.slice(0, 4)).toEqual(['新建 Markdown 文档', '新建课件', '新建文本文档', '新建文件夹'])
+  expect(toolbarButtons.slice(0, 4)).toEqual(['新建 Markdown 文档', '新建 H5 演示', '新建文本文档', '新建文件夹'])
   fireEvent.contextMenu(itemBtn)
   const contextMenu = screen.getByRole('menu', { name: '文件菜单' })
   const contextButtons = within(contextMenu).getAllByRole('button').map(b => b.textContent)
-  expect(contextButtons.slice(0, 4)).toEqual(['新建 Markdown 文档', '新建课件', '新建文本文档', '新建文件夹'])
+  expect(contextButtons.slice(0, 4)).toEqual(['新建 Markdown 文档', '新建 H5 演示', '新建文本文档', '新建文件夹'])
 })
 
 it('prefills default names, numbers collisions with (2) and selects only the main stem on focus', async () => {
@@ -235,12 +235,12 @@ it('prefills default names, numbers collisions with (2) and selects only the mai
   expect(input.selectionEnd).toBe('新建 Markdown 文档'.length)
   fireEvent.click(screen.getByRole('button', { name: '取消' }))
 
-  fireEvent.click(screen.getByRole('button', { name: '新建课件' }))
+  fireEvent.click(screen.getByRole('button', { name: '新建 H5 演示' }))
   input = (await screen.findByLabelText('文件名称')) as HTMLInputElement
-  expect(input.value).toBe('新建课件.h5lesson')
+  expect(input.value).toBe('新建 H5 演示.h5lesson')
   fireEvent.focus(input)
   expect(input.selectionStart).toBe(0)
-  expect(input.selectionEnd).toBe('新建课件'.length)
+  expect(input.selectionEnd).toBe('新建 H5 演示'.length)
   fireEvent.click(screen.getByRole('button', { name: '取消' }))
 
   fireEvent.click(screen.getByRole('button', { name: '新建文本文档' }))
@@ -363,8 +363,8 @@ it('M19 creates a course with the Slide canvas size chosen in the creation dialo
   const operate = ((request: WorkspaceFilesRequest) => { requests.push(request); return service.operate(request) }) as WorkspaceFilesAPI
   render(<LessonDirectoryTree directory={directory} files={operate} operation={async () => ({})} onFile={vi.fn()} onDirectory={vi.fn()} />)
   await screen.findByRole('button', { name: '工作空间根目录' })
-  await waitFor(() => expect(screen.getByRole('button', { name: '新建课件' })).not.toBeDisabled())
-  fireEvent.click(screen.getByRole('button', { name: '新建课件' }))
+  await waitFor(() => expect(screen.getByRole('button', { name: '新建 H5 演示' })).not.toBeDisabled())
+  fireEvent.click(screen.getByRole('button', { name: '新建 H5 演示' }))
   const size = await screen.findByLabelText('画布尺寸')
   expect(size).toHaveValue('wide')
   fireEvent.change(size, { target: { value: 'portrait' } })

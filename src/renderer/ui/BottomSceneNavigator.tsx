@@ -94,7 +94,7 @@ export function BottomSceneNavigator({ documentId }: { documentId: string | null
   const liveStore = () => {
     const state = useEditorStore.getState()
     if (!documentId || state.courseDocument.documentId !== documentId) {
-      state.setError('文档已切换，请在当前课件重新选择场景。')
+      state.setError('文档已切换，请在当前 H5 演示重新选择场景。')
       return null
     }
     return state
@@ -151,7 +151,7 @@ export function BottomSceneNavigator({ documentId }: { documentId: string | null
     useEditorStore.getState().setEditingScope('scene')
   }
 
-  return <nav className="bottom-scene-nav" aria-label="课件场景与页面导航">
+  return <nav className="bottom-scene-nav" aria-label="场景与页面导航">
     <ol ref={track} className="bottom-scene-nav__track">
       {cards.map(card => {
         const active = card.kind === 'slide'
@@ -168,7 +168,7 @@ export function BottomSceneNavigator({ documentId }: { documentId: string | null
             </button>
             <div className="bottom-scene-card__states" role="group" aria-label={`${card.node.label}的呈现状态`}>
               <button type="button" className="bottom-scene-card__state" aria-pressed={active && editingScope !== 'global' && activeStateId === null}
-                onClick={() => goToState(card, null)}>基础</button>
+                onClick={() => goToState(card, null)}>母版</button>
               {presentation.states.map(state => <button key={state.id} type="button" className="bottom-scene-card__state"
                 aria-pressed={active && editingScope !== 'global' && activeStateId === state.id}
                 title={state.name} onClick={() => goToState(card, state.id)}>{state.name}</button>)}

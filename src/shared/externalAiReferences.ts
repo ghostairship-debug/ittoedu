@@ -50,7 +50,7 @@ function lessonMaterialFileReferences(files: GenerationRequest['resourceFiles'])
 export function generationExternalReferences(request: GenerationRequest): string[] {
   const references = [`工程：${request.workspace.normalizedPath}（完整可编辑内容）`]
   const context = record(request.context)
-  const scope = context.reference === 'selection' ? '当前选区' : context.reference === 'course' ? '整份课件' : '当前页'
+  const scope = context.reference === 'selection' ? '当前选区' : context.reference === 'course' ? '整份 H5 演示' : '当前页'
   references.push(`编辑目标：${scope}；其他工程内容可作为上下文读取`)
   // The lesson context is injected by Main after this request is frozen; it is
   // listed from the final request so the explanation always names it.

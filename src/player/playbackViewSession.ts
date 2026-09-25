@@ -124,7 +124,7 @@ export class PlaybackViewSession implements PlaybackViewPort {
     const viewport = dom.createElement('div')
     viewport.dataset.playbackViewport = 'true'
     viewport.tabIndex = 0
-    viewport.setAttribute('aria-label', '课件播放视口')
+    viewport.setAttribute('aria-label', '演示播放视口')
     Object.assign(viewport.style, { position: 'absolute', inset: '0', overflow: 'clip' })
     frame.appendChild(viewport)
     container.appendChild(frame)
@@ -251,7 +251,7 @@ export class PlaybackViewSession implements PlaybackViewPort {
     const panel = dom.createElement('div')
     panel.dataset.playbackChrome = 'zoom-panel'
     panel.setAttribute('role', 'group')
-    panel.setAttribute('aria-label', '课件观察缩放')
+    panel.setAttribute('aria-label', '演示观察缩放')
     Object.assign(panel.style, { position: 'absolute', zIndex: '2147483647', display: 'flex', gap: '8px', padding: '10px',
       background: '#10263c', color: 'white', border: '1px solid #7597b5', borderRadius: '10px', font: '14px sans-serif', boxShadow: '0 4px 18px #0005' })
     const anchor = this.#anchor ?? { x: this.#state.viewport.width / 2, y: this.#state.viewport.height / 2 }

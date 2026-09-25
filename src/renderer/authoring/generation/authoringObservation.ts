@@ -52,7 +52,7 @@ export function authoringObservationCameraToken(camera: AuthoringObservationSpat
 
 export class AuthoringObservationUnavailable extends Error {
   readonly code = 'observation-pending-sync'
-  constructor(message: string) { super(`当前课件观察待同步：${message}`) }
+  constructor(message: string) { super(`当前画面观察待同步：${message}`) }
 }
 
 export interface AuthoringObservationState {

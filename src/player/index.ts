@@ -9,10 +9,10 @@ import {
 } from './surfaces/publishedDynamicHosts'
 
 export const PLAYER_V2_ENTRY_UNSUPPORTED_ERROR =
-  '当前播放器只接受 Published Course V2。旧版播放器导出包或旧 Player 课件不受支持，请用最新编辑器重新导出后再打开。'
+  '当前播放器只接受 Published Course V2。旧版播放器导出包不受支持，请用最新编辑器重新导出后再打开。'
 
 export const PLAYER_V2_ENTRY_CORRUPT_ERROR =
-  '课件数据损坏或格式无效。请重新导出课件后再试。'
+  'H5 演示数据损坏或格式无效。请重新导出后再试。'
 
 const COURSE_ROOT_ID = 'course-root'
 const LESSON_ROOT_ID = 'lesson-root'

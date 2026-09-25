@@ -310,7 +310,7 @@ export function WorkspaceFilesTree({ directory, files, refreshVersion = 0, onFil
   const droppable = (id: string) => ({ onDragOver: (event: DragEvent) => { if (event.dataTransfer.types.includes(WORKSPACE_ENTRIES_DRAG_TYPE) || event.dataTransfer.types.includes('Files')) { event.preventDefault(); event.stopPropagation(); event.dataTransfer.dropEffect = event.dataTransfer.types.includes(WORKSPACE_ENTRIES_DRAG_TYPE) ? 'move' : 'copy'; setDropTarget(id) } }, onDragLeave: (event: DragEvent) => { if (!event.currentTarget.contains(event.relatedTarget as Node)) setDropTarget(undefined) }, onDrop: (event: DragEvent) => { void drop(event, id) } })
   const action = (type: Dialog) => { if (createMenu.current) createMenu.current.open = false; void begin(type).catch(reason => setError(message(reason))) }
   const actions = (context = false) => <>
-    <button type="button" disabled={busy || !root} onClick={() => action('create-markdown')}>新建 Markdown 文档</button><button type="button" disabled={busy || !root} onClick={() => action('create-course')}>新建课件</button><button type="button" disabled={busy || !root} onClick={() => action('create-text')}>新建文本文档</button><button type="button" disabled={busy || !root} onClick={() => action('mkdir')}>新建文件夹</button>
+    <button type="button" disabled={busy || !root} onClick={() => action('create-markdown')}>新建 Markdown 文档</button><button type="button" disabled={busy || !root} onClick={() => action('create-course')}>新建 H5 演示</button><button type="button" disabled={busy || !root} onClick={() => action('create-text')}>新建文本文档</button><button type="button" disabled={busy || !root} onClick={() => action('mkdir')}>新建文件夹</button>
     <button type="button" disabled={busy || !single} onClick={() => action('rename')}>重命名</button><button type="button" disabled={busy || !selected.length} onClick={() => copy('copy')}>复制</button><button type="button" disabled={busy || !selected.length} onClick={() => copy('move')}>剪切</button><button type="button" disabled={busy || !clipboard?.ids.length} onClick={paste}>粘贴</button>
     <button type="button" disabled={busy || !selected.length} onClick={() => action('copy')}>复制到…</button><button type="button" disabled={busy || !selected.length} onClick={() => action('move')}>移动到…</button><button type="button" disabled={busy || !selected.length} onClick={() => action('trash')}>移到回收站</button>
     <button type="button" disabled={!selected.length} onClick={() => { void copyPath().catch(reason => setError(message(reason))) }}>复制路径</button><button type="button" disabled={busy || !single} onClick={() => { if (single && root) void run({ type: 'reveal', ...common(), entryId: single.entryId }) }}>在系统中定位</button>
@@ -330,7 +330,7 @@ export function WorkspaceFilesTree({ directory, files, refreshVersion = 0, onFil
         <summary aria-label="新建文件或文件夹">新建</summary>
         <div className="workspace-files-create-options">
           <button type="button" disabled={busy || !root} onClick={() => action('create-markdown')}>新建 Markdown 文档</button>
-          <button type="button" disabled={busy || !root} onClick={() => action('create-course')}>新建课件</button>
+          <button type="button" disabled={busy || !root} onClick={() => action('create-course')}>新建 H5 演示</button>
           <button type="button" disabled={busy || !root} onClick={() => action('create-text')}>新建文本文档</button>
           <button type="button" disabled={busy || !root} onClick={() => action('mkdir')}>新建文件夹</button>
         </div>

@@ -311,7 +311,7 @@ export function createComponentAuthoringActions(ports: ComponentAuthoringPorts) 
         }
       } catch (error) {
         ports.setFeedback({
-          errorMessage: error instanceof Error ? error.message : '组件删除未写入当前课件。',
+          errorMessage: error instanceof Error ? error.message : '组件删除未写入当前 H5 演示。',
           statusMessage: null,
         })
         return false
@@ -336,7 +336,7 @@ export function createComponentAuthoringActions(ports: ComponentAuthoringPorts) 
       ) {
         ports.setFeedback({
           errorMessage:
-            '命名状态只能覆盖图层属性，不能改变元素内容。请切换到“基础”后再创建可编辑副本。',
+            '命名状态只能覆盖图层属性，不能改变元素内容。请切换到“母版”后再创建可编辑副本。',
           statusMessage: null,
         })
         return null

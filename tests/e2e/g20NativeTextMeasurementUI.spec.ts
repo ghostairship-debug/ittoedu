@@ -67,7 +67,7 @@ test('S04 real Native measurement updates a background base/named object once, s
     expect(environment.state.faces.length).toBeGreaterThan(0)
     expect(environment.state.faces.every((face: { status: string }) => face.status === 'loaded')).toBe(true)
     await page.locator('.workspace-document-tabs').getByRole('tab', { name: /^auto-height\.h5lesson/ }).click()
-    const tools = page.getByLabel('课件常用工具', { exact: true })
+    const tools = page.getByLabel('常用工具', { exact: true })
     await tools.getByRole('button', { name: '撤销', exact: true }).click()
     await expect.poll(async () => (await readSelectionDocument(page, original.documentId)).undoDepth).toBe(original.undoDepth + 1)
     await tools.getByRole('button', { name: '重做', exact: true }).click()
@@ -80,7 +80,7 @@ test('S04 real Native measurement updates a background base/named object once, s
     await page.getByRole('button', { name: '深度编辑', exact: true }).click()
     const states = page.getByRole('region', { name: '场景状态', exact: true })
     const paint = page.locator('[data-slide-layer-item="scene-text"]:visible').first()
-    for (const [label, expectedText, item] of [[/^基础场景，/, baseText, baseItem], [/^命名态 A，命名状态/, namedText, namedItem]] as const) {
+    for (const [label, expectedText, item] of [[/^母版，/, baseText, baseItem], [/^命名态 A，命名状态/, namedText, namedItem]] as const) {
       await states.getByRole('button', { name: label }).click()
       await expect(paint).toContainText(expectedText)
       await expect.poll(() => paint.evaluate(element => Number.parseFloat((element as HTMLElement).style.height))).toBeCloseTo(item.frame.height, 2)

@@ -59,7 +59,7 @@ export const componentPackageTool: AuthoringToolDefinition<z.infer<typeof schema
           || located.source !== 'global' && (located.surfaceId !== surface.id || located.source === 'scene' && located.sceneId !== scope.sceneId)) throw new Error('实例另存的图层目标与组件包或 owner 不一致')
         if (located.item.locked) throw new Error('图层已锁定，不能另存实例源码')
       }
-      if (target.stateId !== null) throw new Error('组件包身份属于实例基础层，命名状态不能单独重绑组件包；请选择基础状态实例另存')
+      if (target.stateId !== null) throw new Error('组件包身份属于实例的母版层，命名状态不能单独重绑组件包；请在母版中选择实例另存')
     } else if (target.owner !== 'global' || destination.target.itemId !== packageId || destination.target.authoringAddress !== componentPackageAddress(document.id, packageId)) throw new Error('共享组件源码修订需要精确 global package target')
     let replacement
     if (value.operation === 'patch') {

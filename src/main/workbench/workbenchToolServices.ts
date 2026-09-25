@@ -38,7 +38,7 @@ export function installWorkbenchToolServices(context: { getMainWindow(): Browser
   const builds = new ControlledBuildService({ directory: path.join(directory, 'builds'), admission: {
     run(payload, signal) {
       const window = context.getMainWindow(), entry = context.getRendererEntryUrl()
-      if (!window || window.isDestroyed() || !entry) throw new Error('当前没有可用的课件准入窗口，请恢复应用窗口后重试。')
+      if (!window || window.isDestroyed() || !entry) throw new Error('当前没有可用的准入窗口，请恢复应用窗口后重试。')
       return createElectronBuildAdmission(window.webContents, entry).run(payload, signal)
     },
   } })

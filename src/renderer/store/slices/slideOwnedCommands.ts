@@ -130,7 +130,7 @@ export function createSlideOwnedCommands(
       } catch (error) {
         return {
           ok: false,
-          reason: error instanceof Error ? error.message : '无法写入当前课件',
+          reason: error instanceof Error ? error.message : '无法写入当前 H5 演示',
           historyEntry: false,
           nextSession: session,
           selection: session.selection,
@@ -326,7 +326,7 @@ export function createSlideOwnedCommands(
           },
           selection: session.selection,
         }
-      }, { statusMessage: '已恢复此元素在当前状态中的基础值' })
+      }, { statusMessage: '已恢复此元素在当前状态中的母版值' })
     },
 
     clearPresentationStateOverrides(stateId: string) {
@@ -354,7 +354,7 @@ export function createSlideOwnedCommands(
           },
           selection: session.selection,
         }
-      }, { statusMessage: '当前状态已恢复为基础场景' })
+      }, { statusMessage: '当前状态已恢复为母版' })
     },
 
     updateSlideSurfaceBackground(

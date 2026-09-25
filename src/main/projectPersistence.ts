@@ -336,7 +336,7 @@ export function writeRecoveryProject(input: RecoveryProjectInput): Promise<void>
       throw new DesktopOperationError(
         'RECOVERY_ARCHIVE_INVALID',
         '自动恢复保存失败',
-        '恢复数据不是有效的课件工程包。',
+        '恢复数据不是有效的 H5 演示。',
         '请立即手动保存工程；若问题持续出现，请重新启动编辑器。',
       )
     }
@@ -409,7 +409,7 @@ export function readRecoveryProject(): Promise<RecoveryProjectResult | null> {
     const metadata = parseRecoveryMetadata(rawMetadata)
     const matchingMetadata = metadata?.sha256 === digest ? metadata : null
     return {
-      projectName: matchingMetadata?.projectName ?? '恢复的课件.h5lesson',
+      projectName: matchingMetadata?.projectName ?? '恢复的 H5 演示.h5lesson',
       projectPath: matchingMetadata?.projectPath,
       savedAt: matchingMetadata?.savedAt ?? stats.mtimeMs,
       bytes,

@@ -77,9 +77,9 @@ export function createBlankCourseProject(
   const projectId = nextId('project', options.id, idFactory)
   const sceneId = nextId('scene', undefined, idFactory)
   const slideSurfaceId = `slide:${projectId}`
-  const title = options.title ?? '未命名课件'
+  const title = options.title ?? '未命名 H5 演示'
   const canvas = options.canvas ?? DEFAULT_SLIDE_CANVAS
-  if (!isValidSlideCanvas(canvas)) throw new RangeError('课件画布尺寸无效')
+  if (!isValidSlideCanvas(canvas)) throw new RangeError('画布尺寸无效')
   const controller = includeDefaultController ? createTeacherControllerComponentItem(nextId('teacher_controller', undefined, idFactory)) : null
   if (controller) controller.playbackInitialVisibility = controls === 'canvas' ? 'inherit' : 'hidden'
   const controllerPackage = controller ? createDefaultTeacherControllerPackage() : null

@@ -82,11 +82,11 @@ describe('2.0 stable workspace layout', () => {
    }
    const result = render(<Harness current={props} />)
    expect(screen.queryAllByRole('tab')).toHaveLength(0)
-   const tab = { id: 'course-2', documentId: 'course-2', kind: 'course' as const, path: '', name: '未命名课件', dirty: true, lesson: null }
+   const tab = { id: 'course-2', documentId: 'course-2', kind: 'course' as const, path: '', name: '未命名 H5 演示', dirty: true, lesson: null }
    result.rerender(<Harness current={{ ...props, tabs: { ...props.tabs, tabs: [tab] } }} />)
-   fireEvent.click(screen.getByRole('tab', { name: /未命名课件/ }))
+   fireEvent.click(screen.getByRole('tab', { name: /未命名 H5 演示/ }))
    expect(setActiveTab).toHaveBeenCalledWith('course-2')
-   fireEvent.click(screen.getByRole('button', { name: '关闭 未命名课件' }))
+   fireEvent.click(screen.getByRole('button', { name: '关闭 未命名 H5 演示' }))
    expect(closeTab).toHaveBeenCalledWith(tab)
  })
 

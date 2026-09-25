@@ -26,7 +26,7 @@
 
 仅正式控制台角色收到可选 `ctx.teacherController`。完整类型见 `src/shared/contracts/component-v4/teacherController.ts`，能力协议的 `sharedTypes.teacherController` 同源提供：`read/subscribe` 读取当前场景、步骤、目录、静音、全屏、缩放与折叠状态；`canExecute/execute` 使用正式教师动作并返回接受结果；`setCollapsed/moveBy/setZoom/resetView` 操作唯一临时 Session。订阅必须销毁；作者态与捕获态不执行动作。普通组件沿用自己的受守卫导航接口，不能借用教师强制跳转。
 
-控制台可采用透明底板、非矩形和分散按钮，与背景在视觉上融合，但始终独立于课件缩放、平移、Flow 滚动和 Spatial 镜头；空白区域设 `pointer-events:none`，真实控件显式接收输入并提供标签/焦点。默认包支持 `backgroundAssetId` 和 `sceneStyles[locationId]`；包素材使用 `ctx.assetUrl`，工程图片使用 `ctx.projectAssetUrl`，加载与动画就绪使用 `ctx.capture.waitUntil`。源码不必保留默认面板结构。背景融合任务不能只改颜色就声称完成。
+控制台可采用透明底板、非矩形和分散按钮，与背景在视觉上融合，但始终独立于 H5 演示的缩放、平移、Flow 滚动和 Spatial 镜头；空白区域设 `pointer-events:none`，真实控件显式接收输入并提供标签/焦点。默认包支持 `backgroundAssetId` 和 `sceneStyles[locationId]`；包素材使用 `ctx.assetUrl`，工程图片使用 `ctx.projectAssetUrl`，加载与动画就绪使用 `ctx.capture.waitUntil`。源码不必保留默认面板结构。背景融合任务不能只改颜色就声称完成。
 
 运行时异常或不可达可用 `Ctrl+Alt+Home` 唤起临时“恢复教师控制台”，仅在当前播放会话恢复默认组件，不改工程。静态输出默认不包含控制台；`props.includeInStaticExports:true` 时使用组件捕获图面，Flow 的全局全页控制台作为页脚图片输出。
 
@@ -466,7 +466,7 @@ interface ComponentInstanceLifecycle {
 
 生命周期方法应可重复、安全调用。本地组件必须正确处理显隐、suspend/resume、location/replay 导致的销毁与重建；全局层组件同样不能假定实例会跨页存活。宿主记录组件生命周期的首个失败并销毁失败挂载，不能因一次显隐或同步更新而“复活”为空白成功。PPTX 中单实例 `prepareCapture()` 抛错会进入该实例的 `staticFallback` / 可见占位链，已经成功的组件快照继续保留，不应吞掉错误或让整批 PPTX 组件退化。
 
-组件自行创建的音频、视频或媒体流不会自动进入 Course Project V9 的主音量、声道和画布控制器管理。若确需自建媒体，组件必须公开必要属性，监听或接受宿主静音语义，并在隐藏/销毁时暂停、解除事件、释放对象 URL 与媒体资源；常规课件声音和视频应使用内置媒体模型。
+组件自行创建的音频、视频或媒体流不会自动进入 Course Project V9 的主音量、声道和画布控制器管理。若确需自建媒体，组件必须公开必要属性，监听或接受宿主静音语义，并在隐藏/销毁时暂停、解除事件、释放对象 URL 与媒体资源；常规声音和视频应使用内置媒体模型。
 
 命名场景状态切换可以改变有效组件集合或挂载 generation，因此可能销毁并重建组件。若同一实例被保留，宿主则可在原实例上调用 `resize()` 和 `updateProps()`。组件必须同时支持这两条路径：更新方法能刷新现有显示对象，`create()` / `destroy()` 也能完整重建与清理，不得把实例身份持续作为业务前提。
 
@@ -523,7 +523,7 @@ Editor 1.0.0 在专业模式独立“组件”页的“工程组件”列表把�
 
 “只读”只阻止直接覆盖原包，不阻止查看或复制已经交付的代码，也不替代许可证约束；创建副本前应确认组件授权允许修改和二次分发。可编辑副本是工程作者态能力，不是源码保密措施。`.h5lesson` 保存完整组件包；单 HTML/网页包虽会裁掉 manifest、编辑器字段和独立原始 `runtime.js`，浏览器仍需取得可恢复的执行逻辑。不要在组件或工程中存放密钥，并且不要把 PublishedLesson 裁剪描述为加密、不可逆向或 DRM。
 
-组件创建、属性更新、尺寸/可见性/暂停更新、捕获准备和销毁必须可诊断。互动 Player 中的单实例异常会进入本地诊断日志，其他组件继续运行；PPTX 按项捕获会只回退失败实例，不清空此前成功快照或阻断后续实例。纯 Slide PDF 是页级 Published 捕获，其必需资源/捕获错误按页传播，不伪造透明成功页。作者排障时先运行“工程检查”确认包和引用，再导出不含课件素材内容的诊断报告。
+组件创建、属性更新、尺寸/可见性/暂停更新、捕获准备和销毁必须可诊断。互动 Player 中的单实例异常会进入本地诊断日志，其他组件继续运行；PPTX 按项捕获会只回退失败实例，不清空此前成功快照或阻断后续实例。纯 Slide PDF 是页级 Published 捕获，其必需资源/捕获错误按页传播，不伪造透明成功页。作者排障时先运行“工程检查”确认包和引用，再导出不含素材内容的诊断报告。
 
 ## 14. 打包
 

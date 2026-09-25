@@ -168,7 +168,7 @@ function textFontAvailable(node: TextNode): boolean | null {
   try {
     return document.fonts.check(
       `${Math.max(8, node.style.fontSize)}px "${node.style.fontFamily}"`,
-      '课件字体检查',
+      '字体检查',
     )
   } catch {
     return null
@@ -176,7 +176,7 @@ function textFontAvailable(node: TextNode): boolean | null {
 }
 
 function nodeLocationLabel(context: SlideVisualStateContext, node: VisualInspectNode): string {
-  return `场景“${context.sceneName}”${context.stateId ? `的状态“${context.stateName}”` : '的基础画面'}中，节点“${node.name}”`
+  return `场景“${context.sceneName}”${context.stateId ? `的状态“${context.stateName}”` : '的母版画面'}中，节点“${node.name}”`
 }
 
 /** Pure visual rule over an already materialized node and background. */
@@ -559,7 +559,7 @@ export function collectCourseSlideLocationVisualPreflightItems(input: {
   const { surface, scene } = slideLocation(input.project, input.locationId)
   const { items, add } = itemCollector(input.target)
   const states: Array<{ id: string | null; name: string }> = [
-    { id: null, name: '基础画面' },
+    { id: null, name: '母版画面' },
     ...(scene.presentation?.states.map(({ id, name }) => ({ id, name })) ?? []),
   ]
   const interactiveIds = interactiveNodeIds([

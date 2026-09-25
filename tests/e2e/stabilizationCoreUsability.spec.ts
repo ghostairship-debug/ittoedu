@@ -148,7 +148,7 @@ async function launchEditor(developmentUrl = '', _standalone = false): Promise<L
     attach(page)
     // Only enter the landing page; keep an existing editor or recovery draft intact.
     // 冷启动落在着陆页（新 profile 无最近工作空间记录），内容区默认收起，顶栏与「＋」都在隐藏列内。
-    // 能建立空白独立课件并展开工作台的入口是 App 级「新建课件（Ctrl+N）」（useEditorKeyboardRouter.ts:60-62，
+    // 能建立空白独立课件并展开工作台的入口是 App 级「新建 H5 演示（Ctrl+N）」（useEditorKeyboardRouter.ts:60-62，
     // 挂在 App 内、window keydown；冷启动 isReadOnly 为假）。旧「更多 → 新建独立课件」已从产品移除。
     const startupEditor = page.getByRole('button', { name: '打开工程（Ctrl+O）', exact: true })
     const startupLanding = page.getByRole('button', { name: '打开工作空间', exact: true }).first()
@@ -158,8 +158,8 @@ async function launchEditor(developmentUrl = '', _standalone = false): Promise<L
       await page.keyboard.press('Control+N')
     }
     // 无条件的产品态断言：landing 是否卸载不是证据（standalone 一置真必卸载，近乎恒真）；
-    // <main aria-label="课件画布"> 存在才是编辑器面真的展开（SlideLocationWorkspace.tsx:2372-2374）。
-    await expect(page.getByRole('main', { name: '课件画布' })).toBeVisible({ timeout: 30_000 })
+    // <main aria-label="画布"> 存在才是编辑器面真的展开（SlideLocationWorkspace.tsx:2372-2374）。
+    await expect(page.getByRole('main', { name: '画布' })).toBeVisible({ timeout: 30_000 })
     await page.locator('[data-testid="canvas-stage"] canvas').first().waitFor()
     await expectBackgroundWindowsIsolated(app, true)
     // V3.1：内容区编辑器已按轻量编辑瘦身，TopToolbar 的「编辑模式（简洁/专业）」切换整段移除
@@ -272,7 +272,7 @@ function courseTreeKind(page: Page, kind: string): Locator {
 async function withCourseTree(page: Page, run: () => Promise<void>): Promise<void> {
   const tree = page.getByTestId('course-page-tree')
   if (await tree.isVisible()) return run()
-  const controls = page.locator('[aria-label="课件编辑面板"]')
+  const controls = page.locator('[aria-label="编辑面板"]')
   const launcher = controls.getByRole('button', { name: '页面与图层', exact: true })
   await launcher.click()
   await expect(launcher).toHaveAttribute('aria-expanded', 'true')
@@ -436,7 +436,7 @@ async function beginControllerDrag(page: Page): Promise<{
   await expect(box).toBeVisible()
   const bounds = await box.boundingBox()
   if (!bounds) throw new Error('Teacher controller selection box is not visible')
-  const workspace = page.getByRole('main', { name: '课件画布' })
+  const workspace = page.getByRole('main', { name: '画布' })
   const workspaceBounds = await workspace.boundingBox()
   if (!workspaceBounds) throw new Error('Course workspace is not visible')
   await page.mouse.move(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2)
@@ -1607,7 +1607,7 @@ test('活动文字草稿：Slide、Spatial、Flow 不失焦保存并可重开', 
       { timeout: 15_000 },
     ).toContain(flowText)
 
-    await page.getByRole('button', { name: '新建课件（Ctrl+N）' }).click()
+    await page.getByRole('button', { name: '新建 H5 演示（Ctrl+N）' }).click()
     await page.getByRole('button', { name: '打开工程（Ctrl+O）' }).click()
     await openSlide(page)
     await openEditorTab(page, '图层')
@@ -1849,7 +1849,7 @@ test('Wave A core authoring remains usable across Mixed surfaces', async () => {
       )))).toEqual(new Set(['text', 'shape']))
 
       await patchProjectDialogs(app, { projectSave: projectPath, projectOpen: projectPath })
-      await page.getByRole('button', { name: '新建课件（Ctrl+N）' }).click()
+      await page.getByRole('button', { name: '新建 H5 演示（Ctrl+N）' }).click()
       await page.getByRole('button', { name: '打开工程（Ctrl+O）' }).click()
       await expect(courseTreeKind(page, 'spatial-camera')).toHaveCount(1)
       await openSpatial(page)

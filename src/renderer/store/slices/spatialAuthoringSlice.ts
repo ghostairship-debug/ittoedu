@@ -190,13 +190,13 @@ export type SpatialAuthoringPorts = {
 function spatialFailureMessage(rawReason: string): string {
   const normalizedReason = rawReason.trim().toLowerCase()
   if (/^[\[{]/.test(normalizedReason) || /"(?:code|path)"\s*:/.test(rawReason)) {
-    return '课件内容格式不正确。请检查刚才的输入后重试。'
+    return '内容格式不正确。请检查刚才的输入后重试。'
   }
   if (normalizedReason === 'locked' || rawReason.includes('锁定')) {
     return '当前内容已锁定。请先解锁后重试。'
   }
   if (normalizedReason === 'stale-revision' || rawReason.includes('stale')) {
-    return '课件内容已更新。请重新选择后再试。'
+    return '内容已更新。请重新选择后再试。'
   }
   if (normalizedReason === 'wrong-owner' || rawReason.includes('不属于')) {
     return '当前内容不在这个编辑范围内。请切换到对应图层后重试。'
@@ -1446,7 +1446,7 @@ export function createSpatialAuthoringSlice(
       )
       if (stale) {
         kernel.setFeedback({
-          errorMessage: '课件内容已更新。旧的 Spatial 会话没有写入。',
+          errorMessage: '内容已更新。旧的 Spatial 会话没有写入。',
           statusMessage: null,
         })
         return rejectSpatialCommand(owned.spatialSession ?? session, 'stale-revision')
@@ -1538,7 +1538,7 @@ export function createSpatialAuthoringSlice(
           past: [...session.history.past, session.history.present],
           future: [],
         },
-      }, true), { statusMessage: `课件已重命名为“${title}”` })
+      }, true), { statusMessage: `已重命名为“${title}”` })
     },
     addChartNode(chartType, x, y) {
       const session = commitDraft()

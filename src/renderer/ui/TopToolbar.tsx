@@ -143,7 +143,7 @@ export function TopToolbar({
 
       <div className="toolbar__group">
         <div className="new-project-split">
-          <ToolButton label="新建" title="新建课件（Ctrl+N）" disabled={busy} onClick={onNew}>
+          <ToolButton label="新建" title="新建 H5 演示（Ctrl+N）" disabled={busy} onClick={onNew}>
             <FilePlus2 size={18} />
           </ToolButton>
           {onNewSpatial || onNewFlow ? (
@@ -268,7 +268,7 @@ export function TopToolbar({
         {editingTitle ? (
           <input
             className="toolbar__project-name-input"
-            aria-label="课件名称"
+            aria-label="名称"
             value={titleDraft}
             maxLength={80}
             autoFocus
@@ -286,8 +286,8 @@ export function TopToolbar({
           <button
             type="button"
             className="toolbar__project-name"
-            title="重命名课件"
-            aria-label="重命名课件"
+            title="重命名"
+            aria-label="重命名"
             onClick={() => setEditingTitle(true)}
           >
             <span>{projectTitle}{dirty ? ' *' : ''}</span>
@@ -330,8 +330,8 @@ export function TopToolbar({
         <summary
           className="tool-button tool-button--accent export-menu__trigger"
           data-testid="export-menu-trigger"
-          title="导出课件"
-          aria-label="导出课件"
+          title="导出"
+          aria-label="导出"
           aria-disabled={busy}
           onClick={(event) => {
             if (busy) event.preventDefault()
@@ -382,7 +382,7 @@ export function TopToolbar({
             }}
           >
             <Archive size={18} />
-            <span><strong>网页包</strong><small>资源独立存放，推荐大型课件使用</small></span>
+            <span><strong>网页包</strong><small>资源独立存放，推荐大型 H5 演示使用</small></span>
           </button>
           <button
             type="button"

@@ -63,7 +63,7 @@ function prepareMixedCopy(widthMode?: 'fluid'): void {
   for (let index = 0; index < 24; index += 1) {
     flow.blocks.push({
       id: `r18-089-scroll-${index}`, type: 'paragraph',
-      content: { inlines: [{ type: 'text', text: `第 ${index + 1} 段：${'正文随窗口宽度重排，纸张滚动与课件观察缩放保持独立。'.repeat(8)}` }] },
+      content: { inlines: [{ type: 'text', text: `第 ${index + 1} 段：${'正文随窗口宽度重排，纸张滚动与演示观察缩放保持独立。'.repeat(8)}` }] },
     })
   }
   const packageId = 'com.ittoedu.baseline.evidence-panel'
@@ -457,7 +457,7 @@ async function patchDialogs(
 }
 
 async function showEditorPanel(page: Page, name: '页面与图层' | '属性与素材' | null): Promise<void> {
-  const controls = page.getByLabel('课件编辑面板', { exact: true })
+  const controls = page.getByLabel('编辑面板', { exact: true })
   if (!await controls.isVisible()) return
   if (name) {
     const button = controls.getByRole('button', { name, exact: true })

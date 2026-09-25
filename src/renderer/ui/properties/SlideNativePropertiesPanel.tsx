@@ -791,12 +791,12 @@ export function SlideNativeNotices({
         <section className={`state-editing-notice${notices.presentationStateName ? ' state-editing-notice--override' : ''}`}>
           <Layers3 size={15} />
           <div>
-            <strong>{notices.presentationStateName ? `状态：${notices.presentationStateName}` : '基础场景'}</strong>
+            <strong>{notices.presentationStateName ? `状态：${notices.presentationStateName}` : '母版'}</strong>
             <span>{notices.presentationStateName
               ? notices.stateOverrideApplied
                 ? '此元素已有当前状态覆盖。'
-                : '当前继承基础值；修改后会创建状态覆盖。'
-              : '修改基础元素会影响所有继承它的状态。'}</span>
+                : '当前继承母版的值；修改后会创建状态覆盖。'
+              : '修改母版元素会影响所有继承它的状态。'}</span>
           </div>
           {notices.presentationStateName && notices.stateOverrideApplied && (
             <button
@@ -804,7 +804,7 @@ export function SlideNativeNotices({
               className="state-editing-notice__clear"
               onClick={onClearPresentationOverride}
             >
-              恢复基础值
+              恢复母版值
             </button>
           )}
         </section>

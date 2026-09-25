@@ -12,7 +12,7 @@ async function chooseDirectory(app: ElectronApplication, directory: string) {
 
 /**
  * V06 快速新建：＋新建 Markdown 真实落盘 + 标签选中 + 干净关闭与脏标签先落盘再关。
- * 「新建课件」只证入口接通同一流程（真正建课例由 r19LessonWorkspace 覆盖），属浅证据。
+ * 「新建 H5 演示」只证入口接通同一流程（真正建课例由 r19LessonWorkspace 覆盖），属浅证据。
  */
 test('r19 V06 快速新建: ＋新建 MD/课件入口与标签关闭', async () => {
   test.setTimeout(4 * 60_000)
@@ -33,8 +33,8 @@ test('r19 V06 快速新建: ＋新建 MD/课件入口与标签关闭', async () 
     await expect(popover).toBeVisible()
     await expect(popover.getByLabel('Markdown 文档名')).toBeVisible()
     await expect(popover.getByRole('button', { name: '创建文档' })).toBeVisible()
-    await popover.getByRole('button', { name: '新建课件' }).click()
-    const createDialog = page.getByRole('dialog', { name: '新建课件' })
+    await popover.getByRole('button', { name: '新建 H5 演示' }).click()
+    const createDialog = page.getByRole('dialog', { name: '新建 H5 演示' })
     await expect(createDialog).toBeVisible()
     await createDialog.getByRole('button', { name: '取消', exact: true }).click()
     await expect(createDialog).toHaveCount(0)
@@ -51,7 +51,7 @@ test('r19 V06 快速新建: ＋新建 MD/课件入口与标签关闭', async () 
 
     await page.getByRole('button', { name: `关闭 ${first}.md`, exact: true }).click()
     await expect(page.getByRole('tab', { name: `${first}.md`, exact: true })).toHaveCount(0)
-    await expect(page.getByRole('tab', { name: '新建课件', exact: true })).toHaveAttribute('aria-selected', 'true')
+    await expect(page.getByRole('tab', { name: '新建 H5 演示', exact: true })).toHaveAttribute('aria-selected', 'true')
 
     const second = `新笔记2${stamp}`
     await page.locator(NEW_TAB).click()

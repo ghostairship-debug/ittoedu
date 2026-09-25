@@ -522,7 +522,7 @@ function CourseGlobalEmptyPanel({
           <span><small>运行时</small>{empty.runtimeAvailable ? '已配置' : '无'}</span>
         </div>
         <p className="property-hint">
-          全局层类似课件母版：文字、图片、图形和组件都可统一布置，并可设置场景可见范围。
+          全局层是所有页面共用的内容：文字、图片、图形和组件都可统一布置，并可设置场景可见范围。
         </p>
       </section>
       <SlideCanvasSizeSection canvas={empty.canvas} onApply={commands.resizeSlideCanvas} />
@@ -659,7 +659,7 @@ export function CourseGlobalPropertiesPanel({
         </details>
         <details className="property-section controller-property-details">
           <summary>源码与维护</summary>
-          <p className="property-hint">源码、图片和纹理随本课件保存，可由 AI 深度定制。恢复默认源码会覆盖源码定制，可以撤销。</p>
+          <p className="property-hint">源码、图片和纹理随本 H5 演示保存，可由 AI 深度定制。恢复默认源码会覆盖源码定制，可以撤销。</p>
           <button type="button" className="secondary-button secondary-button--danger" onClick={() => context.commands.manageTeacherControllerComponent?.(node.id, 'restore')}>恢复默认控制台源码</button>
         </details>
       </> : <>

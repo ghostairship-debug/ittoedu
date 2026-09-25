@@ -282,7 +282,7 @@ describe('Spatial command failure diagnostics', () => {
 
     const after = useEditorStore.getState()
     expect(result.reason).toBe(rawReason)
-    expect(after.errorMessage).toBe('课件内容格式不正确。请检查刚才的输入后重试。')
+    expect(after.errorMessage).toBe('内容格式不正确。请检查刚才的输入后重试。')
     expect(after.errorMessage).not.toMatch(/invalid_type|surfaces|code|path|[\[\]{}]/)
     expect(reportDiagnostic).toHaveBeenCalledTimes(1)
     expect(reportDiagnostic.mock.calls[0]?.[0]).toMatchObject({

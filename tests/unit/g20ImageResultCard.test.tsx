@@ -58,7 +58,7 @@ it('lets the user inspect and change the insertion frame while replacement stays
   try {
     render(<ImageResultCard api={api} owner={owner} documents={documents} />)
     await screen.findByRole('button', { name: '插入图片' })
-    fireEvent.change(screen.getByLabelText('应用到课件'), { target: { value: snapshot.documentId } })
+    fireEvent.change(screen.getByLabelText('应用到 H5 演示'), { target: { value: snapshot.documentId } })
     fireEvent.change(screen.getByLabelText('插入位置'), { target: { value: location.id } })
     const details = screen.getByText(/画布位置与尺寸：/).closest('details')!
     await waitFor(() => expect(details.querySelector('summary')).toHaveTextContent('X 752 · Y 352 · 480×320'))

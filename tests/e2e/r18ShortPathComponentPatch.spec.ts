@@ -302,7 +302,7 @@ for (const mode of ['shared', 'instance'] as const) test(`controlled build sourc
     expect(withoutClock(redone.project)).toEqual(withoutClock(saved.project))
     expect(redone.componentFiles).toEqual(saved.componentFiles)
     expect(redone.assetFiles).toEqual(saved.assetFiles)
-    await page.getByRole('button', { name: '新建课件（Ctrl+N）', exact: true }).click()
+    await page.getByRole('button', { name: '新建 H5 演示（Ctrl+N）', exact: true }).click()
     await page.getByRole('button', { name: '打开工程（Ctrl+O）', exact: true }).click()
     await expectInteractivePreview(run, mode)
     const reopened = await saveStage(run, '04-reopened-interacted')

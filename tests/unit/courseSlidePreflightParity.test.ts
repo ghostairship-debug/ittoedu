@@ -144,7 +144,7 @@ describe('Slide export-preflight V9 behavior', () => {
         {
           severity: 'error',
           code: 'node-fully-outside-canvas',
-          message: '场景“对等场景”的基础画面中，节点“outside-a”完全位于 1280×720 画布之外。',
+          message: '场景“对等场景”的母版画面中，节点“outside-a”完全位于 1280×720 画布之外。',
           target: 'pptx',
           sceneId: 'scene-parity',
           nodeId: 'outside-a',
@@ -152,7 +152,7 @@ describe('Slide export-preflight V9 behavior', () => {
         {
           severity: 'error',
           code: 'node-fully-outside-canvas',
-          message: '场景“对等场景”的基础画面中，节点“outside-b”完全位于 1280×720 画布之外。',
+          message: '场景“对等场景”的母版画面中，节点“outside-b”完全位于 1280×720 画布之外。',
           target: 'pptx',
           sceneId: 'scene-parity',
           nodeId: 'outside-b',
@@ -178,7 +178,7 @@ describe('Slide export-preflight V9 behavior', () => {
         {
           severity: 'warning',
           code: 'text-low-contrast',
-          message: '场景“对等场景”的基础画面中，节点“contrast”的估算文字对比度仅 1.00:1；这是启发式提醒，请在真实投影环境人工确认。',
+          message: '场景“对等场景”的母版画面中，节点“contrast”的估算文字对比度仅 1.00:1；这是启发式提醒，请在真实投影环境人工确认。',
           target: 'pptx',
           sceneId: 'scene-parity',
           nodeId: 'contrast',

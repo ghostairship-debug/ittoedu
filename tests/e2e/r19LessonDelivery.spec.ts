@@ -224,7 +224,7 @@ test('r19 original saved lesson: resource closure, reopen, both previews and off
     await page.locator('.lesson-directory-tree').getByRole('button', { name: basename(paths.LESSON), exact: true }).click()
     await page.locator('.lesson-directory-tree').getByRole('button', { name: basename(paths.PROJECT), exact: true }).click()
     await expect(page.locator('.lesson-workflow')).toBeVisible()
-    await page.getByRole('tab', { name: /course|新建课件/ }).click()
+    await page.getByRole('tab', { name: /course|新建 H5 演示/ }).click()
     await expect(page.getByRole('button', { name: '整课预览', exact: true })).toBeVisible()
     // Save through the actual UI, wait for its acknowledgement, then reopen
     // the same lesson through its real open command, preserving lesson identity.
@@ -316,7 +316,7 @@ test('r19 original saved lesson: resource closure, reopen, both previews and off
     await expect(docEditor.getByRole('textbox', { name: '正文排版编辑', exact: true })).toBeVisible()
     await noOuterOverflow()
     await page.screenshot({ path: join(output, 'narrow-document.png'), fullPage: false })
-    const tabs = page.getByRole('tablist', { name: '材料、教学文档与课件', exact: true })
+    const tabs = page.getByRole('tablist', { name: '打开的文件', exact: true })
     await tabs.getByRole('tab', { name: '材料', exact: true }).click()
     await expect(tabs.getByRole('tab', { name: '材料', exact: true })).toHaveAttribute('aria-selected', 'true')
     const materials = page.getByRole('region', { name: '课例材料', exact: true })
@@ -325,8 +325,8 @@ test('r19 original saved lesson: resource closure, reopen, both previews and off
     await expect(materials.getByRole('article', { name: '材料片段内容', exact: true })).toBeVisible()
     await noOuterOverflow()
     await page.screenshot({ path: join(output, 'narrow-materials.png'), fullPage: false })
-    await tabs.getByRole('tab', { name: /course|新建课件/ }).click()
-    await expect(tabs.getByRole('tab', { name: /course|新建课件/ })).toHaveAttribute('aria-selected', 'true')
+    await tabs.getByRole('tab', { name: /course|新建 H5 演示/ }).click()
+    await expect(tabs.getByRole('tab', { name: /course|新建 H5 演示/ })).toHaveAttribute('aria-selected', 'true')
     // Desktop keeps three columns; each navigation section has its own fold control.
     for (const label of ['资源管理器', '课例与对话']) {
       const heading = nav.getByRole('button', { name: label, exact: true })

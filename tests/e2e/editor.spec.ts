@@ -227,7 +227,7 @@ async function showEditorPanel(page: Page, panel: 'structure' | 'properties'): P
       requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
     }))
     if (await region.isVisible()) return region
-    const controls = page.getByLabel('课件编辑面板', { exact: true })
+    const controls = page.getByLabel('编辑面板', { exact: true })
     if (!await controls.isVisible()) {
       await expect(region).toBeVisible()
       return region
@@ -248,10 +248,10 @@ async function selectEditorTab(page: Page, name: string): Promise<void> {
 }
 
 async function showEditorCanvas(page: Page): Promise<void> {
-  const close = page.getByLabel('课件编辑面板', { exact: true })
+  const close = page.getByLabel('编辑面板', { exact: true })
     .getByRole('button', { name: '关闭面板', exact: true })
   if (await close.isVisible()) await close.click()
-  await expect(page.getByRole('main', { name: '课件画布' })).toBeVisible()
+  await expect(page.getByRole('main', { name: '画布' })).toBeVisible()
 }
 
 async function clickSceneStateButton(page: Page, name: string | RegExp): Promise<void> {
@@ -657,13 +657,13 @@ async function dragElementToCanvas(
   expectedNodeCount: number,
 ): Promise<void> {
   const canvas = page.locator('[data-testid="canvas-stage"] canvas')
-  const workspace = page.getByRole('main', { name: '课件画布' })
+  const workspace = page.getByRole('main', { name: '画布' })
   const [canvasBounds, workspaceBounds] = await Promise.all([
     canvas.boundingBox(),
     workspace.boundingBox(),
   ])
   if (!canvasBounds || !workspaceBounds) {
-    throw new Error('课件画布或工作区不可见')
+    throw new Error('画布或工作区不可见')
   }
   // React owns dragover/drop on the workspace rather than the nested Phaser
   // canvas. Target the real listener while keeping the drop point inside the
@@ -690,9 +690,9 @@ async function dragElementToCanvas(
           `[data-testid="${sourceTestId}"]`,
         )
         const target = document.querySelector<HTMLElement>(
-          'main[aria-label="课件画布"]',
+          'main[aria-label="画布"]',
         )
-        if (!source || !target) throw new Error('拖放源或课件画布不可见')
+        if (!source || !target) throw new Error('拖放源或画布不可见')
         const dataTransfer = new DataTransfer()
         const dispatch = (
           element: HTMLElement,
@@ -1823,7 +1823,7 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
       await patchDialogs(app, {
         projectOpen: globalRuntimeAuthoringImportedPath,
       })
-      await page.getByRole('button', { name: '新建课件（Ctrl+N）' }).click()
+      await page.getByRole('button', { name: '新建 H5 演示（Ctrl+N）' }).click()
       await page.getByRole('button', { name: '打开工程（Ctrl+O）' }).click()
       await expect(page.getByRole('alertdialog', { name: explicitLegacyImportDialogName }))
         .toHaveCount(0)
@@ -1941,7 +1941,7 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
       await expect.poll(() => existsSync(projectPath)).toBe(true)
       expect(readFileSync(projectPath).subarray(0, 2).toString()).toBe('PK')
 
-      await page.getByRole('button', { name: '新建课件（Ctrl+N）' }).click()
+      await page.getByRole('button', { name: '新建 H5 演示（Ctrl+N）' }).click()
       await page.getByRole('button', { name: '打开工程（Ctrl+O）' }).click()
       await selectEditorTab(page, '图层')
       await page.locator('.node-name').filter({ hasText: '文本' }).click()
@@ -2330,7 +2330,7 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
 
       await page.getByRole('button', { name: '保存（Ctrl+S）' }).click()
       await expect.poll(() => existsSync(componentProjectPath)).toBe(true)
-      await page.getByRole('button', { name: '新建课件（Ctrl+N）' }).click()
+      await page.getByRole('button', { name: '新建 H5 演示（Ctrl+N）' }).click()
       await page.getByRole('button', { name: '打开工程（Ctrl+O）' }).click()
       await expectPublishedAuthoringReady(page)
       expect(await initialComponentTargetHandle.evaluate((element) => element.isConnected))
@@ -2440,7 +2440,7 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
 
       await page.getByRole('button', { name: '保存（Ctrl+S）' }).click()
       await expect.poll(() => existsSync(globalNativeProjectPath)).toBe(true)
-      await page.getByRole('button', { name: '新建课件（Ctrl+N）' }).click()
+      await page.getByRole('button', { name: '新建 H5 演示（Ctrl+N）' }).click()
       await page.getByRole('button', { name: '打开工程（Ctrl+O）' }).click()
       await showEditorPanel(page, 'structure')
       await page.getByTestId('global-layer-entry').click()
@@ -2523,7 +2523,7 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
 
       await page.getByRole('button', { name: '保存（Ctrl+S）' }).click()
       await expect.poll(() => existsSync(globalComponentProjectPath)).toBe(true)
-      await page.getByRole('button', { name: '新建课件（Ctrl+N）' }).click()
+      await page.getByRole('button', { name: '新建 H5 演示（Ctrl+N）' }).click()
       await page.getByRole('button', { name: '打开工程（Ctrl+O）' }).click()
       await showEditorPanel(page, 'structure')
       await page.getByTestId('global-layer-entry').click()
@@ -3139,7 +3139,7 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
 
       await page.getByRole('button', { name: '保存（Ctrl+S）' }).click()
       await expect.poll(() => existsSync(imageProjectPath)).toBe(true)
-      await page.getByRole('button', { name: '新建课件（Ctrl+N）' }).click()
+      await page.getByRole('button', { name: '新建 H5 演示（Ctrl+N）' }).click()
       await page.getByRole('button', { name: '打开工程（Ctrl+O）' }).click()
       await selectEditorTab(page, '图层')
       await expect(authoredLayerRows(page)).toHaveCount(1)
@@ -3662,7 +3662,7 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
         style: { fontSize: 64 },
       })
 
-      await page.getByRole('button', { name: '新建课件（Ctrl+N）' }).click()
+      await page.getByRole('button', { name: '新建 H5 演示（Ctrl+N）' }).click()
       await page.getByRole('button', { name: '打开工程（Ctrl+O）' }).click()
       await selectEditorTab(page, '图层')
       await expect(page.locator('.node-item')).toHaveCount(4)
@@ -3728,7 +3728,7 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
             '局部着重号示例文字',
           ]) {
             await expect(emphasisItems.getByText(
-              `场景“场景 1”的基础画面中，节点“${nodeName}”含有文字着重号，PPTX 将按保真策略静态化该文本节点。`,
+              `场景“场景 1”的母版画面中，节点“${nodeName}”含有文字着重号，PPTX 将按保真策略静态化该文本节点。`,
               { exact: true },
             )).toHaveCount(1)
             await expect(emphasisItems.getByText(
@@ -3739,7 +3739,7 @@ test.describe.serial(`${APP_NAME} 1.0 / Project V8 收敛`, () => {
           const formulaItems = preflight.locator('.export-preflight__item')
             .filter({ hasText: 'pptx-formula-rasterized' })
           await expect(formulaItems).toHaveCount(2)
-          for (const location of ['基础画面', '状态“初始”']) {
+          for (const location of ['母版画面', '状态“初始”']) {
             await expect(formulaItems.getByText(
               `场景“场景 1”的${location}中，节点“语义公式”是递归语义公式；PPTX 没有可靠的一对一原生映射，将按共享渲染结果静态化为透明图片，并保留 Formula ID 与无障碍文本。`,
               { exact: true },

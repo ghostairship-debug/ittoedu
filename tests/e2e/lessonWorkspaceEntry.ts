@@ -12,12 +12,12 @@ import { expect, type Page } from '@playwright/test'
  *   :945 .lesson-new-tab（＋新建标签页）、:1170 .lesson-workspace-switcher（切换工作空间）、
  *   :1258 .lesson-layout-menu（布局）。任何 '.lesson-workspace-more > summary' locator 都是多匹配
  *   （先例：docs/development-plan/reviews/2026-09-18-r19-closeout-retry-v05-060.md:78 记录过 strict mode violation）。
- * - 现在唯一能建立空白独立课件并展开工作台的入口是 App 级「新建课件（Ctrl+N）」：
+ * - 现在唯一能建立空白独立课件并展开工作台的入口是 App 级「新建 H5 演示（Ctrl+N）」：
  *   useEditorKeyboardRouter.ts:60-62 在 window keydown 上路由到 current.newProject()（监听注册在 :108），
  *   App.tsx:552 接到 courseProjectLifecycle.newProject()；键盘路由只在 isReadOnly() 为假时生效
  *   （App.tsx:505 = 预览打开或 canvasMode==='run'；冷启动为假）。
  * - 产品态判据：TopToolbar.tsx:78 aria-label={title} ⇒ 「打开工程（Ctrl+O）」（:182）只有编辑器面存在；
- *   <main aria-label="课件画布">（SlideLocationWorkspace.tsx:2374）与 [data-testid="canvas-stage"]（:2830）
+ *   <main aria-label="画布">（SlideLocationWorkspace.tsx:2374）与 [data-testid="canvas-stage"]（:2830）
  *   才是编辑器面真的展开——着陆页是否卸载不是证据（standalone 一置真必卸载，近乎恒真）。
  *
  * 本文件只服务「独立编辑器」路线。课例工作空间路线（打开工作空间 → 会话）见 tests/e2e/r19ChatSpecSupport.ts，
@@ -83,6 +83,6 @@ export async function observeStartupSurface(page: Page): Promise<StartupSurface>
 export async function enterIndependentEditor(page: Page): Promise<void> {
   const surface = await observeStartupSurface(page)
   if (surface === 'landing') await page.keyboard.press('Control+N')
-  await expect(page.getByRole('main', { name: '课件画布' })).toBeVisible({ timeout: 30_000 })
+  await expect(page.getByRole('main', { name: '画布' })).toBeVisible({ timeout: 30_000 })
   await page.locator('[data-testid="canvas-stage"] canvas').first().waitFor()
 }

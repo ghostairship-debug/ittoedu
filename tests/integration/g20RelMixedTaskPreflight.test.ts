@@ -20,7 +20,7 @@ function complete(request: ModelRequest, turn: number, name?: string, input?: ob
   const toolCalls = name ? [{ id: `rel-mixed-${turn}`, name, argumentsText: JSON.stringify(input) }] : []
   return { requestId: request.requestId, sequence: 1, type: 'response.completed', responseId: `rel-mixed-response-${turn}`,
     actualModel: 'local-fixture', nativeResponse: {}, finishReason: toolCalls.length ? 'tool_calls' : 'stop', toolCalls,
-    assistant: { role: 'assistant', content: toolCalls.length ? '' : '已新建课件，并确认后续工具可用',
+    assistant: { role: 'assistant', content: toolCalls.length ? '' : '已新建 H5 演示，并确认后续工具可用',
       ...(toolCalls.length ? { tool_calls: toolCalls.map(call => ({ id: call.id, type: 'function' as const,
         function: { name: call.name, arguments: call.argumentsText } })) } : {}) } }
 }

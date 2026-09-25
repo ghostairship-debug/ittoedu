@@ -142,7 +142,7 @@ describe('scene presentation state UI', () => {
 
     const list = screen.getByRole('list', { name: '当前场景状态列表' })
     const base = within(list).getByRole('button', {
-      name: '基础场景，所有命名状态的继承源',
+      name: '母版，所有命名状态的继承源',
     })
     const initial = within(list).getByRole('button', {
       name: '初始，命名状态，运行初始状态，场景缩略图状态，1 项覆盖',

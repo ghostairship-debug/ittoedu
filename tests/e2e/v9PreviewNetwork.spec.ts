@@ -372,7 +372,7 @@ test('V9 current/full preview embeds local assets and leases declared origins pe
     await page.reload({ waitUntil: 'domcontentloaded' })
     // Reload only needs a live landing control; it must not create a project.
     await expect(page.getByRole('button', { name: '打开工作空间', exact: true }).first()).toBeVisible()
-    await expect(page.getByRole('main', { name: '课件画布' })).toHaveCount(0)
+    await expect(page.getByRole('main', { name: '画布' })).toHaveCount(0)
     await expect(page.evaluate(() => window.name)).resolves
       .toBe('old-document-late-invoke-sent')
     const assetAAfterReload = assetA.requests.length

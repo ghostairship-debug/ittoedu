@@ -70,7 +70,7 @@ export function CourseLightToolbar(props: CourseLightToolbarProps) {
   }
   const editing = props.mode === 'edit'
   const unavailable = props.insertSurface === null
-    ? '当前没有可编辑的课件位置。'
+    ? '当前没有可编辑的位置。'
     : props.insertSurface === 'spatial' && props.spatialScope !== 'world'
       ? '请切换到无限画布世界层后插入对象。'
       : null
@@ -90,7 +90,7 @@ export function CourseLightToolbar(props: CourseLightToolbarProps) {
     <button key="agent" type="button" role="menuitem" disabled={!props.canUndoLatestAgent || !undoLatestAgent || !editing} onClick={() => { if (undoLatestAgent) more(undoLatestAgent) }}>撤销最近 AI 修改</button>,
     ...(fitWorld ? [<button key="fit" type="button" role="menuitem" onClick={() => more(fitWorld)}>查看全部对象</button>] : []),
   ]
-  return <div ref={toolbarRef} className="course-light-tools" aria-label="课件常用工具">
+  return <div ref={toolbarRef} className="course-light-tools" aria-label="常用工具">
     <div className="course-light-tools__row">
       <button type="button" onClick={() => invoke(props.save)}>保存</button>
       {!compact && <button type="button" onClick={() => invoke(props.saveAs)}>另存为</button>}
@@ -121,7 +121,7 @@ export function CourseLightToolbar(props: CourseLightToolbarProps) {
           <button type="button" aria-label="更多工具" title="更多工具" aria-haspopup="menu" aria-expanded={moreOpen} onClick={() => setMoreOpen(open => !open)}><MoreHorizontal size={15} /></button>
           {moreOpen && <div className="course-light-tools__more-menu" role="menu" aria-label="更多工具">{overflow}</div>}
         </div>
-        {chrome.workbench && <button type="button" className="workbench-editor-focus" title="打开图层、完整属性、交互、组件和开发工具" onClick={() => chrome.setMode('deep')}>编辑器</button>}
+        {chrome.workbench && <button type="button" className="workbench-editor-focus" title="打开图层、完整属性、交互、组件和开发工具" onClick={() => chrome.setMode('deep')}>在编辑器中打开</button>}
       </div>
     </div>
   </div>

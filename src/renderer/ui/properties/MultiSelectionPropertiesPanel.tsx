@@ -68,12 +68,12 @@ export function MultiSelectionPropertiesPanel({
         <section className={`state-editing-notice${activeStateName ? ' state-editing-notice--override' : ''}`}>
           <Layers3 size={15} />
           <div>
-            <strong>{activeStateName ? `状态：${activeStateName} · 多选` : '基础场景 · 多选'}</strong>
+            <strong>{activeStateName ? `状态：${activeStateName} · 多选` : '母版 · 多选'}</strong>
             <span>{activeStateName
               ? overriddenCount > 0
                 ? `${overriddenCount}/${items.length} 个所选元素已有覆盖；批量修改只写入当前状态。`
-                : `所选 ${items.length} 个元素当前继承基础；批量修改将创建状态覆盖。`
-              : '批量修改基础元素会影响所有继承这些值的状态。'}</span>
+                : `所选 ${items.length} 个元素当前继承母版；批量修改将创建状态覆盖。`
+              : '批量修改母版元素会影响所有继承这些值的状态。'}</span>
           </div>
         </section>
       )}

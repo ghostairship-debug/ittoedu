@@ -500,7 +500,7 @@ export function mutatePasteSlideSceneClipboard(
     throw new SlideCommandError(SLIDE_REJECT_WRONG_OWNER, SLIDE_CLIPBOARD_WRONG_OWNER_REASON)
   }
   if (clipboard.projectId !== draft.id) {
-    throw new Error('剪贴板不属于当前课件，请重新复制')
+    throw new Error('剪贴板不属于当前 H5 演示，请重新复制')
   }
   const derivedReferences = collectSlideClipboardResourceReferences(
     clipboard.items.map((entry) => entry.item),
@@ -560,7 +560,7 @@ export function mutatePasteSlideGlobalClipboard(
     )
   }
   if (clipboard.projectId !== draft.id) {
-    throw new Error('剪贴板不属于当前课件，请重新复制')
+    throw new Error('剪贴板不属于当前 H5 演示，请重新复制')
   }
   if (draft.globalLayerItems.length + clipboard.items.length > MAX_SCENE_NODES) {
     throw new Error(`粘贴后将超过全局层 ${MAX_SCENE_NODES} 个元素的上限。`)

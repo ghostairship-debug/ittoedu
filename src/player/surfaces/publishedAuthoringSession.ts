@@ -84,7 +84,7 @@ function authoringError(
 }
 
 function describeState(stateId: string | null): string {
-  return stateId === null ? '基础状态' : `状态“${stateId}”`
+  return stateId === null ? '母版' : `状态“${stateId}”`
 }
 
 /**

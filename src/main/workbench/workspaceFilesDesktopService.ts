@@ -100,7 +100,7 @@ export class WorkspaceFilesDesktopService {
       case 'resolve': return this.files.resolveEntry(input.workspaceId, input.entryId)
       case 'read-media': {
         const resolved = await this.files.resolveEntry(input.workspaceId, input.entryId)
-        if (resolved.kind !== 'file') throw new Error('只能将媒体文件拖入课件内容')
+        if (resolved.kind !== 'file') throw new Error('只能将媒体文件拖入 H5 演示')
         const media = await readWorkspaceMediaSelection(resolved.resolvedPath)
         const current = await this.files.resolveEntry(input.workspaceId, input.entryId)
         if (current.kind !== 'file' || pathKey(current.resolvedPath) !== pathKey(resolved.resolvedPath)) throw new Error('媒体文件已变化，请重新拖入')
@@ -108,7 +108,7 @@ export class WorkspaceFilesDesktopService {
       }
       case 'create-markdown': return this.files.createFile({ ...input, format: 'markdown', bytes: Buffer.from(`# ${input.name.replace(/\.md$/i, '')}\n\n`, 'utf8') })
       case 'create-text': {
-        if (/\.h5lesson$/i.test(input.name)) throw new Error('课件请使用“新建课件”，不能创建空的课件文件')
+        if (/\.h5lesson$/i.test(input.name)) throw new Error('H5 演示请使用“新建 H5 演示”，不能创建空的 .h5lesson 文件')
         return this.files.createFile({ ...input, format: 'file', bytes: new Uint8Array() })
       }
       case 'create-course': {

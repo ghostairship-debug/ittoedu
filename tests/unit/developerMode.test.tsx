@@ -810,7 +810,7 @@ describe('专业开发模式', () => {
       type: 'external-component',
       component: { packageId: source.manifest.id },
     })
-    expect(useEditorStore.getState().errorMessage).toContain('切换到“基础”')
+    expect(useEditorStore.getState().errorMessage).toContain('切换到“母版”')
   })
 
   it('可编辑组件提交前复用完整包校验并保护现有实例作用域', async () => {

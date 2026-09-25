@@ -107,7 +107,7 @@ test('S06-T05 saved Flow excludes a live preview from disk and restores source s
   try {
     await setupSelectionUI(app, page, server.endpoint, fixture.workspace)
     const document = await openSelectionFile(page, fixture.workspace, 'flow.h5lesson')
-    const courseTools = page.getByLabel('课件常用工具', { exact: true })
+    const courseTools = page.getByLabel('常用工具', { exact: true })
     const before = await readSelectionDocument(page, document.documentId)
     const original = flowText(before)
     const otherOriginal = flowText(before, 'flow-b')

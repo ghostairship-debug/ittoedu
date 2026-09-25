@@ -117,7 +117,7 @@ export function SceneStateStrip() {
           <span>
             {activeState
               ? `正在编辑“${activeState.name}”的覆盖值`
-              : '正在编辑基础；修改会被所有状态继承'}
+              : '正在编辑母版；修改会被所有状态继承'}
           </span>
         </div>
         <div className="scene-state-strip__actions" aria-label="状态操作">
@@ -134,8 +134,8 @@ export function SceneStateStrip() {
             type="button"
             className="state-action"
             onClick={() => activeState ? duplicateState(activeState.id) : addState()}
-            aria-label={activeState ? '复制当前状态' : '从基础新建状态'}
-            title={activeState ? '复制当前状态及其覆盖' : '从基础创建空状态'}
+            aria-label={activeState ? '复制当前状态' : '从母版新建状态'}
+            title={activeState ? '复制当前状态及其覆盖' : '从母版创建空状态'}
           >
             <Copy size={14} /><span>复制</span>
           </button>
@@ -174,7 +174,7 @@ export function SceneStateStrip() {
             className="state-action"
             disabled={!activeState}
             aria-label="清除当前状态的全部覆盖"
-            title={activeState ? '恢复为基础场景外观' : '基础场景没有状态覆盖'}
+            title={activeState ? '恢复为母版外观' : '母版没有状态覆盖'}
             onClick={() => setPendingAction('reset')}
           >
             <RotateCcw size={14} /><span>清除覆盖</span>
@@ -198,11 +198,11 @@ export function SceneStateStrip() {
             type="button"
             className={`scene-state-card scene-state-card--base${activeStateId === null ? ' scene-state-card--active' : ''}`}
             aria-pressed={activeStateId === null}
-            aria-label="基础场景，所有命名状态的继承源"
+            aria-label="母版，所有命名状态的继承源"
             onClick={() => setActiveState(null)}
           >
-            <span className="scene-state-card__preview">基础</span>
-            <span className="scene-state-card__name">基础场景</span>
+            <span className="scene-state-card__preview">母版</span>
+            <span className="scene-state-card__name">母版</span>
             <small>所有命名状态的继承源</small>
           </button>
         </li>
@@ -213,7 +213,7 @@ export function SceneStateStrip() {
           const isThumbnail = state.id === presentation.thumbnailStateId
           const overrideCount = countStateOverrides(state)
           const overrideSummary = overrideCount === 0
-            ? '继承基础，无覆盖'
+            ? '继承母版，无覆盖'
             : `${overrideCount} 项覆盖`
           const incomingCount = scene.interactions.filter((rule) =>
             rule.actions.some(({ action }) =>
@@ -286,8 +286,8 @@ export function SceneStateStrip() {
         open={pendingAction !== null}
         title={pendingAction === 'delete' ? '删除场景状态？' : '清除当前状态的覆盖？'}
         message={pendingAction === 'delete'
-          ? `“${activeState?.name ?? ''}”及其全部覆盖值将被删除，基础场景不会受影响。此操作可以撤销。`
-          : `“${activeState?.name ?? ''}”将恢复为基础场景的外观。此操作可以撤销。`}
+          ? `“${activeState?.name ?? ''}”及其全部覆盖值将被删除，母版不会受影响。此操作可以撤销。`
+          : `“${activeState?.name ?? ''}”将恢复为母版的外观。此操作可以撤销。`}
         confirmLabel={pendingAction === 'delete' ? '删除状态' : '清除覆盖'}
         danger={pendingAction === 'delete'}
         onCancel={() => setPendingAction(null)}

@@ -17,8 +17,8 @@ export const agentFileTools = (Object.keys(agentFileSchemas) as AgentFileToolNam
   description: ({
     'file.list': '列出文件夹内容。path 可用绝对路径或工作空间相对路径；省略时从会话所属位置开始。返回有界列表。',
     'file.search': '按文件名搜索文件夹及子文件夹，返回有界路径列表。path 省略时从会话所属位置开始。',
-    'file.open': '打开 Markdown、纯文本（.txt）或 V9 课件并取得当前任务的正式文档句柄；当前任务权限档决定可否修改。',
-    'file.create': '通过文件服务新建 Markdown、纯文本（.txt）或 V9 课件，并打开为正式文档。path 省略时放在会话所属文件夹；文件归属取父目录。',
+    'file.open': '打开 Markdown、纯文本（.txt）或 H5 演示（.h5lesson）并取得当前任务的正式文档句柄；当前任务权限档决定可否修改。',
+    'file.create': '通过文件服务新建 Markdown、纯文本（.txt）或 H5 演示（.h5lesson），并打开为正式文档。path 省略时放在会话所属文件夹；文件归属取父目录。',
   })[name],
   inputSchema: z.toJSONSchema(agentFileSchemas[name]),
 }))

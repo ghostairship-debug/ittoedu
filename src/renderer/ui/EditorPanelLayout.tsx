@@ -48,7 +48,7 @@ export function EditorPanelLayout({ children, className = '', chrome }: { childr
   const panel = structureOpen ? 'structure' : propertiesOpen ? 'properties' : null
   return <div ref={root} className={`${className} editor-panel-layout${compact ? ' editor-panel-layout--compact' : ''}${light ? ' editor-panel-layout--light' : ''}`}
     onKeyDown={event => { if (compact && panel && event.key === 'Escape') { event.preventDefault(); close() } }}>
-    {!light && compact && <div className="editor-panel-controls" aria-label="课件编辑面板">
+    {!light && compact && <div className="editor-panel-controls" aria-label="编辑面板">
       {(['structure', 'properties'] as const).map(value => <button key={value} type="button"
         aria-expanded={panel === value} aria-controls={`embedded-editor-${value}`}
         onClick={event => {

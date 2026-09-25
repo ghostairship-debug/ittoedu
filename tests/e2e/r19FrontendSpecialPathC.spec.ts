@@ -20,7 +20,7 @@ async function activateLesson(page: Page, folder: string, projectFile: string) {
   // V3.1：课例段已从导航移除，点树中的 .h5lesson 直接激活课例上下文。
   await page.locator('.lesson-directory-tree').getByRole('button', { name: folder, exact: true }).first().click()
   await page.locator('.lesson-directory-tree').getByRole('button', { name: projectFile, exact: true }).click()
-  await expect(page.getByRole('tab', { name: /course|新建课件/ })).toBeVisible()
+  await expect(page.getByRole('tab', { name: /course|新建 H5 演示/ })).toBeVisible()
 }
 
 test('F08 path C: h5lesson workbench continuity, scene states, undo/redo, save/reopen, real preview', async () => {
@@ -57,7 +57,7 @@ test('F08 path C: h5lesson workbench continuity, scene states, undo/redo, save/r
     await expect(page.getByRole('button', { name: /撤销/ })).toBeVisible()
     const strip = page.getByRole('region', { name: '场景状态' }).first()
     await expect(strip).toBeVisible()
-    await expect(strip.getByRole('button', { name: /基础场景/ })).toBeVisible()
+    await expect(strip.getByRole('button', { name: /母版/ })).toBeVisible()
     await page.screenshot({ path: join(evidence, 'C1-editor-in-workbench.png') })
 
     // 连续切换：文档标签 ⇄ 课件标签、停靠切换，编辑器 DOM 不重建
@@ -69,7 +69,7 @@ test('F08 path C: h5lesson workbench continuity, scene states, undo/redo, save/r
     })
     expect(probe).toBeTruthy()
     await page.getByRole('tab', { name: '材料', exact: true }).click()
-    await page.getByRole('tab', { name: /course|新建课件/ }).click()
+    await page.getByRole('tab', { name: /course|新建 H5 演示/ }).click()
     const sameNode = await page.evaluate(() => {
       const probe = (window as unknown as { __courseProbe: Element | null }).__courseProbe
       const current = document.querySelector('.lesson-course-tab')?.firstElementChild ?? null
@@ -94,7 +94,7 @@ test('F08 path C: h5lesson workbench continuity, scene states, undo/redo, save/r
     await page.getByRole('textbox', { name: '状态名称', exact: true }).fill('状态B')
     await page.getByRole('textbox', { name: '状态名称', exact: true }).press('Enter')
     await expect(strip.getByRole('button', { name: /状态B/ })).toBeVisible()
-    await strip.getByRole('button', { name: /基础场景/ }).click()
+    await strip.getByRole('button', { name: /母版/ }).click()
     await strip.getByRole('button', { name: /状态B/ }).click()
     await page.screenshot({ path: join(evidence, 'C3-scene-states.png') })
 

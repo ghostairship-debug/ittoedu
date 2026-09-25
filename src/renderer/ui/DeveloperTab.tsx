@@ -396,7 +396,7 @@ function runtimeUnavailableCopy(view: RuntimeSourceAuthoringView | null): string
     case 'invalid-session':
       return 'Runtime 编辑会话已经失效，请重新选择当前页面后再编辑。'
     case 'invalid-state':
-      return '当前呈现状态无效，请切回基础状态或有效的命名状态。'
+      return '当前呈现状态无效，请切回母版或有效的命名状态。'
     case 'runtime-missing':
       return view.label
   }
@@ -794,7 +794,7 @@ export function DeveloperTab() {
           <Code2 size={19} />
           <div>
             <strong>工程开发工作台</strong>
-            <span>受控修改课件运行时与工程数据，不开放编辑器源码、文件系统或 Shell。</span>
+            <span>受控修改 H5 演示的运行时与工程数据，不开放编辑器源码、文件系统或 Shell。</span>
           </div>
         </div>
         <div className="developer-workbench-meta">

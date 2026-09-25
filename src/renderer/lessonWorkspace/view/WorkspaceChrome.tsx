@@ -171,16 +171,16 @@ export function WorkspaceChrome({ props, layout, editorFocus = false, proPanel =
             className="lesson-modal lesson-create-form"
             role="dialog"
             aria-modal="true"
-            aria-label="新建课件"
+            aria-label="新建 H5 演示"
             onClick={(event) => event.stopPropagation()}
             onSubmit={(event) => {
               event.preventDefault();
               void actions.run(actions.createLesson);
             }}
           >
-            <h3>新建课件</h3>
+            <h3>新建 H5 演示</h3>
             <label>
-              课件名称
+              名称
               <input
                 value={state.name}
                 onChange={(event) => actions.setName(event.target.value)}
@@ -193,14 +193,14 @@ export function WorkspaceChrome({ props, layout, editorFocus = false, proPanel =
                 state.selectedDirectory
                   ? join(
                       state.selectedDirectory,
-                      state.name.trim() || "课件名称",
+                      state.name.trim() || "名称",
                     )
                   : undefined
               }
             >
               将创建：
               {state.selectedDirectory &&
-                join(state.selectedDirectory, state.name.trim() || "课件名称")}
+                join(state.selectedDirectory, state.name.trim() || "名称")}
             </p>
             <div className="lesson-modal-actions">
               <button
@@ -208,7 +208,7 @@ export function WorkspaceChrome({ props, layout, editorFocus = false, proPanel =
                 className="lesson-primary-action"
                 disabled={state.busy || !state.name.trim()}
               >
-                创建课件
+                创建
               </button>
               <button
                 type="button"

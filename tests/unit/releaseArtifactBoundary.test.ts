@@ -108,7 +108,7 @@ describe('发布物边界规则集', () => {
       'trace.diagnostic-log-file': 'editor-diagnostics.previous.jsonl',
       'trace.diagnostic-entry':
         '{"timestamp":"2026-09-21T00:00:00.000Z","source":"renderer","message":"boom"}',
-      'trace.diagnostic-report': '互动课件编辑器诊断报告\n生成时间：2026-09-21T00:00:00.000Z',
+      'trace.diagnostic-report': '果铃编辑器诊断报告\n生成时间：2026-09-21T00:00:00.000Z',
       'credential.openai-api-key': `OPENAI_API_KEY 形态：${FAKE_OPENAI_KEY}`,
       'credential.aws-access-key-id': 'AKIAIOSFODNN7EXAMPLE',
       'credential.github-token': `ghp_${'b7Kd93LmQ1x'.repeat(4)}`,

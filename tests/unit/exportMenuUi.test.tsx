@@ -50,8 +50,8 @@ function renderToolbar(
 describe('unified export menu', () => {
   it('renames the project inline and keeps the change undoable', async () => {
     renderToolbar(vi.fn())
-    fireEvent.click(screen.getByRole('button', { name: '重命名课件' }))
-    const title = screen.getByRole('textbox', { name: '课件名称' })
+    fireEvent.click(screen.getByRole('button', { name: '重命名' }))
+    const title = screen.getByRole('textbox', { name: '名称' })
     fireEvent.change(title, { target: { value: '雨中的苏轼' } })
     fireEvent.blur(title)
     await useEditorStore.getState().drainCourseDocument()
@@ -59,7 +59,7 @@ describe('unified export menu', () => {
     expect(useEditorStore.getState().dirty).toBe(true)
     useEditorStore.getState().undo()
     await useEditorStore.getState().drainCourseDocument()
-    expect(selectActiveCourseProjectDocument(useEditorStore.getState())!.title).toBe('未命名课件')
+    expect(selectActiveCourseProjectDocument(useEditorStore.getState())!.title).toBe('未命名 H5 演示')
   })
 
   it('keeps Save As, project health, and recent projects directly visible', () => {
@@ -112,7 +112,7 @@ describe('unified export menu', () => {
     ) => void>()
     renderToolbar(onExport)
 
-    fireEvent.click(screen.getByLabelText('导出课件'))
+    fireEvent.click(screen.getByLabelText('导出'))
     expect(screen.getByRole('menuitem', { name: /离线便携单 HTML/ })).toBeInTheDocument()
     expect(screen.getByRole('menuitem', { name: /在线轻量单 HTML/ })).toBeInTheDocument()
     expect(screen.getByRole('menuitem', { name: /网页包/ })).toBeInTheDocument()
@@ -123,11 +123,11 @@ describe('unified export menu', () => {
     fireEvent.click(screen.getByRole('menuitem', { name: /离线便携单 HTML/ }))
     expect(onExport).toHaveBeenLastCalledWith('single-html', 'offline-portable')
 
-    fireEvent.click(screen.getByLabelText('导出课件'))
+    fireEvent.click(screen.getByLabelText('导出'))
     fireEvent.click(screen.getByRole('menuitem', { name: /在线轻量单 HTML/ }))
     expect(onExport).toHaveBeenLastCalledWith('single-html', 'online-lightweight')
 
-    fireEvent.click(screen.getByLabelText('导出课件'))
+    fireEvent.click(screen.getByLabelText('导出'))
     fireEvent.click(screen.getByRole('menuitem', { name: /网页包/ }))
     expect(onExport).toHaveBeenCalledWith('web-package')
   })
@@ -147,7 +147,7 @@ describe('unified export menu', () => {
 
   it('does not open while the editor is busy', () => {
     renderToolbar(vi.fn(), true)
-    const trigger = screen.getByLabelText('导出课件')
+    const trigger = screen.getByLabelText('导出')
     fireEvent.click(trigger)
     expect(trigger.closest('details')).not.toHaveAttribute('open')
   })

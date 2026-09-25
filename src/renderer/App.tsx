@@ -74,7 +74,7 @@ function desktopApi() {
   if (!window.desktopAPI) {
     throw new UserFacingError(
       '桌面功能不可用',
-      '当前页面未运行在课件编辑器桌面环境中。',
+      '当前页面未运行在果铃编辑器桌面环境中。',
       `请双击 ${APP_EXECUTABLE_NAME}.exe 启动软件。`,
     )
   }
@@ -272,7 +272,7 @@ export default function App() {
     openProjectFile: () => desktopApi().openProject(),
     openWorkspaceProjectFile: async path => {
       const result = await desktopApi().lesson?.({ operation: 'open-project', path })
-      if (!result?.projectFile) throw new Error('课件文件未读取成功')
+      if (!result?.projectFile) throw new Error('文件未读取成功')
       return result.projectFile
     },
     openRecentProjectFile: (path) => desktopApi().openRecentProject({ path }),
@@ -683,8 +683,8 @@ export default function App() {
           editingItemCount > RECOMMENDED_SCENE_NODES) && (
           <>
             <span>·</span>
-            <span className="status-bar__warning" title="大型课件建议使用网页包导出，以减少启动和内存压力">
-              大型课件 · 建议网页包
+            <span className="status-bar__warning" title="大型 H5 演示建议使用网页包导出，以减少启动和内存压力">
+              大型 H5 演示 · 建议网页包
             </span>
           </>
         )}
@@ -821,7 +821,7 @@ export default function App() {
             <header className="course-preview-chrome">
               <div>
                 <h2 className="modal__title" id="course-preview-title">整课预览</h2>
-                <p className="modal__message">查看课件实际播放效果</p>
+                <p className="modal__message">查看实际播放效果</p>
               </div>
               <div className="course-preview-chrome__actions">
                 <button

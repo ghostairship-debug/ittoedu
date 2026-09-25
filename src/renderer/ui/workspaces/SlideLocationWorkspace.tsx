@@ -2464,7 +2464,7 @@ export function SlideLocationWorkspace({
         return
       }
       const point = readDropPoint(event.clientX, event.clientY)
-      if (!point) { ports.canvas.setStatus('请将媒体拖到课件画布内'); return }
+      if (!point) { ports.canvas.setStatus('请将媒体拖到画布内'); return }
       const target = { documentId: documentId ?? null, projectId: snapshot.projectId, revision: snapshot.projectRevision,
         locationId: courseLocationId, surfaceId: slideEditorView.surfaceId, sessionGeneration: snapshot.sessionGeneration }
       const raw = event.dataTransfer.getData(WORKSPACE_MEDIA_DRAG_TYPE)
@@ -2529,7 +2529,7 @@ export function SlideLocationWorkspace({
     <main
       ref={workspaceRef}
       className={`workspace workspace--${canvasMode}`}
-      aria-label="课件画布"
+      aria-label="画布"
       style={drawTool ? { cursor: 'crosshair' } : undefined}
       onDragOver={(event) => {
         if (canvasMode !== 'edit') return
@@ -2993,7 +2993,7 @@ export function SlideLocationWorkspace({
         {slideCanvas.width} × {slideCanvas.height} · {editingScope === 'global'
           ? `全局层 · ${slideEditorView?.layers.filter((layer) => layer.source === 'global').length ?? 0} 个元素`
           : `${slideEditorView?.sceneName ?? ''} · ${activePresentationStateId === null
-            ? '基础'
+            ? '母版'
             : slideEditorView?.presentation?.states.find((state) => state.active)?.name
               ?? '状态'}`}
       </div>

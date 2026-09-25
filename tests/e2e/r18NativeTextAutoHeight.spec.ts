@@ -140,7 +140,7 @@ test('Native auto-height: real tool and UI edits preserve text through history, 
     expect((await stateOf(page)).project).toEqual(final.project)
     await selectTitle(page)
     await page.screenshot({ path: join(runRoot, 'after-reopen.png') })
-    await page.getByLabel('导出课件', { exact: true }).click()
+    await page.getByLabel('导出', { exact: true }).click()
     await page.getByTestId('export-single-html').click()
     const continueExport = page.getByRole('button', { name: '继续导出', exact: true })
     if (await continueExport.isVisible({ timeout: 1000 }).catch(() => false)) await continueExport.click()
