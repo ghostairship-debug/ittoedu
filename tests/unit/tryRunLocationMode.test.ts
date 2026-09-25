@@ -5,16 +5,18 @@ import {
   selectSlideAuthoringBackend,
   useEditorStore,
 } from '@/renderer/store/editorStore'
+import { connectCourseHost, settleCourse } from '../helpers/triage-t2-course'
 
-beforeEach(() => {
-  useEditorStore.getState().createNewProject()
+beforeEach(async () => {
+  await connectCourseHost()
 })
 
 describe('Mixed try-run location mode', () => {
-  it('keeps canvasMode run when activating another surface location', () => {
-    const store = useEditorStore.getState()
-    store.addCourseContent('flow-page')
-    store.addCourseContent('spatial-page')
+  it('keeps canvasMode run when activating another surface location', async () => {
+    useEditorStore.getState().addCourseContent('flow-page')
+    await settleCourse()
+    useEditorStore.getState().addCourseContent('spatial-page')
+    await settleCourse()
     const project = selectActiveCourseProjectDocument(useEditorStore.getState())
     if (!project) throw new Error('expected course document')
     const slide = project.locations.find((location) => location.kind === 'slide-scene')

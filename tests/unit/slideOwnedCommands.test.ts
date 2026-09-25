@@ -5,6 +5,16 @@ import {
   useEditorStore,
 } from '@/renderer/store/editorStore'
 import type { SlideSceneDocument, SlideSurfaceDocument } from '@/shared/courseProjectTypes'
+import {
+  connectCourseHost,
+  formalCourse,
+  settleCourse,
+  undoSettled,
+  type CourseHost,
+} from '../helpers/triage-t2-course'
+
+let host: CourseHost
+let documentId: string
 
 const NOW_BYTES = new Uint8Array([1, 2, 3, 4])
 
@@ -25,8 +35,10 @@ function activeScene(): SlideSceneDocument {
   return scene
 }
 
-beforeEach(() => {
-  useEditorStore.getState().createNewProject()
+beforeEach(async () => {
+  const connected = await connectCourseHost()
+  host = connected.host
+  documentId = connected.documentId
 })
 
 describe('slideOwnedCommands: updateSlideSurfaceBackground', () => {
@@ -134,7 +146,7 @@ describe('slideOwnedCommands: updateSlideSurfaceBackground', () => {
     expect(noop.historyEntry).toBe(false)
   })
 
-  it('imports a new background image and assigns it in one commit', () => {
+  it('imports a new background image and assigns it in one commit', async () => {
     const surfaceId = activeSurface().id
     const store = useEditorStore.getState()
     const result = store.importSlideSurfaceBackgroundAsset(surfaceId, {
@@ -149,7 +161,10 @@ describe('slideOwnedCommands: updateSlideSurfaceBackground', () => {
     const document = selectSlideAuthoringDocument(useEditorStore.getState())!
     expect(document.assets[assetId as string]).toMatchObject({ filename: 'surface-bg.png' })
 
-    useEditorStore.getState().undo()
+    await settleCourse()
+    const depth = formalCourse(host, documentId).undoDepth
+    await undoSettled(host, documentId)
+    expect(formalCourse(host, documentId).undoDepth).toBe(depth - 1)
     expect(activeSurface().backgroundAssetId).toBeUndefined()
   })
 })
@@ -210,7 +225,7 @@ describe('slideOwnedCommands: updateSceneBackground', () => {
     expect(noop.historyEntry).toBe(false)
   })
 
-  it('imports a new background image and assigns it in one commit', () => {
+  it('imports a new background image and assigns it in one commit', async () => {
     const sceneId = activeScene().id
     const store = useEditorStore.getState()
     const result = store.importSceneBackgroundAsset(sceneId, {
@@ -225,7 +240,10 @@ describe('slideOwnedCommands: updateSceneBackground', () => {
     const document = selectSlideAuthoringDocument(useEditorStore.getState())!
     expect(document.assets[assetId as string]).toMatchObject({ filename: 'scene-bg.png' })
 
-    useEditorStore.getState().undo()
+    await settleCourse()
+    const depth = formalCourse(host, documentId).undoDepth
+    await undoSettled(host, documentId)
+    expect(formalCourse(host, documentId).undoDepth).toBe(depth - 1)
     expect(activeScene().backgroundAssetId).toBeNull()
   })
 

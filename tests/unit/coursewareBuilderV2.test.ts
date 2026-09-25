@@ -1,12 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createCoursewareBuilderV2WithOwner } from '../../src/renderer/course/coursewareBuilderV2'
 import { selectActiveCourseProjectDocument, useEditorStore } from '../../src/renderer/store/editorStore'
+import { connectCourseHost, courseContent, formalCourse, redoSettled, undoSettled } from '../helpers/triage-t2-course'
 
 const document = () => selectActiveCourseProjectDocument(useEditorStore.getState())!
 beforeEach(() => useEditorStore.getState().createNewProject())
 
 describe('same-window Builder canonical Store owner', () => {
   it('commits to the visible document and its one undo history, with real resources and stale scope rejection', async () => {
+    const { host, documentId } = await connectCourseHost()
     const owner = useEditorStore.getState().createCoursewareBuilderOwner()
     const builder = createCoursewareBuilderV2WithOwner(owner)
     const before = structuredClone(document())
@@ -19,11 +21,14 @@ describe('same-window Builder canonical Store owner', () => {
     expect(builder.finish().project).toEqual(document())
     expect(builder.finish().componentFiles).toEqual(Object.fromEntries(Object.entries(resources).map(([id, pkg]) => [id, pkg.files])))
     const committed = structuredClone(document())
-    useEditorStore.getState().undo()
-    expect(document()).toEqual(before)
-    expect(useEditorStore.getState().componentPackages).toEqual(resources)
-    useEditorStore.getState().redo()
-    expect(document()).toEqual(committed)
+    const depth = formalCourse(host, documentId).undoDepth
+    await undoSettled(host, documentId)
+    expect(formalCourse(host, documentId).undoDepth).toBe(depth - 1)
+    expect(courseContent(document())).toEqual(courseContent(before))
+    expect(structuredClone(useEditorStore.getState().componentPackages)).toEqual(resources)
+    await redoSettled(host, documentId)
+    expect(formalCourse(host, documentId).undoDepth).toBe(depth)
+    expect(courseContent(document())).toEqual(courseContent(committed))
     const oldScope = builder.createScope({ parent: { kind: 'owner' }, insertion: { kind: 'append' } })
     builder.activateScope({ locationId: before.startLocationId, owner: 'global' })
     expect(owner.readScope().owner).toBe('global')
@@ -31,8 +36,8 @@ describe('same-window Builder canonical Store owner', () => {
     const stale = await builder.execute('native.content', { operation: 'insert', template: { nativeType: 'text', text: '不得提交' } }, { kind: 'create', scope: oldScope })
     expect(stale.status).toBe('rejected')
     expect(stale.diagnostics).toEqual(expect.arrayContaining([expect.objectContaining({ code: 'owner-mismatch' })]))
-    expect(document()).toEqual(committed)
-    useEditorStore.getState().createNewFlowProject()
+    expect(courseContent(document())).toEqual(courseContent(committed))
+    await useEditorStore.getState().createCourseDocument('flow')
     expect(() => owner.readDocument()).toThrow('工程已切换')
     expect(() => owner.activate({ locationId: before.startLocationId })).toThrow('工程已切换')
     const flowOwner = useEditorStore.getState().createCoursewareBuilderOwner()

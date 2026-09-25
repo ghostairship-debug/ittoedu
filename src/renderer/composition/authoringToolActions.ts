@@ -90,7 +90,15 @@ export function createAuthoringToolActions(ports: {
           if (!session) throw new Error('当前没有有效的作者会话')
           return session.token.generation
         },
-        validateDestination(destination) { ensureCurrent(); return commitPort.validateDestination(destination) },
+        validateDestination(destination) {
+          ensureCurrent()
+          const activeScope = ports.readScope()
+          const target = destination.kind === 'update' ? destination.target : destination.scope
+          if (target.owner !== activeScope.owner || target.ownerKey !== activeScope.ownerKey || target.locationId !== activeScope.locationId) {
+            return { code: 'owner-mismatch', message: '目标范围与当前编辑范围不一致', path: ['destination', 'owner'] }
+          }
+          return commitPort.validateDestination(destination)
+        },
         commit(step) { ensureCurrent(); return !ports.hasContentDraft() && commitPort.commit(step) },
         activate(input) {
           ensureCurrent()

@@ -1,17 +1,17 @@
-import { beforeEach, describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import type { AssetMeta } from '@/shared/contracts/media-v1'
 import type { SpatialSurfaceDocument } from '@/shared/courseProjectTypes'
 import { createBlankSpatialCourseProject } from '@/renderer/project/createSpatialCourseProject'
 import { useEditorStore } from '@/renderer/store/editorStore'
+import { openCourseOnHost, settleCourse } from '../helpers/triage-t2-course'
 
-beforeEach(() => useEditorStore.getState().createNewProject())
+async function openSpatial() {
+  await openCourseOnHost(createBlankSpatialCourseProject({ now: '2026-08-19T00:00:00.000Z' }))
+}
 
 describe('Spatial addVideoNode with real session and asset', () => {
-  it('inserts video node into blank spatial project with world layer, asset entry, and sidecar bytes', () => {
-    useEditorStore.getState().loadCourseProject(
-      createBlankSpatialCourseProject({ now: '2026-08-19T00:00:00.000Z' }),
-      null,
-    )
+  it('inserts video node into blank spatial project with world layer, asset entry, and sidecar bytes', async () => {
+    await openSpatial()
     const initialSession = useEditorStore.getState().spatialSession
     expect(initialSession).not.toBeNull()
     expect(initialSession?.scope).toBe('world')
@@ -29,6 +29,7 @@ describe('Spatial addVideoNode with real session and asset', () => {
     }
     const bytes = new Uint8Array([0, 0, 0, 1])
     useEditorStore.getState().addVideoNode(asset, bytes)
+    await settleCourse()
 
     const state = useEditorStore.getState()
     expect(state.errorMessage).toBeNull()
@@ -54,11 +55,8 @@ describe('Spatial addVideoNode with real session and asset', () => {
     expect(present.revision).toBe(beforeRevision + 1)
   })
 
-  it('inserts a second video node with new id into existing spatial session', () => {
-    useEditorStore.getState().loadCourseProject(
-      createBlankSpatialCourseProject({ now: '2026-08-19T00:00:00.000Z' }),
-      null,
-    )
+  it('inserts a second video node with new id into existing spatial session', async () => {
+    await openSpatial()
     const asset1: AssetMeta = {
       id: 'asset-q6-video-1',
       filename: 'clip1.mp4',
@@ -71,6 +69,7 @@ describe('Spatial addVideoNode with real session and asset', () => {
     }
     const bytes1 = new Uint8Array([1, 1, 1, 1])
     useEditorStore.getState().addVideoNode(asset1, bytes1)
+    await settleCourse()
 
     const revisionAfterFirst = useEditorStore.getState().spatialSession!.history.present.revision
 
@@ -86,6 +85,7 @@ describe('Spatial addVideoNode with real session and asset', () => {
     }
     const bytes2 = new Uint8Array([2, 2, 2, 2])
     useEditorStore.getState().addVideoNode(asset2, bytes2)
+    await settleCourse()
 
     const state = useEditorStore.getState()
     expect(state.errorMessage).toBeNull()
