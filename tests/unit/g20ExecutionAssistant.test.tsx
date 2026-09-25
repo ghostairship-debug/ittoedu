@@ -751,8 +751,9 @@ it('displays conversation home location for folder, file, unhomed, missing, othe
   fireEvent.click(screen.getByRole('button', { name: '会话-其他空间' }))
   await waitFor(() => expect(screen.getByRole('button', { name: '会话-其他空间' })).toHaveAttribute('aria-current', 'page'))
   locationBtn = container.querySelector('.execution-assistant__location')!
-  expect(locationBtn).toHaveTextContent('其他工作空间')
-  expect(locationBtn).toHaveTextContent('workspace › Shared')
+  expect(locationBtn).toHaveTextContent('其他工作空间 · Shared')
+  expect(locationBtn).not.toHaveTextContent('workspace › Shared')
+  expect(locationBtn.getAttribute('title')).not.toContain('C:/workspace')
   fireEvent.click(locationBtn)
   expect(listener).toHaveBeenCalledWith(expect.objectContaining({
     detail: { workspaceId: 'other-ws', path: 'Shared', kind: 'folder' }

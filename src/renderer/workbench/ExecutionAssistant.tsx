@@ -920,12 +920,13 @@ export function ExecutionAssistant({ root, captureDocuments, prepareSend, api: s
   const workspaceName = root ? (root.replace(/[/\\]+$/, '').split(/[/\\]/).pop() || '工作空间') : '工作空间'
   const homePath = active?.home?.path ? active.home.path.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '') : ''
   const pathSegments = homePath ? homePath.split('/') : []
-  const formattedPath = pathSegments.length > 0 ? [workspaceName, ...pathSegments].join(' › ') : workspaceName
   const isOtherWorkspace = Boolean(active?.home?.workspaceId && active?.workspaceId && active.home.workspaceId !== active.workspaceId)
+  // A home in another workspace must not be shown under this workspace's name or root.
+  const formattedPath = isOtherWorkspace ? pathSegments.join(' › ') : pathSegments.length > 0 ? [workspaceName, ...pathSegments].join(' › ') : workspaceName
   const isMissing = Boolean(active?.home?.missing)
   const locationKind = active?.home?.kind ?? 'folder'
   const locationIcon = locationKind === 'file' ? <File size={13} className="execution-assistant__location-icon" /> : <Folder size={13} className="execution-assistant__location-icon" />
-  const fullPath = [root?.replace(/[/\\]+$/, ''), homePath].filter(Boolean).join('/')
+  const fullPath = isOtherWorkspace ? homePath : [root?.replace(/[/\\]+$/, ''), homePath].filter(Boolean).join('/')
   const locationTitle = `${fullPath ? `${fullPath}\n` : ''}所属位置只决定默认引用和新建文件的位置，不限制可修改的范围`
   const handleLocationClick = () => {
     if (!active) return

@@ -263,8 +263,6 @@ export function WorkspaceFilesTree({ directory, files, refreshVersion = 0, onFil
     if (!root || !dialog) return
     if (dialog === 'mkdir' || dialog.startsWith('create-')) {
       const filename = normalizeNewFilename(dialog as CreateFileType, name)
-
-
       void run({ type: dialog as 'mkdir' | 'create-markdown' | 'create-course' | 'create-text', ...common(), targetDirectoryId: targetDirectory!, name: filename })
     } else if (dialog === 'rename' && single) void run({ type: 'rename', ...common(), sourceEntryId: single.entryId, name: name.trim() })
     else if (dialog === 'copy' || dialog === 'move') void run({ type: dialog, ...common(), sourceEntryIds: selected.map(row => row.entry.entryId), targetDirectoryId: destination ?? root.rootEntryId })
