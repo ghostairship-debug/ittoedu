@@ -1,6 +1,6 @@
 import { controllerMetadata } from '../fixtures/teacherController'
 import { controllerPackage } from '../fixtures/teacherController'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 import { makeAuthoringAddress } from '@/shared/authoringAddress'
 import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
 import {
@@ -45,6 +45,9 @@ import {
 } from '@/renderer/course/slideEditorCommands'
 import { updateSlideNativeLayerContent } from '@/renderer/course/v9SlideContentCommands'
 import { constrainControllerDisplayFrame, controllerDisplayFrame } from '@/renderer/authoring/controllerDisplayBounds'
+import { withDefaultComponentController } from '@/renderer/components/teacherControllerComponent'
+import { parseComponentPackageFiles } from '../../src/core/drivers/codecs/importComponentPackage'
+import { openCourseOnHost } from '../helpers/triage-t2-course'
 
 /**
  * V9 candidate fixture. Proves canvas hit / selection / transform / viewport.
@@ -53,6 +56,28 @@ import { constrainControllerDisplayFrame, controllerDisplayFrame } from '@/rende
 const NOW = '2026-08-17T14:20:00.000Z'
 const VIEWPORT = { x: 0, y: 0, width: 1280, height: 720 }
 const VIEW = { viewport: VIEWPORT, zoom: 1, pan: { x: 0, y: 0 } }
+
+/** Real manifest/runtime bytes: the document host verifies every referenced package. */
+function createQuizComponentPackage() {
+  const manifest = {
+    schemaVersion: 4, runtimeApiVersion: 4, renderMode: 'dom', supportedScopes: ['scene'],
+    id: 'component.quiz', version: '4.0.0', name: 'Quiz', entry: 'runtime.js',
+    description: '测试用问答组件。',
+    defaultSize: { width: 200, height: 160 }, minSize: { width: 100, height: 80 },
+    preserveAspectRatio: false, assets: {},
+    defaultProps: { prompt: '题' },
+    editor: { properties: [
+      { key: 'prompt', label: '题目', type: 'text', required: true },
+    ] },
+  }
+  const encode = (value: string) => new TextEncoder().encode(value)
+  return parseComponentPackageFiles({
+    'manifest.json': encode(JSON.stringify(manifest)),
+    'runtime.js': encode('window.CoursewareComponent.define({componentApiVersion:4,mount(){return {destroy(){}}}})'),
+  })
+}
+
+const quizComponentPackage = createQuizComponentPackage()
 
 function textStyle() {
   return {
@@ -331,14 +356,7 @@ function v9ViewportFixture(): CourseProjectDocument {
       },
     },
     componentPackages: { ...controllerMetadata,
-      'component.quiz': {
-        packageId: 'component.quiz',
-        version: '4.0.0',
-        name: 'Quiz',
-        manifestPath: 'components/component.quiz/manifest.json',
-        runtimePath: 'components/component.quiz/runtime.js',
-        contentSha256: '1'.repeat(64),
-      },
+      'component.quiz': quizComponentPackage.metadata,
     },
     designTokens: {
       fonts: [{
@@ -422,6 +440,24 @@ function v9LineWorkspaceFixture(): CourseProjectDocument {
   return courseProjectDocumentSchema.parse(base)
 }
 
+/**
+ * Open the fixture as the formal document. The projected Slide backend replaces the
+ * old inject-only candidate: preview keeps working on the live session, and commits
+ * now land on the document host like they do in the real Workspace.
+ */
+async function openFixture(fixture: CourseProjectDocument) {
+  await openCourseOnHost(fixture, {
+    assetFiles: {
+      photo: new Uint8Array(4),
+      clip: new Uint8Array(8),
+    },
+    componentPackages: {
+      ...withDefaultComponentController(fixture).componentPackages,
+      [quizComponentPackage.manifest.id]: quizComponentPackage,
+    },
+  })
+}
+
 function storeAuthoringPorts() {
   return {
     getBackend: () => selectSlideAuthoringBackend(useEditorStore.getState()),
@@ -436,12 +472,6 @@ function createController() {
   return createSlideWorkspaceAuthoringController(storeAuthoringPorts())
 }
 
-function injectCandidate() {
-  const backend = createSlideAuthoringBackend(openSlideAuthoringSession(v9ViewportFixture()))
-  useEditorStore.getState().injectV9SlideCandidateBackend(backend)
-  return backend
-}
-
 function nativeFrame(id: string) {
   const document = selectSlideAuthoringBackend(useEditorStore.getState())?.getSession().history.present
   const surface = document?.surfaces.find((candidate) => candidate.type === 'slide')
@@ -451,13 +481,8 @@ function nativeFrame(id: string) {
   return { ...item.frame, rotation: item.rotation }
 }
 
-beforeEach(() => {
-  useEditorStore.getState().clearV9SlideCandidateBackend()
-  useEditorStore.getState().createNewProject()
-})
-
-afterEach(() => {
-  useEditorStore.getState().clearV9SlideCandidateBackend()
+beforeEach(async () => {
+  await openFixture(v9ViewportFixture())
 })
 
 describe('V9 Slide viewport adapter', () => {
@@ -482,8 +507,7 @@ describe('V9 Slide viewport adapter', () => {
   })
 
   it('keeps a dragged teacher launcher in Slide while preview and commit retain its full authoring dimensions', () => {
-    const backend = injectCandidate()
-    backend.setScope('global')
+    useEditorStore.getState().setEditingScope('global')
     const controller = createController()
     const mount = document.createElement('div')
     mount.dataset.controllerAuthoringId = 'teacher-ctrl'
@@ -552,7 +576,6 @@ describe('V9 Slide viewport adapter', () => {
   })
 
   it('maps single, additive, marquee and layer selection to the same SlideAuthoringTarget', () => {
-    injectCandidate()
     const controller = createController()
     const canvas = controller.pointerDown({ x: 200, y: 150 }, VIEW)
     if (canvas.kind !== 'slide-authoring') throw new Error('expected V9')
@@ -600,7 +623,6 @@ describe('V9 Slide viewport adapter', () => {
   })
 
   it('keeps object, selection box, rotate handle and eight handles on one viewport transform', () => {
-    injectCandidate()
     const controller = createController()
     controller.selectFromLayerIds(['slide-title'], VIEW)
     const overlay = controller.overlayGeometry(VIEW)
@@ -630,7 +652,6 @@ describe('V9 Slide viewport adapter', () => {
   })
 
   it('previews west/north resize on pointermove and commits transformSlideNativeLayers once on pointerup', () => {
-    injectCandidate()
     const controller = createController()
     controller.selectFromLayerIds(['slide-title'], VIEW)
     const west = stageResizeHandleWorldPoint(
@@ -709,7 +730,7 @@ describe('V9 Slide viewport adapter', () => {
   })
 
   it('hits image, video, Component and Runtime through the Phaser adapter without a game loop', () => {
-    const backend = injectCandidate()
+    const backend = selectSlideAuthoringBackend(useEditorStore.getState())!
     const session = backend.getSession()
     const surface = session.history.present.surfaces.find((candidate) => candidate.type === 'slide')
     if (!surface || surface.type !== 'slide') throw new Error('expected slide')
@@ -760,7 +781,7 @@ describe('V9 Slide viewport adapter', () => {
   })
 
   it('keeps formula, rotated thin Shape, and surface-owner hits in the V9 geometry adapter', () => {
-    const backend = injectCandidate()
+    const backend = selectSlideAuthoringBackend(useEditorStore.getState())!
     const document = backend.getSession().history.present
     const surface = document.surfaces.find((candidate) => candidate.type === 'slide')
     if (!surface || surface.type !== 'slide') throw new Error('expected slide')
@@ -782,7 +803,6 @@ describe('V9 Slide viewport adapter', () => {
   })
 
   it('lets locked items be selected but rejects transform writes', () => {
-    injectCandidate()
     const controller = createController()
     const selected = controller.pointerDown({ x: 200, y: 250 }, VIEW)
     if (selected.kind !== 'slide-authoring') throw new Error('expected V9')
@@ -808,7 +828,6 @@ describe('V9 Slide viewport adapter', () => {
   })
 
   it('paints pointermove preview onto SceneNodes without committing the native frame', () => {
-    injectCandidate()
     const controller = createController()
     controller.pointerDown({ x: 200, y: 150 }, VIEW)
     const moved = controller.pointerMove({ x: 260, y: 190 }, VIEW)
@@ -827,12 +846,11 @@ describe('V9 Slide viewport adapter', () => {
   })
 
   it('transforms global Native layers on global scope without touching scene layerItems and edits the component teacher controller', () => {
-    const backend = injectCandidate()
     const controller = createController()
 
     // Switch to global scope
-    const scopeResult = backend.setScope('global')
-    expect(scopeResult.ok).toBe(true)
+    useEditorStore.getState().setEditingScope('global')
+    expect(selectSlideAuthoringBackend(useEditorStore.getState())!.getSession().scope).toBe('global')
 
     // Select global-banner
     const selectBanner = controller.selectFromLayerIds(['global-banner'], VIEW)
@@ -942,14 +960,8 @@ describe('V9 Slide viewport adapter', () => {
   })
 
   describe('line handle hit-test priority and snap disabling (workspaceSlideAuthoring hitHandle/computeLineDrag)', () => {
-    function injectLineFixture() {
-      const backend = createSlideAuthoringBackend(openSlideAuthoringSession(v9LineWorkspaceFixture()))
-      useEditorStore.getState().injectV9SlideCandidateBackend(backend)
-      return backend
-    }
-
-    it('resolves a selected line handle over a coincident resize handle', () => {
-      injectLineFixture()
+    it('resolves a selected line handle over a coincident resize handle', async () => {
+      await openFixture(v9LineWorkspaceFixture())
       const controller = createController()
       controller.selectFromLayerIds(['slide-line'], VIEW)
 
@@ -980,8 +992,8 @@ describe('V9 Slide viewport adapter', () => {
     // first case's commit would otherwise change 'slide-line's frame/
     // geometry out from under the second case's hand-computed expectation.
 
-    it('snaps a line handle drag to a nearby guide without Alt', () => {
-      injectLineFixture()
+    it('snaps a line handle drag to a nearby guide without Alt', async () => {
+      await openFixture(v9LineWorkspaceFixture())
       const controller = createController()
       controller.selectFromLayerIds(['slide-line'], VIEW)
       controller.pointerDown({ x: 300, y: 350 }, VIEW)
@@ -996,8 +1008,8 @@ describe('V9 Slide viewport adapter', () => {
       expect(nativeFrame('slide-line')).toMatchObject({ x: 200, y: 347, width: 300, height: 16 })
     })
 
-    it('lets Alt bypass that same snap, committing the raw pointer position instead', () => {
-      injectLineFixture()
+    it('lets Alt bypass that same snap, committing the raw pointer position instead', async () => {
+      await openFixture(v9LineWorkspaceFixture())
       const controller = createController()
       controller.selectFromLayerIds(['slide-line'], VIEW)
       controller.pointerDown({ x: 300, y: 350 }, VIEW)
