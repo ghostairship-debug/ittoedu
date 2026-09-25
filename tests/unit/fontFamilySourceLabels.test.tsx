@@ -37,11 +37,16 @@ function stubFontFaceSet(check: (font: string, text?: string) => boolean) {
   return spy
 }
 
-let originalFonts: PropertyDescriptor | undefined
+import { createBlankCourseProject } from '@/core/course/createCourseProject'
+import { createCourseStoreHost } from '../helpers/courseStoreHost'
 
-beforeEach(() => {
+let originalFonts: PropertyDescriptor | undefined
+let host: Awaited<ReturnType<typeof createCourseStoreHost>>
+
+beforeEach(async () => {
   originalFonts = Object.getOwnPropertyDescriptor(document, 'fonts')
-  useEditorStore.getState().createNewProject()
+  host = await createCourseStoreHost()
+  await host.open(createBlankCourseProject({ includeDefaultController: false, controls: 'none' }))
 })
 
 afterEach(() => {
@@ -103,18 +108,19 @@ describe('font family availability probe', () => {
 })
 
 describe('font family picker labelling', () => {
-  function openFontList() {
+  async function openFontList() {
     const store = useEditorStore.getState()
     store.addTextNode()
+    await store.drainCourseDocument()
     expect(selectActiveScene(useEditorStore.getState()).nodes).toHaveLength(1)
     render(<PropertiesTab onReplaceImage={() => undefined} />)
     fireEvent.focus(screen.getByRole('combobox', { name: '字体' }))
     return screen.getByRole('listbox', { name: '常用字体' })
   }
 
-  it('tags each option with its class and shows the cost of both groups', () => {
+  it('tags each option with its class and shows the cost of both groups', async () => {
     stubFontFaceSet((font) => font.includes(BUNDLED_TEXT_FONT_FAMILY))
-    const listbox = openFontList()
+    const listbox = await openFontList()
 
     const bundled = screen.getByRole('option', {
       name: new RegExp(`${BUNDLED_TEXT_FONT_FAMILY}，内置字体，可用$`),
@@ -144,9 +150,9 @@ describe('font family picker labelling', () => {
     expect(screen.getAllByTestId('font-family-group-system')).toHaveLength(1)
   })
 
-  it('repeats the cost of whichever class survives filtering', () => {
+  it('repeats the cost of whichever class survives filtering', async () => {
     stubFontFaceSet(() => true)
-    openFontList()
+    await openFontList()
     fireEvent.change(screen.getByRole('combobox', { name: '字体' }), {
       target: { value: 'Kai' },
     })

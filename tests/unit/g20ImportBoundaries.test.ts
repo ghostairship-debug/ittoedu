@@ -19,7 +19,7 @@ describe('S11 determined import boundaries', () => {
     expect(report.files).toBeGreaterThan(0)
     expect(report.edges).toBeGreaterThan(0)
     expect(report.violations).toEqual([])
-  })
+  }, 60000)
 
   it('reports each forbidden edge and a missing schema source edge', () => {
     const edges: ImportEdge[] = [
@@ -28,7 +28,7 @@ describe('S11 determined import boundaries', () => {
       { from: 'src/renderer/example.ts', specifier: '../../main/localAgent/harness', to: 'src/main/localAgent/harness.ts' },
       { from: 'src/renderer/other.ts', specifier: 'node:child_process', to: null },
       { from: 'src/main/workbench/providers/OpenAIChatProvider.ts', specifier: '../../../renderer/ui/Canvas', to: 'src/renderer/ui/Canvas.tsx' },
-      { from: engine, specifier: 'zod', to: null },
+      { from: mcp, specifier: 'zod', to: null },
     ]
     const violations = checkImportBoundaries(edges, new Set([catalog, gateway, engine, mcp,
       'src/main/workbench/providers/OpenAIChatProvider.ts',

@@ -1,5 +1,6 @@
 import { resolveSlideSelectionLayer } from '../../workbench/SelectionContextController'
 import { NativeSelectionContext } from '../../workbench/NativeSelectionContext'
+import { QUICK_BAR_SELECTOR } from '../../editing/quickbar/usePointerGesture'
 import { canEditLayerInScope } from '../../../shared/teacherControllerRole'
 import { useControllerDisplayRevision } from '../../authoring/controllerDisplayBounds'
 import {
@@ -2506,6 +2507,8 @@ export function SlideLocationWorkspace({
         setZoom(view.zoom + (event.deltaY < 0 ? 0.1 : -0.1))
       }}
       onPointerDownCapture={(event) => {
+        // The selection quick bar is portaled but still a React child: its presses must not hit-test the stage below.
+        if (event.target instanceof Element && event.target.closest(QUICK_BAR_SELECTOR)) return
         if (canvasMode === 'edit' && event.button === 0 &&
           activeTextPreview?.target.kind === 'course-object') {
           const domItemId = event.target instanceof Element

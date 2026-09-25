@@ -17,15 +17,21 @@ vi.mock('@/shared/courseProjectHealth', async (importOriginal) => {
   }
 })
 
-beforeEach(() => {
-  useEditorStore.getState().createNewProject()
+import { createBlankCourseProject } from '@/core/course/createCourseProject'
+import { createCourseStoreHost } from '../helpers/courseStoreHost'
+
+let host: Awaited<ReturnType<typeof createCourseStoreHost>>
+
+beforeEach(async () => {
+  host = await createCourseStoreHost()
+  await host.open(createBlankCourseProject({ includeDefaultController: false, controls: 'none' }))
   vi.mocked(collectCourseProjectHealth).mockClear().mockReturnValue([])
 })
 
 afterEach(() => cleanup())
 
 describe('ProjectHealthPanel on-demand analysis', () => {
-  it('uses the latest V9 document and archive files only after opening', () => {
+  it('uses the latest V9 document and archive files only after opening', async () => {
     const onClose = vi.fn()
     const { rerender } = render(
       <ProjectHealthPanel open={false} onClose={onClose} />,
@@ -36,6 +42,7 @@ describe('ProjectHealthPanel on-demand analysis', () => {
 
     const staleProject = selectActiveCourseProjectDocument(useEditorStore.getState())!
     useEditorStore.getState().addTextNode()
+    await useEditorStore.getState().drainCourseDocument()
     const latestState = useEditorStore.getState()
     expect(selectActiveCourseProjectDocument(latestState)).not.toBe(staleProject)
 

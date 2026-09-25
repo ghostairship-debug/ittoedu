@@ -13,6 +13,8 @@ import {
 } from '@/renderer/store/editorStore'
 import { Workspace } from '@/renderer/ui/Workspace'
 import { mountSpatialLocationTryRun } from '@/renderer/ui/spatialLocationTryRun'
+import { createCourseStoreHost } from '../helpers/courseStoreHost'
+import { createBlankSpatialCourseProject } from '@/renderer/project/createSpatialCourseProject'
 
 vi.mock('@/renderer/phaser/createEditorGame', () => ({
   createEditorGame: () => ({
@@ -22,19 +24,20 @@ vi.mock('@/renderer/phaser/createEditorGame', () => ({
   }),
 }))
 
-beforeEach(() => {
-  useEditorStore.getState().createNewProject()
+let storeHost: Awaited<ReturnType<typeof createCourseStoreHost>>
+
+beforeEach(async () => {
+  storeHost = await createCourseStoreHost()
+  await storeHost.open(createBlankSpatialCourseProject({ includeDefaultController: false, controls: 'none' }))
 })
 
 afterEach(() => {
   cleanup()
-  useEditorStore.getState().createNewProject()
   document.body.replaceChildren()
 })
 
 describe('Spatial camera session and try-run host', () => {
   it('changes sessionCamera without writing revision', () => {
-    useEditorStore.getState().createNewSpatialProject()
     const before = selectActiveCourseProjectDocument(useEditorStore.getState())
     expect(before).toBeTruthy()
     const revision = before!.revision
@@ -48,7 +51,6 @@ describe('Spatial camera session and try-run host', () => {
   })
 
   it('mounts SpatialSurfaceHost for location try-run and resumes without editor sessionCamera', async () => {
-    useEditorStore.getState().createNewSpatialProject()
     useEditorStore.getState().runSpatialCommand((session) => zoomSpatialSessionCamera(session, 2.4))
     expect(useEditorStore.getState().spatialSession?.sessionCamera.zoom).toBe(2.4)
 
@@ -84,7 +86,6 @@ describe('Spatial camera session and try-run host', () => {
   })
 
   it('copies sessionCamera onto the typed view without writing Course Project revision', () => {
-    useEditorStore.getState().createNewSpatialProject()
     const session = useEditorStore.getState().spatialSession
     expect(session).toBeTruthy()
     const revision = session!.history.present.revision
@@ -107,7 +108,6 @@ describe('Spatial camera session and try-run host', () => {
   })
 
   it('rejects a typed Spatial view without an active session camera', () => {
-    useEditorStore.getState().createNewSpatialProject()
     const session = useEditorStore.getState().spatialSession
     expect(session).toBeTruthy()
 
@@ -119,7 +119,6 @@ describe('Spatial camera session and try-run host', () => {
   })
 
   it('keeps the root Workspace on the Spatial fail-loud shell when its session is missing', () => {
-    useEditorStore.getState().createNewSpatialProject()
     expect(useEditorStore.getState().courseAuthoringSession?.token.surfaceType).toBe('spatial-2d')
     useEditorStore.setState({ spatialSession: null })
 

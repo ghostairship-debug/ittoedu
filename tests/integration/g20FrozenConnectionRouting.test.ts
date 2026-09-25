@@ -17,7 +17,7 @@ afterEach(async () => {
   for (const server of servers.splice(0)) await new Promise<void>(resolve => { server.closeAllConnections(); server.close(() => resolve()) })
   for (const root of roots.splice(0)) {
     if (!path.resolve(root).startsWith(path.resolve(os.tmpdir()) + path.sep)) throw new Error('fixture outside temp')
-    await fs.rm(root, { recursive: true, force: true })
+    await fs.rm(root, { recursive: true, force: true, maxRetries: 8, retryDelay: 25 })
   }
 })
 
@@ -86,7 +86,7 @@ it('freezes the active Token Plan route through tool continuation while a later 
     if (request.url === '/token/v1/chat/completions' && received.length === 1) {
       await gate
       const references = JSON.parse(fixed!.slice(fixed!.indexOf('：') + 1)) as Array<{ writable: Array<{ target: string }> }>
-      const name = body.tools.find(tool => tool.function.description.includes('原位替换'))?.function.name
+      const name = body.tools.find(tool => tool.function.description.includes('只替换已授权 Markdown 范围'))?.function.name
       if (!name) throw new Error('text replace tool unavailable')
       sse(response, 'token-actual', [
         { id: 'token-response-1', object: 'chat.completion.chunk', model: 'token-actual', choices: [{ index: 0, delta: { role: 'assistant', tool_calls: [{ index: 0, id: 'token-tool-1', type: 'function', function: { name, arguments: JSON.stringify({ target: references[0]!.writable[0]!.target, content: 'first changed\n' }) } }] }, finish_reason: null }] },

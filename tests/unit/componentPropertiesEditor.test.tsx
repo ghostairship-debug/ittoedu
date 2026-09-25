@@ -1,7 +1,8 @@
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { useState } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { ComponentManifestV4 } from '@/shared/componentTypes'
+import type { ComponentManifestV4, ComponentPackageData } from '@/shared/componentTypes'
+import { componentContentSha256 } from '@/shared/componentContentIntegrity'
 import type { AssetMeta } from '@/shared/contracts/media-v1'
 import {
   ComponentPropertiesEditor,
@@ -19,6 +20,7 @@ import {
   useEditorStore,
 } from '@/renderer/store/editorStore'
 import { applyTextRunEdits, type TextRunEdit } from '@/shared/textRuns'
+import { createTriageT4StoreHost } from '../helpers/triage-t4-store-host'
 
 function activeHistory() {
   const state = useEditorStore.getState()
@@ -257,19 +259,32 @@ describe('ComponentPropertiesEditor', () => {
 })
 
 describe('ComponentsTab component presets', () => {
-  it('shows presets as independent add choices and applies their props', () => {
-    useEditorStore.getState().createNewProject()
-    useEditorStore.getState().importComponentPackage({
+  it('shows presets as independent add choices and applies their props', async () => {
+    const host = await createTriageT4StoreHost()
+    const runtimeSource = 'window.CoursewareComponent.define({id:"com.example.editor",runtimeApiVersion:4,create:function(){return{destroy:function(){}}}})'
+    const files = {
+      'manifest.json': new TextEncoder().encode(JSON.stringify(manifest)),
+      'runtime.js': new TextEncoder().encode(runtimeSource),
+    }
+    const pkg: ComponentPackageData = {
       manifest,
-      runtimeSource: 'window.CoursewareComponent.define({id:"com.example.editor",runtimeApiVersion:4,create:function(){return{destroy:function(){}}}})',
-      files: {},
-    })
+      runtimeSource,
+      files,
+      contentSha256: componentContentSha256(files),
+    }
+    host.registerPackageData(pkg)
+    useEditorStore.getState().importComponentPackage(pkg)
+    await useEditorStore.getState().drainCourseDocument()
+
     const originalGetContext = HTMLCanvasElement.prototype.getContext
     HTMLCanvasElement.prototype.getContext = () => null
     try {
-      const historyLengthBeforeInsert = activeHistory().past.length
       render(<ComponentsTab />)
+      const documentId = useEditorStore.getState().courseDocument.documentId!
+      const depthBeforeInsert = host.registry.get(documentId).read().undoDepth
       fireEvent.click(within(screen.getByLabelText('属性组件预设')).getByRole('button', { name: '即用' }))
+      await useEditorStore.getState().drainCourseDocument()
+      expect(host.registry.get(documentId).read().undoDepth).toBe(depthBeforeInsert + 1)
 
       const node = selectActiveScene(useEditorStore.getState()).nodes[0]
       expect(node).toMatchObject({
@@ -277,26 +292,36 @@ describe('ComponentsTab component presets', () => {
         name: '属性组件 · 即用',
         props: { title: '预设标题' },
       })
-      expect(activeHistory().past).toHaveLength(historyLengthBeforeInsert + 1)
       useEditorStore.getState().undo()
-      expect(selectActiveScene(useEditorStore.getState()).nodes).toHaveLength(0)
+      await waitFor(() => expect(selectActiveScene(useEditorStore.getState()).nodes).toHaveLength(0))
     } finally {
       HTMLCanvasElement.prototype.getContext = originalGetContext
     }
   })
 
-  it('keeps nested-content presets available for scene component instances', () => {
-    useEditorStore.getState().createNewProject()
-    useEditorStore.getState().importComponentPackage({
+  it('keeps nested-content presets available for scene component instances', async () => {
+    const host = await createTriageT4StoreHost()
+    const runtimeSource = 'window.CoursewareComponent.define({id:"com.example.editor-nested",runtimeApiVersion:4,create:function(){return{destroy:function(){}}}})'
+    const files = {
+      'manifest.json': new TextEncoder().encode(JSON.stringify(nestedManifest)),
+      'runtime.js': new TextEncoder().encode(runtimeSource),
+    }
+    const pkg: ComponentPackageData = {
       manifest: nestedManifest,
-      runtimeSource: 'window.CoursewareComponent.define({id:"com.example.editor-nested",runtimeApiVersion:4,create:function(){return{destroy:function(){}}}})',
-      files: {},
-    })
+      runtimeSource,
+      files,
+      contentSha256: componentContentSha256(files),
+    }
+    host.registerPackageData(pkg)
+    useEditorStore.getState().importComponentPackage(pkg)
+    await useEditorStore.getState().drainCourseDocument()
+
     const originalGetContext = HTMLCanvasElement.prototype.getContext
     HTMLCanvasElement.prototype.getContext = () => null
     try {
       render(<ComponentsTab />)
       fireEvent.click(within(screen.getByLabelText('嵌套内容属性组件预设')).getByRole('button', { name: '即用' }))
+      await useEditorStore.getState().drainCourseDocument()
 
       const node = selectActiveScene(useEditorStore.getState()).nodes[0]
       expect(node).toMatchObject({

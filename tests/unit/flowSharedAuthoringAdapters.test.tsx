@@ -67,6 +67,7 @@ import { buildFlowEditorView, captureFlowEditorAuthoringTarget } from '@/rendere
 import { applyEditorTransactionStep, createEditorTransactionStep } from '@/renderer/authoring/editorTransaction'
 import type { HistoryResourceState } from '@/renderer/store/courseResourceState'
 import { useEditorStore } from '@/renderer/store/editorStore'
+import { createCourseStoreHostWithPackages } from '../helpers/triage-t3-courseStoreHost'
 import { parseComponentPackageFiles } from '../../src/core/drivers/codecs/importComponentPackage'
 import { componentPackageMeta } from '@/shared/componentPackageMeta'
 import { FlowPropertiesPanel } from '@/renderer/ui/properties/FlowPropertiesPanel'
@@ -123,7 +124,7 @@ function courseShell(): Omit<CourseProjectDocument, 'locations' | 'startLocation
         filename: 'cover.png',
         mimeType: 'image/png',
         kind: 'image',
-        path: 'media/cover.png',
+        path: 'assets/cover.png',
         byteLength: 1024,
         width: 640,
         height: 360,
@@ -133,7 +134,7 @@ function courseShell(): Omit<CourseProjectDocument, 'locations' | 'startLocation
         filename: 'clip.mp4',
         mimeType: 'video/mp4',
         kind: 'video',
-        path: 'media/clip.mp4',
+        path: 'assets/clip.mp4',
         byteLength: 2048,
         width: 1280,
         height: 720,
@@ -143,7 +144,7 @@ function courseShell(): Omit<CourseProjectDocument, 'locations' | 'startLocation
         filename: 'voice.mp3',
         mimeType: 'audio/mpeg',
         kind: 'audio',
-        path: 'media/voice.mp3',
+        path: 'assets/voice.mp3',
         byteLength: 512,
       },
       'asset-fallback': {
@@ -151,7 +152,7 @@ function courseShell(): Omit<CourseProjectDocument, 'locations' | 'startLocation
         filename: 'fallback.png',
         mimeType: 'image/png',
         kind: 'image',
-        path: 'media/fallback.png',
+        path: 'assets/fallback.png',
         byteLength: 64,
         width: 120,
         height: 80,
@@ -805,13 +806,11 @@ describe('Flow shared authoring adapters', () => {
         finishAdmission = resolve
       })),
     })
+    const host = await createCourseStoreHostWithPackages({
+      [componentManifest.id]: packageData,
+    })
     try {
-      useEditorStore.getState().loadCourseProject(
-        fixture.project,
-        'C:\\flow-conversion.h5lesson',
-        {},
-        { [componentManifest.id]: packageData },
-      )
+      await host.open(fixture.project)
       useEditorStore.getState().applyFlowSelection(selectFlowOverlay(
         fixture.project,
         'h1',
@@ -830,6 +829,7 @@ describe('Flow shared authoring adapters', () => {
       )
       await vi.waitFor(() => expect(finishAdmission).not.toBeNull())
       useEditorStore.getState().addTextNode()
+      await useEditorStore.getState().drainCourseDocument()
       const deliberatelyChanged = useEditorStore.getState().flowSession!.history.present
       finishAdmission!({
         ok: true,
