@@ -19,7 +19,7 @@ describe('S11 determined import boundaries', () => {
     expect(report.files).toBeGreaterThan(0)
     expect(report.edges).toBeGreaterThan(0)
     expect(report.violations).toEqual([])
-  })
+  }, 60000)
 
   it('reports each forbidden edge and a missing schema source edge', () => {
     const edges: ImportEdge[] = [

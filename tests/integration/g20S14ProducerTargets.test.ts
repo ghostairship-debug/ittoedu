@@ -343,6 +343,6 @@ it('keeps a legal small Native text edit committed once while reporting shrink, 
   } finally {
     vi.restoreAllMocks()
     if (!path.resolve(root).startsWith(path.resolve(tmpdir()) + path.sep)) throw new Error('Unsafe temp directory')
-    await rm(root, { recursive: true, force: true })
+    await rm(root, { recursive: true, force: true, maxRetries: 8, retryDelay: 25 })
   }
 })
