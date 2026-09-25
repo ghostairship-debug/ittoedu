@@ -7,10 +7,6 @@ import {
   addSlideImageLayer,
   addSlideRuntimeLayer,
 } from '@/renderer/course/v9SlideContentCommands'
-import {
-  createSlideAuthoringBackend,
-  openSlideAuthoringSession,
-} from '@/renderer/course/slideAuthoringBackend'
 import { onElementAnimationPreviewRequested } from '@/renderer/phaser/elementAnimationPreviewBus'
 import {
   selectEditingNodes,
@@ -33,6 +29,13 @@ import {
   type SlideWorkspaceAuthoringPorts,
 } from '@/renderer/ui/workspaceSlideAuthoring'
 import { hitTestV9SlideLayerItems } from '@/renderer/phaser/v9SlideHitAdapter'
+import {
+  assignedRedoDepth,
+  assignedUndoDepth,
+  openAssignedCourse,
+  settleAssignedCourse,
+  undoAssignedCourse,
+} from '../helpers/triage-t5-courseHost'
 
 /**
  * Proves R2-Z wiring: same V8 UI components against the R3-CUT default V9 Slide candidate.
@@ -130,12 +133,12 @@ function v9EmptySlideFixture() {
   })
 }
 
-function injectCandidate() {
-  const backend = createSlideAuthoringBackend(
-    openSlideAuthoringSession(v9EmptySlideFixture()),
-  )
-  useEditorStore.getState().injectV9SlideCandidateBackend(backend)
-  return backend
+/** The fixture declares one 8-byte image asset, so its bytes must travel with it. */
+const FIXTURE_ASSET_FILES = { 'asset-photo': new Uint8Array(8) }
+
+/** Open the fixture as the real Main-process document; the Store is a projection. */
+async function injectCandidate() {
+  return openAssignedCourse(v9EmptySlideFixture(), FIXTURE_ASSET_FILES)
 }
 
 function storeAuthoringPorts(): SlideWorkspaceAuthoringPorts {
@@ -190,18 +193,16 @@ function nativeFrame(layerItemId: string) {
   return item.frame
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(
     drawingContext(),
   )
-  useEditorStore.getState().clearV9SlideCandidateBackend()
-  useEditorStore.getState().createNewProject()
+  await injectCandidate()
 })
 
 afterEach(() => {
   cleanup()
   vi.restoreAllMocks()
-  useEditorStore.getState().clearV9SlideCandidateBackend()
 })
 
 function slideSceneLayerItems() {
@@ -212,7 +213,7 @@ function slideSceneLayerItems() {
 }
 
 describe('V9 slide product integration on the real V8 UI', () => {
-  it('defaults to the V9 slide authoring backend and writes inserted text into the candidate document', () => {
+  it('defaults to the V9 slide authoring backend and writes inserted text into the candidate document', async () => {
     expect(selectSlideBackendKind(useEditorStore.getState())).toBe('slide-authoring')
     expect(selectSlideAuthoringBackend(useEditorStore.getState())).not.toBeNull()
     expect(selectSlideAuthoringSnapshot(useEditorStore.getState())).not.toBeNull()
@@ -224,6 +225,7 @@ describe('V9 slide product integration on the real V8 UI', () => {
     const nodesBefore = selectEditingNodes(useEditorStore.getState())
     render(<ElementsTab onAddImage={() => undefined} />)
     fireEvent.click(screen.getByRole('button', { name: '文本' }))
+    await settleAssignedCourse()
     expect(selectEditingNodes(useEditorStore.getState())).toHaveLength(nodesBefore.length + 1)
     expect(selectEditingNodes(useEditorStore.getState()).filter(node => !nodesBefore.some(before => before.id === node.id))).toMatchObject([{ type: 'text' }])
     expect(selectSlideAuthoringSnapshot(useEditorStore.getState())?.revision).toBe(revisionBefore + 1)
@@ -232,7 +234,7 @@ describe('V9 slide product integration on the real V8 UI', () => {
     ))).toBe(true)
   })
 
-  it('inserts a table and all five chart types through the Elements tab into the candidate document', () => {
+  it('inserts a table and all five chart types through the Elements tab into the candidate document', async () => {
     const revisionBefore = selectSlideAuthoringSnapshot(useEditorStore.getState())?.revision ?? 0
     render(<ElementsTab onAddImage={() => undefined} />)
 
@@ -241,6 +243,7 @@ describe('V9 slide product integration on the real V8 UI', () => {
       fireEvent.click(screen.getByTestId('add-chart'))
       fireEvent.click(screen.getByTestId(`add-chart-${chartType}`))
     }
+    await settleAssignedCourse()
 
     const items = slideSceneLayerItems()
     const tableItem = items.find((item) => (
@@ -276,8 +279,8 @@ describe('V9 slide product integration on the real V8 UI', () => {
     expect(selectSlideAuthoringDocument(useEditorStore.getState())?.schemaVersion).toBe(9)
   })
 
-  it('notifies Zustand after a successful candidate command', () => {
-    injectCandidate()
+  it('notifies Zustand after a successful candidate command', async () => {
+    await injectCandidate()
     let notifications = 0
     const unsubscribe = useEditorStore.subscribe(() => {
       notifications += 1
@@ -285,6 +288,7 @@ describe('V9 slide product integration on the real V8 UI', () => {
     render(<ElementsTab onAddImage={() => undefined} />)
     fireEvent.click(screen.getByRole('button', { name: '文本' }))
     unsubscribe()
+    await settleAssignedCourse()
     expect(notifications).toBeGreaterThan(0)
     expect(selectSlideAuthoringSnapshot(useEditorStore.getState())?.revision).toBe(2)
     expect(selectSlideAuthoringDocument(useEditorStore.getState())?.schemaVersion).toBe(9)
@@ -293,13 +297,14 @@ describe('V9 slide product integration on the real V8 UI', () => {
     ))).toBe(true)
   })
 
-  it('inserts two staggered texts, west-resizes, applies selection bold, then undoes', () => {
-    injectCandidate()
+  it('inserts two staggered texts, west-resizes, applies selection bold, then undoes', async () => {
+    await injectCandidate()
     render(<ScenePanel />)
     render(<ElementsTab onAddImage={() => undefined} />)
 
     fireEvent.click(screen.getByTestId('add-text'))
     fireEvent.click(screen.getByTestId('add-text'))
+    await settleAssignedCourse()
 
     const nodes = selectEditingNodes(useEditorStore.getState())
     expect(nodes).toHaveLength(2)
@@ -339,12 +344,14 @@ describe('V9 slide product integration on the real V8 UI', () => {
     expect(down.kind).toBe('slide-authoring')
     const revisionAfterDown = selectSlideAuthoringSnapshot(useEditorStore.getState())?.revision
     controller.pointerMove({ x: west.x - 40, y: west.y }, VIEW)
+    await settleAssignedCourse()
     expect(selectSlideAuthoringSnapshot(useEditorStore.getState())?.revision).toBe(revisionAfterDown)
     const up = controller.pointerUp({ x: west.x - 40, y: west.y }, VIEW)
     expect(up.kind).toBe('slide-authoring')
     if (up.kind !== 'slide-authoring') throw new Error('expected slide-authoring')
     expect(up.command?.ok).toBe(true)
     expect(up.command?.historyEntry).toBe(true)
+    await settleAssignedCourse()
     expect(nativeFrame(firstId)).toMatchObject({
       x: startFrame.x - 40,
       width: startFrame.width + 40,
@@ -364,9 +371,11 @@ describe('V9 slide product integration on the real V8 UI', () => {
     if (textNode?.type !== 'text') throw new Error('expected text')
     expect(textNode.runs?.some((run) => run.start === 0 && run.end === 2 && run.style.bold === true)).toBe(true)
 
-    const revisionAfterBold = selectSlideAuthoringSnapshot(useEditorStore.getState())?.revision
-    useEditorStore.getState().undo()
-    expect(selectSlideAuthoringSnapshot(useEditorStore.getState())?.revision).toBe((revisionAfterBold ?? 1) - 1)
+    await settleAssignedCourse()
+    await undoAssignedCourse()
+    // Undo restores content; the document revision is a monotonic commit counter and
+    // never rolls back, so the restored runs are the real invariant.
+    expect(assignedRedoDepth()).toBeGreaterThan(0)
     const undone = selectEditingNodes(useEditorStore.getState()).find((node) => node.id === firstId)
     expect(undone?.type).toBe('text')
     if (undone?.type !== 'text') throw new Error('expected text')
@@ -380,8 +389,8 @@ describe('V9 slide product integration on the real V8 UI', () => {
     )
   })
 
-  it('writes inserted image/runtime into the candidate session and hits them with the existing adapter', () => {
-    injectCandidate()
+  it('writes inserted image/runtime into the candidate session and hits them with the existing adapter', async () => {
+    await injectCandidate()
     const image = useEditorStore.getState().applySlideCandidateCommand((session) =>
       addSlideImageLayer(session, { assetId: 'asset-photo' }, {
         expectedRevision: session.history.present.revision,
@@ -425,10 +434,11 @@ describe('V9 slide product integration on the real V8 UI', () => {
     expect(JSON.stringify(selected.targets?.[0])).not.toMatch(/hitId/)
   })
 
-  it('previews simple entrance animation through the existing motion bus and ignores Delete while editing text', () => {
-    injectCandidate()
+  it('previews simple entrance animation through the existing motion bus and ignores Delete while editing text', async () => {
+    await injectCandidate()
     render(<ElementsTab onAddImage={() => undefined} />)
     fireEvent.click(screen.getByTestId('add-text'))
+    await settleAssignedCourse()
     const nodeId = selectEditingNodes(useEditorStore.getState())[0]!.id
     useEditorStore.getState().selectNode(nodeId)
 
@@ -456,12 +466,12 @@ describe('V9 slide product integration on the real V8 UI', () => {
   })
 
   it('projects a live canvas text draft into Properties and transfers focus as one new edit', async () => {
-    injectCandidate()
+    await injectCandidate()
     act(() => useEditorStore.getState().addTextNode())
     const nodeId = selectSelectedNodeId(useEditorStore.getState())
-    const backend = selectSlideAuthoringBackend(useEditorStore.getState())
-    if (!nodeId || !backend) throw new Error('expected selected Slide text')
-    const historyBefore = backend.getSession().history.past.length
+    if (!nodeId) throw new Error('expected selected Slide text')
+    await settleAssignedCourse()
+    const historyBefore = assignedUndoDepth()
     render(<PropertiesTab onReplaceImage={() => undefined} />)
 
     act(() => {
@@ -476,31 +486,39 @@ describe('V9 slide product integration on the real V8 UI', () => {
 
     const textarea = screen.getByRole('textbox', { name: '文字内容' })
     expect(textarea).toHaveValue('画布编辑中的草稿')
-    expect(selectSlideAuthoringBackend(useEditorStore.getState())
-      ?.getSession().history.past).toHaveLength(historyBefore)
+    expect(assignedUndoDepth()).toBe(historyBefore)
 
     fireEvent.focus(textarea)
     await act(async () => Promise.resolve())
     expect(useEditorStore.getState().v9ContentEdit?.source).toBe('properties')
-    expect(selectSlideAuthoringBackend(useEditorStore.getState())
-      ?.getSession().history.past).toHaveLength(historyBefore + 1)
+    expect(useEditorStore.getState().v9ContentEdit?.target.revision)
+      .toBe(selectSlideAuthoringSnapshot(useEditorStore.getState())?.revision)
 
     fireEvent.change(textarea, { target: { value: '属性栏最终文字' } })
+    expect(textarea).toHaveValue('属性栏最终文字')
+    expect(useEditorStore.getState().errorMessage).toBeNull()
     fireEvent.blur(textarea)
+    // Both the transferred canvas draft and the Properties draft reach the
+    // Main-process session as two separate history entries.
     expect(selectEditingNodes(useEditorStore.getState())[0]).toMatchObject({
       id: nodeId,
       text: '属性栏最终文字',
     })
-    expect(selectSlideAuthoringBackend(useEditorStore.getState())
-      ?.getSession().history.past).toHaveLength(historyBefore + 2)
+    await settleAssignedCourse()
+    expect(assignedUndoDepth()).toBe(historyBefore + 2)
+    expect(selectEditingNodes(useEditorStore.getState())[0]).toMatchObject({
+      id: nodeId,
+      text: '属性栏最终文字',
+    })
   })
 
-  it('属性输入在 IME 组合期间不提交，并在目标切换后拒绝迟到草稿', () => {
-    injectCandidate()
+  it('属性输入在 IME 组合期间不提交，并在目标切换后拒绝迟到草稿', async () => {
+    await injectCandidate()
     act(() => useEditorStore.getState().addTextNode())
     const firstId = selectEditingNodes(useEditorStore.getState())[0]!.id
     render(<PropertiesTab onReplaceImage={() => undefined} />)
     const nameInput = screen.getByRole('textbox', { name: '名称' })
+    await settleAssignedCourse()
     const beforeCompositionRevision = selectSlideAuthoringDocument(
       useEditorStore.getState(),
     )!.revision
@@ -508,6 +526,7 @@ describe('V9 slide product integration on the real V8 UI', () => {
     fireEvent.compositionStart(nameInput)
     fireEvent.change(nameInput, { target: { value: '组合中的名称' } })
     fireEvent.keyDown(nameInput, { key: 'Enter', isComposing: true })
+    await settleAssignedCourse()
     expect(selectSlideAuthoringDocument(useEditorStore.getState())!.revision)
       .toBe(beforeCompositionRevision)
     expect(slideSceneLayerItems().find((item) => item.layerItemId === firstId)?.label)
@@ -526,8 +545,8 @@ describe('V9 slide product integration on the real V8 UI', () => {
     expect(slideSceneLayerItems().map((item) => item.label)).not.toContain('不得迟到写入')
   })
 
-  it('同值图层切换后拒绝滑杆的迟到 pointerup，不写入新目标', () => {
-    injectCandidate()
+  it('同值图层切换后拒绝滑杆的迟到 pointerup，不写入新目标', async () => {
+    await injectCandidate()
     act(() => useEditorStore.getState().addRectangleNode())
     const firstId = selectSelectedNodeId(useEditorStore.getState())
     act(() => useEditorStore.getState().addRectangleNode())
@@ -544,6 +563,8 @@ describe('V9 slide product integration on the real V8 UI', () => {
     }
     const originalOpacity = firstShape.style.fillOpacity
 
+    await settleAssignedCourse()
+    const historyBeforeLate = assignedUndoDepth()
     fireEvent.pointerDown(slider)
     fireEvent.change(slider, { target: { value: '37' } })
     const beforeSwitch = selectSlideAuthoringBackend(useEditorStore.getState())!.getSession()
@@ -551,12 +572,16 @@ describe('V9 slide product integration on the real V8 UI', () => {
       .toBe(selectSlideAuthoringDocument(useEditorStore.getState())!.revision)
     act(() => useEditorStore.getState().selectNode(secondId))
     const beforeLate = selectSlideAuthoringBackend(useEditorStore.getState())!.getSession()
+    const beforeLateDocument = JSON.stringify(beforeLate.history.present)
     fireEvent.pointerUp(slider)
+    await settleAssignedCourse()
     const afterLate = selectSlideAuthoringBackend(useEditorStore.getState())!.getSession()
 
-    expect(afterLate).toBe(beforeLate)
-    expect(afterLate.history).toBe(beforeLate.history)
-    expect(afterLate.selection).toBe(beforeLate.selection)
+    // The rejected late pointerup writes nothing: same document, same selection,
+    // no new undo entry. The Store rebuilds its projection, so identity is not the invariant.
+    expect(JSON.stringify(afterLate.history.present)).toBe(beforeLateDocument)
+    expect(afterLate.selection).toEqual(beforeLate.selection)
+    expect(assignedUndoDepth()).toBe(historyBeforeLate)
     expect(selectSelectedNodeId(useEditorStore.getState())).toBe(secondId)
     for (const id of [firstId, secondId]) {
       const shape = selectEditingNodes(useEditorStore.getState()).find((node) => node.id === id)
@@ -568,8 +593,8 @@ describe('V9 slide product integration on the real V8 UI', () => {
 
   it.each(['blur', 'escape', 'commit'] as const)(
     '文字属性目标切换后拒绝迟到的 %s 终止事件且不触碰新编辑租约',
-    (terminal) => {
-      injectCandidate()
+    async (terminal) => {
+      await injectCandidate()
       act(() => {
         useEditorStore.getState().addTextNode()
         useEditorStore.getState().addTextNode()
@@ -589,8 +614,9 @@ describe('V9 slide product integration on the real V8 UI', () => {
         store.updateTextEditDraft(secondId!, 'B live draft', [])
       })
       const beforeLate = useEditorStore.getState()
-      const beforeBackend = selectSlideAuthoringBackend(beforeLate)!
-      const beforeSession = beforeBackend.getSession()
+      const beforeSession = selectSlideAuthoringBackend(beforeLate)!.getSession()
+      const beforeDocument = JSON.stringify(beforeSession.history.present)
+      const beforeUndoDepth = assignedUndoDepth()
       const beforeEdit = beforeLate.v9ContentEdit
       if (!beforeEdit || beforeEdit.kind !== 'text' || !('text' in beforeEdit.draft)) {
         throw new Error('expected B text edit')
@@ -603,12 +629,13 @@ describe('V9 slide product integration on the real V8 UI', () => {
       else fireEvent.keyDown(textarea, { key: 'Enter', ctrlKey: true })
 
       const afterLate = useEditorStore.getState()
-      const afterBackend = selectSlideAuthoringBackend(afterLate)!
-      expect(afterBackend).toBe(beforeBackend)
-      expect(afterBackend.getSession()).toBe(beforeSession)
-      expect(afterBackend.getSession().history).toBe(beforeSession.history)
-      expect(afterBackend.getSession().selection).toBe(beforeSession.selection)
+      const afterSession = selectSlideAuthoringBackend(afterLate)!.getSession()
+      // The Store rebuilds its projection on a rejected view-only patch, so the
+      // invariants are the untouched B lease, the unchanged document and no new undo entry.
       expect(afterLate.v9ContentEdit).toBe(beforeEdit)
+      expect(JSON.stringify(afterSession.history.present)).toBe(beforeDocument)
+      expect(afterSession.selection.selectionIds).toEqual(beforeSession.selection.selectionIds)
+      expect(assignedUndoDepth()).toBe(beforeUndoDepth)
       expect(afterLate.dirty).toBe(beforeLate.dirty)
       expect(selectSelectedNodeId(afterLate)).toBe(secondId)
       expect(selectEditingNodes(afterLate).find((node) => node.id === secondId)?.type).toBe('text')
@@ -616,8 +643,8 @@ describe('V9 slide product integration on the real V8 UI', () => {
     },
   )
 
-  it('同一批次内旧文字命令不能提交、取消或格式化新目标的精确编辑租约', () => {
-    injectCandidate()
+  it('同一批次内旧文字命令不能提交、取消或格式化新目标的精确编辑租约', async () => {
+    await injectCandidate()
     act(() => {
       useEditorStore.getState().addTextNode()
       useEditorStore.getState().addTextNode()
@@ -652,16 +679,19 @@ describe('V9 slide product integration on the real V8 UI', () => {
     expect(beforeLateEdit.target.layerItemId).toBe(secondId)
     expect(beforeLateEdit.draft.text).toBe('B exact live draft')
     expect(afterLate.v9ContentEdit).toBe(beforeLate.v9ContentEdit)
-    expect(selectSlideAuthoringBackend(afterLate)).toBe(selectSlideAuthoringBackend(beforeLate))
-    expect(selectSlideAuthoringBackend(afterLate)!.getSession())
-      .toBe(selectSlideAuthoringBackend(beforeLate)!.getSession())
-    expect(afterLate.assetFiles).toBe(beforeLate.assetFiles)
-    expect(afterLate.componentPackages).toBe(beforeLate.componentPackages)
-    expect(afterLate.courseAuthoringSession).toBe(beforeLate.courseAuthoringSession)
+    expect(JSON.stringify(selectSlideAuthoringBackend(afterLate)!.getSession().history.present))
+      .toBe(JSON.stringify(selectSlideAuthoringBackend(beforeLate)!.getSession().history.present))
+    expect(selectSlideAuthoringBackend(afterLate)!.getSession().selection.selectionIds)
+      .toEqual(selectSlideAuthoringBackend(beforeLate)!.getSession().selection.selectionIds)
+    expect(assignedUndoDepth()).toBe(0)
+    expect(Object.keys(afterLate.assetFiles)).toEqual(Object.keys(beforeLate.assetFiles))
+    expect(Object.keys(afterLate.componentPackages)).toEqual(Object.keys(beforeLate.componentPackages))
+    expect(afterLate.courseAuthoringSession?.token.locationId)
+      .toBe(beforeLate.courseAuthoringSession?.token.locationId)
   })
 
-  it('字体草稿不会在目标切换后写入新元素，并可在重置后正常提交', () => {
-    injectCandidate()
+  it('字体草稿不会在目标切换后写入新元素，并可在重置后正常提交', async () => {
+    await injectCandidate()
     act(() => {
       useEditorStore.getState().addTextNode()
       useEditorStore.getState().addTextNode()
@@ -674,13 +704,18 @@ describe('V9 slide product integration on the real V8 UI', () => {
     fireEvent.focus(font)
     fireEvent.change(font, { target: { value: 'Stale Custom Font' } })
 
+    await settleAssignedCourse()
+    const undoDepthBeforeLate = assignedUndoDepth()
     act(() => useEditorStore.getState().selectNode(secondId!))
     const beforeLate = selectSlideAuthoringBackend(useEditorStore.getState())!.getSession()
+    const beforeLateDocument = JSON.stringify(beforeLate.history.present)
     fireEvent.blur(font)
+    await settleAssignedCourse()
     const afterLate = selectSlideAuthoringBackend(useEditorStore.getState())!.getSession()
-    expect(afterLate).toBe(beforeLate)
-    expect(afterLate.history).toBe(beforeLate.history)
-    expect(afterLate.selection).toBe(beforeLate.selection)
+    // The stale font draft is rejected: no content, selection or history write.
+    expect(JSON.stringify(afterLate.history.present)).toBe(beforeLateDocument)
+    expect(afterLate.selection.selectionIds).toEqual(beforeLate.selection.selectionIds)
+    expect(assignedUndoDepth()).toBe(undoDepthBeforeLate)
     const secondBeforeCommit = selectEditingNodes(useEditorStore.getState())
       .find((node) => node.id === secondId)
     expect(secondBeforeCommit?.type).toBe('text')
@@ -695,21 +730,22 @@ describe('V9 slide product integration on the real V8 UI', () => {
     fireEvent.focus(font)
     fireEvent.change(font, { target: { value: 'KaiTi' } })
     fireEvent.blur(font)
+    await settleAssignedCourse()
     const secondAfterCommit = selectEditingNodes(useEditorStore.getState())
       .find((node) => node.id === secondId)
     expect(secondAfterCommit?.type).toBe('text')
     if (secondAfterCommit?.type !== 'text') throw new Error('expected text')
     expect(secondAfterCommit.style?.fontFamily).toBe('KaiTi')
-    expect(selectSlideAuthoringBackend(useEditorStore.getState())!.getSession().history.past)
-      .toHaveLength(beforeLate.history.past.length + 1)
+    expect(assignedUndoDepth()).toBe(undoDepthBeforeLate + 1)
   })
 
-  it('Table 与 Chart 经 store 增量创建并在编辑视图中保留完整 Native 结构', () => {
-    injectCandidate()
+  it('Table 与 Chart 经 store 增量创建并在编辑视图中保留完整 Native 结构', async () => {
+    await injectCandidate()
     act(() => {
       useEditorStore.getState().addChartNode('bar')
       useEditorStore.getState().addTableNode()
     })
+    await settleAssignedCourse()
     const state = useEditorStore.getState()
     const backend = selectSlideAuthoringBackend(state)!
     const session = backend.getSession()
