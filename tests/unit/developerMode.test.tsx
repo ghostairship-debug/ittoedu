@@ -1,5 +1,8 @@
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { createBlankCourseProject } from '../../src/core/course/createCourseProject'
+import { withDefaultComponentController } from '../../src/renderer/components/teacherControllerComponent'
+import { createTriageT4StoreHost } from '../helpers/triage-t4-store-host'
 import type { ComponentPackageData } from '../../src/shared/componentTypes'
 import { listCourseProjectV9Fixtures } from '../fixtures/course-project-v9/sources'
 import { RightSidebar } from '../../src/renderer/ui/RightSidebar'
@@ -21,6 +24,41 @@ const originalUpdateRuntimeSourceAtTarget =
   useEditorStore.getState().updateRuntimeSourceAtTarget
 const originalCreateRuntimeTemplateAtTarget =
   useEditorStore.getState().createRuntimeTemplateAtTarget
+
+/**
+ * 2.0 keeps no renderer History: the projection only carries the current
+ * document, while undo/redo live on the main-process DocumentSession.
+ */
+let host: Awaited<ReturnType<typeof createTriageT4StoreHost>>
+
+function activeDocumentSession() {
+  const documentId = useEditorStore.getState().courseDocument.documentId
+  if (!documentId) throw new Error('expected an active course document')
+  return host.registry.get(documentId)
+}
+
+function undoDepth(): number {
+  return activeDocumentSession().read().undoDepth
+}
+
+async function settle(): Promise<void> {
+  await useEditorStore.getState().drainCourseDocument()
+}
+
+async function navigateHistory(direction: 'undo' | 'redo'): Promise<void> {
+  const before = undoDepth()
+  useEditorStore.getState()[direction]()
+  await waitFor(() => {
+    expect(undoDepth()).not.toBe(before)
+  })
+  await settle()
+}
+
+beforeEach(async () => {
+  host = await createTriageT4StoreHost()
+  const bundle = withDefaultComponentController(createBlankCourseProject())
+  await host.open(bundle.project, Object.values(bundle.componentPackages))
+})
 
 function selectRuntimeView(editingScope: 'scene' | 'global') {
   const state = useEditorStore.getState()
@@ -153,6 +191,23 @@ function applyPackageSources(packageId: string, patch: Partial<Pick<ComponentPac
   return state.updateComponentPackageSources(state.captureComponentPackageSourceTarget(packageId), files)
 }
 
+/** Byte-level comparison: the host round-trip recreates every package. */
+function expectComponentPackageContents(
+  actual: ComponentPackageData | undefined,
+  expected: ComponentPackageData,
+): void {
+  if (!actual) throw new Error('Expected an embedded component package')
+  expect(actual.manifest).toEqual(expected.manifest)
+  expect(actual.runtimeSource).toBe(expected.runtimeSource)
+  if (expected.contentSha256 !== undefined) {
+    expect(actual.contentSha256).toBe(expected.contentSha256)
+  }
+  expect(Object.keys(actual.files).sort()).toEqual(Object.keys(expected.files).sort())
+  for (const [path, bytes] of Object.entries(expected.files)) {
+    expect([...actual.files[path]!], path).toEqual([...bytes])
+  }
+}
+
 // Unit receipt exercises the atomic consumer, not real-host visual admission.
 function installAdmissionReceipt() {
   const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB'
@@ -170,15 +225,14 @@ afterEach(() => {
     updateRuntimeSourceAtTarget: originalUpdateRuntimeSourceAtTarget,
     createRuntimeTemplateAtTarget: originalCreateRuntimeTemplateAtTarget,
   })
-  useEditorStore.getState().createNewProject()
 })
 
 describe('专业开发模式', () => {
   it.each(['cancel', 'stale', 'failure'] as const)('组件异步准入 %s 保留原工程和资源', async mode => {
-    useEditorStore.getState().createNewProject()
     const source = domComponentPackage()
     useEditorStore.getState().importComponentPackage(source)
     useEditorStore.getState().addExternalComponentNode(source.manifest.id)
+    await settle()
     const state = useEditorStore.getState()
     const target = state.captureComponentPackageSourceTarget(source.manifest.id)
     let finish: ((value: unknown) => void) | undefined
@@ -195,7 +249,8 @@ describe('专业开发模式', () => {
       .then(() => 'unexpected success', error => String(error))
     await vi.waitFor(() => expect(finish).toBeDefined())
     if (mode === 'cancel') controller.abort()
-    if (mode === 'stale') useEditorStore.getState().undo()
+    // 2.0 undo is a main-process round trip: wait for it before snapshotting.
+    if (mode === 'stale') await navigateHistory('undo')
     const before = structuredClone(selectActiveCourseProjectDocument(useEditorStore.getState()))
     const packages = useEditorStore.getState().componentPackages
     finish!(mode === 'failure' ? { ok: false, message: 'host rejected source' } : { ok: true, message: 'admitted', captures })
@@ -204,11 +259,11 @@ describe('专业开发模式', () => {
     expect(useEditorStore.getState().componentPackages).toBe(packages)
   })
 
-  it('组件文件和实例切换保留草稿，工程变化后必须显式载入基线', () => {
-    useEditorStore.getState().createNewProject()
+  it('组件文件和实例切换保留草稿，工程变化后必须显式载入基线', async () => {
     const source = domComponentPackage()
     useEditorStore.getState().importComponentPackage(source)
     useEditorStore.getState().addExternalComponentNode(source.manifest.id)
+    await settle()
     const nodeId = selectSelectedNodeId(useEditorStore.getState())!
     render(<DeveloperTab />)
     fireEvent.click(screen.getByRole('tab', { name: /组件代码/ }))
@@ -220,7 +275,11 @@ describe('专业开发模式', () => {
     act(() => useEditorStore.getState().selectNode(null))
     act(() => useEditorStore.getState().selectNode(nodeId))
     expect(screen.getByLabelText('组件 Runtime')).toHaveValue('retained source draft')
-    act(() => useEditorStore.getState().addExternalComponentNode(source.manifest.id))
+    await act(async () => {
+      useEditorStore.getState().addExternalComponentNode(source.manifest.id)
+      // 2.0 提交回执才带来新 revision，草稿绑定键随之后移。
+      await settle()
+    })
     expect(screen.getByRole('button', { name: '校验并应用组件源码' })).toBeDisabled()
     fireEvent.click(screen.getByRole('button', { name: '载入当前基线并保留草稿' }))
     expect(screen.getByLabelText('组件 Runtime')).toHaveValue('retained source draft')
@@ -235,7 +294,6 @@ describe('专业开发模式', () => {
   })
 
   it('开发工作流常驻，可随时从标签进入', () => {
-    useEditorStore.getState().createNewProject()
     useEditorStore.setState({
       activeTab: 'properties',
     })
@@ -264,8 +322,7 @@ describe('专业开发模式', () => {
     expect(screen.getByRole('tab', { name: /组件代码/ })).toBeInTheDocument()
   })
 
-  it('场景运行时源码更新进入正常撤销历史', () => {
-    useEditorStore.getState().createNewProject()
+  it('场景运行时源码更新进入正常撤销历史', async () => {
     const scene = selectActiveScene(useEditorStore.getState())
     const initialSource =
       'CoursewareRuntime.define({runtimeApiVersion:2,create(){return{destroy(){}}}})'
@@ -295,12 +352,11 @@ describe('专业开发模式', () => {
     })
     expect(selectActiveScene(useEditorStore.getState()).runtime?.source).toBe(nextSource)
 
-    useEditorStore.getState().undo()
+    await navigateHistory('undo')
     expect(selectActiveScene(useEditorStore.getState()).runtime?.source).toBe(initialSource)
   })
 
   it('代码编辑器拒绝模块语法，只提交通过校验的运行时源码', () => {
-    useEditorStore.getState().createNewProject()
     const scene = selectActiveScene(useEditorStore.getState())
     const initialSource =
       'CoursewareRuntime.define({runtimeApiVersion:2,create(){return{destroy(){}}}})'
@@ -324,7 +380,6 @@ describe('专业开发模式', () => {
   })
 
   it('同源应用显示零写入，并在输入法组合期间禁用应用与取消', () => {
-    useEditorStore.getState().createNewProject()
     const scene = selectActiveScene(useEditorStore.getState())
     const source =
       'CoursewareRuntime.define({runtimeApiVersion:2,create(){return{destroy(){}}}})'
@@ -354,7 +409,6 @@ describe('专业开发模式', () => {
   })
 
   it('脏草稿只绑定原 Runtime：切换目标时保持并禁用，返回后恢复，取消可加载当前目标', () => {
-    useEditorStore.getState().createNewProject()
     const scene = selectActiveScene(useEditorStore.getState())
     const localSource =
       'CoursewareRuntime.define({runtimeApiVersion:2,create(){const scope="local";return{destroy(){}}}})'
@@ -389,7 +443,6 @@ describe('专业开发模式', () => {
   })
 
   it('两个同源 Runtime 之间切换也按稳定目标标记脏草稿过期', () => {
-    useEditorStore.getState().createNewProject()
     const scene = selectActiveScene(useEditorStore.getState())
     const source =
       'CoursewareRuntime.define({runtimeApiVersion:2,create(){return{destroy(){}}}})'
@@ -411,7 +464,6 @@ describe('专业开发模式', () => {
   })
 
   it('命名状态切换不重绑草稿，提交仍携带绑定时捕获的状态目标', () => {
-    useEditorStore.getState().createNewProject()
     const scene = selectActiveScene(useEditorStore.getState())
     const source =
       'CoursewareRuntime.define({runtimeApiVersion:2,create(){return{destroy(){}}}})'
@@ -441,15 +493,14 @@ describe('专业开发模式', () => {
     expect(screen.getByRole('status')).toHaveTextContent('修改已写入工程历史')
   })
 
-  it('完整保留 V9 Surface Runtime 定义，并显示动态协议与 API 版本', () => {
+  it('完整保留 V9 Surface Runtime 定义，并显示动态协议与 API 版本', async () => {
     const fixture = listCourseProjectV9Fixtures().find(
       (candidate) => candidate.id === 'surface-runtime',
     )!
-    useEditorStore.getState().loadCourseProject(
+    await host.open(
       structuredClone(fixture.data.project),
-      null,
+      undefined,
       structuredClone(fixture.data.assetFiles),
-      {},
     )
     const before = selectActiveCourseProjectDocument(useEditorStore.getState())!
     const beforeSurface = before.surfaces[0]
@@ -481,7 +532,6 @@ describe('专业开发模式', () => {
   })
 
   it('把 typed Store 提交失败原因显示在原草稿旁且不宣称成功', () => {
-    useEditorStore.getState().createNewProject()
     const scene = selectActiveScene(useEditorStore.getState())
     const source =
       'CoursewareRuntime.define({runtimeApiVersion:2,create(){return{destroy(){}}}})'
@@ -509,8 +559,9 @@ describe('专业开发模式', () => {
       .not.toBeInTheDocument()
   })
 
-  it('Flow 与 Spatial 的本地及全局缺失 Runtime 都不提供模板按钮', () => {
-    useEditorStore.getState().createNewFlowProject()
+  it('Flow 与 Spatial 的本地及全局缺失 Runtime 都不提供模板按钮', async () => {
+    await useEditorStore.getState().createCourseDocument('flow')
+    await settle()
     const { unmount } = render(<DeveloperTab />)
     expect(screen.getByTestId('runtime-source-missing')).toHaveTextContent(
       '尚未创建 Runtime',
@@ -525,7 +576,8 @@ describe('专业开发模式', () => {
       .not.toBeInTheDocument()
 
     unmount()
-    useEditorStore.getState().createNewSpatialProject()
+    await useEditorStore.getState().createCourseDocument('spatial')
+    await settle()
     render(<DeveloperTab />)
     expect(screen.getByTestId('runtime-source-missing')).toHaveTextContent(
       '尚未创建 Runtime',
@@ -541,7 +593,6 @@ describe('专业开发模式', () => {
   })
 
   it('开发工作区一次只呈现一类任务，并给未就绪任务明确空状态', () => {
-    useEditorStore.getState().createNewProject()
     render(<DeveloperTab />)
 
     expect(screen.getByText('当前作用域没有自定义运行时')).toBeInTheDocument()
@@ -559,7 +610,6 @@ describe('专业开发模式', () => {
   })
 
   it('对象 JSON 草稿在 IME 期间禁用提交，并在目标切换后保持但零写入', () => {
-    useEditorStore.getState().createNewProject()
     act(() => useEditorStore.getState().addTextNode())
     const firstNode = selectActiveScene(useEditorStore.getState()).nodes[0]!
     render(<DeveloperTab />)
@@ -587,13 +637,14 @@ describe('专业开发模式', () => {
     expect((editor as HTMLTextAreaElement).value).not.toContain('不得迟到写入的对象')
   })
 
-  it('Slide 既有模板入口创建后刷新为可编辑的 canonical Runtime', () => {
-    useEditorStore.getState().createNewProject()
+  it('Slide 既有模板入口创建后刷新为可编辑的 canonical Runtime', async () => {
     const before = selectActiveCourseProjectDocument(useEditorStore.getState())!
     const beforeLocationId = selectActiveCourseLocationId(useEditorStore.getState())
     render(<DeveloperTab />)
 
     fireEvent.click(screen.getByRole('button', { name: '创建运行时模板' }))
+    // 2.0 的 revision 由主进程提交回执推进，而不是本地乐观自增。
+    await act(async () => { await settle() })
 
     expect(selectActiveCourseProjectDocument(useEditorStore.getState())!.revision)
       .toBe(before.revision + 1)
@@ -606,15 +657,16 @@ describe('专业开发模式', () => {
     expect(screen.getByText(/Canvas Runtime \/ Runtime API 2/)).toBeInTheDocument()
   })
 
-  it('当前 Slide 经过其他编辑事务后仍可创建 Runtime 模板', () => {
-    useEditorStore.getState().createNewProject()
+  it('当前 Slide 经过其他编辑事务后仍可创建 Runtime 模板', async () => {
     act(() => useEditorStore.getState().addTextNode())
+    await act(async () => { await settle() })
     const beforeRevision = selectActiveCourseProjectDocument(
       useEditorStore.getState(),
     )!.revision
 
     render(<DeveloperTab />)
     fireEvent.click(screen.getByRole('button', { name: '创建运行时模板' }))
+    await act(async () => { await settle() })
 
     expect(selectActiveCourseProjectDocument(useEditorStore.getState())!.revision)
       .toBe(beforeRevision + 1)
@@ -622,9 +674,9 @@ describe('专业开发模式', () => {
       .toContain('runtimeApiVersion: 2')
   })
 
-  it('全局 Runtime 模板创建后保留全局作用域与当前命名状态', () => {
-    useEditorStore.getState().createNewProject()
+  it('全局 Runtime 模板创建后保留全局作用域与当前命名状态', async () => {
     useEditorStore.getState().addPresentationState('讲解状态')
+    await act(async () => { await settle() })
     const namedStateId = selectActivePresentationStateId(useEditorStore.getState())
     expect(namedStateId).not.toBeNull()
     useEditorStore.getState().setActivePresentationState(namedStateId)
@@ -636,6 +688,7 @@ describe('专业开发模式', () => {
     render(<DeveloperTab />)
 
     fireEvent.click(screen.getByRole('button', { name: '创建运行时模板' }))
+    await act(async () => { await settle() })
 
     expect(selectActiveCourseProjectDocument(useEditorStore.getState())!.revision)
       .toBe(beforeRevision + 1)
@@ -652,7 +705,6 @@ describe('专业开发模式', () => {
     ['revision-conflict', '模拟的 Runtime 创建目标已经过期'],
     ['runtime-already-exists', '模拟的 Runtime 槽位已经被占用'],
   ] as const)('模板创建把 typed %s 失败留在原空状态旁', (code, reason) => {
-    useEditorStore.getState().createNewProject()
     const before = structuredClone(
       selectActiveCourseProjectDocument(useEditorStore.getState())!,
     )
@@ -676,10 +728,10 @@ describe('专业开发模式', () => {
   })
 
   it('创建组件可编辑副本会生成新身份、切换当前实例且一次撤销恢复', async () => {
-    useEditorStore.getState().createNewProject()
     const source = componentPackage()
     useEditorStore.getState().importComponentPackage(source)
     useEditorStore.getState().addExternalComponentNode(source.manifest.id)
+    await settle()
     const originalNode = selectActiveScene(useEditorStore.getState()).nodes[0]
     expect(originalNode?.type).toBe('external-component')
     const copyId = useEditorStore.getState().createEditableComponentCopy(
@@ -687,6 +739,7 @@ describe('专业开发模式', () => {
       originalNode!.id,
     )
     expect(copyId).toMatch(/^com\.example\.developer\.editable\./)
+    await settle()
     const copiedPackage = useEditorStore.getState().componentPackages[copyId!]
     expect(copiedPackage?.manifest.id).toBe(copyId)
     expect(copiedPackage?.runtimeSource).toContain(copyId)
@@ -695,7 +748,10 @@ describe('专业开发模式', () => {
         editableCopy: true,
         sourcePackageId: source.manifest.id,
       })
-    expect(useEditorStore.getState().componentPackages[source.manifest.id]).toBe(source)
+    expectComponentPackageContents(
+      useEditorStore.getState().componentPackages[source.manifest.id],
+      source,
+    )
     expect(selectActiveScene(useEditorStore.getState()).nodes[0]).toMatchObject({
       type: 'external-component',
       component: { packageId: copyId },
@@ -706,12 +762,13 @@ describe('专业开发模式', () => {
     await applyPackageSources(copyId!, {
       runtimeSource: updatedSource,
     })
+    await settle()
     expect(useEditorStore.getState().componentPackages[copyId!]?.runtimeSource)
       .toBe(updatedSource)
-    useEditorStore.getState().undo()
+    await navigateHistory('undo')
     expect(useEditorStore.getState().componentPackages[copyId!]?.runtimeSource)
       .not.toBe(updatedSource)
-    useEditorStore.getState().undo()
+    await navigateHistory('undo')
     expect(useEditorStore.getState().componentPackages[copyId!]).toBeUndefined()
     expect(selectActiveScene(useEditorStore.getState()).nodes[0]).toMatchObject({
       type: 'external-component',
@@ -720,25 +777,26 @@ describe('专业开发模式', () => {
   })
 
   it.each(['com.example.developer', 'vendor.editable.widget'])('普通工程包 %s 可直接修订且身份不变', async id => {
-    useEditorStore.getState().createNewProject()
     const source = componentPackage(id)
     useEditorStore.getState().importComponentPackage(source)
     useEditorStore.getState().addExternalComponentNode(id)
+    await settle()
     installAdmissionReceipt()
     await applyPackageSources(id, { runtimeSource: editableSource(id, 'const changed = true') })
+    await settle()
     const updated = useEditorStore.getState().componentPackages[id]!
     expect(updated.manifest.id).toBe(id)
     expect(updated.manifest.version).not.toBe(source.manifest.version)
     expect(source.runtimeSource).not.toContain('changed')
-    useEditorStore.getState().undo()
+    await navigateHistory('undo')
     expect(useEditorStore.getState().componentPackages[id]!.runtimeSource).toBe(source.runtimeSource)
   })
 
-  it('命名状态下阻止创建组件副本且不产生孤儿包', () => {
-    useEditorStore.getState().createNewProject()
+  it('命名状态下阻止创建组件副本且不产生孤儿包', async () => {
     const source = componentPackage()
     useEditorStore.getState().importComponentPackage(source)
     useEditorStore.getState().addExternalComponentNode(source.manifest.id)
+    await settle()
     const node = selectActiveScene(useEditorStore.getState()).nodes[0]!
     useEditorStore.getState().addPresentationState('反馈')
     const beforeIds = Object.keys(useEditorStore.getState().componentPackages)
@@ -756,15 +814,16 @@ describe('专业开发模式', () => {
   })
 
   it('可编辑组件提交前复用完整包校验并保护现有实例作用域', async () => {
-    useEditorStore.getState().createNewProject()
     const source = domComponentPackage()
     useEditorStore.getState().importComponentPackage(source)
     useEditorStore.getState().addExternalComponentNode(source.manifest.id)
+    await settle()
     const node = selectActiveScene(useEditorStore.getState()).nodes[0]!
     const copyId = useEditorStore.getState().createEditableComponentCopy(
       source.manifest.id,
       node.id,
     )!
+    await settle()
     const copied = useEditorStore.getState().componentPackages[copyId]!
 
     await expect(applyPackageSources(
