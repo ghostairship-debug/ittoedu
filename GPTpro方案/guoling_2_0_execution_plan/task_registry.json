@@ -1041,13 +1041,84 @@
       ]
     },
     {
-      "id": "M15",
-      "title": "Runtime／Component 轻编辑与自动图文发现",
+      "id": "M20",
+      "title": "文件与会话细节：新建菜单、纯文本文档、另存为与会话所属",
       "phase": "M",
       "release": "2.0",
       "required": true,
       "dependencies": [
         "M14"
+      ],
+      "document": "mid_term/M20.md",
+      "status": "planned",
+      "existing_code": [
+        "src/renderer/lessonWorkspace/view/WorkspaceFilesTree.tsx",
+        "src/main/workbench/workspaceFilesDesktopService.ts",
+        "src/main/workbench/DocumentHostService.ts",
+        "src/shared/workbench/document.ts",
+        "src/core/drivers/MarkdownDriver.ts",
+        "src/main/workbench/documentSaveDialog.ts",
+        "src/main/workbench/execution/AgentFileService.ts",
+        "src/renderer/documents/CourseLightToolbar.tsx",
+        "src/renderer/workbench/ExecutionAssistant.tsx"
+      ],
+      "sources": [
+        "R62",
+        "R63",
+        "R64",
+        "R67"
+      ],
+      "acceptance_ids": [
+        "M20-T01",
+        "M20-T02",
+        "M20-T03",
+        "M20-T04"
+      ]
+    },
+    {
+      "id": "M21",
+      "title": "轻编辑外壳：单行顶栏、统一选中快捷条与常用色板",
+      "phase": "M",
+      "release": "2.0",
+      "required": true,
+      "dependencies": [
+        "M14"
+      ],
+      "document": "mid_term/M21.md",
+      "status": "planned",
+      "existing_code": [
+        "src/renderer/documents/CourseLightToolbar.tsx",
+        "src/renderer/documents/courseEditorChrome.css",
+        "src/renderer/workbench/NativeSelectionContext.tsx",
+        "src/renderer/ui/TextEditOverlay.tsx",
+        "src/renderer/document/SharedDocumentEditor.tsx",
+        "src/renderer/ui/ColorInput.tsx",
+        "src/renderer/ui/workspaces/SlideLocationWorkspace.tsx",
+        "src/renderer/documents/useContentEditorMode.ts"
+      ],
+      "sources": [
+        "R64",
+        "R65",
+        "R69",
+        "R34",
+        "R59"
+      ],
+      "acceptance_ids": [
+        "M21-T01",
+        "M21-T02",
+        "M21-T03",
+        "M21-T04"
+      ]
+    },
+    {
+      "id": "M15",
+      "title": "统一编辑目标、元素 AI 卡与 Runtime 图文轻编辑",
+      "phase": "M",
+      "release": "2.0",
+      "required": true,
+      "dependencies": [
+        "M21",
+        "M19"
       ],
       "document": "mid_term/M15.md",
       "status": "planned",
@@ -1055,19 +1126,30 @@
         "src/player/RuntimeAuthoringTargetRegistry.ts",
         "src/player/RuntimeHost.ts",
         "src/player/ComponentAuthoringTargetRegistry.ts",
-        "src/renderer/ui/workspaces/spatial/SpatialGlobalRuntimeAuthoring.tsx"
+        "src/renderer/ui/workspaces/spatial/SpatialGlobalRuntimeAuthoring.tsx",
+        "src/renderer/workbench/SelectionContextController.ts",
+        "src/renderer/workbench/ExecutionAssistant.tsx",
+        "src/shared/workbench/executionDesktop.ts",
+        "src/core/documents/DocumentSession.ts",
+        "artifacts/ai-capabilities/protocols/runtime-api2.authoring.md"
       ],
       "sources": [
         "R53",
         "R54",
         "R55",
-        "R48"
+        "R48",
+        "R65",
+        "R66",
+        "R68"
       ],
       "acceptance_ids": [
         "M15-T01",
         "M15-T02",
         "M15-T03",
-        "M15-T04"
+        "M15-T04",
+        "M15-T05",
+        "M15-T06",
+        "M15-T07"
       ]
     },
     {
@@ -1141,7 +1223,7 @@
       "release": "2.0",
       "required": true,
       "dependencies": [
-        "M17"
+        "M14"
       ],
       "document": "mid_term/M19.md",
       "status": "planned",
@@ -1316,46 +1398,55 @@
     },
     {
       "id": "B13",
-      "title": "2.0 追加收口：Runtime 轻编辑",
+      "title": "文件与会话细节",
       "tasks": [
-        "M15"
+        "M20"
       ],
-      "exit": "旧验收先完成并形成稳定基线；Runtime/Component 可在当前运行状态进入轻编辑，图文目标主要由宿主自动发现并可持久保存。"
+      "exit": "新建菜单区分 Markdown/课件/文本文档并补默认后缀；.txt 在工作台内编辑保存；轻量顶栏另存为与“编辑器”按钮；会话头显示所属位置。与后续轻编辑改造互不牵扯。"
     },
     {
       "id": "B14",
+      "title": "轻编辑外壳与有限画布",
+      "tasks": [
+        "M21",
+        "M19"
+      ],
+      "exit": "顶栏单行固定，选择不再引起画布跳变；统一选中快捷条与常用色板；只保留右上角“编辑器”入口；Slide 画布尺寸按课件参数化，命中、选框、拖拽与快捷条定位共用同一套换算。"
+    },
+    {
+      "id": "B15",
+      "title": "统一编辑目标与元素 AI 卡",
+      "tasks": [
+        "M15"
+      ],
+      "exit": "原生对象、文档对象、选中文字与 Runtime/组件图文共用一套编辑目标；元素 AI 卡就地修改并可单元素撤销；Runtime 图文由软件自动识别，AI 不登记。"
+    },
+    {
+      "id": "B16",
       "title": "Flow 混合画布恢复",
       "tasks": [
         "M16"
       ],
-      "exit": "Flow 保留 Markdown/文档正文，同时可在 paper 上自由放置 Native 图文与页面 Runtime；“插入文字”语义改为 Native Text。"
+      "exit": "Flow 保留 Markdown/文档正文；自由图层默认随段落、可选固定纸面（含背景/水印）；“文本框”插入原生文字；正文可承载页面 Runtime；复用 B14/B15 的快捷条与 AI 卡。"
     },
     {
-      "id": "B15",
+      "id": "B17",
       "title": "HTML 高保真导入",
       "tasks": [
         "M17"
       ],
-      "exit": "已有 HTML 可不经 LLM 重写机械导入为完整 Runtime，关键布局/交互/数据不因原生化而主动丢失，并可轻编辑图文。"
+      "exit": "已有 HTML 不经 LLM 重写，机械导入为完整 Runtime（内嵌资源抽为受管资源），关键布局/交互/数据不因原生化而丢失，并复用 B15 的图文轻编辑。"
     },
     {
-      "id": "B16",
-      "title": "有限画布参数化",
-      "tasks": [
-        "M19"
-      ],
-      "exit": "Slide 不再被 1280×720 写死，至少支持标准横屏与另一种有限尺寸，坐标、Runtime 编辑、保存和导出保持一致。"
-    },
-    {
-      "id": "B17",
-      "title": "创作链与表示规划收口",
+      "id": "B18",
+      "title": "创作链收口与终局核对",
       "tasks": [
         "M18"
       ],
-      "exit": "教学设计与理想呈现不读取编辑器能力；理想 HTML 后再用一次薄 Representation Planning 选择 Surface 与 Native/Asset/Runtime，并由机械工具执行。"
+      "exit": "教学设计与理想呈现不读取编辑器能力；理想 HTML 后做一次薄 Representation Planning 并机械执行；在同一次 REL-T11 真实端到端运行中核对，最后由 Owner 做 M14-T05。"
     }
   ],
-  "plan_revision": "2.1",
+  "plan_revision": "2.2",
   "removed_acceptance": [
     {
       "id": "S01-T03",

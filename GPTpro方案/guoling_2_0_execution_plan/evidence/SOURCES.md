@@ -657,3 +657,67 @@ CANVAS_WIDTH=1280、CANVAS_HEIGHT=720 是全局常量，自定义 Slide 尺寸�
 Spatial 已直接使用统一 LayerItem、world camera 及 Native/Component/Runtime，接近自由画布+镜头
 
 类型：repository；核对日期：2026-09-25。
+
+## R62 · src/renderer/lessonWorkspace/view/WorkspaceFilesTree.tsx
+
+[src/renderer/lessonWorkspace/view/WorkspaceFilesTree.tsx](https://github.com/ghostairship-debug/ittoedu/blob/25b12b4b253298f63b642b60e1e80bd0c1f93840/src/renderer/lessonWorkspace/view/WorkspaceFilesTree.tsx)
+
+新建菜单为“新建文档/新建课件/新建文本文件”；只有 Markdown 与课件自动补后缀，文本文件按原名建空文件且新建后不打开
+
+类型：repository；核对日期：2026-09-25。
+
+## R63 · src/main/workbench/DocumentHostService.ts
+
+[src/main/workbench/DocumentHostService.ts](https://github.com/ghostairship-debug/ittoedu/blob/25b12b4b253298f63b642b60e1e80bd0c1f93840/src/main/workbench/DocumentHostService.ts)
+
+kind() 只认 .md/.markdown/.h5lesson；其余文件交给系统程序，无后缀文件因无关联程序打不开
+
+类型：repository；核对日期：2026-09-25。
+
+## R64 · src/renderer/documents/CourseLightToolbar.tsx
+
+[src/renderer/documents/CourseLightToolbar.tsx](https://github.com/ghostairship-debug/ittoedu/blob/25b12b4b253298f63b642b60e1e80bd0c1f93840/src/renderer/documents/CourseLightToolbar.tsx)
+
+轻量顶栏第二行随选择改变内容与高度（可换行），只有“保存”无“另存为”，并在多处埋有进入深度编辑的入口
+
+类型：repository；核对日期：2026-09-25。
+
+## R65 · src/renderer/workbench/NativeSelectionContext.tsx
+
+[src/renderer/workbench/NativeSelectionContext.tsx](https://github.com/ghostairship-debug/ittoedu/blob/25b12b4b253298f63b642b60e1e80bd0c1f93840/src/renderer/workbench/NativeSelectionContext.tsx)
+
+选中浮层另有“属性”卡（X/Y/宽/高、“更多属性”进深度编辑）；AI 修改需经“已固定/改为当前选择/交给创作助手”，并受主输入框草稿牵制
+
+类型：repository；核对日期：2026-09-25。
+
+## R66 · src/renderer/workbench/SelectionContextController.ts
+
+[src/renderer/workbench/SelectionContextController.ts](https://github.com/ghostairship-debug/ittoedu/blob/25b12b4b253298f63b642b60e1e80bd0c1f93840/src/renderer/workbench/SelectionContextController.ts)
+
+选区失效按整份文档 revision 判定；任一处修改都会让其他元素的待发请求被拒
+
+类型：repository；核对日期：2026-09-25。
+
+## R67 · src/renderer/workbench/ExecutionAssistant.tsx
+
+[src/renderer/workbench/ExecutionAssistant.tsx](https://github.com/ghostairship-debug/ittoedu/blob/25b12b4b253298f63b642b60e1e80bd0c1f93840/src/renderer/workbench/ExecutionAssistant.tsx)
+
+右侧会话头只显示“当前会话+标题”，所属位置仅在会话列表小字中；空会话会随资源管理器点选静默改变所属
+
+类型：repository；核对日期：2026-09-25。
+
+## R68 · artifacts/ai-capabilities/protocols/runtime-api2.authoring.md
+
+[artifacts/ai-capabilities/protocols/runtime-api2.authoring.md](https://github.com/ghostairship-debug/ittoedu/blob/25b12b4b253298f63b642b60e1e80bd0c1f93840/artifacts/ai-capabilities/protocols/runtime-api2.authoring.md)
+
+§5 要求所有可见文字来自 content.values，§5.1 要求 AI 显式注册编辑目标或加 data-courseware-edit-key
+
+类型：repository；核对日期：2026-09-25。
+
+## R69 · src/renderer/ui/TextEditOverlay.tsx
+
+[src/renderer/ui/TextEditOverlay.tsx](https://github.com/ghostairship-debug/ittoedu/blob/25b12b4b253298f63b642b60e1e80bd0c1f93840/src/renderer/ui/TextEditOverlay.tsx)
+
+文字编辑快捷条：深色、图标按钮、浮于对象上方，是统一选中快捷条的样式参照；颜色为系统连续取色器
+
+类型：repository；核对日期：2026-09-25。

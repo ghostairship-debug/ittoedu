@@ -17,7 +17,7 @@
 ## 执行状态
 
 <!-- BEGIN GENERATED STATUS -->
-当前开发范围有 **33 个实施任务、174 个验收用例**；任务状态：`planned` 5、`verified` 28；当前验收状态：`not_run` 20、`passed` 154；Owner 待验收：M14-T05。后续发行准备另有 **4 个用例**（`not_run` 4），未列入当前开发完成门。统计来自同源 JSON；`verified` / `passed` 是工程状态，不等于 Owner `accepted`，延期用例也不算通过。
+当前开发范围有 **35 个实施任务、185 个验收用例**；任务状态：`planned` 7、`verified` 28；当前验收状态：`not_run` 31、`passed` 154；Owner 待验收：M14-T05。后续发行准备另有 **4 个用例**（`not_run` 4），未列入当前开发完成门。统计来自同源 JSON；`verified` / `passed` 是工程状态，不等于 Owner `accepted`，延期用例也不算通过。
 <!-- END GENERATED STATUS -->
 
 2026-09-23 Owner 已另行授权完整 B00–B12 产品实施，Goal active。B00 的实际基线、6 个真实 Electron 用例和源码复现见 [B00_BASELINE](B00_BASELINE.md)；其后的内核、界面、OAuth 图片和工具链进展见 [B07 集成记录](B07_2026_09_23_INTEGRATION.md)。正式 OAuth 已连接并完成明确授权的实际模型及图片请求；其余未执行场景仍为 `not_run`，DeepSeek 路由缺凭据的实测门、Owner/教师艺术接受及发布均未完成。上方生成统计是工程状态，不给出整体产品通过结论。

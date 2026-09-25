@@ -1,6 +1,6 @@
 # 问题与任务索引
 
-当前修订 v2.1：33 个 S/M 实施任务属于当前开发；验收按 `required_for` 区分当前开发和后续发行准备，延期用例不进入当前完成门。
+当前修订 v2.2：35 个 S/M 实施任务属于当前开发；验收按 `required_for` 区分当前开发和后续发行准备，延期用例不进入当前完成门。
 
 先读[根目录收敛稿](../../果铃2.0收敛方案.md)。任务依赖/批次以 task_registry.json 为准，验收以 acceptance_cases.json 为准。
 
@@ -41,10 +41,12 @@
 | [M12](mid_term/M12.md) | 首次使用与连接设置 | S05、S08、S10、S11、S12、S13、S14、M07、M08、M09 |
 | [M13](mid_term/M13.md) | 现有课件、资源、试运行与导出保全 | S03、S04、S05、S13、S14、M03、M04、M11 |
 | [M14](mid_term/M14.md) | 整体可用性、长会话与无障碍收口 | S11、M01、M02、M03、M04、M05、M06、M07、M08、M09、M10、M11、M12、M13 |
-| [M15](mid_term/M15.md) | Runtime／Component 轻编辑与自动图文发现 | M14 |
+| [M20](mid_term/M20.md) | 文件与会话细节：新建菜单、纯文本文档、另存为与会话所属 | M14 |
+| [M21](mid_term/M21.md) | 轻编辑外壳：单行顶栏、统一选中快捷条与常用色板 | M14 |
+| [M15](mid_term/M15.md) | 统一编辑目标、元素 AI 卡与 Runtime 图文轻编辑 | M21、M19 |
 | [M16](mid_term/M16.md) | Flow 混合画布、自由原生图层与页面 Runtime | M15、M05、M13 |
 | [M17](mid_term/M17.md) | HTML 高保真机械导入与 Runtime 承载 | M15、M16、S13 |
-| [M19](mid_term/M19.md) | Slide 有限画布尺寸参数化 | M17 |
+| [M19](mid_term/M19.md) | Slide 有限画布尺寸参数化 | M14 |
 | [M18](mid_term/M18.md) | 理想呈现后置的 Representation Planning 与创作链 | M15、M16、M17、M19、S14 |
 
 ## 长期：2.x–3.0

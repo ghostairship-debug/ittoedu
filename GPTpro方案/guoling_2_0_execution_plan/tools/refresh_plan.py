@@ -161,11 +161,11 @@ S04 做直接工具演示，S05/S06/S07 在真实窗口完成 API 正文流和�
 
 ## G-PRODUCT
 
-M01–M19 当前 2.0 产品任务全部完成；其中 M15–M19 是 2026-09-25 追加的 Runtime/HTML/Flow 创作能力收口。正常、空态、失败、取消、恢复及额度/冲突/外部接手状态齐备。Markdown、Flow、Slides、Spatial、Runtime、HTML 导入、附件、图片成果、Explorer、会话及 API 配置均无必须绕开的核心缺口。
+M01–M21 当前 2.0 产品任务全部完成；其中 M15–M21 是 2026-09-25 追加的轻编辑、文件会话细节与 Runtime/HTML/Flow 创作能力收口。正常、空态、失败、取消、恢复及额度/冲突/外部接手状态齐备。Markdown、纯文本、Flow、Slides、Spatial、Runtime、HTML 导入、附件、图片成果、Explorer、会话及 API 配置均无必须绕开的核心缺口。
 
 ## G-2.0
 
-当前开发完成须同时满足 G-INFRA、G-PRODUCT、B13–B17 新增收口批次及 [发布门](RELEASE.md) 中 `required_for: 2.0` 的核心行为用例，形成工程候选。后续正式发行再验证 `release-preparation` 用例并由 Owner 签收。核心内容能力不因重构退化；每项声明有实际证据，not_run/blocked/skipped 不汇总为 passed。外部 MCP 兜底不代替自建主执行器完成产品任务。
+当前开发完成须同时满足 G-INFRA、G-PRODUCT、B13–B18 新增收口批次及 [发布门](RELEASE.md) 中 `required_for: 2.0` 的核心行为用例，形成工程候选。后续正式发行再验证 `release-preparation` 用例并由 Owner 签收。核心内容能力不因重构退化；每项声明有实际证据，not_run/blocked/skipped 不汇总为 passed。外部 MCP 兜底不代替自建主执行器完成产品任务。
 ''')
 
     count_line = status_summary(tasks, cases)
