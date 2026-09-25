@@ -4,6 +4,8 @@ import { flowSurfaceIn } from '../../src/core/tools/flowDocumentModel'
 import { selectActiveCourseProjectDocument, useEditorStore } from '@/renderer/store/editorStore'
 import { plainDocumentText } from '@/shared/document/content'
 import { serializeDocumentMarkdown } from '@/shared/document/markdown'
+import { createBlankFlowCourseProject } from '@/renderer/project/createFlowCourseProject'
+import { createCourseStoreHost } from '../helpers/courseStoreHost'
 
 function document() {
   const current = selectActiveCourseProjectDocument(useEditorStore.getState())
@@ -31,7 +33,10 @@ function sourceWithText(text: string): string {
   return serializeDocumentMarkdown({ content: { blocks }, resources: { assets: [], components: [] } }, 'flow')
 }
 
-beforeEach(() => useEditorStore.getState().createNewFlowProject())
+beforeEach(async () => {
+  const host = await createCourseStoreHost()
+  await host.open(createBlankFlowCourseProject())
+})
 
 describe('Flow document draft observation materialization', () => {
   it('materializes a valid source without committing document or history', () => {
