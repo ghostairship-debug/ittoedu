@@ -24,13 +24,17 @@ import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
 import type { CourseProjectDocument, NativeLayerItem } from '@/shared/courseProjectTypes'
 import { formulaAstSchema } from '@/shared/contracts/native-v1/schema'
 import type { FormulaAstNode } from '@/shared/contracts/native-v1'
+import {
+  connectCourseHost,
+  formalCourse,
+  redoSettled,
+  settleCourse,
+  undoSettled,
+  type CourseHost,
+} from '../helpers/triage-t2-course'
 
-function activeHistory() {
-  const state = useEditorStore.getState()
-  const backend = state.slideBackend
-  if (!backend) throw new Error('expected active slideBackend')
-  return backend.getSession().history
-}
+let host: CourseHost
+let documentId: string
 
 const completeAst: FormulaAstNode = {
   type: 'row',
@@ -164,9 +168,11 @@ function publishedFormula(project: CourseProjectDocument) {
   return item.content.data
 }
 
-beforeEach(() => {
-  useEditorStore.getState().createNewProject()
+beforeEach(async () => {
   vi.restoreAllMocks()
+  const connected = await connectCourseHost()
+  host = connected.host
+  documentId = connected.documentId
 })
 
 describe('Course Project V9 FormulaNode contract', () => {
@@ -241,21 +247,23 @@ describe('Course Project V9 FormulaNode contract', () => {
     expect(courseProjectDocumentSchema.safeParse(reopened).success).toBe(true)
   })
 
-  it('uses the normal state-override and undo/redo command path', () => {
-    const store = useEditorStore.getState()
-    store.addFormulaNode(160, 120)
+  it('uses the normal state-override and undo/redo command path', async () => {
+    useEditorStore.getState().addFormulaNode(160, 120)
+    await settleCourse()
     const formula = selectActiveScene(useEditorStore.getState()).nodes[0]
     if (formula?.type !== 'formula') throw new Error('Expected FormulaNode')
     const formulaId = formula.formulaId
-    store.addPresentationState('公式答案')
+    useEditorStore.getState().addPresentationState('公式答案')
+    await settleCourse()
     const stateId = selectActivePresentationStateId(useEditorStore.getState())!
-    const historyBefore = activeHistory().past.length
+    const depthBefore = formalCourse(host, documentId).undoDepth
 
     useEditorStore.getState().updateNode(formula.id, {
       accessibleText: '答案为一',
       ast: { type: 'token', value: '1' },
       style: { fontSize: 64, color: '#7c3aed', align: 'right' },
     })
+    await settleCourse()
 
     let scene = selectActiveScene(useEditorStore.getState())
     expect(scene.nodes[0]).toMatchObject({
@@ -270,14 +278,17 @@ describe('Course Project V9 FormulaNode contract', () => {
       ast: { type: 'token', value: '1' },
       style: { fontSize: 64, color: '#7c3aed', align: 'right' },
     })
-    expect(activeHistory().past).toHaveLength(historyBefore + 1)
+    const depth = formalCourse(host, documentId).undoDepth
+    expect(depth).toBe(depthBefore + 1)
 
-    useEditorStore.getState().undo()
+    await undoSettled(host, documentId)
+    expect(formalCourse(host, documentId).undoDepth).toBe(depth - 1)
     scene = selectActiveScene(useEditorStore.getState())
     expect(selectEffectiveSlideSceneNodes(stateId)[0]).toMatchObject({
       accessibleText: 'x 的平方加二分之一',
     })
-    useEditorStore.getState().redo()
+    await redoSettled(host, documentId)
+    expect(formalCourse(host, documentId).undoDepth).toBe(depth)
     scene = selectActiveScene(useEditorStore.getState())
     expect(selectEffectiveSlideSceneNodes(stateId)[0]).toMatchObject({
       accessibleText: '答案为一',

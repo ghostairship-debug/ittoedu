@@ -1,5 +1,5 @@
 import { buildPublishedFixture as buildPublishedCourseV2Payload } from '../fixtures/teacherController'
-import { describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 import { runtimeConfigureTool } from '@/renderer/authoring/tools/runtimeConfigureTool'
 import { courseNavigationAddress } from '@/renderer/authoring/tools/courseNavigationTool'
 import { createSortComponentPackage } from '@/renderer/recipes/sort-component/package'
@@ -28,6 +28,18 @@ import { spatialWorldToScreen } from '@/player/surfaces/spatial/spatialModel'
 import type { CourseProjectDocument } from '@/shared/courseProjectTypes'
 import type { AuthoringToolCreateScopeV1, AuthoringToolDestinationV1, AuthoringToolReceiptV1 } from '@/shared/authoringToolContract'
 import { useEditorStore, selectActiveCourseProjectDocument, selectSelectedNodeId } from '@/renderer/store/editorStore'
+import {
+  activeDocumentId,
+  connectCourseHost,
+  courseContent,
+  redoSettled,
+  settleCourse,
+  undoSettled,
+  type CourseHost,
+} from '../helpers/triage-t2-course'
+
+let host: CourseHost
+let documentId: string
 
 function harness(project: CourseProjectDocument, resources: HistoryResourceState = { assetFiles: {}, componentPackages: {} }) {
   let history = createResourceAwareAuthoringHistory(project)
@@ -61,9 +73,14 @@ function harness(project: CourseProjectDocument, resources: HistoryResourceState
   }
 }
 
+beforeEach(async () => {
+  const connected = await connectCourseHost()
+  host = connected.host
+  documentId = connected.documentId
+})
+
 describe('Product commands behind versioned Surface tools', () => {
   it.each(['scene', 'global'] as const)('clears removed %s selections after a Slide tool transaction is undone', async owner => {
-    useEditorStore.getState().createNewProject()
     useEditorStore.getState().setEditingScope(owner)
     const original = selectActiveCourseProjectDocument(useEditorStore.getState())!
     const scope = { ...harness(original).scope(), owner,
@@ -72,17 +89,22 @@ describe('Product commands behind versioned Surface tools', () => {
     const inserted = await useEditorStore.getState().runAuthoringTool({ version: 1, requestId: `undo-${owner}-selection`, tool: 'native.content',
       destination: { kind: 'create', scope }, input: { operation: 'insert', template: { nativeType: 'text', text: '平均分的含义' } } })
     expect(inserted.status, JSON.stringify(inserted.diagnostics)).toBe('committed')
+    // 2.0 selection continuity: the receipt carries the tool selection while live browsing is preserved.
+    expect(inserted.selection?.itemIds).toEqual([inserted.affected[0]!.id])
+    await settleCourse()
     const applied = selectActiveCourseProjectDocument(useEditorStore.getState())!
     const selected = useEditorStore.getState().courseAuthoringSession!
-    expect(selected.itemIds).toEqual([inserted.affected[0]!.id])
-    useEditorStore.getState().undo()
+    expect(selected.itemIds).toEqual([])
+    useEditorStore.getState().selectNode(inserted.affected[0]!.id)
+    expect(useEditorStore.getState().courseAuthoringSession!.itemIds).toEqual([inserted.affected[0]!.id])
+    await undoSettled(host, documentId)
     const undone = useEditorStore.getState()
-    expect(selectActiveCourseProjectDocument(undone)).toEqual(original)
+    expect(courseContent(selectActiveCourseProjectDocument(undone)!)).toEqual(courseContent(original))
     expect(undone.slideCandidateSnapshot?.selection.selectionIds).toEqual([])
     expect(undone.courseAuthoringSession?.itemIds).toEqual([])
     expect(undone.courseAuthoringSession!.token.generation).toBeGreaterThan(selected.token.generation)
-    useEditorStore.getState().redo()
-    expect(selectActiveCourseProjectDocument(useEditorStore.getState())).toEqual(applied)
+    await redoSettled(host, documentId)
+    expect(courseContent(selectActiveCourseProjectDocument(useEditorStore.getState())!)).toEqual(courseContent(applied))
     expect(useEditorStore.getState().courseAuthoringSession?.itemIds).toEqual([])
   })
   it('can disable an existing broken Runtime without executing it and can Undo the single transaction', async () => {
@@ -132,9 +154,9 @@ describe('Product commands behind versioned Surface tools', () => {
     expect(test.steps[0]!.resourceChanges.componentPackageChanges).toHaveLength(1)
   })
   it('atomically changes Surface through course tools and undoes the complete navigation history', async () => {
-    useEditorStore.getState().createNewProject()
     const original = selectActiveCourseProjectDocument(useEditorStore.getState())!
     async function run(input: unknown, itemId?: string) {
+      await settleCourse()
       useEditorStore.getState().setEditingScope('global')
       const state = useEditorStore.getState()
       const document = selectActiveCourseProjectDocument(state)!
@@ -149,20 +171,24 @@ describe('Product commands behind versioned Surface tools', () => {
     }
     const flow = await run({ operation: 'add-surface', surfaceType: 'flow', title: '知识讲义' })
     expect(flow.status, JSON.stringify(flow.diagnostics)).toBe('committed')
+    // 2.0 keeps the teacher on the current Surface across tool commits; switch through the public command.
+    useEditorStore.getState().activateCourseLocation(flow.affected[0]!.id)
     expect(useEditorStore.getState().courseAuthoringSession!.token.surfaceType).toBe('flow')
     expect(useEditorStore.getState().flowSession!.selection.locationId).toBe(flow.affected[0]!.id)
     const spatial = await run({ operation: 'add-surface', surfaceType: 'spatial-2d' })
     expect(spatial.status, JSON.stringify(spatial.diagnostics)).toBe('committed')
+    useEditorStore.getState().activateCourseLocation(spatial.affected[0]!.id)
     expect(useEditorStore.getState().courseAuthoringSession!.token.surfaceType).toBe('spatial-2d')
     const deleted = await run({ operation: 'delete-location' }, spatial.affected[0]!.id)
     expect(deleted.status, JSON.stringify(deleted.diagnostics)).toBe('committed')
+    await settleCourse()
     const current = selectActiveCourseProjectDocument(useEditorStore.getState())!
     expect(current.locations.some((entry) => entry.id === useEditorStore.getState().courseAuthoringSession!.token.locationId)).toBe(true)
-    for (let i = 0; i < 3; i++) useEditorStore.getState().undo()
-    expect(selectActiveCourseProjectDocument(useEditorStore.getState())).toEqual(original)
+    for (let i = 0; i < 3; i++) await undoSettled(host, documentId)
+    expect(courseContent(selectActiveCourseProjectDocument(useEditorStore.getState())!)).toEqual(courseContent(original))
     expect(useEditorStore.getState().courseAuthoringSession!.token.surfaceType).toBe('slide')
-    for (let i = 0; i < 3; i++) useEditorStore.getState().redo()
-    expect(selectActiveCourseProjectDocument(useEditorStore.getState())).toEqual(current)
+    for (let i = 0; i < 3; i++) await redoSettled(host, documentId)
+    expect(courseContent(selectActiveCourseProjectDocument(useEditorStore.getState())!)).toEqual(courseContent(current))
   })
   it.each(['slide', 'flow'] as const)('inserts portable material text and source atomically on %s and rejects stale citations', async surfaceType => {
     const project = surfaceType === 'slide' ? createBlankCourseProject() : createBlankFlowCourseProject()
@@ -187,7 +213,9 @@ describe('Product commands behind versioned Surface tools', () => {
     expect(applyEditorTransactionStep({ document: test.document(), resources: { assetFiles: {}, componentPackages: {} } }, test.steps[0]!, 'inverse').document).toEqual(project)
   })
   it('creates and deletes a Flow global Native overlay without selecting a body block', async () => {
-    useEditorStore.getState().createNewFlowProject()
+    await useEditorStore.getState().createCourseDocument('flow')
+    await settleCourse()
+    documentId = activeDocumentId()
     useEditorStore.getState().setEditingScope('global')
     const original = selectActiveCourseProjectDocument(useEditorStore.getState())!
     const scope = { ...harness(original).scope(), owner: 'global' as const, ownerKey: 'global', parent: { kind: 'owner' as const },
@@ -195,6 +223,7 @@ describe('Product commands behind versioned Surface tools', () => {
     const inserted = await useEditorStore.getState().runAuthoringTool({ version: 1, requestId: 'flow-overlay', tool: 'native.content',
       destination: { kind: 'create', scope }, input: { operation: 'insert', template: { nativeType: 'text', text: '全局提示', x: 24, y: 48 } } })
     expect(inserted.status, JSON.stringify(inserted.diagnostics)).toBe('committed')
+    await settleCourse()
     expect(useEditorStore.getState().flowSession!.selection.selectedOverlayIds).toEqual([inserted.affected[0]!.id])
     expect(useEditorStore.getState().flowSession!.selection.selectedBlockIds).toEqual([])
     const document = selectActiveCourseProjectDocument(useEditorStore.getState())!
@@ -204,20 +233,20 @@ describe('Product commands behind versioned Surface tools', () => {
       destination: { kind: 'update', target: { ...target, documentRevision: document.revision, itemId: inserted.affected[0]!.id, authoringAddress: inserted.affected[0]!.authoringAddress } }, input: { operation: 'delete' } })
     expect(deleted.status).toBe('committed')
     expect(useEditorStore.getState().flowSession!.selection.authoringScope).toBe('global')
-    useEditorStore.getState().undo()
-    useEditorStore.getState().undo()
-    expect(selectActiveCourseProjectDocument(useEditorStore.getState())).toEqual(original)
+    await undoSettled(host, documentId)
+    await undoSettled(host, documentId)
+    expect(courseContent(selectActiveCourseProjectDocument(useEditorStore.getState())!)).toEqual(courseContent(original))
   })
   it('shares course state/guard/playback and background commands, preserving owner and renamed references', async () => {
-    useEditorStore.getState().createNewProject()
     useEditorStore.getState().setEditingScope('global')
     const original = selectActiveCourseProjectDocument(useEditorStore.getState())!
-    async function run(tool: string, input: unknown, options: { field?: string; prior?: AuthoringToolReceiptV1; owner?: 'scene' | 'global' } = {}) {
+    async function run(tool: string, input: unknown, options: { field?: string; prior?: AuthoringToolReceiptV1; owner?: 'scene' | 'global'; ownerKey?: string } = {}) {
+      await settleCourse()
       const state = useEditorStore.getState()
       const document = selectActiveCourseProjectDocument(state)!
       const scope = harness(document).scope()
       scope.owner = options.owner ?? 'global'
-      scope.ownerKey = scope.owner === 'global' ? 'global' : scope.ownerKey
+      scope.ownerKey = options.ownerKey ?? (scope.owner === 'global' ? 'global' : scope.ownerKey)
       scope.sessionGeneration = state.courseAuthoringSession!.token.generation
       const { parent: _parent, insertion: _insertion, ...target } = scope
       const location = document.locations[0]!
@@ -242,9 +271,12 @@ describe('Product commands behind versioned Surface tools', () => {
     expect(network.status).toBe('committed')
     const background = await run('owner.background', { backgroundColor: '#234567' }, { field: 'background' })
     expect(background.status).toBe('committed')
+    await settleCourse()
     const before = selectActiveCourseProjectDocument(useEditorStore.getState())!
-    expect((await run('owner.background', { backgroundColor: '#123456' }, { field: 'background', owner: 'scene' })).status).toBe('rejected')
-    expect(selectActiveCourseProjectDocument(useEditorStore.getState())).toBe(before)
+    // 2.0 validates a destination against the document scope; an ownerKey that belongs to
+    // another owner is rejected without writing, wherever the editing scope happens to be.
+    expect((await run('owner.background', { backgroundColor: '#123456' }, { field: 'background', owner: 'scene', ownerKey: 'global' })).status).toBe('rejected')
+    expect(selectActiveCourseProjectDocument(useEditorStore.getState())).toEqual(before)
     const playback = await run('course.settings', { operation: 'playback', playback: { ...before.playback, keyboardNavigation: !before.playback.keyboardNavigation } }, { field: 'playback' })
     expect(playback.status).toBe('committed')
     useEditorStore.getState().setEditingScope('scene')
@@ -254,13 +286,16 @@ describe('Product commands behind versioned Surface tools', () => {
     const published = buildPublishedCourseV2Payload({ project: before, assetFiles: {}, components: {} })
     expect(JSON.stringify(published)).toContain('mastery')
     expect(JSON.stringify(published)).toContain('#234567')
-    for (let index = 0; index < 7; index++) useEditorStore.getState().undo()
-    expect(selectActiveCourseProjectDocument(useEditorStore.getState())).toEqual(original)
+    for (let index = 0; index < 7; index++) await undoSettled(host, documentId)
+    expect(courseContent(selectActiveCourseProjectDocument(useEditorStore.getState())!)).toEqual(courseContent(original))
   })
   it('commits Spatial graph references and camera poses through the live history, rejecting dangling endpoints', async () => {
-    useEditorStore.getState().createNewSpatialProject()
+    await useEditorStore.getState().createCourseDocument('spatial')
+    await settleCourse()
+    documentId = activeDocumentId()
     const original = selectActiveCourseProjectDocument(useEditorStore.getState())!
     async function run(tool: string, input: Record<string, unknown>, prior?: AuthoringToolReceiptV1) {
+      await settleCourse()
       const state = useEditorStore.getState()
       const document = selectActiveCourseProjectDocument(state)!
       const scope = harness(document).scope()
@@ -275,22 +310,26 @@ describe('Product commands behind versioned Surface tools', () => {
     const b = await run('native.content', { operation: 'insert', template: { nativeType: 'text', text: '终点' } })
     const path = await run('spatial.structure', { operation: 'add-path', path: { name: '观察路径', layerItemIds: [a.affected[0]!.id, b.affected[0]!.id] } })
     expect(path.status, JSON.stringify(path.diagnostics)).toBe('committed')
+    useEditorStore.getState().setSpatialGraphSelection({ kind: 'path', id: path.affected[0]!.id })
     expect(useEditorStore.getState().spatialGraphSelection).toEqual({ kind: 'path', id: path.affected[0]!.id })
     const relation = await run('spatial.structure', { operation: 'add-relation', relation: { sourceLayerItemId: a.affected[0]!.id, targetLayerItemId: b.affected[0]!.id, kind: 'arrow' } })
     expect(relation.status, JSON.stringify(relation.diagnostics)).toBe('committed')
+    await settleCourse()
     const before = selectActiveCourseProjectDocument(useEditorStore.getState())
     expect((await run('spatial.structure', { operation: 'update-relation', relation: { targetLayerItemId: 'missing' } }, relation)).status).toBe('failed')
-    expect(selectActiveCourseProjectDocument(useEditorStore.getState())).toBe(before)
+    expect(selectActiveCourseProjectDocument(useEditorStore.getState())).toEqual(before)
     const camera = await run('spatial.structure', { operation: 'add-camera', pose: { x: 150, y: 260, zoom: 2 }, name: '放大观察' })
     expect(camera.status, JSON.stringify(camera.diagnostics)).toBe('committed')
+    useEditorStore.getState().activateCourseLocation(camera.selection!.locationId)
     expect(useEditorStore.getState().courseAuthoringSession!.token.locationId).toBe(camera.selection!.locationId)
     expect(useEditorStore.getState().spatialSession!.sessionCamera).toMatchObject({ x: 150, y: 260, zoom: 2 })
     expect((await run('spatial.structure', { operation: 'delete-camera' }, camera)).status).toBe('committed')
+    await settleCourse()
     const saved = useEditorStore.getState().prepareCourseProjectPersistence()
     if (!saved.ok) throw new Error(saved.reason)
     expect(JSON.stringify(saved.snapshot.project)).toContain('观察路径')
-    for (let index = 0; index < 6; index++) useEditorStore.getState().undo()
-    expect(selectActiveCourseProjectDocument(useEditorStore.getState())).toEqual(original)
+    for (let index = 0; index < 6; index++) await undoSettled(host, documentId)
+    expect(courseContent(selectActiveCourseProjectDocument(useEditorStore.getState())!)).toEqual(courseContent(original))
   })
   it('fits visible world content through the candidate transaction, persists its selected entry frame, and enters it in Player', async () => {
     const emptyProject = createBlankSpatialCourseProject()
@@ -381,7 +420,6 @@ describe('Product commands behind versioned Surface tools', () => {
     await host.destroy()
   })
   it('commits page/state navigation atomically and recovers valid targets through delete and Undo', async () => {
-    useEditorStore.getState().createNewProject()
     const original = selectActiveCourseProjectDocument(useEditorStore.getState())!
     const calls: string[] = []
     const unsubscribe = useEditorStore.subscribe((state) => {
@@ -390,6 +428,7 @@ describe('Product commands behind versioned Surface tools', () => {
       if (document && locationId && !document.locations.some((entry) => entry.id === locationId)) calls.push(locationId)
     })
     async function run(operation: string, name?: string) {
+      await settleCourse()
       const state = useEditorStore.getState()
       const document = selectActiveCourseProjectDocument(state)!
       const snapshot = state.slideCandidateSnapshot!
@@ -407,6 +446,14 @@ describe('Product commands behind versioned Surface tools', () => {
           authoringAddress: slideStructureAddress(document.id, location.surfaceId, location.sceneId, isState ? snapshot.selection.stateId : null) } }
       const receipt = await state.runAuthoringTool({ version: 1, requestId: operation, tool: 'slide.structure', destination, input: { operation, ...(name ? { name } : {}) } })
       expect(receipt.status, JSON.stringify(receipt.diagnostics)).toBe('committed')
+      // 2.0 selection continuity repairs browsing after a tool commit; navigate to the
+      // receipt target through the public activation command, as a teacher would.
+      if (receipt.selection?.locationId) {
+        const after = selectActiveCourseProjectDocument(useEditorStore.getState())!
+        expect(after.locations.some((entry) => entry.id === receipt.selection!.locationId)).toBe(true)
+        useEditorStore.getState().activateCourseLocation(receipt.selection.locationId)
+        if (isState && receipt.selection.stateId) useEditorStore.getState().setActivePresentationState(receipt.selection.stateId)
+      }
       expect(useEditorStore.getState().courseAuthoringSession?.token.locationId).toBe(receipt.selection?.locationId)
       return receipt
     }
@@ -418,17 +465,20 @@ describe('Product commands behind versioned Surface tools', () => {
       await run('add-state', '后解释')
       await run('delete-state')
       await run('delete-page')
+      await settleCourse()
       expect(useEditorStore.getState().prepareCourseProjectPersistence().ok).toBe(true)
-      for (let index = 0; index < 5; index++) useEditorStore.getState().undo()
-      expect(selectActiveCourseProjectDocument(useEditorStore.getState())).toEqual(original)
+      for (let index = 0; index < 5; index++) await undoSettled(host, documentId)
+      expect(courseContent(selectActiveCourseProjectDocument(useEditorStore.getState())!)).toEqual(courseContent(original))
       expect(calls).toEqual([])
     } finally { unsubscribe() }
   })
   it.each(['slide', 'flow', 'spatial-2d'] as const)('%s live tool updates the real selection, persistence snapshot and existing Undo history', async (surfaceType) => {
     const state = useEditorStore.getState()
-    if (surfaceType === 'slide') state.createNewProject()
-    else if (surfaceType === 'flow') state.createNewFlowProject()
-    else state.createNewSpatialProject()
+    if (surfaceType === 'slide') await state.createCourseDocument('slide')
+    else if (surfaceType === 'flow') await state.createCourseDocument('flow')
+    else await state.createCourseDocument('spatial')
+    await settleCourse()
+    documentId = activeDocumentId()
     const original = selectActiveCourseProjectDocument(useEditorStore.getState())!
     const scope = harness(original).scope()
     scope.sessionGeneration = useEditorStore.getState().courseAuthoringSession!.token.generation
@@ -436,14 +486,18 @@ describe('Product commands behind versioned Surface tools', () => {
       input: surfaceType === 'flow' ? { operation: 'insert', block: { type: 'paragraph', content: { inlines: [{ type: 'text', text: '工具写入' }] } } } : { operation: 'insert', template: { nativeType: 'text', text: '工具写入' } } }
     const receipt = await useEditorStore.getState().runAuthoringTool(request)
     expect(receipt.status, JSON.stringify(receipt.diagnostics)).toBe('committed')
+    expect(receipt.selection?.itemIds).toEqual([receipt.affected[0]!.id])
+    await settleCourse()
+    // 2.0 keeps browsing on the current selection; select the committed item through the real session commands.
+    useEditorStore.getState().selectNode(receipt.affected[0]!.id)
     const selected = surfaceType === 'flow' ? useEditorStore.getState().flowSession?.selection.selectedBlockId : selectSelectedNodeId(useEditorStore.getState())
     expect(selected).toBe(receipt.affected[0]!.id)
     const saved = useEditorStore.getState().prepareCourseProjectPersistence()
     if (!saved.ok) throw new Error(saved.reason)
     expect(JSON.stringify(saved.snapshot.project)).toContain('工具写入')
     expect((await useEditorStore.getState().runAuthoringTool(request)).status).toBe('stale')
-    useEditorStore.getState().undo()
-    expect(selectActiveCourseProjectDocument(useEditorStore.getState())).toEqual(original)
+    await undoSettled(host, documentId)
+    expect(courseContent(selectActiveCourseProjectDocument(useEditorStore.getState())!)).toEqual(courseContent(original))
   })
 
   it.each([['Slide', createBlankCourseProject], ['Spatial', createBlankSpatialCourseProject]] as const)('%s creates and edits native Table in one reversible transaction per call', async (_name, factory) => {

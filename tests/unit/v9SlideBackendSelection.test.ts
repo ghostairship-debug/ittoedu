@@ -20,6 +20,12 @@ import {
   getSlideBackendKind,
   isSlideAuthoringBackend,
 } from '@/renderer/store/slideBackendPort'
+import {
+  connectCourseHost,
+  openCourseOnHost,
+  settleCourse,
+  type CourseHost,
+} from '../helpers/triage-t2-course'
 
 /**
  * Proves store backend exclusivity and single V9 document transaction.
@@ -163,9 +169,11 @@ function expectExactlyOneActiveV9Document(label: string) {
   return document!
 }
 
-beforeEach(() => {
-  useEditorStore.getState().clearV9SlideCandidateBackend()
-  useEditorStore.getState().createNewProject()
+let host: CourseHost
+
+beforeEach(async () => {
+  const connected = await connectCourseHost()
+  host = connected.host
 })
 
 afterEach(() => {
@@ -173,7 +181,7 @@ afterEach(() => {
 })
 
 describe('V9 slide authoring backend single document transaction', () => {
-  it('navigates exact state locations through the Store without history and preserves scene base editing', () => {
+  it('navigates exact state locations through the Store without history and preserves scene base editing', async () => {
     const source = v9CandidateFixture()
     const surface = source.surfaces[0]!
     if (surface.type !== 'slide') throw new Error('expected Slide surface')
@@ -192,9 +200,7 @@ describe('V9 slide authoring backend single document transaction', () => {
       { id: 'location-step-two', label: '第二步', kind: 'slide-scene', surfaceId: surface.id, sceneId: scene.id, stateId: 'state-two' },
     ]
     source.startLocationId = 'location-step-one'
-    useEditorStore.getState().injectV9SlideCandidateBackend(createSlideAuthoringBackend(
-      openSlideAuthoringSession(source, { locationId: 'location-two' }),
-    ))
+    await openCourseOnHost(source)
     const history = selectSlideAuthoringBackend(useEditorStore.getState())!.getSession().history
     const dirty = useEditorStore.getState().dirty
     const assertExact = (locationId: string, stateId: string) => {
@@ -230,6 +236,7 @@ describe('V9 slide authoring backend single document transaction', () => {
     expect(backend.getSnapshot()).toEqual(beforeRejected)
 
     useEditorStore.getState().addCourseContent('flow-page')
+    await settleCourse()
     const flowHistory = useEditorStore.getState().flowSession!.history
     useEditorStore.getState().activateCourseLocation('location-step-two')
     assertExact('location-step-two', 'state-two')
@@ -237,7 +244,7 @@ describe('V9 slide authoring backend single document transaction', () => {
     expect(useEditorStore.getState().flowSession).toBeNull()
   })
 
-  it('defaults to the V9 slide authoring backend', () => {
+  it('defaults to the V9 slide authoring backend', async () => {
     const state = useEditorStore.getState()
     expect(selectSlideBackendKind(state)).toBe('slide-authoring')
     expect(getSlideBackendKind(state.slideBackend)).toBe('slide-authoring')
@@ -260,6 +267,7 @@ describe('V9 slide authoring backend single document transaction', () => {
     )
     expect(added.ok).toBe(true)
     expect(added.historyEntry).toBe(true)
+    await settleCourse()
     const documentAfter = selectSlideAuthoringDocument(useEditorStore.getState())
     expect(documentAfter?.schemaVersion).toBe(9)
     expect(documentAfter?.revision).toBe(revisionBefore + 1)
@@ -268,16 +276,22 @@ describe('V9 slide authoring backend single document transaction', () => {
     ))).toHaveLength(scenesBefore + 1)
   })
 
-  it('injects one V9 authoring backend and executes single document transactions', () => {
+  it('injects one V9 authoring backend and executes single document transactions', async () => {
     const source = v9CandidateFixture()
-    const backend = createSlideAuthoringBackend(openSlideAuthoringSession(source))
 
-    useEditorStore.getState().injectV9SlideCandidateBackend(backend)
+    await openCourseOnHost(source)
 
     const injected = useEditorStore.getState()
     expect(selectSlideBackendKind(injected)).toBe('slide-authoring')
-    expect(selectSlideAuthoringBackend(injected)).toBe(backend)
-    expect(selectSlideAuthoringSnapshot(injected)).toEqual(backend.getSnapshot())
+    // 2.0 wraps every stored backend in a one-call planner (courseViewPatch);
+    // identity with a donor backend is intentionally gone, the projected
+    // document and snapshot remain the single active authoring state.
+    expect(selectSlideAuthoringBackend(injected)).not.toBeNull()
+    expect(selectSlideAuthoringSnapshot(injected)).toMatchObject({
+      locationId: 'location-scene-1',
+      sceneId: 'scene-1',
+      revision: 1,
+    })
     expect(selectSlideAuthoringDocument(injected)?.schemaVersion).toBe(9)
     expect(selectSlideAuthoringDocument(injected)?.id).toBe('r2-seam-slide-candidate')
     expect(selectActiveCourseProjectDocument(injected)?.schemaVersion).toBe(9)
@@ -290,6 +304,7 @@ describe('V9 slide authoring backend single document transaction', () => {
     )
     expect(added.ok).toBe(true)
     expect(added.historyEntry).toBe(true)
+    await settleCourse()
 
     const afterWrite = useEditorStore.getState()
     expect(selectSlideBackendKind(afterWrite)).toBe('slide-authoring')
@@ -306,7 +321,7 @@ describe('V9 slide authoring backend single document transaction', () => {
       : []).toHaveLength(1)
   })
 
-  it('maintains single V9 document state across createNewProject and reset', () => {
+  it('maintains single V9 document state across createNewProject and reset', async () => {
     const backend = makeCandidateBackend()
     useEditorStore.getState().injectV9SlideCandidateBackend(backend)
     expect(selectSlideBackendKind(useEditorStore.getState())).toBe('slide-authoring')
@@ -325,7 +340,9 @@ describe('V9 slide authoring backend single document transaction', () => {
       historyEntry: true,
     })
 
-    cleared.createNewProject()
+    // createNewProject defers to the async document host; await the same call.
+    await cleared.createCourseDocument('slide')
+    await settleCourse()
     const restored = useEditorStore.getState()
     expect(selectSlideBackendKind(restored)).toBe('slide-authoring')
     expect(selectSlideAuthoringDocument(restored)?.schemaVersion).toBe(9)
@@ -340,17 +357,20 @@ describe('V9 slide authoring backend single document transaction', () => {
       }),
     )
     expect(added.ok).toBe(true)
+    await settleCourse()
     expect(selectSlideAuthoringSnapshot(useEditorStore.getState())?.revision).toBe(revisionBefore + 1)
     expect(selectSlideAuthoringDocument(useEditorStore.getState())?.schemaVersion).toBe(9)
   })
 
-  it('never loses publish sources during normal V9 new, open, mixed-switch, and restore lifecycles', () => {
+  it('never loses publish sources during normal V9 new, open, mixed-switch, and restore lifecycles', async () => {
     const store = useEditorStore.getState()
     const freshSlide = expectExactlyOneActiveV9Document('new Slide project')
 
     store.addCourseContent('flow-page')
+    await settleCourse()
     expectExactlyOneActiveV9Document('add Flow page')
-    store.addCourseContent('spatial-page')
+    useEditorStore.getState().addCourseContent('spatial-page')
+    await settleCourse()
     const mixed = expectExactlyOneActiveV9Document('add Spatial page')
     expect(mixed.id).toBe(freshSlide.id)
 
@@ -381,13 +401,18 @@ describe('V9 slide authoring backend single document transaction', () => {
 
     // New replaces the prior authoring session; normal product lifecycle does
     // not expose a sessionless "closed project" state between these actions.
-    useEditorStore.getState().createNewProject()
+    // createNewProject defers to the async document host; await the same call.
+    await useEditorStore.getState().createCourseDocument('slide')
+    await settleCourse()
     expectExactlyOneActiveV9Document('replace document with new project')
-    expect(useEditorStore.getState().reopenV9SlideCandidateArchive(archive)).toBe(true)
+    expect(await useEditorStore.getState().reopenV9SlideCandidateArchive(archive)).toBe(true)
+    await settleCourse()
     const restored = expectExactlyOneActiveV9Document('restore V9 archive')
     expect(restored.id).toBe(mixed.id)
 
-    useEditorStore.getState().loadCourseProject(structuredClone(restored), 'C:/tmp/legal-v9.h5lesson')
+    // Open the legal V9 project through the real file path of the document host.
+    await host.open(structuredClone(restored))
+    await settleCourse()
     expectExactlyOneActiveV9Document('open legal V9 project')
   })
 })

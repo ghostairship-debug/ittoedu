@@ -29,6 +29,11 @@ function state(documentId = 'document-a', sequence = 0): DurableDocumentState {
 }
 const journalFile = (directory: string, id: string) => path.join(directory, `${createHash('sha256').update(id).digest('hex')}.journal`)
 
+/** Save refuses a revision that was never appended to this document's recovery journal. */
+async function remember(journal: ReturnType<typeof createDocumentJournal>, documentId: string, revision: number, source = '正文') {
+  await journal.append({ ...state(documentId, revision), model: model(source) })
+}
+
 describe('G20 durable document journal', () => {
   it('recovers resources, history and receipts atomically, discards only a torn tail and rejects complete corruption', async () => {
     const { directory, journal } = await fixture()
@@ -75,6 +80,7 @@ describe('G20 durable document journal', () => {
     const serialized = bytes('revision r')
     const input = { documentId: 'doc', revision: 4, model: draft, bytes: serialized,
       binding: { kind: 'file' as const, path: filename, version: null, bindingVersion: 1 } }
+    await remember(journal, 'doc', 4, 'revision r')
     const saving = journal.save(input)
     if (draft.kind === 'markdown') draft.source = 'revision r+1'
     serialized.fill(0)
@@ -103,6 +109,7 @@ describe('G20 durable document journal', () => {
     draft.resources.components['packages/demo'] = { 'index.js': bytes('export default {}'), 'media/part.bin': bytes('component media') }
     const input = { documentId: 'doc', revision: 1, model: draft, bytes: bytes(source),
       binding: { kind: 'file' as const, path: filename, version: null, bindingVersion: 1 } }
+    await remember(journal, 'doc', 1, source)
     vi.spyOn(fs, 'rename').mockRejectedValueOnce(new Error('injected package publish failure'))
     await expect(journal.save(input)).rejects.toThrow('injected package publish failure')
     await expect(fs.access(filename)).rejects.toMatchObject({ code: 'ENOENT' })
@@ -155,6 +162,7 @@ describe('G20 durable document journal', () => {
     expect(Object.keys(resources.components['packages/demo']).sort()).toEqual(['index.js', 'media/part.bin'])
     const draft: DocumentModel = { kind: 'markdown', source, resources }
     const version = await readDocumentFileVersion(filename, 'markdown')
+    await remember(journal, 'doc', 2, source)
     await journal.save({ documentId: 'doc', revision: 2, model: draft, bytes: bytes(source),
       binding: { kind: 'file', path: filename, version, bindingVersion: 1 } })
     const copy = path.join(destination, 'copy.md')

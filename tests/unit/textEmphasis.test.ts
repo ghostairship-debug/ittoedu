@@ -16,13 +16,17 @@ import { selectEffectiveSlideSceneNodes } from '../helpers/selectEffectiveSlideS
 import { sceneNodeToCourseLayerItem } from '@/shared/courseProjectModel'
 import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
 import type { CourseProjectDocument, NativeLayerItem } from '@/shared/courseProjectTypes'
+import {
+  connectCourseHost,
+  formalCourse,
+  redoSettled,
+  settleCourse,
+  undoSettled,
+  type CourseHost,
+} from '../helpers/triage-t2-course'
 
-function activeHistory() {
-  const state = useEditorStore.getState()
-  const backend = state.slideBackend
-  if (!backend) throw new Error('expected active slideBackend')
-  return backend.getSession().history
-}
+let host: CourseHost
+let documentId: string
 
 function canvasContext(): CanvasRenderingContext2D {
   return {
@@ -76,8 +80,10 @@ function addTextLayer(
   return item as TextLayerItem
 }
 
-beforeEach(() => {
-  useEditorStore.getState().createNewProject()
+beforeEach(async () => {
+  const connected = await connectCourseHost()
+  host = connected.host
+  documentId = connected.documentId
 })
 
 afterEach(() => {
@@ -134,18 +140,20 @@ describe('Course Project V9 native text emphasis', () => {
     })
   })
 
-  it('writes named-state emphasis through the same update and undo path', () => {
+  it('writes named-state emphasis through the same update and undo path', async () => {
     const store = useEditorStore.getState()
     store.addTextNode()
     const nodeId = selectActiveScene(useEditorStore.getState()).nodes[0]!.id
     store.addPresentationState('着重状态')
     const stateId = selectActivePresentationStateId(useEditorStore.getState())!
-    const historyBefore = activeHistory().past.length
+    await settleCourse()
+    const depthBefore = formalCourse(host, documentId).undoDepth
 
     useEditorStore.getState().updateNode(nodeId, {
       runs: [{ start: 0, end: 2, style: { emphasis: false } }],
       style: { emphasis: true },
     })
+    await settleCourse()
 
     const scene = selectActiveScene(useEditorStore.getState())
     expect(scene.nodes[0]).toMatchObject({ style: { emphasis: false }, runs: [] })
@@ -155,19 +163,20 @@ describe('Course Project V9 native text emphasis', () => {
     })
     expect(courseProjectDocumentSchema.safeParse(selectActiveCourseProjectDocument(useEditorStore.getState())!).success)
       .toBe(true)
-    expect(activeHistory().past).toHaveLength(historyBefore + 1)
+    expect(formalCourse(host, documentId).undoDepth).toBe(depthBefore + 1)
 
-    useEditorStore.getState().undo()
+    await undoSettled(host, documentId)
     expect(selectEffectiveSlideSceneNodes(stateId)[0])
       .toMatchObject({ style: { emphasis: false }, runs: [] })
   })
 
-  it('commits a local emphasis command as one undoable and redoable text edit', () => {
+  it('commits a local emphasis command as one undoable and redoable text edit', async () => {
     const store = useEditorStore.getState()
     store.addTextNode()
     const node = selectActiveScene(useEditorStore.getState()).nodes[0]!
     if (node.type !== 'text') throw new Error('Expected text node')
-    const historyBefore = activeHistory().past.length
+    await settleCourse()
+    const depthBefore = formalCourse(host, documentId).undoDepth
 
     store.beginTextEdit(node.id, 'canvas')
     store.updateTextEditDraft(
@@ -178,22 +187,23 @@ describe('Course Project V9 native text emphasis', () => {
       node.width,
     )
     store.commitTextEdit()
+    await settleCourse()
 
     expect(selectActiveScene(useEditorStore.getState()).nodes[0]).toMatchObject({
       runs: [{ start: 0, end: 2, style: { emphasis: true } }],
     })
-    expect(activeHistory().past).toHaveLength(historyBefore + 1)
+    expect(formalCourse(host, documentId).undoDepth).toBe(depthBefore + 1)
 
-    useEditorStore.getState().undo()
+    await undoSettled(host, documentId)
     expect(selectActiveScene(useEditorStore.getState()).nodes[0])
       .toMatchObject({ runs: [] })
-    useEditorStore.getState().redo()
+    await redoSettled(host, documentId)
     expect(selectActiveScene(useEditorStore.getState()).nodes[0]).toMatchObject({
       runs: [{ start: 0, end: 2, style: { emphasis: true } }],
     })
   })
 
-  it('keeps node and run emphasis when copying and pasting text', () => {
+  it('keeps node and run emphasis when copying and pasting text', async () => {
     const store = useEditorStore.getState()
     store.addTextNode()
     const nodeId = selectActiveScene(useEditorStore.getState()).nodes[0]!.id
@@ -201,9 +211,11 @@ describe('Course Project V9 native text emphasis', () => {
       runs: [{ start: 0, end: 2, style: { emphasis: false } }],
       style: { emphasis: true },
     })
+    await settleCourse()
 
     useEditorStore.getState().copySelectedNodes()
     useEditorStore.getState().pasteNodes()
+    await settleCourse()
 
     const pasted = selectActiveScene(useEditorStore.getState()).nodes[1]
     expect(pasted).toMatchObject({

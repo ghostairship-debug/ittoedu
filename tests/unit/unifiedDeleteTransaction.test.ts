@@ -1,6 +1,5 @@
 import { withDefaultComponentController } from '@/renderer/components/teacherControllerComponent'
 import { plainDocumentText } from '@/shared/document/content'
-import { isAuthoringHistoryTransactionFrame } from '../../src/renderer/authoring/resourceAwareAuthoringHistory'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
 import type {
@@ -15,9 +14,20 @@ import { selectFlowEditorBlocks } from '@/renderer/course/flowEditorSlice'
 import {
   selectActiveCourseProjectDocument,
   selectSelectedNodeIds,
-  selectSlideAuthoringBackend,
   useEditorStore,
 } from '@/renderer/store/editorStore'
+import {
+  activeDocumentId,
+  connectCourseHost,
+  formalCourse,
+  openCourseOnHost,
+  settleCourse,
+  undoSettled,
+  type CourseHost,
+} from '../helpers/triage-t2-course'
+
+let host: CourseHost
+let documentId: string
 
 function activeDocument(): CourseProjectDocument {
   const document = selectActiveCourseProjectDocument(useEditorStore.getState())
@@ -25,13 +35,9 @@ function activeDocument(): CourseProjectDocument {
   return document
 }
 
-function activeHistory() {
-  const state = useEditorStore.getState()
-  if (state.spatialSession) return state.spatialSession.history
-  if (state.flowSession) return state.flowSession.history
-  const backend = selectSlideAuthoringBackend(state)
-  if (!backend) throw new Error('expected active Surface session')
-  return backend.getSession().history
+/** Renderer history is a cursor; the formal undo depth lives on the document session. */
+function formalUndoDepth(): number {
+  return formalCourse(host, documentId).undoDepth
 }
 
 function firstSlideScene(document = activeDocument()): SlideSceneDocument {
@@ -59,89 +65,93 @@ function spatialWorldIds(document = activeDocument()): Set<string> {
   return new Set(surface.world.layerItems.map((item) => item.layerItemId))
 }
 
-beforeEach(() => {
-  useEditorStore.getState().createNewProject()
+async function openBlankCourseDocument(surface: 'slide' | 'flow' | 'spatial') {
+  await useEditorStore.getState().createCourseDocument(surface)
+  await settleCourse()
+  documentId = activeDocumentId()
+}
+
+beforeEach(async () => {
+  const connected = await connectCourseHost()
+  host = connected.host
+  documentId = connected.documentId
 })
 
 describe('unified Delete transaction', () => {
-  it('deletes a Slide multi-selection in one revision and one undo step', () => {
+  it('deletes a Slide multi-selection in one revision and one undo step', async () => {
     const store = useEditorStore.getState()
     store.addTextNode(80, 90)
     store.addRectangleNode(320, 240)
+    await settleCourse()
     const ids = firstSlideScene().layerItems.map((item) => item.layerItemId)
     store.selectNodes(ids)
     const before = activeDocument()
-    const historyCount = selectSlideAuthoringBackend(useEditorStore.getState())!
-      .getSession().history.past.length
+    const depthBefore = formalUndoDepth()
 
     const result = useEditorStore.getState().routeEditorAction('delete')
 
-    const after = activeDocument()
     expect(result.ok).toBe(true)
+    await settleCourse()
+    const after = activeDocument()
     const remainingIds = new Set(firstSlideScene(after).layerItems.map((item) => item.layerItemId))
     ids.forEach((id) => expect(remainingIds.has(id)).toBe(false))
     expect(after.revision).toBe(before.revision + 1)
-    expect(selectSlideAuthoringBackend(useEditorStore.getState())!
-      .getSession().history.past).toHaveLength(historyCount + 1)
+    expect(formalUndoDepth()).toBe(depthBefore + 1)
     expect(selectSelectedNodeIds(useEditorStore.getState())).toEqual([])
-    const backend = selectSlideAuthoringBackend(useEditorStore.getState())
-    const lastFrame = backend?.getSession().history.past.at(-1)
-    expect(lastFrame && isAuthoringHistoryTransactionFrame(lastFrame)).toBe(true)
 
-    useEditorStore.getState().undo()
+    await undoSettled(host, documentId)
     expect(firstSlideScene().layerItems.map((item) => item.layerItemId))
       .toEqual(expect.arrayContaining(ids))
   })
 
-  it('rejects a stale selection snapshot without changing document, history, or selection', () => {
+  it('rejects a stale selection snapshot without changing document, history, or selection', async () => {
     const store = useEditorStore.getState()
     store.addTextNode(80, 90)
+    await settleCourse()
     const nodeId = firstSlideScene().layerItems[0]!.layerItemId
     store.selectNodes([nodeId])
     const stale = store.createLiveEditorSelectionSnapshot('layer')
     if (!stale) throw new Error('expected selection snapshot')
     store.updateNode(nodeId, { x: 420 })
+    await settleCourse()
     const beforeDocument = activeDocument()
-    const beforeHistory = selectSlideAuthoringBackend(useEditorStore.getState())!
-      .getSession().history.past
+    const beforeDepth = formalUndoDepth()
     const beforeSelection = selectSelectedNodeIds(useEditorStore.getState())
 
     const result = useEditorStore.getState().routeEditorAction('delete', stale)
 
     expect(result).toMatchObject({ ok: false, adapter: 'none' })
     expect(activeDocument()).toBe(beforeDocument)
-    expect(selectSlideAuthoringBackend(useEditorStore.getState())!
-      .getSession().history.past).toBe(beforeHistory)
+    expect(formalUndoDepth()).toBe(beforeDepth)
     expect(selectSelectedNodeIds(useEditorStore.getState())).toBe(beforeSelection)
     expect(firstSlideScene().layerItems.some((item) => item.layerItemId === nodeId)).toBe(true)
   })
 
-  it('keeps an unlocked plus locked Slide selection fully unchanged on failure', () => {
+  it('keeps an unlocked plus locked Slide selection fully unchanged on failure', async () => {
     const store = useEditorStore.getState()
     store.addTextNode()
     store.addRectangleNode()
+    await settleCourse()
     const ids = firstSlideScene().layerItems.map((item) => item.layerItemId)
     store.updateNode(ids[1]!, { locked: true })
     store.selectNodes(ids)
     const beforeDocument = activeDocument()
-    const beforeHistory = selectSlideAuthoringBackend(useEditorStore.getState())!
-      .getSession().history.past
+    const beforeDepth = formalUndoDepth()
     const beforeSelection = selectSelectedNodeIds(useEditorStore.getState())
 
     const result = useEditorStore.getState().routeEditorAction('delete')
 
     expect(result.ok).toBe(false)
     expect(activeDocument()).toBe(beforeDocument)
-    expect(selectSlideAuthoringBackend(useEditorStore.getState())!
-      .getSession().history.past).toBe(beforeHistory)
-    expect(selectSelectedNodeIds(useEditorStore.getState())).toBe(beforeSelection)
+    expect(formalUndoDepth()).toBe(beforeDepth)
+    expect(selectSelectedNodeIds(useEditorStore.getState())).toEqual(beforeSelection)
     expect(firstSlideScene().layerItems.map((item) => item.layerItemId))
       .toEqual(expect.arrayContaining(ids))
   })
 
-  it('rejects an old Flow text-focus snapshot after the live selection becomes block focus', () => {
+  it('rejects an old Flow text-focus snapshot after the live selection becomes block focus', async () => {
     const store = useEditorStore.getState()
-    store.createNewFlowProject()
+    await openBlankCourseDocument('flow')
     const flow = useEditorStore.getState().flowSession
     if (!flow) throw new Error('expected Flow session')
     const surface = flow.history.present.surfaces.find((candidate) => candidate.type === 'flow')
@@ -166,23 +176,23 @@ describe('unified Delete transaction', () => {
       [paragraph.id],
     ))
     const beforeDocument = activeDocument()
-    const beforeHistory = useEditorStore.getState().flowSession!.history.past
+    const beforeDepth = formalUndoDepth()
     const beforeSelection = useEditorStore.getState().flowSession!.selection
 
     const result = useEditorStore.getState().routeEditorAction('delete', stale)
 
     expect(result).toMatchObject({ ok: false, adapter: 'none' })
     expect(activeDocument()).toBe(beforeDocument)
-    expect(useEditorStore.getState().flowSession!.history.past).toBe(beforeHistory)
+    expect(formalUndoDepth()).toBe(beforeDepth)
     expect(useEditorStore.getState().flowSession!.selection).toBe(beforeSelection)
     const remainingSurface = activeDocument().surfaces.find((candidate) => candidate.type === 'flow')
     expect(remainingSurface?.type === 'flow'
       && remainingSurface.blocks.some((block) => block.id === paragraph.id)).toBe(true)
   })
 
-  it('rejects an old Flow text range after the live caret moves within the same block', () => {
+  it('rejects an old Flow text range after the live caret moves within the same block', async () => {
     const store = useEditorStore.getState()
-    store.createNewFlowProject()
+    await openBlankCourseDocument('flow')
     const flow = useEditorStore.getState().flowSession
     if (!flow) throw new Error('expected Flow session')
     const surface = flow.history.present.surfaces.find((candidate) => candidate.type === 'flow')
@@ -211,14 +221,14 @@ describe('unified Delete transaction', () => {
       },
     ))
     const beforeDocument = activeDocument()
-    const beforeHistory = useEditorStore.getState().flowSession!.history.past
+    const beforeDepth = formalUndoDepth()
     const beforeSelection = useEditorStore.getState().flowSession!.selection
 
     const result = useEditorStore.getState().routeEditorAction('delete', stale)
 
     expect(result).toMatchObject({ ok: false, adapter: 'none' })
     expect(activeDocument()).toBe(beforeDocument)
-    expect(useEditorStore.getState().flowSession!.history.past).toBe(beforeHistory)
+    expect(formalUndoDepth()).toBe(beforeDepth)
     expect(useEditorStore.getState().flowSession!.selection).toBe(beforeSelection)
     const remaining = activeDocument().surfaces.find((candidate) => candidate.type === 'flow')
     expect(remaining?.type === 'flow'
@@ -228,9 +238,9 @@ describe('unified Delete transaction', () => {
       .toBe(true)
   })
 
-  it('rebases the course authoring session when deleting the active Flow heading anchor', () => {
+  it('rebases the course authoring session when deleting the active Flow heading anchor', async () => {
     const store = useEditorStore.getState()
-    store.createNewFlowProject()
+    await openBlankCourseDocument('flow')
     const initial = useEditorStore.getState().flowSession
     if (!initial) throw new Error('expected Flow session')
     const initialSurface = initial.history.present.surfaces.find((candidate) => candidate.type === 'flow')
@@ -243,6 +253,7 @@ describe('unified Delete transaction', () => {
     }, { expectedRevision: initial.history.present.revision })
     expect(inserted.ok).toBe(true)
     store.applyFlowCommand(inserted)
+    await settleCourse()
     const ready = useEditorStore.getState().flowSession
     if (!ready) throw new Error('expected updated Flow session')
     const readySurface = ready.history.present.surfaces.find((candidate) => candidate.type === 'flow')
@@ -266,6 +277,7 @@ describe('unified Delete transaction', () => {
     })
 
     expect(result.ok).toBe(true)
+    await settleCourse()
     const after = useEditorStore.getState()
     const nextLocationId = after.flowSession!.selection.locationId
     expect(nextLocationId).not.toBe(location.id)
@@ -280,9 +292,9 @@ describe('unified Delete transaction', () => {
   it.each([
     ['surface then global', false],
     ['global then surface', true],
-  ] as const)('deletes a mixed Flow overlay selection atomically: %s', (_label, globalFirst) => {
+  ] as const)('deletes a mixed Flow overlay selection atomically: %s', async (_label, globalFirst) => {
     const store = useEditorStore.getState()
-    store.createNewFlowProject()
+    await openBlankCourseDocument('flow')
     useEditorStore.getState().addRectangleNode(80, 90)
     const surfaceId = useEditorStore.getState().flowSession?.selection.selectedOverlayIds[0]
     if (!surfaceId) throw new Error('expected surface overlay')
@@ -292,57 +304,62 @@ describe('unified Delete transaction', () => {
     if (!globalId) throw new Error('expected global overlay')
     const selectedIds = globalFirst ? [globalId, surfaceId] : [surfaceId, globalId]
     useEditorStore.getState().selectNodes(selectedIds)
+    await settleCourse()
     const before = activeDocument()
-    const historyCount = activeHistory().past.length
+    const depthBefore = formalUndoDepth()
 
     const result = useEditorStore.getState().routeEditorAction('delete')
 
+    expect(result.ok).toBe(true)
+    await settleCourse()
     const after = activeDocument()
     const remaining = flowLayerIds(after)
-    expect(result.ok).toBe(true)
     expect(remaining.surface.has(surfaceId)).toBe(false)
     expect(remaining.global.has(globalId)).toBe(false)
     expect(after.revision).toBe(before.revision + 1)
-    expect(activeHistory().past).toHaveLength(historyCount + 1)
+    expect(formalUndoDepth()).toBe(depthBefore + 1)
     expect(useEditorStore.getState().flowSession?.selection).toMatchObject({
       focus: 'idle',
       selectedOverlayIds: [],
     })
 
-    useEditorStore.getState().undo()
+    await undoSettled(host, documentId)
     const restored = flowLayerIds()
     expect(restored.surface.has(surfaceId)).toBe(true)
     expect(restored.global.has(globalId)).toBe(true)
   })
 
-  it('deletes a Spatial world multi-selection in one revision and one undo step', () => {
+  it('deletes a Spatial world multi-selection in one revision and one undo step', async () => {
     const store = useEditorStore.getState()
-    store.createNewSpatialProject()
+    await openBlankCourseDocument('spatial')
     useEditorStore.getState().addTextNode(40, 60)
     useEditorStore.getState().addTextNode(360, 260)
+    await settleCourse()
     const ids = [...spatialWorldIds()]
     useEditorStore.getState().selectNodes(ids)
     const before = activeDocument()
-    const historyCount = activeHistory().past.length
+    const depthBefore = formalUndoDepth()
 
     const result = useEditorStore.getState().routeEditorAction('delete')
 
-    const after = activeDocument()
     expect(result.ok).toBe(true)
+    await settleCourse()
+    const after = activeDocument()
     const remainingIds = spatialWorldIds(after)
     ids.forEach((id) => expect(remainingIds.has(id)).toBe(false))
     expect(after.revision).toBe(before.revision + 1)
-    expect(activeHistory().past).toHaveLength(historyCount + 1)
+    expect(formalUndoDepth()).toBe(depthBefore + 1)
     expect(useEditorStore.getState().spatialSession?.selection.selectionIds).toEqual([])
 
-    useEditorStore.getState().undo()
+    await undoSettled(host, documentId)
     expect([...spatialWorldIds()]).toEqual(expect.arrayContaining(ids))
   })
 
-  it('repairs interactions and Runtime bindings before a deleted Slide document is saved and reopened', () => {
+  it('repairs interactions and Runtime bindings before a deleted Slide document is saved and reopened', async () => {
     const store = useEditorStore.getState()
     store.addTextNode()
     store.addRectangleNode()
+    await settleCourse()
     const document = structuredClone(activeDocument())
     const scene = firstSlideScene(document)
     const targetId = scene.layerItems[0]!.layerItemId
@@ -398,12 +415,17 @@ describe('unified Delete transaction', () => {
       },
     )
     courseProjectDocumentSchema.parse(document)
-    store.loadCourseProject(document, null, {}, withDefaultComponentController(document).componentPackages)
+    const opened = await openCourseOnHost(document, {
+      componentPackages: withDefaultComponentController(document).componentPackages,
+    })
+    host = opened.host
+    documentId = opened.documentId
     useEditorStore.getState().selectNodes([targetId])
 
     const result = useEditorStore.getState().routeEditorAction('delete')
 
     expect(result.ok).toBe(true)
+    await settleCourse()
     const after = courseProjectDocumentSchema.parse(activeDocument())
     const runtime = firstSlideScene(after).layerItems.find((item) => item.layerItemId === runtimeId)
     expect(runtime).toMatchObject({ kind: 'runtime' })
@@ -413,8 +435,8 @@ describe('unified Delete transaction', () => {
 
     const archive = useEditorStore.getState().exportV9SlideCandidateArchive()
     expect(archive).toBeTruthy()
-    useEditorStore.getState().createNewProject()
-    expect(useEditorStore.getState().reopenV9SlideCandidateArchive(archive!)).toBe(true)
+    expect(await useEditorStore.getState().reopenV9SlideCandidateArchive(archive!)).toBe(true)
+    await settleCourse()
     courseProjectDocumentSchema.parse(activeDocument())
     const reopenedRuntime = firstSlideScene().layerItems.find((item) => item.layerItemId === runtimeId)
     expect(reopenedRuntime).toMatchObject({ kind: 'runtime' })
