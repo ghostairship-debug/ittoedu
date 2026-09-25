@@ -5,11 +5,11 @@ import { controllerGeometryItem, isControllerItem, type PublishedTeacherControll
 import { projectFlowComponentControllerFrame } from '../../../shared/flowViewportGeometry'
 import type { TeacherControllerHostOptions } from '../../teacherControllerHostContract'
 import { createPlaybackContent, playbackGestureOccupied, type PlaybackViewSession } from '../../playbackViewSession'
-import { renderDocumentText, renderDocumentMath } from '../../../shared/document/render'
+import { flowFormulaBlockElement, renderDocumentText } from '../../../shared/document/render'
 import { plainDocumentText, type FlowTextContent } from '../../../shared/document/content'
 import { buildNativeChartSvg } from '../../../shared/nativeChartSvg'
 import { createFlowViewportGeometry, measureFlowPaperOrigin } from '../../../shared/flowViewportGeometry'
-import { FLOW_BODY_CSS, FLOW_BODY_PAPER_PADDING, FLOW_BODY_SCROLL_PADDING, flowPaperMaxWidth, resolveFlowParagraphPresentation } from '../../../shared/flowBodyPresentation'
+import { FLOW_BODY_CSS, FLOW_BODY_PAPER_PADDING, FLOW_BODY_SCROLL_PADDING, FLOW_COMPONENT_BLOCK_HEIGHT, flowPaperMaxWidth, resolveFlowParagraphPresentation } from '../../../shared/flowBodyPresentation'
 import { tableCellSpan } from '../../../shared/tableMerge'
 import { resolveCourseSurfaceBackgroundColor } from '../../../shared/courseProjectModel'
 import { resolveEffectiveBackground } from '../../../shared/effectiveBackground'
@@ -1823,14 +1823,7 @@ function renderBlockDom(
       return
     }
     case 'formula': {
-      const wrap = assignBlock(dom.createElement('div'))
-      wrap.dataset.flowFormulaId = block.formulaId
-      wrap.setAttribute('aria-label', block.accessibleText)
-      wrap.style.overflowX = 'auto'
-      if (block.style?.fontSize) wrap.style.fontSize = `${block.style.fontSize}px`
-      if (block.style?.color) wrap.style.color = block.style.color
-      wrap.innerHTML = renderDocumentMath(block.latex, true)
-      parent.appendChild(wrap)
+      parent.appendChild(assignBlock(flowFormulaBlockElement(dom, block)))
       return
     }
     case 'code': {
@@ -1874,7 +1867,7 @@ function renderBlockDom(
       const figure = assignBlock(dom.createElement('figure'))
       figure.className = 'flow-block-component'
       figure.style.position = 'relative'
-      figure.style.minHeight = '240px'
+      figure.style.minHeight = `${FLOW_COMPONENT_BLOCK_HEIGHT}px`
       if (block.wrap === 'left') {
         figure.style.width = '48%'
         figure.style.float = 'left'
@@ -1894,7 +1887,7 @@ function renderBlockDom(
           version: block.component.version,
           instanceId: block.id,
           width: figure.clientWidth || options.readingWidth || 760,
-          height: 320,
+          height: FLOW_COMPONENT_BLOCK_HEIGHT,
           props: block.props,
           staticFallbackAssetId: block.staticFallbackAssetId,
           projectId: options.projectId,
@@ -1905,7 +1898,7 @@ function renderBlockDom(
           ...(options.componentActions ? { actions: options.componentActions } : {}),
         })
         const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(() => {
-          if (figure.clientWidth > 0) handle.resize(figure.clientWidth, 320)
+          if (figure.clientWidth > 0) handle.resize(figure.clientWidth, FLOW_COMPONENT_BLOCK_HEIGHT)
         }) : null
         observer?.observe(figure)
         const destroy = handle.destroy.bind(handle)

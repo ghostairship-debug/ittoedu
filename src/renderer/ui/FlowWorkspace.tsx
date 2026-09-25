@@ -5,7 +5,7 @@ import type { AssetMeta } from '../../shared/contracts/media-v1'
 import type { FlowBlock } from '../../shared/courseProjectTypes'
 import type { ComponentPackageData } from '../../shared/componentTypes'
 import { documentResourceReferences } from '../../shared/document/resources'
-import { FLOW_BODY_CSS, FLOW_BODY_PAPER_PADDING, FLOW_BODY_SCROLL_PADDING, flowPaperMaxWidth, resolveFlowBodyWidth } from '../../shared/flowBodyPresentation'
+import { FLOW_BODY_CSS, FLOW_BODY_PAPER_PADDING, FLOW_BODY_SCROLL_PADDING, FLOW_COMPONENT_BLOCK_HEIGHT, flowPaperMaxWidth, resolveFlowBodyWidth } from '../../shared/flowBodyPresentation'
 import { measureFlowPaperOrigin } from '../../shared/flowViewportGeometry'
 import { SharedDocumentEditor, type SharedDocumentEditorHandle } from '../document'
 import { createFlowDocumentResourcePort } from '../document/flowDocumentResources'
@@ -408,7 +408,7 @@ function FlowComponentBlockView({
       version: block.component.version,
       instanceId: block.id,
       width: el.clientWidth || readingWidth,
-      height: 320,
+      height: FLOW_COMPONENT_BLOCK_HEIGHT,
       props: block.props,
       staticFallbackAssetId: block.staticFallbackAssetId,
       components: componentPackages,
@@ -416,7 +416,7 @@ function FlowComponentBlockView({
       mode: 'edit',
       interactive: false,
     })
-    const observer = new ResizeObserver(() => { if (el.clientWidth > 0) handle.resize(el.clientWidth, 320) })
+    const observer = new ResizeObserver(() => { if (el.clientWidth > 0) handle.resize(el.clientWidth, FLOW_COMPONENT_BLOCK_HEIGHT) })
     observer.observe(el)
     return () => { observer.disconnect(); handle.destroy() }
   }, [block.component.packageId, block.component.version, block.id, block.props, block.staticFallbackAssetId, componentPackages, assetUrls, pkg, projectId])
@@ -446,7 +446,7 @@ function FlowComponentBlockView({
       ref={containerRef}
       data-flow-component-package-id={block.component.packageId}
       data-flow-component-version={block.component.version}
-      style={{ width: '100%', minHeight: 320, position: 'relative' }}
+      style={{ width: '100%', minHeight: FLOW_COMPONENT_BLOCK_HEIGHT, position: 'relative' }}
     />
   )
 }

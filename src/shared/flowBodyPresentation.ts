@@ -4,6 +4,8 @@ import { BUNDLED_TEXT_FONT_FAMILY } from './fonts/bundledFontFamilies'
 export const FLOW_BODY_FONT_FAMILY = `"${BUNDLED_TEXT_FONT_FAMILY}","Microsoft YaHei","PingFang SC",sans-serif`
 export const FLOW_BODY_SCROLL_PADDING = '24px 16px 48px'
 export const FLOW_BODY_PAPER_PADDING = '28px 36px 64px'
+/** Height of an interactive component block in the Flow body, the same in the editor and in playback. */
+export const FLOW_COMPONENT_BLOCK_HEIGHT = 320
 export interface FlowWidthLayout {
   readonly widthMode?: 'fluid' | 'reading'
   readonly readingWidth: number
@@ -39,5 +41,6 @@ export const FLOW_BODY_CSS = `
 .flow-body-content [data-flow-idle-rich-text],.flow-body-content [data-flow-published-rich-text]{white-space:pre-wrap;overflow-wrap:anywhere;min-height:1lh;display:block}
 .flow-body-content .flow-block-media>img,.flow-body-content .flow-block-media>video{display:block}
 .flow-body-content table{width:100%;border-collapse:collapse}
+.flow-body-content hr[data-flow-body-block]{display:block;box-sizing:content-box;height:13px;margin:6px 0 18px;border:0;background:linear-gradient(#cbd5e1,#cbd5e1) center/100% 1px no-repeat}
 .flow-body-content th,.flow-body-content td{padding:8px;border:1px solid #cbd5e1;text-align:left}
 `.trim()

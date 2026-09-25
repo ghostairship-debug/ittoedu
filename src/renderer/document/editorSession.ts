@@ -13,6 +13,7 @@ import type { DocumentBlock } from '../../shared/document/content'
 import { prepareDocumentClipboard, type DocumentClipboardResourcePort } from './documentClipboard'
 import { documentResourceReferences } from '../../shared/document/resources'
 import { resolveFlowParagraphPresentation } from '../../shared/flowBodyPresentation'
+import { flowFormulaBlockElement, flowInlineFormulaHtml } from '../../shared/document/render'
 import { previewCaretTransaction } from './editPreviewWidgets'
 
 export interface DocumentOperation { operationId: string; historyGroup: string; source: 'layout' | 'source'; preparedResources?: unknown }
@@ -81,6 +82,8 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
       } } : {}),
       ...(initial.presentation === 'flow' ? {
         paragraph: (node: import('prosemirror-model').Node) => textView(node, 'p'),
+        formula: (node: import('prosemirror-model').Node) => flowFormulaView(node),
+        math: (node: import('prosemirror-model').Node) => flowInlineMathView(node),
         heading: (node: import('prosemirror-model').Node) => textView(node, `h${node.attrs.data.level}`),
         section: (node: import('prosemirror-model').Node) => {
           const dom = flowBlockElement(node, 'details') as HTMLDetailsElement
@@ -183,7 +186,8 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
   function objectView(node: import('prosemirror-model').Node, editableSlots: boolean) {
     const block = { ...node.attrs.data, id: node.attrs.id } as DocumentBlock
     const flow = options.presentation === 'flow'
-    const tag = block.type === 'list' ? block.ordered ? 'ol' : 'ul' : block.type === 'quote' ? 'blockquote' : flow && block.type === 'callout' ? 'aside' : flow && ['media', 'chart', 'component'].includes(block.type) ? 'figure' : 'section'
+    // Flow draws a divider as playback does: a real rule, not a label.
+    const tag = block.type === 'list' ? block.ordered ? 'ol' : 'ul' : block.type === 'quote' ? 'blockquote' : flow && block.type === 'divider' ? 'hr' : flow && block.type === 'callout' ? 'aside' : flow && ['media', 'chart', 'component'].includes(block.type) ? 'figure' : 'section'
     const dom = flow ? flowBlockElement(node, tag) : document.createElement(tag)
     if (!flow) dom.className = `document-object document-${node.attrs.data.type}`
     dom.dataset.documentId = node.attrs.id
@@ -191,7 +195,7 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
     if (options.renderObject && ['media', 'chart', 'component'].includes(block.type)) {
       const object = document.createElement('div'); object.contentEditable = 'false'; dom.append(object)
       destroy = options.renderObject(block, object)
-    } else if (!editableSlots) dom.textContent = `${block.type} 对象`
+    } else if (!editableSlots && !(flow && block.type === 'divider')) dom.textContent = `${block.type} 对象`
     // ProseMirror owns every child of contentDOM. Keep editable captions separate
     // from the React media host so mounting the caption cannot remove the media.
     const ownsRenderedObject = Boolean(options.renderObject && ['media', 'chart', 'component'].includes(block.type))
@@ -207,6 +211,22 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
       dom.style.textAlign = presentation.textAlign; dom.style.lineHeight = String(presentation.lineHeight)
     }
     return dom
+  }
+  // Flow formulas use playback's renderer and frame (M19); a formula that does not parse shows its source.
+  function flowFormulaView(node: import('prosemirror-model').Node) {
+    const data = node.attrs.data
+    let dom: HTMLElement
+    try { dom = flowFormulaBlockElement(document, data) } catch { dom = document.createElement('div'); dom.textContent = data.latex }
+    dom.classList.add('document-math'); dom.contentEditable = 'false'
+    dom.dataset.documentId = node.attrs.id; dom.dataset.flowBodyBlock = 'formula'; dom.dataset.formulaId = data.formulaId
+    return { dom }
+  }
+  function flowInlineMathView(node: import('prosemirror-model').Node) {
+    const data = node.attrs.data
+    const dom = document.createElement('span')
+    dom.className = 'document-math'; dom.contentEditable = 'false'; dom.dataset.formulaId = data.formulaId
+    try { dom.innerHTML = flowInlineFormulaHtml(data) } catch { dom.textContent = data.latex }
+    return { dom }
   }
   function richTextHost() { const dom = document.createElement('span'); dom.dataset.flowIdleRichText = 'true'; return dom }
   function textView(node: import('prosemirror-model').Node, tag: string) {
