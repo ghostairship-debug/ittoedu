@@ -22,12 +22,14 @@ describe('read-only lesson Markdown candidate validation', () => {
     expect(validateLessonMarkdownSource({ source, file }).status).toBe('valid')
     expect(readFileSync(file)).toEqual(before)
   })
-  it('U07-validator-parity reports nested list line/column and refuses aligned tables and unknown math', () => {
+  it('U07-validator-parity accepts projected nested lists, reports uneditable list line/column and refuses aligned tables and unknown math', () => {
     const { file } = fixture('# 教学\n\n- 上层\n  - 下层\n')
+    expect(validateLessonMarkdown(file).status).toBe('valid')
+    writeFileSync(file, '# 教学\n\n- 上层\n\n  ```js\n  x\n  ```\n')
     const output: string[] = []
     expect(runLessonMarkdownValidation([file], line => output.push(line))).toBe(1)
     expect(output[0]).toContain(`${file}:3:1`)
-    expect(output[0]).toContain('嵌套或任务列表')
+    expect(output[0]).toContain('此列表结构暂时不能可靠编辑')
     expect(validateLessonMarkdownSource({ source: readFileSync(file, 'utf8'), file }).diagnostics)
       .toEqual(validateLessonMarkdown(file).diagnostics)
     writeFileSync(file, '| A |\n| :--- |\n| B |\n')

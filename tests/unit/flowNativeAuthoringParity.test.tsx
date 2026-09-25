@@ -9,6 +9,8 @@ import { selectFlowOverlay } from '@/renderer/course/flowEditorSlice'
 import { locateCourseLayer } from '@/renderer/course/effectiveLayerCommands'
 import type { FlowSurfaceDocument } from '@/shared/courseProjectTypes'
 import type { ShapeNode } from '@/shared/contracts/native-v1'
+import { createCourseStoreHost } from '../helpers/courseStoreHost'
+import { createBlankFlowCourseProject } from '@/renderer/project/createFlowCourseProject'
 
 function drawingContext(): CanvasRenderingContext2D {
   return {
@@ -128,11 +130,9 @@ describe('Flow Native Authoring Parity in PropertiesTab and Store', () => {
     vi.restoreAllMocks()
   })
 
-  it('edits rectangle shape overlay via FlowPropertiesPanel and commits single transaction', () => {
-    const store = useEditorStore.getState()
-    store.createNewFlowProject()
-
-    const baseDoc = structuredClone(useEditorStore.getState().flowSession!.history.present)
+  it('edits rectangle shape overlay via FlowPropertiesPanel and commits single transaction', async () => {
+    const host = await createCourseStoreHost()
+    const baseDoc = createBlankFlowCourseProject()
     const flowSurface = baseDoc.surfaces.find((s): s is FlowSurfaceDocument => s.type === 'flow')!
     const originalBlocks = structuredClone(flowSurface.blocks)
 
@@ -156,7 +156,7 @@ describe('Flow Native Authoring Parity in PropertiesTab and Store', () => {
       visibility: { mode: 'all', locationIds: [] },
     })
 
-    store.loadCourseProject(baseDoc, null)
+    await host.open(baseDoc)
 
     // Select the overlay
     const selection = selectFlowOverlay(baseDoc, baseDoc.startLocationId, ['rect-overlay'])
@@ -172,6 +172,7 @@ describe('Flow Native Authoring Parity in PropertiesTab and Store', () => {
     const fillColorInput = screen.getByLabelText('填充色') as HTMLInputElement
     fireEvent.change(fillColorInput, { target: { value: '#10b981' } })
     fireEvent.blur(fillColorInput)
+    await useEditorStore.getState().drainCourseDocument()
 
     // Verify document history updated
     const updatedDoc = useEditorStore.getState().flowSession!.history.present
@@ -188,11 +189,9 @@ describe('Flow Native Authoring Parity in PropertiesTab and Store', () => {
     expect(updatedFlowSurface.blocks).toEqual(originalBlocks)
   })
 
-  it('edits line shape overlay via FlowPropertiesPanel and preserves document flow', () => {
-    const store = useEditorStore.getState()
-    store.createNewFlowProject()
-
-    const baseDoc = structuredClone(useEditorStore.getState().flowSession!.history.present)
+  it('edits line shape overlay via FlowPropertiesPanel and preserves document flow', async () => {
+    const host = await createCourseStoreHost()
+    const baseDoc = createBlankFlowCourseProject()
     const flowSurface = baseDoc.surfaces.find((s): s is FlowSurfaceDocument => s.type === 'flow')!
     const originalBlocks = structuredClone(flowSurface.blocks)
 
@@ -215,7 +214,7 @@ describe('Flow Native Authoring Parity in PropertiesTab and Store', () => {
       visibility: { mode: 'all', locationIds: [] },
     })
 
-    store.loadCourseProject(baseDoc, null)
+    await host.open(baseDoc)
 
     // Select the overlay
     const selection = selectFlowOverlay(baseDoc, baseDoc.startLocationId, ['line-overlay'])
@@ -230,6 +229,7 @@ describe('Flow Native Authoring Parity in PropertiesTab and Store', () => {
     const strokeColorInput = screen.getByLabelText('线条颜色') as HTMLInputElement
     fireEvent.change(strokeColorInput, { target: { value: '#dc2626' } })
     fireEvent.blur(strokeColorInput)
+    await useEditorStore.getState().drainCourseDocument()
 
     const updatedDoc = useEditorStore.getState().flowSession!.history.present
     const located = locateCourseLayer(updatedDoc, 'line-overlay')
@@ -243,11 +243,9 @@ describe('Flow Native Authoring Parity in PropertiesTab and Store', () => {
     expect(updatedFlowSurface.blocks).toEqual(originalBlocks)
   })
 
-  it('edits text overlay via FlowPropertiesPanel and preserves body blocks', () => {
-    const store = useEditorStore.getState()
-    store.createNewFlowProject()
-
-    const baseDoc = structuredClone(useEditorStore.getState().flowSession!.history.present)
+  it('edits text overlay via FlowPropertiesPanel and preserves body blocks', async () => {
+    const host = await createCourseStoreHost()
+    const baseDoc = createBlankFlowCourseProject()
     const flowSurface = baseDoc.surfaces.find((s): s is FlowSurfaceDocument => s.type === 'flow')!
     const originalBlocks = structuredClone(flowSurface.blocks)
 
@@ -263,7 +261,7 @@ describe('Flow Native Authoring Parity in PropertiesTab and Store', () => {
       visibility: { mode: 'all', locationIds: [] },
     })
 
-    store.loadCourseProject(baseDoc, null)
+    await host.open(baseDoc)
 
     // Select the text overlay
     const selection = selectFlowOverlay(baseDoc, baseDoc.startLocationId, ['text-overlay'])
@@ -275,6 +273,7 @@ describe('Flow Native Authoring Parity in PropertiesTab and Store', () => {
     const colorInput = screen.getByLabelText('文字颜色') as HTMLInputElement
     fireEvent.change(colorInput, { target: { value: '#7c3aed' } })
     fireEvent.blur(colorInput)
+    await useEditorStore.getState().drainCourseDocument()
 
     const updatedDoc = useEditorStore.getState().flowSession!.history.present
     const located = locateCourseLayer(updatedDoc, 'text-overlay')
@@ -288,18 +287,16 @@ describe('Flow Native Authoring Parity in PropertiesTab and Store', () => {
     expect(updatedFlowSurface.blocks).toEqual(originalBlocks)
   })
 
-  it('renders image overlay properties with demote-to-body button and preserves body blocks', () => {
-    const store = useEditorStore.getState()
-    store.createNewFlowProject()
-
-    const baseDoc = structuredClone(useEditorStore.getState().flowSession!.history.present)
+  it('renders image overlay properties with demote-to-body button and preserves body blocks', async () => {
+    const host = await createCourseStoreHost()
+    const baseDoc = createBlankFlowCourseProject()
     baseDoc.assets = {
       'asset-image': {
         id: 'asset-image',
         filename: 'test.png',
         mimeType: 'image/png',
         kind: 'image',
-        path: 'media/test.png',
+        path: 'assets/test.png',
         byteLength: 100,
         width: 640,
         height: 360,
@@ -324,7 +321,7 @@ describe('Flow Native Authoring Parity in PropertiesTab and Store', () => {
       visibility: { mode: 'all', locationIds: [] },
     })
 
-    store.loadCourseProject(baseDoc, null)
+    await host.open(baseDoc)
 
     // Select the image overlay
     const selection = selectFlowOverlay(baseDoc, baseDoc.startLocationId, ['img-overlay'])
@@ -339,6 +336,7 @@ describe('Flow Native Authoring Parity in PropertiesTab and Store', () => {
     const cornerRadiusInput = screen.getByLabelText('圆角') as HTMLInputElement
     fireEvent.change(cornerRadiusInput, { target: { value: '10' } })
     fireEvent.blur(cornerRadiusInput)
+    await useEditorStore.getState().drainCourseDocument()
 
     const updatedDoc = useEditorStore.getState().flowSession!.history.present
     const located = locateCourseLayer(updatedDoc, 'img-overlay')

@@ -23,8 +23,6 @@
 .course-light-tools__insert-menu button:disabled, .course-light-tools__more-menu button:disabled { opacity: .55; cursor: not-allowed; }
 .course-light-tools__insert-menu small { color: var(--muted-text, #66758a); }
 .course-light-tools__insert-menu p { margin: 4px 0; padding: 2px 8px; color: var(--muted-text, #66758a); font-size: 12px; }
-  .course-light-tools__more-menu .course-light-tools__overflow-only { display: flex; }
-}
 .course-editor-frame--light .status-bar { font-size: 11px; }
 
 .app-main.editor-panel-layout--light:has(> .course-chat) { grid-template-columns: minmax(0, 1fr); }

@@ -7,12 +7,13 @@ export type QuickBarPlacement = 'above' | 'below' | 'inside'
  * aligned to the selection's left edge. When neither side fits (a selection taller than the view) it is pinned
  * inside the top of the selection. The bar never leaves `bounds` and never participates in layout.
  */
-export function placeQuickBar(anchor: QuickBarRect, bounds: QuickBarBounds, size: { width: number; height: number }, gap = 8): { left: number; top: number; placement: QuickBarPlacement } {
+export function placeQuickBar(anchor: QuickBarRect, bounds: QuickBarBounds, size: { width: number; height: number }, gap = 8, aboveOffset = gap): { left: number; top: number; placement: QuickBarPlacement } {
   const leftEdge = bounds.left + gap, rightEdge = bounds.right - gap
   const topEdge = bounds.top + gap, bottomEdge = bounds.bottom - gap
   const width = Math.min(size.width, Math.max(0, rightEdge - leftEdge))
   const left = Math.max(leftEdge, Math.min(anchor.left, rightEdge - width))
-  const above = anchor.top - gap - size.height
+  // `aboveOffset` clears handles drawn above a selection, such as a canvas object's rotation handle.
+  const above = anchor.top - aboveOffset - size.height
   if (above >= topEdge) return { left, top: above, placement: 'above' }
   const below = anchor.top + anchor.height + gap
   if (below + size.height <= bottomEdge) return { left, top: below, placement: 'below' }

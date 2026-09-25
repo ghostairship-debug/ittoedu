@@ -3,6 +3,11 @@ import { assertSafeArchivePath } from './codecs/archivePath'
 
 export const emptyDocumentResources = (): DocumentResources => ({ assets: {}, components: {} })
 
+/** Tag check instead of `instanceof`: bytes cloned in another realm (jsdom, structuredClone) keep their tag. */
+function isUint8Array(value: unknown): value is Uint8Array {
+  return Object.prototype.toString.call(value) === '[object Uint8Array]'
+}
+
 function record(value: unknown, label: string): asserts value is Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new TypeError(`${label}必须是资源记录`)
 }
