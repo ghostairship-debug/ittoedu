@@ -5,9 +5,10 @@ import { createChartNode, createChartLayerItem } from '../../../core/tools/nativ
 import type { ChartType } from '../../course/chartContentOperations'
 import type { ChartTextField } from '../../authoring/chartTextDraft'
 import type { ComponentPackageData } from '../../../shared/componentTypes'
-import type { CourseProjectDocument, FlowBlock, LayerFrame, NativeLayerItem } from '../../../shared/courseProjectTypes'
+import type { ComponentLayerItem, CourseProjectDocument, FlowBlock, LayerFrame, NativeLayerItem } from '../../../shared/courseProjectTypes'
 import { courseProjectDocumentSchema } from '../../../shared/courseProjectSchema'
 import { componentPackageMeta } from '../../../shared/componentPackageMeta'
+import { componentSupportsScope } from '../../../shared/componentCapabilities'
 import type { AssetMeta } from '../../../shared/contracts/media-v1'
 import { planFlowMenuDocumentInsertion, type FlowMenuDocumentKind } from '../../../core/tools/flowMenuDocumentInsertion'
 import { insertFlowMenuPaperItem, type FlowMenuPaperItem, type FlowMenuParagraphAnchor } from '../../../core/tools/flowMenuPaperInsertion'
@@ -218,6 +219,7 @@ export type FlowAuthoringIntent = (
   | { readonly kind: 'begin-formula-edit' }
   | { readonly kind: 'menu-insert-document'; readonly documentKind: FlowMenuDocumentKind }
   | { readonly kind: 'menu-insert-paper'; readonly item: FlowMenuPaperItem; readonly frame: LayerFrame; readonly paragraphAnchor: FlowMenuParagraphAnchor }
+  | { readonly kind: 'menu-insert-paper-component'; readonly item: ComponentLayerItem; readonly frame: LayerFrame; readonly paragraphAnchor: FlowMenuParagraphAnchor; readonly packageData: ComponentPackageData }
   | { readonly kind: 'menu-insert-media'; readonly placement: 'document'; readonly mediaKind: 'image' | 'video' | 'audio'; readonly source: FlowMenuMediaSource }
   | { readonly kind: 'menu-insert-media'; readonly placement: 'paper'; readonly mediaKind: 'image'; readonly source: FlowMenuMediaSource; readonly item: FlowMenuPaperItem; readonly frame: LayerFrame; readonly paragraphAnchor: FlowMenuParagraphAnchor }
   | { readonly kind: 'replace-document-content'; readonly blocks: FlowBlock[]; readonly historyGroup: string; readonly preparedResources?: unknown }
@@ -310,6 +312,7 @@ function flowIntentMutatesDocument(intent: FlowAuthoringIntent): boolean {
   switch (intent.kind) {
     case 'menu-insert-document':
     case 'menu-insert-paper':
+    case 'menu-insert-paper-component':
     case 'menu-insert-media':
     case 'format-block':
     case 'execute-editor-command':
@@ -967,7 +970,7 @@ export function createFlowAuthoringSlice(
     let committedSelection: FlowEditorSelection | null = null
     let committedHistoryEntry = false
 
-    if (intent.kind === 'menu-insert-document' || intent.kind === 'menu-insert-paper' || intent.kind === 'menu-insert-media') {
+    if (intent.kind === 'menu-insert-document' || intent.kind === 'menu-insert-paper' || intent.kind === 'menu-insert-paper-component' || intent.kind === 'menu-insert-media') {
       if (flow.readCanvasMode?.() !== 'edit') return rejectedFlowReceipt('当前为只读模式')
       if (target.owner === 'global' || session.selection.authoringScope === 'global') return rejectedFlowReceipt('全局图层不能插入 Flow 页面')
       if (target.itemId !== target.surfaceId && !findFlowBlockRecursive(flowSurfaceIn(document, target.surfaceId).blocks, target.itemId)) {
@@ -1046,6 +1049,36 @@ export function createFlowAuthoringSlice(
           })
           const selection = selectFlowOverlay(inserted.nextDocument, target.locationId, [inserted.layerItemId])
           return persistIntentResult({ ok: true, nextDocument: inserted.nextDocument, historyEntry: true, selection }, { selection, statusMessage: '已插入纸面对象' })
+        }
+        case 'menu-insert-paper-component': {
+          if (flow.read().flowDocumentDraft) return rejectedFlowReceipt('正文草稿尚未提交')
+          const item = intent.item
+          const data = intent.packageData
+          const packageId = data.manifest.id
+          if (item.component.packageId !== packageId || item.component.version !== data.manifest.version
+            || !componentSupportsScope(data.manifest, 'scene')) {
+            return rejectedFlowReceipt('纸面组件包与当前对象不匹配')
+          }
+          if (document.componentPackages[packageId]) return rejectedFlowReceipt('组件包已嵌入，请使用纸面对象插入')
+          const meta = componentPackageMeta(data)
+          const existingResource = kernel.readResources().componentPackages[packageId]
+          if (existingResource && JSON.stringify(componentPackageMeta(existingResource)) !== JSON.stringify(meta)) {
+            return rejectedFlowReceipt('组件包资源版本已改变')
+          }
+          const candidate = structuredClone(document)
+          candidate.componentPackages[packageId] = meta
+          const inserted = insertFlowMenuPaperItem(candidate, {
+            surfaceId: target.surfaceId, item, frame: intent.frame,
+            paragraphAnchor: intent.paragraphAnchor, expectedRevision: document.revision,
+          })
+          const step = createEditorTransactionStep(document, {
+            projectId: document.id, baseRevision: document.revision, nextDocument: inserted.nextDocument,
+            resourceChanges: existingResource ? {} : { componentPackageChanges: [{ packageId, after: data }] },
+            selectionHint: { kind: 'authoring-tool-selection', locationId: target.locationId, stateId: null,
+              owner: 'surface', itemIds: [inserted.layerItemId], flowCarrier: 'overlay' },
+          })
+          if (!step || !persistFlowTransaction(flow, step, '纸面组件已插入')) return rejectedFlowReceipt('纸面组件事务未提交')
+          return { ok: true, historyEntry: true }
         }
         case 'menu-insert-media': {
           const sidecar = intent.source.kind === 'new' ? flow.readAssetSidecar() : null
