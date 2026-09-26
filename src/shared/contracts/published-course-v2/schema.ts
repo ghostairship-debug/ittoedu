@@ -1,4 +1,4 @@
-import { documentContentSchema } from '../../document/content'
+import { documentContentSchema, walkDocument } from '../../document/content'
 import { z } from 'zod'
 import { mismatchedSlideCanvasIndexes, slideCanvasSchema } from '../../slideCanvas'
 import { teacherControllerRoleIssues } from '../../teacherControllerRole'
@@ -8,6 +8,7 @@ import {
   courseLocationSchema,
   courseNavigationGuardSchema,
   flowBodyLayerPlaneSchema,
+  flowParagraphAnchorSchema,
   flowBlockSchema,
   globalLayerPlaneSchema,
   layerFrameSchema,
@@ -178,7 +179,11 @@ const publishedFlowSurfaceLayerEntrySchema: z.ZodType<PublishedFlowSurfaceLayerE
   item: publishedLayerItemSchema,
   visibility: locationVisibilitySchema,
   bodyPlane: flowBodyLayerPlaneSchema.optional(),
+  paragraphAnchor: flowParagraphAnchorSchema.optional(),
 }).strict().superRefine((entry, context) => {
+  if (entry.paragraphAnchor && entry.item.paperSpace !== 'paper') {
+    context.addIssue({ code: 'custom', path: ['paragraphAnchor'], message: '随段落对象必须处于纸面坐标' })
+  }
   if (
     entry.item.kind === 'native'
     && (entry.item.content.nativeType === 'table' || entry.item.content.nativeType === 'chart' || entry.item.content.nativeType === 'input')
@@ -386,6 +391,13 @@ const publishedFlowSurfaceSchema = z.object({
   }
   const validated = documentContentSchema.safeParse({ blocks: surface.blocks })
   if (!validated.success) for (const issue of validated.error.issues) context.addIssue({ ...issue, path: issue.path })
+  const blockIds = new Set<string>()
+  walkDocument(surface.blocks, block => blockIds.add(block.id))
+  surface.surfaceLayerItems.forEach((entry, index) => {
+    if (entry.paragraphAnchor && !blockIds.has(entry.paragraphAnchor.blockId)) {
+      context.addIssue({ code: 'custom', path: ['surfaceLayerItems', index, 'paragraphAnchor', 'blockId'], message: '随段落对象的目标段落不存在' })
+    }
+  })
 })
 
 const semanticZoomSchema = z.object({

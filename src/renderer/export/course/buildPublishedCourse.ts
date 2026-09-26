@@ -605,6 +605,7 @@ function publishFlowScoped(
     item: publishLayerItem(sources, entry.item),
     visibility: cloneJson(entry.visibility),
     bodyPlane: entry.bodyPlane ?? 'overlay',
+    ...(entry.paragraphAnchor ? { paragraphAnchor: cloneJson(entry.paragraphAnchor) } : {}),
   }
 }
 

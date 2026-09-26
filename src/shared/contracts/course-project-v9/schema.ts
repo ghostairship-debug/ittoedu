@@ -1,4 +1,4 @@
-import { documentBlockSchema, documentContentSchema } from '../../document/content'
+import { documentBlockSchema, documentContentSchema, walkDocument } from '../../document/content'
 import { z } from 'zod'
 import { mismatchedSlideCanvasIndexes, slideCanvasSchema } from '../../slideCanvas'
 import { teacherControllerRoleIssues } from '../../teacherControllerRole'
@@ -387,12 +387,21 @@ export const scopedLayerItemListSchema = z.array(scopedLayerItemSchema).max(20_0
   })
 
 export const flowBodyLayerPlaneSchema = z.enum(FLOW_BODY_LAYER_PLANES)
+export const flowParagraphAnchorSchema = z.object({
+  blockId: stableIdSchema,
+  offsetY: finiteNumber,
+  xRatio: finiteNumber,
+}).strict()
 
 export const flowSurfaceLayerEntrySchema: z.ZodType<FlowSurfaceLayerEntry> = z.object({
   item: layerItemSchema,
   visibility: locationVisibilitySchema,
   bodyPlane: flowBodyLayerPlaneSchema.optional(),
+  paragraphAnchor: flowParagraphAnchorSchema.optional(),
 }).strict().superRefine((entry, context) => {
+  if (entry.paragraphAnchor && entry.item.paperSpace !== 'paper') {
+    context.addIssue({ code: 'custom', path: ['paragraphAnchor'], message: '随段落对象必须处于纸面坐标' })
+  }
   if (
     entry.item.kind === 'native'
     && (entry.item.content.nativeType === 'table' || entry.item.content.nativeType === 'chart' || entry.item.content.nativeType === 'input')
@@ -678,6 +687,13 @@ const flowSurfaceSchema = z.object({
   }
   const validated = documentContentSchema.safeParse({ blocks: surface.blocks })
   if (!validated.success) for (const issue of validated.error.issues) context.addIssue({ ...issue, path: issue.path })
+  const blockIds = new Set<string>()
+  walkDocument(surface.blocks, block => blockIds.add(block.id))
+  surface.surfaceLayerItems.forEach((entry, index) => {
+    if (entry.paragraphAnchor && !blockIds.has(entry.paragraphAnchor.blockId)) {
+      context.addIssue({ code: 'custom', path: ['surfaceLayerItems', index, 'paragraphAnchor', 'blockId'], message: '随段落对象的目标段落不存在' })
+    }
+  })
 })
 
 const spatialSurfaceSchema = z.object({

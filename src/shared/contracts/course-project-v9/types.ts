@@ -198,6 +198,7 @@ export interface ScopedLayerItem {
  * persisted.
  */
 export interface FlowSurfaceLayerEntry extends ScopedLayerItem {
+  paragraphAnchor?: { blockId: string; offsetY: number; xRatio: number }
   bodyPlane?: FlowBodyLayerPlane
 }
 

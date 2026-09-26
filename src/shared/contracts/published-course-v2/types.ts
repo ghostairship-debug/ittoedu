@@ -117,6 +117,7 @@ export interface PublishedScopedLayerItem {
 
 /** Missing `bodyPlane` keeps legacy Published V2 Flow overlays above body. */
 export interface PublishedFlowSurfaceLayerEntry extends PublishedScopedLayerItem {
+  paragraphAnchor?: { blockId: string; offsetY: number; xRatio: number }
   bodyPlane?: FlowBodyLayerPlane
 }
 

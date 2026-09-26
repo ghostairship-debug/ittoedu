@@ -18,7 +18,7 @@ export type DocumentBlock = { id: string } & (
   | ({ type: 'quote'; content: FlowTextContent; citation?: FlowTextContent } & ParagraphStyle)
   | { type: 'list'; ordered: boolean; items: { id: string; content: FlowTextContent }[] }
   | { type: 'divider' }
-  | { type: 'media'; assetId: string; mediaKind: 'image' | 'audio' | 'video'; altText?: string; caption?: FlowTextContent; layout: 'content-width' | 'wide' | 'full-width'; wrap?: 'none' | 'left' | 'right' }
+  | { type: 'media'; assetId: string; mediaKind: 'image' | 'audio' | 'video'; altText?: string; caption?: FlowTextContent; layout: 'content-width' | 'wide' | 'full-width'; wrap?: 'none' | 'left' | 'right'; crop?: { left: number; top: number; right: number; bottom: number }; cropX?: number; cropY?: number }
   | { type: 'table'; caption?: FlowTextContent; headerEnabled?: boolean; columns: { id: string; header: FlowTextContent }[]; rows: { id: string; cells: Record<string, FlowTextContent> }[]; merges?: TableMergeRegion[] }
   | { type: 'chart'; chart: NativeChartContent; height: number }
   | { type: 'formula'; formulaId: string; latex: string; accessibleText: string; style?: MathStyle }
@@ -48,6 +48,23 @@ export const documentInlineSchema: z.ZodType<FlowInline> = z.discriminatedUnion(
 ])
 export const documentTextContentSchema = z.object({ inlines: z.array(documentInlineSchema) }).strict()
 const base = { id: documentIdSchema }
+const cropFraction = z.number().finite().min(0).max(1)
+const documentMediaCropSchema = z.object({
+  left: cropFraction, top: cropFraction, right: cropFraction, bottom: cropFraction,
+}).strict()
+const media = z.object({ ...base, type: z.literal('media'), assetId: documentIdSchema,
+  mediaKind: z.enum(['image', 'audio', 'video']), altText: z.string().max(4000).optional(),
+  caption: documentTextContentSchema.optional(), layout: z.enum(['content-width', 'wide', 'full-width']),
+  wrap: z.enum(['none', 'left', 'right']).optional(), crop: documentMediaCropSchema.optional(),
+  cropX: cropFraction.optional(), cropY: cropFraction.optional(),
+}).strict().superRefine((block, ctx) => {
+  if (block.mediaKind !== 'image' && (block.crop || block.cropX !== undefined || block.cropY !== undefined)) {
+    ctx.addIssue({ code: 'custom', path: ['crop'], message: '只有图片正文块可以裁剪' })
+  }
+  if (block.crop && (block.crop.left + block.crop.right >= 0.99 || block.crop.top + block.crop.bottom >= 0.99)) {
+    ctx.addIssue({ code: 'custom', path: ['crop'], message: '图片每个方向的裁剪总量必须小于 99%' })
+  }
+})
 const paragraph = { content: documentTextContentSchema, textAlign: z.enum(['left', 'center', 'right']).optional(), lineSpacing: z.number().finite().min(0).max(200).optional() }
 const table = z.object({
   ...base, type: z.literal('table'), caption: documentTextContentSchema.optional(), headerEnabled: z.boolean().optional(),
@@ -72,7 +89,7 @@ export const documentBlockSchema: z.ZodType<DocumentBlock> = z.lazy(() => z.disc
   z.object({ ...base, type: z.literal('quote'), ...paragraph, citation: documentTextContentSchema.optional() }).strict(),
   z.object({ ...base, type: z.literal('list'), ordered: z.boolean(), items: z.array(z.object({ id: documentIdSchema, content: documentTextContentSchema }).strict()).min(1).max(10000) }).strict(),
   z.object({ ...base, type: z.literal('divider') }).strict(),
-  z.object({ ...base, type: z.literal('media'), assetId: documentIdSchema, mediaKind: z.enum(['image', 'audio', 'video']), altText: z.string().max(4000).optional(), caption: documentTextContentSchema.optional(), layout: z.enum(['content-width', 'wide', 'full-width']), wrap: z.enum(['none', 'left', 'right']).optional() }).strict(),
+  media,
   table,
   z.object({ ...base, type: z.literal('chart'), chart: chartNativeContentObjectSchema, height: z.number().finite().min(160).max(1600) }).strict(),
   z.object({ ...base, type: z.literal('formula'), ...mathFields }).strict(),
