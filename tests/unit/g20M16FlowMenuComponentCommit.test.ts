@@ -28,8 +28,14 @@ function componentData(): ComponentPackageData {
   } }
 }
 
-function harness() {
+function harness(options: { existingPackage?: boolean } = {}) {
   const project = createBlankFlowCourseProject()
+  const existingData = componentData()
+  if (options.existingPackage) {
+    project.componentPackages[existingData.manifest.id] = componentPackageMeta(existingData, {
+      editableCopy: true, sourcePackageId: 'source.card',
+    })
+  }
   let session = openFlowAuthoringSession(project)
   let owner = createCourseAuthoringSession({ locationId: session.selection.locationId, surfaceType: 'flow', revision: project.revision })
   let mode: 'edit' | 'run' = 'edit'
@@ -37,7 +43,8 @@ function harness() {
   let textEdit: FlowAuthoringPorts['read'] extends () => infer R ? R extends { flowTextEdit: infer E } ? E : never : never = null
   let resources: CourseResourceState = {
     courseAssetSidecar: emptyCourseAssetSidecar(), courseAssetSidecarPast: [], courseAssetSidecarFuture: [],
-    courseComponentPackagesPast: [], courseComponentPackagesFuture: [], componentPackages: {},
+    courseComponentPackagesPast: [], courseComponentPackagesFuture: [],
+    componentPackages: options.existingPackage ? { [existingData.manifest.id]: existingData } : {},
   }
   const persist: FlowAuthoringPorts['persist'] = vi.fn((result, extra) => {
     if (!result.ok) return result
@@ -67,7 +74,7 @@ function harness() {
     const before = session.history.present
     const pkg = componentData()
     const prepared = structuredClone(before)
-    prepared.componentPackages[pkg.manifest.id] = componentPackageMeta(pkg)
+    if (!prepared.componentPackages[pkg.manifest.id]) prepared.componentPackages[pkg.manifest.id] = componentPackageMeta(pkg)
     prepared.assets.fallback = { id: 'fallback', filename: 'fallback.png', mimeType: 'image/png', kind: 'image',
       path: 'assets/fallback.png', byteLength: imageBytes.length, width: 64, height: 64 }
     const inserted = insertFlowEditorBlock(prepared, {
@@ -79,7 +86,7 @@ function harness() {
     const made = createEditorTransactionStep(before, { projectId: before.id, baseRevision: before.revision,
       nextDocument: inserted.nextDocument,
       resourceChanges: { assetFileChanges: [{ assetId: 'fallback', after: imageBytes }],
-        componentPackageChanges: [{ packageId: pkg.manifest.id, after: pkg }] },
+        ...(!options.existingPackage ? { componentPackageChanges: [{ packageId: pkg.manifest.id, after: pkg }] } : {}) },
       selectionHint: { kind: 'authoring-tool-selection', locationId: session.selection.locationId, stateId: null,
         owner: 'surface', itemIds: [inserted.createdBlockIds[0]], flowCarrier: 'block' },
     })
@@ -103,6 +110,19 @@ describe('Flow menu component commit port', () => {
     expect(h.session.selection.selectedBlockId).toBe((step.selectionHint as { itemIds: string[] }).itemIds[0])
     expect(h.resources.componentPackages['menu.card']).toBeDefined()
     expect(Array.from(h.resources.courseAssetSidecar!.files.fallback!)).toEqual(Array.from(imageBytes))
+    expect(h.persist).toHaveBeenCalledTimes(1)
+  })
+
+  it('accepts an existing editable package without a package resource change', () => {
+    const h = harness({ existingPackage: true }); const target = h.target(); const step = h.step()
+    expect(step.resourceChanges.componentPackageChanges).toBeUndefined()
+    const receipt = h.commit(target, step)
+    expect(receipt.ok, receipt.reason).toBe(true)
+    expect(receipt).toMatchObject({ ok: true, historyEntry: true })
+    expect(h.session.history.present.componentPackages['menu.card']).toMatchObject({
+      editableCopy: true, sourcePackageId: 'source.card',
+    })
+    expect(h.session.history.past).toHaveLength(1)
     expect(h.persist).toHaveBeenCalledTimes(1)
   })
 

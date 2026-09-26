@@ -1665,7 +1665,10 @@ export function createFlowAuthoringSlice(
       if (priorPackage) {
         if (packages.length !== 0 || !livePackage
           || JSON.stringify(priorPackage) !== JSON.stringify(nextPackage)
-          || JSON.stringify(componentPackageMeta(livePackage)) !== JSON.stringify(priorPackage)) {
+          || JSON.stringify(componentPackageMeta(livePackage, {
+            editableCopy: priorPackage.editableCopy,
+            sourcePackageId: priorPackage.sourcePackageId,
+          })) !== JSON.stringify(priorPackage)) {
           return rejectedFlowReceipt('正文组件包资源基线已改变')
         }
       } else {
