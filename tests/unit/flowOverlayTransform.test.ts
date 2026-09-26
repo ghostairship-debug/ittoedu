@@ -108,4 +108,38 @@ describe('transformFlowOverlayFrame', () => {
     expect(again.ok).toBe(true)
     expect(again.historyEntry).toBe(false)
   })
+
+  it('commits anchor set and removal with the frame in one revision, including an unchanged frame', () => {
+    const candidate = structuredClone(flowProject())
+    const surface = candidate.surfaces[0]!
+    if (surface.type !== 'flow') throw new Error('Flow fixture missing')
+    surface.surfaceLayerItems[0]!.item.paperSpace = 'paper'
+    const project = courseProjectDocumentSchema.parse(candidate)
+    const selection = selectFlowOverlay(project, 'h1', ['overlay-text'], 'page')
+    const frame = { x: 40, y: 80, width: 160, height: 48 }
+    const anchored = transformFlowOverlayFrame(project, selection, frame, {
+      expectedRevision: project.revision, paragraphAnchor: { blockId: 'h1', offsetY: 24, xRatio: 0.2 },
+    })
+    expect(anchored.ok).toBe(true)
+    expect(anchored.historyEntry).toBe(true)
+    expect(anchored.nextDocument?.revision).toBe(project.revision + 1)
+    const placed = anchored.nextDocument!.surfaces[0]!
+    if (placed.type !== 'flow') throw new Error('Flow result missing')
+    expect(placed.surfaceLayerItems[0]?.paragraphAnchor).toEqual({ blockId: 'h1', offsetY: 24, xRatio: 0.2 })
+    expect(placed.surfaceLayerItems[0]?.item.frame).toEqual(surface.surfaceLayerItems[0]?.item.frame)
+    const rejected = transformFlowOverlayFrame(anchored.nextDocument!, selection, frame, {
+      expectedRevision: anchored.nextDocument!.revision, paragraphAnchor: { blockId: 'other-page', offsetY: 0, xRatio: 0 },
+    })
+    expect(rejected.ok).toBe(false)
+    expect(anchored.nextDocument?.revision).toBe(project.revision + 1)
+    const fixed = transformFlowOverlayFrame(anchored.nextDocument!, selection, frame, {
+      expectedRevision: anchored.nextDocument!.revision, paragraphAnchor: null,
+    })
+    expect(fixed.ok).toBe(true)
+    expect(fixed.historyEntry).toBe(true)
+    expect(fixed.nextDocument?.revision).toBe(project.revision + 2)
+    const fixedSurface = fixed.nextDocument!.surfaces[0]!
+    if (fixedSurface.type !== 'flow') throw new Error('Flow result missing')
+    expect(fixedSurface.surfaceLayerItems[0]?.paragraphAnchor).toBeUndefined()
+  })
 })

@@ -60,6 +60,7 @@ import {
 } from './flowOverlayProjection'
 import { isTeacherControllerLayerItem, LAYER_REJECT_LOCKED, lockedLayerWriteReason, refuseLockedLayerWrite, rejectIfStaleDocument, setGlobalLayerVisibleAtLocation, validateLocationVisibilitySpec, visibilityAfterTogglingLocation, type LayerCommandOptions, type LayerCommandResult } from '../../core/tools/globalLayers'
 import { commitCourseProjectMutation } from '../../core/tools/courseProjectMutation'
+import type { FlowParagraphAnchor } from '../../shared/flowParagraphAnchors'
 
 export const FLOW_NO_PAGE_REASON = '请先选择一个流式页面'
 export { FLOW_GLOBAL_STRUCTURE_REASON }
@@ -1048,7 +1049,7 @@ export function transformFlowOverlayFrame(
   document: CourseProjectDocument,
   selection: FlowEditorSelection,
   frame: { readonly x: number; readonly y: number; readonly width: number; readonly height: number },
-  options: FlowCommandOptions = {},
+  options: FlowCommandOptions & { readonly paragraphAnchor?: FlowParagraphAnchor | null } = {},
 ): FlowSharedAuthoringResult {
   const overlayId = selection.selectedOverlayIds[0]
   if (!overlayId) return fail('请先选择一个浮层或全局层项目')
@@ -1072,13 +1073,28 @@ export function transformFlowOverlayFrame(
   ) {
     return fail('浮层尺寸无效')
   }
+  const proposedAnchor = options.paragraphAnchor
+  const entry = located.source === 'surface' && located.surfaceId ? flowSurfaceIn(document, located.surfaceId).surfaceLayerItems.find(candidate => candidate.item.layerItemId === overlayId) : undefined
+  if (proposedAnchor !== undefined) {
+    if (!entry || located.item.paperSpace !== 'paper' || located.item.kind === 'runtime' || isTeacherControllerLayerItem(located.item)) {
+      return fail('当前对象不能随段落移动')
+    }
+    if (proposedAnchor && (!located.surfaceId || !findFlowBlockRecursive(flowSurfaceIn(document, located.surfaceId).blocks, proposedAnchor.blockId))) {
+      return fail('挂靠段落不属于当前 Flow 正文')
+    }
+  }
   const current = located.item.frame
-  const unchanged =
+  const frameUnchanged =
     Math.abs(current.x - frame.x) < 0.01 &&
     Math.abs(current.y - frame.y) < 0.01 &&
     Math.abs(current.width - frame.width) < 0.01 &&
     Math.abs(current.height - frame.height) < 0.01
-  if (unchanged) {
+  const anchorUnchanged = proposedAnchor === undefined || (proposedAnchor === null
+    ? !entry?.paragraphAnchor
+    : entry?.paragraphAnchor?.blockId === proposedAnchor.blockId
+      && entry.paragraphAnchor.offsetY === proposedAnchor.offsetY
+      && entry.paragraphAnchor.xRatio === proposedAnchor.xRatio)
+  if (frameUnchanged && anchorUnchanged) {
     return {
       ok: true,
       reason: '未变化',
@@ -1102,6 +1118,13 @@ export function transformFlowOverlayFrame(
       y: frame.y,
       width: frame.width,
       height: frame.height,
+    }
+    if (proposedAnchor !== undefined) {
+      if (next.source !== 'surface' || !next.surfaceId) throw new Error('当前对象不能随段落移动')
+      const nextEntry = flowSurfaceIn(draft, next.surfaceId).surfaceLayerItems.find(candidate => candidate.item.layerItemId === overlayId)
+      if (!nextEntry) throw new Error('找不到当前纸面对象')
+      if (proposedAnchor === null) delete nextEntry.paragraphAnchor
+      else nextEntry.paragraphAnchor = { ...proposedAnchor }
     }
     return []
   }, '已调整浮层位置')

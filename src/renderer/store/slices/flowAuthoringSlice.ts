@@ -6,6 +6,7 @@ import type { ChartType } from '../../course/chartContentOperations'
 import type { ChartTextField } from '../../authoring/chartTextDraft'
 import type { ComponentPackageData } from '../../../shared/componentTypes'
 import type { CourseProjectDocument, FlowBlock } from '../../../shared/courseProjectTypes'
+import type { FlowParagraphAnchor } from '../../../shared/flowParagraphAnchors'
 import type { FormulaAstNode } from '../../../shared/contracts/native-v1'
 import type { DocumentDiagnostic } from '../../../shared/document/ports'
 import { parseDocumentMarkdown } from '../../../shared/document/markdown'
@@ -239,6 +240,7 @@ export type FlowAuthoringIntent = (
   | {
       readonly kind: 'transform-overlay-frame'
       readonly frame: { readonly x: number; readonly y: number; readonly width: number; readonly height: number }
+      readonly paragraphAnchor?: FlowParagraphAnchor | null
     }
   | {
       readonly kind: 'commit-block-formula'
@@ -1243,7 +1245,7 @@ export function createFlowAuthoringSlice(
             document,
             selection,
             intent.frame,
-            { expectedRevision: document.revision },
+            { expectedRevision: document.revision, paragraphAnchor: intent.paragraphAnchor },
           ))
         }
         case 'commit-block-formula': {
