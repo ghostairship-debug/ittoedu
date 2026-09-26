@@ -277,6 +277,8 @@ export interface SlideWorkspaceRuntimePort {
   readonly writeComponentTextRule?: (itemId: string, rule: LightEditTextOverride) => { ok: false; reason: string } | { ok: true; status: 'unchanged' | 'updated' }
   /** M15: a new image instead of one of a component's manifest assets. */
   readonly replaceComponentAssetAtKey?: (itemId: string, assetKey: string, asset: AssetMeta, bytes: Uint8Array) => { ok: false; reason: string } | { ok: true; status: 'unchanged' | 'updated' }
+  /** M15: capture the item's static fallback again once its text edits settle. */
+  readonly scheduleStaticFallbackRecapture?: (itemId: string) => void
 }
 
 export interface SlideWorkspaceAuthoringPort extends SlideWorkspaceCommandPort {
@@ -2002,6 +2004,7 @@ export function SlideLocationWorkspace({
       const committed = ports.runtime.writeComponentTextRule?.(session.nodeId, { original: session.lightEdit.original, ...(session.lightEdit.region ? { region: session.lightEdit.region } : {}), text: value })
       ports.canvas.setStatus(!committed ? '当前版本不能修改组件文字' : !committed.ok ? `${committed.reason} 未写入修改`
         : committed.status === 'unchanged' ? '组件文字没有变化' : '已更新组件文字；组件源码没有改动')
+      if (committed?.ok && committed.status === 'updated') ports.runtime.scheduleStaticFallbackRecapture?.(session.nodeId)
       setActiveComponentTextSession(null)
       return
     }
@@ -2078,6 +2081,10 @@ export function SlideLocationWorkspace({
       ports.canvas.setStatus('已更新全局运行时文字；此内容由整课共享')
     } else {
       ports.canvas.setStatus('已更新运行时文字；此内容由当前场景的所有状态共享')
+    }
+    // The static fallback follows text found by the host (M15).
+    if (committed.ok && committed.status === 'updated' && session.courseTarget.override) {
+      ports.runtime.scheduleStaticFallbackRecapture?.(session.courseTarget.courseTarget.itemId)
     }
     // Light-edit rules reach the host through the rule sync; only keyed text is patched here.
     if (committed.ok && committed.status === 'updated' && !session.courseTarget.override) {

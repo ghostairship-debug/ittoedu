@@ -18,6 +18,7 @@ export interface SurfaceRuntimeBounds {
   height: number
 }
 
+/** Optional, for compatibility (M15): the host recognises visible text and pictures on its own; nothing has to be registered. */
 interface SurfaceRuntimeAuthoringRegionBase {
   /** Stable key in runtime.content.values or runtime.assets. */
   key: string

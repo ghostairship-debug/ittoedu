@@ -157,6 +157,10 @@ export interface ComponentEditableTextBounds {
   height: number
 }
 
+/**
+ * Optional, for compatibility (M15): the host recognises a component's visible text and manifest-asset pictures on
+ * its own and edits them as instance rules; a registered region is edited through its prop path instead.
+ */
 export interface ComponentEditableTextRegion {
   /** Dot-separated path inside node.props, for example `content.title`. */
   key: string

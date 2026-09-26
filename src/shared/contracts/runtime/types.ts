@@ -224,6 +224,10 @@ export interface RuntimeAuthoringBounds {
   height: number
 }
 
+/**
+ * Optional, for compatibility (M15): the host recognises visible text and pictures on its own and edits them as
+ * rules, so a Runtime never has to register anything. A registered key is edited through its content value instead.
+ */
 interface RuntimeAuthoringTargetRegistrationBase {
   /** Stable key in RuntimeDocument.content.values or RuntimeDocument.assets. */
   key: string

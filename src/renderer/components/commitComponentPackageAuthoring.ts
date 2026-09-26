@@ -25,7 +25,7 @@ import { addSlideComponentLayer } from '../course/v9SlideContentCommands'
 import { addSpatialWorldComponentLayer } from '../course/spatialEditorCommands'
 import { insertFlowSharedComponent } from '../course/flowSharedAuthoringAdapters'
 import { componentPackageMeta } from '../../shared/componentPackageMeta'
-import { planComponentAssetReplacement, planComponentTextRule, type ComponentLightEditPlanResult } from './componentLightEditTransactions'
+import { planComponentAssetReplacement, planComponentTextRule, planStaticFallbackRefresh, type ComponentLightEditPlanResult } from './componentLightEditTransactions'
 import type { LightEditTextOverride } from '../../shared/contracts/runtime/lightEdit'
 import { emptyCourseAssetSidecar } from '../project/v9AssetAdapter'
 
@@ -193,6 +193,10 @@ export function createComponentAuthoringActions(ports: ComponentAuthoringPorts) 
     replaceComponentAssetAtKey: (itemId: string, assetKey: string, asset: AssetMeta, bytes: Uint8Array): ComponentLightEditCommitResult => commitComponentLightEdit(ports,
       project => planComponentAssetReplacement({ project, sidecar: ports.read().sidecar ?? emptyCourseAssetSidecar(), itemId, assetKey, asset, bytes, now: new Date().toISOString() }),
       '已替换组件图片'),
+    /** M15: the static fallback of a Runtime or component, captured again after its text changed. */
+    refreshStaticFallback: (itemId: string, asset: AssetMeta, bytes: Uint8Array): ComponentLightEditCommitResult => commitComponentLightEdit(ports,
+      project => planStaticFallbackRefresh({ project, sidecar: ports.read().sidecar ?? emptyCourseAssetSidecar(), itemId, asset, bytes, now: new Date().toISOString() }),
+      '已按修改后的文字更新静态后备图'),
     captureComponentInsertionTarget: () => captureComponentInsertionTarget(ports),
     insertComponentPackagesAtTarget: (target: ComponentInsertionTarget, packages: readonly ComponentPackageData[]) =>
       insertComponentPackagesAtTarget(ports, target, packages),

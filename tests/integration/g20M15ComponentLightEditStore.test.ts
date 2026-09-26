@@ -1,6 +1,6 @@
 import { beforeEach, expect, it } from 'vitest'
 import { componentPackagesFromArchive } from '@/renderer/components/componentPackageStore'
-import { planComponentAssetReplacement, planComponentTextRule } from '@/renderer/components/componentLightEditTransactions'
+import { planComponentAssetReplacement, planComponentTextRule, planStaticFallbackRefresh } from '@/renderer/components/componentLightEditTransactions'
 import { emptyCourseAssetSidecar } from '@/renderer/project/v9AssetAdapter'
 import { useEditorStore } from '@/renderer/store/editorStore'
 import type { ComponentLayerItem, CourseProjectDocument } from '@/shared/courseProjectTypes'
@@ -83,4 +83,32 @@ it('M15 a component text rule and a replaced picture are one undo step each, sur
   const { packageId, version } = quiz(archive.project).component
   const bytes = (files: Record<string, Uint8Array> | undefined) => Object.fromEntries(Object.entries(files ?? {}).map(([name, value]) => [name, Array.from(value)]))
   expect(bytes(reopened.componentFiles[`${packageId}@${version}`])).toEqual(bytes(archive.componentFiles[`${packageId}@${version}`]))
+})
+
+it('M15 points an existing static fallback at a new capture, keeps its coverage, and leaves items without one alone', () => {
+  const captured: AssetMeta = { ...picture, id: 'fallback-captured', filename: 'fallback-captured.png', path: 'assets/fallback-captured.png' }
+  const component = fixture().project
+  const refreshed = planStaticFallbackRefresh({ project: component, sidecar: emptyCourseAssetSidecar(), itemId: 'slide-quiz', asset: captured, bytes: PNG, now: NOW })
+  if (!refreshed.ok || refreshed.status !== 'planned') throw new Error('planned')
+  expect(quiz(refreshed.plan.nextDocument).staticFallbackAssetId).toBe(captured.id)
+  expect(refreshed.plan.nextDocument.assets[captured.id]).toEqual(captured)
+  expect(refreshed.plan.resourceChanges.assetFileChanges?.[0]).toMatchObject({ assetId: captured.id })
+
+  const runtimeProject = listCourseProjectV9Fixtures().find(value => value.id === 'canvas-runtime')!.data.project
+  const runtime = planStaticFallbackRefresh({ project: runtimeProject, sidecar: emptyCourseAssetSidecar(), itemId: 'slide-canvas-runtime', asset: captured, bytes: PNG, now: NOW })
+  if (!runtime.ok || runtime.status !== 'planned') throw new Error('planned')
+  const surface = runtime.plan.nextDocument.surfaces[0]
+  if (surface?.type !== 'slide') throw new Error('slide surface')
+  const item = surface.scenes[0]!.layerItems.find(value => value.layerItemId === 'slide-canvas-runtime')
+  expect(item?.kind === 'runtime' && item.runtime.staticFallback).toEqual({ assetId: captured.id, coverage: 'scene' })
+
+  const without = structuredClone(runtimeProject)
+  const plain = without.surfaces[0]
+  if (plain?.type !== 'slide') throw new Error('slide surface')
+  const bare = plain.scenes[0]!.layerItems.find(value => value.layerItemId === 'slide-canvas-runtime')
+  if (bare?.kind !== 'runtime') throw new Error('runtime')
+  delete bare.runtime.staticFallback
+  expect(planStaticFallbackRefresh({ project: without, sidecar: emptyCourseAssetSidecar(), itemId: 'slide-canvas-runtime', asset: captured, bytes: PNG, now: NOW })).toEqual({ ok: true, status: 'no-op' })
+  const locked = structuredClone(component); quiz(locked).locked = true
+  expect(planStaticFallbackRefresh({ project: locked, sidecar: emptyCourseAssetSidecar(), itemId: 'slide-quiz', asset: captured, bytes: PNG, now: NOW })).toMatchObject({ ok: false })
 })

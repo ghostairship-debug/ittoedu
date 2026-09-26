@@ -212,26 +212,24 @@ API 2 的联合类型是能力边界，不是类型提示：`dom` 模式不存�
 播放中的调用宣称为 evidence-grade 记录。可见动作仍只能使用浏览器正在分发的
 `isTrusted` 事件；合成事件或事后重用事件不会成为可信动作证据。
 
-## 5. 所有人工可见文字
+## 5. 可见文字与图片：不需要登记
 
-运行时产生的标题、按钮、标签、选项、反馈、提示和格式模板必须来自 `content.values`：
+按正常方式写页面和代码即可：可见文字可以直接写在源码或 DOM 里，**不需要**放进 `content.values`，也不需要注册编辑目标或添加 `data-courseware-edit-key`。宿主在运行时自动识别可见图文：DOM 文字与 `<img>`、Phaser `Text` 与静态 `Image`。教师在画布上改字时，修改按“原文 + 所在区域 → 新文字”存成工程里的轻量规则（`content.overrides`），重绘、切换状态、撤销/重做与保存重开后都保持；替换图片按受管资源更换素材绑定。源码不会被改写，改字后宿主会自动重新截取静态后备图。
+
+- 程序实时计算的文字（计分、计时、随状态频繁变化的数字）不作为可直接修改的目标，只能由 AI 修改源码；
+- 直接画在 Canvas、WebGL 或 Three.js 上的内容对宿主是黑盒，同样只提供 AI 修改；
+- 显示图片时使用 `RuntimeDocument.assets` 绑定的素材，宿主才能识别并替换它；
+- 需要在属性栏统一编辑或多处复用的文案，仍可以放进 `content.values` 并用 `ctx.content.get(key)` 读取，`metadata` 用于改善属性栏标签、说明、多行模式和长度约束。这是可选做法，不是义务；已使用文案表的旧 Runtime 继续按键编辑。
 
 ```js
+// 直接写出可见文字即可；宿主会识别它，教师可以在画布上改。
 const button = document.createElement('button')
-button.textContent = ctx.content.get('continueLabel')
-
-const scoreText = ctx.content
-  .get('scoreTemplate')
-  .replace('{score}', String(score))
+button.textContent = '继续'
 ```
 
-不得把最终显示文案只写在 `source`。内部状态键、事件名和不会显示的调试字符串不属于可编辑文案。静态后备画面中的文字应由同一内容表生成。
+### 5.1 兼容：Runtime Authoring V1 显式目标
 
-`metadata` 用于改善属性栏标签、说明、多行模式和长度约束；即使没有 metadata，`values` 中的每项仍可编辑。
-
-### 5.1 Runtime Authoring V1：显式文字与图片目标
-
-属性面板是所有运行时内容的基础入口。如果场景或全局运行时还希望让教师直接在对应画布作用域中修改稳定文字或替换图片，定义必须显式声明独立的 authoring 版本：
+新 Runtime 不需要本节内容。已显式登记文字与图片目标的旧 Runtime 继续可用：定义声明独立的 authoring 版本后，登记的键在画布上按 `content.values` / `assets` 编辑；宿主自动识别的其余文字仍按上面的规则编辑。
 
 ```js
 CoursewareRuntime.define({
@@ -282,7 +280,7 @@ CoursewareRuntime.define({
 - 目标快照是只读、会话局部的数据。运行时拿不到工程写权限，编辑器提交后重建/同步运行时文档；旧会话或过期 revision 不得覆盖新实例；
 - `content.values` 与 `assets` 位于整个 `RuntimeDocument`，不属于 `scene.presentation`，也不生成状态专属覆盖；
 - `scene.runtime` 目标只在当前场景编辑作用域出现，画布修改由该场景基础及全部命名状态共享，界面必须明确提示“所有状态共享”；
-- `globalRuntime` 目标只在“全局层”编辑作用域出现，画布修改由整课共享。未声明 `authoringApiVersion` 的 API 2 运行时和没有目标的区域仍由 Published authoring 宿主显示稳定视觉，并继续从属性/开发面板编辑；宿主不得用空框替换、扫描像素或根据 DOM 文本猜测数据键。
+- `globalRuntime` 目标只在“全局层”编辑作用域出现，画布修改由整课共享。未声明 `authoringApiVersion` 的运行时由宿主自动识别可见图文；宿主不会扫描像素，也不会根据 DOM 文本猜测 `content.values` 的键。
 
 Runtime Authoring V1 不等于 AI patch。未来 Blueprint 或 AI 能力必须使用新的版本化协议和明确授权接入，不能复用本扩展偷偷修改源码或工程结构。
 
@@ -388,7 +386,7 @@ Project `designTokens` 是作者态的最小字体/色板词汇，`ImageNode.saf
 
 `playbackInitialVisibility: 'hidden'` 只表示互动 Player 开始时先隐藏等待入场。入场/退场只改变 Player 瞬态可见性和输入，不写回节点 `visible`、不调用 `presentation.setState()`。编辑画布、缩略图、PDF/PPTX 按作者稳定可见性显示。运行时不应为同一可枚举节奏重复实现 Tween；只有路径、关键帧、物理、粒子或算法动画继续属于运行时/组件。
 
-运行时只应使用 `presentation.states()` 返回的稳定 ID。`initialStateId` 负责进入场景时的状态，`thumbnailStateId` 决定编辑器场景缩略图的稳定节点状态；不要把悬停、拖拽中间帧或随机动画结果当作缩略图状态。缩略图不执行运行时源码，但会按“背景 → 全局 underlay 元素 → 全局运行时 underlay → 场景运行时 underlay → 场景节点 → 场景运行时 overlay → 全局 overlay 元素 → 全局运行时 overlay”的固定顺序合成已启用运行时的 `staticFallback`；没有后备的已启用运行时显示“运行时”角标。Slide 编辑状态由同文档 Published V2 authoring 模式显示运行时真实稳定视觉；只有显式登记的 text/asset 区域可原位编辑。学生互动和瞬态业务只能在对应 carrier 的 Published playback parity 落地后，才用“当前位置试运行”或“整课预览”验收；当前包含 Slide scene-local 与 session-global API 2 DOM/Phaser/hybrid，以及 Slide scene-local 与 Flow surface-local API 3 DOM。Slide scene-local API 2/3 可使用 `presentation`；全局 API 2 与 Flow surface-local API 3 的 `presentation` inert，Published `nodes` 为空，动态 Runtime 导航守卫 inert。
+运行时只应使用 `presentation.states()` 返回的稳定 ID。`initialStateId` 负责进入场景时的状态，`thumbnailStateId` 决定编辑器场景缩略图的稳定节点状态；不要把悬停、拖拽中间帧或随机动画结果当作缩略图状态。缩略图不执行运行时源码，但会按“背景 → 全局 underlay 元素 → 全局运行时 underlay → 场景运行时 underlay → 场景节点 → 场景运行时 overlay → 全局 overlay 元素 → 全局运行时 overlay”的固定顺序合成已启用运行时的 `staticFallback`；没有后备的已启用运行时显示“运行时”角标。Slide 编辑状态由同文档 Published V2 authoring 模式显示运行时真实稳定视觉；宿主自动识别的文字与图片以及显式登记的 text/asset 区域都可原位编辑。学生互动和瞬态业务只能在对应 carrier 的 Published playback parity 落地后，才用“当前位置试运行”或“整课预览”验收；当前包含 Slide scene-local 与 session-global API 2 DOM/Phaser/hybrid，以及 Slide scene-local 与 Flow surface-local API 3 DOM。Slide scene-local API 2/3 可使用 `presentation`；全局 API 2 与 Flow surface-local API 3 的 `presentation` inert，Published `nodes` 为空，动态 Runtime 导航守卫 inert。
 
 在明确提供 `nodes` 能力的 API 2 宿主中，`phaser` / `hybrid` 上下文可用 `ctx.nodes.get('actual_node_id')` 按节点 ID 查询；当前 Published carrier 不能从 host actions 接线推导出完整 `nodes` parity。即使目标宿主提供该能力，新创作仍不应在 `source` 中硬编码节点 ID。
 
@@ -599,8 +597,8 @@ Runtime 是经过审核的可信扩展。Slide authoring 与 playback 位于主 
 
 - [ ] 选择 scene/global 作用域有明确理由，没有为形式而组件化。
 - [ ] `source` 同步且只注册一个 API 2 定义；API 1 输入明确拒绝；无模块语法或远程脚本，远程媒体/API 与工程声明一致。
-- [ ] 所有人工可见文字都来自 `content.values`，metadata 标签清楚。
-- [ ] 如开放统一画布编辑，定义显式使用 `authoringApiVersion: 1`；registered/DOM text 与 asset key 分别存在于 `content.values` / `assets`，目标边界、更新、注销和普通宿主无 `ctx.authoring` 时均正确。
+- [ ] 可见文字与图片不需要登记；显示的图片来自 `RuntimeDocument.assets` 绑定，程序实时计算的文字不当作可直接修改的文案。
+- [ ] 若为兼容使用显式登记（`authoringApiVersion: 1`），registered/DOM text 与 asset key 分别存在于 `content.values` / `assets`，目标边界、更新、注销和普通宿主无 `ctx.authoring` 时均正确。
 - [ ] 运行时内容/素材的画布修改共享语义明确：`scene.runtime` 由当前场景全部命名状态共享，`globalRuntime` 由整课共享；未声明 authoring 目标的 API 2 运行时仍正常显示并可从属性面板编辑。
 - [ ] 所有素材通过稳定绑定访问，静态后备引用存在；没有只靠散落源码字面量维持的隐式引用，删除诊断可定位到 Runtime 上下文。
 - [ ] `renderMode` 是最小且真实的能力声明；源码没有访问未声明的 DOM/Phaser 能力，也没有误以为切换字段会自动转换代码。

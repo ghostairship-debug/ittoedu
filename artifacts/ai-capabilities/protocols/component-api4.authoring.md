@@ -45,7 +45,7 @@
 
 语文两项因具有独立学科语义和行为保持分立；七项旧通用视觉包只是外观差异，已删除并按内容载体合并为两个组件。当行为、数据结构和导出语义不变时，新外观应继续作为属性选项，不应再新建一个包。旧七个 ID 没有别名、迁移或宿主兼容分支。两个新视觉组件使用纯 CSS/SVG 程序视觉，不复用旧来源不明位图。
 
-四个实验包若出现在目录中，可编辑的稳定可见文字均必须同时出现在属性栏和画布双击目标中。不可见的无障碍说明继续只在属性栏编辑。
+四个实验包若出现在目录中，稳定可见文字都可以在画布上直接修改（宿主自动识别，或按其公开属性编辑）。不可见的无障碍说明继续只在属性栏编辑。
 
 ## 1. 组件包结构
 
@@ -126,7 +126,7 @@ scene-controls.h5component
 - `renderMode` 必须是 `dom`、`phaser` 或 `hybrid`，并且与入口实际访问的能力一致；
 - `supportedScopes` 至少包含一个且不能重复，可选 `scene`、`global`；
 - `id` 推荐反向域名，`version` 使用语义化版本；
-- `defaultProps.content` 是所有人工可见文字的保留树；
+- `defaultProps.content` 是需要在属性栏编辑的文案的保留树（可选）；
 - `defaultSize`、`minSize` 和 `preserveAspectRatio` 定义实例变换边界。
 - `thumbnail` 可选，但所有面向交付的可视组件都应提供；路径必须指向包内 PNG、JPG、WebP、GIF 或 SVG。
 
@@ -136,9 +136,11 @@ V4 的 `renderMode` 是能力声明，不是自动转换开关：改成 `dom` �
 
 缩略图应使用与 `defaultSize` 相同的宽高比，展示组件的稳定默认外观，不要依赖远程字体、运行时网络或透明到不可辨认的内容。编辑器会把它绘制到左侧场景缩略图；未提供或解码失败时改用带组件名称的边框后备框。后备框只保证组件可见，不代表视觉质量合格。
 
-## 3. 所有组件文字必须放入 `props.content`
+## 3. 组件文字与图片：不需要登记
 
-V4 编辑器会对合并后的 `props.content` 递归遍历，把其中每个字符串自动显示为文字编辑项。支持对象和数组，例如：
+按正常方式写组件即可：可见文字可以直接写在 `runtime.js` 或 DOM 里，**不需要**放进 `props.content`，也不需要标记 `data-courseware-edit-key` 或登记命中区域。宿主在运行时自动识别 DOM 组件的可见文字与显示 manifest 素材的 `<img>`；教师在画布上改字时，修改按“原文 + 所在区域 → 新文字”存为该组件实例的规则（`textOverrides`），替换图片按受管资源记录为实例的 `assetOverrides`。组件包与源码不会被改写，改字后宿主会自动重新截取静态后备图。程序实时计算的文字只提供 AI 修改。
+
+需要在属性栏统一编辑、随预设或变体切换的文案，仍可以放进 `props.content`；这是可选做法。V4 编辑器会对合并后的 `props.content` 递归遍历，把其中每个字符串自动显示为文字编辑项。支持对象和数组，例如：
 
 ```json
 {
@@ -153,13 +155,13 @@ V4 编辑器会对合并后的 `props.content` 递归遍历，把其中每个字
 }
 ```
 
-运行时只能从 `ctx.props.content` 读取这些文案。不得把最终显示文字仅硬编码在 `runtime.js`，也不得因某个状态不在编辑器预览首页就漏登记。
+放进 `props.content` 的文案由运行时从 `ctx.props.content` 读取；没有放进去的可见文字由宿主识别后按规则编辑。
 
 V4 对 `content` 使用递归合并。修改一个深层字符串不会丢失默认值、变体或预设中的兄弟文案；其他 props 仍沿用顶层覆盖语义。
 
 `editor.properties` 对文字的作用是指定顺序、友好标签、说明、多行和长度，不决定文字是否可编辑。即使某个 `content` 字符串没有显式字段，它仍会自动出现。显式声明 `content...` 时只能使用 `text` 或 `textarea`。
 
-动态分数和时间可计算，但人工模板仍放入 content，例如 `得分：{score}`。Logo、照片原有文字和不可拆分艺术字属于需说明的素材例外。
+动态分数和时间由程序计算，不作为可直接修改的文字。Logo、照片原有文字和不可拆分艺术字属于素材，替换图片即可。
 
 ## 4. 公开属性
 
@@ -181,9 +183,9 @@ V4 对 `content` 使用递归合并。修改一个深层字符串不会丢失默
 
 工程素材删除使用共享引用图：外部组件基础/命名状态 Props 中出现的工程 Asset ID、公开 `image` 属性及有效默认值都会保护素材；提供包上下文时还会保守扫描组件 Runtime source。缺少匹配包上下文时，删除安全路径会按可能引用阻断并报告上下文缺失，而不是把素材判为未使用。因此应优先把教师可替换图片声明为 `image` 属性，不要只把工程 Asset ID 隐藏在任意字符串或源码中。
 
-### 4.1 显式开放画布文字编辑
+### 4.1 兼容：显式登记的画布文字
 
-属性栏始终是公开文字的基础编辑入口。若组件还希望教师在编辑画布中双击文字直接修改，必须显式登记命中区域；宿主不会扫描画面文字或按 DOM 文本猜测 Props。
+新组件不需要本节内容。已显式登记命中区域的组件继续可用：登记的文字在画布上按 Props 路径编辑，其余可见文字仍由宿主识别后按规则编辑。宿主不会按 DOM 文本猜测 Props 路径。
 
 DOM 组件在真实文字元素上标记点分 Props 路径：
 
@@ -225,7 +227,7 @@ var removeTitleRegion = ctx.editor?.registerTextRegion({
 - `key` 必须能解析为字符串，并对应 `editor.properties` 中的 `text` / `textarea` 或宿主递归发现的 `props.content` 文字；
 - DOM 的 `data-courseware-edit-label` 与 `data-courseware-edit-multiline` 可覆盖浮层标签和单/多行表现，最大长度仍以公开属性定义为准；
 - 状态覆盖、撤销/重做和保存由宿主负责。组件只需在 `updateProps()` 中立即刷新画面；
-- 未登记区域继续整体选择并通过属性栏编辑。
+- 未登记的可见文字由宿主自动识别，按实例规则编辑。
 
 编辑浮层是纯文本入口，不替代组件自己的富文本数据结构。完整示例可参考 `examples/render-host-benchmark/components/editable-table/`（DOM）和 `examples/sample-counter-component/`（Phaser）。
 
@@ -245,7 +247,7 @@ V4 预设合并顺序：
 defaultProps → variant props → preset props → instance props
 ```
 
-其中各层 `content` 递归合并。无论页面、变体和状态有多少，所有可达状态的可见文案都必须出现在有效 `props.content` 中。
+其中各层 `content` 递归合并。放进 `props.content` 的文案在所有页面、变体和状态中都按合并后的值显示。
 
 ## 6. 注册运行时
 
@@ -553,9 +555,9 @@ Component 是经过审核的可信扩展，不是普通图片；外部导入只�
 - [ ] Package ID 使用权利主体控制的反向域名；ittoedu 自有组件使用 `com.ittoedu.*`，第三方组件保留自己的命名空间，不靠改 ID 转移权属。
 - [ ] manifest 与 runtime 的 ID 和 API 版本一致，入口同步只注册一次。
 - [ ] 原始 `.h5component` ZIP 的 `sha256` 与嵌入文件集的 canonical `contentSha256` 均已记录并核对；内容哈希未被误写成签名、许可证或权属证明。
-- [ ] 所有人工可见文字均位于有效 `props.content`，所有状态和页面均已覆盖。
-- [ ] 显式文字字段只补充标签/说明，未依赖它决定可编辑性。
-- [ ] 如开放画布文字编辑，DOM key 或 `ctx.editor?.registerTextRegion()` 与公开字符串路径一致，区域会更新/注销；authoring Player 中命中位置与组件视觉一致，preview/capture/成品在没有 `ctx.editor` 时正常运行。
+- [ ] 可见文字与图片不需要登记；显示的图片来自 manifest 素材，程序实时计算的文字不当作可直接修改的文案。
+- [ ] 放进 `props.content` 的文案（可选）用显式文字字段补充标签/说明，未依赖它决定可编辑性。
+- [ ] 若为兼容使用显式登记，DOM key 或 `ctx.editor?.registerTextRegion()` 与公开字符串路径一致，区域会更新/注销；authoring Player 中命中位置与组件视觉一致，preview/capture/成品在没有 `ctx.editor` 时正常运行。
 - [ ] 图片、数字、颜色和模式按真实维护需求公开；工程图片使用 `image` 属性/稳定 Asset ID，可被引用图、删除保护和 Project Health 正确识别。
 - [ ] `updateProps()`、`setEditorState()`、`resize()`、`setVisible()`、`suspend/resume()`、`prepareCapture()` 和 `destroy()` 行为正确。
 - [ ] DOM/Phaser 对象只使用声明能力；没有依赖跨 DOM/Canvas 平面的逐对象交错，也没有把修改 `renderMode` 当作自动代码转换。

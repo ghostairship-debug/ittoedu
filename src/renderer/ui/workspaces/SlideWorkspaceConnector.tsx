@@ -20,6 +20,7 @@ import {
   reportTryRunInteractionDiagnostic,
 } from '../coursePlayerTryRun'
 import { sidecarFileIdsFrom } from '../workspaceSlidePreviewRebuild'
+import { scheduleStaticFallbackRecapture } from '../../composition/runtime/staticFallbackRecapture'
 import {
   buildSlidePreviewRebuildKey,
   type SlidePreviewIdentityNode,
@@ -330,6 +331,7 @@ export function SlideWorkspaceConnector({
       // M15: component light edits commit through the component authoring actions.
       writeComponentTextRule,
       replaceComponentAssetAtKey,
+      scheduleStaticFallbackRecapture,
     },
     authoring: {
       runFieldTextIntent: runSlideFieldTextIntent,

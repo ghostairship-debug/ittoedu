@@ -1363,7 +1363,8 @@ export async function generateAiCapabilityArtifacts(
       renderModes: COMPONENT_RENDER_MODES,
       hostActions: componentHostActionNames,
       lifecycleHooks: componentLifecycleHooks,
-      visibleTextAuthority: 'props.content',
+      // M15: nothing has to be registered; props.content and explicit targets remain for compatibility.
+      visibleTextAuthority: 'host-recognised visible text and manifest-asset images; edits are instance textOverrides/assetOverrides; props.content optional',
       optionalAuthoringTargets: [
         'DOM data-courseware-edit-key',
         'ctx.editor.registerTextRegion',

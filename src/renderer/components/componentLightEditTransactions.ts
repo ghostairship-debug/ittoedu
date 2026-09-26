@@ -51,6 +51,33 @@ export function planComponentTextRule(input: {
   return finish(input.project, next, input.now)
 }
 
+/**
+ * Points a Runtime's or component's existing static fallback at a newly captured image (after its text changed).
+ * Items without a fallback are not given one; locked items are left alone.
+ */
+export function planStaticFallbackRefresh(input: {
+  project: CourseProjectDocument
+  sidecar: CourseAssetSidecar
+  itemId: string
+  asset: AssetMeta
+  bytes: Uint8Array
+  now: string
+}): ComponentLightEditPlanResult {
+  const located = locateCourseLayer(input.project, input.itemId)
+  if (!located || located.item.kind === 'native') return { ok: false, reason: '这个对象已不存在。' }
+  if (located.item.locked) return { ok: false, reason: '对象已锁定。' }
+  const hasFallback = located.item.kind === 'runtime' ? Boolean(located.item.runtime.staticFallback) : Boolean(located.item.staticFallbackAssetId)
+  if (!hasFallback) return { ok: true, status: 'no-op' }
+  if (Object.hasOwn(input.project.assets, input.asset.id)) return { ok: false, reason: '截取的图片编号已被占用。' }
+  const next = structuredClone(input.project)
+  next.assets[input.asset.id] = structuredClone(input.asset)
+  const item = locateCourseLayer(next, input.itemId)!.item
+  if (item.kind === 'runtime') item.runtime.staticFallback = { ...item.runtime.staticFallback!, assetId: input.asset.id }
+  else if (item.kind === 'component') item.staticFallbackAssetId = input.asset.id
+  const change = planAssetFileHistoryChange(input.asset.id, undefined, input.bytes)
+  return finish(input.project, next, input.now, change ? { assetFileChanges: [change] } : {})
+}
+
 /** Shows a managed image instead of one of the component's manifest assets; the image and the override are one step. */
 export function planComponentAssetReplacement(input: {
   project: CourseProjectDocument

@@ -1,6 +1,7 @@
 import { useMemo } from 'react'
 import type { LightEditTextOverride } from '../../../shared/contracts/runtime/lightEdit'
 import { selectActiveCourseProjectDocument, selectActiveSceneId, selectEditingScope, selectEffectiveLayerProjection, useEditorStore } from '../../store/editorStore'
+import { scheduleStaticFallbackRecapture } from './staticFallbackRecapture'
 
 export interface RuntimeLightEditView {
   readonly source: string
@@ -54,6 +55,7 @@ export const runtimeLightEditCommands = {
     if (!target) return { ok: false, reason: '这个 Runtime 已锁定或不在当前编辑范围，未写入修改' }
     const committed = state.updateRuntimeContentTextAtTarget(target, text)
     if (!committed.ok) return { ok: false, reason: committed.reason }
+    if (committed.status === 'updated') scheduleStaticFallbackRecapture(itemId)
     return { ok: true, changed: committed.status === 'updated' }
   },
 }
