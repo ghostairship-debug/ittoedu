@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { ContextMenu, type MenuCommand } from '../editing/commands/CommandMenu'
 
 export const DOCUMENT_BLOCK_DRAG_MIME = 'application/x-guoling-document-block'
@@ -14,11 +14,12 @@ export interface DocumentBlockHandleProps {
 /** The host supplies the active caret block, its visible rect and already-bound commands. */
 export function DocumentBlockHandle({ blockId, rect, commands, disabledReason, onDragStart }: DocumentBlockHandleProps) {
   const [menu, setMenu] = useState<'insert' | 'block' | null>(null)
+  useEffect(() => setMenu(null), [blockId])
   if (!blockId || !rect) return null
   const insert = commands.filter(command => command.group === '插入')
   const blocked = commands.map(command => ({ ...command, disabledReason: disabledReason ?? command.disabledReason }))
   const items = menu === 'insert' ? blocked.filter(command => command.group === '插入') : blocked
-  const at = { x: Math.max(4, rect.left - 36), y: rect.top + rect.height / 2 }
+  const at = { x: Math.max(4, rect.left - 56), y: rect.top + rect.height / 2 }
   return <div className="document-block-handle" data-block-id={blockId} style={{ position: 'fixed', left: at.x, top: rect.top, zIndex: 20 }}>
     <button type="button" aria-label="插入段落" disabled={Boolean(disabledReason) || !insert.length}
       onMouseDown={event => event.preventDefault()} onClick={() => setMenu(value => value === 'insert' ? null : 'insert')}>+</button>

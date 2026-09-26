@@ -40,7 +40,8 @@ function blockNode(block: DocumentBlock): PMNode {
   const attrs = { id, data }
   switch (block.type) {
     case 'table': {
-      const header = schema.nodes.table_row.create(null, block.columns.map(column => schema.nodes.table_header.create(null,
+      const firstCell = block.headerEnabled === false ? schema.nodes.table_cell : schema.nodes.table_header
+      const header = schema.nodes.table_row.create(null, block.columns.map(column => firstCell.create(null,
         schema.nodes.slot.create({ key: `column:${column.id}` }, inlineNodes(column.header)))))
       const rows = block.rows.map(row => schema.nodes.table_row.create(null, block.columns.flatMap(column => {
         const span = tableCellSpan(block, row.id, column.id)

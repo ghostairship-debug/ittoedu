@@ -15,6 +15,7 @@ import { documentResourceReferences } from '../../shared/document/resources'
 import { resolveFlowParagraphPresentation } from '../../shared/flowBodyPresentation'
 import { flowFormulaBlockElement, flowInlineFormulaHtml } from '../../shared/document/render'
 import { previewCaretTransaction } from './editPreviewWidgets'
+import { createDocumentInputRuleResult, matchDocumentInputRule, type DocumentFormulaDraftRequest } from './documentInputRules'
 
 /** Sent from a document object (picture, chart, component) that was right-clicked, after selecting it (M21). */
 export const DOCUMENT_OBJECT_CONTEXT_MENU_EVENT = 'document-object-context-menu'
@@ -25,6 +26,7 @@ export interface LayoutEditorOptions {
   document: MarkdownDocument; revision: string; sourceMap?: MarkdownSourceMap
   change(document: MarkdownDocument, operation: DocumentOperation): boolean | void
   stateChanged?(state: EditorState): void
+  requestMathDraft?(draft: DocumentFormulaDraftRequest): void
   selection?(selection: DocumentSelection | null): void
   undo(): void; redo(): void
   diagnostic(message: string): void
@@ -111,6 +113,18 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
       blur: () => { boundary(); return false },
       copy: (_view, event) => clipboard(event, false),
       cut: (_view, event) => clipboard(event, true),
+    },
+    handleTextInput: (currentView, from, to, text) => {
+      if (options.readOnly) return false
+      const match = matchDocumentInputRule(currentView.state, from, to, text, composing || currentView.composing)
+      if (!match) return false
+      try {
+        const result = createDocumentInputRuleResult(currentView.state, match, () => crypto.randomUUID())
+        boundary()
+        currentView.dispatch(result.transaction)
+        if (result.kind === 'formula-draft') options.requestMathDraft?.(result.draft)
+      } catch (error) { options.diagnostic(error instanceof Error ? error.message : String(error)) }
+      return true
     },
     handlePaste: (_view, event) => {
       boundary()

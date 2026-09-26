@@ -19,7 +19,7 @@ export type DocumentBlock = { id: string } & (
   | { type: 'list'; ordered: boolean; items: { id: string; content: FlowTextContent }[] }
   | { type: 'divider' }
   | { type: 'media'; assetId: string; mediaKind: 'image' | 'audio' | 'video'; altText?: string; caption?: FlowTextContent; layout: 'content-width' | 'wide' | 'full-width'; wrap?: 'none' | 'left' | 'right' }
-  | { type: 'table'; caption?: FlowTextContent; columns: { id: string; header: FlowTextContent }[]; rows: { id: string; cells: Record<string, FlowTextContent> }[]; merges?: TableMergeRegion[] }
+  | { type: 'table'; caption?: FlowTextContent; headerEnabled?: boolean; columns: { id: string; header: FlowTextContent }[]; rows: { id: string; cells: Record<string, FlowTextContent> }[]; merges?: TableMergeRegion[] }
   | { type: 'chart'; chart: NativeChartContent; height: number }
   | { type: 'formula'; formulaId: string; latex: string; accessibleText: string; style?: MathStyle }
   | { type: 'code'; code: string; language?: string }
@@ -50,7 +50,7 @@ export const documentTextContentSchema = z.object({ inlines: z.array(documentInl
 const base = { id: documentIdSchema }
 const paragraph = { content: documentTextContentSchema, textAlign: z.enum(['left', 'center', 'right']).optional(), lineSpacing: z.number().finite().min(0).max(200).optional() }
 const table = z.object({
-  ...base, type: z.literal('table'), caption: documentTextContentSchema.optional(),
+  ...base, type: z.literal('table'), caption: documentTextContentSchema.optional(), headerEnabled: z.boolean().optional(),
   columns: z.array(z.object({ id: documentIdSchema, header: documentTextContentSchema }).strict()).min(1).max(256),
   rows: z.array(z.object({ id: documentIdSchema, cells: z.record(z.string(), documentTextContentSchema) }).strict()).max(100000),
   merges: z.array(tableMergeRegionSchema).max(10000).optional(),

@@ -100,7 +100,7 @@ export function serializeDocumentMarkdown(document: MarkdownDocument, target: 'f
         if (block.items.some(i => serializeMarkdownInline(i.content).includes('\n') || !i.content.inlines.length)) return object(block)
         return `${metadata('block', { id: block.id })}\n${block.items.map((item, index) => `${block.ordered ? `${index + 1}.` : '-'} ${metadata('item', { id: item.id })}${serializeMarkdownInline(item.content)}`).join('\n')}`
       case 'table': {
-        if (block.merges !== undefined || block.caption || block.columns.some(c => /[|\n]/.test(serializeMarkdownInline(c.header) + c.id)) || block.rows.some(r => /[|\n]/.test(r.id) || Object.values(r.cells).some(c => /[|\n]/.test(serializeMarkdownInline(c))))) return object(block)
+        if (block.merges !== undefined || block.caption || block.headerEnabled === false || block.columns.some(c => /[|\n]/.test(serializeMarkdownInline(c.header) + c.id)) || block.rows.some(r => /[|\n]/.test(r.id) || Object.values(r.cells).some(c => /[|\n]/.test(serializeMarkdownInline(c))))) return object(block)
         const headers = block.columns.map(c => `${serializeMarkdownInline(c.header)} ${metadata('column', { id: c.id })}`)
         return `${metadata('block', { id: block.id })}\n| ${headers.join(' | ')} |\n| ${block.columns.map(() => '---').join(' | ')} |\n${block.rows.map(r => `| ${block.columns.map((c, i) => `${i === 0 ? metadata('row', { id: r.id }) : ''}${serializeMarkdownInline(r.cells[c.id]!)}`).join(' | ')} |`).join('\n')}`
       }

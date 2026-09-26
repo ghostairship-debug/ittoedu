@@ -5,7 +5,7 @@ import type { ExecutionSelectionTarget } from '../../shared/workbench/executionD
 import { pinnedSelectionKey, pinnedSelectionPlugin, sourcePinnedSelectionEffect, sourcePinnedSelectionField } from './selectionDecorations'
 import { FONT_FAMILY_OPTIONS } from '../../shared/fonts/fontFamilyCatalog'
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState, useMemo, type ReactNode } from 'react'
-import { Baseline, Bold, Highlighter, Italic, Strikethrough, Underline } from 'lucide-react'
+import { Baseline, Bold, Highlighter, Italic, Link2, MoreHorizontal, Sigma, Underline } from 'lucide-react'
 import { PaletteButton } from '../editing/color/PaletteButton'
 import type { QuickBarBounds, QuickBarRect } from '../editing/quickbar/placeQuickBar'
 import { QuickBarAiButton, QuickBarButton, QuickBarColorButton, QuickBarPopoverButton, QuickBarSeparator, SelectionQuickBar } from '../editing/quickbar/SelectionQuickBar'
@@ -21,6 +21,9 @@ import type { DocumentDiagnostic, DocumentSelection, DocumentContextSelection } 
 import { mapDocumentSelectionToSource, type MarkdownSourceMap } from '../../shared/document/markdownSourceMap'
 import type { TextRunStyle } from '../../shared/contracts/native-v1/types'
 import { createLayoutEditor, DOCUMENT_OBJECT_CONTEXT_MENU_EVENT, type DocumentObjectContextMenuDetail, type DocumentOperation } from './editorSession'
+import { documentBlockMenu, applyDocumentBlockCommand, type DocumentBlockCommand } from './documentBlockCommands'
+import { DocumentBlockHandle, documentBlockDragId } from './DocumentBlockHandle'
+import { fromEditorDocument, toEditorDocument } from './documentAdapter'
 import { documentEditorSchema } from './editorSchema'
 import { NodeSelection, Selection, TextSelection, type EditorState } from 'prosemirror-state'
 import { toggleMark, setBlockType } from 'prosemirror-commands'
@@ -114,6 +117,7 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
   const [mode, setMode] = useState<'layout' | 'source'>(props.initialMode ?? (props.sourceDraft === undefined ? 'layout' : 'source'))
   const [diagnostics, setDiagnostics] = useState<DocumentDiagnostic[]>([])
   const [mathDraft, setMathDraft] = useState<{ latex: string; accessibleText: string; display: boolean; formulaId: string; from: number; to: number } | null>(null)
+  const [activeBlock, setActiveBlock] = useState<{ id: string; rect: { left: number; top: number; height: number } } | null>(null)
   const [linkDraft, setLinkDraft] = useState<string | null>(null)
   const [contextualTarget, setContextualTarget] = useState<DocumentContextSelection | null>(null)
   /** Each newly published target; the quick bar closes its popovers when it changes. */
@@ -262,7 +266,51 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
     }
     return result.status === 'valid'
   }
-  const options = () => ({ presentation: latest.current.target === 'flow' ? 'flow' as const : undefined, stateChanged: (state: EditorState) => setFormat(readDocumentFormatting(state)), document: projection.current.document, sourceMap: mapRef.current, revision: latest.current.revision,
+  function updateActiveBlock(state: EditorState) {
+    if (mode !== 'layout' || !state.selection.empty || !(state.selection instanceof TextSelection)) { setActiveBlock(null); return }
+    const point = editorPositionToPoint(state.doc, state.selection.head)
+    const id = point?.blockId
+    const element = id ? [...(editorRoot.current?.querySelectorAll<HTMLElement>('[data-flow-block-id]') ?? [])].find(node => node.dataset.flowBlockId === id) : null
+    if (!id || !element) { setActiveBlock(null); return }
+    const rect = element.getBoundingClientRect()
+    const next = { id, rect: { left: rect.left, top: rect.top, height: rect.height } }
+    setActiveBlock(previous => previous && previous.id === next.id && previous.rect.left === next.rect.left && previous.rect.top === next.rect.top && previous.rect.height === next.rect.height ? previous : next)
+  }
+  useEffect(() => {
+    const reposition = () => { const state = layout.current?.view.state; if (state) updateActiveBlock(state) }
+    window.addEventListener('scroll', reposition, true); window.addEventListener('resize', reposition)
+    return () => { window.removeEventListener('scroll', reposition, true); window.removeEventListener('resize', reposition) }
+  }, [mode])
+  function applyDocumentContent(content: ReturnType<typeof fromEditorDocument>) {
+    const editor = layout.current
+    if (!editor || latest.current.readOnly) return
+    const view = editor.view
+    try {
+      const replacement = toEditorDocument(content)
+      const selected = activeBlock?.id
+      editor.boundary()
+      const transaction = view.state.tr.replaceWith(0, view.state.doc.content.size, replacement.content)
+      if (selected) {
+        let at = -1
+        transaction.doc.descendants((node, position) => { if (at < 0 && node.attrs.id === selected) at = position; return at < 0 })
+        if (at >= 0) transaction.setSelection(Selection.near(transaction.doc.resolve(Math.min(at + 1, transaction.doc.content.size))))
+      }
+      view.dispatch(transaction.scrollIntoView())
+      view.focus()
+    } catch (error) { fail(error instanceof Error ? error.message : String(error)) }
+  }
+  function activeBlockMenu(blockId: string) {
+    const editor = layout.current
+    if (!editor || latest.current.readOnly) return []
+    return documentBlockMenu({ content: fromEditorDocument(editor.view.state.doc), blockId, apply: applyDocumentContent,
+      ai: latest.current.onContextualCommand ? id => {
+        let at = -1
+        editor.view.state.doc.descendants((node, position) => { if (at < 0 && node.attrs.id === id) at = position; return at < 0 })
+        if (at >= 0) editor.view.dispatch(editor.view.state.tr.setSelection(Selection.near(editor.view.state.doc.resolve(at + 1))))
+      } : undefined,
+      disabledReason: latest.current.editPreview ? '正在生成的范围暂时只读' : null })
+  }
+  const options = () => ({ presentation: latest.current.target === 'flow' ? 'flow' as const : undefined, stateChanged: (state: EditorState) => { setFormat(readDocumentFormatting(state)); updateActiveBlock(state) }, requestMathDraft: (request: { from: number; to: number; display: true; latex: ''; formulaId: string }) => setMathDraft({ ...request, accessibleText: '' }), document: projection.current.document, sourceMap: mapRef.current, revision: latest.current.revision,
     projectionPlugins: [previewPlugin, pinPlugin], projectionClipboard: (view: Parameters<typeof layoutPreviewClipboard>[0], event: ClipboardEvent, cut: boolean) => {
       const handled = layoutPreviewClipboard(view, event, cut)
       if (handled && cut) previewBlocked()
@@ -297,7 +345,8 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
         try { editor.view.updateState(editor.view.state.apply(editor.view.state.tr.setSelection(Selection.fromJSON(editor.view.state.doc, layoutSelection.current)))) } catch { /* The owner may have replaced the selected block. */ }
       }
       if (focusAfterSwitch.current) { editor.view.focus(); focusAfterSwitch.current = false }
-      return () => { layoutSelection.current = editor.view.state.selection.toJSON(); editor.destroy(); if (layout.current === editor) layout.current = null }
+      queueMicrotask(() => { if (layout.current === editor) updateActiveBlock(editor.view.state) })
+      return () => { setActiveBlock(null); layoutSelection.current = editor.view.state.selection.toJSON(); editor.destroy(); if (layout.current === editor) layout.current = null }
     }
     if (mode === 'source' && sourceHost.current) {
       source.current = new SourceView({ parent: sourceHost.current, state: SourceState.create({ doc: draft.current, extensions: [sourcePinnedSelectionField, ...sourcePreviewExtensions(previewBlocked), markdown(), foldGutter(), SourceView.lineWrapping, SourceState.readOnly.of(Boolean(latest.current.readOnly)),
@@ -435,6 +484,19 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
     if (!state) return
     style({ [key]: readDocumentFormatting(state).flags[key] !== true })
   }
+  function clearFormatting() {
+    const editor = layout.current
+    if (!editor) return
+    editor.syncDomTextSelection()
+    editor.boundary()
+    const state = editor.view.state, transaction = state.tr
+    for (const type of [documentEditorSchema.marks.style, documentEditorSchema.marks.code, documentEditorSchema.marks.link]) {
+      if (state.selection.empty) transaction.removeStoredMark(type)
+      else transaction.removeMark(state.selection.from, state.selection.to, type)
+    }
+    editor.view.dispatch(transaction)
+    editor.view.focus()
+  }
   function applyParagraphType(value: string) {
     const editor = layout.current
     if (!editor) return
@@ -495,7 +557,9 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
     } catch (error) { fail(error instanceof Error ? error.message : String(error)) }
   }
   const toolbar = <div ref={toolbarRef} tabIndex={-1} className="shared-document-toolbar" onPointerDownCapture={() => layout.current?.syncDomTextSelection()} role="toolbar" aria-label="正文工具">
-      <button type="button" onMouseDown={event => event.preventDefault()} onClick={switchMode}>{mode === 'layout' ? '源文' : '正文'}</button>
+      <details className="shared-document-more"><summary onMouseDown={event => event.preventDefault()} aria-label="更多正文操作">⋯</summary>
+        <button type="button" onMouseDown={event => event.preventDefault()} onClick={switchMode}>{mode === 'layout' ? '源文' : '正文'}</button>
+      </details>
       <button type="button" onClick={() => props.editPreview ? props.editPreview.cancel() : props.onUndo()}>撤销</button><button type="button" onClick={props.onRedo}>重做</button>
       {mode === 'layout' && <>
         {([['bold', '粗体'], ['italic', '斜体'], ['underline', '下划线'], ['strike', '删除线'], ['emphasis', '着重号']] as const).map(([key, label]) => <button key={key} type="button" onMouseDown={event => event.preventDefault()} aria-pressed={format.flags[key]} onClick={() => toggleStyle(key)}>{label}</button>)}
@@ -536,7 +600,8 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
     ? { ...contextualTarget.selection, revision: undefined }
     : { mode: contextualTarget.mode, ranges: contextualTarget.ranges?.map(range => [range.from, range.to]) }) : ''
   const hostAiButton = contextualTarget ? props.renderAiButton?.(contextualTarget, quickBarIssue) : undefined
-  const textTools = contextualTarget && mode === 'layout' && contextualTarget.selection && contextualTarget.selection.kind !== 'object'
+  const textTools = contextualTarget && mode === 'layout' && contextualTarget.selection?.kind === 'text'
+    && contextualTarget.selection.head.slot.kind !== 'cell' && contextualTarget.selection.head.slot.kind !== 'header'
   const quickBar = contextualTarget && !props.readOnly && !props.contextualCardSuppressed && quickBarPlace
     && <SelectionQuickBar anchor={quickBarPlace.anchor} bounds={quickBarPlace.bounds} label="选中内容快捷工具" selectionKey={selectionKey}
       suspended={pointerGesture || dismissedGeneration === targetGeneration}>
@@ -544,15 +609,36 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
         <QuickBarButton label="当前选区加粗" icon={<Bold size={14} />} pressed={format.flags.bold === true} onClick={() => toggleStyle('bold')} />
         <QuickBarButton label="当前选区斜体" icon={<Italic size={14} />} pressed={format.flags.italic === true} onClick={() => toggleStyle('italic')} />
         <QuickBarButton label="当前选区下划线" icon={<Underline size={14} />} pressed={format.flags.underline === true} onClick={() => toggleStyle('underline')} />
-        <QuickBarButton label="当前选区删除线" icon={<Strikethrough size={14} />} pressed={format.flags.strike === true} onClick={() => toggleStyle('strike')} />
         <QuickBarColorButton label="当前选区文字颜色" icon={<Baseline size={14} />} onPick={color => { if (color) style({ color }) }} />
         <QuickBarColorButton label="当前选区高亮" icon={<Highlighter size={14} />} variant="highlight" onPick={highlightColor => style({ highlightColor })} />
+        <QuickBarButton label="当前选区链接" icon={<Link2 size={14} />} onClick={() => {
+          const state = layout.current?.view.state
+          setLinkDraft(state?.selection.$from.marks().find(mark => mark.type === documentEditorSchema.marks.link)?.attrs.href ?? '')
+        }} />
+        <QuickBarButton label="当前选区公式" icon={<Sigma size={14} />} onClick={openMath} />
         {['段落', '标题'].includes(contextualTarget.label) && <QuickBarPopoverButton label="当前段落类型" text="段落" popupRole="menu">
           {close => <div className="selection-quick-bar__menu" role="menu" aria-label="当前段落类型">
             {[['paragraph', '正文'], ...[1, 2, 3, 4, 5, 6].map(level => [String(level), `标题 ${level}`])].map(([value, label]) => <button key={value} type="button" role="menuitem"
               onMouseDown={event => event.preventDefault()} onClick={() => { close(); applyParagraphType(value!) }}>{label}</button>)}
           </div>}
         </QuickBarPopoverButton>}
+        <QuickBarPopoverButton label="更多文字格式" icon={<MoreHorizontal size={15} />} popupRole="menu">
+          {close => <div className="selection-quick-bar__menu" role="menu" aria-label="更多文字格式">
+            {([['strike', '删除线'], ['emphasis', '着重号']] as const).map(([key, label]) =>
+              <button key={key} type="button" role="menuitem" onMouseDown={event => event.preventDefault()} onClick={() => { close(); toggleStyle(key) }}>{label}</button>)}
+            <button type="button" role="menuitem" onMouseDown={event => event.preventDefault()} onClick={() => { close(); style({ baseline: 0.35 }) }}>上标</button>
+            <button type="button" role="menuitem" onMouseDown={event => event.preventDefault()} onClick={() => { close(); style({ baseline: -0.25 }) }}>下标</button>
+            <button type="button" role="menuitem" onMouseDown={event => event.preventDefault()} onClick={() => { const editor = layout.current; close(); if (editor) { editor.boundary(); toggleMark(documentEditorSchema.marks.code)(editor.view.state, editor.view.dispatch) } }}>行内代码</button>
+            <label>字号<input aria-label="选区字号" type="number" min="8" max="400" value={format.fontSize === 'mixed' ? '' : format.fontSize ?? ''} placeholder={format.fontSize === 'mixed' ? '混合' : '默认'}
+              onChange={event => { const value = Number(event.target.value); if (value >= 8 && value <= 400) style({ fontSize: value }) }} /></label>
+            <label>字体<select aria-label="选区字体" value={format.fontFamily === 'mixed' ? '__mixed' : format.fontFamily ?? ''}
+              onChange={event => { if (event.target.value && event.target.value !== '__mixed') { close(); style({ fontFamily: event.target.value }) } }}>
+              <option value="">默认字体</option>{format.fontFamily === 'mixed' && <option value="__mixed">混合字体</option>}
+              {FONT_FAMILY_OPTIONS.map(option => <option key={option.family} value={option.family}>{option.label}</option>)}
+            </select></label>
+            <button type="button" role="menuitem" onMouseDown={event => event.preventDefault()} onClick={() => { close(); clearFormatting() }}>清除文字格式</button>
+          </div>}
+        </QuickBarPopoverButton>
         <QuickBarSeparator />
       </>}
       {props.renderQuickBarActions?.(contextualTarget)}
@@ -563,12 +649,48 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
       {props.renderQuickBarMenu?.(contextualTarget)}
       {commandError && <span role="alert" className="selection-quick-bar__notice" title={commandError}>{commandError}</span>}
     </SelectionQuickBar>
-  return <div ref={attachRoot} className={`shared-document-editor${props.target === 'flow' ? ' shared-document-editor--flow' : ''}`} onKeyDown={event => {
+  return <div ref={attachRoot} onDragOver={event => { if (event.dataTransfer.types.includes('application/x-guoling-document-block')) event.preventDefault() }}
+    onDrop={event => {
+      const sourceId = documentBlockDragId(event.dataTransfer)
+      const target = (event.target as HTMLElement).closest<HTMLElement>('[data-flow-block-id]')
+      const targetId = target?.dataset.flowBlockId
+      if (!sourceId || !targetId || sourceId === targetId || !layout.current) return
+      event.preventDefault()
+      const side = event.clientY < target!.getBoundingClientRect().top + target!.getBoundingClientRect().height / 2 ? 'before' : 'after'
+      try {
+        const content = fromEditorDocument(layout.current.view.state.doc)
+        applyDocumentContent(applyDocumentBlockCommand(content, { action: 'move', blockId: sourceId, targetId, side }))
+      } catch (error) { fail(error instanceof Error ? error.message : String(error)) }
+    }}
+    onContextMenu={event => {
+      if (props.readOnly || mode !== 'layout') return
+      const target = (event.target as HTMLElement).closest<HTMLElement>('[data-flow-block-id]')
+      const id = target?.dataset.flowBlockId
+      if (!id || !layout.current) return
+      const block = fromEditorDocument(layout.current.view.state.doc).blocks.find(item => item.id === id)
+      if (!block || ['table', 'media', 'chart', 'component', 'formula'].includes(block.type)) return
+      event.preventDefault()
+      openObjectMenu({ x: event.clientX, y: event.clientY }, '段落操作', activeBlockMenu(id))
+    }}
+    className={`shared-document-editor${props.target === 'flow' ? ' shared-document-editor--flow' : ''}`} onKeyDown={event => {
     if (event.key === 'Escape' && contextualTarget) { event.preventDefault(); setDismissedGeneration(targetGeneration) }
+    if (event.key === '/' && mode === 'layout' && !event.nativeEvent.isComposing && !props.readOnly && activeBlock && layout.current) {
+      const selection = layout.current.view.state.selection
+      if (selection.empty && selection.$from.depth === 1 && selection.$from.parent.type === documentEditorSchema.nodes.paragraph && selection.$from.parent.content.size === 0) {
+        event.preventDefault()
+        openObjectMenu({ x: activeBlock.rect.left, y: activeBlock.rect.top + activeBlock.rect.height }, '插入段落',
+          activeBlockMenu(activeBlock.id).filter(command => command.group === '插入'))
+      }
+    }
   }} onCompositionStartCapture={() => props.onCompositionChange?.(true, draft.current)} onCompositionEndCapture={() => queueMicrotask(() => props.onCompositionChange?.(false, draft.current))}>
-     {!props.readOnly && (props.toolbarHost ? createPortal(<details className="flow-document-format"><summary onMouseDown={event => event.preventDefault()}>正文格式</summary>{toolbar}{editorForms}</details>, props.toolbarHost) : <>{toolbar}{editorForms}</>)}
+     {!props.readOnly && (props.toolbarHost ? createPortal(<><details className="flow-document-more"><summary onMouseDown={event => event.preventDefault()} aria-label="更多正文操作">⋯</summary>
+       <button type="button" onMouseDown={event => event.preventDefault()} onClick={switchMode}>{mode === 'layout' ? '源文' : '正文'}</button>
+       <button type="button" onMouseDown={event => event.preventDefault()} onClick={() => props.editPreview ? props.editPreview.cancel() : props.onUndo()}>撤销</button>
+       <button type="button" onMouseDown={event => event.preventDefault()} onClick={props.onRedo}>重做</button>
+     </details>{editorForms}</>, props.toolbarHost) : <>{toolbar}{editorForms}</>)}
      {quickBar}
      {objectMenu.element}
+      {mode === 'layout' && !props.readOnly && activeBlock && <DocumentBlockHandle blockId={activeBlock.id} rect={activeBlock.rect} commands={activeBlockMenu(activeBlock.id)} disabledReason={props.editPreview ? '正在生成的范围暂时只读' : null} />}
      {props.editPreview && <div className="document-generation-status" role="status">正文正在生成，生成部分尚未保存。<button type="button" onClick={props.editPreview.cancel}>停止生成</button>{commandError && <span role="alert">{commandError}</span>}</div>}
      {mode === 'layout' ? <div ref={layoutHost} /> : <div ref={sourceHost} />}
     {diagnostics.length > 0 && <ul role="alert">{diagnostics.map((diagnostic, index) => <li key={index}><button type="button" onClick={() => { const editor = source.current; if (!editor) return; const position = Math.min(editor.state.doc.length, diagnostic.offset); editor.dispatch({ selection: { anchor: position }, effects: SourceView.scrollIntoView(position) }); editor.focus() }}>第 {diagnostic.line} 行：{diagnostic.message}</button></li>)}</ul>}
