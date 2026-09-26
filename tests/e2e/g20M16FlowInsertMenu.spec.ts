@@ -112,7 +112,7 @@ test('M16-T06 Flow workbench insert menu exposes the 11 document and 4 paper com
     surface = after.model.project.surfaces.find(item => item.type === 'flow')
     expect(surface?.type === 'flow' ? surface.surfaceLayerItems.length : 0).toBeGreaterThanOrEqual(2)
     expect(surface?.type === 'flow' ? surface.surfaceLayerItems.map(entry => entry.item.kind) : []).toContain('native')
-    expect(surface?.type === 'flow' ? surface.surfaceLayerItems.map(entry => entry.item.kind) : []).toContain('shape')
+    expect(surface?.type === 'flow' ? surface.surfaceLayerItems.some(entry => entry.item.kind === 'native' && entry.item.content.nativeType === 'shape') : false).toBe(true)
 
     await page.evaluate(async id => { await window.desktopAPI.documents!.save(id) }, opened.documentId)
     await page.evaluate(async id => { await window.desktopAPI.documents!.close(id) }, opened.documentId)
@@ -147,8 +147,9 @@ test('M16-T06 Flow image chooser result is discarded after switching the capture
     const second = await openFlow(page, data.workspace, 'flow-b.h5lesson')
     const beforeB = await snapshot(page, second.documentId)
     await app.evaluate((_, path) => (globalThis as typeof globalThis & { __resolveM16Chooser: (paths: string[]) => void }).__resolveM16Chooser([path]), data.imagePath)
-    await expect.poll(async () => (await snapshot(page, first.documentId)).revision).toBe(beforeA.revision)
-    await expect.poll(async () => (await snapshot(page, second.documentId)).revision).toBe(beforeB.revision)
+    await expect(page.getByRole('alert').filter({ hasText: '文档已切换，请重新插入' })).toBeVisible()
+    expect((await snapshot(page, first.documentId)).revision).toBe(beforeA.revision)
+    expect((await snapshot(page, second.documentId)).revision).toBe(beforeB.revision)
     const afterA = await snapshot(page, first.documentId), afterB = await snapshot(page, second.documentId)
     for (const current of [afterA, afterB]) {
       expect(current.model.kind).toBe('course-v9')
