@@ -903,20 +903,25 @@ export function SlideLocationWorkspace({
     }
   }, [])
 
-  const setZoom = useCallback((zoom: number) => {
-    setView((current) => {
-      const next = Math.max(0.5, Math.min(2, Math.round(zoom * 20) / 20))
-      if (!(stageViewportSize.width > 0 && stageViewportSize.height > 0)) return { ...current, zoom: next }
-      // Zooming out, a page that fits again on an axis returns to its place; one still larger keeps a pan within reach
-      // (otherwise a page scrolled sideways while zoomed in stays off-centre with nothing left to scroll).
-      const range = stageViewportPanRange(createStageViewportTransform({
-        viewport: { x: 0, y: 0, width: stageViewportSize.width, height: stageViewportSize.height },
-        zoom: next, pan: { x: current.x, y: current.y }, stage: slideCanvas, fit: 'page',
-      }))
-      const within = (value: number, axis: StagePanRange | null) => axis ? Math.max(axis.min, Math.min(axis.max, value)) : 0
-      return { ...current, zoom: next, x: within(current.x, range.x), y: within(current.y, range.y) }
-    })
+  // The view keeps its pan within reach of the page: an axis that fits sits in place, a larger one scrolls edge to
+  // edge. Otherwise zooming out after scrolling sideways, or a page of another size, leaves the page off-centre with
+  // nothing left to scroll.
+  const viewWithinReach = useCallback((current: { zoom: number; x: number; y: number }) => {
+    if (!(stageViewportSize.width > 0 && stageViewportSize.height > 0)) return current
+    const range = stageViewportPanRange(createStageViewportTransform({
+      viewport: { x: 0, y: 0, width: stageViewportSize.width, height: stageViewportSize.height },
+      zoom: current.zoom, pan: { x: current.x, y: current.y }, stage: slideCanvas, fit: 'page',
+    }))
+    const within = (value: number, axis: StagePanRange | null) => axis ? Math.max(axis.min, Math.min(axis.max, value)) : 0
+    const x = within(current.x, range.x), y = within(current.y, range.y)
+    return x === current.x && y === current.y ? current : { ...current, x, y }
   }, [slideCanvas, stageViewportSize.height, stageViewportSize.width])
+  const setZoom = useCallback((zoom: number) => {
+    setView(current => viewWithinReach({ ...current, zoom: Math.max(0.5, Math.min(2, Math.round(zoom * 20) / 20)) }))
+  }, [viewWithinReach])
+  useEffect(() => { setView(viewWithinReach) }, [viewWithinReach])
+  // Another page or document opens at its top: the previous page's scroll never carries over.
+  useEffect(() => { setView(current => current.x === 0 && current.y === 0 ? current : { ...current, x: 0, y: 0 }) }, [documentId, courseLocationId])
 
   const resetView = useCallback(() => {
     setView({ zoom: 1, x: 0, y: 0 })
