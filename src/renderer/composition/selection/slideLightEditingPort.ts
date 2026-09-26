@@ -10,12 +10,14 @@ import { createEditorTransactionStep, type EditorTransactionStep } from '../../a
 /** Captured at selection time. Commands never retarget to the current selection. */
 export interface SlideLightSelectionSnapshot extends SlideLightTarget {
   readonly documentId: string
+  readonly epoch: string
   readonly projectId: string
   readonly stateId: string | null
 }
 
 export interface SlideLightCurrent {
   readonly documentId: string
+  readonly epoch: string
   readonly project: CourseProjectDocument
   readonly locationId: string
   readonly itemId: string
@@ -44,13 +46,13 @@ const stale = () => new Error('选择或文档已改变，请重新选择后再�
 export function createSlideLightEditingPort(owner: SlideLightEditingOwner) {
   const capture = (): SlideLightSelectionSnapshot | null => {
     const current = owner.readCurrent()
-    return current ? Object.freeze({ documentId: current.documentId, projectId: current.project.id,
+    return current ? Object.freeze({ documentId: current.documentId, epoch: current.epoch, projectId: current.project.id,
       locationId: current.locationId, itemId: current.itemId, stateId: current.stateId,
       expectedRevision: current.project.revision }) : null
   }
   const requireCurrent = (target: SlideLightSelectionSnapshot): CourseProjectDocument => {
     const current = owner.readCurrent()
-    if (!current || current.documentId !== target.documentId || current.project.id !== target.projectId ||
+    if (!current || current.documentId !== target.documentId || current.epoch !== target.epoch || current.project.id !== target.projectId ||
       current.project.revision !== target.expectedRevision || current.locationId !== target.locationId ||
       current.itemId !== target.itemId || current.stateId !== target.stateId) throw stale()
     return current.project

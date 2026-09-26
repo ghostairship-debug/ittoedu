@@ -30,17 +30,20 @@ async function harness(options: { locked?: boolean } = {}) {
   if (options.locked) scene(seeded.project).layerItems[0].locked = true
   const documentId = await projectCourse(host, seeded.project)
   let locationId = seeded.locationId, itemId = seeded.itemId
+  let beforeAudioReturn: (() => Promise<void>) | null = null
   let serial = 0
   const port = createSlideLightEditingPort({
     readCurrent: () => {
       const active = useEditorStore.getState().courseDocument.documentId
       if (!active) return null
-      return { documentId: active, project: formalProject(host, active), locationId, itemId, stateId: null }
+      const snapshot = formalCourse(host, active)
+      if (snapshot.model.kind !== 'course-v9') return null
+      return { documentId: active, epoch: snapshot.epoch, project: snapshot.model.project, locationId, itemId, stateId: null }
     },
     createId: () => `m22-${++serial}`,
     async commit(step, target) {
       const before = formalCourse(host)
-      if (before.model.kind !== 'course-v9' || before.model.project.id !== step.projectId ||
+      if (before.model.kind !== 'course-v9' || before.epoch !== target.epoch || before.model.project.id !== step.projectId ||
         before.model.project.revision !== step.baseRevision ||
         useEditorStore.getState().courseDocument.documentId !== target.documentId ||
         locationId !== target.locationId || itemId !== target.itemId) return false
@@ -49,17 +52,21 @@ async function harness(options: { locked?: boolean } = {}) {
         if (change.after) resources.assets[change.assetId] = change.after
         else delete resources.assets[change.assetId]
       }
-      const result = await host.api.dispatch({ documentId, epoch: before.epoch, baseRevision: before.revision,
+      const result = await host.api.dispatch({ documentId: target.documentId, epoch: target.epoch, baseRevision: target.expectedRevision,
         actor: 'human', operationId: `m22-op-${++serial}`, mutation: { type: 'command', command: {
           type: 'course.replace', project: { ...step.nextDocument, revision: step.baseRevision }, resources,
         } } })
       if (result.status !== 'applied') throw new Error(JSON.stringify(result))
       return true
     },
-    chooseAudio: async () => ({ asset: { id: 'm22-wav', filename: 'click.wav', mimeType: 'audio/wav', kind: 'audio',
-      path: 'assets/click.wav', byteLength: 44 }, bytes: new Uint8Array(44) }),
+    chooseAudio: async () => {
+      if (beforeAudioReturn) await beforeAudioReturn()
+      return { asset: { id: 'm22-wav', filename: 'click.wav', mimeType: 'audio/wav', kind: 'audio',
+        path: 'assets/click.wav', byteLength: 44 }, bytes: new Uint8Array(44) }
+    },
   })
-  return { host, port, documentId, setSelection: (next: string) => { itemId = next }, setLocation: (next: string) => { locationId = next } }
+  return { host, port, documentId, setSelection: (next: string) => { itemId = next }, setLocation: (next: string) => { locationId = next },
+    setAudioSelectionHook: (hook: () => Promise<void>) => { beforeAudioReturn = hook } }
 }
 
 it('M22 commits one light property through the real DocumentSession and saves its value', async () => {
@@ -128,6 +135,68 @@ it('M22 refuses a captured command after page or document activation changes', a
   await host.open(fixture().project)
   await expect(port.run(target, command)).rejects.toThrow('选择或文档已改变')
   expect(formalCourse(host, documentId).revision).toBe(before.revision)
+})
+
+it('M22 rejects a captured command after a formal revision changes', async () => {
+  const { host, port, documentId } = await harness()
+  const oldTarget = port.capture()!
+  const oldCommand = port.view(oldTarget).commands.find(item => item.id === 'slide.opacity.75')!
+  const currentTarget = port.capture()!
+  const currentCommand = port.view(currentTarget).commands.find(item => item.id === 'slide.opacity.50')!
+  await port.run(currentTarget, currentCommand)
+  const changed = formalCourse(host, documentId)
+  expect(changed.revision).toBe(oldTarget.expectedRevision + 1)
+  await expect(port.run(oldTarget, oldCommand)).rejects.toThrow('选择或文档已改变')
+  expect(formalCourse(host, documentId).revision).toBe(changed.revision)
+  expect(formalCourse(host, documentId).undoDepth).toBe(changed.undoDepth)
+})
+
+it('M22 rejects an old menu after the same document is restored with a new epoch', async () => {
+  const { host, port, documentId } = await harness()
+  const target = port.capture()!
+  const command = port.view(target).commands.find(item => item.id === 'slide.opacity.75')!
+  const before = formalCourse(host, documentId)
+  expect(await useEditorStore.getState().closeCourseDocument(documentId)).toBe(true)
+  const restored = await host.api.restore(documentId)
+  await useEditorStore.getState().activateCourseDocument(documentId)
+  await useEditorStore.getState().drainCourseDocument()
+  expect(restored.documentId).toBe(target.documentId)
+  expect(restored.epoch).not.toBe(target.epoch)
+  expect(restored.revision).toBe(target.expectedRevision)
+  expect(restored.model.kind).toBe('course-v9')
+  if (restored.model.kind !== 'course-v9') throw new Error('course')
+  expect(restored.model.project.id).toBe(target.projectId)
+  expect(port.capture()?.itemId).toBe(target.itemId)
+  await expect(port.run(target, command)).rejects.toThrow('选择或文档已改变')
+  const after = formalCourse(host, documentId)
+  expect(after.revision).toBe(before.revision)
+  expect(after.undoDepth).toBe(before.undoDepth)
+  expect(scene(formalProject(host, documentId)).layerItems.find(item => item.layerItemId === target.itemId)?.opacity).toBe(1)
+})
+
+it('M22 rejects an audio choice that returns after a page and document switch', async () => {
+  const { host, port, documentId, setLocation, setAudioSelectionHook } = await harness()
+  const target = port.capture()!
+  const before = formalCourse(host, documentId)
+  let newDocumentId: string | null = null
+  setAudioSelectionHook(async () => {
+    setLocation('another-location')
+    await host.open(fixture().project)
+    newDocumentId = useEditorStore.getState().courseDocument.documentId
+  })
+  await expect(port.placeAudio(target)).rejects.toThrow('选择或文档已改变')
+  expect(newDocumentId).not.toBe(documentId)
+  const original = formalCourse(host, documentId)
+  expect(original.revision).toBe(before.revision)
+  expect(original.undoDepth).toBe(before.undoDepth)
+  expect(original.model.kind).toBe('course-v9')
+  if (original.model.kind !== 'course-v9') throw new Error('course')
+  expect(original.model.resources.assets['m22-wav']).toBeUndefined()
+  const active = formalCourse(host, newDocumentId)
+  expect(active.undoDepth).toBe(0)
+  expect(active.model.kind).toBe('course-v9')
+  if (active.model.kind !== 'course-v9') throw new Error('course')
+  expect(active.model.resources.assets['m22-wav']).toBeUndefined()
 })
 
 it('M22 shows disabled commands for a locked item and preserves the planner rejection', async () => {
