@@ -110,7 +110,7 @@ export interface PublishedComponentMountHandle {
    * M15 运行现场: publish the text and pictures the host finds in this playback component while its page is paused
    * for editing. Returns the stop function, or null when it cannot.
    */
-  startLiveEdit?(input: { node: ComponentHostNode; onTargetsChanged: ComponentAuthoringTargetsChangedHandler }): (() => void) | null
+  startLiveEdit?(input: { node: ComponentHostNode; sceneId?: string; onTargetsChanged: ComponentAuthoringTargetsChangedHandler }): (() => void) | null
   setVisible(visible: boolean): void
   suspend(): void
   resume(): void
@@ -138,7 +138,7 @@ export interface PublishedComponentContextResources {
   invalidateAuthoringTargets(): void
   destroyAuthoringTargets(): void
   /** M15 运行现场: publish host-found text and pictures of a playback instance; false when it cannot. */
-  startLiveEditTargets(node: ComponentHostNode, onTargetsChanged: ComponentAuthoringTargetsChangedHandler): boolean
+  startLiveEditTargets(node: ComponentHostNode, onTargetsChanged: ComponentAuthoringTargetsChangedHandler, sceneId?: string): boolean
   stopLiveEditTargets(): void
   /** Applies the text rules to what the component has rendered so far (right after create). */
   applyTextOverrides(): void
@@ -342,6 +342,20 @@ export function resolvePublishedComponent(
   return { source, manifest, definition, identity }
 }
 
+const PACKAGE_FILE_TYPES: Readonly<Record<string, string>> = {
+  png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp', gif: 'image/gif', svg: 'image/svg+xml',
+  mp3: 'audio/mpeg', ogg: 'audio/ogg', wav: 'audio/wav', m4a: 'audio/mp4', mp4: 'video/mp4', webm: 'video/webm',
+}
+/** A package file as a data URL: an authoring package keeps its manifest assets as bytes, not as published URLs. */
+function packageFileUrl(files: Readonly<Record<string, Uint8Array>>, path: string): string {
+  const bytes = Object.hasOwn(files, path) ? files[path] : undefined
+  if (!bytes) return ''
+  const type = PACKAGE_FILE_TYPES[path.split('.').pop()?.toLowerCase() ?? ''] ?? 'application/octet-stream'
+  let binary = ''
+  for (let index = 0; index < bytes.length; index += 0x8000) binary += String.fromCharCode(...bytes.subarray(index, index + 0x8000))
+  return `data:${type};base64,${btoa(binary)}`
+}
+
 function scopedComponentEvents(base: CourseEventBus | undefined): {
   events: CourseEventBus | undefined
   dispose(): void
@@ -433,6 +447,7 @@ export function createPublishedComponentContextResources(
   let disposed = false
 
   const projectAssetUrl = (assetId: string): string => options.resolveAsset?.(assetId) ?? ''
+  const packageUrls = new Map<string, string>()
   const assetUrl = (assetKey: string): string => {
     // A replaced picture shows the managed project asset instead of the package's own.
     const replaced = Object.hasOwn(options.assetOverrides ?? {}, assetKey) ? projectAssetUrl(options.assetOverrides![assetKey]!.assetId) : ''
@@ -444,12 +459,19 @@ export function createPublishedComponentContextResources(
         if ('dataUrl' in asset && typeof asset.dataUrl === 'string') return asset.dataUrl
       }
     }
+    // In the editor the package is its files: its pictures show from their bytes.
+    const path = 'files' in source && Object.hasOwn(manifest.assets ?? {}, assetKey) ? manifest.assets[assetKey] : undefined
+    if (path && 'files' in source) {
+      const url = packageUrls.get(assetKey) ?? packageFileUrl(source.files, path)
+      packageUrls.set(assetKey, url)
+      return url
+    }
     return ''
   }
   /** The manifest asset a picture shows, found by its URL. */
   const assetKeyForUrl = (url: string): string | null => {
     if (!url) return null
-    const keys = new Set([...Object.keys('assets' in source && source.assets ? source.assets : {}), ...Object.keys(options.assetOverrides ?? {})])
+    const keys = new Set([...Object.keys('assets' in source && source.assets ? source.assets : {}), ...Object.keys(manifest.assets ?? {}), ...Object.keys(options.assetOverrides ?? {})])
     for (const key of keys) if (assetUrl(key) === url) return key
     return null
   }
@@ -529,13 +551,15 @@ export function createPublishedComponentContextResources(
     destroyAuthoringTargets() {
       authoringTargets?.destroy()
     },
-    startLiveEditTargets(node: ComponentHostNode, onTargetsChanged: ComponentAuthoringTargetsChangedHandler) {
+    startLiveEditTargets(node: ComponentHostNode, onTargetsChanged: ComponentAuthoringTargetsChangedHandler, sceneId?: string) {
       if (disposed || authoringTargets || mode !== 'preview') return false
+      // A playback instance is mounted without its scene; the page being edited names it.
+      const scene = sceneId ?? options.sceneId
       authoringTargets = new ComponentAuthoringTargetRegistry({
         manifest,
         node,
         scope: options.scope ?? 'scene',
-        ...(options.sceneId ? { sceneId: options.sceneId } : {}),
+        ...(scene ? { sceneId: scene } : {}),
         ...(domRoot ? { domRoot } : {}),
         lightEdit: { ...(domText ? { dom: domText } : {}), assetKeyForUrl },
         onTargetsChanged,
@@ -790,7 +814,7 @@ export function mountPublishedComponent(
       resources.setTextOverrides(rules)
     },
     startLiveEdit(input) {
-      if (destroyed || quarantined || !resources.startLiveEditTargets(input.node, input.onTargetsChanged)) return null
+      if (destroyed || quarantined || !resources.startLiveEditTargets(input.node, input.onTargetsChanged, input.sceneId)) return null
       return () => resources.stopLiveEditTargets()
     },
     setVisible(visible: boolean) {

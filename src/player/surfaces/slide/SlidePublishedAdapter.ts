@@ -1303,6 +1303,7 @@ export class SlidePublishedAdapter implements SurfaceHost, PublishedAuthoringPat
         live.paused.push(componentHandle)
         const stop = componentHandle.startLiveEdit?.({
           node: publishedComponentAuthoringNode(record.item),
+          sceneId: scene.id,
           onTargetsChanged: (update) => {
             if (this.#liveEdit === live) publish({ kind: 'component', update })
           },

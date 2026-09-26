@@ -188,18 +188,19 @@ it('M15 a playback component publishes its own text while paused for editing and
   } as unknown as PublishedCourseComponent
   const handle = mountPublishedComponent(container, {
     container, componentId: 'card-component', version: '1.0.0', instanceId: 'card', width: 200, height: 100,
-    components: { 'card-component@1.0.0': component }, registry: new ComponentRegistry(), mode: 'preview', scope: 'scene', sceneId: 'scene-1',
+    // As in playback: mounted without its scene, which the page being edited names.
+    components: { 'card-component@1.0.0': component }, registry: new ComponentRegistry(), mode: 'preview',
   })
   const root = container.querySelector('.published-component-mount')!.shadowRoot!
   root.querySelector('button')!.click()
   expect(root.querySelector('p')!.hidden).toBe(false)
   const updates: ComponentAuthoringTargetUpdate[] = []
   const node = { id: 'card', x: 100, y: 80, width: 200, height: 100, rotation: 0, visible: true, props: {} } as unknown as ComponentHostNode
-  const stop = handle.startLiveEdit!({ node, onTargetsChanged: update => updates.push(update) })
+  const stop = handle.startLiveEdit!({ node, sceneId: 'scene-1', onTargetsChanged: update => updates.push(update) })
   expect(stop).toBeTypeOf('function')
   await settle()
   expect(updates.at(-1)!.targets).toEqual(expect.arrayContaining([
-    expect.objectContaining({ kind: 'component-text', source: 'auto', lightEdit: expect.objectContaining({ original: '答案：蓝色' }) }),
+    expect.objectContaining({ kind: 'component-text', source: 'auto', scope: 'scene', sceneId: 'scene-1', lightEdit: expect.objectContaining({ original: '答案：蓝色' }) }),
   ]))
   handle.setTextOverrides!([{ original: '答案：蓝色', text: '答案：深蓝色' }])
   expect(root.querySelector('p')!.textContent).toBe('答案：深蓝色')

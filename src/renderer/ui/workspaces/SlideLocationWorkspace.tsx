@@ -741,6 +741,7 @@ function sanitizeComponentAuthoringTargets(
 type CanvasAuthoringHit =
   | { kind: 'runtime'; target: Readonly<RuntimeAuthoringTarget> }
   | { kind: 'component'; target: Readonly<ComponentAuthoringTextTarget> }
+  | { kind: 'component-image'; target: Readonly<ComponentAuthoringImageTarget> }
 
 
 
@@ -1791,7 +1792,7 @@ export function SlideLocationWorkspace({
       if (session?.applyLiveEdit(patch) !== 'applied') reloads.push(port.itemLabel(live.sceneId, patch.target.nodeId))
     }
     const reload = reloads.length
-      ? `“${reloads[0]}”要重新加载后才会显示这项修改。重新加载后它从头开始运行，页面位置和课程状态保留。`
+      ? `“${reloads[0]}”要重新加载这一页后才会显示这项修改。重新加载后页面从头开始运行，页面位置和课程状态保留。`
       : null
     // Until it is loaded again the page still shows the document it had; later edits are compared with that one.
     if (!reload) liveShownRef.current = port.capture()
@@ -2432,6 +2433,11 @@ export function SlideLocationWorkspace({
     if (componentTarget) {
       return { kind: 'component', target: componentTarget }
     }
+    // A picture the component shows from its package (M15): double-clicking it replaces it.
+    const componentImage = [...visibleComponentImageTargets].reverse().find(
+      (candidate) => pointInsideRotatedBounds(point, candidate.bounds, candidate.rotation),
+    )
+    if (componentImage) return { kind: 'component-image', target: componentImage }
     if (
       runtimeTarget?.layer === 'underlay' &&
       (slideEditorView?.layers ?? []).some((layer) => (
@@ -2457,6 +2463,7 @@ export function SlideLocationWorkspace({
     view.y,
     view.zoom,
     visibleComponentTargets,
+    visibleComponentImageTargets,
   ])
 
   useLayoutEffect(() => {
@@ -3285,6 +3292,7 @@ export function SlideLocationWorkspace({
           const spot = canvasAuthoringHitAtClientPoint(point.x, point.y)
           const extra: MenuCommand[] = !spot ? []
             : spot.kind === 'component' ? [{ id: 'component.edit-text', label: '编辑此处文字', group: 'spot', run: () => beginComponentTextEdit(spot.target) }]
+            : spot.kind === 'component-image' ? [{ id: 'component.replace-image', label: '替换此处图片…', group: 'spot', run: () => { void replaceComponentImage(spot.target) } }]
             : spot.target.kind === 'text' ? [{ id: 'runtime.edit-text', label: '编辑此处文字', group: 'spot', run: () => beginRuntimeTextEdit(spot.target) }]
             : [{ id: 'runtime.replace-image', label: '替换此处图片…', group: 'spot', run: () => { void replaceRuntimeAsset(spot.target) } }]
           // The selection owner re-renders with the new selection first.
@@ -3377,6 +3385,8 @@ export function SlideLocationWorkspace({
         event.stopPropagation()
         if (hit.kind === 'component') {
           beginComponentTextEdit(hit.target)
+        } else if (hit.kind === 'component-image') {
+          void replaceComponentImage(hit.target)
         } else if (hit.target.kind === 'text') {
           beginRuntimeTextEdit(hit.target)
         } else {

@@ -1063,6 +1063,7 @@ button:disabled {
 
 .live-scene-bar__message {
   min-width: 0;
+  flex: 1 1 360px;
   color: var(--text-muted);
 }
 

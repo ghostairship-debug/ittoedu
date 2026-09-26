@@ -74,3 +74,30 @@ it('M15 applies a component item’s text rules and replaced pictures, publishes
   expect(updates.at(-1)!.targets[0]).toMatchObject({ label: '标题', lightEdit: { original: '标题', text: '标题' } })
   handle.destroy()
 })
+
+it('M15 in the editor a component package shows its own pictures from its files and offers them as targets', async () => {
+  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(() => rect(0, 0, 200, 100))
+  Object.defineProperty(Range.prototype, 'getBoundingClientRect', { configurable: true, value: () => rect(20, 10, 80, 24) })
+  const container = document.createElement('div')
+  document.body.append(container)
+  const encode = (value: string) => new TextEncoder().encode(value)
+  const png = Uint8Array.from([0x89, 0x50, 0x4e, 0x47])
+  // The editor's package is its files; it has no published asset URLs.
+  const pkg = {
+    manifest: { schemaVersion: 4, runtimeApiVersion: 4, id: 'card-component', version: '1.0.0', name: '卡片', entry: 'runtime.js', renderMode: 'dom',
+      supportedScopes: ['scene'], defaultSize: { width: 200, height: 100 }, assets: { pic: 'pic.png' }, defaultProps: {}, editor: { properties: [] } },
+    runtimeSource: SOURCE, files: { 'manifest.json': encode('{}'), 'runtime.js': encode(SOURCE), 'pic.png': png },
+  }
+  const updates: ComponentAuthoringTargetUpdate[] = []
+  const handle = mountPublishedComponent(container, {
+    container, componentId: 'card-component', version: '1.0.0', instanceId: 'card', width: 200, height: 100,
+    components: { 'card-component@1.0.0': pkg as never }, registry: new ComponentRegistry(), mode: 'edit', scope: 'scene', sceneId: 'scene-1',
+    authoring: { node: node(), onTargetsChanged: update => updates.push(update) },
+  })
+  expect(handle.ok).toBe(true)
+  const root = container.querySelector('.published-component-mount')!.shadowRoot!
+  expect(root.querySelector('img')!.getAttribute('src')).toBe('data:image/png;base64,iVBORw==')
+  await settle()
+  expect(updates.at(-1)!.targets).toEqual(expect.arrayContaining([expect.objectContaining({ kind: 'component-image', assetKey: 'pic' })]))
+  handle.destroy()
+})

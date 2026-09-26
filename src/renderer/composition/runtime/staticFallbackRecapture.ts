@@ -30,6 +30,10 @@ export async function captureLayerStaticFallback(itemId: string): Promise<{ meta
   const project = selectActiveCourseProjectDocument(state), locationId = selectActiveCourseLocationId(state)
   const located = project ? locateCourseLayer(project, itemId) : null
   if (!project || !locationId || !located) return null
+  // Only an existing fallback is refreshed; items without one are not captured at all.
+  const hasFallback = located.item.kind === 'runtime' ? Boolean(located.item.runtime.staticFallback)
+    : located.item.kind === 'component' && Boolean(located.item.staticFallbackAssetId)
+  if (!hasFallback) return null
   const location = project.locations.find(item => item.id === locationId)
   const payload = buildPublishedCourseTryRunPayload({ project, assetFiles: selectMediaAssetFiles(state), components: state.componentPackages })
   const dataUrl = await capturePublishedCourseV2Stage({ payload, locationId, ...(location?.surfaceId ? { surfaceId: location.surfaceId } : {}), layerItemId: itemId, includeGlobalLayerItems: true })
