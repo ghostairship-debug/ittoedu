@@ -13,6 +13,7 @@ import type { ElementChangeView, ElementRevertResult, ExecutionDesktopAPI, Execu
 import type { ExecutionEvent } from '../../src/shared/workbench/executionEvents'
 import type { ExecutionSettingsView } from '../../src/shared/workbench/executionSettings'
 import type { ExecutionSettingsAPI } from '../../src/shared/workbench/executionSettingsDesktop'
+import { executionInputMessages } from '../../src/shared/workbench/executionInputMessages'
 import { USER_QUESTION_TOOL } from '../../src/shared/workbench/userQuestion'
 
 // M15: every object has its own AI card. A card's AI may change only its object; requests to one object queue.
@@ -49,6 +50,8 @@ function executionFixture() {
     conversation: vi.fn(async (_workspaceId: string, id: string) => structuredClone(conversations.get(id) ?? null)),
     send: vi.fn(async (input: ExecutionSendInput) => {
       const current = conversations.get(input.conversationId)!
+      // As Main: a send names the revision it saw; across contextBridge only the fixed message arrives.
+      if (input.expectedRevision !== current.revision) throw new Error(`消息尚未发送：${executionInputMessages['conversation-draft-changed'][0]}`)
       const saved = { ...current, revision: current.revision + 1 }
       conversations.set(saved.conversationId, saved)
       const runId = control.next === 'accepted' ? `run-${submissions.length + 1}` : undefined
@@ -92,7 +95,18 @@ function executionFixture() {
     for (const listener of listeners) listener(timeline.at(-1)!)
     return submission.submissionId
   }
-  return { api, control, ask, finish, reverts, submissions, execution: api as unknown as ExecutionDesktopAPI }
+  /** A run moves its conversation on (its replies, its state). */
+  const progress = (conversationId: string) => {
+    const current = conversations.get(conversationId)!
+    conversations.set(conversationId, { ...current, revision: current.revision + 1 })
+  }
+  /** The run shows its reply as text; the conversation records it only after the run ended. */
+  const say = (conversationId: string, runId: string, text: string) => {
+    const base = { conversationId, taskId: 'task', runId, time: 1, source: 'builtin' as const }
+    timeline.push({ ...base, eventId: `text-${runId}`, itemId: 'text', sequence: timeline.length + 1, type: 'text', update: 'snapshot', data: { text } })
+    for (const listener of listeners) listener(timeline.at(-1)!)
+  }
+  return { api, control, ask, finish, progress, say, reverts, submissions, execution: api as unknown as ExecutionDesktopAPI }
 }
 
 const settings = (): ExecutionSettingsAPI => ({
@@ -282,4 +296,34 @@ it('M15 a text card sends to where its text is now, waits for the previous reque
   await cards.closeText(key)
   expect(cards.texts()).toEqual([])
   expect(f.api.deleteConversation).toHaveBeenCalledWith(expect.objectContaining({ workspaceId: 'workspace', conversationId: 'c1' }))
+})
+
+it('M15 a card sends against its conversation as it is now, while its earlier requests move it on', async () => {
+  const f = executionFixture()
+  const cards = new ElementCardController({ execution: () => f.execution, settings: () => settings() })
+  cards.setWorkspace('workspace')
+  const key = cards.ensure({ documentId: 'doc', target: target('a'), label: '标题' })
+  await cards.send(key, '改成红色', capture('a'))
+  // The first request's run writes its progress into the conversation; the next request still goes out.
+  f.progress('c1'); f.progress('c1')
+  f.control.next = 'queued'
+  await cards.send(key, '再大一点', capture('a'))
+  expect(f.api.send.mock.calls[1]![0].expectedRevision).toBe(4)
+  // Moved on again between reading it and sending: the card reads it once more and sends.
+  const stale = await f.api.conversation('workspace', 'c1')
+  f.progress('c1')
+  f.api.conversation.mockResolvedValueOnce(stale)
+  await cards.send(key, '再亮一点', capture('a'))
+  expect(f.api.send).toHaveBeenCalledTimes(4)
+  expect(cards.view(key)!.entries.map(entry => [entry.text, entry.state])).toEqual([['改成红色', 'running'], ['再大一点', 'queued'], ['再亮一点', 'queued']])
+})
+
+it('M15 a card shows a request\'s reply as its run showed it, before the conversation records it', async () => {
+  const f = executionFixture()
+  const cards = new ElementCardController({ execution: () => f.execution, settings: () => settings() })
+  cards.setWorkspace('workspace')
+  const key = cards.ensure({ documentId: 'doc', target: target('a'), label: '标题' })
+  await cards.send(key, '看看', capture('a'))
+  f.say('c1', 'run-1', '看过了：是红色。')
+  await waitFor(() => expect(cards.view(key)!.entries[0]!.reply).toBe('看过了：是红色。'))
 })

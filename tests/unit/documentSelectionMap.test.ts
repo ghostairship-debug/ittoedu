@@ -98,4 +98,33 @@ describe('document selection mapping', () => {
     } finally { cleanup() }
   })
 
+  it('keeps selected cells selected when the document changes around them (after an element card edit, M15)', () => {
+    const element = document.createElement('div')
+    document.body.append(element)
+    const options = { document: { content, resources: emptyDocumentResources() }, revision: 'revision-1', change: vi.fn(), diagnostic: vi.fn(), undo: vi.fn(), redo: vi.fn(), selection: vi.fn() }
+    const editor = createLayoutEditor(element, options)
+    try {
+      const cells: number[] = []
+      editor.view.state.doc.descendants((node, position) => { if (node.type.name === 'table_cell') cells.push(position) })
+      editor.view.dispatch(editor.view.state.tr.setSelection(CellSelection.create(editor.view.state.doc, cells[0]!, cells[1]!)))
+      // The table gets another row from outside the editor.
+      const table = content.blocks[2] as Extract<DocumentContent['blocks'][number], { type: 'table' }>
+      const next: DocumentContent = { blocks: [...content.blocks.slice(0, 2),
+        { ...table, rows: [...table.rows, { id: 'row-3', cells: { 'column-1': { inlines: [] }, 'column-2': { inlines: [] } } }] }] }
+      editor.update({ ...options, document: { content: next, resources: emptyDocumentResources() }, revision: 'revision-2' })
+      expect(fromEditorDocument(editor.view.state.doc).blocks[2]).toMatchObject({ rows: [{ id: 'row-1' }, { id: 'row-2' }, { id: 'row-3' }] })
+      expect(editor.readSelection()).toEqual({ revision: 'revision-2', kind: 'cells', tableId: 'table',
+        anchor: { rowId: 'row-1', columnId: 'column-1' }, head: { rowId: 'row-1', columnId: 'column-2' } })
+
+      // A selected object whose data changed from outside stays selected too; one that is gone is not reselected.
+      const formula = { id: 'formula-block', type: 'formula' as const, formulaId: 'f', latex: 'x', accessibleText: 'x' }
+      editor.update({ ...options, document: { content: { blocks: [...next.blocks, formula] }, resources: emptyDocumentResources() }, revision: 'revision-3' })
+      editor.view.state.doc.descendants((node, position) => { if (node.attrs.id === 'formula-block') editor.view.dispatch(editor.view.state.tr.setSelection(NodeSelection.create(editor.view.state.doc, position))) })
+      editor.update({ ...options, document: { content: { blocks: [...next.blocks, { ...formula, latex: 'y', accessibleText: 'y' }] }, resources: emptyDocumentResources() }, revision: 'revision-4' })
+      expect(editor.readSelection()).toEqual({ revision: 'revision-4', kind: 'object', blockId: 'formula-block' })
+      editor.update({ ...options, document: { content: next, resources: emptyDocumentResources() }, revision: 'revision-5' })
+      expect(editor.readSelection()).not.toMatchObject({ kind: 'object' })
+    } finally { editor.destroy(); element.remove() }
+  })
+
 })

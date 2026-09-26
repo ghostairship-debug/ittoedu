@@ -326,6 +326,41 @@ describe('G20 canonical model execution loop', () => {
     expect((await h.events.snapshot('conversation')).items.filter(item => item.type === 'document.commit')).toHaveLength(1)
   })
 
+  it('M15 a run editing a document whose other part another run is previewing commits its own edit without a preview', async () => {
+    const aStreaming = deferred(), releaseA = deferred(), turns = new Map<string, number>()
+    const provider: ModelProvider = { async *stream(request) {
+      const which = String([...request.messages].reverse().find(message => message.role === 'user')?.content)
+      const turn = (turns.get(which) ?? 0) + 1; turns.set(which, turn)
+      if (turn > 1) { yield complete(request, [], '完成'); return }
+      const target = refsOf(request)[0]!.writable[0]!.target, id = `call-${which}`
+      const raw = JSON.stringify({ target, content: which === 'A' ? '新中' : '新前' })
+      if (which === 'A') {
+        yield { type: 'tool.delta', requestId: request.requestId, sequence: 1, index: 0, id, name: 'text.replace', argumentsDelta: raw.slice(0, -3) }
+        aStreaming.resolve(); await releaseA.promise
+        yield { type: 'tool.delta', requestId: request.requestId, sequence: 2, index: 0, id, name: 'text.replace', argumentsDelta: raw.slice(-3) }
+      } else yield { type: 'tool.delta', requestId: request.requestId, sequence: 1, index: 0, id, name: 'text.replace', argumentsDelta: raw }
+      yield complete(request, [{ id, name: 'text.replace', argumentsText: raw }], '')
+    } }
+    const h = await fixture(provider)
+    const a = await h.engine.start({ ...h.input, instruction: 'A' })
+    await aStreaming.promise
+    await vi.waitFor(() => expect(h.edits.list(h.session.documentId)).toMatchObject([{ runId: a.runId, value: '新' }]))
+    // Meanwhile another run (another object's card) edits another part of the same document.
+    const b = await h.engine.start({ ...h.input, conversationId: 'conversation-b', taskId: 'task-b', instruction: 'B',
+      documents: [{ documentId: h.session.documentId, writable: [{ kind: 'markdown-range', from: 0, to: 2 }] }] })
+    const runB = await h.engine.wait(b.runId)
+    expect(runB.status).toBe('completed')
+    expect(runB.tools[0]?.result).toMatchObject({ kind: 'document-operation', result: { status: 'applied' } })
+    expect(h.session.read().model).toMatchObject({ source: '新前 OLD 后文' })
+    // The first run's preview carries on over the other edit, then commits.
+    expect(h.edits.list(h.session.documentId)).toMatchObject([{ runId: a.runId, status: 'active' }])
+    releaseA.resolve()
+    const runA = await h.engine.wait(a.runId)
+    expect(runA.status).toBe('completed')
+    expect(h.session.read()).toMatchObject({ undoDepth: 2, model: { source: '新前 新中 后文' } })
+    expect(h.edits.list(h.session.documentId)).toEqual([])
+  })
+
   it.each(['duplicate-key', 'truncated-escape'] as const)('S06-T06 rejects %s after streamed preview without a document write', async mode => {
     let turns = 0
     const provider: ModelProvider = { async *stream(request) {

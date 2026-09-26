@@ -50,6 +50,8 @@ interface StreamingCall {
   callId: string; id?: string; name?: string; raw: string; sequence: number; progressCount: number
   seenDeltas: Map<number, { id?: string; name?: string; argumentsDelta: string }>
   parser?: StreamingEditArguments; editing: boolean; invalid?: string; progressiveAt?: number; contentDecodedMarked?: boolean
+  /** Another edit of the document is being previewed: this call shows none and commits as one operation. */
+  previewSkipped?: boolean
 }
 interface ActiveRun {
   record: ExecutionRunRecord; controller: AbortController; stopped: boolean
@@ -869,9 +871,16 @@ export class ExecutionEngine {
     try {
       stream.parser ??= new StreamingEditArguments({ toolCallId: stream.callId, toolName: 'text.replace' })
       const decoded = stream.parser.snapshot(stream.sequence++, stream.raw)
-      if (decoded.target && !stream.editing && this.options.edits) {
-        await this.options.edits.begin({ editId: stream.callId, toolCallId: stream.callId, runId: active.record.runId, targetHandle: decoded.target })
-        stream.editing = true
+      if (decoded.target && !stream.editing && !stream.previewSkipped && this.options.edits) {
+        try {
+          await this.options.edits.begin({ editId: stream.callId, toolCallId: stream.callId, runId: active.record.runId, targetHandle: decoded.target })
+          stream.editing = true
+        } catch (error) {
+          // One preview per document: while another run's edit of it is previewed (another object's card, M15), this
+          // call is not refused; it shows no preview and the gateway commits it once it is complete.
+          if ((error as { code?: unknown } | null)?.code !== 'document-busy') throw error
+          stream.previewSkipped = true
+        }
       }
       if (active.stopped) { this.options.edits?.abort(stream.callId, '运行已停止'); return }
       if (decoded.content !== undefined && stream.editing) {

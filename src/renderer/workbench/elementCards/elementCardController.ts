@@ -2,7 +2,7 @@ import { useSyncExternalStore } from 'react'
 import type { ConversationRecord } from '../../../shared/workbench/conversations'
 import type { DocumentHostAPI } from '../../../shared/workbench/desktop'
 import type { ExecutionRunRecord } from '../../../shared/workbench/execution'
-import { disclosedExecutionSettings, type ElementChangeView, type ElementRevertResult, type ExecutionDesktopAPI, type ExecutionSelectionTarget, type ExecutionSubmissionRecord } from '../../../shared/workbench/executionDesktop'
+import { disclosedExecutionSettings, type ElementChangeView, type ElementRevertResult, type ExecutionDesktopAPI, type ExecutionSelectionTarget, type ExecutionSendResult, type ExecutionSubmissionRecord } from '../../../shared/workbench/executionDesktop'
 import { emptyExecutionProjection, foldExecutionEvents, type ExecutionEvent, type ExecutionProjection } from '../../../shared/workbench/executionEvents'
 import { DEFAULT_PERMISSION_MODE, type ApprovalDecision, type ExecutionPermissionMode } from '../../../shared/workbench/executionPermission'
 import type { ExecutionSettingsAPI } from '../../../shared/workbench/executionSettingsDesktop'
@@ -10,6 +10,7 @@ import type { UserAnswer } from '../../../shared/workbench/userQuestion'
 import { pendingApproval, pendingQuestion, type PendingApproval, type PendingQuestion } from '../executionTimelineModel'
 import { selectionReference, workbenchSelection, type SelectionCapture } from '../SelectionContextController'
 import type { DocumentSnapshot } from '../../../shared/workbench/document'
+import { isExecutionInputError } from '../../../shared/workbench/executionInputMessages'
 import { textTargetContent } from '../../../core/drivers/course/elementFields'
 
 /**
@@ -95,6 +96,16 @@ function steps(entries: readonly ElementCardEntry[]): Pick<ElementCardView, 'und
   const step = (entry: ElementCardEntry | undefined) => entry?.change ? { submissionId: entry.submissionId, fields: entry.change.fields } : null
   return { undo: step(entries[lastApplied]), redo: step(undone), undoUnavailable: latest?.change?.unavailable ?? null }
 }
+/**
+ * A request's reply: what the conversation records, or, until Main has recorded it there (just after the run ends),
+ * the last text its run showed.
+ */
+function withReply(entry: ElementCardEntry, projection: ExecutionProjection): ElementCardEntry {
+  if (entry.reply || !entry.runId) return entry
+  const item = [...projection.items].reverse().find(value => value.runId === entry.runId && value.type === 'text')
+  const reply = item?.content.map(part => part.kind === 'text' ? part.text : '').join('').trim()
+  return reply ? { ...entry, reply } : entry
+}
 const TERMINAL: ReadonlySet<ElementCardEntryState> = new Set(['completed', 'failed', 'stopped'])
 const TEXT_LOST = '这段文字已找不到，请重新选中后再打开 AI 卡。'
 
@@ -130,7 +141,8 @@ export class ElementCardController {
     const cached = this.views.get(key)
     if (cached) return cached
     const view: ElementCardView = {
-      key, kind: card.kind, anchor: card.anchor, textLost: card.kind === 'text' && card.content === null ? TEXT_LOST : null, documentId: card.documentId, label: card.label, target: card.target, entries: card.entries,
+      key, kind: card.kind, anchor: card.anchor, textLost: card.kind === 'text' && card.content === null ? TEXT_LOST : null, documentId: card.documentId, label: card.label, target: card.target,
+      entries: card.entries.map(entry => withReply(entry, card.projection)),
       busy: card.entries.some(entry => entry.state === 'sending' || entry.state === 'queued' || entry.state === 'running'),
       question: pendingQuestion(card.projection), approval: pendingApproval(card.projection), error: card.error, ...steps(card.entries),
     }
@@ -221,9 +233,17 @@ export class ElementCardController {
         this.listen(api)
       }
       const writable = this.permission !== 'read-only'
-      const result = await api.send({ workspaceId: workspace.workspaceId, conversationId: current.conversationId, submissionId,
-        expectedRevision: current.revision, text, documents: [selectionReference(capture, writable)], attachments: [], mode: 'queue',
-        permission: this.permission, disclosedSettings: disclosedExecutionSettings(settings) })
+      const request = { workspaceId: workspace.workspaceId, conversationId: current.conversationId, submissionId, text,
+        documents: [selectionReference(capture, writable)], attachments: [], mode: 'queue' as const,
+        permission: this.permission, disclosedSettings: disclosedExecutionSettings(settings) }
+      // The conversation moves on while the element's requests run, so each send goes against its latest revision. A
+      // card keeps no draft there: a newer revision is only its own requests' progress, and sending again is safe.
+      let result: ExecutionSendResult
+      for (let attempt = 0; ; attempt += 1) {
+        current = await api.conversation(current.workspaceId, current.conversationId) ?? current
+        try { result = await api.send({ ...request, expectedRevision: current.revision }); break }
+        catch (error) { if (attempt >= 3 || !isExecutionInputError(error, 'conversation-draft-changed')) throw error }
+      }
       card.conversation = result.conversation
       this.applySubmission(card, result.submission, result.run)
     } catch (error) {

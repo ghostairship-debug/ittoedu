@@ -314,6 +314,35 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
     if (!$anchor.parent.inlineContent || !$head.parent.inlineContent) return
     view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, anchor, head)))
   }
+  /**
+   * A change from outside the editor replaces a block whose data changed, and a selection in it falls back to text.
+   * The cells or the object that were selected are selected again while they are still there, so an element card's
+   * own edit keeps its element selected (M15).
+   */
+  function reselect(kept: DocumentSelection | null | undefined) {
+    if (!kept || kept.kind === 'text') return
+    const identity = (value: DocumentSelection) => JSON.stringify({ ...value, revision: '' })
+    const now = describeSelection(view.state)
+    if (now && identity(now) === identity(kept)) return
+    const { doc } = view.state, blockId = kept.kind === 'cells' ? kept.tableId : kept.blockId
+    let at = -1
+    doc.descendants((node, position) => { if (at < 0 && node.attrs.id === blockId) at = position; return at < 0 })
+    const block = at < 0 ? null : doc.nodeAt(at)
+    if (!block) return
+    let selection: NodeSelection | CellSelection | null = null
+    if (kept.kind === 'object') selection = NodeSelection.isSelectable(block) ? NodeSelection.create(doc, at) : null
+    else {
+      const cell = (point: { rowId: string; columnId: string }) => {
+        const key = `cell:${JSON.stringify([point.rowId, point.columnId])}`
+        let found = -1
+        block.descendants((node, offset) => { if (found < 0 && node.type.spec.tableRole && node.firstChild?.attrs.key === key) found = at + 1 + offset; return found < 0 })
+        return found
+      }
+      const anchor = cell(kept.anchor), head = cell(kept.head)
+      selection = anchor >= 0 && head >= 0 ? CellSelection.create(doc, anchor, head) : null
+    }
+    if (selection) view.updateState(view.state.apply(view.state.tr.setSelection(selection)))
+  }
   function update(next: LayoutEditorOptions) {
     if (composing) { deferred = next; return }
     const changed = JSON.stringify(next.document.content) !== JSON.stringify(options.document.content)
@@ -321,6 +350,7 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
     options = next
     if (changed) {
       boundary()
+      const kept = describeSelection(view.state)
       const document = toEditorDocument(next.document.content), from = view.state.doc.content.findDiffStart(document.content)
       const end = view.state.doc.content.findDiffEnd(document.content)
       if (from !== null && end) {
@@ -328,6 +358,7 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
         const to = end.a + Math.max(0, overlap), nextTo = end.b + Math.max(0, overlap)
         const transaction = view.state.tr.replace(from, to, document.slice(from, nextTo)).setMeta('canonicalUpdate', true)
         view.updateState(view.state.apply(transaction))
+        reselect(kept)
       }
     }
     if (refreshObjects) view.setProps({ nodeViews: { ...view.props.nodeViews, object: (node, current, getPos) => objectView(node, false, current, getPos), compound: (node, current, getPos) => objectView(node, true, current, getPos) } })

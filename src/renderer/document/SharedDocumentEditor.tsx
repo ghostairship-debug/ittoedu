@@ -530,10 +530,15 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
     </form>}
   </>
   const quickBarIssue = contextualTarget ? contextualIssue(contextualTarget) ?? (diagnostics.length ? '源文尚有错误，请先修正或丢弃待修草稿。' : null) : null
+  // As on the objects' quick bar, an open popover closes when something else is selected, not when the same selection
+  // is reported again at a new revision (after an element card's own edit, M15).
+  const selectionKey = contextualTarget ? JSON.stringify(contextualTarget.selection
+    ? { ...contextualTarget.selection, revision: undefined }
+    : { mode: contextualTarget.mode, ranges: contextualTarget.ranges?.map(range => [range.from, range.to]) }) : ''
   const hostAiButton = contextualTarget ? props.renderAiButton?.(contextualTarget, quickBarIssue) : undefined
   const textTools = contextualTarget && mode === 'layout' && contextualTarget.selection && contextualTarget.selection.kind !== 'object'
   const quickBar = contextualTarget && !props.readOnly && !props.contextualCardSuppressed && quickBarPlace
-    && <SelectionQuickBar anchor={quickBarPlace.anchor} bounds={quickBarPlace.bounds} label="选中内容快捷工具" selectionKey={String(targetGeneration)}
+    && <SelectionQuickBar anchor={quickBarPlace.anchor} bounds={quickBarPlace.bounds} label="选中内容快捷工具" selectionKey={selectionKey}
       suspended={pointerGesture || dismissedGeneration === targetGeneration}>
       {textTools && <>
         <QuickBarButton label="当前选区加粗" icon={<Bold size={14} />} pressed={format.flags.bold === true} onClick={() => toggleStyle('bold')} />

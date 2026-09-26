@@ -147,6 +147,9 @@ it('M15 a request for an object is judged by that object: other edits do not ref
     expectedRevision: card.revision, text: '改成红色', documents: [reference], attachments: [] }) as ExecutionSendResult
   expect(['accepted', 'queued']).toContain(accepted.submission.state)
   if (accepted.run) await f.service.engine.wait(accepted.run.runId)
+  // Main records the reply in the conversation just after the run ends; the next send names the revision after it.
+  await vi.waitFor(async () => expect((await f.service.conversations.readConversation({ workspaceId: f.workspaceId, conversationId: card.conversationId }))!
+    .messages.some(message => message.role === 'assistant')).toBe(true))
 
   // Once "a" is gone, a request captured before is refused as changed.
   await edit(f.documents, f.opened.documentId, project => {
