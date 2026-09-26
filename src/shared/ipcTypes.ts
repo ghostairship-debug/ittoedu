@@ -95,7 +95,10 @@ export interface PreviewNetworkPolicyInput {
   remoteAssetUrls: string[]
 }
 
+export type EditorClipboardCommand = 'cut' | 'copy' | 'paste' | 'paste-plain'
+
 export interface DesktopAPI {
+  editorClipboard?(command: EditorClipboardCommand): Promise<void>
   imageResults?: import('./workbench/imageResultsDesktop').ImageResultsDesktopAPI
   attachments?: import('./workbench/attachmentsDesktop').AttachmentsDesktopAPI
   execution?: import('./workbench/executionDesktop').ExecutionDesktopAPI
@@ -222,6 +225,7 @@ export const IPC_CHANNELS = {
   setPreviewNetworkPolicy: 'preview-network:set',
   releasePreviewNetworkPolicy: 'preview-network:release',
   dirtyState: 'app:dirty-state',
+  editorClipboard: 'editor:clipboard',
   requestSave: 'app:request-save',
   requestFocusDocument: 'app:request-focus-document',
   requestSaveAndClose: 'app:request-save-and-close',

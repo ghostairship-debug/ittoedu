@@ -54,6 +54,7 @@ const IPC_CHANNELS = {
   setPreviewNetworkPolicy: 'preview-network:set',
   releasePreviewNetworkPolicy: 'preview-network:release',
   dirtyState: 'app:dirty-state',
+  editorClipboard: 'editor:clipboard',
   requestSave: 'app:request-save',
   requestFocusDocument: 'app:request-focus-document',
   requestSaveAndClose: 'app:request-save-and-close',
@@ -321,6 +322,7 @@ const desktopAPI = Object.freeze<DesktopAPI>({
     },
   ),
   setDirtyState: (dirty) => invoke(IPC_CHANNELS.dirtyState, dirty),
+  editorClipboard: command => invoke(IPC_CHANNELS.editorClipboard, command),
   onRequestFocusDocument: handler => {
     const listener = (_event: Electron.IpcRendererEvent, id: unknown) => { if (typeof id === 'string' && id.length > 0 && id.length <= 512) handler(id) }
     ipcRenderer.on(IPC_CHANNELS.requestFocusDocument, listener)
