@@ -74,6 +74,7 @@ import {
   stageViewportPanRange,
 } from '../../authoring/stageViewportTransform'
 import { DEFAULT_SLIDE_CANVAS, type SlideCanvasSize } from '../../../shared/slideCanvas'
+import { workspaceTryRunHostProps } from '../../../shared/pageFrame'
 
 import {
   type mountPublishedCourseAuthoring,
@@ -3169,6 +3170,7 @@ export function SlideLocationWorkspace({
           className="course-try-run-host"
           data-testid="course-try-run-host"
           data-page-backdrop="transparent"
+          {...workspaceTryRunHostProps()}
           hidden={!useCoursePlayerTryRun}
         />
         {tryRunFeedback && useCoursePlayerTryRun ? (

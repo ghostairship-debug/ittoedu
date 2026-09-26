@@ -18,10 +18,11 @@ describe('M19 one page frame', () => {
     expect(fitPage({ width: 360, height: 1000 }, PORTRAIT).top).toBe((1000 - 640) / 2)
     // A Spatial camera frame is always whole.
     expect(fitPage({ width: 900, height: 600 }, PORTRAIT, undefined, 'contain').scale).toBe(600 / 1280)
-    // Window margins come off the available space.
-    const inset = fitPage({ width: 932, height: 632 }, LANDSCAPE, WINDOW_PAGE_INSETS)
+    // Window margins come off the available space; they are as wide as a playback scroll bar.
+    expect(WINDOW_PAGE_INSETS).toEqual({ top: 18, right: 18, bottom: 18, left: 18 })
+    const inset = fitPage({ width: 936, height: 636 }, LANDSCAPE, WINDOW_PAGE_INSETS)
     expect(inset.scale).toBe(900 / 1280)
-    expect(inset.left).toBe(16)
+    expect(inset.left).toBe(18)
   })
 
   it('reads CSS-like margins and draws the same frame on screen at any fit', () => {

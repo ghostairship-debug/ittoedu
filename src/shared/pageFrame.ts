@@ -1,4 +1,5 @@
 import type { SlideCanvasSize } from './slideCanvas'
+import { PLAYBACK_VIEW_CHROME_GUTTER } from './playbackViewGeometry'
 
 /**
  * One page frame for editing, try-run, the whole-course preview and exported HTML (M19): around the page is the
@@ -33,8 +34,11 @@ export interface PageFrameInsets {
 export const NO_PAGE_INSETS: PageFrameInsets = Object.freeze({ top: 0, right: 0, bottom: 0, left: 0 })
 /** Space the editor leaves around its page; a try-run in its place keeps the page where it was. */
 export const EDITOR_PAGE_INSETS: PageFrameInsets = Object.freeze({ top: 42, right: 22, bottom: 22, left: 22 })
-/** Space around the page of the whole-course preview and exported HTML in a window. */
-export const WINDOW_PAGE_INSETS: PageFrameInsets = Object.freeze({ top: 16, right: 16, bottom: 16, left: 16 })
+/** Space around the page of the whole-course preview and exported HTML in a window: as wide as a playback scroll
+ * bar, so a tall page's bar sits beside the page instead of over it. */
+export const WINDOW_PAGE_INSETS: PageFrameInsets = Object.freeze({
+  top: PLAYBACK_VIEW_CHROME_GUTTER, right: PLAYBACK_VIEW_CHROME_GUTTER, bottom: PLAYBACK_VIEW_CHROME_GUTTER, left: PLAYBACK_VIEW_CHROME_GUTTER,
+})
 
 /** `"42 22 22 22"`, `"16"` or `"16 24"`, as in CSS margins. Anything else means no insets. */
 export function parsePageInsets(value: string | undefined | null): PageFrameInsets {
@@ -46,6 +50,18 @@ export function parsePageInsets(value: string | undefined | null): PageFrameInse
 
 export function formatPageInsets(insets: PageFrameInsets): string {
   return `${insets.top} ${insets.right} ${insets.bottom} ${insets.left}`
+}
+
+/**
+ * A try-run host placed on the editor's page area reaches out to the workspace edges and keeps the editor's page
+ * margins: the page lands exactly where the edited page is, and playback chrome (scroll bars) sits in the margins
+ * instead of over the page.
+ */
+export function workspaceTryRunHostProps(insets: PageFrameInsets = EDITOR_PAGE_INSETS) {
+  return {
+    'data-page-insets': formatPageInsets(insets),
+    style: { inset: `${-insets.top}px ${-insets.right}px ${-insets.bottom}px ${-insets.left}px` },
+  }
 }
 
 /** Portrait pages (竖屏、长页) fill the available width and scroll down; landscape pages are shown whole. */

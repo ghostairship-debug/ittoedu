@@ -12,6 +12,7 @@ import {
   RECOMMENDED_SCENE_NODES,
 } from '../shared/constants'
 import { toUserMessage, UserFacingError } from '../shared/errors'
+import { formatPageInsets, WINDOW_PAGE_INSETS } from '../shared/pageFrame'
 import {
   collectCourseProjectHealth,
   summarizeCourseProjectHealth,
@@ -855,7 +856,7 @@ export default function App() {
                 ref={courseDelivery.bindPreviewHost}
                 className="course-preview-host"
                 data-testid="course-preview-host"
-                data-page-insets="16"
+                data-page-insets={formatPageInsets(WINDOW_PAGE_INSETS)}
               />
               {courseDelivery.previewFeedback ? (
                 <div

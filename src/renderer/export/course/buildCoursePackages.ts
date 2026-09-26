@@ -2,6 +2,7 @@ import { strToU8, zip, zipSync } from 'fflate'
 import type { PublishedCourseV2Payload } from '../../../shared/publishedCourseTypes'
 import { createTimezoneStableZipMtime } from '../../../shared/archiveTimestamp'
 import { compareStableStrings } from '../../../shared/stableOrder'
+import { formatPageInsets, WINDOW_PAGE_INSETS } from '../../../shared/pageFrame'
 import {
   bundledFontDataUrlCss,
   bundledFontNoticeHtmlComment,
@@ -256,7 +257,7 @@ function packageIndex(
   <link rel="stylesheet" href="./player/player.css">
 </head>
 <body>
-  <div id="course-root" data-page-insets="16" aria-label="${escapeHtml(payload.title)}"></div>
+  <div id="course-root" data-page-insets="${formatPageInsets(WINDOW_PAGE_INSETS)}" aria-label="${escapeHtml(payload.title)}"></div>
   <script defer src="./course-data.js"></script>
   <script defer src="./player/player.iife.js"></script>
 </body>
@@ -286,7 +287,7 @@ function emitPublishedCourseStandaloneHtml(
   <style>${withBundledFontCss(COURSE_PLAYER_CSS, bundledFontDataUrlCss(fonts))}</style>${bundledFontNoticeHtmlComment(fonts)}
 </head>
 <body>
-  <div id="course-root" data-page-insets="16" aria-label="${escapeHtml(payload.title)}"></div>
+  <div id="course-root" data-page-insets="${formatPageInsets(WINDOW_PAGE_INSETS)}" aria-label="${escapeHtml(payload.title)}"></div>
   <script>${escapeScript(serializedAssignment(payload))}</script>
   <script>${escapeScript(normalized.playerBundle)}</script>
 </body>

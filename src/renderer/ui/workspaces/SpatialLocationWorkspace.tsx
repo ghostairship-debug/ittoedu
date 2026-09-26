@@ -36,6 +36,7 @@ import {
 } from '../../authoring/stageViewportTransform'
 import { isTeacherControllerLayerItem } from '../../../core/tools/globalLayers'
 import { courseSlideCanvas } from '../../../shared/slideCanvas'
+import { workspaceTryRunHostProps } from '../../../shared/pageFrame'
 import type { SpatialEditorWorldTransform } from '../../course/spatialEditorCommands'
 import {
   assertActiveSpatialEditorView,
@@ -1158,6 +1159,7 @@ export function SpatialLocationWorkspace({
           className="spatial-try-run-host"
           data-testid="spatial-try-run-host"
           data-page-backdrop="transparent"
+          {...workspaceTryRunHostProps()}
           hidden={canvasMode !== 'run'}
         />
       </div>

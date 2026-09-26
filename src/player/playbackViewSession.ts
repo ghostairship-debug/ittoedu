@@ -209,7 +209,8 @@ export class PlaybackViewSession implements PlaybackViewPort {
       right = Math.max(right, x + insets.left + canvas.width * scale + insets.right)
       bottom = Math.max(bottom, y + insets.top + canvas.height * scale + insets.bottom)
     }
-    if (host && this.#viewport) {
+    // A page clips what lies outside it (M19), so only Flow's own content can widen what the view scrolls over.
+    if (host?.kind === 'flow' && this.#viewport) {
       const viewport = this.#viewport.getBoundingClientRect()
       for (const item of host.content.querySelectorAll<HTMLElement>('[data-playback-bounds]')) {
         if (item.hidden) continue
