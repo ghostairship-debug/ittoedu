@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { flowOverlayAnchorAfterDrag, resolveFlowOverlayAuthoredFrame } from '@/renderer/ui/flow/FlowOverlayAuthoringLayer'
+import { canChangeFlowOverlayPlacement, flowOverlayAnchorAfterDrag, resolveFlowOverlayAuthoredFrame } from '@/renderer/ui/flow/FlowOverlayAuthoringLayer'
 import type { FlowEditorLayerView } from '@/renderer/course/flowEditorView'
 import type { FlowParagraphBlockRect } from '@/shared/flowParagraphAnchors'
 import { createBlankCourseProject } from '@/core/course/createCourseProject'
@@ -15,10 +15,10 @@ const rects: FlowParagraphBlockRect[] = [
 ]
 const storedFrame = { mode: 'absolute' as const, x: 200, y: 30, width: 100, height: 60 }
 
-function layer(input: { owner?: 'surface' | 'global'; paperSpace?: 'paper' | 'viewport'; anchored?: boolean } = {}): FlowEditorLayerView {
+function layer(input: { owner?: 'surface' | 'global'; paperSpace?: 'paper' | 'viewport'; anchored?: boolean; kind?: 'native' | 'component' | 'runtime'; role?: string } = {}): FlowEditorLayerView {
   return {
     owner: input.owner ?? 'surface',
-    item: { frame: storedFrame, paperSpace: input.paperSpace ?? 'paper' },
+    item: { frame: storedFrame, paperSpace: input.paperSpace ?? 'paper', kind: input.kind ?? 'native', role: input.role },
     ...(input.anchored ? { paragraphAnchor: { blockId: 'a', offsetY: 10, xRatio: 0.25 } } : {}),
   } as FlowEditorLayerView
 }
@@ -63,6 +63,17 @@ describe('Flow authoring overlay placement', () => {
     expect(flowOverlayAnchorAfterDrag(layer({ anchored: true }), moved, 1000, rects))
       .toEqual({ blockId: 'b', offsetY: 15, xRatio: 0.3 })
     expect(flowOverlayAnchorAfterDrag(layer(), moved, 1000, rects)).toBeUndefined()
-    expect(flowOverlayAnchorAfterDrag(layer({ anchored: true }), moved, 0, [])).toBeUndefined()
+    expect(flowOverlayAnchorAfterDrag(layer({ anchored: true }), moved, 0, [])).toBeNull()
+    expect(flowOverlayAnchorAfterDrag(layer({ anchored: true }), moved, 1000, [])).toBeNull()
+    expect(flowOverlayAnchorAfterDrag(layer({ anchored: true }), moved, 1000, rects.map(rect => ({ ...rect, width: 0 })))).toBeNull()
+  })
+
+  it('restricts placement controls to page paper Native and ordinary components', () => {
+    expect(canChangeFlowOverlayPlacement(layer())).toBe(true)
+    expect(canChangeFlowOverlayPlacement(layer({ kind: 'component' }))).toBe(true)
+    expect(canChangeFlowOverlayPlacement(layer({ kind: 'runtime' }))).toBe(false)
+    expect(canChangeFlowOverlayPlacement(layer({ kind: 'component', role: 'teacher-controller' }))).toBe(false)
+    expect(canChangeFlowOverlayPlacement(layer({ owner: 'global' }))).toBe(false)
+    expect(canChangeFlowOverlayPlacement(layer({ paperSpace: 'viewport' }))).toBe(false)
   })
 })

@@ -52,9 +52,15 @@ export function resolveFlowOverlayAuthoredFrame(layer: FlowEditorLayerView, pape
   return flowParagraphAnchoredFrame(layer.paragraphAnchor, frame, paperWidth, paragraphRects, visibleAncestorIds) ?? frame
 }
 
+/** `null` means an anchored gesture has no reliable layout and must not commit. */
 export function flowOverlayAnchorAfterDrag(layer: FlowEditorLayerView, frame: StageRect, paperWidth: number, paragraphRects: readonly FlowParagraphBlockRect[]) {
   return layer.owner === 'surface' && layer.item.paperSpace === 'paper' && layer.paragraphAnchor
-    ? flowParagraphAnchorAt(frame, paperWidth, paragraphRects) ?? undefined : undefined
+    ? flowParagraphAnchorAt(frame, paperWidth, paragraphRects) : undefined
+}
+
+export function canChangeFlowOverlayPlacement(layer: FlowEditorLayerView): boolean {
+  return layer.owner === 'surface' && layer.item.paperSpace === 'paper'
+    && layer.item.kind !== 'runtime' && !isTeacherControllerLayerItem(layer.item)
 }
 
 function overlayCardStyle(
@@ -546,12 +552,13 @@ export function FlowOverlayAuthoringLayer({
     const persisted = layer?.item.kind === 'component' && isTeacherControllerLayerItem(layer.item) ? { ...next, width: rawNext.width, height: rawNext.height }
       : isViewportOverlay(layer) ? flowViewportOverlayFrameAt(next, canvas, overlayViewportSize) : next
     const anchor = layer ? flowOverlayAnchorAfterDrag(layer, persisted, paperWidth, paragraphRects) : undefined
+    if (anchor === null) return
     const intent = { kind: 'transform-overlay-frame', frame: persisted, ...(anchor ? { paragraphAnchor: anchor } : {}) } as const
     commands.run(gesture.target, intent)
   }
 
   const setSelectedPlacement = (layer: FlowEditorLayerView, follow: boolean) => {
-    if (readOnly || layer.locked || layer.owner !== 'surface' || layer.item.paperSpace !== 'paper' || layer.item.kind === 'runtime') return
+    if (readOnly || layer.locked || !canChangeFlowOverlayPlacement(layer)) return
     const frame = overlayFrameOf(layer)
     const anchor = follow ? flowParagraphAnchorAt(frame, paperWidth, paragraphRects) : null
     if (follow && !anchor) return
@@ -699,7 +706,7 @@ export function FlowOverlayAuthoringLayer({
         onPointerUp={readOnly ? undefined : endOverlayGesture}
         onPointerCancel={readOnly ? undefined : cancelOverlayGesture}
       >
-        {editable && layer.owner === 'surface' && layer.item.paperSpace === 'paper' && layer.item.kind !== 'runtime' ? <div className="flow-layer-placement-controls" data-flow-placement-controls={layer.selectionId}
+        {editable && canChangeFlowOverlayPlacement(layer) ? <div className="flow-layer-placement-controls" data-flow-placement-controls={layer.selectionId}
           style={{ position: 'absolute', left: 0, top: -30, display: 'flex', gap: 4, whiteSpace: 'nowrap', pointerEvents: 'auto', zIndex: 1 }}
           onPointerDown={event => event.stopPropagation()}>
           <button type="button" disabled={Boolean(layer.paragraphAnchor)} onClick={event => { event.stopPropagation(); setSelectedPlacement(layer, true) }}>随文字移动</button>
