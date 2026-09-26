@@ -14,6 +14,7 @@ import {
   type FlowEditorSelection,
 } from '../course/flowEditorSlice'
 import type { FlowOverlayPlacement } from '../course/flowOverlayProjection'
+import type { FlowParagraphAnchor } from '../../shared/flowParagraphAnchors'
 
 /**
  * Pointer/layer hit for a Flow overlay. `hitId` is ephemeral inspection only
@@ -34,6 +35,7 @@ export interface FlowOverlayAuthoringTarget {
   readonly field: string
   readonly placement: FlowOverlayPlacement
   readonly isTeacherController: boolean
+  readonly paragraphAnchor?: FlowParagraphAnchor
   readonly ephemeralHitId?: string
 }
 
@@ -89,6 +91,8 @@ export function resolveFlowOverlayAuthoringTarget(
     return { ok: false, reason: '作者地址不能包含临时命中 id' }
   }
   const authoringScope: FlowAuthoringScope = located.source === 'global' ? 'global' : 'page'
+  const flowSurface = project.surfaces.find(surface => surface.id === located.surfaceId && surface.type === 'flow')
+  const paragraphAnchor = flowSurface?.type === 'flow' ? flowSurface.surfaceLayerItems.find(entry => entry.item.layerItemId === located.item.layerItemId)?.paragraphAnchor : undefined
   return {
     ok: true,
     layerItemId: located.item.layerItemId,
@@ -98,6 +102,7 @@ export function resolveFlowOverlayAuthoringTarget(
     field,
     placement: flowOverlayPlacementForItem(located.item),
     isTeacherController: isTeacherControllerLayerItem(located.item),
+    ...(paragraphAnchor ? { paragraphAnchor } : {}),
     ...(hit.hitId ? { ephemeralHitId: hit.hitId } : {}),
   }
 }

@@ -34,6 +34,7 @@ import {
   walkFlowBlocks,
 } from '../../core/tools/flowDocumentModel'
 import { isFlowZOrderLayerBlock } from './flowEditorSlice'
+import type { FlowParagraphAnchor } from '../../shared/flowParagraphAnchors'
 
 export type DeepReadonly<T> =
   T extends (...args: never[]) => unknown ? T :
@@ -88,6 +89,8 @@ export interface FlowEditorLayerView {
   readonly selectionId: string
   readonly authoringAddress: string
   readonly item: DeepReadonly<LayerItem>
+  /** Flow surface entry metadata; never attached to LayerItem. */
+  readonly paragraphAnchor?: DeepReadonly<FlowParagraphAnchor>
 }
 
 export interface FlowCourseTreeHeading {
@@ -253,6 +256,7 @@ function overlayLayerView(
   globalPlane: GlobalLayerPlane | null,
   flowBodyPlane: FlowBodyLayerPlane | null,
   stackOrder: number,
+  paragraphAnchor?: FlowParagraphAnchor,
 ): FlowEditorLayerView {
   const owner = source
   return {
@@ -275,6 +279,7 @@ function overlayLayerView(
       field: 'item',
     }),
     item: deepFreeze(structuredClone(item)),
+    ...(paragraphAnchor ? { paragraphAnchor: deepFreeze(structuredClone(paragraphAnchor)) } : {}),
   }
 }
 
@@ -398,6 +403,7 @@ export function buildFlowEditorView(input: BuildFlowEditorViewInput): FlowEditor
   }
 
   const composition = composeFlowEditorLocation({ project, locationId })
+  const surfaceAnchors = new Map(surface.surfaceLayerItems.map(entry => [entry.item.layerItemId, entry.paragraphAnchor] as const))
   const overlayLayers = composition.entries
     .filter((entry) => entry.applicable)
     .map((entry) => overlayLayerView(
@@ -409,6 +415,7 @@ export function buildFlowEditorView(input: BuildFlowEditorViewInput): FlowEditor
       entry.globalPlane,
       entry.flowBodyPlane,
       entry.stackOrder,
+      entry.source === 'surface' ? surfaceAnchors.get(entry.item.layerItemId) : undefined,
     ))
 
   const courseTree = listFlowCourseTreePages(project).find((page) => page.surfaceId === surface.id)

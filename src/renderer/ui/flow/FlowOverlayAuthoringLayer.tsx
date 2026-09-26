@@ -12,6 +12,7 @@ import {
 import { requestObjectContextMenu } from '../../editing/commands/objectContextMenu'
 import { CANVAS_HEIGHT, CANVAS_WIDTH, MIN_NODE_SIZE } from '../../../shared/constants'
 import { createFlowViewportGeometry, flowViewportOverlayFrameAt, flowViewportOverlayPoint, projectFlowComponentControllerFrame, revealFlowSelectionPan, type FlowPoint } from '../../../shared/flowViewportGeometry'
+import { flowParagraphAnchorAt, flowParagraphAnchoredFrame, type FlowParagraphBlockRect } from '../../../shared/flowParagraphAnchors'
 import { DEFAULT_SLIDE_CANVAS } from '../../../shared/slideCanvas'
 import { playbackControllerInsets, type PlaybackChromeInsets } from '../../../shared/playbackViewGeometry'
 import { rotatedWorldRectAxisBounds } from '../../authoring/stageViewportTransform'
@@ -45,9 +46,21 @@ import {
 
 const FLOW_OVERLAY_HANDLE_RADIUS = 10
 
+export function resolveFlowOverlayAuthoredFrame(layer: FlowEditorLayerView, paperWidth: number, paragraphRects: readonly FlowParagraphBlockRect[], visibleAncestorIds: readonly string[] = []): StageRect {
+  const frame = layer.item.frame
+  if (layer.owner !== 'surface' || layer.item.paperSpace !== 'paper' || !layer.paragraphAnchor) return frame
+  return flowParagraphAnchoredFrame(layer.paragraphAnchor, frame, paperWidth, paragraphRects, visibleAncestorIds) ?? frame
+}
+
+export function flowOverlayAnchorAfterDrag(layer: FlowEditorLayerView, frame: StageRect, paperWidth: number, paragraphRects: readonly FlowParagraphBlockRect[]) {
+  return layer.owner === 'surface' && layer.item.paperSpace === 'paper' && layer.paragraphAnchor
+    ? flowParagraphAnchorAt(frame, paperWidth, paragraphRects) ?? undefined : undefined
+}
+
 function overlayCardStyle(
   layer: FlowEditorLayerView,
   preview: StageRect | null | undefined,
+  resolved: StageRect,
   paperScrollTop: number,
   paperOrigin: FlowPoint,
   paperScrollLeft: number,
@@ -56,7 +69,7 @@ function overlayCardStyle(
   display = false,
   canvas: { width: number; height: number } = DEFAULT_SLIDE_CANVAS,
 ): CSSProperties {
-  const raw = preview ?? layer.item.frame
+  const raw = preview ?? resolved
   const authored = constrainFlowControllerOverlayFrame(layer, raw, viewportSize)
   const frame = display ? controllerDisplayFrame(layer.item as LayerItem, authored) : authored
   const isController = isTeacherControllerLayerItem(layer.item)
@@ -286,6 +299,9 @@ export interface FlowOverlayAuthoringLayerProps {
   readonly assetUrls: Record<string, string>
   readonly componentPackages?: Record<string, ComponentPackageData>
   readonly paperScrollTop: number
+  readonly paperWidth?: number
+  readonly paragraphRects?: readonly FlowParagraphBlockRect[]
+  readonly onBodyPlaneChange?: (layerItemId: string, plane: 'overlay' | 'underlay') => void
   readonly paperScrollLeft?: number
   readonly paperOrigin?: FlowPoint
   readonly overlayViewportSize: { readonly width: number; readonly height: number; readonly nativeChrome?: PlaybackChromeInsets }
@@ -306,6 +322,9 @@ export function FlowOverlayAuthoringLayer({
   assetUrls,
   componentPackages,
   paperScrollTop,
+  paperWidth = 0,
+  paragraphRects = [],
+  onBodyPlaneChange,
   paperScrollLeft = 0,
   paperOrigin = { x: 0, y: 0 },
   overlayViewportSize,
@@ -328,6 +347,15 @@ export function FlowOverlayAuthoringLayer({
     playbackPanClient: viewPan,
   })
   const canvas = view.canvas ?? DEFAULT_SLIDE_CANVAS
+  const authoredFrameOf = (layer: FlowEditorLayerView): StageRect => {
+    const ancestors: string[] = []
+    let block = view.blocks.find(entry => entry.blockId === layer.paragraphAnchor?.blockId)
+    while (block?.parentId) {
+      ancestors.push(block.parentId)
+      block = view.blocks.find(entry => entry.blockId === block?.parentId)
+    }
+    return resolveFlowOverlayAuthoredFrame(layer, paperWidth, paragraphRects, ancestors)
+  }
   const localForLayer = (overlay: HTMLElement, event: ReactPointerEvent<HTMLElement>, layer?: FlowEditorLayerView) => {
     const point = overlayLocalPoint(overlay, event.clientX, event.clientY, overlayViewportSize)
     if (layer && isTeacherControllerLayerItem(layer.item)) return point
@@ -339,7 +367,7 @@ export function FlowOverlayAuthoringLayer({
     // Screen-anchored overlays always stay inside the view; only paper overlays can scroll out of it.
     const bounds = view.overlayLayers.filter(layer => layer.effectiveVisible && !isTeacherControllerLayerItem(layer.item)
       && layer.item.paperSpace === 'paper' && selection?.selectedOverlayIds.includes(layer.selectionId)).map(layer => {
-      const rect = rotatedWorldRectAxisBounds(layer.item.frame, layer.item.rotation)
+      const rect = rotatedWorldRectAxisBounds(authoredFrameOf(layer), layer.item.rotation)
       const origin = { x: rect.left, y: rect.top }
       const point = layer.item.paperSpace === 'paper' ? geometry.paperToClient(origin)
         : geometry.viewportToClient(flowViewportOverlayPoint({ ...origin, width: rect.width, height: rect.height }, canvas, overlayViewportSize))
@@ -380,10 +408,7 @@ export function FlowOverlayAuthoringLayer({
     const raw = overlayPreview?.id === layer.selectionId
       ? overlayPreview.frame
       : {
-          x: layer.item.frame.x,
-          y: layer.item.frame.y,
-          width: layer.item.frame.width,
-          height: layer.item.frame.height,
+          ...authoredFrameOf(layer),
         }
     return constrainFlowControllerOverlayFrame(layer, raw, overlayViewportSize)
   }
@@ -520,7 +545,19 @@ export function FlowOverlayAuthoringLayer({
     const layer = view.overlayLayers.find(layer => layer.selectionId === gesture.layerItemId)
     const persisted = layer?.item.kind === 'component' && isTeacherControllerLayerItem(layer.item) ? { ...next, width: rawNext.width, height: rawNext.height }
       : isViewportOverlay(layer) ? flowViewportOverlayFrameAt(next, canvas, overlayViewportSize) : next
-    commands.run(gesture.target, { kind: 'transform-overlay-frame', frame: persisted })
+    const anchor = layer ? flowOverlayAnchorAfterDrag(layer, persisted, paperWidth, paragraphRects) : undefined
+    const intent = { kind: 'transform-overlay-frame', frame: persisted, ...(anchor ? { paragraphAnchor: anchor } : {}) } as const
+    commands.run(gesture.target, intent)
+  }
+
+  const setSelectedPlacement = (layer: FlowEditorLayerView, follow: boolean) => {
+    if (readOnly || layer.locked || layer.owner !== 'surface' || layer.item.paperSpace !== 'paper' || layer.item.kind === 'runtime') return
+    const frame = overlayFrameOf(layer)
+    const anchor = follow ? flowParagraphAnchorAt(frame, paperWidth, paragraphRects) : null
+    if (follow && !anchor) return
+    const target = captureFlowEditorAuthoringTarget({ view, sessionToken, target: { kind: 'overlay', layerItemId: layer.selectionId } })
+    const intent = { kind: 'transform-overlay-frame', frame, paragraphAnchor: anchor } as const
+    commands.run(target, intent)
   }
 
   const cancelOverlayGesture = (event: ReactPointerEvent<HTMLElement>) => {
@@ -578,6 +615,7 @@ export function FlowOverlayAuthoringLayer({
           ...overlayCardStyle(
             layer,
             preview,
+            authoredFrameOf(layer),
             paperScrollTop,
             paperOrigin,
             paperScrollLeft,
@@ -623,6 +661,9 @@ export function FlowOverlayAuthoringLayer({
   }
 
   const renderSelectionChrome = (layer: FlowEditorLayerView) => {
+    const previewFrame = overlayPreview?.id === layer.selectionId ? overlayPreview.frame : null
+    const previewAnchor = previewFrame && layer.paragraphAnchor ? flowParagraphAnchorAt(previewFrame, paperWidth, paragraphRects) : null
+    const shownAnchor = previewAnchor ?? layer.paragraphAnchor
     const selected = selection?.selectedOverlayIds.includes(layer.selectionId) === true
     if (!selected) return null
     const editable = !readOnly && !layer.locked
@@ -639,6 +680,7 @@ export function FlowOverlayAuthoringLayer({
           ...overlayCardStyle(
             layer,
             overlayPreview?.id === layer.selectionId ? overlayPreview.frame : null,
+            authoredFrameOf(layer),
             paperScrollTop,
             paperOrigin,
             paperScrollLeft,
@@ -657,6 +699,18 @@ export function FlowOverlayAuthoringLayer({
         onPointerUp={readOnly ? undefined : endOverlayGesture}
         onPointerCancel={readOnly ? undefined : cancelOverlayGesture}
       >
+        {editable && layer.owner === 'surface' && layer.item.paperSpace === 'paper' && layer.item.kind !== 'runtime' ? <div className="flow-layer-placement-controls" data-flow-placement-controls={layer.selectionId}
+          style={{ position: 'absolute', left: 0, top: -30, display: 'flex', gap: 4, whiteSpace: 'nowrap', pointerEvents: 'auto', zIndex: 1 }}
+          onPointerDown={event => event.stopPropagation()}>
+          <button type="button" disabled={Boolean(layer.paragraphAnchor)} onClick={event => { event.stopPropagation(); setSelectedPlacement(layer, true) }}>随文字移动</button>
+          <button type="button" disabled={!layer.paragraphAnchor} onClick={event => { event.stopPropagation(); setSelectedPlacement(layer, false) }}>固定在纸面</button>
+          {onBodyPlaneChange && <>
+            <button type="button" disabled={layer.flowBodyPlane !== 'underlay'} onClick={event => { event.stopPropagation(); onBodyPlaneChange(layer.selectionId, 'overlay') }}>正文上方</button>
+            <button type="button" disabled={layer.flowBodyPlane === 'underlay'} onClick={event => { event.stopPropagation(); onBodyPlaneChange(layer.selectionId, 'underlay') }}>正文下方</button>
+          </>}
+        </div> : null}
+        {selected && shownAnchor && <span data-flow-anchor-block-id={shownAnchor.blockId}
+          style={{ position: 'absolute', left: 0, top: -16, fontSize: 11, pointerEvents: 'none', background: '#2563eb', color: '#fff' }}>挂靠：{shownAnchor.blockId}</span>}
         {editable ? STAGE_RESIZE_HANDLE_DIRECTIONS.map((direction) => {
           const frame = controllerDisplayFrame(layer.item as LayerItem, overlayFrameOf(layer))
           const point = overlayHandlePoint(frame, direction)

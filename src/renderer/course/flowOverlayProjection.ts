@@ -8,6 +8,7 @@ import type {
   FlowBodyLayerPlane,
   LayerItem,
 } from '../../shared/courseProjectTypes'
+import type { FlowParagraphAnchor } from '../../shared/flowParagraphAnchors'
 import { carrierForLayerItem, isTeacherControllerLayerItem, makeGlobalLayerAuthoringAddress } from '../../core/tools/globalLayers'
 import {
   walkFlowBlocks,
@@ -46,6 +47,7 @@ export interface FlowUnifiedOverlayRow {
   /** Effective page-overlay plane around the Flow body; global rows carry null. */
   readonly bodyPlane: FlowBodyLayerPlane | null
   readonly item: LayerItem
+  readonly paragraphAnchor?: FlowParagraphAnchor
 }
 
 export interface FlowUnifiedOverlayProjection {
@@ -73,6 +75,7 @@ function overlayRow(entry: FlowEditorLayerView): FlowUnifiedOverlayRow {
     effectiveVisible: entry.effectiveVisible,
     bodyPlane: entry.flowBodyPlane,
     item: entry.item as LayerItem,
+    ...(entry.paragraphAnchor ? { paragraphAnchor: entry.paragraphAnchor } : {}),
   })
 }
 
