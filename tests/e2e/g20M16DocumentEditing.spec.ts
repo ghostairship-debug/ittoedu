@@ -336,9 +336,15 @@ for (const carrier of ['flow', 'markdown'] as const) {
       await expect(sourceButton).toBeHidden()
       await selectVisibleText(page, body, '先预测')
       const beforeAi = await readSelectionDocument(page, opened.documentId)
-      const expectedAi = beforeAi.model.kind === 'markdown' ? beforeAi.model.source.replace('先预测', '先观察')
-        : beforeAi.model.kind === 'course-v9' ? JSON.stringify(beforeAi.model.project.surfaces.find(surface => surface.type === 'flow')?.blocks).replace('先预测', '先观察') : ''
-      expect(expectedAi).not.toBe('')
+      const beforeAiFormal = beforeAi.model.kind === 'markdown' ? beforeAi.model.source
+        : beforeAi.model.kind === 'course-v9' ? JSON.stringify(beforeAi.model.project.surfaces.find(surface => surface.type === 'flow')?.blocks) : ''
+      expect(beforeAiFormal).toContain('先预测')
+      const expectedAi = beforeAiFormal.replace('先预测', '先观察')
+      const currentAiFormal = async () => {
+        const current = await readSelectionDocument(page, opened.documentId)
+        return current.model.kind === 'markdown' ? current.model.source
+          : current.model.kind === 'course-v9' ? JSON.stringify(current.model.project.surfaces.find(surface => surface.type === 'flow')?.blocks) : ''
+      }
       const round = server.arm(`m16-${carrier}-ai`, carrier === 'flow' ? 'flow-range' : 'markdown-range', '先观察')
       await bar.getByRole('button', { name: 'AI 修改' }).click()
       const card = page.getByRole('dialog', { name: /^AI 修改：“先预测”$/ })
@@ -346,12 +352,20 @@ for (const carrier of ['flow', 'markdown'] as const) {
       await card.getByLabel('AI 修改要求').fill('只修改选中文字')
       await card.getByRole('button', { name: '发送', exact: true }).click()
       await heldRound(round); await finishRound(page, round)
-      expect(round.readText).toBe('先预测')
-      await expect.poll(async () => {
-        const current = await readSelectionDocument(page, opened.documentId)
-        return current.model.kind === 'markdown' ? current.model.source
-          : current.model.kind === 'course-v9' ? JSON.stringify(current.model.project.surfaces.find(surface => surface.type === 'flow')?.blocks) : ''
-      }).toBe(expectedAi)
+      expect(round.references?.[0].selection).toMatchObject([{
+        kind: carrier === 'flow' ? 'flow-range' : 'markdown-range',
+        writableTarget: round.references?.[0].writable[0]?.target,
+        content: { text: round.readText, truncated: false },
+      }])
+      if (carrier === 'flow') expect(JSON.parse(round.readText!)).toEqual({
+        content: { inlines: [{ type: 'text', text: '先预测' }] }, parentId: null,
+      })
+      else expect(round.readText).toBe('先预测')
+      await expect.poll(currentAiFormal).toBe(expectedAi)
+      await body.press('Control+z')
+      await expect.poll(currentAiFormal).toBe(beforeAiFormal)
+      await body.press('Control+Shift+z')
+      await expect.poll(currentAiFormal).toBe(expectedAi)
       expect(errors).toEqual([])
       await page.screenshot({ path: join(data.directory, `${carrier}-tools.png`) })
       await info.attach(`${carrier} tools`, { path: join(data.directory, `${carrier}-tools.png`), contentType: 'image/png' })
