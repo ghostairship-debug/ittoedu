@@ -1,7 +1,8 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { createElement } from 'react'
 import { afterEach, expect, it, vi } from 'vitest'
-import { flowMediaCropGeometry } from '@/shared/flowMediaCrop'
+import { flowMediaCropGeometry, flowMediaCropPatch } from '@/shared/flowMediaCrop'
+import { clampCrop } from '@/renderer/editing/crop/imageCrop'
 import { FlowMediaCropEditor } from '@/renderer/ui/flow/FlowMediaCropEditor'
 import { FlowPaperMedia } from '@/renderer/ui/flow/FlowPaperMedia'
 import type { FlowMediaBlock } from '@/shared/contracts/course-project-v9/types'
@@ -20,6 +21,20 @@ it('projects Native source fractions to one crop rectangle and clipped DOM drawi
   const image = container.querySelector('img')!
   expect(image.getAttribute('src')).toBe('asset://original')
   expect(image.parentElement?.style.aspectRatio).toBe('600 / 350')
+})
+
+it('matches Native edge bounds near 98 percent and preserves crop on body to Native round trip', () => {
+  const nearEdge = { left: 0.99, top: 1, right: 0.4, bottom: 0.5 }
+  const native = clampCrop(nearEdge)
+  const flow = flowMediaCropPatch(nearEdge, 0.25, 0.75)
+  expect(flow.crop).toEqual(native)
+  expect(flow.cropX).toBe(0.25)
+  expect(flow.cropY).toBe(0.75)
+  const geometry = flowMediaCropGeometry({ width: 1000, height: 500 }, flow)
+  expect(geometry.sourceRect).toEqual({ x: 980, y: 490, width: 20, height: 10 })
+  const nativeAfterConversion = { crop: flow.crop!, cropX: flow.cropX!, cropY: flow.cropY! }
+  const returned = flowMediaCropPatch(nativeAfterConversion.crop, nativeAfterConversion.cropX, nativeAfterConversion.cropY)
+  expect(returned).toEqual(flow)
 })
 
 it('keeps the original asset and commits crop exactly once only on confirm', () => {

@@ -11,7 +11,7 @@ const round = (value: number): number => Math.round(value * 1_000_000) / 1_000_0
 /** Native image crop units: source-edge fractions and a 0–1 focal point. No frame is persisted for Flow media. */
 export function flowMediaCropGeometry(source: FlowImageSource, fields: FlowImageCrop) {
   const width = finitePositive(source.width), height = finitePositive(source.height)
-  const left = fraction(fields.crop?.left, 0), top = fraction(fields.crop?.top, 0)
+  const left = Math.min(0.98, fraction(fields.crop?.left, 0)), top = Math.min(0.98, fraction(fields.crop?.top, 0))
   const right = Math.min(fraction(fields.crop?.right, 0), Math.max(0, 0.98 - left))
   const bottom = Math.min(fraction(fields.crop?.bottom, 0), Math.max(0, 0.98 - top))
   const visibleX = round(1 - left - right), visibleY = round(1 - top - bottom)
