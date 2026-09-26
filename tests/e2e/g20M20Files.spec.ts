@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test'
 import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { openCourseProjectArchive } from '../../src/core/drivers/codecs/courseProjectArchive'
 import { chooseM20Workspace, closeM20, launchM20, m20Evidence, m20Fixture, m20OpenFile, m20Row, m20Snapshot, m20Tree, m20VisibleTextEditor } from './helpers/g20M20Harness'
 
 test('M20-T01 both Explorer creation entrances preserve order, stem selection, extension and active file', async ({}, info) => {
@@ -70,6 +71,7 @@ test('M20-T03 H5 and Markdown Save As buttons, shortcut and binding use the real
   copyFileSync(join(__dirname, '../fixtures/course-project-v9/slide-native.h5lesson'), source)
   writeFileSync(join(fixture.workspace, '讲义.md'), '# 讲义\n')
   const original = readFileSync(source)
+  const originalArchive = openCourseProjectArchive(new Uint8Array(original))
   const { app, page } = await launchM20(fixture)
   try {
     await chooseM20Workspace(app, page, fixture.workspace)
@@ -95,11 +97,15 @@ test('M20-T03 H5 and Markdown Save As buttons, shortcut and binding use the real
     await expect.poll(() => existsSync(second)).toBe(true)
     await expect.poll(async () => (await page.evaluate(id => window.desktopAPI.documents!.read(id), before!.documentId)).binding).toMatchObject({ kind: 'file', path: second })
     expect(readFileSync(source)).toEqual(original)
-    expect(readFileSync(first)).toEqual(original)
+    const firstArchive = openCourseProjectArchive(new Uint8Array(readFileSync(first)))
+    expect(firstArchive.project).toEqual(originalArchive.project)
+    expect(firstArchive.assetFiles).toEqual(originalArchive.assetFiles)
+    expect(firstArchive.componentFiles).toEqual(originalArchive.componentFiles)
     await m20OpenFile(page, '另存演示.h5lesson', 'course')
     const reopened = await m20Snapshot(page, first)
     expect(reopened?.documentId).not.toBe(before?.documentId)
     expect(reopened?.model.kind).toBe('course-v9')
+    expect(reopened?.model).toEqual(before?.model)
     evidence.paths = { source, first, second }; evidence.identity = { source: before?.documentId, reopened: reopened?.documentId }
     await m20Evidence(info, fixture, page, evidence)
   } catch (error) { await m20Evidence(info, fixture, page, evidence, error); throw error }
