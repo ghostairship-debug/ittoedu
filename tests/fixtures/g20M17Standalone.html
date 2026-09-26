@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>M17 standalone positive fixture</title>
+<style>
+:root{font:16px/1.65 system-ui,sans-serif;color:#183044;background:#f2f7fa}body{margin:0}.hero{padding:2rem;background:#d8efff}.card{max-width:54rem;margin:1rem auto;padding:1.2rem;background:#fff;border-radius:1rem;box-shadow:0 2px 12px #1232}img{width:120px;height:120px;object-fit:cover}.page{min-height:90vh;padding:1rem}.toolbar{position:sticky;top:0;background:#fff;padding:.5rem}
+</style>
+</head>
+<body>
+<header class="hero"><h1>Starter Unit 1: Hello</h1><p>Listen, read, and say hello.</p><img id="local" src="g20M17/local-media.png" alt="Local classroom illustration"></header>
+<main id="pages">
+<section class="page card" id="page-1"><h2>Dialogue 1</h2><p><b>Ms Gao:</b> Hello, Fu Xing.</p><p><b>Fu Xing:</b> Hello, Ms Gao.</p><p id="translation-1" lang="zh-CN">高老师：你好，傅星。傅星：你好，高老师。</p><button id="show-translation" aria-expanded="false">Show translation</button><button id="next">Next dialogue</button><button id="play">Play audio</button><img id="inline-image" alt="Inline story illustration"></section>
+<section class="page card" id="page-2" hidden><h2>Dialogue 2</h2><p><b>Ms Gao:</b> How are you?</p><p><b>Fu Xing:</b> I'm fine, thank you.</p><p lang="zh-CN">高老师：你好吗？傅星：我很好，谢谢。</p><button id="back">Back</button></section>
+<section class="page card"><h2>Practice</h2><p>Read the dialogue aloud. Scroll through this long page to the end.</p><ol id="long-list"></ol></section>
+</main>
+<script>
+const assets={picture:'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGOwmHvxPwAFXQKmZX6V9QAAAABJRU5ErkJggg==',audio:'data:audio/wav;base64,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'};
+document.querySelector('#inline-image').src=assets.picture;
+const audio=new Audio(assets.audio);
+document.querySelector('#play').addEventListener('click',()=>audio.play());
+const p1=document.querySelector('#page-1'),p2=document.querySelector('#page-2');
+document.querySelector('#next').addEventListener('click',()=>{p1.hidden=true;p2.hidden=false});
+document.querySelector('#back').addEventListener('click',()=>{p2.hidden=true;p1.hidden=false});
+const t=document.querySelector('#translation-1'),toggle=document.querySelector('#show-translation');
+toggle.addEventListener('click',()=>{const visible=t.hidden;t.hidden=!visible;toggle.setAttribute('aria-expanded',String(visible));toggle.textContent=visible?'Hide translation':'Show translation'});t.hidden=true;
+const list=document.querySelector('#long-list');for(let i=1;i<=30;i++){const li=document.createElement('li');li.textContent=`Practice line ${i}: Hello, how are you?`;list.append(li)}
+</script>
+</body></html>
