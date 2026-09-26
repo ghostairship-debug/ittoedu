@@ -163,7 +163,20 @@ for (const carrier of ['flow', 'markdown'] as const) {
           await last.click()
           await page.keyboard.press('End')
           await page.keyboard.press('Enter')
+          const editorCaret = async () => body.evaluate(root => {
+            const selection = root.ownerDocument.getSelection(), anchor = selection?.anchorNode
+            const element = anchor instanceof Element ? anchor : anchor?.parentElement
+            const block = element?.closest('[data-flow-block-id]')
+            return { focused: root === document.activeElement, tag: block?.tagName.toLowerCase() ?? null, text: block?.textContent ?? null }
+          })
+          writeFileSync(join(data.directory, `${carrier}-${marker.name}-after-enter.json`), JSON.stringify({
+            before, formal: await blocks(page, opened.documentId), caret: await editorCaret(), editor: await body.evaluate(root => root.textContent),
+          }, null, 2))
+          if (carrier === 'flow') await expect.poll(async () => (await blocks(page, opened.documentId)).length).toBe(before.length + 1)
+          await expect.poll(editorCaret).toEqual({ focused: true, tag: 'p', text: '' })
           await page.keyboard.type(marker.input)
+          writeFileSync(join(data.directory, `${carrier}-${marker.name}-input.json`), JSON.stringify({ before, caret: await editorCaret(),
+            formal: await blocks(page, opened.documentId), editor: await body.evaluate(root => root.textContent) }, null, 2))
           if (marker.type === 'formula') {
             const form = page.getByRole('form', { name: '公式编辑' })
             await expect(form).toBeVisible()
@@ -332,7 +345,7 @@ for (const carrier of ['flow', 'markdown'] as const) {
         return entry.rows.length
       }
       const initialRows = await rowCount()
-      await table.locator('[data-document-slot]').first().click()
+      await table.locator('[data-document-slot^="cell:"]').first().click()
       const bar = page.getByRole('toolbar', { name: '选中内容快捷工具' })
       await expect(bar).toBeVisible()
       await bar.getByRole('button', { name: '表格操作' }).click()
@@ -340,7 +353,7 @@ for (const carrier of ['flow', 'markdown'] as const) {
       await expect.poll(rowCount).toBe(initialRows + 1)
       await body.press('Control+z')
       await expect.poll(rowCount).toBe(initialRows)
-      await table.locator('[data-document-slot]').first().click({ button: 'right' })
+      await table.locator('[data-document-slot^="cell:"]').first().click({ button: 'right' })
       await page.getByRole('menu', { name: '表格操作' }).getByRole('menuitem', { name: '上方插入行' }).click()
       await expect.poll(rowCount).toBe(initialRows + 1)
       await body.press('Control+z')
