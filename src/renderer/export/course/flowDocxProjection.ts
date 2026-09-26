@@ -60,6 +60,7 @@ export interface FlowDocxProjectedItem {
   behindDoc: boolean
   item: PublishedLayerItem
   anchorBlockId: string
+  paragraphAnchor?: PublishedFlowSurfaceLayerEntry['paragraphAnchor']
   placeholderText?: string
   assetId?: string
 }
@@ -193,6 +194,7 @@ interface StagedItem {
   isFooter: boolean
   isOmitted: boolean
   anchorBlockId: string
+  paragraphAnchor?: PublishedFlowSurfaceLayerEntry['paragraphAnchor']
   placeholderText?: string
   assetId?: string
 }
@@ -326,7 +328,11 @@ export function buildFlowDocxProjection(
     let reasonCode = 'anchored-drawingml'
     let message = '浮层已作为 DrawingML 对象锚定到文档中。'
 
-    if (item.paperSpace === 'paper') {
+    if (entry.paragraphAnchor) {
+      anchorBlockId = entry.paragraphAnchor.blockId
+      reasonCode = 'paragraph-anchor'
+      message = `浮层已锚定到正文块 ${anchorBlockId}，并使用段落相对位置。`
+    } else if (item.paperSpace === 'paper') {
       if (options.blockTops && Object.keys(options.blockTops).length > 0) {
         let bestBlockId = firstBlockId
         let bestTop = -Infinity
@@ -353,7 +359,9 @@ export function buildFlowDocxProjection(
       message = '视口定位浮层已转换为文档首段锚点。'
     }
 
-    const { outputFrame } = clampLayerFrameToPageBox(sourceFrame, pageBox)
+    const { outputFrame } = entry.paragraphAnchor
+      ? { outputFrame: { ...sourceFrame, x: entry.paragraphAnchor.xRatio * pageBox.maxContentWidthPx, y: entry.paragraphAnchor.offsetY } }
+      : clampLayerFrameToPageBox(sourceFrame, pageBox)
 
     // Determine carrier & disposition
     let disposition: FlowDocxDisposition = 'preserved'
@@ -460,6 +468,7 @@ export function buildFlowDocxProjection(
       isFooter: false,
       isOmitted: false,
       anchorBlockId,
+      ...(entry.paragraphAnchor ? { paragraphAnchor: entry.paragraphAnchor } : {}),
       placeholderText,
       assetId,
     })
@@ -744,6 +753,7 @@ export function buildFlowDocxProjection(
       behindDoc,
       item: staged.entry.item,
       anchorBlockId: staged.anchorBlockId,
+      ...(staged.paragraphAnchor ? { paragraphAnchor: staged.paragraphAnchor } : {}),
       ...(staged.placeholderText ? { placeholderText: staged.placeholderText } : {}),
       ...(staged.assetId ? { assetId: staged.assetId } : {}),
     }
@@ -763,7 +773,7 @@ export function buildFlowDocxProjection(
 
     if (staged.isFooter) {
       footerItems.push(projectedItem)
-    } else if (staged.anchorBlockId === firstBlockId || staged.anchorBlockId === '__anchor_start__') {
+    } else if (!staged.paragraphAnchor && (staged.anchorBlockId === firstBlockId || staged.anchorBlockId === '__anchor_start__')) {
       documentStartItems.push(projectedItem)
     } else {
       const existing = blockAnchorMap.get(staged.anchorBlockId) ?? []
@@ -781,6 +791,13 @@ export function buildFlowDocxProjection(
     pageSize,
     orientation,
   })
+  for (const group of anchoredGroups) {
+    const node = printPlan.nodes.find(node => 'blockId' in node && node.blockId === group.blockId)
+    if (!node) throw new Error(`DOCX 锚点正文块 ${group.blockId} 不存在，已停止导出。`)
+    if (node.type === 'table' || node?.type === 'chart' || node?.type === 'media') {
+      warnings.push(`正文块 ${group.blockId} 是 ${node.type}，DOCX 绘图已锚定到该块前的相邻段落。`)
+    }
+  }
 
   // Background resolution
   const effectiveBg = resolveEffectiveBackground({

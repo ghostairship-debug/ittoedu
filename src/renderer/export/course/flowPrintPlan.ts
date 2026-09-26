@@ -1,4 +1,5 @@
 import { buildNativeChartSvg } from '../../../shared/nativeChartSvg'
+import { flowMediaCropGeometry, type FlowImageCrop } from '../../../shared/flowMediaCrop'
 import { resolveFlowParagraphPresentation, type FlowParagraphPresentation } from '../../../shared/flowBodyPresentation'
 import { tableCellSpan, type TableCellSpan } from '../../../shared/tableMerge'
 import type { NativeChartContent } from '../../../shared/contracts/native-v1'
@@ -59,6 +60,9 @@ export type FlowPrintNode =
       fallbackLabel: string
       altText?: string
       caption?: FlowTextContent
+      crop?: FlowImageCrop['crop']
+      cropX?: number
+      cropY?: number
     }
   | { type: 'code'; blockId: string; language?: string; code: string }
   | {
@@ -241,6 +245,9 @@ function printNodesForBlock(block: FlowBlock): FlowPrintNode[] {
         fallbackLabel: block.altText?.trim() || (block.caption ? plainDocumentText(block.caption).trim() : undefined) || block.assetId,
         ...(block.altText ? { altText: block.altText } : {}),
         ...(block.caption ? { caption: block.caption } : {}),
+        ...(block.crop ? { crop: block.crop } : {}),
+        ...(block.cropX !== undefined ? { cropX: block.cropX } : {}),
+        ...(block.cropY !== undefined ? { cropY: block.cropY } : {}),
       }]
     case 'code':
       return [{
@@ -313,7 +320,10 @@ function printNodeToHtml(
         : undefined
       if (assetUrl) {
         const alt = node.altText?.trim() || (node.caption ? plainDocumentText(node.caption).trim() : undefined) || node.fallbackLabel
-        return `<figure data-flow-print-block="${escapeHtml(node.blockId)}" data-flow-print="image"><img class="flow-print-image" src="${escapeHtml(assetUrl)}" alt="${escapeHtml(alt)}"/>${
+        const crop = node.crop ? flowMediaCropGeometry({ width: 1, height: 1 }, node) : null
+        const pct = (value: number) => Math.round(value * 1_000_000) / 10_000
+        const cropStyle = crop ? ` style="clip-path:inset(${pct(crop.sourceRect.y)}% ${pct(1 - crop.sourceRect.x - crop.sourceRect.width)}% ${pct(1 - crop.sourceRect.y - crop.sourceRect.height)}% ${pct(crop.sourceRect.x)}%)"` : ''
+        return `<figure data-flow-print-block="${escapeHtml(node.blockId)}" data-flow-print="image"><img class="flow-print-image" src="${escapeHtml(assetUrl)}" alt="${escapeHtml(alt)}"${cropStyle}/>${
           node.caption ? `<figcaption>${richTextToHtml(node.caption)}</figcaption>` : ''
         }</figure>`
       }

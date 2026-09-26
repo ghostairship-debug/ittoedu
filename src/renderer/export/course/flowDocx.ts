@@ -1,5 +1,6 @@
 import type { FlowTextContent } from '../../../shared/document/content'
 import { documentMathOmml } from '../../../shared/document/omml'
+import { flowMediaCropGeometry, type FlowImageCrop } from '../../../shared/flowMediaCrop'
 import { describeNativeChart } from '../../../shared/nativeChartView'
 import type { TableCellSpan } from '../../../shared/tableMerge'
 import { strToU8, zipSync } from 'fflate'
@@ -206,12 +207,14 @@ function imageExtension(mimeType: string): string | null {
   return null
 }
 
-function inlineImageDrawing(label: string, image: ImagePart, drawingId: number, aspect = 16 / 9, maxHeight = Infinity): string {
+function inlineImageDrawing(label: string, image: ImagePart, drawingId: number, aspect = 16 / 9, maxHeight = Infinity, crop?: FlowImageCrop): string {
   const width = Math.min(560, maxHeight * aspect)
   const height = Math.round(width / aspect)
   const cx = Math.round(width * 9_525)
   const cy = Math.round(height * 9_525)
-  return `<w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0"><wp:extent cx="${cx}" cy="${cy}"/><wp:docPr id="${drawingId}" name="${xml(label)}" descr="${xml(label)}"/><a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:nvPicPr><pic:cNvPr id="${drawingId}" name="${xml(image.path)}"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed="${image.relationshipId}"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>`
+  const source = crop?.crop ? flowMediaCropGeometry({ width: 1, height: 1 }, crop).sourceRect : null
+  const srcRectXml = source ? `<a:srcRect l="${Math.round(source.x * 100_000)}" t="${Math.round(source.y * 100_000)}" r="${Math.round((1 - source.x - source.width) * 100_000)}" b="${Math.round((1 - source.y - source.height) * 100_000)}"/>` : ''
+  return `<w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0"><wp:extent cx="${cx}" cy="${cy}"/><wp:docPr id="${drawingId}" name="${xml(label)}" descr="${xml(label)}"/><a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:nvPicPr><pic:cNvPr id="${drawingId}" name="${xml(image.path)}"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed="${image.relationshipId}"/>${srcRectXml}<a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>`
 }
 
 function anchorXml(
@@ -225,8 +228,9 @@ function anchorXml(
   const cyEMU = Math.round(item.outputFrame.height * 9_525)
   const behindDocVal = item.behindDoc ? '1' : '0'
   const relHeightVal = item.relativeHeight
+  const verticalFrom = item.paragraphAnchor ? 'paragraph' : 'margin'
 
-  return `<w:r><w:drawing><wp:anchor distT="0" distB="0" distL="0" distR="0" simplePos="0" relativeHeight="${relHeightVal}" behindDoc="${behindDocVal}" locked="0" layoutInCell="1" allowOverlap="1"><wp:simplePos x="0" y="0"/><wp:positionH relativeFrom="margin"><wp:posOffset>${xEMU}</wp:posOffset></wp:positionH><wp:positionV relativeFrom="margin"><wp:posOffset>${yEMU}</wp:posOffset></wp:positionV><wp:extent cx="${cxEMU}" cy="${cyEMU}"/><wp:effectExtent l="0" t="0" r="0" b="0"/><wp:wrapNone/><wp:docPr id="${drawingId}" name="${xml(item.layerItemId)}" descr="${xml(item.layerItemId)}"/><wp:cNvGraphicFramePr/>${graphicXml}</wp:anchor></w:drawing></w:r>`
+  return `<w:r><w:drawing><wp:anchor distT="0" distB="0" distL="0" distR="0" simplePos="0" relativeHeight="${relHeightVal}" behindDoc="${behindDocVal}" locked="0" layoutInCell="1" allowOverlap="1"><wp:simplePos x="0" y="0"/><wp:positionH relativeFrom="margin"><wp:posOffset>${xEMU}</wp:posOffset></wp:positionH><wp:positionV relativeFrom="${verticalFrom}"><wp:posOffset>${yEMU}</wp:posOffset></wp:positionV><wp:extent cx="${cxEMU}" cy="${cyEMU}"/><wp:effectExtent l="0" t="0" r="0" b="0"/><wp:wrapNone/><wp:docPr id="${drawingId}" name="${xml(item.layerItemId)}" descr="${xml(item.layerItemId)}"/><wp:cNvGraphicFramePr/>${graphicXml}</wp:anchor></w:drawing></w:r>`
 }
 
 function textBoxGraphicXml(
@@ -543,7 +547,7 @@ function renderPrintNode(
             disposition: 'preserved',
             detail: 'Embedded OOXML image relationship',
           })
-          return `${leadingContent ? `<w:p>${leadingContent}</w:p>` : ''}${inlineImageDrawing(node.fallbackLabel, image, context.nextDrawingId++)}${
+          return `${leadingContent ? `<w:p>${leadingContent}</w:p>` : ''}${inlineImageDrawing(node.fallbackLabel, image, context.nextDrawingId++, 16 / 9, Infinity, node)}${
             node.caption ? paragraph(node.caption, { style: 'Caption' }) : ''
           }`
         }
