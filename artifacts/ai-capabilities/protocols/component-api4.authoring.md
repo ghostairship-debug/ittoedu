@@ -2,6 +2,8 @@
 
 > **当前工程格式是 Course Project V9。** 本文只描述当前 V9 可用边界；类型与协议真值以 `src/shared/componentTypes.ts`、`componentSchema.ts` 和源码为准。
 
+果铃是通用内容工作台，支持 H5 演示、讲义、无限画布与文档等创作；本文描述其中 Component 的实际协议与支持范围，教育内容只是应用场景之一。Component 的可执行载体以本文列明的宿主支持范围为准，不表示可直接嵌入所有文档格式。
+
 本文定义 `.h5component` 协议。类型真值以 [`src/shared/componentTypes.ts`](../src/shared/componentTypes.ts) 和 [`src/shared/componentSchema.ts`](../src/shared/componentSchema.ts) 为准。
 
 文档同步基线：**2026-08-27**。生产 Schema、导入器、宿主、发布器与测试只接受 Component API 4。
@@ -10,7 +12,7 @@
 
 编辑器只接受 V4：严格声明 `supportedScopes` 与 `renderMode`，使用 DOM/Phaser 分能力上下文、可见性/暂停生命周期和确定性捕获准备。V1–V3 包会在导入边界得到明确的“不受支持”诊断。
 
-组件必须使用 V4。Course Project V9 JSON 是组件实例、公开参数、作用域、几何和业务状态的工程真相；DOM、Phaser 和 Three.js 只是组件内部的呈现/交互实现。可枚举的节点/全局元素点击、元素入场/退场、状态/场景跳转、声音和视频控制优先使用声明式 interactions。整页或整块世界的动画、特效与连续耦合机制使用画布或 surface 运行时，少放可教文字。稍复杂的局部互动（拖拽、配对、本地多步控件）使用 Component API 4：先匹配已有包，允许为本课新建。不要用场景运行时去仿一个局部控件。旧 Project V1–V8 与 Component API 1–3 均明确拒绝。
+组件必须使用 V4。Course Project V9 JSON 是组件实例、公开参数、作用域、几何和业务状态的工程真相；DOM、Phaser 和 Three.js 只是组件内部的呈现/交互实现。可枚举的节点/全局元素点击、元素入场/退场、状态/场景跳转、声音和视频控制优先使用声明式 interactions。整页或整块世界的动画、特效与连续耦合机制使用画布或 surface 运行时，少放说明性文字。稍复杂的局部互动（拖拽、配对、本地多步控件）使用 Component API 4：先匹配已有包，允许为当前内容新建。不要用场景运行时去仿一个局部控件。旧 Project V1–V8 与 Component API 1–3 均明确拒绝。
 
 中央编辑状态与当前位置试运行共用同一个 1280×720 Player 视觉画布，并在同一 Renderer 文档中使用 Published V2 宿主，不再通过 authoring iframe 合成。编辑状态由 authoring Player 创建组件真实视觉，并在其上叠加透明 Phaser 原生交互层；authoring 宿主冻结组件输入、宿主动作、声明式互动、音视频、导航和课程状态推进。组件只能通过带 session/revision 的版本化 direct patch / ACK / error / target 协议向宿主描述“哪一段 Props 可在何处编辑”，不能借 authoring 协议访问编辑器 DOM 或 Store。普通试运行、整课预览、捕获和成品仍使用各自既有的 preview/capture 行为。
 
@@ -32,7 +34,7 @@
 
 ### 0.1 当前组件来源
 
-组件目录状态以当次生成的 [`artifacts/ai-capabilities/index.json`](../artifacts/ai-capabilities/index.json) 和 `component-catalog.snapshot.json` 为准；本次同步为 `catalogStatus: available`、`packageCount: 4`。以后目录不可用或包数变化，只表示当时没有对应目录包可浏览，不是禁止为本课导入或新建 `.h5component`。当前已验证的互动播放载体是 Slide scene/surface、Flow block/surface 和 Spatial world/surface 的本地 DOM Component，以及 Slide scene 的 Phaser Component；目录可用性不扩大这个边界。
+组件目录状态以当次生成的 [`artifacts/ai-capabilities/index.json`](../artifacts/ai-capabilities/index.json) 和 `component-catalog.snapshot.json` 为准；本次同步为 `catalogStatus: available`、`packageCount: 4`。以后目录不可用或包数变化，只表示当时没有对应目录包可浏览，不是禁止为当前内容导入或新建 `.h5component`。当前已验证的互动播放载体是 Slide scene/surface、Flow block/surface 和 Spatial world/surface 的本地 DOM Component，以及 Slide scene 的 Phaser Component；目录可用性不扩大这个边界。
 
 当外部目录可用时，ittoedu 自有实验包预期仍是：
 
@@ -138,7 +140,7 @@ V4 的 `renderMode` 是能力声明，不是自动转换开关：改成 `dom` �
 
 ## 3. 组件文字与图片：不需要登记
 
-按正常方式写组件即可：可见文字可以直接写在 `runtime.js` 或 DOM 里，**不需要**放进 `props.content`，也不需要标记 `data-courseware-edit-key` 或登记命中区域。宿主在运行时自动识别 DOM 组件的可见文字与显示 manifest 素材的 `<img>`；教师在画布上改字时，修改按“原文 + 所在区域 → 新文字”存为该组件实例的规则（`textOverrides`），替换图片按受管资源记录为实例的 `assetOverrides`。组件包与源码不会被改写，改字后宿主会自动重新截取静态后备图。程序实时计算的文字只提供 AI 修改。
+按正常方式写组件即可：可见文字可以直接写在 `runtime.js` 或 DOM 里，**不需要**放进 `props.content`，也不需要标记 `data-courseware-edit-key` 或登记命中区域。宿主在运行时自动识别 DOM 组件的可见文字与显示 manifest 素材的 `<img>`；用户在画布上改字时，修改按“原文 + 所在区域 → 新文字”存为该组件实例的规则（`textOverrides`），替换图片按受管资源记录为实例的 `assetOverrides`。组件包与源码不会被改写，改字后宿主会自动重新截取静态后备图。程序实时计算的文字只提供 AI 修改。
 
 需要在属性栏统一编辑、随预设或变体切换的文案，仍可以放进 `props.content`；这是可选做法。V4 编辑器会对合并后的 `props.content` 递归遍历，把其中每个字符串自动显示为文字编辑项。支持对象和数组，例如：
 
@@ -175,13 +177,13 @@ V4 对 `content` 使用递归合并。修改一个深层字符串不会丢失默
 | `boolean` | 布尔值 | 功能开关 |
 | `color` | `#rrggbb` | 颜色 |
 | `select` | 选项字符串 | 布局、模式、题型 |
-| `image` | 工程素材 ID | 教师可替换图片 |
+| `image` | 工程素材 ID | 用户可替换图片 |
 
 `key` 是点分路径，例如 `content.feedback.correct`、`items.0.imageId`。禁止空路径段、`__proto__`、`prototype` 和 `constructor`。
 
 图片属性存的是工程 `AssetMeta.id`，运行时通过 `ctx.projectAssetUrl(assetId)` 读取。组件自带且不需替换的图片通过 manifest `assets` 和 `ctx.assetUrl(assetKey)` 读取。
 
-工程素材删除使用共享引用图：外部组件基础/命名状态 Props 中出现的工程 Asset ID、公开 `image` 属性及有效默认值都会保护素材；提供包上下文时还会保守扫描组件 Runtime source。缺少匹配包上下文时，删除安全路径会按可能引用阻断并报告上下文缺失，而不是把素材判为未使用。因此应优先把教师可替换图片声明为 `image` 属性，不要只把工程 Asset ID 隐藏在任意字符串或源码中。
+工程素材删除使用共享引用图：外部组件基础/命名状态 Props 中出现的工程 Asset ID、公开 `image` 属性及有效默认值都会保护素材；提供包上下文时还会保守扫描组件 Runtime source。缺少匹配包上下文时，删除安全路径会按可能引用阻断并报告上下文缺失，而不是把素材判为未使用。因此应优先把用户可替换图片声明为 `image` 属性，不要只把工程 Asset ID 隐藏在任意字符串或源码中。
 
 ### 4.1 兼容：显式登记的画布文字
 
@@ -505,7 +507,7 @@ Published V2 当前已证明的 API 4 互动播放切片是：DOM 的 Slide scen
 
 内部点击、拖拽、动画状态推进和宿主动作只在 `preview` 生效。authoring 中即使组件代码创建了命中对象，宿主也会屏蔽输入并冻结动作；组件不得访问编辑器 DOM，也不得假定属性栏结构。
 
-组件自己显示的文字与图片由宿主识别，教师可在画布上原位修改（见第 3 节），组件不需要登记；`props.content` 文字（可选）另可在属性栏编辑。已用 DOM `data-courseware-edit-key` 或 `ctx.editor.registerTextRegion()` 登记的旧组件继续按 Props 路径编辑。
+组件自己显示的文字与图片由宿主识别，用户可在画布上原位修改（见第 3 节），组件不需要登记；`props.content` 文字（可选）另可在属性栏编辑。已用 DOM `data-courseware-edit-key` 或 `ctx.editor.registerTextRegion()` 登记的旧组件继续按 Props 路径编辑。
 
 PDF/PPTX 成品不执行组件互动或声音；部分 Slide 链路会在导出时以 `mode: 'capture'` 执行组件以生成静态像素。当前精确边界是：
 
