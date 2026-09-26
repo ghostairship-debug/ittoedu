@@ -25,8 +25,8 @@ test('G20 window title stays fixed across dirty edits and editor focus', async (
     const page = await app.firstWindow()
     await expect(page).toHaveTitle(APP_NAME)
     await app.evaluate(({ dialog }, path) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] }) }, workspace)
-    await page.getByRole('button', { name: '打开工作空间', exact: true }).first().click()
-    await page.getByRole('tree', { name: '工作空间文件' }).getByRole('button', { name: 'private-title.h5lesson', exact: true }).dblclick()
+    await page.getByRole('region', { name: '没有打开的文件' }).getByRole('button', { name: '打开文件夹', exact: true }).click()
+    await page.locator('.lesson-directory-tree').getByRole('button', { name: 'private-title.h5lesson', exact: true }).dblclick()
     const tab = page.locator('.workspace-document-tabs').getByRole('tab', { name: /^private-title\.h5lesson/ })
     await expect(tab).toHaveAttribute('aria-selected', 'true')
     await expect(page.locator('.canvas-stage-stack, .flow-workspace').filter({ visible: true }).first()).toBeVisible()
@@ -53,14 +53,14 @@ test('G20 window title stays fixed across dirty edits and editor focus', async (
     await expect(page).toHaveTitle(APP_NAME)
     await expect.poll(() => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.getTitle())).toBe(APP_NAME)
 
-    await page.getByRole('button', { name: '在编辑器中打开', exact: true }).click()
+    await page.locator('.course-light-tools').getByRole('button', { name: '在编辑器中打开', exact: true }).click()
     await expect(page).toHaveTitle(APP_NAME)
     await expect.poll(() => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.getTitle())).toBe(APP_NAME)
     await page.screenshot({ path: join(directory, 'dirty-editor-title.png') })
     writeFileSync(join(directory, 'evidence.json'), JSON.stringify({ file, projectTitle: project.title, appName: APP_NAME,
       receipt: edited.receipt, dirty: (await page.evaluate(id => window.desktopAPI!.documents!.read(id), edited.documentId)).dirty,
       browserTitle: await page.title(), nativeTitle: await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.getTitle()) }, null, 2))
-    await page.getByRole('button', { name: /^保存/ }).click()
+    await page.keyboard.press('Control+s')
     await expect.poll(async () => (await page.evaluate(id => window.desktopAPI!.documents!.read(id), edited.documentId)).dirty).toBe(false)
     await expect(page).toHaveTitle(APP_NAME)
     await expect.poll(() => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.getTitle())).toBe(APP_NAME)
