@@ -382,9 +382,26 @@ for (const carrier of ['flow', 'markdown'] as const) {
     const page = await app.firstWindow(), restoreClipboard = await preserveClipboard()
     try {
       await setupSelectionUI(app, page, server.endpoint, data.workspace)
+      const assertClipboardFocus = async () => {
+        await expect.poll(() => app.evaluate(({ BrowserWindow }) => {
+          const window = BrowserWindow.getAllWindows()[0]!
+          return { window: window.isFocused(), webContents: window.webContents.isFocused() }
+        })).toEqual({ window: true, webContents: true })
+      }
+      const focusClipboardWindow = async () => {
+        await page.bringToFront()
+        await app.evaluate(({ BrowserWindow }) => {
+          const window = BrowserWindow.getAllWindows()[0]!
+          window.show()
+          window.focus()
+          window.webContents.focus()
+        })
+        await assertClipboardFocus()
+      }
       const name = carrier === 'flow' ? '正文验收.h5lesson' : '正文验收.md'
       const opened = await openSelectionFile(page, data.workspace, name)
       const body = await bodyFor(page, carrier, name)
+      await focusClipboardWindow()
       const formal = async () => {
         const snapshot = await readSelectionDocument(page, opened.documentId)
         if (snapshot.model.kind === 'markdown') return snapshot.model.source
@@ -448,12 +465,18 @@ for (const carrier of ['flow', 'markdown'] as const) {
             alerts: [...document.querySelectorAll('[role="alert"]')].map(node => node.textContent?.trim() ?? ''),
             paste: (window as Window & { __m16PasteEvents?: Array<Record<string, unknown>> }).__m16PasteEvents ?? [] }
         })
-        plainDiagnostic.push({ stage, ui, clipboardText: await app.evaluate(({ clipboard }) => clipboard.readText()), formal: await readFormal() })
+        const focus = await app.evaluate(({ BrowserWindow }) => {
+          const window = BrowserWindow.getAllWindows()[0]!
+          return { window: window.isFocused(), webContents: window.webContents.isFocused() }
+        })
+        plainDiagnostic.push({ stage, ui, focus, clipboardText: await app.evaluate(({ clipboard }) => clipboard.readText()), formal: await readFormal() })
         writeFileSync(join(data.directory, `${carrier}-clipboard-plain-diagnostic.json`), JSON.stringify(plainDiagnostic, null, 2))
       }
+      await focusClipboardWindow()
       await selectVisibleText(page, body, '再观察')
       await firstParagraph(body, carrier).click({ button: 'right' })
       await capturePlain('before-menu-command')
+      await assertClipboardFocus()
       await page.getByRole('menu', { name: '段落操作' }).getByRole('menuitem', { name: '粘贴为纯文本' }).click()
       await capturePlain('after-menu-command')
       try { await expect.poll(visibleText).toBe('甲段：先预测，先预测。') }
@@ -500,9 +523,11 @@ for (const carrier of ['flow', 'markdown'] as const) {
       await expect.poll(objectFormal).toBe(objectBefore)
       expect(await app.evaluate(({ clipboard }) => clipboard.readText())).toBe(objectClipboard.text)
       expect(await app.evaluate(({ clipboard }) => clipboard.availableFormats())).toContain('application/x-cw-document-slice')
+      await focusClipboardWindow()
       await selectVisibleText(page, objectBody, '保持原样')
       await secondParagraph(objectBody, carrier).click({ button: 'right' })
       await capturePlain('object-before-menu-command', objectFormal)
+      await assertClipboardFocus()
       await page.getByRole('menu', { name: '段落操作' }).getByRole('menuitem', { name: '粘贴为纯文本' }).click()
       await capturePlain('object-after-menu-command', objectFormal)
       await expect.poll(async () => (await targetParagraph()).map(item => item.type === 'text' ? item.text : '').join(''))
