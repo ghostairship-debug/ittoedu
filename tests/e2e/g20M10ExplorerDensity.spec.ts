@@ -75,40 +75,40 @@ test('M10-T06 Explorer keeps a small top bar while right-click actions and Enter
 
     const context = async (name: string) => {
       await tree.getByRole('button', { name, exact: true }).click({ button: 'right' })
-      const menu = files.getByRole('menu', { name: '文件菜单' })
+      const menu = page.getByRole('menu', { name: '文件菜单' })
       await expect(menu).toBeVisible()
       return menu
     }
     const menu = await context('classroom')
-    for (const name of ['新建文本文件', '重命名', '复制', '剪切', '粘贴', '移到回收站'])
-      await expect(menu.getByRole('button', { name, exact: true })).toBeVisible()
+    for (const name of ['新建文本文档', '重命名', '复制', '剪切', '粘贴', '移到回收站'])
+      await expect(menu.getByRole('menuitem', { name, exact: true })).toBeVisible()
     const menuScreenshot = join(directory, '01-explorer-context.png')
     await page.screenshot({ path: menuScreenshot })
     await info.attach('explorer-context', { path: menuScreenshot, contentType: 'image/png' })
-    await menu.getByRole('button', { name: '新建文本文件', exact: true }).click()
+    await menu.getByRole('menuitem', { name: '新建文本文档', exact: true }).click()
     await files.getByLabel('文件名称').fill('new.txt')
     await files.getByRole('dialog', { name: '文件操作' }).getByRole('button', { name: '确认' }).click()
     await expect.poll(() => existsSync(join(classroom, 'new.txt'))).toBe(true)
     await expect(tree.getByRole('button', { name: 'new.txt', exact: true })).toBeVisible()
 
-    await (await context('copy-me.txt')).getByRole('button', { name: '复制', exact: true }).click()
-    await (await context('classroom')).getByRole('button', { name: '粘贴', exact: true }).click()
+    await (await context('copy-me.txt')).getByRole('menuitem', { name: '复制', exact: true }).click()
+    await (await context('classroom')).getByRole('menuitem', { name: '粘贴', exact: true }).click()
     await expect.poll(() => existsSync(join(classroom, 'copy-me.txt'))).toBe(true)
     expect(readFileSync(join(classroom, 'copy-me.txt'), 'utf8')).toBe('copy body')
     expect(readFileSync(join(workspace, 'copy-me.txt'), 'utf8')).toBe('copy body')
 
-    await (await context('move-me.txt')).getByRole('button', { name: '剪切', exact: true }).click()
-    await (await context('classroom')).getByRole('button', { name: '粘贴', exact: true }).click()
+    await (await context('move-me.txt')).getByRole('menuitem', { name: '剪切', exact: true }).click()
+    await (await context('classroom')).getByRole('menuitem', { name: '粘贴', exact: true }).click()
     await expect.poll(() => existsSync(join(classroom, 'move-me.txt'))).toBe(true)
     expect(existsSync(join(workspace, 'move-me.txt'))).toBe(false)
     expect(readFileSync(join(classroom, 'move-me.txt'), 'utf8')).toBe('move body')
 
-    await (await context('new.txt')).getByRole('button', { name: '重命名', exact: true }).click()
+    await (await context('new.txt')).getByRole('menuitem', { name: '重命名', exact: true }).click()
     await files.getByLabel('文件名称').fill('renamed.txt')
     await files.getByRole('dialog', { name: '文件操作' }).getByRole('button', { name: '确认' }).click()
     await expect.poll(() => existsSync(join(classroom, 'renamed.txt'))).toBe(true)
     expect(existsSync(join(classroom, 'new.txt'))).toBe(false)
-    await (await context('renamed.txt')).getByRole('button', { name: '移到回收站', exact: true }).click()
+    await (await context('renamed.txt')).getByRole('menuitem', { name: '移到回收站', exact: true }).click()
     await expect.poll(() => existsSync(join(classroom, 'renamed.txt'))).toBe(false)
     await expect(tree.getByRole('button', { name: 'renamed.txt', exact: true })).toHaveCount(0)
 
@@ -141,7 +141,7 @@ test('M10-T06 Explorer keeps a small top bar while right-click actions and Enter
     await page.screenshot({ path: screenshot })
     await info.attach('explorer-actions', { path: screenshot, contentType: 'image/png' })
     writeFileSync(join(directory, 'evidence.json'), JSON.stringify({ toolbar: ['新建', '刷新'],
-      contextActions: ['新建文本文件', '复制', '粘贴', '剪切', '重命名', '移到回收站'],
+      contextActions: ['新建文本文档', '复制', '粘贴', '剪切', '重命名', '移到回收站'],
       keyboardOpen: 'lesson.md', nestedDirectory: 'lessons/classroom',
       treeDrag: { fileIntoDirectory: true, descendantDirectoryRejected: true, directoryToRoot: true },
       mediaPresent: ['picture.png', 'movie.webm', 'voice.wav'], pageErrors: errors }, null, 2) + '\n')

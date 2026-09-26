@@ -57,8 +57,8 @@ it('M21 imports a .pptx from its right-click menu as a new H5 presentation besid
   const onFile = renderTree(directory, service)
   fireEvent.contextMenu(await screen.findByRole('button', { name: '第一课.pptx' }))
   const menu = screen.getByRole('menu', { name: '文件菜单' })
-  expect(within(menu).getAllByRole('button')[0]).toHaveTextContent('导入为 H5 演示')
-  fireEvent.click(within(menu).getByRole('button', { name: '导入为 H5 演示' }))
+  expect(within(menu).getAllByRole('menuitem')[0]).toHaveTextContent('导入为 H5 演示')
+  fireEvent.click(within(menu).getByRole('menuitem', { name: '导入为 H5 演示' }))
   const created = path.join(directory, '第一课 (2).h5lesson')
   await waitFor(() => expect(onFile).toHaveBeenCalledWith({ name: '第一课 (2).h5lesson', kind: 'file', path: created }))
   const course = await pptCourse(created)
@@ -68,7 +68,7 @@ it('M21 imports a .pptx from its right-click menu as a new H5 presentation besid
 
   // Other files do not offer it.
   fireEvent.contextMenu(screen.getByRole('button', { name: '第一课.h5lesson' }))
-  expect(within(screen.getByRole('menu', { name: '文件菜单' })).queryByRole('button', { name: '导入为 H5 演示' })).toBeNull()
+  expect(within(screen.getByRole('menu', { name: '文件菜单' })).queryByRole('menuitem', { name: '导入为 H5 演示' })).toBeNull()
 })
 
 it('M21 makes a new H5 presentation from a chosen PPT in the folder the 新建 menu was opened for', async () => {
@@ -76,7 +76,7 @@ it('M21 makes a new H5 presentation from a chosen PPT in the folder the 新建 m
   await fs.mkdir(path.join(directory, 'unit'))
   const onFile = renderTree(directory, service)
   fireEvent.click(await screen.findByRole('button', { name: 'unit' }))
-  fireEvent.click(screen.getByRole('button', { name: '从 PPT 新建 H5 演示' }))
+  fireEvent.click(screen.getByRole('menuitem', { name: '从 PPT 新建 H5 演示' }))
   const bytes = pptxImportFixture()
   const file = Object.assign(new File([bytes], '期末复习.pptx'), { arrayBuffer: async () => bytes.slice().buffer })
   fireEvent.change(screen.getByLabelText('选择要在此文件夹新建为 H5 演示的 PPT'), { target: { files: [file] } })
@@ -86,7 +86,7 @@ it('M21 makes a new H5 presentation from a chosen PPT in the folder the 新建 m
 
   // A file that is not a PPT fails before anything is written.
   const broken = Object.assign(new File(['not a zip'], '坏文件.pptx'), { arrayBuffer: async () => new TextEncoder().encode('not a zip').buffer })
-  fireEvent.click(screen.getByRole('button', { name: '从 PPT 新建 H5 演示' }))
+  fireEvent.click(screen.getByRole('menuitem', { name: '从 PPT 新建 H5 演示' }))
   fireEvent.change(screen.getByLabelText('选择要在此文件夹新建为 H5 演示的 PPT'), { target: { files: [broken] } })
   await screen.findByRole('alert')
   expect(await fs.readdir(path.join(directory, 'unit'))).toEqual(['期末复习.h5lesson'])

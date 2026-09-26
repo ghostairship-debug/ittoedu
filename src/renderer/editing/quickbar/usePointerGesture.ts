@@ -12,16 +12,18 @@ export function usePointerGesture(root: HTMLElement | null | undefined): boolean
     if (!root) return
     const down = (event: PointerEvent) => {
       if (event.button !== 0) return
+      if (!(event.target instanceof Node) || !root.contains(event.target)) return
       if (event.target instanceof Element && event.target.closest(QUICK_BAR_SELECTOR)) return
       setActive(true)
     }
     const up = () => setActive(false)
-    root.addEventListener('pointerdown', down, true)
+    // Listen at the document: a stage's React capture handler stops the press at the React root, before `root`.
+    document.addEventListener('pointerdown', down, true)
     window.addEventListener('pointerup', up, true)
     window.addEventListener('pointercancel', up, true)
     window.addEventListener('blur', up)
     return () => {
-      root.removeEventListener('pointerdown', down, true)
+      document.removeEventListener('pointerdown', down, true)
       window.removeEventListener('pointerup', up, true)
       window.removeEventListener('pointercancel', up, true)
       window.removeEventListener('blur', up)

@@ -108,7 +108,19 @@
   outline-offset: 1px;
 }
 /* M21: the "+" stays at the end of the rail without hovering; a dragged card shows where it will land. */
-.bottom-scene-nav__add { display: flex; flex: 0 0 44px; align-items: center; }
+/* Always in view (M21): with more pages than fit, the "+" stays at the right end while the cards scroll under it. */
+.bottom-scene-nav__add {
+  position: sticky;
+  right: -10px;
+  z-index: 1;
+  box-sizing: border-box;
+  display: flex;
+  flex: 0 0 60px;
+  align-items: center;
+  justify-content: center;
+  padding: 0 10px;
+  background: var(--panel-bg, #fffefa);
+}
 .lesson-workspace-shell .bottom-scene-nav__add-button, .bottom-scene-nav__add-button {
   display: grid;
   place-items: center;

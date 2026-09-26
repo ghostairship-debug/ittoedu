@@ -70,8 +70,8 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
       return DecorationSet.create(state.doc, decorations)
     },
     nodeViews: {
-      object: node => objectView(node, false),
-      compound: node => objectView(node, true),
+      object: (node, view, getPos) => objectView(node, false, view, getPos),
+      compound: (node, view, getPos) => objectView(node, true, view, getPos),
       ...(initial.presentation !== 'flow' ? { slot: (node: import('prosemirror-model').Node) => {
         const key = node.attrs.key as string, dom = document.createElement(key.startsWith('item:') ? 'li' : 'div')
         dom.dataset.documentSlot = key
@@ -183,7 +183,7 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
       view.dispatch(transaction)
     } catch (error) { if (prepared) await port?.discard(prepared.prepared); options.diagnostic(error instanceof Error ? error.message : String(error)) }
   }
-  function objectView(node: import('prosemirror-model').Node, editableSlots: boolean) {
+  function objectView(node: import('prosemirror-model').Node, editableSlots: boolean, owner: EditorView, getPos: () => number | undefined) {
     const block = { ...node.attrs.data, id: node.attrs.id } as DocumentBlock
     const flow = options.presentation === 'flow'
     // Flow draws a divider as playback does: a real rule, not a label.
@@ -194,6 +194,16 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
     let destroy: (() => void) | void
     if (options.renderObject && ['media', 'chart', 'component'].includes(block.type)) {
       const object = document.createElement('div'); object.contentEditable = 'false'; dom.append(object)
+      // A click on the picture, chart or component itself (not its caption) selects the whole block, so its quick bar
+      // opens as it does for objects on a page (M21). ProseMirror alone selects such a block only on Ctrl+click.
+      object.addEventListener('mousedown', event => {
+        if (event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey) return
+        const pos = getPos()
+        if (pos === undefined) return
+        event.preventDefault()
+        if (!(owner.state.selection instanceof NodeSelection && owner.state.selection.from === pos)) owner.dispatch(owner.state.tr.setSelection(NodeSelection.create(owner.state.doc, pos)))
+        owner.focus()
+      })
       destroy = options.renderObject(block, object)
     } else if (!editableSlots && !(flow && block.type === 'divider')) dom.textContent = `${block.type} 对象`
     // ProseMirror owns every child of contentDOM. Keep editable captions separate
@@ -306,7 +316,7 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
         view.updateState(view.state.apply(transaction))
       }
     }
-    if (refreshObjects) view.setProps({ nodeViews: { ...view.props.nodeViews, object: node => objectView(node, false), compound: node => objectView(node, true) } })
+    if (refreshObjects) view.setProps({ nodeViews: { ...view.props.nodeViews, object: (node, current, getPos) => objectView(node, false, current, getPos), compound: (node, current, getPos) => objectView(node, true, current, getPos) } })
   }
   return { view, update, boundary, syncDomTextSelection, flush: () => { if (composing) return false; publish(); boundary(); return true }, destroy: () => view.destroy(),
     /** Current selection at the current revision, for re-reporting it after a committed edit such as formatting. */

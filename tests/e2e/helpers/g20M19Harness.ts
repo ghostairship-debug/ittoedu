@@ -84,6 +84,13 @@ const RUNTIME_SOURCE = `CoursewareRuntime.define({
   }
 });`
 
+/** The DOM Runtime at RUNTIME_FRAME that draws RUNTIME_TEXT itself (recognised by the host, registered nowhere). */
+export function runtimeLayerItem(order: number) {
+  return { kind: 'runtime', layerItemId: 'm19-runtime', label: 'm19-runtime', frame: { mode: 'absolute', ...RUNTIME_FRAME }, order,
+    visible: true, locked: false, rotation: 0, opacity: 1, hitPolicy: 'surface', playbackInitialVisibility: 'inherit',
+    runtime: { protocol: 'canvas-runtime', runtimeApiVersion: 2, enabled: true, renderMode: 'dom', source: RUNTIME_SOURCE, content: { values: {} }, assets: {} } }
+}
+
 /**
  * A Slide course on `canvas` with a Native text block and a DOM Runtime that draws its own text (recognised by the
  * host, registered nowhere); `pages` adds a Flow and a Spatial page after it.
@@ -92,12 +99,7 @@ export function runtimeCourse(title: string, canvas: { width: number; height: nu
   let project = createBlankCourseProject({ title, canvas })
   const surface = project.surfaces[0]
   if (surface?.type !== 'slide') throw new Error('slide surface')
-  surface.scenes[0]!.layerItems = [
-    textBlock('title', titleFrame, '标题', '#245b46', 1),
-    { kind: 'runtime', layerItemId: 'm19-runtime', label: 'm19-runtime', frame: { mode: 'absolute', ...RUNTIME_FRAME }, order: 2,
-      visible: true, locked: false, rotation: 0, opacity: 1, hitPolicy: 'surface', playbackInitialVisibility: 'inherit',
-      runtime: { protocol: 'canvas-runtime', runtimeApiVersion: 2, enabled: true, renderMode: 'dom', source: RUNTIME_SOURCE, content: { values: {} }, assets: {} } },
-  ] as never
+  surface.scenes[0]!.layerItems = [textBlock('title', titleFrame, '标题', '#245b46', 1), runtimeLayerItem(2)] as never
   if (pages) {
     const flow = addCourseFlowPage(project, { title: '讲义' })
     if (!flow.ok) throw new Error(flow.reason)

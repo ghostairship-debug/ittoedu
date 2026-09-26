@@ -199,7 +199,8 @@ export function NativeSelectionContext({ documentId, revision, locationId, itemI
     const node = single.view, patch = single.patch
     const objectState = { locked: node.locked, visible: node.visible, disabledReason: single.disabledReason,
       setLocked: (locked: boolean) => patch({ locked }), setVisible: (visible: boolean) => patch({ visible }),
-      editText: single.editText, replaceImage: node.type === 'image' ? single.replaceImage : undefined }
+      // The main action matches the quick bar's button for the type: 编辑文字 for text, 替换图片 for images.
+      editText: node.type === 'text' ? single.editText : undefined, replaceImage: node.type === 'image' ? single.replaceImage : undefined }
     const ports = selectionObjectCommands.portsFor(itemIds[0]!)
     const collapsed = node.type === 'external-component' && node.props.collapsible === true && node.props.defaultCollapsed === true
     const toggleCollapsed = () => { if (node.type === 'external-component') patch({ props: { ...node.props, collapsible: true, defaultCollapsed: !collapsed } }) }

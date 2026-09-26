@@ -35,3 +35,17 @@ it('returns to the workbench when the editor is left without a document', () => 
   rerender({ documentId: null, focused: true })
   expect(exit).toHaveBeenCalledTimes(1)
 })
+
+it('M21 shows every document light again after leaving the editor, also one last seen in the editor', () => {
+  const { result, rerender } = host({ documentId: 'a', focused: false })
+  act(() => result.current.setMode('deep'))
+  rerender({ documentId: 'a', focused: true })
+  // In the editor, open another file, then return to the workbench from it.
+  rerender({ documentId: 'b', focused: true })
+  expect(result.current.mode).toBe('deep')
+  rerender({ documentId: 'b', focused: false })
+  expect(result.current.mode).toBe('light')
+  // The workbench then shows the first file: light, not the editor.
+  rerender({ documentId: 'a', focused: false })
+  expect(result.current.mode).toBe('light')
+})

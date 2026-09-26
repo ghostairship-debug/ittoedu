@@ -124,3 +124,26 @@ it('M21 the selection owner answers a right-click with the same commands as its 
   expect(item()?.locked).toBe(false)
   expect(extra).not.toHaveBeenCalled()
 })
+
+it('M21 offers 编辑文字 only for text: a shape\'s right-click menu starts with the clipboard', async () => {
+  const host = await createCourseStoreHost()
+  await host.open(createBlankCourseProject({ includeDefaultController: false, controls: 'none' }))
+  store().addRectangleNode(); await store().drainCourseDocument()
+  const documentId = store().courseDocument.documentId!
+  const shape = selectSelectedNodeId(store())!
+  Object.defineProperty(window, 'desktopAPI', { configurable: true, value: { documents: host.api } })
+  function CurrentSelection() {
+    const revision = useEditorStore(state => state.courseDocument.snapshot?.revision ?? 0)
+    const itemIds = useEditorStore(selectSelectedNodeIds)
+    const locationId = useEditorStore(selectActiveCourseLocationId)
+    return <CourseEditorChromeContext.Provider value={{ documentId, mode: 'light', setMode() {} }}>
+      <main data-testid="workspace"><NativeSelectionContext documentId={documentId} revision={revision} locationId={locationId} itemIds={itemIds} enabled bounds={() => ({ left: 200, top: 200, width: 120, height: 40 })} /></main>
+    </CourseEditorChromeContext.Provider>
+  }
+  render(<CurrentSelection />)
+  await screen.findByRole('toolbar', { name: '选中对象快捷工具' })
+  act(() => { requestObjectContextMenu(screen.getByTestId('workspace'), { x: 300, y: 260, itemIds: [shape] }) })
+  const labels = within(screen.getByRole('menu', { name: '对象操作' })).getAllByRole('menuitem').map(element => element.getAttribute('aria-label'))
+  expect(labels[0]).toBe('复制')
+  expect(labels).not.toContain('编辑文字')
+})

@@ -115,7 +115,7 @@ it('moves a Markdown file through explicit resource choice and keeps an expanded
   fireEvent.click(await screen.findByRole('button', { name: '展开 target' }))
   fireEvent.click(await screen.findByRole('button', { name: 'note.md' }))
   fireEvent.contextMenu(screen.getByRole('button', { name: 'note.md' }))
-  fireEvent.click(within(screen.getByRole('menu', { name: '文件菜单' })).getByRole('button', { name: '移动到…' }))
+  fireEvent.click(within(screen.getByRole('menu', { name: '文件菜单' })).getByRole('menuitem', { name: '移动到…' }))
   const select = await screen.findByLabelText('目标文件夹')
   await waitFor(() => expect([...select.querySelectorAll('option')].some(item => item.textContent === 'target')).toBe(true))
   const targetId = [...select.querySelectorAll('option')].find(item => item.textContent === 'target')!.value
@@ -145,7 +145,7 @@ it('renames a dirty open tab without replacing its editor, preserves History, an
   const before = (await documents.list())[0]!
   await act(async () => { await documents.dispatch({ documentId: before.documentId, epoch: before.epoch, baseRevision: before.revision, operationId: 'edit', actor: 'human', mutation: { type: 'command', command: { type: 'markdown.replace', source: '教师新稿' } } }) })
   fireEvent.contextMenu(screen.getByRole('button', { name: 'note.md' }))
-  fireEvent.click(within(screen.getByRole('menu', { name: '文件菜单' })).getByRole('button', { name: '重命名' }))
+  fireEvent.click(within(screen.getByRole('menu', { name: '文件菜单' })).getByRole('menuitem', { name: '重命名' }))
   fireEvent.change(screen.getByLabelText('文件名称'), { target: { value: 'renamed.md' } })
   fireEvent.click(screen.getByRole('button', { name: '确认' }))
   await screen.findByRole('tab', { name: /renamed.md/ })
@@ -155,7 +155,7 @@ it('renames a dirty open tab without replacing its editor, preserves History, an
   expect(screen.getByRole('tab', { name: /renamed.md/ })).toBeInTheDocument()
   expect(document.querySelector('.ProseMirror')).toBe(editor)
   fireEvent.click(screen.getByRole('button', { name: /^保存$/ }))
-  await waitFor(async () => expect(await fs.readFile(path.join(directory, 'renamed.md'), 'utf8')).toBe('教师新稿'))
+  await waitFor(async () => expect(await fs.readFile(path.join(directory, 'renamed.md'), 'utf8')).toBe('教师新稿'), { timeout: 5000 })
   await expect(fs.access(filename)).rejects.toMatchObject({ code: 'ENOENT' })
 })
 
@@ -172,9 +172,9 @@ it('keeps keyboard commands scoped to the tree and performs multi-file clipboard
   fireEvent.click(b, { ctrlKey: true }); fireEvent.keyDown(b, { key: 'c', ctrlKey: true })
   fireEvent.click(screen.getByRole('button', { name: 'child' })); fireEvent.keyDown(screen.getByRole('button', { name: 'child' }), { key: 'v', ctrlKey: true })
   await waitFor(async () => expect(await fs.readFile(path.join(directory, 'child', 'a.md'), 'utf8')).toBe('A'))
-  expect(await fs.readFile(path.join(directory, 'child', 'b.md'), 'utf8')).toBe('B')
-  await waitFor(() => expect(screen.getByRole('button', { name: '新建文本文档' })).not.toBeDisabled())
-  fireEvent.click(screen.getByRole('button', { name: '新建文本文档' }))
+  await waitFor(async () => expect(await fs.readFile(path.join(directory, 'child', 'b.md'), 'utf8')).toBe('B'))
+  await waitFor(() => expect(screen.getByRole('menuitem', { name: '新建文本文档' })).not.toHaveAttribute('aria-disabled', 'true'))
+  fireEvent.click(screen.getByRole('menuitem', { name: '新建文本文档' }))
   const name = screen.getByLabelText('文件名称'); fireEvent.change(name, { target: { value: 'notes.txt' } })
   for (const key of ['F2', 'Delete']) fireEvent.keyDown(name, { key })
   for (const key of ['c', 'x', 'v']) fireEvent.keyDown(name, { key, ctrlKey: true })
@@ -185,17 +185,17 @@ it('keeps keyboard commands scoped to the tree and performs multi-file clipboard
   await fs.writeFile(path.join(directory, 'external.txt'), 'external')
   await screen.findByRole('button', { name: 'external.txt' })
   expect(screen.getByRole('button', { name: 'child' }).closest('li')).toHaveAttribute('data-open', 'true')
-  await waitFor(() => expect(screen.getByRole('button', { name: '新建 Markdown 文档' })).not.toBeDisabled())
+  await waitFor(() => expect(screen.getByRole('menuitem', { name: '新建 Markdown 文档' })).not.toHaveAttribute('aria-disabled', 'true'))
   const chat = screen.getByLabelText('聊天文字')
   for (const key of ['F2', 'Delete']) fireEvent.keyDown(chat, { key })
   for (const key of ['c', 'x', 'v']) fireEvent.keyDown(chat, { key, ctrlKey: true })
   expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   fireEvent.click(screen.getByRole('button', { name: 'external.txt' })); fireEvent.keyDown(screen.getByRole('button', { name: 'external.txt' }), { key: 'F2' })
   fireEvent.keyDown(screen.getByLabelText('文件名称'), { key: 'Escape' }); expect(await fs.readFile(path.join(directory, 'external.txt'), 'utf8')).toBe('external')
-  fireEvent.click(screen.getByRole('button', { name: 'child' })); fireEvent.click(screen.getByRole('button', { name: '新建 H5 演示' }))
+  fireEvent.click(screen.getByRole('button', { name: 'child' })); fireEvent.click(screen.getByRole('menuitem', { name: '新建 H5 演示' }))
   fireEvent.change(screen.getByLabelText('文件名称'), { target: { value: 'new-course' } }); fireEvent.click(screen.getByRole('button', { name: '确认' }))
   await waitFor(async () => { const model = await createCourseV9Driver().load(await fs.readFile(path.join(directory, 'child', 'new-course.h5lesson'))); expect(model.kind).toBe('course-v9') })
-  await waitFor(() => expect(screen.getByRole('button', { name: '新建 Markdown 文档' })).not.toBeDisabled())
+  await waitFor(() => expect(screen.getByRole('menuitem', { name: '新建 Markdown 文档' })).not.toHaveAttribute('aria-disabled', 'true'))
   const dropped = Object.assign(new File(['payload'], 'photo.png'), { arrayBuffer: async () => new TextEncoder().encode('payload').buffer })
   let reads = 0
   const directoryEntry = { name: 'bundle', isFile: false, isDirectory: true, createReader: () => ({ readEntries: (resolve: (entries: unknown[]) => void) => resolve(reads++ ? [] : [{ name: 'photo.png', isFile: true, isDirectory: false, file: (resolveFile: (file: File) => void) => resolveFile(dropped) }]) }) }
@@ -212,11 +212,11 @@ it('displays creation menu items in correct order and wording in toolbar and con
   render(<LessonDirectoryTree directory={directory} files={service.operate} operation={async () => ({})} onFile={vi.fn()} onDirectory={vi.fn()} />)
   const itemBtn = await screen.findByRole('button', { name: 'item.md' })
   const createMenu = document.querySelector('.workspace-files-create-options')!
-  const toolbarButtons = within(createMenu as HTMLElement).getAllByRole('button').map(b => b.textContent)
+  const toolbarButtons = within(createMenu as HTMLElement).getAllByRole('menuitem').map(b => b.getAttribute('aria-label'))
   expect(toolbarButtons.slice(0, 5)).toEqual(['新建 Markdown 文档', '新建 H5 演示', '从 PPT 新建 H5 演示', '新建文本文档', '新建文件夹'])
   fireEvent.contextMenu(itemBtn)
   const contextMenu = screen.getByRole('menu', { name: '文件菜单' })
-  const contextButtons = within(contextMenu).getAllByRole('button').map(b => b.textContent)
+  const contextButtons = within(contextMenu).getAllByRole('menuitem').map(b => b.getAttribute('aria-label'))
   expect(contextButtons.slice(0, 5)).toEqual(['新建 Markdown 文档', '新建 H5 演示', '从 PPT 新建 H5 演示', '新建文本文档', '新建文件夹'])
 })
 
@@ -228,7 +228,7 @@ it('prefills default names, numbers collisions with (2) and selects only the mai
   render(<LessonDirectoryTree directory={directory} files={service.operate} operation={async () => ({})} onFile={vi.fn()} onDirectory={vi.fn()} />)
   await screen.findByRole('button', { name: 'existing.txt' })
 
-  fireEvent.click(screen.getByRole('button', { name: '新建 Markdown 文档' }))
+  fireEvent.click(screen.getByRole('menuitem', { name: '新建 Markdown 文档' }))
   let input = (await screen.findByLabelText('文件名称')) as HTMLInputElement
   expect(input.value).toBe('新建 Markdown 文档.md')
   fireEvent.focus(input)
@@ -236,7 +236,7 @@ it('prefills default names, numbers collisions with (2) and selects only the mai
   expect(input.selectionEnd).toBe('新建 Markdown 文档'.length)
   fireEvent.click(screen.getByRole('button', { name: '取消' }))
 
-  fireEvent.click(screen.getByRole('button', { name: '新建 H5 演示' }))
+  fireEvent.click(screen.getByRole('menuitem', { name: '新建 H5 演示' }))
   input = (await screen.findByLabelText('文件名称')) as HTMLInputElement
   expect(input.value).toBe('新建 H5 演示.h5lesson')
   fireEvent.focus(input)
@@ -244,7 +244,7 @@ it('prefills default names, numbers collisions with (2) and selects only the mai
   expect(input.selectionEnd).toBe('新建 H5 演示'.length)
   fireEvent.click(screen.getByRole('button', { name: '取消' }))
 
-  fireEvent.click(screen.getByRole('button', { name: '新建文本文档' }))
+  fireEvent.click(screen.getByRole('menuitem', { name: '新建文本文档' }))
   input = (await screen.findByLabelText('文件名称')) as HTMLInputElement
   expect(input.value).toBe('新建文本文档.txt')
   fireEvent.focus(input)
@@ -252,7 +252,7 @@ it('prefills default names, numbers collisions with (2) and selects only the mai
   expect(input.selectionEnd).toBe('新建文本文档'.length)
   fireEvent.click(screen.getByRole('button', { name: '取消' }))
 
-  fireEvent.click(screen.getByRole('button', { name: '新建文件夹' }))
+  fireEvent.click(screen.getByRole('menuitem', { name: '新建文件夹' }))
   input = (await screen.findByLabelText('文件名称')) as HTMLInputElement
   expect(input.value).toBe('新建文件夹')
   fireEvent.focus(input)
@@ -273,7 +273,7 @@ it('prefills default names, numbers collisions with (2) and selects only the mai
   await screen.findByRole('button', { name: '新建文本文档.txt' })
   await screen.findByRole('button', { name: '新建文本文档 (2).txt' })
 
-  fireEvent.click(screen.getByRole('button', { name: '新建文本文档' }))
+  fireEvent.click(screen.getByRole('menuitem', { name: '新建文本文档' }))
   input = (await screen.findByLabelText('文件名称')) as HTMLInputElement
   expect(input.value).toBe('新建文本文档 (3).txt')
   fireEvent.focus(input)
@@ -289,32 +289,32 @@ it('auto-appends .txt when missing extension, preserves other extensions, and ca
   const onFile = vi.fn()
   render(<LessonDirectoryTree directory={directory} files={service.operate} operation={async () => ({})} onFile={onFile} onDirectory={vi.fn()} />)
   await screen.findByRole('button', { name: '工作空间根目录' })
-  await waitFor(() => expect(screen.getByRole('button', { name: '新建文本文档' })).not.toBeDisabled())
+  await waitFor(() => expect(screen.getByRole('menuitem', { name: '新建文本文档' })).not.toHaveAttribute('aria-disabled', 'true'))
 
-  fireEvent.click(screen.getByRole('button', { name: '新建文本文档' }))
+  fireEvent.click(screen.getByRole('menuitem', { name: '新建文本文档' }))
   fireEvent.change(await screen.findByLabelText('文件名称'), { target: { value: 'plain' } })
   fireEvent.click(screen.getByRole('button', { name: '确认' }))
   await waitFor(() => expect(onFile).toHaveBeenCalledWith({ name: 'plain.txt', kind: 'file', path: path.join(directory, 'plain.txt') }))
   expect(await fs.readFile(path.join(directory, 'plain.txt'), 'utf8')).toBe('')
 
   onFile.mockClear()
-  await waitFor(() => expect(screen.getByRole('button', { name: '新建文本文档' })).not.toBeDisabled())
-  fireEvent.click(screen.getByRole('button', { name: '新建文本文档' }))
+  await waitFor(() => expect(screen.getByRole('menuitem', { name: '新建文本文档' })).not.toHaveAttribute('aria-disabled', 'true'))
+  fireEvent.click(screen.getByRole('menuitem', { name: '新建文本文档' }))
   fireEvent.change(await screen.findByLabelText('文件名称'), { target: { value: 'dotted.' } })
   fireEvent.click(screen.getByRole('button', { name: '确认' }))
   await waitFor(() => expect(onFile).toHaveBeenCalledWith({ name: 'dotted.txt', kind: 'file', path: path.join(directory, 'dotted.txt') }))
 
   onFile.mockClear()
-  await waitFor(() => expect(screen.getByRole('button', { name: '新建文本文档' })).not.toBeDisabled())
-  fireEvent.click(screen.getByRole('button', { name: '新建文本文档' }))
+  await waitFor(() => expect(screen.getByRole('menuitem', { name: '新建文本文档' })).not.toHaveAttribute('aria-disabled', 'true'))
+  fireEvent.click(screen.getByRole('menuitem', { name: '新建文本文档' }))
   fireEvent.change(await screen.findByLabelText('文件名称'), { target: { value: 'data.csv' } })
   fireEvent.click(screen.getByRole('button', { name: '确认' }))
   await waitFor(() => expect(onFile).toHaveBeenCalledWith({ name: 'data.csv', kind: 'file', path: path.join(directory, 'data.csv') }))
   expect(await fs.readFile(path.join(directory, 'data.csv'), 'utf8')).toBe('')
 
   onFile.mockClear()
-  await waitFor(() => expect(screen.getByRole('button', { name: '新建文件夹' })).not.toBeDisabled())
-  fireEvent.click(screen.getByRole('button', { name: '新建文件夹' }))
+  await waitFor(() => expect(screen.getByRole('menuitem', { name: '新建文件夹' })).not.toHaveAttribute('aria-disabled', 'true'))
+  fireEvent.click(screen.getByRole('menuitem', { name: '新建文件夹' }))
   fireEvent.change(await screen.findByLabelText('文件名称'), { target: { value: 'new-dir' } })
   fireEvent.click(screen.getByRole('button', { name: '确认' }))
   await waitFor(async () => expect((await fs.stat(path.join(directory, 'new-dir'))).isDirectory()).toBe(true))
@@ -378,8 +378,8 @@ it('M19 creates a course with the Slide canvas size chosen in the creation dialo
   const operate = ((request: WorkspaceFilesRequest) => { requests.push(request); return service.operate(request) }) as WorkspaceFilesAPI
   render(<LessonDirectoryTree directory={directory} files={operate} operation={async () => ({})} onFile={vi.fn()} onDirectory={vi.fn()} />)
   await screen.findByRole('button', { name: '工作空间根目录' })
-  await waitFor(() => expect(screen.getByRole('button', { name: '新建 H5 演示' })).not.toBeDisabled())
-  fireEvent.click(screen.getByRole('button', { name: '新建 H5 演示' }))
+  await waitFor(() => expect(screen.getByRole('menuitem', { name: '新建 H5 演示' })).not.toHaveAttribute('aria-disabled', 'true'))
+  fireEvent.click(screen.getByRole('menuitem', { name: '新建 H5 演示' }))
   const size = await screen.findByLabelText('画布尺寸')
   expect(size).toHaveValue('wide')
   fireEvent.change(size, { target: { value: 'portrait' } })

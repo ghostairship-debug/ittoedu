@@ -490,6 +490,11 @@ function publishedAuthoringPatchesFromSlideView(
   ]
 }
 
+/** A press whose target lies outside the stage's own DOM: portaled React children such as the quick bar and menus. */
+function outsideStage(event: { target: EventTarget; currentTarget: EventTarget }): boolean {
+  return !(event.target instanceof Node && event.currentTarget instanceof Node && event.currentTarget.contains(event.target))
+}
+
 function isEditableKeyboardTarget(target: EventTarget | null): boolean {
   return target instanceof HTMLElement && (
     target instanceof HTMLInputElement ||
@@ -2609,8 +2614,9 @@ export function SlideLocationWorkspace({
       onDragLeave={event => { if (!event.currentTarget.contains(event.relatedTarget as Node)) setMediaDragOver(false) }}
       onDrop={onDrop}
       onPointerDownCapture={(event) => {
-        // The selection quick bar is portaled but still a React child: its presses must not hit-test the stage below.
-        if (event.target instanceof Element && event.target.closest(QUICK_BAR_SELECTOR)) return
+        // The quick bar and the right-click menus are portaled but still React children: their presses must not
+        // hit-test the stage below (nor take the pointer, which would move their click onto the stage).
+        if (outsideStage(event)) return
         if (canvasMode === 'edit' && event.button === 0 &&
           activeTextPreview?.target.kind === 'course-object') {
           const domItemId = event.target instanceof Element
@@ -2904,6 +2910,7 @@ export function SlideLocationWorkspace({
       onContextMenu={(event) => {
         // M21 right-click: what lies under the pointer is selected as a click would and gets the selection's menu (the
         // quick bar's owner builds it from the same commands); empty canvas gets the canvas menu.
+        if (outsideStage(event)) return
         if (event.target instanceof Element && event.target.closest(`${QUICK_BAR_SELECTOR}, .command-menu, .canvas-plain-text-editor, .text-edit-overlay, .text-edit-toolbar, .formula-edit-dialog, .canvas-mode-switch, .canvas-view-controls`)) return
         event.preventDefault()
         if (canvasMode !== 'edit' || slideBackendKind !== 'slide-authoring' || !authoringCanvasInteractive) return
@@ -2938,6 +2945,7 @@ export function SlideLocationWorkspace({
         ])
       }}
       onDoubleClickCapture={(event) => {
+        if (outsideStage(event)) return
         if (activeTextPreview?.target.kind === 'course-object') {
           const viewport = readCandidateViewport()
           const world = viewport && clientToWorld(createStageViewportTransform(viewport), {

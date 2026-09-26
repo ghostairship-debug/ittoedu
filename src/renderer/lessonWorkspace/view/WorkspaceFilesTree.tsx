@@ -10,6 +10,8 @@ import { SLIDE_CANVAS_PRESETS } from '../../../shared/slideCanvas'
 import { snapshotWorkspaceDrop } from './workspaceDropFiles'
 import { parseWorkspaceEntryDrag, WORKSPACE_ENTRIES_DRAG_TYPE, writeWorkspaceEntryDrag } from '../workspaceMediaDrag'
 import { createCourseFromPptx, pptxCourseArchive, pptxCourseStem } from '../../project/pptxCourseCreation'
+import { CommandMenuItems, ContextMenu, moveMenuFocus } from '../../editing/commands/CommandMenu'
+import { explorerContextCommands, explorerNewCommands, type ExplorerCommandPorts } from './explorerCommands'
 
 type Entry = Extract<WorkspaceListItem, { status: 'accessible' }>
 type Dialog = 'create-markdown' | 'create-course' | 'create-text' | 'mkdir' | 'rename' | 'copy' | 'move' | 'trash'
@@ -353,18 +355,19 @@ export function WorkspaceFilesTree({ directory, files, refreshVersion = 0, onFil
   const choosePptx = () => { closeCreateMenu(); setMenu(undefined); pptxTarget.current = targetDirectory; pptxInput.current?.click() }
   const pptxRow = selected.length === 1 && selected[0]!.entry.kind === 'file' && /\.pptx$/i.test(selected[0]!.entry.name) ? selected[0] : undefined
   const importPptx = (row: Row) => { if (root) void fromPptx(() => files({ type: 'read-pptx', workspaceId: root.workspaceId, entryId: row.entry.entryId }), row.parentId) }
-  const actions = (context = false) => <>
-    {context && pptxRow && <button type="button" disabled={busy} onClick={() => importPptx(pptxRow)}>导入为 H5 演示</button>}
-    <button type="button" disabled={busy || !root} onClick={() => action('create-markdown')}>新建 Markdown 文档</button><button type="button" disabled={busy || !root} onClick={() => action('create-course')}>新建 H5 演示</button><button type="button" disabled={busy || !root} onClick={choosePptx}>从 PPT 新建 H5 演示</button><button type="button" disabled={busy || !root} onClick={() => action('create-text')}>新建文本文档</button><button type="button" disabled={busy || !root} onClick={() => action('mkdir')}>新建文件夹</button>
-    <button type="button" disabled={busy || !single} onClick={() => action('rename')}>重命名</button><button type="button" disabled={busy || !selected.length} onClick={() => copy('copy')}>复制</button><button type="button" disabled={busy || !selected.length} onClick={() => copy('move')}>剪切</button><button type="button" disabled={busy || !clipboard?.ids.length} onClick={paste}>粘贴</button>
-    <button type="button" disabled={busy || !selected.length} onClick={() => action('copy')}>复制到…</button><button type="button" disabled={busy || !selected.length} onClick={() => action('move')}>移动到…</button><button type="button" disabled={busy || !selected.length} onClick={() => action('trash')}>移到回收站</button>
-    <button type="button" disabled={!selected.length} onClick={() => { void copyPath().catch(reason => setError(message(reason))) }}>复制路径</button><button type="button" disabled={busy || !single} onClick={() => { if (single && root) void run({ type: 'reveal', ...common(), entryId: single.entryId }) }}>在系统中定位</button>
-    {!context && <button type="button" disabled={busy || !root} onClick={() => { void refresh().catch(reason => setError(message(reason))) }}>刷新文件</button>}
-  </>
+  // One definition per operation (M21): the right-click menu and the 新建 menu show the same items.
+  const blocked = !root ? '工作空间未就绪' : busy ? '正在处理文件…' : null
+  const commandPorts: ExplorerCommandPorts = {
+    create: type => action(type), newFromPptx: choosePptx, importPptx: () => { if (pptxRow) importPptx(pptxRow) },
+    rename: () => action('rename'), copy: () => copy('copy'), cut: () => copy('move'), paste,
+    copyTo: () => action('copy'), moveTo: () => action('move'), trash: () => action('trash'),
+    copyPath: () => { void copyPath().catch(reason => setError(message(reason))) },
+    reveal: () => { if (single && root) void run({ type: 'reveal', ...common(), entryId: single.entryId }) },
+  }
   const renderEntries = (id: string): React.ReactNode => <ul role="group" className="lesson-directory-tree">{(pages[id] ?? []).map(entry => entry.status === 'blocked' ? <li key={`blocked:${entry.name}`}><span>{entry.name}（无法访问）</span></li> : <li role="treeitem" aria-selected={selection.has(entry.entryId)} aria-expanded={entry.kind === 'directory' ? expanded.has(entry.entryId) : undefined} key={entry.entryId} data-kind={entry.kind} data-open={expanded.has(entry.entryId)}>
     <div className="workspace-tree-row" data-drop={dropTarget === entry.entryId} {...(entry.kind === 'directory' ? droppable(entry.entryId) : {})}>
       {entry.kind === 'directory' && <button type="button" className="workspace-tree-toggle" aria-label={`${expanded.has(entry.entryId) ? '折叠' : '展开'} ${entry.name}`} onClick={() => { setExpanded(value => { const next = new Set(value); if (next.has(entry.entryId)) next.delete(entry.entryId); else next.add(entry.entryId); return next }) }}><ChevronRight size={14} /></button>}
-      <button type="button" className="lesson-tree-row" data-entry-id={entry.entryId} aria-pressed={selection.has(entry.entryId)} ref={element => { if (element) buttons.current.set(entry.entryId, element); else buttons.current.delete(entry.entryId) }} draggable={!busy} onDragStart={event => { writeWorkspaceEntryDrag(event.dataTransfer, root!.workspaceId, selection.has(entry.entryId) ? selected.map(row => row.entry) : [entry]) }} onClick={event => choose({ entry, parentId: id }, event)} onDoubleClick={() => { void open(entry).catch(reason => setError(message(reason))) }} onContextMenu={event => { event.preventDefault(); if (!selection.has(entry.entryId)) choose({ entry, parentId: id }); setMenu({ x: Math.min(event.clientX, window.innerWidth - 220), y: Math.min(event.clientY, window.innerHeight - 350) }) }}>
+      <button type="button" className="lesson-tree-row" data-entry-id={entry.entryId} aria-pressed={selection.has(entry.entryId)} ref={element => { if (element) buttons.current.set(entry.entryId, element); else buttons.current.delete(entry.entryId) }} draggable={!busy} onDragStart={event => { writeWorkspaceEntryDrag(event.dataTransfer, root!.workspaceId, selection.has(entry.entryId) ? selected.map(row => row.entry) : [entry]) }} onClick={event => choose({ entry, parentId: id }, event)} onDoubleClick={() => { void open(entry).catch(reason => setError(message(reason))) }} onContextMenu={event => { event.preventDefault(); if (!selection.has(entry.entryId)) choose({ entry, parentId: id }); setMenu({ x: event.clientX, y: event.clientY }) }}>
         {entry.kind === 'directory' ? expanded.has(entry.entryId) ? <FolderOpen size={15} /> : <Folder size={15} /> : icon(entry.name)}<span title={entry.name}>{entry.name}</span>
       </button>
     </div>{entry.kind === 'directory' && expanded.has(entry.entryId) && renderEntries(entry.entryId)}
@@ -377,12 +380,8 @@ export function WorkspaceFilesTree({ directory, files, refreshVersion = 0, onFil
           const rect = event.currentTarget.getBoundingClientRect()
           setCreateAt({ left: Math.max(0, Math.min(rect.left, window.innerWidth - 200)), top: rect.bottom + 4 })
         }}>新建</summary>
-        <div className="workspace-files-create-options" style={createAt}>
-          <button type="button" disabled={busy || !root} onClick={() => action('create-markdown')}>新建 Markdown 文档</button>
-          <button type="button" disabled={busy || !root} onClick={() => action('create-course')}>新建 H5 演示</button>
-          <button type="button" disabled={busy || !root} onClick={choosePptx}>从 PPT 新建 H5 演示</button>
-          <button type="button" disabled={busy || !root} onClick={() => action('create-text')}>新建文本文档</button>
-          <button type="button" disabled={busy || !root} onClick={() => action('mkdir')}>新建文件夹</button>
+        <div className="workspace-files-create-options command-menu" role="menu" aria-label="新建" style={createAt} onKeyDown={moveMenuFocus}>
+          <CommandMenuItems items={explorerNewCommands(blocked, commandPorts)} onRun={item => item.run()} />
         </div>
       </details>
       <button type="button" disabled={busy || !root} onClick={() => { void refresh().catch(reason => setError(message(reason))) }}>刷新</button>
@@ -398,7 +397,8 @@ export function WorkspaceFilesTree({ directory, files, refreshVersion = 0, onFil
     <div role="tree" aria-label="工作空间文件" aria-multiselectable="true" onKeyDown={keyboard}>
       {root && <><button type="button" className="workspace-tree-root" data-drop={dropTarget === root.rootEntryId} {...droppable(root.rootEntryId)} onClick={() => { ++scopeTicket.current; onScope?.(root.resolvedPath, 'folder', root.workspaceId); setSelection(new Set()); setParentId(root.rootEntryId); onSaveDirectoryChange?.({ workspaceId: root.workspaceId, directoryEntryId: root.rootEntryId }); setMenu(undefined) }}>工作空间根目录</button>{renderEntries(root.rootEntryId)}</>}
     </div>
-    {menu && <><div className="workspace-menu-backdrop" onClick={() => setMenu(undefined)} /><div className="workspace-context-menu" role="menu" aria-label="文件菜单" style={{ left: Math.max(0, menu.x), top: Math.max(0, menu.y) }} onKeyDown={event => { if (event.key === 'Escape') { event.stopPropagation(); setMenu(undefined) } }}>{actions(true)}</div></>}
+    {menu && <ContextMenu at={menu} label="文件菜单" onClose={() => setMenu(undefined)}
+      items={explorerContextCommands({ blocked, selected: selected.length, pptx: Boolean(pptxRow), clipboard: clipboard?.ids.length ?? 0 }, commandPorts)} />}
     {dialog && <section ref={dialogRef} className="workspace-file-dialog" role="dialog" aria-modal="true" aria-label="文件操作" onKeyDown={event => { event.stopPropagation(); if (event.key === 'Escape' && !busy) { event.preventDefault(); close() } else if (event.key === 'Tab') { const controls = [...(dialogRef.current?.querySelectorAll<HTMLElement>('input:not(:disabled), select:not(:disabled), button:not(:disabled)') ?? [])]; const first = controls[0], last = controls.at(-1); if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus() } else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus() } } else if (event.key === 'Enter' && event.target instanceof HTMLInputElement && !event.nativeEvent.isComposing && event.nativeEvent.keyCode !== 229 && !busy && !retry && (dialog === 'rename' || dialog === 'mkdir' || dialog.startsWith('create-')) && name.trim()) { event.preventDefault(); submit() } }}>
       {dialog === 'create-course' && <label>画布尺寸<select aria-label="画布尺寸" value={canvasPreset} onChange={event => setCanvasPreset(event.target.value)}>
         {SLIDE_CANVAS_PRESETS.map(preset => <option key={preset.id} value={preset.id}>{preset.label}（{preset.width}×{preset.height}）</option>)}
