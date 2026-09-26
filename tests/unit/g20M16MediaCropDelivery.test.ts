@@ -1,36 +1,58 @@
 import { describe, expect, it } from 'vitest'
 import { strFromU8, unzipSync } from 'fflate'
 import type { PublishedFlowSurface } from '@/shared/contracts/published-course-v2/types'
+import { encodeImageTransformPng } from '@/shared/imageTransform'
 import { buildFlowPrintPlan, renderFlowPrintBodyHtml } from '@/renderer/export/course/flowPrintPlan'
 import { buildFlowDocx } from '@/renderer/export/course/flowDocx'
 
-const bytes = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10, 1, 2, 3])
+const bytes = encodeImageTransformPng({ width: 8, height: 4, data: new Uint8Array(8 * 4 * 4) })
+const dataUrl = `data:image/png;base64,${btoa(String.fromCharCode(...bytes))}`
 function surface(crop: boolean): PublishedFlowSurface {
   return { id: 'flow', type: 'flow', title: 'Media', layout: { readingWidth: 760, wideContentWidth: 960 }, surfaceLayerItems: [], blocks: [{
     id: 'photo', type: 'media', assetId: 'original', mediaKind: 'image', layout: 'content-width', altText: 'Original',
-    ...(crop ? { crop: { left: 0.1, top: 0.2, right: 0.3, bottom: 0.1 }, cropX: 0.7, cropY: 0.4 } : {}),
+    ...(crop ? { crop: { left: 0.125, top: 0.25, right: 0.25, bottom: 0 }, cropX: 0.7, cropY: 0.4 } : {}),
   }] }
 }
 
 describe('M16 body media crop delivery', () => {
-  it('carries crop into print HTML and DOCX DrawingML while embedding the original bytes', () => {
+  it('uses cropped source aspect in print HTML and DOCX while embedding original bytes', () => {
     const source = surface(true)
     const plan = buildFlowPrintPlan(source)
     expect(plan.includesFloatingLayers).toBe(false)
-    expect(plan.nodes.find(node => node.type === 'media')).toMatchObject({ crop: { left: 0.1, top: 0.2, right: 0.3, bottom: 0.1 } })
-    const html = renderFlowPrintBodyHtml(plan, { resolveAssetUrl: () => 'data:image/png;base64,AA==' })
-    expect(html).toContain('clip-path:inset(20% 30% 10% 10%)')
+    expect(plan.nodes.find(node => node.type === 'media')).toMatchObject({ crop: { left: 0.125, top: 0.25, right: 0.25, bottom: 0 } })
+    const html = renderFlowPrintBodyHtml(plan, { resolveAssetUrl: () => dataUrl })
+    const rendered = new DOMParser().parseFromString(html, 'text/html')
+    const wrapper = rendered.querySelector('.flow-print-image-crop') as HTMLElement
+    const image = wrapper.querySelector('img') as HTMLElement
+    expect(wrapper.style.aspectRatio).toBe('5 / 3')
+    expect(wrapper.style.overflow).toBe('hidden')
+    expect(image.style.position).toBe('absolute')
+    expect(image.style.width).toBe('160%')
+    expect(image.style.left).toBe('-20%')
     const result = buildFlowDocx(source, { resolveAsset: () => ({ bytes, mimeType: 'image/png' }) })
     const files = unzipSync(result.bytes)
-    const xml = strFromU8(files['word/document.xml']!)
-    expect(xml).toContain('<a:srcRect l="10000" t="20000" r="30000" b="10000"/>')
+    const xml = new DOMParser().parseFromString(strFromU8(files['word/document.xml']!), 'application/xml')
+    expect(xml.getElementsByTagName('parsererror')).toHaveLength(0)
+    const drawing = xml.getElementsByTagNameNS('*', 'inline')[0]!
+    const extent = drawing.getElementsByTagNameNS('*', 'extent')[0]!
+    const ratio = Number(extent.getAttribute('cx')) / Number(extent.getAttribute('cy'))
+    expect(ratio).toBeCloseTo(5 / 3, 2)
+    const srcRect = drawing.getElementsByTagNameNS('*', 'srcRect')[0]!
+    expect([srcRect.getAttribute('l'), srcRect.getAttribute('t'), srcRect.getAttribute('r'), srcRect.getAttribute('b')]).toEqual(['12500', '25000', '25000', '0'])
     expect(files['word/media/image1.png']).toEqual(bytes)
   })
 
-  it('keeps uncropped legacy image markup free of a crop rectangle', () => {
+  it('keeps uncropped legacy image markup and extent', () => {
     const plan = buildFlowPrintPlan(surface(false))
-    expect(renderFlowPrintBodyHtml(plan, { resolveAssetUrl: () => 'image.png' })).not.toContain('clip-path:')
+    expect(renderFlowPrintBodyHtml(plan, { resolveAssetUrl: () => 'image.png' })).not.toContain('flow-print-image-crop')
     const result = buildFlowDocx(surface(false), { resolveAsset: () => ({ bytes, mimeType: 'image/png' }) })
-    expect(strFromU8(unzipSync(result.bytes)['word/document.xml']!)).not.toContain('<a:srcRect')
+    const xml = strFromU8(unzipSync(result.bytes)['word/document.xml']!)
+    expect(xml).not.toContain('<a:srcRect')
+    expect(xml).toContain('<wp:extent cx="5334000" cy="3000375"')
+  })
+
+  it('fails explicitly when cropped media has no readable intrinsic dimensions', () => {
+    expect(() => renderFlowPrintBodyHtml(buildFlowPrintPlan(surface(true)), { resolveAssetUrl: () => 'image.png' })).toThrow('无法读取原图尺寸')
+    expect(() => buildFlowDocx(surface(true), { resolveAsset: () => ({ bytes: new Uint8Array([1, 2, 3]), mimeType: 'image/png' }) })).toThrow('无法读取原图尺寸')
   })
 })

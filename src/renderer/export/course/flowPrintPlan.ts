@@ -104,6 +104,47 @@ export interface FlowPrintRenderOptions {
   readonly resolveAssetUrl?: (assetId: string) => string | undefined
 }
 
+export function flowImageDimensions(bytes: Uint8Array, mimeType: string): { width: number; height: number } | undefined {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+  if (mimeType === 'image/png' && bytes.length >= 24 && bytes.subarray(0, 8).every((value, index) => value === [137, 80, 78, 71, 13, 10, 26, 10][index])) {
+    const width = view.getUint32(16), height = view.getUint32(20)
+    return width > 0 && height > 0 ? { width, height } : undefined
+  }
+  if (mimeType === 'image/gif' && bytes.length >= 10 && bytes[0] === 71 && bytes[1] === 73 && bytes[2] === 70) {
+    const width = view.getUint16(6, true), height = view.getUint16(8, true)
+    return width > 0 && height > 0 ? { width, height } : undefined
+  }
+  if (mimeType === 'image/jpeg' && bytes.length >= 4 && bytes[0] === 255 && bytes[1] === 216) {
+    let offset = 2
+    while (offset + 4 <= bytes.length) {
+      if (bytes[offset] !== 255) break
+      while (bytes[offset] === 255) offset += 1
+      const marker = bytes[offset++]
+      if (marker === 217 || marker === 218 || marker === undefined || offset + 2 > bytes.length) break
+      const length = view.getUint16(offset)
+      if (length < 2 || offset + length > bytes.length) break
+      if ([192, 193, 194, 195, 197, 198, 199, 201, 202, 203, 205, 206, 207].includes(marker) && length >= 7) {
+        const height = view.getUint16(offset + 3), width = view.getUint16(offset + 5)
+        return width > 0 && height > 0 ? { width, height } : undefined
+      }
+      offset += length
+    }
+  }
+  return undefined
+}
+
+function dataUrlImageDimensions(url: string): { width: number; height: number } | undefined {
+  const match = /^data:(image\/(?:png|jpeg|gif));base64,([A-Za-z0-9+/=]+)$/i.exec(url)
+  if (!match) return undefined
+  try {
+    const binary = atob(match[2]!)
+    const bytes = Uint8Array.from(binary, char => char.charCodeAt(0))
+    return flowImageDimensions(bytes, match[1]!.toLowerCase())
+  } catch {
+    return undefined
+  }
+}
+
 export function buildFlowPrintPlan(
   surface: PublishedFlowSurface,
   options: BuildFlowPrintPlanOptions = {},
@@ -320,10 +361,14 @@ function printNodeToHtml(
         : undefined
       if (assetUrl) {
         const alt = node.altText?.trim() || (node.caption ? plainDocumentText(node.caption).trim() : undefined) || node.fallbackLabel
-        const crop = node.crop ? flowMediaCropGeometry({ width: 1, height: 1 }, node) : null
-        const pct = (value: number) => Math.round(value * 1_000_000) / 10_000
-        const cropStyle = crop ? ` style="clip-path:inset(${pct(crop.sourceRect.y)}% ${pct(1 - crop.sourceRect.x - crop.sourceRect.width)}% ${pct(1 - crop.sourceRect.y - crop.sourceRect.height)}% ${pct(crop.sourceRect.x)}%)"` : ''
-        return `<figure data-flow-print-block="${escapeHtml(node.blockId)}" data-flow-print="image"><img class="flow-print-image" src="${escapeHtml(assetUrl)}" alt="${escapeHtml(alt)}"${cropStyle}/>${
+        let image = `<img class="flow-print-image" src="${escapeHtml(assetUrl)}" alt="${escapeHtml(alt)}"/>`
+        if (node.crop) {
+          const source = dataUrlImageDimensions(assetUrl)
+          if (!source) throw new Error(`正文图片 ${node.blockId} 无法读取原图尺寸，已停止裁剪打印。`)
+          const { dom } = flowMediaCropGeometry(source, node)
+          image = `<div class="flow-print-image-crop" style="width:100%;max-width:100%;aspect-ratio:${dom.wrapperAspectRatio};overflow:hidden;position:relative"><img class="flow-print-image" src="${escapeHtml(assetUrl)}" alt="${escapeHtml(alt)}" style="position:absolute;display:block;max-width:none;width:${dom.imageWidth};height:${dom.imageHeight};left:${dom.imageLeft};top:${dom.imageTop}"/></div>`
+        }
+        return `<figure data-flow-print-block="${escapeHtml(node.blockId)}" data-flow-print="image">${image}${
           node.caption ? `<figcaption>${richTextToHtml(node.caption)}</figcaption>` : ''
         }</figure>`
       }

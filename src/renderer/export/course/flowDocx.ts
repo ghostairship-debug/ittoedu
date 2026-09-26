@@ -15,6 +15,7 @@ import { serializeFormulaAst } from '../../../shared/formulaLinear'
 import { flowRichTextSegments } from '../../../player/surfaces/flow/flowModel'
 import {
   buildFlowPrintPlan,
+  flowImageDimensions,
   type BuildFlowPrintPlanOptions,
   type FlowPrintNode,
   type FlowPrintPlan,
@@ -205,6 +206,13 @@ function imageExtension(mimeType: string): string | null {
   if (mimeType === 'image/jpeg') return 'jpeg'
   if (mimeType === 'image/gif') return 'gif'
   return null
+}
+
+function croppedImageAspect(bytes: Uint8Array, mimeType: string, crop: FlowImageCrop): number {
+  const source = flowImageDimensions(bytes, mimeType)
+  if (!source) throw new Error('正文图片无法读取原图尺寸，已停止 DOCX 裁剪导出。')
+  const { sourceRect } = flowMediaCropGeometry(source, crop)
+  return sourceRect.width / sourceRect.height
 }
 
 function inlineImageDrawing(label: string, image: ImagePart, drawingId: number, aspect = 16 / 9, maxHeight = Infinity, crop?: FlowImageCrop): string {
@@ -547,7 +555,7 @@ function renderPrintNode(
             disposition: 'preserved',
             detail: 'Embedded OOXML image relationship',
           })
-          return `${leadingContent ? `<w:p>${leadingContent}</w:p>` : ''}${inlineImageDrawing(node.fallbackLabel, image, context.nextDrawingId++, 16 / 9, Infinity, node)}${
+          return `${leadingContent ? `<w:p>${leadingContent}</w:p>` : ''}${inlineImageDrawing(node.fallbackLabel, image, context.nextDrawingId++, node.crop ? croppedImageAspect(asset.bytes, asset.mimeType, node) : 16 / 9, Infinity, node)}${
             node.caption ? paragraph(node.caption, { style: 'Caption' }) : ''
           }`
         }
