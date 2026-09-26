@@ -467,7 +467,11 @@ function rewriteJavaScript(code: string, sourceType: 'script' | 'module', baseDi
     return code
   }
   const edits: Array<{ start: number; end: number; value: string }> = []
+  const handled = new Set<Node>()
+  const jsString = (value: string) => JSON.stringify(value).replace(/</g, '\\u003c')
+  const jsTemplate = (value: string) => '`' + value.replace(/[`\\]/g, '\\$&').replace(/\$\{/g, '\\${').replace(/</g, '\\u003c') + '`'
   const visit = (node: Node) => {
+    if (handled.has(node)) return
     if (['ImportDeclaration', 'ExportAllDeclaration', 'ImportExpression'].includes(node.type) || (node.type === 'ExportNamedDeclaration' && node.source)) {
       addDiagnostic(sink, 'error', 'unsupported-module-graph', '导入暂不支持模块依赖图')
     }
@@ -481,19 +485,26 @@ function rewriteJavaScript(code: string, sourceType: 'script' | 'module', baseDi
       if (value.type === 'TemplateLiteral' && (value.expressions as Node[]).length === 0) return ((value.quasis as Array<{ value: { cooked: string | null } }>)[0]?.value.cooked) ?? null
       return null
     }
-    const urlSink = (value: Node) => {
+    const urlSink = (value: Node, name: string) => {
       const url = literalValue(value)
-      if (url === null || !url.trim() || url.trim().startsWith('#') || /^data:/i.test(url)) return
-      if (/^https?:|^\/\//i.test(url)) {
+      if (url === null || !url.trim()) return
+      if (name === 'srcset') {
+        handled.add(value)
+        const rewritten = rewriteSrcset(url, baseDir, sink, siblings)
+        if (rewritten !== url) edits.push({ start: value.start, end: value.end, value: jsString(rewritten) })
+        return
+      }
+      if (url.trim().startsWith('#') || /^data:/i.test(url.trim())) return
+      if (/^https?:|^\/\//i.test(url.trim())) {
         addDiagnostic(sink, 'error', 'remote-js-resource', `未授权脚本资源 ${clip(url, 180)}`, url)
         return
       }
       const result = rewriteSingleUrl(url, 'js-string', baseDir, sink, siblings, false)
-      if (result.changed) edits.push({ start: value.start, end: value.end, value: JSON.stringify(result.value) })
+      if (result.changed) edits.push({ start: value.start, end: value.end, value: jsString(result.value) })
     }
     if (node.type === 'AssignmentExpression' && node.operator === '=') {
       const name = memberName(node.left as Node)
-      if (name && ['src', 'srcset', 'href', 'poster', 'data', 'action', 'formAction'].includes(name)) urlSink(node.right as Node)
+      if (name && ['src', 'srcset', 'href', 'poster', 'data', 'action', 'formAction'].includes(name)) urlSink(node.right as Node, name)
     }
     if (node.type === 'CallExpression' || node.type === 'NewExpression') {
       const callee = node.callee as Node | undefined
@@ -504,13 +515,13 @@ function rewriteJavaScript(code: string, sourceType: 'script' | 'module', baseDi
       if (name === 'setAttribute') {
         const args = node.arguments as Node[]
         const attribute = args[0] ? literalValue(args[0]) : null
-        if (attribute && ['src', 'srcset', 'href', 'poster', 'data'].includes(attribute) && args[1]) urlSink(args[1])
+        if (attribute && ['src', 'srcset', 'href', 'poster', 'data'].includes(attribute) && args[1]) urlSink(args[1], attribute)
       }
     }
     if (node.type === 'Literal' && typeof node.value === 'string') {
       const value = node.value as string
       const rewritten = rewriteEmbedded(value, 'js-string', baseDir, sink, siblings, { url: true, remote: true }, false)
-      if (rewritten !== value) edits.push({ start: node.start, end: node.end, value: JSON.stringify(rewritten) })
+      if (rewritten !== value) edits.push({ start: node.start, end: node.end, value: jsString(rewritten) })
       return
     }
     if (node.type === 'TemplateLiteral') {
@@ -519,7 +530,7 @@ function rewriteJavaScript(code: string, sourceType: 'script' | 'module', baseDi
         const cooked = ((node.quasis as Array<{ value: { cooked: string | null } }>)[0]?.value.cooked)
         if (cooked !== null && cooked !== undefined) {
           const rewritten = rewriteEmbedded(cooked, 'js-string', baseDir, sink, siblings, { url: true, remote: true }, false)
-          if (rewritten !== cooked) edits.push({ start: node.start, end: node.end, value: '`' + rewritten.replace(/[`\\]/g, '\\$&').replace(/\$\{/g, '\\${') + '`' })
+          if (rewritten !== cooked) edits.push({ start: node.start, end: node.end, value: jsTemplate(rewritten) })
         }
         return
       }

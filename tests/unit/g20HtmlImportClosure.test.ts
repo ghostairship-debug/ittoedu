@@ -34,6 +34,18 @@ describe('HTML import closure', () => {
     expect(new Function('window', `${source}; return [x, window.finished];`)(state)).toEqual([`cw-resource:${result.resources[0]?.key} </script><p id="injected">`, true])
   })
 
+  it('keeps the HTML parser out of script escaped-comment mode after rewriting', () => {
+    const html = `<script>const x = '${uri} \\x3c!-- \\x3cscript>'; window.finished = true;</script><p id="after">after</p>`
+    const result = extractHtmlResources({ html })
+    expect(validateHtmlImport(result)).toEqual([])
+    const document = new DOMParser().parseFromString(result.html, 'text/html')
+    expect(document.querySelector('#after')?.textContent).toBe('after')
+    const source = document.querySelector('script')?.textContent ?? ''
+    const state: Record<string, unknown> = {}
+    expect(new Function('window', `${source}; return [x, window.finished];`)(state)).toEqual([`cw-resource:${result.resources[0]?.key} <!-- <script>`, true])
+    expect(source).toContain('\\u003c!-- \\u003cscript>')
+  })
+
   it('fails on invalid scripts and external module graphs without scanning as success', () => {
     const invalid = extractHtmlResources({ html: `<script>const = '${uri}'</script>` })
     expect(invalid.resources).toEqual([])
@@ -53,6 +65,10 @@ describe('HTML import closure', () => {
   it('classifies member network calls and element URL assignments as sinks', () => {
     const remote = extractHtmlResources({ html: '<script>window.fetch("https://cdn.example/api"); image.src="https://cdn.example/pic.png";</script>' })
     expect(validateHtmlImport(remote).map(error => error.code)).toEqual(expect.arrayContaining(['unsupported-network-sink', 'remote-js-resource']))
+    const padded = extractHtmlResources({ html: '<script>image.src="  https://cdn.example/pic.png";</script>' })
+    expect(validateHtmlImport(padded).map(error => error.code)).toContain('remote-js-resource')
+    const mixedSrcset = extractHtmlResources({ html: `<script>image.srcset="${uri} 1x, https://cdn.example/pic.png 2x";</script>` })
+    expect(validateHtmlImport(mixedSrcset).map(error => error.code)).toContain('remote-resource')
     const missing = extractHtmlResources({ html: '<script>image.src="picture.png";</script>' })
     expect(validateHtmlImport(missing).map(error => error.code)).toContain('missing-relative-resource')
     const local = extractHtmlResources({ html: '<script>image.src="picture.png";</script>', siblingFiles: new Map([['picture.png', png]]) })
