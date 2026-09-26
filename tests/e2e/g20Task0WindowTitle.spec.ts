@@ -38,16 +38,19 @@ test('G20 window title stays fixed across dirty edits and editor focus', async (
       const slide = snapshot.model.project.surfaces.find(surface => surface.type === 'slide')
       if (!slide || slide.type !== 'slide') throw new Error('Expected slide surface')
       const scene = slide.scenes[0]!
+      const location = snapshot.model.project.locations.find(candidate => candidate.kind === 'slide-scene'
+        && candidate.surfaceId === slide.id && candidate.sceneId === scene.id)
+      if (!location) throw new Error(`Missing location for ${slide.id}/${scene.id}`)
       const item = scene.layerItems.find(candidate => candidate.kind === 'native' && candidate.content.nativeType === 'text')
       if (!item || item.kind !== 'native') throw new Error('Expected native text')
       const receipt = await api.dispatch({ documentId: snapshot.documentId, epoch: snapshot.epoch, baseRevision: snapshot.revision,
         actor: 'human', operationId: 'task0-window-title-dirty', mutation: { type: 'command', command: {
-          type: 'course.object.patch', locationId: scene.id, itemId: item.layerItemId,
+          type: 'course.object.patch', locationId: location.id, itemId: item.layerItemId,
           patch: { nativeData: { text: '工程修改已提交，但标题保持固定' } },
         } } })
       return { documentId: snapshot.documentId, receipt }
     }, file)
-    expect(edited.receipt).toMatchObject({ status: 'applied' })
+    expect(edited.receipt, JSON.stringify(edited.receipt)).toMatchObject({ status: 'applied' })
     await expect.poll(async () => (await page.evaluate(id => window.desktopAPI!.documents!.read(id), edited.documentId)).dirty).toBe(true)
     await expect(page.locator('.workspace-document-tabs').getByRole('tab', { name: /^private-title\.h5lesson/ }).getByLabel('未保存')).toBeVisible()
     await expect(page).toHaveTitle(APP_NAME)
