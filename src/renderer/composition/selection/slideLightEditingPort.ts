@@ -2,6 +2,7 @@ import type { CourseProjectDocument } from '../../../shared/courseProjectTypes'
 import type { AssetMeta } from '../../../shared/contracts/media-v1'
 import { slideSceneContext } from '../../../core/tools/slideInsertion'
 import { materializeNamedStateItem } from '../../../core/tools/layerProperties'
+import { isPublishedInteractionClickBindable } from '../../../shared/publishedInteractionSupport'
 import { planSlideAudioPlacement, planSlideLightOpacity, planSlideLightTextStyle, planSlidePageAlignment, planSlideSceneBackground, planSimpleSlideInteraction, readSimpleSlideInteraction, type SlideLightTarget, type SlideAudioPlacement, type SlidePageAlignment } from '../../../core/tools/lightSlideEditing'
 import { slideLightCommands, type SlideLightCommand, type SlideLightCommandState } from '../../editing/commands/slideLightCommands'
 import { createEditorTransactionStep, type EditorTransactionStep } from '../../authoring/editorTransaction'
@@ -62,13 +63,13 @@ export function createSlideLightEditingPort(owner: SlideLightEditingOwner) {
     const state = scene.presentation?.states.find(value => value.id === target.stateId)
     if (target.stateId && !state) throw stale()
     const item = materializeNamedStateItem(base, state?.layerItemOverrides[base.layerItemId])
-    const audio = readSimpleSlideInteraction(project, target, 'audio.play')
-    const navigation = readSimpleSlideInteraction(project, target, 'location.go')
+    const audio = item.locked ? null : readSimpleSlideInteraction(project, target, 'audio.play')
+    const navigation = item.locked ? null : readSimpleSlideInteraction(project, target, 'location.go')
     const commandState: SlideLightCommandState = {
       isText: item.kind === 'native' && item.content.nativeType === 'text', locked: item.locked,
-      clickBindable: !audio.disabledReason || audio.disabledReason !== '此元素不支持点击互动',
-      complexAudioRule: Boolean(audio.disabledReason && audio.disabledReason !== '此元素不支持点击互动'),
-      complexNavigationRule: Boolean(navigation.disabledReason && navigation.disabledReason !== '此元素不支持点击互动'),
+      clickBindable: isPublishedInteractionClickBindable(item),
+      complexAudioRule: Boolean(audio?.disabledReason && audio.disabledReason !== '此元素不支持点击互动'),
+      complexNavigationRule: Boolean(navigation?.disabledReason && navigation.disabledReason !== '此元素不支持点击互动'),
       stateBackgroundOverride: Boolean(state && (state.backgroundColor !== undefined || state.backgroundAssetId !== undefined)),
       sounds: Object.values(project.media.audio.sounds).map(sound => ({ id: sound.id, name: sound.name })),
       locations: project.locations.map(location => ({ id: location.id, label: location.label })),

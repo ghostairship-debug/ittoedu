@@ -2,6 +2,7 @@
 import { expect, it } from 'vitest'
 import { createBlankCourseProject } from '../../src/core/course/createCourseProject'
 import { planSlideTextInsertion } from '../../src/core/tools/slideInsertion'
+import { planSlideLightOpacity } from '../../src/core/tools/lightSlideEditing'
 import { createCourseProjectArchive, openCourseProjectArchive } from '../../src/core/drivers/codecs/courseProjectArchive'
 import { createSlideLightEditingPort } from '../../src/renderer/composition/selection/slideLightEditingPort'
 import { useEditorStore } from '../../src/renderer/store/editorStore'
@@ -23,9 +24,10 @@ function fixture() {
 }
 
 /** Test wiring uses the real Main DocumentSession; product wiring is owned by editorStore composition. */
-async function harness() {
+async function harness(options: { locked?: boolean } = {}) {
   const host = await createCourseStoreHost()
   const seeded = fixture()
+  if (options.locked) scene(seeded.project).layerItems[0].locked = true
   const documentId = await projectCourse(host, seeded.project)
   let locationId = seeded.locationId, itemId = seeded.itemId
   let serial = 0
@@ -126,4 +128,19 @@ it('M22 refuses a captured command after page or document activation changes', a
   await host.open(fixture().project)
   await expect(port.run(target, command)).rejects.toThrow('选择或文档已改变')
   expect(formalCourse(host, documentId).revision).toBe(before.revision)
+})
+
+it('M22 shows disabled commands for a locked item and preserves the planner rejection', async () => {
+  const { host, port } = await harness({ locked: true })
+  const target = port.capture()!
+  const before = formalCourse(host)
+  const view = port.view(target)
+  const opacity = view.commands.find(command => command.id === 'slide.opacity.50')!
+  const navigation = view.commands.find(command => command.kind === 'location-go')!
+  expect(opacity.disabledReason).toContain('锁定')
+  expect(navigation.disabledReason).toContain('锁定')
+  await expect(port.run(target, opacity)).rejects.toThrow('锁定')
+  expect(() => planSlideLightOpacity(formalProject(host), target, 0.5)).toThrow('锁定')
+  expect(formalCourse(host).revision).toBe(before.revision)
+  expect(formalCourse(host).undoDepth).toBe(before.undoDepth)
 })
