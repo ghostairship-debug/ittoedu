@@ -10,11 +10,12 @@ import {
 import { createServer as createHttpServer } from 'node:http'
 import { createServer as createHttpsServer } from 'node:https'
 import { tmpdir } from 'node:os'
-import { extname, isAbsolute, join, relative, resolve } from 'node:path'
+import { basename, extname, isAbsolute, join, relative, resolve } from 'node:path'
 import type { AddressInfo } from 'node:net'
 import type { ElectronApplication, Locator, Page } from 'playwright'
 import { createCourseProjectArchive } from '../../src/core/drivers/codecs/courseProjectArchive'
 import type { CourseProjectDocument } from '../../src/shared/courseProjectTypes'
+import { APP_NAME } from '../../src/shared/constants'
 import { BACKGROUND_E2E_ENV } from '../../src/main/windowVisibility'
 import { listCourseProjectV9Fixtures } from '../fixtures/course-project-v9/sources'
 import { enterIndependentEditor } from './lessonWorkspaceEntry'
@@ -179,7 +180,9 @@ async function openProject(
 ): Promise<void> {
   await patchOpenDialog(app, projectPath)
   await page.getByRole('button', { name: '打开工程（Ctrl+O）', exact: true }).click()
-  await expect(page).toHaveTitle(new RegExp(title))
+  await expect(page.locator('.workspace-document-tabs [role="tab"][aria-selected="true"]'))
+    .toContainText(basename(projectPath))
+  await expect(page).toHaveTitle(APP_NAME)
 }
 
 async function fetchSucceeded(page: Page, url: string): Promise<boolean> {
@@ -323,7 +326,9 @@ test('V9 current/full preview embeds local assets and leases declared origins pe
     const assetBRemoteBeforeOverlaySwitch = remoteImageRequestCount(assetB)
     await patchOpenDialog(app, projectBPath)
     await page.keyboard.press('Control+O')
-    await expect(page).toHaveTitle(/NET H1 B/)
+    await expect(page.locator('.workspace-document-tabs [role="tab"][aria-selected="true"]'))
+      .toContainText('network-b.h5lesson')
+    await expect(page).toHaveTitle(APP_NAME)
     await expect(page.getByTestId('course-preview-overlay')).toBeVisible()
     await expectOnlyLocalDataImages(fullPreviewImages, projectBPhotoDataUrl)
     expect(remoteImageRequestCount(assetB)).toBe(assetBRemoteBeforeOverlaySwitch)

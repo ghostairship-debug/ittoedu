@@ -19,13 +19,12 @@ export class AppState {
   }
 
   setDirty(dirty: boolean): void {
-    // The renderer names the window after the visible file and marks unsaved changes itself.
     this.dirty = dirty
   }
 
   private updateWindowTitle(): void {
     if (this.mainWindow === null || this.mainWindow.isDestroyed()) return
-    this.mainWindow.setTitle(`${this.dirty ? '* ' : ''}${APP_NAME}`)
+    this.mainWindow.setTitle(APP_NAME)
   }
 }
 

@@ -7,6 +7,7 @@ import {
 } from '../../src/renderer/app/useCourseProjectLifecycle'
 import { createCourseDocumentHost, deferred, type CourseDocumentTestHost } from '../helpers/courseDocumentHost'
 import { createBlankCourseProject } from '../../src/core/course/createCourseProject'
+import { APP_NAME } from '../../src/shared/constants'
 
 const WATCH: CourseProjectLifecycleWatch = {
   dirty: false, projectTitle: '课件', projectPath: null,
@@ -46,6 +47,26 @@ async function mount(host: CourseDocumentTestHost, overrides: Partial<CourseProj
 afterEach(() => { cleanup(); vi.restoreAllMocks() })
 
 describe('useCourseProjectLifecycle main document sessions', () => {
+  it('keeps the browser title fixed while forwarding actual dirty state to main', async () => {
+    const host = await createCourseDocumentHost()
+    const ports = createPorts(host)
+    const watch = { ...WATCH }
+    const hook = renderHook(() => useCourseProjectLifecycle(ports, watch))
+    await waitFor(() => expect(ports.setWindowDirtyState).toHaveBeenLastCalledWith(false))
+    expect(document.title).toBe(APP_NAME)
+
+    watch.projectTitle = '另一个工程名'
+    watch.dirty = true
+    hook.rerender()
+    await waitFor(() => expect(ports.setWindowDirtyState).toHaveBeenLastCalledWith(true))
+    expect(document.title).toBe(APP_NAME)
+
+    watch.projectTitle = '未命名工程'
+    watch.dirty = false
+    hook.rerender()
+    await waitFor(() => expect(ports.setWindowDirtyState).toHaveBeenLastCalledWith(false))
+    expect(document.title).toBe(APP_NAME)
+  })
   it.each([
     ['newProject', 'slide-scene'], ['newFlowProject', 'flow-block'], ['newSpatialProject', 'spatial-camera'],
   ] as const)('%s creates its real surface in a separate main session', async (method, kind) => {
