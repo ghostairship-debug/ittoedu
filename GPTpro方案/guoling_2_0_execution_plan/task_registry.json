@@ -1085,7 +1085,7 @@
         "M14"
       ],
       "document": "mid_term/M21.md",
-      "status": "planned",
+      "status": "verified",
       "existing_code": [
         "src/renderer/documents/CourseLightToolbar.tsx",
         "src/renderer/documents/courseEditorChrome.css",

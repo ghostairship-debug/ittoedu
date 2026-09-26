@@ -2635,7 +2635,10 @@
       "expected": "裁剪与适配所见即所得并可撤销；替换视频保持位置与尺寸；隐藏对象可在工作台找回并恢复；形状与公式可在工作台插入和修改；以上均无需进入编辑器，保存重开一致",
       "test_layer": "electron",
       "required_for": "2.0",
-      "status": "not_run"
+      "status": "passed",
+      "evidence_files": [
+        "evidence/B14_2026_09_26_M21_P2.md"
+      ]
     },
     {
       "id": "M22-T01",
