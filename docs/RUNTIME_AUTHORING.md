@@ -2,11 +2,13 @@
 
 > **当前工程格式是 Course Project V9。** 本文只描述当前 V9 可用边界；类型与协议真值以 `src/shared/runtimeTypes.ts`、`runtimeSchema.ts` 和源码为准。
 
+果铃是通用内容工作台，支持 H5 演示、讲义、无限画布与文档等创作；本文描述其中 Runtime 的实际协议与支持范围，教育内容只是应用场景之一。Runtime 的可执行载体以本文列明的 Published 支持范围为准，不表示可直接嵌入所有文档格式。
+
 本文主要定义 `scene.runtime` / 画布运行时与 `globalRuntime` 的 Runtime API 2 创作协议；API 1 会在当前入口得到明确拒绝。Course Project V9 还允许图层承载 `surface-runtime` API 3；当前发布执行实现了 Slide scene-local 与 session-global API 2 DOM/Phaser/hybrid，以及 Slide scene-local 与 Flow surface-local API 3 DOM 四个 playback 纵切。组件协议是另一套独立版本体系。
 
 文档同步基线：**2026-08-28**。Runtime API 2 仍是当前画布 Runtime/全局 Runtime 的完整作者协议；Published V2 对 API 2 接入 Slide scene-local 与 session-global carrier，并把这些已支持 carrier 的 host actions 接回同一会话。Slide scene-local API 2/3 已接通 `presentation`；全局 API 2 与 Flow surface-local API 3 的 `presentation` 为 inert，当前 Published `nodes` 解析为空，动态 Runtime 导航守卫也为 inert。API 3 playback 只接入 Slide scene-local 与 Flow surface-local DOM。新工程必须写 Course Project `schemaVersion: 9`。旧 Project V1–V8 由产品入口明确拒绝，不再是加载或导入输入。
 
-Course Project V9 JSON 是业务真相，DOM、Phaser 和 Three.js 都只是可替换的呈现/交互实现。Phaser 是当前原生 2D Player/交互代理的内部技术能力，不是产品品牌；产品名为“果铃编辑器”。场景/世界运行时用于整页动画、特效、连续耦合交互、事件协调与瞬态效果，并尽量少放可教文字；它不是组件包，也不用来仿一个局部拖拽控件。专业“开发”面板可以创建最小模板并受控修改工程中的 runtime source，但不会为教学需求自动生成完整实现。题目、答错、答对、完成等稳定视觉应由 presentation / Native 图层承载；简单节点/全局元素点击、状态/场景切换、声音和视频控制应优先由声明式 interactions 承担。稍复杂的局部互动走 Component API 4（可复用或新建）。运行时只承担声明式规则与局部组件都不足以表达的整块机制，并可驱动这些可编辑状态。
+Course Project V9 JSON 是业务真相，DOM、Phaser 和 Three.js 都只是可替换的呈现/交互实现。Phaser 是当前原生 2D Player/交互代理的内部技术能力，不是产品品牌；产品名为“果铃编辑器”。场景/世界运行时用于整页动画、特效、连续耦合交互、事件协调与瞬态效果，并尽量少放说明性文字；它不是组件包，也不用来仿一个局部拖拽控件。专业“开发”面板可以创建最小模板并受控修改工程中的 runtime source，但不会为内容创作需求自动生成完整实现。例如题目、答错、答对、完成等稳定视觉应由 presentation / Native 图层承载；简单节点/全局元素点击、状态/场景切换、声音和视频控制应优先由声明式 interactions 承担。稍复杂的局部互动走 Component API 4（可复用或新建）。运行时只承担声明式规则与局部组件都不足以表达的整块机制，并可驱动这些可编辑状态。
 
 完整归档可用 `npm run --silent validate:project -- <file.h5lesson>` 无界面检查真实资源、Schema、当前已接线的结构性工程健康结果和四格式预检。Published V2 playback 会按 V9 `courseState` 声明初始化默认值；`node.click` Interaction 可用 `course-state.exists` / `course-state.compare` 读取这份状态，并用 `course-state.set` 同步写入已声明键。跨 location 的 `go` / `next` / `previous` 随后执行顶层声明式 `navigationGuards` 的 `block` 语义；同位置状态切换与 replay 不经过守卫，restart 会绕过守卫并恢复声明默认值。校验命令只验证这些引用与类型，不会真的运行课程状态变化、导航路径、Runtime/Component 源码或真实导出。Runtime/Component 实际网络使用与工程声明一致性、Node 近似布局和真实像素也需另行复核；退出码 0 不能替代真实 Published playback、导出画面与外部请求检查。
 
@@ -29,7 +31,7 @@ Runtime Authoring V1 是 Runtime API 2 上可选、确定性的人工编辑扩�
 | `scene.runtime` | 当前场景独有的动画、拖拽、判定、DOM 界面、原生节点绑定 | 销毁 | 销毁并重建 | 销毁并随首场景重建 |
 | `globalRuntime` | 跨场景状态、事件协调、常驻 HUD 或课程级效果 | 保留 | 保留 | 销毁并重建 |
 
-整页少字的动画/特效/连续机制写运行时。稳定画面先用场景节点和状态覆盖创作；可枚举的触发、条件与动作先用声明式交互；稍复杂的局部互动（拖拽、配对、本地多步）制作 V4 组件，先匹配已有包，允许为本课新建。不要为“点击按钮切换状态/场景或播放声音”专门写一份自由运行时。
+整页少字的动画/特效/连续机制写运行时。稳定画面先用场景节点和状态覆盖创作；可枚举的触发、条件与动作先用声明式交互；稍复杂的局部互动（拖拽、配对、本地多步）制作 V4 组件，先匹配已有包，允许为当前内容新建。不要为“点击按钮切换状态/场景或播放声音”专门写一份自由运行时。
 
 编辑器简洁模式用于常用图文和单元素出现动画；运行时内容与完整规则位于专业模式。选中节点后的“属性/交互”只维护该节点点击规则；右侧“互动与动画”维护场景/状态进入、节点激活、动画完成、音视频/组件/运行时事件；“开发”可校验并修改当前场景或全局 runtime source，修改进入撤销历史。Slide authoring 视觉由同文档 Published V2 authoring 模式执行；Published playback 只对 Slide scene-local 与 session-global API 2 DOM/Phaser/hybrid、Slide scene-local API 3 DOM 与 Flow surface-local API 3 DOM 开放真实执行，其他 carrier/host context 仍显示 fallback、空实现或占位，不得借这些纵切验收全 parity。Slide scene-local API 2/3 的 `presentation` 已接通；全局 API 2 与 Flow surface-local API 3 的 `presentation` inert，Published `nodes` 为空，动态 Runtime 导航守卫 inert。每个 Course Project V9 动作步骤带稳定 ID、局部延迟和 `after-previous` / `with-previous` 启动方式，可编排元素入场/退场、状态、媒体和导航；`course-state.exists` / `course-state.compare` 与其他条件一起在点击触发时按 AND 判断一次，延迟动作不会重新判断课程状态，`course-state.set` 同步写入与 Runtime/Component、导航守卫共享的会话 Store。当前 Published 声明式互动执行器仍只接通 `node.click`，不能把 Runtime/Component 自定义事件写成已落地的可视化规则纵切。统一 `PresenterInput` 已处理 PageUp/PageDown 和项目附加按键；跨 location 的 `scene-navigation` 经过顶层声明式 `block` 守卫，`authored-command` 只分发可在“互动与动画”配置的 `presenter.command`，没有匹配规则时不隐式翻页。
 
@@ -214,7 +216,7 @@ API 2 的联合类型是能力边界，不是类型提示：`dom` 模式不存�
 
 ## 5. 可见文字与图片：不需要登记
 
-按正常方式写页面和代码即可：可见文字可以直接写在源码或 DOM 里，**不需要**放进 `content.values`，也不需要注册编辑目标或添加 `data-courseware-edit-key`。宿主在运行时自动识别可见图文：DOM 文字与 `<img>`、Phaser `Text` 与静态 `Image`。教师在画布上改字时，修改按“原文 + 所在区域 → 新文字”存成工程里的轻量规则（`content.overrides`），重绘、切换状态、撤销/重做与保存重开后都保持；替换图片按受管资源更换素材绑定。源码不会被改写，改字后宿主会自动重新截取静态后备图。
+按正常方式写页面和代码即可：可见文字可以直接写在源码或 DOM 里，**不需要**放进 `content.values`，也不需要注册编辑目标或添加 `data-courseware-edit-key`。宿主在运行时自动识别可见图文：DOM 文字与 `<img>`、Phaser `Text` 与静态 `Image`。用户在画布上改字时，修改按“原文 + 所在区域 → 新文字”存成工程里的轻量规则（`content.overrides`），重绘、切换状态、撤销/重做与保存重开后都保持；替换图片按受管资源更换素材绑定。源码不会被改写，改字后宿主会自动重新截取静态后备图。
 
 - 程序实时计算的文字（计分、计时、随状态频繁变化的数字）不作为可直接修改的目标，只能由 AI 修改源码；
 - 直接画在 Canvas、WebGL 或 Three.js 上的内容对宿主是黑盒，同样只提供 AI 修改；
@@ -222,7 +224,7 @@ API 2 的联合类型是能力边界，不是类型提示：`dom` 模式不存�
 - 需要在属性栏统一编辑或多处复用的文案，仍可以放进 `content.values` 并用 `ctx.content.get(key)` 读取，`metadata` 用于改善属性栏标签、说明、多行模式和长度约束。这是可选做法，不是义务；已使用文案表的旧 Runtime 继续按键编辑。
 
 ```js
-// 直接写出可见文字即可；宿主会识别它，教师可以在画布上改。
+// 直接写出可见文字即可；宿主会识别它，用户可以在画布上改。
 const button = document.createElement('button')
 button.textContent = '继续'
 ```

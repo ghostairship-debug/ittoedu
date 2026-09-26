@@ -1517,6 +1517,7 @@ export async function generateAiCapabilityArtifacts(
   const index = {
     manifestVersion: AI_CAPABILITY_MANIFEST_VERSION,
     editorVersion: APP_VERSION,
+    description: '果铃是通用内容工作台，支持 H5 演示、讲义、无限画布与文档等创作；各能力的实际载体与范围以分域协议和支持状态为准。',
     protocols: currentProtocols,
     surfaces: {
       types: COURSE_SURFACE_TYPES,
