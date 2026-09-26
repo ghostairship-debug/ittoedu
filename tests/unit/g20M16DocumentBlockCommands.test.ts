@@ -49,6 +49,20 @@ describe('M16 document block commands', () => {
     expect(applyDocumentBlockCommand(converted, { action: 'delete', blockId: 'last' }).blocks.map(block => block.id)).toEqual(['first', 'section'])
   })
 
+  it('applies an open menu to the latest document instead of restoring stale text', () => {
+    let current: DocumentContent = { blocks: [{ id: 'first', type: 'paragraph', content: { inlines: [{ type: 'text', text: 'OLD' }] } }] }
+    const apply = vi.fn((content: DocumentContent) => { current = content })
+    const menu = documentBlockMenu({ content: current, readContent: () => current, blockId: 'first', apply,
+      createId: () => 'copy' })
+    current = { blocks: [{ id: 'first', type: 'paragraph', content: { inlines: [{ type: 'text', text: 'NEW' }] } }] }
+    menu.find(item => item.id === 'duplicate')!.run()
+    expect(current.blocks).toMatchObject([
+      { id: 'first', content: { inlines: [{ text: 'NEW' }] } },
+      { id: 'copy', content: { inlines: [{ text: 'NEW' }] } },
+    ])
+    expect(apply).toHaveBeenCalledTimes(1)
+  })
+
   it('refuses identity-invalid and destructive transformations', () => {
     expect(() => applyDocumentBlockCommand(initial, { action: 'insert-below', blockId: 'first' }, () => 'last')).toThrow()
     expect(() => applyDocumentBlockCommand(initial, { action: 'convert', blockId: 'first', kind: 'code' })).toThrow('丢失')

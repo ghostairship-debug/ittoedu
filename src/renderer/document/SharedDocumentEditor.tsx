@@ -302,11 +302,14 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
   function activeBlockMenu(blockId: string) {
     const editor = layout.current
     if (!editor || latest.current.readOnly) return []
-    return documentBlockMenu({ content: fromEditorDocument(editor.view.state.doc), blockId, apply: applyDocumentContent,
+    return documentBlockMenu({ content: fromEditorDocument(editor.view.state.doc),
+      readContent: () => fromEditorDocument(editor.view.state.doc), blockId, apply: applyDocumentContent, onError: fail,
       ai: latest.current.onContextualCommand ? id => {
         let at = -1
         editor.view.state.doc.descendants((node, position) => { if (at < 0 && node.attrs.id === id) at = position; return at < 0 })
-        if (at >= 0) editor.view.dispatch(editor.view.state.tr.setSelection(Selection.near(editor.view.state.doc.resolve(at + 1))))
+        if (at < 0 || !NodeSelection.isSelectable(editor.view.state.doc.nodeAt(at)!)) { fail('段落已变化，请重新选择'); return }
+        editor.view.dispatch(editor.view.state.tr.setSelection(NodeSelection.create(editor.view.state.doc, at)).scrollIntoView())
+        editor.view.focus()
       } : undefined,
       disabledReason: latest.current.editPreview ? '正在生成的范围暂时只读' : null })
   }

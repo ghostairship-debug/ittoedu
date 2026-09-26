@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { ContextMenu, type MenuCommand } from '../editing/commands/CommandMenu'
 
 export const DOCUMENT_BLOCK_DRAG_MIME = 'application/x-guoling-document-block'
@@ -20,7 +21,7 @@ export function DocumentBlockHandle({ blockId, rect, commands, disabledReason, o
   const blocked = commands.map(command => ({ ...command, disabledReason: disabledReason ?? command.disabledReason }))
   const items = menu === 'insert' ? blocked.filter(command => command.group === '插入') : blocked
   const at = { x: Math.max(4, rect.left - 56), y: rect.top + rect.height / 2 }
-  return <div className="document-block-handle" data-block-id={blockId} style={{ position: 'fixed', left: at.x, top: rect.top, zIndex: 20 }}>
+  return createPortal(<div className="document-block-handle" data-block-id={blockId} style={{ position: 'fixed', left: at.x, top: rect.top, zIndex: 20 }}>
     <button type="button" aria-label="插入段落" disabled={Boolean(disabledReason) || !insert.length}
       onMouseDown={event => event.preventDefault()} onClick={() => setMenu(value => value === 'insert' ? null : 'insert')}>+</button>
     <button type="button" aria-label="段落操作" draggable={!disabledReason}
@@ -34,7 +35,7 @@ export function DocumentBlockHandle({ blockId, rect, commands, disabledReason, o
         onDragStart?.(blockId)
       }}>⋮⋮</button>
     {menu && <ContextMenu at={at} label={menu === 'insert' ? '插入段落' : '段落操作'} items={items} onClose={() => setMenu(null)} />}
-  </div>
+  </div>, document.body)
 }
 
 /** Used by the editor's drop port; the command owner commits the returned move once. */

@@ -12,8 +12,11 @@ export type DocumentBlockCommand = { action: DocumentBlockAction; blockId: strin
 
 export interface DocumentBlockCommandPort {
   content: DocumentContent
+  /** Read at command execution, because an open menu may outlive an owner revision. */
+  readContent?(): DocumentContent
   blockId: string
   apply(content: DocumentContent): void
+  onError?(message: string): void
   ai?(blockId: string): void
   disabledReason?: string | null
   createId?(): string
@@ -127,9 +130,16 @@ export function documentBlockMenu(port: DocumentBlockCommandPort): MenuCommand[]
   const location = locate(port.content.blocks, port.blockId)
   if (!location) return []
   const run = (command: DocumentBlockCommand) => {
-    if (command.action === 'ai') { port.ai?.(port.blockId); return }
-    const result = applyDocumentBlockCommand(port.content, command, port.createId)
-    if (result !== port.content) port.apply(result)
+    try {
+      const current = port.readContent?.() ?? port.content
+      if (!locate(current.blocks, port.blockId)) throw new Error('段落已变化，请重新选择')
+      if (command.action === 'ai') { port.ai?.(port.blockId); return }
+      const result = applyDocumentBlockCommand(current, command, port.createId)
+      if (result !== current) port.apply(result)
+    } catch (error) {
+      if (!port.onError) throw error
+      port.onError(error instanceof Error ? error.message : String(error))
+    }
   }
   const item = (id: string, label: string, group: string, command: DocumentBlockCommand, disabledReason?: string | null): MenuCommand => ({
     id, label, group, disabledReason: port.disabledReason ?? disabledReason,
