@@ -1050,7 +1050,7 @@
         "M14"
       ],
       "document": "mid_term/M20.md",
-      "status": "planned",
+      "status": "verified",
       "existing_code": [
         "src/renderer/lessonWorkspace/view/WorkspaceFilesTree.tsx",
         "src/main/workbench/workspaceFilesDesktopService.ts",
