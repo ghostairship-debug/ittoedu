@@ -80,6 +80,8 @@ function globalRuntimeGenerationKey(payload: PublishedCourseV2Payload): string {
       const runtime = structuredClone(entry.item.runtime)
       const contentKeys = Object.keys(runtime.content.values).sort()
       runtime.content.values = Object.fromEntries(contentKeys.map((key) => [key, '']))
+      // Text rules (M15) apply in place too.
+      delete runtime.content.overrides
       return [{
         itemId: entry.item.layerItemId,
         frame: entry.item.frame,
@@ -88,6 +90,16 @@ function globalRuntimeGenerationKey(payload: PublishedCourseV2Payload): string {
       }]
     }),
   })
+}
+
+/** M15: each global Runtime's text rules, as JSON for comparison. */
+function textOverridesByItem(payload: PublishedCourseV2Payload): ReadonlyMap<string, string> {
+  return new Map(payload.globalLayerItems.flatMap((entry) => (
+    entry.item.kind === 'runtime' && entry.item.runtime.enabled && entry.item.runtime.protocol === 'canvas-runtime'
+      && entry.item.runtime.runtimeApiVersion === 2
+      ? [[entry.item.layerItemId, JSON.stringify(entry.item.runtime.content.overrides ?? [])] as const]
+      : []
+  )))
 }
 
 function contentValuesByItem(
@@ -121,14 +133,21 @@ function sanitizeTargets(
       || target.sceneId !== undefined
       || target.kind !== 'text'
       || target.layer !== 'underlay' && target.layer !== 'overlay'
-      || target.source !== 'registered' && target.source !== 'dom'
+      || target.source !== 'registered' && target.source !== 'dom' && target.source !== 'auto'
       || typeof target.nodeId !== 'string'
       || !editableIds.has(target.nodeId)
       || typeof target.targetId !== 'string'
       || !target.targetId
       || typeof target.key !== 'string'
-      || !target.key
+      // Host-recognised text (M15) has no content key; everything else needs one.
+      || !target.key && !target.lightEdit
     ) continue
+    const lightEdit = target.lightEdit
+    if (lightEdit && (
+      typeof lightEdit.original !== 'string' || !lightEdit.original || lightEdit.original.length > 2_000
+      || typeof lightEdit.region !== 'string' || !lightEdit.region || lightEdit.region.length > 500
+      || typeof lightEdit.text !== 'string' || lightEdit.text.length > 20_000
+    )) continue
     const { x, y, width, height } = target.bounds
     if (![x, y, width, height].every(Number.isFinite)) continue
     const left = Math.max(0, x)
@@ -142,6 +161,7 @@ function sanitizeTargets(
       ...(typeof target.label === 'string'
         ? { label: target.label.slice(0, 120) }
         : { label: undefined }),
+      ...(lightEdit ? { lightEdit: Object.freeze({ original: lightEdit.original, region: lightEdit.region, text: lightEdit.text }) } : {}),
       bounds: Object.freeze({
         x: left,
         y: top,
@@ -179,6 +199,7 @@ export function SpatialGlobalRuntimeAuthoring({
   const targetsByItemRef = useRef(new Map<string, HTMLElement>())
   const ownerRef = useRef<PublishedGlobalCanvasRuntimeOwner | null>(null)
   const valuesRef = useRef<ReadonlyMap<string, Readonly<Record<string, string>>>>(new Map())
+  const overridesRef = useRef<ReadonlyMap<string, string>>(new Map())
   const rawTargetsRef = useRef<readonly Readonly<RuntimeAuthoringTarget>[]>([])
   const targetsRef = useRef<readonly Readonly<RuntimeAuthoringTarget>[]>([])
   const [targets, setTargets] = useState<readonly Readonly<RuntimeAuthoringTarget>[]>([])
@@ -244,6 +265,7 @@ export function SpatialGlobalRuntimeAuthoring({
     })
     ownerRef.current = owner
     valuesRef.current = contentValuesByItem(payload)
+    overridesRef.current = textOverridesByItem(payload)
     rawTargetsRef.current = []
     targetsRef.current = []
     setTargets([])
@@ -274,6 +296,13 @@ export function SpatialGlobalRuntimeAuthoring({
         if (previous[key] === value) continue
         void owner.applyAuthoringContentValue(itemId, key, value)
       }
+    }
+    // M15: changed text rules (and their undo/redo) apply in place, keeping the Runtime's state.
+    const nextOverrides = textOverridesByItem(payload), previousOverrides = overridesRef.current
+    overridesRef.current = nextOverrides
+    for (const [itemId, json] of nextOverrides) {
+      if (previousOverrides.get(itemId) === undefined || previousOverrides.get(itemId) === json) continue
+      if (!owner.applyAuthoringTextOverrides(itemId, JSON.parse(json))) console.warn(`全局 Runtime“${itemId}”的文字修改未能原位更新`)
     }
   }, [payload])
 

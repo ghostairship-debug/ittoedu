@@ -417,6 +417,8 @@ export class RuntimeAuthoringTargetRegistry implements RuntimeAuthoringApi {
         if (sample.root !== root || sample.live) continue
         // Registered keys keep their own editing path.
         if (sample.node.parentElement?.closest('[data-courseware-edit-key]')) continue
+        // A text that cannot be measured is skipped, never the whole list.
+        if (typeof range.getBoundingClientRect !== 'function') break
         range.selectNodeContents(sample.node)
         const rect = range.getBoundingClientRect()
         if (!finitePositiveDomRect(rect)) continue

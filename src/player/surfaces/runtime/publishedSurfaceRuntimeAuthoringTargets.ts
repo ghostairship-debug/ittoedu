@@ -10,6 +10,7 @@ import type {
 import {
   RuntimeAuthoringTargetRegistry,
   type RuntimeAuthoringTargetsChangedHandler,
+  type RuntimeLightEditSources,
 } from '../../RuntimeAuthoringTargetRegistry'
 
 export interface PublishedRuntimeAuthoringMountOptions {
@@ -25,6 +26,8 @@ export interface PublishedSurfaceRuntimeAuthoringTargetsOptions {
   content: EditableTextContent
   assets: Readonly<Record<string, RuntimeAssetBinding>>
   authoring: PublishedRuntimeAuthoringMountOptions
+  /** M15: text and pictures the Surface Runtime renders itself, found by the host. */
+  lightEdit?: RuntimeLightEditSources
 }
 
 type TargetKind = 'text' | 'asset'
@@ -153,6 +156,8 @@ export class PublishedSurfaceRuntimeAuthoringTargets implements SurfaceRuntimeAu
       height: options.height,
       content: options.content,
       assets: options.assets,
+      // One DOM root: the Surface Runtime has no separate underlay.
+      ...(options.lightEdit ? { domRoots: { underlay: options.root.ownerDocument.createElement('div'), overlay: options.root }, lightEdit: options.lightEdit } : {}),
       onTargetsChanged: options.authoring.onTargetsChanged,
     })
 

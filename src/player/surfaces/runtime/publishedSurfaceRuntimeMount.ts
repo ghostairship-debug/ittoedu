@@ -19,6 +19,8 @@ import { CourseStateStore } from '../../CourseStateStore'
 import { decodePublishedCode } from '../../decodePublishedExecutableCode'
 import { validateRuntimeSource } from '../../RuntimeRegistry'
 import { registerPublishedDynamicUpdateProbe } from '../publishedDynamicUpdateProbe'
+import { DomTextOverrides } from '../../lightEdit/domTextOverrides'
+import type { LightEditTextOverride } from '../../../shared/contracts/runtime/lightEdit'
 import {
   PublishedCaptureBarrier,
   registerPublishedCaptureResource,
@@ -42,6 +44,8 @@ export interface PublishedSurfaceRuntimeMountHandle {
   readonly ok: boolean
   readonly element: HTMLElement
   applyAuthoringContentValue(key: string, value: string): boolean
+  /** M15: apply edited text rules in place, keeping the Runtime's current state. */
+  applyAuthoringTextOverrides(rules: readonly LightEditTextOverride[]): boolean
   waitForReady(): Promise<void>
   waitForObservationReady?(): Promise<void>
   waitForCaptureReady(): Promise<void>
@@ -416,6 +420,7 @@ function failedHandle(
     ok: false,
     element,
     applyAuthoringContentValue: () => false,
+    applyAuthoringTextOverrides: () => false,
     waitForReady: () => Promise.reject(failure),
     waitForCaptureReady: () => Promise.reject(failure),
     restoreAfterCapture() {},
@@ -519,7 +524,17 @@ export function mountPublishedSurfaceRuntime(
   )
   const publishedMode = options.mode ?? 'playback'
   const surfaceMode = publishedMode === 'authoring' ? 'inspect' : publishedMode
-  const authoringTargets = publishedMode === 'authoring' && options.authoring
+  // M15: the Runtime's own text follows its rules in every mode; light editing never fails the Runtime.
+  let authoringTargets: PublishedSurfaceRuntimeAuthoringTargets | null = null
+  let domText: DomTextOverrides | null = null
+  try { domText = new DomTextOverrides([root], options.runtime.content.overrides ?? [], () => authoringTargets?.invalidate()) }
+  catch (error) { console.warn(`Surface Runtime“${options.instanceId}”的文字修改暂不可用`, error) }
+  const assetKeyByUrl = new Map<string, string>()
+  for (const [key, binding] of Object.entries(options.runtime.assets)) {
+    const url = options.resolveAsset(binding.assetId)
+    if (url) assetKeyByUrl.set(url, key)
+  }
+  authoringTargets = publishedMode === 'authoring' && options.authoring
     ? new PublishedSurfaceRuntimeAuthoringTargets({
         root,
         width: options.width,
@@ -527,6 +542,7 @@ export function mountPublishedSurfaceRuntime(
         content: options.runtime.content,
         assets: options.runtime.assets,
         authoring: options.authoring,
+        lightEdit: { ...(domText ? { dom: domText } : {}), assetKeyForUrl: url => assetKeyByUrl.get(url) },
       })
     : null
   const captureBarrier = new PublishedCaptureBarrier()
@@ -594,6 +610,7 @@ export function mountPublishedSurfaceRuntime(
       throw new Error('Surface Runtime create() 必须返回含 destroy() 的生命周期对象')
     }
     lifecycle = created
+    try { domText?.applyAll() } catch (error) { console.warn(`Surface Runtime“${options.instanceId}”的文字修改暂不可用`, error) }
     lifecycle.setMode?.(surfaceMode)
     lifecycle.resize?.(options.width, options.height)
     lifecycle.setVisible?.(options.visible)
@@ -609,6 +626,7 @@ export function mountPublishedSurfaceRuntime(
       reportError(options, 'destroy', destroyCause)
     }
     authoringTargets?.destroy()
+    domText?.destroy()
     captureBarrier.destroy()
     events.dispose()
     host.remove()
@@ -626,6 +644,7 @@ export function mountPublishedSurfaceRuntime(
     captureFailure = reportError(options, 'lifecycle', cause)
     captureBarrier.fail(captureFailure)
     authoringTargets?.destroy()
+    domText?.destroy()
     events.dispose()
     instanceDestroyed = true
     try { lifecycle.destroy() } catch (error) { reportError(options, 'destroy', error) }
@@ -659,6 +678,12 @@ export function mountPublishedSurfaceRuntime(
       const updated = applyPublishedRuntimeAuthoringText(host, key, value)
       authoringTargets?.invalidate()
       return updated
+    },
+    applyAuthoringTextOverrides(rules: readonly LightEditTextOverride[]) {
+      if (instanceDestroyed || quarantined || !domText) return false
+      try { domText.setRules(rules) } catch (error) { console.warn(`Surface Runtime“${options.instanceId}”的文字修改暂不可用`, error); return false }
+      authoringTargets?.invalidate()
+      return true
     },
     async waitForReady() {
       if (captureFailure) throw captureFailure
@@ -716,6 +741,7 @@ export function mountPublishedSurfaceRuntime(
         reportError(options, 'destroy', cause)
       } finally {
         authoringTargets?.destroy()
+        domText?.destroy()
         events.dispose()
         root.replaceChildren()
         host.remove()
