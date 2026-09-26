@@ -36,8 +36,9 @@ function fixture() {
 async function showInsertMenu(page: Page) {
   const menu = page.getByRole('menu', { name: 'Flow 插入菜单', exact: true })
   if (!await menu.isVisible()) {
-    const elements = page.getByRole('tab', { name: '元素', exact: true })
-    if (await elements.isVisible()) await elements.click()
+    const lightInsert = page.locator('button[aria-controls="course-light-insert-menu"]')
+    await expect(lightInsert, 'Flow 11+4 menu must be reached through the light workbench toolbar').toBeVisible()
+    await lightInsert.click()
   }
   await expect(menu).toBeVisible()
   await expect(menu.getByRole('region', { name: '插入到正文', exact: true }).getByRole('menuitem')).toHaveCount(11)
@@ -58,7 +59,7 @@ async function openFlow(page: Page, workspace: string, name: string) {
   return opened
 }
 
-test('M16-T06 Flow workbench insert menu exposes the 11 document and 4 paper commands and commits both semantics', async () => {
+test('M16-T06 Flow light workbench insert menu exposes the 11 document and 4 paper commands and commits both semantics', async () => {
   test.setTimeout(180_000)
   const data = fixture(), server = await selectionServer(), app = await launchSelectionApp(data.directory)
   const page = await app.firstWindow()
