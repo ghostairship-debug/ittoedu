@@ -87,13 +87,19 @@ async function focusSecondEnd(page: Page, body: Locator, carrier: Carrier) {
   await expect(secondParagraph(body, carrier)).toBeVisible()
   await selectVisibleText(page, body, '乙段：保持原样。')
   await page.keyboard.press('ArrowRight')
+  await page.keyboard.press('End')
   await expect.poll(() => body.evaluate(root => {
     const selection = root.ownerDocument.getSelection(), anchor = selection?.anchorNode
     const element = anchor instanceof Element ? anchor : anchor?.parentElement
     const block = element?.closest('[data-flow-block-id]')
+    const prefix = block && anchor ? root.ownerDocument.createRange() : null
+    prefix?.selectNodeContents(block!)
+    if (anchor) prefix?.setEnd(anchor, selection!.anchorOffset)
     return { focused: root === document.activeElement, blockId: block?.getAttribute('data-flow-block-id') ?? null,
-      text: block?.textContent ?? null }
-  })).toMatchObject({ focused: true, ...(carrier === 'flow' ? { blockId: 'm16-second' } : {}), text: '乙段：保持原样。' })
+      text: block?.textContent ?? null, collapsed: selection?.isCollapsed ?? false,
+      atEnd: Boolean(block && prefix && prefix.toString() === block.textContent) }
+  })).toMatchObject({ focused: true, ...(carrier === 'flow' ? { blockId: 'm16-second' } : {}),
+    text: '乙段：保持原样。', collapsed: true, atEnd: true })
 }
 
 function firstParagraph(body: Locator, carrier: Carrier) {
@@ -345,7 +351,8 @@ for (const carrier of ['flow', 'markdown'] as const) {
       const name = `表格验收.${carrier === 'flow' ? 'h5lesson' : 'md'}`
       const opened = await openSelectionFile(page, data.workspace, name)
       const body = await bodyFor(page, carrier, name)
-      const table = body.locator('[data-flow-body-block="table"], .document-table').first()
+      const table = carrier === 'flow' ? body.locator('[data-flow-body-block="table"]').first()
+        : body.locator('figure:has(table)').first()
       await expect(table).toBeVisible()
       const rowCount = async () => {
         const entry = (await blocks(page, opened.documentId)).find(block => block.type === 'table')
