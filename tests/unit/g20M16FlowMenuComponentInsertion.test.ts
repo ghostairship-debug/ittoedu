@@ -21,8 +21,8 @@ function fixture() {
       schemaVersion: 4, runtimeApiVersion: 4, renderMode: 'dom', supportedScopes: ['scene'],
       id: packageId, name: '菜单组件', version: '1.0.0', entry: 'runtime.js',
       defaultSize: { width: 320, height: 180 }, minSize: { width: 100, height: 80 },
-      preserveAspectRatio: false, assets: {}, defaultProps: { title: '默认' },
-      presets: [{ id: 'blue', label: '蓝色', props: { title: '预设' } }],
+      preserveAspectRatio: false, assets: {}, defaultProps: { title: '默认', content: { a: 'default-a', b: 'default-b' } },
+      presets: [{ id: 'blue', label: '蓝色', props: { title: '预设', content: { a: 'preset-a' } } }],
     })),
     'runtime.js': new TextEncoder().encode(`CoursewareComponent.define({id:'${packageId}',runtimeApiVersion:4,create(ctx){const el=document.createElement('div');el.textContent='hello';ctx.dom.root.append(el);return{destroy(){el.remove()}}}})`),
   })
@@ -40,7 +40,7 @@ function fixture() {
   const resources: HistoryResourceState = { assetFiles: {}, componentPackages: {} }
   const input = { project, resources, target: { projectId: project.id, documentRevision: project.revision,
     locationId: 'heading', surfaceId: 'flow' }, destination: { parentBlockId: null, index: 1, wrap: 'left' as const },
-    packageId, packageData: data, presetId: 'blue', props: { title: '自定义' }, width: 420, height: 240, now }
+    packageId, packageData: data, presetId: 'blue', props: { title: '自定义', content: { b: 'custom-b' } }, width: 420, height: 240, now }
   return { input, project, resources, data }
 }
 
@@ -75,7 +75,7 @@ describe('Flow menu component preparation', () => {
     expect(step.nextDocument.revision).toBe(1)
     expect(flow(step.nextDocument).surfaceLayerItems).toHaveLength(0)
     const block = flow(step.nextDocument).blocks[1]
-    expect(block).toMatchObject({ type: 'component', props: { title: '自定义' }, wrap: 'left',
+    expect(block).toMatchObject({ type: 'component', props: { title: '自定义', content: { a: 'preset-a', b: 'custom-b' } }, wrap: 'left',
       component: { packageId, version: '1.0.0' } })
     if (block?.type !== 'component') throw new Error('missing component')
     expect(step.nextDocument.assets[block.staticFallbackAssetId]).toMatchObject({ mimeType: 'image/png', width: 1, height: 1 })

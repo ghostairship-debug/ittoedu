@@ -80,7 +80,7 @@ export async function prepareFlowMenuComponentInsertion(
   }
   const data = resolvedPackage(frozen)
   const presetProps = frozen.presetId ? resolveComponentPresetProps(data.manifest, frozen.presetId) : data.manifest.defaultProps
-  const props = mergeComponentProps(data.manifest, { ...presetProps, ...frozen.props })
+  const props = mergeComponentProps({ ...data.manifest, defaultProps: presetProps }, frozen.props ?? {})
   const candidate = structuredClone(project)
   if (!candidate.componentPackages[frozen.packageId]) candidate.componentPackages[frozen.packageId] = componentPackageMeta(data)
   const candidateResources: HistoryResourceState = {
