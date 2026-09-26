@@ -427,10 +427,37 @@ for (const carrier of ['flow', 'markdown'] as const) {
       await expect.poll(async () => (await app.evaluate(({ clipboard }) => clipboard.readText()))).toBe('先预测')
       await body.press('Control+z')
       await expect.poll(formal).toBe(boldState)
+      const plainDiagnostic: unknown[] = []
+      await page.evaluate(() => {
+        const probe = window as Window & { __m16PasteEvents?: Array<Record<string, unknown>> }
+        probe.__m16PasteEvents = []
+        document.addEventListener('paste', event => {
+          const target = event.target instanceof Element ? event.target : null
+          const entry: Record<string, unknown> = { target: target?.outerHTML.slice(0, 300) ?? null,
+            text: event.clipboardData?.getData('text/plain') ?? null, types: [...(event.clipboardData?.types ?? [])],
+            defaultPreventedAtCapture: event.defaultPrevented, trusted: event.isTrusted }
+          probe.__m16PasteEvents!.push(entry)
+          queueMicrotask(() => { entry.defaultPreventedAfterDispatch = event.defaultPrevented })
+        }, { capture: true })
+      })
+      const capturePlain = async (stage: string, readFormal: () => Promise<string> = formal) => {
+        const ui = await page.evaluate(() => {
+          const active = document.activeElement, selection = window.getSelection()
+          return { active: active instanceof Element ? { tag: active.tagName, label: active.getAttribute('aria-label'),
+            text: active.textContent?.slice(0, 80) } : null, selection: selection?.toString() ?? null,
+            alerts: [...document.querySelectorAll('[role="alert"]')].map(node => node.textContent?.trim() ?? ''),
+            paste: (window as Window & { __m16PasteEvents?: Array<Record<string, unknown>> }).__m16PasteEvents ?? [] }
+        })
+        plainDiagnostic.push({ stage, ui, clipboardText: await app.evaluate(({ clipboard }) => clipboard.readText()), formal: await readFormal() })
+        writeFileSync(join(data.directory, `${carrier}-clipboard-plain-diagnostic.json`), JSON.stringify(plainDiagnostic, null, 2))
+      }
       await selectVisibleText(page, body, '再观察')
       await firstParagraph(body, carrier).click({ button: 'right' })
+      await capturePlain('before-menu-command')
       await page.getByRole('menu', { name: '段落操作' }).getByRole('menuitem', { name: '粘贴为纯文本' }).click()
-      await expect.poll(visibleText).toBe('甲段：先预测，先预测。')
+      await capturePlain('after-menu-command')
+      try { await expect.poll(visibleText).toBe('甲段：先预测，先预测。') }
+      finally { await capturePlain('after-formal-observation') }
       const plain = await inlines()
       expect(plain.some(item => item.type === 'text' && item.text.includes('先预测') && !item.style?.bold)).toBe(true)
       const plainState = await formal()
@@ -475,7 +502,9 @@ for (const carrier of ['flow', 'markdown'] as const) {
       expect(await app.evaluate(({ clipboard }) => clipboard.availableFormats())).toContain('application/x-cw-document-slice')
       await selectVisibleText(page, objectBody, '保持原样')
       await secondParagraph(objectBody, carrier).click({ button: 'right' })
+      await capturePlain('object-before-menu-command', objectFormal)
       await page.getByRole('menu', { name: '段落操作' }).getByRole('menuitem', { name: '粘贴为纯文本' }).click()
+      await capturePlain('object-after-menu-command', objectFormal)
       await expect.poll(async () => (await targetParagraph()).map(item => item.type === 'text' ? item.text : '').join(''))
         .toBe(`乙段：${objectClipboard.text}。`)
       expect((await targetParagraph()).some(item => item.type === 'math')).toBe(false)
