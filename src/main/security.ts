@@ -105,9 +105,12 @@ export function hardenWebContents(
   })
 }
 
-/** Main renderer may write the system clipboard from a user gesture. All other permissions stay denied. */
+/**
+ * Main renderer may write the system clipboard and enter fullscreen (the teacher controller's 全屏 in preview and
+ * try-run), both only from a user gesture. All other permissions stay denied.
+ */
 export function isAllowedRendererPermission(permission: string): boolean {
-  return permission === 'clipboard-sanitized-write'
+  return permission === 'clipboard-sanitized-write' || permission === 'fullscreen'
 }
 
 export type MediaCaptureKind = 'audio' | 'video'
