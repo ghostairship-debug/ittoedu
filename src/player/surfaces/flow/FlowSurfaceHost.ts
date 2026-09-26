@@ -9,6 +9,8 @@ import { flowFormulaBlockElement, renderDocumentText } from '../../../shared/doc
 import { plainDocumentText, type FlowTextContent } from '../../../shared/document/content'
 import { buildNativeChartSvg } from '../../../shared/nativeChartSvg'
 import { createFlowViewportGeometry, flowViewportOverlayPoint, measureFlowPaperOrigin } from '../../../shared/flowViewportGeometry'
+import { flowParagraphAnchoredFrame, type FlowParagraphAnchor, type FlowParagraphBlockRect } from '../../../shared/flowParagraphAnchors'
+import { flowMediaCropGeometry } from '../../../shared/flowMediaCrop'
 import { courseSlideCanvas, type SlideCanvasSize } from '../../../shared/slideCanvas'
 import { FLOW_BODY_CSS, FLOW_BODY_PAPER_PADDING, FLOW_BODY_SCROLL_PADDING, FLOW_COMPONENT_BLOCK_HEIGHT, flowPaperMaxWidth, resolveFlowParagraphPresentation } from '../../../shared/flowBodyPresentation'
 import { tableCellSpan } from '../../../shared/tableMerge'
@@ -117,6 +119,7 @@ interface PublishedFlowOverlayEntry {
   readonly globalPlane: GlobalLayerPlane | null
   readonly flowBodyPlane: FlowBodyLayerPlane | null
   readonly stackOrder: number
+  readonly paragraphAnchor?: FlowParagraphAnchor
 }
 
 interface FlowOverlayRecord {
@@ -889,6 +892,13 @@ export class FlowSurfaceHost {
     this.#article = article
     this.#toc?.sync()
     this.#renderOverlay(surface)
+    const reading = article.querySelector<HTMLElement>('.flow-runtime-reading')
+    if (reading && surface.surfaceLayerItems.some(entry => entry.paragraphAnchor && entry.item.paperSpace === 'paper') && typeof ResizeObserver === 'function') {
+      const observer = new ResizeObserver(() => this.#syncPaperOverlayPositions(surface))
+      observer.observe(reading)
+      reading.querySelectorAll<HTMLElement>('[data-flow-block-id]').forEach(block => observer.observe(block))
+      this.#bodyLayoutCleanups.push(() => observer.disconnect())
+    }
     this.#interactionPort?.refreshNodes(
       this.#interactionNodes.values(),
       ++this.#interactionGeneration,
@@ -900,6 +910,9 @@ export class FlowSurfaceHost {
     if (!article) return
     const entries = publishedFlowOverlayEntries(this.#playback, surface, this.#locationId)
     const geometry = this.#flowGeometry()
+    const paper = article.querySelector<HTMLElement>('.flow-runtime-reading')
+    const paragraphLayout = paper && entries.some(entry => entry.source === 'surface' && entry.item.paperSpace === 'paper' && entry.paragraphAnchor)
+      ? measurePublishedFlowParagraphLayout(paper, this.#options.playbackView?.state.zoom ?? 1) : null
     for (const entry of entries) {
       if (isControllerItem(entry.item)) continue
       const wrap = this.#layerPlaneForEntry(entry)?.querySelector<HTMLElement>(
@@ -907,9 +920,12 @@ export class FlowSurfaceHost {
       )
       if (wrap) {
         // Paper overlays follow the paper; screen-anchored ones scale their place with the view.
+        const frame = entry.source === 'surface' && entry.item.paperSpace === 'paper' && entry.paragraphAnchor && paragraphLayout && paper
+          ? flowParagraphAnchoredFrame(entry.paragraphAnchor, entry.item.frame, paragraphLayout.width, paragraphLayout.blocks, visiblePublishedFlowAncestors(paper, entry.paragraphAnchor.blockId)) ?? entry.item.frame
+          : entry.item.frame
         const point = entry.item.paperSpace === 'paper'
-          ? geometry.paperToViewport(entry.item.frame)
-          : flowViewportOverlayPoint(entry.item.frame, this.#canvas, geometry.layoutViewportSize)
+          ? geometry.paperToViewport(frame)
+          : flowViewportOverlayPoint(frame, this.#canvas, geometry.layoutViewportSize)
         wrap.style.left = `${point.x}px`
         wrap.style.top = `${point.y}px`
       }
@@ -1020,6 +1036,7 @@ export class FlowSurfaceHost {
       }
       this.#registerInteractionNode(wrap, entry.item, entry.source)
     }
+    this.#syncPaperOverlayPositions(surface)
   }
 
   #layerPlanes(): HTMLElement[] {
@@ -1314,6 +1331,7 @@ export function publishedFlowOverlayEntries(
     throw new Error(`Flow composition surface mismatch: ${composition.surfaceId}`)
   }
   // Playback-hidden nodes stay mounted so Interaction V1 node.enter can reveal them.
+  const anchors = new Map(surface.surfaceLayerItems.map(entry => [entry.item.layerItemId, entry.paragraphAnchor] as const))
   return composition.entries
     .filter((entry) => entry.mounted)
     .map((entry) => ({
@@ -1322,9 +1340,35 @@ export function publishedFlowOverlayEntries(
       globalPlane: entry.globalPlane,
       flowBodyPlane: entry.flowBodyPlane,
       stackOrder: entry.stackOrder,
+      ...(entry.source === 'surface' && anchors.get(entry.item.layerItemId) ? { paragraphAnchor: anchors.get(entry.item.layerItemId) } : {}),
     }))
 }
 
+
+function measurePublishedFlowParagraphLayout(paper: HTMLElement, scale: number): { width: number; blocks: FlowParagraphBlockRect[] } {
+  const rect = paper.getBoundingClientRect()
+  if (!Number.isFinite(scale) || scale <= 0 || rect.width <= 0) return { width: 0, blocks: [] }
+  const blocks: FlowParagraphBlockRect[] = []
+  const seen = new Set<string>()
+  for (const element of paper.querySelectorAll<HTMLElement>('[data-flow-block-id]')) {
+    const blockId = element.dataset.flowBlockId
+    if (!blockId || seen.has(blockId) || element.getClientRects().length === 0) continue
+    const block = element.getBoundingClientRect()
+    if (block.width <= 0 || block.height <= 0) continue
+    let depth = 0
+    for (let parent = element.parentElement; parent && parent !== paper; parent = parent.parentElement) if (parent.hasAttribute('data-flow-block-id')) depth += 1
+    blocks.push({ blockId, depth, x: (block.left - rect.left) / scale, y: (block.top - rect.top) / scale, width: block.width / scale, height: block.height / scale })
+    seen.add(blockId)
+  }
+  return { width: rect.width / scale, blocks }
+}
+
+function visiblePublishedFlowAncestors(paper: HTMLElement, blockId: string): string[] {
+  const block = [...paper.querySelectorAll<HTMLElement>('[data-flow-block-id]')].find(element => element.dataset.flowBlockId === blockId)
+  const ancestors: string[] = []
+  for (let parent = block?.parentElement; parent && parent !== paper; parent = parent.parentElement) if (parent instanceof HTMLElement && parent.dataset.flowBlockId) ancestors.push(parent.dataset.flowBlockId)
+  return ancestors
+}
 
 function publishedInteractionOwnership(
   item: PublishedLayerItem,
@@ -1758,10 +1802,34 @@ function renderBlockDom(
       const url = resolvePlaybackAssetUrl(options.playback, block.assetId, options.resolveAsset)
       if (block.mediaKind === 'image' && url) {
         const image = dom.createElement('img')
-        image.src = url
         image.alt = block.altText ?? ''
-        image.style.maxWidth = '100%'
-        figure.appendChild(image)
+        if (block.crop) {
+          const clipped = dom.createElement('div')
+          clipped.style.width = '100%'
+          clipped.style.maxWidth = '100%'
+          clipped.style.overflow = 'hidden'
+          clipped.style.position = 'relative'
+          const paintCrop = () => {
+            const geometry = flowMediaCropGeometry({ width: image.naturalWidth, height: image.naturalHeight }, block)
+            clipped.style.aspectRatio = geometry.dom.wrapperAspectRatio
+            image.style.position = 'absolute'
+            image.style.display = 'block'
+            image.style.maxWidth = 'none'
+            image.style.width = geometry.dom.imageWidth
+            image.style.height = geometry.dom.imageHeight
+            image.style.left = geometry.dom.imageLeft
+            image.style.top = geometry.dom.imageTop
+          }
+          image.addEventListener('load', paintCrop)
+          options.onLayoutCleanup?.(() => image.removeEventListener('load', paintCrop))
+          paintCrop()
+          clipped.appendChild(image)
+          figure.appendChild(clipped)
+        } else {
+          image.style.maxWidth = '100%'
+          figure.appendChild(image)
+        }
+        image.src = url
       } else if (block.mediaKind === 'audio' && url) {
         const audio = dom.createElement('audio')
         audio.controls = true
