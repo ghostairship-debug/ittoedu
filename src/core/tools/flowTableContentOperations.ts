@@ -8,10 +8,10 @@ import { normalizeDocumentText, type FlowInline } from '../../shared/document/co
 export type FlowTableStructureOperation =
   | { kind: 'merge'; region: TableMergeRegion }
   | { kind: 'split'; rowId: string; columnId: string }
-  | { kind: 'insert-row'; afterId?: string }
+  | { kind: 'insert-row'; beforeId?: string; afterId?: string }
   | { kind: 'delete-row'; id: string }
   | { kind: 'move-row'; id: string; direction: -1 | 1 }
-  | { kind: 'insert-column'; afterId?: string }
+  | { kind: 'insert-column'; beforeId?: string; afterId?: string }
   | { kind: 'delete-column'; id: string }
   | { kind: 'move-column'; id: string; direction: -1 | 1 }
 
@@ -43,9 +43,11 @@ export function changeFlowTableStructure(source: FlowTableBlock, operation: Flow
       break
     }
     case 'insert-row': {
-      const index = operation.afterId ? table.rows.findIndex(row => row.id === operation.afterId) : table.rows.length - 1
-      if (operation.afterId && index < 0) throw new Error('表格行已失效')
-      table.rows.splice(index + 1, 0, { id: `row-${idFactory()}`, cells: Object.fromEntries(table.columns.map(column => [column.id, { inlines: [] }])) })
+      if (operation.beforeId && operation.afterId) throw new Error('只能指定一个插入位置')
+      const referenceId = operation.beforeId ?? operation.afterId
+      const index = referenceId ? table.rows.findIndex(row => row.id === referenceId) : table.rows.length
+      if (index < 0) throw new Error('表格行已失效')
+      table.rows.splice(operation.beforeId ? index : operation.afterId ? index + 1 : index, 0, { id: `row-${idFactory()}`, cells: Object.fromEntries(table.columns.map(column => [column.id, { inlines: [] }])) })
       break
     }
     case 'delete-row':
@@ -54,10 +56,12 @@ export function changeFlowTableStructure(source: FlowTableBlock, operation: Flow
       break
     case 'move-row': table.rows = moveTableItem(table.rows, operation.id, operation.direction); break
     case 'insert-column': {
-      const index = operation.afterId ? table.columns.findIndex(column => column.id === operation.afterId) : table.columns.length - 1
-      if (operation.afterId && index < 0) throw new Error('表格列已失效')
+      if (operation.beforeId && operation.afterId) throw new Error('只能指定一个插入位置')
+      const referenceId = operation.beforeId ?? operation.afterId
+      const index = referenceId ? table.columns.findIndex(column => column.id === referenceId) : table.columns.length
+      if (index < 0) throw new Error('表格列已失效')
       const id = `col-${idFactory()}`
-      table.columns.splice(index + 1, 0, { id, header: { inlines: [{ type: 'text', text: '新列' }] } })
+      table.columns.splice(operation.beforeId ? index : operation.afterId ? index + 1 : index, 0, { id, header: { inlines: [{ type: 'text', text: '新列' }] } })
       for (const row of table.rows) row.cells[id] = { inlines: [] }
       break
     }
