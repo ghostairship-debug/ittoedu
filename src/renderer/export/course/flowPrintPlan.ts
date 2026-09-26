@@ -139,7 +139,9 @@ export function flowImageDimensions(bytes: Uint8Array, mimeType: string): { widt
     }
   }
   if (mimeType === 'image/svg+xml') {
-    const root = /<svg\b([^>]*)>/i.exec(new TextDecoder().decode(bytes))?.[1]
+    const encoding = bytes[0] === 0xff && bytes[1] === 0xfe ? 'utf-16le'
+      : bytes[0] === 0xfe && bytes[1] === 0xff ? 'utf-16be' : 'utf-8'
+    const root = /<svg\b([^>]*)>/i.exec(new TextDecoder(encoding, { fatal: true }).decode(bytes))?.[1]
     if (!root) return undefined
     const attribute = (name: string) => new RegExp(`(?:^|\\s)${name}\\s*=\\s*([\"'])(.*?)\\1`, 'i').exec(root)?.[2]
     const length = (name: string): number | undefined => {

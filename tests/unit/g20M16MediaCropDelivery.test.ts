@@ -56,6 +56,21 @@ describe('M16 body media crop delivery', () => {
     expect(strFromU8(unzipSync(output.bytes)['word/document.xml']!)).toContain('媒体后备')
   })
 
+  it.each(['utf-16le', 'utf-16be'] as const)('prints a BOM-encoded %s SVG with nonzero crop', encoding => {
+    const svg = '<?xml version="1.0" encoding="UTF-16"?><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 60"><rect width="120" height="60" fill="red"/></svg>'
+    const sourceBytes = new Uint8Array(2 + svg.length * 2)
+    sourceBytes.set(encoding === 'utf-16le' ? [0xff, 0xfe] : [0xfe, 0xff])
+    for (let index = 0; index < svg.length; index += 1) {
+      const unit = svg.charCodeAt(index)
+      sourceBytes[2 + index * 2] = encoding === 'utf-16le' ? unit & 255 : unit >> 8
+      sourceBytes[3 + index * 2] = encoding === 'utf-16le' ? unit >> 8 : unit & 255
+    }
+    const html = renderFlowPrintBodyHtml(buildFlowPrintPlan(surface(true)), { resolveAssetUrl: () => dataUrl(sourceBytes, 'image/svg+xml') })
+    const wrapper = new DOMParser().parseFromString(html, 'text/html').querySelector('.flow-print-image-crop') as HTMLElement
+    const [width, height] = wrapper.style.aspectRatio.split(' / ').map(Number)
+    expect(width / height).toBeCloseTo(5 / 3)
+    expect(wrapper.querySelector('img')?.getAttribute('src')).toBe(dataUrl(sourceBytes, 'image/svg+xml'))
+  })
   it.each(['image/webp', 'image/svg+xml'] as const)('accepts valid zero-edge crop for %s in print HTML', async mimeType => {
     const sourceBytes = mimeType === 'image/webp'
       ? new Uint8Array(await sharp({ create: { width: 12, height: 6, channels: 4, background: '#ff0000' } }).webp().toBuffer())
@@ -83,4 +98,5 @@ describe('M16 body media crop delivery', () => {
     expect(() => buildFlowDocx(surface(true), { resolveAsset: () => ({ bytes: new Uint8Array([1, 2, 3]), mimeType: 'image/png' }) })).toThrow('无法读取原图尺寸')
   })
 })
+
 
