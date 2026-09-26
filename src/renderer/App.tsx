@@ -1,6 +1,8 @@
 import { captureDocumentReference } from './workbench/SelectionContextController'
 import { CourseAdvancedChrome, CourseEditorFrame } from './documents/CourseEditorChromeContext'
 import { CourseLightToolbar } from './documents/CourseLightToolbar'
+import { elementCards } from './workbench/elementCards/elementCardController'
+import { locateCourseLayer } from '../core/drivers/course/layerProperties'
 import { CourseEditorActionsContext, type CourseEditorActions } from './documents/CourseEditorActionsContext'
 import { AlertCircle, LoaderCircle, X } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -641,6 +643,23 @@ export default function App() {
       mode={courseCanvasMode}
       busy={busy} hasFlowSurface={hasFlowSurface}
       onPreview={courseDelivery.openPreview} onExport={courseDelivery.exportCourse}
+      elementCards={{
+        exists: card => {
+          const state = useEditorStore.getState(), project = selectActiveCourseProjectDocument(state)
+          return card.target.kind === 'course-object' && state.courseDocument.documentId === card.documentId
+            && Boolean(project && locateCourseLayer(project, card.target.itemId))
+        },
+        jump: card => {
+          const target = card.target, state = useEditorStore.getState()
+          if (target.kind !== 'course-object' || state.courseDocument.documentId !== card.documentId) return
+          const global = Boolean(selectActiveCourseProjectDocument(state)?.globalLayerItems.some(({ item }) => item.layerItemId === target.itemId))
+          state.activateCourseLocation(target.locationId)
+          state.setEditingScope(global ? 'global' : 'scene')
+          if (!global && target.stateId) state.setActivePresentationState(target.stateId)
+          state.selectNode(target.itemId)
+          elementCards.requestOpen(card.key)
+        },
+      }}
       reportError={setError} />}>
       <CourseAdvancedChrome><TopToolbar
         busy={busy}

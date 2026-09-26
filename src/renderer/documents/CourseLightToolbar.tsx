@@ -4,6 +4,7 @@ import { usePropertiesContext } from '../ui/properties/PropertiesContextAdapter'
 import { ExportMenu, type ExportFormat } from '../ui/ExportMenu'
 import type { SingleHtmlExportMode } from '../export/course/coursePackagePreflight'
 import { useCourseEditorChrome } from './CourseEditorChromeContext'
+import { ElementCardIndicator, type ElementCardNavigation } from '../workbench/elementCards/ElementCardIndicator'
 import './courseEditorChrome.css'
 
 export interface CourseLightToolbarProps {
@@ -35,6 +36,8 @@ export interface CourseLightToolbarProps {
   hasFlowSurface?: boolean
   onPreview?(): void
   onExport?(format: ExportFormat, singleHtmlMode?: SingleHtmlExportMode): void
+  /** Finds the elements of AI cards that are working or waiting (M15); shows the top bar's indicator. */
+  elementCards?: ElementCardNavigation
 }
 
 const COMPACT_WIDTH = 560
@@ -141,6 +144,7 @@ export function CourseLightToolbar(props: CourseLightToolbarProps) {
         </div>}
       </div>
       <div className="course-light-tools__document-actions">
+        {props.elementCards && <ElementCardIndicator documentId={props.documentId} navigation={props.elementCards} />}
         {chrome.workbench && <span className="course-light-tools__status">{chrome.workbench.documentStatus}</span>}
         {!compact && props.onPreview && <button type="button" disabled={props.busy} onClick={() => { if (props.onPreview) invoke(props.onPreview) }}>整课预览</button>}
         {props.onExport && <ExportMenu variant="light" busy={props.busy ?? false} hasFlowSurface={props.hasFlowSurface ?? false}

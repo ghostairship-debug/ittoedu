@@ -7,6 +7,7 @@ import { useContextMenu, type MenuCommand } from '../editing/commands/CommandMen
 import { IMAGE_FIT_LABEL, multiObjectCommands, singleObjectCommands, type SingleObjectState } from '../editing/commands/objectCommands'
 import { OBJECT_CONTEXT_MENU_EVENT, requestObjectEdit, type ObjectContextMenuRequest } from '../editing/commands/objectContextMenu'
 import { ImageCropOverlay } from '../editing/crop/ImageCropOverlay'
+import { ElementAiButton } from './elementCards/ElementAiCard'
 import { rotatedBoundingBox, unionBoxes, visibleBounds, type QuickBarBounds, type QuickBarRect } from '../editing/quickbar/placeQuickBar'
 import { QuickBarAiButton, QuickBarButton, QuickBarColorButton, QuickBarLabel, QuickBarMenu, QuickBarPopoverButton, QuickBarSeparator, SelectionQuickBar } from '../editing/quickbar/SelectionQuickBar'
 import { usePointerGesture } from '../editing/quickbar/usePointerGesture'
@@ -56,6 +57,12 @@ const ALIGN_LABEL = { left: '左对齐', center: '居中', right: '右对齐' }
 
 function run(action: () => unknown, onError: (message: string) => void) {
   try { action() } catch (error) { onError(error instanceof Error ? error.message : String(error)) }
+}
+
+/** What an element's AI card calls it: the start of its text, else its name. */
+function elementLabel(view: PropertiesItemView): string {
+  const text = view.type === 'text' ? view.text.replace(/\s+/g, ' ').trim().slice(0, 16) : ''
+  return text || view.name || '所选对象'
 }
 
 /** Type-specific common actions of one selected object; everything else stays in the editor. */
@@ -205,12 +212,15 @@ export function NativeSelectionContext({ documentId, revision, locationId, itemI
   // Commands report a failure next to the bar instead of throwing into React.
   const guarded = (items: MenuCommand[]): MenuCommand[] => items.map(item => ({ ...item, run: () => run(item.run, report) }))
   // Capture when sending, so the request always names the objects selected now.
-  const ai = <QuickBarAiButton targetLabel={itemIds.length > 1 ? `所选 ${itemIds.length} 个对象` : single ? `“${single.view.name}”` : '所选对象'}
-    onSubmit={async instruction => {
-      if (!documentId || !locationId) throw new Error('文档尚未就绪，请重新选择。')
-      const snapshot = await workbenchSelection.prepare(documentId)
-      await workbenchSelection.request(captureCourseObjectSelection(snapshot, locationId, itemIds, stateId), instruction)
-    }} />
+  const captureSelected = async () => {
+    if (!documentId || !locationId) throw new Error('文档尚未就绪，请重新选择。')
+    return captureCourseObjectSelection(await workbenchSelection.prepare(documentId), locationId, itemIds, stateId)
+  }
+  // One object has its own AI card (M15); several objects still go to the assistant as one request.
+  const ai = single && documentId && locationId && itemIds.length === 1
+    ? <ElementAiButton documentId={documentId} target={{ kind: 'course-object', locationId, itemId: itemIds[0]! }} label={elementLabel(single.view)} capture={captureSelected} />
+    : <QuickBarAiButton targetLabel={itemIds.length > 1 ? `所选 ${itemIds.length} 个对象` : '所选对象'}
+      onSubmit={async instruction => { await workbenchSelection.request(await captureSelected(), instruction) }} />
   let content: ReactNode = null
   // The selection's right-click menu: the whole list, from the same definitions as the bar's "⋯".
   let contextItems: MenuCommand[] = []

@@ -1,4 +1,5 @@
 import { selectionReference, workbenchSelection, type ContextualEditRequest } from './SelectionContextController'
+import { elementCards } from './elementCards/elementCardController'
 import './selectionContext.css'
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent } from 'react'
 import { createPortal } from 'react-dom'
@@ -429,6 +430,9 @@ export function ExecutionAssistant({ root, captureDocuments, prepareSend, api: s
   const openQuestion = useMemo(() => pendingQuestion(projection), [projection])
   const openApproval = useMemo(() => pendingApproval(projection), [projection])
   useEffect(() => { if (workspaceId) setPermissionState(readPermission(workspaceId)) }, [workspaceId])
+  // Element AI cards (M15) belong to this space and use the permission level shown here.
+  useEffect(() => { elementCards.setWorkspace(workspaceId || null); return () => elementCards.setWorkspace(null) }, [workspaceId])
+  useEffect(() => { elementCards.setPermission(permission) }, [permission])
   const choosePermission = (value: ExecutionPermissionMode) => {
     setPermissionState(value); setPermissionOpen(false)
     permissionRef.current?.querySelector<HTMLButtonElement>('button')?.focus()

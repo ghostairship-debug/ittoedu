@@ -1,0 +1,30 @@
+/* M15 element AI card: a white panel under the quick bar, like the AI form it replaces. */
+.element-ai-card { display: grid; gap: 8px; box-sizing: border-box; width: min(320px, 82vw); padding: 10px; border: 1px solid #c4b5fd; border-radius: 8px; background: #fff; box-shadow: 0 8px 24px rgb(0 0 0 / 18%); color: #17211d; font-size: 12px; white-space: normal; }
+.element-ai-card p { margin: 0; }
+.element-ai-card__header { display: flex; align-items: center; gap: 6px; color: #5b21b6; }
+.element-ai-card__header strong { overflow: hidden; flex: 1; min-width: 0; color: #17211d; text-overflow: ellipsis; white-space: nowrap; }
+.element-ai-card__header button { min-width: 24px; height: 22px; padding: 0 6px; border: 1px solid #d8dee6; border-radius: 4px; background: #fff; color: #334155; font: inherit; cursor: pointer; }
+.element-ai-card__header button:disabled { opacity: .5; cursor: not-allowed; }
+.element-ai-card__close { border-color: transparent !important; font-size: 15px !important; line-height: 1; }
+.element-ai-card__hint { color: #66758a; }
+.element-ai-card__log { display: grid; gap: 8px; max-height: 220px; margin: 0; padding: 0; overflow-y: auto; list-style: none; }
+.element-ai-card__entry { display: grid; gap: 2px; padding: 6px 8px; border-radius: 6px; background: #f6f4ff; }
+.element-ai-card__request { font-weight: 600; }
+.element-ai-card__state { color: #66758a; }
+.element-ai-card__entry[data-state="running"] .element-ai-card__state, .element-ai-card__entry[data-state="queued"] .element-ai-card__state { color: #6d28d9; }
+.element-ai-card__entry[data-state="failed"] .element-ai-card__state { color: #b42318; }
+.element-ai-card__reply { color: #334155; }
+.element-ai-card__failure { color: #b42318; }
+.element-ai-card__form { display: grid; gap: 6px; }
+.element-ai-card__form textarea { box-sizing: border-box; width: 100%; min-height: 48px; resize: vertical; font: inherit; }
+.element-ai-card__actions { display: flex; justify-content: flex-end; gap: 6px; }
+.element-ai-card__actions button { padding: 4px 12px; }
+
+/* The top bar's indicator of element cards at work (M15). */
+.element-card-indicator { position: relative; display: inline-flex; flex: none; }
+.element-card-indicator__button { display: inline-flex; align-items: center; gap: 4px; min-height: 26px; padding: 2px 8px; border: 1px solid #c4b5fd; border-radius: 999px; background: #f5f3ff; color: #5b21b6; font: inherit; font-size: 12px; white-space: nowrap; cursor: pointer; }
+.element-card-indicator__button[data-waiting] { border-color: #f59e0b; background: #fffbeb; color: #92400e; }
+.element-card-indicator__menu { position: absolute; top: calc(100% + 5px); right: 0; z-index: 40; display: grid; min-width: 200px; padding: 4px; border: 1px solid #d8dee6; border-radius: 8px; background: #fff; box-shadow: 0 8px 24px rgb(0 0 0 / 16%); }
+.element-card-indicator__menu button { display: flex; justify-content: space-between; gap: 12px; padding: 6px 10px; border: 0; border-radius: 5px; background: transparent; color: #17211d; font: inherit; font-size: 12px; text-align: left; cursor: pointer; }
+.element-card-indicator__menu button:hover { background: #f5f3ff; }
+.element-card-indicator__menu small { color: #66758a; }

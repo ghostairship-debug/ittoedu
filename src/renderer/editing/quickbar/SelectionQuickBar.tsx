@@ -121,12 +121,15 @@ export interface QuickBarPopoverButtonProps extends Omit<QuickBarButtonProps, 'o
   children(close: () => void): ReactNode
   popoverLabel?: string
   popupRole?: 'dialog' | 'menu'
+  /** Opens the popover each time this grows (a jump to the element asked for its card, M15). */
+  openToken?: number
 }
-export function QuickBarPopoverButton({ children, popoverLabel, popupRole = 'dialog', ...button }: QuickBarPopoverButtonProps) {
+export function QuickBarPopoverButton({ children, popoverLabel, popupRole = 'dialog', openToken, ...button }: QuickBarPopoverButtonProps) {
   const id = useId()
   const { open, setOpen, direction, maxHeight } = useContext(QuickBarContext)
   const expanded = open === id
   const close = () => setOpen(null)
+  useEffect(() => { if (openToken) setOpen(id) }, [openToken])
   return <span className="selection-quick-bar__anchor">
     <button type="button" className={`selection-quick-bar__button${button.text ? ' selection-quick-bar__button--text' : ''}`}
       aria-label={button.label} title={button.label} aria-expanded={expanded} aria-haspopup={popupRole} disabled={button.disabled}
