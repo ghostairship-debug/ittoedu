@@ -37,6 +37,39 @@ describe('Flow body and paper media conversion', () => {
     expect(result.blocks[2]).toMatchObject({ id: floated.captionBlockId, type: 'paragraph' })
   })
 
+  it('uses the original caption position when the media itself was selected as its anchor', () => {
+    const original = fixture()
+    const floated = floatFlowMediaBlock(original, { surfaceId: 'flow', blockId: 'media', layerItemId: 'caption-anchored',
+      frame: { mode: 'absolute', x: 80, y: 120, width: 320, height: 180 }, anchor: { blockId: 'media', offsetY: 0, xRatio: 0.1 } })
+    const surface = flowSurfaceIn(floated.nextDocument, 'flow')
+    expect(floated.nextDocument.revision).toBe(original.revision + 1)
+    expect(surface.blocks.map(block => block.type)).toEqual(['heading', 'paragraph'])
+    expect(surface.blocks[1]).toMatchObject({ id: floated.captionBlockId, content: { inlines: [{ text: '图一' }] } })
+    expect(surface.surfaceLayerItems[0]?.paragraphAnchor).toEqual({ blockId: floated.captionBlockId, offsetY: 0, xRatio: 0.1 })
+    expect(surface.surfaceLayerItems[0]?.item).toMatchObject({ content: { data: { assetId: 'photo', crop: { left: 0.1, right: 0.15 } } } })
+    expect(floated.nextDocument.assets).toEqual(original.assets)
+    expect(flowSurfaceIn(original, 'flow').blocks[1]?.type).toBe('media')
+  })
+
+  it('creates one empty paragraph at a first media block without a caption', () => {
+    const original = fixture()
+    const surface = flowSurfaceIn(original, 'flow')
+    const [heading, media] = surface.blocks
+    if (!heading || !media || media.type !== 'media') throw new Error('Expected media fixture')
+    delete media.caption
+    surface.blocks = [media, heading]
+    const floated = floatFlowMediaBlock(original, { surfaceId: 'flow', blockId: 'media', layerItemId: 'first-anchored',
+      frame: { mode: 'absolute', x: 40, y: 10, width: 320, height: 180 }, anchor: { blockId: 'media', offsetY: 7, xRatio: 0.05 } })
+    const next = flowSurfaceIn(floated.nextDocument, 'flow')
+    expect(floated.captionBlockId).toBeUndefined()
+    expect(floated.nextDocument.revision).toBe(original.revision + 1)
+    expect(next.blocks[0]).toMatchObject({ type: 'paragraph', content: { inlines: [] } })
+    expect(next.blocks[1]?.id).toBe('h')
+    expect(next.surfaceLayerItems[0]?.paragraphAnchor).toEqual({ blockId: next.blocks[0]?.id, offsetY: 7, xRatio: 0.05 })
+    expect(next.surfaceLayerItems[0]?.item).toMatchObject({ content: { data: { assetId: 'photo', crop: { left: 0.1, right: 0.15 } } } })
+    expect(floated.nextDocument.assets).toEqual(original.assets)
+  })
+
   it('rejects stale commands without changing the project', () => {
     const original = fixture()
     expect(() => floatFlowMediaBlock(original, { surfaceId: 'flow', blockId: 'media', frame: { mode: 'absolute', x: 0, y: 0, width: 100, height: 100 }, expectedRevision: 0 })).toThrow('stale-revision')

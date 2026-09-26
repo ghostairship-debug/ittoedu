@@ -16,6 +16,8 @@ export function floatFlowMediaBlock(
   if (!document.assets[source.block.assetId] || document.assets[source.block.assetId]?.kind !== source.block.mediaKind) throw new Error('正文媒体素材无效')
   const layerItemId = stableFlowId('media', input.layerItemId)
   const captionBlockId = source.block.caption ? stableFlowId('block') : undefined
+  const sourceIsAnchor = input.anchor.blockId === input.blockId
+  const replacementBlockId = sourceIsAnchor ? captionBlockId ?? stableFlowId('block') : undefined
   const nextDocument = commitCourseProjectMutation(document, draft => {
     const target = flowSurfaceIn(draft, input.surfaceId)
     const found = findFlowBlockRecursive(target.blocks, input.blockId)!
@@ -29,9 +31,10 @@ export function floatFlowMediaBlock(
     }
     found.blocks.splice(found.index, 1)
     if (media.caption && captionBlockId) found.blocks.splice(found.index, 0, { id: captionBlockId, type: 'paragraph', content: structuredClone(media.caption) })
+    else if (replacementBlockId) found.blocks.splice(found.index, 0, { id: replacementBlockId, type: 'paragraph', content: { inlines: [] } })
     appendOverlayItem(draft, { source: 'surface', surfaceId: input.surfaceId }, item)
     const entry = target.surfaceLayerItems.find(candidate => candidate.item.layerItemId === item.layerItemId)!
-    entry.paragraphAnchor = { ...input.anchor! }
+    entry.paragraphAnchor = { ...input.anchor!, blockId: replacementBlockId ?? input.anchor!.blockId }
     syncFlowCourseLocations(draft, input.surfaceId)
   }, input.now)
   return { nextDocument, layerItemId, ...(captionBlockId ? { captionBlockId } : {}) }
