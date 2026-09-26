@@ -69,6 +69,7 @@ export function insertFlowOverlayShape(draft: CourseProjectDocument, destination
       name: request.label,
     })
     const item = sceneNodeToCourseLayerItem(node)
+    item.paperSpace = 'paper'
     appendOverlayItem(draft, destination, item)
     return [item.layerItemId]
 }
@@ -79,6 +80,7 @@ export function insertFlowOverlayText(draft: CourseProjectDocument, destination:
       text: request.text ?? '请输入文本',
     })
     const item = sceneNodeToCourseLayerItem(node)
+    item.paperSpace = 'paper'
     appendOverlayItem(draft, destination, item)
     return [item.layerItemId]
 }

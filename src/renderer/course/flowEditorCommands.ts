@@ -18,6 +18,7 @@ import { LAYER_REJECT_STALE_REVISION, rejectIfStaleDocument } from '../../core/t
 import { deleteEffectiveLayerItems, makeEffectiveLayerAuthoringAddress } from '../../core/tools/layerCommands'
 import { locateCourseLayer } from './effectiveLayerCommands'
 import { commitCourseProjectMutation } from '../../core/tools/courseProjectMutation'
+import { reconcileFlowParagraphAnchors } from '../../core/tools/flowParagraphPlacement'
 import {
   controllerTargetIdsForLocations,
   repairRemovedCourseReferences,
@@ -175,6 +176,12 @@ function runMutation(
     let createdBlockIds: string[] = []
     const next = commitCourseProjectMutation(document, (draft) => {
       createdBlockIds = mutate(draft) ?? []
+      for (const before of document.surfaces) {
+        if (before.type !== 'flow') continue
+        const after = draft.surfaces.find(surface => surface.id === before.id)
+        if (after?.type !== 'flow') continue
+        after.surfaceLayerItems = reconcileFlowParagraphAnchors(before.blocks, after.blocks, after.surfaceLayerItems)
+      }
     }, options.now)
     return succeedMutation(next, reason, createdBlockIds.length > 0 ? { createdBlockIds } : {})
   } catch (error) {
