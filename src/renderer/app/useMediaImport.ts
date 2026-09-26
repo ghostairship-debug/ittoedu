@@ -135,6 +135,8 @@ export interface MediaImportPorts {
   selectImage(): Promise<SelectedImageResult | null>
   selectImages(): Promise<SelectedFileBatch<SelectedImageBatchFile> | null>
   selectAudios(): Promise<SelectedFileBatch<SelectedMediaBatchFile> | null>
+  /** Single-file audio picker for a caller-owned insertion transaction. */
+  selectAudio?(): Promise<SelectedMediaResult | null>
   selectVideos(): Promise<SelectedFileBatch<SelectedMediaBatchFile> | null>
   /** One video for replacing the selected one (M21). */
   selectVideo?(): Promise<SelectedMediaResult | null>
@@ -160,6 +162,7 @@ export interface MediaImportApi {
   importWorkspaceMedia(request: WorkspaceMediaDropRequest): Promise<{ ok: boolean; reason?: string; assetId?: string; soundId?: string }>
   selectImageAsset(): Promise<ImportedImageAsset | null>
   selectVideoAsset(): Promise<MediaImportItem | null>
+  selectAudioAsset(): Promise<MediaImportItem | null>
   batchOperationSummary: { title: string; summary: string } | null
   clearBatchSummary(): void
 }
@@ -473,6 +476,19 @@ export function useMediaImport(ports: MediaImportPorts): MediaImportApi {
     return imported ?? null
   }, [])
 
+  const selectAudioAsset = useCallback(async (): Promise<MediaImportItem | null> => {
+    const imported = await portsRef.current.runBusy(async () => {
+      const select = portsRef.current.selectAudio
+      if (!select) throw new UserFacingError('无法选择声音', '当前界面不支持选择声音。', '请重新打开编辑器后再试。')
+      const file = await select()
+      if (!file) return null
+      const metadata = await readMediaMetadata(file.bytes, file.mimeType, 'audio')
+      const asset = createMediaAssetImport(file, 'audio', metadata)
+      return { meta: asset.meta, bytes: asset.bytes }
+    }, '声音读取失败。请重新选择受支持的 MP3、OGG、WAV 或 M4A 文件。')
+    return imported ?? null
+  }, [])
+
   const selectAndImportAudio = useCallback(async () => {
     await portsRef.current.runBusy(async () => {
       const started = portsRef.current.captureIdentity()
@@ -724,6 +740,7 @@ export function useMediaImport(ports: MediaImportPorts): MediaImportApi {
     importWorkspaceMedia,
     selectImageAsset,
     selectVideoAsset,
+    selectAudioAsset,
     batchOperationSummary,
     clearBatchSummary,
   }
