@@ -16,6 +16,10 @@ import { resolveFlowParagraphPresentation } from '../../shared/flowBodyPresentat
 import { flowFormulaBlockElement, flowInlineFormulaHtml } from '../../shared/document/render'
 import { previewCaretTransaction } from './editPreviewWidgets'
 
+/** Sent from a document object (picture, chart, component) that was right-clicked, after selecting it (M21). */
+export const DOCUMENT_OBJECT_CONTEXT_MENU_EVENT = 'document-object-context-menu'
+export interface DocumentObjectContextMenuDetail { x: number; y: number; blockId: string }
+
 export interface DocumentOperation { operationId: string; historyGroup: string; source: 'layout' | 'source'; preparedResources?: unknown }
 export interface LayoutEditorOptions {
   document: MarkdownDocument; revision: string; sourceMap?: MarkdownSourceMap
@@ -196,13 +200,23 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
       const object = document.createElement('div'); object.contentEditable = 'false'; dom.append(object)
       // A click on the picture, chart or component itself (not its caption) selects the whole block, so its quick bar
       // opens as it does for objects on a page (M21). ProseMirror alone selects such a block only on Ctrl+click.
-      object.addEventListener('mousedown', event => {
-        if (event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey) return
+      const selectBlock = () => {
         const pos = getPos()
-        if (pos === undefined) return
-        event.preventDefault()
+        if (pos === undefined) return false
         if (!(owner.state.selection instanceof NodeSelection && owner.state.selection.from === pos)) owner.dispatch(owner.state.tr.setSelection(NodeSelection.create(owner.state.doc, pos)))
         owner.focus()
+        return true
+      }
+      object.addEventListener('mousedown', event => {
+        if (event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey) return
+        event.preventDefault()
+        selectBlock()
+      })
+      // A right-click selects the object the same way and asks the editor for its menu.
+      object.addEventListener('contextmenu', event => {
+        event.preventDefault()
+        if (!selectBlock()) return
+        dom.dispatchEvent(new CustomEvent<DocumentObjectContextMenuDetail>(DOCUMENT_OBJECT_CONTEXT_MENU_EVENT, { bubbles: true, detail: { x: event.clientX, y: event.clientY, blockId: node.attrs.id } }))
       })
       destroy = options.renderObject(block, object)
     } else if (!editableSlots && !(flow && block.type === 'divider')) dom.textContent = `${block.type} 对象`

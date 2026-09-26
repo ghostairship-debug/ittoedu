@@ -573,7 +573,7 @@ export function TextEditOverlay({
         <button type="button" title="清除局部格式" aria-label="清除局部格式" onClick={() => command('removeFormat')}><Eraser size={14} /></button>
         <button type="button" title="局部文字颜色" aria-label="局部文字颜色" aria-expanded={palette === 'color'} onClick={() => togglePalette('color')}><Baseline size={14} /></button>
         {palette && <div className="text-edit-toolbar__popover">
-          <ColorSwatchPanel label={palette === 'color' ? '局部文字颜色' : '局部高亮'} variant={palette} value={palette === 'color' ? node.style.color : null} onPick={color => pickColor(palette, color)} />
+          <ColorSwatchPanel key={palette} label={palette === 'color' ? '局部文字颜色' : '局部高亮'} variant={palette} value={palette === 'color' ? node.style.color : null} onPick={color => pickColor(palette, color)} />
         </div>}
       </div>
       <div

@@ -30,7 +30,7 @@ import { flowContextSelectionIntent } from '../course/flowContextSelection'
 import { resolveFlowContextSelection } from '../../core/tools/flowTextSlot'
 import { cancelEditPreview, useEditPreview } from '../workbench/EditPreviewProjection'
 import { usePropertiesContext } from './properties/PropertiesContextAdapter'
-import { FlowBlockQuickActions } from './flow/FlowBlockQuickActions'
+import { FLOW_MEDIA_ACCEPT, FlowBlockQuickActions, FlowBlockQuickMenu, flowBlockCommands, type FlowMediaKind } from './flow/FlowBlockQuickActions'
 import { NativeSelectionContext } from '../workbench/NativeSelectionContext'
 import { useWorkspaceMediaSource } from '../lessonWorkspace/workspaceMediaSourceContext'
 import { deliverWorkspaceMediaDrop, type WorkspaceMediaDropHandler } from '../lessonWorkspace/workspaceMediaDrop'
@@ -80,6 +80,19 @@ export function FlowWorkspace({ documentId, view, sessionToken, assets, selectio
   const [error, setError] = useState<string | null>(null)
   const [mediaDragOver, setMediaDragOver] = useState(false)
   const propertyContext = usePropertiesContext({ onReplaceImage: () => setError('请在完整属性面板中替换浮层图片。') })
+  // The selected Flow document object, once the property context agrees with the editor's selection.
+  const selectedBlock = (blockId: string) => propertyContext.kind === 'flow-block' && propertyContext.selection.selectedBlockId === blockId
+    ? view.blocks.find(entry => entry.blockId === blockId)?.block : undefined
+  const quickBarBlock = (target: DocumentContextSelection) => !readOnly && target.mode === 'layout' && target.revision === String(view.revision) && target.selection?.kind === 'object'
+    ? selectedBlock(target.selection.blockId) : undefined
+  // One file input serves the quick bar's 替换 and the right-click menu's 替换… (M21).
+  const replacementInput = useRef<HTMLInputElement>(null)
+  const replaceMedia = (kind: FlowMediaKind) => {
+    const input = replacementInput.current
+    if (!input) return
+    input.accept = FLOW_MEDIA_ACCEPT[kind]
+    input.click()
+  }
   const pendingFocus = useRef<FlowBlockFocusRequest | null>(null)
   const focusTimer = useRef<number | null>(null)
   const focusExpiry = useRef<number | null>(null)
@@ -253,6 +266,14 @@ export function FlowWorkspace({ documentId, view, sessionToken, assets, selectio
         onClick={event => { if (event.target === event.currentTarget && editorRef.current?.flush().ready) run({ kind: 'clear-selection' }) }}
         onScroll={event => setPaperScroll({ top: event.currentTarget.scrollTop, left: event.currentTarget.scrollLeft })}
         style={{ flex: 1, position: 'relative', zIndex: 2, overflow: 'auto', height: '100%', padding: FLOW_BODY_SCROLL_PADDING, containerType: 'inline-size', containerName: 'flow-media-root', transform: `translate(${viewPan.x}px, ${viewPan.y}px)` }}>
+        <input ref={replacementInput} type="file" hidden tabIndex={-1} aria-label="替换文档中的媒体文件" onClick={event => event.stopPropagation()} onChange={event => {
+          const file = event.target.files?.[0]; event.target.value = ''
+          if (!file || propertyContext.kind !== 'flow-block') return
+          const blockCommands = propertyContext.commands
+          void file.arrayBuffer()
+            .then(bytes => blockCommands.importReplacementMedia({ name: file.name, mimeType: file.type, bytes: new Uint8Array(bytes) }))
+            .catch(() => blockCommands.reportError('媒体文件读取失败'))
+        }} />
         <article ref={paperRef} className="flow-paper flow-body-content" data-testid="flow-paper" data-flow-reading-width={view.layout.readingWidth}
           data-workspace-media-drop={mediaDragOver || undefined}
           onDragOverCapture={event => { if (onDropWorkspaceMedia && event.dataTransfer.types.includes(WORKSPACE_MEDIA_DRAG_TYPE)) { event.preventDefault(); event.stopPropagation(); event.dataTransfer.dropEffect = 'copy'; setMediaDragOver(!readOnly && Boolean(paperRef.current?.querySelector('.ProseMirror'))) } }}
@@ -300,10 +321,16 @@ export function FlowWorkspace({ documentId, view, sessionToken, assets, selectio
               await workbenchSelection.request(captureFlowSelection(snapshot, current.current.view.surfaceId, target), instruction)
             }}
             renderQuickBarActions={target => {
-              if (readOnly || target.mode !== 'layout' || target.revision !== String(view.revision) || target.selection?.kind !== 'object' || propertyContext.kind !== 'flow-block') return null
-              const blockId = target.selection.blockId
-              const block = propertyContext.selection.selectedBlockId === blockId ? view.blocks.find(entry => entry.blockId === blockId)?.block : undefined
-              return block ? <FlowBlockQuickActions block={block} commands={propertyContext.commands} /> : null
+              const block = quickBarBlock(target)
+              return block && propertyContext.kind === 'flow-block' ? <FlowBlockQuickActions block={block} commands={propertyContext.commands} replaceMedia={replaceMedia} /> : null
+            }}
+            renderQuickBarMenu={target => {
+              const block = quickBarBlock(target)
+              return block && propertyContext.kind === 'flow-block' ? <FlowBlockQuickMenu block={block} commands={propertyContext.commands} replaceMedia={replaceMedia} /> : null
+            }}
+            objectMenu={blockId => {
+              const block = readOnly ? undefined : selectedBlock(blockId)
+              return block && propertyContext.kind === 'flow-block' ? flowBlockCommands(block, propertyContext.commands, replaceMedia) : []
             }}
             onSelection={next => {
               if (!next) { run({ kind: 'clear-selection' }); return }

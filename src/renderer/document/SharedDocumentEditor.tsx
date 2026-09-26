@@ -10,6 +10,7 @@ import { PaletteButton } from '../editing/color/PaletteButton'
 import type { QuickBarBounds, QuickBarRect } from '../editing/quickbar/placeQuickBar'
 import { QuickBarAiButton, QuickBarButton, QuickBarColorButton, QuickBarPopoverButton, QuickBarSeparator, SelectionQuickBar } from '../editing/quickbar/SelectionQuickBar'
 import { usePointerGesture } from '../editing/quickbar/usePointerGesture'
+import { useContextMenu, type MenuCommand } from '../editing/commands/CommandMenu'
 import { createPortal } from 'react-dom'
 import { EditorState as SourceState } from '@codemirror/state'
 import { EditorView as SourceView, keymap as sourceKeymap } from '@codemirror/view'
@@ -19,7 +20,7 @@ import { parseDocumentMarkdown, serializeDocumentMarkdown, type MarkdownDocument
 import type { DocumentDiagnostic, DocumentSelection, DocumentContextSelection } from '../../shared/document/ports'
 import { mapDocumentSelectionToSource, type MarkdownSourceMap } from '../../shared/document/markdownSourceMap'
 import type { TextRunStyle } from '../../shared/contracts/native-v1/types'
-import { createLayoutEditor, type DocumentOperation } from './editorSession'
+import { createLayoutEditor, DOCUMENT_OBJECT_CONTEXT_MENU_EVENT, type DocumentObjectContextMenuDetail, type DocumentOperation } from './editorSession'
 import { documentEditorSchema } from './editorSchema'
 import { NodeSelection, Selection, TextSelection, type EditorState } from 'prosemirror-state'
 import { toggleMark, setBlockType } from 'prosemirror-commands'
@@ -80,6 +81,10 @@ export interface SharedDocumentEditorProps {
   onContextualCommand?(instruction: string, target: DocumentContextSelection): void | Promise<void>
   /** Owner actions on the selection quick bar, such as replacing or moving a Flow image. */
   renderQuickBarActions?(target: DocumentContextSelection): ReactNode
+  /** The bar's "⋯" for the selection, after the AI entry. */
+  renderQuickBarMenu?(target: DocumentContextSelection): ReactNode
+  /** The right-click menu of a document object (picture, chart, component), asked after the object is selected. */
+  objectMenu?(blockId: string): readonly MenuCommand[]
   pinnedTargets?: readonly ExecutionSelectionTarget[]
   contextualCommandIssue?(target: DocumentContextSelection): string | null
   contextualCardSuppressed?: boolean
@@ -116,6 +121,22 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
   const editorRoot = useRef<HTMLDivElement | null>(null)
   const [rootElement, setRootElement] = useState<HTMLDivElement | null>(null)
   const attachRoot = useCallback((element: HTMLDivElement | null) => { editorRoot.current = element; setRootElement(element) }, [])
+  // A right-clicked object is selected first; its owner builds the menu for the new selection on the next turn.
+  const objectMenu = useContextMenu()
+  const openObjectMenu = objectMenu.open
+  useEffect(() => {
+    if (!rootElement) return
+    const request = (event: Event) => {
+      const detail = (event as CustomEvent<DocumentObjectContextMenuDetail>).detail
+      if (!detail || latest.current.readOnly) return
+      window.setTimeout(() => {
+        const items = latest.current.objectMenu?.(detail.blockId) ?? []
+        if (items.length) openObjectMenu({ x: detail.x, y: detail.y }, '对象操作', items)
+      }, 0)
+    }
+    rootElement.addEventListener(DOCUMENT_OBJECT_CONTEXT_MENU_EVENT, request)
+    return () => rootElement.removeEventListener(DOCUMENT_OBJECT_CONTEXT_MENU_EVENT, request)
+  }, [rootElement, openObjectMenu])
   const pointerGesture = usePointerGesture(rootElement)
   const toolbarRef = useRef<HTMLDivElement>(null)
   const draft = useRef(props.sourceDraft ?? serializeDocumentMarkdown(props.document, props.target))
@@ -512,6 +533,7 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
         instruction={contextualInstruction} onInstructionChange={value => { instructionRef.current = value; setContextualInstruction(value) }}
         onSubmit={sendContextualInstruction} onCancel={dismissContextualTarget}
         footer={manualTarget.current && manualTarget.current !== contextualTarget ? <button type="button" onClick={rebindToCurrentSelection}>改为当前选择</button> : null} />}
+      {props.renderQuickBarMenu?.(contextualTarget)}
       {commandError && <span role="alert" className="selection-quick-bar__notice" title={commandError}>{commandError}</span>}
     </SelectionQuickBar>
   return <div ref={attachRoot} className={`shared-document-editor${props.target === 'flow' ? ' shared-document-editor--flow' : ''}`} onKeyDown={event => {
@@ -519,6 +541,7 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
   }} onCompositionStartCapture={() => props.onCompositionChange?.(true, draft.current)} onCompositionEndCapture={() => queueMicrotask(() => props.onCompositionChange?.(false, draft.current))}>
      {!props.readOnly && (props.toolbarHost ? createPortal(<details className="flow-document-format"><summary onMouseDown={event => event.preventDefault()}>正文格式</summary>{toolbar}{editorForms}</details>, props.toolbarHost) : <>{toolbar}{editorForms}</>)}
      {quickBar}
+     {objectMenu.element}
      {props.editPreview && <div className="document-generation-status" role="status">正文正在生成，生成部分尚未保存。<button type="button" onClick={props.editPreview.cancel}>停止生成</button>{commandError && <span role="alert">{commandError}</span>}</div>}
      {mode === 'layout' ? <div ref={layoutHost} /> : <div ref={sourceHost} />}
     {diagnostics.length > 0 && <ul role="alert">{diagnostics.map((diagnostic, index) => <li key={index}><button type="button" onClick={() => { const editor = source.current; if (!editor) return; const position = Math.min(editor.state.doc.length, diagnostic.offset); editor.dispatch({ selection: { anchor: position }, effects: SourceView.scrollIntoView(position) }); editor.focus() }}>第 {diagnostic.line} 行：{diagnostic.message}</button></li>)}</ul>}

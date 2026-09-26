@@ -261,6 +261,8 @@ test('M21-T01 M21-T02 M21-T03 a steady top bar and canvas, one quick bar everywh
       await page.getByRole('button', { name: '局部高亮', exact: true }).click()
       const editingHighlight = await palette(page.getByRole('group', { name: '局部高亮', exact: true }))
       expect(editingHighlight).toMatchObject({ none: 1, more: 1, picker: 0 })
+      // The highlight palette keeps its own recent colours, not the text colour just used.
+      expect(editingHighlight.recent).not.toContain(PICKED)
       await page.keyboard.press('Escape')
       await page.mouse.click(...xy(onStage(stage, { x: 1100, y: 640 })))
       palettes.editing = { editing, editingHighlight }
@@ -279,6 +281,7 @@ test('M21-T01 M21-T02 M21-T03 a steady top bar and canvas, one quick bar everywh
       await page.screenshot({ path: join(shots, 't02-flow-paper.png') })
       await page.keyboard.press('Escape')
       // A plain click on the picture selects it as a whole: the bar offers its own actions.
+      let imageMenuItems: string[] = []
       const image = flow.locator('figure[data-document-id="flow-media"] img').first()
       await image.scrollIntoViewIfNeeded()
       await image.click()
@@ -286,7 +289,19 @@ test('M21-T01 M21-T02 M21-T03 a steady top bar and canvas, one quick bar everywh
       await expect(documentBar).toBeVisible()
       await expect(documentBar.getByRole('button', { name: '替换图片', exact: true })).toBeVisible()
       const imageBar = await documentBar.getByRole('button').evaluateAll(buttons => buttons.map(button => button.getAttribute('aria-label') ?? ''))
+      // Same order as a page object's bar: its own actions, AI, then "⋯".
+      expect(imageBar.slice(-2)).toEqual(['AI 修改', '更多操作'])
       await page.screenshot({ path: join(shots, 't02-flow-image.png') })
+      // M21-T05: its right-click menu holds the bar's actions and the "⋯" items under the same names.
+      await documentBar.getByRole('button', { name: '更多操作', exact: true }).click()
+      const more = await page.getByRole('menu', { name: '更多操作' }).getByRole('menuitem').evaluateAll(items => items.map(item => item.getAttribute('aria-label') ?? ''))
+      await page.keyboard.press('Escape')
+      const imageBox = (await image.boundingBox())!
+      const imageMenu = await contextMenuAt(page, centre(imageBox), '对象操作')
+      imageMenuItems = await imageMenu.getByRole('menuitem').evaluateAll(items => items.map(item => item.getAttribute('aria-label') ?? ''))
+      expect(imageMenuItems).toEqual(['替换图片…', '上移', '下移', ...more])
+      await page.screenshot({ path: join(shots, 't05-flow-image-menu.png') })
+      await page.keyboard.press('Escape')
       // Cells of a table selected together get the text tools.
       const cells = flow.locator('[data-document-id="flow-table"] td')
       await cells.first().scrollIntoViewIfNeeded()
@@ -313,7 +328,7 @@ test('M21-T01 M21-T02 M21-T03 a steady top bar and canvas, one quick bar everywh
       expect(bodyHighlight).toMatchObject({ none: 1, more: 1, picker: 0 })
       await page.keyboard.press('Escape')
       palettes.body = { body, bodyHighlight }
-      evidence.t02flow = { paperBar, imageBar, tableBar }
+      evidence.t02flow = { paperBar, imageBar, tableBar, imageMenuItems }
     })
     evidence.palettes = palettes
     evidence.errors = errors
