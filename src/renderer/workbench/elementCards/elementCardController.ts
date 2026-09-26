@@ -2,7 +2,7 @@ import { useSyncExternalStore } from 'react'
 import type { ConversationRecord } from '../../../shared/workbench/conversations'
 import type { DocumentHostAPI } from '../../../shared/workbench/desktop'
 import type { ExecutionRunRecord } from '../../../shared/workbench/execution'
-import { disclosedExecutionSettings, type ExecutionDesktopAPI, type ExecutionSelectionTarget, type ExecutionSubmissionRecord } from '../../../shared/workbench/executionDesktop'
+import { disclosedExecutionSettings, type ElementChangeView, type ElementRevertResult, type ExecutionDesktopAPI, type ExecutionSelectionTarget, type ExecutionSubmissionRecord } from '../../../shared/workbench/executionDesktop'
 import { emptyExecutionProjection, foldExecutionEvents, type ExecutionEvent, type ExecutionProjection } from '../../../shared/workbench/executionEvents'
 import { DEFAULT_PERMISSION_MODE, type ApprovalDecision, type ExecutionPermissionMode } from '../../../shared/workbench/executionPermission'
 import type { ExecutionSettingsAPI } from '../../../shared/workbench/executionSettingsDesktop'
@@ -23,7 +23,11 @@ export interface ElementCardEntry {
   runId?: string
   reply?: string
   failure?: string
+  /** What the request changed on the object, once it ended (M15). */
+  change?: ElementChangeView
 }
+/** The request the card's undo (or redo) would take back (or repeat), and what it changed. */
+export interface ElementCardStep { submissionId: string; fields: readonly string[] }
 export interface ElementCardView {
   key: string
   documentId: string
@@ -35,6 +39,10 @@ export interface ElementCardView {
   question: PendingQuestion | null
   approval: PendingApproval | null
   error: string
+  undo: ElementCardStep | null
+  redo: ElementCardStep | null
+  /** Why the latest request cannot be undone in the card (components and Runtime); the editor's undo still can. */
+  undoUnavailable: string | null
 }
 export interface ElementCardPorts {
   execution(): ExecutionDesktopAPI | undefined
@@ -62,6 +70,19 @@ export function elementCardKey(documentId: string, target: ExecutionSelectionTar
   throw new Error('元素 AI 卡只针对对象或文档块。')
 }
 
+/** Undo takes back the latest applied request; redo repeats the earliest undone one after it. */
+function steps(entries: readonly ElementCardEntry[]): Pick<ElementCardView, 'undo' | 'redo' | 'undoUnavailable'> {
+  let lastApplied = -1, latest: ElementCardEntry | undefined
+  entries.forEach((entry, index) => {
+    if (entry.change?.state === 'applied') lastApplied = index
+    if (entry.change && entry.change.state !== 'pending') latest = entry
+  })
+  const undone = entries.find((entry, index) => index > lastApplied && entry.change?.state === 'undone')
+  const step = (entry: ElementCardEntry | undefined) => entry?.change ? { submissionId: entry.submissionId, fields: entry.change.fields } : null
+  return { undo: step(entries[lastApplied]), redo: step(undone), undoUnavailable: latest?.change?.unavailable ?? null }
+}
+const TERMINAL: ReadonlySet<ElementCardEntryState> = new Set(['completed', 'failed', 'stopped'])
+
 const RUN_STATE: Partial<Record<ExecutionRunRecord['status'], ElementCardEntryState>> = {
   queued: 'running', running: 'running', stopping: 'running', completed: 'completed', partial: 'completed',
   failed: 'failed', interrupted: 'failed', stopped: 'stopped',
@@ -73,8 +94,8 @@ export class ElementCardController {
   private version = 0
   private workspace: { workspaceId: string } | null = null
   private permission: ExecutionPermissionMode = DEFAULT_PERMISSION_MODE
-  private stopEvents: (() => void) | null = null
-  private stopDocuments: (() => void) | null = null
+  private events: { api: ExecutionDesktopAPI; stop(): void } | null = null
+  private documents: { api: Pick<DocumentHostAPI, 'subscribe'>; stop(): void } | null = null
   private views = new Map<string, ElementCardView>()
   private readonly openRequests = new Set<string>()
 
@@ -96,7 +117,7 @@ export class ElementCardController {
     const view: ElementCardView = {
       key, documentId: card.documentId, label: card.label, target: card.target, entries: card.entries,
       busy: card.entries.some(entry => entry.state === 'sending' || entry.state === 'queued' || entry.state === 'running'),
-      question: pendingQuestion(card.projection), approval: pendingApproval(card.projection), error: card.error,
+      question: pendingQuestion(card.projection), approval: pendingApproval(card.projection), error: card.error, ...steps(card.entries),
     }
     this.views.set(key, view)
     return view
@@ -119,7 +140,11 @@ export class ElementCardController {
     this.cards.set(key, { key, documentId: input.documentId, label: input.label, target: structuredClone(input.target), workspaceId: null,
       conversation: null, entries: [], projection: emptyExecutionProjection(''), error: '', catchUp: Promise.resolve() })
     // A card ends with its document (Main deletes its conversation at the same time).
-    this.stopDocuments ??= this.ports.documents?.()?.subscribe(event => { if (event.type === 'closed') this.forgetDocument(event.documentId) }) ?? null
+    const documents = this.ports.documents?.()
+    if (documents && this.documents?.api !== documents) {
+      this.documents?.stop()
+      this.documents = { api: documents, stop: documents.subscribe(event => { if (event.type === 'closed') this.forgetDocument(event.documentId) }) }
+    }
     this.notify()
     return key
   }
@@ -177,6 +202,17 @@ export class ElementCardController {
     await api.approve({ runId, callId, decision })
     this.refresh(key)
   }
+  /**
+   * Undoes or redoes one request on the object as one ordinary edit. A `conflict` names the fields changed again
+   * since; nothing was written, and `force` overwrites them.
+   */
+  async revert(key: string, submissionId: string, direction: 'undo' | 'redo', force = false): Promise<ElementRevertResult> {
+    const api = this.ports.execution(), card = this.cards.get(key)
+    if (!api?.revertElement || !card) throw new Error('当前版本不能在卡片中撤销。')
+    const result = await api.revertElement({ submissionId, direction, ...(force ? { force } : {}) })
+    if (result.status === 'applied') this.patchEntry(card, submissionId, { change: result.change })
+    return result
+  }
   /** Stops the element's running request; queued ones stay. */
   async stop(key: string): Promise<void> {
     const api = this.ports.execution(), card = this.cards.get(key)
@@ -197,7 +233,9 @@ export class ElementCardController {
   }
 
   private listen(api: ExecutionDesktopAPI) {
-    this.stopEvents ??= api.subscribe(event => this.onEvent(event))
+    if (this.events?.api === api) return
+    this.events?.stop()
+    this.events = { api, stop: api.subscribe(event => this.onEvent(event)) }
   }
   private cardFor(conversationId: string): CardRecord | undefined {
     for (const card of this.cards.values()) if (card.conversation?.conversationId === conversationId) return card
@@ -238,7 +276,22 @@ export class ElementCardController {
         this.applySubmission(card, submission, run ?? undefined, false)
       }
       this.notify()
+      await this.readChanges(card)
     })().catch(() => undefined)
+  }
+  /** Asks Main what each ended request changed; Main records it just after the run ends, so a pending answer is asked again. */
+  private async readChanges(card: CardRecord, attempt = 0): Promise<void> {
+    const api = this.ports.execution()
+    if (!api?.elementChange) return
+    let pending = false
+    for (const entry of card.entries) {
+      if (!TERMINAL.has(entry.state) || entry.change && entry.change.state !== 'pending') continue
+      const change = await api.elementChange(entry.submissionId)
+      pending ||= change.state === 'pending'
+      this.patchEntry(card, entry.submissionId, { change }, false)
+    }
+    this.notify()
+    if (pending && attempt < 20 && this.cards.get(card.key) === card) setTimeout(() => { void this.readChanges(card, attempt + 1).catch(() => undefined) }, 150)
   }
   private applySubmission(card: CardRecord, submission: ExecutionSubmissionRecord, run?: ExecutionRunRecord | null, notify = true) {
     const state: ElementCardEntryState = submission.state === 'failed' ? 'failed' : submission.state === 'cancelled' ? 'cancelled'

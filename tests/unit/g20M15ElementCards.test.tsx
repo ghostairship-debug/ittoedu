@@ -8,7 +8,7 @@ import type { SelectionCapture } from '../../src/renderer/workbench/SelectionCon
 import type { ConversationElementScope, ConversationRecord } from '../../src/shared/workbench/conversations'
 import type { DocumentHostAPI } from '../../src/shared/workbench/desktop'
 import type { ExecutionRunRecord } from '../../src/shared/workbench/execution'
-import type { ExecutionDesktopAPI, ExecutionSelectionTarget, ExecutionSendInput, ExecutionSubmissionRecord } from '../../src/shared/workbench/executionDesktop'
+import type { ElementChangeView, ElementRevertResult, ExecutionDesktopAPI, ExecutionSelectionTarget, ExecutionSendInput, ExecutionSubmissionRecord } from '../../src/shared/workbench/executionDesktop'
 import type { ExecutionEvent } from '../../src/shared/workbench/executionEvents'
 import type { ExecutionSettingsView } from '../../src/shared/workbench/executionSettings'
 import type { ExecutionSettingsAPI } from '../../src/shared/workbench/executionSettingsDesktop'
@@ -27,6 +27,8 @@ function executionFixture() {
   const listeners = new Set<(event: ExecutionEvent) => void>()
   const timeline: ExecutionEvent[] = []
   const control = { next: 'accepted' as 'accepted' | 'queued' }
+  const changes = new Map<string, ElementChangeView>()
+  const reverts: ElementRevertResult[] = []
   let count = 0
   const run = (conversationId: string, runId: string): ExecutionRunRecord => ({
     schemaVersion: 1, runId, version: 1, input: { conversationId, taskId: 'task', instruction: 'instruction',
@@ -64,6 +66,8 @@ function executionFixture() {
       return { events, cursor: events.at(-1)?.sequence ?? after, hasMore: false }
     }),
     answer: vi.fn(async () => ({ runId: 'run-1' })),
+    elementChange: vi.fn(async (submissionId: string): Promise<ElementChangeView> => changes.get(submissionId) ?? { submissionId, state: 'pending', fields: [] }),
+    revertElement: vi.fn(async (_input: { submissionId: string; direction: 'undo' | 'redo'; force?: boolean }): Promise<ElementRevertResult> => reverts.shift()!),
     subscribe: vi.fn((listener: (event: ExecutionEvent) => void) => { listeners.add(listener); return () => { listeners.delete(listener) } }),
   }
   /** The run of the first request asks the teacher a question. */
@@ -76,7 +80,17 @@ function executionFixture() {
     )
     for (const listener of listeners) listener(timeline.at(-1)!)
   }
-  return { api, control, ask, submissions, execution: api as unknown as ExecutionDesktopAPI }
+  /** The run of a request ends; Main has recorded what it changed on the object. */
+  const finish = (conversationId: string, runId: string, change: Omit<ElementChangeView, 'submissionId'>) => {
+    const submission = submissions.find(value => value.runId === runId)!
+    runs.set(runId, { ...runs.get(runId)!, status: 'completed' })
+    changes.set(submission.submissionId, { submissionId: submission.submissionId, ...change })
+    const base = { conversationId, taskId: 'task', runId, time: 1, source: 'builtin' as const }
+    timeline.push({ ...base, eventId: `end-${runId}`, itemId: 'run-end', sequence: timeline.length + 1, type: 'run.end', update: 'snapshot', data: { status: 'completed' } })
+    for (const listener of listeners) listener(timeline.at(-1)!)
+    return submission.submissionId
+  }
+  return { api, control, ask, finish, reverts, submissions, execution: api as unknown as ExecutionDesktopAPI }
 }
 
 const settings = (): ExecutionSettingsAPI => ({
@@ -182,6 +196,50 @@ it('M15 the quick bar opens the card, the top bar shows cards at work and jumps 
     expect(screen.queryByRole('button', { name: /AI 需回答/ })).toBeNull()
     existing.add('a'); rerender(view())
     expect(screen.getByRole('button', { name: 'AI 需回答 1' })).toBeInTheDocument()
+  } finally {
+    act(() => d.close('doc'))
+    window.desktopAPI = undefined as unknown as typeof window.desktopAPI
+  }
+})
+
+it('M15 the card undoes and redoes its latest request, and asks before overwriting fields changed again since', async () => {
+  const f = executionFixture(), d = documentsFixture()
+  window.desktopAPI = { execution: f.execution, executionSettings: settings(), documents: d.documents } as unknown as typeof window.desktopAPI
+  elementCards.setWorkspace('workspace')
+  try {
+    render(<SelectionQuickBar label="选中对象快捷工具" anchor={{ left: 100, top: 200, width: 120, height: 40 }} bounds={{ left: 0, top: 0, right: 1000, bottom: 800 }} selectionKey="doc:a">
+      <ElementAiButton documentId="doc" target={target('a')} label="标题" capture={async () => capture('a')} />
+    </SelectionQuickBar>)
+    fireEvent.click(screen.getByRole('button', { name: 'AI 修改' }))
+    const card = screen.getByRole('dialog', { name: 'AI 修改：标题' })
+    const undo = within(card).getByRole('button', { name: '撤销这张卡的 AI 修改' }), redo = within(card).getByRole('button', { name: '重做这张卡的 AI 修改' })
+    expect(undo).toBeDisabled(); expect(redo).toBeDisabled()
+    fireEvent.change(within(card).getByRole('textbox', { name: 'AI 修改要求' }), { target: { value: '改成红色' } })
+    fireEvent.click(within(card).getByRole('button', { name: '发送' }))
+    await waitFor(() => expect(f.api.send).toHaveBeenCalledTimes(1))
+
+    let submissionId = ''
+    act(() => { submissionId = f.finish('c1', 'run-1', { state: 'applied', fields: ['文字颜色'] }) })
+    await waitFor(() => expect(undo).toBeEnabled())
+    expect(undo).toHaveAttribute('title', '撤销 AI 对文字颜色的修改')
+    expect(within(card).getByRole('list', { name: '修改记录' })).toHaveTextContent('改成红色已完成')
+
+    // The colour was changed again by hand: the card asks first and overwrites only when confirmed.
+    f.reverts.push({ status: 'conflict', fields: ['文字颜色'] }, { status: 'applied', change: { submissionId, state: 'undone', fields: ['文字颜色'] } })
+    fireEvent.click(undo)
+    const confirm = await within(card).findByRole('alertdialog', { name: '确认撤销' })
+    expect(confirm).toHaveTextContent('文字颜色在 AI 修改后又改过')
+    fireEvent.click(within(confirm).getByRole('button', { name: '仍要撤销' }))
+    await waitFor(() => expect(redo).toBeEnabled())
+    expect(f.api.revertElement.mock.calls.map(call => call[0])).toEqual([{ submissionId, direction: 'undo' }, { submissionId, direction: 'undo', force: true }])
+    expect(undo).toBeDisabled()
+    expect(within(card).queryByRole('alertdialog')).toBeNull()
+
+    f.reverts.push({ status: 'applied', change: { submissionId, state: 'applied', fields: ['文字颜色'] } })
+    fireEvent.click(redo)
+    await waitFor(() => expect(undo).toBeEnabled())
+    expect(redo).toBeDisabled()
+    expect(f.api.revertElement).toHaveBeenLastCalledWith({ submissionId, direction: 'redo' })
   } finally {
     act(() => d.close('doc'))
     window.desktopAPI = undefined as unknown as typeof window.desktopAPI

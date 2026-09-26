@@ -88,6 +88,8 @@ export const executionDesktopRequestSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('timeline'), conversationId: id }).strict(),
   z.object({ type: z.literal('blob'), conversationId: id, ref: z.object({ id: z.string().regex(/^[a-f0-9]{64}$/), bytes: index, mime: z.literal('text/plain;charset=utf-8') }).strict() }).strict(),
   z.object({ type: z.literal('edits'), documentId: id }).strict(),
+  z.object({ type: z.literal('element-change'), submissionId: id }).strict(),
+  z.object({ type: z.literal('element-revert'), submissionId: id, direction: z.enum(['undo', 'redo']), force: z.boolean().optional() }).strict(),
 ])
 export interface ExecutionWorkspace { workspace: WorkspaceRecord; conversations: ConversationRecord[] }
 export interface ExecutionSendInput {
@@ -128,6 +130,22 @@ export interface ExecutionSubmissionRecord {
   permission?: ExecutionPermissionMode
 }
 export interface ExecutionSendResult { submission: ExecutionSubmissionRecord; conversation: ConversationRecord; run?: ExecutionRunRecord }
+/**
+ * M15: one element card request's effect on its object. `pending` until the request ends; `none` when it changed
+ * nothing of the object; then `applied` or `undone`. `fields` names what it changed; `unavailable` says why the card
+ * cannot undo it (a component, a deleted object) — the editor's undo still can.
+ */
+export interface ElementChangeView {
+  submissionId: string
+  state: 'pending' | 'none' | 'applied' | 'undone'
+  fields: string[]
+  unavailable?: string
+}
+export type ElementRevertResult =
+  | { status: 'applied'; change: ElementChangeView }
+  /** Some fields were changed again after the request; nothing was written. */
+  | { status: 'conflict'; fields: string[] }
+  | { status: 'unavailable'; message: string }
 export interface ExecutionDesktopAPI {
   workspace(root: string | null): Promise<ExecutionWorkspace>
   conversations(workspaceId: string): Promise<ConversationRecord[]>
@@ -153,6 +171,10 @@ export interface ExecutionDesktopAPI {
   answer?(input: { runId: string; callId: string; answer: UserAnswer }): Promise<ExecutionRunRecord>
   /** Decides the open modification approval of a live built-in run. */
   approve?(input: { runId: string; callId: string; decision: ApprovalDecision }): Promise<ExecutionRunRecord>
+  /** What an element card's request changed on its object, and whether the card can undo or redo it (M15). */
+  elementChange?(submissionId: string): Promise<ElementChangeView>
+  /** Undoes or redoes an element card's request on its object as one ordinary edit; later edits of the same fields are reported first. */
+  revertElement?(input: { submissionId: string; direction: 'undo' | 'redo'; force?: boolean }): Promise<ElementRevertResult>
   events(conversationId: string, after?: number, limit?: number): Promise<ExecutionEventPage>
   searchEvents(input: ExecutionEventSearchInput): Promise<ExecutionEventSearchPage>
   timeline(conversationId: string): Promise<ExecutionProjection>

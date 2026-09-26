@@ -26,6 +26,9 @@ import { executionInputError } from './executionInputErrors'
 import { AgentFileService } from './AgentFileService'
 import { diagnosticLog } from '../../diagnosticLog'
 import { readTarget } from '../../../core/tools/ToolTargets'
+import { locateCourseLayer } from '../../../core/drivers/course/layerProperties'
+import { elementChangeUnits, elementUnitLabel, readElementFields, sameFieldValue, writeElementFields, type ElementFields } from '../../../core/drivers/course/elementFields'
+import type { ElementChangeView, ElementRevertResult } from '../../../shared/workbench/executionDesktop'
 
 export interface ExecutionDesktopServiceOptions {
   directory: string
@@ -47,6 +50,18 @@ function targetStillExists(snapshot: DocumentSnapshot, target: ExecutionDocument
   if (target.kind !== 'course-object' && target.kind !== 'flow-block') return false
   try { readTarget(snapshot.model, target); return true } catch { return false }
 }
+/** M15: an element card request's object when it started and when it ended, for the card's own undo and redo. */
+interface ElementChange {
+  conversationId: string
+  documentId: string
+  itemId: string
+  before: ElementFields | null
+  /** Undefined until the request ends; null when the object was gone by then. */
+  after?: ElementFields | null
+  undone: boolean
+}
+const ELEMENT_UNSUPPORTED = '组件和页面 Runtime 的修改请用编辑器的撤销（Ctrl+Z）。'
+const unitLabels = (units: readonly string[][]) => [...new Set(units.map(elementUnitLabel))]
 /** Main owns spaces, task freezes and runs. Mounting a view only reads/subscribes. */
 export class ExecutionDesktopService {
   readonly conversations: ConversationStore
@@ -57,6 +72,7 @@ export class ExecutionDesktopService {
   readonly edits: EditSessionService
   readonly attachments: AttachmentService
   private readonly queues = new Map<string, Promise<unknown>>()
+  private readonly elementChanges = new Map<string, ElementChange>()
   private eventSink?: (event: ExecutionEvent) => void
   private editSink?: (event: EditEvent) => void
   private externalRevoker?: (input: { workspaceId: string; conversationId: string; portIds: string[] }) => Promise<void>
@@ -361,6 +377,7 @@ export class ExecutionDesktopService {
   }
   private async startSubmission(record: StoredExecutionSubmission, continuation = record.continuation): Promise<StoredExecutionSubmission> {
     record = await this.submissions.update(record.submissionId, { state: 'starting', continuation, updatedAt: Date.now(), failure: undefined })
+    await this.recordElementBaseline(record)
     try {
       const run = await this.engine.start(record.start, continuation, prepared => this.bindRun(record, prepared).then(() => undefined))
       return (await this.submissions.read(record.submissionId)) ?? { ...record, state: 'accepted', runId: run.runId }
@@ -568,6 +585,8 @@ export class ExecutionDesktopService {
   private async afterRunEnd(runId: string): Promise<void> {
     const run = await this.engine.read(runId)
     if (!run) return
+    // Before the object's next queued request can start.
+    await this.recordElementResult(run.input.taskId)
     if (['failed', 'partial', 'interrupted'].includes(run.status)) {
       const record = await this.submissions.read(run.input.taskId)
       if (record?.runId === runId && record.state === 'accepted')
@@ -629,6 +648,7 @@ export class ExecutionDesktopService {
         },
       } })
       this.imageRetention?.collect()
+      for (const [submissionId, change] of this.elementChanges) if (change.conversationId === input.conversationId) this.elementChanges.delete(submissionId)
       // Deletion is already durable. A failed sweep keeps its intent for startup retry.
       await this.collectAttachmentReleases().catch(() => undefined)
     } catch (error) {
@@ -657,6 +677,68 @@ export class ExecutionDesktopService {
           if (current) await this.removeConversation({ workspaceId: current.workspaceId, conversationId: current.conversationId, expectedRevision: current.revision })
         }))
       }
+  }
+  /** An element card request edits one object: its fields are read as it starts, before the model can change them. */
+  private async recordElementBaseline(record: StoredExecutionSubmission): Promise<void> {
+    try {
+      const conversation = await this.conversations.readConversation({ workspaceId: record.workspaceId, conversationId: record.conversationId })
+      const element = conversation?.element
+      const reference = element && record.documents.find(value => value.documentId === element.documentId)
+      const target = reference?.writable.length === 1 ? reference.writable[0] : undefined
+      if (!reference || target?.kind !== 'course-object') return
+      const snapshot = await this.options.documents.registry.get(reference.documentId).drain()
+      if (snapshot.model.kind !== 'course-v9' || !locateCourseLayer(snapshot.model.project, target.itemId)) return
+      this.elementChanges.set(record.submissionId, { conversationId: record.conversationId, documentId: reference.documentId, itemId: target.itemId,
+        before: readElementFields(snapshot.model.project, target.itemId), undone: false })
+    } catch { /* The card's undo is a convenience; the request runs regardless. */ }
+  }
+  private async recordElementResult(submissionId: string): Promise<void> {
+    const change = this.elementChanges.get(submissionId)
+    if (!change || change.after !== undefined) return
+    try {
+      const snapshot = await this.options.documents.registry.get(change.documentId).drain()
+      change.after = snapshot.model.kind === 'course-v9' ? readElementFields(snapshot.model.project, change.itemId) : null
+    } catch { change.after = null }
+  }
+  private elementChangeView(submissionId: string): ElementChangeView {
+    const change = this.elementChanges.get(submissionId)
+    if (!change) return { submissionId, state: 'none', fields: [] }
+    if (change.after === undefined) return { submissionId, state: 'pending', fields: [] }
+    if (!change.before) return { submissionId, state: 'none', fields: [], unavailable: ELEMENT_UNSUPPORTED }
+    if (!change.after) return { submissionId, state: 'none', fields: [], unavailable: '这个对象已不存在。' }
+    const units = elementChangeUnits(change.before, change.after)
+    return units.length ? { submissionId, state: change.undone ? 'undone' : 'applied', fields: unitLabels(units) } : { submissionId, state: 'none', fields: [] }
+  }
+  /**
+   * Undoes (or redoes) one element card request on its object as one ordinary edit in the document's history. Only
+   * the fields the request changed are written; fields changed again since are reported first and written only
+   * when `force` confirms it.
+   */
+  private async revertElement(input: { submissionId: string; direction: 'undo' | 'redo'; force?: boolean }): Promise<ElementRevertResult> {
+    const change = this.elementChanges.get(input.submissionId), view = this.elementChangeView(input.submissionId)
+    if (!change?.before || !change.after || view.state === 'pending' || view.state === 'none')
+      return { status: 'unavailable', message: view.unavailable ?? (view.state === 'pending' ? '这次修改还没有结束。' : '这次请求没有改动这个对象。') }
+    if ((input.direction === 'undo') === change.undone)
+      return { status: 'unavailable', message: input.direction === 'undo' ? '这次修改已经撤销。' : '这次修改没有撤销，不需要重做。' }
+    const [from, to] = input.direction === 'undo' ? [change.after, change.before] : [change.before, change.after]
+    const units = elementChangeUnits(change.before, change.after)
+    const session = this.options.documents.registry.get(change.documentId)
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const snapshot = await session.drain()
+      const current = snapshot.model.kind === 'course-v9' ? readElementFields(snapshot.model.project, change.itemId) : null
+      if (!current || snapshot.model.kind !== 'course-v9') return { status: 'unavailable', message: '这个对象已不存在。' }
+      const conflicts = units.filter(unit => unit.some(key => !sameFieldValue(current[key], from[key])))
+      if (conflicts.length && !input.force) return { status: 'conflict', fields: unitLabels(conflicts) }
+      const project = writeElementFields(snapshot.model.project, change.itemId, Object.fromEntries(units.flat().map(key => [key, to[key]])))
+      const result = await session.execute({ documentId: change.documentId, epoch: snapshot.epoch, baseRevision: snapshot.revision, operationId: randomUUID(),
+        actor: 'human', mutation: { type: 'command', command: { type: 'course.replace', project } } })
+      if (result.status === 'applied' || result.status === 'unchanged') {
+        change.undone = input.direction === 'undo'
+        return { status: 'applied', change: this.elementChangeView(input.submissionId) }
+      }
+      if (result.status !== 'conflict') return { status: 'unavailable', message: 'message' in result ? result.message : '撤销没有完成。' }
+    }
+    return { status: 'unavailable', message: '文档正在被修改，请稍后再试。' }
   }
   async operate(raw: unknown): Promise<unknown> {
     const received = captureMainTiming()
@@ -730,6 +812,8 @@ export class ExecutionDesktopService {
         case 'timeline': return this.events.snapshot(input.conversationId)
         case 'blob': return Buffer.from(await this.events.readBlob(input.conversationId, input.ref)).toString('utf8')
         case 'edits': return this.edits.list(input.documentId)
+        case 'element-change': return this.elementChangeView(input.submissionId)
+        case 'element-revert': return this.revertElement(input)
       }
     } catch (error) {
       if (error instanceof DesktopOperationError) throw error

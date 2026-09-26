@@ -16,7 +16,7 @@ import { ExecutionDesktopService } from '../../src/main/workbench/execution/Exec
 import { ExecutionSettingsStore } from '../../src/main/workbench/providers/ExecutionSettingsStore'
 import { isExecutionInputError } from '../../src/shared/workbench/executionInputMessages'
 import type { ConversationRecord } from '../../src/shared/workbench/conversations'
-import type { ExecutionDocumentReference, ExecutionSendResult } from '../../src/shared/workbench/executionDesktop'
+import type { ElementChangeView, ElementRevertResult, ExecutionDocumentReference, ExecutionSendResult } from '../../src/shared/workbench/executionDesktop'
 
 const roots: string[] = []
 afterEach(async () => {
@@ -27,8 +27,8 @@ afterEach(async () => {
 const reply = () => new Response(`data: ${JSON.stringify({ id: randomUUID(), model: 'fixture-model', choices: [{ index: 0,
   delta: { role: 'assistant', content: '好的' }, finish_reason: 'stop' }] })}\n\ndata: [DONE]\n\n`, { headers: { 'Content-Type': 'text/event-stream' } })
 
-/** A course with two texts on its first scene, open in the document host, and one ordinary session. */
-async function fixture() {
+/** A course with texts on its first scene, open in the document host, and one ordinary session. */
+async function fixture(model: (request: { instruction: string }) => Promise<void> = async () => {}) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'g20-m15-element-')); roots.push(root)
   const project = createBlankCourseProject({ includeDefaultController: false, controls: 'none' })
   const surface = project.surfaces[0]
@@ -36,6 +36,7 @@ async function fixture() {
   surface.scenes[0]!.layerItems = [
     sceneNodeToCourseLayerItem(createTextNode({ id: 'a', text: '标题', x: 40, y: 40 }), 1),
     sceneNodeToCourseLayerItem(createTextNode({ id: 'b', text: '要点', x: 40, y: 160 }), 2),
+    sceneNodeToCourseLayerItem(createTextNode({ id: 'c', text: '结语', x: 40, y: 280 }), 3),
   ]
   const filename = path.join(root, 'lesson.h5lesson')
   await fs.writeFile(filename, createCourseProjectArchive({ project: courseProjectDocumentSchema.parse(project), assetFiles: {}, componentFiles: {} }))
@@ -46,7 +47,14 @@ async function fixture() {
   const connection = await settings.saveConnection({ apiKey: 'fixture', connection: { provider: 'fixture', protocol: 'openai-chat', baseURL: 'https://fixture.invalid/v1',
     accountId: 'account', authKind: 'api-key', billing: { kind: 'token-plan' }, capabilities: { tools: 'supported', stream: 'supported', vision: 'unknown', reasoning: 'unknown' } } })
   await settings.saveProfile({ roles: { conversation: { connectionId: connection.connection.id, model: 'fixture-model' }, vision: null, imageGenerate: null, imageEdit: null } })
-  const options = { directory: path.join(root, 'execution'), documents, settings, fetch: vi.fn(async () => reply()) as unknown as typeof fetch,
+  // The model's turn: `model` may change the document the way a run's tools would, then the model replies.
+  const respond = async (_url: unknown, init?: { body?: unknown }) => {
+    const body = JSON.parse(String(init?.body ?? '{}')) as { messages?: Array<{ role: string; content: unknown }> }
+    const last = body.messages?.filter(message => message.role === 'user').at(-1)?.content
+    await model({ instruction: typeof last === 'string' ? last : JSON.stringify(last ?? '') })
+    return reply()
+  }
+  const options = { directory: path.join(root, 'execution'), documents, settings, fetch: vi.fn(respond) as unknown as typeof fetch,
     authorizeWorkspaceRoot: async (value: string) => ({ resolvedPath: value }) }
   const service = new ExecutionDesktopService(options)
   const space = await service.operate({ type: 'workspace', root }) as { workspace: { workspaceId: string } }
@@ -148,4 +156,90 @@ it('M15 a request for an object is judged by that object: other edits do not ref
   const refused = await f.service.operate({ type: 'send', workspaceId: f.workspaceId, conversationId: card.conversationId, submissionId: randomUUID(),
     expectedRevision: latest!.revision, text: '再改大一点', documents: [reference], attachments: [] }).then(() => null, error => error)
   expect(isExecutionInputError(refused, 'document-range-changed')).toBe(true)
+})
+
+/** A text object's words, colour and place on the course's first scene. */
+function textOf(project: CourseProjectDocument, itemId: string) {
+  const item = sceneItems(project).find(value => value.layerItemId === itemId)!
+  if (item.kind !== 'native' || item.content.nativeType !== 'text') throw new Error('text')
+  return { text: item.content.data.text, color: item.content.data.style.color, x: item.frame.x }
+}
+
+it('M15 a card undoes only what its request changed, asks before overwriting later edits of the same fields, and every step is one ordinary edit', async () => {
+  let releaseA!: () => void
+  const aRunning = new Promise<void>(resolve => { releaseA = resolve })
+  let f!: Awaited<ReturnType<typeof fixture>>
+  const recolor = (itemId: string, color: string, text?: string) => edit(f.documents, f.opened.documentId, project => {
+    const item = sceneItems(project).find(value => value.layerItemId === itemId)!
+    if (item.kind !== 'native' || item.content.nativeType !== 'text') throw new Error('text')
+    item.content.data.style.color = color
+    if (text !== undefined) item.content.data.text = text
+  })
+  // What each request's run does to the course while the model works.
+  f = await fixture(async ({ instruction }) => {
+    if (instruction.includes('A-慢')) await aRunning
+    if (instruction.includes('B-改红')) await recolor('b', '#dc2626', '要点（AI）')
+    if (instruction.includes('C-改蓝')) await recolor('c', '#2563eb')
+  })
+  const current = async (itemId: string) => {
+    const snapshot = await f.documents.registry.get(f.opened.documentId).drain()
+    if (snapshot.model.kind !== 'course-v9') throw new Error('course')
+    return textOf(snapshot.model.project, itemId)
+  }
+  const original = { b: await current('b'), c: await current('c') }
+  const card = (label: string) => f.service.operate({ type: 'create-conversation', workspaceId: f.workspaceId,
+    element: { kind: 'element', documentId: f.opened.documentId, label } }) as Promise<ConversationRecord>
+  const send = async (conversation: ConversationRecord, itemId: string, text: string) => {
+    const snapshot = await f.documents.registry.get(f.opened.documentId).drain()
+    const latest = await f.service.conversations.readConversation({ workspaceId: f.workspaceId, conversationId: conversation.conversationId })
+    return f.service.operate({ type: 'send', workspaceId: f.workspaceId, conversationId: conversation.conversationId, submissionId: randomUUID(),
+      expectedRevision: latest!.revision, text, documents: [objectReference(snapshot, itemId)], attachments: [] }) as Promise<ExecutionSendResult>
+  }
+  const change = (result: ExecutionSendResult) => f.service.operate({ type: 'element-change', submissionId: result.submission.submissionId }) as Promise<ElementChangeView>
+  const settle = async (result: ExecutionSendResult) => {
+    if (result.run) await f.service.engine.wait(result.run.runId)
+    await vi.waitFor(async () => expect((await change(result)).state).not.toBe('pending'))
+    return change(result)
+  }
+  const revert = (result: ExecutionSendResult, direction: 'undo' | 'redo', force?: boolean) => f.service.operate({ type: 'element-revert',
+    submissionId: result.submission.submissionId, direction, ...(force ? { force } : {}) }) as Promise<ElementRevertResult>
+  const [a, b, c] = [await card('标题'), await card('要点'), await card('结语')]
+
+  // A is still working when B's request arrives; B runs beside it and is not refused.
+  const slow = await send(a, 'a', 'A-慢')
+  const toB = await send(b, 'b', 'B-改红')
+  expect(toB.submission.state).toBe('accepted')
+  expect(await settle(toB)).toMatchObject({ state: 'applied', fields: expect.arrayContaining(['文字', '文字颜色']) })
+  releaseA()
+  expect(await settle(slow)).toMatchObject({ state: 'none', fields: [] })
+
+  // The teacher moves B; undoing B's request restores its words and colour and keeps the move. C stays.
+  await edit(f.documents, f.opened.documentId, project => { sceneItems(project).find(value => value.layerItemId === 'b')!.frame.x = 300 })
+  expect(await revert(toB, 'undo')).toMatchObject({ status: 'applied', change: { state: 'undone' } })
+  expect(await current('b')).toEqual({ ...original.b, x: 300 })
+  expect(await current('c')).toEqual(original.c)
+  expect(await revert(toB, 'undo')).toMatchObject({ status: 'unavailable' })
+  // The card's undo is one ordinary edit: the document's undo takes it back and its redo repeats it.
+  const session = f.documents.registry.get(f.opened.documentId)
+  const history = async (type: 'undo' | 'redo') => {
+    const snapshot = await session.drain()
+    return session.execute({ documentId: snapshot.documentId, epoch: snapshot.epoch, baseRevision: snapshot.revision, operationId: randomUUID(), actor: 'human', mutation: { type } })
+  }
+  expect((await history('undo')).status).toBe('applied')
+  expect(await current('b')).toEqual({ text: '要点（AI）', color: '#dc2626', x: 300 })
+  expect((await history('redo')).status).toBe('applied')
+  expect(await current('b')).toEqual({ ...original.b, x: 300 })
+  // The card redoes its request.
+  expect(await revert(toB, 'redo')).toMatchObject({ status: 'applied', change: { state: 'applied' } })
+  expect(await current('b')).toEqual({ text: '要点（AI）', color: '#dc2626', x: 300 })
+
+  // C's colour is changed again by hand: the card's undo asks first and overwrites only when confirmed.
+  const toC = await send(c, 'c', 'C-改蓝')
+  expect(await settle(toC)).toMatchObject({ state: 'applied', fields: ['文字颜色'] })
+  await recolor('c', '#16a34a')
+  expect(await revert(toC, 'undo')).toEqual({ status: 'conflict', fields: ['文字颜色'] })
+  expect((await current('c')).color).toBe('#16a34a')
+  expect(await revert(toC, 'undo', true)).toMatchObject({ status: 'applied', change: { state: 'undone' } })
+  expect(await current('c')).toEqual(original.c)
+  expect(await current('b')).toEqual({ text: '要点（AI）', color: '#dc2626', x: 300 })
 })
