@@ -50,6 +50,18 @@ describe('M16 deep editor Flow insertion', () => {
     expect(screen.queryByText('Runtime')).toBeNull()
   })
 
+  it('keeps the existing Flow body chart picker when the command port is present', async () => {
+    const onFlowInsert = vi.fn()
+    render(<ElementsTab onAddImage={vi.fn()} onFlowInsert={onFlowInsert} />)
+    fireEvent.click(screen.getByTestId('add-chart'))
+    expect(screen.getByTestId('chart-picker-panel')).toBeInTheDocument()
+    fireEvent.click(screen.getByTestId('add-chart-bar'))
+    await settleAssignedCourse()
+    const surface = useEditorStore.getState().flowSession!.history.present.surfaces.find(entry => entry.type === 'flow')!
+    expect(surface.blocks).toContainEqual(expect.objectContaining({ type: 'chart', chart: expect.objectContaining({ chartType: 'bar' }) }))
+    expect(onFlowInsert).not.toHaveBeenCalled()
+  })
+
   it('passes actual library asset IDs through the same command port', async () => {
     useEditorStore.getState().importAsset(image, new Uint8Array(8))
     useEditorStore.getState().importAsset(video, new Uint8Array(8))

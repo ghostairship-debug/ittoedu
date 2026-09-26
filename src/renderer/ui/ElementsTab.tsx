@@ -343,6 +343,33 @@ export function ElementsTab({
   if (authoringSurface === 'flow' && editingScope === 'scene' && onFlowInsert) return (
     <div className="elements-scroll" data-testid="elements-tab">
       <FlowInsertMenu onInsert={command => onFlowInsert(command)} />
+      <div className="element-grid element-grid--primary">
+        <button type="button" aria-label="图表"
+          className={`element-card element-card--primary ${showChartPicker ? 'is-active' : ''}`}
+          title="图表：点击展开选择图表类型" data-testid="add-chart"
+          aria-haspopup="dialog" aria-expanded={showChartPicker}
+          onClick={() => setShowChartPicker((prev) => !prev)}>
+          <span className="element-icon"><BarChart3 size={20} /></span>图表
+        </button>
+        {showChartPicker && <div className="chart-picker-popover" data-testid="chart-picker-panel"
+          role="dialog" aria-label="选择图表类型">
+          <div className="chart-picker-header">
+            <span className="chart-picker-title">选择图表类型</span>
+            <button type="button" className="icon-button" aria-label="关闭图表选择"
+              onClick={() => setShowChartPicker(false)}><X size={14} /></button>
+          </div>
+          <div className="chart-picker-grid">
+            {CHART_ITEMS.map(({ type, label, Icon }) => <button type="button" key={type}
+              aria-label={label} className="chart-picker-item"
+              title={insertionTitle(authoringSurface, editingScope, 'chart', label, spatialInsertionScope ?? undefined)}
+              data-testid={`add-chart-${type}`} data-insertion-carrier={chartInsertion.carrier}
+              onClick={() => { addChartNode(type); setShowChartPicker(false) }}>
+              <span className="chart-picker-item-icon"><Icon size={18} /></span>
+              <span className="chart-picker-item-label">{label}</span>
+            </button>)}
+          </div>
+        </div>}
+      </div>
       {onImportAudio && onImportVideo && <details className="flow-insert-assets"><summary>已导入素材</summary>
         <MediaTab embedded onFlowInsert={onFlowInsert} onImportImage={onImportImage}
           onImportAudio={onImportAudio} onImportVideo={onImportVideo} showAdvancedAudioSettings={false} />
