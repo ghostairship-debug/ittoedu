@@ -1,9 +1,10 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createTextNode } from '@/core/tools/nativeNodeFactories'
 import { sceneNodeToCourseLayerItem } from '@/shared/courseProjectModel'
 import { FlowSurfaceHost } from '@/player/surfaces/flow/FlowSurfaceHost'
 import type { FlowPublishedPlaybackDocument } from '@/player/surfaces/flow/flowModel'
 import type { PublishedNativeLayerItem } from '@/shared/publishedCourseTypes'
+import type { PlaybackViewSession } from '@/player/playbackViewSession'
 
 function source(): FlowPublishedPlaybackDocument {
   const anchored = sceneNodeToCourseLayerItem(createTextNode({ id: 'anchored', text: '跟随段落', x: 50, y: 60 })) as PublishedNativeLayerItem
@@ -29,7 +30,7 @@ function box(left: number, top: number, width: number, height: number): DOMRect 
   return { x: left, y: top, left, top, width, height, right: left + width, bottom: top + height, toJSON: () => ({}) } as DOMRect
 }
 
-afterEach(() => { document.body.innerHTML = '' })
+afterEach(() => { document.body.innerHTML = ''; vi.unstubAllGlobals() })
 
 describe('Published Flow Player paragraph and crop projection', () => {
   it('uses live paragraph layout for anchored paper layers while fixed/global layers retain their positions', async () => {
@@ -105,6 +106,72 @@ describe('Published Flow Player paragraph and crop projection', () => {
     const anchored = container.querySelector<HTMLElement>('[data-flow-overlay-item="anchored"]')!
     expect({ left: anchored.style.left, top: anchored.style.top }).toEqual({ left: '200px', top: '82px' })
     expect(host.surface.surfaceLayerItems[0]?.paragraphAnchor?.blockId).toBe('nested')
+    await host.destroy()
+  })
+
+  it('updates an anchor on body resize with zoom and scroll, then disconnects its observer', async () => {
+    if (typeof HTMLElement.prototype.scrollIntoView !== 'function') HTMLElement.prototype.scrollIntoView = function () {}
+    const observers: Array<{ targets: Set<Element>; disconnected: boolean; notify(): void }> = []
+    class FakeResizeObserver {
+      targets = new Set<Element>()
+      disconnected = false
+      constructor(private readonly callback: ResizeObserverCallback) { observers.push(this) }
+      observe(target: Element) { this.targets.add(target) }
+      unobserve(target: Element) { this.targets.delete(target) }
+      disconnect() { this.disconnected = true; this.targets.clear() }
+      notify() { this.callback([], this as unknown as ResizeObserver) }
+    }
+    vi.stubGlobal('ResizeObserver', FakeResizeObserver)
+    const view = { state: { zoom: 2, pan: { x: 0, y: 0 } }, register: () => {}, refreshBounds: () => {} } as unknown as PlaybackViewSession
+    const host = new FlowSurfaceHost(source(), { playbackView: view })
+    const container = document.createElement('div'); document.body.appendChild(container)
+    await host.mount(container); await host.activate()
+    const root = container.querySelector<HTMLElement>('.flow-surface-host')!
+    const paper = container.querySelector<HTMLElement>('.flow-runtime-reading')!
+    const article = container.querySelector<HTMLElement>('.flow-runtime-article')!
+    const heading = container.querySelector<HTMLElement>('[data-flow-block-id="h"]')!
+    const paragraph = container.querySelector<HTMLElement>('[data-flow-block-id="p"]')!
+    root.getBoundingClientRect = () => box(0, 0, 1000, 700)
+    paper.getBoundingClientRect = () => box(0, -40, 1600, 1200)
+    heading.getBoundingClientRect = () => box(0, 0, 1200, 60)
+    heading.getClientRects = () => [heading.getBoundingClientRect()] as unknown as DOMRectList
+    let paragraphTop = 100
+    paragraph.getBoundingClientRect = () => box(0, -40 + paragraphTop * 2, 1200, 60)
+    paragraph.getClientRects = () => [paragraph.getBoundingClientRect()] as unknown as DOMRectList
+    article.scrollTop = 20
+    const bodyObserver = observers.find(observer => [...observer.targets].some(target => target.classList.contains('flow-runtime-reading')))
+    expect(bodyObserver).toBeDefined()
+    bodyObserver!.notify()
+    const anchored = container.querySelector<HTMLElement>('[data-flow-overlay-item="anchored"]')!
+    expect({ left: anchored.style.left, top: anchored.style.top }).toEqual({ left: '200px', top: '90px' })
+    paragraphTop = 160
+    bodyObserver!.notify()
+    expect({ left: anchored.style.left, top: anchored.style.top }).toEqual({ left: '200px', top: '150px' })
+    await host.destroy()
+    expect(bodyObserver!.disconnected).toBe(true)
+    paragraphTop = 300; bodyObserver!.notify()
+    expect(anchored.style.top).toBe('150px')
+  })
+
+  it.each([false, true])('keeps the image asset with zero crop field present=%s', async explicitCrop => {
+    if (typeof HTMLElement.prototype.scrollIntoView !== 'function') HTMLElement.prototype.scrollIntoView = function () {}
+    const course = source()
+    const imageBlock = course.surfaces[0]!.blocks.find(block => block.id === 'image')!
+    if (imageBlock.type !== 'media') throw new Error('Expected image block')
+    if (explicitCrop) imageBlock.crop = { left: 0, top: 0, right: 0, bottom: 0 }
+    else delete imageBlock.crop
+    const host = new FlowSurfaceHost(course)
+    const container = document.createElement('div'); document.body.appendChild(container)
+    await host.mount(container); await host.activate()
+    const figure = container.querySelector<HTMLElement>('[data-flow-block-id="image"]')!
+    const image = figure.querySelector<HTMLImageElement>('img')!
+    expect(image.src).toBe('https://example.test/photo.png')
+    expect(Boolean(image.parentElement === figure)).toBe(!explicitCrop)
+    if (explicitCrop) {
+      Object.defineProperties(image, { naturalWidth: { value: 640, configurable: true }, naturalHeight: { value: 360, configurable: true } })
+      image.dispatchEvent(new Event('load'))
+      expect(image.parentElement?.style.aspectRatio).toBe('640 / 360')
+    }
     await host.destroy()
   })
 })
