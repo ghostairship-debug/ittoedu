@@ -21,6 +21,11 @@ import {
 export interface ComponentLibraryIdentity {
   readonly projectId: string
   readonly revision: number
+  readonly sessionGeneration?: number
+  readonly locationId?: string | null
+  readonly surfaceId?: string | null
+  readonly owner?: string | null
+  readonly ownerKey?: string | null
 }
 
 export interface ComponentPackageTarget {
@@ -88,6 +93,7 @@ export interface ComponentLibraryApi {
   replacePackage(packageId: string): void
   refreshCatalog(): void
   addCatalogPackages(entries: AvailableComponentCatalogPackage[]): Promise<boolean>
+  prepareCatalogPackage(entry: AvailableComponentCatalogPackage): Promise<ComponentPackageData | null>
   requestCatalogUpdate(entry: AvailableComponentCatalogPackage): void
   confirmReplacement(): void
   cancelReplacement(): void
@@ -153,6 +159,29 @@ function assertSameProject(
   }
 }
 
+function samePreparationIdentity(left: ComponentLibraryIdentity, right: ComponentLibraryIdentity | null): boolean {
+  return Boolean(right)
+    && left.projectId === right!.projectId
+    && left.revision === right!.revision
+    && left.sessionGeneration === right!.sessionGeneration
+    && left.locationId === right!.locationId
+    && left.surfaceId === right!.surfaceId
+    && left.owner === right!.owner
+    && left.ownerKey === right!.ownerKey
+}
+
+function catalogEntryMatches(
+  snapshot: ComponentCatalogSnapshot,
+  entry: Pick<AvailableComponentCatalogPackage, 'sourceId' | 'sourceLabel' | 'sourceTrust' | 'packageId' | 'version' | 'sha256'>,
+): boolean {
+  return snapshot.packages.some(candidate => candidate.sourceId === entry.sourceId
+    && candidate.sourceLabel === entry.sourceLabel
+    && candidate.sourceTrust === entry.sourceTrust
+    && candidate.packageId === entry.packageId
+    && candidate.version === entry.version
+    && candidate.sha256 === entry.sha256)
+}
+
 export function useComponentLibrary(ports: ComponentLibraryPorts): ComponentLibraryApi {
   const portsRef = useRef(ports)
   portsRef.current = ports
@@ -160,6 +189,8 @@ export function useComponentLibrary(ports: ComponentLibraryPorts): ComponentLibr
   const [componentCatalog, setComponentCatalog] = useState<ComponentCatalogSnapshot>(
     EMPTY_COMPONENT_CATALOG,
   )
+  const componentCatalogRef = useRef(componentCatalog)
+  componentCatalogRef.current = componentCatalog
   const [replacementRequest, setReplacementRequest] = useState<
     ComponentPackageReplacementRequest | null
   >(null)
@@ -424,6 +455,61 @@ export function useComponentLibrary(ports: ComponentLibraryPorts): ComponentLibr
     return completed === true
   }, [])
 
+  const prepareCatalogPackage = useCallback(async (
+    entry: AvailableComponentCatalogPackage,
+  ): Promise<ComponentPackageData | null> => {
+    const started = portsRef.current.captureIdentity()
+    const expected = {
+      sourceId: entry.sourceId,
+      sourceLabel: entry.sourceLabel,
+      sourceTrust: entry.sourceTrust,
+      packageId: entry.packageId,
+      version: entry.version,
+      sha256: entry.sha256,
+    }
+    const prepared = await portsRef.current.runBusy(async () => {
+      const changed = () => new UserFacingError(
+        '组件选择已取消',
+        '工程、会话或组件目录已发生变化。',
+        '请刷新组件目录并重新选择。',
+      )
+      const assertCurrent = () => {
+        if (!started || !samePreparationIdentity(started, portsRef.current.captureIdentity())
+          || !catalogEntryMatches(componentCatalogRef.current, expected)) throw changed()
+      }
+      assertCurrent()
+      const installed = portsRef.current.readInstalledPackages()[expected.packageId]
+      const status = componentCatalogInstallStatus(entry, installed)
+      if (status === 'embedded' && installed) {
+        assertCurrent()
+        if (portsRef.current.readInstalledPackages()[expected.packageId] !== installed) throw changed()
+        return installed
+      }
+      if (status !== 'available') throw changed()
+      const file = await portsRef.current.readCatalogPackage({
+        sourceId: expected.sourceId,
+        packageId: expected.packageId,
+        version: expected.version,
+      })
+      if (file.sha256 !== expected.sha256 || await componentPackageSha256(file.bytes) !== expected.sha256) {
+        throw new UserFacingError('组件目录已改变', '组件包哈希与当前目录快照不一致。', '请刷新组件目录后重试。')
+      }
+      const imported = await importComponentPackageAsync(file.bytes, {
+        expectedId: expected.packageId,
+        expectedVersion: expected.version,
+        provenance: {
+          sha256: expected.sha256,
+          importedAt: new Date().toISOString(),
+          sourceLabel: expected.sourceLabel,
+        },
+      })
+      assertCurrent()
+      if (componentCatalogInstallStatus(entry, portsRef.current.readInstalledPackages()[expected.packageId]) !== 'available') throw changed()
+      return imported
+    }, '目录组件读取失败，工程未改变。')
+    return prepared ?? null
+  }, [])
+
   const addCatalogPackages = useCallback(async (
     entries: AvailableComponentCatalogPackage[],
   ): Promise<boolean> => {
@@ -458,7 +544,9 @@ export function useComponentLibrary(ports: ComponentLibraryPorts): ComponentLibr
 
   const refreshCatalog = useCallback(() => {
     void portsRef.current.runBusy(async () => {
-      setComponentCatalog(await portsRef.current.loadCatalog())
+      const snapshot = await portsRef.current.loadCatalog()
+      componentCatalogRef.current = snapshot
+      setComponentCatalog(snapshot)
     }, '组件目录刷新失败。')
   }, [])
 
@@ -466,7 +554,10 @@ export function useComponentLibrary(ports: ComponentLibraryPorts): ComponentLibr
     if (!portsRef.current.desktopAvailable()) return
     let cancelled = false
     void portsRef.current.loadCatalog().then((snapshot) => {
-      if (!cancelled) setComponentCatalog(snapshot)
+      if (!cancelled) {
+        componentCatalogRef.current = snapshot
+        setComponentCatalog(snapshot)
+      }
     }).catch((error) => {
       if (cancelled) return
       console.error('读取组件目录失败', error)
@@ -483,6 +574,7 @@ export function useComponentLibrary(ports: ComponentLibraryPorts): ComponentLibr
     replacePackage,
     refreshCatalog,
     addCatalogPackages,
+    prepareCatalogPackage,
     requestCatalogUpdate,
     confirmReplacement,
     cancelReplacement,
