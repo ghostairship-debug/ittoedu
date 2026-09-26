@@ -6,6 +6,8 @@ import type { ChartType } from '../../course/chartContentOperations'
 import type { ChartTextField } from '../../authoring/chartTextDraft'
 import type { ComponentPackageData } from '../../../shared/componentTypes'
 import type { CourseProjectDocument, FlowBlock, LayerFrame, NativeLayerItem } from '../../../shared/courseProjectTypes'
+import { courseProjectDocumentSchema } from '../../../shared/courseProjectSchema'
+import { componentPackageMeta } from '../../../shared/componentPackageMeta'
 import type { AssetMeta } from '../../../shared/contracts/media-v1'
 import { planFlowMenuDocumentInsertion, type FlowMenuDocumentKind } from '../../../core/tools/flowMenuDocumentInsertion'
 import { insertFlowMenuPaperItem, type FlowMenuPaperItem, type FlowMenuParagraphAnchor } from '../../../core/tools/flowMenuPaperInsertion'
@@ -102,7 +104,7 @@ import {
   markFlowTextComposing,
   type FlowTextEditSession,
 } from '../../authoring/flowTextEdit'
-import { findFlowBlockRecursive, flowSurfaceIn } from '../../../core/tools/flowDocumentModel'
+import { findFlowBlockRecursive, flowSurfaceIn, walkFlowBlocks } from '../../../core/tools/flowDocumentModel'
 import { nanoid } from 'nanoid'
 import { LAYER_REJECT_STALE_REVISION } from '../../course/effectiveLayerCommands'
 import { commitSlideProjectMutation } from '../../course/slideEditorCommands'
@@ -682,6 +684,10 @@ export function createFlowAuthoringSlice(
   runFlowAuthoringIntent(
     target: CourseAuthoringTarget,
     intent: FlowAuthoringIntent,
+  ): FlowAuthoringReceipt
+  commitFlowMenuComponentAtTarget(
+    target: CourseAuthoringTarget,
+    step: EditorTransactionStep,
   ): FlowAuthoringReceipt
   convertFlowOverlayComponentAtTarget(
     target: CourseAuthoringTarget,
@@ -1602,6 +1608,98 @@ export function createFlowAuthoringSlice(
     }
   }
 
+  const commitFlowMenuComponentAtTarget = (
+    target: CourseAuthoringTarget,
+    step: EditorTransactionStep,
+  ): FlowAuthoringReceipt => {
+    const resolved = resolveFlowAuthoringTarget(flow, target)
+    if (!('session' in resolved)) return resolved
+    const { session, document } = resolved
+    if (flow.readCanvasMode?.() !== 'edit') return rejectedFlowReceipt('当前为只读模式')
+    if (target.owner !== 'surface' || session.selection.authoringScope !== 'page') return rejectedFlowReceipt('正文组件只能插入当前 Flow 页面')
+    if (target.itemId !== target.surfaceId && !findFlowBlockRecursive(flowSurfaceIn(document, target.surfaceId).blocks, target.itemId)) {
+      return rejectedFlowReceipt('正文组件插入目标已改变')
+    }
+    const owned = flow.read()
+    if (owned.flowTextEdit || owned.flowDocumentDraft) return rejectedFlowReceipt('正文草稿尚未提交')
+    try {
+      if (step.projectId !== document.id || step.baseRevision !== document.revision
+        || step.previousDocument.id !== document.id || step.previousDocument.revision !== document.revision
+        || JSON.stringify(step.previousDocument) !== JSON.stringify(document)
+        || step.nextDocument.id !== document.id || step.nextDocument.revision !== document.revision + 1) {
+        return rejectedFlowReceipt(LAYER_REJECT_STALE_REVISION)
+      }
+      const hint = readAuthoringToolSelection(step.selectionHint)
+      if (!hint || hint.locationId !== target.locationId || hint.stateId !== null
+        || hint.owner !== 'surface' || hint.flowCarrier !== 'block' || hint.itemIds.length !== 1) {
+        return rejectedFlowReceipt('正文组件事务选区无效')
+      }
+      const next = courseProjectDocumentSchema.parse(step.nextDocument)
+      const beforeSurface = flowSurfaceIn(document, target.surfaceId)
+      const nextSurface = flowSurfaceIn(next, target.surfaceId)
+      const blockId = hint.itemIds[0]!
+      const beforeIds = new Set<string>()
+      walkFlowBlocks(beforeSurface.blocks, block => { beforeIds.add(block.id) })
+      const createdIds: string[] = []
+      walkFlowBlocks(nextSurface.blocks, block => { if (!beforeIds.has(block.id)) createdIds.push(block.id) })
+      const inserted = findFlowBlockRecursive(nextSurface.blocks, blockId)
+      if (createdIds.length !== 1 || createdIds[0] !== blockId || !inserted || inserted.block.type !== 'component') {
+        return rejectedFlowReceipt('正文组件事务未唯一新增组件块')
+      }
+      const fallbackId = inserted.block.staticFallbackAssetId
+      const packageId = inserted.block.component.packageId
+      const fallback = next.assets[fallbackId]
+      const nextPackage = next.componentPackages[packageId]
+      if (!fallback || fallback.kind !== 'image' || document.assets[fallbackId] || !nextPackage
+        || nextPackage.version !== inserted.block.component.version) return rejectedFlowReceipt('正文组件后备资源无效')
+      const files = step.resourceChanges.assetFileChanges ?? []
+      const packages = step.resourceChanges.componentPackageChanges ?? []
+      const resources = kernel.readResources()
+      if (!resources.courseAssetSidecar || files.length !== 1 || files[0]?.assetId !== fallbackId
+        || files[0].before !== undefined || !files[0].after || files[0].after.byteLength !== fallback.byteLength
+        || resources.courseAssetSidecar.files[fallbackId] !== undefined) {
+        return rejectedFlowReceipt('正文组件图片资源基线已改变')
+      }
+      const priorPackage = document.componentPackages[packageId]
+      const livePackage = resources.componentPackages[packageId]
+      if (priorPackage) {
+        if (packages.length !== 0 || !livePackage
+          || JSON.stringify(priorPackage) !== JSON.stringify(nextPackage)
+          || JSON.stringify(componentPackageMeta(livePackage)) !== JSON.stringify(priorPackage)) {
+          return rejectedFlowReceipt('正文组件包资源基线已改变')
+        }
+      } else {
+        if (packages.length !== 1 || packages[0]?.packageId !== packageId || packages[0].before !== undefined
+          || !packages[0].after || livePackage !== undefined
+          || JSON.stringify(componentPackageMeta(packages[0].after)) !== JSON.stringify(nextPackage)) {
+          return rejectedFlowReceipt('正文组件包资源基线已改变')
+        }
+      }
+      const retainedAssets = structuredClone(next.assets)
+      delete retainedAssets[fallbackId]
+      const retainedPackages = structuredClone(next.componentPackages)
+      if (!priorPackage) delete retainedPackages[packageId]
+      if (JSON.stringify(retainedAssets) !== JSON.stringify(document.assets)
+        || JSON.stringify(retainedPackages) !== JSON.stringify(document.componentPackages)) {
+        return rejectedFlowReceipt('正文组件事务包含额外素材或组件修改')
+      }
+      const normalized = structuredClone(next)
+      const normalizedSurface = flowSurfaceIn(normalized, target.surfaceId)
+      const added = findFlowBlockRecursive(normalizedSurface.blocks, blockId)
+      if (!added) return rejectedFlowReceipt('正文组件块已改变')
+      added.blocks.splice(added.index, 1)
+      normalized.assets = structuredClone(document.assets)
+      normalized.componentPackages = structuredClone(document.componentPackages)
+      normalized.revision = document.revision
+      normalized.updatedAt = document.updatedAt
+      if (JSON.stringify(normalized) !== JSON.stringify(document)) return rejectedFlowReceipt('正文组件事务包含额外工程修改')
+      if (!persistFlowTransaction(flow, step, '正文组件已插入')) return rejectedFlowReceipt('正文组件事务未提交')
+      return { ok: true, historyEntry: true }
+    } catch (error) {
+      return rejectedFlowReceipt(error instanceof Error ? error.message : '正文组件事务无效')
+    }
+  }
+
   const convertFlowOverlayComponentAtTarget = async (
     target: CourseAuthoringTarget,
     destination: FlowBodyDestination,
@@ -1640,6 +1738,7 @@ export function createFlowAuthoringSlice(
 
   return {
     runFlowAuthoringIntent,
+    commitFlowMenuComponentAtTarget,
     convertFlowOverlayComponentAtTarget,
     applyFlowCommand(result, extra = {}) {
       return flow.persist(result, extra)
