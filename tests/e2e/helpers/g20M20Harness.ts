@@ -29,13 +29,14 @@ export async function chooseM20Workspace(app: ElectronApplication, page: Page, w
 
 export function m20Tree(page: Page) { return page.getByRole('tree', { name: '工作空间文件' }) }
 export function m20Row(page: Page, name: string) { return m20Tree(page).getByRole('button', { name, exact: true }) }
+export function m20VisibleTextEditor(page: Page) { return page.getByLabel('纯文本编辑', { exact: true }).filter({ visible: true }) }
 
 export async function m20OpenFile(page: Page, name: string, kind: 'course' | 'markdown' | 'text') {
   await m20Row(page, name).dblclick()
   await expect(page.locator('.workspace-document-tabs').getByRole('tab', { name: new RegExp(name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')) })).toHaveAttribute('aria-selected', 'true')
   if (kind === 'course') await expect(page.locator('.canvas-stage-stack, .flow-workspace').filter({ visible: true }).first()).toBeVisible()
   if (kind === 'markdown') await expect(page.locator('.ProseMirror').filter({ visible: true }).first()).toBeVisible()
-  if (kind === 'text') await expect(page.getByLabel('纯文本编辑', { exact: true })).toBeVisible()
+  if (kind === 'text') { await expect(m20VisibleTextEditor(page)).toHaveCount(1); await expect(m20VisibleTextEditor(page)).toBeVisible() }
 }
 
 export async function m20Snapshot(page: Page, path: string) {
