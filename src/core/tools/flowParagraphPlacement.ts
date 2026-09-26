@@ -1,29 +1,9 @@
-import type { CourseProjectDocument, FlowBlock, FlowSurfaceLayerEntry } from '../../shared/courseProjectTypes'
+import type { CourseProjectDocument, FlowBlock } from '../../shared/courseProjectTypes'
 import { flowParagraphAnchorAt, flowParagraphAnchoredFrame, type FlowParagraphBlockRect } from '../../shared/flowParagraphAnchors'
 import { commitCourseProjectMutation } from './courseProjectMutation'
-import { flowSurfaceIn, walkFlowBlocks } from './flowDocumentModel'
+import { flowSurfaceIn } from './flowDocumentModel'
 
-export function reconcileFlowParagraphAnchors(
-  beforeBlocks: readonly FlowBlock[],
-  afterBlocks: readonly FlowBlock[],
-  entries: readonly FlowSurfaceLayerEntry[],
-): FlowSurfaceLayerEntry[] {
-  const before: string[] = []
-  const after = new Set<string>()
-  walkFlowBlocks(beforeBlocks, block => { before.push(block.id) })
-  walkFlowBlocks(afterBlocks, block => { after.add(block.id) })
-  const first = afterBlocks[0]?.id
-  return entries.map(entry => {
-    const anchor = entry.paragraphAnchor
-    if (!anchor || after.has(anchor.blockId)) return entry
-    const index = before.indexOf(anchor.blockId)
-    if (index < 0) throw new Error(`挂靠段落不属于原正文：${anchor.blockId}`)
-    const preceding = before.slice(0, index).reverse().find(id => after.has(id))
-    const target = preceding ?? first
-    if (!target) throw new Error('Flow 正文不能为空，无法改挂段落对象')
-    return { ...entry, paragraphAnchor: { ...anchor, blockId: target } }
-  })
-}
+export { reconcileFlowParagraphAnchors } from './flowAnchorReconciliation'
 
 export function setFlowParagraphPlacement(
   document: CourseProjectDocument,

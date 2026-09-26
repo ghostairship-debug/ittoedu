@@ -2,7 +2,6 @@ import type { CourseProjectDocument, FlowBlock, FlowMediaBlock, NativeLayerItem 
 import { commitCourseProjectMutation } from './courseProjectMutation'
 import { findFlowBlockRecursive, flowSurfaceIn, stableFlowId, syncFlowCourseLocations } from './flowDocumentModel'
 import { appendOverlayItem, nativeMediaOverlay } from './flowNativeInsertion'
-import { reconcileFlowParagraphAnchors } from './flowParagraphPlacement'
 
 export function floatFlowMediaBlock(
   document: CourseProjectDocument,
@@ -33,7 +32,6 @@ export function floatFlowMediaBlock(
     appendOverlayItem(draft, { source: 'surface', surfaceId: input.surfaceId }, item)
     const entry = target.surfaceLayerItems.find(candidate => candidate.item.layerItemId === item.layerItemId)!
     entry.paragraphAnchor = { ...input.anchor! }
-    target.surfaceLayerItems = reconcileFlowParagraphAnchors(surface.blocks, target.blocks, target.surfaceLayerItems)
     syncFlowCourseLocations(draft, input.surfaceId)
   }, input.now)
   return { nextDocument, layerItemId, ...(captionBlockId ? { captionBlockId } : {}) }

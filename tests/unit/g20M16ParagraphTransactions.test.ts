@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { createTextNode } from '@/core/tools/nativeNodeFactories'
+import { commitCourseProjectMutation } from '@/core/tools/courseProjectMutation'
 import { sceneNodeToCourseLayerItem } from '@/shared/courseProjectModel'
 import { reconcileFlowParagraphAnchors, setFlowParagraphPlacement } from '@/core/tools/flowParagraphPlacement'
 import { planDeleteFlowBlocks } from '@/core/tools/flowContent'
@@ -46,6 +47,47 @@ describe('Flow paragraph placement transactions', () => {
     expect(replaced.ok).toBe(true)
     expect(replaced.nextDocument?.revision).toBe(2)
     expect(flowSurfaceIn(replaced.nextDocument!, 'flow').surfaceLayerItems[0]?.paragraphAnchor?.blockId).toBe('h')
+  })
+
+  it('reconciles generic canonical mutations before strict parse and rejects foreign anchors', () => {
+    const original = fixture()
+    const changed = commitCourseProjectMutation(original, draft => {
+      flowSurfaceIn(draft, 'flow').blocks.splice(2, 1)
+    })
+    expect(changed.revision).toBe(original.revision + 1)
+    expect(flowSurfaceIn(changed, 'flow').surfaceLayerItems[0]?.paragraphAnchor?.blockId).toBe('a')
+    expect(flowSurfaceIn(original, 'flow').surfaceLayerItems[0]?.paragraphAnchor?.blockId).toBe('b')
+    expect(() => commitCourseProjectMutation(original, draft => {
+      flowSurfaceIn(draft, 'flow').surfaceLayerItems[0]!.paragraphAnchor = { blockId: 'foreign', offsetY: 0, xRatio: 0.2 }
+    })).toThrow('挂靠段落不属于原正文')
+    expect(original.revision).toBe(1)
+  })
+
+  it('provides a valid empty paragraph for an unlisted Flow surface whose last anchor block is removed', () => {
+    const candidate = fixture()
+    const spare = structuredClone(flowSurfaceIn(candidate, 'flow'))
+    spare.id = 'flow-spare'
+    spare.blocks = [paragraph('spare')]
+    spare.surfaceLayerItems[0]!.item.layerItemId = 'spare-note'
+    spare.surfaceLayerItems[0]!.paragraphAnchor = { blockId: 'spare', offsetY: 8, xRatio: 0.2 }
+    candidate.surfaces.push(spare)
+    candidate.mixedPrintPlan = { pageSize: 'A4', orientation: 'auto', entries: [
+      { id: 'print-flow', kind: 'flow-document', surfaceId: 'flow' },
+      { id: 'print-spare', kind: 'flow-document', surfaceId: 'flow-spare' },
+    ] }
+    const original = courseProjectDocumentSchema.parse(candidate)
+    const changed = commitCourseProjectMutation(original, draft => { flowSurfaceIn(draft, 'flow-spare').blocks = [] })
+    const result = flowSurfaceIn(changed, 'flow-spare')
+    expect(result.blocks).toHaveLength(1)
+    expect(result.blocks[0]).toMatchObject({ type: 'paragraph', content: { inlines: [] } })
+    expect(result.surfaceLayerItems[0]?.paragraphAnchor?.blockId).toBe(result.blocks[0]?.id)
+    expect(flowSurfaceIn(original, 'flow-spare').blocks[0]?.id).toBe('spare')
+  })
+
+  it('leaves Flow content intact for an unrelated project mutation', () => {
+    const original = fixture()
+    const changed = commitCourseProjectMutation(original, draft => { draft.title = '只修改标题' })
+    expect(flowSurfaceIn(changed, 'flow')).toEqual(flowSurfaceIn(original, 'flow'))
   })
 
   it('keeps global Native coordinates while new surface Native uses paper space', () => {

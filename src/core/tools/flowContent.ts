@@ -3,7 +3,6 @@ import { collectFlowBlockIds, removeBlocksById, wouldLeaveSurfaceWithoutAnchor, 
 import type { CourseProjectDocument, FlowBlock } from '../../shared/courseProjectTypes'
 import { plainDocumentText, type FlowTextContent } from '../../shared/document/content'
 import { commitCourseProjectMutation } from './courseProjectMutation'
-import { reconcileFlowParagraphAnchors } from './flowParagraphPlacement'
 import { flowSurfaceIn, findFlowBlockRecursive, walkFlowBlocks, stableFlowId, syncFlowCourseLocations, resolveFlowBlock, isRichTextFlowBlock } from './flowDocumentModel'
 
 export interface FlowContentOptions { now?: string; expectedRevision?: number }
@@ -18,15 +17,7 @@ function staleOrGlobal(document: CourseProjectDocument, options: FlowContentOpti
 function runMutation(document: CourseProjectDocument, mutate: (draft: CourseProjectDocument) => string[] | void, reason: string, options: FlowContentOptions): FlowContentResult {
   try {
     let createdBlockIds: string[] = []
-    const nextDocument = commitCourseProjectMutation(document, draft => {
-      createdBlockIds = mutate(draft) ?? []
-      for (const before of document.surfaces) {
-        if (before.type !== 'flow') continue
-        const after = draft.surfaces.find(surface => surface.id === before.id)
-        if (after?.type !== 'flow') continue
-        after.surfaceLayerItems = reconcileFlowParagraphAnchors(before.blocks, after.blocks, after.surfaceLayerItems)
-      }
-    }, options.now)
+    const nextDocument = commitCourseProjectMutation(document, draft => { createdBlockIds = mutate(draft) ?? [] }, options.now)
     return { ok: true, nextDocument, historyEntry: true, reason, ...(createdBlockIds.length ? { createdBlockIds } : {}) }
   } catch (error) { return failCommand(error instanceof Error ? error.message : reason) }
 }
