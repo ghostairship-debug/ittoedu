@@ -235,9 +235,14 @@ test('M20-T04 conversation homes show type, full location, missing state and Exp
     await select('未发送空会话')
     await expect(location).toContainText('发送首条消息后固定')
     await select('跨空间会话')
+    await chooseM20Workspace(app, page, targetWorkspace)
+    await expect(page.getByLabel('切换工作空间')).toHaveAttribute('title', targetWorkspace)
+    await chooseM20Workspace(app, page, fixture.workspace)
+    await expect(page.getByLabel('切换工作空间')).toHaveAttribute('title', fixture.workspace)
+    await select('跨空间会话')
+    await expect(location).toContainText('workspace › Unit › c.md')
     const transfer = await page.evaluate(async input => {
-      const files = window.desktopAPI.workspaceFiles!, execution = window.desktopAPI.execution!
-      await execution.workspace(input.target)
+      const files = window.desktopAPI.workspaceFiles!
       const source = await files({ type: 'root', directory: input.source }), target = await files({ type: 'root', directory: input.target })
       const directory = (await files({ type: 'list', workspaceId: source.workspaceId, directoryEntryId: source.rootEntryId })).entries
         .find(entry => entry.status === 'accessible' && entry.name === 'Unit')
