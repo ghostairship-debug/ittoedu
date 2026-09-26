@@ -47,8 +47,8 @@ export function embedFlowNativeMedia(
   if (input.expectedRevision !== undefined && input.expectedRevision !== document.revision) throw new Error('stale-revision')
   const surface = flowSurfaceIn(document, input.surfaceId)
   const entry = surface.surfaceLayerItems.find(candidate => candidate.item.layerItemId === input.layerItemId)
-  if (!entry || entry.item.kind !== 'native' || (entry.item.content.nativeType !== 'image' && entry.item.content.nativeType !== 'video')) throw new Error('所选对象不是纸面媒体')
-  if (entry.item.paperSpace !== 'paper') throw new Error('只有纸面 Native 媒体可以改为正文')
+  if (!entry || entry.item.kind !== 'native' || (entry.item.content.nativeType !== 'image' && entry.item.content.nativeType !== 'video')) throw new Error('所选对象不是当前 Flow 表面的 Native 图片或视频')
+  if (entry.item.locked) throw new Error('图层已锁定，除解锁外不能修改。')
   const assetId = entry.item.content.data.assetId
   const mediaKind = entry.item.content.nativeType
   if (document.assets[assetId]?.kind !== mediaKind) throw new Error('纸面媒体素材无效')

@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import { floatFlowMediaBlock, embedFlowNativeMedia } from '@/core/tools/flowMediaConversion'
-import { flowSurfaceIn } from '@/core/tools/flowDocumentModel'
+import { createBlankFlowSurface, flowSurfaceIn } from '@/core/tools/flowDocumentModel'
+import { appendOverlayItem, insertFlowOverlayShape, nativeMediaOverlay } from '@/core/tools/flowNativeInsertion'
 import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
-import { COURSE_PROJECT_SCHEMA_VERSION, type CourseProjectDocument } from '@/shared/courseProjectTypes'
+import { COURSE_PROJECT_SCHEMA_VERSION, type CourseProjectDocument, type RuntimeLayerItem } from '@/shared/courseProjectTypes'
 
 function fixture(): CourseProjectDocument {
   return courseProjectDocumentSchema.parse({
@@ -68,6 +69,60 @@ describe('Flow body and paper media conversion', () => {
     expect(next.surfaceLayerItems[0]?.paragraphAnchor).toEqual({ blockId: next.blocks[0]?.id, offsetY: 7, xRatio: 0.05 })
     expect(next.surfaceLayerItems[0]?.item).toMatchObject({ content: { data: { assetId: 'photo', crop: { left: 0.1, right: 0.15 } } } })
     expect(floated.nextDocument.assets).toEqual(original.assets)
+  })
+
+  it.each(['viewport', undefined] as const)('embeds same-surface legacy image with paperSpace=%s and retains crop', paperSpace => {
+    const original = fixture()
+    const image = nativeMediaOverlay(original, { assetId: 'photo', mediaKind: 'image', id: 'legacy-image' })
+    if (paperSpace) image.paperSpace = paperSpace
+    else delete image.paperSpace
+    if (image.content.nativeType !== 'image') throw new Error('Expected Native image')
+    image.content.data.crop = { left: 0.1, top: 0.05, right: 0.15, bottom: 0.02 }
+    image.content.data.cropX = 0.4; image.content.data.cropY = 0.6
+    appendOverlayItem(original, { source: 'surface', surfaceId: 'flow' }, image)
+    const embedded = embedFlowNativeMedia(original, { surfaceId: 'flow', layerItemId: 'legacy-image', parentId: null, index: 1, blockId: 'legacy-body' })
+    expect(embedded.nextDocument.revision).toBe(original.revision + 1)
+    expect(embedded.nextDocument.assets).toEqual(original.assets)
+    expect(flowSurfaceIn(embedded.nextDocument, 'flow').surfaceLayerItems).toHaveLength(0)
+    expect(flowSurfaceIn(embedded.nextDocument, 'flow').blocks[1]).toMatchObject({ id: 'legacy-body', type: 'media', mediaKind: 'image', assetId: 'photo',
+      crop: { left: 0.1, top: 0.05, right: 0.15, bottom: 0.02 }, cropX: 0.4, cropY: 0.6 })
+    expect(flowSurfaceIn(original, 'flow').surfaceLayerItems).toHaveLength(1)
+  })
+
+  it('embeds a same-surface legacy viewport video without changing the asset', () => {
+    const original = fixture()
+    original.assets.clip = { ...original.assets.photo!, id: 'clip', filename: 'clip.mp4', mimeType: 'video/mp4', kind: 'video', path: 'media/clip.mp4' }
+    const video = nativeMediaOverlay(original, { assetId: 'clip', mediaKind: 'video', id: 'legacy-video' })
+    video.paperSpace = 'viewport'
+    appendOverlayItem(original, { source: 'surface', surfaceId: 'flow' }, video)
+    const embedded = embedFlowNativeMedia(original, { surfaceId: 'flow', layerItemId: 'legacy-video', parentId: null, index: 1 })
+    expect(embedded.nextDocument.revision).toBe(original.revision + 1)
+    expect(flowSurfaceIn(embedded.nextDocument, 'flow').blocks[1]).toMatchObject({ type: 'media', mediaKind: 'video', assetId: 'clip' })
+    expect(embedded.nextDocument.assets.clip).toEqual(original.assets.clip)
+  })
+
+  it('rejects global, cross-surface, shape, and locked sources without a project write', () => {
+    const original = fixture()
+    const image = nativeMediaOverlay(original, { assetId: 'photo', mediaKind: 'image', id: 'surface-image' })
+    image.paperSpace = 'viewport'
+    appendOverlayItem(original, { source: 'surface', surfaceId: 'flow' }, image)
+    const second = createBlankFlowSurface({ id: 'second', title: '第二页' })
+    original.surfaces.push(second.surface); original.locations.push(second.location)
+    expect(() => embedFlowNativeMedia(original, { surfaceId: 'second', layerItemId: 'surface-image', parentId: null, index: 1 })).toThrow('不是当前 Flow 表面')
+    const global = nativeMediaOverlay(original, { assetId: 'photo', mediaKind: 'image', id: 'global-image' })
+    global.paperSpace = 'viewport'
+    appendOverlayItem(original, { source: 'global', surfaceId: 'flow' }, global)
+    expect(() => embedFlowNativeMedia(original, { surfaceId: 'flow', layerItemId: 'global-image', parentId: null, index: 1 })).toThrow('不是当前 Flow 表面')
+    const [shapeId] = insertFlowOverlayShape(original, { source: 'surface', surfaceId: 'flow' }, { shapeType: 'rectangle', id: 'shape' })
+    expect(() => embedFlowNativeMedia(original, { surfaceId: 'flow', layerItemId: shapeId!, parentId: null, index: 1 })).toThrow('不是当前 Flow 表面')
+    const { content: _content, kind: _kind, ...runtimeBase } = image
+    const runtime: RuntimeLayerItem = { ...runtimeBase, layerItemId: 'runtime', kind: 'runtime', runtime: { protocol: 'surface-runtime', runtimeApiVersion: 3, enabled: true, renderMode: 'dom', source: 'export default {}', content: { values: {} }, assets: {} } }
+    appendOverlayItem(original, { source: 'surface', surfaceId: 'flow' }, runtime)
+    expect(() => embedFlowNativeMedia(original, { surfaceId: 'flow', layerItemId: 'runtime', parentId: null, index: 1 })).toThrow('不是当前 Flow 表面')
+    image.locked = true
+    expect(() => embedFlowNativeMedia(original, { surfaceId: 'flow', layerItemId: 'surface-image', parentId: null, index: 1 })).toThrow('图层已锁定')
+    expect(original.revision).toBe(1)
+    expect(flowSurfaceIn(original, 'flow').surfaceLayerItems).toHaveLength(3)
   })
 
   it('rejects stale commands without changing the project', () => {
