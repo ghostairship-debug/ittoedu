@@ -41,6 +41,7 @@ export type FlowPrintNode =
       blockId: string
       caption?: FlowTextContent
       headers: FlowTextContent[]
+      headerEnabled: boolean
       rows: Array<Array<{ content: FlowTextContent; span?: TableCellSpan }>>
     }
   | {
@@ -214,6 +215,7 @@ function printNodesForBlock(block: FlowBlock): FlowPrintNode[] {
         blockId: block.id,
         ...(block.caption ? { caption: block.caption } : {}),
         headers: block.columns.map((column) => column.header),
+        headerEnabled: block.headerEnabled !== false,
         rows: block.rows.map((row) => block.columns.map((column) => {
           const cell = row.cells[column.id]
           return {
@@ -297,7 +299,7 @@ function printNodeToHtml(
     case 'chart':
       return `<figure data-flow-print-block="${escapeHtml(node.blockId)}" style="width:100%;margin:16px 0;aspect-ratio:656/${node.height}">${buildNativeChartSvg(node.chart, 656, node.height, node.blockId)}</figure>`
     case 'table': {
-      const head = `<tr>${node.headers.map((header) => `<th>${richTextToHtml(header)}</th>`).join('')}</tr>`
+      const head = `<tr>${node.headers.map((header) => `<${node.headerEnabled ? 'th' : 'td'}>${richTextToHtml(header)}</${node.headerEnabled ? 'th' : 'td'}>`).join('')}</tr>`
       const body = node.rows.map((row) => `<tr>${row.filter(cell => !cell.span?.covered).map((cell) => `<td${cell.span ? ` rowspan="${cell.span.rowSpan}" colspan="${cell.span.columnSpan}"` : ''}>${richTextToHtml(cell.content)}</td>`).join('')}</tr>`).join('')
       return `<figure data-flow-print-block="${escapeHtml(node.blockId)}">${
         node.caption ? `<figcaption>${richTextToHtml(node.caption)}</figcaption>` : ''

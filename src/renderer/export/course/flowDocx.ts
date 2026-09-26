@@ -520,7 +520,7 @@ function renderPrintNode(
         tableXml([
           node.headers.map((content) => ({ content })),
           ...node.rows,
-        ], 1)
+        ], node.headerEnabled ? 1 : 0)
       }`
     case 'formula':
       context.report.push({

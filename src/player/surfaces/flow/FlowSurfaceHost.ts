@@ -1806,17 +1806,21 @@ function renderBlockDom(
         figure.appendChild(caption)
       }
       const table = dom.createElement('table')
-      const thead = dom.createElement('thead')
+      const tbody = dom.createElement('tbody')
       const headerRow = dom.createElement('tr')
       for (const column of block.columns) {
-        const cell = dom.createElement('th')
+        const cell = dom.createElement(block.headerEnabled === false ? 'td' : 'th')
         cell.dataset.flowColumnId = column.id
         appendRichText(cell, column.header)
         headerRow.appendChild(cell)
       }
-      thead.appendChild(headerRow)
-      table.appendChild(thead)
-      const tbody = dom.createElement('tbody')
+      if (block.headerEnabled === false) {
+        tbody.appendChild(headerRow)
+      } else {
+        const thead = dom.createElement('thead')
+        thead.appendChild(headerRow)
+        table.appendChild(thead)
+      }
       for (const row of block.rows) {
         const tr = dom.createElement('tr')
         tr.dataset.flowRowId = row.id
