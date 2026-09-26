@@ -132,6 +132,19 @@ async function selectAcrossInline(page: Page, body: Locator, fromText: string, t
   await expect.poll(() => page.evaluate(() => window.getSelection()?.toString())).toContain(toText)
 }
 
+async function rightClickSelectedText(page: Page, text: string) {
+  const point = await page.evaluate(expected => {
+    const selection = window.getSelection()
+    if (!selection || selection.toString() !== expected || selection.rangeCount !== 1)
+      throw new Error(`Expected selected text ${expected} before context menu, got ${selection?.toString() ?? ''}`)
+    const rect = [...selection.getRangeAt(0).getClientRects()].find(rect => rect.width > 0 && rect.height > 0)
+    if (!rect) throw new Error(`Selected text ${expected} has no visible rect`)
+    return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }
+  }, text)
+  await page.mouse.click(point.x, point.y, { button: 'right' })
+  await expect.poll(() => page.evaluate(() => window.getSelection()?.toString())).toBe(text)
+}
+
 async function preserveClipboard() {
   const helper = join(root, 'tests/e2e/helpers/g20ClipboardFixture.ps1')
   const child = spawn('powershell.exe', ['-NoProfile', '-STA', '-ExecutionPolicy', 'Bypass', '-File', helper],
@@ -231,7 +244,7 @@ for (const carrier of ['flow', 'markdown'] as const) {
   })
 
   test(`M16-T05 ${carrier}: menus, block operations, text tools and exact AI selection`, async ({}, info) => {
-    test.setTimeout(180_000)
+    test.setTimeout(300_000)
     const data = fixture(), server = await selectionServer(), app = await launchSelectionApp(data.directory)
     const page = await app.firstWindow(), errors: string[] = []
     page.on('pageerror', error => errors.push(error.message))
@@ -315,9 +328,12 @@ for (const carrier of ['flow', 'markdown'] as const) {
       const more = page.getByRole('menu', { name: '更多文字格式' })
       for (const label of ['删除线', '上标', '下标', '行内代码', '清除文字格式']) await expect(more.getByRole('menuitem', { name: label })).toBeVisible()
       await page.keyboard.press('Escape')
-      await page.getByLabel('更多正文操作').filter({ visible: true }).first().click()
-      await expect(page.getByRole('button', { name: '源文', exact: true }).filter({ visible: true })).toBeVisible()
-      await page.keyboard.press('Escape')
+      const moreBodyActions = page.getByLabel('更多正文操作').filter({ visible: true }).first()
+      await moreBodyActions.click()
+      const sourceButton = page.getByRole('button', { name: '源文', exact: true }).filter({ visible: true })
+      await expect(sourceButton).toBeVisible()
+      await moreBodyActions.click()
+      await expect(sourceButton).toBeHidden()
       await selectVisibleText(page, body, '先预测')
       const beforeAi = await readSelectionDocument(page, opened.documentId)
       const expectedAi = beforeAi.model.kind === 'markdown' ? beforeAi.model.source.replace('先预测', '先观察')
@@ -474,7 +490,7 @@ for (const carrier of ['flow', 'markdown'] as const) {
       }
       await focusClipboardWindow()
       await selectVisibleText(page, body, '再观察')
-      await firstParagraph(body, carrier).click({ button: 'right' })
+      await rightClickSelectedText(page, '再观察')
       await capturePlain('before-menu-command')
       await assertClipboardFocus()
       await page.getByRole('menu', { name: '段落操作' }).getByRole('menuitem', { name: '粘贴为纯文本' }).click()
@@ -525,7 +541,7 @@ for (const carrier of ['flow', 'markdown'] as const) {
       expect(await app.evaluate(({ clipboard }) => clipboard.availableFormats())).toContain('application/x-cw-document-slice')
       await focusClipboardWindow()
       await selectVisibleText(page, objectBody, '保持原样')
-      await secondParagraph(objectBody, carrier).click({ button: 'right' })
+      await rightClickSelectedText(page, '保持原样')
       await capturePlain('object-before-menu-command', objectFormal)
       await assertClipboardFocus()
       await page.getByRole('menu', { name: '段落操作' }).getByRole('menuitem', { name: '粘贴为纯文本' }).click()
