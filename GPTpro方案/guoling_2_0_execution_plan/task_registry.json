@@ -1257,7 +1257,7 @@
         "M14"
       ],
       "document": "mid_term/M19.md",
-      "status": "planned",
+      "status": "verified",
       "existing_code": [
         "src/shared/constants.ts",
         "src/shared/contracts/course-project-v9/types.ts",
