@@ -4185,6 +4185,28 @@
                         "underlay",
                         "overlay"
                       ]
+                    },
+                    "paragraphAnchor": {
+                      "type": "object",
+                      "properties": {
+                        "blockId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 240
+                        },
+                        "offsetY": {
+                          "type": "number"
+                        },
+                        "xRatio": {
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "blockId",
+                        "offsetY",
+                        "xRatio"
+                      ],
+                      "additionalProperties": false
                     }
                   },
                   "required": [
@@ -7456,6 +7478,48 @@
                 "left",
                 "right"
               ]
+            },
+            "crop": {
+              "type": "object",
+              "properties": {
+                "left": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1
+                },
+                "top": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1
+                },
+                "right": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1
+                },
+                "bottom": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1
+                }
+              },
+              "required": [
+                "left",
+                "top",
+                "right",
+                "bottom"
+              ],
+              "additionalProperties": false
+            },
+            "cropX": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "cropY": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
             }
           },
           "required": [
@@ -7643,6 +7707,9 @@
                 "inlines"
               ],
               "additionalProperties": false
+            },
+            "headerEnabled": {
+              "type": "boolean"
             },
             "columns": {
               "minItems": 1,
