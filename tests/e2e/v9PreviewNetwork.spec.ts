@@ -180,8 +180,8 @@ async function openProject(
 ): Promise<void> {
   await patchOpenDialog(app, projectPath)
   await page.getByRole('button', { name: '打开工程（Ctrl+O）', exact: true }).click()
-  await expect(page.locator('.workspace-document-tabs').getByRole('tab', { name: new RegExp(basename(projectPath)) }))
-    .toHaveAttribute('aria-selected', 'true')
+  await expect(page.locator('.workspace-document-tabs [role="tab"][aria-selected="true"]'))
+    .toContainText(basename(projectPath))
   await expect(page).toHaveTitle(APP_NAME)
 }
 
@@ -326,8 +326,8 @@ test('V9 current/full preview embeds local assets and leases declared origins pe
     const assetBRemoteBeforeOverlaySwitch = remoteImageRequestCount(assetB)
     await patchOpenDialog(app, projectBPath)
     await page.keyboard.press('Control+O')
-    await expect(page.locator('.workspace-document-tabs').getByRole('tab', { name: /^network-b\.h5lesson/ }))
-      .toHaveAttribute('aria-selected', 'true')
+    await expect(page.locator('.workspace-document-tabs [role="tab"][aria-selected="true"]'))
+      .toContainText('network-b.h5lesson')
     await expect(page).toHaveTitle(APP_NAME)
     await expect(page.getByTestId('course-preview-overlay')).toBeVisible()
     await expectOnlyLocalDataImages(fullPreviewImages, projectBPhotoDataUrl)
