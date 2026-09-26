@@ -18,6 +18,8 @@ export interface LessonWorkspaceShellProps {
   projectPath: string | null
   onOpenProject(path: string): Promise<boolean>
   onNewProject(): Promise<boolean>
+  /** A new H5 presentation made from a PPT (M21). */
+  onNewProjectFromPptx?(file: { name: string; bytes: Uint8Array }): Promise<boolean>
   renderAssistant?(root: string | null, documentTarget: ActiveDocumentTarget | undefined, isCourse: boolean, drainDocuments: () => Promise<boolean>): ReactNode
   renderMaterial?(path: string, lesson: LessonWorkspace | null): ReactNode
   renderMaterials?(lesson: LessonWorkspace): ReactNode
@@ -42,7 +44,7 @@ export interface LessonWorkspaceShellHandle {
 /** Composition and lifecycle bridge for the lesson workspace. Rendering and local writers live in dedicated modules. */
 export const LessonWorkspaceShell = forwardRef<LessonWorkspaceShellHandle, LessonWorkspaceShellProps>(function LessonWorkspaceShell(props, ref) {
   const tabs = useDocumentTabsController({ documentPort: props.documentPort, courseDocuments: props.courseDocuments })
-  const workspace = useLessonWorkspaceController({ lessonOperation: props.lessonOperation, projectPath: props.projectPath, onOpenProject: props.onOpenProject, onNewProject: props.onNewProject, tabs })
+  const workspace = useLessonWorkspaceController({ lessonOperation: props.lessonOperation, projectPath: props.projectPath, onOpenProject: props.onOpenProject, onNewProject: props.onNewProject, onNewProjectFromPptx: props.onNewProjectFromPptx, tabs })
   const shownWorkspace = useRef(workspace.state.workspace)
   useLayoutEffect(() => {
     if (shownWorkspace.current === workspace.state.workspace) return

@@ -1,15 +1,12 @@
 import {
-  Archive,
   ArrowLeft,
   Box,
   ChevronDown,
   Eye,
-  FileDown,
   FilePlus2,
   FileUp,
   FolderOpen,
   FileText,
-  Presentation,
   Pencil,
   Redo2,
   History,
@@ -20,6 +17,7 @@ import {
 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { useDismissableDetails } from './useDismissableDetails'
+import { ExportMenu, type ExportFormat } from './ExportMenu'
 import type { RecentProjectEntry } from '../../shared/ipcTypes'
 import type { CourseProjectHealthSummary } from '../../shared/courseProjectHealth'
 import { APP_NAME } from '../../shared/constants'
@@ -54,7 +52,7 @@ interface TopToolbarProps {
   onExport(format: ExportFormat, singleHtmlMode?: SingleHtmlExportMode): void
 }
 
-export type ExportFormat = 'single-html' | 'web-package' | 'pptx' | 'pdf' | 'docx'
+export type { ExportFormat } from './ExportMenu'
 
 interface ToolButtonProps {
   label: string
@@ -109,11 +107,10 @@ export function TopToolbar({
   const editorChrome = useCourseEditorChrome()
   // The toolbar's drop-down menus close on a click elsewhere or Escape, like the workbench menus.
   const newMenuRef = useRef<HTMLDetailsElement>(null), recentMenuRef = useRef<HTMLDetailsElement>(null)
-  const moreMenuRef = useRef<HTMLDetailsElement>(null), exportMenuRef = useRef<HTMLDetailsElement>(null)
+  const moreMenuRef = useRef<HTMLDetailsElement>(null)
   useDismissableDetails(newMenuRef)
   useDismissableDetails(recentMenuRef)
   useDismissableDetails(moreMenuRef)
-  useDismissableDetails(exportMenuRef)
   const dirty = useEditorStore(selectHasUnsavedCourseChanges)
   const canUndo = useEditorStore(selectCanUndoActiveSurface)
   const canRedo = useEditorStore(selectCanRedoActiveSurface)
@@ -334,108 +331,7 @@ export function TopToolbar({
       >
         <Eye size={18} />
       </ToolButton>
-      <details ref={exportMenuRef} className="export-menu">
-        <summary
-          className="tool-button tool-button--accent export-menu__trigger"
-          data-testid="export-menu-trigger"
-          title="导出"
-          aria-label="导出"
-          aria-disabled={busy}
-          onClick={(event) => {
-            if (busy) event.preventDefault()
-          }}
-        >
-          <span className="export-menu__trigger-icon">
-            <FileDown size={18} />
-            <ChevronDown size={11} />
-          </span>
-          <span>导出</span>
-        </summary>
-        <div className="export-menu__panel" role="menu" aria-label="选择导出格式">
-          <div className="export-menu__title">选择导出格式</div>
-          <button
-            type="button"
-            role="menuitem"
-            data-testid="export-single-html"
-            className="export-menu__item"
-            onClick={(event) => {
-              event.currentTarget.closest('details')?.removeAttribute('open')
-              onExport('single-html', 'offline-portable')
-            }}
-          >
-            <FileDown size={18} />
-            <span><strong>离线便携单 HTML</strong><small>资源全部内嵌，无网络也能使用，文件较大</small></span>
-          </button>
-          <button
-            type="button"
-            role="menuitem"
-            data-testid="export-single-html-online"
-            className="export-menu__item"
-            onClick={(event) => {
-              event.currentTarget.closest('details')?.removeAttribute('open')
-              onExport('single-html', 'online-lightweight')
-            }}
-          >
-            <FileDown size={18} />
-            <span><strong>在线轻量单 HTML</strong><small>保留已声明的远程素材地址，文件较小但依赖网络</small></span>
-          </button>
-          <button
-            type="button"
-            role="menuitem"
-            data-testid="export-web-package"
-            className="export-menu__item"
-            onClick={(event) => {
-              event.currentTarget.closest('details')?.removeAttribute('open')
-              onExport('web-package')
-            }}
-          >
-            <Archive size={18} />
-            <span><strong>网页包</strong><small>资源独立存放，推荐大型 H5 演示使用</small></span>
-          </button>
-          <button
-            type="button"
-            role="menuitem"
-            data-testid="export-pptx"
-            className="export-menu__item"
-            onClick={(event) => {
-              event.currentTarget.closest('details')?.removeAttribute('open')
-              onExport('pptx')
-            }}
-          >
-            <Presentation size={18} />
-            <span><strong>PowerPoint（PPTX）</strong><small>文字、图形、图片和组件为独立对象</small></span>
-          </button>
-          <button
-            type="button"
-            role="menuitem"
-            data-testid="export-pdf"
-            className="export-menu__item"
-            onClick={(event) => {
-              event.currentTarget.closest('details')?.removeAttribute('open')
-              onExport('pdf')
-            }}
-          >
-            <FileText size={18} />
-            <span><strong>PDF</strong><small>静态页面，互动组件将静态化</small></span>
-          </button>
-          <button
-            type="button"
-            role="menuitem"
-            data-testid="export-docx"
-            className="export-menu__item"
-            disabled={!hasFlowSurface}
-            title={hasFlowSurface ? undefined : '请先新增流式讲义页面'}
-            onClick={(event) => {
-              if (!hasFlowSurface) return
-              event.currentTarget.closest('details')?.removeAttribute('open')
-              onExport('docx')
-            }}
-          >
-            <FileText size={18} />
-            <span><strong>DOCX 讲义</strong><small>Flow 内容导出为可编辑 Word 文档</small></span>
-          </button>
-        </div>
-      </details>
+      <ExportMenu busy={busy} hasFlowSurface={hasFlowSurface} onExport={onExport} />
     </header>
   )
 }

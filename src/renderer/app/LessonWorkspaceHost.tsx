@@ -18,6 +18,7 @@ export interface LessonWorkspaceHostProps {
   prepareCourseDocuments?(): Promise<void>
   onOpenProject(path: string): Promise<boolean>
   onNewProject(): Promise<boolean>
+  onNewProjectFromPptx?(file: { name: string; bytes: Uint8Array }): Promise<boolean>
   onDirtyChange?(dirty: boolean): void
   onActiveDocumentChange?(active: { kind: 'document' | 'material' | 'course'; name: string } | null): void
   documents?: DocumentHostAPI

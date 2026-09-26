@@ -96,3 +96,24 @@ it('M21 moves optional commands into "⋯" on a narrow workbench instead of wrap
     expect(screen.getByRole('menuitem', { name: '重做' })).toBeEnabled()
   } finally { width.mockRestore(); vi.unstubAllGlobals() }
 })
+
+it('M21 puts 整课预览 and 导出 in the top bar, before the editor entry, with the editor’s export formats', () => {
+  const onPreview = vi.fn(), onExport = vi.fn()
+  mount({ onPreview, onExport, hasFlowSurface: false }, true)
+  const row = screen.getByLabelText('常用工具')
+  const order = [...row.querySelectorAll('button, summary')].map(element => element.getAttribute('aria-label') ?? element.textContent?.trim())
+  expect(order.indexOf('整课预览')).toBeGreaterThan(order.indexOf('插入'))
+  expect(order.indexOf('导出')).toBe(order.indexOf('整课预览') + 1)
+  expect(order.indexOf('在编辑器中打开')).toBeGreaterThan(order.indexOf('导出'))
+  fireEvent.click(screen.getByRole('button', { name: '整课预览' }))
+  expect(onPreview).toHaveBeenCalledOnce()
+  fireEvent.click(screen.getByTestId('light-export-menu-trigger'))
+  const formats = screen.getByRole('menu', { name: '选择导出格式' })
+  expect([...formats.querySelectorAll('[role="menuitem"] strong')].map(element => element.textContent)).toEqual(
+    ['离线便携单 HTML', '在线轻量单 HTML', '网页包', 'PowerPoint（PPTX）', 'PDF', 'DOCX 讲义'])
+  expect(screen.getByTestId('light-export-docx')).toBeDisabled()
+  fireEvent.click(screen.getByTestId('light-export-single-html'))
+  expect(onExport).toHaveBeenCalledWith('single-html', 'offline-portable')
+  // No project check in the workbench.
+  expect(screen.queryByRole('button', { name: /工程检查/ })).toBeNull()
+})

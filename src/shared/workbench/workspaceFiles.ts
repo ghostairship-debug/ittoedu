@@ -28,6 +28,19 @@ export interface WorkspaceMediaFile {
   mediaKind: 'image' | 'video' | 'audio'
 }
 
+/** A PowerPoint file in the workspace, read to make a new H5 presentation from it (M21). */
+export interface WorkspacePptxFile {
+  workspaceId: string
+  entryId: string
+  name: string
+  bytes: Uint8Array
+}
+
+/** Largest PPTX read for an import; the importer itself accepts the same size. */
+export const WORKSPACE_PPTX_MAX_BYTES = 32 * 1024 * 1024
+/** Largest ready-made H5 presentation a create-course request may carry. */
+export const WORKSPACE_COURSE_ARCHIVE_MAX_BYTES = 256 * 1024 * 1024
+
 export type WorkspaceListItem =
   | { status: 'accessible'; entryId: string; name: string; kind: WorkspaceEntryKind }
   | { status: 'blocked'; name: string; reason: 'outside-workspace' | 'unsupported-entry' }
@@ -73,12 +86,15 @@ const mutation = { ...scope, operationId: id }
 export const workspaceFilesRequestSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('root'), directory: z.string().min(1).max(32767) }).strict(),
   z.object({ type: z.literal('watch'), ...scope }).strict(),
-  z.object({ type: z.literal('create-course'), ...mutation, targetDirectoryId: id, name, canvas: slideCanvasSchema.optional() }).strict(),
+  // `archive` is a ready-made H5 presentation (e.g. made from a PPTX); main validates it before writing.
+  z.object({ type: z.literal('create-course'), ...mutation, targetDirectoryId: id, name, canvas: slideCanvasSchema.optional(),
+    archive: z.instanceof(Uint8Array).refine(bytes => bytes.byteLength <= WORKSPACE_COURSE_ARCHIVE_MAX_BYTES, 'H5 演示文件过大').optional() }).strict(),
   z.object({ type: z.literal('create-text'), ...mutation, targetDirectoryId: id, name }).strict(),
   z.object({ type: z.literal('import-files'), ...mutation, targetDirectoryId: id, directories: z.array(documentRelativePathSchema).max(256).optional(), files: z.array(z.object({ name: documentRelativePathSchema, bytes: z.instanceof(Uint8Array) }).strict()).max(32).refine(files => files.reduce((total, file) => total + file.bytes.byteLength, 0) <= 64 * 1024 * 1024, '拖入文件总计不能超过 64 MiB') }).strict(),
   z.object({ type: z.literal('list'), ...scope, directoryEntryId: id, cursor: z.string().optional(), limit: z.number().int().min(1).max(200).optional() }).strict(),
   z.object({ type: z.literal('resolve'), ...scope, entryId: id }).strict(),
   z.object({ type: z.literal('read-media'), ...scope, entryId: id }).strict(),
+  z.object({ type: z.literal('read-pptx'), ...scope, entryId: id }).strict(),
   z.object({ type: z.literal('create-markdown'), ...mutation, targetDirectoryId: id, name }).strict(),
   z.object({ type: z.literal('mkdir'), ...mutation, targetDirectoryId: id, name }).strict(),
   z.object({ type: z.literal('rename'), ...mutation, sourceEntryId: id, name }).strict(),
@@ -91,7 +107,7 @@ export type WorkspaceFilesRequest = z.infer<typeof workspaceFilesRequestSchema>
 export type WorkspaceFilesResponse<T extends WorkspaceFilesRequest> = T extends { type: 'root' } ? RegisteredWorkspaceRoot
   : T extends { type: 'watch' } ? { workspaceId: string; watching: boolean }
   : T extends { type: 'list' } ? WorkspaceListPage : T extends { type: 'resolve' } ? ResolvedWorkspaceEntry
-  : T extends { type: 'read-media' } ? WorkspaceMediaFile : WorkspaceOperationResult
+  : T extends { type: 'read-media' } ? WorkspaceMediaFile : T extends { type: 'read-pptx' } ? WorkspacePptxFile : WorkspaceOperationResult
 export interface WorkspaceFilesChange { workspaceId: string }
 export interface WorkspaceFilesAPI {
   subscribe?(listener: (event: WorkspaceFilesChange) => void): () => void

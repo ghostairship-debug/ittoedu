@@ -4,12 +4,14 @@ import type { LessonDesktopRequest, LessonDesktopResult, LessonDirectoryEntry } 
 import { normalizeWorkspacePath, sameWorkspacePath } from '../../../shared/workspaceIdentity'
 import { lessonProjectPath } from '../lessonConversationSelection'
 import type { DocumentTabsController } from './useDocumentTabsController'
+import { WORKSPACE_PPTX_MAX_BYTES } from '../../../shared/workbench/workspaceFiles'
 
 export interface LessonWorkspaceControllerProps {
   lessonOperation(request: LessonDesktopRequest): Promise<LessonDesktopResult>
   projectPath: string | null
   onOpenProject(path: string): Promise<boolean>
   onNewProject(): Promise<boolean>
+  onNewProjectFromPptx?(file: { name: string; bytes: Uint8Array }): Promise<boolean>
   tabs: DocumentTabsController
 }
 
@@ -175,10 +177,17 @@ export function useLessonWorkspaceController(props: LessonWorkspaceControllerPro
     await stopAndFlush()
     if (await props.onNewProject()) { detachLesson() }
   }
+  async function newCourseFromPptx(file: File) {
+    if (!props.onNewProjectFromPptx) throw new Error('当前界面不能从 PPT 新建 H5 演示')
+    if (file.size > WORKSPACE_PPTX_MAX_BYTES) throw new Error('PPTX 不能超过 32 MiB')
+    const bytes = new Uint8Array(await file.arrayBuffer())
+    await stopAndFlush()
+    if (await props.onNewProjectFromPptx({ name: file.name, bytes })) { detachLesson() }
+  }
   return {
     state: { workspace, standalone, recent, selectedDirectory, lessons, lesson, name, creating, error, busy, treeVersion, explorerOpen, mobilePane, projects, activeDirectory, projectFolder, projectName, projectNotice },
     actions: {
-      newCourse: newStandaloneProject, run, openWorkspace, activate, createLesson, openFile, newStandaloneProject, detachLesson, showProject,
+      newCourse: newStandaloneProject, newCourseFromPptx, run, openWorkspace, activate, createLesson, openFile, newStandaloneProject, detachLesson, showProject,
       loadProjects, createLessonProject, removeProject, pickProjectFolder, cancelProjectPick, openDirectoryContext,
       setSelectedDirectory, setName, setCreating, refreshTree: () => { if (workspace) { setSelectedDirectory(workspace); setTreeVersion(value => value + 1) } },
       setExplorerOpen, setMobilePane,

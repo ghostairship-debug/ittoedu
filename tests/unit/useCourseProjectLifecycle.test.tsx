@@ -6,6 +6,7 @@ import {
   type CourseProjectLifecycleWatch,
 } from '../../src/renderer/app/useCourseProjectLifecycle'
 import { createCourseDocumentHost, deferred, type CourseDocumentTestHost } from '../helpers/courseDocumentHost'
+import { createBlankCourseProject } from '../../src/core/course/createCourseProject'
 
 const WATCH: CourseProjectLifecycleWatch = {
   dirty: false, projectTitle: '课件', projectPath: null,
@@ -59,6 +60,25 @@ describe('useCourseProjectLifecycle main document sessions', () => {
     expect(current.model).toMatchObject({ project: { locations: [{ kind }] } })
     expect(host.registry.get(previous.documentId).read()).toEqual(previous)
     expect(ports.onProjectReplaced).toHaveBeenCalledOnce()
+  })
+
+  it('M21 newProjectFrom opens content built first (e.g. from a PPT) as a separate untitled document', async () => {
+    const host = await createCourseDocumentHost()
+    const previous = host.read()
+    const { result, ports } = await mount(host)
+    const project = createBlankCourseProject({ title: '第一课', includeDefaultController: false, controls: 'none' })
+    await act(async () => { expect(await result.current.newProjectFrom(async () => ({ project, assetFiles: {}, componentPackages: {} }), { origin: 'lesson' })).toBe(true) })
+    const current = host.read()
+    expect(current.documentId).not.toBe(previous.documentId)
+    expect(current).toMatchObject({ binding: { kind: 'untitled', suggestedName: '第一课.h5lesson' }, dirty: true, undoDepth: 0 })
+    expect(current.model).toMatchObject({ project: { title: '第一课' } })
+    expect(host.registry.get(previous.documentId).read()).toEqual(previous)
+    // Made from the work area: the lesson stays attached.
+    expect(ports.onProjectReplaced).not.toHaveBeenCalled()
+    // Content that cannot be built (an unreadable PPT) leaves the open document as it was.
+    await act(async () => { expect(await result.current.newProjectFrom(async () => { throw new Error('PPTX 无法导入') })).toBe(false) })
+    expect(host.read().documentId).toBe(current.documentId)
+    expect(ports.reportError).toHaveBeenCalledWith('PPTX 无法导入')
   })
 
   it('opens the chosen path through main and reselects the same live History for recent opens', async () => {

@@ -4,6 +4,7 @@ import { createBlankCourseProject } from '../../src/core/course/createCourseProj
 import { createBlankFlowCourseProject } from '../../src/renderer/project/createFlowCourseProject'
 import { createBlankSpatialCourseProject } from '../../src/renderer/project/createSpatialCourseProject'
 import type { CourseProjectLifecyclePorts } from '../../src/renderer/app/useCourseProjectLifecycle'
+import { componentPackagesToArchiveFiles } from '../../src/renderer/components/componentPackageStore'
 import type { DocumentModel, DocumentPersistence, DurableDocumentState } from '../../src/shared/workbench/document'
 
 export function deferred<T = void>() {
@@ -53,6 +54,11 @@ export async function createCourseDocumentHost() {
     async ready() {}, snapshot: read,
     async create(surface) {
       const session = await registry.create(model(surface, `new ${surface}`), `new-${surface}.h5lesson`)
+      select(session.documentId)
+    },
+    async createFrom(content) {
+      const session = await registry.create({ kind: 'course-v9', project: content.project,
+        resources: { assets: content.assetFiles, components: componentPackagesToArchiveFiles(content.componentPackages) } }, `${content.project.title}.h5lesson`)
       select(session.documentId)
     },
     async open(path) {

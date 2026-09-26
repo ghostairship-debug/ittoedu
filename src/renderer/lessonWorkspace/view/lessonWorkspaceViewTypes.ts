@@ -40,6 +40,7 @@ export interface LessonWorkspaceViewProps {
     openFile(entry: LessonDirectoryEntry): Promise<void>;
     newStandaloneProject(): Promise<void>;
     newCourse(): Promise<void>;
+    newCourseFromPptx(file: File): Promise<void>;
     setSelectedDirectory(value: string | null): void;
     setName(value: string): void;
     setCreating(value: boolean): void;

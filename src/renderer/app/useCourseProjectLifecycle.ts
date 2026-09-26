@@ -56,11 +56,20 @@ export interface CourseProjectOpenedLoad {
   readonly statusMessage?: string
 }
 
+/** The content of a course that does not exist yet as a document. */
+export interface CourseProjectContent {
+  project: CourseProjectDocument
+  assetFiles: Record<string, Uint8Array>
+  componentPackages: Record<string, ComponentPackageData>
+}
+
 export interface CourseProjectLifecyclePorts<TDraftToken = unknown> {
   documents?: {
     ready(): Promise<void>
     snapshot(): DocumentSnapshot | null
     create(surface: 'slide' | 'flow' | 'spatial', canvas?: SlideCanvasSize): Promise<void>
+    /** A new untitled course with given content, e.g. made from a PPT (M21). */
+    createFrom?(content: CourseProjectContent): Promise<void>
     open(path: string): Promise<void>
     save(saveAs?: boolean): Promise<DocumentSnapshot | null>
     drain(): Promise<DocumentSnapshot>
@@ -126,6 +135,8 @@ export interface CourseProjectReplacementOptions extends CourseProjectOperationO
 export interface CourseProjectLifecycleApi {
   readonly recentProjects: RecentProjectEntry[]
   newProject(options?: CourseProjectReplacementOptions): Promise<boolean>
+  /** A new untitled course whose content `make` builds first (it may fail, e.g. on an unreadable PPT). */
+  newProjectFrom(make: () => Promise<CourseProjectContent>, options?: CourseProjectReplacementOptions): Promise<boolean>
   newSpatialProject(options?: CourseProjectReplacementOptions): Promise<boolean>
   newFlowProject(options?: CourseProjectReplacementOptions): Promise<boolean>
   openProject(): void
@@ -169,6 +180,12 @@ export function useCourseProjectLifecycle<TDraftToken>(ports: CourseProjectLifec
     return result === true
   }, [refresh])
   const newProject = useCallback((options?: CourseProjectReplacementOptions) => replace(() => service().create('slide', options?.canvas), options), [replace])
+  const newProjectFrom = useCallback((make: () => Promise<CourseProjectContent>, options?: CourseProjectReplacementOptions) => replace(async () => {
+    const content = await make()
+    const create = service().createFrom
+    if (!create) throw new Error('当前界面不能从已有内容新建 H5 演示')
+    await create(content)
+  }, options), [replace])
   const newFlowProject = useCallback((options?: CourseProjectReplacementOptions) => replace(() => service().create('flow'), options), [replace])
   const newSpatialProject = useCallback((options?: CourseProjectReplacementOptions) => replace(() => service().create('spatial'), options), [replace])
   const openProject = useCallback(() => { void replace(async () => {
@@ -218,5 +235,5 @@ export function useCourseProjectLifecycle<TDraftToken>(ports: CourseProjectLifec
   }, [])
   useEffect(() => ref.current.desktopAvailable() ? ref.current.subscribeSaveAndCloseRequest(() => prepareBeforeClose('save')) : undefined, [prepareBeforeClose])
   useEffect(() => ref.current.desktopAvailable() ? ref.current.subscribePreserveAndCloseRequest?.(() => prepareBeforeClose('preserve')) : undefined, [prepareBeforeClose])
-  return { recentProjects, newProject, newFlowProject, newSpatialProject, openProject, openRecentProject, saveProject }
+  return { recentProjects, newProject, newProjectFrom, newFlowProject, newSpatialProject, openProject, openRecentProject, saveProject }
 }

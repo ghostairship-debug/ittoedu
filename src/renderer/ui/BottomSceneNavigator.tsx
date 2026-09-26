@@ -336,10 +336,10 @@ export function BottomSceneNavigator({ documentId }: { documentId: string | null
           data-current-card={active} data-kind={card.kind} data-testid={`bottom-page-${card.key}`}
           onContextMenu={event => openMenu(event, '页面操作', cardCommands(card))} {...dragProps(card)}>
           <button type="button" className="bottom-scene-card__main" aria-current={active ? 'page' : undefined}
-            aria-label={`${card.kind === 'flow' ? 'Flow' : 'Spatial'} 页面 ${card.number}：${card.page.label}`}
+            aria-label={`${card.kind === 'flow' ? '流式讲义' : '无限画布'} ${card.number}：${card.page.label}`}
             onClick={() => goTo(card.page.locationId)}>
             <span className="bottom-scene-card__surface-mark" aria-hidden="true">{card.kind === 'flow' ? '文' : '空'}</span>
-            <span className="bottom-scene-card__identity"><small>{String(card.number).padStart(2, '0')} · {card.kind === 'flow' ? 'Flow 页面' : 'Spatial 页面'}</small>{!renamingCard && <strong title={card.page.label}>{card.page.label}</strong>}</span>
+            <span className="bottom-scene-card__identity"><small>{String(card.number).padStart(2, '0')} · {card.kind === 'flow' ? '流式讲义' : '无限画布'}</small>{!renamingCard && <strong title={card.page.label}>{card.page.label}</strong>}</span>
           </button>
           {renamingCard && <RenameField label="页面名称" value={card.page.label} onCommit={name => { setRenaming(null); renameCard(card, name) }} onCancel={() => setRenaming(null)} />}
           <div className="bottom-scene-card__children" role="group" aria-label={`${card.page.label}的${card.kind === 'flow' ? '标题与章节' : '世界与镜头'}`}>

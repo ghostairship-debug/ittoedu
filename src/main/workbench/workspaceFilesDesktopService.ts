@@ -1,10 +1,12 @@
 import path from 'node:path'
+import { createHash } from 'node:crypto'
 import { promises as fs } from 'node:fs'
-import { workspaceFilesRequestSchema, type RegisteredWorkspaceRoot, type WorkspaceFilesAPI, type WorkspaceFilesChange, type WorkspaceItemResult, type WorkspaceOperationResult } from '../../shared/workbench/workspaceFiles'
+import { WORKSPACE_PPTX_MAX_BYTES, workspaceFilesRequestSchema, type RegisteredWorkspaceRoot, type WorkspaceFilesAPI, type WorkspaceFilesChange, type WorkspaceItemResult, type WorkspaceOperationResult } from '../../shared/workbench/workspaceFiles'
+import { UserFacingError } from '../../shared/errors'
 import type { WorkspaceFiles } from './WorkspaceFiles'
 import { createBlankCourseProject } from '../../core/course/createCourseProject'
 import { createDefaultTeacherControllerPackage } from '../../shared/defaultTeacherControllerComponent'
-import { createCourseProjectArchive } from '../../core/drivers/codecs/courseProjectArchive'
+import { createCourseProjectArchive, openCourseProjectArchive } from '../../core/drivers/codecs/courseProjectArchive'
 import { readWorkspaceMediaSelection } from '../fileDialogs'
 
 const pathKey = (value: string) => process.platform === 'win32' ? path.resolve(value).toLowerCase() : path.resolve(value)
@@ -106,20 +108,37 @@ export class WorkspaceFilesDesktopService {
         if (current.kind !== 'file' || pathKey(current.resolvedPath) !== pathKey(resolved.resolvedPath)) throw new Error('媒体文件已变化，请重新拖入')
         return { workspaceId: input.workspaceId, entryId: input.entryId, ...media }
       }
+      case 'read-pptx': {
+        const resolved = await this.files.resolveEntry(input.workspaceId, input.entryId)
+        if (resolved.kind !== 'file' || !/\.pptx$/i.test(resolved.resolvedPath)) throw new Error('只能把 .pptx 文件导入为 H5 演示')
+        const stat = await fs.stat(resolved.resolvedPath)
+        if (stat.size > WORKSPACE_PPTX_MAX_BYTES) throw new UserFacingError('PPT 导入失败', 'PPTX 不能超过 32 MiB。', '请压缩图片或拆分演示文稿后再导入。')
+        const bytes = new Uint8Array(await fs.readFile(resolved.resolvedPath))
+        const current = await this.files.resolveEntry(input.workspaceId, input.entryId)
+        if (current.kind !== 'file' || pathKey(current.resolvedPath) !== pathKey(resolved.resolvedPath)) throw new Error('PPT 文件已变化，请重新选择')
+        return { workspaceId: input.workspaceId, entryId: input.entryId, name: path.basename(resolved.resolvedPath), bytes }
+      }
       case 'create-markdown': return this.files.createFile({ ...input, format: 'markdown', bytes: Buffer.from(`# ${input.name.replace(/\.md$/i, '')}\n\n`, 'utf8') })
       case 'create-text': {
         if (/\.h5lesson$/i.test(input.name)) throw new Error('H5 演示请使用“新建 H5 演示”，不能创建空的 .h5lesson 文件')
         return this.files.createFile({ ...input, format: 'file', bytes: new Uint8Array() })
       }
       case 'create-course': {
-        const identity = JSON.stringify(input), old = this.preparedCourses.get(input.operationId)
+        // The ready-made file is identified by its digest; its bytes never enter the operation record.
+        const { archive, ...request } = input
+        const identity = JSON.stringify(archive ? { ...request, archive: createHash('sha256').update(archive).digest('hex') } : request)
+        const old = this.preparedCourses.get(input.operationId)
         if (old && old.input !== identity) throw new Error('同一文件操作不能改变参数')
-        if (!old) {
+        if (!old && archive) {
+          // Only a valid V9 H5 presentation is written; anything else fails here, before the file exists.
+          try { openCourseProjectArchive(archive) } catch { throw new UserFacingError('无法新建 H5 演示', '转换得到的文件不是有效的 H5 演示。', '请重新选择 PPT 后再试。') }
+          this.preparedCourses.set(input.operationId, { input: identity, bytes: Uint8Array.from(archive) })
+        } else if (!old) {
           const project = createBlankCourseProject({ title: input.name.replace(/\.h5lesson$/i, ''), canvas: input.canvas })
           const component = createDefaultTeacherControllerPackage()
           this.preparedCourses.set(input.operationId, { input: identity, bytes: createCourseProjectArchive({ project, assetFiles: {}, componentFiles: { [`${component.manifest.id}@${component.manifest.version}`]: component.files } }) })
         }
-        return this.files.createFile({ ...input, format: 'course-v9', bytes: this.preparedCourses.get(input.operationId)!.bytes })
+        return this.files.createFile({ ...request, format: 'course-v9', bytes: this.preparedCourses.get(input.operationId)!.bytes })
       }
       case 'import-files': {
         const items: WorkspaceItemResult[] = [], directories = new Map<string, string>([['', input.targetDirectoryId]])

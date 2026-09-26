@@ -7,6 +7,7 @@ import type { LessonWorkspace } from '../../../shared/lessonWorkspace'
 import { WorkspaceDocumentTabs } from './WorkspaceDocumentTabs'
 import { WorkspaceDocumentStatus } from './WorkspaceDocumentStatus'
 import { LessonDocumentEditor } from '../../documentFiles/LessonDocumentEditor'
+import { usePptxPicker } from './usePptxPicker'
 function relativeFile(lesson: LessonWorkspace, filename: string) {
   const root = lesson.identity.normalizedDirectory.replace(/[\\/]$/, "");
   const lower = (value: string) => value.replace(/\\/g, "/").toLowerCase();
@@ -24,6 +25,9 @@ export function WorkspaceContentHost({ props, layout, editorFocus, enterEditor, 
     tabs.tabs.find((tab) => tab.id === tabs.activeTab) ?? null;
   const chrome = useContentEditorMode(activeFileTab?.documentId ?? null, editorFocus, enterEditor, exitEditor);
   const showDocumentHeader = activeFileTab?.kind === 'material' && !editorFocus;
+  const pptx = usePptxPicker(file => {
+    void actions.run(async () => { await actions.newCourseFromPptx(file); layout.setContentClosed(false); actions.setMobilePane('workbench') });
+  });
   const openActiveExternal = async () => {
     if (!activeFileTab) return;
     setExternalNotice(null);
@@ -71,13 +75,15 @@ export function WorkspaceContentHost({ props, layout, editorFocus, enterEditor, 
           {externalNotice}
         </p>
       )}
-      <WorkspaceDocumentTabs props={props} layout={layout} hidden={editorFocus} />
+      <WorkspaceDocumentTabs props={props} layout={layout} hidden={editorFocus} onNewFromPptx={pptx.pick} />
+      {pptx.element}
       {tabs.tabs.length === 0 && <section className="lesson-workbench-empty" aria-label="没有打开的文件">
         <h2>从一份文档开始</h2>
         <p>新建文档或打开文件夹；会话可以独立继续。</p>
         <div className="lesson-chat-empty-actions">
           <button type="button" onClick={() => void actions.run(() => tabs.createMarkdown())}>新建 Markdown</button>
           <button type="button" onClick={() => void actions.run(actions.newCourse)}>新建 H5 演示</button>
+          <button type="button" disabled={state.busy} onClick={pptx.pick}>从 PPT 新建 H5 演示</button>
           <button type="button" onClick={() => void actions.run(() => actions.openWorkspace())}>打开文件夹</button>
         </div>
       </section>}

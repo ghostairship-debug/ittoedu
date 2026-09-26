@@ -570,6 +570,8 @@ export type EditorState =
       activateCourseDocument(documentId: string): Promise<void>
       closeCourseDocument(documentId: string): Promise<boolean>
       createCourseDocument(surface: 'slide' | 'flow' | 'spatial', canvas?: import('../../shared/slideCanvas').SlideCanvasSize): Promise<void>
+      /** A new untitled H5 presentation with this content, e.g. made from a PPT (M21). */
+      createCourseDocumentFrom(project: CourseProjectDocument, assetFiles: Record<string, Uint8Array>, componentPackages: Record<string, ComponentPackageData>): Promise<void>
       openCourseDocument(path: string): Promise<void>
       drainCourseDocument(): Promise<DocumentSnapshot>
       drainAllCourseDocuments(): Promise<DocumentSnapshot[]>
@@ -1319,6 +1321,9 @@ export const useEditorStore = create<EditorState>((set, get) => {
       const factory = surface === 'slide' ? () => createBlankCourseProject({ canvas }) : surface === 'flow' ? createBlankFlowCourseProject : createBlankSpatialCourseProject
       const bundle = withDefaultComponentController(factory())
       await documents.create(courseViewModel({ courseAssetSidecar: emptyCourseAssetSidecar(), componentPackages: bundle.componentPackages }, bundle.project), `${bundle.project.title}.h5lesson`)
+    },
+    async createCourseDocumentFrom(project, assetFiles, componentPackages) {
+      await documents.create(courseViewModel({ courseAssetSidecar: freezeCourseAssetSidecar(assetFiles), componentPackages }, project), `${project.title}.h5lesson`)
     },
     createNewProject(canvas?: import('../../shared/slideCanvas').SlideCanvasSize) { void get().createCourseDocument('slide', canvas).catch(error => write({ errorMessage: String(error) })) },
     createNewFlowProject() { void get().createCourseDocument('flow').catch(error => write({ errorMessage: String(error) })) },

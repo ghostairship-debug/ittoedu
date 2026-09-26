@@ -70,6 +70,7 @@ import { EditorPanelLayout } from './ui/EditorPanelLayout'
 import { createMaterialCitationRequest } from './authoring/tools/materialCitationRequest'
 import type { ProductivityContext } from './authoring/productivity'
 import { resolveCourseProjectDiagnosticTargetRoute } from './diagnostics/projectHealthNavigation'
+import { createCourseFromPptx, pptxCourseStem } from './project/pptxCourseCreation'
 
 function desktopApi() {
   if (!window.desktopAPI) {
@@ -126,6 +127,7 @@ export default function App() {
   const [projectHealthOpen, setProjectHealthOpen] = useState(false)
   const [materialsOpen, setMaterialsOpen] = useState(false)
   const [designTool, setDesignTool] = useState<{ kind: 'recipe' | 'productivity' | 'pptx'; context: ProductivityContext } | null>(null)
+  const hasFlowSurface = useEditorStore(state => Boolean(selectActiveCourseProjectDocument(state)?.surfaces.some(surface => surface.type === 'flow')))
   const openDesignTool = (kind: 'recipe' | 'productivity' | 'pptx') => {
     const context = useEditorStore.getState().prepareDesignProduction()
     if (context) setDesignTool({ kind, context })
@@ -261,6 +263,7 @@ export default function App() {
       },
       snapshot: () => useEditorStore.getState().courseDocument.snapshot,
       create: (surface, canvas) => useEditorStore.getState().createCourseDocument(surface, canvas),
+      createFrom: content => useEditorStore.getState().createCourseDocumentFrom(content.project, content.assetFiles, content.componentPackages),
       open: path => useEditorStore.getState().openCourseDocument(path),
       save: saveAs => useEditorStore.getState().saveCourseDocument(saveAs),
       drain: () => useEditorStore.getState().drainCourseDocument(),
@@ -315,6 +318,18 @@ export default function App() {
     flowDraftTrigger: flowDocumentDraft ?? flowTextEdit,
     textEditTrigger: undefined,
   })
+  // The work area's "从 PPT 新建 H5 演示": a new untitled H5 presentation holding the PPT's pages (M21).
+  const newProjectFromPptx = async ({ name, bytes }: { name: string; bytes: Uint8Array }) => {
+    const title = pptxCourseStem(name)
+    let issues = 0
+    const created = await courseProjectLifecycle.newProjectFrom(async () => {
+      const course = await createCourseFromPptx(bytes, title)
+      issues = course.issues.length
+      return course
+    }, { origin: 'lesson' })
+    if (created) setStatus(issues ? `已从 PPT 新建 H5 演示「${title}」；${issues} 项内容未保留或已简化` : `已从 PPT 新建 H5 演示「${title}」`)
+    return created
+  }
 
   useEffect(() => window.desktopAPI?.onRequestSave(() => {
     void (async () => {
@@ -568,7 +583,7 @@ export default function App() {
         const snapshot = await useEditorStore.getState().drainCourseDocument()
         return [captureDocumentReference(snapshot, writable)]
       }}
-      onOpenProject={path => courseProjectLifecycle.openRecentProject(path, { origin: 'lesson' })} onNewProject={() => courseProjectLifecycle.newProject({ origin: 'lesson' })} onDirtyChange={setLessonDirty} onActiveDocumentChange={setActiveWorkspaceDocument}
+      onOpenProject={path => courseProjectLifecycle.openRecentProject(path, { origin: 'lesson' })} onNewProject={() => courseProjectLifecycle.newProject({ origin: 'lesson' })} onNewProjectFromPptx={newProjectFromPptx} onDirtyChange={setLessonDirty} onActiveDocumentChange={setActiveWorkspaceDocument}
 >
     <CourseEditorFrame lightTools={<CourseLightToolbar
       documentId={courseConnection.documentId}
@@ -619,6 +634,8 @@ export default function App() {
         : mediaImport.selectAndImportAudio()) }}
       insertSurface={insertSurface} editingScope={editingScope} spatialScope={spatialInsertScope}
       mode={courseCanvasMode}
+      busy={busy} hasFlowSurface={hasFlowSurface}
+      onPreview={courseDelivery.openPreview} onExport={courseDelivery.exportCourse}
       reportError={setError} />}>
       <CourseAdvancedChrome><TopToolbar
         busy={busy}

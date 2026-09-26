@@ -27,3 +27,8 @@
 
 .app-main.editor-panel-layout--light:has(> .course-chat) { grid-template-columns: minmax(0, 1fr); }
 .app-main.editor-panel-layout--light > .course-chat { display: none; }
+/* M21: 导出 in the light toolbar opens the editor's format list under a plain toolbar-style trigger. */
+.course-light-tools .export-menu--light { flex: none; }
+.course-light-tools .export-menu__trigger--light { display: inline-flex; align-items: center; gap: 3px; box-sizing: border-box; min-height: 30px; padding: 0 12px; border: 1px solid var(--border, #d9d6ce); border-radius: 8px; background: var(--surface, #fffefa); color: var(--ink, #17221d); white-space: nowrap; cursor: pointer; user-select: none; }
+.course-light-tools .export-menu--light[open] > .export-menu__trigger--light { background: var(--surface-muted, #ece9e1); color: var(--ink, #17221d); }
+.course-light-tools .export-menu--light .export-menu__panel { top: calc(100% + 5px); }

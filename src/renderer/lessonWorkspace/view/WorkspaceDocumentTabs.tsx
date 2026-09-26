@@ -2,7 +2,10 @@ import { useState } from 'react'
 import type { LessonWorkspaceViewProps } from './lessonWorkspaceViewTypes'
 import type { WorkbenchLayoutController } from './useWorkbenchLayoutPrefs'
 import type { LessonFileTab } from '../controller/useDocumentTabsController'
-export function WorkspaceDocumentTabs({ props, layout, hidden = false }: { props: LessonWorkspaceViewProps; layout: WorkbenchLayoutController; hidden?: boolean }) {
+import { useContextMenu } from '../../editing/commands/CommandMenu'
+import { dispatchRevealInExplorer } from '../../workbench/revealInExplorer'
+import { documentTabCommands } from './documentTabCommands'
+export function WorkspaceDocumentTabs({ props, layout, hidden = false, onNewFromPptx }: { props: LessonWorkspaceViewProps; layout: WorkbenchLayoutController; hidden?: boolean; onNewFromPptx?(): void }) {
  const { state, actions, tabs } = props;
  const [newTabMenuOpen, setNewTabMenuOpen] = useState(false);
  const [newDocName, setNewDocName] = useState('');
@@ -12,6 +15,28 @@ export function WorkspaceDocumentTabs({ props, layout, hidden = false }: { props
    await tabs.createMarkdown(newDocName.trim() || undefined)
    revealContent(); setNewDocName(''); setNewTabMenuOpen(false)
  }
+ const tabMenu = useContextMenu();
+ // Closing stops at the first tab that asks the teacher to keep a draft.
+ const closeTabs = (targets: readonly LessonFileTab[]) => {
+   void actions.run(async () => { for (const target of targets) if (!(await tabs.closeTab(target))) return });
+ };
+ const openTabMenu = (at: { x: number; y: number }, tab: LessonFileTab, index: number) => {
+   const all = [...tabs.tabs];
+   tabMenu.open(at, `${tabLabels[index]} 标签菜单`, documentTabCommands({ index, count: all.length, saved: Boolean(tab.path) }, {
+     close: () => closeTabs([tab]),
+     closeOthers: () => closeTabs(all.filter(other => other.id !== tab.id)),
+     closeRight: () => closeTabs(all.slice(index + 1)),
+     closeAll: () => closeTabs(all),
+     copyPath: () => { void navigator.clipboard.writeText(tab.path).catch(() => {}) },
+     reveal: () => dispatchRevealInExplorer({ path: tab.path, kind: 'file' }),
+     openExternal: () => {
+       void actions.run(async () => {
+         const result = await props.operation({ operation: 'open-external', path: tab.path });
+         if (result.opened === false) throw new Error(`无法用系统应用打开 ${tab.name}：${result.openError ?? '没有可用的关联程序'}`);
+       });
+     },
+   }));
+ };
 
  return (
       <div className="workspace-document-tabs" hidden={hidden}>
@@ -33,6 +58,7 @@ export function WorkspaceDocumentTabs({ props, layout, hidden = false }: { props
             label={tabLabels[index]!}
             active={tabs.activeTab === tab.id}
             onSelect={() => { tabs.setActiveTab(tab.id); revealContent() }}
+            onMenu={at => openTabMenu(at, tab, index)}
             onClose={() => {
               void actions.run(async () => {
                 await tabs.closeTab(tab);
@@ -89,8 +115,19 @@ export function WorkspaceDocumentTabs({ props, layout, hidden = false }: { props
             >
               新建 H5 演示
             </button>
+            {onNewFromPptx && <button
+              type="button"
+              disabled={state.busy}
+              onClick={() => {
+                setNewTabMenuOpen(false);
+                onNewFromPptx();
+              }}
+            >
+              从 PPT 新建 H5 演示
+            </button>}
           </div>
         </details>
+        {tabMenu.element}
       </div>
  );
 }
@@ -100,15 +137,17 @@ function TabButton({
   active,
   onSelect,
   onClose,
+  onMenu,
 }: {
   tab: LessonFileTab;
   label: string;
   active: boolean;
   onSelect(): void;
   onClose(): void;
+  onMenu(at: { x: number; y: number }): void;
 }) {
   return (
-    <span className="lesson-workbench-tab">
+    <span className="lesson-workbench-tab" onContextMenu={event => { event.preventDefault(); onMenu({ x: event.clientX, y: event.clientY }) }}>
       <button
         type="button"
         role="tab"

@@ -23,6 +23,11 @@ export function computeDefaultName(type: CreateFileType, existingItems: Workspac
       ext = ''
       break
   }
+  return uniqueFilename(base, ext, existingItems)
+}
+
+/** `base` + `ext`, numbered "base (2)ext", "base (3)ext"… past the names already in the folder. */
+export function uniqueFilename(base: string, ext: string, existingItems: WorkspaceListItem[] = []): string {
   const existingNames = new Set(existingItems.map(item => item.name.toLowerCase()))
   let candidate = ext ? `${base}${ext}` : base
   if (!existingNames.has(candidate.toLowerCase())) {

@@ -1,14 +1,15 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type MouseEvent, type DragEvent } from 'react'
 import { ChevronRight, File, FileText, Folder, FolderOpen, Presentation } from 'lucide-react'
 import type { LessonDirectoryEntry } from '../../../shared/lessonDesktopContract'
-import type { RegisteredWorkspaceRoot, WorkspaceFilesAPI, WorkspaceFilesRequest, WorkspaceListItem, WorkspaceOperationResult } from '../../../shared/workbench/workspaceFiles'
+import { WORKSPACE_PPTX_MAX_BYTES, type RegisteredWorkspaceRoot, type WorkspaceFilesAPI, type WorkspaceFilesRequest, type WorkspaceListItem, type WorkspaceOperationResult } from '../../../shared/workbench/workspaceFiles'
 import type { SaveDirectoryContext } from '../../../shared/workbench/desktop'
 import './WorkspaceFilesTree.css'
-import { computeDefaultName, normalizeNewFilename, getStemSelectionRange, type CreateFileType } from '../workspaceFilesNaming'
+import { computeDefaultName, normalizeNewFilename, getStemSelectionRange, uniqueFilename, type CreateFileType } from '../workspaceFilesNaming'
 import { REVEAL_IN_EXPLORER_EVENT, takePendingReveal, type RevealInExplorerDetail } from '../../workbench/revealInExplorer'
 import { SLIDE_CANVAS_PRESETS } from '../../../shared/slideCanvas'
 import { snapshotWorkspaceDrop } from './workspaceDropFiles'
 import { parseWorkspaceEntryDrag, WORKSPACE_ENTRIES_DRAG_TYPE, writeWorkspaceEntryDrag } from '../workspaceMediaDrag'
+import { createCourseFromPptx, pptxCourseArchive, pptxCourseStem } from '../../project/pptxCourseCreation'
 
 type Entry = Extract<WorkspaceListItem, { status: 'accessible' }>
 type Dialog = 'create-markdown' | 'create-course' | 'create-text' | 'mkdir' | 'rename' | 'copy' | 'move' | 'trash'
@@ -40,6 +41,8 @@ export function WorkspaceFilesTree({ directory, files, refreshVersion = 0, onFil
   const pagesRef = useRef(pages); pagesRef.current = pages
   const buttons = useRef(new Map<string, HTMLButtonElement>())
   const createMenu = useRef<HTMLDetailsElement>(null)
+  // "从 PPT 新建 H5 演示" picks a file here and writes the new presentation into the folder chosen when it was asked for.
+  const pptxInput = useRef<HTMLInputElement>(null), pptxTarget = useRef<string | undefined>(undefined)
   // The pane clips its content, so the create options open at a fixed window position.
   const [createAt, setCreateAt] = useState<{ left: number; top: number }>()
   const dialogRef = useRef<HTMLElement>(null), dialogReturnFocus = useRef<HTMLElement | null>(null)
@@ -267,10 +270,33 @@ export function WorkspaceFilesTree({ directory, files, refreshVersion = 0, onFil
           }
         }
       }
+      return result
     } catch (reason) { if (generation === epoch.current) setError(message(reason)) }
     finally { lock.current = false; if (generation === epoch.current) setBusy(false) }
   }
   const common = () => ({ operationId: crypto.randomUUID(), workspaceId: root!.workspaceId })
+  // A new H5 presentation made from a PPT, written into the folder like any new file and then opened (M21).
+  const fromPptx = async (source: () => Promise<{ name: string; bytes: Uint8Array }>, directoryId: string) => {
+    if (!root || lock.current) return
+    const current = root, generation = epoch.current
+    lock.current = true; setBusy(true); setError(''); setMenu(undefined); setResults(undefined)
+    let made: { name: string; archive: Uint8Array<ArrayBuffer>; issues: number } | undefined
+    try {
+      const file = await source()
+      const stem = pptxCourseStem(file.name)
+      const course = await createCourseFromPptx(file.bytes, stem)
+      const entries = pagesRef.current[directoryId] ?? await load(directoryId, current)
+      made = { name: uniqueFilename(stem, '.h5lesson', entries), archive: pptxCourseArchive(course), issues: course.issues.length }
+    } catch (reason) { if (generation === epoch.current) setError(message(reason)) }
+    finally { lock.current = false; if (generation === epoch.current) setBusy(false) }
+    if (!made || generation !== epoch.current) return
+    const result = await run({ type: 'create-course', ...common(), targetDirectoryId: directoryId, name: made.name, archive: made.archive })
+    if (result?.status === 'success' && made.issues) setNotice(`已从 PPT 新建 H5 演示；${made.issues} 项内容未保留或已简化`)
+  }
+  const readChosenPptx = (file: File) => async () => {
+    if (file.size > WORKSPACE_PPTX_MAX_BYTES) throw new Error('PPTX 不能超过 32 MiB')
+    return { name: file.name, bytes: new Uint8Array(await file.arrayBuffer()) }
+  }
   const submit = () => {
     if (!root || !dialog) return
     if (dialog === 'mkdir' || dialog.startsWith('create-')) {
@@ -324,8 +350,12 @@ export function WorkspaceFilesTree({ directory, files, refreshVersion = 0, onFil
     return () => document.removeEventListener('pointerdown', outside, true)
   }, [createAt])
   const action = (type: Dialog) => { closeCreateMenu(); void begin(type).catch(reason => setError(message(reason))) }
+  const choosePptx = () => { closeCreateMenu(); setMenu(undefined); pptxTarget.current = targetDirectory; pptxInput.current?.click() }
+  const pptxRow = selected.length === 1 && selected[0]!.entry.kind === 'file' && /\.pptx$/i.test(selected[0]!.entry.name) ? selected[0] : undefined
+  const importPptx = (row: Row) => { if (root) void fromPptx(() => files({ type: 'read-pptx', workspaceId: root.workspaceId, entryId: row.entry.entryId }), row.parentId) }
   const actions = (context = false) => <>
-    <button type="button" disabled={busy || !root} onClick={() => action('create-markdown')}>新建 Markdown 文档</button><button type="button" disabled={busy || !root} onClick={() => action('create-course')}>新建 H5 演示</button><button type="button" disabled={busy || !root} onClick={() => action('create-text')}>新建文本文档</button><button type="button" disabled={busy || !root} onClick={() => action('mkdir')}>新建文件夹</button>
+    {context && pptxRow && <button type="button" disabled={busy} onClick={() => importPptx(pptxRow)}>导入为 H5 演示</button>}
+    <button type="button" disabled={busy || !root} onClick={() => action('create-markdown')}>新建 Markdown 文档</button><button type="button" disabled={busy || !root} onClick={() => action('create-course')}>新建 H5 演示</button><button type="button" disabled={busy || !root} onClick={choosePptx}>从 PPT 新建 H5 演示</button><button type="button" disabled={busy || !root} onClick={() => action('create-text')}>新建文本文档</button><button type="button" disabled={busy || !root} onClick={() => action('mkdir')}>新建文件夹</button>
     <button type="button" disabled={busy || !single} onClick={() => action('rename')}>重命名</button><button type="button" disabled={busy || !selected.length} onClick={() => copy('copy')}>复制</button><button type="button" disabled={busy || !selected.length} onClick={() => copy('move')}>剪切</button><button type="button" disabled={busy || !clipboard?.ids.length} onClick={paste}>粘贴</button>
     <button type="button" disabled={busy || !selected.length} onClick={() => action('copy')}>复制到…</button><button type="button" disabled={busy || !selected.length} onClick={() => action('move')}>移动到…</button><button type="button" disabled={busy || !selected.length} onClick={() => action('trash')}>移到回收站</button>
     <button type="button" disabled={!selected.length} onClick={() => { void copyPath().catch(reason => setError(message(reason))) }}>复制路径</button><button type="button" disabled={busy || !single} onClick={() => { if (single && root) void run({ type: 'reveal', ...common(), entryId: single.entryId }) }}>在系统中定位</button>
@@ -350,12 +380,18 @@ export function WorkspaceFilesTree({ directory, files, refreshVersion = 0, onFil
         <div className="workspace-files-create-options" style={createAt}>
           <button type="button" disabled={busy || !root} onClick={() => action('create-markdown')}>新建 Markdown 文档</button>
           <button type="button" disabled={busy || !root} onClick={() => action('create-course')}>新建 H5 演示</button>
+          <button type="button" disabled={busy || !root} onClick={choosePptx}>从 PPT 新建 H5 演示</button>
           <button type="button" disabled={busy || !root} onClick={() => action('create-text')}>新建文本文档</button>
           <button type="button" disabled={busy || !root} onClick={() => action('mkdir')}>新建文件夹</button>
         </div>
       </details>
       <button type="button" disabled={busy || !root} onClick={() => { void refresh().catch(reason => setError(message(reason))) }}>刷新</button>
     </div>
+    <input ref={pptxInput} type="file" accept=".pptx" hidden aria-label="选择要在此文件夹新建为 H5 演示的 PPT" onChange={event => {
+      const file = event.target.files?.[0], target = pptxTarget.current
+      event.target.value = ''
+      if (file && target) void fromPptx(readChosenPptx(file), target)
+    }} />
     {notice && <p role="status">{busy ? '正在处理文件…' : notice}</p>}{busy && !notice && <p role="status">正在处理文件…</p>}
     {error && <p role="alert">{error}</p>}
     {results && results.status !== 'success' && <ul className="workspace-file-results" aria-label="文件操作结果">{results.items.map((item, index) => <li key={index} data-status={item.status}>{item.sourcePath?.split(/[\\/]/).pop() ?? item.targetPath?.split(/[\\/]/).pop() ?? '文件'}：{item.status === 'success' ? '已完成' : item.error?.message ?? (item.status === 'cancelled' ? '已取消' : '未完成')}</li>)}</ul>}
