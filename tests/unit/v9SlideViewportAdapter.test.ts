@@ -827,6 +827,16 @@ describe('V9 Slide viewport adapter', () => {
     expect(nativeFrame('slide-locked')).toMatchObject({ x: 120, y: 220, width: 400, height: 80 })
   })
 
+  it('drags an object pressed while unselected in the same gesture, before the host hands back its new backend', () => {
+    // The workspace reads its backend from a ref refreshed on render, so right after the selection it is still stale.
+    const stale = selectSlideAuthoringBackend(useEditorStore.getState())
+    const controller = createSlideWorkspaceAuthoringController({ ...storeAuthoringPorts(), getBackend: () => stale })
+    controller.pointerDown({ x: 200, y: 150 }, VIEW)
+    const moved = controller.pointerMove({ x: 260, y: 190 }, VIEW)
+    if (moved.kind !== 'slide-authoring') throw new Error('expected V9')
+    expect(moved.preview?.[0]).toMatchObject({ nodeId: 'slide-title', x: 180, y: 160 })
+  })
+
   it('paints pointermove preview onto SceneNodes without committing the native frame', () => {
     const controller = createController()
     controller.pointerDown({ x: 200, y: 150 }, VIEW)

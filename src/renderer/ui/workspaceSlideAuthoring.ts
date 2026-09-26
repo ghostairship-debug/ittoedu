@@ -209,11 +209,11 @@ function nativeFrames(backend: SlideAuthoringBackend): Map<string, SlideEditorNo
 
 function writableNativeTransforms(
   backend: SlideAuthoringBackend,
+  selectionIds: readonly string[] = backend.getSession().selection.selectionIds,
 ): SlideEditorNodeTransform[] {
-  const session = backend.getSession()
   const frames = nativeFrames(backend)
   const hits = new Map(layerTargets(backend).map((target) => [target.layerItemId, target]))
-  return session.selection.selectionIds.flatMap((id) => {
+  return selectionIds.flatMap((id) => {
     const frame = frames.get(id)
     const hit = hits.get(id)
     if (!frame || !hit || hit.locked || !hit.writable) return []
@@ -632,7 +632,9 @@ export function createSlideWorkspaceAuthoringController(
       )
       ports.commandPort.afterSelectLayers?.(command)
       const live = readBackend() ?? backend
-      const nextWritable = writableNativeTransforms(live)
+      // The host may hand back its backend only after it re-renders; the command's own selection is the one just made,
+      // so an object pressed while unselected is dragged in the same gesture.
+      const nextWritable = writableNativeTransforms(live, command.ok && command.selection ? command.selection.selectionIds : live.getSession().selection.selectionIds)
       if (nextWritable.length > 0 && !hit.locked) {
         const present = live.getSession().history.present
         gesture = {
