@@ -1,9 +1,7 @@
 import { expect, test } from '@playwright/test'
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { createCourseV9Driver } from '../../src/core/drivers/CourseV9Driver'
-import { createBlankCourseProject } from '../../src/core/course/createCourseProject'
-import { chooseM20Workspace, closeM20, launchM20, m20Evidence, m20Fixture, m20OpenFile, m20Row, m20Snapshot, m20Tree } from './helpers/g20M20Harness'
+import { chooseM20Workspace, closeM20, launchM20, m20Evidence, m20Fixture, m20OpenFile, m20Row, m20Snapshot, m20Tree, m20VisibleTextEditor } from './helpers/g20M20Harness'
 
 test('M20-T01 both Explorer creation entrances preserve order, stem selection, extension and active file', async ({}, info) => {
   test.skip(process.platform !== 'win32', 'Explorer acceptance uses Windows Electron.')
@@ -68,9 +66,8 @@ test('M20-T03 H5 and Markdown Save As buttons, shortcut and binding use the real
   test.skip(process.platform !== 'win32', 'Save As dialog acceptance uses Windows Electron.')
   test.setTimeout(180_000)
   const fixture = m20Fixture(), evidence: Record<string, unknown> = { case: 'M20-T03' }
-  const driver = createCourseV9Driver()
   const source = join(fixture.workspace, '原演示.h5lesson'), first = join(fixture.workspace, '另存演示.h5lesson'), second = join(fixture.workspace, '快捷键演示.h5lesson')
-  writeFileSync(source, await driver.serialize({ kind: 'course-v9', project: createBlankCourseProject({ title: '原演示' }), resources: { assets: {}, components: {} } }))
+  copyFileSync(join(__dirname, '../fixtures/course-project-v9/slide-native.h5lesson'), source)
   writeFileSync(join(fixture.workspace, '讲义.md'), '# 讲义\n')
   const original = readFileSync(source)
   const { app, page } = await launchM20(fixture)
@@ -120,7 +117,8 @@ test('M20-T02 UI edits literal text without Markdown rendering and preserves BOM
   try {
     await chooseM20Workspace(app, page, fixture.workspace)
     await m20OpenFile(page, '原样.txt', 'text')
-    const editor = page.getByLabel('纯文本编辑', { exact: true })
+    const editor = m20VisibleTextEditor(page)
+    await expect(editor).toHaveCount(1)
     await expect(editor).toContainText('# 标题')
     await expect(editor).toContainText('- 列表 `code` 😀')
     await expect(page.getByRole('heading', { name: '标题', exact: true })).toHaveCount(0)
@@ -218,7 +216,7 @@ test('M20-T04 conversation homes show type, full location, missing state and Exp
     await select('文件会话')
     await expect(location).toContainText('workspace › Unit › a.md')
     await expect(location.locator('svg.lucide-file')).toHaveCount(1)
-    await expect(location).toHaveAttribute('title', new RegExp('Unit[/\\]a\\.md'))
+    await expect(location).toHaveAttribute('title', `${fixture.workspace}/Unit/a.md\n所属位置只决定默认引用和新建文件的位置，不限制可修改的范围`)
     await location.click()
     await expect(m20Row(page, 'a.md')).toHaveAttribute('aria-pressed', 'true')
     await m20Row(page, 'Unit').click()
