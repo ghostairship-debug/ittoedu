@@ -161,13 +161,36 @@ test('M20-T04 conversation homes show type, full location, missing state and Exp
       const home = (kind: 'file' | 'folder', path: string) => ({ kind, path })
       const folder = await api.createConversation(id, '文件夹会话', home('folder', 'Unit'))
       const file = await api.createConversation(id, '文件会话', home('file', 'Unit/a.md'))
-      const rootConversation = await api.createConversation(id, '工作空间会话')
+      const rootConversation = await api.createConversation(id)
       const deleted = await api.createConversation(id, '删除文件会话', home('file', 'Unit/b.md'))
       const empty = await api.createConversation(id, '未发送空会话', home('file', 'Unit/a.md'))
       const moved = await api.createConversation(id, '跨空间会话', home('file', 'Unit/c.md'))
+      const seeded = []
+      for (const record of [folder, file, rootConversation, deleted, moved]) {
+        const saved = await api.draft({ workspaceId: id, conversationId: record.conversationId,
+          expectedRevision: record.revision, text: `M20 fixed home ${record.conversationId}`, documents: [], attachments: [] })
+        const persisted = await api.conversation(id, record.conversationId)
+        if (!persisted || persisted.inputDraft !== saved.inputDraft || persisted.revision !== saved.revision)
+          throw new Error('Conversation draft did not persist')
+        seeded.push({ id: record.conversationId, revision: persisted.revision, text: persisted.inputDraft })
+      }
+      let homeChangeRejected = false
+      try { await api.setConversationHome!({ workspaceId: id, conversationId: rootConversation.conversationId, home: home('folder', 'Unit') }) }
+      catch { homeChangeRejected = true }
+      const frozenRoot = await api.conversation(id, rootConversation.conversationId)
+      if (!frozenRoot || frozenRoot.home || !frozenRoot.inputDraft) throw new Error('Unhomed draft lost its frozen state')
+      await api.renameConversation({ workspaceId: id, conversationId: rootConversation.conversationId,
+        expectedRevision: frozenRoot.revision, title: '工作空间会话' })
+      const untouched = await api.conversation(id, empty.conversationId)
       return { id, folder: folder.conversationId, file: file.conversationId, root: rootConversation.conversationId,
-        deleted: deleted.conversationId, empty: empty.conversationId, moved: moved.conversationId }
+        deleted: deleted.conversationId, empty: empty.conversationId, moved: moved.conversationId,
+        seeded, homeChangeRejected, emptyRevision: untouched?.revision, emptyDraft: untouched?.inputDraft }
     }, fixture.workspace)
+    expect(prepared.seeded).toHaveLength(5)
+    expect(prepared.seeded.every(record => record.revision > 1 && record.text === `M20 fixed home ${record.id}`)).toBe(true)
+    expect(prepared.homeChangeRejected).toBe(true)
+    expect(prepared.emptyRevision).toBe(1)
+    expect(prepared.emptyDraft).toBe('')
     await app.evaluate(({ dialog }) => { dialog.showMessageBox = async () => ({ response: 0, checkboxChecked: false }) })
     await m20Tree(page).getByRole('button', { name: '展开 Unit', exact: true }).click()
     await m20Row(page, 'b.md').click(); await m20Row(page, 'b.md').press('Delete')
