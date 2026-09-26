@@ -471,10 +471,40 @@ function rewriteJavaScript(code: string, sourceType: 'script' | 'module', baseDi
     if (['ImportDeclaration', 'ExportAllDeclaration', 'ImportExpression'].includes(node.type) || (node.type === 'ExportNamedDeclaration' && node.source)) {
       addDiagnostic(sink, 'error', 'unsupported-module-graph', '导入暂不支持模块依赖图')
     }
+    const memberName = (member: Node): string | null => {
+      if (member.type !== 'MemberExpression') return null
+      const property = member.property as Node
+      return property.type === 'Identifier' ? String(property.name) : property.type === 'Literal' && typeof property.value === 'string' ? property.value : null
+    }
+    const literalValue = (value: Node): string | null => {
+      if (value.type === 'Literal' && typeof value.value === 'string') return value.value
+      if (value.type === 'TemplateLiteral' && (value.expressions as Node[]).length === 0) return ((value.quasis as Array<{ value: { cooked: string | null } }>)[0]?.value.cooked) ?? null
+      return null
+    }
+    const urlSink = (value: Node) => {
+      const url = literalValue(value)
+      if (url === null || !url.trim() || url.trim().startsWith('#') || /^data:/i.test(url)) return
+      if (/^https?:|^\/\//i.test(url)) {
+        addDiagnostic(sink, 'error', 'remote-js-resource', `未授权脚本资源 ${clip(url, 180)}`, url)
+        return
+      }
+      const result = rewriteSingleUrl(url, 'js-string', baseDir, sink, siblings, false)
+      if (result.changed) edits.push({ start: value.start, end: value.end, value: JSON.stringify(result.value) })
+    }
+    if (node.type === 'AssignmentExpression' && node.operator === '=') {
+      const name = memberName(node.left as Node)
+      if (name && ['src', 'srcset', 'href', 'poster', 'data', 'action', 'formAction'].includes(name)) urlSink(node.right as Node)
+    }
     if (node.type === 'CallExpression' || node.type === 'NewExpression') {
       const callee = node.callee as Node | undefined
-      if (callee?.type === 'Identifier' && ['fetch', 'importScripts', 'WebSocket', 'EventSource', 'Worker', 'SharedWorker', 'XMLHttpRequest'].includes(String(callee.name))) {
-        addDiagnostic(sink, 'error', 'unsupported-network-sink', `导入暂不支持脚本网络/动态加载: ${String(callee.name)}`)
+      const name = callee?.type === 'Identifier' ? String(callee.name) : callee ? memberName(callee) : null
+      if (name && ['fetch', 'importScripts', 'WebSocket', 'EventSource', 'Worker', 'SharedWorker', 'XMLHttpRequest', 'sendBeacon'].includes(name)) {
+        addDiagnostic(sink, 'error', 'unsupported-network-sink', `导入暂不支持脚本网络/动态加载: ${name}`)
+      }
+      if (name === 'setAttribute') {
+        const args = node.arguments as Node[]
+        const attribute = args[0] ? literalValue(args[0]) : null
+        if (attribute && ['src', 'srcset', 'href', 'poster', 'data'].includes(attribute) && args[1]) urlSink(args[1])
       }
     }
     if (node.type === 'Literal' && typeof node.value === 'string') {
@@ -721,7 +751,9 @@ function transformHtml(html: string, sink: Sink, siblings: Map<string, Uint8Arra
     if (tag.name === 'link') {
       const href = attributeBy(tag.attrs, 'href')
       const stylesheet = relHas(tag.attrs, 'stylesheet')
-      const managed = stylesheet || relHas(tag.attrs, 'icon') || relHas(tag.attrs, 'preload')
+      const modulepreload = relHas(tag.attrs, 'modulepreload')
+      const managed = stylesheet || relHas(tag.attrs, 'icon') || relHas(tag.attrs, 'preload') || modulepreload
+      if (modulepreload) addDiagnostic(sink, 'error', 'unsupported-module-graph', '导入暂不支持 modulepreload 依赖图')
       if (href?.hasValue && stylesheet && extensionOf(decodeEntities(href.rawValue)) === 'css') {
         const decoded = decodeEntities(href.rawValue).trim()
         const key = resolveRelative('', decoded)
@@ -779,9 +811,9 @@ function transformHtml(html: string, sink: Sink, siblings: Map<string, Uint8Arra
       }
       if (!inlined) {
         const baseKind = javascriptKind(attributeBy(tag.attrs, 'type')?.hasValue ? attributeBy(tag.attrs, 'type')!.rawValue : null)
-        body = baseKind === 'other'
+        body = neutralizeScriptClose(baseKind === 'other'
           ? body
-          : rewriteJavaScript(body, baseKind === 'module' ? 'module' : 'script', '', sink, siblings)
+          : rewriteJavaScript(body, baseKind === 'module' ? 'module' : 'script', '', sink, siblings))
       }
       const start = tag.attrs.some(attribute => attribute.changed || attribute.drop) ? rebuildStart(tag, false) : html.slice(tagStart, tag.end)
       parts.push(start, body)
@@ -789,7 +821,14 @@ function transformHtml(html: string, sink: Sink, siblings: Map<string, Uint8Arra
       i = raw.closeEnd
       continue
     }
-    rewriteAttributes(tag, '', sink, siblings, false)
+    rewriteAttributes(tag, '', sink, siblings, tag.name === 'image' || tag.name === 'use')
+    if (tag.name === 'image' || tag.name === 'use') {
+      const xlink = attributeBy(tag.attrs, 'xlink:href')
+      if (xlink?.hasValue) {
+        const result = rewriteSingleUrl(decodeEntities(xlink.rawValue), 'html-attr', '', sink, siblings, false)
+        if (result.changed) { xlink.value = result.value; xlink.changed = true }
+      }
+    }
     parts.push(tag.attrs.some(attribute => attribute.changed || attribute.drop) ? rebuildStart(tag, tag.selfClosing) : html.slice(tagStart, tag.end))
     i = tag.end
   }
