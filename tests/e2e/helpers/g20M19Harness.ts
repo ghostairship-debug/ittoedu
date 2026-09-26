@@ -1,8 +1,8 @@
 import { expect, type Page } from '@playwright/test'
 import { readFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
-import { crc32, deflateSync } from 'node:zlib'
 import { createBlankCourseProject } from '../../../src/core/course/createCourseProject'
+import { addCourseFlowPage, addCourseSpatialPage } from '../../../src/core/tools/courseLocations'
 import { createCourseProjectArchive, openCourseProjectArchive } from '../../../src/core/drivers/codecs/courseProjectArchive'
 import { createDefaultTeacherControllerPackage } from '../../../src/shared/defaultTeacherControllerComponent'
 import { componentPackagesToArchiveFiles } from '../../../src/renderer/components/componentPackageStore'
@@ -11,18 +11,7 @@ import { courseProjectDocumentSchema } from '../../../src/shared/courseProjectSc
 /** Fixtures and measurements shared by the M19 page-frame acceptance specs. */
 export const root = resolve(__dirname, '../../..')
 export const OFF_PAGE = [225, 29, 72] as const
-/** A solid RGB PNG, written with Node's own zlib so the test needs no image dependency. */
-export function solidPng(width: number, height: number, rgb: readonly number[]): Buffer {
-  const chunk = (type: string, data: Buffer) => {
-    const body = Buffer.concat([Buffer.from(type, 'ascii'), data]), length = Buffer.alloc(4), crc = Buffer.alloc(4)
-    length.writeUInt32BE(data.length); crc.writeUInt32BE(crc32(body))
-    return Buffer.concat([length, body, crc])
-  }
-  const header = Buffer.alloc(13); header.writeUInt32BE(width, 0); header.writeUInt32BE(height, 4); header[8] = 8; header[9] = 2
-  const row = Buffer.concat([Buffer.from([0]), Buffer.from(Array.from({ length: width }, () => [...rgb]).flat())])
-  return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk('IHDR', header),
-    chunk('IDAT', deflateSync(Buffer.concat(Array.from({ length: height }, () => row)))), chunk('IEND', Buffer.alloc(0))])
-}
+export { solidPng } from '../../helpers/solidPng'
 
 export type Rect = { x: number; y: number; width: number; height: number }
 
@@ -73,6 +62,50 @@ export function spatialCourse(canvas: { width: number; height: number }): Uint8A
     ] },
   })
   return createCourseProjectArchive({ project, assetFiles: {}, componentFiles: controllerFiles() })
+}
+
+export const RUNTIME_TEXT = '运行时标题'
+export const RUNTIME_FRAME = { x: 60, y: 260, width: 560, height: 220 }
+/** Where the Runtime draws its text inside its own frame, in its own CSS pixels. */
+export const RUNTIME_TEXT_AT = { x: 40, y: 60 }
+export const TITLE_COLOUR = [36, 91, 70] as const
+const RUNTIME_SOURCE = `CoursewareRuntime.define({
+  runtimeApiVersion: 2,
+  create(ctx) {
+    var panel = document.createElement('div');
+    panel.style.cssText = 'position:absolute;inset:0;background:#dbeafe;';
+    var text = document.createElement('div');
+    text.setAttribute('data-m19-runtime-text', 'true');
+    text.textContent = '${RUNTIME_TEXT}';
+    text.style.cssText = 'position:absolute;left:${RUNTIME_TEXT_AT.x}px;top:${RUNTIME_TEXT_AT.y}px;margin:0;font:bold 40px sans-serif;color:#1e3a8a;white-space:nowrap;';
+    panel.appendChild(text);
+    ctx.dom.root.appendChild(panel);
+    return { destroy: function () { panel.remove(); } };
+  }
+});`
+
+/**
+ * A Slide course on `canvas` with a Native text block and a DOM Runtime that draws its own text (recognised by the
+ * host, registered nowhere); `pages` adds a Flow and a Spatial page after it.
+ */
+export function runtimeCourse(title: string, canvas: { width: number; height: number }, titleFrame: Rect, pages = false): Uint8Array {
+  let project = createBlankCourseProject({ title, canvas })
+  const surface = project.surfaces[0]
+  if (surface?.type !== 'slide') throw new Error('slide surface')
+  surface.scenes[0]!.layerItems = [
+    textBlock('title', titleFrame, '标题', '#245b46', 1),
+    { kind: 'runtime', layerItemId: 'm19-runtime', label: 'm19-runtime', frame: { mode: 'absolute', ...RUNTIME_FRAME }, order: 2,
+      visible: true, locked: false, rotation: 0, opacity: 1, hitPolicy: 'surface', playbackInitialVisibility: 'inherit',
+      runtime: { protocol: 'canvas-runtime', runtimeApiVersion: 2, enabled: true, renderMode: 'dom', source: RUNTIME_SOURCE, content: { values: {} }, assets: {} } },
+  ] as never
+  if (pages) {
+    const flow = addCourseFlowPage(project, { title: '讲义' })
+    if (!flow.ok) throw new Error(flow.reason)
+    const spatial = addCourseSpatialPage(flow.project, { title: '空间' })
+    if (!spatial.ok) throw new Error(spatial.reason)
+    project = spatial.project
+  }
+  return createCourseProjectArchive({ project: courseProjectDocumentSchema.parse(project), assetFiles: {}, componentFiles: controllerFiles() })
 }
 
 export const FLOW_CONTROLLER_ID = 'm19-flow-controller'
@@ -126,6 +159,9 @@ export async function pixelAt(decoder: Page, source: Page, x: number, y: number)
   }, png.toString('base64'))
 }
 export const isOffPageColour = (rgb: readonly number[]) => rgb.every((value, index) => Math.abs(value - OFF_PAGE[index]!) < 24)
+/** The space beside a page in window mode: a light neutral grey or workspace tone (the page shadow darkens it a little). */
+export const isNeutralBackdrop = (rgb: readonly number[]) => Math.max(...rgb) - Math.min(...rgb) <= 16 && Math.min(...rgb) >= 150
+export const sameColour = (a: readonly number[], b: readonly number[], tolerance = 12) => a.every((value, index) => Math.abs(value - b[index]!) <= tolerance)
 
 export function expectSameRect(actual: Rect, expected: Rect, tolerance = 1.5) {
   for (const key of ['x', 'y', 'width', 'height'] as const) expect(Math.abs(actual[key] - expected[key]), `${key}: ${actual[key]} vs ${expected[key]}`).toBeLessThanOrEqual(tolerance)

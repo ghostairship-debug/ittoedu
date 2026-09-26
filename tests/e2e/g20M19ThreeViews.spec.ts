@@ -4,8 +4,8 @@ import { join } from 'node:path'
 import { BACKGROUND_E2E_ENV } from '../../src/main/windowVisibility'
 import { EDITOR_PAGE_INSETS, WINDOW_PAGE_INSETS } from '../../src/shared/pageFrame'
 import {
-  expectFit, expectSameRect, flowCourse, FLOW_CONTROLLER_ID, isOffPageColour, openInWorkbench, pixelAt, rectOf, root,
-  settledRect, slideCourse, solidPng, spatialCourse, type Rect,
+  expectFit, expectSameRect, flowCourse, FLOW_CONTROLLER_ID, isNeutralBackdrop, isOffPageColour, openInWorkbench, pixelAt, rectOf, root,
+  sameColour, settledRect, slideCourse, solidPng, spatialCourse, type Rect,
 } from './helpers/g20M19Harness'
 
 const EDITOR_INSETS = EDITOR_PAGE_INSETS
@@ -94,6 +94,9 @@ test('M19-T04 M19-T05 M19-T06 editing, try-run, whole-course preview and export 
         const row = edit.y + (course.offPage.y + course.offPage.height / 2) * scale
         expect(isOffPageColour(await pixelAt(page, page, edit.x + edit.width - 6, row))).toBe(true)
         expect(isOffPageColour(await pixelAt(page, page, edit.x + edit.width + 8, row))).toBe(false)
+        // Beside the page (the left margin: a tall page's scroll bar takes the right one in playback).
+        const editBackdrop = await pixelAt(page, page, edit.x - 8, row)
+        expect(isNeutralBackdrop(editBackdrop), `edit backdrop ${editBackdrop}`).toBe(true)
         const editController = await settledRect(page, '[data-controller-authoring-id]')
         if (key === 'landscape') {
           // The Slide page's teacher controller has the same quick bar, and picking it writes nothing.
@@ -111,10 +114,13 @@ test('M19-T04 M19-T05 M19-T06 editing, try-run, whole-course preview and export 
         expectSameRect(run, edit)
         expect(isOffPageColour(await pixelAt(page, page, run.x + run.width - 6, row))).toBe(true)
         expect(isOffPageColour(await pixelAt(page, page, run.x + run.width + 8, row))).toBe(false)
+        const runBackdrop = await pixelAt(page, page, run.x - 8, row)
+        // The same workspace tone and page shadow beside the page in both views.
+        expect(sameColour(runBackdrop, editBackdrop), `try-run backdrop ${runBackdrop} vs edit ${editBackdrop}`).toBe(true)
         if (key === 'landscape') evidence.runZoom = await expectZoomedClip(page, '.course-try-run-host [data-slide-scene-stage]', viewport, run, course, join(shots, 'landscape-try-run-zoomed.png'))
         // The teacher controller follows the same rule in both views (kept on the visible page).
         const runController = await settledRect(page, '.course-try-run-host .published-component-mount')
-        evidence[key] = { viewport, edit, run, editController, runController }
+        evidence[key] = { viewport, edit, run, editController, runController, editBackdrop, runBackdrop }
         // A tall page's scroll bar sits in the margin, so the controller is in the same place in both views.
         expectSameRect(runController, editController, 2)
         await page.getByRole('button', { name: '编辑状态', exact: true }).click()
@@ -234,6 +240,8 @@ test('M19-T04 M19-T05 M19-T06 editing, try-run, whole-course preview and export 
         const row = preview.y + (course.offPage.y + course.offPage.height / 2) * scale
         expect(isOffPageColour(await pixelAt(page, page, preview.x + preview.width - 6, row))).toBe(true)
         expect(isOffPageColour(await pixelAt(page, page, preview.x + preview.width + 8, row))).toBe(false)
+        const previewBackdrop = await pixelAt(page, page, preview.x - 8, row)
+        expect(isNeutralBackdrop(previewBackdrop), `preview backdrop ${previewBackdrop}`).toBe(true)
         await page.screenshot({ path: join(shots, `${key}-preview.png`) })
 
         await page.getByRole('button', { name: '关闭预览', exact: true }).click()
@@ -268,8 +276,11 @@ test('M19-T04 M19-T05 M19-T06 editing, try-run, whole-course preview and export 
         const exportRow = exportPageRect.y + (course.offPage.y + course.offPage.height / 2) * exportScale
         expect(isOffPageColour(await pixelAt(page, exportPage, exportPageRect.x + exportPageRect.width - 6, exportRow))).toBe(true)
         expect(isOffPageColour(await pixelAt(page, exportPage, exportPageRect.x + exportPageRect.width + 8, exportRow))).toBe(false)
+        const exportBackdrop = await pixelAt(page, exportPage, exportPageRect.x - 8, exportRow)
+        // The exported file shows the page with the same margin tone and shadow as the app's preview.
+        expect(sameColour(exportBackdrop, previewBackdrop), `export backdrop ${exportBackdrop} vs preview ${previewBackdrop}`).toBe(true)
         await exportPage.screenshot({ path: join(shots, `${key}-export.png`) })
-        evidence[`${key}-preview-export`] = { frame, preview, exportFrame, exportPageRect }
+        evidence[`${key}-preview-export`] = { frame, preview, exportFrame, exportPageRect, previewBackdrop, exportBackdrop }
         await app!.evaluate(({ BrowserWindow }, id) => BrowserWindow.fromId(id)?.destroy(), windowId)
         await page.getByRole('button', { name: '返回工作台', exact: true }).click()
       })
@@ -329,6 +340,10 @@ test('M19-T04 M19-T05 M19-T06 editing, try-run, whole-course preview and export 
       const centre = { x: box.x + box.width / 2, y: box.y + box.height / 2 }
       await page.mouse.click(centre.x, centre.y)
       for (const name of [/^(展开|收起)/, /^隐藏$/, /^锁定$/, /^AI 修改$/]) await expect(page.getByRole('button', { name }).first()).toBeVisible()
+      // The bar opens over the controller as it is shown (its round button), not over its stored full frame.
+      const bar = await settledRect(page, '.selection-quick-bar', nudge)
+      expect(bar.y + bar.height).toBeLessThanOrEqual(box.y)
+      expect(bar.x + bar.width).toBeGreaterThan(box.x)
       expect((await page.evaluate(id => window.desktopAPI.documents!.read(id), before.documentId)).revision).toBe(before.revision)
       // The quick bar really changes the controller on a Flow page.
       await page.getByRole('button', { name: /^(展开|收起)/ }).first().click()
@@ -342,7 +357,7 @@ test('M19-T04 M19-T05 M19-T06 editing, try-run, whole-course preview and export 
       await page.mouse.move(grip.x, grip.y - 160, { steps: 8 }); await page.mouse.up()
       await expect.poll(async () => (await page.evaluate(id => window.desktopAPI.documents!.read(id), before.documentId)).revision).toBeGreaterThan(revision)
       const moved = await settledRect(page, footprint, nudge)
-      evidence.flowController = { before: shown, after: moved }
+      evidence.flowController = { before: shown, after: moved, bar }
       expect(Math.abs(shown.y - 160 - moved.y)).toBeLessThanOrEqual(2)
       expect(Math.abs(shown.x - moved.x)).toBeLessThanOrEqual(2)
       await page.screenshot({ path: join(shots, 'flow-controller-picked.png') })
