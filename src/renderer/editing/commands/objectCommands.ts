@@ -19,8 +19,17 @@ export interface SingleObjectState {
   setLocked(locked: boolean): void
   setVisible(visible: boolean): void
   editText?: () => void
+  editFormula?: () => void
   replaceImage?: () => void
+  /** Starts cropping the image in place, on the canvas; set with the reason when it cannot. */
+  crop?: { run(): void; disabledReason?: string | null }
+  /** How the image fills its frame. */
+  fit?: { value: ImageFitMode; set(fit: ImageFitMode): void }
+  replaceVideo?: () => void
 }
+
+export type ImageFitMode = 'contain' | 'cover' | 'stretch'
+export const IMAGE_FIT_LABEL: Record<ImageFitMode, string> = { contain: '适应（完整显示）', cover: '填充（允许裁剪）', stretch: '拉伸' }
 
 export interface MultiObjectState {
   count: number
@@ -46,7 +55,16 @@ export function singleObjectCommands(state: SingleObjectState, ports: ObjectComm
   const editable = blocked ?? (state.locked ? '对象已锁定，请先解锁' : null)
   const commands: MenuCommand[] = []
   if (options.primary && state.editText) commands.push({ id: 'object.edit-text', label: '编辑文字', group: 'primary', run: state.editText, disabledReason: editable })
+  if (options.primary && state.editFormula) commands.push({ id: 'object.edit-formula', label: '编辑公式', group: 'primary', run: state.editFormula, disabledReason: editable })
   if (options.primary && state.replaceImage) commands.push({ id: 'object.replace-image', label: '替换图片…', group: 'primary', run: state.replaceImage, disabledReason: editable })
+  if (options.primary && state.crop) commands.push({ id: 'object.crop', label: '裁剪', group: 'primary', run: state.crop.run, disabledReason: editable ?? state.crop.disabledReason ?? null })
+  if (options.primary && state.replaceVideo) commands.push({ id: 'object.replace-video', label: '替换视频…', group: 'primary', run: state.replaceVideo, disabledReason: editable })
+  // The image's fit is on the bar as a picker; the menu lists the choices, the current one says so.
+  const fit = state.fit
+  if (options.primary && fit) for (const mode of ['contain', 'cover', 'stretch'] as const) commands.push({
+    id: `object.fit.${mode}`, label: `显示方式：${IMAGE_FIT_LABEL[mode]}`, group: 'fit', run: () => fit.set(mode),
+    disabledReason: editable ?? (fit.value === mode ? '已是当前显示方式' : null),
+  })
   commands.push(
     { id: 'object.copy', label: '复制', shortcut: 'Ctrl+C', group: 'clipboard', run: ports.copy, disabledReason: blocked },
     { id: 'object.paste', label: '粘贴', shortcut: 'Ctrl+V', group: 'clipboard', run: ports.paste },

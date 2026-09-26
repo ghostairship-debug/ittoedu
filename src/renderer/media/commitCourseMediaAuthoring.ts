@@ -7,6 +7,7 @@ import {
   deleteCourseSound,
   importAndPlaceCourseMedia,
   importCourseSounds,
+  replaceCourseLayerMedia,
   updateCourseAudioSettings,
   updateCourseSound,
   type CourseMediaCommandResult,
@@ -555,6 +556,15 @@ export function createMediaAuthoringActions(ports: ImageAuthoringPorts) {
       bytes: Uint8Array,
     ) {
       return commitCourseImageReplacement(ports, target, asset, bytes)
+    },
+    /** Replaces the selected Slide video with a new file; its frame, playback settings and name stay (M21). */
+    replaceSelectedVideo(asset: AssetMeta, bytes: Uint8Array): { ok: boolean; reason?: string } {
+      const state = ports.read()
+      const media = state.hasFlowSession || state.hasSpatialSession ? null : mediaSession()
+      const selected = media?.session.selection.selectionIds.at(-1)
+      if (!media || !selected) return { ok: false, reason: '请先选中当前演示页中的视频' }
+      const result = ports.persistMedia(replaceCourseLayerMedia(media, selected, { meta: asset, bytes }, { expectedRevision: media.session.history.present.revision }))
+      return result.ok ? { ok: true } : { ok: false, reason: result.reason ?? '视频替换未完成' }
     },
     addImageNode(asset: AssetMeta, bytes: Uint8Array, x?: number, y?: number) {
       placeImage(asset, bytes, x, y)

@@ -64,6 +64,35 @@ it('requires the Spatial world for canvas insertion and retains honest sound-lib
   expect(actions.audio).toHaveBeenCalledOnce()
 })
 
+it('M21 inserts shapes and formulas from the workbench, saying where they go and when they cannot', () => {
+  const shape = vi.fn(), formula = vi.fn()
+  mount({ onAddShape: shape, onAddFormula: formula })
+  fireEvent.click(screen.getByRole('button', { name: '插入' }))
+  const shapes = screen.getByRole('group', { name: '形状' })
+  expect([...shapes.querySelectorAll('button')].map(button => button.textContent)).toEqual(['矩形', '圆角矩形', '椭圆', '三角形', '直线', '箭头'])
+  fireEvent.click(screen.getByRole('button', { name: '插入椭圆' }))
+  expect(shape).toHaveBeenCalledWith('ellipse')
+  expect(screen.queryByRole('group', { name: '形状' })).toBeNull()
+  fireEvent.click(screen.getByRole('button', { name: '插入' }))
+  expect(screen.getByRole('button', { name: '插入公式' })).toHaveTextContent('可编辑的数学公式')
+  fireEvent.click(screen.getByRole('button', { name: '插入公式' }))
+  expect(formula).toHaveBeenCalledOnce()
+  cleanup()
+
+  // In a Flow page shapes float over the paper and a formula is a block of the text, which the global layer cannot hold.
+  mount({ insertSurface: 'flow', editingScope: 'global', onAddShape: shape, onAddFormula: formula })
+  fireEvent.click(screen.getByRole('button', { name: '插入' }))
+  expect(screen.getByRole('group', { name: '形状' })).toHaveTextContent('形状（页面浮层）')
+  expect(screen.getByRole('button', { name: '插入矩形' })).toBeEnabled()
+  expect(screen.getByRole('button', { name: '插入公式' })).toBeDisabled()
+  cleanup()
+  mount({ insertSurface: 'spatial', spatialScope: 'surface', onAddShape: shape, onAddFormula: formula })
+  fireEvent.click(screen.getByRole('button', { name: '插入' }))
+  expect(screen.getByRole('button', { name: '插入矩形' })).toBeDisabled()
+  expect(screen.getByRole('button', { name: '插入矩形' })).toHaveAttribute('title', '请切换到无限画布世界层后插入对象。')
+  expect(screen.getByRole('button', { name: '插入公式' })).toBeDisabled()
+})
+
 it('M21 keeps one fixed toolbar row with 另存为 and a single editor entry at the end', () => {
   const saveAs = vi.fn(), undoLatestAgent = vi.fn()
   const actions = mount({ saveAs, canUndoLatestAgent: true, undoLatestAgent }, true)

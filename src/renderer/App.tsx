@@ -458,6 +458,8 @@ export default function App() {
     selectImages: () => desktopApi().selectImages(),
     selectAudios: () => desktopApi().selectAudios(),
     selectVideos: () => desktopApi().selectVideos(),
+    selectVideo: () => desktopApi().selectVideo(),
+    replaceSelectedVideo: (asset, bytes) => useEditorStore.getState().replaceSelectedVideo(asset, bytes),
     runBusy: run,
     commitStatus: setStatus,
     reportError: setError,
@@ -568,6 +570,7 @@ export default function App() {
   const mediaImportRef = useRef(mediaImport); mediaImportRef.current = mediaImport
   const courseEditorActions = useMemo<CourseEditorActions>(() => ({
     replaceImage: () => { void mediaImportRef.current.selectAndImportImage('replace') },
+    replaceVideo: () => { void mediaImportRef.current.replaceSelectedVideo() },
   }), [])
 
   return (
@@ -632,6 +635,8 @@ export default function App() {
       onAddAudio={() => { void (useEditorStore.getState().flowSession
         ? mediaImport.selectAndInsertFlowAudio()
         : mediaImport.selectAndImportAudio()) }}
+      onAddShape={shapeType => useEditorStore.getState().addShapeNode(shapeType)}
+      onAddFormula={() => useEditorStore.getState().addFormulaNode()}
       insertSurface={insertSurface} editingScope={editingScope} spatialScope={spatialInsertScope}
       mode={courseCanvasMode}
       busy={busy} hasFlowSurface={hasFlowSurface}

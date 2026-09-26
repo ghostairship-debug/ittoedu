@@ -1,0 +1,20 @@
+/* M21 in-place image crop: the whole image faintly, the kept part at full strength, handles on its edges. */
+.image-crop { position: fixed; inset: 0; z-index: 1100; }
+.image-crop__backdrop { position: absolute; inset: 0; background: rgb(15 23 42 / 22%); }
+.image-crop__whole { position: absolute; max-width: none; opacity: .38; pointer-events: none; user-select: none; }
+.image-crop__whole--outline { border: 1px dashed rgb(255 255 255 / 85%); opacity: 1; }
+.image-crop__clip { position: absolute; overflow: hidden; pointer-events: none; }
+.image-crop__kept { position: absolute; max-width: none; pointer-events: none; user-select: none; }
+.image-crop__frame { position: absolute; outline: 2px solid #5b9cff; box-shadow: 0 0 0 1px rgb(0 0 0 / 35%); pointer-events: none; }
+.image-crop__handle { position: absolute; width: 12px; height: 12px; margin: -7px 0 0 -7px; border: 2px solid #5b9cff; border-radius: 2px; background: #fff; pointer-events: auto; touch-action: none; }
+.image-crop__handle--nw { left: 0; top: 0; cursor: nwse-resize; }
+.image-crop__handle--n { left: 50%; top: 0; cursor: ns-resize; }
+.image-crop__handle--ne { left: 100%; top: 0; cursor: nesw-resize; }
+.image-crop__handle--e { left: 100%; top: 50%; cursor: ew-resize; }
+.image-crop__handle--se { left: 100%; top: 100%; cursor: nwse-resize; }
+.image-crop__handle--s { left: 50%; top: 100%; cursor: ns-resize; }
+.image-crop__handle--sw { left: 0; top: 100%; cursor: nesw-resize; }
+.image-crop__handle--w { left: 0; top: 50%; cursor: ew-resize; }
+.image-crop__bar { position: absolute; display: flex; gap: 4px; padding: 4px; border-radius: 8px; background: #1f2530; box-shadow: 0 6px 18px rgb(0 0 0 / 28%); }
+.image-crop__bar button { padding: 4px 10px; border: 0; border-radius: 5px; background: transparent; color: #f4f6f8; font: inherit; font-size: 12px; cursor: pointer; }
+.image-crop__bar button:hover, .image-crop__bar button:focus-visible { background: rgb(255 255 255 / 14%); outline: none; }

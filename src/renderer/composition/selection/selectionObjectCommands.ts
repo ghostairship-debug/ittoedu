@@ -1,6 +1,6 @@
 import { planLayerOrder, type LayerOrderMove } from '../../editing/quickbar/layerOrder'
 import type { ObjectCommandPorts } from '../../editing/commands/objectCommands'
-import { selectEditingNodes, selectEffectiveLayerProjection, useEditorStore } from '../../store/editorStore'
+import { selectActiveCourseProjectDocument, selectEditingNodes, selectEffectiveLayerProjection, useEditorStore } from '../../store/editorStore'
 
 /**
  * Store-backed commands for the current selection, used by the quick bar and the right-click menus. They route
@@ -24,6 +24,13 @@ export const selectionObjectCommands = {
     const projection = selectEffectiveLayerProjection(useEditorStore.getState())
     const order = projection ? planLayerOrder(projection.unifiedRows, itemId, move) : null
     if (order) useEditorStore.getState().reorderNodes(order)
+  },
+  /** An image asset's pixel size and bytes, for cropping it in place (null when the course has no such image). */
+  imageSource(assetId: string): { width: number; height: number; mimeType: string; bytes: Uint8Array | null } | null {
+    const state = useEditorStore.getState()
+    const meta = selectActiveCourseProjectDocument(state)?.assets[assetId]
+    if (!meta || meta.kind !== 'image') return null
+    return { width: meta.width ?? 0, height: meta.height ?? 0, mimeType: meta.mimeType, bytes: state.courseAssetSidecar?.files[assetId] ?? null }
   },
   /** The ports of one selected object, for the shared object command list. */
   portsFor(itemId: string): ObjectCommandPorts {

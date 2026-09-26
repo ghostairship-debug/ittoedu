@@ -1,7 +1,10 @@
+import { crc32, deflateSync } from 'node:zlib'
 import { expect, type Locator, type Page } from '@playwright/test'
 import { createBlankCourseProject } from '../../../src/core/course/createCourseProject'
 import { addCourseFlowPage, addCourseScene, addCourseSpatialPage, renameCourseLocation } from '../../../src/core/tools/courseLocations'
 import { createCourseProjectArchive, openCourseProjectArchive } from '../../../src/core/drivers/codecs/courseProjectArchive'
+import { createVideoNode } from '../../../src/core/tools/nativeNodeFactories'
+import { sceneNodeToCourseLayerItem } from '../../../src/shared/courseProjectModel'
 import { courseProjectDocumentSchema } from '../../../src/shared/courseProjectSchema'
 import type { CourseProjectDocument } from '../../../src/shared/courseProjectTypes'
 import { controllerFiles, flowCourse, runtimeLayerItem, solidPng, textBlock, type Rect } from './g20M19Harness'
@@ -57,6 +60,47 @@ export function lightCourse(title = 'M21 轻编辑'): Uint8Array {
   if (spatial?.type !== 'spatial-2d') throw new Error('spatial surface')
   spatial.world.layerItems = [textBlock('world-note', FRAMES.world, '空间便签', '#0f766e', 1)] as never
   return createCourseProjectArchive({ project: courseProjectDocumentSchema.parse(project), assetFiles: { photo: PHOTO }, componentFiles: controllerFiles() })
+}
+
+/** A PNG whose left and right halves differ in colour, so a crop shows which part it kept. */
+export function splitPng(width: number, height: number, left: readonly number[], right: readonly number[]): Buffer {
+  const chunk = (type: string, data: Buffer) => {
+    const body = Buffer.concat([Buffer.from(type, 'ascii'), data]), length = Buffer.alloc(4), crc = Buffer.alloc(4)
+    length.writeUInt32BE(data.length); crc.writeUInt32BE(crc32(body))
+    return Buffer.concat([length, body, crc])
+  }
+  const header = Buffer.alloc(13); header.writeUInt32BE(width, 0); header.writeUInt32BE(height, 4); header[8] = 8; header[9] = 2
+  const row = Buffer.concat([Buffer.from([0]), Buffer.from(Array.from({ length: width }, (_, x) => [...(x < width / 2 ? left : right)]).flat())])
+  return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk('IHDR', header),
+    chunk('IDAT', deflateSync(Buffer.concat(Array.from({ length: height }, () => row)))), chunk('IEND', Buffer.alloc(0))])
+}
+
+export const SPLIT = { left: [37, 99, 235], right: [234, 88, 12] } as const
+/** Square, so in the 16:9 photo frame 适应 leaves bands at the sides and 填充 cuts off the top and bottom. */
+export const SPLIT_PHOTO = splitPng(640, 640, SPLIT.left, SPLIT.right)
+export const CLIP = { x: 120, y: 330, width: 320, height: 180 }
+export const HINT = '提示：先想一想'
+
+/**
+ * M21-T07: one scene with a title, a photo whose halves are blue and orange, a video, and a hidden hint (`video` is
+ * a 320×180, 2 s WebM); then an empty infinite canvas 空间.
+ */
+export function inPlaceCourse(video: Uint8Array): Uint8Array {
+  let project: CourseProjectDocument = createBlankCourseProject({ title: 'M21 就地编辑', canvas: CANVAS })
+  const surface = project.surfaces[0]
+  if (surface?.type !== 'slide') throw new Error('slide surface')
+  surface.scenes[0]!.layerItems = [
+    textBlock('title', FRAMES.title, '课题', '#245b46', 1),
+    imageItem('photo', FRAMES.photo, 'photo', 2),
+    sceneNodeToCourseLayerItem(createVideoNode({ id: 'clip', name: '课堂视频', assetId: 'clip', ...CLIP }), 3),
+    { ...textBlock('hint', FRAMES.note, HINT, '#b45309', 4), visible: false },
+  ] as never
+  project.assets = {
+    photo: { id: 'photo', filename: 'photo.png', mimeType: 'image/png', kind: 'image', path: 'assets/photo.png', byteLength: SPLIT_PHOTO.byteLength, width: 640, height: 640 },
+    clip: { id: 'clip', filename: 'motion.webm', mimeType: 'video/webm', kind: 'video', path: 'assets/clip.webm', byteLength: video.byteLength, width: 320, height: 180, duration: 2 },
+  } as never
+  project = must(addCourseSpatialPage(project, { title: '空间' })).project
+  return createCourseProjectArchive({ project: courseProjectDocumentSchema.parse(project), assetFiles: { photo: SPLIT_PHOTO, clip: video }, componentFiles: controllerFiles() })
 }
 
 /** The M19 Flow course (paper overlay, image and table in the document) with a figure large enough to click. */

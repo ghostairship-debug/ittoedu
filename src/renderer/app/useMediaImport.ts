@@ -8,6 +8,7 @@ import type {
   SelectedFileBatch,
   SelectedImageBatchFile,
   SelectedImageResult,
+  SelectedMediaResult,
   SelectedMediaBatchFile,
 } from '../../shared/ipcTypes'
 import {
@@ -135,6 +136,9 @@ export interface MediaImportPorts {
   selectImages(): Promise<SelectedFileBatch<SelectedImageBatchFile> | null>
   selectAudios(): Promise<SelectedFileBatch<SelectedMediaBatchFile> | null>
   selectVideos(): Promise<SelectedFileBatch<SelectedMediaBatchFile> | null>
+  /** One video for replacing the selected one (M21). */
+  selectVideo?(): Promise<SelectedMediaResult | null>
+  replaceSelectedVideo?(asset: AssetMeta, bytes: Uint8Array): MediaReplacementCommitResult
   runBusy<T>(operation: () => Promise<T>, fallback: string): Promise<T | undefined>
   commitStatus(message: string | null): void
   reportError(message: string): void
@@ -150,6 +154,8 @@ export interface MediaImportApi {
     position?: { x?: number; y?: number },
   ): Promise<void>
   selectAndImportAudio(): Promise<void>
+  /** Pick a video file and put it in place of the selected video, keeping its frame. */
+  replaceSelectedVideo(): Promise<void>
   selectAndInsertFlowAudio(): Promise<void>
   importWorkspaceMedia(request: WorkspaceMediaDropRequest): Promise<{ ok: boolean; reason?: string; assetId?: string; soundId?: string }>
   selectImageAsset(): Promise<ImportedImageAsset | null>
@@ -678,10 +684,28 @@ export function useMediaImport(ports: MediaImportPorts): MediaImportApi {
     setBatchOperationSummary(null)
   }, [])
 
+  const replaceSelectedVideo = useCallback(async () => {
+    await portsRef.current.runBusy(async () => {
+      const select = portsRef.current.selectVideo, replace = portsRef.current.replaceSelectedVideo
+      if (!select || !replace) throw new UserFacingError('无法替换视频', '当前界面不支持替换视频。', '请在演示页中选中视频后再试。')
+      const started = portsRef.current.captureIdentity()
+      const file = await select()
+      if (!file) return
+      assertFreshIdentity(started, portsRef.current.captureIdentity(), '无法替换视频')
+      const metadata = await readMediaMetadata(file.bytes, file.mimeType, 'video')
+      assertFreshIdentity(started, portsRef.current.captureIdentity(), '无法替换视频')
+      const imported = createMediaAssetImport(file, 'video', metadata)
+      const result = replace(imported.meta, imported.bytes)
+      if (!result.ok) throw new UserFacingError('无法替换视频', result.reason ?? '视频替换未完成。', '请重新选中当前演示页中的视频，再点击“替换视频”。')
+      portsRef.current.commitStatus('视频已替换，位置和大小保持不变')
+    }, '视频替换失败，当前视频仍保留。')
+  }, [])
+
   return {
     selectAndImportImage,
     selectAndImportVideo,
     selectAndImportAudio,
+    replaceSelectedVideo,
     selectAndInsertFlowAudio,
     importWorkspaceMedia,
     selectImageAsset,

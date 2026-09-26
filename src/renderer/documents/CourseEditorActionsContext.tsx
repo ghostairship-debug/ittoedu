@@ -4,6 +4,8 @@ import { createContext, useContext } from 'react'
 export interface CourseEditorActions {
   /** Pick an image file and replace the selected image in place. */
   replaceImage(): void
+  /** Pick a video file and replace the selected video, keeping its frame. */
+  replaceVideo?(): void
 }
 
 export const CourseEditorActionsContext = createContext<CourseEditorActions | null>(null)

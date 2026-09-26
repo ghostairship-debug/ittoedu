@@ -10,7 +10,7 @@ import { canvasReady, centre, closeMenu, contextMenuAt, FRAMES, lightCourse, men
 const COURSE = 'm21.h5lesson'
 const OTHER = 'other.h5lesson'
 const OBJECT_ITEMS = ['复制', '粘贴', '创建副本', '删除', '上移一层', '下移一层', '置于顶层', '置于底层', '锁定', '隐藏']
-const CANVAS_ITEMS = ['粘贴', '全选', '在此插入文字', '在此插入图片…', '在此插入视频…', '在此插入矩形', '在此插入公式', '当前位置试运行']
+const CANVAS_ITEMS = ['粘贴', '全选', '在此插入文字', '在此插入图片…', '在此插入视频…', '在此插入矩形', '在此插入公式', '找回隐藏的对象', '当前位置试运行']
 const SCENE_ITEMS = ['新建场景', '创建副本', '重命名', '前移', '后移', '删除场景']
 const STATE_ITEMS = ['新建状态', '创建副本', '重命名', '删除状态']
 const PRIMARY = new Set(['编辑文字', '替换图片…', '编辑此处文字', '替换此处图片…'])

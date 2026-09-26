@@ -19,3 +19,14 @@ export interface ObjectContextMenuRequest {
 export function requestObjectContextMenu(root: Element, request: ObjectContextMenuRequest): boolean {
   return !root.dispatchEvent(new CustomEvent<ObjectContextMenuRequest>(OBJECT_CONTEXT_MENU_EVENT, { detail: request, cancelable: true }))
 }
+
+/**
+ * The quick bar or a menu asks the workspace to open an object's own editor, as a double-click does (e.g. the formula
+ * editor for a formula).
+ */
+export const OBJECT_EDIT_EVENT = 'course-object-edit'
+
+/** Returns true when the workspace opened an editor for the object. */
+export function requestObjectEdit(root: Element, itemId: string): boolean {
+  return !root.dispatchEvent(new CustomEvent<{ itemId: string }>(OBJECT_EDIT_EVENT, { detail: { itemId }, cancelable: true }))
+}

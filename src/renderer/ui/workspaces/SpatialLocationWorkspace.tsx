@@ -1,6 +1,8 @@
 import { NativeSelectionContext } from '../../workbench/NativeSelectionContext'
-import { useContextMenu } from '../../editing/commands/CommandMenu'
-import { requestObjectContextMenu } from '../../editing/commands/objectContextMenu'
+import { useContextMenu, type MenuCommand } from '../../editing/commands/CommandMenu'
+import { hiddenObjectCommands, hiddenObjectName } from '../../editing/commands/hiddenObjectCommands'
+import { isTeacherController } from '../../../shared/teacherControllerRole'
+import { OBJECT_EDIT_EVENT, requestObjectContextMenu } from '../../editing/commands/objectContextMenu'
 import { QUICK_BAR_SELECTOR } from '../../editing/quickbar/usePointerGesture'
 import { useControllerDisplayRevision } from '../../authoring/controllerDisplayBounds'
 
@@ -97,6 +99,8 @@ export interface SpatialLocationWorkspaceProps {
   readonly runtimeContentAuthoring: SpatialRuntimeContentAuthoringPort
   readonly worldTarget: CourseAuthoringTarget
   readonly layerTargets: ReadonlyMap<string, CourseAuthoringTarget>
+  /** Targets for property patches of whole items (M21: showing hidden objects again). */
+  readonly layerItemTargets?: ReadonlyMap<string, CourseAuthoringTarget>
   readonly commands: SpatialAuthoringCommandPort
   readonly onCanvasModeChange: (mode: SpatialCanvasMode) => void
   readonly onMountTryRun: (container: HTMLElement) => Promise<PublishedCourseSession>
@@ -342,6 +346,7 @@ export function SpatialLocationWorkspace({
   runtimeContentAuthoring,
   worldTarget,
   layerTargets,
+  layerItemTargets,
   commands,
   onCanvasModeChange,
   onMountTryRun,
@@ -413,6 +418,36 @@ export function SpatialLocationWorkspace({
     readSnapshot: () => snapshotRef.current,
     commands: { run: (target, intent) => commandsRef.current.run(target, intent) },
   }))
+  // Hidden objects of the current layer (and a hidden teacher controller, as on a slide) stay findable (M21): the
+  // label counts them, and a menu shows them again.
+  const hiddenLayers = canvasMode === 'edit' ? view.layers.filter((layer) => !layer.item.visible
+    && (layer.source === scope || (scope !== 'global' && layer.source === 'global' && isTeacherController(layer.item)))) : []
+  const hiddenMenu = (): MenuCommand[] => hiddenObjectCommands(
+    hiddenLayers.map((layer) => ({ id: layer.selectionId, name: hiddenObjectName(layer.item) })),
+    (ids) => {
+      const targets = ids.map((id) => layerItemTargets?.get(id))
+      if (!targets[0] || targets.some((target) => !target)) return
+      // Layer patches apply to the selection: select the objects, then show them (they stay selected, in view).
+      if (!commandsRef.current.run(worldTarget, { kind: 'select-layers', layerItemIds: [...ids], expectedContentEdit: contentEditRef.current }).ok) return
+      commandsRef.current.run(targets[0], {
+        kind: 'patch-layers',
+        updates: targets.map((target) => ({ target: target!, patch: { visible: true } })),
+        expectedSelectionIds: [...ids],
+        expectedContentEdit: contentEditRef.current,
+      })
+    },
+  )
+  // The quick bar's and menus' 编辑公式 open the formula editor as a double-click does (M21).
+  useEffect(() => {
+    const root = workspaceRef.current
+    if (!root || canvasMode !== 'edit') return
+    const request = (event: Event) => {
+      const itemId = (event as CustomEvent<{ itemId: string }>).detail?.itemId
+      if (itemId && authoringRef.current.beginContentEdit(itemId)?.ok) event.preventDefault()
+    }
+    root.addEventListener(OBJECT_EDIT_EVENT, request)
+    return () => root.removeEventListener(OBJECT_EDIT_EVENT, request)
+  }, [canvasMode])
 
   const measureViewport = useCallback(() => {
     const node = viewportRef.current
@@ -776,7 +811,7 @@ export function SpatialLocationWorkspace({
       className={`workspace workspace--${canvasMode} workspace--spatial`}
       data-testid="spatial-workspace"
     >
-      <NativeSelectionContext documentId={documentId} revision={project.revision} locationId={view.locationId} itemIds={selectionIds} enabled={canvasMode === 'edit'} textEditing={editingNode?.type === 'text'} />
+      <NativeSelectionContext documentId={documentId} revision={project.revision} locationId={view.locationId} itemIds={selectionIds} enabled={canvasMode === 'edit'} textEditing={editingNode?.type === 'text' || formulaNode?.type === 'formula'} />
       {canvasMenu.element}
       <div className="canvas-mode-switch" role="group" aria-label="画布模式">
         <button
@@ -846,6 +881,11 @@ export function SpatialLocationWorkspace({
         {scope === 'global'
           ? `全局层 · ${hudItems.length} 个元素`
           : `${view.surfaceTitle} · ${view.camera.activeFrame.name}`}
+        {hiddenLayers.length > 0 && <button type="button" className="canvas-label__hidden"
+          onClick={(event) => {
+            const rect = event.currentTarget.getBoundingClientRect()
+            canvasMenu.open({ x: rect.left, y: rect.bottom + 4 }, '隐藏的对象', hiddenMenu())
+          }}>{hiddenLayers.length} 个隐藏对象</button>}
       </div>
       {previewNotice && activeTextPreview && (
         <div role="status" className="canvas-label">正在生成文字；完成或停止后可编辑此对象。</div>
@@ -993,6 +1033,8 @@ export function SpatialLocationWorkspace({
           canvasMenu.open(point, '画布操作', [
             { id: 'canvas.paste', label: '粘贴', shortcut: 'Ctrl+V', group: 'clipboard', run: () => onPaste?.(), disabledReason: onPaste ? null : noPort },
             { id: 'canvas.select-all', label: '全选', shortcut: 'Ctrl+A', group: 'clipboard', run: () => onSelectAll?.(), disabledReason: onSelectAll ? null : noPort },
+            { id: 'canvas.hidden', label: '找回隐藏的对象', group: 'view', run: () => canvasMenu.open(point, '隐藏的对象', hiddenMenu()),
+              disabledReason: hiddenLayers.length ? null : '本页没有隐藏的对象' },
             { id: 'canvas.try-run', label: '当前位置试运行', group: 'view', run: () => onCanvasModeChange('run') },
           ])
         }}
@@ -1139,6 +1181,8 @@ export function SpatialLocationWorkspace({
               </svg>
               {worldItems.map((layer) => {
                 if (layer.item.kind !== 'native' && layer.item.kind !== 'component') return null
+                // A hidden object is not drawn, as on a slide; it cannot be clicked either (M21).
+                if (!layer.effectiveVisible) return null
                 const preview = previewById.get(layer.selectionId)
                 const frame = preview ?? layer.item.frame
                 const paintKind = spatialLayerPaintKind(layer.item)

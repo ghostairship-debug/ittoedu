@@ -2,7 +2,8 @@ import { resolveSlideSelectionLayer } from '../../workbench/SelectionContextCont
 import { NativeSelectionContext } from '../../workbench/NativeSelectionContext'
 import { QUICK_BAR_SELECTOR } from '../../editing/quickbar/usePointerGesture'
 import { useContextMenu, type MenuCommand } from '../../editing/commands/CommandMenu'
-import { requestObjectContextMenu } from '../../editing/commands/objectContextMenu'
+import { OBJECT_EDIT_EVENT, requestObjectContextMenu } from '../../editing/commands/objectContextMenu'
+import { hiddenObjectCommands, hiddenObjectName } from '../../editing/commands/hiddenObjectCommands'
 import type { LightEditTextOverride } from '../../../shared/contracts/runtime/lightEdit'
 import { canEditLayerInScope } from '../../../shared/teacherControllerRole'
 import { controllerDisplayFrame, useControllerDisplayRevision } from '../../authoring/controllerDisplayBounds'
@@ -697,6 +698,25 @@ export function SlideLocationWorkspace({
   snapshotRef.current = snapshot
   const readSnapshot = () => snapshotRef.current
   const canvasMenu = useContextMenu()
+  // Hidden objects stay findable on the canvas (M21): the label counts them, and a menu shows them again.
+  const hiddenLayers = slideEditorView?.layers.filter((layer) => !layer.item.visible && canEditLayerInScope(layer, editingScope)) ?? []
+  const hiddenMenu = (): MenuCommand[] => hiddenObjectCommands(
+    hiddenLayers.map((layer) => ({ id: layer.selectionId, name: hiddenObjectName(layer.item) })),
+    // Shown again and selected, so the teacher sees what came back.
+    (ids) => { ports.content.updateNodes(ids.map((nodeId) => ({ nodeId, patch: { visible: true } }))); ports.selection.selectNodes(ids) },
+  )
+  // Opens an object's own editor on request (the quick bar's and menus' 编辑公式).
+  const formulaEditRef = useRef<((nodeId: string) => boolean) | null>(null)
+  useEffect(() => {
+    const root = workspaceRef.current
+    if (!root) return
+    const request = (event: Event) => {
+      const itemId = (event as CustomEvent<{ itemId: string }>).detail?.itemId
+      if (itemId && formulaEditRef.current?.(itemId)) event.preventDefault()
+    }
+    root.addEventListener(OBJECT_EDIT_EVENT, request)
+    return () => root.removeEventListener(OBJECT_EDIT_EVENT, request)
+  }, [])
   const workspaceRef = useRef<HTMLDivElement>(null)
   const stageViewportRef = useRef<HTMLDivElement>(null)
   const gameHostRef = useRef<HTMLDivElement>(null)
@@ -2175,31 +2195,36 @@ export function SlideLocationWorkspace({
         ports.selection.selectNode(nodeId)
         ports.content.beginTextEdit(nodeId, 'canvas')
       }),
-      handle.bridge.onFormulaDoubleClick((nodeId) => {
-        const currentSnapshot = readSnapshot()
-        const view = currentSnapshot.view
-        if (!view || currentSnapshot.canvasMode !== 'edit') return
-        const item = nativeSlideLayer(view.layers, nodeId, 'formula')
-        if (!item) return
-        if (currentSnapshot.editingTextNodeId) {
-          ports.content.cancelTextEdit()
-          handle.bridge.setTextEditing(null)
-        }
-        setActiveComponentTextSession(null)
-        setActiveRuntimeTextSession(null)
-        ports.selection.selectNode(nodeId)
-        ports.content.beginTextEdit(nodeId, 'canvas')
-        setActiveFormulaEditSession({
-          projectId: currentSnapshot.projectId,
-          scope: currentSnapshot.editingScope,
-          sceneId: view.sceneId,
-          stateId: currentSnapshot.presentationStateId,
-          nodeId,
-        })
-      }),
+      handle.bridge.onFormulaDoubleClick((nodeId) => { startFormulaEdit(nodeId) }),
     ]
+    // The quick bar's and the menu's 编辑公式 open the same editor as a double-click.
+    function startFormulaEdit(nodeId: string): boolean {
+      const currentSnapshot = readSnapshot()
+      const view = currentSnapshot.view
+      if (!view || currentSnapshot.canvasMode !== 'edit') return false
+      const item = nativeSlideLayer(view.layers, nodeId, 'formula')
+      if (!item) return false
+      if (currentSnapshot.editingTextNodeId) {
+        ports.content.cancelTextEdit()
+        handle.bridge.setTextEditing(null)
+      }
+      setActiveComponentTextSession(null)
+      setActiveRuntimeTextSession(null)
+      ports.selection.selectNode(nodeId)
+      ports.content.beginTextEdit(nodeId, 'canvas')
+      setActiveFormulaEditSession({
+        projectId: currentSnapshot.projectId,
+        scope: currentSnapshot.editingScope,
+        sceneId: view.sceneId,
+        stateId: currentSnapshot.presentationStateId,
+        nodeId,
+      })
+      return true
+    }
+    formulaEditRef.current = startFormulaEdit
 
     return () => {
+      formulaEditRef.current = null
       observer.disconnect()
       unsubscribers.forEach((unsubscribe) => unsubscribe())
       handle.destroy()
@@ -2662,7 +2687,7 @@ export function SlideLocationWorkspace({
         if (
           event.target instanceof Element &&
           event.target.closest(
-            '.canvas-authoring-target, .canvas-plain-text-editor, .text-edit-overlay, .text-edit-toolbar, .formula-edit-dialog, .canvas-mode-switch, .canvas-view-controls',
+            '.canvas-authoring-target, .canvas-plain-text-editor, .text-edit-overlay, .text-edit-toolbar, .formula-edit-dialog, .canvas-mode-switch, .canvas-view-controls, .canvas-label',
           )
         ) return
         const currentSnapshot = readSnapshot()
@@ -2941,6 +2966,8 @@ export function SlideLocationWorkspace({
           { id: 'canvas.insert-video', label: '在此插入视频…', group: 'insert', run: () => onAddVideo(world.x, world.y) },
           { id: 'canvas.insert-rectangle', label: '在此插入矩形', group: 'insert', run: () => ports.content.addRectangleNode(world.x, world.y) },
           { id: 'canvas.insert-formula', label: '在此插入公式', group: 'insert', run: () => ports.content.addFormulaNode(world.x, world.y) },
+          { id: 'canvas.hidden', label: '找回隐藏的对象', group: 'view', run: () => canvasMenu.open(point, '隐藏的对象', hiddenMenu()),
+            disabledReason: hiddenLayers.length ? null : '本页没有隐藏的对象' },
           { id: 'canvas.try-run', label: '当前位置试运行', group: 'view', run: () => ports.canvas.setCanvasMode('run') },
         ])
       }}
@@ -3021,7 +3048,7 @@ export function SlideLocationWorkspace({
         }
       }}
     >
-      <NativeSelectionContext documentId={documentId} revision={snapshot.projectRevision} locationId={courseLocationId} itemIds={selectedNodeIds} stateId={activePresentationStateId} sceneItemIds={slideEditorView?.layers.filter(layer => layer.source === 'scene').map(layer => layer.selectionId)} enabled={canvasMode === 'edit'} textEditing={Boolean(editingNode)} bounds={id => {
+      <NativeSelectionContext documentId={documentId} revision={snapshot.projectRevision} locationId={courseLocationId} itemIds={selectedNodeIds} stateId={activePresentationStateId} sceneItemIds={slideEditorView?.layers.filter(layer => layer.source === 'scene').map(layer => layer.selectionId)} enabled={canvasMode === 'edit'} textEditing={Boolean(editingNode || editingFormulaNode)} bounds={id => {
         const layer = slideEditorView?.layers.find(value => value.selectionId === id), viewport = readCandidateViewport()
         if (!layer || !viewport) return null
         // A teacher controller is anchored where it is shown: collapsed, and kept on the page.
@@ -3095,6 +3122,11 @@ export function SlideLocationWorkspace({
             ? '母版'
             : slideEditorView?.presentation?.states.find((state) => state.active)?.name
               ?? '状态'}`}
+        {canvasMode === 'edit' && hiddenLayers.length > 0 && <button type="button" className="canvas-label__hidden"
+          onClick={(event) => {
+            const rect = event.currentTarget.getBoundingClientRect()
+            canvasMenu.open({ x: rect.left, y: rect.bottom + 4 }, '隐藏的对象', hiddenMenu())
+          }}>{hiddenLayers.length} 个隐藏对象</button>}
       </div>
       <div ref={stageViewportRef} className="canvas-viewport"
         data-workspace-media-drop={mediaDragOver || undefined}

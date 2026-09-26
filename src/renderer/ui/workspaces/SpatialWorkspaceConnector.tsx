@@ -95,15 +95,15 @@ export function SpatialWorkspaceConnector({ onDropWorkspaceMedia }: { onDropWork
         sessionToken: authoringSession.token,
         target: { kind: 'world', field: 'world' },
       })
-      const layerTargets = new Map(view.layers.map((layer) => [
-        layer.selectionId,
-        captureSpatialEditorAuthoringTarget({
-          view,
-          sessionToken: authoringSession.token,
-          target: { kind: 'layer', layerItemId: layer.selectionId, field: 'frame' },
-        }),
-      ] as const))
-      return { worldTarget, layerTargets }
+      const layerTarget = (layerItemId: string, field: 'frame' | 'item') => captureSpatialEditorAuthoringTarget({
+        view,
+        sessionToken: authoringSession.token,
+        target: { kind: 'layer', layerItemId, field },
+      })
+      const layerTargets = new Map(view.layers.map((layer) => [layer.selectionId, layerTarget(layer.selectionId, 'frame')] as const))
+      // Property patches (showing a hidden object again) address the whole item.
+      const layerItemTargets = new Map(view.layers.map((layer) => [layer.selectionId, layerTarget(layer.selectionId, 'item')] as const))
+      return { worldTarget, layerTargets, layerItemTargets }
     } catch {
       return null
     }
@@ -157,6 +157,7 @@ export function SpatialWorkspaceConnector({ onDropWorkspaceMedia }: { onDropWork
       runtimeContentAuthoring={runtimeContentAuthoring}
       worldTarget={authoringTargets.worldTarget}
       layerTargets={authoringTargets.layerTargets}
+      layerItemTargets={authoringTargets.layerItemTargets}
       commands={commands}
       onCanvasModeChange={setCanvasMode}
       onPaste={selectionObjectCommands.paste}

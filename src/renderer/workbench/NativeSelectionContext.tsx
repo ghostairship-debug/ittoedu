@@ -1,11 +1,12 @@
-import { AArrowDown, AArrowUp, AlignCenter, AlignLeft, AlignRight, AlignHorizontalJustifyStart, Baseline, Bold, ChevronsDownUp, ChevronsUpDown, Eye, EyeOff, Highlighter, ImageIcon, Lock, Italic, PaintBucket, Pencil, Play, Repeat, Square, Type, Underline, Unlock, VolumeX } from 'lucide-react'
+import { AArrowDown, AArrowUp, AlignCenter, AlignLeft, AlignRight, AlignHorizontalJustifyStart, Baseline, Bold, ChevronsDownUp, ChevronsUpDown, Crop, Eye, EyeOff, Film, Highlighter, ImageIcon, Lock, Italic, PaintBucket, Pencil, Play, Repeat, Scan, Sigma, Square, Type, Underline, Unlock, VolumeX } from 'lucide-react'
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { isStrokeOnlyShapeType } from '../../shared/contracts/native-v1'
 import { useCourseEditorActions } from '../documents/CourseEditorActionsContext'
 import { selectionObjectCommands } from '../composition/selection/selectionObjectCommands'
 import { useContextMenu, type MenuCommand } from '../editing/commands/CommandMenu'
-import { multiObjectCommands, singleObjectCommands } from '../editing/commands/objectCommands'
-import { OBJECT_CONTEXT_MENU_EVENT, type ObjectContextMenuRequest } from '../editing/commands/objectContextMenu'
+import { IMAGE_FIT_LABEL, multiObjectCommands, singleObjectCommands, type SingleObjectState } from '../editing/commands/objectCommands'
+import { OBJECT_CONTEXT_MENU_EVENT, requestObjectEdit, type ObjectContextMenuRequest } from '../editing/commands/objectContextMenu'
+import { ImageCropOverlay } from '../editing/crop/ImageCropOverlay'
 import { rotatedBoundingBox, unionBoxes, visibleBounds, type QuickBarBounds, type QuickBarRect } from '../editing/quickbar/placeQuickBar'
 import { QuickBarAiButton, QuickBarButton, QuickBarColorButton, QuickBarLabel, QuickBarMenu, QuickBarPopoverButton, QuickBarSeparator, SelectionQuickBar } from '../editing/quickbar/SelectionQuickBar'
 import { usePointerGesture } from '../editing/quickbar/usePointerGesture'
@@ -58,7 +59,7 @@ function run(action: () => unknown, onError: (message: string) => void) {
 }
 
 /** Type-specific common actions of one selected object; everything else stays in the editor. */
-function ObjectActions({ view, patch, replaceImage, editText }: { view: PropertiesItemView; patch(patch: PropertiesPatch): void; replaceImage?: () => void; editText?: () => void }) {
+function ObjectActions({ view, patch, replaceImage, editText, extra = {} }: { view: PropertiesItemView; patch(patch: PropertiesPatch): void; replaceImage?: () => void; editText?: () => void; extra?: Pick<SingleObjectState, 'editFormula' | 'crop' | 'fit' | 'replaceVideo'> }) {
   if (view.type === 'text') {
     const align = ALIGN_ORDER.includes(view.style.align) ? view.style.align : 'left'
     const next = ALIGN_ORDER[(ALIGN_ORDER.indexOf(align) + 1) % ALIGN_ORDER.length]!
@@ -75,9 +76,25 @@ function ObjectActions({ view, patch, replaceImage, editText }: { view: Properti
       <QuickBarButton label={`${ALIGN_LABEL[align]}（点按切换为${ALIGN_LABEL[next]}）`} icon={ALIGN_ICON[align]} onClick={() => patch({ style: { align: next } })} />
     </>
   }
-  if (view.type === 'formula') return <QuickBarColorButton label="公式颜色" icon={<Baseline size={14} />} value={view.style.color} onPick={color => { if (color) patch({ style: { color } }) }} />
-  if (view.type === 'image') return replaceImage ? <QuickBarButton label="替换图片" text="替换" icon={<ImageIcon size={14} />} onClick={replaceImage} /> : null
+  if (view.type === 'formula') return <>
+    {extra.editFormula && <QuickBarButton label="编辑公式" icon={<Sigma size={14} />} onClick={extra.editFormula} />}
+    <QuickBarColorButton label="公式颜色" icon={<Baseline size={14} />} value={view.style.color} onPick={color => { if (color) patch({ style: { color } }) }} />
+  </>
+  if (view.type === 'image') {
+    const { crop, fit } = extra
+    return <>
+      {replaceImage && <QuickBarButton label="替换图片" text="替换" icon={<ImageIcon size={14} />} onClick={replaceImage} />}
+      {crop && <QuickBarButton label={crop.disabledReason ?? '裁剪'} text="裁剪" icon={<Crop size={14} />} disabled={Boolean(crop.disabledReason)} onClick={crop.run} />}
+      {fit && <QuickBarPopoverButton label="显示方式" text={IMAGE_FIT_LABEL[fit.value].replace(/（.*）/, '')} icon={<Scan size={14} />} popoverLabel="显示方式" popupRole="menu">
+        {close => <div className="selection-quick-bar__menu" role="menu" aria-label="显示方式">
+          {(['contain', 'cover', 'stretch'] as const).map(mode => <button key={mode} type="button" role="menuitemradio" aria-checked={fit.value === mode}
+            onMouseDown={event => event.preventDefault()} onClick={() => { close(); if (fit.value !== mode) fit.set(mode) }}>{IMAGE_FIT_LABEL[mode]}</button>)}
+        </div>}
+      </QuickBarPopoverButton>}
+    </>
+  }
   if (view.type === 'video') return <>
+    {extra.replaceVideo && <QuickBarButton label="替换视频" text="替换" icon={<Film size={14} />} onClick={extra.replaceVideo} />}
     <QuickBarButton label="自动播放" icon={<Play size={14} />} pressed={view.autoplay} onClick={() => patch({ autoplay: !view.autoplay })} />
     <QuickBarButton label="循环播放" icon={<Repeat size={14} />} pressed={view.loop} onClick={() => patch({ loop: !view.loop })} />
     <QuickBarButton label="静音" icon={<VolumeX size={14} />} pressed={view.muted} onClick={() => patch({ muted: !view.muted })} />
@@ -112,6 +129,8 @@ export function NativeSelectionContext({ documentId, revision, locationId, itemI
   const [anchor, setAnchor] = useState<QuickBarRect | null>(null)
   const [view, setView] = useState<QuickBarBounds | null>(null)
   const [notice, setNotice] = useState('')
+  // The image being cropped in place (M21); any change of selection ends it.
+  const [cropping, setCropping] = useState<string | null>(null)
   const ids = JSON.stringify(itemIds), sceneIds = JSON.stringify(sceneItemIds)
   useLayoutEffect(() => { setRoot(marker.current?.closest('main') ?? null) }, [])
   // Right-click: the workspace selects what is under the pointer and asks for that selection's menu (M21).
@@ -129,7 +148,7 @@ export function NativeSelectionContext({ documentId, revision, locationId, itemI
     root.addEventListener(OBJECT_CONTEXT_MENU_EVENT, request)
     return () => root.removeEventListener(OBJECT_CONTEXT_MENU_EVENT, request)
   }, [root, contextMenu.open])
-  useEffect(() => { setNotice('') }, [documentId, locationId, ids, stateId])
+  useEffect(() => { setNotice(''); setCropping(null) }, [documentId, locationId, ids, stateId])
   useEffect(() => {
     if (!documentId || !ownsDocumentSelection) return
     void workbenchSelection.observe(documentId, revision, snapshot => enabled && locationId && itemIds.length
@@ -197,10 +216,21 @@ export function NativeSelectionContext({ documentId, revision, locationId, itemI
   let contextItems: MenuCommand[] = []
   if (single) {
     const node = single.view, patch = single.patch
-    const objectState = { locked: node.locked, visible: node.visible, disabledReason: single.disabledReason,
+    // Cropping and replacing a video are Slide-page tools for now (M21).
+    const slidePage = selection?.kind === 'slide-native' && !selection.spatialMode
+    const objectState: SingleObjectState = { locked: node.locked, visible: node.visible, disabledReason: single.disabledReason,
       setLocked: (locked: boolean) => patch({ locked }), setVisible: (visible: boolean) => patch({ visible }),
-      // The main action matches the quick bar's button for the type: 编辑文字 for text, 替换图片 for images.
-      editText: node.type === 'text' ? single.editText : undefined, replaceImage: node.type === 'image' ? single.replaceImage : undefined }
+      // The main action matches the quick bar's button for the type: 编辑文字 for text, 编辑公式 for formulas, 替换图片 and
+      // 裁剪 for images, 替换视频 for videos.
+      editText: node.type === 'text' ? single.editText : undefined,
+      // The canvas opens its formula editor on request, as a double-click does.
+      editFormula: node.type === 'formula' && single.editText ? () => { if (!root || !requestObjectEdit(root, node.id)) report('公式编辑器现在打不开，请双击公式再试。') } : undefined,
+      replaceImage: node.type === 'image' ? single.replaceImage : undefined,
+      crop: node.type === 'image' && bounds && slidePage
+        ? { run: () => setCropping(node.id), disabledReason: node.rotation ? '旋转的图片请先把旋转归零再裁剪' : null } : undefined,
+      fit: node.type === 'image' ? { value: node.fit, set: fit => patch({ fit }) } : undefined,
+      replaceVideo: node.type === 'video' && slidePage && actions?.replaceVideo ? () => actions.replaceVideo?.() : undefined,
+    }
     const ports = selectionObjectCommands.portsFor(itemIds[0]!)
     const collapsed = node.type === 'external-component' && node.props.collapsible === true && node.props.defaultCollapsed === true
     const toggleCollapsed = () => { if (node.type === 'external-component') patch({ props: { ...node.props, collapsible: true, defaultCollapsed: !collapsed } }) }
@@ -230,7 +260,7 @@ export function NativeSelectionContext({ documentId, revision, locationId, itemI
     }
     else {
       content = <>
-        <ObjectActions view={node} patch={patch} replaceImage={single.replaceImage} editText={single.editText} />
+        <ObjectActions view={node} patch={patch} replaceImage={single.replaceImage} editText={single.editText} extra={objectState} />
         {node.type === 'runtime' && <QuickBarPopoverButton label="页面文字" text="页面文字" icon={<Type size={14} />} popoverLabel="页面文字">
           {() => <RuntimePageTextList itemId={node.id} onError={report} />}
         </QuickBarPopoverButton>}
@@ -266,6 +296,17 @@ export function NativeSelectionContext({ documentId, revision, locationId, itemI
   }
   menuRequestState.current = { ids: sortedIds(itemIds), items: contextItems }
   if (!enabled) return null
+  // The in-place crop of the selected image, drawn over the canvas while it runs (M21).
+  const cropView = cropping && single?.view.type === 'image' && single.view.id === cropping ? single.view : null
+  const cropScreen = cropView ? bounds?.(cropView.id) ?? null : null
+  const cropSource = cropView ? selectionObjectCommands.imageSource(cropView.assetId) : null
+  const cropPatch = single?.patch
+  const cropElement = cropView && cropScreen && cropSource && cropPatch ? <ImageCropOverlay screen={cropScreen}
+    image={{ frame: { x: cropView.x, y: cropView.y, width: cropView.width, height: cropView.height }, crop: cropView.crop, fit: cropView.fit,
+      cropX: cropView.cropX, cropY: cropView.cropY, flipX: cropView.flipX, flipY: cropView.flipY, source: { width: cropSource.width, height: cropSource.height } }}
+    source={{ bytes: cropSource.bytes, mimeType: cropSource.mimeType }}
+    onCommit={result => { setCropping(null); cropPatch({ x: result.frame.x, y: result.frame.y, width: result.frame.width, height: result.frame.height, crop: result.crop }) }}
+    onCancel={() => setCropping(null)} /> : null
   return <span ref={marker} className="native-selection-context" aria-hidden="true">
     {overlay && <input ref={replacement} type="file" accept="image/*" hidden tabIndex={-1} aria-label="替换浮层图片文件" onChange={event => {
       const file = event.target.files?.[0]; event.target.value = ''
@@ -274,10 +315,11 @@ export function NativeSelectionContext({ documentId, revision, locationId, itemI
     }} />}
     {pinnedBoxes.map((box, index) => <span key={index} aria-hidden="true" data-pinned-object="true" className="native-selection-context__pinned"
       style={{ left: box.left, top: box.top, width: box.width, height: box.height, transform: box.rotation ? `rotate(${box.rotation}deg)` : undefined }} />)}
-    {content && <SelectionQuickBar label="选中对象快捷工具" anchor={anchor} bounds={view} suspended={gesture || textEditing} selectionKey={`${documentId}:${locationId}:${stateId}:${ids}`} aboveOffset={ROTATION_HANDLE_CLEARANCE}>
+    {content && <SelectionQuickBar label="选中对象快捷工具" anchor={anchor} bounds={view} suspended={gesture || textEditing || cropping !== null} selectionKey={`${documentId}:${locationId}:${stateId}:${ids}`} aboveOffset={ROTATION_HANDLE_CLEARANCE}>
       {content}
       {notice && <span role="alert" className="selection-quick-bar__notice" title={notice}>{notice}</span>}
     </SelectionQuickBar>}
     {contextMenu.element}
+    {cropElement}
   </span>
 }

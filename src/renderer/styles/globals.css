@@ -898,6 +898,24 @@ button:disabled {
   background: rgba(23, 62, 49, 0.88);
 }
 
+/* M21: hidden objects stay findable; the count opens the list that shows them again. */
+.canvas-label__hidden {
+  margin-left: 6px;
+  padding: 0 7px;
+  border: 0;
+  border-radius: 999px;
+  color: #245b46;
+  background: rgba(36, 91, 70, 0.12);
+  font: inherit;
+  letter-spacing: 0;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.canvas-label__hidden:hover {
+  background: rgba(36, 91, 70, 0.22);
+}
+
 .canvas-mode-switch {
   position: absolute;
   top: 7px;

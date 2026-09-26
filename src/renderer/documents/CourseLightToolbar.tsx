@@ -22,6 +22,9 @@ export interface CourseLightToolbarProps {
   onAddImage(): void
   onAddVideo(): void
   onAddAudio(): void
+  /** Shapes and formulas inserted from the workbench (M21); omitted where they cannot go. */
+  onAddShape?(shapeType: LightShapeType): void
+  onAddFormula?(): void
   insertSurface: 'slide' | 'flow' | 'spatial' | null
   editingScope: 'scene' | 'global'
   spatialScope: 'world' | 'surface' | 'global' | null
@@ -35,6 +38,12 @@ export interface CourseLightToolbarProps {
 }
 
 const COMPACT_WIDTH = 560
+
+export type LightShapeType = 'rectangle' | 'rounded-rectangle' | 'ellipse' | 'triangle' | 'line' | 'arrow-right'
+/** The shapes a teacher reaches for most; the editor's element library has the rest. */
+const LIGHT_SHAPES: ReadonlyArray<readonly [LightShapeType, string]> = [
+  ['rectangle', '矩形'], ['rounded-rectangle', '圆角矩形'], ['ellipse', '椭圆'], ['triangle', '三角形'], ['line', '直线'], ['arrow-right', '箭头'],
+]
 
 /** Close a toolbar popover on an outside press or Escape. */
 function useDismiss(open: boolean, ref: RefObject<HTMLElement | null>, close: () => void) {
@@ -119,6 +128,14 @@ export function CourseLightToolbar(props: CourseLightToolbarProps) {
           <button type="button" aria-label={audioToDocument ? '插入音频到正文' : '导入音频到声音库'} disabled={props.insertSurface === null || Boolean(audioToDocument && flowMediaUnavailable)} title={flowMediaUnavailable ?? undefined} onClick={() => insert(props.onAddAudio)}>
             <span>音频</span><small>{audioToDocument ? '文中音频块' : '加入声音库供互动播放'}</small>
           </button>
+          {props.onAddFormula && <button type="button" aria-label="插入公式" disabled={Boolean(unavailable || flowMediaUnavailable)} title={unavailable ?? flowMediaUnavailable ?? undefined} onClick={() => { const add = props.onAddFormula; if (add) insert(add) }}>
+            <span>公式</span><small>{props.insertSurface === 'flow' ? '文中公式块' : '可编辑的数学公式'}</small>
+          </button>}
+          {props.onAddShape && <div className="course-light-tools__insert-shapes" role="group" aria-label="形状">
+            <span>形状{props.insertSurface === 'flow' ? '（页面浮层）' : ''}</span>
+            {LIGHT_SHAPES.map(([shape, label]) => <button key={shape} type="button" aria-label={`插入${label}`} disabled={Boolean(unavailable)} title={unavailable ?? undefined}
+              onClick={() => { const add = props.onAddShape; if (add) insert(() => add(shape)) }}>{label}</button>)}
+          </div>}
           {unavailable && <p role="status">{unavailable}</p>}
           {flowMediaUnavailable && <p role="status">{flowMediaUnavailable}</p>}
         </div>}

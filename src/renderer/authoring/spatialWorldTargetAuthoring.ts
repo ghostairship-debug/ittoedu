@@ -617,6 +617,20 @@ export function createSpatialWorldTargetAuthoringController(port: SpatialWorldTa
     return result(viewport, { hit, ...(command ? { command } : {}) })
   }
 
+  /** Opens one object's content editor by id, as a double-click on it does (the quick bar's 编辑公式, M21). */
+  const beginContentEdit = (layerItemId: string): SpatialAuthoringReceipt | null => {
+    const snapshot = port.readSnapshot()
+    const layer = hits(snapshot).find((candidate) => candidate.layerItemId === layerItemId)
+    const target = snapshot.layerTargets.get(layerItemId)
+    if (!layer || !target || !isEditable(layer)) return null
+    return port.commands.run(target, {
+      kind: 'begin-content-edit',
+      source: 'canvas',
+      expectedEdit: snapshot.contentEdit,
+      expectedContentEdit: snapshot.contentEdit,
+    })
+  }
+
   const zoomSession = (zoom: number, viewport: StageRect): SpatialWorldTargetAuthoringResult => {
     const snapshot = port.readSnapshot()
     const command = port.commands.run(snapshot.worldTarget, {
@@ -636,6 +650,7 @@ export function createSpatialWorldTargetAuthoringController(port: SpatialWorldTa
     pointerUp,
     pointerCancel,
     doubleClick,
+    beginContentEdit,
     zoomSession,
   }
 }

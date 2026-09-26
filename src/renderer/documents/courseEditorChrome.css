@@ -23,6 +23,9 @@
 .course-light-tools__insert-menu button:disabled, .course-light-tools__more-menu button:disabled { opacity: .55; cursor: not-allowed; }
 .course-light-tools__insert-menu small { color: var(--muted-text, #66758a); }
 .course-light-tools__insert-menu p { margin: 4px 0; padding: 2px 8px; color: var(--muted-text, #66758a); font-size: 12px; }
+.course-light-tools__insert-shapes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 2px; margin-top: 4px; padding-top: 6px; border-top: 1px solid var(--border-color, #e3e8ee); }
+.course-light-tools__insert-shapes > span { grid-column: 1 / -1; padding: 0 8px 2px; color: var(--muted-text, #66758a); font-size: 12px; }
+.course-light-tools__insert-menu .course-light-tools__insert-shapes button { align-items: center; padding: 5px 4px; text-align: center; font-size: 12px; }
 .course-editor-frame--light .status-bar { font-size: 11px; }
 
 .app-main.editor-panel-layout--light:has(> .course-chat) { grid-template-columns: minmax(0, 1fr); }
