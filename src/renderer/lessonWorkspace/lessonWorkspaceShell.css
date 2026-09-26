@@ -13,6 +13,11 @@
 .lesson-workspace-shell button{cursor:pointer;border:1px solid var(--border,#d9d6ce);border-radius:8px;padding:7px 12px;background:var(--surface,#fffefa);color:var(--ink,#17221d);transition:background .14s ease,border-color .14s ease}
 .lesson-workspace-shell button:hover{background:var(--surface-muted,#ece9e1)}
 .lesson-workspace-shell button:disabled{cursor:not-allowed;opacity:.5}
+/* The shell's plain button look must not swallow the primary and danger styles (hover turned them into dark text on green). */
+.lesson-workspace-shell .primary-button{border-color:transparent;background:#245b46;color:#fff}
+.lesson-workspace-shell .primary-button:hover:not(:disabled){background:#2e7057}
+.lesson-workspace-shell .danger-button{border-color:transparent;background:#b34e46;color:#fff}
+.lesson-workspace-shell .danger-button:hover:not(:disabled){background:#c05a51}
 .lesson-workspace-shell .lesson-primary-action{border-color:var(--green,#245b46);background:var(--green,#245b46);color:#fffefa}
 .lesson-workspace-shell .lesson-primary-action:hover{background:var(--green-deep,#173e31);border-color:var(--green-deep,#173e31)}
 .lesson-workspace-toolbar button{border-color:rgba(244,241,234,.28);background:transparent;color:#f4f1ea}

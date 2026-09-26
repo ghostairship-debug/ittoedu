@@ -132,6 +132,18 @@ describe('unified export menu', () => {
     expect(onExport).toHaveBeenCalledWith('web-package')
   })
 
+  it('closes the export menu on a click elsewhere or Escape', () => {
+    renderToolbar(vi.fn())
+    const menu = screen.getByTestId('export-menu-trigger').closest('details')!
+    fireEvent.click(screen.getByLabelText('导出'))
+    expect(menu.open).toBe(true)
+    fireEvent.pointerDown(document.body)
+    expect(menu.open).toBe(false)
+    fireEvent.click(screen.getByLabelText('导出'))
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(menu.open).toBe(false)
+  })
+
   it('routes V9 course HTML through the Published Course V2 producer', () => {
     const document = selectActiveCourseProjectDocument(useEditorStore.getState())
     expect(document?.schemaVersion).toBe(9)

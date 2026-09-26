@@ -18,7 +18,8 @@ import {
   ShieldCheck,
   Undo2,
 } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { useDismissableDetails } from './useDismissableDetails'
 import type { RecentProjectEntry } from '../../shared/ipcTypes'
 import type { CourseProjectHealthSummary } from '../../shared/courseProjectHealth'
 import { APP_NAME } from '../../shared/constants'
@@ -106,6 +107,13 @@ export function TopToolbar({
   onExport,
 }: TopToolbarProps) {
   const editorChrome = useCourseEditorChrome()
+  // The toolbar's drop-down menus close on a click elsewhere or Escape, like the workbench menus.
+  const newMenuRef = useRef<HTMLDetailsElement>(null), recentMenuRef = useRef<HTMLDetailsElement>(null)
+  const moreMenuRef = useRef<HTMLDetailsElement>(null), exportMenuRef = useRef<HTMLDetailsElement>(null)
+  useDismissableDetails(newMenuRef)
+  useDismissableDetails(recentMenuRef)
+  useDismissableDetails(moreMenuRef)
+  useDismissableDetails(exportMenuRef)
   const dirty = useEditorStore(selectHasUnsavedCourseChanges)
   const canUndo = useEditorStore(selectCanUndoActiveSurface)
   const canRedo = useEditorStore(selectCanRedoActiveSurface)
@@ -147,7 +155,7 @@ export function TopToolbar({
             <FilePlus2 size={18} />
           </ToolButton>
           {onNewSpatial || onNewFlow ? (
-            <details className="new-project-menu">
+            <details ref={newMenuRef} className="new-project-menu">
               <summary className="tool-button" title="更多新建选项" aria-label="更多新建选项">
                 <ChevronDown size={14} />
               </summary>
@@ -190,7 +198,7 @@ export function TopToolbar({
         {onImportPptx && <ToolButton label="导入 PPT" title="导入 PPT（.pptx）" disabled={busy} onClick={onImportPptx}>
           <FileUp size={18} />
         </ToolButton>}
-        <details className="recent-projects">
+        <details ref={recentMenuRef} className="recent-projects">
           <summary className="tool-button" title="打开最近工程">
             <History size={18} />
             <span>最近</span>
@@ -247,7 +255,7 @@ export function TopToolbar({
 
       <div className="toolbar__separator" />
 
-      {(onOpenRecipes || onOpenProductivity || onOpenMaterials) && <details className="toolbar-more-menu">
+      {(onOpenRecipes || onOpenProductivity || onOpenMaterials) && <details ref={moreMenuRef} className="toolbar-more-menu">
         <summary className="tool-button" aria-label="创作工具"><FileText size={18} /><span>创作工具</span></summary>
         <div className="toolbar-more-menu__panel" role="menu" aria-label="创作工具菜单">
           <button type="button" role="menuitem" disabled={busy} onClick={event => {
@@ -326,7 +334,7 @@ export function TopToolbar({
       >
         <Eye size={18} />
       </ToolButton>
-      <details className="export-menu">
+      <details ref={exportMenuRef} className="export-menu">
         <summary
           className="tool-button tool-button--accent export-menu__trigger"
           data-testid="export-menu-trigger"
