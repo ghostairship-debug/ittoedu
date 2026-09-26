@@ -70,6 +70,7 @@ import {
   STAGE_VIEWPORT_HEIGHT,
   STAGE_VIEWPORT_WIDTH,
   type StageRect,
+  type StagePanRange,
   type StageSelectionOverlayGeometry,
   stageViewportPanRange,
 } from '../../authoring/stageViewportTransform'
@@ -903,11 +904,19 @@ export function SlideLocationWorkspace({
   }, [])
 
   const setZoom = useCallback((zoom: number) => {
-    setView((current) => ({
-      ...current,
-      zoom: Math.max(0.5, Math.min(2, Math.round(zoom * 20) / 20)),
-    }))
-  }, [])
+    setView((current) => {
+      const next = Math.max(0.5, Math.min(2, Math.round(zoom * 20) / 20))
+      if (!(stageViewportSize.width > 0 && stageViewportSize.height > 0)) return { ...current, zoom: next }
+      // Zooming out, a page that fits again on an axis returns to its place; one still larger keeps a pan within reach
+      // (otherwise a page scrolled sideways while zoomed in stays off-centre with nothing left to scroll).
+      const range = stageViewportPanRange(createStageViewportTransform({
+        viewport: { x: 0, y: 0, width: stageViewportSize.width, height: stageViewportSize.height },
+        zoom: next, pan: { x: current.x, y: current.y }, stage: slideCanvas, fit: 'page',
+      }))
+      const within = (value: number, axis: StagePanRange | null) => axis ? Math.max(axis.min, Math.min(axis.max, value)) : 0
+      return { ...current, zoom: next, x: within(current.x, range.x), y: within(current.y, range.y) }
+    })
+  }, [slideCanvas, stageViewportSize.height, stageViewportSize.width])
 
   const resetView = useCallback(() => {
     setView({ zoom: 1, x: 0, y: 0 })
