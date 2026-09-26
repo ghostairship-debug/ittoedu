@@ -5,7 +5,7 @@ import { createChartNode, createChartLayerItem } from '../../../core/tools/nativ
 import type { ChartType } from '../../course/chartContentOperations'
 import type { ChartTextField } from '../../authoring/chartTextDraft'
 import type { ComponentPackageData } from '../../../shared/componentTypes'
-import type { CourseProjectDocument, FlowBlock } from '../../../shared/courseProjectTypes'
+import type { CourseProjectDocument, FlowBlock, NativeLayerItem } from '../../../shared/courseProjectTypes'
 import type { FlowParagraphAnchor } from '../../../shared/flowParagraphAnchors'
 import type { FormulaAstNode } from '../../../shared/contracts/native-v1'
 import type { DocumentDiagnostic } from '../../../shared/document/ports'
@@ -269,7 +269,7 @@ export type FlowAuthoringIntent = (
       readonly bytes: Uint8Array
     }
   | { readonly kind: 'move-block'; readonly direction: 'up' | 'down' }
-  | { readonly kind: 'convert-block-to-overlay' }
+  | { readonly kind: 'convert-block-to-overlay'; readonly frame?: NativeLayerItem['frame']; readonly paragraphAnchor?: FlowParagraphAnchor }
   | { readonly kind: 'convert-overlay-to-document' }
   | { readonly kind: 'patch-overlay-paper-space'; readonly paperSpace: 'viewport' | 'paper' }
   | { readonly kind: 'patch-overlay-body-plane'; readonly bodyPlane: 'overlay' | 'underlay' }
@@ -1452,6 +1452,8 @@ export function createFlowAuthoringSlice(
           if (found?.block.type === 'media') {
             return persistIntentResult(convertFlowMediaBlockToOverlay(document, selection, {
               expectedRevision: document.revision,
+              frame: intent.frame,
+              paragraphAnchor: intent.paragraphAnchor,
             }))
           }
           if (found?.block.type === 'component') {

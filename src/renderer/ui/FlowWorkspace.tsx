@@ -11,6 +11,7 @@ import { documentResourceReferences } from '../../shared/document/resources'
 import { FLOW_BODY_CSS, FLOW_BODY_PAPER_PADDING, FLOW_BODY_SCROLL_PADDING, FLOW_COMPONENT_BLOCK_HEIGHT, flowPaperMaxWidth, resolveFlowBodyWidth } from '../../shared/flowBodyPresentation'
 import { measureFlowPaperOrigin } from '../../shared/flowViewportGeometry'
 import type { FlowParagraphBlockRect } from '../../shared/flowParagraphAnchors'
+import { MIN_NODE_SIZE } from '../../shared/constants'
 import { SharedDocumentEditor, type SharedDocumentEditorHandle } from '../document'
 import { createFlowDocumentResourcePort } from '../document/flowDocumentResources'
 import { createDocumentClipboardContext, readDocumentClipboardContext } from '../document/documentClipboardContext'
@@ -44,6 +45,7 @@ import { FlowPaperMedia } from './flow/FlowPaperMedia'
 import { FlowMediaCropEditor } from './flow/FlowMediaCropEditor'
 import type { FlowMediaToolPort } from './flow/flowMediaCommands'
 import { observeFlowParagraphLayout } from './flow/flowParagraphLayout'
+import { flowMediaFloatAnchor } from './flow/flowMediaFloatPlacement'
 
 export interface FlowWorkspaceProps {
   readonly documentId?: string | null
@@ -257,7 +259,19 @@ export function FlowWorkspace({ documentId, view, sessionToken, assets, selectio
           generation: captured.generation, revision: captured.revision + (receipt?.historyEntry ? 1 : 0),
           blockId: block.id, expires: Date.now() + 1000 })
       },
-      convertToOverlay: () => { if (matchesCurrent()) run({ kind: 'convert-block-to-overlay' }, block.id) },
+      convertToOverlay: () => {
+        if (!matchesCurrent()) return
+        const paper = paperRef.current
+        const media = paper?.querySelector<HTMLElement>(`[data-flow-block-id="${CSS.escape(block.id)}"] [data-flow-media-kind="${block.mediaKind}"]`)
+        if (!paper || !media || currentPaperLayout.width <= 0) { setError('正文尚未完成布局，请稍后再改为浮动'); return }
+        const paperRect = paper.getBoundingClientRect(), mediaRect = media.getBoundingClientRect()
+        const frame = { mode: 'absolute' as const, x: mediaRect.left - paperRect.left, y: mediaRect.top - paperRect.top,
+          width: mediaRect.width, height: mediaRect.height }
+        if (frame.width < MIN_NODE_SIZE || frame.height < MIN_NODE_SIZE) { setError('媒体尚未完成布局，请稍后再改为浮动'); return }
+        const paragraphAnchor = flowMediaFloatAnchor(block.id, frame, currentPaperLayout.width, currentPaperLayout.rects)
+        if (!paragraphAnchor) { setError('找不到可挂靠的正文段落，请稍后再试'); return }
+        run({ kind: 'convert-block-to-overlay', frame, paragraphAnchor }, block.id)
+      },
     }
   }
   useEffect(() => {

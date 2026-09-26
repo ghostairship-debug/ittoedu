@@ -1,5 +1,4 @@
 import { appendOverlayItem, nativeMediaOverlay, insertFlowOverlayText, insertFlowOverlayShape } from '../../core/tools/flowNativeInsertion'
-import { plainDocumentText } from '../../shared/document/content'
 import { CANVAS_HEIGHT, CANVAS_WIDTH, MIN_NODE_SIZE } from '../../shared/constants'
 import { formulaAstToAccessibleText } from '../../shared/formulaLinear'
 import {
@@ -61,6 +60,7 @@ import {
 import { isTeacherControllerLayerItem, LAYER_REJECT_LOCKED, lockedLayerWriteReason, refuseLockedLayerWrite, rejectIfStaleDocument, setGlobalLayerVisibleAtLocation, validateLocationVisibilitySpec, visibilityAfterTogglingLocation, type LayerCommandOptions, type LayerCommandResult } from '../../core/tools/globalLayers'
 import { commitCourseProjectMutation } from '../../core/tools/courseProjectMutation'
 import type { FlowParagraphAnchor } from '../../shared/flowParagraphAnchors'
+import { embedFlowNativeMedia, floatFlowMediaBlock } from '../../core/tools/flowMediaConversion'
 
 export const FLOW_NO_PAGE_REASON = '请先选择一个流式页面'
 export { FLOW_GLOBAL_STRUCTURE_REASON }
@@ -647,7 +647,7 @@ function selectedDocumentBlock(
 export function convertFlowMediaBlockToOverlay(
   document: CourseProjectDocument,
   selection: FlowEditorSelection,
-  options: FlowCommandOptions = {},
+  options: FlowCommandOptions & { readonly frame?: NativeLayerItem['frame']; readonly paragraphAnchor?: FlowParagraphAnchor } = {},
 ): FlowSharedAuthoringResult {
   const page = requireFlowPage(document, selection)
   if (!('surfaceId' in page)) return page
@@ -659,30 +659,31 @@ export function convertFlowMediaBlockToOverlay(
   const asset = requireMediaAsset(document, selected.block.assetId)
   if (!('assetId' in asset)) return asset
   const blockId = selected.block.id
-  const created = runOverlayMutation(document, options, (draft) => {
-    const surface = flowSurfaceIn(draft, page.surfaceId)
-    const found = findFlowBlockRecursive(surface.blocks, blockId)
-    if (!found || found.block.type !== 'media') throw new Error(FLOW_MEDIA_ONLY_CONVERT_REASON)
-    if (found.block.mediaKind === 'audio') throw new Error(FLOW_AUDIO_OVERLAY_REASON)
-    const item = nativeMediaOverlay(draft, {
-      assetId: found.block.assetId,
-      mediaKind: found.block.mediaKind,
-      label: found.block.caption ? plainDocumentText(found.block.caption) : found.block.altText,
+  const frame = options.frame ?? nativeMediaOverlay(document, {
+    assetId: selected.block.assetId,
+    mediaKind: selected.block.mediaKind,
+  }).frame
+  const anchor = options.paragraphAnchor ?? { blockId, offsetY: 0, xRatio: 0.1 }
+  try {
+    const created = floatFlowMediaBlock(document, {
+      surfaceId: page.surfaceId,
+      blockId,
+      frame,
+      anchor,
+      expectedRevision: options.expectedRevision,
+      now: options.now,
     })
-    surface.blocks = removeBlocksById(surface.blocks, new Set([blockId]))
-    syncFlowCourseLocations(draft, page.surfaceId)
-    appendOverlayItem(draft, { source: 'surface', surfaceId: page.surfaceId }, item)
-    return [item.layerItemId]
-  }, '已改为页面浮层')
-  if (!created.ok || !created.nextDocument || !created.createdLayerItemIds?.[0]) return created
-  return {
-    ...created,
-    ownership: 'viewport-overlay',
-    selection: selectFlowOverlay(
-      created.nextDocument,
-      page.locationId,
-      [created.createdLayerItemIds[0]],
-    ),
+    return {
+      ok: true,
+      reason: '已改为页面浮层',
+      nextDocument: created.nextDocument,
+      historyEntry: true,
+      createdLayerItemIds: [created.layerItemId],
+      ownership: 'viewport-overlay',
+      selection: selectFlowOverlay(created.nextDocument, page.locationId, [created.layerItemId]),
+    }
+  } catch (error) {
+    return fail(error instanceof Error ? error.message : '无法改为页面浮层')
   }
 }
 
@@ -697,8 +698,10 @@ export function convertFlowOverlayMediaToDocument(
   const overlayId = selection.selectedOverlayIds[0]
   if (!overlayId) return fail(FLOW_NO_OVERLAY_REASON)
   const located = locateCourseLayer(document, overlayId)
-  if (!located) return fail(`找不到浮层：${overlayId}`)
-  if (located.source !== 'surface') return fail(FLOW_GLOBAL_ITEM_EMBED_REASON)
+  if (!located) return fail('找不到浮层：' + overlayId)
+  if (located.source !== 'surface' || located.surfaceId !== page.surfaceId) {
+    return fail('所选媒体不属于当前 Flow 页面')
+  }
   const locked = teacherLocked(located.item)
   if (locked) return locked
   if (located.item.kind !== 'native') return fail('只有图片或视频浮层可以嵌入正文')
@@ -707,46 +710,28 @@ export function convertFlowOverlayMediaToDocument(
     if (nativeType === 'shape') return fail(FLOW_SHAPE_EMBED_REASON)
     return fail('该浮层不能嵌入正文')
   }
-  const assetId = located.item.content.data.assetId
-  const created = runOverlayMutation(document, options, (draft) => {
-    const surface = flowSurfaceIn(draft, page.surfaceId)
-    const index = surface.surfaceLayerItems.findIndex(
-      (entry) => entry.item.layerItemId === overlayId,
-    )
-    if (index < 0) throw new Error(`找不到浮层：${overlayId}`)
-    surface.surfaceLayerItems.splice(index, 1)
-    const anchor = resolveInsertAnchor(draft, selection, page.surfaceId)
-    const parentBlocks = anchor.parentId
-      ? (() => {
-        const section = findFlowBlockRecursive(surface.blocks, anchor.parentId)
-        if (!section || section.block.type !== 'section') throw new Error(`找不到 Flow 分节：${anchor.parentId}`)
-        return section.block.blocks
-      })()
-      : surface.blocks
-    const blockId = stableFlowId('block')
-    parentBlocks.splice(anchor.index, 0, {
-      id: blockId,
-      type: 'media',
-      assetId,
-      mediaKind: nativeType,
-      caption: { inlines: [{ type: 'text', text: located.item.label }] },
-      layout: 'content-width',
+  const destination = resolveInsertAnchor(document, selection, page.surfaceId)
+  try {
+    const created = embedFlowNativeMedia(document, {
+      surfaceId: page.surfaceId,
+      layerItemId: overlayId,
+      parentId: destination.parentId,
+      index: destination.index,
+      altText: located.item.label,
+      expectedRevision: options.expectedRevision,
+      now: options.now,
     })
-    syncFlowCourseLocations(draft, page.surfaceId)
-    return [blockId]
-  }, '已嵌入正文')
-  if (!created.ok || !created.nextDocument || !created.createdLayerItemIds?.[0]) {
-    return created
-  }
-  const blockId = created.createdLayerItemIds[0]
-  return {
-    ok: true,
-    reason: created.reason,
-    nextDocument: created.nextDocument,
-    historyEntry: true,
-    createdBlockIds: [blockId],
-    ownership: 'document-block',
-    selection: selectFlowEditorBlock(created.nextDocument, page.locationId, blockId),
+    return {
+      ok: true,
+      reason: '已嵌入正文',
+      nextDocument: created.nextDocument,
+      historyEntry: true,
+      createdBlockIds: [created.blockId],
+      ownership: 'document-block',
+      selection: selectFlowEditorBlock(created.nextDocument, page.locationId, created.blockId),
+    }
+  } catch (error) {
+    return fail(error instanceof Error ? error.message : '无法嵌入正文')
   }
 }
 

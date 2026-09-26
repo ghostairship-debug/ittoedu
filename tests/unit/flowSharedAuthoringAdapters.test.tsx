@@ -505,6 +505,34 @@ describe('Flow shared authoring adapters', () => {
     expect(engineIds(shape.nextDocument!)).toContain('overlay-shape')
   })
 
+  it('keeps image crop and caption across the formal document-to-paper round trip', () => {
+    const project = createFlowProject()
+    const source = flowOf(project).blocks.find(block => block.id === 'media-inline')
+    if (!source || source.type !== 'media') throw new Error('Missing media fixture')
+    source.crop = { left: 0.2, top: 0.1, right: 0.05, bottom: 0.15 }
+    source.cropX = 0.7
+    source.cropY = 0.3
+    source.caption = { inlines: [{ type: 'text', text: '原有说明', style: { bold: true } }] }
+    const converted = convertFlowMediaBlockToOverlay(project, selectFlowEditorBlock(project, 'h1', source.id), {
+      expectedRevision: project.revision,
+      frame: { mode: 'absolute', x: 120, y: 360, width: 480, height: 270 },
+      paragraphAnchor: { blockId: 'p-body', offsetY: 18, xRatio: 0.15 },
+    })
+    expect(converted.ok).toBe(true)
+    const surface = flowOf(converted.nextDocument!)
+    const entry = surface.surfaceLayerItems.find(value => value.item.layerItemId === converted.createdLayerItemIds?.[0])
+    expect(entry?.paragraphAnchor).toEqual({ blockId: 'p-body', offsetY: 18, xRatio: 0.15 })
+    expect(entry?.item.kind).toBe('native')
+    if (entry?.item.kind !== 'native' || entry.item.content.nativeType !== 'image') throw new Error('Missing paper image')
+    expect(entry.item.content.data).toMatchObject({ assetId: source.assetId, crop: source.crop, cropX: 0.7, cropY: 0.3 })
+    expect(surface.blocks.some(block => block.type === 'paragraph' && block.content.inlines.some(inline => inline.type === 'text' && inline.text === '原有说明' && inline.style?.bold))).toBe(true)
+    const embedded = convertFlowOverlayMediaToDocument(converted.nextDocument!, converted.selection!, { expectedRevision: converted.nextDocument!.revision })
+    expect(embedded.ok).toBe(true)
+    const restored = flowOf(embedded.nextDocument!).blocks.find(block => block.id === embedded.createdBlockIds?.[0])
+    expect(restored).toMatchObject({ type: 'media', assetId: source.assetId, crop: source.crop, cropX: 0.7, cropY: 0.3 })
+    expect(flowOf(embedded.nextDocument!).surfaceLayerItems.some(value => value.item.layerItemId === entry.item.layerItemId)).toBe(false)
+  })
+
   it('converts in-document media and component to overlays once, and refuses silent layer writes', () => {
     const project = createFlowProject()
     const mediaSelection = selectFlowEditorBlock(project, 'h1', 'media-inline')
