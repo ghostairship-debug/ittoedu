@@ -85,15 +85,18 @@ it('M21 moves optional commands into "⋯" on a narrow workbench instead of wrap
   vi.stubGlobal('ResizeObserver', class { constructor(callback: () => void) { report = callback } observe() {} disconnect() {} })
   const width = vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(420)
   try {
-    const saveAs = vi.fn()
-    mount({ saveAs, canRedo: true }, true)
+    const saveAs = vi.fn(), onPreview = vi.fn()
+    mount({ saveAs, canRedo: true, onPreview, onExport: vi.fn(), hasFlowSurface: false }, true)
     act(() => report?.())
     expect(screen.queryByRole('button', { name: '另存为' })).toBeNull()
+    expect(screen.queryByRole('button', { name: '整课预览' })).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: '更多工具' }))
     fireEvent.click(screen.getByRole('menuitem', { name: '另存为' }))
     expect(saveAs).toHaveBeenCalledOnce()
     fireEvent.click(screen.getByRole('button', { name: '更多工具' }))
     expect(screen.getByRole('menuitem', { name: '重做' })).toBeEnabled()
+    fireEvent.click(screen.getByRole('menuitem', { name: '整课预览' }))
+    expect(onPreview).toHaveBeenCalledOnce()
   } finally { width.mockRestore(); vi.unstubAllGlobals() }
 })
 

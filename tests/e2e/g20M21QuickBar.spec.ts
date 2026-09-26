@@ -1,7 +1,8 @@
 import { _electron as electron, expect, test, type ElectronApplication, type Locator, type Page } from '@playwright/test'
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { BACKGROUND_E2E_ENV } from '../../src/main/windowVisibility'
+import { createCourseProjectArchive, openCourseProjectArchive } from '../../src/core/drivers/codecs/courseProjectArchive'
 import { openInWorkbench, root, settledRect, type Rect } from './helpers/g20M19Harness'
 import { canvasReady, centre, contextMenuAt, flowCourseWithFigure, FRAMES, lightCourse, onStage } from './helpers/g20M21Harness'
 
@@ -125,7 +126,29 @@ test('M21-T01 M21-T02 M21-T03 a steady top bar and canvas, one quick bar everywh
       await same('after drag')
       await page.keyboard.press('Control+Z')
       await expect.poll(async () => (await frameOf('title'))!.x).toBe(before.x)
-      evidence.t01 = { baseline, rounds, drag: { before, after, delta, scale } }
+      // A change from outside the canvas, as an AI client's edit reaches the document: the course file changes on
+      // disk and the main process takes it in (an `external` step). Then the same round again.
+      const archive = openCourseProjectArchive(new Uint8Array(readFileSync(join(workspace, COURSE))))
+      const slide = archive.project.surfaces[0]
+      const note = slide?.type === 'slide' ? slide.scenes[0]!.layerItems.find(item => item.layerItemId === 'note') : undefined
+      if (note?.kind !== 'native' || note.content.nativeType !== 'text') throw new Error('note text')
+      note.content.data.text = '要点（外部修改）'
+      writeFileSync(join(workspace, COURSE), createCourseProjectArchive({ project: archive.project, assetFiles: archive.assetFiles, componentFiles: archive.componentFiles }))
+      const external = await page.evaluate(async file => {
+        const found = (await window.desktopAPI.documents!.list()).find(item => item.binding.kind === 'file' && item.binding.path.endsWith(file))!
+        const observed = await window.desktopAPI.documents!.observeFile(found.documentId)
+        const next = await window.desktopAPI.documents!.reconcileFile({ documentId: found.documentId, epoch: found.epoch, baseRevision: found.revision,
+          bindingVersion: observed.bindingVersion, version: observed.version, choice: 'disk' })
+        return { before: found.revision, after: next.revision, undoHeadActor: next.undoHead?.actor ?? null }
+      }, COURSE)
+      expect(external.after).toBeGreaterThan(external.before)
+      await canvasReady(page)
+      await page.mouse.click(...xy(onStage(stage, centre(FRAMES.title)))); await expect(quickBar).toHaveCount(1); await same('text after external change')
+      await page.mouse.click(...xy(onStage(stage, centre(FRAMES.photo)))); await expect(quickBar).toHaveCount(1); await same('image after external change')
+      await page.keyboard.down('Shift'); await page.mouse.click(...xy(onStage(stage, centre(FRAMES.note)))); await page.keyboard.up('Shift')
+      await expect(page.locator('footer.status-bar')).toContainText('已选 2 个图层'); await same('multi after external change')
+      await page.mouse.click(...xy(onStage(stage, { x: 1100, y: 640 }))); await expect(quickBar).toHaveCount(0); await same('blank after external change')
+      evidence.t01 = { baseline, rounds, drag: { before, after, delta, scale }, external }
       // A narrower content area: still one row, and what does not fit moves into "⋯".
       await app!.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.setContentSize(1200, 1000))
       await expect.poll(async () => (await topBar(page)).rect.width).toBeLessThan(baseline.bar.rect.width - 100)
