@@ -29,3 +29,6 @@
 .element-card-indicator__menu button { display: flex; justify-content: space-between; gap: 12px; padding: 6px 10px; border: 0; border-radius: 5px; background: transparent; color: #17211d; font: inherit; font-size: 12px; text-align: left; cursor: pointer; }
 .element-card-indicator__menu button:hover { background: #f5f3ff; }
 .element-card-indicator__menu small { color: #66758a; }
+
+/* A text card floats under the quick bar that opened it, above the page (M15). */
+.element-text-card { position: fixed; z-index: 60; }

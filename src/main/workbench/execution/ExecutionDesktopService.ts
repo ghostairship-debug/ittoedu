@@ -27,9 +27,12 @@ import { AgentFileService } from './AgentFileService'
 import { diagnosticLog } from '../../diagnosticLog'
 import { readTarget } from '../../../core/tools/ToolTargets'
 import { locateCourseLayer } from '../../../core/drivers/course/layerProperties'
-import { elementChangeUnits, elementUnitLabel, readElementFields, readFlowBlockFields, sameFieldValue, writeElementFields, writeFlowBlockFields, type ElementFields } from '../../../core/drivers/course/elementFields'
+import { elementChangeUnits, elementUnitLabel, flowSlotContent, readElementFields, readFlowBlockFields, sameFieldValue, traceFlowRange, traceSourceRange, writeElementFields, writeFlowBlockFields, type ElementFields } from '../../../core/drivers/course/elementFields'
+import { sliceFlowRichText } from '../../../core/tools/flowDocumentModel'
 import type { CourseProjectDocument } from '../../../shared/courseProjectTypes'
-import type { ElementChangeView, ElementRevertResult } from '../../../shared/workbench/executionDesktop'
+import type { FlowTextContent } from '../../../shared/document/content'
+import { isSourceDocumentModel } from '../../../shared/workbench/document'
+import type { ElementChangeView, ElementRevertResult, ExecutionSelectionTarget } from '../../../shared/workbench/executionDesktop'
 
 export interface ExecutionDesktopServiceOptions {
   directory: string
@@ -51,8 +54,9 @@ function targetStillExists(snapshot: DocumentSnapshot, target: ExecutionDocument
   if (target.kind !== 'course-object' && target.kind !== 'flow-block') return false
   try { readTarget(snapshot.model, target); return true } catch { return false }
 }
-/** M15: an element card request's object when it started and when it ended, for the card's own undo and redo. */
-interface ElementChange {
+/** M15: an element card request's object, block or text when it started and when it ended, for the card's own undo and redo. */
+interface ElementFieldChange {
+  kind: 'fields'
   conversationId: string
   documentId: string
   /** The card's object or document block in a version of the course, and writing fields back into one. */
@@ -62,9 +66,29 @@ interface ElementChange {
   /** Undefined until the request ends; null when the object was gone by then. */
   after?: ElementFields | null
   undone: boolean
+  /** A text card in a Flow document: its range and the slot's text before the request, and after it (null when untraceable). */
+  range?: { target: Extract<ExecutionSelectionTarget, { kind: 'flow-range' }>; content: FlowTextContent; after?: { target: Extract<ExecutionSelectionTarget, { kind: 'flow-range' }>; content: FlowTextContent } | null }
 }
+/** A text card in a Markdown document: the text of its range before and after the request, and where that text is now. */
+interface ElementSourceChange {
+  kind: 'source'
+  conversationId: string
+  documentId: string
+  before: { from: number; to: number; text: string; source: string }
+  after?: { text: string; prefix: string; suffix: string } | null
+  /** Where the request's text (or, undone, the original text) starts now. */
+  position: number
+  undone: boolean
+}
+type ElementChange = ElementFieldChange | ElementSourceChange
 const ELEMENT_UNSUPPORTED = '组件和页面 Runtime 的修改请用编辑器的撤销（Ctrl+Z）。'
+const SOURCE_UNTRACEABLE = '这段文字在 AI 修改后又改过，卡片不能撤销；请用编辑器的撤销。'
 const unitLabels = (units: readonly string[][]) => [...new Set(units.map(elementUnitLabel))]
+/** The one place a non-empty text occurs, or -1. */
+function uniqueIndex(source: string, text: string): number {
+  const first = text ? source.indexOf(text) : -1
+  return first >= 0 && source.indexOf(text, first + 1) < 0 ? first : -1
+}
 /** Main owns spaces, task freezes and runs. Mounting a view only reads/subscribes. */
 export class ExecutionDesktopService {
   readonly conversations: ConversationStore
@@ -681,67 +705,118 @@ export class ExecutionDesktopService {
         }))
       }
   }
-  /** An element card request edits one object: its fields are read as it starts, before the model can change them. */
+  /** An element card request edits one object, block or text: it is read as the request starts, before the model can change it. */
   private async recordElementBaseline(record: StoredExecutionSubmission): Promise<void> {
     try {
       const conversation = await this.conversations.readConversation({ workspaceId: record.workspaceId, conversationId: record.conversationId })
       const element = conversation?.element
       const reference = element && record.documents.find(value => value.documentId === element.documentId)
       const target = reference?.writable.length === 1 ? reference.writable[0] : undefined
-      if (!reference || target?.kind !== 'course-object' && target?.kind !== 'flow-block') return
+      if (!reference || !target || target.kind === 'document') return
       const snapshot = await this.options.documents.registry.get(reference.documentId).drain()
+      const base = { conversationId: record.conversationId, documentId: reference.documentId, undone: false }
+      if (target.kind === 'markdown-range') {
+        if (!isSourceDocumentModel(snapshot.model) || target.to > snapshot.model.source.length) return
+        const source = snapshot.model.source
+        this.elementChanges.set(record.submissionId, { kind: 'source', ...base, position: target.from,
+          before: { from: target.from, to: target.to, text: source.slice(target.from, target.to), source } })
+        return
+      }
       if (snapshot.model.kind !== 'course-v9') return
-      const access: Pick<ElementChange, 'read' | 'write'> = target.kind === 'course-object'
-        ? { read: project => readElementFields(project, target.itemId), write: (project, fields) => writeElementFields(project, target.itemId, fields) }
-        : { read: project => readFlowBlockFields(project, target.surfaceId, target.blockId), write: (project, fields) => writeFlowBlockFields(project, target.surfaceId, target.blockId, fields) }
-      const exists = target.kind === 'course-object' ? Boolean(locateCourseLayer(snapshot.model.project, target.itemId)) : access.read(snapshot.model.project) !== null
-      if (!exists) return
-      this.elementChanges.set(record.submissionId, { conversationId: record.conversationId, documentId: reference.documentId, ...access,
-        before: access.read(snapshot.model.project), undone: false })
+      const project = snapshot.model.project
+      if (target.kind === 'course-object') {
+        if (!locateCourseLayer(project, target.itemId)) return
+        this.elementChanges.set(record.submissionId, { kind: 'fields', ...base, before: readElementFields(project, target.itemId),
+          read: value => readElementFields(value, target.itemId), write: (value, fields) => writeElementFields(value, target.itemId, fields) })
+        return
+      }
+      const read = (value: CourseProjectDocument) => readFlowBlockFields(value, target.surfaceId, target.blockId)
+      const before = read(project), content = target.kind === 'flow-range' ? flowSlotContent(project, target) : null
+      if (!before || target.kind === 'flow-range' && !content) return
+      this.elementChanges.set(record.submissionId, { kind: 'fields', ...base, before, read,
+        write: (value, fields) => writeFlowBlockFields(value, target.surfaceId, target.blockId, fields),
+        ...(target.kind === 'flow-range' && content ? { range: { target, content } } : {}) })
     } catch { /* The card's undo is a convenience; the request runs regardless. */ }
   }
   private async recordElementResult(submissionId: string): Promise<void> {
     const change = this.elementChanges.get(submissionId)
     if (!change || change.after !== undefined) return
     try {
-      const snapshot = await this.options.documents.registry.get(change.documentId).drain()
-      change.after = snapshot.model.kind === 'course-v9' ? change.read(snapshot.model.project) : null
+      const model = (await this.options.documents.registry.get(change.documentId).drain()).model
+      if (change.kind === 'source') {
+        const { from, to, source } = change.before
+        const text = isSourceDocumentModel(model) ? model.source : null
+        const traced = text === null ? null : traceSourceRange(source, text, from, to)
+        change.after = traced && text !== null ? { text: text.slice(traced.from, traced.to), prefix: text.slice(Math.max(0, traced.from - 24), traced.from),
+          suffix: text.slice(traced.to, traced.to + 24) } : null
+        return
+      }
+      change.after = model.kind === 'course-v9' ? change.read(model.project) : null
+      if (change.range && model.kind === 'course-v9') {
+        const { target, content } = change.range, next = flowSlotContent(model.project, target)
+        const traced = next && traceFlowRange(content, next, target.from, target.to)
+        change.range.after = traced && next ? { target: { ...target, ...traced }, content: next } : null
+      }
     } catch { change.after = null }
   }
   private elementChangeView(submissionId: string): ElementChangeView {
     const change = this.elementChanges.get(submissionId)
     if (!change) return { submissionId, state: 'none', fields: [] }
     if (change.after === undefined) return { submissionId, state: 'pending', fields: [] }
+    if (change.kind === 'source') {
+      if (!change.after) return { submissionId, state: 'none', fields: [], unavailable: SOURCE_UNTRACEABLE }
+      const text = change.undone ? change.before.text : change.after.text
+      const place = text ? { target: { kind: 'markdown-range' as const, from: change.position, to: change.position + text.length }, content: text } : {}
+      return change.before.text === change.after.text ? { submissionId, state: 'none', fields: [], ...place }
+        : { submissionId, state: change.undone ? 'undone' : 'applied', fields: ['文字'], ...place }
+    }
+    const range = change.range, current = range && (change.undone ? range : range.after)
+    const place = current && current.target.to > current.target.from
+      ? { target: current.target, content: JSON.stringify(sliceFlowRichText(current.content, current.target.from, current.target.to)) } : {}
     if (!change.before) return { submissionId, state: 'none', fields: [], unavailable: ELEMENT_UNSUPPORTED }
     if (!change.after) return { submissionId, state: 'none', fields: [], unavailable: '这个对象已不存在。' }
     const units = elementChangeUnits(change.before, change.after)
-    return units.length ? { submissionId, state: change.undone ? 'undone' : 'applied', fields: unitLabels(units) } : { submissionId, state: 'none', fields: [] }
+    return units.length ? { submissionId, state: change.undone ? 'undone' : 'applied', fields: unitLabels(units), ...place } : { submissionId, state: 'none', fields: [], ...place }
   }
   /**
-   * Undoes (or redoes) one element card request on its object as one ordinary edit in the document's history. Only
-   * the fields the request changed are written; fields changed again since are reported first and written only
-   * when `force` confirms it.
+   * Undoes (or redoes) one element card request as one ordinary edit in the document's history. Only what the
+   * request changed is written; fields changed again since are reported first and written only when `force`
+   * confirms it. A Markdown text card restores its text where it is found, or says it cannot.
    */
   private async revertElement(input: { submissionId: string; direction: 'undo' | 'redo'; force?: boolean }): Promise<ElementRevertResult> {
     const change = this.elementChanges.get(input.submissionId), view = this.elementChangeView(input.submissionId)
-    if (!change?.before || !change.after || view.state === 'pending' || view.state === 'none')
+    if (!change?.after || view.state === 'pending' || view.state === 'none')
       return { status: 'unavailable', message: view.unavailable ?? (view.state === 'pending' ? '这次修改还没有结束。' : '这次请求没有改动这个对象。') }
     if ((input.direction === 'undo') === change.undone)
       return { status: 'unavailable', message: input.direction === 'undo' ? '这次修改已经撤销。' : '这次修改没有撤销，不需要重做。' }
-    const [from, to] = input.direction === 'undo' ? [change.after, change.before] : [change.before, change.after]
-    const units = elementChangeUnits(change.before, change.after)
     const session = this.options.documents.registry.get(change.documentId)
     for (let attempt = 0; attempt < 3; attempt++) {
       const snapshot = await session.drain()
-      const current = snapshot.model.kind === 'course-v9' ? change.read(snapshot.model.project) : null
-      if (!current || snapshot.model.kind !== 'course-v9') return { status: 'unavailable', message: '这个对象已不存在。' }
-      const conflicts = units.filter(unit => unit.some(key => !sameFieldValue(current[key], from[key])))
-      if (conflicts.length && !input.force) return { status: 'conflict', fields: unitLabels(conflicts) }
-      const project = change.write(snapshot.model.project, Object.fromEntries(units.flat().map(key => [key, to[key]])))
+      let command: Extract<Parameters<typeof session.execute>[0]['mutation'], { type: 'command' }>['command'], position = 0
+      if (change.kind === 'source') {
+        if (!isSourceDocumentModel(snapshot.model)) return { status: 'unavailable', message: '这个文档已不可编辑。' }
+        const source = snapshot.model.source, after = change.after
+        const [from, to] = input.direction === 'undo' ? [after.text, change.before.text] : [change.before.text, after.text]
+        const inPlace = source.slice(change.position, change.position + from.length) === from
+          && (from || source.slice(Math.max(0, change.position - after.prefix.length), change.position) === after.prefix && source.slice(change.position, change.position + after.suffix.length) === after.suffix)
+        position = inPlace ? change.position : uniqueIndex(source, from)
+        if (position < 0) return { status: 'unavailable', message: SOURCE_UNTRACEABLE }
+        command = { type: 'markdown.splice', from: position, to: position + from.length, text: to }
+      } else {
+        if (!change.before || !change.after) return { status: 'unavailable', message: view.unavailable ?? '这次请求没有改动这个对象。' }
+        const [from, to] = input.direction === 'undo' ? [change.after, change.before] : [change.before, change.after]
+        const units = elementChangeUnits(change.before, change.after)
+        const current = snapshot.model.kind === 'course-v9' ? change.read(snapshot.model.project) : null
+        if (!current || snapshot.model.kind !== 'course-v9') return { status: 'unavailable', message: '这个对象已不存在。' }
+        const conflicts = units.filter(unit => unit.some(key => !sameFieldValue(current[key], from[key])))
+        if (conflicts.length && !input.force) return { status: 'conflict', fields: unitLabels(conflicts) }
+        command = { type: 'course.replace', project: change.write(snapshot.model.project, Object.fromEntries(units.flat().map(key => [key, to[key]]))) }
+      }
       const result = await session.execute({ documentId: change.documentId, epoch: snapshot.epoch, baseRevision: snapshot.revision, operationId: randomUUID(),
-        actor: 'human', mutation: { type: 'command', command: { type: 'course.replace', project } } })
+        actor: 'human', mutation: { type: 'command', command } })
       if (result.status === 'applied' || result.status === 'unchanged') {
         change.undone = input.direction === 'undo'
+        if (change.kind === 'source') change.position = position
         return { status: 'applied', change: this.elementChangeView(input.submissionId) }
       }
       if (result.status !== 'conflict') return { status: 'unavailable', message: 'message' in result ? result.message : '撤销没有完成。' }

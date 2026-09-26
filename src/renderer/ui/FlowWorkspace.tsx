@@ -1,5 +1,7 @@
 import { captureFlowBlock, captureFlowSelection, usePinnedSelection, workbenchSelection } from '../workbench/SelectionContextController'
 import { ElementAiButton } from '../workbench/elementCards/ElementAiCard'
+import { TextAiButton, textCardLabel } from '../workbench/elementCards/ElementTextCards'
+import { textTargetContent } from '../../core/drivers/course/elementFields'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { createRoot } from 'react-dom/client'
 import type { AssetMeta } from '../../shared/contracts/media-v1'
@@ -350,8 +352,18 @@ export function FlowWorkspace({ documentId, view, sessionToken, assets, selectio
               const block = quickBarBlock(target)
               return block && propertyContext.kind === 'flow-block' ? <FlowBlockQuickActions block={block} commands={propertyContext.commands} replaceMedia={replaceMedia} /> : null
             }}
-            renderAiButton={target => {
-              // A picture, table or other object of the document has its own AI card (M15); text keeps the assistant.
+            renderAiButton={(target, issue) => {
+              // Selected text opens a text card (M15); it stays until closed and follows its text through follow-ups.
+              if (target.selection?.kind === 'text' && target.mode === 'layout' && documentId && !readOnly) {
+                const surfaceId = view.surfaceId, label = textCardLabel(target.ranges?.map(range => range.before).join('') || '所选文字')
+                return <TextAiButton documentId={documentId} disabledReason={issue ?? contextualCommandIssue(target)} start={async () => {
+                  const snapshot = await workbenchSelection.prepare(documentId)
+                  const capture = captureFlowSelection(snapshot, surfaceId, target), range = capture.targets[0]
+                  if (capture.targets.length !== 1 || range?.kind !== 'flow-range') throw new Error('请在一段文字内选择要修改的内容。')
+                  return { target: range, label, content: textTargetContent(snapshot.model, range) }
+                }} />
+              }
+              // A picture, table or other object of the document has its own AI card (M15).
               const blockId = target.selection?.kind === 'object' ? target.selection.blockId : target.selection?.kind === 'cells' ? target.selection.tableId : null
               const entry = blockId && !readOnly ? view.blocks.find(value => value.blockId === blockId) : undefined
               if (!entry || !documentId) return undefined

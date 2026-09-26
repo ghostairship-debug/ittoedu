@@ -8,7 +8,9 @@ import { DEFAULT_PERMISSION_MODE, type ApprovalDecision, type ExecutionPermissio
 import type { ExecutionSettingsAPI } from '../../../shared/workbench/executionSettingsDesktop'
 import type { UserAnswer } from '../../../shared/workbench/userQuestion'
 import { pendingApproval, pendingQuestion, type PendingApproval, type PendingQuestion } from '../executionTimelineModel'
-import { selectionReference, type SelectionCapture } from '../SelectionContextController'
+import { selectionReference, workbenchSelection, type SelectionCapture } from '../SelectionContextController'
+import type { DocumentSnapshot } from '../../../shared/workbench/document'
+import { textTargetContent } from '../../../core/drivers/course/elementFields'
 
 /**
  * Element AI cards (M15): every element has its own card with its requests and replies. A card is backed by an
@@ -30,6 +32,12 @@ export interface ElementCardEntry {
 export interface ElementCardStep { submissionId: string; fields: readonly string[] }
 export interface ElementCardView {
   key: string
+  /** An element's card lives while its document is open; a text card while it is open on screen. */
+  kind: 'element' | 'text'
+  /** Where a text card floats (viewport coordinates). */
+  anchor: { left: number; top: number } | null
+  /** Why a text card cannot send again: its text is no longer where the card left it. */
+  textLost: string | null
   documentId: string
   label: string
   target: ExecutionSelectionTarget
@@ -48,10 +56,16 @@ export interface ElementCardPorts {
   execution(): ExecutionDesktopAPI | undefined
   settings(): ExecutionSettingsAPI | undefined
   documents?(): Pick<DocumentHostAPI, 'subscribe'> | undefined
+  /** The document as it is now, for a text card's next request. */
+  snapshot?(documentId: string): Promise<DocumentSnapshot>
 }
 
 interface CardRecord {
   key: string
+  kind: 'element' | 'text'
+  anchor: { left: number; top: number } | null
+  /** A text card: what its range held after the last request (undefined before the first check, null once lost). */
+  content?: string | null
   documentId: string
   label: string
   target: ExecutionSelectionTarget
@@ -82,6 +96,7 @@ function steps(entries: readonly ElementCardEntry[]): Pick<ElementCardView, 'und
   return { undo: step(entries[lastApplied]), redo: step(undone), undoUnavailable: latest?.change?.unavailable ?? null }
 }
 const TERMINAL: ReadonlySet<ElementCardEntryState> = new Set(['completed', 'failed', 'stopped'])
+const TEXT_LOST = '这段文字已找不到，请重新选中后再打开 AI 卡。'
 
 const RUN_STATE: Partial<Record<ExecutionRunRecord['status'], ElementCardEntryState>> = {
   queued: 'running', running: 'running', stopping: 'running', completed: 'completed', partial: 'completed',
@@ -115,17 +130,18 @@ export class ElementCardController {
     const cached = this.views.get(key)
     if (cached) return cached
     const view: ElementCardView = {
-      key, documentId: card.documentId, label: card.label, target: card.target, entries: card.entries,
+      key, kind: card.kind, anchor: card.anchor, textLost: card.kind === 'text' && card.content === null ? TEXT_LOST : null, documentId: card.documentId, label: card.label, target: card.target, entries: card.entries,
       busy: card.entries.some(entry => entry.state === 'sending' || entry.state === 'queued' || entry.state === 'running'),
       question: pendingQuestion(card.projection), approval: pendingApproval(card.projection), error: card.error, ...steps(card.entries),
     }
     this.views.set(key, view)
     return view
   }
-  /** Cards with work to show in the top bar: running, or waiting for an answer or an approval. */
+  /** Element cards with work to show in the top bar: running, or waiting for an answer or an approval. */
   active(): ElementCardView[] {
-    return [...this.cards.keys()].map(key => this.view(key)!).filter(view => view.busy || view.question || view.approval)
+    return [...this.cards.keys()].map(key => this.view(key)!).filter(view => view.kind === 'element' && (view.busy || view.question || view.approval))
   }
+  texts(): ElementCardView[] { return [...this.cards.keys()].map(key => this.view(key)!).filter(view => view.kind === 'text') }
 
   /** Opens (or finds) the card of an element; its label and place follow the element. Call it outside rendering. */
   ensure(input: { documentId: string; target: ExecutionSelectionTarget; label: string }): string {
@@ -137,7 +153,7 @@ export class ElementCardController {
       }
       return key
     }
-    this.cards.set(key, { key, documentId: input.documentId, label: input.label, target: structuredClone(input.target), workspaceId: null,
+    this.cards.set(key, { key, kind: 'element', anchor: null, documentId: input.documentId, label: input.label, target: structuredClone(input.target), workspaceId: null,
       conversation: null, entries: [], projection: emptyExecutionProjection(''), error: '', catchUp: Promise.resolve() })
     // A card ends with its document (Main deletes its conversation at the same time).
     const documents = this.ports.documents?.()
@@ -150,10 +166,34 @@ export class ElementCardController {
   }
 
   /**
-   * Sends one request about the card's element. Requests to a busy element wait in its queue. `capture` is the
-   * element as selected now; only it is writable.
+   * Opens a card for selected text (M15): it stays on screen until closed, and closing it ends it. Only one text
+   * card is open at a time; `content` is what the range holds now.
    */
-  async send(key: string, instruction: string, capture: SelectionCapture): Promise<void> {
+  openText(input: { documentId: string; target: ExecutionSelectionTarget; label: string; anchor: { left: number; top: number }; content: string | null }): string {
+    for (const card of [...this.cards.values()]) if (card.kind === 'text') void this.closeText(card.key).catch(() => undefined)
+    const key = `${input.documentId}:text:${crypto.randomUUID()}`
+    this.cards.set(key, { key, kind: 'text', anchor: input.anchor, content: input.content ?? undefined, documentId: input.documentId, label: input.label,
+      target: structuredClone(input.target), workspaceId: null, conversation: null, entries: [], projection: emptyExecutionProjection(''), error: '', catchUp: Promise.resolve() })
+    this.notify()
+    return key
+  }
+  /** Closes a text card: its running request stops, its conversation goes; what it changed stays in the document. */
+  async closeText(key: string): Promise<void> {
+    const card = this.cards.get(key)
+    if (card?.kind !== 'text') return
+    this.cards.delete(key)
+    this.notify()
+    const api = this.ports.execution(), conversation = card.conversation
+    const latest = api && conversation ? await api.conversation(conversation.workspaceId, conversation.conversationId) : null
+    if (api && latest) await api.deleteConversation({ workspaceId: latest.workspaceId, conversationId: latest.conversationId, expectedRevision: latest.revision })
+  }
+
+  /**
+   * Sends one request about the card's element. Requests to a busy element wait in its queue. `capture` is the
+   * element as selected now; only it is writable. A text card sends to where its text is now and waits for the
+   * previous request to end.
+   */
+  async send(key: string, instruction: string, selected?: SelectionCapture): Promise<void> {
     const card = this.cards.get(key)
     const text = instruction.trim()
     if (!card || !text) return
@@ -161,7 +201,9 @@ export class ElementCardController {
     if (!api) throw new Error('AI 执行服务尚未就绪。')
     const workspace = this.workspace
     if (!workspace) throw new Error('工作空间尚未就绪，请稍后再发送。')
-    if (capture.documentId !== card.documentId || capture.targets.length !== 1 || elementCardKey(capture.documentId, capture.targets[0]!) !== key)
+    const capture = card.kind === 'text' ? await this.textCapture(card) : selected
+    if (!capture || capture.documentId !== card.documentId || capture.targets.length !== 1
+      || card.kind === 'element' && elementCardKey(capture.documentId, capture.targets[0]!) !== key)
       throw new Error('选中的对象已改变，请重新选择后发送。')
     const settings = await this.ports.settings()?.read()
     const conversation = settings?.profile.roles.conversation
@@ -190,6 +232,22 @@ export class ElementCardController {
     }
   }
 
+  /** A text card's range as it is now; refused while a request runs or when the text is no longer where the card left it. */
+  private async textCapture(card: CardRecord): Promise<SelectionCapture> {
+    if (this.view(card.key)?.busy) throw new Error('请等 AI 改完这一次再继续追问。')
+    if (card.content === null) throw new Error(TEXT_LOST)
+    const snapshot = await this.ports.snapshot?.(card.documentId)
+    if (!snapshot) throw new Error('文档尚未就绪，请稍后再发送。')
+    if (card.content !== undefined && textTargetContent(snapshot.model, card.target) !== card.content) throw new Error('这段文字已被改动，请重新选中后再打开 AI 卡。')
+    return { documentId: card.documentId, epoch: snapshot.epoch, revision: snapshot.revision, targets: [structuredClone(card.target)], label: card.label }
+  }
+  /** A text card follows its text: each ended request, undo or redo says where it is now. */
+  private followText(card: CardRecord, change: ElementChangeView) {
+    if (card.kind !== 'text' || change.state === 'pending') return
+    if (change.target && change.content !== undefined) { card.target = structuredClone(change.target); card.content = change.content }
+    else card.content = null
+  }
+
   async answer(key: string, runId: string, callId: string, answer: UserAnswer): Promise<void> {
     const api = this.ports.execution()
     if (!api?.answer) throw new Error('当前版本不能在卡片中回答。')
@@ -210,7 +268,7 @@ export class ElementCardController {
     const api = this.ports.execution(), card = this.cards.get(key)
     if (!api?.revertElement || !card) throw new Error('当前版本不能在卡片中撤销。')
     const result = await api.revertElement({ submissionId, direction, ...(force ? { force } : {}) })
-    if (result.status === 'applied') this.patchEntry(card, submissionId, { change: result.change })
+    if (result.status === 'applied') { this.followText(card, result.change); this.patchEntry(card, submissionId, { change: result.change }) }
     return result
   }
   /** Stops the element's running request; queued ones stay. */
@@ -288,6 +346,7 @@ export class ElementCardController {
       if (!TERMINAL.has(entry.state) || entry.change && entry.change.state !== 'pending') continue
       const change = await api.elementChange(entry.submissionId)
       pending ||= change.state === 'pending'
+      this.followText(card, change)
       this.patchEntry(card, entry.submissionId, { change }, false)
     }
     this.notify()
@@ -313,7 +372,13 @@ export const elementCards = new ElementCardController({
   execution: () => window.desktopAPI?.execution,
   settings: () => window.desktopAPI?.executionSettings,
   documents: () => window.desktopAPI?.documents,
+  snapshot: documentId => workbenchSelection.prepare(documentId),
 })
+/** The open text cards, for the layer that floats them. */
+export function useTextCards(): ElementCardView[] {
+  useSyncExternalStore(elementCards.subscribe, elementCards.readVersion)
+  return elementCards.texts()
+}
 
 export function useElementCard(key: string | null): ElementCardView | null {
   useSyncExternalStore(elementCards.subscribe, elementCards.readVersion)

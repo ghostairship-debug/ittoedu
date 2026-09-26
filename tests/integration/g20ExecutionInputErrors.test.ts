@@ -14,7 +14,8 @@ import { diagnosticLog } from '../../src/main/diagnosticLog'
 import type { ConversationRecord } from '../../src/shared/workbench/conversations'
 
 const roots: string[] = []
-afterEach(async () => { vi.restoreAllMocks(); for (const root of roots.splice(0)) await fs.rm(root, { recursive: true, force: true }) })
+// Timing marks are written in the background; a removal racing one retries instead of failing the test.
+afterEach(async () => { vi.restoreAllMocks(); for (const root of roots.splice(0)) await fs.rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 }) })
 async function fixture() {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'g20-input-errors-')); roots.push(root)
   const filename = path.join(root, 'notes.md'); await fs.writeFile(filename, '原正文')

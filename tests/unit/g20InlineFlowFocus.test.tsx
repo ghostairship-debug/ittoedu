@@ -1,4 +1,4 @@
-import { createElement, type ComponentProps } from 'react'
+import { createElement, Fragment, type ComponentProps } from 'react'
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { TextSelection } from 'prosemirror-state'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
@@ -7,6 +7,9 @@ import { buildFlowEditorView } from '../../src/renderer/course/flowEditorView'
 import { useEditorStore } from '../../src/renderer/store/editorStore'
 import { FlowWorkspace, requestFlowBlockFocus } from '../../src/renderer/ui/FlowWorkspace'
 import { createCourseStoreHost } from '../helpers/courseStoreHost'
+import { ElementTextCardLayer } from '../../src/renderer/workbench/elementCards/ElementTextCards'
+import { elementCards } from '../../src/renderer/workbench/elementCards/elementCardController'
+import { workbenchSelection } from '../../src/renderer/workbench/SelectionContextController'
 
 const store = () => useEditorStore.getState()
 function FlowHarness() {
@@ -41,11 +44,13 @@ afterEach(() => {
   store().createNewProject()
 })
 
-it('M21 Flow text selection shows the shared quick bar with formatting and AI, and no properties card', () => {
+it('M21 Flow text selection shows the shared quick bar with formatting and AI, and no properties card', async () => {
   expect(store().flowSession).toBeTruthy()
   expect(store().courseAuthoringSession).toBeTruthy()
   const factory = vi.spyOn(editorSession, 'createLayoutEditor')
-  render(createElement(FlowHarness))
+  // The app registers how to read the open course; here the store's committed document stands in.
+  const unregister = workbenchSelection.register('focus-document', async () => ({ ...await store().drainCourseDocument(), documentId: 'focus-document' }))
+  render(createElement(Fragment, null, createElement(FlowHarness), createElement(ElementTextCardLayer)))
   const editor = factory.mock.results.at(-1)!.value as ReturnType<typeof editorSession.createLayoutEditor>
   const text = editor.view.state.doc.textContent
   expect(text.length).toBeGreaterThan(1)
@@ -54,8 +59,12 @@ it('M21 Flow text selection shows the shared quick bar with formatting and AI, a
   expect(within(bar).getByRole('button', { name: '当前选区加粗' })).toBeTruthy()
   expect(within(bar).getByRole('button', { name: '当前选区高亮' })).toBeTruthy()
   expect(within(bar).queryByRole('button', { name: '属性' })).toBeNull()
+  // M15: the text gets its own card, which stays until it is closed.
   fireEvent.click(within(bar).getByRole('button', { name: 'AI 修改' }))
-  expect(screen.getByLabelText('AI 修改要求')).toBeTruthy()
+  expect(await screen.findByLabelText('AI 修改要求')).toBeTruthy()
+  expect(elementCards.texts()).toMatchObject([{ kind: 'text', target: { kind: 'flow-range', from: 0, to: 1 } }])
+  await act(async () => { await elementCards.closeText(elementCards.texts()[0]!.key) })
+  unregister()
 })
 
 it('M03 Flow insertion focus request only focuses the new selected paragraph in the mounted document', async () => {

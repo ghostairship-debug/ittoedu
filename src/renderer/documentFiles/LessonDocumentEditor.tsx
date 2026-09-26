@@ -1,6 +1,8 @@
 import { documentSaveLabel } from '../lessonWorkspace/view/WorkspaceDocumentStatus'
 import type { MarkdownProjection } from '../../shared/document/markdownIdentity'
 import { captureMarkdownSelection, usePinnedSelection, workbenchSelection } from '../workbench/SelectionContextController'
+import { TextAiButton, textCardLabel } from '../workbench/elementCards/ElementTextCards'
+import { textTargetContent } from '../../core/drivers/course/elementFields'
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { SharedDocumentEditor, type SharedDocumentEditorHandle } from '../document/SharedDocumentEditor'
 import type { ContextualEditTarget, DocumentContextSelection } from '../../shared/document/ports'
@@ -173,6 +175,18 @@ export const LessonDocumentEditor = forwardRef<LessonDocumentEditorHandle, Lesso
          onSelectionChange?.(bindTarget(target))
          const snapshot = session.committedDocument
          if (snapshot) { try { workbenchSelection.setManual(snapshot.documentId, target ? captureMarkdownSelection(snapshot, target) : null) } catch { workbenchSelection.setManual(snapshot.documentId, null) } }
+       }}
+       renderAiButton={(target, issue) => {
+         // Selected text opens a text card (M15); objects and table cells keep the assistant.
+         const documentId = session.documentId
+         if (!documentId || target.selection && target.selection.kind !== 'text' || !target.ranges?.length) return undefined
+         const label = textCardLabel(target.ranges.map(range => range.before).join(''))
+         return <TextAiButton documentId={documentId} disabledReason={issue} start={async () => {
+           const snapshot = await workbenchSelection.prepare(documentId)
+           const capture = captureMarkdownSelection(snapshot, target), range = capture.targets[0]
+           if (capture.targets.length !== 1 || range?.kind !== 'markdown-range') throw new Error('请选择连续的一段文字再用 AI 修改。')
+           return { target: range, label, content: textTargetContent(snapshot.model, range) }
+         }} />
        }}
        onContextualCommand={async (instruction, selection) => {
          if (!session.documentId) throw new Error('文档尚未就绪。')

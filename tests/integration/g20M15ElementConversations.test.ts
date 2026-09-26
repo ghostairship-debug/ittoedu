@@ -292,3 +292,85 @@ it('M15 a document block card undoes only the fields its request changed and ask
   expect(await revert('undo', true)).toMatchObject({ status: 'applied' })
   expect(await current()).toEqual({ altText: original.altText, layout: original.layout, caption })
 })
+
+it('M15 a Markdown text card follows its text through follow-ups and undoes and redoes it where the text is now', async () => {
+  let f!: Awaited<ReturnType<typeof fixture>>
+  let documentId = ''
+  const splice = async (find: string, text: string) => {
+    const session = f.documents.registry.get(documentId), snapshot = await session.drain()
+    if (snapshot.model.kind !== 'markdown') throw new Error('markdown')
+    const from = snapshot.model.source.indexOf(find)
+    const result = await session.execute({ documentId, epoch: snapshot.epoch, baseRevision: snapshot.revision, operationId: randomUUID(), actor: 'human',
+      mutation: { type: 'command', command: { type: 'markdown.splice', from, to: from + find.length, text } } })
+    expect(result.status).toBe('applied')
+  }
+  f = await fixture(async ({ instruction }) => {
+    if (instruction.includes('改写-1')) await splice('第二句。', '改写后的第二句。')
+    if (instruction.includes('改写-2')) await splice('改写后的第二句。', '再改的第二句。')
+  })
+  const file = path.join(f.root, 'notes.md')
+  await fs.writeFile(file, '# 标题\n\n第一句。第二句。第三句。\n')
+  documentId = (await f.documents.open(file)).documentId
+  const source = async () => { const snapshot = await f.documents.registry.get(documentId).drain(); if (snapshot.model.kind !== 'markdown') throw new Error('markdown'); return snapshot.model.source }
+  const card = await f.service.operate({ type: 'create-conversation', workspaceId: f.workspaceId, element: { kind: 'element', documentId, label: '第二句' } }) as ConversationRecord
+  const send = async (text: string, target: { kind: 'markdown-range'; from: number; to: number }) => {
+    const snapshot = await f.documents.registry.get(documentId).drain()
+    const latest = await f.service.conversations.readConversation({ workspaceId: f.workspaceId, conversationId: card.conversationId })
+    const sent = await f.service.operate({ type: 'send', workspaceId: f.workspaceId, conversationId: card.conversationId, submissionId: randomUUID(), expectedRevision: latest!.revision,
+      text, documents: [{ documentId, epoch: snapshot.epoch, revision: snapshot.revision, writable: [target], selection: [target] }], attachments: [] }) as ExecutionSendResult
+    if (sent.run) await f.service.engine.wait(sent.run.runId)
+    const read = () => f.service.operate({ type: 'element-change', submissionId: sent.submission.submissionId }) as Promise<ElementChangeView>
+    await vi.waitFor(async () => expect((await read()).state).not.toBe('pending'))
+    return { submissionId: sent.submission.submissionId, change: await read() }
+  }
+  const start = (await source()).indexOf('第二句。')
+  const first = await send('改写-1', { kind: 'markdown-range', from: start, to: start + 4 })
+  expect(first.change).toMatchObject({ state: 'applied', fields: ['文字'], content: '改写后的第二句。', target: { kind: 'markdown-range', from: start, to: start + 8 } })
+  // The follow-up goes to the text the first request left.
+  const second = await send('改写-2', first.change.target as { kind: 'markdown-range'; from: number; to: number })
+  expect(second.change).toMatchObject({ state: 'applied', content: '再改的第二句。', target: { from: start, to: start + 7 } })
+
+  // Someone adds text before it; the card still finds its text, undoes and redoes it there.
+  await splice('# 标题', '# 新的标题')
+  const revert = (submissionId: string, direction: 'undo' | 'redo') => f.service.operate({ type: 'element-revert', submissionId, direction }) as Promise<ElementRevertResult>
+  expect(await revert(second.submissionId, 'undo')).toMatchObject({ status: 'applied', change: { state: 'undone', content: '改写后的第二句。', target: { from: start + 2, to: start + 10 } } })
+  expect(await source()).toBe('# 新的标题\n\n第一句。改写后的第二句。第三句。\n')
+  expect(await revert(second.submissionId, 'redo')).toMatchObject({ status: 'applied', change: { state: 'applied', content: '再改的第二句。' } })
+  expect(await source()).toBe('# 新的标题\n\n第一句。再改的第二句。第三句。\n')
+  // Once its text is gone, the card says so instead of guessing.
+  await splice('再改的第二句。', '别的内容')
+  expect(await revert(second.submissionId, 'undo')).toMatchObject({ status: 'unavailable' })
+})
+
+it('M15 a Flow text card traces its range in the paragraph and undoes the paragraph text only', async () => {
+  const source = listCourseProjectV9Fixtures().find(value => value.id === 'flow')!.data
+  let f!: Awaited<ReturnType<typeof fixture>>
+  const paragraph = (project: CourseProjectDocument) => {
+    const surface = project.surfaces.find(item => item.type === 'flow')
+    if (surface?.type !== 'flow') throw new Error('flow surface')
+    const found = findFlowBlockRecursive(surface.blocks, 'flow-paragraph')
+    if (found?.block.type !== 'paragraph') throw new Error('paragraph')
+    return { surfaceId: surface.id, block: found.block }
+  }
+  f = await fixture(async ({ instruction }) => {
+    if (instruction.includes('一段-改')) await edit(f.documents, f.opened.documentId, project => { paragraph(project).block.content = { inlines: [{ type: 'text', text: '这是两段文字可编辑正文。' }] } })
+  }, source)
+  const snapshot = await f.documents.registry.get(f.opened.documentId).drain()
+  if (snapshot.model.kind !== 'course-v9') throw new Error('course')
+  const target = { kind: 'flow-range' as const, surfaceId: paragraph(snapshot.model.project).surfaceId, blockId: 'flow-paragraph', parentId: null,
+    slot: { kind: 'field' as const, field: 'content' as const }, from: 2, to: 4 }
+  const card = await f.service.operate({ type: 'create-conversation', workspaceId: f.workspaceId, element: { kind: 'element', documentId: f.opened.documentId, label: '一段' } }) as ConversationRecord
+  const sent = await f.service.operate({ type: 'send', workspaceId: f.workspaceId, conversationId: card.conversationId, submissionId: randomUUID(), expectedRevision: card.revision,
+    text: '一段-改', documents: [{ documentId: snapshot.documentId, epoch: snapshot.epoch, revision: snapshot.revision, writable: [target], selection: [target] }], attachments: [] }) as ExecutionSendResult
+  if (sent.run) await f.service.engine.wait(sent.run.runId)
+  const read = () => f.service.operate({ type: 'element-change', submissionId: sent.submission.submissionId }) as Promise<ElementChangeView>
+  await vi.waitFor(async () => expect((await read()).state).not.toBe('pending'))
+  const changed = await read()
+  expect(changed).toMatchObject({ state: 'applied', fields: ['文字'], target: { ...target, from: 2, to: 6 } })
+  expect(JSON.parse(changed.content!)).toMatchObject({ inlines: [{ type: 'text', text: '两段文字' }] })
+  const undone = await f.service.operate({ type: 'element-revert', submissionId: sent.submission.submissionId, direction: 'undo' }) as ElementRevertResult
+  expect(undone).toMatchObject({ status: 'applied', change: { state: 'undone', target: { from: 2, to: 4 } } })
+  const after = await f.documents.registry.get(f.opened.documentId).drain()
+  if (after.model.kind !== 'course-v9') throw new Error('course')
+  expect(paragraph(after.model.project).block.content).toEqual(paragraph(snapshot.model.project).block.content)
+})

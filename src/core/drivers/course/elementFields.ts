@@ -1,5 +1,10 @@
 import type { CourseProjectDocument, FlowSurfaceDocument, SlidePresentationState } from '../../../shared/courseProjectTypes'
-import { findFlowBlockRecursive } from '../../tools/flowDocumentModel'
+import { documentTextLength, type FlowTextContent } from '../../../shared/document/content'
+import type { DocumentSlot } from '../../../shared/document/ports'
+import { isSourceDocumentModel, type DocumentModel } from '../../../shared/workbench/document'
+import type { ExecutionSelectionTarget } from '../../../shared/workbench/executionDesktop'
+import { findFlowBlockRecursive, sliceFlowRichText } from '../../tools/flowDocumentModel'
+import { flowTextSlot } from '../../tools/flowTextSlot'
 import { locateCourseLayer, type LocatedCourseLayer } from './layerProperties'
 
 /**
@@ -175,4 +180,33 @@ export function elementUnitLabel(unit: readonly string[]): string {
   if (path[0] === 'block') return BLOCK_LABELS[path[1]!] ?? '内容'
   const name = LABELS[path.at(-1)!] ?? '其他设置'
   return path[0] === 'state' ? `命名态中的${name}` : name
+}
+
+/** The rich text of a Flow block's text slot, or null when the block or the slot is gone. */
+export function flowSlotContent(project: CourseProjectDocument, target: { surfaceId: string; blockId: string; slot: DocumentSlot }): FlowTextContent | null {
+  const found = flowBlock(project, target.surfaceId, target.blockId)
+  if (!found) return null
+  try { return structuredClone(flowTextSlot(found.block, target.slot).get()) } catch { return null }
+}
+/**
+ * What a text card's range holds now: the Markdown source there, or the Flow slot's rich text there. A card
+ * compares it with what its last request left before it sends the next one.
+ */
+export function textTargetContent(model: DocumentModel, target: ExecutionSelectionTarget): string | null {
+  if (target.kind === 'markdown-range') return isSourceDocumentModel(model) && target.to <= model.source.length ? model.source.slice(target.from, target.to) : null
+  if (target.kind !== 'flow-range' || model.kind !== 'course-v9') return null
+  const content = flowSlotContent(model.project, target)
+  return content && target.to <= documentTextLength(content) ? JSON.stringify(sliceFlowRichText(content, target.from, target.to)) : null
+}
+/** Where a range of Markdown source is after a change inside it; null when the text around it changed too. */
+export function traceSourceRange(before: string, after: string, from: number, to: number): { from: number; to: number } | null {
+  const end = to + after.length - before.length
+  return end >= from && before.slice(0, from) === after.slice(0, from) && before.slice(to) === after.slice(end) ? { from, to: end } : null
+}
+/** Where a range of a Flow text slot is after a change inside it; null when the text around it changed too. */
+export function traceFlowRange(before: FlowTextContent, after: FlowTextContent, from: number, to: number): { from: number; to: number } | null {
+  const length = documentTextLength(before), next = documentTextLength(after), end = to + next - length
+  const same = (a: FlowTextContent, b: FlowTextContent) => JSON.stringify(a) === JSON.stringify(b)
+  return end >= from && same(sliceFlowRichText(before, 0, from), sliceFlowRichText(after, 0, from))
+    && same(sliceFlowRichText(before, to, length), sliceFlowRichText(after, end, next)) ? { from, to: end } : null
 }

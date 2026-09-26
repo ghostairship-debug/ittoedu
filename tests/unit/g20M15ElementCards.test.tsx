@@ -7,6 +7,7 @@ import { ElementCardController, elementCardKey, elementCards, type ElementCardVi
 import type { SelectionCapture } from '../../src/renderer/workbench/SelectionContextController'
 import type { ConversationElementScope, ConversationRecord } from '../../src/shared/workbench/conversations'
 import type { DocumentHostAPI } from '../../src/shared/workbench/desktop'
+import type { DocumentSnapshot } from '../../src/shared/workbench/document'
 import type { ExecutionRunRecord } from '../../src/shared/workbench/execution'
 import type { ElementChangeView, ElementRevertResult, ExecutionDesktopAPI, ExecutionSelectionTarget, ExecutionSendInput, ExecutionSubmissionRecord } from '../../src/shared/workbench/executionDesktop'
 import type { ExecutionEvent } from '../../src/shared/workbench/executionEvents'
@@ -66,6 +67,7 @@ function executionFixture() {
       return { events, cursor: events.at(-1)?.sequence ?? after, hasMore: false }
     }),
     answer: vi.fn(async () => ({ runId: 'run-1' })),
+    deleteConversation: vi.fn(async (input: { conversationId: string }) => { conversations.delete(input.conversationId) }),
     elementChange: vi.fn(async (submissionId: string): Promise<ElementChangeView> => changes.get(submissionId) ?? { submissionId, state: 'pending', fields: [] }),
     revertElement: vi.fn(async (_input: { submissionId: string; direction: 'undo' | 'redo'; force?: boolean }): Promise<ElementRevertResult> => reverts.shift()!),
     subscribe: vi.fn((listener: (event: ExecutionEvent) => void) => { listeners.add(listener); return () => { listeners.delete(listener) } }),
@@ -244,4 +246,40 @@ it('M15 the card undoes and redoes its latest request, and asks before overwriti
     act(() => d.close('doc'))
     window.desktopAPI = undefined as unknown as typeof window.desktopAPI
   }
+})
+
+it('M15 a text card sends to where its text is now, waits for the previous request, and ends when closed', async () => {
+  const f = executionFixture(), d = documentsFixture()
+  let source = '# 标题\n\n**加粗**文字\n', revision = 1
+  const snapshot = async () => ({ documentId: 'doc', epoch: 'epoch', revision, model: { kind: 'markdown', source, resources: { attachments: [] } } }) as unknown as DocumentSnapshot
+  const cards = new ElementCardController({ execution: () => f.execution, settings: () => settings(), documents: () => d.documents, snapshot })
+  cards.setWorkspace('workspace')
+  const first = { kind: 'markdown-range' as const, from: 8, to: 10 }
+  const key = cards.openText({ documentId: 'doc', target: first, label: '“加粗”', anchor: { left: 10, top: 20 }, content: '加粗' })
+  expect(cards.texts()).toMatchObject([{ key, kind: 'text', anchor: { left: 10, top: 20 }, textLost: null }])
+  expect(cards.active()).toEqual([])
+
+  await cards.send(key, '换个说法', undefined)
+  expect(f.api.createConversation).toHaveBeenCalledWith('workspace', '“加粗”', undefined, { kind: 'element', documentId: 'doc', label: '“加粗”' })
+  expect(f.api.send.mock.calls[0]![0].documents).toEqual([{ documentId: 'doc', epoch: 'epoch', revision: 1, selection: [first], writable: [first] }])
+  // A follow-up waits until the AI has changed the text.
+  await expect(cards.send(key, '再短一点', undefined)).rejects.toThrow('请等 AI 改完这一次再继续追问')
+
+  // The request ends; Main says where the text is now, and the next request goes there.
+  source = '# 标题\n\n**更粗的**文字\n'; revision = 2
+  const moved = { kind: 'markdown-range' as const, from: 8, to: 11 }
+  f.finish('c1', 'run-1', { state: 'applied', fields: ['文字'], target: moved, content: '更粗的' })
+  await waitFor(() => expect(cards.view(key)).toMatchObject({ busy: false, target: moved }))
+  await cards.send(key, '再短一点', undefined)
+  expect(f.api.send.mock.calls[1]![0].documents).toEqual([{ documentId: 'doc', epoch: 'epoch', revision: 2, selection: [moved], writable: [moved] }])
+  f.finish('c1', 'run-2', { state: 'applied', fields: ['文字'], target: moved, content: '更粗的' })
+  await waitFor(() => expect(cards.view(key)!.busy).toBe(false))
+
+  // Someone rewrote that text: the card does not guess.
+  source = '# 标题\n\n**别的**文字\n'; revision = 3
+  await expect(cards.send(key, '还原', undefined)).rejects.toThrow('这段文字已被改动')
+  // Closing ends the card and its conversation; the document keeps the changes.
+  await cards.closeText(key)
+  expect(cards.texts()).toEqual([])
+  expect(f.api.deleteConversation).toHaveBeenCalledWith(expect.objectContaining({ workspaceId: 'workspace', conversationId: 'c1' }))
 })

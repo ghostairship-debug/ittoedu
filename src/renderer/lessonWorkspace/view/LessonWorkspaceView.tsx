@@ -9,6 +9,7 @@ import { WorkspaceGrid } from './WorkspaceGrid'
 import { WorkbenchSessionPortalProvider } from '../../workbench/WorkbenchSessionPortal'
 import { proEditorRailController, useProEditorRailState } from '../../ui/proEditorRailController'
 import { WorkspaceMediaSourceProvider } from '../workspaceMediaSourceContext'
+import { ElementTextCardLayer } from '../../workbench/elementCards/ElementTextCards'
 export type { LessonWorkspaceViewProps } from './lessonWorkspaceViewTypes'
 
 /** Composition only: layout changes retain each region's parent and component identity. */
@@ -24,5 +25,6 @@ export function LessonWorkspaceView(props: LessonWorkspaceViewProps) {
      resources={<WorkspaceResources props={props} layout={layout} editorFocus={editorFocus} proPanel={activePanel} />}
      content={<WorkspaceContentHost props={props} layout={layout} editorFocus={editorFocus} enterEditor={() => { proEditorRailController.close(); setEditorFocus(true); props.actions.setMobilePane('workbench') }} exitEditor={exitEditor} />}
      assistant={<WorkspaceSessionHost props={props} />} />
+   <ElementTextCardLayer />
  </div></WorkbenchSessionPortalProvider></WorkspaceMediaSourceProvider>
 }

@@ -140,6 +140,10 @@ export interface ElementChangeView {
   state: 'pending' | 'none' | 'applied' | 'undone'
   fields: string[]
   unavailable?: string
+  /** A text card's range now (after the request, or after its undo), for the next request; absent when it cannot be traced. */
+  target?: ExecutionSelectionTarget
+  /** What that range holds (see textTargetContent); a card checks it before sending the next request. */
+  content?: string
 }
 export type ElementRevertResult =
   | { status: 'applied'; change: ElementChangeView }

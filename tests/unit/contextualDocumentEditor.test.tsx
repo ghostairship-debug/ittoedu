@@ -1,6 +1,6 @@
 import { attachMarkdownRendererHost } from '../helpers/markdownRendererHost'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { createRef } from 'react'
 import { TextSelection } from 'prosemirror-state'
 import { EditorView } from '@codemirror/view'
@@ -9,6 +9,8 @@ import { LessonDocumentEditor, type LessonDocumentEditorHandle } from '../../src
 import type { RecoverableDocumentFilePort } from '../../src/renderer/documentFiles/documentFileSession'
 import type { OpenDocumentResult } from '../../src/shared/document/ports'
 import { workbenchSelection, type ContextualEditRequest } from '../../src/renderer/workbench/SelectionContextController'
+import { ElementTextCardLayer } from '../../src/renderer/workbench/elementCards/ElementTextCards'
+import { elementCards } from '../../src/renderer/workbench/elementCards/elementCardController'
 
 afterEach(() => { cleanup(); vi.restoreAllMocks() })
 // JSDOM has no layout; the selection quick bar only appears over a visible editor.
@@ -26,23 +28,21 @@ function fixture() {
   return { ref, port, read: () => disk }
 }
 describe('file contextual editing in mounted UI', () => {
-  it('selects plain Markdown without IDs, invokes a precise AI callback, and clears it after source changes', async () => {
+  it('selects plain Markdown without IDs, opens a text card on the precise range, and clears it after source changes', async () => {
     visibleEditor()
     const factory = vi.spyOn(editorSession, 'createLayoutEditor'), f = fixture(), handle = createRef<LessonDocumentEditorHandle>()
-    // The file editor hands a frozen Markdown range to the unified assistant through the selection controller.
-    const requests: ContextualEditRequest[] = []
-    const stop = workbenchSelection.onRequest(request => { requests.push(request) })
-    render(<LessonDocumentEditor ref={handle} documentRef={f.ref} port={f.port} />)
+    render(<><LessonDocumentEditor ref={handle} documentRef={f.ref} port={f.port} /><ElementTextCardLayer /></>)
     await screen.findByText('加粗')
     const editor = factory.mock.results.at(-1)!.value as ReturnType<typeof editorSession.createLayoutEditor>
     act(() => editor.view.dispatch(editor.view.state.tr.setSelection(TextSelection.create(editor.view.state.doc, 5, 7))))
     expect(handle.current?.getContextualEditTarget()?.ranges).toEqual([{ from: 6, to: 8, before: '加粗' }])
+    // M15: selected text gets its own card on the frozen Markdown range, which stays until it is closed.
     fireEvent.click(screen.getByRole('button', { name: 'AI 修改' }))
-    fireEvent.change(screen.getByLabelText('AI 修改要求'), { target: { value: '换一个词' } })
-    fireEvent.click(screen.getByRole('button', { name: /^发送$/ }))
-    await waitFor(() => expect(requests).toHaveLength(1))
-    stop()
-    expect(requests[0]).toMatchObject({ instruction: '换一个词', selection: { source: f.read().source, targets: [{ kind: 'markdown-range', from: 6, to: 8 }] } })
+    const card = await screen.findByRole('dialog', { name: 'AI 修改：“加粗”' })
+    expect(card).toHaveTextContent('这里的 AI 只改选中的文字')
+    expect(elementCards.texts()).toMatchObject([{ kind: 'text', target: { kind: 'markdown-range', from: 6, to: 8 } }])
+    fireEvent.click(within(card).getByRole('button', { name: '关闭 AI 卡' }))
+    await waitFor(() => expect(elementCards.texts()).toEqual([]))
     act(() => editor.view.dispatch(editor.view.state.tr.insertText('新词')))
     await waitFor(() => expect(handle.current?.getContextualEditTarget()).toBeNull())
   })

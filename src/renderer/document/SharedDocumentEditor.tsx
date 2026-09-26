@@ -83,8 +83,11 @@ export interface SharedDocumentEditorProps {
   renderQuickBarActions?(target: DocumentContextSelection): ReactNode
   /** The bar's "⋯" for the selection, after the AI entry. */
   renderQuickBarMenu?(target: DocumentContextSelection): ReactNode
-  /** The bar's AI entry for the selection when the host has its own (an element AI card, M15); undefined keeps the default. */
-  renderAiButton?(target: DocumentContextSelection): ReactNode | undefined
+  /**
+   * The bar's AI entry for the selection when the host has its own (an element or text AI card, M15); undefined
+   * keeps the default. `issue` is why the editor would refuse a request now (for example source errors).
+   */
+  renderAiButton?(target: DocumentContextSelection, issue: string | null): ReactNode | undefined
   /** The right-click menu of a document object (picture, chart, component), asked after the object is selected. */
   objectMenu?(blockId: string): readonly MenuCommand[]
   pinnedTargets?: readonly ExecutionSelectionTarget[]
@@ -527,7 +530,7 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
     </form>}
   </>
   const quickBarIssue = contextualTarget ? contextualIssue(contextualTarget) ?? (diagnostics.length ? '源文尚有错误，请先修正或丢弃待修草稿。' : null) : null
-  const hostAiButton = contextualTarget ? props.renderAiButton?.(contextualTarget) : undefined
+  const hostAiButton = contextualTarget ? props.renderAiButton?.(contextualTarget, quickBarIssue) : undefined
   const textTools = contextualTarget && mode === 'layout' && contextualTarget.selection && contextualTarget.selection.kind !== 'object'
   const quickBar = contextualTarget && !props.readOnly && !props.contextualCardSuppressed && quickBarPlace
     && <SelectionQuickBar anchor={quickBarPlace.anchor} bounds={quickBarPlace.bounds} label="选中内容快捷工具" selectionKey={String(targetGeneration)}
