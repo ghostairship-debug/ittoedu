@@ -79,15 +79,17 @@ export function visiblePageRect(
   if (!view || !(box.width > 1) || !(box.height > 1)) return whole
   const document = page.ownerDocument.documentElement
   let left = Math.max(box.left, 0), top = Math.max(box.top, 0)
-  let right = Math.min(box.right, document.clientWidth || box.right), bottom = Math.min(box.bottom, document.clientHeight || box.bottom)
+  let edgeRight = document.clientWidth || box.right, edgeBottom = document.clientHeight || box.bottom
   for (let element = page.parentElement; element; element = element.parentElement) {
     const style = view.getComputedStyle(element)
     if (style.overflowX === 'visible' && style.overflowY === 'visible') continue
     const clip = element.getBoundingClientRect()
     left = Math.max(left, clip.left); top = Math.max(top, clip.top)
-    right = Math.min(right, clip.right); bottom = Math.min(bottom, clip.bottom)
+    edgeRight = Math.min(edgeRight, clip.right); edgeBottom = Math.min(edgeBottom, clip.bottom)
   }
-  right -= chrome.right; bottom -= chrome.bottom
+  // Scroll bars lie along the view's right and bottom edges: only the part of the page under them is lost, so a page
+  // with margins as wide as the bars keeps all of itself.
+  const right = Math.min(box.right, edgeRight - chrome.right), bottom = Math.min(box.bottom, edgeBottom - chrome.bottom)
   if (right <= left || bottom <= top) return whole
   const sx = box.width / canvas.width, sy = box.height / canvas.height
   return { x: (left - box.left) / sx, y: (top - box.top) / sy, width: (right - left) / sx, height: (bottom - top) / sy }

@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { visiblePageRect } from '@/player/teacherControllerHostContract'
 import { fitPage, pageFrameStyle, parsePageInsets, WINDOW_PAGE_INSETS } from '@/shared/pageFrame'
 import { createStageViewportTransform, stageViewportPanRange } from '@/renderer/authoring/stageViewportTransform'
 import { PlaybackViewSession } from '@/player/playbackViewSession'
@@ -91,5 +92,27 @@ describe('M19 one page frame', () => {
     view.register({ id: 'flow', kind: 'flow', root: flowRoot, content: flowContent }); view.activate('flow')
     expect(view.scrollBy({ x: 0, y: 100 })).toBe(false)
     view.destroy()
+  })
+
+  it('keeps the whole page when a scroll bar sits in its margin and loses only the covered strip otherwise', () => {
+    const rect = (x: number, y: number, width: number, height: number) => ({ x, y, left: x, top: y, right: x + width, bottom: y + height, width, height, toJSON: () => ({}) }) as DOMRect
+    const root = document.documentElement
+    Object.defineProperty(root, 'clientWidth', { configurable: true, value: 1000 })
+    Object.defineProperty(root, 'clientHeight', { configurable: true, value: 600 })
+    try {
+      const frame = document.createElement('div'), page = document.createElement('div')
+      frame.style.overflow = 'hidden'; frame.append(page); document.body.append(frame)
+      vi.spyOn(frame, 'getBoundingClientRect').mockReturnValue(rect(0, 0, 1000, 600))
+      const box = vi.spyOn(page, 'getBoundingClientRect')
+      // A portrait page 22px inside the view: the 18px bar lies in the margin.
+      box.mockReturnValue(rect(22, 42, 956, 956 * 1280 / 720))
+      expect(visiblePageRect(page, PORTRAIT, { right: 18, bottom: 0 }).width).toBeCloseTo(720)
+      // A page flush with the view, as in fullscreen: the bar covers its right strip.
+      box.mockReturnValue(rect(0, 0, 1000, 1000 * 1280 / 720))
+      expect(visiblePageRect(page, PORTRAIT, { right: 18, bottom: 0 }).width).toBeCloseTo((1000 - 18) * 720 / 1000)
+    } finally {
+      delete (root as unknown as Record<string, unknown>).clientWidth
+      delete (root as unknown as Record<string, unknown>).clientHeight
+    }
   })
 })
