@@ -50,7 +50,7 @@ function fixture() {
     resources: { assets: {}, components: {} } }))
   writeFileSync(join(workspace, '剪贴板对象.md'), serializeDocumentMarkdown({ content: { blocks: objectBlocks.slice(1) },
     resources: { assets: [], components: [] } }, 'file'))
-  const tableSource = '| 甲 | 乙 |\n| --- | --- |\n| 丙 | 丁 |\n'
+  const tableSource = '| 甲 | 乙 |\n| --- | --- |\n| 丙 | 丁 |\n| 戊 | 己 |\n'
   const parsedTable = parseDocumentMarkdown(tableSource, { target: 'flow', createId: () => crypto.randomUUID() })
   if (parsedTable.status !== 'valid') throw new Error(`Table fixture invalid: ${JSON.stringify(parsedTable.diagnostics)}`)
   const tableProject = courseProjectDocumentSchema.parse({ ...project, surfaces: [{ ...flow.surface, blocks: [flow.surface.blocks[0]!, ...parsedTable.document.content.blocks] }] })
@@ -406,6 +406,168 @@ for (const carrier of ['flow', 'markdown'] as const) {
     } finally { await closeSelectionApp(app); await server.close() }
   })
 
+  test('M16-T06 ' + carrier + ': table row, column and header commands keep visible and formal grids', async () => {
+    test.setTimeout(180_000)
+    const data = fixture(), server = await selectionServer(), app = await launchSelectionApp(data.directory)
+    const page = await app.firstWindow()
+    try {
+      await setupSelectionUI(app, page, server.endpoint, data.workspace)
+      const name = '表格验收.' + (carrier === 'flow' ? 'h5lesson' : 'md')
+      const opened = await openSelectionFile(page, data.workspace, name)
+      const body = await bodyFor(page, carrier, name)
+      const table = carrier === 'flow' ? body.locator('[data-flow-body-block="table"]').first()
+        : body.locator('figure:has(table)').first()
+      const formal = async () => {
+        const snapshot = await readSelectionDocument(page, opened.documentId)
+        if (snapshot.model.kind === 'markdown') return snapshot.model.source
+        if (snapshot.model.kind === 'course-v9') return JSON.stringify(snapshot.model.project.surfaces.find(surface => surface.type === 'flow')?.blocks)
+        throw new Error('Unexpected document kind ' + snapshot.model.kind)
+      }
+      const structure = async () => {
+        const entry = (await blocks(page, opened.documentId)).find(block => block.type === 'table')
+        if (!entry || entry.type !== 'table') throw new Error('Formal table missing')
+        const text = (content: typeof entry.columns[number]['header']) => content.inlines.map(item => item.type === 'text' ? item.text : '').join('')
+        return { headers: entry.columns.map(column => text(column.header)),
+          cells: entry.rows.map(row => entry.columns.map(column => text(row.cells[column.id]!))),
+          headerEnabled: entry.headerEnabled !== false }
+      }
+      const visibleGrid = () => table.locator('table tr').evaluateAll(rows => rows.map(row =>
+        [...row.querySelectorAll(':scope > th, :scope > td')].map(cell => cell.textContent?.trim() ?? '')))
+      const baseline = await structure()
+      expect(baseline).toEqual({ headers: ['甲', '乙'], cells: [['丙', '丁'], ['戊', '己']], headerEnabled: true })
+      await expect(table).toBeVisible()
+      await expect.poll(visibleGrid).toEqual([baseline.headers, ...baseline.cells])
+      const bar = page.getByRole('toolbar', { name: '选中内容快捷工具' })
+      const run = async (label: string, via: 'quick' | 'context', expected: typeof baseline) => {
+        const before = await formal()
+        const cell = table.locator('[data-document-slot^="cell:"]').first()
+        await cell.click({ button: via === 'context' ? 'right' : 'left' })
+        if (via === 'quick') {
+          await expect(bar).toBeVisible()
+          await bar.getByRole('button', { name: '表格操作' }).click()
+        }
+        const item = page.getByRole('menu', { name: '表格操作' }).getByRole('menuitem', { name: label, exact: true })
+        await expect(item).toBeEnabled()
+        await item.click()
+        await expect.poll(structure).toEqual(expected)
+        await expect.poll(visibleGrid).toEqual([expected.headers, ...expected.cells])
+        await expect(table.locator('table tr').first().locator(expected.headerEnabled ? 'th' : 'td')).toHaveCount(expected.headers.length)
+        const after = await formal()
+        expect(after).not.toBe(before)
+        await body.press('Control+z')
+        await expect.poll(formal).toBe(before)
+        await expect.poll(structure).toEqual(baseline)
+        await expect.poll(visibleGrid).toEqual([baseline.headers, ...baseline.cells])
+        await body.press('Control+Shift+z')
+        await expect.poll(formal).toBe(after)
+        await expect.poll(structure).toEqual(expected)
+        await expect.poll(visibleGrid).toEqual([expected.headers, ...expected.cells])
+        await body.press('Control+z')
+        await expect.poll(formal).toBe(before)
+      }
+      await run('下方插入行', 'quick', { ...baseline, cells: [['丙', '丁'], ['', ''], ['戊', '己']] })
+      await run('上方插入行', 'context', { ...baseline, cells: [['', ''], ['丙', '丁'], ['戊', '己']] })
+      await run('删除行', 'quick', { ...baseline, cells: [['戊', '己']] })
+      await run('右侧插入列', 'context', { ...baseline, headers: ['甲', '新列', '乙'],
+        cells: [['丙', '', '丁'], ['戊', '', '己']] })
+      await run('左侧插入列', 'quick', { ...baseline, headers: ['新列', '甲', '乙'],
+        cells: [['', '丙', '丁'], ['', '戊', '己']] })
+      await run('删除列', 'context', { ...baseline, headers: ['乙'], cells: [['丁'], ['己']] })
+      await run('关闭表头', 'quick', { ...baseline, headerEnabled: false })
+    } finally { await closeSelectionApp(app); await server.close() }
+  })
+  test('M16-T06 ' + carrier + ': table merge, split and delete keep one-step history', async () => {
+    test.setTimeout(120_000)
+    const data = fixture(), server = await selectionServer(), app = await launchSelectionApp(data.directory)
+    const page = await app.firstWindow()
+    try {
+      await setupSelectionUI(app, page, server.endpoint, data.workspace)
+      const name = '表格验收.' + (carrier === 'flow' ? 'h5lesson' : 'md')
+      const opened = await openSelectionFile(page, data.workspace, name)
+      const body = await bodyFor(page, carrier, name)
+      const table = carrier === 'flow' ? body.locator('[data-flow-body-block="table"]').first()
+        : body.locator('figure:has(table)').first()
+      const formal = async () => {
+        const snapshot = await readSelectionDocument(page, opened.documentId)
+        if (snapshot.model.kind === 'markdown') return snapshot.model.source
+        if (snapshot.model.kind === 'course-v9') return JSON.stringify(snapshot.model.project.surfaces.find(surface => surface.type === 'flow')?.blocks)
+        throw new Error('Unexpected document kind ' + snapshot.model.kind)
+      }
+      const tableData = async () => {
+        const entry = (await blocks(page, opened.documentId)).find(block => block.type === 'table')
+        if (!entry || entry.type !== 'table') throw new Error('Formal table missing')
+        return entry
+      }
+      const firstRowText = async () => {
+        const entry = await tableData()
+        return entry.columns.map(column => entry.rows[0]!.cells[column.id]!.inlines
+          .map(item => item.type === 'text' ? item.text : '').join(''))
+      }
+      const baseline = await formal()
+      const cells = table.locator('table tr').nth(1).locator('td')
+      await expect(cells).toHaveCount(2)
+      const first = await cells.nth(0).boundingBox(), second = await cells.nth(1).boundingBox()
+      if (!first || !second) throw new Error('Data cells have no screen geometry')
+      await page.mouse.move(first.x + first.width / 2, first.y + first.height / 2)
+      await page.mouse.down()
+      await page.mouse.move(second.x + second.width / 2, second.y + second.height / 2, { steps: 12 })
+      await page.mouse.up()
+      await expect(table.locator('td.selectedCell')).toHaveCount(2)
+      const bar = page.getByRole('toolbar', { name: '选中内容快捷工具' })
+      await expect(bar).toBeVisible()
+      await bar.getByRole('button', { name: '表格操作' }).click()
+      const merge = page.getByRole('menu', { name: '表格操作' }).getByRole('menuitem', { name: '合并单元格' })
+      await expect(merge).toBeEnabled()
+      await merge.click()
+      await expect.poll(async () => (await tableData()).merges?.map(item => [item.rowIds.length, item.columnIds.length])).toEqual([[1, 2]])
+      await expect.poll(firstRowText).toEqual(['丙\n丁', ''])
+      await expect(cells).toHaveCount(1)
+      await expect(cells.first()).toHaveAttribute('colspan', '2')
+      await expect(cells.first()).toContainText('丙')
+      await expect(cells.first()).toContainText('丁')
+      const merged = await formal()
+      expect(merged).not.toBe(baseline)
+      await body.press('Control+z')
+      await expect.poll(formal).toBe(baseline)
+      await expect(cells).toHaveCount(2)
+      await body.press('Control+Shift+z')
+      await expect.poll(formal).toBe(merged)
+      await expect(cells).toHaveCount(1)
+      await cells.first().click({ button: 'right' })
+      const split = page.getByRole('menu', { name: '表格操作' }).getByRole('menuitem', { name: '拆分单元格' })
+      await expect(split).toBeEnabled()
+      await split.click()
+      await expect.poll(async () => (await tableData()).merges ?? []).toEqual([])
+      await expect.poll(firstRowText).toEqual(['丙\n丁', ''])
+      await expect(cells).toHaveCount(2)
+      await expect(cells.nth(1)).toHaveText('')
+      await expect(cells.first()).toContainText('丙')
+      await expect(cells.first()).toContainText('丁')
+      const splitFormal = await formal()
+      expect(splitFormal).not.toBe(merged)
+      await body.press('Control+z')
+      await expect.poll(formal).toBe(merged)
+      await expect(cells).toHaveCount(1)
+      await body.press('Control+Shift+z')
+      await expect.poll(formal).toBe(splitFormal)
+      await expect(cells).toHaveCount(2)
+      await cells.first().click({ button: 'right' })
+      const remove = page.getByRole('menu', { name: '表格操作' }).getByRole('menuitem', { name: '删除表格' })
+      await expect(remove).toBeEnabled()
+      await remove.click()
+      await expect.poll(async () => (await blocks(page, opened.documentId)).some(block => block.type === 'table')).toBe(false)
+      await expect(table).toHaveCount(0)
+      const deleted = await formal()
+      expect(deleted).not.toBe(splitFormal)
+      await body.press('Control+z')
+      await expect.poll(formal).toBe(splitFormal)
+      await expect(table).toBeVisible()
+      await expect(cells).toHaveCount(2)
+      await body.press('Control+Shift+z')
+      await expect.poll(formal).toBe(deleted)
+      await expect(table).toHaveCount(0)
+    } finally { await closeSelectionApp(app); await server.close() }
+  })
   test(`M16-T05 ${carrier}: clipboard menu and native rich/plain paste preserve formal content`, async () => {
     test.setTimeout(150_000)
     const data = fixture(), server = await selectionServer(), app = await launchSelectionApp(data.directory)
