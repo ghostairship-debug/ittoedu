@@ -20,8 +20,11 @@ import {
   useEditorStore,
 } from '../store/editorStore'
 import type { ProjectAudioSettingsPatch } from '../media/commitCourseMediaAuthoring'
+import { flowInsertCommand, type FlowInsertDestination, type FlowInsertKind } from './flow/flowInsertCommands'
+import type { FlowDeepInsertPort } from './RightSidebar'
 
 export interface MediaTabProps {
+  onFlowInsert?: FlowDeepInsertPort
   onImportImage?(): void
   onImportAudio(): void
   onImportVideo(): void
@@ -419,6 +422,7 @@ function GlobalAudioSettings({ settings, onUpdate }: GlobalAudioSettingsProps) {
 }
 
 export function MediaTab({
+  onFlowInsert,
   onImportImage,
   onImportAudio,
   onImportVideo,
@@ -437,6 +441,7 @@ export function MediaTab({
   const addImageNode = useEditorStore((state) => state.addImageNode)
   const addVideoNode = useEditorStore((state) => state.addVideoNode)
   const flowSession = useEditorStore((state) => state.flowSession)
+  const flowInsertPort = flowSession?.selection.authoringScope === 'page' ? onFlowInsert : undefined
   const spatialScope = useEditorStore((state) => state.spatialSession?.scope ?? null)
   const insertFlowLibraryMedia = useEditorStore((state) => state.insertFlowLibraryMedia)
   const setError = useEditorStore((state) => state.setError)
@@ -453,6 +458,11 @@ export function MediaTab({
   ) => {
     const result = insertFlowLibraryMedia(assetId, request)
     if (!result.ok && result.reason) setError(result.reason)
+  }
+
+  const insertFlowAssetCommand = (destination: FlowInsertDestination, kind: FlowInsertKind, assetId: string) => {
+    const command = flowInsertCommand(destination, kind)
+    if (command && flowInsertPort) flowInsertPort(command, { assetId })
   }
 
   const normalizedFilter = filterQuery.trim().toLocaleLowerCase()
@@ -554,8 +564,8 @@ export function MediaTab({
                 asset={asset}
                 bytes={assetFiles[asset.id]}
                 onDelete={() => deleteAsset(asset.id)}
-                onAddToCanvas={flowSession ? () => insertFlowAsset(asset.id) : undefined}
-                onAddAsOverlay={flowSession ? () => insertFlowAsset(asset.id, { menuAction: 'insert-overlay' }) : undefined}
+                onAddToCanvas={flowSession ? () => flowInsertPort ? insertFlowAssetCommand('document', 'audio', asset.id) : insertFlowAsset(asset.id) : undefined}
+                onAddAsOverlay={flowSession && !flowInsertPort ? () => insertFlowAsset(asset.id, { menuAction: 'insert-overlay' }) : undefined}
                 placeLabel={flowSession ? '插入正文' : undefined}
               />
             ))}
@@ -581,12 +591,13 @@ export function MediaTab({
                   bytes={bytes}
                   onAddToCanvas={(event) => {
                     if (flowSession) {
-                      insertFlowAsset(asset.id, { altKey: event.altKey })
+                      if (flowInsertPort) insertFlowAssetCommand('document', 'video', asset.id)
+                      else insertFlowAsset(asset.id, { altKey: event.altKey })
                       return
                     }
                     if (bytes) addVideoNode(asset, bytes)
                   }}
-                  onAddAsOverlay={flowSession ? () => insertFlowAsset(asset.id, { menuAction: 'insert-overlay' }) : undefined}
+                  onAddAsOverlay={flowSession && !flowInsertPort ? () => insertFlowAsset(asset.id, { menuAction: 'insert-overlay' }) : undefined}
                   placeLabel={flowSession ? '插入正文' : undefined}
                   placementDisabled={spatialPlacementDisabled}
                   placementDisabledReason={spatialPlacementDisabledReason}
@@ -616,12 +627,14 @@ export function MediaTab({
                   bytes={bytes}
                   onAddToCanvas={(event) => {
                     if (flowSession) {
-                      insertFlowAsset(asset.id, { altKey: event.altKey })
+                      if (flowInsertPort) insertFlowAssetCommand('document', 'image', asset.id)
+                      else insertFlowAsset(asset.id, { altKey: event.altKey })
                       return
                     }
                     if (bytes) addImageNode(asset, bytes)
                   }}
-                  onAddAsOverlay={flowSession ? () => insertFlowAsset(asset.id, { menuAction: 'insert-overlay' }) : undefined}
+                  onAddAsOverlay={flowSession ? () => flowInsertPort ? insertFlowAssetCommand('paper', 'image', asset.id) : insertFlowAsset(asset.id, { menuAction: 'insert-overlay' }) : undefined}
+                  overlayLabel={flowInsertPort ? '放到纸面上' : undefined}
                   placeLabel={flowSession ? '插入正文' : undefined}
                   placementDisabled={spatialPlacementDisabled}
                   placementDisabledReason={spatialPlacementDisabledReason}

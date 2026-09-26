@@ -24,8 +24,11 @@ import { createShapeNode } from '../../core/tools/nativeNodeFactories'
 import { useEditorStore, selectMediaAssets, selectAudioSettings, selectEditingScope } from '../store/editorStore'
 import type { EditingScope } from '../store/slices/editorShellSlice'
 import { MediaTab } from './MediaTab'
+import { FlowInsertMenu } from './flow/FlowInsertMenu'
+import type { FlowDeepInsertPort } from './RightSidebar'
 
 interface ElementsTabProps {
+  onFlowInsert?: FlowDeepInsertPort
   onAddImage(x?: number, y?: number): void
   onAddVideo?(x?: number, y?: number): void
   onImportImage?(): void
@@ -217,6 +220,7 @@ function ShapePreview({ type }: { type: ShapeType }) {
 }
 
 export function ElementsTab({
+  onFlowInsert,
   onAddImage,
   onAddVideo,
   onImportImage,
@@ -335,6 +339,16 @@ export function ElementsTab({
   const showControlsEmpty = activeCategory === 'controls' &&
     editingScope !== 'global' &&
     !searching
+
+  if (authoringSurface === 'flow' && editingScope === 'scene' && onFlowInsert) return (
+    <div className="elements-scroll" data-testid="elements-tab">
+      <FlowInsertMenu onInsert={command => onFlowInsert(command)} />
+      {onImportAudio && onImportVideo && <details className="flow-insert-assets"><summary>已导入素材</summary>
+        <MediaTab embedded onFlowInsert={onFlowInsert} onImportImage={onImportImage}
+          onImportAudio={onImportAudio} onImportVideo={onImportVideo} showAdvancedAudioSettings={false} />
+      </details>}
+    </div>
+  )
 
   return (
     <div className="elements-scroll" data-testid="elements-tab">

@@ -19,6 +19,8 @@ import type {
   ComponentCatalogSnapshot,
 } from '../../shared/componentCatalog'
 import { componentSupportsScope } from '../../shared/componentCapabilities'
+import { flowInsertCommand, type FlowInsertDestination } from './flow/flowInsertCommands'
+import type { FlowDeepInsertPort } from './RightSidebar'
 import type { ComponentPackageData } from '../../shared/componentTypes'
 import { componentCatalogInstallStatus } from '../components/componentCatalogStatus'
 import {
@@ -38,6 +40,7 @@ import {
 } from '../store/editorStore'
 
 interface ComponentsTabProps {
+  onFlowInsert?: FlowDeepInsertPort
   componentCatalog?: ComponentCatalogSnapshot
   onImportExternalComponents?(): void
   onRefreshComponentCatalog?(): void
@@ -459,6 +462,7 @@ export function ComponentLibraryDialog({
 }
 
 export function ComponentsTab({
+  onFlowInsert,
   componentCatalog = EMPTY_CATALOG,
   onImportExternalComponents,
   onRefreshComponentCatalog,
@@ -474,6 +478,12 @@ export function ComponentsTab({
   const editingScope = useEditorStore(selectEditingScope)
   const spatialScope = useEditorStore((state) => state.spatialSession?.scope ?? null)
   const addExternalComponentNode = useEditorStore((state) => state.addExternalComponentNode)
+  const flowSession = useEditorStore((state) => state.flowSession)
+  const flowInsertPort = flowSession?.selection.authoringScope === 'page' ? onFlowInsert : undefined
+  const insertFlowComponent = (destination: FlowInsertDestination, packageId: string, presetId?: string) => {
+    const command = flowInsertCommand(destination, 'component')
+    if (command && flowInsertPort) flowInsertPort(command, { packageId, ...(presetId ? { presetId } : {}) })
+  }
   const deleteComponentPackage = useEditorStore((state) => state.deleteComponentPackage)
   const packages = useMemo(() => Object.values(components).sort((left, right) =>
     left.manifest.name.localeCompare(right.manifest.name, 'zh-CN'),
@@ -572,7 +582,7 @@ export function ComponentsTab({
             const scopeSupported = isSpatial
               ? spatialScope === 'world' && manifestScopeSupported
               : manifestScopeSupported
-            const draggable = isSpatial ? false : scopeSupported
+            const draggable = isSpatial || flowInsertPort ? false : scopeSupported
             const insertionDisabledReason = spatialScope === 'surface'
               ? '表面共享层暂不支持插入组件；请切换到无限画布世界层。'
               : spatialScope === 'global'
@@ -602,7 +612,7 @@ export function ComponentsTab({
                     onDragStart={draggable
                       ? (event) => setComponentDragData(event, packageId, data.manifest.name)
                       : undefined}
-                    onClick={scopeSupported ? () => addExternalComponentNode(packageId) : undefined}
+                    onClick={scopeSupported ? () => flowInsertPort ? insertFlowComponent('document', packageId) : addExternalComponentNode(packageId) : undefined}
                   >
                     <span className="component-thumb"><ComponentThumbnail data={data} /></span>
                     <span>
@@ -612,6 +622,8 @@ export function ComponentsTab({
                     </span>
                     <Box size={15} />
                   </button>
+                  {flowInsertPort && <button type="button" disabled={!scopeSupported} aria-label={`将${data.manifest.name}放到纸面上`}
+                    onClick={() => insertFlowComponent('paper', packageId)}>放到纸面上</button>}
                   <details className="project-component-menu">
                     <summary aria-label={`管理${data.manifest.name}`} title="组件管理"><MoreVertical size={17} /></summary>
                     <div className="project-component-menu__panel" role="menu">
@@ -651,12 +663,15 @@ export function ComponentsTab({
                           ? (event) => setComponentDragData(event, packageId, `${data.manifest.name} · ${preset.label}`, preset.id)
                           : undefined}
                         onClick={scopeSupported
-                          ? () => addExternalComponentNode(packageId, undefined, undefined, preset.id)
+                          ? () => flowInsertPort ? insertFlowComponent('document', packageId, preset.id) : addExternalComponentNode(packageId, undefined, undefined, preset.id)
                           : undefined}
                       >
                         {preset.label}
                       </button>
                     ))}
+                    {flowInsertPort && data.manifest.presets.map(preset => <button type="button" key={`${preset.id}-paper`}
+                      disabled={!scopeSupported} aria-label={`将${preset.label} 放到纸面上`}
+                      onClick={() => insertFlowComponent('paper', packageId, preset.id)}>纸面 · {preset.label}</button>)}
                   </div>
                 )}
                 {!scopeSupported && (

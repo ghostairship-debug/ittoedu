@@ -4,6 +4,7 @@ import {
   Settings2, Sparkles, Workflow, X,
 } from 'lucide-react'
 import { ElementsTab } from './ElementsTab'
+import type { FlowInsertCommand } from './flow/flowInsertCommands'
 import { NodesTab } from './NodesTab'
 import { PropertiesTab } from './PropertiesTab'
 import { AutomationTab } from './AutomationTab'
@@ -21,7 +22,11 @@ import type {
 } from '../../shared/componentCatalog'
 import './proEditorRail.css'
 
+export interface FlowDeepInsertPayload { readonly assetId?: string; readonly packageId?: string; readonly presetId?: string }
+export type FlowDeepInsertPort = (command: FlowInsertCommand, payload?: FlowDeepInsertPayload) => void
+
 interface RightSidebarProps {
+  onFlowInsert?: FlowDeepInsertPort
   onAddImage(x?: number, y?: number): void
   onReplaceImage(): void
   onAddVideo(x?: number, y?: number): void
@@ -54,6 +59,7 @@ const workspaceButtons = [
 ] as const
 
 export function RightSidebar({
+  onFlowInsert,
   onAddImage,
   onReplaceImage,
   onAddVideo,
@@ -153,11 +159,11 @@ export function RightSidebar({
           <button type="button" aria-label="收起编辑面板" onClick={closePanel}><X size={16} /></button>
         </header>
         {visited.has('elements') && <div className="sidebar-section" hidden={activeTab !== 'elements'}>
-          <ElementsTab onAddImage={onAddImage} onAddVideo={onAddVideo}
+          <ElementsTab onFlowInsert={onFlowInsert} onAddImage={onAddImage} onAddVideo={onAddVideo}
             onImportImage={onImportImage} onImportAudio={onImportAudio} onImportVideo={onImportVideo} />
         </div>}
         {visited.has('components') && <div className="sidebar-section" hidden={activeTab !== 'components'}>
-          <ComponentsTab componentCatalog={componentCatalog}
+          <ComponentsTab onFlowInsert={onFlowInsert} componentCatalog={componentCatalog}
             onImportExternalComponents={onImportExternalComponents}
             onRefreshComponentCatalog={onRefreshComponentCatalog}
             onAddCatalogComponents={onAddCatalogComponents}
