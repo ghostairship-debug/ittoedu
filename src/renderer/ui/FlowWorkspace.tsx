@@ -5,11 +5,12 @@ import { textTargetContent } from '../../core/drivers/course/elementFields'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { createRoot } from 'react-dom/client'
 import type { AssetMeta } from '../../shared/contracts/media-v1'
-import type { FlowBlock } from '../../shared/courseProjectTypes'
+import type { FlowBlock, FlowMediaBlock } from '../../shared/courseProjectTypes'
 import type { ComponentPackageData } from '../../shared/componentTypes'
 import { documentResourceReferences } from '../../shared/document/resources'
 import { FLOW_BODY_CSS, FLOW_BODY_PAPER_PADDING, FLOW_BODY_SCROLL_PADDING, FLOW_COMPONENT_BLOCK_HEIGHT, flowPaperMaxWidth, resolveFlowBodyWidth } from '../../shared/flowBodyPresentation'
 import { measureFlowPaperOrigin } from '../../shared/flowViewportGeometry'
+import type { FlowParagraphBlockRect } from '../../shared/flowParagraphAnchors'
 import { SharedDocumentEditor, type SharedDocumentEditorHandle } from '../document'
 import { createFlowDocumentResourcePort } from '../document/flowDocumentResources'
 import { createDocumentClipboardContext, readDocumentClipboardContext } from '../document/documentClipboardContext'
@@ -39,6 +40,10 @@ import { useWorkspaceMediaSource } from '../lessonWorkspace/workspaceMediaSource
 import { deliverWorkspaceMediaDrop, type WorkspaceMediaDropHandler } from '../lessonWorkspace/workspaceMediaDrop'
 import { WORKSPACE_MEDIA_DRAG_TYPE } from '../lessonWorkspace/workspaceMediaDrag'
 import { flowMediaDropAfterBlock } from './flow/flowMediaDropPosition'
+import { FlowPaperMedia } from './flow/FlowPaperMedia'
+import { FlowMediaCropEditor } from './flow/FlowMediaCropEditor'
+import type { FlowMediaToolPort } from './flow/flowMediaCommands'
+import { observeFlowParagraphLayout } from './flow/flowParagraphLayout'
 
 export interface FlowWorkspaceProps {
   readonly documentId?: string | null
@@ -89,6 +94,8 @@ export function FlowWorkspace({ documentId, view, sessionToken, assets, selectio
   const workspaceRef = useRef<HTMLDivElement>(null)
   const editorRef = useRef<SharedDocumentEditorHandle>(null)
   const [error, setError] = useState<string | null>(null)
+  const [cropTarget, setCropTarget] = useState<{ documentId: string; projectId: string; surfaceId: string; generation: number; revision: number; block: FlowMediaBlock } | null>(null)
+  const [captionFocus, setCaptionFocus] = useState<{ documentId: string; projectId: string; surfaceId: string; generation: number; revision: number; blockId: string; expires: number } | null>(null)
   const [mediaDragOver, setMediaDragOver] = useState(false)
   const propertyContext = usePropertiesContext({ onReplaceImage: () => setError('请在完整属性面板中替换浮层图片。') })
   // The selected Flow document object, once the property context agrees with the editor's selection.
@@ -182,14 +189,17 @@ export function FlowWorkspace({ documentId, view, sessionToken, assets, selectio
     : undefined, [generation, view.surfaceId, readOnly])
   const [paperScroll, setPaperScroll] = useState({ top: 0, left: 0 })
   const [paperOrigin, setPaperOrigin] = useState({ x: 0, y: 0 })
+  const paperLayoutKey = `${documentId ?? ''}/${view.projectId}/${view.surfaceId}/${sessionToken.locationId}/${sessionToken.revision}/${sessionToken.generation}/${view.revision}`
+  const [paperLayout, setPaperLayout] = useState<{ key: string; width: number; rects: readonly FlowParagraphBlockRect[] }>({ key: paperLayoutKey, width: 0, rects: [] })
   const viewKey = `${view.projectId}/${view.surfaceId}`
+  const currentPaperLayout = paperLayout.key === paperLayoutKey ? paperLayout : { key: paperLayoutKey, width: 0, rects: [] }
   const [panState, setPanState] = useState({ key: viewKey, x: 0, y: 0 })
   const viewPan = panState.key === viewKey ? panState : { x: 0, y: 0 }
   const setViewPan = (pan: { x: number; y: number }) => setPanState(current => current.key === viewKey && current.x === pan.x && current.y === pan.y ? current : { key: viewKey, ...pan })
   const [viewport, setViewport] = useState({ width: 1280, height: 720, nativeChrome: { right: 0, bottom: 0 } })
   const assetMimeTypes = useMemo(() => Object.fromEntries(Object.entries(assets).map(([id, asset]) => [id, asset.mimeType])), [assets])
   const assetUrls = useAssetObjectUrls(assetFiles, assetMimeTypes)
-  const current = useRef({ view, sessionToken, commands }); current.current = { view, sessionToken, commands }
+  const current = useRef({ documentId, view, sessionToken, commands }); current.current = { documentId, view, sessionToken, commands }
   const bodyWidth = resolveFlowBodyWidth(view.layout, viewport.width - viewport.nativeChrome.right)
   const objectRevision = useMemo(() => ({ assetUrls, componentPackages, bodyWidth }), [assetUrls, componentPackages, bodyWidth])
   const controller = useFlowTextAuthoringController({ view, sessionToken, selection, readOnly, textEdit, workspaceRef, commands })
@@ -205,6 +215,78 @@ export function FlowWorkspace({ documentId, view, sessionToken, assets, selectio
     else setError(null)
     return receipt
   }
+  const runOverlay = (layerItemId: string, intent: Parameters<FlowCurrentSessionCommandPort['run']>[1]) => {
+    if (!editorRef.current?.flush().ready) { setError('请先完成当前正文输入，再调整纸面对象'); return }
+    const value = current.current
+    const receipt = value.commands.run(captureFlowEditorAuthoringTarget({
+      view: value.view,
+      sessionToken: value.sessionToken,
+      target: { kind: 'overlay', layerItemId },
+    }), intent)
+    if (!receipt.ok) setError(receipt.reason ?? '纸面对象操作未提交')
+    else setError(null)
+  }
+  const mediaToolsFor = (block: Pick<FlowMediaBlock, 'id' | 'assetId' | 'mediaKind'>): FlowMediaToolPort => {
+    const captured = { documentId, projectId: view.projectId, surfaceId: view.surfaceId,
+      generation: sessionToken.generation, revision: view.revision }
+    const matchesCurrent = (): FlowMediaBlock | null => {
+      const liveView = current.current.view
+      const live = liveView.blocks.find(entry => entry.blockId === block.id)?.block
+      if (captured.documentId && current.current.documentId === captured.documentId
+        && liveView.projectId === captured.projectId && liveView.surfaceId === captured.surfaceId
+        && current.current.sessionToken.generation === captured.generation && liveView.revision === captured.revision
+        && live?.type === 'media' && live.assetId === block.assetId && live.mediaKind === block.mediaKind) {
+        return structuredClone(live) as FlowMediaBlock
+      }
+      setError('媒体对象已变化，请重新选择')
+      return null
+    }
+    return {
+      openCrop: () => {
+        const snapshot = matchesCurrent()
+        if (snapshot && captured.documentId) setCropTarget({ documentId: captured.documentId, projectId: captured.projectId,
+          surfaceId: captured.surfaceId, generation: captured.generation, revision: captured.revision, block: snapshot })
+      },
+      patchMedia: patch => { if (matchesCurrent()) run({ kind: 'patch-block', patch }, block.id) },
+      openCaption: (caption, draft) => {
+        if (!matchesCurrent() || !captured.documentId) { draft.cancel(); return }
+        draft.cancel()
+        const receipt = caption ? null : run({ kind: 'patch-block', patch: { caption: { inlines: [] } } }, block.id)
+        if (receipt && !receipt.ok) return
+        setCaptionFocus({ documentId: captured.documentId, projectId: captured.projectId, surfaceId: captured.surfaceId,
+          generation: captured.generation, revision: captured.revision + (receipt?.historyEntry ? 1 : 0),
+          blockId: block.id, expires: Date.now() + 1000 })
+      },
+      convertToOverlay: () => { if (matchesCurrent()) run({ kind: 'convert-block-to-overlay' }, block.id) },
+    }
+  }
+  useEffect(() => {
+    setCropTarget(target => target && (target.documentId !== documentId || target.projectId !== view.projectId
+      || target.surfaceId !== view.surfaceId || target.generation !== sessionToken.generation
+      || target.revision !== view.revision) ? null : target)
+  }, [documentId, view.projectId, view.surfaceId, sessionToken.generation, view.revision])
+  useEffect(() => {
+    if (!captionFocus) return
+    const sameIdentity = () => current.current.documentId === captionFocus.documentId
+      && current.current.view.projectId === captionFocus.projectId
+      && current.current.view.surfaceId === captionFocus.surfaceId
+      && current.current.sessionToken.generation === captionFocus.generation
+    if (!sameIdentity() || view.revision > captionFocus.revision || selection?.selectedBlockId !== captionFocus.blockId) {
+      setCaptionFocus(null)
+      return
+    }
+    if (view.revision < captionFocus.revision) return
+    let timer: number | null = null
+    const attempt = () => {
+      timer = null
+      if (!sameIdentity() || current.current.view.revision !== captionFocus.revision) { setCaptionFocus(null); return }
+      if (editorRef.current?.focusSlot(captionFocus.blockId, 'caption')) { setCaptionFocus(null); return }
+      if (Date.now() >= captionFocus.expires) { setError('请在正文中选择图片说明后编辑'); setCaptionFocus(null); return }
+      timer = window.setTimeout(attempt, 60)
+    }
+    timer = window.setTimeout(attempt, 0)
+    return () => { if (timer !== null) window.clearTimeout(timer) }
+  }, [captionFocus, documentId, view.projectId, view.surfaceId, view.revision, sessionToken.generation, selection?.selectedBlockId])
   const contextualCommandIssue = (target: DocumentContextSelection): string | null => {
     try {
       const currentView = current.current.view
@@ -255,6 +337,19 @@ export function FlowWorkspace({ documentId, view, sessionToken, assets, selectio
     if (paperRef.current) observer.observe(paperRef.current)
     return () => observer.disconnect()
   }, [viewPan.x, viewPan.y])
+  useLayoutEffect(() => {
+    const paper = paperRef.current
+    if (!paper) return
+    return observeFlowParagraphLayout(paper, rects => {
+      const width = paper.getBoundingClientRect().width
+      setPaperLayout(previous => previous.key === paperLayoutKey && previous.width === width && previous.rects.length === rects.length
+        && previous.rects.every((rect, index) => {
+          const next = rects[index]
+          return next && rect.blockId === next.blockId && rect.depth === next.depth
+            && rect.x === next.x && rect.y === next.y && rect.width === next.width && rect.height === next.height
+        }) ? previous : { key: paperLayoutKey, width, rects })
+    })
+  }, [paperLayoutKey])
   const formulaOverlay = view.overlayLayers.find(layer => layer.selectionId === controller.formulaBlockId)?.item
   const [toolbarHost, setToolbarHost] = useState<HTMLDivElement | null>(null)
   const formulaNode = formulaOverlay?.kind === 'native' && formulaOverlay.content.nativeType === 'formula'
@@ -288,7 +383,9 @@ export function FlowWorkspace({ documentId, view, sessionToken, assets, selectio
       enabled={!readOnly} ownsDocumentSelection={false} textEditing={Boolean(textEdit)} />
     <FlowOverlayAuthoringLayer view={view} sessionToken={sessionToken} selection={selection} locationId={selection?.locationId ?? view.locationId}
       readOnly={readOnly} assetUrls={assetUrls} componentPackages={componentPackages} paperScrollTop={paperScroll.top} paperScrollLeft={paperScroll.left}
-      paperOrigin={paperOrigin} overlayViewportSize={viewport} viewPan={viewPan} onViewPanChange={setViewPan} onEditFormula={controller.openFormula}
+      paperOrigin={paperOrigin} paperWidth={currentPaperLayout.width} paragraphRects={currentPaperLayout.rects}
+      overlayViewportSize={viewport} viewPan={viewPan} onViewPanChange={setViewPan} onEditFormula={controller.openFormula}
+      onBodyPlaneChange={(layerItemId, bodyPlane) => runOverlay(layerItemId, { kind: 'patch-overlay-body-plane', bodyPlane })}
       onBeforeGesture={() => editorRef.current?.flush().ready ?? true} commands={commands}>
       <div ref={scrollRef} className="flow-workspace__scroll flow-media-query-root" data-testid="flow-workspace-scroll" data-flow-media-query-root="true"
         onClick={event => { if (event.target === event.currentTarget && editorRef.current?.flush().ready) run({ kind: 'clear-selection' }) }}
@@ -350,7 +447,7 @@ export function FlowWorkspace({ documentId, view, sessionToken, assets, selectio
             }}
             renderQuickBarActions={target => {
               const block = quickBarBlock(target)
-              return block && propertyContext.kind === 'flow-block' ? <FlowBlockQuickActions block={block} commands={propertyContext.commands} replaceMedia={replaceMedia} /> : null
+              return block && propertyContext.kind === 'flow-block' ? <FlowBlockQuickActions block={block} commands={propertyContext.commands} replaceMedia={replaceMedia} mediaTools={block.type === 'media' ? mediaToolsFor(block) : undefined} /> : null
             }}
             renderAiButton={(target, issue) => {
               // Selected text opens a text card (M15); it stays until closed and follows its text through follow-ups.
@@ -374,11 +471,11 @@ export function FlowWorkspace({ documentId, view, sessionToken, assets, selectio
             }}
             renderQuickBarMenu={target => {
               const block = quickBarBlock(target)
-              return block && propertyContext.kind === 'flow-block' ? <FlowBlockQuickMenu block={block} commands={propertyContext.commands} replaceMedia={replaceMedia} /> : null
+              return block && propertyContext.kind === 'flow-block' ? <FlowBlockQuickMenu block={block} commands={propertyContext.commands} replaceMedia={replaceMedia} mediaTools={block.type === 'media' ? mediaToolsFor(block) : undefined} /> : null
             }}
             objectMenu={blockId => {
               const block = readOnly ? undefined : selectedBlock(blockId)
-              return block && propertyContext.kind === 'flow-block' ? flowBlockCommands(block, propertyContext.commands, replaceMedia) : []
+              return block && propertyContext.kind === 'flow-block' ? flowBlockCommands(block, propertyContext.commands, replaceMedia, block.type === 'media' ? mediaToolsFor(block) : undefined) : []
             }}
             onSelection={next => {
               if (!next) { run({ kind: 'clear-selection' }); return }
@@ -398,7 +495,7 @@ export function FlowWorkspace({ documentId, view, sessionToken, assets, selectio
                 if (selected) figure.dataset.flowMediaSelected = 'true'; else delete figure.dataset.flowMediaSelected
                 figure.style.setProperty(FLOW_MEDIA_INLINE_SIZE_CUSTOM_PROPERTY, projection.inlineSize)
                 Object.assign(figure.style, { outline: selected ? '2px solid #2563eb' : '', outlineOffset: selected ? '3px' : '', width: wrapped ? projection.wrappedOuterInlineSize : FLOW_MEDIA_INLINE_SIZE_REFERENCE, maxWidth: wrapped ? '100%' : FLOW_MEDIA_INLINE_SIZE_REFERENCE, inlineSize: wrapped ? projection.wrappedOuterInlineSize : FLOW_MEDIA_INLINE_SIZE_REFERENCE, maxInlineSize: wrapped ? '100%' : FLOW_MEDIA_INLINE_SIZE_REFERENCE, cssFloat: wrapped ? block.wrap : 'none', position: 'relative', left: wrapped ? '' : '50%', transform: wrapped ? '' : 'translateX(-50%)', margin: wrapped ? block.wrap === 'left' ? '0 16px 8px 0' : '0 0 8px 16px' : '0' })
-                root.render(renderFlowPaperMedia(block, assetUrls))
+                root.render(block.mediaKind === 'image' ? <FlowPaperMedia block={block} url={assetUrls[block.assetId]} /> : renderFlowPaperMedia(block, assetUrls))
               }
               if (block.type === 'component') {
                 if ((block.wrap === 'left' || block.wrap === 'right') && host.parentElement) { host.parentElement.style.cssFloat = block.wrap; host.parentElement.style.width = '48%'; host.parentElement.style.margin = block.wrap === 'left' ? '0 16px 8px 0' : '0 0 8px 16px' }
@@ -413,6 +510,25 @@ export function FlowWorkspace({ documentId, view, sessionToken, assets, selectio
         </article>
       </div>
     </FlowOverlayAuthoringLayer>
+    {cropTarget && cropTarget.documentId === documentId && cropTarget.projectId === view.projectId
+      && cropTarget.surfaceId === view.surfaceId && cropTarget.generation === sessionToken.generation
+      && cropTarget.revision === view.revision && <div style={{ position: 'absolute', inset: 0, zIndex: 40, display: 'grid', placeItems: 'center', background: '#0008' }}>
+        <div style={{ width: 'min(520px, 90%)', maxHeight: '90%', overflow: 'auto', padding: 20, borderRadius: 8, background: '#fff', boxShadow: '0 18px 48px #0004' }}>
+          <FlowMediaCropEditor block={cropTarget.block} url={assetUrls[cropTarget.block.assetId]} onCancel={() => setCropTarget(null)} onConfirm={patch => {
+            const live = current.current
+            const liveBlock = live.view.blocks.find(entry => entry.blockId === cropTarget.block.id)?.block
+            if (live.documentId !== cropTarget.documentId || live.view.projectId !== cropTarget.projectId
+              || live.view.surfaceId !== cropTarget.surfaceId || live.sessionToken.generation !== cropTarget.generation
+              || live.view.revision !== cropTarget.revision || liveBlock?.type !== 'media'
+              || liveBlock.mediaKind !== 'image' || liveBlock.assetId !== cropTarget.block.assetId) {
+              setError('图片已变化，请重新打开裁剪')
+              setCropTarget(null)
+              return
+            }
+            if (run({ kind: 'patch-block', patch }, cropTarget.block.id).ok) setCropTarget(null)
+          }} />
+        </div>
+      </div>}
     {formulaNode && formulaDraft && <FormulaEditDialog node={formulaNode} draftSource={formulaDraft.source} onDraftChange={controller.updateFormulaDraft}
       onCompositionChange={controller.setFormulaComposing} onCancel={controller.cancelCurrent} onCommit={controller.commitFormula} />}
   </div>

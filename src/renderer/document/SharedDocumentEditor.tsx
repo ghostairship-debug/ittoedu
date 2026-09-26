@@ -118,6 +118,8 @@ export interface SharedDocumentEditorHandle {
   getContextualEditTarget(): DocumentContextSelection | null
   /** Focus a committed editable paragraph without authoring a transaction. */
   focusBlock(blockId: string): boolean
+  /** Focus a named editable slot of a compound document object. */
+  focusSlot(blockId: string, slotKey: string): boolean
   /** Select a document object (picture, table, component) as the user would by clicking it; no transaction. */
   selectBlock(blockId: string): boolean
 }
@@ -516,6 +518,24 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
           return false
         }
         return true
+      })
+      if (position === null) return false
+      editor.view.dispatch(editor.view.state.tr.setSelection(TextSelection.create(editor.view.state.doc, position)).scrollIntoView())
+      editor.view.focus()
+      return true
+    },
+    focusSlot: (blockId, slotKey) => {
+      const editor = layout.current
+      if (!editor || mode !== 'layout' || latest.current.readOnly) return false
+      let position: number | null = null
+      editor.view.state.doc.descendants((node, offset) => {
+        if (node.attrs.id !== blockId || node.type.name !== 'compound') return true
+        node.descendants((child, localOffset) => {
+          if (position !== null) return false
+          if (child.type.name === 'slot' && child.attrs.key === slotKey) { position = offset + localOffset + 2; return false }
+          return true
+        })
+        return false
       })
       if (position === null) return false
       editor.view.dispatch(editor.view.state.tr.setSelection(TextSelection.create(editor.view.state.doc, position)).scrollIntoView())

@@ -75,6 +75,7 @@ import {
   insertFlowSharedMedia,
   insertFlowSharedShape,
   patchFlowOverlayPaperSpace,
+  patchFlowOverlayBodyPlane,
   patchFlowOverlayProperties,
   transformFlowOverlayFrame,
   type FlowBodyDestination,
@@ -271,6 +272,7 @@ export type FlowAuthoringIntent = (
   | { readonly kind: 'convert-block-to-overlay' }
   | { readonly kind: 'convert-overlay-to-document' }
   | { readonly kind: 'patch-overlay-paper-space'; readonly paperSpace: 'viewport' | 'paper' }
+  | { readonly kind: 'patch-overlay-body-plane'; readonly bodyPlane: 'overlay' | 'underlay' }
   | { readonly kind: 'commit-overlay-formula'; readonly ast: FormulaAstNode; readonly accessibleText: string }
   | { readonly kind: 'patch-overlay-properties'; readonly patch: Record<string, unknown> }
 ) & {
@@ -308,6 +310,7 @@ function flowIntentMutatesDocument(intent: FlowAuthoringIntent): boolean {
     case 'convert-block-to-overlay':
     case 'convert-overlay-to-document':
     case 'patch-overlay-paper-space':
+    case 'patch-overlay-body-plane':
     case 'commit-overlay-formula':
     case 'patch-overlay-properties':
       return true
@@ -1476,6 +1479,14 @@ export function createFlowAuthoringSlice(
             document,
             flowOverlaySelection(document, target),
             intent.paperSpace,
+            { expectedRevision: document.revision },
+          ))
+        }
+        case 'patch-overlay-body-plane': {
+          return persistIntentResult(patchFlowOverlayBodyPlane(
+            document,
+            flowOverlaySelection(document, target),
+            intent.bodyPlane,
             { expectedRevision: document.revision },
           ))
         }
