@@ -1,6 +1,7 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react'
 import { EditorState } from '@codemirror/state'
 import { EditorView, keymap } from '@codemirror/view'
+import { applyEditorChanges, editorText, reconcileEditorText } from './plainTextSourceMapping'
 
 export interface PlainTextDocumentEditorHandle {
   flush(): { ready: boolean; source: string }
@@ -34,11 +35,11 @@ export const PlainTextDocumentEditor = forwardRef<PlainTextDocumentEditorHandle,
       ]),
       EditorView.domEventHandlers({
         compositionstart: () => { composing.current = true },
-        compositionend: (_event, current) => { composing.current = false; queueMicrotask(() => { if (view.current === current) { draft.current = current.state.doc.toString(); latest.current.onDraft(draft.current) } }) },
+        compositionend: (_event, current) => { composing.current = false; queueMicrotask(() => { if (view.current === current) { draft.current = reconcileEditorText(draft.current, current.state.doc.toString()); latest.current.onDraft(draft.current) } }) },
       }),
       EditorView.updateListener.of(update => {
         if (!update.docChanged || syncing.current || composing.current) return
-        draft.current = update.state.doc.toString()
+        draft.current = applyEditorChanges(draft.current, update.changes)
         latest.current.onDraft(draft.current)
       }),
     ] }) })
@@ -53,11 +54,11 @@ export const PlainTextDocumentEditor = forwardRef<PlainTextDocumentEditorHandle,
     const editor = view.current
     if (!editor) return
     syncing.current = true
-    const previous = editor.state.doc.toString()
-    let from = 0, before = previous.length, after = text.length
-    while (from < before && from < after && previous[from] === text[from]) from++
-    while (before > from && after > from && previous[before - 1] === text[after - 1]) { before--; after-- }
-    editor.dispatch({ changes: { from, to: before, insert: text.slice(from, after) } })
+    const previous = editor.state.doc.toString(), visible = editorText(text)
+    let from = 0, before = previous.length, after = visible.length
+    while (from < before && from < after && previous[from] === visible[from]) from++
+    while (before > from && after > from && previous[before - 1] === visible[after - 1]) { before--; after-- }
+    editor.dispatch({ changes: { from, to: before, insert: visible.slice(from, after) } })
     syncing.current = false
   }, [props.source, props.revision])
   return <div ref={host} className="plain-text-document-editor" />
