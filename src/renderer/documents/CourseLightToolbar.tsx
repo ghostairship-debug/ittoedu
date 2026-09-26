@@ -5,6 +5,8 @@ import { ExportMenu, type ExportFormat } from '../ui/ExportMenu'
 import type { SingleHtmlExportMode } from '../export/course/coursePackagePreflight'
 import { useCourseEditorChrome } from './CourseEditorChromeContext'
 import { ElementCardIndicator, type ElementCardNavigation } from '../workbench/elementCards/ElementCardIndicator'
+import { FlowInsertMenu } from '../ui/flow/FlowInsertMenu'
+import type { FlowInsertCommand } from '../ui/flow/flowInsertCommands'
 import './courseEditorChrome.css'
 
 export interface CourseLightToolbarProps {
@@ -26,6 +28,8 @@ export interface CourseLightToolbarProps {
   /** Shapes and formulas inserted from the workbench (M21); omitted where they cannot go. */
   onAddShape?(shapeType: LightShapeType): void
   onAddFormula?(): void
+  /** Flow page insertion is routed by destination and kind through one current-document port. */
+  flowInsertMenu?: { readonly onInsert: (command: FlowInsertCommand) => void; readonly disabledReason?: string }
   insertSurface: 'slide' | 'flow' | 'spatial' | null
   editingScope: 'scene' | 'global'
   spatialScope: 'world' | 'surface' | 'global' | null
@@ -99,6 +103,7 @@ export function CourseLightToolbar(props: CourseLightToolbarProps) {
   const insert = (action: () => void) => { setInsertOpen(false); invoke(action) }
   const more = (action: () => void) => { setMoreOpen(false); invoke(action) }
   const audioToDocument = props.insertSurface === 'flow'
+  const flowInsertMenu = props.insertSurface === 'flow' && props.editingScope === 'scene' ? props.flowInsertMenu : undefined
   const undoLatestAgent = props.undoLatestAgent
   const fitWorld = context.kind === 'spatial-page' || context.kind === 'spatial-graph' ? context.commands.fitWorldContent : null
   const overflow: ReactNode[] = [
@@ -119,6 +124,7 @@ export function CourseLightToolbar(props: CourseLightToolbarProps) {
       <div className="course-light-tools__insert" ref={insertRef}>
         <button type="button" aria-expanded={insertOpen} aria-controls="course-light-insert-menu" disabled={!editing} title={editing ? undefined : '运行状态下不能插入内容'} onClick={() => setInsertOpen(open => !open)}>插入</button>
         {insertOpen && editing && <div id="course-light-insert-menu" className="course-light-tools__insert-menu" aria-label="插入内容">
+          {flowInsertMenu ? <FlowInsertMenu disabled={Boolean(flowInsertMenu.disabledReason)} onInsert={command => insert(() => flowInsertMenu.onInsert(command))} /> : <>
           <button type="button" aria-label="添加文字" disabled={Boolean(unavailable)} title={unavailable ?? undefined} onClick={() => insert(props.onAddText)}>
             <span>文字</span><small>{props.insertSurface === 'flow' ? '当前文档页的段落' : props.insertSurface === 'spatial' ? '世界文本' : '自由文本'}</small>
           </button>
@@ -141,6 +147,8 @@ export function CourseLightToolbar(props: CourseLightToolbarProps) {
           </div>}
           {unavailable && <p role="status">{unavailable}</p>}
           {flowMediaUnavailable && <p role="status">{flowMediaUnavailable}</p>}
+          </>}
+          {flowInsertMenu?.disabledReason && <p role="status">{flowInsertMenu.disabledReason}</p>}
         </div>}
       </div>
       <div className="course-light-tools__document-actions">
