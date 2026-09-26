@@ -43,9 +43,11 @@ export function controllerFiles() {
   return componentPackagesToArchiveFiles({ [pkg.manifest.id]: pkg })
 }
 
-/** A Slide course on `canvas` with one block that runs past the page edge. */
-export function slideCourse(title: string, canvas: { width: number; height: number }, offPage: Rect): Uint8Array {
+/** A Slide course on `canvas` with one block that runs past the page edge (and, optionally, its controller placed elsewhere). */
+export function slideCourse(title: string, canvas: { width: number; height: number }, offPage: Rect, controllerFrame?: Rect): Uint8Array {
   const project = createBlankCourseProject({ title, canvas })
+  const controller = project.globalLayerItems.find(entry => entry.item.kind === 'component')!.item
+  if (controllerFrame) controller.frame = { mode: 'absolute', ...controllerFrame }
   const surface = project.surfaces[0]
   if (surface?.type !== 'slide') throw new Error('slide surface')
   surface.scenes[0]!.layerItems = [

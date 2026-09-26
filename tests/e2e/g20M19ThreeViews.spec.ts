@@ -47,7 +47,7 @@ async function expectZoomedClip(page: Page, stageSelector: string, viewport: Rec
 
 test('M19-T04 M19-T05 M19-T06 editing, try-run, whole-course preview and export share one page frame', async () => {
   test.skip(process.platform !== 'win32', 'Windows desktop acceptance path.')
-  test.setTimeout(420_000)
+  test.setTimeout(900_000)
   const base = join(root, 'output/g20/m19/three-views'); mkdirSync(base, { recursive: true })
   const directory = mkdtempSync(join(base, 'run-')), workspace = join(directory, 'workspace'), shots = join(directory, 'shots')
   mkdirSync(workspace); mkdirSync(shots)
@@ -59,6 +59,8 @@ test('M19-T04 M19-T05 M19-T06 editing, try-run, whole-course preview and export 
   for (const [key, course] of Object.entries(courses)) writeFileSync(join(workspace, course.file), slideCourse(`M19 ${key}`, course.canvas, course.offPage))
   writeFileSync(join(workspace, 'flow-controller.h5lesson'), flowCourse())
   writeFileSync(join(workspace, 'spatial-portrait.h5lesson'), spatialCourse({ width: 720, height: 1280 }))
+  // A portrait course whose controller was laid out for a wider page and now lies mostly off it.
+  writeFileSync(join(workspace, 'portrait-offpage-controller.h5lesson'), slideCourse('M19 off-page controller', { width: 720, height: 1280 }, { x: 40, y: 200, width: 200, height: 80 }, { x: 190, y: 1198, width: 900, height: 64 }))
   const image = join(directory, 'sample.png'); writeFileSync(image, solidPng(400, 300, [37, 99, 235]))
   const evidence: Record<string, unknown> = { run: directory, courses }
   const errors: string[] = []
@@ -182,6 +184,29 @@ test('M19-T04 M19-T05 M19-T06 editing, try-run, whole-course preview and export 
       await page.getByRole('button', { name: '编辑状态', exact: true }).click()
       await expect(page.getByRole('button', { name: '初始', exact: true }).first()).toHaveAttribute('aria-pressed', 'true')
       await page.getByRole('button', { name: '母版', exact: true }).first().click()
+    })
+
+    await test.step('M19-T05: an off-page controller shows at the page edge in edit and try-run, and a drag starts where it is shown', async () => {
+      await openInWorkbench(page, 'portrait-offpage-controller.h5lesson')
+      const edit = await rectOf(page, '.canvas-stage-stack')
+      const shown = await settledRect(page, '[data-controller-authoring-id]')
+      // Kept on the page: its right edge is the page's right edge.
+      expect(Math.abs(shown.x + shown.width - (edit.x + edit.width))).toBeLessThanOrEqual(1.5)
+      await page.getByRole('button', { name: '当前位置试运行', exact: true }).click()
+      const run = await settledRect(page, '.course-try-run-host .published-component-mount')
+      expectSameRect(run, shown, 2)
+      await page.getByRole('button', { name: '编辑状态', exact: true }).click()
+      const revision = () => page.evaluate(async () => (await window.desktopAPI.documents!.list()).find(item => item.binding.kind === 'file' && item.binding.path.endsWith('portrait-offpage-controller.h5lesson'))!.revision)
+      const before = await revision()
+      const grip = { x: shown.x + shown.width / 2, y: shown.y + shown.height / 2 }
+      await page.mouse.move(grip.x, grip.y); await page.mouse.down()
+      await page.mouse.move(grip.x - 200, grip.y - 120, { steps: 10 }); await page.mouse.up()
+      await expect.poll(revision).toBeGreaterThan(before)
+      const moved = await settledRect(page, '[data-controller-authoring-id]')
+      expect(Math.abs(moved.x - (shown.x - 200))).toBeLessThanOrEqual(2)
+      expect(Math.abs(moved.y - (shown.y - 120))).toBeLessThanOrEqual(2)
+      await page.screenshot({ path: join(shots, 'offpage-controller-dragged.png') })
+      evidence.offPageController = { edit, shown, run, moved }
     })
 
     await test.step('M19-T05: the Spatial camera takes the course canvas ratio in edit and try-run', async () => {
