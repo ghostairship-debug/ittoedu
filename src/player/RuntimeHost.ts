@@ -36,6 +36,7 @@ import type { RuntimeRegistry } from './RuntimeRegistry'
 import type { CaptureSurfaceSnapshotter } from './PreparedCanvasSnapshots'
 import {
   RuntimeAuthoringTargetRegistry,
+  type RuntimeAuthoringTargetRegistryOptions,
   type RuntimeAuthoringTargetsChangedHandler,
 } from './RuntimeAuthoringTargetRegistry'
 import type {
@@ -365,6 +366,8 @@ export class RuntimeHost {
   private readonly guardDisposers = new Set<RuntimeEventDisposer>()
   private readonly capturePromises = new Set<Promise<unknown>>()
   private authoringRegistry: RuntimeAuthoringTargetRegistry | null = null
+  /** M15 运行现场: what a playback host needs to publish its targets while its page is paused for editing. */
+  private liveEditTargetOptions: Omit<RuntimeAuthoringTargetRegistryOptions, 'onTargetsChanged'> | null = null
   /** M15: host-applied edits of text the Runtime renders itself. */
   private domText: DomTextOverrides | null = null
   private phaserText: PhaserTextOverrides | null = null
@@ -425,25 +428,30 @@ export class RuntimeHost {
       )
       // Every Runtime gets host-recognised text and images; only API-1 authoring
       // Runtimes also see the registration API for their own keyed targets.
+      const targetOptions: Omit<RuntimeAuthoringTargetRegistryOptions, 'onTargetsChanged'> = {
+        scope: options.scope,
+        sceneId: options.sceneId,
+        width: options.width,
+        height: options.height,
+        ...(options.authoringCanvas ? { canvas: options.authoringCanvas } : {}),
+        content: runtime.content,
+        assets: runtime.assets,
+        ...(exposesDom ? { domRoots: this.domRoots() } : {}),
+        lightEdit: {
+          ...(this.domText ? { dom: this.domText } : {}),
+          ...(this.phaserText ? { phaser: this.phaserText } : {}),
+          assetKeyForUrl: runtimeAssetKeyForUrl(runtime.assets, options.assetUrl),
+          phaserImages: () => this.runtimePhaserImages(),
+          phaserLayerOf: (object) => this.phaserLayerOf(object),
+        },
+      }
       if (options.authoring) {
         this.authoringRegistry = new RuntimeAuthoringTargetRegistry({
-          scope: options.scope,
-          sceneId: options.sceneId,
-          width: options.width,
-          height: options.height,
-          ...(options.authoringCanvas ? { canvas: options.authoringCanvas } : {}),
-          content: runtime.content,
-          assets: runtime.assets,
-          ...(exposesDom ? { domRoots: this.domRoots() } : {}),
-          lightEdit: {
-            ...(this.domText ? { dom: this.domText } : {}),
-            ...(this.phaserText ? { phaser: this.phaserText } : {}),
-            assetKeyForUrl: runtimeAssetKeyForUrl(runtime.assets, options.assetUrl),
-            phaserImages: () => this.runtimePhaserImages(),
-            phaserLayerOf: (object) => this.phaserLayerOf(object),
-          },
+          ...targetOptions,
           onTargetsChanged: options.authoring.onTargetsChanged,
         })
+      } else if (options.mode === 'preview') {
+        this.liveEditTargetOptions = targetOptions
       }
       const exposeAuthoring = definition.authoringApiVersion === 1 && this.authoringRegistry
       const contentValues = Object.freeze({ ...runtime.content.values })
@@ -657,6 +665,23 @@ export class RuntimeHost {
     } catch (error) {
       throw this.recordFailure(error)
     }
+  }
+
+  /**
+   * M15 运行现场: while a playback page is paused for editing, publish the text and pictures the host finds in this
+   * Runtime, as the editor does. Only playback hosts can; returns false when this one cannot.
+   */
+  startLiveEditTargets(onTargetsChanged: RuntimeAuthoringTargetsChangedHandler): boolean {
+    if (this.destroyed || this.failure || this.authoringRegistry || !this.liveEditTargetOptions) return false
+    this.authoringRegistry = new RuntimeAuthoringTargetRegistry({ ...this.liveEditTargetOptions, onTargetsChanged })
+    return true
+  }
+
+  stopLiveEditTargets(): void {
+    if (!this.liveEditTargetOptions) return
+    const registry = this.authoringRegistry
+    this.authoringRegistry = null
+    registry?.destroy()
   }
 
   /** M15: apply edited text rules in place, keeping the Runtime's current state. */

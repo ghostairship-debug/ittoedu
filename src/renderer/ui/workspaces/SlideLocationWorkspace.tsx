@@ -91,8 +91,10 @@ import {
   enqueueSerial,
 } from '../serializedSessionMount'
 import type { PublishedCourseSession } from '../../../player/surfaces/publishedDynamicHosts'
+import type { SlideLiveEditTargets } from '../../../player/surfaces/slide/SlidePublishedAdapter'
 import { courseLayerItemToEditorCanvasNode } from '../../store/slideEditorProjection'
 import type { LayerItem, NativeLayerItem } from '../../../shared/courseProjectTypes'
+import type { LiveSceneBaseline, LiveSceneChanges } from './liveSceneChanges'
 import { isTeacherControllerLayerItem } from '../../../core/tools/globalLayers'
 import { runtimeTargetMatchesEditingContext } from '../../authoring/runtimeAuthoringContext'
 import {
@@ -211,6 +213,8 @@ export interface SlideWorkspaceCanvasPort {
   readonly setCanvasMode: (mode: SlideCanvasMode) => void
   readonly setStatus: (message: string) => void
   readonly setDrawTool: (tool: SlideLineDrawTool) => void
+  /** M15 运行现场: the editor follows the try-run to the page it is on. */
+  readonly showLocation?: (locationId: string) => void
 }
 
 export interface SlideWorkspaceSelectionPort {
@@ -298,9 +302,22 @@ export interface SlideWorkspacePreviewPort {
   ) => ReturnType<typeof mountPublishedCourseAuthoring>
 }
 
+/** M15 运行现场: what the paused try-run page needs to know about the document, answered by the connector. */
+export interface SlideWorkspaceLiveScenePort {
+  /** Remembers the document as the page shows it now. */
+  readonly capture: () => LiveSceneBaseline | null
+  /** How the document changed since; null when the page cannot take it (the live page then ends). */
+  readonly changesSince: (baseline: LiveSceneBaseline, sceneId: string) => LiveSceneChanges | null
+  /** The scene of a Slide page with a Runtime or component, which can be edited where the try-run is. */
+  readonly sceneWithCarriers: (locationId: string) => string | null
+  readonly itemLabel: (sceneId: string, itemId: string) => string
+}
+
 export interface SlideWorkspaceTryRunPort {
   readonly mount: (
     container: HTMLElement,
+    /** M15 运行现场: a page loaded again after an edit starts in its state, with the course state it had. */
+    resume?: { readonly stateId: string | null; readonly courseState: Readonly<Record<string, unknown>> | null },
   ) => ReturnType<typeof mountPublishedCourseTryRun>
 }
 
@@ -312,6 +329,7 @@ export interface SlideWorkspacePorts {
   readonly authoring: SlideWorkspaceAuthoringPort
   readonly preview: SlideWorkspacePreviewPort
   readonly tryRun: SlideWorkspaceTryRunPort
+  readonly liveScene?: SlideWorkspaceLiveScenePort
 }
 
 export interface SlideLocationWorkspaceProps {
@@ -531,6 +549,20 @@ type RuntimePreviewFeedback = {
   title: string
   message: string
 } | null
+
+/** M15 运行现场: a try-run page paused for editing where it is. */
+interface LiveScene {
+  readonly sceneId: string
+  readonly locationId: string
+  /** Try-run mount key of the paused session; it changes only to load the page again. */
+  readonly mountKey: string | null
+  /** Why the page has to be loaded again to show an edit, while it waits for the teacher. */
+  readonly reload: string | null
+  /** The page is being loaded again, with the edits it could not take in place. */
+  readonly reloading: boolean
+}
+let liveReloadSequence = 0
+
 
 function sanitizeRuntimeAuthoringTargets(
   update: PlayerRuntimeAuthoringTargetsMessage['update'],
@@ -866,6 +898,15 @@ export function SlideLocationWorkspace({
   const courseTryRunMountChainRef = useRef(Promise.resolve())
   const [tryRunFeedback, setTryRunFeedback] = useState<RuntimePreviewFeedback>(null)
   const [tryRunEpoch, setTryRunEpoch] = useState(0)
+  // M15 运行现场: back from the try-run, the page stays paused where it is and its Runtimes' and components' text
+  // and pictures are edited there. The document it shows, and the try-run mount key it stays mounted under.
+  const [liveScene, setLiveScene] = useState<LiveScene | null>(null)
+  const liveSceneRef = useRef(liveScene)
+  liveSceneRef.current = liveScene
+  const liveShownRef = useRef<LiveSceneBaseline | null>(null)
+  const liveResumeRef = useRef<{ stateId: string | null; courseState: Record<string, unknown> | null } | null>(null)
+  // A resumed try-run stays mounted while the document only changed by edits it has taken in place.
+  const [tryRunKeyAlias, setTryRunKeyAlias] = useState<{ projectKey: string; mountKey: string } | null>(null)
   
   const controllerDisplayRevision = useControllerDisplayRevision()
   const [layerOverlay, setLayerOverlay] = useState<StageSelectionOverlayGeometry | null>(null)
@@ -906,10 +947,16 @@ export function SlideLocationWorkspace({
     if (readSnapshot().drawTool !== null) portsRef.current.canvas.setDrawTool(null)
   }, [canvasMode, editingScope, courseLocationId])
 
-  const useCoursePlayerTryRun = Boolean(snapshot.projectId && canvasMode === 'run')
-  const usePublishedAuthoring = Boolean(snapshot.projectId && canvasMode === 'edit')
+  const useCoursePlayerTryRun = Boolean(snapshot.projectId && (canvasMode === 'run' || liveScene))
+  const usePublishedAuthoring = Boolean(snapshot.projectId && canvasMode === 'edit' && !liveScene)
+  const liveEditInteractive = Boolean(liveScene && !liveScene.reloading)
   const publishedAuthoringOwnerScope = backend?.getSnapshot().scope ?? editingScope
   const tryRunMountKey = snapshot.tryRunMountKey
+  const effectiveTryRunMountKey = liveScene
+    ? liveScene.mountKey
+    : tryRunKeyAlias && tryRunKeyAlias.projectKey === tryRunMountKey ? tryRunKeyAlias.mountKey : tryRunMountKey
+  const effectiveTryRunMountKeyRef = useRef(effectiveTryRunMountKey)
+  effectiveTryRunMountKeyRef.current = effectiveTryRunMountKey
   const readCandidateViewport = useCallback(() => {
     const viewport = stageViewportRef.current
     if (!viewport) return null
@@ -1657,15 +1704,153 @@ export function SlideLocationWorkspace({
     usePublishedAuthoring,
   ])
 
+  // M15 运行现场 ------------------------------------------------------------------------------------------------------
+  const liveAcceptingRef = useRef(false)
+  const clearLiveTargets = useCallback(() => {
+    runtimeTargetsByHostRef.current.clear()
+    componentTargetsByHostRef.current.clear()
+    componentImageTargetsByHostRef.current.clear()
+    setRuntimeTargets([])
+    setComponentTargets([])
+    setComponentImageTargets([])
+    setActiveRuntimeTextSession(null)
+    setActiveComponentTextSession(null)
+    setHoveredAuthoringTargetId(null)
+  }, [])
+  /** The paused page's Runtime and component targets take the place of the editor's. */
+  const acceptLiveTargets = useCallback((targets: SlideLiveEditTargets) => {
+    if (!liveAcceptingRef.current) return
+    if (targets.kind === 'runtime') {
+      const hostKey = `${targets.update.scope}:${targets.update.sceneId ?? ''}`
+      runtimeTargetsByHostRef.current.set(hostKey, sanitizeRuntimeAuthoringTargets(targets.update, hostKey, slideCanvas))
+      setRuntimeTargets([...runtimeTargetsByHostRef.current.values()].flat())
+      return
+    }
+    const update = targets.update
+    const hostKey = [update.scope, update.sceneId ?? '', update.nodeId].join(':')
+    componentTargetsByHostRef.current.set(hostKey, sanitizeComponentAuthoringTargets(update, hostKey, slideCanvas))
+    componentImageTargetsByHostRef.current.set(hostKey, sanitizeComponentImageTargets(update, hostKey, slideCanvas))
+    setComponentTargets([...componentTargetsByHostRef.current.values()].flat())
+    setComponentImageTargets([...componentImageTargetsByHostRef.current.values()].flat())
+  }, [slideCanvas])
+  const acceptLiveTargetsRef = useRef(acceptLiveTargets)
+  acceptLiveTargetsRef.current = acceptLiveTargets
+  /** Ends the live page; in the editor the session goes and the editing canvas comes back. */
+  const endLiveScene = useCallback((message?: string) => {
+    liveAcceptingRef.current = false
+    courseTryRunSessionRef.current?.endLiveEdit(false)
+    liveShownRef.current = null
+    liveResumeRef.current = null
+    clearLiveTargets()
+    setLiveScene(null)
+    if (message) portsRef.current.canvas.setStatus(message)
+  }, [clearLiveTargets])
+  const endLiveSceneRef = useRef(endLiveScene)
+  endLiveSceneRef.current = endLiveScene
+  /** Back from the try-run: a page with Runtimes or components stays paused where it is, to be edited there. */
+  const returnToEdit = useCallback(() => {
+    const ports = portsRef.current
+    const session = courseTryRunSessionRef.current
+    const current = readSnapshot()
+    if (current.canvasMode === 'run' && session && ports.liveScene && current.editingScope === 'scene' && !liveSceneRef.current) {
+      const position = session.readObservationState()
+      const baseline = ports.liveScene.capture()
+      if (position.ready && baseline && ports.liveScene.sceneWithCarriers(position.locationId)) {
+        liveAcceptingRef.current = true
+        const started = session.beginLiveEdit(acceptLiveTargets)
+        if (started) {
+          session.playbackView?.reset()
+          resetView()
+          if (started.locationId !== current.locationId) ports.canvas.showLocation?.(started.locationId)
+          liveShownRef.current = baseline
+          setLiveScene({ sceneId: started.sceneId, locationId: started.locationId, mountKey: effectiveTryRunMountKeyRef.current, reload: null, reloading: false })
+          ports.canvas.setCanvasMode('edit')
+          ports.canvas.setStatus('运行现场：双击 Runtime 或组件里的文字、图片即可修改；点“继续运行”从这里接着运行')
+          return
+        }
+        liveAcceptingRef.current = false
+      }
+    }
+    ports.canvas.setCanvasMode('edit')
+  }, [acceptLiveTargets, resetView])
+  /**
+   * Brings the paused page up to the document: new text rules of its Runtimes and components go in place; a replaced
+   * picture or keyed text waits for the teacher to load the page again; any other change ends the live page.
+   */
+  const syncLiveScene = useCallback(() => {
+    const live = liveSceneRef.current, shown = liveShownRef.current, session = courseTryRunSessionRef.current
+    const current = readSnapshot(), port = portsRef.current.liveScene
+    if (!live || live.reloading || !shown || !port || shown.key === current.tryRunMountKey) return
+    const changes = port.changesSince(shown, live.sceneId)
+    if (!changes) {
+      endLiveScene('运行现场已结束：H5 演示还有其他修改，已回到编辑画面')
+      return
+    }
+    const reloads = changes.reloads.map(entry => entry.label)
+    for (const patch of changes.patches) {
+      if (session?.applyLiveEdit(patch) !== 'applied') reloads.push(port.itemLabel(live.sceneId, patch.target.nodeId))
+    }
+    const reload = reloads.length
+      ? `“${reloads[0]}”要重新加载后才会显示这项修改。重新加载后它从头开始运行，页面位置和课程状态保留。`
+      : null
+    // Until it is loaded again the page still shows the document it had; later edits are compared with that one.
+    if (!reload) liveShownRef.current = port.capture()
+    if (reload !== live.reload) setLiveScene({ ...live, reload })
+  }, [endLiveScene])
+  useEffect(() => { syncLiveScene() }, [tryRunMountKey, liveScene?.reloading, syncLiveScene])
+  /** Carries on running from where the page was paused; the resumed session already shows every edit. */
+  const continueLiveScene = useCallback(() => {
+    syncLiveScene()
+    const live = liveSceneRef.current, session = courseTryRunSessionRef.current
+    if (!live || !session || live.reload || live.reloading) return
+    const key = readSnapshot().tryRunMountKey
+    liveAcceptingRef.current = false
+    setTryRunKeyAlias(key && live.mountKey ? { projectKey: key, mountKey: live.mountKey } : null)
+    portsRef.current.canvas.setCanvasMode('run')
+    session.endLiveEdit(true)
+    liveShownRef.current = null
+    clearLiveTargets()
+    setLiveScene(null)
+  }, [clearLiveTargets, syncLiveScene])
+  /** Loads the page again with the edits it could not take in place, in its state and with its course state. */
+  const reloadLiveScene = useCallback(() => {
+    const live = liveSceneRef.current, session = courseTryRunSessionRef.current
+    if (!live || !session || live.reloading) return
+    const position = session.readObservationState()
+    liveResumeRef.current = { stateId: position.stateId, courseState: session.readCourseStateSnapshot() }
+    liveAcceptingRef.current = false
+    session.endLiveEdit(false)
+    clearLiveTargets()
+    setLiveScene({ ...live, reload: null, reloading: true, mountKey: `${readSnapshot().tryRunMountKey ?? ''}#${++liveReloadSequence}` })
+  }, [clearLiveTargets])
+  // Leaving the page, the scene scope or the document ends the live page; running again from elsewhere resumes it.
+  const liveSeenInEditRef = useRef(false)
+  useEffect(() => {
+    const live = liveSceneRef.current
+    if (!live) {
+      liveSeenInEditRef.current = false
+      return
+    }
+    if (!snapshot.projectId || courseLocationId !== live.locationId || editingScope !== 'scene') {
+      endLiveScene('运行现场已结束：已离开这一页')
+    } else if (canvasMode === 'edit') {
+      liveSeenInEditRef.current = true
+    } else if (liveSeenInEditRef.current) {
+      if (live.reload || live.reloading) endLiveScene()
+      else continueLiveScene()
+    }
+  }, [canvasMode, continueLiveScene, courseLocationId, editingScope, endLiveScene, snapshot.projectId])
+
   useEffect(() => {
     const container = courseTryRunRef.current
-    if (!useCoursePlayerTryRun || !snapshot.projectId || !container || !tryRunMountKey) {
+    if (!useCoursePlayerTryRun || !snapshot.projectId || !container || !effectiveTryRunMountKey) {
       const leftover = courseTryRunSessionRef.current
       courseTryRunSessionRef.current = null
       if (leftover) {
         enqueueSerial(courseTryRunMountChainRef, () => leftover.destroy())
       }
       setTryRunFeedback(null)
+      setTryRunKeyAlias(null)
       return
     }
     setTryRunFeedback({
@@ -1679,12 +1864,26 @@ export function SlideLocationWorkspace({
       setTryRunFeedback(null)
       return
     }
-    return beginSerializedSessionMount(courseTryRunMountChainRef, () => ports.tryRun.mount(container), {
+    const resume = liveResumeRef.current
+    liveResumeRef.current = null
+    return beginSerializedSessionMount(courseTryRunMountChainRef, () => ports.tryRun.mount(container, resume ?? undefined), {
       onReady: (session) => {
         courseTryRunSessionRef.current = session
         container.dataset.coursePlayerReady = 'true'
         setTryRunFeedback(null)
         setTryRunEpoch((current) => current + 1)
+        // Loaded again for an edit on the live page: pause it again at once, now showing the edit.
+        if (resume && liveSceneRef.current) {
+          liveAcceptingRef.current = true
+          const started = session.beginLiveEdit(acceptLiveTargetsRef.current)
+          const baseline = portsRef.current.liveScene?.capture() ?? null
+          if (started && baseline) {
+            liveShownRef.current = baseline
+            setLiveScene(live => live && { ...live, sceneId: started.sceneId, reloading: false })
+          } else {
+            endLiveSceneRef.current('运行现场已结束：重新加载后这一页没能暂停')
+          }
+        }
       },
       onError: (error) => {
         console.error('CoursePlayer 试运行启动失败', error)
@@ -1699,11 +1898,11 @@ export function SlideLocationWorkspace({
         courseTryRunSessionRef.current = null
       },
     })
-  }, [tryRunMountKey, useCoursePlayerTryRun])
+  }, [effectiveTryRunMountKey, useCoursePlayerTryRun])
 
   useEffect(() => {
     const session = courseTryRunSessionRef.current
-    if (!useCoursePlayerTryRun || !session || !courseLocationId) return
+    if (!useCoursePlayerTryRun || !session || !courseLocationId || liveSceneRef.current) return
     void session.goToLocation(courseLocationId).catch((error) => {
       console.error('CoursePlayer 试运行跳转失败', error)
     })
@@ -2194,7 +2393,7 @@ export function SlideLocationWorkspace({
     clientY: number,
   ): CanvasAuthoringHit | null => {
     const viewport = stageViewportRef.current
-    if (!viewport || !authoringCanvasInteractive) return null
+    if (!viewport || !(authoringCanvasInteractive || liveEditInteractive)) return null
     const rect = viewport.getBoundingClientRect()
     if (rect.width <= 0 || rect.height <= 0) return null
     const transform = createStageViewportTransform({
@@ -2250,6 +2449,7 @@ export function SlideLocationWorkspace({
     return runtimeTarget ? { kind: 'runtime', target: runtimeTarget } : null
   }, [
     authoringCanvasInteractive,
+    liveEditInteractive,
     slideCanvas,
     slideEditorView,
     visibleRuntimeTargets,
@@ -2706,16 +2906,16 @@ export function SlideLocationWorkspace({
     }
   }
 
-  const wheelZoom = useRef({ canvasMode, view, stageTransform })
-  wheelZoom.current = { canvasMode, view, stageTransform }
+  const wheelZoom = useRef({ canvasMode, view, stageTransform, live: false })
+  wheelZoom.current = { canvasMode, view, stageTransform, live: liveScene !== null }
   const hasStage = Boolean(snapshot.projectId && slideEditorView)
   useEffect(() => {
     // React attaches wheel listeners as passive; Ctrl+wheel zoom must keep the window itself from zooming.
     const element = workspaceRef.current
     if (!element) return
     const zoomByWheel = (event: WheelEvent) => {
-      const { canvasMode, view, stageTransform } = wheelZoom.current
-      if (canvasMode !== 'edit') return
+      const { canvasMode, view, stageTransform, live } = wheelZoom.current
+      if (canvasMode !== 'edit' || live) return
       if (event.ctrlKey || event.metaKey) {
         event.preventDefault()
         setZoom(view.zoom + (event.deltaY < 0 ? 0.1 : -0.1))
@@ -2750,7 +2950,7 @@ export function SlideLocationWorkspace({
   return (
     <main
       ref={workspaceRef}
-      className={`workspace workspace--${canvasMode}`}
+      className={`workspace workspace--${canvasMode}${liveScene ? ' workspace--live' : ''}`}
       aria-label="画布"
       style={drawTool ? { cursor: 'crosshair' } : undefined}
       onDragOver={(event) => {
@@ -2796,8 +2996,9 @@ export function SlideLocationWorkspace({
             return
           }
         }
+        // A paused try-run page (M15 运行现场) keeps its place: no panning, no native gestures.
         if (
-          canvasMode === 'edit' &&
+          canvasMode === 'edit' && !liveScene &&
           (event.button === 1 || (event.button === 0 && spacePressedRef.current))
         ) {
           event.preventDefault()
@@ -2816,6 +3017,7 @@ export function SlideLocationWorkspace({
         if (
           slideBackendKind !== 'slide-authoring' ||
           canvasMode !== 'edit' ||
+          liveScene !== null ||
           event.button !== 0
         ) return
         if (
@@ -3122,7 +3324,7 @@ export function SlideLocationWorkspace({
           }
         }
         if (
-          !authoringCanvasInteractive ||
+          !(authoringCanvasInteractive || liveEditInteractive) ||
           (event.target instanceof Element &&
             event.target.closest(
               '.canvas-authoring-target, .canvas-plain-text-editor, .text-edit-overlay, .text-edit-toolbar, .formula-edit-dialog',
@@ -3130,7 +3332,7 @@ export function SlideLocationWorkspace({
         ) {
           return
         }
-        if (slideBackendKind === 'slide-authoring') {
+        if (slideBackendKind === 'slide-authoring' && !liveScene) {
           const viewport = readCandidateViewport()
           if (!viewport) return
           const world = clientToWorld(createStageViewportTransform(viewport), {
@@ -3182,7 +3384,7 @@ export function SlideLocationWorkspace({
         }
       }}
     >
-      <NativeSelectionContext documentId={documentId} revision={snapshot.projectRevision} locationId={courseLocationId} itemIds={selectedNodeIds} stateId={activePresentationStateId} sceneItemIds={slideEditorView?.layers.filter(layer => layer.source === 'scene').map(layer => layer.selectionId)} enabled={canvasMode === 'edit'} textEditing={Boolean(editingNode || editingFormulaNode)} bounds={id => {
+      <NativeSelectionContext documentId={documentId} revision={snapshot.projectRevision} locationId={courseLocationId} itemIds={selectedNodeIds} stateId={activePresentationStateId} sceneItemIds={slideEditorView?.layers.filter(layer => layer.source === 'scene').map(layer => layer.selectionId)} enabled={canvasMode === 'edit' && !liveScene} textEditing={Boolean(editingNode || editingFormulaNode)} bounds={id => {
         const layer = slideEditorView?.layers.find(value => value.selectionId === id), viewport = readCandidateViewport()
         if (!layer || !viewport) return null
         // A teacher controller is anchored where it is shown: collapsed, and kept on the page.
@@ -3196,7 +3398,7 @@ export function SlideLocationWorkspace({
           type="button"
           className={canvasMode === 'edit' ? 'canvas-mode-switch__active' : ''}
           aria-pressed={canvasMode === 'edit'}
-          onClick={() => ports.canvas.setCanvasMode('edit')}
+          onClick={returnToEdit}
         >
           <MousePointer2 size={13} />编辑状态
         </button>
@@ -3204,11 +3406,12 @@ export function SlideLocationWorkspace({
           type="button"
           className={canvasMode === 'run' ? 'canvas-mode-switch__active' : ''}
           aria-pressed={canvasMode === 'run'}
-          onClick={() => ports.canvas.setCanvasMode('run')}
+          disabled={Boolean(liveScene?.reload || liveScene?.reloading)}
+          onClick={() => { if (liveSceneRef.current) continueLiveScene(); else ports.canvas.setCanvasMode('run') }}
         >
           <Play size={13} />当前位置试运行
         </button>
-        {useCoursePlayerTryRun ? (
+        {useCoursePlayerTryRun && !liveScene ? (
           <div
             role="group"
             aria-label="试运行翻页"
@@ -3232,7 +3435,24 @@ export function SlideLocationWorkspace({
           </div>
         ) : null}
       </div>
-      {canvasMode === 'edit' && (
+      {liveScene && (
+        <div className="live-scene-bar" role="region" aria-label="运行现场" data-testid="live-scene-bar">
+          <strong>运行现场</strong>
+          <span className="live-scene-bar__message" role="status">
+            {liveScene.reloading
+              ? '正在按修改重新加载这一页…'
+              : liveScene.reload ?? '已停在试运行的这一刻。双击 Runtime 或组件里的文字、图片即可修改。'}
+          </span>
+          {liveScene.reload && !liveScene.reloading && (
+            <button type="button" className="live-scene-bar__primary" onClick={reloadLiveScene}>重新加载</button>
+          )}
+          <button type="button" disabled={Boolean(liveScene.reload) || liveScene.reloading} onClick={continueLiveScene}>
+            <Play size={13} />继续运行
+          </button>
+          <button type="button" onClick={() => endLiveScene('已回到编辑画面')}>回到编辑画面</button>
+        </div>
+      )}
+      {canvasMode === 'edit' && !liveScene && (
         <div className="canvas-view-controls" role="group" aria-label="画布视图">
           <button type="button" aria-label="缩小画布" onClick={() => setZoom(view.zoom - 0.1)}>
             <Minus size={14} />
@@ -3256,7 +3476,7 @@ export function SlideLocationWorkspace({
             ? '母版'
             : slideEditorView?.presentation?.states.find((state) => state.active)?.name
               ?? '状态'}`}
-        {canvasMode === 'edit' && hiddenLayers.length > 0 && <button type="button" className="canvas-label__hidden"
+        {canvasMode === 'edit' && !liveScene && hiddenLayers.length > 0 && <button type="button" className="canvas-label__hidden"
           onClick={(event) => {
             const rect = event.currentTarget.getBoundingClientRect()
             canvasMenu.open({ x: rect.left, y: rect.bottom + 4 }, '隐藏的对象', hiddenMenu())
@@ -3307,7 +3527,7 @@ export function SlideLocationWorkspace({
             style={useCoursePlayerTryRun ? { pointerEvents: 'none' } : undefined}
           />
           <SlideDynamicAuthoringOverlay
-            interactive={authoringCanvasInteractive}
+            interactive={authoringCanvasInteractive || liveEditInteractive}
             runtimeTargets={visibleRuntimeTargets}
             componentTargets={visibleComponentTargets}
             componentImageTargets={visibleComponentImageTargets}
@@ -3407,6 +3627,8 @@ export function SlideLocationWorkspace({
           data-page-backdrop="transparent"
           {...workspaceTryRunHostProps()}
           hidden={!useCoursePlayerTryRun}
+          inert={liveScene !== null}
+          data-live-scene={liveScene ? 'paused' : undefined}
         />
         {tryRunFeedback && useCoursePlayerTryRun ? (
           <div

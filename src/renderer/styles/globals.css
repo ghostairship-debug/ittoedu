@@ -1021,6 +1021,77 @@ button:disabled {
   visibility: hidden;
 }
 
+/* M15 运行现场: the paused try-run page shows through the editing layer, which keeps only its edit targets. */
+.workspace--live .canvas-stage-stack {
+  z-index: 6;
+  outline: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.workspace--live .canvas-stage--authoring {
+  visibility: hidden;
+}
+
+.workspace--live .course-try-run-host {
+  pointer-events: none;
+}
+
+.live-scene-bar {
+  position: absolute;
+  bottom: 14px;
+  left: 50%;
+  z-index: 9;
+  display: inline-flex;
+  max-width: calc(100% - 32px);
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px 6px 12px;
+  border: 1px solid rgba(23, 34, 29, 0.08);
+  border-radius: 8px;
+  color: var(--text-primary);
+  background: rgba(255, 254, 250, 0.96);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.22);
+  font-size: 12px;
+  transform: translateX(-50%);
+}
+
+.live-scene-bar strong {
+  color: #245b46;
+  white-space: nowrap;
+}
+
+.live-scene-bar__message {
+  min-width: 0;
+  color: var(--text-muted);
+}
+
+.live-scene-bar button {
+  display: inline-flex;
+  min-height: 26px;
+  align-items: center;
+  gap: 4px;
+  padding: 0 10px;
+  border: 1px solid rgba(23, 34, 29, 0.12);
+  border-radius: 6px;
+  color: var(--text-primary);
+  background: #ffffff;
+  cursor: pointer;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.live-scene-bar button:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.live-scene-bar button.live-scene-bar__primary {
+  border-color: #245b46;
+  color: #ffffff;
+  background: #245b46;
+}
+
 /* Inside the editor the workspace clips, as it does for the edited page: the page shadow and a zoomed
    try-run page reach into the margins instead of stopping at the viewport. */
 .course-try-run-host,

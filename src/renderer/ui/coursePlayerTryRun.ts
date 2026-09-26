@@ -89,6 +89,8 @@ export interface PublishedCourseMountInput {
   locationId?: string | null
   /** Session-only Slide state used for the first current-position try-run mount. */
   initialPresentationStateId?: string | null
+  /** M15 运行现场: course state of a try-run loaded again after an edit; session-only. */
+  initialCourseState?: Readonly<Record<string, unknown>> | null
   playbackPathId?: string | null
   width?: number
   height?: number
@@ -193,6 +195,7 @@ export async function mountPublishedCourseTryRun(
       ...(playback && input.initialPresentationStateId != null
         ? { initialPresentationStateId: input.initialPresentationStateId }
         : {}),
+      ...(playback && input.initialCourseState ? { initialCourseState: input.initialCourseState } : {}),
       ...(reportDiagnostic ? { services: { reportDiagnostic } } : {}),
       ...(input.authoring
         ? {

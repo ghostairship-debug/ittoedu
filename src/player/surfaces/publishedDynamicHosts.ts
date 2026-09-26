@@ -57,6 +57,9 @@ import {
 } from './mixed/MixedCourseNavigator'
 import {
   SlidePublishedAdapter,
+  type SlideLiveEditPatch,
+  type SlideLiveEditResult,
+  type SlideLiveEditTargets,
   type SlidePublishedAuthoringOptions,
 } from './slide/SlidePublishedAdapter'
 import { SpatialSurfaceHost } from './spatial/SpatialSurfaceHost'
@@ -134,6 +137,8 @@ export interface PublishedCourseSessionOptions extends CreatePublishedDynamicHos
   initialLocationId?: string
   /** One-shot playback state for initialLocationId; never enters Published V2. */
   initialPresentationStateId?: string
+  /** M15 运行现场: course state for a playback session that reloads a page after an edit; never enters Published V2. */
+  initialCourseState?: Readonly<Record<string, unknown>>
   services?: Partial<SurfacePlayerServices>
   onFailure?: CoursePlayerOptions['onFailure']
   /** Internal direct same-document authoring host. Published V2 stays immutable. */
@@ -462,6 +467,7 @@ export class PublishedCourseSession {
   readonly #playbackScenes: readonly CoursePlaybackScene[]
   readonly #navigationListeners = new Set<() => void>()
   #observationNavigationVersion = 0
+  #liveEditHost: SlidePublishedAdapter | null = null
 
   constructor(
     player: CoursePlayer,
@@ -482,6 +488,37 @@ export class PublishedCourseSession {
   }
 
   listPlaybackScenes(): readonly CoursePlaybackScene[] { return this.#playbackScenes }
+
+  /**
+   * M15 运行现场: pause the current Slide page where it is so the teacher can edit what it shows, and publish its
+   * Runtime and component text and pictures. Playback only; the caller keeps the page inert until `endLiveEdit`.
+   */
+  beginLiveEdit(publish: (targets: SlideLiveEditTargets) => void): { locationId: string; stateId: string | null; sceneId: string } | null {
+    if (this.#authoringCoordinator || this.#liveEditHost || !this.canAcceptPlaybackNavigation()) return null
+    const current = this.navigator.current
+    const host = this.#hosts.find(entry => entry.id === current?.surfaceId)
+    if (!current || !(host instanceof SlidePublishedAdapter)) return null
+    const started = host.beginLiveEdit(publish)
+    if (!started) return null
+    this.#liveEditHost = host
+    return { locationId: current.locationId, stateId: host.getPublishedPresentationStateId(), sceneId: started.sceneId }
+  }
+
+  /** M15 运行现场: take a text-rule edit on the current Slide page in place (also after the run was resumed). */
+  applyLiveEdit(patch: SlideLiveEditPatch): SlideLiveEditResult {
+    const host = this.#liveEditHost ?? this.#hosts.find(entry => entry.id === this.navigator.current?.surfaceId)
+    return !this.#authoringCoordinator && host instanceof SlidePublishedAdapter ? host.applyLiveEdit(patch) : 'missing'
+  }
+
+  /** M15 运行现场: with `resume` the page carries on from where it was paused. */
+  endLiveEdit(resume: boolean): void {
+    const host = this.#liveEditHost
+    this.#liveEditHost = null
+    host?.endLiveEdit(resume)
+  }
+
+  /** M15 运行现场: the course state a page loaded again after an edit starts from. */
+  readCourseStateSnapshot(): Record<string, unknown> | null { return null }
 
   readObservationState(): { ready: boolean; surfaceId: string; locationId: string; stateId: string | null; stateVersion: number; publicState: Record<string, unknown> } {
     const current = this.navigator.current
@@ -835,6 +872,10 @@ class PublishedInteractionCourseSession extends PublishedCourseSession {
     const state = super.readObservationState()
     return { ...state, stateVersion: state.stateVersion + this.#courseState.version,
       publicState: { ...state.publicState, courseState: this.#courseState.snapshot() } }
+  }
+
+  override readCourseStateSnapshot(): Record<string, unknown> | null {
+    return this.#staticCapture ? null : this.#courseState.snapshot()
   }
 
   constructor(
@@ -1574,6 +1615,10 @@ export function createPublishedCourseSession(
     ? new FrozenPublishedCourseStateStore(playback.courseState)
     : new CourseStateStore()
   if (!options.staticCapture) resetPublishedCourseState(courseState, playback.courseState)
+  // M15 运行现场: a page loaded again after an edit keeps the course state it had.
+  if (!options.staticCapture && options.initialCourseState) {
+    courseState.setMany(Object.entries(options.initialCourseState).map(([key, value]) => ({ key, value })))
+  }
   const resolvePublishedAsset = options.resolveAsset
     ?? options.services?.resolveAsset
     ?? ((assetId: string) => playback.assets[assetId]?.url)

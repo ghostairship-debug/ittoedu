@@ -140,6 +140,8 @@ export interface ElementChangeView {
   state: 'pending' | 'none' | 'applied' | 'undone'
   fields: string[]
   unavailable?: string
+  /** A Runtime's earlier text edits whose original text the request took out of its source; they no longer apply. */
+  lostTexts?: string[]
   /** A text card's range now (after the request, or after its undo), for the next request; absent when it cannot be traced. */
   target?: ExecutionSelectionTarget
   /** What that range holds (see textTargetContent); a card checks it before sending the next request. */

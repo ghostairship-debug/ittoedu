@@ -9,6 +9,7 @@ import type {
 import type { RuntimeHost, RuntimeMountEnvironment } from '../../RuntimeHost'
 import type { LightEditTextOverride } from '../../../shared/contracts/runtime/lightEdit'
 import type { RuntimeRegistry } from '../../RuntimeRegistry'
+import type { RuntimeAuthoringTargetsChangedHandler } from '../../RuntimeAuthoringTargetRegistry'
 import { decodePublishedCode } from '../../decodePublishedExecutableCode'
 import type {
   PublishedRuntimeAuthoringMountOptions,
@@ -28,6 +29,13 @@ export interface PublishedCanvasRuntimeMountHandle {
   applyAuthoringContentValue(key: string, value: string): boolean
   /** M15: replace the Runtime's light-edit rules without recreating it. */
   applyAuthoringTextOverrides(overrides: readonly LightEditTextOverride[]): boolean
+  /**
+   * M15 运行现场: publish the text and pictures the host finds in this playback Runtime while its page is paused for
+   * editing; its Phaser scene stops updating but keeps drawing. Returns the stop function, or null when it cannot.
+   */
+  startLiveEdit?(input: { sceneId?: string; onTargetsChanged: RuntimeAuthoringTargetsChangedHandler }): (() => void) | null
+  /** M15 运行现场: apply edited text rules to this playback Runtime in place. */
+  applyLiveTextOverrides?(overrides: readonly LightEditTextOverride[]): boolean
   waitForReady(): Promise<void>
   waitForObservationReady?(): Promise<void>
   waitForCaptureReady(): Promise<void>
@@ -545,6 +553,24 @@ export function mountPublishedCanvasRuntime(
     },
     applyAuthoringTextOverrides(overrides) {
       if (options.mode !== 'authoring' || destroyed || quarantined || !runtimeHost) return false
+      const next = overrides.map(rule => ({ ...rule }))
+      options.runtime.content.overrides = next
+      runtime.content.overrides = next
+      runtimeHost.setTextOverrides(next)
+      return true
+    },
+    startLiveEdit(input) {
+      if (options.mode === 'authoring' || options.mode === 'capture' || destroyed || quarantined || !runtimeHost) return null
+      if (!runtimeHost.startLiveEditTargets(input.onTargetsChanged)) return null
+      const scene = game?.scene.getScenes(true)[0]
+      try { scene?.scene.pause() } catch { /* nothing runs to pause */ }
+      return () => {
+        runtimeHost?.stopLiveEditTargets()
+        try { scene?.scene.resume() } catch { /* destroyed with its page */ }
+      }
+    },
+    applyLiveTextOverrides(overrides) {
+      if (options.mode === 'authoring' || options.mode === 'capture' || destroyed || quarantined || !runtimeHost) return false
       const next = overrides.map(rule => ({ ...rule }))
       options.runtime.content.overrides = next
       runtime.content.overrides = next

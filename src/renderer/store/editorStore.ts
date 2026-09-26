@@ -1506,6 +1506,7 @@ export const selectSlideWorkspaceSource = (state: EditorState) => {
     state.slideDrawTool,
     state.setSlideDrawTool,
     state.drawSlideShapeNode,
+    state.activateCourseLocation,
   ] as const
 }
 

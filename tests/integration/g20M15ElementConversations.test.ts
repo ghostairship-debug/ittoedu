@@ -374,3 +374,46 @@ it('M15 a Flow text card traces its range in the paragraph and undoes the paragr
   if (after.model.kind !== 'course-v9') throw new Error('course')
   expect(paragraph(after.model.project).block.content).toEqual(paragraph(snapshot.model.project).block.content)
 })
+
+it('M15 a Runtime card names the earlier text edits whose original text its request took out of the source', async () => {
+  const quiz = (heading: string) => `CoursewareRuntime.define({ runtimeApiVersion: 3, create(ctx) {
+    var question = 1;
+    ctx.dom.root.innerHTML = '<h2>${heading}</h2><p>第 ' + question + ' 题</p>';
+    return { destroy: function () { ctx.dom.root.innerHTML = ''; } };
+  } });`
+  let f!: Awaited<ReturnType<typeof fixture>>
+  const rewrite = (heading: string) => edit(f.documents, f.opened.documentId, project => {
+    const item = sceneItems(project).find(value => value.layerItemId === 'quiz')!
+    if (item.kind !== 'runtime') throw new Error('runtime')
+    item.runtime.source = quiz(heading)
+  })
+  f = await fixture(async ({ instruction }) => {
+    if (instruction.includes('换题目')) await rewrite('看图说话')
+    if (instruction.includes('只改样式')) await rewrite('听录音，选图片')
+  })
+  // The teacher edited the heading (text in the source) and the question number (computed by the program).
+  await edit(f.documents, f.opened.documentId, project => {
+    sceneItems(project).push({
+      layerItemId: 'quiz', label: '小测验', order: 4, visible: true, locked: false, rotation: 0, opacity: 1, hitPolicy: 'auto',
+      playbackInitialVisibility: 'inherit', frame: { mode: 'absolute', x: 40, y: 40, width: 640, height: 360 }, kind: 'runtime',
+      runtime: { protocol: 'surface-runtime', runtimeApiVersion: 3, enabled: true, renderMode: 'dom', source: quiz('听录音，选图片'), assets: {},
+        content: { values: {}, overrides: [{ original: '听录音，选图片', region: 'h2', text: '听录音，选出正确的图片' }, { original: '第 1 题', text: '第一题' }] } },
+    })
+  })
+  const card = await f.service.operate({ type: 'create-conversation', workspaceId: f.workspaceId,
+    element: { kind: 'element', documentId: f.opened.documentId, label: '小测验' } }) as ConversationRecord
+  const send = async (text: string) => {
+    const snapshot = await f.documents.registry.get(f.opened.documentId).drain()
+    const latest = await f.service.conversations.readConversation({ workspaceId: f.workspaceId, conversationId: card.conversationId })
+    const result = await f.service.operate({ type: 'send', workspaceId: f.workspaceId, conversationId: card.conversationId, submissionId: randomUUID(),
+      expectedRevision: latest!.revision, text, documents: [objectReference(snapshot, 'quiz')], attachments: [] }) as ExecutionSendResult
+    if (result.run) await f.service.engine.wait(result.run.runId)
+    const view = () => f.service.operate({ type: 'element-change', submissionId: result.submission.submissionId }) as Promise<ElementChangeView>
+    await vi.waitFor(async () => expect((await view()).state).not.toBe('pending'))
+    return view()
+  }
+  // The new source no longer has the heading: that edit no longer applies. The computed number is not reported.
+  expect(await send('换题目')).toMatchObject({ state: 'none', lostTexts: ['听录音，选图片'] })
+  // A request that keeps the text reports nothing.
+  expect((await send('只改样式')).lostTexts).toBeUndefined()
+})

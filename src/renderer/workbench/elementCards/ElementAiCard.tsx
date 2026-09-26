@@ -67,6 +67,8 @@ export function ElementAiCard({ cardKey, capture, onClose }: { cardKey: string; 
           <p className="element-ai-card__request">{entry.text}</p>
           <p className="element-ai-card__state">{STATE_LABEL[entry.state]}</p>
           {entry.reply && <p className="element-ai-card__reply">{entry.reply}</p>}
+          {entry.change?.lostTexts?.length ? <p className="element-ai-card__notice" role="status">
+            之前改过的文字“{entry.change.lostTexts.join('”“')}”在新页面里找不到原文，这些文字修改不再生效。</p> : null}
           {entry.failure && entry.state !== 'completed' && <p className="element-ai-card__failure" role="alert">{entry.failure}</p>}
         </li>)}
       </ol>}

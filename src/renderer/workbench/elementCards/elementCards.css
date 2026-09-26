@@ -15,6 +15,7 @@
 .element-ai-card__entry[data-state="failed"] .element-ai-card__state { color: #b42318; }
 .element-ai-card__reply { color: #334155; }
 .element-ai-card__failure { color: #b42318; }
+.element-ai-card__notice { color: #92400e; }
 .element-ai-card__form { display: grid; gap: 6px; }
 .element-ai-card__form textarea { box-sizing: border-box; width: 100%; min-height: 48px; resize: vertical; font: inherit; }
 .element-ai-card__actions { display: flex; justify-content: flex-end; gap: 6px; }

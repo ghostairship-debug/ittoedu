@@ -21,6 +21,7 @@ import { validateRuntimeSource } from '../../RuntimeRegistry'
 import { registerPublishedDynamicUpdateProbe } from '../publishedDynamicUpdateProbe'
 import { DomTextOverrides } from '../../lightEdit/domTextOverrides'
 import type { LightEditTextOverride } from '../../../shared/contracts/runtime/lightEdit'
+import type { RuntimeAuthoringTargetsChangedHandler } from '../../RuntimeAuthoringTargetRegistry'
 import {
   PublishedCaptureBarrier,
   registerPublishedCaptureResource,
@@ -46,6 +47,13 @@ export interface PublishedSurfaceRuntimeMountHandle {
   applyAuthoringContentValue(key: string, value: string): boolean
   /** M15: apply edited text rules in place, keeping the Runtime's current state. */
   applyAuthoringTextOverrides(rules: readonly LightEditTextOverride[]): boolean
+  /**
+   * M15 运行现场: publish the text and pictures the host finds in this playback Runtime while its page is paused for
+   * editing. Returns the stop function, or null when it cannot.
+   */
+  startLiveEdit?(input: { sceneId?: string; onTargetsChanged: RuntimeAuthoringTargetsChangedHandler }): (() => void) | null
+  /** M15 运行现场: apply edited text rules to this playback Runtime in place. */
+  applyLiveTextOverrides?(rules: readonly LightEditTextOverride[]): boolean
   waitForReady(): Promise<void>
   waitForObservationReady?(): Promise<void>
   waitForCaptureReady(): Promise<void>
@@ -684,6 +692,27 @@ export function mountPublishedSurfaceRuntime(
       try { domText.setRules(rules) } catch (error) { console.warn(`Surface Runtime“${options.instanceId}”的文字修改暂不可用`, error); return false }
       authoringTargets?.invalidate()
       return true
+    },
+    startLiveEdit(input) {
+      if (publishedMode !== 'playback' || instanceDestroyed || quarantined || authoringTargets) return null
+      authoringTargets = new PublishedSurfaceRuntimeAuthoringTargets({
+        root,
+        width: options.width,
+        height: options.height,
+        content: options.runtime.content,
+        assets: options.runtime.assets,
+        authoring: { scope: 'scene', ...(input.sceneId ? { sceneId: input.sceneId } : {}), onTargetsChanged: input.onTargetsChanged },
+        lightEdit: { ...(domText ? { dom: domText } : {}), assetKeyForUrl: url => assetKeyByUrl.get(url) },
+      })
+      return () => {
+        authoringTargets?.destroy()
+        authoringTargets = null
+      }
+    },
+    applyLiveTextOverrides(rules: readonly LightEditTextOverride[]) {
+      if (publishedMode !== 'playback') return false
+      options.runtime.content.overrides = rules.map(rule => ({ ...rule }))
+      return handle.applyAuthoringTextOverrides(rules)
     },
     async waitForReady() {
       if (captureFailure) throw captureFailure

@@ -6,6 +6,8 @@ import type { ExecutionSelectionTarget } from '../../../shared/workbench/executi
 import { findFlowBlockRecursive, sliceFlowRichText } from '../../tools/flowDocumentModel'
 import { flowTextSlot } from '../../tools/flowTextSlot'
 import { locateCourseLayer, type LocatedCourseLayer } from './layerProperties'
+import { normalizeLightEditText } from '../../../shared/contracts/runtime/lightEdit'
+import { scanPageText } from '../../../shared/runtimeText/scanPageText'
 
 /**
  * One native object's authored fields, flattened to what an element card's undo restores one by one (M15): the
@@ -197,6 +199,32 @@ export function textTargetContent(model: DocumentModel, target: ExecutionSelecti
   if (target.kind !== 'flow-range' || model.kind !== 'course-v9') return null
   const content = flowSlotContent(model.project, target)
   return content && target.to <= documentTextLength(content) ? JSON.stringify(sliceFlowRichText(content, target.from, target.to)) : null
+}
+/** A Runtime item's source, for comparing it after a request. */
+export function runtimeSourceOf(project: CourseProjectDocument, itemId: string): string | null {
+  const located = locateCourseLayer(project, itemId)
+  return located?.item.kind === 'runtime' ? located.item.runtime.source : null
+}
+function sourceTexts(source: string): string[] {
+  return scanPageText([{ path: 'runtime.js', kind: 'js', text: source }]).entries.map(entry => normalizeLightEditText(entry.text))
+}
+/** Whether a Runtime's source still has this text: as written, or inside one of its string literals. */
+function sourceHas(source: string, texts: readonly string[], text: string): boolean {
+  return normalizeLightEditText(source).includes(text) || texts.some(entry => entry.includes(text))
+}
+/**
+ * M15: text edits of a Runtime whose original text a request took out of its source; they no longer apply anywhere.
+ * Text the source never contained as such (computed by the program) is not reported.
+ */
+export function lostRuntimeTextEdits(project: CourseProjectDocument, itemId: string, beforeSource: string): string[] {
+  const located = locateCourseLayer(project, itemId)
+  if (!located || located.item.kind !== 'runtime' || located.item.runtime.source === beforeSource) return []
+  const afterSource = located.item.runtime.source, before = sourceTexts(beforeSource), after = sourceTexts(afterSource)
+  const lost = new Set<string>()
+  for (const rule of located.item.runtime.content.overrides ?? []) {
+    if (sourceHas(beforeSource, before, rule.original) && !sourceHas(afterSource, after, rule.original)) lost.add(rule.original)
+  }
+  return [...lost]
 }
 /** Where a range of Markdown source is after a change inside it; null when the text around it changed too. */
 export function traceSourceRange(before: string, after: string, from: number, to: number): { from: number; to: number } | null {

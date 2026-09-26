@@ -21,6 +21,7 @@ import {
 } from '../coursePlayerTryRun'
 import { sidecarFileIdsFrom } from '../workspaceSlidePreviewRebuild'
 import { scheduleStaticFallbackRecapture } from '../../composition/runtime/staticFallbackRecapture'
+import { captureLiveSceneBaseline, liveSceneChangesSince, liveSceneItemLabel, sceneWithLiveCarriers } from './liveSceneChanges'
 import {
   buildSlidePreviewRebuildKey,
   type SlidePreviewIdentityNode,
@@ -190,6 +191,7 @@ export function SlideWorkspaceConnector({
     slideDrawTool,
     setSlideDrawTool,
     drawSlideShapeNode,
+    activateCourseLocation,
   ] = useEditorStore(useShallow(selectSlideWorkspaceSource))
   const previewBackgroundColor = useEditorStore((state) => state.previewBackgroundColor)
   const documentId = useEditorStore((state) => state.courseDocument.documentId)
@@ -289,6 +291,7 @@ export function SlideWorkspaceConnector({
       setCanvasMode,
       setDrawTool: (tool) => setSlideDrawTool(tool),
       setStatus: (message) => setStatus(message),
+      showLocation: (id) => activateCourseLocation(id),
     },
     selection: {
       selectNodes: (ids) => selectNodes([...ids]),
@@ -356,8 +359,14 @@ export function SlideWorkspaceConnector({
         })
       },
     },
+    liveScene: {
+      capture: () => project ? captureLiveSceneBaseline(project, tryRunMountKey) : null,
+      changesSince: (baseline, sceneId) => project ? liveSceneChangesSince(baseline, project, sceneId) : null,
+      sceneWithCarriers: (id) => project ? sceneWithLiveCarriers(project, id) : null,
+      itemLabel: (sceneId, itemId) => project ? liveSceneItemLabel(project, sceneId, itemId) : '这个对象',
+    },
     tryRun: {
-      mount: (container) => {
+      mount: (container, resume) => {
         if (!project) throw new Error('not-slide-session')
         return mountPublishedCourseTryRun({
           container,
@@ -365,7 +374,9 @@ export function SlideWorkspaceConnector({
           assetFiles,
           components: componentPackages,
           locationId,
-          initialPresentationStateId: locationId ? activePresentationStateId : null,
+          // A page loaded again after an edit on it (M15 运行现场) starts where it was, with its course state.
+          initialPresentationStateId: !locationId ? null : resume ? resume.stateId : activePresentationStateId,
+          ...(resume?.courseState ? { initialCourseState: resume.courseState } : {}),
           onInteractionDiagnostic: reportTryRunInteractionDiagnostic,
         })
       },
@@ -392,11 +403,13 @@ export function SlideWorkspaceConnector({
     replaceComponentAssetAtKey,
     locationId,
     project,
+    tryRunMountKey,
     runSlideCandidateCommand,
     selectNode,
     selectNodes,
     setActiveTab,
     setCanvasMode,
+    activateCourseLocation,
     setSlideDrawTool,
     setStatus,
     updateNode,

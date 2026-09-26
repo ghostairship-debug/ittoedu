@@ -106,6 +106,11 @@ export interface PublishedComponentMountHandle {
   updateAuthoringNode(node: ComponentHostNode): void
   /** M15: apply edited text rules in place, keeping the component's current state. */
   setTextOverrides?(rules: readonly LightEditTextOverride[]): void
+  /**
+   * M15 运行现场: publish the text and pictures the host finds in this playback component while its page is paused
+   * for editing. Returns the stop function, or null when it cannot.
+   */
+  startLiveEdit?(input: { node: ComponentHostNode; onTargetsChanged: ComponentAuthoringTargetsChangedHandler }): (() => void) | null
   setVisible(visible: boolean): void
   suspend(): void
   resume(): void
@@ -132,6 +137,9 @@ export interface PublishedComponentContextResources {
   updateAuthoringProps(props: Record<string, unknown>): void
   invalidateAuthoringTargets(): void
   destroyAuthoringTargets(): void
+  /** M15 运行现场: publish host-found text and pictures of a playback instance; false when it cannot. */
+  startLiveEditTargets(node: ComponentHostNode, onTargetsChanged: ComponentAuthoringTargetsChangedHandler): boolean
+  stopLiveEditTargets(): void
   /** Applies the text rules to what the component has rendered so far (right after create). */
   applyTextOverrides(): void
   setTextOverrides(rules: readonly LightEditTextOverride[]): void
@@ -415,6 +423,7 @@ export function createPublishedComponentContextResources(
   const captureBarrier = new PublishedCaptureBarrier()
   let authoringNode = options.authoring?.node
   let authoringTargets: ComponentAuthoringTargetRegistry | null = null
+  let liveTargets = false
   // M15: the component's own DOM text follows the item's rules in every mode; light editing never fails the component.
   let domText: DomTextOverrides | null = null
   if (domRoot) {
@@ -519,6 +528,26 @@ export function createPublishedComponentContextResources(
     },
     destroyAuthoringTargets() {
       authoringTargets?.destroy()
+    },
+    startLiveEditTargets(node: ComponentHostNode, onTargetsChanged: ComponentAuthoringTargetsChangedHandler) {
+      if (disposed || authoringTargets || mode !== 'preview') return false
+      authoringTargets = new ComponentAuthoringTargetRegistry({
+        manifest,
+        node,
+        scope: options.scope ?? 'scene',
+        ...(options.sceneId ? { sceneId: options.sceneId } : {}),
+        ...(domRoot ? { domRoot } : {}),
+        lightEdit: { ...(domText ? { dom: domText } : {}), assetKeyForUrl },
+        onTargetsChanged,
+      })
+      liveTargets = true
+      return true
+    },
+    stopLiveEditTargets() {
+      if (!liveTargets) return
+      liveTargets = false
+      authoringTargets?.destroy()
+      authoringTargets = null
     },
     applyTextOverrides() {
       try { domText?.applyAll() } catch (error) { console.warn(`组件“${manifest.id}”的文字修改暂不可用`, error) }
@@ -759,6 +788,10 @@ export function mountPublishedComponent(
     },
     setTextOverrides(rules: readonly LightEditTextOverride[]) {
       resources.setTextOverrides(rules)
+    },
+    startLiveEdit(input) {
+      if (destroyed || quarantined || !resources.startLiveEditTargets(input.node, input.onTargetsChanged)) return null
+      return () => resources.stopLiveEditTargets()
     },
     setVisible(visible: boolean) {
       lifecycle.setVisible?.(visible)

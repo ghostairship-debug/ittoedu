@@ -27,7 +27,7 @@ import { AgentFileService } from './AgentFileService'
 import { diagnosticLog } from '../../diagnosticLog'
 import { readTarget } from '../../../core/tools/ToolTargets'
 import { locateCourseLayer } from '../../../core/drivers/course/layerProperties'
-import { elementChangeUnits, elementUnitLabel, flowSlotContent, readElementFields, readFlowBlockFields, sameFieldValue, traceFlowRange, traceSourceRange, writeElementFields, writeFlowBlockFields, type ElementFields } from '../../../core/drivers/course/elementFields'
+import { elementChangeUnits, elementUnitLabel, flowSlotContent, lostRuntimeTextEdits, readElementFields, readFlowBlockFields, runtimeSourceOf, sameFieldValue, traceFlowRange, traceSourceRange, writeElementFields, writeFlowBlockFields, type ElementFields } from '../../../core/drivers/course/elementFields'
 import { sliceFlowRichText } from '../../../core/tools/flowDocumentModel'
 import type { CourseProjectDocument } from '../../../shared/courseProjectTypes'
 import type { FlowTextContent } from '../../../shared/document/content'
@@ -68,6 +68,8 @@ interface ElementFieldChange {
   undone: boolean
   /** A text card in a Flow document: its range and the slot's text before the request, and after it (null when untraceable). */
   range?: { target: Extract<ExecutionSelectionTarget, { kind: 'flow-range' }>; content: FlowTextContent; after?: { target: Extract<ExecutionSelectionTarget, { kind: 'flow-range' }>; content: FlowTextContent } | null }
+  /** A Runtime's source before the request, and its text edits that lost their original text by it. */
+  runtime?: { itemId: string; source: string; lostTexts?: string[] }
 }
 /** A text card in a Markdown document: the text of its range before and after the request, and where that text is now. */
 interface ElementSourceChange {
@@ -726,8 +728,10 @@ export class ExecutionDesktopService {
       const project = snapshot.model.project
       if (target.kind === 'course-object') {
         if (!locateCourseLayer(project, target.itemId)) return
+        const source = runtimeSourceOf(project, target.itemId)
         this.elementChanges.set(record.submissionId, { kind: 'fields', ...base, before: readElementFields(project, target.itemId),
-          read: value => readElementFields(value, target.itemId), write: (value, fields) => writeElementFields(value, target.itemId, fields) })
+          read: value => readElementFields(value, target.itemId), write: (value, fields) => writeElementFields(value, target.itemId, fields),
+          ...(source !== null ? { runtime: { itemId: target.itemId, source } } : {}) })
         return
       }
       const read = (value: CourseProjectDocument) => readFlowBlockFields(value, target.surfaceId, target.blockId)
@@ -752,6 +756,7 @@ export class ExecutionDesktopService {
         return
       }
       change.after = model.kind === 'course-v9' ? change.read(model.project) : null
+      if (change.runtime && model.kind === 'course-v9') change.runtime.lostTexts = lostRuntimeTextEdits(model.project, change.runtime.itemId, change.runtime.source)
       if (change.range && model.kind === 'course-v9') {
         const { target, content } = change.range, next = flowSlotContent(model.project, target)
         const traced = next && traceFlowRange(content, next, target.from, target.to)
@@ -773,7 +778,8 @@ export class ExecutionDesktopService {
     const range = change.range, current = range && (change.undone ? range : range.after)
     const place = current && current.target.to > current.target.from
       ? { target: current.target, content: JSON.stringify(sliceFlowRichText(current.content, current.target.from, current.target.to)) } : {}
-    if (!change.before) return { submissionId, state: 'none', fields: [], unavailable: ELEMENT_UNSUPPORTED }
+    const lost = change.runtime?.lostTexts?.length ? { lostTexts: [...change.runtime.lostTexts] } : {}
+    if (!change.before) return { submissionId, state: 'none', fields: [], unavailable: ELEMENT_UNSUPPORTED, ...lost }
     if (!change.after) return { submissionId, state: 'none', fields: [], unavailable: '这个对象已不存在。' }
     const units = elementChangeUnits(change.before, change.after)
     return units.length ? { submissionId, state: change.undone ? 'undone' : 'applied', fields: unitLabels(units), ...place } : { submissionId, state: 'none', fields: [], ...place }

@@ -652,6 +652,24 @@ function exactPresentationStateId(
 
 type SlideRenderedLayerSource = 'scene' | 'surface' | 'global'
 
+/** M15 运行现场: what a paused playback page publishes for the editor, in the editor's own target shapes. */
+export type SlideLiveEditTargets =
+  | { readonly kind: 'runtime'; readonly update: Readonly<RuntimeAuthoringTargetUpdate> }
+  | { readonly kind: 'component'; readonly update: Readonly<ComponentAuthoringTargetUpdate> }
+/** M15 运行现场: an edit of a Runtime's or component's own text that the paused page takes in place. */
+export type SlideLiveEditPatch = Extract<PlayerAuthoringPatch, { kind: 'runtime-text-overrides' | 'component-light-edits' }>
+/** `reload`: the page has to be loaded again to show it (a replaced picture, a carrier that cannot update). */
+export type SlideLiveEditResult = 'applied' | 'reload' | 'missing'
+
+interface SlideLiveEdit {
+  readonly sceneId: string
+  readonly stops: Array<() => void>
+  readonly paused: Array<{ resume(): void }>
+  readonly playingVideos: PublishedNativeVideoHandle[]
+  readonly runtimeTargets: Map<string, Readonly<{ order: number; update: RuntimeAuthoringTargetUpdate }>>
+  revision: number
+}
+
 interface SlideRenderedLayerRecord {
   item: PublishedLayerItem
   stackOrder: number
@@ -731,6 +749,7 @@ export class SlidePublishedAdapter implements SurfaceHost, PublishedAuthoringPat
   #interactionGeneration = 0
   #interactionNodes = new Map<string, PublishedInteractionNodeHandle>()
   #renderedLayers = new Map<string, SlideRenderedLayerRecord>()
+  #liveEdit: SlideLiveEdit | null = null
   #authoringMotionTimers = new Map<string, number>()
   #authoringMotionControllers = new Map<string, AbortController>()
   #authoringRuntimeGeneration = 0
@@ -1229,7 +1248,125 @@ export class SlidePublishedAdapter implements SurfaceHost, PublishedAuthoringPat
     this.#autoplayPublishedVideos()
   }
 
+  /**
+   * M15 运行现场: pause the current page where it is (its videos, the lifecycles of its Runtimes and components, and
+   * their course state and host actions) and publish the text and pictures found in its Runtimes and components, as
+   * the editor's targets. The caller keeps the page inert. Playback only.
+   */
+  beginLiveEdit(publish: (targets: SlideLiveEditTargets) => void): { sceneId: string } | null {
+    if (this.#authoring || this.#staticCapture || !this.#active || this.#liveEdit) return null
+    const surface = findSlideSurface(this.#payload, this.id)
+    const scene = sceneOf(surface, resolveSlideLocation(this.#payload, this.id, this.#locationId))
+    const live: SlideLiveEdit = {
+      sceneId: scene.id,
+      stops: [],
+      paused: [],
+      playingVideos: [...this.#videoHandles.values()].filter(handle => !handle.element.paused),
+      runtimeTargets: new Map(),
+      revision: 0,
+    }
+    this.#liveEdit = live
+    this.#pausePublishedVideos()
+    this.#carrierSideEffects.suspend()
+    const publishRuntimeTargets = (): void => publish({
+      kind: 'runtime',
+      update: Object.freeze({
+        revision: ++live.revision,
+        scope: 'scene' as const,
+        sceneId: scene.id,
+        targets: Object.freeze([...live.runtimeTargets.entries()]
+          .sort(([leftId, left], [rightId, right]) => left.order - right.order || leftId.localeCompare(rightId, 'en'))
+          .flatMap(([, entry]) => entry.update.targets)),
+      }),
+    })
+    for (const record of this.#renderedLayers.values()) {
+      if (record.source !== 'scene' || !record.applicable || !record.item.visible) continue
+      const itemId = record.item.layerItemId
+      const runtimeHandle = record.runtimeHandle
+      const componentHandle = record.componentHandle
+      if (record.item.kind === 'runtime' && runtimeHandle) {
+        runtimeHandle.suspend()
+        live.paused.push(runtimeHandle)
+        const stop = runtimeHandle.startLiveEdit?.({
+          sceneId: scene.id,
+          onTargetsChanged: (update) => {
+            if (this.#liveEdit !== live) return
+            const mapped = mapRuntimeAuthoringTargetsToLayer(update, record.item, surface.canvas)
+            if (mapped.targets.length > 0) live.runtimeTargets.set(itemId, { order: record.item.order, update: mapped })
+            else live.runtimeTargets.delete(itemId)
+            publishRuntimeTargets()
+          },
+        })
+        if (stop) live.stops.push(stop)
+      } else if (record.item.kind === 'component' && componentHandle) {
+        componentHandle.suspend()
+        live.paused.push(componentHandle)
+        const stop = componentHandle.startLiveEdit?.({
+          node: publishedComponentAuthoringNode(record.item),
+          onTargetsChanged: (update) => {
+            if (this.#liveEdit === live) publish({ kind: 'component', update })
+          },
+        })
+        if (stop) live.stops.push(stop)
+      }
+    }
+    return { sceneId: scene.id }
+  }
+
+  /**
+   * M15 运行现场: take new text rules of a Runtime or component on the current page in place, so it keeps its state.
+   * A replaced picture, or a carrier that cannot update, needs the page to be loaded again.
+   */
+  applyLiveEdit(patch: SlideLiveEditPatch): SlideLiveEditResult {
+    if (this.#authoring || this.#staticCapture || patch.target.scope !== 'scene') return 'missing'
+    const record = this.#renderedLayers.get(renderedLayerKey('scene', patch.target.nodeId))
+    if (!record) return 'missing'
+    const location = resolveSlideLocation(this.#payload, this.id, this.#locationId)
+    const stored = sceneOf(findSlideSurface(this.#payload, this.id), location).layerItems
+      .find(item => item.layerItemId === patch.target.nodeId)
+    if (patch.kind === 'runtime-text-overrides') {
+      const handle = record.runtimeHandle
+      if (record.item.kind !== 'runtime' || !handle?.applyLiveTextOverrides) return 'reload'
+      const overrides = patch.overrides.map(rule => ({ ...rule }))
+      if (!handle.applyLiveTextOverrides(overrides)) return 'reload'
+      const { overrides: _previous, ...rest } = record.item.runtime.content
+      const content = overrides.length ? { ...rest, overrides } : rest
+      record.item = { ...record.item, runtime: { ...record.item.runtime, content } }
+      // A replay of this page builds it from the payload, so the payload follows too.
+      if (stored?.kind === 'runtime') stored.runtime.content = { ...content }
+      return 'applied'
+    }
+    const handle = record.componentHandle
+    if (record.item.kind !== 'component' || !handle?.setTextOverrides) return 'reload'
+    if (JSON.stringify(record.item.assetOverrides ?? {}) !== JSON.stringify(patch.assetOverrides)) return 'reload'
+    const textOverrides = patch.textOverrides.map(rule => ({ ...rule }))
+    handle.setTextOverrides(textOverrides)
+    const item: Extract<PublishedLayerItem, { kind: 'component' }> = { ...record.item, textOverrides }
+    if (!textOverrides.length) delete item.textOverrides
+    record.item = item
+    if (stored?.kind === 'component') {
+      if (textOverrides.length) stored.textOverrides = textOverrides.map(rule => ({ ...rule }))
+      else delete stored.textOverrides
+    }
+    return 'applied'
+  }
+
+  /** M15 运行现场: stop publishing targets; with `resume` the page carries on from where it was paused. */
+  endLiveEdit(resume: boolean): void {
+    const live = this.#liveEdit
+    if (!live) return
+    this.#liveEdit = null
+    for (const stop of live.stops) {
+      try { stop() } catch (error) { console.warn('运行现场结束时未能停止目标发布', error) }
+    }
+    if (!resume || !this.#active) return
+    for (const handle of live.paused) handle.resume()
+    this.#carrierSideEffects.activate()
+    for (const handle of live.playingVideos) void handle.element.play().catch(() => undefined)
+  }
+
   async suspend(): Promise<void> {
+    this.endLiveEdit(false)
     this.#invalidateInteractions()
     this.#active = false
     for (const controller of this.#controllers) if (controller instanceof TeacherControllerComponentHost) controller.suspend()
@@ -1377,6 +1514,7 @@ export class SlidePublishedAdapter implements SurfaceHost, PublishedAuthoringPat
   }
 
   async destroy(): Promise<void> {
+    this.endLiveEdit(false)
     if (this.#authoring) this.#authoringGeneration += 1
     this.#cancelAllAuthoringMotions()
     this.#invalidateInteractions()
@@ -2040,6 +2178,8 @@ export class SlidePublishedAdapter implements SurfaceHost, PublishedAuthoringPat
   #render(): void {
     const root = this.#root
     if (!root) return
+    // A page drawn again is no longer the paused one (M15 运行现场).
+    this.endLiveEdit(false)
     if (this.#authoring) this.#authoringGeneration += 1
     this.#carrierEffects = this.#carrierSideEffects.beginGeneration()
     const carrierEffects = this.#carrierEffects
