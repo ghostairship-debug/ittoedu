@@ -242,7 +242,8 @@ test('M20-T04 conversation homes show type, full location, missing state and Exp
     await select('跨空间会话')
     await expect(location).toContainText('workspace › Unit › c.md')
     const transfer = await page.evaluate(async input => {
-      const files = window.desktopAPI.workspaceFiles!
+      const files = window.desktopAPI.workspaceFiles!, execution = window.desktopAPI.execution!
+      const conversationTarget = await execution.workspace(input.target)
       const source = await files({ type: 'root', directory: input.source }), target = await files({ type: 'root', directory: input.target })
       const directory = (await files({ type: 'list', workspaceId: source.workspaceId, directoryEntryId: source.rootEntryId })).entries
         .find(entry => entry.status === 'accessible' && entry.name === 'Unit')
@@ -252,10 +253,15 @@ test('M20-T04 conversation homes show type, full location, missing state and Exp
       if (!file || file.status !== 'accessible') throw new Error('source file missing')
       const result = await files({ type: 'move', operationId: crypto.randomUUID(), workspaceId: source.workspaceId,
         targetWorkspaceId: target.workspaceId, sourceEntryIds: [file.entryId], targetDirectoryId: target.rootEntryId })
-      return { result, targetId: target.workspaceId }
+      const resolved = await files({ type: 'resolve', workspaceId: target.workspaceId, entryId: file.entryId })
+      return { result, resolved, fileTargetId: target.workspaceId, fileTargetRootEntryId: target.rootEntryId,
+        conversationTargetId: conversationTarget.workspace.workspaceId }
     }, { source: fixture.workspace, target: targetWorkspace })
     expect(transfer.result.status).toBe('success')
-    await expect.poll(async () => (await page.evaluate(async value => window.desktopAPI.execution!.conversation(value.id, value.moved), prepared))?.home?.workspaceId).toBe(transfer.targetId)
+    expect(transfer.fileTargetRootEntryId).toBeTruthy()
+    expect(transfer.resolved).toMatchObject({ workspaceId: transfer.fileTargetId, resolvedPath: join(targetWorkspace, 'c.md') })
+    expect(transfer.result.items[0]?.targetPath).toBe(join(targetWorkspace, 'c.md'))
+    await expect.poll(async () => (await page.evaluate(async value => window.desktopAPI.execution!.conversation(value.id, value.moved), prepared))?.home?.workspaceId).toBe(transfer.conversationTargetId)
     await expect(location).toContainText('其他工作空间 · c.md')
     await expect(location).not.toContainText('workspace ›')
     await expect(location).toHaveAttribute('title', /^c\.md\n所属位置只决定默认引用和新建文件的位置，不限制可修改的范围$/)
