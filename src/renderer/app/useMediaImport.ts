@@ -159,6 +159,7 @@ export interface MediaImportApi {
   selectAndInsertFlowAudio(): Promise<void>
   importWorkspaceMedia(request: WorkspaceMediaDropRequest): Promise<{ ok: boolean; reason?: string; assetId?: string; soundId?: string }>
   selectImageAsset(): Promise<ImportedImageAsset | null>
+  selectVideoAsset(): Promise<MediaImportItem | null>
   batchOperationSummary: { title: string; summary: string } | null
   clearBatchSummary(): void
 }
@@ -459,6 +460,19 @@ export function useMediaImport(ports: MediaImportPorts): MediaImportApi {
     return imported ?? null
   }, [])
 
+  const selectVideoAsset = useCallback(async (): Promise<MediaImportItem | null> => {
+    const imported = await portsRef.current.runBusy(async () => {
+      const select = portsRef.current.selectVideo
+      if (!select) throw new UserFacingError('无法选择视频', '当前界面不支持选择视频。', '请重新打开编辑器后再试。')
+      const file = await select()
+      if (!file) return null
+      const metadata = await readMediaMetadata(file.bytes, file.mimeType, 'video')
+      const asset = createMediaAssetImport(file, 'video', metadata)
+      return { meta: asset.meta, bytes: asset.bytes }
+    }, '视频读取失败。请重新选择受支持的 MP4 或 WebM 文件。')
+    return imported ?? null
+  }, [])
+
   const selectAndImportAudio = useCallback(async () => {
     await portsRef.current.runBusy(async () => {
       const started = portsRef.current.captureIdentity()
@@ -709,6 +723,7 @@ export function useMediaImport(ports: MediaImportPorts): MediaImportApi {
     selectAndInsertFlowAudio,
     importWorkspaceMedia,
     selectImageAsset,
+    selectVideoAsset,
     batchOperationSummary,
     clearBatchSummary,
   }
