@@ -41,7 +41,7 @@ function fixture() {
   const tableSource = '| 甲 | 乙 |\n| --- | --- |\n| 丙 | 丁 |\n'
   const parsedTable = parseDocumentMarkdown(tableSource, { target: 'flow', createId: () => crypto.randomUUID() })
   if (parsedTable.status !== 'valid') throw new Error(`Table fixture invalid: ${JSON.stringify(parsedTable.diagnostics)}`)
-  const tableProject = courseProjectDocumentSchema.parse({ ...project, surfaces: [{ ...flow.surface, blocks: parsedTable.document.content.blocks }] })
+  const tableProject = courseProjectDocumentSchema.parse({ ...project, surfaces: [{ ...flow.surface, blocks: [flow.surface.blocks[0]!, ...parsedTable.document.content.blocks] }] })
   writeFileSync(join(workspace, '表格验收.h5lesson'), driver.serialize({ kind: 'course-v9', project: tableProject,
     resources: { assets: {}, components: {} } }))
   writeFileSync(join(workspace, '表格验收.md'), tableSource)
@@ -100,11 +100,15 @@ for (const carrier of ['flow', 'markdown'] as const) {
             await form.getByLabel('LaTeX').fill('x+1')
             await form.getByRole('button', { name: '应用公式' }).click()
           }
-          await expect.poll(async () => (await blocks(page, opened.documentId)).map(block => block.type)).toContain(marker.type)
+          await expect.poll(async () => (await blocks(page, opened.documentId)).filter(block => block.type === marker.type).length)
+            .toBeGreaterThan(before.filter(block => block.type === marker.type).length)
           const after = await blocks(page, opened.documentId)
           expect(after.length).toBeGreaterThan(before.length)
-          const created = [...after].reverse().find(block => block.type === marker.type)
-          expect(created, `${marker.name} must create a formal ${marker.type} block`).toBeDefined()
+          expect(JSON.stringify(after[before.length - 1])).toContain('乙段：保持原样。')
+          const created = after[before.length]
+          expect(created, `${marker.name} must create a formal block immediately after the edited paragraph`).toBeDefined()
+          expect(created!.type).toBe(marker.type)
+          expect(JSON.stringify(created)).not.toContain(marker.input)
           if ('ordered' in marker) expect(created).toMatchObject({ ordered: marker.ordered })
           if (marker.type === 'formula') expect(created).toMatchObject({ latex: 'x+1' })
         })
@@ -217,6 +221,11 @@ for (const carrier of ['flow', 'markdown'] as const) {
       await page.getByLabel('更多正文操作').filter({ visible: true }).first().click()
       await expect(page.getByRole('button', { name: '源文', exact: true }).filter({ visible: true })).toBeVisible()
       await page.keyboard.press('Escape')
+      await selectVisibleText(page, body, '先预测')
+      const beforeAi = await readSelectionDocument(page, opened.documentId)
+      const expectedAi = beforeAi.model.kind === 'markdown' ? beforeAi.model.source.replace('先预测', '先观察')
+        : beforeAi.model.kind === 'course-v9' ? JSON.stringify(beforeAi.model.project.surfaces.find(surface => surface.type === 'flow')?.blocks).replace('先预测', '先观察') : ''
+      expect(expectedAi).not.toBe('')
       const round = server.arm(`m16-${carrier}-ai`, carrier === 'flow' ? 'flow-range' : 'markdown-range', '先观察')
       await bar.getByRole('button', { name: 'AI 修改' }).click()
       const card = page.getByRole('dialog', { name: /^AI 修改：“先预测”$/ })
@@ -225,7 +234,11 @@ for (const carrier of ['flow', 'markdown'] as const) {
       await card.getByRole('button', { name: '发送', exact: true }).click()
       await heldRound(round); await finishRound(page, round)
       expect(round.readText).toBe('先预测')
-      await expect.poll(async () => JSON.stringify(await blocks(page, opened.documentId))).toContain('先观察')
+      await expect.poll(async () => {
+        const current = await readSelectionDocument(page, opened.documentId)
+        return current.model.kind === 'markdown' ? current.model.source
+          : current.model.kind === 'course-v9' ? JSON.stringify(current.model.project.surfaces.find(surface => surface.type === 'flow')?.blocks) : ''
+      }).toBe(expectedAi)
       expect(errors).toEqual([])
       await page.screenshot({ path: join(data.directory, `${carrier}-tools.png`) })
       await info.attach(`${carrier} tools`, { path: join(data.directory, `${carrier}-tools.png`), contentType: 'image/png' })
@@ -241,7 +254,7 @@ for (const carrier of ['flow', 'markdown'] as const) {
       const name = `表格验收.${carrier === 'flow' ? 'h5lesson' : 'md'}`
       const opened = await openSelectionFile(page, data.workspace, name)
       const body = await bodyFor(page, carrier, name)
-      const table = body.locator('table').first()
+      const table = body.locator('[data-flow-body-block="table"], .document-table').first()
       await expect(table).toBeVisible()
       const rowCount = async () => {
         const entry = (await blocks(page, opened.documentId)).find(block => block.type === 'table')
@@ -249,7 +262,7 @@ for (const carrier of ['flow', 'markdown'] as const) {
         return entry.rows.length
       }
       const initialRows = await rowCount()
-      await table.locator('td').first().click()
+      await table.locator('[data-document-slot]').first().click()
       const bar = page.getByRole('toolbar', { name: '选中内容快捷工具' })
       await expect(bar).toBeVisible()
       await bar.getByRole('button', { name: '表格操作' }).click()
@@ -257,7 +270,7 @@ for (const carrier of ['flow', 'markdown'] as const) {
       await expect.poll(rowCount).toBe(initialRows + 1)
       await body.press('Control+z')
       await expect.poll(rowCount).toBe(initialRows)
-      await table.locator('td').first().click({ button: 'right' })
+      await table.locator('[data-document-slot]').first().click({ button: 'right' })
       await page.getByRole('menu', { name: '表格操作' }).getByRole('menuitem', { name: '上方插入行' }).click()
       await expect.poll(rowCount).toBe(initialRows + 1)
       await body.press('Control+z')
