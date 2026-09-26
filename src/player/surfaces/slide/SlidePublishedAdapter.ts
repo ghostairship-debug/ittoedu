@@ -921,6 +921,36 @@ export class SlidePublishedAdapter implements SurfaceHost, PublishedAuthoringPat
       return { ok: true, target: patch.target }
     }
 
+    if (patch.kind === 'component-light-edits') {
+      const record = this.#authoringRecord(patch.target.scope, patch.target.nodeId)
+      const captured = this.#captureAuthoringIdentity(patch.target, commandIdentity, patch.target.nodeId)
+      const identity = this.#validateCapturedAuthoringRecord(captured, record)
+      if (!identity.ok) return identity
+      if (!record || record.item.kind !== 'component') {
+        return this.#authoringFailure('target-not-found', `当前 Published 宿主中不存在组件“${patch.target.nodeId}”。`)
+      }
+      const item: Extract<PublishedLayerItem, { kind: 'component' }> = { ...record.item,
+        textOverrides: patch.textOverrides.map(rule => ({ ...rule })), assetOverrides: structuredClone(patch.assetOverrides) }
+      if (!item.textOverrides?.length) delete item.textOverrides
+      if (!Object.keys(item.assetOverrides ?? {}).length) delete item.assetOverrides
+      // M15: text rules apply in place; a replaced picture (or a component that cannot update) is rebuilt.
+      const handle = record.componentHandle
+      const picturesChanged = JSON.stringify(record.item.assetOverrides ?? {}) !== JSON.stringify(item.assetOverrides ?? {})
+      try {
+        if (!picturesChanged && handle?.ok && handle.setTextOverrides) handle.setTextOverrides(item.textOverrides ?? [])
+        else if (record.remountComponent) await record.remountComponent(item)
+        else return this.#authoringFailure('update-failed', `组件“${patch.target.nodeId}”没有可重建的作者实例。`)
+      } catch (error) {
+        const current = this.#validateCapturedAuthoringRecord(captured, record)
+        if (!current.ok) return current
+        throw error
+      }
+      const current = this.#validateCapturedAuthoringRecord(captured, record)
+      if (!current.ok) return current
+      record.item = item
+      return { ok: true, target: patch.target }
+    }
+
     if (patch.kind === 'runtime-text-overrides') {
       const record = this.#authoringRecord(patch.target.scope, patch.target.nodeId)
       const captured = this.#captureAuthoringIdentity(patch.target, commandIdentity, patch.target.nodeId)

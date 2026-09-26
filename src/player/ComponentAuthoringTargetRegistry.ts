@@ -403,7 +403,8 @@ export class ComponentAuthoringTargetRegistry implements ComponentEditorHost {
       if (sample.node.parentElement?.closest('[data-courseware-edit-key]')) continue
       const parent = sample.node.parentElement
       let local = parent && parent.childNodes.length === 1 ? offsetBoundsInsideRoot(parent, root) : null
-      if (!local) { range.selectNodeContents(sample.node); local = toLocal(range.getBoundingClientRect()) }
+      // A text that cannot be measured is skipped, never the whole list.
+      if (!local && typeof range.getBoundingClientRect === 'function') { range.selectNodeContents(sample.node); local = toLocal(range.getBoundingClientRect()) }
       if (!local || !isFinitePositiveBounds(local)) continue
       targets.push(this.createTarget(`auto:${this.domElementId(sample.node)}:text`, '', autoLabel(sample.rule?.text || sample.original),
         sample.original.length > 30, undefined, 'auto', local,

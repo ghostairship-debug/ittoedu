@@ -7,7 +7,7 @@ import {
 import { nodeMotionActionSchema } from './interactionSchema'
 import type { NodeMotionAction } from './interactionTypes'
 import type { RuntimeAuthoringTargetUpdate } from './runtimeTypes'
-import { lightEditTextOverridesSchema, type LightEditTextOverride } from './contracts/runtime/lightEdit'
+import { lightEditAssetOverridesSchema, lightEditTextOverridesSchema, type LightEditTextOverride } from './contracts/runtime/lightEdit'
 
 export interface PlayerAuthoringNativeNode {
   id: string
@@ -75,6 +75,11 @@ export type PlayerAuthoringTarget =
       scope: PlayerAuthoringScope
       nodeId: string
     }
+  | {
+      kind: 'component-light-edits'
+      scope: PlayerAuthoringScope
+      nodeId: string
+    }
 
 export type PlayerAuthoringPatch =
   | {
@@ -112,6 +117,13 @@ export type PlayerAuthoringPatch =
       kind: 'runtime-text-overrides'
       target: Extract<PlayerAuthoringTarget, { kind: 'runtime-text-overrides' }>
       overrides: readonly LightEditTextOverride[]
+    }
+  | {
+      /** M15: every light edit of one component instance: text rules apply in place, replaced pictures rebuild it. */
+      kind: 'component-light-edits'
+      target: Extract<PlayerAuthoringTarget, { kind: 'component-light-edits' }>
+      textOverrides: readonly LightEditTextOverride[]
+      assetOverrides: Readonly<Record<string, { assetId: string }>>
     }
 
 export interface PlayerAuthoringPatchCommand {
@@ -243,6 +255,11 @@ const runtimeTextOverridesTargetSchema = z.object({
   scope: z.enum(['scene', 'global']),
   nodeId: identifier,
 }).strict()
+const componentLightEditsTargetSchema = z.object({
+  kind: z.literal('component-light-edits'),
+  scope: z.enum(['scene', 'global']),
+  nodeId: identifier,
+}).strict()
 const targetSchema = z.discriminatedUnion('kind', [
   nativeTargetSchema,
   sceneBackgroundTargetSchema,
@@ -340,6 +357,12 @@ const patchSchema = z.discriminatedUnion('kind', [
     kind: z.literal('runtime-text-overrides'),
     target: runtimeTextOverridesTargetSchema,
     overrides: lightEditTextOverridesSchema,
+  }).strict(),
+  z.object({
+    kind: z.literal('component-light-edits'),
+    target: componentLightEditsTargetSchema,
+    textOverrides: lightEditTextOverridesSchema,
+    assetOverrides: lightEditAssetOverridesSchema,
   }).strict(),
 ])
 

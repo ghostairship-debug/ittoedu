@@ -1,5 +1,5 @@
 import { ImagePlus, LoaderCircle, RotateCcw } from 'lucide-react'
-import type { ComponentAuthoringTextTarget } from '../../../shared/componentTypes'
+import type { ComponentAuthoringImageTarget, ComponentAuthoringTextTarget } from '../../../shared/componentTypes'
 import type { RuntimeAuthoringTarget } from '../../../shared/runtimeTypes'
 import type { ComponentTextEditSession } from '../../authoring/componentTextEditSession'
 import type { CourseRuntimeContentTextTarget } from '../../runtime/runtimeContentTextAuthoringCommands'
@@ -21,6 +21,10 @@ export interface SlideDynamicAuthoringOverlayProps {
   readonly interactive: boolean
   readonly runtimeTargets: ReadonlyArray<Readonly<RuntimeAuthoringTarget>>
   readonly componentTargets: ReadonlyArray<Readonly<ComponentAuthoringTextTarget>>
+  /** M15: pictures of a component's manifest assets; activating one replaces that picture. */
+  readonly componentImageTargets?: ReadonlyArray<Readonly<ComponentAuthoringImageTarget>>
+  readonly replacingComponentImageTargetId?: string | null
+  readonly onComponentImageActivate?: (target: Readonly<ComponentAuthoringImageTarget>) => void
   readonly hoveredTargetId: string | null
   readonly replacingRuntimeAssetTargetId: string | null
   readonly activeRuntimeTextSession: Readonly<SlideRuntimeTextEditSession> | null
@@ -53,6 +57,9 @@ export function SlideDynamicAuthoringOverlay({
   interactive,
   runtimeTargets,
   componentTargets,
+  componentImageTargets = [],
+  replacingComponentImageTargetId = null,
+  onComponentImageActivate,
   hoveredTargetId,
   replacingRuntimeAssetTargetId,
   activeRuntimeTextSession,
@@ -77,6 +84,7 @@ export function SlideDynamicAuthoringOverlay({
   const showTargets = interactive && (
     runtimeTargets.length > 0 ||
     componentTargets.length > 0 ||
+    componentImageTargets.length > 0 ||
     Boolean(activeRuntimeTextTarget) ||
     Boolean(activeComponentTextTarget)
   )
@@ -132,6 +140,22 @@ export function SlideDynamicAuthoringOverlay({
               onCancel={onCancelRuntimeText}
             />
           )}
+          {componentImageTargets.map((target) => (
+            <button
+              key={target.targetId}
+              type="button"
+              className={`canvas-authoring-target canvas-authoring-target--asset${hoveredTargetId === target.targetId ? ' canvas-authoring-target--hovered' : ''}`}
+              aria-label={`${target.label}，双击替换组件图片`}
+              title={`双击替换组件图片：${target.label}`}
+              disabled={replacingComponentImageTargetId === target.targetId}
+              style={{ left: target.bounds.x, top: target.bounds.y, width: target.bounds.width, height: target.bounds.height, zIndex: 3, transform: `rotate(${target.rotation}deg)` }}
+              onFocus={() => onHoverTarget(target.targetId)}
+              onBlur={() => onHoverTarget(null)}
+              onClick={() => onComponentImageActivate?.(target)}
+            >
+              <span className="canvas-authoring-target__badge" aria-hidden="true"><ImagePlus size={14} /><span>{target.label}</span></span>
+            </button>
+          ))}
           {componentTargets.map((target) => (
             <button
               key={target.targetId}

@@ -1498,6 +1498,8 @@ export const selectSlideWorkspaceSource = (state: EditorState) => {
     state.updateRuntimeContentTextAtTarget,
     state.captureRuntimeAssetReplacementTarget,
     state.replaceRuntimeAssetAtTarget,
+    state.writeComponentTextRule,
+    state.replaceComponentAssetAtKey,
     state.runSlideCandidateCommand,
     state.applySlideCandidateCommand,
     state.setActiveTab,

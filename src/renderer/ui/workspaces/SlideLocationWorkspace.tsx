@@ -21,6 +21,8 @@ import { useWorkspaceMediaSource } from '../../lessonWorkspace/workspaceMediaSou
 import { deliverWorkspaceMediaDrop, type WorkspaceMediaDropHandler } from '../../lessonWorkspace/workspaceMediaDrop'
 import { WORKSPACE_MEDIA_DRAG_TYPE } from '../../lessonWorkspace/workspaceMediaDrag'
 import type {
+  ComponentAuthoringImageTarget,
+  ComponentAuthoringLightEditText,
   ComponentAuthoringTextTarget,
   ComponentPackageData,
 } from '../../../shared/componentTypes'
@@ -152,6 +154,19 @@ function runtimeOverrideSync(view: SlideEditorView | null): RuntimeOverrideSync 
   return sync
 }
 
+/** M15: each component's light edits (text rules and replaced pictures) as the live host last received them. */
+type ComponentLightEditSync = Map<string, { scope: 'scene' | 'global'; nodeId: string; json: string; textOverrides: readonly LightEditTextOverride[]; assetOverrides: Readonly<Record<string, { assetId: string }>> }>
+function componentLightEditSync(view: SlideEditorView | null): ComponentLightEditSync {
+  const sync: ComponentLightEditSync = new Map()
+  for (const layer of view?.layers ?? []) {
+    if (layer.item.kind !== 'component') continue
+    const scope = layer.source === 'global' ? 'global' : 'scene'
+    const textOverrides = (layer.item.textOverrides ?? []) as readonly LightEditTextOverride[], assetOverrides = layer.item.assetOverrides ?? {}
+    sync.set(`${scope}:${layer.item.layerItemId}`, { scope, nodeId: layer.item.layerItemId, json: JSON.stringify([textOverrides, assetOverrides]), textOverrides, assetOverrides })
+  }
+  return sync
+}
+
 export type SlidePhaserNode = NonNullable<ReturnType<typeof courseLayerItemToEditorCanvasNode>>
 type AuthoringPatchNode = Extract<PlayerAuthoringPatch, { kind: 'native-node' }>['node']
 type SlidePhaserDocument = Parameters<EditorGameHandle['bridge']['loadScene']>[0]
@@ -258,6 +273,10 @@ export interface SlideWorkspaceRuntimePort {
     asset: AssetMeta,
     bytes: Uint8Array,
   ) => { ok: false; reason: string } | { ok: true; status: 'unchanged' | 'replaced' }
+  /** M15: a rule for text a component renders itself (back at the original text, the rule goes). */
+  readonly writeComponentTextRule?: (itemId: string, rule: LightEditTextOverride) => { ok: false; reason: string } | { ok: true; status: 'unchanged' | 'updated' }
+  /** M15: a new image instead of one of a component's manifest assets. */
+  readonly replaceComponentAssetAtKey?: (itemId: string, assetKey: string, asset: AssetMeta, bytes: Uint8Array) => { ok: false; reason: string } | { ok: true; status: 'unchanged' | 'updated' }
 }
 
 export interface SlideWorkspaceAuthoringPort extends SlideWorkspaceCommandPort {
@@ -579,6 +598,35 @@ function sanitizeRuntimeAuthoringTargets(
   return Object.freeze(sanitized)
 }
 
+/** M15: the original text, region and shown text of text a component renders itself, or null when malformed. */
+function sanitizeComponentLightEdit(value: unknown): ComponentAuthoringLightEditText | null {
+  if (!value || typeof value !== 'object') return null
+  const { original, region, text } = value as Record<string, unknown>
+  return typeof original === 'string' && original.length > 0 && original.length <= 2_000 && typeof region === 'string' && region.length <= 500
+    && typeof text === 'string' && text.length <= 20_000 ? { original, region, text } : null
+}
+
+/** M15: pictures of a component's manifest assets that the host found; replacing one overrides that asset. */
+function sanitizeComponentImageTargets(
+  update: PlayerComponentAuthoringTargetsMessage['update'],
+  hostKey: string,
+  stage: SlideCanvasSize = DEFAULT_SLIDE_CANVAS,
+): ReadonlyArray<Readonly<ComponentAuthoringImageTarget>> {
+  const sanitized: ComponentAuthoringImageTarget[] = []
+  for (const candidate of update.targets) {
+    if (!candidate || candidate.kind !== 'component-image' || candidate.source !== 'auto' || candidate.scope !== update.scope
+      || candidate.sceneId !== update.sceneId || candidate.nodeId !== update.nodeId || typeof candidate.targetId !== 'string'
+      || !candidate.targetId || candidate.targetId.length > 256 || typeof candidate.componentId !== 'string' || !candidate.componentId
+      || typeof candidate.assetKey !== 'string' || !candidate.assetKey || candidate.assetKey.length > 200 || !Number.isFinite(candidate.rotation)
+      || !candidate.bounds || typeof candidate.bounds !== 'object') continue
+    const { x, y, width, height } = candidate.bounds
+    if (![x, y, width, height].every(Number.isFinite) || width <= 0 || height <= 0) continue
+    if (!rotatedRectIntersectsStage(candidate.bounds, candidate.rotation, stage)) continue
+    sanitized.push(Object.freeze({ ...candidate, targetId: `component:${hostKey}:${candidate.targetId}`, label: '图片', bounds: Object.freeze({ x, y, width, height }) }))
+  }
+  return Object.freeze(sanitized)
+}
+
 function sanitizeComponentAuthoringTargets(
   update: PlayerComponentAuthoringTargetsMessage['update'],
   hostKey: string,
@@ -596,13 +644,15 @@ function sanitizeComponentAuthoringTargets(
   }
   const sanitized: ComponentAuthoringTextTarget[] = []
   for (const candidate of update.targets) {
+    // Text the component renders itself has no prop key; its edits become rules (M15).
+    const lightEdit = candidate?.kind === 'component-text' && candidate.source === 'auto' ? sanitizeComponentLightEdit(candidate.lightEdit) : null
     if (
       !candidate ||
       candidate.kind !== 'component-text' ||
       candidate.scope !== update.scope ||
       candidate.sceneId !== update.sceneId ||
       candidate.nodeId !== update.nodeId ||
-      (candidate.source !== 'registered' && candidate.source !== 'dom') ||
+      (candidate.source !== 'registered' && candidate.source !== 'dom' && !lightEdit) ||
       typeof candidate.targetId !== 'string' ||
       !candidate.targetId ||
       candidate.targetId.length > 256 ||
@@ -610,7 +660,7 @@ function sanitizeComponentAuthoringTargets(
       !candidate.componentId ||
       candidate.componentId.length > 256 ||
       typeof candidate.key !== 'string' ||
-      !candidate.key ||
+      (lightEdit ? candidate.key !== '' : !candidate.key) ||
       candidate.key.length > 256 ||
       typeof candidate.multiline !== 'boolean' ||
       !Number.isFinite(candidate.rotation)
@@ -635,7 +685,8 @@ function sanitizeComponentAuthoringTargets(
       targetId: `component:${hostKey}:${candidate.targetId}`,
       label: typeof candidate.label === 'string' && candidate.label.trim()
         ? candidate.label.slice(0, 120)
-        : candidate.key.slice(0, 120),
+        : (lightEdit?.text || candidate.key).slice(0, 120),
+      ...(lightEdit ? { lightEdit: Object.freeze(lightEdit) } : {}),
       ...(
         maxLength === undefined ||
         (Number.isSafeInteger(maxLength) && maxLength > 0 && maxLength <= 1_000_000)
@@ -734,6 +785,7 @@ export function SlideLocationWorkspace({
   const previousPublishedStateRef = useRef<PublishedAuthoringSnapshotState | null>(null)
   /** Rules the Published host already shows; edits, undo and redo patch the difference in place. */
   const syncedRuntimeOverridesRef = useRef<RuntimeOverrideSync | null>(null)
+  const syncedComponentLightEditsRef = useRef<ComponentLightEditSync | null>(null)
   const previousComponentPackagesRef = useRef<
     Record<string, ComponentPackageData> | null
   >(null)
@@ -756,6 +808,7 @@ export function SlideLocationWorkspace({
     string,
     ReadonlyArray<Readonly<ComponentAuthoringTextTarget>>
   >())
+  const componentImageTargetsByHostRef = useRef(new Map<string, ReadonlyArray<Readonly<ComponentAuthoringImageTarget>>>())
   const [canvas, setCanvas] = useState<HTMLCanvasElement | null>(null)
   const [previewFeedback, setPreviewFeedback] = useState<RuntimePreviewFeedback>(null)
   const [previewRetryRevision, setPreviewRetryRevision] = useState(0)
@@ -771,6 +824,10 @@ export function SlideLocationWorkspace({
     useState<ReadonlyArray<Readonly<RuntimeAuthoringTarget>>>([])
   const [componentTargets, setComponentTargets] =
     useState<ReadonlyArray<Readonly<ComponentAuthoringTextTarget>>>([])
+  const [componentImageTargets, setComponentImageTargets] = useState<ReadonlyArray<Readonly<ComponentAuthoringImageTarget>>>([])
+  const [replacingComponentImageTargetId, setReplacingComponentImageTargetId] = useState<string | null>(null)
+  /** M15: the draft of text a component renders itself (no prop field draft backs it). */
+  const [componentAutoValue, setComponentAutoValue] = useState('')
   const [activeRuntimeTextSession, setActiveRuntimeTextSession] =
     useState<Readonly<SlideRuntimeTextEditSession> | null>(null)
   const [activeComponentTextSession, setActiveComponentTextSession] =
@@ -1000,11 +1057,13 @@ export function SlideLocationWorkspace({
     pendingAuthoringNodesRef.current.clear()
     previousPublishedStateRef.current = null
     syncedRuntimeOverridesRef.current = null
+    syncedComponentLightEditsRef.current = null
     runtimeTargetsByHostRef.current.clear()
     componentTargetsByHostRef.current.clear()
     lastAuthoringTargetsRevisionRef.current = -1
     setRuntimeTargets([])
     setComponentTargets([])
+    setComponentImageTargets([]); componentImageTargetsByHostRef.current.clear()
     setActiveRuntimeTextSession(null)
     setActiveComponentTextSession(null)
     setHoveredAuthoringTargetId(null)
@@ -1336,6 +1395,7 @@ export function SlideLocationWorkspace({
     previousPublishedStateRef.current = structuredClone(currentState)
     // The host was mounted from this document, so it already shows these rules.
     syncedRuntimeOverridesRef.current = runtimeOverrideSync(view)
+    syncedComponentLightEditsRef.current = componentLightEditSync(view)
     const patches = publishedAuthoringPatchesFromSlideView(
       view,
       localSource,
@@ -1356,6 +1416,7 @@ export function SlideLocationWorkspace({
     pendingAuthoringNodesRef.current.clear()
     previousPublishedStateRef.current = null
     syncedRuntimeOverridesRef.current = null
+    syncedComponentLightEditsRef.current = null
   }, [])
 
   // M15: Runtime text edits (and their undo/redo) reach the live host as rule
@@ -1373,6 +1434,22 @@ export function SlideLocationWorkspace({
       })) return
     }
     syncedRuntimeOverridesRef.current = current
+  }, [canvasMode, postAuthoringPatch, slideEditorView])
+  // M15: a component's light edits (and their undo/redo) reach the live host the same way.
+  useEffect(() => {
+    const synced = syncedComponentLightEditsRef.current
+    if (!synced || canvasMode !== 'edit' || !authoringReadyRef.current) return
+    const current = componentLightEditSync(slideEditorView)
+    for (const [key, entry] of current) {
+      if (synced.get(key)?.json === entry.json) continue
+      if (!postAuthoringPatch({
+        kind: 'component-light-edits',
+        target: { kind: 'component-light-edits', scope: entry.scope, nodeId: entry.nodeId },
+        textOverrides: entry.textOverrides,
+        assetOverrides: entry.assetOverrides,
+      })) return
+    }
+    syncedComponentLightEditsRef.current = current
   }, [canvasMode, postAuthoringPatch, slideEditorView])
 
   const handlePublishedAuthoringMessage = useCallback((
@@ -1456,7 +1533,9 @@ export function SlideLocationWorkspace({
         hostKey,
         sanitizeComponentAuthoringTargets(message.update, hostKey, slideCanvas),
       )
+      componentImageTargetsByHostRef.current.set(hostKey, sanitizeComponentImageTargets(message.update, hostKey, slideCanvas))
       setComponentTargets([...componentTargetsByHostRef.current.values()].flat())
+      setComponentImageTargets([...componentImageTargetsByHostRef.current.values()].flat())
       return
     }
     if (message.type !== PLAYER_AUTHORING_MESSAGE_TYPES.error) return
@@ -1507,6 +1586,7 @@ export function SlideLocationWorkspace({
     componentTargetsByHostRef.current.clear()
     setRuntimeTargets([])
     setComponentTargets([])
+    setComponentImageTargets([]); componentImageTargetsByHostRef.current.clear()
     setAcknowledgedPreviewGeneration(null)
     setPreviewFeedback({
       kind: 'loading',
@@ -1561,6 +1641,7 @@ export function SlideLocationWorkspace({
           componentTargetsByHostRef.current.clear()
           setRuntimeTargets([])
           setComponentTargets([])
+          setComponentImageTargets([]); componentImageTargetsByHostRef.current.clear()
           setAcknowledgedPreviewGeneration(null)
         },
       },
@@ -1699,6 +1780,15 @@ export function SlideLocationWorkspace({
     }),
     [componentTargets, editingScope, slideEditorView, slideSceneId],
   )
+  const visibleComponentImageTargets = useMemo(
+    () => componentImageTargets.filter((target) => {
+      if (target.scope !== editingScope) return false
+      if (target.scope === 'scene' && target.sceneId !== slideSceneId) return false
+      const layer = slideEditorView?.layers.find((candidate) => candidate.selectionId === target.nodeId)
+      return Boolean(layer && layer.item.kind === 'component' && layer.item.visible && !layer.item.locked)
+    }),
+    [componentImageTargets, editingScope, slideEditorView, slideSceneId],
+  )
   const activeComponentTextTarget = useMemo(() => {
     if (
       !activeComponentTextSession ||
@@ -1741,11 +1831,12 @@ export function SlideLocationWorkspace({
   }, [activeComponentTextSession, activeComponentTextTarget, slideEditorView])
   const componentDraftRef = useRef(contentEdit)
   componentDraftRef.current = contentEdit
-  const componentEditingValue = contentEdit?.kind === 'field-text' && contentEdit.textField?.kind === 'component-prop'
-    ? (contentEdit.draft as import('../../authoring/layerTextField').LayerTextDraft).text
-    : activeComponentTextSession?.initialValue ?? ''
+  const componentEditingValue = activeComponentTextSession?.source === 'auto' ? componentAutoValue
+    : contentEdit?.kind === 'field-text' && contentEdit.textField?.kind === 'component-prop'
+      ? (contentEdit.draft as import('../../authoring/layerTextField').LayerTextDraft).text
+      : activeComponentTextSession?.initialValue ?? ''
   useEffect(() => {
-    if (activeComponentTextSession && (contentEdit?.kind !== 'field-text' || contentEdit.textField?.kind !== 'component-prop')) {
+    if (activeComponentTextSession && activeComponentTextSession.source !== 'auto' && (contentEdit?.kind !== 'field-text' || contentEdit.textField?.kind !== 'component-prop')) {
       setActiveComponentTextSession(null)
     }
   }, [contentEdit, activeComponentTextSession])
@@ -1869,6 +1960,14 @@ export function SlideLocationWorkspace({
       return
     }
     ports.selection.selectNode(result.session.nodeId)
+    if (result.session.source === 'auto') {
+      // Text the component renders itself: no prop draft; the edit becomes a rule when committed.
+      componentDraftRef.current = null
+      setComponentAutoValue(result.value)
+      setActiveRuntimeTextSession(null)
+      setActiveComponentTextSession(result.session)
+      return
+    }
     const backendSession = backendRef.current?.getSession()
     if (!backendSession) return
     const begun = ports.authoring.runFieldTextIntent({
@@ -1896,6 +1995,13 @@ export function SlideLocationWorkspace({
           ? '组件文字编辑上下文已切换，未写入修改'
           : '组件文字目标已失效，未写入修改',
       )
+      setActiveComponentTextSession(null)
+      return
+    }
+    if (session.source === 'auto' && session.lightEdit) {
+      const committed = ports.runtime.writeComponentTextRule?.(session.nodeId, { original: session.lightEdit.original, ...(session.lightEdit.region ? { region: session.lightEdit.region } : {}), text: value })
+      ports.canvas.setStatus(!committed ? '当前版本不能修改组件文字' : !committed.ok ? `${committed.reason} 未写入修改`
+        : committed.status === 'unchanged' ? '组件文字没有变化' : '已更新组件文字；组件源码没有改动')
       setActiveComponentTextSession(null)
       return
     }
@@ -2054,6 +2160,27 @@ export function SlideLocationWorkspace({
     onSelectImageAsset,
     replacingRuntimeAssetTargetId,
   ])
+
+  /** M15: replaces a picture a component shows from its package with a managed image; the component is rebuilt with it. */
+  const replaceComponentImage = useCallback(async (target: Readonly<ComponentAuthoringImageTarget>) => {
+    if (replacingComponentImageTargetId) return
+    const replace = ports.runtime.replaceComponentAssetAtKey
+    if (!replace) { ports.canvas.setStatus('当前版本不能替换组件图片'); return }
+    setReplacingComponentImageTargetId(target.targetId)
+    try {
+      const imported = await onSelectImageAsset()
+      if (!imported) return
+      const current = componentImageTargetsByHostRef.current
+      if (![...current.values()].flat().some(candidate => candidate.targetId === target.targetId)) {
+        ports.canvas.setStatus('组件图片目标已失效，未写入修改')
+        return
+      }
+      const committed = replace(target.nodeId, target.assetKey, imported.meta, imported.bytes)
+      ports.canvas.setStatus(!committed.ok ? `${committed.reason} 未写入修改` : committed.status === 'unchanged' ? '组件图片未改变' : '已替换组件图片；组件源码没有改动')
+    } finally {
+      setReplacingComponentImageTargetId(null)
+    }
+  }, [onSelectImageAsset, replacingComponentImageTargetId])
 
   const canvasAuthoringHitAtClientPoint = useCallback((
     clientX: number,
@@ -3176,6 +3303,9 @@ export function SlideLocationWorkspace({
             interactive={authoringCanvasInteractive}
             runtimeTargets={visibleRuntimeTargets}
             componentTargets={visibleComponentTargets}
+            componentImageTargets={visibleComponentImageTargets}
+            replacingComponentImageTargetId={replacingComponentImageTargetId}
+            onComponentImageActivate={(target) => { void replaceComponentImage(target) }}
             hoveredTargetId={hoveredAuthoringTargetId}
             replacingRuntimeAssetTargetId={replacingRuntimeAssetTargetId}
             activeRuntimeTextSession={activeRuntimeTextSession}
@@ -3200,6 +3330,7 @@ export function SlideLocationWorkspace({
             onCancelRuntimeText={() => setActiveRuntimeTextSession(null)}
             onCommitComponentText={commitComponentText}
             onComponentDraftChange={(text, composing) => {
+              if (activeComponentTextSession?.source === 'auto') { setComponentAutoValue(text); return }
               const draft = componentDraftRef.current
               if (!draft || draft.kind !== 'field-text' || draft.textField?.kind !== 'component-prop') return
               const result = ports.authoring.runFieldTextIntent({ kind: 'update-field', expectedEdit: draft, text, composing })

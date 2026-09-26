@@ -25,6 +25,22 @@ import { addSlideComponentLayer } from '../course/v9SlideContentCommands'
 import { addSpatialWorldComponentLayer } from '../course/spatialEditorCommands'
 import { insertFlowSharedComponent } from '../course/flowSharedAuthoringAdapters'
 import { componentPackageMeta } from '../../shared/componentPackageMeta'
+import { planComponentAssetReplacement, planComponentTextRule, type ComponentLightEditPlanResult } from './componentLightEditTransactions'
+import type { LightEditTextOverride } from '../../shared/contracts/runtime/lightEdit'
+import { emptyCourseAssetSidecar } from '../project/v9AssetAdapter'
+
+/** The result of a component light edit (M15): written, nothing to change, or refused with the reason. */
+export type ComponentLightEditCommitResult = { ok: true; status: 'updated' | 'unchanged' } | { ok: false; reason: string }
+function commitComponentLightEdit(ports: ComponentAuthoringPorts, plan: (document: CourseProjectDocument) => ComponentLightEditPlanResult, message: string): ComponentLightEditCommitResult {
+  const document = ports.read().document
+  if (!document) return { ok: false, reason: '当前没有打开的 H5 演示。' }
+  const planned = plan(document)
+  if (!planned.ok) return planned
+  if (planned.status === 'no-op') return { ok: true, status: 'unchanged' }
+  const step = createEditorTransactionStep(document, planned.plan)
+  if (!step) return { ok: true, status: 'unchanged' }
+  return ports.persistTransaction(step, message) ? { ok: true, status: 'updated' } : { ok: false, reason: '当前 H5 演示没有可用的编辑会话，未写入。' }
+}
 
 export interface ComponentPackageSourceTarget extends ComponentPackageSourceBaseline {
   readonly projectPath: string | null
@@ -170,6 +186,13 @@ export { editableComponentPackageId } from './editableComponentPackage'
 
 export function createComponentAuthoringActions(ports: ComponentAuthoringPorts) {
   return {
+    /** M15: sets the rule for one occurrence of a component's own text; back at the original text it is removed. */
+    writeComponentTextRule: (itemId: string, rule: LightEditTextOverride): ComponentLightEditCommitResult => commitComponentLightEdit(ports,
+      project => planComponentTextRule({ project, itemId, rule, now: new Date().toISOString() }), '已更新组件文字'),
+    /** M15: shows a new image instead of one of a component's manifest assets. */
+    replaceComponentAssetAtKey: (itemId: string, assetKey: string, asset: AssetMeta, bytes: Uint8Array): ComponentLightEditCommitResult => commitComponentLightEdit(ports,
+      project => planComponentAssetReplacement({ project, sidecar: ports.read().sidecar ?? emptyCourseAssetSidecar(), itemId, assetKey, asset, bytes, now: new Date().toISOString() }),
+      '已替换组件图片'),
     captureComponentInsertionTarget: () => captureComponentInsertionTarget(ports),
     insertComponentPackagesAtTarget: (target: ComponentInsertionTarget, packages: readonly ComponentPackageData[]) =>
       insertComponentPackagesAtTarget(ports, target, packages),

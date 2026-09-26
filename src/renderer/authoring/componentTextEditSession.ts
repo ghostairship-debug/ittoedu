@@ -45,6 +45,8 @@ export interface ComponentTextEditSession {
   readonly source: ComponentAuthoringTextTarget['source']
   readonly bounds: ComponentAuthoringTextTarget['bounds']
   readonly rotation: number
+  /** M15: text the component renders itself; the edit becomes a rule for this original text and region. */
+  readonly lightEdit?: ComponentAuthoringTextTarget['lightEdit']
 }
 
 export type ComponentTextEditFailureReason =
@@ -208,7 +210,8 @@ export function beginComponentTextEditSession(
     context,
   )
   if (!node) return { ok: false, reason: 'target-invalid' }
-  const value = resolveCurrentStringValue(node, target.key, context)
+  // Text the component renders itself starts from what it shows now; it is not a prop.
+  const value = target.source === 'auto' ? target.lightEdit?.text : resolveCurrentStringValue(node, target.key, context)
   if (value === undefined) return { ok: false, reason: 'target-invalid' }
 
   return {
@@ -234,6 +237,7 @@ export function beginComponentTextEditSession(
       source: target.source,
       bounds: Object.freeze({ ...target.bounds }),
       rotation: target.rotation,
+      ...(target.lightEdit ? { lightEdit: Object.freeze({ ...target.lightEdit }) } : {}),
     }),
   }
 }
@@ -257,9 +261,10 @@ export function resolveComponentTextEdit(
     session.componentVersion,
     context,
   )
-  if (!node || resolveCurrentStringValue(node, session.key, context) === undefined) {
+  if (!node || session.source !== 'auto' && resolveCurrentStringValue(node, session.key, context) === undefined) {
     return { ok: false, reason: 'target-invalid' }
   }
+  if (session.source === 'auto') return { ok: true, nodeId: node.id, props: node.props }
 
   try {
     return {

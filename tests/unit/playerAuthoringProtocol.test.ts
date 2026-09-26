@@ -326,3 +326,16 @@ it('M15 carries the complete light-edit rules of one Runtime as a strict patch',
   expect(parsePlayerAuthoringPatchCommand(patch([{ original: '开始', text: 'a' }, { original: '开始', text: 'b' }])).ok).toBe(false)
   expect(parsePlayerAuthoringPatchCommand(patch([], { kind: 'runtime-text-overrides', scope: 'scene', nodeId: 'runtime-a', key: 'x' })).ok).toBe(false)
 })
+
+it('M15 carries a component instance’s text rules and replaced pictures as one strict patch', () => {
+  const patch = (textOverrides: unknown, assetOverrides: unknown = {}, target: unknown = { kind: 'component-light-edits', scope: 'scene', nodeId: 'quiz' }) => ({
+    ...command(),
+    patch: { kind: 'component-light-edits', target, textOverrides, assetOverrides },
+  })
+  expect(parsePlayerAuthoringPatchCommand(patch([{ original: '题目', region: 'div>p', text: '新题目' }], { icon: { assetId: 'asset-1' } })).ok).toBe(true)
+  expect(parsePlayerAuthoringPatchCommand(patch([], {})).ok).toBe(true)
+  expect(parsePlayerAuthoringPatchCommand(patch([{ original: ' 题目', text: 'x' }])).ok).toBe(false)
+  expect(parsePlayerAuthoringPatchCommand(patch([], { icon: { assetId: '' } })).ok).toBe(false)
+  expect(parsePlayerAuthoringPatchCommand(patch([], {}, { kind: 'component-light-edits', scope: 'surface', nodeId: 'quiz' })).ok).toBe(false)
+  expect(parsePlayerAuthoringPatchCommand({ ...command(), patch: { kind: 'component-light-edits', target: { kind: 'component-light-edits', scope: 'scene', nodeId: 'quiz' }, textOverrides: [] } }).ok).toBe(false)
+})

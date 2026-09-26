@@ -181,6 +181,8 @@ export function SlideWorkspaceConnector({
     updateRuntimeContentTextAtTarget,
     captureRuntimeAssetReplacementTarget,
     replaceRuntimeAssetAtTarget,
+    writeComponentTextRule,
+    replaceComponentAssetAtKey,
     runSlideCandidateCommand,
     applySlideCandidateCommand,
     setActiveTab,
@@ -325,6 +327,9 @@ export function SlideWorkspaceConnector({
       updateRuntimeContentTextAtTarget,
       captureRuntimeAssetReplacementTarget,
       replaceRuntimeAssetAtTarget,
+      // M15: component light edits commit through the component authoring actions.
+      writeComponentTextRule,
+      replaceComponentAssetAtKey,
     },
     authoring: {
       runFieldTextIntent: runSlideFieldTextIntent,
@@ -381,6 +386,8 @@ export function SlideWorkspaceConnector({
     componentPackages,
     drawSlideShapeNode,
     replaceRuntimeAssetAtTarget,
+    writeComponentTextRule,
+    replaceComponentAssetAtKey,
     locationId,
     project,
     runSlideCandidateCommand,
