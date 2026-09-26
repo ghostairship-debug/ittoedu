@@ -176,7 +176,6 @@ async function openProject(
   app: ElectronApplication,
   page: Page,
   projectPath: string,
-  title: string,
 ): Promise<void> {
   await patchOpenDialog(app, projectPath)
   await page.getByRole('button', { name: '打开工程（Ctrl+O）', exact: true }).click()
@@ -293,7 +292,7 @@ test('V9 current/full preview embeds local assets and leases declared origins pe
     // 冷启动只进入独立编辑器面（判据见 tests/e2e/lessonWorkspaceEntry.ts）。
     await enterIndependentEditor(page)
 
-    await openProject(app, page, projectAPath, 'NET H1 A')
+    await openProject(app, page, projectAPath)
     const projectAPhotoDataUrl = `data:image/png;base64,${Buffer.from(
       fixture.data.assetFiles.photo!,
     ).toString('base64')}`
@@ -375,8 +374,9 @@ test('V9 current/full preview embeds local assets and leases declared origins pe
       }, { once: true })
     }, assetA.origin)
     await page.reload({ waitUntil: 'domcontentloaded' })
-    // Reload only needs a live landing control; it must not create a project.
-    await expect(page.getByRole('button', { name: '打开工作空间', exact: true }).first()).toBeVisible()
+    // Reload returns to the empty workbench without creating a new document.
+    const emptyWorkbench = page.getByRole('region', { name: '没有打开的文件', exact: true })
+    await expect(emptyWorkbench.getByRole('button', { name: '新建 H5 演示', exact: true })).toBeVisible()
     await expect(page.getByRole('main', { name: '画布' })).toHaveCount(0)
     await expect(page.evaluate(() => window.name)).resolves
       .toBe('old-document-late-invoke-sent')
