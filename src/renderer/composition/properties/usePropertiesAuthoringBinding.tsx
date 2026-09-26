@@ -721,6 +721,13 @@ export function usePropertiesAuthoringBinding({
       )
       return
     }
+    if (read.flow && read.authoringToken) {
+      // A global object on a Flow page (the teacher controller among them) is patched as that page's overlay (M19).
+      const target = captureFlowEditorAuthoringTarget({ view: read.flow.view, sessionToken: read.authoringToken, target: { kind: 'overlay', layerItemId: node.id } })
+      const result = runFlowAuthoringIntent(target, { kind: 'patch-overlay-properties', patch: normalized as Record<string, unknown> })
+      if (!result.ok) reportError(result.reason ?? COURSE_AUTHORING_STALE_SESSION_REASON)
+      return
+    }
     if (slideTarget) {
       const result = applySlideCandidateCommand((session) => (
         patchSlideLayerPropertiesAtTarget(
