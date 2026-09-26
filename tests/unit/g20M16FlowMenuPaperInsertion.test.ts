@@ -80,13 +80,18 @@ describe('Flow menu paper insertion', () => {
     expect(() => insertFlowMenuPaperItem(first.nextDocument, { surfaceId: 'flow', item: item('shape', 'same'), frame, paragraphAnchor: anchor })).toThrow('图层 ID 已存在')
     const badImage = item('image')
     if (badImage.kind === 'native' && badImage.content.nativeType === 'image') badImage.content.data.assetId = 'missing'
-    expect(() => insertFlowMenuPaperItem(original, { surfaceId: 'flow', item: badImage, frame, paragraphAnchor: anchor })).toThrow()
+    expect(() => insertFlowMenuPaperItem(original, { surfaceId: 'flow', item: badImage, frame, paragraphAnchor: anchor })).toThrow('纸面图片素材类型无效')
+    original.assets.audio = { id: 'audio', filename: 'voice.mp3', mimeType: 'audio/mpeg', kind: 'audio', path: 'media/voice.mp3', byteLength: 128 }
+    if (badImage.kind === 'native' && badImage.content.nativeType === 'image') badImage.content.data.assetId = 'audio'
+    expect(() => insertFlowMenuPaperItem(original, { surfaceId: 'flow', item: badImage, frame, paragraphAnchor: anchor })).toThrow('纸面图片素材类型无效')
     const badComponent = item('component') as ComponentLayerItem
     badComponent.component.version = 'wrong'
-    expect(() => insertFlowMenuPaperItem(original, { surfaceId: 'flow', item: badComponent, frame, paragraphAnchor: anchor })).toThrow()
+    expect(() => insertFlowMenuPaperItem(original, { surfaceId: 'flow', item: badComponent, frame, paragraphAnchor: anchor })).toThrow('组件包或版本无效')
     badComponent.component.version = '1.0.0'
     badComponent.staticFallbackAssetId = 'missing'
-    expect(() => insertFlowMenuPaperItem(original, { surfaceId: 'flow', item: badComponent, frame, paragraphAnchor: anchor })).toThrow()
+    expect(() => insertFlowMenuPaperItem(original, { surfaceId: 'flow', item: badComponent, frame, paragraphAnchor: anchor })).toThrow('组件静态后备素材无效')
+    badComponent.staticFallbackAssetId = 'audio'
+    expect(() => insertFlowMenuPaperItem(original, { surfaceId: 'flow', item: badComponent, frame, paragraphAnchor: anchor })).toThrow('组件静态后备素材无效')
     expect(flowSurfaceIn(original, 'flow').surfaceLayerItems).toHaveLength(0)
   })
 
@@ -103,6 +108,10 @@ describe('Flow menu paper insertion', () => {
     const surface = flowSurfaceIn(result.nextDocument, 'spare')
     expect(surface.blocks).toEqual([{ id: result.anchorBlockId, type: 'paragraph', content: { inlines: [] } }])
     expect(surface.surfaceLayerItems[0]?.paragraphAnchor?.blockId).toBe(result.anchorBlockId)
+    expect(flowSurfaceIn(empty, 'spare').blocks).toHaveLength(0)
+    const invalid = item('image')
+    if (invalid.kind === 'native' && invalid.content.nativeType === 'image') invalid.content.data.assetId = 'missing'
+    expect(() => appendFlowMenuPaperItem(empty, { surfaceId: 'spare', item: invalid, frame, paragraphAnchor: { kind: 'empty-body', offsetY: 0, xRatio: 0.25 } })).toThrow('纸面图片素材类型无效')
     expect(flowSurfaceIn(empty, 'spare').blocks).toHaveLength(0)
     expect(() => insertFlowMenuPaperItem(original, { surfaceId: 'flow', item: item('text'), frame, paragraphAnchor: { kind: 'empty-body', offsetY: 0, xRatio: 0.25 } })).toThrow()
   })
