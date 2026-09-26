@@ -123,7 +123,9 @@ export function NativeSelectionContext({ documentId, revision, locationId, itemI
     const locate = (id: string): Box | null => {
       const explicit = bounds?.(id)
       if (explicit) return explicit
-      const element = [...root.querySelectorAll<HTMLElement>('[data-layer-item-id]')].find(element => element.dataset.layerItemId === id)
+      // A teacher controller is anchored where it is shown (collapsed, kept in view), not at its stored full frame.
+      const element = [...root.querySelectorAll<HTMLElement>('[data-controller-authoring-id]')].find(element => element.dataset.controllerAuthoringId === id)
+        ?? [...root.querySelectorAll<HTMLElement>('[data-layer-item-id]')].find(element => element.dataset.layerItemId === id)
       const rect = element?.getBoundingClientRect()
       return rect ? { left: rect.left, top: rect.top, width: rect.width, height: rect.height } : null
     }

@@ -7,7 +7,7 @@ import { createCourseStoreHost } from '../helpers/courseStoreHost'
 import { createBlankFlowCourseProject } from '../../src/renderer/project/createFlowCourseProject'
 import { selectFlowOverlay } from '../../src/renderer/course/flowEditorSlice'
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { afterEach, expect, it } from 'vitest'
+import { afterEach, expect, it, vi } from 'vitest'
 
 const store = () => useEditorStore.getState()
 const previousDesktopAPI = window.desktopAPI
@@ -173,6 +173,39 @@ it('M19 the teacher controller quick bar changes the controller on a Flow page t
   expect(controller()).toMatchObject({ props: { defaultCollapsed: false } })
   await act(async () => { fireEvent.click(within(screen.getByRole('toolbar', { name: '选中对象快捷工具' })).getByRole('button', { name: '锁定' })); await store().drainCourseDocument() })
   expect(controller()?.locked).toBe(true)
+})
+
+it('M19 anchors the quick bar of a Flow teacher controller where the controller is shown, not at its stored frame', async () => {
+  const host = await createCourseStoreHost()
+  await host.open(createBlankFlowCourseProject())
+  const documentId = store().courseDocument.documentId!
+  Object.defineProperty(window, 'desktopAPI', { configurable: true, value: { documents: host.api } })
+  const read = host.registry.get(documentId).read().model
+  if (read.kind !== 'course-v9') throw new Error('course fixture')
+  const controllerId = read.project.globalLayerItems.find(entry => entry.item.kind === 'component')!.item.layerItemId
+  function FlowSelection() {
+    const revision = useEditorStore(state => state.courseDocument.snapshot?.revision ?? 0)
+    const selection = useEditorStore(state => state.flowSession?.selection)
+    return <CourseEditorChromeContext.Provider value={{ documentId, mode: 'light', setMode() {} }}>
+      <main data-testid="flow-main">
+        {/* The overlay card spans the stored (expanded) frame; the collapsed button is what the teacher sees. */}
+        <div data-layer-item-id={controllerId} data-testid="controller-card" />
+        <div data-controller-authoring-id={controllerId} data-testid="controller-footprint" />
+        <NativeSelectionContext documentId={documentId} revision={revision} locationId={selection?.locationId ?? null} itemIds={selection?.selectedOverlayIds ?? []} enabled />
+      </main>
+    </CourseEditorChromeContext.Provider>
+  }
+  render(<FlowSelection />)
+  const rect = (left: number, top: number, width: number, height: number) => ({ x: left, y: top, left, top, width, height, right: left + width, bottom: top + height, toJSON: () => ({}) }) as DOMRect
+  vi.spyOn(screen.getByTestId('flow-main'), 'getBoundingClientRect').mockReturnValue(rect(0, 0, 1000, 700))
+  vi.spyOn(screen.getByTestId('controller-card'), 'getBoundingClientRect').mockReturnValue(rect(20, 600, 680, 64))
+  vi.spyOn(screen.getByTestId('controller-footprint'), 'getBoundingClientRect').mockReturnValue(rect(900, 612, 52, 52))
+  const session = store().flowSession!
+  act(() => store().applyFlowSelection(selectFlowOverlay(session.history.present, session.selection.locationId, [controllerId], 'global')))
+  await screen.findByRole('toolbar', { name: '选中对象快捷工具' })
+  const bar = document.querySelector<HTMLElement>('[data-selection-quick-bar]')!
+  expect(bar.dataset.placement).toBe('above')
+  expect(bar.style.left).toBe('900px')
 })
 
 it('M21 steps font sizes in readable increments inside the Native limits', () => {
