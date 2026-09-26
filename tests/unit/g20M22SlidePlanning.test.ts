@@ -3,6 +3,7 @@ import { createBlankCourseProject } from '../../src/core/course/createCourseProj
 import { planSlideAudioPlacement, planSlideLightOpacity, planSlideLightTextStyle, planSlidePageAlignment, planSlideSceneBackground, planSimpleSlideInteraction, readSimpleSlideInteraction } from '../../src/core/tools/lightSlideEditing'
 import { planSlideTextInsertion } from '../../src/core/tools/slideInsertion'
 import type { CourseProjectDocument } from '../../src/shared/courseProjectTypes'
+import { courseProjectDocumentSchema } from '../../src/shared/courseProjectSchema'
 
 function fixture() {
   const project = createBlankCourseProject({ includeDefaultController: false, controls: 'none', canvas: { width: 720, height: 1280 } })
@@ -60,6 +61,30 @@ describe('M22 Slide light planner', () => {
     expect(scene(second).interactions[0].actions[0].id).toBe('step-go')
     expect(scene(second).interactions[0].actions[0].action).toEqual({ type: 'location.go', locationId: 'loc-three' })
     expect(() => planSimpleSlideInteraction(second, { ...target, expectedRevision: second.revision }, 'location.go', 'missing', { ruleId: 'x', stepId: 'y' })).toThrow('目标页面')
+  })
+
+  it('refuses a matching global click rule instead of adding a second scene rule', () => {
+    const { project, target } = fixture()
+    project.globalInteractions.push({ id: 'global-go', enabled: true, trigger: { type: 'node.click', nodeId: target.itemId }, conditions: [], actions: [{ id: 'global-step', start: 'after-previous', delayMs: 0, action: { type: 'location.go', locationId: target.locationId } }] })
+    expect(courseProjectDocumentSchema.safeParse(project).success).toBe(true)
+    expect(readSimpleSlideInteraction(project, target, 'location.go').disabledReason).toContain('全局点击互动')
+    expect(() => planSimpleSlideInteraction(project, target, 'location.go', target.locationId, { ruleId: 'scene-go', stepId: 'scene-step' })).toThrow('全局点击互动')
+    expect(scene(project).interactions).toHaveLength(0)
+    expect(project.globalInteractions).toHaveLength(1)
+  })
+
+  it('preserves authored audio parameters when changing only the sound', () => {
+    const { project, target } = fixture()
+    const asset = { id: 'audio-asset', filename: 'clip.wav', mimeType: 'audio/wav', kind: 'audio' as const, path: 'assets/audio-asset.wav', byteLength: 3 }
+    const placed = planSlideAudioPlacement(project, { locationId: target.locationId, expectedRevision: project.revision, asset, bytes: new Uint8Array([1, 2, 3]), buttonId: 'audio-button', ruleId: 'audio-rule', stepId: 'audio-step' })
+    const soundId = placed.soundId
+    placed.project.media.audio.sounds['second-sound'] = { ...placed.project.media.audio.sounds[soundId], id: 'second-sound' }
+    const original = scene(placed.project).interactions[0]
+    original.actions[0].action = { type: 'audio.play', soundId, volume: 0.3, fadeInMs: 450, loop: true, lifetime: 'course', ifPlaying: 'continue' }
+    const next = planSimpleSlideInteraction(placed.project, { locationId: target.locationId, itemId: 'audio-button', expectedRevision: placed.project.revision }, 'audio.play', 'second-sound', { ruleId: 'unused', stepId: 'unused' })
+    expect(scene(next).interactions).toHaveLength(1)
+    expect(scene(next).interactions[0].actions[0].action).toEqual({ type: 'audio.play', soundId: 'second-sound', volume: 0.3, fadeInMs: 450, loop: true, lifetime: 'course', ifPlaying: 'continue' })
+    expect(scene(next).interactions[0].id).toBe('audio-rule')
   })
 
   it('reactivates a simple disabled rule when the user selects a destination', () => {

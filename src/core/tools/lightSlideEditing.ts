@@ -103,7 +103,9 @@ function simpleRule(rule: InteractionRule, action: SimpleSlideAction): boolean {
 export function readSimpleSlideInteraction(project: CourseProjectDocument, target: SlideLightTarget, action: SimpleSlideAction): { readonly rule: InteractionRule | null; readonly disabledReason: string | null } {
   const { item } = context(project, target)
   if (!isPublishedInteractionClickBindable(item)) return { rule: null, disabledReason: '此元素不支持点击互动' }
-  const rules = locateSceneInteractions(project, target.locationId).filter(rule => rule.trigger.type === 'node.click' && rule.trigger.nodeId === target.itemId && rule.actions.some(step => step.action.type === action))
+  const matching = (rule: InteractionRule) => rule.trigger.type === 'node.click' && rule.trigger.nodeId === target.itemId && rule.actions.some(step => step.action.type === action)
+  if (project.globalInteractions.some(matching)) return { rule: null, disabledReason: '此元素已有全局点击互动，请在编辑器中设置' }
+  const rules = locateSceneInteractions(project, target.locationId).filter(matching)
   if (rules.length > 1 || rules.some(rule => !simpleRule(rule, action))) return { rule: null, disabledReason: '已有复杂互动，请在编辑器中设置' }
   return { rule: rules[0] ?? null, disabledReason: null }
 }
@@ -119,7 +121,9 @@ export function planSimpleSlideInteraction(project: CourseProjectDocument, targe
     : { type: 'location.go', locationId: destinationId }
   const scope = { locationId: target.locationId, scope: 'scene' as const }
   if (current.rule) {
-    return planUpdateSlideInteractionRule(project, scope, current.rule.id, { enabled: true, actions: [{ ...current.rule.actions[0], action: payload }] })
+    const previous = current.rule.actions[0].action
+    const updated = previous.type === 'audio.play' ? { ...previous, soundId: destinationId } : payload
+    return planUpdateSlideInteractionRule(project, scope, current.rule.id, { enabled: true, actions: [{ ...current.rule.actions[0], action: updated }] })
   }
   const rule: InteractionRule = { id: ids.ruleId, enabled: true, trigger: { type: 'node.click', nodeId: target.itemId }, conditions: [], actions: [{ id: ids.stepId, start: 'after-previous', delayMs: 0, action: payload }] }
   return planAddSlideInteractionRule(project, scope, rule)
