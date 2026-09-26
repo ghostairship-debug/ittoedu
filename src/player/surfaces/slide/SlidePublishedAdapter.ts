@@ -61,6 +61,7 @@ import {
   extractPublishedComponentManifest,
   findComponentPackageSource,
   mountPublishedComponent,
+  componentLightEditOptions,
   type PublishedComponentPackageSource,
   type PublishedComponentMountHandle,
 } from '../publishedComponentMount'
@@ -542,6 +543,7 @@ function appendLayerNode(
           height: nextItem.frame.height,
           props: nextItem.props,
           staticFallbackAssetId: nextItem.staticFallbackAssetId,
+          ...componentLightEditOptions(nextItem),
           projectId: options?.projectId,
           components: options?.components,
           resolveAsset,

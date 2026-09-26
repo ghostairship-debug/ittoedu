@@ -29,6 +29,8 @@ import {
   type ComponentAuthoringTargetsChangedHandler,
   type ComponentHostNode as ComponentAuthoringHostNode,
 } from '../ComponentAuthoringTargetRegistry'
+import { DomTextOverrides } from '../lightEdit/domTextOverrides'
+import type { LightEditTextOverride } from '../../shared/contracts/runtime/lightEdit'
 
 export interface ComponentHostNode extends ComponentAuthoringHostNode {
   component: {
@@ -75,6 +77,9 @@ export interface PublishedComponentMountOptions {
   courseState?: ComponentCreateContextV4['courseState']
   presentation?: ComponentCreateContextV4['presentation']
   emit?: (eventName: string, payload?: unknown) => void
+  /** M15: this instance's light edits (its layer item's text rules and replaced manifest assets). */
+  textOverrides?: readonly LightEditTextOverride[]
+  assetOverrides?: Readonly<Record<string, { assetId: string }>>
   authoring?: {
     node: ComponentHostNode
     onTargetsChanged: ComponentAuthoringTargetsChangedHandler
@@ -99,6 +104,8 @@ export interface PublishedComponentMountHandle {
   resize(width: number, height: number): void
   updateProps(props: Record<string, unknown>): void
   updateAuthoringNode(node: ComponentHostNode): void
+  /** M15: apply edited text rules in place, keeping the component's current state. */
+  setTextOverrides?(rules: readonly LightEditTextOverride[]): void
   setVisible(visible: boolean): void
   suspend(): void
   resume(): void
@@ -125,8 +132,19 @@ export interface PublishedComponentContextResources {
   updateAuthoringProps(props: Record<string, unknown>): void
   invalidateAuthoringTargets(): void
   destroyAuthoringTargets(): void
+  /** Applies the text rules to what the component has rendered so far (right after create). */
+  applyTextOverrides(): void
+  setTextOverrides(rules: readonly LightEditTextOverride[]): void
   destroyCapture(): void
   dispose(): void
+}
+
+/** A component layer item's light edits (M15) as mount options. */
+export function componentLightEditOptions(item: {
+  textOverrides?: readonly LightEditTextOverride[]
+  assetOverrides?: Readonly<Record<string, { assetId: string }>>
+}): Pick<PublishedComponentMountOptions, 'textOverrides' | 'assetOverrides'> {
+  return { ...(item.textOverrides ? { textOverrides: item.textOverrides } : {}), ...(item.assetOverrides ? { assetOverrides: item.assetOverrides } : {}) }
 }
 
 const sharedComponentRegistry = new ComponentRegistry()
@@ -396,19 +414,20 @@ export function createPublishedComponentContextResources(
   const eventScope = scopedComponentEvents(options.events)
   const captureBarrier = new PublishedCaptureBarrier()
   let authoringNode = options.authoring?.node
-  const authoringTargets = authoringNode && options.authoring
-    ? new ComponentAuthoringTargetRegistry({
-        manifest,
-        node: authoringNode,
-        scope: options.scope ?? 'scene',
-        ...(options.sceneId ? { sceneId: options.sceneId } : {}),
-        ...(domRoot ? { domRoot } : {}),
-        onTargetsChanged: options.authoring.onTargetsChanged,
-      })
-    : null
+  let authoringTargets: ComponentAuthoringTargetRegistry | null = null
+  // M15: the component's own DOM text follows the item's rules in every mode; light editing never fails the component.
+  let domText: DomTextOverrides | null = null
+  if (domRoot) {
+    try { domText = new DomTextOverrides([domRoot], options.textOverrides ?? [], () => authoringTargets?.invalidate()) }
+    catch (error) { console.warn(`组件“${manifest.id}”的文字修改暂不可用`, error) }
+  }
   let disposed = false
 
+  const projectAssetUrl = (assetId: string): string => options.resolveAsset?.(assetId) ?? ''
   const assetUrl = (assetKey: string): string => {
+    // A replaced picture shows the managed project asset instead of the package's own.
+    const replaced = Object.hasOwn(options.assetOverrides ?? {}, assetKey) ? projectAssetUrl(options.assetOverrides![assetKey]!.assetId) : ''
+    if (replaced) return replaced
     if ('assets' in source && source.assets) {
       const asset = source.assets[assetKey] as PublishedCourseAsset | { dataUrl?: string } | undefined
       if (asset) {
@@ -418,7 +437,24 @@ export function createPublishedComponentContextResources(
     }
     return ''
   }
-  const projectAssetUrl = (assetId: string): string => options.resolveAsset?.(assetId) ?? ''
+  /** The manifest asset a picture shows, found by its URL. */
+  const assetKeyForUrl = (url: string): string | null => {
+    if (!url) return null
+    const keys = new Set([...Object.keys('assets' in source && source.assets ? source.assets : {}), ...Object.keys(options.assetOverrides ?? {})])
+    for (const key of keys) if (assetUrl(key) === url) return key
+    return null
+  }
+  if (authoringNode && options.authoring) {
+    authoringTargets = new ComponentAuthoringTargetRegistry({
+      manifest,
+      node: authoringNode,
+      scope: options.scope ?? 'scene',
+      ...(options.sceneId ? { sceneId: options.sceneId } : {}),
+      ...(domRoot ? { domRoot } : {}),
+      lightEdit: { ...(domText ? { dom: domText } : {}), assetKeyForUrl },
+      onTargetsChanged: options.authoring.onTargetsChanged,
+    })
+  }
   const emit = (eventName: string, payload?: unknown): void => {
     if (disposed) return
     if (options.emit) {
@@ -484,12 +520,20 @@ export function createPublishedComponentContextResources(
     destroyAuthoringTargets() {
       authoringTargets?.destroy()
     },
+    applyTextOverrides() {
+      try { domText?.applyAll() } catch (error) { console.warn(`组件“${manifest.id}”的文字修改暂不可用`, error) }
+    },
+    setTextOverrides(rules: readonly LightEditTextOverride[]) {
+      try { domText?.setRules(rules) } catch (error) { console.warn(`组件“${manifest.id}”的文字修改暂不可用`, error) }
+      authoringTargets?.invalidate()
+    },
     destroyCapture() {
       captureBarrier.destroy()
     },
     dispose() {
       if (disposed) return
       disposed = true
+      domText?.destroy()
       captureBarrier.destroy()
       eventScope.dispose()
     },
@@ -651,6 +695,7 @@ export function mountPublishedComponent(
   }
 
   const lifecycle = creation.lifecycle
+  resources.applyTextOverrides()
   lifecycle.setMode?.(mode)
   lifecycle.resize?.(options.width, options.height)
   resources.updateAuthoringSize(options.width, options.height)
@@ -711,6 +756,9 @@ export function mountPublishedComponent(
     },
     updateAuthoringNode(node: ComponentHostNode) {
       resources.updateAuthoringNode(node)
+    },
+    setTextOverrides(rules: readonly LightEditTextOverride[]) {
+      resources.setTextOverrides(rules)
     },
     setVisible(visible: boolean) {
       lifecycle.setVisible?.(visible)

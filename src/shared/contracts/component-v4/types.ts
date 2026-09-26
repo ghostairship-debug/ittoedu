@@ -171,7 +171,17 @@ export interface ComponentEditableTextRegion {
   getBounds(): ComponentEditableTextBounds
 }
 
-export type ComponentAuthoringTargetSource = 'registered' | 'dom'
+export type ComponentAuthoringTargetSource = 'registered' | 'dom' | 'auto'
+
+/** M15: an occurrence of text the component renders itself, found by the host (source 'auto'). */
+export interface ComponentAuthoringLightEditText {
+  /** Rendered text before any edit, normalized. */
+  original: string
+  /** Host-computed region of this occurrence. */
+  region: string
+  /** Text shown now: the matching rule's replacement, or `original`. */
+  text: string
+}
 
 /** Explicit component text target measured in the canonical stage space. */
 export interface ComponentAuthoringTextTarget {
@@ -182,12 +192,14 @@ export interface ComponentAuthoringTextTarget {
   sceneId?: string
   nodeId: string
   componentId: string
-  /** Dot-separated path inside the effective component props. */
+  /** Dot-separated path inside the effective component props; empty for text found by the host. */
   key: string
   label: string
   multiline: boolean
   maxLength?: number
   source: ComponentAuthoringTargetSource
+  /** Present on text found by the host: edits become the item's text rules instead of props. */
+  lightEdit?: Readonly<ComponentAuthoringLightEditText>
   /**
    * Stage-space rectangle before rotation. Rotate around its center by
    * `rotation` to obtain the visible target in the 1280 x 720 canvas.
@@ -197,13 +209,30 @@ export interface ComponentAuthoringTextTarget {
   rotation: number
 }
 
+/** M15: a picture of one of the component's manifest assets, found by the host; replacing it overrides that asset. */
+export interface ComponentAuthoringImageTarget {
+  kind: 'component-image'
+  targetId: string
+  scope: ComponentScope
+  sceneId?: string
+  nodeId: string
+  componentId: string
+  /** The manifest asset key the picture shows (after any replacement). */
+  assetKey: string
+  label: string
+  source: 'auto'
+  bounds: Readonly<ComponentEditableTextBounds>
+  rotation: number
+}
+export type ComponentAuthoringTarget = ComponentAuthoringTextTarget | ComponentAuthoringImageTarget
+
 export interface ComponentAuthoringTargetUpdate {
   revision: number
   /** Identifies the component even when cleanup publishes an empty list. */
   scope: ComponentScope
   sceneId?: string
   nodeId: string
-  targets: ReadonlyArray<Readonly<ComponentAuthoringTextTarget>>
+  targets: ReadonlyArray<Readonly<ComponentAuthoringTarget>>
 }
 
 export interface ComponentEditorHost {

@@ -1,4 +1,7 @@
 import type {
+  ComponentAuthoringImageTarget,
+  ComponentAuthoringLightEditText,
+  ComponentAuthoringTarget,
   ComponentAuthoringTargetUpdate,
   ComponentAuthoringTextTarget,
   ComponentEditableTextBounds,
@@ -13,6 +16,12 @@ import {
   mergeComponentProps,
   resolveComponentEditorProperties,
 } from '../shared/componentProps'
+import type { DomTextOverrides } from './lightEdit/domTextOverrides'
+
+const MAX_AUTO_TARGETS = 400
+function autoLabel(text: string): string {
+  return text.length > 24 ? `${text.slice(0, 23)}…` : text
+}
 
 export interface ComponentHostNode {
   id: string
@@ -35,6 +44,12 @@ export interface ComponentAuthoringTargetRegistryOptions {
   scope: ComponentScope
   sceneId?: string
   domRoot?: HTMLElement
+  /** M15: text and pictures the component renders itself, found by the host without any registration. */
+  lightEdit?: {
+    dom?: DomTextOverrides
+    /** The manifest asset a picture's URL shows, if any. */
+    assetKeyForUrl(url: string): string | null
+  }
   onTargetsChanged: ComponentAuthoringTargetsChangedHandler
 }
 
@@ -92,11 +107,20 @@ function sameBounds(
 }
 
 function sameTarget(
-  left: Readonly<ComponentAuthoringTextTarget>,
-  right: Readonly<ComponentAuthoringTextTarget>,
+  left: Readonly<ComponentAuthoringTarget>,
+  right: Readonly<ComponentAuthoringTarget>,
 ): boolean {
+  if (left.kind === 'component-image' || right.kind === 'component-image') {
+    return left.kind === right.kind && left.targetId === right.targetId &&
+      left.nodeId === right.nodeId && left.label === right.label && left.rotation === right.rotation &&
+      (left as ComponentAuthoringImageTarget).assetKey === (right as ComponentAuthoringImageTarget).assetKey &&
+      sameBounds(left.bounds, right.bounds)
+  }
   return left.kind === right.kind &&
     left.targetId === right.targetId &&
+    left.lightEdit?.original === right.lightEdit?.original &&
+    left.lightEdit?.region === right.lightEdit?.region &&
+    left.lightEdit?.text === right.lightEdit?.text &&
     left.scope === right.scope &&
     left.sceneId === right.sceneId &&
     left.nodeId === right.nodeId &&
@@ -111,8 +135,8 @@ function sameTarget(
 }
 
 function sameTargets(
-  left: ReadonlyArray<Readonly<ComponentAuthoringTextTarget>> | null,
-  right: ReadonlyArray<Readonly<ComponentAuthoringTextTarget>>,
+  left: ReadonlyArray<Readonly<ComponentAuthoringTarget>> | null,
+  right: ReadonlyArray<Readonly<ComponentAuthoringTarget>>,
 ): boolean {
   return left !== null &&
     left.length === right.length &&
@@ -152,14 +176,14 @@ function offsetBoundsInsideRoot(
  */
 export class ComponentAuthoringTargetRegistry implements ComponentEditorHost {
   private readonly textRegions = new Map<number, StoredTextRegion>()
-  private readonly domElementIds = new WeakMap<Element, number>()
+  private readonly domElementIds = new WeakMap<Node, number>()
   private mutationObserver: MutationObserver | null = null
   private resizeObserver: ResizeObserver | null = null
   private readonly resizeObservedElements = new Set<Element>()
   private node: ComponentHostNode
   private domRoot: HTMLElement | undefined
   private previousTargets:
-    ReadonlyArray<Readonly<ComponentAuthoringTextTarget>> | null = null
+    ReadonlyArray<Readonly<ComponentAuthoringTarget>> | null = null
   private nextTextRegionId = 1
   private nextDomElementId = 1
   private revision = 0
@@ -238,6 +262,7 @@ export class ComponentAuthoringTargetRegistry implements ComponentEditorHost {
       ? [
           ...this.collectDomTargets(fields),
           ...this.collectRegisteredTargets(fields),
+          ...this.collectAutoTargets(),
         ]
       : [])
     if (sameTargets(this.previousTargets, targets)) return
@@ -246,7 +271,7 @@ export class ComponentAuthoringTargetRegistry implements ComponentEditorHost {
   }
 
   private publish(
-    targets: ReadonlyArray<Readonly<ComponentAuthoringTextTarget>>,
+    targets: ReadonlyArray<Readonly<ComponentAuthoringTarget>>,
   ): void {
     this.revision += 1
     try {
@@ -355,26 +380,68 @@ export class ComponentAuthoringTargetRegistry implements ComponentEditorHost {
     return targets
   }
 
+  /**
+   * Text and pictures the component renders itself (M15): every visible text that is not program-computed and not
+   * already declared, and every picture showing one of the component's manifest assets.
+   */
+  private collectAutoTargets(): ComponentAuthoringTarget[] {
+    const root = this.domRoot, sources = this.options.lightEdit
+    if (!root || !sources) return []
+    const rootRect = root.getBoundingClientRect()
+    const toLocal = (rect: DOMRect): ComponentEditableTextBounds | null => isFinitePositiveRect(rootRect) && isFinitePositiveRect(rect) ? {
+      x: ((rect.left - rootRect.left) / rootRect.width) * this.node.width,
+      y: ((rect.top - rootRect.top) / rootRect.height) * this.node.height,
+      width: (rect.width / rootRect.width) * this.node.width,
+      height: (rect.height / rootRect.height) * this.node.height,
+    } : null
+    const targets: ComponentAuthoringTarget[] = []
+    const range = root.ownerDocument.createRange()
+    for (const sample of sources.dom?.samples() ?? []) {
+      if (targets.length >= MAX_AUTO_TARGETS) break
+      if (sample.root !== root || sample.live) continue
+      // Declared text keeps its own editing path.
+      if (sample.node.parentElement?.closest('[data-courseware-edit-key]')) continue
+      const parent = sample.node.parentElement
+      let local = parent && parent.childNodes.length === 1 ? offsetBoundsInsideRoot(parent, root) : null
+      if (!local) { range.selectNodeContents(sample.node); local = toLocal(range.getBoundingClientRect()) }
+      if (!local || !isFinitePositiveBounds(local)) continue
+      targets.push(this.createTarget(`auto:${this.domElementId(sample.node)}:text`, '', autoLabel(sample.rule?.text || sample.original),
+        sample.original.length > 30, undefined, 'auto', local,
+        { original: sample.original, region: sample.region, text: sample.rule?.text ?? sample.original }))
+    }
+    for (const image of root.querySelectorAll('img')) {
+      if (targets.length >= MAX_AUTO_TARGETS) break
+      const assetKey = sources.assetKeyForUrl(image.getAttribute('src') ?? '') ?? sources.assetKeyForUrl(image.currentSrc || image.src)
+      if (!assetKey) continue
+      const local = offsetBoundsInsideRoot(image, root) ?? toLocal(image.getBoundingClientRect())
+      if (!local || !isFinitePositiveBounds(local)) continue
+      targets.push(Object.freeze({
+        kind: 'component-image' as const,
+        targetId: `auto:${this.domElementId(image)}:image`,
+        scope: this.options.scope,
+        ...(this.options.sceneId ? { sceneId: this.options.sceneId } : {}),
+        nodeId: this.node.id,
+        componentId: this.options.manifest.id,
+        assetKey,
+        label: '图片',
+        source: 'auto' as const,
+        bounds: this.stageBounds(local),
+        rotation: this.node.rotation,
+      }))
+    }
+    return targets
+  }
+
   private createTarget(
     targetId: string,
     key: string,
     label: string,
     multiline: boolean,
     maxLength: number | undefined,
-    source: 'registered' | 'dom',
+    source: ComponentAuthoringTextTarget['source'],
     localBounds: ComponentEditableTextBounds,
+    lightEdit?: ComponentAuthoringLightEditText,
   ): ComponentAuthoringTextTarget {
-    const angle = this.node.rotation * Math.PI / 180
-    const cosine = Math.cos(angle)
-    const sine = Math.sin(angle)
-    const nodeCenterX = this.node.x + this.node.width / 2
-    const nodeCenterY = this.node.y + this.node.height / 2
-    const localCenterX = localBounds.x + localBounds.width / 2
-    const localCenterY = localBounds.y + localBounds.height / 2
-    const deltaX = localCenterX - this.node.width / 2
-    const deltaY = localCenterY - this.node.height / 2
-    const targetCenterX = nodeCenterX + deltaX * cosine - deltaY * sine
-    const targetCenterY = nodeCenterY + deltaX * sine + deltaY * cosine
     return Object.freeze({
       kind: 'component-text',
       targetId,
@@ -387,13 +454,30 @@ export class ComponentAuthoringTargetRegistry implements ComponentEditorHost {
       multiline,
       ...(maxLength !== undefined ? { maxLength } : {}),
       source,
-      bounds: Object.freeze({
-        x: targetCenterX - localBounds.width / 2,
-        y: targetCenterY - localBounds.height / 2,
-        width: localBounds.width,
-        height: localBounds.height,
-      }),
+      ...(lightEdit ? { lightEdit: Object.freeze(lightEdit) } : {}),
+      bounds: this.stageBounds(localBounds),
       rotation: this.node.rotation,
+    })
+  }
+
+  /** A rectangle in the component's local space, placed in the stage around the node's rotated centre. */
+  private stageBounds(localBounds: ComponentEditableTextBounds): Readonly<ComponentEditableTextBounds> {
+    const angle = this.node.rotation * Math.PI / 180
+    const cosine = Math.cos(angle)
+    const sine = Math.sin(angle)
+    const nodeCenterX = this.node.x + this.node.width / 2
+    const nodeCenterY = this.node.y + this.node.height / 2
+    const localCenterX = localBounds.x + localBounds.width / 2
+    const localCenterY = localBounds.y + localBounds.height / 2
+    const deltaX = localCenterX - this.node.width / 2
+    const deltaY = localCenterY - this.node.height / 2
+    const targetCenterX = nodeCenterX + deltaX * cosine - deltaY * sine
+    const targetCenterY = nodeCenterY + deltaX * sine + deltaY * cosine
+    return Object.freeze({
+      x: targetCenterX - localBounds.width / 2,
+      y: targetCenterY - localBounds.height / 2,
+      width: localBounds.width,
+      height: localBounds.height,
     })
   }
 
@@ -437,7 +521,7 @@ export class ComponentAuthoringTargetRegistry implements ComponentEditorHost {
     next.forEach((element) => this.resizeObservedElements.add(element))
   }
 
-  private domElementId(element: Element): number {
+  private domElementId(element: Node): number {
     const existing = this.domElementIds.get(element)
     if (existing !== undefined) return existing
     const id = this.nextDomElementId

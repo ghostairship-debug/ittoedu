@@ -74,6 +74,7 @@ import {
 } from './flowRuntimeToc'
 import {
   mountPublishedComponent,
+  componentLightEditOptions,
   type PublishedComponentMountHandle,
   type PublishedComponentPackageSource,
 } from '../publishedComponentMount'
@@ -1443,6 +1444,7 @@ function renderStaticOverlayItem(
         height: componentItem.frame.height,
         props: componentItem.props,
         staticFallbackAssetId: componentItem.staticFallbackAssetId,
+        ...componentLightEditOptions(componentItem),
         projectId: options?.projectId,
         components: options?.components,
         resolveAsset,

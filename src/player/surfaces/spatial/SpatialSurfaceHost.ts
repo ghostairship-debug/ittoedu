@@ -61,6 +61,7 @@ import {
 } from './spatialPlaybackGestures'
 import {
   mountPublishedComponent,
+  componentLightEditOptions,
   type PublishedComponentMountHandle,
   type PublishedComponentPackageSource,
 } from '../publishedComponentMount'
@@ -269,6 +270,7 @@ function createWorldItem(
         height: frame.height,
         props: item.props,
         staticFallbackAssetId: item.staticFallbackAssetId,
+        ...componentLightEditOptions(item),
         projectId: options?.projectId,
         components: options?.components,
         resolveAsset,
