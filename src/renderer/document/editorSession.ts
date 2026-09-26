@@ -47,6 +47,9 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
   let deferred: LayoutEditorOptions | null = null
   const editorId = crypto.randomUUID()
   let pendingCut: string | null = null
+  let plainPastePending = false
+  let plainPasteTimer: ReturnType<typeof setTimeout> | null = null
+  const clearPlainPaste = () => { plainPastePending = false; if (plainPasteTimer) clearTimeout(plainPasteTimer); plainPasteTimer = null }
   const clipboardType = 'application/x-cw-document-slice'
   const boundary = () => { group = crypto.randomUUID(); lastInput = 0 }
   const view = new EditorView(element, {
@@ -111,8 +114,16 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
       compositionstart: () => { composing = true; return false },
       compositionend: () => { composing = false; queueMicrotask(() => { if (view.isDestroyed) return; publish(); if (deferred) { const next = deferred; deferred = null; update(next) } }); return false },
       blur: () => { boundary(); return false },
+      keyup: (_view, event) => {
+        if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) syncDomTextSelection()
+        return false
+      },
       copy: (_view, event) => clipboard(event, false),
       cut: (_view, event) => clipboard(event, true),
+    },
+    handleKeyDown: (_currentView, event) => {
+      if (event.key === 'Enter') syncDomTextSelection()
+      return false
     },
     handleTextInput: (currentView, from, to, text) => {
       if (options.readOnly) return false
@@ -128,6 +139,13 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
     },
     handlePaste: (_view, event) => {
       boundary()
+      if (plainPastePending) {
+        clearPlainPaste()
+        const text = event.clipboardData?.getData('text/plain') ?? ''
+        event.preventDefault()
+        if (text) view.pasteText(text, new Event('paste') as ClipboardEvent)
+        return true
+      }
       const data = event.clipboardData?.getData(clipboardType)
       if (!data) return false
       try {
@@ -317,7 +335,8 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
     } catch (error) { void prepared?.discard(); options.diagnostic(error instanceof Error ? error.message : String(error)) }
   }
   function syncDomTextSelection() {
-    if (composing || options.readOnly || view.isDestroyed || !view.hasFocus() || view.state.selection instanceof CellSelection) return
+    if (composing || view.composing || options.readOnly || view.isDestroyed || !view.hasFocus() ||
+      view.state.selection instanceof CellSelection || view.state.selection instanceof NodeSelection) return
     const selection = view.dom.ownerDocument.getSelection()
     if (!selection?.anchorNode || !selection.focusNode || !view.dom.contains(selection.anchorNode) || !view.dom.contains(selection.focusNode)) return
     const anchor = view.posAtDOM(selection.anchorNode, selection.anchorOffset)
@@ -377,7 +396,9 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
     }
     if (refreshObjects) view.setProps({ nodeViews: { ...view.props.nodeViews, object: (node, current, getPos) => objectView(node, false, current, getPos), compound: (node, current, getPos) => objectView(node, true, current, getPos) } })
   }
-  return { view, update, boundary, syncDomTextSelection, flush: () => { if (composing) return false; publish(); boundary(); return true }, destroy: () => view.destroy(),
+  return { view, update, boundary, syncDomTextSelection,
+    requestPlainPaste: () => { clearPlainPaste(); plainPastePending = true; plainPasteTimer = setTimeout(clearPlainPaste, 3000); return clearPlainPaste },
+    flush: () => { if (composing) return false; publish(); boundary(); return true }, destroy: () => { clearPlainPaste(); view.destroy() },
     /** Current selection at the current revision, for re-reporting it after a committed edit such as formatting. */
     readSelection: () => describeSelection(view.state) ?? null }
 }

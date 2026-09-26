@@ -10,7 +10,7 @@ import { PaletteButton } from '../editing/color/PaletteButton'
 import type { QuickBarBounds, QuickBarRect } from '../editing/quickbar/placeQuickBar'
 import { QuickBarAiButton, QuickBarButton, QuickBarColorButton, QuickBarPopoverButton, QuickBarSeparator, SelectionQuickBar } from '../editing/quickbar/SelectionQuickBar'
 import { usePointerGesture } from '../editing/quickbar/usePointerGesture'
-import { useContextMenu, type MenuCommand } from '../editing/commands/CommandMenu'
+import { CommandMenuItems, useContextMenu, type MenuCommand } from '../editing/commands/CommandMenu'
 import { createPortal } from 'react-dom'
 import { EditorState as SourceState } from '@codemirror/state'
 import { EditorView as SourceView, keymap as sourceKeymap } from '@codemirror/view'
@@ -23,9 +23,13 @@ import type { TextRunStyle } from '../../shared/contracts/native-v1/types'
 import { createLayoutEditor, DOCUMENT_OBJECT_CONTEXT_MENU_EVENT, type DocumentObjectContextMenuDetail, type DocumentOperation } from './editorSession'
 import { documentBlockMenu, applyDocumentBlockCommand, type DocumentBlockCommand } from './documentBlockCommands'
 import { DocumentBlockHandle, documentBlockDragId } from './DocumentBlockHandle'
+import { documentTableCommandLabels, type DocumentTableCommand } from './documentTableCommands'
+import { changeDocumentTableFromEditorState, resolveDocumentTableEditorTarget } from './documentTableEditorPort'
+import { restoreDocumentTableSelection, type PreviousDocumentTableSelection } from './documentTableSelectionRestore'
 import { fromEditorDocument, toEditorDocument } from './documentAdapter'
 import { documentEditorSchema } from './editorSchema'
 import { NodeSelection, Selection, TextSelection, type EditorState } from 'prosemirror-state'
+import { CellSelection } from 'prosemirror-tables'
 import { toggleMark, setBlockType } from 'prosemirror-commands'
 import { describeDocumentMath, parseDocumentMath } from '../../shared/document/math'
 import { type DocumentBlock } from '../../shared/document/content'
@@ -35,6 +39,14 @@ import 'katex/dist/katex.min.css'
 import { layoutPreviewClipboard, layoutPreviewKey, layoutPreviewPlugin, layoutPreviewRange, sourcePreviewEffect, sourcePreviewExtensions, sourcePreviewRange, type DocumentEditPreview } from './editPreviewWidgets'
 
 const FORMAT_FLAGS = ['bold', 'italic', 'underline', 'strike', 'emphasis'] as const
+
+function findDocumentBlock(blocks: readonly DocumentBlock[], id: string): DocumentBlock | null {
+  for (const block of blocks) {
+    if (block.id === id) return block
+    if (block.type === 'section') { const nested = findDocumentBlock(block.blocks, id); if (nested) return nested }
+  }
+  return null
+}
 
 function visibleEditorBounds(editor: HTMLElement): { left: number; right: number; top: number; bottom: number } {
   const bounds = editor.getBoundingClientRect()
@@ -235,7 +247,13 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
   function publishLayoutSelection(selection: DocumentSelection | null, notifyOwner = true) {
     if (notifyOwner) latest.current.onSelection?.(selection)
     if (!selection) { publishContextualTarget(null); return }
-    if (selection.kind === 'text' && JSON.stringify(selection.anchor.slot) === JSON.stringify(selection.head.slot) && selection.anchor.blockId === selection.head.blockId && selection.anchor.offset === selection.head.offset) { publishContextualTarget(null); return }
+    if (selection.kind === 'text' && JSON.stringify(selection.anchor.slot) === JSON.stringify(selection.head.slot) && selection.anchor.blockId === selection.head.blockId && selection.anchor.offset === selection.head.offset) {
+      const table = layout.current && resolveDocumentTableEditorTarget(layout.current.view.state)
+      if (table) publishContextualTarget({ selection, ranges: null, revision: latest.current.revision, mode: 'layout', source: draft.current,
+        label: '表格', message: '请选择表格中的文字后再交给 AI 修改' })
+      else publishContextualTarget(null)
+      return
+    }
     const mapped = mapDocumentSelectionToSource(draft.current, mapRef.current, selection)
     const ranges = mapped.status === 'mapped' ? mapped.ranges : null
     const blockId = selection.kind === 'cells' ? selection.tableId : selection.kind === 'object' ? selection.blockId : selection.head.blockId
@@ -281,7 +299,7 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
     window.addEventListener('scroll', reposition, true); window.addEventListener('resize', reposition)
     return () => { window.removeEventListener('scroll', reposition, true); window.removeEventListener('resize', reposition) }
   }, [mode])
-  function applyDocumentContent(content: ReturnType<typeof fromEditorDocument>) {
+  function applyDocumentContent(content: ReturnType<typeof fromEditorDocument>, tableSelection?: PreviousDocumentTableSelection) {
     const editor = layout.current
     if (!editor || latest.current.readOnly) return
     const view = editor.view
@@ -290,7 +308,8 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
       const selected = activeBlock?.id
       editor.boundary()
       const transaction = view.state.tr.replaceWith(0, view.state.doc.content.size, replacement.content)
-      if (selected) {
+      if (tableSelection) restoreDocumentTableSelection(transaction, tableSelection, content)
+      else if (selected) {
         let at = -1
         transaction.doc.descendants((node, position) => { if (at < 0 && node.attrs.id === selected) at = position; return at < 0 })
         if (at >= 0) transaction.setSelection(Selection.near(transaction.doc.resolve(Math.min(at + 1, transaction.doc.content.size))))
@@ -312,6 +331,77 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
         editor.view.focus()
       } : undefined,
       disabledReason: latest.current.editPreview ? '正在生成的范围暂时只读' : null })
+  }
+  function clipboardMenu(): MenuCommand[] {
+    const editor = layout.current
+    if (!editor || latest.current.readOnly) return []
+    const hasSelection = !editor.view.state.selection.empty
+    const bridge = window.desktopAPI?.editorClipboard
+    const run = async (command: 'copy' | 'cut' | 'paste' | 'paste-plain') => {
+      const current = layout.current
+      if (!current || !bridge) { fail('当前环境无法使用系统剪贴板'); return }
+      current.syncDomTextSelection()
+      if (command !== 'copy') current.boundary()
+      current.view.focus()
+      const cancelPlain = command === 'paste-plain' ? current.requestPlainPaste() : null
+      try { await bridge(command) }
+      catch (error) { cancelPlain?.(); fail(error instanceof Error ? error.message : String(error)) }
+    }
+    const unavailable = bridge ? undefined : '当前环境无法使用系统剪贴板'
+    return ([['cut', '剪切'], ['copy', '复制'], ['paste', '粘贴'], ['paste-plain', '粘贴为纯文本']] as const).map(([id, label]) => ({
+      id: `clipboard-${id}`, label, group: '剪贴板',
+      disabledReason: latest.current.editPreview ? '正在生成的范围暂时只读' : unavailable ??
+        ((id === 'cut' || id === 'copy') && !hasSelection ? '请先选择文字或对象' : undefined),
+      run: () => { void run(id) },
+    }))
+  }
+  function activeTableMenu(): MenuCommand[] {
+    const editor = layout.current
+    if (!editor || latest.current.readOnly) return []
+    const state = editor.view.state, target = resolveDocumentTableEditorTarget(state)
+    if (!target) return []
+    const content = fromEditorDocument(state.doc)
+    const table = findDocumentBlock(content.blocks, target.tableId)
+    if (table?.type !== 'table') return []
+    const row = target.anchor?.kind === 'cell' ? target.anchor.cell.rowId : null
+    const column = target.anchor?.kind === 'cell' ? target.anchor.cell.columnId : target.anchor?.kind === 'header' ? target.anchor.columnId : null
+    const run = (command: DocumentTableCommand | 'toggle-header' | 'delete-table') => {
+      const current = layout.current
+      if (!current) return
+      try {
+        if (command === 'delete-table') {
+          const content = fromEditorDocument(current.view.state.doc)
+          applyDocumentContent(applyDocumentBlockCommand(content, { action: 'delete', blockId: target.tableId }))
+        } else {
+          const state = current.view.state
+          const selected = resolveDocumentTableEditorTarget(state)
+          if (!selected || selected.tableId !== target.tableId) throw new Error('表格选区已变化，请重新选择')
+          const previousTable = findDocumentBlock(fromEditorDocument(state.doc).blocks, target.tableId)
+          if (previousTable?.type !== 'table') throw new Error('表格已变化，请重新选择')
+          const next = changeDocumentTableFromEditorState(state, command, () => crypto.randomUUID())
+          applyDocumentContent(next, { ...selected, previousTable, wasCellSelection: state.selection instanceof CellSelection })
+        }
+      } catch (error) { fail(error instanceof Error ? error.message : String(error)) }
+    }
+    const disabled = (command: DocumentTableCommand): string | undefined => {
+      if (!target.anchor || !column) return '请先选择单元格'
+      if (command === 'insert-column-left' || command === 'insert-column-right') return undefined
+      if (command === 'delete-column') return table.columns.length <= 1 ? '至少保留一列' : undefined
+      if (!row) return '请选择表格数据行'
+      if (command === 'delete-row') return table.rows.length <= 1 ? '至少保留一行' : undefined
+      if (command === 'merge-cells') return target.head?.kind !== 'cell' ||
+        target.head.cell.rowId === row && target.head.cell.columnId === column ? '请选择多个单元格' : undefined
+      if (command === 'split-cell') return table.merges?.some(merge => merge.rowIds.includes(row) && merge.columnIds.includes(column)) ? undefined : '当前单元格未合并'
+      return undefined
+    }
+    const items = (Object.keys(documentTableCommandLabels) as DocumentTableCommand[]).map(command => ({
+      id: `table-${command}`, label: documentTableCommandLabels[command], group: '表格',
+      disabledReason: latest.current.editPreview ? '正在生成的范围暂时只读' : disabled(command), run: () => run(command),
+    }))
+    return [...items, { id: 'table-toggle-header', label: table.headerEnabled === false ? '开启表头' : '关闭表头', group: '表格',
+      disabledReason: latest.current.editPreview ? '正在生成的范围暂时只读' : null, run: () => run('toggle-header') },
+    { id: 'table-delete', label: '删除表格', group: '表格', danger: true,
+      disabledReason: latest.current.editPreview ? '正在生成的范围暂时只读' : null, run: () => run('delete-table') }]
   }
   const options = () => ({ presentation: latest.current.target === 'flow' ? 'flow' as const : undefined, stateChanged: (state: EditorState) => { setFormat(readDocumentFormatting(state)); updateActiveBlock(state) }, requestMathDraft: (request: { from: number; to: number; display: true; latex: ''; formulaId: string }) => setMathDraft({ ...request, accessibleText: '' }), document: projection.current.document, sourceMap: mapRef.current, revision: latest.current.revision,
     projectionPlugins: [previewPlugin, pinPlugin], projectionClipboard: (view: Parameters<typeof layoutPreviewClipboard>[0], event: ClipboardEvent, cut: boolean) => {
@@ -603,6 +693,7 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
     ? { ...contextualTarget.selection, revision: undefined }
     : { mode: contextualTarget.mode, ranges: contextualTarget.ranges?.map(range => [range.from, range.to]) }) : ''
   const hostAiButton = contextualTarget ? props.renderAiButton?.(contextualTarget, quickBarIssue) : undefined
+  const tableTools = contextualTarget && mode === 'layout' ? activeTableMenu() : []
   const textTools = contextualTarget && mode === 'layout' && contextualTarget.selection?.kind === 'text'
     && contextualTarget.selection.head.slot.kind !== 'cell' && contextualTarget.selection.head.slot.kind !== 'header'
   const quickBar = contextualTarget && !props.readOnly && !props.contextualCardSuppressed && quickBarPlace
@@ -644,6 +735,11 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
         </QuickBarPopoverButton>
         <QuickBarSeparator />
       </>}
+      {tableTools.length > 0 && <QuickBarPopoverButton label="表格操作" text="表格操作" popupRole="menu">
+        {close => <div className="selection-quick-bar__menu" role="menu" aria-label="表格操作">
+          <CommandMenuItems items={tableTools} onRun={command => { close(); command.run() }} />
+        </div>}
+      </QuickBarPopoverButton>}
       {props.renderQuickBarActions?.(contextualTarget)}
       {hostAiButton !== undefined ? hostAiButton : props.onContextualCommand && <QuickBarAiButton targetLabel={contextualTarget.label} disabledReason={quickBarIssue}
         instruction={contextualInstruction} onInstructionChange={value => { instructionRef.current = value; setContextualInstruction(value) }}
@@ -670,10 +766,22 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
       const target = (event.target as HTMLElement).closest<HTMLElement>('[data-flow-block-id]')
       const id = target?.dataset.flowBlockId
       if (!id || !layout.current) return
-      const block = fromEditorDocument(layout.current.view.state.doc).blocks.find(item => item.id === id)
-      if (!block || ['table', 'media', 'chart', 'component', 'formula'].includes(block.type)) return
+      layout.current.syncDomTextSelection()
+      const block = findDocumentBlock(fromEditorDocument(layout.current.view.state.doc).blocks, id)
+      if (!block) return
+      if (block.type === 'table') {
+        event.preventDefault()
+        const view = layout.current.view, selected = resolveDocumentTableEditorTarget(view.state)
+        if (selected?.tableId !== id) {
+          const hit = view.posAtCoords({ left: event.clientX, top: event.clientY })
+          if (hit) view.dispatch(view.state.tr.setSelection(TextSelection.near(view.state.doc.resolve(hit.pos))))
+        }
+        openObjectMenu({ x: event.clientX, y: event.clientY }, '表格操作', [...activeTableMenu(), ...clipboardMenu()])
+        return
+      }
+      if (['media', 'chart', 'component', 'formula'].includes(block.type)) return
       event.preventDefault()
-      openObjectMenu({ x: event.clientX, y: event.clientY }, '段落操作', activeBlockMenu(id))
+      openObjectMenu({ x: event.clientX, y: event.clientY }, '段落操作', [...activeBlockMenu(id), ...clipboardMenu()])
     }}
     className={`shared-document-editor${props.target === 'flow' ? ' shared-document-editor--flow' : ''}`} onKeyDown={event => {
     if (event.key === 'Escape' && contextualTarget) { event.preventDefault(); setDismissedGeneration(targetGeneration) }
