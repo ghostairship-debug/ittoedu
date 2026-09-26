@@ -1,11 +1,13 @@
-import { expect, test, type Page } from '@playwright/test'
+import { expect, test, type Locator, type Page } from '@playwright/test'
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { spawn } from 'node:child_process'
+import { createInterface } from 'node:readline'
 import { join, resolve } from 'node:path'
 import { CourseV9Driver } from '../../src/core/drivers/CourseV9Driver'
 import { createBlankCourseProject } from '../../src/core/course/createCourseProject'
 import { createBlankFlowSurface } from '../../src/core/tools/flowDocumentModel'
 import { courseProjectDocumentSchema } from '../../src/shared/courseProjectSchema'
-import { parseDocumentMarkdown } from '../../src/shared/document/markdown'
+import { parseDocumentMarkdown, serializeDocumentMarkdown } from '../../src/shared/document/markdown'
 import type { DocumentBlock } from '../../src/shared/document/content'
 import { closeSelectionApp, finishRound, heldRound, launchSelectionApp, openSelectionFile, readSelectionDocument,
   selectVisibleText, selectionServer, setupSelectionUI } from './helpers/g20SelectionHarness'
@@ -38,6 +40,16 @@ function fixture() {
   writeFileSync(join(workspace, '正文验收.h5lesson'), driver.serialize({ kind: 'course-v9', project,
     resources: { assets: {}, components: {} } }))
   writeFileSync(join(workspace, '正文验收.md'), initial)
+  const objectParagraph: DocumentBlock = { id: 'm16-first', type: 'paragraph', content: { inlines: [
+    { type: 'text', text: '甲段：先预测' }, { type: 'math', formulaId: 'm16-math', latex: 'x', accessibleText: '公式x' },
+    { type: 'text', text: '，再观察。' },
+  ] } }
+  const objectBlocks = [flow.surface.blocks[0]!, objectParagraph, flow.surface.blocks[2]!]
+  const objectProject = courseProjectDocumentSchema.parse({ ...project, surfaces: [{ ...flow.surface, blocks: objectBlocks }] })
+  writeFileSync(join(workspace, '剪贴板对象.h5lesson'), driver.serialize({ kind: 'course-v9', project: objectProject,
+    resources: { assets: {}, components: {} } }))
+  writeFileSync(join(workspace, '剪贴板对象.md'), serializeDocumentMarkdown({ content: { blocks: objectBlocks.slice(1) },
+    resources: { assets: [], components: [] } }, 'file'))
   const tableSource = '| 甲 | 乙 |\n| --- | --- |\n| 丙 | 丁 |\n'
   const parsedTable = parseDocumentMarkdown(tableSource, { target: 'flow', createId: () => crypto.randomUUID() })
   if (parsedTable.status !== 'valid') throw new Error(`Table fixture invalid: ${JSON.stringify(parsedTable.diagnostics)}`)
@@ -66,6 +78,63 @@ async function blocks(page: Page, documentId: string): Promise<DocumentBlock[]> 
   return parsed.document.content.blocks
 }
 
+function secondParagraph(body: Locator, carrier: Carrier) {
+  return carrier === 'flow' ? body.locator('[data-flow-block-id="m16-second"]')
+    : body.locator('p').filter({ hasText: '乙段：保持原样。' }).last()
+}
+
+function firstParagraph(body: Locator, carrier: Carrier) {
+  return carrier === 'flow' ? body.locator('[data-flow-block-id="m16-first"]')
+    : body.locator('p').filter({ hasText: '甲段：先预测' }).first()
+}
+
+async function selectAcrossInline(page: Page, body: Locator, fromText: string, toText: string) {
+  const points = await body.evaluate((root, texts) => {
+    const bounds = (text: string, end: boolean) => {
+      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
+      let node: Node | null
+      while ((node = walker.nextNode())) {
+        const index = (node.textContent ?? '').indexOf(text)
+        if (index < 0) continue
+        const range = document.createRange(), offset = index + (end ? text.length - 1 : 0)
+        range.setStart(node, offset); range.setEnd(node, offset + 1)
+        const rect = range.getBoundingClientRect()
+        return { x: end ? rect.right - 0.1 : rect.left + 0.1, y: rect.top + rect.height / 2 }
+      }
+      throw new Error(`Text ${text} not rendered`)
+    }
+    return { from: bounds(texts.fromText, false), to: bounds(texts.toText, true) }
+  }, { fromText, toText })
+  await page.mouse.move(points.from.x, points.from.y)
+  await page.mouse.down()
+  await page.mouse.move(points.to.x, points.to.y, { steps: 12 })
+  await page.mouse.up()
+  await expect.poll(() => page.evaluate(() => window.getSelection()?.toString())).toContain(fromText)
+  await expect.poll(() => page.evaluate(() => window.getSelection()?.toString())).toContain(toText)
+}
+
+async function preserveClipboard() {
+  const helper = join(root, 'tests/e2e/helpers/g20ClipboardFixture.ps1')
+  const child = spawn('powershell.exe', ['-NoProfile', '-STA', '-ExecutionPolicy', 'Bypass', '-File', helper],
+    { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] })
+  const lines: string[] = [], waiting: Array<(line: string) => void> = []
+  let stderr = ''
+  child.stderr.on('data', value => { stderr += value.toString() })
+  createInterface({ input: child.stdout }).on('line', line => { const next = waiting.shift(); if (next) next(line); else lines.push(line) })
+  const next = () => new Promise<string>((resolveLine, reject) => {
+    if (lines.length) return resolveLine(lines.shift()!)
+    const timer = setTimeout(() => reject(new Error(`Clipboard helper timed out: ${stderr}`)), 15_000)
+    waiting.push(line => { clearTimeout(timer); resolveLine(line) })
+  })
+  expect(JSON.parse(await next())).toEqual({ ready: true })
+  return async () => {
+    const exited = new Promise<number | null>(resolveExit => child.once('exit', resolveExit))
+    child.stdin.end()
+    expect(JSON.parse(await next())).toEqual({ restored: true })
+    expect(await exited, stderr).toBe(0)
+  }
+}
+
 async function bodyFor(page: Page, carrier: Carrier, name: string) {
   const root = carrier === 'flow' ? page.locator('.flow-workspace').filter({ visible: true }).first()
     : page.getByRole('region', { name: `教学文档 ${name}`, exact: true })
@@ -88,8 +157,9 @@ for (const carrier of ['flow', 'markdown'] as const) {
           const opened = await openSelectionFile(page, data.workspace, name)
           const body = await bodyFor(page, carrier, name)
           const before = await blocks(page, opened.documentId)
-          const last = body.getByText('乙段：保持原样。', { exact: false }).first()
-          await last.scrollIntoViewIfNeeded()
+          if (carrier === 'flow') expect(before.some(block => block.id === 'm16-second')).toBe(true)
+          const last = secondParagraph(body, carrier)
+          await expect(last).toBeVisible()
           await last.click()
           await page.keyboard.press('End')
           await page.keyboard.press('Enter')
@@ -117,7 +187,7 @@ for (const carrier of ['flow', 'markdown'] as const) {
       const opened = await openSelectionFile(page, data.workspace, name)
       const body = await bodyFor(page, carrier, name)
       const stable = await blocks(page, opened.documentId)
-      const last = body.getByText('乙段：保持原样。', { exact: false }).first()
+      const last = secondParagraph(body, carrier)
       await last.click(); await page.keyboard.press('End')
       await body.evaluate(element => element.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true, data: '' })))
       await page.keyboard.insertText('中文输入')
@@ -141,7 +211,7 @@ for (const carrier of ['flow', 'markdown'] as const) {
       await setupSelectionUI(app, page, server.endpoint, data.workspace)
       const opened = await openSelectionFile(page, data.workspace, carrier === 'flow' ? '正文验收.h5lesson' : '正文验收.md')
       const body = await bodyFor(page, carrier, carrier === 'flow' ? '正文验收.h5lesson' : '正文验收.md')
-      await body.getByText('乙段：保持原样。', { exact: false }).first().click()
+      await secondParagraph(body, carrier).click()
       const handle = page.locator('.document-block-handle')
       await expect(handle).toBeVisible()
       const id = await handle.getAttribute('data-block-id')
@@ -160,36 +230,36 @@ for (const carrier of ['flow', 'markdown'] as const) {
       await expect.poll(async () => (await blocks(page, opened.documentId)).length).toBe(baselineCount + 1)
       await body.press('Control+z')
       await expect.poll(async () => (await blocks(page, opened.documentId)).length).toBe(baselineCount)
-      await body.getByText('乙段：保持原样。', { exact: false }).first().click()
+      await secondParagraph(body, carrier).click()
       await handle.getByRole('button', { name: '插入段落' }).click()
       await page.getByRole('menu', { name: '插入段落' }).getByRole('menuitem', { name: '上方插入段落' }).click()
       await expect.poll(async () => (await blocks(page, opened.documentId)).length).toBe(baselineCount + 1)
       await body.press('Control+z')
       await expect.poll(async () => (await blocks(page, opened.documentId)).length).toBe(baselineCount)
-      await body.getByText('乙段：保持原样。', { exact: false }).first().click()
+      await secondParagraph(body, carrier).click()
       await handle.getByRole('button', { name: '段落操作' }).click()
       await page.getByRole('menu', { name: '段落操作' }).getByRole('menuitem', { name: '转换为标题' }).click()
       await expect.poll(async () => (await blocks(page, opened.documentId)).find(block => JSON.stringify(block).includes('乙段：保持原样。'))?.type).toBe('heading')
       await body.press('Control+z')
       await expect.poll(async () => (await blocks(page, opened.documentId)).find(block => JSON.stringify(block).includes('乙段：保持原样。'))?.type).toBe('paragraph')
-      await body.getByText('乙段：保持原样。', { exact: false }).first().click()
+      await secondParagraph(body, carrier).click()
       await handle.getByRole('button', { name: '段落操作' }).click()
       await page.getByRole('menu', { name: '段落操作' }).getByRole('menuitem', { name: '上移段落' }).click()
       await expect.poll(async () => (await blocks(page, opened.documentId)).findIndex(block => JSON.stringify(block).includes('乙段：保持原样。'))).toBe(carrier === 'flow' ? 1 : 0)
       await body.press('Control+z')
       await expect.poll(async () => (await blocks(page, opened.documentId)).findIndex(block => JSON.stringify(block).includes('乙段：保持原样。'))).toBe(carrier === 'flow' ? 2 : 1)
-      await body.getByText('乙段：保持原样。', { exact: false }).first().click()
+      await secondParagraph(body, carrier).click()
       await handle.getByRole('button', { name: '段落操作' }).dragTo(body.locator('[data-flow-block-id]').first())
       await expect.poll(async () => (await blocks(page, opened.documentId)).findIndex(block => JSON.stringify(block).includes('乙段：保持原样。'))).toBe(0)
       await body.press('Control+z')
       await expect.poll(async () => (await blocks(page, opened.documentId)).findIndex(block => JSON.stringify(block).includes('乙段：保持原样。'))).toBe(carrier === 'flow' ? 2 : 1)
-      await body.getByText('乙段：保持原样。', { exact: false }).first().click()
+      await secondParagraph(body, carrier).click()
       await handle.getByRole('button', { name: '段落操作' }).click()
       await page.getByRole('menu', { name: '段落操作' }).getByRole('menuitem', { name: '删除段落' }).click()
       await expect.poll(async () => (await blocks(page, opened.documentId)).length).toBe(baselineCount - 1)
       await body.press('Control+z')
       await expect.poll(async () => (await blocks(page, opened.documentId)).length).toBe(baselineCount)
-      await body.getByText('乙段：保持原样。', { exact: false }).first().click()
+      await secondParagraph(body, carrier).click()
       await page.keyboard.press('End')
       await page.keyboard.press('Enter')
       await expect(handle).toBeVisible()
@@ -276,5 +346,106 @@ for (const carrier of ['flow', 'markdown'] as const) {
       await body.press('Control+z')
       await expect.poll(rowCount).toBe(initialRows)
     } finally { await closeSelectionApp(app); await server.close() }
+  })
+
+  test(`M16-T05 ${carrier}: clipboard menu and native rich/plain paste preserve formal content`, async () => {
+    test.setTimeout(150_000)
+    const data = fixture(), server = await selectionServer(), app = await launchSelectionApp(data.directory)
+    const page = await app.firstWindow(), restoreClipboard = await preserveClipboard()
+    try {
+      await setupSelectionUI(app, page, server.endpoint, data.workspace)
+      const name = carrier === 'flow' ? '正文验收.h5lesson' : '正文验收.md'
+      const opened = await openSelectionFile(page, data.workspace, name)
+      const body = await bodyFor(page, carrier, name)
+      const formal = async () => {
+        const snapshot = await readSelectionDocument(page, opened.documentId)
+        if (snapshot.model.kind === 'markdown') return snapshot.model.source
+        if (snapshot.model.kind === 'course-v9') return JSON.stringify(snapshot.model.project.surfaces.find(surface => surface.type === 'flow')?.blocks)
+        throw new Error(`Unexpected document kind ${snapshot.model.kind}`)
+      }
+      const inlines = async () => {
+        const block = (await blocks(page, opened.documentId)).find(item => item.type === 'paragraph' && JSON.stringify(item).includes('甲段：'))
+        if (!block || block.type !== 'paragraph') throw new Error('First formal paragraph missing')
+        return block.content.inlines
+      }
+      const visibleText = async () => (await inlines()).map(item => item.type === 'text' ? item.text : '').join('')
+      await selectVisibleText(page, body, '先预测')
+      await firstParagraph(body, carrier).click({ button: 'right' })
+      const context = page.getByRole('menu', { name: '段落操作' })
+      for (const label of ['剪切', '复制', '粘贴', '粘贴为纯文本'])
+        await expect(context.getByRole('menuitem', { name: label, exact: true })).toBeVisible()
+      await page.keyboard.press('Escape')
+      await selectVisibleText(page, body, '先预测')
+      await page.getByRole('toolbar', { name: '选中内容快捷工具' }).getByRole('button', { name: '当前选区加粗' }).click()
+      await expect.poll(async () => JSON.stringify(await inlines())).toContain('"bold":true')
+      const boldState = await formal()
+      await selectVisibleText(page, body, '先预测')
+      await body.press('Control+c')
+      const copied = await app.evaluate(({ clipboard }) => ({ text: clipboard.readText(),
+        custom: clipboard.readBuffer('application/x-cw-document-slice').toString('utf8'), formats: clipboard.availableFormats() }))
+      expect(copied.text).toBe('先预测')
+      expect(copied.formats).toContain('application/x-cw-document-slice')
+      expect(JSON.parse(copied.custom.replace(/\0+$/, ''))).toMatchObject({ slice: expect.any(Object), resources: { assets: [], components: [] } })
+      expect(await formal()).toBe(boldState)
+      await selectVisibleText(page, body, '再观察')
+      await body.press('Control+v')
+      await expect.poll(visibleText).toBe('甲段：先预测，先预测。')
+      await expect.poll(async () => (await inlines()).filter(item => item.type === 'text' && item.text.includes('先预测') && item.style?.bold).length).toBe(2)
+      await body.press('Control+z')
+      await expect.poll(formal).toBe(boldState)
+      await selectVisibleText(page, body, '先预测')
+      await body.press('Control+x')
+      await expect.poll(visibleText).toBe('甲段：，再观察。')
+      await expect.poll(async () => (await app.evaluate(({ clipboard }) => clipboard.readText()))).toBe('先预测')
+      await body.press('Control+z')
+      await expect.poll(formal).toBe(boldState)
+      await selectVisibleText(page, body, '再观察')
+      await firstParagraph(body, carrier).click({ button: 'right' })
+      await page.getByRole('menu', { name: '段落操作' }).getByRole('menuitem', { name: '粘贴为纯文本' }).click()
+      await expect.poll(visibleText).toBe('甲段：先预测，先预测。')
+      const plain = await inlines()
+      expect(plain.some(item => item.type === 'text' && item.text.includes('先预测') && !item.style?.bold)).toBe(true)
+      const plainState = await formal()
+      await body.press('Control+z')
+      await expect.poll(formal).toBe(boldState)
+      await body.press('Control+Shift+z')
+      await expect.poll(formal).toBe(plainState)
+      await body.press('Control+z')
+      await expect.poll(formal).toBe(boldState)
+      const objectName = `剪贴板对象.${carrier === 'flow' ? 'h5lesson' : 'md'}`
+      const objectOpened = await openSelectionFile(page, data.workspace, objectName)
+      const objectBody = await bodyFor(page, carrier, objectName)
+      const objectFormal = async () => {
+        const snapshot = await readSelectionDocument(page, objectOpened.documentId)
+        if (snapshot.model.kind === 'markdown') return snapshot.model.source
+        if (snapshot.model.kind === 'course-v9') return JSON.stringify(snapshot.model.project.surfaces.find(surface => surface.type === 'flow')?.blocks)
+        throw new Error(`Unexpected document kind ${snapshot.model.kind}`)
+      }
+      const objectBefore = await objectFormal()
+      await expect(firstParagraph(objectBody, carrier)).toBeVisible()
+      await selectAcrossInline(page, objectBody, '先预测', '再观察')
+      await objectBody.press('Control+c')
+      const objectClipboard = await app.evaluate(({ clipboard }) => ({ text: clipboard.readText(),
+        custom: clipboard.readBuffer('application/x-cw-document-slice').toString('utf8') }))
+      expect(objectClipboard.text).toContain('先预测')
+      expect(objectClipboard.text).toContain('再观察')
+      expect(JSON.stringify(JSON.parse(objectClipboard.custom.replace(/\0+$/, '')))).toContain('"math"')
+      await selectVisibleText(page, objectBody, '保持原样')
+      await secondParagraph(objectBody, carrier).click({ button: 'right' })
+      await page.getByRole('menu', { name: '段落操作' }).getByRole('menuitem', { name: '粘贴为纯文本' }).click()
+      const targetParagraph = async () => {
+        const entry = (await blocks(page, objectOpened.documentId)).find(item => item.type === 'paragraph' && JSON.stringify(item).includes('乙段：'))
+        if (!entry || entry.type !== 'paragraph') throw new Error('Paste target paragraph missing')
+        return entry.content.inlines
+      }
+      await expect.poll(async () => (await targetParagraph()).map(item => item.type === 'text' ? item.text : '').join(''))
+        .toBe(`乙段：${objectClipboard.text}。`)
+      expect((await targetParagraph()).some(item => item.type === 'math')).toBe(false)
+      const objectPasted = await objectFormal()
+      await objectBody.press('Control+z')
+      await expect.poll(objectFormal).toBe(objectBefore)
+      await objectBody.press('Control+Shift+z')
+      await expect.poll(objectFormal).toBe(objectPasted)
+    } finally { try { await restoreClipboard() } finally { await closeSelectionApp(app); await server.close() } }
   })
 }
