@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { EditorState, TextSelection } from 'prosemirror-state'
+import { EditorState, NodeSelection, TextSelection } from 'prosemirror-state'
 import { CellSelection } from 'prosemirror-tables'
 import { changeDocumentTableFromEditorState, resolveDocumentTableEditorTarget } from '../../src/renderer/document/documentTableEditorPort'
 import { fromEditorDocument, toEditorDocument } from '../../src/renderer/document/documentAdapter'
@@ -64,6 +64,20 @@ describe('M16 table editor port', () => {
     const inserted = changeDocumentTableFromEditorState(stateAt(disabled, 'column:a'), 'insert-column-right', () => 'new')
     expect(table(inserted).columns.map(column => column.id)).toEqual(['a', 'col-new', 'b'])
     expect(table(inserted).columns[0]!.header).toEqual(text('Alpha'))
+    expect(() => changeDocumentTableFromEditorState(stateAt(disabled, 'column:a'), 'insert-row-above')).toThrow('请选择表格数据行')
+  })
+
+  it('resolves a whole-table node selection without inventing a cell or row identity', () => {
+    const original = content()
+    const doc = toEditorDocument(original)
+    let tablePosition = -1
+    doc.descendants((node, position) => { if (node.attrs.id === 'table-1') tablePosition = position })
+    const state = EditorState.create({ doc, selection: NodeSelection.create(doc, tablePosition) })
+    expect(resolveDocumentTableEditorTarget(state)).toEqual({ tableId: 'table-1', tablePosition, anchor: null, head: null })
+    const disabled = changeDocumentTableFromEditorState(state, 'toggle-header')
+    expect(table(disabled).headerEnabled).toBe(false)
+    expect(table(disabled).columns.map(column => column.header)).toEqual(table(original).columns.map(column => column.header))
+    expect(() => changeDocumentTableFromEditorState(state, 'insert-row-above')).toThrow('请选择表格单元格')
   })
 
   it('handles caret in a cell and rejects a selection outside a table', () => {

@@ -1,4 +1,4 @@
-import type { EditorState } from 'prosemirror-state'
+import { NodeSelection, type EditorState } from 'prosemirror-state'
 import type { ResolvedPos } from 'prosemirror-model'
 import { fromEditorDocument } from './documentAdapter'
 import { changeDocumentTable, type DocumentTableCell, type DocumentTableCommand, type DocumentTableSelection } from './documentTableCommands'
@@ -51,6 +51,9 @@ function slotAt(position: ResolvedPos): DocumentTableEditorTarget['anchor'] {
 
 export function resolveDocumentTableEditorTarget(state: EditorState): DocumentTableEditorTarget | null {
   const { selection } = state
+  if (selection instanceof NodeSelection && selection.node.type.name === 'table_container') {
+    return { tableId: selection.node.attrs.id as string, tablePosition: selection.from, anchor: null, head: null }
+  }
   const anchorPos = '$anchorCell' in selection ? selection.$anchorCell as ResolvedPos : selection.$anchor
   const headPos = '$headCell' in selection ? selection.$headCell as ResolvedPos : selection.$head
   const anchorTable = tableAt(anchorPos) ?? (state.doc.nodeAt(selection.from)?.type.name === 'table_container'
