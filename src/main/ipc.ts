@@ -847,6 +847,30 @@ export function registerIpcHandlers(context: IpcContext): void {
   )
 
   registerSafeHandler(
+    IPC_CHANNELS.editorClipboard,
+    context,
+    {
+      code: 'EDITOR_CLIPBOARD_FAILED',
+      title: '编辑命令失败',
+      message: '剪贴板操作未完成。',
+      suggestion: '请聚焦主编辑窗口后重试。',
+    },
+    (event, args) => {
+      const command = z.enum(['cut', 'copy', 'paste', 'paste-plain']).parse(requireSingleArgument(args))
+      const window = requireWindow(context)
+      if (event.sender !== window.webContents || !window.isFocused() || !event.sender.isFocused()) {
+        throw new Error('主编辑窗口未获得焦点。')
+      }
+      switch (command) {
+        case 'cut': event.sender.cut(); break
+        case 'copy': event.sender.copy(); break
+        case 'paste': event.sender.paste(); break
+        case 'paste-plain': event.sender.pasteAndMatchStyle(); break
+      }
+    },
+  )
+
+  registerSafeHandler(
     IPC_CHANNELS.reportDiagnostic,
     context,
     {
