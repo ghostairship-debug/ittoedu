@@ -560,7 +560,9 @@ function renderPrintNode(
           }`
         }
       }
-      const reason = `${node.mediaKind} media exported as a descriptive fallback`
+      const reason = node.mediaKind === 'image' && node.crop
+        ? 'image crop could not be represented in DOCX; media exported as a descriptive fallback'
+        : `${node.mediaKind} media exported as a descriptive fallback`
       context.warnings.push(`${node.blockId}: ${reason}`)
       context.report.push({ blockId: node.blockId, disposition: 'fallback', detail: reason })
       return `${paragraph(`[媒体后备：${node.fallbackLabel}]`, { italic: true, leadingContent })}${node.caption ? paragraph(node.caption, { style: 'Caption' }) : ''}`
