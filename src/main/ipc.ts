@@ -262,6 +262,7 @@ function registerSafeHandler<T>(
 
 let stopWorkspaceFileEvents: (() => void) | undefined
 let documentSaveEvents: ReturnType<typeof installDocumentSaveEvents> | undefined
+let elementCardCleanup: (() => void) | undefined
 let imageResults: ImageResultsDesktopService | undefined
 let workspaceFileEventGeneration = 0
 export function registerIpcHandlers(context: IpcContext): void {
@@ -294,6 +295,12 @@ export function registerIpcHandlers(context: IpcContext): void {
   const saveEventsReady = executionDesktopService().then(service => {
     if (generation !== workspaceFileEventGeneration) return
     documentSaveEvents?.dispose()
+    elementCardCleanup?.()
+    // M15: an element's AI card ends with its document.
+    elementCardCleanup = documentHost().subscribeClosed(documentId => {
+      void service.clearElementConversations(documentId).catch(error => diagnosticLog.append({ source: 'main', message: '元素 AI 卡记录未能清理',
+        details: { reason: error instanceof Error ? error.message : String(error) } }))
+    })
     documentSaveEvents = installDocumentSaveEvents({ documents: documentHost(), execution: service,
       onError: error => diagnosticLog.append({ source: 'main', message: '保存状态记录未能更新', details: { reason: error instanceof Error ? error.message : String(error) } }),
     })
@@ -874,6 +881,7 @@ export function unregisterIpcHandlers(): void {
   workspaceFileEventGeneration++
   stopWorkspaceFileEvents?.(); stopWorkspaceFileEvents = undefined
   const saves = documentSaveEvents; documentSaveEvents = undefined
+  elementCardCleanup?.(); elementCardCleanup = undefined
   if (saves) void saves.flush().finally(() => saves.dispose())
   const images = imageResults; imageResults = undefined
   if (images) { images.setEventSink(undefined); void images.flush().finally(() => images.dispose()) }

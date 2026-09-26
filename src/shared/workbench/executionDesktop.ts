@@ -1,6 +1,6 @@
 import { documentSlotSchema } from '../document/selectionSchema'
 import { z } from 'zod'
-import { validHomePath, type ConversationRecord, type WorkspaceRecord } from './conversations'
+import { validHomePath, type ConversationElementScope, type ConversationRecord, type WorkspaceRecord } from './conversations'
 import type { ExecutionRunRecord } from './execution'
 import type { ExecutionEventSearchInput, ExecutionEventSearchPage, ExecutionBlobRef, ExecutionEvent, ExecutionEventPage, ExecutionProjection } from './executionEvents'
 import type { EditEvent, EditSessionSnapshot } from './editSession'
@@ -63,7 +63,8 @@ export function captureRendererTiming(): RendererTimingStamp {
 export const executionDesktopRequestSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('workspace'), root: z.string().min(1).max(32767).nullable() }).strict(),
   z.object({ type: z.literal('conversations'), workspaceId: id }).strict(),
-  z.object({ type: z.literal('create-conversation'), workspaceId: id, title: z.string().max(1024).optional(), home: conversationHomeSchema.optional() }).strict(),
+  z.object({ type: z.literal('create-conversation'), workspaceId: id, title: z.string().max(1024).optional(), home: conversationHomeSchema.optional(),
+    element: z.object({ kind: z.literal('element'), documentId: id, label: z.string().min(1).max(200) }).strict().optional() }).strict(),
   z.object({ type: z.literal('set-conversation-home'), ...identity, home: conversationHomeSchema.nullable() }).strict(),
   z.object({ type: z.literal('conversation'), ...identity }).strict(),
   z.object({ type: z.literal('draft'), ...identity, expectedRevision: index, text: z.string().max(1024 * 1024), documents: z.array(executionDocumentReferenceSchema).max(100), attachments: z.array(inputAttachmentReferenceSchema).max(1000).default([]) }).strict(),
@@ -130,7 +131,8 @@ export interface ExecutionSendResult { submission: ExecutionSubmissionRecord; co
 export interface ExecutionDesktopAPI {
   workspace(root: string | null): Promise<ExecutionWorkspace>
   conversations(workspaceId: string): Promise<ConversationRecord[]>
-  createConversation(workspaceId: string, title?: string, home?: ConversationHomeInput): Promise<ConversationRecord>
+  /** `element` makes the conversation behind one element's AI card (M15): unlisted, cleared when its document closes. */
+  createConversation(workspaceId: string, title?: string, home?: ConversationHomeInput, element?: ConversationElementScope): Promise<ConversationRecord>
   /** Where a conversation belongs (Owner 2026-09-24); advisory metadata that never changes its revision. */
   setConversationHome?(input: { workspaceId: string; conversationId: string; home: ConversationHomeInput | null }): Promise<ConversationRecord>
   conversation(workspaceId: string, conversationId: string): Promise<ConversationRecord | null>

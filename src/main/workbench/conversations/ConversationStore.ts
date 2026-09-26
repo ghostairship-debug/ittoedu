@@ -5,6 +5,7 @@ import { inputAttachmentReferenceSchema } from '../../../shared/workbench/attach
 import {
   CONVERSATION_STORE_SCHEMA_VERSION,
   type ConversationDeletionPorts,
+  type ConversationElementScope,
   type ConversationHome,
   type ConversationMessage,
   type ConversationPatch,
@@ -15,6 +16,7 @@ import {
   type ReleasedConversationReferences,
   type WorkspaceRecord,
   rebaseHome,
+  validConversationElement,
   validConversationHome,
 } from '../../../shared/workbench/conversations'
 
@@ -66,6 +68,7 @@ function validConversation(value: unknown, conversationId: string): value is Con
     && new Set(item.inputAttachments.map(ref => `${ref.attachmentId}:${ref.representationId}`)).size === item.inputAttachments.length
     && new Set(item.frozenContextRefs.map(reference => reference.contextRefId)).size === item.frozenContextRefs.length
     && (item.home === undefined || validConversationHome(item.home))
+    && (item.element === undefined || validConversationElement(item.element))
     && validRevision(item.revision) && validTime(item.createdAt) && validTime(item.updatedAt)
 }
 function emptyState(): ConversationStoreState { return { schemaVersion: CONVERSATION_STORE_SCHEMA_VERSION, workspaces: {}, conversations: {} } }
@@ -197,7 +200,7 @@ export class ConversationStore {
     return this.serial(async () => Object.values((await this.readState()).workspaces)
       .sort((a, b) => b.updatedAt - a.updatedAt || a.workspaceId.localeCompare(b.workspaceId)).map(clone))
   }
-  createConversation(input: { workspaceId: string; conversationId?: string; title?: string; inputDraft?: string; home?: ConversationHome }): Promise<ConversationRecord> {
+  createConversation(input: { workspaceId: string; conversationId?: string; title?: string; inputDraft?: string; home?: ConversationHome; element?: ConversationElementScope }): Promise<ConversationRecord> {
     return this.serial(async () => {
       const state = await this.readState(); this.workspace(state, input.workspaceId)
       const conversationId = input.conversationId ?? this.createId()
@@ -206,10 +209,12 @@ export class ConversationStore {
       const title = input.title ?? '', inputDraft = input.inputDraft ?? ''
       if (!validText(title, 1024) || !validText(inputDraft)) throw new TypeError('会话标题或草稿无效')
       if (input.home !== undefined && (!validConversationHome(input.home) || input.home.missing)) throw new TypeError('会话所属位置无效')
+      if (input.element !== undefined && !validConversationElement(input.element)) throw new TypeError('元素会话范围无效')
       const time = this.now(), record: ConversationRecord = {
         conversationId, workspaceId: input.workspaceId, title, messages: [], attachmentIds: [],
         runIndex: { builtinRunIds: [], externalRunIds: [], externalPortIds: [] }, inputDraft, inputAttachments: [], frozenContextRefs: [],
         ...(input.home ? { home: { kind: input.home.kind, path: input.home.path } } : {}),
+        ...(input.element ? { element: { kind: 'element', documentId: input.element.documentId, label: input.element.label } } : {}),
         revision: 1, createdAt: time, updatedAt: time,
       }
       state.conversations[conversationId] = record

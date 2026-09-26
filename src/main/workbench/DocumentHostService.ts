@@ -47,6 +47,7 @@ export class DocumentHostService {
   private readonly subscribed = new Set<string>()
   private eventSink?: (event: DocumentEvent) => void
   private readonly saveListeners = new Set<(fact: DocumentSaveFact) => void>()
+  private readonly closeListeners = new Set<(documentId: string) => void>()
   private bootstrapping?: Promise<DocumentSnapshot>
 
   constructor(directory: string, fileDependencies: Pick<WorkspaceFilesDependencies, 'trashItem' | 'showItemInFolder' | 'fileOperations'> = {}, rendering: { measureNativeTextAsync?: AsyncNativeTextMeasurePort } = {}) {
@@ -62,6 +63,8 @@ export class DocumentHostService {
   setEventSink(sink?: (event: DocumentEvent) => void): void { this.eventSink = sink }
 
   subscribeSaves(listener: (fact: DocumentSaveFact) => void): () => void { this.saveListeners.add(listener); return () => this.saveListeners.delete(listener) }
+  /** A document session closed (its tab or window); what belonged to it can be cleared (M15 element AI cards). */
+  subscribeClosed(listener: (documentId: string) => void): () => void { this.closeListeners.add(listener); return () => this.closeListeners.delete(listener) }
   private publishSave(fact: DocumentSaveFact): void {
     for (const listener of this.saveListeners) { try { listener(structuredClone(fact)) } catch { /* File saving is independent of timeline/diagnostic consumers. */ } }
   }
@@ -100,7 +103,10 @@ export class DocumentHostService {
     if (!this.subscribed.has(session.documentId)) {
       this.subscribed.add(session.documentId)
       session.subscribe(event => {
-        if (event.type === 'closed') this.subscribed.delete(event.documentId)
+        if (event.type === 'closed') {
+          this.subscribed.delete(event.documentId)
+          for (const listener of this.closeListeners) { try { listener(event.documentId) } catch { /* Closing never waits for its listeners. */ } }
+        }
         this.eventSink?.(event)
       })
     }

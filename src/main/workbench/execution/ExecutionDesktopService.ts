@@ -25,6 +25,7 @@ import { DEFAULT_PERMISSION_MODE } from '../../../shared/workbench/executionPerm
 import { executionInputError } from './executionInputErrors'
 import { AgentFileService } from './AgentFileService'
 import { diagnosticLog } from '../../diagnosticLog'
+import { readTarget } from '../../../core/tools/ToolTargets'
 
 export interface ExecutionDesktopServiceOptions {
   directory: string
@@ -38,6 +39,13 @@ export interface ExecutionDesktopServiceOptions {
 function conversationAttachmentIds(record: ConversationRecord): string[] {
   return [...new Set([...record.attachmentIds, ...record.inputAttachments.map(reference => reference.attachmentId),
     ...record.messages.flatMap(message => message.attachmentIds)])]
+}
+/** The space's session list leaves out the conversations behind element AI cards (M15). */
+function listed(records: ConversationRecord[]): ConversationRecord[] { return records.filter(record => !record.element) }
+/** An object or document block that still exists is the same target after other edits; a text range never is. */
+function targetStillExists(snapshot: DocumentSnapshot, target: ExecutionDocumentReference['writable'][number]): boolean {
+  if (target.kind !== 'course-object' && target.kind !== 'flow-block') return false
+  try { readTarget(snapshot.model, target); return true } catch { return false }
 }
 /** Main owns spaces, task freezes and runs. Mounting a view only reads/subscribes. */
 export class ExecutionDesktopService {
@@ -131,6 +139,8 @@ export class ExecutionDesktopService {
         }
       }
       await this.engine.recover()
+      // M15: element AI cards live only while their document is open; none survives a restart.
+      await this.clearElementCards().catch(() => undefined)
       runs = await this.runs.list()
       const submissions = await this.submissions.list()
       for (let record of submissions.filter(value => value.state === 'starting' || value.state === 'accepted')) {
@@ -165,7 +175,7 @@ export class ExecutionDesktopService {
     const canonical = await fs.realpath(rootPath), key = (value: string) => process.platform === 'win32' ? value.toLowerCase() : value
     const existing = (await this.conversations.listWorkspaces()).find(space => key(space.rootPath) === key(canonical))
     const workspace = existing ?? await this.conversations.registerWorkspace({ workspaceId: randomUUID(), rootPath: canonical, managed: root === null, authorization: root === null ? 'managed' : 'user-selected' })
-    return { workspace, conversations: await this.conversations.listConversations(workspace.workspaceId) }
+    return { workspace, conversations: listed(await this.conversations.listConversations(workspace.workspaceId)) }
   }
   private async validateHome(workspaceId: string, home: ConversationHomeInput): Promise<ConversationHomeInput> {
     const space = await this.conversations.readWorkspace(workspaceId)
@@ -273,7 +283,9 @@ export class ExecutionDesktopService {
       try { snapshot = await this.options.documents.registry.get(reference.documentId).drain() }
       catch (error) { throw executionInputError('document-session-changed', error) }
       if (snapshot.epoch !== reference.epoch) throw executionInputError('document-session-changed')
-      if (snapshot.revision !== reference.revision && (reference.selection?.length || reference.writable.some(target => target.kind !== 'document'))) throw executionInputError('document-range-changed')
+      // M15: an object or a document block stays the same target while it exists; a text range only while nothing changed.
+      if (snapshot.revision !== reference.revision && [...(reference.selection ?? []), ...reference.writable.filter(target => target.kind !== 'document')]
+        .some(target => !targetStillExists(snapshot, target))) throw executionInputError('document-range-changed')
       documents.push({ documentId: reference.documentId, writable: reference.writable, ...(reference.selection?.length ? { selection: reference.selection } : {}) })
     }
     const history = current.messages.filter(message => message.role === 'user' || message.role === 'assistant')
@@ -599,6 +611,53 @@ export class ExecutionDesktopService {
     })
     return { runIds: stopped, submissionIds: cancelled }
   }
+  /** Deletes a conversation with everything it holds (runs stopped, external grants revoked, resources released). */
+  private async removeConversation(input: { workspaceId: string; conversationId: string; expectedRevision: number }): Promise<void> {
+    let prepared = false
+    try {
+      const record = await this.required(input.workspaceId, input.conversationId)
+      await this.conversations.deleteConversation({ ...input, ports: {
+        stopBuiltinRuns: async ({ runIds }) => { await Promise.all(runIds.map(runId => this.engine.stop(runId))) },
+        revokeExternalPorts: async ({ workspaceId, conversationId, portIds }) => {
+          if (portIds.length && !this.externalRevoker) throw new Error('外部授权尚未撤销，会话已保留')
+          if (portIds.length) await this.externalRevoker!({ workspaceId, conversationId, portIds: [...portIds] })
+        },
+        prepareResourceRelease: async owner => {
+          await this.imageRetention?.prepare(owner); prepared = !!this.imageRetention
+          await this.attachments.prepareConversationRelease({ version: 1, workspaceId: owner.workspaceId, conversationId: owner.conversationId,
+            attachmentIds: conversationAttachmentIds(record) })
+        },
+      } })
+      this.imageRetention?.collect()
+      // Deletion is already durable. A failed sweep keeps its intent for startup retry.
+      await this.collectAttachmentReleases().catch(() => undefined)
+    } catch (error) {
+      if (prepared) this.imageRetention?.abort(input)
+      throw error
+    }
+  }
+  /**
+   * M15: element AI cards live only while their document is open. Clears the cards of one document (all of them
+   * without an id, at startup); their queued requests are cancelled first so nothing starts afterwards.
+   */
+  async clearElementConversations(documentId?: string): Promise<void> {
+    await this.ready()
+    await this.clearElementCards(documentId)
+  }
+  private async clearElementCards(documentId?: string): Promise<void> {
+    for (const workspace of await this.conversations.listWorkspaces())
+      for (const record of await this.conversations.listConversations(workspace.workspaceId)) {
+        if (!record.element || (documentId !== undefined && record.element.documentId !== documentId)) continue
+        await this.serial('attachment-lifecycle', () => this.serial(record.conversationId, async () => {
+          for (const submission of await this.submissions.list())
+            if (submission.conversationId === record.conversationId && submission.state === 'queued')
+              await this.submissions.update(submission.submissionId, { state: 'cancelled', updatedAt: Date.now(),
+                failure: { code: 'element-card-closed', message: '已取消：元素 AI 卡已随文件关闭。' } })
+          const current = await this.conversations.readConversation({ workspaceId: record.workspaceId, conversationId: record.conversationId })
+          if (current) await this.removeConversation({ workspaceId: current.workspaceId, conversationId: current.conversationId, expectedRevision: current.revision })
+        }))
+      }
+  }
   async operate(raw: unknown): Promise<unknown> {
     const received = captureMainTiming()
     try {
@@ -606,9 +665,10 @@ export class ExecutionDesktopService {
       const input = executionDesktopRequestSchema.parse(raw)
       switch (input.type) {
         case 'workspace': return this.serial('workspace', () => this.workspace(input.root))
-        case 'conversations': return this.conversations.listConversations(input.workspaceId)
+        case 'conversations': return listed(await this.conversations.listConversations(input.workspaceId))
         case 'create-conversation': return this.conversations.createConversation({ ...input,
-          ...(input.home ? { home: await this.validateHome(input.workspaceId, input.home) } : {}) })
+          ...(input.home ? { home: await this.validateHome(input.workspaceId, input.home) } : {}),
+          ...(input.element ? { element: input.element } : {}) })
         case 'set-conversation-home': return this.serial(input.conversationId, async () => this.conversations.setConversationHome({ ...input,
           home: input.home ? await this.validateHome(input.workspaceId, input.home) : null }))
         case 'conversation': return this.conversations.readConversation(input)
@@ -617,30 +677,7 @@ export class ExecutionDesktopService {
           return this.conversations.updateConversation({ ...input, patch: { inputDraft: input.text, inputAttachments: input.attachments, frozenContextRefs: this.refs(input.documents) } })
         }))
         case 'rename-conversation': return this.serial(input.conversationId, () => this.conversations.updateConversation({ ...input, patch: { title: input.title } }))
-        case 'delete-conversation': return this.serial('attachment-lifecycle', () => this.serial(input.conversationId, async () => {
-          let prepared = false
-          try {
-            const record = await this.required(input.workspaceId, input.conversationId)
-            await this.conversations.deleteConversation({ ...input, ports: {
-              stopBuiltinRuns: async ({ runIds }) => { await Promise.all(runIds.map(runId => this.engine.stop(runId))) },
-              revokeExternalPorts: async ({ workspaceId, conversationId, portIds }) => {
-                if (portIds.length && !this.externalRevoker) throw new Error('外部授权尚未撤销，会话已保留')
-                if (portIds.length) await this.externalRevoker!({ workspaceId, conversationId, portIds: [...portIds] })
-              },
-              prepareResourceRelease: async owner => {
-                await this.imageRetention?.prepare(owner); prepared = !!this.imageRetention
-                await this.attachments.prepareConversationRelease({ version: 1, workspaceId: owner.workspaceId, conversationId: owner.conversationId,
-                  attachmentIds: conversationAttachmentIds(record) })
-              },
-            } })
-            this.imageRetention?.collect()
-            // Deletion is already durable. A failed sweep keeps its intent for startup retry.
-            await this.collectAttachmentReleases().catch(() => undefined)
-          } catch (error) {
-            if (prepared) this.imageRetention?.abort(input)
-            throw error
-          }
-        }))
+        case 'delete-conversation': return this.serial('attachment-lifecycle', () => this.serial(input.conversationId, () => this.removeConversation(input)))
         case 'send': {
           if (input.clientTiming) {
             this.rendererTiming(input.conversationId, input.submissionId, `${input.submissionId}:renderer:click`,

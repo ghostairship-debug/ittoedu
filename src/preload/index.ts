@@ -176,7 +176,7 @@ const desktopAPI = Object.freeze<DesktopAPI>({
   execution: {
     workspace: root => invoke(IPC_CHANNELS.execution, { type: 'workspace', root }),
     conversations: workspaceId => invoke(IPC_CHANNELS.execution, { type: 'conversations', workspaceId }),
-    createConversation: (workspaceId, title, home) => invoke(IPC_CHANNELS.execution, { type: 'create-conversation', workspaceId, title, ...(home ? { home } : {}) }),
+    createConversation: (workspaceId, title, home, element) => invoke(IPC_CHANNELS.execution, { type: 'create-conversation', workspaceId, title, ...(home ? { home } : {}), ...(element ? { element } : {}) }),
     setConversationHome: input => invoke(IPC_CHANNELS.execution, { type: 'set-conversation-home', ...input }),
     conversation: (workspaceId, conversationId) => invoke(IPC_CHANNELS.execution, { type: 'conversation', workspaceId, conversationId }),
     draft: input => invoke(IPC_CHANNELS.execution, { type: 'draft', ...input }),

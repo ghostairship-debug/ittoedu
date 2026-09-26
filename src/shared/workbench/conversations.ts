@@ -61,6 +61,24 @@ export interface ConversationHome {
   missing?: true
 }
 
+/**
+ * M15: the conversation behind one element's AI card. It is not listed with the space's sessions and is cleared
+ * when its document closes or the application starts; nothing of it is offered for recovery.
+ */
+export interface ConversationElementScope {
+  kind: 'element'
+  documentId: string
+  /** What the card edits, as the teacher sees it ("标题文字"). */
+  label: string
+}
+export function validConversationElement(value: unknown): value is ConversationElementScope {
+  if (!value || typeof value !== 'object') return false
+  const item = value as Record<string, unknown>
+  return Object.keys(item).every(key => key === 'kind' || key === 'documentId' || key === 'label')
+    && item.kind === 'element' && typeof item.documentId === 'string' && item.documentId.length > 0 && item.documentId.length <= 512
+    && typeof item.label === 'string' && item.label.length > 0 && item.label.length <= 200
+}
+
 export interface ConversationRecord {
   conversationId: string
   workspaceId: string
@@ -72,6 +90,8 @@ export interface ConversationRecord {
   inputAttachments: import('./attachments').InputAttachmentReference[]
   frozenContextRefs: FrozenConversationContextRef[]
   home?: ConversationHome
+  /** Set only for an element's AI card (M15). */
+  element?: ConversationElementScope
   revision: number
   createdAt: number
   updatedAt: number
