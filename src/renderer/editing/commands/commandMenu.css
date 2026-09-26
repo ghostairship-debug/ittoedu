@@ -1,0 +1,11 @@
+/* M21 shared command menu: right-click menus and "⋯" menus use the same white panel as the quick bar menu. */
+.command-menu { display: grid; min-width: 168px; max-width: 280px; padding: 4px; border: 1px solid #d8dee6; border-radius: 8px; background: #fff; box-shadow: 0 8px 24px rgb(0 0 0 / 18%); color: #17211d; font-size: 12px; }
+.command-menu--context { position: fixed; z-index: 1000; }
+.command-menu .command-menu__item { display: grid; grid-template-columns: 1fr auto; align-items: center; column-gap: 12px; padding: 6px 10px; border: 0; border-radius: 5px; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.command-menu .command-menu__item:hover:not([aria-disabled="true"]),
+.command-menu .command-menu__item:focus-visible { background: #edf3fa; outline: none; }
+.command-menu .command-menu__item[aria-disabled="true"] { color: #8a94a3; cursor: default; }
+.command-menu .command-menu__item--group { margin-top: 4px; border-top: 1px solid #e5e9ef; border-radius: 0 0 5px 5px; }
+.command-menu .command-menu__item--danger:not([aria-disabled="true"]) { color: #b42318; }
+.command-menu__shortcut { color: #8a94a3; font: 11px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.command-menu__reason { grid-column: 1 / -1; color: #8a94a3; font-size: 11px; line-height: 1.35; white-space: normal; }

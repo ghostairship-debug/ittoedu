@@ -1,4 +1,5 @@
 import { projectWithBackgroundPreview } from '../../authoring/backgroundPreview'
+import { selectionObjectCommands } from '../../composition/selection/selectionObjectCommands'
 import { useMemo } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import type { ComponentPackageData } from '../../../shared/componentTypes'
@@ -289,6 +290,8 @@ export function SlideWorkspaceConnector({
     selection: {
       selectNodes: (ids) => selectNodes([...ids]),
       selectNode: (id) => selectNode(id),
+      paste: selectionObjectCommands.paste,
+      selectAll: selectionObjectCommands.selectAll,
     },
     content: {
       beginTextEdit: (nodeId, origin) => beginTextEdit(nodeId, origin),

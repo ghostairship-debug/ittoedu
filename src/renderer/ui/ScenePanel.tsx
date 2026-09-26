@@ -18,6 +18,8 @@ import { CSS } from '@dnd-kit/utilities'
 import { FileText, Globe2, GripVertical, Layers3, Plus, Trash2 } from 'lucide-react'
 import { useMemo, useState, type ReactNode } from 'react'
 import { COURSE_LAST_LOCATION_REASON } from '../../core/tools/courseLocations'
+import { useContextMenu, type MenuCommand } from '../editing/commands/CommandMenu'
+import { pageCardCommands } from '../editing/commands/pageCommands'
 import { deriveCourseEditorLayout, type CourseEditorLayoutResult } from '../course/courseEditorLayout'
 import {
   buildSpatialEditorView,
@@ -352,6 +354,9 @@ function CourseTreeNodeRow({
   const project = useEditorStore(selectActiveCourseProjectDocument)
   const [editingKey, setEditingKey] = useState<string | null>(null)
   const [draft, setDraft] = useState('')
+  // M21: the same page commands as the workbench page bar, on right-click.
+  const menu = useContextMenu()
+  const [menuRename, setMenuRename] = useState<'scene' | 'surface' | null>(null)
   const active = Boolean(
     node.locationId &&
     node.locationId === activeLocationId &&
@@ -375,7 +380,14 @@ function CourseTreeNodeRow({
   const commitRename = () => {
     if (!editingKey) return
     const next = draft.trim()
-    if (editingKey.startsWith('page:') && next) {
+    if (menuRename) {
+      const store = useEditorStore.getState()
+      if (next && next !== node.label) {
+        if (menuRename === 'scene' && node.locationId) store.renameCourseLocation(node.locationId, next)
+        else if (menuRename === 'surface') store.renameCourseSurface(node.surfaceId, next)
+      }
+      setMenuRename(null)
+    } else if (editingKey.startsWith('page:') && next) {
       onRenameFlowPage?.(editingKey.slice('page:'.length), next)
     } else if (editingKey.startsWith('heading:') && next) {
       onRenameFlowHeading?.(editingKey.slice('heading:'.length), next)
@@ -441,12 +453,60 @@ function CourseTreeNodeRow({
       onClick={(event) => event.stopPropagation()}
       onKeyDown={(event) => {
         if (event.key === 'Enter') event.currentTarget.blur()
-        if (event.key === 'Escape') setEditingKey(null)
+        if (event.key === 'Escape') { setMenuRename(null); setEditingKey(null) }
       }}
     />
   ) : (
     <span>{node.label}</span>
   )
+
+  const pageMenuItems = (): MenuCommand[] => {
+    if (!project) return []
+    const store = useEditorStore.getState()
+    const startRename = (kind: 'scene' | 'surface') => { setMenuRename(kind); setEditingKey(node.id); setDraft(node.label) }
+    if (node.kind === 'slide-scene' && node.locationId) {
+      const locationId = node.locationId
+      const location = project.locations.find(candidate => candidate.id === locationId)
+      const surface = project.surfaces.find(candidate => candidate.id === node.surfaceId)
+      if (location?.kind !== 'slide-scene' || surface?.type !== 'slide') return []
+      const ids = surface.scenes.map(scene => scene.id), index = ids.indexOf(location.sceneId)
+      return pageCardCommands({ kind: 'scene', index, count: ids.length, deleteBlocked: canDeleteSlideScene ? null : COURSE_LAST_LOCATION_REASON }, {
+        addScene: () => store.addCourseContent('scene', { surfaceId: node.surfaceId }),
+        duplicate: () => {
+          const result = store.duplicateCourseLocation(locationId)
+          if (result.ok && result.activatedLocationId) store.activateCourseLocation(result.activatedLocationId)
+        },
+        rename: () => startRename('scene'),
+        remove: () => onDeleteSlideScene?.(locationId),
+        move: (delta) => {
+          const target = index + delta
+          if (target < 0 || target >= ids.length) return
+          const next = [...ids]
+          next.splice(index, 1); next.splice(target, 0, location.sceneId)
+          // The Slide session reorders the scenes of the page it has open.
+          if (activeLocationId !== locationId) onActivateLocation(locationId)
+          useEditorStore.getState().reorderScenes(next)
+        },
+      })
+    }
+    if (node.kind === 'slide-page' || node.kind === 'flow-page' || node.kind === 'spatial-page') {
+      const ids = project.surfaces.map(surface => surface.id), index = ids.indexOf(node.surfaceId)
+      return pageCardCommands({ kind: 'page', index, count: ids.length, deleteBlocked: canDeleteSurface ? null : COURSE_LAST_LOCATION_REASON }, {
+        addScene: () => {},
+        duplicate: () => {},
+        rename: () => startRename('surface'),
+        remove: () => onDeleteSurface?.(node.surfaceId),
+        move: (delta) => {
+          const target = index + delta
+          if (target < 0 || target >= ids.length) return
+          const next = [...ids]
+          next.splice(index, 1); next.splice(target, 0, node.surfaceId)
+          store.reorderCourseSurfaces(next)
+        },
+      })
+    }
+    return []
+  }
 
   const row = (
     <>
@@ -483,6 +543,12 @@ function CourseTreeNodeRow({
         onClick={() => {
           if (node.locationId) onActivateLocation(node.locationId)
         }}
+        onContextMenu={(event) => {
+          const items = pageMenuItems()
+          if (!items.length) return
+          event.preventDefault()
+          menu.open({ x: event.clientX, y: event.clientY }, node.kind === 'slide-scene' ? '场景操作' : '页面操作', items)
+        }}
         onDoubleClick={(event) => {
           if (node.kind === 'flow-page') {
             event.preventDefault()
@@ -505,6 +571,7 @@ function CourseTreeNodeRow({
           <small>缩略图 · {thumbnailStateName}</small>
         ) : null}
       </button>
+      {menu.element}
       {node.kind === 'spatial-camera' && onDeleteSpatialCamera && node.locationId ? (
         <button
           type="button"

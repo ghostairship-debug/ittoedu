@@ -11,6 +11,9 @@ import {
   addCourseSpatialPage,
   deleteCourseLocation as applyDeleteCourseLocation,
   deleteCourseSurface as applyDeleteCourseSurface,
+  duplicateCourseLocation as applyDuplicateCourseLocation,
+  renameCourseLocation as applyRenameCourseLocation,
+  renameCourseSurface as applyRenameCourseSurface,
   moveCourseSlideScene as applyMoveCourseSlideScene,
   reorderCourseSurfaces as applyReorderCourseSurfaces,
   type CourseLocationCommandResult,
@@ -175,6 +178,40 @@ export function createCourseStructureSlice(
         return { ok: false, reason: result.reason }
       }
       return persistCourseProjectCommand(result, { statusMessage: '场景已删除' })
+    },
+
+    /** Copies a Slide scene right after itself (M21 page bar); the caller activates the copy. */
+    duplicateCourseLocation(locationId: string): CourseStructureResult {
+      const project = kernel.tryReadDocument()
+      if (!project) return { ok: false, reason: '当前会话没有课程工程' }
+      return persistCourseProjectCommand(applyDuplicateCourseLocation(project, locationId, {
+        expectedRevision: project.revision,
+      }), { statusMessage: '已复制场景' })
+    },
+
+    renameCourseLocation(locationId: string, label: string): CourseStructureResult {
+      const project = kernel.tryReadDocument()
+      if (!project) return { ok: false, reason: '当前会话没有课程工程' }
+      return persistCourseProjectCommand(applyRenameCourseLocation(project, locationId, label, {
+        expectedRevision: project.revision,
+      }), { statusMessage: '已重命名' })
+    },
+
+    /** Renames a whole page (a Flow or Spatial surface, or a Slide page group). */
+    renameCourseSurface(surfaceId: string, name: string): CourseStructureResult {
+      const project = kernel.tryReadDocument()
+      if (!project) return { ok: false, reason: '当前会话没有课程工程' }
+      let next: CourseProjectDocument
+      try {
+        next = applyRenameCourseSurface(project, surfaceId, name.trim())
+      } catch (error) {
+        const reason = error instanceof Error && error.message ? '名称无效或页面已不存在' : '重命名失败'
+        kernel.setFeedback({ errorMessage: reason, statusMessage: null })
+        return { ok: false, reason }
+      }
+      if (next === project) return { ok: true }
+      kernel.persistDocument(next, { historyEntry: true, statusMessage: '已重命名' })
+      return { ok: true }
     },
 
     resizeSlideCanvas(next: SlideCanvasSize): CourseStructureResult {

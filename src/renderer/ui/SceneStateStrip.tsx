@@ -7,7 +7,9 @@ import {
   Star,
   Trash2,
 } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, type MouseEvent as ReactMouseEvent } from 'react'
+import { useContextMenu } from '../editing/commands/CommandMenu'
+import { stateCommands } from '../editing/commands/pageCommands'
 import { ensureSlidePresentation } from '../../shared/contracts/course-project-v9/presentation'
 import type { SlidePresentationState } from '../../shared/courseProjectTypes'
 import {
@@ -63,6 +65,18 @@ export function SceneStateStrip() {
     (state) => state.clearPresentationStateOverrides,
   )
   const [editingStateId, setEditingStateId] = useState<string | null>(null)
+  // M21: the same state commands as the workbench page bar, on right-click.
+  const menu = useContextMenu()
+  const openStateMenu = (event: ReactMouseEvent, stateId: string | null, name: string) => {
+    event.preventDefault()
+    setActiveState(stateId)
+    menu.open({ x: event.clientX, y: event.clientY }, '状态操作', stateCommands(stateId === null, {
+      add: () => addState(),
+      duplicate: () => { if (stateId) duplicateState(stateId) },
+      rename: () => { if (stateId) { setEditingStateId(stateId); setDraftName(name) } },
+      remove: () => { if (stateId) setPendingAction('delete') },
+    }))
+  }
   const [draftName, setDraftName] = useState('')
   const [pendingAction, setPendingAction] = useState<PendingAction>(null)
 
@@ -192,6 +206,7 @@ export function SceneStateStrip() {
         </div>
       </header>
 
+      {menu.element}
       <ul className="scene-state-strip__track" aria-label="当前场景状态列表">
         <li className="scene-state-card-shell">
           <button
@@ -200,6 +215,7 @@ export function SceneStateStrip() {
             aria-pressed={activeStateId === null}
             aria-label="母版，所有命名状态的继承源"
             onClick={() => setActiveState(null)}
+            onContextMenu={(event) => openStateMenu(event, null, '母版')}
           >
             <span className="scene-state-card__preview">母版</span>
             <span className="scene-state-card__name">母版</span>
@@ -256,6 +272,7 @@ export function SceneStateStrip() {
                 aria-pressed={active}
                 aria-label={`${state.name}，命名状态${isInitial ? '，运行初始状态' : ''}${isThumbnail ? '，场景缩略图状态' : ''}，${overrideSummary}`}
                 onClick={() => setActiveState(state.id)}
+                onContextMenu={(event) => openStateMenu(event, state.id, state.name)}
                 onDoubleClick={() => {
                   setActiveState(state.id)
                   setEditingStateId(state.id)

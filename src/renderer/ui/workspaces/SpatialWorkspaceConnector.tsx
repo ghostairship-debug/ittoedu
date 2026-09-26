@@ -13,6 +13,7 @@ import {
   type SpatialEditorGraphSelection,
 } from '../../course/spatialEditorView'
 import { selectMediaAssetFiles, useEditorStore } from '../../store/editorStore'
+import { selectionObjectCommands } from '../../composition/selection/selectionObjectCommands'
 import { mountPublishedCourseTryRun, reportTryRunInteractionDiagnostic } from '../coursePlayerTryRun'
 import { SpatialLocationWorkspace } from './SpatialLocationWorkspace'
 import type { WorkspaceMediaDropHandler } from '../../lessonWorkspace/workspaceMediaDrop'
@@ -158,6 +159,8 @@ export function SpatialWorkspaceConnector({ onDropWorkspaceMedia }: { onDropWork
       layerTargets={authoringTargets.layerTargets}
       commands={commands}
       onCanvasModeChange={setCanvasMode}
+      onPaste={selectionObjectCommands.paste}
+      onSelectAll={selectionObjectCommands.selectAll}
       onMountTryRun={onMountTryRun}
       onDropWorkspaceMedia={onDropWorkspaceMedia}
     />

@@ -22,7 +22,7 @@ export function FlowBlockQuickActions({ block, commands }: { block: { readonly t
     </>}
     <QuickBarButton label="上移" icon={<ArrowUp size={14} />} onClick={() => commands.moveSelectedBlock('up')} />
     <QuickBarButton label="下移" icon={<ArrowDown size={14} />} onClick={() => commands.moveSelectedBlock('down')} />
-    <QuickBarMenu items={[{ label: '删除', danger: true, onSelect: () => commands.deleteSelectedBlocks() }]} />
+    <QuickBarMenu items={[{ id: 'flow-block.delete', label: '删除', danger: true, run: () => commands.deleteSelectedBlocks() }]} />
     <QuickBarSeparator />
   </>
 }

@@ -107,3 +107,20 @@
   outline: 2px solid var(--green, #245b46);
   outline-offset: 1px;
 }
+/* M21: the "+" stays at the end of the rail without hovering; a dragged card shows where it will land. */
+.bottom-scene-nav__add { display: flex; flex: 0 0 44px; align-items: center; }
+.lesson-workspace-shell .bottom-scene-nav__add-button, .bottom-scene-nav__add-button {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 100%;
+  padding: 0;
+  border: 1px dashed var(--border-strong, #bdb8ad);
+  border-radius: 7px;
+  background: transparent;
+  color: var(--green, #245b46);
+  cursor: pointer;
+}
+.lesson-workspace-shell .bottom-scene-nav__add-button:hover, .bottom-scene-nav__add-button:hover { background: var(--green-soft, #e5f1e9); }
+.bottom-scene-card[data-drop-target] { outline: 2px dashed var(--green, #245b46); outline-offset: 1px; }
+.bottom-scene-card__rename { box-sizing: border-box; width: 100%; min-width: 0; padding: 2px 6px; border: 1px solid var(--green, #245b46); border-radius: 4px; font: inherit; font-size: 12px; }

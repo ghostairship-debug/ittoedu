@@ -1,6 +1,8 @@
 import { resolveSlideSelectionLayer } from '../../workbench/SelectionContextController'
 import { NativeSelectionContext } from '../../workbench/NativeSelectionContext'
 import { QUICK_BAR_SELECTOR } from '../../editing/quickbar/usePointerGesture'
+import { useContextMenu, type MenuCommand } from '../../editing/commands/CommandMenu'
+import { requestObjectContextMenu } from '../../editing/commands/objectContextMenu'
 import type { LightEditTextOverride } from '../../../shared/contracts/runtime/lightEdit'
 import { canEditLayerInScope } from '../../../shared/teacherControllerRole'
 import { controllerDisplayFrame, useControllerDisplayRevision } from '../../authoring/controllerDisplayBounds'
@@ -198,6 +200,9 @@ export interface SlideWorkspaceCanvasPort {
 export interface SlideWorkspaceSelectionPort {
   readonly selectNodes: (ids: readonly string[]) => void
   readonly selectNode: (id: string) => void
+  /** The keyboard's Ctrl+V and Ctrl+A, for the canvas right-click menu. */
+  readonly paste?: () => void
+  readonly selectAll?: () => void
 }
 
 export interface SlideWorkspaceContentPort {
@@ -686,6 +691,7 @@ export function SlideLocationWorkspace({
   const snapshotRef = useRef(snapshot)
   snapshotRef.current = snapshot
   const readSnapshot = () => snapshotRef.current
+  const canvasMenu = useContextMenu()
   const workspaceRef = useRef<HTMLDivElement>(null)
   const stageViewportRef = useRef<HTMLDivElement>(null)
   const gameHostRef = useRef<HTMLDivElement>(null)
@@ -2895,6 +2901,42 @@ export function SlideLocationWorkspace({
         }
       }}
       onPointerLeave={() => setHoveredAuthoringTargetId(null)}
+      onContextMenu={(event) => {
+        // M21 right-click: what lies under the pointer is selected as a click would and gets the selection's menu (the
+        // quick bar's owner builds it from the same commands); empty canvas gets the canvas menu.
+        if (event.target instanceof Element && event.target.closest(`${QUICK_BAR_SELECTOR}, .command-menu, .canvas-plain-text-editor, .text-edit-overlay, .text-edit-toolbar, .formula-edit-dialog, .canvas-mode-switch, .canvas-view-controls`)) return
+        event.preventDefault()
+        if (canvasMode !== 'edit' || slideBackendKind !== 'slide-authoring' || !authoringCanvasInteractive) return
+        const currentSnapshot = readSnapshot()
+        if (currentSnapshot.editingTextNodeId || currentSnapshot.contentEdit || currentSnapshot.drawTool) return
+        const viewport = readCandidateViewport()
+        if (!viewport) return
+        const point = { x: event.clientX, y: event.clientY }
+        const root = event.currentTarget
+        if (slideAuthoringRef.current.contextTarget(point, viewport)) {
+          const spot = canvasAuthoringHitAtClientPoint(point.x, point.y)
+          const extra: MenuCommand[] = !spot ? []
+            : spot.kind === 'component' ? [{ id: 'component.edit-text', label: '编辑此处文字', group: 'spot', run: () => beginComponentTextEdit(spot.target) }]
+            : spot.target.kind === 'text' ? [{ id: 'runtime.edit-text', label: '编辑此处文字', group: 'spot', run: () => beginRuntimeTextEdit(spot.target) }]
+            : [{ id: 'runtime.replace-image', label: '替换此处图片…', group: 'spot', run: () => { void replaceRuntimeAsset(spot.target) } }]
+          // The selection owner re-renders with the new selection first.
+          window.setTimeout(() => { requestObjectContextMenu(root, { ...point, itemIds: readSnapshot().selectedNodeIds, extra }) }, 0)
+          return
+        }
+        if (currentSnapshot.selectedNodeIds.length) ports.selection.selectNodes([])
+        const world = clientToWorld(createStageViewportTransform(viewport), point)
+        const noPort = '当前界面不支持此操作'
+        canvasMenu.open(point, '画布操作', [
+          { id: 'canvas.paste', label: '粘贴', shortcut: 'Ctrl+V', group: 'clipboard', run: () => ports.selection.paste?.(), disabledReason: ports.selection.paste ? null : noPort },
+          { id: 'canvas.select-all', label: '全选', shortcut: 'Ctrl+A', group: 'clipboard', run: () => ports.selection.selectAll?.(), disabledReason: ports.selection.selectAll ? null : noPort },
+          { id: 'canvas.insert-text', label: '在此插入文字', group: 'insert', run: () => ports.content.addTextNode(world.x, world.y) },
+          { id: 'canvas.insert-image', label: '在此插入图片…', group: 'insert', run: () => onAddImage(world.x, world.y) },
+          { id: 'canvas.insert-video', label: '在此插入视频…', group: 'insert', run: () => onAddVideo(world.x, world.y) },
+          { id: 'canvas.insert-rectangle', label: '在此插入矩形', group: 'insert', run: () => ports.content.addRectangleNode(world.x, world.y) },
+          { id: 'canvas.insert-formula', label: '在此插入公式', group: 'insert', run: () => ports.content.addFormulaNode(world.x, world.y) },
+          { id: 'canvas.try-run', label: '当前位置试运行', group: 'view', run: () => ports.canvas.setCanvasMode('run') },
+        ])
+      }}
       onDoubleClickCapture={(event) => {
         if (activeTextPreview?.target.kind === 'course-object') {
           const viewport = readCandidateViewport()
@@ -3132,6 +3174,7 @@ export function SlideLocationWorkspace({
             onRetryPreview={retryRuntimePreview}
           />
           {nativeTextEditor.editor}
+          {canvasMenu.element}
           {(drawPreview || lineDragGuides) && (
             <svg
               className="canvas-line-overlay"

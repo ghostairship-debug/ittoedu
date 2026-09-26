@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useId, useRef, useSt
 import { createPortal } from 'react-dom'
 import { MoreHorizontal, Sparkles } from 'lucide-react'
 import { ColorSwatchPanel, type ColorSwatchVariant } from '../color/ColorSwatchPanel'
+import { CommandMenuItems, moveMenuFocus, type MenuCommand } from '../commands/CommandMenu'
 import { placeQuickBar, type QuickBarBounds, type QuickBarRect } from './placeQuickBar'
 import './quickBar.css'
 
@@ -154,21 +155,12 @@ export function QuickBarColorButton({ label, icon, value, variant = 'color', dis
   </QuickBarPopoverButton>
 }
 
-export interface QuickBarMenuItem {
-  label: string
-  onSelect(): void
-  disabled?: boolean
-  danger?: boolean
-  /** Items with the same group are drawn together; a new group starts a new section. */
-  group?: string
-}
-export function QuickBarMenu({ label = '更多操作', items }: { label?: string; items: readonly QuickBarMenuItem[] }) {
+/** The bar's "⋯": the same command items, names and behaviour as the right-click menu of the selection (M21). */
+export function QuickBarMenu({ label = '更多操作', items }: { label?: string; items: readonly MenuCommand[] }) {
   if (!items.length) return null
   return <QuickBarPopoverButton label={label} icon={<MoreHorizontal size={15} />} popoverLabel={label} popupRole="menu">
-    {close => <div className="selection-quick-bar__menu" role="menu" aria-label={label}>
-      {items.map((item, index) => <button key={`${item.label}-${index}`} type="button" role="menuitem" disabled={item.disabled}
-        className={`${item.danger ? 'selection-quick-bar__menu-item--danger' : ''}${index > 0 && item.group !== items[index - 1]!.group ? ' selection-quick-bar__menu-item--group' : ''}`}
-        onMouseDown={keepSelection} onClick={() => { close(); item.onSelect() }}>{item.label}</button>)}
+    {close => <div className="command-menu" role="menu" aria-label={label} onKeyDown={moveMenuFocus}>
+      <CommandMenuItems items={items} onRun={item => { close(); item.run() }} />
     </div>}
   </QuickBarPopoverButton>
 }

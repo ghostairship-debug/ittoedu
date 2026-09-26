@@ -1,4 +1,7 @@
 import { NativeSelectionContext } from '../../workbench/NativeSelectionContext'
+import { useContextMenu } from '../../editing/commands/CommandMenu'
+import { requestObjectContextMenu } from '../../editing/commands/objectContextMenu'
+import { QUICK_BAR_SELECTOR } from '../../editing/quickbar/usePointerGesture'
 import { useControllerDisplayRevision } from '../../authoring/controllerDisplayBounds'
 
 import { chartCanvasTextPort } from '../../authoring/chartCanvasTextBridge'
@@ -98,6 +101,9 @@ export interface SpatialLocationWorkspaceProps {
   readonly onCanvasModeChange: (mode: SpatialCanvasMode) => void
   readonly onMountTryRun: (container: HTMLElement) => Promise<PublishedCourseSession>
   readonly onDropWorkspaceMedia?: WorkspaceMediaDropHandler
+  /** The keyboard's Ctrl+V and Ctrl+A, for the canvas right-click menu. */
+  readonly onPaste?: () => void
+  readonly onSelectAll?: () => void
 }
 
 function distanceToSegment(
@@ -340,7 +346,12 @@ export function SpatialLocationWorkspace({
   onCanvasModeChange,
   onMountTryRun,
   onDropWorkspaceMedia,
+  onPaste,
+  onSelectAll,
 }: SpatialLocationWorkspaceProps) {
+  const canvasMenu = useContextMenu()
+  const selectionRef = useRef(selectionIds)
+  selectionRef.current = selectionIds
   const mediaSource = useWorkspaceMediaSource()
   const mediaSourceRef = useRef(mediaSource)
   mediaSourceRef.current = mediaSource
@@ -766,6 +777,7 @@ export function SpatialLocationWorkspace({
       data-testid="spatial-workspace"
     >
       <NativeSelectionContext documentId={documentId} revision={project.revision} locationId={view.locationId} itemIds={selectionIds} enabled={canvasMode === 'edit'} textEditing={editingNode?.type === 'text'} />
+      {canvasMenu.element}
       <div className="canvas-mode-switch" role="group" aria-label="画布模式">
         <button
           type="button"
@@ -954,6 +966,35 @@ export function SpatialLocationWorkspace({
           if (event.currentTarget.hasPointerCapture(event.pointerId)) {
             event.currentTarget.releasePointerCapture(event.pointerId)
           }
+        }}
+        onContextMenu={(event) => {
+          // M21 right-click: the object under the pointer is selected as a click would and gets the selection's menu;
+          // empty canvas gets the canvas menu.
+          if (event.target instanceof Element && event.target.closest(`${QUICK_BAR_SELECTOR}, .command-menu`)) return
+          event.preventDefault()
+          if (canvasMode !== 'edit' || contentEdit || pointerActiveRef.current) return
+          const stagePoint = readLogicalPointer(event.clientX, event.clientY)
+          if (!stagePoint) return
+          const world = clientToWorld(createSpatialWorldViewTransform(stageViewport, view.sessionCamera), stagePoint)
+          const hudPoint = clientToWorld(createSpatialViewportOverlayTransform(stageViewport), stagePoint)
+          const hit = hitTestV9SpatialLayerItems(adaptV9SpatialEditorLayers(view.layers), { viewport: hudPoint, world })
+          const point = { x: event.clientX, y: event.clientY }, root = event.currentTarget.closest('main')
+          if (hit) {
+            if (!selectionRef.current.includes(hit.layerItemId)) {
+              authoringRef.current.pointerDown({ ...stagePoint, additive: false }, stageViewport)
+              authoringRef.current.pointerUp({ ...stagePoint, additive: false }, stageViewport)
+              syncOverlays()
+            }
+            // The selection owner re-renders with the new selection first.
+            if (root) window.setTimeout(() => { requestObjectContextMenu(root, { ...point, itemIds: selectionRef.current }) }, 0)
+            return
+          }
+          const noPort = '当前界面不支持此操作'
+          canvasMenu.open(point, '画布操作', [
+            { id: 'canvas.paste', label: '粘贴', shortcut: 'Ctrl+V', group: 'clipboard', run: () => onPaste?.(), disabledReason: onPaste ? null : noPort },
+            { id: 'canvas.select-all', label: '全选', shortcut: 'Ctrl+A', group: 'clipboard', run: () => onSelectAll?.(), disabledReason: onSelectAll ? null : noPort },
+            { id: 'canvas.try-run', label: '当前位置试运行', group: 'view', run: () => onCanvasModeChange('run') },
+          ])
         }}
         onDoubleClick={(event) => {
           if (canvasMode !== 'edit') return

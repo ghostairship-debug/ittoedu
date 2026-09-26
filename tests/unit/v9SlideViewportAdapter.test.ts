@@ -837,6 +837,19 @@ describe('V9 Slide viewport adapter', () => {
     expect(moved.preview?.[0]).toMatchObject({ nodeId: 'slide-title', x: 180, y: 160 })
   })
 
+  it('M21 right-click selects the object under the pointer, keeps a selection it belongs to and finds nothing on empty canvas', () => {
+    const controller = createController()
+    const selection = () => selectSlideAuthoringBackend(useEditorStore.getState())!.getSession().selection.selectionIds
+    expect(controller.contextTarget({ x: 200, y: 150 }, VIEW)).toEqual({ layerItemId: 'slide-title' })
+    expect(selection()).toEqual(['slide-title'])
+    controller.selectFromLayerIds(['slide-title', 'slide-locked'], VIEW)
+    // A locked object is selected like a click selects it; a multi-selection it is part of stays whole.
+    expect(controller.contextTarget({ x: 200, y: 250 }, VIEW)).toEqual({ layerItemId: 'slide-locked' })
+    expect([...selection()].sort()).toEqual(['slide-locked', 'slide-title'])
+    expect(controller.contextTarget({ x: 40, y: 40 }, VIEW)).toBeNull()
+    expect([...selection()].sort()).toEqual(['slide-locked', 'slide-title'])
+  })
+
   it('paints pointermove preview onto SceneNodes without committing the native frame', () => {
     const controller = createController()
     controller.pointerDown({ x: 200, y: 150 }, VIEW)

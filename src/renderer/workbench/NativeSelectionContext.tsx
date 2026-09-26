@@ -2,10 +2,12 @@ import { AArrowDown, AArrowUp, AlignCenter, AlignLeft, AlignRight, AlignHorizont
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { isStrokeOnlyShapeType } from '../../shared/contracts/native-v1'
 import { useCourseEditorActions } from '../documents/CourseEditorActionsContext'
-import type { LayerOrderMove } from '../editing/quickbar/layerOrder'
 import { selectionObjectCommands } from '../composition/selection/selectionObjectCommands'
+import { useContextMenu, type MenuCommand } from '../editing/commands/CommandMenu'
+import { multiObjectCommands, singleObjectCommands } from '../editing/commands/objectCommands'
+import { OBJECT_CONTEXT_MENU_EVENT, type ObjectContextMenuRequest } from '../editing/commands/objectContextMenu'
 import { rotatedBoundingBox, unionBoxes, visibleBounds, type QuickBarBounds, type QuickBarRect } from '../editing/quickbar/placeQuickBar'
-import { QuickBarAiButton, QuickBarButton, QuickBarColorButton, QuickBarLabel, QuickBarMenu, QuickBarPopoverButton, QuickBarSeparator, SelectionQuickBar, type QuickBarMenuItem } from '../editing/quickbar/SelectionQuickBar'
+import { QuickBarAiButton, QuickBarButton, QuickBarColorButton, QuickBarLabel, QuickBarMenu, QuickBarPopoverButton, QuickBarSeparator, SelectionQuickBar } from '../editing/quickbar/SelectionQuickBar'
 import { usePointerGesture } from '../editing/quickbar/usePointerGesture'
 import { usePropertiesContext } from '../ui/properties/PropertiesContextAdapter'
 import type { PropertiesContext } from '../ui/properties/PropertiesContext'
@@ -88,6 +90,7 @@ function ObjectActions({ view, patch, replaceImage, editText }: { view: Properti
 }
 
 const MULTI_ALIGN = [['left', '左对齐'], ['center', '水平居中'], ['right', '右对齐'], ['top', '顶对齐'], ['middle', '垂直居中'], ['bottom', '底对齐']] as const
+const sortedIds = (ids: readonly string[]) => JSON.stringify([...ids].sort())
 
 export function NativeSelectionContext({ documentId, revision, locationId, itemIds, stateId, sceneItemIds = [], enabled, bounds, textEditing = false, ownsDocumentSelection = true }: {
   documentId?: string | null; revision: number; locationId?: string | null; itemIds: readonly string[]; stateId?: string | null; sceneItemIds?: readonly string[]; enabled: boolean
@@ -111,6 +114,21 @@ export function NativeSelectionContext({ documentId, revision, locationId, itemI
   const [notice, setNotice] = useState('')
   const ids = JSON.stringify(itemIds), sceneIds = JSON.stringify(sceneItemIds)
   useLayoutEffect(() => { setRoot(marker.current?.closest('main') ?? null) }, [])
+  // Right-click: the workspace selects what is under the pointer and asks for that selection's menu (M21).
+  const contextMenu = useContextMenu()
+  const menuRequestState = useRef<{ ids: string; items: MenuCommand[] }>({ ids: '[]', items: [] })
+  useEffect(() => {
+    if (!root) return
+    const request = (event: Event) => {
+      const detail = (event as CustomEvent<ObjectContextMenuRequest>).detail
+      const current = menuRequestState.current
+      if (!detail || sortedIds(detail.itemIds) !== current.ids || !current.items.length) return
+      event.preventDefault()
+      contextMenu.open({ x: detail.x, y: detail.y }, '对象操作', [...(detail.extra ?? []), ...current.items])
+    }
+    root.addEventListener(OBJECT_CONTEXT_MENU_EVENT, request)
+    return () => root.removeEventListener(OBJECT_CONTEXT_MENU_EVENT, request)
+  }, [root, contextMenu.open])
   useEffect(() => { setNotice('') }, [documentId, locationId, ids, stateId])
   useEffect(() => {
     if (!documentId || !ownsDocumentSelection) return
@@ -165,8 +183,8 @@ export function NativeSelectionContext({ documentId, revision, locationId, itemI
         replaceImage: () => replacement.current?.click() }
     }
   }
-  const reorder = (move: LayerOrderMove) => run(() => { if (itemIds.length === 1) selectionObjectCommands.reorder(itemIds[0]!, move) }, report)
-  const canMove = (move: LayerOrderMove) => Boolean(single) && itemIds.length === 1 && selectionObjectCommands.canReorder(itemIds[0]!, move)
+  // Commands report a failure next to the bar instead of throwing into React.
+  const guarded = (items: MenuCommand[]): MenuCommand[] => items.map(item => ({ ...item, run: () => run(item.run, report) }))
   // Capture when sending, so the request always names the objects selected now.
   const ai = <QuickBarAiButton targetLabel={itemIds.length > 1 ? `所选 ${itemIds.length} 个对象` : single ? `“${single.view.name}”` : '所选对象'}
     onSubmit={async instruction => {
@@ -175,43 +193,48 @@ export function NativeSelectionContext({ documentId, revision, locationId, itemI
       await workbenchSelection.request(captureCourseObjectSelection(snapshot, locationId, itemIds, stateId), instruction)
     }} />
   let content: ReactNode = null
+  // The selection's right-click menu: the whole list, from the same definitions as the bar's "⋯".
+  let contextItems: MenuCommand[] = []
   if (single) {
     const node = single.view, patch = single.patch
+    const objectState = { locked: node.locked, visible: node.visible, disabledReason: single.disabledReason,
+      setLocked: (locked: boolean) => patch({ locked }), setVisible: (visible: boolean) => patch({ visible }),
+      editText: single.editText, replaceImage: node.type === 'image' ? single.replaceImage : undefined }
+    const ports = selectionObjectCommands.portsFor(itemIds[0]!)
+    const collapsed = node.type === 'external-component' && node.props.collapsible === true && node.props.defaultCollapsed === true
+    const toggleCollapsed = () => { if (node.type === 'external-component') patch({ props: { ...node.props, collapsible: true, defaultCollapsed: !collapsed } }) }
+    contextItems = guarded(single.controller && node.type === 'external-component' ? [
+      // The teacher controller: how playback starts it, and hiding or locking it in place.
+      { id: 'controller.toggle', label: collapsed ? '展开（播放时默认展开）' : '收起（播放时默认收起）', group: 'controller', run: toggleCollapsed,
+        disabledReason: single.disabledReason ?? (node.locked ? '对象已锁定，请先解锁' : null) },
+      node.visible ? { id: 'object.hide', label: '隐藏', group: 'state', run: () => patch({ visible: false }), disabledReason: single.disabledReason }
+        : { id: 'object.show', label: '显示', group: 'state', run: () => patch({ visible: true }), disabledReason: single.disabledReason },
+      node.locked ? { id: 'object.unlock', label: '解锁', group: 'state', run: () => patch({ locked: false }), disabledReason: single.disabledReason }
+        : { id: 'object.lock', label: '锁定', group: 'state', run: () => patch({ locked: true }), disabledReason: single.disabledReason },
+    ] : singleObjectCommands(objectState, ports, { primary: true }))
     if (single.disabledReason) content = <><span title={single.disabledReason}><QuickBarLabel>此处不可编辑</QuickBarLabel></span><QuickBarSeparator />{ai}</>
     // A hidden object stays selected until the selection moves on, so it can be shown again in place.
     else if (!node.visible) content = <><QuickBarLabel>已隐藏</QuickBarLabel><QuickBarButton label="显示" text="显示" icon={<Eye size={14} />} onClick={() => patch({ visible: true })} /><QuickBarSeparator />{ai}</>
     else if (node.locked) content = <><QuickBarLabel>已锁定</QuickBarLabel><QuickBarButton label="解锁" text="解锁" icon={<Unlock size={14} />} onClick={() => patch({ locked: false })} /><QuickBarSeparator />{ai}</>
     else if (single.controller && node.type === 'external-component') {
-      // The teacher controller: whether playback starts it collapsed, and hiding or locking it in place.
-      const collapsed = node.props.collapsible === true && node.props.defaultCollapsed === true
       content = <>
         <QuickBarLabel>教师控制台</QuickBarLabel>
         <QuickBarButton label={collapsed ? '展开（播放时默认展开）' : '收起（播放时默认收起）'} text={collapsed ? '展开' : '收起'}
           icon={collapsed ? <ChevronsUpDown size={14} /> : <ChevronsDownUp size={14} />}
-          onClick={() => patch({ props: { ...node.props, collapsible: true, defaultCollapsed: !collapsed } })} />
+          onClick={toggleCollapsed} />
         <QuickBarButton label="隐藏" text="隐藏" icon={<EyeOff size={14} />} onClick={() => patch({ visible: false })} />
         <QuickBarButton label="锁定" text="锁定" icon={<Lock size={14} />} onClick={() => patch({ locked: true })} />
         <QuickBarSeparator />{ai}
       </>
     }
     else {
-      const items: QuickBarMenuItem[] = [
-        { label: '复制', group: 'edit', onSelect: () => run(selectionObjectCommands.duplicate, report) },
-        { label: '删除', group: 'edit', danger: true, onSelect: () => run(selectionObjectCommands.remove, report) },
-        { label: '上移一层', group: 'order', disabled: !canMove('forward'), onSelect: () => reorder('forward') },
-        { label: '下移一层', group: 'order', disabled: !canMove('backward'), onSelect: () => reorder('backward') },
-        { label: '置于顶层', group: 'order', disabled: !canMove('front'), onSelect: () => reorder('front') },
-        { label: '置于底层', group: 'order', disabled: !canMove('back'), onSelect: () => reorder('back') },
-        { label: '锁定', group: 'state', onSelect: () => patch({ locked: true }) },
-        { label: '隐藏', group: 'state', onSelect: () => patch({ visible: false }) },
-      ]
       content = <>
         <ObjectActions view={node} patch={patch} replaceImage={single.replaceImage} editText={single.editText} />
         {node.type === 'runtime' && <QuickBarPopoverButton label="页面文字" text="页面文字" icon={<Type size={14} />} popoverLabel="页面文字">
           {() => <RuntimePageTextList itemId={node.id} onError={report} />}
         </QuickBarPopoverButton>}
         {node.type !== 'table' && node.type !== 'chart' && node.type !== 'input' && node.type !== 'external-component' && <QuickBarSeparator />}
-        {ai}<QuickBarMenu items={items} />
+        {ai}<QuickBarMenu items={guarded(singleObjectCommands(objectState, ports))} />
       </>
     }
   } else if (selection?.kind === 'multi-selection') {
@@ -219,16 +242,14 @@ export function NativeSelectionContext({ documentId, revision, locationId, itemI
     const unlocked = selection.items.filter(item => !item.locked).length
     const allHidden = selection.items.every(item => !item.visible)
     const show = () => run(() => commands.setVisible(true), report)
-    const items: QuickBarMenuItem[] = [
-      ...(commands.duplicate ? [{ label: '复制所选', group: 'edit', onSelect: () => run(commands.duplicate!, report) }] : []),
-      ...(commands.remove ? [{ label: '删除所选', group: 'edit', danger: true, onSelect: () => run(commands.remove!, report) }] : []),
-      { label: '横向等距分布', group: 'layout', disabled: unlocked < 3, onSelect: () => run(() => commands.distribute('horizontal'), report) },
-      { label: '纵向等距分布', group: 'layout', disabled: unlocked < 3, onSelect: () => run(() => commands.distribute('vertical'), report) },
-      { label: '全部锁定', group: 'state', onSelect: () => run(() => commands.setLocked(true), report) },
-      { label: '全部解锁', group: 'state', onSelect: () => run(() => commands.setLocked(false), report) },
-      { label: '全部显示', group: 'state', onSelect: show },
-      { label: '全部隐藏', group: 'state', onSelect: () => run(() => commands.setVisible(false), report) },
-    ]
+    const items = guarded(multiObjectCommands({
+      count: selection.items.length, unlocked, allHidden, duplicate: commands.duplicate, remove: commands.remove,
+      distribute: axis => commands.distribute(axis), setLocked: locked => commands.setLocked(locked), setVisible: visible => commands.setVisible(visible),
+    }, selectionObjectCommands))
+    const alignReason = selection.unavailableReason ?? (unlocked < 2 ? '至少需要 2 个未锁定对象' : null)
+    contextItems = [...items, ...guarded(MULTI_ALIGN.map(([mode, label]): MenuCommand => ({
+      id: `objects.align.${mode}`, label, group: 'align', run: () => commands.align(mode), disabledReason: alignReason,
+    })))]
     content = <>
       <QuickBarLabel>已选 {selection.items.length} 项{allHidden ? '（已隐藏）' : ''}</QuickBarLabel>
       {allHidden ? <QuickBarButton label="全部显示" text="显示" icon={<Eye size={14} />} onClick={show} />
@@ -242,6 +263,7 @@ export function NativeSelectionContext({ documentId, revision, locationId, itemI
       <QuickBarSeparator />{ai}<QuickBarMenu items={items} />
     </>
   }
+  menuRequestState.current = { ids: sortedIds(itemIds), items: contextItems }
   if (!enabled) return null
   return <span ref={marker} className="native-selection-context" aria-hidden="true">
     {overlay && <input ref={replacement} type="file" accept="image/*" hidden tabIndex={-1} aria-label="替换浮层图片文件" onChange={event => {
@@ -255,5 +277,6 @@ export function NativeSelectionContext({ documentId, revision, locationId, itemI
       {content}
       {notice && <span role="alert" className="selection-quick-bar__notice" title={notice}>{notice}</span>}
     </SelectionQuickBar>}
+    {contextMenu.element}
   </span>
 }

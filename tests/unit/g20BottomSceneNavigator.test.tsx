@@ -127,3 +127,69 @@ it('shows the new rail only in light mode and preserves the professional state s
   expect(screen.queryByRole('navigation', { name: '场景与页面导航' })).toBeNull()
   expect(screen.getByRole('region', { name: '场景状态' })).toBeInTheDocument()
 })
+
+it('M21 keeps "+" on the rail and changes pages from each card’s right-click menu, every step undoable', async () => {
+  const host = await createCourseStoreHost()
+  await host.open(createBlankCourseProject({ includeDefaultController: false, controls: 'none' }))
+  const id = store().courseDocument.documentId!
+  const depth = () => host.registry.get(id).read().undoDepth
+  const slideScenes = () => {
+    const surface = project().surfaces.find(candidate => candidate.type === 'slide')
+    if (surface?.type !== 'slide') throw new Error('expected slide page')
+    return surface.scenes
+  }
+  HTMLElement.prototype.scrollIntoView = vi.fn()
+  render(<BottomSceneNavigator documentId={id} />)
+  const rail = screen.getByRole('navigation', { name: '场景与页面导航' })
+  // "+" is always there, no hover needed.
+  fireEvent.click(within(rail).getByRole('button', { name: '新建场景或页面' }))
+  const addMenu = screen.getByRole('menu', { name: '新建场景或页面' })
+  expect(within(addMenu).getAllByRole('menuitem').map(item => item.getAttribute('aria-label'))).toEqual(['新建场景', '新建演示页', '新建流式讲义', '新建无限画布'])
+  await act(async () => { fireEvent.click(within(addMenu).getByRole('menuitem', { name: '新建场景' })); await store().drainCourseDocument() })
+  expect(slideScenes()).toHaveLength(2)
+  const [first, second] = slideScenes()
+
+  const card = (sceneId: string) => {
+    const location = project().locations.find(candidate => candidate.kind === 'slide-scene' && candidate.sceneId === sceneId)!
+    return screen.getByTestId(`bottom-scene-${buildBottomSceneCards(project()).find(entry => entry.kind === 'slide' && entry.node.locationId === location.id)!.key}`)
+  }
+  // The first scene cannot move further forward and says so; a copy lands after it.
+  fireEvent.contextMenu(card(first!.id))
+  const sceneMenu = screen.getByRole('menu', { name: '场景操作' })
+  expect(within(sceneMenu).getAllByRole('menuitem').map(item => item.getAttribute('aria-label'))).toEqual(['新建场景', '创建副本', '重命名', '前移', '后移', '删除场景'])
+  expect(within(sceneMenu).getByRole('menuitem', { name: '前移' }).getAttribute('aria-disabled')).toBe('true')
+  expect(within(sceneMenu).getByText('已是本页第一个场景')).toBeTruthy()
+  const beforeCopy = depth()
+  await act(async () => { fireEvent.click(within(sceneMenu).getByRole('menuitem', { name: '创建副本' })); await store().drainCourseDocument() })
+  expect(slideScenes()).toHaveLength(3)
+  expect(depth()).toBe(beforeCopy + 1)
+
+  // Rename in place.
+  fireEvent.contextMenu(card(second!.id))
+  fireEvent.click(within(screen.getByRole('menu', { name: '场景操作' })).getByRole('menuitem', { name: '重命名' }))
+  const field = screen.getByRole('textbox', { name: '场景名称' })
+  fireEvent.change(field, { target: { value: '练习' } })
+  await act(async () => { fireEvent.keyDown(field, { key: 'Enter' }); await store().drainCourseDocument() })
+  expect(slideScenes().find(scene => scene.id === second!.id)?.name).toBe('练习')
+
+  // Move the renamed scene to the front, then delete it after confirming; undo brings it back.
+  for (let step = 0; step < 2; step++) {
+    fireEvent.contextMenu(card(second!.id))
+    await act(async () => { fireEvent.click(within(screen.getByRole('menu', { name: '场景操作' })).getByRole('menuitem', { name: '前移' })); await store().drainCourseDocument() })
+  }
+  expect(slideScenes()[0]?.id).toBe(second!.id)
+  fireEvent.contextMenu(card(second!.id))
+  fireEvent.click(within(screen.getByRole('menu', { name: '场景操作' })).getByRole('menuitem', { name: '删除场景' }))
+  expect(slideScenes()).toHaveLength(3)
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: '删除场景' })); await store().drainCourseDocument() })
+  expect(slideScenes().some(scene => scene.id === second!.id)).toBe(false)
+  await act(async () => { store().undo(); await store().drainCourseDocument() })
+  expect(slideScenes().some(scene => scene.id === second!.id)).toBe(true)
+
+  // 母版 can only gain a state; the others say why they are unavailable.
+  fireEvent.contextMenu(within(card(first!.id)).getByRole('button', { name: '母版' }))
+  const stateMenu = screen.getByRole('menu', { name: '状态操作' })
+  expect(within(stateMenu).getByRole('menuitem', { name: '重命名' }).getAttribute('aria-disabled')).toBe('true')
+  await act(async () => { fireEvent.click(within(stateMenu).getByRole('menuitem', { name: '新建状态' })); await store().drainCourseDocument() })
+  expect(slideScenes().find(scene => scene.id === first!.id)?.presentation?.states.length).toBeGreaterThan(1)
+})

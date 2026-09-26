@@ -5,9 +5,11 @@ import {
   useRef,
   useState,
   type CSSProperties,
+  type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from 'react'
+import { requestObjectContextMenu } from '../../editing/commands/objectContextMenu'
 import { CANVAS_HEIGHT, CANVAS_WIDTH, MIN_NODE_SIZE } from '../../../shared/constants'
 import { createFlowViewportGeometry, flowViewportOverlayFrameAt, flowViewportOverlayPoint, projectFlowComponentControllerFrame, revealFlowSelectionPan, type FlowPoint } from '../../../shared/flowViewportGeometry'
 import { DEFAULT_SLIDE_CANVAS } from '../../../shared/slideCanvas'
@@ -399,6 +401,19 @@ export function FlowOverlayAuthoringLayer({
     return receipt.ok ? target : null
   }
 
+  // M21 right-click: select the object as a press would, then ask the selection owner for that selection's menu.
+  const openOverlayMenu = (event: ReactMouseEvent<HTMLElement>, layer: FlowEditorLayerView) => {
+    event.preventDefault()
+    event.stopPropagation()
+    if (readOnly) return
+    const current = selection?.selectedOverlayIds ?? []
+    const selected = current.includes(layer.selectionId)
+    if (!selected && (onBeforeGesture?.() === false || !selectOverlay(layer))) return
+    const root = event.currentTarget.closest('main'), point = { x: event.clientX, y: event.clientY }
+    const itemIds = selected ? [...current] : [layer.selectionId]
+    if (root) window.setTimeout(() => { requestObjectContextMenu(root, { ...point, itemIds }) }, 0)
+  }
+
   const beginOverlayGesture = (
     event: ReactPointerEvent<HTMLElement>,
     layer: FlowEditorLayerView,
@@ -576,6 +591,7 @@ export function FlowOverlayAuthoringLayer({
           pointerEvents: interactive ? 'auto' : 'none',
         }}
         onPointerDown={interactive ? (event) => beginOverlayGesture(event, layer) : undefined}
+        onContextMenu={interactive ? (event) => openOverlayMenu(event, layer) : undefined}
         onDoubleClick={!readOnly && layer.item.kind === 'native' && layer.item.content.nativeType === 'formula' ? event => { event.stopPropagation(); onEditFormula?.(layer.selectionId) } : undefined}
         onPointerMove={readOnly ? undefined : moveOverlayGesture}
         onPointerUp={readOnly ? undefined : endOverlayGesture}
@@ -635,6 +651,7 @@ export function FlowOverlayAuthoringLayer({
           background: 'transparent',
         }}
         onPointerDown={readOnly ? undefined : (event) => beginOverlayGesture(event, layer)}
+        onContextMenu={readOnly ? undefined : (event) => openOverlayMenu(event, layer)}
         onDoubleClick={!readOnly && layer.item.kind === 'native' && layer.item.content.nativeType === 'formula' ? event => { event.stopPropagation(); onEditFormula?.(layer.selectionId) } : undefined}
         onPointerMove={readOnly ? undefined : moveOverlayGesture}
         onPointerUp={readOnly ? undefined : endOverlayGesture}

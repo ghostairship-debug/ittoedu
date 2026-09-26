@@ -566,6 +566,30 @@ export function createSlideWorkspaceAuthoringController(
     return v9Result(next, options, { command })
   }
 
+  /**
+   * A right-click selects what is under the pointer the way a click does, except that it keeps a selection the
+   * object already belongs to. Null when it lands on empty canvas.
+   */
+  const contextTarget = (
+    pointer: SlideAuthoringPointer,
+    options: StageViewportTransformOptions,
+  ): { layerItemId: string } | null => {
+    const backend = readBackend()
+    if (!backend) return null
+    const hit = hitTestV9SlideLayerItems(layerTargets(backend), pointerToWorld(pointer, options), viewportTransform(options).scale)
+    if (!hit) return null
+    if (!backend.getSession().selection.selectionIds.includes(hit.layerItemId)) {
+      const command = runCommand((current) =>
+        current.selectLayers([hit.layerItemId], false, { expectedRevision: current.getSnapshot().revision }),
+      )
+      ports.commandPort.afterSelectLayers?.(command)
+    }
+    gesture = null
+    preview = null
+    clearLineDrag()
+    return { layerItemId: hit.layerItemId }
+  }
+
   const pointerDown = (
     pointer: SlideAuthoringPointer,
     options: StageViewportTransformOptions,
@@ -811,6 +835,7 @@ export function createSlideWorkspaceAuthoringController(
     currentTargets,
     overlayGeometry,
     selectFromLayerIds,
+    contextTarget,
     pointerDown,
     pointerMove,
     pointerUp,
