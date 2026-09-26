@@ -55,6 +55,24 @@ export function slideCourse(title: string, canvas: { width: number; height: numb
   return createCourseProjectArchive({ project: courseProjectDocumentSchema.parse(project), assetFiles: {}, componentFiles: controllerFiles() })
 }
 
+/** A course that opens on a Spatial page; its Slide page carries the course canvas the camera follows. */
+export function spatialCourse(canvas: { width: number; height: number }): Uint8Array {
+  const base = createBlankCourseProject({ title: 'M19 spatial', canvas })
+  const project = courseProjectDocumentSchema.parse({
+    ...base,
+    locations: [...base.locations, { id: 'm19-spatial-home', label: '空间', kind: 'spatial-camera', surfaceId: 'm19-spatial', cameraFrameId: 'm19-spatial-home' }],
+    startLocationId: 'm19-spatial-home',
+    surfaces: [...base.surfaces, { id: 'm19-spatial', type: 'spatial-2d', title: '空间', backgroundColor: '#ffffff', surfaceLayerItems: [],
+      world: { bounds: { mode: 'infinite' }, layerItems: [textBlock('world-note', { x: 40, y: 40, width: 280, height: 80 }, '空间', '#245b46', 1)], paths: [], relations: [] },
+      camera: { home: { x: 0, y: 0, zoom: 1 }, frames: [{ id: 'm19-spatial-home', name: '全景', x: 0, y: 0, zoom: 1 }] }, semanticZoom: [] }],
+    mixedPrintPlan: { pageSize: 'surface-native', orientation: 'auto', entries: [
+      { id: 'print-slide', kind: 'slide-scenes', surfaceId: base.surfaces[0]!.id, sceneIds: base.surfaces[0]!.type === 'slide' ? base.surfaces[0]!.scenes.map(scene => scene.id) : [] },
+      { id: 'print-spatial', kind: 'spatial-frames', surfaceId: 'm19-spatial', cameraFrameIds: ['m19-spatial-home'] },
+    ] },
+  })
+  return createCourseProjectArchive({ project, assetFiles: {}, componentFiles: controllerFiles() })
+}
+
 export const FLOW_CONTROLLER_ID = 'm19-flow-controller'
 
 /** The architecture Flow-heavy course (formula, divider, component, screen overlay) with the teacher controller added. */

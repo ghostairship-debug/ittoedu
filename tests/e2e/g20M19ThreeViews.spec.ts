@@ -1,15 +1,49 @@
-import { _electron as electron, expect, test, type ElectronApplication } from '@playwright/test'
+import { _electron as electron, expect, test, type ElectronApplication, type Page } from '@playwright/test'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { BACKGROUND_E2E_ENV } from '../../src/main/windowVisibility'
 import { EDITOR_PAGE_INSETS, WINDOW_PAGE_INSETS } from '../../src/shared/pageFrame'
 import {
   expectFit, expectSameRect, flowCourse, FLOW_CONTROLLER_ID, isOffPageColour, openInWorkbench, pixelAt, rectOf, root,
-  settledRect, slideCourse, solidPng, type Rect,
+  settledRect, slideCourse, solidPng, spatialCourse, type Rect,
 } from './helpers/g20M19Harness'
 
 const EDITOR_INSETS = EDITOR_PAGE_INSETS
 const WINDOW_INSETS = WINDOW_PAGE_INSETS
+
+/**
+ * Zoomed in, the page still cuts the off-page block at its now larger edge: zoom with Ctrl+wheel, scroll to the
+ * page's right edge, sample both sides of it, then zoom back and check the page returns to its fitted place.
+ */
+async function expectZoomedClip(page: Page, stageSelector: string, viewport: Rect, fitted: Rect, course: { canvas: { width: number; height: number }; offPage: Rect }, shot: string) {
+  await page.mouse.move(viewport.x + viewport.width / 2, viewport.y + viewport.height / 2)
+  // Two wheel notches: well under the zoom limit, so zooming back out returns exactly to the fitted page.
+  await page.keyboard.down('Control')
+  for (let step = 0; step < 2; step++) await page.mouse.wheel(0, -120)
+  await page.keyboard.up('Control')
+  for (let step = 0; step < 12; step++) await page.mouse.wheel(600, 0)
+  const zoomed = await settledRect(page, stageSelector)
+  expect(zoomed.width).toBeGreaterThan(fitted.width * 1.15)
+  const edge = zoomed.x + zoomed.width, row = zoomed.y + (course.offPage.y + course.offPage.height / 2) * zoomed.width / course.canvas.width
+  expect(edge).toBeLessThanOrEqual(viewport.x + viewport.width)
+  expect(row).toBeGreaterThan(viewport.y)
+  expect(row).toBeLessThan(viewport.y + viewport.height)
+  expect(isOffPageColour(await pixelAt(page, page, edge - 6, row))).toBe(true)
+  expect(isOffPageColour(await pixelAt(page, page, edge + 8, row))).toBe(false)
+  await page.screenshot({ path: shot })
+  await page.keyboard.down('Control')
+  for (let step = 0; step < 2; step++) await page.mouse.wheel(0, 120)
+  await page.keyboard.up('Control')
+  for (let step = 0; step < 12; step++) await page.mouse.wheel(-600, 0)
+  const restored = await settledRect(page, stageSelector)
+  const state = await page.evaluate(({ selector, x, y }) => {
+    const hit = document.elementFromPoint(x, y) as HTMLElement | null
+    return { transform: document.querySelector<HTMLElement>(selector)?.style.transform ?? null, hit: hit ? `${hit.tagName}.${String(hit.className).slice(0, 60)}` : null }
+  }, { selector: stageSelector, x: viewport.x + viewport.width / 2, y: viewport.y + viewport.height / 2 })
+  expect(restored, JSON.stringify(state)).toMatchObject({})
+  for (const key of ['x', 'y', 'width', 'height'] as const) expect(Math.abs(restored[key] - fitted[key]), `${key} ${JSON.stringify(state)}`).toBeLessThanOrEqual(1.5)
+  return zoomed
+}
 
 test('M19-T04 M19-T05 M19-T06 editing, try-run, whole-course preview and export share one page frame', async () => {
   test.skip(process.platform !== 'win32', 'Windows desktop acceptance path.')
@@ -24,6 +58,7 @@ test('M19-T04 M19-T05 M19-T06 editing, try-run, whole-course preview and export 
   } as const
   for (const [key, course] of Object.entries(courses)) writeFileSync(join(workspace, course.file), slideCourse(`M19 ${key}`, course.canvas, course.offPage))
   writeFileSync(join(workspace, 'flow-controller.h5lesson'), flowCourse())
+  writeFileSync(join(workspace, 'spatial-portrait.h5lesson'), spatialCourse({ width: 720, height: 1280 }))
   const image = join(directory, 'sample.png'); writeFileSync(image, solidPng(400, 300, [37, 99, 235]))
   const evidence: Record<string, unknown> = { run: directory, courses }
   const errors: string[] = []
@@ -58,6 +93,15 @@ test('M19-T04 M19-T05 M19-T06 editing, try-run, whole-course preview and export 
         expect(isOffPageColour(await pixelAt(page, page, edit.x + edit.width - 6, row))).toBe(true)
         expect(isOffPageColour(await pixelAt(page, page, edit.x + edit.width + 8, row))).toBe(false)
         const editController = await settledRect(page, '[data-controller-authoring-id]')
+        if (key === 'landscape') {
+          // The Slide page's teacher controller has the same quick bar, and picking it writes nothing.
+          const revision = () => page.evaluate(async () => (await window.desktopAPI.documents!.list()).find(item => item.binding.kind === 'file' && item.binding.path.endsWith('landscape.h5lesson'))!.revision)
+          const before = await revision()
+          await page.mouse.click(editController.x + editController.width / 2, editController.y + editController.height / 2)
+          for (const name of [/^(展开|收起)/, /^隐藏$/, /^锁定$/, /^AI 修改$/]) await expect(page.getByRole('button', { name }).first()).toBeVisible()
+          expect(await revision()).toBe(before)
+          evidence.editZoom = await expectZoomedClip(page, '.canvas-stage-stack', viewport, edit, course, join(shots, 'landscape-edit-zoomed.png'))
+        }
 
         await page.getByRole('button', { name: '当前位置试运行', exact: true }).click()
         const run = await rectOf(page, '.course-try-run-host [data-slide-scene-stage]')
@@ -65,6 +109,7 @@ test('M19-T04 M19-T05 M19-T06 editing, try-run, whole-course preview and export 
         expectSameRect(run, edit)
         expect(isOffPageColour(await pixelAt(page, page, run.x + run.width - 6, row))).toBe(true)
         expect(isOffPageColour(await pixelAt(page, page, run.x + run.width + 8, row))).toBe(false)
+        if (key === 'landscape') evidence.runZoom = await expectZoomedClip(page, '.course-try-run-host [data-slide-scene-stage]', viewport, run, course, join(shots, 'landscape-try-run-zoomed.png'))
         // The teacher controller follows the same rule in both views (kept on the visible page).
         const runController = await settledRect(page, '.course-try-run-host .published-component-mount')
         evidence[key] = { viewport, edit, run, editController, runController }
@@ -139,6 +184,19 @@ test('M19-T04 M19-T05 M19-T06 editing, try-run, whole-course preview and export 
       await page.getByRole('button', { name: '母版', exact: true }).first().click()
     })
 
+    await test.step('M19-T05: the Spatial camera takes the course canvas ratio in edit and try-run', async () => {
+      await openInWorkbench(page, 'spatial-portrait.h5lesson')
+      const frame = await rectOf(page, '.spatial-camera-frame--active')
+      expect(Math.abs(frame.width / frame.height - 720 / 1280)).toBeLessThan(0.01)
+      await page.screenshot({ path: join(shots, 'spatial-edit.png') })
+      await page.getByRole('button', { name: '当前位置试运行', exact: true }).click()
+      const run = await rectOf(page, '.spatial-try-run-host section[data-spatial-viewport-width]')
+      await page.screenshot({ path: join(shots, 'spatial-try-run.png') })
+      evidence.spatial = { frame, run }
+      expectSameRect(run, frame)
+      await page.getByRole('button', { name: '编辑状态', exact: true }).click()
+    })
+
     for (const [key, course] of Object.entries(courses)) {
       await test.step(`${key}: whole-course preview uses the same frame with window margins`, async () => {
         await openInWorkbench(page, course.file)
@@ -198,18 +256,46 @@ test('M19-T04 M19-T05 M19-T06 editing, try-run, whole-course preview and export 
       const editController = await settledRect(page, `.flow-authoring-layer-overlay [data-controller-authoring-id="${FLOW_CONTROLLER_ID}"]`, nudge)
       const editFormula = await rectOf(page, '.flow-workspace [data-flow-body-block="formula"]')
       const editDivider = await rectOf(page, '.flow-workspace hr[data-flow-body-block]')
+      const editComponent = await rectOf(page, '.flow-workspace [data-flow-component-package-id]')
+      const editNote = await rectOf(page, '[data-testid="flow-layer-card-flow-surface-note"]')
       await page.screenshot({ path: join(shots, 'flow-edit.png') })
       await page.getByRole('button', { name: '当前位置试运行', exact: true }).click()
       const runController = await settledRect(page, `.flow-try-run-host [data-flow-overlay-item="${FLOW_CONTROLLER_ID}"]`, nudge)
       const runFormula = await rectOf(page, '.flow-try-run-host [data-flow-formula-id]')
       const runDivider = await rectOf(page, '.flow-try-run-host hr[data-flow-body-block]')
+      const runComponent = await rectOf(page, '.flow-try-run-host figure.flow-block-component')
+      const runNote = await rectOf(page, '.flow-try-run-host [data-flow-overlay-item="flow-surface-note"]')
       await page.screenshot({ path: join(shots, 'flow-try-run.png') })
-      evidence.flow = { editFormula, runFormula, editDivider, runDivider, editController, runController }
+      evidence.flow = { editFormula, runFormula, editDivider, runDivider, editComponent, runComponent, editNote, runNote, editController, runController }
       expect(Math.abs(runFormula.height - editFormula.height)).toBeLessThanOrEqual(2)
       expect(Math.abs(runDivider.height - editDivider.height)).toBeLessThanOrEqual(1)
+      expectSameRect(runComponent, editComponent, 2)
+      // The screen-anchored overlay sits in the same place in both views.
+      expectSameRect(runNote, editNote, 2)
       // The controller sits in the same place on the Flow page in both views.
       expectSameRect(runController, editController, 2)
       await page.getByRole('button', { name: '编辑状态', exact: true }).click()
+
+      // A narrower window keeps the overlay where the canvas says, relative to the view, and inside it.
+      const noteFrame = await page.evaluate(async () => {
+        const entry = (await window.desktopAPI.documents!.list()).find(item => item.binding.kind === 'file' && item.binding.path.endsWith('flow-controller.h5lesson'))!
+        const project = ((await window.desktopAPI.documents!.read(entry.documentId)).model as unknown as { project: { surfaces: { type: string; surfaceLayerItems?: { item: { layerItemId: string; frame: { x: number; y: number; width: number; height: number } } }[] }[] } }).project
+        return project.surfaces.find(surface => surface.type === 'flow')!.surfaceLayerItems!.find(entry => entry.item.layerItemId === 'flow-surface-note')!.item.frame
+      })
+      const expectedNote = (plane: Rect) => plane.x + Math.max(0, Math.min(noteFrame.x * plane.width / 1280, plane.width - noteFrame.width))
+      const planeSelector = '[data-testid="flow-authoring-layer-overlay"]', noteSelector = '[data-testid="flow-layer-card-flow-surface-note"]'
+      const widePlane = await settledRect(page, planeSelector, nudge)
+      expect(Math.abs((await settledRect(page, noteSelector, nudge)).x - expectedNote(widePlane))).toBeLessThanOrEqual(2)
+      await app!.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.setContentSize(1400, 1000))
+      const narrowPlane = await settledRect(page, planeSelector, nudge)
+      expect(narrowPlane.width).toBeLessThan(widePlane.width - 100)
+      const narrowNote = await settledRect(page, noteSelector, nudge)
+      expect(Math.abs(narrowNote.x - expectedNote(narrowPlane))).toBeLessThanOrEqual(2)
+      expect(narrowNote.x + narrowNote.width).toBeLessThanOrEqual(narrowPlane.x + narrowPlane.width + 1)
+      await page.screenshot({ path: join(shots, 'flow-edit-narrow.png') })
+      evidence.flowResize = { widePlane, narrowPlane, narrowNote, noteFrame }
+      await app!.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.setContentSize(1600, 1000))
+      await settledRect(page, planeSelector, nudge)
 
       // The controller as it is shown (collapsed here: its round button), picked and dragged in place.
       const footprint = '.flow-authoring-layer-overlay [data-controller-authoring-id]'
