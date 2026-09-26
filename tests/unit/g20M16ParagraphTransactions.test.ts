@@ -3,6 +3,7 @@ import { createTextNode } from '@/core/tools/nativeNodeFactories'
 import { sceneNodeToCourseLayerItem } from '@/shared/courseProjectModel'
 import { reconcileFlowParagraphAnchors, setFlowParagraphPlacement } from '@/core/tools/flowParagraphPlacement'
 import { planDeleteFlowBlocks } from '@/core/tools/flowContent'
+import { insertFlowOverlayShape, insertFlowOverlayText } from '@/core/tools/flowNativeInsertion'
 import { flowSurfaceIn } from '@/core/tools/flowDocumentModel'
 import { replaceFlowDocumentContent } from '@/renderer/course/flowEditorCommands'
 import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
@@ -32,6 +33,7 @@ describe('Flow paragraph placement transactions', () => {
     expect(next[0]?.paragraphAnchor).toEqual({ blockId: 'a', offsetY: 12, xRatio: 0.2 })
     expect(entry.paragraphAnchor?.blockId).toBe('b')
     expect(reconcileFlowParagraphAnchors(before, [heading, paragraph('a'), paragraph('b'), paragraph('c')], [entry])[0]).toBe(entry)
+    expect(() => reconcileFlowParagraphAnchors(before, [heading, paragraph('a'), paragraph('c')], [{ ...entry, paragraphAnchor: { blockId: 'foreign', offsetY: 12, xRatio: 0.2 } }])).toThrow('挂靠段落不属于原正文')
   })
 
   it('reconciles delete and full replacement within one formal revision', () => {
@@ -44,6 +46,16 @@ describe('Flow paragraph placement transactions', () => {
     expect(replaced.ok).toBe(true)
     expect(replaced.nextDocument?.revision).toBe(2)
     expect(flowSurfaceIn(replaced.nextDocument!, 'flow').surfaceLayerItems[0]?.paragraphAnchor?.blockId).toBe('h')
+  })
+
+  it('keeps global Native coordinates while new surface Native uses paper space', () => {
+    const project = fixture()
+    insertFlowOverlayText(project, { source: 'global', surfaceId: 'flow' }, { id: 'global-text' })
+    insertFlowOverlayShape(project, { source: 'global', surfaceId: 'flow' }, { id: 'global-shape', shapeType: 'rectangle' })
+    insertFlowOverlayText(project, { source: 'surface', surfaceId: 'flow' }, { id: 'paper-text' })
+    insertFlowOverlayShape(project, { source: 'surface', surfaceId: 'flow' }, { id: 'paper-shape', shapeType: 'rectangle' })
+    expect(project.globalLayerItems.map(entry => entry.item.paperSpace)).toEqual([undefined, undefined])
+    expect(flowSurfaceIn(project, 'flow').surfaceLayerItems.filter(entry => entry.item.layerItemId.startsWith('paper-')).map(entry => entry.item.paperSpace)).toEqual(['paper', 'paper'])
   })
 
   it('switches to fixed paper at the resolved position and back without a jump', () => {

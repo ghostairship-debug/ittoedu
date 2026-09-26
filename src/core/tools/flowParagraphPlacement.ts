@@ -17,7 +17,8 @@ export function reconcileFlowParagraphAnchors(
     const anchor = entry.paragraphAnchor
     if (!anchor || after.has(anchor.blockId)) return entry
     const index = before.indexOf(anchor.blockId)
-    const preceding = index < 0 ? undefined : before.slice(0, index).reverse().find(id => after.has(id))
+    if (index < 0) throw new Error(`挂靠段落不属于原正文：${anchor.blockId}`)
+    const preceding = before.slice(0, index).reverse().find(id => after.has(id))
     const target = preceding ?? first
     if (!target) throw new Error('Flow 正文不能为空，无法改挂段落对象')
     return { ...entry, paragraphAnchor: { ...anchor, blockId: target } }

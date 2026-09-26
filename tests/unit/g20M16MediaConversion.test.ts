@@ -40,6 +40,9 @@ describe('Flow body and paper media conversion', () => {
   it('rejects stale commands without changing the project', () => {
     const original = fixture()
     expect(() => floatFlowMediaBlock(original, { surfaceId: 'flow', blockId: 'media', frame: { mode: 'absolute', x: 0, y: 0, width: 100, height: 100 }, expectedRevision: 0 })).toThrow('stale-revision')
+    expect(() => floatFlowMediaBlock(original, { surfaceId: 'flow', blockId: 'media', frame: { mode: 'absolute', x: 0, y: 0, width: 100, height: 100 } })).toThrow('找不到当前页的挂靠段落')
+    expect(() => floatFlowMediaBlock(original, { surfaceId: 'flow', blockId: 'media', frame: { mode: 'absolute', x: 0, y: 0, width: 100, height: 100 }, anchor: { blockId: 'other-page', offsetY: 0, xRatio: 0.2 } })).toThrow('找不到当前页的挂靠段落')
     expect(original.revision).toBe(1)
+    expect(flowSurfaceIn(original, 'flow').surfaceLayerItems).toHaveLength(0)
   })
 })

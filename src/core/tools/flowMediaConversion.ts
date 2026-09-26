@@ -12,6 +12,7 @@ export function floatFlowMediaBlock(
   const surface = flowSurfaceIn(document, input.surfaceId)
   const source = findFlowBlockRecursive(surface.blocks, input.blockId)
   if (!source || source.block.type !== 'media') throw new Error('找不到正文媒体')
+  if (!input.anchor || !findFlowBlockRecursive(surface.blocks, input.anchor.blockId)) throw new Error('找不到当前页的挂靠段落')
   if (source.block.mediaKind === 'audio') throw new Error('音频不支持转换为纸面 Native')
   if (!document.assets[source.block.assetId] || document.assets[source.block.assetId]?.kind !== source.block.mediaKind) throw new Error('正文媒体素材无效')
   const layerItemId = stableFlowId('media', input.layerItemId)
@@ -31,7 +32,7 @@ export function floatFlowMediaBlock(
     if (media.caption && captionBlockId) found.blocks.splice(found.index, 0, { id: captionBlockId, type: 'paragraph', content: structuredClone(media.caption) })
     appendOverlayItem(draft, { source: 'surface', surfaceId: input.surfaceId }, item)
     const entry = target.surfaceLayerItems.find(candidate => candidate.item.layerItemId === item.layerItemId)!
-    if (input.anchor) entry.paragraphAnchor = { ...input.anchor }
+    entry.paragraphAnchor = { ...input.anchor! }
     target.surfaceLayerItems = reconcileFlowParagraphAnchors(surface.blocks, target.blocks, target.surfaceLayerItems)
     syncFlowCourseLocations(draft, input.surfaceId)
   }, input.now)
