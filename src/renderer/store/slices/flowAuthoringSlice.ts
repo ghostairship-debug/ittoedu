@@ -5,7 +5,11 @@ import { createChartNode, createChartLayerItem } from '../../../core/tools/nativ
 import type { ChartType } from '../../course/chartContentOperations'
 import type { ChartTextField } from '../../authoring/chartTextDraft'
 import type { ComponentPackageData } from '../../../shared/componentTypes'
-import type { CourseProjectDocument, FlowBlock, NativeLayerItem } from '../../../shared/courseProjectTypes'
+import type { CourseProjectDocument, FlowBlock, LayerFrame, NativeLayerItem } from '../../../shared/courseProjectTypes'
+import type { AssetMeta } from '../../../shared/contracts/media-v1'
+import { planFlowMenuDocumentInsertion, type FlowMenuDocumentKind } from '../../../core/tools/flowMenuDocumentInsertion'
+import { insertFlowMenuPaperItem, type FlowMenuPaperItem, type FlowMenuParagraphAnchor } from '../../../core/tools/flowMenuPaperInsertion'
+import { planInsertFlowBlock } from '../../../core/tools/flowContent'
 import type { FlowParagraphAnchor } from '../../../shared/flowParagraphAnchors'
 import type { FormulaAstNode } from '../../../shared/contracts/native-v1'
 import type { DocumentDiagnostic } from '../../../shared/document/ports'
@@ -176,6 +180,7 @@ export type FlowAuthoringPorts = {
   read(): FlowOwnedState
   readAuthoringSession(): CourseAuthoringSession | null
   readAssetSidecar(): CourseAssetSidecar | null
+  readCanvasMode?(): 'edit' | 'run'
   patch(patch: Partial<FlowOwnedState>): void
   persist(
     result: FlowCommandResult | FlowSharedAuthoringResult,
@@ -183,6 +188,11 @@ export type FlowAuthoringPorts = {
   ): FlowCommandResult | FlowSharedAuthoringResult
   applyBackend(session: FlowAuthoringSession, extra?: FlowApplyBackendExtra): void
 }
+
+export type FlowMenuMediaSource =
+  | { readonly kind: 'existing'; readonly assetId: string }
+  | { readonly kind: 'new'; readonly meta: AssetMeta; readonly bytes: Uint8Array }
+  | { readonly kind: 'new'; readonly name: string; readonly mimeType: string; readonly bytes: Uint8Array; readonly duration?: number; readonly width?: number; readonly height?: number }
 
 export type FlowAuthoringIntent = (
   | {
@@ -204,6 +214,10 @@ export type FlowAuthoringIntent = (
       readonly tableColumnId?: string
     }
   | { readonly kind: 'begin-formula-edit' }
+  | { readonly kind: 'menu-insert-document'; readonly documentKind: FlowMenuDocumentKind }
+  | { readonly kind: 'menu-insert-paper'; readonly item: FlowMenuPaperItem; readonly frame: LayerFrame; readonly paragraphAnchor: FlowMenuParagraphAnchor }
+  | { readonly kind: 'menu-insert-media'; readonly placement: 'document'; readonly mediaKind: 'image' | 'video' | 'audio'; readonly source: FlowMenuMediaSource }
+  | { readonly kind: 'menu-insert-media'; readonly placement: 'paper'; readonly mediaKind: 'image'; readonly source: FlowMenuMediaSource; readonly item: FlowMenuPaperItem; readonly frame: LayerFrame; readonly paragraphAnchor: FlowMenuParagraphAnchor }
   | { readonly kind: 'replace-document-content'; readonly blocks: FlowBlock[]; readonly historyGroup: string; readonly preparedResources?: unknown }
   | { readonly kind: 'document-history'; readonly direction: 'undo' | 'redo' }
   | { readonly kind: 'update-document-draft'; readonly source: string; readonly diagnostics: DocumentDiagnostic[]; readonly composing: boolean }
@@ -292,6 +306,9 @@ const FLOW_ACTIVE_EDIT_REQUIRES_ATOMIC_COMMIT =
 
 function flowIntentMutatesDocument(intent: FlowAuthoringIntent): boolean {
   switch (intent.kind) {
+    case 'menu-insert-document':
+    case 'menu-insert-paper':
+    case 'menu-insert-media':
     case 'format-block':
     case 'execute-editor-command':
     case 'replace-document-content':
@@ -944,6 +961,15 @@ export function createFlowAuthoringSlice(
     let committedSelection: FlowEditorSelection | null = null
     let committedHistoryEntry = false
 
+    if (intent.kind === 'menu-insert-document' || intent.kind === 'menu-insert-paper' || intent.kind === 'menu-insert-media') {
+      if (flow.readCanvasMode?.() !== 'edit') return rejectedFlowReceipt('当前为只读模式')
+      if (target.owner === 'global' || session.selection.authoringScope === 'global') return rejectedFlowReceipt('全局图层不能插入 Flow 页面')
+      if (target.itemId !== target.surfaceId && !findFlowBlockRecursive(flowSurfaceIn(document, target.surfaceId).blocks, target.itemId)) {
+        return rejectedFlowReceipt('菜单目标必须是当前页面或正文块')
+      }
+      if (flow.read().flowTextEdit) return rejectedFlowReceipt(FLOW_ACTIVE_EDIT_REQUIRES_ATOMIC_COMMIT)
+    }
+
     if (flowIntentMutatesDocument(intent)) {
       const currentEdit = flow.read().flowTextEdit
       if (!Object.is(currentEdit, intent.expectedEdit ?? null)) {
@@ -998,6 +1024,67 @@ export function createFlowAuthoringSlice(
 
     try {
       switch (intent.kind) {
+        case 'menu-insert-document': {
+          const result = planFlowMenuDocumentInsertion(document, {
+            projectId: target.projectId, revision: document.revision, locationId: target.locationId,
+            surfaceId: target.surfaceId, selectedBlockId: target.itemId === target.surfaceId ? null : target.itemId,
+          }, intent.documentKind)
+          if (!result.ok || !result.nextDocument || !result.createdBlockIds?.[0]) return rejectedFlowReceipt(result.reason ?? '正文插入失败')
+          const selection = selectFlowEditorBlock(result.nextDocument, target.locationId, result.createdBlockIds[0])
+          return persistIntentResult({ ...result, selection }, { selection, statusMessage: '已插入正文内容' })
+        }
+        case 'menu-insert-paper': {
+          const inserted = insertFlowMenuPaperItem(document, {
+            surfaceId: target.surfaceId, item: intent.item, frame: intent.frame,
+            paragraphAnchor: intent.paragraphAnchor, expectedRevision: document.revision,
+          })
+          const selection = selectFlowOverlay(inserted.nextDocument, target.locationId, [inserted.layerItemId])
+          return persistIntentResult({ ok: true, nextDocument: inserted.nextDocument, historyEntry: true, selection }, { selection, statusMessage: '已插入纸面对象' })
+        }
+        case 'menu-insert-media': {
+          const sidecar = intent.source.kind === 'new' ? flow.readAssetSidecar() : null
+          if (intent.source.kind === 'new' && !sidecar) return rejectedFlowReceipt('缺少当前 Flow 资源边车')
+          let imported: { meta: AssetMeta; bytes: Uint8Array } | null = null
+          if (intent.source.kind === 'new') {
+            const source = intent.source
+            imported = 'meta' in source
+              ? { meta: source.meta, bytes: Uint8Array.from(source.bytes) }
+              : intent.mediaKind === 'image'
+                ? createImageAssetImport({ name: source.name, mimeType: source.mimeType, bytes: source.bytes },
+                    source.width && source.height ? { dimensions: { width: source.width, height: source.height } } : {})
+                : createMediaAssetImport(
+                    { name: source.name, mimeType: source.mimeType, bytes: source.bytes },
+                    intent.mediaKind, { duration: source.duration ?? 0, width: source.width, height: source.height },
+                  )
+          }
+          if (imported && (imported.meta.kind !== intent.mediaKind || imported.meta.byteLength !== imported.bytes.byteLength || document.assets[imported.meta.id])) {
+            return rejectedFlowReceipt('新素材元数据与文件不一致或 ID 已存在')
+          }
+          const assetId = imported?.meta.id ?? (intent.source.kind === 'existing' ? intent.source.assetId : '')
+          const asset = imported?.meta ?? document.assets[assetId]
+          if (!asset || asset.kind !== intent.mediaKind) return rejectedFlowReceipt('找不到匹配类型的媒体素材')
+          const candidate = imported ? structuredClone(document) : document
+          if (imported) candidate.assets[assetId] = imported.meta
+          const extra = imported && sidecar ? { sidecar: freezeCourseAssetSidecar({ ...sidecar.files, [assetId]: imported.bytes }) } : {}
+          if (intent.placement === 'paper') {
+            if (intent.item.kind !== 'native' || intent.item.content.nativeType !== 'image') return rejectedFlowReceipt('纸面媒体只支持图片')
+            const item = structuredClone(intent.item)
+            if (item.kind !== 'native' || item.content.nativeType !== 'image') return rejectedFlowReceipt('纸面媒体只支持图片')
+            item.content.data.assetId = assetId
+            const inserted = insertFlowMenuPaperItem(candidate, { surfaceId: target.surfaceId, item, frame: intent.frame, paragraphAnchor: intent.paragraphAnchor, expectedRevision: document.revision })
+            const selection = selectFlowOverlay(inserted.nextDocument, target.locationId, [inserted.layerItemId])
+            return persistIntentResult({ ok: true, nextDocument: inserted.nextDocument, historyEntry: true, selection }, { ...extra, selection, statusMessage: '已插入纸面图片' })
+          }
+          const surface = flowSurfaceIn(candidate, target.surfaceId)
+          const selected = target.itemId === target.surfaceId ? null : findFlowBlockRecursive(surface.blocks, target.itemId)
+          const result = planInsertFlowBlock(candidate, { surfaceId: target.surfaceId, parentId: selected?.parentId ?? null,
+            index: selected ? selected.index + 1 : surface.blocks.length,
+            block: { type: 'media', assetId, mediaKind: intent.mediaKind, layout: 'content-width' },
+          }, { expectedRevision: document.revision })
+          if (!result.ok || !result.nextDocument || !result.createdBlockIds?.[0]) return rejectedFlowReceipt(result.reason ?? '正文媒体插入失败')
+          const selection = selectFlowEditorBlock(result.nextDocument, target.locationId, result.createdBlockIds[0])
+          return persistIntentResult({ ...result, selection }, { ...extra, selection, statusMessage: '已插入正文媒体' })
+        }
         case 'replace-document-content': {
           if (intent.preparedResources !== undefined) {
             const prepared = prepareFlowDocumentResourceTransaction(document, target.surfaceId, intent.blocks, intent.preparedResources)
