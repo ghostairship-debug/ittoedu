@@ -5,8 +5,10 @@ import path from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { afterEach, expect, it, vi } from 'vitest'
 import { createBlankCourseProject } from '../../src/core/course/createCourseProject'
-import { createCourseProjectArchive } from '../../src/core/drivers/codecs/courseProjectArchive'
+import { createCourseProjectArchive, type CourseProjectArchiveData } from '../../src/core/drivers/codecs/courseProjectArchive'
 import { createTextNode } from '../../src/core/tools/nativeNodeFactories'
+import { findFlowBlockRecursive } from '../../src/core/tools/flowDocumentModel'
+import { listCourseProjectV9Fixtures } from '../fixtures/course-project-v9/sources'
 import { sceneNodeToCourseLayerItem } from '../../src/shared/courseProjectModel'
 import { courseProjectDocumentSchema } from '../../src/shared/courseProjectSchema'
 import type { CourseProjectDocument } from '../../src/shared/courseProjectTypes'
@@ -28,7 +30,7 @@ const reply = () => new Response(`data: ${JSON.stringify({ id: randomUUID(), mod
   delta: { role: 'assistant', content: '好的' }, finish_reason: 'stop' }] })}\n\ndata: [DONE]\n\n`, { headers: { 'Content-Type': 'text/event-stream' } })
 
 /** A course with texts on its first scene, open in the document host, and one ordinary session. */
-async function fixture(model: (request: { instruction: string }) => Promise<void> = async () => {}) {
+async function fixture(model: (request: { instruction: string }) => Promise<void> = async () => {}, archive?: CourseProjectArchiveData) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'g20-m15-element-')); roots.push(root)
   const project = createBlankCourseProject({ includeDefaultController: false, controls: 'none' })
   const surface = project.surfaces[0]
@@ -39,7 +41,7 @@ async function fixture(model: (request: { instruction: string }) => Promise<void
     sceneNodeToCourseLayerItem(createTextNode({ id: 'c', text: '结语', x: 40, y: 280 }), 3),
   ]
   const filename = path.join(root, 'lesson.h5lesson')
-  await fs.writeFile(filename, createCourseProjectArchive({ project: courseProjectDocumentSchema.parse(project), assetFiles: {}, componentFiles: {} }))
+  await fs.writeFile(filename, createCourseProjectArchive(archive ?? { project: courseProjectDocumentSchema.parse(project), assetFiles: {}, componentFiles: {} }))
   const documents = new DocumentHostService(path.join(root, 'documents'))
   const opened = await documents.open(filename)
   const settings = new ExecutionSettingsStore({ directory: path.join(root, 'settings'), encryption: { isEncryptionAvailable: () => true,
@@ -242,4 +244,51 @@ it('M15 a card undoes only what its request changed, asks before overwriting lat
   expect(await revert(toC, 'undo', true)).toMatchObject({ status: 'applied', change: { state: 'undone' } })
   expect(await current('c')).toEqual(original.c)
   expect(await current('b')).toEqual({ text: '要点（AI）', color: '#dc2626', x: 300 })
+})
+
+it('M15 a document block card undoes only the fields its request changed and asks before overwriting', async () => {
+  const source = listCourseProjectV9Fixtures().find(value => value.id === 'flow')!.data
+  let f!: Awaited<ReturnType<typeof fixture>>
+  const media = (project: CourseProjectDocument) => {
+    const surface = project.surfaces.find(item => item.type === 'flow')
+    if (surface?.type !== 'flow') throw new Error('flow surface')
+    const found = findFlowBlockRecursive(surface.blocks, 'flow-media')
+    if (found?.block.type !== 'media') throw new Error('media block')
+    return { surfaceId: surface.id, block: found.block }
+  }
+  const change = (apply: (block: ReturnType<typeof media>['block']) => void) => edit(f.documents, f.opened.documentId, project => apply(media(project).block))
+  f = await fixture(async ({ instruction }) => {
+    if (instruction.includes('图片-改')) await change(block => { block.altText = '新插图'; block.layout = 'wide' })
+  }, source)
+  const current = async () => {
+    const snapshot = await f.documents.registry.get(f.opened.documentId).drain()
+    if (snapshot.model.kind !== 'course-v9') throw new Error('course')
+    const { block } = media(snapshot.model.project)
+    return { altText: block.altText, layout: block.layout, caption: JSON.stringify(block.caption) }
+  }
+  const original = await current()
+  const card = await f.service.operate({ type: 'create-conversation', workspaceId: f.workspaceId,
+    element: { kind: 'element', documentId: f.opened.documentId, label: '图片' } }) as ConversationRecord
+  const snapshot = await f.documents.registry.get(f.opened.documentId).drain()
+  if (snapshot.model.kind !== 'course-v9') throw new Error('course')
+  const target = { kind: 'flow-block' as const, surfaceId: media(snapshot.model.project).surfaceId, blockId: 'flow-media', parentId: null }
+  const sent = await f.service.operate({ type: 'send', workspaceId: f.workspaceId, conversationId: card.conversationId, submissionId: randomUUID(), expectedRevision: card.revision,
+    text: '图片-改', documents: [{ documentId: snapshot.documentId, epoch: snapshot.epoch, revision: snapshot.revision, writable: [target], selection: [target] }], attachments: [] }) as ExecutionSendResult
+  if (sent.run) await f.service.engine.wait(sent.run.runId)
+  const read = () => f.service.operate({ type: 'element-change', submissionId: sent.submission.submissionId }) as Promise<ElementChangeView>
+  await vi.waitFor(async () => expect((await read()).state).not.toBe('pending'))
+  expect(await read()).toMatchObject({ state: 'applied', fields: ['替代文字', '排版'] })
+
+  // The teacher rewrites the caption; undoing the request restores the alt text and the layout and keeps the caption.
+  await change(block => { block.caption = { inlines: [{ type: 'text', text: '老师的说明' }] } })
+  const caption = (await current()).caption
+  const revert = (direction: 'undo' | 'redo', force?: boolean) => f.service.operate({ type: 'element-revert', submissionId: sent.submission.submissionId, direction, ...(force ? { force } : {}) }) as Promise<ElementRevertResult>
+  expect(await revert('undo')).toMatchObject({ status: 'applied', change: { state: 'undone' } })
+  expect(await current()).toEqual({ altText: original.altText, layout: original.layout, caption })
+  // Redone, then the layout changed by hand: undo asks first.
+  expect(await revert('redo')).toMatchObject({ status: 'applied' })
+  await change(block => { block.layout = 'full-width' })
+  expect(await revert('undo')).toEqual({ status: 'conflict', fields: ['排版'] })
+  expect(await revert('undo', true)).toMatchObject({ status: 'applied' })
+  expect(await current()).toEqual({ altText: original.altText, layout: original.layout, caption })
 })

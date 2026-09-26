@@ -60,7 +60,7 @@ import { ExportPreflightDialog } from './ui/ExportPreflightDialog'
 import { RightSidebar } from './ui/RightSidebar'
 import { ScenePanel } from './ui/ScenePanel'
 import { CourseBottomNavigation } from './ui/BottomSceneNavigator'
-import { requestFlowBlockFocus } from './ui/FlowWorkspace'
+import { requestFlowBlockFocus, requestFlowBlockSelection } from './ui/FlowWorkspace'
 import { TopToolbar } from './ui/TopToolbar'
 import { Workspace } from './ui/Workspace'
 import { ProjectHealthPanel } from './ui/ProjectHealthPanel'
@@ -645,13 +645,26 @@ export default function App() {
       onPreview={courseDelivery.openPreview} onExport={courseDelivery.exportCourse}
       elementCards={{
         exists: card => {
-          const state = useEditorStore.getState(), project = selectActiveCourseProjectDocument(state)
-          return card.target.kind === 'course-object' && state.courseDocument.documentId === card.documentId
-            && Boolean(project && locateCourseLayer(project, card.target.itemId))
+          const state = useEditorStore.getState(), project = selectActiveCourseProjectDocument(state), target = card.target
+          if (!project || state.courseDocument.documentId !== card.documentId) return false
+          if (target.kind === 'course-object') return Boolean(locateCourseLayer(project, target.itemId))
+          const surface = target.kind === 'flow-block' ? project.surfaces.find(item => item.id === target.surfaceId) : undefined
+          return target.kind === 'flow-block' && surface?.type === 'flow' && Boolean(findFlowBlockRecursive(surface.blocks, target.blockId))
         },
         jump: card => {
           const target = card.target, state = useEditorStore.getState()
-          if (target.kind !== 'course-object' || state.courseDocument.documentId !== card.documentId) return
+          if (state.courseDocument.documentId !== card.documentId) return
+          if (target.kind === 'flow-block') {
+            const locations = selectActiveCourseProjectDocument(state)?.locations ?? []
+            const location = locations.find(item => item.kind === 'flow-block' && item.surfaceId === target.surfaceId && item.blockId === target.blockId)
+              ?? locations.find(item => item.surfaceId === target.surfaceId)
+            if (!location) return
+            state.activateCourseLocation(location.id)
+            requestFlowBlockSelection({ documentId: card.documentId, surfaceId: target.surfaceId, blockId: target.blockId })
+            elementCards.requestOpen(card.key)
+            return
+          }
+          if (target.kind !== 'course-object') return
           const global = Boolean(selectActiveCourseProjectDocument(state)?.globalLayerItems.some(({ item }) => item.layerItemId === target.itemId))
           state.activateCourseLocation(target.locationId)
           state.setEditingScope(global ? 'global' : 'scene')

@@ -1,4 +1,5 @@
-import type { CourseProjectDocument, SlidePresentationState } from '../../../shared/courseProjectTypes'
+import type { CourseProjectDocument, FlowSurfaceDocument, SlidePresentationState } from '../../../shared/courseProjectTypes'
+import { findFlowBlockRecursive } from '../../tools/flowDocumentModel'
 import { locateCourseLayer, type LocatedCourseLayer } from './layerProperties'
 
 /**
@@ -126,6 +127,41 @@ export function writeElementFields(project: CourseProjectDocument, itemId: strin
   return next
 }
 
+const BLOCK_EXPAND = ['props']
+/** A block's identity and its child blocks (elements of their own) are never restored with it. */
+const BLOCK_SKIP = new Set(['id', 'type', 'blocks'])
+function flowBlock(project: CourseProjectDocument, surfaceId: string, blockId: string) {
+  const surface = project.surfaces.find(item => item.id === surfaceId) as FlowSurfaceDocument | undefined
+  return surface?.type === 'flow' ? findFlowBlockRecursive(surface.blocks, blockId) : null
+}
+/** A Flow document block's fields (its top-level fields, a component's settings one level down), or null when it is gone. */
+export function readFlowBlockFields(project: CourseProjectDocument, surfaceId: string, blockId: string): ElementFields | null {
+  const found = flowBlock(project, surfaceId, blockId)
+  if (!found) return null
+  const out: Record<string, unknown> = {}
+  flatten(out, ['block'], found.block, BLOCK_EXPAND)
+  for (const key of Object.keys(out)) if (BLOCK_SKIP.has((JSON.parse(key) as string[])[1]!)) delete out[key]
+  return out
+}
+/** Writes a Flow block's fields back into a copy of the project; undefined removes a field. */
+export function writeFlowBlockFields(project: CourseProjectDocument, surfaceId: string, blockId: string, fields: Readonly<Record<string, unknown>>): CourseProjectDocument {
+  const next = structuredClone(project)
+  const found = flowBlock(next, surfaceId, blockId)
+  if (!found) throw new Error('这个正文块已不存在。')
+  for (const [key, value] of Object.entries(fields)) {
+    const [root, ...path] = JSON.parse(key) as string[]
+    if (root !== 'block' || !path.length || BLOCK_SKIP.has(path[0]!)) throw new Error('无法恢复这项设置。')
+    setPath(found.block as unknown as Record<string, unknown>, path, value)
+  }
+  return next
+}
+
+const BLOCK_LABELS: Record<string, string> = {
+  assetId: '图片或媒体', mediaKind: '媒体类型', altText: '替代文字', caption: '说明文字', layout: '排版', wrap: '环绕', columns: '表头',
+  rows: '表格内容', merges: '合并单元格', chart: '图表', height: '高度', latex: '公式', accessibleText: '朗读说明', style: '样式',
+  code: '代码', language: '语言', tone: '提示类型', title: '标题', body: '正文', collapsedByDefault: '默认折叠', props: '组件设置',
+  component: '组件', staticFallbackAssetId: '静态图', content: '文字', items: '列表项', level: '级别', ordered: '编号',
+}
 const LABELS: Record<string, string> = {
   label: '名称', x: '位置', y: '位置', width: '大小', height: '大小', rotation: '旋转', opacity: '不透明度', visible: '显示',
   locked: '锁定', order: '层级', hitPolicy: '点击设置', playbackInitialVisibility: '播放时的初始显示', paperSpace: '纸面位置',
@@ -136,6 +172,7 @@ const LABELS: Record<string, string> = {
 /** A teacher's name for the fields a unit restores, e.g. "位置" or "命名态中的文字颜色". */
 export function elementUnitLabel(unit: readonly string[]): string {
   const path = JSON.parse(unit[0]!) as string[]
+  if (path[0] === 'block') return BLOCK_LABELS[path[1]!] ?? '内容'
   const name = LABELS[path.at(-1)!] ?? '其他设置'
   return path[0] === 'state' ? `命名态中的${name}` : name
 }

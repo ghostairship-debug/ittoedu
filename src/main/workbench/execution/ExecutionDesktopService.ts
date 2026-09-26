@@ -27,7 +27,8 @@ import { AgentFileService } from './AgentFileService'
 import { diagnosticLog } from '../../diagnosticLog'
 import { readTarget } from '../../../core/tools/ToolTargets'
 import { locateCourseLayer } from '../../../core/drivers/course/layerProperties'
-import { elementChangeUnits, elementUnitLabel, readElementFields, sameFieldValue, writeElementFields, type ElementFields } from '../../../core/drivers/course/elementFields'
+import { elementChangeUnits, elementUnitLabel, readElementFields, readFlowBlockFields, sameFieldValue, writeElementFields, writeFlowBlockFields, type ElementFields } from '../../../core/drivers/course/elementFields'
+import type { CourseProjectDocument } from '../../../shared/courseProjectTypes'
 import type { ElementChangeView, ElementRevertResult } from '../../../shared/workbench/executionDesktop'
 
 export interface ExecutionDesktopServiceOptions {
@@ -54,7 +55,9 @@ function targetStillExists(snapshot: DocumentSnapshot, target: ExecutionDocument
 interface ElementChange {
   conversationId: string
   documentId: string
-  itemId: string
+  /** The card's object or document block in a version of the course, and writing fields back into one. */
+  read(project: CourseProjectDocument): ElementFields | null
+  write(project: CourseProjectDocument, fields: Readonly<Record<string, unknown>>): CourseProjectDocument
   before: ElementFields | null
   /** Undefined until the request ends; null when the object was gone by then. */
   after?: ElementFields | null
@@ -685,11 +688,16 @@ export class ExecutionDesktopService {
       const element = conversation?.element
       const reference = element && record.documents.find(value => value.documentId === element.documentId)
       const target = reference?.writable.length === 1 ? reference.writable[0] : undefined
-      if (!reference || target?.kind !== 'course-object') return
+      if (!reference || target?.kind !== 'course-object' && target?.kind !== 'flow-block') return
       const snapshot = await this.options.documents.registry.get(reference.documentId).drain()
-      if (snapshot.model.kind !== 'course-v9' || !locateCourseLayer(snapshot.model.project, target.itemId)) return
-      this.elementChanges.set(record.submissionId, { conversationId: record.conversationId, documentId: reference.documentId, itemId: target.itemId,
-        before: readElementFields(snapshot.model.project, target.itemId), undone: false })
+      if (snapshot.model.kind !== 'course-v9') return
+      const access: Pick<ElementChange, 'read' | 'write'> = target.kind === 'course-object'
+        ? { read: project => readElementFields(project, target.itemId), write: (project, fields) => writeElementFields(project, target.itemId, fields) }
+        : { read: project => readFlowBlockFields(project, target.surfaceId, target.blockId), write: (project, fields) => writeFlowBlockFields(project, target.surfaceId, target.blockId, fields) }
+      const exists = target.kind === 'course-object' ? Boolean(locateCourseLayer(snapshot.model.project, target.itemId)) : access.read(snapshot.model.project) !== null
+      if (!exists) return
+      this.elementChanges.set(record.submissionId, { conversationId: record.conversationId, documentId: reference.documentId, ...access,
+        before: access.read(snapshot.model.project), undone: false })
     } catch { /* The card's undo is a convenience; the request runs regardless. */ }
   }
   private async recordElementResult(submissionId: string): Promise<void> {
@@ -697,7 +705,7 @@ export class ExecutionDesktopService {
     if (!change || change.after !== undefined) return
     try {
       const snapshot = await this.options.documents.registry.get(change.documentId).drain()
-      change.after = snapshot.model.kind === 'course-v9' ? readElementFields(snapshot.model.project, change.itemId) : null
+      change.after = snapshot.model.kind === 'course-v9' ? change.read(snapshot.model.project) : null
     } catch { change.after = null }
   }
   private elementChangeView(submissionId: string): ElementChangeView {
@@ -725,11 +733,11 @@ export class ExecutionDesktopService {
     const session = this.options.documents.registry.get(change.documentId)
     for (let attempt = 0; attempt < 3; attempt++) {
       const snapshot = await session.drain()
-      const current = snapshot.model.kind === 'course-v9' ? readElementFields(snapshot.model.project, change.itemId) : null
+      const current = snapshot.model.kind === 'course-v9' ? change.read(snapshot.model.project) : null
       if (!current || snapshot.model.kind !== 'course-v9') return { status: 'unavailable', message: '这个对象已不存在。' }
       const conflicts = units.filter(unit => unit.some(key => !sameFieldValue(current[key], from[key])))
       if (conflicts.length && !input.force) return { status: 'conflict', fields: unitLabels(conflicts) }
-      const project = writeElementFields(snapshot.model.project, change.itemId, Object.fromEntries(units.flat().map(key => [key, to[key]])))
+      const project = change.write(snapshot.model.project, Object.fromEntries(units.flat().map(key => [key, to[key]])))
       const result = await session.execute({ documentId: change.documentId, epoch: snapshot.epoch, baseRevision: snapshot.revision, operationId: randomUUID(),
         actor: 'human', mutation: { type: 'command', command: { type: 'course.replace', project } } })
       if (result.status === 'applied' || result.status === 'unchanged') {

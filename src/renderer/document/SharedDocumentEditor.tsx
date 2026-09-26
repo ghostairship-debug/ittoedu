@@ -83,6 +83,8 @@ export interface SharedDocumentEditorProps {
   renderQuickBarActions?(target: DocumentContextSelection): ReactNode
   /** The bar's "⋯" for the selection, after the AI entry. */
   renderQuickBarMenu?(target: DocumentContextSelection): ReactNode
+  /** The bar's AI entry for the selection when the host has its own (an element AI card, M15); undefined keeps the default. */
+  renderAiButton?(target: DocumentContextSelection): ReactNode | undefined
   /** The right-click menu of a document object (picture, chart, component), asked after the object is selected. */
   objectMenu?(blockId: string): readonly MenuCommand[]
   pinnedTargets?: readonly ExecutionSelectionTarget[]
@@ -98,6 +100,8 @@ export interface SharedDocumentEditorHandle {
   getContextualEditTarget(): DocumentContextSelection | null
   /** Focus a committed editable paragraph without authoring a transaction. */
   focusBlock(blockId: string): boolean
+  /** Select a document object (picture, table, component) as the user would by clicking it; no transaction. */
+  selectBlock(blockId: string): boolean
 }
 
 /** The caller owns persistence and undo; neither editor installs a history extension. */
@@ -373,6 +377,20 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
       editor.view.focus()
       return true
     },
+    selectBlock: (blockId) => {
+      const editor = layout.current
+      if (!editor || mode !== 'layout') return false
+      let position: number | null = null
+      editor.view.state.doc.descendants((node, offset) => {
+        if (position !== null) return false
+        if (node.attrs.id === blockId && NodeSelection.isSelectable(node)) { position = offset; return false }
+        return true
+      })
+      if (position === null) return false
+      editor.view.dispatch(editor.view.state.tr.setSelection(NodeSelection.create(editor.view.state.doc, position)).scrollIntoView())
+      editor.view.focus()
+      return true
+    },
   }), [diagnostics, mode])
   function switchMode() {
     publishContextualTarget(null)
@@ -509,6 +527,7 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
     </form>}
   </>
   const quickBarIssue = contextualTarget ? contextualIssue(contextualTarget) ?? (diagnostics.length ? '源文尚有错误，请先修正或丢弃待修草稿。' : null) : null
+  const hostAiButton = contextualTarget ? props.renderAiButton?.(contextualTarget) : undefined
   const textTools = contextualTarget && mode === 'layout' && contextualTarget.selection && contextualTarget.selection.kind !== 'object'
   const quickBar = contextualTarget && !props.readOnly && !props.contextualCardSuppressed && quickBarPlace
     && <SelectionQuickBar anchor={quickBarPlace.anchor} bounds={quickBarPlace.bounds} label="选中内容快捷工具" selectionKey={String(targetGeneration)}
@@ -529,7 +548,7 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
         <QuickBarSeparator />
       </>}
       {props.renderQuickBarActions?.(contextualTarget)}
-      {props.onContextualCommand && <QuickBarAiButton targetLabel={contextualTarget.label} disabledReason={quickBarIssue}
+      {hostAiButton !== undefined ? hostAiButton : props.onContextualCommand && <QuickBarAiButton targetLabel={contextualTarget.label} disabledReason={quickBarIssue}
         instruction={contextualInstruction} onInstructionChange={value => { instructionRef.current = value; setContextualInstruction(value) }}
         onSubmit={sendContextualInstruction} onCancel={dismissContextualTarget}
         footer={manualTarget.current && manualTarget.current !== contextualTarget ? <button type="button" onClick={rebindToCurrentSelection}>改为当前选择</button> : null} />}

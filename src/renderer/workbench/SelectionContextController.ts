@@ -50,6 +50,15 @@ export function captureMarkdownSelection(snapshot: DocumentSnapshot, value: Docu
   if (!value.ranges?.length) throw new Error(value.message ?? '正文选区无法定位。')
   return captureSelection(snapshot, value.ranges.map(range => ({ kind: 'markdown-range', from: range.from, to: range.to })), value.label, value.source)
 }
+/** One block of a Flow document as a whole, found by its identity whatever else changed (an element AI card, M15). */
+export function captureFlowBlock(snapshot: DocumentSnapshot, surfaceId: string, blockId: string, label: string): SelectionCapture {
+  if (snapshot.model.kind !== 'course-v9') throw new Error('当前文档不是 H5 演示。')
+  const surface = snapshot.model.project.surfaces.find(item => item.id === surfaceId)
+  if (!surface || surface.type !== 'flow') throw new Error('讲义已不存在。')
+  const block = findFlowBlockRecursive(surface.blocks, blockId)
+  if (!block) throw new Error('所选正文块已不存在。')
+  return captureSelection(snapshot, [{ kind: 'flow-block', surfaceId, blockId, parentId: block.parentId }], label)
+}
 export function captureFlowSelection(snapshot: DocumentSnapshot, surfaceId: string, value: DocumentContextSelection): SelectionCapture {
   if (snapshot.model.kind !== 'course-v9' || !value.selection) throw new Error('请在正文中选择要修改的内容。')
   const surface = snapshot.model.project.surfaces.find(item => item.id === surfaceId)

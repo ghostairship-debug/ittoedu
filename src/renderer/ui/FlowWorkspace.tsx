@@ -1,4 +1,5 @@
-import { captureFlowSelection, usePinnedSelection, workbenchSelection } from '../workbench/SelectionContextController'
+import { captureFlowBlock, captureFlowSelection, usePinnedSelection, workbenchSelection } from '../workbench/SelectionContextController'
+import { ElementAiButton } from '../workbench/elementCards/ElementAiCard'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { createRoot } from 'react-dom/client'
 import type { AssetMeta } from '../../shared/contracts/media-v1'
@@ -65,6 +66,14 @@ export function requestFlowBlockFocus(request: FlowBlockFocusRequest): boolean {
   let accepted = false
   for (const listener of flowBlockFocusListeners) accepted = listener(request) || accepted
   return accepted
+}
+/** A jump to a document object, asked for before its page may be on screen (an element AI card, M15). */
+let pendingBlockSelection: { documentId: string; surfaceId: string; blockId: string; expires: number } | null = null
+const flowBlockSelectionListeners = new Set<() => void>()
+/** Selects the object once its Flow page shows it; a request not taken within two seconds is dropped. */
+export function requestFlowBlockSelection(request: { documentId: string; surfaceId: string; blockId: string }): void {
+  pendingBlockSelection = { ...request, expires: Date.now() + 2000 }
+  for (const listener of flowBlockSelectionListeners) listener()
 }
 const EMPTY_ASSET_FILES: Record<string, Uint8Array> = {}
 const EMPTY_COMPONENT_PACKAGES: Record<string, ComponentPackageData> = {}
@@ -146,6 +155,23 @@ export function FlowWorkspace({ documentId, view, sessionToken, assets, selectio
     }
   }, [documentId, view.surfaceId])
   useEffect(() => { focusWhenReady() }, [documentId, view.surfaceId, view.revision, selection?.selectedBlockId])
+  useEffect(() => {
+    if (!documentId) return
+    let timer: number | null = null
+    const apply = () => {
+      if (timer !== null) window.clearTimeout(timer)
+      timer = null
+      const request = pendingBlockSelection
+      if (!request || request.documentId !== documentId || request.surfaceId !== view.surfaceId) return
+      if (request.expires < Date.now()) { pendingBlockSelection = null; return }
+      // The editor may still be loading this page's document; try again shortly.
+      if (editorRef.current?.selectBlock(request.blockId)) pendingBlockSelection = null
+      else timer = window.setTimeout(apply, 60)
+    }
+    flowBlockSelectionListeners.add(apply)
+    apply()
+    return () => { flowBlockSelectionListeners.delete(apply); if (timer !== null) window.clearTimeout(timer) }
+  }, [documentId, view.surfaceId])
   const pinned = usePinnedSelection(documentId)
   const generation = useEditPreview(documentId, view.revision)
   const editPreview = useMemo(() => generation && (generation.target.kind === 'flow-block' || generation.target.kind === 'flow-range')
@@ -323,6 +349,16 @@ export function FlowWorkspace({ documentId, view, sessionToken, assets, selectio
             renderQuickBarActions={target => {
               const block = quickBarBlock(target)
               return block && propertyContext.kind === 'flow-block' ? <FlowBlockQuickActions block={block} commands={propertyContext.commands} replaceMedia={replaceMedia} /> : null
+            }}
+            renderAiButton={target => {
+              // A picture, table or other object of the document has its own AI card (M15); text keeps the assistant.
+              const blockId = target.selection?.kind === 'object' ? target.selection.blockId : target.selection?.kind === 'cells' ? target.selection.tableId : null
+              const entry = blockId && !readOnly ? view.blocks.find(value => value.blockId === blockId) : undefined
+              if (!entry || !documentId) return undefined
+              const surfaceId = view.surfaceId, label = entry.label || target.label
+              return <ElementAiButton documentId={documentId} target={{ kind: 'flow-block', surfaceId, blockId: entry.blockId, parentId: entry.parentId }} label={label}
+                disabledReason={target.mode === 'layout' ? null : '请切回正文后再用 AI 修改。'}
+                capture={async () => captureFlowBlock(await workbenchSelection.prepare(documentId), surfaceId, entry.blockId, label)} />
             }}
             renderQuickBarMenu={target => {
               const block = quickBarBlock(target)
