@@ -505,7 +505,7 @@ Published V2 当前已证明的 API 4 互动播放切片是：DOM 的 Slide scen
 
 内部点击、拖拽、动画状态推进和宿主动作只在 `preview` 生效。authoring 中即使组件代码创建了命中对象，宿主也会屏蔽输入并冻结动作；组件不得访问编辑器 DOM，也不得假定属性栏结构。
 
-V4 保证所有 `props.content` 文字可在属性栏编辑；画布原位编辑是可选扩展，组件必须通过 DOM `data-courseware-edit-key` 或 `ctx.editor.registerTextRegion()` 显式登记。未登记不影响属性栏、预览或导出。
+组件自己显示的文字与图片由宿主识别，教师可在画布上原位修改（见第 3 节），组件不需要登记；`props.content` 文字（可选）另可在属性栏编辑。已用 DOM `data-courseware-edit-key` 或 `ctx.editor.registerTextRegion()` 登记的旧组件继续按 Props 路径编辑。
 
 PDF/PPTX 成品不执行组件互动或声音；部分 Slide 链路会在导出时以 `mode: 'capture'` 执行组件以生成静态像素。当前精确边界是：
 
