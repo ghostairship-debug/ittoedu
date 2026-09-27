@@ -135,8 +135,8 @@ test('M17 Flow insert menu imports a managed long HTML page that runs after save
     await expect(document.locator('#page-heading')).toHaveText('纵向 HTML 讲义')
     await expect(document.locator('.lesson-row')).toHaveCount(18)
     await expect(document.locator('#picture')).toHaveJSProperty('naturalWidth', 64)
+    await expect.poll(async () => runtimeCard.evaluate(element => element.getBoundingClientRect().height), { timeout: 10_000 }).toBeGreaterThan(1_300)
     const height = await runtimeCard.evaluate(element => element.getBoundingClientRect().height)
-    expect(height).toBeGreaterThan(1_300)
     await expect.poll(async () => {
       const rect = await tail.boundingBox()
       return rect ? rect.y - tailBefore.y : 0
