@@ -273,7 +273,7 @@ test('M17-T04: remote image and audio fail before document writes or requests; l
   const remote = createServer((request, response) => { remoteRequests.push(request.url ?? ''); response.writeHead(418); response.end('unauthorized') })
   await new Promise<void>(resolve => remote.listen(0, '127.0.0.1', resolve))
   const port = (remote.address() as { port: number }).port
-  writeFileSync(join(workspace, 'blocked.html'), `<!doctype html><html><head><meta charset="utf-8"></head><body>${body}<img src="http://127.0.0.1:${port}/remote-image.png"><audio src="http://127.0.0.1:${port}/remote-audio.mp3"></audio></body></html>`)
+  writeFileSync(join(workspace, 'blocked.html'), `<!doctype html><html><head><meta charset="utf-8"><script src="http://127.0.0.1:${port}/remote-script.js"></script></head><body>${body}<img src="http://127.0.0.1:${port}/remote-image.png"><audio src="http://127.0.0.1:${port}/remote-audio.mp3"></audio></body></html>`)
   let app: ElectronApplication | undefined
   try {
     app = await launchSelectionApp(directory)
@@ -297,6 +297,7 @@ test('M17-T04: remote image and audio fail before document writes or requests; l
     await expect(dialog).toBeVisible()
     await dialog.getByRole('button', { name: '导入', exact: true }).click()
     await expect(dialog.getByRole('alert')).toContainText('未授权远程资源')
+    await expect(dialog.getByRole('alert')).toContainText('remote-script.js')
     await expect(dialog.getByRole('alert')).toContainText('remote-image.png')
     await expect(dialog.getByRole('alert')).toContainText('remote-audio.mp3')
     const afterFailure = await document()
