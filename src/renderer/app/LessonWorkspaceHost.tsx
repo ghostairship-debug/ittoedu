@@ -23,6 +23,7 @@ export interface LessonWorkspaceHostProps {
   onActiveDocumentChange?(active: { kind: 'document' | 'material' | 'course'; name: string } | null): void
   documents?: DocumentHostAPI
   onSaveDirectoryChange?(directory: SaveDirectoryContext | null): void
+  onImportHtml?(directory: SaveDirectoryContext, sourceEntryId?: string): void
   children: ReactNode
 }
 export const LessonWorkspaceHost = forwardRef<LessonWorkspaceShellHandle, LessonWorkspaceHostProps>(function LessonWorkspaceHost(props, ref) {

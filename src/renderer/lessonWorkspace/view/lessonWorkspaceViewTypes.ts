@@ -62,6 +62,7 @@ export interface LessonWorkspaceViewProps {
   operation(request: LessonDesktopRequest): Promise<LessonDesktopResult>;
   documentPort: RecoverableDocumentFilePort;
   onSaveDirectoryChange?(directory: SaveDirectoryContext | null): void;
+  onImportHtml?(directory: SaveDirectoryContext, sourceEntryId?: string): void;
   tabs: DocumentTabsController;
   projectPath: string | null;
   renderAssistant?(root: string | null, documentTarget: ActiveDocumentTarget | undefined, isCourse: boolean, drainDocuments: () => Promise<boolean>): ReactNode;

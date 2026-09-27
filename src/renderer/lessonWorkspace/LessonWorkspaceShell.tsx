@@ -27,6 +27,7 @@ export interface LessonWorkspaceShellProps {
   /** The file shown in the content area, which names the window. */
   onActiveDocumentChange?(active: { kind: LessonFileTab['kind']; name: string } | null): void
   onSaveDirectoryChange?(directory: SaveDirectoryContext | null): void
+  onImportHtml?(directory: SaveDirectoryContext, sourceEntryId?: string): void
   children: ReactNode
 }
 
@@ -66,6 +67,6 @@ export const LessonWorkspaceShell = forwardRef<LessonWorkspaceShellHandle, Lesso
     detachLesson: workspace.actions.detachLesson,
     showProject: workspace.actions.showProject,
   }), [tabs, workspace.actions, workspace.state.lesson])
-  return <LessonWorkspaceView state={workspace.state} actions={workspace.actions} operation={props.lessonOperation} workspaceFiles={props.workspaceFiles} documentPort={props.documentPort} tabs={tabs} projectPath={props.projectPath} onSaveDirectoryChange={props.onSaveDirectoryChange}
+  return <LessonWorkspaceView state={workspace.state} actions={workspace.actions} operation={props.lessonOperation} workspaceFiles={props.workspaceFiles} documentPort={props.documentPort} tabs={tabs} projectPath={props.projectPath} onSaveDirectoryChange={props.onSaveDirectoryChange} onImportHtml={props.onImportHtml}
     renderAssistant={props.renderAssistant} renderMaterial={props.renderMaterial} renderMaterials={props.renderMaterials}>{props.children}</LessonWorkspaceView>
 })

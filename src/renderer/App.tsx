@@ -1,6 +1,7 @@
 import { captureDocumentReference } from './workbench/SelectionContextController'
 import { CourseAdvancedChrome, CourseEditorFrame } from './documents/CourseEditorChromeContext'
 import { CourseLightToolbar } from './documents/CourseLightToolbar'
+import { HtmlImportDialog, type HtmlImportDestination } from './documents/HtmlImportDialog'
 import { elementCards } from './workbench/elementCards/elementCardController'
 import { locateCourseLayer } from '../core/drivers/course/layerProperties'
 import { CourseEditorActionsContext, type CourseEditorActions } from './documents/CourseEditorActionsContext'
@@ -34,7 +35,7 @@ import { courseDeliverySnapshot } from './app/courseDeliverySnapshot'
 import { useCourseProjectLifecycle } from './app/useCourseProjectLifecycle'
 import { useFlowDocumentRecovery } from './app/useFlowDocumentRecovery'
 import { buildFlowEditorView, captureFlowEditorAuthoringTarget } from './course/flowEditorView'
-import { findFlowBlockRecursive, flowSurfaceIn } from '../core/tools/flowDocumentModel'
+import { findFlowBlockRecursive, flowBlockLabel, flowSurfaceIn, walkFlowBlocks } from '../core/tools/flowDocumentModel'
 import { createExternalComponentNode, createImageNode, createShapeNode, createTextNode } from '../core/tools/nativeNodeFactories'
 import { sceneNodeToCourseLayerItem } from '../shared/courseProjectModel'
 import { resolveComponentPresetProps } from '../shared/componentProps'
@@ -140,6 +141,8 @@ export default function App() {
   const [lessonDirty, setLessonDirty] = useState(false)
   const [activeWorkspaceDocument, setActiveWorkspaceDocument] = useState<{ kind: string; name: string } | null>(null)
   const [busy, setBusy] = useState(false)
+  const [htmlImportDialog, setHtmlImportDialog] = useState<{ documentId: string; epoch: string; revision: number; projectId: string;
+    sourcePath: string | null; destinations: HtmlImportDestination[]; busy: boolean; error: string | null } | null>(null)
   const [projectHealthOpen, setProjectHealthOpen] = useState(false)
   const [materialsOpen, setMaterialsOpen] = useState(false)
   const [designTool, setDesignTool] = useState<{ kind: 'recipe' | 'productivity' | 'pptx'; context: ProductivityContext } | null>(null)
@@ -345,6 +348,86 @@ export default function App() {
     }, { origin: 'lesson' })
     if (created) setStatus(issues ? `已从 PPT 新建 H5 演示「${title}」；${issues} 项内容未保留或已简化` : `已从 PPT 新建 H5 演示「${title}」`)
     return created
+  }
+
+  const htmlImportInFlight = useRef(false)
+  const openHtmlImport = async (directory?: SaveDirectoryContext, sourceEntryId?: string) => {
+    try {
+      if (!desktopApi().htmlImport) throw new Error('HTML 导入服务不可用')
+      const documentId = useEditorStore.getState().courseDocument.documentId
+      if (!documentId) throw new Error('请先打开一份 H5 演示')
+      const snapshot = await useEditorStore.getState().drainCourseDocument()
+      if (snapshot.documentId !== documentId || snapshot.model.kind !== 'course-v9') {
+        throw new Error('当前 H5 演示已切换，请重新发起导入')
+      }
+      const project = snapshot.model.project
+      const activeLocationId = selectActiveCourseLocationId(useEditorStore.getState())
+      const destinations: HtmlImportDestination[] = project.locations.flatMap<HtmlImportDestination>(location => {
+        const surface = project.surfaces.find(item => item.id === location.surfaceId)
+        if (location.kind === 'slide-scene' && surface?.type === 'slide') {
+          return [{ locationId: location.id, surfaceType: 'slide' as const, label: location.label }]
+        }
+        if (location.kind !== 'flow-block' || surface?.type !== 'flow') return []
+        const anchors: { blockId: string; label: string }[] = []
+        walkFlowBlocks(surface.blocks, block => {
+          if (block.type === 'paragraph') anchors.push({ blockId: block.id, label: flowBlockLabel(block).slice(0, 60) })
+        })
+        return [{ locationId: location.id, surfaceType: 'flow' as const, label: location.label, anchors }]
+      })
+      if (!destinations.length) throw new Error('当前 H5 演示没有可导入 HTML 的页面')
+      destinations.sort((left, right) => Number(right.locationId === activeLocationId) - Number(left.locationId === activeLocationId))
+      const sourcePath = sourceEntryId
+        ? (await desktopApi().workspaceFiles!({ type: 'resolve', workspaceId: directory!.workspaceId, entryId: sourceEntryId })).resolvedPath
+        : null
+      const current = useEditorStore.getState().courseDocument
+      if (current.documentId !== snapshot.documentId || current.snapshot?.epoch !== snapshot.epoch || current.snapshot.revision !== snapshot.revision) {
+        throw new Error('当前 H5 演示已变化，请重新发起导入')
+      }
+      setHtmlImportDialog({ documentId, epoch: snapshot.epoch, revision: snapshot.revision, projectId: project.id,
+        sourcePath, destinations, busy: false, error: null })
+    } catch (error) {
+      setError(readableError(error, '无法开始 HTML 导入'))
+    }
+  }
+  const confirmHtmlImport = async (target: { locationId: string; anchorBlockId?: string }) => {
+    const dialog = htmlImportDialog
+    if (!dialog || dialog.busy || htmlImportInFlight.current) return
+    htmlImportInFlight.current = true
+    setHtmlImportDialog({ ...dialog, busy: true, error: null })
+    try {
+      const snapshot = await useEditorStore.getState().drainCourseDocument()
+      if (snapshot.documentId !== dialog.documentId || snapshot.epoch !== dialog.epoch || snapshot.revision !== dialog.revision
+        || snapshot.model.kind !== 'course-v9' || snapshot.model.project.id !== dialog.projectId) {
+        throw new Error('当前 H5 演示已变化，请重新选择导入位置')
+      }
+      const api = desktopApi().htmlImport
+      if (!api) throw new Error('HTML 导入服务不可用')
+      const result = await api.import({
+        documentId: dialog.documentId, epoch: dialog.epoch, revision: dialog.revision,
+        locationId: target.locationId, ...(target.anchorBlockId ? { anchorBlockId: target.anchorBlockId } : {}),
+        source: dialog.sourcePath ? { kind: 'file', path: dialog.sourcePath } : { kind: 'choose' },
+      })
+      if (!result) {
+        setHtmlImportDialog(null)
+        setStatus('已取消 HTML 导入')
+        return
+      }
+      if (result.receipt.status !== 'applied') {
+        throw new Error(result.receipt.status === 'unchanged' ? 'HTML 页面没有产生可导入内容' : ('message' in result.receipt ? result.receipt.message : 'HTML 导入未提交'))
+      }
+      const confirmed = await useEditorStore.getState().drainCourseDocument()
+      if (confirmed.documentId !== dialog.documentId || confirmed.epoch !== dialog.epoch
+        || confirmed.revision < result.receipt.revision) {
+        throw new Error('导入已提交，但当前文档尚未同步；请重新打开页面核对')
+      }
+      setHtmlImportDialog(null)
+      setStatus('HTML 页面已导入到所选位置')
+    } catch (error) {
+      setHtmlImportDialog(current => current?.documentId === dialog.documentId && current.epoch === dialog.epoch
+        ? { ...current, busy: false, error: readableError(error, 'HTML 导入失败') } : current)
+    } finally {
+      htmlImportInFlight.current = false
+    }
   }
 
   useEffect(() => window.desktopAPI?.onRequestSave(() => {
@@ -814,6 +897,7 @@ export default function App() {
         return [captureDocumentReference(snapshot, writable)]
       }}
       onOpenProject={path => courseProjectLifecycle.openRecentProject(path, { origin: 'lesson' })} onNewProject={() => courseProjectLifecycle.newProject({ origin: 'lesson' })} onNewProjectFromPptx={newProjectFromPptx} onDirtyChange={setLessonDirty} onActiveDocumentChange={setActiveWorkspaceDocument}
+      onImportHtml={(directory, sourceEntryId) => { void openHtmlImport(directory, sourceEntryId) }}
 >
     <CourseEditorFrame lightTools={<CourseLightToolbar
       slideLightPage={slideLightPageView ? { view: slideLightPageView, run: command => slideLight.runPage(slideLightPageView.target, command) } : null}
@@ -858,6 +942,7 @@ export default function App() {
           after.beginTextEdit(selectedId, 'canvas')
         }
       })() }}
+      onImportHtml={() => { void openHtmlImport() }}
       onAddImage={() => { void mediaImport.selectAndImportImage('add') }}
       onAddVideo={() => { void mediaImport.selectAndImportVideo('add') }}
       onAddAudio={() => {
@@ -1199,6 +1284,13 @@ export default function App() {
         </div>
       ) : null}
     </CourseEditorFrame>
+    {htmlImportDialog && <HtmlImportDialog
+      sourceName={htmlImportDialog.sourcePath?.split(/[\\/]/).pop() ?? null}
+      destinations={htmlImportDialog.destinations}
+      busy={htmlImportDialog.busy}
+      error={htmlImportDialog.error}
+      onCancel={() => setHtmlImportDialog(null)}
+      onImport={target => { void confirmHtmlImport(target) }} />}
     </LessonWorkspaceHost>
     </CourseEditorActionsContext.Provider>
     </ProjectColorPaletteContext.Provider>

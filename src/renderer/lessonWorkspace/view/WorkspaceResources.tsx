@@ -29,7 +29,7 @@ export function WorkspaceResources({ props, layout, editorFocus = false, proPane
        <button type="button" className="lesson-workspace-root" title="显示全部会话" style={{ border: 0, padding: 0, background: 'transparent', cursor: 'pointer', width: '100%' }} onClick={() => sessionDock.setScope?.(null)}>{state.workspace}</button>
        <LessonDirectoryTree refreshVersion={state.treeVersion} files={props.workspaceFiles} directory={state.workspace} operation={props.operation}
          onFile={entry => { layout.setContentClosed(false); actions.setMobilePane('workbench'); void actions.run(() => actions.openFile(entry)) }}
-         onDirectory={actions.setSelectedDirectory} onScope={setConversationScope} onSaveDirectoryChange={props.onSaveDirectoryChange} />
+         onDirectory={actions.setSelectedDirectory} onScope={setConversationScope} onSaveDirectoryChange={props.onSaveDirectoryChange} onImportHtml={props.onImportHtml} />
      </div> : <div className="lesson-pane-body"><p>打开文件夹以浏览和整理文件。</p>
        <button type="button" onClick={() => void actions.run(() => actions.openWorkspace())}>打开文件夹</button>
      </div>}

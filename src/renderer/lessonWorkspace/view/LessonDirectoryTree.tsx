@@ -10,6 +10,7 @@ export function LessonDirectoryTree(props: {
   onFile(entry: LessonDirectoryEntry): void; onDirectory(path: string): void
   onScope?(path: string, kind: 'folder' | 'file', workspaceId?: string): void
   onSaveDirectoryChange?(directory: SaveDirectoryContext | null): void
+  onImportHtml?(directory: SaveDirectoryContext, sourceEntryId?: string): void
 }) {
   return props.files ? <WorkspaceFilesTree {...props} files={props.files} /> : <ReadOnlyTree {...props} refreshVersion={props.refreshVersion ?? 0} />
 }
