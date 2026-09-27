@@ -141,6 +141,67 @@ test('M16-T06 Flow light workbench insert menu exposes the 11 document and 4 pap
   } finally { await closeSelectionApp(app); await server.close() }
 })
 
+test('M16-T06 full editor Elements menu inserts a document heading and a paper text box with isolated undo', async () => {
+  test.setTimeout(180_000)
+  const data = fixture(), server = await selectionServer(), app = await launchSelectionApp(data.directory)
+  const page = await app.firstWindow()
+  try {
+    await setupSelectionUI(app, page, server.endpoint, data.workspace)
+    const opened = await openFlow(page, data.workspace, 'flow-a.h5lesson')
+    await page.keyboard.press('Escape')
+    await page.getByRole('button', { name: '在编辑器中打开', exact: true }).click()
+    await page.getByRole('tab', { name: '元素', exact: true }).click()
+    const menu = page.getByTestId('elements-tab').getByRole('menu', { name: 'Flow 插入菜单', exact: true })
+    await expect(menu.getByRole('region', { name: '插入到正文', exact: true })).toBeVisible()
+    await expect(menu.getByRole('region', { name: '放到纸面上', exact: true })).toBeVisible()
+
+    const readFlow = async () => {
+      const document = await snapshot(page, opened.documentId)
+      if (document.model.kind !== 'course-v9') throw new Error('Expected course document')
+      const flow = document.model.project.surfaces.find(surface => surface.type === 'flow')
+      if (!flow || flow.type !== 'flow') throw new Error('Expected Flow surface')
+      return { document, flow }
+    }
+    const beforeHeading = await readFlow()
+    const originalBlockIds = new Set(beforeHeading.flow.blocks.map(block => block.id))
+    await menu.getByRole('region', { name: '插入到正文', exact: true })
+      .getByRole('menuitem', { name: '标题', exact: true }).click()
+    await expect.poll(async () => (await readFlow()).flow.blocks.filter(block => !originalBlockIds.has(block.id)).length).toBe(1)
+    const afterHeading = await readFlow()
+    const addedHeading = afterHeading.flow.blocks.filter(block => !originalBlockIds.has(block.id))
+    expect(addedHeading).toHaveLength(1)
+    expect(addedHeading[0]?.type).toBe('heading')
+    expect(afterHeading.flow.surfaceLayerItems).toEqual(beforeHeading.flow.surfaceLayerItems)
+    expect(afterHeading.document.undoDepth).toBe(beforeHeading.document.undoDepth + 1)
+    await expect(page.getByTestId('flow-paper').locator(`[data-flow-block-id="${addedHeading[0]!.id}"]`)).toBeVisible()
+    await page.getByRole('button', { name: '撤销', exact: true }).click()
+    await expect.poll(async () => (await readFlow()).document.undoDepth).toBe(beforeHeading.document.undoDepth)
+    const undoneHeading = await readFlow()
+    expect(undoneHeading.flow.blocks).toEqual(beforeHeading.flow.blocks)
+    expect(undoneHeading.flow.surfaceLayerItems).toEqual(beforeHeading.flow.surfaceLayerItems)
+
+    const beforePaper = await readFlow()
+    const originalPaperIds = new Set(beforePaper.flow.surfaceLayerItems.map(entry => entry.item.layerItemId))
+    await menu.getByRole('region', { name: '放到纸面上', exact: true })
+      .getByRole('menuitem', { name: '文本框', exact: true }).click()
+    await expect.poll(async () => (await readFlow()).flow.surfaceLayerItems
+      .filter(entry => !originalPaperIds.has(entry.item.layerItemId)).length).toBe(1)
+    const afterPaper = await readFlow()
+    const addedPaper = afterPaper.flow.surfaceLayerItems.filter(entry => !originalPaperIds.has(entry.item.layerItemId))
+    expect(addedPaper).toHaveLength(1)
+    expect(addedPaper[0]?.item.kind).toBe('native')
+    expect(addedPaper[0]?.item.kind === 'native' ? addedPaper[0].item.content.nativeType : null).toBe('text')
+    expect(afterPaper.flow.blocks).toEqual(beforePaper.flow.blocks)
+    expect(afterPaper.document.undoDepth).toBe(beforePaper.document.undoDepth + 1)
+    await expect(page.getByTestId(`flow-layer-card-${addedPaper[0]!.item.layerItemId}`)).toBeVisible()
+    await page.getByRole('button', { name: '撤销', exact: true }).click()
+    await expect.poll(async () => (await readFlow()).document.undoDepth).toBe(beforePaper.document.undoDepth)
+    const undonePaper = await readFlow()
+    expect(undonePaper.flow.surfaceLayerItems).toEqual(beforePaper.flow.surfaceLayerItems)
+    expect(undonePaper.flow.blocks).toEqual(beforePaper.flow.blocks)
+  } finally { await closeSelectionApp(app); await server.close() }
+})
+
 test('M16-T06 Flow image chooser result is discarded after switching the captured document session', async () => {
   test.setTimeout(180_000)
   const data = fixture(), server = await selectionServer(), app = await launchSelectionApp(data.directory)
