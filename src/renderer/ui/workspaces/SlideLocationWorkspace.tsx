@@ -815,6 +815,7 @@ export function SlideLocationWorkspace({
   snapshotRef.current = snapshot
   const documentIdRef = useRef(documentId)
   documentIdRef.current = documentId
+  useEffect(() => () => { documentIdRef.current = null }, [])
   const readSnapshot = () => snapshotRef.current
   const canvasMenu = useContextMenu()
   const slideLight = useCourseEditorActions()?.slideLight
@@ -2232,7 +2233,8 @@ export function SlideLocationWorkspace({
     labels: { pending: string; applied: string; unchanged: string },
   ): Promise<'applied' | 'unchanged' | null> => {
     try {
-      return await runSlideDynamicFallbackSubmission(intent, ports.runtime.submitDynamicFallbackIntent, ports.canvas.setStatus, labels)
+      return await runSlideDynamicFallbackSubmission(intent, ports.runtime.submitDynamicFallbackIntent,
+        message => { if (documentIdRef.current === intent.documentId) ports.canvas.setStatus(message) }, labels)
     } finally {
       refreshDynamicRecoveryTasks()
     }
@@ -2244,14 +2246,14 @@ export function SlideLocationWorkspace({
     try {
       const result = await ports.runtime.retryDynamicFallback(taskId)
       const failure = slideDynamicFallbackFailureMessage(result)
-      ports.canvas.setStatus(failure ?? (result.status === 'applied' ? '动态内容及静态后备图已确认' : '动态内容没有变化'))
+      if (documentIdRef.current === documentId) ports.canvas.setStatus(failure ?? (result.status === 'applied' ? '动态内容及静态后备图已确认' : '动态内容没有变化'))
     } catch (error) {
-      ports.canvas.setStatus(error instanceof Error ? error.message : String(error))
+      if (documentIdRef.current === documentId) ports.canvas.setStatus(error instanceof Error ? error.message : String(error))
     } finally {
       refreshDynamicRecoveryTasks()
       setRecoveringDynamicTaskId(null)
     }
-  }, [ports.canvas, ports.runtime, refreshDynamicRecoveryTasks])
+  }, [documentId, ports.canvas, ports.runtime, refreshDynamicRecoveryTasks])
 
   const discardDynamicFallback = useCallback((taskId: string) => {
     try {
