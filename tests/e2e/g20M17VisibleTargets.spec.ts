@@ -16,7 +16,7 @@ function fixtureHtml() {
     *{box-sizing:border-box}body{margin:0;font:22px sans-serif}main{display:flex;gap:0;padding:32px;width:720px}
     #clip{width:260px;height:190px;overflow:hidden;flex:none}#picture{display:block;width:130%;height:180px;object-fit:cover}
     #right{width:340px;height:190px;padding:24px;background:#eef4ff;flex:none}#copy{margin:0}
-  </style></head><body><main><div id="clip"><img id="picture" alt="clipped picture" src="data:image/png;base64,${png}"></div><section id="right"><p id="copy">Visible right hand text</p></section></main></body></html>`
+  </style></head><body><main><div id="clip"><img id="picture" alt="clipped picture" src="data:image/png;base64,${png}"></div><section id="right"><p id="copy">Edit me</p></section></main></body></html>`
 }
 
 function makeCourse() {
@@ -134,7 +134,7 @@ test('M17: clipped image overflow cannot steal a visible text edit target', asyn
     await expect(tryRun).toHaveAttribute('data-course-player-ready', 'true', { timeout: 60_000 })
     const iframe = page.locator('.course-try-run-host iframe').first()
     const frame = iframe.contentFrame()
-    await expect(frame.locator('#copy')).toHaveText('Visible right hand text')
+    await expect(frame.locator('#copy')).toHaveText('Edit me')
     await expect.poll(() => frame.locator('#picture').evaluate(image => (image as HTMLImageElement).naturalWidth)).toBe(8)
     const clip = frame.locator('#clip'), image = frame.locator('#picture'), copy = frame.locator('#copy')
 
