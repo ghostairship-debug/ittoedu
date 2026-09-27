@@ -25,7 +25,7 @@ import {
   componentPackagesToArchiveFiles,
   componentPackagesFromArchive,
 } from './components/componentPackageStore'
-import { dedupeCourseMediaImports, emptyCourseAssetSidecar } from './project/v9AssetAdapter'
+import { emptyCourseAssetSidecar } from './project/v9AssetAdapter'
 import { createSlideLightEditingPort } from './composition/selection/slideLightEditingPort'
 import { useComponentLibrary } from './app/useComponentLibrary'
 import { componentCatalogInstallStatus } from './components/componentCatalogStatus'
@@ -523,6 +523,11 @@ export default function App() {
         sidecar: state.courseAssetSidecar ?? emptyCourseAssetSidecar(),
       }
     },
+    readCourseMediaContext() {
+      const state = useEditorStore.getState()
+      const project = selectActiveCourseProjectDocument(state)
+      return project ? { assets: project.assets, sidecar: state.courseAssetSidecar ?? emptyCourseAssetSidecar() } : null
+    },
     replaceImageAtTarget: (target, asset, bytes) => (
       useEditorStore.getState().replaceImageAssetAtTarget(target, asset, bytes)
     ),
@@ -732,17 +737,26 @@ export default function App() {
           if (command.destination === 'paper' && command.kind !== 'image') throw new Error('纸面菜单仅支持图片媒体')
           const existing = payload?.assetId ? project.assets[payload.assetId] : null
           if (payload?.assetId && (!existing || existing.kind !== command.kind)) throw new Error('所选媒体素材已变化')
-          const selected = existing ? null : command.kind === 'image' ? await mediaImport.selectImageAsset()
-            : command.kind === 'video' ? await mediaImport.selectVideoAsset() : await mediaImport.selectAudioAsset()
-          if (!existing && !selected) return
-          const deduped = selected ? await dedupeCourseMediaImports(command.kind, project.assets,
-            state.courseAssetSidecar ?? emptyCourseAssetSidecar(), [selected]) : null
-          const prepared = deduped?.placements[0]
-          const asset = existing ?? prepared?.meta
+          const prepared = existing ? null : await mediaImport.selectTargetMedia({
+            kind: command.kind,
+            captureTarget: () => page,
+            isTargetCurrent: captured => {
+              const live = useEditorStore.getState()
+              const flow = live.flowSession
+              const token = live.courseAuthoringSession?.token
+              return live.canvasMode === 'edit' && live.courseDocument.documentId === captured.documentId
+                && flow?.selection.authoringScope === 'page' && flow.history.present.id === captured.projectId
+                && flow.history.present.revision === captured.revision
+                && flow.selection.locationId === captured.locationId && flow.selection.surfaceId === captured.surfaceId
+                && JSON.stringify(flow.selection) === captured.selectionSignature
+                && token?.surfaceType === 'flow' && token.generation === captured.generation
+                && token.revision === captured.revision
+            },
+          })
+          if (!existing && !prepared) return
+          const asset = existing ?? prepared?.asset
           if (!asset) throw new Error('所选媒体素材未准备完成')
-          const source = existing || (deduped && deduped.additions.length === 0)
-            ? { kind: 'existing' as const, assetId: asset.id }
-            : { kind: 'new' as const, meta: asset, bytes: prepared!.bytes }
+          const source = existing ? { kind: 'existing' as const, assetId: asset.id } : prepared!.source
           if (command.destination === 'paper') {
             const imageWidth = Math.min(320, Math.max(80, asset.width ?? 320))
             const imageHeight = Math.max(80, Math.min(240, imageWidth * ((asset.height ?? 180) / (asset.width ?? 320))))
@@ -750,8 +764,10 @@ export default function App() {
             const item = sceneNodeToCourseLayerItem(createImageNode({ assetId: asset.id,
               width: placement.frame.width, height: placement.frame.height,
               x: placement.frame.x, y: placement.frame.y })) as NativeLayerItem
+            prepared?.assertCurrent()
             await commit({ kind: 'menu-insert-media', placement: 'paper', mediaKind: 'image', source, item, ...placement })
           } else {
+            prepared?.assertCurrent()
             await commit({ kind: 'menu-insert-media', placement: 'document', mediaKind: command.kind, source })
           }
           return
@@ -861,16 +877,20 @@ export default function App() {
           confirmed.model.project.revision === step.nextDocument.revision
       },
       async chooseAudio() {
-        const selected = await mediaImportRef.current.selectAudioAsset()
-        if (!selected) return null
-        const current = readCurrent()
-        if (!current) throw new Error('文档已切换，请重新选择音频')
-        const state = useEditorStore.getState()
-        const batch = await dedupeCourseMediaImports('audio', current.project.assets,
-          state.courseAssetSidecar ?? emptyCourseAssetSidecar(), [selected])
-        const placement = batch.placements[0]
-        if (!placement) throw new Error('声音读取失败')
-        return { asset: placement.meta, bytes: placement.bytes }
+        const prepared = await mediaImportRef.current.selectTargetMedia({
+          kind: 'audio',
+          captureTarget: readCurrent,
+          isTargetCurrent: target => {
+            const live = readCurrent()
+            return Boolean(live && live.documentId === target.documentId && live.epoch === target.epoch
+              && live.project.id === target.project.id && live.project.revision === target.project.revision
+              && live.locationId === target.locationId && live.stateId === target.stateId
+              && live.itemId === target.itemId)
+          },
+        })
+        if (!prepared) return null
+        prepared.assertCurrent()
+        return { asset: prepared.asset, bytes: prepared.bytes }
       },
       createId: () => crypto.randomUUID(),
     })
