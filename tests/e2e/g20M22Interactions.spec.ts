@@ -121,8 +121,8 @@ test('M22-T02 workbench audio placement and identity-based jump survive save and
 
     const htmlFile = join(h.directory, 'M22 离线互动.html')
     await app.evaluate(({ dialog }, file) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath: file }) }, htmlFile)
-    await page.getByTestId('export-menu-trigger').click()
-    await page.getByTestId('export-single-html').click()
+    await page.getByTestId('light-export-menu-trigger').click()
+    await page.getByTestId('light-export-single-html').click()
     await expect.poll(async () => {
       const proceed = page.getByRole('alertdialog').getByRole('button', { name: /^(继续导出|仍然导出)$/ }).first()
       if (!existsSync(htmlFile) && await proceed.isVisible().catch(() => false)) await proceed.click().catch(() => undefined)
