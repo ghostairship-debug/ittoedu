@@ -81,6 +81,7 @@ export function FlowPageRuntime({ item, surfaceId, ownerKey = surfaceId, width, 
       authoring: {
         scope: 'scene',
         sceneId: surfaceId,
+        targetOutputSpace: 'local',
         onTargetsChanged: update => {
           if (!active) return
           targetRevision = Math.max(targetRevision, update.revision)

@@ -49,6 +49,8 @@ export interface RuntimeAuthoringTargetRegistryOptions {
   height: number
   /** Output space for reported bounds. Callers pass the current slide canvas. */
   canvas?: SlideCanvasSize
+  /** Flow authoring reports bounds in its live local frame; default is the slide canvas. */
+  targetOutputSpace?: 'local'
   content: EditableTextContent
   assets: Readonly<Record<string, RuntimeAssetBinding>>
   domRoots?: RuntimeAuthoringDomRoots
@@ -168,8 +170,10 @@ export class RuntimeAuthoringTargetRegistry implements RuntimeAuthoringApi {
   constructor(private readonly options: RuntimeAuthoringTargetRegistryOptions) {
     this.width = options.width
     this.height = options.height
-    this.canvasWidth = options.canvas?.width ?? DEFAULT_SLIDE_CANVAS.width
-    this.canvasHeight = options.canvas?.height ?? DEFAULT_SLIDE_CANVAS.height
+    this.canvasWidth = options.targetOutputSpace === 'local'
+      ? options.width : options.canvas?.width ?? DEFAULT_SLIDE_CANVAS.width
+    this.canvasHeight = options.targetOutputSpace === 'local'
+      ? options.height : options.canvas?.height ?? DEFAULT_SLIDE_CANVAS.height
 
     if (options.domRoots) {
       for (const root of [options.domRoots.underlay, options.domRoots.overlay]) {
@@ -231,6 +235,10 @@ export class RuntimeAuthoringTargetRegistry implements RuntimeAuthoringApi {
     if (this.destroyed) return
     this.width = width
     this.height = height
+    if (this.options.targetOutputSpace === 'local') {
+      this.canvasWidth = width
+      this.canvasHeight = height
+    }
     this.invalidate()
   }
 

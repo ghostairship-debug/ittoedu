@@ -17,6 +17,7 @@ import { bridgeManagedHtmlEvents } from '../../lightEdit/htmlDocumentRoots'
 export interface PublishedRuntimeAuthoringMountOptions {
   scope: 'scene' | 'global'
   sceneId?: string
+  targetOutputSpace?: 'local'
   onTargetsChanged: RuntimeAuthoringTargetsChangedHandler
 }
 
@@ -156,6 +157,7 @@ export class PublishedSurfaceRuntimeAuthoringTargets implements SurfaceRuntimeAu
       ...(options.authoring.sceneId ? { sceneId: options.authoring.sceneId } : {}),
       width: options.width,
       height: options.height,
+      ...(options.authoring.targetOutputSpace ? { targetOutputSpace: options.authoring.targetOutputSpace } : {}),
       content: options.content,
       assets: options.assets,
       // One DOM root: the Surface Runtime has no separate underlay.
