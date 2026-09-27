@@ -7,6 +7,7 @@ import { CourseV9Driver } from '../../src/core/drivers/CourseV9Driver'
 import { createBlankCourseProject } from '../../src/core/course/createCourseProject'
 import { openCourseProjectArchive } from '../../src/core/drivers/codecs/courseProjectArchive'
 import { selectionServer, launchSelectionApp, setupSelectionUI, openSelectionFile } from './helpers/g20SelectionHarness'
+import { solidPng } from '../helpers/solidPng'
 
 const root = resolve(__dirname, '../..')
 const benchmark = 'D:/g20-work/b14-core/output/g20/m17/benchmark/Starter-Unit-1-Hello-standalone.html'
@@ -14,7 +15,7 @@ const benchmarkSha256 = 'e0dbf76c6a837e3466b6d777944b6139c5945fc47d57875f44cf7cf
 const courseName = 'M17 导入验收.h5lesson'
 const editingCourseName = 'M17 轻编辑验收.h5lesson'
 const imageOne = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGOwmHvxPwAFXQKmZX6V9QAAAABJRU5ErkJggg=='
-const imageTwo = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP8z8AARMAgYKSgAAAABJRU5ErkJggg=='
+const imageTwo = solidPng(1, 1, [37, 99, 235]).toString('base64')
 
 function fixtureHtml() {
   return `<!doctype html><html><head><meta charset="utf-8"><style>body{margin:0;background:#e8f6ff;font:24px sans-serif}main{padding:40px}img{width:180px;height:180px}</style></head><body><main><h1>M17 interactive fixture</h1><p id="sentence">Original greeting</p><img id="picture" alt="Classroom picture" src="data:image/png;base64,${imageOne}"><button id="advance">Next sentence</button><output id="answer">Ready</output></main><script>document.getElementById('advance').addEventListener('click',()=>{document.getElementById('answer').textContent='Interaction survived'})</script></body></html>`
