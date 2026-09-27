@@ -85,6 +85,8 @@ describe('HTML import closure', () => {
     expect(validateHtmlImport(extractHtmlResources({ html: `<script>${vite}</script>` }))).toEqual([])
     expect(validateHtmlImport(extractHtmlResources({ html: '<script>fetch(location.href)</script>' })).map(error => error.code)).toContain('unsupported-network-sink')
     expect(validateHtmlImport(extractHtmlResources({ html: `<script>${vite.replace('fetch(e.href,n)', 'fetch(e.href,n);fetch(location.href)')}</script>` })).map(error => error.code)).toContain('unsupported-network-sink')
+    const eager = vite.replace('let e=document.createElement(`link`).relList;', 'n({href:location.href});let e=document.createElement(`link`).relList;')
+    expect(validateHtmlImport(extractHtmlResources({ html: `<script>${eager}</script>` })).map(error => error.code)).toContain('unsupported-network-sink')
   })
 
   it('rejects CSS import modifiers rather than turning them into media queries', () => {
@@ -92,7 +94,7 @@ describe('HTML import closure', () => {
     const media = extractHtmlResources({ html: '<style>@import "theme.css" screen;</style>', siblingFiles: files })
     expect(validateHtmlImport(media)).toEqual([])
     expect(media.html).toContain('@media screen{.title{color:red}}')
-    for (const modifier of ['layer(theme)', 'supports(display: grid)', 'layer(theme) supports(display: grid)']) {
+    for (const modifier of ['layer(theme)', 'supports(display: grid)', 'layer(theme) supports(display: grid)', '/*comment*/ layer(theme)']) {
       const result = extractHtmlResources({ html: `<style>@import "theme.css" ${modifier};</style>`, siblingFiles: files })
       expect(validateHtmlImport(result).map(error => error.code)).toContain('unsupported-css-import')
       expect(result.html).not.toContain('@media')
@@ -106,6 +108,11 @@ describe('HTML import closure', () => {
     expect(validateHtmlImport(local)).toEqual([])
     const remote = extractHtmlResources({ html: '<style>.x{background:-webkit-image-set("https://cdn.example/a.png" 1x)}</style>' })
     expect(validateHtmlImport(remote).map(error => error.code)).toContain('remote-resource')
+    const typed = extractHtmlResources({ html: '<style>.x{background:image-set("picture.png" type("image/png") 1x)}</style>', siblingFiles: new Map([['picture.png', png]]) })
+    expect(validateHtmlImport(typed)).toEqual([])
+    expect(typed.resources).toHaveLength(1)
+    const closingParen = extractHtmlResources({ html: '<style>.x{background:image-set("p).png" 1x,"https://cdn.example/b.png" 2x)}</style>', siblingFiles: new Map([['p).png', png]]) })
+    expect(validateHtmlImport(closingParen).map(error => error.code)).toContain('remote-resource')
   })
 
   it('rejects data URI script sources and handles computed property names precisely', () => {

@@ -368,13 +368,47 @@ function rewriteEmbedded(text: string, context: Context, baseDir: string, sink: 
   return parts.join('')
 }
 
+function imageSetStringStarts(css: string): Set<number> {
+  const starts = new Set<number>()
+  const imageSets: number[] = []
+  let depth = 0
+  for (let i = 0; i < css.length;) {
+    if (css.startsWith('/*', i)) {
+      const end = css.indexOf('*/', i + 2)
+      i = end === -1 ? css.length : end + 2
+      continue
+    }
+    const quote = css[i]
+    if (quote === '"' || quote === "'") {
+      if (imageSets[imageSets.length - 1] === depth) starts.add(i)
+      i++
+      while (i < css.length && css[i] !== quote) i += css[i] === '\\' ? 2 : 1
+      if (i < css.length) i++
+      continue
+    }
+    if (css.slice(i, i + 10).toLowerCase() === 'image-set(' && !/[A-Za-z0-9_]/.test(css[i - 1] ?? '')) {
+      depth++
+      imageSets.push(depth)
+      i += 10
+      continue
+    }
+    if (css[i] === '(') depth++
+    else if (css[i] === ')') {
+      if (imageSets[imageSets.length - 1] === depth) imageSets.pop()
+      depth = Math.max(0, depth - 1)
+    }
+    i++
+  }
+  return starts
+}
+
 function rewriteCss(css: string, baseDir: string, sink: Sink, siblings: Map<string, Uint8Array>): string {
   const lower = folded(css)
   const parts: string[] = []
   let cursor = 0
   let i = 0
   let changed = false
-  let imageSetEnd = -1
+  const imageSetStrings = imageSetStringStarts(css)
   const nextAt = (from: number) => {
     let best = -1
     const consider = (index: number) => { if (index !== -1 && (best === -1 || index < best)) best = index }
@@ -383,7 +417,6 @@ function rewriteCss(css: string, baseDir: string, sink: Sink, siblings: Map<stri
     consider(css.indexOf("'", from))
     consider(indexOfUrl(lower, from))
     consider(lower.indexOf('@import', from))
-    consider(lower.indexOf('image-set(', from))
     consider(lower.indexOf('data:', from))
     return best
   }
@@ -395,18 +428,6 @@ function rewriteCss(css: string, baseDir: string, sink: Sink, siblings: Map<stri
       i = end === -1 ? css.length : end + 2
       continue
     }
-    if (lower.startsWith('image-set(', next)) {
-      let depth = 1
-      let j = next + 'image-set('.length
-      while (j < css.length && depth > 0) {
-        if (css[j] === '(') depth++
-        else if (css[j] === ')') depth--
-        j++
-      }
-      imageSetEnd = j
-      i = next + 'image-set('.length
-      continue
-    }
     const quote = css[next]
     if (quote === '"' || quote === "'") {
       let j = next + 1
@@ -414,7 +435,7 @@ function rewriteCss(css: string, baseDir: string, sink: Sink, siblings: Map<stri
       const closed = j < css.length
       if (closed) j++
       const inner = css.slice(next + 1, closed ? j - 1 : j)
-      const rewritten = next < imageSetEnd
+      const rewritten = imageSetStrings.has(next)
         ? rewriteSingleUrl(inner, 'css-url', baseDir, sink, siblings, false).value
         : rewriteEmbedded(inner, 'css-url', baseDir, sink, siblings, { url: false, remote: false }, false)
       if (rewritten !== inner) {
@@ -430,7 +451,7 @@ function rewriteCss(css: string, baseDir: string, sink: Sink, siblings: Map<stri
       if (!match) { addDiagnostic(sink, 'error', 'unsupported-css-import', '无法解析 CSS @import'); i = next + 7; continue }
       const reference = match[2] ?? match[4]
       const media = match[5]?.trim() ?? ''
-      if (/^(?:layer(?:\s*\(|\b)|supports\s*\()/i.test(media)) {
+      if (/^(?:layer(?:\s*\(|\b)|supports\s*\()/i.test(media.replace(/\/\*[\s\S]*?\*\//g, '').trim())) {
         addDiagnostic(sink, 'error', 'unsupported-css-import', 'CSS @import 的 layer()/supports() 条件暂不支持', reference)
         i = next + match[0].length
         continue
@@ -542,6 +563,9 @@ function rewriteJavaScript(code: string, sourceType: 'script' | 'module', baseDi
           && ancestors.some(ancestor => {
             if (!['FunctionDeclaration', 'FunctionExpression', 'ArrowFunctionExpression'].includes(ancestor.type)) return false
             const body = code.slice(ancestor.start, ancestor.end)
+            const beforeGuard = body.slice(0, body.search(/if\s*\([^)]*\.supports/))
+            const loaderName = (loader?.id as Node | undefined)?.name
+            if (typeof loaderName !== 'string' || new RegExp('\\b' + loaderName + '\\s*\\(').test(beforeGuard)) return false
             return /\.relList\b/.test(body)
               && /\.supports\(\s*['"`]modulepreload['"`]\s*\)/.test(body)
               && /querySelectorAll\(\s*['"`]link\[rel=/.test(body)
