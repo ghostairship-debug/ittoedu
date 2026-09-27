@@ -56,17 +56,35 @@ async function imageBlock(page: Page) {
   return block
 }
 
+async function visibleImagePoint(image: ReturnType<Page['locator']>) {
+  const result = await image.evaluate(element => {
+    const rect = element.getBoundingClientRect()
+    const covers: string[] = []
+    for (const yFraction of [0.1, 0.3, 0.5, 0.7, 0.9]) for (const xFraction of [0.1, 0.3, 0.5, 0.7, 0.9]) {
+      const x = rect.left + rect.width * xFraction, y = rect.top + rect.height * yFraction
+      const hit = document.elementFromPoint(x, y)
+      if (hit && (hit === element || element.contains(hit))) return { point: { x, y }, covers }
+      covers.push(hit?.closest('[data-flow-block-id]')?.getAttribute('data-flow-block-id') ?? hit?.tagName ?? 'none')
+    }
+    return { point: null, covers, box: { x: rect.x, y: rect.y, width: rect.width, height: rect.height } }
+  })
+  if (!result.point) throw new Error(`No mouse-accessible pixel on the document image: ${JSON.stringify(result)}`)
+  return result.point
+}
+
 async function selectImage(page: Page) {
-  const image = page.locator('.flow-workspace').filter({ visible: true }).first().locator('figure[data-document-id="flow-media"] img').first()
+  const image = page.locator('.flow-workspace').filter({ visible: true }).first().locator('figure[data-document-id="flow-media"] [data-flow-media-kind="image"]').first()
   await image.scrollIntoViewIfNeeded()
-  await image.click()
+  const point = await visibleImagePoint(image)
+  await page.mouse.click(point.x, point.y)
   await expect(page.getByRole('toolbar', { name: '选中内容快捷工具' })).toBeVisible()
   return image
 }
 
 async function contextImage(page: Page) {
   const image = await selectImage(page)
-  await image.click({ button: 'right' })
+  const point = await visibleImagePoint(image)
+  await page.mouse.click(point.x, point.y, { button: 'right' })
   const menu = page.getByRole('menu', { name: '对象操作' })
   await expect(menu).toBeVisible()
   return menu
@@ -80,12 +98,16 @@ test('M16-T06 Flow image layout, caption, crop and replacement persist in light 
   try {
     const initial = await imageBlock(page), initialId = initial.id, initialAssetId = initial.assetId
     const figure = page.locator('.flow-workspace').filter({ visible: true }).first().locator('figure[data-document-id="flow-media"]').first()
+    await figure.scrollIntoViewIfNeeded()
+    await page.screenshot({ path: join(data.shots, 'initial-media.png') })
+    ;(evidence.screenshots as string[]).push('initial-media.png')
     const choices = [
       ['正文宽', 'content-width', 'none'], ['宽幅', 'wide', 'none'], ['通栏', 'full-width', 'none'],
       ['左环绕', 'full-width', 'left'], ['右环绕', 'full-width', 'right'],
     ] as const
     const widths: Partial<Record<(typeof choices)[number][0], number>> = {}
     for (const [label, layout, wrap] of choices) {
+      evidence.currentChoice = label
       const menu = await contextImage(page)
       await menu.getByRole('menuitem', { name: label, exact: true }).click()
       await expect.poll(async () => ({ layout: (await imageBlock(page)).layout, wrap: (await imageBlock(page)).wrap })).toEqual({ layout, wrap })
@@ -100,6 +122,8 @@ test('M16-T06 Flow image layout, caption, crop and replacement persist in light 
       const savedFlow = archiveAtChoice.project.surfaces.find(item => item.type === 'flow')
       const savedImage = savedFlow?.type === 'flow' ? savedFlow.blocks.find(item => item.id === initialId) : undefined
       expect(savedImage).toEqual(expect.objectContaining({ type: 'media', layout, wrap, assetId: initialAssetId }))
+      await page.screenshot({ path: join(data.shots, `layout-${label}.png`) })
+      ;(evidence.screenshots as string[]).push(`layout-${label}.png`)
     }
     expect(widths['宽幅']!).toBeGreaterThan(widths['正文宽']!)
     expect(widths['通栏']!).toBeGreaterThan(widths['宽幅']!)
@@ -204,9 +228,7 @@ test('M16-T06 document image converts to anchored paper image and back without l
     await expect(editorInsert.locator('[data-flow-insert-destination="document"]')).toHaveCount(11)
     await expect(editorInsert.locator('[data-flow-insert-destination="paper"]')).toHaveCount(4)
     await expect(editorInsert.getByRole('menuitem', { name: /屏幕|浮层/ })).toHaveCount(0)
-    await card.click()
-    const properties = page.getByRole('button', { name: '属性与素材', exact: true })
-    if (await properties.getAttribute('aria-expanded') !== 'true') await properties.click()
+    await expect(page.getByTestId(`flow-layer-selection-${layerId}`)).toBeVisible()
     await page.getByRole('tab', { name: '属性', exact: true }).click()
     const overlayBeforeReplace = flow(await snapshot(page)).surfaceLayerItems.find(entry => entry.item.layerItemId === layerId)!
     const overlayChooser = page.waitForEvent('filechooser')
