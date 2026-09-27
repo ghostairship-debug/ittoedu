@@ -166,7 +166,9 @@ test('M16-T04 Flow 正文、paper Native 与 Runtime 独立修改后保存重开
     await expect(preview.locator('[data-m16-mixed-runtime="true"] h2')).toHaveText('Runtime 改后标题')
     await preview.locator('[data-m16-mixed-run="true"]').click()
     await expect(preview.locator('[data-m16-mixed-run="true"]')).toHaveAttribute('data-ran', 'true')
-    await info.attach('M16-T04 mixed Flow export preview', { body: await preview.screenshot({ fullPage: true }), contentType: 'image/png' })
+    const previewImage = await preview.screenshot({ fullPage: true })
+    writeFileSync(join(directory, 'export-preview.png'), previewImage)
+    await info.attach('M16-T04 mixed Flow export preview', { body: previewImage, contentType: 'image/png' })
     writeFileSync(join(directory, 'evidence.json'), JSON.stringify({ documentId, reopenedId, savedRevision: edited.revision + 1, exportPath, checks: ['body', 'paper Native', 'Runtime', 'undo-redo', 'save-reopen', 'offline HTML preview interaction'] }, null, 2))
     await info.attach('M16-T04 mixed Flow evidence', { path: join(directory, 'evidence.json'), contentType: 'application/json' })
   } finally {
