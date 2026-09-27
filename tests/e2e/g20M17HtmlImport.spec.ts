@@ -43,6 +43,42 @@ async function centreOf(locator: Locator) {
   return { x: box.x + box.width / 2, y: box.y + box.height / 2 }
 }
 
+async function centreOfTextRange(iframe: Locator, target: Locator) {
+  await expect(iframe).toBeVisible()
+  await expect(target).toBeVisible()
+  const frame = await iframe.boundingBox()
+  if (!frame) throw new Error('No visible Runtime iframe bounds')
+  const local = await target.evaluate(element => {
+    const doc = element.ownerDocument
+    const viewport = doc.defaultView
+    if (!viewport) throw new Error('Runtime iframe has no viewport')
+    const paragraph = element.getBoundingClientRect()
+    const walker = doc.createTreeWalker(element, NodeFilter.SHOW_TEXT)
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      const raw = node.textContent ?? ''
+      const start = raw.search(/\S/)
+      if (start < 0) continue
+      const end = raw.length - (raw.match(/\s*$/)?.[0].length ?? 0)
+      const range = doc.createRange()
+      range.setStart(node, start)
+      range.setEnd(node, end)
+      const rect = Array.from(range.getClientRects()).find(rect => rect.width > 0 && rect.height > 0)
+      if (rect) return {
+        paragraph: { x: paragraph.x, y: paragraph.y, width: paragraph.width, height: paragraph.height },
+        range: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
+        viewport: { width: viewport.innerWidth, height: viewport.innerHeight },
+      }
+    }
+    throw new Error('No nonempty visible Text Range in Runtime target')
+  })
+  if (local.viewport.width <= 0 || local.viewport.height <= 0) throw new Error('Invalid Runtime iframe viewport')
+  const point = {
+    x: frame.x + (local.range.x + local.range.width / 2) * frame.width / local.viewport.width,
+    y: frame.y + (local.range.y + local.range.height / 2) * frame.height / local.viewport.height,
+  }
+  return { point, frame, ...local }
+}
+
 async function setFilePicker(app: ElectronApplication, path: string) {
   await app.evaluate((_electron, value) => { (globalThis as unknown as { m17FilePicker?: string }).m17FilePicker = value }, path)
 }
@@ -95,6 +131,11 @@ test('M17-T01/T02/T03: both UI entries import without model calls; benchmark run
   writeFileSync(join(workspace, 'menu.html'), fixtureHtml())
   const replacement = join(directory, 'replacement.png')
   writeFileSync(replacement, Buffer.from(imageTwo, 'base64'))
+  const textHitEvidence: Record<string, unknown> = {}
+  const recordTextHit = (name: string, hit: Awaited<ReturnType<typeof centreOfTextRange>>) => {
+    textHitEvidence[name] = hit
+    writeFileSync(join(directory, 'text-hit-points.json'), JSON.stringify(textHitEvidence, null, 2))
+  }
   const server = await selectionServer()
   let app: ElectronApplication | undefined
   const errors: string[] = []
@@ -217,8 +258,9 @@ test('M17-T01/T02/T03: both UI entries import without model calls; benchmark run
     const previousTranslation = (await translation.textContent())?.trim()
     expect(previousTranslation).toBeTruthy()
     expect(previousTranslation).not.toBe(editedTranslation)
-    const translationPoint = await centreOf(translation)
-    await page.mouse.dblclick(translationPoint.x, translationPoint.y)
+    const translationHit = await centreOfTextRange(benchmarkFrame, translation)
+    recordTextHit('benchmark-translation', translationHit)
+    await page.mouse.dblclick(translationHit.point.x, translationHit.point.y)
     const benchmarkEditor = page.getByTestId('canvas-plain-text-editor').locator('input, textarea')
     await expect(benchmarkEditor).toBeVisible()
     await expect(benchmarkEditor).toHaveValue(previousTranslation!)
@@ -293,13 +335,15 @@ test('M17-T01/T02/T03: both UI entries import without model calls; benchmark run
     await expect(fixtureAuthoring.locator('#sentence')).toHaveText('Original greeting')
     await runMode.click()
     await expect(tryRun).toHaveAttribute('data-course-player-ready', 'true', { timeout: 60_000 })
-    const fixture = page.locator('.course-try-run-host iframe').first().contentFrame()
+    const fixtureFrame = page.locator('.course-try-run-host iframe').first()
+    const fixture = fixtureFrame.contentFrame()
     await expect(fixture.locator('#sentence')).toHaveText('Original greeting')
     await editMode.click()
     await expect(liveBar).toBeVisible()
     const editor = page.getByTestId('canvas-plain-text-editor').locator('input, textarea')
-    const sentencePoint = await centreOf(fixture.locator('#sentence'))
-    await page.mouse.dblclick(sentencePoint.x, sentencePoint.y)
+    const sentenceHit = await centreOfTextRange(fixtureFrame, fixture.locator('#sentence'))
+    recordTextHit('fixture-sentence', sentenceHit)
+    await page.mouse.dblclick(sentenceHit.point.x, sentenceHit.point.y)
     await expect(editor).toBeVisible()
     await editor.fill('Edited greeting')
     await editor.press('Enter')
