@@ -37,8 +37,8 @@ test('M17 remote media: HTTPS image/audio import stays live, saves, reopens, and
   const base = join(root, 'output/g20/m17/remote-media')
   mkdirSync(base, { recursive: true })
   const directory = mkdtempSync(join(base, 'run-'))
-  const workspace = join(directory, 'workspace')
-  mkdirSync(workspace)
+  const workspace = join(directory, 'workspace'), shots = join(directory, 'shots')
+  mkdirSync(workspace); mkdirSync(shots)
   writeFileSync(join(workspace, courseName), makeCourse())
 
   const requests: string[] = []
@@ -91,8 +91,7 @@ test('M17 remote media: HTTPS image/audio import stays live, saves, reopens, and
     const dialog = page.getByRole('dialog', { name: '导入 HTML 页面' })
     await dialog.getByRole('button', { name: '导入', exact: true }).click()
     await expect(dialog).toHaveCount(0, { timeout: 60_000 })
-    await expect(page.getByText('HTML 页面已导入到所选位置')).toBeVisible()
-    await expect(page.getByText(/网络媒体.*离线时可能无法使用/)).toBeVisible()
+    await expect(page.getByText('HTML 页面已导入；在线图片/音视频链接已保留，离线时可能无法使用')).toBeVisible()
     await expect.poll(() => document().then(snapshot => snapshot.model.kind === 'course-v9' ? snapshot.model.project.network?.connectOrigins : undefined)).toContain(origin)
 
     const frame = page.locator('.published-authoring-host iframe').last().contentFrame()
@@ -101,6 +100,7 @@ test('M17 remote media: HTTPS image/audio import stays live, saves, reopens, and
     await expect.poll(() => frame.locator('#remote-audio').evaluate(node => (node as HTMLAudioElement).readyState)).toBeGreaterThan(0)
     expect(requests).toContain('/image.png')
     expect(requests).toContain('/tone.wav')
+    await page.screenshot({ path: join(shots, '01-imported-remote-media.png') })
 
     const runMode = page.getByRole('group', { name: '画布模式' }).getByRole('button', { name: '当前位置试运行', exact: true })
     await runMode.click()
@@ -120,6 +120,7 @@ test('M17 remote media: HTTPS image/audio import stays live, saves, reopens, and
     const reopenedFrame = page.locator('.published-authoring-host iframe').last().contentFrame()
     await expect(reopenedFrame.locator('#remote-image')).toHaveAttribute('src', `${origin}/image.png`)
     await expect(reopenedFrame.locator('#remote-audio')).toHaveAttribute('src', `${origin}/tone.wav`)
+    await page.screenshot({ path: join(shots, '02-reopened-remote-media.png') })
     const online = buildPublishedCourseStandaloneHtml({ project: saved.project, assetFiles: saved.assetFiles, components: {} }, {
       playerBundle: readFileSync(join(root, 'dist-player/player.iife.js'), 'utf8'),
       singleHtmlMode: 'online-lightweight',
