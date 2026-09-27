@@ -26,6 +26,37 @@ CoursewareRuntime.define({
       if (!Object.prototype.hasOwnProperty.call(replacements, key)) throw new Error('HTML 页面素材绑定缺失：' + key);
       return replacements[key];
     });
+    // srcdoc inherits the host CSP. Parser inserted inline scripts cannot run there,
+    // while same-origin Blob scripts are permitted by the host and export policies.
+    const parsed = new DOMParser().parseFromString(html, 'text/html');
+    const scriptUrls = [];
+    const eventHandlers = [];
+    const supportedEvents = new Set(['click', 'dblclick', 'change', 'input', 'submit', 'keydown', 'keyup', 'keypress', 'pointerdown', 'pointerup', 'mousedown', 'mouseup', 'mousemove', 'mouseover', 'mouseout', 'focus', 'blur']);
+    try {
+      for (const [index, element] of Array.from(parsed.querySelectorAll('*')).entries()) {
+        for (const attribute of Array.from(element.attributes)) {
+          if (!/^on[a-z]+$/i.test(attribute.name)) continue;
+          const eventName = attribute.name.slice(2).toLowerCase();
+          if (!supportedEvents.has(eventName)) throw new Error('HTML 页面不支持内联事件：' + attribute.name);
+          eventHandlers.push([index, eventName, attribute.value]);
+          element.removeAttribute(attribute.name);
+        }
+      }
+      for (const script of parsed.querySelectorAll('script:not([src])')) {
+        const type = (script.getAttribute('type') || '').trim().toLowerCase();
+        if (type && type !== 'module' && !/^(?:text|application)\\/(?:javascript|ecmascript|x-javascript)$/.test(type)) continue;
+        if (!script.textContent) continue;
+        const url = URL.createObjectURL(new Blob([script.textContent], { type: 'text/javascript' }));
+        scriptUrls.push(url);
+        script.textContent = '';
+        script.setAttribute('src', url);
+      }
+    } catch (error) {
+      for (const url of scriptUrls) URL.revokeObjectURL(url);
+      throw error;
+    }
+    const doctype = html.match(/^\\s*<!doctype[^>]*>/i)?.[0] || '';
+    const executableHtml = doctype + parsed.documentElement.outerHTML;
     let destroyed = false;
     let suspended = false;
     const pausedMedia = new Set();
@@ -36,7 +67,23 @@ CoursewareRuntime.define({
       const finish = (error) => { if (!pending) return; pending = false; cleanup(); error ? reject(error) : resolve(); };
       const onLoad = () => {
         // A connected iframe may also emit the initial about:blank load.
-        if (iframe.contentDocument?.URL === 'about:srcdoc' && iframe.contentDocument.readyState === 'complete') finish();
+        if (iframe.contentDocument?.URL !== 'about:srcdoc' || iframe.contentDocument.readyState !== 'complete') return;
+        try {
+          if (eventHandlers.length) {
+            const elements = iframe.contentDocument.querySelectorAll('*');
+            const ChildFunction = iframe.contentWindow?.Function;
+            if (!ChildFunction) throw new Error('HTML 页面事件执行环境不可用');
+            for (const [index, eventName, body] of eventHandlers) {
+              const element = elements[index];
+              if (!element) throw new Error('HTML 页面事件目标缺失');
+              const handler = new ChildFunction('event', body);
+              element.addEventListener(eventName, function(event) {
+                if (handler.call(this, event) === false) event.preventDefault();
+              });
+            }
+          }
+          finish();
+        } catch (error) { finish(error); }
       };
       const onError = () => finish(new Error('HTML 页面加载失败'));
       const timeout = setTimeout(() => finish(new Error('HTML 页面加载超时')), 15000);
@@ -44,7 +91,7 @@ CoursewareRuntime.define({
       iframe.addEventListener('error', onError);
       cancelReady = () => finish(new Error('HTML 页面已销毁'));
     });
-    iframe.srcdoc = html;
+    iframe.srcdoc = executableHtml;
     context.dom.root.appendChild(iframe);
     context.capture.waitUntil(ready);
     return {
@@ -68,7 +115,7 @@ CoursewareRuntime.define({
         pausedMedia.clear();
       },
       prepareCapture() { return ready; },
-      destroy() { if (destroyed) return; destroyed = true; pausedMedia.clear(); cancelReady(); iframe.remove(); iframe.srcdoc = ''; },
+      destroy() { if (destroyed) return; destroyed = true; pausedMedia.clear(); cancelReady(); iframe.remove(); iframe.srcdoc = ''; for (const url of scriptUrls) URL.revokeObjectURL(url); },
     };
   },
 });`
