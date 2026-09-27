@@ -17,9 +17,11 @@ import { DEFAULT_SLIDE_CANVAS } from '../../../shared/slideCanvas'
 import { playbackControllerInsets, type PlaybackChromeInsets } from '../../../shared/playbackViewGeometry'
 import { rotatedWorldRectAxisBounds } from '../../authoring/stageViewportTransform'
 import type { LayerItem } from '../../../shared/courseProjectTypes'
+import type { RuntimeAuthoringTargetUpdate } from '../../../shared/runtimeTypes'
 import type { ComponentPackageData } from '../../../shared/componentTypes'
 import {
   captureFlowEditorAuthoringTarget,
+  type DeepReadonly,
   type FlowEditorLayerView,
   type FlowEditorView,
 } from '../../course/flowEditorView'
@@ -39,12 +41,45 @@ import {
 } from '../../authoring/stageViewportTransform'
 import { TeacherControllerAuthoringChrome } from '../TeacherControllerAuthoringChrome'
 import { PublishedNativeContent } from '../PublishedNativeContent'
+import { FlowPageRuntime } from './FlowPageRuntime'
 import {
   findComponentPackageSource,
   mountPublishedComponent,
 } from '../../../player/surfaces/publishedComponentMount'
 
 const FLOW_OVERLAY_HANDLE_RADIUS = 10
+const FLOW_RUNTIME_DRAG_EDGE = 6
+
+function isFlowPageRuntimeLayer(layer: FlowEditorLayerView): layer is FlowEditorLayerView & { item: DeepReadonly<Extract<LayerItem, { kind: 'runtime' }>> } {
+  return layer.owner === 'surface' && layer.item.paperSpace === 'paper'
+    && Boolean(layer.paragraphAnchor) && layer.effectiveVisible
+    && layer.item.kind === 'runtime' && layer.item.runtime.enabled
+    && layer.item.runtime.protocol === 'surface-runtime'
+    && layer.item.runtime.runtimeApiVersion === 3
+    && layer.item.runtime.renderMode === 'dom'
+}
+
+function persistedRuntimeGestureFrame(layer: FlowEditorLayerView, start: StageRect, next: StageRect): StageRect {
+  if (!isFlowPageRuntimeLayer(layer)) return next
+  // The visible Runtime may be much taller than its stored frame. Movement must
+  // not commit observed content height; an explicit resize commits only its delta.
+  return {
+    ...next,
+    width: Math.max(MIN_NODE_SIZE, layer.item.frame.width + next.width - start.width),
+    height: Math.max(MIN_NODE_SIZE, layer.item.frame.height + next.height - start.height),
+  }
+}
+
+function runtimeDragEdges(): ReactNode {
+  return (['top', 'right', 'bottom', 'left'] as const).map(edge => (
+    <div key={edge} data-runtime-drag-edge={edge} style={{
+      position: 'absolute', pointerEvents: 'auto', cursor: 'move',
+      ...(edge === 'top' || edge === 'bottom'
+        ? { left: 0, right: 0, height: FLOW_RUNTIME_DRAG_EDGE, [edge]: 0 }
+        : { top: 0, bottom: 0, width: FLOW_RUNTIME_DRAG_EDGE, [edge]: 0 }),
+    }} />
+  ))
+}
 
 export function resolveFlowOverlayAuthoredFrame(layer: FlowEditorLayerView, paperWidth: number, paragraphRects: readonly FlowParagraphBlockRect[], visibleAncestorIds: readonly string[] = []): StageRect {
   const frame = layer.item.frame
@@ -307,6 +342,10 @@ export interface FlowOverlayAuthoringLayerProps {
   readonly paperScrollTop: number
   readonly paperWidth?: number
   readonly paragraphRects?: readonly FlowParagraphBlockRect[]
+  /** Derived Runtime paper frames; the canonical layer frame remains unchanged. */
+  readonly runtimeFrames?: Readonly<Record<string, StageRect>>
+  readonly onRuntimeHeightChange?: (layerItemId: string, height: number) => void
+  readonly onRuntimeTargetsChanged?: (layerItemId: string, update: Readonly<RuntimeAuthoringTargetUpdate>) => void
   readonly onBodyPlaneChange?: (layerItemId: string, plane: 'overlay' | 'underlay') => void
   readonly paperScrollLeft?: number
   readonly paperOrigin?: FlowPoint
@@ -330,6 +369,9 @@ export function FlowOverlayAuthoringLayer({
   paperScrollTop,
   paperWidth = 0,
   paragraphRects = [],
+  runtimeFrames = {},
+  onRuntimeHeightChange,
+  onRuntimeTargetsChanged,
   onBodyPlaneChange,
   paperScrollLeft = 0,
   paperOrigin = { x: 0, y: 0 },
@@ -354,6 +396,7 @@ export function FlowOverlayAuthoringLayer({
   })
   const canvas = view.canvas ?? DEFAULT_SLIDE_CANVAS
   const authoredFrameOf = (layer: FlowEditorLayerView): StageRect => {
+    if (isFlowPageRuntimeLayer(layer) && runtimeFrames[layer.selectionId]) return runtimeFrames[layer.selectionId]
     const ancestors: string[] = []
     let block = view.blocks.find(entry => entry.blockId === layer.paragraphAnchor?.blockId)
     while (block?.parentId) {
@@ -475,7 +518,7 @@ export function FlowOverlayAuthoringLayer({
     const handleAttr = handleEl?.getAttribute('data-handle')
     const direction = (STAGE_RESIZE_HANDLE_DIRECTIONS as readonly string[]).includes(handleAttr ?? '')
       ? handleAttr as StageResizeHandleDirection
-      : hitFlowOverlayResizeHandle(startFrame, local)
+      : isFlowPageRuntimeLayer(layer) ? null : hitFlowOverlayResizeHandle(startFrame, local)
     overlayGestureRef.current = {
       type: direction ? 'resize' : 'move',
       layerItemId: layer.selectionId,
@@ -549,8 +592,9 @@ export function FlowOverlayAuthoringLayer({
     )
     setOverlayPreview(null)
     const layer = view.overlayLayers.find(layer => layer.selectionId === gesture.layerItemId)
-    const persisted = layer?.item.kind === 'component' && isTeacherControllerLayerItem(layer.item) ? { ...next, width: rawNext.width, height: rawNext.height }
+    const projected = layer?.item.kind === 'component' && isTeacherControllerLayerItem(layer.item) ? { ...next, width: rawNext.width, height: rawNext.height }
       : isViewportOverlay(layer) ? flowViewportOverlayFrameAt(next, canvas, overlayViewportSize) : next
+    const persisted = layer ? persistedRuntimeGestureFrame(layer, gesture.startFrame, projected) : projected
     const anchor = layer ? flowOverlayAnchorAfterDrag(layer, persisted, paperWidth, paragraphRects) : undefined
     if (anchor === null) return
     const intent = { kind: 'transform-overlay-frame', frame: persisted, ...(anchor ? { paragraphAnchor: anchor } : {}) } as const
@@ -599,7 +643,9 @@ export function FlowOverlayAuthoringLayer({
     const underlayVisual = layer.owner === 'global' && layer.globalPlane === 'underlay'
     const passThroughVisual = layer.item.hitPolicy === 'pass-through'
     const inertVisual = underlayVisual || passThroughVisual
-    const interactive = !readOnly && !selected && !inertVisual
+    const pageRuntime = isFlowPageRuntimeLayer(layer)
+    const interactive = !readOnly && !selected && !inertVisual && !pageRuntime
+    const runtimeEdgeActive = pageRuntime && !readOnly && !layer.locked && !inertVisual
     return (
       <div
         key={layer.selectionId}
@@ -633,10 +679,12 @@ export function FlowOverlayAuthoringLayer({
           ),
           opacity: layer.item.opacity,
           ...(controller ? (() => { const base = overlayFrameOf(layer), visible = controllerDisplayFrame(layer.item as LayerItem, base); return { clipPath: `inset(${visible.y-base.y}px ${base.width-(visible.x-base.x)-visible.width}px ${base.height-(visible.y-base.y)-visible.height}px ${visible.x-base.x}px)` } })() : {}),
-          pointerEvents: interactive ? 'auto' : 'none',
+          pointerEvents: pageRuntime && !inertVisual ? 'auto' : interactive ? 'auto' : 'none',
         }}
-        onPointerDown={interactive ? (event) => beginOverlayGesture(event, layer) : undefined}
-        onContextMenu={interactive ? (event) => openOverlayMenu(event, layer) : undefined}
+        onPointerDown={runtimeEdgeActive
+          ? event => { if ((event.target as HTMLElement).closest('[data-runtime-drag-edge]')) beginOverlayGesture(event, layer) }
+          : interactive ? event => beginOverlayGesture(event, layer) : undefined}
+        onContextMenu={(interactive || (pageRuntime && !readOnly && !inertVisual)) ? event => openOverlayMenu(event, layer) : undefined}
         onDoubleClick={!readOnly && layer.item.kind === 'native' && layer.item.content.nativeType === 'formula' ? event => { event.stopPropagation(); onEditFormula?.(layer.selectionId) } : undefined}
         onPointerMove={readOnly ? undefined : moveOverlayGesture}
         onPointerUp={readOnly ? undefined : endOverlayGesture}
@@ -660,9 +708,18 @@ export function FlowOverlayAuthoringLayer({
             scenes={overlayScenes}
             currentSceneId={locationId}
           />
-        ) : (
-          renderFlowOverlayCardContent(view.projectId, layer, assetUrls, componentPackages)
-        )}
+        ) : pageRuntime ? (
+          <FlowPageRuntime
+            item={layer.item}
+            surfaceId={view.surfaceId}
+            width={authoredFrameOf(layer).width}
+            height={authoredFrameOf(layer).height}
+            assetUrls={assetUrls}
+            onHeightChange={height => onRuntimeHeightChange?.(layer.selectionId, height)}
+            onTargetsChanged={update => onRuntimeTargetsChanged?.(layer.selectionId, update)}
+          />
+        ) : renderFlowOverlayCardContent(view.projectId, layer, assetUrls, componentPackages)}
+        {runtimeEdgeActive && runtimeDragEdges()}
       </div>
     )
   }
@@ -674,11 +731,12 @@ export function FlowOverlayAuthoringLayer({
     const selected = selection?.selectedOverlayIds.includes(layer.selectionId) === true
     if (!selected) return null
     const editable = !readOnly && !layer.locked
+    const pageRuntime = isFlowPageRuntimeLayer(layer)
     return (
       <div
         key={layer.selectionId}
-        role={readOnly ? undefined : 'button'}
-        tabIndex={readOnly ? undefined : 0}
+        role={readOnly || pageRuntime ? undefined : 'button'}
+        tabIndex={readOnly || pageRuntime ? undefined : 0}
         className="flow-layer-selection-chrome flow-layer-card--selected"
         data-layer-item-id={layer.selectionId}
         data-testid={`flow-layer-selection-${layer.selectionId}`}
@@ -696,10 +754,12 @@ export function FlowOverlayAuthoringLayer({
             true,
             canvas,
           ),
-          pointerEvents: readOnly ? 'none' : 'auto',
+          pointerEvents: readOnly || pageRuntime ? 'none' : 'auto',
           background: 'transparent',
         }}
-        onPointerDown={readOnly ? undefined : (event) => beginOverlayGesture(event, layer)}
+        onPointerDown={readOnly ? undefined : pageRuntime
+          ? event => { if ((event.target as HTMLElement).closest('[data-runtime-drag-edge], [data-handle]')) beginOverlayGesture(event, layer) }
+          : event => beginOverlayGesture(event, layer)}
         onContextMenu={readOnly ? undefined : (event) => openOverlayMenu(event, layer)}
         onDoubleClick={!readOnly && layer.item.kind === 'native' && layer.item.content.nativeType === 'formula' ? event => { event.stopPropagation(); onEditFormula?.(layer.selectionId) } : undefined}
         onPointerMove={readOnly ? undefined : moveOverlayGesture}
@@ -718,6 +778,7 @@ export function FlowOverlayAuthoringLayer({
         </div> : null}
         {selected && shownAnchor && <span data-flow-anchor-block-id={shownAnchor.blockId}
           style={{ position: 'absolute', left: 0, top: -16, fontSize: 11, pointerEvents: 'none', background: '#2563eb', color: '#fff' }}>挂靠：{shownAnchor.blockId}</span>}
+        {editable && pageRuntime && runtimeDragEdges()}
         {editable ? STAGE_RESIZE_HANDLE_DIRECTIONS.map((direction) => {
           const frame = controllerDisplayFrame(layer.item as LayerItem, overlayFrameOf(layer))
           const point = overlayHandlePoint(frame, direction)
