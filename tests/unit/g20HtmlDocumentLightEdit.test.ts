@@ -220,11 +220,17 @@ it('publishes only painted image and text bounds after axis-specific clipping', 
   const section = root.querySelector('section')!
   section.style.overflowX = 'hidden'
   section.getBoundingClientRect = () => rect(20, 20, 100, 100)
+  Object.defineProperties(section, {
+    offsetWidth: { value: 100 }, clientWidth: { value: 100 },
+  })
   const image = section.querySelector('img')!
   image.getBoundingClientRect = () => rect(20, 30, 130, 60)
   const aside = root.querySelector('aside')!
   aside.style.overflowY = 'scroll'
   aside.getBoundingClientRect = () => rect(125, 60, 80, 20)
+  Object.defineProperties(aside, {
+    offsetHeight: { value: 20 }, clientHeight: { value: 20 },
+  })
   const originalRange = Range.prototype.getBoundingClientRect
   Object.defineProperty(Range.prototype, 'getBoundingClientRect', {
     configurable: true, value: () => rect(130, 55, 60, 40),

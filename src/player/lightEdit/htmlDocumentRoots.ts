@@ -37,17 +37,19 @@ export function visibleDomRect(rect: DOMRect, element: HTMLElement): DOMRect | n
     if (!clipsX && !clipsY) continue
     const bounds = ancestor.getBoundingClientRect()
     // client* uses layout pixels; the rect is already in scaled viewport pixels.
-    const scaleX = ancestor.offsetWidth > 0 ? bounds.width / ancestor.offsetWidth : 1
-    const scaleY = ancestor.offsetHeight > 0 ? bounds.height / ancestor.offsetHeight : 1
-    const clipLeft = bounds.left + ancestor.clientLeft * scaleX
-    const clipTop = bounds.top + ancestor.clientTop * scaleY
     if (clipsX) {
+      if (ancestor.offsetWidth <= 0) return null
+      const scaleX = bounds.width / ancestor.offsetWidth
+      const clipLeft = bounds.left + ancestor.clientLeft * scaleX
       left = Math.max(left, clipLeft)
-      right = Math.min(right, clipLeft + (ancestor.offsetWidth > 0 ? ancestor.clientWidth * scaleX : bounds.width))
+      right = Math.min(right, clipLeft + ancestor.clientWidth * scaleX)
     }
     if (clipsY) {
+      if (ancestor.offsetHeight <= 0) return null
+      const scaleY = bounds.height / ancestor.offsetHeight
+      const clipTop = bounds.top + ancestor.clientTop * scaleY
       top = Math.max(top, clipTop)
-      bottom = Math.min(bottom, clipTop + (ancestor.offsetHeight > 0 ? ancestor.clientHeight * scaleY : bounds.height))
+      bottom = Math.min(bottom, clipTop + ancestor.clientHeight * scaleY)
     }
   }
   if (![left, top, right, bottom].every(Number.isFinite) || right <= left || bottom <= top) return null
