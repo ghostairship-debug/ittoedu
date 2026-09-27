@@ -15,6 +15,7 @@ const courseName = 'M17 远程媒体.h5lesson'
 const certificateRoot = join(root, 'tests/fixtures/network')
 const certificate = readFileSync(join(certificateRoot, 'localhost-cert.pem'))
 const privateKey = readFileSync(join(certificateRoot, 'localhost-key.pem'))
+const LOCALHOST_CERTIFICATE_SPKI = 'DNIiwZV2/2dxPciQIn3bHbi8UyIs3pJdIXVDYExz9K4='
 const imageBytes = solidPng(1, 1, [37, 99, 235])
 const audioBytes = Buffer.alloc(44 + 8_000)
 audioBytes.write('RIFF', 0); audioBytes.writeUInt32LE(audioBytes.length - 8, 4); audioBytes.write('WAVEfmt ', 8)
@@ -67,15 +68,11 @@ test('M17 remote media: HTTPS image/audio import stays live, saves, reopens, and
   const modelServer = await selectionServer()
   let app: ElectronApplication | undefined
   let importError = ''
+  const requestFailures: string[] = []
   try {
-    app = await launchSelectionApp(directory)
-    await app.evaluate(({ app: electronApp }, allowedOrigin) => {
-      electronApp.on('certificate-error', (event, _contents, url, _error, _certificate, callback) => {
-        if (url.startsWith(allowedOrigin)) { event.preventDefault(); callback(true) }
-        else callback(false)
-      })
-    }, origin)
+    app = await launchSelectionApp(directory, [`--ignore-certificate-errors-spki-list=${LOCALHOST_CERTIFICATE_SPKI}`])
     const page = await app.firstWindow()
+    page.on('requestfailed', request => requestFailures.push(`${request.url()}: ${request.failure()?.errorText ?? 'unknown'}`))
     page.setDefaultTimeout(20_000)
     await setupSelectionUI(app, page, modelServer.endpoint, workspace)
     await app.evaluate(({ dialog }, folder) => {
@@ -137,7 +134,7 @@ test('M17 remote media: HTTPS image/audio import stays live, saves, reopens, and
     expect(csp).toContain(`img-src data: blob: ${origin}`)
     expect(csp).toContain(`media-src data: blob: ${origin}`)
   } finally {
-    writeFileSync(join(directory, 'evidence.json'), JSON.stringify({ requests, importError }, null, 2))
+    writeFileSync(join(directory, 'evidence.json'), JSON.stringify({ requests, requestFailures, importError }, null, 2))
     if (app) await closeApp(app)
     await modelServer.close()
     await new Promise<void>(resolveClose => remote.close(() => resolveClose()))

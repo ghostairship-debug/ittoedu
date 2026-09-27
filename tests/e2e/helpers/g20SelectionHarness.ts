@@ -154,8 +154,8 @@ export function selectionFixtures() {
   return { directory, workspace, named }
 }
 
-export async function launchSelectionApp(directory: string) {
-  const app = await electron.launch({ cwd: root, args: ['.', `--user-data-dir=${join(directory, 'profile')}`], env: { ...process.env, VITE_DEV_SERVER_URL: '', [BACKGROUND_E2E_ENV]: '1' } })
+export async function launchSelectionApp(directory: string, extraArgs: string[] = []) {
+  const app = await electron.launch({ cwd: root, args: ['.', `--user-data-dir=${join(directory, 'profile')}`, ...extraArgs], env: { ...process.env, VITE_DEV_SERVER_URL: '', [BACKGROUND_E2E_ENV]: '1' } })
   await app.firstWindow()
   await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setContentSize(1600, 1000))
   return app
