@@ -1929,7 +1929,8 @@ class FlowPublishedAdapter implements SurfaceHost {
     await this.#host.reset(scope, this.#startLocationId)
   }
 
-  async capture(_request: SurfaceCaptureRequest): Promise<SurfaceCapture> {
+  async capture(request: SurfaceCaptureRequest): Promise<SurfaceCapture> {
+    if (request.layerItemId) return this.#host.captureLayerItem(request.layerItemId)
     return {
       format: 'json',
       content: JSON.stringify({
