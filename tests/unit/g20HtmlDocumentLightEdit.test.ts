@@ -22,7 +22,8 @@ it('edits only a managed HTML document and maps its text and image into the oute
   Object.defineProperty(inner.defaultView, 'innerWidth', { configurable: true, value: 400 })
   Object.defineProperty(inner.defaultView, 'innerHeight', { configurable: true, value: 200 })
   iframe.getBoundingClientRect = () => rect(100, 50, 400, 200)
-  Object.defineProperty(inner.defaultView!.Range.prototype, 'getBoundingClientRect', { configurable: true, value: () => rect(20, 10, 80, 24) })
+  let textTop = 10
+  Object.defineProperty(inner.defaultView!.Range.prototype, 'getBoundingClientRect', { configurable: true, value: () => rect(20, textTop, 80, 24) })
   inner.body.innerHTML = '<main><h2>听力练习</h2><img src="data:image/png;base64,SEVSTw=="></main>'
   inner.querySelector('img')!.getBoundingClientRect = () => rect(20, 60, 100, 80)
   const hidden = document.createElement('iframe')
@@ -47,6 +48,10 @@ it('edits only a managed HTML document and maps its text and image into the oute
     expect.objectContaining({ kind: 'asset', key: 'hero', bounds: expect.objectContaining({ x: 120, width: 100, height: 80 }) }),
   ]))
   expect(targets.find(target => target.kind === 'asset')!.bounds.y).toBeCloseTo(110)
+  textTop = 30
+  inner.querySelector('main')!.dispatchEvent(new Event('scroll'))
+  await flush()
+  expect(updates.at(-1)!.targets.find(target => target.kind === 'text')!.bounds.y).toBe(80)
   const received: MouseEvent[] = []
   root.addEventListener('dblclick', event => received.push(event))
   const stopBridge = bridgeManagedHtmlEvents(root)
@@ -70,6 +75,42 @@ it('edits only a managed HTML document and maps its text and image into the oute
   iframe.remove()
   await flush()
   expect(updates.at(-1)!.targets).toEqual([])
+  const removedRevision = updates.length
+  inner.dispatchEvent(new Event('scroll'))
+  inner.defaultView!.dispatchEvent(new Event('scroll'))
+  await flush()
+  expect(updates).toHaveLength(removedRevision)
   registry.destroy(); dom.destroy()
   root.remove()
+})
+
+it('a consumed outer gesture cancels the original inner event while ordinary interaction survives', () => {
+  const root = document.createElement('div')
+  document.body.append(root)
+  const iframe = document.createElement('iframe')
+  iframe.dataset.htmlDocumentRuntime = 'true'
+  root.append(iframe)
+  const inner = iframe.contentDocument!
+  inner.body.innerHTML = '<button>继续</button>'
+  const button = inner.querySelector('button')!
+  let innerDoubleClicks = 0
+  let innerMenus = 0
+  let innerPointers = 0
+  button.addEventListener('dblclick', () => { innerDoubleClicks += 1 })
+  button.addEventListener('contextmenu', () => { innerMenus += 1 })
+  button.addEventListener('pointerdown', () => { innerPointers += 1 })
+  root.addEventListener('dblclick', event => event.preventDefault(), true)
+  root.addEventListener('contextmenu', event => event.stopPropagation(), true)
+  const stop = bridgeManagedHtmlEvents(root)
+  const doubleClick = new inner.defaultView!.MouseEvent('dblclick', { bubbles: true, cancelable: true })
+  button.dispatchEvent(doubleClick)
+  expect(doubleClick.defaultPrevented).toBe(true)
+  expect(innerDoubleClicks).toBe(0)
+  const menu = new inner.defaultView!.MouseEvent('contextmenu', { bubbles: true, cancelable: true })
+  button.dispatchEvent(menu)
+  expect(menu.defaultPrevented).toBe(true)
+  expect(innerMenus).toBe(0)
+  button.dispatchEvent(new inner.defaultView!.MouseEvent('pointerdown', { bubbles: true, cancelable: true }))
+  expect(innerPointers).toBe(1)
+  stop(); root.remove()
 })

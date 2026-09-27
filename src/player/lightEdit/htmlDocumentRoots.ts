@@ -34,7 +34,7 @@ export function managedHtmlRect(rect: DOMRect, managed: ManagedHtmlDocument): DO
 /** Tracks loads, React redraws, and removal without following arbitrary iframes. */
 export function watchManagedHtmlDocuments(root: HTMLElement, onChange: () => void): () => void {
   const frames = new Set<HTMLIFrameElement>()
-  const documents = new Map<Document, MutationObserver>()
+  const documents = new Map<Document, { observer: MutationObserver; scroll: () => void; view: Window | null }>()
   const rootObserver = new (root.ownerDocument.defaultView?.MutationObserver ?? MutationObserver)(sync)
   function sync(): void {
     const current = managedHtmlDocuments(root)
@@ -42,13 +42,21 @@ export function watchManagedHtmlDocuments(root: HTMLElement, onChange: () => voi
     for (const frame of frames) if (!currentFrames.has(frame)) { frame.removeEventListener('load', sync); frames.delete(frame) }
     for (const frame of currentFrames) if (!frames.has(frame)) { frame.addEventListener('load', sync); frames.add(frame) }
     const currentDocs = new Set(current.map(item => item.document))
-    for (const [document, observer] of documents) if (!currentDocs.has(document)) { observer.disconnect(); documents.delete(document) }
+    for (const [document, entry] of documents) if (!currentDocs.has(document)) {
+      entry.observer.disconnect()
+      document.removeEventListener('scroll', entry.scroll, true)
+      entry.view?.removeEventListener('scroll', entry.scroll, true)
+      documents.delete(document)
+    }
     for (const item of current) if (!documents.has(item.document)) {
       const Observer = item.document.defaultView?.MutationObserver
       if (!Observer) continue
       const observer = new Observer(onChange)
       observer.observe(item.root, { subtree: true, childList: true, characterData: true, attributes: true })
-      documents.set(item.document, observer)
+      const scroll = () => onChange()
+      item.document.addEventListener('scroll', scroll, true)
+      item.document.defaultView?.addEventListener('scroll', scroll, true)
+      documents.set(item.document, { observer, scroll, view: item.document.defaultView })
     }
     onChange()
   }
@@ -57,7 +65,12 @@ export function watchManagedHtmlDocuments(root: HTMLElement, onChange: () => voi
   return () => {
     rootObserver.disconnect()
     for (const frame of frames) frame.removeEventListener('load', sync)
-    for (const observer of documents.values()) observer.disconnect()
+    for (const [document, entry] of documents) {
+      entry.observer.disconnect()
+      document.removeEventListener('scroll', entry.scroll, true)
+      entry.view?.removeEventListener('scroll', entry.scroll, true)
+    }
+    documents.clear()
   }
 }
 
@@ -86,7 +99,16 @@ export function bridgeManagedHtmlEvents(root: HTMLElement): () => void {
         const forwarded = event.type.startsWith('pointer') && view.PointerEvent
           ? new view.PointerEvent(event.type, { ...options, pointerId: pointer.pointerId, pointerType: pointer.pointerType, isPrimary: pointer.isPrimary })
           : new view.MouseEvent(event.type, options)
+        let stopped = false
+        const stop = forwarded.stopPropagation.bind(forwarded)
+        const stopImmediately = forwarded.stopImmediatePropagation.bind(forwarded)
+        forwarded.stopPropagation = () => { stopped = true; stop() }
+        forwarded.stopImmediatePropagation = () => { stopped = true; stopImmediately() }
         item.iframe.dispatchEvent(forwarded)
+        if (forwarded.defaultPrevented || stopped) {
+          event.preventDefault()
+          event.stopImmediatePropagation()
+        }
       }
       for (const type of types) item.document.addEventListener(type, listener, true)
       listeners.set(item.document, { iframe: item.iframe, listener })
