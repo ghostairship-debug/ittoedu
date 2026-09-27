@@ -14,6 +14,7 @@ function encodeSource(source: string): PublishedRuntimeLayerItem['runtime']['cod
 
 const SOURCE = `CoursewareRuntime.define({runtimeApiVersion:3,create(ctx){
   ctx.actions.goToScene('other-scene');
+  ctx.authoring.registerText({key:'title',bounds:{x:10,y:20,width:100,height:30}});
   const content = ctx.dom.root.ownerDocument.createElement('main');
   content.textContent = '互动状态 0';
   ctx.dom.root.append(content);
@@ -21,7 +22,7 @@ const SOURCE = `CoursewareRuntime.define({runtimeApiVersion:3,create(ctx){
   return {resize(width,height){ctx.dom.root.dataset.size = width + 'x' + height},destroy(){content.remove()}};
 }})`
 
-it('reports real Runtime content growth and shrink without remount or duplicate notifications', () => {
+it('reports real Runtime content growth and shrink without remount or duplicate notifications', async () => {
   const frame = document.createElement('iframe')
   document.body.append(frame)
   const view = frame.contentWindow as (Window & typeof globalThis) | null
@@ -46,19 +47,26 @@ it('reports real Runtime content growth and shrink without remount or duplicate 
   const container = doc.createElement('div')
   doc.body.append(container)
   const heights: number[] = []
+  const registeredY: number[] = []
   let navigationCalls = 0
   const session = createPublishedSurfaceRuntimeSession()
   const handle = mountPublishedSurfaceRuntime(container, {
     instanceId: 'flow-long-runtime',
-    runtime: { protocol: 'surface-runtime', runtimeApiVersion: 3, enabled: true, renderMode: 'dom', code: encodeSource(SOURCE), content: { values: {} }, assets: {} },
+    runtime: { protocol: 'surface-runtime', runtimeApiVersion: 3, enabled: true, renderMode: 'dom', code: encodeSource(SOURCE), content: { values: { title: 'Title' } }, assets: {} },
     width: 640, height: 300, visible: true, mode: 'authoring', resolveAsset: () => undefined, session,
     onContentHeightChange: height => heights.push(height),
+    authoring: { scope: 'scene', sceneId: 'flow', onTargetsChanged: update => {
+      const target = update.targets.find(target => target.source === 'registered' && target.key === 'title')
+      if (target) registeredY.push(target.bounds.y)
+    } },
     actions: { goToScene: () => { navigationCalls += 1; return true }, nextScene: () => false, previousScene: () => false, replayScene: () => false, restartCourse: () => false },
   })
   expect(handle.ok).toBe(true)
   expect(navigationCalls).toBe(0)
   flush()
+  await Promise.resolve()
   expect(heights).toEqual([1200])
+  expect(registeredY[0]).toBeGreaterThan(9)
   const main = container.querySelector('main')
   expect(Reflect.get(view, '__m16Creates')).toBe(1)
   contentHeight = 1600
@@ -67,7 +75,9 @@ it('reports real Runtime content growth and shrink without remount or duplicate 
   expect(heights).toEqual([1200, 1600])
   handle.updateSize(640, 1600)
   flush()
+  await Promise.resolve()
   expect(heights).toEqual([1200, 1600])
+  expect(registeredY.at(-1)).toBeLessThan(registeredY[0]!)
   expect(container.querySelector('main')).toBe(main)
   expect(container.querySelector('[data-surface-runtime-root]')?.getAttribute('data-size')).toBe('640x1600')
   contentHeight = 500
@@ -107,6 +117,7 @@ it('accepts a managed document as the content source and measures its page inste
   const page = frame.contentDocument
   if (!page) throw new Error('iframe document unavailable')
   const article = page.createElement('article')
+  page.body.style.minHeight = '100vh'
   page.body.append(article)
   let pageHeight = 920
   Object.defineProperty(article, 'getBoundingClientRect', { configurable: true, value: () => ({ top: 0, bottom: pageHeight, height: pageHeight }) })
@@ -124,4 +135,31 @@ it('accepts a managed document as the content source and measures its page inste
   observer.destroy()
   root.remove()
   frame.remove()
+})
+
+it.each([0.5, 2])('measures unscaled content at %sx and shrinks after a 100%% wrapper grows', async scale => {
+  const root = document.createElement('div')
+  const wrapper = document.createElement('div')
+  wrapper.style.height = '100%'
+  const content = document.createElement('article')
+  wrapper.append(content)
+  root.append(wrapper)
+  document.body.append(root)
+  let hostHeight = 300
+  let contentHeight = 1200
+  Object.defineProperty(root, 'offsetHeight', { configurable: true, get: () => hostHeight })
+  Object.defineProperty(root, 'getBoundingClientRect', { configurable: true, value: () => ({ top: 0, bottom: hostHeight * scale, height: hostHeight * scale }) })
+  Object.defineProperty(wrapper, 'getBoundingClientRect', { configurable: true, value: () => ({ top: 0, bottom: hostHeight * scale, height: hostHeight * scale }) })
+  Object.defineProperty(content, 'getBoundingClientRect', { configurable: true, value: () => ({ top: 0, bottom: contentHeight * scale, height: contentHeight * scale }) })
+  const heights: number[] = []
+  const observer = observeSurfaceRuntimeContentSize({ root, onHeightChange: height => heights.push(height) })
+  await new Promise<void>(resolve => requestAnimationFrame(() => resolve()))
+  expect(heights).toEqual([1200])
+  hostHeight = 1200
+  contentHeight = 500
+  observer.refresh()
+  await new Promise<void>(resolve => requestAnimationFrame(() => resolve()))
+  expect(heights).toEqual([1200, 500])
+  observer.destroy()
+  root.remove()
 })

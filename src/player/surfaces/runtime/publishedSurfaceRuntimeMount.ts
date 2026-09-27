@@ -769,6 +769,7 @@ export function mountPublishedSurfaceRuntime(
       options.width = width
       options.height = height
       invoke(() => lifecycle.resize?.(width, height))
+      authoringTargets?.resize(width, height)
       contentSizeObserver?.refresh()
     },
     suspend() {

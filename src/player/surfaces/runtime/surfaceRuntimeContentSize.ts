@@ -10,23 +10,29 @@ export interface SurfaceRuntimeContentSizeObserver {
 }
 
 function measuredNodes(source: HTMLElement | Document): HTMLElement[] {
-  if (source.nodeType === 9) {
-    const document = source as Document
-    return Array.from((document.body ?? document.documentElement).children).filter((node): node is HTMLElement => node.nodeType === 1)
-  }
-  const element = source as HTMLElement
-  return Array.from(element.children).filter((node): node is HTMLElement => node.nodeType === 1)
+  const origin = source.nodeType === 9 ? (source as Document).body ?? (source as Document).documentElement : source as HTMLElement
+  return Array.from(origin.querySelectorAll('*')).filter((node): node is HTMLElement => node.nodeType === 1)
+}
+
+function isHostSized(element: HTMLElement): boolean {
+  const style = element.ownerDocument.defaultView?.getComputedStyle(element)
+  const hostSize = /^(100%|100vh|100dvh|100svh|100lvh)$/
+  return hostSize.test(element.style.height) || hostSize.test(element.style.minHeight)
+    || Boolean(style && (hostSize.test(style.height) || hostSize.test(style.minHeight)))
 }
 
 function measureHeight(source: HTMLElement | Document, root: HTMLElement): number {
   const origin = source.nodeType === 9 ? (source as Document).body : source as HTMLElement
   if (!origin) return 0
-  const originTop = origin.getBoundingClientRect().top
-  let bottom = source === root ? 0 : Math.max(origin.getBoundingClientRect().height, origin.scrollHeight)
+  const originRect = origin.getBoundingClientRect()
+  const scaleY = origin.offsetHeight > 0 && originRect.height > 0 ? originRect.height / origin.offsetHeight : 1
+  let bottom = 0
   for (const node of measuredNodes(source)) {
+    if (isHostSized(node)) continue
     const rect = node.getBoundingClientRect()
-    bottom = Math.max(bottom, rect.bottom - originTop, rect.top - originTop + node.scrollHeight)
+    bottom = Math.max(bottom, (rect.bottom - originRect.top) / scaleY)
   }
+  if (source.nodeType !== 9 && source !== root && !isHostSized(origin)) bottom = Math.max(bottom, origin.offsetHeight)
   return Math.max(0, Math.ceil(bottom))
 }
 
