@@ -656,6 +656,7 @@ export function createRuntimeAuthoringActions(ports: RuntimeAuthoringPorts) {
     const document = state.document
     const projection = state.projection
     let authoringSession = state.authoringSession
+    const targetContextId = projection?.surfaceType === 'flow' ? projection.locationId : state.activeSceneId
     if (
       !document
       || !projection
@@ -663,7 +664,7 @@ export function createRuntimeAuthoringActions(ports: RuntimeAuthoringPorts) {
       || session.kind !== 'asset'
       || session.projectId !== document.id
       || session.scope !== state.editingScope
-      || session.sceneId !== state.activeSceneId
+      || session.sceneId !== targetContextId
       || authoringSession.token.locationId !== projection.locationId
       || authoringSession.token.surfaceType !== projection.surfaceType
     ) {
