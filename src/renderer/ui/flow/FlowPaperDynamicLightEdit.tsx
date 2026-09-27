@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react'
+import { createPortal } from 'react-dom'
 import { ImagePlus } from 'lucide-react'
 import type { AssetMeta } from '../../../shared/contracts/media-v1'
 import type { ComponentAuthoringImageTarget, ComponentAuthoringTargetUpdate, ComponentAuthoringTextTarget, ComponentPackageData } from '../../../shared/componentTypes'
@@ -7,6 +8,8 @@ import type { RuntimeAuthoringTarget, RuntimeAuthoringTargetUpdate } from '../..
 import type { StageRect } from '../../authoring/stageViewportTransform'
 import type { DeepReadonly } from '../../course/flowEditorView'
 import { beginRuntimeTargetEditSession, validateRuntimeTargetEditSession, type RuntimeTargetEditSession } from '../../authoring/runtimeTargetEditSession'
+import { registerAuthoringObservationDraft } from '../../authoring/generation/authoringObservation'
+import { registerFlowDynamicDraft } from '../../composition/runtime/flowDynamicDraftPreparation'
 import { flowComponentLightEditCommands, type FlowComponentLightEditTarget } from '../../composition/runtime/flowDynamicLightEditCommands'
 import type { DynamicFallbackIntent } from '../../composition/runtime/precommitDynamicFallback'
 import type { CourseRuntimeContentTextTarget } from '../../runtime/runtimeContentTextAuthoringCommands'
@@ -28,6 +31,9 @@ export interface FlowPaperDynamicLightEditProps {
   readonly assetUrls: Readonly<Record<string, string>>
   readonly componentPackages?: Readonly<Record<string, ComponentPackageData>>
   readonly readOnly?: boolean
+  readonly toolbarContainer?: HTMLElement | null
+  readonly showRuntimeEditToggle?: boolean
+  readonly onRuntimeEditModeChange?: (itemId: string, editing: boolean) => void
   readonly onHeightChange?: (height: number) => void
   readonly onRuntimeTargetsChanged?: (update: Readonly<RuntimeAuthoringTargetUpdate>) => void
   readonly onSelectImageAsset: () => Promise<{ meta: AssetMeta; bytes: Uint8Array } | null>
@@ -58,7 +64,7 @@ function localBounds(bounds: Readonly<{ x: number; y: number; width: number; hei
 }
 
 /** Content and edit controls inside one already-positioned Flow paper card. */
-export function FlowPaperDynamicLightEdit({ documentId, projectId, surfaceId, locationId, generation, item, frame, assetUrls, componentPackages, readOnly = false, onHeightChange, onRuntimeTargetsChanged, onSelectImageAsset, onStatus }: FlowPaperDynamicLightEditProps) {
+export function FlowPaperDynamicLightEdit({ documentId, projectId, surfaceId, locationId, generation, item, frame, assetUrls, componentPackages, readOnly = false, toolbarContainer, showRuntimeEditToggle = false, onRuntimeEditModeChange, onHeightChange, onRuntimeTargetsChanged, onSelectImageAsset, onStatus }: FlowPaperDynamicLightEditProps) {
   const owner = JSON.stringify([documentId, projectId, surfaceId, locationId, generation, item.layerItemId,
     item.kind === 'runtime' ? item.runtime.source : `${item.component.packageId}@${item.component.version}`])
   const ownerRef = useRef(owner)
@@ -69,6 +75,10 @@ export function FlowPaperDynamicLightEdit({ documentId, projectId, surfaceId, lo
   snapshotRef.current = shown
   const [mode, setMode] = useState<{ owner: string; editing: boolean }>({ owner, editing: false })
   const [active, setActive] = useState<LocalTextEdit | null>(null)
+  const activeRef = useRef<LocalTextEdit | null>(null)
+  const composingRef = useRef(false)
+  const runtimeEditRoot = useRef<HTMLDivElement>(null)
+  const runtimePreparation = useRef<{ owner: string; pending: Promise<void> } | null>(null)
   const [busy, setBusy] = useState<{ owner: string; targetId: string } | null>(null)
   const [failedTask, setFailedTask] = useState<{ owner: string; taskId: string; status: string; reason: string } | null>(null)
   const request = useRef(0)
@@ -85,7 +95,12 @@ export function FlowPaperDynamicLightEdit({ documentId, projectId, surfaceId, lo
   const componentTextTargets = shown.componentText
   const componentImageTargets = shown.componentImage
   const liveActive = active?.owner === owner ? active : null
+  activeRef.current = liveActive
   const liveBusy = busy?.owner === owner ? busy.targetId : null
+  const busyRef = useRef<string | null>(null)
+  busyRef.current = liveBusy
+  const failedRef = useRef(false)
+  failedRef.current = failedTask?.owner === owner
   const report = (message: string, kind: 'success' | 'error' = 'error') => onStatus?.(message, kind)
   const commonIntent = { documentId, projectId, locationId, itemId: item.layerItemId }
   const submitFallback = async (intent: DynamicFallbackIntent): Promise<boolean> => {
@@ -134,6 +149,19 @@ export function FlowPaperDynamicLightEdit({ documentId, projectId, surfaceId, lo
   }
   const editable = !readOnly && !item.locked
   const runtimeEditing = editable && item.kind === 'runtime' && mode.owner === owner && mode.editing
+  const previousOwner = useRef(owner)
+  useEffect(() => {
+    if (previousOwner.current !== owner) {
+      onRuntimeEditModeChange?.(item.layerItemId, false)
+      previousOwner.current = owner
+    }
+  }, [owner, item.layerItemId, onRuntimeEditModeChange])
+  useEffect(() => {
+    if (!editable && mode.owner === owner && mode.editing) {
+      setMode({ owner, editing: false })
+      onRuntimeEditModeChange?.(item.layerItemId, false)
+    }
+  }, [editable, mode, owner, item.layerItemId, onRuntimeEditModeChange])
   const editableRef = useRef(editable)
   editableRef.current = editable
 
@@ -173,6 +201,7 @@ export function FlowPaperDynamicLightEdit({ documentId, projectId, surfaceId, lo
     if (!begun.ok) return report('运行时文字目标已失效，请重新选择')
     const course = useEditorStore.getState().captureRuntimeContentTextTarget(begun.session)
     if (!course) return report('运行时文字目标已失效或已锁定')
+    composingRef.current = false
     setActive({ owner, target, value: course.initialValue, runtime: { session: begun.session, course } })
   }
   const beginComponentText = (target: Readonly<ComponentAuthoringTextTarget>) => {
@@ -253,32 +282,65 @@ export function FlowPaperDynamicLightEdit({ documentId, projectId, surfaceId, lo
       componentPackages={componentPackages} assetUrls={assetUrls} onTargetsChanged={acceptComponent} />
   const activeRuntime = liveActive?.runtime && liveActive.target.kind === 'text' ? liveActive : null
   const activeComponent = liveActive?.component && liveActive.target.kind === 'component-text' ? liveActive : null
-  const completeRuntimeEditing = async (): Promise<void> => {
-    if (liveBusy || failedTask?.owner === owner) return
-    if (activeRuntime) {
-      if (activeRuntime.value !== activeRuntime.runtime!.course.initialValue) {
-        if (!await commitText(activeRuntime, activeRuntime.value)) return
-      } else setActive(null)
+  const prepareRuntimeDraft = (): Promise<void> => {
+    if (runtimePreparation.current?.owner === owner) return runtimePreparation.current.pending
+    if (composingRef.current) return Promise.reject(new Error('输入法组合中，请完成当前文字后再继续'))
+    if (busyRef.current || failedRef.current) return Promise.reject(new Error('修改仍在确认或需要恢复，请先处理'))
+    const edit = activeRef.current
+    if (!edit?.runtime || edit.owner !== owner) return Promise.resolve()
+    if (edit.value === edit.runtime.course.initialValue) { setActive(null); return Promise.resolve() }
+    const pending = (async () => {
+      if (!await commitText(edit, edit.value)) throw new Error('修改未确认，草稿已保留')
+    })()
+    runtimePreparation.current = { owner, pending }
+    void pending.then(() => { if (runtimePreparation.current?.pending === pending) runtimePreparation.current = null },
+      () => { if (runtimePreparation.current?.pending === pending) runtimePreparation.current = null })
+    return pending
+  }
+  const prepareRef = useRef(prepareRuntimeDraft)
+  prepareRef.current = prepareRuntimeDraft
+  useEffect(() => {
+    if (item.kind !== 'runtime') return
+    return registerFlowDynamicDraft({ documentId, owner, prepare: () => prepareRef.current() })
+  }, [documentId, owner, item.kind])
+  useEffect(() => {
+    if (!runtimeEditing || !activeRuntime) return
+    const control = runtimeEditRoot.current?.querySelector<HTMLInputElement | HTMLTextAreaElement>('.canvas-plain-text-editor__control')
+    if (!control) return
+    const port = {
+      read: () => {
+        const edit = activeRef.current
+        return { label: edit?.target.label ?? edit?.target.key ?? '', value: edit?.value ?? '',
+          initialValue: edit?.runtime?.course.initialValue ?? '', composing: composingRef.current,
+          bounds: edit?.target.bounds ?? { x: 0, y: 0, width: 0, height: 0 } }
+      },
+      commit: () => { void prepareRef.current().catch(error => report(error instanceof Error ? error.message : '修改未确认')) },
     }
-    if (mounted.current && ownerRef.current === owner) setMode({ owner, editing: false })
+    return registerAuthoringObservationDraft(control, port)
+  }, [owner, runtimeEditing, activeRuntime?.target.targetId])
+  const completeRuntimeEditing = async (): Promise<void> => {
+    try { await prepareRuntimeDraft() } catch (error) { report(error instanceof Error ? error.message : '修改未确认'); return }
+    if (mounted.current && ownerRef.current === owner) {
+      setMode({ owner, editing: false })
+      onRuntimeEditModeChange?.(item.layerItemId, false)
+    }
   }
   const overlayStyle: CSSProperties = { position: 'absolute', inset: 0, pointerEvents: 'none' }
   return <div data-testid="flow-paper-dynamic-light-edit" style={{ position: 'relative', width: '100%', height: '100%' }}>
     {content}
-    {editable && item.kind === 'runtime' && <button type="button" data-testid="flow-runtime-edit-mode-toggle"
+    {editable && item.kind === 'runtime' && toolbarContainer && (showRuntimeEditToggle || runtimeEditing) && createPortal(<button type="button" data-testid="flow-runtime-edit-mode-toggle"
       aria-pressed={runtimeEditing} disabled={Boolean(liveBusy)}
       onPointerDown={event => { if (liveActive) event.preventDefault(); event.stopPropagation() }}
-      onClick={event => { event.stopPropagation(); if (runtimeEditing) void completeRuntimeEditing(); else setMode({ owner, editing: true }) }}
-      style={{ position: 'absolute', zIndex: 9, bottom: '100%', right: 0, marginBottom: 6, pointerEvents: 'auto' }}>
+      onClick={event => { event.stopPropagation(); if (runtimeEditing) void completeRuntimeEditing(); else { setMode({ owner, editing: true }); onRuntimeEditModeChange?.(item.layerItemId, true) } }}>
       {runtimeEditing ? '\u5b8c\u6210\u7f16\u8f91\u7ee7\u7eed\u8fd0\u884c' : '\u7f16\u8f91\u56fe\u6587'}
-    </button>}
+    </button>, toolbarContainer)}
     {failedTask?.owner === owner && (item.kind !== 'runtime' || runtimeEditing) && <div data-testid="flow-dynamic-edit-recovery" role="alert"
       style={{ position: 'absolute', zIndex: 8, left: 8, right: 8, bottom: 8, padding: 8, background: '#fff', color: '#7a2434', pointerEvents: 'auto' }}>
       <span>{failedTask.reason}</span>
       <button type="button" disabled={Boolean(liveBusy)} onClick={() => { void retryFailed() }}>重试</button>
       {failedTask.status !== 'unknown' && <button type="button" disabled={Boolean(liveBusy)} onClick={discardFailed}>取消修改</button>}
     </div>}
-    {runtimeEditing && (runtimeTargets.length > 0 || activeRuntime) && <div className="canvas-authoring-targets" data-testid="flow-runtime-light-edit-targets"
+    {runtimeEditing && (runtimeTargets.length > 0 || activeRuntime) && <div ref={runtimeEditRoot} className="canvas-authoring-targets" data-testid="flow-runtime-light-edit-targets"
       style={overlayStyle} onPointerDown={event => event.stopPropagation()}>
       {runtimeTargets.map(target => <button key={target.targetId} type="button"
         className={`canvas-authoring-target canvas-authoring-target--${target.kind}`}
@@ -291,9 +353,14 @@ export function FlowPaperDynamicLightEdit({ documentId, projectId, surfaceId, lo
       {activeRuntime && <CanvasPlainTextEditor key={activeRuntime.target.targetId} bounds={activeRuntime.target.bounds}
         label={activeRuntime.target.label ?? activeRuntime.target.key} value={activeRuntime.value}
         multiline={activeRuntime.target.multiline} maxLength={activeRuntime.target.maxLength}
-        onDraftChange={value => setActive(current => current?.owner === owner && current.target.targetId === activeRuntime.target.targetId
-          ? { ...current, value } : current)}
-        onCommit={value => commitText(activeRuntime, value)} onCancel={() => setActive(null)} />}
+        onDraftChange={(value, composing) => {
+          composingRef.current = composing
+          if (activeRef.current?.owner === owner && activeRef.current.target.targetId === activeRuntime.target.targetId)
+            activeRef.current = { ...activeRef.current, value }
+          setActive(current => current?.owner === owner && current.target.targetId === activeRuntime.target.targetId
+            ? { ...current, value } : current)
+        }}
+        onCommit={() => { void prepareRuntimeDraft().catch(error => report(error instanceof Error ? error.message : '修改未确认')) }} onCancel={() => setActive(null)} />}
     </div>}
     {editable && item.kind === 'component' && <div onPointerDown={event => event.stopPropagation()}>
       <FlowDynamicAuthoringOverlay textTargets={componentTextTargets} imageTargets={componentImageTargets}

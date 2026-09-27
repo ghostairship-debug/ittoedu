@@ -2,6 +2,8 @@ import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, expect, it, vi } from 'vitest'
 import { FlowPaperDynamicLightEdit } from '@/renderer/ui/flow/FlowPaperDynamicLightEdit'
+import { prepareFlowDynamicDrafts } from '@/renderer/composition/runtime/flowDynamicDraftPreparation'
+import { readAuthoringObservationDraftState } from '@/renderer/authoring/generation/authoringObservation'
 import type { ComponentLayerItem, RuntimeLayerItem } from '@/shared/courseProjectTypes'
 
 const mocks = vi.hoisted(() => ({
@@ -20,8 +22,10 @@ const mocks = vi.hoisted(() => ({
 vi.mock('@/renderer/ui/flow/FlowPageRuntime', () => ({ FlowPageRuntime: (props: any) => { mocks.runtimeProps = props; return <div data-testid="runtime-mount" /> } }))
 vi.mock('@/renderer/ui/flow/FlowPageComponent', () => ({ FlowPageComponent: (props: any) => { mocks.componentProps = props; return <div data-testid="component-mount" /> } }))
 vi.mock('@/renderer/ui/CanvasPlainTextEditor', () => ({ CanvasPlainTextEditor: (props: any) => <div>
+  <input className="canvas-plain-text-editor__control" value={props.value} readOnly />
   <button data-testid="draft-text" onClick={() => props.onDraftChange?.('Unsaved draft', false)}>{props.value}</button>
-  <button data-testid="commit-text" onClick={() => props.onCommit('Edited')}>commit</button>
+  <button data-testid="compose-text" onClick={() => props.onDraftChange?.('Unsaved draft', true)}>compose</button>
+  <button data-testid="commit-text" onClick={() => { props.onDraftChange?.('Edited', false); props.onCommit('Edited') }}>commit</button>
 </div> }))
 vi.mock('@/renderer/composition/runtime/flowDynamicLightEditCommands', () => ({ flowComponentLightEditCommands: {
   captureText: mocks.captureText, captureAsset: mocks.captureAsset,
@@ -56,6 +60,7 @@ function mount() {
 const base = {
   documentId: 'document-1', projectId: 'project-1', surfaceId: 'surface-1', locationId: 'location-1', generation: 1,
   frame: { x: 140, y: 220, width: 200, height: 100 }, assetUrls: {},
+  toolbarContainer: document.body, showRuntimeEditToggle: true,
   onSelectImageAsset: vi.fn(async () => ({ meta: { id: 'asset-1', filename: 'picture.png', mimeType: 'image/png', kind: 'image' as const, path: 'picture.png', byteLength: 1 }, bytes: new Uint8Array([1]) })),
 }
 const component = {
@@ -111,7 +116,7 @@ it('maps Runtime target identity to location, commits text and asset through the
     label: 'Title', source: 'registered' as const, layer: 'scene' as const, bounds: { x: 190, y: 5, width: 40, height: 20 } }
   const picture = { ...text, targetId: 'image-1', kind: 'asset' as const, key: 'hero', label: 'Picture', bounds: { x: 15, y: 70, width: 40, height: 40 } }
   await act(async () => mocks.runtimeProps.onTargetsChanged({ scope: 'scene', sceneId: 'surface-1', revision: 1, targets: [text, picture] }))
-  await act(async () => element.querySelector<HTMLButtonElement>('[data-testid="flow-runtime-edit-mode-toggle"]')!.click())
+  await act(async () => document.querySelector<HTMLButtonElement>('[data-testid="flow-runtime-edit-mode-toggle"]')!.click())
   const textButton = element.querySelector<HTMLButtonElement>('[aria-label="Title，编辑文字"]')!
   expect(textButton.style.width).toBe('10px')
   await act(async () => textButton.click())
@@ -139,7 +144,7 @@ it('keeps a failed text draft and offers retry before reporting a confirmed edit
   const target = { targetId: 'text-1', scope: 'scene' as const, sceneId: 'surface-1', kind: 'text' as const, key: 'title',
     label: 'Title', source: 'registered' as const, layer: 'scene' as const, bounds: { x: 10, y: 5, width: 40, height: 20 } }
   await act(async () => mocks.runtimeProps.onTargetsChanged({ scope: 'scene', sceneId: 'surface-1', revision: 1, targets: [target] }))
-  await act(async () => element.querySelector<HTMLButtonElement>('[data-testid="flow-runtime-edit-mode-toggle"]')!.click())
+  await act(async () => document.querySelector<HTMLButtonElement>('[data-testid="flow-runtime-edit-mode-toggle"]')!.click())
   await act(async () => element.querySelector<HTMLButtonElement>('[aria-label="Title，编辑文字"]')!.click())
   await act(async () => element.querySelector<HTMLButtonElement>('[data-testid="commit-text"]')!.click())
   expect(mocks.submitIntent).toHaveBeenCalledTimes(1)
@@ -191,9 +196,10 @@ it('runs Runtime by default, confirms an active draft before leaving edit mode, 
   const target = { targetId: 'text-1', scope: 'scene' as const, sceneId: 'surface-1', kind: 'text' as const, key: 'title',
     label: 'Title', source: 'auto' as const, layer: 'scene' as const, bounds: { x: 10, y: 5, width: 40, height: 20 } }
   await act(async () => mocks.runtimeProps.onTargetsChanged({ scope: 'scene', sceneId: 'surface-1', revision: 1, targets: [target] }))
-  const toggle = element.querySelector<HTMLButtonElement>('[data-testid="flow-runtime-edit-mode-toggle"]')!
+  const toggle = document.querySelector<HTMLButtonElement>('[data-testid="flow-runtime-edit-mode-toggle"]')!
   expect(toggle.textContent).toBe('编辑图文')
-  expect(toggle.style.bottom).toBe('100%')
+  expect(toggle.parentElement).toBe(document.body)
+  expect(element.contains(toggle)).toBe(false)
   expect(toggle.getAttribute('aria-pressed')).toBe('false')
   expect(element.querySelector('[data-testid="flow-runtime-light-edit-targets"]')).toBeNull()
   await act(async () => toggle.click())
@@ -202,7 +208,7 @@ it('runs Runtime by default, confirms an active draft before leaving edit mode, 
   await act(async () => element.querySelector<HTMLButtonElement>('[data-testid="draft-text"]')!.click())
   await act(async () => toggle.click())
   expect(mocks.submitIntent).toHaveBeenCalledWith(expect.objectContaining({ kind: 'runtime.text', value: 'Unsaved draft' }))
-  expect(element.querySelector('[data-testid="flow-runtime-light-edit-targets"]')).toBeNull()
+  await vi.waitFor(() => expect(element.querySelector('[data-testid="flow-runtime-light-edit-targets"]')).toBeNull())
   expect(element.querySelector('[data-testid="runtime-mount"]')).toBe(host)
 })
 
@@ -214,14 +220,25 @@ it('keeps edit mode and the draft visible while confirmation is pending or faile
   const target = { targetId: 'text-1', scope: 'scene' as const, sceneId: 'surface-1', kind: 'text' as const, key: 'title',
     label: 'Title', source: 'auto' as const, layer: 'scene' as const, bounds: { x: 10, y: 5, width: 40, height: 20 } }
   await act(async () => mocks.runtimeProps.onTargetsChanged({ scope: 'scene', sceneId: 'surface-1', revision: 1, targets: [target] }))
-  const toggle = element.querySelector<HTMLButtonElement>('[data-testid="flow-runtime-edit-mode-toggle"]')!
+  const toggle = document.querySelector<HTMLButtonElement>('[data-testid="flow-runtime-edit-mode-toggle"]')!
   await act(async () => toggle.click())
   await act(async () => element.querySelector<HTMLButtonElement>('[aria-label="Title，编辑文字"]')!.click())
   await act(async () => element.querySelector<HTMLButtonElement>('[data-testid="draft-text"]')!.click())
+  await act(async () => element.querySelector<HTMLButtonElement>('[data-testid="compose-text"]')!.click())
+  await expect(prepareFlowDynamicDrafts('document-1')).rejects.toThrow('输入法组合中')
+  expect(mocks.submitIntent).not.toHaveBeenCalled()
+  await act(async () => element.querySelector<HTMLButtonElement>('[data-testid="draft-text"]')!.click())
+  const control = element.querySelector<HTMLInputElement>('.canvas-plain-text-editor__control')!
+  vi.spyOn(control, 'getBoundingClientRect').mockReturnValue({ width: 120, height: 24 } as DOMRect)
+  expect(readAuthoringObservationDraftState()).toContain('Unsaved draft')
+  let pending!: Promise<void>
+  await act(async () => { pending = prepareFlowDynamicDrafts('document-1'); await Promise.resolve() })
+  const rejected = expect(pending).rejects.toThrow('修改未确认')
   await act(async () => { toggle.click(); await Promise.resolve() })
+  expect(mocks.submitIntent).toHaveBeenCalledTimes(1)
   expect(toggle.disabled).toBe(true)
   expect(element.querySelector('[data-testid="draft-text"]')?.textContent).toBe('Unsaved draft')
-  await act(async () => settle({ status: 'failed', taskId: 'task-failed', reason: '提交失败' }))
+  await act(async () => { settle({ status: 'failed', taskId: 'task-failed', reason: '提交失败' }); await rejected })
   expect(toggle.textContent).toBe('完成编辑继续运行')
   expect(element.querySelector('[data-testid="draft-text"]')?.textContent).toBe('Unsaved draft')
   expect(element.querySelector('[data-testid="flow-dynamic-edit-recovery"]')).not.toBeNull()
@@ -233,12 +250,12 @@ it('keeps edit mode and the draft visible while confirmation is pending or faile
 it('keeps locked and read-only cards in run mode and resets edit mode for a new owner', async () => {
   const { root, element } = mount()
   await act(async () => root.render(<FlowPaperDynamicLightEdit {...base} item={runtime} />))
-  await act(async () => element.querySelector<HTMLButtonElement>('[data-testid="flow-runtime-edit-mode-toggle"]')!.click())
-  expect(element.querySelector('[data-testid="flow-runtime-edit-mode-toggle"]')?.textContent).toBe('完成编辑继续运行')
+  await act(async () => document.querySelector<HTMLButtonElement>('[data-testid="flow-runtime-edit-mode-toggle"]')!.click())
+  expect(document.querySelector('[data-testid="flow-runtime-edit-mode-toggle"]')?.textContent).toBe('完成编辑继续运行')
   await act(async () => root.render(<FlowPaperDynamicLightEdit {...base} documentId="document-2" item={runtime} />))
-  expect(element.querySelector('[data-testid="flow-runtime-edit-mode-toggle"]')?.textContent).toBe('编辑图文')
+  expect(document.querySelector('[data-testid="flow-runtime-edit-mode-toggle"]')?.textContent).toBe('编辑图文')
   await act(async () => root.render(<FlowPaperDynamicLightEdit {...base} item={{ ...runtime, locked: true }} />))
-  expect(element.querySelector('[data-testid="flow-runtime-edit-mode-toggle"]')).toBeNull()
+  expect(document.querySelector('[data-testid="flow-runtime-edit-mode-toggle"]')).toBeNull()
   await act(async () => root.render(<FlowPaperDynamicLightEdit {...base} item={runtime} readOnly />))
-  expect(element.querySelector('[data-testid="flow-runtime-edit-mode-toggle"]')).toBeNull()
+  expect(document.querySelector('[data-testid="flow-runtime-edit-mode-toggle"]')).toBeNull()
 })
