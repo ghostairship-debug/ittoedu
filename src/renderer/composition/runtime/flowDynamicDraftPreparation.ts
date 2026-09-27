@@ -16,6 +16,7 @@ export function registerFlowDynamicDraft(port: FlowDynamicDraftPort): () => void
 }
 
 export async function prepareFlowDynamicDrafts(documentId: string): Promise<void> {
-  await Promise.all([...ports.values()].filter(({ port }) => port.documentId === documentId)
-    .map(({ port }) => port.prepare()))
+  for (const { port } of [...ports.values()]) {
+    if (port.documentId === documentId) await port.prepare()
+  }
 }

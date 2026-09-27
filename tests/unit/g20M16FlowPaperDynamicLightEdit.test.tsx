@@ -1,5 +1,6 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
+import { fireEvent } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
 import { FlowPaperDynamicLightEdit } from '@/renderer/ui/flow/FlowPaperDynamicLightEdit'
 import { prepareFlowDynamicDrafts } from '@/renderer/composition/runtime/flowDynamicDraftPreparation'
@@ -9,6 +10,7 @@ import type { ComponentLayerItem, RuntimeLayerItem } from '@/shared/courseProjec
 const mocks = vi.hoisted(() => ({
   runtimeProps: null as any,
   componentProps: null as any,
+  realEditor: false,
   captureText: vi.fn(() => ({ kind: 'text', itemId: 'card-1', projectId: 'project-1', revision: 1, generation: 1,
     original: 'Before', region: 'p' })),
   captureAsset: vi.fn(() => ({ kind: 'asset', itemId: 'card-1', projectId: 'project-1', revision: 1, generation: 1, key: 'hero' })),
@@ -21,12 +23,15 @@ const mocks = vi.hoisted(() => ({
 }))
 vi.mock('@/renderer/ui/flow/FlowPageRuntime', () => ({ FlowPageRuntime: (props: any) => { mocks.runtimeProps = props; return <div data-testid="runtime-mount" /> } }))
 vi.mock('@/renderer/ui/flow/FlowPageComponent', () => ({ FlowPageComponent: (props: any) => { mocks.componentProps = props; return <div data-testid="component-mount" /> } }))
-vi.mock('@/renderer/ui/CanvasPlainTextEditor', () => ({ CanvasPlainTextEditor: (props: any) => <div>
+vi.mock('@/renderer/ui/CanvasPlainTextEditor', async () => {
+  const actual = await vi.importActual<typeof import('@/renderer/ui/CanvasPlainTextEditor')>('@/renderer/ui/CanvasPlainTextEditor')
+  return { CanvasPlainTextEditor: (props: any) => mocks.realEditor ? <actual.CanvasPlainTextEditor {...props} /> : <div>
   <input className="canvas-plain-text-editor__control" value={props.value} readOnly />
   <button data-testid="draft-text" onClick={() => props.onDraftChange?.('Unsaved draft', false)}>{props.value}</button>
   <button data-testid="compose-text" onClick={() => props.onDraftChange?.('Unsaved draft', true)}>compose</button>
   <button data-testid="commit-text" onClick={() => { props.onDraftChange?.('Edited', false); props.onCommit('Edited') }}>commit</button>
-</div> }))
+</div> }
+})
 vi.mock('@/renderer/composition/runtime/flowDynamicLightEditCommands', () => ({ flowComponentLightEditCommands: {
   captureText: mocks.captureText, captureAsset: mocks.captureAsset,
 } }))
@@ -49,6 +54,7 @@ afterEach(async () => {
   for (const value of Object.values(mocks)) if (typeof value === 'function' && 'mockClear' in value) value.mockClear()
   mocks.runtimeProps = null
   mocks.componentProps = null
+  mocks.realEditor = false
 })
 function mount() {
   const element = document.createElement('div')
@@ -198,6 +204,8 @@ it('runs Runtime by default, confirms an active draft before leaving edit mode, 
   await act(async () => mocks.runtimeProps.onTargetsChanged({ scope: 'scene', sceneId: 'surface-1', revision: 1, targets: [target] }))
   const toggle = document.querySelector<HTMLButtonElement>('[data-testid="flow-runtime-edit-mode-toggle"]')!
   expect(toggle.textContent).toBe('编辑图文')
+  expect(toggle.getAttribute('aria-label')).toBe('Runtime：编辑图文')
+  expect(toggle.classList.contains('secondary-button')).toBe(true)
   expect(toggle.parentElement).toBe(document.body)
   expect(element.contains(toggle)).toBe(false)
   expect(toggle.getAttribute('aria-pressed')).toBe('false')
@@ -258,4 +266,33 @@ it('keeps locked and read-only cards in run mode and resets edit mode for a new 
   expect(document.querySelector('[data-testid="flow-runtime-edit-mode-toggle"]')).toBeNull()
   await act(async () => root.render(<FlowPaperDynamicLightEdit {...base} item={runtime} readOnly />))
   expect(document.querySelector('[data-testid="flow-runtime-edit-mode-toggle"]')).toBeNull()
+})
+
+it('locks the real text control while a saved draft awaits ACK and clears parent mode on unmount', async () => {
+  mocks.realEditor = true
+  const { root, element } = mount()
+  const onModeChange = vi.fn()
+  let settle!: (result: unknown) => void
+  mocks.submitIntent.mockImplementationOnce(() => ({ taskId: 'task-pending', settled: new Promise(resolve => { settle = resolve }) }) as any)
+  await act(async () => root.render(<FlowPaperDynamicLightEdit {...base} item={runtime} onRuntimeEditModeChange={onModeChange} />))
+  const target = { targetId: 'text-1', scope: 'scene' as const, sceneId: 'surface-1', kind: 'text' as const, key: 'title',
+    label: 'Title', source: 'auto' as const, layer: 'scene' as const, bounds: { x: 10, y: 5, width: 40, height: 20 } }
+  await act(async () => mocks.runtimeProps.onTargetsChanged({ scope: 'scene', sceneId: 'surface-1', revision: 1, targets: [target] }))
+  await act(async () => document.querySelector<HTMLButtonElement>('[data-testid="flow-runtime-edit-mode-toggle"]')!.click())
+  await act(async () => element.querySelector<HTMLButtonElement>('[aria-label="Title，编辑文字"]')!.click())
+  const input = element.querySelector<HTMLInputElement>('.canvas-plain-text-editor__control')!
+  await act(async () => fireEvent.change(input, { target: { value: 'A' } }))
+  expect(input.value).toBe('A')
+  let pending!: Promise<void>
+  await act(async () => { pending = prepareFlowDynamicDrafts('document-1'); await Promise.resolve() })
+  expect(input.readOnly).toBe(true)
+  await act(async () => fireEvent.change(input, { target: { value: 'B' } }))
+  expect(input.value).toBe('A')
+  expect(mocks.submitIntent).toHaveBeenCalledTimes(1)
+  expect(mocks.submitIntent).toHaveBeenCalledWith(expect.objectContaining({ kind: 'runtime.text', value: 'A' }))
+  await act(async () => { settle({ status: 'applied', receipt: { status: 'applied' } }); await pending })
+  expect(element.querySelector('[data-testid="canvas-plain-text-editor"]')).toBeNull()
+  await act(async () => root.unmount())
+  entries.pop()?.element.remove()
+  expect(onModeChange).toHaveBeenCalledWith('runtime-1', false)
 })

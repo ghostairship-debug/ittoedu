@@ -149,13 +149,9 @@ export function FlowPaperDynamicLightEdit({ documentId, projectId, surfaceId, lo
   }
   const editable = !readOnly && !item.locked
   const runtimeEditing = editable && item.kind === 'runtime' && mode.owner === owner && mode.editing
-  const previousOwner = useRef(owner)
-  useEffect(() => {
-    if (previousOwner.current !== owner) {
-      onRuntimeEditModeChange?.(item.layerItemId, false)
-      previousOwner.current = owner
-    }
-  }, [owner, item.layerItemId, onRuntimeEditModeChange])
+  const modeChangeRef = useRef(onRuntimeEditModeChange)
+  modeChangeRef.current = onRuntimeEditModeChange
+  useEffect(() => () => { modeChangeRef.current?.(item.layerItemId, false) }, [owner, item.layerItemId])
   useEffect(() => {
     if (!editable && mode.owner === owner && mode.editing) {
       setMode({ owner, editing: false })
@@ -289,12 +285,16 @@ export function FlowPaperDynamicLightEdit({ documentId, projectId, surfaceId, lo
     const edit = activeRef.current
     if (!edit?.runtime || edit.owner !== owner) return Promise.resolve()
     if (edit.value === edit.runtime.course.initialValue) { setActive(null); return Promise.resolve() }
+    const control = runtimeEditRoot.current?.querySelector<HTMLInputElement | HTMLTextAreaElement>('.canvas-plain-text-editor__control')
+    if (control) control.readOnly = true
     const pending = (async () => {
       if (!await commitText(edit, edit.value)) throw new Error('修改未确认，草稿已保留')
     })()
     runtimePreparation.current = { owner, pending }
-    void pending.then(() => { if (runtimePreparation.current?.pending === pending) runtimePreparation.current = null },
-      () => { if (runtimePreparation.current?.pending === pending) runtimePreparation.current = null })
+    const release = () => {
+      if (runtimePreparation.current?.pending === pending) runtimePreparation.current = null
+    }
+    void pending.then(release, release)
     return pending
   }
   const prepareRef = useRef(prepareRuntimeDraft)
@@ -328,8 +328,8 @@ export function FlowPaperDynamicLightEdit({ documentId, projectId, surfaceId, lo
   const overlayStyle: CSSProperties = { position: 'absolute', inset: 0, pointerEvents: 'none' }
   return <div data-testid="flow-paper-dynamic-light-edit" style={{ position: 'relative', width: '100%', height: '100%' }}>
     {content}
-    {editable && item.kind === 'runtime' && toolbarContainer && (showRuntimeEditToggle || runtimeEditing) && createPortal(<button type="button" data-testid="flow-runtime-edit-mode-toggle"
-      aria-pressed={runtimeEditing} disabled={Boolean(liveBusy)}
+    {editable && item.kind === 'runtime' && toolbarContainer && (showRuntimeEditToggle || runtimeEditing) && createPortal(<button type="button" className="secondary-button" data-testid="flow-runtime-edit-mode-toggle"
+      aria-label={`${item.label ?? '运行内容'}：${runtimeEditing ? '完成编辑继续运行' : '编辑图文'}`} aria-pressed={runtimeEditing} disabled={Boolean(liveBusy)}
       onPointerDown={event => { if (liveActive) event.preventDefault(); event.stopPropagation() }}
       onClick={event => { event.stopPropagation(); if (runtimeEditing) void completeRuntimeEditing(); else { setMode({ owner, editing: true }); onRuntimeEditModeChange?.(item.layerItemId, true) } }}>
       {runtimeEditing ? '\u5b8c\u6210\u7f16\u8f91\u7ee7\u7eed\u8fd0\u884c' : '\u7f16\u8f91\u56fe\u6587'}
@@ -353,7 +353,9 @@ export function FlowPaperDynamicLightEdit({ documentId, projectId, surfaceId, lo
       {activeRuntime && <CanvasPlainTextEditor key={activeRuntime.target.targetId} bounds={activeRuntime.target.bounds}
         label={activeRuntime.target.label ?? activeRuntime.target.key} value={activeRuntime.value}
         multiline={activeRuntime.target.multiline} maxLength={activeRuntime.target.maxLength}
+        readOnly={Boolean(liveBusy || failedTask?.owner === owner || runtimePreparation.current?.owner === owner)}
         onDraftChange={(value, composing) => {
+          if (runtimePreparation.current?.owner === owner || failedRef.current) return
           composingRef.current = composing
           if (activeRef.current?.owner === owner && activeRef.current.target.targetId === activeRuntime.target.targetId)
             activeRef.current = { ...activeRef.current, value }

@@ -33,3 +33,19 @@ it('retains a replacement registration when the old token unregisters and propag
   } finally { unregisterCurrent() }
   await expect(prepareFlowDynamicDrafts('doc-1')).resolves.toBeUndefined()
 })
+
+it('prepares two cards on one document in registration order', async () => {
+  let settleFirst!: () => void
+  const calls: string[] = []
+  const unregisterFirst = registerFlowDynamicDraft({ documentId: 'doc-order', owner: 'card-1',
+    prepare: () => { calls.push('first'); return new Promise(resolve => { settleFirst = resolve }) } })
+  const unregisterSecond = registerFlowDynamicDraft({ documentId: 'doc-order', owner: 'card-2',
+    prepare: async () => { calls.push('second') } })
+  try {
+    const pending = prepareFlowDynamicDrafts('doc-order')
+    expect(calls).toEqual(['first'])
+    settleFirst()
+    await pending
+    expect(calls).toEqual(['first', 'second'])
+  } finally { unregisterFirst(); unregisterSecond() }
+})
