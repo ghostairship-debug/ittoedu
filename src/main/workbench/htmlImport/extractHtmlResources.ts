@@ -409,17 +409,19 @@ function imageSetStringStarts(css: string): Set<number> {
   return starts
 }
 
-function cssUrlUsage(css: string, at: number): Usage {
+function cssUrlUsage(css: string, at: number, propertyHint?: string): Usage {
   const before = css.slice(0, at)
   const block = before.lastIndexOf('{')
   const rule = before.slice(Math.max(0, before.lastIndexOf('}', block) + 1), block).trim()
-  const property = before.slice(Math.max(block + 1, before.lastIndexOf(';') + 1), at).split(':')[0].trim().toLowerCase()
+  const declaration = before.slice(Math.max(block + 1, before.lastIndexOf(';') + 1), at)
+  const property = (declaration.includes(':') ? declaration.split(':')[0] : propertyHint ?? '')
+    .replace(/^style\./, '').replace(/[A-Z]/g, letter => `-${letter.toLowerCase()}`).trim().toLowerCase()
   if (/@font-face\b/i.test(rule) && property === 'src') return 'font'
   if (/^(?:background(?:-image)?|border-image(?:-source)?|list-style(?:-image)?|content|cursor|mask-image)$/.test(property)) return 'image'
   return 'unknown'
 }
 
-function rewriteCss(css: string, baseDir: string, sink: Sink, siblings: Map<string, Uint8Array>): string {
+function rewriteCss(css: string, baseDir: string, sink: Sink, siblings: Map<string, Uint8Array>, propertyHint?: string): string {
   const lower = folded(css)
   const parts: string[] = []
   let cursor = 0
@@ -492,7 +494,7 @@ function rewriteCss(css: string, baseDir: string, sink: Sink, siblings: Map<stri
     if (lower.startsWith('url', next)) {
       const call = readUrlCall(css, next)
       if (!call) { i = next + 3; continue }
-      const inner = rewriteSingleUrl(call.inner, 'css-url', baseDir, sink, siblings, Boolean(call.quote), cssUrlUsage(css, next))
+      const inner = rewriteSingleUrl(call.inner, 'css-url', baseDir, sink, siblings, Boolean(call.quote), cssUrlUsage(css, next, propertyHint))
       if (inner.changed) {
         changed = true
         parts.push(css.slice(cursor, next), renderUrl(call.quote, inner.value.trim()))
@@ -676,7 +678,7 @@ function rewriteJavaScript(code: string, sourceType: 'script' | 'module', baseDi
     const embeddedSink = (value: Node, kind: 'css' | 'html', name: string) => {
       const text = literalValue(value) ?? (value.type === 'Identifier' ? constants.get(String(value.name)) ?? null : null)
       if (text === null) { addDiagnostic(sink, 'error', 'unsupported-dynamic-url-sink', `无法静态解析 ${name} 的资源内容`); return }
-      const next = kind === 'css' ? rewriteCss(text, baseDir, sink, siblings) : transformHtml(text, sink, siblings, baseDir, true)
+      const next = kind === 'css' ? rewriteCss(text, baseDir, sink, siblings, name) : transformHtml(text, sink, siblings, baseDir, true)
       writeString(value, next)
     }
     const rewriteUrl = (url: string, name: string, usage: Usage): string => {
@@ -704,7 +706,7 @@ function rewriteJavaScript(code: string, sourceType: 'script' | 'module', baseDi
         for (const literal of input.proof.literals) {
           const before = literalValue(literal)!
           const after = input.kind === 'url' ? rewriteUrl(before, input.name, input.usage)
-            : input.kind === 'css' ? rewriteCss(before, baseDir, sink, siblings) : transformHtml(before, sink, siblings, baseDir, true)
+            : input.kind === 'css' ? rewriteCss(before, baseDir, sink, siblings, input.name) : transformHtml(before, sink, siblings, baseDir, true)
           const owned = input.value.start <= literal.start && literal.end <= input.value.end
           if (before === after) continue
           const target = targets.get(input.value) ?? { local: new Map<Node, string>(), transforms: [] }

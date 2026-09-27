@@ -101,6 +101,8 @@ describe('HTML import closure', () => {
     expect(validateHtmlImport(audioAlias)).toEqual([expect.objectContaining({ level: 'warning', code: 'remote-media-preserved' })])
     const image = extractHtmlResources({ html: '<script>const img = new Image(); img.src="https://example.org/picture"</script>' })
     expect(validateHtmlImport(image)).toEqual([expect.objectContaining({ level: 'warning', code: 'remote-media-preserved' })])
+    const background = extractHtmlResources({ html: '<script>image.style.backgroundImage="url(https://cdn.example.test/a.png)"</script>' })
+    expect(validateHtmlImport(background)).toEqual([expect.objectContaining({ level: 'warning', code: 'remote-media-preserved' })])
     const script = extractHtmlResources({ html: '<script>const script = document.createElement("script"); script.src="https://example.org/code"</script>' })
     expect(validateHtmlImport(script).map(diagnostic => diagnostic.code)).toContain('remote-script')
   })
