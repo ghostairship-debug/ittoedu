@@ -133,8 +133,9 @@ test('M16-T06 Flow image layout, caption, crop and replacement persist in light 
     await app.evaluate(({ dialog }, imagePath) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [imagePath] }) }, data.imagePath)
     const bar = page.getByRole('toolbar', { name: '选中内容快捷工具' })
     await selectImage(page)
+    const bodyChooser = page.waitForEvent('filechooser')
     await bar.getByRole('button', { name: '替换图片', exact: true }).click()
-    await page.locator('input[aria-label="替换文档中的媒体文件"]').setInputFiles(data.imagePath)
+    await (await bodyChooser).setFiles(data.imagePath)
     await expect.poll(async () => (await imageBlock(page)).assetId).not.toBe(initialAssetId)
     const changed = await imageBlock(page)
     expect(changed.id).toBe(initialId)
@@ -208,8 +209,9 @@ test('M16-T06 document image converts to anchored paper image and back without l
     if (await properties.getAttribute('aria-expanded') !== 'true') await properties.click()
     await page.getByRole('tab', { name: '属性', exact: true }).click()
     const overlayBeforeReplace = flow(await snapshot(page)).surfaceLayerItems.find(entry => entry.item.layerItemId === layerId)!
+    const overlayChooser = page.waitForEvent('filechooser')
     await page.getByTestId('properties-tab').getByRole('button', { name: '替换图片', exact: true }).click()
-    await page.getByTestId('properties-tab').locator('input[type="file"][accept="image/*"]').setInputFiles(data.imagePath)
+    await (await overlayChooser).setFiles(data.imagePath)
     await expect.poll(async () => {
       const current = flow(await snapshot(page)).surfaceLayerItems.find(entry => entry.item.layerItemId === layerId)
       return current?.item.kind === 'native' && current.item.content.nativeType === 'image' ? current.item.content.data.assetId : null
@@ -220,7 +222,8 @@ test('M16-T06 document image converts to anchored paper image and back without l
     const replacementId = overlayAfterReplace.item.kind === 'native' && overlayAfterReplace.item.content.nativeType === 'image'
       ? overlayAfterReplace.item.content.data.assetId : null
     expect(replacementId).toBeTruthy()
-    await expect(card.locator('img')).toBeVisible()
+    await expect(card.locator('canvas')).toBeVisible()
+    await expect(card.locator('img')).toHaveJSProperty('naturalWidth', 640)
     await page.screenshot({ path: join(data.shots, 'floating-replaced.png') })
     ;(evidence.screenshots as string[]).push('floating-replaced.png')
     await page.getByTestId('flow-overlay-to-document').click()
