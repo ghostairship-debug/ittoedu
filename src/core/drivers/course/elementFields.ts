@@ -7,7 +7,7 @@ import { findFlowBlockRecursive, sliceFlowRichText } from '../../tools/flowDocum
 import { flowTextSlot } from '../../tools/flowTextSlot'
 import { locateCourseLayer, type LocatedCourseLayer } from './layerProperties'
 import { normalizeLightEditText } from '../../../shared/contracts/runtime/lightEdit'
-import { scanPageText } from '../../../shared/runtimeText/scanPageText'
+import { scanRuntimePageText } from '../../../shared/runtimeText/scanPageText'
 
 /**
  * One native object's authored fields, flattened to what an element card's undo restores one by one (M15): the
@@ -206,7 +206,7 @@ export function runtimeSourceOf(project: CourseProjectDocument, itemId: string):
   return located?.item.kind === 'runtime' ? located.item.runtime.source : null
 }
 function sourceTexts(source: string): string[] {
-  return scanPageText([{ path: 'runtime.js', kind: 'js', text: source }]).entries.map(entry => normalizeLightEditText(entry.text))
+  return scanRuntimePageText(source).entries.map(entry => normalizeLightEditText(entry.text))
 }
 /** Whether a Runtime's source still has this text: as written, or inside one of its string literals. */
 function sourceHas(source: string, texts: readonly string[], text: string): boolean {

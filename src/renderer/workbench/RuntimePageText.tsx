@@ -1,6 +1,6 @@
 import { useMemo, useState, type KeyboardEvent } from 'react'
 import { normalizeLightEditText } from '../../shared/contracts/runtime/lightEdit'
-import { scanPageText } from '../../shared/runtimeText/scanPageText'
+import { scanRuntimePageText } from '../../shared/runtimeText/scanPageText'
 import { runtimeLightEditCommands, useRuntimeLightEditView } from '../composition/runtime/runtimeLightEditCommands'
 
 const MAX_PAGE_TEXTS = 200
@@ -15,7 +15,7 @@ export function RuntimePageTextList({ itemId, onError }: { itemId: string; onErr
   const entries = useMemo(() => {
     if (!view) return []
     const seen = new Set<string>()
-    return scanPageText([{ path: 'runtime.js', kind: 'js', text: view.source }], { maxEntries: MAX_PAGE_TEXTS }).entries
+    return scanRuntimePageText(view.source, { maxEntries: MAX_PAGE_TEXTS }).entries
       .map(entry => normalizeLightEditText(entry.text))
       .filter(text => text && !seen.has(text) && seen.add(text))
   }, [view])

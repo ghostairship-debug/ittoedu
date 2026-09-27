@@ -1,5 +1,6 @@
 import { tokenizer, tokTypes } from 'acorn'
 import type { TokenType } from 'acorn'
+import { unpackHtmlDocumentRuntimeSource } from '../runtime/htmlDocumentSource'
 
 export interface PageTextOccurrence { path: string; start: number; end: number; context: 'html-text' | 'html-attr' | 'js-string' | 'js-template'; attribute?: string }
 export interface PageTextEntry { text: string; occurrences: PageTextOccurrence[] }
@@ -229,4 +230,11 @@ export function scanPageText(files: readonly PageTextScanInput[], options: PageT
     else if (file.kind === 'js') scanJavaScript(file.text, 0, file.path, add, diagnostics)
   }
   return { entries: [...byText.values()], diagnostics }
+}
+
+export function scanRuntimePageText(source: string, options: PageTextScanOptions = {}): PageTextScanResult {
+  const htmlDocument = unpackHtmlDocumentRuntimeSource(source)
+  return htmlDocument
+    ? scanPageText([{ path: 'runtime.html', kind: 'html', text: htmlDocument.html }], options)
+    : scanPageText([{ path: 'runtime.js', kind: 'js', text: source }], options)
 }
