@@ -47,12 +47,16 @@ async function importedFrame(page: Page, position: 'first' | 'last' = 'first') {
   return host.contentFrame()
 }
 
-async function saveAndReopen(page: Page, workspace: string, name: string) {
+async function saveAndWait(page: Page, name: string) {
   await page.keyboard.press('Control+S')
   await expect.poll(() => page.evaluate(async filename => {
     const documents = await window.desktopAPI.documents!.list()
     return documents.find(item => item.binding.kind === 'file' && item.binding.path.endsWith(filename))?.dirty
   }, name)).toBe(false)
+}
+
+async function saveAndReopen(page: Page, workspace: string, name: string) {
+  await saveAndWait(page, name)
   await page.getByRole('tablist', { name: '打开的文件' }).getByRole('button', { name: `关闭 ${name}`, exact: true }).click()
   return openSelectionFile(page, workspace, name)
 }
@@ -98,10 +102,12 @@ test('M17-T01/T02/T03: both UI entries import without model calls; benchmark run
     await page.getByRole('menuitem', { name: '作为互动页导入', exact: true }).click()
     await importDialog(page, 'right-click.html')
     // Import is a document edit; disk is updated only after Save.
-    await page.keyboard.press('Control+S')
+    await saveAndWait(page, courseName)
     const archive = openCourseProjectArchive(new Uint8Array(readFileSync(join(workspace, courseName))))
     expect(archive.project.surfaces[0]?.type).toBe('slide')
     expect(Object.keys(archive.project.assets).length).toBeGreaterThan(0)
+    expect(Object.values(archive.assetFiles).some(bytes =>
+      Buffer.from(bytes).equals(Buffer.from(imageOne, 'base64')))).toBe(true)
     await page.screenshot({ path: join(shots, '01-right-click-import.png') })
 
     await setFilePicker(app, join(workspace, 'menu.html'))
@@ -109,7 +115,7 @@ test('M17-T01/T02/T03: both UI entries import without model calls; benchmark run
     await page.getByRole('button', { name: '导入 HTML 页面', exact: true }).click()
     await importDialog(page, null)
     await page.screenshot({ path: join(shots, '02-insert-menu-import.png') })
-    await page.keyboard.press('Control+S')
+    await saveAndWait(page, courseName)
     const afterMenu = openCourseProjectArchive(new Uint8Array(readFileSync(join(workspace, courseName))))
     const slide = afterMenu.project.surfaces.find(surface => surface.type === 'slide')
     if (slide?.type !== 'slide') throw new Error('Expected Slide surface')
