@@ -46,11 +46,11 @@ CoursewareRuntime.define({
           element.removeAttribute(attribute.name);
         }
       }
-      handlerCode = 'const specs=' + JSON.stringify(eventHandlers) + ';' +
+      handlerCode = '(function(){const specs=' + JSON.stringify(eventHandlers) + ';' +
         'for(const element of document.querySelectorAll("[data-cw-inline-handler]")){' +
         'const id=element.getAttribute("data-cw-inline-handler");' +
         'for(const [key,eventName,body] of specs) if(key===id) element["on"+eventName]=new Function("event",body);' +
-        'element.removeAttribute("data-cw-inline-handler");}';
+        'element.removeAttribute("data-cw-inline-handler");}})();';
       let flushUrl = null;
       for (const script of Array.from(parsed.querySelectorAll('script'))) {
         const type = (script.getAttribute('type') || '').trim().toLowerCase();
@@ -71,6 +71,15 @@ CoursewareRuntime.define({
           flush.setAttribute('src', flushUrl);
           script.before(flush);
         }
+      }
+      if (eventHandlers.length) {
+        if (!flushUrl) {
+          flushUrl = URL.createObjectURL(new Blob([handlerCode], { type: 'text/javascript' }));
+          scriptUrls.push(flushUrl);
+        }
+        const tail = parsed.createElement('script');
+        tail.setAttribute('src', flushUrl);
+        parsed.body.appendChild(tail);
       }
     } catch (error) {
       for (const url of scriptUrls) URL.revokeObjectURL(url);

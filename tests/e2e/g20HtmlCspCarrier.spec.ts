@@ -41,7 +41,7 @@ test('HTML carrier executes ordered scripts and handlers under inherited CSP', a
   expect(result.clearedOnDestroy).toBe(true)
   expect(result.data).toBe('{"literal":"do not run"}')
   expect(result.scriptSources).toEqual([expect.stringMatching(/^blob:/), expect.stringMatching(/^blob:/), null,
-    expect.stringMatching(/^blob:/), expect.stringMatching(/^blob:/)])
+    expect.stringMatching(/^blob:/), expect.stringMatching(/^blob:/), expect.stringMatching(/^blob:/)])
 })
 
 test('parser scripts preserve handler target, property override, and inline script order', async ({ page }) => {
@@ -50,10 +50,12 @@ test('parser scripts preserve handler target, property override, and inline scri
   const cases = [
     `<button id="target" onclick="this.textContent='clicked'">start</button><script>document.body.insertBefore(document.createElement('div'), document.body.firstChild)</script>`,
     `<button id="target" onclick="this.textContent='wrong'">start</button><script>document.getElementById('target').onclick=null</script>`,
+    `<script>window.order=[]</script><button id="target" onclick="window.clicked=(window.clicked||0)+1">start</button><script>document.getElementById('target').onclick=null</script>`,
+    `<script type="module">document.getElementById('target').onclick=null</script><button id="target" onclick="window.clicked=1">start</button>`,
     `<script defer>window.order=['first']</script><script async>window.order.push('second')</script><script>window.order.push('third')</script>`,
   ].map(html => createHtmlDocumentRuntimeSource({ html, resourceKeys: [] }))
   const result = await page.evaluate(async cases => {
-    const output: Array<{ text?: string | null; order?: string[]; attrs?: string[] }> = []
+    const output: Array<{ text?: string | null; order?: string[]; clicked?: number; attrs?: string[] }> = []
     for (const source of cases) {
       let definition: any
       new Function('CoursewareRuntime', source)({ define(value: unknown) { definition = value } })
@@ -64,8 +66,9 @@ test('parser scripts preserve handler target, property override, and inline scri
       const frame = root.querySelector('iframe')!
       const button = frame.contentDocument!.getElementById('target')
       button?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
-      const order = (frame.contentWindow as Window & { order?: string[] }).order
-      output.push({ text: button?.textContent, order, attrs: Array.from(frame.contentDocument!.querySelectorAll('script')).map(script =>
+      const child = frame.contentWindow as Window & { order?: string[]; clicked?: number }
+      const order = child.order
+      output.push({ text: button?.textContent, order, clicked: child.clicked, attrs: Array.from(frame.contentDocument!.querySelectorAll('script')).map(script =>
         `${script.hasAttribute('defer')}:${script.hasAttribute('async')}`) })
       lifecycle.destroy()
     }
@@ -73,8 +76,10 @@ test('parser scripts preserve handler target, property override, and inline scri
   }, cases)
   expect(result[0]?.text).toBe('clicked')
   expect(result[1]?.text).toBe('start')
-  expect(result[2]?.order).toEqual(['first', 'second', 'third'])
-  expect(result[2]?.attrs).toEqual(['false:false', 'false:false', 'false:false'])
+  expect(result[2]?.clicked).toBeUndefined()
+  expect(result[3]?.clicked).toBeUndefined()
+  expect(result[4]?.order).toEqual(['first', 'second', 'third'])
+  expect(result[4]?.attrs).toEqual(['false:false', 'false:false', 'false:false'])
 })
 
 test('unsupported early event attributes fail and Blob scripts are revoked on destroy', async ({ page }) => {
