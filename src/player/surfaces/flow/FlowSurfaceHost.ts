@@ -104,6 +104,7 @@ import {
   PublishedCarrierSideEffectGate,
   type PublishedCarrierSideEffects,
 } from '../publishedCourseState'
+import { capturePublishedSurfacePng } from '../publishedCapture'
 
 type FlowRuntimeFailurePhase = 'register' | 'create' | 'lifecycle' | 'destroy'
 
@@ -287,6 +288,35 @@ export class FlowSurfaceHost {
 
   get rootElement(): HTMLElement | null {
     return this.#root
+  }
+
+  async captureLayerItem(itemId: string): Promise<{ format: 'data-url'; content: string; width: number; height: number }> {
+    const root = this.#root
+    if (!root || !root.isConnected) throw new Error('Flow Published 宿主尚未挂载')
+    const surface = findPublishedFlowSurface(this.#playback, this.#surfaceId)
+    const matches = publishedFlowOverlayEntries(this.#playback, surface, this.#locationId)
+      .filter(entry => entry.item.layerItemId === itemId)
+    if (matches.length === 0) throw new Error(`当前 Published 位置中不存在图层“${itemId}”`)
+    if (matches.length > 1) throw new Error(`当前 Published 位置中图层 ID“${itemId}”不唯一`)
+    const item = matches[0]!.item
+    if (!item.visible || (item.kind !== 'component' && item.kind !== 'runtime')) {
+      throw new Error(`图层“${itemId}”在当前位置不可用于动态内容静态捕获`)
+    }
+    const wrap = this.#overlayRecords.get(itemId)?.wrap
+    if (!wrap || !wrap.isConnected || !root.contains(wrap)) {
+      throw new Error(`图层“${itemId}”在当前位置没有可捕获的宿主`)
+    }
+    const width = wrap.offsetWidth
+    const height = wrap.offsetHeight
+    if (width <= 0 || height <= 0) throw new Error(`图层“${itemId}”没有可见布局尺寸`)
+    const content = await capturePublishedSurfacePng({
+      root: wrap,
+      width,
+      height,
+      layers: [{ element: wrap, x: 0, y: 0, width, height, rotation: 0, opacity: 1 }],
+      transparentBackground: true,
+    })
+    return { format: 'data-url', content, width, height }
   }
 
   readObservationState() {
