@@ -83,6 +83,7 @@ export interface SharedDocumentEditorProps {
   initialMode?: 'layout' | 'source'
   readOnly?: boolean
   renderObject?(block: DocumentBlock, container: HTMLElement): (() => void) | void
+  runtimeSpacers?: readonly { readonly blockId: string; readonly height: number }[]
   objectRevision?: unknown
   clipboardContext?: unknown
   clipboardResourcePort?(context: unknown): DocumentClipboardResourcePort<unknown>
@@ -412,6 +413,7 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
       return handled
     },
     readOnly: latest.current.readOnly, renderObject: latest.current.renderObject, objectRevision: latest.current.objectRevision,
+    runtimeSpacers: latest.current.runtimeSpacers,
     clipboardContext: latest.current.clipboardContext, clipboardResourcePort: latest.current.clipboardResourcePort,
     change: (document: MarkdownDocument, operation: DocumentOperation) => {
       const current = projection.current
@@ -463,7 +465,7 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
       return () => { sourceSelection.current = { anchor: editor.state.selection.main.anchor, head: editor.state.selection.main.head }; editor.destroy(); if (source.current === editor) source.current = null; sourceComposing.current = false }
     }
   }, [mode])
-  useEffect(() => { layout.current?.update(options()) }, [props.document, props.revision, props.objectRevision, props.readOnly])
+  useEffect(() => { layout.current?.update(options()) }, [props.document, props.revision, props.objectRevision, props.runtimeSpacers, props.readOnly])
   useEffect(() => {
     if (sourceComposing.current) return
     const text = props.sourceDraft ?? serializeDocumentMarkdown(props.document, props.target)

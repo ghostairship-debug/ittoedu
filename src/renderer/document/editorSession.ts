@@ -32,6 +32,8 @@ export interface LayoutEditorOptions {
   diagnostic(message: string): void
   readOnly?: boolean
   presentation?: 'flow'
+  /** View-only space after document blocks; it is absent from the ProseMirror document and history. */
+  runtimeSpacers?: readonly { readonly blockId: string; readonly height: number }[]
   renderObject?(block: DocumentBlock, container: HTMLElement): (() => void) | void
   objectRevision?: unknown
   clipboardContext?: unknown
@@ -75,7 +77,24 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
     editable: () => !options.readOnly,
     decorations: state => {
       const decorations: Decoration[] = []
-      state.doc.descendants((node, pos) => { if (node.attrs.id) decorations.push(Decoration.node(pos, pos + node.nodeSize, { 'data-testid': `flow-block-${node.attrs.id}`, 'data-flow-block-id': node.attrs.id, 'data-flow-layer-kind': 'document-block', ...(options.presentation === 'flow' ? { 'data-flow-body-block': node.attrs.data?.type ?? node.type.name } : {}) })) })
+      const spacers = options.presentation === 'flow'
+        ? new Map(options.runtimeSpacers?.map(spacer => [spacer.blockId, spacer.height]) ?? []) : new Map<string, number>()
+      state.doc.descendants((node, pos) => {
+        const id = node.attrs.id as string | undefined
+        if (!id) return
+        decorations.push(Decoration.node(pos, pos + node.nodeSize, { 'data-testid': `flow-block-${id}`, 'data-flow-block-id': id,
+          'data-flow-layer-kind': 'document-block', ...(options.presentation === 'flow' ? { 'data-flow-body-block': node.attrs.data?.type ?? node.type.name } : {}) }))
+        const height = spacers.get(id)
+        if (!height || !Number.isFinite(height) || height <= 0) return
+        decorations.push(Decoration.widget(pos + node.nodeSize, () => {
+          const spacer = document.createElement('div')
+          spacer.dataset.flowRuntimeSpacer = id
+          spacer.contentEditable = 'false'
+          spacer.setAttribute('aria-hidden', 'true')
+          spacer.style.cssText = `display:block;height:${height}px;pointer-events:none;user-select:none;`
+          return spacer
+        }, { key: `flow-runtime-spacer:${id}:${height}`, side: 1, ignoreSelection: true, stopEvent: () => true }))
+      })
       return DecorationSet.create(state.doc, decorations)
     },
     nodeViews: {
@@ -380,6 +399,7 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
     if (composing) { deferred = next; return }
     const changed = JSON.stringify(next.document.content) !== JSON.stringify(options.document.content)
     const refreshObjects = next.objectRevision !== options.objectRevision
+    const refreshSpacers = JSON.stringify(next.runtimeSpacers) !== JSON.stringify(options.runtimeSpacers)
     options = next
     if (changed) {
       boundary()
@@ -395,6 +415,7 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
       }
     }
     if (refreshObjects) view.setProps({ nodeViews: { ...view.props.nodeViews, object: (node, current, getPos) => objectView(node, false, current, getPos), compound: (node, current, getPos) => objectView(node, true, current, getPos) } })
+    if (refreshSpacers) view.setProps({ decorations: view.props.decorations })
   }
   return { view, update, boundary, syncDomTextSelection,
     requestPlainPaste: () => { clearPlainPaste(); plainPastePending = true; plainPasteTimer = setTimeout(clearPlainPaste, 3000); return clearPlainPaste },
