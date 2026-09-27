@@ -31,25 +31,46 @@ CoursewareRuntime.define({
     const parsed = new DOMParser().parseFromString(html, 'text/html');
     const scriptUrls = [];
     const eventHandlers = [];
+    let handlerCode = '';
     const supportedEvents = new Set(['click', 'dblclick', 'change', 'input', 'submit', 'keydown', 'keyup', 'keypress', 'pointerdown', 'pointerup', 'mousedown', 'mouseup', 'mousemove', 'mouseover', 'mouseout', 'focus', 'blur']);
     try {
-      for (const [index, element] of Array.from(parsed.querySelectorAll('*')).entries()) {
+      for (const element of parsed.querySelectorAll('*')) {
+        if (element.hasAttribute('data-cw-inline-handler')) throw new Error('HTML 页面事件标记冲突');
+        let id = null;
         for (const attribute of Array.from(element.attributes)) {
           if (!/^on[a-z]+$/i.test(attribute.name)) continue;
           const eventName = attribute.name.slice(2).toLowerCase();
           if (!supportedEvents.has(eventName)) throw new Error('HTML 页面不支持内联事件：' + attribute.name);
-          eventHandlers.push([index, eventName, attribute.value]);
+          if (id === null) { id = String(eventHandlers.length); element.setAttribute('data-cw-inline-handler', id); }
+          eventHandlers.push([id, eventName, attribute.value]);
           element.removeAttribute(attribute.name);
         }
       }
-      for (const script of parsed.querySelectorAll('script:not([src])')) {
+      handlerCode = 'const specs=' + JSON.stringify(eventHandlers) + ';' +
+        'for(const element of document.querySelectorAll("[data-cw-inline-handler]")){' +
+        'const id=element.getAttribute("data-cw-inline-handler");' +
+        'for(const [key,eventName,body] of specs) if(key===id) element["on"+eventName]=new Function("event",body);' +
+        'element.removeAttribute("data-cw-inline-handler");}';
+      let flushUrl = null;
+      for (const script of Array.from(parsed.querySelectorAll('script'))) {
         const type = (script.getAttribute('type') || '').trim().toLowerCase();
         if (type && type !== 'module' && !/^(?:text|application)\\/(?:javascript|ecmascript|x-javascript)$/.test(type)) continue;
-        if (!script.textContent) continue;
-        const url = URL.createObjectURL(new Blob([script.textContent], { type: 'text/javascript' }));
-        scriptUrls.push(url);
-        script.textContent = '';
-        script.setAttribute('src', url);
+        if (!script.hasAttribute('src') && script.textContent) {
+          const url = URL.createObjectURL(new Blob([script.textContent], { type: 'text/javascript' }));
+          scriptUrls.push(url);
+          script.textContent = '';
+          script.setAttribute('src', url);
+          if (type !== 'module') { script.removeAttribute('defer'); script.removeAttribute('async'); }
+        }
+        if (eventHandlers.length) {
+          if (!flushUrl) {
+            flushUrl = URL.createObjectURL(new Blob([handlerCode], { type: 'text/javascript' }));
+            scriptUrls.push(flushUrl);
+          }
+          const flush = parsed.createElement('script');
+          flush.setAttribute('src', flushUrl);
+          script.before(flush);
+        }
       }
     } catch (error) {
       for (const url of scriptUrls) URL.revokeObjectURL(url);
@@ -70,17 +91,9 @@ CoursewareRuntime.define({
         if (iframe.contentDocument?.URL !== 'about:srcdoc' || iframe.contentDocument.readyState !== 'complete') return;
         try {
           if (eventHandlers.length) {
-            const elements = iframe.contentDocument.querySelectorAll('*');
             const ChildFunction = iframe.contentWindow?.Function;
             if (!ChildFunction) throw new Error('HTML 页面事件执行环境不可用');
-            for (const [index, eventName, body] of eventHandlers) {
-              const element = elements[index];
-              if (!element) throw new Error('HTML 页面事件目标缺失');
-              const handler = new ChildFunction('event', body);
-              element.addEventListener(eventName, function(event) {
-                if (handler.call(this, event) === false) event.preventDefault();
-              });
-            }
+            new ChildFunction(handlerCode)();
           }
           iframe.dataset.htmlDocumentReady = 'true';
           finish();

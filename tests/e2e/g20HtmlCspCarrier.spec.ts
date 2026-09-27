@@ -40,7 +40,41 @@ test('HTML carrier executes ordered scripts and handlers under inherited CSP', a
   expect(result.observed).toContain('ready')
   expect(result.clearedOnDestroy).toBe(true)
   expect(result.data).toBe('{"literal":"do not run"}')
-  expect(result.scriptSources).toEqual([expect.stringMatching(/^blob:/), null, expect.stringMatching(/^blob:/)])
+  expect(result.scriptSources).toEqual([expect.stringMatching(/^blob:/), expect.stringMatching(/^blob:/), null,
+    expect.stringMatching(/^blob:/), expect.stringMatching(/^blob:/)])
+})
+
+test('parser scripts preserve handler target, property override, and inline script order', async ({ page }) => {
+  await page.goto('about:blank')
+  await page.setContent(`<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-eval' blob:">`)
+  const cases = [
+    `<button id="target" onclick="this.textContent='clicked'">start</button><script>document.body.insertBefore(document.createElement('div'), document.body.firstChild)</script>`,
+    `<button id="target" onclick="this.textContent='wrong'">start</button><script>document.getElementById('target').onclick=null</script>`,
+    `<script defer>window.order=['first']</script><script async>window.order.push('second')</script><script>window.order.push('third')</script>`,
+  ].map(html => createHtmlDocumentRuntimeSource({ html, resourceKeys: [] }))
+  const result = await page.evaluate(async cases => {
+    const output: Array<{ text?: string | null; order?: string[]; attrs?: string[] }> = []
+    for (const source of cases) {
+      let definition: any
+      new Function('CoursewareRuntime', source)({ define(value: unknown) { definition = value } })
+      const root = document.body.appendChild(document.createElement('div'))
+      let ready!: Promise<unknown>
+      const lifecycle = definition.create({ dom: { root }, assets: {}, capture: { waitUntil(value: Promise<unknown>) { ready = value } } })
+      await ready
+      const frame = root.querySelector('iframe')!
+      const button = frame.contentDocument!.getElementById('target')
+      button?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+      const order = (frame.contentWindow as Window & { order?: string[] }).order
+      output.push({ text: button?.textContent, order, attrs: Array.from(frame.contentDocument!.querySelectorAll('script')).map(script =>
+        `${script.hasAttribute('defer')}:${script.hasAttribute('async')}`) })
+      lifecycle.destroy()
+    }
+    return output
+  }, cases)
+  expect(result[0]?.text).toBe('clicked')
+  expect(result[1]?.text).toBe('start')
+  expect(result[2]?.order).toEqual(['first', 'second', 'third'])
+  expect(result[2]?.attrs).toEqual(['false:false', 'false:false', 'false:false'])
 })
 
 test('unsupported early event attributes fail and Blob scripts are revoked on destroy', async ({ page }) => {
