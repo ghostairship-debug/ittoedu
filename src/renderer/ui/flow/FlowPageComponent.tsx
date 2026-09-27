@@ -1,6 +1,7 @@
-import { useEffect, useRef, type CSSProperties } from 'react'
+import { useEffect, useRef, useState, type CSSProperties } from 'react'
 import type { ComponentPackageData, ComponentAuthoringTargetUpdate, ComponentScope } from '../../../shared/componentTypes'
 import type { LightEditTextOverride } from '../../../shared/contracts/runtime/lightEdit'
+import { retainAssetObjectUrls } from '../useAssetObjectUrls'
 import {
   componentLightEditOptions,
   findComponentPackageSource,
@@ -47,16 +48,20 @@ export function FlowPageComponent({ item, nodeId, projectId, surfaceId, ownerKey
   targetOwners.current.set(ownerKey, onTargetsChanged)
   const latest = useRef({ onError, assetUrls })
   latest.current = { onError, assetUrls }
+  const assetBaseline = useRef<Map<string, string | null> | null>(null)
+  const [assetEpoch, setAssetEpoch] = useState(0)
   const pkg = findComponentPackageSource(componentPackages, item.component.packageId, item.component.version)
   const propsKey = JSON.stringify(item.props)
   const textKey = JSON.stringify(item.textOverrides ?? [])
   const assetsKey = JSON.stringify(item.assetOverrides ?? {})
-  const urlKey = JSON.stringify(Object.entries(item.assetOverrides ?? {}).sort(([a], [b]) => a.localeCompare(b)).map(([key, override]) => [key, override.assetId, assetUrls[override.assetId] ?? null]))
-  const sourceKey = JSON.stringify([item.component.packageId, item.component.version, nodeId, projectId, surfaceId, scope, assetsKey, urlKey])
+  const sourceKey = JSON.stringify([item.component.packageId, item.component.version, nodeId, projectId, surfaceId, scope, assetsKey])
 
   useEffect(() => {
     const el = container.current
     if (!el || !pkg) return
+    const releaseUrls = retainAssetObjectUrls(assetUrls as Record<string, string>)
+    const baseline = new Map<string, string | null>(Object.values(item.assetOverrides ?? {}).map(override => [override.assetId, assetUrls[override.assetId] ?? null]))
+    assetBaseline.current = baseline
     let active = true
     let revision = 0
     const publish = (update: Readonly<ComponentAuthoringTargetUpdate>) => targetOwners.current.get(ownerKey)?.(update)
@@ -66,7 +71,13 @@ export function FlowPageComponent({ item, nodeId, projectId, surfaceId, ownerKey
       width, height, props: { ...item.props },
       staticFallbackAssetId: item.staticFallbackAssetId,
       components: componentPackages,
-      resolveAsset: id => latest.current.assetUrls[id],
+      resolveAsset: id => {
+        const mountedUrl = assetUrls[id]
+        const currentUrl = latest.current.assetUrls[id]
+        baseline.set(id, mountedUrl ?? null)
+        if (currentUrl !== mountedUrl) setAssetEpoch(epoch => epoch + 1)
+        return currentUrl
+      },
       mode: 'edit', scope, sceneId: surfaceId, interactive: false,
       ...componentLightEditOptions({
         textOverrides: item.textOverrides,
@@ -87,18 +98,25 @@ export function FlowPageComponent({ item, nodeId, projectId, surfaceId, ownerKey
       active = false
       if (handle.current === mounted) handle.current = null
       mounted.destroy()
+      releaseUrls()
+      if (assetBaseline.current === baseline) assetBaseline.current = null
       publish({ scope, sceneId: surfaceId, nodeId, revision: revision + 1, targets: [] })
       if (ownerKey !== currentOwner.current) targetOwners.current.delete(ownerKey)
     }
-  }, [sourceKey, pkg, ownerKey, item.staticFallbackAssetId])
+  }, [sourceKey, pkg, ownerKey, item.staticFallbackAssetId, assetEpoch])
+
+  useEffect(() => {
+    const baseline = assetBaseline.current
+    if (baseline && [...baseline].some(([id, url]) => url !== (assetUrls[id] ?? null))) setAssetEpoch(epoch => epoch + 1)
+  }, [assetUrls])
 
   useEffect(() => {
     handle.current?.updateProps({ ...item.props })
     handle.current?.updateAuthoringNode({ id: nodeId, component: { ...item.component }, x, y, width, height, rotation, visible, props: { ...item.props } })
-  }, [sourceKey, propsKey, x, y, width, height, rotation, visible])
+  }, [sourceKey, assetEpoch, propsKey, x, y, width, height, rotation, visible])
 
-  useEffect(() => { handle.current?.resize(width, height) }, [sourceKey, width, height])
-  useEffect(() => { handle.current?.setTextOverrides?.(item.textOverrides ?? []) }, [sourceKey, textKey])
+  useEffect(() => { handle.current?.resize(width, height) }, [sourceKey, assetEpoch, width, height])
+  useEffect(() => { handle.current?.setTextOverrides?.(item.textOverrides ?? []) }, [sourceKey, assetEpoch, textKey])
 
   const fallbackUrl = item.staticFallbackAssetId ? assetUrls[item.staticFallbackAssetId] : undefined
   return pkg

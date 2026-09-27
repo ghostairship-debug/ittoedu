@@ -1,8 +1,10 @@
 import { act } from 'react'
+import { renderHook } from '@testing-library/react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, expect, it, vi } from 'vitest'
 import { FlowPageComponent } from '@/renderer/ui/flow/FlowPageComponent'
 import { FlowDynamicAuthoringOverlay } from '@/renderer/ui/flow/FlowDynamicAuthoringOverlay'
+import { useAssetObjectUrls } from '@/renderer/ui/useAssetObjectUrls'
 import { mountPublishedComponent } from '@/player/surfaces/publishedComponentMount'
 
 vi.mock('@/player/surfaces/publishedComponentMount', async importOriginal => {
@@ -20,6 +22,7 @@ afterEach(async () => {
     container.remove()
   }
   vi.mocked(mountPublishedComponent).mockClear()
+  vi.unstubAllGlobals()
 })
 
 function mount() {
@@ -112,6 +115,74 @@ it('ignores unrelated package and asset map changes but remounts when an overrid
     assetUrls={{ ...base.assetUrls, image1: 'blob:replacement' }} />))
   expect(mountPublishedComponent).toHaveBeenCalledTimes(2)
   expect(firstHandle.destroy).toHaveBeenCalledTimes(1)
+})
+
+it('leases a URL generation and tracks actual projectAssetUrl reads across whole-map rotations', async () => {
+  const live = new Set<string>()
+  let serial = 0
+  vi.stubGlobal('URL', {
+    createObjectURL: vi.fn(() => { const url = `blob:generation-${++serial}`; live.add(url); return url }),
+    revokeObjectURL: vi.fn((url: string) => { live.delete(url) }),
+  })
+  const image1 = new Uint8Array([1])
+  const other = new Uint8Array([2])
+  const sources = renderHook(({ files }) => useAssetObjectUrls(files, {}), {
+    initialProps: { files: { image1, other } },
+  })
+  const firstUrls = sources.result.current
+  const root = mount()
+  const plain = { ...item, assetOverrides: undefined }
+  await act(async () => root.render(<FlowPageComponent {...base} item={plain} assetUrls={firstUrls} />))
+  const firstOptions = vi.mocked(mountPublishedComponent).mock.calls[0]![1]
+  sources.rerender({ files: { image1, other: new Uint8Array([3]) } })
+  const secondUrls = sources.result.current
+  expect(secondUrls.image1).not.toBe(firstUrls.image1)
+  expect(live.has(firstUrls.image1!)).toBe(true)
+  await act(async () => root.render(<FlowPageComponent {...base} item={plain} assetUrls={secondUrls} />))
+  expect(mountPublishedComponent).toHaveBeenCalledTimes(1)
+  expect(live.has(firstUrls.image1!)).toBe(true)
+  await act(async () => { expect(firstOptions.resolveAsset?.('image1')).toBe(secondUrls.image1) })
+  expect(mountPublishedComponent).toHaveBeenCalledTimes(2)
+  expect(live.has(firstUrls.image1!)).toBe(false)
+  expect(vi.mocked(mountPublishedComponent).mock.calls[1]![1].resolveAsset?.('image1')).toBe(secondUrls.image1)
+  sources.rerender({ files: { image1: new Uint8Array([4]), other: new Uint8Array([3]) } })
+  const thirdUrls = sources.result.current
+  expect(live.has(secondUrls.image1!)).toBe(true)
+  await act(async () => root.render(<FlowPageComponent {...base} item={plain} assetUrls={thirdUrls} />))
+  expect(mountPublishedComponent).toHaveBeenCalledTimes(3)
+  expect(vi.mocked(mountPublishedComponent).mock.calls[2]![1].resolveAsset?.('image1')).toBe(thirdUrls.image1)
+  expect(live.has(secondUrls.image1!)).toBe(false)
+  await act(async () => root.unmount())
+  roots.pop()?.container.remove()
+  sources.unmount()
+  expect(live.size).toBe(0)
+})
+
+it('remounts a manifest image override when its managed URL rotates and releases the prior lease', async () => {
+  const live = new Set<string>()
+  let serial = 0
+  vi.stubGlobal('URL', {
+    createObjectURL: vi.fn(() => { const url = `blob:override-${++serial}`; live.add(url); return url }),
+    revokeObjectURL: vi.fn((url: string) => { live.delete(url) }),
+  })
+  const firstBytes = new Uint8Array([1])
+  const sources = renderHook(({ files }) => useAssetObjectUrls(files, {}), {
+    initialProps: { files: { image1: firstBytes, other: new Uint8Array([2]) } },
+  })
+  const firstUrls = sources.result.current
+  const root = mount()
+  await act(async () => root.render(<FlowPageComponent {...base} item={item} assetUrls={firstUrls} />))
+  sources.rerender({ files: { image1: firstBytes, other: new Uint8Array([3]) } })
+  const secondUrls = sources.result.current
+  expect(live.has(firstUrls.image1!)).toBe(true)
+  await act(async () => root.render(<FlowPageComponent {...base} item={item} assetUrls={secondUrls} />))
+  expect(mountPublishedComponent).toHaveBeenCalledTimes(2)
+  expect(live.has(firstUrls.image1!)).toBe(false)
+  expect(vi.mocked(mountPublishedComponent).mock.calls[1]![1].resolveAsset?.('image1')).toBe(secondUrls.image1)
+  await act(async () => root.unmount())
+  roots.pop()?.container.remove()
+  sources.unmount()
+  expect(live.size).toBe(0)
 })
 
 it('renders host-discovered paper targets and routes activation to the Flow owner', async () => {
