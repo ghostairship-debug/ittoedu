@@ -281,6 +281,21 @@ function collectOfflineManagedHtmlRemoteMedia(
                 else if (argument && declaredHttpsOrigins.length && !dynamicMediaPaths.includes(sourcePath)) dynamicMediaPaths.push(sourcePath)
               }
             }
+            if (node.type === 'AssignmentExpression') {
+              const target = node.left as Record<string, unknown> | undefined
+              const property = target?.property as Record<string, unknown> | undefined
+              const style = target?.object as Record<string, unknown> | undefined
+              const styleProperty = style?.property as Record<string, unknown> | undefined
+              const value = node.right as Record<string, unknown> | undefined
+              if (target?.type === 'MemberExpression' && property?.name === 'backgroundImage'
+                && style?.type === 'MemberExpression' && styleProperty?.name === 'style'
+                && value?.type === 'Literal' && typeof value.value === 'string') {
+                for (const match of value.value.matchAll(/url\(\s*(?:"([^"]+)"|'([^']+)'|([^\s)]+))\s*\)/gi)) {
+                  const url = match[1] ?? match[2] ?? match[3]
+                  if (url && declaredHttpsOrigins.includes(exactHttpsOrigin(url) ?? '')) add(url)
+                }
+              }
+            }
             Object.values(node).forEach(visit)
           }
           visit(ast)

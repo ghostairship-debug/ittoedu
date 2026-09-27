@@ -382,6 +382,8 @@ describe('course package export', () => {
           const example = "new Audio('https://example-only.example.com/not-loaded')";
           new Audio('https://audio.example.com/sound');
           new Audio(audioFromSettings);
+          const image = new Image();
+          image.style.backgroundImage = "url(https://cdn.example.test/a.png)";
         </script>
       </body></html>`,
       resourceKeys: [],
@@ -389,6 +391,7 @@ describe('course package export', () => {
     sources.project.network = { connectOrigins: [
       'https://background.example.com', 'https://inline.example.com',
       'https://audio.example.com', 'https://settings.example.com',
+      'https://cdn.example.test',
     ] }
     const report = collectCoursePackageExportPreflight(
       sources.project, 'standalone-html',
@@ -397,11 +400,12 @@ describe('course package export', () => {
       { singleHtmlMode: 'offline-portable' },
     )
     const warnings = report.items.filter((item) => item.code === 'offline-managed-html-remote-media')
-    expect(warnings).toHaveLength(4)
+    expect(warnings).toHaveLength(5)
     const messages = warnings.map((item) => item.message).join(' ')
     expect(messages).toContain('https://background.example.com/image')
     expect(messages).toContain('https://inline.example.com/image')
     expect(messages).toContain('https://audio.example.com/sound')
+    expect(messages).toContain('https://cdn.example.test/a.png')
     expect(messages).toContain('动态媒体地址')
     expect(messages).not.toContain('text.example.com')
     expect(messages).not.toContain('example-only.example.com')
