@@ -5,6 +5,7 @@ import { courseProjectDocumentSchema } from '../../../shared/courseProjectSchema
 import { createHtmlDocumentRuntimeSource } from '../../../shared/runtime/htmlDocumentSource'
 import { validateRuntimeSource } from '../../../shared/runtimeSourceValidation'
 import { validateCourseProjectArchiveData } from '../../../core/drivers/codecs/courseProjectArchive'
+import { allocateCourseLayerOrder } from '../../../core/tools/layerOrder'
 import { prepareImageResource } from '../admittedImageResource'
 import { readHtmlClosure } from './readHtmlClosure'
 import { validateHtmlImport } from './validateHtmlImport'
@@ -78,7 +79,8 @@ export async function prepareHtmlCourseCandidate(input: {
   if (scene.layerItems.some(item => item.layerItemId === instanceId)) throw new Error('HTML 页面已在目标场景中，不能重复追加')
   scene.layerItems.push({
     layerItemId: instanceId, label: 'HTML 页面', kind: 'runtime', frame: { mode: 'absolute', x: 0, y: 0, width: targetSurface.canvas.width, height: targetSurface.canvas.height },
-    order: scene.layerItems.length, visible: true, locked: false, rotation: 0, opacity: 1, hitPolicy: 'auto', playbackInitialVisibility: 'inherit',
+    order: allocateCourseLayerOrder(project, Math.max(0, ...scene.layerItems.map(item => item.order + 1))),
+    visible: true, locked: false, rotation: 0, opacity: 1, hitPolicy: 'auto', playbackInitialVisibility: 'inherit',
     runtime: { protocol: 'surface-runtime', runtimeApiVersion: 3, enabled: true, renderMode: 'dom', source, content: { values: {} }, assets,
       staticFallback: { assetId: fallbackId, coverage: 'scene' } },
   })

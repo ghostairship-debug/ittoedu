@@ -6,6 +6,8 @@ import path from 'node:path'
 import sharp from 'sharp'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createBlankCourseProject } from '../../src/core/course/createCourseProject'
+import { createTextNode } from '../../src/core/tools/nativeNodeFactories'
+import { sceneNodeToCourseLayerItem } from '../../src/shared/courseProjectModel'
 import { CourseV9Driver } from '../../src/core/drivers/CourseV9Driver'
 import { DocumentRegistry } from '../../src/core/documents/DocumentRegistry'
 import { DocumentToolGateway } from '../../src/core/tools/DocumentToolGateway'
@@ -23,12 +25,15 @@ afterEach(async () => {
   }
 })
 
-async function fixture(admission?: BuildAdmissionPort) {
+async function fixture(admission?: BuildAdmissionPort, existingOrders: readonly number[] = []) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'g20-html-import-'))
   roots.push(root)
   const sourcePath = path.join(root, 'lesson.html')
   await fs.writeFile(sourcePath, '<!doctype html><button onclick="this.textContent=\'Next\'">Start</button>')
   const project = createBlankCourseProject({ includeDefaultController: false, controls: 'none' })
+  const firstSurface = project.surfaces[0]
+  if (firstSurface?.type !== 'slide') throw new Error('fixture requires Slide')
+  for (const order of existingOrders) firstSurface.scenes[0]!.layerItems.push(sceneNodeToCourseLayerItem(createTextNode(), order))
   const driver = new CourseV9Driver()
   const journal = createDocumentJournal({ directory: path.join(root, 'journal') })
   const registry = new DocumentRegistry({ persistence: journal, drivers: [driver], createId: randomUUID, bindingKey: binding => binding.path })
@@ -78,6 +83,18 @@ describe('M17 S13 HTML import orchestration', () => {
     const now = f.session.read()
     await f.session.execute({ documentId: now.documentId, epoch: now.epoch, baseRevision: now.revision, operationId: 'undo', actor: 'human', mutation: { type: 'undo' } })
     expect(f.session.read().model.resources.assets[item.runtime.assets[key]!.assetId]).toBeUndefined()
+  })
+
+  it('allocates above sparse scene orders without colliding with an existing layer', async () => {
+    const f = await fixture(undefined, [0, 5])
+    const ticket = await f.service.prepare(f.request)
+    await f.service.admit(ticket)
+    expect((await f.service.commit(ticket)).status).toBe('applied')
+    const model = f.session.read().model
+    if (model.kind !== 'course-v9') throw new Error('wrong model')
+    const surface = model.project.surfaces[0]
+    if (surface?.type !== 'slide') throw new Error('wrong surface')
+    expect(surface.scenes[0]!.layerItems.map(item => item.order)).toEqual([0, 5, 6])
   })
 
   it('freezes runId so stopRun rejects a ready artifact without a formal write', async () => {
