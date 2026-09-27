@@ -223,11 +223,13 @@ export function waitForManagedHtmlResize(document: Document, signal: AbortSignal
   return new Promise((resolve, reject) => {
     const view = document.defaultView!
     let frame = 0
-    const cancel = () => { view.cancelAnimationFrame(frame); signal.removeEventListener('abort', cancel); reject(new DOMException('已取消', 'AbortError')) }
+    const cleanup = () => { view.cancelAnimationFrame(frame); view.clearTimeout(timeout); signal.removeEventListener('abort', cancel) }
+    const cancel = () => { cleanup(); reject(new DOMException('已取消', 'AbortError')) }
+    const timeout = view.setTimeout(() => { cleanup(); reject(new Error('Flow HTML 子页面 resize 等待超时；请使用演示页。')) }, 3000)
     if (signal.aborted) { cancel(); return }
     signal.addEventListener('abort', cancel, { once: true })
     frame = view.requestAnimationFrame(() => {
-      frame = view.requestAnimationFrame(() => { signal.removeEventListener('abort', cancel); resolve() })
+      frame = view.requestAnimationFrame(() => { cleanup(); resolve() })
     })
   })
 }

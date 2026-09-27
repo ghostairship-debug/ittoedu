@@ -72,26 +72,34 @@ export function observeSurfaceRuntimeContentSize(options: SurfaceRuntimeContentS
   let frame = 0
   let lastHeight: number | null = null
   let observedSource: SurfaceRuntimeContentSource | null = null
+  let observedSize: string | null = null
   let resizeObserver: ResizeObserver | null = null
   let mutationObserver: MutationObserver | null = null
   let controller: AbortController | null = null
   let generation = 0
+  let countedGeneration = -1
   let failure: Error | null = null
-  let consecutiveChanges = 0
+  let heightChanges = 0
+  let invalidations = 0
+  let lastInvalidation = 'none'
+  let phase = 'idle'
+  let ready = false
+  let dirty = true
+  let publishingHeight = false
   let cssFrame = 0
   let cssSignature: string | null = null
   let verifyPublishedLayout: (() => boolean) | null = null
-  let deadline: ReturnType<typeof setTimeout> | null = null
+  const resizeSizes = new WeakMap<Element, string>()
   const waiters = new Set<{ resolve(): void; reject(error: Error): void }>()
   const settle = (error?: Error): void => {
-    if (deadline) clearTimeout(deadline)
-    deadline = null
     for (const waiter of waiters) error ? waiter.reject(error) : waiter.resolve()
     waiters.clear()
   }
   const fail = (cause: unknown): void => {
     if (destroyed || failure) return
-    failure = cause instanceof Error ? cause : new Error(String(cause))
+    const error = cause instanceof Error ? cause : new Error(String(cause))
+    failure = error.message.includes('phase=') ? error
+      : new Error(`${error.message}（phase=${phase}, invalidations=${invalidations}, lastHeight=${lastHeight ?? 'none'}, reason=${lastInvalidation}）`)
     controller?.abort()
     if (frame && view) view.cancelAnimationFrame(frame)
     if (cssFrame && view) view.cancelAnimationFrame(cssFrame)
@@ -101,18 +109,8 @@ export function observeSurfaceRuntimeContentSize(options: SurfaceRuntimeContentS
     settle(failure)
     options.onError?.(failure)
   }
-  const monitorStyles = (): void => {
-    cssFrame = 0
-    if (destroyed || failure || !view || observedSource?.kind !== 'managed-document') return
-    const source = observedSource
-    if (source.iframe.contentDocument !== source.origin.ownerDocument) { schedule(); return }
-    try {
-      const signature = managedHtmlStylesheetSignature(source.origin.ownerDocument)
-      if (cssSignature !== null && signature !== cssSignature) throw new Error('Flow HTML 不允许动态修改样式表；请使用演示页。')
-      cssSignature = signature
-    } catch (cause) { fail(cause); return }
-    cssFrame = view.requestAnimationFrame(monitorStyles)
-  }
+  const sourceSize = (source: SurfaceRuntimeContentSource | null): string | null =>
+    source?.kind === 'managed-document' ? `${source.iframe.clientWidth}x${source.iframe.clientHeight}` : null
   const sourceRoot = (source: SurfaceRuntimeContentSource): HTMLElement => source.kind === 'intrinsic' ? source.element : source.origin
   const bindResizeNodes = (): void => {
     resizeObserver?.disconnect()
@@ -121,47 +119,17 @@ export function observeSurfaceRuntimeContentSize(options: SurfaceRuntimeContentS
     resizeObserver.observe(root)
     for (const child of root.querySelectorAll('*')) resizeObserver.observe(child)
   }
-  const schedule = (): void => {
-    if (destroyed || failure || !view) return
-    if (observedSource?.kind === 'managed-document' && !deadline) deadline = setTimeout(() => fail(new Error('Flow HTML 布局持续变化或测量超时；请使用演示页。')), 3000)
-    generation += 1
-    controller?.abort()
-    if (frame) return
-    frame = view.requestAnimationFrame(async () => {
-      frame = 0
-      if (destroyed) return
-      const currentGeneration = generation
-      const source = options.source ? options.source() : defaultSource
-      if (!sameSource(source, observedSource)) attach(source)
-      if (!source) { settle(); return }
-      const pending = new AbortController()
-      controller = pending
-      try {
-        if (verifyPublishedLayout && source.kind === 'managed-document') await waitForManagedHtmlResize(source.origin.ownerDocument, pending.signal)
-        if (verifyPublishedLayout && !verifyPublishedLayout()) throw new Error('Flow HTML 在调整视口后删除、移动或改变了正文；请使用演示页。')
-        const height = source.kind === 'managed-document'
-          ? await measureManagedHtmlContent(source, pending.signal)
-          : contentHeight(source)
-        if (destroyed || pending.signal.aborted || currentGeneration !== generation) return
-        // Navigation can replace the child document without a mutation in the old tree.
-        if (source.kind === 'managed-document' && source.iframe.contentDocument !== source.origin.ownerDocument) { schedule(); return }
-        if (height !== lastHeight) {
-          if (source.kind === 'managed-document' && ++consecutiveChanges > 12) throw new Error('HTML 页面在调整 Flow 高度后持续改变布局，无法稳定显示；请使用演示页。')
-          lastHeight = height
-          if (source.kind === 'managed-document') verifyPublishedLayout = freezeManagedHtmlLayout(source.origin.ownerDocument)
-          options.onHeightChange(height)
-          // The real page may react to its one final resize. Check that result before readiness.
-          if (source.kind === 'managed-document') { schedule(); return }
-        } else consecutiveChanges = 0
-        if (verifyPublishedLayout && !verifyPublishedLayout()) throw new Error('Flow HTML 在调整视口后删除、移动或改变了正文；请使用演示页。')
-        verifyPublishedLayout = null
-        settle()
-      } catch (cause) {
-        if (destroyed || pending.signal.aborted || currentGeneration !== generation) return
-        if (cause instanceof Error && cause.name === 'AbortError') { schedule(); return }
-        fail(cause)
-      }
-    })
+  const monitorStyles = (): void => {
+    cssFrame = 0
+    if (destroyed || failure || !view || observedSource?.kind !== 'managed-document') return
+    const source = observedSource
+    if (source.iframe.contentDocument !== source.origin.ownerDocument) { request('refresh'); return }
+    try {
+      const signature = managedHtmlStylesheetSignature(source.origin.ownerDocument)
+      if (cssSignature !== null && signature !== cssSignature) throw new Error('Flow HTML 不允许动态修改样式表；请使用演示页。')
+      cssSignature = signature
+    } catch (cause) { fail(cause); return }
+    cssFrame = view.requestAnimationFrame(monitorStyles)
   }
   const attach = (source: SurfaceRuntimeContentSource | null): void => {
     resizeObserver?.disconnect()
@@ -171,28 +139,132 @@ export function observeSurfaceRuntimeContentSize(options: SurfaceRuntimeContentS
     cssSignature = null
     verifyPublishedLayout = null
     observedSource = source
-    if (deadline) clearTimeout(deadline)
-    deadline = source?.kind === 'managed-document' ? setTimeout(() => fail(new Error('Flow HTML 布局持续变化或测量超时；请使用演示页。')), 3000) : null
+    observedSize = sourceSize(source)
+    lastHeight = null
+    ready = false
     if (source?.kind === 'managed-document' && view) cssFrame = view.requestAnimationFrame(monitorStyles)
     if (!source) return
     const root = sourceRoot(source)
     const sourceView = root.ownerDocument.defaultView
     const Resize = sourceView?.ResizeObserver
-    resizeObserver = Resize ? new Resize(schedule) : null
+    resizeObserver = Resize ? new Resize(entries => {
+      let changed = false
+      for (const entry of entries) {
+        const size = `${entry.contentRect.width}x${entry.contentRect.height}`
+        const previous = resizeSizes.get(entry.target)
+        if (previous !== undefined && previous !== size) changed = true
+        resizeSizes.set(entry.target, size)
+      }
+      if (changed) request('descendant resize')
+    }) : null
     const Mutation = sourceView?.MutationObserver
-    mutationObserver = Mutation ? new Mutation(() => { bindResizeNodes(); schedule() }) : null
+    mutationObserver = Mutation ? new Mutation(records => {
+      if (records.some(record => record.type === 'childList')) bindResizeNodes()
+      // data-* is metadata unless a stylesheet selector can use it; paint/size checks still run for such selectors.
+      const selectorsMayUseData = source.kind !== 'managed-document' || cssSignature === null
+        || /\[\s*data-|:has\s*\(/i.test(cssSignature)
+      if (records.some(record => record.type !== 'attributes' || !record.attributeName?.startsWith('data-') || selectorsMayUseData)) {
+        request('DOM mutation')
+      }
+    }) : null
     bindResizeNodes()
     mutationObserver?.observe(root, { childList: true, subtree: true, characterData: true, attributes: true })
   }
+  const request = (reason: 'refresh' | 'verify' | 'DOM mutation' | 'descendant resize' = 'refresh'): void => {
+    if (destroyed || failure || !view) return
+    const source = options.source ? options.source() : defaultSource
+    const replaced = !sameSource(source, observedSource)
+    if (replaced) attach(source)
+    const size = sourceSize(source)
+    const resized = size !== observedSize
+    // The host's synchronous height publication belongs to the confirmation pass.
+    const expectedResize = publishingHeight || (!!verifyPublishedLayout && source?.kind === 'managed-document'
+      && observedSize?.split('x')[0] === size?.split('x')[0] && reason === 'refresh')
+    if (resized) observedSize = size
+    const changed = replaced || reason === 'DOM mutation' || reason === 'descendant resize' || (resized && !expectedResize)
+    if (changed) {
+      lastInvalidation = replaced ? 'source replacement' : resized ? 'viewport resize' : reason
+      dirty = true
+      ready = false
+      if (controller && !controller.signal.aborted) {
+        if (countedGeneration !== generation) {
+          countedGeneration = generation
+          if (++invalidations > 12) {
+            fail(new Error(`Flow HTML 持续失效，无法稳定测量（phase=measurement, invalidations=${invalidations}, lastHeight=${lastHeight ?? 'none'}, reason=${lastInvalidation}）；请使用演示页。`))
+            return
+          }
+        }
+        // During confirmation the frozen live layout must run and reject author resize edits.
+        if (!verifyPublishedLayout || replaced) controller.abort()
+      }
+    } else if (reason === 'verify' && ready) {
+      dirty = true
+      ready = false
+    }
+    if (controller || frame) return
+    if (!source) { ready = false; dirty = false; return }
+    if (!dirty && ready) { settle(); return }
+    frame = view.requestAnimationFrame(run)
+  }
+  const run = async (): Promise<void> => {
+    frame = 0
+    if (destroyed || failure || !observedSource) return
+    const source = observedSource
+    const pending = new AbortController()
+    controller = pending
+    const currentGeneration = ++generation
+    dirty = false
+    try {
+      phase = verifyPublishedLayout ? 'await-child-resize' : 'initial-measure'
+      if (verifyPublishedLayout && source.kind === 'managed-document') await waitForManagedHtmlResize(source.origin.ownerDocument, pending.signal)
+      if (pending.signal.aborted) return
+      phase = verifyPublishedLayout ? 'confirm-measure' : 'initial-measure'
+      if (verifyPublishedLayout && !verifyPublishedLayout()) throw new Error('Flow HTML 在调整视口后删除、移动或改变了正文；请使用演示页。')
+      const height = source.kind === 'managed-document'
+        ? await measureManagedHtmlContent(source, pending.signal)
+        : contentHeight(source)
+      if (destroyed || pending.signal.aborted || currentGeneration !== generation) return
+      if (source.kind === 'managed-document' && source.iframe.contentDocument !== source.origin.ownerDocument) {
+        request('refresh')
+        return
+      }
+      if (height !== lastHeight) {
+        if (source.kind === 'managed-document' && ++heightChanges > 12) {
+          throw new Error(`HTML 页面在调整 Flow 高度后持续改变布局（phase=publish-height, invalidations=${invalidations}, lastHeight=${lastHeight ?? 'none'}, reason=${lastInvalidation}）；请使用演示页。`)
+        }
+        lastHeight = height
+        phase = 'publish-height'
+        if (source.kind === 'managed-document') verifyPublishedLayout = freezeManagedHtmlLayout(source.origin.ownerDocument)
+        publishingHeight = true
+        try { options.onHeightChange(height) } finally { publishingHeight = false }
+        observedSize = sourceSize(source)
+        if (source.kind === 'managed-document') { dirty = true; return }
+      }
+      if (verifyPublishedLayout && !verifyPublishedLayout()) throw new Error('Flow HTML 在调整视口后删除、移动或改变了正文；请使用演示页。')
+      verifyPublishedLayout = null
+      if (dirty) return
+      ready = true
+      phase = 'ready'
+      heightChanges = invalidations = 0
+      settle()
+    } catch (cause) {
+      if (destroyed || pending.signal.aborted || currentGeneration !== generation) return
+      if (cause instanceof Error && cause.name === 'AbortError') { dirty = true; return }
+      fail(cause)
+    } finally {
+      if (controller === pending) controller = null
+      if (!destroyed && !failure && dirty) request('refresh')
+    }
+  }
   attach(options.source ? options.source() : defaultSource)
-  schedule()
+  request()
   return {
-    refresh: schedule,
+    refresh: () => request('refresh'),
     waitForReady() {
       if (failure) return Promise.reject(failure)
       if (destroyed) return Promise.reject(new Error('内容高度观察器已销毁'))
       const result = new Promise<void>((resolve, reject) => waiters.add({ resolve, reject }))
-      schedule()
+      request('verify')
       return result
     },
     destroy() {

@@ -235,14 +235,14 @@ it('detects insertRule without a DOM mutation and stops after destroy', async ()
   } finally { await page.close() }
 })
 
-it('uses one readiness deadline despite perpetual DOM mutations', async () => {
+it('does not mistake metadata updates between valid snapshots for layout churn', async () => {
   const page = await pageWith('<!doctype html><style>body{margin:0}</style><article style="height:500px"></article>')
   try {
     await settled(page)
     await page.evaluate(() => { const doc = document.querySelector('iframe')!.contentDocument!; (window as any).mutationTimer = setInterval(() => { doc.body.dataset.tick = String(performance.now()) }, 1) })
-    const started = Date.now()
-    await expect(settled(page)).rejects.toThrow('持续变化或测量超时')
-    expect(Date.now() - started).toBeLessThan(4500)
+    await settled(page)
+    await page.waitForTimeout(80)
+    expect(await page.evaluate(() => ({ heights: (window as any).testHeight.heights, errors: (window as any).testHeight.errors }))).toEqual({ heights: [500], errors: [] })
     expect(await page.locator('[data-html-height-measurement]').count()).toBe(0)
     await page.evaluate(() => clearInterval((window as any).mutationTimer))
   } finally { await page.close() }
