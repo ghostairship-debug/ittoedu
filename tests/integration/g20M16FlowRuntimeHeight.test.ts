@@ -1,4 +1,4 @@
-import { expect, it } from 'vitest'
+import { expect, it, vi } from 'vitest'
 import { createPublishedSurfaceRuntimeSession, mountPublishedSurfaceRuntime } from '@/player/surfaces/runtime/publishedSurfaceRuntimeMount'
 import { observeSurfaceRuntimeContentSize } from '@/player/surfaces/runtime/surfaceRuntimeContentSize'
 import { resolveFlowRuntimePaperSlots } from '@/shared/flowRuntimePaperLayout'
@@ -137,10 +137,13 @@ it('accepts a managed document as the content source and measures its page inste
   frame.remove()
 })
 
-it.each([0.5, 2])('measures unscaled content at %sx and shrinks after a 100%% wrapper grows', async scale => {
+it.each([0.5, 2])('measures unscaled content at %sx and shrinks after a stylesheet 100%% wrapper grows', async scale => {
+  const style = document.createElement('style')
+  style.textContent = `.m16-host-fill { height: 100%; } .m16-viewport-fill { height: 100vh; }`
+  document.head.append(style)
   const root = document.createElement('div')
   const wrapper = document.createElement('div')
-  wrapper.style.height = '100%'
+  wrapper.className = 'm16-host-fill'
   const content = document.createElement('article')
   wrapper.append(content)
   root.append(wrapper)
@@ -149,7 +152,10 @@ it.each([0.5, 2])('measures unscaled content at %sx and shrinks after a 100%% wr
   let contentHeight = 1200
   Object.defineProperty(root, 'offsetHeight', { configurable: true, get: () => hostHeight })
   Object.defineProperty(root, 'getBoundingClientRect', { configurable: true, value: () => ({ top: 0, bottom: hostHeight * scale, height: hostHeight * scale }) })
-  Object.defineProperty(wrapper, 'getBoundingClientRect', { configurable: true, value: () => ({ top: 0, bottom: hostHeight * scale, height: hostHeight * scale }) })
+  Object.defineProperty(wrapper, 'getBoundingClientRect', { configurable: true, value: () => {
+    const height = wrapper.className === 'm16-viewport-fill' ? 720 : hostHeight
+    return { top: 0, bottom: height * scale, height: height * scale }
+  } })
   Object.defineProperty(content, 'getBoundingClientRect', { configurable: true, value: () => ({ top: 0, bottom: contentHeight * scale, height: contentHeight * scale }) })
   const heights: number[] = []
   const observer = observeSurfaceRuntimeContentSize({ root, onHeightChange: height => heights.push(height) })
@@ -160,6 +166,34 @@ it.each([0.5, 2])('measures unscaled content at %sx and shrinks after a 100%% wr
   observer.refresh()
   await new Promise<void>(resolve => requestAnimationFrame(() => resolve()))
   expect(heights).toEqual([1200, 500])
+  wrapper.className = 'm16-viewport-fill'
+  contentHeight = 1200
+  observer.refresh()
+  await new Promise<void>(resolve => requestAnimationFrame(() => resolve()))
+  contentHeight = 500
+  observer.refresh()
+  await new Promise<void>(resolve => requestAnimationFrame(() => resolve()))
+  expect(heights).toEqual([1200, 500, 1200, 500])
   observer.destroy()
+  root.remove()
+  style.remove()
+})
+
+it('measures direct visible text in an otherwise empty Runtime root', async () => {
+  const root = document.createElement('div')
+  root.append(document.createTextNode('Direct Runtime text'))
+  document.body.append(root)
+  const originalRange = document.createRange.bind(document)
+  const createRange = vi.spyOn(document, 'createRange').mockImplementation(() => {
+    const range = originalRange()
+    Object.defineProperty(range, 'getBoundingClientRect', { value: () => ({ top: 0, bottom: 40, height: 40 }) })
+    return range
+  })
+  const heights: number[] = []
+  const observer = observeSurfaceRuntimeContentSize({ root, onHeightChange: height => heights.push(height) })
+  await new Promise<void>(resolve => requestAnimationFrame(() => resolve()))
+  expect(heights).toEqual([40])
+  observer.destroy()
+  createRange.mockRestore()
   root.remove()
 })

@@ -14,25 +14,37 @@ function measuredNodes(source: HTMLElement | Document): HTMLElement[] {
   return Array.from(origin.querySelectorAll('*')).filter((node): node is HTMLElement => node.nodeType === 1)
 }
 
-function isHostSized(element: HTMLElement): boolean {
-  const style = element.ownerDocument.defaultView?.getComputedStyle(element)
-  const hostSize = /^(100%|100vh|100dvh|100svh|100lvh)$/
-  return hostSize.test(element.style.height) || hostSize.test(element.style.minHeight)
-    || Boolean(style && (hostSize.test(style.height) || hostSize.test(style.minHeight)))
-}
-
 function measureHeight(source: HTMLElement | Document, root: HTMLElement): number {
   const origin = source.nodeType === 9 ? (source as Document).body : source as HTMLElement
   if (!origin) return 0
   const originRect = origin.getBoundingClientRect()
   const scaleY = origin.offsetHeight > 0 && originRect.height > 0 ? originRect.height / origin.offsetHeight : 1
   let bottom = 0
-  for (const node of measuredNodes(source)) {
-    if (isHostSized(node)) continue
-    const rect = node.getBoundingClientRect()
-    bottom = Math.max(bottom, (rect.bottom - originRect.top) / scaleY)
+  const layoutBottom = (rect: DOMRect): number => (rect.bottom - originRect.top) / scaleY
+  const measureText = (element: HTMLElement): number => {
+    let textBottom = 0
+    for (const child of element.childNodes) {
+      if (child.nodeType !== 3 || !child.textContent?.trim()) continue
+      const range = element.ownerDocument.createRange()
+      range.selectNodeContents(child)
+      if (typeof range.getBoundingClientRect === 'function') textBottom = Math.max(textBottom, layoutBottom(range.getBoundingClientRect()))
+      range.detach()
+    }
+    return textBottom
   }
-  if (source.nodeType !== 9 && source !== root && !isHostSized(origin)) bottom = Math.max(bottom, origin.offsetHeight)
+  const originHeight = originRect.height / scaleY
+  const viewportHeight = origin.ownerDocument.defaultView?.innerHeight ?? 0
+  for (const node of [origin, ...measuredNodes(source)]) {
+    const textBottom = measureText(node)
+    bottom = Math.max(bottom, textBottom)
+    if (node === origin && (source.nodeType === 9 || source === root)) continue
+    if (node.children.length > 0) continue
+    const rect = node.getBoundingClientRect()
+    const height = rect.height / scaleY
+    const fillsHost = Math.abs(height - originHeight) < 0.5 || Math.abs(height - viewportHeight) < 0.5
+    if (textBottom > 0 && fillsHost) continue
+    bottom = Math.max(bottom, layoutBottom(rect))
+  }
   return Math.max(0, Math.ceil(bottom))
 }
 
