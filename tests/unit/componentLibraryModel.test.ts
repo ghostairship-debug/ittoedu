@@ -10,6 +10,7 @@ import {
   filterComponentLibraryPackages,
   GENERAL_COMPONENT_SUBJECT,
   planCatalogBatchJoin,
+  selectAvailableBuiltInCatalogPackages,
   selectCurrentCatalogPackages,
 } from '@/renderer/components/componentLibraryModel'
 
@@ -99,6 +100,28 @@ describe('component library model', () => {
 
     expect(selectCurrentCatalogPackages([older, promptCurrent, builtInCurrent]))
       .toEqual([builtInCurrent])
+  })
+
+  it('offers only current, unembedded built-in packages in the Flow insert menu', () => {
+    const older = catalogEntry(1, { version: '1.0.0' })
+    const current = catalogEntry(1, { version: '2.0.0' })
+    const prompt = catalogEntry(2, { sourceTrust: 'prompt' })
+    const trusted = catalogEntry(3, { sourceTrust: 'trusted' })
+    const embedded = catalogEntry(4)
+    const updateAvailable = catalogEntry(5, { version: '2.0.0' })
+    const hashConflict = catalogEntry(6)
+    const available = catalogEntry(7)
+    const components = {
+      [embedded.packageId]: embeddedPackage(embedded),
+      [updateAvailable.packageId]: embeddedPackage(catalogEntry(5, { version: '1.0.0' })),
+      [hashConflict.packageId]: embeddedPackage(catalogEntry(6, { sha256: 'f'.repeat(64) })),
+    }
+
+    expect(selectAvailableBuiltInCatalogPackages(
+      [older, prompt, embedded, updateAvailable, hashConflict, available, current, trusted],
+      components,
+    )).toEqual([current, available])
+    expect(selectAvailableBuiltInCatalogPackages([], components)).toEqual([])
   })
 
   it('filters by dynamic subject, stage, purpose, name, description, and tags', () => {

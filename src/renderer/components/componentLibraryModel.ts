@@ -92,6 +92,15 @@ export function selectCurrentCatalogPackages(
   )
 }
 
+/** Flow's insert menu offers one current built-in package per ID until it is embedded. */
+export function selectAvailableBuiltInCatalogPackages(
+  entries: ReadonlyArray<AvailableComponentCatalogPackage>,
+  components: Readonly<Record<string, ComponentPackageData>>,
+): AvailableComponentCatalogPackage[] {
+  return selectCurrentCatalogPackages(entries.filter((entry) => entry.sourceTrust === 'built-in'))
+    .filter((entry) => componentCatalogInstallStatus(entry, components[entry.packageId]) === 'available')
+}
+
 export interface ComponentLibraryFilters {
   query: string
   subject: string | null
