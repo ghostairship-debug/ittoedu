@@ -6,6 +6,7 @@ export interface ExplorerCommandPorts {
   create(type: ExplorerCreateType): void
   newFromPptx(): void
   importPptx(): void
+  importHtml(): void
   rename(): void
   copy(): void
   cut(): void
@@ -32,12 +33,13 @@ export function explorerNewCommands(blocked: string | null, ports: Pick<Explorer
  * The right-click menu of the explorer: what the selection offers, with the reason an item cannot run now.
  * `blocked` is set while the workspace is not ready or another file operation runs.
  */
-export function explorerContextCommands(state: { blocked: string | null; selected: number; pptx: boolean; clipboard: number }, ports: ExplorerCommandPorts): MenuCommand[] {
+export function explorerContextCommands(state: { blocked: string | null; selected: number; pptx: boolean; htmlImport: 'pick' | 'selected' | null; clipboard: number }, ports: ExplorerCommandPorts): MenuCommand[] {
   const busy = state.blocked
   const any = state.selected ? null : '请先选择文件或文件夹'
   const one = state.selected === 1 ? null : '请只选择一项'
   return [
     ...(state.pptx ? [{ id: 'file.import-pptx', label: '导入为 H5 演示', group: 'open', run: ports.importPptx, disabledReason: busy }] : []),
+    ...(state.htmlImport ? [{ id: 'file.import-html', label: state.htmlImport === 'selected' ? '作为互动页导入' : '导入 HTML 页面…', group: 'open', run: ports.importHtml, disabledReason: busy }] : []),
     ...explorerNewCommands(busy, ports),
     { id: 'file.rename', label: '重命名', shortcut: 'F2', group: 'edit', run: ports.rename, disabledReason: busy ?? one },
     { id: 'file.copy', label: '复制', shortcut: 'Ctrl+C', group: 'edit', run: ports.copy, disabledReason: busy ?? any },
