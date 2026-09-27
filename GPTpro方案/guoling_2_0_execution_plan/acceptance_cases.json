@@ -2485,7 +2485,10 @@
       "expected": "使用中高度随内容正确变化，页面始终可互动，不被替换为静态后备图；导入检查照旧拒绝随窗口删改正文的页面，持续变化的页面仍在有界轮次后明确报错",
       "test_layer": "electron",
       "required_for": "2.0",
-      "status": "not_run"
+      "status": "passed",
+      "evidence_files": [
+        "evidence/B17_2026_09_28_M17_T05.md"
+      ]
     },
     {
       "id": "M19-T01",

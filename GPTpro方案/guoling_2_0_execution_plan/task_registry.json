@@ -1280,7 +1280,7 @@
         "S13"
       ],
       "document": "mid_term/M17.md",
-      "status": "implemented",
+      "status": "verified",
       "existing_code": [
         "src/player/RuntimeHost.ts",
         "src/player/surfaces/flow/FlowSurfaceHost.ts",
