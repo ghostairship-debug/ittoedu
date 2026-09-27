@@ -148,16 +148,10 @@ export function FlowPaperDynamicLightEdit({ documentId, projectId, surfaceId, lo
     } catch (error) { report(error instanceof Error ? error.message : '未能取消修改') }
   }
   const editable = !readOnly && !item.locked
-  const runtimeEditing = editable && item.kind === 'runtime' && mode.owner === owner && mode.editing
+  const runtimeEditing = item.kind === 'runtime' && mode.owner === owner && mode.editing
   const modeChangeRef = useRef(onRuntimeEditModeChange)
   modeChangeRef.current = onRuntimeEditModeChange
   useEffect(() => () => { modeChangeRef.current?.(item.layerItemId, false) }, [owner, item.layerItemId])
-  useEffect(() => {
-    if (!editable && mode.owner === owner && mode.editing) {
-      setMode({ owner, editing: false })
-      onRuntimeEditModeChange?.(item.layerItemId, false)
-    }
-  }, [editable, mode, owner, item.layerItemId, onRuntimeEditModeChange])
   const editableRef = useRef(editable)
   editableRef.current = editable
 
@@ -285,6 +279,7 @@ export function FlowPaperDynamicLightEdit({ documentId, projectId, surfaceId, lo
     const edit = activeRef.current
     if (!edit?.runtime || edit.owner !== owner) return Promise.resolve()
     if (edit.value === edit.runtime.course.initialValue) { setActive(null); return Promise.resolve() }
+    if (!editable) return Promise.reject(new Error('当前卡片已锁定或只读，文字草稿尚未提交'))
     const control = runtimeEditRoot.current?.querySelector<HTMLInputElement | HTMLTextAreaElement>('.canvas-plain-text-editor__control')
     if (control) control.readOnly = true
     const pending = (async () => {
@@ -342,7 +337,7 @@ export function FlowPaperDynamicLightEdit({ documentId, projectId, surfaceId, lo
     </div>}
     {runtimeEditing && (runtimeTargets.length > 0 || activeRuntime) && <div ref={runtimeEditRoot} className="canvas-authoring-targets" data-testid="flow-runtime-light-edit-targets"
       style={overlayStyle} onPointerDown={event => event.stopPropagation()}>
-      {runtimeTargets.map(target => <button key={target.targetId} type="button"
+      {editable && runtimeTargets.map(target => <button key={target.targetId} type="button"
         className={`canvas-authoring-target canvas-authoring-target--${target.kind}`}
         aria-label={`${target.label ?? target.key}，${target.kind === 'text' ? '编辑文字' : '替换图片'}`}
         disabled={liveBusy === target.targetId}
@@ -353,9 +348,9 @@ export function FlowPaperDynamicLightEdit({ documentId, projectId, surfaceId, lo
       {activeRuntime && <CanvasPlainTextEditor key={activeRuntime.target.targetId} bounds={activeRuntime.target.bounds}
         label={activeRuntime.target.label ?? activeRuntime.target.key} value={activeRuntime.value}
         multiline={activeRuntime.target.multiline} maxLength={activeRuntime.target.maxLength}
-        readOnly={Boolean(liveBusy || failedTask?.owner === owner || runtimePreparation.current?.owner === owner)}
+        readOnly={Boolean(!editable || liveBusy || failedTask?.owner === owner || runtimePreparation.current?.owner === owner)}
         onDraftChange={(value, composing) => {
-          if (runtimePreparation.current?.owner === owner || failedRef.current) return
+          if (!editable || runtimePreparation.current?.owner === owner || failedRef.current) return
           composingRef.current = composing
           if (activeRef.current?.owner === owner && activeRef.current.target.targetId === activeRuntime.target.targetId)
             activeRef.current = { ...activeRef.current, value }

@@ -296,3 +296,28 @@ it('locks the real text control while a saved draft awaits ACK and clears parent
   entries.pop()?.element.remove()
   expect(onModeChange).toHaveBeenCalledWith('runtime-1', false)
 })
+
+it('retains an unconfirmed draft visibly when the card becomes read-only', async () => {
+  mocks.realEditor = true
+  const { root, element } = mount()
+  await act(async () => root.render(<FlowPaperDynamicLightEdit {...base} item={runtime} />))
+  const target = { targetId: 'text-1', scope: 'scene' as const, sceneId: 'surface-1', kind: 'text' as const, key: 'title',
+    label: 'Title', source: 'auto' as const, layer: 'scene' as const, bounds: { x: 10, y: 5, width: 40, height: 20 } }
+  await act(async () => mocks.runtimeProps.onTargetsChanged({ scope: 'scene', sceneId: 'surface-1', revision: 1, targets: [target] }))
+  await act(async () => document.querySelector<HTMLButtonElement>('[data-testid="flow-runtime-edit-mode-toggle"]')!.click())
+  await act(async () => element.querySelector<HTMLButtonElement>('[aria-label="Title，编辑文字"]')!.click())
+  const input = element.querySelector<HTMLInputElement>('.canvas-plain-text-editor__control')!
+  await act(async () => fireEvent.change(input, { target: { value: 'A' } }))
+  await act(async () => root.render(<FlowPaperDynamicLightEdit {...base} item={runtime} readOnly />))
+  expect(input.isConnected).toBe(true)
+  expect(input.value).toBe('A')
+  expect(input.readOnly).toBe(true)
+  expect(element.querySelector('[aria-label="Title，编辑文字"]')).toBeNull()
+  expect(document.querySelector('[data-testid="flow-runtime-edit-mode-toggle"]')).toBeNull()
+  await expect(prepareFlowDynamicDrafts('document-1')).rejects.toThrow('锁定或只读')
+  expect(mocks.submitIntent).not.toHaveBeenCalled()
+  await act(async () => root.render(<FlowPaperDynamicLightEdit {...base} item={runtime} />))
+  expect(input.value).toBe('A')
+  await act(async () => document.querySelector<HTMLButtonElement>('[data-testid="flow-runtime-edit-mode-toggle"]')!.click())
+  expect(mocks.submitIntent).toHaveBeenCalledWith(expect.objectContaining({ kind: 'runtime.text', value: 'A' }))
+})
