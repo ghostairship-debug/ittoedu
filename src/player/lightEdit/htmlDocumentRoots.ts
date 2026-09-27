@@ -76,47 +76,75 @@ export function watchManagedHtmlDocuments(root: HTMLElement, onChange: () => voi
 
 /** An iframe has a separate event tree; authoring gestures reach the outer surface here. */
 export function bridgeManagedHtmlEvents(root: HTMLElement): () => void {
-  const listeners = new Map<Document, { iframe: HTMLIFrameElement; listener: (event: MouseEvent) => void }>()
-  const types = ['pointerdown', 'pointerup', 'dblclick', 'contextmenu'] as const
+  type ActivePointer = { clientX: number; clientY: number; pointerType: string; isPrimary: boolean }
+  type Entry = { iframe: HTMLIFrameElement; listener: (event: MouseEvent) => void; active: Map<number, ActivePointer> }
+  const listeners = new Map<Document, Entry>()
+  const types = ['pointerdown', 'pointermove', 'pointerup', 'pointercancel', 'lostpointercapture', 'dblclick', 'contextmenu'] as const
+  const view = root.ownerDocument.defaultView
+  const pointerEvent = (type: string, pointerId: number, state: ActivePointer): Event | null => {
+    if (!view) return null
+    const options = { bubbles: true, cancelable: true, clientX: state.clientX, clientY: state.clientY, pointerId, pointerType: state.pointerType, isPrimary: state.isPrimary }
+    return view.PointerEvent ? new view.PointerEvent(type, options) : new view.MouseEvent(type, options)
+  }
+  const cancelActive = (entry: Entry) => {
+    for (const [pointerId, state] of entry.active) {
+      const event = pointerEvent('pointercancel', pointerId, state)
+      if (event) root.dispatchEvent(event)
+    }
+    entry.active.clear()
+  }
+  const remove = (document: Document, entry: Entry) => {
+    cancelActive(entry)
+    for (const type of types) document.removeEventListener(type, entry.listener, true)
+    listeners.delete(document)
+  }
   const stop = watchManagedHtmlDocuments(root, () => {
     const current = managedHtmlDocuments(root)
     const active = new Set(current.map(item => item.document))
-    for (const [document, entry] of listeners) if (!active.has(document)) {
-      for (const type of types) document.removeEventListener(type, entry.listener, true)
-      listeners.delete(document)
-    }
+    for (const [document, entry] of listeners) if (!active.has(document)) remove(document, entry)
     for (const item of current) if (!listeners.has(item.document)) {
-      const listener = (event: MouseEvent) => {
+      const entry: Entry = { iframe: item.iframe, active: new Map(), listener: () => undefined }
+      entry.listener = (event: MouseEvent) => {
+        const pointer = event as PointerEvent
+        const isPointer = event.type.startsWith('pointer') || event.type === 'lostpointercapture'
+        const wasActive = isPointer && entry.active.has(pointer.pointerId)
+        if ((event.type === 'pointermove' || event.type === 'pointercancel' || event.type === 'lostpointercapture') && !wasActive) return
+        const type = event.type === 'lostpointercapture' ? 'pointercancel' : event.type
         const point = managedHtmlRect(new DOMRect(event.clientX, event.clientY, 0, 0), item)
-        const view = root.ownerDocument.defaultView
         if (!view) return
         const options = {
           bubbles: true, cancelable: true, clientX: point.left, clientY: point.top,
           button: event.button, buttons: event.buttons,
           ctrlKey: event.ctrlKey, shiftKey: event.shiftKey, altKey: event.altKey, metaKey: event.metaKey,
         }
-        const pointer = event as PointerEvent
-        const forwarded = event.type.startsWith('pointer') && view.PointerEvent
-          ? new view.PointerEvent(event.type, { ...options, pointerId: pointer.pointerId, pointerType: pointer.pointerType, isPrimary: pointer.isPrimary })
-          : new view.MouseEvent(event.type, options)
+        const forwarded = isPointer && view.PointerEvent
+          ? new view.PointerEvent(type, { ...options, pointerId: pointer.pointerId, pointerType: pointer.pointerType, isPrimary: pointer.isPrimary })
+          : new view.MouseEvent(type, options)
         let stopped = false
-        const stop = forwarded.stopPropagation.bind(forwarded)
+        const stopPropagation = forwarded.stopPropagation.bind(forwarded)
         const stopImmediately = forwarded.stopImmediatePropagation.bind(forwarded)
-        forwarded.stopPropagation = () => { stopped = true; stop() }
+        forwarded.stopPropagation = () => { stopped = true; stopPropagation() }
         forwarded.stopImmediatePropagation = () => { stopped = true; stopImmediately() }
         item.iframe.dispatchEvent(forwarded)
-        if (forwarded.defaultPrevented || stopped) {
+        const consumed = forwarded.defaultPrevented || stopped
+        if (event.type === 'pointerdown' && consumed) {
+          entry.active.set(pointer.pointerId, { clientX: point.left, clientY: point.top, pointerType: pointer.pointerType, isPrimary: pointer.isPrimary })
+        } else if (wasActive && (event.type === 'pointerup' || event.type === 'pointercancel' || event.type === 'lostpointercapture')) {
+          entry.active.delete(pointer.pointerId)
+        } else if (wasActive) {
+          entry.active.set(pointer.pointerId, { clientX: point.left, clientY: point.top, pointerType: pointer.pointerType, isPrimary: pointer.isPrimary })
+        }
+        if (consumed || wasActive) {
           event.preventDefault()
           event.stopImmediatePropagation()
         }
       }
-      for (const type of types) item.document.addEventListener(type, listener, true)
-      listeners.set(item.document, { iframe: item.iframe, listener })
+      for (const type of types) item.document.addEventListener(type, entry.listener, true)
+      listeners.set(item.document, entry)
     }
   })
   return () => {
     stop()
-    for (const [document, entry] of listeners) for (const type of types) document.removeEventListener(type, entry.listener, true)
-    listeners.clear()
+    for (const [document, entry] of listeners) remove(document, entry)
   }
 }

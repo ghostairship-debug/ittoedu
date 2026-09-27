@@ -114,3 +114,52 @@ it('a consumed outer gesture cancels the original inner event while ordinary int
   expect(innerPointers).toBe(1)
   stop(); root.remove()
 })
+
+it('bridges the full consumed pointer stream and cleans up after up, cancel and teardown', () => {
+  const root = document.createElement('div')
+  document.body.append(root)
+  const iframe = document.createElement('iframe')
+  iframe.dataset.htmlDocumentRuntime = 'true'
+  root.append(iframe)
+  iframe.getBoundingClientRect = () => rect(100, 50, 400, 200)
+  const inner = iframe.contentDocument!
+  Object.defineProperty(inner.defaultView, 'innerWidth', { configurable: true, value: 400 })
+  Object.defineProperty(inner.defaultView, 'innerHeight', { configurable: true, value: 200 })
+  inner.body.innerHTML = '<button>继续</button>'
+  const button = inner.querySelector('button')!
+  const pointer = (type: string, id: number, x: number, y: number) => {
+    const event = new inner.defaultView!.MouseEvent(type, { bubbles: true, cancelable: true, clientX: x, clientY: y })
+    Object.defineProperty(event, 'pointerId', { value: id })
+    return event
+  }
+  const outerMoves: number[] = []
+  const outerEnds: string[] = []
+  const innerMoves: number[] = []
+  root.addEventListener('pointerdown', event => { if ((event as PointerEvent).pointerId === 1) event.preventDefault() }, true)
+  root.addEventListener('pointermove', event => outerMoves.push(event.clientX), true)
+  root.addEventListener('pointerup', () => outerEnds.push('up'), true)
+  root.addEventListener('pointercancel', () => outerEnds.push('cancel'), true)
+  button.addEventListener('pointermove', event => innerMoves.push(event.clientX))
+  const stop = bridgeManagedHtmlEvents(root)
+  button.dispatchEvent(pointer('pointerdown', 1, 5, 5))
+  button.dispatchEvent(pointer('pointermove', 1, 20, 10))
+  expect(outerMoves).toEqual([120])
+  expect(innerMoves).toEqual([])
+  button.dispatchEvent(pointer('pointerup', 1, 20, 10))
+  expect(outerEnds).toEqual(['up'])
+  button.dispatchEvent(pointer('pointermove', 1, 30, 10))
+  expect(outerMoves).toEqual([120])
+  expect(innerMoves).toEqual([30])
+  button.dispatchEvent(pointer('pointerdown', 1, 5, 5))
+  button.dispatchEvent(pointer('pointercancel', 1, 20, 10))
+  expect(outerEnds).toEqual(['up', 'cancel'])
+  button.dispatchEvent(pointer('pointerdown', 1, 5, 5))
+  button.dispatchEvent(pointer('lostpointercapture', 1, 20, 10))
+  expect(outerEnds).toEqual(['up', 'cancel', 'cancel'])
+  button.dispatchEvent(pointer('pointerdown', 1, 5, 5))
+  stop()
+  expect(outerEnds).toEqual(['up', 'cancel', 'cancel', 'cancel'])
+  button.dispatchEvent(pointer('pointermove', 1, 40, 10))
+  expect(innerMoves).toEqual([30, 40])
+  root.remove()
+})
