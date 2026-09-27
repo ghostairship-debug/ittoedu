@@ -13,17 +13,17 @@ const uri = `data:image/png;base64,${Buffer.from(png).toString('base64')}`
 describe('HTML import closure', () => {
   it('decodes JavaScript literals and safely re-encodes their runtime values', () => {
     const escaped = uri.replace('data:', '\\x64ata:')
-    const result = extractHtmlResources({ html: `<script>const x = ''; const a = '${escaped}'; const b = \`${uri}\`; const c = \`prefix\${x}${uri}\`;</script>` })
+    const result = extractHtmlResources({ html: `<script>const x = ''; const image = {}; image.src = '${escaped}'; image.poster = \`${uri}\`; const c = \`prefix\${x}${uri}\`;</script>` })
     expect(result.resources).toHaveLength(1)
     expect(result.resources[0]?.origins).toHaveLength(2)
     const code = result.html.match(/<script>([\s\S]*?)<\/script>/)?.[1] ?? ''
-    expect(new Function(`${code}; return [a, b];`)()).toEqual([`cw-resource:${result.resources[0]?.key}`, `cw-resource:${result.resources[0]?.key}`])
+    expect(new Function(`${code}; return [image.src, image.poster];`)()).toEqual([`cw-resource:${result.resources[0]?.key}`, `cw-resource:${result.resources[0]?.key}`])
     expect(code).toContain(`prefix\${x}${uri}`)
     expect(validateHtmlImport(result)).toEqual([])
   })
 
   it('keeps rewritten inline JavaScript intact in a real HTML parser', () => {
-    const html = `<script>const x = '${uri} \\x3c/script><p id="injected">'; window.finished = true;</script>`
+    const html = `<script>const image = {}; image.src = '${uri} \\x3c/script><p id="injected">'; const x = image.src; window.finished = true;</script>`
     const result = extractHtmlResources({ html })
     expect(validateHtmlImport(result)).toEqual([])
     const document = new DOMParser().parseFromString(result.html, 'text/html')
@@ -35,7 +35,7 @@ describe('HTML import closure', () => {
   })
 
   it('keeps the HTML parser out of script escaped-comment mode after rewriting', () => {
-    const html = `<script>const x = '${uri} \\x3c!-- \\x3cscript>'; window.finished = true;</script><p id="after">after</p>`
+    const html = `<script>const image = {}; image.src = '${uri} \\x3c!-- \\x3cscript>'; const x = image.src; window.finished = true;</script><p id="after">after</p>`
     const result = extractHtmlResources({ html })
     expect(validateHtmlImport(result)).toEqual([])
     const document = new DOMParser().parseFromString(result.html, 'text/html')
@@ -52,6 +52,16 @@ describe('HTML import closure', () => {
     expect(validateHtmlImport(invalid).map(error => error.code)).toContain('script-parse')
     const module = extractHtmlResources({ html: '<script type="module">import "./dependency.js"</script>' })
     expect(validateHtmlImport(module).map(error => error.code)).toContain('unsupported-module-graph')
+  })
+
+  it('preserves unused resource-looking strings and visible text', () => {
+    const result = extractHtmlResources({ html: `<script>const caption=${JSON.stringify(uri)};label.textContent=caption;</script>` })
+    expect(validateHtmlImport(result)).toEqual([])
+    expect(result.resources).toEqual([])
+    const label = { textContent: '' }
+    const source = result.html.match(/<script>([\s\S]*?)<\/script>/)![1]
+    new Function('label', source)(label)
+    expect(label.textContent).toBe(uri)
   })
 
   it('keeps non-executable JSON data and rejects direct network loaders', () => {

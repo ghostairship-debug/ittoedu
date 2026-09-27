@@ -55,13 +55,12 @@ describe('extractHtmlResources', () => {
     expect(result.resources[0]?.origins[0]).toMatchObject({ kind: 'data-uri', context: 'html-attr' })
   })
 
-  it('extracts a data URI from a classic script string without breaking the surrounding program', () => {
+  it('extracts classic script resource consumers without breaking the surrounding program', () => {
     const uri = dataUri(audio, 'audio/mpeg')
     const html = `<script>
 const re = /["'\`]/;
 const label = "ready";
-const clip = "${uri}";
-const template = \`${uri}\`;
+function load() { new Audio("${uri}"); image.src=\`${uri}\`; }
 function total(a, b) { return a + b; }
 if (a < b) { total(1, 2); }
 const ratio = 10 / 2;
@@ -122,8 +121,8 @@ const ratio = 10 / 2;
       `.badge{background:url("${dataUri(gif, 'image/gif')}")}`,
     ].join('\n'))
     const js = text([
-      `const clip = ${JSON.stringify(dataUri(audio, 'audio/mpeg'))};`,
-      "const rule = 'background:url(\"../fonts/extra.woff\")';",
+      `function load() { new Audio(${JSON.stringify(dataUri(audio, 'audio/mpeg'))}); }`,
+      "function style() { element.style.cssText = 'background:url(\"../fonts/extra.woff\")'; }",
       'function total(a, b) { return a + b; }',
       'const ratio = 8 / 2;',
     ].join('\n'))
@@ -161,7 +160,6 @@ const ratio = 10 / 2;
     expect(result.remoteReferences).toEqual([
       { url: 'https://cdn.example.com/a.png', context: 'html-attr' },
       { url: '//cdn.example.com/b.png', context: 'html-attr' },
-      { url: 'http://www.w3.org/2000/svg', context: 'js-string' },
     ])
     expect(result.resources).toEqual([])
     expect(() => new Function(scriptBody(result.html))).not.toThrow()

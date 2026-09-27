@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { parse } from 'acorn'
+import { runInNewContext } from 'node:vm'
 import { extractHtmlResources } from '../../src/main/workbench/htmlImport/extractHtmlResources'
 import { validateHtmlImport } from '../../src/main/workbench/htmlImport/validateHtmlImport'
 import { MODULE_SOURCE } from '../../src/main/workbench/htmlImport/frameworks/react1927'
@@ -13,6 +14,13 @@ var D={a:${JSON.stringify(image)}}, k=${JSON.stringify(sound)};
 ${extra}
 function lesson(){const key="a";return (0,T.jsxs)("div",{children:[(0,T.jsx)("img",${props}),(0,T.jsx)("audio",{src:k})]})}
 (0,w.createRoot)(document.getElementById("root")).render((0,T.jsx)(lesson,{}));`
+
+const evaluateLesson = (html: string) => {
+  const code = html.match(/<script[^>]*>([\s\S]*?)<\/script>/)![1]
+  const appCode = code.slice(code.indexOf('var D=')).split('(0,w.createRoot)')[0]
+  const jsx = (type: string, props: Record<string, unknown>) => ({ type, props })
+  return runInNewContext(appCode + ';lesson()', { T: { jsx, jsxs: jsx } })
+}
 
 describe('audited framework resource closure', () => {
   it('proves complete library propagation only after proving application resources', () => {
@@ -59,14 +67,20 @@ describe('audited framework resource closure', () => {
     expect(validateHtmlImport(result)).toEqual([])
     const rewritten = result.html.match(/<script[^>]*>([\s\S]*?)<\/script>/)![1]
     expect(() => parse(rewritten, { ecmaVersion: 'latest', sourceType: 'module' })).not.toThrow()
-    expect(rewritten).toMatch(/D=\{a:"cw-resource:[a-f0-9]{64}"\}/)
+    expect(rewritten.includes('D={a:"pic.png"}')).toBe(true)
+    expect(evaluateLesson(result.html).props.children.map((child: { props: { src: string } }) => child.props.src)).toEqual([
+      `cw-resource:${result.resources[0].key}`, `cw-resource:${result.resources[0].key}`,
+    ])
     expect(result.resources.filter(resource => resource.mediaType === 'image/png')).toHaveLength(1)
   })
 
-  it('rejects incompatible rewrites of a shared literal across URL and HTML contexts', () => {
+  it('keeps shared literals intact and rewrites each consuming context independently', () => {
     const script = vendor + app('shared', 'const shared="pic.png";', '{src:shared,dangerouslySetInnerHTML:{__html:shared}}')
     const result = extractHtmlResources({ html: `<script type="module">${script}</script>`, siblingFiles: new Map([['pic.png', Buffer.from(image.split(',')[1], 'base64')]]) })
-    expect(validateHtmlImport(result).map(item => item.code)).toContain('conflicting-js-rewrite')
+    expect(validateHtmlImport(result)).toEqual([])
+    const props = evaluateLesson(result.html).props.children[0].props
+    expect(props.src).toBe(`cw-resource:${result.resources[0].key}`)
+    expect(props.dangerouslySetInnerHTML.__html).toBe('pic.png')
   })
 
   it.each([
@@ -93,7 +107,12 @@ describe('audited framework resource closure', () => {
     const rewritten = result.html.match(/<script[^>]*>([\s\S]*?)<\/script>/)![1]
     expect(() => parse(rewritten, { ecmaVersion: 'latest', sourceType: 'module' })).not.toThrow()
     expect(rewritten).toContain('静态文字')
-    expect(rewritten).not.toContain('pic.png')
+    const renderedProps = evaluateLesson(result.html).props.children[0].props
+    expect(renderedProps.style.backgroundImage).toContain('cw-resource:')
+    expect(renderedProps.style.width).toBe(12)
+    expect(renderedProps.style.color).toBe('red')
+    expect(renderedProps.dangerouslySetInnerHTML.__html).not.toContain('pic.png')
+    expect(rewritten.includes('backgroundImage:"url(pic.png)"')).toBe(true)
     expect(result.resources.filter(resource => resource.mediaType === 'image/png')).toHaveLength(1)
   })
 
@@ -111,6 +130,44 @@ describe('audited framework resource closure', () => {
     'element.style.cssText+=chooseStyle()',
   ])('rejects unknown dynamic DOM sinks: %s', code => {
     expect(errors(code)).toContain('unsupported-dynamic-url-sink')
+  })
+
+  it.each([
+    'const st=el.style;st.backgroundImage="url("+location.hash+")"',
+    'let st;st=el.style;const next=st;next.backgroundImage=chooseUrl()',
+    'const {style:st}=el;st.backgroundImage="url("+location.hash+")"',
+    'const load=fetch;load(location.hash)',
+    'const set=el.style.setProperty.bind(el.style);set("background-image",location.hash)',
+    'Object.assign(el.style,{backgroundImage:location.hash})',
+    'Object.defineProperty(el.style,"backgroundImage",{value:location.hash})',
+    'function style(){return el.style}style().backgroundImage=location.hash',
+    'function set(st){st.backgroundImage=location.hash}set(el.style)',
+    'const put=el.insertAdjacentHTML;put("beforeend",location.hash)',
+  ])('rejects unproven capability aliases and escapes: %s', code => {
+    expect(errors(code)).toContain('unsupported-dynamic-url-sink')
+    expect(errors(vendor + app('D.a', `function unsafe(){${code}}`))).toContain('unsupported-dynamic-url-sink')
+  })
+
+  it('preserves shared image captions and ordinary CSS-looking text', () => {
+    const script = vendor + app('label', 'const label="pic.png";').replace('(0,T.jsx)("audio",{src:k})', '(0,T.jsx)("span",{children:label})')
+    const result = extractHtmlResources({ html: `<script type="module">${script}</script>`, siblingFiles: new Map([['pic.png', Uint8Array.of(1,2,3)]]) })
+    expect(validateHtmlImport(result)).toEqual([])
+    const rendered = evaluateLesson(result.html)
+    expect(rendered.props.children[0].props.src).toBe(`cw-resource:${result.resources[0].key}`)
+    expect(rendered.props.children[1].props.children).toBe('pic.png')
+    const caption = extractHtmlResources({ html: '<script>const caption="url(pic.png)";label.textContent=caption;</script>', siblingFiles: new Map([['pic.png', Uint8Array.of(1,2,3)]]) })
+    expect(validateHtmlImport(caption)).toEqual([])
+    expect(caption.resources).toEqual([])
+    expect(caption.html).toContain('"url(pic.png)"')
+  })
+
+  it('localizes static style aliases without changing their original text', () => {
+    const result = extractHtmlResources({ html: '<script>const css="url(pic.png)";const st=el.style;st.backgroundImage=css;label.textContent=css;</script>', siblingFiles: new Map([['pic.png', Uint8Array.of(1,2,3)]]) })
+    expect(validateHtmlImport(result)).toEqual([])
+    const el = { style: {} }, label = { textContent: '' }
+    runInNewContext(result.html.match(/<script>([\s\S]*?)<\/script>/)![1], { el, label })
+    expect(el.style).toEqual({ backgroundImage: `url(cw-resource:${result.resources[0].key})` })
+    expect(label.textContent).toBe('url(pic.png)')
   })
 
   it('resolves static embedded HTML relative to its source script', () => {

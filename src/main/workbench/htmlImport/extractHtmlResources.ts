@@ -551,8 +551,8 @@ function rewriteJavaScript(code: string, sourceType: 'script' | 'module', baseDi
     edits.set(key, edit)
   }
   const handled = new Set<Node>()
+  if (closureProof.capabilityErrors.length) addDiagnostic(sink, 'error', 'unsupported-dynamic-url-sink', '资源能力存在无法证明闭合的引用或逃逸')
   const jsString = (value: string) => JSON.stringify(value).replace(/</g, '\\u003c')
-  const jsTemplate = (value: string) => '`' + value.replace(/[`\\]/g, '\\$&').replace(/\$\{/g, '\\${').replace(/</g, '\\u003c') + '`'
   const staticString = (value: Node): string | null => {
     if (value.type === 'Literal' && typeof value.value === 'string') return value.value
     if (value.type === 'TemplateLiteral' && (value.expressions as Node[]).length === 0)
@@ -625,37 +625,65 @@ function rewriteJavaScript(code: string, sourceType: 'script' | 'module', baseDi
       const next = kind === 'css' ? rewriteCss(text, baseDir, sink, siblings) : transformHtml(text, sink, siblings, baseDir, true)
       writeString(value, next)
     }
-    const urlSink = (value: Node, name: string) => {
-      const url = literalValue(value) ?? (value.type === 'Identifier' ? constants.get(String(value.name)) ?? null : null)
-      if (url === null) {
-        addDiagnostic(sink, 'error', 'unsupported-dynamic-url-sink', `无法静态解析 ${name} 的资源地址`)
-        return
-      }
-      if (!url.trim()) { writeString(value, url); return }
-      if (name === 'srcset') {
-        handled.add(value)
-        const rewritten = rewriteSrcset(url, baseDir, sink, siblings)
-        writeString(value, rewritten)
-        return
-      }
-      if (url.trim().startsWith('#')) { writeString(value, url); return }
-      if (/^data:/i.test(url.trim())) { writeString(value, rewriteEmbedded(url, 'js-string', baseDir, sink, siblings, { url: true, remote: true }, false)); return }
+    const rewriteUrl = (url: string, name: string): string => {
+      if (!url.trim() || url.trim().startsWith('#')) return url
+      if (name === 'srcset') return rewriteSrcset(url, baseDir, sink, siblings)
+      if (/^data:/i.test(url.trim())) return rewriteEmbedded(url, 'js-string', baseDir, sink, siblings, { url: true, remote: true }, false)
       if (/^https?:|^\/\//i.test(url.trim())) {
         addDiagnostic(sink, 'error', 'remote-js-resource', `未授权脚本资源 ${clip(url, 180)}`, url)
-        return
+        return url
       }
-      const result = rewriteSingleUrl(url, 'js-string', baseDir, sink, siblings, false)
-      writeString(value, result.value)
+      return rewriteSingleUrl(url, 'js-string', baseDir, sink, siblings, false).value
     }
-    if (node === root) for (const input of closureProof.resourceInputs) {
-      if (input.proof.kind === 'proven-resource') {
-        for (const literal of input.proof.literals) urlSink(literal, input.name)
-      } else addDiagnostic(sink, 'error', 'unsupported-dynamic-url-sink', `无法静态解析 ${input.name} 的资源地址`)
+    const urlSink = (value: Node, name: string) => {
+      const url = literalValue(value) ?? (value.type === 'Identifier' ? constants.get(String(value.name)) ?? null : null)
+      if (url === null) { addDiagnostic(sink, 'error', 'unsupported-dynamic-url-sink', `无法静态解析 ${name} 的资源地址`); return }
+      writeString(value, rewriteUrl(url, name))
     }
-    if (node === root) for (const input of closureProof.embeddedInputs) {
-      if (input.proof.kind === 'proven-resource') {
-        for (const literal of input.proof.literals) embeddedSink(literal, input.kind, input.name)
-      } else addDiagnostic(sink, 'error', 'unsupported-dynamic-url-sink', `无法静态解析 ${input.name} 的资源内容`)
+    if (node === root) {
+      type Transform = { path: string[]; before: string; after: string }
+      const targets = new Map<Node, { local: Map<Node, string>; transforms: Transform[] }>()
+      const inputs = [
+        ...closureProof.resourceInputs.map(input => ({ ...input, path: [] as string[], kind: 'url' as const })),
+        ...closureProof.embeddedInputs,
+      ]
+      for (const input of inputs) {
+        if (input.proof.kind !== 'proven-resource') { addDiagnostic(sink, 'error', 'unsupported-dynamic-url-sink', `无法静态解析 ${input.name} 的资源内容`); continue }
+        for (const literal of input.proof.literals) {
+          const before = literalValue(literal)!
+          const after = input.kind === 'url' ? rewriteUrl(before, input.name)
+            : input.kind === 'css' ? rewriteCss(before, baseDir, sink, siblings) : transformHtml(before, sink, siblings, baseDir, true)
+          const owned = input.value.start <= literal.start && literal.end <= input.value.end
+          if (before === after) continue
+          const target = targets.get(input.value) ?? { local: new Map<Node, string>(), transforms: [] }
+          if (owned) {
+            const previous = target.local.get(literal)
+            if (previous !== undefined && previous !== after) { conflictingEdits = true; addDiagnostic(sink, 'error', 'conflicting-js-rewrite', '同一资源使用位置需要不同改写') }
+            target.local.set(literal, after)
+          } else target.transforms.push({ path: input.path, before, after })
+          targets.set(input.value, target)
+        }
+      }
+      const mapValue = (expression: string, transforms: Transform[]) => {
+        const values = new Map<string, string>()
+        for (const item of transforms) {
+          const previous = values.get(item.before)
+          if (previous !== undefined && previous !== item.after) { conflictingEdits = true; addDiagnostic(sink, 'error', 'conflicting-js-rewrite', '同一资源使用位置需要不同改写') }
+          values.set(item.before, item.after)
+        }
+        const branches = [...values].map(([before, after]) => `__cwField===${jsString(before)}?${jsString(after)}:`).join('')
+        return branches ? `(__cwField=>${branches}__cwField)(${expression})` : expression
+      }
+      for (const [value, target] of targets) {
+        let expression = code.slice(value.start, value.end)
+        for (const [literal, after] of [...target.local].sort(([a], [b]) => b.start - a.start))
+          expression = expression.slice(0, literal.start - value.start) + jsString(after) + expression.slice(literal.end - value.start)
+        const direct = target.transforms.filter(item => item.path.length === 0)
+        if (direct.length) expression = mapValue(expression, direct)
+        const fields = [...new Set(target.transforms.filter(item => item.path.length === 1).map(item => item.path[0]))]
+        if (fields.length) expression = `(__cwValue=>({...__cwValue,${fields.map(field => `[${jsString(field)}]:${mapValue(`__cwValue[${jsString(field)}]`, target.transforms.filter(item => item.path[0] === field))}`).join(',')}}))(${expression})`
+        addEdit({ start: value.start, end: value.end, value: expression })
+      }
     }
     if (node.type === 'AssignmentExpression' && !closureProof.auditedNode(node)) {
       const left = node.left as Node, right = node.right as Node
@@ -668,7 +696,7 @@ function rewriteJavaScript(code: string, sourceType: 'script' | 'module', baseDi
         else urlSink(right, name)
       }
       const htmlTarget = !!name && ['innerHTML', 'outerHTML', 'srcdoc'].includes(name)
-      const cssTarget = name === 'cssText' || (left.type === 'MemberExpression' && memberName(left.object as Node) === 'style')
+      const cssTarget = name === 'cssText' || (left.type === 'MemberExpression' && closureProof.styleReceiver(left.object as Node))
       if ((htmlTarget || cssTarget) && node.operator !== '=') addDiagnostic(sink, 'error', 'unsupported-dynamic-url-sink', '资源内容的复合写入无法静态解析')
       else if (htmlTarget) embeddedSink(right, 'html', name!)
       else if (cssTarget) embeddedSink(right, 'css', name ?? 'style')
@@ -702,23 +730,6 @@ function rewriteJavaScript(code: string, sourceType: 'script' | 'module', baseDi
       }
     }
     if (handled.has(node)) return
-    if (node.type === 'Literal' && typeof node.value === 'string') {
-      const value = node.value as string
-      const rewritten = rewriteEmbedded(value, 'js-string', baseDir, sink, siblings, { url: true, remote: true }, false)
-      if (rewritten !== value) addEdit({ start: node.start, end: node.end, value: jsString(rewritten) })
-      return
-    }
-    if (node.type === 'TemplateLiteral') {
-      const expressions = node.expressions as Node[]
-      if (expressions.length === 0) {
-        const cooked = ((node.quasis as Array<{ value: { cooked: string | null } }>)[0]?.value.cooked)
-        if (cooked !== null && cooked !== undefined) {
-          const rewritten = rewriteEmbedded(cooked, 'js-string', baseDir, sink, siblings, { url: true, remote: true }, false)
-          if (rewritten !== cooked) addEdit({ start: node.start, end: node.end, value: jsTemplate(rewritten) })
-        }
-        return
-      }
-    }
     for (const [key, value] of Object.entries(node)) {
       if (key === 'parent') continue
       if (Array.isArray(value)) {

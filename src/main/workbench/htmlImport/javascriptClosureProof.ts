@@ -7,7 +7,9 @@ export type ClosureProof = { kind: 'proven-state' } | { kind: 'proven-resource';
 export interface JavaScriptClosureProof {
   internalSink(node: JsNode): ClosureProof
   auditedNode(node: JsNode): boolean
-  embeddedInputs: Array<{ name: string; kind: 'css' | 'html'; proof: ClosureProof }>
+  styleReceiver(node: JsNode): boolean
+  capabilityErrors: JsNode[]
+  embeddedInputs: Array<{ value: JsNode; path: string[]; name: string; kind: 'css' | 'html'; proof: ClosureProof }>
   resourceInputs: Array<{ value: JsNode; name: string; proof: ClosureProof }>
   frameworkError: boolean
 }
@@ -271,24 +273,26 @@ export function analyzeJavaScriptClosure(root: JsNode, inertCalls: Set<JsNode> =
     }
     return resourceProof(value)
   }
-  const styleInputs = (value: Value) => {
-    if (value.kind === 'union') { for (const item of value.values) styleInputs(item); return }
-    if (value.kind !== 'object') { embeddedInputs.push({ name: 'style', kind: 'css', proof: UNKNOWN_PROOF }); return }
-    for (const [name, field] of value.fields) embeddedInputs.push({ name: `style.${name}`, kind: 'css', proof: cssProof(field) })
+  const styleInputs = (source: JsNode, value: Value) => {
+    if (value.kind === 'union') { for (const item of value.values) styleInputs(source, item); return }
+    if (value.kind !== 'object') { embeddedInputs.push({ value: source, path: [], name: 'style', kind: 'css', proof: UNKNOWN_PROOF }); return }
+    for (const [name, field] of value.fields) embeddedInputs.push({ value: source, path: [name], name: `style.${name}`, kind: 'css', proof: cssProof(field) })
   }
-  const htmlInput = (value: Value) => {
-    if (value.kind === 'union') { for (const item of value.values) htmlInput(item); return }
-    embeddedInputs.push({ name: 'dangerouslySetInnerHTML.__html', kind: 'html', proof: value.kind === 'object' && value.fields.has('__html') ? resourceProof(value.fields.get('__html')!) : UNKNOWN_PROOF })
+  const htmlInput = (source: JsNode, value: Value) => {
+    if (value.kind === 'union') { for (const item of value.values) htmlInput(source, item); return }
+    embeddedInputs.push({ value: source, path: ['__html'], name: 'dangerouslySetInnerHTML.__html', kind: 'html', proof: value.kind === 'object' && value.fields.has('__html') ? resourceProof(value.fields.get('__html')!) : UNKNOWN_PROOF })
   }
   if (audited) for (const node of allNodes) {
     if (inLibrary(node)) continue
     if (node.type === 'Property') {
       const name = !node.computed ? keyOf(node.key as JsNode) : undefined
-      if (name && RESOURCE_FIELDS.has(name)) resourceInputs.push({ value: node.value as JsNode, name: name === 'srcSet' ? 'srcset' : name, proof: resourceProof(evaluate(node.value as JsNode)) })
-      if (name === 'style') styleInputs(evaluate(node.value as JsNode))
-      if (name && CSS_RESOURCE_PROPERTIES.has(name)) embeddedInputs.push({ name, kind: 'css', proof: cssProof(evaluate(node.value as JsNode)) })
-      if (name === 'srcDoc') embeddedInputs.push({ name, kind: 'html', proof: resourceProof(evaluate(node.value as JsNode)) })
-      if (name === 'dangerouslySetInnerHTML') htmlInput(evaluate(node.value as JsNode))
+      const props = parents.get(node), call = props ? parents.get(props) : undefined
+      const jsxProp = props?.type === 'ObjectExpression' && !!call && isReactEntry(call) && (call.arguments as JsNode[])[1] === props
+      if (jsxProp && name && RESOURCE_FIELDS.has(name)) resourceInputs.push({ value: node.value as JsNode, name: name === 'srcSet' ? 'srcset' : name, proof: resourceProof(evaluate(node.value as JsNode)) })
+      if (jsxProp && name === 'style') styleInputs(node.value as JsNode, evaluate(node.value as JsNode))
+      if (jsxProp && name && CSS_RESOURCE_PROPERTIES.has(name)) embeddedInputs.push({ value: node.value as JsNode, path: [], name, kind: 'css', proof: cssProof(evaluate(node.value as JsNode)) })
+      if (jsxProp && name === 'srcDoc') embeddedInputs.push({ value: node.value as JsNode, path: [], name, kind: 'html', proof: resourceProof(evaluate(node.value as JsNode)) })
+      if (jsxProp && name === 'dangerouslySetInnerHTML') htmlInput(node.value as JsNode, evaluate(node.value as JsNode))
       if (name === '$$typeof') frameworkError = true
     }
     if (isReactEntry(node)) {
@@ -300,10 +304,48 @@ export function analyzeJavaScriptClosure(root: JsNode, inertCalls: Set<JsNode> =
       if (!tag || !['Literal', 'TemplateLiteral', 'Identifier', 'MemberExpression'].includes(tag.type)) frameworkError = true
     }
   }
+  const styleBindings = new Set<Binding>()
+  const styleReceiver = (node: JsNode): boolean => (node.type === 'MemberExpression' && propertyName(node) === 'style')
+    || (node.type === 'Identifier' && styleBindings.has(bindingOf(node)!))
+  let changed = true
+  while (changed) {
+    changed = false
+    for (const node of allNodes) {
+      if (inLibrary(node)) continue
+      const source = node.type === 'VariableDeclarator' ? node.init : node.type === 'AssignmentExpression' && node.operator === '=' ? node.right : undefined
+      const target = node.type === 'VariableDeclarator' ? node.id : node.left
+      if (source && target && styleReceiver(source as JsNode)) {
+        const binding = bindingOf(target as JsNode)
+        if (binding && !styleBindings.has(binding)) { styleBindings.add(binding); changed = true }
+      }
+    }
+  }
+  // Capability references are allowed only at an analyzed operation or tracked alias.
+  // Unknown calls, returns, containers, destructuring and bound methods fail closed.
+  const capabilityErrors: JsNode[] = []
+  const networks = new Set(['fetch', 'importScripts', 'WebSocket', 'EventSource', 'Worker', 'SharedWorker', 'XMLHttpRequest', 'sendBeacon'])
+  const setters = new Set(['setAttribute', 'setProperty', 'insertRule', 'insertAdjacentHTML'])
+  const inInert = (node: JsNode): boolean => { let current: JsNode | undefined = node; while (current) { if (inertCalls.has(current)) return true; current = parents.get(current) } return false }
+  for (const node of allNodes) {
+    if (inLibrary(node) || inInert(node)) continue
+    const parent = parents.get(node)
+    if (!parent) continue
+    const name = node.type === 'MemberExpression' ? propertyName(node) : node.type === 'Identifier' && isReference(node) && !bindingOf(node) ? String(node.name) : undefined
+    if (name && networks.has(name)) capabilityErrors.push(node)
+    if (node.type === 'MemberExpression' && setters.has(name ?? '') && !(parent.type === 'CallExpression' && parent.callee === node)) capabilityErrors.push(node)
+    if (node.type === 'ObjectPattern' && (node.properties as JsNode[]).some(prop => prop.type === 'Property' && (prop.computed || keyOf(prop.key as JsNode) === 'style' || setters.has(keyOf(prop.key as JsNode) ?? '') || networks.has(keyOf(prop.key as JsNode) ?? '')))) capabilityErrors.push(node)
+    if (!styleReceiver(node) || (node.type === 'Identifier' && !isReference(node))) continue
+    const alias = (parent.type === 'VariableDeclarator' && parent.init === node && (parent.id as JsNode).type === 'Identifier')
+      || (parent.type === 'AssignmentExpression' && parent.operator === '=' && parent.right === node && (parent.left as JsNode).type === 'Identifier')
+    const member = parent.type === 'MemberExpression' && parent.object === node && propertyName(parent) !== undefined
+    if (!alias && !member) capabilityErrors.push(node)
+  }
   return {
     frameworkError,
     resourceInputs,
     embeddedInputs,
+    capabilityErrors,
+    styleReceiver,
     auditedNode: node => !!audited && !frameworkError && inLibrary(node),
     internalSink(node) {
       if (!audited || frameworkError) return UNKNOWN_PROOF
