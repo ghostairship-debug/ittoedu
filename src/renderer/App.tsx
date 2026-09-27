@@ -28,8 +28,7 @@ import {
 import { emptyCourseAssetSidecar } from './project/v9AssetAdapter'
 import { createSlideLightEditingPort } from './composition/selection/slideLightEditingPort'
 import { useComponentLibrary } from './app/useComponentLibrary'
-import { componentCatalogInstallStatus } from './components/componentCatalogStatus'
-import { selectCurrentCatalogPackages } from './components/componentLibraryModel'
+import { selectAvailableBuiltInCatalogPackages } from './components/componentLibraryModel'
 import { useCourseDelivery } from './app/useCourseDelivery'
 import { courseDeliverySnapshot } from './app/courseDeliverySnapshot'
 import { useCourseProjectLifecycle } from './app/useCourseProjectLifecycle'
@@ -1077,9 +1076,7 @@ export default function App() {
                 setPendingFlowComponent(null)
                 insertFlowMenu(pending.command, { packageId: data.manifest.id }, pending.capture, data)
               }}>{data.manifest.name}</button>)}
-            {selectCurrentCatalogPackages(componentLibrary.componentCatalog.packages.filter(entry => entry.sourceTrust === 'built-in'))
-              .filter(entry => !componentPackages[entry.packageId]
-                && componentCatalogInstallStatus(entry, componentPackages[entry.packageId]) === 'available')
+            {selectAvailableBuiltInCatalogPackages(componentLibrary.componentCatalog.packages, componentPackages)
               .map(entry => <button key={entry.packageId} type="button" className="secondary-button" onClick={() => {
                 const pending = pendingFlowComponent
                 setPendingFlowComponent(null)
