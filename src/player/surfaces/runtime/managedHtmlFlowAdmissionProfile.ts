@@ -155,9 +155,22 @@ export function inspectManagedHtmlFlowProfile(document: Document): ManagedHtmlFl
 }
 
 
+/** Every browser-computed property participates, so admission cannot grow beyond its proof.
+ * Only unpainted root height and inactive transform origins may vary with the viewport.
+ */
+export function managedHtmlPaintSnapshot(element: Element, transparentRoot: boolean, minimumRoot: boolean): string[] {
+  const style = element.ownerDocument.defaultView!.getComputedStyle(element)
+  return [...style].filter(property => {
+    if (transparentRoot && ['height', 'block-size'].includes(property)) return false
+    if (minimumRoot && ['min-height', 'min-block-size'].includes(property)) return false
+    if (style.transform === 'none' && style.perspective === 'none' && ['transform-origin', 'perspective-origin'].includes(property)) return false
+    return true
+  }).map(property => `${property}:${style.getPropertyValue(property)}`)
+}
+
 /** Frozen before publishing the size; author resize handlers may not erase or repaint its content. */
 export function freezeManagedHtmlLayout(document: Document): () => boolean {
-  const { transparentRoots } = inspectManagedHtmlFlowProfile(document)
+  const { transparentRoots, minimumRoots } = inspectManagedHtmlFlowProfile(document)
   const view = document.defaultView!
   const painted = () => [document.documentElement, ...document.documentElement.querySelectorAll('*')].filter(element => view.getComputedStyle(element).display !== 'none')
   const elements = painted()
@@ -165,7 +178,10 @@ export function freezeManagedHtmlLayout(document: Document): () => boolean {
     const rect = element.getBoundingClientRect(), style = view.getComputedStyle(element)
     const values: Array<string | number> = [rect.x + view.scrollX, rect.y + view.scrollY, rect.width]
     if (!transparentRoots.has(element)) values.push(rect.height)
-    for (const property of ['color', 'background-color', 'opacity', 'visibility', 'font-size', 'font-family', 'font-weight', 'font-style', 'line-height', 'letter-spacing', 'word-spacing', 'text-decoration-line', 'text-decoration-color', 'border-top-color', 'border-right-color', 'border-bottom-color', 'border-left-color', 'border-top-width', 'border-right-width', 'border-bottom-width', 'border-left-width']) values.push(style.getPropertyValue(property))
+    values.push(...managedHtmlPaintSnapshot(element, transparentRoots.has(element), minimumRoots.has(element)))
+    // Attribute names are sorted: adding/removing a same-size srcset, poster, type, etc. is a change.
+    // data-* alone is metadata; any selector effect is covered by the full computed signature.
+    for (const attribute of [...element.attributes].filter(attribute => !attribute.name.startsWith('data-')).sort((a, b) => a.name.localeCompare(b.name))) values.push(attribute.name, attribute.value)
     for (const node of element.childNodes) {
       if (node.nodeType !== 3 || !node.textContent?.trim()) continue
       values.push(node.textContent)
@@ -173,7 +189,8 @@ export function freezeManagedHtmlLayout(document: Document): () => boolean {
       for (const box of range.getClientRects()) values.push(box.x + view.scrollX, box.y + view.scrollY, box.width, box.height)
       range.detach()
     }
-    if (['img', 'video', 'audio', 'input', 'textarea', 'select'].includes(element.localName)) values.push(element.getAttribute('src') ?? '', (element as HTMLInputElement).value ?? '')
+    if (['img', 'video', 'audio'].includes(element.localName)) values.push((element as HTMLImageElement | HTMLMediaElement).currentSrc)
+    if (['input', 'textarea', 'select'].includes(element.localName)) values.push((element as HTMLInputElement).value, String((element as HTMLInputElement).checked), String((element as HTMLInputElement).indeterminate), String((element as HTMLSelectElement).selectedIndex))
     return values
   }
   const snapshots = elements.map(values)

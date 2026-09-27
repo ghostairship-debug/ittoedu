@@ -33,6 +33,7 @@ async function observe(source: string) {
   const page = await browser.newPage()
   try {
     await page.route('https://height-admission.invalid/**', route => route.fulfill({ contentType: 'text/html', body: '<div id="host" style="width:640px;height:700px"></div>' }))
+    await page.route('https://height-admission.invalid/style.css', route => route.fulfill({ contentType: 'text/css', body: paintCss }))
     await page.goto('https://height-admission.invalid/')
     await page.addScriptTag({ content: bundle })
     return await page.evaluate(async source => {
@@ -121,5 +122,28 @@ it('quarantines author resize handlers that erase content before claiming readin
   expect(result.ok).toBe(false)
   expect(result.observationFailure).toContain('改变了正文')
   expect(result.captureFailure).toContain('改变了正文')
+  expect(result.mirrors).toBe(0)
+})
+
+
+const paintCss = 'body,p{margin:0}main{height:200px}img{display:block;width:200px;height:180px;object-fit:cover;object-position:0% 50%}p{font-family:monospace;height:20px}'
+const redImage = `data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="400" height="180"><rect width="200" height="180" fill="red"/><rect x="200" width="200" height="180" fill="blue"/></svg>')}`
+const greenImage = `data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="400" height="180"><rect width="400" height="180" fill="green"/></svg>')}`
+
+it.each([
+  ['object position', 'document.querySelector("img").style.objectPosition="100% 50%"', false],
+  ['same-size srcset', `document.querySelector("img").srcset=${JSON.stringify(greenImage + ' 1x')}`, false],
+  ['text transform', 'document.querySelector("p").style.textTransform="uppercase"', false],
+  ['direct CSSOM', 'document.styleSheets[0].insertRule("img{object-position:100% 50%}",document.styleSheets[0].cssRules.length)', false],
+  ['external CSSOM', 'document.styleSheets[0].insertRule("p{text-transform:uppercase}",document.styleSheets[0].cssRules.length)', true],
+])('refuses resized content paint changes: %s', async (_name, mutation, external) => {
+  const css = external ? '<link rel="stylesheet" href="https://height-admission.invalid/style.css">' : `<style>${paintCss}</style>`
+  const html = `<!doctype html>${css}<main><img src="${redImage}"><p>continue</p></main><script>addEventListener('resize',()=>{if(innerHeight<500){${mutation}}})</script>`
+  const result = await observe(createHtmlDocumentRuntimeSource({ html, resourceKeys: [] }))
+  expect(result.heights).toEqual([200])
+  expect(result.beforeResize[0]).toContain('continue')
+  expect(result.ok).toBe(false)
+  expect(result.observationFailure).toMatch(/改变了正文|动态修改样式表/)
+  expect(result.captureFailure).toMatch(/改变了正文|动态修改样式表/)
   expect(result.mirrors).toBe(0)
 })

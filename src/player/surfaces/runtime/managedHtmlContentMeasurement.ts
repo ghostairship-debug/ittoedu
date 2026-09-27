@@ -1,5 +1,5 @@
 import { preservesManagedHtmlVisibility } from './managedHtmlContentVisibility'
-import { inspectManagedHtmlFlowProfile, managedHtmlStylesheetSignature } from './managedHtmlFlowAdmissionProfile'
+import { inspectManagedHtmlFlowProfile, managedHtmlPaintSnapshot, managedHtmlStylesheetSignature } from './managedHtmlFlowAdmissionProfile'
 
 /** A measurement document never runs the imported page's code or changes its viewport. */
 export interface ManagedHtmlMeasurementSource {
@@ -162,10 +162,9 @@ export async function measureManagedHtmlContent(source: ManagedHtmlMeasurementSo
       const a = original.getBoundingClientRect(), b = copy.getBoundingClientRect()
       const container = profile.transparentRoots.has(original)
       if (Math.abs(a.x - b.x) > 1 || Math.abs(a.y - b.y) > 1 || Math.abs(a.width - b.width) > 1 || (!container && Math.abs(a.height - b.height) > 1)) throw unsupported('内容几何在调整高度时改变。')
-      const left = live.defaultView!.getComputedStyle(original), right = mirror.defaultView!.getComputedStyle(copy)
-      for (const property of ['color', 'background-color', 'opacity', 'visibility', 'font-size', 'line-height', 'border-top-width', 'border-bottom-width', 'border-left-width', 'border-right-width']) {
-        if (left.getPropertyValue(property) !== right.getPropertyValue(property)) throw unsupported('内容绘制样式在调整高度时改变。')
-      }
+      const left = managedHtmlPaintSnapshot(original, container, profile.minimumRoots.has(original))
+      const right = managedHtmlPaintSnapshot(copy, container, profile.minimumRoots.has(original))
+      if (left.length !== right.length || left.some((value, index) => value !== right[index])) throw unsupported('内容绘制样式在调整高度时改变。')
     }
     requireCurrent(source, signal)
     if (managedHtmlStylesheetSignature(live) !== profile.stylesheetSignature) throw unsupported('测量期间样式表发生变化。')
