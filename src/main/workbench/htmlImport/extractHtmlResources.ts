@@ -603,13 +603,7 @@ function rewriteJavaScript(code: string, sourceType: 'script' | 'module', baseDi
     if (['ImportDeclaration', 'ExportAllDeclaration', 'ImportExpression'].includes(node.type) || (node.type === 'ExportNamedDeclaration' && node.source)) {
       addDiagnostic(sink, 'error', 'unsupported-module-graph', '导入暂不支持模块依赖图')
     }
-    const memberName = (member: Node): string | null => {
-      if (member.type !== 'MemberExpression') return null
-      const property = member.property as Node
-      return member.computed
-        ? property.type === 'Literal' && typeof property.value === 'string' ? property.value : null
-        : property.type === 'Identifier' ? String(property.name) : null
-    }
+    const memberName = (member: Node): string | null => closureProof.memberName(member) ?? null
     const literalValue = (value: Node): string | null => {
       if (value.type === 'Literal' && typeof value.value === 'string') return value.value
       if (value.type === 'TemplateLiteral' && (value.expressions as Node[]).length === 0) return ((value.quasis as Array<{ value: { cooked: string | null } }>)[0]?.value.cooked) ?? null
@@ -641,10 +635,12 @@ function rewriteJavaScript(code: string, sourceType: 'script' | 'module', baseDi
       writeString(value, rewriteUrl(url, name))
     }
     if (node === root) {
+      for (const definition of closureProof.exclusiveDefinitions) urlSink(definition.value, definition.name)
+      for (const definition of closureProof.deadDefinitions) writeString(definition, '')
       type Transform = { path: string[]; before: string; after: string }
       const targets = new Map<Node, { local: Map<Node, string>; transforms: Transform[] }>()
       const inputs = [
-        ...closureProof.resourceInputs.map(input => ({ ...input, path: [] as string[], kind: 'url' as const })),
+        ...closureProof.resourceInputs.filter(input => !closureProof.definitionBackedUses.has(input.value)).map(input => ({ ...input, path: [] as string[], kind: 'url' as const })),
         ...closureProof.embeddedInputs,
       ]
       for (const input of inputs) {

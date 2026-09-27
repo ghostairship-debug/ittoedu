@@ -8,9 +8,13 @@ export interface JavaScriptClosureProof {
   internalSink(node: JsNode): ClosureProof
   auditedNode(node: JsNode): boolean
   styleReceiver(node: JsNode): boolean
+  memberName(node: JsNode): string | undefined
   capabilityErrors: JsNode[]
   embeddedInputs: Array<{ value: JsNode; path: string[]; name: string; kind: 'css' | 'html'; proof: ClosureProof }>
   resourceInputs: Array<{ value: JsNode; name: string; proof: ClosureProof }>
+  exclusiveDefinitions: Array<{ value: JsNode; name: string }>
+  deadDefinitions: JsNode[]
+  definitionBackedUses: Set<JsNode>
   frameworkError: boolean
 }
 const UNKNOWN: Value = { kind: 'unknown' }
@@ -288,6 +292,9 @@ export function analyzeJavaScriptClosure(root: JsNode, inertCalls: Set<JsNode> =
       const name = !node.computed ? keyOf(node.key as JsNode) : undefined
       const props = parents.get(node), call = props ? parents.get(props) : undefined
       const jsxProp = props?.type === 'ObjectExpression' && !!call && isReactEntry(call) && (call.arguments as JsNode[])[1] === props
+      const tag = jsxProp ? (call.arguments as JsNode[])[0] : undefined
+      const hostTag = tag?.type === 'Literal' && typeof tag.value === 'string' || tag?.type === 'TemplateLiteral' && (tag.expressions as JsNode[]).length === 0
+      if (jsxProp && !hostTag && !libraryBindings.has(bindingOf(tag!)!) && name && (RESOURCE_FIELDS.has(name) || CSS_RESOURCE_PROPERTIES.has(name) || ['style', 'srcDoc', 'dangerouslySetInnerHTML'].includes(name))) frameworkError = true
       if (jsxProp && name && RESOURCE_FIELDS.has(name)) resourceInputs.push({ value: node.value as JsNode, name: name === 'srcSet' ? 'srcset' : name, proof: resourceProof(evaluate(node.value as JsNode)) })
       if (jsxProp && name === 'style') styleInputs(node.value as JsNode, evaluate(node.value as JsNode))
       if (jsxProp && name && CSS_RESOURCE_PROPERTIES.has(name)) embeddedInputs.push({ value: node.value as JsNode, path: [], name, kind: 'css', proof: cssProof(evaluate(node.value as JsNode)) })
@@ -304,8 +311,61 @@ export function analyzeJavaScriptClosure(root: JsNode, inertCalls: Set<JsNode> =
       if (!tag || !['Literal', 'TemplateLiteral', 'Identifier', 'MemberExpression'].includes(tag.type)) frameworkError = true
     }
   }
+  // A producer is rewritable only if every lexical reference is an approved
+  // resource read or a proven, ordered bootstrap write. Aliases and text reads
+  // disqualify the whole binding. This proof covers initial and overwritten values.
+  const exclusiveDefinitions: JavaScriptClosureProof['exclusiveDefinitions'] = []
+  const deadDefinitions: JsNode[] = [], definitionBackedUses = new Set<JsNode>()
+  const stringLeaves = (node: JsNode): JsNode[] => {
+    if (node.type === 'Literal' && typeof node.value === 'string') return [node]
+    if (node.type === 'TemplateLiteral' && (node.expressions as JsNode[]).length === 0) return [node]
+    if (node.type === 'ObjectExpression') return (node.properties as JsNode[]).flatMap(prop => prop.type === 'Property' && !prop.computed && prop.kind === 'init' ? stringLeaves(prop.value as JsNode) : [])
+    return []
+  }
+  const producerBindings = new Set(resourceInputs.map(input => rootBinding(input.value)).filter((binding): binding is Binding => !!binding))
+  for (const binding of producerBindings) {
+    if (binding.scope !== program || binding.duplicate || !binding.initial || mutations.has(binding)) continue
+    const uses = resourceInputs.filter(input => rootBinding(input.value) === binding)
+    if (!uses.length || uses.some(input => input.proof.kind !== 'proven-resource')) continue
+    const writes = [...(assignments.get(binding) ?? []), ...(objectAssigns.get(binding) ?? [])]
+    if (writes.length && (!orderedBootstrap || writes.some(write => topStatement(write).type !== 'ExpressionStatement' || topStatement(write).expression !== write || write.start >= last!.start))) continue
+    const producers = [binding.initial, ...writes.flatMap(write => write.type === 'AssignmentExpression' ? [write.right as JsNode] : (write.arguments as JsNode[]).slice(1))]
+    const ownedLiterals = new Set(producers.flatMap(stringLeaves))
+    // Following an alias proves a value, but never gives ownership of its source.
+    if (uses.some(input => input.proof.kind === 'proven-resource' && input.proof.literals.some(literal => !ownedLiterals.has(literal)))) continue
+    const references = allNodes.filter(node => isReference(node) && bindingOf(node) === binding)
+    const allowed = references.every(reference => {
+      const parent = parents.get(reference)!
+      if (writes.includes(parent) && ((parent.type === 'AssignmentExpression' && parent.left === reference) || (isObjectAssign(parent) && (parent.arguments as JsNode[])[0] === reference))) return true
+      let value = reference
+      while (parents.get(value)?.type === 'MemberExpression' && parents.get(value)!.object === value) value = parents.get(value)!
+      return uses.some(input => input.value === value)
+    })
+    if (!allowed) continue
+    const live = new Set<JsNode>()
+    for (const input of uses) if (input.proof.kind === 'proven-resource') {
+      definitionBackedUses.add(input.value)
+      for (const literal of input.proof.literals) { live.add(literal); exclusiveDefinitions.push({ value: literal, name: input.name }) }
+    }
+    for (const literal of ownedLiterals) if (!live.has(literal)) deadDefinitions.push(literal)
+  }
+  const staticKey = (node: JsNode, seen = new Set<Binding>()): string | undefined => {
+    const value = evaluate(node)
+    if (value.kind === 'string') return value.node.type === 'Literal' ? String(value.node.value) : (value.node.quasis as Array<{ value: { cooked: string } }>)[0].value.cooked
+    if (node.type === 'BinaryExpression' && node.operator === '+') {
+      const left = staticKey(node.left as JsNode, seen), right = staticKey(node.right as JsNode, seen)
+      return left !== undefined && right !== undefined ? left + right : undefined
+    }
+    if (node.type === 'Identifier') {
+      const binding = bindingOf(node)
+      if (binding?.initial && !binding.duplicate && !mutations.has(binding) && !assignments.has(binding) && !seen.has(binding)) return staticKey(binding.initial, new Set(seen).add(binding))
+    }
+    return undefined
+  }
+  const memberName = (node: JsNode): string | undefined => propertyName(node)
+    ?? (node.type === 'MemberExpression' && node.computed ? staticKey(node.property as JsNode) : undefined)
   const styleBindings = new Set<Binding>()
-  const styleReceiver = (node: JsNode): boolean => (node.type === 'MemberExpression' && propertyName(node) === 'style')
+  const styleReceiver = (node: JsNode): boolean => (node.type === 'MemberExpression' && memberName(node) === 'style')
     || (node.type === 'Identifier' && styleBindings.has(bindingOf(node)!))
   let changed = true
   while (changed) {
@@ -325,27 +385,44 @@ export function analyzeJavaScriptClosure(root: JsNode, inertCalls: Set<JsNode> =
   const capabilityErrors: JsNode[] = []
   const networks = new Set(['fetch', 'importScripts', 'WebSocket', 'EventSource', 'Worker', 'SharedWorker', 'XMLHttpRequest', 'sendBeacon'])
   const setters = new Set(['setAttribute', 'setProperty', 'insertRule', 'insertAdjacentHTML'])
+  const ambientReceiver = (node: JsNode, seen = new Set<Binding>()): boolean => {
+    if (node.type === 'MemberExpression') return ambientReceiver(node.object as JsNode, seen)
+    if (node.type === 'CallExpression' || node.type === 'NewExpression') return ambientReceiver(node.callee as JsNode, seen)
+    if (node.type !== 'Identifier') return false
+    const binding = bindingOf(node)
+    if (!binding) return true
+    if (seen.has(binding)) return false
+    const next = new Set(seen).add(binding)
+    return !!binding.initial && ambientReceiver(binding.initial, next)
+      || (assignments.get(binding) ?? []).some(write => ambientReceiver(write.right as JsNode, next))
+  }
   const inInert = (node: JsNode): boolean => { let current: JsNode | undefined = node; while (current) { if (inertCalls.has(current)) return true; current = parents.get(current) } return false }
   for (const node of allNodes) {
     if (inLibrary(node) || inInert(node)) continue
     const parent = parents.get(node)
     if (!parent) continue
-    const name = node.type === 'MemberExpression' ? propertyName(node) : node.type === 'Identifier' && isReference(node) && !bindingOf(node) ? String(node.name) : undefined
-    if (name && networks.has(name)) capabilityErrors.push(node)
+    const name = node.type === 'MemberExpression' ? memberName(node) : node.type === 'Identifier' && isReference(node) && !bindingOf(node) ? String(node.name) : undefined
+    if (node.type === 'MemberExpression' && node.computed && name === undefined
+      && (ambientReceiver(node.object as JsNode) || (parent.type === 'CallExpression' && parent.callee === node))) capabilityErrors.push(node)
+    if (name && (networks.has(name) || ['eval', 'Function', 'Reflect', 'constructor', 'getOwnPropertyDescriptor', 'getOwnPropertyDescriptors', '__lookupGetter__', '__lookupSetter__'].includes(name))) capabilityErrors.push(node)
     if (node.type === 'MemberExpression' && setters.has(name ?? '') && !(parent.type === 'CallExpression' && parent.callee === node)) capabilityErrors.push(node)
     if (node.type === 'ObjectPattern' && (node.properties as JsNode[]).some(prop => prop.type === 'Property' && (prop.computed || keyOf(prop.key as JsNode) === 'style' || setters.has(keyOf(prop.key as JsNode) ?? '') || networks.has(keyOf(prop.key as JsNode) ?? '')))) capabilityErrors.push(node)
     if (!styleReceiver(node) || (node.type === 'Identifier' && !isReference(node))) continue
     const alias = (parent.type === 'VariableDeclarator' && parent.init === node && (parent.id as JsNode).type === 'Identifier')
       || (parent.type === 'AssignmentExpression' && parent.operator === '=' && parent.right === node && (parent.left as JsNode).type === 'Identifier')
-    const member = parent.type === 'MemberExpression' && parent.object === node && propertyName(parent) !== undefined
+    const member = parent.type === 'MemberExpression' && parent.object === node && memberName(parent) !== undefined
     if (!alias && !member) capabilityErrors.push(node)
   }
   return {
     frameworkError,
     resourceInputs,
+    exclusiveDefinitions,
+    deadDefinitions,
+    definitionBackedUses,
     embeddedInputs,
     capabilityErrors,
     styleReceiver,
+    memberName,
     auditedNode: node => !!audited && !frameworkError && inLibrary(node),
     internalSink(node) {
       if (!audited || frameworkError) return UNKNOWN_PROOF

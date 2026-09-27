@@ -1,4 +1,17 @@
+// @vitest-environment node
 import { describe, expect, it } from 'vitest'
+import { promises as fs } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join, resolve, sep } from 'node:path'
+import { randomUUID } from 'node:crypto'
+import { createBlankCourseProject } from '../../src/core/course/createCourseProject'
+import { CourseV9Driver } from '../../src/core/drivers/CourseV9Driver'
+import { DocumentRegistry } from '../../src/core/documents/DocumentRegistry'
+import { DocumentToolGateway } from '../../src/core/tools/DocumentToolGateway'
+import { ControlledBuildService } from '../../src/main/workbench/build/ControlledBuildService'
+import { createDocumentJournal } from '../../src/main/workbench/documentJournal'
+import { HtmlImportService } from '../../src/main/workbench/htmlImport/HtmlImportService'
+import { unpackHtmlDocumentRuntimeSource } from '../../src/shared/runtime/htmlDocumentSource'
 import { parse } from 'acorn'
 import { runInNewContext } from 'node:vm'
 import { extractHtmlResources } from '../../src/main/workbench/htmlImport/extractHtmlResources'
@@ -67,7 +80,7 @@ describe('audited framework resource closure', () => {
     expect(validateHtmlImport(result)).toEqual([])
     const rewritten = result.html.match(/<script[^>]*>([\s\S]*?)<\/script>/)![1]
     expect(() => parse(rewritten, { ecmaVersion: 'latest', sourceType: 'module' })).not.toThrow()
-    expect(rewritten.includes('D={a:"pic.png"}')).toBe(true)
+    expect(rewritten.includes('D={a:"cw-resource:')).toBe(true)
     expect(evaluateLesson(result.html).props.children.map((child: { props: { src: string } }) => child.props.src)).toEqual([
       `cw-resource:${result.resources[0].key}`, `cw-resource:${result.resources[0].key}`,
     ])
@@ -79,7 +92,7 @@ describe('audited framework resource closure', () => {
     const result = extractHtmlResources({ html: `<script type="module">${script}</script>`, siblingFiles: new Map([['pic.png', Buffer.from(image.split(',')[1], 'base64')]]) })
     expect(validateHtmlImport(result)).toEqual([])
     const props = evaluateLesson(result.html).props.children[0].props
-    expect(props.src).toBe(`cw-resource:${result.resources[0].key}`)
+    expect(props.src).toBe(`cw-resource:${result.resources.find(resource => resource.mediaType === 'image/png')!.key}`)
     expect(props.dangerouslySetInnerHTML.__html).toBe('pic.png')
   })
 
@@ -137,6 +150,15 @@ describe('audited framework resource closure', () => {
     'let st;st=el.style;const next=st;next.backgroundImage=chooseUrl()',
     'const {style:st}=el;st.backgroundImage="url("+location.hash+")"',
     'const load=fetch;load(location.hash)',
+    'const name="style";const st=el[name];st.backgroundImage="url("+location.hash+")"',
+    'const name="fetch";globalThis[name](location.hash)',
+    'const st=Reflect.get(el,"style");st.backgroundImage=location.hash',
+    'eval("fetch(location.hash)")',
+    'const key="st"+"yle";const st=el[key];st.backgroundImage=location.hash',
+    'const key=location.hash;globalThis[key]("https://example.invalid")',
+    'const el=document.createElement("div");const key=location.hash;const st=el[key];st.backgroundImage=location.hash',
+    'const run=Function;run("fetch(location.hash)")()',
+    'const name="setProperty";el.style[name]("background-image",location.hash)',
     'const set=el.style.setProperty.bind(el.style);set("background-image",location.hash)',
     'Object.assign(el.style,{backgroundImage:location.hash})',
     'Object.defineProperty(el.style,"backgroundImage",{value:location.hash})',
@@ -159,6 +181,56 @@ describe('audited framework resource closure', () => {
     expect(validateHtmlImport(caption)).toEqual([])
     expect(caption.resources).toEqual([])
     expect(caption.html).toContain('"url(pic.png)"')
+  })
+
+  it('does not treat arbitrary component props as proven host resource consumers', () => {
+    expect(errors(vendor + app('D.a', 'function Caption(props){return (0,T.jsx)("span",{children:props.src})}').replace('(0,T.jsx)("img",', '(0,T.jsx)(Caption,'))).toContain('unsupported-framework-resource-input')
+  })
+
+  it('does not acquire ownership through a shared producer alias', () => {
+    const script = vendor + app('alias', 'const label="pic.png";const alias=label;').replace('(0,T.jsx)("audio",{src:k})', '(0,T.jsx)("span",{children:label})')
+    const result = extractHtmlResources({ html: `<script type="module">${script}</script>`, siblingFiles: new Map([['pic.png', Uint8Array.of(1,2,3)]]) })
+    expect(validateHtmlImport(result)).toEqual([])
+    const rendered = evaluateLesson(result.html)
+    expect(rendered.props.children[0].props.src).toBe(`cw-resource:${result.resources[0].key}`)
+    expect(rendered.props.children[1].props.children).toBe('pic.png')
+  })
+
+  it('prepares a resource-only multi-megabyte pool through the real import service without a formal write', async () => {
+    const root = await fs.mkdtemp(join(tmpdir(), 'g20-proof-'))
+    try {
+      const project = createBlankCourseProject({ includeDefaultController: false, controls: 'none' })
+      const driver = new CourseV9Driver()
+      const registry = new DocumentRegistry({ persistence: createDocumentJournal({ directory: join(root, 'journal') }), drivers: [driver], createId: randomUUID, bindingKey: binding => binding.path })
+      const session = await registry.create({ kind: 'course-v9', project, resources: { assets: {}, components: {} } }, 'lesson.h5lesson')
+      const builds = new ControlledBuildService({ directory: join(root, 'builds'), admission: { run: async () => { throw new Error('prepare must not invoke admission') } } })
+      const gateway = new DocumentToolGateway(registry, [driver], randomUUID, { services: { builds } })
+      await gateway.beginRun({ runId: 'run', actor: 'human', documents: [{ documentId: session.documentId, writable: [{ kind: 'document' }] }] })
+      const targetHandle = await gateway.issueTarget('run', session.documentId, { kind: 'document' })
+      const service = new HtmlImportService({ session, gateway })
+      const largeImage = 'data:image/png;base64,' + Buffer.concat([Buffer.from(image.split(',')[1], 'base64'), Buffer.alloc(850_000)]).toString('base64')
+      const script = vendor + app('D[key]', `Object.assign(D,{a:${JSON.stringify(largeImage)}});k=${JSON.stringify(sound)};`).replace(JSON.stringify(image), JSON.stringify('.' + largeImage))
+      const sourcePath = join(root, 'lesson.html')
+      await fs.writeFile(sourcePath, `<script type="module">${script}</script>`)
+      expect(Buffer.byteLength(script)).toBeGreaterThan(2 * 1024 * 1024)
+      const request = { operationId: 'prepare', runId: 'run', targetHandle, sourcePath, locationId: project.locations[0].id }
+      const baseline = session.read()
+      const ticket = await service.prepare(request)
+      const staged = JSON.parse(await fs.readFile(join(root, 'builds', ticket.jobId, 'files', 'project.json'), 'utf8'))
+      const runtime = staged.surfaces[0].scenes[0].layerItems.find((item: { kind: string }) => item.kind === 'runtime').runtime
+      expect(Buffer.byteLength(runtime.source)).toBeLessThan(2 * 1024 * 1024)
+      expect(Object.keys(runtime.assets)).toHaveLength(2)
+      const html = unpackHtmlDocumentRuntimeSource(runtime.source)!.html
+      expect(html).toContain('alt:"lesson"')
+      expect(html).not.toContain('data:image/png;base64,')
+      expect(session.read()).toEqual(baseline)
+      await fs.writeFile(sourcePath, `<script type="module">${script.replace('src:D[key]', 'src:"https://example.invalid/image.png"')}</script>`)
+      await expect(service.prepare({ ...request, operationId: 'remote' })).rejects.toThrow()
+      expect(session.read()).toEqual(baseline)
+    } finally {
+      if (!resolve(root).startsWith(resolve(tmpdir()) + sep)) throw new Error('unexpected fixture root')
+      await fs.rm(root, { recursive: true, force: true })
+    }
   })
 
   it('localizes static style aliases without changing their original text', () => {
