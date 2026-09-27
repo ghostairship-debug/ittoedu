@@ -4,6 +4,7 @@ import { join, resolve } from 'node:path'
 import { createCourseProjectArchive, openCourseProjectArchive } from '../../src/core/drivers/codecs/courseProjectArchive'
 import { flowCourse, openInWorkbench, root, solidPng, type Rect } from './helpers/g20M19Harness'
 import { BACKGROUND_E2E_ENV } from '../../src/main/windowVisibility'
+import { closeSelectionApp } from './helpers/g20SelectionHarness'
 
 const filename = 'm16-paper-anchor.h5lesson'
 const png = solidPng(96, 64, [27, 125, 110])
@@ -39,8 +40,35 @@ async function layerSnapshot(page: Page): Promise<Snapshot[]> {
   }, filename)
 }
 
-async function paragraphTop(page: Page, blockId: string) {
-  return page.locator(`.flow-workspace [data-flow-block-id="${blockId}"]`).evaluate(element => element.getBoundingClientRect().top)
+type AnchorGeometry = { paragraphTop: number; layerTop: number; relative: number; paperTop: number; paperWidth: number; scrollTop: number }
+
+async function anchorGeometry(page: Page, blockId: string, layerId: string): Promise<AnchorGeometry> {
+  return page.locator('.flow-workspace').filter({ visible: true }).first().evaluate((workspace, ids) => {
+    const paragraph = workspace.querySelector<HTMLElement>(`[data-flow-block-id="${ids.blockId}"]`)
+    const layer = workspace.querySelector<HTMLElement>(`[data-testid="flow-layer-card-${ids.layerId}"]`)
+    const paper = workspace.querySelector<HTMLElement>('[data-testid="flow-paper"]')
+    const scroll = workspace.querySelector<HTMLElement>('[data-testid="flow-workspace-scroll"]')
+    if (!paragraph || !layer || !paper || !scroll) throw new Error('Anchor geometry is not laid out')
+    const paragraphTop = paragraph.getBoundingClientRect().top
+    const layerTop = layer.getBoundingClientRect().top
+    const paperRect = paper.getBoundingClientRect()
+    return { paragraphTop, layerTop, relative: layerTop - paragraphTop, paperTop: paperRect.top,
+      paperWidth: paperRect.width, scrollTop: scroll.scrollTop }
+  }, { blockId, layerId })
+}
+
+async function expectAnchored(page: Page, blockId: string, layerId: string, offsetY: number,
+  evidence: Record<string, unknown>, stage: string): Promise<AnchorGeometry> {
+  let turn = 0
+  let latest: AnchorGeometry | undefined
+  await expect.poll(async () => {
+    // The isolated background Electron window may need input before its pending animation frame paints.
+    await page.mouse.move(1450 + (turn++ % 2), 700)
+    latest = await anchorGeometry(page, blockId, layerId)
+    ;(evidence.geometry as Record<string, unknown>)[stage] = latest
+    return Math.abs(latest.relative - offsetY)
+  }, { intervals: [200, 200, 300, 500, 800] }).toBeLessThan(4)
+  return latest!
 }
 
 async function paragraphIds(page: Page) {
@@ -94,7 +122,7 @@ test('M16-T02 Flow paper text and image layers follow paragraphs through edit, s
   const shots = join(directory, 'shots')
   mkdirSync(shots)
   const { workspace, imagePath } = fixture(directory)
-  const evidence: Record<string, unknown> = { run: directory, shots, modelCalls: 0, status: 'running', entryPoints: {}, screenshots: [], screenshotsRequireManualReview: true }
+  const evidence: Record<string, unknown> = { run: directory, shots, modelCalls: 0, status: 'running', entryPoints: {}, geometry: {}, screenshots: [], screenshotsRequireManualReview: true }
   const errors: string[] = []
   let app: ElectronApplication | undefined = await launch(directory, workspace)
   let page: Page = await app.firstWindow()
@@ -116,7 +144,7 @@ test('M16-T02 Flow paper text and image layers follow paragraphs through edit, s
     const textLayer = (await layerSnapshot(page)).find(layer => layer.kind === 'text' && !existingIds.has(layer.id))!
     expect(textLayer.anchor).toBeTruthy()
     await expect(flow.locator(`[data-testid="flow-layer-card-${textLayer.id}"]`)).toBeVisible()
-    await flow.locator(`[data-testid="flow-layer-card-${textLayer.id}"]`).click()
+    await expect(flow.locator(`[data-testid="flow-layer-selection-${textLayer.id}"]`)).toBeVisible()
     await expect(flow.locator(`[data-flow-anchor-block-id="${textLayer.anchor!.blockId}"]`)).toBeVisible()
     await page.screenshot({ path: join(shots, 'authored-anchor-visible.png') })
     ;(evidence.screenshots as string[]).push('shots/authored-anchor-visible.png')
@@ -128,7 +156,8 @@ test('M16-T02 Flow paper text and image layers follow paragraphs through edit, s
     await expect.poll(async () => (await layerSnapshot(page)).filter(layer => layer.kind === 'image' && !existingIds.has(layer.id)).length).toBe(1)
     const imageLayer = (await layerSnapshot(page)).find(layer => layer.kind === 'image' && !existingIds.has(layer.id))!
     expect(imageLayer.anchor).toBeTruthy()
-    await expect(flow.locator(`[data-testid="flow-layer-card-${imageLayer.id}"] img`)).toBeVisible()
+    await expect(flow.locator(`[data-testid="flow-layer-card-${imageLayer.id}"] canvas`)).toBeVisible()
+    await expect(flow.locator(`[data-testid="flow-layer-card-${imageLayer.id}"] img`)).toHaveJSProperty('naturalWidth', 96)
 
     // Also prove that the same 11+4 paper insertion menu is reachable from the full editor's Elements rail.
     await page.getByRole('button', { name: '在编辑器中打开', exact: true }).click()
@@ -140,32 +169,31 @@ test('M16-T02 Flow paper text and image layers follow paragraphs through edit, s
     await openInWorkbench(page, filename)
 
     const anchoredId = textLayer.anchor!.blockId
-    const beforeTop = await paragraphTop(page, anchoredId)
-    const layer = flow.locator(`[data-testid="flow-layer-card-${textLayer.id}"]`)
-    const beforeLayerTop = (await layer.boundingBox())!.y
+    const before = await expectAnchored(page, anchoredId, textLayer.id, textLayer.anchor!.offsetY, evidence, 'text-before')
+    await expectAnchored(page, imageLayer.anchor!.blockId, imageLayer.id, imageLayer.anchor!.offsetY, evidence, 'image-before')
     const ids = await paragraphIds(page)
     const anchorIndex = ids.indexOf(anchoredId)
     expect(anchorIndex).toBeGreaterThan(0)
     const preceding = body.locator(`[data-flow-block-id="${ids[anchorIndex - 1]}"]`)
     await clickParagraphStart(page, preceding)
     await page.keyboard.insertText('新增导语使锚点段落下移。'.repeat(18))
-    await expect.poll(() => paragraphTop(page, anchoredId)).toBeGreaterThan(beforeTop + 20)
-    const afterTextParagraphTop = await paragraphTop(page, anchoredId)
-    const afterTextLayerTop = (await layer.boundingBox())!.y
-    expect(Math.abs((afterTextLayerTop - beforeLayerTop) - (afterTextParagraphTop - beforeTop))).toBeLessThan(4)
+    const afterText = await expectAnchored(page, anchoredId, textLayer.id, textLayer.anchor!.offsetY, evidence, 'text-after-input')
+    await expectAnchored(page, imageLayer.anchor!.blockId, imageLayer.id, imageLayer.anchor!.offsetY, evidence, 'image-after-input')
+    expect(afterText.paragraphTop).toBeGreaterThan(before.paragraphTop + 20)
+    expect(Math.abs((afterText.layerTop - before.layerTop) - (afterText.paragraphTop - before.paragraphTop))).toBeLessThan(4)
     const countBeforeInsert = (await paragraphIds(page)).length
     await page.keyboard.press('Enter')
     await expect.poll(async () => (await paragraphIds(page)).length).toBe(countBeforeInsert + 1)
-    const afterInsertParagraphTop = await paragraphTop(page, anchoredId)
-    const afterInsertLayerTop = (await layer.boundingBox())!.y
-    expect(afterInsertParagraphTop).toBeGreaterThan(afterTextParagraphTop)
-    expect(Math.abs((afterInsertLayerTop - afterTextLayerTop) - (afterInsertParagraphTop - afterTextParagraphTop))).toBeLessThan(4)
+    const afterInsert = await expectAnchored(page, anchoredId, textLayer.id, textLayer.anchor!.offsetY, evidence, 'text-after-enter')
+    await expectAnchored(page, imageLayer.anchor!.blockId, imageLayer.id, imageLayer.anchor!.offsetY, evidence, 'image-after-enter')
+    expect(afterInsert.paragraphTop).toBeGreaterThan(afterText.paragraphTop)
+    expect(Math.abs((afterInsert.layerTop - afterText.layerTop) - (afterInsert.paragraphTop - afterText.paragraphTop))).toBeLessThan(4)
     await page.keyboard.press('Backspace')
     await expect.poll(async () => (await paragraphIds(page)).length).toBe(countBeforeInsert)
-    const afterDeleteParagraphTop = await paragraphTop(page, anchoredId)
-    const afterDeleteLayerTop = (await layer.boundingBox())!.y
-    expect(afterDeleteParagraphTop).toBeLessThan(afterInsertParagraphTop)
-    expect(Math.abs((afterDeleteLayerTop - afterInsertLayerTop) - (afterDeleteParagraphTop - afterInsertParagraphTop))).toBeLessThan(4)
+    const afterDelete = await expectAnchored(page, anchoredId, textLayer.id, textLayer.anchor!.offsetY, evidence, 'text-after-backspace')
+    await expectAnchored(page, imageLayer.anchor!.blockId, imageLayer.id, imageLayer.anchor!.offsetY, evidence, 'image-after-backspace')
+    expect(afterDelete.paragraphTop).toBeLessThan(afterInsert.paragraphTop)
+    expect(Math.abs((afterDelete.layerTop - afterInsert.layerTop) - (afterDelete.paragraphTop - afterInsert.paragraphTop))).toBeLessThan(4)
     expect((await layerSnapshot(page)).find(item => item.id === textLayer.id)?.anchor?.blockId).toBe(anchoredId)
 
     await page.getByRole('button', { name: '保存', exact: true }).first().click()
@@ -178,7 +206,7 @@ test('M16-T02 Flow paper text and image layers follow paragraphs through edit, s
           && flow.surfaceLayerItems.some(entry => entry.item.layerItemId === imageLayer.id && entry.paragraphAnchor?.blockId === imageLayer.anchor!.blockId)
       } catch { return false }
     }).toBe(true)
-    await app.close(); app = undefined
+    await closeSelectionApp(app); app = undefined
     const saved = openCourseProjectArchive(new Uint8Array(readFileSync(join(workspace, filename))))
     const savedFlow = saved.project.surfaces.find(surface => surface.type === 'flow')
     expect(savedFlow?.type).toBe('flow')
@@ -195,12 +223,14 @@ test('M16-T02 Flow paper text and image layers follow paragraphs through edit, s
     expect(reopenedLayers.find(item => item.id === imageLayer.id)?.anchor).toEqual(imageLayer.anchor)
     const reopenedFlow = page.locator('.flow-workspace').filter({ visible: true }).first()
     await expect(reopenedFlow.locator(`[data-testid="flow-layer-card-${textLayer.id}"]`)).toBeVisible()
-    await expect(reopenedFlow.locator(`[data-testid="flow-layer-card-${imageLayer.id}"] img`)).toBeVisible()
+    await expect(reopenedFlow.locator(`[data-testid="flow-layer-card-${imageLayer.id}"] canvas`)).toBeVisible()
+    await expect(reopenedFlow.locator(`[data-testid="flow-layer-card-${imageLayer.id}"] img`)).toHaveJSProperty('naturalWidth', 96)
 
     await page.getByRole('button', { name: '整课预览', exact: true }).click()
     await expect(page.locator('.course-preview-host [data-playback-view]')).toBeVisible()
-    await expect(page.getByText('新增导语使锚点段落下移。', { exact: false })).toBeVisible()
-    await expect(page.locator(`[data-flow-overlay-item="${imageLayer.id}"] img`)).toBeVisible()
+    await expect(page.getByTestId('flow-runtime-article')).toContainText('新增导语使锚点段落下移。')
+    await expect(page.locator(`[data-flow-overlay-item="${imageLayer.id}"] canvas`)).toBeVisible()
+    await expect(page.locator(`[data-flow-overlay-item="${imageLayer.id}"] img`)).toHaveJSProperty('naturalWidth', 96)
     await page.screenshot({ path: join(shots, 'player-paper-anchor-visible.png') })
     ;(evidence.screenshots as string[]).push('shots/player-paper-anchor-visible.png')
     expect(errors).toEqual([])
@@ -217,6 +247,6 @@ test('M16-T02 Flow paper text and image layers follow paragraphs through edit, s
     }
     evidence.pageErrors = errors
     writeFileSync(join(directory, 'evidence.json'), JSON.stringify(evidence, null, 2) + '\n', 'utf8')
-    if (app && app.process().exitCode === null) await app.close().catch(() => undefined)
+    if (app && app.process().exitCode === null) await closeSelectionApp(app).catch(() => undefined)
   }
 })
