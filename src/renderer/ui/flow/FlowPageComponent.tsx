@@ -51,7 +51,7 @@ export function FlowPageComponent({ item, nodeId, projectId, surfaceId, ownerKey
   const propsKey = JSON.stringify(item.props)
   const textKey = JSON.stringify(item.textOverrides ?? [])
   const assetsKey = JSON.stringify(item.assetOverrides ?? {})
-  const urlKey = JSON.stringify(Object.entries(assetUrls).sort(([a], [b]) => a.localeCompare(b)))
+  const urlKey = JSON.stringify(Object.entries(item.assetOverrides ?? {}).sort(([a], [b]) => a.localeCompare(b)).map(([key, override]) => [key, override.assetId, assetUrls[override.assetId] ?? null]))
   const sourceKey = JSON.stringify([item.component.packageId, item.component.version, nodeId, projectId, surfaceId, scope, assetsKey, urlKey])
 
   useEffect(() => {
@@ -77,7 +77,7 @@ export function FlowPageComponent({ item, nodeId, projectId, surfaceId, ownerKey
         onTargetsChanged: update => {
           if (!active) return
           revision = Math.max(revision, update.revision)
-          publish(update)
+          publish({ ...update, targets: update.targets.map(target => ({ ...target, targetId: JSON.stringify([ownerKey, scope, surfaceId, nodeId, target.targetId]) })) })
         },
       },
       reportError: (phase, error) => { if (active) latest.current.onError?.(phase, error) },
@@ -90,7 +90,7 @@ export function FlowPageComponent({ item, nodeId, projectId, surfaceId, ownerKey
       publish({ scope, sceneId: surfaceId, nodeId, revision: revision + 1, targets: [] })
       if (ownerKey !== currentOwner.current) targetOwners.current.delete(ownerKey)
     }
-  }, [sourceKey, pkg, componentPackages, ownerKey, item.staticFallbackAssetId])
+  }, [sourceKey, pkg, ownerKey, item.staticFallbackAssetId])
 
   useEffect(() => {
     handle.current?.updateProps({ ...item.props })

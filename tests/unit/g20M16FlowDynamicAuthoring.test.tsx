@@ -76,6 +76,44 @@ it('updates text and geometry in place, but remounts for image changes and retir
   expect(current).not.toHaveBeenCalled()
 })
 
+it('namespaces host target identities for two components with identical automatic IDs', async () => {
+  const root = mount()
+  const first = vi.fn()
+  const second = vi.fn()
+  await act(async () => root.render(<>
+    <FlowPageComponent {...base} item={item} onTargetsChanged={first} />
+    <FlowPageComponent {...base} nodeId="component-2" item={item} onTargetsChanged={second} />
+  </>))
+  const raw = { kind: 'component-text' as const, targetId: 'auto:1:text', scope: 'scene' as const,
+    sceneId: 'flow-1', nodeId: 'component-1', componentId: 'card', key: '', label: 'Title',
+    multiline: false, source: 'auto' as const, lightEdit: { original: 'A', region: 'p', text: 'A' },
+    bounds: { x: 0, y: 0, width: 20, height: 20 }, rotation: 0 }
+  const options = vi.mocked(mountPublishedComponent).mock.calls.map(call => call[1])
+  options[0]!.authoring!.onTargetsChanged({ scope: 'scene', sceneId: 'flow-1', nodeId: 'component-1', revision: 1, targets: [raw] })
+  options[1]!.authoring!.onTargetsChanged({ scope: 'scene', sceneId: 'flow-1', nodeId: 'component-2', revision: 1,
+    targets: [{ ...raw, nodeId: 'component-2' }] })
+  const firstId = first.mock.calls[0]![0].targets[0].targetId
+  const secondId = second.mock.calls[0]![0].targets[0].targetId
+  expect(firstId).not.toBe(secondId)
+  expect(firstId).toContain('component-1')
+  expect(secondId).toContain('component-2')
+})
+
+it('ignores unrelated package and asset map changes but remounts when an overridden asset URL changes', async () => {
+  const root = mount()
+  await act(async () => root.render(<FlowPageComponent {...base} item={item} />))
+  const firstHandle = vi.mocked(mountPublishedComponent).mock.results[0]!.value
+  await act(async () => root.render(<FlowPageComponent {...base} item={item}
+    componentPackages={{ ...base.componentPackages, unrelated: {} as never }}
+    assetUrls={{ ...base.assetUrls, unrelated: 'blob:other' }} />))
+  expect(mountPublishedComponent).toHaveBeenCalledTimes(1)
+  expect(firstHandle.destroy).not.toHaveBeenCalled()
+  await act(async () => root.render(<FlowPageComponent {...base} item={item}
+    assetUrls={{ ...base.assetUrls, image1: 'blob:replacement' }} />))
+  expect(mountPublishedComponent).toHaveBeenCalledTimes(2)
+  expect(firstHandle.destroy).toHaveBeenCalledTimes(1)
+})
+
 it('renders host-discovered paper targets and routes activation to the Flow owner', async () => {
   const root = mount()
   const onTextActivate = vi.fn()
