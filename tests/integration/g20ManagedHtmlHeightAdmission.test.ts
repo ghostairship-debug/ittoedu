@@ -28,6 +28,7 @@ const centeredPage = '<!doctype html><style>html,body{margin:0;height:100vh;over
 
 const clippedPage = '<!doctype html><style>body{margin:0}main{position:absolute;width:200px;height:200px}@media(max-height:500px){main{clip:rect(0,200px,1px,0)}}</style><main>Continue</main>'
 const backgroundPage = `<html><style>body{margin:0}main{width:200px;height:200px;background-image:url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22200%22 height=%22200%22%3E%3Crect width=%22200%22 height=%22200%22 fill=%22red%22/%3E%3C/svg%3E");background-repeat:no-repeat}@media(max-height:500px){main{background-position-y:-199px}}</style><main></main></html>`
+const naturalLongPage = `<!doctype html><style>body{margin:0;font:20px sans-serif}</style><main style="font:20px sans-serif">${Array.from({ length: 60 }, (_, index) => `<p>Paragraph ${index + 1}</p>`).join('')}</main>`
 
 async function observe(source: string) {
   const page = await browser.newPage()
@@ -56,12 +57,30 @@ async function observe(source: string) {
   } finally { await page.close() }
 }
 
+it('admits a natural long Flow page with Chromium-expanded font shorthand and measures its full height', async () => {
+  const result = await observe(createHtmlDocumentRuntimeSource({ html: naturalLongPage, resourceKeys: [] }))
+  expect(result.ok).toBe(true)
+  expect(result.heights[0]).toBeGreaterThan(700)
+  expect(result.observationFailure).toBe('')
+  expect(result.captureFailure).toBe('')
+  expect(result.mirrors).toBe(0)
+})
+
+it('rejects an explicit nondefault font longhand outside the proven profile', async () => {
+  const html = naturalLongPage.replace('font:20px sans-serif', 'font:20px sans-serif;font-variant-caps:all-small-caps')
+  const result = await observe(createHtmlDocumentRuntimeSource({ html, resourceKeys: [] }))
+  expect(result.ok).toBe(false)
+  expect(result.heights).toEqual([])
+  expect(result.observationFailure).toContain('font-variant-caps')
+})
+
 it.each([
   centeredPage,
   clippedPage,
   backgroundPage,
   centeredPage.replace('<button>Continue</button>', 'Continue'),
   centeredPage.replace('body{display:flex;', 'body{font-size:6vh;display:flex;'),
+  naturalLongPage.replace('font:20px sans-serif', 'font:20vh sans-serif'),
   centeredPage.replace('</style><button>Continue</button>', 'body::before{content:"Continue"}</style>'),
 ])('rejects a viewport page whose mathematically stable height clips or shrinks its real content', async html => {
   const result = await observe(createHtmlDocumentRuntimeSource({ html, resourceKeys: [] }))
@@ -134,6 +153,7 @@ it.each([
   ['object position', 'document.querySelector("img").style.objectPosition="100% 50%"', false],
   ['same-size srcset', `document.querySelector("img").srcset=${JSON.stringify(greenImage + ' 1x')}`, false],
   ['text transform', 'document.querySelector("p").style.textTransform="uppercase"', false],
+  ['font size', 'document.querySelector("p").style.fontSize="24px"', false],
   ['direct CSSOM', 'document.styleSheets[0].insertRule("img{object-position:100% 50%}",document.styleSheets[0].cssRules.length)', false],
   ['external CSSOM', 'document.styleSheets[0].insertRule("p{text-transform:uppercase}",document.styleSheets[0].cssRules.length)', true],
 ])('refuses resized content paint changes: %s', async (_name, mutation, external) => {
