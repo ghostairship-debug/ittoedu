@@ -80,6 +80,45 @@ describe('HTML import closure', () => {
     expect(validateHtmlImport(namespace)).toEqual([])
   })
 
+  it('accepts an inert Vite modulepreload fallback but rejects an active fetch', () => {
+    const vite = '(function(){let e=document.createElement(`link`).relList;if(e&&e.supports&&e.supports(`modulepreload`))return;for(let e of document.querySelectorAll(`link[rel="modulepreload"]`))n(e);function n(e){if(e.ep)return;e.ep=!0;let n={credentials:`same-origin`};fetch(e.href,n)}})();'
+    expect(validateHtmlImport(extractHtmlResources({ html: `<script>${vite}</script>` }))).toEqual([])
+    expect(validateHtmlImport(extractHtmlResources({ html: '<script>fetch(location.href)</script>' })).map(error => error.code)).toContain('unsupported-network-sink')
+    expect(validateHtmlImport(extractHtmlResources({ html: `<script>${vite.replace('fetch(e.href,n)', 'fetch(e.href,n);fetch(location.href)')}</script>` })).map(error => error.code)).toContain('unsupported-network-sink')
+  })
+
+  it('rejects CSS import modifiers rather than turning them into media queries', () => {
+    const files = new Map([['theme.css', new TextEncoder().encode('.title{color:red}')]])
+    const media = extractHtmlResources({ html: '<style>@import "theme.css" screen;</style>', siblingFiles: files })
+    expect(validateHtmlImport(media)).toEqual([])
+    expect(media.html).toContain('@media screen{.title{color:red}}')
+    for (const modifier of ['layer(theme)', 'supports(display: grid)', 'layer(theme) supports(display: grid)']) {
+      const result = extractHtmlResources({ html: `<style>@import "theme.css" ${modifier};</style>`, siblingFiles: files })
+      expect(validateHtmlImport(result).map(error => error.code)).toContain('unsupported-css-import')
+      expect(result.html).not.toContain('@media')
+    }
+  })
+
+  it('localizes image-set string resources and rejects remote strings', () => {
+    const local = extractHtmlResources({ html: '<style>.x{background:image-set("picture.png" 1x, -webkit-image-set("picture.png" 2x))}</style>', siblingFiles: new Map([['picture.png', png]]) })
+    expect(local.resources).toHaveLength(1)
+    expect(local.resources[0]?.origins).toHaveLength(2)
+    expect(validateHtmlImport(local)).toEqual([])
+    const remote = extractHtmlResources({ html: '<style>.x{background:-webkit-image-set("https://cdn.example/a.png" 1x)}</style>' })
+    expect(validateHtmlImport(remote).map(error => error.code)).toContain('remote-resource')
+  })
+
+  it('rejects data URI script sources and handles computed property names precisely', () => {
+    const script = extractHtmlResources({ html: '<script src="data:text/javascript,fetch(%22https%3A%2F%2Fcdn.example%22)"></script>' })
+    expect(validateHtmlImport(script).map(error => error.code)).toContain('unsupported-script-source')
+    const base64 = extractHtmlResources({ html: `<script src="data:text/javascript;base64,${Buffer.from('fetch("https://cdn.example")').toString('base64')}"></script>` })
+    expect(validateHtmlImport(base64).map(error => error.code)).toContain('unsupported-script-source')
+    const dynamic = extractHtmlResources({ html: '<script>const src="name"; state[src]="picture.png"</script>' })
+    expect(validateHtmlImport(dynamic)).toEqual([])
+    const literal = extractHtmlResources({ html: '<script>image["src"]="picture.png"</script>' })
+    expect(validateHtmlImport(literal).map(error => error.code)).toContain('missing-relative-resource')
+  })
+
   it('includes modulepreload and SVG image references in closure decisions', () => {
     const remote = extractHtmlResources({ html: '<link rel="modulepreload" href="https://cdn.example/mod.js">' })
     expect(validateHtmlImport(remote).map(error => error.code)).toEqual(expect.arrayContaining(['unsupported-module-graph', 'remote-resource']))

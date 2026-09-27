@@ -374,6 +374,7 @@ function rewriteCss(css: string, baseDir: string, sink: Sink, siblings: Map<stri
   let cursor = 0
   let i = 0
   let changed = false
+  let imageSetEnd = -1
   const nextAt = (from: number) => {
     let best = -1
     const consider = (index: number) => { if (index !== -1 && (best === -1 || index < best)) best = index }
@@ -382,6 +383,7 @@ function rewriteCss(css: string, baseDir: string, sink: Sink, siblings: Map<stri
     consider(css.indexOf("'", from))
     consider(indexOfUrl(lower, from))
     consider(lower.indexOf('@import', from))
+    consider(lower.indexOf('image-set(', from))
     consider(lower.indexOf('data:', from))
     return best
   }
@@ -393,6 +395,18 @@ function rewriteCss(css: string, baseDir: string, sink: Sink, siblings: Map<stri
       i = end === -1 ? css.length : end + 2
       continue
     }
+    if (lower.startsWith('image-set(', next)) {
+      let depth = 1
+      let j = next + 'image-set('.length
+      while (j < css.length && depth > 0) {
+        if (css[j] === '(') depth++
+        else if (css[j] === ')') depth--
+        j++
+      }
+      imageSetEnd = j
+      i = next + 'image-set('.length
+      continue
+    }
     const quote = css[next]
     if (quote === '"' || quote === "'") {
       let j = next + 1
@@ -400,7 +414,9 @@ function rewriteCss(css: string, baseDir: string, sink: Sink, siblings: Map<stri
       const closed = j < css.length
       if (closed) j++
       const inner = css.slice(next + 1, closed ? j - 1 : j)
-      const rewritten = rewriteEmbedded(inner, 'css-url', baseDir, sink, siblings, { url: false, remote: false }, false)
+      const rewritten = next < imageSetEnd
+        ? rewriteSingleUrl(inner, 'css-url', baseDir, sink, siblings, false).value
+        : rewriteEmbedded(inner, 'css-url', baseDir, sink, siblings, { url: false, remote: false }, false)
       if (rewritten !== inner) {
         changed = true
         parts.push(css.slice(cursor, next), quote + rewritten + (closed ? quote : ''))
@@ -414,6 +430,11 @@ function rewriteCss(css: string, baseDir: string, sink: Sink, siblings: Map<stri
       if (!match) { addDiagnostic(sink, 'error', 'unsupported-css-import', '无法解析 CSS @import'); i = next + 7; continue }
       const reference = match[2] ?? match[4]
       const media = match[5]?.trim() ?? ''
+      if (/^(?:layer(?:\s*\(|\b)|supports\s*\()/i.test(media)) {
+        addDiagnostic(sink, 'error', 'unsupported-css-import', 'CSS @import 的 layer()/supports() 条件暂不支持', reference)
+        i = next + match[0].length
+        continue
+      }
       const key = resolveRelative(baseDir, reference)
       const bytes = key ? siblings.get(key) : undefined
       if (/^https?:|^\/\//i.test(reference)) sink.remoteReferences.push({ url: reference, context: 'css-url' })
@@ -470,7 +491,7 @@ function rewriteJavaScript(code: string, sourceType: 'script' | 'module', baseDi
   const handled = new Set<Node>()
   const jsString = (value: string) => JSON.stringify(value).replace(/</g, '\\u003c')
   const jsTemplate = (value: string) => '`' + value.replace(/[`\\]/g, '\\$&').replace(/\$\{/g, '\\${').replace(/</g, '\\u003c') + '`'
-  const visit = (node: Node) => {
+  const visit = (node: Node, ancestors: Node[] = []) => {
     if (handled.has(node)) return
     if (['ImportDeclaration', 'ExportAllDeclaration', 'ImportExpression'].includes(node.type) || (node.type === 'ExportNamedDeclaration' && node.source)) {
       addDiagnostic(sink, 'error', 'unsupported-module-graph', '导入暂不支持模块依赖图')
@@ -478,7 +499,9 @@ function rewriteJavaScript(code: string, sourceType: 'script' | 'module', baseDi
     const memberName = (member: Node): string | null => {
       if (member.type !== 'MemberExpression') return null
       const property = member.property as Node
-      return property.type === 'Identifier' ? String(property.name) : property.type === 'Literal' && typeof property.value === 'string' ? property.value : null
+      return member.computed
+        ? property.type === 'Literal' && typeof property.value === 'string' ? property.value : null
+        : property.type === 'Identifier' ? String(property.name) : null
     }
     const literalValue = (value: Node): string | null => {
       if (value.type === 'Literal' && typeof value.value === 'string') return value.value
@@ -510,7 +533,21 @@ function rewriteJavaScript(code: string, sourceType: 'script' | 'module', baseDi
       const callee = node.callee as Node | undefined
       const name = callee?.type === 'Identifier' ? String(callee.name) : callee ? memberName(callee) : null
       if (name && ['fetch', 'importScripts', 'WebSocket', 'EventSource', 'Worker', 'SharedWorker', 'XMLHttpRequest', 'sendBeacon'].includes(name)) {
-        addDiagnostic(sink, 'error', 'unsupported-network-sink', `导入暂不支持脚本网络/动态加载: ${name}`)
+        const request = (node.arguments as Node[])[0]
+        const requestOwner = request?.type === 'MemberExpression' ? request.object as Node : null
+        const loader = [...ancestors].reverse().find(ancestor => ['FunctionDeclaration', 'FunctionExpression', 'ArrowFunctionExpression'].includes(ancestor.type))
+        const loaderParam = (loader?.params as Node[] | undefined)?.[0]
+        const modulepreloadPolyfill = name === 'fetch' && requestOwner?.type === 'Identifier' && loaderParam?.type === 'Identifier'
+          && requestOwner.name === loaderParam.name && loader && /\.ep\)\s*return/.test(code.slice(loader.start, loader.end))
+          && ancestors.some(ancestor => {
+            if (!['FunctionDeclaration', 'FunctionExpression', 'ArrowFunctionExpression'].includes(ancestor.type)) return false
+            const body = code.slice(ancestor.start, ancestor.end)
+            return /\.relList\b/.test(body)
+              && /\.supports\(\s*['"`]modulepreload['"`]\s*\)/.test(body)
+              && /querySelectorAll\(\s*['"`]link\[rel=/.test(body)
+              && /if\s*\([^)]*\.supports[\s\S]*?\)\s*return/.test(body)
+          }) && request?.type === 'MemberExpression' && memberName(request) === 'href'
+        if (!modulepreloadPolyfill) addDiagnostic(sink, 'error', 'unsupported-network-sink', `导入暂不支持脚本网络/动态加载: ${name}`)
       }
       if (name === 'setAttribute') {
         const args = node.arguments as Node[]
@@ -538,8 +575,8 @@ function rewriteJavaScript(code: string, sourceType: 'script' | 'module', baseDi
     for (const [key, value] of Object.entries(node)) {
       if (key === 'parent') continue
       if (Array.isArray(value)) {
-        for (const child of value) if (child && typeof child === 'object' && typeof child.type === 'string') visit(child as Node)
-      } else if (value && typeof value === 'object' && typeof (value as Node).type === 'string') visit(value as Node)
+        for (const child of value) if (child && typeof child === 'object' && typeof child.type === 'string') visit(child as Node, [...ancestors, node])
+      } else if (value && typeof value === 'object' && typeof (value as Node).type === 'string') visit(value as Node, [...ancestors, node])
     }
   }
   visit(root)
@@ -799,6 +836,7 @@ function transformHtml(html: string, sink: Sink, siblings: Map<string, Uint8Arra
         if (attributeBy(tag.attrs, 'defer') || attributeBy(tag.attrs, 'async')) addDiagnostic(sink, 'error', 'script-order', '外部脚本 defer/async 顺序无法保持')
         const decoded = decodeEntities(src.rawValue).trim()
         if (/^https?:|^\/\//i.test(decoded)) addDiagnostic(sink, 'error', 'remote-script', `远程脚本不可导入: ${clip(decoded, 180)}`, decoded)
+        if (/^data:/i.test(decoded)) addDiagnostic(sink, 'error', 'unsupported-script-source', 'data URI 脚本源暂不支持安全内联', clip(decoded))
         const key = resolveRelative('', decoded)
         const bytes = key ? siblings.get(key) : undefined
         if (bytes && key && ['js', 'mjs'].includes(extensionOf(decoded))) {
