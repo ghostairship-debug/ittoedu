@@ -80,6 +80,31 @@ describe('HTML import closure', () => {
     expect(validateHtmlImport(namespace)).toEqual([])
   })
 
+  it('resolves simple constant URL sinks without treating ordinary URL text as a request', () => {
+    const text = extractHtmlResources({ html: '<script>const ns="http://www.w3.org/2000/svg"; const docs="https://react.dev";</script>' })
+    expect(validateHtmlImport(text)).toEqual([])
+    const alias = extractHtmlResources({ html: '<script>const u="https://example.org/a.png"; document.createElement("img").src=u;</script>' })
+    expect(validateHtmlImport(alias).map(error => error.code)).toContain('remote-js-resource')
+    const audio = extractHtmlResources({ html: '<script>new Audio("https://example.org/a.mp3")</script>' })
+    expect(validateHtmlImport(audio).map(error => error.code)).toContain('remote-js-resource')
+    const audioAlias = extractHtmlResources({ html: '<script>const clip="https://example.org/a.mp3"; new Audio(clip)</script>' })
+    expect(validateHtmlImport(audioAlias).map(error => error.code)).toContain('remote-js-resource')
+  })
+
+  it('rejects ambiguous or computed URL sinks instead of treating them as local', () => {
+    for (const code of [
+      'image.src=chooseImage()',
+      'new Audio(chooseClip())',
+      'const u="https://example.org/a.png"; function f(u){image.src=u}',
+      'const u="local.png"; try {} catch(u) {image.src=u}',
+      'const u="local.png"; function f({u}) {image.src=u}',
+      'const u="https://example.org/a.png"; u="local.png"; image.src=u',
+    ]) {
+      const result = extractHtmlResources({ html: `<script>${code}</script>` })
+      expect(validateHtmlImport(result).map(error => error.code)).toContain('unsupported-dynamic-url-sink')
+    }
+  })
+
   it('accepts an inert Vite modulepreload fallback but rejects an active fetch', () => {
     const vite = '(function(){let e=document.createElement(`link`).relList;if(e&&e.supports&&e.supports(`modulepreload`))return;for(let e of document.querySelectorAll(`link[rel="modulepreload"]`))n(e);function n(e){if(e.ep)return;e.ep=!0;let n={credentials:`same-origin`};fetch(e.href,n)}})();'
     expect(validateHtmlImport(extractHtmlResources({ html: `<script>${vite}</script>` }))).toEqual([])

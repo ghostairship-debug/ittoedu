@@ -540,6 +540,51 @@ function rewriteJavaScript(code: string, sourceType: 'script' | 'module', baseDi
   const handled = new Set<Node>()
   const jsString = (value: string) => JSON.stringify(value).replace(/</g, '\\u003c')
   const jsTemplate = (value: string) => '`' + value.replace(/[`\\]/g, '\\$&').replace(/\$\{/g, '\\${').replace(/</g, '\\u003c') + '`'
+  const staticString = (value: Node): string | null => {
+    if (value.type === 'Literal' && typeof value.value === 'string') return value.value
+    if (value.type === 'TemplateLiteral' && (value.expressions as Node[]).length === 0)
+      return ((value.quasis as Array<{ value: { cooked: string | null } }>)[0]?.value.cooked) ?? null
+    return null
+  }
+  // Resolve only unambiguous top-level const strings. A shadow, reassignment or
+  // non-literal initializer makes a sink unknown and therefore a clear failure.
+  const constants = new Map<string, string>()
+  for (const statement of root.body as Node[]) if (statement.type === 'VariableDeclaration' && statement.kind === 'const') {
+    for (const declarator of statement.declarations as Node[]) {
+      const id = declarator.id as Node, initial = declarator.init as Node | undefined
+      if (id.type === 'Identifier' && initial) {
+        const value = staticString(initial)
+        if (value !== null) constants.set(String(id.name), value)
+      }
+    }
+  }
+  const declarations = new Map<string, number>(), ambiguous = new Set<string>()
+  const patternNames = (pattern: Node | undefined): string[] => {
+    if (!pattern) return []
+    if (pattern.type === 'Identifier') return [String(pattern.name)]
+    if (pattern.type === 'AssignmentPattern') return patternNames(pattern.left as Node)
+    if (pattern.type === 'RestElement') return patternNames(pattern.argument as Node)
+    if (pattern.type === 'ArrayPattern') return (pattern.elements as Array<Node | null>).flatMap(item => patternNames(item ?? undefined))
+    if (pattern.type === 'ObjectPattern') return (pattern.properties as Node[]).flatMap(item =>
+      patternNames((item.type === 'RestElement' ? item.argument : item.value) as Node))
+    return []
+  }
+  const scanBindings = (node: Node): void => {
+    if (node.type === 'VariableDeclarator') for (const name of patternNames(node.id as Node))
+      declarations.set(name, (declarations.get(name) ?? 0) + 1)
+    if (node.type === 'AssignmentExpression') for (const name of patternNames(node.left as Node)) ambiguous.add(name)
+    if (node.type === 'UpdateExpression') for (const name of patternNames(node.argument as Node)) ambiguous.add(name)
+    if (['FunctionDeclaration', 'FunctionExpression', 'ArrowFunctionExpression'].includes(node.type))
+      for (const param of node.params as Node[]) for (const name of patternNames(param)) ambiguous.add(name)
+    if (node.type === 'CatchClause') for (const name of patternNames(node.param as Node | undefined)) ambiguous.add(name)
+    for (const value of Object.values(node)) {
+      if (Array.isArray(value)) {
+        for (const child of value) if (child && typeof child === 'object' && typeof child.type === 'string') scanBindings(child as Node)
+      } else if (value && typeof value === 'object' && typeof (value as Node).type === 'string') scanBindings(value as Node)
+    }
+  }
+  scanBindings(root)
+  for (const name of constants.keys()) if (declarations.get(name) !== 1 || ambiguous.has(name)) constants.delete(name)
   const visit = (node: Node, ancestors: Node[] = []) => {
     if (handled.has(node)) return
     if (['ImportDeclaration', 'ExportAllDeclaration', 'ImportExpression'].includes(node.type) || (node.type === 'ExportNamedDeclaration' && node.source)) {
@@ -558,8 +603,12 @@ function rewriteJavaScript(code: string, sourceType: 'script' | 'module', baseDi
       return null
     }
     const urlSink = (value: Node, name: string) => {
-      const url = literalValue(value)
-      if (url === null || !url.trim()) return
+      const url = literalValue(value) ?? (value.type === 'Identifier' ? constants.get(String(value.name)) ?? null : null)
+      if (url === null) {
+        addDiagnostic(sink, 'error', 'unsupported-dynamic-url-sink', `无法静态解析 ${name} 的资源地址`)
+        return
+      }
+      if (!url.trim()) return
       if (name === 'srcset') {
         handled.add(value)
         const rewritten = rewriteSrcset(url, baseDir, sink, siblings)
@@ -585,6 +634,7 @@ function rewriteJavaScript(code: string, sourceType: 'script' | 'module', baseDi
         const modulepreloadPolyfill = name === 'fetch' && ancestors.some(ancestor => inertPolyfills.has(ancestor))
         if (!modulepreloadPolyfill) addDiagnostic(sink, 'error', 'unsupported-network-sink', `导入暂不支持脚本网络/动态加载: ${name}`)
       }
+      if (node.type === 'NewExpression' && name === 'Audio' && (node.arguments as Node[])[0]) urlSink((node.arguments as Node[])[0], 'Audio')
       if (name === 'setAttribute') {
         const args = node.arguments as Node[]
         const attribute = args[0] ? literalValue(args[0]) : null
