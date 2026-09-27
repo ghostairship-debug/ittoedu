@@ -19,7 +19,10 @@ const mocks = vi.hoisted(() => ({
 }))
 vi.mock('@/renderer/ui/flow/FlowPageRuntime', () => ({ FlowPageRuntime: (props: any) => { mocks.runtimeProps = props; return <div data-testid="runtime-mount" /> } }))
 vi.mock('@/renderer/ui/flow/FlowPageComponent', () => ({ FlowPageComponent: (props: any) => { mocks.componentProps = props; return <div data-testid="component-mount" /> } }))
-vi.mock('@/renderer/ui/CanvasPlainTextEditor', () => ({ CanvasPlainTextEditor: (props: any) => <button data-testid="commit-text" onClick={() => props.onCommit('Edited')}>commit</button> }))
+vi.mock('@/renderer/ui/CanvasPlainTextEditor', () => ({ CanvasPlainTextEditor: (props: any) => <div>
+  <button data-testid="draft-text" onClick={() => props.onDraftChange?.('Unsaved draft', false)}>{props.value}</button>
+  <button data-testid="commit-text" onClick={() => props.onCommit('Edited')}>commit</button>
+</div> }))
 vi.mock('@/renderer/composition/runtime/flowDynamicLightEditCommands', () => ({ flowComponentLightEditCommands: {
   captureText: mocks.captureText, captureAsset: mocks.captureAsset,
 } }))
@@ -108,6 +111,7 @@ it('maps Runtime target identity to location, commits text and asset through the
     label: 'Title', source: 'registered' as const, layer: 'scene' as const, bounds: { x: 190, y: 5, width: 40, height: 20 } }
   const picture = { ...text, targetId: 'image-1', kind: 'asset' as const, key: 'hero', label: 'Picture', bounds: { x: 15, y: 70, width: 40, height: 40 } }
   await act(async () => mocks.runtimeProps.onTargetsChanged({ scope: 'scene', sceneId: 'surface-1', revision: 1, targets: [text, picture] }))
+  await act(async () => element.querySelector<HTMLButtonElement>('[data-testid="flow-runtime-edit-mode-toggle"]')!.click())
   const textButton = element.querySelector<HTMLButtonElement>('[aria-label="Title，编辑文字"]')!
   expect(textButton.style.width).toBe('10px')
   await act(async () => textButton.click())
@@ -135,6 +139,7 @@ it('keeps a failed text draft and offers retry before reporting a confirmed edit
   const target = { targetId: 'text-1', scope: 'scene' as const, sceneId: 'surface-1', kind: 'text' as const, key: 'title',
     label: 'Title', source: 'registered' as const, layer: 'scene' as const, bounds: { x: 10, y: 5, width: 40, height: 20 } }
   await act(async () => mocks.runtimeProps.onTargetsChanged({ scope: 'scene', sceneId: 'surface-1', revision: 1, targets: [target] }))
+  await act(async () => element.querySelector<HTMLButtonElement>('[data-testid="flow-runtime-edit-mode-toggle"]')!.click())
   await act(async () => element.querySelector<HTMLButtonElement>('[aria-label="Title，编辑文字"]')!.click())
   await act(async () => element.querySelector<HTMLButtonElement>('[data-testid="commit-text"]')!.click())
   expect(mocks.submitIntent).toHaveBeenCalledTimes(1)
@@ -177,4 +182,43 @@ it('ignores old Runtime source targets and hides edits when switched to read-onl
   await act(async () => former({ scope: 'scene', sceneId: 'surface-1', revision: 4, targets: [target] }))
   expect(element.querySelector('[data-testid="flow-runtime-light-edit-targets"]')).toBeNull()
   expect(mocks.captureRuntimeText).not.toHaveBeenCalled()
+})
+
+it('runs Runtime by default, preserves an unfinished draft across mode changes, and does not remount the host', async () => {
+  const { root, element } = mount()
+  await act(async () => root.render(<FlowPaperDynamicLightEdit {...base} item={runtime} />))
+  const host = element.querySelector('[data-testid="runtime-mount"]')!
+  const target = { targetId: 'text-1', scope: 'scene' as const, sceneId: 'surface-1', kind: 'text' as const, key: 'title',
+    label: 'Title', source: 'auto' as const, layer: 'scene' as const, bounds: { x: 10, y: 5, width: 40, height: 20 } }
+  await act(async () => mocks.runtimeProps.onTargetsChanged({ scope: 'scene', sceneId: 'surface-1', revision: 1, targets: [target] }))
+  const toggle = element.querySelector<HTMLButtonElement>('[data-testid="flow-runtime-edit-mode-toggle"]')!
+  expect(toggle.textContent).toBe('编辑图文')
+  expect(toggle.getAttribute('aria-pressed')).toBe('false')
+  expect(element.querySelector('[data-testid="flow-runtime-light-edit-targets"]')).toBeNull()
+  await act(async () => toggle.click())
+  expect(toggle.textContent).toBe('完成编辑继续运行')
+  expect(element.querySelector('[aria-label="Title，编辑文字"]')).not.toBeNull()
+  await act(async () => element.querySelector<HTMLButtonElement>('[aria-label="Title，编辑文字"]')!.click())
+  await act(async () => element.querySelector<HTMLButtonElement>('[data-testid="draft-text"]')!.click())
+  expect(element.querySelector('[data-testid="draft-text"]')?.textContent).toBe('Unsaved draft')
+  await act(async () => toggle.click())
+  expect(element.querySelector('[data-testid="flow-runtime-light-edit-targets"]')).toBeNull()
+  expect(mocks.submitIntent).not.toHaveBeenCalled()
+  expect(element.querySelector('[data-testid="runtime-mount"]')).toBe(host)
+  await act(async () => toggle.click())
+  expect(element.querySelector('[data-testid="draft-text"]')?.textContent).toBe('Unsaved draft')
+  expect(element.querySelector('[data-testid="runtime-mount"]')).toBe(host)
+})
+
+it('keeps locked and read-only cards in run mode and resets edit mode for a new owner', async () => {
+  const { root, element } = mount()
+  await act(async () => root.render(<FlowPaperDynamicLightEdit {...base} item={runtime} />))
+  await act(async () => element.querySelector<HTMLButtonElement>('[data-testid="flow-runtime-edit-mode-toggle"]')!.click())
+  expect(element.querySelector('[data-testid="flow-runtime-edit-mode-toggle"]')?.textContent).toBe('完成编辑继续运行')
+  await act(async () => root.render(<FlowPaperDynamicLightEdit {...base} documentId="document-2" item={runtime} />))
+  expect(element.querySelector('[data-testid="flow-runtime-edit-mode-toggle"]')?.textContent).toBe('编辑图文')
+  await act(async () => root.render(<FlowPaperDynamicLightEdit {...base} item={{ ...runtime, locked: true }} />))
+  expect(element.querySelector('[data-testid="flow-runtime-edit-mode-toggle"]')).toBeNull()
+  await act(async () => root.render(<FlowPaperDynamicLightEdit {...base} item={runtime} readOnly />))
+  expect(element.querySelector('[data-testid="flow-runtime-edit-mode-toggle"]')).toBeNull()
 })

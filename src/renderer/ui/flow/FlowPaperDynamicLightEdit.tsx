@@ -67,6 +67,7 @@ export function FlowPaperDynamicLightEdit({ documentId, projectId, surfaceId, lo
   const snapshotRef = useRef(snapshot)
   const shown = snapshot.owner === owner ? snapshot : { owner, runtime: [], componentText: [], componentImage: [] }
   snapshotRef.current = shown
+  const [mode, setMode] = useState<{ owner: string; editing: boolean }>({ owner, editing: false })
   const [active, setActive] = useState<LocalTextEdit | null>(null)
   const [busy, setBusy] = useState<{ owner: string; targetId: string } | null>(null)
   const [failedTask, setFailedTask] = useState<{ owner: string; taskId: string; status: string; reason: string } | null>(null)
@@ -132,6 +133,7 @@ export function FlowPaperDynamicLightEdit({ documentId, projectId, surfaceId, lo
     } catch (error) { report(error instanceof Error ? error.message : '未能取消修改') }
   }
   const editable = !readOnly && !item.locked
+  const runtimeEditing = editable && item.kind === 'runtime' && mode.owner === owner && mode.editing
   const editableRef = useRef(editable)
   editableRef.current = editable
 
@@ -252,13 +254,19 @@ export function FlowPaperDynamicLightEdit({ documentId, projectId, surfaceId, lo
   const overlayStyle: CSSProperties = { position: 'absolute', inset: 0, pointerEvents: 'none' }
   return <div data-testid="flow-paper-dynamic-light-edit" style={{ position: 'relative', width: '100%', height: '100%' }}>
     {content}
-    {failedTask?.owner === owner && <div data-testid="flow-dynamic-edit-recovery" role="alert"
+    {editable && item.kind === 'runtime' && <button type="button" data-testid="flow-runtime-edit-mode-toggle"
+      aria-pressed={runtimeEditing} onPointerDown={event => { if (liveActive) event.preventDefault(); event.stopPropagation() }}
+      onClick={event => { event.stopPropagation(); setMode({ owner, editing: !runtimeEditing }) }}
+      style={{ position: 'absolute', zIndex: 9, top: 8, right: 8, pointerEvents: 'auto' }}>
+      {runtimeEditing ? '\u5b8c\u6210\u7f16\u8f91\u7ee7\u7eed\u8fd0\u884c' : '\u7f16\u8f91\u56fe\u6587'}
+    </button>}
+    {failedTask?.owner === owner && (item.kind !== 'runtime' || runtimeEditing) && <div data-testid="flow-dynamic-edit-recovery" role="alert"
       style={{ position: 'absolute', zIndex: 8, left: 8, right: 8, bottom: 8, padding: 8, background: '#fff', color: '#7a2434', pointerEvents: 'auto' }}>
       <span>{failedTask.reason}</span>
       <button type="button" disabled={Boolean(liveBusy)} onClick={() => { void retryFailed() }}>重试</button>
       {failedTask.status !== 'unknown' && <button type="button" disabled={Boolean(liveBusy)} onClick={discardFailed}>取消修改</button>}
     </div>}
-    {editable && item.kind === 'runtime' && (runtimeTargets.length > 0 || activeRuntime) && <div className="canvas-authoring-targets" data-testid="flow-runtime-light-edit-targets"
+    {runtimeEditing && (runtimeTargets.length > 0 || activeRuntime) && <div className="canvas-authoring-targets" data-testid="flow-runtime-light-edit-targets"
       style={overlayStyle} onPointerDown={event => event.stopPropagation()}>
       {runtimeTargets.map(target => <button key={target.targetId} type="button"
         className={`canvas-authoring-target canvas-authoring-target--${target.kind}`}
@@ -271,6 +279,8 @@ export function FlowPaperDynamicLightEdit({ documentId, projectId, surfaceId, lo
       {activeRuntime && <CanvasPlainTextEditor key={activeRuntime.target.targetId} bounds={activeRuntime.target.bounds}
         label={activeRuntime.target.label ?? activeRuntime.target.key} value={activeRuntime.value}
         multiline={activeRuntime.target.multiline} maxLength={activeRuntime.target.maxLength}
+        onDraftChange={value => setActive(current => current?.owner === owner && current.target.targetId === activeRuntime.target.targetId
+          ? { ...current, value } : current)}
         onCommit={value => commitText(activeRuntime, value)} onCancel={() => setActive(null)} />}
     </div>}
     {editable && item.kind === 'component' && <div onPointerDown={event => event.stopPropagation()}>
