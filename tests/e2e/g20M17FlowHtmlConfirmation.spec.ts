@@ -120,6 +120,7 @@ async function exercise(page: Page, label: string, frame: Locator, host: Locator
   const baseline = await geometry(frame, content, host, tail)
   expect(baseline.fallbackCount).toBe(0)
   const steps: Record<string, unknown>[] = []
+  evidence[label] = { baseline, steps }
   for (let round = 0; round < rounds; round++) {
     for (const open of [true, false]) {
       const button = content.locator('#toggle')
@@ -277,9 +278,9 @@ test('M17-T05 Flow HTML keeps measuring during use while admission remains stric
     const disk = readFileSync(coursePath)
     for (const [name, pattern] of [['erasing.html', /改变了正文/], ['nonconverging.html', /持续失效|持续改变布局/]] as const) {
       const result = await imported(page, app, workspace, name)
+      expectedRejections[name] = result.reason
       expect(result.reason, `${name} unexpectedly committed`).toMatch(pattern)
       if (name === 'nonconverging.html') expect(result.reason).toMatch(/invalidations=13|phase=publish-height/)
-      expectedRejections[name] = result.reason
       await page.screenshot({ path: join(shots, `${name}-rejected.png`) })
       const after = await snapshot(page, reopened.documentId)
       expect(after.revision).toBe(stable.revision)
