@@ -36,7 +36,7 @@ function runtime(): CourseRuntimeDefinition {
 }
 
 function fixture(): Uint8Array {
-  let project = createBlankCourseProject({ title: 'M16 Flow Runtime 长内容', now: '2026-09-27T00:00:00.000Z' })
+  let project = createBlankCourseProject({ title: 'M16 Flow Runtime 长内容', now: '2026-09-27T00:00:00.000Z', includeDefaultController: false, controls: 'none' })
   const added = addCourseFlowPage(project, { title: 'Runtime 长页面', expectedRevision: project.revision })
   if (!added.ok) throw new Error(added.reason)
   project = added.project
@@ -52,7 +52,7 @@ function fixture(): Uint8Array {
   const runtimeItem: RuntimeLayerItem = {
     layerItemId: runtimeId, label: '长内容 DOM Runtime', kind: 'runtime',
     frame: { mode: 'absolute', x: 44, y: 260, width: 760, height: 150 }, order: 10,
-    visible: true, locked: false, rotation: 0, opacity: 1, hitPolicy: 'auto', playbackInitialVisibility: 'inherit', runtime: runtime(),
+    visible: true, locked: false, rotation: 0, opacity: 1, hitPolicy: 'auto', playbackInitialVisibility: 'inherit', paperSpace: 'paper', runtime: runtime(),
   }
   flow.surfaceLayerItems.push({ item: runtimeItem, visibility: { mode: 'all', locationIds: [] },
     paragraphAnchor: { blockId: anchor.id, offsetY: 0, xRatio: 0 }, bodyPlane: 'overlay' })
@@ -60,6 +60,7 @@ function fixture(): Uint8Array {
   const native = sceneNodeToCourseLayerItem(createTextNode({ id: nativeId, name: '纸面原生标注', text: 'Native 纸面标注', x: 110, y: 360,
     width: 320, height: 76, style: { fontSize: 28, bold: true, color: '#7c2d12', backgroundColor: '#ffedd5' } })) as NativeLayerItem
   native.paperSpace = 'paper'
+  native.order = 20
   flow.surfaceLayerItems.push({ item: native, visibility: { mode: 'all', locationIds: [] },
     paragraphAnchor: { blockId: anchor.id, offsetY: 80, xRatio: 0 }, bodyPlane: 'overlay' })
   project.startLocationId = project.locations.find(location => location.kind === 'flow-block' && location.surfaceId === flow.id)!.id
@@ -114,6 +115,7 @@ test('M16-T03 Flow Runtime edits real long DOM content, reserves body height, ov
       if (!(paper instanceof HTMLElement)) throw new Error('missing Flow paper')
       return { tail: rect(tailElement), runtime: rect(runtimeElement), native: rect(nativeElement), paperHeight: paper.scrollHeight }
     }, { tailSelector: '[data-flow-block-id="m16-flow-tail"]', runtimeSelector: '[data-m16-flow-runtime="true"]', nativeSelector: `[data-layer-item-id="${nativeId}"]` })
+    await expect.poll(async () => (await geometry()).tail.top - (await geometry()).runtime.bottom).toBeGreaterThan(0)
     const collapsed = await geometry()
     await runtimeToggle.click()
     await expect(runtimeRoot.locator('[data-m16-flow-runtime-content] p')).toHaveCount(14)
@@ -151,20 +153,19 @@ test('M16-T03 Flow Runtime edits real long DOM content, reserves body height, ov
     await expect(playerRuntime.locator('[data-m16-flow-runtime-content] p')).toHaveCount(2)
     await playerToggle.click()
     await expect(playerRuntime.locator('[data-m16-flow-runtime-content] p')).toHaveCount(14)
-    await expect(player.locator('[data-layer-item-id="m16-flow-paper-annotation"]')).toContainText('Native 纸面标注')
+    await expect(player.locator('[data-flow-overlay-item="m16-flow-paper-annotation"]')).toContainText('Native 纸面标注')
 
     await mode.getByRole('button', { name: '编辑状态', exact: true }).click()
-    await page.getByRole('button', { name: '保存（Ctrl+S）', exact: true }).click()
+    await page.getByRole('button', { name: '保存', exact: true }).click()
     const documentApi = await page.evaluate(id => window.desktopAPI!.documents!.read(id), documentId)
     expect(documentApi.dirty).toBe(false)
     const saved = openCourseProjectArchive(new Uint8Array(readFileSync(coursePath)))
     expect(saved.project.surfaces.find(surface => surface.type === 'flow')).toMatchObject({
       surfaceLayerItems: expect.arrayContaining([
-        expect.objectContaining({ item: expect.objectContaining({ layerItemId: runtimeId, kind: 'runtime', runtime: { source: runtimeSource } }) }),
+        expect.objectContaining({ item: expect.objectContaining({ layerItemId: runtimeId, kind: 'runtime', runtime: expect.objectContaining({ source: runtimeSource }) }) }),
         expect.objectContaining({ item: expect.objectContaining({ layerItemId: nativeId, kind: 'native' }) }),
       ]),
     })
-    await page.getByRole('button', { name: '返回工作台', exact: true }).click()
     await page.locator('.workspace-document-tabs').getByRole('button', { name: `关闭 ${name}`, exact: true }).click()
     await tree.getByRole('button', { name, exact: true }).dblclick()
     const reopenedId = await frame.getAttribute('data-document-id')
@@ -172,6 +173,7 @@ test('M16-T03 Flow Runtime edits real long DOM content, reserves body height, ov
     const reopenedRuntime = page.locator('[data-m16-flow-runtime="true"]')
     await expect(reopenedRuntime).toBeVisible()
     await expect(reopenedRuntime.locator('[data-m16-flow-runtime-content] p')).toHaveCount(2)
+    await expect.poll(async () => (await geometry()).tail.top - (await geometry()).runtime.bottom).toBeGreaterThan(0)
     await expect(page.locator(`[data-layer-item-id="${nativeId}"]`)).toContainText('Native 纸面标注')
     expect(errors).toEqual([])
     const screenshot = join(directory, 'm16-t03-flow-runtime.png')
