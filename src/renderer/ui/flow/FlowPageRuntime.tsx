@@ -29,6 +29,8 @@ export interface FlowPageRuntimeProps {
 export function FlowPageRuntime({ item, surfaceId, ownerKey = surfaceId, width, height, assetUrls, onHeightChange, onTargetsChanged, onError, style }: FlowPageRuntimeProps) {
   const container = useRef<HTMLDivElement>(null)
   const handle = useRef<PublishedSurfaceRuntimeMountHandle | null>(null)
+  const mountGeneration = useRef(0)
+  const [failure, setFailure] = useState<{ identity: string; message: string } | null>(null)
   const callbacks = useRef({ onHeightChange, onError, assetUrls })
   callbacks.current = { onHeightChange, onError, assetUrls }
   const targetOwners = useRef(new Map<string, FlowPageRuntimeProps['onTargetsChanged']>())
@@ -47,6 +49,7 @@ export function FlowPageRuntime({ item, surfaceId, ownerKey = surfaceId, width, 
     item.runtime.assets, item.runtime.nodeBindings, item.runtime.staticFallback,
   ])
   const overrideKey = JSON.stringify(item.runtime.content.overrides ?? [])
+  const mountIdentity = JSON.stringify([ownerKey, sourceKey, surfaceId, assetEpoch])
   const runtime = useMemo(() => projectFlowRuntimeForAuthoring(item), [sourceKey, overrideKey])
 
   useEffect(() => {
@@ -64,6 +67,8 @@ export function FlowPageRuntime({ item, surfaceId, ownerKey = surfaceId, width, 
     )
     assetBaseline.current = baseline
     let active = true
+    const generation = ++mountGeneration.current
+    setFailure(null)
     let targetRevision = 0
     const mounted = mountPublishedSurfaceRuntime(target, {
       instanceId: item.layerItemId,
@@ -92,7 +97,9 @@ export function FlowPageRuntime({ item, surfaceId, ownerKey = surfaceId, width, 
         if (active) callbacks.current.onHeightChange(measured)
       },
       reportError: (phase, error) => {
-        if (active) callbacks.current.onError?.(phase, error)
+        if (!active || mountGeneration.current !== generation) return
+        setFailure({ identity: mountIdentity, message: `运行时 ${phase}：${error.message}` })
+        callbacks.current.onError?.(phase, error)
       },
     })
     handle.current = mounted
@@ -126,5 +133,10 @@ export function FlowPageRuntime({ item, surfaceId, ownerKey = surfaceId, width, 
   }, [width, height, sourceKey, ownerKey, assetEpoch])
 
   return <div ref={container} data-testid="flow-page-runtime" data-runtime-instance-id={item.layerItemId}
-    style={{ width: '100%', height: '100%', minHeight: 0, ...style }} />
+    style={{ width: '100%', height: '100%', minHeight: 0, position: 'relative', ...style }}>
+    {failure?.identity === mountIdentity && <div role="alert" style={{
+      position: 'absolute', top: 8, left: 8, right: 8, zIndex: 1, padding: '8px 10px',
+      color: '#fff', background: '#991b1b', borderRadius: 4, overflowWrap: 'anywhere',
+    }}>{failure.message}</div>}
+  </div>
 }

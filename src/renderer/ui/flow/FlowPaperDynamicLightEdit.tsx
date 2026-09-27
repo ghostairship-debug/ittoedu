@@ -266,7 +266,8 @@ export function FlowPaperDynamicLightEdit({ documentId, projectId, surfaceId, lo
 
   const content = item.kind === 'runtime'
     ? <FlowPageRuntime key={owner} item={item} surfaceId={surfaceId} ownerKey={owner} width={frame.width} height={frame.height}
-      assetUrls={assetUrls} onHeightChange={height => { if (ownerRef.current === owner) onHeightChange?.(height) }} onTargetsChanged={acceptRuntime} />
+      assetUrls={assetUrls} onHeightChange={height => { if (ownerRef.current === owner) onHeightChange?.(height) }}
+      onTargetsChanged={acceptRuntime} onError={(phase, error) => { if (ownerRef.current === owner) report(`运行时 ${phase}：${error.message}`) }} />
     : <FlowPageComponent key={owner} item={item} nodeId={item.layerItemId} projectId={projectId} surfaceId={surfaceId}
       ownerKey={owner} scope="scene" x={0} y={0} width={frame.width} height={frame.height} rotation={0}
       componentPackages={componentPackages} assetUrls={assetUrls} onTargetsChanged={acceptComponent} />
