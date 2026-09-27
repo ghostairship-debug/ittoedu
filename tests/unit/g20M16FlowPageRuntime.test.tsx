@@ -48,7 +48,7 @@ it('runs the real authoring Runtime, updates size in place, and retires stale so
   frame.contentDocument!.body.append(container)
   const rect = (x: number, y: number, width: number, height: number) =>
     ({ x, y, left: x, top: y, width, height, right: x + width, bottom: y + height, toJSON: () => ({}) }) as DOMRect
-  const view = frame.contentWindow!
+  const view = frame.contentWindow as Window & typeof globalThis
   Object.defineProperty(view.HTMLElement.prototype, 'getBoundingClientRect', { configurable: true, value: () => rect(0, 0, 600, 500) })
   Object.defineProperty(view.Range.prototype, 'getBoundingClientRect', { configurable: true, value: () => rect(20, 20, 120, 25) })
   const root = createRoot(container)
@@ -78,4 +78,33 @@ it('runs the real authoring Runtime, updates size in place, and retires stale so
   mounted.pop()
   frame.remove()
   expect(container.querySelector('[data-surface-runtime-root]')).toBeNull()
+})
+
+it('remounts when a managed asset URL becomes ready or rotates, without remounting for unrelated assets', async () => {
+  const frame = document.createElement('iframe')
+  document.body.append(frame)
+  const container = frame.contentDocument!.createElement('div')
+  frame.contentDocument!.body.append(container)
+  const root = createRoot(container)
+  mounted.push({ root, frame })
+  const layer = item(makeSource('asset'))
+  const urlA = 'data:image/png;base64,SEVSTw=='
+  const urlB = 'data:image/png;base64,U0VDT05E'
+  const base = { item: layer, surfaceId: 'flow-1', width: 640, height: 400, onHeightChange: vi.fn() }
+  const onError = vi.fn()
+  await act(async () => root.render(<FlowPageRuntime {...base} assetUrls={{}} onError={onError} />))
+  expect(container.querySelector('p')).toBeNull()
+  expect(onError).toHaveBeenCalledWith('create', expect.any(Error))
+
+  await act(async () => root.render(<FlowPageRuntime {...base} assetUrls={{ 'image-1': urlA }} onError={onError} />))
+  const firstParagraph = container.querySelector('p')
+  expect(firstParagraph?.textContent).toBe('Lesson asset')
+  expect(container.querySelector('img')?.getAttribute('src')).toBe(urlA)
+
+  await act(async () => root.render(<FlowPageRuntime {...base} assetUrls={{ 'image-1': urlA, unrelated: urlB }} onError={onError} />))
+  expect(container.querySelector('p')).toBe(firstParagraph)
+
+  await act(async () => root.render(<FlowPageRuntime {...base} assetUrls={{ 'image-1': urlB }} onError={onError} />))
+  expect(container.querySelector('p')).not.toBe(firstParagraph)
+  expect(container.querySelector('img')?.getAttribute('src')).toBe(urlB)
 })

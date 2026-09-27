@@ -8,6 +8,7 @@ import {
 } from '../../../player/surfaces/runtime/publishedSurfaceRuntimeMount'
 import type { DeepReadonly } from '../../course/flowEditorView'
 import { projectFlowRuntimeForAuthoring } from '../../document/flowRuntimeSpaceProjection'
+import { retainAssetObjectUrls } from '../useAssetObjectUrls'
 
 export interface FlowPageRuntimeProps {
   readonly item: DeepReadonly<RuntimeLayerItem>
@@ -28,6 +29,14 @@ export function FlowPageRuntime({ item, surfaceId, width, height, assetUrls, onH
   const handle = useRef<PublishedSurfaceRuntimeMountHandle | null>(null)
   const callbacks = useRef({ onHeightChange, onTargetsChanged, onError, assetUrls })
   callbacks.current = { onHeightChange, onTargetsChanged, onError, assetUrls }
+  const requestedAssetIds = useRef(new Set<string>())
+  const relevantAssetIds = new Set([
+    ...Object.values(item.runtime.assets).map(binding => binding.assetId),
+    ...requestedAssetIds.current,
+  ])
+  // Managed URLs arrive after the first render and may rotate when project bytes change.
+  // Recreate only hosts whose own asset references changed, including projectUrl() reads.
+  const assetSignature = JSON.stringify([...relevantAssetIds].sort().map(id => [id, assetUrls[id] ?? null]))
 
   // A changed source or binding retires the old host. Geometry changes use updateSize instead.
   const sourceKey = JSON.stringify([
@@ -42,6 +51,7 @@ export function FlowPageRuntime({ item, surfaceId, width, height, assetUrls, onH
     if (!target || !item.runtime.enabled || item.runtime.protocol !== 'surface-runtime'
       || item.runtime.runtimeApiVersion !== 3 || item.runtime.renderMode !== 'dom') return
     const session = createPublishedSurfaceRuntimeSession()
+    const releaseUrls = retainAssetObjectUrls(assetUrls)
     let active = true
     let targetRevision = 0
     const mounted = mountPublishedSurfaceRuntime(target, {
@@ -52,7 +62,10 @@ export function FlowPageRuntime({ item, surfaceId, width, height, assetUrls, onH
       visible: true,
       mode: 'authoring',
       session,
-      resolveAsset: assetId => callbacks.current.assetUrls[assetId],
+      resolveAsset: assetId => {
+        requestedAssetIds.current.add(assetId)
+        return callbacks.current.assetUrls[assetId]
+      },
       authoring: {
         scope: 'scene',
         sceneId: surfaceId,
@@ -75,9 +88,10 @@ export function FlowPageRuntime({ item, surfaceId, width, height, assetUrls, onH
       if (handle.current === mounted) handle.current = null
       mounted.destroy()
       session.destroy()
+      releaseUrls()
       callbacks.current.onTargetsChanged?.({ scope: 'scene', sceneId: surfaceId, revision: targetRevision + 1, targets: [] })
     }
-  }, [item.layerItemId, item.runtime.enabled, item.runtime.protocol, item.runtime.runtimeApiVersion, item.runtime.renderMode, runtime, surfaceId])
+  }, [item.layerItemId, item.runtime.enabled, item.runtime.protocol, item.runtime.runtimeApiVersion, item.runtime.renderMode, runtime, surfaceId, assetSignature])
 
   useEffect(() => {
     handle.current?.updateSize(width, height)
