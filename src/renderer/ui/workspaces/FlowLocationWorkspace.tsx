@@ -20,6 +20,7 @@ import { FlowWorkspace } from '../FlowWorkspace'
 import { FLOW_WORKSPACE_HEADER_HEIGHT } from '../FlowBlockContextToolbar'
 import type { FlowCurrentSessionCommandPort } from '../flow/useFlowTextAuthoringController'
 import type { WorkspaceMediaDropHandler } from '../../lessonWorkspace/workspaceMediaDrop'
+import type { ImportedImageAsset } from '../../project/assetManager'
 
 export type FlowCanvasMode = 'edit' | 'run'
 export type FlowEditingScope = 'scene' | 'global'
@@ -44,6 +45,7 @@ export interface FlowLocationWorkspaceProps {
   readonly onCanvasModeChange: (mode: FlowCanvasMode) => void
   readonly onMountTryRun: (container: HTMLElement) => Promise<FlowTryRunSession>
   readonly onDropWorkspaceMedia?: WorkspaceMediaDropHandler
+  readonly onSelectImageAsset: () => Promise<ImportedImageAsset | null>
 }
 
 export function FlowLocationWorkspace({
@@ -63,6 +65,7 @@ export function FlowLocationWorkspace({
   onCanvasModeChange,
   onMountTryRun,
   onDropWorkspaceMedia,
+  onSelectImageAsset,
 }: FlowLocationWorkspaceProps) {
   const [toolbarContainer, setToolbarContainer] = useState<HTMLDivElement | null>(null)
   const tryRunRef = useRef<HTMLDivElement>(null)
@@ -144,6 +147,7 @@ export function FlowLocationWorkspace({
             assetFiles={assetFiles}
             componentPackages={componentPackages}
             onDropWorkspaceMedia={onDropWorkspaceMedia}
+            onSelectImageAsset={onSelectImageAsset}
           />
         ) : null}
         <div

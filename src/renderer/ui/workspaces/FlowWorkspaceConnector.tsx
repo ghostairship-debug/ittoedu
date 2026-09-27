@@ -15,6 +15,7 @@ import { mountFlowLocationTryRun } from '../flowLocationTryRun'
 import type { FlowCurrentSessionCommandPort } from '../flow/useFlowTextAuthoringController'
 import { FlowLocationWorkspace } from './FlowLocationWorkspace'
 import type { WorkspaceMediaDropHandler } from '../../lessonWorkspace/workspaceMediaDrop'
+import type { ImportedImageAsset } from '../../project/assetManager'
 
 type FlowWorkspaceStore = {
   readonly flowSession: FlowAuthoringSession | null
@@ -35,7 +36,7 @@ function selectFlowTextEdit(state: FlowWorkspaceStore) { return state.flowTextEd
 function selectRunFlowAuthoringIntent(state: FlowWorkspaceStore) { return state.runFlowAuthoringIntent }
 function selectSetCanvasMode(state: FlowWorkspaceStore) { return state.setCanvasMode }
 
-export function FlowWorkspaceConnector({ onDropWorkspaceMedia }: { onDropWorkspaceMedia?: WorkspaceMediaDropHandler }) {
+export function FlowWorkspaceConnector({ onDropWorkspaceMedia, onSelectImageAsset }: { onDropWorkspaceMedia?: WorkspaceMediaDropHandler; onSelectImageAsset(): Promise<ImportedImageAsset | null> }) {
   const documentId = useEditorStore(state => state.courseDocument.documentId)
   const session = useEditorStore(selectFlowSession)
   const authoringSession = useEditorStore(selectCourseAuthoringSession)
@@ -116,6 +117,7 @@ export function FlowWorkspaceConnector({ onDropWorkspaceMedia }: { onDropWorkspa
       onCanvasModeChange={setCanvasMode}
       onMountTryRun={onMountTryRun}
       onDropWorkspaceMedia={onDropWorkspaceMedia}
+      onSelectImageAsset={onSelectImageAsset}
     />
   )
 }

@@ -26,7 +26,7 @@ export function Workspace({
       </main>
     )
   }
-  if (route.kind === 'flow') return <FlowWorkspaceConnector onDropWorkspaceMedia={onDropWorkspaceMedia} />
+  if (route.kind === 'flow') return <FlowWorkspaceConnector onDropWorkspaceMedia={onDropWorkspaceMedia} onSelectImageAsset={onSelectImageAsset} />
   if (route.kind === 'spatial') return <SpatialWorkspaceConnector onDropWorkspaceMedia={onDropWorkspaceMedia} />
   return (
     <SlideWorkspaceConnector

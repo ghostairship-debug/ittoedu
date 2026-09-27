@@ -41,6 +41,7 @@ import { FLOW_MEDIA_ACCEPT, FlowBlockQuickActions, FlowBlockQuickMenu, flowBlock
 import { NativeSelectionContext } from '../workbench/NativeSelectionContext'
 import { useWorkspaceMediaSource } from '../lessonWorkspace/workspaceMediaSourceContext'
 import { deliverWorkspaceMediaDrop, type WorkspaceMediaDropHandler } from '../lessonWorkspace/workspaceMediaDrop'
+import type { ImportedImageAsset } from '../project/assetManager'
 import { WORKSPACE_MEDIA_DRAG_TYPE } from '../lessonWorkspace/workspaceMediaDrag'
 import { flowMediaDropAfterBlock } from './flow/flowMediaDropPosition'
 import { FlowPaperMedia } from './flow/FlowPaperMedia'
@@ -64,6 +65,7 @@ export interface FlowWorkspaceProps {
   readonly assetFiles?: Record<string, Uint8Array>
   readonly componentPackages?: Record<string, ComponentPackageData>
   readonly onDropWorkspaceMedia?: WorkspaceMediaDropHandler
+  readonly onSelectImageAsset?: () => Promise<ImportedImageAsset | null>
 }
 export interface FlowBlockFocusRequest {
   readonly documentId: string
@@ -100,7 +102,7 @@ export function requestFlowBlockSelection(request: { documentId: string; surface
 }
 const EMPTY_ASSET_FILES: Record<string, Uint8Array> = {}
 const EMPTY_COMPONENT_PACKAGES: Record<string, ComponentPackageData> = {}
-export function FlowWorkspace({ documentId, view, sessionToken, assets, selection, textEdit, documentDraft, commands, readOnly = false, assetFiles = EMPTY_ASSET_FILES, componentPackages = EMPTY_COMPONENT_PACKAGES, onDropWorkspaceMedia }: FlowWorkspaceProps) {
+export function FlowWorkspace({ documentId, view, sessionToken, assets, selection, textEdit, documentDraft, commands, readOnly = false, assetFiles = EMPTY_ASSET_FILES, componentPackages = EMPTY_COMPONENT_PACKAGES, onDropWorkspaceMedia, onSelectImageAsset }: FlowWorkspaceProps) {
   assertActiveFlowEditorView(view)
   const mediaSource = useWorkspaceMediaSource()
   const mediaSourceRef = useRef(mediaSource)
