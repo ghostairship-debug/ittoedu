@@ -84,7 +84,8 @@ it('uses card-local Component geometry, clips target bounds, and commits auto te
   expect(mocks.writeText).toHaveBeenCalledWith(expect.anything(), 'Edited')
   await act(async () => imageButton.click())
   expect(mocks.replaceAsset).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ id: 'asset-1' }), expect.any(Uint8Array))
-  expect(onStatus).toHaveBeenCalledWith('已替换组件图片', 'success')
+  // The document bridge reports success only after Main acknowledges the queued edit.
+  expect(onStatus).not.toHaveBeenCalled()
 })
 
 it('maps Runtime target identity to location, commits text and asset through the Store, and keeps local bounds', async () => {

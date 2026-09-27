@@ -42,6 +42,7 @@ import { NativeSelectionContext } from '../workbench/NativeSelectionContext'
 import { useWorkspaceMediaSource } from '../lessonWorkspace/workspaceMediaSourceContext'
 import { deliverWorkspaceMediaDrop, type WorkspaceMediaDropHandler } from '../lessonWorkspace/workspaceMediaDrop'
 import type { ImportedImageAsset } from '../project/assetManager'
+import { useEditorStore } from '../store/editorStore'
 import { WORKSPACE_MEDIA_DRAG_TYPE } from '../lessonWorkspace/workspaceMediaDrag'
 import { flowMediaDropAfterBlock } from './flow/flowMediaDropPosition'
 import { FlowPaperMedia } from './flow/FlowPaperMedia'
@@ -468,6 +469,8 @@ export function FlowWorkspace({ documentId, view, sessionToken, assets, selectio
     <NativeSelectionContext documentId={documentId} revision={view.revision} locationId={selection?.locationId ?? view.locationId} itemIds={selection?.selectedOverlayIds ?? []}
       enabled={!readOnly} ownsDocumentSelection={false} textEditing={Boolean(textEdit)} />
     <FlowOverlayAuthoringLayer view={view} sessionToken={sessionToken} selection={selection} locationId={selection?.locationId ?? view.locationId}
+      documentId={documentId} onSelectImageAsset={onSelectImageAsset}
+      onDynamicStatus={(message, kind) => { if (kind === 'error') setError(message); else useEditorStore.getState().setStatus(message) }}
       readOnly={readOnly} assetUrls={assetUrls} componentPackages={componentPackages} paperScrollTop={paperScroll.top} paperScrollLeft={paperScroll.left}
       paperOrigin={paperOrigin} paperWidth={currentPaperLayout.width} paragraphRects={currentPaperLayout.rects}
       runtimeFrames={runtimeLayout.runtimeFrames} onRuntimeHeightChange={onRuntimeHeightChange}

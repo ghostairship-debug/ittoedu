@@ -8,7 +8,6 @@ import type { StageRect } from '../../authoring/stageViewportTransform'
 import type { DeepReadonly } from '../../course/flowEditorView'
 import { beginRuntimeTargetEditSession, validateRuntimeTargetEditSession, type RuntimeTargetEditSession } from '../../authoring/runtimeTargetEditSession'
 import { flowComponentLightEditCommands, type FlowComponentLightEditTarget } from '../../composition/runtime/flowDynamicLightEditCommands'
-import { scheduleStaticFallbackRecapture } from '../../composition/runtime/staticFallbackRecapture'
 import type { CourseRuntimeContentTextTarget } from '../../runtime/runtimeContentTextAuthoringCommands'
 import { useEditorStore } from '../../store/editorStore'
 import { CanvasPlainTextEditor } from '../CanvasPlainTextEditor'
@@ -29,6 +28,7 @@ export interface FlowPaperDynamicLightEditProps {
   readonly componentPackages?: Readonly<Record<string, ComponentPackageData>>
   readonly readOnly?: boolean
   readonly onHeightChange?: (height: number) => void
+  readonly onRuntimeTargetsChanged?: (update: Readonly<RuntimeAuthoringTargetUpdate>) => void
   readonly onSelectImageAsset: () => Promise<{ meta: AssetMeta; bytes: Uint8Array } | null>
   readonly onStatus?: (message: string, kind?: 'success' | 'error') => void
 }
@@ -57,7 +57,7 @@ function localBounds(bounds: Readonly<{ x: number; y: number; width: number; hei
 }
 
 /** Content and edit controls inside one already-positioned Flow paper card. */
-export function FlowPaperDynamicLightEdit({ documentId, projectId, surfaceId, locationId, generation, item, frame, assetUrls, componentPackages, readOnly = false, onHeightChange, onSelectImageAsset, onStatus }: FlowPaperDynamicLightEditProps) {
+export function FlowPaperDynamicLightEdit({ documentId, projectId, surfaceId, locationId, generation, item, frame, assetUrls, componentPackages, readOnly = false, onHeightChange, onRuntimeTargetsChanged, onSelectImageAsset, onStatus }: FlowPaperDynamicLightEditProps) {
   const owner = JSON.stringify([documentId, projectId, surfaceId, locationId, generation, item.layerItemId,
     item.kind === 'runtime' ? item.runtime.source : `${item.component.packageId}@${item.component.version}`])
   const ownerRef = useRef(owner)
@@ -92,6 +92,7 @@ export function FlowPaperDynamicLightEdit({ documentId, projectId, surfaceId, lo
     const next = { owner, runtime: targets, componentText: [], componentImage: [] }
     snapshotRef.current = next
     setSnapshot(next)
+    onRuntimeTargetsChanged?.(update)
   }
   const acceptComponent = (update: Readonly<ComponentAuthoringTargetUpdate>) => {
     if (ownerRef.current !== owner || update.scope !== 'scene' || update.sceneId !== surfaceId || update.nodeId !== item.layerItemId) return
@@ -132,13 +133,11 @@ export function FlowPaperDynamicLightEdit({ documentId, projectId, surfaceId, lo
       if (!validateRuntimeTargetEditSession(edit.runtime.session, runtimeContext()).ok) return report('运行时文字目标已失效，未写入修改')
       const result = useEditorStore.getState().updateRuntimeContentTextAtTarget(edit.runtime.course, value)
       if (!result.ok) report(`${result.reason} 未写入修改`)
-      else if (result.status === 'updated') { scheduleStaticFallbackRecapture(item.layerItemId); report('已更新运行时文字', 'success') }
-      else report('运行时文字没有变化', 'success')
+      else if (result.status === 'unchanged') report('运行时文字没有变化', 'success')
     } else if (edit.component && sameTarget(edit.target as ComponentAuthoringTextTarget)) {
       const result = flowComponentLightEditCommands.writeText(edit.component, value)
       if (!result.ok) report(`${result.reason} 未写入修改`)
-      else if (result.status === 'updated') { scheduleStaticFallbackRecapture(item.layerItemId); report('已更新组件文字', 'success') }
-      else report('组件文字没有变化', 'success')
+      else if (result.status === 'unchanged') report('组件文字没有变化', 'success')
     } else report('组件文字目标已失效，未写入修改')
     setActive(null)
   }
@@ -151,8 +150,7 @@ export function FlowPaperDynamicLightEdit({ documentId, projectId, surfaceId, lo
       if (!validateRuntimeTargetEditSession(begun.session, runtimeContext()).ok) return report('运行时图片目标已失效，未写入修改')
       const result = useEditorStore.getState().replaceRuntimeAssetAtTarget(course, asset.meta, asset.bytes)
       if (!result.ok) report(`${result.reason} 未写入修改`)
-      else if (result.status === 'replaced') { scheduleStaticFallbackRecapture(item.layerItemId); report('已替换运行时图片', 'success') }
-      else report('运行时图片没有变化', 'success')
+      else if (result.status === 'unchanged') report('运行时图片没有变化', 'success')
     })
   }
   const replaceComponent = async (target: Readonly<ComponentAuthoringImageTarget>) => {
@@ -163,8 +161,7 @@ export function FlowPaperDynamicLightEdit({ documentId, projectId, surfaceId, lo
       if (!sameTarget(target)) return report('组件图片目标已失效，未写入修改')
       const result = flowComponentLightEditCommands.replaceAsset(captured, asset.meta, asset.bytes)
       if (!result.ok) report(`${result.reason} 未写入修改`)
-      else if (result.status === 'updated') { scheduleStaticFallbackRecapture(item.layerItemId); report('已替换组件图片', 'success') }
-      else report('组件图片没有变化', 'success')
+      else if (result.status === 'unchanged') report('组件图片没有变化', 'success')
     })
   }
   const selectAndReplace = async (targetId: string, commit: (asset: { meta: AssetMeta; bytes: Uint8Array }) => void) => {

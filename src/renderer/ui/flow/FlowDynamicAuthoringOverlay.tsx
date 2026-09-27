@@ -6,7 +6,7 @@ import { CanvasPlainTextEditor } from '../CanvasPlainTextEditor'
 export interface FlowDynamicAuthoringOverlayProps {
   readonly textTargets: ReadonlyArray<Readonly<ComponentAuthoringTextTarget>>
   readonly imageTargets: ReadonlyArray<Readonly<ComponentAuthoringImageTarget>>
-  /** Targets use paper coordinates; the parent owns scrolling and viewport projection. */
+  /** Targets use local card coordinates; the parent owns paper placement and viewport projection. */
   readonly style?: CSSProperties
   readonly activeText?: {
     readonly target: Readonly<ComponentAuthoringTextTarget>
@@ -20,7 +20,7 @@ export interface FlowDynamicAuthoringOverlayProps {
   readonly onImageActivate: (target: Readonly<ComponentAuthoringImageTarget>) => void
 }
 
-/** Paper-space hit targets; commands and canonical edits remain with the Flow owner. */
+/** Card-local hit targets; commands and canonical edits remain with the Flow owner. */
 export function FlowDynamicAuthoringOverlay({ textTargets, imageTargets, style, activeText, replacingImageTargetId, onTextActivate, onImageActivate }: FlowDynamicAuthoringOverlayProps) {
   if (textTargets.length === 0 && imageTargets.length === 0 && !activeText) return null
   return <div className="canvas-authoring-targets" data-testid="flow-component-authoring-targets" aria-label="纸面组件可编辑内容" style={style}>
