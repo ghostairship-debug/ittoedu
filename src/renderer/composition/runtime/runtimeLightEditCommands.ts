@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import type { LightEditTextOverride } from '../../../shared/contracts/runtime/lightEdit'
 import { selectActiveCourseProjectDocument, selectActiveSceneId, selectEditingScope, selectEffectiveLayerProjection, useEditorStore } from '../../store/editorStore'
-import { scheduleStaticFallbackRecapture } from './staticFallbackRecapture'
+
 
 export interface RuntimeLightEditView {
   readonly source: string
@@ -27,7 +27,7 @@ export function useRuntimeLightEditView(itemId: string): RuntimeLightEditView | 
 
 export type RuntimePageTextResult = { readonly ok: true; readonly changed: boolean } | { readonly ok: false; readonly reason: string }
 
-/** Store-backed M15 page-text commands for one selected Runtime; commits go through the Runtime text planner. */
+/** Page-text edits enter the dynamic fallback precommit lane; an ACK owns content and fallback together. */
 export const runtimeLightEditCommands = {
   read(itemId: string): RuntimeLightEditView | null {
     const row = selectEffectiveLayerProjection(useEditorStore.getState())?.unifiedRows
@@ -37,11 +37,12 @@ export const runtimeLightEditCommands = {
   },
 
   /** Replace one text everywhere the Runtime renders it (a rule without a region). */
-  setPageText(itemId: string, original: string, text: string): RuntimePageTextResult {
+  async setPageText(itemId: string, original: string, text: string): Promise<RuntimePageTextResult> {
     const state = useEditorStore.getState()
     const document = selectActiveCourseProjectDocument(state)
     const projection = selectEffectiveLayerProjection(state)
-    if (!document || !projection || !projection.locationId) return { ok: false, reason: '当前没有可编辑的 H5 演示页面' }
+    const documentId = state.courseDocument.documentId
+    if (!document || !projection?.locationId || !documentId) return { ok: false, reason: '当前没有可编辑的 H5 演示页面' }
     const target = state.captureRuntimeContentTextTarget({
       projectId: document.id,
       scope: selectEditingScope(state),
@@ -53,15 +54,16 @@ export const runtimeLightEditCommands = {
       lightEdit: { original },
     })
     if (!target) return { ok: false, reason: '这个 Runtime 已锁定或不在当前编辑范围，未写入修改' }
-    const committed = state.updateRuntimeContentTextAtTarget(target, text)
-    if (!committed.ok) return { ok: false, reason: committed.reason }
-    if (committed.status === 'updated') {
-      const handle = useEditorStore.getState().captureCourseSubmission()
-      const locationId = projection.locationId
-      if (!handle || !locationId) return { ok: false, reason: '页面文字已更新，但静态后备图缺少确认版本或页面；请撤销本次修改后重试' }
-      scheduleStaticFallbackRecapture({ handle, itemId, locationId,
-        amend: (commit, command) => useEditorStore.getState().amendFrozenCourseCommit(commit, command) })
+    const submission = state.submitDynamicFallbackIntent({
+      kind: 'runtime.text', documentId, locationId: projection.locationId, itemId, projectId: document.id, target, value: text,
+    })
+    if (!submission) return { ok: false, reason: '页面文字暂时无法提交，草稿已保留' }
+    try {
+      const result = await submission.settled
+      if (result.status === 'failed' || result.status === 'conflict') return { ok: false, reason: result.reason }
+      return { ok: true, changed: result.status === 'applied' }
+    } catch (error) {
+      return { ok: false, reason: error instanceof Error ? error.message : '页面文字提交失败，草稿已保留' }
     }
-    return { ok: true, changed: committed.status === 'updated' }
   },
 }

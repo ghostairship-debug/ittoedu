@@ -75,7 +75,7 @@ it('commits Flow paper Runtime text and image via the formal transaction, then u
   const reopened = openCourseProjectArchive(createCourseProjectArchive({ project: snapshot.model.project, assetFiles: snapshot.model.resources.assets ?? {}, componentFiles: snapshot.model.resources.components ?? {} }))
   expect(flowItems(reopened.project)[0]!.item).toMatchObject({ runtime: { content: { overrides: [{ original: ORIGINAL, text: 'Flow 页面新文字' }] } } })
   expect(runtimeLightEditCommands.read('flow-runtime')?.overrides).toHaveLength(1)
-  expect(runtimeLightEditCommands.setPageText('flow-runtime', ORIGINAL, '快捷入口文字')).toEqual({ ok: true, changed: true })
+  expect(await runtimeLightEditCommands.setPageText('flow-runtime', ORIGINAL, '快捷入口文字')).toEqual({ ok: true, changed: true })
   await settleCourse()
   expect(flowItems(formalProject(host))[0]!.item).toMatchObject({ runtime: { content: { overrides: [{ original: ORIGINAL, text: '快捷入口文字' }] } } })
 })

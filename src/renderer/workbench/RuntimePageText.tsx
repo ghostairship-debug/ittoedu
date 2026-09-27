@@ -1,7 +1,7 @@
-import { useMemo, useState, type KeyboardEvent } from 'react'
+import { useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import { normalizeLightEditText } from '../../shared/contracts/runtime/lightEdit'
 import { scanRuntimePageText } from '../../shared/runtimeText/scanPageText'
-import { runtimeLightEditCommands, useRuntimeLightEditView } from '../composition/runtime/runtimeLightEditCommands'
+import { runtimeLightEditCommands, useRuntimeLightEditView, type RuntimePageTextResult } from '../composition/runtime/runtimeLightEditCommands'
 
 const MAX_PAGE_TEXTS = 200
 
@@ -29,31 +29,41 @@ export function RuntimePageTextList({ itemId, onError }: { itemId: string; onErr
       : <ul className="runtime-page-text__list">
         {entries.map(original => <li key={original}>
           <PageTextRow original={original} current={everywhere.get(original) ?? original} regional={regional(original)} disabled={view.locked}
-            onCommit={text => {
-              const result = runtimeLightEditCommands.setPageText(itemId, original, text)
-              if (!result.ok) onError(result.reason)
-            }} />
+            onCommit={text => runtimeLightEditCommands.setPageText(itemId, original, text)} onError={onError} />
         </li>)}
       </ul>}
   </div>
 }
 
-function PageTextRow({ original, current, regional, disabled, onCommit }: { original: string; current: string; regional: readonly string[]; disabled: boolean; onCommit(text: string): void }) {
+function PageTextRow({ original, current, regional, disabled, onCommit, onError }: {
+  original: string; current: string; regional: readonly string[]; disabled: boolean
+  onCommit(text: string): Promise<RuntimePageTextResult>; onError(message: string): void
+}) {
   const [draft, setDraft] = useState<string | null>(null)
+  const [saving, setSaving] = useState(false)
+  const submitting = useRef(false)
   const value = draft ?? current
   const commit = () => {
-    if (draft !== null && draft !== current) onCommit(draft)
-    setDraft(null)
+    if (submitting.current || draft === null) return
+    if (draft === current) { setDraft(null); return }
+    const submittedDraft = draft
+    submitting.current = true
+    setSaving(true)
+    void onCommit(submittedDraft).then(result => {
+      if (result.ok) setDraft(previous => previous === submittedDraft ? null : previous)
+      else onError(result.reason)
+    }).catch(error => onError(error instanceof Error ? error.message : '页面文字提交失败，草稿已保留'))
+      .finally(() => { submitting.current = false; setSaving(false) })
   }
   const onKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
     if (event.nativeEvent.isComposing) return
     if (event.key === 'Enter') { event.preventDefault(); commit() }
-    if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); setDraft(null) }
+    if (event.key === 'Escape' && !submitting.current) { event.preventDefault(); event.stopPropagation(); setDraft(null) }
   }
   return <label className="runtime-page-text__row">
     {current !== original && <span className="runtime-page-text__original" title={original}>原文：{original}</span>}
     {regional.length > 0 && <span className="runtime-page-text__original">画面中已单独改为：{regional.join('、')}</span>}
-    <input aria-label={`页面文字：${original}`} value={value} disabled={disabled}
+    <input aria-label={`页面文字：${original}`} value={value} disabled={disabled || saving} aria-busy={saving}
       onChange={event => setDraft(event.target.value)} onBlur={commit} onKeyDown={onKeyDown} />
   </label>
 }
