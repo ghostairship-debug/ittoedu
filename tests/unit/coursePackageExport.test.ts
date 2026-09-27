@@ -371,6 +371,43 @@ describe('course package export', () => {
       .toContain('media-src data: blob:;')
   })
 
+  it('warns for managed HTML CSS backgrounds and Audio loads without counting URL examples', () => {
+    const sources = runtimeSources(createHtmlDocumentRuntimeSource({
+      html: `<!doctype html><html><head>
+        <style>.hero { background-image: url("https://background.example.com/image"); }</style>
+        </head><body>
+        <p>https://text.example.com/looks-like-media.mp4</p>
+        <div style="background:url('https://inline.example.com/image')"></div>
+        <script>
+          const example = "new Audio('https://example-only.example.com/not-loaded')";
+          new Audio('https://audio.example.com/sound');
+          new Audio(audioFromSettings);
+        </script>
+      </body></html>`,
+      resourceKeys: [],
+    }))
+    sources.project.network = { connectOrigins: [
+      'https://background.example.com', 'https://inline.example.com',
+      'https://audio.example.com', 'https://settings.example.com',
+    ] }
+    const report = collectCoursePackageExportPreflight(
+      sources.project, 'standalone-html',
+      { assetFiles: sources.assetFiles, components: sources.components },
+      PLAYER_BUNDLE, new Date('2026-08-17T00:00:00.000Z'),
+      { singleHtmlMode: 'offline-portable' },
+    )
+    const warnings = report.items.filter((item) => item.code === 'offline-managed-html-remote-media')
+    expect(warnings).toHaveLength(4)
+    const messages = warnings.map((item) => item.message).join(' ')
+    expect(messages).toContain('https://background.example.com/image')
+    expect(messages).toContain('https://inline.example.com/image')
+    expect(messages).toContain('https://audio.example.com/sound')
+    expect(messages).toContain('动态媒体地址')
+    expect(messages).not.toContain('text.example.com')
+    expect(messages).not.toContain('example-only.example.com')
+    expect(report.summary.canExport).toBe(true)
+  })
+
   it('lists only actual online remote dependencies in stable preflight order', () => {
     const sources = onlineSources()
     const online = collectCoursePackageExportPreflight(

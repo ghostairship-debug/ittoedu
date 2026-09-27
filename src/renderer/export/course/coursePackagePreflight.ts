@@ -1,3 +1,4 @@
+import { parse as parseJavaScript } from 'acorn'
 import type { ComponentPackageData } from '../../../shared/componentTypes'
 import { courseProjectDocumentSchema } from '../../../shared/courseProjectSchema'
 import type {
@@ -226,6 +227,9 @@ function collectOfflineManagedHtmlRemoteMedia(
   const parsed = courseProjectDocumentSchema.safeParse(project)
   if (!parsed.success) return []
   const dependencies = new Map<string, ReadonlyArray<string | number>>()
+  const dynamicMediaPaths: Array<ReadonlyArray<string | number>> = []
+  const declaredHttpsOrigins = (parsed.data.network?.connectOrigins ?? [])
+    .filter((origin) => exactHttpsOrigin(origin) !== null)
   visitCourseProject(parsed.data, {
     layerItem(item, path) {
       if (item.kind !== 'runtime' || !item.runtime.enabled) return
@@ -245,9 +249,44 @@ function collectOfflineManagedHtmlRemoteMedia(
       }
       // Scan only media elements and their URL attributes; visible URL text is not a dependency.
       // Removing raw-text elements also keeps JS examples from looking like actual media tags.
-      const markup = managed.html
-        .replace(/<!--[\s\S]*?-->/g, '')
-        .replace(/<(script|style|textarea|title)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, '')
+      const noComments = managed.html.replace(/<!--[\s\S]*?-->/g, '')
+      const styleAndScript = noComments.replace(/<(script|textarea|title)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, '')
+      const addBackgroundUrls = (css: string) => {
+        const withoutComments = css.replace(/\/\*[\s\S]*?\*\//g, '')
+        for (const declaration of withoutComments.matchAll(/\bbackground(?:-image)?\s*:\s*([^;}]*)/gi)) {
+          for (const url of declaration[1]!.matchAll(/url\(\s*(?:"([^"]+)"|'([^']+)'|([^\s)]+))\s*\)/gi)) {
+            add(url[1] ?? url[2] ?? url[3])
+          }
+        }
+      }
+      for (const style of styleAndScript.matchAll(/<style\b[^>]*>([\s\S]*?)<\/style\s*>/gi)) {
+        addBackgroundUrls(style[1]!)
+      }
+      for (const tag of styleAndScript.matchAll(/<[^>]+>/g)) {
+        const inlineStyle = /\bstyle\s*=\s*(?:"([^"]*)"|'([^']*)')/i.exec(tag[0])
+        if (inlineStyle) addBackgroundUrls(inlineStyle[1] ?? inlineStyle[2] ?? '')
+      }
+      for (const script of noComments.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script\s*>/gi)) {
+        try {
+          const ast = parseJavaScript(script[1]!, { ecmaVersion: 'latest', sourceType: 'module' })
+          const visit = (value: unknown): void => {
+            if (!value || typeof value !== 'object') return
+            if (Array.isArray(value)) { value.forEach(visit); return }
+            const node = value as Record<string, unknown>
+            if (node.type === 'NewExpression') {
+              const callee = node.callee as Record<string, unknown> | undefined
+              if (callee?.type === 'Identifier' && (callee.name === 'Audio' || callee.name === 'Image')) {
+                const argument = Array.isArray(node.arguments) ? node.arguments[0] as Record<string, unknown> | undefined : undefined
+                if (argument?.type === 'Literal' && typeof argument.value === 'string') add(argument.value)
+                else if (argument && declaredHttpsOrigins.length && !dynamicMediaPaths.includes(sourcePath)) dynamicMediaPaths.push(sourcePath)
+              }
+            }
+            Object.values(node).forEach(visit)
+          }
+          visit(ast)
+        } catch { /* An unparseable script cannot prove a media dependency. */ }
+      }
+      const markup = styleAndScript.replace(/<style\b[^>]*>[\s\S]*?<\/style\s*>/gi, '')
       for (const element of markup.matchAll(/<(img|audio|video|source|image)\b((?:[^"'<>]|"[^"]*"|'[^']*')*)>/gi)) {
         const tag = element[1]!.toLowerCase()
         const attributes = new Map<string, string>()
@@ -264,13 +303,23 @@ function collectOfflineManagedHtmlRemoteMedia(
       }
     },
   })
-  return [...dependencies].sort(([left], [right]) => compareStableStrings(left, right))
+  const items: CoursePackagePreflightItem[] = [...dependencies]
+    .sort(([left], [right]) => compareStableStrings(left, right))
     .map(([url, path]) => ({
       severity: 'warning',
       code: 'offline-managed-html-remote-media',
       message: `离线便携单 HTML 中的 HTML 页面引用远程媒体：${url}；离线时该媒体不可用。`,
       path,
     }))
+  for (const path of dynamicMediaPaths) {
+    items.push({
+      severity: 'warning',
+      code: 'offline-managed-html-remote-media',
+      message: '离线便携单 HTML 中的 HTML 页面使用动态媒体地址且工程声明了网络来源；离线时相关媒体可能不可用。',
+      path,
+    })
+  }
+  return items
 }
 
 function collectOnlineConnectPreflightItems(
