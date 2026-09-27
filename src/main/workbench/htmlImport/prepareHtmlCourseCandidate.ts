@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
 import sharp from 'sharp'
+import { UserFacingError } from '../../../shared/errors'
 import type { DocumentModel, DocumentSnapshot } from '../../../shared/workbench/document'
 import { courseProjectDocumentSchema } from '../../../shared/courseProjectSchema'
 import { createHtmlDocumentRuntimeSource } from '../../../shared/runtime/htmlDocumentSource'
@@ -45,7 +46,7 @@ export async function prepareHtmlCourseCandidate(input: {
   const closure = await readHtmlClosure({ htmlPath: input.sourcePath, ...(input.rootDir ? { rootDir: input.rootDir } : {}) })
   signal?.throwIfAborted()
   const errors = validateHtmlImport(closure)
-  if (errors.length) throw new Error(errors.map(item => item.message).join('\n'))
+  if (errors.length) throw new UserFacingError('HTML 导入失败', errors.map(item => item.message).join('\n'), '请移除或本地化列出的资源后重试。')
   const project = structuredClone(snapshot.model.project)
   const resources = structuredClone(snapshot.model.resources)
   const assets: Record<string, { assetId: string }> = {}

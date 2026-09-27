@@ -16,6 +16,7 @@ import { DocumentToolGateway } from '../../src/core/tools/DocumentToolGateway'
 import { ControlledBuildService } from '../../src/main/workbench/build/ControlledBuildService'
 import { createDocumentJournal } from '../../src/main/workbench/documentJournal'
 import { HtmlImportService } from '../../src/main/workbench/htmlImport/HtmlImportService'
+import { normalizeDesktopError } from '../../src/main/errors'
 import { unpackHtmlDocumentRuntimeSource } from '../../src/shared/runtime/htmlDocumentSource'
 import type { BuildAdmissionPort } from '../../src/shared/workbench/build'
 
@@ -217,6 +218,27 @@ describe('M17 S13 HTML import orchestration', () => {
     await fs.writeFile(network.sourcePath, '<script>fetch("https://example.org/a.json")</script>')
     await expect(network.service.prepare(network.request)).rejects.toThrow('网络')
     expect(network.run).not.toHaveBeenCalled()
+  })
+
+  it('projects every rejected remote URL through desktop IPC without writing the document', async () => {
+    const f = await fixture()
+    const urls = ['https://example.org/lesson.js', 'https://example.org/photo.png', 'https://example.org/audio.mp3']
+    await fs.writeFile(f.sourcePath, `<script src="${urls[0]}"></script><img src="${urls[1]}"><audio src="${urls[2]}"></audio>`)
+    const before = f.session.read()
+    const execute = vi.spyOn(f.gateway, 'execute')
+    const fallback = { code: 'HTML_IMPORT_FAILED', title: 'HTML 导入失败', message: '导入未完成。', suggestion: '请重试。' }
+    let failure: unknown
+    try { await f.service.prepare(f.request) } catch (error) { failure = error }
+    expect(failure).toBeDefined()
+    const shown = normalizeDesktopError(failure, fallback)
+    expect(shown.title).toBe('HTML 导入失败')
+    for (const url of urls) expect(shown.message).toContain(url)
+    expect(shown.suggestion).toContain('本地化')
+    expect(shown.message).not.toBe(fallback.message)
+    expect(execute).not.toHaveBeenCalled()
+    expect(f.session.read().revision).toBe(before.revision)
+    expect(f.session.read().undoDepth).toBe(before.undoDepth)
+    expect(f.session.read().model).toEqual(before.model)
   })
 
   it('cancels an in-flight S13 check and keeps late results outside the document', async () => {
