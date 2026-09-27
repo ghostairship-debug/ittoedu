@@ -12,22 +12,33 @@ test('HTML carrier executes ordered scripts and handlers under inherited CSP', a
     let definition: any
     new Function('CoursewareRuntime', source)({ define(value: unknown) { definition = value } })
     const root = document.body.appendChild(document.createElement('div'))
+    const observed: string[] = []
+    const observer = new MutationObserver(records => {
+      for (const record of records) if (record.attributeName === 'data-html-document-ready') observed.push('ready')
+    })
+    observer.observe(root, { subtree: true, attributes: true, attributeFilter: ['data-html-document-ready'] })
     let ready!: Promise<unknown>
     const lifecycle = definition.create({ dom: { root }, assets: { url() { throw Error('unexpected') } }, capture: { waitUntil(value: Promise<unknown>) { ready = value } } })
     await ready
     const frame = root.querySelector('iframe')!
+    const readyAttribute = frame.dataset.htmlDocumentReady
     const child = frame.contentWindow as Window & { order: string[] }
     const button = frame.contentDocument!.getElementById('action') as HTMLButtonElement
     const event = new MouseEvent('click', { bubbles: true, cancelable: true })
     const allowed = button.dispatchEvent(event)
     const value = { order: child.order, text: button.textContent, allowed, data: frame.contentDocument!.getElementById('data')?.textContent,
+      readyAttribute, observed: [...observed],
       scriptSources: Array.from(frame.contentDocument!.querySelectorAll('script')).map(script => script.getAttribute('src')) }
     lifecycle.destroy()
-    return value
+    observer.disconnect()
+    return { ...value, clearedOnDestroy: frame.dataset.htmlDocumentReady === undefined }
   }, source)
   expect(result.order).toEqual(['first', 'second', 'click'])
   expect(result.text).toBe('click')
   expect(result.allowed).toBe(false)
+  expect(result.readyAttribute).toBe('true')
+  expect(result.observed).toContain('ready')
+  expect(result.clearedOnDestroy).toBe(true)
   expect(result.data).toBe('{"literal":"do not run"}')
   expect(result.scriptSources).toEqual([expect.stringMatching(/^blob:/), null, expect.stringMatching(/^blob:/)])
 })

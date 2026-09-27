@@ -64,7 +64,7 @@ CoursewareRuntime.define({
     const ready = new Promise((resolve, reject) => {
       let pending = true;
       const cleanup = () => { clearTimeout(timeout); iframe.removeEventListener('load', onLoad); iframe.removeEventListener('error', onError); };
-      const finish = (error) => { if (!pending) return; pending = false; cleanup(); error ? reject(error) : resolve(); };
+      const finish = (error) => { if (!pending) return; pending = false; cleanup(); if (error) delete iframe.dataset.htmlDocumentReady; error ? reject(error) : resolve(); };
       const onLoad = () => {
         // A connected iframe may also emit the initial about:blank load.
         if (iframe.contentDocument?.URL !== 'about:srcdoc' || iframe.contentDocument.readyState !== 'complete') return;
@@ -82,6 +82,7 @@ CoursewareRuntime.define({
               });
             }
           }
+          iframe.dataset.htmlDocumentReady = 'true';
           finish();
         } catch (error) { finish(error); }
       };
@@ -115,7 +116,7 @@ CoursewareRuntime.define({
         pausedMedia.clear();
       },
       prepareCapture() { return ready; },
-      destroy() { if (destroyed) return; destroyed = true; pausedMedia.clear(); cancelReady(); iframe.remove(); iframe.srcdoc = ''; for (const url of scriptUrls) URL.revokeObjectURL(url); },
+      destroy() { if (destroyed) return; destroyed = true; pausedMedia.clear(); cancelReady(); delete iframe.dataset.htmlDocumentReady; iframe.remove(); iframe.srcdoc = ''; for (const url of scriptUrls) URL.revokeObjectURL(url); },
     };
   },
 });`
