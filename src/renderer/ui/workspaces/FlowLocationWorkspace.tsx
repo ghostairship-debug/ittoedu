@@ -46,6 +46,7 @@ export interface FlowLocationWorkspaceProps {
   readonly onMountTryRun: (container: HTMLElement) => Promise<FlowTryRunSession>
   readonly onDropWorkspaceMedia?: WorkspaceMediaDropHandler
   readonly onSelectImageAsset: () => Promise<ImportedImageAsset | null>
+  readonly onStatus?: (message: string) => void
 }
 
 export function FlowLocationWorkspace({
@@ -66,6 +67,7 @@ export function FlowLocationWorkspace({
   onMountTryRun,
   onDropWorkspaceMedia,
   onSelectImageAsset,
+  onStatus,
 }: FlowLocationWorkspaceProps) {
   const [toolbarContainer, setToolbarContainer] = useState<HTMLDivElement | null>(null)
   const tryRunRef = useRef<HTMLDivElement>(null)
@@ -148,6 +150,7 @@ export function FlowLocationWorkspace({
             componentPackages={componentPackages}
             onDropWorkspaceMedia={onDropWorkspaceMedia}
             onSelectImageAsset={onSelectImageAsset}
+            onStatus={onStatus}
           />
         ) : null}
         <div

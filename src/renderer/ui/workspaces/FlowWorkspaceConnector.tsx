@@ -1,6 +1,6 @@
 import type { FlowDocumentDraft } from '../../authoring/flowDocumentDraft'
 import { projectWithBackgroundPreview, flowTextColorPreview } from '../../authoring/backgroundPreview'
-import { useCallback, useMemo } from 'react'
+import { useCallback, useEffect, useMemo, useRef } from 'react'
 import type { ComponentPackageData } from '../../../shared/componentTypes'
 import type { CourseAuthoringSession } from '../../authoring/courseAuthoringSession'
 import type { FlowTextEditSession } from '../../authoring/flowTextEdit'
@@ -48,6 +48,16 @@ export function FlowWorkspaceConnector({ onDropWorkspaceMedia, onSelectImageAsse
   const documentDraft = useEditorStore(state => state.flowDocumentDraft)
   const runFlowAuthoringIntent = useEditorStore(selectRunFlowAuthoringIntent)
   const setCanvasMode = useEditorStore(selectSetCanvasMode)
+  const setStatus = useEditorStore(state => state.setStatus)
+  const activeDocumentId = useRef(documentId)
+  activeDocumentId.current = documentId
+  useEffect(() => {
+    activeDocumentId.current = documentId
+    return () => { activeDocumentId.current = null }
+  }, [documentId])
+  const reportStatus = useCallback((message: string) => {
+    if (documentId && activeDocumentId.current === documentId) setStatus(message)
+  }, [documentId, setStatus])
   const commands = useMemo<FlowCurrentSessionCommandPort>(() => ({
     run: runFlowAuthoringIntent,
   }), [runFlowAuthoringIntent])
@@ -118,6 +128,7 @@ export function FlowWorkspaceConnector({ onDropWorkspaceMedia, onSelectImageAsse
       onMountTryRun={onMountTryRun}
       onDropWorkspaceMedia={onDropWorkspaceMedia}
       onSelectImageAsset={onSelectImageAsset}
+      onStatus={reportStatus}
     />
   )
 }

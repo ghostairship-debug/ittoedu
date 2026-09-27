@@ -42,7 +42,6 @@ import { NativeSelectionContext } from '../workbench/NativeSelectionContext'
 import { useWorkspaceMediaSource } from '../lessonWorkspace/workspaceMediaSourceContext'
 import { deliverWorkspaceMediaDrop, type WorkspaceMediaDropHandler } from '../lessonWorkspace/workspaceMediaDrop'
 import type { ImportedImageAsset } from '../project/assetManager'
-import { useEditorStore } from '../store/editorStore'
 import { WORKSPACE_MEDIA_DRAG_TYPE } from '../lessonWorkspace/workspaceMediaDrag'
 import { flowMediaDropAfterBlock } from './flow/flowMediaDropPosition'
 import { FlowPaperMedia } from './flow/FlowPaperMedia'
@@ -67,6 +66,7 @@ export interface FlowWorkspaceProps {
   readonly componentPackages?: Record<string, ComponentPackageData>
   readonly onDropWorkspaceMedia?: WorkspaceMediaDropHandler
   readonly onSelectImageAsset?: () => Promise<ImportedImageAsset | null>
+  readonly onStatus?: (message: string) => void
 }
 export interface FlowBlockFocusRequest {
   readonly documentId: string
@@ -103,7 +103,7 @@ export function requestFlowBlockSelection(request: { documentId: string; surface
 }
 const EMPTY_ASSET_FILES: Record<string, Uint8Array> = {}
 const EMPTY_COMPONENT_PACKAGES: Record<string, ComponentPackageData> = {}
-export function FlowWorkspace({ documentId, view, sessionToken, assets, selection, textEdit, documentDraft, commands, readOnly = false, assetFiles = EMPTY_ASSET_FILES, componentPackages = EMPTY_COMPONENT_PACKAGES, onDropWorkspaceMedia, onSelectImageAsset }: FlowWorkspaceProps) {
+export function FlowWorkspace({ documentId, view, sessionToken, assets, selection, textEdit, documentDraft, commands, readOnly = false, assetFiles = EMPTY_ASSET_FILES, componentPackages = EMPTY_COMPONENT_PACKAGES, onDropWorkspaceMedia, onSelectImageAsset, onStatus }: FlowWorkspaceProps) {
   assertActiveFlowEditorView(view)
   const mediaSource = useWorkspaceMediaSource()
   const mediaSourceRef = useRef(mediaSource)
@@ -470,7 +470,7 @@ export function FlowWorkspace({ documentId, view, sessionToken, assets, selectio
       enabled={!readOnly} ownsDocumentSelection={false} textEditing={Boolean(textEdit)} />
     <FlowOverlayAuthoringLayer view={view} sessionToken={sessionToken} selection={selection} locationId={selection?.locationId ?? view.locationId}
       documentId={documentId} onSelectImageAsset={onSelectImageAsset}
-      onDynamicStatus={(message, kind) => { if (kind === 'error') setError(message); else useEditorStore.getState().setStatus(message) }}
+      onDynamicStatus={(message, kind) => { if (kind === 'error') setError(message); else onStatus?.(message) }}
       readOnly={readOnly} assetUrls={assetUrls} componentPackages={componentPackages} paperScrollTop={paperScroll.top} paperScrollLeft={paperScroll.left}
       paperOrigin={paperOrigin} paperWidth={currentPaperLayout.width} paragraphRects={currentPaperLayout.rects}
       runtimeFrames={runtimeLayout.runtimeFrames} onRuntimeHeightChange={onRuntimeHeightChange}

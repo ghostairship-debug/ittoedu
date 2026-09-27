@@ -195,6 +195,10 @@ export function SlideWorkspaceConnector({
   const previewBackgroundColor = useEditorStore((state) => state.previewBackgroundColor)
   const documentId = useEditorStore((state) => state.courseDocument.documentId)
   const sessionGeneration = useEditorStore((state) => state.courseAuthoringSession?.token.generation ?? -1)
+  const submitDynamicFallbackIntent = useEditorStore(state => state.submitDynamicFallbackIntent)
+  const dynamicFallbackState = useEditorStore(state => state.dynamicFallbackState)
+  const retryDynamicFallback = useEditorStore(state => state.retryDynamicFallback)
+  const discardDynamicFallback = useEditorStore(state => state.discardDynamicFallback)
   const view = useMemo(() => {
     if (!project || !locationId) return null
     return buildSlideEditorView({
@@ -328,10 +332,10 @@ export function SlideWorkspaceConnector({
     runtime: {
       captureRuntimeContentTextTarget,
       captureRuntimeAssetReplacementTarget,
-      submitDynamicFallbackIntent: (intent) => useEditorStore.getState().submitDynamicFallbackIntent(intent),
-      dynamicFallbackState: (targetDocumentId) => useEditorStore.getState().dynamicFallbackState(targetDocumentId),
-      retryDynamicFallback: (taskId) => useEditorStore.getState().retryDynamicFallback(taskId),
-      discardDynamicFallback: (taskId) => useEditorStore.getState().discardDynamicFallback(taskId),
+      submitDynamicFallbackIntent,
+      dynamicFallbackState,
+      retryDynamicFallback,
+      discardDynamicFallback,
     },
     authoring: {
       runFieldTextIntent: runSlideFieldTextIntent,
@@ -392,6 +396,10 @@ export function SlideWorkspaceConnector({
     cancelTextEdit,
     captureRuntimeAssetReplacementTarget,
     captureRuntimeContentTextTarget,
+    submitDynamicFallbackIntent,
+    dynamicFallbackState,
+    retryDynamicFallback,
+    discardDynamicFallback,
     commitTextEdit,
     componentPackages,
     drawSlideShapeNode,
