@@ -21,7 +21,7 @@ import { validateRuntimeSource } from '../../RuntimeRegistry'
 import { registerPublishedDynamicUpdateProbe } from '../publishedDynamicUpdateProbe'
 import { DomTextOverrides } from '../../lightEdit/domTextOverrides'
 import { managedHtmlDocuments, watchManagedHtmlDocuments } from '../../lightEdit/htmlDocumentRoots'
-import { observeSurfaceRuntimeContentSize, type SurfaceRuntimeContentSizeObserver, type SurfaceRuntimeContentSource } from './surfaceRuntimeContentSize'
+import { observeSurfaceRuntimeContentSize, type FlowHtmlConfirmationMode, type SurfaceRuntimeContentSizeObserver, type SurfaceRuntimeContentSource } from './surfaceRuntimeContentSize'
 import type { LightEditTextOverride } from '../../../shared/contracts/runtime/lightEdit'
 import type { RuntimeAuthoringTargetsChangedHandler } from '../../RuntimeAuthoringTargetRegistry'
 import {
@@ -82,6 +82,7 @@ export interface PublishedSurfaceRuntimeMountOptions {
   fallbackText?: string
   onContentHeightChange?(height: number): void
   contentSizeSource?: () => SurfaceRuntimeContentSource | null
+  flowHtmlConfirmationMode?: FlowHtmlConfirmationMode
   actions?: Readonly<RuntimeHostActions>
   presentation?: RuntimePresentationApi
   reportError?(phase: 'register' | 'create' | 'lifecycle' | 'destroy', error: Error): void
@@ -666,6 +667,7 @@ export function mountPublishedSurfaceRuntime(
     contentSizeObserver = observeSurfaceRuntimeContentSize({
       root,
       source,
+      flowHtmlConfirmationMode: options.flowHtmlConfirmationMode,
       onHeightChange: options.onContentHeightChange,
       onError: error => quarantine(error),
     })

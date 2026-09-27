@@ -245,7 +245,7 @@ export async function runDynamicCandidateHostSmoke(project: CourseProjectDocumen
     let hostFailure: AuthoringToolFailure | undefined
     try {
       const firstTarget = !session
-      session ??= createPublishedCourseSession(payload, { initialLocationId: locationId,
+      session ??= createPublishedCourseSession(payload, { initialLocationId: locationId, flowHtmlConfirmationMode: 'admission',
         ...(initialStateId ? { initialPresentationStateId: initialStateId } : {}),
         resolveAsset: assetId => {
           const url = payload.assets[assetId]?.url
