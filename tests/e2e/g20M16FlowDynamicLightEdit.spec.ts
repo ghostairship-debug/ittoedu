@@ -15,6 +15,7 @@ import { selectionServer, setupSelectionUI } from './helpers/g20SelectionHarness
 const name = 'Flow 动态轻编辑.h5lesson'
 const runtimeId = 'm16-light-runtime'
 const componentId = 'm16-light-component'
+const initialFallbackId = 'm16-light-initial-fallback'
 const oldText = 'Flow 页面原文字'
 const newText = 'Flow 页面新文字'
 const newCardText = '词语卡片：Flow 已修改'
@@ -49,18 +50,22 @@ function fixture() {
   project.componentPackages[card.manifest.id] = componentPackageMeta(card)
   project.assets['m16-light-original'] = { id: 'm16-light-original', filename: 'original.png', mimeType: 'image/png', kind: 'image',
     path: 'assets/m16-light-original.png', byteLength: originalPicture.byteLength, width: 160, height: 90 }
+  project.assets[initialFallbackId] = { id: initialFallbackId, filename: 'initial-fallback.png', mimeType: 'image/png', kind: 'image',
+    path: `assets/${initialFallbackId}.png`, byteLength: originalPicture.byteLength, width: 160, height: 90 }
   const runtime: RuntimeLayerItem = {
     kind: 'runtime', layerItemId: runtimeId, label: 'Flow 页面 Runtime', order: 1, visible: true, locked: false,
     rotation: 0, opacity: 1, hitPolicy: 'auto', playbackInitialVisibility: 'inherit', paperSpace: 'paper',
     frame: { mode: 'absolute', x: 40, y: 130, width: 440, height: 260 },
     runtime: { protocol: 'surface-runtime', runtimeApiVersion: 3, enabled: true, renderMode: 'dom', source: runtimeSource,
-      content: { values: {} }, assets: { hero: { assetId: 'm16-light-original' } } },
+      content: { values: {} }, assets: { hero: { assetId: 'm16-light-original' } },
+      staticFallback: { assetId: initialFallbackId, coverage: 'scene' } },
   }
   const component: ComponentLayerItem = {
     kind: 'component', layerItemId: componentId, label: 'Flow 词语卡片', order: 2, visible: true, locked: false,
     rotation: 0, opacity: 1, hitPolicy: 'auto', playbackInitialVisibility: 'inherit', paperSpace: 'paper',
     frame: { mode: 'absolute', x: 500, y: 130, width: 400, height: 300 },
     component: { packageId: card.manifest.id, version: card.manifest.version }, props: {},
+    staticFallbackAssetId: initialFallbackId,
   }
   flow.surfaceLayerItems.push(
     { item: runtime, visibility: { mode: 'all', locationIds: [] }, bodyPlane: 'overlay',
@@ -68,7 +73,7 @@ function fixture() {
     { item: component, visibility: { mode: 'all', locationIds: [] }, bodyPlane: 'overlay' },
   )
   const parsed = courseProjectDocumentSchema.parse(project)
-  return createCourseProjectArchive({ project: parsed, assetFiles: { 'm16-light-original': originalPicture },
+  return createCourseProjectArchive({ project: parsed, assetFiles: { 'm16-light-original': originalPicture, [initialFallbackId]: originalPicture },
     componentFiles: componentPackagesToArchiveFiles({ [card.manifest.id]: card }) })
 }
 
@@ -136,6 +141,8 @@ test('M16 Flow paper Runtime and managed Component light edits commit with fallb
     const initial = await snapshot(page, documentId)
     evidence.initial = initial
     expect(initial.runtimeAnchorBlockId).toBeTruthy()
+    expect(initial.runtime.fallback).toBe(initialFallbackId)
+    expect(initial.component.fallback).toBe(initialFallbackId)
     await expect(runtime.getByTestId('flow-page-runtime')).toBeVisible()
     await expect(runtime.locator('[data-m16-light-runtime-text]')).toHaveText(oldText)
     await expect(component.locator('[data-m15-card-title]')).toHaveText('词语卡片')
@@ -150,6 +157,7 @@ test('M16 Flow paper Runtime and managed Component light edits commit with fallb
     const afterCardText = await snapshot(page, documentId)
     expect(afterCardText.undoDepth).toBe(initial.undoDepth + 1)
     expect(afterCardText.component.fallback).toBeTruthy()
+    expect(afterCardText.component.fallback).not.toBe(initialFallbackId)
     await expect(component.locator('[data-m15-card-title]')).toHaveText(newCardText)
 
     await pick(cardImagePath)
@@ -158,6 +166,7 @@ test('M16 Flow paper Runtime and managed Component light edits commit with fallb
     const afterCardImage = await snapshot(page, documentId)
     expect(afterCardImage.undoDepth).toBe(afterCardText.undoDepth + 1)
     expect(afterCardImage.component.fallback).toBeTruthy()
+    expect(afterCardImage.component.fallback).not.toBe(afterCardText.component.fallback)
     const cardAssetId = afterCardImage.component.assetOverrides.pic!.assetId
     await expect.poll(() => component.locator('[data-m15-card-picture]').evaluate(image => (image as HTMLImageElement).naturalWidth)).toBeGreaterThan(0)
 
@@ -185,6 +194,7 @@ test('M16 Flow paper Runtime and managed Component light edits commit with fallb
     const afterRuntimeText = await snapshot(page, documentId)
     expect(afterRuntimeText.undoDepth).toBe(afterCardImage.undoDepth + 1)
     expect(afterRuntimeText.runtime.fallback).toBeTruthy()
+    expect(afterRuntimeText.runtime.fallback).not.toBe(initialFallbackId)
     await expect(runtime.locator('[data-m16-light-runtime-text]')).toHaveText(newText)
 
     await pick(runtimeImagePath)
@@ -193,6 +203,7 @@ test('M16 Flow paper Runtime and managed Component light edits commit with fallb
     const edited = await snapshot(page, documentId)
     expect(edited.undoDepth).toBe(afterRuntimeText.undoDepth + 1)
     expect(edited.runtime.fallback).toBeTruthy()
+    expect(edited.runtime.fallback).not.toBe(afterRuntimeText.runtime.fallback)
     const runtimeAssetId = edited.runtime.assets.hero.assetId
     evidence.edited = edited
     await runtimeEditToggle.click()
@@ -204,11 +215,13 @@ test('M16 Flow paper Runtime and managed Component light edits commit with fallb
     const undone = await snapshot(page, documentId)
     expect(undone.undoDepth).toBe(edited.undoDepth - 1)
     expect(undone.runtime.content.overrides).toContainEqual({ original: oldText, region: 'section>h2', text: newText })
+    expect(undone.runtime.fallback).toBe(afterRuntimeText.runtime.fallback)
     evidence.undone = undone
     await page.getByLabel('常用工具').getByRole('button', { name: '重做', exact: true }).click()
     await expect.poll(async () => (await snapshot(page, documentId)).runtime.assets.hero.assetId).toBe(runtimeAssetId)
     const redone = await snapshot(page, documentId)
     expect(redone.redoDepth).toBe(0)
+    expect(redone.runtime.fallback).toBe(edited.runtime.fallback)
     evidence.redone = redone
 
     await page.keyboard.press('Control+S')
@@ -230,6 +243,8 @@ test('M16 Flow paper Runtime and managed Component light edits commit with fallb
     const cardFallback = savedCard.staticFallbackAssetId
     expect(runtimeFallback).toBeTruthy()
     expect(cardFallback).toBeTruthy()
+    expect(runtimeFallback).not.toBe(initialFallbackId)
+    expect(cardFallback).not.toBe(initialFallbackId)
     expect(saved.assetFiles[runtimeFallback!]?.byteLength).toBeGreaterThan(0)
     expect(saved.assetFiles[cardFallback!]?.byteLength).toBeGreaterThan(0)
     evidence.saved = { cardAssetId, runtimeAssetId, runtimeFallback, cardFallback }
@@ -261,7 +276,8 @@ test('M16 Flow paper Runtime and managed Component light edits commit with fallb
     evidence.modelRequests = model.requests.length
     writeFileSync(join(directory, 'evidence.json'), JSON.stringify(evidence, null, 2))
     await info.attach('Flow dynamic light edit evidence', { path: join(directory, 'evidence.json'), contentType: 'application/json' })
-    await app?.close()
+    await app?.evaluate(({ app: electronApp, BrowserWindow }) => { BrowserWindow.getAllWindows().forEach(window => window.destroy()); electronApp.exit(0) }).catch(() => undefined)
+    await app?.close().catch(() => undefined)
     await model.close()
   }
 })
