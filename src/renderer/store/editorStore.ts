@@ -1,5 +1,6 @@
 import { CourseDocumentBridge, type CourseDocumentConnection } from '../documents/CourseDocumentBridge'
 import type { DynamicFallbackIntent } from '../composition/runtime/precommitDynamicFallback'
+import { prepareFlowDynamicDrafts } from '../composition/runtime/flowDynamicDraftPreparation'
 import { createCoursePlannerBackend, courseViewModel, courseViewPatch } from '../documents/CourseDocumentView'
 import type { DocumentHostAPI } from '../../shared/workbench/desktop'
 import type { DocumentSnapshot } from '../../shared/workbench/document'
@@ -618,6 +619,16 @@ export function selectHasUnsavedCourseChanges(state: EditorState): boolean {
 export const useEditorStore = create<EditorState>((set, get) => {
   const write = (patch: Record<string, unknown>) => set(courseViewPatch(patch))
   const documents = new CourseDocumentBridge({ read: get, patch: write })
+  let navigationIntent = 0
+  const prepareCurrentFlowDynamicDrafts = async () => {
+    const before = documents.connection()
+    const intent = navigationIntent
+    if (before.documentId) await prepareFlowDynamicDrafts(before.documentId)
+    const after = documents.connection()
+    if (before.documentId !== after.documentId || before.activation !== after.activation || intent !== navigationIntent) {
+      throw new Error('准备输入期间文档已切换，请重试')
+    }
+  }
   const initialBundle = withDefaultComponentController(createBlankCourseProject())
   const initialCourse = initialBundle.project
   const initialBackend = createCoursePlannerBackend(openSlideAuthoringSession(initialCourse))
@@ -1298,50 +1309,98 @@ export const useEditorStore = create<EditorState>((set, get) => {
     discardDynamicFallback: taskId => documents.discardDynamicFallback(taskId),
     dynamicFallbackState: documentId => documents.dynamicFallbackState(documentId),
     async activateCourseDocument(id) {
-      try { await documents.activatePrepared(id, () => get().drainCourseDocument()) }
-      catch (error) { write({ errorMessage: error instanceof Error ? error.message : '切换失败，当前输入已保留' }); throw error }
+      const request = ++navigationIntent
+      try {
+        await prepareCurrentFlowDynamicDrafts()
+        if (request !== navigationIntent) return
+        await documents.activatePrepared(id, () => get().drainCourseDocument())
+      } catch (error) {
+        if (request !== navigationIntent) return
+        write({ errorMessage: error instanceof Error ? error.message : '切换失败，当前输入已保留' })
+        throw error
+      }
     },
     async closeCourseDocument(id) {
-      try { await get().drainAllCourseDocuments(); return await documents.close(id) }
-      catch (error) { write({ errorMessage: error instanceof Error ? error.message : '未能关闭，当前输入已保留' }); return false }
+      const request = ++navigationIntent
+      try {
+        await get().drainAllCourseDocuments()
+        return request === navigationIntent ? documents.close(id) : false
+      } catch (error) {
+        if (request === navigationIntent) write({ errorMessage: error instanceof Error ? error.message : '未能关闭，当前输入已保留' })
+        return false
+      }
     },
-    openCourseDocument: path => documents.open(path),
-    restoreCourseDocument: id => documents.restore(id),
+    async openCourseDocument(path) {
+      const request = ++navigationIntent
+      try {
+        if (documents.connection().documentId) await get().drainCourseDocument()
+        if (request === navigationIntent) await documents.open(path)
+      } catch (error) { if (request === navigationIntent) throw error }
+    },
+    async restoreCourseDocument(id) {
+      const request = ++navigationIntent
+      try {
+        if (documents.connection().documentId) await get().drainCourseDocument()
+        if (request === navigationIntent) await documents.restore(id)
+      } catch (error) { if (request === navigationIntent) throw error }
+    },
     listCourseRecovery: () => documents.recoverable(),
     discardCourseRecovery: id => documents.discardRecovery(id),
     async drainCourseDocument() {
+      await prepareCurrentFlowDynamicDrafts()
       const prepared = courseLifecycleSlice.prepareCourseProjectPersistence()
       if (!prepared.ok) throw new Error(prepared.reason)
       return documents.drain()
     },
-    drainAllCourseDocuments: () => documents.drainAll(() => {
-      const prepared = courseLifecycleSlice.prepareCourseProjectPersistence()
-      if (!prepared.ok) throw new Error(prepared.reason)
-    }),
+    async drainAllCourseDocuments() {
+      await prepareCurrentFlowDynamicDrafts()
+      return documents.drainAll(() => {
+        const prepared = courseLifecycleSlice.prepareCourseProjectPersistence()
+        if (!prepared.ok) throw new Error(prepared.reason)
+      })
+    },
     async undoLatestAgentCourseDocument() {
       const target = documents.captureLatestAgentUndoTarget()
       await get().drainCourseDocument()
       return documents.undoLatestAgent(target)
     },
     async saveCourseDocument(saveAs) {
+      await prepareCurrentFlowDynamicDrafts()
       const prepared = courseLifecycleSlice.prepareCourseProjectPersistence()
       if (!prepared.ok) throw new Error(prepared.reason)
       return documents.save(saveAs)
     },
     async createCourseDocument(surface, canvas?) {
-      const factory = surface === 'slide' ? () => createBlankCourseProject({ canvas }) : surface === 'flow' ? createBlankFlowCourseProject : createBlankSpatialCourseProject
-      const bundle = withDefaultComponentController(factory())
-      await documents.create(courseViewModel({ courseAssetSidecar: emptyCourseAssetSidecar(), componentPackages: bundle.componentPackages }, bundle.project), `${bundle.project.title}.h5lesson`)
+      const request = ++navigationIntent
+      try {
+        if (documents.connection().documentId) await get().drainCourseDocument()
+        if (request !== navigationIntent) return
+        const factory = surface === 'slide' ? () => createBlankCourseProject({ canvas }) : surface === 'flow' ? createBlankFlowCourseProject : createBlankSpatialCourseProject
+        const bundle = withDefaultComponentController(factory())
+        await documents.create(courseViewModel({ courseAssetSidecar: emptyCourseAssetSidecar(), componentPackages: bundle.componentPackages }, bundle.project), `${bundle.project.title}.h5lesson`)
+      } catch (error) { if (request === navigationIntent) throw error }
     },
     async createCourseDocumentFrom(project, assetFiles, componentPackages) {
-      await documents.create(courseViewModel({ courseAssetSidecar: freezeCourseAssetSidecar(assetFiles), componentPackages }, project), `${project.title}.h5lesson`)
+      const request = ++navigationIntent
+      try {
+        if (documents.connection().documentId) await get().drainCourseDocument()
+        if (request === navigationIntent) await documents.create(courseViewModel({ courseAssetSidecar: freezeCourseAssetSidecar(assetFiles), componentPackages }, project), `${project.title}.h5lesson`)
+      } catch (error) { if (request === navigationIntent) throw error }
     },
     createNewProject(canvas?: import('../../shared/slideCanvas').SlideCanvasSize) { void get().createCourseDocument('slide', canvas).catch(error => write({ errorMessage: String(error) })) },
     createNewFlowProject() { void get().createCourseDocument('flow').catch(error => write({ errorMessage: String(error) })) },
     createNewSpatialProject() { void get().createCourseDocument('spatial').catch(error => write({ errorMessage: String(error) })) },
     loadCourseProject(project, path, assetFiles = {}, componentPackages = {}) {
-      const load = path ? documents.open(path) : documents.create(courseViewModel({ courseAssetSidecar: freezeCourseAssetSidecar(assetFiles), componentPackages }, project), `${project.title}.h5lesson`)
-      void load.catch(error => write({ errorMessage: String(error) }))
+      const request = ++navigationIntent
+      const load = async () => {
+        try {
+          if (documents.connection().documentId) await get().drainCourseDocument()
+          if (request !== navigationIntent) return
+          if (path) await documents.open(path)
+          else await documents.create(courseViewModel({ courseAssetSidecar: freezeCourseAssetSidecar(assetFiles), componentPackages }, project), `${project.title}.h5lesson`)
+        } catch (error) { if (request === navigationIntent) throw error }
+      }
+      void load().catch(error => write({ errorMessage: String(error) }))
     },
 
   }

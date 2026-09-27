@@ -336,6 +336,9 @@ export interface FlowOverlayAuthoringLayerProps {
   readonly documentId?: string | null
   readonly onSelectImageAsset?: () => Promise<ImportedImageAsset | null>
   readonly onDynamicStatus?: (message: string, kind?: 'success' | 'error') => void
+  readonly runtimeEditToolbarContainer?: HTMLElement | null
+  readonly activeRuntimeEditItemId?: string | null
+  readonly onRuntimeEditModeChange?: (itemId: string, editing: boolean) => void
   readonly view: FlowEditorView
   readonly sessionToken: CourseAuthoringSessionToken
   readonly selection: FlowEditorSelection | null
@@ -366,6 +369,9 @@ export function FlowOverlayAuthoringLayer({
   documentId,
   onSelectImageAsset,
   onDynamicStatus,
+  runtimeEditToolbarContainer,
+  activeRuntimeEditItemId,
+  onRuntimeEditModeChange,
   view,
   sessionToken,
   selection,
@@ -442,6 +448,8 @@ export function FlowOverlayAuthoringLayer({
   useLayoutEffect(revealSelection, [selectedOverlayKey, view.projectId, view.surfaceId, overlayViewportSize.width, overlayViewportSize.height])
 
   const overlayLayers = view.overlayLayers.filter((layer) => layer.effectiveVisible)
+  const pageRuntimes = overlayLayers.filter(isFlowPageRuntimeLayer)
+  const activeRuntimeEdit = pageRuntimes.some(layer => layer.selectionId === activeRuntimeEditItemId) ? activeRuntimeEditItemId : null
   const globalUnderlayLayers = overlayLayers.filter((layer) => (
     layer.owner === 'global' && layer.globalPlane === 'underlay'
   ))
@@ -730,6 +738,11 @@ export function FlowOverlayAuthoringLayer({
             frame={authoredFrameOf(layer)}
             assetUrls={assetUrls}
             componentPackages={componentPackages}
+            toolbarContainer={pageRuntime ? runtimeEditToolbarContainer : null}
+            showRuntimeEditToggle={pageRuntime && Boolean(runtimeEditToolbarContainer) && (activeRuntimeEdit
+              ? activeRuntimeEdit === layer.selectionId
+              : pageRuntimes.length === 1 || (selection?.selectedOverlayIds.length === 1 && selection.selectedOverlayIds[0] === layer.selectionId))}
+            onRuntimeEditModeChange={pageRuntime ? onRuntimeEditModeChange : undefined}
             readOnly={readOnly || !documentId || layer.locked || inertVisual}
             onHeightChange={pageRuntime ? height => onRuntimeHeightChange?.(layer.selectionId, height) : undefined}
             onRuntimeTargetsChanged={pageRuntime ? update => onRuntimeTargetsChanged?.(layer.selectionId, update) : undefined}

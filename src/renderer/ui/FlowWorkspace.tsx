@@ -103,7 +103,7 @@ export function requestFlowBlockSelection(request: { documentId: string; surface
 }
 const EMPTY_ASSET_FILES: Record<string, Uint8Array> = {}
 const EMPTY_COMPONENT_PACKAGES: Record<string, ComponentPackageData> = {}
-export function FlowWorkspace({ documentId, view, sessionToken, assets, selection, textEdit, documentDraft, commands, readOnly = false, assetFiles = EMPTY_ASSET_FILES, componentPackages = EMPTY_COMPONENT_PACKAGES, onDropWorkspaceMedia, onSelectImageAsset, onStatus }: FlowWorkspaceProps) {
+export function FlowWorkspace({ documentId, toolbarContainer, view, sessionToken, assets, selection, textEdit, documentDraft, commands, readOnly = false, assetFiles = EMPTY_ASSET_FILES, componentPackages = EMPTY_COMPONENT_PACKAGES, onDropWorkspaceMedia, onSelectImageAsset, onStatus }: FlowWorkspaceProps) {
   assertActiveFlowEditorView(view)
   const mediaSource = useWorkspaceMediaSource()
   const mediaSourceRef = useRef(mediaSource)
@@ -116,6 +116,9 @@ export function FlowWorkspace({ documentId, view, sessionToken, assets, selectio
   const [cropTarget, setCropTarget] = useState<{ documentId: string; projectId: string; surfaceId: string; generation: number; revision: number; block: FlowMediaBlock } | null>(null)
   const [captionFocus, setCaptionFocus] = useState<{ documentId: string; projectId: string; surfaceId: string; generation: number; revision: number; blockId: string; expires: number } | null>(null)
   const [mediaDragOver, setMediaDragOver] = useState(false)
+  const runtimeModeOwner = JSON.stringify([documentId, view.projectId, view.surfaceId, sessionToken.generation])
+  const [editingRuntime, setEditingRuntime] = useState<{ owner: string; itemId: string } | null>(null)
+  const activeRuntimeEditItemId = editingRuntime?.owner === runtimeModeOwner ? editingRuntime.itemId : null
   const propertyContext = usePropertiesContext({ onReplaceImage: () => setError('请在完整属性面板中替换浮层图片。') })
   // The selected Flow document object, once the property context agrees with the editor's selection.
   const selectedBlock = (blockId: string) => propertyContext.kind === 'flow-block' && propertyContext.selection.selectedBlockId === blockId
@@ -470,6 +473,10 @@ export function FlowWorkspace({ documentId, view, sessionToken, assets, selectio
       enabled={!readOnly} ownsDocumentSelection={false} textEditing={Boolean(textEdit)} />
     <FlowOverlayAuthoringLayer view={view} sessionToken={sessionToken} selection={selection} locationId={selection?.locationId ?? view.locationId}
       documentId={documentId} onSelectImageAsset={onSelectImageAsset}
+      runtimeEditToolbarContainer={toolbarContainer} activeRuntimeEditItemId={activeRuntimeEditItemId}
+      onRuntimeEditModeChange={(itemId, editing) => setEditingRuntime(current => editing
+        ? { owner: runtimeModeOwner, itemId }
+        : current?.owner === runtimeModeOwner && current.itemId === itemId ? null : current)}
       onDynamicStatus={(message, kind) => { if (kind === 'error') setError(message); else onStatus?.(message) }}
       readOnly={readOnly} assetUrls={assetUrls} componentPackages={componentPackages} paperScrollTop={paperScroll.top} paperScrollLeft={paperScroll.left}
       paperOrigin={paperOrigin} paperWidth={currentPaperLayout.width} paragraphRects={currentPaperLayout.rects}
