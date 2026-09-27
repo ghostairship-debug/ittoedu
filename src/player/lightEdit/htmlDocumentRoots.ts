@@ -19,7 +19,7 @@ export function managedHtmlDocuments(root: ParentNode): ManagedHtmlDocument[] {
 }
 
 /** The painted part of a DOM target, before any iframe coordinate mapping. */
-export function visibleDomRect(rect: DOMRect, element: Element): DOMRect | null {
+export function visibleDomRect(rect: DOMRect, element: HTMLElement): DOMRect | null {
   const document = element.ownerDocument
   const view = document.defaultView
   const viewport = document.documentElement
@@ -27,7 +27,7 @@ export function visibleDomRect(rect: DOMRect, element: Element): DOMRect | null 
   let top = Math.max(rect.top, 0)
   let right = Math.min(rect.right, view?.innerWidth || viewport.clientWidth)
   let bottom = Math.min(rect.bottom, view?.innerHeight || viewport.clientHeight)
-  for (let ancestor: Element | null = element; ancestor; ancestor = ancestor.parentElement) {
+  for (let ancestor: HTMLElement | null = element; ancestor; ancestor = ancestor.parentElement) {
     const style = view?.getComputedStyle(ancestor)
     if (!style) continue
     const overflowX = style.overflowX || style.overflow
@@ -36,15 +36,18 @@ export function visibleDomRect(rect: DOMRect, element: Element): DOMRect | null 
     const clipsY = /^(hidden|clip|auto|scroll)$/.test(overflowY)
     if (!clipsX && !clipsY) continue
     const bounds = ancestor.getBoundingClientRect()
-    const clipLeft = bounds.left + ancestor.clientLeft
-    const clipTop = bounds.top + ancestor.clientTop
+    // client* uses layout pixels; the rect is already in scaled viewport pixels.
+    const scaleX = ancestor.offsetWidth > 0 ? bounds.width / ancestor.offsetWidth : 1
+    const scaleY = ancestor.offsetHeight > 0 ? bounds.height / ancestor.offsetHeight : 1
+    const clipLeft = bounds.left + ancestor.clientLeft * scaleX
+    const clipTop = bounds.top + ancestor.clientTop * scaleY
     if (clipsX) {
       left = Math.max(left, clipLeft)
-      right = Math.min(right, clipLeft + (ancestor.clientWidth || bounds.width))
+      right = Math.min(right, clipLeft + (ancestor.offsetWidth > 0 ? ancestor.clientWidth * scaleX : bounds.width))
     }
     if (clipsY) {
       top = Math.max(top, clipTop)
-      bottom = Math.min(bottom, clipTop + (ancestor.clientHeight || bounds.height))
+      bottom = Math.min(bottom, clipTop + (ancestor.offsetHeight > 0 ? ancestor.clientHeight * scaleY : bounds.height))
     }
   }
   if (![left, top, right, bottom].every(Number.isFinite) || right <= left || bottom <= top) return null

@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest'
 import { DomTextOverrides } from '@/player/lightEdit/domTextOverrides'
-import { bridgeManagedHtmlEvents } from '@/player/lightEdit/htmlDocumentRoots'
+import { bridgeManagedHtmlEvents, visibleDomRect } from '@/player/lightEdit/htmlDocumentRoots'
 import { RuntimeAuthoringTargetRegistry } from '@/player/RuntimeAuthoringTargetRegistry'
 import type { RuntimeAuthoringTargetUpdate } from '@/shared/runtimeTypes'
 
@@ -254,5 +254,71 @@ it('publishes only painted image and text bounds after axis-specific clipping', 
   } finally {
     registry.destroy(); dom.destroy(); root.remove()
     Object.defineProperty(Range.prototype, 'getBoundingClientRect', { configurable: true, value: originalRange })
+  }
+})
+
+it('converts scaled border and client dimensions before clipping, including a true zero width', () => {
+  const section = document.createElement('section')
+  section.style.overflowX = 'hidden'
+  section.style.overflowY = 'hidden'
+  const image = document.createElement('img')
+  section.append(image)
+  document.body.append(section)
+  section.getBoundingClientRect = () => rect(20, 10, 150, 75)
+  Object.defineProperties(section, {
+    offsetWidth: { configurable: true, value: 200 },
+    offsetHeight: { configurable: true, value: 100 },
+    clientLeft: { configurable: true, value: 10 },
+    clientTop: { configurable: true, value: 4 },
+    clientWidth: { configurable: true, value: 170 },
+    clientHeight: { configurable: true, value: 90 },
+  })
+  try {
+    const visible = visibleDomRect(rect(0, 0, 200, 100), image)
+    expect(visible).toMatchObject({ left: 27.5, top: 13, width: 127.5, height: 67.5 })
+    Object.defineProperty(section, 'clientWidth', { configurable: true, value: 0 })
+    expect(visibleDomRect(rect(0, 0, 200, 100), image)).toBeNull()
+  } finally {
+    section.remove()
+  }
+})
+
+it('clips a managed iframe image again against scaled outer ancestors after mapping', async () => {
+  const root = document.createElement('div')
+  document.body.append(root)
+  root.getBoundingClientRect = () => rect(0, 0, 300, 200)
+  const section = document.createElement('section')
+  section.style.overflowX = 'hidden'
+  section.getBoundingClientRect = () => rect(100, 0, 120, 150)
+  Object.defineProperties(section, {
+    offsetWidth: { configurable: true, value: 160 },
+    clientLeft: { configurable: true, value: 10 },
+    clientWidth: { configurable: true, value: 140 },
+  })
+  const iframe = document.createElement('iframe')
+  iframe.dataset.htmlDocumentRuntime = 'true'
+  iframe.getBoundingClientRect = () => rect(100, 0, 300, 150)
+  section.append(iframe)
+  root.append(section)
+  const inner = iframe.contentDocument!
+  Object.defineProperty(inner.defaultView, 'innerWidth', { configurable: true, value: 400 })
+  Object.defineProperty(inner.defaultView, 'innerHeight', { configurable: true, value: 200 })
+  inner.body.innerHTML = '<img src="data:image/png;base64,SEVSTw==">'
+  inner.querySelector('img')!.getBoundingClientRect = () => rect(100, 20, 100, 40)
+  const dom = new DomTextOverrides([root], [])
+  const updates: RuntimeAuthoringTargetUpdate[] = []
+  const registry = new RuntimeAuthoringTargetRegistry({
+    scope: 'scene', width: 300, height: 200, canvas: { width: 300, height: 200 },
+    content: { values: {} }, assets: { hero: { assetId: 'hero' } },
+    domRoots: { underlay: document.createElement('div'), overlay: root },
+    lightEdit: { dom, assetKeyForUrl: url => url === 'data:image/png;base64,SEVSTw==' ? 'hero' : undefined },
+    onTargetsChanged: update => updates.push(update),
+  })
+  try {
+    await flush()
+    expect(updates.at(-1)!.targets.find(target => target.kind === 'asset')?.bounds)
+      .toEqual({ x: 175, y: 15, width: 37.5, height: 30 })
+  } finally {
+    registry.destroy(); dom.destroy(); root.remove()
   }
 })
