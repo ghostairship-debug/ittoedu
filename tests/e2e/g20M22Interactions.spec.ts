@@ -126,11 +126,22 @@ test('M22-T02 workbench audio placement and identity-based jump survive save and
         : { nodeName: node instanceof Node ? node.nodeName : null }
       const box = wrapper.getBoundingClientRect()
       const center = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2)
+      ;(window as any).__m22PreviewAudioHost = host
       ;(window as any).__m22PreviewAudioClick = {
         before: { wrapper: identity(wrapper), role: wrapper.getAttribute('role'), tabindex: wrapper.getAttribute('tabindex'),
           pointerEvents: getComputedStyle(wrapper).pointerEvents, center: identity(center),
-          centerIsWrapper: center === wrapper, centerInsideWrapper: center ? wrapper.contains(center) : false },
+          centerIsWrapper: center === wrapper, centerInsideWrapper: center ? wrapper.contains(center) : false,
+          hostConnected: host.isConnected, hostIsCurrent: document.querySelector('.course-preview-host') === host },
+        documentCapture: [],
         click: null,
+      }
+      for (const type of ['mousedown', 'mouseup', 'click']) {
+        document.addEventListener(type, event => {
+          ;(window as any).__m22PreviewAudioClick.documentCapture.push({
+            type, target: identity(event.target), composedPath: event.composedPath().slice(0, 8).map(identity),
+            hostConnected: host.isConnected, hostIsCurrent: document.querySelector('.course-preview-host') === host,
+          })
+        }, { capture: true, once: true })
       }
       host.addEventListener('click', event => {
         ;(window as any).__m22PreviewAudioClick.click = {
@@ -144,6 +155,8 @@ test('M22-T02 workbench audio placement and identity-based jump survive save and
     } finally {
       const diagnostic = await page.evaluate(() => ({
         ...(window as any).__m22PreviewAudioClick,
+        hostConnectedAfter: (window as any).__m22PreviewAudioHost?.isConnected ?? null,
+        hostIsCurrentAfter: document.querySelector('.course-preview-host') === (window as any).__m22PreviewAudioHost,
         playCalls: (window as any).__m22Played?.length ?? null,
       })).catch(error => ({ diagnosticError: String(error) }))
       await test.info().attach('m22-preview-audio-click.json', {
