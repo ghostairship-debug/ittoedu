@@ -3,6 +3,7 @@ import {
   normalizeLightEditText,
   type LightEditTextOverride,
 } from '../../shared/contracts/runtime/lightEdit'
+import { managedHtmlDocuments, watchManagedHtmlDocuments } from './htmlDocumentRoots'
 
 /** Elements whose text is not visible page copy, or is typed by the viewer. */
 const SKIPPED_SELECTOR = 'script,style,noscript,template,textarea,option,title,[contenteditable]:not([contenteditable="false"])'
@@ -92,24 +93,55 @@ export function observerFor(root: Node): typeof MutationObserver | undefined {
   return view?.MutationObserver ?? (typeof MutationObserver === 'undefined' ? undefined : MutationObserver)
 }
 
+function isElementRoot(root: Node): root is HTMLElement {
+  return root.nodeType === 1 && 'querySelectorAll' in root
+}
+
 export class DomTextOverrides {
   private readonly records = new WeakMap<Text, TextRecord>()
-  private readonly observers: MutationObserver[] = []
+  private readonly observers = new Map<Node, MutationObserver>()
+  private readonly roots: Node[]
+  private readonly unwatch: Array<() => void> = []
   private rules: Map<string, LightEditTextOverride>
   private destroyed = false
+  private managedRoots = new Set<Node>()
+  private readonly baseRootCount: number
 
   constructor(
-    private readonly roots: readonly Node[],
+    roots: readonly Node[],
     rules: readonly LightEditTextOverride[],
     private readonly onChange?: () => void,
   ) {
     this.rules = lightEditRuleMap(rules)
-    for (const root of roots) {
+    this.baseRootCount = roots.length
+    this.roots = [...roots]
+    this.syncRoots()
+    for (const root of roots) if (isElementRoot(root)) {
+      this.unwatch.push(watchManagedHtmlDocuments(root, () => {
+        if (this.destroyed) return
+        this.syncRoots()
+        this.applyAll()
+        this.onChange?.()
+      }))
+    }
+  }
+
+  private syncRoots(): void {
+    const desired = [...this.roots.filter(root => !this.managedRoots.has(root))]
+    for (const root of desired) if (isElementRoot(root)) {
+      for (const item of managedHtmlDocuments(root)) desired.push(item.root)
+    }
+    const keep = new Set(desired)
+    for (const [root, observer] of this.observers) if (!keep.has(root)) { observer.disconnect(); this.observers.delete(root) }
+    this.roots.length = 0
+    this.roots.push(...desired)
+    this.managedRoots = new Set(desired.slice(this.baseRootCount))
+    for (const root of desired) if (!this.observers.has(root)) {
       const Observer = observerFor(root)
       if (!Observer) continue
-      const observer = new Observer((mutations) => this.handle(root, mutations))
+      const observer = new Observer(mutations => this.handle(root, mutations))
       observer.observe(root, { subtree: true, childList: true, characterData: true })
-      this.observers.push(observer)
+      this.observers.set(root, observer)
     }
   }
 
@@ -123,6 +155,7 @@ export class DomTextOverrides {
   /** Apply rules to everything rendered so far (after create(), before the first observer tick). */
   applyAll(): void {
     if (this.destroyed) return
+    this.syncRoots()
     let changed = false
     for (const root of this.roots) {
       for (const node of this.textNodes(root)) changed = this.process(node, root) || changed
@@ -131,6 +164,7 @@ export class DomTextOverrides {
   }
 
   samples(): DomTextSample[] {
+    this.syncRoots()
     const samples: DomTextSample[] = []
     for (const root of this.roots) {
       for (const node of this.textNodes(root)) {
@@ -151,8 +185,9 @@ export class DomTextOverrides {
 
   destroy(): void {
     this.destroyed = true
+    this.unwatch.forEach(stop => stop())
     this.observers.forEach(observer => observer.disconnect())
-    this.observers.length = 0
+    this.observers.clear()
   }
 
   private handle(root: Node, mutations: readonly MutationRecord[]): void {

@@ -1,6 +1,7 @@
 import type * as PhaserTypes from 'phaser'
 import { DEFAULT_SLIDE_CANVAS, type SlideCanvasSize } from '../shared/slideCanvas'
 import { observerFor, type DomTextOverrides } from './lightEdit/domTextOverrides'
+import { managedHtmlDocuments, managedHtmlRect, watchManagedHtmlDocuments } from './lightEdit/htmlDocumentRoots'
 import type { PhaserTextOverrides } from './lightEdit/phaserTextOverrides'
 import type {
   EditableTextContent,
@@ -151,6 +152,7 @@ export class RuntimeAuthoringTargetRegistry implements RuntimeAuthoringApi {
   private readonly registrations = new Map<number, StoredRegistration>()
   private readonly domElementIds = new WeakMap<object, number>()
   private readonly mutationObservers: MutationObserver[] = []
+  private readonly unwatchHtmlDocuments: Array<() => void> = []
   private readonly resizeObserver: ResizeObserver | null
   private previousTargets: ReadonlyArray<Readonly<RuntimeAuthoringTarget>> | null = null
   private nextRegistrationId = 1
@@ -181,6 +183,7 @@ export class RuntimeAuthoringTargetRegistry implements RuntimeAuthoringApi {
           attributes: true,
         })
         this.mutationObservers.push(observer)
+        this.unwatchHtmlDocuments.push(watchManagedHtmlDocuments(root, () => this.invalidate()))
       }
     }
 
@@ -236,6 +239,7 @@ export class RuntimeAuthoringTargetRegistry implements RuntimeAuthoringApi {
     this.destroyed = true
     this.invalidationQueued = false
     this.registrations.clear()
+    this.unwatchHtmlDocuments.forEach(stop => stop())
     this.mutationObservers.forEach((observer) => observer.disconnect())
     this.mutationObservers.length = 0
     this.resizeObserver?.disconnect()
@@ -411,16 +415,19 @@ export class RuntimeAuthoringTargetRegistry implements RuntimeAuthoringApi {
         width: (rect.width / rootRect.width) * this.canvasWidth,
         height: (rect.height / rootRect.height) * this.canvasHeight,
       })
-      const range = root.ownerDocument.createRange()
+      const managed = managedHtmlDocuments(root)
       for (const sample of sources.dom?.samples() ?? []) {
         if (targets.length >= MAX_AUTO_TARGETS) break
-        if (sample.root !== root || sample.live) continue
+        const document = managed.find(item => item.root === sample.root)
+        if ((sample.root !== root && !document) || sample.live) continue
         // Registered keys keep their own editing path.
         if (sample.node.parentElement?.closest('[data-courseware-edit-key]')) continue
         // A text that cannot be measured is skipped, never the whole list.
-        if (typeof range.getBoundingClientRect !== 'function') break
+        const range = sample.node.ownerDocument.createRange()
+        if (typeof range.getBoundingClientRect !== 'function') continue
         range.selectNodeContents(sample.node)
-        const rect = range.getBoundingClientRect()
+        const measured = range.getBoundingClientRect()
+        const rect = document ? managedHtmlRect(measured, document) : measured
         if (!finitePositiveDomRect(rect)) continue
         targets.push(this.freezeTarget({
           targetId: `auto:${this.domElementId(sample.node)}:text`,
@@ -435,12 +442,13 @@ export class RuntimeAuthoringTargetRegistry implements RuntimeAuthoringApi {
           lightEdit: { original: sample.original, region: sample.region, text: sample.rule?.text ?? sample.original },
         }))
       }
-      for (const image of root.querySelectorAll('img')) {
+      for (const imageRoot of [{ root, document: undefined }, ...managed.map(item => ({ root: item.root, document: item }))]) for (const image of imageRoot.root.querySelectorAll('img')) {
         if (targets.length >= MAX_AUTO_TARGETS) break
         if (image.closest('[data-courseware-asset-key]')) continue
         const key = sources.assetKeyForUrl(image.currentSrc || image.src)
         if (!key || !this.knownKey('asset', key)) continue
-        const rect = image.getBoundingClientRect()
+        const measured = image.getBoundingClientRect()
+        const rect = imageRoot.document ? managedHtmlRect(measured, imageRoot.document) : measured
         if (!finitePositiveDomRect(rect)) continue
         targets.push(this.freezeTarget({
           targetId: `auto:${this.domElementId(image)}:asset`,

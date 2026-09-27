@@ -12,6 +12,7 @@ import {
   type RuntimeAuthoringTargetsChangedHandler,
   type RuntimeLightEditSources,
 } from '../../RuntimeAuthoringTargetRegistry'
+import { bridgeManagedHtmlEvents } from '../../lightEdit/htmlDocumentRoots'
 
 export interface PublishedRuntimeAuthoringMountOptions {
   scope: 'scene' | 'global'
@@ -138,6 +139,7 @@ function trimmedAttribute(element: Element, name: string): string | undefined {
  */
 export class PublishedSurfaceRuntimeAuthoringTargets implements SurfaceRuntimeAuthoring {
   readonly #registry: RuntimeAuthoringTargetRegistry
+  readonly #stopHtmlEvents: () => void
   readonly #declarative = new Map<Element, Map<string, DeclarativeTargetRegistration>>()
   readonly #resizeObserver: ResizeObserver | null
   readonly #mutationObserver: MutationObserver | null
@@ -170,6 +172,7 @@ export class PublishedSurfaceRuntimeAuthoringTargets implements SurfaceRuntimeAu
     this.#resizeObserver = ResizeObserverConstructor
       ? new ResizeObserverConstructor(() => this.#registry.invalidate())
       : null
+    this.#stopHtmlEvents = bridgeManagedHtmlEvents(options.root)
     this.#observeResize(options.root)
     this.#syncDeclarativeTargets()
   }
@@ -198,6 +201,7 @@ export class PublishedSurfaceRuntimeAuthoringTargets implements SurfaceRuntimeAu
   destroy(): void {
     if (this.#destroyed) return
     this.#destroyed = true
+    this.#stopHtmlEvents()
     this.#mutationObserver?.disconnect()
     this.#resizeObserver?.disconnect()
     this.#resizeObservationCounts.clear()
