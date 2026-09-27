@@ -20,6 +20,7 @@ import { decodePublishedCode } from '../../decodePublishedExecutableCode'
 import { validateRuntimeSource } from '../../RuntimeRegistry'
 import { registerPublishedDynamicUpdateProbe } from '../publishedDynamicUpdateProbe'
 import { DomTextOverrides } from '../../lightEdit/domTextOverrides'
+import { observeSurfaceRuntimeContentSize, type SurfaceRuntimeContentSizeObserver } from './surfaceRuntimeContentSize'
 import type { LightEditTextOverride } from '../../../shared/contracts/runtime/lightEdit'
 import type { RuntimeAuthoringTargetsChangedHandler } from '../../RuntimeAuthoringTargetRegistry'
 import {
@@ -60,6 +61,7 @@ export interface PublishedSurfaceRuntimeMountHandle {
   failCapture?(error: Error): void
   restoreAfterCapture(): void
   setVisible(visible: boolean): void
+  updateSize(width: number, height: number): void
   suspend(): void
   resume(): void
   destroy(): void
@@ -77,6 +79,8 @@ export interface PublishedSurfaceRuntimeMountOptions {
   authoring?: PublishedRuntimeAuthoringMountOptions
   courseState?: CourseStateStoreContract
   fallbackText?: string
+  onContentHeightChange?(height: number): void
+  contentSizeSource?: () => HTMLElement | Document | null
   actions?: Readonly<RuntimeHostActions>
   presentation?: RuntimePresentationApi
   reportError?(phase: 'register' | 'create' | 'lifecycle' | 'destroy', error: Error): void
@@ -433,6 +437,7 @@ function failedHandle(
     waitForCaptureReady: () => Promise.reject(failure),
     restoreAfterCapture() {},
     setVisible() {},
+    updateSize() {},
     suspend() {},
     resume() {},
     destroy() {
@@ -587,8 +592,8 @@ export function mountPublishedSurfaceRuntime(
       },
     }),
     courseState: scopeDynamicHostApi(courseState, () => !instanceDestroyed),
-    presentation: scopeDynamicHostApi(options.presentation ?? inertPresentation, () => !instanceDestroyed),
-    actions: scopeDynamicHostApi(options.actions ?? inertActions, () => !instanceDestroyed),
+    presentation: scopeDynamicHostApi(publishedMode === 'authoring' ? inertPresentation : options.presentation ?? inertPresentation, () => !instanceDestroyed),
+    actions: scopeDynamicHostApi(publishedMode === 'authoring' ? inertActions : options.actions ?? inertActions, () => !instanceDestroyed),
     events,
     capture: Object.freeze({
       waitUntil(promise: Promise<unknown>) {
@@ -641,6 +646,14 @@ export function mountPublishedSurfaceRuntime(
     return failedHandle(createFallback(container, options), container, cause)
   }
 
+  let contentSizeObserver: SurfaceRuntimeContentSizeObserver | null = null
+  if (options.onContentHeightChange) {
+    contentSizeObserver = observeSurfaceRuntimeContentSize({
+      root,
+      ...(options.contentSizeSource ? { source: options.contentSizeSource } : {}),
+      onHeightChange: options.onContentHeightChange,
+    })
+  }
   let quarantined = false
   let capturePrepared = false
   let captureFailure: Error | null = null
@@ -654,6 +667,7 @@ export function mountPublishedSurfaceRuntime(
     authoringTargets?.destroy()
     domText?.destroy()
     events.dispose()
+    contentSizeObserver?.destroy()
     instanceDestroyed = true
     try { lifecycle.destroy() } catch (error) { reportError(options, 'destroy', error) }
     captureBarrier.destroy()
@@ -749,6 +763,14 @@ export function mountPublishedSurfaceRuntime(
     setVisible(visible: boolean) {
       invoke(() => lifecycle.setVisible?.(visible))
     },
+    updateSize(width: number, height: number) {
+      if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return
+      if (options.width === width && options.height === height) { contentSizeObserver?.refresh(); return }
+      options.width = width
+      options.height = height
+      invoke(() => lifecycle.resize?.(width, height))
+      contentSizeObserver?.refresh()
+    },
     suspend() {
       suspended = true
       invoke(() => lifecycle.suspend?.())
@@ -763,6 +785,7 @@ export function mountPublishedSurfaceRuntime(
       if (instanceDestroyed) return
       instanceDestroyed = true
       unregisterCapture()
+      contentSizeObserver?.destroy()
       captureBarrier.destroy()
       try {
         lifecycle.destroy()
