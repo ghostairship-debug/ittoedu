@@ -1,6 +1,7 @@
 import { expect, test, type ElectronApplication, type Page } from '@playwright/test'
 import { createHash } from 'node:crypto'
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { createServer } from 'node:http'
 import { join, resolve } from 'node:path'
 import { CourseV9Driver } from '../../src/core/drivers/CourseV9Driver'
 import { createBlankCourseProject } from '../../src/core/course/createCourseProject'
@@ -115,7 +116,7 @@ test('M17-T01/T02/T03: both UI entries import without model calls; benchmark run
     expect(slide.scenes[0]?.layerItems.filter(item => item.kind === 'runtime')).toHaveLength(2)
     expect(server.requests).toHaveLength(0)
 
-    // T02: use only the immutable, ignored original, never a copied or rewritten stand-in.
+    // T02: read the fixed ignored benchmark file from b14-core without copying it into this run.
     await setFilePicker(app, benchmark)
     await page.getByRole('button', { name: '插入', exact: true }).click()
     await page.getByRole('button', { name: '导入 HTML 页面', exact: true }).click()
@@ -185,5 +186,96 @@ test('M17-T01/T02/T03: both UI entries import without model calls; benchmark run
   } finally {
     await app?.close()
     await server.close()
+  }
+})
+
+test('M17-T04: remote image and audio fail before document writes or requests; local and inline resources form a saved closure', async () => {
+  test.skip(process.platform !== 'win32', 'Windows Electron acceptance path.')
+  test.setTimeout(240_000)
+  const base = join(root, 'output/g20/m17/resource-boundary')
+  mkdirSync(base, { recursive: true })
+  const directory = mkdtempSync(join(base, 'run-'))
+  const workspace = join(directory, 'workspace'), shots = join(directory, 'shots')
+  mkdirSync(workspace); mkdirSync(shots)
+  const localBytes = Buffer.from(imageTwo, 'base64')
+  const inlineBytes = Buffer.from(imageOne, 'base64')
+  writeFileSync(join(workspace, 'local.png'), localBytes)
+  writeFileSync(join(workspace, 'theme.css'), 'body{background:#f0f9ff}.local{border:4px solid #0369a1}')
+  const body = `<link rel="stylesheet" href="theme.css"><h1>M17 resource closure</h1><img class="local" alt="Local image" src="local.png"><img alt="Inline image" src="data:image/png;base64,${imageOne}">`
+  writeFileSync(join(workspace, 'allowed.html'), `<!doctype html><html><head><meta charset="utf-8"></head><body>${body}<button id="toggle">Next</button><output id="result">Ready</output><script>document.querySelector('#toggle').onclick=()=>document.querySelector('#result').textContent='Done'</script></body></html>`)
+  writeFileSync(join(workspace, courseName), makeCourse())
+  const modelServer = await selectionServer()
+  const remoteRequests: string[] = []
+  const remote = createServer((request, response) => { remoteRequests.push(request.url ?? ''); response.writeHead(418); response.end('unauthorized') })
+  await new Promise<void>(resolve => remote.listen(0, '127.0.0.1', resolve))
+  const port = (remote.address() as { port: number }).port
+  writeFileSync(join(workspace, 'blocked.html'), `<!doctype html><html><head><meta charset="utf-8"></head><body>${body}<img src="http://127.0.0.1:${port}/remote-image.png"><audio src="http://127.0.0.1:${port}/remote-audio.mp3"></audio></body></html>`)
+  let app: ElectronApplication | undefined
+  try {
+    app = await launchSelectionApp(directory)
+    const page = await app.firstWindow()
+    page.setDefaultTimeout(15_000)
+    await setupSelectionUI(app, page, modelServer.endpoint, workspace)
+    await app.evaluate(({ dialog }, folder) => {
+      dialog.showOpenDialog = async (...args: unknown[]) => {
+        const options = args.find(value => value && typeof value === 'object' && 'properties' in (value as object)) as { properties?: string[] } | undefined
+        return { canceled: false, filePaths: [(options?.properties ?? []).includes('openDirectory') ? folder : (globalThis as unknown as { m17FilePicker?: string }).m17FilePicker ?? ''] }
+      }
+    }, workspace)
+    const opened = await openSelectionFile(page, workspace, courseName)
+    const document = () => page.evaluate(id => window.desktopAPI.documents!.read(id), opened.documentId)
+    const before = await document()
+    const diskBefore = readFileSync(join(workspace, courseName))
+    await setFilePicker(app, join(workspace, 'blocked.html'))
+    await page.getByRole('button', { name: '插入', exact: true }).click()
+    await page.getByRole('button', { name: '导入 HTML 页面', exact: true }).click()
+    const dialog = page.getByRole('dialog', { name: '导入 HTML 页面' })
+    await expect(dialog).toBeVisible()
+    await dialog.getByRole('button', { name: '导入', exact: true }).click()
+    await expect(dialog.getByRole('alert')).toContainText('未授权远程资源')
+    await expect(dialog.getByRole('alert')).toContainText('remote-image.png')
+    await expect(dialog.getByRole('alert')).toContainText('remote-audio.mp3')
+    const afterFailure = await document()
+    expect(afterFailure.revision).toBe(before.revision)
+    expect(afterFailure.model).toEqual(before.model)
+    expect(afterFailure.dirty).toBe(false)
+    expect(readFileSync(join(workspace, courseName))).toEqual(diskBefore)
+    expect(remoteRequests).toEqual([])
+    expect(modelServer.requests).toEqual([])
+    await page.screenshot({ path: join(shots, '01-remote-rejected.png') })
+
+    await dialog.getByRole('button', { name: '取消', exact: true }).click()
+    await setFilePicker(app, join(workspace, 'allowed.html'))
+    await page.getByRole('button', { name: '插入', exact: true }).click()
+    await page.getByRole('button', { name: '导入 HTML 页面', exact: true }).click()
+    await importDialog(page, null)
+    const frame = await importedFrame(page)
+    await expect(frame.getByRole('img', { name: 'Local image' })).toBeVisible()
+    await expect(frame.getByRole('img', { name: 'Inline image' })).toBeVisible()
+    await expect.poll(() => frame.getByRole('img', { name: 'Local image' }).evaluate(image => (image as HTMLImageElement).naturalWidth)).toBeGreaterThan(0)
+    await expect.poll(() => frame.getByRole('img', { name: 'Inline image' }).evaluate(image => (image as HTMLImageElement).naturalWidth)).toBeGreaterThan(0)
+    await frame.locator('#toggle').click()
+    await expect(frame.locator('#result')).toHaveText('Done')
+    await page.keyboard.press('Control+S')
+    await expect.poll(async () => (await document()).dirty).toBe(false)
+    const persisted = openCourseProjectArchive(new Uint8Array(readFileSync(join(workspace, courseName))))
+    const assetBytes = Object.values(persisted.assetFiles).map(bytes => Buffer.from(bytes))
+    expect(assetBytes.some(bytes => bytes.equals(localBytes))).toBe(true)
+    expect(assetBytes.some(bytes => bytes.equals(inlineBytes))).toBe(true)
+    const surface = persisted.project.surfaces.find(item => item.type === 'slide')
+    const runtime = surface?.type === 'slide' ? surface.scenes[0]?.layerItems.find(item => item.kind === 'runtime') : undefined
+    if (!runtime || runtime.kind !== 'runtime') throw new Error('Saved HTML Runtime missing')
+    expect(Object.keys(runtime.runtime.assets)).toHaveLength(2)
+    expect(runtime.runtime.source).toContain('border:4px solid #0369a1')
+    expect(runtime.runtime.source).not.toContain('href="theme.css"')
+    expect(runtime.runtime.source).not.toContain('src="local.png"')
+    expect(runtime.runtime.source).not.toContain(`data:image/png;base64,${imageOne}`)
+    expect(remoteRequests).toEqual([])
+    expect(modelServer.requests).toEqual([])
+    await page.screenshot({ path: join(shots, '02-local-closure-running.png') })
+  } finally {
+    await app?.close()
+    await modelServer.close()
+    await new Promise<void>(resolve => remote.close(() => resolve()))
   }
 })
