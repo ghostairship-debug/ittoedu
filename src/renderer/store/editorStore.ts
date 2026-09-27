@@ -1,7 +1,8 @@
-import { CourseDocumentBridge, type CourseDocumentConnection } from '../documents/CourseDocumentBridge'
+import { CourseDocumentBridge, type CourseDocumentConnection, type CourseSubmissionHandle } from '../documents/CourseDocumentBridge'
 import { createCoursePlannerBackend, courseViewModel, courseViewPatch } from '../documents/CourseDocumentView'
+import type { FrozenDocumentCommit } from '../documents/DocumentProjection'
 import type { DocumentHostAPI } from '../../shared/workbench/desktop'
-import type { DocumentSnapshot } from '../../shared/workbench/document'
+import type { DocumentCommand, DocumentOperationResult, DocumentSnapshot } from '../../shared/workbench/document'
 import { commitResourceAwareAuthoringHistory, type ResourceAwareAuthoringHistory } from '../authoring/resourceAwareAuthoringHistory'
 import { create } from 'zustand'
 import { persistCrossSurfaceToolTransaction } from '../composition/courseToolTransaction'
@@ -567,6 +568,9 @@ export type EditorState =
   & ReturnType<typeof createAuthoringToolActions>
   & {
       connectCourseDocuments(api: DocumentHostAPI): Promise<void>
+      /** Capture the exact submission synchronously after a course writer returns. */
+      captureCourseSubmission(): CourseSubmissionHandle | null
+      amendFrozenCourseCommit(commit: FrozenDocumentCommit, command: Extract<DocumentCommand, { type: 'course.replace' }>): Promise<DocumentOperationResult>
       activateCourseDocument(documentId: string): Promise<void>
       closeCourseDocument(documentId: string): Promise<boolean>
       createCourseDocument(surface: 'slide' | 'flow' | 'spatial', canvas?: import('../../shared/slideCanvas').SlideCanvasSize): Promise<void>
@@ -1287,6 +1291,8 @@ export const useEditorStore = create<EditorState>((set, get) => {
     ...authoringToolActions,
     courseDocument: documents.connection(),
     connectCourseDocuments: api => documents.connect(api),
+    captureCourseSubmission: () => documents.captureLastSubmission(),
+    amendFrozenCourseCommit: (commit, command) => documents.amendFrozenCommit(commit, command),
     async activateCourseDocument(id) {
       try { await documents.activatePrepared(id, () => get().drainCourseDocument()) }
       catch (error) { write({ errorMessage: error instanceof Error ? error.message : '切换失败，当前输入已保留' }); throw error }
