@@ -1,7 +1,8 @@
 import { renderHook } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { MediaImportIdentity, MediaImportPorts } from '../../src/renderer/app/useMediaImport'
-import { emptyCourseAssetSidecar } from '../../src/renderer/project/v9AssetAdapter'
+import { emptyCourseAssetSidecar, freezeCourseAssetSidecar } from '../../src/renderer/project/v9AssetAdapter'
+import { createImageAssetImport } from '../../src/renderer/project/assetManager'
 
 const dimensionProbe = vi.hoisted(() => ({
   calls: 0,
@@ -84,6 +85,7 @@ function createHarness(): Harness {
     captureImageReplacementTarget: vi.fn(() => null),
     readMediaLibrarySnapshot: vi.fn(() => ({ assets: {}, files: {} })),
     readCandidateMediaContext: vi.fn(() => ({ assets: {}, sidecar: emptyCourseAssetSidecar() })),
+    readCourseMediaContext: vi.fn(() => ({ assets: {}, sidecar: emptyCourseAssetSidecar() })),
     replaceImageAtTarget: vi.fn(() => ({ ok: true })),
     importAssetsAtTarget: vi.fn(() => ({ ok: true })),
     placeImageNodes: vi.fn(() => []),
@@ -146,6 +148,81 @@ afterEach(() => {
   dedupeProbe.deferred = false
   dedupeProbe.release = null
   vi.restoreAllMocks()
+})
+
+describe('useMediaImport target media Owner', () => {
+  const chosen = { name: 'repeat.png', path: 'repeat.png', mimeType: 'image/png', bytes: new Uint8Array([1, 2, 3]), sha256: 'h1' }
+
+  function targetInput(harness: Harness) {
+    return {
+      kind: 'image' as const,
+      captureTarget: () => ({ projectId: harness.identity.projectId, revision: harness.identity.revision,
+        locationId: harness.identity.locationId }),
+      isTargetCurrent: (target: { projectId: string; revision: number; locationId: string | null }) =>
+        target.projectId === harness.identity.projectId && target.revision === harness.identity.revision
+          && target.locationId === harness.identity.locationId,
+    }
+  }
+
+  it('reuses the existing asset and sidecar bytes for identical content', async () => {
+    const harness = createHarness()
+    const existing = createImageAssetImport(chosen, { id: 'existing', dimensions: { width: 20, height: 10 } })
+    harness.ports.readCourseMediaContext = vi.fn(() => ({ assets: { existing: existing.meta },
+      sidecar: freezeCourseAssetSidecar({ existing: existing.bytes }) }))
+    harness.ports.selectImage = vi.fn(async () => chosen)
+    const { result } = renderHook(() => useMediaImport(harness.ports))
+    const pending = result.current.selectTargetMedia(targetInput(harness))
+    await vi.waitFor(() => expect(dimensionProbe.calls).toBe(1))
+    dimensionProbe.resolve?.({ width: 20, height: 10 })
+    const prepared = await pending
+    expect(prepared?.asset.id).toBe('existing')
+    expect(prepared?.source).toEqual({ kind: 'existing', assetId: 'existing' })
+    expect(prepared?.bytes).toEqual(existing.bytes)
+    expect(() => prepared?.assertCurrent()).not.toThrow()
+  })
+
+  it('returns null on picker cancellation without decoding or deduplication', async () => {
+    const harness = createHarness()
+    const { result } = renderHook(() => useMediaImport(harness.ports))
+    expect(await result.current.selectTargetMedia(targetInput(harness))).toBeNull()
+    expect(dimensionProbe.calls).toBe(0)
+    expect(dedupeProbe.calls).toBe(0)
+  })
+
+  it('rejects a target changed while decoding', async () => {
+    const harness = createHarness()
+    harness.ports.selectImage = vi.fn(async () => chosen)
+    const { result } = renderHook(() => useMediaImport(harness.ports))
+    const pending = result.current.selectTargetMedia(targetInput(harness))
+    await vi.waitFor(() => expect(dimensionProbe.calls).toBe(1))
+    harness.identity.locationId = 'L2'
+    dimensionProbe.resolve?.({ width: 20, height: 10 })
+    await expect(pending).rejects.toThrow('工程已发生变化')
+    expect(dedupeProbe.calls).toBe(0)
+  })
+
+  it('rejects a target changed during dedupe and rechecks before commit', async () => {
+    const harness = createHarness()
+    harness.ports.selectImage = vi.fn(async () => chosen)
+    dedupeProbe.deferred = true
+    const { result } = renderHook(() => useMediaImport(harness.ports))
+    const pending = result.current.selectTargetMedia(targetInput(harness))
+    await vi.waitFor(() => expect(dimensionProbe.calls).toBe(1))
+    dimensionProbe.resolve?.({ width: 20, height: 10 })
+    await vi.waitFor(() => expect(dedupeProbe.calls).toBe(1))
+    harness.identity.revision = 2
+    dedupeProbe.release?.()
+    await expect(pending).rejects.toThrow('工程已发生变化')
+
+    dedupeProbe.deferred = false
+    harness.identity.revision = 1
+    const again = result.current.selectTargetMedia(targetInput(harness))
+    await vi.waitFor(() => expect(dimensionProbe.calls).toBe(2))
+    dimensionProbe.resolve?.({ width: 20, height: 10 })
+    const prepared = await again
+    harness.identity.revision = 3
+    expect(() => prepared?.assertCurrent()).toThrow('工程已发生变化')
+  })
 })
 
 describe('useMediaImport stale results', () => {
