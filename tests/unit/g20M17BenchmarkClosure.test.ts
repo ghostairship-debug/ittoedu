@@ -150,6 +150,16 @@ describe('audited framework resource closure', () => {
     'let st;st=el.style;const next=st;next.backgroundImage=chooseUrl()',
     'const {style:st}=el;st.backgroundImage="url("+location.hash+")"',
     'const load=fetch;load(location.hash)',
+    'function apply(el,key){const st=el[key];st.backgroundImage="url("+location.hash+")"}apply(document.body,"style")',
+    'function apply(el,key){return el[key]}const st=apply(document.body,"style");st.backgroundImage=location.hash',
+    'const apply=(el,key)=>{const st=el[key];st.backgroundImage=location.hash};apply(document.body,"style")',
+    'function apply({el},key){const st=el[key];st.backgroundImage=location.hash}apply({el:document.body},"style")',
+    'const obj={};const alias=obj;alias.x=document.body;const st=obj[location.hash];st.backgroundImage=location.hash',
+    'const obj={};function change(arg){arg.x=document.body}change(obj);const st=obj[location.hash];st.backgroundImage=location.hash',
+    'const obj={};Object.defineProperty(obj,"x",{value:document.body});const st=obj[location.hash];st.backgroundImage=location.hash',
+    'const obj={};function change(arg){arg.x=document.body}const update=change.bind(null,obj);update();const st=obj[location.hash];st.backgroundImage=location.hash',
+    'const obj={};const key=location.hash;const first=obj[key];const second=first[key];second("fetch(location.hash)")',
+    'const first={}.toString;const second=first[location.hash];second("fetch(location.hash)")',
     'const name="style";const st=el[name];st.backgroundImage="url("+location.hash+")"',
     'const name="fetch";globalThis[name](location.hash)',
     'const st=Reflect.get(el,"style");st.backgroundImage=location.hash',
@@ -185,6 +195,14 @@ describe('audited framework resource closure', () => {
 
   it('does not treat arbitrary component props as proven host resource consumers', () => {
     expect(errors(vendor + app('D.a', 'function Caption(props){return (0,T.jsx)("span",{children:props.src})}').replace('(0,T.jsx)("img",', '(0,T.jsx)(Caption,'))).toContain('unsupported-framework-resource-input')
+  })
+
+  it('proves literal containers and audited state updates before allowing unknown indices', () => {
+    expect(errors('const rows=[{label:"one"},{label:"two"}];const row=rows[location.hash]')).toEqual([])
+    const safe = 'function state(){const [value,setValue]=(0,h.useState)({});const toggle=(key,field)=>setValue(previous=>({...previous,[key]:{...previous[key],[field]:!previous[key]?.[field]}}));return !!value[location.hash]}'
+    expect(errors(vendor + app('D.a', safe))).toEqual([])
+    expect(errors(vendor + app('D.a', safe.replace('setValue(previous=>', 'setValue(document.body);setValue(previous=>')))).toContain('unsupported-dynamic-url-sink')
+    expect(errors(vendor + app('D.a', 'function bad(){const [value,setValue]=(0,h.useState)({});const escape=setValue;return value[location.hash]}'))).toContain('unsupported-dynamic-url-sink')
   })
 
   it('does not acquire ownership through a shared producer alias', () => {

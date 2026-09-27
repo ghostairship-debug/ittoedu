@@ -31,7 +31,10 @@ export function analyzeJavaScriptClosure(root: JsNode, inertCalls: Set<JsNode> =
   const scopes = new Map<JsNode, Scope>(), parents = new Map<JsNode, JsNode>()
   const bind = (id: JsNode, declaration: JsNode, scope: Scope, initial?: JsNode) => {
     if (id.type !== 'Identifier') {
-      for (const child of children(id)) bind(child, declaration, scope)
+      if (id.type === 'ArrayPattern') for (const child of id.elements as Array<JsNode | null>) { if (child) bind(child, declaration, scope) }
+      if (id.type === 'ObjectPattern') for (const prop of id.properties as JsNode[]) bind((prop.type === 'RestElement' ? prop.argument : prop.value) as JsNode, declaration, scope)
+      if (id.type === 'AssignmentPattern') bind(id.left as JsNode, declaration, scope)
+      if (id.type === 'RestElement') bind(id.argument as JsNode, declaration, scope)
       return
     }
     const name = String(id.name), previous = scope.bindings.get(name)
@@ -70,6 +73,16 @@ export function analyzeJavaScriptClosure(root: JsNode, inertCalls: Set<JsNode> =
     if (node.type !== 'Identifier') return false
     const parent = parents.get(node)
     if (!parent) return false
+    let pattern = node, owner = parent
+    while (['ArrayPattern', 'ObjectPattern', 'RestElement', 'AssignmentPattern', 'Property'].includes(owner.type)) {
+      if (owner.type === 'Property' && parents.get(owner)?.type !== 'ObjectPattern') break
+      if (owner.type === 'AssignmentPattern' && owner.right === pattern) break
+      pattern = owner
+      const next = parents.get(pattern)
+      if (!next) break
+      owner = next
+    }
+    if ((owner.type === 'VariableDeclarator' && owner.id === pattern) || (FUNCTIONS.has(owner.type) && (owner.params as JsNode[]).includes(pattern)) || (owner.type === 'CatchClause' && owner.param === pattern)) return false
     if ((parent.type === 'MemberExpression' && parent.property === node && !parent.computed)
       || (parent.type === 'Property' && parent.key === node && !parent.computed && !parent.shorthand)
       || (parent.type === 'VariableDeclarator' && parent.id === node)
@@ -385,16 +398,188 @@ export function analyzeJavaScriptClosure(root: JsNode, inertCalls: Set<JsNode> =
   const capabilityErrors: JsNode[] = []
   const networks = new Set(['fetch', 'importScripts', 'WebSocket', 'EventSource', 'Worker', 'SharedWorker', 'XMLHttpRequest', 'sendBeacon'])
   const setters = new Set(['setAttribute', 'setProperty', 'insertRule', 'insertAdjacentHTML'])
-  const ambientReceiver = (node: JsNode, seen = new Set<Binding>()): boolean => {
-    if (node.type === 'MemberExpression') return ambientReceiver(node.object as JsNode, seen)
-    if (node.type === 'CallExpression' || node.type === 'NewExpression') return ambientReceiver(node.callee as JsNode, seen)
-    if (node.type !== 'Identifier') return false
+  // Unknown bindings (especially parameters) are not local data. The finite
+  // data proof recognizes literal containers and audited React state/memo results.
+  // A state proof covers every setter reference and every updater result.
+  const dataBindings = new Set<Binding>()
+  const taintedDataBindings = new Set(mutations)
+  const dataMethods = new Set(['map', 'flatMap', 'filter', 'find', 'findIndex', 'some', 'every', 'includes', 'indexOf'])
+  const functionValue = (node: JsNode): JsNode | undefined => {
+    if (FUNCTIONS.has(node.type)) return node
     const binding = bindingOf(node)
-    if (!binding) return true
-    if (seen.has(binding)) return false
-    const next = new Set(seen).add(binding)
-    return !!binding.initial && ambientReceiver(binding.initial, next)
-      || (assignments.get(binding) ?? []).some(write => ambientReceiver(write.right as JsNode, next))
+    if (!binding || binding.duplicate || assignments.has(binding) || mutations.has(binding)) return undefined
+    return binding.declaration.type === 'FunctionDeclaration' ? binding.declaration : binding.initial && FUNCTIONS.has(binding.initial.type) ? binding.initial : undefined
+  }
+  const passiveStateSetters = new Set<Binding>()
+  for (const declaration of allNodes) {
+    if (inLibrary(declaration) || declaration.type !== 'VariableDeclarator' || (declaration.id as JsNode).type !== 'ArrayPattern') continue
+    const init = declaration.init as JsNode | undefined, callee = init?.type === 'CallExpression' ? unwrap(init.callee as JsNode) : undefined
+    if (!callee || memberName(callee) !== 'useState' || !libraryBindings.has(bindingOf(callee.object as JsNode)!)) continue
+    const setter = ((declaration.id as JsNode).elements as Array<JsNode | null>)[1], binding = setter && bindingOf(setter)
+    if (!binding) continue
+    const passive = allNodes.filter(ref => isReference(ref) && bindingOf(ref) === binding).every(ref => {
+      const call = parents.get(ref)
+      if (call?.type !== 'CallExpression' || call.callee !== ref) return false
+      return (call.arguments as JsNode[]).every(arg => !FUNCTIONS.has(arg.type) || !allNodes.some(child => arg.start <= child.start && child.end <= arg.end && ['CallExpression', 'NewExpression', 'AssignmentExpression', 'UpdateExpression'].includes(child.type)))
+    })
+    if (passive) passiveStateSetters.add(binding)
+  }
+  const literalProjection = (node: JsNode, seen = new Set<Binding>()): JsNode | undefined => {
+    if (node.type === 'Identifier') {
+      const binding = bindingOf(node)
+      return binding?.initial && !binding.duplicate && !assignments.has(binding) && !mutations.has(binding) && !seen.has(binding) ? literalProjection(binding.initial, new Set(seen).add(binding)) : undefined
+    }
+    if (node.type !== 'MemberExpression') return node
+    const object = literalProjection(node.object as JsNode, seen), key = memberName(node) ?? ((node.property as JsNode).type === 'Literal' && typeof (node.property as JsNode).value === 'number' ? String((node.property as JsNode).value) : undefined)
+    if (object?.type === 'ArrayExpression' && key !== undefined && /^\d+$/.test(key)) return ((object.elements as Array<JsNode | null>)[Number(key)]) ?? undefined
+    if (object?.type === 'ObjectExpression' && key !== undefined) {
+      const prop = (object.properties as JsNode[]).find(item => item.type === 'Property' && !item.computed && keyOf(item.key as JsNode) === key)
+      return prop?.kind === 'init' ? prop.value as JsNode : undefined
+    }
+    return undefined
+  }
+  const argumentBindings = (node: JsNode): Binding[] => {
+    const projected = literalProjection(node)
+    if (projected?.type === 'Literal' && (projected.value === null || typeof projected.value !== 'object') || projected?.type === 'TemplateLiteral' && (projected.expressions as JsNode[]).length === 0) return []
+    const direct = rootBinding(node)
+    if (direct) return [direct]
+    if (node.type === 'ObjectExpression') return (node.properties as JsNode[]).flatMap(prop => argumentBindings((prop.type === 'SpreadElement' ? prop.argument : prop.value) as JsNode))
+    if (node.type === 'ArrayExpression') return (node.elements as Array<JsNode | null>).flatMap(value => value ? argumentBindings(value) : [])
+    return []
+  }
+  let taintChanged = true
+  while (taintChanged) {
+    taintChanged = false
+    const taint = (binding: Binding) => { if (!taintedDataBindings.has(binding)) { taintedDataBindings.add(binding); taintChanged = true } }
+    for (const binding of [...taintedDataBindings]) {
+      if (binding.initial) for (const source of argumentBindings(binding.initial)) taint(source)
+      if (binding.initial?.type === 'CallExpression') for (const argument of binding.initial.arguments as JsNode[]) for (const source of argumentBindings(argument)) taint(source)
+    }
+    for (const call of allNodes) {
+      if (inLibrary(call) || call.type !== 'CallExpression') continue
+      const callee = unwrap(call.callee as JsNode), target = functionValue(callee), args = call.arguments as JsNode[]
+      if (isReactEntry(call)) {
+        const component = args[0] && functionValue(args[0]), pattern = component && (component.params as JsNode[])[0]
+        if (pattern?.type === 'ObjectPattern' && args[1]?.type === 'ObjectExpression') {
+          for (const prop of args[1].properties as JsNode[]) {
+            const key = prop.type === 'Property' && !prop.computed ? keyOf(prop.key as JsNode) : undefined
+            const slot = (pattern.properties as JsNode[]).find(item => item.type === 'Property' && !item.computed && keyOf(item.key as JsNode) === key)
+            const parameter = slot && bindingOf(slot.value as JsNode)
+            if (!parameter || taintedDataBindings.has(parameter)) for (const binding of argumentBindings(prop.value as JsNode)) taint(binding)
+          }
+        } else if (!libraryBindings.has(bindingOf(args[0])!) && args[1]) for (const binding of argumentBindings(args[1])) taint(binding)
+        continue
+      }
+      for (let index = 0; index < args.length; index++) {
+        if (passiveStateSetters.has(bindingOf(callee)!)) continue
+        const param = target ? (target.params as JsNode[])[index] : undefined
+        if (param?.type === 'Identifier' && !taintedDataBindings.has(bindingOf(param)!)) continue
+        for (const binding of argumentBindings(args[index])) taint(binding)
+      }
+      if (callee.type === 'MemberExpression' && !dataMethods.has(memberName(callee) ?? '')) {
+        const receiver = rootBinding(callee.object as JsNode)
+        if (receiver) taint(receiver)
+      }
+    }
+  }
+  const expressionBody = (fn: JsNode): JsNode | undefined => {
+    const body = fn.body as JsNode
+    if (body.type !== 'BlockStatement') return body
+    const statements = body.body as JsNode[]
+    return statements.length === 1 && statements[0].type === 'ReturnStatement' ? statements[0].argument as JsNode : undefined
+  }
+  const dataSources = (node: JsNode, locals: Map<Binding, JsNode[]>, seen = new Set<Binding>()): JsNode[] => {
+    if (node.type === 'Identifier') {
+      const binding = bindingOf(node)
+      if (!binding || seen.has(binding)) return []
+      if (locals.has(binding)) return locals.get(binding)!
+      return binding.initial ? dataSources(binding.initial, locals, new Set(seen).add(binding)) : []
+    }
+    if (node.type === 'MemberExpression') {
+      const key = memberName(node) ?? ((node.property as JsNode).type === 'Literal' && typeof (node.property as JsNode).value === 'number' ? String((node.property as JsNode).value) : undefined)
+      if (key === undefined) return []
+      const objects = dataSources(node.object as JsNode, locals, seen)
+      const values = objects.map(object => {
+        if (object.type === 'ArrayExpression' && /^\d+$/.test(key)) return (object.elements as Array<JsNode | null>)[Number(key)] ?? undefined
+        if (object.type !== 'ObjectExpression') return undefined
+        const properties = object.properties as JsNode[]
+        if (properties.some(item => item.type !== 'Property' || item.computed || item.kind !== 'init')) return undefined
+        const prop = properties.filter(item => keyOf(item.key as JsNode) === key).at(-1)
+        return prop?.value as JsNode | undefined
+      })
+      return values.length && values.every((value): value is JsNode => !!value) ? values : []
+    }
+    return [node]
+  }
+  const dataValue = (node: JsNode, locals = new Map<Binding, JsNode[]>(), seen = new Set<Binding>(), budget = 64): boolean => {
+    if (budget <= 0) return false
+    const data = (value: JsNode, env = locals) => dataValue(value, env, seen, budget - 1)
+    if (node.type === 'Literal' || node.type === 'TemplateLiteral') return true
+    if (node.type === 'UnaryExpression' || node.type === 'BinaryExpression') return true
+    if (node.type === 'LogicalExpression') return data(node.left as JsNode) && data(node.right as JsNode)
+    if (node.type === 'ConditionalExpression') return data(node.consequent as JsNode) && data(node.alternate as JsNode)
+    if (node.type === 'ChainExpression') return data(node.expression as JsNode)
+    if (node.type === 'ArrayExpression') return (node.elements as Array<JsNode | null>).every(value => !value || data(value.type === 'SpreadElement' ? value.argument as JsNode : value))
+    if (node.type === 'ObjectExpression') return (node.properties as JsNode[]).every(prop => prop.type === 'SpreadElement' ? data(prop.argument as JsNode) : prop.type === 'Property' && prop.kind === 'init' && !prop.method && data(prop.value as JsNode))
+    if (node.type === 'Identifier') {
+      const binding = bindingOf(node)
+      if (!binding || binding.duplicate || taintedDataBindings.has(binding) || assignments.has(binding)) return false
+      if (locals.has(binding) || dataBindings.has(binding)) return true
+      if (!binding.initial || seen.has(binding) || objectAssigns.has(binding)) return false
+      return dataValue(binding.initial, locals, new Set(seen).add(binding), budget - 1)
+    }
+    if (node.type === 'MemberExpression') {
+      if (!data(node.object as JsNode)) return false
+      // Indexed reads can yield prototype methods. They are not fresh data
+      // provenance for another receiver unless consumed structurally.
+      const own = dataSources(node, locals)
+      if (own.length && own.every(value => value !== node && data(value))) return true
+      let use = parents.get(node)
+      if (use?.type === 'ChainExpression') use = parents.get(use)
+      while (use?.type === 'MemberExpression') { use = parents.get(use); if (use?.type === 'ChainExpression') use = parents.get(use) }
+      return use?.type === 'UnaryExpression' || use?.type === 'BinaryExpression' || use?.type === 'SpreadElement'
+    }
+    if (node.type !== 'CallExpression') return false
+    const callee = unwrap(node.callee as JsNode), args = node.arguments as JsNode[]
+    if (callee.type === 'MemberExpression') {
+      const name = memberName(callee)
+      if (name === 'useMemo' && libraryBindings.has(bindingOf(callee.object as JsNode)!) && args[0]) {
+        const fn = functionValue(args[0]), body = fn && (fn.params as JsNode[]).length === 0 ? expressionBody(fn) : undefined
+        return !!body && data(body)
+      }
+      if (!name || !dataMethods.has(name) || !data(callee.object as JsNode)) return false
+      if (['includes', 'indexOf'].includes(name)) return true
+      const fn = args[0] && functionValue(args[0]), body = fn && expressionBody(fn)
+      if (!fn || !body || (fn.params as JsNode[]).some(param => param.type !== 'Identifier')) return false
+      const env = new Map(locals)
+      const elements = dataSources(callee.object as JsNode, locals).flatMap(source => source.type === 'ArrayExpression' ? (source.elements as Array<JsNode | null>).filter((value): value is JsNode => !!value) : [])
+      for (const [index, param] of (fn.params as JsNode[]).entries()) { const binding = bindingOf(param); if (binding) env.set(binding, index === 0 ? elements : []) }
+      return data(body, env)
+    }
+    return false
+  }
+  for (const node of allNodes) {
+    if (inLibrary(node) || node.type !== 'VariableDeclarator' || (node.id as JsNode).type !== 'ArrayPattern') continue
+    const init = node.init as JsNode | undefined, callee = init?.type === 'CallExpression' ? unwrap(init.callee as JsNode) : undefined
+    if (!callee || callee.type !== 'MemberExpression' || memberName(callee) !== 'useState' || !libraryBindings.has(bindingOf(callee.object as JsNode)!)) continue
+    const [state, setter] = (node.id as JsNode).elements as Array<JsNode | null>, initial = (init!.arguments as JsNode[])[0]
+    if (!state || !setter || state.type !== 'Identifier' || setter.type !== 'Identifier' || !initial || !dataValue(initial)) continue
+    const stateBinding = bindingOf(state), setterBinding = bindingOf(setter)
+    if (!stateBinding || !setterBinding || stateBinding.duplicate || setterBinding.duplicate || mutations.has(stateBinding) || assignments.has(stateBinding) || mutations.has(setterBinding) || assignments.has(setterBinding)) continue
+    const updaterParams = new Set<Binding>()
+    const valid = allNodes.filter(ref => isReference(ref) && bindingOf(ref) === setterBinding).every(ref => {
+      const call = parents.get(ref)
+      if (call?.type !== 'CallExpression' || call.callee !== ref || (call.arguments as JsNode[]).length !== 1) return false
+      const value = (call.arguments as JsNode[])[0]
+      if (!FUNCTIONS.has(value.type)) return dataValue(value)
+      const params = value.params as JsNode[], body = expressionBody(value)
+      if (params.length !== 1 || params[0].type !== 'Identifier' || !body) return false
+      const parameter = bindingOf(params[0])
+      if (!parameter || !dataValue(body, new Map([[parameter, [initial]]]))) return false
+      updaterParams.add(parameter)
+      return true
+    })
+    if (valid) { dataBindings.add(stateBinding); for (const parameter of updaterParams) dataBindings.add(parameter) }
   }
   const inInert = (node: JsNode): boolean => { let current: JsNode | undefined = node; while (current) { if (inertCalls.has(current)) return true; current = parents.get(current) } return false }
   for (const node of allNodes) {
@@ -403,7 +588,9 @@ export function analyzeJavaScriptClosure(root: JsNode, inertCalls: Set<JsNode> =
     if (!parent) continue
     const name = node.type === 'MemberExpression' ? memberName(node) : node.type === 'Identifier' && isReference(node) && !bindingOf(node) ? String(node.name) : undefined
     if (node.type === 'MemberExpression' && node.computed && name === undefined
-      && (ambientReceiver(node.object as JsNode) || (parent.type === 'CallExpression' && parent.callee === node))) capabilityErrors.push(node)
+      && ((parent.type === 'CallExpression' && parent.callee === node) || !dataValue(node.object as JsNode))
+      && !resourceInputs.some(input => input.value === node && input.proof.kind === 'proven-resource')
+      && !((node.property as JsNode).type === 'Literal' && typeof (node.property as JsNode).value === 'number')) capabilityErrors.push(node)
     if (name && (networks.has(name) || ['eval', 'Function', 'Reflect', 'constructor', 'getOwnPropertyDescriptor', 'getOwnPropertyDescriptors', '__lookupGetter__', '__lookupSetter__'].includes(name))) capabilityErrors.push(node)
     if (node.type === 'MemberExpression' && setters.has(name ?? '') && !(parent.type === 'CallExpression' && parent.callee === node)) capabilityErrors.push(node)
     if (node.type === 'ObjectPattern' && (node.properties as JsNode[]).some(prop => prop.type === 'Property' && (prop.computed || keyOf(prop.key as JsNode) === 'style' || setters.has(keyOf(prop.key as JsNode) ?? '') || networks.has(keyOf(prop.key as JsNode) ?? '')))) capabilityErrors.push(node)
