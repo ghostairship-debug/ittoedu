@@ -47,7 +47,8 @@ export async function operateDynamicAdmission(raw: unknown, owner: WebContents, 
     remoteAssetUrls: Object.entries(request.payload.project.assets).flatMap(([id, asset]) => !request.payload.assetFiles[id] && asset.remote ? [asset.remote.url] : []) }, networkOwner)
   configureRestrictedSession(isolatedSession, url => network.allowsRequest(url))
   const worker = new BrowserWindow({ width: 1280, height: 720, useContentSize: true, frame: false, show: false, skipTaskbar: true,
-    webPreferences: { session: isolatedSession, contextIsolation: true, sandbox: true, nodeIntegration: false, webSecurity: true, backgroundThrottling: false } })
+    webPreferences: { session: isolatedSession, contextIsolation: true, sandbox: true, nodeIntegration: false, webSecurity: true, backgroundThrottling: false, offscreen: true } })
+  worker.webContents.setFrameRate(60)
   worker.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
   const entry = new URL('admission.html', rendererEntryUrl).toString()
   worker.webContents.on('will-navigate', (event, url) => { if (url !== entry) event.preventDefault() })
