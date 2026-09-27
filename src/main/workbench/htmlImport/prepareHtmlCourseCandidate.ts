@@ -6,7 +6,7 @@ import { createHtmlDocumentRuntimeSource } from '../../../shared/runtime/htmlDoc
 import { validateRuntimeSource } from '../../../shared/runtimeSourceValidation'
 import { validateCourseProjectArchiveData } from '../../../core/drivers/codecs/courseProjectArchive'
 import { allocateCourseLayerOrder } from '../../../core/tools/layerOrder'
-import { resolveHtmlImportTarget } from './resolveHtmlImportTarget'
+import { insertHtmlImportEmptyParagraph, resolveHtmlImportTarget } from './resolveHtmlImportTarget'
 import { prepareImageResource } from '../admittedImageResource'
 import { readHtmlClosure } from './readHtmlClosure'
 import { validateHtmlImport } from './validateHtmlImport'
@@ -89,7 +89,7 @@ export async function prepareHtmlCourseCandidate(input: {
   if (destination.kind === 'slide' && targetSurface.type === 'slide') {
     targetSurface.scenes.find(scene => scene.id === destination.sceneId)!.layerItems.push(item)
   } else if (destination.kind === 'flow' && targetSurface.type === 'flow') {
-    if (destination.createEmptyParagraph) targetSurface.blocks.push({ id: destination.anchorBlockId, type: 'paragraph', content: { inlines: [] } })
+    insertHtmlImportEmptyParagraph(targetSurface, destination)
     targetSurface.surfaceLayerItems.push({ item: { ...item, paperSpace: 'paper' }, visibility: { mode: 'all', locationIds: [] },
       bodyPlane: 'overlay', paragraphAnchor: { blockId: destination.anchorBlockId, offsetY: 0, xRatio: 0 } })
   }

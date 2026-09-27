@@ -7,6 +7,7 @@ import sharp from 'sharp'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createBlankCourseProject } from '../../src/core/course/createCourseProject'
 import { addCourseFlowPage } from '../../src/core/tools/courseLocations'
+import { syncFlowCourseLocations } from '../../src/core/tools/flowDocumentModel'
 import { createTextNode } from '../../src/core/tools/nativeNodeFactories'
 import { sceneNodeToCourseLayerItem } from '../../src/shared/courseProjectModel'
 import { CourseV9Driver } from '../../src/core/drivers/CourseV9Driver'
@@ -26,7 +27,7 @@ afterEach(async () => {
   }
 })
 
-async function fixture(admission?: BuildAdmissionPort, existingOrders: readonly number[] = [], kind: 'slide' | 'flow' = 'slide', emptyBody = false) {
+async function fixture(admission?: BuildAdmissionPort, existingOrders: readonly number[] = [], kind: 'slide' | 'flow' = 'slide', emptyBody = false, shape?: 'next-heading' | 'nested-heading') {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'g20-html-import-'))
   roots.push(root)
   const sourcePath = path.join(root, 'lesson.html')
@@ -34,6 +35,17 @@ async function fixture(admission?: BuildAdmissionPort, existingOrders: readonly 
   const blank = createBlankCourseProject({ includeDefaultController: false, controls: 'none' })
   const project = kind === 'flow' ? addCourseFlowPage(blank, { expectedRevision: blank.revision }).project : blank
   if (emptyBody) project.surfaces.filter(surface => surface.type === 'flow').forEach(surface => { surface.blocks = surface.blocks.filter(block => block.type === 'heading') })
+  if (shape) {
+    const flow = project.surfaces.find(surface => surface.type === 'flow')!
+    const blocks = [
+      { id: 'h1', type: 'heading' as const, level: 1 as const, content: { inlines: [{ type: 'text' as const, text: 'Current' }] } },
+      { id: 'h2', type: 'heading' as const, level: 1 as const, content: { inlines: [{ type: 'text' as const, text: 'Next' }] } },
+      { id: 'p2', type: 'paragraph' as const, content: { inlines: [{ type: 'text' as const, text: 'Next body' }] } },
+    ]
+    flow.blocks = shape === 'nested-heading' ? [{ id: 'section', type: 'section', title: { inlines: [{ type: 'text', text: 'Chapter' }] },
+      collapsedByDefault: false, blocks }] : blocks
+    syncFlowCourseLocations(project, flow.id)
+  }
   const firstSurface = project.surfaces[0]
   if (firstSurface?.type !== 'slide') throw new Error('fixture requires Slide')
   for (const order of existingOrders) firstSurface.scenes[0]!.layerItems.push(sceneNodeToCourseLayerItem(createTextNode(), order))
@@ -44,7 +56,8 @@ async function fixture(admission?: BuildAdmissionPort, existingOrders: readonly 
   const png = await sharp({ create: { width: 1, height: 1, channels: 4, background: '#ffffff' } }).png().toBuffer()
   const run = vi.fn<BuildAdmissionPort['run']>(async payload => ({ ok: true, message: 'fake admission', processId: 1,
     captures: payload.targets.flatMap(target => target.instanceIds.map(instanceId => ({ instanceId, locationId: target.locationId,
-      width: 1, height: 1, dataUrl: `data:image/png;base64,${png.toString('base64')}` }))),
+      width: 1, height: 1, dataUrl: `data:image/png;base64,${png.toString('base64')}` })))
+      .filter((capture, index, all) => all.findIndex(item => item.instanceId === capture.instanceId) === index),
     behaviorEvidence: payload.targets.map(target => ({ version: 1, status: 'observed', mode: 'full-admission',
       projectId: payload.project.id, documentRevision: payload.project.revision, locationId: target.locationId,
       stateId: target.stateId ?? null, instanceIds: target.instanceIds, sourceIdentities: {}, actions: [],
@@ -150,6 +163,21 @@ describe('M17 S13 HTML import orchestration', () => {
     const flow = after.project.surfaces.find(item => item.type === 'flow')!
     expect(flow.blocks).toHaveLength(2)
     expect(flow.blocks[1]).toMatchObject({ type: 'paragraph', id: ticket.target.anchorBlockId, content: { inlines: [] } })
+    expect(flow.surfaceLayerItems[0]?.paragraphAnchor?.blockId).toBe(ticket.target.anchorBlockId)
+  })
+
+  it.each(['next-heading', 'nested-heading'] as const)('inserts an empty paragraph in the selected %s scope before the next heading', async shape => {
+    const f = await fixture(undefined, [], 'flow', false, shape)
+    const current = f.project.locations.find(item => item.kind === 'flow-block' && item.blockId === 'h1')!
+    const ticket = await f.service.prepare({ ...f.request, locationId: current.id })
+    await f.service.admit(ticket)
+    expect((await f.service.commit(ticket)).status).toBe('applied')
+    const model = f.session.read().model
+    if (model.kind !== 'course-v9') throw new Error('wrong model')
+    const flow = model.project.surfaces.find(item => item.type === 'flow')!
+    const scoped = shape === 'nested-heading' ? flow.blocks[0]!.type === 'section' ? flow.blocks[0]!.blocks : [] : flow.blocks
+    expect(scoped.map(block => block.id)).toEqual(['h1', ticket.target.anchorBlockId, 'h2', 'p2'])
+    expect(scoped[1]).toMatchObject({ type: 'paragraph', content: { inlines: [] } })
     expect(flow.surfaceLayerItems[0]?.paragraphAnchor?.blockId).toBe(ticket.target.anchorBlockId)
   })
 

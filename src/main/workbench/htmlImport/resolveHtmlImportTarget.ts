@@ -1,12 +1,21 @@
-import type { CourseProjectDocument, FlowBlock } from '../../../shared/courseProjectTypes'
+import type { CourseProjectDocument, FlowBlock, FlowSurfaceDocument } from '../../../shared/courseProjectTypes'
 import { createHash } from 'node:crypto'
 
 export type HtmlImportResolvedTarget =
   | { kind: 'slide'; locationId: string; surfaceId: string; sceneId: string }
-  | { kind: 'flow'; locationId: string; surfaceId: string; anchorBlockId: string; createEmptyParagraph: boolean }
+  | { kind: 'flow'; locationId: string; surfaceId: string; anchorBlockId: string; createEmptyParagraph: boolean;
+      containerPath?: number[]; insertAt?: number }
 
-function hasBlock(blocks: readonly FlowBlock[], id: string): boolean {
-  return blocks.some(block => block.id === id || block.type === 'section' && hasBlock(block.blocks, id))
+function findBlock(blocks: readonly FlowBlock[], id: string, containerPath: number[] = []): { block: FlowBlock; blocks: readonly FlowBlock[]; index: number; containerPath: number[] } | null {
+  for (let index = 0; index < blocks.length; index += 1) {
+    const block = blocks[index]!
+    if (block.id === id) return { block, blocks, index, containerPath }
+    if (block.type === 'section') {
+      const nested = findBlock(block.blocks, id, [...containerPath, index])
+      if (nested) return nested
+    }
+  }
+  return null
 }
 
 export function resolveHtmlImportTarget(project: CourseProjectDocument, locationId: string, anchorBlockId?: string): HtmlImportResolvedTarget {
@@ -20,18 +29,34 @@ export function resolveHtmlImportTarget(project: CourseProjectDocument, location
   }
   if (location.kind === 'flow-block' && surface.type === 'flow') {
     if (anchorBlockId !== undefined) {
-      if (!hasBlock(surface.blocks, anchorBlockId)) throw new Error('HTML 导入的 Flow 挂靠段落不存在')
+      if (!findBlock(surface.blocks, anchorBlockId)) throw new Error('HTML 导入的 Flow 挂靠段落不存在')
       return { kind: 'flow', locationId, surfaceId: surface.id, anchorBlockId, createEmptyParagraph: false }
     }
-    const headingIndex = surface.blocks.findIndex(block => block.id === location.blockId)
-    if (headingIndex < 0) throw new Error('HTML 导入的 Flow 位置锚点不存在')
-    const body = surface.blocks.slice(headingIndex + 1).find(block => block.type === 'heading' ? true : block.type === 'paragraph')
+    const located = findBlock(surface.blocks, location.blockId)
+    if (!located) throw new Error('HTML 导入的 Flow 位置锚点不存在')
+    const bodyBlocks = located.block.type === 'section' ? located.block.blocks : located.blocks
+    const bodyPath = located.block.type === 'section' ? [...located.containerPath, located.index] : located.containerPath
+    const bodyStart = located.block.type === 'section' ? 0 : located.index + 1
+    const body = bodyBlocks.slice(bodyStart).find(block => block.type === 'heading' || block.type === 'section' || block.type === 'paragraph')
     if (body?.type === 'paragraph')
       return { kind: 'flow', locationId, surfaceId: surface.id, anchorBlockId: body.id, createEmptyParagraph: false }
     const blockId = `html-import-paragraph-${createHash('sha256').update(`${surface.id}:${location.id}`).digest('hex').slice(0, 20)}`
-    if (hasBlock(surface.blocks, blockId))
+    if (findBlock(surface.blocks, blockId))
       return { kind: 'flow', locationId, surfaceId: surface.id, anchorBlockId: blockId, createEmptyParagraph: false }
-    return { kind: 'flow', locationId, surfaceId: surface.id, anchorBlockId: blockId, createEmptyParagraph: true }
+    return { kind: 'flow', locationId, surfaceId: surface.id, anchorBlockId: blockId, createEmptyParagraph: true,
+      containerPath: bodyPath, insertAt: bodyStart }
   }
   throw new Error('HTML 页面只能导入 Slide 场景或 Flow 正文')
+}
+
+export function insertHtmlImportEmptyParagraph(surface: FlowSurfaceDocument, target: Extract<HtmlImportResolvedTarget, { kind: 'flow' }>): void {
+  if (!target.createEmptyParagraph) return
+  if (!target.containerPath || target.insertAt === undefined) throw new Error('HTML 导入缺少空段落插入位置')
+  let blocks = surface.blocks
+  for (const index of target.containerPath) {
+    const section = blocks[index]
+    if (section?.type !== 'section') throw new Error('HTML 导入的 Flow 容器已改变')
+    blocks = section.blocks
+  }
+  blocks.splice(target.insertAt, 0, { id: target.anchorBlockId, type: 'paragraph', content: { inlines: [] } })
 }
