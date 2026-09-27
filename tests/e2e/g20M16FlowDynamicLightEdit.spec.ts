@@ -128,10 +128,10 @@ test('M16 Flow paper Runtime and managed Component light edits commit with fallb
     const frame = page.locator('.course-editor-frame:visible')
     const documentId = await frame.getAttribute('data-document-id')
     if (!documentId) throw new Error('DocumentSession was not bound')
-    const paper = page.getByTestId('flow-paper')
-    const runtime = paper.getByTestId(`flow-layer-card-${runtimeId}`)
-    const runtimeEditToggle = page.getByTestId('flow-workspace-toolbar-host').getByTestId('flow-runtime-edit-mode-toggle')
-    const component = paper.getByTestId(`flow-layer-card-${componentId}`)
+    // Paper overlays are siblings of the article, scoped to the visible editor frame.
+    const runtime = frame.getByTestId(`flow-layer-card-${runtimeId}`)
+    const runtimeEditToggle = frame.getByTestId('flow-workspace-toolbar-host').getByTestId('flow-runtime-edit-mode-toggle')
+    const component = frame.getByTestId(`flow-layer-card-${componentId}`)
     const textEditor = page.getByTestId('canvas-plain-text-editor').locator('input, textarea')
     const initial = await snapshot(page, documentId)
     evidence.initial = initial
