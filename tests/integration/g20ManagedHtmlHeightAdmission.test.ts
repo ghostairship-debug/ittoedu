@@ -29,6 +29,17 @@ const centeredPage = '<!doctype html><style>html,body{margin:0;height:100vh;over
 const clippedPage = '<!doctype html><style>body{margin:0}main{position:absolute;width:200px;height:200px}@media(max-height:500px){main{clip:rect(0,200px,1px,0)}}</style><main>Continue</main>'
 const backgroundPage = `<html><style>body{margin:0}main{width:200px;height:200px;background-image:url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22200%22 height=%22200%22%3E%3Crect width=%22200%22 height=%22200%22 fill=%22red%22/%3E%3C/svg%3E");background-repeat:no-repeat}@media(max-height:500px){main{background-position-y:-199px}}</style><main></main></html>`
 const naturalLongPage = `<!doctype html><style>body{margin:0;font:20px sans-serif}</style><main style="font:20px sans-serif">${Array.from({ length: 60 }, (_, index) => `<p>Paragraph ${index + 1}</p>`).join('')}</main>`
+const flowFixtureCss = `
+    body{margin:0;font:20px sans-serif;background:#eff6ff;color:#123052}
+    main{box-sizing:border-box;width:100%;padding:24px}
+    h1{margin:0 0 16px;font-size:32px}.lesson-row{box-sizing:border-box;height:76px;margin:0;border-bottom:1px solid #93c5fd}
+    img{display:block;width:64px;height:48px}button{margin-top:20px;padding:10px 20px;font-size:20px}
+  `
+const flowFixtureHtml = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><style>${flowFixtureCss}</style></head><body><main>
+  <h1 id="page-heading">纵向 HTML 讲义</h1><img id="picture" alt="受管图片" src="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2264%22%20height%3D%2248%22%3E%3C%2Fsvg%3E">
+  ${Array.from({ length: 18 }, (_, index) => `<p class="lesson-row">第 ${index + 1} 段：保留纵向长页的正文布局。</p>`).join('')}
+  <button id="advance" type="button">显示结论</button><output id="result">等待操作</output>
+  </main><script>document.getElementById('advance').addEventListener('click',function(){document.getElementById('result').textContent='观察后得到结论'})</script></body></html>`
 
 async function observe(source: string) {
   const page = await browser.newPage()
@@ -61,6 +72,17 @@ it('admits a natural long Flow page with Chromium-expanded font shorthand and me
   const result = await observe(createHtmlDocumentRuntimeSource({ html: naturalLongPage, resourceKeys: [] }))
   expect(result.ok).toBe(true)
   expect(result.heights[0]).toBeGreaterThan(700)
+  expect(result.observationFailure).toBe('')
+  expect(result.captureFailure).toBe('')
+  expect(result.mirrors).toBe(0)
+})
+
+it('admits the full M17 Flow fixture CSS without clipping its long page', async () => {
+  const result = await observe(createHtmlDocumentRuntimeSource({ html: flowFixtureHtml, resourceKeys: [] }))
+  expect(result.ok).toBe(true)
+  expect(result.heights[0]).toBeGreaterThan(1300)
+  expect(result.beforeResize[0]).toContain('第 18 段')
+  expect(result.beforeResize[0]).toContain('id="advance"')
   expect(result.observationFailure).toBe('')
   expect(result.captureFailure).toBe('')
   expect(result.mirrors).toBe(0)

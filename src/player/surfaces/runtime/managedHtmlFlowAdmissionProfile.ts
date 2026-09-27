@@ -3,6 +3,11 @@ export const MAX_FLOW_CSS_RULES = 1000
 const fail = (reason: string): never => { throw new Error(`Flow HTML 无法证明页面调整高度后无裁切：${reason}；请使用演示页。`) }
 const displays = new Set(['block', 'inline', 'inline-block', 'none', 'list-item', 'table', 'inline-table', 'table-caption', 'table-column-group', 'table-column', 'table-header-group', 'table-row-group', 'table-footer-group', 'table-row', 'table-cell'])
 const simple = new Map<string, RegExp>([
+  // Chromium expands a solid `background` shorthand into these inert reset longhands.
+  // The painted result is still checked through the full computed-style snapshot.
+  ...['background-image', 'background-position-x', 'background-position-y', 'background-size',
+    'background-repeat', 'background-attachment', 'background-origin', 'background-clip']
+    .map(name => [name, /^initial$/] as [string, RegExp]),
   ['box-sizing', /^(content-box|border-box)$/], ['position', /^static$/],
   ['overflow', /^visible$/], ['overflow-x', /^visible$/], ['overflow-y', /^visible$/],
   ['float', /^none$/], ['clear', /^none$/], ['opacity', /^(0(?:\.\d+)?|1(?:\.0+)?)$/],
