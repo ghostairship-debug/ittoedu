@@ -15,6 +15,8 @@ const mocks = vi.hoisted(() => ({
   updateRuntimeText: vi.fn(() => ({ ok: true, status: 'updated' })),
   captureRuntimeAsset: vi.fn((_session: any) => ({ courseTarget: { itemId: 'runtime-1' } })),
   replaceRuntimeAsset: vi.fn(() => ({ ok: true, status: 'replaced' })),
+  captureSubmission: vi.fn(() => ({ documentId: 'document-1', sequence: 1, settled: Promise.resolve(null) })),
+  amendFrozen: vi.fn(),
   recapture: vi.fn(),
 }))
 vi.mock('@/renderer/ui/flow/FlowPageRuntime', () => ({ FlowPageRuntime: (props: any) => { mocks.runtimeProps = props; return <div data-testid="runtime-mount" /> } }))
@@ -27,6 +29,7 @@ vi.mock('@/renderer/composition/runtime/staticFallbackRecapture', () => ({ sched
 vi.mock('@/renderer/store/editorStore', () => ({ useEditorStore: { getState: () => ({
   captureRuntimeContentTextTarget: mocks.captureRuntimeText, updateRuntimeContentTextAtTarget: mocks.updateRuntimeText,
   captureRuntimeAssetReplacementTarget: mocks.captureRuntimeAsset, replaceRuntimeAssetAtTarget: mocks.replaceRuntimeAsset,
+  captureCourseSubmission: mocks.captureSubmission, amendFrozenCourseCommit: mocks.amendFrozen,
 }) } }))
 
 const entries: Array<{ root: Root; element: HTMLElement }> = []
@@ -84,6 +87,11 @@ it('uses card-local Component geometry, clips target bounds, and commits auto te
   expect(mocks.writeText).toHaveBeenCalledWith(expect.anything(), 'Edited')
   await act(async () => imageButton.click())
   expect(mocks.replaceAsset).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ id: 'asset-1' }), expect.any(Uint8Array))
+  expect(mocks.captureSubmission).toHaveBeenCalledTimes(2)
+  expect(mocks.recapture).toHaveBeenCalledTimes(2)
+  expect(mocks.recapture).toHaveBeenLastCalledWith(expect.objectContaining({
+    handle: expect.objectContaining({ documentId: 'document-1', sequence: 1 }), itemId: 'card-1', locationId: 'location-1', amend: expect.any(Function),
+  }))
   // The document bridge reports success only after Main acknowledges the queued edit.
   expect(onStatus).not.toHaveBeenCalled()
 })
@@ -104,6 +112,10 @@ it('maps Runtime target identity to location, commits text and asset through the
   await act(async () => element.querySelector<HTMLButtonElement>('[aria-label="Picture，替换图片"]')!.click())
   expect(mocks.captureRuntimeAsset.mock.calls[0]![0]).toMatchObject({ sceneId: 'location-1', nodeId: 'runtime-1' })
   expect(mocks.replaceRuntimeAsset).toHaveBeenCalledTimes(1)
+  expect(mocks.recapture).toHaveBeenCalledTimes(2)
+  expect(mocks.recapture).toHaveBeenLastCalledWith(expect.objectContaining({
+    handle: expect.objectContaining({ documentId: 'document-1', sequence: 1 }), itemId: 'runtime-1', locationId: 'location-1', amend: expect.any(Function),
+  }))
 })
 
 it('rejects a late picker result after the document owner changes', async () => {
