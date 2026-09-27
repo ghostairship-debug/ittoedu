@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { parse } from 'acorn'
 import { extractHtmlResources } from '../../src/main/workbench/htmlImport/extractHtmlResources'
 import { validateHtmlImport } from '../../src/main/workbench/htmlImport/validateHtmlImport'
 import { MODULE_SOURCE } from '../../src/main/workbench/htmlImport/frameworks/react1927'
@@ -50,6 +51,80 @@ describe('audited framework resource closure', () => {
     expect(errors(vendor + app('D[key]', 's=otherModule;'))).toContain('unsupported-framework-resource-input')
     expect(errors(vendor + app('D[key]', 'const document=otherDocument;'))).toContain('unsupported-framework-resource-input')
     expect(errors(vendor + app('D[key]', 'Object.prototype.remote="https://example.invalid/image";'))).toContain('unsupported-framework-resource-input')
+  })
+
+  it('rewrites a shared relative literal once and leaves parseable JavaScript', () => {
+    const script = vendor + app('D.a').replace(JSON.stringify(image), '"pic.png"').replace('(0,T.jsx)("audio",{src:k})', '(0,T.jsx)("img",{src:D.a})')
+    const result = extractHtmlResources({ html: `<script type="module">${script}</script>`, siblingFiles: new Map([['pic.png', Buffer.from(image.split(',')[1], 'base64')]]) })
+    expect(validateHtmlImport(result)).toEqual([])
+    const rewritten = result.html.match(/<script[^>]*>([\s\S]*?)<\/script>/)![1]
+    expect(() => parse(rewritten, { ecmaVersion: 'latest', sourceType: 'module' })).not.toThrow()
+    expect(rewritten).toMatch(/D=\{a:"cw-resource:[a-f0-9]{64}"\}/)
+    expect(result.resources.filter(resource => resource.mediaType === 'image/png')).toHaveLength(1)
+  })
+
+  it('rejects incompatible rewrites of a shared literal across URL and HTML contexts', () => {
+    const script = vendor + app('shared', 'const shared="pic.png";', '{src:shared,dangerouslySetInnerHTML:{__html:shared}}')
+    const result = extractHtmlResources({ html: `<script type="module">${script}</script>`, siblingFiles: new Map([['pic.png', Buffer.from(image.split(',')[1], 'base64')]]) })
+    expect(validateHtmlImport(result).map(item => item.code)).toContain('conflicting-js-rewrite')
+  })
+
+  it.each([
+    '{src:D.a,style:{backgroundImage:"url("+chooseUrl()+")"}}',
+    '{src:D.a,style:chooseStyle()}',
+    '{src:D.a,style:{"--picture":chooseUrl()}}',
+    '{src:D.a,dangerouslySetInnerHTML:{__html:chooseHtml()}}',
+    '{src:D.a,dangerouslySetInnerHTML:chooseMarkup()}',
+  ])('rejects unproven recursive React resource input: %s', props => {
+    expect(errors(vendor + app('D.a', '', props))).toContain('unsupported-dynamic-url-sink')
+  })
+
+  it('rejects static remote resources nested in CSS and HTML', () => {
+    expect(errors(vendor + app('D.a', '', '{src:D.a,style:{backgroundImage:"url(https://example.invalid/x.png)"}}'))).toContain('remote-resource')
+    expect(errors(vendor + app('D.a', '', '{src:D.a,fill:"url(https://example.invalid/paint.svg)"}'))).toContain('remote-resource')
+    expect(errors(vendor + app('D.a', '', `{src:D.a,dangerouslySetInnerHTML:{__html:${JSON.stringify('<img src="https://example.invalid/x.png">')}}}`))).toContain('remote-resource')
+  })
+
+  it('preserves legal static CSS and HTML while localizing nested relative resources', () => {
+    const props = `{src:D.a,style:staticStyle,dangerouslySetInnerHTML:staticMarkup}`
+    const extra = `const staticStyle={backgroundImage:"url(pic.png)",width:12,color:"red"};const staticMarkup={__html:${JSON.stringify('<section style="background-image:url(pic.png)"><img src="pic.png"><span>静态文字</span></section>')}};`
+    const result = extractHtmlResources({ html: `<script type="module">${vendor + app('D.a', extra, props)}</script>`, siblingFiles: new Map([['pic.png', Buffer.from(image.split(',')[1], 'base64')]]) })
+    expect(validateHtmlImport(result)).toEqual([])
+    const rewritten = result.html.match(/<script[^>]*>([\s\S]*?)<\/script>/)![1]
+    expect(() => parse(rewritten, { ecmaVersion: 'latest', sourceType: 'module' })).not.toThrow()
+    expect(rewritten).toContain('静态文字')
+    expect(rewritten).not.toContain('pic.png')
+    expect(result.resources.filter(resource => resource.mediaType === 'image/png')).toHaveLength(1)
+  })
+
+  it.each([
+    'img[p]=chooseUrl()',
+    'img[p]="https://example.invalid/x.png"',
+    'const p="src";img[p]=chooseUrl()',
+    'img.src+=chooseUrl()',
+    'img.setAttribute(p,chooseUrl())',
+    'element.innerHTML=chooseHtml()',
+    'element.style.backgroundImage=chooseStyle()',
+    'element.style.setProperty("background-image",chooseStyle())',
+    'element.insertAdjacentHTML("beforeend",chooseHtml())',
+    'element.innerHTML+=chooseHtml()',
+    'element.style.cssText+=chooseStyle()',
+  ])('rejects unknown dynamic DOM sinks: %s', code => {
+    expect(errors(code)).toContain('unsupported-dynamic-url-sink')
+  })
+
+  it('resolves static embedded HTML relative to its source script', () => {
+    const script = `element.innerHTML=${JSON.stringify('<img src="../pic.png">')};`
+    const result = extractHtmlResources({ html: '<script src="scripts/main.js"></script>', siblingFiles: new Map([
+      ['scripts/main.js', Buffer.from(script)], ['pic.png', Buffer.from(image.split(',')[1], 'base64')],
+    ]) })
+    expect(validateHtmlImport(result)).toEqual([])
+    expect(result.resources).toHaveLength(1)
+    expect(result.html).not.toContain('../pic.png')
+  })
+
+  it('permits resolved computed property names and harmless numeric indices', () => {
+    expect(errors(`const p="src";img[p]=${JSON.stringify(image)};const a=[];a[0]=1`)).toEqual([])
   })
 
   it('does not grant summaries to changed library code or lookalike fragments', () => {

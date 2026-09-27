@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { parse } from 'acorn'
-import { analyzeJavaScriptClosure } from './javascriptClosureProof'
+import { analyzeJavaScriptClosure, CSS_RESOURCE_PROPERTIES } from './javascriptClosureProof'
 import type {
   ExtractedResource,
   ExtractedResourceOrigin,
@@ -539,7 +539,17 @@ function rewriteJavaScript(code: string, sourceType: 'script' | 'module', baseDi
   }
   const closureProof = analyzeJavaScriptClosure(root, inertPolyfills)
   if (closureProof.frameworkError) addDiagnostic(sink, 'error', 'unsupported-framework-resource-input', '无法证明框架入口及资源来源闭合')
-  const edits: Array<{ start: number; end: number; value: string }> = []
+  const edits = new Map<string, { start: number; end: number; value: string }>()
+  let conflictingEdits = false
+  const addEdit = (edit: { start: number; end: number; value: string }) => {
+    const key = `${edit.start}:${edit.end}`, previous = edits.get(key)
+    if (previous && previous.value !== edit.value) {
+      conflictingEdits = true
+      addDiagnostic(sink, 'error', 'conflicting-js-rewrite', '同一脚本值在不同资源上下文中需要不同改写')
+      return
+    }
+    edits.set(key, edit)
+  }
   const handled = new Set<Node>()
   const jsString = (value: string) => JSON.stringify(value).replace(/</g, '\\u003c')
   const jsTemplate = (value: string) => '`' + value.replace(/[`\\]/g, '\\$&').replace(/\$\{/g, '\\${').replace(/</g, '\\u003c') + '`'
@@ -605,33 +615,65 @@ function rewriteJavaScript(code: string, sourceType: 'script' | 'module', baseDi
       if (value.type === 'TemplateLiteral' && (value.expressions as Node[]).length === 0) return ((value.quasis as Array<{ value: { cooked: string | null } }>)[0]?.value.cooked) ?? null
       return null
     }
+    const writeString = (value: Node, next: string) => {
+      handled.add(value)
+      addEdit({ start: value.start, end: value.end, value: jsString(next) })
+    }
+    const embeddedSink = (value: Node, kind: 'css' | 'html', name: string) => {
+      const text = literalValue(value) ?? (value.type === 'Identifier' ? constants.get(String(value.name)) ?? null : null)
+      if (text === null) { addDiagnostic(sink, 'error', 'unsupported-dynamic-url-sink', `无法静态解析 ${name} 的资源内容`); return }
+      const next = kind === 'css' ? rewriteCss(text, baseDir, sink, siblings) : transformHtml(text, sink, siblings, baseDir, true)
+      writeString(value, next)
+    }
     const urlSink = (value: Node, name: string) => {
       const url = literalValue(value) ?? (value.type === 'Identifier' ? constants.get(String(value.name)) ?? null : null)
       if (url === null) {
         addDiagnostic(sink, 'error', 'unsupported-dynamic-url-sink', `无法静态解析 ${name} 的资源地址`)
         return
       }
-      if (!url.trim()) return
+      if (!url.trim()) { writeString(value, url); return }
       if (name === 'srcset') {
         handled.add(value)
         const rewritten = rewriteSrcset(url, baseDir, sink, siblings)
-        if (rewritten !== url) edits.push({ start: value.start, end: value.end, value: jsString(rewritten) })
+        writeString(value, rewritten)
         return
       }
-      if (url.trim().startsWith('#') || /^data:/i.test(url.trim())) return
+      if (url.trim().startsWith('#')) { writeString(value, url); return }
+      if (/^data:/i.test(url.trim())) { writeString(value, rewriteEmbedded(url, 'js-string', baseDir, sink, siblings, { url: true, remote: true }, false)); return }
       if (/^https?:|^\/\//i.test(url.trim())) {
         addDiagnostic(sink, 'error', 'remote-js-resource', `未授权脚本资源 ${clip(url, 180)}`, url)
         return
       }
       const result = rewriteSingleUrl(url, 'js-string', baseDir, sink, siblings, false)
-      if (result.changed) edits.push({ start: value.start, end: value.end, value: jsString(result.value) })
+      writeString(value, result.value)
     }
     if (node === root) for (const input of closureProof.resourceInputs) {
       if (input.proof.kind === 'proven-resource') {
         for (const literal of input.proof.literals) urlSink(literal, input.name)
       } else addDiagnostic(sink, 'error', 'unsupported-dynamic-url-sink', `无法静态解析 ${input.name} 的资源地址`)
     }
-    if (node.type === 'AssignmentExpression' && node.operator === '=') {
+    if (node === root) for (const input of closureProof.embeddedInputs) {
+      if (input.proof.kind === 'proven-resource') {
+        for (const literal of input.proof.literals) embeddedSink(literal, input.kind, input.name)
+      } else addDiagnostic(sink, 'error', 'unsupported-dynamic-url-sink', `无法静态解析 ${input.name} 的资源内容`)
+    }
+    if (node.type === 'AssignmentExpression' && !closureProof.auditedNode(node)) {
+      const left = node.left as Node, right = node.right as Node
+      const property = left.property as Node | undefined
+      const name = memberName(left) ?? (left.computed && property?.type === 'Identifier' ? constants.get(String(property.name)) ?? null : null)
+      if (left.type === 'MemberExpression' && left.computed && name === null && !(property?.type === 'Literal' && typeof property.value === 'number'))
+        addDiagnostic(sink, 'error', 'unsupported-dynamic-url-sink', '无法静态确定计算属性写入是否为资源入口')
+      if (name && ['src', 'srcset', 'href', 'poster', 'data', 'action', 'formAction'].includes(name)) {
+        if (node.operator !== '=') addDiagnostic(sink, 'error', 'unsupported-dynamic-url-sink', `无法静态解析 ${name} 的复合写入`)
+        else urlSink(right, name)
+      }
+      const htmlTarget = !!name && ['innerHTML', 'outerHTML', 'srcdoc'].includes(name)
+      const cssTarget = name === 'cssText' || (left.type === 'MemberExpression' && memberName(left.object as Node) === 'style')
+      if ((htmlTarget || cssTarget) && node.operator !== '=') addDiagnostic(sink, 'error', 'unsupported-dynamic-url-sink', '资源内容的复合写入无法静态解析')
+      else if (htmlTarget) embeddedSink(right, 'html', name!)
+      else if (cssTarget) embeddedSink(right, 'css', name ?? 'style')
+    }
+    if (node.type === 'AssignmentExpression' && closureProof.auditedNode(node) && node.operator === '=') {
       const name = memberName(node.left as Node)
       if (name && ['src', 'srcset', 'href', 'poster', 'data', 'action', 'formAction'].includes(name)
         && closureProof.internalSink(node).kind === 'unknown') urlSink(node.right as Node, name)
@@ -646,14 +688,24 @@ function rewriteJavaScript(code: string, sourceType: 'script' | 'module', baseDi
       if (node.type === 'NewExpression' && name === 'Audio' && (node.arguments as Node[])[0]) urlSink((node.arguments as Node[])[0], 'Audio')
       if (name === 'setAttribute') {
         const args = node.arguments as Node[]
-        const attribute = args[0] ? literalValue(args[0]) : null
-        if (attribute && ['src', 'srcset', 'href', 'poster', 'data'].includes(attribute) && args[1]) urlSink(args[1], attribute)
+        const attribute = args[0] ? literalValue(args[0]) ?? (args[0].type === 'Identifier' ? constants.get(String(args[0].name)) ?? null : null) : null
+        if (!attribute && !closureProof.auditedNode(node)) addDiagnostic(sink, 'error', 'unsupported-dynamic-url-sink', '无法静态确定 setAttribute 的属性')
+        if (attribute && ['src', 'srcset', 'href', 'poster', 'data', 'action', 'formaction'].includes(attribute) && args[1]) urlSink(args[1], attribute)
+        if (attribute && (attribute === 'style' || CSS_RESOURCE_PROPERTIES.has(attribute)) && args[1]) embeddedSink(args[1], 'css', attribute)
+        if (attribute === 'srcdoc' && args[1]) embeddedSink(args[1], 'html', attribute)
+      }
+      if (!closureProof.auditedNode(node)) {
+        const args = node.arguments as Node[]
+        if (name === 'setProperty' && args[1]) embeddedSink(args[1], 'css', 'style.setProperty')
+        if (name === 'insertRule' && args[0]) embeddedSink(args[0], 'css', 'stylesheet.insertRule')
+        if (name === 'insertAdjacentHTML' && args[1]) embeddedSink(args[1], 'html', name)
       }
     }
+    if (handled.has(node)) return
     if (node.type === 'Literal' && typeof node.value === 'string') {
       const value = node.value as string
       const rewritten = rewriteEmbedded(value, 'js-string', baseDir, sink, siblings, { url: true, remote: true }, false)
-      if (rewritten !== value) edits.push({ start: node.start, end: node.end, value: jsString(rewritten) })
+      if (rewritten !== value) addEdit({ start: node.start, end: node.end, value: jsString(rewritten) })
       return
     }
     if (node.type === 'TemplateLiteral') {
@@ -662,7 +714,7 @@ function rewriteJavaScript(code: string, sourceType: 'script' | 'module', baseDi
         const cooked = ((node.quasis as Array<{ value: { cooked: string | null } }>)[0]?.value.cooked)
         if (cooked !== null && cooked !== undefined) {
           const rewritten = rewriteEmbedded(cooked, 'js-string', baseDir, sink, siblings, { url: true, remote: true }, false)
-          if (rewritten !== cooked) edits.push({ start: node.start, end: node.end, value: jsTemplate(rewritten) })
+          if (rewritten !== cooked) addEdit({ start: node.start, end: node.end, value: jsTemplate(rewritten) })
         }
         return
       }
@@ -675,9 +727,18 @@ function rewriteJavaScript(code: string, sourceType: 'script' | 'module', baseDi
     }
   }
   visit(root)
-  if (edits.length === 0) return code
+  if (edits.size === 0 || conflictingEdits) return code
+  const ordered = [...edits.values()].sort((a, b) => b.start - a.start)
+  if (ordered.some((edit, index) => index > 0 && edit.end > ordered[index - 1].start)) {
+    addDiagnostic(sink, 'error', 'conflicting-js-rewrite', '脚本资源改写区间重叠')
+    return code
+  }
   let result = code
-  for (const edit of edits.sort((a, b) => b.start - a.start)) result = result.slice(0, edit.start) + edit.value + result.slice(edit.end)
+  for (const edit of ordered) result = result.slice(0, edit.start) + edit.value + result.slice(edit.end)
+  try { parse(result, { ecmaVersion: 'latest', sourceType, allowHashBang: true }) } catch (error) {
+    addDiagnostic(sink, 'error', 'script-rewrite', `资源改写后脚本无法解析: ${String(error)}`)
+    return code
+  }
   return result
 }
 function neutralizeScriptClose(code: string): string {
@@ -837,7 +898,7 @@ function keptStyleAttributes(attrs: ParsedAttr[]): ParsedAttr[] {
   return attrs.filter(attribute => ['media', 'title', 'id', 'class', 'nonce'].includes(attribute.name)).map(attribute => ({ ...attribute }))
 }
 
-function transformHtml(html: string, sink: Sink, siblings: Map<string, Uint8Array>): string {
+function transformHtml(html: string, sink: Sink, siblings: Map<string, Uint8Array>, baseDir = '', embedded = false): string {
   const parts: string[] = []
   let i = 0
   while (i < html.length) {
@@ -873,6 +934,7 @@ function transformHtml(html: string, sink: Sink, siblings: Map<string, Uint8Arra
     const tagStart = i
     const tag = parseStartTag(html, i)
     if (!tag) { parts.push(html[i]); i++; continue }
+    if (embedded && (tag.name === 'script' || tag.attrs.some(attribute => /^on[a-z]/i.test(attribute.name)))) addDiagnostic(sink, 'error', 'unsupported-html-capability', '动态 HTML 中的脚本和内联事件暂不支持')
     if (['base', 'iframe', 'object', 'embed'].includes(tag.name)) addDiagnostic(sink, 'error', 'unsupported-html-capability', `导入暂不支持 <${tag.name}>`)
     if (tag.name === 'meta' && /refresh/i.test(attributeBy(tag.attrs, 'http-equiv')?.rawValue ?? '')) addDiagnostic(sink, 'error', 'unsupported-html-capability', '导入暂不支持 meta refresh')
     if (RAW_TEXT.has(tag.name)) {
@@ -886,7 +948,7 @@ function transformHtml(html: string, sink: Sink, siblings: Map<string, Uint8Arra
     if (tag.name === 'style' && !tag.selfClosing) {
       const raw = readRaw(html, tag.end, 'style')
       if (!raw.closed) addDiagnostic(sink, 'warning', 'unclosed-element', '未闭合的 <style>')
-      parts.push(html.slice(tagStart, tag.end), rewriteCss(raw.body, '', sink, siblings))
+      parts.push(html.slice(tagStart, tag.end), rewriteCss(raw.body, baseDir, sink, siblings))
       if (raw.closed) parts.push(html.slice(raw.closeStart, raw.closeEnd))
       i = raw.closeEnd
       continue
@@ -899,7 +961,7 @@ function transformHtml(html: string, sink: Sink, siblings: Map<string, Uint8Arra
       if (modulepreload) addDiagnostic(sink, 'error', 'unsupported-module-graph', '导入暂不支持 modulepreload 依赖图')
       if (href?.hasValue && stylesheet && extensionOf(decodeEntities(href.rawValue)) === 'css') {
         const decoded = decodeEntities(href.rawValue).trim()
-        const key = resolveRelative('', decoded)
+        const key = resolveRelative(baseDir, decoded)
         const bytes = key ? siblings.get(key) : undefined
         if (/^https?:/i.test(decoded) || decoded.startsWith('//')) sink.remoteReferences.push({ url: decoded, context: 'html-attr' })
         else if (bytes && key) {
@@ -911,12 +973,12 @@ function transformHtml(html: string, sink: Sink, siblings: Map<string, Uint8Arra
         } else if (!/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(decoded) && !decoded.startsWith('#')) {
           addDiagnostic(sink, 'error', 'missing-relative-resource', `找不到相对资源 ${clip(decoded, 180)}`, key ?? decoded)
         }
-        if (managed) rewriteAttributes(tag, '', sink, siblings, false)
+        if (managed) rewriteAttributes(tag, baseDir, sink, siblings, false)
         parts.push(tag.attrs.some(attribute => attribute.changed) ? rebuildStart(tag, tag.selfClosing) : html.slice(tagStart, tag.end))
         i = tag.end
         continue
       }
-      if (managed) rewriteAttributes(tag, '', sink, siblings, true)
+      if (managed) rewriteAttributes(tag, baseDir, sink, siblings, true)
       parts.push(tag.attrs.some(attribute => attribute.changed) ? rebuildStart(tag, tag.selfClosing) : html.slice(tagStart, tag.end))
       i = tag.end
       continue
@@ -932,7 +994,7 @@ function transformHtml(html: string, sink: Sink, siblings: Map<string, Uint8Arra
         const decoded = decodeEntities(src.rawValue).trim()
         if (/^https?:|^\/\//i.test(decoded)) addDiagnostic(sink, 'error', 'remote-script', `远程脚本不可导入: ${clip(decoded, 180)}`, decoded)
         if (/^data:/i.test(decoded)) addDiagnostic(sink, 'error', 'unsupported-script-source', 'data URI 脚本源暂不支持安全内联', clip(decoded))
-        const key = resolveRelative('', decoded)
+        const key = resolveRelative(baseDir, decoded)
         const bytes = key ? siblings.get(key) : undefined
         if (bytes && key && ['js', 'mjs'].includes(extensionOf(decoded))) {
           const type = attributeBy(tag.attrs, 'type')?.rawValue ?? null
@@ -949,7 +1011,7 @@ function transformHtml(html: string, sink: Sink, siblings: Map<string, Uint8Arra
           src.value = placeholder(addResource(sink, bytes, mediaTypeForPath(key), { kind: 'relative', context: 'html-attr', reference: decoded }))
           src.changed = true
         } else {
-          const result = rewriteSingleUrl(decoded, 'html-attr', '', sink, siblings, true)
+          const result = rewriteSingleUrl(decoded, 'html-attr', baseDir, sink, siblings, true)
           if (result.changed) { src.value = result.value.trim(); src.changed = true }
         }
       }
@@ -957,7 +1019,7 @@ function transformHtml(html: string, sink: Sink, siblings: Map<string, Uint8Arra
         const baseKind = javascriptKind(attributeBy(tag.attrs, 'type')?.hasValue ? attributeBy(tag.attrs, 'type')!.rawValue : null)
         body = neutralizeScriptClose(baseKind === 'other'
           ? body
-          : rewriteJavaScript(body, baseKind === 'module' ? 'module' : 'script', '', sink, siblings))
+          : rewriteJavaScript(body, baseKind === 'module' ? 'module' : 'script', baseDir, sink, siblings))
       }
       const start = tag.attrs.some(attribute => attribute.changed || attribute.drop) ? rebuildStart(tag, false) : html.slice(tagStart, tag.end)
       parts.push(start, body)
@@ -965,11 +1027,11 @@ function transformHtml(html: string, sink: Sink, siblings: Map<string, Uint8Arra
       i = raw.closeEnd
       continue
     }
-    rewriteAttributes(tag, '', sink, siblings, tag.name === 'image' || tag.name === 'use')
+    rewriteAttributes(tag, baseDir, sink, siblings, tag.name === 'image' || tag.name === 'use')
     if (tag.name === 'image' || tag.name === 'use') {
       const xlink = attributeBy(tag.attrs, 'xlink:href')
       if (xlink?.hasValue) {
-        const result = rewriteSingleUrl(decodeEntities(xlink.rawValue), 'html-attr', '', sink, siblings, false)
+        const result = rewriteSingleUrl(decodeEntities(xlink.rawValue), 'html-attr', baseDir, sink, siblings, false)
         if (result.changed) { xlink.value = result.value; xlink.changed = true }
       }
     }

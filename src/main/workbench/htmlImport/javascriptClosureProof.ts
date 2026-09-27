@@ -2,16 +2,19 @@ import { children, propertyName, recognizeReact1927, type JsNode } from './frame
 
 type Scope = { parent?: Scope; functionScope: boolean; bindings: Map<string, Binding> }
 type Binding = { declaration: JsNode; initial?: JsNode; scope: Scope; duplicate: boolean }
-type Value = { kind: 'string'; node: JsNode } | { kind: 'object'; fields: Map<string, Value> } | { kind: 'union'; values: Value[] } | { kind: 'unknown' }
+type Value = { kind: 'string'; node: JsNode } | { kind: 'object'; fields: Map<string, Value> } | { kind: 'union'; values: Value[] } | { kind: 'non-resource' } | { kind: 'unknown' }
 export type ClosureProof = { kind: 'proven-state' } | { kind: 'proven-resource'; literals: JsNode[] } | { kind: 'unknown' }
 export interface JavaScriptClosureProof {
   internalSink(node: JsNode): ClosureProof
+  auditedNode(node: JsNode): boolean
+  embeddedInputs: Array<{ name: string; kind: 'css' | 'html'; proof: ClosureProof }>
   resourceInputs: Array<{ value: JsNode; name: string; proof: ClosureProof }>
   frameworkError: boolean
 }
 const UNKNOWN: Value = { kind: 'unknown' }
 const UNKNOWN_PROOF: ClosureProof = { kind: 'unknown' }
-const RESOURCE_FIELDS = new Set(['src', 'srcSet', 'srcset', 'href', 'poster', 'data', 'action', 'formAction'])
+const RESOURCE_FIELDS = new Set(['src', 'srcSet', 'srcset', 'href', 'xlinkHref', 'poster', 'data', 'action', 'formAction'])
+export const CSS_RESOURCE_PROPERTIES = new Set(['fill', 'stroke', 'filter', 'clipPath', 'clip-path', 'mask', 'cursor', 'markerStart', 'marker-start', 'markerMid', 'marker-mid', 'markerEnd', 'marker-end'])
 const FUNCTIONS = new Set(['FunctionDeclaration', 'FunctionExpression', 'ArrowFunctionExpression'])
 const keyOf = (node: JsNode): string | undefined => node.type === 'Identifier' ? String(node.name)
   : node.type === 'Literal' && (typeof node.value === 'string' || typeof node.value === 'number') ? String(node.value) : undefined
@@ -153,7 +156,10 @@ export function analyzeJavaScriptClosure(root: JsNode, inertCalls: Set<JsNode> =
       const readProperty = parent.type === 'MemberExpression' && parent.object === node
       const directWrite = parent.type === 'AssignmentExpression' && parent.left === node
       const controlledAssign = isObjectAssign(parent) && (parent.arguments as JsNode[])[0] === node
-      if (binding && !readProperty && !directWrite && !controlledAssign) escaped.add(binding)
+      const container = parents.get(parent), call = container ? parents.get(container) : undefined
+      const readOnlyProp = parent.type === 'Property' && parent.value === node && ['style', 'dangerouslySetInnerHTML'].includes(keyOf(parent.key as JsNode) ?? '')
+        && container?.type === 'ObjectExpression' && !!call && isReactEntry(call) && (call.arguments as JsNode[])[1] === container
+      if (binding && !readProperty && !directWrite && !controlledAssign && !readOnlyProp) escaped.add(binding)
     }
   }
   // Overwriting a table is only ordered when the entire application bootstrap is
@@ -183,8 +189,19 @@ export function analyzeJavaScriptClosure(root: JsNode, inertCalls: Set<JsNode> =
     if (expression && inertCalls.has(expression)) continue
     orderedBootstrap = false
   }
+  const numeric = (node: JsNode): boolean => {
+    if (node.type === 'Literal') return typeof node.value === 'number'
+    if (node.type === 'UnaryExpression') return ['+', '-', '~'].includes(String(node.operator))
+    if (node.type === 'BinaryExpression') return ['-', '*', '/', '%', '**', '|', '&', '^', '<<', '>>', '>>>'].includes(String(node.operator))
+      || (node.operator === '+' && numeric(node.left as JsNode) && numeric(node.right as JsNode))
+    return false
+  }
   const evaluate = (node: JsNode, seen = new Set<Binding>(), budget = 64): Value => {
     if (budget <= 0) return UNKNOWN
+    if (numeric(node) || (node.type === 'Literal' && (node.value === null || typeof node.value === 'boolean'))) return { kind: 'non-resource' }
+    if (node.type === 'TemplateLiteral' && (node.expressions as JsNode[]).length > 0
+      && (node.expressions as JsNode[]).every(numeric)
+      && (node.quasis as Array<{ value: { cooked: string | null } }>).every(part => part.value.cooked !== null && /^[\s\d.%+a-zA-Z-]*$/.test(part.value.cooked))) return { kind: 'non-resource' }
     if (node.type === 'Literal' && typeof node.value === 'string') return { kind: 'string', node }
     if (node.type === 'TemplateLiteral' && (node.expressions as JsNode[]).length === 0) return { kind: 'string', node }
     if (node.type === 'ConditionalExpression') return { kind: 'union', values: [evaluate(node.consequent as JsNode, seen, budget - 1), evaluate(node.alternate as JsNode, seen, budget - 1)] }
@@ -245,11 +262,33 @@ export function analyzeJavaScriptClosure(root: JsNode, inertCalls: Set<JsNode> =
     return UNKNOWN_PROOF
   }
   const resourceInputs: JavaScriptClosureProof['resourceInputs'] = []
+  const embeddedInputs: JavaScriptClosureProof['embeddedInputs'] = []
+  const cssProof = (value: Value): ClosureProof => {
+    if (value.kind === 'non-resource') return { kind: 'proven-resource', literals: [] }
+    if (value.kind === 'union') {
+      const proofs = value.values.map(cssProof)
+      return proofs.every(proof => proof.kind === 'proven-resource') ? { kind: 'proven-resource', literals: proofs.flatMap(proof => proof.literals) } : UNKNOWN_PROOF
+    }
+    return resourceProof(value)
+  }
+  const styleInputs = (value: Value) => {
+    if (value.kind === 'union') { for (const item of value.values) styleInputs(item); return }
+    if (value.kind !== 'object') { embeddedInputs.push({ name: 'style', kind: 'css', proof: UNKNOWN_PROOF }); return }
+    for (const [name, field] of value.fields) embeddedInputs.push({ name: `style.${name}`, kind: 'css', proof: cssProof(field) })
+  }
+  const htmlInput = (value: Value) => {
+    if (value.kind === 'union') { for (const item of value.values) htmlInput(item); return }
+    embeddedInputs.push({ name: 'dangerouslySetInnerHTML.__html', kind: 'html', proof: value.kind === 'object' && value.fields.has('__html') ? resourceProof(value.fields.get('__html')!) : UNKNOWN_PROOF })
+  }
   if (audited) for (const node of allNodes) {
     if (inLibrary(node)) continue
     if (node.type === 'Property') {
       const name = !node.computed ? keyOf(node.key as JsNode) : undefined
       if (name && RESOURCE_FIELDS.has(name)) resourceInputs.push({ value: node.value as JsNode, name: name === 'srcSet' ? 'srcset' : name, proof: resourceProof(evaluate(node.value as JsNode)) })
+      if (name === 'style') styleInputs(evaluate(node.value as JsNode))
+      if (name && CSS_RESOURCE_PROPERTIES.has(name)) embeddedInputs.push({ name, kind: 'css', proof: cssProof(evaluate(node.value as JsNode)) })
+      if (name === 'srcDoc') embeddedInputs.push({ name, kind: 'html', proof: resourceProof(evaluate(node.value as JsNode)) })
+      if (name === 'dangerouslySetInnerHTML') htmlInput(evaluate(node.value as JsNode))
       if (name === '$$typeof') frameworkError = true
     }
     if (isReactEntry(node)) {
@@ -264,6 +303,8 @@ export function analyzeJavaScriptClosure(root: JsNode, inertCalls: Set<JsNode> =
   return {
     frameworkError,
     resourceInputs,
+    embeddedInputs,
+    auditedNode: node => !!audited && !frameworkError && inLibrary(node),
     internalSink(node) {
       if (!audited || frameworkError) return UNKNOWN_PROOF
       const kind = audited.internalSinks.get(node)
