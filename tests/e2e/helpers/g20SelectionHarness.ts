@@ -161,6 +161,8 @@ export async function launchSelectionApp(directory: string) {
   return app
 }
 export async function setupSelectionUI(app: ElectronApplication, page: Page, endpoint: string, workspace: string) {
+  // Initial conversation hydration closes the model menu; wait until it has finished before opening settings.
+  await expect(page.getByRole('button', { name: '新建会话', exact: true })).toBeEnabled()
   await page.getByRole('button', { name: '切换模型', exact: true }).click()
   await page.getByRole('button', { name: '管理模型与连接…', exact: true }).click()
   await page.getByLabel('供应商标识', { exact: true }).fill('fixture-selection')
