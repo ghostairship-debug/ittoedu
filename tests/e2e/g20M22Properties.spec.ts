@@ -105,7 +105,13 @@ test('M22-T01 workbench edits opacity, font, two-line spacing, page background a
     await expect.poll(async () => item(await read(), 'm22-title').frame.x).toBe((CANVAS.width - FIRST.width) / 2)
     expect(await frame.getAttribute('data-editor-mode')).toBe('light')
 
-    const blankLocation = project(await read()).locations.find(location => location.label === '空白页')
+    const currentProject = project(await read())
+    const blankSurface = currentProject.surfaces[0]
+    if (blankSurface?.type !== 'slide') throw new Error('No Slide surface for blank page')
+    const blankScene = blankSurface.scenes[2]
+    if (!blankScene || blankScene.name !== '空白页') throw new Error('No blank Slide scene')
+    const blankLocation = currentProject.locations.find(location => location.kind === 'slide-scene'
+      && location.surfaceId === blankSurface.id && location.sceneId === blankScene.id && location.stateId === undefined)
     if (!blankLocation) throw new Error('No blank Slide location')
     await frame.getByTestId(`bottom-scene-${blankLocation.id}`).locator('.bottom-scene-card__main').click()
     await expect(page.locator('[data-slide-layer-item]:visible')).toHaveCount(0)
