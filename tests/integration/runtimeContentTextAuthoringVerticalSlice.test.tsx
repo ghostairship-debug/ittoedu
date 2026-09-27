@@ -767,7 +767,7 @@ describe('ARCH-2 Runtime content text Store vertical slice', () => {
     },
   )
 
-  it.each(['slide-scene', 'slide-global', 'spatial-global'] as const)(
+  it.each(['slide-scene', 'slide-global', 'flow-surface', 'spatial-global'] as const)(
     'captures %s from the projected first Runtime, with host targetId discovery-only',
     async (fixtureKind) => {
       const source = await loadFixture(fixtureKind, { secondRuntime: true })
@@ -782,6 +782,8 @@ describe('ARCH-2 Runtime content text Store vertical slice', () => {
           itemId: source.itemId,
           owner: source.owner,
           stateId: null,
+          locationId: source.locationId,
+          surfaceId: source.surfaceId,
         },
       })
       expect(target?.courseTarget.authoringAddress).toContain(
@@ -799,7 +801,6 @@ describe('ARCH-2 Runtime content text Store vertical slice', () => {
 
   it.each([
     'slide-surface',
-    'flow-surface',
     'flow-global',
     'spatial-surface',
     'spatial-world',
