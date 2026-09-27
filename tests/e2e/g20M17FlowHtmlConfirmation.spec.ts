@@ -1,4 +1,4 @@
-import { expect, test, type ElectronApplication, type FrameLocator, type Locator, type Page } from '@playwright/test'
+import { expect, test, type ElectronApplication, type FrameLocator, type Locator, type Page, type TestInfo } from '@playwright/test'
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -188,9 +188,22 @@ async function closeApp(app: ElectronApplication) {
   if (result === 'timeout') { try { app.process()?.kill() } catch { /* preserve the original failure */ } }
 }
 
-test('M17-T05 Flow HTML keeps measuring during use while admission remains strict', async ({}, info) => {
-  test.skip(process.platform !== 'win32', 'Windows Electron host acceptance path.')
-  test.setTimeout(600_000)
+type ExpectedRejection = { ui: string; admission?: string; jobId?: string }
+interface FlowFixture {
+  app: ElectronApplication
+  page: Page
+  opened: Awaited<ReturnType<typeof openSelectionFile>>
+  workspace: string
+  coursePath: string
+  exportPath: string
+  directory: string
+  shots: string
+  errors: string[]
+  expectedRejections: Record<string, ExpectedRejection>
+  evidence: Record<string, unknown>
+}
+
+async function withFlowFixture(info: TestInfo, scenario: 'use' | 'admission', run: (fixture: FlowFixture) => Promise<void>) {
   const base = join(root, 'output/g20/m17/flow-html-confirmation')
   mkdirSync(base, { recursive: true })
   const directory = mkdtempSync(join(base, 'run-'))
@@ -202,8 +215,8 @@ test('M17-T05 Flow HTML keeps measuring during use while admission remains stric
   writeFileSync(join(workspace, 'erasing.html'), erasingHtml(), 'utf8')
   writeFileSync(join(workspace, 'nonconverging.html'), nonconvergingHtml(), 'utf8')
   const server = await selectionServer()
-  const errors: string[] = [], expectedRejections: Record<string, { ui: string; admission?: string; jobId?: string }> = {}
-  const evidence: Record<string, unknown> = { run: directory, baseline: 'b0bcaa8b', actualCommit: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim(),
+  const errors: string[] = [], expectedRejections: Record<string, ExpectedRejection> = {}
+  const evidence: Record<string, unknown> = { run: directory, scenario, baseline: 'b0bcaa8b', actualCommit: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim(),
     pageErrors: errors, expectedRejections, exportPath }
   let app: ElectronApplication | undefined
   try {
@@ -220,6 +233,23 @@ test('M17-T05 Flow HTML keeps measuring during use while admission remains stric
       dialog.showSaveDialog = async () => ({ canceled: false, filePath: paths.exportPath })
     }, { workspace, exportPath })
     const opened = await openSelectionFile(page, workspace, courseName)
+    await run({ app, page, opened, workspace, coursePath, exportPath, directory, shots, errors, expectedRejections, evidence })
+    expect(server.requests).toHaveLength(0)
+    expect(errors).toEqual([])
+  } finally {
+    evidence.modelRequests = server.requests.length
+    evidence.windowErrors = errors.length
+    writeFileSync(join(directory, 'evidence.json'), JSON.stringify(evidence, null, 2))
+    await info.attach('M17-T05 Flow HTML confirmation evidence', { path: join(directory, 'evidence.json'), contentType: 'application/json' })
+    if (app) await closeApp(app)
+    await server.close()
+  }
+}
+
+test('M17-T05 Flow HTML keeps measuring across editing, try-run, preview and export', async ({}, info) => {
+  test.skip(process.platform !== 'win32', 'Windows Electron host acceptance path.')
+  test.setTimeout(600_000)
+  await withFlowFixture(info, 'use', async ({ app, page, opened, workspace, coursePath, exportPath, shots, evidence, errors }) => {
     const before = await snapshot(page, opened.documentId)
     expect(before.imported).toHaveLength(0)
     const positive = await imported(page, app, workspace, 'interactive.html')
@@ -304,7 +334,15 @@ test('M17-T05 Flow HTML keeps measuring during use while admission remains stric
     evidence.runtimeDiagnostics = await page.getByRole('alert').allTextContents()
     expect(evidence.runtimeDiagnostics).not.toEqual(expect.arrayContaining([expect.stringMatching(/Flow HTML.*(失败|错误|改变了正文)/)]))
 
-    const stable = await snapshot(page, reopened.documentId)
+  })
+})
+
+test('M17-T05 Flow HTML strict admission rejects content erasure and nonconvergence without writes', async ({}, info) => {
+  test.skip(process.platform !== 'win32', 'Windows Electron host acceptance path.')
+  test.setTimeout(360_000)
+  await withFlowFixture(info, 'admission', async ({ app, page, opened, workspace, coursePath, directory, shots, evidence, expectedRejections }) => {
+    const stable = await snapshot(page, opened.documentId)
+    expect(stable.imported).toHaveLength(0)
     const disk = readFileSync(coursePath)
     const profile = join(directory, 'profile')
     for (const [name, pattern] of [['erasing.html', /改变了正文/], ['nonconverging.html', /持续失效|持续改变布局/]] as const) {
@@ -323,7 +361,7 @@ test('M17-T05 Flow HTML keeps measuring during use while admission remains stric
       expect(admissionReason).toMatch(pattern)
       if (name === 'nonconverging.html') expect(admissionReason).toMatch(/invalidations=13/)
       await page.screenshot({ path: join(shots, `${name}-rejected.png`) })
-      const after = await snapshot(page, reopened.documentId)
+      const after = await snapshot(page, opened.documentId)
       expect(after.revision).toBe(stable.revision)
       expect(after.undoDepth).toBe(stable.undoDepth)
       expect(after.imported).toEqual(stable.imported)
@@ -335,14 +373,5 @@ test('M17-T05 Flow HTML keeps measuring during use while admission remains stric
         after: { revision: after.revision, undoDepth: after.undoDepth }, runtimeCount: after.imported.length }
       await result.dialog.getByRole('button', { name: '取消', exact: true }).click()
     }
-    expect(server.requests).toHaveLength(0)
-    expect(errors).toEqual([])
-  } finally {
-    evidence.modelRequests = server.requests.length
-    evidence.windowErrors = errors.length
-    writeFileSync(join(directory, 'evidence.json'), JSON.stringify(evidence, null, 2))
-    await info.attach('M17-T05 Flow HTML confirmation evidence', { path: join(directory, 'evidence.json'), contentType: 'application/json' })
-    if (app) await closeApp(app)
-    await server.close()
-  }
+  })
 })
